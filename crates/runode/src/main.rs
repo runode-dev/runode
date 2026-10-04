@@ -22,6 +22,7 @@ fn main() {
         .init();
 
     application().run(|cx: &mut App| {
+        about::install_icon();
         menus::install(cx);
         cx.on_window_closed(|cx, _| {
             if cx.windows().is_empty() {
