@@ -6,6 +6,7 @@ mod keys;
 mod menus;
 mod pty;
 mod session;
+mod sprites;
 mod terminal_view;
 mod theme;
 

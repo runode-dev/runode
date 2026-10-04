@@ -16,6 +16,7 @@ use crate::{
     keys,
     pty::{GridSize, PtyEvent},
     session::{Attrs, CursorShape, Frame, Paste as PasteResult, Rgb, SYNC_OUTPUT_TIMEOUT, Session},
+    sprites,
 };
 
 actions!(
@@ -29,6 +30,9 @@ const FONT_FAMILY: &str = "Hack Nerd Font Mono";
 /// macOS 自带的等宽字体。
 const FALLBACK_FONT_FAMILY: &str = "Menlo";
 const FONT_SIZE: f32 = 13.;
+/// 字体的下划线粗细（em 的比例），自绘字符的线宽由它算出。GPUI 不公开字体的下划线粗细，
+/// 这里写死 `FONT_FAMILY` 和 `FALLBACK_FONT_FAMILY` 的 post 表取值，两者都是 90/2048。
+const UNDERLINE_THICKNESS_EM: f32 = 90. / 2048.;
 const MIN_FONT_SIZE: f32 = 6.;
 const MAX_FONT_SIZE: f32 = 72.;
 /// 透明标题栏的高度：终端内容从它下面开始，这一条用来拖动窗口。
@@ -578,6 +582,14 @@ fn paint_frame(
         size(cw * f32::from(frame.cols), ch * f32::from(frame.rows)),
     );
 
+    let scale = window.scale_factor();
+    let sprite_metrics = sprites::Metrics::new(
+        f32::from(cw),
+        f32::from(ch),
+        f32::from(view.font_size) * UNDERLINE_THICKNESS_EM,
+        scale,
+    );
+
     // 有焦点时块状光标是实心的，光标下的字形改用背景色画，保证仍然看得清。
     let filled_cursor = frame
         .cursor
@@ -647,6 +659,13 @@ fn paint_frame(
                     ));
                 }
                 if cell.text.is_empty() || cell.text == " " {
+                    continue;
+                }
+                // 方框线、块元素和 Powerline 符号自绘，铺满单元格，不用字体字形。
+                if !cell.wide
+                    && let Some(shapes) = sprites::shapes(&cell.text, sprite_metrics)
+                {
+                    sprites::paint(&shapes, position, scale, hsla(fg), window);
                     continue;
                 }
                 let line = view.shape(&cell.text, cell.attrs, window);
