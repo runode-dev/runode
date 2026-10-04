@@ -4,3 +4,4 @@
 [submodule "vendor/libghostty-rs"]
 	path = vendor/libghostty-rs
 	url = https://github.com/runode-dev/libghostty-rs
+	branch = main
