@@ -1,0 +1,18 @@
+[package]
+name = "runode"
+description = "Desktop workspace for AI coding agents, built on libghostty-vt and GPUI"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+libghostty-vt.workspace = true
+gpui.workspace = true
+# Without font-kit, gpui_macos falls back to a no-op text system and draws no glyphs.
+gpui_platform = { workspace = true, features = ["font-kit"] }
+anyhow.workspace = true
+portable-pty.workspace = true
+futures.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true

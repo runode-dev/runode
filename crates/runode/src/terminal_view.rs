@@ -1,0 +1,628 @@
+//! The GPUI view of one terminal session: input routing and cell painting.
+
+use std::{collections::HashMap, ops::Range};
+
+use futures::StreamExt as _;
+use gpui::{
+    App, Bounds, ClipboardItem, Context, ElementId, ElementInputHandler, EntityInputHandler,
+    FocusHandle, Focusable, Font, FontStyle, FontWeight, GlobalElementId, Hsla, KeyDownEvent,
+    LayoutId, Pixels, Point, Render, ScrollDelta, ScrollWheelEvent, ShapedLine, SharedString,
+    Style, Task, TextRun, UTF16Selection, Window, actions, div, fill, font, point, prelude::*, px,
+    relative, rgb, size,
+};
+use libghostty_vt::key::Mods;
+
+use crate::{
+    keys,
+    pty::{GridSize, PtyEvent},
+    session::{Attrs, CursorShape, Frame, Rgb, SYNC_OUTPUT_TIMEOUT, Session},
+};
+
+actions!(runode, [Copy, Paste]);
+
+const PADDING: f32 = 6.;
+const FONT_FAMILY: &str = "Menlo";
+const FONT_SIZE: f32 = 13.;
+/// Line height as a multiple of the font's ascent + descent.
+const LINE_SPACING: f32 = 1.15;
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct Metrics {
+    cell: gpui::Size<Pixels>,
+    ascent: Pixels,
+    descent: Pixels,
+}
+
+#[derive(Clone, PartialEq, Eq, Hash)]
+struct GlyphKey {
+    text: String,
+    bold: bool,
+    italic: bool,
+}
+
+pub struct TerminalView {
+    session: Session,
+    focus_handle: FocusHandle,
+    font: Font,
+    font_size: Pixels,
+    metrics: Option<Metrics>,
+    /// Shaped glyphs by text and style; color is applied at paint time.
+    glyphs: HashMap<GlyphKey, ShapedLine>,
+    /// Uncommitted IME composition, drawn at the cursor.
+    marked_text: Option<String>,
+    /// Sub-line remainder of precise (trackpad) scrolling.
+    scroll_remainder: f32,
+    /// Where the cursor cell was last painted, for the IME candidate window.
+    cursor_bounds: Option<Bounds<Pixels>>,
+    /// Origin of the cell grid, for mapping pointer positions to cells.
+    grid_origin: Point<Pixels>,
+    _reader: Task<()>,
+    _hold_timeout: Option<Task<()>>,
+}
+
+impl TerminalView {
+    pub fn new(window: &mut Window, cx: &mut Context<Self>) -> anyhow::Result<Self> {
+        // A provisional size; the first layout resizes to the real bounds.
+        let (session, mut rx) = Session::spawn(GridSize {
+            cols: 80,
+            rows: 24,
+            cell_width_px: 8,
+            cell_height_px: 16,
+        })?;
+
+        let reader = cx.spawn_in(window, async move |this, cx| {
+            while let Some(first) = rx.next().await {
+                // Coalesce everything already queued into one VT write and one repaint.
+                let mut output = Vec::new();
+                let mut exited = false;
+                let mut next = Some(first);
+                while let Some(event) = next.take() {
+                    match event {
+                        PtyEvent::Output(data) => output.extend_from_slice(&data),
+                        PtyEvent::Exited => exited = true,
+                    }
+                    next = rx.try_recv().ok();
+                }
+                let updated = this.update_in(cx, |view, window, cx| {
+                    if !output.is_empty() && view.session.feed(&output) {
+                        let title = view.session.title.as_deref().unwrap_or("runode");
+                        window.set_window_title(title);
+                    }
+                    if view.session.take_bell() {
+                        window.play_system_bell();
+                    }
+                    if exited {
+                        view.session.exited = true;
+                        window.remove_window();
+                    }
+                    if view.session.render_held() {
+                        view.schedule_hold_timeout(cx);
+                    }
+                    cx.notify();
+                });
+                if updated.is_err() || exited {
+                    break;
+                }
+            }
+        });
+
+        Ok(Self {
+            session,
+            focus_handle: cx.focus_handle(),
+            font: font(FONT_FAMILY),
+            font_size: px(FONT_SIZE),
+            metrics: None,
+            glyphs: HashMap::new(),
+            marked_text: None,
+            scroll_remainder: 0.,
+            cursor_bounds: None,
+            grid_origin: Point::default(),
+            _reader: reader,
+            _hold_timeout: None,
+        })
+    }
+
+    /// Repaints once a synchronized-output hold has had its time, so a
+    /// program that never releases it can't freeze the view.
+    fn schedule_hold_timeout(&mut self, cx: &mut Context<Self>) {
+        let timer = cx.background_executor().timer(SYNC_OUTPUT_TIMEOUT);
+        self._hold_timeout = Some(cx.spawn(async move |this, cx| {
+            timer.await;
+            this.update(cx, |_, cx| cx.notify()).ok();
+        }));
+    }
+
+    fn key_down(&mut self, event: &KeyDownEvent, _: &mut Window, cx: &mut Context<Self>) {
+        // While the IME composes, keys belong to it.
+        if self.marked_text.is_some() {
+            return;
+        }
+        let Some(input) = keys::translate(&event.keystroke) else {
+            return;
+        };
+        if self.session.key(&input) {
+            cx.stop_propagation();
+            cx.notify();
+        }
+    }
+
+    fn scroll_wheel(&mut self, event: &ScrollWheelEvent, _: &mut Window, cx: &mut Context<Self>) {
+        let Some(metrics) = self.metrics else {
+            return;
+        };
+        let lines = match event.delta {
+            ScrollDelta::Lines(delta) => delta.y,
+            ScrollDelta::Pixels(delta) => f32::from(delta.y) / f32::from(metrics.cell.height),
+        };
+        // Positive wheel delta means content moves down: back into history.
+        self.scroll_remainder -= lines;
+        let whole = self.scroll_remainder.trunc();
+        self.scroll_remainder -= whole;
+        let local = event.position - self.grid_origin;
+        let cell = (
+            (f32::from(local.x) / f32::from(metrics.cell.width)).max(0.) as u16,
+            (f32::from(local.y) / f32::from(metrics.cell.height)).max(0.) as u16,
+        );
+        let mut mods = Mods::empty();
+        if event.modifiers.shift {
+            mods |= Mods::SHIFT;
+        }
+        if event.modifiers.control {
+            mods |= Mods::CTRL;
+        }
+        if event.modifiers.alt {
+            mods |= Mods::ALT;
+        }
+        self.session.scroll(whole as isize, cell, mods);
+        cx.notify();
+    }
+
+    fn paste(&mut self, _: &Paste, _: &mut Window, cx: &mut Context<Self>) {
+        if let Some(text) = cx.read_from_clipboard().and_then(|item| item.text()) {
+            self.session.paste(&text);
+        }
+    }
+
+    fn copy(&mut self, _: &Copy, _: &mut Window, cx: &mut Context<Self>) {
+        // Selection arrives in a later phase; until then copy the visible screen.
+        let frame = self.session.frame();
+        let mut text = String::new();
+        for y in 0..frame.rows {
+            let line: String = frame
+                .row(y)
+                .iter()
+                .filter(|c| !c.spacer)
+                .map(|c| if c.text.is_empty() { " " } else { c.text.as_str() })
+                .collect();
+            text.push_str(line.trim_end());
+            text.push('\n');
+        }
+        cx.write_to_clipboard(ClipboardItem::new_string(text.trim_end().to_owned()));
+    }
+
+    fn metrics(&mut self, window: &Window) -> Metrics {
+        if let Some(metrics) = self.metrics {
+            return metrics;
+        }
+        let text_system = window.text_system();
+        let font_id = text_system.resolve_font(&self.font);
+        let scale = window.scale_factor();
+        // Snap to device pixels so adjacent cell backgrounds never leave seams.
+        let snap = |v: f32| (v * scale).round() / scale;
+        let width = text_system
+            .advance(font_id, self.font_size, 'M')
+            .map_or(FONT_SIZE * 0.6, |a| f32::from(a.width));
+        let ascent = text_system.ascent(font_id, self.font_size);
+        let descent = text_system.descent(font_id, self.font_size).abs();
+        let height = (f32::from(ascent) + f32::from(descent)) * LINE_SPACING;
+        let metrics = Metrics {
+            cell: size(px(snap(width)), px(snap(height).ceil())),
+            ascent,
+            descent,
+        };
+        self.metrics = Some(metrics);
+        metrics
+    }
+
+    fn shape(&mut self, text: &str, attrs: Attrs, window: &Window) -> ShapedLine {
+        let key = GlyphKey {
+            text: text.to_owned(),
+            bold: attrs.bold,
+            italic: attrs.italic,
+        };
+        if let Some(line) = self.glyphs.get(&key) {
+            return line.clone();
+        }
+        let mut font = self.font.clone();
+        if attrs.bold {
+            font.weight = FontWeight::BOLD;
+        }
+        if attrs.italic {
+            font.style = FontStyle::Italic;
+        }
+        let line = window.text_system().shape_line(
+            SharedString::from(key.text.clone()),
+            self.font_size,
+            &[TextRun {
+                len: text.len(),
+                font,
+                color: Hsla::default(),
+                background_color: None,
+                underline: None,
+                strikethrough: None,
+            }],
+            None,
+        );
+        // Unbounded growth only matters for pathological output; reset rather than evict.
+        if self.glyphs.len() > 8192 {
+            self.glyphs.clear();
+        }
+        self.glyphs.insert(key, line.clone());
+        line
+    }
+}
+
+impl Focusable for TerminalView {
+    fn focus_handle(&self, _: &App) -> FocusHandle {
+        self.focus_handle.clone()
+    }
+}
+
+impl Render for TerminalView {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let background = self.session.frame().background;
+        div()
+            .id("terminal")
+            .key_context("Terminal")
+            .track_focus(&self.focus_handle)
+            .on_key_down(cx.listener(Self::key_down))
+            .on_scroll_wheel(cx.listener(Self::scroll_wheel))
+            .on_action(cx.listener(Self::paste))
+            .on_action(cx.listener(Self::copy))
+            .size_full()
+            .bg(rgb(background.to_u32()))
+            .p(px(PADDING))
+            .child(TerminalElement { view: cx.entity() })
+    }
+}
+
+impl EntityInputHandler for TerminalView {
+    fn text_for_range(
+        &mut self,
+        range: Range<usize>,
+        actual_range: &mut Option<Range<usize>>,
+        _: &mut Window,
+        _: &mut Context<Self>,
+    ) -> Option<String> {
+        let marked = self.marked_text.as_deref()?;
+        let utf16: Vec<u16> = marked.encode_utf16().collect();
+        let range = range.start.min(utf16.len())..range.end.min(utf16.len());
+        actual_range.replace(range.clone());
+        Some(String::from_utf16_lossy(&utf16[range]))
+    }
+
+    fn selected_text_range(
+        &mut self,
+        _: bool,
+        _: &mut Window,
+        _: &mut Context<Self>,
+    ) -> Option<UTF16Selection> {
+        let end = self
+            .marked_text
+            .as_deref()
+            .map_or(0, |t| t.encode_utf16().count());
+        Some(UTF16Selection {
+            range: end..end,
+            reversed: false,
+        })
+    }
+
+    fn marked_text_range(&self, _: &mut Window, _: &mut Context<Self>) -> Option<Range<usize>> {
+        self.marked_text
+            .as_deref()
+            .map(|t| 0..t.encode_utf16().count())
+    }
+
+    fn unmark_text(&mut self, _: &mut Window, cx: &mut Context<Self>) {
+        self.marked_text = None;
+        cx.notify();
+    }
+
+    fn replace_text_in_range(
+        &mut self,
+        _: Option<Range<usize>>,
+        text: &str,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.marked_text = None;
+        if !text.is_empty() {
+            self.session.commit_text(text);
+        }
+        cx.notify();
+    }
+
+    fn replace_and_mark_text_in_range(
+        &mut self,
+        _: Option<Range<usize>>,
+        text: &str,
+        _: Option<Range<usize>>,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.marked_text = (!text.is_empty()).then(|| text.to_owned());
+        cx.notify();
+    }
+
+    fn bounds_for_range(
+        &mut self,
+        _: Range<usize>,
+        _: Bounds<Pixels>,
+        _: &mut Window,
+        _: &mut Context<Self>,
+    ) -> Option<Bounds<Pixels>> {
+        self.cursor_bounds
+    }
+
+    fn character_index_for_point(
+        &mut self,
+        _: Point<Pixels>,
+        _: &mut Window,
+        _: &mut Context<Self>,
+    ) -> Option<usize> {
+        None
+    }
+}
+
+struct TerminalElement {
+    view: gpui::Entity<TerminalView>,
+}
+
+impl IntoElement for TerminalElement {
+    type Element = Self;
+
+    fn into_element(self) -> Self::Element {
+        self
+    }
+}
+
+impl Element for TerminalElement {
+    type RequestLayoutState = ();
+    type PrepaintState = ();
+
+    fn id(&self) -> Option<ElementId> {
+        None
+    }
+
+    fn source_location(&self) -> Option<&'static core::panic::Location<'static>> {
+        None
+    }
+
+    fn request_layout(
+        &mut self,
+        _: Option<&GlobalElementId>,
+        _: Option<&gpui::InspectorElementId>,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> (LayoutId, ()) {
+        let mut style = Style::default();
+        style.size.width = relative(1.).into();
+        style.size.height = relative(1.).into();
+        (window.request_layout(style, [], cx), ())
+    }
+
+    fn prepaint(
+        &mut self,
+        _: Option<&GlobalElementId>,
+        _: Option<&gpui::InspectorElementId>,
+        bounds: Bounds<Pixels>,
+        _: &mut (),
+        window: &mut Window,
+        cx: &mut App,
+    ) {
+        self.view.update(cx, |view, _| {
+            let metrics = view.metrics(window);
+            let cols = (f32::from(bounds.size.width) / f32::from(metrics.cell.width)).floor();
+            let rows = (f32::from(bounds.size.height) / f32::from(metrics.cell.height)).floor();
+            let scale = window.scale_factor();
+            view.session.resize(GridSize {
+                cols: cols.clamp(1., u16::MAX as f32) as u16,
+                rows: rows.clamp(1., u16::MAX as f32) as u16,
+                cell_width_px: (f32::from(metrics.cell.width) * scale).round() as u16,
+                cell_height_px: (f32::from(metrics.cell.height) * scale).round() as u16,
+            });
+            view.grid_origin = bounds.origin;
+        });
+    }
+
+    fn paint(
+        &mut self,
+        _: Option<&GlobalElementId>,
+        _: Option<&gpui::InspectorElementId>,
+        bounds: Bounds<Pixels>,
+        _: &mut (),
+        _: &mut (),
+        window: &mut Window,
+        cx: &mut App,
+    ) {
+        let focus_handle = self.view.read(cx).focus_handle.clone();
+        window.handle_input(
+            &focus_handle,
+            ElementInputHandler::new(bounds, self.view.clone()),
+            cx,
+        );
+        let focused = focus_handle.is_focused(window);
+        self.view.update(cx, |view, _| {
+            let metrics = view.metrics(window);
+            // Painting needs the frame and `&mut view` (for the glyph cache)
+            // at once, so take the frame out for the duration.
+            let frame = view.session.take_frame();
+            paint_frame(view, &frame, bounds.origin, metrics, focused, window);
+            view.session.restore_frame(frame);
+        });
+    }
+}
+
+fn hsla(color: Rgb) -> Hsla {
+    rgb(color.to_u32()).into()
+}
+
+/// Halfway between `fg` and `bg`, for faint (SGR 2) text.
+fn faint(fg: Rgb, bg: Rgb) -> Rgb {
+    let mix = |a: u8, b: u8| ((u16::from(a) + u16::from(b)) / 2) as u8;
+    Rgb(mix(fg.0, bg.0), mix(fg.1, bg.1), mix(fg.2, bg.2))
+}
+
+fn paint_frame(
+    view: &mut TerminalView,
+    frame: &Frame,
+    origin: Point<Pixels>,
+    metrics: Metrics,
+    focused: bool,
+    window: &mut Window,
+) {
+    let cw = metrics.cell.width;
+    let ch = metrics.cell.height;
+    let cell_origin = |x: u16, y: u16| origin + point(cw * f32::from(x), ch * f32::from(y));
+    let grid = Bounds::new(
+        origin,
+        size(cw * f32::from(frame.cols), ch * f32::from(frame.rows)),
+    );
+
+    // A block cursor in a focused view is filled, and the glyph under it is
+    // drawn in the background color so it stays readable.
+    let filled_cursor = frame
+        .cursor
+        .filter(|c| focused && c.shape == CursorShape::Block && view.marked_text.is_none());
+
+    window.paint_layer(grid, |window| {
+        // Backgrounds, merged into runs of equal color per row.
+        for y in 0..frame.rows {
+            let row = frame.row(y);
+            let mut x = 0usize;
+            while x < row.len() {
+                let Some(bg) = row[x].bg else {
+                    x += 1;
+                    continue;
+                };
+                let start = x;
+                while x < row.len() && row[x].bg == Some(bg) {
+                    x += 1;
+                }
+                window.paint_quad(fill(
+                    Bounds::new(
+                        cell_origin(start as u16, y),
+                        size(cw * (x - start) as f32, ch),
+                    ),
+                    hsla(bg),
+                ));
+            }
+        }
+
+        if let Some(cursor) = filled_cursor {
+            let width = if cursor.wide { cw * 2. } else { cw };
+            window.paint_quad(fill(
+                Bounds::new(cell_origin(cursor.x, cursor.y), size(width, ch)),
+                hsla(cursor.color),
+            ));
+        }
+
+        // Glyphs and decorations.
+        let baseline = (ch - metrics.ascent - metrics.descent) / 2. + metrics.ascent;
+        for y in 0..frame.rows {
+            for (x, cell) in frame.row(y).iter().enumerate() {
+                let x = x as u16;
+                if cell.spacer {
+                    continue;
+                }
+                let bg = cell.bg.unwrap_or(frame.background);
+                let mut fg = if cell.attrs.faint {
+                    faint(cell.fg, bg)
+                } else {
+                    cell.fg
+                };
+                if filled_cursor.is_some_and(|c| c.x == x && c.y == y) {
+                    fg = frame.background;
+                }
+                let position = cell_origin(x, y);
+                let width = if cell.wide { cw * 2. } else { cw };
+                if cell.attrs.underline {
+                    window.paint_quad(fill(
+                        Bounds::new(position + point(px(0.), ch - px(2.)), size(width, px(1.))),
+                        hsla(fg),
+                    ));
+                }
+                if cell.attrs.strikethrough {
+                    window.paint_quad(fill(
+                        Bounds::new(position + point(px(0.), ch / 2.), size(width, px(1.))),
+                        hsla(fg),
+                    ));
+                }
+                if cell.text.is_empty() || cell.text == " " {
+                    continue;
+                }
+                let line = view.shape(&cell.text, cell.attrs, window);
+                paint_glyphs(&line, position + point(px(0.), baseline), hsla(fg), window);
+            }
+        }
+    });
+
+    // Cursor shapes that sit over the text, and the IME composition.
+    let mut cursor_bounds = None;
+    if let Some(cursor) = frame.cursor {
+        let position = cell_origin(cursor.x, cursor.y);
+        let width = if cursor.wide { cw * 2. } else { cw };
+        cursor_bounds = Some(Bounds::new(position, size(width, ch)));
+        let color = hsla(cursor.color);
+        window.paint_layer(grid, |window| {
+            if let Some(text) = view.marked_text.clone() {
+                let line = view.shape(&text, Attrs::default(), window);
+                let area = Bounds::new(position, size(line.width.max(cw), ch));
+                window.paint_quad(fill(area, hsla(frame.background)));
+                window.paint_quad(fill(
+                    Bounds::new(position + point(px(0.), ch - px(2.)), size(area.size.width, px(1.))),
+                    hsla(frame.foreground),
+                ));
+                let baseline = (ch - metrics.ascent - metrics.descent) / 2. + metrics.ascent;
+                paint_glyphs(&line, position + point(px(0.), baseline), hsla(frame.foreground), window);
+                return;
+            }
+            let quads: &[Bounds<Pixels>] = match (focused, cursor.shape) {
+                (true, CursorShape::Block) => &[],
+                (true, CursorShape::Bar) => &[Bounds::new(position, size(px(2.), ch))],
+                (true, CursorShape::Underline) => {
+                    &[Bounds::new(position + point(px(0.), ch - px(2.)), size(width, px(2.)))]
+                }
+                // Unfocused, or explicitly hollow: an outline.
+                _ => &[
+                    Bounds::new(position, size(width, px(1.))),
+                    Bounds::new(position + point(px(0.), ch - px(1.)), size(width, px(1.))),
+                    Bounds::new(position, size(px(1.), ch)),
+                    Bounds::new(position + point(width - px(1.), px(0.)), size(px(1.), ch)),
+                ],
+            };
+            for quad in quads {
+                window.paint_quad(fill(*quad, color));
+            }
+        });
+    }
+    view.cursor_bounds = cursor_bounds;
+}
+
+/// Paints a shaped line's glyphs at `baseline_origin` (x at the cell's left
+/// edge, y on the baseline) without `ShapedLine::paint`'s per-call layer.
+fn paint_glyphs(line: &ShapedLine, baseline_origin: Point<Pixels>, color: Hsla, window: &mut Window) {
+    for run in &line.runs {
+        for glyph in &run.glyphs {
+            let position = baseline_origin + point(glyph.position.x, px(0.));
+            let painted = if glyph.is_emoji {
+                window.paint_emoji(position, run.font_id, glyph.id, line.font_size)
+            } else {
+                window.paint_glyph(position, run.font_id, glyph.id, line.font_size, color)
+            };
+            if let Err(err) = painted {
+                tracing::debug!("glyph paint failed: {err}");
+            }
+        }
+    }
+}

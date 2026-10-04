@@ -1,0 +1,4 @@
+[env]
+# Build libghostty-vt from the vendored fork, not libghostty-rs's own fetch.
+# The checked-in bindings in vendor/libghostty-rs match this commit exactly.
+GHOSTTY_SOURCE_DIR = { value = "vendor/ghostty", relative = true }
