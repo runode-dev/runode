@@ -1,38 +1,104 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <title>Runode</title>
+  <desc>曜石黑磨砂圆角终端，带有银白提示符、薄荷色光标和在线状态灯。</desc>
   <defs>
-    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#232838"/>
-      <stop offset="1" stop-color="#0c0e14"/>
+    <path id="tile" d="M330 100H694C846 100 924 178 924 330V694C924 846 846 924 694 924H330C178 924 100 846 100 694V330C100 178 178 100 330 100Z"/>
+    <path id="face" d="M330 108H694C842 108 916 182 916 330V694C916 842 842 916 694 916H330C182 916 108 842 108 694V330C108 182 182 108 330 108Z"/>
+    <path id="prompt" d="M310 374L472 512L310 650"/>
+    <clipPath id="face-clip">
+      <use href="#face"/>
+    </clipPath>
+
+    <linearGradient id="rim" x1="196" y1="100" x2="776" y2="924" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#626262"/>
+      <stop offset="0.28" stop-color="#303030"/>
+      <stop offset="0.6" stop-color="#171717"/>
+      <stop offset="1" stop-color="#363636"/>
     </linearGradient>
-    <linearGradient id="rim" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#5eead4"/>
-      <stop offset="0.5" stop-color="#60a5fa"/>
-      <stop offset="1" stop-color="#a78bfa"/>
+    <linearGradient id="enamel" x1="362" y1="108" x2="654" y2="916" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#1b1b1b"/>
+      <stop offset="0.48" stop-color="#0e0e0e"/>
+      <stop offset="1" stop-color="#070707"/>
     </linearGradient>
-    <linearGradient id="cursor" x1="0" y1="0" x2="1" y2="0">
-      <stop offset="0" stop-color="#5eead4"/>
-      <stop offset="1" stop-color="#60a5fa"/>
-    </linearGradient>
-    <radialGradient id="glow" cx="0.5" cy="0.35" r="0.65">
-      <stop offset="0" stop-color="#3b4766" stop-opacity="0.55"/>
-      <stop offset="1" stop-color="#3b4766" stop-opacity="0"/>
+    <radialGradient id="ambient" cx="256" cy="156" r="650" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#ffffff" stop-opacity="0.055"/>
+      <stop offset="1" stop-color="#ffffff" stop-opacity="0"/>
     </radialGradient>
-    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
-      <feDropShadow dx="0" dy="12" stdDeviation="18" flood-color="#000" flood-opacity="0.35"/>
+    <radialGradient id="reflection" cx="816" cy="884" r="540" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#ffffff" stop-opacity="0.018"/>
+      <stop offset="1" stop-color="#ffffff" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="edge" x1="400" y1="108" x2="624" y2="916" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#ffffff" stop-opacity="0.22"/>
+      <stop offset="0.38" stop-color="#ffffff" stop-opacity="0.035"/>
+      <stop offset="0.8" stop-color="#ffffff" stop-opacity="0"/>
+      <stop offset="1" stop-color="#c8c8c8" stop-opacity="0.1"/>
+    </linearGradient>
+    <linearGradient id="ivory" x1="328" y1="342" x2="424" y2="680" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#f5fffc"/>
+      <stop offset="0.5" stop-color="#e5f2f2"/>
+      <stop offset="1" stop-color="#c0d5da"/>
+    </linearGradient>
+    <linearGradient id="mint" x1="552" y1="618" x2="720" y2="684" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#a0f7de"/>
+      <stop offset="0.5" stop-color="#77e8cd"/>
+      <stop offset="1" stop-color="#51cdb9"/>
+    </linearGradient>
+    <radialGradient id="led" cx="726" cy="288" r="42" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#d1ffe7"/>
+      <stop offset="0.45" stop-color="#7bf0bc"/>
+      <stop offset="1" stop-color="#2cb483"/>
+    </radialGradient>
+    <radialGradient id="halo">
+      <stop stop-color="#66f4bf" stop-opacity="0.22"/>
+      <stop offset="1" stop-color="#66f4bf" stop-opacity="0"/>
+    </radialGradient>
+
+    <filter id="tile-shadow" x="-15%" y="-15%" width="130%" height="140%" color-interpolation-filters="sRGB">
+      <feDropShadow dx="0" dy="18" stdDeviation="18" flood-color="#000000" flood-opacity="0.28"/>
+      <feDropShadow dx="0" dy="3" stdDeviation="3" flood-color="#000000" flood-opacity="0.18"/>
+    </filter>
+    <filter id="glyph-shadow" x="-30%" y="-30%" width="160%" height="180%" color-interpolation-filters="sRGB">
+      <feDropShadow dx="0" dy="12" stdDeviation="10" flood-color="#000000" flood-opacity="0.42"/>
+    </filter>
+    <filter id="cursor-glow" x="-50%" y="-100%" width="200%" height="300%" color-interpolation-filters="sRGB">
+      <feGaussianBlur stdDeviation="20"/>
+    </filter>
+    <filter id="grain" x="0" y="0" width="100%" height="100%" color-interpolation-filters="sRGB">
+      <feTurbulence type="fractalNoise" baseFrequency="0.42" numOctaves="3" seed="7" stitchTiles="stitch"/>
+      <feColorMatrix type="saturate" values="0"/>
+      <feComponentTransfer>
+        <feFuncA type="linear" slope="0" intercept="1"/>
+      </feComponentTransfer>
     </filter>
   </defs>
-  <!-- macOS 图标网格：824×824 的圆角方块，四周留 100px -->
-  <g filter="url(#shadow)">
-    <rect x="100" y="100" width="824" height="824" rx="186" fill="url(#rim)"/>
-    <rect x="114" y="114" width="796" height="796" rx="174" fill="url(#bg)"/>
-    <rect x="114" y="114" width="796" height="796" rx="174" fill="url(#glow)"/>
+
+  <!-- 824px 的主体和透明留白适配 macOS 图标网格。 -->
+  <g filter="url(#tile-shadow)">
+    <use href="#tile" fill="url(#rim)"/>
+    <use href="#face" fill="url(#enamel)"/>
+    <g clip-path="url(#face-clip)">
+      <path fill="url(#ambient)" d="M100 100H924V924H100Z"/>
+      <path fill="url(#reflection)" d="M100 100H924V924H100Z"/>
+      <!-- 轻微纹理打散深色渐变在 8 位 PNG 中的色带。 -->
+      <path fill="#fff" d="M100 100H924V924H100Z" filter="url(#grain)" opacity="0.065"/>
+    </g>
+    <use href="#face" fill="none" stroke="url(#edge)" stroke-width="2"/>
   </g>
-  <!-- 提示符 > -->
-  <path d="M300 372 L470 512 L300 652" fill="none" stroke="#eef2f8" stroke-width="64"
-        stroke-linecap="round" stroke-linejoin="round"/>
-  <!-- 光标 -->
-  <rect x="520" y="604" width="210" height="64" rx="32" fill="url(#cursor)"/>
-  <!-- agent 状态点 -->
-  <circle cx="742" cy="300" r="46" fill="#34d399"/>
-  <circle cx="742" cy="300" r="46" fill="none" stroke="#0c0e14" stroke-width="14" opacity="0.35"/>
+
+  <!-- 提示符与光标共用基线，用轻微的厚度和阴影拉开层次。 -->
+  <rect x="548" y="625" width="194" height="62" rx="31" fill="#6ef1d0" opacity="0.16" filter="url(#cursor-glow)"/>
+  <g filter="url(#glyph-shadow)">
+    <use href="#prompt" transform="translate(0 5)" fill="none" stroke="#6c919c" stroke-width="70" stroke-linecap="round" stroke-linejoin="round"/>
+    <use href="#prompt" fill="none" stroke="url(#ivory)" stroke-width="70" stroke-linecap="round" stroke-linejoin="round"/>
+    <rect x="548" y="623" width="194" height="66" rx="33" fill="#2f877f"/>
+    <rect x="548" y="618" width="194" height="66" rx="33" fill="url(#mint)"/>
+    <path d="M581 621H709" fill="none" stroke="#e1fff2" stroke-opacity="0.5" stroke-width="2" stroke-linecap="round"/>
+  </g>
+
+  <!-- 状态灯缩小后仍保留独立的暗色灯座，避免小尺寸下和高光粘连。 -->
+  <circle cx="734" cy="300" r="70" fill="url(#halo)"/>
+  <circle cx="734" cy="302" r="39" fill="#080808" stroke="#bcbcbc" stroke-opacity="0.16" stroke-width="2"/>
+  <circle cx="734" cy="300" r="28" fill="url(#led)"/>
+  <path d="M718 287C724 280 736 279 743 284" fill="none" stroke="#e1fff1" stroke-opacity="0.6" stroke-width="2.5" stroke-linecap="round"/>
 </svg>
