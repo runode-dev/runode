@@ -4,19 +4,20 @@ use std::{collections::HashMap, ops::Range, sync::Arc, time::Duration};
 
 use futures::StreamExt as _;
 use gpui::{
-    App, AppContext as _, Bounds, ClipboardItem, Context, ElementId, ElementInputHandler, Entity,
-    EntityInputHandler, EventEmitter, FocusHandle, Focusable, Font, FontStyle, FontWeight,
-    GlobalElementId, Hsla, KeyDownEvent, LayoutId, Pixels, Point, PromptLevel, Render, ScrollDelta,
+    App, AppContext as _, Bounds, ClipboardItem, Context, CursorStyle, DispatchPhase, ElementId,
+    ElementInputHandler, Entity, EntityInputHandler, EventEmitter, FocusHandle, Focusable, Font,
+    FontStyle, FontWeight, GlobalElementId, Hsla, KeyDownEvent, LayoutId, Modifiers, MouseButton,
+    MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, Point, PromptLevel, Render, ScrollDelta,
     ScrollWheelEvent, ShapedLine, SharedString, Style, Subscription, Task, TextRun, UTF16Selection,
     Window, actions, div, fill, font, point, prelude::*, px, relative, rgb, size,
 };
-use libghostty_vt::key::Mods;
+use libghostty_vt::{key::Mods, mouse};
 
 use crate::{
     config::{AppConfig, CellHeight, Config},
     keys,
     pty::{GridSize, PtyEvent},
-    session::{Attrs, CursorShape, Frame, Paste as PasteResult, Rgb, SYNC_OUTPUT_TIMEOUT, Session},
+    session::{Attrs, CursorShape, Frame, GridPoint, Paste as PasteResult, Rgb, SYNC_OUTPUT_TIMEOUT, Session},
     sprites,
 };
 
@@ -34,6 +35,8 @@ const MIN_FONT_SIZE: f32 = 6.;
 const MAX_FONT_SIZE: f32 = 72.;
 /// 程序没设置标题时用的标题。
 pub const DEFAULT_TITLE: &str = "runode";
+/// 拖选到网格外时自动滚动的间隔，每次滚一行。
+const AUTOSCROLL_INTERVAL: Duration = Duration::from_millis(15);
 /// 光标闪烁时亮、灭各持续的时长。
 const CURSOR_BLINK_INTERVAL: Duration = Duration::from_millis(600);
 
@@ -78,12 +81,16 @@ pub struct TerminalView {
     cursor_bounds: Option<Bounds<Pixels>>,
     /// 单元格网格的原点，用于把指针位置换算成单元格。
     grid_origin: Point<Pixels>,
+    /// 左键按下后正在拖动选择，这次的移动和松开都归选区，不上报给程序。
+    selecting: bool,
     /// 闪烁光标当前处于亮的一半周期。
     cursor_blink_visible: bool,
     _reader: Task<()>,
     _hold_timeout: Option<Task<()>>,
     /// 有焦点时才运行的闪烁计时器。
     _cursor_blink: Option<Task<()>>,
+    /// 拖选到网格外时运行的自动滚动计时器。
+    _autoscroll: Option<Task<()>>,
     _config_watch: Subscription,
     _appearance_watch: Subscription,
     _focus_watch: [Subscription; 2],
@@ -184,10 +191,12 @@ impl TerminalView {
             scroll_remainder: 0.,
             cursor_bounds: None,
             grid_origin: Point::default(),
+            selecting: false,
             cursor_blink_visible: true,
             _reader: reader,
             _hold_timeout: None,
             _cursor_blink: None,
+            _autoscroll: None,
             _config_watch: config_watch,
             _appearance_watch: appearance_watch,
             _focus_watch: focus_watch,
@@ -262,23 +271,117 @@ impl TerminalView {
         self.scroll_remainder -= lines;
         let whole = self.scroll_remainder.trunc();
         self.scroll_remainder -= whole;
-        let local = event.position - self.grid_origin;
-        let cell = (
-            (f32::from(local.x) / f32::from(metrics.cell.width)).max(0.) as u16,
-            (f32::from(local.y) / f32::from(metrics.cell.height)).max(0.) as u16,
-        );
-        let mut mods = Mods::empty();
-        if event.modifiers.shift {
-            mods |= Mods::SHIFT;
-        }
-        if event.modifiers.control {
-            mods |= Mods::CTRL;
-        }
-        if event.modifiers.alt {
-            mods |= Mods::ALT;
-        }
-        self.session.scroll(whole as isize, cell, mods);
+        let Some(at) = self.grid_point(event.position) else {
+            return;
+        };
+        self.session.scroll(whole as isize, at, mouse_mods(&event.modifiers));
         cx.notify();
+    }
+
+    /// 窗口坐标换算成网格位置；单元格尺寸还没量出来时为 `None`。
+    fn grid_point(&self, position: Point<Pixels>) -> Option<GridPoint> {
+        let metrics = self.metrics?;
+        let local = position - self.grid_origin;
+        Some(GridPoint {
+            x: f32::from(local.x) / f32::from(metrics.cell.width),
+            y: f32::from(local.y) / f32::from(metrics.cell.height),
+        })
+    }
+
+    fn mouse_down(&mut self, event: &MouseDownEvent, window: &mut Window, cx: &mut Context<Self>) {
+        window.focus(&self.focus_handle, cx);
+        // 激活窗口的那一下只用来激活，不选择也不上报。
+        if event.first_mouse {
+            return;
+        }
+        let Some(at) = self.grid_point(event.position) else {
+            return;
+        };
+        // 程序开了鼠标上报时按键归程序，按住 Shift 照常选择。
+        if self.session.mouse_tracking() && !event.modifiers.shift {
+            if let Some(button) = mouse_button(event.button) {
+                let mods = mouse_mods(&event.modifiers);
+                self.session.mouse_report(mouse::Action::Press, Some(button), at, mods);
+            }
+            return;
+        }
+        if event.button != MouseButton::Left {
+            return;
+        }
+        self.selecting = true;
+        self.session.select_press(at, double_click_interval());
+        cx.notify();
+    }
+
+    fn mouse_move(&mut self, event: &MouseMoveEvent, inside: bool, cx: &mut Context<Self>) {
+        let Some(at) = self.grid_point(event.position) else {
+            return;
+        };
+        if self.selecting {
+            // 漏掉了松开事件时按松开处理，免得之后的移动还在扩展选区。
+            if event.pressed_button != Some(MouseButton::Left) {
+                self.finish_selecting(at, cx);
+                return;
+            }
+            // Option 拖出矩形块。
+            if self.session.select_drag(at, event.modifiers.alt) {
+                self.start_autoscroll(cx);
+            } else {
+                self._autoscroll = None;
+            }
+            cx.notify();
+            return;
+        }
+        if inside && self.session.mouse_tracking() {
+            let pressed = event.pressed_button.and_then(mouse_button);
+            let mods = mouse_mods(&event.modifiers);
+            self.session.mouse_report(mouse::Action::Motion, pressed, at, mods);
+        }
+    }
+
+    fn mouse_up(&mut self, event: &MouseUpEvent, cx: &mut Context<Self>) {
+        let Some(at) = self.grid_point(event.position) else {
+            return;
+        };
+        if self.selecting {
+            if event.button == MouseButton::Left {
+                self.finish_selecting(at, cx);
+            }
+            return;
+        }
+        if self.session.mouse_tracking()
+            && let Some(button) = mouse_button(event.button)
+        {
+            let mods = mouse_mods(&event.modifiers);
+            self.session.mouse_report(mouse::Action::Release, Some(button), at, mods);
+        }
+    }
+
+    fn finish_selecting(&mut self, at: GridPoint, cx: &mut Context<Self>) {
+        self.selecting = false;
+        self._autoscroll = None;
+        self.session.select_release(at);
+        cx.notify();
+    }
+
+    /// 拖到网格上下边以外时定时滚动视口、扩展选区，直到拖回网格里或松开左键。
+    fn start_autoscroll(&mut self, cx: &mut Context<Self>) {
+        if self._autoscroll.is_some() {
+            return;
+        }
+        self._autoscroll = Some(cx.spawn(async move |this, cx| {
+            loop {
+                cx.background_executor().timer(AUTOSCROLL_INTERVAL).await;
+                let updated = this.update(cx, |view, cx| {
+                    if view.session.select_autoscroll() {
+                        cx.notify();
+                    }
+                });
+                if updated.is_err() {
+                    break;
+                }
+            }
+        }));
     }
 
     fn paste(&mut self, _: &Paste, window: &mut Window, cx: &mut Context<Self>) {
@@ -308,20 +411,9 @@ impl TerminalView {
     }
 
     fn copy(&mut self, _: &Copy, _: &mut Window, cx: &mut Context<Self>) {
-        // 选择功能后续再做；在那之前先复制整个可见屏幕。
-        let frame = self.session.frame();
-        let mut text = String::new();
-        for y in 0..frame.rows {
-            let line: String = frame
-                .row(y)
-                .iter()
-                .filter(|c| !c.spacer)
-                .map(|c| if c.text.is_empty() { " " } else { c.text.as_str() })
-                .collect();
-            text.push_str(line.trim_end());
-            text.push('\n');
+        if let Some(text) = self.session.selection_text() {
+            cx.write_to_clipboard(ClipboardItem::new_string(text));
         }
-        cx.write_to_clipboard(ClipboardItem::new_string(text.trim_end().to_owned()));
     }
 
     fn increase_font_size(&mut self, _: &IncreaseFontSize, _: &mut Window, cx: &mut Context<Self>) {
@@ -449,6 +541,13 @@ impl Render for TerminalView {
                     .pr(px(self.config.window_padding_x.1))
                     .pt(px(self.config.window_padding_y.0))
                     .pb(px(self.config.window_padding_y.1))
+                    .on_any_mouse_down(cx.listener(Self::mouse_down))
+                    // 程序开了鼠标上报时点击归程序，指针不显示成文本选择的样子。
+                    .cursor(if self.session.mouse_tracking() {
+                        CursorStyle::Arrow
+                    } else {
+                        CursorStyle::IBeam
+                    })
                     .child(TerminalElement { view: cx.entity() }),
             )
     }
@@ -619,6 +718,24 @@ impl Element for TerminalElement {
             ElementInputHandler::new(bounds, self.view.clone()),
             cx,
         );
+        // 移动和松开挂在窗口上：拖到网格外甚至窗口外时也要收到。
+        window.on_mouse_event({
+            let view = self.view.clone();
+            move |event: &MouseMoveEvent, phase, _, cx| {
+                if phase == DispatchPhase::Bubble {
+                    let inside = bounds.contains(&event.position);
+                    view.update(cx, |view, cx| view.mouse_move(event, inside, cx));
+                }
+            }
+        });
+        window.on_mouse_event({
+            let view = self.view.clone();
+            move |event: &MouseUpEvent, phase, _, cx| {
+                if phase == DispatchPhase::Bubble {
+                    view.update(cx, |view, cx| view.mouse_up(event, cx));
+                }
+            }
+        });
         let focused = focus_handle.is_focused(window);
         self.view.update(cx, |view, _| {
             let metrics = view.metrics(window);
@@ -645,6 +762,37 @@ fn resolve_font(families: &[String], window: &Window) -> Font {
         .map_or(FALLBACK_FONT_FAMILY, String::as_str);
     tracing::debug!("terminal font: {family}");
     font(family.to_owned())
+}
+
+fn mouse_mods(modifiers: &Modifiers) -> Mods {
+    let mut mods = Mods::empty();
+    if modifiers.shift {
+        mods |= Mods::SHIFT;
+    }
+    if modifiers.control {
+        mods |= Mods::CTRL;
+    }
+    if modifiers.alt {
+        mods |= Mods::ALT;
+    }
+    mods
+}
+
+/// 系统设置里的双击间隔，决定两次按下算不算连击。
+fn double_click_interval() -> Duration {
+    #[cfg(target_os = "macos")]
+    return Duration::from_secs_f64(objc2_app_kit::NSEvent::doubleClickInterval());
+    #[cfg(not(target_os = "macos"))]
+    Duration::from_millis(500)
+}
+
+fn mouse_button(button: MouseButton) -> Option<mouse::Button> {
+    match button {
+        MouseButton::Left => Some(mouse::Button::Left),
+        MouseButton::Right => Some(mouse::Button::Right),
+        MouseButton::Middle => Some(mouse::Button::Middle),
+        _ => None,
+    }
 }
 
 pub fn hsla(color: Rgb) -> Hsla {

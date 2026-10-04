@@ -14,16 +14,21 @@ use anyhow::Result;
 use futures::channel::mpsc::UnboundedReceiver;
 use libghostty_vt::{
     Error,
+    fmt::Format,
     key::{self, OptionAsAlt},
     mouse,
     paste::PasteSource,
     render::{CellIterator, CursorVisualStyle, Dirty, RenderState, RowIterator, Snapshot},
     screen::CellWide,
+    selection::{
+        FormatOptions,
+        gesture::{self, AutoscrollTickEvent, DragEvent, Gesture, Geometry, PressEvent, ReleaseEvent},
+    },
     style::{RgbColor, Underline},
     terminal::{
-        ConformanceLevel, DeviceAttributeFeature, DeviceAttributes, DeviceType, Mode,
-        PrimaryDeviceAttributes, ScrollViewport, SecondaryDeviceAttributes, SizeReportSize,
-        Terminal,
+        ConformanceLevel, DeviceAttributeFeature, DeviceAttributes, DeviceType, Mode, Point,
+        PointCoordinate, PrimaryDeviceAttributes, ScrollViewport, SecondaryDeviceAttributes,
+        SizeReportSize, Terminal,
     },
 };
 
@@ -146,6 +151,26 @@ struct Renderer {
     cursor_text: Option<TerminalColor>,
 }
 
+/// 指针在网格里的位置，以单元格为单位并带小数。拖到网格外时可以为负，也可以超出行列数。
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct GridPoint {
+    pub x: f32,
+    pub y: f32,
+}
+
+/// 鼠标选区：libghostty 的手势状态机，加上各类事件复用的对象。
+struct Selecting {
+    gesture: Gesture<'static>,
+    press: PressEvent<'static>,
+    drag: DragEvent<'static>,
+    release: ReleaseEvent<'static>,
+    autoscroll: AutoscrollTickEvent<'static>,
+    /// 按下事件的时间基准，手势靠两次按下的间隔判断双击、三击。
+    epoch: Instant,
+    /// 拖动时指针最后的位置和是否选矩形块，自动滚动时沿用。
+    pointer: (GridPoint, bool),
+}
+
 pub struct Session {
     terminal: Terminal<'static, 'static>,
     renderer: Rc<RefCell<Renderer>>,
@@ -155,6 +180,7 @@ pub struct Session {
     key_event: key::Event<'static>,
     mouse_encoder: mouse::Encoder<'static>,
     mouse_event: mouse::Event<'static>,
+    selecting: Selecting,
     pty: Pty,
     writer: PtyWriter,
     size: Rc<StdCell<GridSize>>,
@@ -278,6 +304,15 @@ impl Session {
                 key_event: key::Event::new()?,
                 mouse_encoder: mouse::Encoder::new()?,
                 mouse_event: mouse::Event::new()?,
+                selecting: Selecting {
+                    gesture: Gesture::new()?,
+                    press: PressEvent::new()?,
+                    drag: DragEvent::new()?,
+                    release: ReleaseEvent::new()?,
+                    autoscroll: AutoscrollTickEvent::new()?,
+                    epoch: Instant::now(),
+                    pointer: Default::default(),
+                },
                 pty,
                 writer,
                 size: shared_size,
@@ -407,14 +442,14 @@ impl Session {
         if self.scratch.is_empty() {
             return false;
         }
-        self.scroll_to_bottom();
+        self.before_input();
         self.writer.write(&self.scratch);
         true
     }
 
     /// 输入法上屏的文本，按原样发送。
     pub fn commit_text(&mut self, text: &str) {
-        self.scroll_to_bottom();
+        self.before_input();
         self.writer.write(text.as_bytes());
     }
 
@@ -424,7 +459,7 @@ impl Session {
     /// 结束序列），除非 `allow_unsafe`，否则什么也不写并返回 `Paste::NeedsConfirmation`，
     /// 由界面向用户确认后再带 `allow_unsafe` 重试。
     pub fn paste(&mut self, text: &str, allow_unsafe: bool) -> Paste {
-        self.scroll_to_bottom();
+        self.before_input();
         match self
             .terminal
             .paste_text(text, PasteSource::Clipboard, allow_unsafe)
@@ -439,45 +474,20 @@ impl Session {
     }
 
     /// 滚轮输入：程序开启鼠标上报时发给程序，否则在回滚缓冲里滚动视口。
-    pub fn scroll(&mut self, lines: isize, cell: (u16, u16), mods: key::Mods) {
+    pub fn scroll(&mut self, lines: isize, at: GridPoint, mods: key::Mods) {
         if lines == 0 {
             return;
         }
-        if self.terminal.is_mouse_tracking().unwrap_or(false) {
-            let size = self.size.get();
-            self.mouse_encoder
-                .set_options_from_terminal(&self.terminal)
-                .set_size(mouse::EncoderSize {
-                    screen_width: u32::from(size.cols) * u32::from(size.cell_width_px),
-                    screen_height: u32::from(size.rows) * u32::from(size.cell_height_px),
-                    cell_width: u32::from(size.cell_width_px),
-                    cell_height: u32::from(size.cell_height_px),
-                    padding_top: 0,
-                    padding_bottom: 0,
-                    padding_left: 0,
-                    padding_right: 0,
-                });
+        if self.mouse_tracking() {
             let button = if lines < 0 {
                 mouse::Button::Four
             } else {
                 mouse::Button::Five
             };
-            let position = mouse::Position {
-                x: f32::from(cell.0) * f32::from(size.cell_width_px),
-                y: f32::from(cell.1) * f32::from(size.cell_height_px),
-            };
+            self.sync_mouse_encoder();
             self.scratch.clear();
             for _ in 0..lines.unsigned_abs() {
-                self.mouse_event
-                    .set_mods(mods)
-                    .set_position(position)
-                    .set_button(Some(button))
-                    .set_action(mouse::Action::Press);
-                if let Err(err) = self
-                    .mouse_encoder
-                    .encode_to_vec(&self.mouse_event, &mut self.scratch)
-                {
-                    tracing::warn!("mouse encode failed: {err}");
+                if !self.encode_mouse(mouse::Action::Press, Some(button), at, mods) {
                     return;
                 }
             }
@@ -487,7 +497,194 @@ impl Session {
         }
     }
 
-    fn scroll_to_bottom(&mut self) {
+    /// 运行中的程序是否开启了鼠标上报。
+    pub fn mouse_tracking(&self) -> bool {
+        self.terminal.is_mouse_tracking().unwrap_or(false)
+    }
+
+    /// 把鼠标按键或移动按程序要求的上报格式发给它；程序没开上报时编码结果为空，什么都不发。
+    /// 移动时 `button` 是按着的键，按键拖动模式只上报这时的移动。
+    pub fn mouse_report(
+        &mut self,
+        action: mouse::Action,
+        button: Option<mouse::Button>,
+        at: GridPoint,
+        mods: key::Mods,
+    ) {
+        self.sync_mouse_encoder();
+        self.mouse_encoder
+            .set_any_button_pressed(action != mouse::Action::Release && button.is_some());
+        self.scratch.clear();
+        if self.encode_mouse(action, button, at, mods) && !self.scratch.is_empty() {
+            self.writer.write(&self.scratch);
+        }
+    }
+
+    /// 编码一个鼠标事件，追加到 `scratch`；失败时记日志并返回 false。
+    fn encode_mouse(
+        &mut self,
+        action: mouse::Action,
+        button: Option<mouse::Button>,
+        at: GridPoint,
+        mods: key::Mods,
+    ) -> bool {
+        let (x, y) = self.surface_position(at);
+        self.mouse_event
+            .set_action(action)
+            .set_button(button)
+            .set_mods(mods)
+            .set_position(mouse::Position { x: x as f32, y: y as f32 });
+        match self.mouse_encoder.encode_to_vec(&self.mouse_event, &mut self.scratch) {
+            Ok(()) => true,
+            Err(err) => {
+                tracing::warn!("mouse encode failed: {err}");
+                false
+            }
+        }
+    }
+
+    /// 让鼠标编码器跟上终端的上报模式和当前网格尺寸。
+    fn sync_mouse_encoder(&mut self) {
+        let size = self.size.get();
+        self.mouse_encoder
+            .set_options_from_terminal(&self.terminal)
+            // 同一单元格里的移动不重复上报。
+            .set_track_last_cell(true)
+            .set_size(mouse::EncoderSize {
+                screen_width: u32::from(size.cols) * u32::from(size.cell_width_px),
+                screen_height: u32::from(size.rows) * u32::from(size.cell_height_px),
+                cell_width: u32::from(size.cell_width_px),
+                cell_height: u32::from(size.cell_height_px),
+                padding_top: 0,
+                padding_bottom: 0,
+                padding_left: 0,
+                padding_right: 0,
+            });
+    }
+
+    /// 左键按下。手势按两次按下的间隔和距离数次数：单击清掉选区、从这里开始拖，
+    /// 双击选词，三击选行。`repeat_interval` 是算作连击的最长间隔。
+    pub fn select_press(&mut self, at: GridPoint, repeat_interval: Duration) {
+        let (x, y) = self.surface_position(at);
+        let size = self.size.get();
+        let cell = self.viewport_cell(at);
+        let s = &mut self.selecting;
+        let result = self.terminal.grid_ref(Point::Viewport(cell)).and_then(|grid_ref| {
+            let selection = s
+                .press
+                .set_repeat_distance(f64::from(size.cell_width_px))?
+                .set_repeat_interval(repeat_interval)?
+                .set_time(s.epoch.elapsed())?
+                .set_position(x, y)?
+                .apply(&mut s.gesture, &self.terminal, grid_ref)?;
+            self.terminal.set_selection(selection.as_ref())?;
+            Ok(())
+        });
+        log_err("selection press", result);
+    }
+
+    /// 按住左键拖动，扩展选区；`rectangle` 时选矩形块。返回是否拖到了网格上下边以外，
+    /// 这时要定时调用 `select_autoscroll` 滚动视口。
+    pub fn select_drag(&mut self, at: GridPoint, rectangle: bool) -> bool {
+        let (x, y) = self.surface_position(at);
+        let geometry = self.gesture_geometry();
+        let cell = self.viewport_cell(at);
+        let s = &mut self.selecting;
+        s.pointer = (at, rectangle);
+        let result = self.terminal.grid_ref(Point::Viewport(cell)).and_then(|grid_ref| {
+            let selection = s
+                .drag
+                .set_rectangle(rectangle)?
+                .set_position(x, y)?
+                .apply(&mut s.gesture, &self.terminal, grid_ref, geometry)?;
+            self.terminal.set_selection(selection.as_ref())?;
+            Ok(s.gesture.autoscroll(&self.terminal)? != gesture::Autoscroll::None)
+        });
+        log_err("selection drag", result).unwrap_or(false)
+    }
+
+    /// 拖到网格外时的定时调用：视口滚一行，再按最后的指针位置扩展选区。返回这次是否滚动了。
+    pub fn select_autoscroll(&mut self) -> bool {
+        let (at, rectangle) = self.selecting.pointer;
+        let (x, y) = self.surface_position(at);
+        let geometry = self.gesture_geometry();
+        let cell = self.viewport_cell(at);
+        let s = &mut self.selecting;
+        let result = s.gesture.autoscroll(&self.terminal).and_then(|autoscroll| {
+            if autoscroll == gesture::Autoscroll::None {
+                return Ok(false);
+            }
+            let selection = s
+                .autoscroll
+                .set_rectangle(rectangle)?
+                .set_position(x, y)?
+                .apply(&mut s.gesture, &self.terminal, cell, geometry)?;
+            // 没有结果说明起点已不在当前屏幕上（比如切到了备用屏幕），原有选区保持不动。
+            if let Some(selection) = &selection {
+                self.terminal.set_selection(Some(selection))?;
+            }
+            Ok(selection.is_some())
+        });
+        log_err("selection autoscroll", result).unwrap_or(false)
+    }
+
+    /// 松开左键，结束这次拖动；选区留着。
+    pub fn select_release(&mut self, at: GridPoint) {
+        let size = self.size.get();
+        let inside = (0. ..f32::from(size.cols)).contains(&at.x)
+            && (0. ..f32::from(size.rows)).contains(&at.y);
+        let cell = self.viewport_cell(at);
+        let grid_ref = inside
+            .then(|| self.terminal.grid_ref(Point::Viewport(cell)).ok())
+            .flatten();
+        let s = &mut self.selecting;
+        log_err("selection release", s.release.apply(&mut s.gesture, &self.terminal, grid_ref));
+    }
+
+    /// 选区的纯文本：软换行处接起来，行尾空白去掉。没有选区时为 `None`。
+    pub fn selection_text(&self) -> Option<String> {
+        let options = FormatOptions::new()
+            .with_emit_format(Format::Plain)
+            .with_unwrap(true)
+            .with_trim(true);
+        log_err("selection format", self.terminal.format_selection_alloc(None, options))
+            .flatten()
+            .map(|bytes| String::from_utf8_lossy(&bytes).into_owned())
+    }
+
+    /// 网格位置换算成以设备像素计的坐标，和 `GridSize` 的单元格尺寸一致。
+    fn surface_position(&self, at: GridPoint) -> (f64, f64) {
+        let size = self.size.get();
+        (
+            f64::from(at.x) * f64::from(size.cell_width_px),
+            f64::from(at.y) * f64::from(size.cell_height_px),
+        )
+    }
+
+    /// 指针所在的视口单元格；落在网格外时取最近的边上的单元格。
+    fn viewport_cell(&self, at: GridPoint) -> PointCoordinate {
+        let size = self.size.get();
+        PointCoordinate {
+            x: (at.x.max(0.) as u16).min(size.cols.saturating_sub(1)),
+            y: u32::from((at.y.max(0.) as u16).min(size.rows.saturating_sub(1))),
+        }
+    }
+
+    fn gesture_geometry(&self) -> Geometry {
+        let size = self.size.get();
+        Geometry {
+            columns: u32::from(size.cols.max(1)),
+            cell_width: u32::from(size.cell_width_px.max(1)),
+            padding_left: 0,
+            screen_height: (u32::from(size.rows) * u32::from(size.cell_height_px)).max(1),
+        }
+    }
+
+    /// 向程序发输入之前：回到最底部，并清掉选区。
+    fn before_input(&mut self) {
+        if self.terminal.selection().is_ok_and(|s| s.is_some()) {
+            log_err("selection clear", self.terminal.set_selection(None));
+        }
         if !self.terminal.viewport_active().unwrap_or(true) {
             self.terminal.scroll_viewport(ScrollViewport::Bottom);
         }
@@ -624,6 +821,11 @@ impl Renderer {
         snapshot.set_dirty(Dirty::Clean)?;
         Ok(())
     }
+}
+
+/// 记日志并吞掉错误：鼠标和选区操作失败时只影响这一下，不该打断输入。
+fn log_err<T>(what: &str, result: libghostty_vt::error::Result<T>) -> Option<T> {
+    result.inspect_err(|err| tracing::warn!("{what} failed: {err}")).ok()
 }
 
 /// 把配置的颜色按单元格的前景、背景色解析成具体值。
@@ -845,6 +1047,63 @@ mod tests {
         assert_eq!(frame.foreground, Rgb::from(theme::FOREGROUND));
         assert_eq!(frame.row(0)[0].fg, Rgb::from(theme::ANSI[2]));
         assert_eq!(frame.cursor.map(|c| c.color), Some(Rgb::from(theme::FOREGROUND)));
+    }
+
+    const REPEAT: Duration = Duration::from_millis(500);
+
+    fn at(x: f32, y: f32) -> GridPoint {
+        GridPoint { x, y }
+    }
+
+    #[test]
+    fn dragging_selects_text_and_highlights_it() {
+        let mut session = idle_session();
+        session.feed(b"hello world");
+        session.select_press(at(0.2, 0.5), REPEAT);
+        session.select_drag(at(4.8, 0.5), false);
+        session.select_release(at(4.8, 0.5));
+        assert_eq!(session.selection_text().as_deref(), Some("hello"));
+        // 没配选区颜色时反色显示。
+        let frame = session.frame();
+        assert_eq!(frame.row(0)[0].bg, Some(Rgb::from(theme::FOREGROUND)));
+        assert_eq!(frame.row(0)[0].fg, Rgb::from(theme::BACKGROUND));
+        assert_eq!(frame.row(0)[6].bg, None);
+        drop(frame);
+
+        // 单击清掉选区。
+        session.select_press(at(2.5, 1.5), REPEAT);
+        session.select_release(at(2.5, 1.5));
+        assert_eq!(session.selection_text(), None);
+        assert_eq!(session.frame().row(0)[0].bg, None);
+    }
+
+    #[test]
+    fn double_click_selects_a_word_and_typing_clears_it() {
+        let mut session = idle_session();
+        session.feed(b"hello world");
+        for _ in 0..2 {
+            session.select_press(at(7.5, 0.5), REPEAT);
+            session.select_release(at(7.5, 0.5));
+        }
+        assert_eq!(session.selection_text().as_deref(), Some("world"));
+        session.commit_text("x");
+        assert_eq!(session.selection_text(), None);
+    }
+
+    #[test]
+    fn selection_colors_can_follow_the_cell() {
+        let mut session = idle_session();
+        session.apply_config(&Config {
+            selection_background: Some(TerminalColor::CellForeground),
+            selection_foreground: Some(TerminalColor::Rgb(RgbColor { r: 1, g: 2, b: 3 })),
+            ..Config::default()
+        });
+        session.feed(b"\x1b[31mred\x1b[0m");
+        session.select_press(at(0.2, 0.5), REPEAT);
+        session.select_drag(at(2.8, 0.5), false);
+        let cell = session.frame().row(0)[0].clone();
+        assert_eq!(cell.bg, Some(Rgb::from(theme::ANSI[1])));
+        assert_eq!(cell.fg, Rgb(1, 2, 3));
     }
 
     #[test]
