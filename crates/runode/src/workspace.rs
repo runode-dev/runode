@@ -16,8 +16,8 @@ use gpui::{
     Action, Animation, AnimationExt, AnyElement, App, Bounds, BoxShadow, Context, CursorStyle, Div,
     ElementId, Entity, EntityId, FocusHandle, Focusable, Hsla, MouseButton, MouseDownEvent,
     MouseMoveEvent, PathPromptOptions, Pixels, Render, ScrollHandle, SharedString, Stateful,
-    Subscription, TitlebarOptions, Window, WindowBounds, actions, canvas, div, point, prelude::*, px,
-    relative,
+    StyleRefinement, Subscription, TitlebarOptions, Window, WindowBounds, actions, canvas, div, point,
+    prelude::*, px, relative,
 };
 
 pub use persistence::{install, saved_window_options};
@@ -1016,7 +1016,9 @@ impl WindowView {
         div()
             .relative()
             .size_full()
-            .child(view)
+            // 终端自己没变时复用上一帧画好的内容：标题栏和侧栏的转圈每一下都会重画整个窗口，
+            // 不缓存的话每一下都要把所有终端格子重新排一遍。
+            .child(view.cached(StyleRefinement::default().size_full()))
             .child(
                 canvas(
                     move |bounds, _, _| {
