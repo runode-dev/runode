@@ -38,7 +38,8 @@ impl PtyWriter {
 
 pub struct Pty {
     master: Box<dyn MasterPty + Send>,
-    child: Box<dyn Child + Send + Sync>,
+    /// `Drop` 里交给回收线程，所以是 `Option`。
+    child: Option<Box<dyn Child + Send + Sync>>,
     pub writer: PtyWriter,
 }
 
@@ -84,6 +85,10 @@ impl Pty {
         cmd.env("COLORTERM", "truecolor");
         cmd.env("TERM_PROGRAM", "runode");
         cmd.env("TERM_PROGRAM_VERSION", env!("CARGO_PKG_VERSION"));
+        // macOS 自带的 BSD ls 只在设置了 CLICOLOR 时才着色；用户已有设置就不覆盖。
+        if std::env::var_os("CLICOLOR").is_none() {
+            cmd.env("CLICOLOR", "1");
+        }
         let cwd = cwd
             .map(Into::into)
             .or_else(|| std::env::var_os("HOME").map(Into::into));
@@ -106,7 +111,7 @@ impl Pty {
         Ok((
             Self {
                 master: pair.master,
-                child,
+                child: Some(child),
                 writer: PtyWriter(Arc::new(Mutex::new(writer))),
             },
             rx,
@@ -123,7 +128,16 @@ impl Pty {
 impl Drop for Pty {
     fn drop(&mut self) {
         // 关窗口即结束会话；master 关闭后 shell 本来也会收到 SIGHUP，kill() 只是让它立即退出。
-        let _ = self.child.kill();
+        // 子进程退出后还得 wait 才会被系统回收，否则每关一个标签就留一个僵尸进程；
+        // shell 可能忽略 SIGHUP，所以放到单独的线程里等，不阻塞界面。
+        if let Some(mut child) = self.child.take() {
+            let _ = child.kill();
+            let _ = thread::Builder::new()
+                .name("pty-reaper".into())
+                .spawn(move || {
+                    let _ = child.wait();
+                });
+        }
     }
 }
 

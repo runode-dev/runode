@@ -1,5 +1,5 @@
-//! 构建期信息：把 Info.plist 嵌进可执行文件，让未打包成 .app 时也有应用元数据；
-//! 再把 `themes/` 下的配色主题编进二进制。
+//! 构建期信息：把应用信息表嵌进可执行文件，让未打包成 .app 时也有应用元数据；
+//! 再把内置的配色主题编进二进制。
 
 use std::{env, fs, path::PathBuf, process::Command};
 
@@ -38,7 +38,8 @@ fn bundle_themes() {
     let mut names: Vec<String> = fs::read_dir(&dir)
         .unwrap()
         .map(|entry| entry.unwrap().file_name().into_string().unwrap())
-        .filter(|name| name != "LICENSE")
+        // 隐藏文件（如 Finder 生成的 .DS_Store）不是主题，二进制内容也进不了 include_str!。
+        .filter(|name| name != "LICENSE" && !name.starts_with('.'))
         .collect();
     names.sort();
 

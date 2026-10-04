@@ -1,6 +1,6 @@
 //! 应用图标与「关于 runode」面板。
 
-/// 应用图标，由 assets 里的 icon.svg 渲染而来。
+/// 应用图标，由矢量源图渲染成 PNG 后编进二进制。
 #[cfg(target_os = "macos")]
 const ICON_PNG: &[u8] = include_bytes!("../assets/icon.png");
 
@@ -25,7 +25,7 @@ pub fn install_icon() {
     unsafe { NSApplication::sharedApplication(mtm).setApplicationIconImage(Some(&image)) };
 }
 
-/// 打开 macOS 标准关于面板。名称、版本、版权来自嵌入的 Info.plist（见构建脚本），
+/// 打开 macOS 标准关于面板。名称、版本、版权来自构建脚本嵌进可执行文件的应用信息表，
 /// 图标来自 `install_icon`，所以不需要传任何选项。
 #[cfg(target_os = "macos")]
 pub fn show() {

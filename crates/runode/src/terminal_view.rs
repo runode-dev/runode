@@ -47,11 +47,11 @@ struct Metrics {
     descent: Pixels,
 }
 
-#[derive(Clone, PartialEq, Eq, Hash)]
-struct GlyphKey {
-    text: String,
-    bold: bool,
-    italic: bool,
+/// 字形缓存按（粗体、斜体）分成四张表，查找时直接用 `&str`，命中时不必为键分配 `String`。
+type GlyphCache = [HashMap<String, ShapedLine>; 4];
+
+fn glyph_table(attrs: Attrs) -> usize {
+    usize::from(attrs.bold) | usize::from(attrs.italic) << 1
 }
 
 /// 终端视图通知外层（标签栏）的事件。
@@ -72,7 +72,7 @@ pub struct TerminalView {
     font_size: Pixels,
     metrics: Option<Metrics>,
     /// 按文本和样式缓存的字形排版结果；颜色在绘制时再上。
-    glyphs: HashMap<GlyphKey, ShapedLine>,
+    glyphs: GlyphCache,
     /// 输入法尚未上屏的预编辑文本，画在光标处。
     marked_text: Option<String>,
     /// 精确滚动（触控板）不足一行的余量。
@@ -165,7 +165,7 @@ impl TerminalView {
             view.font_size = px(view.config.font_size.clamp(MIN_FONT_SIZE, MAX_FONT_SIZE));
             // 字体、字号或行高调整都可能变了，单元格尺寸和字形缓存一律作废。
             view.metrics = None;
-            view.glyphs.clear();
+            view.glyphs.iter_mut().for_each(HashMap::clear);
             cx.notify();
         });
         let appearance_watch =
@@ -186,7 +186,7 @@ impl TerminalView {
             config,
             focus_handle,
             metrics: None,
-            glyphs: HashMap::new(),
+            glyphs: Default::default(),
             marked_text: None,
             scroll_remainder: 0.,
             cursor_bounds: None,
@@ -437,7 +437,7 @@ impl TerminalView {
         }
         self.font_size = size;
         self.metrics = None;
-        self.glyphs.clear();
+        self.glyphs.iter_mut().for_each(HashMap::clear);
         cx.notify();
     }
 
@@ -473,12 +473,8 @@ impl TerminalView {
     }
 
     fn shape(&mut self, text: &str, attrs: Attrs, window: &Window) -> ShapedLine {
-        let key = GlyphKey {
-            text: text.to_owned(),
-            bold: attrs.bold,
-            italic: attrs.italic,
-        };
-        if let Some(line) = self.glyphs.get(&key) {
+        let table = glyph_table(attrs);
+        if let Some(line) = self.glyphs[table].get(text) {
             return line.clone();
         }
         let mut font = self.font.clone();
@@ -489,7 +485,7 @@ impl TerminalView {
             font.style = FontStyle::Italic;
         }
         let line = window.text_system().shape_line(
-            SharedString::from(key.text.clone()),
+            SharedString::from(text.to_owned()),
             self.font_size,
             &[TextRun {
                 len: text.len(),
@@ -502,10 +498,10 @@ impl TerminalView {
             None,
         );
         // 只有异常输出才会让缓存无限增长；直接清空，不做逐项淘汰。
-        if self.glyphs.len() > 8192 {
-            self.glyphs.clear();
+        if self.glyphs.iter().map(HashMap::len).sum::<usize>() > 8192 {
+            self.glyphs.iter_mut().for_each(HashMap::clear);
         }
-        self.glyphs.insert(key, line.clone());
+        self.glyphs[table].insert(text.to_owned(), line.clone());
         line
     }
 }

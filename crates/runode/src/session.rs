@@ -329,7 +329,13 @@ impl Session {
     /// 应用配置中与终端状态相关的部分。改的是默认值：程序自己用转义序列设置的
     /// 颜色和光标形状照旧优先，所以配置可以随时重载。
     pub fn apply_config(&mut self, config: &Config) {
-        let mut palette = match self.terminal.default_color_palette() {
+        // 默认调色板读出来的是上次设置的值，先重置回内置调色板再叠加配置，
+        // 否则旧主题设过、新主题没设的条目会残留。
+        let mut palette = match self
+            .terminal
+            .set_default_color_palette(None)
+            .and_then(|t| t.default_color_palette())
+        {
             Ok(palette) => palette,
             Err(err) => {
                 tracing::warn!("failed to read the default palette: {err}");
