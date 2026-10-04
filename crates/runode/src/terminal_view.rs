@@ -14,6 +14,7 @@ use gpui::{
 use libghostty_vt::{key::Mods, mouse, selection::Adjustment};
 
 use crate::{
+    agent::Agent,
     config::{AppConfig, CellHeight, Config},
     keys,
     pty::{GridSize, PtyEvent},
@@ -110,6 +111,8 @@ pub enum TerminalEvent {
     Focused,
     /// 程序响铃（BEL）。
     Bell,
+    /// 前台 agent 从工作中停了下来（干完了、等着输入或者退出了）。
+    AgentFinished,
     /// shell 已经退出，这个终端该关掉了。
     Exited,
 }
@@ -199,10 +202,14 @@ impl TerminalView {
                 }
                 let updated = this.update_in(cx, |view, window, cx| {
                     if !output.is_empty() {
+                        let was_working = view.session.agent.is_some_and(Agent::is_working);
                         // 进出目录、启动或退出程序时通常都有输出，顺带重读前台进程。
                         let fallback_changed = view.session.refresh_fallback_title();
                         if view.session.feed(&output) || fallback_changed {
                             cx.emit(TerminalEvent::TitleChanged);
+                        }
+                        if was_working && !view.session.agent.is_some_and(Agent::is_working) {
+                            cx.emit(TerminalEvent::AgentFinished);
                         }
                         // 有输出（包括键入的回显）时光标先亮起，免得打字时看不到它。
                         view.reset_cursor_blink(window, cx);
@@ -307,6 +314,11 @@ impl TerminalView {
             .as_deref()
             .or(self.session.fallback_title.as_deref())
             .unwrap_or(DEFAULT_TITLE)
+    }
+
+    /// 前台 agent 在标题里报告的状态；不是 agent 在前台时为 `None`。
+    pub fn agent(&self) -> Option<Agent> {
+        self.session.agent
     }
 
     /// 当前的默认前景色和背景色，标签栏跟着终端配色走。

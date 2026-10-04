@@ -2,6 +2,7 @@
 //! 窗口和绘制用 GPUI。
 
 mod about;
+mod agent;
 mod config;
 mod keys;
 mod menus;

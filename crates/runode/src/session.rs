@@ -28,12 +28,13 @@ use libghostty_vt::{
     style::{RgbColor, Underline},
     terminal::{
         ConformanceLevel, DeviceAttributeFeature, DeviceAttributes, DeviceType, Mode, Point,
-        PointCoordinate, PointSpace, PrimaryDeviceAttributes, ScrollViewport, SecondaryDeviceAttributes,
-        SizeReportSize, Terminal,
+        PointCoordinate, PointSpace, PrimaryDeviceAttributes, ProgressState, ScrollViewport,
+        SecondaryDeviceAttributes, SizeReportSize, Terminal,
     },
 };
 
 use crate::{
+    agent::{self, Agent, AgentKind, AgentState},
     config::{Config, TerminalColor},
     pty::{GridSize, Pty, PtyEvent, PtyWriter},
 };
@@ -136,6 +137,8 @@ impl Frame {
 struct Effects {
     title_changed: StdCell<bool>,
     bell: StdCell<bool>,
+    /// 最近一次 OSC 9;4 进度报告是不是在进行中。
+    progress: StdCell<Option<bool>>,
 }
 
 /// 把 libghostty 的 render state 复制进 `Frame`。和 render-hold 回调共用，
@@ -246,7 +249,14 @@ pub struct Session {
     effects: Rc<Effects>,
     /// 待写出的已编码输入，各次按键复用这块缓冲。
     scratch: Vec<u8>,
+    /// 程序设置的标题；agent 的状态前缀已拆到 `agent` 里。
     pub title: Option<String>,
+    /// 前台 agent 的状态，由 `title_agent` 和 `progress` 合成；不是 agent 在前台时为 `None`。
+    pub agent: Option<Agent>,
+    /// claude、codex 等在标题里报告的状态，见 `agent::split_status`。
+    title_agent: Option<Agent>,
+    /// pi 等用 OSC 9;4 报告的进度：`Some(true)` 进行中，`Some(false)` 已停下但程序还在前台。
+    progress: Option<bool>,
     /// 打开搜索栏期间的搜索；关掉就丢弃。
     search: Option<Search<'static>>,
     /// 程序没设置标题时用的名字，见 `Pty::foreground_title`；由 `refresh_fallback_title` 更新。
@@ -352,6 +362,14 @@ impl Session {
                 let effects = effects.clone();
                 move |_| effects.bell.set(true)
             })?
+            .on_progress_report({
+                let effects = effects.clone();
+                move |_, report| {
+                    let active =
+                        matches!(report.state(), Ok(ProgressState::Set | ProgressState::Indeterminate));
+                    effects.progress.set(Some(active));
+                }
+            })?
             // RIS 会清空标题，但不会触发标题变化回调。
             .on_reset({
                 let effects = effects.clone();
@@ -400,6 +418,9 @@ impl Session {
                 effects,
                 scratch: Vec::with_capacity(64),
                 title: None,
+                agent: None,
+                title_agent: None,
+                progress: None,
                 search: None,
                 fallback_title: None,
                 exited: false,
@@ -457,23 +478,52 @@ impl Session {
         self.option_as_alt = config.macos_option_as_alt;
     }
 
-    /// 把 PTY 输出喂给 VT，返回标题是否变化。
+    /// 把 PTY 输出喂给 VT，返回标题或 agent 状态是否变化。
     pub fn feed(&mut self, data: &[u8]) -> bool {
         self.terminal.vt_write(data);
-        // 不少 shell 每次出提示符都重发一遍同样的标题，只有真变了才算。
+        let mut changed = false;
+        // 不少 shell 每次出提示符都重发一遍同样的标题，agent 工作时每一帧转圈都改一次标题，
+        // 只有去掉状态前缀后的标题或状态真变了才算。
         if self.effects.title_changed.take() {
-            let title = self
-                .terminal
-                .title()
-                .ok()
-                .filter(|t| !t.is_empty())
-                .map(str::to_owned);
-            if title != self.title {
-                self.title = title;
-                return true;
-            }
+            let raw = self.terminal.title().ok().unwrap_or_default();
+            let (title, title_agent) = match agent::split_status(raw) {
+                Some((state, rest)) => (rest, Some(state)),
+                // codex 空闲时不带前缀：刚才还在报告状态的 agent 只要仍在前台，就是停下来了。
+                None => (
+                    raw,
+                    self.title_agent
+                        .filter(|_| !self.pty.foreground_is_shell())
+                        .map(|agent| Agent { state: AgentState::Idle, ..agent }),
+                ),
+            };
+            let title = (!title.is_empty()).then(|| title.to_owned());
+            changed |= title != self.title;
+            self.title = title;
+            self.title_agent = title_agent;
         }
-        false
+        // pi 工作中每秒重发一次进度；停下时清掉进度，回到 shell 的不再算 agent。
+        if let Some(active) = self.effects.progress.take() {
+            self.progress = if active {
+                Some(true)
+            } else {
+                (!self.pty.foreground_is_shell()).then_some(false)
+            };
+        }
+        let progress_agent = |state| {
+            let kind = match self.title_agent {
+                Some(agent) => agent.kind,
+                None if self.title.as_deref().is_some_and(agent::is_pi_title) => AgentKind::Pi,
+                None => AgentKind::Other,
+            };
+            Agent { kind, state }
+        };
+        let agent = match self.progress {
+            Some(true) => Some(progress_agent(AgentState::Working)),
+            progress => self.title_agent.or(progress.map(|_| progress_agent(AgentState::Idle))),
+        };
+        changed |= agent != self.agent;
+        self.agent = agent;
+        changed
     }
 
     /// shell 当前所在的目录。
@@ -481,11 +531,18 @@ impl Session {
         self.pty.shell_cwd()
     }
 
-    /// 重新读取终端的前台进程，返回 `fallback_title` 是否变化。
+    /// 重新读取终端的前台进程，返回 `fallback_title` 或 `agent` 是否变化。
     pub fn refresh_fallback_title(&mut self) -> bool {
+        // agent 退出、回到 shell 后，它留下的标题不再代表任何状态。
+        let agent_gone = self.agent.is_some() && self.pty.foreground_is_shell();
+        if agent_gone {
+            self.agent = None;
+            self.title_agent = None;
+            self.progress = None;
+        }
         let title = self.pty.foreground_title();
         if title == self.fallback_title {
-            return false;
+            return agent_gone;
         }
         self.fallback_title = title;
         true
@@ -1709,24 +1766,34 @@ mod tests {
     }
 
     #[test]
-    fn full_reset_clears_the_title() {
+    fn agent_status_prefix_is_split_from_the_title() {
         let mut session = idle_session();
-        assert!(session.feed(b"\x1b]2;hello\x07"));
-        assert_eq!(session.title.as_deref(), Some("hello"));
-        assert!(session.feed(b"\x1bc"));
-        assert_eq!(session.title, None);
+        assert!(session.feed("\x1b]0;⠋ 美化图标 | runode\x07".as_bytes()));
+        assert_eq!(session.title.as_deref(), Some("美化图标 | runode"));
+        assert_eq!(session.agent, Some(Agent { kind: AgentKind::Codex, state: AgentState::Working }));
+        // 转圈换一帧不算标题变化。
+        assert!(!session.feed("\x1b]0;⠙ 美化图标 | runode\x07".as_bytes()));
+        assert!(session.feed("\x1b]0;✳ 美化图标\x07".as_bytes()));
+        assert_eq!(session.title.as_deref(), Some("美化图标"));
+        assert_eq!(session.agent, Some(Agent { kind: AgentKind::Claude, state: AgentState::Idle }));
+        // 前台已经回到 shell（这里的 `cat`），不带前缀的标题不再算 agent 的。
+        assert!(session.feed(b"\x1b]0;~\x07"));
+        assert_eq!(session.agent, None);
     }
 
     #[test]
-    fn multiline_paste_needs_confirmation_unless_bracketed() {
+    fn progress_report_marks_the_agent_working() {
         let mut session = idle_session();
-        assert_eq!(session.paste("ls", false), Paste::Done);
-        assert_eq!(session.paste("rm -rf x\nls", false), Paste::NeedsConfirmation);
-        assert_eq!(session.paste("rm -rf x\nls", true), Paste::Done);
-
-        // 程序开启 bracketed paste 后，换行不会被直接执行，无需确认。
-        session.feed(b"\x1b[?2004h");
-        assert_eq!(session.paste("a\nb", false), Paste::Done);
+        let pi_working = Some(Agent { kind: AgentKind::Pi, state: AgentState::Working });
+        assert!(session.feed("\x1b]0;π - runode\x07\x1b]9;4;3\x07".as_bytes()));
+        assert_eq!(session.agent, pi_working);
+        // 工作中的保活重发和不带前缀的新标题都不改变状态。
+        assert!(!session.feed(b"\x1b]9;4;3\x07"));
+        assert!(session.feed("\x1b]0;π - 问候 - runode\x07".as_bytes()));
+        assert_eq!(session.agent, pi_working);
+        // 前台是 shell（这里的 `cat`）时清掉进度，就不再算 agent。
+        assert!(session.feed(b"\x1b]9;4;0\x07"));
+        assert_eq!(session.agent, None);
     }
 
     /// shell 集成标出的提示符：`$ ` 是提示符，后面是用户输入。
@@ -1771,6 +1838,27 @@ mod tests {
         assert_eq!(row_text(&session.frame(), 0), "$ cmd0");
         session.jump_to_prompt(false);
         assert_eq!(row_text(&session.frame(), 0), "$ cmd1");
+    }
+
+    #[test]
+    fn full_reset_clears_the_title() {
+        let mut session = idle_session();
+        assert!(session.feed(b"\x1b]2;hello\x07"));
+        assert_eq!(session.title.as_deref(), Some("hello"));
+        assert!(session.feed(b"\x1bc"));
+        assert_eq!(session.title, None);
+    }
+
+    #[test]
+    fn multiline_paste_needs_confirmation_unless_bracketed() {
+        let mut session = idle_session();
+        assert_eq!(session.paste("ls", false), Paste::Done);
+        assert_eq!(session.paste("rm -rf x\nls", false), Paste::NeedsConfirmation);
+        assert_eq!(session.paste("rm -rf x\nls", true), Paste::Done);
+
+        // 程序开启 bracketed paste 后，换行不会被直接执行，无需确认。
+        session.feed(b"\x1b[?2004h");
+        assert_eq!(session.paste("a\nb", false), Paste::Done);
     }
 
     #[test]

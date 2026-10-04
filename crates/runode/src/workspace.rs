@@ -3,13 +3,14 @@
 use std::{cell::RefCell, collections::HashMap, rc::Rc};
 
 use gpui::{
-    Action, AnyElement, App, Bounds, BoxShadow, Context, CursorStyle, Div, Entity, EntityId,
-    FocusHandle, Focusable, Hsla, MouseButton, MouseDownEvent, MouseMoveEvent, Pixels, Render,
-    ScrollHandle, SharedString, Stateful, Subscription, TitlebarOptions, Window, actions, canvas,
-    div, point, prelude::*, px, relative,
+    Action, Animation, AnimationExt, AnyElement, App, Bounds, BoxShadow, Context, CursorStyle, Div,
+    ElementId, Entity, EntityId, FocusHandle, Focusable, Hsla, MouseButton, MouseDownEvent,
+    MouseMoveEvent, Pixels, Render, ScrollHandle, SharedString, Stateful, Subscription,
+    TitlebarOptions, Window, actions, canvas, div, point, prelude::*, px, relative,
 };
 
 use crate::{
+    agent::{Agent, AgentState},
     pane::{self, Axis, Direction, Node, SplitId},
     session::Rgb,
     terminal_view::{DEFAULT_TITLE, TerminalEvent, TerminalView, hsla},
@@ -64,6 +65,8 @@ const NEW_TAB_BUTTON_WIDTH: f32 = 28.;
 const TAB_MIN_WIDTH: f32 = 64.;
 /// 比这窄的标签只留标题：快捷键提示收起，关闭按钮悬停时浮在标题左边。
 const TAB_COMPACT_WIDTH: f32 = 120.;
+/// 标题前面 agent 状态标记的宽度，固定下来标题才不会随转圈的字符左右跳。
+const AGENT_MARK_WIDTH: f32 = 12.;
 /// 键盘调整分屏大小时每次挪动的像素。
 const RESIZE_STEP: f32 = 10.;
 /// 分隔线两侧可以按住拖动的宽度。
@@ -96,7 +99,7 @@ struct Tab {
     focused: EntityId,
     /// 当前终端放大占满整个标签，其他分屏暂时不画。
     zoomed: bool,
-    /// 不在前台时响过铃，切过去后清掉。
+    /// 不在前台时响过铃，或者里面的 agent 停了下来，切过去后清掉。
     bell: bool,
 }
 
@@ -148,6 +151,55 @@ impl Render for DraggedTab {
             .text_size(px(12.))
             .text_color(self.fg)
             .child(div().min_w_0().truncate().child(self.title.clone()))
+    }
+}
+
+/// 居中的标题，前台是 agent 时前面加上它的状态标记。
+fn titled(title: SharedString, agent: Option<Agent>, id: impl Into<ElementId>, fg: Hsla) -> Div {
+    div()
+        .min_w_0()
+        .flex()
+        .justify_center()
+        .items_center()
+        .gap(px(5.))
+        .children(agent.map(|agent| agent_mark(agent, id, fg)))
+        .child(div().min_w_0().truncate().child(title))
+}
+
+/// agent 的状态标记：工作中播放该 agent 自己的工作动画，空闲时是一个空心圆点。
+fn agent_mark(agent: Agent, id: impl Into<ElementId>, fg: Hsla) -> AnyElement {
+    let slot = div()
+        .flex_none()
+        .w(px(AGENT_MARK_WIDTH))
+        .flex()
+        .justify_center()
+        .items_center();
+    match agent.state {
+        // 所有转圈的标记共用同一个时钟，同一种 agent 的几个标签一起转时步调一致。
+        AgentState::Working => {
+            let (frames, frame_time) = agent.kind.spinner();
+            let period = frame_time * frames.len() as u32;
+            slot.with_animation(
+                id,
+                Animation::new(period)
+                    .repeat_synced()
+                    .with_max_fps(2. / frame_time.as_secs_f32()),
+                move |slot, delta| {
+                    let frame = (delta * frames.len() as f32) as usize;
+                    slot.child(frames[frame.min(frames.len() - 1)])
+                },
+            )
+            .into_any_element()
+        }
+        AgentState::Idle => slot
+            .child(
+                div()
+                    .size(px(6.))
+                    .rounded_full()
+                    .border_1()
+                    .border_color(fg.opacity(0.6)),
+            )
+            .into_any_element(),
     }
 }
 
@@ -257,6 +309,12 @@ impl Workspace {
             }
             TerminalEvent::Bell => {
                 window.play_system_bell();
+                if ix != self.active {
+                    self.tabs[ix].bell = true;
+                    cx.notify();
+                }
+            }
+            TerminalEvent::AgentFinished => {
                 if ix != self.active {
                     self.tabs[ix].bell = true;
                     cx.notify();
@@ -651,7 +709,9 @@ impl Workspace {
     ) -> Stateful<Div> {
         let tab = &self.tabs[ix];
         let id = tab.id;
-        let title = SharedString::from(tab.focused_view().read(cx).title().to_owned());
+        let view = tab.focused_view().read(cx);
+        let title = SharedString::from(view.title().to_owned());
+        let agent = view.agent();
         let active = ix == self.active;
         let active_bg = hsla(bg.mix(fg, 0.08));
         let hover_bg = hsla(bg.mix(fg, 0.04));
@@ -784,14 +844,7 @@ impl Workspace {
                         }),
                     ),
             )
-            .child(
-                div()
-                    .flex_1()
-                    .min_w_0()
-                    .truncate()
-                    .text_center()
-                    .child(title),
-            )
+            .child(titled(title, agent, ("tab-agent", ix), fg).flex_1())
             .children(side_slot)
     }
 
@@ -861,7 +914,21 @@ impl Render for Workspace {
                 );
             vec![strip, self.render_new_tab_button(fg, bg, cx)]
         } else {
-            Vec::new()
+            // 只有一个标签时标题居中画在整个窗口宽度上，右边留出和红绿灯一样宽的空白。
+            let view = view.read(cx);
+            let title = SharedString::from(view.title().to_owned());
+            let fg = hsla(fg);
+            vec![
+                div()
+                    .id("window-title")
+                    .flex_1()
+                    .min_w_0()
+                    .h_full()
+                    .pr(px(left_inset))
+                    .flex()
+                    .text_color(fg.opacity(0.55))
+                    .child(titled(title, view.agent(), "window-agent", fg).flex_1()),
+            ]
         };
         let titlebar = (!fullscreen || show_tabs).then(|| {
             div()
