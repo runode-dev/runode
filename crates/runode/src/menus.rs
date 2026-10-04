@@ -135,14 +135,13 @@ pub fn set_menus(cx: &mut App) {
             MenuItem::action(tr("menu.equalize_splits"), EqualizePanes),
         ]),
     ]);
-    // GPUI 只在菜单名恰好是 "Window" 时把它设成系统的窗口菜单（系统会往里加窗口列表），
-    // 翻译过的标题它认不出来，按位置补上：应用、File、Edit、View 之后的第五个。
     #[cfg(target_os = "macos")]
-    set_windows_menu(4);
+    fix_native_menus(4);
 }
 
+/// 补上 GPUI 设置菜单时漏掉的两件事。`windows_menu` 是窗口菜单的位置。
 #[cfg(target_os = "macos")]
-fn set_windows_menu(index: isize) {
+fn fix_native_menus(windows_menu: isize) {
     use objc2::MainThreadMarker;
     use objc2_app_kit::NSApplication;
 
@@ -150,9 +149,35 @@ fn set_windows_menu(index: isize) {
         return;
     };
     let app = NSApplication::sharedApplication(mtm);
-    let menu = app.mainMenu().and_then(|bar| bar.itemAtIndex(index)).and_then(|item| item.submenu());
-    if let Some(menu) = menu {
+    let Some(bar) = app.mainMenu() else {
+        return;
+    };
+    // GPUI 只在菜单名恰好是 "Window" 时把它设成系统的窗口菜单（系统会往里加窗口列表），
+    // 翻译过的标题它认不出来，按位置补上：应用、File、Edit、View 之后的第五个。
+    if let Some(menu) = bar.itemAtIndex(windows_menu).and_then(|item| item.submenu()) {
         app.setWindowsMenu(Some(&menu));
+    }
+    fix_key_equivalents(&bar);
+}
+
+/// GPUI 把回车和 Tab 的键名原样当成菜单快捷键，系统只认第一个字符，⇧⌘↩ 就成了 ⇧⌘E，
+/// 按 ⇧⌘E 真会触发菜单项。这里换成系统的按键字符。
+#[cfg(target_os = "macos")]
+fn fix_key_equivalents(menu: &objc2_app_kit::NSMenu) {
+    use objc2_foundation::NSString;
+
+    for item in menu.itemArray().iter() {
+        let native = match item.keyEquivalent().to_string().as_str() {
+            "enter" => Some("\r"),
+            "tab" => Some("\t"),
+            _ => None,
+        };
+        if let Some(native) = native {
+            item.setKeyEquivalent(&NSString::from_str(native));
+        }
+        if let Some(submenu) = item.submenu() {
+            fix_key_equivalents(&submenu);
+        }
     }
 }
 
