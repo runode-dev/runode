@@ -68,18 +68,18 @@ pub fn install(cx: &mut App) {
 
     cx.set_menus([
         // macOS 总把第一个菜单当作应用菜单，标题显示为应用名。
-        Menu::new("runode").items([
-            MenuItem::action("About runode", About),
+        Menu::new("Runode").items([
+            MenuItem::action("About Runode", About),
             MenuItem::separator(),
             MenuItem::action("Reload Configuration", ReloadConfiguration),
             MenuItem::separator(),
             MenuItem::os_submenu("Services", SystemMenuType::Services),
             MenuItem::separator(),
-            MenuItem::action("Hide runode", Hide),
+            MenuItem::action("Hide Runode", Hide),
             MenuItem::action("Hide Others", HideOthers),
             MenuItem::action("Show All", ShowAll),
             MenuItem::separator(),
-            MenuItem::action("Quit runode", Quit),
+            MenuItem::action("Quit Runode", Quit),
         ]),
         Menu::new("File").items([
             MenuItem::action("New Tab", NewTab),

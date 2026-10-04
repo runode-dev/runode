@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleName</key>
+	<string>Runode</string>
+	<key>CFBundleDisplayName</key>
+	<string>Runode</string>
+	<key>CFBundleIdentifier</key>
+	<string>dev.runode.app</string>
+	<key>CFBundleExecutable</key>
+	<string>runode</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleIconFile</key>
+	<string>runode</string>
+	<key>NSHighResolutionCapable</key>
+	<true/>
+	<key>CFBundleShortVersionString</key>
+	<string>@VERSION@</string>
+	<key>CFBundleVersion</key>
+	<string>@BUILD@</string>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>en</string>
+	<key>CFBundleAllowMixedLocalizations</key>
+	<true/>
+	<key>NSHumanReadableCopyright</key>
+	<string>Copyright (c) Runode 2026-present. All rights reserved.</string>
+</dict>
+</plist>

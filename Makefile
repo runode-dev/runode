@@ -3,7 +3,7 @@ CARGO ?= cargo
 ARGS ?=
 
 .DEFAULT_GOAL := help
-.PHONY: help submodules build release run run-release check test clippy clean
+.PHONY: help submodules build release run run-release dmg check test clippy clean
 
 help: ## 列出所有目标
 	@awk 'BEGIN {FS = ":.*## "} /^[a-zA-Z_-]+:.*## / {printf "  %-12s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -22,6 +22,9 @@ run: ## 调试构建并启动
 
 run-release: ## 发布构建并启动
 	$(CARGO) run --release -- $(ARGS)
+
+dmg: ## 发布构建并打包 Runode.app 与 dmg，产物在 target/release/bundle
+	CARGO=$(CARGO) scripts/bundle-macos.sh
 
 check: ## 只做类型检查，不生成二进制
 	$(CARGO) check --all-targets

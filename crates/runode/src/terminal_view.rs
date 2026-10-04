@@ -34,7 +34,7 @@ const UNDERLINE_THICKNESS_EM: f32 = 90. / 2048.;
 const MIN_FONT_SIZE: f32 = 6.;
 const MAX_FONT_SIZE: f32 = 72.;
 /// 程序没设置标题时用的标题。
-pub const DEFAULT_TITLE: &str = "runode";
+pub const DEFAULT_TITLE: &str = "Runode";
 /// 拖选到网格外时自动滚动的间隔，每次滚一行。
 const AUTOSCROLL_INTERVAL: Duration = Duration::from_millis(15);
 /// 光标闪烁时亮、灭各持续的时长。
