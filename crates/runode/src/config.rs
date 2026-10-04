@@ -24,6 +24,14 @@ pub enum CellHeight {
     Percent(f32),
 }
 
+/// 光标和选区的颜色：固定色，或者跟随所在单元格的前景、背景色。
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum TerminalColor {
+    Rgb(RgbColor),
+    CellForeground,
+    CellBackground,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct Config {
     /// 依次尝试的字体族，第一个能解析的生效。
@@ -40,14 +48,20 @@ pub struct Config {
     pub background: RgbColor,
     pub foreground: RgbColor,
     /// `None` 表示用前景色。
-    pub cursor_color: Option<RgbColor>,
-    pub selection_background: Option<RgbColor>,
-    pub selection_foreground: Option<RgbColor>,
+    pub cursor_color: Option<TerminalColor>,
+    /// 实心块状光标下文字的颜色，`None` 表示用背景色。
+    pub cursor_text: Option<TerminalColor>,
+    /// `None` 表示取单元格的前景色，与下一项合起来就是反色。
+    pub selection_background: Option<TerminalColor>,
+    /// `None` 表示取单元格的背景色。
+    pub selection_foreground: Option<TerminalColor>,
     /// 覆盖默认 256 色中的若干项。
     pub palette: Vec<(u8, RgbColor)>,
     pub macos_option_as_alt: OptionAsAlt,
     /// 本次读到的全部文件（含主题和 config-file 引入的），供热重载监视。
     pub sources: Vec<PathBuf>,
+    /// 加载时系统是否为深色外观，`theme = light:A,dark:B` 据此选了其中一个。
+    pub dark: bool,
 }
 
 impl Default for Config {
@@ -63,6 +77,7 @@ impl Default for Config {
             background: theme::BACKGROUND,
             foreground: theme::FOREGROUND,
             cursor_color: None,
+            cursor_text: None,
             selection_background: None,
             selection_foreground: None,
             palette: theme::ANSI
@@ -72,6 +87,7 @@ impl Default for Config {
                 .collect(),
             macos_option_as_alt: OptionAsAlt::False,
             sources: Vec::new(),
+            dark: true,
         }
     }
 }
@@ -108,11 +124,23 @@ pub fn install(cx: &mut App) {
 
 /// 重新读取全部配置文件并广播给各视图。
 pub fn reload(cx: &mut App) {
-    let dark = matches!(
+    let dark = system_is_dark(cx);
+    cx.set_global(AppConfig(Arc::new(Config::load(dark))));
+}
+
+/// 系统深浅色变了就重载，让 `theme = light:A,dark:B` 换到对应的主题。每个窗口都会
+/// 收到外观变化，第一个窗口重载后外观已经对上，其余窗口直接跳过。
+pub fn follow_appearance(cx: &mut App) {
+    if system_is_dark(cx) != cx.global::<AppConfig>().0.dark {
+        reload(cx);
+    }
+}
+
+fn system_is_dark(cx: &App) -> bool {
+    matches!(
         cx.window_appearance(),
         WindowAppearance::Dark | WindowAppearance::VibrantDark
-    );
-    cx.set_global(AppConfig(Arc::new(Config::load(dark))));
+    )
 }
 
 /// 所有可能的配置文件的修改时间。还不存在的文件也算在内，新建配置文件同样会触发重载。
@@ -160,10 +188,8 @@ impl Config {
         if let Some(theme) = theme.filter(|t| !t.is_empty()) {
             let name = pick_theme(&theme, dark);
             match find_theme(&name) {
-                Some(path) => {
-                    let entries = read_entries(&path, sources);
-                    config.apply_layer(&entries);
-                }
+                Some(Theme::File(path)) => config.apply_layer(&read_entries(&path, sources)),
+                Some(Theme::Bundled(text)) => config.apply_layer(&parse_entries(text, &name)),
                 None => tracing::warn!("theme not found: {name}"),
             }
         }
@@ -171,6 +197,7 @@ impl Config {
             config.apply_layer(layer);
         }
         config.sources = std::mem::take(sources);
+        config.dark = dark;
         config
     }
 
@@ -238,13 +265,16 @@ impl Config {
                 self.foreground = if empty { defaults.foreground } else { parse_color(value)? };
             }
             "cursor-color" => {
-                self.cursor_color = if empty { defaults.cursor_color } else { Some(parse_color(value)?) };
+                self.cursor_color = if empty { defaults.cursor_color } else { Some(parse_terminal_color(value)?) };
+            }
+            "cursor-text" => {
+                self.cursor_text = if empty { None } else { Some(parse_terminal_color(value)?) };
             }
             "selection-background" => {
-                self.selection_background = if empty { None } else { Some(parse_color(value)?) };
+                self.selection_background = if empty { None } else { Some(parse_terminal_color(value)?) };
             }
             "selection-foreground" => {
-                self.selection_foreground = if empty { None } else { Some(parse_color(value)?) };
+                self.selection_foreground = if empty { None } else { Some(parse_terminal_color(value)?) };
             }
             "palette" => {
                 let (index, color) = value.split_once('=').ok_or("expected N=COLOR")?;
@@ -293,6 +323,16 @@ fn parse_color(value: &str) -> Result<RgbColor, String> {
     RgbColor::parse(value).map_err(|_| "not a color".into())
 }
 
+fn parse_terminal_color(value: &str) -> Result<TerminalColor, String> {
+    match value {
+        "cell-foreground" => Ok(TerminalColor::CellForeground),
+        "cell-background" => Ok(TerminalColor::CellBackground),
+        _ => parse_color(value)
+            .map(TerminalColor::Rgb)
+            .map_err(|_| "expected a color, cell-foreground or cell-background".into()),
+    }
+}
+
 /// `light:A,dark:B` 按系统外观取一个，否则原样返回。
 fn pick_theme(value: &str, dark: bool) -> String {
     let want = if dark { "dark:" } else { "light:" };
@@ -318,41 +358,48 @@ fn read_entries(path: &Path, sources: &mut Vec<PathBuf>) -> Vec<Entry> {
 
     let mut entries = Vec::new();
     let mut includes = Vec::new();
+    for entry in parse_entries(&text, &path.display().to_string()) {
+        if entry.key == "config-file" {
+            // `?` 前缀表示文件可以不存在；引入的文件在本文件之后处理。
+            let (optional, file) = match entry.value.strip_prefix('?') {
+                Some(file) => (true, file),
+                None => (false, entry.value.as_str()),
+            };
+            let file = expand_home(file);
+            let file = path.parent().map_or(file.clone(), |dir| dir.join(&file));
+            if !optional && !file.exists() {
+                tracing::warn!("{}: config-file not found: {}", entry.origin, file.display());
+            }
+            includes.push(file);
+            continue;
+        }
+        entries.push(entry);
+    }
+    for include in includes {
+        entries.extend(read_entries(&include, sources));
+    }
+    entries
+}
+
+/// 逐行解析 `key = value`，跳过空行和注释。`name` 是出处，报错时带上行号。
+fn parse_entries(text: &str, name: &str) -> Vec<Entry> {
+    let mut entries = Vec::new();
     for (n, line) in text.lines().enumerate() {
         let line = line.trim();
         if line.is_empty() || line.starts_with('#') {
             continue;
         }
         let (key, value) = line.split_once('=').unwrap_or((line, ""));
-        let key = key.trim().to_owned();
         let value = value.trim();
         let value = value
             .strip_prefix('"')
             .and_then(|v| v.strip_suffix('"'))
-            .unwrap_or(value)
-            .to_owned();
-        if key == "config-file" {
-            // `?` 前缀表示文件可以不存在；引入的文件在本文件之后处理。
-            let (optional, file) = match value.strip_prefix('?') {
-                Some(file) => (true, file),
-                None => (false, value.as_str()),
-            };
-            let file = expand_home(file);
-            let file = path.parent().map_or(file.clone(), |dir| dir.join(&file));
-            if !optional && !file.exists() {
-                tracing::warn!("{}:{}: config-file not found: {}", path.display(), n + 1, file.display());
-            }
-            includes.push(file);
-            continue;
-        }
+            .unwrap_or(value);
         entries.push(Entry {
-            key,
-            value,
-            origin: format!("{}:{}", path.display(), n + 1),
+            key: key.trim().to_owned(),
+            value: value.to_owned(),
+            origin: format!("{name}:{}", n + 1),
         });
-    }
-    for include in includes {
-        entries.extend(read_entries(&include, sources));
     }
     entries
 }
@@ -391,19 +438,37 @@ fn ghostty_config_paths() -> Vec<PathBuf> {
     paths
 }
 
-/// 主题可以是绝对路径，否则依次在 runode、Ghostty 的用户主题目录和
-/// Ghostty 自带的主题目录里找同名文件。
-fn find_theme(name: &str) -> Option<PathBuf> {
+/// 编进二进制的配色主题，按名字排序。
+static BUNDLED_THEMES: &[(&str, &str)] = include!(concat!(env!("OUT_DIR"), "/themes.rs"));
+
+enum Theme {
+    File(PathBuf),
+    Bundled(&'static str),
+}
+
+/// 主题可以是绝对路径，否则依次在 runode、Ghostty 的用户主题目录、
+/// Ghostty 自带的主题目录里找同名文件，都没有再用内置的同名主题。
+fn find_theme(name: &str) -> Option<Theme> {
     let path = expand_home(name);
     if path.is_absolute() {
-        return path.is_file().then_some(path);
+        return path.is_file().then_some(Theme::File(path));
     }
     let mut dirs = vec![
         config_dir().join("runode/themes"),
         config_dir().join("ghostty/themes"),
     ];
     dirs.extend(ghostty_resources_dir().map(|dir| dir.join("themes")));
-    dirs.into_iter().map(|dir| dir.join(name)).find(|p| p.is_file())
+    if let Some(path) = dirs.into_iter().map(|dir| dir.join(name)).find(|p| p.is_file()) {
+        return Some(Theme::File(path));
+    }
+    bundled_theme(name).map(Theme::Bundled)
+}
+
+fn bundled_theme(name: &str) -> Option<&'static str> {
+    BUNDLED_THEMES
+        .binary_search_by(|(n, _)| (*n).cmp(name))
+        .ok()
+        .map(|i| BUNDLED_THEMES[i].1)
 }
 
 /// Ghostty 的资源目录：在 Ghostty 里启动的进程有 `GHOSTTY_RESOURCES_DIR`；
@@ -505,6 +570,46 @@ unknown-key = whatever
         let config = load(&[&format!("theme = {}\nforeground = #333333", theme.display())]);
         assert_eq!(config.background, RgbColor { r: 0x11, g: 0x11, b: 0x11 });
         assert_eq!(config.foreground, RgbColor { r: 0x33, g: 0x33, b: 0x33 });
+    }
+
+    #[test]
+    fn bundled_theme_sets_every_color() {
+        let entries = parse_entries(bundled_theme("Catppuccin Mocha").unwrap(), "Catppuccin Mocha");
+        let mut config = Config::default();
+        config.apply_layer(&entries);
+        assert_eq!(config.background, RgbColor { r: 0x1e, g: 0x1e, b: 0x2e });
+        let rgb = |r, g, b| Some(TerminalColor::Rgb(RgbColor { r, g, b }));
+        assert_eq!(config.cursor_color, rgb(0xf5, 0xe0, 0xdc));
+        assert_eq!(config.cursor_text, rgb(0x1e, 0x1e, 0x2e));
+        assert_eq!(config.selection_background, rgb(0x58, 0x5b, 0x70));
+        assert!(config.palette.contains(&(15, RgbColor { r: 0xba, g: 0xc2, b: 0xde })));
+        assert!(bundled_theme("No Such Theme").is_none());
+    }
+
+    #[test]
+    fn every_bundled_theme_parses() {
+        for (name, text) in BUNDLED_THEMES {
+            let mut config = Config::default();
+            for entry in parse_entries(text, name) {
+                config
+                    .apply(&entry.key, &entry.value, false)
+                    .unwrap_or_else(|err| panic!("{}: {err}", entry.origin));
+            }
+        }
+    }
+
+    #[test]
+    fn colors_can_follow_the_cell() {
+        let config = load(&[
+            "cursor-color = cell-foreground\ncursor-text = cell-background\nselection-background = cell-background\nselection-foreground = #010203",
+        ]);
+        assert_eq!(config.cursor_color, Some(TerminalColor::CellForeground));
+        assert_eq!(config.cursor_text, Some(TerminalColor::CellBackground));
+        assert_eq!(config.selection_background, Some(TerminalColor::CellBackground));
+        assert_eq!(
+            config.selection_foreground,
+            Some(TerminalColor::Rgb(RgbColor { r: 1, g: 2, b: 3 }))
+        );
     }
 
     #[test]

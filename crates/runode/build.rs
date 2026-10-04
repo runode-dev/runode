@@ -1,4 +1,5 @@
-//! 构建期信息：把 Info.plist 嵌进可执行文件，让未打包成 .app 时也有应用元数据。
+//! 构建期信息：把 Info.plist 嵌进可执行文件，让未打包成 .app 时也有应用元数据；
+//! 再把 `themes/` 下的配色主题编进二进制。
 
 use std::{env, fs, path::PathBuf, process::Command};
 
@@ -24,6 +25,30 @@ fn main() {
             plist.display()
         );
     }
+
+    bundle_themes();
+}
+
+/// 生成按名字排序的 `(名字, 内容)` 表，供 `BUNDLED_THEMES` 使用。
+fn bundle_themes() {
+    let dir = PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").unwrap()).join("themes");
+    // 指向目录时，目录里任何文件变动都会触发重新生成。
+    println!("cargo:rerun-if-changed={}", dir.display());
+
+    let mut names: Vec<String> = fs::read_dir(&dir)
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name().into_string().unwrap())
+        .filter(|name| name != "LICENSE")
+        .collect();
+    names.sort();
+
+    let mut out = String::from("&[\n");
+    for name in &names {
+        out += &format!("    ({name:?}, include_str!({:?})),\n", dir.join(name));
+    }
+    out += "]\n";
+    let out_dir = PathBuf::from(env::var_os("OUT_DIR").unwrap());
+    fs::write(out_dir.join("themes.rs"), out).unwrap();
 }
 
 fn git_short_head() -> Option<String> {

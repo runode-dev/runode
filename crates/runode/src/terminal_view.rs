@@ -75,6 +75,7 @@ pub struct TerminalView {
     /// 有焦点时才运行的闪烁计时器。
     _cursor_blink: Option<Task<()>>,
     _config_watch: Subscription,
+    _appearance_watch: Subscription,
     _focus_watch: [Subscription; 2],
 }
 
@@ -140,6 +141,8 @@ impl TerminalView {
             view.glyphs.clear();
             cx.notify();
         });
+        let appearance_watch =
+            cx.observe_window_appearance(window, |_, _, cx| crate::config::follow_appearance(cx));
 
         let focus_handle = cx.focus_handle();
         let focus_watch = [
@@ -166,6 +169,7 @@ impl TerminalView {
             _hold_timeout: None,
             _cursor_blink: None,
             _config_watch: config_watch,
+            _appearance_watch: appearance_watch,
             _focus_watch: focus_watch,
         })
     }
@@ -664,7 +668,7 @@ fn paint_frame(
 
     // 闪烁到灭的一半时不画光标；没有焦点时光标不闪，总画空心框。
     let cursor_hidden = focused && !view.cursor_blink_visible && frame.cursor.is_some_and(|c| c.blinking);
-    // 有焦点时块状光标是实心的，光标下的字形改用背景色画，保证仍然看得清。
+    // 有焦点时块状光标是实心的，光标下的字形改用光标文字色（默认背景色）画，保证仍然看得清。
     let filled_cursor = frame.cursor.filter(|c| {
         focused && !cursor_hidden && c.shape == CursorShape::Block && view.marked_text.is_none()
     });
@@ -715,8 +719,8 @@ fn paint_frame(
                 } else {
                     cell.fg
                 };
-                if filled_cursor.is_some_and(|c| c.x == x && c.y == y) {
-                    fg = frame.background;
+                if let Some(cursor) = filled_cursor.filter(|c| c.x == x && c.y == y) {
+                    fg = cursor.text;
                 }
                 let position = cell_origin(x, y);
                 let width = if cell.wide { cw * 2. } else { cw };

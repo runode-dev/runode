@@ -28,7 +28,7 @@ use libghostty_vt::{
 };
 
 use crate::{
-    config::Config,
+    config::{Config, TerminalColor},
     pty::{GridSize, Pty, PtyEvent, PtyWriter},
 };
 
@@ -90,6 +90,8 @@ pub struct Cursor {
     pub y: u16,
     pub shape: CursorShape,
     pub color: Rgb,
+    /// 实心块状光标下文字的颜色。
+    pub text: Rgb,
     /// 光标落在宽字符上，跨两个单元格。
     pub wide: bool,
     /// 终端要求光标闪烁（DECSCUSR 或 DEC 模式 12）。
@@ -130,8 +132,12 @@ struct Renderer {
     cell_it: CellIterator<'static>,
     frame: Frame,
     /// 配置的选区颜色；没配时选区反色显示。
-    selection_bg: Option<Rgb>,
-    selection_fg: Option<Rgb>,
+    selection_bg: Option<TerminalColor>,
+    selection_fg: Option<TerminalColor>,
+    /// 配置的光标颜色。固定色已交给 VT 作默认光标色，这里只用来解析跟随单元格的两种。
+    cursor_color: Option<TerminalColor>,
+    /// 配置的光标下文字颜色；没配时用背景色。
+    cursor_text: Option<TerminalColor>,
 }
 
 pub struct Session {
@@ -184,6 +190,8 @@ impl Session {
             frame: Frame::default(),
             selection_bg: None,
             selection_fg: None,
+            cursor_color: None,
+            cursor_text: None,
         }));
         let held_since = Rc::new(StdCell::new(None));
 
@@ -294,7 +302,13 @@ impl Session {
             .terminal
             .set_default_bg_color(Some(config.background))
             .and_then(|t| t.set_default_fg_color(Some(config.foreground)))
-            .and_then(|t| t.set_default_cursor_color(config.cursor_color))
+            // 跟随单元格的光标色由渲染时按光标所在单元格解析，VT 里不设默认值。
+            .and_then(|t| {
+                t.set_default_cursor_color(match config.cursor_color {
+                    Some(TerminalColor::Rgb(color)) => Some(color),
+                    _ => None,
+                })
+            })
             .and_then(|t| t.set_default_cursor_style(Some(config.cursor_style)))
             // 没配置时默认闪烁；libghostty 的 `None` 是不闪烁，所以这里显式给 true。
             .and_then(|t| t.set_default_cursor_blink(Some(config.cursor_style_blink.unwrap_or(true))))
@@ -303,8 +317,10 @@ impl Session {
             tracing::warn!("failed to apply config to the terminal: {err}");
         }
         let mut renderer = self.renderer.borrow_mut();
-        renderer.selection_bg = config.selection_background.map(Rgb::from);
-        renderer.selection_fg = config.selection_foreground.map(Rgb::from);
+        renderer.selection_bg = config.selection_background;
+        renderer.selection_fg = config.selection_foreground;
+        renderer.cursor_color = config.cursor_color;
+        renderer.cursor_text = config.cursor_text;
         // 选区颜色不经过 VT 的脏标记，强制下一帧整屏重画。
         renderer.frame = Frame::default();
         self.option_as_alt = config.macos_option_as_alt;
@@ -515,14 +531,18 @@ impl Renderer {
         let background = Rgb::from(colors.background);
         let foreground = Rgb::from(colors.foreground);
 
-        let cursor_color = colors.cursor.map_or(foreground, Rgb::from);
+        // VT 里的光标色（配置的固定色，或程序用 OSC 12 设的）优先。
+        let cursor_colors = (
+            colors.cursor.map(TerminalColor::Rgb).or(self.cursor_color),
+            self.cursor_text,
+        );
 
         let frame = &mut self.frame;
         let reshaped = frame.cols != cols || frame.rows != rows;
         let recolored = frame.background != background || frame.foreground != foreground;
         if dirty == Dirty::Clean && !reshaped && !recolored {
             // 只改光标形状或闪烁（DECSCUSR、DEC 模式 12）不会让 render state 变脏，光标要每次都重读。
-            frame.cursor = read_cursor(&snapshot, frame, cursor_color)?;
+            frame.cursor = read_cursor(&snapshot, frame, cursor_colors)?;
             return Ok(());
         }
         if reshaped {
@@ -577,9 +597,9 @@ impl Renderer {
                     // 选中的单元格用配置的选区颜色；没配的那一项按反色取。
                     let x16 = x as u16;
                     if selection.is_some_and(|s| s.start_x <= x16 && x16 <= s.end_x) {
-                        let swapped = bg.unwrap_or(background);
-                        bg = Some(self.selection_bg.unwrap_or(fg));
-                        fg = self.selection_fg.unwrap_or(swapped);
+                        let cell_bg = bg.unwrap_or(background);
+                        bg = Some(self.selection_bg.map_or(fg, |c| resolve(c, fg, cell_bg)));
+                        fg = self.selection_fg.map_or(cell_bg, |c| resolve(c, fg, cell_bg));
                     }
                     out.fg = fg;
                     out.bg = bg;
@@ -590,14 +610,29 @@ impl Renderer {
             y += 1;
         }
 
-        frame.cursor = read_cursor(&snapshot, frame, cursor_color)?;
+        frame.cursor = read_cursor(&snapshot, frame, cursor_colors)?;
         snapshot.set_dirty(Dirty::Clean)?;
         Ok(())
     }
 }
 
-/// 视口里可见的光标；`frame` 的单元格须已是最新，用来判断光标是否落在宽字符上。
-fn read_cursor(snapshot: &Snapshot<'_, '_>, frame: &Frame, color: Rgb) -> libghostty_vt::error::Result<Option<Cursor>> {
+/// 把配置的颜色按单元格的前景、背景色解析成具体值。
+fn resolve(color: TerminalColor, fg: Rgb, bg: Rgb) -> Rgb {
+    match color {
+        TerminalColor::Rgb(color) => Rgb::from(color),
+        TerminalColor::CellForeground => fg,
+        TerminalColor::CellBackground => bg,
+    }
+}
+
+/// 视口里可见的光标；`frame` 的单元格和默认颜色须已是最新，用来判断光标是否落在
+/// 宽字符上，以及解析跟随单元格的颜色。第三个参数是配置的光标色和光标下文字色，
+/// 没配时分别用前景色和背景色。
+fn read_cursor(
+    snapshot: &Snapshot<'_, '_>,
+    frame: &Frame,
+    (color, text): (Option<TerminalColor>, Option<TerminalColor>),
+) -> libghostty_vt::error::Result<Option<Cursor>> {
     if !snapshot.cursor_visible()? {
         return Ok(None);
     }
@@ -611,12 +646,16 @@ fn read_cursor(snapshot: &Snapshot<'_, '_>, frame: &Frame, color: Rgb) -> libgho
         _ => CursorShape::Block,
     };
     let index = usize::from(vp.y) * usize::from(frame.cols) + usize::from(vp.x);
+    let cell = frame.cells.get(index);
+    let cell_fg = cell.map_or(frame.foreground, |c| c.fg);
+    let cell_bg = cell.and_then(|c| c.bg).unwrap_or(frame.background);
     Ok(Some(Cursor {
         x: vp.x,
         y: vp.y,
         shape,
-        color,
-        wide: frame.cells.get(index).is_some_and(|c| c.wide),
+        color: color.map_or(frame.foreground, |c| resolve(c, cell_fg, cell_bg)),
+        text: text.map_or(frame.background, |c| resolve(c, cell_fg, cell_bg)),
+        wide: cell.is_some_and(|c| c.wide),
         blinking: snapshot.cursor_blinking()?,
     }))
 }
@@ -796,6 +835,26 @@ mod tests {
         assert_eq!(frame.foreground, Rgb::from(theme::FOREGROUND));
         assert_eq!(frame.row(0)[0].fg, Rgb::from(theme::ANSI[2]));
         assert_eq!(frame.cursor.map(|c| c.color), Some(Rgb::from(theme::FOREGROUND)));
+    }
+
+    #[test]
+    fn cursor_colors_can_follow_the_cell() {
+        let mut session = idle_session();
+        session.apply_config(&Config {
+            cursor_color: Some(TerminalColor::CellForeground),
+            cursor_text: Some(TerminalColor::CellBackground),
+            ..Config::default()
+        });
+        // 光标退回到红色的 X 上。
+        session.feed(b"\x1b[31mX\x1b[0m\x1b[D");
+        let cursor = session.frame().cursor.unwrap();
+        assert_eq!(cursor.color, Rgb::from(theme::ANSI[1]));
+        assert_eq!(cursor.text, Rgb::from(theme::BACKGROUND));
+
+        // 程序用 OSC 12 设的光标色优先于跟随单元格。
+        session.feed(b"\x1b]12;#010203\x07");
+        let color = session.frame().cursor.unwrap().color;
+        assert_eq!(color, Rgb::from(RgbColor { r: 1, g: 2, b: 3 }));
     }
 
     #[test]
