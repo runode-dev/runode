@@ -10,14 +10,12 @@ mod session;
 mod sprites;
 mod terminal_view;
 mod theme;
+mod workspace;
 
-use gpui::{
-    App, AppContext as _, Bounds, Focusable as _, TitlebarOptions, WindowBounds, WindowOptions,
-    point, px, size,
-};
+use gpui::{App, AppContext as _, Bounds, WindowBounds, WindowOptions, px, size};
 use gpui_platform::application;
 
-use crate::terminal_view::TerminalView;
+use crate::{terminal_view::TerminalView, workspace::Workspace};
 
 fn main() {
     tracing_subscriber::fmt()
@@ -49,23 +47,13 @@ fn open_window(cx: &mut App) {
         WindowOptions {
             window_bounds: Some(WindowBounds::Windowed(bounds)),
             window_min_size: Some(size(px(320.), px(200.))),
-            // 标题栏透明，终端背景一直铺到窗口顶部。
-            titlebar: Some(TitlebarOptions {
-                title: Some("runode".into()),
-                appears_transparent: true,
-                traffic_light_position: Some(point(px(12.), px(10.))),
-            }),
+            titlebar: Some(workspace::titlebar_options()),
             ..Default::default()
         },
         |window, cx| {
-            let view = cx.new(|cx| {
-                TerminalView::new(window, cx).unwrap_or_else(|err| {
-                    panic!("failed to start terminal session: {err:#}")
-                })
-            });
-            window.focus(&view.focus_handle(cx), cx);
-            window.set_window_title("runode");
-            view
+            let first = TerminalView::spawn(window, cx)
+                .unwrap_or_else(|err| panic!("failed to start terminal session: {err:#}"));
+            cx.new(|cx| Workspace::new(first, window, cx))
         },
     );
     if let Err(err) = opened {

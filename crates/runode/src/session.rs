@@ -49,6 +49,12 @@ impl Rgb {
     pub fn to_u32(self) -> u32 {
         (u32::from(self.0) << 16) | (u32::from(self.1) << 8) | u32::from(self.2)
     }
+
+    /// 从自身往 `other` 混合 `amount`（0 到 1）。
+    pub fn mix(self, other: Rgb, amount: f32) -> Rgb {
+        let mix = |a: u8, b: u8| (f32::from(a) + (f32::from(b) - f32::from(a)) * amount).round() as u8;
+        Rgb(mix(self.0, other.0), mix(self.1, other.1), mix(self.2, other.2))
+    }
 }
 
 /// 影响字形排版或装饰的文字属性。
@@ -329,14 +335,18 @@ impl Session {
     /// 把 PTY 输出喂给 VT，返回标题是否变化。
     pub fn feed(&mut self, data: &[u8]) -> bool {
         self.terminal.vt_write(data);
+        // 不少 shell 每次出提示符都重发一遍同样的标题，只有真变了才算。
         if self.effects.title_changed.take() {
-            self.title = self
+            let title = self
                 .terminal
                 .title()
                 .ok()
                 .filter(|t| !t.is_empty())
                 .map(str::to_owned);
-            return true;
+            if title != self.title {
+                self.title = title;
+                return true;
+            }
         }
         false
     }

@@ -5,7 +5,10 @@
 
 use gpui::{App, KeyBinding, Menu, MenuItem, OsAction, SystemMenuType, actions};
 
-use crate::terminal_view::{Copy, DecreaseFontSize, IncreaseFontSize, Paste, ResetFontSize};
+use crate::{
+    terminal_view::{Copy, DecreaseFontSize, IncreaseFontSize, Paste, ResetFontSize},
+    workspace::{CloseTab, NewTab, NextTab, PreviousTab, SelectLastTab, SelectTab},
+};
 
 actions!(
     runode,
@@ -31,7 +34,14 @@ pub fn install(cx: &mut App) {
         KeyBinding::new("cmd-h", Hide, None),
         KeyBinding::new("alt-cmd-h", HideOthers, None),
         KeyBinding::new("cmd-n", NewWindow, None),
-        KeyBinding::new("cmd-w", CloseWindow, None),
+        KeyBinding::new("cmd-shift-w", CloseWindow, None),
+        KeyBinding::new("cmd-t", NewTab, Some("Workspace")),
+        KeyBinding::new("cmd-w", CloseTab, Some("Workspace")),
+        KeyBinding::new("cmd-}", NextTab, Some("Workspace")),
+        KeyBinding::new("ctrl-tab", NextTab, Some("Workspace")),
+        KeyBinding::new("cmd-{", PreviousTab, Some("Workspace")),
+        KeyBinding::new("ctrl-shift-tab", PreviousTab, Some("Workspace")),
+        KeyBinding::new("cmd-9", SelectLastTab, Some("Workspace")),
         KeyBinding::new("cmd-m", Minimize, None),
         KeyBinding::new("ctrl-cmd-f", ToggleFullScreen, None),
         KeyBinding::new("cmd-c", Copy, Some("Terminal")),
@@ -41,6 +51,8 @@ pub fn install(cx: &mut App) {
         KeyBinding::new("cmd--", DecreaseFontSize, Some("Terminal")),
         KeyBinding::new("cmd-0", ResetFontSize, Some("Terminal")),
     ]);
+    // Cmd-1 到 Cmd-8 切到对应标签，Cmd-9 是最后一个。
+    cx.bind_keys((1..=8).map(|n| KeyBinding::new(&format!("cmd-{n}"), SelectTab(n - 1), Some("Workspace"))));
 
     cx.on_action(|_: &About, _| crate::about::show());
     cx.on_action(|_: &ReloadConfiguration, cx| crate::config::reload(cx));
@@ -70,8 +82,10 @@ pub fn install(cx: &mut App) {
             MenuItem::action("Quit runode", Quit),
         ]),
         Menu::new("File").items([
+            MenuItem::action("New Tab", NewTab),
             MenuItem::action("New Window", NewWindow),
             MenuItem::separator(),
+            MenuItem::action("Close Tab", CloseTab),
             MenuItem::action("Close Window", CloseWindow),
         ]),
         // 用 os_action 挂到系统的复制/粘贴选择器上，菜单栏的 Edit 才会被 macOS 识别，
@@ -90,6 +104,9 @@ pub fn install(cx: &mut App) {
         Menu::new("Window").items([
             MenuItem::action("Minimize", Minimize),
             MenuItem::action("Zoom", Zoom),
+            MenuItem::separator(),
+            MenuItem::action("Show Previous Tab", PreviousTab),
+            MenuItem::action("Show Next Tab", NextTab),
         ]),
     ]);
 }

@@ -4,11 +4,11 @@ use std::{collections::HashMap, ops::Range, sync::Arc, time::Duration};
 
 use futures::StreamExt as _;
 use gpui::{
-    App, Bounds, ClipboardItem, Context, ElementId, ElementInputHandler, EntityInputHandler,
-    FocusHandle, Focusable, Font, FontStyle, FontWeight, GlobalElementId, Hsla, KeyDownEvent,
-    LayoutId, Pixels, Point, PromptLevel, Render, ScrollDelta, ScrollWheelEvent, ShapedLine, SharedString,
-    Style, Subscription, Task, TextRun, UTF16Selection, Window, actions, div, fill, font, point, prelude::*, px,
-    relative, rgb, size,
+    App, AppContext as _, Bounds, ClipboardItem, Context, ElementId, ElementInputHandler, Entity,
+    EntityInputHandler, EventEmitter, FocusHandle, Focusable, Font, FontStyle, FontWeight,
+    GlobalElementId, Hsla, KeyDownEvent, LayoutId, Pixels, Point, PromptLevel, Render, ScrollDelta,
+    ScrollWheelEvent, ShapedLine, SharedString, Style, Subscription, Task, TextRun, UTF16Selection,
+    Window, actions, div, fill, font, point, prelude::*, px, relative, rgb, size,
 };
 use libghostty_vt::key::Mods;
 
@@ -32,8 +32,8 @@ const FALLBACK_FONT_FAMILY: &str = "Menlo";
 const UNDERLINE_THICKNESS_EM: f32 = 90. / 2048.;
 const MIN_FONT_SIZE: f32 = 6.;
 const MAX_FONT_SIZE: f32 = 72.;
-/// 透明标题栏的高度：终端内容从它下面开始，这一条用来拖动窗口。
-const TITLEBAR_HEIGHT: f32 = 28.;
+/// 程序没设置标题时用的标题。
+pub const DEFAULT_TITLE: &str = "runode";
 /// 光标闪烁时亮、灭各持续的时长。
 const CURSOR_BLINK_INTERVAL: Duration = Duration::from_millis(600);
 
@@ -49,6 +49,16 @@ struct GlyphKey {
     text: String,
     bold: bool,
     italic: bool,
+}
+
+/// 终端视图通知外层（标签栏）的事件。
+pub enum TerminalEvent {
+    /// 运行中的程序改了标题（OSC 0/2）。
+    TitleChanged,
+    /// 程序响铃（BEL）。
+    Bell,
+    /// shell 已经退出，这个终端该关掉了。
+    Exited,
 }
 
 pub struct TerminalView {
@@ -79,16 +89,27 @@ pub struct TerminalView {
     _focus_watch: [Subscription; 2],
 }
 
+impl EventEmitter<TerminalEvent> for TerminalView {}
+
 impl TerminalView {
-    pub fn new(window: &mut Window, cx: &mut Context<Self>) -> anyhow::Result<Self> {
+    /// 启动一个 shell 会话并建好它的视图；shell 起不来时返回错误，不建视图。
+    pub fn spawn(window: &mut Window, cx: &mut App) -> anyhow::Result<Entity<Self>> {
         // 临时尺寸；第一次布局时会按实际大小重设。
-        let (mut session, mut rx) = Session::spawn(GridSize {
+        let (session, rx) = Session::spawn(GridSize {
             cols: 80,
             rows: 24,
             cell_width_px: 8,
             cell_height_px: 16,
         })?;
+        Ok(cx.new(|cx| Self::new(session, rx, window, cx)))
+    }
 
+    fn new(
+        mut session: Session,
+        mut rx: futures::channel::mpsc::UnboundedReceiver<PtyEvent>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
         let reader = cx.spawn_in(window, async move |this, cx| {
             while let Some(first) = rx.next().await {
                 // 把已排队的输出合并成一次 VT 写入和一次重绘。
@@ -105,18 +126,17 @@ impl TerminalView {
                 let updated = this.update_in(cx, |view, window, cx| {
                     if !output.is_empty() {
                         if view.session.feed(&output) {
-                            let title = view.session.title.as_deref().unwrap_or("runode");
-                            window.set_window_title(title);
+                            cx.emit(TerminalEvent::TitleChanged);
                         }
                         // 有输出（包括键入的回显）时光标先亮起，免得打字时看不到它。
                         view.reset_cursor_blink(window, cx);
                     }
                     if view.session.take_bell() {
-                        window.play_system_bell();
+                        cx.emit(TerminalEvent::Bell);
                     }
                     if exited {
                         view.session.exited = true;
-                        window.remove_window();
+                        cx.emit(TerminalEvent::Exited);
                     }
                     if view.session.render_held() {
                         view.schedule_hold_timeout(cx);
@@ -152,7 +172,7 @@ impl TerminalView {
             cx.on_blur(&focus_handle, window, |view, _, _| view._cursor_blink = None),
         ];
 
-        Ok(Self {
+        Self {
             session,
             font: resolve_font(&config.font_family, window),
             font_size: px(config.font_size.clamp(MIN_FONT_SIZE, MAX_FONT_SIZE)),
@@ -171,7 +191,18 @@ impl TerminalView {
             _config_watch: config_watch,
             _appearance_watch: appearance_watch,
             _focus_watch: focus_watch,
-        })
+        }
+    }
+
+    /// 程序设置的标题；还没设置过时为 `DEFAULT_TITLE`。
+    pub fn title(&self) -> &str {
+        self.session.title.as_deref().unwrap_or(DEFAULT_TITLE)
+    }
+
+    /// 当前的默认前景色和背景色，标签栏跟着终端配色走。
+    pub fn colors(&mut self) -> (Rgb, Rgb) {
+        let frame = self.session.frame();
+        (frame.foreground, frame.background)
     }
 
     /// 让光标立即亮起，并从头开始计闪烁周期；没有焦点时不闪，也就不启动计时器。
@@ -394,23 +425,8 @@ impl Focusable for TerminalView {
 }
 
 impl Render for TerminalView {
-    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let background = self.session.frame().background;
-        // 标题栏透明后内容铺到红绿灯下面，顶部这条要能拖动窗口、双击缩放。
-        // 全屏时没有红绿灯，不留这一条。
-        let titlebar = (!window.is_fullscreen()).then(|| {
-            div()
-                .id("titlebar")
-                .h(px(TITLEBAR_HEIGHT))
-                .flex_none()
-                .on_mouse_down(gpui::MouseButton::Left, |event, window, _| {
-                    if event.click_count >= 2 {
-                        window.titlebar_double_click();
-                    } else {
-                        window.start_window_move();
-                    }
-                })
-        });
         div()
             .id("terminal")
             .key_context("Terminal")
@@ -426,7 +442,6 @@ impl Render for TerminalView {
             .flex()
             .flex_col()
             .bg(rgb(background.to_u32()))
-            .children(titlebar)
             .child(
                 div()
                     .flex_1()
@@ -632,14 +647,13 @@ fn resolve_font(families: &[String], window: &Window) -> Font {
     font(family.to_owned())
 }
 
-fn hsla(color: Rgb) -> Hsla {
+pub fn hsla(color: Rgb) -> Hsla {
     rgb(color.to_u32()).into()
 }
 
 /// `fg` 与 `bg` 的中间色，用于暗淡（SGR 2）文字。
 fn faint(fg: Rgb, bg: Rgb) -> Rgb {
-    let mix = |a: u8, b: u8| ((u16::from(a) + u16::from(b)) / 2) as u8;
-    Rgb(mix(fg.0, bg.0), mix(fg.1, bg.1), mix(fg.2, bg.2))
+    fg.mix(bg, 0.5)
 }
 
 fn paint_frame(
