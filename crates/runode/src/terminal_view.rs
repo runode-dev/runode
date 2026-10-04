@@ -6,7 +6,7 @@ use futures::StreamExt as _;
 use gpui::{
     App, Bounds, ClipboardItem, Context, ElementId, ElementInputHandler, EntityInputHandler,
     FocusHandle, Focusable, Font, FontStyle, FontWeight, GlobalElementId, Hsla, KeyDownEvent,
-    LayoutId, Pixels, Point, Render, ScrollDelta, ScrollWheelEvent, ShapedLine, SharedString,
+    LayoutId, Pixels, Point, PromptLevel, Render, ScrollDelta, ScrollWheelEvent, ShapedLine, SharedString,
     Style, Task, TextRun, UTF16Selection, Window, actions, div, fill, font, point, prelude::*, px,
     relative, rgb, size,
 };
@@ -15,7 +15,7 @@ use libghostty_vt::key::Mods;
 use crate::{
     keys,
     pty::{GridSize, PtyEvent},
-    session::{Attrs, CursorShape, Frame, Rgb, SYNC_OUTPUT_TIMEOUT, Session},
+    session::{Attrs, CursorShape, Frame, Paste as PasteResult, Rgb, SYNC_OUTPUT_TIMEOUT, Session},
 };
 
 actions!(
@@ -181,10 +181,30 @@ impl TerminalView {
         cx.notify();
     }
 
-    fn paste(&mut self, _: &Paste, _: &mut Window, cx: &mut Context<Self>) {
-        if let Some(text) = cx.read_from_clipboard().and_then(|item| item.text()) {
-            self.session.paste(&text);
+    fn paste(&mut self, _: &Paste, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(text) = cx.read_from_clipboard().and_then(|item| item.text()) else {
+            return;
+        };
+        if self.session.paste(&text, false) == PasteResult::Done {
+            return;
         }
+        // 和 Ghostty 一样：可能直接执行命令的粘贴先让用户确认。
+        let answer = window.prompt(
+            PromptLevel::Warning,
+            "粘贴的内容可能会直接执行命令",
+            Some("内容含有换行或终端控制序列，粘贴后可能被当作命令立即运行。"),
+            &["粘贴", "取消"],
+            cx,
+        );
+        cx.spawn(async move |this, cx| {
+            if answer.await.ok() == Some(0) {
+                this.update(cx, |view, _| {
+                    view.session.paste(&text, true);
+                })
+                .ok();
+            }
+        })
+        .detach();
     }
 
     fn copy(&mut self, _: &Copy, _: &mut Window, cx: &mut Context<Self>) {

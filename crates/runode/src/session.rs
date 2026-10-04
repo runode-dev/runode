@@ -13,7 +13,8 @@ use std::{
 use anyhow::Result;
 use futures::channel::mpsc::UnboundedReceiver;
 use libghostty_vt::{
-    key, mouse, paste,
+    Error, key, mouse,
+    paste::PasteSource,
     render::{CellIterator, CursorVisualStyle, Dirty, RenderState, RowIterator},
     screen::CellWide,
     style::{RgbColor, Underline},
@@ -331,17 +332,23 @@ impl Session {
         self.writer.write(text.as_bytes());
     }
 
-    pub fn paste(&mut self, text: &str) {
-        let bracketed = self.terminal.mode(Mode::BRACKETED_PASTE).unwrap_or(false);
-        let mut data = text.as_bytes().to_vec();
-        // bracketed paste 会多 12 字节；非 bracketed 时换行原地改成 CR。
-        let mut buf = vec![0u8; data.len() + 16];
-        match paste::encode(&mut data, bracketed, &mut buf) {
-            Ok(len) => {
-                self.scroll_to_bottom();
-                self.writer.write(&buf[..len]);
+    /// 按终端当前模式粘贴剪贴板文本（bracketed paste、粘贴事件等由 libghostty 处理）。
+    ///
+    /// 文本可能注入命令时（未开 bracketed paste 却含换行，或含 bracketed paste
+    /// 结束序列），除非 `allow_unsafe`，否则什么也不写并返回 `Paste::NeedsConfirmation`，
+    /// 由界面向用户确认后再带 `allow_unsafe` 重试。
+    pub fn paste(&mut self, text: &str, allow_unsafe: bool) -> Paste {
+        self.scroll_to_bottom();
+        match self
+            .terminal
+            .paste_text(text, PasteSource::Clipboard, allow_unsafe)
+        {
+            Ok(_) => Paste::Done,
+            Err(Error::Rejected) => Paste::NeedsConfirmation,
+            Err(err) => {
+                tracing::warn!("paste failed: {err}");
+                Paste::Done
             }
-            Err(err) => tracing::warn!("paste encode failed: {err}"),
         }
     }
 
@@ -478,18 +485,15 @@ impl Renderer {
                         break;
                     }
                     let out = &mut frame.cells[y * usize::from(cols) + x];
-                    let wide = cell.raw_cell()?.wide()?;
-                    out.wide = wide == CellWide::Wide;
-                    out.spacer = matches!(wide, CellWide::SpacerTail | CellWide::SpacerHead);
-                    out.text.clear();
-                    if cell.graphemes_len()? > 0 {
-                        cell.graphemes_utf8(&mut out.text)?;
-                    }
-                    let mut fg = cell.fg_color()?.map_or(foreground, Rgb::from);
-                    let mut bg = cell.bg_color()?.map(Rgb::from);
+                    // 一次批量读取拿到渲染所需的全部字段，比逐个 getter 少几次 FFI。
+                    let read = cell.read(&colors.palette, &mut out.text)?;
+                    out.wide = read.wide == CellWide::Wide;
+                    out.spacer = matches!(read.wide, CellWide::SpacerTail | CellWide::SpacerHead);
+                    let mut fg = read.fg_color.map_or(foreground, Rgb::from);
+                    let mut bg = read.bg_color.map(Rgb::from);
                     out.attrs = Attrs::default();
-                    if cell.has_styling()? {
-                        let style = cell.style()?;
+                    if read.has_styling {
+                        let style = read.style;
                         out.attrs = Attrs {
                             bold: style.bold,
                             italic: style.italic,
@@ -544,6 +548,14 @@ impl Renderer {
         snapshot.set_dirty(Dirty::Clean)?;
         Ok(())
     }
+}
+
+/// `Session::paste` 的结果。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Paste {
+    Done,
+    /// 内容可能直接执行命令，需要用户确认。
+    NeedsConfirmation,
 }
 
 /// 翻译成 libghostty 术语的平台按键。
@@ -658,5 +670,17 @@ mod tests {
         assert_eq!(session.title.as_deref(), Some("hello"));
         assert!(session.feed(b"\x1bc"));
         assert_eq!(session.title, None);
+    }
+
+    #[test]
+    fn multiline_paste_needs_confirmation_unless_bracketed() {
+        let mut session = idle_session();
+        assert_eq!(session.paste("ls", false), Paste::Done);
+        assert_eq!(session.paste("rm -rf x\nls", false), Paste::NeedsConfirmation);
+        assert_eq!(session.paste("rm -rf x\nls", true), Paste::Done);
+
+        // 程序开启 bracketed paste 后，换行不会被直接执行，无需确认。
+        session.feed(b"\x1b[?2004h");
+        assert_eq!(session.paste("a\nb", false), Paste::Done);
     }
 }
