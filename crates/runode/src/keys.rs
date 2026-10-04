@@ -23,6 +23,9 @@ pub fn translate(keystroke: &Keystroke) -> Option<KeyInput> {
     }
     if m.alt {
         mods |= Mods::ALT;
+        if right_option_down() {
+            mods |= Mods::ALT_SIDE;
+        }
     }
     if m.control {
         mods |= Mods::CTRL;
@@ -58,6 +61,26 @@ pub fn translate(keystroke: &Keystroke) -> Option<KeyInput> {
         unshifted,
         text,
     })
+}
+
+/// 当前按下的是不是右 Option。GPUI 的修饰键不分左右，这里读正在分发的
+/// NSEvent 里的设备相关位（`NX_DEVICERALTKEYMASK`），供 `macos-option-as-alt`
+/// 区分左右键。
+#[cfg(target_os = "macos")]
+fn right_option_down() -> bool {
+    use objc2::MainThreadMarker;
+    use objc2_app_kit::NSApplication;
+    const NX_DEVICERALTKEYMASK: usize = 0x40;
+    MainThreadMarker::new().is_some_and(|mtm| {
+        NSApplication::sharedApplication(mtm)
+            .currentEvent()
+            .is_some_and(|event| event.modifierFlags().0 & NX_DEVICERALTKEYMASK != 0)
+    })
+}
+
+#[cfg(not(target_os = "macos"))]
+fn right_option_down() -> bool {
+    false
 }
 
 /// GPUI 键名对应的 libghostty 按键及其未按 Shift 时的字符。

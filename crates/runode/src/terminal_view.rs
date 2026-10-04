@@ -1,18 +1,19 @@
 //! 单个终端会话的 GPUI 视图：输入分发和单元格绘制。
 
-use std::{collections::HashMap, ops::Range};
+use std::{collections::HashMap, ops::Range, sync::Arc};
 
 use futures::StreamExt as _;
 use gpui::{
     App, Bounds, ClipboardItem, Context, ElementId, ElementInputHandler, EntityInputHandler,
     FocusHandle, Focusable, Font, FontStyle, FontWeight, GlobalElementId, Hsla, KeyDownEvent,
     LayoutId, Pixels, Point, PromptLevel, Render, ScrollDelta, ScrollWheelEvent, ShapedLine, SharedString,
-    Style, Task, TextRun, UTF16Selection, Window, actions, div, fill, font, point, prelude::*, px,
+    Style, Subscription, Task, TextRun, UTF16Selection, Window, actions, div, fill, font, point, prelude::*, px,
     relative, rgb, size,
 };
 use libghostty_vt::key::Mods;
 
 use crate::{
+    config::{AppConfig, CellHeight, Config},
     keys,
     pty::{GridSize, PtyEvent},
     session::{Attrs, CursorShape, Frame, Paste as PasteResult, Rgb, SYNC_OUTPUT_TIMEOUT, Session},
@@ -24,17 +25,10 @@ actions!(
     [Copy, Paste, IncreaseFontSize, DecreaseFontSize, ResetFontSize]
 );
 
-/// 终端内容的左右边距。
-const PADDING_X: f32 = 2.;
-/// 终端内容的底部边距，让最后一行不贴着窗口下沿。
-const PADDING_BOTTOM: f32 = 6.;
-/// 默认字体；系统没装时改用 `FALLBACK_FONT_FAMILY`。
-const FONT_FAMILY: &str = "Hack Nerd Font Mono";
-/// macOS 自带的等宽字体。
+/// 配置的字体都不可用时使用的等宽字体，macOS 自带。
 const FALLBACK_FONT_FAMILY: &str = "Menlo";
-const FONT_SIZE: f32 = 14.;
 /// 字体的下划线粗细（em 的比例），自绘字符的线宽由它算出。GPUI 不公开字体的下划线粗细，
-/// 这里写死 `FONT_FAMILY` 和 `FALLBACK_FONT_FAMILY` 的 post 表取值，两者都是 90/2048。
+/// 这里取 Hack 与 Menlo 的 post 表数值，两者都是 90/2048。
 const UNDERLINE_THICKNESS_EM: f32 = 90. / 2048.;
 const MIN_FONT_SIZE: f32 = 6.;
 const MAX_FONT_SIZE: f32 = 72.;
@@ -57,6 +51,7 @@ struct GlyphKey {
 
 pub struct TerminalView {
     session: Session,
+    config: Arc<Config>,
     focus_handle: FocusHandle,
     font: Font,
     font_size: Pixels,
@@ -73,12 +68,13 @@ pub struct TerminalView {
     grid_origin: Point<Pixels>,
     _reader: Task<()>,
     _hold_timeout: Option<Task<()>>,
+    _config_watch: Subscription,
 }
 
 impl TerminalView {
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> anyhow::Result<Self> {
         // 临时尺寸；第一次布局时会按实际大小重设。
-        let (session, mut rx) = Session::spawn(GridSize {
+        let (mut session, mut rx) = Session::spawn(GridSize {
             cols: 80,
             rows: 24,
             cell_width_px: 8,
@@ -121,22 +117,25 @@ impl TerminalView {
             }
         });
 
-        // 字体族整个找不到时，GPUI 会落到 Helvetica 这类非等宽字体，
-        // 所以先看默认字体能否解析成它自己。
-        let text_system = window.text_system();
-        let resolved = text_system.get_font_for_id(text_system.resolve_font(&font(FONT_FAMILY)));
-        let family = if resolved.is_some_and(|f| f.family == FONT_FAMILY) {
-            FONT_FAMILY
-        } else {
-            FALLBACK_FONT_FAMILY
-        };
-        tracing::debug!("terminal font: {family}");
+        let config = cx.global::<AppConfig>().0.clone();
+        session.apply_config(&config);
+        let config_watch = cx.observe_global_in::<AppConfig>(window, |view, window, cx| {
+            view.config = cx.global::<AppConfig>().0.clone();
+            view.session.apply_config(&view.config);
+            view.font = resolve_font(&view.config.font_family, window);
+            view.font_size = px(view.config.font_size.clamp(MIN_FONT_SIZE, MAX_FONT_SIZE));
+            // 字体、字号或行高调整都可能变了，单元格尺寸和字形缓存一律作废。
+            view.metrics = None;
+            view.glyphs.clear();
+            cx.notify();
+        });
 
         Ok(Self {
             session,
+            font: resolve_font(&config.font_family, window),
+            font_size: px(config.font_size.clamp(MIN_FONT_SIZE, MAX_FONT_SIZE)),
+            config,
             focus_handle: cx.focus_handle(),
-            font: font(family),
-            font_size: px(FONT_SIZE),
             metrics: None,
             glyphs: HashMap::new(),
             marked_text: None,
@@ -145,6 +144,7 @@ impl TerminalView {
             grid_origin: Point::default(),
             _reader: reader,
             _hold_timeout: None,
+            _config_watch: config_watch,
         })
     }
 
@@ -209,7 +209,7 @@ impl TerminalView {
         if self.session.paste(&text, false) == PasteResult::Done {
             return;
         }
-        // 和 Ghostty 一样：可能直接执行命令的粘贴先让用户确认。
+        // 可能直接执行命令的粘贴先让用户确认。
         let answer = window.prompt(
             PromptLevel::Warning,
             "粘贴的内容可能会直接执行命令",
@@ -254,7 +254,7 @@ impl TerminalView {
     }
 
     fn reset_font_size(&mut self, _: &ResetFontSize, _: &mut Window, cx: &mut Context<Self>) {
-        self.set_font_size(FONT_SIZE, cx);
+        self.set_font_size(self.config.font_size, cx);
     }
 
     /// 字号一变，单元格尺寸和已排版的字形都要作废；下一次 prepaint 会按新单元格
@@ -281,11 +281,17 @@ impl TerminalView {
         let snap = |v: f32| (v * scale).round() / scale;
         let width = text_system
             .advance(font_id, self.font_size, 'M')
-            .map_or(FONT_SIZE * 0.6, |a| f32::from(a.width));
+            .map_or(f32::from(self.font_size) * 0.6, |a| f32::from(a.width));
         let ascent = text_system.ascent(font_id, self.font_size);
         let descent = text_system.descent(font_id, self.font_size).abs();
-        // 和 Rio、Ghostty 一样直接用字体本身的行高，不额外加行距。
-        let height = f32::from(ascent) + f32::from(descent);
+        // 行高取字体本身的 ascent + descent，再按配置的 adjust-cell-height 增减。
+        let natural = f32::from(ascent) + f32::from(descent);
+        let height = match self.config.adjust_cell_height {
+            Some(CellHeight::Pixels(delta)) => natural + delta,
+            Some(CellHeight::Percent(percent)) => natural * (1. + percent / 100.),
+            None => natural,
+        }
+        .max(1.);
         let metrics = Metrics {
             cell: size(px(snap(width)), px(snap(height).ceil())),
             ascent,
@@ -376,8 +382,10 @@ impl Render for TerminalView {
             .child(
                 div()
                     .flex_1()
-                    .px(px(PADDING_X))
-                    .pb(px(PADDING_BOTTOM))
+                    .pl(px(self.config.window_padding_x.0))
+                    .pr(px(self.config.window_padding_x.1))
+                    .pt(px(self.config.window_padding_y.0))
+                    .pb(px(self.config.window_padding_y.1))
                     .child(TerminalElement { view: cx.entity() }),
             )
     }
@@ -557,6 +565,23 @@ impl Element for TerminalElement {
             view.session.restore_frame(frame);
         });
     }
+}
+
+/// 依次尝试配置的字体族，取第一个系统里有的。字体族整个找不到时 GPUI 会
+/// 落到 Helvetica 这类非等宽字体，所以要先确认能解析成它自己。
+fn resolve_font(families: &[String], window: &Window) -> Font {
+    let text_system = window.text_system();
+    let family = families
+        .iter()
+        .find(|family| {
+            let id = text_system.resolve_font(&font(family.as_str()));
+            text_system
+                .get_font_for_id(id)
+                .is_some_and(|f| f.family.as_ref() == family.as_str())
+        })
+        .map_or(FALLBACK_FONT_FAMILY, String::as_str);
+    tracing::debug!("terminal font: {family}");
+    font(family.to_owned())
 }
 
 fn hsla(color: Rgb) -> Hsla {

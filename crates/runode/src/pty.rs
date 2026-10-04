@@ -78,7 +78,7 @@ impl Pty {
             .or_else(|| std::env::var("SHELL").ok())
             .unwrap_or_else(|| "/bin/zsh".into());
         let mut cmd = CommandBuilder::new(&shell);
-        // 和 Terminal.app、Ghostty 一样用登录 shell，这样会执行用户的 profile。
+        // 用登录 shell，这样会执行用户的 profile。
         cmd.arg("-l");
         cmd.env("TERM", "xterm-256color");
         cmd.env("COLORTERM", "truecolor");

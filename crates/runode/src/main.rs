@@ -2,6 +2,7 @@
 //! 窗口和绘制用 GPUI。
 
 mod about;
+mod config;
 mod keys;
 mod menus;
 mod pty;
@@ -28,6 +29,7 @@ fn main() {
 
     application().run(|cx: &mut App| {
         about::install_icon();
+        config::install(cx);
         menus::install(cx);
         cx.on_window_closed(|cx, _| {
             if cx.windows().is_empty() {
@@ -47,7 +49,7 @@ fn open_window(cx: &mut App) {
         WindowOptions {
             window_bounds: Some(WindowBounds::Windowed(bounds)),
             window_min_size: Some(size(px(320.), px(200.))),
-            // 和 Rio、Ghostty 一样：标题栏透明，终端背景一直铺到窗口顶部。
+            // 标题栏透明，终端背景一直铺到窗口顶部。
             titlebar: Some(TitlebarOptions {
                 title: Some("runode".into()),
                 appears_transparent: true,

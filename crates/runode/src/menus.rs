@@ -11,6 +11,7 @@ actions!(
     runode,
     [
         About,
+        ReloadConfiguration,
         Quit,
         Hide,
         HideOthers,
@@ -26,6 +27,7 @@ actions!(
 pub fn install(cx: &mut App) {
     cx.bind_keys([
         KeyBinding::new("cmd-q", Quit, None),
+        KeyBinding::new("cmd-shift-,", ReloadConfiguration, None),
         KeyBinding::new("cmd-h", Hide, None),
         KeyBinding::new("alt-cmd-h", HideOthers, None),
         KeyBinding::new("cmd-n", NewWindow, None),
@@ -41,6 +43,7 @@ pub fn install(cx: &mut App) {
     ]);
 
     cx.on_action(|_: &About, _| crate::about::show());
+    cx.on_action(|_: &ReloadConfiguration, cx| crate::config::reload(cx));
     cx.on_action(|_: &Quit, cx| cx.quit());
     cx.on_action(|_: &Hide, cx| cx.hide());
     cx.on_action(|_: &HideOthers, cx| cx.hide_other_apps());
@@ -55,6 +58,8 @@ pub fn install(cx: &mut App) {
         // macOS 总把第一个菜单当作应用菜单，标题显示为应用名。
         Menu::new("runode").items([
             MenuItem::action("About runode", About),
+            MenuItem::separator(),
+            MenuItem::action("Reload Configuration", ReloadConfiguration),
             MenuItem::separator(),
             MenuItem::os_submenu("Services", SystemMenuType::Services),
             MenuItem::separator(),

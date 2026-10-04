@@ -10,7 +10,7 @@ fn main() {
     println!("cargo:rerun-if-changed=../../.git/refs/heads");
     let version = env::var("CARGO_PKG_VERSION").unwrap();
     let commit = git_short_head().unwrap_or_else(|| "unknown".into());
-    // 和 Rio 一样，关于面板显示为「版本 0.1.0 (0.1.0.<commit>)」。
+    // 关于面板显示为「版本 0.1.0 (0.1.0.<commit>)」。
     let build = format!("{version}.{commit}");
 
     if env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("macos") {

@@ -13,7 +13,9 @@ use std::{
 use anyhow::Result;
 use futures::channel::mpsc::UnboundedReceiver;
 use libghostty_vt::{
-    Error, key, mouse,
+    Error,
+    key::{self, OptionAsAlt},
+    mouse,
     paste::PasteSource,
     render::{CellIterator, CursorVisualStyle, Dirty, RenderState, RowIterator},
     screen::CellWide,
@@ -26,12 +28,12 @@ use libghostty_vt::{
 };
 
 use crate::{
+    config::Config,
     pty::{GridSize, Pty, PtyEvent, PtyWriter},
-    theme,
 };
 
 const SCROLLBACK_LINES: usize = 10_000;
-/// 程序用同步输出（mode 2026）冻结屏幕的最长时间，超时后不再遵守，Ghostty 等终端也这样做。
+/// 程序用同步输出（mode 2026）冻结屏幕的最长时间，超时后不再遵守，以免程序异常时画面卡死。
 pub const SYNC_OUTPUT_TIMEOUT: Duration = Duration::from_secs(1);
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -125,6 +127,9 @@ struct Renderer {
     row_it: RowIterator<'static>,
     cell_it: CellIterator<'static>,
     frame: Frame,
+    /// 配置的选区颜色；没配时选区反色显示。
+    selection_bg: Option<Rgb>,
+    selection_fg: Option<Rgb>,
 }
 
 pub struct Session {
@@ -144,6 +149,7 @@ pub struct Session {
     scratch: Vec<u8>,
     pub title: Option<String>,
     pub exited: bool,
+    option_as_alt: OptionAsAlt,
 }
 
 impl Session {
@@ -160,13 +166,6 @@ impl Session {
 
         let mut terminal = Terminal::new(size.cols, size.rows)?;
         terminal.set_scrollback_max_lines(Some(SCROLLBACK_LINES))?;
-        let mut palette = terminal.default_color_palette()?;
-        palette.0[..theme::ANSI.len()].copy_from_slice(&theme::ANSI);
-        terminal
-            .set_default_bg_color(Some(theme::BACKGROUND))?
-            .set_default_fg_color(Some(theme::FOREGROUND))?
-            .set_default_cursor_color(Some(theme::CURSOR))?
-            .set_default_color_palette(Some(palette))?;
         terminal.resize(
             size.cols,
             size.rows,
@@ -181,6 +180,8 @@ impl Session {
             row_it: RowIterator::new()?,
             cell_it: CellIterator::new()?,
             frame: Frame::default(),
+            selection_bg: None,
+            selection_fg: None,
         }));
         let held_since = Rc::new(StdCell::new(None));
 
@@ -268,9 +269,42 @@ impl Session {
                 scratch: Vec::with_capacity(64),
                 title: None,
                 exited: false,
+                option_as_alt: OptionAsAlt::False,
             },
             rx,
         ))
+    }
+
+    /// 应用配置中与终端状态相关的部分。改的是默认值：程序自己用转义序列设置的
+    /// 颜色和光标形状照旧优先，所以配置可以随时重载。
+    pub fn apply_config(&mut self, config: &Config) {
+        let mut palette = match self.terminal.default_color_palette() {
+            Ok(palette) => palette,
+            Err(err) => {
+                tracing::warn!("failed to read the default palette: {err}");
+                return;
+            }
+        };
+        for &(index, color) in &config.palette {
+            palette.0[usize::from(index)] = color;
+        }
+        let applied = self
+            .terminal
+            .set_default_bg_color(Some(config.background))
+            .and_then(|t| t.set_default_fg_color(Some(config.foreground)))
+            .and_then(|t| t.set_default_cursor_color(config.cursor_color))
+            .and_then(|t| t.set_default_cursor_style(Some(config.cursor_style)))
+            .and_then(|t| t.set_default_cursor_blink(config.cursor_style_blink))
+            .and_then(|t| t.set_default_color_palette(Some(palette)));
+        if let Err(err) = applied {
+            tracing::warn!("failed to apply config to the terminal: {err}");
+        }
+        let mut renderer = self.renderer.borrow_mut();
+        renderer.selection_bg = config.selection_background.map(Rgb::from);
+        renderer.selection_fg = config.selection_foreground.map(Rgb::from);
+        // 选区颜色不经过 VT 的脏标记，强制下一帧整屏重画。
+        renderer.frame = Frame::default();
+        self.option_as_alt = config.macos_option_as_alt;
     }
 
     /// 把 PTY 输出喂给 VT，返回标题是否变化。
@@ -312,17 +346,30 @@ impl Session {
     /// Kitty 键盘协议、modifyOtherKeys 等）。按键没有产生字节时返回 false，
     /// 调用方可以交给平台处理。
     pub fn key(&mut self, input: &KeyInput) -> bool {
+        // Option 当作 Alt 时不能算「已消耗」，编码器才会改用未加修饰的字符并加 ESC 前缀。
+        let right = input.mods.contains(key::Mods::ALT_SIDE);
+        let option_is_alt = match self.option_as_alt {
+            OptionAsAlt::True => true,
+            OptionAsAlt::Left => !right,
+            OptionAsAlt::Right => right,
+            _ => false,
+        };
+        let mut consumed = input.consumed_mods;
+        if option_is_alt {
+            consumed.remove(key::Mods::ALT);
+        }
         self.key_event
             .set_action(key::Action::Press)
             .set_key(input.key)
             .set_mods(input.mods)
-            .set_consumed_mods(input.consumed_mods)
+            .set_consumed_mods(consumed)
             .set_unshifted_codepoint(input.unshifted)
             .set_utf8(input.text.as_deref());
         self.scratch.clear();
         let encoded = self
             .key_encoder
             .set_options_from_terminal(&self.terminal)
+            .set_macos_option_as_alt(self.option_as_alt)
             .encode_to_vec(&self.key_event, &mut self.scratch);
         if let Err(err) = encoded {
             tracing::warn!("key encode failed: {err}");
@@ -520,12 +567,12 @@ impl Renderer {
                             out.text.clear();
                         }
                     }
-                    // 选中的单元格反色显示，和大多数终端一致。
+                    // 选中的单元格用配置的选区颜色；没配的那一项按反色取。
                     let x16 = x as u16;
                     if selection.is_some_and(|s| s.start_x <= x16 && x16 <= s.end_x) {
                         let swapped = bg.unwrap_or(background);
-                        bg = Some(fg);
-                        fg = swapped;
+                        bg = Some(self.selection_bg.unwrap_or(fg));
+                        fg = self.selection_fg.unwrap_or(swapped);
                     }
                     out.fg = fg;
                     out.bg = bg;
@@ -582,6 +629,7 @@ pub struct KeyInput {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::theme;
     use futures::{StreamExt as _, executor::block_on};
 
     fn row_text(frame: &Frame, y: u16) -> String {
@@ -655,7 +703,9 @@ mod tests {
             cell_height_px: 16,
         };
         // `cat` 自己不输出，VT 只会收到测试喂进去的内容。
-        Session::spawn_shell(size, Some("/bin/cat")).unwrap().0
+        let mut session = Session::spawn_shell(size, Some("/bin/cat")).unwrap().0;
+        session.apply_config(&Config::default());
+        session
     }
 
     #[test]
@@ -692,6 +742,35 @@ mod tests {
         // 程序开启 bracketed paste 后，换行不会被直接执行，无需确认。
         session.feed(b"\x1b[?2004h");
         assert_eq!(session.paste("a\nb", false), Paste::Done);
+    }
+
+    #[test]
+    fn option_as_alt_follows_the_configured_side() {
+        /// 按一次 Option+s（美式布局下打出 ß），返回编码结果。
+        fn option_s(session: &mut Session, right: bool) -> Vec<u8> {
+            let mut mods = key::Mods::ALT;
+            if right {
+                mods |= key::Mods::ALT_SIDE;
+            }
+            session.key(&KeyInput {
+                key: key::Key::S,
+                mods,
+                consumed_mods: key::Mods::ALT,
+                unshifted: 's',
+                text: Some("ß".into()),
+            });
+            session.scratch.clone()
+        }
+
+        let mut session = idle_session();
+        assert_eq!(option_s(&mut session, false), "ß".as_bytes());
+
+        session.apply_config(&Config {
+            macos_option_as_alt: OptionAsAlt::Left,
+            ..Config::default()
+        });
+        assert_eq!(option_s(&mut session, false), b"\x1bs");
+        assert_eq!(option_s(&mut session, true), "ß".as_bytes());
     }
 
     #[test]
