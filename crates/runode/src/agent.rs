@@ -48,6 +48,14 @@ impl AgentKind {
             Self::Pi | Self::Other => (&BRAILLE_FRAMES, Duration::from_millis(80)),
         }
     }
+
+    /// 工作动画的颜色，跟 agent 自己界面里的一致；`None` 时沿用文字颜色。
+    pub fn spinner_color(self) -> Option<u32> {
+        match self {
+            Self::Claude => Some(0xD77757),
+            Self::Codex | Self::Pi | Self::Other => None,
+        }
+    }
 }
 
 /// 去掉状态前缀后的标题是不是 pi 的，pi 的标题是「π - 目录名」。

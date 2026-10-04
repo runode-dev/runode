@@ -212,17 +212,18 @@ fn agent_mark(agent: Agent, id: impl Into<ElementId>, fg: Hsla) -> AnyElement {
         AgentState::Working => {
             let (frames, frame_time) = agent.kind.spinner();
             let period = frame_time * frames.len() as u32;
-            slot.with_animation(
-                id,
-                Animation::new(period)
-                    .repeat_synced()
-                    .with_max_fps(2. / frame_time.as_secs_f32()),
-                move |slot, delta| {
-                    let frame = (delta * frames.len() as f32) as usize;
-                    slot.child(frames[frame.min(frames.len() - 1)])
-                },
-            )
-            .into_any_element()
+            slot.when_some(agent.kind.spinner_color(), |slot, color| slot.text_color(gpui::rgb(color)))
+                .with_animation(
+                    id,
+                    Animation::new(period)
+                        .repeat_synced()
+                        .with_max_fps(2. / frame_time.as_secs_f32()),
+                    move |slot, delta| {
+                        let frame = (delta * frames.len() as f32) as usize;
+                        slot.child(frames[frame.min(frames.len() - 1)])
+                    },
+                )
+                .into_any_element()
         }
         AgentState::Idle => slot
             .child(
