@@ -9,6 +9,7 @@ mod pane;
 mod pty;
 mod search_bar;
 mod session;
+mod shell_integration;
 mod sprites;
 mod terminal_view;
 mod theme;

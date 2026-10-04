@@ -52,6 +52,11 @@ actions!(
 #[action(namespace = runode, no_json)]
 pub struct SendText(pub &'static str);
 
+/// 视口跳到上一个（负数）或下一个提示符。
+#[derive(Clone, PartialEq, Action)]
+#[action(namespace = runode, no_json)]
+pub struct JumpToPrompt(pub isize);
+
 /// 把屏幕连同回滚历史写进临时文件，再按 `ScreenFile` 处理这个文件。
 #[derive(Clone, PartialEq, Action)]
 #[action(namespace = runode, no_json)]
@@ -168,7 +173,8 @@ impl TerminalView {
             cell_width_px: 8,
             cell_height_px: 16,
         };
-        let (session, rx) = Session::spawn(size, cwd)?;
+        let integration = cx.global::<AppConfig>().0.shell_integration;
+        let (session, rx) = Session::spawn(size, cwd, integration)?;
         Ok(cx.new(|cx| Self::new(session, rx, window, cx)))
     }
 
@@ -737,6 +743,11 @@ impl TerminalView {
         cx.notify();
     }
 
+    fn jump_to_prompt(&mut self, action: &JumpToPrompt, _: &mut Window, cx: &mut Context<Self>) {
+        self.session.jump_to_prompt(action.0 < 0);
+        cx.notify();
+    }
+
     fn send_text(&mut self, action: &SendText, _: &mut Window, cx: &mut Context<Self>) {
         self.session.send_text(action.0.as_bytes());
         cx.notify();
@@ -885,6 +896,7 @@ impl Render for TerminalView {
             .on_action(cx.listener(Self::scroll_page_down))
             .on_action(cx.listener(Self::scroll_to_selection))
             .on_action(cx.listener(Self::send_text))
+            .on_action(cx.listener(Self::jump_to_prompt))
             .on_action(cx.listener(Self::write_screen_file))
             .on_action(cx.listener(Self::start_search))
             .on_action(cx.listener(Self::search_selection))
@@ -1240,8 +1252,12 @@ fn paint_frame(
         scale,
     );
 
-    // 闪烁到灭的一半时不画光标；没有焦点时光标不闪，总画空心框。
-    let cursor_hidden = focused && !view.cursor_blink_visible && frame.cursor.is_some_and(|c| c.blinking);
+    // 闪烁到灭的一半时不画光标；没有焦点时光标不闪，总画空心框。光标落在选区里时也不画，
+    // 免得盖住那一格的选区颜色。
+    let cursor_hidden = frame.cursor.is_some_and(|c| {
+        (focused && !view.cursor_blink_visible && c.blinking)
+            || frame.row(c.y).get(usize::from(c.x)).is_some_and(|cell| cell.selected)
+    });
     // 有焦点时块状光标是实心的，光标下的字形改用光标文字色（默认背景色）画，保证仍然看得清。
     let filled_cursor = frame.cursor.filter(|c| {
         focused && !cursor_hidden && c.shape == CursorShape::Block && view.marked_text.is_none()

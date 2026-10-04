@@ -19,7 +19,7 @@ use libghostty_vt::{
     mouse,
     paste::PasteSource,
     render::{CellIterator, CursorVisualStyle, Dirty, RenderState, RowIterator, Snapshot},
-    screen::{CellWide, GridRef, Screen},
+    screen::{CellSemanticContent, CellWide, GridRef, RowSemanticPrompt, Screen},
     search::Search,
     selection::{
         Adjustment, FormatOptions, Order,
@@ -86,6 +86,8 @@ pub struct Cell {
     pub wide: bool,
     /// 宽字符的后半格，这里什么都不画。
     pub spacer: bool,
+    /// 在选区里。
+    pub selected: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -196,6 +198,8 @@ struct InputLine {
     spacer: Vec<bool>,
     /// 最后一个有字的格子之后。
     end: usize,
+    /// 用户输入从哪一格开始：shell 集成标出的提示符之后；没有标记时为 0。
+    start: usize,
     cursor: usize,
 }
 
@@ -256,8 +260,9 @@ impl Session {
     pub fn spawn(
         size: GridSize,
         cwd: Option<&std::path::Path>,
+        integration: crate::shell_integration::Mode,
     ) -> Result<(Self, UnboundedReceiver<PtyEvent>)> {
-        Self::spawn_in(size, None, cwd)
+        Self::spawn_in(size, None, cwd, integration)
     }
 
     #[cfg(test)]
@@ -265,15 +270,16 @@ impl Session {
         size: GridSize,
         shell: Option<&str>,
     ) -> Result<(Self, UnboundedReceiver<PtyEvent>)> {
-        Self::spawn_in(size, shell, None)
+        Self::spawn_in(size, shell, None, crate::shell_integration::Mode::Off)
     }
 
     fn spawn_in(
         size: GridSize,
         shell: Option<&str>,
         cwd: Option<&std::path::Path>,
+        integration: crate::shell_integration::Mode,
     ) -> Result<(Self, UnboundedReceiver<PtyEvent>)> {
-        let (pty, rx) = Pty::spawn(size, shell, cwd)?;
+        let (pty, rx) = Pty::spawn(size, shell, cwd, integration)?;
         let writer = pty.writer.clone();
 
         let mut terminal = Terminal::new(size.cols, size.rows)?;
@@ -565,7 +571,10 @@ impl Session {
     fn click_to_move_steps(&mut self, at: GridPoint) -> Option<isize> {
         let target = self.viewport_cell(at);
         let line = log_err("input line", self.input_line()).flatten()?;
-        let to = line.index(target.x, target.y)?.min(line.end.max(line.cursor));
+        let to = line
+            .index(target.x, target.y)?
+            .max(line.start)
+            .min(line.end.max(line.cursor));
         let steps = line.steps(line.cursor, to);
         (steps != 0).then_some(steps)
     }
@@ -609,7 +618,7 @@ impl Session {
             let (Some(start), Some(end)) = (line.index(start.x, start.y), line.index(end.x, end.y)) else {
                 return Ok(None);
             };
-            start.min(line.end)..(end + 1).min(line.end)
+            start.max(line.start).min(line.end)..(end + 1).min(line.end)
         };
         let count = line.chars(range.clone()) as usize;
         if count == 0 {
@@ -619,11 +628,13 @@ impl Session {
     }
 
     /// 光标所在的输入行：光标那一行，连同软换行接在一起的上下几行。只在主屏、视口在底部、
-    /// 前台是 shell（多半停在提示符上）时有，别的时候为 `None`。
+    /// 光标停在 shell 提示符上时有，别的时候为 `None`。
+    ///
+    /// shell 集成用 OSC 133 标出了提示符时，以它为准：输入从提示符之后开始。没有这些标记时
+    /// 只能看前台是不是 shell 自己，也不知道提示符在哪里结束。
     fn input_line(&mut self) -> libghostty_vt::error::Result<Option<InputLine>> {
         if self.terminal.active_screen()? == Screen::Alternate
             || !self.terminal.viewport_active().unwrap_or(false)
-            || !self.pty.foreground_is_shell()
         {
             return Ok(None);
         }
@@ -642,6 +653,23 @@ impl Session {
         while bottom + 1 < rows && row(bottom)?.is_wrapped()? {
             bottom += 1;
         }
+        let cols = self.size.get().cols;
+        let mut prompt_end = None;
+        for y in top..=bottom {
+            for x in 0..cols {
+                let cell = self.terminal.grid_ref(Point::Active(PointCoordinate { x, y }))?.cell()?;
+                if cell.semantic_content()? == CellSemanticContent::Prompt {
+                    prompt_end = Some((y - top) as usize * usize::from(cols) + usize::from(x) + 1);
+                }
+            }
+        }
+        let at_prompt = match prompt_end {
+            Some(_) => self.terminal.is_cursor_at_prompt()?,
+            None => self.pty.foreground_is_shell(),
+        };
+        if !at_prompt {
+            return Ok(None);
+        }
         let frame = self.frame();
         let cells: Vec<&Cell> = (top..=bottom).flat_map(|y| frame.row(y as u16)).collect();
         let mut line = InputLine {
@@ -650,6 +678,7 @@ impl Session {
             cols: usize::from(frame.cols),
             spacer: cells.iter().map(|c| c.spacer).collect(),
             end: cells.iter().rposition(|c| !c.text.is_empty()).map_or(0, |i| i + 1),
+            start: prompt_end.unwrap_or(0),
             cursor: 0,
         };
         line.cursor = line.index(cursor.0, cursor.1).unwrap_or(0).min(line.spacer.len());
@@ -953,6 +982,30 @@ impl Session {
             }
         };
         self.terminal.scroll_viewport(scroll);
+    }
+
+    /// 视口跳到上一个（`backward`）或下一个提示符所在的行，靠 shell 集成标在提示符上的记号。
+    /// 往后没有提示符时回到底部。
+    pub fn jump_to_prompt(&mut self, backward: bool) {
+        let result = self.terminal.scrollbar().map(|scrollbar| {
+            let is_prompt = |y: u64| {
+                self.terminal
+                    .grid_ref(Point::Screen(PointCoordinate { x: 0, y: y as u32 }))
+                    .and_then(|r| r.row())
+                    .and_then(|r| r.semantic_prompt())
+                    .is_ok_and(|p| p == RowSemanticPrompt::Prompt)
+            };
+            if backward {
+                (0..scrollbar.offset).rev().find(|y| is_prompt(*y))
+            } else {
+                (scrollbar.offset + 1..scrollbar.total).find(|y| is_prompt(*y))
+            }
+        });
+        match log_err("jump to prompt", result) {
+            Some(Some(row)) => self.terminal.scroll_viewport(ScrollViewport::Row(row as usize)),
+            Some(None) if !backward => self.terminal.scroll_viewport(ScrollViewport::Bottom),
+            _ => {}
+        }
     }
 
     /// 把字节直接发给程序，用于映射成控制字符的快捷键（比如 ⌘← 发 Ctrl-A）。
@@ -1278,11 +1331,21 @@ impl Renderer {
                         bg = Some(resolve(hl_bg, fg, cell_bg));
                         fg = resolve(hl_fg, fg, cell_bg);
                     }
-                    // 选中的单元格用配置的选区颜色；没配的那一项按反色取。
-                    if selection.is_some_and(|s| s.start_x <= x16 && x16 <= s.end_x) {
+                    // 选中的单元格用配置的选区颜色。没配底色时用统一的蓝色、文字不变：
+                    // 逐格反色会让彩色文字变成一块块彩色底，看起来像高亮而不像选区。
+                    out.selected = selection.is_some_and(|s| s.start_x <= x16 && x16 <= s.end_x);
+                    if out.selected {
                         let cell_bg = bg.unwrap_or(background);
-                        bg = Some(self.selection_bg.map_or(fg, |c| resolve(c, fg, cell_bg)));
-                        fg = self.selection_fg.map_or(cell_bg, |c| resolve(c, fg, cell_bg));
+                        let text = fg;
+                        bg = Some(match self.selection_bg {
+                            Some(c) => resolve(c, text, cell_bg),
+                            None => default_selection_bg(background),
+                        });
+                        fg = match (self.selection_fg, self.selection_bg) {
+                            (Some(c), _) => resolve(c, text, cell_bg),
+                            (None, Some(_)) => cell_bg,
+                            (None, None) => text,
+                        };
                     }
                     out.fg = fg;
                     out.bg = bg;
@@ -1305,6 +1368,12 @@ fn log_err<T>(what: &str, result: libghostty_vt::error::Result<T>) -> Option<T> 
 }
 
 /// 把配置的颜色按单元格的前景、背景色解析成具体值。
+fn default_selection_bg(background: Rgb) -> Rgb {
+    let Rgb(r, g, b) = background;
+    let luma = 0.299 * f32::from(r) + 0.587 * f32::from(g) + 0.114 * f32::from(b);
+    Rgb::from(if luma < 128. { crate::theme::SELECTION_ON_DARK } else { crate::theme::SELECTION_ON_LIGHT })
+}
+
 fn resolve(color: TerminalColor, fg: Rgb, bg: Rgb) -> Rgb {
     match color {
         TerminalColor::Rgb(color) => Rgb::from(color),
@@ -1660,6 +1729,50 @@ mod tests {
         assert_eq!(session.paste("a\nb", false), Paste::Done);
     }
 
+    /// shell 集成标出的提示符：`$ ` 是提示符，后面是用户输入。
+    const PROMPT: &[u8] = b"\x1b]133;A\x07$ \x1b]133;B\x07";
+
+    #[test]
+    fn marked_prompts_bound_clicks_and_deletes_to_the_input() {
+        let mut session = idle_session();
+        session.feed(PROMPT);
+        session.feed(b"hello");
+        // 点在提示符上：最多退到输入开头（第 2 列），"hello" 五步。
+        assert_eq!(session.click_to_move_steps(at(0.5, 0.5)), Some(-5));
+        // 选区把提示符也选进去了：只删输入里的 "hel"。
+        session.select_press(at(0.2, 0.5), REPEAT);
+        session.select_drag(at(4.8, 0.5), false);
+        session.select_release(at(4.8, 0.5));
+        assert_eq!(session.delete_selection_keys().unwrap(), Some((-2, 3)));
+    }
+
+    #[test]
+    fn marked_prompts_tell_when_a_command_is_running() {
+        let mut session = idle_session();
+        session.feed(PROMPT);
+        session.feed(b"sleep 9\r\n\x1b]133;C\x07");
+        // 命令在跑：光标在输出区，不算停在提示符上。
+        assert_eq!(session.click_to_move_steps(at(0.5, 1.5)), None);
+    }
+
+    #[test]
+    fn jumping_between_marked_prompts() {
+        let mut session = idle_session();
+        for n in 0..3 {
+            session.feed(PROMPT);
+            session.feed(format!("cmd{n}\r\n\x1b]133;C\x07out\r\nout\r\n\x1b]133;D;0\x07").as_bytes());
+        }
+        session.feed(PROMPT);
+        // 4 行高的视口最上面一行是 "$ cmd2"，往上跳到它之前的那个提示符。
+        assert_eq!(row_text(&session.frame(), 0), "$ cmd2");
+        session.jump_to_prompt(true);
+        assert_eq!(row_text(&session.frame(), 0), "$ cmd1");
+        session.jump_to_prompt(true);
+        assert_eq!(row_text(&session.frame(), 0), "$ cmd0");
+        session.jump_to_prompt(false);
+        assert_eq!(row_text(&session.frame(), 0), "$ cmd1");
+    }
+
     #[test]
     fn option_as_alt_follows_the_configured_side() {
         /// 按一次 Option+s（美式布局下打出 ß），返回编码结果。
@@ -1714,10 +1827,11 @@ mod tests {
         session.select_drag(at(4.8, 0.5), false);
         session.select_release(at(4.8, 0.5));
         assert_eq!(session.selection_text().as_deref(), Some("hello"));
-        // 没配选区颜色时反色显示。
+        // 没配选区颜色时用统一的蓝色底，文字保持原来的颜色。
         let frame = session.frame();
-        assert_eq!(frame.row(0)[0].bg, Some(Rgb::from(theme::FOREGROUND)));
-        assert_eq!(frame.row(0)[0].fg, Rgb::from(theme::BACKGROUND));
+        assert_eq!(frame.row(0)[0].bg, Some(Rgb::from(theme::SELECTION_ON_DARK)));
+        assert_eq!(frame.row(0)[0].fg, Rgb::from(theme::FOREGROUND));
+        assert!(frame.row(0)[0].selected && !frame.row(0)[6].selected);
         assert_eq!(frame.row(0)[6].bg, None);
         drop(frame);
 

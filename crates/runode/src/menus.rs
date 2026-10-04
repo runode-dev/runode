@@ -10,7 +10,7 @@ use crate::{
     terminal_view::{
         ClearScreen, Copy, DecreaseFontSize, IncreaseFontSize, Paste, PasteSelection,
         ResetFontSize, ScreenFile, ScrollPageDown, ScrollPageUp, ScrollToBottom, ScrollToSelection,
-        ScrollToTop, SelectAll, SendText, WriteScreenFile,
+        ScrollToTop, SelectAll, SendText, WriteScreenFile, JumpToPrompt,
     },
     pane::Direction,
     workspace::{
@@ -84,6 +84,10 @@ pub fn install(cx: &mut App) {
         KeyBinding::new("cmd-pageup", ScrollPageUp, Some("Terminal")),
         KeyBinding::new("cmd-pagedown", ScrollPageDown, Some("Terminal")),
         KeyBinding::new("cmd-j", ScrollToSelection, Some("Terminal")),
+        KeyBinding::new("cmd-up", JumpToPrompt(-1), Some("Terminal")),
+        KeyBinding::new("cmd-down", JumpToPrompt(1), Some("Terminal")),
+        KeyBinding::new("cmd-shift-up", JumpToPrompt(-1), Some("Terminal")),
+        KeyBinding::new("cmd-shift-down", JumpToPrompt(1), Some("Terminal")),
         // 行编辑：跳到行首、行尾，删到行首，按词左右移动。
         KeyBinding::new("cmd-left", SendText("\x01"), Some("Terminal")),
         KeyBinding::new("cmd-right", SendText("\x05"), Some("Terminal")),
@@ -190,6 +194,9 @@ pub fn install(cx: &mut App) {
             MenuItem::action("Increase Font Size", IncreaseFontSize),
             MenuItem::action("Decrease Font Size", DecreaseFontSize),
             MenuItem::action("Reset Font Size", ResetFontSize),
+            MenuItem::separator(),
+            MenuItem::action("Jump to Previous Prompt", JumpToPrompt(-1)),
+            MenuItem::action("Jump to Next Prompt", JumpToPrompt(1)),
             MenuItem::separator(),
             MenuItem::action("Toggle Full Screen", ToggleFullScreen),
         ]),

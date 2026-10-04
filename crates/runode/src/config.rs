@@ -51,9 +51,10 @@ pub struct Config {
     pub cursor_color: Option<TerminalColor>,
     /// 实心块状光标下文字的颜色，`None` 表示用背景色。
     pub cursor_text: Option<TerminalColor>,
-    /// `None` 表示取单元格的前景色，与下一项合起来就是反色。
+    /// `None` 表示按背景深浅用一种统一的蓝色。
     pub selection_background: Option<TerminalColor>,
-    /// `None` 表示取单元格的背景色。
+    /// `None` 时：配了选区底色就取单元格的背景色（底色设成单元格前景色时就是反色），
+    /// 没配就保持文字原来的颜色。
     pub selection_foreground: Option<TerminalColor>,
     /// 搜索匹配的背景色和文字色。
     pub search_background: TerminalColor,
@@ -64,6 +65,7 @@ pub struct Config {
     /// 覆盖默认 256 色中的若干项。
     pub palette: Vec<(u8, RgbColor)>,
     pub macos_option_as_alt: OptionAsAlt,
+    pub shell_integration: crate::shell_integration::Mode,
     /// 本次读到的全部文件（含主题和 config-file 引入的），供热重载监视。
     pub sources: Vec<PathBuf>,
     /// 加载时系统是否为深色外观，`theme = light:A,dark:B` 据此选了其中一个。
@@ -96,6 +98,7 @@ impl Default for Config {
                 .map(|(i, c)| (i as u8, *c))
                 .collect(),
             macos_option_as_alt: OptionAsAlt::False,
+            shell_integration: crate::shell_integration::Mode::Detect,
             sources: Vec::new(),
             dark: true,
         }
@@ -308,6 +311,16 @@ impl Config {
                 let color = parse_color(color)?;
                 self.palette.retain(|(i, _)| *i != index);
                 self.palette.push((index, color));
+            }
+            "shell-integration" => {
+                use crate::shell_integration::{Mode, Shell};
+                self.shell_integration = match value {
+                    "" | "detect" => Mode::Detect,
+                    "none" => Mode::Off,
+                    // 这两种 shell 还没有集成脚本。
+                    "elvish" | "nushell" => Mode::Off,
+                    name => Mode::Force(Shell::from_name(name).ok_or("expected none, detect, bash, zsh or fish")?),
+                };
             }
             "macos-option-as-alt" => {
                 self.macos_option_as_alt = match value {

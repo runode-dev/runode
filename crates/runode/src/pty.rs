@@ -15,6 +15,8 @@ use anyhow::{Context as _, Result};
 use futures::channel::mpsc::{UnboundedReceiver, UnboundedSender, unbounded};
 use portable_pty::{Child, CommandBuilder, MasterPty, PtySize, native_pty_system};
 
+use crate::shell_integration;
+
 /// 读线程报告给 UI 线程的事件。
 pub enum PtyEvent {
     Output(Vec<u8>),
@@ -64,12 +66,13 @@ impl GridSize {
 }
 
 impl Pty {
-    /// 在 `cwd` 下以登录 shell 方式启动 `shell`（为 `None` 时用用户的 `$SHELL`），
-    /// 并启动读线程。
+    /// 在 `cwd` 下以登录 shell 方式启动 `shell`（为 `None` 时用用户的 `$SHELL`），按 `integration`
+    /// 注入 shell 集成，并启动读线程。
     pub fn spawn(
         size: GridSize,
         shell: Option<&str>,
         cwd: Option<&std::path::Path>,
+        integration: shell_integration::Mode,
     ) -> Result<(Self, UnboundedReceiver<PtyEvent>)> {
         // 系统的 openpty 内部用了不可重入的 ptsname，多个线程同时开伪终端会互相踩，
         // 拿到错的从设备名而失败。
@@ -86,7 +89,7 @@ impl Pty {
             .unwrap_or_else(|| "/bin/zsh".into());
         let mut cmd = CommandBuilder::new(&shell);
         // 用登录 shell，这样会执行用户的 profile。
-        cmd.arg("-l");
+        shell_integration::prepare(integration, &shell, &mut cmd);
         cmd.env("TERM", "xterm-256color");
         cmd.env("COLORTERM", "truecolor");
         cmd.env("TERM_PROGRAM", "runode");
