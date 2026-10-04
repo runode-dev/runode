@@ -2,19 +2,15 @@
 //! 窗口和绘制用 GPUI。
 
 mod keys;
+mod menus;
 mod pty;
 mod session;
 mod terminal_view;
 
-use gpui::{
-    App, AppContext as _, Bounds, Focusable as _, KeyBinding, WindowBounds, WindowOptions,
-    actions, px, size,
-};
+use gpui::{App, AppContext as _, Bounds, Focusable as _, WindowBounds, WindowOptions, px, size};
 use gpui_platform::application;
 
-use crate::terminal_view::{Copy, Paste, TerminalView};
-
-actions!(runode, [Quit, NewWindow, CloseWindow]);
+use crate::terminal_view::TerminalView;
 
 fn main() {
     tracing_subscriber::fmt()
@@ -25,20 +21,7 @@ fn main() {
         .init();
 
     application().run(|cx: &mut App| {
-        cx.bind_keys([
-            KeyBinding::new("cmd-q", Quit, None),
-            KeyBinding::new("cmd-n", NewWindow, None),
-            KeyBinding::new("cmd-w", CloseWindow, None),
-            KeyBinding::new("cmd-v", Paste, Some("Terminal")),
-            KeyBinding::new("cmd-c", Copy, Some("Terminal")),
-        ]);
-        cx.on_action(|_: &Quit, cx| cx.quit());
-        cx.on_action(|_: &NewWindow, cx| open_window(cx));
-        cx.on_action(|_: &CloseWindow, cx| {
-            if let Some(window) = cx.active_window() {
-                window.update(cx, |_, window, _| window.remove_window()).ok();
-            }
-        });
+        menus::install(cx);
         cx.on_window_closed(|cx, _| {
             if cx.windows().is_empty() {
                 cx.quit();

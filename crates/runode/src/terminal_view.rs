@@ -18,11 +18,16 @@ use crate::{
     session::{Attrs, CursorShape, Frame, Rgb, SYNC_OUTPUT_TIMEOUT, Session},
 };
 
-actions!(runode, [Copy, Paste]);
+actions!(
+    runode,
+    [Copy, Paste, IncreaseFontSize, DecreaseFontSize, ResetFontSize]
+);
 
 const PADDING: f32 = 6.;
 const FONT_FAMILY: &str = "Menlo";
 const FONT_SIZE: f32 = 13.;
+const MIN_FONT_SIZE: f32 = 6.;
+const MAX_FONT_SIZE: f32 = 72.;
 /// 行高，按字体 ascent + descent 的倍数计。
 const LINE_SPACING: f32 = 1.15;
 
@@ -199,6 +204,31 @@ impl TerminalView {
         cx.write_to_clipboard(ClipboardItem::new_string(text.trim_end().to_owned()));
     }
 
+    fn increase_font_size(&mut self, _: &IncreaseFontSize, _: &mut Window, cx: &mut Context<Self>) {
+        self.set_font_size(f32::from(self.font_size) + 1., cx);
+    }
+
+    fn decrease_font_size(&mut self, _: &DecreaseFontSize, _: &mut Window, cx: &mut Context<Self>) {
+        self.set_font_size(f32::from(self.font_size) - 1., cx);
+    }
+
+    fn reset_font_size(&mut self, _: &ResetFontSize, _: &mut Window, cx: &mut Context<Self>) {
+        self.set_font_size(FONT_SIZE, cx);
+    }
+
+    /// 字号一变，单元格尺寸和已排版的字形都要作废；下一次 prepaint 会按新单元格
+    /// 重新计算行列数并调整终端尺寸。
+    fn set_font_size(&mut self, size: f32, cx: &mut Context<Self>) {
+        let size = px(size.clamp(MIN_FONT_SIZE, MAX_FONT_SIZE));
+        if size == self.font_size {
+            return;
+        }
+        self.font_size = size;
+        self.metrics = None;
+        self.glyphs.clear();
+        cx.notify();
+    }
+
     fn metrics(&mut self, window: &Window) -> Metrics {
         if let Some(metrics) = self.metrics {
             return metrics;
@@ -278,6 +308,9 @@ impl Render for TerminalView {
             .on_scroll_wheel(cx.listener(Self::scroll_wheel))
             .on_action(cx.listener(Self::paste))
             .on_action(cx.listener(Self::copy))
+            .on_action(cx.listener(Self::increase_font_size))
+            .on_action(cx.listener(Self::decrease_font_size))
+            .on_action(cx.listener(Self::reset_font_size))
             .size_full()
             .bg(rgb(background.to_u32()))
             .p(px(PADDING))
