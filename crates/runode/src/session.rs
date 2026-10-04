@@ -1,10 +1,8 @@
-//! One terminal: the libghostty-vt state machine wired to a child shell.
+//! 一个终端：接到子 shell 上的 libghostty-vt 状态机。
 //!
-//! `Session` owns the VT state and lives on the UI thread, because
-//! `libghostty_vt::Terminal` is single-threaded. PTY output arrives over a
-//! channel (see `Pty::spawn`) and is fed in with `feed`; the renderer reads a
-//! `Frame`, which `refresh` keeps current by copying only the rows libghostty
-//! reports dirty.
+//! `Session` 持有 VT 状态并放在 UI 线程上，因为 `libghostty_vt::Terminal` 只能单线程
+//! 使用。PTY 输出经 channel 到达（见 `Pty::spawn`），由 `feed` 喂进去；渲染器读取
+//! `Frame`，`refresh` 只复制 libghostty 报告为脏的行来保持它最新。
 
 use std::{
     cell::{Cell as StdCell, RefCell},
@@ -29,8 +27,7 @@ use libghostty_vt::{
 use crate::pty::{GridSize, Pty, PtyEvent, PtyWriter};
 
 const SCROLLBACK_LINES: usize = 10_000;
-/// How long a program may freeze the screen with synchronized output (mode
-/// 2026) before we stop honouring it, as Ghostty and others do.
+/// 程序用同步输出（mode 2026）冻结屏幕的最长时间，超时后不再遵守，Ghostty 等终端也这样做。
 pub const SYNC_OUTPUT_TIMEOUT: Duration = Duration::from_secs(1);
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -48,7 +45,7 @@ impl Rgb {
     }
 }
 
-/// Text attributes that change how a glyph is shaped or decorated.
+/// 影响字形排版或装饰的文字属性。
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub struct Attrs {
     pub bold: bool,
@@ -58,18 +55,18 @@ pub struct Attrs {
     pub strikethrough: bool,
 }
 
-/// One grid cell, already resolved to concrete colors.
+/// 一个网格单元格，颜色已解析为具体值。
 #[derive(Clone, Debug, Default)]
 pub struct Cell {
-    /// The grapheme cluster, empty for a blank cell.
+    /// 字素簇；空白单元格为空串。
     pub text: String,
     pub fg: Rgb,
-    /// `None` paints nothing: the frame background shows through.
+    /// `None` 表示不画背景，透出帧背景色。
     pub bg: Option<Rgb>,
     pub attrs: Attrs,
-    /// A wide glyph that also covers the next cell.
+    /// 宽字符，同时占用下一个单元格。
     pub wide: bool,
-    /// The continuation of a wide glyph; draw nothing here.
+    /// 宽字符的后半格，这里什么都不画。
     pub spacer: bool,
 }
 
@@ -87,17 +84,16 @@ pub struct Cursor {
     pub y: u16,
     pub shape: CursorShape,
     pub color: Rgb,
-    /// The cursor sits on a wide glyph and spans two cells.
+    /// 光标落在宽字符上，跨两个单元格。
     pub wide: bool,
 }
 
-/// What the renderer draws: a copy of the viewport, independent of the
-/// libghostty render state so painting never touches the VT.
+/// 渲染器要画的内容：视口的一份副本，与 libghostty 的 render state 分离，绘制时不碰 VT。
 #[derive(Clone, Debug, Default)]
 pub struct Frame {
     pub cols: u16,
     pub rows: u16,
-    /// Row-major, `cols * rows` cells.
+    /// 按行优先存放，共 `cols * rows` 个单元格。
     pub cells: Vec<Cell>,
     pub background: Rgb,
     pub foreground: Rgb,
@@ -111,16 +107,15 @@ impl Frame {
     }
 }
 
-/// Changes the UI cares about, accumulated by the VT callbacks.
+/// VT 回调累积下来、UI 关心的变化。
 #[derive(Default)]
 struct Effects {
     title_changed: StdCell<bool>,
     bell: StdCell<bool>,
 }
 
-/// Copies libghostty's render state into a `Frame`. Shared with the
-/// render-hold callback, which must capture the frame the moment a
-/// synchronized update begins.
+/// 把 libghostty 的 render state 复制进 `Frame`。和 render-hold 回调共用，
+/// 因为同步更新一开始，回调就要立即截下当前帧。
 struct Renderer {
     render_state: RenderState<'static>,
     row_it: RowIterator<'static>,
@@ -131,7 +126,7 @@ struct Renderer {
 pub struct Session {
     terminal: Terminal<'static, 'static>,
     renderer: Rc<RefCell<Renderer>>,
-    /// When the running program began holding the screen (mode 2026).
+    /// 运行中的程序开始冻结屏幕（mode 2026）的时刻。
     held_since: Rc<StdCell<Option<Instant>>>,
     key_encoder: key::Encoder<'static>,
     key_event: key::Event<'static>,
@@ -141,7 +136,7 @@ pub struct Session {
     writer: PtyWriter,
     size: Rc<StdCell<GridSize>>,
     effects: Rc<Effects>,
-    /// Encoded input waiting to be written, reused across keystrokes.
+    /// 待写出的已编码输入，各次按键复用这块缓冲。
     scratch: Vec<u8>,
     pub title: Option<String>,
     pub exited: bool,
@@ -178,8 +173,8 @@ impl Session {
         }));
         let held_since = Rc::new(StdCell::new(None));
 
-        // Query replies (DA, DECRQM, DSR...) go straight back to the child.
-        // Without them programs like vim and tmux stall while probing.
+        // 查询回复（DA、DECRQM、DSR 等）直接写回子进程。
+        // 没有回复的话，vim、tmux 这类程序探测终端能力时会卡住。
         let reply = writer.clone();
         terminal
             .on_pty_write(move |_, data| reply.write(data))?
@@ -222,7 +217,7 @@ impl Session {
                 let effects = effects.clone();
                 move |_| effects.bell.set(true)
             })?
-            // RIS clears the title without reporting a title change.
+            // RIS 会清空标题，但不会触发标题变化回调。
             .on_reset({
                 let effects = effects.clone();
                 move |_| effects.title_changed.set(true)
@@ -232,10 +227,8 @@ impl Session {
                 let held_since = held_since.clone();
                 move |term, held| {
                     if held {
-                        // Freeze on the frame as it stood before the update
-                        // began. The renderer is never borrowed across a VT
-                        // write, but this runs inside an extern "C" callback,
-                        // so never risk a panicking borrow here.
+                        // 冻结在更新开始前的那一帧。renderer 从不跨 VT 写入被借用，
+                        // 但这里运行在 extern "C" 回调里，绝不能冒会 panic 的借用风险。
                         if let Ok(mut renderer) = renderer.try_borrow_mut()
                             && let Err(err) = renderer.refresh(term)
                         {
@@ -269,7 +262,7 @@ impl Session {
         ))
     }
 
-    /// Feeds PTY output into the VT. Returns whether the title changed.
+    /// 把 PTY 输出喂给 VT，返回标题是否变化。
     pub fn feed(&mut self, data: &[u8]) -> bool {
         self.terminal.vt_write(data);
         if self.effects.title_changed.take() {
@@ -304,10 +297,9 @@ impl Session {
         self.pty.resize(size);
     }
 
-    /// Encodes one key press through libghostty, which honours the modes the
-    /// running program asked for (application cursor keys, Kitty keyboard
-    /// protocol, modifyOtherKeys...). Returns false when the key produced no
-    /// bytes, so the caller can let the platform handle it.
+    /// 经 libghostty 编码一次按键，它会遵守运行中程序要求的模式（应用光标键、
+    /// Kitty 键盘协议、modifyOtherKeys 等）。按键没有产生字节时返回 false，
+    /// 调用方可以交给平台处理。
     pub fn key(&mut self, input: &KeyInput) -> bool {
         self.key_event
             .set_action(key::Action::Press)
@@ -333,7 +325,7 @@ impl Session {
         true
     }
 
-    /// Text committed by an input method, sent as typed.
+    /// 输入法上屏的文本，按原样发送。
     pub fn commit_text(&mut self, text: &str) {
         self.scroll_to_bottom();
         self.writer.write(text.as_bytes());
@@ -342,7 +334,7 @@ impl Session {
     pub fn paste(&mut self, text: &str) {
         let bracketed = self.terminal.mode(Mode::BRACKETED_PASTE).unwrap_or(false);
         let mut data = text.as_bytes().to_vec();
-        // Bracketing adds 12 bytes; unbracketed newlines become CRs in place.
+        // bracketed paste 会多 12 字节；非 bracketed 时换行原地改成 CR。
         let mut buf = vec![0u8; data.len() + 16];
         match paste::encode(&mut data, bracketed, &mut buf) {
             Ok(len) => {
@@ -353,8 +345,7 @@ impl Session {
         }
     }
 
-    /// Wheel input: reported to the program when it tracks the mouse,
-    /// otherwise it scrolls the viewport through scrollback.
+    /// 滚轮输入：程序开启鼠标上报时发给程序，否则在回滚缓冲里滚动视口。
     pub fn scroll(&mut self, lines: isize, cell: (u16, u16), mods: key::Mods) {
         if lines == 0 {
             return;
@@ -409,15 +400,13 @@ impl Session {
         }
     }
 
-    /// Whether the running program is holding the screen for a synchronized
-    /// update; the view must repaint once `SYNC_OUTPUT_TIMEOUT` passes even
-    /// if no more output arrives.
+    /// 运行中的程序是否正为同步更新冻结屏幕；即使没有新输出，
+    /// 过了 `SYNC_OUTPUT_TIMEOUT` 视图也必须重绘。
     pub fn render_held(&self) -> bool {
         self.held_since.get().is_some()
     }
 
-    /// The up-to-date frame, moved out so a painter can hold it alongside
-    /// other mutable state. Hand it back with `restore_frame`.
+    /// 取出最新的帧，让绘制方能同时持有其他可变状态。用完用 `restore_frame` 放回。
     pub fn take_frame(&mut self) -> Frame {
         self.sync_frame();
         std::mem::take(&mut self.renderer.borrow_mut().frame)
@@ -437,8 +426,7 @@ impl Session {
             if since.elapsed() < SYNC_OUTPUT_TIMEOUT {
                 return;
             }
-            // A program that crashed or forgot to release its hold must not
-            // freeze the screen forever.
+            // 程序崩溃或忘了释放时，不能让屏幕永远冻结。
             if let Err(err) = self.terminal.set_mode(Mode::SYNC_OUTPUT, false) {
                 tracing::warn!("failed to end synchronized output: {err}");
             }
@@ -518,7 +506,7 @@ impl Renderer {
                             out.text.clear();
                         }
                     }
-                    // Selected cells draw in reverse video, as most terminals do.
+                    // 选中的单元格反色显示，和大多数终端一致。
                     let x16 = x as u16;
                     if selection.is_some_and(|s| s.start_x <= x16 && x16 <= s.end_x) {
                         let swapped = bg.unwrap_or(background);
@@ -558,13 +546,13 @@ impl Renderer {
     }
 }
 
-/// A platform keystroke translated to libghostty's vocabulary.
+/// 翻译成 libghostty 术语的平台按键。
 pub struct KeyInput {
     pub key: key::Key,
     pub mods: key::Mods,
-    /// Modifiers the platform already applied to produce `text`.
+    /// 平台生成 `text` 时已经用掉的修饰键。
     pub consumed_mods: key::Mods,
-    /// The character the key produces with no modifiers ('\0' if none).
+    /// 不带修饰键时该键产生的字符（没有则为 '\0'）。
     pub unshifted: char,
     pub text: Option<String>,
 }
@@ -585,9 +573,8 @@ mod tests {
             .to_owned()
     }
 
-    /// Drives a real shell through the PTY and libghostty-vt end to end:
-    /// typed keys reach the child, its colored and wide output lands in the
-    /// frame, and EOF arrives when it exits.
+    /// 端到端驱动真实 shell 经过 PTY 和 libghostty-vt：按键送达子进程，
+    /// 彩色和宽字符输出落进帧，子进程退出时读到 EOF。
     #[test]
     fn shell_round_trip() {
         let size = GridSize {
@@ -645,7 +632,7 @@ mod tests {
             cell_width_px: 8,
             cell_height_px: 16,
         };
-        // `cat` stays quiet, so only what the test feeds reaches the VT.
+        // `cat` 自己不输出，VT 只会收到测试喂进去的内容。
         Session::spawn_shell(size, Some("/bin/cat")).unwrap().0
     }
 

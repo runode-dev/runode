@@ -1,5 +1,5 @@
-//! runode: a desktop workspace for AI coding agents, rendering terminals with
-//! libghostty-vt in-process and GPUI for the window.
+//! runode：面向 AI 编程 agent 的桌面工作台。终端在进程内用 libghostty-vt 仿真，
+//! 窗口和绘制用 GPUI。
 
 mod keys;
 mod pty;

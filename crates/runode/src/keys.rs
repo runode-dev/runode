@@ -1,17 +1,15 @@
-//! Translates GPUI keystrokes into libghostty key events.
+//! 把 GPUI 的按键翻译成 libghostty 的按键事件。
 //!
-//! GPUI names keys by what is printed on them (`key`) and separately reports
-//! the text the platform typed (`key_char`). libghostty wants a physical-ish
-//! key code plus that text, so the encoder can pick legacy, modifyOtherKeys or
-//! Kitty encoding as the running program requested.
+//! GPUI 用键帽上印的字符命名按键（`key`），另外单独给出平台实际输入的文本
+//! （`key_char`）。libghostty 要的是接近物理键位的键码加上这段文本，这样编码器
+//! 才能按运行中程序的要求，选择传统编码、modifyOtherKeys 或 Kitty 编码。
 
 use gpui::Keystroke;
 use libghostty_vt::key::{Key, Mods};
 
 use crate::session::KeyInput;
 
-/// Returns `None` for keystrokes the terminal should not see at all: the
-/// Command key is reserved for the app's own bindings.
+/// 终端完全不该收到的按键返回 `None`：Command 键留给应用自己的快捷键。
 pub fn translate(keystroke: &Keystroke) -> Option<KeyInput> {
     let m = &keystroke.modifiers;
     if m.platform {
@@ -30,8 +28,7 @@ pub fn translate(keystroke: &Keystroke) -> Option<KeyInput> {
         mods |= Mods::CTRL;
     }
 
-    // Control combinations are encoded from the key itself; the platform's
-    // text for them is a control character the encoder must not echo.
+    // Control 组合键由按键本身编码；平台给出的文本是控制字符，编码器不能再原样发出。
     let text = keystroke
         .key_char
         .as_ref()
@@ -39,8 +36,8 @@ pub fn translate(keystroke: &Keystroke) -> Option<KeyInput> {
         .filter(|t| !t.is_empty() && t.chars().all(|c| !c.is_control()))
         .cloned();
 
-    // Shift and Option are "consumed" when they changed the produced text
-    // (a → A, s → ß), so the encoder doesn't report them a second time.
+    // Shift 和 Option 改变了产出的文本时（a → A，s → ß）算作「已消耗」，
+    // 免得编码器再把它们报告一次。
     let mut consumed_mods = Mods::empty();
     if let Some(text) = &text {
         let base = unshifted.to_string();
@@ -63,8 +60,8 @@ pub fn translate(keystroke: &Keystroke) -> Option<KeyInput> {
     })
 }
 
-/// The libghostty key and its unshifted character for a GPUI key name.
-/// Shifted US-layout symbols map back to the key that produces them.
+/// GPUI 键名对应的 libghostty 按键及其未按 Shift 时的字符。
+/// 美式布局下需要 Shift 的符号，映射回产生它的那个键。
 fn key_code(name: &str) -> Option<(Key, char)> {
     let key = match name {
         "enter" => return Some((Key::Enter, '\r')),
@@ -160,7 +157,7 @@ fn printable(c: char) -> Option<(Key, char)> {
         '.' | '>' => (Key::Period, '.'),
         '/' | '?' => (Key::Slash, '/'),
         '`' | '~' => (Key::Backquote, '`'),
-        // A non-US key: no code, but the encoder still sends its text.
+        // 非美式布局的键：没有键码，但编码器仍会发送它的文本。
         other => (Key::Unidentified, other),
     };
     Some(key)

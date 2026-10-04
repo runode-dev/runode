@@ -2,8 +2,8 @@
 resolver = "3"
 members = ["crates/runode"]
 default-members = ["crates/runode"]
-# vendor/libghostty-rs is its own workspace; without this, path deps under
-# the root would be adopted as members of ours.
+# vendor/libghostty-rs 自成一个 workspace；不排除的话，根目录下的 path 依赖
+# 会被自动收编为本 workspace 的成员。
 exclude = ["vendor"]
 
 [workspace.package]

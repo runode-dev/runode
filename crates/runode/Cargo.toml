@@ -9,7 +9,7 @@ publish.workspace = true
 [dependencies]
 libghostty-vt.workspace = true
 gpui.workspace = true
-# Without font-kit, gpui_macos falls back to a no-op text system and draws no glyphs.
+# 不开 font-kit 时，gpui_macos 退回到空实现的文字系统，一个字形都画不出来。
 gpui_platform = { workspace = true, features = ["font-kit"] }
 anyhow.workspace = true
 portable-pty.workspace = true

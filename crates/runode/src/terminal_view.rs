@@ -1,4 +1,4 @@
-//! The GPUI view of one terminal session: input routing and cell painting.
+//! 单个终端会话的 GPUI 视图：输入分发和单元格绘制。
 
 use std::{collections::HashMap, ops::Range};
 
@@ -23,7 +23,7 @@ actions!(runode, [Copy, Paste]);
 const PADDING: f32 = 6.;
 const FONT_FAMILY: &str = "Menlo";
 const FONT_SIZE: f32 = 13.;
-/// Line height as a multiple of the font's ascent + descent.
+/// 行高，按字体 ascent + descent 的倍数计。
 const LINE_SPACING: f32 = 1.15;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -46,15 +46,15 @@ pub struct TerminalView {
     font: Font,
     font_size: Pixels,
     metrics: Option<Metrics>,
-    /// Shaped glyphs by text and style; color is applied at paint time.
+    /// 按文本和样式缓存的字形排版结果；颜色在绘制时再上。
     glyphs: HashMap<GlyphKey, ShapedLine>,
-    /// Uncommitted IME composition, drawn at the cursor.
+    /// 输入法尚未上屏的预编辑文本，画在光标处。
     marked_text: Option<String>,
-    /// Sub-line remainder of precise (trackpad) scrolling.
+    /// 精确滚动（触控板）不足一行的余量。
     scroll_remainder: f32,
-    /// Where the cursor cell was last painted, for the IME candidate window.
+    /// 光标单元格上次绘制的位置，供输入法候选窗定位。
     cursor_bounds: Option<Bounds<Pixels>>,
-    /// Origin of the cell grid, for mapping pointer positions to cells.
+    /// 单元格网格的原点，用于把指针位置换算成单元格。
     grid_origin: Point<Pixels>,
     _reader: Task<()>,
     _hold_timeout: Option<Task<()>>,
@@ -62,7 +62,7 @@ pub struct TerminalView {
 
 impl TerminalView {
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> anyhow::Result<Self> {
-        // A provisional size; the first layout resizes to the real bounds.
+        // 临时尺寸；第一次布局时会按实际大小重设。
         let (session, mut rx) = Session::spawn(GridSize {
             cols: 80,
             rows: 24,
@@ -72,7 +72,7 @@ impl TerminalView {
 
         let reader = cx.spawn_in(window, async move |this, cx| {
             while let Some(first) = rx.next().await {
-                // Coalesce everything already queued into one VT write and one repaint.
+                // 把已排队的输出合并成一次 VT 写入和一次重绘。
                 let mut output = Vec::new();
                 let mut exited = false;
                 let mut next = Some(first);
@@ -122,8 +122,7 @@ impl TerminalView {
         })
     }
 
-    /// Repaints once a synchronized-output hold has had its time, so a
-    /// program that never releases it can't freeze the view.
+    /// 同步输出的冻结超时后重绘一次，避免程序一直不释放导致画面卡死。
     fn schedule_hold_timeout(&mut self, cx: &mut Context<Self>) {
         let timer = cx.background_executor().timer(SYNC_OUTPUT_TIMEOUT);
         self._hold_timeout = Some(cx.spawn(async move |this, cx| {
@@ -133,7 +132,7 @@ impl TerminalView {
     }
 
     fn key_down(&mut self, event: &KeyDownEvent, _: &mut Window, cx: &mut Context<Self>) {
-        // While the IME composes, keys belong to it.
+        // 输入法正在组字时，按键归输入法处理。
         if self.marked_text.is_some() {
             return;
         }
@@ -154,7 +153,7 @@ impl TerminalView {
             ScrollDelta::Lines(delta) => delta.y,
             ScrollDelta::Pixels(delta) => f32::from(delta.y) / f32::from(metrics.cell.height),
         };
-        // Positive wheel delta means content moves down: back into history.
+        // 滚轮增量为正表示内容向下移动，即往回滚到历史输出。
         self.scroll_remainder -= lines;
         let whole = self.scroll_remainder.trunc();
         self.scroll_remainder -= whole;
@@ -184,7 +183,7 @@ impl TerminalView {
     }
 
     fn copy(&mut self, _: &Copy, _: &mut Window, cx: &mut Context<Self>) {
-        // Selection arrives in a later phase; until then copy the visible screen.
+        // 选择功能后续再做；在那之前先复制整个可见屏幕。
         let frame = self.session.frame();
         let mut text = String::new();
         for y in 0..frame.rows {
@@ -207,7 +206,7 @@ impl TerminalView {
         let text_system = window.text_system();
         let font_id = text_system.resolve_font(&self.font);
         let scale = window.scale_factor();
-        // Snap to device pixels so adjacent cell backgrounds never leave seams.
+        // 对齐到设备像素，相邻单元格背景之间才不会出现缝隙。
         let snap = |v: f32| (v * scale).round() / scale;
         let width = text_system
             .advance(font_id, self.font_size, 'M')
@@ -253,7 +252,7 @@ impl TerminalView {
             }],
             None,
         );
-        // Unbounded growth only matters for pathological output; reset rather than evict.
+        // 只有异常输出才会让缓存无限增长；直接清空，不做逐项淘汰。
         if self.glyphs.len() > 8192 {
             self.glyphs.clear();
         }
@@ -454,8 +453,7 @@ impl Element for TerminalElement {
         let focused = focus_handle.is_focused(window);
         self.view.update(cx, |view, _| {
             let metrics = view.metrics(window);
-            // Painting needs the frame and `&mut view` (for the glyph cache)
-            // at once, so take the frame out for the duration.
+            // 绘制时要同时用到帧和 `&mut view`（字形缓存），所以先把帧取出来，画完再放回。
             let frame = view.session.take_frame();
             paint_frame(view, &frame, bounds.origin, metrics, focused, window);
             view.session.restore_frame(frame);
@@ -467,7 +465,7 @@ fn hsla(color: Rgb) -> Hsla {
     rgb(color.to_u32()).into()
 }
 
-/// Halfway between `fg` and `bg`, for faint (SGR 2) text.
+/// `fg` 与 `bg` 的中间色，用于暗淡（SGR 2）文字。
 fn faint(fg: Rgb, bg: Rgb) -> Rgb {
     let mix = |a: u8, b: u8| ((u16::from(a) + u16::from(b)) / 2) as u8;
     Rgb(mix(fg.0, bg.0), mix(fg.1, bg.1), mix(fg.2, bg.2))
@@ -489,14 +487,13 @@ fn paint_frame(
         size(cw * f32::from(frame.cols), ch * f32::from(frame.rows)),
     );
 
-    // A block cursor in a focused view is filled, and the glyph under it is
-    // drawn in the background color so it stays readable.
+    // 有焦点时块状光标是实心的，光标下的字形改用背景色画，保证仍然看得清。
     let filled_cursor = frame
         .cursor
         .filter(|c| focused && c.shape == CursorShape::Block && view.marked_text.is_none());
 
     window.paint_layer(grid, |window| {
-        // Backgrounds, merged into runs of equal color per row.
+        // 背景：每行把同色的相邻单元格合并成一块画。
         for y in 0..frame.rows {
             let row = frame.row(y);
             let mut x = 0usize;
@@ -527,7 +524,7 @@ fn paint_frame(
             ));
         }
 
-        // Glyphs and decorations.
+        // 字形和装饰线。
         let baseline = (ch - metrics.ascent - metrics.descent) / 2. + metrics.ascent;
         for y in 0..frame.rows {
             for (x, cell) in frame.row(y).iter().enumerate() {
@@ -567,7 +564,7 @@ fn paint_frame(
         }
     });
 
-    // Cursor shapes that sit over the text, and the IME composition.
+    // 盖在文字上方的光标形状，以及输入法预编辑文本。
     let mut cursor_bounds = None;
     if let Some(cursor) = frame.cursor {
         let position = cell_origin(cursor.x, cursor.y);
@@ -593,7 +590,7 @@ fn paint_frame(
                 (true, CursorShape::Underline) => {
                     &[Bounds::new(position + point(px(0.), ch - px(2.)), size(width, px(2.)))]
                 }
-                // Unfocused, or explicitly hollow: an outline.
+                // 没有焦点或明确要求空心时：只画轮廓。
                 _ => &[
                     Bounds::new(position, size(width, px(1.))),
                     Bounds::new(position + point(px(0.), ch - px(1.)), size(width, px(1.))),
@@ -609,8 +606,8 @@ fn paint_frame(
     view.cursor_bounds = cursor_bounds;
 }
 
-/// Paints a shaped line's glyphs at `baseline_origin` (x at the cell's left
-/// edge, y on the baseline) without `ShapedLine::paint`'s per-call layer.
+/// 在 `baseline_origin`（x 为单元格左边缘，y 在基线上）绘制一行已排版字形，
+/// 不像 `ShapedLine::paint` 那样每次调用都新建一层。
 fn paint_glyphs(line: &ShapedLine, baseline_origin: Point<Pixels>, color: Hsla, window: &mut Window) {
     for run in &line.runs {
         for glyph in &run.glyphs {

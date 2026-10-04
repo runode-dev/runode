@@ -1,9 +1,8 @@
-//! The child shell and its pseudo-terminal.
+//! 子 shell 及其伪终端。
 //!
-//! A reader thread forwards PTY output over a channel, because the VT state it
-//! feeds (`Terminal`) is single-threaded and lives on the UI thread. Writes
-//! (keystrokes and VT query replies) go straight to the PTY from any thread
-//! through a shared writer.
+//! 读线程通过 channel 转发 PTY 输出，因为接收输出的 VT 状态（`Terminal`）
+//! 只能单线程使用，放在 UI 线程上。写入（按键和 VT 查询的回复）可以从任意线程
+//! 经共享的 writer 直接写进 PTY。
 
 use std::{
     io::{Read, Write},
@@ -15,10 +14,10 @@ use anyhow::{Context as _, Result};
 use futures::channel::mpsc::{UnboundedReceiver, UnboundedSender, unbounded};
 use portable_pty::{Child, CommandBuilder, MasterPty, PtySize, native_pty_system};
 
-/// What the reader thread reports to the UI thread.
+/// 读线程报告给 UI 线程的事件。
 pub enum PtyEvent {
     Output(Vec<u8>),
-    /// The PTY reached EOF or failed: the child is gone.
+    /// PTY 读到 EOF 或出错：子进程已经退出。
     Exited,
 }
 
@@ -63,8 +62,8 @@ impl GridSize {
 }
 
 impl Pty {
-    /// Spawns `shell` (the user's `$SHELL` when `None`) as a login shell in
-    /// `cwd` and starts the reader thread.
+    /// 在 `cwd` 下以登录 shell 方式启动 `shell`（为 `None` 时用用户的 `$SHELL`），
+    /// 并启动读线程。
     pub fn spawn(
         size: GridSize,
         shell: Option<&str>,
@@ -79,7 +78,7 @@ impl Pty {
             .or_else(|| std::env::var("SHELL").ok())
             .unwrap_or_else(|| "/bin/zsh".into());
         let mut cmd = CommandBuilder::new(&shell);
-        // A login shell, like Terminal.app and Ghostty, so the user's profile runs.
+        // 和 Terminal.app、Ghostty 一样用登录 shell，这样会执行用户的 profile。
         cmd.arg("-l");
         cmd.env("TERM", "xterm-256color");
         cmd.env("COLORTERM", "truecolor");
@@ -93,7 +92,7 @@ impl Pty {
         }
 
         let child = pair.slave.spawn_command(cmd).context("failed to spawn shell")?;
-        // The child holds its own copy of the slave; ours must close so EOF arrives on exit.
+        // 子进程持有自己的 slave 副本；我们这份必须关掉，子进程退出时才会读到 EOF。
         drop(pair.slave);
 
         let reader = pair.master.try_clone_reader().context("pty reader")?;
@@ -123,8 +122,7 @@ impl Pty {
 
 impl Drop for Pty {
     fn drop(&mut self) {
-        // Closing the window ends the session; the shell gets SIGHUP from the
-        // closed master anyway, kill() just makes it prompt.
+        // 关窗口即结束会话；master 关闭后 shell 本来也会收到 SIGHUP，kill() 只是让它立即退出。
         let _ = self.child.kill();
     }
 }

@@ -1,4 +1,4 @@
 [env]
-# Build libghostty-vt from the vendored fork, not libghostty-rs's own fetch.
-# The checked-in bindings in vendor/libghostty-rs match this commit exactly.
+# 从 vendor 里的 ghostty fork 编译 libghostty-vt，不让 libghostty-rs 自己去拉源码。
+# libghostty-rs 提交在仓库里的绑定与这个 commit 完全对应。
 GHOSTTY_SOURCE_DIR = { value = "vendor/ghostty", relative = true }
