@@ -131,6 +131,8 @@ pub struct TerminalView {
     /// 按下的那一下已经上报给了程序。分屏时每个终端都在窗口上监听移动和松开，
     /// 只有按下发生在自己这里的终端才上报对应的拖动和松开。
     reporting_press: bool,
+    /// 这次左键按下是一次不带修饰键的单击，按在哪一格；松开时还在这一格就把光标挪过去。
+    click_cell: Option<(i32, i32)>,
     /// 闪烁光标当前处于亮的一半周期。
     cursor_blink_visible: bool,
     /// 打开着的搜索栏输入框，以及对它事件的订阅。
@@ -272,6 +274,7 @@ impl TerminalView {
             grid_origin: Point::default(),
             selecting: false,
             reporting_press: false,
+            click_cell: None,
             cursor_blink_visible: true,
             search_field: None,
             _reader: reader,
@@ -342,6 +345,16 @@ impl TerminalView {
         if self.marked_text.is_some() {
             return;
         }
+        // 在 shell 提示符上选中了一段命令时，退格和 Delete 删掉选中的文字。
+        let keystroke = &event.keystroke;
+        if matches!(keystroke.key.as_str(), "backspace" | "delete")
+            && !keystroke.modifiers.modified()
+            && self.session.delete_selection()
+        {
+            cx.stop_propagation();
+            cx.notify();
+            return;
+        }
         // Shift 加方向键等在有选区时用来扩展选区，没有选区时照常发给程序。
         if let Some(adjustment) = selection_adjustment(&event.keystroke)
             && self.session.adjust_selection(adjustment)
@@ -410,6 +423,8 @@ impl TerminalView {
             return;
         }
         self.selecting = true;
+        let plain = !event.modifiers.modified() && event.click_count == 1;
+        self.click_cell = plain.then(|| grid_cell(at));
         self.session.select_press(at, double_click_interval());
         cx.notify();
     }
@@ -449,6 +464,10 @@ impl TerminalView {
         if self.selecting {
             if event.button == MouseButton::Left {
                 self.finish_selecting(at, cx);
+                // 原地单击、没选出东西：在 shell 提示符上时把光标挪到点击处。
+                if self.click_cell.take() == Some(grid_cell(at)) && self.session.selection_text().is_none() {
+                    self.session.click_to_move(at);
+                }
             }
             return;
         }
@@ -1144,6 +1163,11 @@ fn mouse_button(button: MouseButton) -> Option<mouse::Button> {
         MouseButton::Middle => Some(mouse::Button::Middle),
         _ => None,
     }
+}
+
+/// 网格位置所在的单元格。
+fn grid_cell(at: GridPoint) -> (i32, i32) {
+    (at.x.floor() as i32, at.y.floor() as i32)
 }
 
 /// 只按着 Shift 的方向、翻页、Home/End 键对应的选区调整。
