@@ -91,7 +91,7 @@ const MAX_FONT_SIZE: f32 = 72.;
 pub const DEFAULT_TITLE: &str = "Runode";
 /// 重新读取前台进程的间隔：不输出的程序（比如 `sleep`）启动后，标签名也能跟上。
 const FOREGROUND_POLL_INTERVAL: Duration = Duration::from_secs(1);
-/// 视图建好时伪终端的临时尺寸；第一次布局时会按实际大小重设。
+/// 视图建好时伪终端的临时尺寸；第一次布局时会按实际大小重设，shell 等到那之后才启动。
 const PROVISIONAL_SIZE: GridSize = GridSize {
     cols: 80,
     rows: 24,
@@ -169,6 +169,10 @@ pub struct TerminalView {
     cursor_blink_since: Instant,
     /// 接上的是提前启动的 shell 时它启动用的尺寸，第一次布局时比对过就清掉。
     adopted_size: Option<GridSize>,
+    /// 要启动 shell，等下一次布局量出实际尺寸再启动。shell 读启动配置期间才收到尺寸变化时，
+    /// 第一个提示符仍按旧尺寸画：zsh 的 PROMPT_SP 按旧列数补空格，终端比那窄时折行，
+    /// 反白的 `%` 就留在了提示符上面一行。
+    start_pending: bool,
     /// 打开着的搜索栏输入框，以及对它事件的订阅。
     search_field: Option<(Entity<SearchField>, Subscription)>,
     _reader: Task<()>,
@@ -193,16 +197,16 @@ pub struct TerminalView {
 impl EventEmitter<TerminalEvent> for TerminalView {}
 
 impl TerminalView {
-    /// 启动一个 shell 会话并建好它的视图；shell 起不来时返回错误，不建视图。
-    /// `cwd` 为 `None` 时 shell 从家目录开始。
+    /// 建好视图，在 `cwd` 下启动 shell，`cwd` 为 `None` 时从家目录开始；shell 等第一次布局后
+    /// 才启动，见 `start`。伪终端开不了时返回错误，不建视图。
     pub fn spawn(
         cwd: Option<&std::path::Path>,
         window: &mut Window,
         cx: &mut App,
     ) -> anyhow::Result<Entity<Self>> {
-        let integration = cx.global::<AppConfig>().0.shell_integration;
-        let (session, rx) = Session::spawn(PROVISIONAL_SIZE, cwd, integration)?;
-        Ok(cx.new(|cx| Self::new(session, rx, window, cx)))
+        let view = Self::unstarted(cwd, window, cx)?;
+        view.update(cx, |view, cx| view.start(cx));
+        Ok(view)
     }
 
     /// 建好视图但先不启动 shell，等 `start` 时再在 `cwd` 下启动。恢复布局时看不见的终端用它，
@@ -220,8 +224,16 @@ impl TerminalView {
         self.session.started()
     }
 
-    /// 启动 `unstarted` 建的视图的 shell；启动不了时按 shell 已退出处理，关掉这个终端。
+    /// 启动 `unstarted` 建的视图的 shell：等下一次布局量出实际尺寸再启动，见 `start_pending`。
     pub fn start(&mut self, cx: &mut Context<Self>) {
+        if !self.session.started() {
+            self.start_pending = true;
+            cx.notify();
+        }
+    }
+
+    /// 按已经设好的实际尺寸启动 shell；启动不了时按 shell 已退出处理，关掉这个终端。
+    fn start_now(&mut self, cx: &mut Context<Self>) {
         if self.session.started() {
             return;
         }
@@ -407,6 +419,7 @@ impl TerminalView {
             cursor_blink_visible: true,
             cursor_blink_since: Instant::now(),
             adopted_size: None,
+            start_pending: false,
             search_field: None,
             _reader: reader,
             _foreground_poll: foreground_poll,
@@ -1263,6 +1276,10 @@ impl Element for TerminalElement {
                 view.respawn(size, window, cx);
             } else {
                 view.session.resize(size);
+            }
+            // 尺寸已经按实际设好，现在启动 shell；放到这一帧画完再做，启动失败时要关掉终端。
+            if std::mem::take(&mut view.start_pending) {
+                cx.defer_in(window, |view, _, cx| view.start_now(cx));
             }
             view.grid_origin = bounds.origin;
         });
