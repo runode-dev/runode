@@ -25,6 +25,8 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 [profile.dev.package."*"]
 opt-level = 2
 
-# block 0.1.6 已停止维护，新版 Rust 会拒绝它的一处写法；用改了这一处的副本替换。
+# block 0.1.6 已停止维护，新版 Rust 拒绝用空 enum 作外部 static 的类型，并对没写 ABI 的
+# extern 报弃用警告；用修好这两点的副本替换。GPUI 的 macOS 后端经 cocoa、metal、core-video
+# 的最新版仍依赖 block 0.1，等它们不再依赖或 block 出修复版，再删掉这段 patch 和副本。
 [patch.crates-io]
 block = { path = "vendor/crates/block" }

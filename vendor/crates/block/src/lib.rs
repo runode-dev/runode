@@ -54,7 +54,7 @@ use std::ops::{Deref, DerefMut};
 use std::os::raw::{c_int, c_ulong, c_void};
 use std::ptr;
 
-// 外部 static 的类型不能是空 enum（无值类型），新版 Rust 会拒绝编译；
+// 空 enum 无法取值，新版 Rust 不允许它作外部 static 的类型；
 // 改成零大小的不透明结构体，只取地址用，ABI 不变。
 #[repr(C)]
 struct Class {
