@@ -1,9 +1,10 @@
 //! 配置：兼容 Ghostty 的配置文件。
 //!
 //! 先按 Ghostty 自己的顺序读它的配置（XDG 目录，再到 macOS 的 Application
-//! Support），再读 runode 自己的 `$XDG_CONFIG_HOME/runode/config`。语法与键名都和
+//! Support），再读 runode 自己的 `$XDG_CONFIG_HOME/runode/config.conf`。语法与键名都和
 //! Ghostty 相同；同一个键 runode 也设了时以 runode 为准。runode 不认识的键直接忽略，
-//! 因为 Ghostty 的配置里大部分键与 runode 无关。
+//! 因为 Ghostty 的配置里大部分键与 runode 无关。runode 的配置文件不存在时，启动时会
+//! 写一份全部注释掉的模板，列出支持的键和默认值。
 
 use std::{
     collections::HashSet,
@@ -66,6 +67,10 @@ pub struct Config {
     pub palette: Vec<(u8, RgbColor)>,
     pub macos_option_as_alt: OptionAsAlt,
     pub shell_integration: crate::shell_integration::Mode,
+    /// 界面语言，是 locales 里的某个语言标签；`None` 表示跟随系统。
+    pub language: Option<String>,
+    /// 叠在默认快捷键上的 `keybind`，按出现顺序；只认 runode 自己的配置文件。
+    pub keybinds: Vec<Keybind>,
     /// 本次读到的全部文件（含主题和 config-file 引入的），供热重载监视。
     pub sources: Vec<PathBuf>,
     /// 加载时系统是否为深色外观，`theme = light:A,dark:B` 据此选了其中一个。
@@ -99,10 +104,23 @@ impl Default for Config {
                 .collect(),
             macos_option_as_alt: OptionAsAlt::False,
             shell_integration: crate::shell_integration::Mode::Detect,
+            language: None,
+            keybinds: Vec::new(),
             sources: Vec::new(),
             dark: true,
         }
     }
+}
+
+/// 一条 `keybind`，由 `keybinds::parse` 解析并校验。
+#[derive(Clone, Debug, PartialEq)]
+pub enum Keybind {
+    /// `keybind = clear`：去掉此前的全部绑定，包括默认的。
+    Clear,
+    /// `触发键=unbind`，触发键已转成 GPUI 的写法。
+    Unbind(String),
+    /// `触发键=动作`，动作保留原文，绑定时再构造。
+    Bind { keys: String, action: String },
 }
 
 /// 当前生效的配置。视图通过 `observe_global` 在重载后重新应用。
@@ -116,6 +134,10 @@ const WATCH_INTERVAL: Duration = Duration::from_secs(1);
 /// 加载配置并开始监视配置文件，保存后自动重载。
 pub fn install(cx: &mut App) {
     reload(cx);
+    // 模板按界面语言写，所以先加载配置定下语言。
+    if let Err(err) = create_config_file() {
+        tracing::warn!("failed to create {}: {err}", runode_config_path().display());
+    }
     cx.spawn(async move |cx| {
         let mut seen = None;
         loop {
@@ -138,7 +160,10 @@ pub fn install(cx: &mut App) {
 /// 重新读取全部配置文件并广播给各视图。
 pub fn reload(cx: &mut App) {
     let dark = system_is_dark(cx);
-    cx.set_global(AppConfig(Arc::new(Config::load(dark))));
+    let config = Config::load(dark);
+    // 先换语言再广播，观察配置的菜单和视图重画时就是新语言。
+    crate::i18n::set(&config.language.clone().unwrap_or_else(crate::i18n::system));
+    cx.set_global(AppConfig(Arc::new(config)));
 }
 
 /// 系统深浅色变了就重载，让 `theme = light:A,dark:B` 换到对应的主题。每个窗口都会
@@ -182,9 +207,11 @@ impl Config {
     /// 读取 Ghostty 与 runode 的配置。`dark` 用于 `theme = light:X,dark:Y`。
     pub fn load(dark: bool) -> Self {
         let mut sources = Vec::new();
+        // Ghostty 配置里的 keybind 针对的是另一套默认键位和动作，照搬过来含义会变，不读。
         let ghostty: Vec<Entry> = ghostty_config_paths()
             .iter()
             .flat_map(|path| read_entries(path, &mut sources))
+            .filter(|e| e.key != "keybind")
             .collect();
         let runode = read_entries(&runode_config_path(), &mut sources);
         Self::from_layers(&[ghostty, runode], dark, &mut sources)
@@ -331,6 +358,25 @@ impl Config {
                     _ => return Err("expected true, false, left or right".into()),
                 };
             }
+            "language" => match value {
+                "" | "system" => self.language = None,
+                tag => match crate::i18n::resolve(tag) {
+                    Some(locale) => self.language = Some(locale),
+                    // 没有翻译的语言用英文，同时报出来，免得写错了不知道。
+                    None => {
+                        self.language = Some(crate::i18n::FALLBACK.to_owned());
+                        return Err(format!("no translation, using {}", crate::i18n::FALLBACK));
+                    }
+                },
+            },
+            "keybind" => {
+                // 值为空时去掉此前写的 keybind，回到默认快捷键。
+                if empty {
+                    self.keybinds.clear();
+                } else {
+                    self.keybinds.push(crate::keybinds::parse(value)?);
+                }
+            }
             // 主题在应用各层之前已处理；其余 Ghostty 键 runode 用不上。
             _ => {}
         }
@@ -454,18 +500,136 @@ fn expand_home(path: &str) -> PathBuf {
     }
 }
 
-/// 用文本编辑器打开 runode 自己的配置文件；文件还不存在时先建一个空的。
+/// runode 的配置文件不存在时写入 `template`；已存在（哪怕是空文件）就不动。
+fn create_config_file() -> std::io::Result<()> {
+    use std::io::Write;
+    let path = runode_config_path();
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir)?;
+    }
+    match std::fs::OpenOptions::new().write(true).create_new(true).open(&path) {
+        Ok(mut file) => file.write_all(template(&crate::i18n::current()).as_bytes()),
+        Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => Ok(()),
+        Err(err) => Err(err),
+    }
+}
+
+/// 配置模板，按 `locale` 写说明：每个支持的键上面是 `##` 说明，说的是能填的值，取自翻译里的
+/// `config.<键名>`；下面是注释掉的默认值，取自 `Config::default`；末尾列出内置的主题名。
+/// 全部是注释，所以写进去不会盖掉 Ghostty 配置里的同名键，以后内置默认值变了也照样生效。
+fn template(locale: &str) -> String {
+    let d = Config::default();
+    let hex = |c: RgbColor| format!("#{:02x}{:02x}{:02x}", c.r, c.g, c.b);
+    let color = |c: TerminalColor| match c {
+        TerminalColor::Rgb(c) => hex(c),
+        TerminalColor::CellForeground => "cell-foreground".into(),
+        TerminalColor::CellBackground => "cell-background".into(),
+    };
+    let pair = |(a, b): (f32, f32)| if a == b { a.to_string() } else { format!("{a},{b}") };
+    let locales = crate::i18n::available().join(", ");
+
+    let mut out = String::new();
+    // 说明可以有多行，每行加 `## `。
+    let note = |out: &mut String, text: &str| {
+        for line in text.lines() {
+            out.push_str(&format!("## {line}\n"));
+        }
+    };
+    // 一个键：上面是它的说明，下面是每个默认值一行；没有默认值时写一行空值。
+    let key = |out: &mut String, key: &str, values: &[String]| {
+        let doc_key = format!("config.{}", key.replace('-', "_"));
+        note(out, &rust_i18n::t!(&doc_key, locale = locale, locales = locales));
+        for value in values.iter().map(String::as_str).chain(values.is_empty().then_some("")) {
+            let line = if value.is_empty() { format!("# {key} =\n") } else { format!("# {key} = {value}\n") };
+            out.push_str(&line);
+        }
+    };
+    let none = || Vec::new();
+
+    note(&mut out, &rust_i18n::t!("config.header", locale = locale));
+    out.push('\n');
+    key(&mut out, "language", &none());
+    out.push('\n');
+    key(&mut out, "font-family", &d.font_family);
+    key(&mut out, "font-size", &[d.font_size.to_string()]);
+    key(&mut out, "adjust-cell-height", &none());
+    key(&mut out, "window-padding-x", &[pair(d.window_padding_x)]);
+    key(&mut out, "window-padding-y", &[pair(d.window_padding_y)]);
+    out.push('\n');
+    key(&mut out, "theme", &none());
+    key(&mut out, "background", &[hex(d.background)]);
+    key(&mut out, "foreground", &[hex(d.foreground)]);
+    key(&mut out, "cursor-color", &none());
+    key(&mut out, "cursor-text", &none());
+    key(&mut out, "selection-background", &none());
+    key(&mut out, "selection-foreground", &none());
+    key(&mut out, "search-background", &[color(d.search_background)]);
+    key(&mut out, "search-foreground", &[color(d.search_foreground)]);
+    key(&mut out, "search-selected-background", &[color(d.search_selected_background)]);
+    key(&mut out, "search-selected-foreground", &[color(d.search_selected_foreground)]);
+    let palette: Vec<String> = d.palette.iter().map(|(i, c)| format!("{i}={}", hex(*c))).collect();
+    key(&mut out, "palette", &palette);
+    out.push('\n');
+    key(&mut out, "cursor-style", &["block".into()]);
+    key(&mut out, "cursor-style-blink", &none());
+    key(&mut out, "macos-option-as-alt", &["false".into()]);
+    key(&mut out, "shell-integration", &["detect".into()]);
+    out.push('\n');
+    key(&mut out, "config-file", &none());
+    out.push('\n');
+    let keybinds: Vec<String> = crate::keybinds::DEFAULTS.iter().map(|k| k.to_string()).collect();
+    key(&mut out, "keybind", &keybinds);
+
+    note(&mut out, &rust_i18n::t!("config.actions", locale = locale));
+    let usages: Vec<String> = crate::keybinds::ACTIONS
+        .iter()
+        .map(|a| match a.param {
+            Some(param) => format!("{}:{param}", a.name),
+            None => a.name.to_owned(),
+        })
+        .collect();
+    let width = usages.iter().map(String::len).max().unwrap_or(0);
+    for (usage, action) in usages.iter().zip(crate::keybinds::ACTIONS) {
+        let doc_key = format!("action.{}", action.name);
+        let doc = rust_i18n::t!(&doc_key, locale = locale);
+        out.push_str(&format!("##   {usage:width$}  {doc}\n"));
+    }
+    out.push('\n');
+
+    note(&mut out, &rust_i18n::t!("config.themes", locale = locale));
+    out.push_str(&wrap_names(BUNDLED_THEMES.iter().map(|(name, _)| *name)));
+    out
+}
+
+/// 把名字用「、」连起来，按宽度折成多行 `##` 注释。
+fn wrap_names<'a>(names: impl Iterator<Item = &'a str>) -> String {
+    const WIDTH: usize = 96;
+    let mut out = String::new();
+    let mut line = String::new();
+    for name in names {
+        if !line.is_empty() && line.chars().count() + name.chars().count() + 1 > WIDTH {
+            out += &format!("##   {line}\n");
+            line.clear();
+        }
+        if !line.is_empty() {
+            line.push('、');
+        }
+        line.push_str(name);
+    }
+    if !line.is_empty() {
+        out += &format!("##   {line}\n");
+    }
+    out
+}
+
+/// 用文本编辑器打开 runode 自己的配置文件；文件还不存在时先写一份模板。
 pub fn open(cx: &App) {
     let path = runode_config_path();
-    let created = path
-        .parent()
-        .map_or(Ok(()), std::fs::create_dir_all)
-        .and_then(|()| std::fs::OpenOptions::new().create(true).append(true).open(&path).map(drop));
-    if let Err(err) = created {
+    if let Err(err) = create_config_file() {
         tracing::warn!("failed to create {}: {err}", path.display());
         return;
     }
-    // 配置文件没有扩展名，按扩展名找默认程序不可靠；macOS 上用 `open -t` 指定文本编辑器。
+    // `.conf` 常常没有默认程序，或者关联到别的应用；macOS 上用 `open -t` 指定文本编辑器。
     // 等它退出要在别的线程里，免得卡住界面，也免得留下僵尸进程。
     if cfg!(target_os = "macos") {
         std::thread::spawn(move || {
@@ -479,7 +643,7 @@ pub fn open(cx: &App) {
 }
 
 fn runode_config_path() -> PathBuf {
-    config_dir().join("runode/config")
+    config_dir().join("runode/config.conf")
 }
 
 fn config_dir() -> PathBuf {
@@ -570,6 +734,64 @@ mod tests {
     fn load(layers: &[&str]) -> Config {
         let layers: Vec<_> = layers.iter().map(|t| entries(t)).collect();
         Config::from_layers(&layers, true, &mut Vec::new())
+    }
+
+    #[test]
+    fn template_is_all_comments_and_lists_defaults() {
+        for locale in crate::i18n::available() {
+            template_round_trips(&template(&locale));
+        }
+    }
+
+    fn template_round_trips(text: &str) {
+        assert!(parse_entries(text, "template").is_empty());
+        // 说明文字用 ##，注释掉的设置用一个 #：去掉一个 # 后说明仍是注释，设置全部生效，
+        // 结果应与默认配置一致。
+        for line in text.lines().filter(|l| l.starts_with("# ")) {
+            let key = line[2..].split_once(" =").map(|(key, _)| key);
+            assert!(
+                key.is_some_and(|k| !k.is_empty() && k.bytes().all(|b| b.is_ascii_lowercase() || b == b'-')),
+                "explanation should start with ##: {line}"
+            );
+        }
+        let settings: String = text.lines().filter_map(|l| l.strip_prefix("# ")).map(|l| format!("{l}\n")).collect();
+        assert!(settings.contains("background = #171618"));
+        let mut config = load(&[&settings]);
+        // 默认快捷键全部重写一遍，结果与不写一样。
+        assert_eq!(config.keybinds.len(), crate::keybinds::DEFAULTS.len());
+        assert_eq!(crate::keybinds::resolve(&config.keybinds), crate::keybinds::resolve(&[]));
+        config.keybinds.clear();
+        assert_eq!(config, Config::default());
+    }
+
+    /// `apply` 认的每个键都要写进模板，新增配置项时漏了这里就会失败。按缩进找
+    /// `apply` 里最外层 match 的分支，值的分支缩进更深，不会混进来。
+    #[test]
+    fn template_lists_every_key() {
+        let source = include_str!("config.rs");
+        let body = &source[source.find("    fn apply(&mut self").unwrap()..source.find("\nfn parse_f32").unwrap()];
+        let keys: Vec<&str> = body
+            .lines()
+            .filter_map(|line| line.strip_prefix("            \""))
+            .filter_map(|line| line.split_once("\" =>").map(|(key, _)| key))
+            .collect();
+        assert!(keys.len() > 20, "{keys:?}");
+        // 说明来自翻译，缺键时 `t!` 返回「语言.键名」，按这个认出漏写的说明。
+        let text = template(crate::i18n::FALLBACK);
+        assert!(!text.contains("en.config.") && !text.contains("en.action."), "template has untranslated keys");
+        let lines: Vec<&str> = text.lines().collect();
+        for key in keys.into_iter().chain(["theme", "config-file"]) {
+            let setting = format!("# {key} =");
+            let first = lines.iter().position(|l| l.starts_with(&setting));
+            let first = first.unwrap_or_else(|| panic!("template misses {key}"));
+            // 紧挨着的上一行是说明能填什么值的 `##`。
+            assert!(first > 0 && lines[first - 1].starts_with("## "), "{key} has no explanation above it");
+        }
+        let themes = &text[text.find("## Available themes").unwrap()..];
+        assert!(BUNDLED_THEMES.iter().all(|(name, _)| themes.contains(name)));
+        for action in crate::keybinds::ACTIONS {
+            assert!(text.contains(&format!("##   {}", action.name)), "template misses action {}", action.name);
+        }
     }
 
     #[test]

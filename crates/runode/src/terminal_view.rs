@@ -48,10 +48,10 @@ actions!(
     ]
 );
 
-/// 把这段字节原样发给程序；用来把 ⌘← 之类的快捷键映射成 shell 认识的控制字符。
+/// 把这段文本原样发给程序；用来把 ⌘← 之类的快捷键映射成 shell 认识的控制字符。
 #[derive(Clone, PartialEq, Action)]
 #[action(namespace = runode, no_json)]
-pub struct SendText(pub &'static str);
+pub struct SendText(pub String);
 
 /// 视口跳到上一个（负数）或下一个提示符。
 #[derive(Clone, PartialEq, Action)]
@@ -544,11 +544,12 @@ impl TerminalView {
             return;
         }
         // 可能直接执行命令的粘贴先让用户确认。
+        let detail = rust_i18n::t!("paste.detail");
         let answer = window.prompt(
             PromptLevel::Warning,
-            "粘贴的内容可能会直接执行命令",
-            Some("内容含有换行或终端控制序列，粘贴后可能被当作命令立即运行。"),
-            &["粘贴", "取消"],
+            &rust_i18n::t!("paste.title"),
+            Some(&detail),
+            &[&*rust_i18n::t!("paste.confirm"), &*rust_i18n::t!("paste.cancel")],
             cx,
         );
         cx.spawn(async move |this, cx| {
@@ -654,7 +655,7 @@ impl TerminalView {
         let fg = hsla(frame.0);
         let bar_bg = hsla(frame.1.mix(frame.0, 0.1));
         let status = match self.session.search_status() {
-            Some((_, 0)) if !field.read(cx).query().is_empty() => "无结果".to_owned(),
+            Some((_, 0)) if !field.read(cx).query().is_empty() => rust_i18n::t!("search.no_results").into_owned(),
             Some((Some(selected), total)) => format!("{}/{total}", selected + 1),
             Some((None, total)) if total > 0 => format!("-/{total}"),
             _ => String::new(),

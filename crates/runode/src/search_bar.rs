@@ -669,10 +669,11 @@ impl Element for SearchText {
         };
         let line = window.text_system().shape_line(field.text.clone().into(), font_size, &runs, None);
         let placeholder = field.text.is_empty().then(|| {
-            let text = "搜索";
+            let text = rust_i18n::t!("search.placeholder").into_owned();
+            let len = text.len();
             window
                 .text_system()
-                .shape_line(text.into(), font_size, &[run(text.len(), style.color.opacity(0.4))], None)
+                .shape_line(text.into(), font_size, &[run(len, style.color.opacity(0.4))], None)
         });
 
         // 横向滚动到光标露出来为止，文字缩短时也别在右边留空。

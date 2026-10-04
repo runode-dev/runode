@@ -203,15 +203,19 @@ fn agent_mark(agent: Agent, id: impl Into<ElementId>, fg: Hsla) -> AnyElement {
     }
 }
 
-/// 第 `ix` 个标签的快捷键提示：⌘1 到 ⌘8 对应前八个，⌘9 对应最后一个。
-fn tab_shortcut(ix: usize, len: usize) -> Option<SharedString> {
-    if ix < 8 {
-        Some(format!("⌘{}", ix + 1).into())
-    } else if ix == len - 1 {
-        Some("⌘9".into())
-    } else {
-        None
-    }
+/// 第 `ix` 个标签的快捷键提示，从键位表里查，快捷键改了也跟着变：先找切到这个标签的
+/// 绑定，最后一个标签再找切到最后一个标签的。默认是 ⌘1 到 ⌘8 对应前八个，⌘9 对应最后一个。
+fn tab_shortcut(ix: usize, len: usize, cx: &App) -> Option<SharedString> {
+    let keymap = cx.key_bindings();
+    let keymap = keymap.borrow();
+    // 后加的绑定优先，显示最后一个。
+    let text = |action: &dyn Action| {
+        keymap.bindings_for_action(action).next_back().map(|binding| {
+            let strokes: Vec<_> = binding.keystrokes().iter().map(ToString::to_string).collect();
+            SharedString::from(strokes.join(" "))
+        })
+    };
+    text(&SelectTab(ix)).or_else(|| if ix + 1 == len { text(&SelectLastTab) } else { None })
 }
 
 pub struct Workspace {
@@ -743,7 +747,7 @@ impl Workspace {
                 div()
                     .text_size(px(11.))
                     .text_color(fg.opacity(0.35))
-                    .children(tab_shortcut(ix, self.tabs.len()))
+                    .children(tab_shortcut(ix, self.tabs.len(), cx))
                     .into_any_element()
             };
             Some(

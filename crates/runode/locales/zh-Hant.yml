@@ -1,0 +1,152 @@
+_version: 1
+menu:
+  about: 關於 Runode
+  open_config: 打開設定
+  reload_config: 重新載入設定
+  services: 服務
+  hide: 隱藏 Runode
+  hide_others: 隱藏其他
+  show_all: 顯示全部
+  quit: 結束 Runode
+  file: 檔案
+  new_tab: 新增分頁
+  new_window: 新增視窗
+  split_right: 向右分割
+  split_down: 向下分割
+  close: 關閉
+  close_tab: 關閉分頁
+  close_window: 關閉視窗
+  close_all_windows: 關閉所有視窗
+  edit: 編輯
+  undo: 還原
+  redo: 重做
+  cut: 剪下
+  copy: 拷貝
+  paste: 貼上
+  paste_selection: 貼上選取內容
+  select_all: 全選
+  find: 尋找…
+  find_next: 尋找下一個
+  find_previous: 尋找上一個
+  find_selection: 使用所選範圍尋找
+  clear_screen: 清除螢幕
+  view: 顯示方式
+  increase_font_size: 放大字體
+  decrease_font_size: 縮小字體
+  reset_font_size: 重設字體大小
+  previous_prompt: 跳到上一個提示符號
+  next_prompt: 跳到下一個提示符號
+  toggle_full_screen: 切換全螢幕
+  window: 視窗
+  minimize: 縮到最小
+  zoom: 縮放
+  previous_tab: 顯示上一個分頁
+  next_tab: 顯示下一個分頁
+  previous_split: 選擇上一個分割畫面
+  next_split: 選擇下一個分割畫面
+  zoom_split: 放大分割畫面
+  equalize_splits: 平均分割畫面
+paste:
+  title: 貼上的內容可能會直接執行指令
+  detail: 內容含有換行或終端機控制序列，貼上後可能被當作指令立即執行。
+  confirm: 貼上
+  cancel: 取消
+search:
+  placeholder: 搜尋
+  no_results: 沒有結果
+config:
+  header: |-
+    runode 設定檔，語法和鍵名與 Ghostty 相同。
+    runode 先讀 Ghostty 的設定，再讀這個檔案；同一個鍵以這裡為準。
+    ## 開頭的是說明；一個 # 開頭的是註解掉的預設值，去掉這個 # 再改值才生效，儲存後自動重新載入。
+    每一項上面寫了能填的值。值留空（例如 `background =`）表示恢復預設。
+    顏色可以寫 #RRGGBB、#RGB（# 可省略）、X11 顏色名稱（例如 white、dark slate gray），
+    或 rgb:RR/GG/BB。
+  language: |-
+    介面語言：%{locales}。
+    留空時跟隨系統，系統語言沒有翻譯時用英文。
+  font_family: 字型：已安裝字型的名稱，可以寫多行，第一個能用的生效。
+  font_size: 字級：正數，單位是點。
+  adjust_cell_height: 字元格高度的調整量：像素（例如 2、-1）或百分比（例如 10%），留空表示不調整。
+  window_padding_x: 左右內距：一個數表示兩邊相同，或寫成 左,右，單位是點。
+  window_padding_y: 上下內距：一個數表示兩邊相同，或寫成 上,下，單位是點。
+  theme: |-
+    主題：檔案末尾列出的主題名稱，或主題檔案的絕對路徑；也可以依系統外觀分開寫，
+    例如 light:Catppuccin Latte,dark:Catppuccin Mocha。主題會先生效，下面寫出的顏色再覆蓋它。
+    runode/themes、ghostty/themes 兩個目錄裡的主題檔案也能用，依檔名引用。
+  background: 背景色：顏色。
+  foreground: 前景色（文字的顏色）：顏色。
+  cursor_color: 游標顏色：顏色，或 cell-foreground、cell-background（跟隨游標所在格子）；留空時用前景色。
+  cursor_text: 區塊游標下文字的顏色：同上；留空時用背景色。
+  selection_background: 選取範圍底色：顏色，或 cell-foreground、cell-background；留空時依背景深淺用一種藍色。
+  selection_foreground: 選取範圍文字顏色：同上；留空時設了選取底色就用格子的背景色，沒設就保持文字原本的顏色。
+  search_background: 搜尋符合項目的底色：顏色，或 cell-foreground、cell-background。
+  search_foreground: 搜尋符合項目的文字顏色：同上。
+  search_selected_background: 目前選中的搜尋符合項目的底色：同上。
+  search_selected_foreground: 目前選中的搜尋符合項目的文字顏色：同上。
+  palette: 調色盤：序號=顏色，序號為 0 到 255，可以寫多行；0-7 是一般色，8-15 是亮色。
+  cursor_style: 游標形狀：block、bar、underline、block_hollow。
+  cursor_style_blink: 游標是否閃爍：true、false；留空時預設閃爍，執行中的程式仍可改變。
+  macos_option_as_alt: macOS 上把 Option 當作 Alt：true（兩邊都是）、false、left（只有左邊）、right（只有右邊）。
+  shell_integration: Shell 整合：detect（依 shell 的程式名稱判斷）、none（關閉）、bash、zsh、fish。
+  config_file: |-
+    引入別的設定檔：檔案路徑，相對路徑從這個檔案所在目錄算，~/ 表示家目錄；
+    路徑前加 ? 表示檔案可以不存在。可以寫多行。
+  keybind: |-
+    快速鍵：觸發鍵=動作，可以寫多行，同一個觸發鍵以最後一行為準。
+    觸發鍵由修飾鍵和按鍵用 + 連起來，修飾鍵有 cmd、ctrl、alt、shift；連按幾個鍵用 > 隔開，
+    例如 ctrl+a>n。按鍵寫字元本身，或 left、right、up、down、page_up、page_down、home、end、
+    enter、escape、tab、backspace、delete、space、equal、plus、minus、f1 到 f24 等名稱。
+    觸發鍵=unbind 去掉一個綁定；keybind = clear 去掉之前的全部綁定，包括下面的預設綁定。
+    這裡只認 runode 自己的設定檔，Ghostty 設定裡的 keybind 不生效。
+    預設綁定：
+  actions: 可用的動作，帶參數的寫成 動作:參數：
+  themes: 可用的主題：
+action:
+  about: 關於 runode
+  quit: 結束
+  open_config: 打開設定檔
+  reload_config: 重新載入設定
+  hide: 隱藏 runode
+  hide_others: 隱藏其他應用程式
+  show_all: 顯示全部應用程式
+  new_window: 新增視窗
+  close_window: 關閉視窗
+  close_all_windows: 關閉所有視窗
+  minimize: 將視窗縮到最小
+  toggle_maximize: 縮放視窗
+  toggle_fullscreen: 切換全螢幕
+  new_tab: 新增分頁
+  close_tab: 關閉分頁
+  next_tab: 下一個分頁
+  previous_tab: 上一個分頁
+  last_tab: 最後一個分頁
+  goto_tab: 第 N 個分頁，從 1 數
+  new_split: 向右或向下分割
+  close_surface: 關閉目前的分割畫面，分頁裡只剩它時關閉分頁
+  goto_split: 焦點移到上一個、下一個或某個方向上的分割畫面
+  resize_split: 把最近的分隔線往這個方向移，步長固定
+  equalize_splits: 平均分割畫面
+  toggle_split_zoom: 放大或還原目前的分割畫面
+  copy_to_clipboard: 拷貝
+  paste_from_clipboard: 貼上
+  paste_from_selection: 貼上選取內容
+  select_all: 全選
+  clear_screen: 清除螢幕並清掉捲動歷史
+  scroll_to_top: 捲到最上面
+  scroll_to_bottom: 捲到最下面
+  scroll_page_up: 向上捲一頁
+  scroll_page_down: 向下捲一頁
+  scroll_to_selection: 捲到選取範圍
+  jump_to_prompt: 跳到上一個（負數）或下一個（正數）提示符號
+  text: 把文字傳給程式，支援 \x1b、\n、\t、\u{...} 等跳脫字元
+  esc: 傳送 Esc 加文字
+  csi: 傳送 Esc [ 加文字
+  start_search: 打開搜尋列
+  search_selection: 用選取的文字搜尋
+  navigate_search: 下一個或上一個搜尋結果
+  end_search: 關閉搜尋列
+  write_screen_file: 把螢幕和捲動歷史寫進暫存檔，再拷貝路徑、貼上路徑或打開它
+  increase_font_size: 放大字體，步長固定，N 可省略
+  decrease_font_size: 縮小字體，步長固定，N 可省略
+  reset_font_size: 重設字體大小

@@ -1,0 +1,152 @@
+_version: 1
+menu:
+  about: 关于 Runode
+  open_config: 打开配置
+  reload_config: 重新加载配置
+  services: 服务
+  hide: 隐藏 Runode
+  hide_others: 隐藏其他
+  show_all: 全部显示
+  quit: 退出 Runode
+  file: 文件
+  new_tab: 新建标签页
+  new_window: 新建窗口
+  split_right: 向右分屏
+  split_down: 向下分屏
+  close: 关闭
+  close_tab: 关闭标签页
+  close_window: 关闭窗口
+  close_all_windows: 关闭所有窗口
+  edit: 编辑
+  undo: 撤销
+  redo: 重做
+  cut: 剪切
+  copy: 拷贝
+  paste: 粘贴
+  paste_selection: 粘贴选区
+  select_all: 全选
+  find: 查找…
+  find_next: 查找下一个
+  find_previous: 查找上一个
+  find_selection: 使用所选内容查找
+  clear_screen: 清屏
+  view: 显示
+  increase_font_size: 放大字号
+  decrease_font_size: 缩小字号
+  reset_font_size: 恢复默认字号
+  previous_prompt: 跳到上一个提示符
+  next_prompt: 跳到下一个提示符
+  toggle_full_screen: 切换全屏
+  window: 窗口
+  minimize: 最小化
+  zoom: 缩放
+  previous_tab: 显示上一个标签页
+  next_tab: 显示下一个标签页
+  previous_split: 选择上一个分屏
+  next_split: 选择下一个分屏
+  zoom_split: 放大分屏
+  equalize_splits: 均分分屏
+paste:
+  title: 粘贴的内容可能会直接执行命令
+  detail: 内容含有换行或终端控制序列，粘贴后可能被当作命令立即运行。
+  confirm: 粘贴
+  cancel: 取消
+search:
+  placeholder: 搜索
+  no_results: 无结果
+config:
+  header: |-
+    runode 配置文件，语法和键名与 Ghostty 相同。
+    runode 先读 Ghostty 的配置，再读这个文件；同一个键以这里为准。
+    ## 开头的是说明；一个 # 开头的是注释掉的默认值，去掉这个 # 再改值才生效，保存后自动重载。
+    每一项上面写了能填的值。值留空（比如 `background =`）表示恢复默认。
+    颜色可以写 #RRGGBB、#RGB（# 可省略）、X11 颜色名（比如 white、dark slate gray），
+    或 rgb:RR/GG/BB。
+  language: |-
+    界面语言：%{locales}。
+    留空时跟随系统，系统语言没有翻译时用英文。
+  font_family: 字体族：已安装字体的名字，可以写多行，第一个能用的生效。
+  font_size: 字号：正数，单位是点。
+  adjust_cell_height: 单元格高度的调整量：像素（比如 2、-1）或百分比（比如 10%），留空表示不调整。
+  window_padding_x: 左右内边距：一个数表示两边相同，或者写成 左,右，单位是点。
+  window_padding_y: 上下内边距：一个数表示两边相同，或者写成 上,下，单位是点。
+  theme: |-
+    主题：文件末尾列出的主题名，或者主题文件的绝对路径；还可以按系统外观分开写，
+    比如 light:Catppuccin Latte,dark:Catppuccin Mocha。主题会先生效，下面写出的颜色再覆盖它。
+    runode/themes、ghostty/themes 两个目录里的主题文件也能用，按文件名引用。
+  background: 背景色：颜色。
+  foreground: 前景色（文字的颜色）：颜色。
+  cursor_color: 光标颜色：颜色，或 cell-foreground、cell-background（跟随光标所在格子）；留空时用前景色。
+  cursor_text: 块状光标下文字的颜色：同上；留空时用背景色。
+  selection_background: 选区底色：颜色，或 cell-foreground、cell-background；留空时按背景深浅用一种蓝色。
+  selection_foreground: 选区文字颜色：同上；留空时配了选区底色就用格子的背景色，没配就保持文字原来的颜色。
+  search_background: 搜索匹配的底色：颜色，或 cell-foreground、cell-background。
+  search_foreground: 搜索匹配的文字颜色：同上。
+  search_selected_background: 当前选中的搜索匹配的底色：同上。
+  search_selected_foreground: 当前选中的搜索匹配的文字颜色：同上。
+  palette: 调色板：序号=颜色，序号为 0 到 255，可以写多行；0-7 是普通色，8-15 是亮色。
+  cursor_style: 光标形状：block、bar、underline、block_hollow。
+  cursor_style_blink: 光标是否闪烁：true、false；留空时默认闪烁，运行中的程序仍可改变。
+  macos_option_as_alt: macOS 上把 Option 当作 Alt：true（两边都是）、false、left（只有左边）、right（只有右边）。
+  shell_integration: shell 集成：detect（按 shell 的程序名判断）、none（关闭）、bash、zsh、fish。
+  config_file: |-
+    引入别的配置文件：文件路径，相对路径从这个文件所在目录算，~/ 表示主目录；
+    路径前加 ? 表示文件可以不存在。可以写多行。
+  keybind: |-
+    快捷键：触发键=动作，可以写多行，同一个触发键以最后一行为准。
+    触发键由修饰键和按键用 + 连起来，修饰键有 cmd、ctrl、alt、shift；连按几个键用 > 隔开，
+    比如 ctrl+a>n。按键写字符本身，或者 left、right、up、down、page_up、page_down、home、end、
+    enter、escape、tab、backspace、delete、space、equal、plus、minus、f1 到 f24 等名字。
+    触发键=unbind 去掉一个绑定；keybind = clear 去掉之前的全部绑定，包括下面的默认绑定。
+    这里只认 runode 自己的配置文件，Ghostty 配置里的 keybind 不生效。
+    默认绑定：
+  actions: 可用的动作，带参数的写成 动作:参数：
+  themes: 可用的主题：
+action:
+  about: 关于 runode
+  quit: 退出
+  open_config: 打开配置文件
+  reload_config: 重新加载配置
+  hide: 隐藏 runode
+  hide_others: 隐藏其他应用
+  show_all: 显示全部应用
+  new_window: 新建窗口
+  close_window: 关闭窗口
+  close_all_windows: 关闭全部窗口
+  minimize: 最小化窗口
+  toggle_maximize: 缩放窗口
+  toggle_fullscreen: 切换全屏
+  new_tab: 新建标签
+  close_tab: 关闭标签
+  next_tab: 下一个标签
+  previous_tab: 上一个标签
+  last_tab: 最后一个标签
+  goto_tab: 第 N 个标签，从 1 数
+  new_split: 向右或向下分屏
+  close_surface: 关闭当前分屏，标签里只剩它时关闭标签
+  goto_split: 焦点移到上一个、下一个或某个方向上的分屏
+  resize_split: 把最近的分隔线往这个方向挪，步长固定
+  equalize_splits: 均分分屏
+  toggle_split_zoom: 放大或还原当前分屏
+  copy_to_clipboard: 复制
+  paste_from_clipboard: 粘贴
+  paste_from_selection: 粘贴选区
+  select_all: 全选
+  clear_screen: 清屏并清掉回滚历史
+  scroll_to_top: 滚到顶部
+  scroll_to_bottom: 滚到底部
+  scroll_page_up: 向上翻页
+  scroll_page_down: 向下翻页
+  scroll_to_selection: 滚到选区
+  jump_to_prompt: 跳到上一个（负数）或下一个（正数）提示符
+  text: 把文本发给程序，支持 \x1b、\n、\t、\u{...} 等转义
+  esc: 发送 Esc 加文本
+  csi: 发送 Esc [ 加文本
+  start_search: 打开搜索栏
+  search_selection: 用选区的文字搜索
+  navigate_search: 下一个或上一个搜索匹配
+  end_search: 关闭搜索栏
+  write_screen_file: 把屏幕和回滚历史写进临时文件，再复制路径、粘贴路径或打开它
+  increase_font_size: 放大字号，步长固定，N 可省略
+  decrease_font_size: 缩小字号，步长固定，N 可省略
+  reset_font_size: 恢复默认字号

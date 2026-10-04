@@ -1,22 +1,19 @@
 //! macOS 菜单栏、快捷键，以及不属于某个终端视图的应用级动作。
 //!
-//! 菜单项上显示的快捷键由 GPUI 从键位绑定里反查，所以每个动作只在
-//! `bind_keys` 里绑一次，菜单和键盘自动保持一致。
+//! 菜单项上显示的快捷键由 GPUI 从键位绑定里反查，快捷键只在 `keybinds` 里绑，
+//! 菜单和键盘自动保持一致。
 
-use gpui::{App, KeyBinding, Menu, MenuItem, OsAction, SystemMenuType, actions};
+use gpui::{App, Menu, MenuItem, OsAction, SystemMenuType, actions};
 
 use crate::{
-    search_bar::{Cut, EndSearch, Redo, SearchNext, SearchPrevious, SearchSelection, StartSearch, Undo},
+    search_bar::{Cut, Redo, SearchNext, SearchPrevious, SearchSelection, StartSearch, Undo},
     terminal_view::{
-        ClearScreen, Copy, DecreaseFontSize, IncreaseFontSize, Paste, PasteSelection,
-        ResetFontSize, ScreenFile, ScrollPageDown, ScrollPageUp, ScrollToBottom, ScrollToSelection,
-        ScrollToTop, SelectAll, SendText, WriteScreenFile, JumpToPrompt,
+        ClearScreen, Copy, DecreaseFontSize, IncreaseFontSize, JumpToPrompt, Paste, PasteSelection,
+        ResetFontSize, SelectAll,
     },
-    pane::Direction,
     workspace::{
-        ClosePane, CloseTab, EqualizePanes, FocusNextPane, FocusPane, FocusPreviousPane, NewSplitDown,
-        NewSplitRight, NewTab, NextTab, PreviousTab, ResizePane, SelectLastTab, SelectTab,
-        TogglePaneZoom,
+        ClosePane, CloseTab, EqualizePanes, FocusNextPane, FocusPreviousPane, NewSplitDown, NewSplitRight,
+        NewTab, NextTab, PreviousTab, TogglePaneZoom,
     },
 };
 
@@ -40,91 +37,6 @@ actions!(
 );
 
 pub fn install(cx: &mut App) {
-    cx.bind_keys([
-        KeyBinding::new("cmd-q", Quit, None),
-        KeyBinding::new("cmd-,", OpenConfiguration, None),
-        KeyBinding::new("cmd-shift-,", ReloadConfiguration, None),
-        KeyBinding::new("cmd-h", Hide, None),
-        KeyBinding::new("alt-cmd-h", HideOthers, None),
-        KeyBinding::new("cmd-n", NewWindow, None),
-        KeyBinding::new("cmd-shift-w", CloseWindow, None),
-        KeyBinding::new("cmd-shift-alt-w", CloseAllWindows, None),
-        KeyBinding::new("cmd-t", NewTab, Some("Workspace")),
-        KeyBinding::new("cmd-w", ClosePane, Some("Workspace")),
-        KeyBinding::new("cmd-alt-w", CloseTab, Some("Workspace")),
-        KeyBinding::new("cmd-d", NewSplitRight, Some("Workspace")),
-        KeyBinding::new("cmd-shift-d", NewSplitDown, Some("Workspace")),
-        KeyBinding::new("cmd-[", FocusPreviousPane, Some("Workspace")),
-        KeyBinding::new("cmd-]", FocusNextPane, Some("Workspace")),
-        KeyBinding::new("cmd-alt-left", FocusPane(Direction::Left), Some("Workspace")),
-        KeyBinding::new("cmd-alt-right", FocusPane(Direction::Right), Some("Workspace")),
-        KeyBinding::new("cmd-alt-up", FocusPane(Direction::Up), Some("Workspace")),
-        KeyBinding::new("cmd-alt-down", FocusPane(Direction::Down), Some("Workspace")),
-        KeyBinding::new("ctrl-cmd-left", ResizePane(Direction::Left), Some("Workspace")),
-        KeyBinding::new("ctrl-cmd-right", ResizePane(Direction::Right), Some("Workspace")),
-        KeyBinding::new("ctrl-cmd-up", ResizePane(Direction::Up), Some("Workspace")),
-        KeyBinding::new("ctrl-cmd-down", ResizePane(Direction::Down), Some("Workspace")),
-        KeyBinding::new("ctrl-cmd-=", EqualizePanes, Some("Workspace")),
-        KeyBinding::new("cmd-shift-enter", TogglePaneZoom, Some("Workspace")),
-        KeyBinding::new("cmd-}", NextTab, Some("Workspace")),
-        KeyBinding::new("ctrl-tab", NextTab, Some("Workspace")),
-        KeyBinding::new("cmd-{", PreviousTab, Some("Workspace")),
-        KeyBinding::new("ctrl-shift-tab", PreviousTab, Some("Workspace")),
-        KeyBinding::new("cmd-9", SelectLastTab, Some("Workspace")),
-        KeyBinding::new("cmd-m", Minimize, None),
-        KeyBinding::new("ctrl-cmd-f", ToggleFullScreen, None),
-        KeyBinding::new("cmd-enter", ToggleFullScreen, None),
-        KeyBinding::new("cmd-c", Copy, Some("Terminal")),
-        KeyBinding::new("cmd-v", Paste, Some("Terminal")),
-        KeyBinding::new("cmd-shift-v", PasteSelection, Some("Terminal")),
-        KeyBinding::new("cmd-a", SelectAll, Some("Terminal")),
-        KeyBinding::new("cmd-k", ClearScreen, Some("Terminal")),
-        KeyBinding::new("cmd-home", ScrollToTop, Some("Terminal")),
-        KeyBinding::new("cmd-end", ScrollToBottom, Some("Terminal")),
-        KeyBinding::new("cmd-pageup", ScrollPageUp, Some("Terminal")),
-        KeyBinding::new("cmd-pagedown", ScrollPageDown, Some("Terminal")),
-        KeyBinding::new("cmd-j", ScrollToSelection, Some("Terminal")),
-        KeyBinding::new("cmd-up", JumpToPrompt(-1), Some("Terminal")),
-        KeyBinding::new("cmd-down", JumpToPrompt(1), Some("Terminal")),
-        KeyBinding::new("cmd-shift-up", JumpToPrompt(-1), Some("Terminal")),
-        KeyBinding::new("cmd-shift-down", JumpToPrompt(1), Some("Terminal")),
-        // 行编辑：跳到行首、行尾，删到行首，按词左右移动。
-        KeyBinding::new("cmd-left", SendText("\x01"), Some("Terminal")),
-        KeyBinding::new("cmd-right", SendText("\x05"), Some("Terminal")),
-        KeyBinding::new("cmd-backspace", SendText("\x15"), Some("Terminal")),
-        KeyBinding::new("alt-left", SendText("\x1bb"), Some("Terminal")),
-        KeyBinding::new("alt-right", SendText("\x1bf"), Some("Terminal")),
-        // 搜索栏里回车找下一个，Esc 关掉；它不在 `Terminal` 上下文里，剪切复制粘贴、全选和撤销也要单独绑。
-        KeyBinding::new("enter", SearchNext, Some("SearchBar")),
-        KeyBinding::new("shift-enter", SearchPrevious, Some("SearchBar")),
-        KeyBinding::new("escape", EndSearch, Some("SearchBar")),
-        KeyBinding::new("cmd-g", SearchNext, Some("SearchBar")),
-        KeyBinding::new("cmd-shift-g", SearchPrevious, Some("SearchBar")),
-        KeyBinding::new("cmd-shift-f", EndSearch, Some("SearchBar")),
-        KeyBinding::new("cmd-c", Copy, Some("SearchBar")),
-        KeyBinding::new("cmd-v", Paste, Some("SearchBar")),
-        KeyBinding::new("cmd-a", SelectAll, Some("SearchBar")),
-        KeyBinding::new("cmd-x", Cut, Some("SearchBar")),
-        KeyBinding::new("cmd-z", Undo, Some("SearchBar")),
-        KeyBinding::new("cmd-shift-z", Redo, Some("SearchBar")),
-        KeyBinding::new("cmd-f", StartSearch, Some("Terminal")),
-        KeyBinding::new("cmd-e", SearchSelection, Some("Terminal")),
-        KeyBinding::new("cmd-g", SearchNext, Some("Terminal")),
-        KeyBinding::new("cmd-shift-g", SearchPrevious, Some("Terminal")),
-        KeyBinding::new("cmd-shift-f", EndSearch, Some("Terminal")),
-        // 点回终端后搜索栏还开着，Esc 照样关掉它；没在搜索时 Esc 照常发给程序。
-        KeyBinding::new("escape", EndSearch, Some("Terminal && searching")),
-        KeyBinding::new("ctrl-shift-cmd-j", WriteScreenFile(ScreenFile::CopyPath), Some("Terminal")),
-        KeyBinding::new("cmd-shift-j", WriteScreenFile(ScreenFile::PastePath), Some("Terminal")),
-        KeyBinding::new("cmd-shift-alt-j", WriteScreenFile(ScreenFile::Open), Some("Terminal")),
-        KeyBinding::new("cmd-=", IncreaseFontSize, Some("Terminal")),
-        KeyBinding::new("cmd-+", IncreaseFontSize, Some("Terminal")),
-        KeyBinding::new("cmd--", DecreaseFontSize, Some("Terminal")),
-        KeyBinding::new("cmd-0", ResetFontSize, Some("Terminal")),
-    ]);
-    // Cmd-1 到 Cmd-8 切到对应标签，Cmd-9 是最后一个。
-    cx.bind_keys((1..=8).map(|n| KeyBinding::new(&format!("cmd-{n}"), SelectTab(n - 1), Some("Workspace"))));
-
     cx.on_action(|_: &About, _| crate::about::show());
     cx.on_action(|_: &OpenConfiguration, cx| crate::config::open(cx));
     cx.on_action(|_: &ReloadConfiguration, cx| crate::config::reload(cx));
@@ -143,76 +55,105 @@ pub fn install(cx: &mut App) {
     cx.on_action(|_: &Zoom, cx| with_active_window(cx, |w| w.zoom_window()));
     cx.on_action(|_: &ToggleFullScreen, cx| with_active_window(cx, |w| w.toggle_fullscreen()));
 
+    // 装快捷键时会顺带设置菜单。
+    crate::keybinds::install(cx);
+}
+
+fn tr(key: &str) -> String {
+    rust_i18n::t!(key).into_owned()
+}
+
+/// 设置菜单栏。菜单项上的快捷键在这时从键位表里查，换了绑定要重新调用。
+pub fn set_menus(cx: &mut App) {
     cx.set_menus([
         // macOS 总把第一个菜单当作应用菜单，标题显示为应用名。
         Menu::new("Runode").items([
-            MenuItem::action("About Runode", About),
+            MenuItem::action(tr("menu.about"), About),
             MenuItem::separator(),
-            MenuItem::action("Open Configuration", OpenConfiguration),
-            MenuItem::action("Reload Configuration", ReloadConfiguration),
+            MenuItem::action(tr("menu.open_config"), OpenConfiguration),
+            MenuItem::action(tr("menu.reload_config"), ReloadConfiguration),
             MenuItem::separator(),
-            MenuItem::os_submenu("Services", SystemMenuType::Services),
+            MenuItem::os_submenu(tr("menu.services"), SystemMenuType::Services),
             MenuItem::separator(),
-            MenuItem::action("Hide Runode", Hide),
-            MenuItem::action("Hide Others", HideOthers),
-            MenuItem::action("Show All", ShowAll),
+            MenuItem::action(tr("menu.hide"), Hide),
+            MenuItem::action(tr("menu.hide_others"), HideOthers),
+            MenuItem::action(tr("menu.show_all"), ShowAll),
             MenuItem::separator(),
-            MenuItem::action("Quit Runode", Quit),
+            MenuItem::action(tr("menu.quit"), Quit),
         ]),
-        Menu::new("File").items([
-            MenuItem::action("New Tab", NewTab),
-            MenuItem::action("New Window", NewWindow),
+        Menu::new(tr("menu.file")).items([
+            MenuItem::action(tr("menu.new_tab"), NewTab),
+            MenuItem::action(tr("menu.new_window"), NewWindow),
             MenuItem::separator(),
-            MenuItem::action("Split Right", NewSplitRight),
-            MenuItem::action("Split Down", NewSplitDown),
+            MenuItem::action(tr("menu.split_right"), NewSplitRight),
+            MenuItem::action(tr("menu.split_down"), NewSplitDown),
             MenuItem::separator(),
-            MenuItem::action("Close", ClosePane),
-            MenuItem::action("Close Tab", CloseTab),
-            MenuItem::action("Close Window", CloseWindow),
-            MenuItem::action("Close All Windows", CloseAllWindows),
+            MenuItem::action(tr("menu.close"), ClosePane),
+            MenuItem::action(tr("menu.close_tab"), CloseTab),
+            MenuItem::action(tr("menu.close_window"), CloseWindow),
+            MenuItem::action(tr("menu.close_all_windows"), CloseAllWindows),
         ]),
         // 用 os_action 挂到系统的复制/粘贴选择器上，菜单栏的 Edit 才会被 macOS 识别，
         // 系统也会自动补上「听写」「表情与符号」等项。
-        Menu::new("Edit").items([
-            MenuItem::os_action("Undo", Undo, OsAction::Undo),
-            MenuItem::os_action("Redo", Redo, OsAction::Redo),
+        Menu::new(tr("menu.edit")).items([
+            MenuItem::os_action(tr("menu.undo"), Undo, OsAction::Undo),
+            MenuItem::os_action(tr("menu.redo"), Redo, OsAction::Redo),
             MenuItem::separator(),
-            MenuItem::os_action("Cut", Cut, OsAction::Cut),
-            MenuItem::os_action("Copy", Copy, OsAction::Copy),
-            MenuItem::os_action("Paste", Paste, OsAction::Paste),
-            MenuItem::action("Paste Selection", PasteSelection),
-            MenuItem::os_action("Select All", SelectAll, OsAction::SelectAll),
+            MenuItem::os_action(tr("menu.cut"), Cut, OsAction::Cut),
+            MenuItem::os_action(tr("menu.copy"), Copy, OsAction::Copy),
+            MenuItem::os_action(tr("menu.paste"), Paste, OsAction::Paste),
+            MenuItem::action(tr("menu.paste_selection"), PasteSelection),
+            MenuItem::os_action(tr("menu.select_all"), SelectAll, OsAction::SelectAll),
             MenuItem::separator(),
-            MenuItem::action("Find…", StartSearch),
-            MenuItem::action("Find Next", SearchNext),
-            MenuItem::action("Find Previous", SearchPrevious),
-            MenuItem::action("Use Selection for Find", SearchSelection),
+            MenuItem::action(tr("menu.find"), StartSearch),
+            MenuItem::action(tr("menu.find_next"), SearchNext),
+            MenuItem::action(tr("menu.find_previous"), SearchPrevious),
+            MenuItem::action(tr("menu.find_selection"), SearchSelection),
             MenuItem::separator(),
-            MenuItem::action("Clear Screen", ClearScreen),
+            MenuItem::action(tr("menu.clear_screen"), ClearScreen),
         ]),
-        Menu::new("View").items([
-            MenuItem::action("Increase Font Size", IncreaseFontSize),
-            MenuItem::action("Decrease Font Size", DecreaseFontSize),
-            MenuItem::action("Reset Font Size", ResetFontSize),
+        Menu::new(tr("menu.view")).items([
+            MenuItem::action(tr("menu.increase_font_size"), IncreaseFontSize),
+            MenuItem::action(tr("menu.decrease_font_size"), DecreaseFontSize),
+            MenuItem::action(tr("menu.reset_font_size"), ResetFontSize),
             MenuItem::separator(),
-            MenuItem::action("Jump to Previous Prompt", JumpToPrompt(-1)),
-            MenuItem::action("Jump to Next Prompt", JumpToPrompt(1)),
+            MenuItem::action(tr("menu.previous_prompt"), JumpToPrompt(-1)),
+            MenuItem::action(tr("menu.next_prompt"), JumpToPrompt(1)),
             MenuItem::separator(),
-            MenuItem::action("Toggle Full Screen", ToggleFullScreen),
+            MenuItem::action(tr("menu.toggle_full_screen"), ToggleFullScreen),
         ]),
-        Menu::new("Window").items([
-            MenuItem::action("Minimize", Minimize),
-            MenuItem::action("Zoom", Zoom),
+        Menu::new(tr("menu.window")).items([
+            MenuItem::action(tr("menu.minimize"), Minimize),
+            MenuItem::action(tr("menu.zoom"), Zoom),
             MenuItem::separator(),
-            MenuItem::action("Show Previous Tab", PreviousTab),
-            MenuItem::action("Show Next Tab", NextTab),
+            MenuItem::action(tr("menu.previous_tab"), PreviousTab),
+            MenuItem::action(tr("menu.next_tab"), NextTab),
             MenuItem::separator(),
-            MenuItem::action("Select Previous Split", FocusPreviousPane),
-            MenuItem::action("Select Next Split", FocusNextPane),
-            MenuItem::action("Zoom Split", TogglePaneZoom),
-            MenuItem::action("Equalize Splits", EqualizePanes),
+            MenuItem::action(tr("menu.previous_split"), FocusPreviousPane),
+            MenuItem::action(tr("menu.next_split"), FocusNextPane),
+            MenuItem::action(tr("menu.zoom_split"), TogglePaneZoom),
+            MenuItem::action(tr("menu.equalize_splits"), EqualizePanes),
         ]),
     ]);
+    // GPUI 只在菜单名恰好是 "Window" 时把它设成系统的窗口菜单（系统会往里加窗口列表），
+    // 翻译过的标题它认不出来，按位置补上：应用、File、Edit、View 之后的第五个。
+    #[cfg(target_os = "macos")]
+    set_windows_menu(4);
+}
+
+#[cfg(target_os = "macos")]
+fn set_windows_menu(index: isize) {
+    use objc2::MainThreadMarker;
+    use objc2_app_kit::NSApplication;
+
+    let Some(mtm) = MainThreadMarker::new() else {
+        return;
+    };
+    let app = NSApplication::sharedApplication(mtm);
+    let menu = app.mainMenu().and_then(|bar| bar.itemAtIndex(index)).and_then(|item| item.submenu());
+    if let Some(menu) = menu {
+        app.setWindowsMenu(Some(&menu));
+    }
 }
 
 fn with_active_window(cx: &mut App, f: impl FnOnce(&mut gpui::Window)) {

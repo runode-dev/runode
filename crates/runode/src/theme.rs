@@ -10,8 +10,8 @@ const fn rgb(hex: u32) -> RgbColor {
     }
 }
 
-pub const BACKGROUND: RgbColor = rgb(0x0F0D0E);
-pub const FOREGROUND: RgbColor = rgb(0xFFFFFF);
+pub const BACKGROUND: RgbColor = rgb(0x171618);
+pub const FOREGROUND: RgbColor = rgb(0xE6E1D8);
 
 /// 没配置选区颜色时的选区底色，深色背景和浅色背景各一种；选中的文字保持原来的颜色。
 pub const SELECTION_ON_DARK: RgbColor = rgb(0x264F78);

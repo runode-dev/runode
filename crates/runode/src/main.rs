@@ -4,6 +4,8 @@
 mod about;
 mod agent;
 mod config;
+mod i18n;
+mod keybinds;
 mod keys;
 mod menus;
 mod pane;
@@ -15,6 +17,9 @@ mod sprites;
 mod terminal_view;
 mod theme;
 mod workspace;
+
+// 界面文字的翻译，见 `i18n`；某种语言缺了某个键时取英文。
+rust_i18n::i18n!("locales", fallback = "en");
 
 use gpui::{App, AppContext as _, Bounds, WindowBounds, WindowOptions, px, size};
 use gpui_platform::application;
