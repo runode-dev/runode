@@ -24,7 +24,10 @@ actions!(
 );
 
 const PADDING: f32 = 6.;
-const FONT_FAMILY: &str = "Menlo";
+/// 默认字体；系统没装时改用 `FALLBACK_FONT_FAMILY`。
+const FONT_FAMILY: &str = "Hack Nerd Font Mono";
+/// macOS 自带的等宽字体。
+const FALLBACK_FONT_FAMILY: &str = "Menlo";
 const FONT_SIZE: f32 = 13.;
 const MIN_FONT_SIZE: f32 = 6.;
 const MAX_FONT_SIZE: f32 = 72.;
@@ -111,10 +114,21 @@ impl TerminalView {
             }
         });
 
+        // 字体族整个找不到时，GPUI 会落到 Helvetica 这类非等宽字体，
+        // 所以先看默认字体能否解析成它自己。
+        let text_system = window.text_system();
+        let resolved = text_system.get_font_for_id(text_system.resolve_font(&font(FONT_FAMILY)));
+        let family = if resolved.is_some_and(|f| f.family == FONT_FAMILY) {
+            FONT_FAMILY
+        } else {
+            FALLBACK_FONT_FAMILY
+        };
+        tracing::debug!("terminal font: {family}");
+
         Ok(Self {
             session,
             focus_handle: cx.focus_handle(),
-            font: font(FONT_FAMILY),
+            font: font(family),
             font_size: px(FONT_SIZE),
             metrics: None,
             glyphs: HashMap::new(),
