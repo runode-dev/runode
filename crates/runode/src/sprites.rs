@@ -1,5 +1,5 @@
-//! 自绘字符：方框线 U+2500–U+257F、块元素 U+2580–U+259F 和 Powerline 符号，
-//! 移植自 Ghostty 的精灵字体（sprite font），让这些字符精确铺满单元格、相邻单元格无缝拼接。
+//! 自绘字符：方框线、块元素、盲文、六分块与八分块、几何三角、Powerline 和 git 分支符号，
+//! 按单元格像素尺寸直接生成几何图形，不用字体字形，让这些字符精确铺满单元格、相邻单元格无缝拼接。
 //!
 //! 几何层（`shapes` 及其下的函数）不依赖 GPUI：按设备像素算出单元格内的图元，
 //! 坐标原点在单元格左上角。绘制层 `paint` 把图元换算回逻辑像素交给 GPUI。
@@ -11,12 +11,12 @@ use gpui::{Bounds, Hsla, PathBuilder, Pixels, Point, Window, fill, point, px};
 pub struct Metrics {
     pub width: u32,
     pub height: u32,
-    /// 细线宽度，对应 Ghostty 的 `box_thickness`。
+    /// 细线宽度；粗线是它的两倍。
     pub thickness: u32,
 }
 
 impl Metrics {
-    /// 单元格宽高和下划线粗细都是逻辑像素。线宽按 Ghostty 的算法取
+    /// 单元格宽高和下划线粗细都是逻辑像素。线宽取
     /// `max(1, ceil(下划线粗细))`，在设备像素上取整，Retina 下也是整像素宽、不发虚。
     pub fn new(cell_width: f32, cell_height: f32, underline_thickness: f32, scale: f32) -> Self {
         Self {
@@ -53,7 +53,18 @@ pub fn shapes(text: &str, m: Metrics) -> Option<Vec<Shape>> {
     match cp {
         0x2500..=0x257f => box_drawing(cp, m, &mut out),
         0x2580..=0x259f => block(cp, m, &mut out),
+        0x25e2..=0x25e5 | 0x25f8..=0x25fa | 0x25ff => corner_triangle(cp, m, &mut out),
+        0x2800..=0x28ff => braille(cp, m, &mut out),
+        0x1fb00..=0x1fb3b
+        | 0x1cd00..=0x1cde5
+        | 0x1cea0
+        | 0x1cea3
+        | 0x1cea8
+        | 0x1ceab
+        | 0x1fbe6
+        | 0x1fbe7 => mosaic(cp, m, &mut out),
         0xe0b0..=0xe0bf | 0xe0d2 | 0xe0d4 => powerline(cp, m, &mut out),
+        0xf5d0..=0xf60d => branch(cp, m, &mut out),
         _ => return None,
     }
     Some(out)
@@ -61,7 +72,7 @@ pub fn shapes(text: &str, m: Metrics) -> Option<Vec<Shape>> {
 
 // ---- 方框线 ----
 
-/// 每个方向线的样式，2 位一组按上、右、下、左打包，同 Ghostty 的 `Lines`。
+/// 每个方向线的样式（无、细、粗、双线），2 位一组按上、右、下、左打包。
 const N: u8 = 0;
 const L: u8 = 1;
 const H: u8 = 2;
@@ -96,7 +107,7 @@ fn box_drawing(cp: u32, m: Metrics, out: &mut Vec<Shape>) {
     let light = m.thickness as i32;
     let heavy = light * 2;
     match cp {
-        // 虚线：(数量, 线宽, 期望间隙)，取值同 Ghostty 的 `draw2500_257F`。
+        // 虚线：(段数, 线宽, 期望间隙)；间隙至少 4 像素，太窄时虚线看着像实线。
         0x2504 => dash_h(m, 3, light, light.max(4), out),
         0x2505 => dash_h(m, 3, heavy, light.max(4), out),
         0x2506 => dash_v(m, 3, light, light.max(4), out),
@@ -127,11 +138,11 @@ fn box_drawing(cp: u32, m: Metrics, out: &mut Vec<Shape>) {
     }
 }
 
-/// 整像素矩形；两角顺序不限，面积为零时不输出。
+/// 整像素矩形；两角顺序不限，面积或不透明度为零时不输出。
 fn rect(out: &mut Vec<Shape>, x0: i32, y0: i32, x1: i32, y1: i32, alpha: u8) {
     let (x0, x1) = (x0.min(x1), x0.max(x1));
     let (y0, y1) = (y0.min(y1), y0.max(y1));
-    if x0 < x1 && y0 < y1 {
+    if x0 < x1 && y0 < y1 && alpha > 0 {
         out.push(Shape::Rect {
             x0,
             y0,
@@ -142,7 +153,7 @@ fn rect(out: &mut Vec<Shape>, x0: i32, y0: i32, x1: i32, y1: i32, alpha: u8) {
     }
 }
 
-/// 移植 Ghostty 的 `linesChar`：各方向的线段从单元格边缘画到中心，
+/// 由四个方向线段组成的字符：各方向的线段从单元格边缘画到中心，
 /// 交汇处按相邻线的粗细和是否双线决定伸进中心多少，保证接缝无缺口、无凸起。
 fn lines(m: Metrics, [up, right, down, left]: [u8; 4], out: &mut Vec<Shape>) {
     let (w, h) = (m.width as i32, m.height as i32);
@@ -262,7 +273,7 @@ fn lines(m: Metrics, [up, right, down, left]: [u8; 4], out: &mut Vec<Shape>) {
     }
 }
 
-/// 横向虚线，移植 Ghostty 的 `dashHorizontal`：左右各留半个间隙，横向平铺时间隔均匀；
+/// 横向虚线：左右各留半个间隙，横向平铺时间隔均匀；
 /// 除不尽的像素逐个分给各段，而不是加到间隙里。
 fn dash_h(m: Metrics, count: i32, thick: i32, desired_gap: i32, out: &mut Vec<Shape>) {
     let (w, h) = (m.width as i32, m.height as i32);
@@ -287,7 +298,7 @@ fn dash_h(m: Metrics, count: i32, thick: i32, desired_gap: i32, out: &mut Vec<Sh
     }
 }
 
-/// 纵向虚线，移植 Ghostty 的 `dashVertical`：从顶部开始，整个间隙留在底部。
+/// 纵向虚线：从顶部开始，整个间隙留在底部，和上下的实线字符相接时不出现半截间隙。
 fn dash_v(m: Metrics, count: i32, thick: i32, desired_gap: i32, out: &mut Vec<Shape>) {
     let (w, h) = (m.width as i32, m.height as i32);
     if h < count * 2 {
@@ -311,7 +322,7 @@ fn dash_v(m: Metrics, count: i32, thick: i32, desired_gap: i32, out: &mut Vec<Sh
     }
 }
 
-/// 圆角，移植 Ghostty 的 `arc`：从单元格边缘沿细线中心线走到离中心 r 处，
+/// 圆角：从单元格边缘沿细线中心线走到离中心 r 处，
 /// 用控制点系数 0.25 的三次贝塞尔拐到另一条边，再以细线宽度描边（平头端点）。
 /// `dx`、`dy` 为 ±1，表示圆弧向右/左、向下/上伸出单元格。
 fn arc(m: Metrics, dx: f32, dy: f32, out: &mut Vec<Shape>) {
@@ -320,18 +331,28 @@ fn arc(m: Metrics, dx: f32, dy: f32, out: &mut Vec<Shape>) {
     let cy = ((m.height as i32 - m.thickness as i32).max(0) / 2) as f32 + t / 2.;
     let r = w.min(h) / 2.;
     let s = 0.25;
-    let mut points = vec![[cx, if dy > 0. { h } else { 0. }], [cx, cy + dy * r]];
+    let (edge_x, edge_y) = (if dx > 0. { w } else { 0. }, if dy > 0. { h } else { 0. });
+    // 尺寸为奇数时圆弧端点可能越出单元格边缘半个像素，连到边缘的直线就会掉头，
+    // 自相重叠的带子按奇偶规则填充会挖出洞。掉头那段本来就被圆弧盖住，
+    // 所以这时直接从圆弧端点起止。
+    let mut points = Vec::new();
+    if dy * (edge_y - cy) > r {
+        points.push([cx, edge_y]);
+    }
+    points.push([cx, cy + dy * r]);
     cubic(
         &mut points,
         [cx, cy + dy * s * r],
         [cx + dx * s * r, cy],
         [cx + dx * r, cy],
     );
-    points.push([if dx > 0. { w } else { 0. }, cy]);
+    if dx * (edge_x - cx) > r {
+        points.push([edge_x, cy]);
+    }
     band(&points, -t / 2., t / 2., out);
 }
 
-/// 斜线，移植 Ghostty 的 `lightDiagonal*`：两端按斜率略微伸出单元格，相邻单元格的斜线才能连上。
+/// 斜线：两端按斜率略微伸出单元格，相邻单元格的斜线才能连上。
 fn diagonal(m: Metrics, rising: bool, out: &mut Vec<Shape>) {
     let (w, h, t) = (m.width as f32, m.height as f32, m.thickness as f32);
     let sx = (w / h).min(1.) * 0.5;
@@ -367,36 +388,145 @@ fn block(cp: u32, m: Metrics, out: &mut Vec<Shape>) {
         // ▉▊▋▌▍▎▏：左侧 7/8 到 1/8。
         0x2589..=0x258f => block_rect(m, Align::Left, (0x2590 - cp) as f32 / 8., 1., out),
         0x2590 => block_rect(m, Align::Right, 0.5, 1., out),
-        // ░▒▓：和 Ghostty 一样用前景色加透明度铺满，不画点阵。
+        // ░▒▓：用前景色加 1/4、1/2、3/4 的不透明度铺满，不画点阵，相邻单元格才不会出现花纹。
         0x2591..=0x2593 => rect(out, 0, 0, w, h, (cp - 0x2590) as u8 * 0x40),
         0x2594 => block_rect(m, Align::Upper, 1., 0.125, out),
         0x2595 => block_rect(m, Align::Right, 0.125, 1., out),
-        _ => {
-            let quads = QUADRANTS[(cp - 0x2596) as usize];
-            // 中线位置同 Ghostty 的 `Fraction.min`/`max`：两半各自取整，奇数尺寸时不留缝。
-            let (x_mid0, x_mid1) = (
-                w - (w as f32 * 0.5).round() as i32,
-                (w as f32 * 0.5).round() as i32,
-            );
-            let (y_mid0, y_mid1) = (
-                h - (h as f32 * 0.5).round() as i32,
-                (h as f32 * 0.5).round() as i32,
-            );
-            for (bit, x0, x1, y0, y1) in [
-                (1, 0, x_mid1, 0, y_mid1),
-                (2, x_mid0, w, 0, y_mid1),
-                (4, 0, x_mid1, y_mid0, h),
-                (8, x_mid0, w, y_mid0, h),
-            ] {
-                if quads & bit != 0 {
-                    rect(out, x0, y0, x1, y1, 0xff);
-                }
-            }
+        _ => grid(m, 2, QUADRANTS[(cp - 0x2596) as usize].into(), out),
+    }
+}
+
+/// 八分块 U+1CD00–U+1CDE5 按码点顺序恰好是 0–255 中去掉下面这些组合后的升序排列
+/// （它们已有别的码点，如空格、`█`、象限块和半块）。
+const OCTANT_SKIPPED: [u8; 26] = [
+    0x00, 0x01, 0x02, 0x03, 0x05, 0x0a, 0x0f, 0x14, 0x28, 0x3f, 0x40, 0x50, 0x55, 0x5a, 0x5f, 0x80,
+    0xa0, 0xa5, 0xaa, 0xaf, 0xc0, 0xf0, 0xf5, 0xfa, 0xfc, 0xff,
+];
+
+/// 六分块、八分块，以及几个四分之一块（U+1CEA0 等）和居中的半块（U+1FBE6/7）。
+fn mosaic(cp: u32, m: Metrics, out: &mut Vec<Shape>) {
+    match cp {
+        // 六分块：按码点顺序排列，跳过与半块、全块重复的组合。
+        0x1fb00..=0x1fb3b => {
+            let i = cp - 0x1fb00;
+            grid(m, 3, i + i / 0x14 + 1, out);
+        }
+        0x1cd00..=0x1cde5 => {
+            let mask = (0..=255u8)
+                .filter(|b| !OCTANT_SKIPPED.contains(b))
+                .nth((cp - 0x1cd00) as usize)
+                .unwrap_or(0);
+            grid(m, 4, mask.into(), out);
+        }
+        0x1cea0 => fill_frac(m, [0.5, 1.], [0.75, 1.], out),
+        0x1cea3 => fill_frac(m, [0., 0.5], [0.75, 1.], out),
+        0x1cea8 => fill_frac(m, [0., 0.5], [0., 0.25], out),
+        0x1ceab => fill_frac(m, [0.5, 1.], [0., 0.25], out),
+        0x1fbe6 => block_rect(m, Align::Left, 0.5, 0.5, out),
+        _ => block_rect(m, Align::Right, 0.5, 0.5, out),
+    }
+}
+
+/// 2 列 × `rows` 行的格子，`mask` 按行优先每格一位（象限块、六分块、八分块共用）。
+fn grid(m: Metrics, rows: u32, mask: u32, out: &mut Vec<Shape>) {
+    for i in (0..2 * rows).filter(|i| mask >> i & 1 != 0) {
+        let (col, row) = (f64::from(i % 2), f64::from(i / 2));
+        let rows = f64::from(rows);
+        fill_frac(
+            m,
+            [col / 2., (col + 1.) / 2.],
+            [row / rows, (row + 1.) / rows],
+            out,
+        );
+    }
+}
+
+/// 按比例填充单元格的一块：起点按从另一端量的
+/// 互补比例取整，终点直接取整，奇数尺寸下相邻两块正好拼满、不留缝也不重叠。
+fn fill_frac(m: Metrics, [x0, x1]: [f64; 2], [y0, y1]: [f64; 2], out: &mut Vec<Shape>) {
+    let lo = |f: f64, size: u32| (f64::from(size) - ((1. - f) * f64::from(size)).round()) as i32;
+    let hi = |f: f64, size: u32| (f * f64::from(size)).round() as i32;
+    rect(
+        out,
+        lo(x0, m.width),
+        lo(y0, m.height),
+        hi(x1, m.width),
+        hi(y1, m.height),
+        0xff,
+    );
+}
+
+/// 盲文：点是 w×w 的整像素方块，剩余像素依次分给
+/// 点宽、边距、点距，保证各种单元格尺寸下点阵都均匀。码点低 8 位依次是左列上三点、
+/// 右列上三点、左下、右下。
+fn braille(cp: u32, m: Metrics, out: &mut Vec<Shape>) {
+    let (width, height) = (m.width as i32, m.height as i32);
+    let mut w = (width / 4).min(height / 8);
+    let (mut x_spacing, mut y_spacing) = (width / 4, height / 8);
+    let (mut x_margin, mut y_margin) = (x_spacing / 2, y_spacing / 2);
+    let mut x_left = width - 2 * x_margin - x_spacing - 2 * w;
+    let mut y_left = height - 2 * y_margin - 3 * y_spacing - 4 * w;
+    if x_left >= 2 && y_left >= 4 && w == 0 {
+        (w, x_left, y_left) = (w + 1, x_left - 2, y_left - 4);
+    }
+    if x_left >= 2 && x_margin == 0 {
+        (x_margin, x_left) = (1, x_left - 2);
+    }
+    if y_left >= 2 && y_margin == 0 {
+        (y_margin, y_left) = (1, y_left - 2);
+    }
+    if x_left >= 1 {
+        (x_spacing, x_left) = (x_spacing + 1, x_left - 1);
+    }
+    if y_left >= 3 {
+        (y_spacing, y_left) = (y_spacing + 1, y_left - 3);
+    }
+    if x_left >= 2 {
+        (x_margin, x_left) = (x_margin + 1, x_left - 2);
+    }
+    if y_left >= 2 {
+        (y_margin, y_left) = (y_margin + 1, y_left - 2);
+    }
+    if x_left >= 2 && y_left >= 4 {
+        w += 1;
+    }
+    let dots = [
+        (0, 0),
+        (0, 1),
+        (0, 2),
+        (1, 0),
+        (1, 1),
+        (1, 2),
+        (0, 3),
+        (1, 3),
+    ];
+    for (bit, (col, row)) in dots.into_iter().enumerate() {
+        if cp >> bit & 1 != 0 {
+            let x = x_margin + col * (w + x_spacing);
+            let y = y_margin + row * (w + y_spacing);
+            rect(out, x, y, x + w, y + w, 0xff);
         }
     }
 }
 
-/// 移植 Ghostty 的 `blockShade`：宽高按比例取整，再按对齐方式贴边或居中。
+/// ◢◣◤◥ 实心直角三角形和 ◸◹◺◿ 空心三角形；空心的只向内描边，外缘与实心的重合。
+fn corner_triangle(cp: u32, m: Metrics, out: &mut Vec<Shape>) {
+    let (w, h, t) = (m.width as f32, m.height as f32, m.thickness as f32);
+    let points = match cp {
+        0x25e4 | 0x25f8 => vec![[0., 0.], [0., h], [w, 0.]],
+        0x25e5 | 0x25f9 => vec![[0., 0.], [w, h], [w, 0.]],
+        0x25e3 | 0x25fa => vec![[0., 0.], [0., h], [w, h]],
+        _ => vec![[0., h], [w, h], [w, 0.]],
+    };
+    if cp <= 0x25e5 {
+        out.push(Shape::Polygon(points));
+    } else {
+        let inner = inset(&points, t);
+        out.push(Shape::Polygon(ring(points, inner)));
+    }
+}
+
+/// 块元素：宽高按比例取整，再按对齐方式贴边或居中。
 fn block_rect(m: Metrics, align: Align, fw: f32, fh: f32, out: &mut Vec<Shape>) {
     let (cw, ch) = (m.width as i32, m.height as i32);
     let w = (cw as f32 * fw).round() as i32;
@@ -412,7 +542,7 @@ fn block_rect(m: Metrics, align: Align, fw: f32, fh: f32, out: &mut Vec<Shape>) 
 
 // ---- Powerline ----
 
-/// Ghostty `powerline.zig` 覆盖的码点：U+E0B0–U+E0BF 的三角、细线箭头、半圆和斜线，
+/// Powerline 分隔符：U+E0B0–U+E0BF 的三角、细线箭头、半圆和斜线，
 /// 以及 U+E0D2、U+E0D4。
 fn powerline(cp: u32, m: Metrics, out: &mut Vec<Shape>) {
     let (w, h, t) = (m.width as f32, m.height as f32, m.thickness as f32);
@@ -470,6 +600,152 @@ fn half_circle(w: f32, h: f32) -> Vec<[f32; 2]> {
     points
 }
 
+// ---- git 分支符号 ----
+
+/// U+F5D0–U+F5ED 由哪些部件组成：横线、竖线和四个方向的圆角（同方框线 ╭╮╰╯）。
+const BRANCH_H: u8 = 1;
+const BRANCH_V: u8 = 2;
+const BRANCH_DR: u8 = 4;
+const BRANCH_DL: u8 = 8;
+const BRANCH_UR: u8 = 16;
+const BRANCH_UL: u8 = 32;
+#[rustfmt::skip]
+const BRANCH_PARTS: [u8; 0x1e] = [
+    BRANCH_H, BRANCH_V, 0, 0, 0, 0, BRANCH_DR, BRANCH_DL, BRANCH_UR, BRANCH_UL,
+    BRANCH_V | BRANCH_UR, BRANCH_V | BRANCH_DR, BRANCH_UR | BRANCH_DR,
+    BRANCH_V | BRANCH_UL, BRANCH_V | BRANCH_DL, BRANCH_UL | BRANCH_DL,
+    BRANCH_H | BRANCH_DL, BRANCH_H | BRANCH_DR, BRANCH_DR | BRANCH_DL,
+    BRANCH_H | BRANCH_UL, BRANCH_H | BRANCH_UR, BRANCH_UR | BRANCH_UL,
+    BRANCH_V | BRANCH_UL | BRANCH_UR, BRANCH_V | BRANCH_DL | BRANCH_DR,
+    BRANCH_H | BRANCH_DL | BRANCH_UL, BRANCH_H | BRANCH_UR | BRANCH_DR,
+    BRANCH_V | BRANCH_UL | BRANCH_DR, BRANCH_V | BRANCH_UR | BRANCH_DL,
+    BRANCH_H | BRANCH_UL | BRANCH_DR, BRANCH_H | BRANCH_UR | BRANCH_DL,
+];
+
+/// U+F5EE–U+F60D 的节点每两个一组（先实心后空心），这里是每组连出去的边：
+/// 1 上、2 右、4 下、8 左。
+const BRANCH_NODES: [u8; 16] = [0, 2, 8, 10, 4, 1, 5, 6, 12, 3, 9, 7, 13, 14, 11, 15];
+
+/// git 分支符号：直线、圆角、渐隐线和带连线的节点，用来画提交图。
+fn branch(cp: u32, m: Metrics, out: &mut Vec<Shape>) {
+    let (w, h) = (m.width as i32, m.height as i32);
+    let t = m.thickness as i32;
+    let (h_top, v_left) = ((h - t).max(0) / 2, (w - t).max(0) / 2);
+    match cp {
+        0xf5d2 => fade(m, false, true, out),
+        0xf5d3 => fade(m, false, false, out),
+        0xf5d4 => fade(m, true, true, out),
+        0xf5d5 => fade(m, true, false, out),
+        0xf5d0..=0xf5ed => {
+            let parts = BRANCH_PARTS[(cp - 0xf5d0) as usize];
+            if parts & BRANCH_H != 0 {
+                rect(out, 0, h_top, w, h_top + t, 0xff);
+            }
+            if parts & BRANCH_V != 0 {
+                rect(out, v_left, 0, v_left + t, h, 0xff);
+            }
+            for (bit, dx, dy) in [
+                (BRANCH_DR, 1., 1.),
+                (BRANCH_DL, -1., 1.),
+                (BRANCH_UR, 1., -1.),
+                (BRANCH_UL, -1., -1.),
+            ] {
+                if parts & bit != 0 {
+                    arc(m, dx, dy, out);
+                }
+            }
+        }
+        _ => {
+            let i = cp - 0xf5ee;
+            branch_node(m, BRANCH_NODES[(i / 2) as usize], i.is_multiple_of(2), out);
+        }
+    }
+}
+
+/// 分支节点：圆心落在细线中心上，半径取到最近单元格边的距离，
+/// 连出去的线从圆周画到单元格边缘。
+fn branch_node(m: Metrics, edges: u8, filled: bool, out: &mut Vec<Shape>) {
+    let (w, h) = (m.width as i32, m.height as i32);
+    let t = m.thickness as i32;
+    let (h_top, v_left) = ((h - t).max(0) / 2, (w - t).max(0) / 2);
+    let (tf, wf, hf) = (t as f32, w as f32, h as f32);
+    let (cx, cy) = (v_left as f32 + tf / 2., h_top as f32 + tf / 2.);
+    let r = cx.min(cy).min(wf - cx).min(hf - cy);
+    if edges & 1 != 0 {
+        rect(
+            out,
+            v_left,
+            0,
+            v_left + t,
+            (cy - r + tf / 2.).ceil() as i32,
+            0xff,
+        );
+    }
+    if edges & 2 != 0 {
+        rect(
+            out,
+            (cx + r - tf / 2.).floor() as i32,
+            h_top,
+            w,
+            h_top + t,
+            0xff,
+        );
+    }
+    if edges & 4 != 0 {
+        rect(
+            out,
+            v_left,
+            (cy + r - tf / 2.).floor() as i32,
+            v_left + t,
+            h,
+            0xff,
+        );
+    }
+    if edges & 8 != 0 {
+        rect(
+            out,
+            0,
+            h_top,
+            (cx - r + tf / 2.).ceil() as i32,
+            h_top + t,
+            0xff,
+        );
+    }
+    // 空心节点是半径 r - t/2、线宽 t 的圆环；r 不足一个线宽时就是实心圆。
+    let shape = if filled || r <= tf {
+        circle(cx, cy, r)
+    } else {
+        ring(circle(cx, cy, r), circle(cx, cy, r - tf))
+    };
+    out.push(Shape::Polygon(shape));
+}
+
+/// 渐隐线：沿线逐像素改变不透明度，`toward_end` 时从起点的
+/// 不透明渐隐到右端或底端，否则从透明渐显。
+fn fade(m: Metrics, vertical: bool, toward_end: bool, out: &mut Vec<Shape>) {
+    let (w, h) = (m.width as i32, m.height as i32);
+    let t = m.thickness as i32;
+    let (across, along) = if vertical {
+        ((w - t).max(0) / 2, h)
+    } else {
+        ((h - t).max(0) / 2, w)
+    };
+    let step = 255. / along as f32;
+    for i in 0..along {
+        let alpha = if toward_end {
+            255. - step * i as f32
+        } else {
+            step * i as f32
+        };
+        let alpha = alpha.round() as u8;
+        if vertical {
+            rect(out, across, i, across + t, i + 1, alpha);
+        } else {
+            rect(out, i, across, i + 1, across + t, alpha);
+        }
+    }
+}
+
 // ---- 路径工具 ----
 
 /// 把从 `points` 末点出发的三次贝塞尔曲线展平成折线追加进去。
@@ -502,33 +778,78 @@ fn band(points: &[[f32; 2]], d0: f32, d1: f32, out: &mut Vec<Shape>) {
     if pts.len() < 2 {
         return;
     }
-    let normals: Vec<[f32; 2]> = pts
-        .windows(2)
-        .map(|s| {
-            let (dx, dy) = (s[1][0] - s[0][0], s[1][1] - s[0][1]);
+    let mut polygon = offset(&pts, d0, false);
+    polygon.extend(offset(&pts, d1, false).into_iter().rev());
+    out.push(Shape::Polygon(polygon));
+}
+
+/// 把折线（`closed` 时为闭合多边形）的各边沿法向 `(-dy, dx)` 平移 `d`，转角处斜接。
+/// 相邻点不能重合。
+fn offset(pts: &[[f32; 2]], d: f32, closed: bool) -> Vec<[f32; 2]> {
+    let n = pts.len();
+    let edges = if closed { n } else { n - 1 };
+    let normals: Vec<[f32; 2]> = (0..edges)
+        .map(|i| {
+            let (a, b) = (pts[i], pts[(i + 1) % n]);
+            let (dx, dy) = (b[0] - a[0], b[1] - a[1]);
             let len = dx.hypot(dy);
             [-dy / len, dx / len]
         })
         .collect();
-    let miter = |i: usize| -> [f32; 2] {
-        let n2 = normals[i.min(normals.len() - 1)];
-        let Some(&n1) = i.checked_sub(1).and_then(|j| normals.get(j)) else {
-            return n2;
-        };
-        let k = 1. + n1[0] * n2[0] + n1[1] * n2[1];
-        // 接近折返时斜接点会飞得很远，退回用后一段的法向（相当于 miter limit）。
-        if k < 0.02 {
-            return n2;
-        }
-        [(n1[0] + n2[0]) / k, (n1[1] + n2[1]) / k]
-    };
-    let side = |d: f32, i: usize| {
-        let m = miter(i);
-        [pts[i][0] + m[0] * d, pts[i][1] + m[1] * d]
-    };
-    let mut polygon: Vec<[f32; 2]> = (0..pts.len()).map(|i| side(d0, i)).collect();
-    polygon.extend((0..pts.len()).rev().map(|i| side(d1, i)));
-    out.push(Shape::Polygon(polygon));
+    (0..n)
+        .map(|i| {
+            let n2 = normals[i.min(edges - 1)];
+            let prev = if closed {
+                Some((i + edges - 1) % edges)
+            } else {
+                i.checked_sub(1)
+            };
+            let m = match prev.map(|j| normals[j]) {
+                Some(n1) => {
+                    let k = 1. + n1[0] * n2[0] + n1[1] * n2[1];
+                    // 接近折返时斜接点会飞得很远，退回用后一段的法向（相当于 miter limit）。
+                    if k < 0.02 {
+                        n2
+                    } else {
+                        [(n1[0] + n2[0]) / k, (n1[1] + n2[1]) / k]
+                    }
+                }
+                None => n2,
+            };
+            [pts[i][0] + m[0] * d, pts[i][1] + m[1] * d]
+        })
+        .collect()
+}
+
+/// 闭合多边形向内收缩 `d`：按顶点绕向决定法向朝里还是朝外。
+fn inset(pts: &[[f32; 2]], d: f32) -> Vec<[f32; 2]> {
+    let area2: f32 = (0..pts.len())
+        .map(|i| {
+            let (a, b) = (pts[i], pts[(i + 1) % pts.len()]);
+            a[0] * b[1] - b[0] * a[1]
+        })
+        .sum();
+    offset(pts, d * area2.signum(), true)
+}
+
+/// 外轮廓挖掉内轮廓：两个轮廓用一条来回重合的桥接边连成一个多边形，
+/// GPUI 的路径默认按奇偶规则（`FillRule::EvenOdd`）填充，桥接边互相抵消，内轮廓成为洞。
+fn ring(mut outer: Vec<[f32; 2]>, inner: Vec<[f32; 2]>) -> Vec<[f32; 2]> {
+    outer.push(outer[0]);
+    outer.push(inner[0]);
+    outer.extend(&inner[1..]);
+    outer.push(inner[0]);
+    outer
+}
+
+/// 圆周上均匀取 32 个点，最大径向误差约 0.5% 半径。
+fn circle(cx: f32, cy: f32, r: f32) -> Vec<[f32; 2]> {
+    (0..32)
+        .map(|i| {
+            let a = i as f32 * std::f32::consts::TAU / 32.;
+            [cx + r * a.cos(), cy + r * a.sin()]
+        })
+        .collect()
 }
 
 // ---- 绘制 ----
@@ -636,7 +957,7 @@ mod tests {
     }
 
     #[test]
-    fn line_width_follows_ghostty() {
+    fn line_width_rounds_up_to_device_pixels() {
         // Hack 与 Menlo 的下划线粗细都是 90/2048 em；13px 下 Retina 为 2 设备像素、1x 为 1。
         let underline = 13. * 90. / 2048.;
         assert_eq!(Metrics::new(8., 16., underline, 2.).thickness, 2);
@@ -741,7 +1062,7 @@ mod tests {
     }
 
     #[test]
-    fn shades_use_ghostty_alpha() {
+    fn shades_are_translucent_fills() {
         let m = metrics(4, 8, 1);
         for (c, alpha) in [('░', 0x40), ('▒', 0x80), ('▓', 0xc0)] {
             assert_eq!(
@@ -788,6 +1109,128 @@ mod tests {
     }
 
     #[test]
+    fn braille_and_mosaics() {
+        let m = metrics(8, 16, 1);
+        let full = raster('⣿', m);
+        let dots = shapes("⣿", m).unwrap();
+        assert_eq!(dots.len(), 8);
+        assert!(
+            dots.iter()
+                .all(|d| matches!(d, Shape::Rect { x0, x1, .. } if x1 - x0 == 2))
+        );
+        let one = raster('⠁', m);
+        assert_eq!(
+            one.iter().flatten().filter(|&&v| v > 0).count(),
+            4,
+            "只有一个 2×2 的点"
+        );
+        assert!(
+            one[..4].iter().all(|row| row[4..].iter().all(|&v| v == 0)),
+            "点在左上"
+        );
+        assert!(
+            full[12..].iter().any(|row| row[4..].iter().any(|&v| v > 0)),
+            "8 点盲文有右下点"
+        );
+
+        let m = metrics(4, 6, 1);
+        // 🬀：左上六分之一；八分块 U+1CD00 是 OCTANT-3（第二行左格）。
+        assert_eq!(
+            art('\u{1fb00}', m),
+            ["##..", "##..", "....", "....", "....", "...."].join("\n")
+        );
+        let m = metrics(4, 8, 1);
+        assert_eq!(
+            art('\u{1cd00}', m),
+            [
+                "....", "....", "##..", "##..", "....", "....", "....", "...."
+            ]
+            .join("\n")
+        );
+        assert_eq!(
+            art('\u{1cea0}', m),
+            [
+                "....", "....", "....", "....", "....", "....", "..##", "..##"
+            ]
+            .join("\n")
+        );
+        assert_eq!(
+            art('\u{1fbe7}', m),
+            [
+                "....", "....", "..##", "..##", "..##", "..##", "....", "...."
+            ]
+            .join("\n")
+        );
+    }
+
+    #[test]
+    fn corner_triangles() {
+        let m = metrics(8, 16, 1);
+        let solid = raster('◢', m);
+        assert!(
+            solid[15][7] == 0xff && solid[0][0] == 0 && solid[15][0] == 0xff && solid[2][7] == 0xff
+        );
+        assert_eq!(solid[2][2], 0, "左上空");
+        let hollow = raster('◸', m);
+        assert!(hollow[0].iter().all(|&v| v == 0xff), "上边描边");
+        assert!(hollow[..14].iter().all(|row| row[0] == 0xff), "左边描边");
+        assert_eq!(hollow[4][2], 0, "内部挖空");
+        assert_eq!(hollow[15][7], 0, "外部为空");
+    }
+
+    #[test]
+    fn hollow_shapes_tessellate_with_holes() {
+        // GPUI 按奇偶规则剖分路径：环形多边形剖分后的面积应是外轮廓减去内轮廓。
+        let outer = vec![[0., 0.], [0., 16.], [8., 0.]];
+        let inner = inset(&outer, 1.);
+        let area = |p: &[[f32; 2]]| {
+            (0..p.len())
+                .map(|i| p[i][0] * p[(i + 1) % p.len()][1] - p[(i + 1) % p.len()][0] * p[i][1])
+                .sum::<f32>()
+                .abs()
+                / 2.
+        };
+        let expected = area(&outer) - area(&inner);
+        let mut builder = PathBuilder::fill();
+        let points: Vec<_> = ring(outer, inner)
+            .iter()
+            .map(|p| point(px(p[0]), px(p[1])))
+            .collect();
+        builder.add_polygon(&points, true);
+        let path = builder.build().unwrap();
+        let tessellated: f32 = path
+            .vertices
+            .chunks(3)
+            .map(|t| {
+                let [a, b, c] = [0, 1, 2].map(|i| t[i].xy_position.map(f32::from));
+                ((b.x - a.x) * (c.y - a.y) - (c.x - a.x) * (b.y - a.y)).abs() / 2.
+            })
+            .sum();
+        assert!(
+            (tessellated - expected).abs() < 0.01,
+            "{tessellated} != {expected}"
+        );
+    }
+
+    #[test]
+    fn branch_symbols() {
+        let m = metrics(10, 20, 2);
+        // 圆心在 (5, 10)，半径 5。
+        let hollow = raster('\u{f5ef}', m);
+        assert_eq!(hollow[10][5], 0, "空心节点中间是空的");
+        assert!(hollow[10][0] == 0xff && hollow[10][9] == 0xff, "圆环");
+        assert_eq!(raster('\u{f5ee}', m)[10][5], 0xff, "实心节点");
+        let cross = raster('\u{f60d}', m);
+        assert!(cross[0][4] == 0xff && cross[19][4] == 0xff, "上下连到边");
+        assert!(cross[9][0] == 0xff && cross[9][9] == 0xff, "左右连到边");
+        let fade = raster('\u{f5d2}', m);
+        assert!(
+            fade[9].windows(2).all(|p| p[0] > p[1]) && fade[9][0] == 0xff,
+            "向右渐隐"
+        );
+    }
+
+    #[test]
     fn unsupported_text_falls_back_to_font() {
         let m = metrics(8, 16, 1);
         assert_eq!(shapes("a", m), None);
@@ -798,10 +1241,25 @@ mod tests {
 
     #[test]
     fn every_codepoint_draws_something() {
-        let codepoints = (0x2500..=0x259f)
+        // 全部自绘范围。
+        let codepoints: Vec<u32> = (0x2500..=0x259f)
+            .chain(0x2800..=0x28ff)
+            .chain(0x1fb00..=0x1fb3b)
+            .chain(0x1cd00..=0x1cde5)
+            .chain([0x1cea0, 0x1cea3, 0x1cea8, 0x1ceab, 0x1fbe6, 0x1fbe7])
             .chain(0xe0b0..=0xe0bf)
-            .chain([0xe0d2, 0xe0d4]);
-        for cp in codepoints {
+            .chain([0xe0d2, 0xe0d4])
+            .chain((0x25e2..=0x25e5).chain(0x25f8..=0x25fa).chain([0x25ff]))
+            .chain(0xf5d0..=0xf60d)
+            .collect();
+        let m = metrics(8, 16, 1);
+        let drawable = (0..=0x1ffff)
+            .filter_map(char::from_u32)
+            .filter(|c| shapes(&c.to_string(), m).is_some())
+            .count();
+        assert_eq!(drawable, codepoints.len(), "自绘范围多出了别的码点");
+        // 空白盲文 U+2800 本来就什么都不画。
+        for cp in codepoints.into_iter().filter(|&cp| cp != 0x2800) {
             let c = char::from_u32(cp).unwrap();
             for (w, h, t) in [
                 (8, 16, 1),

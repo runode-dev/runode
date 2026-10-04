@@ -664,7 +664,7 @@ fn paint_frame(
                 if cell.text.is_empty() || cell.text == " " {
                     continue;
                 }
-                // 方框线、块元素和 Powerline 符号自绘，铺满单元格，不用字体字形。
+                // 方框线、块元素、Powerline 等符号自绘，铺满单元格，不用字体字形。
                 if !cell.wide
                     && let Some(shapes) = sprites::shapes(&cell.text, sprite_metrics)
                 {
