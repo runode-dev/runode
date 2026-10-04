@@ -24,3 +24,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 [profile.dev.package."*"]
 opt-level = 2
+
+# block 0.1.6 已停止维护，新版 Rust 会拒绝它的一处写法；用改了这一处的副本替换。
+[patch.crates-io]
+block = { path = "vendor/crates/block" }
