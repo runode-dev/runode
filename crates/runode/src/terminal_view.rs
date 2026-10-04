@@ -24,7 +24,10 @@ actions!(
     [Copy, Paste, IncreaseFontSize, DecreaseFontSize, ResetFontSize]
 );
 
-const PADDING: f32 = 6.;
+/// 终端内容的左右边距。
+const PADDING_X: f32 = 2.;
+/// 终端内容的底部边距，让最后一行不贴着窗口下沿。
+const PADDING_BOTTOM: f32 = 6.;
 /// 默认字体；系统没装时改用 `FALLBACK_FONT_FAMILY`。
 const FONT_FAMILY: &str = "Hack Nerd Font Mono";
 /// macOS 自带的等宽字体。
@@ -373,8 +376,8 @@ impl Render for TerminalView {
             .child(
                 div()
                     .flex_1()
-                    .px(px(PADDING))
-                    .pb(px(PADDING))
+                    .px(px(PADDING_X))
+                    .pb(px(PADDING_BOTTOM))
                     .child(TerminalElement { view: cx.entity() }),
             )
     }
