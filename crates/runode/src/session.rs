@@ -290,6 +290,11 @@ impl Session {
         integration: crate::shell_integration::Mode,
     ) -> Result<(Self, UnboundedReceiver<PtyEvent>)> {
         let (pty, rx) = Pty::spawn(size, shell, cwd, integration)?;
+        Ok((Self::with_pty(size, pty)?, rx))
+    }
+
+    /// 接上已经按 `size` 启动好的 shell。
+    pub fn with_pty(size: GridSize, pty: Pty) -> Result<Self> {
         let writer = pty.writer.clone();
 
         let mut terminal = Terminal::new(size.cols, size.rows)?;
@@ -394,40 +399,37 @@ impl Session {
                 }
             })?;
 
-        Ok((
-            Self {
-                terminal,
-                renderer,
-                held_since,
-                key_encoder: key::Encoder::new()?,
-                key_event: key::Event::new()?,
-                mouse_encoder: mouse::Encoder::new()?,
-                mouse_event: mouse::Event::new()?,
-                selecting: Selecting {
-                    gesture: Gesture::new()?,
-                    press: PressEvent::new()?,
-                    drag: DragEvent::new()?,
-                    release: ReleaseEvent::new()?,
-                    autoscroll: AutoscrollTickEvent::new()?,
-                    epoch: Instant::now(),
-                    pointer: Default::default(),
-                },
-                pty,
-                writer,
-                size: shared_size,
-                effects,
-                scratch: Vec::with_capacity(64),
-                title: None,
-                agent: None,
-                title_agent: None,
-                progress: None,
-                search: None,
-                fallback_title: None,
-                exited: false,
-                option_as_alt: OptionAsAlt::False,
+        Ok(Self {
+            terminal,
+            renderer,
+            held_since,
+            key_encoder: key::Encoder::new()?,
+            key_event: key::Event::new()?,
+            mouse_encoder: mouse::Encoder::new()?,
+            mouse_event: mouse::Event::new()?,
+            selecting: Selecting {
+                gesture: Gesture::new()?,
+                press: PressEvent::new()?,
+                drag: DragEvent::new()?,
+                release: ReleaseEvent::new()?,
+                autoscroll: AutoscrollTickEvent::new()?,
+                epoch: Instant::now(),
+                pointer: Default::default(),
             },
-            rx,
-        ))
+            pty,
+            writer,
+            size: shared_size,
+            effects,
+            scratch: Vec::with_capacity(64),
+            title: None,
+            agent: None,
+            title_agent: None,
+            progress: None,
+            search: None,
+            fallback_title: None,
+            exited: false,
+            option_as_alt: OptionAsAlt::False,
+        })
     }
 
     /// 应用配置中与终端状态相关的部分。改的是默认值：程序自己用转义序列设置的

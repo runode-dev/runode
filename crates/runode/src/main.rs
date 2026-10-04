@@ -9,6 +9,7 @@ mod keybinds;
 mod keys;
 mod menus;
 mod pane;
+mod prespawn;
 mod pty;
 mod search_bar;
 mod session;
@@ -24,7 +25,7 @@ rust_i18n::i18n!("locales", fallback = "en");
 use gpui::{App, AppContext as _, Bounds, WindowBounds, WindowOptions, px, size};
 use gpui_platform::application;
 
-use crate::{terminal_view::TerminalView, workspace::Workspace};
+use crate::{prespawn::Prespawned, terminal_view::TerminalView, workspace::Workspace};
 
 fn main() {
     tracing_subscriber::fmt()
@@ -33,6 +34,8 @@ fn main() {
                 .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
         )
         .init();
+    // shell 启动要几十毫秒，先在后台拉起来，和 GPUI 初始化同时进行。
+    prespawn::start();
 
     application().run(|cx: &mut App| {
         config::install(cx);
@@ -44,14 +47,15 @@ fn main() {
         })
         .detach();
 
-        open_window(cx);
+        open_window(cx, prespawn::take());
         cx.activate(true);
         // 窗口先出来；未打包运行时才需要的图标解码放到最后。
         about::install_icon();
     });
 }
 
-fn open_window(cx: &mut App) {
+/// 打开一个新窗口，里面一个终端；`shell` 是启动时提前拉起的 shell，没有时现启动一个。
+fn open_window(cx: &mut App, shell: Option<Prespawned>) {
     let bounds = Bounds::centered(None, size(px(960.), px(620.)), cx);
     let opened = cx.open_window(
         WindowOptions {
@@ -64,8 +68,11 @@ fn open_window(cx: &mut App) {
             ..Default::default()
         },
         |window, cx| {
-            let first = TerminalView::spawn(None, window, cx)
-                .unwrap_or_else(|err| panic!("failed to start terminal session: {err:#}"));
+            let first = match shell {
+                Some(shell) => TerminalView::adopt(shell, window, cx),
+                None => TerminalView::spawn(None, window, cx),
+            }
+            .unwrap_or_else(|err| panic!("failed to start terminal session: {err:#}"));
             cx.new(|cx| Workspace::new(first, window, cx))
         },
     );

@@ -135,7 +135,7 @@ fn install() -> io::Result<PathBuf> {
 }
 
 /// 放在用户自己的缓存目录里，而不是可能多人共用的临时目录：这些脚本会被 shell 执行。
-fn cache_dir() -> Option<PathBuf> {
+pub(crate) fn cache_dir() -> Option<PathBuf> {
     let home = std::env::var_os("HOME").filter(|v| !v.is_empty()).map(PathBuf::from);
     if cfg!(target_os = "macos") {
         return home.map(|home| home.join("Library/Caches"));

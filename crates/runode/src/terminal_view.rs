@@ -1,8 +1,14 @@
 //! 单个终端会话的 GPUI 视图：输入分发和单元格绘制。
 
-use std::{collections::HashMap, ops::Range, sync::Arc, time::Duration};
+use std::{
+    collections::HashMap,
+    ops::Range,
+    rc::Rc,
+    sync::Arc,
+    time::{Duration, Instant},
+};
 
-use futures::StreamExt as _;
+use futures::{FutureExt as _, StreamExt as _};
 use gpui::{
     Action, App, AppContext as _, Bounds, ClipboardItem, Context, CursorStyle, DispatchPhase, ElementId,
     ElementInputHandler, Entity, EntityInputHandler, EventEmitter, FocusHandle, Focusable, Font,
@@ -17,6 +23,7 @@ use crate::{
     agent::Agent,
     config::{AppConfig, CellHeight, Config},
     keys,
+    prespawn::Prespawned,
     pty::{GridSize, PtyEvent},
     search_bar::{
         EndSearch, SearchField, SearchFieldEvent, SearchNext, SearchPrevious, SearchSelection,
@@ -84,6 +91,20 @@ const MAX_FONT_SIZE: f32 = 72.;
 pub const DEFAULT_TITLE: &str = "Runode";
 /// 重新读取前台进程的间隔：不输出的程序（比如 `sleep`）启动后，标签名也能跟上。
 const FOREGROUND_POLL_INTERVAL: Duration = Duration::from_secs(1);
+/// 视图建好时伪终端的临时尺寸；第一次布局时会按实际大小重设。
+const PROVISIONAL_SIZE: GridSize = GridSize {
+    cols: 80,
+    rows: 24,
+    cell_width_px: 8,
+    cell_height_px: 16,
+};
+/// 建视图时最多先喂进去这么多已经到达的输出，余下的照常交给读输出的任务：shell 一启动就
+/// 大量输出时，第一帧不能等它们全部处理完。
+const EARLY_OUTPUT_LIMIT: usize = 64 * 1024;
+/// 一次最多合并这么多排队的输出再交给 VT：积压很多时不必为它们另拼一整块大缓冲。
+const MAX_OUTPUT_BATCH: usize = 1024 * 1024;
+/// 有输出时重读前台进程的最短间隔：大量输出时不必每批都做几次系统调用，推迟的那次到点补上。
+const FOREGROUND_REFRESH_INTERVAL: Duration = Duration::from_millis(50);
 /// 拖选到网格外时自动滚动的间隔，每次滚一行。
 const AUTOSCROLL_INTERVAL: Duration = Duration::from_millis(15);
 /// 光标闪烁时亮、灭各持续的时长。
@@ -97,7 +118,8 @@ struct Metrics {
 }
 
 /// 字形缓存按（粗体、斜体）分成四张表，查找时直接用 `&str`，命中时不必为键分配 `String`。
-type GlyphCache = [HashMap<String, ShapedLine>; 4];
+/// 值放在 `Rc` 里：`ShapedLine` 内联着一整块装饰数组，每格每帧复制一份会占去绘制的大头。
+type GlyphCache = [HashMap<String, Rc<ShapedLine>>; 4];
 
 fn glyph_table(attrs: Attrs) -> usize {
     usize::from(attrs.bold) | usize::from(attrs.italic) << 1
@@ -143,10 +165,16 @@ pub struct TerminalView {
     click_cell: Option<(i32, i32)>,
     /// 闪烁光标当前处于亮的一半周期。
     cursor_blink_visible: bool,
+    /// 当前这半个闪烁周期从何时开始。
+    cursor_blink_since: Instant,
     /// 打开着的搜索栏输入框，以及对它事件的订阅。
     search_field: Option<(Entity<SearchField>, Subscription)>,
     _reader: Task<()>,
     _foreground_poll: Task<()>,
+    /// 上次因为有输出而重读前台进程的时刻。
+    foreground_read_at: Instant,
+    /// 输出太密时推迟的那次重读。
+    _foreground_refresh: Option<Task<()>>,
     _hold_timeout: Option<Task<()>>,
     /// 有焦点时才运行的闪烁计时器。
     _cursor_blink: Option<Task<()>>,
@@ -169,16 +197,32 @@ impl TerminalView {
         window: &mut Window,
         cx: &mut App,
     ) -> anyhow::Result<Entity<Self>> {
-        // 临时尺寸；第一次布局时会按实际大小重设。
-        let size = GridSize {
-            cols: 80,
-            rows: 24,
-            cell_width_px: 8,
-            cell_height_px: 16,
-        };
         let integration = cx.global::<AppConfig>().0.shell_integration;
-        let (session, rx) = Session::spawn(size, cwd, integration)?;
+        let (session, rx) = Session::spawn(PROVISIONAL_SIZE, cwd, integration)?;
         Ok(cx.new(|cx| Self::new(session, rx, window, cx)))
+    }
+
+    /// 定时重读前台进程，不输出的程序（比如 `sleep`）启动后标签名也能跟上。
+    fn poll_foreground(cx: &mut Context<Self>) -> Task<()> {
+        cx.spawn(async move |this, cx| {
+            loop {
+                cx.background_executor().timer(FOREGROUND_POLL_INTERVAL).await;
+                let updated = this.update(cx, |view, cx| {
+                    if view.session.refresh_fallback_title() {
+                        cx.emit(TerminalEvent::TitleChanged);
+                    }
+                });
+                if updated.is_err() {
+                    break;
+                }
+            }
+        })
+    }
+
+    /// 接上启动时提前拉起的 shell（见 `prespawn`）并建好它的视图。
+    pub fn adopt(shell: Prespawned, window: &mut Window, cx: &mut App) -> anyhow::Result<Entity<Self>> {
+        let session = Session::with_pty(shell.size, shell.pty)?;
+        Ok(cx.new(|cx| Self::new(session, shell.rx, window, cx)))
     }
 
     fn new(
@@ -187,7 +231,26 @@ impl TerminalView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
+        let config = cx.global::<AppConfig>().0.clone();
+        session.apply_config(&config);
+        // 提前启动的 shell 多半已经输出了提示符：现在就喂进去，第一帧就画得出来，
+        // 不用等下面读输出的任务排上主线程。已经读到的退出留给那个任务照常处理。
+        let mut exited_early = None;
+        let mut early = Vec::new();
+        while early.len() < EARLY_OUTPUT_LIMIT
+            && let Ok(event) = rx.try_recv()
+        {
+            match event {
+                PtyEvent::Output(data) => early.extend_from_slice(&data),
+                PtyEvent::Exited => exited_early = Some(PtyEvent::Exited),
+            }
+        }
+        if !early.is_empty() {
+            session.feed(&early);
+        }
+
         let reader = cx.spawn_in(window, async move |this, cx| {
+            let mut rx = futures::stream::iter(exited_early).chain(rx);
             while let Some(first) = rx.next().await {
                 // 把已排队的输出合并成一次 VT 写入和一次重绘。
                 let mut output = Vec::new();
@@ -198,13 +261,15 @@ impl TerminalView {
                         PtyEvent::Output(data) => output.extend_from_slice(&data),
                         PtyEvent::Exited => exited = true,
                     }
-                    next = rx.try_recv().ok();
+                    if output.len() < MAX_OUTPUT_BATCH {
+                        next = rx.next().now_or_never().flatten();
+                    }
                 }
                 let updated = this.update_in(cx, |view, window, cx| {
                     if !output.is_empty() {
                         let was_working = view.session.agent.is_some_and(Agent::is_working);
                         // 进出目录、启动或退出程序时通常都有输出，顺带重读前台进程。
-                        let fallback_changed = view.session.refresh_fallback_title();
+                        let fallback_changed = view.refresh_foreground_soon(cx);
                         if view.session.feed(&output) || fallback_changed {
                             cx.emit(TerminalEvent::TitleChanged);
                         }
@@ -232,8 +297,6 @@ impl TerminalView {
             }
         });
 
-        let config = cx.global::<AppConfig>().0.clone();
-        session.apply_config(&config);
         // shell 已经在起始目录里跑起来了，不等第一次输出，新标签一出现就有名字。
         session.refresh_fallback_title();
         let config_watch = cx.observe_global_in::<AppConfig>(window, |view, window, cx| {
@@ -249,19 +312,7 @@ impl TerminalView {
         let appearance_watch =
             cx.observe_window_appearance(window, |_, _, cx| crate::config::follow_appearance(cx));
 
-        let foreground_poll = cx.spawn(async move |this, cx| {
-            loop {
-                cx.background_executor().timer(FOREGROUND_POLL_INTERVAL).await;
-                let updated = this.update(cx, |view, cx| {
-                    if view.session.refresh_fallback_title() {
-                        cx.emit(TerminalEvent::TitleChanged);
-                    }
-                });
-                if updated.is_err() {
-                    break;
-                }
-            }
-        });
+        let foreground_poll = Self::poll_foreground(cx);
 
         let focus_handle = cx.focus_handle();
         let pane_focus = cx.focus_handle();
@@ -289,9 +340,12 @@ impl TerminalView {
             reporting_press: false,
             click_cell: None,
             cursor_blink_visible: true,
+            cursor_blink_since: Instant::now(),
             search_field: None,
             _reader: reader,
             _foreground_poll: foreground_poll,
+            foreground_read_at: Instant::now(),
+            _foreground_refresh: None,
             _hold_timeout: None,
             _cursor_blink: None,
             _autoscroll: None,
@@ -327,23 +381,64 @@ impl TerminalView {
         (frame.foreground, frame.background)
     }
 
+    /// 有输出时重读前台进程，返回程序没设置标题时用的名字或 agent 状态是否变了。离上次读
+    /// 不到 `FOREGROUND_REFRESH_INTERVAL` 时推迟到间隔满了再读，那时有变化再通知外层。
+    fn refresh_foreground_soon(&mut self, cx: &mut Context<Self>) -> bool {
+        if self._foreground_refresh.is_some() {
+            return false;
+        }
+        let elapsed = self.foreground_read_at.elapsed();
+        if elapsed >= FOREGROUND_REFRESH_INTERVAL {
+            self.foreground_read_at = Instant::now();
+            return self.session.refresh_fallback_title();
+        }
+        let timer = cx.background_executor().timer(FOREGROUND_REFRESH_INTERVAL - elapsed);
+        self._foreground_refresh = Some(cx.spawn(async move |this, cx| {
+            timer.await;
+            this.update(cx, |view, cx| {
+                view._foreground_refresh = None;
+                view.foreground_read_at = Instant::now();
+                let was_working = view.session.agent.is_some_and(Agent::is_working);
+                if view.session.refresh_fallback_title() {
+                    cx.emit(TerminalEvent::TitleChanged);
+                }
+                if was_working && !view.session.agent.is_some_and(Agent::is_working) {
+                    cx.emit(TerminalEvent::AgentFinished);
+                }
+            })
+            .ok();
+        }));
+        false
+    }
+
     /// 让光标立即亮起，并从头开始计闪烁周期；没有焦点时不闪，也就不启动计时器。
+    /// 每批输出都会调用，所以计时器只建一次，重新计周期只是改 `cursor_blink_since`。
     fn reset_cursor_blink(&mut self, window: &Window, cx: &mut Context<Self>) {
         self.cursor_blink_visible = true;
-        if !self.focus_handle.is_focused(window) {
+        self.cursor_blink_since = Instant::now();
+        if self._cursor_blink.is_some() || !self.focus_handle.is_focused(window) {
             return;
         }
         self._cursor_blink = Some(cx.spawn(async move |this, cx| {
+            let mut wait = CURSOR_BLINK_INTERVAL;
             loop {
-                cx.background_executor().timer(CURSOR_BLINK_INTERVAL).await;
-                let updated = this.update(cx, |view, cx| {
+                cx.background_executor().timer(wait).await;
+                let next = this.update(cx, |view, cx| {
+                    // 等的时候又重新计了周期，就等到这个周期结束。
+                    let elapsed = view.cursor_blink_since.elapsed();
+                    if elapsed < CURSOR_BLINK_INTERVAL {
+                        return CURSOR_BLINK_INTERVAL - elapsed;
+                    }
                     view.cursor_blink_visible = !view.cursor_blink_visible;
+                    view.cursor_blink_since = Instant::now();
                     if view.session.frame().cursor.is_some_and(|c| c.blinking) {
                         cx.notify();
                     }
+                    CURSOR_BLINK_INTERVAL
                 });
-                if updated.is_err() {
-                    break;
+                match next {
+                    Ok(next) => wait = next,
+                    Err(_) => break,
                 }
             }
         }));
@@ -842,7 +937,7 @@ impl TerminalView {
         metrics
     }
 
-    fn shape(&mut self, text: &str, attrs: Attrs, window: &Window) -> ShapedLine {
+    fn shape(&mut self, text: &str, attrs: Attrs, window: &Window) -> Rc<ShapedLine> {
         let table = glyph_table(attrs);
         if let Some(line) = self.glyphs[table].get(text) {
             return line.clone();
@@ -854,7 +949,7 @@ impl TerminalView {
         if attrs.italic {
             font.style = FontStyle::Italic;
         }
-        let line = window.text_system().shape_line(
+        let line = Rc::new(window.text_system().shape_line(
             SharedString::from(text.to_owned()),
             self.font_size,
             &[TextRun {
@@ -866,7 +961,7 @@ impl TerminalView {
                 strikethrough: None,
             }],
             None,
-        );
+        ));
         // 只有异常输出才会让缓存无限增长；直接清空，不做逐项淘汰。
         if self.glyphs.iter().map(HashMap::len).sum::<usize>() > 8192 {
             self.glyphs.iter_mut().for_each(HashMap::clear);
@@ -1083,16 +1178,22 @@ impl Element for TerminalElement {
         cx: &mut App,
     ) {
         self.view.update(cx, |view, _| {
+            let first_layout = view.metrics.is_none();
             let metrics = view.metrics(window);
             let cols = (f32::from(bounds.size.width) / f32::from(metrics.cell.width)).floor();
             let rows = (f32::from(bounds.size.height) / f32::from(metrics.cell.height)).floor();
             let scale = window.scale_factor();
-            view.session.resize(GridSize {
+            let size = GridSize {
                 cols: cols.clamp(1., u16::MAX as f32) as u16,
                 rows: rows.clamp(1., u16::MAX as f32) as u16,
                 cell_width_px: (f32::from(metrics.cell.width) * scale).round() as u16,
                 cell_height_px: (f32::from(metrics.cell.height) * scale).round() as u16,
-            });
+            };
+            // 进程里第一个量出尺寸的终端就是启动时那个，记下来，下次启动好提前拉起 shell。
+            if first_layout {
+                crate::prespawn::remember(&view.config, size);
+            }
+            view.session.resize(size);
             view.grid_origin = bounds.origin;
         });
     }
