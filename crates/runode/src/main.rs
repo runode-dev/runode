@@ -3,6 +3,7 @@
 
 mod about;
 mod agent;
+mod assets;
 mod config;
 mod i18n;
 mod keybinds;
@@ -38,7 +39,7 @@ fn main() {
     // shell 启动要几十毫秒，先在后台拉起来，和 GPUI 初始化同时进行。
     prespawn::start();
 
-    application().run(|cx: &mut App| {
+    application().with_assets(assets::Assets).run(|cx: &mut App| {
         config::install(cx);
         menus::install(cx);
         workspace::install(cx);

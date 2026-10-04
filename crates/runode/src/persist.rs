@@ -37,6 +37,9 @@ pub struct SavedWindow {
     /// 用户手动收起（`false`）或展开（`true`）过侧栏；没动过时为空，按 workspace 数决定。
     #[serde(default)]
     pub sidebar: Option<bool>,
+    /// 用户拖动过侧栏宽度时是那个宽度；没拖过时为空，用默认宽度。
+    #[serde(default)]
+    pub sidebar_width: Option<f32>,
 }
 
 /// 窗口的位置和大小，相对于它所在的屏幕；放大和全屏时是还原后的位置和大小。
@@ -183,6 +186,7 @@ mod tests {
             workspaces: vec![SavedWorkspace { name: "tmp".into(), dir: "/tmp".into(), tabs: vec![tab], active: 0 }],
             active: 0,
             sidebar: None,
+            sidebar_width: Some(240.),
         }])
     }
 

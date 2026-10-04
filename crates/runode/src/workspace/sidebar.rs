@@ -1,22 +1,32 @@
 //! 窗口左侧的 workspace 列表：切换、拖动排序、改名、关闭和新建。
 
 use gpui::{
-    AnyElement, BoxShadow, Context, Div, Focusable, Hsla, MouseButton, MouseDownEvent, Render, SharedString,
-    Stateful, Window, div, point, prelude::*, px,
+    AnyElement, BoxShadow, Context, CursorStyle, Div, Focusable, Hsla, MouseButton, MouseDownEvent, Render,
+    SharedString, Stateful, Window, div, point, prelude::*, px, svg,
 };
 
 use super::{
-    AGENT_MARK_WIDTH, NewWorkspace, RenameWorkspace, Renaming, SelectLastWorkspace, SelectWorkspace,
-    TAB_CLOSE_SIZE, TITLEBAR_HEIGHT, WindowView, WorkspaceId, agent_mark, display_dir, shortcut_hint,
+    AGENT_MARK_WIDTH, DIVIDER_GRAB_WIDTH, Divider, NewWorkspace, RenameWorkspace, Renaming, SelectLastWorkspace,
+    SelectWorkspace, TAB_CLOSE_SIZE, TITLEBAR_HEIGHT, TRAFFIC_LIGHTS_WIDTH, ToggleSidebar, WindowView,
+    WorkspaceId, agent_mark, display_dir, shortcut_hint,
 };
 use crate::{
+    assets::SIDEBAR_ICON,
     search_bar::{SearchField, SearchFieldEvent},
     session::Rgb,
     terminal_view::hsla,
 };
 
-/// 侧栏的宽度，比红绿灯宽得多，红绿灯落在侧栏顶上。
-pub(super) const SIDEBAR_WIDTH: f32 = 200.;
+/// 侧栏的默认宽度，比红绿灯宽得多，红绿灯落在侧栏顶上。
+const SIDEBAR_WIDTH: f32 = 200.;
+/// 拖动侧栏宽度的范围；最窄也要放得下红绿灯。
+const SIDEBAR_MIN_WIDTH: f32 = 140.;
+const SIDEBAR_MAX_WIDTH: f32 = 480.;
+/// 红绿灯右边收起、展开侧栏的按钮。
+const SIDEBAR_TOGGLE_WIDTH: f32 = 24.;
+const SIDEBAR_TOGGLE_HEIGHT: f32 = 20.;
+/// 侧栏收着时标题栏左边让出的宽度：红绿灯和开关按钮，再空一点才到标签，图标离两边差不多远。
+pub(super) const SIDEBAR_TOGGLE_INSET: f32 = TRAFFIC_LIGHTS_WIDTH + SIDEBAR_TOGGLE_WIDTH + 6.;
 /// 每个 workspace 一行：名字和目录各占一行。
 const ROW_HEIGHT: f32 = 40.;
 /// 改名输入框的高度。
@@ -29,6 +39,8 @@ struct DraggedWorkspace {
     /// 开始拖动时所在的位置，用来决定落点提示画在目标行的上边还是下边。
     ix: usize,
     name: SharedString,
+    /// 侧栏当前的宽度，预览照这个宽度画。
+    width: f32,
     fg: Hsla,
     bg: Hsla,
 }
@@ -36,7 +48,7 @@ struct DraggedWorkspace {
 impl Render for DraggedWorkspace {
     fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
         div()
-            .w(px(SIDEBAR_WIDTH - 12.))
+            .w(px(self.width - 12.))
             .h(px(ROW_HEIGHT))
             .px(px(8.))
             .flex()
@@ -64,12 +76,82 @@ impl WindowView {
         self.renaming.is_some() || self.sidebar_shown.unwrap_or(self.workspaces.len() > 1)
     }
 
+    pub(super) fn sidebar_width(&self) -> f32 {
+        self.sidebar_width.unwrap_or(SIDEBAR_WIDTH)
+    }
+
+    /// 拖动分隔线时侧栏的右边跟到窗口里的横坐标 `x`。
+    pub(super) fn resize_sidebar(&mut self, x: f32) {
+        self.sidebar_width = Some(x.clamp(SIDEBAR_MIN_WIDTH, SIDEBAR_MAX_WIDTH));
+    }
+
+    /// 侧栏右边的分隔线只有一像素宽，在它两侧放一条透明的把手供拖动。盖在窗口的最上层，
+    /// 伸进终端区的一半才能先于终端接到鼠标。
+    pub(super) fn render_sidebar_handle(&self, cx: &mut Context<Self>) -> Stateful<Div> {
+        div()
+            .id("sidebar-divider")
+            .absolute()
+            .top_0()
+            .h_full()
+            .left(px(self.sidebar_width() - DIVIDER_GRAB_WIDTH / 2.))
+            .w(px(DIVIDER_GRAB_WIDTH))
+            .cursor(CursorStyle::ResizeLeftRight)
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(|this, event: &MouseDownEvent, _, cx| {
+                    cx.stop_propagation();
+                    if event.click_count >= 2 {
+                        // 双击恢复默认宽度。
+                        this.sidebar_width = None;
+                        this.save(cx);
+                    } else {
+                        this.dragging_divider = Some(Divider::Sidebar);
+                    }
+                    cx.notify();
+                }),
+            )
+    }
+
+    /// 红绿灯右边收起、展开侧栏的按钮，侧栏收着时也在原处，不随侧栏跳动。
+    pub(super) fn render_sidebar_toggle(&self, fg: Rgb, bg: Rgb, cx: &mut Context<Self>) -> Stateful<Div> {
+        let hover_bg = hsla(bg.mix(fg, 0.10));
+        let fg = hsla(fg);
+        let group = "sidebar-toggle";
+        div()
+            .id(group)
+            .group(group)
+            .absolute()
+            .left(px(TRAFFIC_LIGHTS_WIDTH))
+            .top(px((TITLEBAR_HEIGHT - SIDEBAR_TOGGLE_HEIGHT) / 2.))
+            .w(px(SIDEBAR_TOGGLE_WIDTH))
+            .h(px(SIDEBAR_TOGGLE_HEIGHT))
+            .rounded(px(4.))
+            .flex()
+            .items_center()
+            .justify_center()
+            .hover(|button| button.bg(hover_bg))
+            .child(
+                svg()
+                    .path(SIDEBAR_ICON)
+                    .size(px(16.))
+                    .text_color(fg.opacity(0.55))
+                    .group_hover(group, |icon| icon.text_color(fg)),
+            )
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(|this, _, window, cx| {
+                    cx.stop_propagation();
+                    this.toggle_sidebar(&ToggleSidebar, window, cx);
+                }),
+            )
+    }
+
     pub(super) fn render_sidebar(&self, fg: Rgb, bg: Rgb, fullscreen: bool, cx: &mut Context<Self>) -> Stateful<Div> {
         let rows: Vec<_> = (0..self.workspaces.len()).map(|ix| self.render_row(ix, fg, bg, cx)).collect();
         div()
             .id("sidebar")
             .flex_none()
-            .w(px(SIDEBAR_WIDTH))
+            .w(px(self.sidebar_width()))
             .h_full()
             .flex()
             .flex_col()
@@ -151,7 +233,8 @@ impl WindowView {
         };
         // 目录和名字一样（比如家目录的 `~`）时不再写一遍。
         let dir = Some(display_dir(&workspace.dir)).filter(|dir| *dir != *workspace.name);
-        let dragged = DraggedWorkspace { id, ix, name: workspace.name.clone(), fg, bg: active_bg };
+        let dragged =
+            DraggedWorkspace { id, ix, name: workspace.name.clone(), width: self.sidebar_width(), fg, bg: active_bg };
         div()
             .id(("workspace", ix))
             .group(group.clone())

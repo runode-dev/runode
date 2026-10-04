@@ -83,8 +83,10 @@ pub struct ResizePane(pub Direction);
 /// 透明标题栏的高度：终端内容从它下面开始，这一条用来拖动窗口，多个标签时也画在这里；
 /// 显示侧栏时红绿灯落在侧栏顶上。
 const TITLEBAR_HEIGHT: f32 = 28.;
-/// 红绿灯按钮的位置，以及标题栏左侧给它们留出的宽度。
-const TRAFFIC_LIGHTS_ORIGIN: (f32, f32) = (12., 10.);
+/// 红绿灯按钮的直径。
+const TRAFFIC_LIGHT_SIZE: f32 = 14.;
+/// 红绿灯按钮的位置，竖直方向在标题栏里居中，和标签文字对齐；以及标题栏左侧给它们留出的宽度。
+const TRAFFIC_LIGHTS_ORIGIN: (f32, f32) = (12., (TITLEBAR_HEIGHT - TRAFFIC_LIGHT_SIZE) / 2.);
 const TRAFFIC_LIGHTS_WIDTH: f32 = 78.;
 /// 标签上关闭按钮的边长。
 const TAB_CLOSE_SIZE: f32 = 16.;
@@ -336,6 +338,15 @@ impl Workspace {
     }
 }
 
+/// 正在用鼠标拖动的分隔线。
+#[derive(Clone, Copy)]
+enum Divider {
+    /// 分屏之间的分隔线。
+    Split(SplitId, Axis),
+    /// 侧栏右边的分隔线，拖动改变侧栏宽度。
+    Sidebar,
+}
+
 /// 侧栏里正在改名的 workspace，以及改名用的输入框。
 struct Renaming {
     id: WorkspaceId,
@@ -350,14 +361,15 @@ pub struct WindowView {
     active: usize,
     /// 用户手动收起或展开过侧栏时是那个选择；没动过时多于一个 workspace 才显示。
     sidebar_shown: Option<bool>,
+    /// 用户拖动过侧栏宽度时是那个宽度；没拖过时用默认宽度。
+    sidebar_width: Option<f32>,
     /// 侧栏里 workspace 列表的滚动位置。
     sidebar_scroll: ScrollHandle,
     renaming: Option<Renaming>,
     /// workspace、标签和分屏节点的标识都从这里取。
     next_id: u64,
     layout: Rc<RefCell<PaneLayout>>,
-    /// 正在用鼠标拖动的分隔线。
-    dragging_divider: Option<(SplitId, Axis)>,
+    dragging_divider: Option<Divider>,
     /// 窗口的位置和大小，以及所在屏幕的 UUID，存布局用：窗口关掉以后就问不到了。
     bounds: WindowBounds,
     display: Option<String>,
@@ -381,6 +393,7 @@ impl WindowView {
             workspaces: Vec::new(),
             active: 0,
             sidebar_shown: None,
+            sidebar_width: None,
             sidebar_scroll: ScrollHandle::new(),
             renaming: None,
             next_id: 0,
@@ -1091,7 +1104,7 @@ impl WindowView {
                                 this.tab_mut().root.set_ratio(id, 0.5);
                                 this.save(cx);
                             } else {
-                                this.dragging_divider = Some((id, axis));
+                                this.dragging_divider = Some(Divider::Split(id, axis));
                             }
                             cx.notify();
                         }),
@@ -1100,17 +1113,18 @@ impl WindowView {
             .into_any_element()
     }
 
-    /// 拖动分隔线期间盖在终端区上的一层：接住所有鼠标移动和松开，免得落进终端。
-    fn render_divider_drag(&self, axis: Axis, cx: &mut Context<Self>) -> Div {
+    /// 拖动分隔线期间盖在整个窗口上的一层：接住所有鼠标移动和松开，免得落进终端或侧栏。
+    fn render_divider_drag(&self, divider: Divider, cx: &mut Context<Self>) -> Div {
+        let vertical = matches!(divider, Divider::Split(_, Axis::Vertical));
         div()
             .absolute()
             .size_full()
             .occlude()
-            .cursor(if axis == Axis::Horizontal { CursorStyle::ResizeLeftRight } else { CursorStyle::ResizeUpDown })
+            .cursor(if vertical { CursorStyle::ResizeUpDown } else { CursorStyle::ResizeLeftRight })
             // 终端在窗口上监听移动和松开，这里拦下，拖动期间它们收不到。
             .on_mouse_move(cx.listener(|this, event: &MouseMoveEvent, _, cx| {
                 cx.stop_propagation();
-                let Some((id, axis)) = this.dragging_divider else {
+                let Some(divider) = this.dragging_divider else {
                     return;
                 };
                 // 在窗口外松开时收不到松开事件，回来时按键已经没按着了。
@@ -1120,6 +1134,14 @@ impl WindowView {
                     cx.notify();
                     return;
                 }
+                let (id, axis) = match divider {
+                    Divider::Split(id, axis) => (id, axis),
+                    Divider::Sidebar => {
+                        this.resize_sidebar(f32::from(event.position.x));
+                        cx.notify();
+                        return;
+                    }
+                };
                 let Some(bounds) = this.layout.borrow().splits.get(&id).copied() else {
                     return;
                 };
@@ -1333,12 +1355,14 @@ impl Render for WindowView {
         let tab_count = self.workspace().tabs.len();
         let show_tabs = tab_count > 1;
         let panes = self.render_panes(fg, bg, cx);
-        let drag = self.dragging_divider.map(|(_, axis)| self.render_divider_drag(axis, cx));
+        let drag = self.dragging_divider.map(|divider| self.render_divider_drag(divider, cx));
         let sidebar = self.sidebar_visible().then(|| self.render_sidebar(fg, bg, fullscreen, cx));
-        // 标题栏透明后内容铺到红绿灯下面，顶部这条要能拖动窗口、双击缩放。红绿灯落在侧栏上
-        // 或者全屏时没有红绿灯，标题栏不用让位；全屏又只有一个标签时不留这一条。
-        let left_inset = if fullscreen || sidebar.is_some() { 0. } else { TRAFFIC_LIGHTS_WIDTH };
-        let sidebar_width = if sidebar.is_some() { sidebar::SIDEBAR_WIDTH } else { 0. };
+        // 标题栏透明后内容铺到红绿灯下面，顶部这条要能拖动窗口、双击缩放。红绿灯和侧栏开关
+        // 落在侧栏上或者全屏时没有红绿灯，标题栏不用让位；全屏又只有一个标签时不留这一条。
+        let left_inset = if fullscreen || sidebar.is_some() { 0. } else { sidebar::SIDEBAR_TOGGLE_INSET };
+        let sidebar_toggle = (!fullscreen).then(|| self.render_sidebar_toggle(fg, bg, cx));
+        let sidebar_width = if sidebar.is_some() { self.sidebar_width() } else { 0. };
+        let sidebar_handle = sidebar.is_some().then(|| self.render_sidebar_handle(cx));
         let tabs: Vec<_> = if show_tabs {
             // 标签平分标题栏除去两头的宽度，但不窄于 `TAB_MIN_WIDTH`，挤不下就让标签条滚动；
             // 拖动时的预览也照这个宽度画。
@@ -1384,7 +1408,6 @@ impl Render for WindowView {
                 .h(px(TITLEBAR_HEIGHT))
                 .flex_none()
                 .flex()
-                .pl(px(left_inset))
                 .text_size(px(12.))
                 .on_mouse_down(MouseButton::Left, |event, window, _| {
                     if event.click_count >= 2 {
@@ -1393,6 +1416,11 @@ impl Render for WindowView {
                         window.start_window_move();
                     }
                 })
+                // 给红绿灯和侧栏开关让出的位置；后面跟着标签时右边画一条分隔线，和新建标签按钮
+                // 左边那条对称。
+                .child(div().flex_none().w(px(left_inset)).h_full().when(show_tabs && left_inset > 0., |inset| {
+                    inset.border_r_1().border_color(hsla(fg).opacity(0.12))
+                }))
                 .children(tabs)
         });
         div()
@@ -1421,6 +1449,7 @@ impl Render for WindowView {
             .on_action(cx.listener(Self::select_workspace))
             .on_action(cx.listener(Self::select_last_workspace))
             .on_action(cx.listener(Self::toggle_sidebar))
+            .relative()
             .size_full()
             .flex()
             .bg(hsla(bg))
@@ -1433,15 +1462,11 @@ impl Render for WindowView {
                     .flex()
                     .flex_col()
                     .children(titlebar)
-                    .child(
-                        div()
-                            .relative()
-                            .flex_1()
-                            .min_h_0()
-                            .child(panes)
-                            .children(drag),
-                    ),
+                    .child(div().relative().flex_1().min_h_0().child(panes)),
             )
+            .children(sidebar_handle)
+            .children(sidebar_toggle)
+            .children(drag)
     }
 }
 

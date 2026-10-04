@@ -188,6 +188,7 @@ impl WindowView {
             workspaces: self.workspaces.iter().map(|workspace| self.save_workspace(workspace, cx)).collect(),
             active: self.active,
             sidebar: self.sidebar_shown,
+            sidebar_width: self.sidebar_width,
         }
     }
 
@@ -258,6 +259,7 @@ impl WindowView {
         }
         if !self.workspaces.is_empty() {
             self.sidebar_shown = saved.sidebar;
+            self.sidebar_width = saved.sidebar_width;
             self.activate_workspace(active, window, cx);
         }
         shell
