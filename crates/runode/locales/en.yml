@@ -10,11 +10,13 @@ menu:
   quit: Quit Runode
   file: File
   new_tab: New Tab
+  new_workspace: New Workspace…
   new_window: New Window
   split_right: Split Right
   split_down: Split Down
   close: Close
   close_tab: Close Tab
+  close_workspace: Close Workspace
   close_window: Close Window
   close_all_windows: Close All Windows
   edit: Edit
@@ -36,16 +38,27 @@ menu:
   reset_font_size: Reset Font Size
   previous_prompt: Jump to Previous Prompt
   next_prompt: Jump to Next Prompt
+  toggle_sidebar: Show or Hide Sidebar
   toggle_full_screen: Toggle Full Screen
   window: Window
   minimize: Minimize
   zoom: Zoom
   previous_tab: Show Previous Tab
   next_tab: Show Next Tab
+  previous_workspace: Show Previous Workspace
+  next_workspace: Show Next Workspace
+  rename_workspace: Rename Workspace…
   previous_split: Select Previous Split
   next_split: Select Next Split
   zoom_split: Zoom Split
   equalize_splits: Equalize Splits
+workspace:
+  new: New Workspace
+  choose: Open
+  close_title: Close the workspace “%{name}”?
+  close_detail: Its %{count} terminals will be closed along with it.
+  close_confirm: Close
+  close_cancel: Cancel
 paste:
   title: The pasted text may run commands
   detail: It contains line breaks or terminal control sequences, so it may run as a command right after pasting.
@@ -139,6 +152,14 @@ action:
   resize_split: Move the nearest divider in this direction by a fixed step
   equalize_splits: Make all splits the same size
   toggle_split_zoom: Zoom or restore the current split
+  new_workspace: Choose a directory and open a workspace there
+  close_workspace: Close the workspace and all of its tabs
+  rename_workspace: Rename the workspace in the sidebar
+  next_workspace: Next workspace
+  previous_workspace: Previous workspace
+  last_workspace: Last workspace
+  goto_workspace: The Nth workspace, counting from 1
+  toggle_sidebar: Show or hide the workspace sidebar
   copy_to_clipboard: Copy
   paste_from_clipboard: Paste
   paste_from_selection: Paste the selection

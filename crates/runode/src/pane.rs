@@ -4,7 +4,8 @@
 //! 视图本身和界面由工作区管理。
 
 /// 分屏的方向。
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum Axis {
     /// 左右并排。
     Horizontal,

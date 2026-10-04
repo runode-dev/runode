@@ -12,8 +12,9 @@ use crate::{
         ResetFontSize, SelectAll,
     },
     workspace::{
-        ClosePane, CloseTab, EqualizePanes, FocusNextPane, FocusPreviousPane, NewSplitDown, NewSplitRight,
-        NewTab, NextTab, PreviousTab, TogglePaneZoom,
+        ClosePane, CloseTab, CloseWorkspace, EqualizePanes, FocusNextPane, FocusPreviousPane, NewSplitDown,
+        NewSplitRight, NewTab, NewWorkspace, NextTab, NextWorkspace, PreviousTab, PreviousWorkspace,
+        RenameWorkspace, TogglePaneZoom, ToggleSidebar,
     },
 };
 
@@ -44,7 +45,7 @@ pub fn install(cx: &mut App) {
     cx.on_action(|_: &Hide, cx| cx.hide());
     cx.on_action(|_: &HideOthers, cx| cx.hide_other_apps());
     cx.on_action(|_: &ShowAll, cx| cx.unhide_other_apps());
-    cx.on_action(|_: &NewWindow, cx| crate::open_window(cx, None));
+    cx.on_action(|_: &NewWindow, cx| crate::open_window(cx, None, None));
     cx.on_action(|_: &CloseWindow, cx| with_active_window(cx, |w| w.remove_window()));
     cx.on_action(|_: &CloseAllWindows, cx| {
         for window in cx.windows() {
@@ -83,6 +84,7 @@ pub fn set_menus(cx: &mut App) {
         ]),
         Menu::new(tr("menu.file")).items([
             MenuItem::action(tr("menu.new_tab"), NewTab),
+            MenuItem::action(tr("menu.new_workspace"), NewWorkspace),
             MenuItem::action(tr("menu.new_window"), NewWindow),
             MenuItem::separator(),
             MenuItem::action(tr("menu.split_right"), NewSplitRight),
@@ -90,6 +92,7 @@ pub fn set_menus(cx: &mut App) {
             MenuItem::separator(),
             MenuItem::action(tr("menu.close"), ClosePane),
             MenuItem::action(tr("menu.close_tab"), CloseTab),
+            MenuItem::action(tr("menu.close_workspace"), CloseWorkspace),
             MenuItem::action(tr("menu.close_window"), CloseWindow),
             MenuItem::action(tr("menu.close_all_windows"), CloseAllWindows),
         ]),
@@ -120,6 +123,7 @@ pub fn set_menus(cx: &mut App) {
             MenuItem::action(tr("menu.previous_prompt"), JumpToPrompt(-1)),
             MenuItem::action(tr("menu.next_prompt"), JumpToPrompt(1)),
             MenuItem::separator(),
+            MenuItem::action(tr("menu.toggle_sidebar"), ToggleSidebar),
             MenuItem::action(tr("menu.toggle_full_screen"), ToggleFullScreen),
         ]),
         Menu::new(tr("menu.window")).items([
@@ -128,6 +132,10 @@ pub fn set_menus(cx: &mut App) {
             MenuItem::separator(),
             MenuItem::action(tr("menu.previous_tab"), PreviousTab),
             MenuItem::action(tr("menu.next_tab"), NextTab),
+            MenuItem::separator(),
+            MenuItem::action(tr("menu.previous_workspace"), PreviousWorkspace),
+            MenuItem::action(tr("menu.next_workspace"), NextWorkspace),
+            MenuItem::action(tr("menu.rename_workspace"), RenameWorkspace),
             MenuItem::separator(),
             MenuItem::action(tr("menu.previous_split"), FocusPreviousPane),
             MenuItem::action(tr("menu.next_split"), FocusNextPane),

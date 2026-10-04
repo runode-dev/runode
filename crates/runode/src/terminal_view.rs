@@ -170,7 +170,8 @@ pub struct TerminalView {
     /// 打开着的搜索栏输入框，以及对它事件的订阅。
     search_field: Option<(Entity<SearchField>, Subscription)>,
     _reader: Task<()>,
-    _foreground_poll: Task<()>,
+    /// shell 启动后才有。
+    _foreground_poll: Option<Task<()>>,
     /// 上次因为有输出而重读前台进程的时刻。
     foreground_read_at: Instant,
     /// 输出太密时推迟的那次重读。
@@ -200,6 +201,38 @@ impl TerminalView {
         let integration = cx.global::<AppConfig>().0.shell_integration;
         let (session, rx) = Session::spawn(PROVISIONAL_SIZE, cwd, integration)?;
         Ok(cx.new(|cx| Self::new(session, rx, window, cx)))
+    }
+
+    /// 建好视图但先不启动 shell，等 `start` 时再在 `cwd` 下启动。恢复布局时看不见的终端用它，
+    /// 不切过去就不占进程。
+    pub fn unstarted(
+        cwd: Option<&std::path::Path>,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> anyhow::Result<Entity<Self>> {
+        let (session, rx) = Session::unstarted(PROVISIONAL_SIZE, cwd)?;
+        Ok(cx.new(|cx| Self::new(session, rx, window, cx)))
+    }
+
+    pub fn started(&self) -> bool {
+        self.session.started()
+    }
+
+    /// 启动 `unstarted` 建的视图的 shell；启动不了时按 shell 已退出处理，关掉这个终端。
+    pub fn start(&mut self, cx: &mut Context<Self>) {
+        if self.session.started() {
+            return;
+        }
+        if let Err(err) = self.session.start(self.config.shell_integration) {
+            tracing::error!("failed to start terminal session: {err:#}");
+            self.session.exited = true;
+            cx.emit(TerminalEvent::Exited);
+            return;
+        }
+        self._foreground_poll = Some(Self::poll_foreground(cx));
+        if self.session.refresh_fallback_title() {
+            cx.emit(TerminalEvent::TitleChanged);
+        }
     }
 
     /// 定时重读前台进程，不输出的程序（比如 `sleep`）启动后标签名也能跟上。
@@ -312,7 +345,7 @@ impl TerminalView {
         let appearance_watch =
             cx.observe_window_appearance(window, |_, _, cx| crate::config::follow_appearance(cx));
 
-        let foreground_poll = Self::poll_foreground(cx);
+        let foreground_poll = session.started().then(|| Self::poll_foreground(cx));
 
         let focus_handle = cx.focus_handle();
         let pane_focus = cx.focus_handle();

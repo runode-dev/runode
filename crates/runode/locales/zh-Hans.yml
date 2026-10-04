@@ -10,11 +10,13 @@ menu:
   quit: 退出 Runode
   file: 文件
   new_tab: 新建标签页
+  new_workspace: 新建工作区…
   new_window: 新建窗口
   split_right: 向右分屏
   split_down: 向下分屏
   close: 关闭
   close_tab: 关闭标签页
+  close_workspace: 关闭工作区
   close_window: 关闭窗口
   close_all_windows: 关闭所有窗口
   edit: 编辑
@@ -36,16 +38,27 @@ menu:
   reset_font_size: 恢复默认字号
   previous_prompt: 跳到上一个提示符
   next_prompt: 跳到下一个提示符
+  toggle_sidebar: 显示或隐藏侧栏
   toggle_full_screen: 切换全屏
   window: 窗口
   minimize: 最小化
   zoom: 缩放
   previous_tab: 显示上一个标签页
   next_tab: 显示下一个标签页
+  previous_workspace: 显示上一个工作区
+  next_workspace: 显示下一个工作区
+  rename_workspace: 重命名工作区…
   previous_split: 选择上一个分屏
   next_split: 选择下一个分屏
   zoom_split: 放大分屏
   equalize_splits: 均分分屏
+workspace:
+  new: 新建工作区
+  choose: 打开
+  close_title: 关闭工作区“%{name}”？
+  close_detail: 里面的 %{count} 个终端会一起关闭。
+  close_confirm: 关闭
+  close_cancel: 取消
 paste:
   title: 粘贴的内容可能会直接执行命令
   detail: 内容含有换行或终端控制序列，粘贴后可能被当作命令立即运行。
@@ -128,6 +141,14 @@ action:
   resize_split: 把最近的分隔线往这个方向挪，步长固定
   equalize_splits: 均分分屏
   toggle_split_zoom: 放大或还原当前分屏
+  new_workspace: 选一个目录，在里面新建工作区
+  close_workspace: 关闭工作区和里面所有标签
+  rename_workspace: 在侧栏里重命名工作区
+  next_workspace: 下一个工作区
+  previous_workspace: 上一个工作区
+  last_workspace: 最后一个工作区
+  goto_workspace: 第 N 个工作区，从 1 数
+  toggle_sidebar: 显示或隐藏工作区侧栏
   copy_to_clipboard: 复制
   paste_from_clipboard: 粘贴
   paste_from_selection: 粘贴选区

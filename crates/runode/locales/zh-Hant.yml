@@ -10,11 +10,13 @@ menu:
   quit: 結束 Runode
   file: 檔案
   new_tab: 新增分頁
+  new_workspace: 新增工作區…
   new_window: 新增視窗
   split_right: 向右分割
   split_down: 向下分割
   close: 關閉
   close_tab: 關閉分頁
+  close_workspace: 關閉工作區
   close_window: 關閉視窗
   close_all_windows: 關閉所有視窗
   edit: 編輯
@@ -36,16 +38,27 @@ menu:
   reset_font_size: 重設字體大小
   previous_prompt: 跳到上一個提示符號
   next_prompt: 跳到下一個提示符號
+  toggle_sidebar: 顯示或隱藏側欄
   toggle_full_screen: 切換全螢幕
   window: 視窗
   minimize: 縮到最小
   zoom: 縮放
   previous_tab: 顯示上一個分頁
   next_tab: 顯示下一個分頁
+  previous_workspace: 顯示上一個工作區
+  next_workspace: 顯示下一個工作區
+  rename_workspace: 重新命名工作區…
   previous_split: 選擇上一個分割畫面
   next_split: 選擇下一個分割畫面
   zoom_split: 放大分割畫面
   equalize_splits: 平均分割畫面
+workspace:
+  new: 新增工作區
+  choose: 打開
+  close_title: 關閉工作區「%{name}」？
+  close_detail: 裡面的 %{count} 個終端機會一起關閉。
+  close_confirm: 關閉
+  close_cancel: 取消
 paste:
   title: 貼上的內容可能會直接執行指令
   detail: 內容含有換行或終端機控制序列，貼上後可能被當作指令立即執行。
@@ -128,6 +141,14 @@ action:
   resize_split: 把最近的分隔線往這個方向移，步長固定
   equalize_splits: 平均分割畫面
   toggle_split_zoom: 放大或還原目前的分割畫面
+  new_workspace: 選一個目錄，在裡面新增工作區
+  close_workspace: 關閉工作區和裡面所有分頁
+  rename_workspace: 在側欄裡重新命名工作區
+  next_workspace: 下一個工作區
+  previous_workspace: 上一個工作區
+  last_workspace: 最後一個工作區
+  goto_workspace: 第 N 個工作區，從 1 數
+  toggle_sidebar: 顯示或隱藏工作區側欄
   copy_to_clipboard: 拷貝
   paste_from_clipboard: 貼上
   paste_from_selection: 貼上選取內容

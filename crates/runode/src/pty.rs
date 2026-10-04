@@ -13,7 +13,7 @@ use std::{
 
 use anyhow::{Context as _, Result};
 use futures::channel::mpsc::{UnboundedReceiver, UnboundedSender, unbounded};
-use portable_pty::{Child, CommandBuilder, MasterPty, PtySize, native_pty_system};
+use portable_pty::{Child, CommandBuilder, MasterPty, PtySize, SlavePty, native_pty_system};
 
 use crate::shell_integration;
 
@@ -41,6 +41,8 @@ impl PtyWriter {
 
 pub struct Pty {
     master: Box<dyn MasterPty + Send>,
+    /// 还没启动 shell 时的从设备和读线程要用的发送端，`start` 时交出去。
+    pending: Option<(Box<dyn SlavePty + Send>, UnboundedSender<PtyEvent>)>,
     /// `Drop` 里交给回收线程，所以是 `Option`。
     child: Option<Box<dyn Child + Send + Sync>>,
     pub writer: PtyWriter,
@@ -74,6 +76,13 @@ impl Pty {
         cwd: Option<&std::path::Path>,
         integration: shell_integration::Mode,
     ) -> Result<(Self, UnboundedReceiver<PtyEvent>)> {
+        let (mut pty, rx) = Self::open(size)?;
+        pty.start(shell, cwd, integration)?;
+        Ok((pty, rx))
+    }
+
+    /// 只打开伪终端，shell 等 `start` 时再启动；在那之前没有子进程，也没有读线程。
+    pub fn open(size: GridSize) -> Result<(Self, UnboundedReceiver<PtyEvent>)> {
         // 系统的 openpty 内部用了不可重入的 ptsname，多个线程同时开伪终端会互相踩，
         // 拿到错的从设备名而失败。
         static OPENPTY: Mutex<()> = Mutex::new(());
@@ -82,7 +91,34 @@ impl Pty {
             native_pty_system().openpty(size.pty_size())
         }
         .context("openpty failed")?;
+        let writer = pair.master.take_writer().context("pty writer")?;
+        let (tx, rx) = unbounded();
+        Ok((
+            Self {
+                master: pair.master,
+                pending: Some((pair.slave, tx)),
+                child: None,
+                writer: PtyWriter(Arc::new(Mutex::new(writer))),
+            },
+            rx,
+        ))
+    }
 
+    /// 已经启动了 shell。
+    pub fn started(&self) -> bool {
+        self.pending.is_none()
+    }
+
+    /// 在 `cwd` 下启动 shell 和读线程，参数同 `spawn`。已经启动过时什么都不做。
+    pub fn start(
+        &mut self,
+        shell: Option<&str>,
+        cwd: Option<&std::path::Path>,
+        integration: shell_integration::Mode,
+    ) -> Result<()> {
+        let Some((slave, tx)) = self.pending.take() else {
+            return Ok(());
+        };
         let shell = shell
             .map(str::to_owned)
             .or_else(|| std::env::var("SHELL").ok())
@@ -105,26 +141,17 @@ impl Pty {
             cmd.cwd::<std::path::PathBuf>(cwd);
         }
 
-        let child = pair.slave.spawn_command(cmd).context("failed to spawn shell")?;
+        let child = slave.spawn_command(cmd).context("failed to spawn shell")?;
+        self.child = Some(child);
         // 子进程持有自己的 slave 副本；我们这份必须关掉，子进程退出时才会读到 EOF。
-        drop(pair.slave);
+        drop(slave);
 
-        let reader = pair.master.try_clone_reader().context("pty reader")?;
-        let writer = pair.master.take_writer().context("pty writer")?;
-        let (tx, rx) = unbounded();
+        let reader = self.master.try_clone_reader().context("pty reader")?;
         thread::Builder::new()
             .name("pty-reader".into())
             .spawn(move || read_loop(reader, tx))
             .context("failed to start pty reader thread")?;
-
-        Ok((
-            Self {
-                master: pair.master,
-                child: Some(child),
-                writer: PtyWriter(Arc::new(Mutex::new(writer))),
-            },
-            rx,
-        ))
+        Ok(())
     }
 
     pub fn resize(&self, size: GridSize) {
@@ -163,7 +190,7 @@ impl Pty {
     }
 }
 
-fn dir_label(path: &Path) -> String {
+pub fn dir_label(path: &Path) -> String {
     if std::env::var_os("HOME").is_some_and(|home| Path::new(&home) == path) {
         return "~".into();
     }

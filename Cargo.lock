@@ -4727,6 +4727,8 @@ dependencies = [
  "objc2-foundation 0.3.2",
  "portable-pty",
  "rust-i18n",
+ "serde",
+ "serde_json",
  "tracing",
  "tracing-subscriber",
 ]

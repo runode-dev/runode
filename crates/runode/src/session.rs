@@ -263,6 +263,8 @@ pub struct Session {
     pub fallback_title: Option<String>,
     pub exited: bool,
     option_as_alt: OptionAsAlt,
+    /// 还没启动 shell 时它要从哪个目录开始，见 `unstarted`。
+    start_dir: Option<std::path::PathBuf>,
 }
 
 impl Session {
@@ -291,6 +293,30 @@ impl Session {
     ) -> Result<(Self, UnboundedReceiver<PtyEvent>)> {
         let (pty, rx) = Pty::spawn(size, shell, cwd, integration)?;
         Ok((Self::with_pty(size, pty)?, rx))
+    }
+
+    /// 先不启动 shell，等 `start` 时再在 `cwd` 下启动；为 `None` 时在家目录。在那之前标题是
+    /// 起始目录的名字，`cwd` 也报起始目录。
+    pub fn unstarted(
+        size: GridSize,
+        cwd: Option<&std::path::Path>,
+    ) -> Result<(Self, UnboundedReceiver<PtyEvent>)> {
+        let (pty, rx) = Pty::open(size)?;
+        let mut session = Self::with_pty(size, pty)?;
+        session.start_dir = cwd
+            .map(Into::into)
+            .or_else(|| std::env::var_os("HOME").map(Into::into));
+        session.fallback_title = session.start_dir.as_deref().map(crate::pty::dir_label);
+        Ok((session, rx))
+    }
+
+    /// 还没启动 shell 时按 `integration` 启动它；已经启动过时什么都不做。
+    pub fn start(&mut self, integration: crate::shell_integration::Mode) -> Result<()> {
+        self.pty.start(None, self.start_dir.as_deref(), integration)
+    }
+
+    pub fn started(&self) -> bool {
+        self.pty.started()
     }
 
     /// 接上已经按 `size` 启动好的 shell。
@@ -429,6 +455,7 @@ impl Session {
             fallback_title: None,
             exited: false,
             option_as_alt: OptionAsAlt::False,
+            start_dir: None,
         })
     }
 
@@ -530,11 +557,18 @@ impl Session {
 
     /// shell 当前所在的目录。
     pub fn cwd(&self) -> Option<std::path::PathBuf> {
+        if !self.pty.started() {
+            return self.start_dir.clone();
+        }
         self.pty.shell_cwd()
     }
 
     /// 重新读取终端的前台进程，返回 `fallback_title` 或 `agent` 是否变化。
     pub fn refresh_fallback_title(&mut self) -> bool {
+        // 还没启动时没有前台进程，标题保持起始目录的名字。
+        if !self.pty.started() {
+            return false;
+        }
         // agent 退出、回到 shell 后，它留下的标题不再代表任何状态。
         let agent_gone = self.agent.is_some() && self.pty.foreground_is_shell();
         if agent_gone {

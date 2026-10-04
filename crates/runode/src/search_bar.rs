@@ -379,6 +379,11 @@ impl SearchField {
     }
 
     fn select_all(&mut self, _: &SelectAll, _: &mut Window, cx: &mut Context<Self>) {
+        self.select_all_text(cx);
+    }
+
+    /// 选中全部文字；开始编辑一段已有的文字时用，直接打字就替换掉它。
+    pub fn select_all_text(&mut self, cx: &mut Context<Self>) {
         self.selected = 0..self.text.len();
         self.reversed = false;
         self.last_edit = None;

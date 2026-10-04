@@ -21,9 +21,10 @@ use crate::{
         ScrollToTop, SelectAll, SendText, WriteScreenFile,
     },
     workspace::{
-        ClosePane, CloseTab, EqualizePanes, FocusNextPane, FocusPane, FocusPreviousPane, NewSplitDown,
-        NewSplitRight, NewTab, NextTab, PreviousTab, ResizePane, SelectLastTab, SelectTab,
-        TogglePaneZoom,
+        ClosePane, CloseTab, CloseWorkspace, EqualizePanes, FocusNextPane, FocusPane, FocusPreviousPane,
+        NewSplitDown, NewSplitRight, NewTab, NewWorkspace, NextTab, NextWorkspace, PreviousTab,
+        PreviousWorkspace, RenameWorkspace, ResizePane, SelectLastTab, SelectLastWorkspace, SelectTab,
+        SelectWorkspace, TogglePaneZoom, ToggleSidebar,
     },
 };
 
@@ -38,7 +39,7 @@ pub struct ActionSpec {
 }
 
 const GLOBAL: &[Option<&str>] = &[None];
-const WORKSPACE: &[Option<&str>] = &[Some("Workspace")];
+const WINDOW: &[Option<&str>] = &[Some("Window")];
 const TERMINAL: &[Option<&str>] = &[Some("Terminal")];
 /// 搜索框不在 `Terminal` 上下文里，复制粘贴和搜索导航在那里也要能用。
 const TERMINAL_AND_SEARCH: &[Option<&str>] = &[Some("Terminal"), Some("SearchBar")];
@@ -97,15 +98,15 @@ pub static ACTIONS: &[ActionSpec] = &[
     plain!("minimize", GLOBAL, Minimize),
     plain!("toggle_maximize", GLOBAL, Zoom),
     plain!("toggle_fullscreen", GLOBAL, ToggleFullScreen),
-    plain!("new_tab", WORKSPACE, NewTab),
-    plain!("close_tab", WORKSPACE, CloseTab),
-    plain!("next_tab", WORKSPACE, NextTab),
-    plain!("previous_tab", WORKSPACE, PreviousTab),
-    plain!("last_tab", WORKSPACE, SelectLastTab),
+    plain!("new_tab", WINDOW, NewTab),
+    plain!("close_tab", WINDOW, CloseTab),
+    plain!("next_tab", WINDOW, NextTab),
+    plain!("previous_tab", WINDOW, PreviousTab),
+    plain!("last_tab", WINDOW, SelectLastTab),
     ActionSpec {
         name: "goto_tab",
         param: Some("N"),
-        contexts: WORKSPACE,
+        contexts: WINDOW,
         build: |param| match required(param)?.parse::<usize>() {
             Ok(n) if n >= 1 => Ok(Box::new(SelectTab(n - 1))),
             _ => Err("expected a tab number starting from 1".into()),
@@ -114,18 +115,18 @@ pub static ACTIONS: &[ActionSpec] = &[
     ActionSpec {
         name: "new_split",
         param: Some("right|down"),
-        contexts: WORKSPACE,
+        contexts: WINDOW,
         build: |param| match required(param)? {
             "right" => Ok(Box::new(NewSplitRight)),
             "down" => Ok(Box::new(NewSplitDown)),
             _ => Err("expected right or down".into()),
         },
     },
-    plain!("close_surface", WORKSPACE, ClosePane),
+    plain!("close_surface", WINDOW, ClosePane),
     ActionSpec {
         name: "goto_split",
         param: Some("previous|next|left|right|up|down"),
-        contexts: WORKSPACE,
+        contexts: WINDOW,
         build: |param| match param {
             Some("previous") => Ok(Box::new(FocusPreviousPane)),
             Some("next") => Ok(Box::new(FocusNextPane)),
@@ -135,7 +136,7 @@ pub static ACTIONS: &[ActionSpec] = &[
     ActionSpec {
         name: "resize_split",
         param: Some("left|right|up|down"),
-        contexts: WORKSPACE,
+        contexts: WINDOW,
         // 兼容 `resize_split:left,10` 的写法，数值只校验不使用。
         build: |param| {
             let (dir, amount) = match param.and_then(|p| p.split_once(',')) {
@@ -146,8 +147,24 @@ pub static ACTIONS: &[ActionSpec] = &[
             Ok(Box::new(ResizePane(direction(dir)?)))
         },
     },
-    plain!("equalize_splits", WORKSPACE, EqualizePanes),
-    plain!("toggle_split_zoom", WORKSPACE, TogglePaneZoom),
+    plain!("equalize_splits", WINDOW, EqualizePanes),
+    plain!("toggle_split_zoom", WINDOW, TogglePaneZoom),
+    plain!("new_workspace", WINDOW, NewWorkspace),
+    plain!("close_workspace", WINDOW, CloseWorkspace),
+    plain!("rename_workspace", WINDOW, RenameWorkspace),
+    plain!("next_workspace", WINDOW, NextWorkspace),
+    plain!("previous_workspace", WINDOW, PreviousWorkspace),
+    plain!("last_workspace", WINDOW, SelectLastWorkspace),
+    ActionSpec {
+        name: "goto_workspace",
+        param: Some("N"),
+        contexts: WINDOW,
+        build: |param| match required(param)?.parse::<usize>() {
+            Ok(n) if n >= 1 => Ok(Box::new(SelectWorkspace(n - 1))),
+            _ => Err("expected a workspace number starting from 1".into()),
+        },
+    },
+    plain!("toggle_sidebar", WINDOW, ToggleSidebar),
     plain!("copy_to_clipboard", TERMINAL_AND_SEARCH, Copy),
     plain!("paste_from_clipboard", TERMINAL_AND_SEARCH, Paste),
     plain!("paste_from_selection", TERMINAL, PasteSelection),
@@ -270,6 +287,19 @@ pub static DEFAULTS: &[&str] = &[
     "ctrl+cmd+down=resize_split:down",
     "ctrl+cmd+equal=equalize_splits",
     "cmd+shift+enter=toggle_split_zoom",
+    "cmd+shift+n=new_workspace",
+    "ctrl+cmd+]=next_workspace",
+    "ctrl+cmd+[=previous_workspace",
+    "ctrl+cmd+1=goto_workspace:1",
+    "ctrl+cmd+2=goto_workspace:2",
+    "ctrl+cmd+3=goto_workspace:3",
+    "ctrl+cmd+4=goto_workspace:4",
+    "ctrl+cmd+5=goto_workspace:5",
+    "ctrl+cmd+6=goto_workspace:6",
+    "ctrl+cmd+7=goto_workspace:7",
+    "ctrl+cmd+8=goto_workspace:8",
+    "ctrl+cmd+9=last_workspace",
+    "cmd+b=toggle_sidebar",
     "cmd+c=copy_to_clipboard",
     "cmd+v=paste_from_clipboard",
     "cmd+shift+v=paste_from_selection",
