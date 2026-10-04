@@ -13,6 +13,11 @@ const fn rgb(hex: u32) -> RgbColor {
 pub const BACKGROUND: RgbColor = rgb(0x0F0D0E);
 pub const FOREGROUND: RgbColor = rgb(0xFFFFFF);
 
+/// 搜索匹配的高亮：浅黄底黑字，当前选中的那个用橙色底。
+pub const SEARCH_BACKGROUND: RgbColor = rgb(0xFFE795);
+pub const SEARCH_SELECTED_BACKGROUND: RgbColor = rgb(0xF2A57E);
+pub const SEARCH_FOREGROUND: RgbColor = rgb(0x000000);
+
 /// ANSI 16 色：0–7 为普通色，8–15 为亮色。其余 240 色沿用终端标准的 256 色默认值。
 pub const ANSI: [RgbColor; 16] = [
     rgb(0x393A3D), // black

@@ -14,20 +14,21 @@ use anyhow::Result;
 use futures::channel::mpsc::UnboundedReceiver;
 use libghostty_vt::{
     Error,
-    fmt::Format,
+    fmt::{Format, Formatter, FormatterOptions},
     key::{self, OptionAsAlt},
     mouse,
     paste::PasteSource,
     render::{CellIterator, CursorVisualStyle, Dirty, RenderState, RowIterator, Snapshot},
-    screen::CellWide,
+    screen::{CellWide, GridRef, Screen},
+    search::Search,
     selection::{
-        FormatOptions,
+        Adjustment, FormatOptions,
         gesture::{self, AutoscrollTickEvent, DragEvent, Gesture, Geometry, PressEvent, ReleaseEvent},
     },
     style::{RgbColor, Underline},
     terminal::{
         ConformanceLevel, DeviceAttributeFeature, DeviceAttributes, DeviceType, Mode, Point,
-        PointCoordinate, PrimaryDeviceAttributes, ScrollViewport, SecondaryDeviceAttributes,
+        PointCoordinate, PointSpace, PrimaryDeviceAttributes, ScrollViewport, SecondaryDeviceAttributes,
         SizeReportSize, Terminal,
     },
 };
@@ -149,6 +150,21 @@ struct Renderer {
     cursor_color: Option<TerminalColor>,
     /// 配置的光标下文字颜色；没配时用背景色。
     cursor_text: Option<TerminalColor>,
+    /// 视口里的搜索匹配，按行切成段。
+    highlights: Vec<Highlight>,
+    /// 搜索匹配的颜色：普通匹配和选中匹配各一对（背景、文字）。
+    search_colors: [(TerminalColor, TerminalColor); 2],
+    /// 高亮或颜色变了，下一次刷新不能只画脏行。
+    force_full: bool,
+}
+
+/// 视口第 `y` 行从 `x0` 到 `x1`（含）的一段搜索匹配。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct Highlight {
+    y: u16,
+    x0: u16,
+    x1: u16,
+    selected: bool,
 }
 
 /// 指针在网格里的位置，以单元格为单位并带小数。拖到网格外时可以为负，也可以超出行列数。
@@ -171,6 +187,14 @@ struct Selecting {
     pointer: (GridPoint, bool),
 }
 
+/// `Session::scroll_viewport` 的滚动方式。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ViewportScroll {
+    Top,
+    Bottom,
+    Page(isize),
+}
+
 pub struct Session {
     terminal: Terminal<'static, 'static>,
     renderer: Rc<RefCell<Renderer>>,
@@ -188,6 +212,8 @@ pub struct Session {
     /// 待写出的已编码输入，各次按键复用这块缓冲。
     scratch: Vec<u8>,
     pub title: Option<String>,
+    /// 打开搜索栏期间的搜索；关掉就丢弃。
+    search: Option<Search<'static>>,
     /// 程序没设置标题时用的名字，见 `Pty::foreground_title`；由 `refresh_fallback_title` 更新。
     pub fallback_title: Option<String>,
     pub exited: bool,
@@ -195,15 +221,28 @@ pub struct Session {
 }
 
 impl Session {
-    pub fn spawn(size: GridSize) -> Result<(Self, UnboundedReceiver<PtyEvent>)> {
-        Self::spawn_shell(size, None)
+    /// 在 `cwd` 下启动用户的 shell；为 `None` 时在家目录。
+    pub fn spawn(
+        size: GridSize,
+        cwd: Option<&std::path::Path>,
+    ) -> Result<(Self, UnboundedReceiver<PtyEvent>)> {
+        Self::spawn_in(size, None, cwd)
     }
 
+    #[cfg(test)]
     pub fn spawn_shell(
         size: GridSize,
         shell: Option<&str>,
     ) -> Result<(Self, UnboundedReceiver<PtyEvent>)> {
-        let (pty, rx) = Pty::spawn(size, shell, None)?;
+        Self::spawn_in(size, shell, None)
+    }
+
+    fn spawn_in(
+        size: GridSize,
+        shell: Option<&str>,
+        cwd: Option<&std::path::Path>,
+    ) -> Result<(Self, UnboundedReceiver<PtyEvent>)> {
+        let (pty, rx) = Pty::spawn(size, shell, cwd)?;
         let writer = pty.writer.clone();
 
         let mut terminal = Terminal::new(size.cols, size.rows)?;
@@ -226,6 +265,9 @@ impl Session {
             selection_fg: None,
             cursor_color: None,
             cursor_text: None,
+            highlights: Vec::new(),
+            search_colors: search_colors(&Config::default()),
+            force_full: false,
         }));
         let held_since = Rc::new(StdCell::new(None));
 
@@ -321,6 +363,7 @@ impl Session {
                 effects,
                 scratch: Vec::with_capacity(64),
                 title: None,
+                search: None,
                 fallback_title: None,
                 exited: false,
                 option_as_alt: OptionAsAlt::False,
@@ -369,6 +412,7 @@ impl Session {
         let mut renderer = self.renderer.borrow_mut();
         renderer.selection_bg = config.selection_background;
         renderer.selection_fg = config.selection_foreground;
+        renderer.search_colors = search_colors(config);
         renderer.cursor_color = config.cursor_color;
         renderer.cursor_text = config.cursor_text;
         // 选区颜色不经过 VT 的脏标记，强制下一帧整屏重画。
@@ -393,6 +437,11 @@ impl Session {
             }
         }
         false
+    }
+
+    /// shell 当前所在的目录。
+    pub fn cwd(&self) -> Option<std::path::PathBuf> {
+        self.pty.shell_cwd()
     }
 
     /// 重新读取终端的前台进程，返回 `fallback_title` 是否变化。
@@ -671,6 +720,148 @@ impl Session {
             .map(|bytes| String::from_utf8_lossy(&bytes).into_owned())
     }
 
+    /// 选中屏幕和回滚历史里的全部内容。
+    pub fn select_all(&mut self) {
+        let result = self
+            .terminal
+            .select_all()
+            .and_then(|selection| self.terminal.set_selection(selection.as_ref()).map(drop));
+        log_err("select all", result);
+    }
+
+    /// 用键盘移动选区的终点，并让终点留在视野里。没有选区时返回 `false`，按键照常交给程序。
+    pub fn adjust_selection(&mut self, adjustment: Adjustment) -> bool {
+        let result = (|| {
+            let Some(mut selection) = self.terminal.selection()? else {
+                return Ok(None);
+            };
+            selection.adjust(&self.terminal, adjustment)?;
+            self.terminal.set_selection(Some(&selection))?;
+            self.reveal_row(&selection.end()).map(Some)
+        })();
+        match log_err("selection adjust", result).flatten() {
+            Some(row) => {
+                if let Some(row) = row {
+                    self.scroll_to_row(row);
+                }
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// 把视口滚到选区开头；没有选区时什么都不做。
+    pub fn scroll_to_selection(&mut self) {
+        let result = (|| {
+            let Some(selection) = self.terminal.selection()? else {
+                return Ok(None);
+            };
+            self.reveal_row(&selection.start())
+        })();
+        if let Some(row) = log_err("scroll to selection", result).flatten() {
+            self.scroll_to_row(row);
+        }
+    }
+
+    /// `grid_ref` 不在视口里时它在整个屏幕（含回滚历史）中的行号；已经看得到时为 `None`。
+    fn reveal_row(&self, grid_ref: &GridRef<'_>) -> libghostty_vt::error::Result<Option<u32>> {
+        if self.terminal.point_from_grid_ref(grid_ref, PointSpace::Viewport)?.is_some() {
+            return Ok(None);
+        }
+        Ok(self.terminal.point_from_grid_ref(grid_ref, PointSpace::Screen)?.map(|p| p.y))
+    }
+
+    /// 滚动视口，让屏幕第 `row` 行落在视口中间。
+    fn scroll_to_row(&mut self, row: u32) {
+        let half = usize::from(self.size.get().rows / 2);
+        self.terminal
+            .scroll_viewport(ScrollViewport::Row((row as usize).saturating_sub(half)));
+    }
+
+    /// 滚动视口；`Page(n)` 按视口高度翻 n 页，负数往回翻。
+    pub fn scroll_viewport(&mut self, scroll: ViewportScroll) {
+        let scroll = match scroll {
+            ViewportScroll::Top => ScrollViewport::Top,
+            ViewportScroll::Bottom => ScrollViewport::Bottom,
+            ViewportScroll::Page(pages) => {
+                ScrollViewport::Delta(pages * self.size.get().rows as isize)
+            }
+        };
+        self.terminal.scroll_viewport(scroll);
+    }
+
+    /// 把字节直接发给程序，用于映射成控制字符的快捷键（比如 ⌘← 发 Ctrl-A）。
+    pub fn send_text(&mut self, bytes: &[u8]) {
+        self.before_input();
+        self.writer.write(bytes);
+    }
+
+    /// 当前屏幕连同回滚历史的纯文本：软换行处接起来，行尾空白去掉。
+    pub fn screen_text(&self) -> Option<String> {
+        let options = FormatterOptions::new()
+            .with_format(Format::Plain)
+            .with_unwrap(true)
+            .with_trim(true);
+        let result = Formatter::new(&self.terminal, options)
+            .and_then(|mut formatter| formatter.format_alloc(None).map(|bytes| bytes.to_vec()));
+        log_err("format screen", result).map(|bytes| String::from_utf8_lossy(&bytes).into_owned())
+    }
+
+    /// 搜索 `needle`，并选中最新的一个匹配（必要时滚过去）；`needle` 为空时清掉匹配。
+    /// 还没在搜索时开始搜索。
+    pub fn search(&mut self, needle: &str) {
+        let result = self.try_search(needle);
+        log_err("search", result);
+    }
+
+    fn try_search(&mut self, needle: &str) -> libghostty_vt::error::Result<()> {
+        let search = match &mut self.search {
+            Some(search) => search,
+            None => self.search.insert(Search::new(&mut self.terminal)?),
+        };
+        if needle.is_empty() {
+            search.clear_needle(&mut self.terminal)?;
+        } else {
+            search.set_needle(&mut self.terminal, needle)?;
+            search.run(&mut self.terminal)?;
+            search.select_next(&mut self.terminal)?;
+        }
+        Ok(())
+    }
+
+    /// 选中下一个（更旧的）匹配，`backward` 时选上一个（更新的）；必要时滚动视口。
+    pub fn search_step(&mut self, backward: bool) {
+        let Some(search) = &mut self.search else {
+            return;
+        };
+        let result = search.run(&mut self.terminal).and_then(|()| {
+            if backward {
+                search.select_prev(&mut self.terminal)
+            } else {
+                search.select_next(&mut self.terminal)
+            }
+        });
+        log_err("search step", result);
+    }
+
+    /// 上一帧的默认前景色和背景色，不触发刷新；画搜索栏这类界面元素时用。
+    pub fn peek_colors(&self) -> (Rgb, Rgb) {
+        let renderer = self.renderer.borrow();
+        (renderer.frame.foreground, renderer.frame.background)
+    }
+
+    /// 搜索栏上显示的进度：选中的是第几个（从 0 数，没选中为 `None`）和匹配总数。
+    pub fn search_status(&self) -> Option<(Option<usize>, usize)> {
+        let search = self.search.as_ref()?;
+        let selected = search.selected_index().ok().flatten();
+        Some((selected, search.total_matches().unwrap_or(0)))
+    }
+
+    /// 关掉搜索，清掉高亮。
+    pub fn end_search(&mut self) {
+        self.search = None;
+    }
+
     /// 网格位置换算成以设备像素计的坐标，和 `GridSize` 的单元格尺寸一致。
     fn surface_position(&self, at: GridPoint) -> (f64, f64) {
         let size = self.size.get();
@@ -709,6 +900,38 @@ impl Session {
         }
     }
 
+    /// 清屏（⌘K）：清掉屏幕和回滚历史。备用屏幕归全屏程序（vim、less 等）自己管，不动。
+    ///
+    /// 前台是 shell 时它多半停在提示符，整屏清掉后发一个 FF（Ctrl-L）让它在顶上重画提示符，
+    /// 已经敲了一半的命令也会保留。前台在跑别的程序时不能给它塞 FF，只删掉光标以上的行，
+    /// 光标所在行顶到第一行。
+    pub fn clear_screen(&mut self) {
+        if self.terminal.active_screen().is_ok_and(|s| s == Screen::Alternate) {
+            return;
+        }
+        self.before_input();
+        if self.pty.foreground_is_shell() {
+            // ED 3 放在最后：先 ED 2 时被推进回滚历史的内容也一起清掉。
+            self.terminal.vt_write(b"\x1b[H\x1b[2J\x1b[3J");
+            self.writer.write(b"\x0c");
+        } else {
+            self.clear_above_cursor();
+        }
+    }
+
+    /// 清掉回滚历史和光标以上的行，光标所在行及以下顶到最上面，光标留在原来的列。
+    fn clear_above_cursor(&mut self) {
+        let x = self.terminal.cursor_x().unwrap_or(0);
+        let y = self.terminal.cursor_y().unwrap_or(0);
+        // DL 从第一行起删掉 y 行，下面的内容跟着上移。
+        let seq = if y > 0 {
+            format!("\x1b[3J\x1b[H\x1b[{y}M\x1b[1;{}H", x + 1)
+        } else {
+            "\x1b[3J".to_owned()
+        };
+        self.terminal.vt_write(seq.as_bytes());
+    }
+
     /// 运行中的程序是否正为同步更新冻结屏幕；即使没有新输出，
     /// 过了 `SYNC_OUTPUT_TIMEOUT` 视图也必须重绘。
     pub fn render_held(&self) -> bool {
@@ -741,10 +964,66 @@ impl Session {
             }
             self.held_since.set(None);
         }
-        if let Err(err) = self.renderer.borrow_mut().refresh(&self.terminal) {
+        let highlights = match &mut self.search {
+            Some(search) => log_err("search highlights", search_highlights(search, &mut self.terminal))
+                .unwrap_or_default(),
+            None => Vec::new(),
+        };
+        let mut renderer = self.renderer.borrow_mut();
+        if renderer.highlights != highlights {
+            renderer.highlights = highlights;
+            renderer.force_full = true;
+        }
+        if let Err(err) = renderer.refresh(&self.terminal) {
             tracing::warn!("render state update failed: {err}");
         }
     }
+}
+
+fn search_colors(config: &Config) -> [(TerminalColor, TerminalColor); 2] {
+    [
+        (config.search_background, config.search_foreground),
+        (config.search_selected_background, config.search_selected_foreground),
+    ]
+}
+
+/// 让搜索追上终端的最新内容，再把视口里的匹配换算成逐行的高亮段。
+fn search_highlights(
+    search: &mut Search<'static>,
+    terminal: &mut Terminal<'static, 'static>,
+) -> libghostty_vt::error::Result<Vec<Highlight>> {
+    search.feed(terminal)?;
+    search.run(terminal)?;
+    let terminal = &*terminal;
+    let cols = terminal.cols()?;
+    let rows = terminal.rows()?;
+    let selected = search.selected_match(terminal)?;
+    let mut highlights = Vec::new();
+    for found in search.viewport_matches(terminal)? {
+        let start = terminal.point_from_grid_ref(&found.start(), PointSpace::Viewport)?;
+        let end = terminal.point_from_grid_ref(&found.end(), PointSpace::Viewport)?;
+        // 一端在视口外的匹配按视口边缘截断；两端都在外面的不画。
+        let ((x0, y0), (x1, y1)) = match (start, end) {
+            (None, None) => continue,
+            (start, end) => (
+                start.map_or((0, 0), |p| (p.x, p.y)),
+                end.map_or((cols.saturating_sub(1), u32::from(rows.saturating_sub(1))), |p| (p.x, p.y)),
+            ),
+        };
+        let is_selected = match &selected {
+            Some(selected) => selected.equals(terminal, &found)?,
+            None => false,
+        };
+        for y in y0..=y1.min(u32::from(rows.saturating_sub(1))) {
+            highlights.push(Highlight {
+                y: y as u16,
+                x0: if y == y0 { x0 } else { 0 },
+                x1: if y == y1 { x1 } else { cols.saturating_sub(1) },
+                selected: is_selected,
+            });
+        }
+    }
+    Ok(highlights)
 }
 
 impl Renderer {
@@ -766,7 +1045,7 @@ impl Renderer {
         let frame = &mut self.frame;
         let reshaped = frame.cols != cols || frame.rows != rows;
         let recolored = frame.background != background || frame.foreground != foreground;
-        if dirty == Dirty::Clean && !reshaped && !recolored {
+        if dirty == Dirty::Clean && !reshaped && !recolored && !self.force_full {
             // 只改光标形状或闪烁（DECSCUSR、DEC 模式 12）不会让 render state 变脏，光标要每次都重读。
             frame.cursor = read_cursor(&snapshot, frame, cursor_colors)?;
             return Ok(());
@@ -778,7 +1057,7 @@ impl Renderer {
         }
         frame.background = background;
         frame.foreground = foreground;
-        let full = dirty == Dirty::Full || reshaped || recolored;
+        let full = dirty == Dirty::Full || reshaped || recolored || std::mem::take(&mut self.force_full);
 
         let mut row_it = self.row_it.update(&snapshot)?;
         let mut y = 0usize;
@@ -820,8 +1099,21 @@ impl Renderer {
                             out.text.clear();
                         }
                     }
-                    // 选中的单元格用配置的选区颜色；没配的那一项按反色取。
                     let x16 = x as u16;
+                    // 宽字符的右半格跟着左半格：匹配的终点只落在宽字符的头格上。
+                    let tail = read.wide == CellWide::SpacerTail;
+                    let highlight = self.highlights.iter().find(|h| {
+                        usize::from(h.y) == y
+                            && h.x0 <= x16
+                            && (x16 <= h.x1 || (tail && x16 == h.x1 + 1))
+                    });
+                    if let Some(highlight) = highlight {
+                        let cell_bg = bg.unwrap_or(background);
+                        let (hl_bg, hl_fg) = self.search_colors[usize::from(highlight.selected)];
+                        bg = Some(resolve(hl_bg, fg, cell_bg));
+                        fg = resolve(hl_fg, fg, cell_bg);
+                    }
+                    // 选中的单元格用配置的选区颜色；没配的那一项按反色取。
                     if selection.is_some_and(|s| s.start_x <= x16 && x16 <= s.end_x) {
                         let cell_bg = bg.unwrap_or(background);
                         bg = Some(self.selection_bg.map_or(fg, |c| resolve(c, fg, cell_bg)));
@@ -1005,6 +1297,128 @@ mod tests {
         session.feed(b"\x1b[?2026l");
         assert!(!session.render_held());
         assert_eq!(row_text(&session.frame(), 0), "after");
+    }
+
+    fn scrollback_rows(session: &Session) -> u64 {
+        let scrollbar = session.terminal.scrollbar().unwrap();
+        scrollbar.total - scrollbar.len
+    }
+
+    #[test]
+    fn clear_screen_at_the_shell_clears_everything() {
+        // `idle_session` 的「shell」就是前台进程，走 shell 那一支。
+        let mut session = idle_session();
+        session.feed(b"1\r\n2\r\n3\r\n4\r\n5\r\n6\r\n$ ls");
+        assert!(scrollback_rows(&session) > 0);
+        session.clear_screen();
+        assert_eq!(scrollback_rows(&session), 0);
+        let frame = session.frame();
+        assert!((0..4).all(|y| row_text(&frame, y).is_empty()));
+    }
+
+    #[test]
+    fn clear_above_cursor_keeps_the_cursor_row_at_the_top() {
+        let mut session = idle_session();
+        session.feed(b"1\r\n2\r\n3\r\n4\r\n5\r\nrunning");
+        session.clear_above_cursor();
+        assert_eq!(scrollback_rows(&session), 0);
+        assert_eq!(session.terminal.cursor_y().unwrap(), 0);
+        assert_eq!(session.terminal.cursor_x().unwrap(), 7);
+        let frame = session.frame();
+        assert_eq!(row_text(&frame, 0), "running");
+        assert!((1..4).all(|y| row_text(&frame, y).is_empty()));
+    }
+
+    #[test]
+    fn clear_screen_leaves_the_alternate_screen_alone() {
+        let mut session = idle_session();
+        session.feed(b"\x1b[?1049hvim");
+        session.clear_screen();
+        assert_eq!(row_text(&session.frame(), 0), "vim");
+    }
+
+    #[test]
+    fn select_all_covers_the_scrollback() {
+        let mut session = idle_session();
+        session.feed(b"one\r\ntwo\r\nthree\r\nfour\r\nfive\r\nsix");
+        session.select_all();
+        assert_eq!(session.selection_text().as_deref(), Some("one\ntwo\nthree\nfour\nfive\nsix"));
+    }
+
+    #[test]
+    fn shift_arrows_extend_an_existing_selection_only() {
+        let mut session = idle_session();
+        session.feed(b"helloworld");
+        assert!(!session.adjust_selection(Adjustment::Right));
+        session.select_press(at(0.2, 0.5), REPEAT);
+        session.select_drag(at(4.8, 0.5), false);
+        session.select_release(at(4.8, 0.5));
+        assert_eq!(session.selection_text().as_deref(), Some("hello"));
+        assert!(session.adjust_selection(Adjustment::Right));
+        assert_eq!(session.selection_text().as_deref(), Some("hellow"));
+    }
+
+    #[test]
+    fn scrolling_the_viewport_by_page_and_to_the_ends() {
+        let mut session = idle_session();
+        for n in 0..20 {
+            session.feed(format!("{n}\r\n").as_bytes());
+        }
+        session.scroll_viewport(ViewportScroll::Top);
+        assert_eq!(row_text(&session.frame(), 0), "0");
+        session.scroll_viewport(ViewportScroll::Page(1));
+        assert_eq!(row_text(&session.frame(), 0), "4");
+        session.scroll_viewport(ViewportScroll::Bottom);
+        assert_eq!(row_text(&session.frame(), 0), "17");
+    }
+
+    #[test]
+    fn screen_text_includes_the_scrollback() {
+        let mut session = idle_session();
+        session.feed(b"one\r\ntwo\r\nthree\r\nfour\r\nfive");
+        assert_eq!(session.screen_text().as_deref(), Some("one\ntwo\nthree\nfour\nfive"));
+    }
+
+    #[test]
+    fn search_highlights_matches_and_steps_through_them() {
+        let mut session = idle_session();
+        session.feed(b"error one\r\nok\r\nerror two");
+        session.search("error");
+        // 先选中最新的那个。
+        assert_eq!(session.search_status(), Some((Some(0), 2)));
+        let frame = session.frame();
+        let selected = Rgb::from(theme::SEARCH_SELECTED_BACKGROUND);
+        let other = Rgb::from(theme::SEARCH_BACKGROUND);
+        assert_eq!(frame.row(2)[0].bg, Some(selected));
+        assert_eq!(frame.row(2)[4].bg, Some(selected));
+        assert_eq!(frame.row(2)[5].bg, None);
+        assert_eq!(frame.row(0)[0].bg, Some(other));
+        assert_eq!(frame.row(1)[0].bg, None);
+        drop(frame);
+
+        session.search_step(false);
+        assert_eq!(session.search_status(), Some((Some(1), 2)));
+        assert_eq!(session.frame().row(0)[0].bg, Some(selected));
+
+        // 新输出里的匹配也会算进来。
+        session.feed(b"\r\nerror three");
+        session.frame();
+        assert_eq!(session.search_status().map(|(_, total)| total), Some(3));
+
+        session.end_search();
+        assert_eq!(session.search_status(), None);
+        assert_eq!(session.frame().row(0)[0].bg, None);
+    }
+
+    #[test]
+    fn search_highlight_covers_both_halves_of_a_trailing_wide_char() {
+        let mut session = idle_session();
+        session.feed("a你好b".as_bytes());
+        session.search("你好");
+        let frame = session.frame();
+        let selected = Some(Rgb::from(theme::SEARCH_SELECTED_BACKGROUND));
+        let colored: Vec<bool> = (0..6).map(|x| frame.row(0)[x].bg == selected).collect();
+        assert_eq!(colored, [false, true, true, true, true, false]);
     }
 
     #[test]

@@ -4,27 +4,68 @@ use std::{collections::HashMap, ops::Range, sync::Arc, time::Duration};
 
 use futures::StreamExt as _;
 use gpui::{
-    App, AppContext as _, Bounds, ClipboardItem, Context, CursorStyle, DispatchPhase, ElementId,
+    Action, App, AppContext as _, Bounds, ClipboardItem, Context, CursorStyle, DispatchPhase, ElementId,
     ElementInputHandler, Entity, EntityInputHandler, EventEmitter, FocusHandle, Focusable, Font,
-    FontStyle, FontWeight, GlobalElementId, Hsla, KeyDownEvent, LayoutId, Modifiers, MouseButton,
+    FontStyle, FontWeight, GlobalElementId, Hsla, KeyDownEvent, Keystroke, LayoutId, Modifiers, MouseButton,
     MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, Point, PromptLevel, Render, ScrollDelta,
     ScrollWheelEvent, ShapedLine, SharedString, Style, Subscription, Task, TextRun, UTF16Selection,
     Window, actions, div, fill, font, point, prelude::*, px, relative, rgb, size,
 };
-use libghostty_vt::{key::Mods, mouse};
+use libghostty_vt::{key::Mods, mouse, selection::Adjustment};
 
 use crate::{
     config::{AppConfig, CellHeight, Config},
     keys,
     pty::{GridSize, PtyEvent},
-    session::{Attrs, CursorShape, Frame, GridPoint, Paste as PasteResult, Rgb, SYNC_OUTPUT_TIMEOUT, Session},
+    search_bar::{
+        EndSearch, SearchField, SearchFieldEvent, SearchNext, SearchPrevious, SearchSelection,
+        StartSearch,
+    },
+    session::{
+        Attrs, CursorShape, Frame, GridPoint, Paste as PasteResult, Rgb, SYNC_OUTPUT_TIMEOUT, Session,
+        ViewportScroll,
+    },
     sprites,
 };
 
 actions!(
     runode,
-    [Copy, Paste, IncreaseFontSize, DecreaseFontSize, ResetFontSize]
+    [
+        Copy,
+        Paste,
+        PasteSelection,
+        SelectAll,
+        ClearScreen,
+        ScrollToTop,
+        ScrollToBottom,
+        ScrollPageUp,
+        ScrollPageDown,
+        ScrollToSelection,
+        IncreaseFontSize,
+        DecreaseFontSize,
+        ResetFontSize
+    ]
 );
+
+/// 把这段字节原样发给程序；用来把 ⌘← 之类的快捷键映射成 shell 认识的控制字符。
+#[derive(Clone, PartialEq, Action)]
+#[action(namespace = runode, no_json)]
+pub struct SendText(pub &'static str);
+
+/// 把屏幕连同回滚历史写进临时文件，再按 `ScreenFile` 处理这个文件。
+#[derive(Clone, PartialEq, Action)]
+#[action(namespace = runode, no_json)]
+pub struct WriteScreenFile(pub ScreenFile);
+
+#[derive(Clone, Copy, PartialEq)]
+pub enum ScreenFile {
+    /// 把文件路径复制到剪贴板。
+    CopyPath,
+    /// 把文件路径粘贴进终端。
+    PastePath,
+    /// 用系统默认程序打开文件。
+    Open,
+}
 
 /// 配置的字体都不可用时使用的等宽字体，macOS 自带。
 const FALLBACK_FONT_FAMILY: &str = "Menlo";
@@ -60,6 +101,8 @@ fn glyph_table(attrs: Attrs) -> usize {
 pub enum TerminalEvent {
     /// 运行中的程序改了标题（OSC 0/2）。
     TitleChanged,
+    /// 焦点进入了这个终端（包括它的搜索栏）。
+    Focused,
     /// 程序响铃（BEL）。
     Bell,
     /// shell 已经退出，这个终端该关掉了。
@@ -85,8 +128,13 @@ pub struct TerminalView {
     grid_origin: Point<Pixels>,
     /// 左键按下后正在拖动选择，这次的移动和松开都归选区，不上报给程序。
     selecting: bool,
+    /// 按下的那一下已经上报给了程序。分屏时每个终端都在窗口上监听移动和松开，
+    /// 只有按下发生在自己这里的终端才上报对应的拖动和松开。
+    reporting_press: bool,
     /// 闪烁光标当前处于亮的一半周期。
     cursor_blink_visible: bool,
+    /// 打开着的搜索栏输入框，以及对它事件的订阅。
+    search_field: Option<(Entity<SearchField>, Subscription)>,
     _reader: Task<()>,
     _foreground_poll: Task<()>,
     _hold_timeout: Option<Task<()>>,
@@ -96,21 +144,29 @@ pub struct TerminalView {
     _autoscroll: Option<Task<()>>,
     _config_watch: Subscription,
     _appearance_watch: Subscription,
-    _focus_watch: [Subscription; 2],
+    /// 包住终端和搜索栏的外层：焦点进到其中任何一处都算这个终端获得了焦点。
+    pane_focus: FocusHandle,
+    _focus_watch: [Subscription; 3],
 }
 
 impl EventEmitter<TerminalEvent> for TerminalView {}
 
 impl TerminalView {
     /// 启动一个 shell 会话并建好它的视图；shell 起不来时返回错误，不建视图。
-    pub fn spawn(window: &mut Window, cx: &mut App) -> anyhow::Result<Entity<Self>> {
+    /// `cwd` 为 `None` 时 shell 从家目录开始。
+    pub fn spawn(
+        cwd: Option<&std::path::Path>,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> anyhow::Result<Entity<Self>> {
         // 临时尺寸；第一次布局时会按实际大小重设。
-        let (session, rx) = Session::spawn(GridSize {
+        let size = GridSize {
             cols: 80,
             rows: 24,
             cell_width_px: 8,
             cell_height_px: 16,
-        })?;
+        };
+        let (session, rx) = Session::spawn(size, cwd)?;
         Ok(cx.new(|cx| Self::new(session, rx, window, cx)))
     }
 
@@ -193,7 +249,9 @@ impl TerminalView {
         });
 
         let focus_handle = cx.focus_handle();
+        let pane_focus = cx.focus_handle();
         let focus_watch = [
+            cx.on_focus_in(&pane_focus, window, |_, _, cx| cx.emit(TerminalEvent::Focused)),
             cx.on_focus(&focus_handle, window, |view, window, cx| {
                 view.reset_cursor_blink(window, cx);
             }),
@@ -213,7 +271,9 @@ impl TerminalView {
             cursor_bounds: None,
             grid_origin: Point::default(),
             selecting: false,
+            reporting_press: false,
             cursor_blink_visible: true,
+            search_field: None,
             _reader: reader,
             _foreground_poll: foreground_poll,
             _hold_timeout: None,
@@ -221,8 +281,14 @@ impl TerminalView {
             _autoscroll: None,
             _config_watch: config_watch,
             _appearance_watch: appearance_watch,
+            pane_focus,
             _focus_watch: focus_watch,
         }
+    }
+
+    /// shell 当前所在的目录，新建标签或分屏时沿用。
+    pub fn cwd(&self) -> Option<std::path::PathBuf> {
+        self.session.cwd()
     }
 
     /// 程序设置的标题；没设置时为前台进程的目录名或进程名，都没有时为 `DEFAULT_TITLE`。
@@ -274,6 +340,14 @@ impl TerminalView {
     fn key_down(&mut self, event: &KeyDownEvent, _: &mut Window, cx: &mut Context<Self>) {
         // 输入法正在组字时，按键归输入法处理。
         if self.marked_text.is_some() {
+            return;
+        }
+        // Shift 加方向键等在有选区时用来扩展选区，没有选区时照常发给程序。
+        if let Some(adjustment) = selection_adjustment(&event.keystroke)
+            && self.session.adjust_selection(adjustment)
+        {
+            cx.stop_propagation();
+            cx.notify();
             return;
         }
         let Some(input) = keys::translate(&event.keystroke) else {
@@ -328,6 +402,7 @@ impl TerminalView {
             if let Some(button) = mouse_button(event.button) {
                 let mods = mouse_mods(&event.modifiers);
                 self.session.mouse_report(mouse::Action::Press, Some(button), at, mods);
+                self.reporting_press = true;
             }
             return;
         }
@@ -358,7 +433,9 @@ impl TerminalView {
             cx.notify();
             return;
         }
-        if inside && self.session.mouse_tracking() {
+        // 没按键的移动只报给指针下的终端；按着键的拖动只报给按下时所在的终端。
+        let ours = if event.pressed_button.is_some() { self.reporting_press } else { inside };
+        if ours && self.session.mouse_tracking() {
             let pressed = event.pressed_button.and_then(mouse_button);
             let mods = mouse_mods(&event.modifiers);
             self.session.mouse_report(mouse::Action::Motion, pressed, at, mods);
@@ -373,6 +450,9 @@ impl TerminalView {
             if event.button == MouseButton::Left {
                 self.finish_selecting(at, cx);
             }
+            return;
+        }
+        if !std::mem::take(&mut self.reporting_press) {
             return;
         }
         if self.session.mouse_tracking()
@@ -411,9 +491,18 @@ impl TerminalView {
     }
 
     fn paste(&mut self, _: &Paste, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(text) = cx.read_from_clipboard().and_then(|item| item.text()) else {
-            return;
-        };
+        if let Some(text) = cx.read_from_clipboard().and_then(|item| item.text()) {
+            self.paste_text(text, window, cx);
+        }
+    }
+
+    fn paste_selection(&mut self, _: &PasteSelection, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(text) = self.session.selection_text() {
+            self.paste_text(text, window, cx);
+        }
+    }
+
+    fn paste_text(&mut self, text: String, window: &mut Window, cx: &mut Context<Self>) {
         if self.session.paste(&text, false) == PasteResult::Done {
             return;
         }
@@ -439,6 +528,218 @@ impl TerminalView {
     fn copy(&mut self, _: &Copy, _: &mut Window, cx: &mut Context<Self>) {
         if let Some(text) = self.session.selection_text() {
             cx.write_to_clipboard(ClipboardItem::new_string(text));
+        }
+    }
+
+    fn clear_screen(&mut self, _: &ClearScreen, _: &mut Window, cx: &mut Context<Self>) {
+        self.session.clear_screen();
+        cx.notify();
+    }
+
+    fn start_search(&mut self, _: &StartSearch, window: &mut Window, cx: &mut Context<Self>) {
+        self.open_search(None, window, cx);
+    }
+
+    fn search_selection(&mut self, _: &SearchSelection, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(text) = self.session.selection_text() {
+            // 搜索只在一行里找，多行选区只取第一行。
+            let line = text.lines().next().unwrap_or_default().to_owned();
+            self.open_search(Some(line), window, cx);
+        }
+    }
+
+    /// 打开搜索栏并把焦点移过去；给了 `query` 时用它替换搜索词并立即搜索。
+    fn open_search(&mut self, query: Option<String>, window: &mut Window, cx: &mut Context<Self>) {
+        let field = match &self.search_field {
+            Some((field, _)) => field.clone(),
+            None => {
+                let field = cx.new(|cx| SearchField::new(String::new(), cx));
+                let events = cx.subscribe_in(&field, window, Self::handle_search_event);
+                self.search_field = Some((field.clone(), events));
+                field
+            }
+        };
+        if let Some(query) = query {
+            self.session.search(&query);
+            field.update(cx, |field, cx| field.set_query(query, cx));
+        }
+        window.focus(&field.focus_handle(cx), cx);
+        cx.notify();
+    }
+
+    fn handle_search_event(
+        &mut self,
+        _: &Entity<SearchField>,
+        event: &SearchFieldEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        match event {
+            SearchFieldEvent::Changed(query) => self.session.search(query),
+            SearchFieldEvent::Next => self.session.search_step(false),
+            SearchFieldEvent::Previous => self.session.search_step(true),
+            SearchFieldEvent::Dismiss => self.close_search(window, cx),
+        }
+        cx.notify();
+    }
+
+    fn close_search(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.search_field = None;
+        self.session.end_search();
+        window.focus(&self.focus_handle, cx);
+        cx.notify();
+    }
+
+    /// 搜索栏开着时切到下一个或上一个匹配；没开时这些键不做事。
+    fn search_next(&mut self, _: &SearchNext, _: &mut Window, cx: &mut Context<Self>) {
+        if self.search_field.is_some() {
+            self.session.search_step(false);
+            cx.notify();
+        }
+    }
+
+    fn search_previous(&mut self, _: &SearchPrevious, _: &mut Window, cx: &mut Context<Self>) {
+        if self.search_field.is_some() {
+            self.session.search_step(true);
+            cx.notify();
+        }
+    }
+
+    fn end_search(&mut self, _: &EndSearch, window: &mut Window, cx: &mut Context<Self>) {
+        if self.search_field.is_some() {
+            self.close_search(window, cx);
+        }
+    }
+
+    /// 右上角的搜索栏：输入框、匹配进度、上下切换和关闭按钮。
+    fn render_search_bar(&self, field: &Entity<SearchField>, cx: &mut Context<Self>) -> gpui::Stateful<gpui::Div> {
+        let frame = self.session.peek_colors();
+        let fg = hsla(frame.0);
+        let bar_bg = hsla(frame.1.mix(frame.0, 0.1));
+        let status = match self.session.search_status() {
+            Some((_, 0)) if !field.read(cx).query().is_empty() => "无结果".to_owned(),
+            Some((Some(selected), total)) => format!("{}/{total}", selected + 1),
+            Some((None, total)) if total > 0 => format!("-/{total}"),
+            _ => String::new(),
+        };
+        let button = |id: &'static str, label: &'static str| {
+            div()
+                .id(id)
+                .flex_none()
+                .size(px(20.))
+                .rounded(px(4.))
+                .flex()
+                .items_center()
+                .justify_center()
+                .text_color(fg.opacity(0.7))
+                .hover(|button| button.bg(fg.opacity(0.15)).text_color(fg))
+                .child(label)
+        };
+        div()
+            .id("search-bar")
+            .absolute()
+            .top(px(8.))
+            .right(px(16.))
+            .w(px(320.))
+            .h(px(32.))
+            .pl(px(10.))
+            .pr(px(4.))
+            .flex()
+            .items_center()
+            .gap(px(4.))
+            .rounded(px(6.))
+            .bg(bar_bg)
+            .border_1()
+            .border_color(fg.opacity(0.15))
+            .shadow_md()
+            .occlude()
+            .text_size(px(12.))
+            .text_color(fg)
+            .cursor(CursorStyle::Arrow)
+            // 搜索词常从终端里复制而来，带着提示符图标之类的字符，界面字体没有这些字形，
+            // 输入框用终端的字体。
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .h_full()
+                    .font_family(self.font.family.clone())
+                    .cursor(CursorStyle::IBeam)
+                    .child(field.clone()),
+            )
+            .child(
+                div()
+                    .flex_none()
+                    .min_w(px(36.))
+                    .text_right()
+                    .text_color(fg.opacity(0.6))
+                    .child(status),
+            )
+            .child(button("search-previous", "↑").on_click(cx.listener(|view, _, _, cx| {
+                view.session.search_step(true);
+                cx.notify();
+            })))
+            .child(button("search-next", "↓").on_click(cx.listener(|view, _, _, cx| {
+                view.session.search_step(false);
+                cx.notify();
+            })))
+            .child(button("search-close", "×").on_click(cx.listener(|view, _, window, cx| {
+                view.close_search(window, cx);
+            })))
+    }
+
+    fn select_all(&mut self, _: &SelectAll, _: &mut Window, cx: &mut Context<Self>) {
+        self.session.select_all();
+        cx.notify();
+    }
+
+    fn scroll_to_top(&mut self, _: &ScrollToTop, _: &mut Window, cx: &mut Context<Self>) {
+        self.session.scroll_viewport(ViewportScroll::Top);
+        cx.notify();
+    }
+
+    fn scroll_to_bottom(&mut self, _: &ScrollToBottom, _: &mut Window, cx: &mut Context<Self>) {
+        self.session.scroll_viewport(ViewportScroll::Bottom);
+        cx.notify();
+    }
+
+    fn scroll_page_up(&mut self, _: &ScrollPageUp, _: &mut Window, cx: &mut Context<Self>) {
+        self.session.scroll_viewport(ViewportScroll::Page(-1));
+        cx.notify();
+    }
+
+    fn scroll_page_down(&mut self, _: &ScrollPageDown, _: &mut Window, cx: &mut Context<Self>) {
+        self.session.scroll_viewport(ViewportScroll::Page(1));
+        cx.notify();
+    }
+
+    fn scroll_to_selection(&mut self, _: &ScrollToSelection, _: &mut Window, cx: &mut Context<Self>) {
+        self.session.scroll_to_selection();
+        cx.notify();
+    }
+
+    fn send_text(&mut self, action: &SendText, _: &mut Window, cx: &mut Context<Self>) {
+        self.session.send_text(action.0.as_bytes());
+        cx.notify();
+    }
+
+    fn write_screen_file(&mut self, action: &WriteScreenFile, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(text) = self.session.screen_text() else {
+            return;
+        };
+        let path = match write_screen_file(&text) {
+            Ok(path) => path,
+            Err(err) => {
+                tracing::warn!("failed to write the screen file: {err:#}");
+                return;
+            }
+        };
+        match action.0 {
+            ScreenFile::CopyPath => {
+                cx.write_to_clipboard(ClipboardItem::new_string(path.display().to_string()));
+            }
+            ScreenFile::PastePath => self.paste_text(path.display().to_string(), window, cx),
+            ScreenFile::Open => cx.open_with_system(&path),
         }
     }
 
@@ -541,14 +842,36 @@ impl Focusable for TerminalView {
 impl Render for TerminalView {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let background = self.session.frame().background;
-        div()
+        // 搜索栏和终端是兄弟节点，不在 `Terminal` 按键上下文里：在搜索栏里打字时，
+        // ⌘← 之类映射给程序的快捷键不能生效。
+        let search_bar = self
+            .search_field
+            .as_ref()
+            .map(|(field, _)| self.render_search_bar(field, cx));
+        let terminal = div()
             .id("terminal")
-            .key_context("Terminal")
+            // 搜索栏开着时多一个 `searching` 标记，只在这时才让 Esc 关搜索而不发给程序。
+            .key_context(if self.search_field.is_some() { "Terminal searching" } else { "Terminal" })
             .track_focus(&self.focus_handle)
             .on_key_down(cx.listener(Self::key_down))
             .on_scroll_wheel(cx.listener(Self::scroll_wheel))
             .on_action(cx.listener(Self::paste))
             .on_action(cx.listener(Self::copy))
+            .on_action(cx.listener(Self::paste_selection))
+            .on_action(cx.listener(Self::clear_screen))
+            .on_action(cx.listener(Self::select_all))
+            .on_action(cx.listener(Self::scroll_to_top))
+            .on_action(cx.listener(Self::scroll_to_bottom))
+            .on_action(cx.listener(Self::scroll_page_up))
+            .on_action(cx.listener(Self::scroll_page_down))
+            .on_action(cx.listener(Self::scroll_to_selection))
+            .on_action(cx.listener(Self::send_text))
+            .on_action(cx.listener(Self::write_screen_file))
+            .on_action(cx.listener(Self::start_search))
+            .on_action(cx.listener(Self::search_selection))
+            .on_action(cx.listener(Self::search_next))
+            .on_action(cx.listener(Self::search_previous))
+            .on_action(cx.listener(Self::end_search))
             .on_action(cx.listener(Self::increase_font_size))
             .on_action(cx.listener(Self::decrease_font_size))
             .on_action(cx.listener(Self::reset_font_size))
@@ -571,7 +894,13 @@ impl Render for TerminalView {
                         CursorStyle::IBeam
                     })
                     .child(TerminalElement { view: cx.entity() }),
-            )
+            );
+        div()
+            .track_focus(&self.pane_focus)
+            .relative()
+            .size_full()
+            .child(terminal)
+            .children(search_bar)
     }
 }
 
@@ -815,6 +1144,43 @@ fn mouse_button(button: MouseButton) -> Option<mouse::Button> {
         MouseButton::Middle => Some(mouse::Button::Middle),
         _ => None,
     }
+}
+
+/// 只按着 Shift 的方向、翻页、Home/End 键对应的选区调整。
+fn selection_adjustment(keystroke: &Keystroke) -> Option<Adjustment> {
+    let mods = &keystroke.modifiers;
+    if !mods.shift || mods.control || mods.alt || mods.platform {
+        return None;
+    }
+    Some(match keystroke.key.as_str() {
+        "left" => Adjustment::Left,
+        "right" => Adjustment::Right,
+        "up" => Adjustment::Up,
+        "down" => Adjustment::Down,
+        "pageup" => Adjustment::PageUp,
+        "pagedown" => Adjustment::PageDown,
+        "home" => Adjustment::Home,
+        "end" => Adjustment::End,
+        _ => return None,
+    })
+}
+
+/// 屏幕内容写到临时目录下一个新文件里，返回它的路径。
+fn write_screen_file(text: &str) -> std::io::Result<std::path::PathBuf> {
+    let dir = std::env::temp_dir().join("runode");
+    std::fs::create_dir_all(&dir)?;
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis();
+    let path = dir.join(format!("screen-{}-{stamp}.txt", std::process::id()));
+    // 屏幕上可能有密钥之类的内容，只让自己读写。
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
+    std::io::Write::write_all(&mut options.open(&path)?, text.as_bytes())?;
+    Ok(path)
 }
 
 pub fn hsla(color: Rgb) -> Hsla {

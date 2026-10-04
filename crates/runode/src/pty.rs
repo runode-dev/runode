@@ -71,9 +71,14 @@ impl Pty {
         shell: Option<&str>,
         cwd: Option<&std::path::Path>,
     ) -> Result<(Self, UnboundedReceiver<PtyEvent>)> {
-        let pair = native_pty_system()
-            .openpty(size.pty_size())
-            .context("openpty failed")?;
+        // 系统的 openpty 内部用了不可重入的 ptsname，多个线程同时开伪终端会互相踩，
+        // 拿到错的从设备名而失败。
+        static OPENPTY: Mutex<()> = Mutex::new(());
+        let pair = {
+            let _guard = OPENPTY.lock().unwrap_or_else(|e| e.into_inner());
+            native_pty_system().openpty(size.pty_size())
+        }
+        .context("openpty failed")?;
 
         let shell = shell
             .map(str::to_owned)
@@ -128,13 +133,30 @@ impl Pty {
     /// 程序没设置标题时显示的名字：前台是 shell 自己时为它当前目录的名字（家目录为 `~`），
     /// 前台在跑别的程序时为该程序的进程名。取不到时为 `None`。
     pub fn foreground_title(&self) -> Option<String> {
-        let leader = self.master.process_group_leader()?;
-        let shell = self.child.as_ref()?.process_id()?;
-        if u32::try_from(leader).ok() == Some(shell) {
+        let (leader, is_shell) = self.foreground()?;
+        if is_shell {
             process_cwd(leader).map(|cwd| dir_label(&cwd))
         } else {
             process_name(leader)
         }
+    }
+
+    /// shell 自己当前所在的目录（不管前台在跑什么）。
+    pub fn shell_cwd(&self) -> Option<PathBuf> {
+        let pid = self.child.as_ref()?.process_id()?;
+        process_cwd(libc::pid_t::try_from(pid).ok()?)
+    }
+
+    /// 前台是不是 shell 自己，也就是没有在跑别的程序。取不到时当作不是。
+    pub fn foreground_is_shell(&self) -> bool {
+        self.foreground().is_some_and(|(_, is_shell)| is_shell)
+    }
+
+    /// 终端前台进程组的组长，以及它是不是 shell 自己。
+    fn foreground(&self) -> Option<(libc::pid_t, bool)> {
+        let leader = self.master.process_group_leader()?;
+        let shell = self.child.as_ref()?.process_id()?;
+        Some((leader, u32::try_from(leader).ok() == Some(shell)))
     }
 }
 

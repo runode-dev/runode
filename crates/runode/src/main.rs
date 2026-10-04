@@ -5,7 +5,9 @@ mod about;
 mod config;
 mod keys;
 mod menus;
+mod pane;
 mod pty;
+mod search_bar;
 mod session;
 mod sprites;
 mod terminal_view;
@@ -55,7 +57,7 @@ fn open_window(cx: &mut App) {
             ..Default::default()
         },
         |window, cx| {
-            let first = TerminalView::spawn(window, cx)
+            let first = TerminalView::spawn(None, window, cx)
                 .unwrap_or_else(|err| panic!("failed to start terminal session: {err:#}"));
             cx.new(|cx| Workspace::new(first, window, cx))
         },

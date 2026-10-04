@@ -55,6 +55,12 @@ pub struct Config {
     pub selection_background: Option<TerminalColor>,
     /// `None` 表示取单元格的背景色。
     pub selection_foreground: Option<TerminalColor>,
+    /// 搜索匹配的背景色和文字色。
+    pub search_background: TerminalColor,
+    pub search_foreground: TerminalColor,
+    /// 当前选中的那个搜索匹配的背景色和文字色。
+    pub search_selected_background: TerminalColor,
+    pub search_selected_foreground: TerminalColor,
     /// 覆盖默认 256 色中的若干项。
     pub palette: Vec<(u8, RgbColor)>,
     pub macos_option_as_alt: OptionAsAlt,
@@ -80,6 +86,10 @@ impl Default for Config {
             cursor_text: None,
             selection_background: None,
             selection_foreground: None,
+            search_background: TerminalColor::Rgb(theme::SEARCH_BACKGROUND),
+            search_foreground: TerminalColor::Rgb(theme::SEARCH_FOREGROUND),
+            search_selected_background: TerminalColor::Rgb(theme::SEARCH_SELECTED_BACKGROUND),
+            search_selected_foreground: TerminalColor::Rgb(theme::SEARCH_FOREGROUND),
             palette: theme::ANSI
                 .iter()
                 .enumerate()
@@ -276,6 +286,22 @@ impl Config {
             "selection-foreground" => {
                 self.selection_foreground = if empty { None } else { Some(parse_terminal_color(value)?) };
             }
+            "search-background" => {
+                self.search_background =
+                    if empty { defaults.search_background } else { parse_terminal_color(value)? };
+            }
+            "search-foreground" => {
+                self.search_foreground =
+                    if empty { defaults.search_foreground } else { parse_terminal_color(value)? };
+            }
+            "search-selected-background" => {
+                self.search_selected_background =
+                    if empty { defaults.search_selected_background } else { parse_terminal_color(value)? };
+            }
+            "search-selected-foreground" => {
+                self.search_selected_foreground =
+                    if empty { defaults.search_selected_foreground } else { parse_terminal_color(value)? };
+            }
             "palette" => {
                 let (index, color) = value.split_once('=').ok_or("expected N=COLOR")?;
                 let index: u8 = index.trim().parse().map_err(|_| "palette index must be 0-255")?;
@@ -412,6 +438,30 @@ fn expand_home(path: &str) -> PathBuf {
     match path.strip_prefix("~/") {
         Some(rest) => home().join(rest),
         None => PathBuf::from(path),
+    }
+}
+
+/// 用文本编辑器打开 runode 自己的配置文件；文件还不存在时先建一个空的。
+pub fn open(cx: &App) {
+    let path = runode_config_path();
+    let created = path
+        .parent()
+        .map_or(Ok(()), std::fs::create_dir_all)
+        .and_then(|()| std::fs::OpenOptions::new().create(true).append(true).open(&path).map(drop));
+    if let Err(err) = created {
+        tracing::warn!("failed to create {}: {err}", path.display());
+        return;
+    }
+    // 配置文件没有扩展名，按扩展名找默认程序不可靠；macOS 上用 `open -t` 指定文本编辑器。
+    // 等它退出要在别的线程里，免得卡住界面，也免得留下僵尸进程。
+    if cfg!(target_os = "macos") {
+        std::thread::spawn(move || {
+            if let Err(err) = std::process::Command::new("open").arg("-t").arg(&path).status() {
+                tracing::warn!("failed to open {}: {err}", path.display());
+            }
+        });
+    } else {
+        cx.open_with_system(&path);
     }
 }
 
