@@ -2,11 +2,14 @@
 # 发布构建 runode，打包成 Runode.app，再做成可拖进「应用程序」安装的 dmg。
 # 产物在 target/release/bundle/ 下。
 #
+# 用法：bundle-macos.sh [app|dmg]，默认 dmg；app 只打包到 Runode.app 为止。
+#
 # 环境变量：
 #   CARGO          cargo 命令，默认 cargo
 #   SIGN_IDENTITY  codesign 签名身份，默认 -（ad-hoc，只适合本机或自己用）
 set -euo pipefail
 
+target=${1:-dmg}
 CARGO=${CARGO:-cargo}
 SIGN_IDENTITY=${SIGN_IDENTITY:--}
 
@@ -44,6 +47,11 @@ iconutil -c icns "$iconset" -o "$app/Contents/Resources/runode.icns"
 rm -rf "$(dirname "$iconset")"
 
 codesign --force --sign "$SIGN_IDENTITY" --options runtime "$app"
+
+if [[ "$target" == app ]]; then
+    echo "$app"
+    exit
+fi
 
 # dmg 里放 .app 和指向 /Applications 的链接，打开后直接拖拽安装。
 staging=$(mktemp -d)

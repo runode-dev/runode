@@ -3,7 +3,7 @@ CARGO ?= cargo
 ARGS ?=
 
 .DEFAULT_GOAL := help
-.PHONY: help submodules build release run run-release dmg check test clippy clean
+.PHONY: help submodules build release run run-release app install dmg check test clippy clean
 
 help: ## 列出所有目标
 	@awk 'BEGIN {FS = ":.*## "} /^[a-zA-Z_-]+:.*## / {printf "  %-12s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -22,6 +22,13 @@ run: ## 调试构建并启动
 
 run-release: ## 发布构建并启动
 	$(CARGO) run --release -- $(ARGS)
+
+app: ## 发布构建并打包 Runode.app，产物在 target/release/bundle
+	CARGO=$(CARGO) scripts/bundle-macos.sh app
+
+install: app ## 打包 Runode.app 并装到 /Applications，覆盖旧版本
+	rm -rf /Applications/Runode.app
+	ditto target/release/bundle/Runode.app /Applications/Runode.app
 
 dmg: ## 发布构建并打包 Runode.app 与 dmg，产物在 target/release/bundle
 	CARGO=$(CARGO) scripts/bundle-macos.sh
