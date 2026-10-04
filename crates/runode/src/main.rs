@@ -48,6 +48,9 @@ fn open_window(cx: &mut App) {
             window_bounds: Some(WindowBounds::Windowed(bounds)),
             window_min_size: Some(size(px(320.), px(200.))),
             titlebar: Some(workspace::titlebar_options()),
+            // 标题栏的拖动和双击由 `Workspace` 自己处理；否则 AppKit 会抢先处理标题栏区域的双击，
+            // 在标签或新建按钮上双击也会缩放窗口。
+            app_owns_titlebar_drag: true,
             ..Default::default()
         },
         |window, cx| {
