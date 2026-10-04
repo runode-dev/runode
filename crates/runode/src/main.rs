@@ -26,7 +26,6 @@ fn main() {
         .init();
 
     application().run(|cx: &mut App| {
-        about::install_icon();
         config::install(cx);
         menus::install(cx);
         cx.on_window_closed(|cx, _| {
@@ -38,6 +37,8 @@ fn main() {
 
         open_window(cx);
         cx.activate(true);
+        // 窗口先出来；未打包运行时才需要的图标解码放到最后。
+        about::install_icon();
     });
 }
 
