@@ -17,7 +17,7 @@ use libghostty_vt::{
     key::{self, OptionAsAlt},
     mouse,
     paste::PasteSource,
-    render::{CellIterator, CursorVisualStyle, Dirty, RenderState, RowIterator},
+    render::{CellIterator, CursorVisualStyle, Dirty, RenderState, RowIterator, Snapshot},
     screen::CellWide,
     style::{RgbColor, Underline},
     terminal::{
@@ -92,6 +92,8 @@ pub struct Cursor {
     pub color: Rgb,
     /// 光标落在宽字符上，跨两个单元格。
     pub wide: bool,
+    /// 终端要求光标闪烁（DECSCUSR 或 DEC 模式 12）。
+    pub blinking: bool,
 }
 
 /// 渲染器要画的内容：视口的一份副本，与 libghostty 的 render state 分离，绘制时不碰 VT。
@@ -294,7 +296,8 @@ impl Session {
             .and_then(|t| t.set_default_fg_color(Some(config.foreground)))
             .and_then(|t| t.set_default_cursor_color(config.cursor_color))
             .and_then(|t| t.set_default_cursor_style(Some(config.cursor_style)))
-            .and_then(|t| t.set_default_cursor_blink(config.cursor_style_blink))
+            // 没配置时默认闪烁；libghostty 的 `None` 是不闪烁，所以这里显式给 true。
+            .and_then(|t| t.set_default_cursor_blink(Some(config.cursor_style_blink.unwrap_or(true))))
             .and_then(|t| t.set_default_color_palette(Some(palette)));
         if let Err(err) = applied {
             tracing::warn!("failed to apply config to the terminal: {err}");
@@ -512,10 +515,14 @@ impl Renderer {
         let background = Rgb::from(colors.background);
         let foreground = Rgb::from(colors.foreground);
 
+        let cursor_color = colors.cursor.map_or(foreground, Rgb::from);
+
         let frame = &mut self.frame;
         let reshaped = frame.cols != cols || frame.rows != rows;
         let recolored = frame.background != background || frame.foreground != foreground;
         if dirty == Dirty::Clean && !reshaped && !recolored {
+            // 只改光标形状或闪烁（DECSCUSR、DEC 模式 12）不会让 render state 变脏，光标要每次都重读。
+            frame.cursor = read_cursor(&snapshot, frame, cursor_color)?;
             return Ok(());
         }
         if reshaped {
@@ -583,28 +590,35 @@ impl Renderer {
             y += 1;
         }
 
-        frame.cursor = None;
-        if snapshot.cursor_visible()?
-            && let Some(vp) = snapshot.cursor_viewport()?
-        {
-            let shape = match snapshot.cursor_visual_style()? {
-                CursorVisualStyle::Bar => CursorShape::Bar,
-                CursorVisualStyle::Underline => CursorShape::Underline,
-                CursorVisualStyle::BlockHollow => CursorShape::BlockHollow,
-                _ => CursorShape::Block,
-            };
-            let index = usize::from(vp.y) * usize::from(cols) + usize::from(vp.x);
-            frame.cursor = Some(Cursor {
-                x: vp.x,
-                y: vp.y,
-                shape,
-                color: colors.cursor.map_or(foreground, Rgb::from),
-                wide: frame.cells.get(index).is_some_and(|c| c.wide),
-            });
-        }
+        frame.cursor = read_cursor(&snapshot, frame, cursor_color)?;
         snapshot.set_dirty(Dirty::Clean)?;
         Ok(())
     }
+}
+
+/// 视口里可见的光标；`frame` 的单元格须已是最新，用来判断光标是否落在宽字符上。
+fn read_cursor(snapshot: &Snapshot<'_, '_>, frame: &Frame, color: Rgb) -> libghostty_vt::error::Result<Option<Cursor>> {
+    if !snapshot.cursor_visible()? {
+        return Ok(None);
+    }
+    let Some(vp) = snapshot.cursor_viewport()? else {
+        return Ok(None);
+    };
+    let shape = match snapshot.cursor_visual_style()? {
+        CursorVisualStyle::Bar => CursorShape::Bar,
+        CursorVisualStyle::Underline => CursorShape::Underline,
+        CursorVisualStyle::BlockHollow => CursorShape::BlockHollow,
+        _ => CursorShape::Block,
+    };
+    let index = usize::from(vp.y) * usize::from(frame.cols) + usize::from(vp.x);
+    Ok(Some(Cursor {
+        x: vp.x,
+        y: vp.y,
+        shape,
+        color,
+        wide: frame.cells.get(index).is_some_and(|c| c.wide),
+        blinking: snapshot.cursor_blinking()?,
+    }))
 }
 
 /// `Session::paste` 的结果。
@@ -781,6 +795,24 @@ mod tests {
         assert_eq!(frame.background, Rgb::from(theme::BACKGROUND));
         assert_eq!(frame.foreground, Rgb::from(theme::FOREGROUND));
         assert_eq!(frame.row(0)[0].fg, Rgb::from(theme::ANSI[2]));
-        assert_eq!(frame.cursor.map(|c| c.color), Some(Rgb::from(theme::CURSOR)));
+        assert_eq!(frame.cursor.map(|c| c.color), Some(Rgb::from(theme::FOREGROUND)));
+    }
+
+    #[test]
+    fn cursor_blinks_unless_configured_or_steadied() {
+        let blinking = |session: &mut Session| session.frame().cursor.map(|c| c.blinking);
+        let mut session = idle_session();
+        session.feed(b"ok");
+        assert_eq!(blinking(&mut session), Some(true));
+        // DECSCUSR 2：稳定的块状光标。
+        session.feed(b"\x1b[2 q");
+        assert_eq!(blinking(&mut session), Some(false));
+
+        session.apply_config(&Config {
+            cursor_style_blink: Some(false),
+            ..Config::default()
+        });
+        session.feed(b"\x1b[0 q");
+        assert_eq!(blinking(&mut session), Some(false));
     }
 }

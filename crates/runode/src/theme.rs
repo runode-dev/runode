@@ -12,7 +12,6 @@ const fn rgb(hex: u32) -> RgbColor {
 
 pub const BACKGROUND: RgbColor = rgb(0x0F0D0E);
 pub const FOREGROUND: RgbColor = rgb(0xFFFFFF);
-pub const CURSOR: RgbColor = rgb(0xF712FF);
 
 /// ANSI 16 色：0–7 为普通色，8–15 为亮色。其余 240 色沿用终端标准的 256 色默认值。
 pub const ANSI: [RgbColor; 16] = [

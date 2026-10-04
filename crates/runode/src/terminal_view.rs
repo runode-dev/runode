@@ -1,6 +1,6 @@
 //! 单个终端会话的 GPUI 视图：输入分发和单元格绘制。
 
-use std::{collections::HashMap, ops::Range, sync::Arc};
+use std::{collections::HashMap, ops::Range, sync::Arc, time::Duration};
 
 use futures::StreamExt as _;
 use gpui::{
@@ -34,6 +34,8 @@ const MIN_FONT_SIZE: f32 = 6.;
 const MAX_FONT_SIZE: f32 = 72.;
 /// 透明标题栏的高度：终端内容从它下面开始，这一条用来拖动窗口。
 const TITLEBAR_HEIGHT: f32 = 28.;
+/// 光标闪烁时亮、灭各持续的时长。
+const CURSOR_BLINK_INTERVAL: Duration = Duration::from_millis(600);
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct Metrics {
@@ -66,9 +68,14 @@ pub struct TerminalView {
     cursor_bounds: Option<Bounds<Pixels>>,
     /// 单元格网格的原点，用于把指针位置换算成单元格。
     grid_origin: Point<Pixels>,
+    /// 闪烁光标当前处于亮的一半周期。
+    cursor_blink_visible: bool,
     _reader: Task<()>,
     _hold_timeout: Option<Task<()>>,
+    /// 有焦点时才运行的闪烁计时器。
+    _cursor_blink: Option<Task<()>>,
     _config_watch: Subscription,
+    _focus_watch: [Subscription; 2],
 }
 
 impl TerminalView {
@@ -95,9 +102,13 @@ impl TerminalView {
                     next = rx.try_recv().ok();
                 }
                 let updated = this.update_in(cx, |view, window, cx| {
-                    if !output.is_empty() && view.session.feed(&output) {
-                        let title = view.session.title.as_deref().unwrap_or("runode");
-                        window.set_window_title(title);
+                    if !output.is_empty() {
+                        if view.session.feed(&output) {
+                            let title = view.session.title.as_deref().unwrap_or("runode");
+                            window.set_window_title(title);
+                        }
+                        // 有输出（包括键入的回显）时光标先亮起，免得打字时看不到它。
+                        view.reset_cursor_blink(window, cx);
                     }
                     if view.session.take_bell() {
                         window.play_system_bell();
@@ -130,22 +141,55 @@ impl TerminalView {
             cx.notify();
         });
 
+        let focus_handle = cx.focus_handle();
+        let focus_watch = [
+            cx.on_focus(&focus_handle, window, |view, window, cx| {
+                view.reset_cursor_blink(window, cx);
+            }),
+            cx.on_blur(&focus_handle, window, |view, _, _| view._cursor_blink = None),
+        ];
+
         Ok(Self {
             session,
             font: resolve_font(&config.font_family, window),
             font_size: px(config.font_size.clamp(MIN_FONT_SIZE, MAX_FONT_SIZE)),
             config,
-            focus_handle: cx.focus_handle(),
+            focus_handle,
             metrics: None,
             glyphs: HashMap::new(),
             marked_text: None,
             scroll_remainder: 0.,
             cursor_bounds: None,
             grid_origin: Point::default(),
+            cursor_blink_visible: true,
             _reader: reader,
             _hold_timeout: None,
+            _cursor_blink: None,
             _config_watch: config_watch,
+            _focus_watch: focus_watch,
         })
+    }
+
+    /// 让光标立即亮起，并从头开始计闪烁周期；没有焦点时不闪，也就不启动计时器。
+    fn reset_cursor_blink(&mut self, window: &Window, cx: &mut Context<Self>) {
+        self.cursor_blink_visible = true;
+        if !self.focus_handle.is_focused(window) {
+            return;
+        }
+        self._cursor_blink = Some(cx.spawn(async move |this, cx| {
+            loop {
+                cx.background_executor().timer(CURSOR_BLINK_INTERVAL).await;
+                let updated = this.update(cx, |view, cx| {
+                    view.cursor_blink_visible = !view.cursor_blink_visible;
+                    if view.session.frame().cursor.is_some_and(|c| c.blinking) {
+                        cx.notify();
+                    }
+                });
+                if updated.is_err() {
+                    break;
+                }
+            }
+        }));
     }
 
     /// 同步输出的冻结超时后重绘一次，避免程序一直不释放导致画面卡死。
@@ -618,10 +662,12 @@ fn paint_frame(
         scale,
     );
 
+    // 闪烁到灭的一半时不画光标；没有焦点时光标不闪，总画空心框。
+    let cursor_hidden = focused && !view.cursor_blink_visible && frame.cursor.is_some_and(|c| c.blinking);
     // 有焦点时块状光标是实心的，光标下的字形改用背景色画，保证仍然看得清。
-    let filled_cursor = frame
-        .cursor
-        .filter(|c| focused && c.shape == CursorShape::Block && view.marked_text.is_none());
+    let filled_cursor = frame.cursor.filter(|c| {
+        focused && !cursor_hidden && c.shape == CursorShape::Block && view.marked_text.is_none()
+    });
 
     window.paint_layer(grid, |window| {
         // 背景：每行把同色的相邻单元格合并成一块画。
@@ -722,18 +768,25 @@ fn paint_frame(
                 paint_glyphs(&line, position + point(px(0.), baseline), hsla(frame.foreground), window);
                 return;
             }
+            if cursor_hidden {
+                return;
+            }
+            // 竖条、下划线和空心框的线宽都是一个设备像素。
+            let line = px(1. / scale);
             let quads: &[Bounds<Pixels>] = match (focused, cursor.shape) {
                 (true, CursorShape::Block) => &[],
-                (true, CursorShape::Bar) => &[Bounds::new(position, size(px(2.), ch))],
+                // 骑在单元格左边线上，落在两个字符之间而不是贴着右边的字符。
+                (true, CursorShape::Bar) => &[Bounds::new(position - point(line, px(0.)), size(line, ch))],
+                // 和文字下划线同一高度。
                 (true, CursorShape::Underline) => {
-                    &[Bounds::new(position + point(px(0.), ch - px(2.)), size(width, px(2.)))]
+                    &[Bounds::new(position + point(px(0.), ch - px(2.)), size(width, line))]
                 }
                 // 没有焦点或明确要求空心时：只画轮廓。
                 _ => &[
-                    Bounds::new(position, size(width, px(1.))),
-                    Bounds::new(position + point(px(0.), ch - px(1.)), size(width, px(1.))),
-                    Bounds::new(position, size(px(1.), ch)),
-                    Bounds::new(position + point(width - px(1.), px(0.)), size(px(1.), ch)),
+                    Bounds::new(position, size(width, line)),
+                    Bounds::new(position + point(px(0.), ch - line), size(width, line)),
+                    Bounds::new(position, size(line, ch)),
+                    Bounds::new(position + point(width - line, px(0.)), size(line, ch)),
                 ],
             };
             for quad in quads {

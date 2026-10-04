@@ -35,10 +35,11 @@ pub struct Config {
     /// (上, 下)
     pub window_padding_y: (f32, f32),
     pub cursor_style: CursorStyle,
-    /// `None` 表示由运行中的程序决定。
+    /// `None` 表示默认闪烁，运行中的程序仍可改变。
     pub cursor_style_blink: Option<bool>,
     pub background: RgbColor,
     pub foreground: RgbColor,
+    /// `None` 表示用前景色。
     pub cursor_color: Option<RgbColor>,
     pub selection_background: Option<RgbColor>,
     pub selection_foreground: Option<RgbColor>,
@@ -61,7 +62,7 @@ impl Default for Config {
             cursor_style_blink: None,
             background: theme::BACKGROUND,
             foreground: theme::FOREGROUND,
-            cursor_color: Some(theme::CURSOR),
+            cursor_color: None,
             selection_background: None,
             selection_foreground: None,
             palette: theme::ANSI
