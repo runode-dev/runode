@@ -16,3 +16,9 @@ portable-pty.workspace = true
 futures.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
+
+# 标准「关于」面板只有 AppKit 提供，GPUI 没有封装。
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSString", "NSDictionary", "NSAttributedString"] }
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSApplication", "NSResponder"] }

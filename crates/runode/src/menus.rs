@@ -10,6 +10,7 @@ use crate::terminal_view::{Copy, DecreaseFontSize, IncreaseFontSize, Paste, Rese
 actions!(
     runode,
     [
+        About,
         Quit,
         Hide,
         HideOthers,
@@ -39,6 +40,7 @@ pub fn install(cx: &mut App) {
         KeyBinding::new("cmd-0", ResetFontSize, Some("Terminal")),
     ]);
 
+    cx.on_action(|_: &About, _| crate::about::show());
     cx.on_action(|_: &Quit, cx| cx.quit());
     cx.on_action(|_: &Hide, cx| cx.hide());
     cx.on_action(|_: &HideOthers, cx| cx.hide_other_apps());
@@ -52,6 +54,8 @@ pub fn install(cx: &mut App) {
     cx.set_menus([
         // macOS 总把第一个菜单当作应用菜单，标题显示为应用名。
         Menu::new("runode").items([
+            MenuItem::action("About runode", About),
+            MenuItem::separator(),
             MenuItem::os_submenu("Services", SystemMenuType::Services),
             MenuItem::separator(),
             MenuItem::action("Hide runode", Hide),

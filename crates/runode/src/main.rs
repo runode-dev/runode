@@ -1,6 +1,7 @@
 //! runode：面向 AI 编程 agent 的桌面工作台。终端在进程内用 libghostty-vt 仿真，
 //! 窗口和绘制用 GPUI。
 
+mod about;
 mod keys;
 mod menus;
 mod pty;
