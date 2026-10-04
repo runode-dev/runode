@@ -14,6 +14,8 @@ gpui_platform = { workspace = true, features = ["font-kit"] }
 anyhow.workspace = true
 portable-pty.workspace = true
 futures.workspace = true
+# 读终端前台进程的名字和当前目录，作程序没设置标题时的标签名。
+libc.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
 

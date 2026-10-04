@@ -6,6 +6,7 @@
 
 use std::{
     io::{Read, Write},
+    path::{Path, PathBuf},
     sync::{Arc, Mutex},
     thread,
 };
@@ -123,6 +124,66 @@ impl Pty {
             tracing::warn!("pty resize failed: {err}");
         }
     }
+
+    /// 程序没设置标题时显示的名字：前台是 shell 自己时为它当前目录的名字（家目录为 `~`），
+    /// 前台在跑别的程序时为该程序的进程名。取不到时为 `None`。
+    pub fn foreground_title(&self) -> Option<String> {
+        let leader = self.master.process_group_leader()?;
+        let shell = self.child.as_ref()?.process_id()?;
+        if u32::try_from(leader).ok() == Some(shell) {
+            process_cwd(leader).map(|cwd| dir_label(&cwd))
+        } else {
+            process_name(leader)
+        }
+    }
+}
+
+fn dir_label(path: &Path) -> String {
+    if std::env::var_os("HOME").is_some_and(|home| Path::new(&home) == path) {
+        return "~".into();
+    }
+    match path.file_name() {
+        Some(name) => name.to_string_lossy().into_owned(),
+        // 根目录没有文件名。
+        None => path.display().to_string(),
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn process_name(pid: libc::pid_t) -> Option<String> {
+    // 内核里的进程名最长 2 * MAXCOMLEN 字节。
+    let mut buf = [0u8; 64];
+    let len = unsafe { libc::proc_name(pid, buf.as_mut_ptr().cast(), buf.len() as u32) };
+    let len = usize::try_from(len).ok().filter(|&len| len > 0)?;
+    Some(String::from_utf8_lossy(&buf[..len]).into_owned())
+}
+
+#[cfg(target_os = "macos")]
+fn process_cwd(pid: libc::pid_t) -> Option<PathBuf> {
+    use std::{ffi::CStr, os::unix::ffi::OsStrExt};
+
+    let mut info = std::mem::MaybeUninit::<libc::proc_vnodepathinfo>::zeroed();
+    let size = std::mem::size_of::<libc::proc_vnodepathinfo>() as libc::c_int;
+    let written = unsafe {
+        libc::proc_pidinfo(pid, libc::PROC_PIDVNODEPATHINFO, 0, info.as_mut_ptr().cast(), size)
+    };
+    if written != size {
+        return None;
+    }
+    let info = unsafe { info.assume_init() };
+    // `vip_path` 是按 MAXPATHLEN 连续排布的 C 字符串，内核保证以 NUL 结尾。
+    let path = unsafe { CStr::from_ptr(info.pvi_cdir.vip_path.as_ptr().cast()) };
+    Some(std::ffi::OsStr::from_bytes(path.to_bytes()).into())
+}
+
+#[cfg(not(target_os = "macos"))]
+fn process_name(_pid: libc::pid_t) -> Option<String> {
+    None
+}
+
+#[cfg(not(target_os = "macos"))]
+fn process_cwd(_pid: libc::pid_t) -> Option<PathBuf> {
+    None
 }
 
 impl Drop for Pty {

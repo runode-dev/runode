@@ -33,8 +33,10 @@ const FALLBACK_FONT_FAMILY: &str = "Menlo";
 const UNDERLINE_THICKNESS_EM: f32 = 90. / 2048.;
 const MIN_FONT_SIZE: f32 = 6.;
 const MAX_FONT_SIZE: f32 = 72.;
-/// 程序没设置标题时用的标题。
+/// 程序没设置标题、也读不到前台进程时用的标题。
 pub const DEFAULT_TITLE: &str = "Runode";
+/// 重新读取前台进程的间隔：不输出的程序（比如 `sleep`）启动后，标签名也能跟上。
+const FOREGROUND_POLL_INTERVAL: Duration = Duration::from_secs(1);
 /// 拖选到网格外时自动滚动的间隔，每次滚一行。
 const AUTOSCROLL_INTERVAL: Duration = Duration::from_millis(15);
 /// 光标闪烁时亮、灭各持续的时长。
@@ -86,6 +88,7 @@ pub struct TerminalView {
     /// 闪烁光标当前处于亮的一半周期。
     cursor_blink_visible: bool,
     _reader: Task<()>,
+    _foreground_poll: Task<()>,
     _hold_timeout: Option<Task<()>>,
     /// 有焦点时才运行的闪烁计时器。
     _cursor_blink: Option<Task<()>>,
@@ -132,7 +135,9 @@ impl TerminalView {
                 }
                 let updated = this.update_in(cx, |view, window, cx| {
                     if !output.is_empty() {
-                        if view.session.feed(&output) {
+                        // 进出目录、启动或退出程序时通常都有输出，顺带重读前台进程。
+                        let fallback_changed = view.session.refresh_fallback_title();
+                        if view.session.feed(&output) || fallback_changed {
                             cx.emit(TerminalEvent::TitleChanged);
                         }
                         // 有输出（包括键入的回显）时光标先亮起，免得打字时看不到它。
@@ -158,6 +163,8 @@ impl TerminalView {
 
         let config = cx.global::<AppConfig>().0.clone();
         session.apply_config(&config);
+        // shell 已经在起始目录里跑起来了，不等第一次输出，新标签一出现就有名字。
+        session.refresh_fallback_title();
         let config_watch = cx.observe_global_in::<AppConfig>(window, |view, window, cx| {
             view.config = cx.global::<AppConfig>().0.clone();
             view.session.apply_config(&view.config);
@@ -170,6 +177,20 @@ impl TerminalView {
         });
         let appearance_watch =
             cx.observe_window_appearance(window, |_, _, cx| crate::config::follow_appearance(cx));
+
+        let foreground_poll = cx.spawn(async move |this, cx| {
+            loop {
+                cx.background_executor().timer(FOREGROUND_POLL_INTERVAL).await;
+                let updated = this.update(cx, |view, cx| {
+                    if view.session.refresh_fallback_title() {
+                        cx.emit(TerminalEvent::TitleChanged);
+                    }
+                });
+                if updated.is_err() {
+                    break;
+                }
+            }
+        });
 
         let focus_handle = cx.focus_handle();
         let focus_watch = [
@@ -194,6 +215,7 @@ impl TerminalView {
             selecting: false,
             cursor_blink_visible: true,
             _reader: reader,
+            _foreground_poll: foreground_poll,
             _hold_timeout: None,
             _cursor_blink: None,
             _autoscroll: None,
@@ -203,9 +225,13 @@ impl TerminalView {
         }
     }
 
-    /// 程序设置的标题；还没设置过时为 `DEFAULT_TITLE`。
+    /// 程序设置的标题；没设置时为前台进程的目录名或进程名，都没有时为 `DEFAULT_TITLE`。
     pub fn title(&self) -> &str {
-        self.session.title.as_deref().unwrap_or(DEFAULT_TITLE)
+        self.session
+            .title
+            .as_deref()
+            .or(self.session.fallback_title.as_deref())
+            .unwrap_or(DEFAULT_TITLE)
     }
 
     /// 当前的默认前景色和背景色，标签栏跟着终端配色走。

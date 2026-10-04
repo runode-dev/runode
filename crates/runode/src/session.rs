@@ -188,6 +188,8 @@ pub struct Session {
     /// 待写出的已编码输入，各次按键复用这块缓冲。
     scratch: Vec<u8>,
     pub title: Option<String>,
+    /// 程序没设置标题时用的名字，见 `Pty::foreground_title`；由 `refresh_fallback_title` 更新。
+    pub fallback_title: Option<String>,
     pub exited: bool,
     option_as_alt: OptionAsAlt,
 }
@@ -319,6 +321,7 @@ impl Session {
                 effects,
                 scratch: Vec::with_capacity(64),
                 title: None,
+                fallback_title: None,
                 exited: false,
                 option_as_alt: OptionAsAlt::False,
             },
@@ -390,6 +393,16 @@ impl Session {
             }
         }
         false
+    }
+
+    /// 重新读取终端的前台进程，返回 `fallback_title` 是否变化。
+    pub fn refresh_fallback_title(&mut self) -> bool {
+        let title = self.pty.foreground_title();
+        if title == self.fallback_title {
+            return false;
+        }
+        self.fallback_title = title;
+        true
     }
 
     pub fn take_bell(&self) -> bool {
