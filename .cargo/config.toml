@@ -2,6 +2,3 @@
 # 从 vendor 里的 ghostty fork 编译 libghostty-vt，不让 libghostty-rs 自己去拉源码。
 # libghostty-rs 提交在仓库里的绑定与这个 commit 完全对应。
 GHOSTTY_SOURCE_DIR = { value = "vendor/ghostty", relative = true }
-# ghostty 要求 zig 0.16（build.zig.zon 的 minimum_zig_version），而 Homebrew 的 zig
-# 已到 0.17。这里固定用 keg-only 的 zig@0.16；环境里已有 ZIG 时以环境为准。
-ZIG = "/opt/homebrew/opt/zig@0.16/bin/zig"
