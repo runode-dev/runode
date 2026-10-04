@@ -29,7 +29,7 @@ const PADDING: f32 = 6.;
 const FONT_FAMILY: &str = "Hack Nerd Font Mono";
 /// macOS 自带的等宽字体。
 const FALLBACK_FONT_FAMILY: &str = "Menlo";
-const FONT_SIZE: f32 = 13.;
+const FONT_SIZE: f32 = 14.;
 /// 字体的下划线粗细（em 的比例），自绘字符的线宽由它算出。GPUI 不公开字体的下划线粗细，
 /// 这里写死 `FONT_FAMILY` 和 `FALLBACK_FONT_FAMILY` 的 post 表取值，两者都是 90/2048。
 const UNDERLINE_THICKNESS_EM: f32 = 90. / 2048.;
