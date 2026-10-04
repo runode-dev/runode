@@ -31,8 +31,8 @@ const FALLBACK_FONT_FAMILY: &str = "Menlo";
 const FONT_SIZE: f32 = 13.;
 const MIN_FONT_SIZE: f32 = 6.;
 const MAX_FONT_SIZE: f32 = 72.;
-/// 行高，按字体 ascent + descent 的倍数计。
-const LINE_SPACING: f32 = 1.15;
+/// 透明标题栏的高度：终端内容从它下面开始，这一条用来拖动窗口。
+const TITLEBAR_HEIGHT: f32 = 28.;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct Metrics {
@@ -277,7 +277,8 @@ impl TerminalView {
             .map_or(FONT_SIZE * 0.6, |a| f32::from(a.width));
         let ascent = text_system.ascent(font_id, self.font_size);
         let descent = text_system.descent(font_id, self.font_size).abs();
-        let height = (f32::from(ascent) + f32::from(descent)) * LINE_SPACING;
+        // 和 Rio、Ghostty 一样直接用字体本身的行高，不额外加行距。
+        let height = f32::from(ascent) + f32::from(descent);
         let metrics = Metrics {
             cell: size(px(snap(width)), px(snap(height).ceil())),
             ascent,
@@ -332,8 +333,23 @@ impl Focusable for TerminalView {
 }
 
 impl Render for TerminalView {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let background = self.session.frame().background;
+        // 标题栏透明后内容铺到红绿灯下面，顶部这条要能拖动窗口、双击缩放。
+        // 全屏时没有红绿灯，不留这一条。
+        let titlebar = (!window.is_fullscreen()).then(|| {
+            div()
+                .id("titlebar")
+                .h(px(TITLEBAR_HEIGHT))
+                .flex_none()
+                .on_mouse_down(gpui::MouseButton::Left, |event, window, _| {
+                    if event.click_count >= 2 {
+                        window.titlebar_double_click();
+                    } else {
+                        window.start_window_move();
+                    }
+                })
+        });
         div()
             .id("terminal")
             .key_context("Terminal")
@@ -346,9 +362,17 @@ impl Render for TerminalView {
             .on_action(cx.listener(Self::decrease_font_size))
             .on_action(cx.listener(Self::reset_font_size))
             .size_full()
+            .flex()
+            .flex_col()
             .bg(rgb(background.to_u32()))
-            .p(px(PADDING))
-            .child(TerminalElement { view: cx.entity() })
+            .children(titlebar)
+            .child(
+                div()
+                    .flex_1()
+                    .px(px(PADDING))
+                    .pb(px(PADDING))
+                    .child(TerminalElement { view: cx.entity() }),
+            )
     }
 }
 

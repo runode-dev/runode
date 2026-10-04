@@ -25,7 +25,10 @@ use libghostty_vt::{
     },
 };
 
-use crate::pty::{GridSize, Pty, PtyEvent, PtyWriter};
+use crate::{
+    pty::{GridSize, Pty, PtyEvent, PtyWriter},
+    theme,
+};
 
 const SCROLLBACK_LINES: usize = 10_000;
 /// 程序用同步输出（mode 2026）冻结屏幕的最长时间，超时后不再遵守，Ghostty 等终端也这样做。
@@ -157,6 +160,13 @@ impl Session {
 
         let mut terminal = Terminal::new(size.cols, size.rows)?;
         terminal.set_scrollback_max_lines(Some(SCROLLBACK_LINES))?;
+        let mut palette = terminal.default_color_palette()?;
+        palette.0[..theme::ANSI.len()].copy_from_slice(&theme::ANSI);
+        terminal
+            .set_default_bg_color(Some(theme::BACKGROUND))?
+            .set_default_fg_color(Some(theme::FOREGROUND))?
+            .set_default_cursor_color(Some(theme::CURSOR))?
+            .set_default_color_palette(Some(palette))?;
         terminal.resize(
             size.cols,
             size.rows,
@@ -682,5 +692,16 @@ mod tests {
         // 程序开启 bracketed paste 后，换行不会被直接执行，无需确认。
         session.feed(b"\x1b[?2004h");
         assert_eq!(session.paste("a\nb", false), Paste::Done);
+    }
+
+    #[test]
+    fn default_colors_come_from_the_theme() {
+        let mut session = idle_session();
+        session.feed(b"\x1b[32mok\x1b[0m");
+        let frame = session.frame();
+        assert_eq!(frame.background, Rgb::from(theme::BACKGROUND));
+        assert_eq!(frame.foreground, Rgb::from(theme::FOREGROUND));
+        assert_eq!(frame.row(0)[0].fg, Rgb::from(theme::ANSI[2]));
+        assert_eq!(frame.cursor.map(|c| c.color), Some(Rgb::from(theme::CURSOR)));
     }
 }

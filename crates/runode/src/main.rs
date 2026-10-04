@@ -7,8 +7,12 @@ mod menus;
 mod pty;
 mod session;
 mod terminal_view;
+mod theme;
 
-use gpui::{App, AppContext as _, Bounds, Focusable as _, WindowBounds, WindowOptions, px, size};
+use gpui::{
+    App, AppContext as _, Bounds, Focusable as _, TitlebarOptions, WindowBounds, WindowOptions,
+    point, px, size,
+};
 use gpui_platform::application;
 
 use crate::terminal_view::TerminalView;
@@ -42,6 +46,12 @@ fn open_window(cx: &mut App) {
         WindowOptions {
             window_bounds: Some(WindowBounds::Windowed(bounds)),
             window_min_size: Some(size(px(320.), px(200.))),
+            // 和 Rio、Ghostty 一样：标题栏透明，终端背景一直铺到窗口顶部。
+            titlebar: Some(TitlebarOptions {
+                title: Some("runode".into()),
+                appears_transparent: true,
+                traffic_light_position: Some(point(px(12.), px(10.))),
+            }),
             ..Default::default()
         },
         |window, cx| {
