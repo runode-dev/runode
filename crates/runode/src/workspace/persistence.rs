@@ -189,6 +189,10 @@ impl WindowView {
             active: self.active,
             sidebar: self.sidebar_shown,
             sidebar_width: self.sidebar_width,
+            changes: self.changes_shown,
+            changes_width: self.changes_width,
+            files: self.files_shown,
+            files_width: self.files_width,
         }
     }
 
@@ -255,11 +259,16 @@ impl WindowView {
                 active: active_tab,
                 tabs,
                 tab_scroll: gpui::ScrollHandle::new(),
+                project: Default::default(),
             });
         }
         if !self.workspaces.is_empty() {
             self.sidebar_shown = saved.sidebar;
             self.sidebar_width = saved.sidebar_width;
+            self.changes_shown = saved.changes;
+            self.changes_width = saved.changes_width;
+            self.files_shown = saved.files;
+            self.files_width = saved.files_width;
             self.activate_workspace(active, window, cx);
         }
         shell

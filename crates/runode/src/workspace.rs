@@ -1,7 +1,11 @@
-//! 一个窗口：左侧列出 workspace 的侧栏，顶部的标签栏，以及标签里的分屏。workspace 对应
-//! 一个项目目录，各有一组标签；窗口的布局随改随存，下次启动时恢复。
+//! 一个窗口：左侧列出 workspace 的侧栏，顶部的标签栏，标签里的分屏，以及右侧可以打开的
+//! 改动栏和文件树。workspace 对应一个项目目录，各有一组标签；窗口的布局随改随存，下次启动
+//! 时恢复。
 
+mod changes;
+mod files;
 mod persistence;
+mod project;
 mod sidebar;
 
 use std::{
@@ -16,7 +20,7 @@ use gpui::{
     Action, Animation, AnimationExt, AnyElement, App, Bounds, BoxShadow, Context, CursorStyle, Div,
     ElementId, Entity, EntityId, FocusHandle, Focusable, Hsla, MouseButton, MouseDownEvent,
     MouseMoveEvent, PathPromptOptions, Pixels, Render, ScrollHandle, SharedString, Stateful,
-    StyleRefinement, Subscription, TitlebarOptions, Window, WindowBounds, actions, canvas, div, point,
+    StyleRefinement, Subscription, Task, TitlebarOptions, Window, WindowBounds, actions, canvas, div, point,
     prelude::*, px, relative,
 };
 
@@ -25,6 +29,7 @@ pub use persistence::{install, saved_window_options};
 use crate::{
     agent::{Agent, AgentState},
     pane::{self, Axis, Direction, Node, SplitId},
+    workspace::project::Project,
     persist::{self, SavedWindow},
     prespawn::Prespawned,
     search_bar::SearchField,
@@ -56,7 +61,11 @@ actions!(
         NextWorkspace,
         PreviousWorkspace,
         SelectLastWorkspace,
-        ToggleSidebar
+        ToggleSidebar,
+        /// 显示或隐藏右侧的改动栏。
+        ToggleChanges,
+        /// 显示或隐藏右侧的文件树。
+        ToggleFiles
     ]
 );
 
@@ -304,6 +313,8 @@ struct Workspace {
     active: usize,
     /// 标签条的滚动位置，切换标签时把当前标签滚进视野。
     tab_scroll: ScrollHandle,
+    /// 改动栏和文件树显示的内容。
+    project: Project,
 }
 
 impl Workspace {
@@ -346,6 +357,9 @@ enum Divider {
     Split(SplitId, Axis),
     /// 侧栏右边的分隔线，拖动改变侧栏宽度。
     Sidebar,
+    /// 改动栏和文件树左边的分隔线，拖动改变它们的宽度。
+    Changes,
+    Files,
 }
 
 /// 侧栏里正在改名的 workspace，以及改名用的输入框。
@@ -366,6 +380,11 @@ pub struct WindowView {
     sidebar_width: Option<f32>,
     /// 侧栏里 workspace 列表的滚动位置。
     sidebar_scroll: ScrollHandle,
+    /// 右侧的改动栏和文件树是否显示；拖动过宽度时是那个宽度，没拖过时用默认宽度。
+    changes_shown: bool,
+    files_shown: bool,
+    changes_width: Option<f32>,
+    files_width: Option<f32>,
     renaming: Option<Renaming>,
     /// workspace、标签和分屏节点的标识都从这里取。
     next_id: u64,
@@ -380,6 +399,10 @@ pub struct WindowView {
     /// 所有 workspace 都关掉了，窗口因此关闭；这样的窗口不留存档。
     emptied: bool,
     _bounds_watch: Subscription,
+    /// 窗口切到前台时重读右侧面板的内容。
+    _activation_watch: Subscription,
+    /// 右侧面板显示时定时重读。
+    _project_poll: Task<()>,
 }
 
 impl WindowView {
@@ -389,6 +412,24 @@ impl WindowView {
             this.display = Self::display_uuid(window, cx);
             this.save(cx);
         });
+        let activation_watch = cx.observe_window_activation(window, |this, window, cx| {
+            if window.is_window_active() {
+                this.refresh_project(cx);
+            }
+        });
+        let project_poll = cx.spawn_in(window, async move |this, cx| {
+            loop {
+                cx.background_executor().timer(project::POLL_INTERVAL).await;
+                let alive = this.update_in(cx, |this, window, cx| {
+                    if window.is_window_active() {
+                        this.poll_project(cx);
+                    }
+                });
+                if alive.is_err() {
+                    break;
+                }
+            }
+        });
         persistence::track(cx);
         Self {
             workspaces: Vec::new(),
@@ -396,6 +437,10 @@ impl WindowView {
             sidebar_shown: None,
             sidebar_width: None,
             sidebar_scroll: ScrollHandle::new(),
+            changes_shown: false,
+            files_shown: false,
+            changes_width: None,
+            files_width: None,
             renaming: None,
             next_id: 0,
             layout: Rc::default(),
@@ -405,6 +450,8 @@ impl WindowView {
             spawned: HashMap::new(),
             emptied: false,
             _bounds_watch: bounds_watch,
+            _activation_watch: activation_watch,
+            _project_poll: project_poll,
         }
     }
 
@@ -543,6 +590,7 @@ impl WindowView {
             tabs: vec![tab],
             active: 0,
             tab_scroll: ScrollHandle::new(),
+            project: Project::default(),
         };
         self.workspaces.insert(ix, workspace);
         self.activate_workspace(ix, window, cx);
@@ -642,6 +690,7 @@ impl WindowView {
     fn activate_workspace(&mut self, ix: usize, window: &mut Window, cx: &mut Context<Self>) {
         self.active = ix;
         self.sidebar_scroll.scroll_to_item(ix);
+        self.refresh_project(cx);
         self.activate(self.workspaces[ix].active, window, cx);
     }
 
@@ -1125,7 +1174,7 @@ impl WindowView {
             .occlude()
             .cursor(if vertical { CursorStyle::ResizeUpDown } else { CursorStyle::ResizeLeftRight })
             // 终端在窗口上监听移动和松开，这里拦下，拖动期间它们收不到。
-            .on_mouse_move(cx.listener(|this, event: &MouseMoveEvent, _, cx| {
+            .on_mouse_move(cx.listener(|this, event: &MouseMoveEvent, window, cx| {
                 cx.stop_propagation();
                 let Some(divider) = this.dragging_divider else {
                     return;
@@ -1141,6 +1190,12 @@ impl WindowView {
                     Divider::Split(id, axis) => (id, axis),
                     Divider::Sidebar => {
                         this.resize_sidebar(f32::from(event.position.x));
+                        cx.notify();
+                        return;
+                    }
+                    Divider::Changes | Divider::Files => {
+                        let viewport = f32::from(window.viewport_size().width);
+                        this.resize_right_panel(divider, f32::from(event.position.x), viewport);
                         cx.notify();
                         return;
                     }
@@ -1366,11 +1421,26 @@ impl Render for WindowView {
         let sidebar_toggle = (!fullscreen).then(|| self.render_sidebar_toggle(fg, bg, cx));
         let sidebar_width = if sidebar.is_some() { self.sidebar_width() } else { 0. };
         let sidebar_handle = sidebar.is_some().then(|| self.render_sidebar_handle(cx));
+        let (changes_width, files_width) = self.right_panel_widths(f32::from(window.viewport_size().width));
+        let font = view.read(cx).font_family();
+        let changes =
+            self.changes_shown.then(|| self.render_changes_panel(changes_width, !self.files_shown, fg, bg, font, cx));
+        let files = self.files_shown.then(|| self.render_files_panel(files_width, fg, bg, cx));
+        let right_handles = [
+            self.changes_shown.then(|| self.render_right_handle(Divider::Changes, changes_width + files_width, cx)),
+            self.files_shown.then(|| self.render_right_handle(Divider::Files, files_width, cx)),
+        ];
+        let titlebar_shown = !fullscreen || show_tabs;
+        // 右侧面板的开关按钮：面板都收着时落在标题栏右端，标题栏给它们让位；打开着时落在
+        // 面板顶上。全屏又只有一个标签、面板也都收着时没有地方放，不画。
+        let right_inset = if titlebar_shown && !self.project_visible() { project::PANEL_TOGGLES_INSET } else { 0. };
+        let panel_toggles =
+            (titlebar_shown || self.project_visible()).then(|| self.render_panel_toggles(fg, bg, cx));
         let tabs: Vec<_> = if show_tabs {
             // 标签平分标题栏除去两头的宽度，但不窄于 `TAB_MIN_WIDTH`，挤不下就让标签条滚动；
             // 拖动时的预览也照这个宽度画。
             let tab_width = ((window.viewport_size().width
-                - px(sidebar_width + left_inset + NEW_TAB_BUTTON_WIDTH))
+                - px(sidebar_width + left_inset + NEW_TAB_BUTTON_WIDTH + right_inset + changes_width + files_width))
                 / tab_count as f32)
                 .max(px(TAB_MIN_WIDTH));
             let strip = div()
@@ -1386,26 +1456,31 @@ impl Render for WindowView {
                         .map(|ix| self.render_tab(ix, tab_width, fg, bg, cx))
                         .collect::<Vec<_>>(),
                 );
-            vec![strip, self.render_new_tab_button(fg, bg, cx)]
+            let inset = div().id("panel-toggles-inset").flex_none().w(px(right_inset)).h_full().when(right_inset > 0., |inset| {
+                inset.border_l_1().border_color(hsla(fg).opacity(0.12))
+            });
+            vec![strip, self.render_new_tab_button(fg, bg, cx), inset]
         } else {
-            // 只有一个标签时标题居中画在侧栏右边的整个宽度上；没有侧栏时右边留出和红绿灯
-            // 一样宽的空白，标题在整个窗口里居中。
+            // 只有一个标签时标题居中画在侧栏和右侧面板之间；两头让出的宽度取大的那个，
+            // 没有侧栏和右侧面板时标题在整个窗口里居中。
             let view = view.read(cx);
             let title = SharedString::from(view.title().to_owned());
             let fg = hsla(fg);
+            let inset = left_inset.max(right_inset);
             vec![
                 div()
                     .id("window-title")
                     .flex_1()
                     .min_w_0()
                     .h_full()
-                    .pr(px(left_inset))
+                    .pl(px(inset - left_inset))
+                    .pr(px(inset))
                     .flex()
                     .text_color(fg.opacity(0.55))
                     .child(titled(title, view.agent(), "window-agent", fg).flex_1()),
             ]
         };
-        let titlebar = (!fullscreen || show_tabs).then(|| {
+        let titlebar = titlebar_shown.then(|| {
             div()
                 .id("titlebar")
                 .h(px(TITLEBAR_HEIGHT))
@@ -1452,6 +1527,8 @@ impl Render for WindowView {
             .on_action(cx.listener(Self::select_workspace))
             .on_action(cx.listener(Self::select_last_workspace))
             .on_action(cx.listener(Self::toggle_sidebar))
+            .on_action(cx.listener(Self::toggle_changes))
+            .on_action(cx.listener(Self::toggle_files))
             .relative()
             .size_full()
             .flex()
@@ -1467,8 +1544,12 @@ impl Render for WindowView {
                     .children(titlebar)
                     .child(div().relative().flex_1().min_h_0().child(panes)),
             )
+            .children(changes)
+            .children(files)
             .children(sidebar_handle)
+            .children(right_handles.into_iter().flatten())
             .children(sidebar_toggle)
+            .children(panel_toggles)
             .children(drag)
     }
 }

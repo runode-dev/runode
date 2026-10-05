@@ -5,6 +5,7 @@ mod about;
 mod agent;
 mod assets;
 mod config;
+mod git;
 mod i18n;
 mod keybinds;
 mod keys;

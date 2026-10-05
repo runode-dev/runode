@@ -39,6 +39,8 @@ menu:
   previous_prompt: Jump to Previous Prompt
   next_prompt: Jump to Next Prompt
   toggle_sidebar: Show or Hide Sidebar
+  toggle_changes: Show or Hide Changes
+  toggle_files: Show or Hide Files
   toggle_full_screen: Toggle Full Screen
   window: Window
   minimize: Minimize
@@ -59,6 +61,14 @@ workspace:
   close_detail: Its %{count} terminals will be closed along with it.
   close_confirm: Close
   close_cancel: Cancel
+panel:
+  changes: Changes
+  uncommitted: "%{count} uncommitted changes"
+  no_changes: No uncommitted changes
+  not_repo: Not a git repository
+  binary: Binary file
+  truncated: Too many changes to show in full
+  no_content: No content changes
 paste:
   title: The pasted text may run commands
   detail: It contains line breaks or terminal control sequences, so it may run as a command right after pasting.
@@ -160,6 +170,8 @@ action:
   last_workspace: Last workspace
   goto_workspace: The Nth workspace, counting from 1
   toggle_sidebar: Show or hide the workspace sidebar
+  toggle_changes: Show or hide the uncommitted changes panel on the right
+  toggle_files: Show or hide the file tree on the right; double-click a file to type its path into the terminal
   copy_to_clipboard: Copy
   paste_from_clipboard: Paste
   paste_from_selection: Paste the selection

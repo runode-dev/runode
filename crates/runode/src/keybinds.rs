@@ -24,7 +24,7 @@ use crate::{
         ClosePane, CloseTab, CloseWorkspace, EqualizePanes, FocusNextPane, FocusPane, FocusPreviousPane,
         NewSplitDown, NewSplitRight, NewTab, NewWorkspace, NextTab, NextWorkspace, PreviousTab,
         PreviousWorkspace, RenameWorkspace, ResizePane, SelectLastTab, SelectLastWorkspace, SelectTab,
-        SelectWorkspace, TogglePaneZoom, ToggleSidebar,
+        SelectWorkspace, ToggleChanges, ToggleFiles, TogglePaneZoom, ToggleSidebar,
     },
 };
 
@@ -165,6 +165,8 @@ pub static ACTIONS: &[ActionSpec] = &[
         },
     },
     plain!("toggle_sidebar", WINDOW, ToggleSidebar),
+    plain!("toggle_changes", WINDOW, ToggleChanges),
+    plain!("toggle_files", WINDOW, ToggleFiles),
     plain!("copy_to_clipboard", TERMINAL_AND_SEARCH, Copy),
     plain!("paste_from_clipboard", TERMINAL_AND_SEARCH, Paste),
     plain!("paste_from_selection", TERMINAL, PasteSelection),
@@ -300,6 +302,8 @@ pub static DEFAULTS: &[&str] = &[
     "ctrl+cmd+8=goto_workspace:8",
     "ctrl+cmd+9=last_workspace",
     "cmd+b=toggle_sidebar",
+    "cmd+alt+g=toggle_changes",
+    "cmd+shift+e=toggle_files",
     "cmd+c=copy_to_clipboard",
     "cmd+v=paste_from_clipboard",
     "cmd+shift+v=paste_from_selection",

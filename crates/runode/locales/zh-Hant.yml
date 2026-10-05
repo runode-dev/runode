@@ -39,6 +39,8 @@ menu:
   previous_prompt: 跳到上一個提示符號
   next_prompt: 跳到下一個提示符號
   toggle_sidebar: 顯示或隱藏側欄
+  toggle_changes: 顯示或隱藏改動
+  toggle_files: 顯示或隱藏檔案
   toggle_full_screen: 切換全螢幕
   window: 視窗
   minimize: 縮到最小
@@ -59,6 +61,14 @@ workspace:
   close_detail: 裡面的 %{count} 個終端機會一起關閉。
   close_confirm: 關閉
   close_cancel: 取消
+panel:
+  changes: 改動
+  uncommitted: "%{count} 個未提交的改動"
+  no_changes: 沒有未提交的改動
+  not_repo: 不在 git 倉庫裡
+  binary: 二進位檔案
+  truncated: 改動太多，沒有全部顯示
+  no_content: 內容沒有變化
 paste:
   title: 貼上的內容可能會直接執行指令
   detail: 內容含有換行或終端機控制序列，貼上後可能被當作指令立即執行。
@@ -149,6 +159,8 @@ action:
   last_workspace: 最後一個工作區
   goto_workspace: 第 N 個工作區，從 1 數
   toggle_sidebar: 顯示或隱藏工作區側欄
+  toggle_changes: 顯示或隱藏右側的未提交改動
+  toggle_files: 顯示或隱藏右側的檔案樹，按兩下檔案把路徑打進終端機
   copy_to_clipboard: 拷貝
   paste_from_clipboard: 貼上
   paste_from_selection: 貼上選取內容

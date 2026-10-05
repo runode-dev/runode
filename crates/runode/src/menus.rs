@@ -14,7 +14,7 @@ use crate::{
     workspace::{
         ClosePane, CloseTab, CloseWorkspace, EqualizePanes, FocusNextPane, FocusPreviousPane, NewSplitDown,
         NewSplitRight, NewTab, NewWorkspace, NextTab, NextWorkspace, PreviousTab, PreviousWorkspace,
-        RenameWorkspace, TogglePaneZoom, ToggleSidebar,
+        RenameWorkspace, ToggleChanges, ToggleFiles, TogglePaneZoom, ToggleSidebar,
     },
 };
 
@@ -124,6 +124,8 @@ pub fn set_menus(cx: &mut App) {
             MenuItem::action(tr("menu.next_prompt"), JumpToPrompt(1)),
             MenuItem::separator(),
             MenuItem::action(tr("menu.toggle_sidebar"), ToggleSidebar),
+            MenuItem::action(tr("menu.toggle_changes"), ToggleChanges),
+            MenuItem::action(tr("menu.toggle_files"), ToggleFiles),
             MenuItem::action(tr("menu.toggle_full_screen"), ToggleFullScreen),
         ]),
         Menu::new(tr("menu.window")).items([

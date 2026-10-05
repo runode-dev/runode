@@ -454,6 +454,11 @@ impl TerminalView {
         self.session.agent
     }
 
+    /// 终端用的字体，改动栏里的代码也用它。
+    pub fn font_family(&self) -> SharedString {
+        self.font.family.clone()
+    }
+
     /// 当前的默认前景色和背景色，标签栏跟着终端配色走。
     pub fn colors(&mut self) -> (Rgb, Rgb) {
         let frame = self.session.frame();
@@ -713,7 +718,8 @@ impl TerminalView {
         }
     }
 
-    fn paste_text(&mut self, text: String, window: &mut Window, cx: &mut Context<Self>) {
+    /// 把文字当作粘贴打进终端，可能直接执行命令时先问一句。
+    pub fn paste_text(&mut self, text: String, window: &mut Window, cx: &mut Context<Self>) {
         if self.session.paste(&text, false) == PasteResult::Done {
             return;
         }
