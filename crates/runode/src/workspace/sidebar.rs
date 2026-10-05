@@ -9,7 +9,8 @@ use runode_model::color::Rgb;
 use super::{
     AGENT_MARK_WIDTH, DIVIDER_GRAB_WIDTH, Divider, NewWorkspace, RenameWorkspace, Renaming, SelectLastWorkspace,
     SelectWorkspace, TAB_CLOSE_SIZE, TITLEBAR_HEIGHT, TRAFFIC_LIGHTS_WIDTH, ToggleSidebar, WindowView,
-    WorkspaceId, agent_mark, display_dir, shortcut_hint,
+    model::{WorkspaceId, display_dir},
+    titlebar::{agent_mark, shortcut_hint},
 };
 use crate::{
     assets::SIDEBAR_ICON,

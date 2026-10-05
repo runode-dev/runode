@@ -12,7 +12,10 @@ use gpui::{
 };
 use runode_model::pane::{Node, Split};
 
-use super::{Tab, WindowView, Workspace, home_dir, workspace_name};
+use super::{
+    WindowView,
+    model::{Tab, Workspace, home_dir, workspace_name},
+};
 use crate::{
     persist::{self, SavedBounds, SavedNode, SavedTab, SavedWindow, SavedWorkspace, State, WindowMode},
     prespawn::Prespawned,
