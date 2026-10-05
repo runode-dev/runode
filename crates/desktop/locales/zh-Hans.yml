@@ -75,6 +75,13 @@ workspace:
   close_detail: 里面的 %{count} 个终端会一起关闭。
   close_confirm: 关闭
   close_cancel: 取消
+quit:
+  title: 还有 agent 在运行，确定退出 Runode？
+  detail: "%{agents} 会随之结束。"
+  confirm: 退出
+  cancel: 取消
+  agent: "%{agent}（%{workspace}）"
+  separator: "、"
 panel:
   changes: 改动
   uncommitted: "%{count} 个未提交的改动"

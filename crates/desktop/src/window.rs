@@ -26,6 +26,7 @@ pub(crate) fn open_window(cx: &mut App, shell: Option<Prespawned>) {
 
 pub(crate) fn open_window_with(cx: &mut App, options: WindowOptions, saved: Option<SavedWindow>, shell: Option<Prespawned>) {
     let opened = cx.open_window(options, |window, cx| {
+        window.on_window_should_close(cx, workspace::should_close);
         cx.new(|cx| match saved {
             Some(saved) => WindowView::restore(saved, shell, window, cx),
             None => WindowView::new(shell, window, cx),

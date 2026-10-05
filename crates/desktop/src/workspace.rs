@@ -7,7 +7,7 @@
 //! agent 的状态标记、提醒和跳转（`agents`）、列出所有 agent 的浮层（`agent_picker`）、
 //! 标签里的分屏（`panes`）、标题栏和标签（`titlebar`）、侧栏（`sidebar`）、右侧的改动栏、
 //! 预览栏和文件树（`project`、`changes`、`preview`、`files`），侧栏和文件树共用的就地输入框
-//! （`inline_edit`），以及存档（`persistence`）。
+//! （`inline_edit`），存档（`persistence`），以及退出前的确认（`quit`）。
 
 mod actions;
 mod agent_picker;
@@ -20,6 +20,7 @@ mod panes;
 mod persistence;
 mod preview;
 mod project;
+mod quit;
 mod sidebar;
 mod titlebar;
 
@@ -44,6 +45,7 @@ pub use files::{
 };
 pub(crate) use agents::reveal_notified;
 pub use persistence::{install, saved_window_options};
+pub use quit::{close_all_windows, close_window, quit, should_close};
 pub use titlebar::titlebar_options;
 
 use crate::{

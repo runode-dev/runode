@@ -41,17 +41,17 @@ pub fn install(cx: &mut App) {
     cx.on_action(|_: &About, _| crate::about::show());
     cx.on_action(|_: &OpenConfiguration, cx| crate::config::open(cx));
     cx.on_action(|_: &ReloadConfiguration, cx| crate::config::reload(cx));
-    cx.on_action(|_: &Quit, cx| cx.quit());
+    cx.on_action(|_: &Quit, cx| crate::workspace::quit(cx));
     cx.on_action(|_: &Hide, cx| cx.hide());
     cx.on_action(|_: &HideOthers, cx| cx.hide_other_apps());
     cx.on_action(|_: &ShowAll, cx| cx.unhide_other_apps());
     cx.on_action(|_: &NewWindow, cx| crate::window::open_window(cx, None));
-    cx.on_action(|_: &CloseWindow, cx| with_active_window(cx, |w| w.remove_window()));
-    cx.on_action(|_: &CloseAllWindows, cx| {
-        for window in cx.windows() {
-            window.update(cx, |_, window, _| window.remove_window()).ok();
+    cx.on_action(|_: &CloseWindow, cx| {
+        if let Some(window) = cx.active_window() {
+            crate::workspace::close_window(window, cx);
         }
     });
+    cx.on_action(|_: &CloseAllWindows, cx| crate::workspace::close_all_windows(cx));
     cx.on_action(|_: &Minimize, cx| with_active_window(cx, |w| w.minimize_window()));
     cx.on_action(|_: &Zoom, cx| with_active_window(cx, |w| w.zoom_window()));
     cx.on_action(|_: &ToggleFullScreen, cx| with_active_window(cx, |w| w.toggle_fullscreen()));

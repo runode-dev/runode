@@ -75,6 +75,13 @@ workspace:
   close_detail: Its %{count} terminals will be closed along with it.
   close_confirm: Close
   close_cancel: Cancel
+quit:
+  title: Quit Runode while agents are still running?
+  detail: "%{agents} will be stopped."
+  confirm: Quit
+  cancel: Cancel
+  agent: "%{agent} (%{workspace})"
+  separator: ", "
 panel:
   changes: Changes
   uncommitted: "%{count} uncommitted changes"
