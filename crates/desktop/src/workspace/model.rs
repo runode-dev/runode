@@ -1,16 +1,13 @@
 //! 窗口里的数据：workspace、标签和分屏布局，以及 `WindowView` 增删、查找、切换和关闭它们的操作。
 
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     path::{Path, PathBuf},
     time::Instant,
 };
 
 use gpui::{App, Bounds, Context, Entity, EntityId, Focusable, Pixels, ScrollHandle, SharedString, Subscription, Window};
-use runode_shared_types::{
-    agent::Agent,
-    pane::{Node, SplitId},
-};
+use runode_shared_types::pane::{Node, SplitId};
 
 use super::{WindowView, persistence, project::Project};
 use crate::{
@@ -31,8 +28,10 @@ pub(super) struct Tab {
     pub(super) focused: EntityId,
     /// 当前终端放大占满整个标签，其他分屏暂时不画。
     pub(super) zoomed: bool,
-    /// 不在前台时响过铃，或者里面的 agent 停了下来，切过去后清掉。
+    /// 不在前台时响过铃，切过去后清掉。agent 停下来不算，那由 agent 的标记表示。
     pub(super) bell: bool,
+    /// agent 干完了、用户还没看过的分屏，见 `Mark::new`；用户看到那个分屏时清掉。
+    pub(super) done: HashSet<EntityId>,
 }
 
 impl Tab {
@@ -105,27 +104,7 @@ impl Workspace {
         &self.tabs[self.active]
     }
 
-    /// 汇总各个终端前台的 agent：有在工作的算工作中，否则有空闲的算空闲。按标签和分屏的
-    /// 顺序找，几种 agent 同时在时标记不会来回跳。
-    pub(super) fn agent(&self, cx: &App) -> Option<Agent> {
-        let mut shown: Option<Agent> = None;
-        for tab in &self.tabs {
-            for id in tab.root.leaves() {
-                let Some(agent) = tab.panes[&id].0.read(cx).agent() else {
-                    continue;
-                };
-                if agent.is_blocked() {
-                    return Some(agent);
-                }
-                if shown.is_none_or(|shown| !shown.is_working() && agent.is_working()) {
-                    shown = Some(agent);
-                }
-            }
-        }
-        shown
-    }
-
-    /// 有标签响过铃或者里面的 agent 停了下来，还没切过去看。
+    /// 有标签响过铃，还没切过去看。
     pub(super) fn bell(&self) -> bool {
         self.tabs.iter().any(|tab| tab.bell)
     }
@@ -200,6 +179,7 @@ impl WindowView {
             focused: id,
             zoomed: false,
             bell: false,
+            done: HashSet::new(),
         }
     }
 
@@ -239,7 +219,7 @@ impl WindowView {
     }
 
     /// 装着这个终端的 workspace 和标签。
-    fn locate(&self, pane: EntityId) -> Option<(usize, usize)> {
+    pub(super) fn locate(&self, pane: EntityId) -> Option<(usize, usize)> {
         self.workspaces.iter().enumerate().find_map(|(wi, workspace)| {
             let ti = workspace.tabs.iter().position(|tab| tab.panes.contains_key(&pane))?;
             Some((wi, ti))
@@ -247,7 +227,7 @@ impl WindowView {
     }
 
     /// 第 `wi` 个 workspace 的第 `ti` 个标签正显示在窗口里。
-    fn is_shown(&self, wi: usize, ti: usize) -> bool {
+    pub(super) fn is_shown(&self, wi: usize, ti: usize) -> bool {
         wi == self.active && ti == self.workspaces[wi].active
     }
 
@@ -268,6 +248,7 @@ impl WindowView {
                 if shown && self.tab().focused == id {
                     self.sync_window_title(window, cx);
                 }
+                self.forget_stale_done(id, wi, ti, cx);
                 cx.notify();
             }
             TerminalEvent::Focused => {
@@ -280,20 +261,18 @@ impl WindowView {
                     self.save(cx);
                     cx.notify();
                 }
+                self.mark_seen(window, cx);
             }
+            // agent 的分屏响铃不点亮提示点：agent 停下来要人处理时已经有它自己的标记。
             TerminalEvent::Bell => {
                 window.play_system_bell();
-                if !shown {
+                if !shown && view.read(cx).agent().is_none() {
                     self.workspaces[wi].tabs[ti].bell = true;
                     cx.notify();
                 }
             }
-            TerminalEvent::AgentFinished | TerminalEvent::AgentBlocked => {
-                if !shown {
-                    self.workspaces[wi].tabs[ti].bell = true;
-                    cx.notify();
-                }
-            }
+            TerminalEvent::AgentFinished => self.agent_finished(id, wi, ti, window, cx),
+            TerminalEvent::AgentBlocked => self.agent_blocked(id, wi, ti, window, cx),
             TerminalEvent::Exited => self.close_pane_by_id(id, window, cx),
         }
     }
@@ -307,6 +286,7 @@ impl WindowView {
         self.start_shown(cx);
         window.focus(&self.tab().focused_view().focus_handle(cx), cx);
         self.sync_window_title(window, cx);
+        self.mark_seen(window, cx);
         self.save(cx);
         cx.notify();
     }
@@ -356,7 +336,8 @@ impl WindowView {
             return;
         }
         let workspace = &mut self.workspaces[wi];
-        workspace.tabs.remove(ti);
+        let tab = workspace.tabs.remove(ti);
+        super::agents::dismiss_alerts(tab.panes.keys().copied(), cx);
         if ti < workspace.active || workspace.active == workspace.tabs.len() {
             workspace.active -= 1;
         }
@@ -381,8 +362,10 @@ impl WindowView {
         let Some((wi, ti)) = self.locate(pane) else {
             return;
         };
+        crate::agent_alert::dismiss(&super::agents::notification_tag(pane), cx);
         let shown = self.is_shown(wi, ti);
         let tab = &mut self.workspaces[wi].tabs[ti];
+        tab.done.remove(&pane);
         let Some(next) = tab.root.remove(pane) else {
             self.close_tab_at(wi, ti, window, cx);
             return;
@@ -410,6 +393,8 @@ impl WindowView {
         if self.renaming.as_ref().is_some_and(|renaming| renaming.id == self.workspaces[ix].id) {
             self.renaming = None;
         }
+        let panes = self.workspaces[ix].tabs.iter().flat_map(|tab| tab.panes.keys().copied()).collect::<Vec<_>>();
+        super::agents::dismiss_alerts(panes, cx);
         if self.workspaces.len() == 1 {
             self.emptied = true;
             window.remove_window();

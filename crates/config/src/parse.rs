@@ -6,6 +6,7 @@ use std::{
 };
 
 use runode_shared_types::{
+    agent::AgentKind,
     color::{Rgb, TerminalColor},
     settings::{CursorStyle, OptionAsAlt},
     shell::{IntegrationMode, Shell},
@@ -46,6 +47,7 @@ pub(crate) const KEYS: &[&[&str]] = &[
         "command-suggestions",
         "command-completions",
     ],
+    &["agent-notifications", "agent-notifications-exclude", "agent-done-sound", "agent-blocked-sound"],
     &["config-file"],
     &["keybind"],
 ];
@@ -238,6 +240,27 @@ impl Config {
             "command-completions" => {
                 self.command_completions = if empty { defaults.command_completions } else { parse_bool(value)? };
             }
+            "agent-notifications" => {
+                self.agent_notifications = if empty { defaults.agent_notifications } else { parse_bool(value)? };
+            }
+            "agent-notifications-exclude" => {
+                // 值为空时清空；可以写多行，也可以一行用逗号隔开几个。
+                if empty {
+                    self.agent_notifications_exclude.clear();
+                } else {
+                    for kind in parse_agents(value)? {
+                        if !self.agent_notifications_exclude.contains(&kind) {
+                            self.agent_notifications_exclude.push(kind);
+                        }
+                    }
+                }
+            }
+            "agent-done-sound" => {
+                self.agent_done_sound = if empty { defaults.agent_done_sound } else { parse_sound(value) };
+            }
+            "agent-blocked-sound" => {
+                self.agent_blocked_sound = if empty { defaults.agent_blocked_sound } else { parse_sound(value) };
+            }
             "macos-option-as-alt" => {
                 self.macos_option_as_alt = match value {
                     "" | "false" => OptionAsAlt::False,
@@ -298,6 +321,28 @@ fn parse_bool(value: &str) -> Result<bool, String> {
         "false" => Ok(false),
         _ => Err("expected true or false".into()),
     }
+}
+
+/// 逗号隔开的 agent 短名（`AgentKind::label`），`other` 是其他报告进度的程序。整行有一个
+/// 认不出就整行不算，免得写错了不知道。
+fn parse_agents(value: &str) -> Result<Vec<AgentKind>, String> {
+    value
+        .split(',')
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+        .map(|name| {
+            AgentKind::ALL
+                .into_iter()
+                .chain([AgentKind::Other])
+                .find(|kind| kind.label() == name)
+                .ok_or_else(|| format!("unknown agent: {name}"))
+        })
+        .collect()
+}
+
+/// 系统声音名；`none` 表示不出声。声音名在播放时才查得到有没有，这里不校验。
+fn parse_sound(value: &str) -> Option<String> {
+    (value != "none").then(|| value.to_owned())
 }
 
 fn parse_color(value: &str) -> Result<Rgb, String> {
@@ -486,6 +531,29 @@ unknown-key = whatever
         assert_eq!(load(&["file-tree-preview-click = double\nfile-tree-preview-click ="]).file_tree_preview_click, PreviewClick::Single);
         // 认不出的值跳过，保留前面的值。
         assert_eq!(load(&["file-tree-preview-click = double\nfile-tree-preview-click = triple"]).file_tree_preview_click, PreviewClick::Double);
+    }
+
+    #[test]
+    fn agent_alerts_can_be_turned_off() {
+        let d = Config::default();
+        assert!(d.agent_notifications);
+        assert_eq!(d.agent_done_sound.as_deref(), Some("Glass"));
+        assert_eq!(d.agent_blocked_sound.as_deref(), Some("Ping"));
+        let config = load(&[
+            "agent-notifications = false\nagent-done-sound = none\nagent-blocked-sound = Funk\n\
+             agent-notifications-exclude = codex, gemini\nagent-notifications-exclude = claude,codex",
+        ]);
+        assert!(!config.agent_notifications);
+        assert_eq!(config.agent_done_sound, None);
+        assert_eq!(config.agent_blocked_sound.as_deref(), Some("Funk"));
+        assert_eq!(config.agent_notifications_exclude, [AgentKind::Codex, AgentKind::Gemini, AgentKind::Claude]);
+        // 有一个认不出的名字时整行跳过；空值清空，声音回到默认。
+        let config = load(&["agent-notifications-exclude = codex\nagent-notifications-exclude = claude,nope"]);
+        assert_eq!(config.agent_notifications_exclude, [AgentKind::Codex]);
+        let config = load(&["agent-notifications-exclude = codex\nagent-notifications-exclude =\nagent-done-sound = none\nagent-done-sound ="]);
+        assert!(config.agent_notifications_exclude.is_empty());
+        assert_eq!(config.agent_done_sound.as_deref(), Some("Glass"));
+        assert_eq!(load(&["agent-notifications-exclude = other"]).agent_notifications_exclude, [AgentKind::Other]);
     }
 
     #[test]

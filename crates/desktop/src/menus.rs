@@ -12,8 +12,8 @@ use crate::{
         ResetFontSize, SelectAll,
     },
     workspace::{
-        ClosePane, CloseTab, CloseWorkspace, EqualizePanes, FocusNextPane, FocusPreviousPane, NewSplitDown,
-        NewSplitRight, NewTab, NewWorkspace, NextTab, NextWorkspace, PreviousTab, PreviousWorkspace,
+        ClosePane, CloseTab, CloseWorkspace, EqualizePanes, FocusNextPane, FocusPreviousPane, GotoAgent, NewSplitDown,
+        NewSplitRight, NewTab, NewWorkspace, NextAgent, NextTab, NextWorkspace, PreviousTab, PreviousWorkspace,
         RenameWorkspace, ToggleChanges, ToggleFiles, TogglePaneZoom, ToggleSidebar,
     },
 };
@@ -143,6 +143,9 @@ pub fn set_menus(cx: &mut App) {
             MenuItem::action(tr("menu.next_split"), FocusNextPane),
             MenuItem::action(tr("menu.zoom_split"), TogglePaneZoom),
             MenuItem::action(tr("menu.equalize_splits"), EqualizePanes),
+            MenuItem::separator(),
+            MenuItem::action(tr("menu.goto_agent"), GotoAgent),
+            MenuItem::action(tr("menu.next_agent"), NextAgent),
         ]),
     ]);
     #[cfg(target_os = "macos")]

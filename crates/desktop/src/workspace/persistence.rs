@@ -245,6 +245,7 @@ impl WindowView {
                     panes,
                     focused,
                     bell: false,
+                    done: Default::default(),
                 });
             }
             if tabs.is_empty() {

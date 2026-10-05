@@ -54,6 +54,20 @@ menu:
   next_split: Select Next Split
   zoom_split: Zoom Split
   equalize_splits: Equalize Splits
+  goto_agent: Go to Agent…
+  next_agent: Next Agent Needing Attention
+agent:
+  done_title: "%{agent} has finished"
+  blocked_title: "%{agent} is waiting for your answer"
+  notification_body: "%{workspace} · %{tab}"
+  status:
+    blocked: Waiting for you
+    done: Finished
+    working: Working
+    idle: Idle
+  picker:
+    none: No agents are running
+    no_matches: No matching agents
 workspace:
   new: New Workspace
   choose: Open

@@ -3,6 +3,7 @@
 use std::path::PathBuf;
 
 use runode_shared_types::{
+    agent::AgentKind,
     color::{Rgb, TerminalColor},
     settings::{CursorStyle, OptionAsAlt, TermSettings},
     shell::IntegrationMode,
@@ -68,6 +69,13 @@ pub struct Config {
     pub command_completions: bool,
     /// 界面语言，是 locales 里的某个语言标签；`None` 表示跟随系统。
     pub language: Option<String>,
+    /// agent 等用户回答或者干完了、用户又没在看那个分屏时，发系统通知。
+    pub agent_notifications: bool,
+    /// 这些 agent 不发通知也不出提示音，标记照常显示。
+    pub agent_notifications_exclude: Vec<AgentKind>,
+    /// agent 干完了、等用户回答时播放的系统声音名；`None` 表示不出声。
+    pub agent_done_sound: Option<String>,
+    pub agent_blocked_sound: Option<String>,
     /// 叠在默认快捷键上的 `keybind`，按出现顺序；只认 runode 自己的配置文件。
     pub keybinds: Vec<Keybind>,
     /// 本次读到的全部文件（含主题和 config-file 引入的），供热重载监视。
@@ -107,6 +115,10 @@ impl Default for Config {
             command_suggestions: true,
             command_completions: true,
             language: None,
+            agent_notifications: true,
+            agent_notifications_exclude: Vec::new(),
+            agent_done_sound: Some("Glass".into()),
+            agent_blocked_sound: Some("Ping".into()),
             keybinds: Vec::new(),
             sources: Vec::new(),
             dark: true,

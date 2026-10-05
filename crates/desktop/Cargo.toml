@@ -37,7 +37,8 @@ notify.workspace = true
 objc2.workspace = true
 # 文件树删除文件时移到废纸篓，用 NSFileManager。
 objc2-foundation = { workspace = true, features = ["std", "NSArray", "NSData", "NSError", "NSFileManager", "NSLocale", "NSString", "NSURL"] }
-objc2-app-kit = { workspace = true, features = ["std", "NSApplication", "NSResponder", "NSImage", "NSMenu", "NSMenuItem", "NSEvent"] }
+# agent 要人处理时的提示音用 NSSound 按名字播放系统声音。
+objc2-app-kit = { workspace = true, features = ["std", "NSApplication", "NSResponder", "NSImage", "NSMenu", "NSMenuItem", "NSEvent", "NSSound"] }
 
 [lints]
 workspace = true

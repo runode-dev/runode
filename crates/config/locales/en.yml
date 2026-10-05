@@ -47,6 +47,12 @@ config:
   shell_integration: "Shell integration: detect (by the shell's program name), none (off), bash, zsh, fish."
   command_suggestions: "Suggest a command from the history in gray after the cursor while typing at the shell prompt; accept it with → or End, one word with Option+→. false also stops reading and recording the command history."
   command_completions: "Press Tab at the shell prompt to pick a command name, subcommand, option or argument from a menu (arguments only for commands runode has a spec for); when there is nothing to offer, Tab goes to the shell. false always sends Tab to the shell."
+  agent_notifications: "Post a system notification when an agent is waiting for your answer or has finished in a split you are not looking at: true, false. Notifications only work in the packaged Runode.app."
+  agent_notifications_exclude: |-
+    Agents that get no notification and no sound (their marks still show): short names separated by commas,
+    can be repeated; empty clears the list. Names: %{agents}.
+  agent_done_sound: "Sound when an agent finishes in a split you are not looking at: a macOS system sound name (Basso, Blow, Bottle, Frog, Funk, Glass, Hero, Morse, Ping, Pop, Purr, Sosumi, Submarine, Tink), or none."
+  agent_blocked_sound: "Sound when an agent waits for your answer in a split you are not looking at: same as above."
   config_file: |-
     Include another configuration file: a path, relative to this file's directory, ~/ for the home
     directory; prefix it with ? if the file may not exist. Can be repeated.
@@ -99,6 +105,8 @@ action:
   toggle_sidebar: Show or hide the workspace sidebar
   toggle_changes: Show or hide the uncommitted changes panel on the right
   toggle_files: Show or hide the file tree on the right; double-click a file to type its path into the terminal
+  goto_agent: List the agents in every window and jump to the one you pick
+  next_agent: Jump to the next agent that needs you, those waiting for an answer first, then those that finished
   copy_to_clipboard: Copy
   paste_from_clipboard: Paste
   paste_from_selection: Paste the selection

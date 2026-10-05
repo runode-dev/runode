@@ -3,7 +3,10 @@
 
 use std::path::Path;
 
-use runode_shared_types::color::{Rgb, TerminalColor};
+use runode_shared_types::{
+    agent::AgentKind,
+    color::{Rgb, TerminalColor},
+};
 
 use crate::{Config, parse::KEYS, theme::BUNDLED_THEMES};
 
@@ -73,7 +76,10 @@ fn fill_missing_keys(text: &str, locale: &str) -> String {
 fn key_block(d: &Config, key: &str, locale: &str, locales: &str) -> String {
     let mut out = String::new();
     let doc_key = format!("config.{}", key.replace('-', "_"));
-    for line in rust_i18n::t!(&doc_key, locale = locale, locales = locales).lines() {
+    // 能填的 agent 短名，`agent-notifications-exclude` 的说明里列出来。
+    let agents: Vec<&str> = AgentKind::ALL.iter().map(|kind| kind.label()).chain(["other"]).collect();
+    let agents = agents.join(", ");
+    for line in rust_i18n::t!(&doc_key, locale = locale, locales = locales, agents = agents).lines() {
         out.push_str(&format!("## {line}\n"));
     }
     let values = template_values(d, key);
@@ -160,6 +166,9 @@ fn template_values(d: &Config, key: &str) -> Vec<String> {
         "shell-integration" => vec!["detect".into()],
         "command-suggestions" => vec!["true".into()],
         "command-completions" => vec!["true".into()],
+        "agent-notifications" => vec![d.agent_notifications.to_string()],
+        "agent-done-sound" => d.agent_done_sound.iter().cloned().collect(),
+        "agent-blocked-sound" => d.agent_blocked_sound.iter().cloned().collect(),
         "keybind" => crate::keybind::DEFAULTS.iter().map(|k| k.to_string()).collect(),
         _ => Vec::new(),
     }
@@ -257,6 +266,9 @@ mod tests {
             }
             let group = without(&full, &["file-tree-font-size", "file-tree-preview-click", "preview-font-size"]);
             assert_eq!(fill_missing_keys(&group, &locale), full);
+            // agent 通知这一组是后来加的，旧配置文件整组都没有。
+            let agents = ["agent-notifications", "agent-notifications-exclude", "agent-done-sound", "agent-blocked-sound"];
+            assert_eq!(fill_missing_keys(&without(&full, &agents), &locale), full);
             assert_eq!(fill_missing_keys(&full, &locale), full);
         }
         // 用户自己写的设置算写到了，空文件不补。

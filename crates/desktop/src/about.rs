@@ -31,7 +31,7 @@ pub fn install_icon() {
 
 /// 可执行文件是否在 `*.app/Contents/MacOS/` 里。
 #[cfg(target_os = "macos")]
-fn in_app_bundle() -> bool {
+pub(crate) fn in_app_bundle() -> bool {
     let Ok(exe) = std::env::current_exe() else {
         return false;
     };

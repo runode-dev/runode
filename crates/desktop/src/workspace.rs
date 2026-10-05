@@ -4,11 +4,14 @@
 //!
 //! 这里是窗口的根视图 `WindowView`、窗口绑定的动作，以及把各部分拼起来的渲染。其余按职责分在
 //! 子模块里：workspace、标签和分屏的数据与增删切换（`model`）、动作的处理（`actions`）、
+//! agent 的状态标记、提醒和跳转（`agents`）、列出所有 agent 的浮层（`agent_picker`）、
 //! 标签里的分屏（`panes`）、标题栏和标签（`titlebar`）、侧栏（`sidebar`）、右侧的改动栏、
 //! 预览栏和文件树（`project`、`changes`、`preview`、`files`），侧栏和文件树共用的就地输入框
 //! （`inline_edit`），以及存档（`persistence`）。
 
 mod actions;
+mod agent_picker;
+mod agents;
 mod changes;
 mod files;
 mod inline_edit;
@@ -39,6 +42,7 @@ pub use files::{
     CollapseSelectedFile, CopyPath, CopyRelativePath, DeleteFile, ExpandSelectedFile, FocusTerminal, OpenSelectedFile,
     RenameFile, RevealInFinder, SelectFirstFile, SelectLastFile, SelectNextFile, SelectPreviousFile,
 };
+pub(crate) use agents::reveal_notified;
 pub use persistence::{install, saved_window_options};
 pub use titlebar::titlebar_options;
 
@@ -79,7 +83,11 @@ actions!(
         /// 显示或隐藏右侧的改动栏。
         ToggleChanges,
         /// 显示或隐藏右侧的文件树。
-        ToggleFiles
+        ToggleFiles,
+        /// 打开或关掉列出所有窗口里 agent 的浮层。
+        GotoAgent,
+        /// 跳到下一个要处理的 agent：先等回答的，再干完了没看的。
+        NextAgent
     ]
 );
 
@@ -187,6 +195,8 @@ pub struct WindowView {
     file_edit: Option<files::FileEdit>,
     file_clipboard: Option<files::FileClipboard>,
     renaming: Option<Renaming>,
+    /// 开着的 agent 列表。
+    agent_picker: Option<agent_picker::AgentPicker>,
     /// workspace、标签和分屏节点的标识都从这里取。
     next_id: u64,
     layout: Rc<RefCell<PaneLayout>>,
@@ -223,6 +233,8 @@ impl WindowView {
             if window.is_window_active() {
                 this.refresh_project(cx);
                 this.refresh_preview_if_changed(cx);
+                // 切回这个窗口就算看到了当前分屏。
+                this.mark_seen(window, cx);
             }
         });
         let project_poll = cx.spawn_in(window, async move |this, cx| {
@@ -255,6 +267,12 @@ impl WindowView {
         });
         let config_watch = cx.observe_global::<AppConfig>(|_, cx| cx.notify());
         persistence::track(cx);
+        // 窗口关掉后它的分屏都没了，发过的通知点了也跳不过去，一并收回。
+        cx.on_release(|view, cx| {
+            let panes = view.workspaces.iter().flat_map(|workspace| &workspace.tabs).flat_map(|tab| tab.panes.keys().copied());
+            agents::dismiss_alerts(panes.collect::<Vec<_>>(), cx);
+        })
+        .detach();
         Self {
             workspaces: Vec::new(),
             active: 0,
@@ -273,6 +291,7 @@ impl WindowView {
             file_edit: None,
             file_clipboard: None,
             renaming: None,
+            agent_picker: None,
             next_id: 0,
             layout: Rc::default(),
             dragging_divider: None,
@@ -362,6 +381,7 @@ impl Render for WindowView {
         let preview = self.render_preview_panel(widths.preview, !self.files_shown, fg, bg, font, cx);
         let files = self.files_shown.then(|| self.render_files_panel(widths.files, fg, bg, cx));
         let file_menu = self.render_file_menu(fg, bg, cx);
+        let agent_picker = self.render_agent_picker(fg, bg, window, cx);
         let right_handles = [
             self.changes_shown.then(|| self.render_right_handle(Divider::Changes, widths.total(), cx)),
             preview_shown.then(|| self.render_right_handle(Divider::Preview, widths.preview + widths.files, cx)),
@@ -416,7 +436,7 @@ impl Render for WindowView {
                     .pr(px(inset))
                     .flex()
                     .text_color(fg.opacity(0.55))
-                    .child(titled(title, view.agent(), "window-agent", fg).flex_1()),
+                    .child(titled(title, self.tab().mark(cx), "window-agent", fg).flex_1()),
             ]
         };
         let titlebar = titlebar_shown.then(|| {
@@ -462,6 +482,8 @@ impl Render for WindowView {
             .on_action(cx.listener(Self::toggle_sidebar))
             .on_action(cx.listener(Self::toggle_changes))
             .on_action(cx.listener(Self::toggle_files))
+            .on_action(cx.listener(Self::goto_agent))
+            .on_action(cx.listener(Self::next_agent))
             .relative()
             .size_full()
             .flex()
@@ -486,6 +508,7 @@ impl Render for WindowView {
             .children(panel_toggles)
             .children(drag)
             .children(file_menu)
+            .children(agent_picker)
     }
 }
 

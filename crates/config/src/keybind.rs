@@ -53,6 +53,10 @@ pub enum Action {
     ToggleSidebar,
     ToggleChanges,
     ToggleFiles,
+    /// 列出所有窗口里的 agent，选一个跳过去。
+    GotoAgent,
+    /// 不弹列表，直接跳到下一个要处理的 agent：先等回答的，再干完了没看的。
+    NextAgent,
     Copy,
     Paste,
     PasteSelection,
@@ -211,6 +215,8 @@ pub static ACTIONS: &[ActionSpec] = &[
     plain!("toggle_sidebar", Action::ToggleSidebar),
     plain!("toggle_changes", Action::ToggleChanges),
     plain!("toggle_files", Action::ToggleFiles),
+    plain!("goto_agent", Action::GotoAgent),
+    plain!("next_agent", Action::NextAgent),
     plain!("copy_to_clipboard", Action::Copy),
     plain!("paste_from_clipboard", Action::Paste),
     plain!("paste_from_selection", Action::PasteSelection),
@@ -340,6 +346,8 @@ pub static DEFAULTS: &[&str] = &[
     "cmd+b=toggle_sidebar",
     "cmd+alt+g=toggle_changes",
     "cmd+shift+e=toggle_files",
+    "cmd+shift+a=goto_agent",
+    "cmd+alt+a=next_agent",
     "cmd+c=copy_to_clipboard",
     "cmd+v=paste_from_clipboard",
     "cmd+shift+v=paste_from_selection",

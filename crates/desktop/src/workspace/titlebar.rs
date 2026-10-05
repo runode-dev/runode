@@ -4,14 +4,14 @@ use gpui::{
     Action, Animation, AnimationExt, AnyElement, App, BoxShadow, Context, Div, ElementId, Hsla, MouseButton,
     MouseDownEvent, Pixels, Render, SharedString, Stateful, TitlebarOptions, Window, div, point, prelude::*, px, svg,
 };
-use runode_shared_types::{
-    agent::{Agent, AgentState},
-    color::Rgb,
-};
+use runode_shared_types::color::Rgb;
 
 use super::{
     AGENT_MARK_WIDTH, NEW_TAB_BUTTON_WIDTH, NewTab, SelectLastTab, SelectTab, TAB_CLOSE_SIZE, TITLEBAR_HEIGHT,
-    TRAFFIC_LIGHTS_ORIGIN, WindowView, divider_color, model::TabId,
+    TRAFFIC_LIGHTS_ORIGIN, WindowView,
+    agents::{Mark, Status},
+    divider_color,
+    model::TabId,
 };
 use crate::{
     terminal_view::{DEFAULT_TITLE, hsla},
@@ -123,33 +123,33 @@ pub(super) fn icon_toggle(
         )
 }
 
-/// 居中的标题，前台是 agent 时前面加上它的状态标记。
-pub(super) fn titled(title: SharedString, agent: Option<Agent>, id: impl Into<ElementId>, fg: Hsla) -> Div {
+/// 居中的标题，有 agent 时前面加上它的状态标记。
+pub(super) fn titled(title: SharedString, mark: Option<Mark>, id: impl Into<ElementId>, fg: Hsla) -> Div {
     div()
         .min_w_0()
         .flex()
         .justify_center()
         .items_center()
         .gap(px(5.))
-        .children(agent.map(|agent| agent_mark(agent, id, fg)))
+        .children(mark.map(|mark| agent_mark(mark, id, fg)))
         .child(div().min_w_0().truncate().child(title))
 }
 
-/// agent 的状态标记：工作中播放该 agent 自己的工作动画，空闲时是一个空心圆点，等用户回答时
-/// 是一个琥珀色的实心圆点。
-pub(super) fn agent_mark(agent: Agent, id: impl Into<ElementId>, fg: Hsla) -> AnyElement {
+/// agent 的状态标记：工作中播放该 agent 自己的工作动画，空闲时是一个空心圆点，等回答是琥珀色
+/// 实心圆点，干完了没看是绿色的对勾。
+pub(super) fn agent_mark(mark: Mark, id: impl Into<ElementId>, fg: Hsla) -> AnyElement {
     let slot = div()
         .flex_none()
         .w(px(AGENT_MARK_WIDTH))
         .flex()
         .justify_center()
         .items_center();
-    match agent.state {
+    match mark.status {
         // 所有转圈的标记共用同一个时钟，同一种 agent 的几个标签一起转时步调一致。
-        AgentState::Working => {
-            let (frames, frame_time) = agent.kind.spinner();
+        Status::Working => {
+            let (frames, frame_time) = mark.kind.spinner();
             let period = frame_time * frames.len() as u32;
-            slot.when_some(agent.kind.spinner_color(), |slot, color| slot.text_color(gpui::rgb(color)))
+            slot.when_some(mark.kind.spinner_color(), |slot, color| slot.text_color(gpui::rgb(color)))
                 .with_animation(
                     id,
                     // 每格只重画一次：转圈每动一下都要重画整个窗口，并不便宜。
@@ -163,7 +163,7 @@ pub(super) fn agent_mark(agent: Agent, id: impl Into<ElementId>, fg: Hsla) -> An
                 )
                 .into_any_element()
         }
-        AgentState::Idle => slot
+        Status::Idle => slot
             .child(
                 div()
                     .size(px(6.))
@@ -172,14 +172,23 @@ pub(super) fn agent_mark(agent: Agent, id: impl Into<ElementId>, fg: Hsla) -> An
                     .border_color(fg.opacity(0.6)),
             )
             .into_any_element(),
-        AgentState::Blocked => slot
+        // 等用户回答：不动的实心琥珀色圆点，比空闲显眼。
+        Status::Blocked => slot
             .child(div().size(px(7.)).rounded_full().bg(gpui::rgb(AGENT_BLOCKED_COLOR)))
+            .into_any_element(),
+        // 干完了还没看：绿色对勾，和等回答的圆点形状也不同，不靠颜色也分得开。
+        Status::Done => slot
+            .text_size(px(11.))
+            .text_color(gpui::rgb(AGENT_DONE_COLOR))
+            .child("✓")
             .into_any_element(),
     }
 }
 
 /// agent 等用户回答时标记的颜色。
 const AGENT_BLOCKED_COLOR: u32 = 0xE5A50A;
+/// agent 干完了、用户还没看时标记的颜色。
+const AGENT_DONE_COLOR: u32 = 0x3FB950;
 
 /// 快捷键提示，从键位表里查，快捷键改了也跟着变：先找 `select` 的绑定，`is_last` 时再找
 /// `last` 的。后加的绑定优先，显示最后一个。
@@ -204,9 +213,8 @@ impl WindowView {
         let workspace = self.workspace();
         let tab = &workspace.tabs[ix];
         let id = tab.id;
-        let view = tab.focused_view().read(cx);
-        let title = SharedString::from(view.title().to_owned());
-        let agent = view.agent();
+        let title = SharedString::from(tab.focused_view().read(cx).title().to_owned());
+        let mark = tab.mark(cx);
         let active = ix == workspace.active;
         let active_bg = hsla(bg.mix(fg, 0.08));
         let hover_bg = hsla(bg.mix(fg, 0.04));
@@ -331,7 +339,7 @@ impl WindowView {
                         }),
                     ),
             )
-            .child(titled(title, agent, ("tab-agent", ix), fg).flex_1())
+            .child(titled(title, mark, ("tab-agent", ix), fg).flex_1())
             .children(side_slot)
     }
 

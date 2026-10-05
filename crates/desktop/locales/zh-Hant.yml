@@ -54,6 +54,20 @@ menu:
   next_split: 選擇下一個分割畫面
   zoom_split: 放大分割畫面
   equalize_splits: 平均分割畫面
+  goto_agent: 前往 agent…
+  next_agent: 下一個要處理的 agent
+agent:
+  done_title: "%{agent} 做完了"
+  blocked_title: "%{agent} 在等你回答"
+  notification_body: "%{workspace} · %{tab}"
+  status:
+    blocked: 等你回答
+    done: 做完了
+    working: 工作中
+    idle: 閒置
+  picker:
+    none: 沒有在執行的 agent
+    no_matches: 沒有相符的 agent
 workspace:
   new: 新增工作區
   choose: 打開

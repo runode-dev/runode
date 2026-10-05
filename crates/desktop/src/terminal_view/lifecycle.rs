@@ -292,6 +292,7 @@ impl TerminalView {
             foreground_read_at: Instant::now(),
             _foreground_refresh: None,
             agent_poll: None,
+            agent_changed_at: Instant::now(),
             _hold_timeout: None,
             _cursor_blink: None,
             _autoscroll: None,
@@ -319,6 +320,11 @@ impl TerminalView {
     /// 前台 agent 在标题里报告的状态；不是 agent 在前台时为 `None`。
     pub fn agent(&self) -> Option<Agent> {
         self.session.agent
+    }
+
+    /// 前台 agent 上次换了种类或状态的时刻。
+    pub fn agent_changed_at(&self) -> Instant {
+        self.agent_changed_at
     }
 
     /// 终端用的字体，改动栏里的代码也用它。
@@ -368,6 +374,9 @@ impl TerminalView {
         let before = self.session.agent;
         update(self, cx);
         let after = self.session.agent;
+        if before != after {
+            self.agent_changed_at = Instant::now();
+        }
         if before.is_some_and(Agent::is_working) && !after.is_some_and(Agent::is_working) {
             cx.emit(TerminalEvent::AgentFinished);
         }

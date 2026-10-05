@@ -2,6 +2,7 @@
 //! 窗口和绘制用 GPUI。
 
 mod about;
+mod agent_alert;
 mod assets;
 mod config;
 mod file_icons;

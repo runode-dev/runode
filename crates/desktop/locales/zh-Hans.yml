@@ -54,6 +54,20 @@ menu:
   next_split: 选择下一个分屏
   zoom_split: 放大分屏
   equalize_splits: 均分分屏
+  goto_agent: 前往 agent…
+  next_agent: 下一个要处理的 agent
+agent:
+  done_title: "%{agent} 干完了"
+  blocked_title: "%{agent} 在等你回答"
+  notification_body: "%{workspace} · %{tab}"
+  status:
+    blocked: 等你回答
+    done: 干完了
+    working: 工作中
+    idle: 空闲
+  picker:
+    none: 没有在运行的 agent
+    no_matches: 没有匹配的 agent
 workspace:
   new: 新建工作区
   choose: 打开

@@ -175,6 +175,8 @@ pub struct TerminalView {
     _foreground_refresh: Option<Task<()>>,
     /// 下次判断前台 agent 状态的时刻和计时器，见 `schedule_agent_poll`。
     agent_poll: Option<(Instant, Task<()>)>,
+    /// 前台 agent 上次换了种类或状态的时刻，agent 列表按它排同一状态里的先后。
+    agent_changed_at: Instant,
     _hold_timeout: Option<Task<()>>,
     /// 有焦点时才运行的闪烁计时器。
     _cursor_blink: Option<Task<()>>,

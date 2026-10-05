@@ -39,6 +39,12 @@ config:
   shell_integration: Shell 整合：detect（依 shell 的程式名稱判斷）、none（關閉）、bash、zsh、fish。
   command_suggestions: 在 shell 提示字元上輸入時，依指令歷史在游標後用灰字給出建議，按 → 或 End 接受，Option+→ 接受一個詞。false 時也不讀寫指令歷史。
   command_completions: 在 shell 提示字元上按 Tab 時從選單裡選指令名稱、子指令、選項或參數（參數只限 runode 認得的指令），沒有可選的時 Tab 照常交給 shell。false 時 Tab 總是交給 shell。
+  agent_notifications: agent 在你沒在看的分割畫面裡等你回答或者做完了時，發系統通知：true、false。只有打包好的 Runode.app 能發通知。
+  agent_notifications_exclude: |-
+    不發通知也不出提示音的 agent（狀態標記照常顯示）：用逗號隔開的短名，可以寫多行，值為空時清空。
+    可用的短名：%{agents}。
+  agent_done_sound: agent 在你沒在看的分割畫面裡做完了時的提示音：macOS 的系統聲音名稱（Basso、Blow、Bottle、Frog、Funk、Glass、Hero、Morse、Ping、Pop、Purr、Sosumi、Submarine、Tink），none 表示不出聲。
+  agent_blocked_sound: agent 在你沒在看的分割畫面裡等你回答時的提示音：同上。
   config_file: |-
     引入別的設定檔：檔案路徑，相對路徑從這個檔案所在目錄算，~/ 表示家目錄；
     路徑前加 ? 表示檔案可以不存在。可以寫多行。
@@ -88,6 +94,8 @@ action:
   toggle_sidebar: 顯示或隱藏工作區側欄
   toggle_changes: 顯示或隱藏右側的未提交改動
   toggle_files: 顯示或隱藏右側的檔案樹，按兩下檔案把路徑打進終端機
+  goto_agent: 列出所有視窗裡的 agent，選一個跳過去
+  next_agent: 跳到下一個要處理的 agent：先是等你回答的，再是做完了還沒看的
   copy_to_clipboard: 拷貝
   paste_from_clipboard: 貼上
   paste_from_selection: 貼上選取內容

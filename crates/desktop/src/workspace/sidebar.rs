@@ -163,8 +163,8 @@ impl WindowView {
         let fg = hsla(fg);
         let group = SharedString::from(format!("workspace-{ix}"));
         let renaming = self.renaming.as_ref().filter(|renaming| renaming.id == id);
-        let mark = match workspace.agent(cx) {
-            Some(agent) => agent_mark(agent, ("workspace-agent", ix), fg),
+        let mark = match workspace.mark(cx) {
+            Some(mark) => agent_mark(mark, ("workspace-agent", ix), fg),
             None => div().flex_none().w(px(AGENT_MARK_WIDTH)).into_any_element(),
         };
         let name: AnyElement = match renaming {
