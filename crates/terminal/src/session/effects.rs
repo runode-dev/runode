@@ -226,7 +226,8 @@ impl Session {
             self.title_agent = None;
             self.progress = None;
         }
-        let title = self.pty.foreground_title();
+        // shell 在前台时不读它此刻的目录：插件管理器在提示符出来后延迟加载插件，会临时切进插件目录。
+        let title = self.pty.foreground_title(|| self.prompt_cwd());
         if title == self.fallback_title {
             return agent_gone;
         }
