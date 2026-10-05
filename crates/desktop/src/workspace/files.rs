@@ -16,7 +16,7 @@ use std::{
 };
 
 use gpui::{
-    Action, AnyElement, Axis, Context, Div, Focusable, Hsla, MouseButton, MouseDownEvent, Pixels, Render, ScrollStrategy,
+    Action, AnyElement, Axis, ClickEvent, Context, Div, Focusable, Hsla, MouseButton, MouseDownEvent, Pixels, Render, ScrollStrategy,
     SharedString, Stateful, Window, actions, div, img, prelude::*, px, svg, uniform_list,
 };
 use runode_config::PreviewClick;
@@ -402,17 +402,27 @@ impl WindowView {
                     MouseButton::Left,
                     cx.listener({
                         let path = path.clone();
-                        move |this, event: &MouseDownEvent, window, cx| {
+                        move |this, _: &MouseDownEvent, window, cx| {
                             // 点在改名输入框里时交给输入框挪光标、选字。
                             cx.stop_propagation();
                             if this.renaming(&path).is_some() {
                                 return;
                             }
                             window.focus(&this.files_focus, cx);
-                            this.click_file(&path, is_dir, event.click_count, cx);
+                            this.workspace_mut().project.selected = Some(path.clone());
+                            cx.notify();
                         }
                     }),
                 )
+                // 按下只选中，松开才展开目录、打开预览：拖动时 GPUI 不发点击，拖走的文件不会被打开。
+                .on_click(cx.listener({
+                    let path = path.clone();
+                    move |this, event: &ClickEvent, _, cx| {
+                        if this.renaming(&path).is_none() {
+                            this.click_file(&path, is_dir, event.click_count(), cx);
+                        }
+                    }
+                }))
                 .on_mouse_down(
                     MouseButton::Right,
                     cx.listener(move |this, event: &MouseDownEvent, window, cx| {
@@ -431,7 +441,7 @@ impl WindowView {
         )
     }
 
-    /// 单击选中，目录同时展开或收起，有改动的文件在改动栏里滚到它。文件按配置的 `PreviewClick`
+    /// 点击（按下又松开、没拖动）选中，目录同时展开或收起，有改动的文件在改动栏里滚到它。文件按配置的 `PreviewClick`
     /// 在预览栏里打开：单击打开时单击开成临时标签，双击固定下来；双击打开时双击开成固定标签。
     fn click_file(&mut self, path: &Path, is_dir: bool, clicks: usize, cx: &mut Context<Self>) {
         self.workspace_mut().project.selected = Some(path.to_path_buf());
