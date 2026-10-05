@@ -15,6 +15,7 @@ config:
   adjust_cell_height: 字元格高度的調整量：像素（例如 2、-1）或百分比（例如 10%），留空表示不調整。
   window_padding_x: 左右內距：一個數表示兩邊相同，或寫成 左,右，單位是點。
   window_padding_y: 上下內距：一個數表示兩邊相同，或寫成 上,下，單位是點。
+  file_tree_font_size: 右側檔案樹的字級：正數，單位是點。
   theme: |-
     主題：檔案末尾列出的主題名稱，或主題檔案的絕對路徑；也可以依系統外觀分開寫，
     例如 light:Catppuccin Latte,dark:Catppuccin Mocha。主題會先生效，下面寫出的顏色再覆蓋它。

@@ -25,6 +25,8 @@ pub struct Config {
     pub window_padding_x: (f32, f32),
     /// (上, 下)
     pub window_padding_y: (f32, f32),
+    /// 右侧文件树的字号。
+    pub file_tree_font_size: f32,
     pub cursor_style: CursorStyle,
     /// `None` 表示默认闪烁，运行中的程序仍可改变。
     pub cursor_style_blink: Option<bool>,
@@ -71,6 +73,7 @@ impl Default for Config {
             adjust_cell_height: None,
             window_padding_x: (2., 2.),
             window_padding_y: (0., 6.),
+            file_tree_font_size: 14.,
             cursor_style: CursorStyle::Block,
             cursor_style_blink: None,
             background: theme::BACKGROUND,

@@ -16,6 +16,7 @@ config:
   adjust_cell_height: "Cell height adjustment: pixels (e.g. 2, -1) or a percentage (e.g. 10%); empty means no adjustment."
   window_padding_x: "Left and right padding: one number for both sides, or left,right, in points."
   window_padding_y: "Top and bottom padding: one number for both sides, or top,bottom, in points."
+  file_tree_font_size: "File tree font size: a positive number, in points."
   theme: |-
     Theme: a theme name listed at the end of this file, or the absolute path of a theme file. It can also
     follow the system appearance, e.g. light:Catppuccin Latte,dark:Catppuccin Mocha. The theme applies first,

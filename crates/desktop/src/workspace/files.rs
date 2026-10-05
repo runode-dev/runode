@@ -15,11 +15,13 @@ use super::{
 };
 use crate::{
     assets::{CHEVRON_DOWN_ICON, CHEVRON_RIGHT_ICON, EYE_ICON, EYE_OFF_ICON},
+    config::AppConfig,
     file_icons::{file_icon, folder_icon},
     terminal_view::hsla,
 };
 
-const ROW_HEIGHT: f32 = 22.;
+/// 行高比字号多出的部分。
+const ROW_EXTRA_HEIGHT: f32 = 10.;
 /// 每深一层往右缩进的宽度。
 const INDENT: f32 = 12.;
 /// 行的左边距。
@@ -73,14 +75,15 @@ impl WindowView {
             .panel_header(true, fg)
             .child(div().flex_1().min_w_0().truncate().text_color(hsla(fg)).child(name))
             .child(ignored_toggle);
+        let font_size = cx.global::<AppConfig>().0.file_tree_font_size;
         let list = uniform_list(
             "files",
             workspace.project.file_rows.len(),
-            cx.processor(move |this, range: Range<usize>, _, cx| this.render_file_rows(range, fg, bg, cx)),
+            cx.processor(move |this, range: Range<usize>, _, cx| this.render_file_rows(range, font_size, fg, bg, cx)),
         )
         .track_scroll(&workspace.project.files_scroll)
         .flex_1()
-        .py(px(4.));
+        .p(px(4.));
         div()
             .id("files-panel")
             .flex_none()
@@ -91,12 +94,20 @@ impl WindowView {
             .bg(hsla(bg.mix(fg, 0.03)))
             .border_l_1()
             .border_color(hsla(fg).opacity(0.12))
-            .text_size(px(12.))
+            .text_size(px(font_size))
             .child(header)
             .child(list)
     }
 
-    fn render_file_rows(&self, range: Range<usize>, fg: Rgb, bg: Rgb, cx: &mut Context<Self>) -> Vec<AnyElement> {
+    /// 文件树的行。行高、箭头和图标跟着字号 `font_size` 一起缩放。
+    fn render_file_rows(
+        &self,
+        range: Range<usize>,
+        font_size: f32,
+        fg: Rgb,
+        bg: Rgb,
+        cx: &mut Context<Self>,
+    ) -> Vec<AnyElement> {
         let project = &self.workspace().project;
         let selected_bg = hsla(bg.mix(fg, 0.12));
         let hover_bg = hsla(bg.mix(fg, 0.06));
@@ -114,7 +125,7 @@ impl WindowView {
                 let chevron = row.is_dir.then(|| {
                     svg()
                         .path(if row.expanded { CHEVRON_DOWN_ICON } else { CHEVRON_RIGHT_ICON })
-                        .size(px(12.))
+                        .size(px(font_size))
                         .text_color(fg.opacity(0.5))
                 });
                 // 并成一行的目录按最里层的名字挑图标。
@@ -129,8 +140,9 @@ impl WindowView {
                 div()
                     .id(("file", ix))
                     .flex_none()
-                    .h(px(ROW_HEIGHT))
-                    .mx(px(4.))
+                    .h(px(font_size + ROW_EXTRA_HEIGHT))
+                    // 占满整行宽度，名字后面的空白处也能点、也有悬停底色。
+                    .w_full()
                     .pl(px(ROW_PADDING))
                     .pr(px(6.))
                     .rounded(px(4.))
@@ -147,8 +159,8 @@ impl WindowView {
                             .flex()
                             .items_center()
                             .gap(px(4.))
-                            .child(div().flex_none().w(px(12.)).flex().items_center().children(chevron))
-                            .child(img(icon).flex_none().size(px(14.)))
+                            .child(div().flex_none().w(px(font_size)).flex().items_center().children(chevron))
+                            .child(img(icon).flex_none().size(px(font_size + 2.)))
                             .child(div().min_w_0().truncate().text_color(color).child(row.name.clone())),
                     )
                     .on_mouse_down(

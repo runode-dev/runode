@@ -36,6 +36,7 @@ pub use persistence::{install, saved_window_options};
 pub use titlebar::titlebar_options;
 
 use crate::{
+    config::AppConfig,
     persist::SavedWindow,
     prespawn::Prespawned,
     search_bar::SearchField,
@@ -170,6 +171,8 @@ pub struct WindowView {
     _bounds_watch: Subscription,
     /// 窗口切到前台时重读右侧面板的内容。
     _activation_watch: Subscription,
+    /// 配置重载后重画，文件树的字号等跟着变。
+    _config_watch: Subscription,
     /// 右侧面板显示时定时看终端换没换目录，监听不了目录时定时重读。
     _project_poll: Task<()>,
     /// 监听右侧面板在看的目录，事件发到 `project_events`，由 `_project_events` 收。
@@ -218,6 +221,7 @@ impl WindowView {
                 }
             }
         });
+        let config_watch = cx.observe_global::<AppConfig>(|_, cx| cx.notify());
         persistence::track(cx);
         Self {
             workspaces: Vec::new(),
@@ -240,6 +244,7 @@ impl WindowView {
             emptied: false,
             _bounds_watch: bounds_watch,
             _activation_watch: activation_watch,
+            _config_watch: config_watch,
             _project_poll: project_poll,
             project_watch: None,
             project_events,

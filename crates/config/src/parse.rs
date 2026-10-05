@@ -23,6 +23,7 @@ use crate::{
 pub(crate) const KEYS: &[&[&str]] = &[
     &["language"],
     &["font-family", "font-size", "adjust-cell-height", "window-padding-x", "window-padding-y"],
+    &["file-tree-font-size"],
     &[
         "theme",
         "background",
@@ -154,6 +155,13 @@ impl Config {
             }
             "window-padding-y" => {
                 self.window_padding_y = if empty { defaults.window_padding_y } else { parse_pair(value)? };
+            }
+            "file-tree-font-size" => {
+                self.file_tree_font_size = if empty {
+                    defaults.file_tree_font_size
+                } else {
+                    Some(parse_f32(value)?).filter(|size| *size > 0.).ok_or("expected a positive number")?
+                };
             }
             "cursor-style" => {
                 self.cursor_style = match value {
@@ -442,6 +450,15 @@ unknown-key = whatever
         let config = load(&["font-size = 20\nfont-size =\ncursor-style = triangle"]);
         assert_eq!(config.font_size, Config::default().font_size);
         assert_eq!(config.cursor_style, CursorStyle::Block);
+    }
+
+    #[test]
+    fn file_tree_font_size_takes_positive_numbers() {
+        assert_eq!(Config::default().file_tree_font_size, 14.);
+        assert_eq!(load(&["file-tree-font-size = 15"]).file_tree_font_size, 15.);
+        // 不是正数的跳过，保留前面的值。
+        assert_eq!(load(&["file-tree-font-size = 15\nfile-tree-font-size = 0"]).file_tree_font_size, 15.);
+        assert_eq!(load(&["file-tree-font-size = -3"]).file_tree_font_size, 14.);
     }
 
     #[test]
