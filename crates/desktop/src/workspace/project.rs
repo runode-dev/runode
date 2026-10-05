@@ -20,7 +20,7 @@ use runode_git_status::FileStatus;
 use runode_shared_types::color::Rgb;
 
 use super::{
-    DIVIDER_GRAB_WIDTH, Divider, TITLEBAR_HEIGHT, ToggleChanges, ToggleFiles, WindowView, drag_window,
+    DIVIDER_GRAB_WIDTH, Divider, TITLEBAR_HEIGHT, ToggleChanges, ToggleFiles, WindowView, divider_color, drag_window,
     titlebar::icon_toggle,
 };
 use crate::{
@@ -56,10 +56,10 @@ const PREVIEW_MIN_WIDTH: f32 = 240.;
 /// 右侧面板再宽也给终端区留这么宽。
 const MAIN_MIN_WIDTH: f32 = 240.;
 /// 标题栏右上角开关按钮的尺寸和间距。
-const TOGGLE_WIDTH: f32 = 24.;
-const TOGGLE_HEIGHT: f32 = 20.;
-const TOGGLE_GAP: f32 = 2.;
-const TOGGLE_MARGIN: f32 = 8.;
+const TOGGLE_WIDTH: f32 = 28.;
+const TOGGLE_HEIGHT: f32 = 24.;
+const TOGGLE_GAP: f32 = 4.;
+const TOGGLE_MARGIN: f32 = 10.;
 /// 右侧面板都收着时标题栏右边给开关按钮让出的宽度。
 pub(super) const PANEL_TOGGLES_INSET: f32 = TOGGLE_WIDTH * 2. + TOGGLE_GAP + TOGGLE_MARGIN + 6.;
 
@@ -392,7 +392,7 @@ impl WindowView {
             .items_center()
             .gap(px(8.))
             .border_b_1()
-            .border_color(hsla(fg).opacity(0.12))
+            .border_color(divider_color(hsla(fg)))
             .on_mouse_down(MouseButton::Left, drag_window)
     }
 }
@@ -412,5 +412,5 @@ pub(super) fn panel_shell(id: &'static str, width: f32, fg: Rgb) -> Stateful<Div
         .flex()
         .flex_col()
         .border_l_1()
-        .border_color(hsla(fg).opacity(0.12))
+        .border_color(divider_color(hsla(fg)))
 }

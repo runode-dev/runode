@@ -16,7 +16,7 @@ use std::{
 };
 
 use gpui::{
-    Action, AnyElement, Context, Div, Focusable, Hsla, MouseButton, MouseDownEvent, Pixels, Render, ScrollStrategy,
+    Action, AnyElement, Axis, Context, Div, Focusable, Hsla, MouseButton, MouseDownEvent, Pixels, Render, ScrollStrategy,
     SharedString, Stateful, Window, actions, div, img, prelude::*, px, svg, uniform_list,
 };
 use runode_config::PreviewClick;
@@ -37,6 +37,7 @@ use crate::{
     },
     config::AppConfig,
     file_icons::{file_icon, folder_icon},
+    scrollbar::scrollbar,
     search_bar::Cut,
     terminal_view::{Copy, Paste, hsla},
     tooltip::tooltip,
@@ -85,7 +86,9 @@ const INDENT: f32 = 12.;
 /// 行的左边距。
 const ROW_PADDING: f32 = 4.;
 /// 标题下面那行工具栏的高度。
-const TOOLBAR_HEIGHT: f32 = 28.;
+const TOOLBAR_HEIGHT: f32 = 32.;
+/// 工具栏按钮的边长。
+const TOOLBAR_BUTTON_SIZE: f32 = 24.;
 /// 剪切下来等着粘贴的行画得淡一些。
 const CUT_OPACITY: f32 = 0.5;
 
@@ -158,7 +161,7 @@ impl WindowView {
         let button = |id, icon, on, text: Cow<'static, str>, action: Option<&dyn Action>, handler: Handler, cx: &mut Context<Self>| {
             icon_toggle(id, icon, 14., on, fg, bg)
                 .flex_none()
-                .size(px(20.))
+                .size(px(TOOLBAR_BUTTON_SIZE))
                 .tooltip(tooltip(text, action, fg, bg))
                 .on_mouse_down(
                     MouseButton::Left,
@@ -195,13 +198,11 @@ impl WindowView {
             .items_center()
             .gap(px(6.))
             .text_size(px(12.))
-            .border_b_1()
-            .border_color(hsla(fg).opacity(0.12))
             .when_some(dirty, |toolbar, git| {
                 toolbar.child(added_label(git.added())).child(removed_label(git.removed()))
             })
             .child(div().flex_1())
-            .child(div().flex().gap(px(2.)).child(new_file).child(new_folder).child(collapse_all).child(ignored_toggle));
+            .child(div().flex().gap(px(4.)).child(new_file).child(new_folder).child(collapse_all).child(ignored_toggle));
         let font_size = cx.global::<AppConfig>().0.file_tree_font_size;
         let new_entry = self.new_entry_row();
         let count = workspace.project.file_rows.len() + usize::from(new_entry.is_some());
@@ -214,7 +215,7 @@ impl WindowView {
             }),
         )
         .track_scroll(&workspace.project.files_scroll)
-        .flex_1()
+        .size_full()
         .p(px(4.))
         // 点在行下面的空白处：取消选中，右键弹出对根目录的菜单。
         .on_mouse_down(
@@ -233,6 +234,13 @@ impl WindowView {
                 this.open_file_menu(event.position, cx);
             }),
         );
+        let scroll = workspace.project.files_scroll.0.borrow().base_handle.clone();
+        let list = div()
+            .flex_1()
+            .min_h_0()
+            .relative()
+            .child(list)
+            .child(scrollbar("files-scroll", scroll, Axis::Vertical, hsla(fg)));
         panel_shell("files-panel", width, fg)
             // 新建或改名时输入框在文件树里面，方向键这些归输入框。
             .key_context(if self.file_edit.is_some() { "FileTree editing" } else { "FileTree" })

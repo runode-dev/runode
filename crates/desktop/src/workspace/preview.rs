@@ -19,24 +19,25 @@ use std::{
 };
 
 use gpui::{
-    Action, AnyElement, App, ClipboardItem, Context, Div, Focusable as _, FontStyle, FontWeight, HighlightStyle, Hsla,
+    Action, AnyElement, App, Axis, ClipboardItem, Context, Div, Focusable as _, FontStyle, FontWeight, HighlightStyle, Hsla,
     Image, ImageSource, ListHorizontalSizingBehavior, MouseButton, MouseDownEvent, MouseMoveEvent, Pixels, Point,
     ScrollHandle, SharedString, Stateful, StyledText, UniformListScrollHandle, Window, actions, div, img, prelude::*,
-    px, uniform_list,
+    linear_color_stop, linear_gradient, px, uniform_list,
 };
 use runode_git_status::{self as git, FileStatus, LineKind, Section};
 use runode_preview::{Content, ImageFormat, Span};
 use runode_shared_types::{color::Rgb, theme};
 
 use super::{
-    CloseTab, TITLEBAR_HEIGHT, WindowView,
+    CloseTab, TITLEBAR_HEIGHT, WindowView, divider_color,
     files::menu_item,
-    project::{ADDED, MODIFIED, REMOVED, RENAMED, panel_message, panel_shell, status_color},
+    project::{ADDED, MODIFIED, PANEL_TOGGLES_INSET, REMOVED, RENAMED, panel_message, panel_shell, status_color},
     titlebar::{close_button, drag_chip},
 };
 use crate::{
     config::AppConfig,
     file_icons::file_icon,
+    scrollbar::scrollbar,
     terminal_view::{Copy, SelectAll, hsla},
     tooltip::tooltip,
 };
@@ -65,6 +66,17 @@ const REMOVED_MARK_HEIGHT: f32 = 5.;
 const TAB_MAX_WIDTH: f32 = 180.;
 /// 拖动预览标签时跟着鼠标的卡片宽度。
 const DRAG_CHIP_WIDTH: f32 = 140.;
+/// 当前标签顶上那条强调色细线的粗细。
+const TAB_ACCENT_HEIGHT: f32 = 2.;
+/// 正文上下留的空。
+const BODY_PADDING: f32 = 6.;
+/// 长行右边缘渐隐的宽度。
+const FADE_WIDTH: f32 = 24.;
+
+/// 标签条底下的分隔线，叠在不是当前标签的标签和标签后面的空白底部。
+fn tab_underline(fg: Rgb) -> Div {
+    div().absolute().bottom_0().left_0().w_full().h(px(1.)).bg(divider_color(hsla(fg)))
+}
 
 /// 预览栏的标签：一个文件一个，没固定的临时标签最多一个。没有标签时预览栏不显示。不进存档。
 #[derive(Default)]
@@ -735,7 +747,15 @@ impl WindowView {
             .overflow_x_scroll()
             .track_scroll(&previews.scroll)
             .children((0..previews.tabs.len()).map(|ix| self.render_preview_tab(ix, fg, bg, cx)).collect::<Vec<_>>());
-        let header = self.panel_header(rightmost, fg).pl_0().child(strip);
+        // 标签下面那条分隔线由各个标签和后面的空白各画一段，当前标签底下空着，和正文连在一起。
+        // 预览栏在最右边时，空白至少留出右上角面板开关的宽度，标签不钻到开关底下。
+        let filler = div()
+            .flex_1()
+            .min_w(px(if rightmost { PANEL_TOGGLES_INSET } else { 0. }))
+            .h_full()
+            .relative()
+            .child(tab_underline(fg));
+        let header = self.panel_header(false, fg).border_b_0().px_0().gap_0().child(strip).child(filler);
         let body: AnyElement = match &preview.content {
             None => div().flex_1().into_any_element(),
             Some(Loaded::Note(note)) => {
@@ -760,7 +780,7 @@ impl WindowView {
                 let digits = lines.len().to_string().len();
                 // 行号一栏按位数定宽，等宽字体一个数字大约 0.6 个字号宽。
                 let gutter = (digits as f32 * font_size * 0.62 + 16.).ceil();
-                uniform_list(
+                let list = uniform_list(
                     "preview",
                     count,
                     cx.processor(move |this, range: Range<usize>, _, cx| this.render_preview_rows(range, font_size, gutter, fg, bg, cx)),
@@ -768,9 +788,28 @@ impl WindowView {
                 .with_width_from_item(Some(*widest))
                 .with_horizontal_sizing_behavior(ListHorizontalSizingBehavior::Unconstrained)
                 .track_scroll(&preview.scroll)
-                .flex_1()
-                .font_family(font)
-                .into_any_element()
+                .size_full()
+                .py(px(BODY_PADDING))
+                .font_family(font);
+                let handle = preview.scroll.0.borrow().base_handle.clone();
+                // 长行往右还有内容时，右边缘渐隐，提示能横着滚。
+                let (offset, max) = (handle.offset().x, handle.max_offset().x);
+                let fade = (max > px(1.) && -offset < max - px(1.)).then(|| {
+                    div().absolute().top_0().right_0().h_full().w(px(FADE_WIDTH)).bg(linear_gradient(
+                        90.,
+                        linear_color_stop(hsla(bg).opacity(0.), 0.),
+                        linear_color_stop(hsla(bg), 1.),
+                    ))
+                });
+                div()
+                    .flex_1()
+                    .min_h_0()
+                    .relative()
+                    .child(list)
+                    .children(fade)
+                    .child(scrollbar("preview-scroll-y", handle.clone(), Axis::Vertical, hsla(fg)))
+                    .child(scrollbar("preview-scroll-x", handle, Axis::Horizontal, hsla(fg)))
+                    .into_any_element()
             }
         };
         Some(
@@ -801,6 +840,7 @@ impl WindowView {
         let name = tab.name();
         let active_bg = hsla(bg.mix(fg, 0.08));
         let hover_bg = hsla(bg.mix(fg, 0.04));
+        let underline = tab_underline(fg);
         let close_tooltip = tooltip(rust_i18n::t!("tooltip.close_preview"), None, fg, bg);
         let path_tooltip = tooltip(SharedString::from(tab.path.display().to_string()), None, fg, bg);
         let fg = hsla(fg);
@@ -818,9 +858,17 @@ impl WindowView {
             .flex()
             .items_center()
             .gap(px(6.))
+            .relative()
             .border_r_1()
-            .border_color(fg.opacity(0.12))
-            .map(|tab| if active { tab.bg(active_bg) } else { tab.hover(|tab| tab.bg(hover_bg)) })
+            .border_color(divider_color(fg))
+            // 当前标签顶上一条强调色，底下不画分隔线，和正文连成一块；别的标签悬停时稍亮。
+            .map(|tab| {
+                if active {
+                    tab.child(div().absolute().top_0().left_0().w_full().h(px(TAB_ACCENT_HEIGHT)).bg(hsla(RENAMED)))
+                } else {
+                    tab.hover(|tab| tab.bg(hover_bg)).child(underline)
+                }
+            })
             .child(img(file_icon(&name)).flex_none().size(px(14.)).when(!active, |icon| icon.opacity(0.6)))
             .child(
                 div()

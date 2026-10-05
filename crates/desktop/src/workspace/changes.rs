@@ -11,7 +11,7 @@ use runode_git_status::{LineKind, Section};
 use runode_shared_types::color::Rgb;
 
 use super::{
-    WindowView,
+    WindowView, divider_color,
     project::{ADDED, DiffNote, DiffRow, REMOVED, added_label, panel_message, panel_shell, removed_label, status_color},
 };
 use crate::{
@@ -21,7 +21,7 @@ use crate::{
 };
 
 /// 每一行的高度：文件、块头和改动的行一样高，列表才能只画看得见的部分。
-const ROW_HEIGHT: f32 = 20.;
+const ROW_HEIGHT: f32 = 24.;
 /// 行号一栏的宽度，五位数的行号也放得下。
 const LINE_NUMBER_WIDTH: f32 = 44.;
 /// 分段、目录分组和文件每深一层往右缩进的宽度。
@@ -121,7 +121,7 @@ impl WindowView {
                     };
                     header(("diff-section", ix), 0., 0.08)
                         .border_t_1()
-                        .border_color(hsla(fg).opacity(0.10))
+                        .border_color(divider_color(hsla(fg)))
                         .child(chevron(project.section_expanded(section)))
                         .child(div().flex_none().font_weight(gpui::FontWeight::SEMIBOLD).child(label.into_owned()))
                         .child(div().flex_none().text_color(dim).child(count.to_string()))

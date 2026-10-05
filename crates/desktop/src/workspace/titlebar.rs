@@ -11,7 +11,7 @@ use runode_shared_types::{
 
 use super::{
     AGENT_MARK_WIDTH, NEW_TAB_BUTTON_WIDTH, NewTab, SelectLastTab, SelectTab, TAB_CLOSE_SIZE, TITLEBAR_HEIGHT,
-    TRAFFIC_LIGHTS_ORIGIN, WindowView, model::TabId,
+    TRAFFIC_LIGHTS_ORIGIN, WindowView, divider_color, model::TabId,
 };
 use crate::{
     terminal_view::{DEFAULT_TITLE, hsla},
@@ -103,7 +103,7 @@ pub(super) fn icon_toggle(
     bg: Rgb,
 ) -> Stateful<Div> {
     let hover_bg = hsla(bg.mix(fg, 0.10));
-    let active_bg = hsla(bg.mix(fg, 0.14));
+    let active_bg = hsla(bg.mix(fg, 0.07));
     let fg = hsla(fg);
     div()
         .id(id)
@@ -210,7 +210,7 @@ impl WindowView {
         let divider = if active || ix == workspace.active + 1 {
             fg.opacity(0.)
         } else {
-            fg.opacity(0.12)
+            divider_color(fg)
         };
         let dragged = DraggedTab {
             id,
@@ -341,7 +341,7 @@ impl WindowView {
             .items_center()
             .justify_center()
             .border_l_1()
-            .border_color(fg.opacity(0.12))
+            .border_color(divider_color(fg))
             .text_size(px(16.))
             .text_color(fg.opacity(0.55))
             .hover(|button| button.bg(hover_bg).text_color(fg))

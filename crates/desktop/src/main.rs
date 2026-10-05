@@ -11,6 +11,7 @@ mod keys;
 mod menus;
 mod persist;
 mod prespawn;
+mod scrollbar;
 mod search_bar;
 mod sprites;
 mod terminal_view;

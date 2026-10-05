@@ -8,7 +8,7 @@ use runode_shared_types::color::Rgb;
 
 use super::{
     AGENT_MARK_WIDTH, DIVIDER_GRAB_WIDTH, Divider, NewWorkspace, RenameWorkspace, Renaming, SelectLastWorkspace,
-    SelectWorkspace, TAB_CLOSE_SIZE, TITLEBAR_HEIGHT, TRAFFIC_LIGHTS_WIDTH, ToggleSidebar, WindowView, drag_window,
+    SelectWorkspace, TAB_CLOSE_SIZE, TITLEBAR_HEIGHT, TRAFFIC_LIGHTS_WIDTH, ToggleSidebar, WindowView, divider_color, drag_window,
     inline_edit::InlineEdit,
     model::{WorkspaceId, display_dir},
     titlebar::{agent_mark, close_button, drag_chip, icon_toggle, shortcut_hint},
@@ -25,10 +25,10 @@ const SIDEBAR_WIDTH: f32 = 200.;
 const SIDEBAR_MIN_WIDTH: f32 = 140.;
 const SIDEBAR_MAX_WIDTH: f32 = 480.;
 /// 红绿灯右边收起、展开侧栏的按钮。
-const SIDEBAR_TOGGLE_WIDTH: f32 = 24.;
-const SIDEBAR_TOGGLE_HEIGHT: f32 = 20.;
+const SIDEBAR_TOGGLE_WIDTH: f32 = 28.;
+const SIDEBAR_TOGGLE_HEIGHT: f32 = 24.;
 /// 侧栏收着时标题栏左边让出的宽度：红绿灯和开关按钮，再空一点才到标签，图标离两边差不多远。
-pub(super) const SIDEBAR_TOGGLE_INSET: f32 = TRAFFIC_LIGHTS_WIDTH + SIDEBAR_TOGGLE_WIDTH + 6.;
+pub(super) const SIDEBAR_TOGGLE_INSET: f32 = TRAFFIC_LIGHTS_WIDTH + SIDEBAR_TOGGLE_WIDTH + 8.;
 /// 每个 workspace 一行：名字和目录各占一行。
 const ROW_HEIGHT: f32 = 40.;
 /// 改名输入框的高度。
@@ -126,7 +126,7 @@ impl WindowView {
             .flex_col()
             .bg(hsla(bg.mix(fg, 0.03)))
             .border_r_1()
-            .border_color(hsla(fg).opacity(0.12))
+            .border_color(divider_color(hsla(fg)))
             .text_size(px(12.))
             // 顶上这条放红绿灯，和标题栏一样能拖动窗口、双击缩放，比标题栏多留一点，第一行
             // 不贴着红绿灯；全屏时没有红绿灯。

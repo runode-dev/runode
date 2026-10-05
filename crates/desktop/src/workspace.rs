@@ -105,16 +105,16 @@ pub struct ResizePane(pub Direction);
 
 /// 透明标题栏的高度：终端内容从它下面开始，这一条用来拖动窗口，多个标签时也画在这里；
 /// 显示侧栏时红绿灯落在侧栏顶上。
-const TITLEBAR_HEIGHT: f32 = 28.;
+const TITLEBAR_HEIGHT: f32 = 36.;
 /// 红绿灯按钮的直径。
 const TRAFFIC_LIGHT_SIZE: f32 = 14.;
 /// 红绿灯按钮的位置，竖直方向在标题栏里居中，和标签文字对齐；以及标题栏左侧给它们留出的宽度。
-const TRAFFIC_LIGHTS_ORIGIN: (f32, f32) = (12., (TITLEBAR_HEIGHT - TRAFFIC_LIGHT_SIZE) / 2.);
-const TRAFFIC_LIGHTS_WIDTH: f32 = 78.;
+const TRAFFIC_LIGHTS_ORIGIN: (f32, f32) = (14., (TITLEBAR_HEIGHT - TRAFFIC_LIGHT_SIZE) / 2.);
+const TRAFFIC_LIGHTS_WIDTH: f32 = 84.;
 /// 标签上关闭按钮的边长。
 const TAB_CLOSE_SIZE: f32 = 16.;
 /// 标签栏最右边新建标签按钮的宽度。
-const NEW_TAB_BUTTON_WIDTH: f32 = 28.;
+const NEW_TAB_BUTTON_WIDTH: f32 = TITLEBAR_HEIGHT;
 /// 标签最窄的宽度；标签多到挤不下时标签条改为横向滚动。
 const TAB_MIN_WIDTH: f32 = 64.;
 /// 标签最宽的宽度；标签少时不再拉宽，靠左排开，后面紧跟新建标签按钮。
@@ -123,6 +123,11 @@ const TAB_MAX_WIDTH: f32 = 200.;
 const AGENT_MARK_WIDTH: f32 = 12.;
 /// 分隔线两侧可以按住拖动的宽度。
 const DIVIDER_GRAB_WIDTH: f32 = 6.;
+
+/// 面板之间、标题下面和标签之间这些分隔线的颜色：前景色调淡，各处一样深。
+fn divider_color(fg: gpui::Hsla) -> gpui::Hsla {
+    fg.opacity(0.09)
+}
 
 /// 在标题栏这类能拖动窗口的地方按下鼠标：双击缩放窗口，否则开始拖动窗口。
 fn drag_window(event: &MouseDownEvent, window: &mut Window, _: &mut App) {
@@ -390,7 +395,7 @@ impl Render for WindowView {
                         .collect::<Vec<_>>(),
                 );
             let inset = div().id("panel-toggles-inset").flex_none().w(px(right_inset)).h_full().when(right_inset > 0., |inset| {
-                inset.border_l_1().border_color(hsla(fg).opacity(0.12))
+                inset.border_l_1().border_color(divider_color(hsla(fg)))
             });
             let spacer = div().id("tabs-spacer").flex_1().h_full();
             vec![strip, self.render_new_tab_button(fg, bg, cx), spacer, inset]
@@ -425,7 +430,7 @@ impl Render for WindowView {
                 // 给红绿灯和侧栏开关让出的位置；后面跟着标签时右边画一条分隔线，和新建标签按钮
                 // 左边那条对称。
                 .child(div().flex_none().w(px(left_inset)).h_full().when(show_tabs && left_inset > 0., |inset| {
-                    inset.border_r_1().border_color(hsla(fg).opacity(0.12))
+                    inset.border_r_1().border_color(divider_color(hsla(fg)))
                 }))
                 .children(tabs)
         });
