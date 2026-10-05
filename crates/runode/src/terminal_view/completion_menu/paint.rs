@@ -21,7 +21,10 @@ use runode_model::{
     frame::{Attrs, Frame},
 };
 
-use super::super::{Metrics, TerminalView, faint, hsla, paint_glyphs};
+use super::super::{
+    Metrics, TerminalView, hsla,
+    paint::{faint, paint_glyphs},
+};
 
 /// 名字一列最宽占终端宽度的这么多（百分比）。
 const NAME_COLUMN_PERCENT: usize = 40;
