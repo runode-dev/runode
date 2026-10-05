@@ -1,5 +1,7 @@
 //! 单个终端会话的 GPUI 视图：输入分发和单元格绘制。
 
+mod completion_menu;
+
 use std::{
     collections::HashMap,
     ops::Range,
@@ -22,7 +24,7 @@ use libghostty_vt::{key::Mods, mouse, selection::Adjustment};
 use crate::{
     agent::Agent,
     config::{AppConfig, CellHeight, Config},
-    keys,
+    history, keys,
     prespawn::Prespawned,
     pty::{GridSize, PtyEvent},
     search_bar::{
@@ -35,6 +37,7 @@ use crate::{
     },
     sprites,
 };
+use completion_menu::{CompletionMenu, PendingKey};
 
 actions!(
     runode,
@@ -109,6 +112,16 @@ const FOREGROUND_REFRESH_INTERVAL: Duration = Duration::from_millis(50);
 const AUTOSCROLL_INTERVAL: Duration = Duration::from_millis(15);
 /// 光标闪烁时亮、灭各持续的时长。
 const CURSOR_BLINK_INTERVAL: Duration = Duration::from_millis(600);
+/// 发出输入后最多等这么久的回显；在那之前屏幕上的输入可能还没更新，不接受按旧屏幕算出的建议。
+const ECHO_WAIT: Duration = Duration::from_millis(200);
+
+/// 显示着的灰字建议。
+struct Suggestion {
+    /// 接在光标后面、还没输入的那部分。
+    rest: String,
+    /// 算它时读屏幕的时刻。
+    read_at: Instant,
+}
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct Metrics {
@@ -153,6 +166,20 @@ pub struct TerminalView {
     /// 程序开着鼠标上报时，精确滚动（触控板）不足一行的余量；滚回滚历史时余量由
     /// `Session::scroll_smoothly` 记着，画成平滑滚动。
     scroll_remainder: f32,
+    /// 按命令历史给出的灰字建议，画在光标后面。
+    suggestion: Option<Suggestion>,
+    suggester: history::Suggester,
+    /// 有了新输出或配置变了，屏幕上的输入可能变了，下次绘制前重读，见 `refresh_suggestion`。
+    input_changed: bool,
+    /// 上次查建议时命令历史的版本，历史变了也要重查。
+    history_generation: u64,
+    /// 按 Tab 弹出的命令补全菜单。
+    completion: Option<CompletionMenu>,
+    /// 回显之前按下、等着处理的补全键，以及等回显的计时器。
+    completion_pending: Option<PendingKey>,
+    _completion_wait: Option<Task<()>>,
+    /// 最近一次收到输出的时刻，用来判断刚发出的输入回显了没有。
+    output_at: Option<Instant>,
     /// 光标单元格上次绘制的位置，供输入法候选窗定位。
     cursor_bounds: Option<Bounds<Pixels>>,
     /// 单元格网格的原点，用于把指针位置换算成单元格；平滑滚动错开时是错开后的位置。
@@ -279,6 +306,13 @@ impl TerminalView {
                         if view.session.feed(&output) || fallback_changed {
                             cx.emit(TerminalEvent::TitleChanged);
                         }
+                        // 关掉建议时也取走，只是不记。
+                        let commands = view.session.take_commands();
+                        if view.config.command_suggestions {
+                            commands.into_iter().for_each(history::record);
+                        }
+                        view.input_changed = true;
+                        view.completion_output(cx);
                         if was_working && !view.session.agent.is_some_and(Agent::is_working) {
                             cx.emit(TerminalEvent::AgentFinished);
                         }
@@ -385,12 +419,17 @@ impl TerminalView {
             // 字体、字号或行高调整都可能变了，单元格尺寸和字形缓存一律作废。
             view.metrics = None;
             view.glyphs.iter_mut().for_each(HashMap::clear);
+            view.input_changed = true;
             cx.notify();
         });
         let appearance_watch =
             cx.observe_window_appearance(window, |_, _, cx| crate::config::follow_appearance(cx));
 
         let foreground_poll = session.started().then(|| Self::poll_foreground(cx));
+        // 第一次用到时开始在后台读命令历史，开着建议时现在就读起来。
+        if config.command_suggestions {
+            history::load_in_background();
+        }
 
         let focus_handle = cx.focus_handle();
         let pane_focus = cx.focus_handle();
@@ -399,7 +438,11 @@ impl TerminalView {
             cx.on_focus(&focus_handle, window, |view, window, cx| {
                 view.reset_cursor_blink(window, cx);
             }),
-            cx.on_blur(&focus_handle, window, |view, _, _| view._cursor_blink = None),
+            cx.on_blur(&focus_handle, window, |view, _, _| {
+                view._cursor_blink = None;
+                // 失焦时补全菜单也关掉。
+                view.completion = None;
+            }),
         ];
 
         Self {
@@ -411,6 +454,14 @@ impl TerminalView {
             metrics: None,
             glyphs: Default::default(),
             marked_text: None,
+            suggestion: None,
+            suggester: Default::default(),
+            input_changed: true,
+            history_generation: 0,
+            completion: None,
+            completion_pending: None,
+            _completion_wait: None,
+            output_at: None,
             scroll_remainder: 0.,
             cursor_bounds: None,
             grid_origin: Point::default(),
@@ -561,6 +612,29 @@ impl TerminalView {
             cx.notify();
             return;
         }
+        // 补全菜单开着时的上下选择、接受和关闭，以及由 runode 接管的 Tab。这些键没有默认快捷键，
+        // 会走到这里。
+        if self.completion_key(keystroke, cx) {
+            cx.stop_propagation();
+            cx.notify();
+            return;
+        }
+        // 光标在输入末尾、后面画着建议时：→、End、Ctrl+F 接受整条，Option+→ 接受一个词。
+        // 默认快捷键把 Option+→ 映射成了 ESC f，那条路在 `send_text` 里处理。
+        let m = &keystroke.modifiers;
+        let accept = match keystroke.key.as_str() {
+            "right" | "end" if !m.modified() => Some(false),
+            "f" if m.control && !m.alt && !m.shift && !m.platform => Some(false),
+            "right" if m.alt && !m.control && !m.shift && !m.platform => Some(true),
+            _ => None,
+        };
+        if let Some(word) = accept
+            && self.accept_suggestion(word)
+        {
+            cx.stop_propagation();
+            cx.notify();
+            return;
+        }
         let Some(input) = keys::translate(&event.keystroke) else {
             return;
         };
@@ -571,6 +645,10 @@ impl TerminalView {
     }
 
     fn scroll_wheel(&mut self, event: &ScrollWheelEvent, _: &mut Window, cx: &mut Context<Self>) {
+        // 滚在补全菜单上：上下移动选中项，不滚终端。
+        if self.completion_scroll(event, cx) {
+            return;
+        }
         let Some(metrics) = self.metrics else {
             return;
         };
@@ -611,6 +689,10 @@ impl TerminalView {
         window.focus(&self.focus_handle, cx);
         // 激活窗口的那一下只用来激活，不选择也不上报。
         if event.first_mouse {
+            return;
+        }
+        // 点在补全菜单上：接受点到的候选，不选择也不上报。
+        if self.completion_click(event, cx) {
             return;
         }
         let Some(at) = self.grid_point(event.position) else {
@@ -951,8 +1033,77 @@ impl TerminalView {
     }
 
     fn send_text(&mut self, action: &SendText, _: &mut Window, cx: &mut Context<Self>) {
-        self.session.send_text(action.0.as_bytes());
+        // 有建议时，跳到行尾（Ctrl-E，默认的 ⌘→）接受整条，按词前进（ESC f，默认的 Option+→）
+        // 接受一个词：光标已经在输入末尾，这两个键原本也没有别的效果。
+        let accepted = match action.0.as_str() {
+            "\x05" => self.accept_suggestion(false),
+            "\x1bf" => self.accept_suggestion(true),
+            _ => false,
+        };
+        if !accepted {
+            self.session.send_text(action.0.as_bytes());
+        }
         cx.notify();
+    }
+
+    /// 屏幕上的输入或命令历史变了时重查建议；输入没变就沿用上次的结果。在绘制前调用。
+    fn refresh_suggestion(&mut self) {
+        if !self.config.command_suggestions {
+            self.suggestion = None;
+            return;
+        }
+        let generation = history::shared().generation();
+        if !self.input_changed && generation == self.history_generation {
+            return;
+        }
+        self.input_changed = false;
+        self.history_generation = generation;
+        // 光标后面还有字（包括插件自己画的建议）时不给建议，免得叠在一起。
+        let Some(input) = self.session.prompt_input().filter(|input| input.at_end) else {
+            self.suggestion = None;
+            return;
+        };
+        let cwd = self.session.prompt_cwd();
+        let rest = self.suggester.suggest(&history::shared(), input.before_cursor(), cwd.as_deref());
+        self.suggestion = rest.map(|rest| Suggestion { rest, read_at: Instant::now() });
+    }
+
+    /// 现在该画出来的建议：开着输入法组字、有选区、视口没在底部、开着补全菜单时都不画。
+    fn visible_suggestion(&self) -> Option<&Suggestion> {
+        self.suggestion.as_ref().filter(|_| {
+            self.config.command_suggestions
+                && self.completion.is_none()
+                && self.marked_text.is_none()
+                && !self.session.has_selection()
+                && self.session.viewport_at_bottom()
+        })
+    }
+
+    /// 接受显示着的建议：整条（`word` 为假）或下一个词，当作普通文字发给 shell，不走粘贴。
+    /// 没有建议，或者刚发出的输入还没回显、建议可能是按旧屏幕算的时候不接受，返回 false。
+    fn accept_suggestion(&mut self, word: bool) -> bool {
+        // 有了新输出还没重画时，先按现在的屏幕重查一次，不接受已经过时的建议。
+        if self.input_changed {
+            self.refresh_suggestion();
+        }
+        // 程序把光标藏起来时建议也不画，同样不接受。
+        if self.session.frame().cursor.is_none() {
+            return false;
+        }
+        let Some(suggestion) = self.visible_suggestion() else {
+            return false;
+        };
+        if self
+            .session
+            .last_input()
+            .is_some_and(|at| at > suggestion.read_at && at.elapsed() < ECHO_WAIT)
+        {
+            return false;
+        }
+        let text = if word { history::next_word(&suggestion.rest) } else { suggestion.rest.as_str() };
+        let text = text.to_owned();
+        self.session.send_text(text.as_bytes());
+        true
     }
 
     fn write_screen_file(&mut self, action: &WriteScreenFile, window: &mut Window, cx: &mut Context<Self>) {
@@ -1074,6 +1225,7 @@ impl Focusable for TerminalView {
 impl Render for TerminalView {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let background = self.session.frame().background;
+        self.check_completion();
         // 搜索栏和终端是兄弟节点，不在 `Terminal` 按键上下文里：在搜索栏里打字时，
         // ⌘← 之类映射给程序的快捷键不能生效。
         let search_bar = self
@@ -1342,9 +1494,12 @@ impl Element for TerminalElement {
                 view.reset_cursor_blink(window, cx);
             }
             let metrics = view.metrics(window);
+            view.refresh_suggestion();
             // 绘制时要同时用到帧和 `&mut view`（字形缓存），所以先把帧取出来，画完再放回。
             let frame = view.session.take_frame();
             paint_frame(view, &frame, bounds.origin, metrics, focused, window);
+            // 补全菜单盖在终端内容上面。
+            view.paint_completion(&frame, metrics, window);
             view.session.restore_frame(frame);
         });
     }
@@ -1489,6 +1644,7 @@ fn paint_frame(
     let filled_cursor = frame.cursor.filter(|c| {
         focused && !cursor_hidden && c.shape == CursorShape::Block && view.marked_text.is_none()
     });
+    let suggestion = view.visible_suggestion().map(|s| s.rest.clone());
 
     let mask = ContentMask { bounds: grid };
     window.with_content_mask(Some(mask), |window| window.paint_layer(grid, |window| {
@@ -1565,6 +1721,33 @@ fn paint_frame(
                 }
                 let line = view.shape(&cell.text, cell.attrs, window);
                 paint_glyphs(&line, position + point(px(0.), baseline), hsla(fg), window);
+            }
+        }
+
+        // 灰字建议：从光标处往右逐字画，不写进屏幕；画到行尾为止，不折行。落在实心光标下的
+        // 那个字和普通文字一样改用光标文字色。
+        if let (Some(cursor), Some(rest)) = (frame.cursor, suggestion.as_deref()) {
+            let dim = faint(frame.foreground, frame.background);
+            let mut x = cursor.x;
+            for c in rest.chars() {
+                let width = u16::from(libghostty_vt::unicode::codepoint_width(c));
+                if width == 0 {
+                    continue;
+                }
+                if x + width > frame.cols {
+                    break;
+                }
+                let color = match filled_cursor {
+                    Some(filled) if filled.x == x && filled.y == cursor.y => filled.text,
+                    _ => dim,
+                };
+                if c != ' ' {
+                    let mut buf = [0; 4];
+                    let line = view.shape(c.encode_utf8(&mut buf), Attrs::default(), window);
+                    let position = cell_origin(x, i32::from(cursor.y));
+                    paint_glyphs(&line, position + point(px(0.), baseline), hsla(color), window);
+                }
+                x += width;
             }
         }
     }));

@@ -79,6 +79,22 @@ paste:
 search:
   placeholder: Search
   no_results: No results
+completion:
+  loading: Loading…
+  no_matches: No matches
+  group:
+    command: external command
+    alias: alias
+    function: shell function
+    builtin: builtin command
+    keyword: reserved word
+    subcommand: subcommand
+    option: option
+    value: argument
+    generated: dynamic value
+    folder: directory
+    file: file
+    named: "%{group}: %{name}"
 config:
   header: |-
     runode configuration file. Syntax and key names are the same as Ghostty's.
@@ -122,6 +138,8 @@ config:
   cursor_style_blink: "Cursor blinking: true, false; empty blinks by default, and running programs can still change it."
   macos_option_as_alt: "Treat Option as Alt on macOS: true (both sides), false, left (left only), right (right only)."
   shell_integration: "Shell integration: detect (by the shell's program name), none (off), bash, zsh, fish."
+  command_suggestions: "Suggest a command from the history in gray after the cursor while typing at the shell prompt; accept it with → or End, one word with Option+→. false also stops reading and recording the command history."
+  command_completions: "Press Tab at the shell prompt to pick a command name, subcommand, option or argument from a menu (arguments only for commands runode has a spec for); when there is nothing to offer, Tab goes to the shell. false always sends Tab to the shell."
   config_file: |-
     Include another configuration file: a path, relative to this file's directory, ~/ for the home
     directory; prefix it with ? if the file may not exist. Can be repeated.

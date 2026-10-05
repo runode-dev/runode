@@ -29,13 +29,16 @@ use libghostty_vt::{
     terminal::{
         ConformanceLevel, DeviceAttributeFeature, DeviceAttributes, DeviceType, Mode, Point,
         PointCoordinate, PointSpace, PrimaryDeviceAttributes, ProgressState, ScrollViewport,
-        SecondaryDeviceAttributes, SizeReportSize, Terminal,
+        SecondaryDeviceAttributes, SemanticPrompt, SizeReportSize, Terminal, UnknownSequence,
     },
 };
 
 use crate::{
     agent::{self, Agent, AgentKind, AgentState},
+    completion::ShellNames,
     config::{Config, TerminalColor},
+    history,
+    prompt_input::{self, PromptInput},
     pty::{GridSize, Pty, PtyEvent, PtyWriter},
 };
 
@@ -144,6 +147,64 @@ struct Effects {
     bell: StdCell<bool>,
     /// 最近一次 OSC 9;4 进度报告是不是在进行中。
     progress: StdCell<Option<bool>>,
+    /// shell 集成报告的命令步骤，按到达的先后，由 `take_commands` 取走。
+    prompts: RefCell<Vec<PromptEvent>>,
+    /// shell 集成用 `SHELL_REPORT` 报告的 shell 自己的 PATH，见 `Session::shell_path`。
+    shell_path: RefCell<Option<std::ffi::OsString>>,
+    /// shell 集成用 `SHELL_REPORT` 报告的别名、函数、内建命令和关键字，见 `Session::shell_names`。
+    shell_names: RefCell<ShellNames>,
+}
+
+/// shell 集成在显示提示符时、内容和上次报告的不一样时用的私有 OSC：
+/// `ESC ] 6973;<字段>=<百分号编码的值> BEL`。字段是 `path`（PATH）或 `aliases`、`functions`、
+/// `builtins`、`keywords`（名字之间用空格分开）。
+const SHELL_REPORT: &[u8] = b"6973;";
+/// 留给未知 OSC 的最多字节数：函数很多的 shell 报告的函数名能有几十 KB。更长的被截断，
+/// 不采用。
+const UNKNOWN_SEQUENCE_MAX_BYTES: usize = 256 * 1024;
+
+impl Effects {
+    /// 记下 shell 集成的一条报告 `<字段>=<百分号编码的值>`；不认识的字段不管。
+    fn shell_report(&self, report: &[u8]) {
+        let Some(eq) = report.iter().position(|&b| b == b'=') else {
+            return;
+        };
+        let (field, value) = (&report[..eq], percent_decode(&report[eq + 1..]));
+        if field == b"path" {
+            if let Ok(mut path) = self.shell_path.try_borrow_mut() {
+                use std::os::unix::ffi::OsStringExt as _;
+                *path = Some(std::ffi::OsString::from_vec(value));
+            }
+            return;
+        }
+        let Ok(mut names) = self.shell_names.try_borrow_mut() else {
+            return;
+        };
+        if field == b"alias_values" {
+            let text = String::from_utf8_lossy(&value);
+            names.alias_values =
+                text.lines().filter_map(|line| line.split_once('\t')).map(|(n, v)| (n.to_owned(), v.to_owned())).collect();
+            return;
+        }
+        let list = match field {
+            b"aliases" => &mut names.aliases,
+            b"functions" => &mut names.functions,
+            b"builtins" => &mut names.builtins,
+            b"keywords" => &mut names.keywords,
+            _ => return,
+        };
+        *list = String::from_utf8_lossy(&value).split_whitespace().map(str::to_owned).collect();
+    }
+}
+
+/// `Effects::prompts` 里的一步。
+enum PromptEvent {
+    /// 提示符画完，shell 等着输入（OSC 133;B）。
+    InputStart,
+    /// 命令开始运行（OSC 133;C），带着从屏幕上读到的命令；没读到时为 `None`。
+    OutputStart(Option<String>),
+    /// 命令运行结束（OSC 133;D），带着退出码。
+    CommandEnd(Option<i32>),
 }
 
 /// 把 libghostty 的 render state 复制进 `Frame`。和 render-hold 回调共用，
@@ -272,6 +333,12 @@ pub struct Session {
     option_as_alt: OptionAsAlt,
     /// 还没启动 shell 时它要从哪个目录开始，见 `unstarted`。
     start_dir: Option<std::path::PathBuf>,
+    /// shell 最近一次等着输入时所在的目录，记命令时当作命令运行的目录。
+    prompt_cwd: Option<std::path::PathBuf>,
+    /// 正在运行、还没报告结束的那条命令。
+    running: Option<history::Entry>,
+    /// 最近一次向程序发输入的时刻，见 `last_input`。
+    input_at: Option<Instant>,
 }
 
 impl Session {
@@ -411,6 +478,39 @@ impl Session {
                     effects.progress.set(Some(active));
                 }
             })?
+            // 命令开始运行的那一刻它还原样留在屏幕上，在这里就读出来，之后的输出可能把它冲掉。
+            // 回调运行在 extern "C" 函数里，不能 panic，所以借用失败时丢掉这一步。
+            .on_semantic_prompt({
+                let effects = effects.clone();
+                move |term, event| {
+                    let event = match event {
+                        SemanticPrompt::InputStart => PromptEvent::InputStart,
+                        SemanticPrompt::OutputStart { command } if !command.is_empty() => {
+                            PromptEvent::OutputStart(Some(String::from_utf8_lossy(command).into_owned()))
+                        }
+                        SemanticPrompt::OutputStart { .. } => PromptEvent::OutputStart(
+                            log_err("read submitted command", prompt_input::submitted_command(term)).flatten(),
+                        ),
+                        SemanticPrompt::CommandEnd { exit_code, .. } => PromptEvent::CommandEnd(exit_code),
+                        _ => return,
+                    };
+                    if let Ok(mut prompts) = effects.prompts.try_borrow_mut() {
+                        prompts.push(event);
+                    }
+                }
+            })?
+            // shell 集成报告的 PATH 和各种名字；别的未知序列不管。回调同样不能 panic。
+            .on_unknown_sequence({
+                let effects = effects.clone();
+                move |_, sequence| {
+                    if let UnknownSequence::Osc { content, truncated: false, .. } = sequence
+                        && let Some(report) = content.strip_prefix(SHELL_REPORT)
+                    {
+                        effects.shell_report(report);
+                    }
+                }
+            })?
+            .set_unknown_sequence_max_bytes(UNKNOWN_SEQUENCE_MAX_BYTES)?
             // RIS 会清空标题，但不会触发标题变化回调。
             .on_reset({
                 let effects = effects.clone();
@@ -467,6 +567,9 @@ impl Session {
             exited: false,
             option_as_alt: OptionAsAlt::False,
             start_dir: None,
+            prompt_cwd: None,
+            running: None,
+            input_at: None,
         })
     }
 
@@ -572,6 +675,78 @@ impl Session {
             return self.start_dir.clone();
         }
         self.pty.shell_cwd()
+    }
+
+    /// 取走 shell 集成报告运行完了的命令，带着运行的目录和退出码，按结束的先后。每次 `feed`
+    /// 之后调用：shell 回到提示符时在这里记下它的目录，之后开始运行的命令就算在那个目录里。
+    pub fn take_commands(&mut self) -> Vec<history::Entry> {
+        let events = self.effects.prompts.take();
+        let mut finished = Vec::new();
+        for event in events {
+            match event {
+                PromptEvent::InputStart => self.prompt_cwd = self.cwd(),
+                PromptEvent::OutputStart(command) => {
+                    self.running = command.map(|command| {
+                        history::Entry::now(command, self.prompt_cwd.clone().or_else(|| self.cwd()))
+                    });
+                }
+                // 有的 shell 每次出提示符都报告一次结束，没在运行的命令时不算。
+                PromptEvent::CommandEnd(exit) => {
+                    if let Some(mut entry) = self.running.take() {
+                        entry.exit = exit;
+                        finished.push(entry);
+                    }
+                }
+            }
+        }
+        finished
+    }
+
+    /// 光标停在 shell 提示符上时正在编辑的那条输入，见 `prompt_input::read`。
+    pub fn prompt_input(&self) -> Option<PromptInput> {
+        log_err("read prompt input", prompt_input::read(&self.terminal)).flatten()
+    }
+
+    /// shell 集成报告的 shell 自己的 PATH（每次显示提示符时 PATH 变了才报告）；还没报告过时
+    /// 为 `None`。补全跑生成器命令时用它，和用户在 shell 里能找到的命令一致。
+    pub fn shell_path(&self) -> Option<std::ffi::OsString> {
+        self.effects.shell_path.borrow().clone()
+    }
+
+    /// shell 集成报告的别名、函数、内建命令和关键字（内容变了才报告）；没报告过的为空。
+    pub fn shell_names(&self) -> ShellNames {
+        self.effects.shell_names.borrow().clone()
+    }
+
+    /// 终端当前的 16 个 ANSI 颜色，跟着主题、配置和程序用 OSC 4 改的颜色走。读不到时用
+    /// 默认前景色代替。
+    pub fn ansi_colors(&self) -> [Rgb; 16] {
+        match self.terminal.color_palette() {
+            Ok(palette) => std::array::from_fn(|i| Rgb::from(palette.0[i])),
+            Err(err) => {
+                tracing::warn!("failed to read the palette: {err}");
+                [self.peek_colors().0; 16]
+            }
+        }
+    }
+
+    /// shell 最近一次等着输入时所在的目录；还没等过输入时现读一次。
+    pub fn prompt_cwd(&self) -> Option<std::path::PathBuf> {
+        self.prompt_cwd.clone().or_else(|| self.cwd())
+    }
+
+    pub fn has_selection(&self) -> bool {
+        self.terminal.selection().is_ok_and(|s| s.is_some())
+    }
+
+    /// 视口停在最底部，没有翻回滚历史，也没有平滑滚动错开的半行。
+    pub fn viewport_at_bottom(&self) -> bool {
+        self.terminal.viewport_active().unwrap_or(false) && self.scroll_offset == 0.
+    }
+
+    /// 最近一次向程序发输入（按键、文本、粘贴等）的时刻；从没发过时为 `None`。
+    pub fn last_input(&self) -> Option<Instant> {
+        self.input_at
     }
 
     /// 重新读取终端的前台进程，返回 `fallback_title` 或 `agent` 是否变化。
@@ -697,6 +872,25 @@ impl Session {
         };
         let mut bytes = arrows;
         bytes.extend(backspace.repeat(count));
+        self.before_input();
+        self.writer.write(&bytes);
+        true
+    }
+
+    /// 改写 shell 正在编辑的输入：先按 `backspace` 下退格，然后把 `text` 当作普通文字写进去
+    /// （不走粘贴），一次发给程序。编码不出退格键时什么也不发，返回 false。
+    pub fn edit_input(&mut self, backspace: usize, text: &str) -> bool {
+        let mut bytes = Vec::new();
+        if backspace > 0 {
+            let Some(key) = self.encode_key(key::Key::Backspace) else {
+                return false;
+            };
+            bytes.extend(key.repeat(backspace));
+        }
+        bytes.extend_from_slice(text.as_bytes());
+        if bytes.is_empty() {
+            return true;
+        }
         self.before_input();
         self.writer.write(&bytes);
         true
@@ -1235,8 +1429,9 @@ impl Session {
         }
     }
 
-    /// 向程序发输入之前：回到最底部，并清掉选区。
+    /// 向程序发输入之前：记下时刻，回到最底部，并清掉选区。
     fn before_input(&mut self) {
+        self.input_at = Some(Instant::now());
         if self.terminal.selection().is_ok_and(|s| s.is_some()) {
             log_err("selection clear", self.terminal.set_selection(None));
         }
@@ -1507,6 +1702,25 @@ impl Renderer {
 }
 
 /// 记日志并吞掉错误：鼠标和选区操作失败时只影响这一下，不该打断输入。
+/// 解开百分号编码；`%` 后面不是两位十六进制数时原样保留。
+fn percent_decode(bytes: &[u8]) -> Vec<u8> {
+    let hex = |b: u8| (b as char).to_digit(16);
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%'
+            && let (Some(hi), Some(lo)) = (bytes.get(i + 1).and_then(|&b| hex(b)), bytes.get(i + 2).and_then(|&b| hex(b)))
+        {
+            out.push((hi * 16 + lo) as u8);
+            i += 3;
+        } else {
+            out.push(bytes[i]);
+            i += 1;
+        }
+    }
+    out
+}
+
 fn log_err<T>(what: &str, result: libghostty_vt::error::Result<T>) -> Option<T> {
     result.inspect_err(|err| tracing::warn!("{what} failed: {err}")).ok()
 }
@@ -1937,6 +2151,64 @@ mod tests {
         session.feed(b"sleep 9\r\n\x1b]133;C\x07");
         // 命令在跑：光标在输出区，不算停在提示符上。
         assert_eq!(session.click_to_move_steps(at(0.5, 1.5)), None);
+    }
+
+    #[test]
+    fn finished_commands_carry_the_prompt_directory_and_exit_code() {
+        let mut session = idle_session();
+        session.feed(PROMPT);
+        assert!(session.take_commands().is_empty());
+        let cwd = session.prompt_cwd();
+        assert_eq!(session.prompt_input().map(|input| input.text), Some(String::new()));
+        session.feed(b"git st");
+        let input = session.prompt_input().unwrap();
+        assert_eq!((input.before_cursor(), input.at_end), ("git st", true));
+        session.feed(b"atus\r\n\x1b]133;C\x07clean\r\n");
+        // 命令还在跑，没有结束报告。
+        assert!(session.take_commands().is_empty());
+        assert_eq!(session.prompt_input(), None);
+        session.feed(b"\x1b]133;D;1\x07");
+        let commands = session.take_commands();
+        assert_eq!(commands.len(), 1);
+        assert_eq!((commands[0].cmd.as_str(), commands[0].exit, &commands[0].cwd), ("git status", Some(1), &cwd));
+        // 没在运行命令时的结束报告（有的 shell 每次出提示符都发）不算。
+        session.feed(b"\x1b]133;D;0\x07");
+        assert!(session.take_commands().is_empty());
+    }
+
+    #[test]
+    fn the_shell_reports_its_path() {
+        let mut session = idle_session();
+        assert_eq!(session.shell_path(), None);
+        session.feed(b"\x1b]6973;path=/usr/bin%3A/opt/my%20bin\x07");
+        assert_eq!(session.shell_path(), Some("/usr/bin:/opt/my bin".into()));
+        // 别的私有 OSC 不算。
+        session.feed(b"\x1b]69730;path=/x\x07\x1b]6973;other=1\x1b\\");
+        assert_eq!(session.shell_path(), Some("/usr/bin:/opt/my bin".into()));
+        // 各种名字，空格编码成 %20；很长的列表也收得下。
+        let functions: Vec<String> = (0..3000).map(|i| format!("function_number_{i}")).collect();
+        let mut report = b"\x1b]6973;functions=".to_vec();
+        report.extend(functions.join("%20").bytes());
+        report.extend(b"\x07\x1b]6973;aliases=ll%20gs\x07\x1b]6973;alias_values=ll%09ls%20-l%0Ags%09git%20status%0A\x07");
+        session.feed(&report);
+        let names = session.shell_names();
+        assert_eq!(names.aliases, ["ll", "gs"]);
+        assert_eq!(names.alias_values, [("ll".into(), "ls -l".into()), ("gs".into(), "git status".into())]);
+        assert_eq!(names.functions, functions);
+        assert!(names.builtins.is_empty());
+        assert_eq!(percent_decode(b"a%2fb%zz%4"), b"a/b%zz%4");
+    }
+
+    #[test]
+    fn the_command_line_sent_by_the_shell_wins_over_the_screen() {
+        let mut session = idle_session();
+        session.feed(PROMPT);
+        // 屏幕上只看得到一部分（比如被插件改写过），shell 报告的原文用百分号编码，分号、
+        // 换行和 ESC 都原样还原。
+        session.feed(b"echo\r\n\x1b]133;C;cmdline_url=echo%20a%3Bb%0Ac%1B\x07\x1b]133;D;0\x07");
+        let commands = session.take_commands();
+        assert_eq!(commands.len(), 1);
+        assert_eq!(commands[0].cmd, "echo a;b\nc\x1b");
     }
 
     #[test]

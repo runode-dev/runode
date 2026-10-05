@@ -36,6 +36,17 @@ enum Slot {
     Text(String),
 }
 
+impl Slot {
+    /// 接到 `text` 后面：空白格算一个空格，占位格不算。
+    fn push_to(&self, text: &mut String) {
+        match self {
+            Slot::Spacer => {}
+            Slot::Blank => text.push(' '),
+            Slot::Text(s) => text.push_str(s),
+        }
+    }
+}
+
 /// 光标正停在 shell 提示符上时，读出提示符后面的输入。备用屏幕上、光标不在提示符上，
 /// 或者光标所在的这条输入里找不到 shell 集成标出的提示符时为 `None`。
 ///
@@ -57,39 +68,30 @@ pub fn read(terminal: &Terminal<'_, '_>) -> Result<Option<PromptInput>> {
         bottom += 1;
     }
 
-    // 各行的单元格按顺序连成一串，同时记下最后一个提示符单元格之后的位置。
+    // 各行的单元格按顺序连成一串，各自记下是不是提示符。
     let mut slots = Vec::with_capacity((bottom - top + 1) as usize * usize::from(cols));
-    let mut start = None;
     for y in top..=bottom {
         for x in 0..cols {
             let grid_ref = terminal.grid_ref(Point::Active(PointCoordinate { x, y }))?;
-            if grid_ref.cell()?.semantic_content()? == CellSemanticContent::Prompt {
-                start = Some(slots.len() + 1);
-            }
-            slots.push(slot(&grid_ref)?);
+            let prompt = grid_ref.cell()?.semantic_content()? == CellSemanticContent::Prompt;
+            slots.push((slot(&grid_ref)?, prompt));
         }
     }
-    let Some(start) = start else {
+    let cursor = (cursor_y - top) as usize * usize::from(cols) + usize::from(cursor_x);
+    // 输入从光标前最后一个提示符单元格之后开始。光标后面的提示符单元格是画在行尾的右侧
+    // 提示符，不算输入，也不挡住「光标在输入末尾」。
+    let Some(start) = slots[..cursor].iter().rposition(|(_, prompt)| *prompt).map(|i| i + 1) else {
         return Ok(None);
     };
-    let cursor = (cursor_y - top) as usize * usize::from(cols) + usize::from(cursor_x);
-    if cursor < start {
-        return Ok(None);
-    }
 
     let mut text = String::new();
-    let mut push = |slot: &Slot, text: &mut String| match slot {
-        Slot::Spacer => {}
-        Slot::Blank => text.push(' '),
-        Slot::Text(s) => text.push_str(s),
-    };
-    for slot in &slots[start..cursor.min(slots.len())] {
-        push(slot, &mut text);
+    for (slot, _) in &slots[start..cursor] {
+        slot.push_to(&mut text);
     }
     let before = text.len();
-    let rest = slots.get(cursor..).unwrap_or_default();
-    for slot in rest {
-        push(slot, &mut text);
+    let rest: Vec<&Slot> = slots[cursor..].iter().filter(|(_, prompt)| !prompt).map(|(slot, _)| slot).collect();
+    for slot in &rest {
+        slot.push_to(&mut text);
     }
     text.truncate(before + text[before..].trim_end().len());
     Ok(Some(PromptInput {
@@ -121,11 +123,7 @@ pub fn submitted_command(terminal: &Terminal<'_, '_>) -> Result<Option<String>> 
             match grid_ref.cell()?.semantic_content()? {
                 CellSemanticContent::Input => {
                     input = true;
-                    match slot(&grid_ref)? {
-                        Slot::Spacer => {}
-                        Slot::Blank => text.push(' '),
-                        Slot::Text(s) => text.push_str(&s),
-                    }
+                    slot(&grid_ref)?.push_to(&mut text);
                 }
                 CellSemanticContent::Prompt => prompt = true,
                 CellSemanticContent::Output => {}
@@ -240,6 +238,31 @@ mod tests {
         let input = read(&t).unwrap().unwrap();
         assert_eq!(input.before_cursor(), "ls");
         assert!(!input.at_end);
+    }
+
+    /// 提示符画完以后，像 zsh 那样在行尾画右侧提示符，再把光标挪回输入处；右侧提示符用
+    /// shell 集成脚本发的 `133;P;k=r` 和 `133;B` 包着。
+    const RIGHT_PROMPT: &[u8] = b"\x1b]133;A\x07$ \x1b]133;B\x07\x1b[35G\x1b]133;P;k=r\x0712:34\x1b]133;B\x07\x1b[3G";
+
+    #[test]
+    fn a_right_prompt_is_neither_input_nor_in_the_way() {
+        let mut t = terminal(40, 5);
+        t.vt_write(RIGHT_PROMPT);
+        t.vt_write(b"git st");
+        let input = read(&t).unwrap().unwrap();
+        assert_eq!((input.text.as_str(), input.before_cursor(), input.at_end), ("git st", "git st", true));
+        // 光标往左挪两格：光标后面还有输入，右侧提示符照样不算。
+        t.vt_write(b"\x1b[2D");
+        let input = read(&t).unwrap().unwrap();
+        assert_eq!((input.text.as_str(), input.before_cursor(), input.at_end), ("git st", "git ", false));
+    }
+
+    #[test]
+    fn submitted_command_leaves_out_the_right_prompt() {
+        let mut t = terminal(40, 6);
+        let mut bytes = RIGHT_PROMPT.to_vec();
+        bytes.extend_from_slice(b"git status\r\n\x1b]133;C\x07");
+        assert_eq!(submitted(&mut t, &bytes), [Some("git status".to_owned())]);
     }
 
     /// 在 OSC 133;C 的回调里读刚提交的命令。

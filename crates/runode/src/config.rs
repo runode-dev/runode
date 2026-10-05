@@ -67,6 +67,10 @@ pub struct Config {
     pub palette: Vec<(u8, RgbColor)>,
     pub macos_option_as_alt: OptionAsAlt,
     pub shell_integration: crate::shell_integration::Mode,
+    /// 在 shell 提示符上输入时，按命令历史在光标后用灰字给出建议；关掉时也不读写命令历史。
+    pub command_suggestions: bool,
+    /// 按 Tab 时由 runode 弹出补全菜单（命令名，以及有规格的命令的参数）；关掉时 Tab 总是交给 shell。
+    pub command_completions: bool,
     /// 界面语言，是 locales 里的某个语言标签；`None` 表示跟随系统。
     pub language: Option<String>,
     /// 叠在默认快捷键上的 `keybind`，按出现顺序；只认 runode 自己的配置文件。
@@ -104,6 +108,8 @@ impl Default for Config {
                 .collect(),
             macos_option_as_alt: OptionAsAlt::False,
             shell_integration: crate::shell_integration::Mode::Detect,
+            command_suggestions: true,
+            command_completions: true,
             language: None,
             keybinds: Vec::new(),
             sources: Vec::new(),
@@ -349,6 +355,12 @@ impl Config {
                     name => Mode::Force(Shell::from_name(name).ok_or("expected none, detect, bash, zsh or fish")?),
                 };
             }
+            "command-suggestions" => {
+                self.command_suggestions = if empty { defaults.command_suggestions } else { parse_bool(value)? };
+            }
+            "command-completions" => {
+                self.command_completions = if empty { defaults.command_completions } else { parse_bool(value)? };
+            }
             "macos-option-as-alt" => {
                 self.macos_option_as_alt = match value {
                     "" | "false" => OptionAsAlt::False,
@@ -574,6 +586,8 @@ fn template(locale: &str) -> String {
     key(&mut out, "cursor-style-blink", &none());
     key(&mut out, "macos-option-as-alt", &["false".into()]);
     key(&mut out, "shell-integration", &["detect".into()]);
+    key(&mut out, "command-suggestions", &["true".into()]);
+    key(&mut out, "command-completions", &["true".into()]);
     out.push('\n');
     key(&mut out, "config-file", &none());
     out.push('\n');

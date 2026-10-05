@@ -25,6 +25,15 @@ serde.workspace = true
 serde_json.workspace = true
 # 右侧面板监听仓库目录，有文件变了才重读 git 状态。
 notify.workspace = true
+# 按 Tab 弹出的命令补全：命令规格的数据类型和动态补全的生成器。
+warp-command-signatures.workspace = true
+# 解压构建脚本嵌进来的命令规格。
+miniz_oxide.workspace = true
+
+[build-dependencies]
+# 构建脚本把命令规格的 JSON 压紧、逐个压缩后嵌进二进制。
+miniz_oxide.workspace = true
+serde_json.workspace = true
 
 # 标准「关于」面板、系统偏好的语言和窗口菜单只有 AppKit 提供，GPUI 没有封装。
 [target.'cfg(target_os = "macos")'.dependencies]

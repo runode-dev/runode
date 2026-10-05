@@ -79,6 +79,22 @@ paste:
 search:
   placeholder: 搜索
   no_results: 无结果
+completion:
+  loading: 加载中…
+  no_matches: 没有匹配项
+  group:
+    command: 外部命令
+    alias: 别名
+    function: shell 函数
+    builtin: 内建命令
+    keyword: 关键字
+    subcommand: 子命令
+    option: 选项
+    value: 参数值
+    generated: 动态值
+    folder: 目录
+    file: 文件
+    named: "%{group}：%{name}"
 config:
   header: |-
     runode 配置文件，语法和键名与 Ghostty 相同。
@@ -114,6 +130,8 @@ config:
   cursor_style_blink: 光标是否闪烁：true、false；留空时默认闪烁，运行中的程序仍可改变。
   macos_option_as_alt: macOS 上把 Option 当作 Alt：true（两边都是）、false、left（只有左边）、right（只有右边）。
   shell_integration: shell 集成：detect（按 shell 的程序名判断）、none（关闭）、bash、zsh、fish。
+  command_suggestions: 在 shell 提示符上输入时，按命令历史在光标后用灰字给出建议，按 → 或 End 接受，Option+→ 接受一个词。false 时也不读写命令历史。
+  command_completions: 在 shell 提示符上按 Tab 时从菜单里选命令名、子命令、选项或参数（参数只限 runode 认识的命令），没有可选的时 Tab 照常交给 shell。false 时 Tab 总是交给 shell。
   config_file: |-
     引入别的配置文件：文件路径，相对路径从这个文件所在目录算，~/ 表示主目录；
     路径前加 ? 表示文件可以不存在。可以写多行。
