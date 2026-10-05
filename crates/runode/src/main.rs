@@ -14,15 +14,16 @@ mod prespawn;
 mod search_bar;
 mod sprites;
 mod terminal_view;
+mod window;
 mod workspace;
 
 // 界面文字的翻译，见 `i18n`；某种语言缺了某个键时取英文。
 rust_i18n::i18n!("locales", fallback = "en");
 
-use gpui::{App, AppContext as _, Bounds, WindowBounds, WindowOptions, px, size};
+use gpui::App;
 use gpui_platform::application;
 
-use crate::{persist::SavedWindow, prespawn::Prespawned, workspace::WindowView};
+use crate::window::{open_window, open_window_with};
 
 fn main() {
     tracing_subscriber::fmt()
@@ -59,37 +60,4 @@ fn main() {
         // 窗口先出来；未打包运行时才需要的图标解码放到最后。
         about::install_icon();
     });
-}
-
-/// 新窗口的默认选项：屏幕居中的默认大小。
-fn window_options(cx: &App) -> WindowOptions {
-    let bounds = Bounds::centered(None, size(px(960.), px(620.)), cx);
-    WindowOptions {
-        window_bounds: Some(WindowBounds::Windowed(bounds)),
-        window_min_size: Some(size(px(320.), px(200.))),
-        titlebar: Some(workspace::titlebar_options()),
-        // 标题栏的拖动和双击由 `WindowView` 自己处理；否则 AppKit 会抢先处理标题栏区域的双击，
-        // 在标签或新建按钮上双击也会缩放窗口。
-        app_owns_titlebar_drag: true,
-        ..Default::default()
-    }
-}
-
-/// 打开一个新窗口，里面一个终端；`shell` 是启动时提前拉起的 shell，没有时现启动一个。
-/// `saved` 是存档里的窗口，有时按它恢复。
-fn open_window(cx: &mut App, saved: Option<SavedWindow>, shell: Option<Prespawned>) {
-    let options = window_options(cx);
-    open_window_with(cx, options, saved, shell);
-}
-
-fn open_window_with(cx: &mut App, options: WindowOptions, saved: Option<SavedWindow>, shell: Option<Prespawned>) {
-    let opened = cx.open_window(options, |window, cx| {
-        cx.new(|cx| match saved {
-            Some(saved) => WindowView::restore(saved, shell, window, cx),
-            None => WindowView::new(shell, window, cx),
-        })
-    });
-    if let Err(err) = opened {
-        tracing::error!("failed to open window: {err:#}");
-    }
 }

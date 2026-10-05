@@ -45,7 +45,7 @@ pub fn install(cx: &mut App) {
     cx.on_action(|_: &Hide, cx| cx.hide());
     cx.on_action(|_: &HideOthers, cx| cx.hide_other_apps());
     cx.on_action(|_: &ShowAll, cx| cx.unhide_other_apps());
-    cx.on_action(|_: &NewWindow, cx| crate::open_window(cx, None, None));
+    cx.on_action(|_: &NewWindow, cx| crate::window::open_window(cx, None, None));
     cx.on_action(|_: &CloseWindow, cx| with_active_window(cx, |w| w.remove_window()));
     cx.on_action(|_: &CloseAllWindows, cx| {
         for window in cx.windows() {

@@ -103,7 +103,7 @@ fn window_options(saved: &SavedBounds, cx: &App) -> WindowOptions {
         let screen = Bounds { origin: point(px(0.), px(0.)), size: display.bounds().size };
         saved.width >= 100. && saved.height >= 100. && screen.intersects(&bounds)
     });
-    let mut options = crate::window_options(cx);
+    let mut options = crate::window::window_options(cx);
     if let Some(display) = placed {
         options.display_id = Some(display.id());
         options.window_bounds = Some(match saved.mode {
