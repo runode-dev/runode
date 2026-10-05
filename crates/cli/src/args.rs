@@ -1,6 +1,8 @@
 //! 解析命令行参数。选项可以写在位置参数前后，`--` 之后的都当位置参数。
 
-use std::time::Duration;
+use std::{path::PathBuf, time::Duration};
+
+use runode_protocol::Placement;
 
 /// 用法说明，`runode help` 打印它。
 pub(crate) const HELP: &str = "\
@@ -28,6 +30,17 @@ commands:
                                 done     working, then stopped
                                 working, idle, blocked
                               prints the agent's state when it gets there
+  open [--tab|--right|--down] [--near SESSION] [--cwd DIR] [--focus]
+       [-- COMMAND...]        open a terminal in the app: a new tab after the
+                              one SESSION is in (default), or split SESSION's
+                              pane to the right or down. SESSION defaults to
+                              your own, else the front window's pane; DIR to
+                              SESSION's directory. Without --focus the app
+                              stays where it is. COMMAND is typed into the new
+                              shell. Prints the new session's id
+  kill SESSION                end the session and close its pane
+  focus [SESSION]             show the session's pane and bring its window to
+                              the front; SESSION defaults to your own
   help                        show this help
   version                     show the version
 
@@ -44,6 +57,9 @@ pub(crate) enum Command {
     Read { session: Option<String>, lines: Option<u32> },
     Send { session: String, text: Text, enter: bool, wait: bool, timeout: Option<Duration> },
     Wait { session: String, until: Until, timeout: Option<Duration> },
+    Open { placement: Placement, near: Option<String>, cwd: Option<PathBuf>, focus: bool, command: String },
+    Kill { session: String },
+    Focus { session: Option<String> },
 }
 
 /// `send` 要打的字。
@@ -85,6 +101,19 @@ pub(crate) fn parse(args: &[String]) -> Result<Command, String> {
             "--lines" => flags.lines = Some(value(&mut rest, arg)?.parse().map_err(|_| "--lines takes a count")?),
             "--timeout" => flags.timeout = Some(seconds(value(&mut rest, arg)?)?),
             "--for" => flags.until = Some(until(value(&mut rest, arg)?)?),
+            "--tab" | "--right" | "--down" => {
+                let placement = match arg.as_str() {
+                    "--tab" => Placement::Tab,
+                    "--right" => Placement::Right,
+                    _ => Placement::Down,
+                };
+                if flags.placement.replace(placement).is_some_and(|before| before != placement) {
+                    return Err("give only one of --tab, --right and --down".into());
+                }
+            }
+            "--near" => flags.near = Some(value(&mut rest, arg)?.to_owned()),
+            "--cwd" => flags.cwd = Some(value(&mut rest, arg)?.into()),
+            "--focus" => flags.focus = true,
             // 单独一个 `-` 是位置参数（`send` 从标准输入读）。
             option if option.starts_with('-') && option != "-" => return Err(format!("unknown option {option}")),
             _ => words.push(arg.clone()),
@@ -136,6 +165,21 @@ pub(crate) fn parse(args: &[String]) -> Result<Command, String> {
                 timeout: flags.timeout.take(),
             }
         }
+        "open" => Command::Open {
+            placement: flags.placement.take().unwrap_or(Placement::Tab),
+            near: flags.near.take(),
+            cwd: flags.cwd.take(),
+            focus: std::mem::take(&mut flags.focus),
+            command: words.join(" "),
+        },
+        "kill" => {
+            no_more(words, 1, name)?;
+            Command::Kill { session: words.first().ok_or("kill needs a SESSION")?.clone() }
+        }
+        "focus" => {
+            no_more(words, 1, name)?;
+            Command::Focus { session: words.first().cloned() }
+        }
         other => return Err(format!("unknown command {other}")),
     };
     flags.unused().map_or(Ok(command), |flag| Err(format!("{name} does not take {flag}")))
@@ -152,6 +196,10 @@ struct Flags {
     lines: Option<u32>,
     timeout: Option<Duration>,
     until: Option<Until>,
+    placement: Option<Placement>,
+    near: Option<String>,
+    cwd: Option<PathBuf>,
+    focus: bool,
 }
 
 impl Flags {
@@ -163,6 +211,10 @@ impl Flags {
             (self.lines.is_some(), "--lines"),
             (self.timeout.is_some(), "--timeout"),
             (self.until.is_some(), "--for"),
+            (self.placement.is_some(), "--tab, --right or --down"),
+            (self.near.is_some(), "--near"),
+            (self.cwd.is_some(), "--cwd"),
+            (self.focus, "--focus"),
         ]
         .into_iter()
         .find_map(|(set, flag)| set.then_some(flag))
@@ -244,6 +296,35 @@ mod tests {
             parse("wait ab12"),
             Ok(Command::Wait { session: "ab12".into(), until: Until::Stopped, timeout: None })
         );
+    }
+
+    #[test]
+    fn window_commands() {
+        assert_eq!(
+            parse("open"),
+            Ok(Command::Open {
+                placement: Placement::Tab,
+                near: None,
+                cwd: None,
+                focus: false,
+                command: String::new()
+            })
+        );
+        assert_eq!(
+            parse("open --right --near ab12 --cwd /tmp --focus -- claude --model opus"),
+            Ok(Command::Open {
+                placement: Placement::Right,
+                near: Some("ab12".into()),
+                cwd: Some("/tmp".into()),
+                focus: true,
+                command: "claude --model opus".into(),
+            })
+        );
+        assert_eq!(parse("kill ab12"), Ok(Command::Kill { session: "ab12".into() }));
+        assert_eq!(parse("focus"), Ok(Command::Focus { session: None }));
+        assert!(parse("open --right --down").unwrap_err().contains("only one"));
+        assert!(parse("kill").unwrap_err().contains("SESSION"));
+        assert!(parse("focus --right").unwrap_err().contains("does not take"));
     }
 
     #[test]

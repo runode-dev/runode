@@ -351,6 +351,27 @@ impl TerminalView {
         view
     }
 
+    /// 宿主里这个终端的会话。
+    pub fn session_id(&self) -> SessionId {
+        self.id
+    }
+
+    /// 终端现在的尺寸。
+    pub fn size(&self) -> GridSize {
+        self.session.size()
+    }
+
+    /// 不等布局，按 `size` 现在就启动 shell。放在看不见的地方（后台标签、放大的分屏后面）的终端
+    /// 等不来 `start` 要的那次布局；之后显示出来时照常按实际尺寸改。
+    pub fn start_at(&mut self, size: GridSize, cx: &mut Context<Self>) {
+        if self.started {
+            return;
+        }
+        self.session.resize(size);
+        self.start_pending = false;
+        self.start_now(cx);
+    }
+
     /// shell 当前所在的目录，新建标签或分屏时沿用。
     pub fn cwd(&self) -> Option<std::path::PathBuf> {
         self.session.cwd()

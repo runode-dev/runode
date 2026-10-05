@@ -23,6 +23,10 @@ use crate::{
 /// `send --enter` 打完字等这么久再按回车。很多 agent 的界面把同一次读到的文字和回车当成一次
 /// 粘贴，回车只换行不提交。
 const ENTER_DELAY: Duration = Duration::from_millis(100);
+/// `open` 给了命令时，等新 shell 显示提示符的最长时间。
+const PROMPT_TIMEOUT: Duration = Duration::from_secs(3);
+/// `kill` 等会话结束的最长时间。
+const KILL_TIMEOUT: Duration = Duration::from_secs(5);
 /// `list` 显示的标识的长度，够区分几十个会话，命令里也能直接用。
 const SHORT_ID: usize = 8;
 
@@ -62,7 +66,7 @@ pub(crate) fn run(command: Command, env: &Env, out: &mut dyn Write) -> Result<()
             if info.exited {
                 return Err(Failure::Exited);
             }
-            let (channel, meta) = attach(&mut connection, &info)?;
+            let (channel, meta) = attach(&mut connection, info.id)?;
             let text = match text {
                 Text::Given(text) => text.into_bytes(),
                 Text::Stdin => stdin_text()?,
@@ -86,8 +90,56 @@ pub(crate) fn run(command: Command, env: &Env, out: &mut dyn Write) -> Result<()
             if info.exited {
                 return Err(Failure::Exited);
             }
-            let (_, meta) = attach(&mut connection, &info)?;
+            let (_, meta) = attach(&mut connection, info.id)?;
             wait_for(&connection, info.id, meta.agent, until, timeout, out)?;
+        }
+        Command::Open { placement, near, cwd, focus, command } => {
+            let mut connection = Connection::open(env)?;
+            let near = match near.or_else(|| env.session.clone()) {
+                Some(near) => Some(resolve(&mut connection, &near)?.id),
+                None => None,
+            };
+            let cwd = cwd.map(|dir| std::env::current_dir().map(|here| here.join(dir))).transpose()?;
+            connection.send(&ClientMsg::Open { req: 1, placement, near, cwd, focus })?;
+            let id = match connection.reply()? {
+                HostMsg::Opened { id, .. } => id,
+                other => return Err(unexpected(&other)),
+            };
+            if !command.is_empty() {
+                let (channel, meta) = attach(&mut connection, id)?;
+                wait_for_prompt(&connection, id, meta)?;
+                connection.input(channel, command.as_bytes())?;
+                thread::sleep(ENTER_DELAY);
+                connection.input(channel, b"\r")?;
+            }
+            writeln!(out, "{id}")?;
+        }
+        Command::Kill { session } => {
+            let mut connection = Connection::open(env)?;
+            let id = resolve(&mut connection, &session)?.id;
+            // 先连上，才收得到结束时的 `Exited`，确认真的结束了再返回。
+            attach(&mut connection, id)?;
+            connection.send(&ClientMsg::Kill { id })?;
+            let deadline = Instant::now() + KILL_TIMEOUT;
+            loop {
+                match connection.next(Some(deadline))? {
+                    Some(HostMsg::Exited { id: exited, .. }) if exited == id => break,
+                    Some(_) => {}
+                    None => return Err(anyhow!("session {id} did not end").into()),
+                }
+            }
+        }
+        Command::Focus { session } => {
+            let session = session
+                .or_else(|| env.session.clone())
+                .ok_or_else(|| anyhow!("focus needs a SESSION outside a runode terminal"))?;
+            let mut connection = Connection::open(env)?;
+            let id = resolve(&mut connection, &session)?.id;
+            connection.send(&ClientMsg::Reveal { req: 1, id })?;
+            match connection.reply()? {
+                HostMsg::Done { .. } => {}
+                other => return Err(unexpected(&other)),
+            }
         }
     }
     Ok(())
@@ -191,6 +243,23 @@ fn wait_for(
     }
 }
 
+/// 等新开的 shell 第一次显示提示符（shell 集成报告了 `SessionMeta::prompt_cwd`）再打字，免得
+/// 打的字在 shell 准备好之前就被终端原样回显出来。没开 shell 集成时等不到，最多等
+/// `PROMPT_TIMEOUT`。
+fn wait_for_prompt(connection: &Connection, id: SessionId, meta: SessionMeta) -> Result<(), Failure> {
+    let deadline = Instant::now() + PROMPT_TIMEOUT;
+    let mut ready = meta.prompt_cwd.is_some();
+    while !ready {
+        match connection.next(Some(deadline))? {
+            None => break,
+            Some(HostMsg::Meta { id: changed, meta }) if changed == id => ready = meta.prompt_cwd.is_some(),
+            Some(HostMsg::Exited { id: exited, .. }) if exited == id => return Err(Failure::Exited),
+            Some(_) => {}
+        }
+    }
+    Ok(())
+}
+
 fn sessions(connection: &mut Connection) -> anyhow::Result<Vec<SessionInfo>> {
     connection.send(&ClientMsg::ListSessions)?;
     match connection.reply()? {
@@ -211,8 +280,8 @@ fn resolve(connection: &mut Connection, given: &str) -> anyhow::Result<SessionIn
 }
 
 /// 只看状态地连上会话，返回通道和连上时的状态。通道也能发输入。
-fn attach(connection: &mut Connection, info: &SessionInfo) -> anyhow::Result<(u32, SessionMeta)> {
-    connection.send(&ClientMsg::Attach { id: info.id, size: None, mode: AttachMode::MetaOnly })?;
+fn attach(connection: &mut Connection, id: SessionId) -> anyhow::Result<(u32, SessionMeta)> {
+    connection.send(&ClientMsg::Attach { id, size: None, mode: AttachMode::MetaOnly })?;
     match connection.reply()? {
         HostMsg::Attached { channel, meta, .. } => Ok((channel, meta)),
         other => bail!("unexpected answer: {}", kind(&other)),

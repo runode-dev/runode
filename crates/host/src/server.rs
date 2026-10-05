@@ -37,7 +37,7 @@ use runode_protocol::{
 use runode_shared_types::grid::GridSize;
 
 use crate::{
-    Client, Host, HostEvent, Sink, SpawnOptions,
+    Client, Host, HostEvent, Sink, SpawnOptions, UiRequest,
     session::{Inbox, Screen, Subscribe},
 };
 
@@ -340,6 +340,15 @@ impl Connection<'_> {
                 self.client.send(message);
             }
             ClientMsg::ReadScreen { id, lines } => self.read_screen(id, lines),
+            ClientMsg::Open { .. } | ClientMsg::Reveal { .. } => {
+                let out = self.out.clone();
+                self.server.host.to_ui(UiRequest::new(
+                    message,
+                    Box::new(move |reply| {
+                        out.control(&reply);
+                    }),
+                ));
+            }
             ClientMsg::Handoff | ClientMsg::Shutdown { .. } => self.error(
                 None,
                 None,

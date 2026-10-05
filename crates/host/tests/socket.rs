@@ -325,3 +325,26 @@ fn a_late_client_learns_the_shell_has_exited() {
     assert!(matches!(late.reply(), HostMsg::Exited { id: exited, .. } if exited == id));
     client.send(ClientMsg::Kill { id });
 }
+
+/// `Open`、`Reveal` 交给登记的界面去办，界面的回话原样转回来；没有界面、或者界面没回话就丢掉
+/// 请求时回 `Error`。
+#[test]
+fn window_requests_go_to_the_app() {
+    use runode_protocol::Placement;
+
+    let dir = temp_dir("ui");
+    let (host, socket) = listen(&dir);
+    let mut peer = Peer::hello(&socket, false);
+    let open = |req| ClientMsg::Open { req, placement: Placement::Tab, near: None, cwd: None, focus: false };
+    peer.send(&open(1));
+    assert!(matches!(peer.reply(), HostMsg::Error { req: Some(1), .. }));
+
+    host.set_ui(Box::new(|request| match request.message {
+        ClientMsg::Open { req, .. } => request.reply(HostMsg::Opened { req, id: SessionId(9) }),
+        _ => drop(request),
+    }));
+    peer.send(&open(2));
+    assert_eq!(peer.reply(), HostMsg::Opened { req: 2, id: SessionId(9) });
+    peer.send(&ClientMsg::Reveal { req: 3, id: SessionId(9) });
+    assert!(matches!(peer.reply(), HostMsg::Error { req: Some(3), .. }));
+}

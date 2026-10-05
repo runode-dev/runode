@@ -11,7 +11,8 @@ pub mod message;
 
 pub use frame::{Frame, FrameError, FrameKind, MAX_PAYLOAD, read_frame, write_frame};
 pub use message::{
-    AttachMode, BuildId, Caps, ClientKind, ClientMsg, FinishedCommand, GoodbyeReason, HostMsg, SessionId, SessionInfo,
+    AttachMode, BuildId, Caps, ClientKind, ClientMsg, FinishedCommand, GoodbyeReason, HostMsg, Placement, SessionId,
+    SessionInfo,
 };
 
 /// 宿主给每个会话的 shell 设的环境变量：这个会话的 `SessionId`。在终端里跑的命令行据此知道

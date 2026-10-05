@@ -39,6 +39,11 @@ pub fn listen() {
     }
 }
 
+/// 登记办 `runode_host::UiRequest` 的界面：别的进程经 socket 请 app 开终端、切到某个终端。
+pub fn set_ui(handler: runode_host::UiHandler) {
+    host().set_ui(handler);
+}
+
 /// 把配置里宿主关心的部分告诉它：主题（各个会话在输出流里标出换主题的位置，视图到那里再换）
 /// 和要不要把命令记进历史文件。和宿主现在的一样时它什么都不做。
 pub fn configure(config: &Config) {

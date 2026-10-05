@@ -53,6 +53,7 @@ fn main() {
         config::install(cx);
         menus::install(cx);
         workspace::install(cx);
+        workspace::serve_requests(cx);
         cx.on_window_closed(|cx, _| {
             if cx.windows().is_empty() {
                 cx.quit();

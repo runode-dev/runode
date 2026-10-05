@@ -157,6 +157,21 @@ pub enum ClientMsg {
     /// 读会话屏幕上的文字，宿主回 `ScreenText`。`lines` 为 `None` 时是当前一屏，否则是从最后
     /// 一个有字的行往上这么多行，含回滚历史。
     ReadScreen { id: SessionId, lines: Option<u32> },
+    /// 在 app 里开一个新终端，宿主转给 app 的界面，回 `Opened`。`near` 是放在哪个会话的分屏
+    /// 旁边，为空时放在最前面那个窗口当前的分屏旁边；`cwd` 为空时沿用旁边那个终端的目录；
+    /// `focus` 为假时不切过去，不打断用户手上的事。
+    Open {
+        req: u32,
+        placement: Placement,
+        #[serde(default)]
+        near: Option<SessionId>,
+        #[serde(default)]
+        cwd: Option<PathBuf>,
+        #[serde(default)]
+        focus: bool,
+    },
+    /// 在 app 里切到显示这个会话的分屏，激活它的窗口，回 `Done`。
+    Reveal { req: u32, id: SessionId },
     /// 新版本的宿主要接手：旧宿主把 PTY 和监听的 socket 交过去后退出。
     Handoff,
     /// 让宿主退出。`kill_sessions` 为假时会话跟着宿主一起留到交接或者下次启动，见
@@ -238,6 +253,15 @@ pub enum HostMsg {
         id: SessionId,
         status: Option<i32>,
     },
+    /// 回 `Open`：新终端的会话。
+    Opened {
+        req: u32,
+        id: SessionId,
+    },
+    /// 回 `Reveal` 这类没有别的结果要给的请求：办好了。
+    Done {
+        req: u32,
+    },
     /// 回 `ReadScreen`：一行一个 `\n`，行尾空白去掉。
     ScreenText {
         id: SessionId,
@@ -256,6 +280,18 @@ pub enum HostMsg {
     /// 比自己新的宿主才有的消息，前端忽略它。
     #[serde(other)]
     Unknown,
+}
+
+/// `Open` 的新终端放在哪里。
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Placement {
+    /// 紧跟在旁边那个终端的标签后面的新标签。
+    Tab,
+    /// 把旁边那个终端一分为二，新终端在右边。
+    Right,
+    /// 把旁边那个终端一分为二，新终端在下边。
+    Down,
 }
 
 /// `SessionList` 里的一个会话。

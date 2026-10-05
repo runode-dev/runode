@@ -173,7 +173,12 @@ impl WindowView {
     }
 
     /// 只有 `view` 一个终端的新标签。
-    fn single_pane_tab(&mut self, view: Entity<TerminalView>, window: &mut Window, cx: &mut Context<Self>) -> Tab {
+    pub(super) fn single_pane_tab(
+        &mut self,
+        view: Entity<TerminalView>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Tab {
         let (id, entry) = self.pane_entry(view, window, cx);
         Tab {
             id: self.next_id(),

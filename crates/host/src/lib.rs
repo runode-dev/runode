@@ -27,7 +27,7 @@ use std::{
 };
 
 use anyhow::{Result, anyhow};
-pub use runode_protocol::{BuildId, ClientMsg, HostMsg, SessionId};
+pub use runode_protocol::{BuildId, ClientMsg, HostMsg, Placement, SessionId};
 use runode_shared_types::{grid::GridSize, session::SessionMeta, settings::TermSettings, shell::IntegrationMode};
 
 /// 宿主发给前端的一件事，同一个会话的按发生的先后到达。
@@ -48,6 +48,51 @@ impl HostEvent {
 /// 收一个会话的 `HostEvent` 的一方，在会话的线程里调用，不能阻塞。返回 false 表示不再要了，
 /// 之后不再调用。
 pub type Sink = Box<dyn FnMut(HostEvent) -> bool + Send>;
+
+/// 要 app 的界面去办的请求：`ClientMsg::Open`、`ClientMsg::Reveal`。宿主不管窗口，收到这样的
+/// 请求就交给 `Host::set_ui` 登记的界面。界面办完了用 `reply` 回话；没回就丢掉时替它回一句
+/// `HostMsg::Error`，发请求的一方不会白等。
+pub struct UiRequest {
+    pub message: ClientMsg,
+    reply: Option<Box<dyn FnOnce(HostMsg) + Send>>,
+}
+
+impl UiRequest {
+    pub(crate) fn new(message: ClientMsg, reply: Box<dyn FnOnce(HostMsg) + Send>) -> Self {
+        Self { message, reply: Some(reply) }
+    }
+
+    /// 请求的编号，回话时带上。
+    pub fn req(&self) -> Option<u32> {
+        match self.message {
+            ClientMsg::Open { req, .. } | ClientMsg::Reveal { req, .. } => Some(req),
+            _ => None,
+        }
+    }
+
+    pub fn reply(mut self, message: HostMsg) {
+        if let Some(reply) = self.reply.take() {
+            reply(message);
+        }
+    }
+
+    /// 回一句没办成。
+    pub fn fail(self, message: impl Into<String>) {
+        let req = self.req();
+        self.reply(HostMsg::Error { req, id: None, message: message.into() });
+    }
+}
+
+impl Drop for UiRequest {
+    fn drop(&mut self) {
+        if let Some(reply) = self.reply.take() {
+            reply(HostMsg::Error { req: self.req(), id: None, message: "the runode app dropped the request".into() });
+        }
+    }
+}
+
+/// 收 `UiRequest` 的界面，在发请求的连接的线程里调用，不能阻塞，自己转到界面的线程去办。
+pub type UiHandler = Box<dyn Fn(UiRequest) + Send + Sync>;
 
 /// 新开一个会话。
 #[derive(Clone, Debug)]
@@ -93,6 +138,8 @@ struct Shared {
     next_connection: AtomicU64,
     /// 之后启动的 shell 另外设的环境变量，见 `Host::set_env`。
     env: Mutex<Vec<(String, OsString)>>,
+    /// 办 `UiRequest` 的界面，见 `Host::set_ui`。
+    ui: Mutex<Option<Arc<UiHandler>>>,
 }
 
 /// 会话和主题放在同一把锁下：新会话加进来和换主题不会互相错过，见 `Client::spawn`。
@@ -138,6 +185,20 @@ impl Host {
     /// 在进程内连上宿主。
     pub fn connect_in_process(&self) -> Client {
         Client { shared: self.shared.clone(), connection: self.shared.next_connection.fetch_add(1, Ordering::Relaxed) }
+    }
+
+    /// 登记办 `UiRequest` 的界面，换掉之前登记的。
+    pub fn set_ui(&self, handler: UiHandler) {
+        *self.shared.ui.lock().unwrap_or_else(PoisonError::into_inner) = Some(Arc::new(handler));
+    }
+
+    /// 把请求交给界面；没有登记界面时回一句没办成。
+    fn to_ui(&self, request: UiRequest) {
+        let handler = self.shared.ui.lock().unwrap_or_else(PoisonError::into_inner).clone();
+        match handler {
+            Some(handler) => handler(request),
+            None => request.fail("there is no runode window to do this in"),
+        }
     }
 
     /// 之后启动的每个 shell 都设上这个环境变量，同名的换掉；已经启动的不受影响。每个 shell

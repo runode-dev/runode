@@ -2,7 +2,7 @@
 
 use runode_protocol::{
     AttachMode, BuildId, Caps, ClientKind, ClientMsg, FinishedCommand, Frame, FrameKind, GoodbyeReason, HostMsg,
-    SessionId, SessionInfo, message::InvalidSessionId, read_frame, write_frame,
+    Placement, SessionId, SessionInfo, message::InvalidSessionId, read_frame, write_frame,
 };
 use runode_shared_types::{
     agent::{Agent, AgentKind, AgentState},
@@ -164,4 +164,13 @@ fn random_session_ids_differ() {
     let b = SessionId::random().unwrap();
     assert_ne!(a, b);
     assert_eq!(a.to_string().parse(), Ok(a));
+}
+
+/// `Open` 只写必填的字段时，其余按默认：放在最前面的窗口当前的分屏旁边，沿用它的目录，不切过去。
+#[test]
+fn open_fills_in_defaults() {
+    let open: ClientMsg = serde_json::from_str(r#"{"type":"open","req":4,"placement":"right"}"#).unwrap();
+    assert_eq!(open, ClientMsg::Open { req: 4, placement: Placement::Right, near: None, cwd: None, focus: false });
+    let opened = HostMsg::Opened { req: 4, id: SessionId(7) };
+    assert_eq!(serde_json::from_str::<HostMsg>(&serde_json::to_string(&opened).unwrap()).unwrap(), opened);
 }
