@@ -119,16 +119,25 @@ fn git(dir: &Path, args: &[&str]) -> Option<Vec<u8>> {
 pub fn snapshot(dir: &Path) -> Option<Snapshot> {
     let root = git(dir, &["rev-parse", "--show-toplevel"])?;
     let root = local_root(dir, PathBuf::from(String::from_utf8_lossy(&root).trim_end_matches('\n')));
-    let status = git(&root, &["status", "--porcelain=v1", "-z", "--untracked-files=all", "--ignored=matching"])?;
+    let mut snapshot = Snapshot { root: root.clone(), files: Vec::new(), statuses: HashMap::new(), ignored: Vec::new() };
+    collect(&root, Path::new(""), &mut snapshot)?;
+    snapshot.files.sort_by(|a, b| a.path.cmp(&b.path));
+    Some(snapshot)
+}
+
+/// 读 `repo` 这个仓库的改动，路径前面加上 `prefix` 并进 `out`。未跟踪的目录是嵌套的
+/// 仓库（比如放在仓库里的 worktree），git 不往里看，就当另一个仓库接着读。
+fn collect(repo: &Path, prefix: &Path, out: &mut Snapshot) -> Option<()> {
+    let status = git(repo, &["status", "--porcelain=v1", "-z", "--untracked-files=all", "--ignored=matching"])?;
     let (statuses, ignored) = parse_status(&status);
     // 还没有提交时和空树比，暂存了的新文件也算进来。
-    let base = match git(&root, &["rev-parse", "--verify", "--quiet", "HEAD"]) {
+    let base = match git(repo, &["rev-parse", "--verify", "--quiet", "HEAD"]) {
         Some(_) => "HEAD".to_owned(),
-        None => String::from_utf8_lossy(&git(&root, &["hash-object", "-t", "tree", "/dev/null"])?).trim().to_owned(),
+        None => String::from_utf8_lossy(&git(repo, &["hash-object", "-t", "tree", "/dev/null"])?).trim().to_owned(),
     };
     // 前缀写明，免得用户配置了 `diff.noprefix` 之类改掉 `a/`、`b/`。
     let diff = git(
-        &root,
+        repo,
         &[
             "diff",
             &base,
@@ -148,8 +157,12 @@ pub fn snapshot(dir: &Path) -> Option<Snapshot> {
         .map(|(path, _)| path.clone())
         .collect();
     untracked.sort();
+    // 指向目录的符号链接 git 当文件报，这里也不跟进去。
+    let (nested, untracked): (Vec<_>, Vec<_>) = untracked
+        .into_iter()
+        .partition(|path| fs::symlink_metadata(repo.join(path)).is_ok_and(|meta| meta.is_dir()));
     for (ix, path) in untracked.into_iter().enumerate() {
-        files.push(untracked_diff(&root, path, ix < MAX_UNTRACKED_FILES));
+        files.push(untracked_diff(repo, path, ix < MAX_UNTRACKED_FILES));
     }
     // 冲突等状态以 `git status` 为准，diff 只看得出增删改名。
     for file in &mut files {
@@ -158,9 +171,16 @@ pub fn snapshot(dir: &Path) -> Option<Snapshot> {
         {
             file.status = *status;
         }
+        file.path = prefix.join(&file.path);
+        file.old_path = file.old_path.take().map(|old| prefix.join(old));
     }
-    files.sort_by(|a, b| a.path.cmp(&b.path));
-    Some(Snapshot { root, files, statuses, ignored })
+    out.files.extend(files);
+    out.statuses.extend(statuses.into_iter().map(|(path, status)| (prefix.join(path), status)));
+    out.ignored.extend(ignored.into_iter().map(|path| prefix.join(path)));
+    for path in nested {
+        collect(&repo.join(&path), &prefix.join(&path), out);
+    }
+    Some(())
 }
 
 /// git 给的仓库根解析过符号链接；按 `dir` 的写法换回来，界面拿 `dir` 下的路径和它比前缀
@@ -504,6 +524,29 @@ Binary files /dev/null and b/logo.png differ
         assert_eq!(local_root(&link.join("sub"), real.clone()), link);
         assert_eq!(local_root(&link, real.clone()), link);
         assert_eq!(local_root(&real.join("sub"), real.clone()), real);
+        std::fs::remove_dir_all(&base).unwrap();
+    }
+
+    #[test]
+    fn reads_nested_repositories() {
+        let base = std::env::temp_dir().join(format!("runode-git-nested-{}", std::process::id()));
+        let nested = base.join("wt/inner");
+        std::fs::create_dir_all(&nested).unwrap();
+        let run = |dir: &Path, args: &[&str]| assert!(git(dir, args).is_some(), "git {args:?}");
+        let commit = |dir: &Path| {
+            std::fs::write(dir.join("a.txt"), "one\n").unwrap();
+            run(dir, &["init", "-q"]);
+            run(dir, &["add", "a.txt"]);
+            run(dir, &["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "init"]);
+            std::fs::write(dir.join("a.txt"), "two\n").unwrap();
+        };
+        commit(&base);
+        commit(&nested);
+        let snapshot = snapshot(&base).unwrap();
+        let paths: Vec<_> = snapshot.files.iter().map(|file| file.path.clone()).collect();
+        assert_eq!(paths, vec![PathBuf::from("a.txt"), PathBuf::from("wt/inner/a.txt")]);
+        assert_eq!((snapshot.files[1].added, snapshot.files[1].removed), (1, 1));
+        assert_eq!(snapshot.statuses[Path::new("wt/inner/a.txt")], FileStatus::Modified);
         std::fs::remove_dir_all(&base).unwrap();
     }
 
