@@ -114,22 +114,20 @@ impl TerminalView {
                 }
                 let updated = this.update_in(cx, |view, window, cx| {
                     if !output.is_empty() {
-                        let was_working = view.session.agent.is_some_and(Agent::is_working);
-                        // 进出目录、启动或退出程序时通常都有输出，顺带重读前台进程。
-                        let fallback_changed = view.refresh_foreground_soon(cx);
-                        if view.session.feed(&output) || fallback_changed {
-                            cx.emit(TerminalEvent::TitleChanged);
-                        }
-                        // 关掉建议时也取走，只是不记。
-                        let commands = view.session.take_commands();
-                        if view.config.command_suggestions {
-                            commands.into_iter().for_each(history::record);
-                        }
-                        view.input_changed = true;
-                        view.completion_output(cx);
-                        if was_working && !view.session.agent.is_some_and(Agent::is_working) {
-                            cx.emit(TerminalEvent::AgentFinished);
-                        }
+                        view.notify_agent_finished(cx, |view, cx| {
+                            // 进出目录、启动或退出程序时通常都有输出，顺带重读前台进程。
+                            let fallback_changed = view.refresh_foreground_soon(cx);
+                            if view.session.feed(&output) || fallback_changed {
+                                cx.emit(TerminalEvent::TitleChanged);
+                            }
+                            // 关掉建议时也取走，只是不记。
+                            let commands = view.session.take_commands();
+                            if view.config.command_suggestions {
+                                commands.into_iter().for_each(history::record);
+                            }
+                            view.input_changed = true;
+                            view.completion_output(cx);
+                        });
                         // 有输出（包括键入的回显）时光标先亮起，免得打字时看不到它。
                         view.reset_cursor_blink(window, cx);
                     }
@@ -348,17 +346,25 @@ impl TerminalView {
             this.update(cx, |view, cx| {
                 view._foreground_refresh = None;
                 view.foreground_read_at = Instant::now();
-                let was_working = view.session.agent.is_some_and(Agent::is_working);
-                if view.session.refresh_fallback_title() {
-                    cx.emit(TerminalEvent::TitleChanged);
-                }
-                if was_working && !view.session.agent.is_some_and(Agent::is_working) {
-                    cx.emit(TerminalEvent::AgentFinished);
-                }
+                view.notify_agent_finished(cx, |view, cx| {
+                    if view.session.refresh_fallback_title() {
+                        cx.emit(TerminalEvent::TitleChanged);
+                    }
+                });
             })
             .ok();
         }));
         false
+    }
+
+    /// 执行 `update`；前台 agent 本来在工作、执行完不在工作了（干完了、等着输入或者退出了）时
+    /// 通知外层 `TerminalEvent::AgentFinished`。
+    fn notify_agent_finished(&mut self, cx: &mut Context<Self>, update: impl FnOnce(&mut Self, &mut Context<Self>)) {
+        let was_working = self.session.agent.is_some_and(Agent::is_working);
+        update(self, cx);
+        if was_working && !self.session.agent.is_some_and(Agent::is_working) {
+            cx.emit(TerminalEvent::AgentFinished);
+        }
     }
 
     /// 让光标立即亮起，并从头开始计闪烁周期；没有焦点时不闪，也就不启动计时器。

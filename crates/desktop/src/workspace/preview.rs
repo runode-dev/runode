@@ -27,7 +27,7 @@ use runode_shared_types::{color::Rgb, theme};
 
 use super::{
     WindowView,
-    project::{ADDED, MODIFIED, REMOVED, RENAMED},
+    project::{ADDED, MODIFIED, REMOVED, RENAMED, panel_message, panel_shell},
 };
 use crate::{
     config::AppConfig,
@@ -60,11 +60,16 @@ pub(in crate::workspace) struct Preview {
     /// 每读一次换一个新的，旧的置位让后台高亮停下。后台任务拿着读的那次的这一个，读完时
     /// 和这里的不是同一个（`Arc::ptr_eq`）就说明已经换了文件或又读了一次，丢掉结果。
     cancel: Arc<AtomicBool>,
+    /// 行号旁的改动标记，由 `refresh_marks` 在 git 状态变了或重读了文件时重算，不每帧算。
+    marks: HashMap<u32, Mark>,
 }
 
 enum Loaded {
     Text {
-        text: runode_preview::Text,
+        /// 和后台高亮共用，不用再复制一份。
+        lines: Arc<Vec<String>>,
+        /// 文件太大，只读了前面这些行。
+        truncated: bool,
         /// 后台高亮完之前为空；重读时留着上一次的，行对不上也只是颜色暂时不准。
         highlights: Option<Arc<Vec<Vec<Span>>>>,
         /// 最长的一行，列表按它的宽度横向滚动。
@@ -93,7 +98,21 @@ impl Preview {
             selecting: false,
             scroll: UniformListScrollHandle::new(),
             cancel: Arc::new(AtomicBool::new(false)),
+            marks: HashMap::new(),
         }
+    }
+
+    /// 按仓库的 git 状态 `git` 重算改动标记；不在仓库里或文件不在仓库下时没有标记。
+    pub fn refresh_marks(&mut self, git: Option<&git::Snapshot>) {
+        self.marks = git
+            .and_then(|git| {
+                let rel = self.path.strip_prefix(&git.root).ok().map(Path::to_path_buf).or_else(|| {
+                    let root = fs::canonicalize(&git.root).ok()?;
+                    self.real_path.strip_prefix(root).ok().map(Path::to_path_buf)
+                })?;
+                Some(line_marks(git, &rel))
+            })
+            .unwrap_or_default();
     }
 
     /// 监听到的这些路径里有没有正在预览的文件。
@@ -103,7 +122,7 @@ impl Preview {
 
     fn lines(&self) -> Option<&[String]> {
         match &self.content {
-            Some(Loaded::Text { text, .. }) => Some(&text.lines),
+            Some(Loaded::Text { lines, .. }) => Some(lines),
             _ => None,
         }
     }
@@ -142,6 +161,20 @@ fn gpui_format(format: ImageFormat) -> gpui::ImageFormat {
         ImageFormat::Tiff => gpui::ImageFormat::Tiff,
         ImageFormat::Ico => gpui::ImageFormat::Ico,
         ImageFormat::Svg => gpui::ImageFormat::Svg,
+    }
+}
+
+/// 读到的内容换成预览栏存的样子，在后台做：文本包进 `Arc`、找出最长的行，UI 线程只管换上。
+fn loaded(content: Content) -> Loaded {
+    match content {
+        Content::Text(text) => {
+            let widest = widest_line(&text.lines);
+            Loaded::Text { lines: Arc::new(text.lines), truncated: text.truncated, highlights: None, widest }
+        }
+        Content::Image { format, bytes } => Loaded::Image(Arc::new(Image::from_bytes(gpui_format(format), bytes))),
+        Content::Binary => Loaded::Note(Note::Binary),
+        Content::TooLarge => Loaded::Note(Note::TooLarge),
+        Content::Unreadable(err) => Loaded::Note(Note::Unreadable(err)),
     }
 }
 
@@ -325,42 +358,37 @@ impl WindowView {
             let path = path.clone();
             async move {
                 let stamp = file_stamp(&path);
-                (runode_preview::load(&path), stamp)
+                (loaded(runode_preview::load(&path)), stamp)
             }
         });
         cx.spawn(async move |this, cx| {
-            let (content, stamp) = job.await;
+            let (mut content, stamp) = job.await;
             let lines = this
                 .update(cx, |this, cx| {
-                    let preview = this.preview_for(id, &cancel)?;
+                    let (preview, git) = this.preview_for(id, &cancel)?;
                     preview.stamp = stamp;
                     preview.release_image(cx);
                     let old_highlights = match preview.content.take() {
                         Some(Loaded::Text { highlights, .. }) => highlights,
                         _ => None,
                     };
-                    let mut lines = None;
-                    preview.content = Some(match content {
-                        Content::Text(text) => {
-                            lines = Some(Arc::new(text.lines.clone()));
-                            let widest = widest_line(&text.lines);
+                    let lines = match &mut content {
+                        Loaded::Text { lines, highlights, .. } => {
+                            *highlights = old_highlights;
                             if let Some((anchor, head)) = &mut preview.selection {
-                                let last = text.lines.len().saturating_sub(1);
+                                let last = lines.len().saturating_sub(1);
                                 *anchor = (*anchor).min(last);
                                 *head = (*head).min(last);
                             }
-                            Loaded::Text { text, highlights: old_highlights, widest }
+                            Some(lines.clone())
                         }
-                        Content::Image { format, bytes } => {
-                            Loaded::Image(Arc::new(Image::from_bytes(gpui_format(format), bytes)))
+                        _ => {
+                            preview.selection = None;
+                            None
                         }
-                        Content::Binary => Loaded::Note(Note::Binary),
-                        Content::TooLarge => Loaded::Note(Note::TooLarge),
-                        Content::Unreadable(err) => Loaded::Note(Note::Unreadable(err)),
-                    });
-                    if lines.is_none() {
-                        preview.selection = None;
-                    }
+                    };
+                    preview.content = Some(content);
+                    preview.refresh_marks(git);
                     cx.notify();
                     lines
                 })
@@ -376,7 +404,7 @@ impl WindowView {
                 })
                 .await;
             this.update(cx, |this, cx| {
-                if let Some(preview) = this.preview_for(id, &cancel)
+                if let Some((preview, _)) = this.preview_for(id, &cancel)
                     && let Some(Loaded::Text { highlights: slot, .. }) = &mut preview.content
                 {
                     *slot = highlights.map(Arc::new);
@@ -388,10 +416,16 @@ impl WindowView {
         .detach();
     }
 
-    /// workspace `id` 的预览，还是拿着 `cancel` 的那次读的时才有。
-    fn preview_for(&mut self, id: super::model::WorkspaceId, cancel: &Arc<AtomicBool>) -> Option<&mut Preview> {
+    /// workspace `id` 的预览和它最近读到的 git 状态，预览还是拿着 `cancel` 的那次读的时才有。
+    fn preview_for(
+        &mut self,
+        id: super::model::WorkspaceId,
+        cancel: &Arc<AtomicBool>,
+    ) -> Option<(&mut Preview, Option<&git::Snapshot>)> {
         let workspace = self.workspaces.iter_mut().find(|workspace| workspace.id == id)?;
-        workspace.project.preview.as_mut().filter(|preview| Arc::ptr_eq(&preview.cancel, cancel))
+        let project = &mut workspace.project;
+        let preview = project.preview.as_mut().filter(|preview| Arc::ptr_eq(&preview.cancel, cancel))?;
+        Some((preview, project.git.as_ref()))
     }
 
     fn copy_preview(&mut self, _: &Copy, _: &mut Window, cx: &mut Context<Self>) {
@@ -486,9 +520,6 @@ impl WindowView {
                 }),
             );
         let header = self.panel_header(rightmost, fg).child(title).child(close);
-        let message = |text: String| {
-            div().flex_1().flex().items_center().justify_center().px(px(16.)).text_color(dim).child(text)
-        };
         let body: AnyElement = match &preview.content {
             None => div().flex_1().into_any_element(),
             Some(Loaded::Note(note)) => {
@@ -497,7 +528,7 @@ impl WindowView {
                     Note::TooLarge => rust_i18n::t!("preview.too_large").into_owned(),
                     Note::Unreadable(err) => rust_i18n::t!("preview.unreadable", error = err).into_owned(),
                 };
-                message(text).into_any_element()
+                panel_message(text, fg).into_any_element()
             }
             Some(Loaded::Image(image)) => div()
                 .flex_1()
@@ -508,9 +539,9 @@ impl WindowView {
                 .items_start()
                 .child(img(image.clone()).max_w_full().max_h_full())
                 .into_any_element(),
-            Some(Loaded::Text { text, widest, .. }) => {
-                let count = text.lines.len() + usize::from(text.truncated);
-                let digits = text.lines.len().to_string().len();
+            Some(Loaded::Text { lines, truncated, widest, .. }) => {
+                let count = lines.len() + usize::from(*truncated);
+                let digits = lines.len().to_string().len();
                 // 行号一栏按位数定宽，等宽字体一个数字大约 0.6 个字号宽。
                 let gutter = (digits as f32 * font_size * 0.62 + 16.).ceil();
                 uniform_list(
@@ -527,20 +558,12 @@ impl WindowView {
             }
         };
         Some(
-            div()
-                .id("preview-panel")
+            panel_shell("preview-panel", width, fg)
                 .key_context("Preview")
                 .track_focus(&self.preview_focus)
                 .on_action(cx.listener(Self::copy_preview))
                 .on_action(cx.listener(Self::select_all_preview))
-                .flex_none()
-                .w(px(width))
-                .h_full()
-                .flex()
-                .flex_col()
                 .bg(hsla(bg))
-                .border_l_1()
-                .border_color(hsla(fg).opacity(0.12))
                 .text_size(px(font_size))
                 .child(header)
                 .child(body),
@@ -560,31 +583,20 @@ impl WindowView {
         let Some(preview) = self.preview() else {
             return Vec::new();
         };
-        let Some(Loaded::Text { text, highlights, .. }) = &preview.content else {
+        let Some(Loaded::Text { lines, highlights, .. }) = &preview.content else {
             return Vec::new();
         };
-        let project = &self.workspace().project;
-        let marks = project
-            .git
-            .as_ref()
-            .and_then(|git| {
-                let rel = preview.path.strip_prefix(&git.root).ok().map(Path::to_path_buf).or_else(|| {
-                    let root = fs::canonicalize(&git.root).ok()?;
-                    preview.real_path.strip_prefix(root).ok().map(Path::to_path_buf)
-                })?;
-                Some(line_marks(git, &rel))
-            })
-            .unwrap_or_default();
+        let marks = &preview.marks;
         let palette = ansi_palette(cx);
         let selected = preview.selected_lines().unwrap_or(0..0);
         let selected_bg = hsla(bg.mix(RENAMED, 0.30));
         let dim = hsla(fg).opacity(0.4);
-        let last = text.lines.len();
+        let last = lines.len();
         let row_height = font_size + ROW_EXTRA_HEIGHT;
         range
             .map(|ix| {
                 let row = div().flex_none().h(px(row_height)).w_full().flex().items_center().whitespace_nowrap();
-                let Some(line) = text.lines.get(ix) else {
+                let Some(line) = lines.get(ix) else {
                     // 截断了的文件末尾多一行说明。
                     return row
                         .pl(px(gutter + MARK_WIDTH + 8.))
@@ -660,6 +672,7 @@ impl WindowView {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::HashSet;
     use git::{FileDiff, FileStatus, Hunk, Line};
 
     fn line(kind: LineKind, old: Option<u32>, new: Option<u32>) -> Line {
@@ -734,7 +747,7 @@ mod tests {
             staged: vec![staged],
             unstaged: vec![unstaged],
             statuses: HashMap::new(),
-            ignored: Vec::new(),
+            ignored: HashSet::new(),
         };
         let marks = line_marks(&snapshot, Path::new("a.rs"));
         // 工作区新加的第 1 行，以及暂存区里加的第 2 行，在工作区里是第 3 行。

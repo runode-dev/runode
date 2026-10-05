@@ -52,7 +52,7 @@ fn main() {
         let mut shell = prespawn::take();
         let saved = workspace::saved_window_options(cx);
         if saved.is_empty() {
-            open_window(cx, None, shell.take());
+            open_window(cx, shell.take());
         }
         for (saved, options) in saved {
             open_window_with(cx, options, Some(saved), shell.take());

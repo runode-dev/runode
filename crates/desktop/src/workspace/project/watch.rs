@@ -66,7 +66,7 @@ impl ProjectWatch {
         if let Some(ix) = rel.components().position(|part| part.as_os_str() == ".git") {
             return git_internal(&rel.components().skip(ix + 1).collect::<PathBuf>());
         }
-        let ignored = project.git.as_ref().is_some_and(|git| rel.ancestors().any(|dir| git.ignored.iter().any(|ig| ig == dir)));
+        let ignored = project.git.as_ref().is_some_and(|git| git.is_ignored(rel));
         !ignored || rel.parent().is_some_and(|parent| project.listings.contains_key(&self.root.join(parent)))
     }
 }

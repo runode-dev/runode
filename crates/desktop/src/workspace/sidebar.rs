@@ -1,16 +1,16 @@
 //! 窗口左侧的 workspace 列表：切换、拖动排序、改名、关闭和新建。
 
 use gpui::{
-    AnyElement, BoxShadow, Context, CursorStyle, Div, Focusable, Hsla, MouseButton, MouseDownEvent, Render,
-    SharedString, Stateful, Window, div, point, prelude::*, px, svg,
+    AnyElement, Context, CursorStyle, Div, Focusable, Hsla, MouseButton, MouseDownEvent, Render, SharedString,
+    Stateful, Window, div, prelude::*, px,
 };
 use runode_shared_types::color::Rgb;
 
 use super::{
     AGENT_MARK_WIDTH, DIVIDER_GRAB_WIDTH, Divider, NewWorkspace, RenameWorkspace, Renaming, SelectLastWorkspace,
-    SelectWorkspace, TAB_CLOSE_SIZE, TITLEBAR_HEIGHT, TRAFFIC_LIGHTS_WIDTH, ToggleSidebar, WindowView,
+    SelectWorkspace, TAB_CLOSE_SIZE, TITLEBAR_HEIGHT, TRAFFIC_LIGHTS_WIDTH, ToggleSidebar, WindowView, drag_window,
     model::{WorkspaceId, display_dir},
-    titlebar::{agent_mark, shortcut_hint},
+    titlebar::{agent_mark, close_button, drag_chip, icon_toggle, shortcut_hint},
 };
 use crate::{
     assets::SIDEBAR_ICON,
@@ -49,26 +49,7 @@ struct DraggedWorkspace {
 
 impl Render for DraggedWorkspace {
     fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
-        div()
-            .w(px(self.width - 12.))
-            .h(px(ROW_HEIGHT))
-            .px(px(8.))
-            .flex()
-            .items_center()
-            .rounded(px(6.))
-            .bg(self.bg)
-            .border_1()
-            .border_color(self.fg.opacity(0.15))
-            .shadow(vec![BoxShadow {
-                color: Hsla::black().opacity(0.3),
-                offset: point(px(0.), px(2.)),
-                blur_radius: px(8.),
-                spread_radius: px(0.),
-                inset: false,
-            }])
-            .text_size(px(12.))
-            .text_color(self.fg)
-            .child(div().min_w_0().truncate().child(self.name.clone()))
+        drag_chip(px(self.width - 12.), px(ROW_HEIGHT), self.name.clone(), self.fg, self.bg)
     }
 }
 
@@ -116,31 +97,14 @@ impl WindowView {
 
     /// 红绿灯右边收起、展开侧栏的按钮，侧栏收着时也在原处，不随侧栏跳动。
     pub(super) fn render_sidebar_toggle(&self, fg: Rgb, bg: Rgb, cx: &mut Context<Self>) -> Stateful<Div> {
-        let hover_bg = hsla(bg.mix(fg, 0.10));
         let text = if self.sidebar_visible() { rust_i18n::t!("tooltip.hide_sidebar") } else { rust_i18n::t!("tooltip.show_sidebar") };
         let tooltip = tooltip(text, Some(&ToggleSidebar), fg, bg);
-        let fg = hsla(fg);
-        let group = "sidebar-toggle";
-        div()
-            .id(group)
-            .group(group)
+        icon_toggle("sidebar-toggle", SIDEBAR_ICON, false, fg, bg)
             .absolute()
             .left(px(TRAFFIC_LIGHTS_WIDTH))
             .top(px((TITLEBAR_HEIGHT - SIDEBAR_TOGGLE_HEIGHT) / 2.))
             .w(px(SIDEBAR_TOGGLE_WIDTH))
             .h(px(SIDEBAR_TOGGLE_HEIGHT))
-            .rounded(px(4.))
-            .flex()
-            .items_center()
-            .justify_center()
-            .hover(|button| button.bg(hover_bg))
-            .child(
-                svg()
-                    .path(SIDEBAR_ICON)
-                    .size(px(16.))
-                    .text_color(fg.opacity(0.55))
-                    .group_hover(group, |icon| icon.text_color(fg)),
-            )
             .tooltip(tooltip)
             .on_mouse_down(
                 MouseButton::Left,
@@ -170,13 +134,7 @@ impl WindowView {
                 div()
                     .flex_none()
                     .h(px(if fullscreen { 6. } else { TITLEBAR_HEIGHT + 6. }))
-                    .on_mouse_down(MouseButton::Left, |event, window, _| {
-                        if event.click_count >= 2 {
-                            window.titlebar_double_click();
-                        } else {
-                            window.start_window_move();
-                        }
-                    }),
+                    .on_mouse_down(MouseButton::Left, drag_window),
             )
             .child(
                 div()
@@ -322,22 +280,12 @@ impl WindowView {
                     .justify_end()
                     .child(div().group_hover(group.clone(), |hint| hint.invisible()).child(hint))
                     .child(
-                        div()
-                            .id(("workspace-close", ix))
+                        close_button(("workspace-close", ix), fg)
                             .absolute()
                             .right_0()
                             .top(px((ROW_HEIGHT - TAB_CLOSE_SIZE) / 2.))
-                            .size(px(TAB_CLOSE_SIZE))
-                            .rounded(px(3.))
-                            .flex()
-                            .items_center()
-                            .justify_center()
                             .invisible()
                             .group_hover(group, |close| close.visible())
-                            .text_size(px(14.))
-                            .text_color(fg.opacity(0.75))
-                            .hover(|close| close.bg(fg.opacity(0.18)).text_color(fg))
-                            .child("×")
                             .tooltip(close_tooltip)
                             .on_mouse_down(
                                 MouseButton::Left,

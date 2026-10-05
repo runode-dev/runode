@@ -28,8 +28,8 @@ use std::{
 
 use futures::StreamExt as _;
 use gpui::{
-    Action, App, Context, Entity, EntityId, FocusHandle, Focusable, MouseButton, Render, ScrollHandle,
-    SharedString, Subscription, Task, Window, WindowBounds, actions, div, prelude::*, px,
+    Action, App, Context, Entity, EntityId, FocusHandle, Focusable, MouseButton, MouseDownEvent, Render,
+    ScrollHandle, SharedString, Subscription, Task, Window, WindowBounds, actions, div, prelude::*, px,
 };
 use runode_shared_types::pane::{Axis, Direction, SplitId};
 
@@ -118,6 +118,15 @@ const TAB_MAX_WIDTH: f32 = 200.;
 const AGENT_MARK_WIDTH: f32 = 12.;
 /// 分隔线两侧可以按住拖动的宽度。
 const DIVIDER_GRAB_WIDTH: f32 = 6.;
+
+/// 在标题栏这类能拖动窗口的地方按下鼠标：双击缩放窗口，否则开始拖动窗口。
+fn drag_window(event: &MouseDownEvent, window: &mut Window, _: &mut App) {
+    if event.click_count >= 2 {
+        window.titlebar_double_click();
+    } else {
+        window.start_window_move();
+    }
+}
 
 /// 正在用鼠标拖动的分隔线。
 #[derive(Clone, Copy)]
@@ -396,13 +405,7 @@ impl Render for WindowView {
                 .flex_none()
                 .flex()
                 .text_size(px(12.))
-                .on_mouse_down(MouseButton::Left, |event, window, _| {
-                    if event.click_count >= 2 {
-                        window.titlebar_double_click();
-                    } else {
-                        window.start_window_move();
-                    }
-                })
+                .on_mouse_down(MouseButton::Left, drag_window)
                 // 给红绿灯和侧栏开关让出的位置；后面跟着标签时右边画一条分隔线，和新建标签按钮
                 // 左边那条对称。
                 .child(div().flex_none().w(px(left_inset)).h_full().when(show_tabs && left_inset > 0., |inset| {

@@ -17,6 +17,24 @@ use crate::keys;
 /// 拖选到网格外时自动滚动的间隔，每次滚一行。
 const AUTOSCROLL_INTERVAL: Duration = Duration::from_millis(15);
 
+/// 一次滚轮滚了几行（可以带小数），按像素给的按单元格高度 `cell_height` 换算。正数表示内容
+/// 向下移动，即往回滚。
+pub(super) fn wheel_lines(delta: ScrollDelta, cell_height: Pixels) -> f32 {
+    match delta {
+        ScrollDelta::Lines(delta) => delta.y,
+        ScrollDelta::Pixels(delta) => f32::from(delta.y) / f32::from(cell_height),
+    }
+}
+
+/// 把这次滚的 `lines` 行累加进不足一行的余量 `remainder`，取出其中的整行。方向和 `lines` 相反：
+/// 正数表示往下（内容往上走）。
+pub(super) fn take_whole_lines(remainder: &mut f32, lines: f32) -> isize {
+    *remainder -= lines;
+    let whole = remainder.trunc();
+    *remainder -= whole;
+    whole as isize
+}
+
 impl TerminalView {
     pub(super) fn key_down(&mut self, event: &KeyDownEvent, _: &mut Window, cx: &mut Context<Self>) {
         // 输入法正在组字时，按键归输入法处理。
@@ -81,10 +99,7 @@ impl TerminalView {
         let Some(metrics) = self.metrics else {
             return;
         };
-        let lines = match event.delta {
-            ScrollDelta::Lines(delta) => delta.y,
-            ScrollDelta::Pixels(delta) => f32::from(delta.y) / f32::from(metrics.cell.height),
-        };
+        let lines = wheel_lines(event.delta, metrics.cell.height);
         // 滚轮增量为正表示内容向下移动，即往回滚到历史输出。程序没开鼠标上报时按像素
         // 平滑滚动回滚历史；开着时只能按整行发给程序。
         if !self.session.mouse_tracking() {
@@ -94,13 +109,11 @@ impl TerminalView {
             }
             return;
         }
-        self.scroll_remainder -= lines;
-        let whole = self.scroll_remainder.trunc();
-        self.scroll_remainder -= whole;
+        let whole = take_whole_lines(&mut self.scroll_remainder, lines);
         let Some(at) = self.grid_point(event.position) else {
             return;
         };
-        self.session.scroll(whole as isize, at, mouse_mods(&event.modifiers));
+        self.session.scroll(whole, at, mouse_mods(&event.modifiers));
         cx.notify();
     }
 

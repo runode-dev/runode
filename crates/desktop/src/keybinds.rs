@@ -16,7 +16,7 @@ use crate::{
     search_bar::{Cut, EndSearch, Redo, SearchNext, SearchPrevious, SearchSelection, StartSearch, Undo},
     terminal_view::{
         ClearScreen, Copy, DecreaseFontSize, IncreaseFontSize, JumpToPrompt, Paste, PasteSelection,
-        ResetFontSize, ScreenFile, ScrollPageDown, ScrollPageUp, ScrollToBottom, ScrollToSelection,
+        ResetFontSize, ScrollPageDown, ScrollPageUp, ScrollToBottom, ScrollToSelection,
         ScrollToTop, SelectAll, SendText, WriteScreenFile,
     },
     workspace::{
@@ -99,14 +99,7 @@ fn gpui_action(action: Action) -> (Box<dyn gpui::Action>, Contexts) {
         Action::SearchNext => (boxed(SearchNext), TERMINAL_AND_SEARCH),
         Action::SearchPrevious => (boxed(SearchPrevious), TERMINAL_AND_SEARCH),
         Action::EndSearch => (boxed(EndSearch), TERMINAL_AND_SEARCH),
-        Action::WriteScreenFile(file) => {
-            let file = match file {
-                keybind::ScreenFile::CopyPath => ScreenFile::CopyPath,
-                keybind::ScreenFile::PastePath => ScreenFile::PastePath,
-                keybind::ScreenFile::Open => ScreenFile::Open,
-            };
-            (boxed(WriteScreenFile(file)), TERMINAL)
-        }
+        Action::WriteScreenFile(file) => (boxed(WriteScreenFile(file)), TERMINAL),
         Action::IncreaseFontSize => (boxed(IncreaseFontSize), TERMINAL),
         Action::DecreaseFontSize => (boxed(DecreaseFontSize), TERMINAL),
         Action::ResetFontSize => (boxed(ResetFontSize), TERMINAL),
@@ -146,7 +139,6 @@ fn bind(cx: &mut App) {
     }
     let mut bindings = Vec::new();
     for (keys, action) in keybind::resolve(&keybinds) {
-        let action = keybind::parse_action(&action).expect("keybind was validated when parsed");
         let (action, contexts) = gpui_action(action);
         for context in contexts {
             let predicate = context.map(|c| gpui::KeyBindingContextPredicate::parse(c).unwrap().into());
@@ -190,7 +182,7 @@ mod tests {
             }
         }
         for (keys, action) in keybind::resolve(&[]) {
-            let (action, contexts) = gpui_action(keybind::parse_action(&action).unwrap());
+            let (action, contexts) = gpui_action(action);
             for context in contexts {
                 let predicate = context.map(|c| gpui::KeyBindingContextPredicate::parse(c).unwrap().into());
                 let loaded = KeyBinding::load(&keys, action.boxed_clone(), predicate, false, None, &gpui::DummyKeyboardMapper);

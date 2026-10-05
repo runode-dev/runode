@@ -101,41 +101,32 @@ impl Request {
                     let Some(cwd) = cwd else {
                         continue;
                     };
-                    let typed: String = self.plan.typed.chars().skip(*from).collect();
-                    let from = from + paths::dir_chars(&typed);
-                    for entry in paths::list(&typed, cwd, home.as_deref(), paths::Filter::Executables) {
-                        candidates.push(engine::path(entry.name, entry.is_dir, None, from));
-                    }
+                    let listed = paths::Filter::Executables;
+                    candidates.extend(self.path_candidates(*from, cwd, home.as_deref(), listed, |entry| {
+                        Some((entry.name, None))
+                    }));
                 }
-                _ => {}
-            }
-            let Source::Template { kind, filter, from, .. } = source else {
-                continue;
-            };
-            let Some(cwd) = cwd else {
-                continue;
-            };
-            let typed: String = self.plan.typed.chars().skip(*from).collect();
-            let listed = match kind {
-                TemplateType::Folders { .. } => paths::Filter::Folders,
-                _ => paths::Filter::All,
-            };
-            let filter = filter
-                .as_ref()
-                .and_then(|name| specs::dynamic(&self.plan.command).and_then(|data| data.filters().get(name)));
-            let from = from + paths::dir_chars(&typed);
-            for entry in paths::list(&typed, cwd, home.as_deref(), listed) {
-                let (name, description) = match filter {
-                    Some(filter) => {
-                        let kind = if entry.is_dir { PathSuggestionType::Folder } else { PathSuggestionType::File };
-                        let Some(kept) = filter.filter(Suggestion::new(entry.name), kind) else {
-                            continue;
+                Source::Template { kind, filter, from } => {
+                    let Some(cwd) = cwd else {
+                        continue;
+                    };
+                    let listed = match kind {
+                        TemplateType::Folders { .. } => paths::Filter::Folders,
+                        _ => paths::Filter::All,
+                    };
+                    let filter = filter
+                        .as_ref()
+                        .and_then(|name| specs::dynamic(&self.plan.command).and_then(|data| data.filters().get(name)));
+                    candidates.extend(self.path_candidates(*from, cwd, home.as_deref(), listed, |entry| {
+                        let Some(filter) = filter else {
+                            return Some((entry.name, None));
                         };
-                        (kept.exact_string, kept.description)
-                    }
-                    None => (entry.name, None),
-                };
-                candidates.push(engine::path(name, entry.is_dir, description, from));
+                        let kind = if entry.is_dir { PathSuggestionType::Folder } else { PathSuggestionType::File };
+                        let kept = filter.filter(Suggestion::new(entry.name), kind)?;
+                        Some((kept.exact_string, kept.description))
+                    }));
+                }
+                Source::Generator { .. } => {}
             }
         }
         // 命令名和命令自己的子命令按命令历史标上常用程度。
@@ -149,6 +140,28 @@ impl Request {
             };
         }
         candidates
+    }
+
+    /// 当前词从第 `from` 个字符起写的是路径：列出它的目录部分指向的目录，按 `listed` 挑选，
+    /// 再由 `keep` 决定每一项留不留、用什么名字和说明。候选从目录部分之后开始替换。
+    fn path_candidates(
+        &self,
+        from: usize,
+        cwd: &Path,
+        home: Option<&Path>,
+        listed: paths::Filter,
+        keep: impl Fn(paths::Entry) -> Option<(String, Option<String>)>,
+    ) -> Vec<Candidate> {
+        let typed: String = self.plan.typed.chars().skip(from).collect();
+        let from = from + paths::dir_chars(&typed);
+        paths::list(&typed, cwd, home, listed)
+            .into_iter()
+            .filter_map(|entry| {
+                let is_dir = entry.is_dir;
+                let (name, description) = keep(entry)?;
+                Some(engine::path(name, is_dir, description, from))
+            })
+            .collect()
     }
 
     /// 要在后台跑的生成器，按规格里的顺序。输入里有 shell 元字符、不能安全拼进命令的不算，

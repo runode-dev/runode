@@ -15,7 +15,7 @@
 use std::ops::Range;
 
 use gpui::{Bounds, ContentMask, Pixels, Point, Window, fill, point, px, size};
-use runode_completion::{self as completion, Kind};
+use runode_completion::{self as completion, Candidate, Kind};
 use runode_shared_types::{
     color::Rgb,
     frame::{Attrs, Frame},
@@ -171,6 +171,23 @@ fn kind_label(kind: Kind, detail: Option<&str>) -> String {
     }
 }
 
+/// `items` 列出的候选里出现的分组，按 `KINDS` 的先后，同一类里带不同参数名的分开列。
+pub(super) fn groups(candidates: &[Candidate], items: &[usize]) -> Vec<(Kind, Option<String>)> {
+    let mut groups = Vec::new();
+    for kind in KINDS {
+        let mut details: Vec<Option<&str>> = items
+            .iter()
+            .map(|&i| &candidates[i])
+            .filter(|c| c.kind == kind)
+            .map(|c| c.detail.as_deref())
+            .collect();
+        details.sort_unstable();
+        details.dedup();
+        groups.extend(details.into_iter().map(|detail| (kind, detail.map(str::to_owned))));
+    }
+    groups
+}
+
 /// 名字一列的宽度：看得到的名字都不超过 `SHORT_NAME` 格时取最长的；有更长的时取九成名字放得下
 /// 的宽度（至少 `SHORT_NAME`），个别特别长的名字自己伸进说明那一列，不为它把整列撑宽。
 /// 最多占终端宽度的 `NAME_COLUMN_PERCENT`。
@@ -208,21 +225,8 @@ impl TerminalView {
         // 当前词的起点所在的行：从光标往回数，词折行时在上面几行。
         let back = menu.cells_before_cursor.saturating_sub(usize::from(cursor.x));
         let word_row = usize::from(cursor.y).saturating_sub(back.div_ceil(cols.max(1)));
-        // 结果里出现的分组，按 `KINDS` 的先后，同一类里带不同参数名的分开列。
-        let mut groups: Vec<(Kind, Option<&str>)> = Vec::new();
-        for kind in KINDS {
-            let mut details: Vec<Option<&str>> = menu
-                .items
-                .iter()
-                .map(|&i| &menu.candidates[i])
-                .filter(|c| c.kind == kind)
-                .map(|c| c.detail.as_deref())
-                .collect();
-            details.sort_unstable();
-            details.dedup();
-            groups.extend(details.into_iter().map(|detail| (kind, detail)));
-        }
-        let labels: Vec<String> = groups.iter().map(|&(kind, detail)| kind_label(kind, detail)).collect();
+        let labels: Vec<String> =
+            menu.groups.iter().map(|(kind, detail)| kind_label(*kind, detail.as_deref())).collect();
         let widths: Vec<usize> = labels.iter().map(|label| completion::cells(label)).collect();
         let Some(layout) = layout(cols, rows, usize::from(cursor.y), word_row, menu.items.len(), &widths) else {
             menu.shown = None;
@@ -266,7 +270,7 @@ impl TerminalView {
 
         // 第一行：选中的是第几项/匹配上几项，筛掉了一些时再用暗色写出一共几项；还在跑生成器时
         // 写「加载中」；上面或下面还有看不到的项时在行尾画箭头；中间一条横线。
-        let total = completion::total(&menu.candidates);
+        let total = menu.total;
         let selected = if menu.items.is_empty() { 0 } else { menu.selected + 1 };
         let count = format!("{selected}/{}", menu.items.len());
         let mut col = completion::cells(&count);
@@ -306,7 +310,7 @@ impl TerminalView {
             let row = top_row + 1 + n as i32;
             let mut col = 0;
             for &i in line {
-                spans.push(plain(row, col, cols, labels[i].clone(), color(groups[i].0)));
+                spans.push(plain(row, col, cols, labels[i].clone(), color(menu.groups[i].0)));
                 col += widths[i] + 1;
             }
         }

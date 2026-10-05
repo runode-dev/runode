@@ -12,7 +12,7 @@ use runode_shared_types::color::Rgb;
 
 use super::{
     WindowView,
-    project::{ADDED, Decoration, REMOVED, status_color},
+    project::{Decoration, added_label, panel_shell, removed_label, status_color},
 };
 use crate::{
     assets::{CHEVRON_DOWN_ICON, CHEVRON_RIGHT_ICON, EYE_ICON, EYE_OFF_ICON},
@@ -88,9 +88,7 @@ impl WindowView {
             .border_b_1()
             .border_color(hsla(fg).opacity(0.12))
             .when_some(dirty, |toolbar, git| {
-                toolbar
-                    .child(div().flex_none().text_color(hsla(ADDED)).child(format!("+{}", git.added())))
-                    .child(div().flex_none().text_color(hsla(REMOVED)).child(format!("−{}", git.removed())))
+                toolbar.child(added_label(git.added())).child(removed_label(git.removed()))
             })
             .child(div().flex_1())
             .child(ignored_toggle);
@@ -103,16 +101,8 @@ impl WindowView {
         .track_scroll(&workspace.project.files_scroll)
         .flex_1()
         .p(px(4.));
-        div()
-            .id("files-panel")
-            .flex_none()
-            .w(px(width))
-            .h_full()
-            .flex()
-            .flex_col()
+        panel_shell("files-panel", width, fg)
             .bg(hsla(bg.mix(fg, 0.03)))
-            .border_l_1()
-            .border_color(hsla(fg).opacity(0.12))
             .text_size(px(font_size))
             .child(header)
             .child(toolbar)

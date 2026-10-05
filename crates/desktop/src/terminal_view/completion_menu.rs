@@ -5,11 +5,14 @@ mod paint;
 
 use std::{path::PathBuf, time::Instant};
 
-use gpui::{Context, Keystroke, MouseDownEvent, ScrollDelta, ScrollWheelEvent, Task};
+use gpui::{Context, Keystroke, MouseDownEvent, ScrollWheelEvent, Task};
 
-use runode_completion::{self as completion, Candidate, GeneratorJob, GeneratorResults, Request, Shell, generators};
+use runode_completion::{self as completion, Candidate, GeneratorJob, GeneratorResults, Kind, Request, Shell, generators};
 
-use super::{ECHO_WAIT, TerminalView};
+use super::{
+    ECHO_WAIT, TerminalView,
+    input::{take_whole_lines, wheel_lines},
+};
 
 /// 开着的补全菜单。
 pub(super) struct CompletionMenu {
@@ -31,6 +34,10 @@ pub(super) struct CompletionMenu {
     candidates: Vec<Candidate>,
     /// 列出来的候选在 `candidates` 里的下标，排好了序。
     items: Vec<usize>,
+    /// `candidates` 里能列出来的一共几项，见 `completion::total`；随候选重算，画的时候直接用。
+    total: usize,
+    /// `items` 里出现的分组，见 `paint::groups`；随候选重算，画的时候直接用。
+    groups: Vec<(Kind, Option<String>)>,
     /// 选中的是 `items` 里的第几项。
     selected: usize,
     /// 显示的第一行是 `items` 里的第几项，画的时候按能放下的行数调整，让选中项总在里面。
@@ -58,6 +65,13 @@ struct Generated {
     _task: Task<()>,
 }
 
+impl Generated {
+    /// 是不是 `job` 这个生成器的结果：命令、起点和组号都一样。
+    fn is_for(&self, job: &GeneratorJob) -> bool {
+        self.command == job.command && self.from == job.from && self.group == job.group
+    }
+}
+
 /// 回显之前按下的补全键，等屏幕上的输入跟上了再处理。
 pub(super) enum PendingKey {
     Tab,
@@ -82,6 +96,8 @@ impl CompletionMenu {
             self.candidates.extend(generated.results.iter().flatten().cloned());
         }
         self.items = completion::rank(&self.candidates, &self.typed);
+        self.total = completion::total(&self.candidates);
+        self.groups = paint::groups(&self.candidates, &self.items);
         self.selected = selected
             .and_then(|(from, value)| {
                 self.items.iter().position(|&i| self.candidates[i].from == from && self.candidates[i].value == value)
@@ -182,6 +198,8 @@ impl TerminalView {
             generated: Vec::new(),
             candidates: Vec::new(),
             items: Vec::new(),
+            total: 0,
+            groups: Vec::new(),
             selected: 0,
             top: 0,
             scroll_remainder: 0.,
@@ -214,10 +232,9 @@ impl TerminalView {
             _ => Vec::new(),
         };
         // 不再需要的生成器丢掉，还在跑的随之取消。
-        menu.generated
-            .retain(|g| jobs.iter().any(|job| job.command == g.command && job.from == g.from && job.group == g.group));
+        menu.generated.retain(|g| jobs.iter().any(|job| g.is_for(job)));
         for job in jobs {
-            if menu.generated.iter().any(|g| g.command == job.command && g.from == job.from && g.group == job.group) {
+            if menu.generated.iter().any(|g| g.is_for(&job)) {
                 continue;
             }
             let env = generators::Environment {
@@ -242,11 +259,7 @@ impl TerminalView {
         let Some(menu) = &mut self.completion else {
             return;
         };
-        let Some(generated) = menu
-            .generated
-            .iter_mut()
-            .find(|g| g.command == job.command && g.from == job.from && g.group == job.group)
-        else {
+        let Some(generated) = menu.generated.iter_mut().find(|g| g.is_for(&job)) else {
             return;
         };
         generated.results = Some(completion::generated(results, &job));
@@ -396,16 +409,10 @@ impl TerminalView {
         let (Some(metrics), Some(menu)) = (self.metrics, &mut self.completion) else {
             return false;
         };
-        let lines = match event.delta {
-            ScrollDelta::Lines(delta) => delta.y,
-            ScrollDelta::Pixels(delta) => f32::from(delta.y) / f32::from(metrics.cell.height),
-        };
         // 滚轮往下（内容往上走）时选中下面的项。
-        menu.scroll_remainder -= lines;
-        let whole = menu.scroll_remainder.trunc();
-        menu.scroll_remainder -= whole;
-        if whole != 0. {
-            menu.select(whole as isize);
+        let whole = take_whole_lines(&mut menu.scroll_remainder, wheel_lines(event.delta, metrics.cell.height));
+        if whole != 0 {
+            menu.select(whole);
         }
         cx.notify();
         true

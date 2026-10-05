@@ -2,7 +2,7 @@
 
 use gpui::{
     Action, Animation, AnimationExt, AnyElement, App, BoxShadow, Context, Div, ElementId, Hsla, MouseButton,
-    MouseDownEvent, Pixels, Render, SharedString, Stateful, TitlebarOptions, Window, div, point, prelude::*, px,
+    MouseDownEvent, Pixels, Render, SharedString, Stateful, TitlebarOptions, Window, div, point, prelude::*, px, svg,
 };
 use runode_shared_types::{
     agent::{Agent, AgentState},
@@ -49,28 +49,71 @@ struct DraggedTab {
 
 impl Render for DraggedTab {
     fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
-        div()
-            .w(self.width)
-            .h(px(TITLEBAR_HEIGHT))
-            .px(px(8.))
-            .flex()
-            .items_center()
-            .justify_center()
-            .rounded(px(6.))
-            .bg(self.bg)
-            .border_1()
-            .border_color(self.fg.opacity(0.15))
-            .shadow(vec![BoxShadow {
-                color: Hsla::black().opacity(0.3),
-                offset: point(px(0.), px(2.)),
-                blur_radius: px(8.),
-                spread_radius: px(0.),
-                inset: false,
-            }])
-            .text_size(px(12.))
-            .text_color(self.fg)
-            .child(div().min_w_0().truncate().child(self.title.clone()))
+        drag_chip(self.width, px(TITLEBAR_HEIGHT), self.title.clone(), self.fg, self.bg).justify_center()
     }
+}
+
+/// 拖动标签或 workspace 时跟着鼠标的那张卡片：带边框和阴影的圆角块，`label` 放不下时截断。
+pub(super) fn drag_chip(width: Pixels, height: Pixels, label: SharedString, fg: Hsla, bg: Hsla) -> Div {
+    div()
+        .w(width)
+        .h(height)
+        .px(px(8.))
+        .flex()
+        .items_center()
+        .rounded(px(6.))
+        .bg(bg)
+        .border_1()
+        .border_color(fg.opacity(0.15))
+        .shadow(vec![BoxShadow {
+            color: Hsla::black().opacity(0.3),
+            offset: point(px(0.), px(2.)),
+            blur_radius: px(8.),
+            spread_radius: px(0.),
+            inset: false,
+        }])
+        .text_size(px(12.))
+        .text_color(fg)
+        .child(div().min_w_0().truncate().child(label))
+}
+
+/// 标签和侧栏 workspace 行上的关闭按钮；什么时候显示、放在哪、点了做什么由调用方接着写。
+pub(super) fn close_button(id: impl Into<ElementId>, fg: Hsla) -> Stateful<Div> {
+    div()
+        .id(id)
+        .size(px(TAB_CLOSE_SIZE))
+        .rounded(px(3.))
+        .flex()
+        .items_center()
+        .justify_center()
+        .text_size(px(14.))
+        .text_color(fg.opacity(0.75))
+        .hover(|close| close.bg(fg.opacity(0.18)).text_color(fg))
+        .child("×")
+}
+
+/// 标题栏上带图标的开关按钮，悬停时底色和图标变亮；`shown` 时底色一直亮着，图标也亮一些。
+/// 位置、尺寸、提示和点击由调用方接着写。
+pub(super) fn icon_toggle(id: &'static str, icon: &'static str, shown: bool, fg: Rgb, bg: Rgb) -> Stateful<Div> {
+    let hover_bg = hsla(bg.mix(fg, 0.10));
+    let active_bg = hsla(bg.mix(fg, 0.14));
+    let fg = hsla(fg);
+    div()
+        .id(id)
+        .group(id)
+        .rounded(px(4.))
+        .flex()
+        .items_center()
+        .justify_center()
+        .when(shown, |button| button.bg(active_bg))
+        .hover(|button| button.bg(hover_bg))
+        .child(
+            svg()
+                .path(icon)
+                .size(px(16.))
+                .text_color(fg.opacity(if shown { 0.9 } else { 0.55 }))
+                .group_hover(id, |icon| icon.text_color(fg)),
+        )
 }
 
 /// 居中的标题，前台是 agent 时前面加上它的状态标记。
@@ -250,14 +293,8 @@ impl WindowView {
                 this.move_tab(dragged.id, ix, window, cx);
             }))
             .child(
-                div()
-                    .id(("tab-close", ix))
+                close_button(("tab-close", ix), fg)
                     .flex_none()
-                    .size(px(TAB_CLOSE_SIZE))
-                    .rounded(px(3.))
-                    .flex()
-                    .items_center()
-                    .justify_center()
                     // 紧凑时平时宽度为零，悬停时才撑开，标题让出位置，两者不重叠。
                     // 不能用 display 切换：悬停状态在 prepaint 和 paint 之间可能变化，
                     // prepaint 时隐藏、paint 时显示会让 gpui 去画没 prepaint 过的子元素而 panic。
@@ -271,10 +308,6 @@ impl WindowView {
                             close.invisible().group_hover(group, |close| close.visible())
                         }
                     })
-                    .text_size(px(14.))
-                    .text_color(fg.opacity(0.75))
-                    .hover(|close| close.bg(fg.opacity(0.18)).text_color(fg))
-                    .child("×")
                     .tooltip(close_tooltip)
                     .on_mouse_down(
                         MouseButton::Left,

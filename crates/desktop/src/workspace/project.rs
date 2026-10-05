@@ -15,11 +15,14 @@ use std::{
     time::{Duration, Instant},
 };
 
-use gpui::{Action, Context, CursorStyle, Div, MouseButton, MouseDownEvent, Stateful, Window, div, prelude::*, px, svg};
+use gpui::{Action, Context, CursorStyle, Div, MouseButton, MouseDownEvent, Stateful, Window, div, prelude::*, px};
 use runode_git_status::FileStatus;
 use runode_shared_types::color::Rgb;
 
-use super::{DIVIDER_GRAB_WIDTH, Divider, TITLEBAR_HEIGHT, ToggleChanges, ToggleFiles, WindowView};
+use super::{
+    DIVIDER_GRAB_WIDTH, Divider, TITLEBAR_HEIGHT, ToggleChanges, ToggleFiles, WindowView, drag_window,
+    titlebar::icon_toggle,
+};
 use crate::{
     assets::{CHANGES_ICON, FILES_ICON},
     terminal_view::hsla,
@@ -65,6 +68,15 @@ pub(super) const ADDED: Rgb = Rgb(0x57, 0xAB, 0x5A);
 pub(super) const REMOVED: Rgb = Rgb(0xE5, 0x53, 0x4B);
 pub(super) const MODIFIED: Rgb = Rgb(0xD2, 0xA8, 0x3E);
 pub(super) const RENAMED: Rgb = Rgb(0x53, 0x9B, 0xF5);
+
+/// 加了多少行、删了多少行的标签，「+N」和「−N」。
+pub(super) fn added_label(count: usize) -> Div {
+    div().flex_none().text_color(hsla(ADDED)).child(format!("+{count}"))
+}
+
+pub(super) fn removed_label(count: usize) -> Div {
+    div().flex_none().text_color(hsla(REMOVED)).child(format!("−{count}"))
+}
 
 pub(super) fn status_color(status: FileStatus) -> Rgb {
     match status {
@@ -339,27 +351,9 @@ impl WindowView {
             };
             let action: &dyn Action = if changes { &ToggleChanges } else { &ToggleFiles };
             let tooltip = tooltip(text, Some(action), fg, bg);
-            let hover_bg = hsla(bg.mix(fg, 0.10));
-            let active_bg = hsla(bg.mix(fg, 0.14));
-            let fg = hsla(fg);
-            div()
-                .id(id)
-                .group(id)
+            icon_toggle(id, icon, shown, fg, bg)
                 .w(px(TOGGLE_WIDTH))
                 .h(px(TOGGLE_HEIGHT))
-                .rounded(px(4.))
-                .flex()
-                .items_center()
-                .justify_center()
-                .when(shown, |button| button.bg(active_bg))
-                .hover(|button| button.bg(hover_bg))
-                .child(
-                    svg()
-                        .path(icon)
-                        .size(px(16.))
-                        .text_color(fg.opacity(if shown { 0.9 } else { 0.55 }))
-                        .group_hover(id, |icon| icon.text_color(fg)),
-                )
                 .tooltip(tooltip)
                 .on_mouse_down(
                     MouseButton::Left,
@@ -395,13 +389,24 @@ impl WindowView {
             .gap(px(8.))
             .border_b_1()
             .border_color(hsla(fg).opacity(0.12))
-            .on_mouse_down(MouseButton::Left, |event, window, _| {
-                if event.click_count >= 2 {
-                    window.titlebar_double_click();
-                } else {
-                    window.start_window_move();
-                }
-            })
+            .on_mouse_down(MouseButton::Left, drag_window)
     }
 }
 
+/// 面板里居中的一句说明，比如不在仓库里、没有改动、预览不了。
+pub(super) fn panel_message(text: String, fg: Rgb) -> Div {
+    div().flex_1().flex().items_center().justify_center().px(px(16.)).text_color(hsla(fg).opacity(0.5)).child(text)
+}
+
+/// 右侧面板的外框：定宽、占满高度、竖着排，左边一条分隔线。底色和字号由调用方接着写。
+pub(super) fn panel_shell(id: &'static str, width: f32, fg: Rgb) -> Stateful<Div> {
+    div()
+        .id(id)
+        .flex_none()
+        .w(px(width))
+        .h_full()
+        .flex()
+        .flex_col()
+        .border_l_1()
+        .border_color(hsla(fg).opacity(0.12))
+}

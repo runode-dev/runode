@@ -157,18 +157,10 @@ impl Config {
                 self.window_padding_y = if empty { defaults.window_padding_y } else { parse_pair(value)? };
             }
             "file-tree-font-size" => {
-                self.file_tree_font_size = if empty {
-                    defaults.file_tree_font_size
-                } else {
-                    Some(parse_f32(value)?).filter(|size| *size > 0.).ok_or("expected a positive number")?
-                };
+                self.file_tree_font_size = if empty { defaults.file_tree_font_size } else { parse_positive(value)? };
             }
             "preview-font-size" => {
-                self.preview_font_size = if empty {
-                    defaults.preview_font_size
-                } else {
-                    Some(parse_f32(value)?).filter(|size| *size > 0.).ok_or("expected a positive number")?
-                };
+                self.preview_font_size = if empty { defaults.preview_font_size } else { parse_positive(value)? };
             }
             "file-tree-preview-click" => {
                 self.file_tree_preview_click = match value {
@@ -233,9 +225,8 @@ impl Config {
             "shell-integration" => {
                 self.shell_integration = match value {
                     "" | "detect" => IntegrationMode::Detect,
-                    "none" => IntegrationMode::Off,
-                    // 这两种 shell 还没有集成脚本。
-                    "elvish" | "nushell" => IntegrationMode::Off,
+                    // elvish 和 nushell 还没有集成脚本，和 none 一样不启用。
+                    "none" | "elvish" | "nushell" => IntegrationMode::Off,
                     name => IntegrationMode::Force(
                         Shell::from_name(name).ok_or("expected none, detect, bash, zsh or fish")?,
                     ),
@@ -286,6 +277,11 @@ impl Config {
 
 fn parse_f32(value: &str) -> Result<f32, String> {
     value.trim().parse().map_err(|_| "expected a number".into())
+}
+
+/// 大于 0 的数。
+fn parse_positive(value: &str) -> Result<f32, String> {
+    Some(parse_f32(value)?).filter(|n| *n > 0.).ok_or_else(|| "expected a positive number".into())
 }
 
 /// `N` 或 `A,B`，前者两边相同。

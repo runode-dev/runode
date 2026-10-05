@@ -12,7 +12,7 @@ use runode_shared_types::color::Rgb;
 
 use super::{
     WindowView,
-    project::{ADDED, DiffNote, DiffRow, REMOVED, status_color},
+    project::{ADDED, DiffNote, DiffRow, REMOVED, added_label, panel_message, panel_shell, removed_label, status_color},
 };
 use crate::{
     assets::{CHEVRON_DOWN_ICON, CHEVRON_RIGHT_ICON},
@@ -51,17 +51,14 @@ impl WindowView {
                         .text_color(dim)
                         .child(rust_i18n::t!("panel.uncommitted", count = git.changed()).into_owned()),
                 )
-                .child(div().flex_none().text_color(hsla(ADDED)).child(format!("+{}", git.added())))
-                .child(div().flex_none().text_color(hsla(REMOVED)).child(format!("−{}", git.removed())));
+                .child(added_label(git.added()))
+                .child(removed_label(git.removed()));
         }
-        let message = |text: String| {
-            div().flex_1().flex().items_center().justify_center().px(px(16.)).text_color(dim).child(text)
-        };
         let body: AnyElement = match &project.git {
-            _ if !project.loaded => div().flex_1().into_any_element(),
-            None => message(rust_i18n::t!("panel.not_repo").into_owned()).into_any_element(),
+            _ if project.root.is_none() => div().flex_1().into_any_element(),
+            None => panel_message(rust_i18n::t!("panel.not_repo").into_owned(), fg).into_any_element(),
             Some(git) if git.is_clean() => {
-                message(rust_i18n::t!("panel.no_changes").into_owned()).into_any_element()
+                panel_message(rust_i18n::t!("panel.no_changes").into_owned(), fg).into_any_element()
             }
             Some(_) => uniform_list(
                 "changes",
@@ -72,16 +69,8 @@ impl WindowView {
             .flex_1()
             .into_any_element(),
         };
-        div()
-            .id("changes-panel")
-            .flex_none()
-            .w(px(width))
-            .h_full()
-            .flex()
-            .flex_col()
+        panel_shell("changes-panel", width, fg)
             .bg(hsla(bg))
-            .border_l_1()
-            .border_color(hsla(fg).opacity(0.12))
             .text_size(px(12.))
             .child(header)
             .child(body)
@@ -208,12 +197,8 @@ impl WindowView {
                                 .text_ellipsis_start()
                                 .child(label),
                         )
-                        .when(file.added > 0, |row| {
-                            row.child(div().flex_none().text_color(hsla(ADDED)).child(format!("+{}", file.added)))
-                        })
-                        .when(file.removed > 0, |row| {
-                            row.child(div().flex_none().text_color(hsla(REMOVED)).child(format!("−{}", file.removed)))
-                        })
+                        .when(file.added > 0, |row| row.child(added_label(file.added)))
+                        .when(file.removed > 0, |row| row.child(removed_label(file.removed)))
                         .on_mouse_down(
                             MouseButton::Left,
                             cx.listener(move |this, _, _, cx| {

@@ -374,7 +374,7 @@ pub static DEFAULTS: &[&str] = &[
     "cmd+0=reset_font_size",
 ];
 
-/// 解析一条 `keybind` 的值。触发键转成 GPUI 的写法，动作原样保留并校验过。
+/// 解析一条 `keybind` 的值。触发键转成 GPUI 的写法，动作解析成 `Action`。
 pub fn parse(value: &str) -> Result<Keybind, String> {
     if value == "clear" {
         return Ok(Keybind::Clear);
@@ -386,8 +386,7 @@ pub fn parse(value: &str) -> Result<Keybind, String> {
     if action == "unbind" {
         return Ok(Keybind::Unbind(keys));
     }
-    parse_action(action)?;
-    Ok(Keybind::Bind { keys, action: action.to_owned() })
+    Ok(Keybind::Bind { keys, action: parse_action(action)? })
 }
 
 /// 解析 `动作` 或 `动作:参数`。
@@ -527,8 +526,8 @@ fn unescape(text: &str) -> Result<String, String> {
 
 /// 默认绑定叠上配置里的 `keybind`，得到最终的 (触发键, 动作) 列表。同一个触发键只保留
 /// 最后一次绑定。
-pub fn resolve(keybinds: &[Keybind]) -> Vec<(String, String)> {
-    let mut table: Vec<(String, String)> = Vec::new();
+pub fn resolve(keybinds: &[Keybind]) -> Vec<(String, Action)> {
+    let mut table: Vec<(String, Action)> = Vec::new();
     let defaults = DEFAULTS.iter().map(|d| parse(d).expect("default keybind parses"));
     for keybind in defaults.chain(keybinds.iter().cloned()) {
         match keybind {
@@ -614,29 +613,29 @@ mod tests {
             parse("ctrl+a>c=new_tab").unwrap(),
         ];
         let table = resolve(&keybinds);
-        let lookup = |keys: &str| table.iter().filter(|(k, _)| k == keys).map(|(_, a)| a.as_str()).collect::<Vec<_>>();
-        assert_eq!(lookup("cmd-t"), ["new_window"]);
+        let lookup = |keys: &str| table.iter().filter(|(k, _)| k == keys).map(|(_, a)| a.clone()).collect::<Vec<_>>();
+        assert_eq!(lookup("cmd-t"), [Action::NewWindow]);
         assert!(lookup("cmd-w").is_empty());
-        assert_eq!(lookup("ctrl-a c"), ["new_tab"]);
-        assert_eq!(lookup("cmd-q"), ["quit"]);
+        assert_eq!(lookup("ctrl-a c"), [Action::NewTab]);
+        assert_eq!(lookup("cmd-q"), [Action::Quit]);
 
         let table = resolve(&[parse("clear").unwrap(), parse("cmd+q=quit").unwrap()]);
-        assert_eq!(table, [("cmd-q".to_owned(), "quit".to_owned())]);
+        assert_eq!(table, [("cmd-q".to_owned(), Action::Quit)]);
     }
 
     /// 默认绑定转换后与原来写死的 GPUI 写法一致，升级后快捷键不变。
     #[test]
     fn defaults_keep_gpui_keystrokes() {
         let table = resolve(&[]);
-        let has = |keys: &str, action: &str| table.iter().any(|(k, a)| k == keys && a == action);
-        assert!(has("shift-cmd-,", "reload_config"));
-        assert!(has("alt-cmd-h", "hide_others"));
-        assert!(has("alt-shift-cmd-w", "close_all_windows"));
-        assert!(has("cmd-}", "next_tab"));
-        assert!(has("cmd-+", "increase_font_size:1"));
-        assert!(has("cmd--", "decrease_font_size:1"));
-        assert!(has("ctrl-cmd-=", "equalize_splits"));
-        assert!(has("cmd-pageup", "scroll_page_up"));
-        assert!(has("ctrl-shift-cmd-j", "write_screen_file:copy"));
+        let has = |keys: &str, action: Action| table.iter().any(|(k, a)| k == keys && *a == action);
+        assert!(has("shift-cmd-,", Action::ReloadConfig));
+        assert!(has("alt-cmd-h", Action::HideOthers));
+        assert!(has("alt-shift-cmd-w", Action::CloseAllWindows));
+        assert!(has("cmd-}", Action::NextTab));
+        assert!(has("cmd-+", Action::IncreaseFontSize));
+        assert!(has("cmd--", Action::DecreaseFontSize));
+        assert!(has("ctrl-cmd-=", Action::EqualizeSplits));
+        assert!(has("cmd-pageup", Action::ScrollPageUp));
+        assert!(has("ctrl-shift-cmd-j", Action::WriteScreenFile(ScreenFile::CopyPath)));
     }
 }

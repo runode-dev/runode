@@ -6,8 +6,9 @@ use runode_shared_types::{
     color::{Rgb, TerminalColor},
     settings::{CursorStyle, OptionAsAlt, TermSettings},
     shell::IntegrationMode,
-    theme,
 };
+
+use crate::keybind::Action;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum CellHeight {
@@ -77,6 +78,8 @@ pub struct Config {
 
 impl Default for Config {
     fn default() -> Self {
+        // 交给终端的那部分沿用 `TermSettings` 的默认值，只在一处写。
+        let term = TermSettings::default();
         Self {
             font_family: vec!["Hack Nerd Font Mono".into()],
             font_size: 14.,
@@ -86,24 +89,20 @@ impl Default for Config {
             file_tree_font_size: 13.,
             file_tree_preview_click: PreviewClick::Double,
             preview_font_size: 13.,
-            cursor_style: CursorStyle::Block,
-            cursor_style_blink: None,
-            background: theme::BACKGROUND,
-            foreground: theme::FOREGROUND,
-            cursor_color: None,
-            cursor_text: None,
-            selection_background: None,
-            selection_foreground: None,
-            search_background: TerminalColor::Rgb(theme::SEARCH_BACKGROUND),
-            search_foreground: TerminalColor::Rgb(theme::SEARCH_FOREGROUND),
-            search_selected_background: TerminalColor::Rgb(theme::SEARCH_SELECTED_BACKGROUND),
-            search_selected_foreground: TerminalColor::Rgb(theme::SEARCH_FOREGROUND),
-            palette: theme::ANSI
-                .iter()
-                .enumerate()
-                .map(|(i, c)| (i as u8, *c))
-                .collect(),
-            macos_option_as_alt: OptionAsAlt::False,
+            cursor_style: term.cursor_style,
+            cursor_style_blink: term.cursor_blink,
+            background: term.background,
+            foreground: term.foreground,
+            cursor_color: term.cursor_color,
+            cursor_text: term.cursor_text,
+            selection_background: term.selection_background,
+            selection_foreground: term.selection_foreground,
+            search_background: term.search_background,
+            search_foreground: term.search_foreground,
+            search_selected_background: term.search_selected_background,
+            search_selected_foreground: term.search_selected_foreground,
+            palette: term.palette,
+            macos_option_as_alt: term.option_as_alt,
             shell_integration: IntegrationMode::Detect,
             command_suggestions: true,
             command_completions: true,
@@ -122,8 +121,8 @@ pub enum Keybind {
     Clear,
     /// `触发键=unbind`，触发键已转成 GPUI 的写法。
     Unbind(String),
-    /// `触发键=动作`，动作保留原文，绑定时再构造。
-    Bind { keys: String, action: String },
+    /// `触发键=动作`，动作已解析好。
+    Bind { keys: String, action: Action },
 }
 
 impl Config {

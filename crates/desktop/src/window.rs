@@ -19,10 +19,9 @@ pub(crate) fn window_options(cx: &App) -> WindowOptions {
 }
 
 /// 打开一个新窗口，里面一个终端；`shell` 是启动时提前拉起的 shell，没有时现启动一个。
-/// `saved` 是存档里的窗口，有时按它恢复。
-pub(crate) fn open_window(cx: &mut App, saved: Option<SavedWindow>, shell: Option<Prespawned>) {
+pub(crate) fn open_window(cx: &mut App, shell: Option<Prespawned>) {
     let options = window_options(cx);
-    open_window_with(cx, options, saved, shell);
+    open_window_with(cx, options, None, shell);
 }
 
 pub(crate) fn open_window_with(cx: &mut App, options: WindowOptions, saved: Option<SavedWindow>, shell: Option<Prespawned>) {

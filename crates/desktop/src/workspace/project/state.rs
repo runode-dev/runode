@@ -70,14 +70,12 @@ pub(in crate::workspace) struct FileRow {
 /// 一个 workspace 的改动和文件树。
 #[derive(Default)]
 pub(in crate::workspace) struct Project {
-    /// 文件树的根目录，跟着当前终端的目录变；还没读过时为空。
+    /// 文件树的根目录，跟着当前终端的目录变；还没读过时为空，读到过一次之后就一直有。
     pub root: Option<PathBuf>,
     /// 上次读的是哪个目录，终端换了目录时据此在文件树里定位过去。
     pub(super) dir: Option<PathBuf>,
     /// 最近一次读到的 git 状态；不在 git 仓库里时为空。
     pub git: Option<git::Snapshot>,
-    /// 读到过至少一次。
-    pub loaded: bool,
     /// 用户点过、和默认展开状态相反的文件，相对仓库根。
     toggled_diffs: HashSet<(Section, PathBuf)>,
     /// 改动栏里收起的分段和目录分组。
@@ -328,8 +326,8 @@ impl Workspace {
     /// 换上后台读到的结果，有变化时返回真。
     pub(super) fn apply_scan(&mut self, scan: Scan, show_ignored: bool) -> bool {
         let project = &mut self.project;
-        let mut changed = !project.loaded;
-        project.loaded = true;
+        // 第一次读时 `root` 还是空的，下面换上根目录时一定算作有变化。
+        let mut changed = false;
         project.untracked = scan.untracked;
         // 终端换到了别的仓库或目录：上一处的目录列表和展开过的改动不再相干。展开的目录
         // 是绝对路径，留着，回到原处时还是展开的。
@@ -344,6 +342,9 @@ impl Workspace {
         }
         if project.git != scan.git {
             project.git = scan.git;
+            if let Some(preview) = &mut project.preview {
+                preview.refresh_marks(project.git.as_ref());
+            }
             changed = true;
         }
         for (dir, listing) in scan.listings {
@@ -393,7 +394,7 @@ mod tests {
                 ("docs/old.md".into(), FileStatus::Deleted),
                 ("src/c.rs".into(), FileStatus::Added),
             ]),
-            ignored: vec!["target".into()],
+            ignored: HashSet::from(["target".into()]),
         }
     }
 
@@ -479,7 +480,7 @@ mod tests {
         assert_eq!(project.file_rows.len(), 3);
 
         // 只装着被忽略目录的目录不和它并成一行。
-        project.git.as_mut().unwrap().ignored.push("out/target".into());
+        project.git.as_mut().unwrap().ignored.insert("out/target".into());
         project.listings.insert(root.into(), vec![dir("out")]);
         project.listings.insert("/repo/out".into(), vec![dir("target")]);
         project.rebuild_file_rows(root, false);

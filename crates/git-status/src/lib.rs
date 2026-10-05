@@ -101,7 +101,7 @@ pub struct Snapshot {
     /// 有改动的文件的状态，键是相对仓库根的路径。
     pub statuses: HashMap<PathBuf, FileStatus>,
     /// 被忽略的文件和目录，相对仓库根；目录被忽略时里面的不再单列。
-    pub ignored: Vec<PathBuf>,
+    pub ignored: HashSet<PathBuf>,
 }
 
 impl Snapshot {
@@ -131,6 +131,11 @@ impl Snapshot {
 
     pub fn is_clean(&self) -> bool {
         self.staged.is_empty() && self.unstaged.is_empty()
+    }
+
+    /// `rel` 相对仓库根，它或者它所在的目录被忽略。
+    pub fn is_ignored(&self, rel: &Path) -> bool {
+        rel.ancestors().any(|dir| self.ignored.contains(dir))
     }
 }
 
@@ -167,7 +172,7 @@ pub fn snapshot(dir: &Path, cache: &mut UntrackedCache) -> Option<Snapshot> {
         staged: Vec::new(),
         unstaged: Vec::new(),
         statuses: HashMap::new(),
-        ignored: Vec::new(),
+        ignored: HashSet::new(),
     };
     let mut seen = UntrackedCache::default();
     collect(&root, Path::new(""), &mut snapshot, cache, &mut seen)?;
@@ -217,16 +222,27 @@ fn collect(
     cache: &UntrackedCache,
     seen: &mut UntrackedCache,
 ) -> Option<()> {
-    let status = git(repo, &["status", "--porcelain=v1", "-z", "--untracked-files=all", "--ignored=matching"])?;
-    let (statuses, ignored) = parse_status(&status);
-    // 还没有提交时和空树比，暂存了的新文件也算进来。
-    let base = match git(repo, &["rev-parse", "--verify", "--quiet", "HEAD"]) {
-        Some(_) => "HEAD".to_owned(),
-        None => String::from_utf8_lossy(&git(repo, &["hash-object", "-t", "tree", "/dev/null"])?).trim().to_owned(),
-    };
-    let mut staged = diff(repo, &["--cached", &base]);
-    // 冲突的文件和「我方」比，不然 git 给的是三方合并的格式。
-    let mut unstaged = diff(repo, &["-2"]);
+    // 状态、暂存段和未暂存段互不依赖，几个 git 进程同时跑。
+    let (status, staged, mut unstaged) = std::thread::scope(|scope| {
+        let status = scope.spawn(|| {
+            git(repo, &["status", "--porcelain=v1", "-z", "--untracked-files=all", "--ignored=matching"])
+        });
+        let staged = scope.spawn(|| {
+            // 还没有提交时和空树比，暂存了的新文件也算进来。
+            let base = match git(repo, &["rev-parse", "--verify", "--quiet", "HEAD"]) {
+                Some(_) => "HEAD".to_owned(),
+                None => String::from_utf8_lossy(&git(repo, &["hash-object", "-t", "tree", "/dev/null"])?).trim().to_owned(),
+            };
+            Some(diff(repo, &["--cached", &base]))
+        });
+        // 冲突的文件和「我方」比，不然 git 给的是三方合并的格式。
+        let unstaged = diff(repo, &["-2"]);
+        let status = status.join().unwrap_or_else(|panic| std::panic::resume_unwind(panic));
+        let staged = staged.join().unwrap_or_else(|panic| std::panic::resume_unwind(panic));
+        (status, staged, unstaged)
+    });
+    let (statuses, ignored) = parse_status(&status?);
+    let mut staged = staged?;
     let mut untracked: Vec<_> = statuses
         .iter()
         .filter(|(_, status)| **status == FileStatus::Untracked)
@@ -624,6 +640,23 @@ Binary files /dev/null and b/logo.png differ
         assert_eq!(statuses[Path::new("added.rs")], FileStatus::Added);
         assert!(!statuses.contains_key(Path::new("a.rs")));
         assert_eq!(ignored, vec![PathBuf::from("target")]);
+    }
+
+    #[test]
+    fn ignored_dirs_cover_their_contents() {
+        let snapshot = Snapshot {
+            root: "/repo".into(),
+            git_dir: "/repo/.git".into(),
+            staged: Vec::new(),
+            unstaged: Vec::new(),
+            statuses: HashMap::new(),
+            ignored: HashSet::from(["target".into(), "out/gen".into()]),
+        };
+        assert!(snapshot.is_ignored(Path::new("target")));
+        assert!(snapshot.is_ignored(Path::new("target/debug/x")));
+        assert!(snapshot.is_ignored(Path::new("out/gen/a.rs")));
+        assert!(!snapshot.is_ignored(Path::new("out")));
+        assert!(!snapshot.is_ignored(Path::new("targets/x")));
     }
 
     #[test]

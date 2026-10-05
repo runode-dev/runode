@@ -133,13 +133,11 @@ pub(super) struct Decorator<'a> {
     git: Option<&'a git::Snapshot>,
     /// 含有改动文件的目录，相对仓库根，值是归总后的状态。
     changed_dirs: HashMap<&'a Path, FileStatus>,
-    ignored: HashSet<&'a Path>,
 }
 
 impl<'a> Decorator<'a> {
     pub(super) fn new(git: Option<&'a git::Snapshot>) -> Self {
         let mut changed_dirs = HashMap::new();
-        let mut ignored = HashSet::new();
         if let Some(git) = git {
             for (path, &status) in &git.statuses {
                 for dir in path.ancestors().skip(1).filter(|dir| !dir.as_os_str().is_empty()) {
@@ -147,14 +145,8 @@ impl<'a> Decorator<'a> {
                     changed_dirs.insert(dir, dir_status(current, status));
                 }
             }
-            ignored.extend(git.ignored.iter().map(PathBuf::as_path));
         }
-        Self { git, changed_dirs, ignored }
-    }
-
-    /// `rel` 相对仓库根，它或者它所在的目录被忽略。
-    fn ignores(&self, rel: &Path) -> bool {
-        rel.ancestors().any(|dir| self.ignored.contains(dir))
+        Self { git, changed_dirs }
     }
 
     pub(super) fn of(&self, path: &Path, is_dir: bool) -> Decoration {
@@ -164,7 +156,7 @@ impl<'a> Decorator<'a> {
         let Ok(rel) = path.strip_prefix(&git.root) else {
             return Decoration::None;
         };
-        if self.ignores(rel) {
+        if git.is_ignored(rel) {
             return Decoration::Ignored;
         }
         if is_dir {

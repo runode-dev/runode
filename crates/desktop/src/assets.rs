@@ -12,11 +12,9 @@ pub const SIDEBAR_ICON: &str = "icons/sidebar.svg";
 /// 右上角改动栏和文件树开关的图标。
 pub const CHANGES_ICON: &str = "icons/changes.svg";
 pub const FILES_ICON: &str = "icons/files.svg";
-/// 改动栏和文件树里展开、收起的箭头，以及文件树里目录和文件的图标。
+/// 改动栏和文件树里展开、收起的箭头。
 pub const CHEVRON_RIGHT_ICON: &str = "icons/chevron-right.svg";
 pub const CHEVRON_DOWN_ICON: &str = "icons/chevron-down.svg";
-pub const FOLDER_ICON: &str = "icons/folder.svg";
-pub const FILE_ICON: &str = "icons/file.svg";
 /// 文件树标题栏上显示、隐藏被 git 忽略的文件的开关。
 pub const EYE_ICON: &str = "icons/eye.svg";
 pub const EYE_OFF_ICON: &str = "icons/eye-off.svg";
@@ -27,8 +25,6 @@ const FILES: &[(&str, &[u8])] = &[
     (FILES_ICON, include_bytes!("../assets/icons/files.svg")),
     (CHEVRON_RIGHT_ICON, include_bytes!("../assets/icons/chevron-right.svg")),
     (CHEVRON_DOWN_ICON, include_bytes!("../assets/icons/chevron-down.svg")),
-    (FOLDER_ICON, include_bytes!("../assets/icons/folder.svg")),
-    (FILE_ICON, include_bytes!("../assets/icons/file.svg")),
     (EYE_ICON, include_bytes!("../assets/icons/eye.svg")),
     (EYE_OFF_ICON, include_bytes!("../assets/icons/eye-off.svg")),
 ];

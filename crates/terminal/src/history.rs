@@ -366,8 +366,7 @@ fn private_file(options: &mut fs::OpenOptions) -> &mut fs::OpenOptions {
 
 /// 读用户登录 shell（`$SHELL`）自己的历史文件，从旧到新。认不出 shell 或读不了时为 `None`。
 fn read_shell_history(shell: &str) -> Option<Vec<Entry>> {
-    let name = Path::new(shell).file_name()?.to_str()?.trim_start_matches('-');
-    let shell = Shell::from_name(name)?;
+    let shell = Shell::detect(shell)?;
     let path = shell_history_path(shell)?;
     let bytes = match fs::read(&path) {
         Ok(bytes) => bytes,
