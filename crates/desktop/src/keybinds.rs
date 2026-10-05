@@ -35,6 +35,8 @@ const WINDOW: Contexts = &[Some("Window")];
 const TERMINAL: Contexts = &[Some("Terminal")];
 /// 搜索框不在 `Terminal` 上下文里，复制粘贴和搜索导航在那里也要能用。
 const TERMINAL_AND_SEARCH: Contexts = &[Some("Terminal"), Some("SearchBar")];
+/// 预览栏里选中的行也能复制、全选。
+const TERMINAL_SEARCH_AND_PREVIEW: Contexts = &[Some("Terminal"), Some("SearchBar"), Some("Preview")];
 
 /// 配置里的动作对应的 GPUI 动作，以及它生效的上下文。
 fn gpui_action(action: Action) -> (Box<dyn gpui::Action>, Contexts) {
@@ -80,10 +82,10 @@ fn gpui_action(action: Action) -> (Box<dyn gpui::Action>, Contexts) {
         Action::ToggleSidebar => (boxed(ToggleSidebar), WINDOW),
         Action::ToggleChanges => (boxed(ToggleChanges), WINDOW),
         Action::ToggleFiles => (boxed(ToggleFiles), WINDOW),
-        Action::Copy => (boxed(Copy), TERMINAL_AND_SEARCH),
+        Action::Copy => (boxed(Copy), TERMINAL_SEARCH_AND_PREVIEW),
         Action::Paste => (boxed(Paste), TERMINAL_AND_SEARCH),
         Action::PasteSelection => (boxed(PasteSelection), TERMINAL),
-        Action::SelectAll => (boxed(SelectAll), TERMINAL_AND_SEARCH),
+        Action::SelectAll => (boxed(SelectAll), TERMINAL_SEARCH_AND_PREVIEW),
         Action::ClearScreen => (boxed(ClearScreen), TERMINAL),
         Action::ScrollToTop => (boxed(ScrollToTop), TERMINAL),
         Action::ScrollToBottom => (boxed(ScrollToBottom), TERMINAL),

@@ -15,6 +15,13 @@ pub enum CellHeight {
     Percent(f32),
 }
 
+/// 文件树里单击还是双击文件在预览栏打开。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PreviewClick {
+    Single,
+    Double,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct Config {
     /// 依次尝试的字体族，第一个能解析的生效。
@@ -27,6 +34,9 @@ pub struct Config {
     pub window_padding_y: (f32, f32),
     /// 右侧文件树的字号。
     pub file_tree_font_size: f32,
+    pub file_tree_preview_click: PreviewClick,
+    /// 预览栏的字号。
+    pub preview_font_size: f32,
     pub cursor_style: CursorStyle,
     /// `None` 表示默认闪烁，运行中的程序仍可改变。
     pub cursor_style_blink: Option<bool>,
@@ -74,6 +84,8 @@ impl Default for Config {
             window_padding_x: (2., 2.),
             window_padding_y: (0., 6.),
             file_tree_font_size: 14.,
+            file_tree_preview_click: PreviewClick::Double,
+            preview_font_size: 12.,
             cursor_style: CursorStyle::Block,
             cursor_style_blink: None,
             background: theme::BACKGROUND,

@@ -12,7 +12,7 @@ use runode_shared_types::{
 };
 
 use crate::{
-    CellHeight, Config, color,
+    CellHeight, Config, PreviewClick, color,
     theme::{Theme, find_theme, pick_theme},
 };
 
@@ -23,7 +23,7 @@ use crate::{
 pub(crate) const KEYS: &[&[&str]] = &[
     &["language"],
     &["font-family", "font-size", "adjust-cell-height", "window-padding-x", "window-padding-y"],
-    &["file-tree-font-size"],
+    &["file-tree-font-size", "file-tree-preview-click", "preview-font-size"],
     &[
         "theme",
         "background",
@@ -161,6 +161,20 @@ impl Config {
                     defaults.file_tree_font_size
                 } else {
                     Some(parse_f32(value)?).filter(|size| *size > 0.).ok_or("expected a positive number")?
+                };
+            }
+            "preview-font-size" => {
+                self.preview_font_size = if empty {
+                    defaults.preview_font_size
+                } else {
+                    Some(parse_f32(value)?).filter(|size| *size > 0.).ok_or("expected a positive number")?
+                };
+            }
+            "file-tree-preview-click" => {
+                self.file_tree_preview_click = match value {
+                    "" | "double" => PreviewClick::Double,
+                    "single" => PreviewClick::Single,
+                    _ => return Err("expected single or double".into()),
                 };
             }
             "cursor-style" => {
@@ -459,6 +473,23 @@ unknown-key = whatever
         // 不是正数的跳过，保留前面的值。
         assert_eq!(load(&["file-tree-font-size = 15\nfile-tree-font-size = 0"]).file_tree_font_size, 15.);
         assert_eq!(load(&["file-tree-font-size = -3"]).file_tree_font_size, 14.);
+    }
+
+    #[test]
+    fn preview_font_size_takes_positive_numbers() {
+        assert_eq!(Config::default().preview_font_size, 12.);
+        assert_eq!(load(&["preview-font-size = 13.5"]).preview_font_size, 13.5);
+        assert_eq!(load(&["preview-font-size = 15\npreview-font-size = 0"]).preview_font_size, 15.);
+        assert_eq!(load(&["preview-font-size = 15\npreview-font-size ="]).preview_font_size, 12.);
+    }
+
+    #[test]
+    fn file_tree_preview_click_defaults_to_double() {
+        assert_eq!(Config::default().file_tree_preview_click, PreviewClick::Double);
+        assert_eq!(load(&["file-tree-preview-click = single"]).file_tree_preview_click, PreviewClick::Single);
+        assert_eq!(load(&["file-tree-preview-click = single\nfile-tree-preview-click ="]).file_tree_preview_click, PreviewClick::Double);
+        // 认不出的值跳过，保留前面的值。
+        assert_eq!(load(&["file-tree-preview-click = single\nfile-tree-preview-click = triple"]).file_tree_preview_click, PreviewClick::Single);
     }
 
     #[test]

@@ -71,6 +71,11 @@ panel:
   no_content: 内容没有变化
   staged: 已暂存的改动
   unstaged: 未暂存的改动
+preview:
+  binary: 无法预览二进制文件
+  too_large: 图片太大，无法预览
+  unreadable: "无法读取文件：%{error}"
+  truncated: 文件太大，只显示了前 %{count} 行
 paste:
   title: 粘贴的内容可能会直接执行命令
   detail: 内容含有换行或终端控制序列，粘贴后可能被当作命令立即运行。

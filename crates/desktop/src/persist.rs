@@ -48,6 +48,9 @@ pub struct SavedWindow {
     pub files: bool,
     #[serde(default)]
     pub files_width: Option<f32>,
+    /// 预览栏拖动过的宽度；预览的是哪个文件、开没开着都不存。
+    #[serde(default)]
+    pub preview_width: Option<f32>,
     /// 文件树里显示被 git 忽略的文件。
     #[serde(default)]
     pub show_ignored: bool,
@@ -193,6 +196,7 @@ mod tests {
             changes_width: None,
             files: false,
             files_width: Some(200.),
+            preview_width: Some(420.),
             show_ignored: true,
         }])
     }

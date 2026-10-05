@@ -1,5 +1,5 @@
 //! 右侧的文件树：当前终端所在仓库或目录下的文件，图标按文件类型，名字按 git 状态着色，行尾标出状态。
-//! 单击目录展开收起，双击文件把它的路径打进当前终端。
+//! 单击目录展开收起，双击文件在预览栏里打开，也可以配置成单击打开、双击把路径打进终端。
 
 use std::{ops::Range, path::Path};
 
@@ -7,6 +7,7 @@ use gpui::{
     AnyElement, Context, Div, Focusable, MouseButton, MouseDownEvent, ScrollStrategy, SharedString, Stateful, Window, div,
     img, prelude::*, px, svg, uniform_list,
 };
+use runode_config::PreviewClick;
 use runode_shared_types::color::Rgb;
 
 use super::{
@@ -182,7 +183,8 @@ impl WindowView {
             .collect()
     }
 
-    /// 单击选中，目录同时展开或收起，有改动的文件在改动栏里滚到它；双击文件把路径打进终端。
+    /// 单击选中，目录同时展开或收起，有改动的文件在改动栏里滚到它。文件按配置的
+    /// `PreviewClick` 双击或单击在预览栏里打开；单击打开时，双击把路径打进终端。
     fn click_file(&mut self, path: &Path, is_dir: bool, clicks: usize, window: &mut Window, cx: &mut Context<Self>) {
         let show_ignored = self.show_ignored;
         let workspace = self.workspace_mut();
@@ -190,12 +192,25 @@ impl WindowView {
         if is_dir {
             let root = workspace.project.root.clone().unwrap_or_else(|| workspace.dir.clone());
             workspace.project.toggle_dir(path, &root, show_ignored);
-        } else if clicks >= 2 {
-            self.insert_path(path, None, window, cx);
-        } else if self.changes_shown {
-            let project = &mut self.workspace_mut().project;
-            if let Some(row) = project.reveal_diff(path) {
-                project.changes_scroll.scroll_to_item(row, ScrollStrategy::Top);
+            cx.notify();
+            return;
+        }
+        let single = cx.global::<AppConfig>().0.file_tree_preview_click == PreviewClick::Single;
+        if clicks >= 2 {
+            if single {
+                self.insert_path(path, None, window, cx);
+            } else {
+                self.open_preview(path, cx);
+            }
+        } else {
+            if self.changes_shown {
+                let project = &mut self.workspace_mut().project;
+                if let Some(row) = project.reveal_diff(path) {
+                    project.changes_scroll.scroll_to_item(row, ScrollStrategy::Top);
+                }
+            }
+            if single {
+                self.open_preview(path, cx);
             }
         }
         cx.notify();

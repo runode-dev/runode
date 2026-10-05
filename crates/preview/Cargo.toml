@@ -1,0 +1,15 @@
+[package]
+name = "runode-preview"
+description = "Read a file for preview, classify it and highlight its syntax"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+syntect.workspace = true
+# 补齐 syntect 自带语法缺的 TypeScript、TOML、Dockerfile、Swift、Zig 等。
+two-face.workspace = true
+
+[lints]
+workspace = true

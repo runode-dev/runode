@@ -1,11 +1,11 @@
 //! 一个窗口：左侧列出 workspace 的侧栏，顶部的标签栏，标签里的分屏，以及右侧可以打开的
-//! 改动栏和文件树。workspace 对应一个项目目录，各有一组标签；窗口的布局随改随存，下次启动
+//! 改动栏、预览栏和文件树。workspace 对应一个项目目录，各有一组标签；窗口的布局随改随存，下次启动
 //! 时恢复。
 //!
 //! 这里是窗口的根视图 `WindowView`、窗口绑定的动作，以及把各部分拼起来的渲染。其余按职责分在
 //! 子模块里：workspace、标签和分屏的数据与增删切换（`model`）、动作的处理（`actions`）、
-//! 标签里的分屏（`panes`）、标题栏和标签（`titlebar`）、侧栏（`sidebar`）、右侧的改动栏和
-//! 文件树（`project`、`changes`、`files`），以及存档（`persistence`）。
+//! 标签里的分屏（`panes`）、标题栏和标签（`titlebar`）、侧栏（`sidebar`）、右侧的改动栏、
+//! 预览栏和文件树（`project`、`changes`、`preview`、`files`），以及存档（`persistence`）。
 
 mod actions;
 mod changes;
@@ -13,6 +13,7 @@ mod files;
 mod model;
 mod panes;
 mod persistence;
+mod preview;
 mod project;
 mod sidebar;
 mod titlebar;
@@ -125,8 +126,9 @@ enum Divider {
     Split(SplitId, Axis),
     /// 侧栏右边的分隔线，拖动改变侧栏宽度。
     Sidebar,
-    /// 改动栏和文件树左边的分隔线，拖动改变它们的宽度。
+    /// 改动栏、预览栏和文件树左边的分隔线，拖动改变它们的宽度。
     Changes,
+    Preview,
     Files,
 }
 
@@ -153,6 +155,10 @@ pub struct WindowView {
     files_shown: bool,
     changes_width: Option<f32>,
     files_width: Option<f32>,
+    /// 预览栏拖动过宽度时是那个宽度；预览栏在单击文件时打开，开关不存档。
+    preview_width: Option<f32>,
+    /// 预览栏的焦点：点了预览的文字后 cmd+c 复制选中的行。
+    preview_focus: FocusHandle,
     /// 文件树里显示被 git 忽略的文件。
     show_ignored: bool,
     renaming: Option<Renaming>,
@@ -191,6 +197,7 @@ impl WindowView {
         let activation_watch = cx.observe_window_activation(window, |this, window, cx| {
             if window.is_window_active() {
                 this.refresh_project(cx);
+                this.refresh_preview_if_changed(cx);
             }
         });
         let project_poll = cx.spawn_in(window, async move |this, cx| {
@@ -233,6 +240,8 @@ impl WindowView {
             files_shown: false,
             changes_width: None,
             files_width: None,
+            preview_width: None,
+            preview_focus: cx.focus_handle(),
             show_ignored: false,
             renaming: None,
             next_id: 0,
@@ -315,14 +324,18 @@ impl Render for WindowView {
         let sidebar_toggle = (!fullscreen).then(|| self.render_sidebar_toggle(fg, bg, cx));
         let sidebar_width = if sidebar.is_some() { self.sidebar_width() } else { 0. };
         let sidebar_handle = sidebar.is_some().then(|| self.render_sidebar_handle(cx));
-        let (changes_width, files_width) = self.right_panel_widths(f32::from(window.viewport_size().width));
+        let widths = self.right_panel_widths(f32::from(window.viewport_size().width));
         let font = view.read(cx).font_family();
-        let changes =
-            self.changes_shown.then(|| self.render_changes_panel(changes_width, !self.files_shown, fg, bg, font, cx));
-        let files = self.files_shown.then(|| self.render_files_panel(files_width, fg, bg, cx));
+        let preview_shown = self.preview_shown();
+        let changes = self.changes_shown.then(|| {
+            self.render_changes_panel(widths.changes, !self.files_shown && !preview_shown, fg, bg, font.clone(), cx)
+        });
+        let preview = self.render_preview_panel(widths.preview, !self.files_shown, fg, bg, font, cx);
+        let files = self.files_shown.then(|| self.render_files_panel(widths.files, fg, bg, cx));
         let right_handles = [
-            self.changes_shown.then(|| self.render_right_handle(Divider::Changes, changes_width + files_width, cx)),
-            self.files_shown.then(|| self.render_right_handle(Divider::Files, files_width, cx)),
+            self.changes_shown.then(|| self.render_right_handle(Divider::Changes, widths.total(), cx)),
+            preview_shown.then(|| self.render_right_handle(Divider::Preview, widths.preview + widths.files, cx)),
+            self.files_shown.then(|| self.render_right_handle(Divider::Files, widths.files, cx)),
         ];
         let titlebar_shown = !fullscreen || show_tabs;
         // 右侧面板的开关按钮：面板都收着时落在标题栏右端，标题栏给它们让位；打开着时落在
@@ -334,7 +347,7 @@ impl Render for WindowView {
             // 标签平分标题栏除去两头的宽度，限制在 `TAB_MIN_WIDTH` 到 `TAB_MAX_WIDTH` 之间，
             // 挤不下就让标签条滚动；拖动时的预览也照这个宽度画。
             let tab_width = ((window.viewport_size().width
-                - px(sidebar_width + left_inset + NEW_TAB_BUTTON_WIDTH + right_inset + changes_width + files_width))
+                - px(sidebar_width + left_inset + NEW_TAB_BUTTON_WIDTH + right_inset + widths.total()))
                 / tab_count as f32)
                 .clamp(px(TAB_MIN_WIDTH), px(TAB_MAX_WIDTH));
             // 标签条只占标签本身的宽度，新建标签按钮紧跟在后面，剩下的空白留给拖动窗口。
@@ -441,6 +454,7 @@ impl Render for WindowView {
                     .child(div().relative().flex_1().min_h_0().child(panes)),
             )
             .children(changes)
+            .children(preview)
             .children(files)
             .children(sidebar_handle)
             .children(right_handles.into_iter().flatten())

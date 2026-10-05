@@ -331,6 +331,8 @@ impl WindowView {
         self.active = ix;
         self.sidebar_scroll.scroll_to_item(ix);
         self.refresh_project(cx);
+        // 目录监听只跟着当前 workspace，切走期间这个 workspace 预览的文件可能变过。
+        self.refresh_preview_if_changed(cx);
         self.activate(self.workspaces[ix].active, window, cx);
     }
 

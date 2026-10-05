@@ -17,6 +17,6 @@ mod theme;
 // 配置模板和动作说明的翻译，见 `i18n`；某种语言缺了某个键时取英文。
 rust_i18n::i18n!("locales", fallback = "en");
 
-pub use model::{CellHeight, Config, Keybind};
+pub use model::{CellHeight, Config, Keybind, PreviewClick};
 pub use parse::config_path;
 pub use template::create_config_file;

@@ -52,6 +52,7 @@ This project is indexed by GitNexus as **runode** (225 symbols, 587 relationship
 | `paths` | 配置、数据和缓存放在哪：`Dirs::from_env()` 和每个文件的路径 | 只有 std |
 | `shared-types` | 各端共用的纯数据：终端帧、网格、分屏布局、agent 状态、终端设置、输入事件 | std、serde |
 | `git-status` | 用 git 命令行读仓库的状态和逐行改动 | 只有 std |
+| `preview` | 文件预览不碰界面的部分：读文件、判断是文本、图片还是二进制，语法高亮出调色板语义的颜色 | std、syntect、two-face |
 | `terminal` | 终端会话：libghostty-vt 状态机接在 shell 的 PTY 上，shell 集成、命令历史 | shared-types、paths、libghostty-vt、portable-pty |
 | `completion` | 按 Tab 的命令补全：命令规格、候选排序、生成器 | terminal、shared-types、paths |
 | `config` | Ghostty 兼容的配置文件、主题、快捷键写法和配置模板，生成 `TermSettings` | shared-types、paths |
@@ -59,8 +60,8 @@ This project is indexed by GitNexus as **runode** (225 symbols, 587 relationship
 
 不变量：
 
-- 只有 `desktop` 能依赖 GPUI（`gpui-pre`、`gpui-pre-platform`）；libghostty-vt 和 portable-pty 只有 `terminal` 能直接依赖，对外的接口一律用 `shared-types` 的类型。这两条由 `deny.toml` 守着，CI 里跑 `cargo deny check bans`。
-- `shared-types` 只放数据，不依赖其他 runode crate，也不依赖终端仿真或界面；`paths`、`git-status` 不依赖任何 runode crate。
+- 只有 `desktop` 能依赖 GPUI（`gpui-pre`、`gpui-pre-platform`）；libghostty-vt 和 portable-pty 只有 `terminal` 能直接依赖，对外的接口一律用 `shared-types` 的类型；syntect 和 two-face 只有 `preview` 能直接依赖。这几条由 `deny.toml` 守着，CI 里跑 `cargo deny check bans`。
+- `shared-types` 只放数据，不依赖其他 runode crate，也不依赖终端仿真或界面；`paths`、`git-status`、`preview` 不依赖任何 runode crate。
 - 家目录和 runode 自己的配置、数据、缓存路径一律经 `paths` 取，不在别处读 HOME 或自己拼路径；别的程序的文件（比如 shell 的历史）按那个程序的规矩找。
 - 新依赖先加进根 `Cargo.toml` 的 `[workspace.dependencies]`，各 crate 用 `xxx.workspace = true`；lint 规则在 `[workspace.lints]`，每个 crate 都写 `[lints] workspace = true`。
 

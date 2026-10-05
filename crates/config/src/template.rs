@@ -88,6 +88,8 @@ fn template_values(d: &Config, key: &str) -> Vec<String> {
         "window-padding-x" => vec![pair(d.window_padding_x)],
         "window-padding-y" => vec![pair(d.window_padding_y)],
         "file-tree-font-size" => vec![d.file_tree_font_size.to_string()],
+        "file-tree-preview-click" => vec!["double".into()],
+        "preview-font-size" => vec![d.preview_font_size.to_string()],
         "background" => vec![hex(d.background)],
         "foreground" => vec![hex(d.foreground)],
         "search-background" => vec![color(d.search_background)],

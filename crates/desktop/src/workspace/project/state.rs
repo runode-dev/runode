@@ -87,6 +87,8 @@ pub(in crate::workspace) struct Project {
     pub(super) listings: HashMap<PathBuf, Vec<DirEntry>>,
     /// 文件树里选中的路径。
     pub selected: Option<PathBuf>,
+    /// 预览栏打开的文件；没打开时预览栏不显示。不进存档。
+    pub preview: Option<super::super::preview::Preview>,
     pub diff_rows: Vec<DiffRow>,
     pub diff_groups: Vec<DiffGroup>,
     pub file_rows: Vec<FileRow>,

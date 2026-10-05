@@ -1,6 +1,6 @@
-//! 右侧两栏共用的项目状态：当前终端所在仓库的 git 改动和文件树。面板显示时监听仓库目录，
-//! 有文件变了才在后台重读，监听不了时定时重读。两栏的开关、宽度、分隔线和标题栏右上角的
-//! 开关按钮也在这里。
+//! 右侧各栏共用的项目状态：当前终端所在仓库的 git 改动和文件树。面板显示时监听仓库目录，
+//! 有文件变了才在后台重读，监听不了时定时重读。改动栏和文件树的开关，改动栏、预览栏和文件树
+//! 的宽度、分隔线，以及标题栏右上角的开关按钮也在这里。
 //!
 //! 读目录和 git 状态、给路径找标记在 `scan`，改动栏和文件树排成行的状态在 `state`，监听目录
 //! 在 `watch`；这三处不碰界面。
@@ -47,6 +47,8 @@ const CHANGES_WIDTH: f32 = 520.;
 const CHANGES_MIN_WIDTH: f32 = 280.;
 const FILES_WIDTH: f32 = 240.;
 const FILES_MIN_WIDTH: f32 = 160.;
+const PREVIEW_WIDTH: f32 = 480.;
+const PREVIEW_MIN_WIDTH: f32 = 240.;
 /// 右侧面板再宽也给终端区留这么宽。
 const MAIN_MIN_WIDTH: f32 = 240.;
 /// 标题栏右上角开关按钮的尺寸和间距。
@@ -72,9 +74,23 @@ pub(super) fn status_color(status: FileStatus) -> Rgb {
     }
 }
 
+/// 右侧各栏实际画多宽，收着的为零。从左到右是改动栏、预览栏、文件树。
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub(super) struct PanelWidths {
+    pub changes: f32,
+    pub preview: f32,
+    pub files: f32,
+}
+
+impl PanelWidths {
+    pub fn total(self) -> f32 {
+        self.changes + self.preview + self.files
+    }
+}
+
 impl WindowView {
     pub(super) fn project_visible(&self) -> bool {
-        self.changes_shown || self.files_shown
+        self.changes_shown || self.files_shown || self.preview_shown()
     }
 
     /// 右侧面板读哪个目录：当前终端的目录，取不到时是 workspace 的目录。
@@ -114,6 +130,10 @@ impl WindowView {
 
     /// 监听到 `paths` 变了：有要紧的就重读。窗口在后台时只记下来，切到前台时再读。
     pub(super) fn project_changed(&mut self, paths: Vec<PathBuf>, active: bool, cx: &mut Context<Self>) {
+        // 预览的文件变了就重读；窗口在后台时等切回前台再按修改时间判断。
+        if active && self.preview().is_some_and(|preview| preview.affected_by(&paths)) {
+            self.load_preview(cx);
+        }
         let Some(watch) = &self.project_watch else {
             return;
         };
@@ -141,6 +161,8 @@ impl WindowView {
     /// 记下来，读完再读一次。
     pub(super) fn refresh_project(&mut self, cx: &mut Context<Self>) {
         if !self.project_visible() {
+            // 切到右侧什么都不显示的 workspace 时，放掉上一个 workspace 的目录监听。
+            self.sync_project_watch();
             return;
         }
         let dir = self.project_dir(cx);
@@ -229,33 +251,40 @@ impl WindowView {
         cx.notify();
     }
 
-    /// 改动栏和文件树实际画多宽，收着的为零。窗口窄时先压改动栏再压文件树，尽量给终端区
-    /// 留出 `MAIN_MIN_WIDTH`，但不窄于各自的下限。
-    pub(super) fn right_panel_widths(&self, viewport: f32) -> (f32, f32) {
+    /// 改动栏、预览栏和文件树实际画多宽，收着的为零。窗口窄时先压改动栏，再压预览栏，最后压
+    /// 文件树，尽量给终端区留出 `MAIN_MIN_WIDTH`，但不窄于各自的下限。
+    pub(super) fn right_panel_widths(&self, viewport: f32) -> PanelWidths {
         let sidebar = if self.sidebar_visible() { self.sidebar_width() } else { 0. };
         let room = viewport - sidebar - MAIN_MIN_WIDTH;
+        let preview_shown = self.preview_shown();
         let files = if self.files_shown { self.files_width.unwrap_or(FILES_WIDTH) } else { 0. };
+        let preview = if preview_shown { self.preview_width.unwrap_or(PREVIEW_WIDTH) } else { 0. };
         let changes = if self.changes_shown {
-            self.changes_width.unwrap_or(CHANGES_WIDTH).min(room - files).max(CHANGES_MIN_WIDTH)
+            self.changes_width.unwrap_or(CHANGES_WIDTH).min(room - files - preview).max(CHANGES_MIN_WIDTH)
         } else {
             0.
         };
-        let files = if self.files_shown { files.min(room - changes).max(FILES_MIN_WIDTH) } else { 0. };
-        (changes, files)
+        let preview = if preview_shown { preview.min(room - files - changes).max(PREVIEW_MIN_WIDTH) } else { 0. };
+        let files = if self.files_shown { files.min(room - changes - preview).max(FILES_MIN_WIDTH) } else { 0. };
+        PanelWidths { changes, preview, files }
     }
 
     /// 拖动右侧面板左边的分隔线，左边跟到窗口里的横坐标 `x`。
     pub(super) fn resize_right_panel(&mut self, divider: Divider, x: f32, viewport: f32) {
         let sidebar = if self.sidebar_visible() { self.sidebar_width() } else { 0. };
         let room = viewport - sidebar - MAIN_MIN_WIDTH;
-        let (changes, files) = self.right_panel_widths(viewport);
+        let PanelWidths { changes, preview, files } = self.right_panel_widths(viewport);
         match divider {
             Divider::Changes => {
-                let width = (viewport - files - x).min(room - files).max(CHANGES_MIN_WIDTH);
+                let width = (viewport - preview - files - x).min(room - preview - files).max(CHANGES_MIN_WIDTH);
                 self.changes_width = Some(width);
             }
+            Divider::Preview => {
+                let width = (viewport - files - x).min(room - changes - files).max(PREVIEW_MIN_WIDTH);
+                self.preview_width = Some(width);
+            }
             Divider::Files => {
-                let width = (viewport - x).min(room - changes).max(FILES_MIN_WIDTH);
+                let width = (viewport - x).min(room - changes - preview).max(FILES_MIN_WIDTH);
                 self.files_width = Some(width);
             }
             Divider::Split(..) | Divider::Sidebar => {}
@@ -264,7 +293,11 @@ impl WindowView {
 
     /// 右侧面板左边的分隔线把手，盖在窗口的最上层；`right` 是分隔线离窗口右边的距离。
     pub(super) fn render_right_handle(&self, divider: Divider, right: f32, cx: &mut Context<Self>) -> Stateful<Div> {
-        let id = if matches!(divider, Divider::Changes) { "changes-divider" } else { "files-divider" };
+        let id = match divider {
+            Divider::Changes => "changes-divider",
+            Divider::Preview => "preview-divider",
+            _ => "files-divider",
+        };
         div()
             .id(id)
             .absolute()
@@ -281,6 +314,7 @@ impl WindowView {
                         // 双击恢复默认宽度。
                         match divider {
                             Divider::Changes => this.changes_width = None,
+                            Divider::Preview => this.preview_width = None,
                             _ => this.files_width = None,
                         }
                         this.save(cx);

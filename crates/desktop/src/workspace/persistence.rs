@@ -196,6 +196,7 @@ impl WindowView {
             changes_width: self.changes_width,
             files: self.files_shown,
             files_width: self.files_width,
+            preview_width: self.preview_width,
             show_ignored: self.show_ignored,
         }
     }
@@ -273,6 +274,7 @@ impl WindowView {
             self.changes_width = saved.changes_width;
             self.files_shown = saved.files;
             self.files_width = saved.files_width;
+            self.preview_width = saved.preview_width;
             self.show_ignored = saved.show_ignored;
             self.activate_workspace(active, window, cx);
         }
