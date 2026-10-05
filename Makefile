@@ -1,6 +1,8 @@
 CARGO ?= cargo
 # 传给 runode 的命令行参数，例如 make run ARGS="--foo"。
 ARGS ?=
+# 追加给 clippy 的参数，例如 CI 里 make clippy CLIPPY_ARGS="-- -D warnings" 让警告算失败。
+CLIPPY_ARGS ?=
 
 .DEFAULT_GOAL := help
 .PHONY: help submodules build release run run-release app install dmg check test clippy clean
@@ -40,7 +42,7 @@ test: ## 运行测试
 	$(CARGO) test --workspace
 
 clippy: ## 运行 clippy
-	$(CARGO) clippy --workspace --all-targets
+	$(CARGO) clippy --workspace --all-targets $(CLIPPY_ARGS)
 
 clean: ## 清理构建产物
 	$(CARGO) clean
