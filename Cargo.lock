@@ -4983,13 +4983,12 @@ dependencies = [
  "futures",
  "gpui-pre",
  "gpui-pre-platform",
- "libc",
  "libghostty-vt",
- "miniz_oxide 0.9.1",
  "notify",
  "objc2 0.6.4",
  "objc2-app-kit 0.3.2",
  "objc2-foundation 0.3.2",
+ "runode-completion",
  "runode-dirs",
  "runode-git",
  "runode-model",
@@ -4999,6 +4998,20 @@ dependencies = [
  "serde_json",
  "tracing",
  "tracing-subscriber",
+]
+
+[[package]]
+name = "runode-completion"
+version = "0.1.0"
+dependencies = [
+ "futures",
+ "libc",
+ "miniz_oxide 0.9.1",
+ "runode-dirs",
+ "runode-model",
+ "runode-term",
+ "serde_json",
+ "tracing",
  "warp-command-signatures",
 ]
 

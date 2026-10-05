@@ -16,7 +16,9 @@ pub mod usage;
 use std::{collections::HashMap, ffi::OsString, path::Path, sync::Arc};
 
 use runode_model::shell::ShellNames;
-use warp_command_signatures::{GeneratorResults, PathSuggestionType, Suggestion, TemplateType};
+use warp_command_signatures::{PathSuggestionType, Suggestion, TemplateType};
+/// 生成器跑出来的结果，交回 `generated` 换成候选。
+pub use warp_command_signatures::GeneratorResults;
 
 pub use engine::{Candidate, Edit, Kind, common_prefix, decisive, highlight, rank};
 use engine::{Plan, Source};

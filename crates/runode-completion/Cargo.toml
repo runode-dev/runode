@@ -1,0 +1,27 @@
+[package]
+name = "runode-completion"
+description = "Command completion for runode: subcommands, options and arguments from embedded command specs, plus command names the shell reports"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+runode-dirs.workspace = true
+runode-model.workspace = true
+# 命令历史里各命令的常用程度，以及文字在终端里占几格。
+runode-term.workspace = true
+# 命令规格的数据类型和动态补全的生成器。
+warp-command-signatures.workspace = true
+# 解压构建脚本嵌进来的命令规格。
+miniz_oxide.workspace = true
+serde_json.workspace = true
+futures.workspace = true
+# 补全的生成器命令跑在自己的进程组里，超时时整组结束。
+libc.workspace = true
+tracing.workspace = true
+
+[build-dependencies]
+# 构建脚本把命令规格的 JSON 压紧、逐个压缩后嵌进二进制。
+miniz_oxide.workspace = true
+serde_json.workspace = true

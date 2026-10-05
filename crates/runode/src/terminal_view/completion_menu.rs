@@ -6,10 +6,10 @@ mod paint;
 use std::{path::PathBuf, time::Instant};
 
 use gpui::{Context, Keystroke, MouseDownEvent, ScrollDelta, ScrollWheelEvent, Task};
-use warp_command_signatures::GeneratorResults;
+
+use runode_completion::{self as completion, Candidate, GeneratorJob, GeneratorResults, Request, Shell, generators};
 
 use super::{ECHO_WAIT, TerminalView};
-use crate::completion::{self, Candidate, GeneratorJob, Request, Shell, generators};
 
 /// 开着的补全菜单。
 pub(super) struct CompletionMenu {

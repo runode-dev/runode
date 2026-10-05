@@ -626,7 +626,7 @@ pub fn edit(text: &str, cursor: usize, word: &Word, from: usize, value: &str, fi
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::completion::{line::parse, specs};
+    use crate::{line::parse, specs};
 
     fn plan_at(input: &str) -> Option<Plan> {
         let cursor = input.find('^').unwrap();

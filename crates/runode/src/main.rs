@@ -3,7 +3,6 @@
 
 mod about;
 mod assets;
-mod completion;
 mod config;
 mod file_icons;
 mod i18n;
