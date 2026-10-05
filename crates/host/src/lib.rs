@@ -34,6 +34,7 @@ use runode_shared_types::{grid::GridSize, session::SessionMeta, settings::TermSe
 #[derive(Clone, Debug, PartialEq)]
 pub enum HostEvent {
     /// PTY 的输出，原样的字节；也可能是宿主为清屏插进输出流的字节，见 `ClientMsg::ClearScreen`。
+    /// 进程内的前端收到的是原样的，socket 上的前端收到的抹掉了 shell 集成报告的内容。
     Output(Arc<[u8]>),
     /// 控制消息。装在盒子里：输出最常见，每件事挪动时不必带着最大那种消息的大小。
     Msg(Box<HostMsg>),

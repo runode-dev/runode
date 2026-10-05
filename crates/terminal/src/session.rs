@@ -17,6 +17,8 @@
 pub(crate) mod convert;
 mod input;
 mod input_line;
+#[cfg(test)]
+mod mirror_tests;
 mod pointer;
 mod render;
 mod scroll;
@@ -255,7 +257,7 @@ impl Session {
 
     /// shell 集成报告的别名、函数、内建命令和关键字（内容变了才报告）；没报告过的为空。
     pub fn shell_names(&self) -> ShellNames {
-        self.meta.shell_names.clone()
+        ShellNames::clone(&self.meta.shell_names)
     }
 
     /// 宿主最近一次读到的前台是不是 shell 自己。

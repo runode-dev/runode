@@ -3,6 +3,7 @@
 
 use std::{
     cell::{Cell as StdCell, RefCell},
+    sync::Arc,
     time::Instant,
 };
 
@@ -26,7 +27,8 @@ pub(super) struct Effects {
     /// shell 集成在这次显示提示符前报告的目录，由下一个 `PromptEvent::InputStart` 取走。
     pub(super) shell_cwd: RefCell<Option<std::path::PathBuf>>,
     /// shell 集成用 `SHELL_REPORT` 报告的别名、函数、内建命令和关键字，对外见 `SessionMeta::shell_names`。
-    pub(super) shell_names: RefCell<ShellNames>,
+    /// 和交出去的状态共享同一份，报告变了才复制一份来改。
+    pub(super) shell_names: RefCell<Arc<ShellNames>>,
     /// 启动 shell 时交给集成脚本的报告口令（见 `shell_integration::prepare`），`SHELL_REPORT`
     /// 带的口令和它一致才采用；没有口令时一条报告都不采用。
     pub(super) report_token: RefCell<Option<String>>,
@@ -95,6 +97,7 @@ impl Effects {
         let Ok(mut names) = self.shell_names.try_borrow_mut() else {
             return;
         };
+        let names = Arc::make_mut(&mut names);
         self.reported.set(true);
         if field == b"alias_values" {
             let text = String::from_utf8_lossy(&value);
@@ -351,6 +354,11 @@ mod tests {
         assert_eq!(names.alias_values, [("ll".into(), "ls -l".into()), ("gs".into(), "git status".into())]);
         assert_eq!(names.functions, functions);
         assert!(names.builtins.is_empty());
+        // 名字没变时交出去的状态共享同一份；再报告时复制一份来改，之前交出去的不跟着变。
+        assert!(Arc::ptr_eq(&names, &session.meta().shell_names));
+        session.feed(format!("\x1b]6973;{TOKEN};aliases=ll\x07").as_bytes());
+        assert_eq!(session.meta().shell_names.aliases, ["ll"]);
+        assert_eq!(names.aliases, ["ll", "gs"]);
         assert_eq!(percent_decode(b"a%2fb%zz%4"), b"a/b%zz%4");
     }
 

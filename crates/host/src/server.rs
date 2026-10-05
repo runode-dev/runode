@@ -4,7 +4,8 @@
 //! 读的线程先等 `Hello`，回 `Welcome`（协议版本对不上时回 `Incompatible` 后断开），之后把控制
 //! 消息和输入帧转给宿主。写的线程按到达的先后把帧写出去：连上的会话在自己的线程里把事件交给
 //! 这条连接的 `Outbox`，一个会话的帧在连接上的先后就是它发生的先后。前端读得太慢、积压超过
-//! `OUTBOX_LIMIT` 时，那个会话不再往这条连接发输出，改发 `Resync`，前端重新 `Attach`。
+//! `OUTBOX_LIMIT` 时，那个会话不再往这条连接发输出，改发 `Resync`，前端重新 `Attach`。转给
+//! 连接的输出里，shell 集成的报告抹掉了内容（见 `ReportRedactor`），报告带的口令不出宿主。
 //!
 //! 能连上 socket 就能读写所有终端：socket 放在只有自己能进的目录里（见调用方建目录的方式），
 //! 连上来的进程也要是同一个用户的。
@@ -355,14 +356,11 @@ impl Connection<'_> {
                 "the host runs inside the runode app and cannot hand off or shut down on its own".into(),
             ),
             ClientMsg::Unknown => self.error(None, None, "unknown message".into()),
-            // 桌面那份 VT 在 `HostMsg::ThemeApplied` 处套的是桌面自己的配置，不是宿主套的那份；
-            // 别的进程改了主题，两份 VT 就分叉了。主题和选项现在只跟着桌面的配置走。
-            ClientMsg::SetTheme { .. } | ClientMsg::SetOptions { .. } => {
-                self.error(None, None, "the theme and options follow the runode app's config".into())
-            }
-            ClientMsg::Resize { .. } | ClientMsg::Focus { .. } | ClientMsg::ClearScreen { .. } => {
-                self.client.send(message)
-            }
+            ClientMsg::Resize { .. }
+            | ClientMsg::Focus { .. }
+            | ClientMsg::ClearScreen { .. }
+            | ClientMsg::SetTheme { .. }
+            | ClientMsg::SetOptions { .. } => self.client.send(message),
         }
     }
 

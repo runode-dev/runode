@@ -8,10 +8,12 @@
 //! 状态。宿主在会话自己的线程里建它，从不挪到别的线程。
 //!
 //! 这里是会话本身：创建、接上 PTY、注册 VT 回调、套用主题、改尺寸、写入和清屏。VT 回调累积的
-//! 变化和 shell 集成的报告在 `effects`，前台 agent 的识别在 `detect`。
+//! 变化和 shell 集成的报告在 `effects`，前台 agent 的识别在 `detect`，转给别的进程前抹掉报告
+//! 内容的 `ReportRedactor` 在 `redact`。
 
 mod detect;
 mod effects;
+mod redact;
 
 use std::{
     cell::{Cell as StdCell, RefCell},
@@ -39,6 +41,7 @@ use crate::{
     vt::{self, SnapshotError},
 };
 use effects::{Effects, PromptEvent, SHELL_REPORT};
+pub use redact::ReportRedactor;
 
 pub struct HostSession {
     terminal: Terminal<'static, 'static>,

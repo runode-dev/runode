@@ -120,7 +120,10 @@ impl TerminalView {
                     events.push(event);
                 }
                 let exited = events.iter().any(is_exited);
-                let updated = this.update_in(cx, |view, window, cx| view.handle_host_events(events, window, cx));
+                let updated = this.update_in(cx, |view, window, cx| {
+                    view.handle_host_events(events, window, cx);
+                    view.ring_bell(cx);
+                });
                 if updated.is_err() || exited {
                     break;
                 }
@@ -129,7 +132,8 @@ impl TerminalView {
     }
 
     /// 按先后处理宿主发来的一批事件：输出喂给 VT（连着的几块合成一次写入），在标出的位置改
-    /// 尺寸、换主题，写入对外公布的状态，转发标题、响铃、退出等事件，再重绘。
+    /// 尺寸、换主题，写入对外公布的状态，转发标题、退出等事件，再重绘。响铃留给调用方用
+    /// `ring_bell` 转发，见 `new`。
     fn handle_host_events(&mut self, events: Vec<HostEvent>, window: &mut Window, cx: &mut Context<Self>) {
         let mut pending: Vec<Arc<[u8]>> = Vec::new();
         let mut fed = false;
@@ -150,9 +154,9 @@ impl TerminalView {
                     }
                 }),
                 HostMsg::Resized { size, .. } => self.session.apply_resized(size),
-                // 用最新的配置：宿主按主线程最近一次发的主题换，这时全局配置已经是它了。
-                HostMsg::ThemeApplied { .. } => {
-                    let settings = cx.global::<AppConfig>().0.term_settings();
+                // 套标记里带的那份：宿主在这里套的就是它，全局配置可能已经又变了，主题也可能是
+                // 别的前端换的。
+                HostMsg::ThemeApplied { settings, .. } => {
                     self.session.apply_theme(&settings);
                     // 高亮的颜色取自调色板。
                     self.input_changed = true;
@@ -177,9 +181,6 @@ impl TerminalView {
             // 有输出（包括键入的回显）时光标先亮起，免得打字时看不到它。
             self.reset_cursor_blink(window, cx);
         }
-        if self.session.take_bell() {
-            cx.emit(TerminalEvent::Bell);
-        }
         if exited {
             self.session.exited = true;
             cx.emit(TerminalEvent::Exited);
@@ -188,6 +189,13 @@ impl TerminalView {
             self.schedule_hold_timeout(cx);
         }
         cx.notify();
+    }
+
+    /// 程序响过铃的话通知外层。
+    fn ring_bell(&mut self, cx: &mut Context<Self>) {
+        if self.session.take_bell() {
+            cx.emit(TerminalEvent::Bell);
+        }
     }
 
     /// 把攒着的几块输出一次喂给 VT，返回是否喂了。
@@ -349,6 +357,9 @@ impl TerminalView {
         }
         if !early.is_empty() {
             view.handle_host_events(early, window, cx);
+            // 补发的输出里响过铃的话，这时通知外层会丢：订阅要等这一轮的副作用处理到时才生效，
+            // 排在它前面发出的事件没人收。推迟到外层订阅好以后再通知。
+            cx.defer_in(window, |view, _, cx| view.ring_bell(cx));
         }
         view._reader = Self::read_events(futures::stream::iter(exited_early).chain(rx), window, cx);
         view

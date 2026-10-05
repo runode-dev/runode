@@ -9,11 +9,11 @@ use std::{
     time::{Duration, Instant},
 };
 
-use runode_host::{ClientMsg, Host, HostMsg, SessionId, SpawnOptions};
+use runode_host::{ClientMsg, Host, HostEvent, HostMsg, SessionId, SpawnOptions};
 use runode_protocol::{
     AttachMode, BuildId, Caps, ClientKind, Frame, FrameKind, PROTOCOL_VERSION, read_frame, write_frame,
 };
-use runode_shared_types::{grid::GridSize, shell::IntegrationMode};
+use runode_shared_types::{grid::GridSize, settings::TermSettings, shell::IntegrationMode};
 
 const SIZE: GridSize = GridSize { cols: 20, rows: 4, cell_width_px: 8, cell_height_px: 16 };
 const WAIT: Duration = Duration::from_secs(10);
@@ -278,23 +278,108 @@ fn attaching_again_replaces_the_channel() {
     peer.send(&ClientMsg::Kill { id });
 }
 
-/// 宿主跑在 app 里，别的进程让它退出、交接，或者改主题和选项，都回 `Error`，连接照旧。
+/// 宿主跑在 app 里，别的进程让它退出、交接，都回 `Error`，连接照旧。
 #[test]
 fn app_owned_requests_are_refused() {
     let dir = temp_dir("refuse");
     let (_host, socket) = listen(&dir);
     let mut peer = Peer::hello(&socket, false);
-    for message in [
-        ClientMsg::Shutdown { kill_sessions: true },
-        ClientMsg::Handoff,
-        ClientMsg::SetTheme { settings: Default::default() },
-        ClientMsg::SetOptions { record_history: false },
-    ] {
+    for message in [ClientMsg::Shutdown { kill_sessions: true }, ClientMsg::Handoff] {
         peer.send(&message);
         assert!(matches!(peer.reply(), HostMsg::Error { .. }), "{message:?}");
     }
     peer.send(&ClientMsg::ListSessions);
     assert!(matches!(peer.reply(), HostMsg::SessionList { .. }));
+}
+
+/// 别的进程也能换主题、改选项：连着的前端，不管是不是发 `SetTheme` 的那个、经不经 socket，
+/// 都在输出流里收到带着宿主套用的那份设置的 `ThemeApplied`，各自的 VT 照它套。
+#[test]
+fn socket_clients_can_change_the_theme() {
+    let dir = temp_dir("theme");
+    let (host, socket) = listen(&dir);
+    let id = cat(&host);
+    let client = host.connect_in_process();
+    let (tx, desktop) = mpsc::channel();
+    client.attach(id, Box::new(move |event| tx.send(event).is_ok())).unwrap();
+    let mut peer = Peer::hello(&socket, false);
+    peer.attach(id, AttachMode::VtReplay);
+    let settings = TermSettings { cursor_blink: Some(false), scrollback_limit: 1 << 20, ..TermSettings::default() };
+    peer.send(&ClientMsg::SetOptions { record_history: false });
+    peer.send(&ClientMsg::SetTheme { settings: settings.clone() });
+    assert_eq!(peer.reply(), HostMsg::ThemeApplied { id, settings: settings.clone() });
+    let applied = loop {
+        match desktop.recv_timeout(WAIT).expect("timed out") {
+            HostEvent::Msg(message) if matches!(*message, HostMsg::ThemeApplied { .. }) => break *message,
+            _ => {}
+        }
+    };
+    assert_eq!(applied, HostMsg::ThemeApplied { id, settings });
+    client.send(ClientMsg::Kill { id });
+}
+
+/// shell 集成的报告带着口令，转给 socket 上的前端时抹掉内容，报告被切在两块输出之间也一样；
+/// 进程内的桌面照旧原样收。之后连上来的前端拿到的屏幕（VT 重放）里本来就没有这些报告。
+#[test]
+fn shell_reports_do_not_leave_the_host() {
+    use std::{io::Write as _, os::unix::fs::PermissionsExt as _};
+
+    const TOKEN: &str = "0123456789abcdef0123456789abcdef";
+    let dir = temp_dir("redact");
+    let (host, socket) = listen(&dir);
+    // 一条报告分两次写，中间停一下，宿主多半分两块读到；之后的输出照常。
+    let shell = dir.join("shell.sh");
+    let mut file = std::fs::File::create(&shell).unwrap();
+    write!(
+        file,
+        "#!/bin/sh\nprintf '\\033]6973;{TOKEN};cwd=/tm'\nsleep 0.3\nprintf 'p\\007visible\\n'\nexec /bin/cat\n"
+    )
+    .unwrap();
+    drop(file);
+    std::fs::set_permissions(&shell, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let client = host.connect_in_process();
+    let id = client
+        .spawn(SpawnOptions {
+            size: SIZE,
+            cwd: None,
+            integration: IntegrationMode::Off,
+            start: false,
+            shell: Some(shell.to_string_lossy().into_owned()),
+            settings: None,
+        })
+        .unwrap();
+    let (tx, desktop) = mpsc::channel();
+    client.attach(id, Box::new(move |event| tx.send(event).is_ok())).unwrap();
+    let mut peer = Peer::hello(&socket, false);
+    let (channel, _) = peer.attach(id, AttachMode::VtReplay);
+    client.start(id, IntegrationMode::Off);
+
+    let deadline = Instant::now() + WAIT;
+    let (mut output, mut chunks) = (Vec::new(), 0);
+    while !output.windows(7).any(|w| w == b"visible") {
+        let frame = peer.frames.recv_timeout(deadline.saturating_duration_since(Instant::now())).expect("timed out");
+        if frame.kind == FrameKind::Output && frame.channel == channel {
+            output.extend_from_slice(&frame.payload);
+            chunks += 1;
+        }
+    }
+    let text = String::from_utf8_lossy(&output);
+    assert!(!text.contains(TOKEN) && !text.contains("cwd="), "{text:?}");
+    assert!(text.contains("\x1b]6973;\x07visible"), "{text:?} in {chunks} chunks");
+
+    let mut raw = Vec::new();
+    while !raw.windows(7).any(|w| w == b"visible") {
+        if let HostEvent::Output(data) = desktop.recv_timeout(WAIT).expect("timed out") {
+            raw.extend_from_slice(&data);
+        }
+    }
+    assert!(String::from_utf8_lossy(&raw).contains(&format!("\x1b]6973;{TOKEN};cwd=/tmp\x07")));
+
+    let mut late = Peer::hello(&socket, false);
+    let (_, screen) = late.attach(id, AttachMode::VtReplay);
+    let screen = String::from_utf8_lossy(&screen);
+    assert!(screen.contains("visible") && !screen.contains(TOKEN), "{screen:?}");
+    client.send(ClientMsg::Kill { id });
 }
 
 /// 会话被结束时，连着的前端收到 `Exited`。

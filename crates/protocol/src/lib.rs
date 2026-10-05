@@ -24,4 +24,4 @@ pub const ENV_SESSION: &str = "RUNODE_SESSION";
 pub const ENV_SOCKET: &str = "RUNODE_SOCKET";
 
 /// 协议的版本。消息的含义或帧格式变了、旧的一方读不懂时加一；只是加了可以缺省的字段不用加。
-pub const PROTOCOL_VERSION: u32 = 1;
+pub const PROTOCOL_VERSION: u32 = 2;

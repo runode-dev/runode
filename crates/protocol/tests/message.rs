@@ -86,7 +86,10 @@ fn host_messages_round_trip() {
         HostMsg::Attached { id: ID, channel: 1, size: size(), mode: AttachMode::VtReplay, meta: meta() },
         HostMsg::SnapshotEnd { id: ID },
         HostMsg::Resized { id: ID, size: size() },
-        HostMsg::ThemeApplied { id: ID },
+        HostMsg::ThemeApplied {
+            id: ID,
+            settings: TermSettings { scrollback_limit: 4 << 20, ..TermSettings::default() },
+        },
         HostMsg::Meta { id: ID, meta: SessionMeta::default() },
         HostMsg::CommandFinished {
             id: ID,

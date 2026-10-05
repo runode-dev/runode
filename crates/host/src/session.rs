@@ -7,7 +7,9 @@
 //! 一方从不等。没有事的时候按 agent 识别和前台进程轮询要的时刻醒来。
 
 use std::{
+    any::Any,
     ffi::OsString,
+    panic::{self, AssertUnwindSafe},
     sync::{
         Arc, Condvar, Mutex, PoisonError,
         atomic::{AtomicBool, AtomicUsize, Ordering},
@@ -22,7 +24,7 @@ use runode_protocol::{AttachMode, FinishedCommand, HostMsg, SessionId, SessionIn
 use runode_shared_types::{grid::GridSize, session::SessionMeta, settings::TermSettings, shell::IntegrationMode};
 use runode_terminal::{
     history,
-    host_session::HostSession,
+    host_session::{HostSession, ReportRedactor},
     pty::{self, Pty, PtyEvent},
 };
 
@@ -96,11 +98,17 @@ pub(crate) struct Screen {
 #[derive(Clone)]
 pub(crate) struct Handle {
     inbox: mpsc::Sender<Inbox>,
+    /// 前端要结束会话。`Inbox::Kill` 排在积压的输出后面，会话线程处理每条消息前先看这个，
+    /// 不用等积压的输出（最多 `PTY_BACKLOG_BYTES`）都喂完。
+    killed: Arc<AtomicBool>,
 }
 
 impl Handle {
     /// 发一条消息，会话线程已经结束时返回 false。
     pub(crate) fn send(&self, message: Inbox) -> bool {
+        if matches!(message, Inbox::Kill) {
+            self.killed.store(true, Ordering::Release);
+        }
         self.inbox.send(message).is_ok()
     }
 }
@@ -130,6 +138,8 @@ pub(crate) fn spawn(
         pty.start(options.shell.as_deref(), options.cwd.as_deref(), options.integration)?;
     }
     let (ready, created) = mpsc::channel();
+    let killed = Arc::new(AtomicBool::new(false));
+    let killed_flag = killed.clone();
     thread::Builder::new()
         .name(format!("session-{id}"))
         .spawn(move || {
@@ -144,36 +154,21 @@ pub(crate) fn spawn(
                 }
             };
             let _ = ready.send(Ok(()));
-            Runner::new(id, session, options, settings, credits, record_history, keep_backlog).run(&rx);
+            Runner::new(id, session, options, settings, credits, record_history, keep_backlog).run(&rx, &killed_flag);
         })
         .context("failed to start the session thread")?;
     created.recv().map_err(|_| anyhow!("the session thread ended while starting"))??;
-    Ok(Handle { inbox })
-}
-
-/// 有大量输出时会话线程处理完一块后空转等下一块的最长时间。
-const STREAMING_SPIN: Duration = Duration::from_micros(50);
-
-/// 空转着等下一条消息，最多 `STREAMING_SPIN`；没等到时为 `None`，收件箱断开了也是 `None`，
-/// 留给接着睡下等的那一步发现。
-fn spin_recv(inbox: &mpsc::Receiver<Inbox>) -> Option<Option<Inbox>> {
-    let until = Instant::now() + STREAMING_SPIN;
-    loop {
-        match inbox.try_recv() {
-            Ok(message) => return Some(Some(message)),
-            Err(mpsc::TryRecvError::Disconnected) => return None,
-            Err(mpsc::TryRecvError::Empty) if Instant::now() >= until => return None,
-            Err(mpsc::TryRecvError::Empty) => std::hint::spin_loop(),
-        }
-    }
+    Ok(Handle { inbox, killed })
 }
 
 /// 会话线程里的状态。
 struct Runner {
     id: SessionId,
     session: HostSession,
-    /// 连着的前端，按连接的编号。
-    subscribers: Vec<(u64, Sink)>,
+    /// 连着的前端。
+    subscribers: Vec<Subscriber>,
+    /// 给 socket 上的前端的输出抹掉 shell 集成报告的内容，从会话开出来起每块输出都经过它。
+    redactor: ReportRedactor,
     /// 还没有前端连上过时攒着的事件，第一个连上的前端先收到它们；为 `None` 时已经连上过，或者
     /// 攒得太多放弃了（`backlog_lost`）。
     backlog: Option<Vec<HostEvent>>,
@@ -212,6 +207,7 @@ impl Runner {
             id,
             session,
             subscribers: Vec::new(),
+            redactor: ReportRedactor::new(),
             backlog: keep_backlog.then(Vec::new),
             backlog_bytes: 0,
             backlog_lost: false,
@@ -231,34 +227,69 @@ impl Runner {
         runner
     }
 
-    fn run(mut self, inbox: &mpsc::Receiver<Inbox>) {
-        let mut streaming = false;
+    fn run(mut self, inbox: &mpsc::Receiver<Inbox>, killed: &AtomicBool) {
         loop {
-            // 程序正在大量输出时下一块多半马上就到，先空转等一小会儿：线程不睡下，读线程交下一块时
-            // 就不用叫醒它，省掉每块一次的系统调用。
-            let spun = if streaming { spin_recv(inbox) } else { None };
-            let message = match spun {
-                Some(message) => Some(message),
-                None => self.wait(inbox),
-            };
-            let Some(message) = message else {
+            let Some(message) = self.wait(inbox) else {
                 return;
             };
-            streaming = matches!(message, Some(Inbox::Pty(PtyEvent::Output(_))));
-            match message {
-                Some(Inbox::Kill) => {
-                    // 连着的前端（比如经 socket 等着 agent 的命令行）由此知道会话没了；叫结束的
-                    // 那一方多半已经不收了。
-                    if !self.exited {
-                        self.emit(HostEvent::msg(HostMsg::Exited { id: self.id, status: None }));
-                    }
+            if killed.load(Ordering::Acquire) {
+                self.ended();
+                return;
+            }
+            // 处理一条消息时 panic 的话，`HostSession` 可能停在半路，不能再往下处理；告诉前端会话
+            // 没了，免得视图一直停在最后一屏不动。
+            match panic::catch_unwind(AssertUnwindSafe(|| self.step(message))) {
+                Ok(true) => {}
+                Ok(false) => return,
+                Err(panic) => {
+                    self.crashed(panic.as_ref());
                     return;
                 }
-                Some(message) => self.handle(message),
-                None => self.tick(),
             }
-            self.publish_meta();
         }
+    }
+
+    /// 处理一条消息（`None` 表示到了该醒的时刻），返回会话是否还要接着跑。
+    fn step(&mut self, message: Option<Inbox>) -> bool {
+        match message {
+            Some(Inbox::Kill) => {
+                self.ended();
+                return false;
+            }
+            Some(message) => self.handle(message),
+            None => {}
+        }
+        // 输出一直不断时收件箱总有消息，`wait` 等不到超时；到点的轮询在这里补上，不然前台进程
+        // 和 agent 状态要等输出停了才更新。
+        if self.deadline().is_some_and(|at| Instant::now() >= at) {
+            self.tick();
+        }
+        self.publish_meta();
+        true
+    }
+
+    /// 会话结束了（前端要结束它，或者处理消息时 panic）：还没报告过退出的，告诉连着的前端
+    /// （比如经 socket 等着 agent 的命令行）；叫结束的那一方多半已经不收了。
+    fn ended(&mut self) {
+        if !std::mem::replace(&mut self.exited, true) {
+            self.emit(HostEvent::msg(HostMsg::Exited { id: self.id, status: None }));
+        }
+    }
+
+    /// 处理消息时 panic 了：记日志，告诉前端出了错、会话没了。
+    fn crashed(&mut self, panic: &(dyn Any + Send)) {
+        let message = panic
+            .downcast_ref::<&str>()
+            .map(|s| (*s).to_owned())
+            .or_else(|| panic.downcast_ref::<String>().cloned())
+            .unwrap_or_else(|| "unknown panic".into());
+        tracing::error!("session {} panicked: {message}", self.id);
+        let error = HostMsg::Error { req: None, id: Some(self.id), message: format!("the session crashed: {message}") };
+        // 发给前端时又 panic 的（比如出事的正是前端的 `Sink`），也只能到此为止。
+        let _ = panic::catch_unwind(AssertUnwindSafe(|| {
+            self.emit(HostEvent::msg(error));
+            self.ended();
+        }));
     }
 
     /// 等下一条消息，到了该醒的时刻还没有时为 `Some(None)`；收件箱断开了为 `None`。
@@ -294,7 +325,7 @@ impl Runner {
             Inbox::Attach { connection, sink, reply } => {
                 let _ = reply.send(self.attach(connection, sink));
             }
-            Inbox::Detach { connection } => self.subscribers.retain(|(c, _)| *c != connection),
+            Inbox::Detach { connection } => self.subscribers.retain(|s| s.connection != connection),
             Inbox::Start { integration } => {
                 if let Err(err) = self.session.start(self.shell.as_deref(), integration) {
                     tracing::error!("failed to start terminal session: {err:#}");
@@ -316,7 +347,8 @@ impl Runner {
             }
             Inbox::Theme(settings) => {
                 if self.session.apply_theme(&settings) {
-                    self.emit(HostEvent::msg(HostMsg::ThemeApplied { id: self.id }));
+                    let settings = (*settings).clone();
+                    self.emit(HostEvent::msg(HostMsg::ThemeApplied { id: self.id, settings }));
                 }
             }
             Inbox::Subscribe(subscribe) => self.subscribe(subscribe),
@@ -360,7 +392,8 @@ impl Runner {
         if self.exited && !sink(HostEvent::msg(HostMsg::Exited { id: self.id, status: None })) {
             return;
         }
-        self.subscribers.push((connection, sink));
+        // 别的进程拿不到 shell 集成报告的口令，见 `ReportRedactor`。
+        self.subscribers.push(Subscriber { connection, sink, redacted: true });
     }
 
     fn replay(&self) -> Vec<u8> {
@@ -384,15 +417,14 @@ impl Runner {
             self.emit(HostEvent::msg(HostMsg::CommandFinished { id: self.id, command }));
         }
         self.try_clear();
-        // 进出目录、启动或退出程序时通常都有输出，顺带重读前台进程。
+        // 进出目录、启动或退出程序时通常都有输出，顺带重读前台进程：离上次读满了间隔就读，
+        // 不满就定在满的时刻；已经定了、到点了也读。
         let now = Instant::now();
-        if self.foreground_due.is_none() {
-            let due = self.foreground_read_at + FOREGROUND_REFRESH_INTERVAL;
-            if now >= due {
-                self.refresh_foreground(now);
-            } else {
-                self.foreground_due = Some(due);
-            }
+        let due = self.foreground_due.unwrap_or(self.foreground_read_at + FOREGROUND_REFRESH_INTERVAL);
+        if now >= due {
+            self.refresh_foreground(now);
+        } else {
+            self.foreground_due = Some(due);
         }
     }
 
@@ -407,7 +439,8 @@ impl Runner {
         }
     }
 
-    /// 没有消息、到了该醒的时刻：轮询前台进程，判断 agent 状态。
+    /// 到了该醒的时刻（没有消息时，或者处理完一条消息时已经过了点）：轮询前台进程，判断 agent
+    /// 状态。
     fn tick(&mut self) {
         let now = Instant::now();
         if self.foreground_due.is_some_and(|due| now >= due) || now >= self.next_poll {
@@ -430,7 +463,7 @@ impl Runner {
         if let Some(meta) = self.session.take_meta() {
             let event = HostEvent::msg(HostMsg::Meta { id: self.id, meta });
             // 状态不攒：连上时直接给最新的。
-            self.subscribers.retain_mut(|(_, sink)| sink(event.clone()));
+            self.subscribers.retain_mut(|s| (s.sink)(event.clone()));
         }
     }
 
@@ -446,15 +479,21 @@ impl Runner {
         };
         let alive = backlog.into_iter().all(&mut sink);
         if alive {
-            self.subscribers.push((connection, sink));
+            // 进程内的桌面原样收，报告由宿主这份 VT 认，界面那份不看。
+            self.subscribers.push(Subscriber { connection, sink, redacted: false });
         }
         self.backlog_bytes = 0;
         let (size, settings) = self.created.clone();
         Ok(Attached { size, settings, meta: self.session.meta(), started: self.session.started() })
     }
 
-    /// 把一件事发给连着的前端；还没有前端连上过时攒起来。
+    /// 把一件事发给连着的前端；还没有前端连上过时攒起来。输出要先经过 `redactor`：它跟着整条
+    /// 输出流走，不管这时有没有 socket 上的前端。
     fn emit(&mut self, event: HostEvent) {
+        let redacted = match &event {
+            HostEvent::Output(data) => self.redactor.redact(data).map(|data| HostEvent::Output(data.into())),
+            HostEvent::Msg(_) => None,
+        };
         if let Some(backlog) = &mut self.backlog {
             if let HostEvent::Output(data) = &event {
                 self.backlog_bytes += data.len();
@@ -467,8 +506,22 @@ impl Runner {
                 backlog.push(event.clone());
             }
         }
-        self.subscribers.retain_mut(|(_, sink)| sink(event.clone()));
+        self.subscribers.retain_mut(|subscriber| match &redacted {
+            // 整块都是报告的内容，抹完什么都不剩，不用发。
+            Some(HostEvent::Output(data)) if subscriber.redacted && data.is_empty() => true,
+            Some(redacted) if subscriber.redacted => (subscriber.sink)(redacted.clone()),
+            _ => (subscriber.sink)(event.clone()),
+        });
     }
+}
+
+/// 一个连着的前端。
+struct Subscriber {
+    /// 连接的编号，`Inbox::Detach` 按它找。
+    connection: u64,
+    sink: Sink,
+    /// 收抹掉了 shell 集成报告内容的输出：socket 上别的进程的前端。
+    redacted: bool,
 }
 
 /// 读线程交来、会话线程还没处理完的输出有多少字节：读线程每交一块先记上（超过

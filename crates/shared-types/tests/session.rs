@@ -22,7 +22,7 @@ fn round_trips_through_json() {
         prompt_cwd: Some("/tmp".into()),
         foreground_is_shell: false,
         shell_path: Some("/usr/bin:/bin".into()),
-        shell_names: ShellNames { aliases: vec!["ll".into()], ..ShellNames::default() },
+        shell_names: ShellNames { aliases: vec!["ll".into()], ..ShellNames::default() }.into(),
     };
     let json = serde_json::to_string(&meta).unwrap();
     assert!(json.contains(r#""kind":"github_copilot","state":"blocked""#), "{json}");

@@ -4,7 +4,7 @@ use libghostty_vt::{
     render::{CellIterator, CursorVisualStyle, Dirty, Overscan, RenderState, RowIterator, Snapshot},
     screen::CellWide,
     style::Underline,
-    terminal::{Mode, Terminal},
+    terminal::Terminal,
 };
 use runode_shared_types::{
     color::{Rgb, TerminalColor},
@@ -96,10 +96,9 @@ impl Session {
             if since.elapsed() < SYNC_OUTPUT_TIMEOUT {
                 return;
             }
-            // 程序崩溃或忘了释放时，不能让屏幕永远冻结。
-            if let Err(err) = self.terminal.set_mode(Mode::SYNC_OUTPUT, false) {
-                tracing::warn!("failed to end synchronized output: {err}");
-            }
+            // 程序崩溃或忘了释放时，不能让屏幕永远冻结：超时后照常画，这次冻结就不管了，等程序
+            // 关掉再重新开始冻结（render-hold 回调）时再遵守。VT 里的 mode 2026 不动：界面这份
+            // VT 只跟着字节流变，和宿主那份一样，程序查询这个模式时宿主答的也是它。
             self.held_since.set(None);
         }
         let highlights = match &mut self.search {

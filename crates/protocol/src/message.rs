@@ -149,8 +149,9 @@ pub enum ClientMsg {
     ClearScreen { id: SessionId },
     /// 结束会话：关掉它的 PTY，进程收到 SIGHUP。
     Kill { id: SessionId },
-    /// 换主题：默认颜色、调色板和光标样式。宿主应用到自己的 VT 后，在每个会话的输出流里发
-    /// `ThemeApplied`，前端到那里才应用，见 `HostMsg::ThemeApplied`。
+    /// 换主题：默认颜色、调色板、光标样式和回滚上限，之后新开的会话也用它。宿主应用到自己的
+    /// VT 后，在每个会话的输出流里发带着这份设置的 `ThemeApplied`，连着的前端到那里才应用，
+    /// 不管是不是自己发的，见 `HostMsg::ThemeApplied`。
     SetTheme { settings: TermSettings },
     /// 改宿主的选项。
     SetOptions { record_history: bool },
@@ -227,10 +228,12 @@ pub enum HostMsg {
         id: SessionId,
         size: GridSize,
     },
-    /// 宿主在这里应用了 `SetTheme` 的主题；前端的 VT 也在这里应用。应用主题会改 VT 的状态
-    /// （比如重设光标闪烁），两边要在输出流的同一个位置做。
+    /// 宿主在这里应用了 `settings` 这份主题；前端的 VT 也在这里应用同一份，不用自己当前的
+    /// 配置。应用主题会改 VT 的状态（比如重设光标闪烁、按回滚上限丢掉历史），两边要在输出流的
+    /// 同一个位置、用同样的设置做：前端自己的配置可能已经又变了，`SetTheme` 也可能是别的前端发的。
     ThemeApplied {
         id: SessionId,
+        settings: TermSettings,
     },
     /// 会话对外公布的状态变了：标题、agent、目录、shell 集成报告的东西。
     Meta {

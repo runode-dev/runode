@@ -1,7 +1,7 @@
 //! 一个终端会话对外公布的状态：标签上的名字、前台 agent、所在目录和 shell 集成报告的东西。
 //! 管着会话的一方随时把它发给连着的各个界面，界面不用自己去读 VT 或问操作系统。
 
-use std::{ffi::OsString, path::PathBuf};
+use std::{ffi::OsString, path::PathBuf, sync::Arc};
 
 use crate::{agent::Agent, shell::ShellNames};
 
@@ -25,6 +25,7 @@ pub struct SessionMeta {
     /// shell 集成报告的 shell 自己的 PATH；补全跑生成器命令时用。PATH 不一定是合法的 UTF-8，
     /// 所以按操作系统的字符串存。
     pub shell_path: Option<OsString>,
-    /// shell 集成报告的别名、函数、内建命令和关键字。
-    pub shell_names: ShellNames,
+    /// shell 集成报告的别名、函数、内建命令和关键字。列表可能很长，状态每次变了都要整份交出去，
+    /// 所以共享着放：名字没变时各份状态指向同一份，不必每次深拷贝。
+    pub shell_names: Arc<ShellNames>,
 }

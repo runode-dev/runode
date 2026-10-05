@@ -18,7 +18,8 @@ pub const MAX_PAYLOAD: u32 = 64 << 20;
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[repr(u8)]
 pub enum FrameKind {
-    /// 宿主发给前端的 PTY 输出，原样的字节。
+    /// 宿主发给前端的 PTY 输出，原样的字节；只有 shell 集成报告给宿主的 OSC 6973（带着 shell
+    /// 的口令）抹掉了编号之后的内容，VT 处理起来和原来那条一样，都是不认识的 OSC。
     Output = 0,
     /// 前端发给宿主、要写进 PTY 的输入，原样的字节。
     Input = 1,
