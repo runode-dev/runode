@@ -5,7 +5,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use runode_model::{
+use runode_shared_types::{
     color::{Rgb, TerminalColor},
     settings::{CursorStyle, OptionAsAlt},
     shell::{IntegrationMode, Shell},
@@ -316,7 +316,7 @@ fn read_entries(path: &Path, sources: &mut Vec<PathBuf>) -> Vec<Entry> {
                 Some(file) => (true, file),
                 None => (false, entry.value.as_str()),
             };
-            let file = runode_dirs::Dirs::from_env().expand_home(file);
+            let file = runode_paths::Dirs::from_env().expand_home(file);
             let file = path.parent().map_or(file.clone(), |dir| dir.join(&file));
             if !optional && !file.exists() {
                 tracing::warn!("{}: config-file not found: {}", entry.origin, file.display());
@@ -357,12 +357,12 @@ pub(crate) fn parse_entries(text: &str, name: &str) -> Vec<Entry> {
 
 /// runode 自己的配置文件；没有家目录时为 `None`。
 pub fn config_path() -> Option<PathBuf> {
-    runode_dirs::Dirs::from_env().config_file()
+    runode_paths::Dirs::from_env().config_file()
 }
 
 /// Ghostty 配置文件的位置，按 Ghostty 的加载顺序。
 fn ghostty_config_paths() -> Vec<PathBuf> {
-    runode_dirs::Dirs::from_env().ghostty_config_files()
+    runode_paths::Dirs::from_env().ghostty_config_files()
 }
 
 #[cfg(test)]

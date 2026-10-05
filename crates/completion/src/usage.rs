@@ -9,7 +9,7 @@ use std::{
     sync::{Arc, Mutex, OnceLock, PoisonError},
 };
 
-use runode_term::history;
+use runode_terminal::history;
 
 use super::line;
 

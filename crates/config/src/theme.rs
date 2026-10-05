@@ -25,7 +25,7 @@ pub(crate) enum Theme {
 /// 主题可以是绝对路径，否则依次在 runode、Ghostty 的用户主题目录、
 /// Ghostty 自带的主题目录里找同名文件，都没有再用内置的同名主题。
 pub(crate) fn find_theme(name: &str) -> Option<Theme> {
-    let paths = runode_dirs::Dirs::from_env();
+    let paths = runode_paths::Dirs::from_env();
     let path = paths.expand_home(name);
     if path.is_absolute() {
         return path.is_file().then_some(Theme::File(path));
@@ -66,7 +66,7 @@ fn ghostty_resources_dir() -> Option<PathBuf> {
 
 #[cfg(test)]
 mod tests {
-    use runode_model::color::{Rgb, TerminalColor};
+    use runode_shared_types::color::{Rgb, TerminalColor};
 
     use super::*;
     use crate::{Config, parse::parse_entries};

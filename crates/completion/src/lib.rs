@@ -15,7 +15,7 @@ pub mod usage;
 
 use std::{collections::HashMap, ffi::OsString, path::Path, sync::Arc};
 
-use runode_model::shell::ShellNames;
+use runode_shared_types::shell::ShellNames;
 use warp_command_signatures::{PathSuggestionType, Suggestion, TemplateType};
 /// 生成器跑出来的结果，交回 `generated` 换成候选。
 pub use warp_command_signatures::GeneratorResults;
@@ -93,7 +93,7 @@ impl Request {
     /// `shell` 里的命令名。
     pub fn local_candidates(&self, cwd: Option<&Path>, shell: &Shell) -> Vec<Candidate> {
         let mut candidates = self.plan.candidates.clone();
-        let home = runode_dirs::Dirs::from_env().home;
+        let home = runode_paths::Dirs::from_env().home;
         for source in &self.plan.sources {
             match source {
                 Source::Commands => command_names(shell, &mut candidates),
@@ -238,7 +238,7 @@ mod tests {
 
     #[test]
     fn ls_lists_the_home_directory() {
-        let Some(home) = runode_dirs::Dirs::from_env().home else {
+        let Some(home) = runode_paths::Dirs::from_env().home else {
             return;
         };
         let request = request("ls ~/^").unwrap();

@@ -2,7 +2,7 @@
 
 use std::path::PathBuf;
 
-use runode_model::{
+use runode_shared_types::{
     color::{Rgb, TerminalColor},
     settings::{CursorStyle, OptionAsAlt, TermSettings},
     shell::IntegrationMode,

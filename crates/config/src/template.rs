@@ -2,7 +2,7 @@
 
 use std::path::Path;
 
-use runode_model::color::{Rgb, TerminalColor};
+use runode_shared_types::color::{Rgb, TerminalColor};
 
 use crate::{Config, parse::KEYS, theme::BUNDLED_THEMES};
 

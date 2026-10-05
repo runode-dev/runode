@@ -6,7 +6,7 @@
 //! 换成具体的动作并决定在哪些上下文里生效。
 //! 搜索框里的文字编辑键（回车、Esc、剪切、撤销等）属于输入框本身，不开放配置。
 
-use runode_model::pane::Direction;
+use runode_shared_types::pane::Direction;
 
 use crate::Keybind;
 

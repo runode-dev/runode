@@ -11,7 +11,7 @@
 
 use std::{collections::HashMap, sync::OnceLock};
 
-use runode_model::color::Rgb;
+use runode_shared_types::color::Rgb;
 
 /// X11 的颜色名表，一行一个：红绿蓝各占三列、空格分隔，从第 13 列起是名字。
 static X11_COLORS: &str = include_str!("../x11/rgb.txt");

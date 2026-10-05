@@ -1,5 +1,5 @@
 # cargo-deny 的配置，CI 里只跑 `cargo deny check bans`，用来守住 crate 的分层：
-# 界面框架只许 app（runode）直接依赖，终端仿真和 PTY 只许 runode-term 直接依赖。
+# 界面框架只许 app（runode）直接依赖，终端仿真和 PTY 只许 runode-terminal 直接依赖。
 # `wrappers` 列出的 crate 可以直接依赖被禁的 crate，其他 crate 直接依赖时报错；经由这些
 # crate 间接用到不算违规。
 
@@ -19,6 +19,6 @@ deny = [
         "gpui-pre-windows",
     ], reason = "只有 app 能依赖界面框架，其余 crate 不碰 GPUI" },
     { crate = "gpui-pre-platform", wrappers = ["runode"], reason = "只有 app 能依赖界面框架，其余 crate 不碰 GPUI" },
-    { crate = "libghostty-vt", wrappers = ["runode-term"], reason = "终端仿真只在 runode-term 里，对外用 runode-model 的类型" },
-    { crate = "portable-pty", wrappers = ["runode-term"], reason = "PTY 只在 runode-term 里" },
+    { crate = "libghostty-vt", wrappers = ["runode-terminal"], reason = "终端仿真只在 runode-terminal 里，对外用 runode-shared-types 的类型" },
+    { crate = "portable-pty", wrappers = ["runode-terminal"], reason = "PTY 只在 runode-terminal 里" },
 ]

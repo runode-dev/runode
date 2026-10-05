@@ -14,10 +14,10 @@ license = "Apache-2.0"
 publish = false
 
 [workspace.dependencies]
-runode-dirs = { path = "crates/dirs" }
-runode-model = { path = "crates/model" }
-runode-git = { path = "crates/git" }
-runode-term = { path = "crates/term" }
+runode-paths = { path = "crates/paths" }
+runode-shared-types = { path = "crates/shared-types" }
+runode-git-status = { path = "crates/git-status" }
+runode-terminal = { path = "crates/terminal" }
 runode-completion = { path = "crates/completion" }
 runode-config = { path = "crates/config" }
 libghostty-vt = { path = "vendor/libghostty-rs/crates/libghostty-vt" }
