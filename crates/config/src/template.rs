@@ -1,4 +1,5 @@
-//! 配置模板：runode 的配置文件不存在时写进去的那一份，全部注释掉，列出支持的键、能填的值和默认值。
+//! 配置模板：runode 的配置文件不存在时写进去的那一份，全部注释掉，列出支持的键、能填的值和默认值；
+//! 文件已经有了的，把后来新加的键按模板补进去。
 
 use std::path::Path;
 
@@ -6,17 +7,81 @@ use runode_shared_types::color::{Rgb, TerminalColor};
 
 use crate::{Config, parse::KEYS, theme::BUNDLED_THEMES};
 
-/// runode 的配置文件 `path` 不存在时写入 `template`；已存在（哪怕是空文件）就不动。
+/// runode 的配置文件 `path` 不存在时写入 `template`；已存在时按 `fill_missing_keys` 补上文件里
+/// 还没有的键，没有要补的就不动。
 pub fn create_config_file(path: &Path) -> std::io::Result<()> {
     use std::io::Write;
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir)?;
     }
+    let locale = crate::i18n::current();
     match std::fs::OpenOptions::new().write(true).create_new(true).open(path) {
-        Ok(mut file) => file.write_all(template(&crate::i18n::current()).as_bytes()),
-        Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => Ok(()),
+        Ok(mut file) => file.write_all(template(&locale).as_bytes()),
+        Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => {
+            let text = std::fs::read_to_string(path)?;
+            let filled = fill_missing_keys(&text, &locale);
+            if filled != text { std::fs::write(path, filled) } else { Ok(()) }
+        }
         Err(err) => Err(err),
     }
+}
+
+/// 一行设置的键名：`key = value`，或注释掉的 `# key = value`；说明行和别的行为 `None`。
+fn setting_key(line: &str) -> Option<&str> {
+    let line = line.trim();
+    let line = line.strip_prefix('#').unwrap_or(line).trim_start();
+    let (key, _) = line.split_once('=')?;
+    let key = key.trim_end();
+    (!key.is_empty() && key.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')).then_some(key)
+}
+
+/// 配置文件的内容 `text` 里补上 `KEYS` 里有、文件里一行都没写到（写了的和注释掉的都算写到）
+/// 的键：说明和注释掉的默认值和模板里一样，插在 `KEYS` 里排在它前面、文件里写到了的那个键
+/// 后面，跨了组就先空一行。前面的键一个都没写到的不补，所以空文件或自己从头写的文件不会被
+/// 塞进整份模板。
+fn fill_missing_keys(text: &str, locale: &str) -> String {
+    let d = Config::default();
+    let locales = crate::i18n::available().join(", ");
+    let mut lines: Vec<String> = text.lines().map(str::to_owned).collect();
+    let keys: Vec<(usize, &str)> =
+        KEYS.iter().enumerate().flat_map(|(group, keys)| keys.iter().map(move |key| (group, *key))).collect();
+    for (ix, &(group, key)) in keys.iter().enumerate() {
+        if lines.iter().any(|line| setting_key(line) == Some(key)) {
+            continue;
+        }
+        let Some((at, same_group)) = keys[..ix].iter().rev().find_map(|&(prev_group, prev)| {
+            let last = lines.iter().rposition(|line| setting_key(line) == Some(prev))?;
+            Some((last + 1, prev_group == group))
+        }) else {
+            continue;
+        };
+        let mut block = String::new();
+        if !same_group {
+            block.push('\n');
+        }
+        block.push_str(&key_block(&d, key, locale, &locales));
+        lines.splice(at..at, block.lines().map(str::to_owned));
+    }
+    let mut out = lines.join("\n");
+    if text.ends_with('\n') {
+        out.push('\n');
+    }
+    out
+}
+
+/// 模板里的一个键：上面是它的说明，每行加 `## `；下面是每个默认值一行，没有默认值时写一行空值。
+fn key_block(d: &Config, key: &str, locale: &str, locales: &str) -> String {
+    let mut out = String::new();
+    let doc_key = format!("config.{}", key.replace('-', "_"));
+    for line in rust_i18n::t!(&doc_key, locale = locale, locales = locales).lines() {
+        out.push_str(&format!("## {line}\n"));
+    }
+    let values = template_values(d, key);
+    for value in values.iter().map(String::as_str).chain(values.is_empty().then_some("")) {
+        let line = if value.is_empty() { format!("# {key} =\n") } else { format!("# {key} = {value}\n") };
+        out.push_str(&line);
+    }
+    out
 }
 
 /// 配置模板，按 `locale` 写说明：每个支持的键上面是 `##` 说明，说的是能填的值，取自翻译里的
@@ -36,19 +101,12 @@ fn template(locale: &str) -> String {
 
     note(&mut out, &rust_i18n::t!("config.header", locale = locale));
     out.push('\n');
-    // 一个键：上面是它的说明，下面是每个默认值一行；没有默认值时写一行空值。
     for (i, group) in KEYS.iter().enumerate() {
         if i > 0 {
             out.push('\n');
         }
         for key in *group {
-            let doc_key = format!("config.{}", key.replace('-', "_"));
-            note(&mut out, &rust_i18n::t!(&doc_key, locale = locale, locales = locales));
-            let values = template_values(&d, key);
-            for value in values.iter().map(String::as_str).chain(values.is_empty().then_some("")) {
-                let line = if value.is_empty() { format!("# {key} =\n") } else { format!("# {key} = {value}\n") };
-                out.push_str(&line);
-            }
+            out.push_str(&key_block(&d, key, locale, &locales));
         }
     }
 
@@ -159,6 +217,53 @@ mod tests {
         assert_eq!(crate::keybind::resolve(&config.keybinds), crate::keybind::resolve(&[]));
         config.keybinds.clear();
         assert_eq!(config, Config::default());
+    }
+
+    /// 删掉模板里的 `keys`：键的设置行和紧挨在上面的说明行；删空了一组时连同组前的空行。
+    fn without(text: &str, keys: &[&str]) -> String {
+        let mut lines: Vec<&str> = text.lines().collect();
+        for key in keys {
+            let setting = lines.iter().position(|line| setting_key(line) == Some(*key)).unwrap();
+            let mut start = setting;
+            while start > 0 && lines[start - 1].starts_with("## ") {
+                start -= 1;
+            }
+            let mut end = setting + 1;
+            while end < lines.len() && setting_key(lines[end]) == Some(*key) {
+                end += 1;
+            }
+            if lines[start - 1].is_empty() && lines.get(end).is_none_or(|line| line.is_empty()) {
+                start -= 1;
+            }
+            lines.drain(start..end);
+        }
+        lines.iter().map(|line| format!("{line}\n")).collect()
+    }
+
+    #[test]
+    fn fills_keys_added_after_the_file_was_written() {
+        for locale in crate::i18n::available() {
+            let full = template(&locale);
+            // 一组里缺了后面几个、整组都缺、多值的键缺了，补回来都和模板一样。
+            for keys in [&["preview-font-size", "file-tree-preview-click"][..], &["language"], &["palette"]] {
+                let old = without(&full, keys);
+                assert_ne!(old, full, "{keys:?}");
+                if keys == ["language"] {
+                    // 排在最前面的键前面没有可以挨着的键，不补。
+                    assert_eq!(fill_missing_keys(&old, &locale), old);
+                } else {
+                    assert_eq!(fill_missing_keys(&old, &locale), full, "{keys:?}");
+                }
+            }
+            let group = without(&full, &["file-tree-font-size", "file-tree-preview-click", "preview-font-size"]);
+            assert_eq!(fill_missing_keys(&group, &locale), full);
+            assert_eq!(fill_missing_keys(&full, &locale), full);
+        }
+        // 用户自己写的设置算写到了，空文件不补。
+        let mine = "font-size = 16\n";
+        assert!(fill_missing_keys(mine, "en").starts_with("font-size = 16\n## "));
+        assert!(!fill_missing_keys(mine, "en").contains("# font-size ="));
+        assert_eq!(fill_missing_keys("", "en"), "");
     }
 
     /// `KEYS` 里的每个键都要在模板里，上面有一行说明；说明缺了翻译时 `t!` 返回「语言.键名」。
