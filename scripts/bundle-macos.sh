@@ -7,6 +7,8 @@
 # 环境变量：
 #   CARGO          cargo 命令，默认 cargo
 #   SIGN_IDENTITY  codesign 签名身份，默认 -（ad-hoc，只适合本机或自己用）
+#
+# 编译应用图标要用 Xcode 自带的 actool，需要装 Xcode。
 set -euo pipefail
 
 target=${1:-dmg}
@@ -35,16 +37,16 @@ mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
 cp "$exe" "$app/Contents/MacOS/runode"
 cp "$plist" "$app/Contents/Info.plist"
 
-# 由 1024px 的源图生成 icns 所需的各档尺寸。
-iconset=$(mktemp -d)/runode.iconset
-mkdir -p "$iconset"
-src=crates/runode/assets/icon.png
-for size in 16 32 128 256 512; do
-    sips -z $size $size "$src" --out "$iconset/icon_${size}x${size}.png" >/dev/null
-    sips -z $((size * 2)) $((size * 2)) "$src" --out "$iconset/icon_${size}x${size}@2x.png" >/dev/null
-done
-iconutil -c icns "$iconset" -o "$app/Contents/Resources/runode.icns"
-rm -rf "$(dirname "$iconset")"
+# 应用图标用 Icon Composer 的 .icon 文档，由 Xcode 的 actool 编译成 Assets.car，系统按
+# 统一的圆角方形裁剪，跟着切换深色和染色；形状不合规的旧式 icns 在 macOS 26 起会被套进
+# 灰框缩小显示。actool 同时生成给旧系统用的 runode.icns。
+icon_build=$(mktemp -d)
+xcrun actool crates/runode/assets/runode.icon --compile "$app/Contents/Resources" \
+    --output-format human-readable-text --errors \
+    --output-partial-info-plist "$icon_build/partial.plist" \
+    --app-icon runode --include-all-app-icons --enable-on-demand-resources NO \
+    --development-region en --target-device mac --platform macosx --minimum-deployment-target 11.0 >&2
+rm -rf "$icon_build"
 
 codesign --force --sign "$SIGN_IDENTITY" --options runtime "$app"
 
