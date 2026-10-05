@@ -79,7 +79,9 @@ pub(crate) fn mixed_output(rng: &mut Rng, lines: usize, cols: usize) -> Vec<u8> 
                     width += word.chars().count() * 2;
                 }
                 5 if rng.chance(10) => {
-                    out.extend_from_slice(format!("\x1b]8;;https://example.com/{line}\x1b\\link\x1b]8;;\x1b\\").as_bytes());
+                    out.extend_from_slice(
+                        format!("\x1b]8;;https://example.com/{line}\x1b\\link\x1b]8;;\x1b\\").as_bytes(),
+                    );
                     width += 4;
                 }
                 _ => {
@@ -352,7 +354,11 @@ fn snapshot_costs() {
         }
         let elapsed = start.elapsed();
         let mib = (rounds * chunk.len()) as f64 / f64::from(1 << 20);
-        eprintln!("feed {mib:.0} MiB, tracking {tracking}: {:.0} ms, {:.0} MiB/s", ms(elapsed), mib / elapsed.as_secs_f64());
+        eprintln!(
+            "feed {mib:.0} MiB, tracking {tracking}: {:.0} ms, {:.0} MiB/s",
+            ms(elapsed),
+            mib / elapsed.as_secs_f64()
+        );
     }
 }
 
@@ -385,7 +391,10 @@ fn scrollback_capacity(cols: u16) {
     let fill = |terminal: &mut Terminal<'_, '_>, styled: bool| {
         for i in 0..40_000 {
             let line = if styled {
-                format!("\x1b[38;5;{}m2026-10-06T12:00:00Z INFO {i:6}\x1b[0m request served in 12ms path=/api/v1/items\r\n", i % 256)
+                format!(
+                    "\x1b[38;5;{}m2026-10-06T12:00:00Z INFO {i:6}\x1b[0m request served in 12ms path=/api/v1/items\r\n",
+                    i % 256
+                )
             } else {
                 format!("2026-10-06T12:00:00Z INFO {i:6} request served in 12ms path=/api/v1/items\r\n")
             };
@@ -419,4 +428,3 @@ fn timed<T>(runs: u32, mut f: impl FnMut() -> T) -> (Duration, T) {
 fn ms(duration: Duration) -> f64 {
     duration.as_secs_f64() * 1000.
 }
-

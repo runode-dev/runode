@@ -7,7 +7,7 @@ use libghostty_vt::{
     screen::GridRef,
     selection::{
         Adjustment, FormatOptions,
-        gesture::{self, AutoscrollTickEvent, DragEvent, Gesture, Geometry, PressEvent, ReleaseEvent},
+        gesture::{self, AutoscrollTickEvent, DragEvent, Geometry, Gesture, PressEvent, ReleaseEvent},
     },
     terminal::{Point, PointSpace},
 };
@@ -77,11 +77,12 @@ impl Session {
         let s = &mut self.selecting;
         s.pointer = (at, rectangle);
         let result = self.terminal.grid_ref(Point::Viewport(cell)).and_then(|grid_ref| {
-            let selection = s
-                .drag
-                .set_rectangle(rectangle)?
-                .set_position(x, y)?
-                .apply(&mut s.gesture, &self.terminal, grid_ref, geometry)?;
+            let selection = s.drag.set_rectangle(rectangle)?.set_position(x, y)?.apply(
+                &mut s.gesture,
+                &self.terminal,
+                grid_ref,
+                geometry,
+            )?;
             self.terminal.set_selection(selection.as_ref())?;
             Ok(s.gesture.autoscroll(&self.terminal)? != gesture::Autoscroll::None)
         });
@@ -99,11 +100,12 @@ impl Session {
             if autoscroll == gesture::Autoscroll::None {
                 return Ok(false);
             }
-            let selection = s
-                .autoscroll
-                .set_rectangle(rectangle)?
-                .set_position(x, y)?
-                .apply(&mut s.gesture, &self.terminal, cell, geometry)?;
+            let selection = s.autoscroll.set_rectangle(rectangle)?.set_position(x, y)?.apply(
+                &mut s.gesture,
+                &self.terminal,
+                cell,
+                geometry,
+            )?;
             // 没有结果说明起点已不在当前屏幕上（比如切到了备用屏幕），原有选区保持不动。
             if let Some(selection) = &selection {
                 self.terminal.set_selection(Some(selection))?;
@@ -116,22 +118,16 @@ impl Session {
     /// 松开左键，结束这次拖动；选区留着。
     pub fn select_release(&mut self, at: GridPoint) {
         let size = self.size.get();
-        let inside = (0. ..f32::from(size.cols)).contains(&at.x)
-            && (0. ..f32::from(size.rows)).contains(&at.y);
+        let inside = (0. ..f32::from(size.cols)).contains(&at.x) && (0. ..f32::from(size.rows)).contains(&at.y);
         let cell = self.viewport_cell(at);
-        let grid_ref = inside
-            .then(|| self.terminal.grid_ref(Point::Viewport(cell)).ok())
-            .flatten();
+        let grid_ref = inside.then(|| self.terminal.grid_ref(Point::Viewport(cell)).ok()).flatten();
         let s = &mut self.selecting;
         log_err("selection release", s.release.apply(&mut s.gesture, &self.terminal, grid_ref));
     }
 
     /// 选区的纯文本：软换行处接起来，行尾空白去掉。没有选区时为 `None`。
     pub fn selection_text(&self) -> Option<String> {
-        let options = FormatOptions::new()
-            .with_emit_format(Format::Plain)
-            .with_unwrap(true)
-            .with_trim(true);
+        let options = FormatOptions::new().with_emit_format(Format::Plain).with_unwrap(true).with_trim(true);
         log_err("selection format", self.terminal.format_selection_alloc(None, options))
             .flatten()
             .map(|bytes| String::from_utf8_lossy(&bytes).into_owned())
@@ -139,10 +135,8 @@ impl Session {
 
     /// 选中屏幕和回滚历史里的全部内容。
     pub fn select_all(&mut self) {
-        let result = self
-            .terminal
-            .select_all()
-            .and_then(|selection| self.terminal.set_selection(selection.as_ref()).map(drop));
+        let result =
+            self.terminal.select_all().and_then(|selection| self.terminal.set_selection(selection.as_ref()).map(drop));
         log_err("select all", result);
     }
 
@@ -200,10 +194,7 @@ impl Session {
 
     /// 当前屏幕连同回滚历史的纯文本：软换行处接起来，行尾空白去掉。
     pub fn screen_text(&self) -> Option<String> {
-        let options = FormatterOptions::new()
-            .with_format(Format::Plain)
-            .with_unwrap(true)
-            .with_trim(true);
+        let options = FormatterOptions::new().with_format(Format::Plain).with_unwrap(true).with_trim(true);
         let result = Formatter::new(&self.terminal, options)
             .and_then(|mut formatter| formatter.format_alloc(None).map(|bytes| bytes.to_vec()));
         log_err("format screen", result).map(|bytes| String::from_utf8_lossy(&bytes).into_owned())

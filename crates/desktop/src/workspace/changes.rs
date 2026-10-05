@@ -12,7 +12,9 @@ use runode_shared_types::color::Rgb;
 
 use super::{
     WindowView, divider_color,
-    project::{ADDED, DiffNote, DiffRow, REMOVED, added_label, panel_message, panel_shell, removed_label, status_color},
+    project::{
+        ADDED, DiffNote, DiffRow, REMOVED, added_label, panel_message, panel_shell, removed_label, status_color,
+    },
 };
 use crate::{
     assets::{CHEVRON_DOWN_ICON, CHEVRON_RIGHT_ICON},
@@ -69,11 +71,7 @@ impl WindowView {
             .flex_1()
             .into_any_element(),
         };
-        panel_shell("changes-panel", width, fg)
-            .bg(hsla(bg))
-            .text_size(px(12.))
-            .child(header)
-            .child(body)
+        panel_shell("changes-panel", width, fg).bg(hsla(bg)).text_size(px(12.)).child(header).child(body)
     }
 
     fn render_diff_rows(
@@ -139,9 +137,9 @@ impl WindowView {
                     let group = &project.diff_groups[gi];
                     let (section, dir) = (group.section, group.dir.clone());
                     // 仓库根下的文件归在仓库名下面。
-                    let name = dir.file_name().or(git.root.file_name()).map(|name| name.to_string_lossy()).unwrap_or_default();
-                    let label =
-                        if dir.as_os_str().is_empty() { name.to_string() } else { dir.display().to_string() };
+                    let name =
+                        dir.file_name().or(git.root.file_name()).map(|name| name.to_string_lossy()).unwrap_or_default();
+                    let label = if dir.as_os_str().is_empty() { name.to_string() } else { dir.display().to_string() };
                     header(("diff-group", ix), base, 0.04)
                         .child(chevron(group.expanded))
                         .child(icon(folder_icon(&name, group.expanded)))
@@ -170,7 +168,10 @@ impl WindowView {
                     let file = &git.files(section)[fi];
                     let path = file.path.clone();
                     let expanded = project.diff_expanded(section, file);
-                    let file_name = |path: &Path| path.file_name().map_or_else(|| path.display().to_string(), |name| name.to_string_lossy().into_owned());
+                    let file_name = |path: &Path| {
+                        path.file_name()
+                            .map_or_else(|| path.display().to_string(), |name| name.to_string_lossy().into_owned())
+                    };
                     let name = file_name(&file.path);
                     // 改名时写上原来的名字，换了目录的写原来的完整路径。
                     let label = match &file.old_path {

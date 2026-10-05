@@ -1,4 +1,4 @@
-# 每次推到 main 和每个 PR：检查 crate 分层（cargo-deny），再类型检查、跑测试、跑 clippy。
+# 每次推到 main 和每个 PR：检查格式和 crate 分层（cargo-deny），再类型检查、跑测试、跑 clippy。
 # libghostty-vt 从 vendor/ghostty 用 zig 编译，GPUI 要用 Xcode 的 Metal 编译器编着色器，
 # 所以在 macOS 上跑。
 name: CI
@@ -31,7 +31,7 @@ jobs:
         # 版本由 rust-toolchain.toml 指定。
         run: |
           rustup toolchain install
-          rustup component add clippy
+          rustup component add clippy rustfmt
       - name: 确认有 Metal 编译器
         # 新版 Xcode 把 Metal 工具链拆成了单独下载的组件。
         run: xcrun -f metal || xcodebuild -downloadComponent MetalToolchain
@@ -39,6 +39,8 @@ jobs:
       - uses: taiki-e/install-action@v2
         with:
           tool: cargo-deny
+      - name: 检查格式
+        run: make fmt-check
       - name: 检查 crate 分层
         run: cargo deny check bans
       - name: 类型检查

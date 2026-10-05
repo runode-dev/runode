@@ -34,12 +34,7 @@ impl TestRepo {
     /// 从 `remote` 克隆一份。
     pub fn clone_of(remote: &TestRepo, name: &str) -> Self {
         let repo = Self::empty_dir(name);
-        let status = Command::new("git")
-            .args(["clone", "-q"])
-            .arg(remote.path())
-            .arg(repo.path())
-            .output()
-            .unwrap();
+        let status = Command::new("git").args(["clone", "-q"]).arg(remote.path()).arg(repo.path()).output().unwrap();
         assert!(status.status.success(), "git clone: {}", String::from_utf8_lossy(&status.stderr));
         repo.configure();
         repo

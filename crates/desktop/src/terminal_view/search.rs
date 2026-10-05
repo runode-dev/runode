@@ -85,7 +85,11 @@ impl TerminalView {
     }
 
     /// 右上角的搜索栏：输入框、匹配进度、上下切换和关闭按钮。
-    pub(super) fn render_search_bar(&self, field: &Entity<SearchField>, cx: &mut Context<Self>) -> gpui::Stateful<gpui::Div> {
+    pub(super) fn render_search_bar(
+        &self,
+        field: &Entity<SearchField>,
+        cx: &mut Context<Self>,
+    ) -> gpui::Stateful<gpui::Div> {
         let frame = self.session.peek_colors();
         let fg = hsla(frame.0);
         let bar_bg = hsla(frame.1.mix(frame.0, 0.1));
@@ -140,24 +144,29 @@ impl TerminalView {
                     .cursor(CursorStyle::IBeam)
                     .child(field.clone()),
             )
+            .child(div().flex_none().min_w(px(36.)).text_right().text_color(fg.opacity(0.6)).child(status))
             .child(
-                div()
-                    .flex_none()
-                    .min_w(px(36.))
-                    .text_right()
-                    .text_color(fg.opacity(0.6))
-                    .child(status),
+                button("search-previous", "↑")
+                    .tooltip(tooltip(rust_i18n::t!("menu.find_previous"), Some(&SearchPrevious), frame.0, frame.1))
+                    .on_click(cx.listener(|view, _, _, cx| {
+                        view.session.search_step(true);
+                        cx.notify();
+                    })),
             )
-            .child(button("search-previous", "↑").tooltip(tooltip(rust_i18n::t!("menu.find_previous"), Some(&SearchPrevious), frame.0, frame.1)).on_click(cx.listener(|view, _, _, cx| {
-                view.session.search_step(true);
-                cx.notify();
-            })))
-            .child(button("search-next", "↓").tooltip(tooltip(rust_i18n::t!("menu.find_next"), Some(&SearchNext), frame.0, frame.1)).on_click(cx.listener(|view, _, _, cx| {
-                view.session.search_step(false);
-                cx.notify();
-            })))
-            .child(button("search-close", "×").tooltip(tooltip(rust_i18n::t!("tooltip.close_search"), Some(&EndSearch), frame.0, frame.1)).on_click(cx.listener(|view, _, window, cx| {
-                view.close_search(window, cx);
-            })))
+            .child(
+                button("search-next", "↓")
+                    .tooltip(tooltip(rust_i18n::t!("menu.find_next"), Some(&SearchNext), frame.0, frame.1))
+                    .on_click(cx.listener(|view, _, _, cx| {
+                        view.session.search_step(false);
+                        cx.notify();
+                    })),
+            )
+            .child(
+                button("search-close", "×")
+                    .tooltip(tooltip(rust_i18n::t!("tooltip.close_search"), Some(&EndSearch), frame.0, frame.1))
+                    .on_click(cx.listener(|view, _, window, cx| {
+                        view.close_search(window, cx);
+                    })),
+            )
     }
 }

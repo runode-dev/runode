@@ -309,10 +309,7 @@ impl Session {
     /// 网格位置换算成以设备像素计的坐标，和 `GridSize` 的单元格尺寸一致。
     fn surface_position(&self, at: GridPoint) -> (f64, f64) {
         let size = self.size.get();
-        (
-            f64::from(at.x) * f64::from(size.cell_width_px),
-            f64::from(at.y) * f64::from(size.cell_height_px),
-        )
+        (f64::from(at.x) * f64::from(size.cell_width_px), f64::from(at.y) * f64::from(size.cell_height_px))
     }
 
     /// 指针所在的视口单元格；落在网格外时取最近的边上的单元格。
@@ -333,7 +330,11 @@ fn log_err<T>(what: &str, result: libghostty_vt::error::Result<T>) -> Option<T> 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{host_session::HostSession, pty::{Pty, PtyEvent}, testing::*};
+    use crate::{
+        host_session::HostSession,
+        pty::{Pty, PtyEvent},
+        testing::*,
+    };
     use runode_shared_types::input::{Key, KeyInput, Mods};
 
     /// 改尺寸只是请求：VT 等宿主标出位置后才改，重复的请求不再发。
@@ -355,12 +356,7 @@ mod tests {
     /// 送达子进程，彩色和宽字符输出落进帧，子进程退出时读到 EOF，两份 VT 的屏幕一样。
     #[test]
     fn shell_round_trip() {
-        let size = GridSize {
-            cols: 40,
-            rows: 10,
-            cell_width_px: 8,
-            cell_height_px: 16,
-        };
+        let size = GridSize { cols: 40, rows: 10, cell_width_px: 8, cell_height_px: 16 };
         let (tx, rx) = std::sync::mpsc::channel();
         let pty = Pty::spawn(
             size,
@@ -374,11 +370,7 @@ mod tests {
         let (mut session, requests) = capturing_session_sized(size);
         let script = "printf '\\033[31mred\\033[0m \\344\\270\\255\\346\\226\\207 ok\\n'; exit\r";
         for c in script.chars() {
-            let (key, unshifted) = if c == '\r' {
-                (Key::Enter, '\r')
-            } else {
-                (Key::Unidentified, c)
-            };
+            let (key, unshifted) = if c == '\r' { (Key::Enter, '\r') } else { (Key::Unidentified, c) };
             let input = KeyInput {
                 key,
                 mods: Mods::default(),
@@ -405,12 +397,10 @@ mod tests {
         }
 
         let frame = session.frame().clone();
-        let line = (0..frame.rows)
-            .find(|&y| row_text(&frame, y).starts_with("red "))
-            .unwrap_or_else(|| {
-                let screen: Vec<_> = (0..frame.rows).map(|y| row_text(&frame, y)).collect();
-                panic!("output line not found in {screen:#?}")
-            });
+        let line = (0..frame.rows).find(|&y| row_text(&frame, y).starts_with("red ")).unwrap_or_else(|| {
+            let screen: Vec<_> = (0..frame.rows).map(|y| row_text(&frame, y)).collect();
+            panic!("output line not found in {screen:#?}")
+        });
         assert_eq!(row_text(&frame, line), "red 中文 ok");
         let row = frame.row(line);
         assert_ne!(row[0].fg, frame.foreground, "SGR 31 should color the text");

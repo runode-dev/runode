@@ -2,7 +2,11 @@
 
 use gpui::{App, AppContext as _, Bounds, WindowBounds, WindowOptions, px, size};
 
-use crate::{persist::SavedWindow, prespawn::Prespawned, workspace::{self, WindowView}};
+use crate::{
+    persist::SavedWindow,
+    prespawn::Prespawned,
+    workspace::{self, WindowView},
+};
 
 /// 新窗口的默认选项：屏幕居中的默认大小。
 pub(crate) fn window_options(cx: &App) -> WindowOptions {
@@ -24,7 +28,12 @@ pub(crate) fn open_window(cx: &mut App, shell: Option<Prespawned>) {
     open_window_with(cx, options, None, shell);
 }
 
-pub(crate) fn open_window_with(cx: &mut App, options: WindowOptions, saved: Option<SavedWindow>, shell: Option<Prespawned>) {
+pub(crate) fn open_window_with(
+    cx: &mut App,
+    options: WindowOptions,
+    saved: Option<SavedWindow>,
+    shell: Option<Prespawned>,
+) {
     let opened = cx.open_window(options, |window, cx| {
         window.on_window_should_close(cx, workspace::should_close);
         cx.new(|cx| match saved {

@@ -60,11 +60,8 @@ fn actions_carry_their_parameters() {
 
 #[test]
 fn user_keybinds_override_unbind_and_clear() {
-    let keybinds = [
-        parse("super+t=new_window").unwrap(),
-        parse("cmd+w=unbind").unwrap(),
-        parse("ctrl+a>c=new_tab").unwrap(),
-    ];
+    let keybinds =
+        [parse("super+t=new_window").unwrap(), parse("cmd+w=unbind").unwrap(), parse("ctrl+a>c=new_tab").unwrap()];
     let table = resolve(&keybinds);
     let lookup = |keys: &str| table.iter().filter(|(k, _)| k == keys).map(|(_, a)| a.clone()).collect::<Vec<_>>();
     assert_eq!(lookup("cmd-t"), [Action::NewWindow]);

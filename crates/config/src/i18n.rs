@@ -13,12 +13,8 @@ pub const FALLBACK: &str = "en";
 
 /// 中文只写了地区、没写文字时按地区补上文字，再去找翻译：(语言, 地区, 文字)，
 /// 地区为空的一项是其余地区的默认。
-const LIKELY_SCRIPTS: &[(&str, &str, &str)] = &[
-    ("zh", "tw", "hant"),
-    ("zh", "hk", "hant"),
-    ("zh", "mo", "hant"),
-    ("zh", "", "hans"),
-];
+const LIKELY_SCRIPTS: &[(&str, &str, &str)] =
+    &[("zh", "tw", "hant"), ("zh", "hk", "hant"), ("zh", "mo", "hant"), ("zh", "", "hans")];
 
 /// 有翻译的语言标签，按名字排序。
 pub fn available() -> Vec<Cow<'static, str>> {

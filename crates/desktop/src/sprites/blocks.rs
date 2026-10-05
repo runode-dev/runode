@@ -37,8 +37,8 @@ pub(super) fn block(cp: u32, m: Metrics, out: &mut Vec<Shape>) {
 /// 八分块 U+1CD00–U+1CDE5 按码点顺序恰好是 0–255 中去掉下面这些组合后的升序排列
 /// （它们已有别的码点，如空格、`█`、象限块和半块）。
 const OCTANT_SKIPPED: [u8; 26] = [
-    0x00, 0x01, 0x02, 0x03, 0x05, 0x0a, 0x0f, 0x14, 0x28, 0x3f, 0x40, 0x50, 0x55, 0x5a, 0x5f, 0x80,
-    0xa0, 0xa5, 0xaa, 0xaf, 0xc0, 0xf0, 0xf5, 0xfa, 0xfc, 0xff,
+    0x00, 0x01, 0x02, 0x03, 0x05, 0x0a, 0x0f, 0x14, 0x28, 0x3f, 0x40, 0x50, 0x55, 0x5a, 0x5f, 0x80, 0xa0, 0xa5, 0xaa,
+    0xaf, 0xc0, 0xf0, 0xf5, 0xfa, 0xfc, 0xff,
 ];
 
 /// 六分块、八分块，以及几个四分之一块（U+1CEA0 等）和居中的半块（U+1FBE6/7）。
@@ -50,10 +50,7 @@ pub(super) fn mosaic(cp: u32, m: Metrics, out: &mut Vec<Shape>) {
             grid(m, 3, i + i / 0x14 + 1, out);
         }
         0x1cd00..=0x1cde5 => {
-            let mask = (0..=255u8)
-                .filter(|b| !OCTANT_SKIPPED.contains(b))
-                .nth((cp - 0x1cd00) as usize)
-                .unwrap_or(0);
+            let mask = (0..=255u8).filter(|b| !OCTANT_SKIPPED.contains(b)).nth((cp - 0x1cd00) as usize).unwrap_or(0);
             grid(m, 4, mask.into(), out);
         }
         0x1cea0 => fill_frac(m, [0.5, 1.], [0.75, 1.], out),
@@ -70,12 +67,7 @@ fn grid(m: Metrics, rows: u32, mask: u32, out: &mut Vec<Shape>) {
     for i in (0..2 * rows).filter(|i| mask >> i & 1 != 0) {
         let (col, row) = (f64::from(i % 2), f64::from(i / 2));
         let rows = f64::from(rows);
-        fill_frac(
-            m,
-            [col / 2., (col + 1.) / 2.],
-            [row / rows, (row + 1.) / rows],
-            out,
-        );
+        fill_frac(m, [col / 2., (col + 1.) / 2.], [row / rows, (row + 1.) / rows], out);
     }
 }
 
@@ -84,14 +76,7 @@ fn grid(m: Metrics, rows: u32, mask: u32, out: &mut Vec<Shape>) {
 fn fill_frac(m: Metrics, [x0, x1]: [f64; 2], [y0, y1]: [f64; 2], out: &mut Vec<Shape>) {
     let lo = |f: f64, size: u32| (f64::from(size) - ((1. - f) * f64::from(size)).round()) as i32;
     let hi = |f: f64, size: u32| (f * f64::from(size)).round() as i32;
-    rect(
-        out,
-        lo(x0, m.width),
-        lo(y0, m.height),
-        hi(x1, m.width),
-        hi(y1, m.height),
-        0xff,
-    );
+    rect(out, lo(x0, m.width), lo(y0, m.height), hi(x1, m.width), hi(y1, m.height), 0xff);
 }
 
 /// 盲文：点是 w×w 的整像素方块，剩余像素依次分给
@@ -128,16 +113,7 @@ pub(super) fn braille(cp: u32, m: Metrics, out: &mut Vec<Shape>) {
     if x_left >= 2 && y_left >= 4 {
         w += 1;
     }
-    let dots = [
-        (0, 0),
-        (0, 1),
-        (0, 2),
-        (1, 0),
-        (1, 1),
-        (1, 2),
-        (0, 3),
-        (1, 3),
-    ];
+    let dots = [(0, 0), (0, 1), (0, 2), (1, 0), (1, 1), (1, 2), (0, 3), (1, 3)];
     for (bit, (col, row)) in dots.into_iter().enumerate() {
         if cp >> bit & 1 != 0 {
             let x = x_margin + col * (w + x_spacing);
@@ -180,7 +156,10 @@ fn block_rect(m: Metrics, align: Align, fw: f32, fh: f32, out: &mut Vec<Shape>) 
 
 #[cfg(test)]
 mod tests {
-    use crate::sprites::{Shape, shapes, testing::{art, metrics, raster}};
+    use crate::sprites::{
+        Shape, shapes,
+        testing::{art, metrics, raster},
+    };
 
     #[test]
     fn blocks() {
@@ -189,37 +168,16 @@ mod tests {
         let upper = raster('▀', m);
         assert!(upper[..4].iter().flatten().all(|&v| v == 0xff));
         assert!(upper[4..].iter().flatten().all(|&v| v == 0));
-        assert_eq!(
-            art('▂', m),
-            [
-                "....", "....", "....", "....", "....", "....", "####", "####"
-            ]
-            .join("\n")
-        );
+        assert_eq!(art('▂', m), ["....", "....", "....", "....", "....", "....", "####", "####"].join("\n"));
         assert_eq!(art('▐', m), ["..##"; 8].join("\n"));
-        assert_eq!(
-            art('▚', m),
-            [
-                "##..", "##..", "##..", "##..", "..##", "..##", "..##", "..##"
-            ]
-            .join("\n")
-        );
+        assert_eq!(art('▚', m), ["##..", "##..", "##..", "##..", "..##", "..##", "..##", "..##"].join("\n"));
     }
 
     #[test]
     fn shades_are_translucent_fills() {
         let m = metrics(4, 8, 1);
         for (c, alpha) in [('░', 0x40), ('▒', 0x80), ('▓', 0xc0)] {
-            assert_eq!(
-                shapes(&c.to_string(), m),
-                Some(vec![Shape::Rect {
-                    x0: 0,
-                    y0: 0,
-                    x1: 4,
-                    y1: 8,
-                    alpha
-                }])
-            );
+            assert_eq!(shapes(&c.to_string(), m), Some(vec![Shape::Rect { x0: 0, y0: 0, x1: 4, y1: 8, alpha }]));
         }
     }
 
@@ -229,62 +187,26 @@ mod tests {
         let full = raster('⣿', m);
         let dots = shapes("⣿", m).unwrap();
         assert_eq!(dots.len(), 8);
-        assert!(
-            dots.iter()
-                .all(|d| matches!(d, Shape::Rect { x0, x1, .. } if x1 - x0 == 2))
-        );
+        assert!(dots.iter().all(|d| matches!(d, Shape::Rect { x0, x1, .. } if x1 - x0 == 2)));
         let one = raster('⠁', m);
-        assert_eq!(
-            one.iter().flatten().filter(|&&v| v > 0).count(),
-            4,
-            "只有一个 2×2 的点"
-        );
-        assert!(
-            one[..4].iter().all(|row| row[4..].iter().all(|&v| v == 0)),
-            "点在左上"
-        );
-        assert!(
-            full[12..].iter().any(|row| row[4..].iter().any(|&v| v > 0)),
-            "8 点盲文有右下点"
-        );
+        assert_eq!(one.iter().flatten().filter(|&&v| v > 0).count(), 4, "只有一个 2×2 的点");
+        assert!(one[..4].iter().all(|row| row[4..].iter().all(|&v| v == 0)), "点在左上");
+        assert!(full[12..].iter().any(|row| row[4..].iter().any(|&v| v > 0)), "8 点盲文有右下点");
 
         let m = metrics(4, 6, 1);
         // 🬀：左上六分之一；八分块 U+1CD00 是 OCTANT-3（第二行左格）。
-        assert_eq!(
-            art('\u{1fb00}', m),
-            ["##..", "##..", "....", "....", "....", "...."].join("\n")
-        );
+        assert_eq!(art('\u{1fb00}', m), ["##..", "##..", "....", "....", "....", "...."].join("\n"));
         let m = metrics(4, 8, 1);
-        assert_eq!(
-            art('\u{1cd00}', m),
-            [
-                "....", "....", "##..", "##..", "....", "....", "....", "...."
-            ]
-            .join("\n")
-        );
-        assert_eq!(
-            art('\u{1cea0}', m),
-            [
-                "....", "....", "....", "....", "....", "....", "..##", "..##"
-            ]
-            .join("\n")
-        );
-        assert_eq!(
-            art('\u{1fbe7}', m),
-            [
-                "....", "....", "..##", "..##", "..##", "..##", "....", "...."
-            ]
-            .join("\n")
-        );
+        assert_eq!(art('\u{1cd00}', m), ["....", "....", "##..", "##..", "....", "....", "....", "...."].join("\n"));
+        assert_eq!(art('\u{1cea0}', m), ["....", "....", "....", "....", "....", "....", "..##", "..##"].join("\n"));
+        assert_eq!(art('\u{1fbe7}', m), ["....", "....", "..##", "..##", "..##", "..##", "....", "...."].join("\n"));
     }
 
     #[test]
     fn corner_triangles() {
         let m = metrics(8, 16, 1);
         let solid = raster('◢', m);
-        assert!(
-            solid[15][7] == 0xff && solid[0][0] == 0 && solid[15][0] == 0xff && solid[2][7] == 0xff
-        );
+        assert!(solid[15][7] == 0xff && solid[0][0] == 0 && solid[15][0] == 0xff && solid[2][7] == 0xff);
         assert_eq!(solid[2][2], 0, "左上空");
         let hollow = raster('◸', m);
         assert!(hollow[0].iter().all(|&v| v == 0xff), "上边描边");

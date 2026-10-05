@@ -57,9 +57,8 @@ fn ties_go_to_usage_then_shorter_commands_then_names() {
         Candidate::new("git", Kind::Command),
         Candidate::new("gist", Kind::Command),
     ];
-    let order = |list: &[Candidate]| -> Vec<String> {
-        rank(list, "gi").into_iter().map(|i| list[i].value.clone()).collect()
-    };
+    let order =
+        |list: &[Candidate]| -> Vec<String> { rank(list, "gi").into_iter().map(|i| list[i].value.clone()).collect() };
     // 都没用过：命令名短的在前，再按字母序。
     assert_eq!(order(&list), ["git", "gist", "gif2webp", "gi-compile-repository"]);
     // 用过的在前。

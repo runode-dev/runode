@@ -35,10 +35,8 @@ pub fn plan(segment: &Segment, cursor: usize, lookup: &dyn Fn(&str) -> Option<st
         let name = command_name(&words[command_at].value());
         let spec = lookup(&name)?;
         // 光标前的、不是重定向目标的参数。
-        let args: Vec<(usize, String)> = (command_at + 1..segment.current)
-            .filter(|&i| !words[i].redirect)
-            .map(|i| (i, words[i].value()))
-            .collect();
+        let args: Vec<(usize, String)> =
+            (command_at + 1..segment.current).filter(|&i| !words[i].redirect).map(|i| (i, words[i].value())).collect();
         match walk(&spec, &args) {
             Walked::Nested(at) => {
                 // `sudo git ...` 这种参数本身是一条命令：从它重新开始。
@@ -104,13 +102,8 @@ struct State<'a> {
 }
 
 fn walk<'a>(spec: &'a Spec, args: &[(usize, String)]) -> Walked<'a> {
-    let mut state = State {
-        signature: &spec.signature,
-        arg: 0,
-        after_dashes: false,
-        used: HashSet::new(),
-        pending: None,
-    };
+    let mut state =
+        State { signature: &spec.signature, arg: 0, after_dashes: false, used: HashSet::new(), pending: None };
     for (index, word) in args {
         if let Some((opt, k)) = state.pending.take() {
             let params = opt.arguments();
@@ -307,9 +300,12 @@ fn argument(param: &Argument, from: usize, plan: &mut Plan) {
                 filter: template.filter_name.clone(),
                 from,
             }),
-            ArgumentType::Generator(name) => {
-                plan.sources.push(Source::Generator { name: name.clone(), from, group, arg: param.display_name.clone() })
-            }
+            ArgumentType::Generator(name) => plan.sources.push(Source::Generator {
+                name: name.clone(),
+                from,
+                group,
+                arg: param.display_name.clone(),
+            }),
             ArgumentType::Alias(_) => {}
         }
     }

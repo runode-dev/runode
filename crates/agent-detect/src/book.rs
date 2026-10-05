@@ -86,7 +86,9 @@ impl RuleBook {
             }
         }
         builtin(kind).map(|text| {
-            Arc::new(RuleSet::parse(text).unwrap_or_else(|err| panic!("built-in {} rules are invalid: {err}", kind.label())))
+            Arc::new(
+                RuleSet::parse(text).unwrap_or_else(|err| panic!("built-in {} rules are invalid: {err}", kind.label())),
+            )
         })
     }
 }

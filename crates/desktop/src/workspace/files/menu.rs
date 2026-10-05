@@ -90,14 +90,23 @@ impl WindowView {
             item("files.copy_relative_path", Box::new(CopyRelativePath)),
         ]);
         if selected.is_some() {
-            items.extend([None, item("files.rename", Box::new(RenameFile)), item("files.delete", Box::new(DeleteFile))]);
+            items.extend([
+                None,
+                item("files.rename", Box::new(RenameFile)),
+                item("files.delete", Box::new(DeleteFile)),
+            ]);
         }
         let target = self.files_focus.clone();
         self.open_menu(position, items, target, cx);
     }
 
     /// 右键菜单，盖在窗口最上层；点到菜单外面就关掉。
-    pub(in crate::workspace) fn render_file_menu(&self, fg: Rgb, bg: Rgb, cx: &mut Context<Self>) -> Option<AnyElement> {
+    pub(in crate::workspace) fn render_file_menu(
+        &self,
+        fg: Rgb,
+        bg: Rgb,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
         let menu = self.file_menu.as_ref()?;
         let hover_bg = hsla(bg.mix(fg, 0.12));
         let menu_bg = hsla(bg.mix(fg, 0.06));
@@ -132,7 +141,11 @@ impl WindowView {
                     )
                 })
                 .child(div().flex_1().min_w_0().truncate().child(item.label.clone()))
-                .children(item.shortcut.clone().map(|shortcut| div().flex_none().text_color(fg.opacity(0.45)).child(shortcut)))
+                .children(
+                    item.shortcut
+                        .clone()
+                        .map(|shortcut| div().flex_none().text_color(fg.opacity(0.45)).child(shortcut)),
+                )
                 .into_any_element()
         });
         let list = div()

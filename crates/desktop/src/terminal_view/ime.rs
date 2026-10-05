@@ -21,26 +21,13 @@ impl EntityInputHandler for TerminalView {
         Some(String::from_utf16_lossy(&utf16[range]))
     }
 
-    fn selected_text_range(
-        &mut self,
-        _: bool,
-        _: &mut Window,
-        _: &mut Context<Self>,
-    ) -> Option<UTF16Selection> {
-        let end = self
-            .marked_text
-            .as_deref()
-            .map_or(0, |t| t.encode_utf16().count());
-        Some(UTF16Selection {
-            range: end..end,
-            reversed: false,
-        })
+    fn selected_text_range(&mut self, _: bool, _: &mut Window, _: &mut Context<Self>) -> Option<UTF16Selection> {
+        let end = self.marked_text.as_deref().map_or(0, |t| t.encode_utf16().count());
+        Some(UTF16Selection { range: end..end, reversed: false })
     }
 
     fn marked_text_range(&self, _: &mut Window, _: &mut Context<Self>) -> Option<Range<usize>> {
-        self.marked_text
-            .as_deref()
-            .map(|t| 0..t.encode_utf16().count())
+        self.marked_text.as_deref().map(|t| 0..t.encode_utf16().count())
     }
 
     fn unmark_text(&mut self, _: &mut Window, cx: &mut Context<Self>) {
@@ -48,13 +35,7 @@ impl EntityInputHandler for TerminalView {
         cx.notify();
     }
 
-    fn replace_text_in_range(
-        &mut self,
-        _: Option<Range<usize>>,
-        text: &str,
-        _: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
+    fn replace_text_in_range(&mut self, _: Option<Range<usize>>, text: &str, _: &mut Window, cx: &mut Context<Self>) {
         self.marked_text = None;
         if !text.is_empty() {
             self.session.commit_text(text);
@@ -84,12 +65,7 @@ impl EntityInputHandler for TerminalView {
         self.cursor_bounds
     }
 
-    fn character_index_for_point(
-        &mut self,
-        _: Point<Pixels>,
-        _: &mut Window,
-        _: &mut Context<Self>,
-    ) -> Option<usize> {
+    fn character_index_for_point(&mut self, _: Point<Pixels>, _: &mut Window, _: &mut Context<Self>) -> Option<usize> {
         None
     }
 }

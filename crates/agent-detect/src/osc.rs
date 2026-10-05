@@ -108,7 +108,8 @@ impl ProgressCapture {
 
     fn finish(&mut self) -> State {
         if let Some(payload) = self.body.strip_prefix(b"9;") {
-            self.latest = String::from_utf8_lossy(payload).chars().filter(|c| !c.is_control()).take(MAX_CHARS).collect();
+            self.latest =
+                String::from_utf8_lossy(payload).chars().filter(|c| !c.is_control()).take(MAX_CHARS).collect();
         }
         self.body.clear();
         State::Ground

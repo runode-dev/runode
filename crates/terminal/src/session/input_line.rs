@@ -27,9 +27,7 @@ struct InputLine {
 impl InputLine {
     /// 活动区第 `y` 行第 `x` 列在这一串里的下标；不在这一行上时为 `None`。
     fn index(&self, x: u16, y: u32) -> Option<usize> {
-        (self.top..=self.bottom)
-            .contains(&y)
-            .then(|| (y - self.top) as usize * self.cols + usize::from(x))
+        (self.top..=self.bottom).contains(&y).then(|| (y - self.top) as usize * self.cols + usize::from(x))
     }
 
     fn chars(&self, range: std::ops::Range<usize>) -> isize {
@@ -63,10 +61,7 @@ impl Session {
     fn click_to_move_steps(&mut self, at: GridPoint) -> Option<isize> {
         let target = self.viewport_cell(at);
         let line = log_err("input line", self.input_line()).flatten()?;
-        let to = line
-            .index(target.x, target.y)?
-            .max(line.start)
-            .min(line.end.max(line.cursor));
+        let to = line.index(target.x, target.y)?.max(line.start).min(line.end.max(line.cursor));
         let steps = line.steps(line.cursor, to);
         (steps != 0).then_some(steps)
     }
@@ -78,8 +73,7 @@ impl Session {
         let Some((steps, count)) = log_err("delete selection", self.delete_selection_keys()).flatten() else {
             return false;
         };
-        let (Some(arrows), Some(backspace)) = (self.arrow_keys(steps), self.encode_key(key::Key::Backspace))
-        else {
+        let (Some(arrows), Some(backspace)) = (self.arrow_keys(steps), self.encode_key(key::Key::Backspace)) else {
             return false;
         };
         let mut bytes = arrows;
@@ -125,18 +119,12 @@ impl Session {
     /// shell 集成用 OSC 133 标出了提示符时，以它为准：输入从提示符之后开始。没有这些标记时
     /// 只能看前台是不是 shell 自己，也不知道提示符在哪里结束。
     fn input_line(&mut self) -> libghostty_vt::error::Result<Option<InputLine>> {
-        if self.terminal.active_screen()? == Screen::Alternate
-            || !self.terminal.viewport_active().unwrap_or(false)
-        {
+        if self.terminal.active_screen()? == Screen::Alternate || !self.terminal.viewport_active().unwrap_or(false) {
             return Ok(None);
         }
         let rows = u32::from(self.size.get().rows);
         let cursor = (self.terminal.cursor_x()?, u32::from(self.terminal.cursor_y()?));
-        let row = |y: u32| {
-            self.terminal
-                .grid_ref(Point::Active(PointCoordinate { x: 0, y }))
-                .and_then(|r| r.row())
-        };
+        let row = |y: u32| self.terminal.grid_ref(Point::Active(PointCoordinate { x: 0, y })).and_then(|r| r.row());
         let mut top = cursor.1;
         while top > 0 && row(top)?.is_wrap_continuation()? {
             top -= 1;

@@ -110,7 +110,9 @@ impl WindowView {
                 let dir = picker
                     .dirs
                     .entry(entry.pane)
-                    .or_insert_with(|| entry.view.read(cx).cwd().map(|dir| display_dir(&dir)).unwrap_or_default().into())
+                    .or_insert_with(|| {
+                        entry.view.read(cx).cwd().map(|dir| display_dir(&dir)).unwrap_or_default().into()
+                    })
                     .clone();
                 let mut fields = entry.haystack().to_vec();
                 fields.push(dir.clone());
@@ -162,7 +164,13 @@ impl WindowView {
     }
 
     /// 浮在标题栏下方正中的列表：上面是输入框，下面是各行。
-    pub(super) fn render_agent_picker(&mut self, fg: Rgb, bg: Rgb, window: &Window, cx: &mut Context<Self>) -> Option<Div> {
+    pub(super) fn render_agent_picker(
+        &mut self,
+        fg: Rgb,
+        bg: Rgb,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> Option<Div> {
         let rows = self.picker_rows(window, cx);
         let selected = self.picker_selected(&rows);
         let picker = self.agent_picker.as_ref()?;

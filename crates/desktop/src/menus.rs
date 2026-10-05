@@ -8,8 +8,8 @@ use gpui::{App, Menu, MenuItem, OsAction, SystemMenuType, actions};
 use crate::{
     search_bar::{Cut, Redo, SearchNext, SearchPrevious, SearchSelection, StartSearch, Undo},
     terminal_view::{
-        ClearScreen, Copy, DecreaseFontSize, IncreaseFontSize, JumpToPrompt, Paste, PasteSelection,
-        ResetFontSize, SelectAll,
+        ClearScreen, Copy, DecreaseFontSize, IncreaseFontSize, JumpToPrompt, Paste, PasteSelection, ResetFontSize,
+        SelectAll,
     },
     workspace::{
         ClosePane, CloseTab, CloseWorkspace, EqualizePanes, FocusNextPane, FocusPreviousPane, GotoAgent, NewSplitDown,

@@ -12,7 +12,7 @@ use super::{
     model::{Tab, Workspace},
 };
 use crate::{
-    agent_alert::{self, Alert, AgentAlert},
+    agent_alert::{self, AgentAlert, Alert},
     terminal_view::TerminalView,
 };
 
@@ -163,10 +163,7 @@ pub(super) fn sort_entries<T>(entries: &mut [T], key: impl Fn(&T) -> (Status, In
 /// `query` 按空白分成几个词，每个词（不分大小写）都出现在 `fields` 的某一项里才算匹配。
 pub(super) fn matches_query<S: AsRef<str>>(fields: &[S], query: &str) -> bool {
     let fields: Vec<String> = fields.iter().map(|field| field.as_ref().to_lowercase()).collect();
-    query
-        .split_whitespace()
-        .map(str::to_lowercase)
-        .all(|term| fields.iter().any(|field| field.contains(&term)))
+    query.split_whitespace().map(str::to_lowercase).all(|term| fields.iter().any(|field| field.contains(&term)))
 }
 
 /// 切到这个窗口里的这个分屏：激活应用和窗口，切到它所在的 workspace 和标签并聚焦它。推迟到
@@ -193,7 +190,9 @@ pub(crate) fn reveal_notified(tag: &str, cx: &mut App) {
         return;
     };
     let target = cx.windows().into_iter().filter_map(|window| window.downcast::<WindowView>()).find(|window| {
-        window.read(cx).is_ok_and(|view| view.workspaces.iter().any(|w| w.tabs.iter().any(|t| t.panes.contains_key(&pane))))
+        window
+            .read(cx)
+            .is_ok_and(|view| view.workspaces.iter().any(|w| w.tabs.iter().any(|t| t.panes.contains_key(&pane))))
     });
     if let Some(target) = target {
         reveal(target, pane, cx);
@@ -208,7 +207,14 @@ impl WindowView {
 
     /// 前台 agent 从工作中停了下来。停在空闲、用户又没在看时记为 done 并提醒；否则（用户看着、
     /// 在等回答或者退出了）不算 done。
-    pub(super) fn agent_finished(&mut self, pane: EntityId, wi: usize, ti: usize, window: &Window, cx: &mut Context<Self>) {
+    pub(super) fn agent_finished(
+        &mut self,
+        pane: EntityId,
+        wi: usize,
+        ti: usize,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) {
         let watching = self.is_watching_pane(pane, wi, ti, window);
         let tab = &mut self.workspaces[wi].tabs[ti];
         let Some(agent) = tab.panes[&pane].0.read(cx).agent() else {
@@ -226,7 +232,14 @@ impl WindowView {
     }
 
     /// 前台 agent 停下来等用户回答；用户没在看时提醒。
-    pub(super) fn agent_blocked(&mut self, pane: EntityId, wi: usize, ti: usize, window: &Window, cx: &mut Context<Self>) {
+    pub(super) fn agent_blocked(
+        &mut self,
+        pane: EntityId,
+        wi: usize,
+        ti: usize,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) {
         let watching = self.is_watching_pane(pane, wi, ti, window);
         let tab = &mut self.workspaces[wi].tabs[ti];
         tab.done.remove(&pane);

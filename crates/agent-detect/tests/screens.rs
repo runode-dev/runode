@@ -39,7 +39,10 @@ fn claude() {
     assert_eq!(title(Claude, "✳ 修复登录"), "idle");
     assert_eq!(progress(Claude, "4;0;"), "idle");
     assert_eq!(
-        screen(Claude, "✻ Thinking… (12s · ↓ 1.2k tokens · esc to interrupt)\n\n────────\n❯\n────────\n  ⏵⏵ accept edits on\n"),
+        screen(
+            Claude,
+            "✻ Thinking… (12s · ↓ 1.2k tokens · esc to interrupt)\n\n────────\n❯\n────────\n  ⏵⏵ accept edits on\n"
+        ),
         "working"
     );
     assert_eq!(screen(Claude, "● 改好了。\n\n────────\n❯\n────────\n  ? for shortcuts\n"), "idle");
@@ -51,7 +54,10 @@ fn claude() {
         "blocked"
     );
     assert_eq!(
-        screen(Claude, "────────\n Edit file\n Do you want to proceed?\n ❯ 1. Yes\n   2. No\n\n Esc to cancel · Tab to amend\n"),
+        screen(
+            Claude,
+            "────────\n Edit file\n Do you want to proceed?\n ❯ 1. Yes\n   2. No\n\n Esc to cancel · Tab to amend\n"
+        ),
         "blocked"
     );
     // 正在看历史记录，看不出当前状态。
@@ -71,11 +77,19 @@ fn codex() {
         "working"
     );
     assert_eq!(
-        verdict(Codex, "• Ran ls\n\n  Allow command?\n  › 1. Yes  2. No\n  Press enter to confirm or esc to cancel\n", "runode", ""),
+        verdict(
+            Codex,
+            "• Ran ls\n\n  Allow command?\n  › 1. Yes  2. No\n  Press enter to confirm or esc to cancel\n",
+            "runode",
+            ""
+        ),
         "blocked"
     );
     assert_eq!(
-        screen(Codex, "> You are in /work/runode\n\n  Do you trust the contents of this directory? Working with untrusted contents\n  › 1. Yes, continue\n"),
+        screen(
+            Codex,
+            "> You are in /work/runode\n\n  Do you trust the contents of this directory? Working with untrusted contents\n  › 1. Yes, continue\n"
+        ),
         "blocked"
     );
     // 计时停了、后面又有回答：不再算工作中。
@@ -107,7 +121,10 @@ fn amp_antigravity_cline_cursor() {
     assert_eq!(title(Amp, "⠋ amp"), "working");
     assert_eq!(title(Amp, "runode - amp - 修 bug"), "idle");
     assert_eq!(screen(Amp, "Run this command?\n  rm -rf build\n"), "blocked");
-    assert_eq!(screen(Antigravity, "Allow running rm?\n↑/↓ Navigate · tab Amend · f full diff\nesc to cancel\n"), "blocked");
+    assert_eq!(
+        screen(Antigravity, "Allow running rm?\n↑/↓ Navigate · tab Amend · f full diff\nesc to cancel\n"),
+        "blocked"
+    );
     assert_eq!(screen(Antigravity, "⠋ Thinking about the plan\n╭───\n│ >\n╰───\n"), "working");
     assert_eq!(screen(Cline, "─────\n❯\n─────\n(Tab) Plan/Act · Shift+Tab auto-approve\n"), "idle");
     assert_eq!(screen(Cline, "Cline needs permission\nApprove tool call?\n[y] Approve  [n] Deny\n"), "blocked");
@@ -123,9 +140,15 @@ fn devin_droid_copilot_grok() {
     assert_eq!(screen(Devin, "Running tools · esc to interrupt\n"), "working");
     assert_eq!(screen(Devin, "Approve once\nSelect · Confirm · Esc cancel\n"), "blocked");
     assert_eq!(screen(Droid, "⠋ Thinking  (Press ESC to stop)\n"), "working");
-    assert_eq!(screen(Droid, "> Yes, allow\n  No, cancel\nUse ↑↓ to navigate, Enter to select, Esc to cancel\n"), "blocked");
+    assert_eq!(
+        screen(Droid, "> Yes, allow\n  No, cancel\nUse ↑↓ to navigate, Enter to select, Esc to cancel\n"),
+        "blocked"
+    );
     assert_eq!(screen(GithubCopilot, "◎ Thinking (Esc to cancel)\n"), "working");
-    assert_eq!(screen(GithubCopilot, "❯ 1. Yes\n  2. No\n↑↓ to navigate · Enter to select · Esc to cancel\n"), "blocked");
+    assert_eq!(
+        screen(GithubCopilot, "❯ 1. Yes\n  2. No\n↑↓ to navigate · Enter to select · Esc to cancel\n"),
+        "blocked"
+    );
     assert_eq!(title(Grok, "grok"), "idle");
     assert_eq!(title(Grok, "⠋ Running tests - grok"), "working");
     assert_eq!(title(Grok, "⚠ Action Required - grok"), "blocked");

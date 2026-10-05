@@ -53,13 +53,18 @@ pub(super) fn single_dir(entries: &[DirEntry]) -> Option<&str> {
 /// 知道它里面有什么；这样的链条一直读到头。被忽略的子目录不往下看，里面多半很大。
 pub(super) fn list_dirs(dirs: Vec<PathBuf>, decorator: &Decorator) -> Vec<(PathBuf, Option<Vec<DirEntry>>)> {
     let mut listed: HashSet<PathBuf> = dirs.iter().cloned().collect();
-    let mut listings: Vec<_> = dirs.into_iter().map(|dir| {
-        let listing = read_dir(&dir);
-        (dir, listing)
-    }).collect();
+    let mut listings: Vec<_> = dirs
+        .into_iter()
+        .map(|dir| {
+            let listing = read_dir(&dir);
+            (dir, listing)
+        })
+        .collect();
     let children: Vec<_> = listings
         .iter()
-        .flat_map(|(dir, listing)| listing.iter().flatten().filter(|entry| entry.is_dir).map(|entry| dir.join(&entry.name)))
+        .flat_map(|(dir, listing)| {
+            listing.iter().flatten().filter(|entry| entry.is_dir).map(|entry| dir.join(&entry.name))
+        })
         .filter(|child| decorator.of(child, true) != Decoration::Ignored)
         .collect();
     for child in children {

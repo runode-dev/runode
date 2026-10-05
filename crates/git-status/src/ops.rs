@@ -54,7 +54,11 @@ pub struct CommitOptions {
 /// 跑一条会写仓库的 git 命令，返回标准输出。和只读的 `git` 不同：不设 `GIT_OPTIONAL_LOCKS`，
 /// 要拿的锁照常拿；`GIT_TERMINAL_PROMPT=0` 让要密码的远端直接报错，不卡着等输入；`input`
 /// 给了就写进标准输入，否则标准输入是空的。失败时的错误是 git 的标准错误，没有就用标准输出。
-pub(crate) fn run<S: AsRef<OsStr>>(dir: &Path, args: impl IntoIterator<Item = S>, input: Option<&[u8]>) -> Result<Vec<u8>> {
+pub(crate) fn run<S: AsRef<OsStr>>(
+    dir: &Path,
+    args: impl IntoIterator<Item = S>,
+    input: Option<&[u8]>,
+) -> Result<Vec<u8>> {
     let mut command = Command::new("git");
     command
         .arg("-C")

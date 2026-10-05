@@ -70,9 +70,7 @@ impl Config {
             .flat_map(|path| read_entries(path, &mut sources))
             .filter(|e| e.key != "keybind")
             .collect();
-        let runode = config_path()
-            .map(|path| read_entries(&path, &mut sources))
-            .unwrap_or_default();
+        let runode = config_path().map(|path| read_entries(&path, &mut sources)).unwrap_or_default();
         Self::from_layers(&[ghostty, runode], dark, &mut sources)
     }
 
@@ -89,11 +87,7 @@ impl Config {
     fn from_layers(layers: &[Vec<Entry>], dark: bool, sources: &mut Vec<PathBuf>) -> Self {
         let mut config = Self::default();
         // 先套主题，再让显式写出的键覆盖它。后一层的主题覆盖前一层的。
-        let theme = layers
-            .iter()
-            .flatten()
-            .rfind(|e| e.key == "theme")
-            .map(|e| e.value.clone());
+        let theme = layers.iter().flatten().rfind(|e| e.key == "theme").map(|e| e.value.clone());
         if let Some(theme) = theme.filter(|t| !t.is_empty()) {
             let name = pick_theme(&theme, dark);
             match find_theme(&name) {
@@ -203,12 +197,10 @@ impl Config {
                 self.selection_foreground = if empty { None } else { Some(parse_terminal_color(value)?) };
             }
             "search-background" => {
-                self.search_background =
-                    if empty { defaults.search_background } else { parse_terminal_color(value)? };
+                self.search_background = if empty { defaults.search_background } else { parse_terminal_color(value)? };
             }
             "search-foreground" => {
-                self.search_foreground =
-                    if empty { defaults.search_foreground } else { parse_terminal_color(value)? };
+                self.search_foreground = if empty { defaults.search_foreground } else { parse_terminal_color(value)? };
             }
             "search-selected-background" => {
                 self.search_selected_background =
@@ -413,10 +405,7 @@ pub(crate) fn parse_entries(text: &str, name: &str) -> Vec<Entry> {
         }
         let (key, value) = line.split_once('=').unwrap_or((line, ""));
         let value = value.trim();
-        let value = value
-            .strip_prefix('"')
-            .and_then(|v| v.strip_suffix('"'))
-            .unwrap_or(value);
+        let value = value.strip_prefix('"').and_then(|v| v.strip_suffix('"')).unwrap_or(value);
         entries.push(Entry {
             key: key.trim().to_owned(),
             value: value.to_owned(),
@@ -544,9 +533,15 @@ unknown-key = whatever
     fn file_tree_preview_click_defaults_to_single() {
         assert_eq!(Config::default().file_tree_preview_click, PreviewClick::Single);
         assert_eq!(load(&["file-tree-preview-click = double"]).file_tree_preview_click, PreviewClick::Double);
-        assert_eq!(load(&["file-tree-preview-click = double\nfile-tree-preview-click ="]).file_tree_preview_click, PreviewClick::Single);
+        assert_eq!(
+            load(&["file-tree-preview-click = double\nfile-tree-preview-click ="]).file_tree_preview_click,
+            PreviewClick::Single
+        );
         // 认不出的值跳过，保留前面的值。
-        assert_eq!(load(&["file-tree-preview-click = double\nfile-tree-preview-click = triple"]).file_tree_preview_click, PreviewClick::Double);
+        assert_eq!(
+            load(&["file-tree-preview-click = double\nfile-tree-preview-click = triple"]).file_tree_preview_click,
+            PreviewClick::Double
+        );
     }
 
     #[test]
@@ -555,10 +550,8 @@ unknown-key = whatever
         assert!(d.agent_notifications);
         assert_eq!(d.agent_done_sound.as_deref(), Some("Glass"));
         assert_eq!(d.agent_blocked_sound.as_deref(), Some("Ping"));
-        let config = load(&[
-            "agent-notifications = false\nagent-done-sound = none\nagent-blocked-sound = Funk\n\
-             agent-notifications-exclude = codex, gemini\nagent-notifications-exclude = claude,codex",
-        ]);
+        let config = load(&["agent-notifications = false\nagent-done-sound = none\nagent-blocked-sound = Funk\n\
+             agent-notifications-exclude = codex, gemini\nagent-notifications-exclude = claude,codex"]);
         assert!(!config.agent_notifications);
         assert_eq!(config.agent_done_sound, None);
         assert_eq!(config.agent_blocked_sound.as_deref(), Some("Funk"));
@@ -566,7 +559,9 @@ unknown-key = whatever
         // 有一个认不出的名字时整行跳过；空值清空，声音回到默认。
         let config = load(&["agent-notifications-exclude = codex\nagent-notifications-exclude = claude,nope"]);
         assert_eq!(config.agent_notifications_exclude, [AgentKind::Codex]);
-        let config = load(&["agent-notifications-exclude = codex\nagent-notifications-exclude =\nagent-done-sound = none\nagent-done-sound ="]);
+        let config = load(&[
+            "agent-notifications-exclude = codex\nagent-notifications-exclude =\nagent-done-sound = none\nagent-done-sound =",
+        ]);
         assert!(config.agent_notifications_exclude.is_empty());
         assert_eq!(config.agent_done_sound.as_deref(), Some("Glass"));
         assert_eq!(load(&["agent-notifications-exclude = other"]).agent_notifications_exclude, [AgentKind::Other]);
@@ -591,9 +586,6 @@ unknown-key = whatever
         assert_eq!(config.cursor_color, Some(TerminalColor::CellForeground));
         assert_eq!(config.cursor_text, Some(TerminalColor::CellBackground));
         assert_eq!(config.selection_background, Some(TerminalColor::CellBackground));
-        assert_eq!(
-            config.selection_foreground,
-            Some(TerminalColor::Rgb(Rgb(1, 2, 3)))
-        );
+        assert_eq!(config.selection_foreground, Some(TerminalColor::Rgb(Rgb(1, 2, 3))));
     }
 }

@@ -95,11 +95,7 @@ fn lines(m: Metrics, [up, right, down, left]: [u8; 4], out: &mut Vec<Shape>) {
     let up_bottom = if left == H || right == H {
         h_heavy_bottom
     } else if left != right || down == up {
-        if left == D || right == D {
-            h_double_bottom
-        } else {
-            h_light_bottom
-        }
+        if left == D || right == D { h_double_bottom } else { h_light_bottom }
     } else if left == N && right == N {
         h_light_bottom
     } else {
@@ -108,11 +104,7 @@ fn lines(m: Metrics, [up, right, down, left]: [u8; 4], out: &mut Vec<Shape>) {
     let down_top = if left == H || right == H {
         h_heavy_top
     } else if left != right || up == down {
-        if left == D || right == D {
-            h_double_top
-        } else {
-            h_light_top
-        }
+        if left == D || right == D { h_double_top } else { h_light_top }
     } else if left == N && right == N {
         h_light_top
     } else {
@@ -121,11 +113,7 @@ fn lines(m: Metrics, [up, right, down, left]: [u8; 4], out: &mut Vec<Shape>) {
     let left_right = if up == H || down == H {
         v_heavy_right
     } else if up != down || left == right {
-        if up == D || down == D {
-            v_double_right
-        } else {
-            v_light_right
-        }
+        if up == D || down == D { v_double_right } else { v_light_right }
     } else if up == N && down == N {
         v_light_right
     } else {
@@ -134,11 +122,7 @@ fn lines(m: Metrics, [up, right, down, left]: [u8; 4], out: &mut Vec<Shape>) {
     let right_left = if up == H || down == H {
         v_heavy_left
     } else if up != down || right == left {
-        if up == D || down == D {
-            v_double_left
-        } else {
-            v_light_left
-        }
+        if up == D || down == D { v_double_left } else { v_light_left }
     } else if up == N && down == N {
         v_light_left
     } else {
@@ -258,12 +242,7 @@ pub(super) fn arc(m: Metrics, dx: f32, dy: f32, out: &mut Vec<Shape>) {
         points.push([cx, edge_y]);
     }
     points.push([cx, cy + dy * r]);
-    cubic(
-        &mut points,
-        [cx, cy + dy * s * r],
-        [cx + dx * s * r, cy],
-        [cx + dx * r, cy],
-    );
+    cubic(&mut points, [cx, cy + dy * s * r], [cx + dx * s * r, cy], [cx + dx * r, cy]);
     if dx * (edge_x - cx) > r {
         points.push([edge_x, cy]);
     }
@@ -275,11 +254,7 @@ pub(super) fn diagonal(m: Metrics, rising: bool, out: &mut Vec<Shape>) {
     let (w, h, t) = (m.width as f32, m.height as f32, m.thickness as f32);
     let sx = (w / h).min(1.) * 0.5;
     let sy = (h / w).min(1.) * 0.5;
-    let points = if rising {
-        [[w + sx, -sy], [-sx, h + sy]]
-    } else {
-        [[-sx, -sy], [w + sx, h + sy]]
-    };
+    let points = if rising { [[w + sx, -sy], [-sx, h + sy]] } else { [[-sx, -sy], [w + sx, h + sy]] };
     band(&points, -t / 2., t / 2., out);
 }
 
@@ -290,36 +265,12 @@ mod tests {
     #[test]
     fn box_lines() {
         let m = metrics(5, 7, 1);
-        assert_eq!(
-            art('─', m),
-            [
-                ".....", ".....", ".....", "#####", ".....", ".....", "....."
-            ]
-            .join("\n")
-        );
+        assert_eq!(art('─', m), [".....", ".....", ".....", "#####", ".....", ".....", "....."].join("\n"));
         assert_eq!(art('│', m), ["..#.."; 7].join("\n"));
-        assert_eq!(
-            art('┼', m),
-            [
-                "..#..", "..#..", "..#..", "#####", "..#..", "..#..", "..#.."
-            ]
-            .join("\n")
-        );
-        assert_eq!(
-            art('═', m),
-            [
-                ".....", ".....", "#####", ".....", "#####", ".....", "....."
-            ]
-            .join("\n")
-        );
+        assert_eq!(art('┼', m), ["..#..", "..#..", "..#..", "#####", "..#..", "..#..", "..#.."].join("\n"));
+        assert_eq!(art('═', m), [".....", ".....", "#####", ".....", "#####", ".....", "....."].join("\n"));
         assert_eq!(art('║', m), [".#.#."; 7].join("\n"));
-        assert_eq!(
-            art('╬', m),
-            [
-                ".#.#.", ".#.#.", "##.##", ".....", "##.##", ".#.#.", ".#.#."
-            ]
-            .join("\n")
-        );
+        assert_eq!(art('╬', m), [".#.#.", ".#.#.", "##.##", ".....", "##.##", ".#.#.", ".#.#."].join("\n"));
     }
 
     #[test]
@@ -328,10 +279,7 @@ mod tests {
         let m = metrics(6, 8, 1);
         assert_eq!(
             art('┏', m),
-            [
-                "......", "......", "......", "..####", "..####", "..##..", "..##..", "..##.."
-            ]
-            .join("\n")
+            ["......", "......", "......", "..####", "..####", "..##..", "..##..", "..##.."].join("\n")
         );
     }
 
@@ -352,10 +300,7 @@ mod tests {
         let m = metrics(12, 8, 1);
         // 三段：间隙 2（左右各半个），每段 (12 - 6) / 3 = 2。
         assert_eq!(art('┄', m).lines().nth(3), Some(".##..##..##."));
-        let col: String = raster('┆', metrics(8, 12, 1))
-            .iter()
-            .map(|r| if r[3] == 0 { '.' } else { '#' })
-            .collect();
+        let col: String = raster('┆', metrics(8, 12, 1)).iter().map(|r| if r[3] == 0 { '.' } else { '#' }).collect();
         assert_eq!(col, "##..##..##..");
     }
 }

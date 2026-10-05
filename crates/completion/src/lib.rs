@@ -16,14 +16,14 @@ pub mod usage;
 use std::{collections::HashMap, ffi::OsString, path::Path, sync::Arc};
 
 use runode_shared_types::shell::ShellNames;
-use warp_command_signatures::{PathSuggestionType, Suggestion, TemplateType};
 /// 生成器跑出来的结果，交回 `generated` 换成候选。
 pub use warp_command_signatures::GeneratorResults;
+use warp_command_signatures::{PathSuggestionType, Suggestion, TemplateType};
 
 pub use engine::{Candidate, Edit, Kind, common_prefix, decisive, highlight, rank};
 use engine::{Plan, Source};
-pub use line::cells;
 use line::Segment;
+pub use line::cells;
 
 /// 光标所在 shell 的情况：它报告的 PATH 和各种名字，以及 runode 记下的命令历史里各命令的
 /// 常用程度。
@@ -102,9 +102,9 @@ impl Request {
                         continue;
                     };
                     let listed = paths::Filter::Executables;
-                    candidates.extend(self.path_candidates(*from, cwd, home.as_deref(), listed, |entry| {
-                        Some((entry.name, None))
-                    }));
+                    candidates.extend(
+                        self.path_candidates(*from, cwd, home.as_deref(), listed, |entry| Some((entry.name, None))),
+                    );
                 }
                 Source::Template { kind, filter, from } => {
                     let Some(cwd) = cwd else {
@@ -212,7 +212,8 @@ fn command_names(shell: &Shell, candidates: &mut Vec<Candidate>) {
         candidate.description = values.get(name.as_str()).map(|value| (*value).to_owned());
         candidates.push(candidate);
     }
-    let groups = [(&names.functions, Kind::Function), (&names.builtins, Kind::Builtin), (&names.keywords, Kind::Keyword)];
+    let groups =
+        [(&names.functions, Kind::Function), (&names.builtins, Kind::Builtin), (&names.keywords, Kind::Keyword)];
     for (list, kind) in groups {
         candidates.extend(list.iter().map(|name| engine::command(name.clone(), kind)));
     }

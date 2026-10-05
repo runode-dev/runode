@@ -6,7 +6,9 @@ use std::{
     time::Instant,
 };
 
-use gpui::{App, Bounds, Context, Entity, EntityId, Focusable, Pixels, ScrollHandle, SharedString, Subscription, Window};
+use gpui::{
+    App, Bounds, Context, Entity, EntityId, Focusable, Pixels, ScrollHandle, SharedString, Subscription, Window,
+};
 use runode_shared_types::pane::{Node, SplitId};
 
 use super::{WindowView, persistence, project::Project};
@@ -58,13 +60,9 @@ pub(super) fn workspace_name(dir: &Path) -> String {
     if home.as_deref() == Some(dir) {
         return "~".into();
     }
-    let root = dir
-        .ancestors()
-        .take_while(|d| Some(*d) != home.as_deref())
-        .find(|d| d.join(".git").exists())
-        .unwrap_or(dir);
-    root.file_name()
-        .map_or_else(|| dir.display().to_string(), |name| name.to_string_lossy().into_owned())
+    let root =
+        dir.ancestors().take_while(|d| Some(*d) != home.as_deref()).find(|d| d.join(".git").exists()).unwrap_or(dir);
+    root.file_name().map_or_else(|| dir.display().to_string(), |name| name.to_string_lossy().into_owned())
 }
 
 /// 侧栏里显示的目录，家目录写成 `~`。
@@ -156,7 +154,12 @@ impl WindowView {
     }
 
     /// 在 `cwd` 里启动一个终端，为空时在家目录；启动失败时记日志，返回 `None`。
-    pub(super) fn spawn_terminal(&mut self, cwd: Option<&Path>, window: &mut Window, cx: &mut App) -> Option<Entity<TerminalView>> {
+    pub(super) fn spawn_terminal(
+        &mut self,
+        cwd: Option<&Path>,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> Option<Entity<TerminalView>> {
         match TerminalView::spawn(cwd, window, cx) {
             Ok(view) => {
                 self.record_spawn(&view, cwd);
@@ -293,13 +296,8 @@ impl WindowView {
 
     /// 启动显示中的标签里还没启动 shell 的终端（恢复布局时看不见的终端都等到这时）。
     fn start_shown(&mut self, cx: &mut Context<Self>) {
-        let unstarted: Vec<_> = self
-            .tab()
-            .panes
-            .values()
-            .map(|(view, _)| view.clone())
-            .filter(|view| !view.read(cx).started())
-            .collect();
+        let unstarted: Vec<_> =
+            self.tab().panes.values().map(|(view, _)| view.clone()).filter(|view| !view.read(cx).started()).collect();
         for view in unstarted {
             let start = view.read(cx).cwd();
             view.update(cx, |view, cx| view.start(cx));
@@ -401,11 +399,8 @@ impl WindowView {
             return;
         }
         self.workspaces.remove(ix);
-        let active = if ix < self.active || self.active == self.workspaces.len() {
-            self.active - 1
-        } else {
-            self.active
-        };
+        let active =
+            if ix < self.active || self.active == self.workspaces.len() { self.active - 1 } else { self.active };
         self.activate_workspace(active, window, cx);
     }
 
@@ -466,7 +461,11 @@ impl WindowView {
     }
 
     /// 新终端从当前终端的 shell 所在目录开始。
-    pub(super) fn spawn_beside_focused(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Option<Entity<TerminalView>> {
+    pub(super) fn spawn_beside_focused(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Option<Entity<TerminalView>> {
         // 目录已经被删掉时 shell 起不来，退回 workspace 的目录，再退回家目录。
         let cwd = self.tab().focused_view().read(cx).cwd();
         let cwd = persist::start_dir(cwd.as_deref(), &self.workspace().dir);

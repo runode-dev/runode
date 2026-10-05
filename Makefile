@@ -5,7 +5,7 @@ ARGS ?=
 CLIPPY_ARGS ?=
 
 .DEFAULT_GOAL := help
-.PHONY: help submodules build release run run-release app install dmg check test clippy clean
+.PHONY: help submodules build release run run-release app install dmg check test clippy fmt fmt-check clean
 
 help: ## 列出所有目标
 	@awk 'BEGIN {FS = ":.*## "} /^[a-zA-Z_-]+:.*## / {printf "  %-12s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -43,6 +43,12 @@ test: ## 运行测试
 
 clippy: ## 运行 clippy
 	$(CARGO) clippy --workspace --all-targets $(CLIPPY_ARGS)
+
+fmt: ## 按 rustfmt.toml 格式化工作区里的 crate（不碰 vendor）
+	$(CARGO) fmt
+
+fmt-check: ## 检查格式，有要改的就失败
+	$(CARGO) fmt -- --check
 
 clean: ## 清理构建产物
 	$(CARGO) clean

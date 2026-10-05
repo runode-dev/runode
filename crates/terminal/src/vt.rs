@@ -276,7 +276,11 @@ pub(crate) fn detection_text(terminal: &Terminal<'_, '_>) -> Result<Option<Strin
 pub(crate) fn screen_lines(terminal: &Terminal<'_, '_>, first: usize, last: usize) -> Result<Vec<String>> {
     let cols = terminal.cols()?;
     let point = |x: u16, y: usize| Point::Screen(PointCoordinate { x, y: u32::try_from(y).unwrap_or(u32::MAX) });
-    let selection = Selection::new(terminal.grid_ref(point(0, first))?, terminal.grid_ref(point(cols.saturating_sub(1), last))?, false);
+    let selection = Selection::new(
+        terminal.grid_ref(point(0, first))?,
+        terminal.grid_ref(point(cols.saturating_sub(1), last))?,
+        false,
+    );
     let options = FormatterOptions::new()
         .with_format(Format::Plain)
         .with_unwrap(false)

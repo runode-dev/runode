@@ -27,8 +27,8 @@ fn bundle_command_specs() {
     let mut blob = Vec::new();
     let mut index: Vec<(String, usize, usize, String)> = Vec::new();
     for path in &files {
-        let json: serde_json::Value = serde_json::from_slice(&fs::read(path).unwrap())
-            .unwrap_or_else(|err| panic!("{}: {err}", path.display()));
+        let json: serde_json::Value =
+            serde_json::from_slice(&fs::read(path).unwrap()).unwrap_or_else(|err| panic!("{}: {err}", path.display()));
         let names: Vec<String> = match &json["name"] {
             serde_json::Value::String(name) => vec![name.clone()],
             serde_json::Value::Array(names) => names.iter().filter_map(|n| n.as_str().map(str::to_owned)).collect(),

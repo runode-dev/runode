@@ -84,13 +84,8 @@ impl WindowView {
         cx: &mut Context<Self>,
         then: impl FnOnce(&mut Self, &mut Window, &mut Context<Self>) + 'static,
     ) {
-        let answer = window.prompt(
-            PromptLevel::Warning,
-            &title,
-            Some(&detail),
-            &[&confirm, &*rust_i18n::t!("git.cancel")],
-            cx,
-        );
+        let answer =
+            window.prompt(PromptLevel::Warning, &title, Some(&detail), &[&confirm, &*rust_i18n::t!("git.cancel")], cx);
         cx.spawn_in(window, async move |this, cx| {
             if answer.await.ok() == Some(0) {
                 this.update_in(cx, |this, window, cx| then(this, window, cx)).ok();
@@ -135,9 +130,15 @@ impl WindowView {
         let (title, detail) = match files.as_slice() {
             [] => return,
             [file] => {
-                let name = file.path.file_name().map_or_else(|| file.path.display().to_string(), |name| name.to_string_lossy().into_owned());
+                let name = file
+                    .path
+                    .file_name()
+                    .map_or_else(|| file.path.display().to_string(), |name| name.to_string_lossy().into_owned());
                 if untracked == 1 {
-                    (rust_i18n::t!("git.delete_untracked_title", name = name), rust_i18n::t!("git.delete_untracked_detail"))
+                    (
+                        rust_i18n::t!("git.delete_untracked_title", name = name),
+                        rust_i18n::t!("git.delete_untracked_detail"),
+                    )
                 } else {
                     (rust_i18n::t!("git.discard_title", name = name), rust_i18n::t!("git.irreversible"))
                 }
@@ -155,7 +156,13 @@ impl WindowView {
     }
 
     /// 整段的操作：暂存全部冲突或未暂存的文件、取消暂存全部、丢掉全部未暂存的改动。
-    pub(super) fn git_section_action(&mut self, section: GitSection, stage: bool, window: &mut Window, cx: &mut Context<Self>) {
+    pub(super) fn git_section_action(
+        &mut self,
+        section: GitSection,
+        stage: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let Some(git) = self.workspace().project.git.as_ref() else {
             return;
         };

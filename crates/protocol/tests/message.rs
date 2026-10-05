@@ -49,7 +49,12 @@ fn client_messages_round_trip() {
             caps: Caps { snapshot: true, vt_replay: true },
         },
         ClientMsg::ListSessions,
-        ClientMsg::Spawn { req: 3, size: size(), cwd: Some("/tmp/中文".into()), integration: IntegrationMode::Force(Shell::Zsh) },
+        ClientMsg::Spawn {
+            req: 3,
+            size: size(),
+            cwd: Some("/tmp/中文".into()),
+            integration: IntegrationMode::Force(Shell::Zsh),
+        },
         ClientMsg::Spawn { req: 4, size: size(), cwd: None, integration: IntegrationMode::Detect },
         ClientMsg::Attach { id: ID, size: Some(size()), mode: AttachMode::Snapshot },
         ClientMsg::Attach { id: ID, size: None, mode: AttachMode::MetaOnly },
@@ -111,7 +116,10 @@ fn the_wire_format_is_readable_json() {
 fn missing_and_unknown_fields_are_tolerated() {
     let hello: ClientMsg =
         serde_json::from_str(r#"{"type":"hello","protocol":1,"build":"x","client":"cli","future":true}"#).unwrap();
-    assert_eq!(hello, ClientMsg::Hello { protocol: 1, build: BuildId("x".into()), client: ClientKind::Cli, caps: Caps::default() });
+    assert_eq!(
+        hello,
+        ClientMsg::Hello { protocol: 1, build: BuildId("x".into()), client: ClientKind::Cli, caps: Caps::default() }
+    );
     // 必填字段缺了读不了。
     assert!(serde_json::from_str::<ClientMsg>(r#"{"type":"detach"}"#).is_err());
 }
@@ -126,7 +134,10 @@ fn newer_kinds_and_messages_read_as_unknown() {
     assert_eq!(serde_json::from_str::<ClientMsg>(r#"{"type":"teleport","to":"mars"}"#).unwrap(), ClientMsg::Unknown);
     assert_eq!(serde_json::from_str::<HostMsg>(r#"{"type":"confetti"}"#).unwrap(), HostMsg::Unknown);
     // 其他枚举的新取值读不了。
-    assert!(serde_json::from_str::<ClientMsg>(&format!(r#"{{"type":"attach","id":"{ID}","size":null,"mode":"hologram"}}"#)).is_err());
+    assert!(
+        serde_json::from_str::<ClientMsg>(&format!(r#"{{"type":"attach","id":"{ID}","size":null,"mode":"hologram"}}"#))
+            .is_err()
+    );
 }
 
 #[test]
@@ -134,7 +145,13 @@ fn session_ids_are_32_hex_digits() {
     assert_eq!(ID.to_string(), "0123456789abcdef0011223344556677");
     assert_eq!(SessionId(1).to_string(), "00000000000000000000000000000001");
     assert_eq!("0123456789ABCDEF0011223344556677".parse(), Ok(ID));
-    for bad in ["", "123", "+123456789abcdef0011223344556677", "0123456789abcdef00112233445566778", "0123456789abcdef001122334455667g"] {
+    for bad in [
+        "",
+        "123",
+        "+123456789abcdef0011223344556677",
+        "0123456789abcdef00112233445566778",
+        "0123456789abcdef001122334455667g",
+    ] {
         assert_eq!(bad.parse::<SessionId>(), Err(InvalidSessionId), "{bad:?}");
     }
     assert!(serde_json::from_str::<SessionId>(r#""xyz""#).is_err());

@@ -1,8 +1,8 @@
 //! 标签里的终端区：分屏树、分隔线和拖动分隔线时的遮罩。
 
 use gpui::{
-    AnyElement, Context, CursorStyle, Div, EntityId, ExternalPaths, MouseButton, MouseDownEvent, MouseMoveEvent, StyleRefinement,
-    canvas, div, prelude::*, px, relative,
+    AnyElement, Context, CursorStyle, Div, EntityId, ExternalPaths, MouseButton, MouseDownEvent, MouseMoveEvent,
+    StyleRefinement, canvas, div, prelude::*, px, relative,
 };
 use runode_shared_types::{
     color::Rgb,
@@ -46,9 +46,7 @@ impl WindowView {
                 .size_full(),
             )
             // 蒙层没有鼠标处理，点击照样落到下面的终端上。
-            .when(dimmed, |leaf| {
-                leaf.child(div().absolute().size_full().bg(hsla(bg).opacity(UNFOCUSED_DIM)))
-            })
+            .when(dimmed, |leaf| leaf.child(div().absolute().size_full().bg(hsla(bg).opacity(UNFOCUSED_DIM))))
             // 从文件树或访达拖来的文件放到这个终端上：切到它，把路径打进去。
             .on_drop(cx.listener(move |this, dragged: &DraggedFile, window, cx| {
                 this.drop_paths_on_pane(id, std::slice::from_ref(&dragged.path), window, cx);
@@ -78,14 +76,21 @@ impl WindowView {
             .child(
                 div()
                     .flex_none()
-                    .map(|pane| if horizontal { pane.w(relative(ratio)).h_full() } else { pane.h(relative(ratio)).w_full() })
+                    .map(
+                        |pane| {
+                            if horizontal { pane.w(relative(ratio)).h_full() } else { pane.h(relative(ratio)).w_full() }
+                        },
+                    )
                     .min_w_0()
                     .min_h_0()
                     .child(first),
             )
-            .child(div().flex_none().bg(line).map(|divider| {
-                if horizontal { divider.w(px(1.)).h_full() } else { divider.h(px(1.)).w_full() }
-            }))
+            .child(
+                div()
+                    .flex_none()
+                    .bg(line)
+                    .map(|divider| if horizontal { divider.w(px(1.)).h_full() } else { divider.h(px(1.)).w_full() }),
+            )
             .child(div().flex_1().min_w_0().min_h_0().child(second))
             .child(
                 canvas(

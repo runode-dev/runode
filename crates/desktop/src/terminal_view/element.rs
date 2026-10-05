@@ -94,11 +94,7 @@ impl Element for TerminalElement {
         cx: &mut App,
     ) {
         let focus_handle = self.view.read(cx).focus_handle.clone();
-        window.handle_input(
-            &focus_handle,
-            ElementInputHandler::new(bounds, self.view.clone()),
-            cx,
-        );
+        window.handle_input(&focus_handle, ElementInputHandler::new(bounds, self.view.clone()), cx);
         // 移动和松开挂在窗口上：拖到网格外甚至窗口外时也要收到。
         window.on_mouse_event({
             let view = self.view.clone();

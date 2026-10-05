@@ -136,9 +136,11 @@ mod tests {
         session.resize(GridSize { cols: 60, rows: 8, cell_width_px: 8, cell_height_px: 16 });
         let claude = |state| Some(Agent { kind: AgentKind::Claude, state });
         // 标题说空闲，屏幕上摆着要不要执行命令的问题：等用户回答。
-        assert!(session.feed(
-            "\x1b]0;✳ 修 bug\x07 Do you want to proceed?\r\n ❯ 1. Yes\r\n   2. No\r\n Esc to cancel".as_bytes()
-        ));
+        assert!(
+            session.feed(
+                "\x1b]0;✳ 修 bug\x07 Do you want to proceed?\r\n ❯ 1. Yes\r\n   2. No\r\n Esc to cancel".as_bytes()
+            )
+        );
         assert_eq!(session.agent, claude(AgentState::Blocked));
         assert_eq!(session.agent_deadline(), None);
         // 回答完回到输入框：新输出节流，到点再看。

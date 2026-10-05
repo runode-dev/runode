@@ -39,7 +39,10 @@ pub struct Text {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Content {
     Text(Text),
-    Image { format: ImageFormat, bytes: Vec<u8> },
+    Image {
+        format: ImageFormat,
+        bytes: Vec<u8>,
+    },
     /// 含 NUL 字节或者不是合法的 UTF-8。
     Binary,
     /// 图片比 `MAX_IMAGE_BYTES` 大。

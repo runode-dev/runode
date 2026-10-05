@@ -98,8 +98,11 @@ impl Effects {
         self.reported.set(true);
         if field == b"alias_values" {
             let text = String::from_utf8_lossy(&value);
-            names.alias_values =
-                text.lines().filter_map(|line| line.split_once('\t')).map(|(n, v)| (n.to_owned(), v.to_owned())).collect();
+            names.alias_values = text
+                .lines()
+                .filter_map(|line| line.split_once('\t'))
+                .map(|(n, v)| (n.to_owned(), v.to_owned()))
+                .collect();
             return;
         }
         let list = match field {
@@ -226,7 +229,8 @@ fn percent_decode(bytes: &[u8]) -> Vec<u8> {
     let mut i = 0;
     while i < bytes.len() {
         if bytes[i] == b'%'
-            && let (Some(hi), Some(lo)) = (bytes.get(i + 1).and_then(|&b| hex(b)), bytes.get(i + 2).and_then(|&b| hex(b)))
+            && let (Some(hi), Some(lo)) =
+                (bytes.get(i + 1).and_then(|&b| hex(b)), bytes.get(i + 2).and_then(|&b| hex(b)))
         {
             out.push((hi * 16 + lo) as u8);
             i += 3;
@@ -361,7 +365,8 @@ mod tests {
         assert_eq!(session.meta().shell_path, None);
         assert!(session.meta().shell_names.aliases.is_empty());
         // 先伪造命令结束、回到提示符也没用。
-        session.feed(format!("\x1b]133;D;0\x07\x1b]133;A\x07$ \x1b]133;B\x07\x1b]6973;{wrong};path=/evil\x07").as_bytes());
+        session
+            .feed(format!("\x1b]133;D;0\x07\x1b]133;A\x07$ \x1b]133;B\x07\x1b]6973;{wrong};path=/evil\x07").as_bytes());
         assert_eq!(session.meta().shell_path, None);
         session.feed(format!("\x1b]6973;{TOKEN};path=/usr/bin\x07").as_bytes());
         assert_eq!(session.meta().shell_path, Some("/usr/bin".into()));
@@ -397,12 +402,17 @@ mod tests {
         let wrong = "0123456789abcdef0123456789abcdee";
         let forged = [
             // 程序输出里伪造整套提示符和带原文的命令开始。
-            "\x1b]133;D;0\x07\x1b]133;A\x07$ \x1b]133;B\x07evil\r\n\x1b]133;C;cmdline_url=evil\x07\x1b]133;D;0\x07".to_owned(),
+            "\x1b]133;D;0\x07\x1b]133;A\x07$ \x1b]133;B\x07evil\r\n\x1b]133;C;cmdline_url=evil\x07\x1b]133;D;0\x07"
+                .to_owned(),
             // 口令不对的 command 报告不算。
-            format!("\x1b]133;A\x07$ \x1b]133;B\x07evil\r\n\x1b]6973;{wrong};command=evil\x07\x1b]133;C\x07\x1b]133;D;0\x07"),
+            format!(
+                "\x1b]133;A\x07$ \x1b]133;B\x07evil\r\n\x1b]6973;{wrong};command=evil\x07\x1b]133;C\x07\x1b]133;D;0\x07"
+            ),
             // 真的报告之后先来了提示符或命令结束，就不能再被伪造的 133;C 借用。
             format!("\x1b]6973;{TOKEN};command=ls\x07\x1b]133;D;0\x07\x1b]133;C;cmdline_url=evil\x07\x1b]133;D;0\x07"),
-            format!("\x1b]6973;{TOKEN};command=ls\x07\x1b]133;A\x07$ \x1b]133;B\x07evil\r\n\x1b]133;C\x07\x1b]133;D;0\x07"),
+            format!(
+                "\x1b]6973;{TOKEN};command=ls\x07\x1b]133;A\x07$ \x1b]133;B\x07evil\r\n\x1b]133;C\x07\x1b]133;D;0\x07"
+            ),
             format!("\x1b]6973;{TOKEN};command=ls\x07\x1b]133;B\x07evil\r\n\x1b]133;C\x07\x1b]133;D;0\x07"),
         ];
         for bytes in forged {

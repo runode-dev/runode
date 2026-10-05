@@ -21,10 +21,7 @@ fn main() {
         // 裸可执行文件的 NSBundle.mainBundle 会读 __TEXT,__info_plist 段，
         // 系统关于面板因此能拿到名称、版本、版权，并按 CFBundleAllowMixedLocalizations
         // 跟随系统语言显示「版本」等字样。
-        println!(
-            "cargo:rustc-link-arg-bins=-Wl,-sectcreate,__TEXT,__info_plist,{}",
-            plist.display()
-        );
+        println!("cargo:rustc-link-arg-bins=-Wl,-sectcreate,__TEXT,__info_plist,{}", plist.display());
     }
 }
 

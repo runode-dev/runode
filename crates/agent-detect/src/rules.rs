@@ -203,7 +203,9 @@ impl RuleSet {
         let mut rules = Vec::with_capacity(spec.rules.len());
         for rule in spec.rules {
             let id = rule.id.clone();
-            rules.push(compile_rule(rule, spec.min_engine_version, &mut budget).map_err(|err| format!("rule {id}: {err}"))?);
+            rules.push(
+                compile_rule(rule, spec.min_engine_version, &mut budget).map_err(|err| format!("rule {id}: {err}"))?,
+            );
         }
         // 稳定排序：优先级一样的保持原来的先后。
         rules.sort_by_key(|rule| std::cmp::Reverse(rule.priority));
@@ -283,7 +285,15 @@ fn compile_rule(rule: RuleSpec, min_engine: Option<u32>, budget: &mut Budget) ->
         regex: rule.regex,
         line_regex: rule.line_regex,
     };
-    Ok(Rule { id: rule.id, state, priority: rule.priority, region, visible, skip: rule.skip_state_update, gate: compile_gate(gate, 0, false, budget)? })
+    Ok(Rule {
+        id: rule.id,
+        state,
+        priority: rule.priority,
+        region,
+        visible,
+        skip: rule.skip_state_update,
+        gate: compile_gate(gate, 0, false, budget)?,
+    })
 }
 
 /// 编译一个条件。直接写在 `not` 里的条件（`negated`）可以只有 `not`，其余的至少要有一个
@@ -304,7 +314,9 @@ fn compile_gate(spec: GateSpec, depth: usize, negated: bool, budget: &mut Budget
     if budget.matchers > MAX_MATCHERS {
         return Err(format!("more than {MAX_MATCHERS} matchers"));
     }
-    if let Some(long) = spec.contains.iter().chain(&spec.regex).chain(&spec.line_regex).find(|m| m.chars().count() > MAX_MATCHER_CHARS) {
+    if let Some(long) =
+        spec.contains.iter().chain(&spec.regex).chain(&spec.line_regex).find(|m| m.chars().count() > MAX_MATCHER_CHARS)
+    {
         return Err(format!("matcher longer than {MAX_MATCHER_CHARS} characters: {long:?}"));
     }
     let positive = direct > 0 || !spec.all.is_empty() || !spec.any.is_empty();

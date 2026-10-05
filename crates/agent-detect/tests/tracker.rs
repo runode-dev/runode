@@ -2,10 +2,10 @@
 
 use std::time::{Duration, Instant};
 
-use runode_agent_detect::{BURST_GAP, EVAL_INTERVAL, Foreground, IDLE_RECHECK, RuleBook, Tracker};
-use runode_shared_types::agent::{Agent, AgentKind, AgentState};
 use AgentKind::*;
 use AgentState::*;
+use runode_agent_detect::{BURST_GAP, EVAL_INTERVAL, Foreground, IDLE_RECHECK, RuleBook, Tracker};
+use runode_shared_types::agent::{Agent, AgentKind, AgentState};
 
 fn agent(kind: AgentKind, state: AgentState) -> Option<Agent> {
     Some(Agent { kind, state })
@@ -22,7 +22,13 @@ struct Fixture {
 
 impl Fixture {
     fn new() -> Self {
-        Self { tracker: Tracker::new(), rules: RuleBook::new(None), t0: Instant::now(), screen: String::new(), last_input: None }
+        Self {
+            tracker: Tracker::new(),
+            rules: RuleBook::new(None),
+            t0: Instant::now(),
+            screen: String::new(),
+            last_input: None,
+        }
     }
 
     fn at(&self, ms: u64) -> Instant {

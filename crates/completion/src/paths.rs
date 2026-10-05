@@ -103,7 +103,10 @@ mod tests {
     fn lists_the_directory_part_of_the_word() {
         let dir = scratch();
         let names = |typed: &str, folders_only: bool| -> Vec<(String, bool)> {
-            list(typed, dir.path(), None, if folders_only { Filter::Folders } else { Filter::All }).into_iter().map(|e| (e.name, e.is_dir)).collect()
+            list(typed, dir.path(), None, if folders_only { Filter::Folders } else { Filter::All })
+                .into_iter()
+                .map(|e| (e.name, e.is_dir))
+                .collect()
         };
         assert_eq!(names("", false), [("Cargo.toml".into(), false), ("src".into(), true)]);
         assert_eq!(names("Ca", false), [("Cargo.toml".into(), false), ("src".into(), true)]);
@@ -123,8 +126,7 @@ mod tests {
         let script = dir.path().join("run.sh");
         std::fs::write(&script, "").unwrap();
         std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
-        let names: Vec<String> =
-            list("", dir.path(), None, Filter::Executables).into_iter().map(|e| e.name).collect();
+        let names: Vec<String> = list("", dir.path(), None, Filter::Executables).into_iter().map(|e| e.name).collect();
         assert_eq!(names, ["run.sh", "src"]);
     }
 

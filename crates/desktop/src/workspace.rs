@@ -25,26 +25,20 @@ mod quit;
 mod sidebar;
 mod titlebar;
 
-use std::{
-    cell::RefCell,
-    collections::HashMap,
-    path::PathBuf,
-    rc::Rc,
-    time::Instant,
-};
+use std::{cell::RefCell, collections::HashMap, path::PathBuf, rc::Rc, time::Instant};
 
 use futures::StreamExt as _;
 use gpui::{
-    Action, App, Context, EntityId, FocusHandle, Focusable, MouseButton, MouseDownEvent, Render,
-    ScrollHandle, SharedString, Subscription, Task, Window, WindowBounds, actions, div, prelude::*, px,
+    Action, App, Context, EntityId, FocusHandle, Focusable, MouseButton, MouseDownEvent, Render, ScrollHandle,
+    SharedString, Subscription, Task, Window, WindowBounds, actions, div, prelude::*, px,
 };
 use runode_shared_types::pane::{Axis, Direction, SplitId};
 
+pub(crate) use agents::reveal_notified;
 pub use files::{
     CollapseSelectedFile, CopyPath, CopyRelativePath, DeleteFile, ExpandSelectedFile, FocusTerminal, OpenSelectedFile,
     RenameFile, RevealInFinder, SelectFirstFile, SelectLastFile, SelectNextFile, SelectPreviousFile,
 };
-pub(crate) use agents::reveal_notified;
 pub use persistence::{install, saved_window_options};
 pub use quit::{close_all_windows, close_window, quit, should_close};
 pub use titlebar::titlebar_options;
@@ -282,7 +276,8 @@ impl WindowView {
         persistence::track(cx);
         // 窗口关掉后它的分屏都没了，发过的通知点了也跳不过去，一并收回。
         cx.on_release(|view, cx| {
-            let panes = view.workspaces.iter().flat_map(|workspace| &workspace.tabs).flat_map(|tab| tab.panes.keys().copied());
+            let panes =
+                view.workspaces.iter().flat_map(|workspace| &workspace.tabs).flat_map(|tab| tab.panes.keys().copied());
             agents::dismiss_alerts(panes.collect::<Vec<_>>(), cx);
         })
         .detach();
@@ -339,12 +334,7 @@ impl WindowView {
     }
 
     /// 按存档恢复的窗口；一个终端都没恢复出来时和新窗口一样。
-    pub fn restore(
-        saved: SavedWindow,
-        shell: Option<Prespawned>,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> Self {
+    pub fn restore(saved: SavedWindow, shell: Option<Prespawned>, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let mut this = Self::empty(window, cx);
         let shell = this.restore_workspaces(saved, shell, window, cx);
         if this.workspaces.is_empty() {
@@ -364,7 +354,6 @@ impl WindowView {
         let dir = view.read(cx).cwd().or_else(home_dir).unwrap_or_else(|| PathBuf::from("/"));
         self.insert_workspace(self.workspaces.len(), dir, view, window, cx);
     }
-
 }
 
 impl Focusable for WindowView {
@@ -398,7 +387,8 @@ impl Render for WindowView {
         });
         let preview =
             self.render_preview_panel(widths.preview, !self.files_shown && !self.git_shown, fg, bg, font.clone(), cx);
-        let git = self.git_shown.then(|| self.render_git_panel(widths.git, !self.files_shown, fg, bg, font, window, cx));
+        let git =
+            self.git_shown.then(|| self.render_git_panel(widths.git, !self.files_shown, fg, bg, font, window, cx));
         let files = self.files_shown.then(|| self.render_files_panel(widths.files, fg, bg, cx));
         let file_menu = self.render_file_menu(fg, bg, cx);
         let agent_picker = self.render_agent_picker(fg, bg, window, cx);
@@ -414,8 +404,7 @@ impl Render for WindowView {
         // 右侧面板的开关按钮：面板都收着时落在标题栏右端，标题栏给它们让位；打开着时落在
         // 面板顶上。全屏又只有一个标签、面板也都收着时没有地方放，不画。
         let right_inset = if titlebar_shown && !self.project_visible() { project::PANEL_TOGGLES_INSET } else { 0. };
-        let panel_toggles =
-            (titlebar_shown || self.project_visible()).then(|| self.render_panel_toggles(fg, bg, cx));
+        let panel_toggles = (titlebar_shown || self.project_visible()).then(|| self.render_panel_toggles(fg, bg, cx));
         let tabs: Vec<_> = if show_tabs {
             // 标签平分标题栏除去两头的宽度，限制在 `TAB_MIN_WIDTH` 到 `TAB_MAX_WIDTH` 之间，
             // 挤不下就让标签条滚动；拖动时的预览也照这个宽度画。
@@ -432,14 +421,13 @@ impl Render for WindowView {
                 .flex()
                 .overflow_x_scroll()
                 .track_scroll(&self.workspace().tab_scroll)
-                .children(
-                    (0..tab_count)
-                        .map(|ix| self.render_tab(ix, tab_width, fg, bg, cx))
-                        .collect::<Vec<_>>(),
-                );
-            let inset = div().id("panel-toggles-inset").flex_none().w(px(right_inset)).h_full().when(right_inset > 0., |inset| {
-                inset.border_l_1().border_color(divider_color(hsla(fg)))
-            });
+                .children((0..tab_count).map(|ix| self.render_tab(ix, tab_width, fg, bg, cx)).collect::<Vec<_>>());
+            let inset = div()
+                .id("panel-toggles-inset")
+                .flex_none()
+                .w(px(right_inset))
+                .h_full()
+                .when(right_inset > 0., |inset| inset.border_l_1().border_color(divider_color(hsla(fg))));
             let spacer = div().id("tabs-spacer").flex_1().h_full();
             vec![strip, self.render_new_tab_button(fg, bg, cx), spacer, inset]
         } else {
@@ -538,4 +526,3 @@ impl Render for WindowView {
             .children(branch_picker)
     }
 }
-

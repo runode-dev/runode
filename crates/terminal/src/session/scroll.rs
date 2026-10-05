@@ -37,8 +37,7 @@ impl Session {
     pub(super) fn scroll_to_row(&mut self, row: u32) {
         self.scroll_offset = 0.;
         let half = usize::from(self.size.get().rows / 2);
-        self.terminal
-            .scroll_viewport(ScrollViewport::Row((row as usize).saturating_sub(half)));
+        self.terminal.scroll_viewport(ScrollViewport::Row((row as usize).saturating_sub(half)));
     }
 
     /// 滚动视口；`Page(n)` 按视口高度翻 n 页，负数往回翻。
@@ -47,9 +46,7 @@ impl Session {
         let scroll = match scroll {
             ViewportScroll::Top => ScrollViewport::Top,
             ViewportScroll::Bottom => ScrollViewport::Bottom,
-            ViewportScroll::Page(pages) => {
-                ScrollViewport::Delta(pages * self.size.get().rows as isize)
-            }
+            ViewportScroll::Page(pages) => ScrollViewport::Delta(pages * self.size.get().rows as isize),
         };
         self.terminal.scroll_viewport(scroll);
     }

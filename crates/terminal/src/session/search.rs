@@ -36,11 +36,7 @@ impl Session {
             return;
         };
         let result = search.run(&mut self.terminal).and_then(|()| {
-            if backward {
-                search.select_prev(&mut self.terminal)
-            } else {
-                search.select_next(&mut self.terminal)
-            }
+            if backward { search.select_prev(&mut self.terminal) } else { search.select_next(&mut self.terminal) }
         });
         log_err("search step", result);
     }

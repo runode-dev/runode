@@ -97,8 +97,9 @@ impl Session {
             self.held_since.set(None);
         }
         let highlights = match &mut self.search {
-            Some(search) => log_err("search highlights", search_highlights(search, &mut self.terminal))
-                .unwrap_or_default(),
+            Some(search) => {
+                log_err("search highlights", search_highlights(search, &mut self.terminal)).unwrap_or_default()
+            }
             None => Vec::new(),
         };
         let mut renderer = self.renderer.borrow_mut();
@@ -151,10 +152,8 @@ impl Renderer {
         let foreground = rgb(colors.foreground);
 
         // VT 里的光标色（配置的固定色，或程序用 OSC 12 设的）优先。
-        let cursor_colors = (
-            colors.cursor.map(|color| TerminalColor::Rgb(rgb(color))).or(self.cursor_color),
-            self.cursor_text,
-        );
+        let cursor_colors =
+            (colors.cursor.map(|color| TerminalColor::Rgb(rgb(color))).or(self.cursor_color), self.cursor_text);
 
         let frame = &mut self.frame;
         let reshaped = frame.cols != cols || frame.rows != rows;
@@ -230,11 +229,10 @@ impl Renderer {
                     let x16 = x as u16;
                     // 宽字符的右半格跟着左半格：匹配的终点只落在宽字符的头格上。
                     let tail = read.wide == CellWide::SpacerTail;
-                    let highlight = self.highlights.iter().find(|h| {
-                        i32::from(h.y) == y
-                            && h.x0 <= x16
-                            && (x16 <= h.x1 || (tail && x16 == h.x1 + 1))
-                    });
+                    let highlight = self
+                        .highlights
+                        .iter()
+                        .find(|h| i32::from(h.y) == y && h.x0 <= x16 && (x16 <= h.x1 || (tail && x16 == h.x1 + 1)));
                     if let Some(highlight) = highlight {
                         let cell_bg = bg.unwrap_or(background);
                         let (hl_bg, hl_fg) = self.search_colors[usize::from(highlight.selected)];

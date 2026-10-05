@@ -160,10 +160,7 @@ impl TerminalView {
 fn write_screen_file(text: &str) -> std::io::Result<std::path::PathBuf> {
     let dir = std::env::temp_dir().join("runode");
     std::fs::create_dir_all(&dir)?;
-    let stamp = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis();
+    let stamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis();
     let path = dir.join(format!("screen-{}-{stamp}.txt", std::process::id()));
     // 屏幕上可能有密钥之类的内容，只让自己读写。
     let mut options = std::fs::OpenOptions::new();

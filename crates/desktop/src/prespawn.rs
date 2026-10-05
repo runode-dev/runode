@@ -47,9 +47,8 @@ static PENDING: Mutex<Option<JoinHandle<Option<Prespawned>>>> = Mutex::new(None)
 pub fn start() {
     let spawned = thread::Builder::new().name("prespawn".into()).spawn(|| {
         // 配置有问题时由主线程加载配置时报告，这里不重复。
-        let config = tracing::subscriber::with_default(tracing::subscriber::NoSubscriber::default(), || {
-            Config::load(true)
-        });
+        let config =
+            tracing::subscriber::with_default(tracing::subscriber::NoSubscriber::default(), || Config::load(true));
         let size = recorded(&key(&config))?;
         let spawned = crate::session_host::client().spawn(SpawnOptions {
             size,
@@ -96,14 +95,8 @@ pub fn remember(config: &Config, size: GridSize) {
         let Some(path) = record_path() else {
             return;
         };
-        let text = format!(
-            "{key}\n{} {} {} {}\n",
-            size.cols, size.rows, size.cell_width_px, size.cell_height_px
-        );
-        let written = path
-            .parent()
-            .map_or(Ok(()), std::fs::create_dir_all)
-            .and_then(|()| std::fs::write(&path, text));
+        let text = format!("{key}\n{} {} {} {}\n", size.cols, size.rows, size.cell_width_px, size.cell_height_px);
+        let written = path.parent().map_or(Ok(()), std::fs::create_dir_all).and_then(|()| std::fs::write(&path, text));
         if let Err(err) = written {
             tracing::debug!("failed to record the terminal size: {err}");
         }
@@ -134,12 +127,7 @@ fn recorded(key: &str) -> Option<GridSize> {
     }
     let mut values = size.split_whitespace().map(|v| v.parse().ok());
     let mut next = || values.next().flatten();
-    Some(GridSize {
-        cols: next()?,
-        rows: next()?,
-        cell_width_px: next()?,
-        cell_height_px: next()?,
-    })
+    Some(GridSize { cols: next()?, rows: next()?, cell_width_px: next()?, cell_height_px: next()? })
 }
 
 fn record_path() -> Option<PathBuf> {

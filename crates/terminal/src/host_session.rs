@@ -175,8 +175,7 @@ impl HostSession {
             .on_progress_report({
                 let effects = effects.clone();
                 move |_, report| {
-                    let active =
-                        matches!(report.state(), Ok(ProgressState::Set | ProgressState::Indeterminate));
+                    let active = matches!(report.state(), Ok(ProgressState::Set | ProgressState::Indeterminate));
                     effects.progress.set(Some(active));
                 }
             })?

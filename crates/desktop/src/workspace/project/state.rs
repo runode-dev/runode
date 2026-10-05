@@ -136,7 +136,9 @@ impl Project {
             }
             // 按目录分组：组按目录排，组里按文件名排。
             let mut order: Vec<usize> = (0..files.len()).collect();
-            order.sort_by(|&a, &b| group_dir(&files[a]).cmp(group_dir(&files[b])).then(files[a].path.cmp(&files[b].path)));
+            order.sort_by(|&a, &b| {
+                group_dir(&files[a]).cmp(group_dir(&files[b])).then(files[a].path.cmp(&files[b].path))
+            });
             for chunk in order.chunk_by(|&a, &b| group_dir(&files[a]) == group_dir(&files[b])) {
                 let dir = group_dir(&files[chunk[0]]).to_path_buf();
                 let expanded = !self.collapsed_groups.contains(&(section, dir.clone()));
@@ -325,8 +327,10 @@ impl Project {
         self.rebuild_file_rows(root, show_ignored);
         // 并成一行的目录，行的路径是链条最深的那个，`path` 在链条中间时找不到原样的路径。
         let rows = &self.file_rows;
-        let Some(ix) =
-            rows.iter().position(|row| row.path == path).or_else(|| rows.iter().position(|row| row.path.starts_with(path)))
+        let Some(ix) = rows
+            .iter()
+            .position(|row| row.path == path)
+            .or_else(|| rows.iter().position(|row| row.path.starts_with(path)))
         else {
             return;
         };
@@ -624,7 +628,10 @@ mod tests {
         project.listings.insert("/p/b".into(), vec![dir("c"), file("x")]);
         project.listings.insert("/p/b/c".into(), vec![file("y")]);
         project.reveal_dir(Path::new("/p/b/c"), root, true);
-        assert_eq!(names(&project), [("a".into(), 0), ("b".into(), 0), ("c".into(), 1), ("y".into(), 2), ("x".into(), 1)]);
+        assert_eq!(
+            names(&project),
+            [("a".into(), 0), ("b".into(), 0), ("c".into(), 1), ("y".into(), 2), ("x".into(), 1)]
+        );
         assert_eq!(project.selected, Some(PathBuf::from("/p/b/c")));
 
         // 终端目录在并成一行的链条中间时，展开到链条尽头。
@@ -690,7 +697,15 @@ mod tests {
         // 没有暂存的改动时不分段；`src/a/b.rs` 按路径排在 `src/c.rs` 前面，但分组跟着目录走。
         let groups: Vec<_> = project.diff_groups.iter().map(|group| (group.dir.clone(), group.files)).collect();
         assert_eq!(groups, [("".into(), 1), ("src".into(), 2), ("src/a".into(), 1)]);
-        assert_eq!(project.diff_rows[..4], [DiffRow::Group(0), DiffRow::File(Section::Unstaged, 0), DiffRow::Note(Section::Unstaged, 0, DiffNote::NoContent), DiffRow::Group(1)]);
+        assert_eq!(
+            project.diff_rows[..4],
+            [
+                DiffRow::Group(0),
+                DiffRow::File(Section::Unstaged, 0),
+                DiffRow::Note(Section::Unstaged, 0, DiffNote::NoContent),
+                DiffRow::Group(1)
+            ]
+        );
 
         project.git.as_mut().unwrap().staged = vec![diff("src/a.rs", 2)];
         project.toggle_group(Section::Unstaged, Path::new("src"));

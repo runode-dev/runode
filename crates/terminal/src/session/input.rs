@@ -211,10 +211,7 @@ mod tests {
         let mut session = idle_session();
         assert_eq!(option_s(&mut session, false), "ß".as_bytes());
 
-        session.apply_config(&TermSettings {
-            option_as_alt: settings::OptionAsAlt::Left,
-            ..TermSettings::default()
-        });
+        session.apply_config(&TermSettings { option_as_alt: settings::OptionAsAlt::Left, ..TermSettings::default() });
         assert_eq!(option_s(&mut session, false), b"\x1bs");
         assert_eq!(option_s(&mut session, true), "ß".as_bytes());
     }

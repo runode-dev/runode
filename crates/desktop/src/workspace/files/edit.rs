@@ -88,7 +88,14 @@ impl WindowView {
     }
 
     /// 新建时插进文件树的那一行，图标跟着输入的名字变。
-    pub(super) fn render_new_entry_row(&self, depth: usize, font_size: f32, fg: Rgb, bg: Rgb, cx: &Context<Self>) -> AnyElement {
+    pub(super) fn render_new_entry_row(
+        &self,
+        depth: usize,
+        font_size: f32,
+        fg: Rgb,
+        bg: Rgb,
+        cx: &Context<Self>,
+    ) -> AnyElement {
         let Some(FileEdit { target: EditTarget::New { is_dir, .. }, edit }) = &self.file_edit else {
             return div().into_any_element();
         };
@@ -219,7 +226,8 @@ impl WindowView {
         };
         let name = display_name(&path);
         let title = rust_i18n::t!("files.delete_title", name = name);
-        let detail = if is_dir { rust_i18n::t!("files.delete_dir_detail") } else { rust_i18n::t!("files.delete_detail") };
+        let detail =
+            if is_dir { rust_i18n::t!("files.delete_dir_detail") } else { rust_i18n::t!("files.delete_detail") };
         let answer = window.prompt(
             PromptLevel::Warning,
             &title,

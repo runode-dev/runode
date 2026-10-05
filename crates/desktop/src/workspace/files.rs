@@ -16,8 +16,8 @@ use std::{
 };
 
 use gpui::{
-    Action, AnyElement, Axis, ClickEvent, Context, Div, Focusable, Hsla, MouseButton, MouseDownEvent, Pixels, Render, ScrollStrategy,
-    SharedString, Stateful, Window, actions, div, img, prelude::*, px, svg, uniform_list,
+    Action, AnyElement, Axis, ClickEvent, Context, Div, Focusable, Hsla, MouseButton, MouseDownEvent, Pixels, Render,
+    ScrollStrategy, SharedString, Stateful, Window, actions, div, img, prelude::*, px, svg, uniform_list,
 };
 use runode_config::PreviewClick;
 use runode_shared_types::color::Rgb;
@@ -97,7 +97,9 @@ const CUT_OPACITY: f32 = 0.5;
 fn shell_quote(text: &str) -> String {
     let plain = !text.is_empty()
         && !text.starts_with(['=', '%'])
-        && text.chars().all(|c| c.is_alphanumeric() || matches!(c, '/' | '.' | '_' | '-' | '+' | '@' | '%' | ':' | ',' | '='));
+        && text
+            .chars()
+            .all(|c| c.is_alphanumeric() || matches!(c, '/' | '.' | '_' | '-' | '+' | '@' | '%' | ':' | ',' | '='));
     if plain { text.to_owned() } else { format!("'{}'", text.replace('\'', r"'\''")) }
 }
 
@@ -183,7 +185,13 @@ impl WindowView {
         // 工具栏上的图标按钮。按下时不往外传：外层的文件树按下时会把焦点抢回去，新建时刚交给
         // 输入框的焦点就丢了。
         type Handler = fn(&mut WindowView, &mut Window, &mut Context<WindowView>);
-        let button = |id, icon, on, text: Cow<'static, str>, action: Option<&dyn Action>, handler: Handler, cx: &mut Context<Self>| {
+        let button = |id,
+                      icon,
+                      on,
+                      text: Cow<'static, str>,
+                      action: Option<&dyn Action>,
+                      handler: Handler,
+                      cx: &mut Context<Self>| {
             icon_toggle(id, icon, 14., on, fg, bg)
                 .flex_none()
                 .size(px(TOOLBAR_BUTTON_SIZE))
@@ -196,22 +204,42 @@ impl WindowView {
                     }),
                 )
         };
-        let new_file = button("new-file", NEW_FILE_ICON, false, rust_i18n::t!("files.new_file"), Some(&NewFile), |this, window, cx| {
-            this.new_file(&NewFile, window, cx)
-        }, cx);
-        let new_folder = button("new-folder", NEW_FOLDER_ICON, false, rust_i18n::t!("files.new_folder"), Some(&NewFolder), |this, window, cx| {
-            this.new_folder(&NewFolder, window, cx)
-        }, cx);
-        let collapse_all = button("collapse-all", COLLAPSE_ALL_ICON, false, rust_i18n::t!("files.collapse_all"), Some(&CollapseAllFiles), |this, window, cx| {
-            this.collapse_all_files(&CollapseAllFiles, window, cx)
-        }, cx);
+        let new_file = button(
+            "new-file",
+            NEW_FILE_ICON,
+            false,
+            rust_i18n::t!("files.new_file"),
+            Some(&NewFile),
+            |this, window, cx| this.new_file(&NewFile, window, cx),
+            cx,
+        );
+        let new_folder = button(
+            "new-folder",
+            NEW_FOLDER_ICON,
+            false,
+            rust_i18n::t!("files.new_folder"),
+            Some(&NewFolder),
+            |this, window, cx| this.new_folder(&NewFolder, window, cx),
+            cx,
+        );
+        let collapse_all = button(
+            "collapse-all",
+            COLLAPSE_ALL_ICON,
+            false,
+            rust_i18n::t!("files.collapse_all"),
+            Some(&CollapseAllFiles),
+            |this, window, cx| this.collapse_all_files(&CollapseAllFiles, window, cx),
+            cx,
+        );
         let (icon, text) = if show_ignored {
             (EYE_ICON, rust_i18n::t!("tooltip.hide_ignored"))
         } else {
             (EYE_OFF_ICON, rust_i18n::t!("tooltip.show_ignored"))
         };
-        let ignored_toggle = button("toggle-ignored", icon, show_ignored, text, None, |this, _, cx| this.toggle_show_ignored(cx), cx);
-        let header = self.panel_header(true, fg).child(div().flex_1().min_w_0().truncate().text_color(hsla(fg)).child(name));
+        let ignored_toggle =
+            button("toggle-ignored", icon, show_ignored, text, None, |this, _, cx| this.toggle_show_ignored(cx), cx);
+        let header =
+            self.panel_header(true, fg).child(div().flex_1().min_w_0().truncate().text_color(hsla(fg)).child(name));
         // 标题下面一行：左边是没提交的改动一共加减了多少行，右边是新建、全部收起和显示忽略
         // 文件的按钮。
         let dirty = workspace.project.git.as_ref().filter(|git| !git.is_clean());
@@ -227,7 +255,9 @@ impl WindowView {
                 toolbar.child(added_label(git.added())).child(removed_label(git.removed()))
             })
             .child(div().flex_1())
-            .child(div().flex().gap(px(4.)).child(new_file).child(new_folder).child(collapse_all).child(ignored_toggle));
+            .child(
+                div().flex().gap(px(4.)).child(new_file).child(new_folder).child(collapse_all).child(ignored_toggle),
+            );
         let font_size = cx.global::<AppConfig>().0.file_tree_font_size;
         let new_entry = self.new_entry_row();
         let count = workspace.project.file_rows.len() + usize::from(new_entry.is_some());
@@ -260,12 +290,12 @@ impl WindowView {
             }),
         );
         let scroll = workspace.project.files_scroll.0.borrow().base_handle.clone();
-        let list = div()
-            .flex_1()
-            .min_h_0()
-            .relative()
-            .child(list)
-            .child(scrollbar("files-scroll", scroll, Axis::Vertical, hsla(fg)));
+        let list = div().flex_1().min_h_0().relative().child(list).child(scrollbar(
+            "files-scroll",
+            scroll,
+            Axis::Vertical,
+            hsla(fg),
+        ));
         panel_shell("files-panel", width, fg)
             // 新建或改名时输入框在文件树里面，方向键这些归输入框。
             .key_context(if self.file_edit.is_some() { "FileTree editing" } else { "FileTree" })
@@ -405,7 +435,8 @@ impl WindowView {
         let path = row.path.clone();
         let is_dir = row.is_dir;
         // 放到目录上挪进这个目录，放到文件上挪进文件所在的目录。
-        let drop_dir = if is_dir { path.clone() } else { path.parent().map_or_else(|| self.files_root(), Path::to_path_buf) };
+        let drop_dir =
+            if is_dir { path.clone() } else { path.parent().map_or_else(|| self.files_root(), Path::to_path_buf) };
         Some(
             Self::file_row_shell(("file", ix), row.depth, font_size, fg)
                 .when(row.decoration == Decoration::Ignored, |item| item.opacity(0.45))
@@ -457,7 +488,9 @@ impl WindowView {
                         this.open_file_menu(event.position, cx);
                     }),
                 )
-                .when_some(dragged, |row, dragged| row.on_drag(dragged, |dragged, _, _, cx| cx.new(|_| dragged.clone())))
+                .when_some(dragged, |row, dragged| {
+                    row.on_drag(dragged, |dragged, _, _, cx| cx.new(|_| dragged.clone()))
+                })
                 .drag_over::<DraggedFile>(move |style, _, _, _| style.bg(drop_bg))
                 .on_drop(cx.listener(move |this, dragged: &DraggedFile, window, cx| {
                     this.drop_file(&dragged.path, drop_dir.clone(), window, cx);
@@ -538,10 +571,13 @@ impl WindowView {
             return;
         };
         if is_dir {
-            self.move_selection(|project, root, show_ignored| {
-                project.toggle_dir(&path, root, show_ignored);
-                None
-            }, cx);
+            self.move_selection(
+                |project, root, show_ignored| {
+                    project.toggle_dir(&path, root, show_ignored);
+                    None
+                },
+                cx,
+            );
         } else {
             self.open_preview(&path, false, cx);
             // 预览栏刚打开时文件树变窄，选中的行可能被挤出视野。
@@ -550,10 +586,13 @@ impl WindowView {
     }
 
     fn collapse_all_files(&mut self, _: &CollapseAllFiles, _: &mut Window, cx: &mut Context<Self>) {
-        self.move_selection(|project, root, show_ignored| {
-            project.collapse_all(root, show_ignored);
-            None
-        }, cx);
+        self.move_selection(
+            |project, root, show_ignored| {
+                project.collapse_all(root, show_ignored);
+                None
+            },
+            cx,
+        );
     }
 
     fn focus_terminal(&mut self, _: &FocusTerminal, window: &mut Window, cx: &mut Context<Self>) {

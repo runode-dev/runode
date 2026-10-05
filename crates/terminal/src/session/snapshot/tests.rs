@@ -128,7 +128,11 @@ fn state(terminal: &Terminal<'static, '_>, history: usize, detailed: bool) -> Ve
         terminal.grid_ref(at(cols - 1, total - 1)).unwrap(),
         false,
     );
-    let vt = Formatter::new(terminal, vt::replay_options().with_selection(&selection)).unwrap().format_alloc(None).unwrap().to_vec();
+    let vt = Formatter::new(terminal, vt::replay_options().with_selection(&selection))
+        .unwrap()
+        .format_alloc(None)
+        .unwrap()
+        .to_vec();
     let scrollbar = terminal.scrollbar().unwrap();
     vec![
         ("vt", String::from_utf8_lossy(&vt).into_owned()),
@@ -167,17 +171,34 @@ fn state(terminal: &Terminal<'static, '_>, history: usize, detailed: bool) -> Ve
             ),
         ),
         ("mouse", format!("{:?} {}", terminal.mouse_shape().unwrap(), terminal.is_mouse_tracking().unwrap())),
-        ("screen", format!("{:?} at prompt {}", terminal.active_screen().unwrap(), terminal.is_cursor_at_prompt().unwrap())),
+        (
+            "screen",
+            format!("{:?} at prompt {}", terminal.active_screen().unwrap(), terminal.is_cursor_at_prompt().unwrap()),
+        ),
         // 视口离底部多远、多高；总行数随回滚历史留了多少而变。
         ("viewport", format!("{} {}", scrollbar.total - scrollbar.offset, scrollbar.len)),
-        ("size", format!("{}x{} {}x{}px", cols, terminal.rows().unwrap(), terminal.width_px().unwrap(), terminal.height_px().unwrap())),
+        (
+            "size",
+            format!(
+                "{}x{} {}x{}px",
+                cols,
+                terminal.rows().unwrap(),
+                terminal.width_px().unwrap(),
+                terminal.height_px().unwrap()
+            ),
+        ),
     ]
 }
 
 /// 比较两份 VT。回滚历史只比两边都留着的行，再去掉最上面那条不完整的逻辑行：它的开头
 /// 可能已经随 page 丢掉了，改尺寸重排后折行的位置也就不同。`detailed` 为假时不逐个单元格比，
 /// 也不比回滚历史，探针之间用它，省时间。
-fn assert_same(context: &str, expected: &Terminal<'static, 'static>, actual: &Terminal<'static, 'static>, detailed: bool) {
+fn assert_same(
+    context: &str,
+    expected: &Terminal<'static, 'static>,
+    actual: &Terminal<'static, 'static>,
+    detailed: bool,
+) {
     let mut history = expected.scrollback_rows().unwrap().min(actual.scrollback_rows().unwrap());
     let continuation = |terminal: &Terminal<'static, 'static>, from_bottom: usize| {
         let y = terminal.total_rows().unwrap() - from_bottom;
@@ -198,15 +219,25 @@ fn assert_same(context: &str, expected: &Terminal<'static, 'static>, actual: &Te
     if !detailed {
         history = 0;
     }
-    for ((name, expected), (_, actual)) in state(expected, history, detailed).into_iter().zip(state(actual, history, detailed)) {
+    for ((name, expected), (_, actual)) in
+        state(expected, history, detailed).into_iter().zip(state(actual, history, detailed))
+    {
         if expected != actual {
-            let at = expected.bytes().zip(actual.bytes()).position(|(a, b)| a != b).unwrap_or(expected.len().min(actual.len()));
+            let at = expected
+                .bytes()
+                .zip(actual.bytes())
+                .position(|(a, b)| a != b)
+                .unwrap_or(expected.len().min(actual.len()));
             let around = |s: &str| {
                 let start = s.floor_char_boundary(at.saturating_sub(200));
                 let end = s.ceil_char_boundary((at + 200).min(s.len()));
                 format!("{:?}", &s[start..end])
             };
-            panic!("{context}: {name} differs at byte {at}\nexpected {}\nactual   {}", around(&expected), around(&actual));
+            panic!(
+                "{context}: {name} differs at byte {at}\nexpected {}\nactual   {}",
+                around(&expected),
+                around(&actual)
+            );
         }
     }
 }
@@ -260,7 +291,14 @@ struct Sample {
 /// 各份数据；`scale` 放大随机生成的数据和切点的个数，见 `snapshots_survive_a_long_soak`。
 fn samples(seed: u64, scale: usize) -> Vec<Sample> {
     let mut rng = Rng::new(seed);
-    let sample = |name, cols, rows, data: &[u8]| Sample { name, cols, rows, data: data.to_vec(), cuts: 6 * scale, scrollback_bytes: None };
+    let sample = |name, cols, rows, data: &[u8]| Sample {
+        name,
+        cols,
+        rows,
+        data: data.to_vec(),
+        cuts: 6 * scale,
+        scrollback_bytes: None,
+    };
     let mut long_osc = b"\x1b]6973;token;functions=".to_vec();
     long_osc.extend(b"fn_name ".repeat(4096));
     long_osc.extend_from_slice(b"\x07prompt$ \x1b]2;");

@@ -8,7 +8,8 @@ fn user_rules_override_the_builtin_ones() {
     let dir = std::env::temp_dir().join(format!("runode-agent-rules-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
-    let rule = |id: &str| format!("id = \"{id}\"\n[[rules]]\nid = \"mine\"\nstate = \"blocked\"\ncontains = [\"MARK\"]\n");
+    let rule =
+        |id: &str| format!("id = \"{id}\"\n[[rules]]\nid = \"mine\"\nstate = \"blocked\"\ncontains = [\"MARK\"]\n");
     std::fs::write(dir.join("codex.toml"), rule("codex")).unwrap();
     // id 对不上、写错了的不用，退回内置的并留下警告。
     std::fs::write(dir.join("gemini.toml"), rule("claude")).unwrap();

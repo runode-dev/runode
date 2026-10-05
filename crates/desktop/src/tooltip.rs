@@ -52,6 +52,8 @@ impl Render for Tooltip {
             .text_size(px(12.))
             .text_color(hsla(self.fg))
             .child(self.text.clone())
-            .children(self.shortcut.clone().map(|shortcut| div().text_color(hsla(self.fg).opacity(0.5)).child(shortcut)))
+            .children(
+                self.shortcut.clone().map(|shortcut| div().text_color(hsla(self.fg).opacity(0.5)).child(shortcut)),
+            )
     }
 }

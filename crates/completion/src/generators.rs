@@ -49,9 +49,9 @@ pub fn command(generator: &Generator, tokens: &[&str], trailing_space: bool, env
 /// 拼进命令也执行不了别的东西的词：没有引号、命令替换、变量、分隔、重定向、子 shell、
 /// 反斜杠和控制字符。
 fn safe_token(token: &str) -> bool {
-    !token.chars().any(|c| {
-        matches!(c, '\'' | '"' | '`' | '$' | ';' | '&' | '|' | '<' | '>' | '(' | ')' | '\\') || c.is_control()
-    })
+    !token
+        .chars()
+        .any(|c| matches!(c, '\'' | '"' | '`' | '$' | ';' | '&' | '|' | '<' | '>' | '(' | ')' | '\\') || c.is_control())
 }
 
 /// `NAME=value`，值只由字母、数字和 `_-./:,+@%=` 组成。

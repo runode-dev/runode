@@ -19,10 +19,10 @@ use std::{
 };
 
 use gpui::{
-    Action, AnyElement, App, Axis, ClipboardItem, Context, Div, Focusable as _, FontStyle, FontWeight, HighlightStyle, Hsla,
-    Image, ImageSource, ListHorizontalSizingBehavior, MouseButton, MouseDownEvent, MouseMoveEvent, Pixels, Point,
-    ScrollHandle, SharedString, Stateful, StyledText, UniformListScrollHandle, Window, actions, div, img, prelude::*,
-    linear_color_stop, linear_gradient, px, uniform_list,
+    Action, AnyElement, App, Axis, ClipboardItem, Context, Div, Focusable as _, FontStyle, FontWeight, HighlightStyle,
+    Hsla, Image, ImageSource, ListHorizontalSizingBehavior, MouseButton, MouseDownEvent, MouseMoveEvent, Pixels, Point,
+    ScrollHandle, SharedString, Stateful, StyledText, UniformListScrollHandle, Window, actions, div, img,
+    linear_color_stop, linear_gradient, prelude::*, px, uniform_list,
 };
 use runode_git_status::{self as git, FileStatus, LineKind, Section};
 use runode_preview::{Content, ImageFormat, Span};
@@ -256,7 +256,10 @@ impl Preview {
 
     /// 标签上的名字。
     fn name(&self) -> SharedString {
-        self.path.file_name().map_or_else(|| self.path.display().to_string(), |name| name.to_string_lossy().into_owned()).into()
+        self.path
+            .file_name()
+            .map_or_else(|| self.path.display().to_string(), |name| name.to_string_lossy().into_owned())
+            .into()
     }
 
     /// 监听到的这些路径里有没有正在预览的文件。
@@ -324,11 +327,7 @@ fn loaded(content: Content) -> Loaded {
 
 /// 字符数最多的那一行；等宽字体下它最宽。
 fn widest_line(lines: &[String]) -> usize {
-    lines
-        .iter()
-        .enumerate()
-        .max_by_key(|(_, line)| line.chars().count().min(MAX_COLUMNS))
-        .map_or(0, |(ix, _)| ix)
+    lines.iter().enumerate().max_by_key(|(_, line)| line.chars().count().min(MAX_COLUMNS)).map_or(0, |(ix, _)| ix)
 }
 
 /// 行号旁的改动标记。
@@ -783,7 +782,9 @@ impl WindowView {
                 let list = uniform_list(
                     "preview",
                     count,
-                    cx.processor(move |this, range: Range<usize>, _, cx| this.render_preview_rows(range, font_size, gutter, fg, bg, cx)),
+                    cx.processor(move |this, range: Range<usize>, _, cx| {
+                        this.render_preview_rows(range, font_size, gutter, fg, bg, cx)
+                    }),
                 )
                 .with_width_from_item(Some(*widest))
                 .with_horizontal_sizing_behavior(ListHorizontalSizingBehavior::Unconstrained)
@@ -998,20 +999,26 @@ impl WindowView {
                 let number = u32::try_from(ix + 1).unwrap_or(u32::MAX);
                 // 删在文件末尾的标记落在最后一行之后，挪到最后一行上。
                 let mark = marks.get(&number).copied().or_else(|| {
-                    (ix + 1 == last).then(|| marks.get(&(number + 1)).copied().filter(|m| *m == Mark::Removed)).flatten()
+                    (ix + 1 == last)
+                        .then(|| marks.get(&(number + 1)).copied().filter(|m| *m == Mark::Removed))
+                        .flatten()
                 });
-                let marker = div().flex_none().w(px(MARK_WIDTH)).h_full().flex().flex_col().children(mark.map(|mark| {
-                    let (color, height) = match mark {
-                        Mark::Added => (ADDED, row_height),
-                        Mark::Modified => (MODIFIED, row_height),
-                        Mark::Removed => (REMOVED, REMOVED_MARK_HEIGHT),
-                    };
-                    div().w_full().h(px(height)).bg(hsla(color))
-                }));
+                let marker =
+                    div().flex_none().w(px(MARK_WIDTH)).h_full().flex().flex_col().children(mark.map(|mark| {
+                        let (color, height) = match mark {
+                            Mark::Added => (ADDED, row_height),
+                            Mark::Modified => (MODIFIED, row_height),
+                            Mark::Removed => (REMOVED, REMOVED_MARK_HEIGHT),
+                        };
+                        div().w_full().h(px(height)).bg(hsla(color))
+                    }));
                 let spans = highlights.as_ref().and_then(|all| all.get(ix)).map_or(&[][..], Vec::as_slice);
                 let shown = runode_preview::display_line(line, spans, MAX_COLUMNS);
-                let runs: Vec<_> =
-                    shown.spans.iter().map(|span| (span.range.clone(), highlight_style(span.style, fg, &palette))).collect();
+                let runs: Vec<_> = shown
+                    .spans
+                    .iter()
+                    .map(|span| (span.range.clone(), highlight_style(span.style, fg, &palette)))
+                    .collect();
                 let mut content = shown.text;
                 if shown.cut {
                     content.push('…');
@@ -1062,8 +1069,8 @@ impl WindowView {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::collections::HashSet;
     use git::{FileDiff, FileStatus, Hunk, Line};
+    use std::collections::HashSet;
 
     fn line(kind: LineKind, old: Option<u32>, new: Option<u32>) -> Line {
         Line { kind, old, new, text: String::new() }

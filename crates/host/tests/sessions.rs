@@ -70,9 +70,10 @@ fn resize_and_theme_changes_are_marked_in_the_stream() {
     let size = GridSize { cols: 30, ..SIZE };
     client.send(ClientMsg::Resize { id, size: SIZE });
     client.send(ClientMsg::Resize { id, size });
-    wait_for(&rx, |event, _| {
-        matches!(event, HostEvent::Msg(m) if matches!(**m, HostMsg::Resized { size: s, .. } if s == size))
-    });
+    wait_for(
+        &rx,
+        |event, _| matches!(event, HostEvent::Msg(m) if matches!(**m, HostMsg::Resized { size: s, .. } if s == size)),
+    );
     client.send(ClientMsg::SetTheme { settings: TermSettings::default() });
     let dark = TermSettings { cursor_blink: Some(false), ..TermSettings::default() };
     client.send(ClientMsg::SetTheme { settings: dark });
@@ -143,9 +144,7 @@ fn killed_sessions_go_quiet() {
 fn unstarted_sessions_start_on_request() {
     let client = Host::new().connect_in_process();
     let dir = std::env::temp_dir();
-    let id = client
-        .spawn(SpawnOptions { start: false, cwd: Some(dir.clone()), ..options("/bin/cat") })
-        .unwrap();
+    let id = client.spawn(SpawnOptions { start: false, cwd: Some(dir.clone()), ..options("/bin/cat") }).unwrap();
     let (sink, rx) = channel_sink();
     let attached = client.attach(id, sink).unwrap();
     assert!(!attached.started);

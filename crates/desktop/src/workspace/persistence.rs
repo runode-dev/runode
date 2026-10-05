@@ -7,8 +7,7 @@
 use std::{collections::HashMap, io, path::Path, time::Duration};
 
 use gpui::{
-    App, Bounds, Context, EntityId, Global, Task, WeakEntity, Window, WindowBounds,
-    WindowOptions, point, px, size,
+    App, Bounds, Context, EntityId, Global, Task, WeakEntity, Window, WindowBounds, WindowOptions, point, px, size,
 };
 use runode_shared_types::pane::{Node, Split};
 
@@ -49,10 +48,8 @@ pub fn install(cx: &mut App) {
     cx.set_global(Saver::default());
     cx.on_app_quit(|cx| {
         let windows: Vec<_> = cx.global::<Saver>().windows.iter().map(|(window, _)| window.clone()).collect();
-        let fresh: Vec<_> = windows
-            .iter()
-            .map(|window| window.upgrade().map(|view| view.read(cx).snapshot(cx)))
-            .collect();
+        let fresh: Vec<_> =
+            windows.iter().map(|window| window.upgrade().map(|view| view.read(cx).snapshot(cx))).collect();
         let saver = cx.global_mut::<Saver>();
         for ((_, saved), fresh) in saver.windows.iter_mut().zip(fresh) {
             if let Some(fresh) = fresh {
@@ -94,10 +91,7 @@ pub fn saved_window_options(cx: &App) -> Vec<(SavedWindow, WindowOptions)> {
 fn window_options(saved: &SavedBounds, cx: &App) -> WindowOptions {
     let displays = cx.displays();
     let display = match &saved.display {
-        Some(uuid) => displays
-            .iter()
-            .find(|display| display.uuid().is_ok_and(|id| id.to_string() == *uuid))
-            .cloned(),
+        Some(uuid) => displays.iter().find(|display| display.uuid().is_ok_and(|id| id.to_string() == *uuid)).cloned(),
         None => cx.primary_display(),
     };
     let bounds = Bounds { origin: point(px(saved.x), px(saved.y)), size: size(px(saved.width), px(saved.height)) };

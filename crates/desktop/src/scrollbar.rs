@@ -7,8 +7,8 @@
 use std::{cell::Cell, rc::Rc};
 
 use gpui::{
-    App, Axis, Bounds, CursorStyle, DispatchPhase, Edges, Element, ElementId, GlobalElementId, Hitbox, HitboxBehavior, Hsla,
-    InspectorElementId, IntoElement, LayoutId, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels,
+    App, Axis, Bounds, CursorStyle, DispatchPhase, Edges, Element, ElementId, GlobalElementId, Hitbox, HitboxBehavior,
+    Hsla, InspectorElementId, IntoElement, LayoutId, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels,
     Position, ScrollHandle, Size, Style, Window, fill, point, px, relative, size,
 };
 
@@ -155,8 +155,7 @@ impl Element for Scrollbar {
         _: &mut App,
     ) -> Option<Hitbox> {
         // 轨道上的点击和悬停归滚动条，滚轮照常交给下面的滚动区域。
-        self.geometry(bounds)
-            .map(|_| window.insert_hitbox(self.track(bounds), HitboxBehavior::BlockMouseExceptScroll))
+        self.geometry(bounds).map(|_| window.insert_hitbox(self.track(bounds), HitboxBehavior::BlockMouseExceptScroll))
     }
 
     fn paint(

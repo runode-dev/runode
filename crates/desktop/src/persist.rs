@@ -119,9 +119,7 @@ pub enum SavedNode {
 /// 恢复的终端从哪里开始：记下的目录还在就用它，否则用 workspace 的目录；都不在了为空，
 /// 也就是家目录。
 pub fn start_dir(cwd: Option<&Path>, workspace_dir: &Path) -> Option<PathBuf> {
-    cwd.filter(|cwd| cwd.is_dir())
-        .or_else(|| Some(workspace_dir).filter(|dir| dir.is_dir()))
-        .map(Path::to_path_buf)
+    cwd.filter(|cwd| cwd.is_dir()).or_else(|| Some(workspace_dir).filter(|dir| dir.is_dir())).map(Path::to_path_buf)
 }
 
 /// 读存档。没有存档或者是别的版本时为 `Ok(None)`，读不了或内容坏了时报错。
@@ -192,7 +190,14 @@ mod tests {
             zoomed: false,
         };
         State::new(vec![SavedWindow {
-            bounds: SavedBounds { display: None, mode: WindowMode::Windowed, x: 10., y: 20., width: 960., height: 620. },
+            bounds: SavedBounds {
+                display: None,
+                mode: WindowMode::Windowed,
+                x: 10.,
+                y: 20.,
+                width: 960.,
+                height: 620.,
+            },
             workspaces: vec![SavedWorkspace { name: "tmp".into(), dir: "/tmp".into(), tabs: vec![tab], active: 0 }],
             active: 0,
             sidebar: None,

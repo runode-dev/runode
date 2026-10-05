@@ -7,7 +7,9 @@ use std::{path::PathBuf, time::Instant};
 
 use gpui::{Context, Keystroke, MouseDownEvent, ScrollWheelEvent, Task};
 
-use runode_completion::{self as completion, Candidate, GeneratorJob, GeneratorResults, Kind, Request, Shell, generators};
+use runode_completion::{
+    self as completion, Candidate, GeneratorJob, GeneratorResults, Kind, Request, Shell, generators,
+};
 
 use super::{
     ECHO_WAIT, TerminalView,
@@ -237,10 +239,8 @@ impl TerminalView {
             if menu.generated.iter().any(|g| g.is_for(&job)) {
                 continue;
             }
-            let env = generators::Environment {
-                cwd: menu.cwd.clone().unwrap_or_default(),
-                path: menu.shell.path.clone(),
-            };
+            let env =
+                generators::Environment { cwd: menu.cwd.clone().unwrap_or_default(), path: menu.shell.path.clone() };
             let (handle, rx) = generators::spawn(job.command.clone(), env, job.parse);
             let (command, from, group) = (job.command.clone(), job.from, job.group);
             // 取消时这个任务随生成器一起丢掉，不会走到这里；收不到结果只可能是解析时 panic 或者
@@ -421,9 +421,7 @@ impl TerminalView {
     /// 菜单现在该不该显示；不该时（视口离开了底部、有了选区、关掉了这项配置）直接关掉。
     pub(super) fn check_completion(&mut self) {
         if self.completion.is_some()
-            && (!self.config.command_completions
-                || self.session.has_selection()
-                || !self.session.viewport_at_bottom())
+            && (!self.config.command_completions || self.session.has_selection() || !self.session.viewport_at_bottom())
         {
             self.completion = None;
         }

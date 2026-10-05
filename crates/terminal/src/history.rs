@@ -180,7 +180,8 @@ impl History {
         if prefix.trim_start().is_empty() {
             return None;
         }
-        let candidates: Vec<usize> = (0..self.items.len()).rev().filter(|&i| completes(&self.items[i].cmd, prefix)).collect();
+        let candidates: Vec<usize> =
+            (0..self.items.len()).rev().filter(|&i| completes(&self.items[i].cmd, prefix)).collect();
         self.best(&candidates, cwd).map(|i| self.items[i].cmd.as_str())
     }
 
@@ -567,7 +568,8 @@ mod tests {
 
     #[test]
     fn fish_history_format() {
-        let text = "- cmd: git log\n  when: 1700000000\n- cmd: echo a\\nb \\\\ c\n  when: 1700000001\n  paths:\n    - b\n";
+        let text =
+            "- cmd: git log\n  when: 1700000000\n- cmd: echo a\\nb \\\\ c\n  when: 1700000001\n  paths:\n    - b\n";
         assert_eq!(cmds(&parse_fish(text)), [("git log", 1700000000), ("echo a\nb \\ c", 1700000001)]);
     }
 

@@ -272,7 +272,8 @@ impl Runner {
         self.session.feed(data);
         let record = self.record_history.load(Ordering::Relaxed);
         for entry in self.session.take_commands() {
-            let command = FinishedCommand { cmd: entry.cmd.clone(), cwd: entry.cwd.clone(), exit: entry.exit, ts: entry.ts };
+            let command =
+                FinishedCommand { cmd: entry.cmd.clone(), cwd: entry.cwd.clone(), exit: entry.exit, ts: entry.ts };
             if record {
                 history::record(entry);
             }

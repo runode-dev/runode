@@ -51,9 +51,7 @@ fn the_first_word_lists_shell_names_and_executables() {
         let candidates = request.local_candidates(Some(Path::new("/")), &shell);
         rank(&candidates, request.typed()).into_iter().map(|i| candidates[i].clone()).collect()
     };
-    let names = |input: &str| -> Vec<(String, Kind)> {
-        listed(input).into_iter().map(|c| (c.value, c.kind)).collect()
-    };
+    let names = |input: &str| -> Vec<(String, Kind)> { listed(input).into_iter().map(|c| (c.value, c.kind)).collect() };
     let g = names("g^");
     assert!(g.contains(&("gst".to_owned(), Kind::Alias)) && g.contains(&("greet".to_owned(), Kind::Function)));
     // 历史里用得多的在前：`git` 两次、`gst` 一次。
@@ -80,7 +78,11 @@ fn the_first_word_lists_shell_names_and_executables() {
 fn git_checkout_runs_a_branch_generator() {
     let request = request("git checkout ^").unwrap();
     let jobs = request.generator_jobs();
-    assert!(jobs.iter().any(|job| job.command.contains("git")), "{:?}", jobs.iter().map(|j| &j.command).collect::<Vec<_>>());
+    assert!(
+        jobs.iter().any(|job| job.command.contains("git")),
+        "{:?}",
+        jobs.iter().map(|j| &j.command).collect::<Vec<_>>()
+    );
     assert_eq!(request.before_word(), "git checkout ");
     assert_eq!(request.cells_before_cursor(), 0);
 }

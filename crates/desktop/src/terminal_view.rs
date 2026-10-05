@@ -23,8 +23,8 @@ use std::{
 };
 
 use gpui::{
-    Action, App, Bounds, Context, CursorStyle, Entity, EventEmitter, FocusHandle, Focusable, Font, Hsla,
-    Pixels, Point, Render, ShapedLine, Subscription, Task, Window, actions, div, prelude::*, px, rgb,
+    Action, App, Bounds, Context, CursorStyle, Entity, EventEmitter, FocusHandle, Focusable, Font, Hsla, Pixels, Point,
+    Render, ShapedLine, Subscription, Task, Window, actions, div, prelude::*, px, rgb,
 };
 use runode_config::Config;
 use runode_host::{ClientMsg, SessionId};
@@ -209,10 +209,7 @@ impl Render for TerminalView {
         self.check_completion();
         // 搜索栏和终端是兄弟节点，不在 `Terminal` 按键上下文里：在搜索栏里打字时，
         // ⌘← 之类映射给程序的快捷键不能生效。
-        let search_bar = self
-            .search_field
-            .as_ref()
-            .map(|(field, _)| self.render_search_bar(field, cx));
+        let search_bar = self.search_field.as_ref().map(|(field, _)| self.render_search_bar(field, cx));
         let terminal = div()
             .id("terminal")
             // 搜索栏开着时多一个 `searching` 标记，只在这时才让 Esc 关搜索而不发给程序。
@@ -254,23 +251,13 @@ impl Render for TerminalView {
                     .pb(px(self.config.window_padding_y.1))
                     .on_any_mouse_down(cx.listener(Self::mouse_down))
                     // 程序开了鼠标上报时点击归程序，指针不显示成文本选择的样子。
-                    .cursor(if self.session.mouse_tracking() {
-                        CursorStyle::Arrow
-                    } else {
-                        CursorStyle::IBeam
-                    })
+                    .cursor(if self.session.mouse_tracking() { CursorStyle::Arrow } else { CursorStyle::IBeam })
                     .child(TerminalElement { view: cx.entity() }),
             );
-        div()
-            .track_focus(&self.pane_focus)
-            .relative()
-            .size_full()
-            .child(terminal)
-            .children(search_bar)
+        div().track_focus(&self.pane_focus).relative().size_full().child(terminal).children(search_bar)
     }
 }
 
 pub fn hsla(color: Rgb) -> Hsla {
     rgb(color.to_u32()).into()
 }
-

@@ -228,11 +228,7 @@ impl TextArea {
     }
 
     fn snapshot(&self) -> Snapshot {
-        Snapshot {
-            text: self.content.clone(),
-            selected: self.selected.clone(),
-            reversed: self.reversed,
-        }
+        Snapshot { text: self.content.clone(), selected: self.selected.clone(), reversed: self.reversed }
     }
 
     /// 编辑前记下当前状态供撤销；`kind` 和上一次相同时并进上一步，`None` 总是单独一步。
@@ -354,11 +350,7 @@ impl TextArea {
             Some(marked) => [
                 run(marked.start),
                 TextRun {
-                    underline: Some(UnderlineStyle {
-                        color: Some(style.color),
-                        thickness: px(1.),
-                        wavy: false,
-                    }),
+                    underline: Some(UnderlineStyle { color: Some(style.color), thickness: px(1.), wavy: false }),
                     ..run(marked.len())
                 },
                 run(self.content.len() - marked.end),
@@ -604,16 +596,8 @@ impl EntityInputHandler for TextArea {
         Some(self.content[range].to_owned())
     }
 
-    fn selected_text_range(
-        &mut self,
-        _: bool,
-        _: &mut Window,
-        _: &mut Context<Self>,
-    ) -> Option<UTF16Selection> {
-        Some(UTF16Selection {
-            range: self.range_to_utf16(&self.selected),
-            reversed: self.reversed,
-        })
+    fn selected_text_range(&mut self, _: bool, _: &mut Window, _: &mut Context<Self>) -> Option<UTF16Selection> {
+        Some(UTF16Selection { range: self.range_to_utf16(&self.selected), reversed: self.reversed })
     }
 
     fn marked_text_range(&self, _: &mut Window, _: &mut Context<Self>) -> Option<Range<usize>> {
@@ -632,10 +616,8 @@ impl EntityInputHandler for TextArea {
         _: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let range = range
-            .map(|range| self.range_from_utf16(&range))
-            .or(self.marked.clone())
-            .unwrap_or(self.selected.clone());
+        let range =
+            range.map(|range| self.range_from_utf16(&range)).or(self.marked.clone()).unwrap_or(self.selected.clone());
         // 回车由 `key_down` 插入换行，制表符不插入；输入法上屏的文字里真有换行时照样保留。
         let typed = text;
         let text: String = normalize_newlines(typed).chars().filter(|&c| c == '\n' || !c.is_control()).collect();
@@ -658,10 +640,8 @@ impl EntityInputHandler for TextArea {
         _: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let range = range
-            .map(|range| self.range_from_utf16(&range))
-            .or(self.marked.clone())
-            .unwrap_or(self.selected.clone());
+        let range =
+            range.map(|range| self.range_from_utf16(&range)).or(self.marked.clone()).unwrap_or(self.selected.clone());
         if self.marked.is_none() {
             self.record(Some(EditKind::Insert));
         }
@@ -757,11 +737,7 @@ fn split_line(line_start: usize, len: usize, glyphs: &[(usize, Pixels)], breaks:
         if end > start {
             stops.push((line_start + end, x_at(end) - origin));
         }
-        rows.push(Row {
-            range: line_start + start..line_start + end,
-            soft: n < breaks.len(),
-            stops,
-        });
+        rows.push(Row { range: line_start + start..line_start + end, soft: n < breaks.len(), stops });
         start = end;
     }
     rows
@@ -773,11 +749,8 @@ fn rows_from_lines(lines: &[WrappedLine]) -> Vec<Row> {
     let mut line_start = 0;
     for line in lines {
         let layout = &line.unwrapped_layout;
-        let glyphs: Vec<(usize, Pixels)> = layout
-            .runs
-            .iter()
-            .flat_map(|run| run.glyphs.iter().map(|glyph| (glyph.index, glyph.position.x)))
-            .collect();
+        let glyphs: Vec<(usize, Pixels)> =
+            layout.runs.iter().flat_map(|run| run.glyphs.iter().map(|glyph| (glyph.index, glyph.position.x))).collect();
         let breaks: Vec<usize> = line
             .wrap_boundaries()
             .iter()
@@ -938,16 +911,8 @@ fn word_range_at(text: &str, offset: usize) -> Range<usize> {
         return line.start + offset..line.start + offset;
     };
     let same = |x: char| is_word_char(x) == is_word_char(c) && (is_word_char(c) || x == c);
-    let start = text[..offset]
-        .char_indices()
-        .rev()
-        .take_while(|(_, x)| same(*x))
-        .last()
-        .map_or(offset, |(i, _)| i);
-    let end = text[offset..]
-        .char_indices()
-        .find(|(_, x)| !same(*x))
-        .map_or(text.len(), |(i, _)| offset + i);
+    let start = text[..offset].char_indices().rev().take_while(|(_, x)| same(*x)).last().map_or(offset, |(i, _)| i);
+    let end = text[offset..].char_indices().find(|(_, x)| !same(*x)).map_or(text.len(), |(i, _)| offset + i);
     line.start + start..line.start + end
 }
 
@@ -1338,12 +1303,7 @@ mod tests {
         let spans = selection_spans(&rows, &(1..9));
         assert_eq!(
             spans,
-            [
-                (0, W, W * 3.),
-                (1, px(0.), W * 3. + NEWLINE_WIDTH),
-                (2, px(0.), NEWLINE_WIDTH),
-                (3, px(0.), W),
-            ]
+            [(0, W, W * 3.), (1, px(0.), W * 3. + NEWLINE_WIDTH), (2, px(0.), NEWLINE_WIDTH), (3, px(0.), W),]
         );
         assert!(selection_spans(&rows, &(4..4)).is_empty());
         // 从软换行处开始的选区不在上一行画。

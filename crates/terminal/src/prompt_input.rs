@@ -94,11 +94,7 @@ pub fn read(terminal: &Terminal<'_, '_>) -> Result<Option<PromptInput>> {
         slot.push_to(&mut text);
     }
     text.truncate(before + text[before..].trim_end().len());
-    Ok(Some(PromptInput {
-        text,
-        cursor: before,
-        at_end: !rest.iter().any(|slot| matches!(slot, Slot::Text(_))),
-    }))
+    Ok(Some(PromptInput { text, cursor: before, at_end: !rest.iter().any(|slot| matches!(slot, Slot::Text(_))) }))
 }
 
 /// 刚提交的那条命令：从光标所在行往上，把 shell 集成标为用户输入的单元格读出来，直到主

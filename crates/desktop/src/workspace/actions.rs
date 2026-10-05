@@ -6,7 +6,7 @@ use gpui::{Bounds, Context, EntityId, PathPromptOptions, Pixels, Window};
 use runode_shared_types::pane::{self, Axis, Direction, SplitId};
 
 use super::{
-    CloseTab, ClosePane, CloseWorkspace, EqualizePanes, FocusNextPane, FocusPane, FocusPreviousPane, NewSplitDown,
+    ClosePane, CloseTab, CloseWorkspace, EqualizePanes, FocusNextPane, FocusPane, FocusPreviousPane, NewSplitDown,
     NewSplitRight, NewTab, NewWorkspace, NextTab, NextWorkspace, PreviousTab, PreviousWorkspace, ResizePane,
     SelectLastTab, SelectLastWorkspace, SelectTab, SelectWorkspace, TogglePaneZoom, ToggleSidebar, WindowView,
 };
@@ -64,7 +64,12 @@ impl WindowView {
         }
     }
 
-    pub(super) fn select_last_workspace(&mut self, _: &SelectLastWorkspace, window: &mut Window, cx: &mut Context<Self>) {
+    pub(super) fn select_last_workspace(
+        &mut self,
+        _: &SelectLastWorkspace,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         self.activate_workspace(self.workspaces.len() - 1, window, cx);
     }
 

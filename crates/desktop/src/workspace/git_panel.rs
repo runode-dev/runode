@@ -13,8 +13,8 @@ mod run;
 use std::{ops::Range, path::PathBuf};
 
 use gpui::{
-    Action, AnyElement, Context, Div, Focusable, MouseButton, MouseDownEvent, SharedString, Stateful, Window, actions, div,
-    prelude::*, px, svg, uniform_list,
+    Action, AnyElement, Context, Div, Focusable, MouseButton, MouseDownEvent, SharedString, Stateful, Window, actions,
+    div, prelude::*, px, svg, uniform_list,
 };
 use runode_git_status::{Operation, RepoInfo, Section};
 use runode_shared_types::color::Rgb;
@@ -175,19 +175,20 @@ impl WindowView {
         let header = self
             .panel_header(rightmost, fg)
             .child(div().flex_none().text_color(hsla(fg)).child(rust_i18n::t!("git.title").into_owned()))
-            .child(
-                div()
-                    .flex_1()
-                    .min_w_0()
-                    .truncate()
-                    .text_color(dim)
-                    .children(panel.busy.map(|busy| busy.label())),
-            )
+            .child(div().flex_1().min_w_0().truncate().text_color(dim).children(panel.busy.map(|busy| busy.label())))
             .when(in_repo, |header| {
                 header
-                    .child(self.header_button("git-refresh", REFRESH_ICON, Some(rust_i18n::t!("git.refresh").into_owned()), fg, bg, cx, |this, _, window, cx| {
-                        this.git_refresh(&GitRefresh, window, cx);
-                    }))
+                    .child(self.header_button(
+                        "git-refresh",
+                        REFRESH_ICON,
+                        Some(rust_i18n::t!("git.refresh").into_owned()),
+                        fg,
+                        bg,
+                        cx,
+                        |this, _, window, cx| {
+                            this.git_refresh(&GitRefresh, window, cx);
+                        },
+                    ))
                     .child(self.header_button("git-more", MORE_ICON, None, fg, bg, cx, |this, event, _, cx| {
                         this.open_git_menu(event.position, cx);
                     }))
@@ -202,7 +203,9 @@ impl WindowView {
                     uniform_list(
                         "git-rows",
                         panel.rows.len(),
-                        cx.processor(move |this, range: Range<usize>, _, cx| this.render_git_rows(range, fg, bg, &font, cx)),
+                        cx.processor(move |this, range: Range<usize>, _, cx| {
+                            this.render_git_rows(range, fg, bg, &font, cx)
+                        }),
                     )
                     .track_scroll(&panel.scroll)
                     .flex_1()
@@ -291,7 +294,11 @@ impl WindowView {
             let text = rust_i18n::t!("git.sync_tooltip", upstream = info.upstream.clone().unwrap_or_default());
             Some((counts, text, PrimaryAction::Sync))
         } else if info.has_remote && info.branch.is_some() && info.head.is_some() {
-            Some((rust_i18n::t!("git.publish").into_owned(), rust_i18n::t!("git.publish_tooltip"), PrimaryAction::Publish))
+            Some((
+                rust_i18n::t!("git.publish").into_owned(),
+                rust_i18n::t!("git.publish_tooltip"),
+                PrimaryAction::Publish,
+            ))
         } else {
             None
         };
@@ -307,7 +314,11 @@ impl WindowView {
                 .gap(px(4.))
                 .text_color(fg_hsla.opacity(if busy { 0.35 } else { 0.75 }))
                 .tooltip(tooltip(text, None, fg, bg))
-                .child(svg().flex_none().path(SYNC_ICON).size(px(13.)).text_color(fg_hsla.opacity(if busy { 0.35 } else { 0.75 })))
+                .child(svg().flex_none().path(SYNC_ICON).size(px(13.)).text_color(fg_hsla.opacity(if busy {
+                    0.35
+                } else {
+                    0.75
+                })))
                 .child(label)
                 .when(!busy, |sync| {
                     sync.hover(|sync| sync.bg(hover_bg)).on_mouse_down(

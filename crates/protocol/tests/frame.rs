@@ -28,7 +28,12 @@ fn frames_round_trip() {
     }
     assert_eq!(
         frames,
-        [(FrameKind::Output, 7, 8), (FrameKind::Input, 7, 0), (FrameKind::Control, 0, 24), (FrameKind::Snapshot, u32::MAX, 300)]
+        [
+            (FrameKind::Output, 7, 8),
+            (FrameKind::Input, 7, 0),
+            (FrameKind::Control, 0, 24),
+            (FrameKind::Snapshot, u32::MAX, 300)
+        ]
     );
 }
 

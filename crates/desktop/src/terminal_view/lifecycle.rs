@@ -23,12 +23,7 @@ use crate::{config::AppConfig, prespawn::Prespawned, session_host};
 /// 配置的字体都不可用时使用的等宽字体，macOS 自带。
 const FALLBACK_FONT_FAMILY: &str = "Menlo";
 /// 视图建好时伪终端的临时尺寸；第一次布局时会按实际大小重设，shell 等到那之后才启动。
-const PROVISIONAL_SIZE: GridSize = GridSize {
-    cols: 80,
-    rows: 24,
-    cell_width_px: 8,
-    cell_height_px: 16,
-};
+const PROVISIONAL_SIZE: GridSize = GridSize { cols: 80, rows: 24, cell_width_px: 8, cell_height_px: 16 };
 /// 建视图时最多先喂进去这么多已经到达的输出，余下的照常交给读输出的任务：shell 一启动就
 /// 大量输出时，第一帧不能等它们全部处理完。
 const EARLY_OUTPUT_LIMIT: usize = 64 * 1024;
@@ -64,11 +59,7 @@ fn connect(id: SessionId) -> anyhow::Result<(Session, UnboundedReceiver<HostEven
 impl TerminalView {
     /// 建好视图，在 `cwd` 下启动 shell，`cwd` 为 `None` 时从家目录开始；shell 等第一次布局后
     /// 才启动，见 `start`。伪终端开不了时返回错误，不建视图。
-    pub fn spawn(
-        cwd: Option<&std::path::Path>,
-        window: &mut Window,
-        cx: &mut App,
-    ) -> anyhow::Result<Entity<Self>> {
+    pub fn spawn(cwd: Option<&std::path::Path>, window: &mut Window, cx: &mut App) -> anyhow::Result<Entity<Self>> {
         let view = Self::unstarted(cwd, window, cx)?;
         view.update(cx, |view, cx| view.start(cx));
         Ok(view)
@@ -76,11 +67,7 @@ impl TerminalView {
 
     /// 建好视图但先不启动 shell，等 `start` 时再在 `cwd` 下启动。恢复布局时看不见的终端用它，
     /// 不切过去就不占进程。
-    pub fn unstarted(
-        cwd: Option<&std::path::Path>,
-        window: &mut Window,
-        cx: &mut App,
-    ) -> anyhow::Result<Entity<Self>> {
+    pub fn unstarted(cwd: Option<&std::path::Path>, window: &mut Window, cx: &mut App) -> anyhow::Result<Entity<Self>> {
         let integration = cx.global::<AppConfig>().0.shell_integration;
         let id = session_host::client().spawn(SpawnOptions {
             size: PROVISIONAL_SIZE,
@@ -279,8 +266,7 @@ impl TerminalView {
             view.input_changed = true;
             cx.notify();
         });
-        let appearance_watch =
-            cx.observe_window_appearance(window, |_, _, cx| crate::config::follow_appearance(cx));
+        let appearance_watch = cx.observe_window_appearance(window, |_, _, cx| crate::config::follow_appearance(cx));
 
         // 第一次用到时开始在后台读命令历史，开着建议时现在就读起来。
         if config.command_suggestions {
@@ -372,11 +358,7 @@ impl TerminalView {
 
     /// 程序设置的标题；没设置时为前台进程的目录名或进程名，都没有时为 `DEFAULT_TITLE`。
     pub fn title(&self) -> &str {
-        self.session
-            .title
-            .as_deref()
-            .or(self.session.fallback_title.as_deref())
-            .unwrap_or(DEFAULT_TITLE)
+        self.session.title.as_deref().or(self.session.fallback_title.as_deref()).unwrap_or(DEFAULT_TITLE)
     }
 
     /// 前台 agent 在标题里报告的状态；不是 agent 在前台时为 `None`。
@@ -470,9 +452,7 @@ fn resolve_font(families: &[String], window: &Window) -> Font {
         .iter()
         .find(|family| {
             let id = text_system.resolve_font(&font(family.as_str()));
-            text_system
-                .get_font_for_id(id)
-                .is_some_and(|f| f.family.as_ref() == family.as_str())
+            text_system.get_font_for_id(id).is_some_and(|f| f.family.as_ref() == family.as_str())
         })
         .map_or(FALLBACK_FONT_FAMILY, String::as_str);
     tracing::debug!("terminal font: {family}");

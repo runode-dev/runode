@@ -3,11 +3,7 @@
 use super::{Metrics, Shape, shapes};
 
 pub(super) fn metrics(width: u32, height: u32, thickness: u32) -> Metrics {
-    Metrics {
-        width,
-        height,
-        thickness,
-    }
+    Metrics { width, height, thickness }
 }
 
 /// 在每个像素中心采样，把图元画进 `width × height` 的覆盖度网格（0–255）。
@@ -19,15 +15,8 @@ pub(super) fn raster(c: char, m: Metrics) -> Vec<Vec<u8>> {
             let (px, py) = (x as f32 + 0.5, y as f32 + 0.5);
             for shape in &shapes {
                 let a = match shape {
-                    Shape::Rect {
-                        x0,
-                        y0,
-                        x1,
-                        y1,
-                        alpha,
-                    } => {
-                        let inside = (*x0..*x1).contains(&(x as i32))
-                            && (*y0..*y1).contains(&(y as i32));
+                    Shape::Rect { x0, y0, x1, y1, alpha } => {
+                        let inside = (*x0..*x1).contains(&(x as i32)) && (*y0..*y1).contains(&(y as i32));
                         if inside { *alpha } else { 0 }
                     }
                     Shape::Polygon(p) => {
@@ -35,9 +24,7 @@ pub(super) fn raster(c: char, m: Metrics) -> Vec<Vec<u8>> {
                         let mut inside = false;
                         for i in 0..p.len() {
                             let (a, b) = (p[i], p[(i + 1) % p.len()]);
-                            if (a[1] > py) != (b[1] > py)
-                                && px < a[0] + (py - a[1]) / (b[1] - a[1]) * (b[0] - a[0])
-                            {
+                            if (a[1] > py) != (b[1] > py) && px < a[0] + (py - a[1]) / (b[1] - a[1]) * (b[0] - a[0]) {
                                 inside = !inside;
                             }
                         }
@@ -54,11 +41,7 @@ pub(super) fn raster(c: char, m: Metrics) -> Vec<Vec<u8>> {
 pub(super) fn art(c: char, m: Metrics) -> String {
     raster(c, m)
         .iter()
-        .map(|row| {
-            row.iter()
-                .map(|&v| if v == 0 { '.' } else { '#' })
-                .collect::<String>()
-        })
+        .map(|row| row.iter().map(|&v| if v == 0 { '.' } else { '#' }).collect::<String>())
         .collect::<Vec<_>>()
         .join("\n")
 }

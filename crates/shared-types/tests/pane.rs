@@ -65,11 +65,7 @@ fn equalize_gives_every_terminal_on_an_axis_the_same_share() {
 #[test]
 fn neighbor_prefers_the_closest_overlapping_terminal() {
     let rect = |x, y, width, height| Rect { x, y, width, height };
-    let panes = [
-        (1, rect(0., 0., 500., 600.)),
-        (2, rect(501., 0., 500., 300.)),
-        (3, rect(501., 301., 500., 299.)),
-    ];
+    let panes = [(1, rect(0., 0., 500., 600.)), (2, rect(501., 0., 500., 300.)), (3, rect(501., 301., 500., 299.))];
     let from = |id| panes.iter().find(|(p, _)| *p == id).unwrap().1;
     let others = |id| panes.iter().copied().filter(move |(p, _)| *p != id);
     assert_eq!(neighbor(from(1), Direction::Right, others(1)), Some(2));

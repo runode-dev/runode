@@ -211,14 +211,21 @@ impl WindowView {
                         SharedString::default(),
                     ),
                     PickerRow::Branch(branch) => {
-                        let kind =
-                            if branch.remote { rust_i18n::t!("git.picker.remote") } else { rust_i18n::t!("git.picker.local") };
+                        let kind = if branch.remote {
+                            rust_i18n::t!("git.picker.remote")
+                        } else {
+                            rust_i18n::t!("git.picker.local")
+                        };
                         let detail = [kind.as_ref(), branch.subject.as_str(), branch.date.as_str()]
                             .into_iter()
                             .filter(|part| !part.is_empty())
                             .collect::<Vec<_>>()
                             .join(" · ");
-                        (if branch.current { CHECK_ICON } else { BRANCH_ICON }, branch.name.clone().into(), detail.into())
+                        (
+                            if branch.current { CHECK_ICON } else { BRANCH_ICON },
+                            branch.name.clone().into(),
+                            detail.into(),
+                        )
                     }
                 };
                 div()
@@ -230,7 +237,9 @@ impl WindowView {
                     .flex()
                     .items_center()
                     .gap(px(8.))
-                    .map(|item| if ix == selected { item.bg(selected_bg) } else { item.hover(|item| item.bg(hover_bg)) })
+                    .map(
+                        |item| if ix == selected { item.bg(selected_bg) } else { item.hover(|item| item.bg(hover_bg)) },
+                    )
                     .on_mouse_down(
                         MouseButton::Left,
                         cx.listener(move |this, _, window, cx| {

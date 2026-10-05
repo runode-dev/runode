@@ -70,7 +70,11 @@ const RULES: &[(&str, Option<u8>, FontStyle)] = &[
     ("comment, punctuation.definition.comment", Some(BLACK_BRIGHT), FontStyle::ITALIC),
     ("string, punctuation.definition.string", Some(GREEN), FontStyle::empty()),
     ("constant.character.escape, constant.other.placeholder", Some(CYAN), FontStyle::empty()),
-    ("constant.numeric, constant.language, constant.character, constant.other, support.constant", Some(CYAN), FontStyle::empty()),
+    (
+        "constant.numeric, constant.language, constant.character, constant.other, support.constant",
+        Some(CYAN),
+        FontStyle::empty(),
+    ),
     ("keyword, storage, keyword.control, storage.type, storage.modifier", Some(MAGENTA), FontStyle::empty()),
     ("keyword.operator", None, FontStyle::empty()),
     (
@@ -83,7 +87,11 @@ const RULES: &[(&str, Option<u8>, FontStyle)] = &[
         Some(YELLOW),
         FontStyle::empty(),
     ),
-    ("variable.language, entity.name.tag, support.type.property-name, meta.mapping.key string", Some(RED), FontStyle::empty()),
+    (
+        "variable.language, entity.name.tag, support.type.property-name, meta.mapping.key string",
+        Some(RED),
+        FontStyle::empty(),
+    ),
     ("entity.other.attribute-name", Some(YELLOW), FontStyle::empty()),
     (
         "meta.attribute, meta.annotation, entity.name.function.decorator, punctuation.definition.annotation, meta.preprocessor, keyword.other.preprocessor",
@@ -110,7 +118,11 @@ fn theme() -> Theme {
             style: StyleModifier { foreground: color.map(ansi), background: None, font_style: Some(font_style) },
         })
         .collect();
-    Theme { settings: ThemeSettings { foreground: Some(FOREGROUND), ..ThemeSettings::default() }, scopes, ..Theme::default() }
+    Theme {
+        settings: ThemeSettings { foreground: Some(FOREGROUND), ..ThemeSettings::default() },
+        scopes,
+        ..Theme::default()
+    }
 }
 
 /// 语法定义和配色表，第一次用时加载，几十毫秒，所以只在后台线程里用。

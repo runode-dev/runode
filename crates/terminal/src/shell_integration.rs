@@ -103,16 +103,12 @@ fn report_token() -> Option<String> {
 /// 脚本所在的目录，每次启动应用时按二进制里的版本重写一遍。
 fn install_dir() -> Result<&'static Path, String> {
     static DIR: OnceLock<Result<PathBuf, String>> = OnceLock::new();
-    DIR.get_or_init(|| install().map_err(|err| err.to_string()))
-        .as_ref()
-        .map(PathBuf::as_path)
-        .map_err(Clone::clone)
+    DIR.get_or_init(|| install().map_err(|err| err.to_string())).as_ref().map(PathBuf::as_path).map_err(Clone::clone)
 }
 
 fn install() -> io::Result<PathBuf> {
-    let dir = runode_paths::Dirs::from_env()
-        .shell_integration_dir()
-        .ok_or_else(|| io::Error::other("no home directory"))?;
+    let dir =
+        runode_paths::Dirs::from_env().shell_integration_dir().ok_or_else(|| io::Error::other("no home directory"))?;
     for (path, contents) in [
         ("zsh/.zshenv", ZSH_ENV),
         ("zsh/runode-integration.zsh", ZSH_INTEGRATION),

@@ -46,13 +46,7 @@ impl Metrics {
 #[derive(Clone, Debug, PartialEq)]
 pub enum Shape {
     /// 整像素对齐的矩形，`alpha` 是前景色的不透明度（0xff 为实心）。
-    Rect {
-        x0: i32,
-        y0: i32,
-        x1: i32,
-        y1: i32,
-        alpha: u8,
-    },
+    Rect { x0: i32, y0: i32, x1: i32, y1: i32, alpha: u8 },
     /// 实心填充的闭合简单多边形，边缘由 GPUI 抗锯齿。
     Polygon(Vec<[f32; 2]>),
 }
@@ -70,14 +64,9 @@ pub fn shapes(text: &str, m: Metrics) -> Option<Vec<Shape>> {
         0x2580..=0x259f => block(cp, m, &mut out),
         0x25e2..=0x25e5 | 0x25f8..=0x25fa | 0x25ff => corner_triangle(cp, m, &mut out),
         0x2800..=0x28ff => braille(cp, m, &mut out),
-        0x1fb00..=0x1fb3b
-        | 0x1cd00..=0x1cde5
-        | 0x1cea0
-        | 0x1cea3
-        | 0x1cea8
-        | 0x1ceab
-        | 0x1fbe6
-        | 0x1fbe7 => mosaic(cp, m, &mut out),
+        0x1fb00..=0x1fb3b | 0x1cd00..=0x1cde5 | 0x1cea0 | 0x1cea3 | 0x1cea8 | 0x1ceab | 0x1fbe6 | 0x1fbe7 => {
+            mosaic(cp, m, &mut out)
+        }
         0xe0b0..=0xe0bf | 0xe0d2 | 0xe0d4 => powerline(cp, m, &mut out),
         0xf5d0..=0xf60d => branch(cp, m, &mut out),
         _ => return None,
@@ -89,25 +78,13 @@ pub fn shapes(text: &str, m: Metrics) -> Option<Vec<Shape>> {
 
 /// 把 `shapes` 画在左上角为 `origin` 的单元格里。原点先对齐到设备像素，
 /// 整像素矩形才能和设备像素网格重合。
-pub fn paint(
-    shapes: &[Shape],
-    origin: Point<Pixels>,
-    scale: f32,
-    color: Hsla,
-    window: &mut Window,
-) {
+pub fn paint(shapes: &[Shape], origin: Point<Pixels>, scale: f32, color: Hsla, window: &mut Window) {
     let ox = (f32::from(origin.x) * scale).round();
     let oy = (f32::from(origin.y) * scale).round();
     let at = |x: f32, y: f32| point(px((ox + x) / scale), px((oy + y) / scale));
     for shape in shapes {
         match shape {
-            Shape::Rect {
-                x0,
-                y0,
-                x1,
-                y1,
-                alpha,
-            } => window.paint_quad(fill(
+            Shape::Rect { x0, y0, x1, y1, alpha } => window.paint_quad(fill(
                 Bounds::from_corners(at(*x0 as f32, *y0 as f32), at(*x1 as f32, *y1 as f32)),
                 color.opacity(f32::from(*alpha) / 255.),
             )),
@@ -161,36 +138,21 @@ mod tests {
             .chain(0xf5d0..=0xf60d)
             .collect();
         let m = metrics(8, 16, 1);
-        let drawable = (0..=0x1ffff)
-            .filter_map(char::from_u32)
-            .filter(|c| shapes(&c.to_string(), m).is_some())
-            .count();
+        let drawable = (0..=0x1ffff).filter_map(char::from_u32).filter(|c| shapes(&c.to_string(), m).is_some()).count();
         assert_eq!(drawable, codepoints.len(), "自绘范围多出了别的码点");
         // 空白盲文 U+2800 本来就什么都不画。
         for cp in codepoints.into_iter().filter(|&cp| cp != 0x2800) {
             let c = char::from_u32(cp).unwrap();
-            for (w, h, t) in [
-                (8, 16, 1),
-                (9, 17, 1),
-                (11, 21, 2),
-                (16, 32, 2),
-                (18, 36, 4),
-            ] {
+            for (w, h, t) in [(8, 16, 1), (9, 17, 1), (11, 21, 2), (16, 32, 2), (18, 36, 4)] {
                 let m = metrics(w, h, t);
                 let shapes = shapes(&c.to_string(), m).unwrap();
                 assert!(!shapes.is_empty(), "U+{cp:04X} {w}x{h}+{t} 没有图元");
                 for shape in &shapes {
                     if let Shape::Polygon(p) = shape {
-                        assert!(
-                            p.len() >= 3 && p.iter().flatten().all(|v| v.is_finite()),
-                            "U+{cp:04X} 多边形无效"
-                        );
+                        assert!(p.len() >= 3 && p.iter().flatten().all(|v| v.is_finite()), "U+{cp:04X} 多边形无效");
                     }
                 }
-                assert!(
-                    raster(c, m).iter().flatten().any(|&v| v > 0),
-                    "U+{cp:04X} {w}x{h}+{t} 画出来是空的"
-                );
+                assert!(raster(c, m).iter().flatten().any(|&v| v > 0), "U+{cp:04X} {w}x{h}+{t} 画出来是空的");
             }
             // 极小的单元格只要求不 panic。
             for (w, h, t) in [(1, 1, 1), (2, 3, 1), (3, 2, 4)] {

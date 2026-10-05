@@ -15,7 +15,9 @@ use std::{
     time::{Duration, Instant},
 };
 
-use gpui::{Action, Context, CursorStyle, Div, Focusable, MouseButton, MouseDownEvent, Stateful, Window, div, prelude::*, px};
+use gpui::{
+    Action, Context, CursorStyle, Div, Focusable, MouseButton, MouseDownEvent, Stateful, Window, div, prelude::*, px,
+};
 use runode_git_status::FileStatus;
 use runode_shared_types::color::Rgb;
 
@@ -300,8 +302,7 @@ impl WindowView {
         } else {
             0.
         };
-        let preview =
-            if preview_shown { preview.min(room - files - git - changes).max(PREVIEW_MIN_WIDTH) } else { 0. };
+        let preview = if preview_shown { preview.min(room - files - git - changes).max(PREVIEW_MIN_WIDTH) } else { 0. };
         let git = if self.git_shown { git.min(room - files - changes - preview).max(GIT_MIN_WIDTH) } else { 0. };
         let files = if self.files_shown { files.min(room - changes - preview - git).max(FILES_MIN_WIDTH) } else { 0. };
         PanelWidths { changes, preview, git, files }
@@ -442,13 +443,5 @@ pub(super) fn panel_message(text: String, fg: Rgb) -> Div {
 
 /// 右侧面板的外框：定宽、占满高度、竖着排，左边一条分隔线。底色和字号由调用方接着写。
 pub(super) fn panel_shell(id: &'static str, width: f32, fg: Rgb) -> Stateful<Div> {
-    div()
-        .id(id)
-        .flex_none()
-        .w(px(width))
-        .h_full()
-        .flex()
-        .flex_col()
-        .border_l_1()
-        .border_color(divider_color(hsla(fg)))
+    div().id(id).flex_none().w(px(width)).h_full().flex().flex_col().border_l_1().border_color(divider_color(hsla(fg)))
 }

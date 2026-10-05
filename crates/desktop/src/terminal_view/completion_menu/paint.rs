@@ -85,7 +85,14 @@ struct Layout {
 /// 终端 `cols` 列、`rows` 行，光标在第 `cursor_row` 行、当前词从第 `word_row` 行开始，要列
 /// `items` 项、分组标签各占 `labels` 格时，菜单画在哪里。默认从光标下一行开始往下画；下面
 /// 放不下全部、上面又更宽裕时画在当前词的上面。上下都不到两行时不画。
-fn layout(cols: usize, rows: usize, cursor_row: usize, word_row: usize, items: usize, labels: &[usize]) -> Option<Layout> {
+fn layout(
+    cols: usize,
+    rows: usize,
+    cursor_row: usize,
+    word_row: usize,
+    items: usize,
+    labels: &[usize],
+) -> Option<Layout> {
     let mut label_lines: Vec<Vec<usize>> = Vec::new();
     let mut used = 0;
     for (i, &width) in labels.iter().enumerate() {
@@ -166,7 +173,9 @@ fn kind_label(kind: Kind, detail: Option<&str>) -> String {
         Kind::File => "completion.group.file",
     };
     match detail {
-        Some(detail) => format!("[{}]", rust_i18n::t!("completion.group.named", group = rust_i18n::t!(key), name = detail)),
+        Some(detail) => {
+            format!("[{}]", rust_i18n::t!("completion.group.named", group = rust_i18n::t!(key), name = detail))
+        }
         None => format!("[{}]", rust_i18n::t!(key)),
     }
 }
@@ -175,12 +184,8 @@ fn kind_label(kind: Kind, detail: Option<&str>) -> String {
 pub(super) fn groups(candidates: &[Candidate], items: &[usize]) -> Vec<(Kind, Option<String>)> {
     let mut groups = Vec::new();
     for kind in KINDS {
-        let mut details: Vec<Option<&str>> = items
-            .iter()
-            .map(|&i| &candidates[i])
-            .filter(|c| c.kind == kind)
-            .map(|c| c.detail.as_deref())
-            .collect();
+        let mut details: Vec<Option<&str>> =
+            items.iter().map(|&i| &candidates[i]).filter(|c| c.kind == kind).map(|c| c.detail.as_deref()).collect();
         details.sort_unstable();
         details.dedup();
         groups.extend(details.into_iter().map(|detail| (kind, detail.map(str::to_owned))));

@@ -259,7 +259,9 @@ fn collect(
                 .map(|head| String::from_utf8_lossy(&head).trim().to_owned());
             let base = match head {
                 Some(_) => "HEAD".to_owned(),
-                None => String::from_utf8_lossy(&git(repo, &["hash-object", "-t", "tree", "/dev/null"])?).trim().to_owned(),
+                None => {
+                    String::from_utf8_lossy(&git(repo, &["hash-object", "-t", "tree", "/dev/null"])?).trim().to_owned()
+                }
             };
             Some((diff(repo, &["--cached", &base]), head))
         });
@@ -277,16 +279,12 @@ fn collect(
     if let Some(extra) = extra {
         out.info = info::read(&status, head, &out.git_dir, extra);
     }
-    let mut untracked: Vec<_> = statuses
-        .iter()
-        .filter(|(_, status)| **status == FileStatus::Untracked)
-        .map(|(path, _)| path.clone())
-        .collect();
+    let mut untracked: Vec<_> =
+        statuses.iter().filter(|(_, status)| **status == FileStatus::Untracked).map(|(path, _)| path.clone()).collect();
     untracked.sort();
     // 指向目录的符号链接 git 当文件报，这里也不跟进去。
-    let (nested, untracked): (Vec<_>, Vec<_>) = untracked
-        .into_iter()
-        .partition(|path| fs::symlink_metadata(repo.join(path)).is_ok_and(|meta| meta.is_dir()));
+    let (nested, untracked): (Vec<_>, Vec<_>) =
+        untracked.into_iter().partition(|path| fs::symlink_metadata(repo.join(path)).is_ok_and(|meta| meta.is_dir()));
     for (ix, path) in untracked.into_iter().enumerate() {
         unstaged.push(untracked_diff(repo, path, ix < MAX_UNTRACKED_FILES, cache, seen));
     }
@@ -651,7 +649,10 @@ Binary files /dev/null and b/logo.png differ
         assert_eq!(renamed.old_path, Some(PathBuf::from("old name.txt")));
 
         let deleted = &files[2];
-        assert_eq!((deleted.status, deleted.path.clone(), deleted.removed), (FileStatus::Deleted, "gone.txt".into(), 1));
+        assert_eq!(
+            (deleted.status, deleted.path.clone(), deleted.removed),
+            (FileStatus::Deleted, "gone.txt".into(), 1)
+        );
 
         let binary = &files[3];
         assert!(binary.binary);
@@ -660,7 +661,8 @@ Binary files /dev/null and b/logo.png differ
 
     #[test]
     fn strips_the_tab_git_adds_after_paths_with_spaces() {
-        let files = parse_diff("diff --git a/a b.txt b/a b.txt\n--- a/a b.txt\t\n+++ b/a b.txt\t\n@@ -1 +1,2 @@\n a\n+b\n");
+        let files =
+            parse_diff("diff --git a/a b.txt b/a b.txt\n--- a/a b.txt\t\n+++ b/a b.txt\t\n@@ -1 +1,2 @@\n a\n+b\n");
         assert_eq!(files[0].path, PathBuf::from("a b.txt"));
     }
 
@@ -737,7 +739,10 @@ Binary files /dev/null and b/logo.png differ
         let snapshot = snapshot(&base, &mut cache).unwrap();
         let paths = |files: &[FileDiff]| files.iter().map(|file| file.path.clone()).collect::<Vec<_>>();
         assert_eq!(paths(&snapshot.staged), [PathBuf::from("a.txt")]);
-        assert_eq!(paths(&snapshot.unstaged), [PathBuf::from("a.txt"), "big.txt".into(), "blob.bin".into(), "new.txt".into()]);
+        assert_eq!(
+            paths(&snapshot.unstaged),
+            [PathBuf::from("a.txt"), "big.txt".into(), "blob.bin".into(), "new.txt".into()]
+        );
         assert_eq!(snapshot.staged[0].hunks[0].lines[1].text, "two");
         assert_eq!(snapshot.unstaged[0].hunks[0].lines[1].text, "three");
         assert_eq!(snapshot.changed(), 4);

@@ -83,10 +83,7 @@ fn cursor_blinks_unless_configured_or_steadied() {
     assert_eq!(blinking(&mut session), Some(false));
 
     // 光标闪烁是主题的一部分，改的是 VT 的默认值。
-    session.apply_theme(&TermSettings {
-        cursor_blink: Some(false),
-        ..TermSettings::default()
-    });
+    session.apply_theme(&TermSettings { cursor_blink: Some(false), ..TermSettings::default() });
     session.feed(b"\x1b[0 q");
     assert_eq!(blinking(&mut session), Some(false));
 }

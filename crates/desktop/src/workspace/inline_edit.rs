@@ -24,12 +24,13 @@ impl InlineEdit {
     pub fn new(text: String, select: usize, finish: Finish, window: &mut Window, cx: &mut Context<WindowView>) -> Self {
         let field = cx.new(|cx| SearchField::editing(text, select, cx));
         // 输入框原本是搜索框：回车是「下一个」，Esc 是「关闭搜索」，在这里分别是确定和取消。
-        let events = cx.subscribe_in(&field, window, move |this, _, event: &SearchFieldEvent, window, cx| match event {
-            SearchFieldEvent::Next => finish(this, true, window, cx),
-            SearchFieldEvent::Dismiss => finish(this, false, window, cx),
-            SearchFieldEvent::Changed(_) => cx.notify(),
-            SearchFieldEvent::Previous => {}
-        });
+        let events =
+            cx.subscribe_in(&field, window, move |this, _, event: &SearchFieldEvent, window, cx| match event {
+                SearchFieldEvent::Next => finish(this, true, window, cx),
+                SearchFieldEvent::Dismiss => finish(this, false, window, cx),
+                SearchFieldEvent::Changed(_) => cx.notify(),
+                SearchFieldEvent::Previous => {}
+            });
         let focus = field.focus_handle(cx);
         let blur = cx.on_blur(&focus, window, move |this, window, cx| {
             if window.is_window_active() {

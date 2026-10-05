@@ -3,8 +3,8 @@
 //! 自己的 locales 里，语言的解析和切换也在那边（见 `runode_config::i18n`），这里只读系统
 //! 偏好的语言。两边的语言集合必须一致。
 
-pub use runode_config::i18n::{current, set};
 use runode_config::i18n::{FALLBACK, resolve};
+pub use runode_config::i18n::{current, set};
 
 /// 系统偏好的语言里第一个有翻译的，都没有时用英文。
 pub fn system() -> String {

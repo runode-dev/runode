@@ -102,13 +102,12 @@ impl Region {
                 Some(_) => "",
                 None => screen,
             },
-            Self::CurrentPromptBlockMarker => {
-                current_block_marker(&lines).map_or("", |i| lines.line(i))
-            }
+            Self::CurrentPromptBlockMarker => current_block_marker(&lines).map_or("", |i| lines.line(i)),
             Self::AfterCurrentPromptBlockMarker => current_block_marker(&lines).map_or("", |i| lines.from(i)),
             Self::PromptBoxBody => match prompt_box_top(&lines) {
                 Some(top) => {
-                    let end = (top + 1..lines.len()).find(|&i| is_horizontal_rule(lines.line(i))).unwrap_or(lines.len());
+                    let end =
+                        (top + 1..lines.len()).find(|&i| is_horizontal_rule(lines.line(i))).unwrap_or(lines.len());
                     lines.between(top + 1, end)
                 }
                 None => "",
@@ -281,7 +280,14 @@ mod tests {
         assert_eq!(Region::parse(" whole_recent "), Some(Region::WholeRecent));
         assert_eq!(Region::parse("bottom_non_empty_lines(12)"), Some(Region::BottomNonEmptyLines(12)));
         assert_eq!(Region::parse("top_non_empty_lines(20)"), Some(Region::TopNonEmptyLines(20)));
-        for bad in ["after_last_promt_marker", "bottom_lines(x)", "top_non_empty_lines(0)", "top_non_empty_lines(07)", "top_non_empty_lines(70000)", "bottom_lines(3"] {
+        for bad in [
+            "after_last_promt_marker",
+            "bottom_lines(x)",
+            "top_non_empty_lines(0)",
+            "top_non_empty_lines(07)",
+            "top_non_empty_lines(70000)",
+            "bottom_lines(3",
+        ] {
             assert_eq!(Region::parse(bad), None, "{bad}");
         }
     }

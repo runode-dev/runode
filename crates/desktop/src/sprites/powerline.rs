@@ -29,18 +29,8 @@ pub(super) fn powerline(cp: u32, m: Metrics, out: &mut Vec<Shape>) {
         // 半圆轮廓：只往内侧描边，外缘与实心半圆重合。
         0xe0b5 | 0xe0b7 => band(&half_circle(w, h), 0., t, out),
         0xe0d2 | 0xe0d4 => {
-            out.push(Shape::Polygon(vec![
-                [0., 0.],
-                [w, 0.],
-                [w / 2., h / 2. - t / 2.],
-                [0., h / 2. - t / 2.],
-            ]));
-            out.push(Shape::Polygon(vec![
-                [0., h],
-                [w, h],
-                [w / 2., h / 2. + t / 2.],
-                [0., h / 2. + t / 2.],
-            ]));
+            out.push(Shape::Polygon(vec![[0., 0.], [w, 0.], [w / 2., h / 2. - t / 2.], [0., h / 2. - t / 2.]]));
+            out.push(Shape::Polygon(vec![[0., h], [w, h], [w / 2., h / 2. + t / 2.], [0., h / 2. + t / 2.]]));
         }
         _ => unreachable!("powerline 码点范围在 shapes 里已经限定"),
     }
@@ -66,7 +56,10 @@ fn half_circle(w: f32, h: f32) -> Vec<[f32; 2]> {
 
 #[cfg(test)]
 mod tests {
-    use crate::sprites::{Shape, shapes, testing::{metrics, raster}};
+    use crate::sprites::{
+        Shape, shapes,
+        testing::{metrics, raster},
+    };
 
     #[test]
     fn powerline_triangle_and_half_circle() {
@@ -78,10 +71,7 @@ mod tests {
         );
         let tri = raster('\u{e0b0}', m);
         assert!(tri[1..15].iter().all(|row| row[0] == 0xff), "左边全高");
-        assert!(
-            tri[7][6] == 0xff && tri[8][6] == 0xff,
-            "尖端附近只剩中间两行"
-        );
+        assert!(tri[7][6] == 0xff && tri[8][6] == 0xff, "尖端附近只剩中间两行");
         assert!(tri[5][6] == 0 && tri[10][6] == 0 && tri[0][7] == 0 && tri[15][7] == 0);
         let left = raster('\u{e0b2}', m);
         assert!(left[1..15].iter().all(|row| row[7] == 0xff), "镜像后贴右边");
@@ -92,9 +82,6 @@ mod tests {
         assert!(half[7][7] == 0xff && half[8][7] == 0xff, "中段铺到半径处");
         let outline = raster('\u{e0b5}', m);
         assert!(outline[8][7] == 0xff && outline[8][3] == 0, "轮廓只描外缘");
-        assert!(
-            outline[0][0] == 0xff && outline[15][0] == 0xff,
-            "上下端贴着左上、左下角"
-        );
+        assert!(outline[0][0] == 0xff && outline[15][0] == 0xff, "上下端贴着左上、左下角");
     }
 }

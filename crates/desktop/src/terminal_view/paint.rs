@@ -3,8 +3,8 @@
 use std::{collections::HashMap, rc::Rc};
 
 use gpui::{
-    Bounds, ContentMask, FontStyle, FontWeight, Hsla, Pixels, Point, ShapedLine, SharedString, TextRun, Window,
-    fill, point, px, size,
+    Bounds, ContentMask, FontStyle, FontWeight, Hsla, Pixels, Point, ShapedLine, SharedString, TextRun, Window, fill,
+    point, px, size,
 };
 use runode_config::CellHeight;
 use runode_shared_types::{
@@ -46,11 +46,7 @@ impl TerminalView {
             None => natural,
         }
         .max(1.);
-        let metrics = Metrics {
-            cell: size(px(snap(width)), px(snap(height).ceil())),
-            ascent,
-            descent,
-        };
+        let metrics = Metrics { cell: size(px(snap(width)), px(snap(height).ceil())), ascent, descent };
         self.metrics = Some(metrics);
         metrics
     }
@@ -104,10 +100,7 @@ pub(super) fn paint_frame(
 ) {
     let cw = metrics.cell.width;
     let ch = metrics.cell.height;
-    let grid = Bounds::new(
-        origin,
-        size(cw * f32::from(frame.cols), ch * f32::from(frame.rows)),
-    );
+    let grid = Bounds::new(origin, size(cw * f32::from(frame.cols), ch * f32::from(frame.rows)));
     // 平滑滚动时整屏往下错开不足一行，视口上面那一行（y 为 -1）从顶上露出一部分，最下面一行
     // 被网格的下边裁掉。指针换算也跟着错开。
     let origin = origin + point(px(0.), ch * frame.scroll_offset);
@@ -117,12 +110,8 @@ pub(super) fn paint_frame(
     let rows = || above.into_iter().chain((0..frame.rows).map(|y| (i32::from(y), frame.row(y))));
 
     let scale = window.scale_factor();
-    let sprite_metrics = sprites::Metrics::new(
-        f32::from(cw),
-        f32::from(ch),
-        f32::from(view.font_size) * UNDERLINE_THICKNESS_EM,
-        scale,
-    );
+    let sprite_metrics =
+        sprites::Metrics::new(f32::from(cw), f32::from(ch), f32::from(view.font_size) * UNDERLINE_THICKNESS_EM, scale);
 
     // 闪烁到灭的一半时不画光标；没有焦点时光标不闪，总画空心框。光标落在选区里时也不画，
     // 免得盖住那一格的选区颜色。
@@ -131,116 +120,111 @@ pub(super) fn paint_frame(
             || frame.row(c.y).get(usize::from(c.x)).is_some_and(|cell| cell.selected)
     });
     // 有焦点时块状光标是实心的，光标下的字形改用光标文字色（默认背景色）画，保证仍然看得清。
-    let filled_cursor = frame.cursor.filter(|c| {
-        focused && !cursor_hidden && c.shape == CursorShape::Block && view.marked_text.is_none()
-    });
+    let filled_cursor = frame
+        .cursor
+        .filter(|c| focused && !cursor_hidden && c.shape == CursorShape::Block && view.marked_text.is_none());
     let suggestion = view.visible_suggestion().map(|s| s.rest.clone());
 
     let mask = ContentMask { bounds: grid };
-    window.with_content_mask(Some(mask), |window| window.paint_layer(grid, |window| {
-        // 背景：每行把同色的相邻单元格合并成一块画。
-        for (y, row) in rows() {
-            let mut x = 0usize;
-            while x < row.len() {
-                let Some(bg) = row[x].bg else {
-                    x += 1;
-                    continue;
-                };
-                let start = x;
-                while x < row.len() && row[x].bg == Some(bg) {
-                    x += 1;
+    window.with_content_mask(Some(mask), |window| {
+        window.paint_layer(grid, |window| {
+            // 背景：每行把同色的相邻单元格合并成一块画。
+            for (y, row) in rows() {
+                let mut x = 0usize;
+                while x < row.len() {
+                    let Some(bg) = row[x].bg else {
+                        x += 1;
+                        continue;
+                    };
+                    let start = x;
+                    while x < row.len() && row[x].bg == Some(bg) {
+                        x += 1;
+                    }
+                    window.paint_quad(fill(
+                        Bounds::new(cell_origin(start as u16, y), size(cw * (x - start) as f32, ch)),
+                        hsla(bg),
+                    ));
                 }
+            }
+
+            if let Some(cursor) = filled_cursor {
+                let width = if cursor.wide { cw * 2. } else { cw };
                 window.paint_quad(fill(
-                    Bounds::new(
-                        cell_origin(start as u16, y),
-                        size(cw * (x - start) as f32, ch),
-                    ),
-                    hsla(bg),
+                    Bounds::new(cell_origin(cursor.x, i32::from(cursor.y)), size(width, ch)),
+                    hsla(cursor.color),
                 ));
             }
-        }
 
-        if let Some(cursor) = filled_cursor {
-            let width = if cursor.wide { cw * 2. } else { cw };
-            window.paint_quad(fill(
-                Bounds::new(cell_origin(cursor.x, i32::from(cursor.y)), size(width, ch)),
-                hsla(cursor.color),
-            ));
-        }
-
-        // 字形和装饰线。
-        let baseline = (ch - metrics.ascent - metrics.descent) / 2. + metrics.ascent;
-        for (y, row) in rows() {
-            for (x, cell) in row.iter().enumerate() {
-                let x = x as u16;
-                if cell.spacer {
-                    continue;
+            // 字形和装饰线。
+            let baseline = (ch - metrics.ascent - metrics.descent) / 2. + metrics.ascent;
+            for (y, row) in rows() {
+                for (x, cell) in row.iter().enumerate() {
+                    let x = x as u16;
+                    if cell.spacer {
+                        continue;
+                    }
+                    let bg = cell.bg.unwrap_or(frame.background);
+                    let mut fg = if cell.attrs.faint { faint(cell.fg, bg) } else { cell.fg };
+                    if let Some(cursor) = filled_cursor.filter(|c| c.x == x && i32::from(c.y) == y) {
+                        fg = cursor.text;
+                    }
+                    let position = cell_origin(x, y);
+                    let width = if cell.wide { cw * 2. } else { cw };
+                    if cell.attrs.underline {
+                        window.paint_quad(fill(
+                            Bounds::new(position + point(px(0.), ch - px(2.)), size(width, px(1.))),
+                            hsla(fg),
+                        ));
+                    }
+                    if cell.attrs.strikethrough {
+                        window.paint_quad(fill(
+                            Bounds::new(position + point(px(0.), ch / 2.), size(width, px(1.))),
+                            hsla(fg),
+                        ));
+                    }
+                    if cell.text.is_empty() || cell.text == " " {
+                        continue;
+                    }
+                    // 方框线、块元素、Powerline 等符号自绘，铺满单元格，不用字体字形。
+                    if !cell.wide
+                        && let Some(shapes) = sprites::shapes(&cell.text, sprite_metrics)
+                    {
+                        sprites::paint(&shapes, position, scale, hsla(fg), window);
+                        continue;
+                    }
+                    let line = view.shape(&cell.text, cell.attrs, window);
+                    paint_glyphs(&line, position + point(px(0.), baseline), hsla(fg), window);
                 }
-                let bg = cell.bg.unwrap_or(frame.background);
-                let mut fg = if cell.attrs.faint {
-                    faint(cell.fg, bg)
-                } else {
-                    cell.fg
-                };
-                if let Some(cursor) = filled_cursor.filter(|c| c.x == x && i32::from(c.y) == y) {
-                    fg = cursor.text;
-                }
-                let position = cell_origin(x, y);
-                let width = if cell.wide { cw * 2. } else { cw };
-                if cell.attrs.underline {
-                    window.paint_quad(fill(
-                        Bounds::new(position + point(px(0.), ch - px(2.)), size(width, px(1.))),
-                        hsla(fg),
-                    ));
-                }
-                if cell.attrs.strikethrough {
-                    window.paint_quad(fill(
-                        Bounds::new(position + point(px(0.), ch / 2.), size(width, px(1.))),
-                        hsla(fg),
-                    ));
-                }
-                if cell.text.is_empty() || cell.text == " " {
-                    continue;
-                }
-                // 方框线、块元素、Powerline 等符号自绘，铺满单元格，不用字体字形。
-                if !cell.wide
-                    && let Some(shapes) = sprites::shapes(&cell.text, sprite_metrics)
-                {
-                    sprites::paint(&shapes, position, scale, hsla(fg), window);
-                    continue;
-                }
-                let line = view.shape(&cell.text, cell.attrs, window);
-                paint_glyphs(&line, position + point(px(0.), baseline), hsla(fg), window);
             }
-        }
 
-        // 灰字建议：从光标处往右逐字画，不写进屏幕；画到行尾为止，不折行。落在实心光标下的
-        // 那个字和普通文字一样改用光标文字色。
-        if let (Some(cursor), Some(rest)) = (frame.cursor, suggestion.as_deref()) {
-            let dim = faint(frame.foreground, frame.background);
-            let mut x = cursor.x;
-            for c in rest.chars() {
-                let width = u16::from(runode_terminal::cell_width(c));
-                if width == 0 {
-                    continue;
+            // 灰字建议：从光标处往右逐字画，不写进屏幕；画到行尾为止，不折行。落在实心光标下的
+            // 那个字和普通文字一样改用光标文字色。
+            if let (Some(cursor), Some(rest)) = (frame.cursor, suggestion.as_deref()) {
+                let dim = faint(frame.foreground, frame.background);
+                let mut x = cursor.x;
+                for c in rest.chars() {
+                    let width = u16::from(runode_terminal::cell_width(c));
+                    if width == 0 {
+                        continue;
+                    }
+                    if x + width > frame.cols {
+                        break;
+                    }
+                    let color = match filled_cursor {
+                        Some(filled) if filled.x == x && filled.y == cursor.y => filled.text,
+                        _ => dim,
+                    };
+                    if c != ' ' {
+                        let mut buf = [0; 4];
+                        let line = view.shape(c.encode_utf8(&mut buf), Attrs::default(), window);
+                        let position = cell_origin(x, i32::from(cursor.y));
+                        paint_glyphs(&line, position + point(px(0.), baseline), hsla(color), window);
+                    }
+                    x += width;
                 }
-                if x + width > frame.cols {
-                    break;
-                }
-                let color = match filled_cursor {
-                    Some(filled) if filled.x == x && filled.y == cursor.y => filled.text,
-                    _ => dim,
-                };
-                if c != ' ' {
-                    let mut buf = [0; 4];
-                    let line = view.shape(c.encode_utf8(&mut buf), Attrs::default(), window);
-                    let position = cell_origin(x, i32::from(cursor.y));
-                    paint_glyphs(&line, position + point(px(0.), baseline), hsla(color), window);
-                }
-                x += width;
             }
-        }
-    }));
+        })
+    });
 
     // 盖在文字上方的光标形状，以及输入法预编辑文本。
     let mut cursor_bounds = None;
@@ -249,44 +233,46 @@ pub(super) fn paint_frame(
         let width = if cursor.wide { cw * 2. } else { cw };
         cursor_bounds = Some(Bounds::new(position, size(width, ch)));
         let color = hsla(cursor.color);
-        window.with_content_mask(Some(mask), |window| window.paint_layer(grid, |window| {
-            if let Some(text) = view.marked_text.clone() {
-                let line = view.shape(&text, Attrs::default(), window);
-                let area = Bounds::new(position, size(line.width.max(cw), ch));
-                window.paint_quad(fill(area, hsla(frame.background)));
-                window.paint_quad(fill(
-                    Bounds::new(position + point(px(0.), ch - px(2.)), size(area.size.width, px(1.))),
-                    hsla(frame.foreground),
-                ));
-                let baseline = (ch - metrics.ascent - metrics.descent) / 2. + metrics.ascent;
-                paint_glyphs(&line, position + point(px(0.), baseline), hsla(frame.foreground), window);
-                return;
-            }
-            if cursor_hidden {
-                return;
-            }
-            // 竖条、下划线和空心框的线宽都是一个设备像素。
-            let line = px(1. / scale);
-            let quads: &[Bounds<Pixels>] = match (focused, cursor.shape) {
-                (true, CursorShape::Block) => &[],
-                // 骑在单元格左边线上，落在两个字符之间而不是贴着右边的字符。
-                (true, CursorShape::Bar) => &[Bounds::new(position - point(line, px(0.)), size(line, ch))],
-                // 和文字下划线同一高度。
-                (true, CursorShape::Underline) => {
-                    &[Bounds::new(position + point(px(0.), ch - px(2.)), size(width, line))]
+        window.with_content_mask(Some(mask), |window| {
+            window.paint_layer(grid, |window| {
+                if let Some(text) = view.marked_text.clone() {
+                    let line = view.shape(&text, Attrs::default(), window);
+                    let area = Bounds::new(position, size(line.width.max(cw), ch));
+                    window.paint_quad(fill(area, hsla(frame.background)));
+                    window.paint_quad(fill(
+                        Bounds::new(position + point(px(0.), ch - px(2.)), size(area.size.width, px(1.))),
+                        hsla(frame.foreground),
+                    ));
+                    let baseline = (ch - metrics.ascent - metrics.descent) / 2. + metrics.ascent;
+                    paint_glyphs(&line, position + point(px(0.), baseline), hsla(frame.foreground), window);
+                    return;
                 }
-                // 没有焦点或明确要求空心时：只画轮廓。
-                _ => &[
-                    Bounds::new(position, size(width, line)),
-                    Bounds::new(position + point(px(0.), ch - line), size(width, line)),
-                    Bounds::new(position, size(line, ch)),
-                    Bounds::new(position + point(width - line, px(0.)), size(line, ch)),
-                ],
-            };
-            for quad in quads {
-                window.paint_quad(fill(*quad, color));
-            }
-        }));
+                if cursor_hidden {
+                    return;
+                }
+                // 竖条、下划线和空心框的线宽都是一个设备像素。
+                let line = px(1. / scale);
+                let quads: &[Bounds<Pixels>] = match (focused, cursor.shape) {
+                    (true, CursorShape::Block) => &[],
+                    // 骑在单元格左边线上，落在两个字符之间而不是贴着右边的字符。
+                    (true, CursorShape::Bar) => &[Bounds::new(position - point(line, px(0.)), size(line, ch))],
+                    // 和文字下划线同一高度。
+                    (true, CursorShape::Underline) => {
+                        &[Bounds::new(position + point(px(0.), ch - px(2.)), size(width, line))]
+                    }
+                    // 没有焦点或明确要求空心时：只画轮廓。
+                    _ => &[
+                        Bounds::new(position, size(width, line)),
+                        Bounds::new(position + point(px(0.), ch - line), size(width, line)),
+                        Bounds::new(position, size(line, ch)),
+                        Bounds::new(position + point(width - line, px(0.)), size(line, ch)),
+                    ],
+                };
+                for quad in quads {
+                    window.paint_quad(fill(*quad, color));
+                }
+            })
+        });
     }
     view.cursor_bounds = cursor_bounds;
 }

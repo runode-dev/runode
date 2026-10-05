@@ -123,7 +123,13 @@ pub enum AttachMode {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ClientMsg {
     /// 连上后的第一条消息。宿主回 `HostMsg::Welcome`，协议版本对不上时回 `Incompatible`。
-    Hello { protocol: u32, build: BuildId, client: ClientKind, #[serde(default)] caps: Caps },
+    Hello {
+        protocol: u32,
+        build: BuildId,
+        client: ClientKind,
+        #[serde(default)]
+        caps: Caps,
+    },
     /// 要所有会话的列表，宿主回 `SessionList`。
     ListSessions,
     /// 新开一个会话。`req` 是前端自己编的号，宿主回 `Spawned` 时带回来。开好的会话不会自动
@@ -167,38 +173,86 @@ pub enum ClientMsg {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum HostMsg {
     /// 回 `Hello`。`snapshot_format` 是宿主编的快照的格式版本（libghostty 快照开头的版本号）。
-    Welcome { protocol: u32, build: BuildId, host_pid: u32, snapshot_format: u16 },
+    Welcome {
+        protocol: u32,
+        build: BuildId,
+        host_pid: u32,
+        snapshot_format: u16,
+    },
     /// 协议版本对不上，宿主接着关掉连接。
-    Incompatible { protocol: u32, build: BuildId, reason: String },
-    SessionList { sessions: Vec<SessionInfo> },
+    Incompatible {
+        protocol: u32,
+        build: BuildId,
+        reason: String,
+    },
+    SessionList {
+        sessions: Vec<SessionInfo>,
+    },
     /// 回 `Spawn`。
-    Spawned { req: u32, id: SessionId },
+    Spawned {
+        req: u32,
+        id: SessionId,
+    },
     /// 回 `Attach`。`channel` 是这个会话的帧在这条连接上用的通道，见 `Frame::channel`；
     /// `mode` 是宿主实际给的，前端要快照、构建又不一样时退成 `VtReplay`。之后先是快照帧和
     /// `SnapshotEnd`（`MetaOnly` 时没有），再是输出。
-    Attached { id: SessionId, channel: u32, size: GridSize, mode: AttachMode, meta: SessionMeta },
+    Attached {
+        id: SessionId,
+        channel: u32,
+        size: GridSize,
+        mode: AttachMode,
+        meta: SessionMeta,
+    },
     /// 快照或 VT 重放发完了，之后的 `Output` 帧接着它喂。
-    SnapshotEnd { id: SessionId },
+    SnapshotEnd {
+        id: SessionId,
+    },
     /// 宿主在这里改了 VT 的尺寸；前端的 VT 也在这里改，之后的输出是按新尺寸来的。
-    Resized { id: SessionId, size: GridSize },
+    Resized {
+        id: SessionId,
+        size: GridSize,
+    },
     /// 宿主在这里应用了 `SetTheme` 的主题；前端的 VT 也在这里应用。应用主题会改 VT 的状态
     /// （比如重设光标闪烁），两边要在输出流的同一个位置做。
-    ThemeApplied { id: SessionId },
+    ThemeApplied {
+        id: SessionId,
+    },
     /// 会话对外公布的状态变了：标题、agent、目录、shell 集成报告的东西。
-    Meta { id: SessionId, meta: SessionMeta },
+    Meta {
+        id: SessionId,
+        meta: SessionMeta,
+    },
     /// shell 集成报告一条命令运行完了，要记进历史时由前端记。
-    CommandFinished { id: SessionId, command: FinishedCommand },
+    CommandFinished {
+        id: SessionId,
+        command: FinishedCommand,
+    },
     /// 宿主没法再保证前端的 VT 和自己的一样（比如前端读得太慢、输出被丢掉了），前端要重新
     /// `Attach`。
-    Resync { id: SessionId, reason: String },
+    Resync {
+        id: SessionId,
+        reason: String,
+    },
     /// 会话里的 shell 退出了。`status` 是退出码，被信号结束等拿不到时为 `None`。
-    Exited { id: SessionId, status: Option<i32> },
+    Exited {
+        id: SessionId,
+        status: Option<i32>,
+    },
     /// 回 `ReadScreen`：一行一个 `\n`，行尾空白去掉。
-    ScreenText { id: SessionId, text: String },
+    ScreenText {
+        id: SessionId,
+        text: String,
+    },
     /// 请求没法办，`req`、`id` 是对得上的那条请求的。
-    Error { req: Option<u32>, id: Option<SessionId>, message: String },
+    Error {
+        req: Option<u32>,
+        id: Option<SessionId>,
+        message: String,
+    },
     /// 宿主要断开这条连接了。
-    Goodbye { reason: GoodbyeReason },
+    Goodbye {
+        reason: GoodbyeReason,
+    },
     /// 比自己新的宿主才有的消息，前端忽略它。
     #[serde(other)]
     Unknown,

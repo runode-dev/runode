@@ -28,10 +28,7 @@ pub fn titlebar_options() -> TitlebarOptions {
     TitlebarOptions {
         title: Some(DEFAULT_TITLE.into()),
         appears_transparent: true,
-        traffic_light_position: Some(point(
-            px(TRAFFIC_LIGHTS_ORIGIN.0),
-            px(TRAFFIC_LIGHTS_ORIGIN.1),
-        )),
+        traffic_light_position: Some(point(px(TRAFFIC_LIGHTS_ORIGIN.0), px(TRAFFIC_LIGHTS_ORIGIN.1))),
     }
 }
 
@@ -138,12 +135,7 @@ pub(super) fn titled(title: SharedString, mark: Option<Mark>, id: impl Into<Elem
 /// agent 的状态标记：工作中播放该 agent 自己的工作动画，空闲时是一个空心圆点，等回答是琥珀色
 /// 实心圆点，干完了没看是绿色的对勾。
 pub(super) fn agent_mark(mark: Mark, id: impl Into<ElementId>, fg: Hsla) -> AnyElement {
-    let slot = div()
-        .flex_none()
-        .w(px(AGENT_MARK_WIDTH))
-        .flex()
-        .justify_center()
-        .items_center();
+    let slot = div().flex_none().w(px(AGENT_MARK_WIDTH)).flex().justify_center().items_center();
     match mark.status {
         // 所有转圈的标记共用同一个时钟，同一种 agent 的几个标签一起转时步调一致。
         Status::Working => {
@@ -153,9 +145,7 @@ pub(super) fn agent_mark(mark: Mark, id: impl Into<ElementId>, fg: Hsla) -> AnyE
                 .with_animation(
                     id,
                     // 每格只重画一次：转圈每动一下都要重画整个窗口，并不便宜。
-                    Animation::new(period)
-                        .repeat_synced()
-                        .with_max_fps(1. / frame_time.as_secs_f32()),
+                    Animation::new(period).repeat_synced().with_max_fps(1. / frame_time.as_secs_f32()),
                     move |slot, delta| {
                         let frame = (delta * frames.len() as f32) as usize;
                         slot.child(frames[frame.min(frames.len() - 1)])
@@ -163,25 +153,15 @@ pub(super) fn agent_mark(mark: Mark, id: impl Into<ElementId>, fg: Hsla) -> AnyE
                 )
                 .into_any_element()
         }
-        Status::Idle => slot
-            .child(
-                div()
-                    .size(px(6.))
-                    .rounded_full()
-                    .border_1()
-                    .border_color(fg.opacity(0.6)),
-            )
-            .into_any_element(),
+        Status::Idle => {
+            slot.child(div().size(px(6.)).rounded_full().border_1().border_color(fg.opacity(0.6))).into_any_element()
+        }
         // 等用户回答：不动的实心琥珀色圆点，比空闲显眼。
-        Status::Blocked => slot
-            .child(div().size(px(7.)).rounded_full().bg(gpui::rgb(AGENT_BLOCKED_COLOR)))
-            .into_any_element(),
+        Status::Blocked => {
+            slot.child(div().size(px(7.)).rounded_full().bg(gpui::rgb(AGENT_BLOCKED_COLOR))).into_any_element()
+        }
         // 干完了还没看：绿色对勾，和等回答的圆点形状也不同，不靠颜色也分得开。
-        Status::Done => slot
-            .text_size(px(11.))
-            .text_color(gpui::rgb(AGENT_DONE_COLOR))
-            .child("✓")
-            .into_any_element(),
+        Status::Done => slot.text_size(px(11.)).text_color(gpui::rgb(AGENT_DONE_COLOR)).child("✓").into_any_element(),
     }
 }
 
@@ -222,19 +202,8 @@ impl WindowView {
         let fg = hsla(fg);
         let group = SharedString::from(format!("tab-{ix}"));
         // 当前标签自己就是一块亮色，和它相邻的分隔线去掉，只是不画颜色，免得宽度跳动。
-        let divider = if active || ix == workspace.active + 1 {
-            fg.opacity(0.)
-        } else {
-            divider_color(fg)
-        };
-        let dragged = DraggedTab {
-            id,
-            ix,
-            title: title.clone(),
-            width,
-            fg,
-            bg: active_bg,
-        };
+        let divider = if active || ix == workspace.active + 1 { fg.opacity(0.) } else { divider_color(fg) };
+        let dragged = DraggedTab { id, ix, title: title.clone(), width, fg, bg: active_bg };
         let compact = width < px(TAB_COMPACT_WIDTH);
         let bell_dot = || div().size(px(6.)).rounded_full().bg(fg.opacity(0.8));
         // 右侧槽位：响铃标记优先，其次快捷键提示；紧凑时只在响铃时占一个圆点的宽度。
@@ -250,15 +219,7 @@ impl WindowView {
                     .children(tab_shortcut(ix, workspace.tabs.len(), cx))
                     .into_any_element()
             };
-            Some(
-                div()
-                    .flex_none()
-                    .w(px(TAB_SIDE_SLOT))
-                    .flex()
-                    .justify_end()
-                    .items_center()
-                    .child(content),
-            )
+            Some(div().flex_none().w(px(TAB_SIDE_SLOT)).flex().justify_end().items_center().child(content))
         };
         div()
             .id(("tab", ix))
@@ -276,8 +237,7 @@ impl WindowView {
                 if active {
                     tab.bg(active_bg).text_color(fg)
                 } else {
-                    tab.text_color(fg.opacity(0.55))
-                        .hover(|tab| tab.bg(hover_bg).text_color(fg.opacity(0.8)))
+                    tab.text_color(fg.opacity(0.55)).hover(|tab| tab.bg(hover_bg).text_color(fg.opacity(0.8)))
                 }
             })
             .on_mouse_down(
@@ -322,10 +282,7 @@ impl WindowView {
                     // prepaint 时隐藏、paint 时显示会让 gpui 去画没 prepaint 过的子元素而 panic。
                     .map(|close| {
                         if compact {
-                            close
-                                .w_0()
-                                .overflow_hidden()
-                                .group_hover(group, |close| close.w(px(TAB_CLOSE_SIZE)))
+                            close.w_0().overflow_hidden().group_hover(group, |close| close.w(px(TAB_CLOSE_SIZE)))
                         } else {
                             close.invisible().group_hover(group, |close| close.visible())
                         }

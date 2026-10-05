@@ -97,10 +97,7 @@ impl Dirs {
         }
         let parent = dir.parent().ok_or_else(|| Error::new(ErrorKind::NotFound, "runtime dir has no parent"))?;
         if meta.uid() != std::fs::metadata(parent)?.uid() {
-            return Err(Error::new(
-                ErrorKind::PermissionDenied,
-                format!("{} belongs to another user", dir.display()),
-            ));
+            return Err(Error::new(ErrorKind::PermissionDenied, format!("{} belongs to another user", dir.display())));
         }
         std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700))?;
         Ok(dir)
@@ -141,15 +138,9 @@ impl Dirs {
     pub fn ghostty_config_files(&self) -> Vec<PathBuf> {
         let mut dirs: Vec<PathBuf> = self.config.iter().map(|config| config.join("ghostty")).collect();
         if cfg!(target_os = "macos") {
-            dirs.extend(
-                self.home
-                    .iter()
-                    .map(|home| home.join("Library/Application Support/com.mitchellh.ghostty")),
-            );
+            dirs.extend(self.home.iter().map(|home| home.join("Library/Application Support/com.mitchellh.ghostty")));
         }
-        dirs.iter()
-            .flat_map(|dir| [dir.join("config"), dir.join("config.ghostty")])
-            .collect()
+        dirs.iter().flat_map(|dir| [dir.join("config"), dir.join("config.ghostty")]).collect()
     }
 
     /// Ghostty 用户自己的配色主题目录。
@@ -220,7 +211,8 @@ mod tests {
     fn socket_paths_must_fit_in_sun_path() {
         // 根目录下的 `/runode/run/host-dev.sock` 共 25 字节（release 构建的 `host.sock` 短 4
         // 字节），根目录拼上它正好 103 字节；再长就放不下了。
-        let fits = format!("/{}", "x".repeat(SUN_PATH_LEN - 2 - "/runode/run/".len() - HOST_NAME.len() - ".sock".len()));
+        let fits =
+            format!("/{}", "x".repeat(SUN_PATH_LEN - 2 - "/runode/run/".len() - HOST_NAME.len() - ".sock".len()));
         let socket = dirs(&[("HOME", "/h"), ("XDG_CONFIG_HOME", &fits)]).host_socket_file().unwrap();
         assert_eq!(socket.as_os_str().len(), SUN_PATH_LEN - 1);
         let too_long = format!("{fits}x");
@@ -262,7 +254,10 @@ mod tests {
     fn xdg_config_home_moves_the_root() {
         let dirs = dirs(&[("HOME", "/home/me"), ("XDG_CONFIG_HOME", "/xdg")]);
         assert_eq!(dirs.config_file(), Some("/xdg/runode/config.conf".into()));
-        assert_eq!(dirs.ghostty_config_files()[..2], [PathBuf::from("/xdg/ghostty/config"), "/xdg/ghostty/config.ghostty".into()]);
+        assert_eq!(
+            dirs.ghostty_config_files()[..2],
+            [PathBuf::from("/xdg/ghostty/config"), "/xdg/ghostty/config.ghostty".into()]
+        );
         // 家目录不跟着变。
         assert_eq!(dirs.expand_home("~/x"), PathBuf::from("/home/me/x"));
     }

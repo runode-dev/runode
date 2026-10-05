@@ -5,13 +5,7 @@ use std::path::PathBuf;
 /// `light:A,dark:B` 按系统外观取一个，否则原样返回。
 pub(crate) fn pick_theme(value: &str, dark: bool) -> String {
     let want = if dark { "dark:" } else { "light:" };
-    value
-        .split(',')
-        .map(str::trim)
-        .find_map(|part| part.strip_prefix(want))
-        .unwrap_or(value)
-        .trim()
-        .to_owned()
+    value.split(',').map(str::trim).find_map(|part| part.strip_prefix(want)).unwrap_or(value).trim().to_owned()
 }
 
 /// 编进二进制的配色主题，按名字排序。
@@ -39,10 +33,7 @@ pub(crate) fn find_theme(name: &str) -> Option<Theme> {
 }
 
 fn bundled_theme(name: &str) -> Option<&'static str> {
-    BUNDLED_THEMES
-        .binary_search_by(|(n, _)| (*n).cmp(name))
-        .ok()
-        .map(|i| BUNDLED_THEMES[i].1)
+    BUNDLED_THEMES.binary_search_by(|(n, _)| (*n).cmp(name)).ok().map(|i| BUNDLED_THEMES[i].1)
 }
 
 /// Ghostty 的资源目录：在 Ghostty 里启动的进程有 `GHOSTTY_RESOURCES_DIR`；
@@ -90,9 +81,7 @@ mod tests {
         for (name, text) in BUNDLED_THEMES {
             let mut config = Config::default();
             for entry in parse_entries(text, name) {
-                config
-                    .apply(&entry.key, &entry.value, false)
-                    .unwrap_or_else(|err| panic!("{}: {err}", entry.origin));
+                config.apply(&entry.key, &entry.value, false).unwrap_or_else(|err| panic!("{}: {err}", entry.origin));
             }
         }
     }

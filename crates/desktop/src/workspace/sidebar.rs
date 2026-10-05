@@ -8,16 +8,13 @@ use runode_shared_types::color::Rgb;
 
 use super::{
     AGENT_MARK_WIDTH, DIVIDER_GRAB_WIDTH, Divider, NewWorkspace, RenameWorkspace, Renaming, SelectLastWorkspace,
-    SelectWorkspace, TAB_CLOSE_SIZE, TITLEBAR_HEIGHT, TRAFFIC_LIGHTS_WIDTH, ToggleSidebar, WindowView, divider_color, drag_window,
+    SelectWorkspace, TAB_CLOSE_SIZE, TITLEBAR_HEIGHT, TRAFFIC_LIGHTS_WIDTH, ToggleSidebar, WindowView, divider_color,
+    drag_window,
     inline_edit::InlineEdit,
     model::{WorkspaceId, display_dir},
     titlebar::{agent_mark, close_button, drag_chip, icon_toggle, shortcut_hint},
 };
-use crate::{
-    assets::SIDEBAR_ICON,
-    terminal_view::hsla,
-    tooltip::tooltip,
-};
+use crate::{assets::SIDEBAR_ICON, terminal_view::hsla, tooltip::tooltip};
 
 /// 侧栏的默认宽度，比红绿灯宽得多，红绿灯落在侧栏顶上。
 const SIDEBAR_WIDTH: f32 = 200.;
@@ -97,7 +94,11 @@ impl WindowView {
 
     /// 红绿灯右边收起、展开侧栏的按钮，侧栏收着时也在原处，不随侧栏跳动。
     pub(super) fn render_sidebar_toggle(&self, fg: Rgb, bg: Rgb, cx: &mut Context<Self>) -> Stateful<Div> {
-        let text = if self.sidebar_visible() { rust_i18n::t!("tooltip.hide_sidebar") } else { rust_i18n::t!("tooltip.show_sidebar") };
+        let text = if self.sidebar_visible() {
+            rust_i18n::t!("tooltip.hide_sidebar")
+        } else {
+            rust_i18n::t!("tooltip.show_sidebar")
+        };
         let tooltip = tooltip(text, Some(&ToggleSidebar), fg, bg);
         icon_toggle("sidebar-toggle", SIDEBAR_ICON, 16., false, fg, bg)
             .absolute()
@@ -223,9 +224,7 @@ impl WindowView {
                 }),
             )
             // 改名时在输入框里拖选文字，不能把整行拖走。
-            .when(renaming.is_none(), |row| {
-                row.on_drag(dragged, |dragged, _, _, cx| cx.new(|_| dragged.clone()))
-            })
+            .when(renaming.is_none(), |row| row.on_drag(dragged, |dragged, _, _, cx| cx.new(|_| dragged.clone())))
             // 落点提示画在目标行靠近原位置的另一侧：往下拖插到它下面，往上拖插到它上面。
             .drag_over::<DraggedWorkspace>(move |style, dragged, _, _| {
                 let marker = fg.opacity(0.6);
@@ -307,15 +306,7 @@ impl WindowView {
             .gap(px(6.))
             .text_color(fg.opacity(0.55))
             .hover(|button| button.bg(hover_bg).text_color(fg))
-            .child(
-                div()
-                    .flex_none()
-                    .w(px(AGENT_MARK_WIDTH))
-                    .flex()
-                    .justify_center()
-                    .text_size(px(14.))
-                    .child("+"),
-            )
+            .child(div().flex_none().w(px(AGENT_MARK_WIDTH)).flex().justify_center().text_size(px(14.)).child("+"))
             .child(div().min_w_0().truncate().child(rust_i18n::t!("workspace.new").into_owned()))
             .tooltip(tooltip)
             .on_mouse_down(

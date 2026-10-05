@@ -108,11 +108,7 @@ fn plain(param: Option<&str>, action: Action) -> Result<Action, String> {
 
 macro_rules! plain {
     ($name:literal, $action:expr) => {
-        ActionSpec {
-            name: $name,
-            param: None,
-            parse: |param| plain(param, $action),
-        }
+        ActionSpec { name: $name, param: None, parse: |param| plain(param, $action) }
     };
 }
 
@@ -237,11 +233,7 @@ pub static ACTIONS: &[ActionSpec] = &[
             _ => Err("expected a non-zero number".into()),
         },
     },
-    ActionSpec {
-        name: "text",
-        param: Some("TEXT"),
-        parse: |param| Ok(Action::SendText(unescape(required(param)?)?)),
-    },
+    ActionSpec { name: "text", param: Some("TEXT"), parse: |param| Ok(Action::SendText(unescape(required(param)?)?)) },
     ActionSpec {
         name: "esc",
         param: Some("TEXT"),
@@ -492,8 +484,7 @@ fn key_name(key: &str) -> Result<String, String> {
     if let Some(rest) = key.strip_prefix("digit_").or_else(|| key.strip_prefix("key_")) {
         return Ok(rest.to_owned());
     }
-    let is_function_key =
-        key.strip_prefix('f').is_some_and(|n| n.parse::<u8>().is_ok_and(|n| (1..=24).contains(&n)));
+    let is_function_key = key.strip_prefix('f').is_some_and(|n| n.parse::<u8>().is_ok_and(|n| (1..=24).contains(&n)));
     if is_function_key || key.chars().count() == 1 {
         return Ok(key);
     }

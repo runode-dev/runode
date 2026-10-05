@@ -126,9 +126,9 @@ pub fn parse(text: &str, cursor: usize) -> Segment {
             }
             // 反斜杠在单引号外转义下一个字；双引号里只转义这几个字，别的时候原样留着。
             (Quote::None, '\\') | (Quote::Double, '\\')
-                if chars.peek().is_some_and(|&(_, next)| {
-                    quote == Quote::None || matches!(next, '"' | '\\' | '$' | '`')
-                }) =>
+                if chars
+                    .peek()
+                    .is_some_and(|&(_, next)| quote == Quote::None || matches!(next, '"' | '\\' | '$' | '`')) =>
             {
                 let (j, next) = chars.next().unwrap();
                 (next, j + next.len_utf8(), quote)
@@ -196,8 +196,27 @@ pub fn is_assignment(word: &str) -> bool {
 fn needs_escape(c: char) -> bool {
     matches!(
         c,
-        ' ' | '\t' | '\\' | '\'' | '"' | '$' | '`' | '&' | '|' | ';' | '<' | '>' | '(' | ')' | '{' | '}' | '['
-            | ']' | '*' | '?' | '!' | '#'
+        ' ' | '\t'
+            | '\\'
+            | '\''
+            | '"'
+            | '$'
+            | '`'
+            | '&'
+            | '|'
+            | ';'
+            | '<'
+            | '>'
+            | '('
+            | ')'
+            | '{'
+            | '}'
+            | '['
+            | ']'
+            | '*'
+            | '?'
+            | '!'
+            | '#'
     )
 }
 

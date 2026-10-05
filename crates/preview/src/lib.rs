@@ -5,8 +5,8 @@
 //! 由界面按当前终端主题换成实际的颜色，换主题时不必重新高亮。
 
 mod highlight;
-mod load;
 mod line;
+mod load;
 
 pub use highlight::{Color, Span, Style, highlight, syntax_name};
 pub use line::{DisplayLine, TAB_WIDTH, display_line};

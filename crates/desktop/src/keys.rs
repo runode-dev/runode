@@ -15,12 +15,7 @@ pub fn translate(keystroke: &Keystroke) -> Option<KeyInput> {
     }
     let (key, unshifted) = key_code(&keystroke.key)?;
 
-    let mods = Mods {
-        shift: m.shift,
-        ctrl: m.control,
-        alt: m.alt,
-        right_alt: m.alt && right_option_down(),
-    };
+    let mods = Mods { shift: m.shift, ctrl: m.control, alt: m.alt, right_alt: m.alt && right_option_down() };
 
     // Control 组合键由按键本身编码；平台给出的文本是控制字符，编码器不能再原样发出。
     let text = keystroke
@@ -40,13 +35,7 @@ pub fn translate(keystroke: &Keystroke) -> Option<KeyInput> {
         consumed_mods.alt = m.alt;
     }
 
-    Some(KeyInput {
-        key,
-        mods,
-        consumed_mods,
-        unshifted,
-        text,
-    })
+    Some(KeyInput { key, mods, consumed_mods, unshifted, text })
 }
 
 /// 当前按下的是不是右 Option。GPUI 的修饰键不分左右，这里读正在分发的
@@ -178,11 +167,7 @@ mod tests {
     use gpui::Modifiers;
 
     fn stroke(key: &str, key_char: Option<&str>, modifiers: Modifiers) -> Keystroke {
-        Keystroke {
-            modifiers,
-            key: key.into(),
-            key_char: key_char.map(Into::into),
-        }
+        Keystroke { modifiers, key: key.into(), key_char: key_char.map(Into::into) }
     }
 
     #[test]

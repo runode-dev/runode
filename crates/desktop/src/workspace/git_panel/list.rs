@@ -23,12 +23,7 @@ use crate::{
     file_icons::file_icon,
     terminal_view::hsla,
     tooltip::tooltip,
-    workspace::{
-        WindowView,
-        changes::diff_note_row,
-        files::menu_item,
-        project::status_color,
-    },
+    workspace::{WindowView, changes::diff_note_row, files::menu_item, project::status_color},
 };
 
 /// 每一行的高度：段标题、文件、块头和改动的行一样高，列表才能只画看得见的部分。
@@ -176,7 +171,15 @@ impl WindowView {
         let dim = hsla(fg).opacity(0.5);
         self.git_row(("git-section", ix), 0., fg, bg)
             .child(chevron(panel.section_expanded(section), fg))
-            .child(div().flex_1().min_w_0().truncate().text_size(px(11.)).font_weight(gpui::FontWeight::SEMIBOLD).child(label.into_owned()))
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .truncate()
+                    .text_size(px(11.))
+                    .font_weight(gpui::FontWeight::SEMIBOLD)
+                    .child(label.into_owned()),
+            )
             .child(self.row_buttons(buttons, fg, bg, cx))
             .child(
                 div()
@@ -309,7 +312,9 @@ impl WindowView {
         match shown_in {
             GitSection::Merge => items.push(item("git.mark_resolved", FileOp::Stage, enabled)),
             GitSection::Staged => items.push(item("git.unstage", FileOp::Unstage, enabled)),
-            _ => items.extend([item("git.stage", FileOp::Stage, enabled), item("git.discard", FileOp::Discard, enabled)]),
+            _ => {
+                items.extend([item("git.stage", FileOp::Stage, enabled), item("git.discard", FileOp::Discard, enabled)])
+            }
         }
         let target = self.git_focus.clone();
         self.open_menu(position, items, target, cx);
@@ -360,7 +365,15 @@ impl WindowView {
             .into_any_element()
     }
 
-    fn render_git_stash(&self, ix: usize, si: usize, git: &git::Snapshot, fg: Rgb, bg: Rgb, cx: &mut Context<Self>) -> AnyElement {
+    fn render_git_stash(
+        &self,
+        ix: usize,
+        si: usize,
+        git: &git::Snapshot,
+        fg: Rgb,
+        bg: Rgb,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let stash = &git.info.stashes[si];
         let index = stash.index;
         let stash_button = |icon, key: &'static str, op: StashOp| {

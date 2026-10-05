@@ -26,7 +26,8 @@ fn a_title_from_the_snapshot_goes_through_agent_detection() {
     let mut original = host(40, 6);
     original.feed("\x1b]0;✳ 修 bug\x07".as_bytes());
     let resumed =
-        HostSession::from_snapshot(&original.snapshot().unwrap(), unstarted_pty(40, 6), &TermSettings::default()).unwrap();
+        HostSession::from_snapshot(&original.snapshot().unwrap(), unstarted_pty(40, 6), &TermSettings::default())
+            .unwrap();
     assert_eq!(resumed.meta().title.as_deref(), Some("修 bug"));
     assert_eq!(resumed.meta().agent, original.meta().agent);
 }

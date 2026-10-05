@@ -29,7 +29,8 @@ pub struct ForegroundJob {
 
 /// 认出前台进程组里跑的是哪个 agent，认不出时为 `None`。
 pub fn identify_job(job: &ForegroundJob) -> Option<AgentKind> {
-    let usable = |process: &ForegroundProcess, kind: AgentKind| kind != AgentKind::Letta || letta_is_interactive(process);
+    let usable =
+        |process: &ForegroundProcess, kind: AgentKind| kind != AgentKind::Letta || letta_is_interactive(process);
     if let Some(leader) = job.processes.iter().find(|process| process.pid == job.leader)
         && let Some(kind) = agent_from_name(&effective_name(leader))
         && usable(leader, kind)
@@ -184,7 +185,16 @@ fn flag_matches(arg: &str, flags: &[&str]) -> bool {
 fn option_takes_value(arg: &str) -> bool {
     matches!(
         arg,
-        "-r" | "--require" | "--loader" | "--import" | "--experimental-loader" | "--inspect-port" | "-W" | "-X" | "-S" | "-L" | "-o"
+        "-r" | "--require"
+            | "--loader"
+            | "--import"
+            | "--experimental-loader"
+            | "--inspect-port"
+            | "-W"
+            | "-X"
+            | "-S"
+            | "-L"
+            | "-o"
     )
 }
 
@@ -213,7 +223,10 @@ fn agent_from_package_path(path: &str) -> Option<AgentKind> {
     let parts: Vec<&str> = path.split(['/', '\\']).filter(|part| !part.is_empty()).collect();
     let ends_with = |suffix: &[&str]| {
         parts.len() >= suffix.len()
-            && parts[parts.len() - suffix.len()..].iter().zip(suffix).all(|(part, want)| part.eq_ignore_ascii_case(want))
+            && parts[parts.len() - suffix.len()..]
+                .iter()
+                .zip(suffix)
+                .all(|(part, want)| part.eq_ignore_ascii_case(want))
     };
     if ends_with(&["node_modules", "@earendil-works", "pi-coding-agent", "dist", "cli.js"])
         || ends_with(&["node_modules", "@earendil-works", "pi-coding-agent", "dist", "bundle", "cli.js"])
@@ -244,14 +257,18 @@ fn agent_from_package_path(path: &str) -> Option<AgentKind> {
 fn is_runtime_or_shell(name: &str) -> bool {
     let name = lookup_name(basename(name));
     is_python(&name)
-        || matches!(name.as_str(), "sh" | "bash" | "zsh" | "fish" | "tmux" | "node" | "bun" | "cmd" | "powershell" | "pwsh")
+        || matches!(
+            name.as_str(),
+            "sh" | "bash" | "zsh" | "fish" | "tmux" | "node" | "bun" | "cmd" | "powershell" | "pwsh"
+        )
 }
 
 /// `python`、`python3`、`python3.12` 这样的名字。
 fn is_python(name: &str) -> bool {
     name == "python"
         || name.strip_prefix("python").is_some_and(|version| {
-            !version.is_empty() && version.split('.').all(|part| !part.is_empty() && part.bytes().all(|b| b.is_ascii_digit()))
+            !version.is_empty()
+                && version.split('.').all(|part| !part.is_empty() && part.bytes().all(|b| b.is_ascii_digit()))
         })
 }
 

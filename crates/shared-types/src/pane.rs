@@ -97,9 +97,7 @@ impl<T: Copy + PartialEq> Node<T> {
                 true
             }
             Node::Leaf(_) => false,
-            Node::Split(split) => {
-                split.first.split(target, new, axis, id) || split.second.split(target, new, axis, id)
-            }
+            Node::Split(split) => split.first.split(target, new, axis, id) || split.second.split(target, new, axis, id),
         }
     }
 
@@ -226,10 +224,18 @@ pub fn neighbor<T: Copy>(
         .into_iter()
         .filter_map(|(leaf, rect)| {
             let (distance, overlaps, offset) = match direction {
-                Direction::Left => (from.x - rect.right(), rect.y < from.bottom() && rect.bottom() > from.y, rect.center().1 - cy),
-                Direction::Right => (rect.x - from.right(), rect.y < from.bottom() && rect.bottom() > from.y, rect.center().1 - cy),
-                Direction::Up => (from.y - rect.bottom(), rect.x < from.right() && rect.right() > from.x, rect.center().0 - cx),
-                Direction::Down => (rect.y - from.bottom(), rect.x < from.right() && rect.right() > from.x, rect.center().0 - cx),
+                Direction::Left => {
+                    (from.x - rect.right(), rect.y < from.bottom() && rect.bottom() > from.y, rect.center().1 - cy)
+                }
+                Direction::Right => {
+                    (rect.x - from.right(), rect.y < from.bottom() && rect.bottom() > from.y, rect.center().1 - cy)
+                }
+                Direction::Up => {
+                    (from.y - rect.bottom(), rect.x < from.right() && rect.right() > from.x, rect.center().0 - cx)
+                }
+                Direction::Down => {
+                    (rect.y - from.bottom(), rect.x < from.right() && rect.right() > from.x, rect.center().0 - cx)
+                }
             };
             (overlaps && distance > -SLACK).then_some((leaf, distance.max(0.), offset.abs()))
         })

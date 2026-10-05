@@ -53,10 +53,8 @@ impl ProjectWatch {
             !rel.components().any(|part| part.as_os_str() == "objects" || part.as_os_str() == "fsmonitor--daemon")
                 && rel.extension().is_none_or(|ext| ext != "lock")
         };
-        if let Some(rel) = [&self.git_dir, &self.real_git_dir]
-            .into_iter()
-            .flatten()
-            .find_map(|dir| path.strip_prefix(dir).ok())
+        if let Some(rel) =
+            [&self.git_dir, &self.real_git_dir].into_iter().flatten().find_map(|dir| path.strip_prefix(dir).ok())
         {
             return git_internal(rel);
         }

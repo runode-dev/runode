@@ -7,13 +7,7 @@ pub(super) fn rect(out: &mut Vec<Shape>, x0: i32, y0: i32, x1: i32, y1: i32, alp
     let (x0, x1) = (x0.min(x1), x0.max(x1));
     let (y0, y1) = (y0.min(y1), y0.max(y1));
     if x0 < x1 && y0 < y1 && alpha > 0 {
-        out.push(Shape::Rect {
-            x0,
-            y0,
-            x1,
-            y1,
-            alpha,
-        });
+        out.push(Shape::Rect { x0, y0, x1, y1, alpha });
     }
 }
 
@@ -25,10 +19,7 @@ pub(super) fn cubic(points: &mut Vec<[f32; 2]>, c1: [f32; 2], c2: [f32; 2], end:
         let t = i as f32 / SEGMENTS as f32;
         let u = 1. - t;
         let (a, b, c, d) = (u * u * u, 3. * u * u * t, 3. * u * t * t, t * t * t);
-        points.push([
-            a * p0[0] + b * c1[0] + c * c2[0] + d * end[0],
-            a * p0[1] + b * c1[1] + c * c2[1] + d * end[1],
-        ]);
+        points.push([a * p0[0] + b * c1[0] + c * c2[0] + d * end[0], a * p0[1] + b * c1[1] + c * c2[1] + d * end[1]]);
     }
 }
 
@@ -37,10 +28,7 @@ pub(super) fn cubic(points: &mut Vec<[f32; 2]>, c1: [f32; 2], c2: [f32; 2], end:
 pub(super) fn band(points: &[[f32; 2]], d0: f32, d1: f32, out: &mut Vec<Shape>) {
     let mut pts: Vec<[f32; 2]> = Vec::with_capacity(points.len());
     for &p in points {
-        if pts
-            .last()
-            .is_none_or(|q| (p[0] - q[0]).hypot(p[1] - q[1]) > 1e-3)
-        {
+        if pts.last().is_none_or(|q| (p[0] - q[0]).hypot(p[1] - q[1]) > 1e-3) {
             pts.push(p);
         }
     }
@@ -68,20 +56,12 @@ fn offset(pts: &[[f32; 2]], d: f32, closed: bool) -> Vec<[f32; 2]> {
     (0..n)
         .map(|i| {
             let n2 = normals[i.min(edges - 1)];
-            let prev = if closed {
-                Some((i + edges - 1) % edges)
-            } else {
-                i.checked_sub(1)
-            };
+            let prev = if closed { Some((i + edges - 1) % edges) } else { i.checked_sub(1) };
             let m = match prev.map(|j| normals[j]) {
                 Some(n1) => {
                     let k = 1. + n1[0] * n2[0] + n1[1] * n2[1];
                     // 接近折返时斜接点会飞得很远，退回用后一段的法向（相当于 miter limit）。
-                    if k < 0.02 {
-                        n2
-                    } else {
-                        [(n1[0] + n2[0]) / k, (n1[1] + n2[1]) / k]
-                    }
+                    if k < 0.02 { n2 } else { [(n1[0] + n2[0]) / k, (n1[1] + n2[1]) / k] }
                 }
                 None => n2,
             };
@@ -140,10 +120,7 @@ mod tests {
         };
         let expected = area(&outer) - area(&inner);
         let mut builder = PathBuilder::fill();
-        let points: Vec<_> = ring(outer, inner)
-            .iter()
-            .map(|p| point(px(p[0]), px(p[1])))
-            .collect();
+        let points: Vec<_> = ring(outer, inner).iter().map(|p| point(px(p[0]), px(p[1]))).collect();
         builder.add_polygon(&points, true);
         let path = builder.build().unwrap();
         let tessellated: f32 = path
@@ -154,9 +131,6 @@ mod tests {
                 ((b.x - a.x) * (c.y - a.y) - (c.x - a.x) * (b.y - a.y)).abs() / 2.
             })
             .sum();
-        assert!(
-            (tessellated - expected).abs() < 0.01,
-            "{tessellated} != {expected}"
-        );
+        assert!((tessellated - expected).abs() < 0.01, "{tessellated} != {expected}");
     }
 }

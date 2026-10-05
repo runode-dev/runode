@@ -15,11 +15,7 @@ impl Session {
             return;
         }
         if self.mouse_tracking() {
-            let button = if lines < 0 {
-                mouse::Button::Four
-            } else {
-                mouse::Button::Five
-            };
+            let button = if lines < 0 { mouse::Button::Four } else { mouse::Button::Five };
             self.sync_mouse_encoder();
             self.scratch.clear();
             for _ in 0..lines.unsigned_abs() {
@@ -53,8 +49,7 @@ impl Session {
         });
         let mods = ghostty_mods(mods);
         self.sync_mouse_encoder();
-        self.mouse_encoder
-            .set_any_button_pressed(action != mouse::Action::Release && button.is_some());
+        self.mouse_encoder.set_any_button_pressed(action != mouse::Action::Release && button.is_some());
         self.scratch.clear();
         if self.encode_mouse(action, button, at, mods) && !self.scratch.is_empty() {
             self.send_input(self.scratch.clone());

@@ -54,11 +54,7 @@ impl TerminalView {
         let Some(suggestion) = self.visible_suggestion() else {
             return false;
         };
-        if self
-            .session
-            .last_input()
-            .is_some_and(|at| at > suggestion.read_at && at.elapsed() < ECHO_WAIT)
-        {
+        if self.session.last_input().is_some_and(|at| at > suggestion.read_at && at.elapsed() < ECHO_WAIT) {
             return false;
         }
         let text = if word { history::next_word(&suggestion.rest) } else { suggestion.rest.as_str() };

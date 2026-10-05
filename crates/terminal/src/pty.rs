@@ -150,10 +150,8 @@ impl Pty {
         let Some((slave, sink)) = self.pending.take() else {
             return Ok(());
         };
-        let shell = shell
-            .map(str::to_owned)
-            .or_else(|| std::env::var("SHELL").ok())
-            .unwrap_or_else(|| "/bin/zsh".into());
+        let shell =
+            shell.map(str::to_owned).or_else(|| std::env::var("SHELL").ok()).unwrap_or_else(|| "/bin/zsh".into());
         let mut cmd = CommandBuilder::new(&shell);
         // 用登录 shell，这样会执行用户的 profile。
         let report_token = shell_integration::prepare(integration, &shell, &mut cmd);
@@ -194,11 +192,7 @@ impl Pty {
     /// 前台在跑别的程序时为该程序的进程名。取不到时为 `None`。
     pub fn foreground_title(&self, shell_dir: impl FnOnce() -> Option<PathBuf>) -> Option<String> {
         let (leader, is_shell) = self.foreground()?;
-        if is_shell {
-            shell_dir().map(|cwd| dir_label(&cwd))
-        } else {
-            process_name(leader)
-        }
+        if is_shell { shell_dir().map(|cwd| dir_label(&cwd)) } else { process_name(leader) }
     }
 
     /// shell 自己当前所在的目录（不管前台在跑什么）。
@@ -269,9 +263,7 @@ fn process_cwd(pid: libc::pid_t) -> Option<PathBuf> {
 
     let mut info = std::mem::MaybeUninit::<libc::proc_vnodepathinfo>::zeroed();
     let size = std::mem::size_of::<libc::proc_vnodepathinfo>() as libc::c_int;
-    let written = unsafe {
-        libc::proc_pidinfo(pid, libc::PROC_PIDVNODEPATHINFO, 0, info.as_mut_ptr().cast(), size)
-    };
+    let written = unsafe { libc::proc_pidinfo(pid, libc::PROC_PIDVNODEPATHINFO, 0, info.as_mut_ptr().cast(), size) };
     if written != size {
         return None;
     }
@@ -366,11 +358,9 @@ impl Drop for Pty {
         // shell 可能忽略 SIGHUP，所以放到单独的线程里等，不阻塞界面。
         if let Some(mut child) = self.child.take() {
             let _ = child.kill();
-            let _ = thread::Builder::new()
-                .name("pty-reaper".into())
-                .spawn(move || {
-                    let _ = child.wait();
-                });
+            let _ = thread::Builder::new().name("pty-reaper".into()).spawn(move || {
+                let _ = child.wait();
+            });
         }
     }
 }

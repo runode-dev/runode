@@ -66,10 +66,7 @@ pub fn follow_appearance(cx: &mut App) {
 }
 
 fn system_is_dark(cx: &App) -> bool {
-    matches!(
-        cx.window_appearance(),
-        WindowAppearance::Dark | WindowAppearance::VibrantDark
-    )
+    matches!(cx.window_appearance(), WindowAppearance::Dark | WindowAppearance::VibrantDark)
 }
 
 /// 所有可能的配置文件的修改时间。还不存在的文件也算在内，新建配置文件同样会触发重载。

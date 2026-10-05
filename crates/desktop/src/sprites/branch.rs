@@ -48,12 +48,9 @@ pub(super) fn branch(cp: u32, m: Metrics, out: &mut Vec<Shape>) {
             if parts & BRANCH_V != 0 {
                 rect(out, v_left, 0, v_left + t, h, 0xff);
             }
-            for (bit, dx, dy) in [
-                (BRANCH_DR, 1., 1.),
-                (BRANCH_DL, -1., 1.),
-                (BRANCH_UR, 1., -1.),
-                (BRANCH_UL, -1., -1.),
-            ] {
+            for (bit, dx, dy) in
+                [(BRANCH_DR, 1., 1.), (BRANCH_DL, -1., 1.), (BRANCH_UR, 1., -1.), (BRANCH_UL, -1., -1.)]
+            {
                 if parts & bit != 0 {
                     arc(m, dx, dy, out);
                 }
@@ -76,51 +73,19 @@ fn branch_node(m: Metrics, edges: u8, filled: bool, out: &mut Vec<Shape>) {
     let (cx, cy) = (v_left as f32 + tf / 2., h_top as f32 + tf / 2.);
     let r = cx.min(cy).min(wf - cx).min(hf - cy);
     if edges & 1 != 0 {
-        rect(
-            out,
-            v_left,
-            0,
-            v_left + t,
-            (cy - r + tf / 2.).ceil() as i32,
-            0xff,
-        );
+        rect(out, v_left, 0, v_left + t, (cy - r + tf / 2.).ceil() as i32, 0xff);
     }
     if edges & 2 != 0 {
-        rect(
-            out,
-            (cx + r - tf / 2.).floor() as i32,
-            h_top,
-            w,
-            h_top + t,
-            0xff,
-        );
+        rect(out, (cx + r - tf / 2.).floor() as i32, h_top, w, h_top + t, 0xff);
     }
     if edges & 4 != 0 {
-        rect(
-            out,
-            v_left,
-            (cy + r - tf / 2.).floor() as i32,
-            v_left + t,
-            h,
-            0xff,
-        );
+        rect(out, v_left, (cy + r - tf / 2.).floor() as i32, v_left + t, h, 0xff);
     }
     if edges & 8 != 0 {
-        rect(
-            out,
-            0,
-            h_top,
-            (cx - r + tf / 2.).ceil() as i32,
-            h_top + t,
-            0xff,
-        );
+        rect(out, 0, h_top, (cx - r + tf / 2.).ceil() as i32, h_top + t, 0xff);
     }
     // 空心节点是半径 r - t/2、线宽 t 的圆环；r 不足一个线宽时就是实心圆。
-    let shape = if filled || r <= tf {
-        circle(cx, cy, r)
-    } else {
-        ring(circle(cx, cy, r), circle(cx, cy, r - tf))
-    };
+    let shape = if filled || r <= tf { circle(cx, cy, r) } else { ring(circle(cx, cy, r), circle(cx, cy, r - tf)) };
     out.push(Shape::Polygon(shape));
 }
 
@@ -129,18 +94,10 @@ fn branch_node(m: Metrics, edges: u8, filled: bool, out: &mut Vec<Shape>) {
 fn fade(m: Metrics, vertical: bool, toward_end: bool, out: &mut Vec<Shape>) {
     let (w, h) = (m.width as i32, m.height as i32);
     let t = m.thickness as i32;
-    let (across, along) = if vertical {
-        ((w - t).max(0) / 2, h)
-    } else {
-        ((h - t).max(0) / 2, w)
-    };
+    let (across, along) = if vertical { ((w - t).max(0) / 2, h) } else { ((h - t).max(0) / 2, w) };
     let step = 255. / along as f32;
     for i in 0..along {
-        let alpha = if toward_end {
-            255. - step * i as f32
-        } else {
-            step * i as f32
-        };
+        let alpha = if toward_end { 255. - step * i as f32 } else { step * i as f32 };
         let alpha = alpha.round() as u8;
         if vertical {
             rect(out, across, i, across + t, i + 1, alpha);
@@ -166,9 +123,6 @@ mod tests {
         assert!(cross[0][4] == 0xff && cross[19][4] == 0xff, "上下连到边");
         assert!(cross[9][0] == 0xff && cross[9][9] == 0xff, "左右连到边");
         let fade = raster('\u{f5d2}', m);
-        assert!(
-            fade[9].windows(2).all(|p| p[0] > p[1]) && fade[9][0] == 0xff,
-            "向右渐隐"
-        );
+        assert!(fade[9].windows(2).all(|p| p[0] > p[1]) && fade[9][0] == 0xff, "向右渐隐");
     }
 }

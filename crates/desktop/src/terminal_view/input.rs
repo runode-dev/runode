@@ -3,8 +3,8 @@
 use std::time::Duration;
 
 use gpui::{
-    Context, KeyDownEvent, Keystroke, Modifiers, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent,
-    Pixels, Point, ScrollDelta, ScrollWheelEvent, Window,
+    Context, KeyDownEvent, Keystroke, Modifiers, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels,
+    Point, ScrollDelta, ScrollWheelEvent, Window,
 };
 use runode_shared_types::{
     grid::GridPoint,
@@ -241,12 +241,7 @@ impl TerminalView {
 }
 
 fn mouse_mods(modifiers: &Modifiers) -> Mods {
-    Mods {
-        shift: modifiers.shift,
-        ctrl: modifiers.control,
-        alt: modifiers.alt,
-        right_alt: false,
-    }
+    Mods { shift: modifiers.shift, ctrl: modifiers.control, alt: modifiers.alt, right_alt: false }
 }
 
 /// 系统设置里的双击间隔，决定两次按下算不算连击。

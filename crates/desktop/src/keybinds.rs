@@ -10,23 +10,23 @@ use runode_config::{
 use crate::{
     config::AppConfig,
     menus::{
-        About, CloseAllWindows, CloseWindow, Hide, HideOthers, Minimize, NewWindow, OpenConfiguration,
-        Quit, ReloadConfiguration, ShowAll, ToggleFullScreen, Zoom,
+        About, CloseAllWindows, CloseWindow, Hide, HideOthers, Minimize, NewWindow, OpenConfiguration, Quit,
+        ReloadConfiguration, ShowAll, ToggleFullScreen, Zoom,
     },
     search_bar::{Cut, EndSearch, Redo, SearchNext, SearchPrevious, SearchSelection, StartSearch, Undo},
     terminal_view::{
-        ClearScreen, Copy, DecreaseFontSize, IncreaseFontSize, JumpToPrompt, Paste, PasteSelection,
-        ResetFontSize, ScrollPageDown, ScrollPageUp, ScrollToBottom, ScrollToSelection,
-        ScrollToTop, SelectAll, SendText, WriteScreenFile,
+        ClearScreen, Copy, DecreaseFontSize, IncreaseFontSize, JumpToPrompt, Paste, PasteSelection, ResetFontSize,
+        ScrollPageDown, ScrollPageUp, ScrollToBottom, ScrollToSelection, ScrollToTop, SelectAll, SendText,
+        WriteScreenFile,
     },
     text_area::SubmitText,
     workspace::{
         ClosePane, CloseTab, CloseWorkspace, CollapseSelectedFile, CopyPath, CopyRelativePath, DeleteFile,
         EqualizePanes, ExpandSelectedFile, FocusNextPane, FocusPane, FocusPreviousPane, FocusTerminal, GotoAgent,
-        NewSplitDown, NewSplitRight, NewTab, NewWorkspace, NextAgent, NextTab, NextWorkspace, OpenSelectedFile, PreviousTab,
-        PreviousWorkspace, RenameFile, RenameWorkspace, ResizePane, RevealInFinder, SelectFirstFile, SelectLastFile,
-        SelectLastTab, SelectLastWorkspace, SelectNextFile, SelectPreviousFile, SelectTab, SelectWorkspace,
-        ToggleChanges, ToggleFiles, ToggleGit, TogglePaneZoom, ToggleSidebar,
+        NewSplitDown, NewSplitRight, NewTab, NewWorkspace, NextAgent, NextTab, NextWorkspace, OpenSelectedFile,
+        PreviousTab, PreviousWorkspace, RenameFile, RenameWorkspace, ResizePane, RevealInFinder, SelectFirstFile,
+        SelectLastFile, SelectLastTab, SelectLastWorkspace, SelectNextFile, SelectPreviousFile, SelectTab,
+        SelectWorkspace, ToggleChanges, ToggleFiles, ToggleGit, TogglePaneZoom, ToggleSidebar,
     },
 };
 
@@ -221,7 +221,8 @@ mod tests {
             let (action, contexts) = gpui_action(action);
             for context in contexts {
                 let predicate = context.map(|c| gpui::KeyBindingContextPredicate::parse(c).unwrap().into());
-                let loaded = KeyBinding::load(&keys, action.boxed_clone(), predicate, false, None, &gpui::DummyKeyboardMapper);
+                let loaded =
+                    KeyBinding::load(&keys, action.boxed_clone(), predicate, false, None, &gpui::DummyKeyboardMapper);
                 assert!(loaded.is_ok(), "{keys}");
             }
         }
@@ -235,7 +236,14 @@ mod tests {
             let (action, contexts) = gpui_action(action);
             for context in contexts {
                 let predicate = context.map(|c| gpui::KeyBindingContextPredicate::parse(c).unwrap().into());
-                bindings.extend(KeyBinding::load(&keys, action.boxed_clone(), predicate, false, None, &gpui::DummyKeyboardMapper));
+                bindings.extend(KeyBinding::load(
+                    &keys,
+                    action.boxed_clone(),
+                    predicate,
+                    false,
+                    None,
+                    &gpui::DummyKeyboardMapper,
+                ));
             }
         }
         bindings.extend(fixed_bindings());
@@ -258,7 +266,8 @@ mod tests {
         keys.extend(["digit_1", "key_a", "key_a-b", "key_-"].map(str::to_owned));
         let mut accepted = 0;
         for key in &keys {
-            for trigger in [key.clone(), format!("ctrl+shift+{key}"), format!("cmd+alt+{key}"), format!("ctrl+a>{key}")] {
+            for trigger in [key.clone(), format!("ctrl+shift+{key}"), format!("cmd+alt+{key}"), format!("ctrl+a>{key}")]
+            {
                 let Ok(keys) = keybind::parse_trigger(&trigger) else {
                     continue;
                 };

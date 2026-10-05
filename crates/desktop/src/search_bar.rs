@@ -6,11 +6,11 @@
 use std::ops::Range;
 
 use gpui::{
-    App, Bounds, ClipboardItem, Context, DispatchPhase, Element, ElementId, ElementInputHandler,
-    Entity, EntityInputHandler, EventEmitter, FocusHandle, Focusable, GlobalElementId, KeyDownEvent,
-    LayoutId, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, PaintQuad, Pixels, Point,
-    Render, ShapedLine, SharedString, Style, TextAlign, TextRun, UTF16Selection, UnderlineStyle, Window, actions,
-    div, fill, point, prelude::*, px, relative, size,
+    App, Bounds, ClipboardItem, Context, DispatchPhase, Element, ElementId, ElementInputHandler, Entity,
+    EntityInputHandler, EventEmitter, FocusHandle, Focusable, GlobalElementId, KeyDownEvent, LayoutId, MouseButton,
+    MouseDownEvent, MouseMoveEvent, MouseUpEvent, PaintQuad, Pixels, Point, Render, ShapedLine, SharedString, Style,
+    TextAlign, TextRun, UTF16Selection, UnderlineStyle, Window, actions, div, fill, point, prelude::*, px, relative,
+    size,
 };
 
 use crate::terminal_view::{Copy, Paste, SelectAll};
@@ -179,11 +179,7 @@ impl SearchField {
     }
 
     fn snapshot(&self) -> Snapshot {
-        Snapshot {
-            text: self.text.clone(),
-            selected: self.selected.clone(),
-            reversed: self.reversed,
-        }
+        Snapshot { text: self.text.clone(), selected: self.selected.clone(), reversed: self.reversed }
     }
 
     /// 编辑前记下当前状态供撤销；`kind` 和上一次相同时并进上一步，`None` 总是单独一步。
@@ -288,16 +284,10 @@ impl SearchField {
             return offset..offset;
         };
         let same = |x: char| is_word_char(x) == is_word_char(c) && (is_word_char(c) || x == c);
-        let start = self.text[..offset]
-            .char_indices()
-            .rev()
-            .take_while(|(_, x)| same(*x))
-            .last()
-            .map_or(offset, |(i, _)| i);
-        let end = self.text[offset..]
-            .char_indices()
-            .find(|(_, x)| !same(*x))
-            .map_or(self.text.len(), |(i, _)| offset + i);
+        let start =
+            self.text[..offset].char_indices().rev().take_while(|(_, x)| same(*x)).last().map_or(offset, |(i, _)| i);
+        let end =
+            self.text[offset..].char_indices().find(|(_, x)| !same(*x)).map_or(self.text.len(), |(i, _)| offset + i);
         start..end
     }
 
@@ -490,16 +480,8 @@ impl EntityInputHandler for SearchField {
         Some(self.text[range].to_owned())
     }
 
-    fn selected_text_range(
-        &mut self,
-        _: bool,
-        _: &mut Window,
-        _: &mut Context<Self>,
-    ) -> Option<UTF16Selection> {
-        Some(UTF16Selection {
-            range: self.range_to_utf16(&self.selected),
-            reversed: self.reversed,
-        })
+    fn selected_text_range(&mut self, _: bool, _: &mut Window, _: &mut Context<Self>) -> Option<UTF16Selection> {
+        Some(UTF16Selection { range: self.range_to_utf16(&self.selected), reversed: self.reversed })
     }
 
     fn marked_text_range(&self, _: &mut Window, _: &mut Context<Self>) -> Option<Range<usize>> {
@@ -518,10 +500,8 @@ impl EntityInputHandler for SearchField {
         _: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let range = range
-            .map(|range| self.range_from_utf16(&range))
-            .or(self.marked.clone())
-            .unwrap_or(self.selected.clone());
+        let range =
+            range.map(|range| self.range_from_utf16(&range)).or(self.marked.clone()).unwrap_or(self.selected.clone());
         // 回车、制表符等由按键绑定处理，不进搜索词。
         let text: String = text.chars().filter(|c| !c.is_control()).collect();
         if text.is_empty() && range.is_empty() && self.marked.is_none() {
@@ -542,10 +522,8 @@ impl EntityInputHandler for SearchField {
         _: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let range = range
-            .map(|range| self.range_from_utf16(&range))
-            .or(self.marked.clone())
-            .unwrap_or(self.selected.clone());
+        let range =
+            range.map(|range| self.range_from_utf16(&range)).or(self.marked.clone()).unwrap_or(self.selected.clone());
         if self.marked.is_none() {
             self.record(Some(EditKind::Insert));
         }
@@ -582,10 +560,7 @@ impl EntityInputHandler for SearchField {
         let layout = self.layout.as_ref()?;
         let range = self.range_from_utf16(&range);
         let x = |index| bounds.left() + layout.x_for_index(index) - self.scroll_x;
-        Some(Bounds::from_corners(
-            point(x(range.start), bounds.top()),
-            point(x(range.end), bounds.bottom()),
-        ))
+        Some(Bounds::from_corners(point(x(range.start), bounds.top()), point(x(range.end), bounds.bottom())))
     }
 
     fn character_index_for_point(
@@ -672,11 +647,7 @@ impl Element for SearchText {
             Some(marked) => [
                 run(marked.start, style.color),
                 TextRun {
-                    underline: Some(UnderlineStyle {
-                        color: Some(style.color),
-                        thickness: px(1.),
-                        wavy: false,
-                    }),
+                    underline: Some(UnderlineStyle { color: Some(style.color), thickness: px(1.), wavy: false }),
                     ..run(marked.len(), style.color)
                 },
                 run(field.text.len() - marked.end, style.color),
@@ -729,13 +700,7 @@ impl Element for SearchText {
                 style.color,
             )
         });
-        SearchTextLayout {
-            line,
-            placeholder,
-            scroll_x,
-            selection,
-            caret,
-        }
+        SearchTextLayout { line, placeholder, scroll_x, selection, caret }
     }
 
     fn paint(
