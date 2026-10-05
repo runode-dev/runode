@@ -9,8 +9,6 @@ publish.workspace = true
 [dependencies]
 runode-dirs.workspace = true
 runode-model.workspace = true
-# 过渡：颜色暂按终端的颜色语法解析，下一步换成自己的实现。
-libghostty-vt.workspace = true
 tracing.workspace = true
 # 配置模板的说明和动作说明的翻译：每种语言一个 locales/<语言>.yml，编译时嵌进二进制。
 rust-i18n.workspace = true

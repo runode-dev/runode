@@ -6,6 +6,7 @@
 //! 因为 Ghostty 的配置里大部分键与 runode 无关。runode 的配置文件不存在时，启动时会
 //! 写一份全部注释掉的模板，列出支持的键和默认值。
 
+pub mod color;
 pub mod i18n;
 pub mod keybind;
 
@@ -17,7 +18,6 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use libghostty_vt::style::RgbColor;
 use runode_model::{
     color::{Rgb, TerminalColor},
     settings::{CursorStyle, OptionAsAlt, TermSettings},
@@ -414,7 +414,7 @@ fn parse_bool(value: &str) -> Result<bool, String> {
 }
 
 fn parse_color(value: &str) -> Result<Rgb, String> {
-    RgbColor::parse(value).map(|c| Rgb(c.r, c.g, c.b)).map_err(|_| "not a color".into())
+    color::parse(value).ok_or_else(|| "not a color".into())
 }
 
 fn parse_terminal_color(value: &str) -> Result<TerminalColor, String> {

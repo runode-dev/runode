@@ -5019,7 +5019,6 @@ dependencies = [
 name = "runode-config"
 version = "0.1.0"
 dependencies = [
- "libghostty-vt",
  "objc2-app-kit 0.3.2",
  "objc2-foundation 0.3.2",
  "runode-dirs",
