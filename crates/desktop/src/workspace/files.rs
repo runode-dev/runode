@@ -12,7 +12,7 @@ use runode_shared_types::color::Rgb;
 
 use super::{
     WindowView,
-    project::{Decoration, status_color},
+    project::{ADDED, Decoration, REMOVED, status_color},
 };
 use crate::{
     assets::{CHEVRON_DOWN_ICON, CHEVRON_RIGHT_ICON, EYE_ICON, EYE_OFF_ICON},
@@ -27,6 +27,8 @@ const ROW_EXTRA_HEIGHT: f32 = 10.;
 const INDENT: f32 = 12.;
 /// 行的左边距。
 const ROW_PADDING: f32 = 4.;
+/// 标题下面那行工具栏的高度。
+const TOOLBAR_HEIGHT: f32 = 28.;
 
 /// 打进 shell 的路径：只含常见字符时原样，否则用单引号括起来。开头是 `=` 或 `%` 时也括起来，
 /// zsh 会把 `=foo` 展开成命令的路径。
@@ -64,17 +66,26 @@ impl WindowView {
                     .size(px(14.))
                     .text_color(hsla(fg).opacity(if show_ignored { 0.9 } else { 0.55 })),
             )
-            // 标题栏按下会拖动窗口，按钮自己接住。
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(|this, _, _, cx| {
-                    cx.stop_propagation();
-                    this.toggle_show_ignored(cx);
-                }),
-            );
-        let header = self
-            .panel_header(true, fg)
-            .child(div().flex_1().min_w_0().truncate().text_color(hsla(fg)).child(name))
+            .on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| this.toggle_show_ignored(cx)));
+        let header = self.panel_header(true, fg).child(div().flex_1().min_w_0().truncate().text_color(hsla(fg)).child(name));
+        // 标题下面一行：左边是没提交的改动一共加减了多少行，右边是显示忽略文件的开关。
+        let dirty = workspace.project.git.as_ref().filter(|git| !git.is_clean());
+        let toolbar = div()
+            .flex_none()
+            .h(px(TOOLBAR_HEIGHT))
+            .px(px(10.))
+            .flex()
+            .items_center()
+            .gap(px(6.))
+            .text_size(px(12.))
+            .border_b_1()
+            .border_color(hsla(fg).opacity(0.12))
+            .when_some(dirty, |toolbar, git| {
+                toolbar
+                    .child(div().flex_none().text_color(hsla(ADDED)).child(format!("+{}", git.added())))
+                    .child(div().flex_none().text_color(hsla(REMOVED)).child(format!("−{}", git.removed())))
+            })
+            .child(div().flex_1())
             .child(ignored_toggle);
         let font_size = cx.global::<AppConfig>().0.file_tree_font_size;
         let list = uniform_list(
@@ -97,6 +108,7 @@ impl WindowView {
             .border_color(hsla(fg).opacity(0.12))
             .text_size(px(font_size))
             .child(header)
+            .child(toolbar)
             .child(list)
     }
 
