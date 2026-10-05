@@ -200,6 +200,39 @@ fn watch_stamp(config: &Config) -> Vec<(PathBuf, Option<SystemTime>)> {
         .collect()
 }
 
+/// runode 认的全部键，按配置模板里的顺序分组，组与组之间在模板里空一行。`apply` 只处理
+/// 这里列出的键，模板也按这张表逐个写出，所以新增配置项只要在这里加上键名、在 `apply` 里
+/// 解析、在 `template_values` 里给出默认值、在翻译里写好说明。`theme` 和 `config-file`
+/// 在应用各层之前就已处理，列在这里是为了写进模板。
+const KEYS: &[&[&str]] = &[
+    &["language"],
+    &["font-family", "font-size", "adjust-cell-height", "window-padding-x", "window-padding-y"],
+    &[
+        "theme",
+        "background",
+        "foreground",
+        "cursor-color",
+        "cursor-text",
+        "selection-background",
+        "selection-foreground",
+        "search-background",
+        "search-foreground",
+        "search-selected-background",
+        "search-selected-foreground",
+        "palette",
+    ],
+    &[
+        "cursor-style",
+        "cursor-style-blink",
+        "macos-option-as-alt",
+        "shell-integration",
+        "command-suggestions",
+        "command-completions",
+    ],
+    &["config-file"],
+    &["keybind"],
+];
+
 /// 一条 `key = value`，带出处以便报错。
 struct Entry {
     key: String,
@@ -280,6 +313,10 @@ impl Config {
     }
 
     fn apply(&mut self, key: &str, value: &str, first_in_layer: bool) -> Result<(), String> {
+        // 不在 `KEYS` 里的是 runode 用不上的 Ghostty 键。
+        if !KEYS.iter().any(|group| group.contains(&key)) {
+            return Ok(());
+        }
         let defaults = Self::default();
         // 值为空表示恢复默认。
         let empty = value.is_empty();
@@ -410,8 +447,10 @@ impl Config {
                     self.keybinds.push(crate::keybinds::parse(value)?);
                 }
             }
-            // 主题在应用各层之前已处理；其余 Ghostty 键 runode 用不上。
-            _ => {}
+            // 主题和 `config-file` 在应用各层之前已处理。
+            "theme" | "config-file" => {}
+            // 列进了 `KEYS` 却没在这里解析；测试 `apply_handles_every_key` 会发现。
+            _ => return Err(format!("{key} is listed in KEYS but not handled")),
         }
         Ok(())
     }
@@ -540,13 +579,6 @@ fn create_config_file(path: &Path) -> std::io::Result<()> {
 /// 全部是注释，所以写进去不会盖掉 Ghostty 配置里的同名键，以后内置默认值变了也照样生效。
 fn template(locale: &str) -> String {
     let d = Config::default();
-    let hex = |Rgb(r, g, b): Rgb| format!("#{r:02x}{g:02x}{b:02x}");
-    let color = |c: TerminalColor| match c {
-        TerminalColor::Rgb(c) => hex(c),
-        TerminalColor::CellForeground => "cell-foreground".into(),
-        TerminalColor::CellBackground => "cell-background".into(),
-    };
-    let pair = |(a, b): (f32, f32)| if a == b { a.to_string() } else { format!("{a},{b}") };
     let locales = crate::i18n::available().join(", ");
 
     let mut out = String::new();
@@ -556,52 +588,24 @@ fn template(locale: &str) -> String {
             out.push_str(&format!("## {line}\n"));
         }
     };
-    // 一个键：上面是它的说明，下面是每个默认值一行；没有默认值时写一行空值。
-    let key = |out: &mut String, key: &str, values: &[String]| {
-        let doc_key = format!("config.{}", key.replace('-', "_"));
-        note(out, &rust_i18n::t!(&doc_key, locale = locale, locales = locales));
-        for value in values.iter().map(String::as_str).chain(values.is_empty().then_some("")) {
-            let line = if value.is_empty() { format!("# {key} =\n") } else { format!("# {key} = {value}\n") };
-            out.push_str(&line);
-        }
-    };
-    let none = || Vec::new();
 
     note(&mut out, &rust_i18n::t!("config.header", locale = locale));
     out.push('\n');
-    key(&mut out, "language", &none());
-    out.push('\n');
-    key(&mut out, "font-family", &d.font_family);
-    key(&mut out, "font-size", &[d.font_size.to_string()]);
-    key(&mut out, "adjust-cell-height", &none());
-    key(&mut out, "window-padding-x", &[pair(d.window_padding_x)]);
-    key(&mut out, "window-padding-y", &[pair(d.window_padding_y)]);
-    out.push('\n');
-    key(&mut out, "theme", &none());
-    key(&mut out, "background", &[hex(d.background)]);
-    key(&mut out, "foreground", &[hex(d.foreground)]);
-    key(&mut out, "cursor-color", &none());
-    key(&mut out, "cursor-text", &none());
-    key(&mut out, "selection-background", &none());
-    key(&mut out, "selection-foreground", &none());
-    key(&mut out, "search-background", &[color(d.search_background)]);
-    key(&mut out, "search-foreground", &[color(d.search_foreground)]);
-    key(&mut out, "search-selected-background", &[color(d.search_selected_background)]);
-    key(&mut out, "search-selected-foreground", &[color(d.search_selected_foreground)]);
-    let palette: Vec<String> = d.palette.iter().map(|(i, c)| format!("{i}={}", hex(*c))).collect();
-    key(&mut out, "palette", &palette);
-    out.push('\n');
-    key(&mut out, "cursor-style", &["block".into()]);
-    key(&mut out, "cursor-style-blink", &none());
-    key(&mut out, "macos-option-as-alt", &["false".into()]);
-    key(&mut out, "shell-integration", &["detect".into()]);
-    key(&mut out, "command-suggestions", &["true".into()]);
-    key(&mut out, "command-completions", &["true".into()]);
-    out.push('\n');
-    key(&mut out, "config-file", &none());
-    out.push('\n');
-    let keybinds: Vec<String> = crate::keybinds::DEFAULTS.iter().map(|k| k.to_string()).collect();
-    key(&mut out, "keybind", &keybinds);
+    // 一个键：上面是它的说明，下面是每个默认值一行；没有默认值时写一行空值。
+    for (i, group) in KEYS.iter().enumerate() {
+        if i > 0 {
+            out.push('\n');
+        }
+        for key in *group {
+            let doc_key = format!("config.{}", key.replace('-', "_"));
+            note(&mut out, &rust_i18n::t!(&doc_key, locale = locale, locales = locales));
+            let values = template_values(&d, key);
+            for value in values.iter().map(String::as_str).chain(values.is_empty().then_some("")) {
+                let line = if value.is_empty() { format!("# {key} =\n") } else { format!("# {key} = {value}\n") };
+                out.push_str(&line);
+            }
+        }
+    }
 
     note(&mut out, &rust_i18n::t!("config.actions", locale = locale));
     let usages: Vec<String> = crate::keybinds::ACTIONS
@@ -622,6 +626,37 @@ fn template(locale: &str) -> String {
     note(&mut out, &rust_i18n::t!("config.themes", locale = locale));
     out.push_str(&wrap_names(BUNDLED_THEMES.iter().map(|(name, _)| *name)));
     out
+}
+
+/// 模板里一个键注释掉的默认值，每项一行；没有默认值的键（默认跟随别的设置或不设）为空。
+fn template_values(d: &Config, key: &str) -> Vec<String> {
+    let hex = |Rgb(r, g, b): Rgb| format!("#{r:02x}{g:02x}{b:02x}");
+    let color = |c: TerminalColor| match c {
+        TerminalColor::Rgb(c) => hex(c),
+        TerminalColor::CellForeground => "cell-foreground".into(),
+        TerminalColor::CellBackground => "cell-background".into(),
+    };
+    let pair = |(a, b): (f32, f32)| if a == b { a.to_string() } else { format!("{a},{b}") };
+    match key {
+        "font-family" => d.font_family.clone(),
+        "font-size" => vec![d.font_size.to_string()],
+        "window-padding-x" => vec![pair(d.window_padding_x)],
+        "window-padding-y" => vec![pair(d.window_padding_y)],
+        "background" => vec![hex(d.background)],
+        "foreground" => vec![hex(d.foreground)],
+        "search-background" => vec![color(d.search_background)],
+        "search-foreground" => vec![color(d.search_foreground)],
+        "search-selected-background" => vec![color(d.search_selected_background)],
+        "search-selected-foreground" => vec![color(d.search_selected_foreground)],
+        "palette" => d.palette.iter().map(|(i, c)| format!("{i}={}", hex(*c))).collect(),
+        "cursor-style" => vec!["block".into()],
+        "macos-option-as-alt" => vec!["false".into()],
+        "shell-integration" => vec!["detect".into()],
+        "command-suggestions" => vec!["true".into()],
+        "command-completions" => vec!["true".into()],
+        "keybind" => crate::keybinds::DEFAULTS.iter().map(|k| k.to_string()).collect(),
+        _ => Vec::new(),
+    }
 }
 
 /// 把名字用「、」连起来，按宽度折成多行 `##` 注释。
@@ -779,23 +814,19 @@ mod tests {
         assert_eq!(config, Config::default());
     }
 
-    /// `apply` 认的每个键都要写进模板，新增配置项时漏了这里就会失败。按缩进找
-    /// `apply` 里最外层 match 的分支，值的分支缩进更深，不会混进来。
+    /// `KEYS` 里的每个键都要在模板里，上面有一行说明；说明缺了翻译时 `t!` 返回「语言.键名」。
     #[test]
     fn template_lists_every_key() {
-        let source = include_str!("config.rs");
-        let body = &source[source.find("    fn apply(&mut self").unwrap()..source.find("\nfn parse_f32").unwrap()];
-        let keys: Vec<&str> = body
-            .lines()
-            .filter_map(|line| line.strip_prefix("            \""))
-            .filter_map(|line| line.split_once("\" =>").map(|(key, _)| key))
-            .collect();
+        let keys: Vec<&str> = KEYS.iter().flat_map(|group| group.iter().copied()).collect();
         assert!(keys.len() > 20, "{keys:?}");
-        // 说明来自翻译，缺键时 `t!` 返回「语言.键名」，按这个认出漏写的说明。
+        let mut unique = keys.clone();
+        unique.sort();
+        unique.dedup();
+        assert_eq!(unique.len(), keys.len(), "KEYS lists a key twice");
         let text = template(crate::i18n::FALLBACK);
         assert!(!text.contains("en.config.") && !text.contains("en.action."), "template has untranslated keys");
         let lines: Vec<&str> = text.lines().collect();
-        for key in keys.into_iter().chain(["theme", "config-file"]) {
+        for key in keys {
             let setting = format!("# {key} =");
             let first = lines.iter().position(|l| l.starts_with(&setting));
             let first = first.unwrap_or_else(|| panic!("template misses {key}"));
@@ -806,6 +837,14 @@ mod tests {
         assert!(BUNDLED_THEMES.iter().all(|(name, _)| themes.contains(name)));
         for action in crate::keybinds::ACTIONS {
             assert!(text.contains(&format!("##   {}", action.name)), "template misses action {}", action.name);
+        }
+    }
+
+    #[test]
+    fn apply_handles_every_key() {
+        for key in KEYS.iter().flat_map(|group| group.iter()) {
+            let result = Config::default().apply(key, "", true);
+            assert!(!result.is_err_and(|err| err.contains("not handled")), "apply does not handle {key}");
         }
     }
 
