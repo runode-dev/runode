@@ -170,17 +170,22 @@ fn a_sequence_longer_than_the_limit_waits_until_it_ends() {
     assert_eq!(format_replay(&decoded).unwrap(), format_replay(&terminal).unwrap());
 }
 
-/// 乱码也会让 VT 暂时编不出快照：ESC 后面跟着 UTF-8 和 C1 字节时，续接取得到，libghostty
-/// 却不肯编。和太长的序列一样，等它回到 ground 再编。
+/// 乱码也会让 VT 暂时编不出快照：字符串序列（SOS、PM、APC）里的 8 位 C1 字节会结束它、开始
+/// 一条新序列，libghostty 记下的续接却还从前一条的 ESC 算起，重喂会把结束了的那条再做一遍，
+/// 所以续接取得到、快照编不出。第一份数据里 0xC6 结束 ESC、0x9F 开始 APC、0x9D 开始 OSC。
+/// 和太长的序列一样，等它回到 ground 再编。哪天这里不成立了，说明 libghostty 修好了，改
+/// `SnapshotError::Unfinished` 的说明和这个测试。
 #[test]
 fn malformed_input_can_block_encoding_until_ground() {
-    let mut terminal = new_terminal(size(20, 4)).unwrap();
-    terminal.vt_write(&[0x1b, 0xc6, 0x9f, b'[', b'r', 0x9d]);
-    assert!(terminal.continuation_alloc(None).is_ok());
-    assert!(matches!(encode_snapshot(&terminal), Err(SnapshotError::Unfinished)));
-    terminal.vt_write(b"\x1b\\");
-    assert!(terminal.is_vt_ground().unwrap());
-    assert!(encode_snapshot(&terminal).is_ok());
+    for bytes in [&[0x1b, 0xc6, 0x9f, b'[', b'r', 0x9d][..], b"\x1bXab\x90$q", b"\x1b_Gx\x9b3"] {
+        let mut terminal = new_terminal(size(20, 4)).unwrap();
+        terminal.vt_write(bytes);
+        assert!(terminal.continuation_alloc(None).is_ok(), "{bytes:?}");
+        assert!(matches!(encode_snapshot(&terminal), Err(SnapshotError::Unfinished)), "{bytes:?}");
+        terminal.vt_write(b"\x1b\\");
+        assert!(terminal.is_vt_ground().unwrap(), "{bytes:?}");
+        assert!(encode_snapshot(&terminal).is_ok(), "{bytes:?}");
+    }
 }
 
 #[test]

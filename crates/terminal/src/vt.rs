@@ -14,7 +14,7 @@ use libghostty_vt::{
     screen::Screen,
     selection::Selection,
     snapshot::Decoder,
-    terminal::{Point, PointCoordinate},
+    terminal::{Mode, Point, PointCoordinate},
 };
 use runode_shared_types::{color::TerminalColor, grid::GridSize, settings::TermSettings};
 
@@ -91,11 +91,13 @@ pub(crate) fn configure_common(terminal: &mut Terminal<'_, '_>, options: CommonO
 }
 
 /// 把配置里和 VT 状态有关的部分（主题）套到 `terminal` 上：默认颜色、调色板、光标样式和闪烁，
-/// 以及 `configure_common` 的选项。改的是默认值：程序自己用转义序列设置的颜色和光标形状照旧
-/// 优先，所以配置可以随时重载。
+/// 以及 `configure_common` 的选项。改的是默认值：程序自己用转义序列设置的颜色、光标形状和
+/// 闪烁照旧优先，所以配置可以随时重载。
 ///
-/// 它不只改默认值：重设默认闪烁会把程序关掉的光标闪烁重新打开，调低回滚上限会丢掉历史。
-/// 所以宿主和界面两份 VT 要在输出流的同一个位置套用同样的主题，见 `HostMsg::ThemeApplied`。
+/// 它不只改默认值：光标还跟着默认样式时，当前的闪烁和形状随新的默认值变；调低回滚上限会
+/// 丢掉历史。所以宿主和界面两份 VT 要在输出流的同一个位置套用同样的主题，见
+/// `HostMsg::ThemeApplied`。结果只取决于 VT 自己的状态（快照里都带着），所以从快照解出来的
+/// VT 和原来那份套同样的主题，结果一样。
 pub(crate) fn apply_theme(terminal: &mut Terminal<'_, '_>, settings: &TermSettings) {
     // 默认调色板读出来的是上次设置的值，先重置回内置调色板再叠加配置，
     // 否则旧主题设过、新主题没设的条目会残留。
@@ -119,9 +121,7 @@ pub(crate) fn apply_theme(terminal: &mut Terminal<'_, '_>, settings: &TermSettin
                 _ => None,
             })
         })
-        .and_then(|t| t.set_default_cursor_style(Some(ghostty_cursor_style(settings.cursor_style))))
-        // 没配置时默认闪烁；libghostty 的 `None` 是不闪烁，所以这里显式给 true。
-        .and_then(|t| t.set_default_cursor_blink(Some(settings.cursor_blink.unwrap_or(true))))
+        .and_then(|t| set_default_cursor(t, settings))
         .and_then(|t| t.set_default_color_palette(Some(palette)));
     if let Err(err) = applied {
         tracing::warn!("failed to apply config to the terminal: {err}");
@@ -129,6 +129,30 @@ pub(crate) fn apply_theme(terminal: &mut Terminal<'_, '_>, settings: &TermSettin
     if let Err(err) = configure_common(terminal, CommonOptions::from_settings(settings)) {
         tracing::warn!("failed to apply the scrollback limit: {err}");
     }
+}
+
+/// 设默认的光标形状和闪烁，但不覆盖程序用 `CSI ? 12 h/l`（DEC 模式 12）自己设的闪烁。
+///
+/// 程序没用 DECSCUSR 设过形状（或用 `CSI 0 SP q` 回到了默认）时，光标跟着默认值走，libghostty
+/// 改任一个默认值都会把当前的形状和闪烁一起换成默认的，模式 12 设的闪烁也就被冲掉了。这里
+/// 先只换默认形状：光标跟着默认值走的话，闪烁这时变回旧的默认值，和原来不一样就说明程序用
+/// 模式 12 改过，换完默认闪烁后把它还原；一样就跟着新的默认闪烁走（配置里改了闪烁要立刻
+/// 生效）。程序用 DECSCUSR 设过形状时 libghostty 两样都不动，这里也不用管。
+///
+/// 程序用模式 12 设的值恰好等于旧的默认闪烁时分不出来，当作跟着默认值，随新配置变。
+fn set_default_cursor<'a, 't, 's>(
+    terminal: &'a mut Terminal<'t, 's>,
+    settings: &TermSettings,
+) -> Result<&'a mut Terminal<'t, 's>> {
+    let blinking = terminal.mode(Mode::CURSOR_BLINKING)?;
+    terminal.set_default_cursor_style(Some(ghostty_cursor_style(settings.cursor_style)))?;
+    let old_default = terminal.mode(Mode::CURSOR_BLINKING)?;
+    // 没配置时默认闪烁；libghostty 的 `None` 是不闪烁，所以这里显式给 true。
+    terminal.set_default_cursor_blink(Some(settings.cursor_blink.unwrap_or(true)))?;
+    if blinking != old_default {
+        terminal.set_mode(Mode::CURSOR_BLINKING, blinking)?;
+    }
+    Ok(terminal)
 }
 
 /// 开始记录没写完的序列，之后停在序列中间的 VT 也能编码快照。要在喂输入之前开：开的时候
@@ -142,8 +166,11 @@ fn track_continuation(terminal: &mut Terminal<'_, '_>) -> Result<()> {
 #[derive(Debug)]
 pub enum SnapshotError {
     /// VT 停在一条还没写完的序列中间，现在编不出快照：这条序列长过 `CONTINUATION_MAX_BYTES`，
-    /// 或者是在开始记录之前开始的，或者是 libghostty 不肯编的乱码（ESC 后面跟着 UTF-8 和 C1
-    /// 字节之类）。等下一批输出让 VT 回到 ground 后再试；程序停在这里不再输出的话会一直这样。
+    /// 或者是在开始记录之前开始的，或者是由 SOS、PM、APC 这类字符串序列里的一个 8 位 C1 字节
+    /// （0x90 DCS、0x9B CSI 等）开头的。最后这种 libghostty 记下的续接从前一条字符串序列的 ESC
+    /// 算起，重喂会把那条已经结束的序列再做一遍，所以它不肯编。正常程序的输出（7 位的 ESC 开头
+    /// 的序列，包括停在 UTF-8 字符中间）都编得出，见差分测试 `a_snapshot_cut_inside_any_sequence_resumes`。
+    /// 等下一批输出让 VT 回到 ground 后再试；程序停在这里不再输出的话会一直这样。
     Unfinished,
     /// libghostty 报的其他错误，只留说明文字，libghostty 的类型不出这个 crate。解码时多半是
     /// 数据坏了或者不是这个版本编出来的。
