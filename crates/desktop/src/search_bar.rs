@@ -63,6 +63,8 @@ pub struct SearchField {
     redo: Vec<Snapshot>,
     /// 上一次编辑的类型，连续打字或连续删除合成一步撤销；挪光标后清空。
     last_edit: Option<EditKind>,
+    /// 空着时画「搜索」提示；拿来就地改名时不画。
+    placeholder: bool,
     /// 上一帧排好的文字、输入框位置和横向滚动量，鼠标点选、输入法摆候选窗都靠它们换算。
     layout: Option<ShapedLine>,
     bounds: Option<Bounds<Pixels>>,
@@ -103,10 +105,21 @@ impl SearchField {
             undo: Vec::new(),
             redo: Vec::new(),
             last_edit: None,
+            placeholder: true,
             layout: None,
             bounds: None,
             scroll_x: px(0.),
         }
+    }
+
+    /// 就地编辑一段已有文字用的输入框：不画「搜索」提示，前 `select` 个字节选中，直接打字就
+    /// 替换掉它们。
+    pub fn editing(text: String, select: usize, cx: &mut Context<Self>) -> Self {
+        let select = (0..=select.min(text.len())).rev().find(|&i| text.is_char_boundary(i)).unwrap_or(0);
+        let mut field = Self::new(text, cx);
+        field.placeholder = false;
+        field.selected = 0..select;
+        field
     }
 
     pub fn query(&self) -> &str {
@@ -379,11 +392,6 @@ impl SearchField {
     }
 
     fn select_all(&mut self, _: &SelectAll, _: &mut Window, cx: &mut Context<Self>) {
-        self.select_all_text(cx);
-    }
-
-    /// 选中全部文字；开始编辑一段已有的文字时用，直接打字就替换掉它。
-    pub fn select_all_text(&mut self, cx: &mut Context<Self>) {
         self.selected = 0..self.text.len();
         self.reversed = false;
         self.last_edit = None;
@@ -673,7 +681,7 @@ impl Element for SearchText {
             None => vec![run(field.text.len(), style.color)],
         };
         let line = window.text_system().shape_line(field.text.clone().into(), font_size, &runs, None);
-        let placeholder = field.text.is_empty().then(|| {
+        let placeholder = (field.placeholder && field.text.is_empty()).then(|| {
             let text = rust_i18n::t!("search.placeholder").into_owned();
             let len = text.len();
             window

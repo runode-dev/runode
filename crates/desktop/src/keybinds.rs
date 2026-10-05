@@ -20,10 +20,12 @@ use crate::{
         ScrollToTop, SelectAll, SendText, WriteScreenFile,
     },
     workspace::{
-        ClosePane, CloseTab, CloseWorkspace, EqualizePanes, FocusNextPane, FocusPane, FocusPreviousPane,
-        NewSplitDown, NewSplitRight, NewTab, NewWorkspace, NextTab, NextWorkspace, PreviousTab,
-        PreviousWorkspace, RenameWorkspace, ResizePane, SelectLastTab, SelectLastWorkspace, SelectTab,
-        SelectWorkspace, ToggleChanges, ToggleFiles, TogglePaneZoom, ToggleSidebar,
+        ClosePane, CloseTab, CloseWorkspace, CollapseSelectedFile, CopyPath, CopyRelativePath, DeleteFile,
+        EqualizePanes, ExpandSelectedFile, FocusNextPane, FocusPane, FocusPreviousPane, FocusTerminal,
+        NewSplitDown, NewSplitRight, NewTab, NewWorkspace, NextTab, NextWorkspace, OpenSelectedFile, PreviousTab,
+        PreviousWorkspace, RenameFile, RenameWorkspace, ResizePane, RevealInFinder, SelectFirstFile, SelectLastFile,
+        SelectLastTab, SelectLastWorkspace, SelectNextFile, SelectPreviousFile, SelectTab, SelectWorkspace,
+        ToggleChanges, ToggleFiles, TogglePaneZoom, ToggleSidebar,
     },
 };
 
@@ -35,8 +37,13 @@ const WINDOW: Contexts = &[Some("Window")];
 const TERMINAL: Contexts = &[Some("Terminal")];
 /// 搜索框不在 `Terminal` 上下文里，复制粘贴和搜索导航在那里也要能用。
 const TERMINAL_AND_SEARCH: Contexts = &[Some("Terminal"), Some("SearchBar")];
-/// 预览栏里选中的行也能复制、全选。
+/// 预览栏里选中的行也能全选。
 const TERMINAL_SEARCH_AND_PREVIEW: Contexts = &[Some("Terminal"), Some("SearchBar"), Some("Preview")];
+/// 预览栏里选中的行也能复制；文件树里复制、粘贴的是选中的文件。
+const COPY: Contexts = &[Some("Terminal"), Some("SearchBar"), Some("Preview"), Some("FileTree")];
+const PASTE: Contexts = &[Some("Terminal"), Some("SearchBar"), Some("FileTree")];
+/// 文件树有焦点、又不在新建或改名时；改名时方向键这些归输入框。
+const FILE_TREE: &str = "FileTree && !editing";
 
 /// 配置里的动作对应的 GPUI 动作，以及它生效的上下文。
 fn gpui_action(action: Action) -> (Box<dyn gpui::Action>, Contexts) {
@@ -82,8 +89,8 @@ fn gpui_action(action: Action) -> (Box<dyn gpui::Action>, Contexts) {
         Action::ToggleSidebar => (boxed(ToggleSidebar), WINDOW),
         Action::ToggleChanges => (boxed(ToggleChanges), WINDOW),
         Action::ToggleFiles => (boxed(ToggleFiles), WINDOW),
-        Action::Copy => (boxed(Copy), TERMINAL_SEARCH_AND_PREVIEW),
-        Action::Paste => (boxed(Paste), TERMINAL_AND_SEARCH),
+        Action::Copy => (boxed(Copy), COPY),
+        Action::Paste => (boxed(Paste), PASTE),
         Action::PasteSelection => (boxed(PasteSelection), TERMINAL),
         Action::SelectAll => (boxed(SelectAll), TERMINAL_SEARCH_AND_PREVIEW),
         Action::ClearScreen => (boxed(ClearScreen), TERMINAL),
@@ -106,8 +113,9 @@ fn gpui_action(action: Action) -> (Box<dyn gpui::Action>, Contexts) {
     }
 }
 
-/// 搜索框自己的编辑键，以及搜索时在终端里按 Esc 关掉搜索栏，不开放配置。
+/// 搜索框自己的编辑键，搜索时在终端里按 Esc 关掉搜索栏，以及文件树里的按键，不开放配置。
 fn fixed_bindings() -> Vec<KeyBinding> {
+    let tree = Some(FILE_TREE);
     vec![
         KeyBinding::new("enter", SearchNext, Some("SearchBar")),
         KeyBinding::new("shift-enter", SearchPrevious, Some("SearchBar")),
@@ -117,6 +125,24 @@ fn fixed_bindings() -> Vec<KeyBinding> {
         KeyBinding::new("cmd-shift-z", Redo, Some("SearchBar")),
         // 点回终端后搜索栏还开着，Esc 照样关掉它；没在搜索时 Esc 照常发给程序。
         KeyBinding::new("escape", EndSearch, Some("Terminal && searching")),
+        KeyBinding::new("up", SelectPreviousFile, tree),
+        KeyBinding::new("down", SelectNextFile, tree),
+        KeyBinding::new("home", SelectFirstFile, tree),
+        KeyBinding::new("end", SelectLastFile, tree),
+        KeyBinding::new("cmd-up", SelectFirstFile, tree),
+        KeyBinding::new("left", CollapseSelectedFile, tree),
+        KeyBinding::new("right", ExpandSelectedFile, tree),
+        // 空格在预览栏里打开，回车改名。
+        KeyBinding::new("space", OpenSelectedFile, tree),
+        KeyBinding::new("cmd-down", OpenSelectedFile, tree),
+        KeyBinding::new("enter", RenameFile, tree),
+        KeyBinding::new("f2", RenameFile, tree),
+        KeyBinding::new("cmd-backspace", DeleteFile, tree),
+        KeyBinding::new("cmd-x", Cut, tree),
+        KeyBinding::new("cmd-alt-r", RevealInFinder, tree),
+        KeyBinding::new("cmd-alt-c", CopyPath, tree),
+        KeyBinding::new("cmd-alt-shift-c", CopyRelativePath, tree),
+        KeyBinding::new("escape", FocusTerminal, tree),
     ]
 }
 

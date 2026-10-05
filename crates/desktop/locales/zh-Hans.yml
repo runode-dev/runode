@@ -84,6 +84,31 @@ paste:
 search:
   placeholder: 搜索
   no_results: 无结果
+files:
+  new_file: 新建文件…
+  new_folder: 新建文件夹…
+  collapse_all: 全部收起
+  reveal: 在访达中显示
+  open_in_terminal: 在新标签页中打开
+  preview: 在预览中打开
+  insert_path: 把路径打进终端
+  copy_path: 复制路径
+  copy_relative_path: 复制相对路径
+  rename: 重命名…
+  delete: 移到废纸篓
+  delete_title: 把“%{name}”移到废纸篓？
+  delete_detail: 之后可以从废纸篓放回原处。
+  delete_dir_detail: 里面的所有内容会一起移走，之后可以从废纸篓放回原处。
+  delete_confirm: 移到废纸篓
+  move_title: 把“%{name}”移到“%{dir}”里？
+  move_confirm: 移动
+  cancel: 取消
+  failed: 操作没有完成
+  exists: 这里已经有“%{name}”了。
+  into_itself: 不能把“%{name}”放进它自己里面。
+  invalid_name: “%{name}”不能用作名字。
+  unsupported: 这个系统上不支持移到废纸篓。
+  ok: 好
 tooltip:
   show_sidebar: 显示侧栏
   hide_sidebar: 隐藏侧栏

@@ -9,7 +9,7 @@ use runode_shared_types::{
     pane::{Axis, Node},
 };
 
-use super::{DIVIDER_GRAB_WIDTH, Divider, WindowView, model::Tab};
+use super::{DIVIDER_GRAB_WIDTH, Divider, WindowView, files::DraggedFile, model::Tab};
 use crate::terminal_view::hsla;
 
 /// 没有焦点的分屏蒙上一层背景色，这是蒙层的不透明度。
@@ -25,7 +25,7 @@ impl WindowView {
         self.render_node(tab, &tab.root, fg, bg, cx)
     }
 
-    fn render_leaf(&self, tab: &Tab, id: EntityId, bg: Rgb, _: &mut Context<Self>) -> AnyElement {
+    fn render_leaf(&self, tab: &Tab, id: EntityId, bg: Rgb, cx: &mut Context<Self>) -> AnyElement {
         let view = tab.panes[&id].0.clone();
         let dimmed = !tab.zoomed && !tab.root.is_leaf() && id != tab.focused;
         let layout = self.layout.clone();
@@ -49,6 +49,10 @@ impl WindowView {
             .when(dimmed, |leaf| {
                 leaf.child(div().absolute().size_full().bg(hsla(bg).opacity(UNFOCUSED_DIM)))
             })
+            // 从文件树拖来的文件放到这个终端上：切到它，把路径打进去。
+            .on_drop(cx.listener(move |this, dragged: &DraggedFile, window, cx| {
+                this.drop_file_on_pane(id, &dragged.path, window, cx);
+            }))
             .into_any_element()
     }
 

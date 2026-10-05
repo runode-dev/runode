@@ -84,6 +84,31 @@ paste:
 search:
   placeholder: Search
   no_results: No results
+files:
+  new_file: New File…
+  new_folder: New Folder…
+  collapse_all: Collapse Folders
+  reveal: Reveal in Finder
+  open_in_terminal: Open in New Tab
+  preview: Open in Preview
+  insert_path: Insert Path into Terminal
+  copy_path: Copy Path
+  copy_relative_path: Copy Relative Path
+  rename: Rename…
+  delete: Move to Trash
+  delete_title: "Move “%{name}” to the Trash?"
+  delete_detail: You can put it back from the Trash.
+  delete_dir_detail: Everything inside goes with it. You can put it back from the Trash.
+  delete_confirm: Move to Trash
+  move_title: "Move “%{name}” into “%{dir}”?"
+  move_confirm: Move
+  cancel: Cancel
+  failed: The operation couldn't be completed
+  exists: "“%{name}” already exists here."
+  into_itself: "Can't put “%{name}” inside itself."
+  invalid_name: "“%{name}” isn't a valid name."
+  unsupported: Moving to the Trash isn't supported on this system.
+  ok: OK
 tooltip:
   show_sidebar: Show Sidebar
   hide_sidebar: Hide Sidebar

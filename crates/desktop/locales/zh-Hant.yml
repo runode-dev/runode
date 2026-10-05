@@ -84,6 +84,31 @@ paste:
 search:
   placeholder: 搜尋
   no_results: 沒有結果
+files:
+  new_file: 新增檔案…
+  new_folder: 新增檔案夾…
+  collapse_all: 全部收合
+  reveal: 在 Finder 中顯示
+  open_in_terminal: 在新分頁中打開
+  preview: 在預覽中打開
+  insert_path: 把路徑打進終端機
+  copy_path: 拷貝路徑
+  copy_relative_path: 拷貝相對路徑
+  rename: 重新命名…
+  delete: 丟到垃圾桶
+  delete_title: 把「%{name}」丟到垃圾桶？
+  delete_detail: 之後可以從垃圾桶放回原處。
+  delete_dir_detail: 裡面的所有內容會一起移走，之後可以從垃圾桶放回原處。
+  delete_confirm: 丟到垃圾桶
+  move_title: 把「%{name}」移到「%{dir}」裡？
+  move_confirm: 移動
+  cancel: 取消
+  failed: 操作沒有完成
+  exists: 這裡已經有「%{name}」了。
+  into_itself: 不能把「%{name}」放進它自己裡面。
+  invalid_name: 「%{name}」不能用作名稱。
+  unsupported: 這個系統上不支援丟到垃圾桶。
+  ok: 好
 tooltip:
   show_sidebar: 顯示側欄
   hide_sidebar: 隱藏側欄

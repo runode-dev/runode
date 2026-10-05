@@ -92,9 +92,16 @@ pub(super) fn close_button(id: impl Into<ElementId>, fg: Hsla) -> Stateful<Div> 
         .child("×")
 }
 
-/// 标题栏上带图标的开关按钮，悬停时底色和图标变亮；`shown` 时底色一直亮着，图标也亮一些。
-/// 位置、尺寸、提示和点击由调用方接着写。
-pub(super) fn icon_toggle(id: &'static str, icon: &'static str, shown: bool, fg: Rgb, bg: Rgb) -> Stateful<Div> {
+/// 标题栏和面板上带图标的开关按钮，图标边长 `icon_size`；悬停时底色和图标变亮，`shown` 时
+/// 底色一直亮着，图标也亮一些。位置、尺寸、提示和点击由调用方接着写。
+pub(super) fn icon_toggle(
+    id: &'static str,
+    icon: &'static str,
+    icon_size: f32,
+    shown: bool,
+    fg: Rgb,
+    bg: Rgb,
+) -> Stateful<Div> {
     let hover_bg = hsla(bg.mix(fg, 0.10));
     let active_bg = hsla(bg.mix(fg, 0.14));
     let fg = hsla(fg);
@@ -110,7 +117,7 @@ pub(super) fn icon_toggle(id: &'static str, icon: &'static str, shown: bool, fg:
         .child(
             svg()
                 .path(icon)
-                .size(px(16.))
+                .size(px(icon_size))
                 .text_color(fg.opacity(if shown { 0.9 } else { 0.55 }))
                 .group_hover(id, |icon| icon.text_color(fg)),
         )

@@ -219,6 +219,9 @@ impl Project {
 
     /// 当场读 `dirs` 以及往下多看的一层，读不了的不记。
     fn list_now(&mut self, dirs: Vec<PathBuf>) {
+        if dirs.is_empty() {
+            return;
+        }
         let listings = list_dirs(dirs, &Decorator::new(self.git.as_ref()));
         for (dir, listing) in listings {
             if let Some(listing) = listing {
@@ -256,48 +259,166 @@ impl Project {
     /// 展开或收起文件树里的目录；展开时当场读它的内容，免得显示收起期间已经变了的旧列表，
     /// 之后跟着重读。
     pub fn toggle_dir(&mut self, path: &Path, root: &Path, show_ignored: bool) {
-        if !self.expanded_dirs.remove(path) {
+        if self.expanded_dirs.remove(path) {
+            // 选中的在收起的目录里面时，选中改成这个目录，免得选中项看不见还被删除、新建用上。
+            if self.selected.as_deref().is_some_and(|selected| selected != path && selected.starts_with(path)) {
+                self.selected = Some(path.to_path_buf());
+            }
+        } else {
             self.expanded_dirs.insert(path.to_path_buf());
             self.list_now(vec![path.to_path_buf()]);
         }
         self.rebuild_file_rows(root, show_ignored);
     }
 
-    /// 在文件树里展开到 `dir` 并选中它，滚到能看见的地方。`dir` 就是根目录或者不在根下面时
-    /// 不动。
+    /// 终端换了目录：在文件树里展开到 `dir`，连它本身也展开，选中它、滚到中间。
     fn reveal_dir(&mut self, dir: &Path, root: &Path, show_ignored: bool) {
-        let Ok(rel) = dir.strip_prefix(root) else {
-            return;
-        };
-        let mut chain: Vec<_> = rel.ancestors().filter(|rel| !rel.as_os_str().is_empty()).map(|rel| root.join(rel)).collect();
-        if chain.is_empty() {
+        self.reveal(dir, true, root, show_ignored, ScrollStrategy::Center);
+    }
+
+    /// 在文件树里展开到 `path` 所在的目录，选中它、滚到能看见。已经显示着时只选中，不重排。
+    pub fn reveal_file(&mut self, path: &Path, root: &Path, show_ignored: bool) {
+        if let Some(ix) = self.file_rows.iter().position(|row| row.path == path) {
+            self.select_row(ix);
+            self.files_scroll.scroll_to_item(ix, ScrollStrategy::Nearest);
             return;
         }
+        self.reveal(path, false, root, show_ignored, ScrollStrategy::Nearest);
+    }
+
+    /// 在文件树里展开到 `path` 并选中它，按 `strategy` 滚到能看见的地方；`expand` 时连 `path`
+    /// 这个目录本身也展开。`path` 就是根目录或者不在根下面时不动。
+    fn reveal(&mut self, path: &Path, expand: bool, root: &Path, show_ignored: bool, strategy: ScrollStrategy) {
+        let Ok(rel) = path.strip_prefix(root) else {
+            return;
+        };
+        if rel.as_os_str().is_empty() {
+            return;
+        }
+        let mut chain: Vec<_> = rel
+            .ancestors()
+            .skip(usize::from(!expand))
+            .filter(|rel| !rel.as_os_str().is_empty())
+            .map(|rel| root.join(rel))
+            .collect();
         chain.reverse();
         let missing = chain.iter().filter(|dir| !self.listings.contains_key(*dir)).cloned().collect();
         self.list_now(missing);
-        // `dir` 和它唯一的子目录并成一行时，这一行按链条最深的那个展开，一路展开下去。
-        for _ in 0..MAX_COMPACT {
-            let last = &chain[chain.len() - 1];
-            let Some(child) = self.listings.get(last).and_then(|entries| single_dir(entries)).map(|name| last.join(name))
-            else {
-                break;
-            };
-            if !self.listings.contains_key(&child) {
-                self.list_now(vec![child.clone()]);
+        // `path` 和它唯一的子目录并成一行时，这一行按链条最深的那个展开，一路展开下去。
+        if expand {
+            for _ in 0..MAX_COMPACT {
+                let last = &chain[chain.len() - 1];
+                let Some(child) =
+                    self.listings.get(last).and_then(|entries| single_dir(entries)).map(|name| last.join(name))
+                else {
+                    break;
+                };
+                if !self.listings.contains_key(&child) {
+                    self.list_now(vec![child.clone()]);
+                }
+                chain.push(child);
             }
-            chain.push(child);
         }
         self.expanded_dirs.extend(chain);
         self.rebuild_file_rows(root, show_ignored);
-        // 并成一行的目录，行的路径是链条最深的那个，`dir` 在链条中间时找不到原样的路径。
+        // 并成一行的目录，行的路径是链条最深的那个，`path` 在链条中间时找不到原样的路径。
         let rows = &self.file_rows;
-        let Some(ix) = rows.iter().position(|row| row.path == dir).or_else(|| rows.iter().position(|row| row.path.starts_with(dir)))
+        let Some(ix) =
+            rows.iter().position(|row| row.path == path).or_else(|| rows.iter().position(|row| row.path.starts_with(path)))
         else {
             return;
         };
         self.selected = Some(rows[ix].path.clone());
-        self.files_scroll.scroll_to_item(ix, ScrollStrategy::Center);
+        self.files_scroll.scroll_to_item(ix, strategy);
+    }
+
+    /// 收起根目录下所有展开的目录。
+    pub fn collapse_all(&mut self, root: &Path, show_ignored: bool) {
+        self.expanded_dirs.retain(|dir| !dir.starts_with(root));
+        self.rebuild_file_rows(root, show_ignored);
+        // 选中的行跟着收起来看不见了，不留着。
+        if self.selected_row().is_none() {
+            self.selected = None;
+        }
+    }
+
+    /// 改了文件之后当场重读 `dirs`，不等监听到改动；后台的重读随后照常进行。
+    pub fn relist(&mut self, dirs: Vec<PathBuf>, root: &Path, show_ignored: bool) {
+        self.list_now(dirs);
+        self.rebuild_file_rows(root, show_ignored);
+    }
+
+    /// `from` 改名或挪到了 `to`：展开的目录和选中的路径跟过去，旧路径下读过的目录不再要。
+    pub fn moved(&mut self, from: &Path, to: &Path) {
+        let follow = |path: &Path| path.strip_prefix(from).ok().map(|rest| to.join(rest));
+        self.expanded_dirs = self.expanded_dirs.drain().map(|dir| follow(&dir).unwrap_or(dir)).collect();
+        self.listings.retain(|dir, _| !dir.starts_with(from));
+        if let Some(selected) = self.selected.as_deref().and_then(follow) {
+            self.selected = Some(selected);
+        }
+    }
+
+    /// `path` 被删掉了：它和下面的目录不再展开。
+    pub fn removed(&mut self, path: &Path) {
+        self.expanded_dirs.retain(|dir| !dir.starts_with(path));
+        self.listings.retain(|dir, _| !dir.starts_with(path));
+    }
+
+    /// 选中的行在 `file_rows` 里的位置。
+    pub fn selected_row(&self) -> Option<usize> {
+        let selected = self.selected.as_ref()?;
+        self.file_rows.iter().position(|row| row.path == *selected)
+    }
+
+    /// 键盘上下移动选中的行，`step` 为负往上；没选中时往下从第一行开始，往上从最后一行开始。
+    /// 返回新选中的位置。
+    pub fn select_step(&mut self, step: isize) -> Option<usize> {
+        let last = self.file_rows.len().checked_sub(1)?;
+        let ix = match self.selected_row() {
+            Some(ix) => ix.saturating_add_signed(step).min(last),
+            None if step > 0 => 0,
+            None => last,
+        };
+        self.selected = Some(self.file_rows[ix].path.clone());
+        Some(ix)
+    }
+
+    /// 选中第 `ix` 行。
+    pub fn select_row(&mut self, ix: usize) -> Option<usize> {
+        let row = self.file_rows.get(ix)?;
+        self.selected = Some(row.path.clone());
+        Some(ix)
+    }
+
+    /// 键盘往左：展开着的目录收起，否则跳到上一级目录。返回新选中的位置。
+    pub fn select_out(&mut self, root: &Path, show_ignored: bool) -> Option<usize> {
+        let ix = self.selected_row()?;
+        let row = &self.file_rows[ix];
+        if row.is_dir && row.expanded {
+            let path = row.path.clone();
+            self.toggle_dir(&path, root, show_ignored);
+            return Some(ix);
+        }
+        let depth = row.depth;
+        let parent = self.file_rows[..ix].iter().rposition(|row| row.depth < depth)?;
+        self.select_row(parent)
+    }
+
+    /// 键盘往右：收着的目录展开，展开着的跳到它的第一项。返回新选中的位置。
+    pub fn select_in(&mut self, root: &Path, show_ignored: bool) -> Option<usize> {
+        let ix = self.selected_row()?;
+        let row = &self.file_rows[ix];
+        if !row.is_dir {
+            return None;
+        }
+        if !row.expanded {
+            let path = row.path.clone();
+            self.toggle_dir(&path, root, show_ignored);
+            return Some(ix);
+        }
+        let depth = row.depth;
+        self.file_rows.get(ix + 1).filter(|child| child.depth > depth)?;
+        self.select_row(ix + 1)
     }
 
     /// 在改动栏里展开到文件 `path`（绝对路径）那一行，返回它的位置；有未暂存的改动时找那一段。
@@ -507,6 +628,52 @@ mod tests {
         project.reveal_dir(Path::new("/p/a"), root, true);
         assert_eq!(names(&project)[..2], [("a / m".into(), 0), ("z".into(), 1)]);
         assert_eq!(project.selected, Some(PathBuf::from("/p/a/m")));
+    }
+
+    #[test]
+    fn reveals_files_without_expanding_them() {
+        let mut project = Project::default();
+        let root = Path::new("/p");
+        project.listings.insert(root.into(), vec![dir("a"), dir("b")]);
+        project.listings.insert("/p/b".into(), vec![dir("c"), file("x")]);
+        project.listings.insert("/p/b/c".into(), vec![file("y")]);
+        project.reveal_file(Path::new("/p/b/x"), root, true);
+        assert_eq!(names(&project), [("a".into(), 0), ("b".into(), 0), ("c".into(), 1), ("x".into(), 1)]);
+        assert_eq!(project.selected, Some(PathBuf::from("/p/b/x")));
+        project.collapse_all(root, true);
+        assert_eq!(names(&project), [("a".into(), 0), ("b".into(), 0)]);
+    }
+
+    #[test]
+    fn moves_the_selection_with_the_keyboard() {
+        let mut project = Project::default();
+        let root = Path::new("/p");
+        project.listings.insert(root.into(), vec![dir("a"), file("z")]);
+        project.listings.insert("/p/a".into(), vec![file("b"), file("c")]);
+        project.rebuild_file_rows(root, true);
+        assert_eq!(project.select_step(-1), Some(1));
+        assert_eq!(project.select_step(1), Some(1));
+        assert_eq!(project.select_step(-5), Some(0));
+        // 往右先展开，再进到第一项；往左先回到上一级，再收起。
+        assert_eq!(project.select_in(root, true), Some(0));
+        assert_eq!(project.file_rows.len(), 4);
+        assert_eq!(project.select_in(root, true), Some(1));
+        assert_eq!(project.selected, Some(PathBuf::from("/p/a/b")));
+        assert_eq!(project.select_in(root, true), None);
+        assert_eq!(project.select_out(root, true), Some(0));
+        assert_eq!(project.select_out(root, true), Some(0));
+        assert_eq!(project.file_rows.len(), 2);
+        assert_eq!(project.select_out(root, true), None);
+
+        // 改名或挪走的目录还是展开的，选中的跟过去。
+        project.select_in(root, true);
+        project.select_step(1);
+        project.moved(Path::new("/p/a"), Path::new("/p/d"));
+        assert!(project.expanded_dirs.contains(Path::new("/p/d")));
+        assert!(!project.listings.contains_key(Path::new("/p/a")));
+        assert_eq!(project.selected, Some(PathBuf::from("/p/d/b")));
+        project.removed(Path::new("/p/d"));
+        assert!(project.expanded_dirs.is_empty());
     }
 
     #[test]

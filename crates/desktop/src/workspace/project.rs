@@ -15,7 +15,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use gpui::{Action, Context, CursorStyle, Div, MouseButton, MouseDownEvent, Stateful, Window, div, prelude::*, px};
+use gpui::{Action, Context, CursorStyle, Div, Focusable, MouseButton, MouseDownEvent, Stateful, Window, div, prelude::*, px};
 use runode_git_status::FileStatus;
 use runode_shared_types::color::Rgb;
 
@@ -256,8 +256,12 @@ impl WindowView {
         cx.notify();
     }
 
-    pub(super) fn toggle_files(&mut self, _: &ToggleFiles, _: &mut Window, cx: &mut Context<Self>) {
+    pub(super) fn toggle_files(&mut self, _: &ToggleFiles, window: &mut Window, cx: &mut Context<Self>) {
         self.files_shown = !self.files_shown;
+        // 文件树收起时焦点还在里面的话，按键就没处去了，交回终端。
+        if !self.files_shown && self.files_focus.contains_focused(window, cx) {
+            window.focus(&self.tab().focused_view().focus_handle(cx), cx);
+        }
         self.sync_project_watch();
         self.refresh_project(cx);
         self.save(cx);
@@ -351,7 +355,7 @@ impl WindowView {
             };
             let action: &dyn Action = if changes { &ToggleChanges } else { &ToggleFiles };
             let tooltip = tooltip(text, Some(action), fg, bg);
-            icon_toggle(id, icon, shown, fg, bg)
+            icon_toggle(id, icon, 16., shown, fg, bg)
                 .w(px(TOGGLE_WIDTH))
                 .h(px(TOGGLE_HEIGHT))
                 .tooltip(tooltip)

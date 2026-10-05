@@ -9,12 +9,12 @@ use runode_shared_types::color::Rgb;
 use super::{
     AGENT_MARK_WIDTH, DIVIDER_GRAB_WIDTH, Divider, NewWorkspace, RenameWorkspace, Renaming, SelectLastWorkspace,
     SelectWorkspace, TAB_CLOSE_SIZE, TITLEBAR_HEIGHT, TRAFFIC_LIGHTS_WIDTH, ToggleSidebar, WindowView, drag_window,
+    inline_edit::InlineEdit,
     model::{WorkspaceId, display_dir},
     titlebar::{agent_mark, close_button, drag_chip, icon_toggle, shortcut_hint},
 };
 use crate::{
     assets::SIDEBAR_ICON,
-    search_bar::{SearchField, SearchFieldEvent},
     terminal_view::hsla,
     tooltip::tooltip,
 };
@@ -99,7 +99,7 @@ impl WindowView {
     pub(super) fn render_sidebar_toggle(&self, fg: Rgb, bg: Rgb, cx: &mut Context<Self>) -> Stateful<Div> {
         let text = if self.sidebar_visible() { rust_i18n::t!("tooltip.hide_sidebar") } else { rust_i18n::t!("tooltip.show_sidebar") };
         let tooltip = tooltip(text, Some(&ToggleSidebar), fg, bg);
-        icon_toggle("sidebar-toggle", SIDEBAR_ICON, false, fg, bg)
+        icon_toggle("sidebar-toggle", SIDEBAR_ICON, 16., false, fg, bg)
             .absolute()
             .left(px(TRAFFIC_LIGHTS_WIDTH))
             .top(px((TITLEBAR_HEIGHT - SIDEBAR_TOGGLE_HEIGHT) / 2.))
@@ -158,26 +158,17 @@ impl WindowView {
         let active = ix == self.active;
         let active_bg = hsla(bg.mix(fg, 0.10));
         let hover_bg = hsla(bg.mix(fg, 0.06));
-        let field_bg = hsla(bg);
         let close_tooltip = tooltip(rust_i18n::t!("menu.close_workspace"), None, fg, bg);
+        let rgb_fg = fg;
         let fg = hsla(fg);
         let group = SharedString::from(format!("workspace-{ix}"));
-        let renaming = self.renaming.as_ref().filter(|renaming| renaming.id == id).map(|r| r.field.clone());
+        let renaming = self.renaming.as_ref().filter(|renaming| renaming.id == id);
         let mark = match workspace.agent(cx) {
             Some(agent) => agent_mark(agent, ("workspace-agent", ix), fg),
             None => div().flex_none().w(px(AGENT_MARK_WIDTH)).into_any_element(),
         };
-        let name: AnyElement = match renaming.clone() {
-            Some(field) => div()
-                .h(px(RENAME_FIELD_HEIGHT))
-                .px(px(3.))
-                .rounded(px(3.))
-                .bg(field_bg)
-                .border_1()
-                .border_color(fg.opacity(0.3))
-                .text_color(fg)
-                .child(field)
-                .into_any_element(),
+        let name: AnyElement = match renaming {
+            Some(renaming) => renaming.edit.render(px(RENAME_FIELD_HEIGHT), rgb_fg, bg).into_any_element(),
             None => div().truncate().child(workspace.name.clone()).into_any_element(),
         };
         // 右侧：响铃标记优先，其次快捷键提示；悬停时换成关闭按钮。
@@ -347,26 +338,9 @@ impl WindowView {
         let workspace = &self.workspaces[ix];
         let id = workspace.id;
         let name = workspace.name.to_string();
-        let field = cx.new(|cx| {
-            let mut field = SearchField::new(name, cx);
-            field.select_all_text(cx);
-            field
-        });
-        // 输入框原本是搜索框：回车是「下一个」，Esc 是「关闭搜索」，在这里分别是确定和取消。
-        let events = cx.subscribe_in(&field, window, |this, _, event: &SearchFieldEvent, window, cx| match event {
-            SearchFieldEvent::Next => this.finish_rename(true, window, cx),
-            SearchFieldEvent::Dismiss => this.finish_rename(false, window, cx),
-            SearchFieldEvent::Changed(_) | SearchFieldEvent::Previous => {}
-        });
-        let focus = field.focus_handle(cx);
-        // 点到别处算确定；切到别的应用时窗口失去焦点，回来接着改。
-        let blur = cx.on_blur(&focus, window, |this, window, cx| {
-            if window.is_window_active() {
-                this.finish_rename(true, window, cx);
-            }
-        });
-        window.focus(&focus, cx);
-        self.renaming = Some(Renaming { id, field, _subscriptions: [events, blur] });
+        let select = name.len();
+        let edit = InlineEdit::new(name, select, Self::finish_rename, window, cx);
+        self.renaming = Some(Renaming { id, edit });
         self.sidebar_scroll.scroll_to_item(ix);
         cx.notify();
     }
@@ -376,7 +350,7 @@ impl WindowView {
         let Some(renaming) = self.renaming.take() else {
             return;
         };
-        let name = renaming.field.read(cx).query().trim().to_owned();
+        let name = renaming.edit.text(cx);
         if commit
             && !name.is_empty()
             && let Some(workspace) = self.workspaces.iter_mut().find(|w| w.id == renaming.id)
@@ -384,10 +358,7 @@ impl WindowView {
             workspace.name = name.into();
             self.save(cx);
         }
-        // 按回车或 Esc 结束时焦点还在输入框里，交回终端；点别处结束时焦点已经去了别处。
-        if renaming.field.focus_handle(cx).is_focused(window) {
-            window.focus(&self.tab().focused_view().focus_handle(cx), cx);
-        }
+        renaming.edit.release_focus(&self.tab().focused_view().focus_handle(cx), window, cx);
         cx.notify();
     }
 }

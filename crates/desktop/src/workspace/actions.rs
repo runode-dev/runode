@@ -178,7 +178,7 @@ impl WindowView {
     }
 
     /// 切到当前标签里的另一个终端；放大着的话先恢复，否则看不到它。
-    fn focus_pane_in_active_tab(&mut self, pane: EntityId, window: &mut Window, cx: &mut Context<Self>) {
+    pub(super) fn focus_pane_in_active_tab(&mut self, pane: EntityId, window: &mut Window, cx: &mut Context<Self>) {
         let tab = self.tab_mut();
         tab.focused = pane;
         tab.zoomed = false;

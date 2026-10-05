@@ -309,7 +309,7 @@ impl WindowView {
         self.preview().is_some()
     }
 
-    /// 在预览栏里打开 `path`，替换原来预览的文件；就是这个文件时重读一次。
+    /// 在预览栏里打开 `path`，替换原来预览的文件；就是这个文件时重读一次。文件树跟着定位到它。
     pub(super) fn open_preview(&mut self, path: &Path, cx: &mut Context<Self>) {
         if self.preview().is_none_or(|preview| preview.path != path) {
             if let Some(old) = self.preview() {
@@ -319,6 +319,8 @@ impl WindowView {
             self.sync_project_watch();
             self.refresh_project(cx);
         }
+        // 文件树跟着展开到预览的文件，选中它、滚到能看见。
+        self.with_tree(|project, root, show_ignored| project.reveal_file(path, root, show_ignored));
         self.load_preview(cx);
     }
 

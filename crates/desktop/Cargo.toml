@@ -35,7 +35,8 @@ notify.workspace = true
 # 标准「关于」面板、系统偏好的语言和窗口菜单只有 AppKit 提供，GPUI 没有封装。
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2.workspace = true
-objc2-foundation = { workspace = true, features = ["std", "NSArray", "NSData", "NSLocale", "NSString"] }
+# 文件树删除文件时移到废纸篓，用 NSFileManager。
+objc2-foundation = { workspace = true, features = ["std", "NSArray", "NSData", "NSError", "NSFileManager", "NSLocale", "NSString", "NSURL"] }
 objc2-app-kit = { workspace = true, features = ["std", "NSApplication", "NSResponder", "NSImage", "NSMenu", "NSMenuItem", "NSEvent"] }
 
 [lints]

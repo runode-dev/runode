@@ -18,6 +18,10 @@ pub const CHEVRON_DOWN_ICON: &str = "icons/chevron-down.svg";
 /// 文件树标题栏上显示、隐藏被 git 忽略的文件的开关。
 pub const EYE_ICON: &str = "icons/eye.svg";
 pub const EYE_OFF_ICON: &str = "icons/eye-off.svg";
+/// 文件树标题栏上新建文件、新建文件夹和全部收起的按钮。
+pub const NEW_FILE_ICON: &str = "icons/new-file.svg";
+pub const NEW_FOLDER_ICON: &str = "icons/new-folder.svg";
+pub const COLLAPSE_ALL_ICON: &str = "icons/collapse-all.svg";
 
 const FILES: &[(&str, &[u8])] = &[
     (SIDEBAR_ICON, include_bytes!("../assets/icons/sidebar.svg")),
@@ -27,6 +31,9 @@ const FILES: &[(&str, &[u8])] = &[
     (CHEVRON_DOWN_ICON, include_bytes!("../assets/icons/chevron-down.svg")),
     (EYE_ICON, include_bytes!("../assets/icons/eye.svg")),
     (EYE_OFF_ICON, include_bytes!("../assets/icons/eye-off.svg")),
+    (NEW_FILE_ICON, include_bytes!("../assets/icons/new-file.svg")),
+    (NEW_FOLDER_ICON, include_bytes!("../assets/icons/new-folder.svg")),
+    (COLLAPSE_ALL_ICON, include_bytes!("../assets/icons/collapse-all.svg")),
 ];
 
 fn all_files() -> impl Iterator<Item = &'static (&'static str, &'static [u8])> {

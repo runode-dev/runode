@@ -5,11 +5,13 @@
 //! 这里是窗口的根视图 `WindowView`、窗口绑定的动作，以及把各部分拼起来的渲染。其余按职责分在
 //! 子模块里：workspace、标签和分屏的数据与增删切换（`model`）、动作的处理（`actions`）、
 //! 标签里的分屏（`panes`）、标题栏和标签（`titlebar`）、侧栏（`sidebar`）、右侧的改动栏、
-//! 预览栏和文件树（`project`、`changes`、`preview`、`files`），以及存档（`persistence`）。
+//! 预览栏和文件树（`project`、`changes`、`preview`、`files`），侧栏和文件树共用的就地输入框
+//! （`inline_edit`），以及存档（`persistence`）。
 
 mod actions;
 mod changes;
 mod files;
+mod inline_edit;
 mod model;
 mod panes;
 mod persistence;
@@ -28,11 +30,15 @@ use std::{
 
 use futures::StreamExt as _;
 use gpui::{
-    Action, App, Context, Entity, EntityId, FocusHandle, Focusable, MouseButton, MouseDownEvent, Render,
+    Action, App, Context, EntityId, FocusHandle, Focusable, MouseButton, MouseDownEvent, Render,
     ScrollHandle, SharedString, Subscription, Task, Window, WindowBounds, actions, div, prelude::*, px,
 };
 use runode_shared_types::pane::{Axis, Direction, SplitId};
 
+pub use files::{
+    CollapseSelectedFile, CopyPath, CopyRelativePath, DeleteFile, ExpandSelectedFile, FocusTerminal, OpenSelectedFile,
+    RenameFile, RevealInFinder, SelectFirstFile, SelectLastFile, SelectNextFile, SelectPreviousFile,
+};
 pub use persistence::{install, saved_window_options};
 pub use titlebar::titlebar_options;
 
@@ -40,7 +46,6 @@ use crate::{
     config::AppConfig,
     persist::SavedWindow,
     prespawn::Prespawned,
-    search_bar::SearchField,
     terminal_view::{TerminalView, hsla},
 };
 use model::{PaneLayout, Workspace, WorkspaceId, home_dir};
@@ -144,8 +149,7 @@ enum Divider {
 /// 侧栏里正在改名的 workspace，以及改名用的输入框。
 struct Renaming {
     id: WorkspaceId,
-    field: Entity<SearchField>,
-    _subscriptions: [Subscription; 2],
+    edit: inline_edit::InlineEdit,
 }
 
 /// 窗口的根视图。
@@ -170,6 +174,12 @@ pub struct WindowView {
     preview_focus: FocusHandle,
     /// 文件树里显示被 git 忽略的文件。
     show_ignored: bool,
+    /// 文件树的焦点：点了文件树后方向键在里面移动选中的行。
+    files_focus: FocusHandle,
+    /// 文件树的右键菜单、正在新建或改名的输入框，以及剪切或复制下来等着粘贴的文件。
+    file_menu: Option<files::FileMenu>,
+    file_edit: Option<files::FileEdit>,
+    file_clipboard: Option<files::FileClipboard>,
     renaming: Option<Renaming>,
     /// workspace、标签和分屏节点的标识都从这里取。
     next_id: u64,
@@ -252,6 +262,10 @@ impl WindowView {
             preview_width: None,
             preview_focus: cx.focus_handle(),
             show_ignored: false,
+            files_focus: cx.focus_handle(),
+            file_menu: None,
+            file_edit: None,
+            file_clipboard: None,
             renaming: None,
             next_id: 0,
             layout: Rc::default(),
@@ -341,6 +355,7 @@ impl Render for WindowView {
         });
         let preview = self.render_preview_panel(widths.preview, !self.files_shown, fg, bg, font, cx);
         let files = self.files_shown.then(|| self.render_files_panel(widths.files, fg, bg, cx));
+        let file_menu = self.render_file_menu(fg, bg, cx);
         let right_handles = [
             self.changes_shown.then(|| self.render_right_handle(Divider::Changes, widths.total(), cx)),
             preview_shown.then(|| self.render_right_handle(Divider::Preview, widths.preview + widths.files, cx)),
@@ -464,6 +479,7 @@ impl Render for WindowView {
             .children(sidebar_toggle)
             .children(panel_toggles)
             .children(drag)
+            .children(file_menu)
     }
 }
 
