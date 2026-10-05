@@ -9,8 +9,10 @@ mod prompt_input;
 pub mod pty;
 pub mod session;
 mod shell_integration;
+mod vt;
 
 pub use prompt_input::PromptInput;
+pub use vt::SnapshotError;
 
 /// runode 的版本号，即整个工作区的版本；终端回答 XTVERSION、设置 `TERM_PROGRAM_VERSION` 时用。
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");

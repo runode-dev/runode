@@ -1,6 +1,6 @@
 //! 颜色。
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Rgb(pub u8, pub u8, pub u8);
 
 impl Rgb {
@@ -16,7 +16,8 @@ impl Rgb {
 }
 
 /// 光标和选区的颜色：固定色，或者跟随所在单元格的前景、背景色。
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum TerminalColor {
     Rgb(Rgb),
     CellForeground,

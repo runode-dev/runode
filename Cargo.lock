@@ -5096,10 +5096,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "runode-protocol"
+version = "0.1.0"
+dependencies = [
+ "runode-shared-types",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "runode-shared-types"
 version = "0.1.0"
 dependencies = [
  "serde",
+ "serde_json",
 ]
 
 [[package]]

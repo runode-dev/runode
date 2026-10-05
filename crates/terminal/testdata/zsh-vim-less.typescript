@@ -1,0 +1,102 @@
+[1m[7m%[27m[1m[0m                                                                                ]2;~]133;D;0[0m[27m[24m[J]133;A~ % ]133;B[K[?2004hsstty cols 80 rows 24[?2004l
+]133;C]2;stty cols 80 rows 24[1m[7m%[27m[1m[0m                                                                                ]2;~]133;D;0[0m[27m[24m[J]133;A~ % ]133;B[K[?2004hlls -G src[?2004l
+]133;C]2;ls -G srclog.txt main.rs
+[1m[7m%[27m[1m[0m                                                                                ]2;~]133;D;0[0m[27m[24m[J]133;A~ % ]133;B[K[?2004hvvim -u NONE -N notes.txt[?2004l
+]133;C]2;vim -u NONE -N notes.txt[?1049h[>4;2m[?1h=[?2004h[?1004h[1;24r[?12h[?12l[22;2t[22;1t[27m[23m[29m[m[H[2J[?25l[24;1H"notes.txt" 2L, 25B[2;1H▽[6n[2;1H  [3;1HPzz\[0%m[6n[3;1H           [1;1H[>c[1;1Hline one
+line two 中文[2;14H[K[3;1H[94m~                                                                               [4;1H~                                                                               [5;1H~                                                                               [6;1H~                                                                               [7;1H~                                                                               [8;1H~                                                                               [9;1H~                                                                               [10;1H~                                                                               [11;1H~                                                                               [12;1H~                                                                               [13;1H~                                                                               [14;1H~                                                                               [15;1H~                                                                               [16;1H~                                                                               [17;1H~                                                                               [18;1H~                                                                               [19;1H~                                                                               [20;1H~                                                                               [21;1H~                                                                               [22;1H~                                                                               [23;1H~                                                                               [1;1H[?25h[?4m
+[?25l[m[24;1H[1m-- INSERT --[m[24;13H[K[24;1H[K[3;1H宽字 wide and a long line that will wrap around the edge of the eighty column tee[4;1Hrminal for sure ok[4;19H[K[4;18H[?25h[?25l[24;1H:wq[?2004l[>4;m"notes.txt" 3L, 126B written[23;2t[23;1t
+[?1004l[?2004l[?1l>[?1049l[?25h[>4;m[1m[7m%[27m[1m[0m                                                                                ]2;~]133;D;0[0m[27m[24m[J]133;A~ % ]133;B[K[?2004hlless src/log.txt[?2004l
+]133;C]2;less src/log.txt[?1049h[24;1H[?1h=log entry number 1
+log entry number 2
+log entry number 3
+log entry number 4
+log entry number 5
+log entry number 6
+log entry number 7
+log entry number 8
+log entry number 9
+log entry number 10
+log entry number 11
+log entry number 12
+log entry number 13
+log entry number 14
+log entry number 15
+log entry number 16
+log entry number 17
+log entry number 18
+log entry number 19
+log entry number 20
+log entry number 21
+log entry number 22
+log entry number 23
+[7msrc/log.txt[27m[K[Klog entry number 24
+log entry number 25
+log entry number 26
+log entry number 27
+log entry number 28
+log entry number 29
+log entry number 30
+log entry number 31
+log entry number 32
+log entry number 33
+log entry number 34
+log entry number 35
+log entry number 36
+log entry number 37
+log entry number 38
+log entry number 39
+log entry number 40
+log entry number 41
+log entry number 42
+log entry number 43
+log entry number 44
+log entry number 45
+log entry number 46
+:[K[K/[Kee[Knn[Ktt[Krr[Kyy[K  [K55[K[1;1H[Klog entry number 24
+[2;1H[Klog entry number 25
+[3;1H[Klog entry number 26
+[4;1H[Klog entry number 27
+[5;1H[Klog entry number 28
+[6;1H[Klog entry number 29
+[7;1H[Klog entry number 30
+[8;1H[Klog entry number 31
+[9;1H[Klog entry number 32
+[10;1H[Klog entry number 33
+[11;1H[Klog entry number 34
+[12;1H[Klog entry number 35
+[13;1H[Klog entry number 36
+[14;1H[Klog entry number 37
+[15;1H[Klog entry number 38
+[16;1H[Klog entry number 39
+[17;1H[Klog entry number 40
+[18;1H[Klog entry number 41
+[19;1H[Klog entry number 42
+[20;1H[Klog entry number 43
+[21;1H[Klog entry number 44
+[22;1H[Klog entry number 45
+[23;1H[Klog entry number 46
+[24;1H[1;1H[Klog entry number 24
+[2;1H[Klog entry number 25
+[3;1H[Klog entry number 26
+[4;1H[Klog entry number 27
+[5;1H[Klog entry number 28
+[6;1H[Klog entry number 29
+[7;1H[Klog entry number 30
+[8;1H[Klog entry number 31
+[9;1H[Klog entry number 32
+[10;1H[Klog entry number 33
+[11;1H[Klog entry number 34
+[12;1H[Klog entry number 35
+[13;1H[Klog entry number 36
+[14;1H[Klog entry number 37
+[15;1H[Klog entry number 38
+[16;1H[Klog entry number 39
+[17;1H[Klog entry number 40
+[18;1H[Klog entry number 41
+[19;1H[Klog entry number 42
+[20;1H[Klog entry number 43
+[21;1H[Klog entry number 44
+[22;1H[Klog entry number 45
+[23;1H[Klog entry number 46
+[24;1H[K[7mPattern not found  (press RETURN)[27m[24;1H[K[K[?1l>[?1049l[1m[7m%[27m[1m[0m                                                                                ]2;~]133;D;0[0m[27m[24m[J]133;A~ % ]133;B[K[?2004heexit[?2004l
+]133;C]2;exit

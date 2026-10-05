@@ -7,8 +7,11 @@ license.workspace = true
 publish.workspace = true
 
 [dependencies]
-# 分屏方向随窗口布局一起存档。
+# 分屏方向随窗口布局一起存档；宿主和界面之间的消息也用这里的类型。
 serde.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true
 
 [lints]
 workspace = true

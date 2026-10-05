@@ -3,7 +3,8 @@
 use std::path::Path;
 
 /// 配置项 `shell-integration` 的取值。
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum IntegrationMode {
     /// 按 shell 的程序名判断用哪一种。
     #[default]
@@ -14,7 +15,8 @@ pub enum IntegrationMode {
     Force(Shell),
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum Shell {
     Zsh,
     Bash,
@@ -39,7 +41,8 @@ impl Shell {
 }
 
 /// shell 集成报告的各种名字，补命令名时用。
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
 pub struct ShellNames {
     pub aliases: Vec<String>,
     /// 别名展开成什么：`(名字, 值)`。

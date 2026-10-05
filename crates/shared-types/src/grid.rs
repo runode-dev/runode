@@ -1,7 +1,7 @@
 //! 终端网格的尺寸、网格里的位置和视口的滚动方式。
 
 /// 网格的行列数和单元格的像素尺寸。
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct GridSize {
     pub cols: u16,
     pub rows: u16,

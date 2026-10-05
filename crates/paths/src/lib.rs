@@ -2,13 +2,22 @@
 //!
 //! runode 自己的东西在所有系统上都放在同一个根目录：`$XDG_CONFIG_HOME/runode`，没设时
 //! `~/.config/runode`。配置文件和要留着的数据（窗口布局的存档、命令历史）直接放在根目录，
-//! 随时能重新生成的缓存（shell 集成脚本、首个终端的尺寸）放在根目录的 `cache/` 里。
+//! 随时能重新生成的缓存（shell 集成脚本、首个终端的尺寸、宿主进程的日志）放在根目录的
+//! `cache/` 里，宿主进程的 socket 和锁放在根目录的 `run/` 里。
 //! Ghostty 自己的配置和主题照旧在它原来的位置读。
 
 use std::{
     ffi::OsString,
     path::{Path, PathBuf},
 };
+
+/// 宿主进程的 socket、锁和日志的文件名（不含扩展名）。调试构建用另一个名字，免得开发版
+/// 连上装好的那个版本的宿主，或者反过来。
+const HOST_NAME: &str = if cfg!(debug_assertions) { "host-dev" } else { "host" };
+
+/// `sockaddr_un.sun_path` 的长度（macOS 上最短，104 字节），含结尾的 NUL；socket 路径的
+/// 字节数要比它小，否则绑定和连接都会失败。
+const SUN_PATH_LEN: usize = 104;
 
 /// 各个目录的位置。环境变量没设、为空，或者连家目录都没有时，对应的字段为 `None`，
 /// 由它算出的文件也都是 `None`。
@@ -44,6 +53,57 @@ impl Dirs {
     /// runode 的配置文件。
     pub fn config_file(&self) -> Option<PathBuf> {
         self.data_file("config.conf")
+    }
+
+    /// 宿主进程和各个界面之间的 Unix socket，在 `runtime_dir` 里。路径太长、放不进
+    /// `sun_path` 时为 `None`。
+    pub fn host_socket_file(&self) -> Option<PathBuf> {
+        socket_path(self.runtime_dir()?.join(format!("{HOST_NAME}.sock")))
+    }
+
+    /// 保证只有一个宿主进程的锁文件，和 socket 放在一起。
+    pub fn host_lock_file(&self) -> Option<PathBuf> {
+        Some(self.runtime_dir()?.join(format!("{HOST_NAME}.lock")))
+    }
+
+    /// 宿主进程的日志。宿主没有终端可写，出了问题只能看这里。
+    pub fn host_log_file(&self) -> Option<PathBuf> {
+        self.cache_file(&format!("{HOST_NAME}.log"))
+    }
+
+    /// 放宿主进程的 socket 和锁的目录，即 `data` 下的 `run`。别的用户不能进这个目录，见
+    /// `create_runtime_dir`。
+    pub fn runtime_dir(&self) -> Option<PathBuf> {
+        self.data_file("run")
+    }
+
+    /// 建好 `runtime_dir`，并把它的权限设成只有自己能进（0700）；已经存在时也重设一遍权限。
+    /// 能连上 socket 的进程就能读写所有终端，所以目录本身要挡住别的用户。
+    ///
+    /// 已经存在的不是真目录（比如是指向别处的符号链接），或者属主和上一级目录（runode 的根
+    /// 目录，用户自己的）不一样时拒绝，不去改它的权限：那多半是别人布下的。
+    #[cfg(unix)]
+    pub fn create_runtime_dir(&self) -> std::io::Result<PathBuf> {
+        use std::{
+            io::{Error, ErrorKind},
+            os::unix::fs::{DirBuilderExt as _, MetadataExt as _, PermissionsExt as _},
+        };
+
+        let dir = self.runtime_dir().ok_or_else(|| Error::new(ErrorKind::NotFound, "no home directory"))?;
+        std::fs::DirBuilder::new().recursive(true).mode(0o700).create(&dir)?;
+        let meta = std::fs::symlink_metadata(&dir)?;
+        if !meta.file_type().is_dir() {
+            return Err(Error::new(ErrorKind::InvalidInput, format!("{} is not a directory", dir.display())));
+        }
+        let parent = dir.parent().ok_or_else(|| Error::new(ErrorKind::NotFound, "runtime dir has no parent"))?;
+        if meta.uid() != std::fs::metadata(parent)?.uid() {
+            return Err(Error::new(
+                ErrorKind::PermissionDenied,
+                format!("{} belongs to another user", dir.display()),
+            ));
+        }
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700))?;
+        Ok(dir)
     }
 
     /// 用户自己的配色主题目录，按名字找主题时最先找这里。
@@ -119,6 +179,11 @@ impl Dirs {
     }
 }
 
+/// 放得进 `sun_path` 的 socket 路径原样返回，放不进时为 `None`。
+fn socket_path(path: PathBuf) -> Option<PathBuf> {
+    (path.as_os_str().len() < SUN_PATH_LEN).then_some(path)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -139,6 +204,58 @@ mod tests {
         assert_eq!(dirs.shell_integration_dir(), Some("/home/me/.config/runode/cache/shell-integration".into()));
         assert_eq!(dirs.prespawn_size_file(), Some("/home/me/.config/runode/cache/first-terminal-size".into()));
         assert_eq!(dirs.ghostty_themes_dir(), Some("/home/me/.config/ghostty/themes".into()));
+    }
+
+    #[test]
+    fn host_files_live_in_the_runtime_dir() {
+        let dirs = dirs(&[("HOME", "/home/me")]);
+        assert_eq!(dirs.runtime_dir(), Some("/home/me/.config/runode/run".into()));
+        assert_eq!(dirs.host_socket_file(), Some(format!("/home/me/.config/runode/run/{HOST_NAME}.sock").into()));
+        assert_eq!(dirs.host_lock_file(), Some(format!("/home/me/.config/runode/run/{HOST_NAME}.lock").into()));
+        assert_eq!(dirs.host_log_file(), Some(format!("/home/me/.config/runode/cache/{HOST_NAME}.log").into()));
+        assert_eq!(Dirs::default().host_socket_file(), None);
+    }
+
+    #[test]
+    fn socket_paths_must_fit_in_sun_path() {
+        // 根目录下的 `/runode/run/host-dev.sock` 共 25 字节（release 构建的 `host.sock` 短 4
+        // 字节），根目录拼上它正好 103 字节；再长就放不下了。
+        let fits = format!("/{}", "x".repeat(SUN_PATH_LEN - 2 - "/runode/run/".len() - HOST_NAME.len() - ".sock".len()));
+        let socket = dirs(&[("HOME", "/h"), ("XDG_CONFIG_HOME", &fits)]).host_socket_file().unwrap();
+        assert_eq!(socket.as_os_str().len(), SUN_PATH_LEN - 1);
+        let too_long = format!("{fits}x");
+        let dirs = dirs(&[("HOME", "/h"), ("XDG_CONFIG_HOME", &too_long)]);
+        assert_eq!(dirs.host_socket_file(), None);
+        // 锁文件和日志不受这个限制。
+        assert!(dirs.host_lock_file().is_some());
+        assert!(dirs.host_log_file().is_some());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_runtime_dir_is_private() {
+        use std::os::unix::fs::PermissionsExt as _;
+
+        let root = std::env::temp_dir().join(format!("runode-paths-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let dirs = dirs(&[("HOME", "/h"), ("XDG_CONFIG_HOME", root.to_str().unwrap())]);
+        let dir = dirs.create_runtime_dir().unwrap();
+        assert_eq!(dir, root.join("runode/run"));
+        let mode = |dir: &Path| std::fs::metadata(dir).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode(&dir), 0o700);
+        // 已经存在、权限被放宽了的目录也收回来。
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o755)).unwrap();
+        dirs.create_runtime_dir().unwrap();
+        assert_eq!(mode(&dir), 0o700);
+        // 换成指向别处的符号链接：拒绝，也不去改链接指向的目录的权限。
+        let elsewhere = root.join("elsewhere");
+        std::fs::create_dir(&elsewhere).unwrap();
+        std::fs::set_permissions(&elsewhere, std::fs::Permissions::from_mode(0o755)).unwrap();
+        std::fs::remove_dir(&dir).unwrap();
+        std::os::unix::fs::symlink(&elsewhere, &dir).unwrap();
+        assert_eq!(dirs.create_runtime_dir().unwrap_err().kind(), std::io::ErrorKind::InvalidInput);
+        assert_eq!(mode(&elsewhere), 0o755);
+        std::fs::remove_dir_all(&root).unwrap();
     }
 
     #[test]

@@ -7,7 +7,8 @@ use crate::{
 };
 
 /// 配置的光标样式。
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum CursorStyle {
     #[default]
     Block,
@@ -17,7 +18,8 @@ pub enum CursorStyle {
 }
 
 /// macOS 上 Option 键当不当 Alt 用。
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum OptionAsAlt {
     /// 不当 Alt，按出系统给的字符。
     #[default]
@@ -30,7 +32,7 @@ pub enum OptionAsAlt {
 }
 
 /// 交给终端的设置。
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct TermSettings {
     pub background: Rgb,
     pub foreground: Rgb,

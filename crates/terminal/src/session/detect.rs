@@ -10,19 +10,11 @@ use std::{
     time::{Duration, Instant},
 };
 
-use libghostty_vt::{
-    Terminal,
-    error::Result,
-    fmt::{Format, Formatter, FormatterOptions},
-    screen::Screen,
-    selection::Selection,
-    terminal::{Point, PointCoordinate},
-};
 use runode_agent_detect::{Foreground, RuleBook, identify_job};
 use runode_shared_types::agent::AgentKind;
 
 use super::{Session, log_err};
-use crate::pty;
+use crate::{pty, vt::detection_text};
 
 /// 前台程序认不出是 agent 时，它启动后这段时间里隔 `REPROBE_INTERVAL` 再认一次：node 写的
 /// agent 启动后才改 argv[0]，npx 这类先起包装进程、再起真正的 agent。
@@ -96,56 +88,6 @@ impl Session {
         }
         self.agent_tracker.foreground(Foreground::Program(probe.agent), now);
     }
-}
-
-/// 屏幕底部一屏高的文字，给识别规则用：一行一个 `\n`，行尾空白去掉，末尾的空行去掉。
-///
-/// 读的是活动区，不管用户把视口翻到了哪里。主屏幕上以最后一个有字的行和光标所在行中靠下
-/// 的那行为底，往上取一屏高，内容没占满一屏时会带上回滚历史里的几行；备用屏幕上就是整屏。
-fn detection_text(terminal: &Terminal<'_, '_>) -> Result<Option<String>> {
-    let rows = usize::from(terminal.rows()?);
-    let total = terminal.total_rows()?;
-    if rows == 0 || total == 0 {
-        return Ok(None);
-    }
-    let active_top = total.saturating_sub(rows);
-    let alternate = terminal.active_screen()? == Screen::Alternate;
-    // 主屏幕上底可能往上移，最多再多读一屏回滚历史。
-    let first = if alternate { active_top } else { active_top.saturating_sub(rows) };
-    let lines = screen_lines(terminal, first, total - 1)?;
-    let line = |row: usize| lines.get(row - first).map_or("", String::as_str);
-    let bottom = if alternate {
-        total - 1
-    } else {
-        let cursor = active_top + usize::from(terminal.cursor_y()?);
-        (active_top..total).rev().find(|&row| !line(row).trim().is_empty()).map_or(total - 1, |row| row.max(cursor))
-    };
-    let top = (bottom + 1).saturating_sub(rows).max(first);
-    let mut picked: Vec<&str> = (top..=bottom).map(line).collect();
-    while picked.last().is_some_and(|line| line.trim().is_empty()) {
-        picked.pop();
-    }
-    if picked.is_empty() {
-        return Ok(Some(String::new()));
-    }
-    let mut text = picked.join("\n");
-    text.push('\n');
-    Ok(Some(text))
-}
-
-/// 整个屏幕（含回滚历史）第 `first` 到 `last` 行的纯文字，一行一项，行尾空白去掉。软换行
-/// 不接起来，和屏幕上的行一一对应；末尾的空行可能没有。
-fn screen_lines(terminal: &Terminal<'_, '_>, first: usize, last: usize) -> Result<Vec<String>> {
-    let cols = terminal.cols()?;
-    let point = |x: u16, y: usize| Point::Screen(PointCoordinate { x, y: u32::try_from(y).unwrap_or(u32::MAX) });
-    let selection = Selection::new(terminal.grid_ref(point(0, first))?, terminal.grid_ref(point(cols.saturating_sub(1), last))?, false);
-    let options = FormatterOptions::new()
-        .with_format(Format::Plain)
-        .with_unwrap(false)
-        .with_trim(true)
-        .with_selection(&selection);
-    let bytes = Formatter::new(terminal, options)?.format_alloc(None)?.to_vec();
-    Ok(String::from_utf8_lossy(&bytes).split('\n').map(|line| line.trim_end().to_owned()).collect())
 }
 
 #[cfg(test)]

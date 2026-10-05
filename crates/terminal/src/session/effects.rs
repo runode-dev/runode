@@ -54,10 +54,6 @@ pub(super) struct Effects {
 /// 伪造一个 OSC 133;D。
 pub(super) const SHELL_REPORT: &[u8] = b"6973;";
 
-/// 留给未知 OSC 的最多字节数：函数很多的 shell 报告的函数名能有几十 KB。更长的被截断，
-/// 不采用。
-pub(super) const UNKNOWN_SEQUENCE_MAX_BYTES: usize = 256 * 1024;
-
 impl Effects {
     /// 记下 shell 集成的一条报告 `<口令>;<字段>=<百分号编码的值>`。口令不对、缺口令或者
     /// 这个 shell 没有口令时整条丢掉；不认识的字段不管。

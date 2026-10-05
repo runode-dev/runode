@@ -3,7 +3,8 @@
 use std::time::Duration;
 
 /// agent 当前的状态。
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum AgentState {
     Working,
     Idle,
@@ -12,7 +13,8 @@ pub enum AgentState {
 }
 
 /// 是哪个 agent；`Other` 是其他用 OSC 9;4 报告进度的程序。
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum AgentKind {
     Pi,
     Claude,
@@ -42,7 +44,7 @@ pub enum AgentKind {
 }
 
 /// 前台 agent 及其状态。
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Agent {
     pub kind: AgentKind,
     pub state: AgentState,

@@ -7,7 +7,8 @@
 //! 这里是 `Session` 本身：创建、接上 PTY、注册 VT 回调、应用设置和改尺寸。其余按职责分在
 //! 子模块里：VT 回调累积的变化（`effects`）、前台 agent 的识别（`detect`）、帧（`render`）、
 //! 输入（`input`）、光标所在的输入行（`input_line`）、鼠标（`pointer`）、视口滚动（`scroll`）、
-//! 选区（`selection`）、搜索（`search`），以及和 libghostty 类型之间的转换（`convert`）。
+//! 选区（`selection`）、搜索（`search`）、快照（`snapshot`），以及和 libghostty 类型之间的
+//! 转换（`convert`）。
 
 mod convert;
 mod detect;
@@ -19,6 +20,7 @@ mod render;
 mod scroll;
 mod search;
 mod selection;
+mod snapshot;
 #[cfg(test)]
 mod testing;
 
@@ -54,14 +56,14 @@ use runode_shared_types::{
 use crate::{
     history, prompt_input,
     pty::{Pty, PtyEvent, PtyWriter},
+    vt,
 };
 use convert::{ghostty_cursor_style, ghostty_rgb};
-use effects::{Effects, PromptEvent, SHELL_REPORT, UNKNOWN_SEQUENCE_MAX_BYTES};
+use effects::{Effects, PromptEvent, SHELL_REPORT};
 pub use input::Paste;
 use render::Renderer;
 use selection::Selecting;
 
-const SCROLLBACK_LINES: usize = 10_000;
 /// 程序用同步输出（mode 2026）冻结屏幕的最长时间，超时后不再遵守，以免程序异常时画面卡死。
 pub const SYNC_OUTPUT_TIMEOUT: Duration = Duration::from_secs(1);
 
@@ -162,16 +164,13 @@ impl Session {
 
     /// 接上已经按 `size` 启动好的 shell。
     pub fn with_pty(size: GridSize, pty: Pty) -> Result<Self> {
-        let writer = pty.writer.clone();
+        Self::with_terminal(size, pty, vt::new_terminal(size)?)
+    }
 
-        let mut terminal = Terminal::new(size.cols, size.rows)?;
-        terminal.set_scrollback_max_lines(Some(SCROLLBACK_LINES))?;
-        terminal.resize(
-            size.cols,
-            size.rows,
-            u32::from(size.cell_width_px),
-            u32::from(size.cell_height_px),
-        )?;
+    /// 把 `terminal` 接到 `pty` 上：注册 VT 回调，建好会话的其余状态。`terminal` 要已经按
+    /// `size` 改好尺寸、设好 `vt::configure_common` 的选项。
+    fn with_terminal(size: GridSize, pty: Pty, mut terminal: Terminal<'static, 'static>) -> Result<Self> {
+        let writer = pty.writer.clone();
 
         let shared_size = Rc::new(StdCell::new(size));
         // 已经启动的 shell 的报告口令；还没启动的等 `start` 时再设。
@@ -270,7 +269,6 @@ impl Session {
                     }
                 }
             })?
-            .set_unknown_sequence_max_bytes(UNKNOWN_SEQUENCE_MAX_BYTES)?
             // RIS 会清空标题，但不会触发标题变化回调。
             .on_reset({
                 let effects = effects.clone();
