@@ -226,9 +226,10 @@ fn agent_mark(agent: Agent, id: impl Into<ElementId>, fg: Hsla) -> AnyElement {
             slot.when_some(agent.kind.spinner_color(), |slot, color| slot.text_color(gpui::rgb(color)))
                 .with_animation(
                     id,
+                    // 每格只重画一次：转圈每动一下都要重画整个窗口，并不便宜。
                     Animation::new(period)
                         .repeat_synced()
-                        .with_max_fps(2. / frame_time.as_secs_f32()),
+                        .with_max_fps(1. / frame_time.as_secs_f32()),
                     move |slot, delta| {
                         let frame = (delta * frames.len() as f32) as usize;
                         slot.child(frames[frame.min(frames.len() - 1)])
