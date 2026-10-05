@@ -1,0 +1,77 @@
+# 每周看一次命令规格子模块（vendor/command-signatures）的 fork 有没有新提交，有就把子模块
+# 指针挪到最新，开一个 PR，正文里列出改到的命令和提交。fork 自己每周一 02:00 合并上游，
+# 这里排在它之后。
+name: 更新命令规格
+
+on:
+  schedule:
+    - cron: '0 4 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    env:
+      BRANCH: update-command-specs
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - name: 挪子模块指针
+        id: bump
+        run: |
+          # 别的子模块很大，只拉命令规格这一个。
+          git submodule update --init vendor/command-signatures
+          old=$(git rev-parse HEAD:vendor/command-signatures)
+          cd vendor/command-signatures
+          git fetch --quiet origin main
+          new=$(git rev-parse origin/main)
+          if [ "$old" = "$new" ]; then
+            echo "命令规格没有新提交。"
+            exit 0
+          fi
+          git checkout --quiet "$new"
+
+          # 改到的命令：规格目录顶层的 JSON 一个文件一个命令，生成器一个文件对应一个命令（文件名里的
+          # 下划线对应命令名里的连字符）。
+          commands=$(git diff --name-only "$old" "$new" -- ':(glob)command-signatures/json/*.json' ':(glob)command-signatures/src/generators/*.rs' \
+            | sed -E 's#.*/##; s#\.(json|rs)$##; s#_tests$##; s#_#-#g' | sort -u | grep -vx -e mod -e common -e output-parsers -e template-filters || true)
+          {
+            echo "命令规格子模块从 \`${old:0:7}\` 更新到 \`${new:0:7}\`。"
+            echo
+            echo "### 改到的命令"
+            echo
+            if [ -n "$commands" ]; then
+              echo "$commands" | sed 's/^/- /'
+            else
+              echo "（没有改到具体命令的规格或生成器）"
+            fi
+            echo
+            echo "### 提交"
+            echo
+            git log --no-merges --format='- %s' "$old..$new"
+            echo
+            echo "合并前在本地 \`cargo build -p runode && cargo test -p runode\`，构建脚本会重新压缩嵌入规格。"
+          } > "$RUNNER_TEMP/body.md"
+          echo "short=${new:0:7}" >> "$GITHUB_OUTPUT"
+          echo "changed=true" >> "$GITHUB_OUTPUT"
+      - name: 开或更新 PR
+        if: steps.bump.outputs.changed == 'true'
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git switch -C "$BRANCH"
+          git add vendor/command-signatures
+          git commit --quiet -m "chore: 命令规格更新到 ${{ steps.bump.outputs.short }}"
+          git push --force origin "$BRANCH"
+          title="chore: 命令规格更新到 ${{ steps.bump.outputs.short }}"
+          if gh pr view "$BRANCH" --json state --jq .state 2>/dev/null | grep -qx OPEN; then
+            gh pr edit "$BRANCH" --title "$title" --body-file "$RUNNER_TEMP/body.md"
+          else
+            gh pr create --base main --head "$BRANCH" --title "$title" --body-file "$RUNNER_TEMP/body.md"
+          fi
