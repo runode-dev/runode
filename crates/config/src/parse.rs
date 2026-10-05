@@ -468,19 +468,19 @@ unknown-key = whatever
 
     #[test]
     fn file_tree_font_size_takes_positive_numbers() {
-        assert_eq!(Config::default().file_tree_font_size, 14.);
+        assert_eq!(Config::default().file_tree_font_size, 13.);
         assert_eq!(load(&["file-tree-font-size = 15"]).file_tree_font_size, 15.);
         // 不是正数的跳过，保留前面的值。
         assert_eq!(load(&["file-tree-font-size = 15\nfile-tree-font-size = 0"]).file_tree_font_size, 15.);
-        assert_eq!(load(&["file-tree-font-size = -3"]).file_tree_font_size, 14.);
+        assert_eq!(load(&["file-tree-font-size = -3"]).file_tree_font_size, 13.);
     }
 
     #[test]
     fn preview_font_size_takes_positive_numbers() {
-        assert_eq!(Config::default().preview_font_size, 12.);
-        assert_eq!(load(&["preview-font-size = 13.5"]).preview_font_size, 13.5);
+        assert_eq!(Config::default().preview_font_size, 13.);
+        assert_eq!(load(&["preview-font-size = 12.5"]).preview_font_size, 12.5);
         assert_eq!(load(&["preview-font-size = 15\npreview-font-size = 0"]).preview_font_size, 15.);
-        assert_eq!(load(&["preview-font-size = 15\npreview-font-size ="]).preview_font_size, 12.);
+        assert_eq!(load(&["preview-font-size = 15\npreview-font-size ="]).preview_font_size, 13.);
     }
 
     #[test]

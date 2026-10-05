@@ -34,7 +34,7 @@ use crate::{
     terminal_view::{Copy, SelectAll, hsla},
 };
 
-/// 行高比字号多出的部分；默认字号下行高和改动栏一样。
+/// 行高比字号多出的部分。
 const ROW_EXTRA_HEIGHT: f32 = 8.;
 /// 一行最多画这么多列，再长的截掉；复制时仍是整行。
 const MAX_COLUMNS: usize = 2000;
