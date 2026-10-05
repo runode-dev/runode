@@ -1,29 +1,25 @@
 //! 没有配置时使用的默认配色。
 
-use libghostty_vt::style::RgbColor;
+use runode_model::color::Rgb;
 
-const fn rgb(hex: u32) -> RgbColor {
-    RgbColor {
-        r: (hex >> 16) as u8,
-        g: (hex >> 8) as u8,
-        b: hex as u8,
-    }
+const fn rgb(hex: u32) -> Rgb {
+    Rgb((hex >> 16) as u8, (hex >> 8) as u8, hex as u8)
 }
 
-pub const BACKGROUND: RgbColor = rgb(0x171618);
-pub const FOREGROUND: RgbColor = rgb(0xE6E1D8);
+pub const BACKGROUND: Rgb = rgb(0x171618);
+pub const FOREGROUND: Rgb = rgb(0xE6E1D8);
 
 /// 没配置选区颜色时的选区底色，深色背景和浅色背景各一种；选中的文字保持原来的颜色。
-pub const SELECTION_ON_DARK: RgbColor = rgb(0x264F78);
-pub const SELECTION_ON_LIGHT: RgbColor = rgb(0xADD6FF);
+pub const SELECTION_ON_DARK: Rgb = rgb(0x264F78);
+pub const SELECTION_ON_LIGHT: Rgb = rgb(0xADD6FF);
 
 /// 搜索匹配的高亮：浅黄底黑字，当前选中的那个用橙色底。
-pub const SEARCH_BACKGROUND: RgbColor = rgb(0xFFE795);
-pub const SEARCH_SELECTED_BACKGROUND: RgbColor = rgb(0xF2A57E);
-pub const SEARCH_FOREGROUND: RgbColor = rgb(0x000000);
+pub const SEARCH_BACKGROUND: Rgb = rgb(0xFFE795);
+pub const SEARCH_SELECTED_BACKGROUND: Rgb = rgb(0xF2A57E);
+pub const SEARCH_FOREGROUND: Rgb = rgb(0x000000);
 
 /// ANSI 16 色：0–7 为普通色，8–15 为亮色。其余 240 色沿用终端标准的 256 色默认值。
-pub const ANSI: [RgbColor; 16] = [
+pub const ANSI: [Rgb; 16] = [
     rgb(0x393A3D), // black
     rgb(0xFF1261), // red
     rgb(0x2AD947), // green

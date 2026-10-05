@@ -26,15 +26,17 @@ use gpui::{
 };
 
 pub use persistence::{install, saved_window_options};
+use runode_model::{
+    agent::{Agent, AgentState},
+    color::Rgb,
+    pane::{self, Axis, Direction, Node, SplitId},
+};
 
 use crate::{
-    agent::{Agent, AgentState},
-    pane::{self, Axis, Direction, Node, SplitId},
     workspace::project::Project,
     persist::{self, SavedWindow},
     prespawn::Prespawned,
     search_bar::SearchField,
-    session::Rgb,
     terminal_view::{DEFAULT_TITLE, TerminalEvent, TerminalView, hsla},
 };
 

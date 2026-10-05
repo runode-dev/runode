@@ -6,6 +6,7 @@
 //! 搜索框里的文字编辑键（回车、Esc、剪切、撤销等）属于输入框本身，不开放配置。
 
 use gpui::{Action, App, Global, KeyBinding};
+use runode_model::pane::Direction;
 
 use crate::{
     config::{AppConfig, Keybind},
@@ -13,7 +14,6 @@ use crate::{
         About, CloseAllWindows, CloseWindow, Hide, HideOthers, Minimize, NewWindow, OpenConfiguration,
         Quit, ReloadConfiguration, ShowAll, ToggleFullScreen, Zoom,
     },
-    pane::Direction,
     search_bar::{Cut, EndSearch, Redo, SearchNext, SearchPrevious, SearchSelection, StartSearch, Undo},
     terminal_view::{
         ClearScreen, Copy, DecreaseFontSize, IncreaseFontSize, JumpToPrompt, Paste, PasteSelection,

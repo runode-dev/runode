@@ -15,23 +15,13 @@ pub mod usage;
 
 use std::{collections::HashMap, ffi::OsString, path::Path, sync::Arc};
 
+use runode_model::shell::ShellNames;
 use warp_command_signatures::{GeneratorResults, PathSuggestionType, Suggestion, TemplateType};
 
 pub use engine::{Candidate, Edit, Kind, common_prefix, decisive, highlight, rank};
 use engine::{Plan, Source};
 pub use line::cells;
 use line::Segment;
-
-/// shell 集成报告的各种名字，补命令名时用。
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct ShellNames {
-    pub aliases: Vec<String>,
-    /// 别名展开成什么：`(名字, 值)`。
-    pub alias_values: Vec<(String, String)>,
-    pub functions: Vec<String>,
-    pub builtins: Vec<String>,
-    pub keywords: Vec<String>,
-}
 
 /// 光标所在 shell 的情况：它报告的 PATH 和各种名字，以及 runode 记下的命令历史里各命令的
 /// 常用程度。

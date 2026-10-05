@@ -15,10 +15,11 @@ use std::{
 };
 
 use futures::channel::mpsc::UnboundedReceiver;
+use runode_model::grid::GridSize;
 
 use crate::{
     config::Config,
-    pty::{GridSize, Pty, PtyEvent},
+    pty::{Pty, PtyEvent},
 };
 
 /// 提前启动好的 shell，以及启动时用的尺寸。

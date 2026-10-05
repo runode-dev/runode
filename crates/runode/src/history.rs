@@ -13,9 +13,8 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
+use runode_model::shell::Shell;
 use serde::{Deserialize, Serialize};
-
-use crate::shell_integration::Shell;
 
 /// 内存里最多留这么多条不同的命令，多出来的丢掉最旧的。
 pub const LIMIT: usize = 10_000;

@@ -10,10 +10,10 @@ use gpui::{
     App, Bounds, Context, EntityId, Global, Task, WeakEntity, Window, WindowBounds,
     WindowOptions, point, px, size,
 };
+use runode_model::pane::{Node, Split};
 
 use super::{Tab, WindowView, Workspace, home_dir, workspace_name};
 use crate::{
-    pane::{Node, Split},
     persist::{self, SavedBounds, SavedNode, SavedTab, SavedWindow, SavedWorkspace, State, WindowMode},
     prespawn::Prespawned,
     terminal_view::TerminalView,

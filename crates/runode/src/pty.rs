@@ -14,6 +14,7 @@ use std::{
 use anyhow::{Context as _, Result};
 use futures::channel::mpsc::{UnboundedReceiver, UnboundedSender, unbounded};
 use portable_pty::{Child, CommandBuilder, MasterPty, PtySize, SlavePty, native_pty_system};
+use runode_model::{grid::GridSize, shell::IntegrationMode};
 
 use crate::shell_integration;
 
@@ -51,22 +52,12 @@ pub struct Pty {
     report_token: Option<String>,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct GridSize {
-    pub cols: u16,
-    pub rows: u16,
-    pub cell_width_px: u16,
-    pub cell_height_px: u16,
-}
-
-impl GridSize {
-    fn pty_size(self) -> PtySize {
-        PtySize {
-            rows: self.rows,
-            cols: self.cols,
-            pixel_width: self.cols.saturating_mul(self.cell_width_px),
-            pixel_height: self.rows.saturating_mul(self.cell_height_px),
-        }
+fn pty_size(size: GridSize) -> PtySize {
+    PtySize {
+        rows: size.rows,
+        cols: size.cols,
+        pixel_width: size.cols.saturating_mul(size.cell_width_px),
+        pixel_height: size.rows.saturating_mul(size.cell_height_px),
     }
 }
 
@@ -77,7 +68,7 @@ impl Pty {
         size: GridSize,
         shell: Option<&str>,
         cwd: Option<&std::path::Path>,
-        integration: shell_integration::Mode,
+        integration: IntegrationMode,
     ) -> Result<(Self, UnboundedReceiver<PtyEvent>)> {
         let (mut pty, rx) = Self::open(size)?;
         pty.start(shell, cwd, integration)?;
@@ -91,7 +82,7 @@ impl Pty {
         static OPENPTY: Mutex<()> = Mutex::new(());
         let pair = {
             let _guard = OPENPTY.lock().unwrap_or_else(|e| e.into_inner());
-            native_pty_system().openpty(size.pty_size())
+            native_pty_system().openpty(pty_size(size))
         }
         .context("openpty failed")?;
         let writer = pair.master.take_writer().context("pty writer")?;
@@ -123,7 +114,7 @@ impl Pty {
         &mut self,
         shell: Option<&str>,
         cwd: Option<&std::path::Path>,
-        integration: shell_integration::Mode,
+        integration: IntegrationMode,
     ) -> Result<()> {
         let Some((slave, tx)) = self.pending.take() else {
             return Ok(());
@@ -163,7 +154,7 @@ impl Pty {
     }
 
     pub fn resize(&self, size: GridSize) {
-        if let Err(err) = self.master.resize(size.pty_size()) {
+        if let Err(err) = self.master.resize(pty_size(size)) {
             tracing::warn!("pty resize failed: {err}");
         }
     }

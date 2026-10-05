@@ -8,9 +8,8 @@ use std::{
     path::{Path, PathBuf},
 };
 
+use runode_model::pane::Axis;
 use serde::{Deserialize, Serialize};
-
-use crate::pane::Axis;
 
 /// 格式改得不兼容时加一；读到别的版本当作没有存档。
 const VERSION: u32 = 1;

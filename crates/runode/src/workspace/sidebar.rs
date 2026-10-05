@@ -4,6 +4,7 @@ use gpui::{
     AnyElement, BoxShadow, Context, CursorStyle, Div, Focusable, Hsla, MouseButton, MouseDownEvent, Render,
     SharedString, Stateful, Window, div, point, prelude::*, px, svg,
 };
+use runode_model::color::Rgb;
 
 use super::{
     AGENT_MARK_WIDTH, DIVIDER_GRAB_WIDTH, Divider, NewWorkspace, RenameWorkspace, Renaming, SelectLastWorkspace,
@@ -13,7 +14,6 @@ use super::{
 use crate::{
     assets::SIDEBAR_ICON,
     search_bar::{SearchField, SearchFieldEvent},
-    session::Rgb,
     terminal_view::hsla,
 };
 

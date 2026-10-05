@@ -27,118 +27,31 @@ use libghostty_vt::{
     },
     style::{RgbColor, Underline},
     terminal::{
-        ConformanceLevel, DeviceAttributeFeature, DeviceAttributes, DeviceType, Mode, Point,
+        ConformanceLevel, CursorStyle, DeviceAttributeFeature, DeviceAttributes, DeviceType, Mode, Point,
         PointCoordinate, PointSpace, PrimaryDeviceAttributes, ProgressState, ScrollViewport,
         SecondaryDeviceAttributes, SemanticPrompt, SizeReportSize, Terminal, UnknownSequence,
     },
 };
 
+use runode_model::{
+    agent::{Agent, AgentKind, AgentState},
+    color::{Rgb, TerminalColor},
+    frame::{Attrs, Cell, Cursor, CursorShape, Frame},
+    grid::{GridPoint, GridSize, ViewportScroll},
+    input::{Key, KeyInput, Mods, MouseAction, MouseButton, SelectionAdjust},
+    settings::{self, TermSettings},
+    shell::{IntegrationMode, ShellNames},
+};
+
 use crate::{
-    agent::{self, Agent, AgentKind, AgentState},
-    completion::ShellNames,
-    config::{Config, TerminalColor},
-    history,
+    agent, history,
     prompt_input::{self, PromptInput},
-    pty::{GridSize, Pty, PtyEvent, PtyWriter},
+    pty::{Pty, PtyEvent, PtyWriter},
 };
 
 const SCROLLBACK_LINES: usize = 10_000;
 /// 程序用同步输出（mode 2026）冻结屏幕的最长时间，超时后不再遵守，以免程序异常时画面卡死。
 pub const SYNC_OUTPUT_TIMEOUT: Duration = Duration::from_secs(1);
-
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct Rgb(pub u8, pub u8, pub u8);
-
-impl From<RgbColor> for Rgb {
-    fn from(c: RgbColor) -> Self {
-        Self(c.r, c.g, c.b)
-    }
-}
-
-impl Rgb {
-    pub fn to_u32(self) -> u32 {
-        (u32::from(self.0) << 16) | (u32::from(self.1) << 8) | u32::from(self.2)
-    }
-
-    /// 从自身往 `other` 混合 `amount`（0 到 1）。
-    pub fn mix(self, other: Rgb, amount: f32) -> Rgb {
-        let mix = |a: u8, b: u8| (f32::from(a) + (f32::from(b) - f32::from(a)) * amount).round() as u8;
-        Rgb(mix(self.0, other.0), mix(self.1, other.1), mix(self.2, other.2))
-    }
-}
-
-/// 影响字形排版或装饰的文字属性。
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
-pub struct Attrs {
-    pub bold: bool,
-    pub italic: bool,
-    pub faint: bool,
-    pub underline: bool,
-    pub strikethrough: bool,
-}
-
-/// 一个网格单元格，颜色已解析为具体值。
-#[derive(Clone, Debug, Default)]
-pub struct Cell {
-    /// 字素簇；空白单元格为空串。
-    pub text: String,
-    pub fg: Rgb,
-    /// `None` 表示不画背景，透出帧背景色。
-    pub bg: Option<Rgb>,
-    pub attrs: Attrs,
-    /// 宽字符，同时占用下一个单元格。
-    pub wide: bool,
-    /// 宽字符的后半格，这里什么都不画。
-    pub spacer: bool,
-    /// 在选区里。
-    pub selected: bool,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum CursorShape {
-    Block,
-    BlockHollow,
-    Bar,
-    Underline,
-}
-
-#[derive(Clone, Copy, Debug)]
-pub struct Cursor {
-    pub x: u16,
-    pub y: u16,
-    pub shape: CursorShape,
-    pub color: Rgb,
-    /// 实心块状光标下文字的颜色。
-    pub text: Rgb,
-    /// 光标落在宽字符上，跨两个单元格。
-    pub wide: bool,
-    /// 终端要求光标闪烁（DECSCUSR 或 DEC 模式 12）。
-    pub blinking: bool,
-}
-
-/// 渲染器要画的内容：视口的一份副本，与 libghostty 的 render state 分离，绘制时不碰 VT。
-#[derive(Clone, Debug, Default)]
-pub struct Frame {
-    pub cols: u16,
-    pub rows: u16,
-    /// 视口上面紧挨着的一行，平滑滚动时露出它的一部分；视口已在回滚历史最顶上（或备用屏幕
-    /// 没有历史）时为空。
-    pub above: Vec<Cell>,
-    /// 整屏往下错开的行数，0 到 1 之间，露出 `above` 的下半部分；`above` 为空时总是 0。
-    pub scroll_offset: f32,
-    /// 按行优先存放，共 `cols * rows` 个单元格。
-    pub cells: Vec<Cell>,
-    pub background: Rgb,
-    pub foreground: Rgb,
-    pub cursor: Option<Cursor>,
-}
-
-impl Frame {
-    pub fn row(&self, y: u16) -> &[Cell] {
-        let start = usize::from(y) * usize::from(self.cols);
-        &self.cells[start..start + usize::from(self.cols)]
-    }
-}
 
 /// VT 回调累积下来、UI 关心的变化。
 #[derive(Default)]
@@ -274,13 +187,6 @@ struct Highlight {
     selected: bool,
 }
 
-/// 指针在网格里的位置，以单元格为单位并带小数。拖到网格外时可以为负，也可以超出行列数。
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
-pub struct GridPoint {
-    pub x: f32,
-    pub y: f32,
-}
-
 /// 鼠标选区：libghostty 的手势状态机，加上各类事件复用的对象。
 struct Selecting {
     gesture: Gesture<'static>,
@@ -325,14 +231,6 @@ impl InputLine {
     fn steps(&self, from: usize, to: usize) -> isize {
         if to >= from { self.chars(from..to) } else { -self.chars(to..from) }
     }
-}
-
-/// `Session::scroll_viewport` 的滚动方式。
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ViewportScroll {
-    Top,
-    Bottom,
-    Page(isize),
 }
 
 pub struct Session {
@@ -382,7 +280,7 @@ impl Session {
     pub fn spawn(
         size: GridSize,
         cwd: Option<&std::path::Path>,
-        integration: crate::shell_integration::Mode,
+        integration: IntegrationMode,
     ) -> Result<(Self, UnboundedReceiver<PtyEvent>)> {
         Self::spawn_in(size, None, cwd, integration)
     }
@@ -392,14 +290,14 @@ impl Session {
         size: GridSize,
         shell: Option<&str>,
     ) -> Result<(Self, UnboundedReceiver<PtyEvent>)> {
-        Self::spawn_in(size, shell, None, crate::shell_integration::Mode::Off)
+        Self::spawn_in(size, shell, None, IntegrationMode::Off)
     }
 
     fn spawn_in(
         size: GridSize,
         shell: Option<&str>,
         cwd: Option<&std::path::Path>,
-        integration: crate::shell_integration::Mode,
+        integration: IntegrationMode,
     ) -> Result<(Self, UnboundedReceiver<PtyEvent>)> {
         let (pty, rx) = Pty::spawn(size, shell, cwd, integration)?;
         Ok((Self::with_pty(size, pty)?, rx))
@@ -419,7 +317,7 @@ impl Session {
     }
 
     /// 还没启动 shell 时按 `integration` 启动它；已经启动过时什么都不做。
-    pub fn start(&mut self, integration: crate::shell_integration::Mode) -> Result<()> {
+    pub fn start(&mut self, integration: IntegrationMode) -> Result<()> {
         self.pty.start(None, self.start_dir.as_deref(), integration)?;
         // 口令在启动 shell 时才生成，这时再交给校验报告的回调。
         *self.effects.report_token.borrow_mut() = self.pty.report_token().map(str::to_owned);
@@ -462,7 +360,14 @@ impl Session {
             cursor_color: None,
             cursor_text: None,
             highlights: Vec::new(),
-            search_colors: search_colors(&Config::default()),
+            // 应用配置之前用默认配色里的搜索高亮。
+            search_colors: {
+                use crate::theme::{SEARCH_BACKGROUND, SEARCH_FOREGROUND, SEARCH_SELECTED_BACKGROUND};
+                [
+                    (TerminalColor::Rgb(SEARCH_BACKGROUND), TerminalColor::Rgb(SEARCH_FOREGROUND)),
+                    (TerminalColor::Rgb(SEARCH_SELECTED_BACKGROUND), TerminalColor::Rgb(SEARCH_FOREGROUND)),
+                ]
+            },
             force_full: false,
         }));
         let held_since = Rc::new(StdCell::new(None));
@@ -620,7 +525,7 @@ impl Session {
 
     /// 应用配置中与终端状态相关的部分。改的是默认值：程序自己用转义序列设置的
     /// 颜色和光标形状照旧优先，所以配置可以随时重载。
-    pub fn apply_config(&mut self, config: &Config) {
+    pub fn apply_config(&mut self, settings: &TermSettings) {
         // 默认调色板读出来的是上次设置的值，先重置回内置调色板再叠加配置，
         // 否则旧主题设过、新主题没设的条目会残留。
         let mut palette = match self
@@ -634,36 +539,44 @@ impl Session {
                 return;
             }
         };
-        for &(index, color) in &config.palette {
-            palette.0[usize::from(index)] = color;
+        for &(index, color) in &settings.palette {
+            palette.0[usize::from(index)] = ghostty_rgb(color);
         }
         let applied = self
             .terminal
-            .set_default_bg_color(Some(config.background))
-            .and_then(|t| t.set_default_fg_color(Some(config.foreground)))
+            .set_default_bg_color(Some(ghostty_rgb(settings.background)))
+            .and_then(|t| t.set_default_fg_color(Some(ghostty_rgb(settings.foreground))))
             // 跟随单元格的光标色由渲染时按光标所在单元格解析，VT 里不设默认值。
             .and_then(|t| {
-                t.set_default_cursor_color(match config.cursor_color {
-                    Some(TerminalColor::Rgb(color)) => Some(color),
+                t.set_default_cursor_color(match settings.cursor_color {
+                    Some(TerminalColor::Rgb(color)) => Some(ghostty_rgb(color)),
                     _ => None,
                 })
             })
-            .and_then(|t| t.set_default_cursor_style(Some(config.cursor_style)))
+            .and_then(|t| t.set_default_cursor_style(Some(ghostty_cursor_style(settings.cursor_style))))
             // 没配置时默认闪烁；libghostty 的 `None` 是不闪烁，所以这里显式给 true。
-            .and_then(|t| t.set_default_cursor_blink(Some(config.cursor_style_blink.unwrap_or(true))))
+            .and_then(|t| t.set_default_cursor_blink(Some(settings.cursor_blink.unwrap_or(true))))
             .and_then(|t| t.set_default_color_palette(Some(palette)));
         if let Err(err) = applied {
             tracing::warn!("failed to apply config to the terminal: {err}");
         }
         let mut renderer = self.renderer.borrow_mut();
-        renderer.selection_bg = config.selection_background;
-        renderer.selection_fg = config.selection_foreground;
-        renderer.search_colors = search_colors(config);
-        renderer.cursor_color = config.cursor_color;
-        renderer.cursor_text = config.cursor_text;
+        renderer.selection_bg = settings.selection_background;
+        renderer.selection_fg = settings.selection_foreground;
+        renderer.search_colors = [
+            (settings.search_background, settings.search_foreground),
+            (settings.search_selected_background, settings.search_selected_foreground),
+        ];
+        renderer.cursor_color = settings.cursor_color;
+        renderer.cursor_text = settings.cursor_text;
         // 选区颜色不经过 VT 的脏标记，强制下一帧整屏重画。
         renderer.frame = Frame::default();
-        self.option_as_alt = config.macos_option_as_alt;
+        self.option_as_alt = match settings.option_as_alt {
+            settings::OptionAsAlt::False => OptionAsAlt::False,
+            settings::OptionAsAlt::True => OptionAsAlt::True,
+            settings::OptionAsAlt::Left => OptionAsAlt::Left,
+            settings::OptionAsAlt::Right => OptionAsAlt::Right,
+        };
     }
 
     /// 把 PTY 输出喂给 VT，返回标题或 agent 状态是否变化。
@@ -767,7 +680,7 @@ impl Session {
     /// 默认前景色代替。
     pub fn ansi_colors(&self) -> [Rgb; 16] {
         match self.terminal.color_palette() {
-            Ok(palette) => std::array::from_fn(|i| Rgb::from(palette.0[i])),
+            Ok(palette) => std::array::from_fn(|i| rgb(palette.0[i])),
             Err(err) => {
                 tracing::warn!("failed to read the palette: {err}");
                 [self.peek_colors().0; 16]
@@ -841,7 +754,7 @@ impl Session {
     /// 调用方可以交给平台处理。
     pub fn key(&mut self, input: &KeyInput) -> bool {
         // Option 当作 Alt 时不能算「已消耗」，编码器才会改用未加修饰的字符并加 ESC 前缀。
-        let right = input.mods.contains(key::Mods::ALT_SIDE);
+        let right = input.mods.right_alt;
         let option_is_alt = match self.option_as_alt {
             OptionAsAlt::True => true,
             OptionAsAlt::Left => !right,
@@ -850,13 +763,13 @@ impl Session {
         };
         let mut consumed = input.consumed_mods;
         if option_is_alt {
-            consumed.remove(key::Mods::ALT);
+            consumed.alt = false;
         }
         self.key_event
             .set_action(key::Action::Press)
-            .set_key(input.key)
-            .set_mods(input.mods)
-            .set_consumed_mods(consumed)
+            .set_key(ghostty_key(input.key))
+            .set_mods(ghostty_mods(input.mods))
+            .set_consumed_mods(ghostty_mods(consumed))
             .set_unshifted_codepoint(input.unshifted)
             .set_utf8(input.text.as_deref());
         self.scratch.clear();
@@ -1080,7 +993,7 @@ impl Session {
     }
 
     /// 滚轮输入：程序开启鼠标上报时发给程序，否则在回滚缓冲里滚动视口。
-    pub fn scroll(&mut self, lines: isize, at: GridPoint, mods: key::Mods) {
+    pub fn scroll(&mut self, lines: isize, at: GridPoint, mods: Mods) {
         if lines == 0 {
             return;
         }
@@ -1093,7 +1006,7 @@ impl Session {
             self.sync_mouse_encoder();
             self.scratch.clear();
             for _ in 0..lines.unsigned_abs() {
-                if !self.encode_mouse(mouse::Action::Press, Some(button), at, mods) {
+                if !self.encode_mouse(mouse::Action::Press, Some(button), at, ghostty_mods(mods)) {
                     return;
                 }
             }
@@ -1129,13 +1042,18 @@ impl Session {
 
     /// 把鼠标按键或移动按程序要求的上报格式发给它；程序没开上报时编码结果为空，什么都不发。
     /// 移动时 `button` 是按着的键，按键拖动模式只上报这时的移动。
-    pub fn mouse_report(
-        &mut self,
-        action: mouse::Action,
-        button: Option<mouse::Button>,
-        at: GridPoint,
-        mods: key::Mods,
-    ) {
+    pub fn mouse_report(&mut self, action: MouseAction, button: Option<MouseButton>, at: GridPoint, mods: Mods) {
+        let action = match action {
+            MouseAction::Press => mouse::Action::Press,
+            MouseAction::Release => mouse::Action::Release,
+            MouseAction::Motion => mouse::Action::Motion,
+        };
+        let button = button.map(|button| match button {
+            MouseButton::Left => mouse::Button::Left,
+            MouseButton::Right => mouse::Button::Right,
+            MouseButton::Middle => mouse::Button::Middle,
+        });
+        let mods = ghostty_mods(mods);
         self.sync_mouse_encoder();
         self.mouse_encoder
             .set_any_button_pressed(action != mouse::Action::Release && button.is_some());
@@ -1287,7 +1205,17 @@ impl Session {
     }
 
     /// 用键盘移动选区的终点，并让终点留在视野里。没有选区时返回 `false`，按键照常交给程序。
-    pub fn adjust_selection(&mut self, adjustment: Adjustment) -> bool {
+    pub fn adjust_selection(&mut self, adjustment: SelectionAdjust) -> bool {
+        let adjustment = match adjustment {
+            SelectionAdjust::Left => Adjustment::Left,
+            SelectionAdjust::Right => Adjustment::Right,
+            SelectionAdjust::Up => Adjustment::Up,
+            SelectionAdjust::Down => Adjustment::Down,
+            SelectionAdjust::PageUp => Adjustment::PageUp,
+            SelectionAdjust::PageDown => Adjustment::PageDown,
+            SelectionAdjust::Home => Adjustment::Home,
+            SelectionAdjust::End => Adjustment::End,
+        };
         let result = (|| {
             let Some(mut selection) = self.terminal.selection()? else {
                 return Ok(None);
@@ -1569,13 +1497,6 @@ impl Session {
     }
 }
 
-fn search_colors(config: &Config) -> [(TerminalColor, TerminalColor); 2] {
-    [
-        (config.search_background, config.search_foreground),
-        (config.search_selected_background, config.search_selected_foreground),
-    ]
-}
-
 /// 让搜索追上终端的最新内容，再把视口里的匹配换算成逐行的高亮段。
 fn search_highlights(
     search: &mut Search<'static>,
@@ -1622,12 +1543,12 @@ impl Renderer {
         let cols = snapshot.cols()?;
         let rows = snapshot.rows()?;
         let colors = snapshot.colors()?;
-        let background = Rgb::from(colors.background);
-        let foreground = Rgb::from(colors.foreground);
+        let background = rgb(colors.background);
+        let foreground = rgb(colors.foreground);
 
         // VT 里的光标色（配置的固定色，或程序用 OSC 12 设的）优先。
         let cursor_colors = (
-            colors.cursor.map(TerminalColor::Rgb).or(self.cursor_color),
+            colors.cursor.map(|color| TerminalColor::Rgb(rgb(color))).or(self.cursor_color),
             self.cursor_text,
         );
 
@@ -1681,8 +1602,8 @@ impl Renderer {
                     let read = cell.read(&colors.palette, &mut out.text)?;
                     out.wide = read.wide == CellWide::Wide;
                     out.spacer = matches!(read.wide, CellWide::SpacerTail | CellWide::SpacerHead);
-                    let mut fg = read.fg_color.map_or(foreground, Rgb::from);
-                    let mut bg = read.bg_color.map(Rgb::from);
+                    let mut fg = read.fg_color.map_or(foreground, rgb);
+                    let mut bg = read.bg_color.map(rgb);
                     out.attrs = Attrs::default();
                     if read.has_styling {
                         let style = read.style;
@@ -1780,14 +1701,128 @@ fn log_err<T>(what: &str, result: libghostty_vt::error::Result<T>) -> Option<T> 
 fn default_selection_bg(background: Rgb) -> Rgb {
     let Rgb(r, g, b) = background;
     let luma = 0.299 * f32::from(r) + 0.587 * f32::from(g) + 0.114 * f32::from(b);
-    Rgb::from(if luma < 128. { crate::theme::SELECTION_ON_DARK } else { crate::theme::SELECTION_ON_LIGHT })
+    if luma < 128. { crate::theme::SELECTION_ON_DARK } else { crate::theme::SELECTION_ON_LIGHT }
 }
 
 fn resolve(color: TerminalColor, fg: Rgb, bg: Rgb) -> Rgb {
     match color {
-        TerminalColor::Rgb(color) => Rgb::from(color),
+        TerminalColor::Rgb(color) => color,
         TerminalColor::CellForeground => fg,
         TerminalColor::CellBackground => bg,
+    }
+}
+
+// 下面几个函数在共用的数据类型和 libghostty 的类型之间转换：对外只用前者，调 libghostty 时才换。
+
+fn rgb(color: RgbColor) -> Rgb {
+    Rgb(color.r, color.g, color.b)
+}
+
+fn ghostty_rgb(Rgb(r, g, b): Rgb) -> RgbColor {
+    RgbColor { r, g, b }
+}
+
+fn ghostty_cursor_style(style: settings::CursorStyle) -> CursorStyle {
+    match style {
+        settings::CursorStyle::Block => CursorStyle::Block,
+        settings::CursorStyle::BlockHollow => CursorStyle::BlockHollow,
+        settings::CursorStyle::Bar => CursorStyle::Bar,
+        settings::CursorStyle::Underline => CursorStyle::Underline,
+    }
+}
+
+fn ghostty_mods(mods: Mods) -> key::Mods {
+    let mut out = key::Mods::empty();
+    for (on, flag) in [
+        (mods.shift, key::Mods::SHIFT),
+        (mods.ctrl, key::Mods::CTRL),
+        (mods.alt, key::Mods::ALT),
+        (mods.right_alt, key::Mods::ALT_SIDE),
+    ] {
+        if on {
+            out |= flag;
+        }
+    }
+    out
+}
+
+fn ghostty_key(key: Key) -> key::Key {
+    match key {
+        Key::Unidentified => key::Key::Unidentified,
+        Key::A => key::Key::A,
+        Key::B => key::Key::B,
+        Key::C => key::Key::C,
+        Key::D => key::Key::D,
+        Key::E => key::Key::E,
+        Key::F => key::Key::F,
+        Key::G => key::Key::G,
+        Key::H => key::Key::H,
+        Key::I => key::Key::I,
+        Key::J => key::Key::J,
+        Key::K => key::Key::K,
+        Key::L => key::Key::L,
+        Key::M => key::Key::M,
+        Key::N => key::Key::N,
+        Key::O => key::Key::O,
+        Key::P => key::Key::P,
+        Key::Q => key::Key::Q,
+        Key::R => key::Key::R,
+        Key::S => key::Key::S,
+        Key::T => key::Key::T,
+        Key::U => key::Key::U,
+        Key::V => key::Key::V,
+        Key::W => key::Key::W,
+        Key::X => key::Key::X,
+        Key::Y => key::Key::Y,
+        Key::Z => key::Key::Z,
+        Key::Digit0 => key::Key::Digit0,
+        Key::Digit1 => key::Key::Digit1,
+        Key::Digit2 => key::Key::Digit2,
+        Key::Digit3 => key::Key::Digit3,
+        Key::Digit4 => key::Key::Digit4,
+        Key::Digit5 => key::Key::Digit5,
+        Key::Digit6 => key::Key::Digit6,
+        Key::Digit7 => key::Key::Digit7,
+        Key::Digit8 => key::Key::Digit8,
+        Key::Digit9 => key::Key::Digit9,
+        Key::Minus => key::Key::Minus,
+        Key::Equal => key::Key::Equal,
+        Key::BracketLeft => key::Key::BracketLeft,
+        Key::BracketRight => key::Key::BracketRight,
+        Key::Backslash => key::Key::Backslash,
+        Key::Semicolon => key::Key::Semicolon,
+        Key::Quote => key::Key::Quote,
+        Key::Comma => key::Key::Comma,
+        Key::Period => key::Key::Period,
+        Key::Slash => key::Key::Slash,
+        Key::Backquote => key::Key::Backquote,
+        Key::Space => key::Key::Space,
+        Key::Enter => key::Key::Enter,
+        Key::Tab => key::Key::Tab,
+        Key::Backspace => key::Key::Backspace,
+        Key::Escape => key::Key::Escape,
+        Key::Delete => key::Key::Delete,
+        Key::Insert => key::Key::Insert,
+        Key::Home => key::Key::Home,
+        Key::End => key::Key::End,
+        Key::PageUp => key::Key::PageUp,
+        Key::PageDown => key::Key::PageDown,
+        Key::ArrowUp => key::Key::ArrowUp,
+        Key::ArrowDown => key::Key::ArrowDown,
+        Key::ArrowLeft => key::Key::ArrowLeft,
+        Key::ArrowRight => key::Key::ArrowRight,
+        Key::F1 => key::Key::F1,
+        Key::F2 => key::Key::F2,
+        Key::F3 => key::Key::F3,
+        Key::F4 => key::Key::F4,
+        Key::F5 => key::Key::F5,
+        Key::F6 => key::Key::F6,
+        Key::F7 => key::Key::F7,
+        Key::F8 => key::Key::F8,
+        Key::F9 => key::Key::F9,
+        Key::F10 => key::Key::F10,
+        Key::F11 => key::Key::F11,
+        Key::F12 => key::Key::F12,
     }
 }
 
@@ -1834,21 +1869,10 @@ pub enum Paste {
     NeedsConfirmation,
 }
 
-/// 翻译成 libghostty 术语的平台按键。
-pub struct KeyInput {
-    pub key: key::Key,
-    pub mods: key::Mods,
-    /// 平台生成 `text` 时已经用掉的修饰键。
-    pub consumed_mods: key::Mods,
-    /// 不带修饰键时该键产生的字符（没有则为 '\0'）。
-    pub unshifted: char,
-    pub text: Option<String>,
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::theme;
+    use crate::{config::Config, theme};
     use futures::{StreamExt as _, executor::block_on};
 
     fn row_text(frame: &Frame, y: u16) -> String {
@@ -1876,14 +1900,14 @@ mod tests {
         let script = "printf '\\033[31mred\\033[0m \\344\\270\\255\\346\\226\\207 ok\\n'; exit\r";
         for c in script.chars() {
             let (key, unshifted) = if c == '\r' {
-                (key::Key::Enter, '\r')
+                (Key::Enter, '\r')
             } else {
-                (key::Key::Unidentified, c)
+                (Key::Unidentified, c)
             };
             let input = KeyInput {
                 key,
-                mods: key::Mods::empty(),
-                consumed_mods: key::Mods::empty(),
+                mods: Mods::default(),
+                consumed_mods: Mods::default(),
                 unshifted,
                 text: (c != '\r').then(|| c.to_string()),
             };
@@ -1923,7 +1947,7 @@ mod tests {
         };
         // `cat` 自己不输出，VT 只会收到测试喂进去的内容。
         let mut session = Session::spawn_shell(size, Some("/bin/cat")).unwrap().0;
-        session.apply_config(&Config::default());
+        session.apply_config(&Config::default().term_settings());
         session
     }
 
@@ -1992,12 +2016,12 @@ mod tests {
     fn shift_arrows_extend_an_existing_selection_only() {
         let mut session = idle_session();
         session.feed(b"helloworld");
-        assert!(!session.adjust_selection(Adjustment::Right));
+        assert!(!session.adjust_selection(SelectionAdjust::Right));
         session.select_press(at(0.2, 0.5), REPEAT);
         session.select_drag(at(4.8, 0.5), false);
         session.select_release(at(4.8, 0.5));
         assert_eq!(session.selection_text().as_deref(), Some("hello"));
-        assert!(session.adjust_selection(Adjustment::Right));
+        assert!(session.adjust_selection(SelectionAdjust::Right));
         assert_eq!(session.selection_text().as_deref(), Some("hellow"));
     }
 
@@ -2060,8 +2084,8 @@ mod tests {
         // 先选中最新的那个。
         assert_eq!(session.search_status(), Some((Some(0), 2)));
         let frame = session.frame();
-        let selected = Rgb::from(theme::SEARCH_SELECTED_BACKGROUND);
-        let other = Rgb::from(theme::SEARCH_BACKGROUND);
+        let selected = theme::SEARCH_SELECTED_BACKGROUND;
+        let other = theme::SEARCH_BACKGROUND;
         assert_eq!(frame.row(2)[0].bg, Some(selected));
         assert_eq!(frame.row(2)[4].bg, Some(selected));
         assert_eq!(frame.row(2)[5].bg, None);
@@ -2089,7 +2113,7 @@ mod tests {
         session.feed("a你好b".as_bytes());
         session.search("你好");
         let frame = session.frame();
-        let selected = Some(Rgb::from(theme::SEARCH_SELECTED_BACKGROUND));
+        let selected = Some(theme::SEARCH_SELECTED_BACKGROUND);
         let colored: Vec<bool> = (0..6).map(|x| frame.row(0)[x].bg == selected).collect();
         assert_eq!(colored, [false, true, true, true, true, false]);
     }
@@ -2375,14 +2399,11 @@ mod tests {
     fn option_as_alt_follows_the_configured_side() {
         /// 按一次 Option+s（美式布局下打出 ß），返回编码结果。
         fn option_s(session: &mut Session, right: bool) -> Vec<u8> {
-            let mut mods = key::Mods::ALT;
-            if right {
-                mods |= key::Mods::ALT_SIDE;
-            }
+            let alt = Mods { alt: true, ..Mods::default() };
             session.key(&KeyInput {
-                key: key::Key::S,
-                mods,
-                consumed_mods: key::Mods::ALT,
+                key: Key::S,
+                mods: Mods { right_alt: right, ..alt },
+                consumed_mods: alt,
                 unshifted: 's',
                 text: Some("ß".into()),
             });
@@ -2393,9 +2414,10 @@ mod tests {
         assert_eq!(option_s(&mut session, false), "ß".as_bytes());
 
         session.apply_config(&Config {
-            macos_option_as_alt: OptionAsAlt::Left,
+            macos_option_as_alt: settings::OptionAsAlt::Left,
             ..Config::default()
-        });
+        }
+        .term_settings());
         assert_eq!(option_s(&mut session, false), b"\x1bs");
         assert_eq!(option_s(&mut session, true), "ß".as_bytes());
     }
@@ -2405,10 +2427,10 @@ mod tests {
         let mut session = idle_session();
         session.feed(b"\x1b[32mok\x1b[0m");
         let frame = session.frame();
-        assert_eq!(frame.background, Rgb::from(theme::BACKGROUND));
-        assert_eq!(frame.foreground, Rgb::from(theme::FOREGROUND));
-        assert_eq!(frame.row(0)[0].fg, Rgb::from(theme::ANSI[2]));
-        assert_eq!(frame.cursor.map(|c| c.color), Some(Rgb::from(theme::FOREGROUND)));
+        assert_eq!(frame.background, theme::BACKGROUND);
+        assert_eq!(frame.foreground, theme::FOREGROUND);
+        assert_eq!(frame.row(0)[0].fg, theme::ANSI[2]);
+        assert_eq!(frame.cursor.map(|c| c.color), Some(theme::FOREGROUND));
     }
 
     const REPEAT: Duration = Duration::from_millis(500);
@@ -2427,8 +2449,8 @@ mod tests {
         assert_eq!(session.selection_text().as_deref(), Some("hello"));
         // 没配选区颜色时用统一的蓝色底，文字保持原来的颜色。
         let frame = session.frame();
-        assert_eq!(frame.row(0)[0].bg, Some(Rgb::from(theme::SELECTION_ON_DARK)));
-        assert_eq!(frame.row(0)[0].fg, Rgb::from(theme::FOREGROUND));
+        assert_eq!(frame.row(0)[0].bg, Some(theme::SELECTION_ON_DARK));
+        assert_eq!(frame.row(0)[0].fg, theme::FOREGROUND);
         assert!(frame.row(0)[0].selected && !frame.row(0)[6].selected);
         assert_eq!(frame.row(0)[6].bg, None);
         drop(frame);
@@ -2458,14 +2480,15 @@ mod tests {
         let mut session = idle_session();
         session.apply_config(&Config {
             selection_background: Some(TerminalColor::CellForeground),
-            selection_foreground: Some(TerminalColor::Rgb(RgbColor { r: 1, g: 2, b: 3 })),
+            selection_foreground: Some(TerminalColor::Rgb(Rgb(1, 2, 3))),
             ..Config::default()
-        });
+        }
+        .term_settings());
         session.feed(b"\x1b[31mred\x1b[0m");
         session.select_press(at(0.2, 0.5), REPEAT);
         session.select_drag(at(2.8, 0.5), false);
         let cell = session.frame().row(0)[0].clone();
-        assert_eq!(cell.bg, Some(Rgb::from(theme::ANSI[1])));
+        assert_eq!(cell.bg, Some(theme::ANSI[1]));
         assert_eq!(cell.fg, Rgb(1, 2, 3));
     }
 
@@ -2476,17 +2499,18 @@ mod tests {
             cursor_color: Some(TerminalColor::CellForeground),
             cursor_text: Some(TerminalColor::CellBackground),
             ..Config::default()
-        });
+        }
+        .term_settings());
         // 光标退回到红色的 X 上。
         session.feed(b"\x1b[31mX\x1b[0m\x1b[D");
         let cursor = session.frame().cursor.unwrap();
-        assert_eq!(cursor.color, Rgb::from(theme::ANSI[1]));
-        assert_eq!(cursor.text, Rgb::from(theme::BACKGROUND));
+        assert_eq!(cursor.color, theme::ANSI[1]);
+        assert_eq!(cursor.text, theme::BACKGROUND);
 
         // 程序用 OSC 12 设的光标色优先于跟随单元格。
         session.feed(b"\x1b]12;#010203\x07");
         let color = session.frame().cursor.unwrap().color;
-        assert_eq!(color, Rgb::from(RgbColor { r: 1, g: 2, b: 3 }));
+        assert_eq!(color, Rgb(1, 2, 3));
     }
 
     #[test]
@@ -2502,7 +2526,8 @@ mod tests {
         session.apply_config(&Config {
             cursor_style_blink: Some(false),
             ..Config::default()
-        });
+        }
+        .term_settings());
         session.feed(b"\x1b[0 q");
         assert_eq!(blinking(&mut session), Some(false));
     }

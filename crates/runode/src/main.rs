@@ -12,7 +12,6 @@ mod i18n;
 mod keybinds;
 mod keys;
 mod menus;
-mod pane;
 mod persist;
 mod prespawn;
 mod prompt_input;

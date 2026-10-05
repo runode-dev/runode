@@ -15,12 +15,13 @@
 use std::ops::Range;
 
 use gpui::{Bounds, ContentMask, Pixels, Point, Window, fill, point, px, size};
+use runode_model::{
+    color::Rgb,
+    frame::{Attrs, Frame},
+};
 
 use super::super::{Metrics, TerminalView, faint, hsla, paint_glyphs};
-use crate::{
-    completion::{self, Kind},
-    session::{Attrs, Frame, Rgb},
-};
+use crate::completion::{self, Kind};
 
 /// 名字一列最宽占终端宽度的这么多（百分比）。
 const NAME_COLUMN_PERCENT: usize = 40;

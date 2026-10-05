@@ -17,11 +17,11 @@ use gpui::{
 };
 use notify::Watcher as _;
 use runode_git::{self as git, FileStatus, Section};
+use runode_model::color::Rgb;
 
 use super::{DIVIDER_GRAB_WIDTH, Divider, TITLEBAR_HEIGHT, ToggleChanges, ToggleFiles, WindowView, Workspace};
 use crate::{
     assets::{CHANGES_ICON, FILES_ICON},
-    session::Rgb,
     terminal_view::hsla,
 };
 

@@ -11,42 +11,7 @@ use std::{
 };
 
 use portable_pty::CommandBuilder;
-
-/// 配置项 `shell-integration` 的取值。
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum Mode {
-    /// 按 shell 的程序名判断用哪一种。
-    #[default]
-    Detect,
-    /// 不注入。
-    Off,
-    /// 不管程序名，当作这种 shell 注入。
-    Force(Shell),
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Shell {
-    Zsh,
-    Bash,
-    Fish,
-}
-
-impl Shell {
-    pub fn from_name(name: &str) -> Option<Self> {
-        match name {
-            "zsh" => Some(Self::Zsh),
-            "bash" => Some(Self::Bash),
-            "fish" => Some(Self::Fish),
-            _ => None,
-        }
-    }
-
-    /// 按可执行文件的名字认 shell；登录 shell 的 argv[0] 可能带前缀 `-`。
-    fn detect(program: &str) -> Option<Self> {
-        let name = Path::new(program).file_name()?.to_str()?;
-        Self::from_name(name.trim_start_matches('-'))
-    }
-}
+use runode_model::shell::{IntegrationMode, Shell};
 
 const ZSH_ENV: &str = include_str!("../shell-integration/zsh/.zshenv");
 const ZSH_INTEGRATION: &str = include_str!("../shell-integration/zsh/runode-integration.zsh");
@@ -60,11 +25,11 @@ const FISH_CONF: &str = include_str!("../shell-integration/fish/runode.fish");
 /// 集成脚本，脚本读进不导出的变量后马上从环境里删掉，子进程继承不到。shell 报告 PATH 等信息时
 /// 带上它，终端据此认出报告确实来自这个 shell，而不是被打印到屏幕上的别的输出伪造的。没注入
 /// 或者生成不了口令时为 `None`，这时脚本不发报告。
-pub fn prepare(mode: Mode, program: &str, cmd: &mut CommandBuilder) -> Option<String> {
+pub fn prepare(mode: IntegrationMode, program: &str, cmd: &mut CommandBuilder) -> Option<String> {
     let shell = match mode {
-        Mode::Off => None,
-        Mode::Detect => Shell::detect(program),
-        Mode::Force(shell) => Some(shell),
+        IntegrationMode::Off => None,
+        IntegrationMode::Detect => Shell::detect(program),
+        IntegrationMode::Force(shell) => Some(shell),
     };
     let dir = shell.and_then(|_| match install_dir() {
         Ok(dir) => Some(dir),
@@ -171,21 +136,13 @@ mod tests {
     use super::*;
 
     #[test]
-    fn shells_are_recognized_by_program_name() {
-        assert_eq!(Shell::detect("/bin/zsh"), Some(Shell::Zsh));
-        assert_eq!(Shell::detect("/opt/homebrew/bin/fish"), Some(Shell::Fish));
-        assert_eq!(Shell::detect("-bash"), Some(Shell::Bash));
-        assert_eq!(Shell::detect("/bin/sh"), None);
-    }
-
-    #[test]
     fn report_tokens_are_random_and_only_given_to_integrated_shells() {
         let token = report_token().unwrap();
         assert_eq!(token.len(), 32);
         assert!(token.bytes().all(|b| b.is_ascii_hexdigit()));
         assert_ne!(report_token().unwrap(), token);
         let mut cmd = CommandBuilder::new("/bin/zsh");
-        assert_eq!(prepare(Mode::Off, "/bin/zsh", &mut cmd), None);
+        assert_eq!(prepare(IntegrationMode::Off, "/bin/zsh", &mut cmd), None);
         assert_eq!(cmd.get_env("RUNODE_REPORT_TOKEN"), None);
     }
 }

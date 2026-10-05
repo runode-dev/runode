@@ -8,6 +8,7 @@ use gpui::{
     uniform_list,
 };
 use runode_git::{LineKind, Section};
+use runode_model::color::Rgb;
 
 use super::{
     WindowView,
@@ -16,7 +17,6 @@ use super::{
 use crate::{
     assets::{CHEVRON_DOWN_ICON, CHEVRON_RIGHT_ICON},
     file_icons::{file_icon, folder_icon},
-    session::Rgb,
     terminal_view::hsla,
 };
 

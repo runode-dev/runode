@@ -15,6 +15,7 @@ publish = false
 
 [workspace.dependencies]
 runode-dirs = { path = "crates/runode-dirs" }
+runode-model = { path = "crates/runode-model" }
 runode-git = { path = "crates/runode-git" }
 libghostty-vt = { path = "vendor/libghostty-rs/crates/libghostty-vt" }
 gpui = { package = "gpui-pre", version = "=0.3.7" }

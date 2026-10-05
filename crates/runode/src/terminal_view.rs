@@ -19,22 +19,24 @@ use gpui::{
     ScrollWheelEvent, ShapedLine, SharedString, Style, Subscription, Task, TextRun, UTF16Selection,
     Window, actions, div, fill, font, point, prelude::*, px, relative, rgb, size,
 };
-use libghostty_vt::{key::Mods, mouse, selection::Adjustment};
+use runode_model::{
+    agent::Agent,
+    color::Rgb,
+    frame::{Attrs, CursorShape, Frame},
+    grid::{GridPoint, GridSize, ViewportScroll},
+    input::{self, Mods, SelectionAdjust},
+};
 
 use crate::{
-    agent::Agent,
     config::{AppConfig, CellHeight, Config},
     history, keys,
     prespawn::Prespawned,
-    pty::{GridSize, PtyEvent},
+    pty::PtyEvent,
     search_bar::{
         EndSearch, SearchField, SearchFieldEvent, SearchNext, SearchPrevious, SearchSelection,
         StartSearch,
     },
-    session::{
-        Attrs, CursorShape, Frame, GridPoint, Paste as PasteResult, Rgb, SYNC_OUTPUT_TIMEOUT, Session,
-        ViewportScroll,
-    },
+    session::{Paste as PasteResult, SYNC_OUTPUT_TIMEOUT, Session},
     sprites,
 };
 use completion_menu::{CompletionMenu, PendingKey};
@@ -350,7 +352,7 @@ impl TerminalView {
                 return;
             }
         };
-        session.apply_config(&self.config);
+        session.apply_config(&self.config.term_settings());
         session.refresh_fallback_title();
         // 换下来的会话随之结束，它的 shell 由 `Pty` 收拾。
         self.session = session;
@@ -390,7 +392,7 @@ impl TerminalView {
         cx: &mut Context<Self>,
     ) -> Self {
         let config = cx.global::<AppConfig>().0.clone();
-        session.apply_config(&config);
+        session.apply_config(&config.term_settings());
         // 提前启动的 shell 多半已经输出了提示符：现在就喂进去，第一帧就画得出来，
         // 不用等下面读输出的任务排上主线程。已经读到的退出留给那个任务照常处理。
         let mut exited_early = None;
@@ -413,7 +415,7 @@ impl TerminalView {
         session.refresh_fallback_title();
         let config_watch = cx.observe_global_in::<AppConfig>(window, |view, window, cx| {
             view.config = cx.global::<AppConfig>().0.clone();
-            view.session.apply_config(&view.config);
+            view.session.apply_config(&view.config.term_settings());
             view.font = resolve_font(&view.config.font_family, window);
             view.font_size = px(view.config.font_size.clamp(MIN_FONT_SIZE, MAX_FONT_SIZE));
             // 字体、字号或行高调整都可能变了，单元格尺寸和字形缓存一律作废。
@@ -702,7 +704,7 @@ impl TerminalView {
         if self.session.mouse_tracking() && !event.modifiers.shift {
             if let Some(button) = mouse_button(event.button) {
                 let mods = mouse_mods(&event.modifiers);
-                self.session.mouse_report(mouse::Action::Press, Some(button), at, mods);
+                self.session.mouse_report(input::MouseAction::Press, Some(button), at, mods);
                 self.reporting_press = true;
             }
             return;
@@ -741,7 +743,7 @@ impl TerminalView {
         if ours && self.session.mouse_tracking() {
             let pressed = event.pressed_button.and_then(mouse_button);
             let mods = mouse_mods(&event.modifiers);
-            self.session.mouse_report(mouse::Action::Motion, pressed, at, mods);
+            self.session.mouse_report(input::MouseAction::Motion, pressed, at, mods);
         }
     }
 
@@ -766,7 +768,7 @@ impl TerminalView {
             && let Some(button) = mouse_button(event.button)
         {
             let mods = mouse_mods(&event.modifiers);
-            self.session.mouse_report(mouse::Action::Release, Some(button), at, mods);
+            self.session.mouse_report(input::MouseAction::Release, Some(button), at, mods);
         }
     }
 
@@ -1523,17 +1525,12 @@ fn resolve_font(families: &[String], window: &Window) -> Font {
 }
 
 fn mouse_mods(modifiers: &Modifiers) -> Mods {
-    let mut mods = Mods::empty();
-    if modifiers.shift {
-        mods |= Mods::SHIFT;
+    Mods {
+        shift: modifiers.shift,
+        ctrl: modifiers.control,
+        alt: modifiers.alt,
+        right_alt: false,
     }
-    if modifiers.control {
-        mods |= Mods::CTRL;
-    }
-    if modifiers.alt {
-        mods |= Mods::ALT;
-    }
-    mods
 }
 
 /// 系统设置里的双击间隔，决定两次按下算不算连击。
@@ -1544,11 +1541,11 @@ fn double_click_interval() -> Duration {
     Duration::from_millis(500)
 }
 
-fn mouse_button(button: MouseButton) -> Option<mouse::Button> {
+fn mouse_button(button: MouseButton) -> Option<input::MouseButton> {
     match button {
-        MouseButton::Left => Some(mouse::Button::Left),
-        MouseButton::Right => Some(mouse::Button::Right),
-        MouseButton::Middle => Some(mouse::Button::Middle),
+        MouseButton::Left => Some(input::MouseButton::Left),
+        MouseButton::Right => Some(input::MouseButton::Right),
+        MouseButton::Middle => Some(input::MouseButton::Middle),
         _ => None,
     }
 }
@@ -1559,20 +1556,20 @@ fn grid_cell(at: GridPoint) -> (i32, i32) {
 }
 
 /// 只按着 Shift 的方向、翻页、Home/End 键对应的选区调整。
-fn selection_adjustment(keystroke: &Keystroke) -> Option<Adjustment> {
+fn selection_adjustment(keystroke: &Keystroke) -> Option<SelectionAdjust> {
     let mods = &keystroke.modifiers;
     if !mods.shift || mods.control || mods.alt || mods.platform {
         return None;
     }
     Some(match keystroke.key.as_str() {
-        "left" => Adjustment::Left,
-        "right" => Adjustment::Right,
-        "up" => Adjustment::Up,
-        "down" => Adjustment::Down,
-        "pageup" => Adjustment::PageUp,
-        "pagedown" => Adjustment::PageDown,
-        "home" => Adjustment::Home,
-        "end" => Adjustment::End,
+        "left" => SelectionAdjust::Left,
+        "right" => SelectionAdjust::Right,
+        "up" => SelectionAdjust::Up,
+        "down" => SelectionAdjust::Down,
+        "pageup" => SelectionAdjust::PageUp,
+        "pagedown" => SelectionAdjust::PageDown,
+        "home" => SelectionAdjust::Home,
+        "end" => SelectionAdjust::End,
         _ => return None,
     })
 }

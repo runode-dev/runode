@@ -4993,6 +4993,7 @@ dependencies = [
  "portable-pty",
  "runode-dirs",
  "runode-git",
+ "runode-model",
  "rust-i18n",
  "serde",
  "serde_json",
@@ -5008,6 +5009,13 @@ version = "0.1.0"
 [[package]]
 name = "runode-git"
 version = "0.1.0"
+
+[[package]]
+name = "runode-model"
+version = "0.1.0"
+dependencies = [
+ "serde",
+]
 
 [[package]]
 name = "rust-i18n"

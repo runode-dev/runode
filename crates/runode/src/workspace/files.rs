@@ -7,6 +7,7 @@ use gpui::{
     AnyElement, Context, Div, Focusable, MouseButton, MouseDownEvent, ScrollStrategy, SharedString, Stateful, Window, div,
     img, prelude::*, px, svg, uniform_list,
 };
+use runode_model::color::Rgb;
 
 use super::{
     WindowView,
@@ -15,7 +16,6 @@ use super::{
 use crate::{
     assets::{CHEVRON_DOWN_ICON, CHEVRON_RIGHT_ICON, EYE_ICON, EYE_OFF_ICON},
     file_icons::{file_icon, folder_icon},
-    session::Rgb,
     terminal_view::hsla,
 };
 

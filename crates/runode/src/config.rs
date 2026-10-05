@@ -15,7 +15,12 @@ use std::{
 
 use gpui::{App, Global, WindowAppearance};
 
-use libghostty_vt::{key::OptionAsAlt, style::RgbColor, terminal::CursorStyle};
+use libghostty_vt::style::RgbColor;
+use runode_model::{
+    color::{Rgb, TerminalColor},
+    settings::{CursorStyle, OptionAsAlt, TermSettings},
+    shell::{IntegrationMode, Shell},
+};
 
 use crate::theme;
 
@@ -23,14 +28,6 @@ use crate::theme;
 pub enum CellHeight {
     Pixels(f32),
     Percent(f32),
-}
-
-/// 光标和选区的颜色：固定色，或者跟随所在单元格的前景、背景色。
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub enum TerminalColor {
-    Rgb(RgbColor),
-    CellForeground,
-    CellBackground,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -46,8 +43,8 @@ pub struct Config {
     pub cursor_style: CursorStyle,
     /// `None` 表示默认闪烁，运行中的程序仍可改变。
     pub cursor_style_blink: Option<bool>,
-    pub background: RgbColor,
-    pub foreground: RgbColor,
+    pub background: Rgb,
+    pub foreground: Rgb,
     /// `None` 表示用前景色。
     pub cursor_color: Option<TerminalColor>,
     /// 实心块状光标下文字的颜色，`None` 表示用背景色。
@@ -64,9 +61,9 @@ pub struct Config {
     pub search_selected_background: TerminalColor,
     pub search_selected_foreground: TerminalColor,
     /// 覆盖默认 256 色中的若干项。
-    pub palette: Vec<(u8, RgbColor)>,
+    pub palette: Vec<(u8, Rgb)>,
     pub macos_option_as_alt: OptionAsAlt,
-    pub shell_integration: crate::shell_integration::Mode,
+    pub shell_integration: IntegrationMode,
     /// 在 shell 提示符上输入时，按命令历史在光标后用灰字给出建议；关掉时也不读写命令历史。
     pub command_suggestions: bool,
     /// 按 Tab 时由 runode 弹出补全菜单（命令名，以及有规格的命令的参数）；关掉时 Tab 总是交给 shell。
@@ -107,7 +104,7 @@ impl Default for Config {
                 .map(|(i, c)| (i as u8, *c))
                 .collect(),
             macos_option_as_alt: OptionAsAlt::False,
-            shell_integration: crate::shell_integration::Mode::Detect,
+            shell_integration: IntegrationMode::Detect,
             command_suggestions: true,
             command_completions: true,
             language: None,
@@ -225,6 +222,26 @@ impl Config {
             .map(|path| read_entries(&path, &mut sources))
             .unwrap_or_default();
         Self::from_layers(&[ghostty, runode], dark, &mut sources)
+    }
+
+    /// 交给终端的那部分设置。
+    pub fn term_settings(&self) -> TermSettings {
+        TermSettings {
+            background: self.background,
+            foreground: self.foreground,
+            palette: self.palette.clone(),
+            cursor_style: self.cursor_style,
+            cursor_blink: self.cursor_style_blink,
+            cursor_color: self.cursor_color,
+            cursor_text: self.cursor_text,
+            selection_background: self.selection_background,
+            selection_foreground: self.selection_foreground,
+            search_background: self.search_background,
+            search_foreground: self.search_foreground,
+            search_selected_background: self.search_selected_background,
+            search_selected_foreground: self.search_selected_foreground,
+            option_as_alt: self.macos_option_as_alt,
+        }
     }
 
     fn from_layers(layers: &[Vec<Entry>], dark: bool, sources: &mut Vec<PathBuf>) -> Self {
@@ -350,13 +367,14 @@ impl Config {
                 self.palette.push((index, color));
             }
             "shell-integration" => {
-                use crate::shell_integration::{Mode, Shell};
                 self.shell_integration = match value {
-                    "" | "detect" => Mode::Detect,
-                    "none" => Mode::Off,
+                    "" | "detect" => IntegrationMode::Detect,
+                    "none" => IntegrationMode::Off,
                     // 这两种 shell 还没有集成脚本。
-                    "elvish" | "nushell" => Mode::Off,
-                    name => Mode::Force(Shell::from_name(name).ok_or("expected none, detect, bash, zsh or fish")?),
+                    "elvish" | "nushell" => IntegrationMode::Off,
+                    name => IntegrationMode::Force(
+                        Shell::from_name(name).ok_or("expected none, detect, bash, zsh or fish")?,
+                    ),
                 };
             }
             "command-suggestions" => {
@@ -420,8 +438,8 @@ fn parse_bool(value: &str) -> Result<bool, String> {
     }
 }
 
-fn parse_color(value: &str) -> Result<RgbColor, String> {
-    RgbColor::parse(value).map_err(|_| "not a color".into())
+fn parse_color(value: &str) -> Result<Rgb, String> {
+    RgbColor::parse(value).map(|c| Rgb(c.r, c.g, c.b)).map_err(|_| "not a color".into())
 }
 
 fn parse_terminal_color(value: &str) -> Result<TerminalColor, String> {
@@ -523,7 +541,7 @@ fn create_config_file(path: &Path) -> std::io::Result<()> {
 /// 全部是注释，所以写进去不会盖掉 Ghostty 配置里的同名键，以后内置默认值变了也照样生效。
 fn template(locale: &str) -> String {
     let d = Config::default();
-    let hex = |c: RgbColor| format!("#{:02x}{:02x}{:02x}", c.r, c.g, c.b);
+    let hex = |Rgb(r, g, b): Rgb| format!("#{r:02x}{g:02x}{b:02x}");
     let color = |c: TerminalColor| match c {
         TerminalColor::Rgb(c) => hex(c),
         TerminalColor::CellForeground => "cell-foreground".into(),
@@ -812,9 +830,9 @@ unknown-key = whatever
         assert_eq!(config.window_padding_y, (3., 3.));
         assert_eq!(config.cursor_style, CursorStyle::Bar);
         assert_eq!(config.cursor_style_blink, Some(false));
-        assert_eq!(config.background, RgbColor { r: 0x10, g: 0x20, b: 0x30 });
-        assert_eq!(config.foreground, RgbColor { r: 255, g: 255, b: 255 });
-        assert!(config.palette.contains(&(1, RgbColor { r: 255, g: 0, b: 0 })));
+        assert_eq!(config.background, Rgb(0x10, 0x20, 0x30));
+        assert_eq!(config.foreground, Rgb(255, 255, 255));
+        assert!(config.palette.contains(&(1, Rgb(255, 0, 0))));
         assert_eq!(config.macos_option_as_alt, OptionAsAlt::Left);
     }
 
@@ -827,9 +845,9 @@ unknown-key = whatever
         // runode 设了字体就整列替换，没设的键保留 Ghostty 的值。
         assert_eq!(config.font_family, ["C"]);
         assert_eq!(config.font_size, 16.);
-        assert!(config.palette.contains(&(2, RgbColor { r: 0, g: 0, b: 1 })));
-        assert!(config.palette.contains(&(3, RgbColor { r: 0, g: 0, b: 3 })));
-        assert!(!config.palette.contains(&(3, RgbColor { r: 0, g: 0, b: 2 })));
+        assert!(config.palette.contains(&(2, Rgb(0, 0, 1))));
+        assert!(config.palette.contains(&(3, Rgb(0, 0, 3))));
+        assert!(!config.palette.contains(&(3, Rgb(0, 0, 2))));
     }
 
     #[test]
@@ -846,8 +864,8 @@ unknown-key = whatever
         let theme = dir.join("T");
         std::fs::write(&theme, "background = #111111\nforeground = #222222\n").unwrap();
         let config = load(&[&format!("theme = {}\nforeground = #333333", theme.display())]);
-        assert_eq!(config.background, RgbColor { r: 0x11, g: 0x11, b: 0x11 });
-        assert_eq!(config.foreground, RgbColor { r: 0x33, g: 0x33, b: 0x33 });
+        assert_eq!(config.background, Rgb(0x11, 0x11, 0x11));
+        assert_eq!(config.foreground, Rgb(0x33, 0x33, 0x33));
     }
 
     #[test]
@@ -855,12 +873,12 @@ unknown-key = whatever
         let entries = parse_entries(bundled_theme("Catppuccin Mocha").unwrap(), "Catppuccin Mocha");
         let mut config = Config::default();
         config.apply_layer(&entries);
-        assert_eq!(config.background, RgbColor { r: 0x1e, g: 0x1e, b: 0x2e });
-        let rgb = |r, g, b| Some(TerminalColor::Rgb(RgbColor { r, g, b }));
+        assert_eq!(config.background, Rgb(0x1e, 0x1e, 0x2e));
+        let rgb = |r, g, b| Some(TerminalColor::Rgb(Rgb(r, g, b)));
         assert_eq!(config.cursor_color, rgb(0xf5, 0xe0, 0xdc));
         assert_eq!(config.cursor_text, rgb(0x1e, 0x1e, 0x2e));
         assert_eq!(config.selection_background, rgb(0x58, 0x5b, 0x70));
-        assert!(config.palette.contains(&(15, RgbColor { r: 0xba, g: 0xc2, b: 0xde })));
+        assert!(config.palette.contains(&(15, Rgb(0xba, 0xc2, 0xde))));
         assert!(bundled_theme("No Such Theme").is_none());
     }
 
@@ -886,7 +904,7 @@ unknown-key = whatever
         assert_eq!(config.selection_background, Some(TerminalColor::CellBackground));
         assert_eq!(
             config.selection_foreground,
-            Some(TerminalColor::Rgb(RgbColor { r: 1, g: 2, b: 3 }))
+            Some(TerminalColor::Rgb(Rgb(1, 2, 3)))
         );
     }
 
