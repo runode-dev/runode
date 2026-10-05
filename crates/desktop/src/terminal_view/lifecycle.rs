@@ -175,9 +175,11 @@ impl TerminalView {
             loop {
                 cx.background_executor().timer(FOREGROUND_POLL_INTERVAL).await;
                 let updated = this.update(cx, |view, cx| {
-                    if view.session.refresh_fallback_title() {
-                        cx.emit(TerminalEvent::TitleChanged);
-                    }
+                    view.notify_agent_finished(cx, |view, cx| {
+                        if view.session.refresh_fallback_title() {
+                            cx.emit(TerminalEvent::TitleChanged);
+                        }
+                    });
                 });
                 if updated.is_err() {
                     break;
@@ -289,6 +291,7 @@ impl TerminalView {
             _foreground_poll: foreground_poll,
             foreground_read_at: Instant::now(),
             _foreground_refresh: None,
+            agent_poll: None,
             _hold_timeout: None,
             _cursor_blink: None,
             _autoscroll: None,
@@ -357,14 +360,48 @@ impl TerminalView {
         false
     }
 
-    /// 执行 `update`；前台 agent 本来在工作、执行完不在工作了（干完了、等着输入或者退出了）时
-    /// 通知外层 `TerminalEvent::AgentFinished`。
+    /// 执行 `update`；前台 agent 本来在工作、执行完不在工作了（干完了、等着用户回答或者退出了）
+    /// 时通知外层 `TerminalEvent::AgentFinished`，刚停下来等用户回答时通知
+    /// `TerminalEvent::AgentBlocked`，从工作中直接变成等用户回答时两个都发。之后按需要定好下次
+    /// 判断 agent 状态的时刻，见 `schedule_agent_poll`。
     fn notify_agent_finished(&mut self, cx: &mut Context<Self>, update: impl FnOnce(&mut Self, &mut Context<Self>)) {
-        let was_working = self.session.agent.is_some_and(Agent::is_working);
+        let before = self.session.agent;
         update(self, cx);
-        if was_working && !self.session.agent.is_some_and(Agent::is_working) {
+        let after = self.session.agent;
+        if before.is_some_and(Agent::is_working) && !after.is_some_and(Agent::is_working) {
             cx.emit(TerminalEvent::AgentFinished);
         }
+        if !before.is_some_and(Agent::is_blocked) && after.is_some_and(Agent::is_blocked) {
+            cx.emit(TerminalEvent::AgentBlocked);
+        }
+        self.schedule_agent_poll(cx);
+    }
+
+    /// 前台 agent 的状态有些要过一会儿再判断（输出节流、确认是不是真停下了、启动宽限期），
+    /// 按 `Session::agent_deadline` 定一个计时器，到点调 `Session::poll_agent`。已经定在更早的
+    /// 时刻时不动。
+    fn schedule_agent_poll(&mut self, cx: &mut Context<Self>) {
+        let Some(at) = self.session.agent_deadline() else {
+            return;
+        };
+        if self.agent_poll.as_ref().is_some_and(|(due, _)| *due <= at) {
+            return;
+        }
+        let timer = cx.background_executor().timer(at.saturating_duration_since(Instant::now()));
+        let task = cx.spawn(async move |this, cx| {
+            timer.await;
+            this.update(cx, |view, cx| {
+                view.agent_poll = None;
+                view.notify_agent_finished(cx, |view, cx| {
+                    if view.session.poll_agent() {
+                        cx.emit(TerminalEvent::TitleChanged);
+                        cx.notify();
+                    }
+                });
+            })
+            .ok();
+        });
+        self.agent_poll = Some((at, task));
     }
 
     /// 让光标立即亮起，并从头开始计闪烁周期；没有焦点时不闪，也就不启动计时器。

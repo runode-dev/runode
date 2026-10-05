@@ -5043,6 +5043,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "runode-agent-detect"
+version = "0.1.0"
+dependencies = [
+ "regex",
+ "runode-shared-types",
+ "serde",
+ "toml 1.1.6+spec-1.1.0",
+]
+
+[[package]]
 name = "runode-completion"
 version = "0.1.0"
 dependencies = [
@@ -5101,6 +5111,7 @@ dependencies = [
  "libc",
  "libghostty-vt",
  "portable-pty",
+ "runode-agent-detect",
  "runode-paths",
  "runode-shared-types",
  "serde",

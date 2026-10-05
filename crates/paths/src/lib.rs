@@ -61,6 +61,11 @@ impl Dirs {
         self.data_file("history.jsonl")
     }
 
+    /// 用户自己的 agent 识别规则，`<agent 短名>.toml` 覆盖内置的同名规则。
+    pub fn agent_detection_dir(&self) -> Option<PathBuf> {
+        self.data_file("agent-detection")
+    }
+
     /// 解出 shell 集成脚本的目录。
     pub fn shell_integration_dir(&self) -> Option<PathBuf> {
         self.cache_file("shell-integration")
@@ -130,6 +135,7 @@ mod tests {
         assert_eq!(dirs.windows_file(), Some("/home/me/.config/runode/windows.json".into()));
         assert_eq!(dirs.history_file(), Some("/home/me/.config/runode/history.jsonl".into()));
         assert_eq!(dirs.themes_dir(), Some("/home/me/.config/runode/themes".into()));
+        assert_eq!(dirs.agent_detection_dir(), Some("/home/me/.config/runode/agent-detection".into()));
         assert_eq!(dirs.shell_integration_dir(), Some("/home/me/.config/runode/cache/shell-integration".into()));
         assert_eq!(dirs.prespawn_size_file(), Some("/home/me/.config/runode/cache/first-terminal-size".into()));
         assert_eq!(dirs.ghostty_themes_dir(), Some("/home/me/.config/ghostty/themes".into()));

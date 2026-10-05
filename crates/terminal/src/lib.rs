@@ -1,9 +1,9 @@
 //! runode 的终端：接到子 shell 的 PTY 上的 libghostty-vt 状态机，以及 shell 集成、提示符上
-//! 正在编辑的输入、agent 状态的识别和命令历史。
+//! 正在编辑的输入和命令历史。前台 agent 的识别由 `runode_agent_detect` 判断，这里把前台进程、
+//! 屏幕文字、标题和进度报告交给它。
 //!
 //! 对外只用 `runode_shared_types` 里的数据类型；libghostty 和 PTY 的类型不出这个 crate。
 
-pub mod agent;
 pub mod history;
 mod prompt_input;
 pub mod pty;

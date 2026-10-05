@@ -21,6 +21,7 @@ runode-terminal = { path = "crates/terminal" }
 runode-completion = { path = "crates/completion" }
 runode-config = { path = "crates/config" }
 runode-preview = { path = "crates/preview" }
+runode-agent-detect = { path = "crates/agent-detect" }
 libghostty-vt = { path = "vendor/libghostty-rs/crates/libghostty-vt" }
 gpui = { package = "gpui-pre", version = "=0.3.7" }
 gpui_platform = { package = "gpui-pre-platform", version = "=0.3.7" }
@@ -38,6 +39,9 @@ notify = "8"
 # 规格数据改由构建脚本压缩后嵌入。
 warp-command-signatures = { path = "vendor/command-signatures/command-signatures", default-features = false }
 miniz_oxide = "0.9"
+# agent 识别规则的格式（TOML）和规则里的正则。
+regex = "1"
+toml = "1"
 # 文件预览的语法高亮（MIT）。只开解析和纯 Rust 的 fancy-regex 正则后端，不链接 C 库；
 # 语法定义取自 two-face（MIT 或 Apache-2.0），它的正则后端特性要和这里一致。
 syntect = { version = "5.3", default-features = false, features = ["parsing", "regex-fancy"] }

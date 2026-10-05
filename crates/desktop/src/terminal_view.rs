@@ -106,8 +106,11 @@ pub enum TerminalEvent {
     Focused,
     /// 程序响铃（BEL）。
     Bell,
-    /// 前台 agent 从工作中停了下来（干完了、等着输入或者退出了）。
+    /// 前台 agent 从工作中停了下来（干完了、等着用户回答或者退出了）。
     AgentFinished,
+    /// 前台 agent 停下来等用户回答（要不要执行命令、选哪一项等）。从工作中直接变成这样时
+    /// 紧跟在 `AgentFinished` 之后发。
+    AgentBlocked,
     /// shell 已经退出，这个终端该关掉了。
     Exited,
 }
@@ -170,6 +173,8 @@ pub struct TerminalView {
     foreground_read_at: Instant,
     /// 输出太密时推迟的那次重读。
     _foreground_refresh: Option<Task<()>>,
+    /// 下次判断前台 agent 状态的时刻和计时器，见 `schedule_agent_poll`。
+    agent_poll: Option<(Instant, Task<()>)>,
     _hold_timeout: Option<Task<()>>,
     /// 有焦点时才运行的闪烁计时器。
     _cursor_blink: Option<Task<()>>,

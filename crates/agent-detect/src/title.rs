@@ -1,8 +1,8 @@
-//! 识别 claude、codex、pi 这类编程 agent 报告的状态。
+//! agent 在标题和进度报告里自己报告的状态。
 //!
 //! claude 和 codex 用标题开头的一个字符加空格报告状态：claude 空闲时是「✳」，工作中在
-//! 「◐」「◑」之间切换；codex 工作中是一个转圈的盲文点阵字符（「⠋」「⠙」等），空闲时不带前缀。
-//! pi 不在标题里报告状态，而是用 OSC 9;4 进度，由 `Session::feed` 处理；它的标题以「π」开头。
+//! 「◐」「◑」等半圆之间切换；codex 工作中是一个转圈的盲文点阵字符（「⠋」「⠙」等），空闲时
+//! 不带前缀。pi 不在标题里报告状态，而是用 OSC 9;4 进度；它的标题以「π」开头。
 
 use runode_shared_types::agent::{Agent, AgentKind, AgentState};
 
@@ -26,6 +26,11 @@ pub fn split_status(title: &str) -> Option<(Agent, &str)> {
     Some((Agent { kind, state }, rest))
 }
 
+/// 去掉状态前缀后的标题，用来显示；没有前缀时原样返回。
+pub fn display_title(title: &str) -> &str {
+    split_status(title).map_or(title, |(_, rest)| rest)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -42,6 +47,7 @@ mod tests {
         assert_eq!(split_status("◑ Tabs UI/UX 优化"), Some((agent(Claude, Working), "Tabs UI/UX 优化")));
         assert_eq!(split_status("⠴ 美化图标 | runode"), Some((agent(Codex, Working), "美化图标 | runode")));
         assert_eq!(split_status("⠴ π - runode"), Some((agent(Pi, Working), "π - runode")));
+        assert_eq!(display_title("✳ 确认回复"), "确认回复");
     }
 
     #[test]
@@ -51,5 +57,6 @@ mod tests {
         // 状态字符后面必须跟空格，免得把正文的第一个字吃掉。
         assert_eq!(split_status("◐x"), None);
         assert_eq!(split_status(""), None);
+        assert_eq!(display_title("◐x"), "◐x");
     }
 }

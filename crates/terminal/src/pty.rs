@@ -14,6 +14,7 @@ use std::{
 use anyhow::{Context as _, Result};
 use futures::channel::mpsc::{UnboundedReceiver, UnboundedSender, unbounded};
 use portable_pty::{Child, CommandBuilder, MasterPty, PtySize, SlavePty, native_pty_system};
+use runode_agent_detect::{ForegroundJob, ForegroundProcess};
 use runode_shared_types::{grid::GridSize, shell::IntegrationMode};
 
 use crate::shell_integration;
@@ -182,11 +183,34 @@ impl Pty {
     }
 
     /// 终端前台进程组的组长，以及它是不是 shell 自己。
-    fn foreground(&self) -> Option<(libc::pid_t, bool)> {
+    pub(crate) fn foreground(&self) -> Option<(libc::pid_t, bool)> {
         let leader = self.master.process_group_leader()?;
         let shell = self.child.as_ref()?.process_id()?;
         Some((leader, u32::try_from(leader).ok() == Some(shell)))
     }
+}
+
+/// 以 `leader` 为组长的进程组里的全部进程，带着进程名和参数，认 agent 用。一个都读不到时
+/// 为 `None`。
+pub(crate) fn process_group(leader: libc::pid_t) -> Option<ForegroundJob> {
+    let processes: Vec<ForegroundProcess> = group_members(leader)
+        .into_iter()
+        .filter_map(|pid| {
+            let argv = process_argv(pid);
+            Some(ForegroundProcess {
+                pid: u32::try_from(pid).ok()?,
+                name: process_name(pid)?,
+                argv0: argv.as_ref().and_then(|argv| argv.first()).and_then(|first| {
+                    let name = first.rsplit('/').next().unwrap_or(first);
+                    let name = name.strip_prefix('-').unwrap_or(name);
+                    (!name.is_empty()).then(|| name.to_owned())
+                }),
+                argv,
+            })
+        })
+        .collect();
+    let leader = u32::try_from(leader).ok()?;
+    (!processes.is_empty()).then_some(ForegroundJob { leader, processes })
 }
 
 pub fn dir_label(path: &Path) -> String {
@@ -225,6 +249,74 @@ fn process_cwd(pid: libc::pid_t) -> Option<PathBuf> {
     // `vip_path` 是按 MAXPATHLEN 连续排布的 C 字符串，内核保证以 NUL 结尾。
     let path = unsafe { CStr::from_ptr(info.pvi_cdir.vip_path.as_ptr().cast()) };
     Some(std::ffi::OsStr::from_bytes(path.to_bytes()).into())
+}
+
+/// 进程组里的进程号；组长总在里面，读不到组员时只有组长。
+#[cfg(target_os = "macos")]
+fn group_members(leader: libc::pid_t) -> Vec<libc::pid_t> {
+    // `proc_listpids` 按进程组列进程的类型，libc 里没有这个常量。
+    const PROC_PGRP_ONLY: u32 = 2;
+    let Ok(group) = u32::try_from(leader) else {
+        return Vec::new();
+    };
+    let mut pids: Vec<libc::pid_t> = vec![0; 16];
+    // 进程多得放不下时加倍再读，最多试几次。
+    for _ in 0..6 {
+        let capacity = std::mem::size_of_val(pids.as_slice());
+        let Ok(capacity_c) = libc::c_int::try_from(capacity) else {
+            break;
+        };
+        let written = unsafe { libc::proc_listpids(PROC_PGRP_ONLY, group, pids.as_mut_ptr().cast(), capacity_c) };
+        let Ok(written) = usize::try_from(written) else {
+            break;
+        };
+        if written < capacity {
+            pids.truncate(written / std::mem::size_of::<libc::pid_t>());
+            pids.retain(|&pid| pid > 0);
+            if !pids.contains(&leader) {
+                pids.insert(0, leader);
+            }
+            return pids;
+        }
+        pids.resize(pids.len() * 2, 0);
+    }
+    vec![leader]
+}
+
+/// 进程的全部参数，用 `sysctl(KERN_PROCARGS2)` 读：开头是参数个数，接着是可执行文件路径和
+/// 补齐用的 NUL，然后是各个参数，每个以 NUL 结尾。程序运行中改了 argv[0]（比如 node 的
+/// `process.title`）时读到的是改过的。
+#[cfg(target_os = "macos")]
+fn process_argv(pid: libc::pid_t) -> Option<Vec<String>> {
+    let mut mib = [libc::CTL_KERN, libc::KERN_PROCARGS2, pid];
+    let mut size: libc::size_t = 0;
+    let ok = unsafe { libc::sysctl(mib.as_mut_ptr(), 3, std::ptr::null_mut(), &mut size, std::ptr::null_mut(), 0) };
+    if ok != 0 || size < 4 {
+        return None;
+    }
+    let mut buf = vec![0u8; size];
+    let ok = unsafe { libc::sysctl(mib.as_mut_ptr(), 3, buf.as_mut_ptr().cast(), &mut size, std::ptr::null_mut(), 0) };
+    if ok != 0 {
+        return None;
+    }
+    buf.truncate(size);
+    let argc = usize::try_from(i32::from_ne_bytes(buf.get(..4)?.try_into().ok()?)).ok()?;
+    let rest = &buf[4..];
+    let exec_end = rest.iter().position(|&b| b == 0)?;
+    let start = exec_end + rest[exec_end..].iter().position(|&b| b != 0)?;
+    let argv: Vec<String> =
+        rest[start..].split(|&b| b == 0).take(argc).map(|arg| String::from_utf8_lossy(arg).into_owned()).collect();
+    (!argv.is_empty()).then_some(argv)
+}
+
+#[cfg(not(target_os = "macos"))]
+fn group_members(leader: libc::pid_t) -> Vec<libc::pid_t> {
+    vec![leader]
+}
+
+#[cfg(not(target_os = "macos"))]
+fn process_argv(_pid: libc::pid_t) -> Option<Vec<String>> {
+    None
 }
 
 #[cfg(not(target_os = "macos"))]

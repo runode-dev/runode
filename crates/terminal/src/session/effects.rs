@@ -1,16 +1,16 @@
 //! VT 回调累积下来、UI 关心的变化：标题和 agent 状态、响铃，以及 shell 集成报告的命令步骤、
 //! PATH 和各种名字。
 
-use std::cell::{Cell as StdCell, RefCell};
-
-use runode_shared_types::{
-    agent::{Agent, AgentKind, AgentState},
-    shell::ShellNames,
+use std::{
+    cell::{Cell as StdCell, RefCell},
+    time::Instant,
 };
+
+use runode_shared_types::shell::ShellNames;
 
 use super::{Session, log_err};
 use crate::{
-    agent, history,
+    history,
     prompt_input::{self, PromptInput},
 };
 
@@ -129,52 +129,29 @@ pub(super) enum PromptEvent {
 }
 
 impl Session {
-    /// 把 PTY 输出喂给 VT，返回标题或 agent 状态是否变化。
+    /// 把 PTY 输出喂给 VT，返回标题或 agent 状态是否变化。agent 状态要读屏幕判断的部分按
+    /// 时间节流，不一定在这次判断，见 `Session::agent_deadline`。
     pub fn feed(&mut self, data: &[u8]) -> bool {
         self.terminal.vt_write(data);
+        let now = Instant::now();
+        self.agent_tracker.output(data, now);
         let mut changed = false;
         // 不少 shell 每次出提示符都重发一遍同样的标题，agent 工作时每一帧转圈都改一次标题，
         // 只有去掉状态前缀后的标题或状态真变了才算。
         if self.effects.title_changed.take() {
             let raw = self.terminal.title().ok().unwrap_or_default();
-            let (title, title_agent) = match agent::split_status(raw) {
-                Some((state, rest)) => (rest, Some(state)),
-                // codex 空闲时不带前缀：刚才还在报告状态的 agent 只要仍在前台，就是停下来了。
-                None => (
-                    raw,
-                    self.title_agent
-                        .filter(|_| !self.pty.foreground_is_shell())
-                        .map(|agent| Agent { state: AgentState::Idle, ..agent }),
-                ),
-            };
+            let pty = &self.pty;
+            let title = self.agent_tracker.title(raw, now, || pty.foreground_is_shell());
             let title = (!title.is_empty()).then(|| title.to_owned());
             changed |= title != self.title;
             self.title = title;
-            self.title_agent = title_agent;
         }
-        // pi 工作中每秒重发一次进度；停下时清掉进度，回到 shell 的不再算 agent。
+        // pi 工作中每秒重发一次进度；停下时前台已经回到 shell 的不再算 agent。
         if let Some(active) = self.effects.progress.take() {
-            self.progress = if active {
-                Some(true)
-            } else {
-                (!self.pty.foreground_is_shell()).then_some(false)
-            };
+            let pty = &self.pty;
+            self.agent_tracker.progress(active, now, || pty.foreground_is_shell());
         }
-        let progress_agent = |state| {
-            let kind = match self.title_agent {
-                Some(agent) => agent.kind,
-                None if self.title.as_deref().is_some_and(agent::is_pi_title) => AgentKind::Pi,
-                None => AgentKind::Other,
-            };
-            Agent { kind, state }
-        };
-        let agent = match self.progress {
-            Some(true) => Some(progress_agent(AgentState::Working)),
-            progress => self.title_agent.or(progress.map(|_| progress_agent(AgentState::Idle))),
-        };
-        changed |= agent != self.agent;
-        self.agent = agent;
-        changed
+        changed | self.poll_agent_at(now)
     }
 
     /// 取走 shell 集成报告运行完了的命令，带着运行的目录和退出码，按结束的先后。每次 `feed`
@@ -228,23 +205,20 @@ impl Session {
         self.prompt_cwd.clone().or_else(|| self.cwd())
     }
 
-    /// 重新读取终端的前台进程，返回 `fallback_title` 或 `agent` 是否变化。
+    /// 重新读取终端的前台进程，返回 `fallback_title` 或 `agent` 是否变化。前台换了程序时
+    /// 顺带认它是不是 agent；回到 shell 时 agent 已经退出，它留下的标题不再代表任何状态。
     pub fn refresh_fallback_title(&mut self) -> bool {
         // 还没启动时没有前台进程，标题保持起始目录的名字。
         if !self.pty.started() {
             return false;
         }
-        // agent 退出、回到 shell 后，它留下的标题不再代表任何状态。
-        let agent_gone = self.agent.is_some() && self.pty.foreground_is_shell();
-        if agent_gone {
-            self.agent = None;
-            self.title_agent = None;
-            self.progress = None;
-        }
+        let now = Instant::now();
+        self.probe_foreground(now);
+        let agent_changed = self.poll_agent_at(now);
         // shell 在前台时不读它此刻的目录：插件管理器在提示符出来后延迟加载插件，会临时切进插件目录。
         let title = self.pty.foreground_title(|| self.prompt_cwd());
         if title == self.fallback_title {
-            return agent_gone;
+            return agent_changed;
         }
         self.fallback_title = title;
         true
@@ -284,6 +258,7 @@ fn percent_decode(bytes: &[u8]) -> Vec<u8> {
 mod tests {
     use super::*;
     use crate::session::testing::*;
+    use runode_shared_types::agent::{Agent, AgentKind, AgentState};
 
     #[test]
     fn agent_status_prefix_is_split_from_the_title() {

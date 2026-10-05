@@ -5,11 +5,12 @@
 //! `Frame`，`refresh` 只复制 libghostty 报告为脏的行来保持它最新。
 //!
 //! 这里是 `Session` 本身：创建、接上 PTY、注册 VT 回调、应用设置和改尺寸。其余按职责分在
-//! 子模块里：VT 回调累积的变化（`effects`）、帧（`render`）、输入（`input`）、光标所在的
-//! 输入行（`input_line`）、鼠标（`pointer`）、视口滚动（`scroll`）、选区（`selection`）、
-//! 搜索（`search`），以及和 libghostty 类型之间的转换（`convert`）。
+//! 子模块里：VT 回调累积的变化（`effects`）、前台 agent 的识别（`detect`）、帧（`render`）、
+//! 输入（`input`）、光标所在的输入行（`input_line`）、鼠标（`pointer`）、视口滚动（`scroll`）、
+//! 选区（`selection`）、搜索（`search`），以及和 libghostty 类型之间的转换（`convert`）。
 
 mod convert;
+mod detect;
 mod effects;
 mod input;
 mod input_line;
@@ -40,6 +41,7 @@ use libghostty_vt::{
     },
 };
 
+use runode_agent_detect::Tracker;
 use runode_shared_types::{
     agent::Agent,
     color::TerminalColor,
@@ -81,12 +83,12 @@ pub struct Session {
     scratch: Vec<u8>,
     /// 程序设置的标题；agent 的状态前缀已拆到 `agent` 里。
     pub title: Option<String>,
-    /// 前台 agent 的状态，由 `title_agent` 和 `progress` 合成；不是 agent 在前台时为 `None`。
+    /// 前台 agent 和它的状态，由 `agent_tracker` 合成；不是 agent 在前台时为 `None`。
     pub agent: Option<Agent>,
-    /// claude、codex 等在标题里报告的状态，见 `agent::split_status`。
-    title_agent: Option<Agent>,
-    /// pi 等用 OSC 9;4 报告的进度：`Some(true)` 进行中，`Some(false)` 已停下但程序还在前台。
-    progress: Option<bool>,
+    /// 识别前台 agent 用的各路信号和去抖状态，见 `runode_agent_detect::Tracker`。
+    agent_tracker: Tracker,
+    /// 上次认前台进程组的结果，见 `detect::ForegroundProbe`。
+    foreground_probe: detect::ForegroundProbe,
     /// 打开搜索栏期间的搜索；关掉就丢弃。
     search: Option<Search<'static>>,
     /// 平滑滚动不足一行的部分，0 到 1 之间：画面整体往下错开这么多行，见 `scroll_smoothly`。
@@ -309,8 +311,8 @@ impl Session {
             scratch: Vec::with_capacity(64),
             title: None,
             agent: None,
-            title_agent: None,
-            progress: None,
+            agent_tracker: Tracker::new(),
+            foreground_probe: detect::ForegroundProbe::default(),
             search: None,
             scroll_offset: 0.,
             fallback_title: None,

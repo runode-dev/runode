@@ -108,19 +108,21 @@ impl Workspace {
     /// 汇总各个终端前台的 agent：有在工作的算工作中，否则有空闲的算空闲。按标签和分屏的
     /// 顺序找，几种 agent 同时在时标记不会来回跳。
     pub(super) fn agent(&self, cx: &App) -> Option<Agent> {
-        let mut idle = None;
+        let mut shown: Option<Agent> = None;
         for tab in &self.tabs {
             for id in tab.root.leaves() {
                 let Some(agent) = tab.panes[&id].0.read(cx).agent() else {
                     continue;
                 };
-                if agent.is_working() {
+                if agent.is_blocked() {
                     return Some(agent);
                 }
-                idle.get_or_insert(agent);
+                if shown.is_none_or(|shown| !shown.is_working() && agent.is_working()) {
+                    shown = Some(agent);
+                }
             }
         }
-        idle
+        shown
     }
 
     /// 有标签响过铃或者里面的 agent 停了下来，还没切过去看。
@@ -286,7 +288,7 @@ impl WindowView {
                     cx.notify();
                 }
             }
-            TerminalEvent::AgentFinished => {
+            TerminalEvent::AgentFinished | TerminalEvent::AgentBlocked => {
                 if !shown {
                     self.workspaces[wi].tabs[ti].bell = true;
                     cx.notify();

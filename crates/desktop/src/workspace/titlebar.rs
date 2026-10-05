@@ -135,7 +135,8 @@ pub(super) fn titled(title: SharedString, agent: Option<Agent>, id: impl Into<El
         .child(div().min_w_0().truncate().child(title))
 }
 
-/// agent 的状态标记：工作中播放该 agent 自己的工作动画，空闲时是一个空心圆点。
+/// agent 的状态标记：工作中播放该 agent 自己的工作动画，空闲时是一个空心圆点，等用户回答时
+/// 是一个琥珀色的实心圆点。
 pub(super) fn agent_mark(agent: Agent, id: impl Into<ElementId>, fg: Hsla) -> AnyElement {
     let slot = div()
         .flex_none()
@@ -171,8 +172,14 @@ pub(super) fn agent_mark(agent: Agent, id: impl Into<ElementId>, fg: Hsla) -> An
                     .border_color(fg.opacity(0.6)),
             )
             .into_any_element(),
+        AgentState::Blocked => slot
+            .child(div().size(px(7.)).rounded_full().bg(gpui::rgb(AGENT_BLOCKED_COLOR)))
+            .into_any_element(),
     }
 }
+
+/// agent 等用户回答时标记的颜色。
+const AGENT_BLOCKED_COLOR: u32 = 0xE5A50A;
 
 /// 快捷键提示，从键位表里查，快捷键改了也跟着变：先找 `select` 的绑定，`is_last` 时再找
 /// `last` 的。后加的绑定优先，显示最后一个。

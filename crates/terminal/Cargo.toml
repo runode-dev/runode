@@ -9,6 +9,7 @@ publish.workspace = true
 [dependencies]
 runode-paths.workspace = true
 runode-shared-types.workspace = true
+runode-agent-detect.workspace = true
 libghostty-vt.workspace = true
 portable-pty.workspace = true
 anyhow.workspace = true
