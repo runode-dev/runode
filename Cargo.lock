@@ -5028,6 +5028,7 @@ dependencies = [
  "objc2 0.6.4",
  "objc2-app-kit 0.3.2",
  "objc2-foundation 0.3.2",
+ "runode-cli",
  "runode-completion",
  "runode-config",
  "runode-git-status",
@@ -5051,6 +5052,17 @@ dependencies = [
  "runode-shared-types",
  "serde",
  "toml 1.1.6+spec-1.1.0",
+]
+
+[[package]]
+name = "runode-cli"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "runode-paths",
+ "runode-protocol",
+ "runode-shared-types",
+ "serde_json",
 ]
 
 [[package]]

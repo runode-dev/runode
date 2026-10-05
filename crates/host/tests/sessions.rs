@@ -118,7 +118,7 @@ fn clear_screen_comes_back_as_output() {
     client.send(ClientMsg::Kill { id });
 }
 
-/// 结束会话后不再有事件，之后发给它的消息都忽略。
+/// 结束会话时最后发一条 `Exited`，之后不再有事件，发给它的消息都忽略。
 #[test]
 fn killed_sessions_go_quiet() {
     let client = Host::new().connect_in_process();
@@ -153,4 +153,21 @@ fn unstarted_sessions_start_on_request() {
     client.input(id, b"go\r".to_vec());
     wait_for(&rx, |_, output| contains(output, b"go"));
     client.send(ClientMsg::Kill { id });
+}
+
+/// shell 的环境里有自己的会话标识和宿主设的变量。
+#[test]
+fn shells_know_their_session() {
+    let host = Host::new();
+    host.set_env("RUNODE_TEST", "first");
+    host.set_env("RUNODE_TEST", "second");
+    let client = host.connect_in_process();
+    let id = client.spawn(options("/bin/sh")).unwrap();
+    let (sink, rx) = channel_sink();
+    client.attach(id, sink).unwrap();
+    client.input(id, b"env; exit\r".to_vec());
+    let output = wait_for(&rx, |event, _| matches!(event, HostEvent::Msg(m) if matches!(**m, HostMsg::Exited { .. })));
+    let output = String::from_utf8_lossy(&output);
+    assert!(output.contains(&format!("RUNODE_SESSION={id}")), "{output}");
+    assert!(output.contains("RUNODE_TEST=second") && !output.contains("RUNODE_TEST=first"), "{output}");
 }

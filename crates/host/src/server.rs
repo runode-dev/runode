@@ -67,6 +67,8 @@ impl Host {
         let listener =
             UnixListener::bind(socket).with_context(|| format!("failed to listen on {}", socket.display()))?;
         std::fs::set_permissions(socket, std::fs::Permissions::from_mode(0o600))?;
+        // 之后开的 shell 里的命令行连这个 socket，开发版和装好的版本同时开着时也不会连错。
+        self.set_env(runode_protocol::ENV_SOCKET, socket.as_os_str());
         let snapshot_format = runode_terminal::host_session::snapshot_format().unwrap_or_else(|err| {
             tracing::warn!("cannot tell the snapshot format: {err}");
             0

@@ -7,6 +7,7 @@
 //! 一方从不等。没有事的时候按 agent 识别和前台进程轮询要的时刻醒来。
 
 use std::{
+    ffi::OsString,
     sync::{
         Arc, Condvar, Mutex, PoisonError,
         atomic::{AtomicBool, AtomicUsize, Ordering},
@@ -105,11 +106,12 @@ impl Handle {
 }
 
 /// 开会话：在调用的线程里打开伪终端（`start` 时连 shell 一起启动），错误当场返回；再起会话线程，
-/// 等它把 `HostSession` 建好。
+/// 等它把 `HostSession` 建好。`env` 是启动 shell 时另外设的环境变量。
 pub(crate) fn spawn(
     id: SessionId,
     options: SpawnOptions,
     settings: TermSettings,
+    env: Vec<(String, OsString)>,
     record_history: Arc<AtomicBool>,
     keep_backlog: bool,
 ) -> Result<Handle> {
@@ -120,11 +122,13 @@ pub(crate) fn spawn(
         let credits = credits.clone();
         Box::new(move |event| credits.acquire(output_len(&event)) && inbox.send(Inbox::Pty(event)).is_ok())
     };
-    let pty = if options.start {
-        Pty::spawn(options.size, options.shell.as_deref(), options.cwd.as_deref(), options.integration, sink)?
-    } else {
-        Pty::open(options.size, sink)?
-    };
+    let mut pty = Pty::open(options.size, sink)?;
+    for (key, value) in env {
+        pty.set_env(key, value);
+    }
+    if options.start {
+        pty.start(options.shell.as_deref(), options.cwd.as_deref(), options.integration)?;
+    }
     let (ready, created) = mpsc::channel();
     thread::Builder::new()
         .name(format!("session-{id}"))
@@ -242,7 +246,14 @@ impl Runner {
             };
             streaming = matches!(message, Some(Inbox::Pty(PtyEvent::Output(_))));
             match message {
-                Some(Inbox::Kill) => return,
+                Some(Inbox::Kill) => {
+                    // 连着的前端（比如经 socket 等着 agent 的命令行）由此知道会话没了；叫结束的
+                    // 那一方多半已经不收了。
+                    if !self.exited {
+                        self.emit(HostEvent::msg(HostMsg::Exited { id: self.id, status: None }));
+                    }
+                    return;
+                }
                 Some(message) => self.handle(message),
                 None => self.tick(),
             }
@@ -344,9 +355,12 @@ impl Runner {
             AttachMode::VtReplay => (mode, self.replay()),
         };
         let screen = Screen { size: self.session.size(), meta: self.session.meta(), mode, data };
-        if let Some(sink) = start(screen) {
-            self.subscribers.push((connection, sink));
+        let Some(mut sink) = start(screen) else { return };
+        // shell 已经退出了：`Exited` 只在退出那一刻发过一次，晚连上的前端在这里补上，免得一直等。
+        if self.exited && !sink(HostEvent::msg(HostMsg::Exited { id: self.id, status: None })) {
+            return;
         }
+        self.subscribers.push((connection, sink));
     }
 
     fn replay(&self) -> Vec<u8> {

@@ -1,5 +1,5 @@
 //! runode：面向 AI 编程 agent 的桌面工作台。终端在进程内用 libghostty-vt 仿真，
-//! 窗口和绘制用 GPUI。
+//! 窗口和绘制用 GPUI。带子命令启动时是命令行（`runode list` 等），不开窗口，见 `runode_cli`。
 
 mod about;
 mod agent_alert;
@@ -31,15 +31,23 @@ use gpui_platform::application;
 use crate::window::{open_window, open_window_with};
 
 fn main() {
+    let args: Vec<std::ffi::OsString> = std::env::args_os().skip(1).collect();
+    if runode_cli::wants_cli(&args) {
+        let args: Vec<String> = args.iter().map(|arg| arg.to_string_lossy().into_owned()).collect();
+        let env = runode_cli::Env::from_process(env!("RUNODE_BUILD"));
+        let code = runode_cli::run(&args, &env, &mut std::io::stdout().lock(), &mut std::io::stderr().lock());
+        std::process::exit(code);
+    }
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
                 .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
         )
         .init();
+    // 先开 socket，之后启动的 shell（包括提前拉起的那个）才知道命令行该连哪里。
+    session_host::listen();
     // shell 启动要几十毫秒，先在后台拉起来，和 GPUI 初始化同时进行。
     prespawn::start();
-    session_host::listen();
 
     application().with_assets(assets::Assets).run(|cx: &mut App| {
         config::install(cx);

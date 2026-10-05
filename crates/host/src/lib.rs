@@ -18,6 +18,7 @@ mod session;
 
 use std::{
     collections::HashMap,
+    ffi::OsString,
     path::PathBuf,
     sync::{
         Arc, Mutex, MutexGuard, PoisonError,
@@ -90,6 +91,8 @@ struct Shared {
     record_history: Arc<AtomicBool>,
     /// 下一个进程内连接的编号。
     next_connection: AtomicU64,
+    /// 之后启动的 shell 另外设的环境变量，见 `Host::set_env`。
+    env: Mutex<Vec<(String, OsString)>>,
 }
 
 /// 会话和主题放在同一把锁下：新会话加进来和换主题不会互相错过，见 `Client::spawn`。
@@ -136,6 +139,14 @@ impl Host {
     pub fn connect_in_process(&self) -> Client {
         Client { shared: self.shared.clone(), connection: self.shared.next_connection.fetch_add(1, Ordering::Relaxed) }
     }
+
+    /// 之后启动的每个 shell 都设上这个环境变量，同名的换掉；已经启动的不受影响。每个 shell
+    /// 另外还有自己的 `runode_protocol::ENV_SESSION`。
+    pub fn set_env(&self, key: &str, value: impl Into<OsString>) {
+        let mut env = self.shared.env.lock().unwrap_or_else(PoisonError::into_inner);
+        env.retain(|(k, _)| k != key);
+        env.push((key.into(), value.into()));
+    }
 }
 
 /// 进程内连到宿主的一个前端。克隆出来的是同一个连接。
@@ -164,7 +175,9 @@ impl Client {
             (settings, registry.theme_generation)
         };
         // 开伪终端、启动 shell 要几毫秒，不占着锁。
-        let handle = session::spawn(id, options, settings, self.shared.record_history.clone(), keep_backlog)?;
+        let mut env = self.shared.env.lock().unwrap_or_else(PoisonError::into_inner).clone();
+        env.push((runode_protocol::ENV_SESSION.into(), id.to_string().into()));
+        let handle = session::spawn(id, options, settings, env, self.shared.record_history.clone(), keep_backlog)?;
         let mut registry = self.shared.registry();
         // 这期间换过主题的话，那次换主题没赶上这个会话，补上。
         if registry.theme_generation != generation {

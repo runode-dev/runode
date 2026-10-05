@@ -14,5 +14,13 @@ pub use message::{
     AttachMode, BuildId, Caps, ClientKind, ClientMsg, FinishedCommand, GoodbyeReason, HostMsg, SessionId, SessionInfo,
 };
 
+/// 宿主给每个会话的 shell 设的环境变量：这个会话的 `SessionId`。在终端里跑的命令行据此知道
+/// 自己在哪个会话里。
+pub const ENV_SESSION: &str = "RUNODE_SESSION";
+
+/// 宿主给 shell 设的环境变量：宿主监听的 socket 的路径。命令行先连它，没有时才按 runode 的
+/// 目录约定去找。
+pub const ENV_SOCKET: &str = "RUNODE_SOCKET";
+
 /// 协议的版本。消息的含义或帧格式变了、旧的一方读不懂时加一；只是加了可以缺省的字段不用加。
 pub const PROTOCOL_VERSION: u32 = 1;

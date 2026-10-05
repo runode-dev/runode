@@ -5,6 +5,7 @@
 //! 所以写入方从不阻塞：给一个不读 stdin 的程序粘贴一大段时，等着的只有写线程。
 
 use std::{
+    ffi::OsString,
     io::{Read, Write},
     path::{Path, PathBuf},
     sync::{Arc, Mutex, mpsc},
@@ -89,6 +90,8 @@ pub struct Pty {
     /// 启动 shell 时交给集成脚本的报告口令，见 `shell_integration::prepare`；没注入集成或者
     /// 还没启动时为 `None`。
     report_token: Option<String>,
+    /// 启动 shell 时另外设的环境变量，见 `set_env`。
+    env: Vec<(OsString, OsString)>,
 }
 
 fn pty_size(size: GridSize) -> PtySize {
@@ -127,7 +130,19 @@ impl Pty {
         }
         .context("openpty failed")?;
         let writer = PtyWriter::start(pair.master.take_writer().context("pty writer")?)?;
-        Ok(Self { master: pair.master, pending: Some((pair.slave, sink)), child: None, writer, report_token: None })
+        Ok(Self {
+            master: pair.master,
+            pending: Some((pair.slave, sink)),
+            child: None,
+            writer,
+            report_token: None,
+            env: Vec::new(),
+        })
+    }
+
+    /// 启动 shell 时给它设这个环境变量，盖过从 app 继承来的同名变量；已经启动了的不受影响。
+    pub fn set_env(&mut self, key: impl Into<OsString>, value: impl Into<OsString>) {
+        self.env.push((key.into(), value.into()));
     }
 
     /// 已经启动了 shell。
@@ -162,6 +177,9 @@ impl Pty {
         // macOS 自带的 BSD ls 只在设置了 CLICOLOR 时才着色；用户已有设置就不覆盖。
         if std::env::var_os("CLICOLOR").is_none() {
             cmd.env("CLICOLOR", "1");
+        }
+        for (key, value) in &self.env {
+            cmd.env(key, value);
         }
         let cwd = cwd.map(Into::into).or_else(|| runode_paths::Dirs::from_env().home);
         if let Some(cwd) = cwd {

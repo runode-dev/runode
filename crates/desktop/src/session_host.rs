@@ -20,8 +20,12 @@ pub fn client() -> &'static Client {
 }
 
 /// 在 runode 自己的 `run/` 目录里开宿主的 socket，让命令行这类别的进程连上来。监听不了（另一个
-/// runode 已经开着、目录不对）时记一笔日志，app 照常用。
+/// runode 已经开着、目录不对）时记一笔日志，app 照常用。之后启动的 shell 里另有
+/// `runode_cli::ENV_BIN`，指向这个可执行文件，没把 runode 放进 PATH 也能用命令行。
 pub fn listen() {
+    if let Ok(exe) = std::env::current_exe() {
+        host().set_env(runode_cli::ENV_BIN, exe);
+    }
     let dirs = runode_paths::Dirs::from_env();
     let result = dirs.create_runtime_dir().map_err(anyhow::Error::from).and_then(|_| {
         let socket = dirs.host_socket_file().ok_or_else(|| anyhow::anyhow!("the socket path is too long"))?;

@@ -59,7 +59,8 @@ This project is indexed by GitNexus as **runode** (225 symbols, 587 relationship
 | `completion` | 按 Tab 的命令补全：命令规格、候选排序、生成器 | terminal、shared-types、paths |
 | `config` | Ghostty 兼容的配置文件、主题、快捷键写法和配置模板，生成 `TermSettings` | shared-types、paths |
 | `host` | 管终端会话的宿主（只有 lib，现在跑在 app 进程里）：每个会话一个线程，持有 PTY 和权威的那份 VT，应答终端查询、认标题和 agent、记命令历史；桌面经进程内的 channel、别的进程经 Unix socket 上 protocol 的帧和它说话 | terminal、protocol、paths、shared-types、libc |
-| `desktop` | GPUI 桌面 app：窗口、视图、菜单、窗口存档和 Info.plist；打包脚本按 `crates/desktop#` 找它的构建产物 | 以上全部（含 host）、GPUI |
+| `cli` | 命令行前端（`runode list`、`read`、`send`、`wait`）：经宿主的 Unix socket 按 protocol 说话，列会话、读屏幕、发输入、等 agent | protocol、shared-types、paths |
+| `desktop` | GPUI 桌面 app：窗口、视图、菜单、窗口存档和 Info.plist；带子命令启动时交给 `cli`，和命令行是同一个可执行文件；打包脚本按 `crates/desktop#` 找它的构建产物 | 以上全部（含 host、cli）、GPUI |
 
 不变量：
 
@@ -68,12 +69,13 @@ This project is indexed by GitNexus as **runode** (225 symbols, 587 relationship
 - `protocol` 只依赖 `shared-types`，不碰终端仿真、PTY 和界面。消息里用到的类型，别的 crate 也要用的（网格尺寸、agent 状态、会话公布的状态等）放 `shared-types`，只在协议里用的（会话标识、帧、连接方式等）放 `protocol` 自己。
 - `agent-detect` 只依赖 `shared-types`，不碰终端仿真、PTY 和界面：屏幕文字、前台进程组由 `terminal` 读好了交给它，用户规则目录由调用方从 `paths` 取来传进去。内置规则文件的出处和许可写在它的 `LICENSE-rules` 里。
 - `host` 不依赖 GPUI，也不直接依赖 libghostty-vt 和 portable-pty：VT 和 PTY 经 `terminal` 的 `HostSession` 用。一个终端有两份 VT，宿主那份（`HostSession`）是权威的，只有它应答终端查询；界面那份（`Session`）只消费同样的字节流，改 VT 状态的操作（改尺寸、清屏、换主题）一律经宿主在输出流里标出位置后两边一起做。现在只有 `desktop` 能直接依赖 `host`，由 `deny.toml` 守着；以后的前端经 `protocol` 和宿主说话，连的是 app 启动时在 `paths` 的 `host_socket_file` 上开的 socket。
+- `cli` 只经 socket 和宿主说话，不依赖 `host`、`terminal` 和 GPUI。`deny.toml` 连测试依赖一起查，所以它的测试也不起真宿主，对着 `tests/common` 里按 protocol 回话的假宿主跑；宿主那边的 socket 由 `host` 自己的测试管。宿主给每个 shell 设 `RUNODE_SESSION`、`RUNODE_SOCKET`（`protocol` 的 `ENV_SESSION`、`ENV_SOCKET`），桌面另设 `RUNODE_BIN`，命令行据此找到开它的那个 app 和自己所在的会话。
 - 家目录和 runode 自己的配置、数据、缓存路径一律经 `paths` 取，不在别处读 HOME 或自己拼路径；别的程序的文件（比如 shell 的历史）按那个程序的规矩找。
 - 新依赖先加进根 `Cargo.toml` 的 `[workspace.dependencies]`，各 crate 用 `xxx.workspace = true`；lint 规则在 `[workspace.lints]`，每个 crate 都写 `[lints] workspace = true`。
 - 只经 crate 公开接口测的黑盒测试放在和 `src` 同级的 `tests/` 目录，按主题分文件，几个文件共用的辅助放 `tests/common/mod.rs`；测私有实现的单元测试留在 `src` 里的 `#[cfg(test)]` 模块。不为了搬测试把内部的东西改成 pub。`desktop` 是二进制 crate，`tests/` 引用不到它，测试都留在 `src` 里。
 
 以后要加的 crate 放在这些位置，命名沿用同样的规则：
 
-- `cli`、`tui`、`mobile`（各个前端）：和 desktop 同层，经 protocol 跟宿主说话，不依赖 GPUI，也不直接依赖 libghostty-vt。
+- `tui`、`mobile`（各个前端）：和 `cli` 一样，经 protocol 跟宿主说话，不依赖 GPUI，也不直接依赖 libghostty-vt。
 
 加了这些 crate 后，相应地更新 `deny.toml` 的 `wrappers` 和上面这张表。

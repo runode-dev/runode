@@ -296,3 +296,32 @@ fn app_owned_requests_are_refused() {
     peer.send(&ClientMsg::ListSessions);
     assert!(matches!(peer.reply(), HostMsg::SessionList { .. }));
 }
+
+/// 会话被结束时，连着的前端收到 `Exited`。
+#[test]
+fn killing_a_session_tells_its_clients() {
+    let dir = temp_dir("kill");
+    let (host, socket) = listen(&dir);
+    let id = cat(&host);
+    let mut watcher = Peer::hello(&socket, false);
+    watcher.attach(id, AttachMode::MetaOnly);
+    host.connect_in_process().send(ClientMsg::Kill { id });
+    assert!(matches!(watcher.reply(), HostMsg::Exited { id: exited, .. } if exited == id));
+}
+
+/// shell 退出以后才连上来的前端，在 `Attached` 之后马上收到 `Exited`。
+#[test]
+fn a_late_client_learns_the_shell_has_exited() {
+    let dir = temp_dir("dead");
+    let (host, socket) = listen(&dir);
+    let client = host.connect_in_process();
+    let id = cat(&host);
+    let mut first = Peer::hello(&socket, false);
+    let (channel, _) = first.attach(id, AttachMode::MetaOnly);
+    first.input(channel, b"\x04");
+    assert!(matches!(first.reply(), HostMsg::Exited { .. }));
+    let mut late = Peer::hello(&socket, false);
+    late.attach(id, AttachMode::MetaOnly);
+    assert!(matches!(late.reply(), HostMsg::Exited { id: exited, .. } if exited == id));
+    client.send(ClientMsg::Kill { id });
+}
