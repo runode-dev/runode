@@ -101,6 +101,31 @@ fn shell_quote(text: &str) -> String {
     if plain { text.to_owned() } else { format!("'{}'", text.replace('\'', r"'\''")) }
 }
 
+/// Claude Code、Codex 会把粘贴进来的图片路径换成图片附件，这几种扩展名两边都认。
+const IMAGE_EXTENSIONS: [&str; 5] = ["png", "jpg", "jpeg", "gif", "webp"];
+
+fn is_image(path: &Path) -> bool {
+    path.extension()
+        .and_then(|ext| ext.to_str())
+        .is_some_and(|ext| IMAGE_EXTENSIONS.iter().any(|image| ext.eq_ignore_ascii_case(image)))
+}
+
+/// 和 `shell_quote` 一样只放过常见字符，其余字符前面加反斜杠，像访达把文件拖进终端时那样。
+/// 图片路径用这种写法：Claude Code 按「空格后跟 `/`」拆开几个路径，引号只在整段两头时才去掉，
+/// 几个带引号的路径连在一起它就认不出来了；反斜杠转义它和 Codex 都能还原。
+fn shell_escape(text: &str) -> String {
+    let mut escaped = String::with_capacity(text.len());
+    for (i, c) in text.chars().enumerate() {
+        let plain = (c.is_alphanumeric() || matches!(c, '/' | '.' | '_' | '-' | '+' | '@' | '%' | ':' | ',' | '='))
+            && !(i == 0 && matches!(c, '=' | '%'));
+        if !plain {
+            escaped.push('\\');
+        }
+        escaped.push(c);
+    }
+    escaped
+}
+
 /// 从文件树拖出来的一项：放到终端上把路径打进去，放到文件树的目录上挪进那个目录。
 #[derive(Clone)]
 pub(super) struct DraggedFile {
@@ -539,31 +564,48 @@ impl WindowView {
         window.focus(&self.tab().focused_view().focus_handle(cx), cx);
     }
 
-    /// 把从文件树拖出来的 `path` 放到终端 `pane` 上：切到那个终端，把路径打进去。
-    pub(super) fn drop_file_on_pane(&mut self, pane: gpui::EntityId, path: &Path, window: &mut Window, cx: &mut Context<Self>) {
+    /// 把从文件树或访达拖来的 `paths` 放到终端 `pane` 上：切到那个终端，把路径一个个打进去。
+    /// 一个路径粘贴一次，因为 Codex 只在一次粘贴里正好是一个路径时才把它当图片。
+    pub(super) fn drop_paths_on_pane(
+        &mut self,
+        pane: gpui::EntityId,
+        paths: &[PathBuf],
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         self.focus_pane_in_active_tab(pane, window, cx);
-        self.insert_path(path, None, window, cx);
+        for path in paths {
+            self.insert_path(path, None, window, cx);
+        }
     }
 
     /// 把 `path` 打进当前终端，在它的目录下时写相对路径，后面带上行号 `line` 和一个空格，
-    /// 再把焦点交回终端。
+    /// 再把焦点交回终端。图片写绝对路径：Claude Code 只把绝对路径认成图片附件。
     pub(super) fn insert_path(&mut self, path: &Path, line: Option<u32>, window: &mut Window, cx: &mut Context<Self>) {
         let view = self.tab().focused_view().clone();
         let cwd = view.read(cx).cwd();
-        // 终端报的目录和面板里的路径可能一个经过符号链接、一个没有，对不上时都换成真实路径再比。
-        let relative = |path: &Path, cwd: &Path| {
-            path.strip_prefix(cwd).ok().map(Path::to_path_buf).or_else(|| {
-                let (path, cwd) = (path.canonicalize().ok()?, cwd.canonicalize().ok()?);
-                path.strip_prefix(cwd).ok().map(Path::to_path_buf)
-            })
+        let text = if line.is_none() && is_image(path) {
+            let absolute = match &cwd {
+                Some(cwd) if path.is_relative() => cwd.join(path),
+                _ => path.to_path_buf(),
+            };
+            shell_escape(&absolute.display().to_string())
+        } else {
+            // 终端报的目录和面板里的路径可能一个经过符号链接、一个没有，对不上时都换成真实路径再比。
+            let relative = |path: &Path, cwd: &Path| {
+                path.strip_prefix(cwd).ok().map(Path::to_path_buf).or_else(|| {
+                    let (path, cwd) = (path.canonicalize().ok()?, cwd.canonicalize().ok()?);
+                    path.strip_prefix(cwd).ok().map(Path::to_path_buf)
+                })
+            };
+            let rel = cwd.as_deref().and_then(|cwd| relative(path, cwd)).filter(|rel| !rel.as_os_str().is_empty());
+            let mut text = rel.as_deref().unwrap_or(path).display().to_string();
+            if let Some(line) = line {
+                text = format!("{text}:{line}");
+            }
+            shell_quote(&text)
         };
-        let rel = cwd.as_deref().and_then(|cwd| relative(path, cwd)).filter(|rel| !rel.as_os_str().is_empty());
-        let mut text = rel.as_deref().unwrap_or(path).display().to_string();
-        if let Some(line) = line {
-            text = format!("{text}:{line}");
-        }
-        let text = format!("{} ", shell_quote(&text));
-        view.update(cx, |view, cx| view.paste_text(text, window, cx));
+        view.update(cx, |view, cx| view.paste_text(format!("{text} "), window, cx));
         window.focus(&view.focus_handle(cx), cx);
     }
 }
@@ -580,5 +622,22 @@ mod tests {
         assert_eq!(shell_quote("文件.md"), "文件.md");
         assert_eq!(shell_quote("=foo"), "'=foo'");
         assert_eq!(shell_quote("a=b"), "a=b");
+    }
+
+    #[test]
+    fn escapes_image_paths_with_backslashes() {
+        assert_eq!(shell_escape("/tmp/shot.png"), "/tmp/shot.png");
+        assert_eq!(shell_escape("/tmp/Screen Shot (1).png"), r"/tmp/Screen\ Shot\ \(1\).png");
+        assert_eq!(shell_escape("/tmp/it's.png"), r"/tmp/it\'s.png");
+        assert_eq!(shell_escape("/tmp/截图.png"), "/tmp/截图.png");
+        assert_eq!(shell_escape("=a=b"), r"\=a=b");
+    }
+
+    #[test]
+    fn recognizes_images_by_extension() {
+        assert!(is_image(Path::new("/tmp/a.PNG")));
+        assert!(is_image(Path::new("b.jpeg")));
+        assert!(!is_image(Path::new("c.svg")));
+        assert!(!is_image(Path::new("png")));
     }
 }

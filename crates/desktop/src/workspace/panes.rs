@@ -1,7 +1,7 @@
 //! 标签里的终端区：分屏树、分隔线和拖动分隔线时的遮罩。
 
 use gpui::{
-    AnyElement, Context, CursorStyle, Div, EntityId, MouseButton, MouseDownEvent, MouseMoveEvent, StyleRefinement,
+    AnyElement, Context, CursorStyle, Div, EntityId, ExternalPaths, MouseButton, MouseDownEvent, MouseMoveEvent, StyleRefinement,
     canvas, div, prelude::*, px, relative,
 };
 use runode_shared_types::{
@@ -49,9 +49,12 @@ impl WindowView {
             .when(dimmed, |leaf| {
                 leaf.child(div().absolute().size_full().bg(hsla(bg).opacity(UNFOCUSED_DIM)))
             })
-            // 从文件树拖来的文件放到这个终端上：切到它，把路径打进去。
+            // 从文件树或访达拖来的文件放到这个终端上：切到它，把路径打进去。
             .on_drop(cx.listener(move |this, dragged: &DraggedFile, window, cx| {
-                this.drop_file_on_pane(id, &dragged.path, window, cx);
+                this.drop_paths_on_pane(id, std::slice::from_ref(&dragged.path), window, cx);
+            }))
+            .on_drop(cx.listener(move |this, dropped: &ExternalPaths, window, cx| {
+                this.drop_paths_on_pane(id, dropped.paths(), window, cx);
             }))
             .into_any_element()
     }
