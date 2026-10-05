@@ -105,6 +105,8 @@ const TAB_SIDE_SLOT: f32 = 20.;
 const NEW_TAB_BUTTON_WIDTH: f32 = 28.;
 /// 标签最窄的宽度；标签多到挤不下时标签条改为横向滚动。
 const TAB_MIN_WIDTH: f32 = 64.;
+/// 标签最宽的宽度；标签少时不再拉宽，靠左排开，后面紧跟新建标签按钮。
+const TAB_MAX_WIDTH: f32 = 200.;
 /// 比这窄的标签只留标题：快捷键提示收起，关闭按钮悬停时浮在标题左边。
 const TAB_COMPACT_WIDTH: f32 = 120.;
 /// 标题前面 agent 状态标记的宽度，固定下来标题才不会随转圈的字符左右跳。
@@ -1437,15 +1439,16 @@ impl Render for WindowView {
         let panel_toggles =
             (titlebar_shown || self.project_visible()).then(|| self.render_panel_toggles(fg, bg, cx));
         let tabs: Vec<_> = if show_tabs {
-            // 标签平分标题栏除去两头的宽度，但不窄于 `TAB_MIN_WIDTH`，挤不下就让标签条滚动；
-            // 拖动时的预览也照这个宽度画。
+            // 标签平分标题栏除去两头的宽度，限制在 `TAB_MIN_WIDTH` 到 `TAB_MAX_WIDTH` 之间，
+            // 挤不下就让标签条滚动；拖动时的预览也照这个宽度画。
             let tab_width = ((window.viewport_size().width
                 - px(sidebar_width + left_inset + NEW_TAB_BUTTON_WIDTH + right_inset + changes_width + files_width))
                 / tab_count as f32)
-                .max(px(TAB_MIN_WIDTH));
+                .clamp(px(TAB_MIN_WIDTH), px(TAB_MAX_WIDTH));
+            // 标签条只占标签本身的宽度，新建标签按钮紧跟在后面，剩下的空白留给拖动窗口。
             let strip = div()
                 .id("tabs")
-                .flex_1()
+                .flex_initial()
                 .min_w_0()
                 .h_full()
                 .flex()
@@ -1459,7 +1462,8 @@ impl Render for WindowView {
             let inset = div().id("panel-toggles-inset").flex_none().w(px(right_inset)).h_full().when(right_inset > 0., |inset| {
                 inset.border_l_1().border_color(hsla(fg).opacity(0.12))
             });
-            vec![strip, self.render_new_tab_button(fg, bg, cx), inset]
+            let spacer = div().id("tabs-spacer").flex_1().h_full();
+            vec![strip, self.render_new_tab_button(fg, bg, cx), spacer, inset]
         } else {
             // 只有一个标签时标题居中画在侧栏和右侧面板之间；两头让出的宽度取大的那个，
             // 没有侧栏和右侧面板时标题在整个窗口里居中。
