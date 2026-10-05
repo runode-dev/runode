@@ -9,7 +9,8 @@ use std::{
 };
 
 use gpui::{
-    Context, CursorStyle, Div, MouseButton, MouseDownEvent, SharedString, Stateful, UniformListScrollHandle,
+    Context, CursorStyle, Div, MouseButton, MouseDownEvent, ScrollStrategy, SharedString, Stateful,
+    UniformListScrollHandle,
     Window, div, prelude::*, px, svg,
 };
 
@@ -87,8 +88,10 @@ fn read_dir(dir: &Path) -> Option<Vec<DirEntry>> {
     Some(entries)
 }
 
-/// 后台读到的一份结果：git 状态，以及项目目录和展开的目录的内容，读不了的目录为 `None`。
+/// 后台读到的一份结果：git 状态，以及文件树根目录和展开的目录的内容，读不了的目录为 `None`。
 struct Scan {
+    /// 文件树的根目录：终端目录所在仓库的根，不在仓库里时是终端目录本身。
+    root: PathBuf,
     git: Option<git::Snapshot>,
     listings: Vec<(PathBuf, Option<Vec<DirEntry>>)>,
     /// 读这一份花的时间。
@@ -97,15 +100,17 @@ struct Scan {
 
 fn scan(dir: &Path, expanded: Vec<PathBuf>) -> Scan {
     let started = Instant::now();
-    let listings = std::iter::once(dir.to_path_buf())
+    let git = git::snapshot(dir);
+    let root = git.as_ref().map_or_else(|| dir.to_path_buf(), |git| git.root.clone());
+    let expanded = expanded.into_iter().filter(|path| path.starts_with(&root));
+    let listings = std::iter::once(root.clone())
         .chain(expanded)
         .map(|dir| {
             let listing = read_dir(&dir);
             (dir, listing)
         })
         .collect();
-    let git = git::snapshot(dir);
-    Scan { git, listings, cost: started.elapsed() }
+    Scan { root, git, listings, cost: started.elapsed() }
 }
 
 /// 改动栏里的一行；下标指向 `git::Snapshot` 里的文件、块和行。
@@ -191,6 +196,8 @@ impl<'a> Decorator<'a> {
 /// 一个 workspace 的改动和文件树。
 #[derive(Default)]
 pub(super) struct Project {
+    /// 文件树的根目录，跟着当前终端的目录变；还没读过时为空。
+    pub root: Option<PathBuf>,
     /// 最近一次读到的 git 状态；不在 git 仓库里时为空。
     pub git: Option<git::Snapshot>,
     /// 读到过至少一次。
@@ -305,6 +312,16 @@ impl Workspace {
         let project = &mut self.project;
         let mut changed = !project.loaded;
         project.loaded = true;
+        // 终端换到了别的仓库或目录：上一处的目录列表和展开过的改动不再相干。展开的目录
+        // 是绝对路径，留着，回到原处时还是展开的。
+        if project.root.as_ref() != Some(&scan.root) {
+            project.root = Some(scan.root.clone());
+            project.listings.clear();
+            project.toggled_diffs.clear();
+            project.changes_scroll.scroll_to_item(0, ScrollStrategy::Top);
+            project.files_scroll.scroll_to_item(0, ScrollStrategy::Top);
+            changed = true;
+        }
         if project.git != scan.git {
             project.git = scan.git;
             changed = true;
@@ -326,7 +343,7 @@ impl Workspace {
         }
         if changed {
             project.rebuild_diff_rows();
-            project.rebuild_file_rows(&self.dir);
+            project.rebuild_file_rows(&scan.root);
         }
         changed
     }
@@ -337,12 +354,13 @@ impl WindowView {
         self.changes_shown || self.files_shown
     }
 
-    /// 在后台重读当前 workspace 的 git 状态和展开的目录；右侧面板都收着或者上次还没读完时
-    /// 不读。
+    /// 在后台重读当前终端目录的 git 状态和展开的目录，取不到终端目录时读 workspace 的目录；
+    /// 右侧面板都收着或者上次还没读完时不读。
     pub(super) fn refresh_project(&mut self, cx: &mut Context<Self>) {
         if !self.project_visible() {
             return;
         }
+        let cwd = self.tab().focused_view().read(cx).cwd();
         let workspace = &mut self.workspaces[self.active];
         if workspace.project.refreshing {
             return;
@@ -350,7 +368,7 @@ impl WindowView {
         workspace.project.refreshing = true;
         workspace.project.refreshed_at = Some(Instant::now());
         let id = workspace.id;
-        let dir = workspace.dir.clone();
+        let dir = cwd.filter(|cwd| cwd.is_dir()).unwrap_or_else(|| workspace.dir.clone());
         let expanded = workspace.project.expanded_dirs.iter().cloned().collect();
         let job = cx.background_spawn(async move { scan(&dir, expanded) });
         cx.spawn(async move |this, cx| {

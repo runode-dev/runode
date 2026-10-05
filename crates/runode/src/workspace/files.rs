@@ -4,8 +4,8 @@
 use std::{ops::Range, path::Path};
 
 use gpui::{
-    AnyElement, Context, Div, Focusable, MouseButton, MouseDownEvent, ScrollStrategy, Stateful, Window, div, prelude::*, px,
-    svg, uniform_list,
+    AnyElement, Context, Div, Focusable, MouseButton, MouseDownEvent, ScrollStrategy, SharedString, Stateful, Window, div,
+    prelude::*, px, svg, uniform_list,
 };
 
 use super::{
@@ -34,9 +34,14 @@ fn shell_quote(text: &str) -> String {
 impl WindowView {
     pub(super) fn render_files_panel(&self, width: f32, fg: Rgb, bg: Rgb, cx: &mut Context<Self>) -> Stateful<Div> {
         let workspace = self.workspace();
-        let header = self
-            .panel_header(true, fg)
-            .child(div().min_w_0().truncate().text_color(hsla(fg)).child(workspace.name.clone()));
+        // 显示的是终端所在的仓库或目录，不一定是 workspace 的目录。
+        let name = match workspace.project.root.as_deref().and_then(Path::file_name) {
+            Some(name) if workspace.project.root.as_ref() != Some(&workspace.dir) => {
+                SharedString::from(name.to_string_lossy().into_owned())
+            }
+            _ => workspace.name.clone(),
+        };
+        let header = self.panel_header(true, fg).child(div().min_w_0().truncate().text_color(hsla(fg)).child(name));
         let list = uniform_list(
             "files",
             workspace.project.file_rows.len(),
@@ -122,7 +127,7 @@ impl WindowView {
         let workspace = self.workspace_mut();
         workspace.project.selected = Some(path.to_path_buf());
         if is_dir {
-            let root = workspace.dir.clone();
+            let root = workspace.project.root.clone().unwrap_or_else(|| workspace.dir.clone());
             workspace.project.toggle_dir(path, &root);
         } else if clicks >= 2 {
             self.insert_path(path, None, window, cx);
