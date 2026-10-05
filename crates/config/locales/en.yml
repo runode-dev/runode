@@ -17,7 +17,7 @@ config:
   window_padding_x: "Left and right padding: one number for both sides, or left,right, in points."
   window_padding_y: "Top and bottom padding: one number for both sides, or top,bottom, in points."
   file_tree_font_size: "File tree font size: a positive number, in points."
-  file_tree_preview_click: "How to open a file from the file tree in the preview pane: double (default) or single. With single, double-clicking a file types its path into the terminal."
+  file_tree_preview_click: "How to open a file from the file tree in the preview pane: single (default) or double. With single, a click opens a temporary tab that the next opened file replaces, and a double-click keeps it open. With double, a double-click opens a tab that stays."
   preview_font_size: "Preview pane font size: a positive number, in points."
   theme: |-
     Theme: a theme name listed at the end of this file, or the absolute path of a theme file. It can also

@@ -23,7 +23,7 @@ use runode_config::PreviewClick;
 use runode_shared_types::color::Rgb;
 
 pub(super) use edit::{FileClipboard, FileEdit};
-pub(super) use menu::FileMenu;
+pub(super) use menu::{FileMenu, menu_item};
 
 use super::{
     WindowView,
@@ -401,7 +401,7 @@ impl WindowView {
                                 return;
                             }
                             window.focus(&this.files_focus, cx);
-                            this.click_file(&path, is_dir, event.click_count, window, cx);
+                            this.click_file(&path, is_dir, event.click_count, cx);
                         }
                     }),
                 )
@@ -423,9 +423,9 @@ impl WindowView {
         )
     }
 
-    /// 单击选中，目录同时展开或收起，有改动的文件在改动栏里滚到它。文件按配置的
-    /// `PreviewClick` 双击或单击在预览栏里打开；单击打开时，双击把路径打进终端。
-    fn click_file(&mut self, path: &Path, is_dir: bool, clicks: usize, window: &mut Window, cx: &mut Context<Self>) {
+    /// 单击选中，目录同时展开或收起，有改动的文件在改动栏里滚到它。文件按配置的 `PreviewClick`
+    /// 在预览栏里打开：单击打开时单击开成临时标签，双击固定下来；双击打开时双击开成固定标签。
+    fn click_file(&mut self, path: &Path, is_dir: bool, clicks: usize, cx: &mut Context<Self>) {
         self.workspace_mut().project.selected = Some(path.to_path_buf());
         if is_dir {
             self.with_tree(|project, root, show_ignored| project.toggle_dir(path, root, show_ignored));
@@ -434,11 +434,7 @@ impl WindowView {
         }
         let single = cx.global::<AppConfig>().0.file_tree_preview_click == PreviewClick::Single;
         if clicks >= 2 {
-            if single {
-                self.insert_path(path, None, window, cx);
-            } else {
-                self.open_preview(path, cx);
-            }
+            self.open_preview(path, true, cx);
         } else {
             if self.changes_shown {
                 let project = &mut self.workspace_mut().project;
@@ -447,7 +443,7 @@ impl WindowView {
                 }
             }
             if single {
-                self.open_preview(path, cx);
+                self.open_preview(path, false, cx);
             }
         }
         cx.notify();
@@ -504,7 +500,7 @@ impl WindowView {
                 None
             }, cx);
         } else {
-            self.open_preview(&path, cx);
+            self.open_preview(&path, false, cx);
             // 预览栏刚打开时文件树变窄，选中的行可能被挤出视野。
             self.move_selection(|project, _, _| project.selected_row(), cx);
         }

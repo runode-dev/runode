@@ -16,7 +16,7 @@ pub enum CellHeight {
     Percent(f32),
 }
 
-/// 文件树里单击还是双击文件在预览栏打开。
+/// 文件树里单击还是双击文件在预览栏打开。单击打开时开成临时标签，双击固定下来。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PreviewClick {
     Single,
@@ -87,7 +87,7 @@ impl Default for Config {
             window_padding_x: (2., 2.),
             window_padding_y: (0., 6.),
             file_tree_font_size: 13.,
-            file_tree_preview_click: PreviewClick::Double,
+            file_tree_preview_click: PreviewClick::Single,
             preview_font_size: 13.,
             cursor_style: term.cursor_style,
             cursor_style_blink: term.cursor_blink,

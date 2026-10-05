@@ -1,11 +1,11 @@
-//! 文件树的右键菜单，以及只在菜单和快捷键里用的几个操作：在访达里显示、在新标签页里开终端、
-//! 复制路径。菜单作用在选中的那一项上，点在空白处时作用在根目录上。
+//! 右键菜单，以及文件树里只在菜单和快捷键里用的几个操作：在访达里显示、在新标签页里开终端、
+//! 复制路径。文件树的菜单作用在选中的那一项上，点在空白处时作用在根目录上；预览标签也用这个菜单。
 
 use std::path::{Path, PathBuf};
 
 use gpui::{
-    Action, AnyElement, ClipboardItem, Context, MouseButton, Pixels, Point, SharedString, Window, anchored, deferred,
-    div, prelude::*, px,
+    Action, AnyElement, App, ClipboardItem, Context, FocusHandle, MouseButton, Pixels, Point, SharedString, Window,
+    anchored, deferred, div, prelude::*, px,
 };
 use runode_shared_types::color::Rgb;
 
@@ -24,30 +24,47 @@ use crate::{
 const MENU_MARGIN: f32 = 8.;
 const MENU_WIDTH: f32 = 240.;
 
-/// 菜单里的一项：点了把 `action` 派发给文件树，和按快捷键走同一条路。
-struct MenuItem {
+/// 菜单里的一项：点了把 `action` 派发给菜单的 `target`，和按快捷键走同一条路。
+pub(in crate::workspace) struct MenuItem {
     label: String,
     action: Box<dyn Action>,
     shortcut: Option<SharedString>,
     enabled: bool,
 }
 
-/// 打开着的右键菜单：右键按下的位置，以及打开时就定下的各项，`None` 是分隔线。
+/// 菜单里的一项，快捷键在这时查，查的是这一刻的键位表。
+pub(in crate::workspace) fn menu_item(key: &str, action: Box<dyn Action>, enabled: bool, cx: &App) -> MenuItem {
+    let shortcut = shortcut_text(action.as_ref(), cx);
+    MenuItem { label: rust_i18n::t!(key).into_owned(), action, shortcut, enabled }
+}
+
+/// 打开着的右键菜单：右键按下的位置，打开时就定下的各项（`None` 是分隔线），以及点了以后
+/// 先把焦点交给谁、再派发动作。
 pub(in crate::workspace) struct FileMenu {
     position: Point<Pixels>,
     items: Vec<Option<MenuItem>>,
+    target: FocusHandle,
 }
 
 impl WindowView {
-    /// 在 `position` 弹出右键菜单，作用在当前选中的那一项上：选中文件、选中目录和点在空白处
-    /// 各有不同。快捷键在这时查，查的是这一刻的键位表。
+    /// 在 `position` 弹出 `items`，点了的那项先把焦点交给 `target` 再派发。
+    pub(in crate::workspace) fn open_menu(
+        &mut self,
+        position: Point<Pixels>,
+        items: Vec<Option<MenuItem>>,
+        target: FocusHandle,
+        cx: &mut Context<Self>,
+    ) {
+        self.file_menu = Some(FileMenu { position, items, target });
+        cx.notify();
+    }
+
+    /// 在 `position` 弹出文件树的右键菜单，作用在当前选中的那一项上：选中文件、选中目录和点在
+    /// 空白处各有不同。
     pub(super) fn open_file_menu(&mut self, position: Point<Pixels>, cx: &mut Context<Self>) {
         let selected = self.selected_entry();
         let can_paste = self.file_clipboard.is_some();
-        let item = |key: &str, action: Box<dyn Action>| {
-            let shortcut = shortcut_text(action.as_ref(), cx);
-            Some(MenuItem { label: rust_i18n::t!(key).into_owned(), action, shortcut, enabled: true })
-        };
+        let item = |key: &str, action: Box<dyn Action>| Some(menu_item(key, action, true, cx));
         let mut items = vec![
             item("files.new_file", Box::new(NewFile)),
             item("files.new_folder", Box::new(NewFolder)),
@@ -75,8 +92,8 @@ impl WindowView {
         if selected.is_some() {
             items.extend([None, item("files.rename", Box::new(RenameFile)), item("files.delete", Box::new(DeleteFile))]);
         }
-        self.file_menu = Some(FileMenu { position, items });
-        cx.notify();
+        let target = self.files_focus.clone();
+        self.open_menu(position, items, target, cx);
     }
 
     /// 右键菜单，盖在窗口最上层；点到菜单外面就关掉。
@@ -90,6 +107,7 @@ impl WindowView {
                 return div().flex_none().h(px(1.)).mx(px(6.)).my(px(4.)).bg(fg.opacity(0.12)).into_any_element();
             };
             let action = item.action.boxed_clone();
+            let target = menu.target.clone();
             div()
                 .id(("file-menu", ix))
                 .flex_none()
@@ -107,7 +125,7 @@ impl WindowView {
                         cx.listener(move |this, _, window, cx| {
                             cx.stop_propagation();
                             this.file_menu = None;
-                            window.focus(&this.files_focus, cx);
+                            window.focus(&target, cx);
                             window.dispatch_action(action.boxed_clone(), cx);
                             cx.notify();
                         }),

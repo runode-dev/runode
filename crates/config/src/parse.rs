@@ -164,8 +164,8 @@ impl Config {
             }
             "file-tree-preview-click" => {
                 self.file_tree_preview_click = match value {
-                    "" | "double" => PreviewClick::Double,
-                    "single" => PreviewClick::Single,
+                    "" | "single" => PreviewClick::Single,
+                    "double" => PreviewClick::Double,
                     _ => return Err("expected single or double".into()),
                 };
             }
@@ -480,12 +480,12 @@ unknown-key = whatever
     }
 
     #[test]
-    fn file_tree_preview_click_defaults_to_double() {
-        assert_eq!(Config::default().file_tree_preview_click, PreviewClick::Double);
-        assert_eq!(load(&["file-tree-preview-click = single"]).file_tree_preview_click, PreviewClick::Single);
-        assert_eq!(load(&["file-tree-preview-click = single\nfile-tree-preview-click ="]).file_tree_preview_click, PreviewClick::Double);
+    fn file_tree_preview_click_defaults_to_single() {
+        assert_eq!(Config::default().file_tree_preview_click, PreviewClick::Single);
+        assert_eq!(load(&["file-tree-preview-click = double"]).file_tree_preview_click, PreviewClick::Double);
+        assert_eq!(load(&["file-tree-preview-click = double\nfile-tree-preview-click ="]).file_tree_preview_click, PreviewClick::Single);
         // 认不出的值跳过，保留前面的值。
-        assert_eq!(load(&["file-tree-preview-click = single\nfile-tree-preview-click = triple"]).file_tree_preview_click, PreviewClick::Single);
+        assert_eq!(load(&["file-tree-preview-click = double\nfile-tree-preview-click = triple"]).file_tree_preview_click, PreviewClick::Double);
     }
 
     #[test]

@@ -168,7 +168,7 @@ pub struct WindowView {
     files_shown: bool,
     changes_width: Option<f32>,
     files_width: Option<f32>,
-    /// 预览栏拖动过宽度时是那个宽度；预览栏在单击文件时打开，开关不存档。
+    /// 预览栏拖动过宽度时是那个宽度；预览栏在打开文件时出现，标签都关掉时收起，不存档。
     preview_width: Option<f32>,
     /// 预览栏的焦点：点了预览的文字后 cmd+c 复制选中的行。
     preview_focus: FocusHandle,
@@ -176,7 +176,8 @@ pub struct WindowView {
     show_ignored: bool,
     /// 文件树的焦点：点了文件树后方向键在里面移动选中的行。
     files_focus: FocusHandle,
-    /// 文件树的右键菜单、正在新建或改名的输入框，以及剪切或复制下来等着粘贴的文件。
+    /// 文件树或预览标签的右键菜单，文件树里正在新建或改名的输入框，以及剪切或复制下来等着粘贴的
+    /// 文件。
     file_menu: Option<files::FileMenu>,
     file_edit: Option<files::FileEdit>,
     file_clipboard: Option<files::FileClipboard>,

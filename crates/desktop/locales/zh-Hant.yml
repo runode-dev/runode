@@ -76,6 +76,11 @@ preview:
   too_large: 圖片太大，無法預覽
   unreadable: "無法讀取檔案：%{error}"
   truncated: 檔案太大，只顯示了前 %{count} 行
+  close: 關閉
+  close_others: 關閉其他
+  close_right: 關閉右側
+  close_all: 全部關閉
+  keep_open: 保持開啟
 paste:
   title: 貼上的內容可能會直接執行指令
   detail: 內容含有換行或終端機控制序列，貼上後可能被當作指令立即執行。

@@ -16,7 +16,7 @@ config:
   window_padding_x: 左右内边距：一个数表示两边相同，或者写成 左,右，单位是点。
   window_padding_y: 上下内边距：一个数表示两边相同，或者写成 上,下，单位是点。
   file_tree_font_size: 右侧文件树的字号：正数，单位是点。
-  file_tree_preview_click: 文件树里怎样在预览栏打开文件：double（双击，默认）或 single（单击）；单击打开时，双击文件把它的路径打进终端。
+  file_tree_preview_click: 文件树里怎样在预览栏打开文件：single（单击，默认）或 double（双击）。single 时单击开成临时标签，再打开别的文件时被换掉，双击固定下来；double 时双击开成固定标签。
   preview_font_size: 预览栏的字号：正数，单位是点。
   theme: |-
     主题：文件末尾列出的主题名，或者主题文件的绝对路径；还可以按系统外观分开写，

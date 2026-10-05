@@ -85,8 +85,8 @@ pub(in crate::workspace) struct Project {
     pub(super) listings: HashMap<PathBuf, Vec<DirEntry>>,
     /// 文件树里选中的路径。
     pub selected: Option<PathBuf>,
-    /// 预览栏打开的文件；没打开时预览栏不显示。不进存档。
-    pub preview: Option<super::super::preview::Preview>,
+    /// 预览栏的标签。
+    pub previews: super::super::preview::PreviewTabs,
     pub diff_rows: Vec<DiffRow>,
     pub diff_groups: Vec<DiffGroup>,
     pub file_rows: Vec<FileRow>,
@@ -463,7 +463,7 @@ impl Workspace {
         }
         if project.git != scan.git {
             project.git = scan.git;
-            if let Some(preview) = &mut project.preview {
+            for preview in &mut project.previews.tabs {
                 preview.refresh_marks(project.git.as_ref());
             }
             changed = true;

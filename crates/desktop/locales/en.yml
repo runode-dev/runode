@@ -76,6 +76,11 @@ preview:
   too_large: The image is too large to preview
   unreadable: "Can't read the file: %{error}"
   truncated: The file is too large; only the first %{count} lines are shown
+  close: Close
+  close_others: Close Others
+  close_right: Close to the Right
+  close_all: Close All
+  keep_open: Keep Open
 paste:
   title: The pasted text may run commands
   detail: It contains line breaks or terminal control sequences, so it may run as a command right after pasting.

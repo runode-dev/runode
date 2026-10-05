@@ -168,9 +168,9 @@ impl WindowView {
             return;
         }
         self.relist_and_reveal(vec![dir.to_path_buf()], &path, cx);
-        // 新建的文件直接打开，接着就能看。
+        // 新建的文件直接开成固定标签，接着就能看。
         if !is_dir {
-            self.open_preview(&path, cx);
+            self.open_preview(&path, true, cx);
         }
     }
 
@@ -208,10 +208,7 @@ impl WindowView {
         }
         let dirs = [from.parent(), to.parent()].into_iter().flatten().map(Path::to_path_buf).collect();
         self.relist_and_reveal(dirs, to, cx);
-        let preview = self.preview().and_then(|preview| preview.path.strip_prefix(from).ok().map(|rest| to.join(rest)));
-        if let Some(preview) = preview {
-            self.open_preview(&preview, cx);
-        }
+        self.move_previews(from, to, cx);
     }
 
     /// 选中的那一项先问一下，再在后台移到废纸篓：外置卷上可能要复制一遍。
@@ -248,12 +245,10 @@ impl WindowView {
         .detach();
     }
 
-    /// `path` 移到了废纸篓：预览的是它或者它下面的文件时关掉预览，选中原来那个位置上的行，
-    /// 接着按删除键可以一路删下去。
+    /// `path` 移到了废纸篓：关掉它和它下面的文件的预览标签，选中原来那个位置上的行，接着按删除键
+    /// 可以一路删下去。
     fn after_delete(&mut self, path: &Path, window: &mut Window, cx: &mut Context<Self>) {
-        if self.preview().is_some_and(|preview| preview.path.starts_with(path)) {
-            self.close_preview(window, cx);
-        }
+        self.retain_previews(|_, preview| !preview.path.starts_with(path), window, cx);
         if self.file_clipboard.as_ref().is_some_and(|clip| clip.path.starts_with(path)) {
             self.file_clipboard = None;
         }
