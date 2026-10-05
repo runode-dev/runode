@@ -9,11 +9,10 @@ use crate::file_icons;
 
 /// 侧栏开关的图标。
 pub const SIDEBAR_ICON: &str = "icons/sidebar.svg";
-/// 右上角改动栏、Git 面板和文件树开关的图标。
-pub const CHANGES_ICON: &str = "icons/changes.svg";
+/// 右上角 Git 面板和文件树开关的图标。
 pub const GIT_ICON: &str = "icons/git.svg";
 pub const FILES_ICON: &str = "icons/files.svg";
-/// 改动栏和文件树里展开、收起的箭头。
+/// Git 面板和文件树里展开、收起的箭头。
 pub const CHEVRON_RIGHT_ICON: &str = "icons/chevron-right.svg";
 pub const CHEVRON_DOWN_ICON: &str = "icons/chevron-down.svg";
 /// 文件树标题栏上显示、隐藏被 git 忽略的文件的开关。
@@ -40,7 +39,6 @@ pub const TRASH_ICON: &str = "icons/trash.svg";
 
 const FILES: &[(&str, &[u8])] = &[
     (SIDEBAR_ICON, include_bytes!("../assets/icons/sidebar.svg")),
-    (CHANGES_ICON, include_bytes!("../assets/icons/changes.svg")),
     (GIT_ICON, include_bytes!("../assets/icons/git.svg")),
     (FILES_ICON, include_bytes!("../assets/icons/files.svg")),
     (CHEVRON_RIGHT_ICON, include_bytes!("../assets/icons/chevron-right.svg")),

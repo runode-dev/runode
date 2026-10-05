@@ -1,6 +1,6 @@
 //! 右侧的 Git 面板，仿 VSCode 的源代码管理：顶上是当前分支和同步按钮，下面是提交说明框和提交
 //! 按钮，再下面按冲突、已暂存、未暂存分段列出改动的文件和储藏。文件和改动块都能暂存、取消暂存
-//! 或丢掉，标题栏的「更多」菜单里是拉取、推送、分支和储藏这些操作。改动栏的开关也在标题栏上。
+//! 或丢掉，标题栏的「更多」菜单里是拉取、推送、分支和储藏这些操作。
 //!
 //! 排成行的状态在 `rows`，列表的各行在 `list`，在后台跑 git 在 `run`，切换和新建分支的浮层在
 //! `branch_picker`。git 命令本身由 `runode_git_status::Repo` 去跑。
@@ -20,12 +20,12 @@ use runode_git_status::{Operation, RepoInfo, Section};
 use runode_shared_types::color::Rgb;
 
 use super::{
-    ToggleChanges, WindowView, divider_color,
+    WindowView, divider_color,
     files::menu_item,
     project::{RENAMED, panel_message, panel_shell},
 };
 use crate::{
-    assets::{BRANCH_ICON, CHANGES_ICON, CHECK_ICON, CHEVRON_DOWN_ICON, MORE_ICON, REFRESH_ICON, SYNC_ICON},
+    assets::{BRANCH_ICON, CHECK_ICON, CHEVRON_DOWN_ICON, MORE_ICON, REFRESH_ICON, SYNC_ICON},
     terminal_view::hsla,
     text_area::{TextArea, TextAreaEvent},
     tooltip::tooltip,
@@ -176,8 +176,6 @@ impl WindowView {
             .panel_header(rightmost, fg)
             .child(div().flex_none().text_color(hsla(fg)).child(rust_i18n::t!("git.title").into_owned()))
             .child(div().flex_1().min_w_0().truncate().text_color(dim).children(panel.busy.map(|busy| busy.label())))
-            // 不在仓库里时改动栏没什么可看，开着的话留着按钮好收起来。
-            .when(in_repo || self.changes_shown, |header| header.child(self.render_changes_toggle(fg, bg, cx)))
             .when(in_repo, |header| {
                 header
                     .child(self.header_button(
@@ -231,23 +229,6 @@ impl WindowView {
             .text_size(px(12.))
             .child(header)
             .child(body)
-    }
-
-    /// 开关改动栏的按钮，改动栏开着时底色亮一些。
-    fn render_changes_toggle(&self, fg: Rgb, bg: Rgb, cx: &mut Context<Self>) -> Stateful<Div> {
-        let shown = self.changes_shown;
-        let text = if shown { rust_i18n::t!("tooltip.hide_changes") } else { rust_i18n::t!("tooltip.show_changes") };
-        super::titlebar::icon_toggle("git-toggle-changes", CHANGES_ICON, 14., shown, fg, bg)
-            .flex_none()
-            .size(px(HEADER_BUTTON_SIZE))
-            .tooltip(tooltip(text, Some(&ToggleChanges), fg, bg))
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(|this, _, window, cx| {
-                    cx.stop_propagation();
-                    this.toggle_changes(&ToggleChanges, window, cx);
-                }),
-            )
     }
 
     /// 标题栏上的图标按钮；按下时不往外传，免得标题栏把它当成拖动窗口。弹出菜单的按钮不带提示，

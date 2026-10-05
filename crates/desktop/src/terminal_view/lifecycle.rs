@@ -371,7 +371,7 @@ impl TerminalView {
         self.agent_changed_at
     }
 
-    /// 终端用的字体，改动栏里的代码也用它。
+    /// 终端用的字体，Git 面板和预览栏里的代码也用它。
     pub fn font_family(&self) -> SharedString {
         self.font.family.clone()
     }

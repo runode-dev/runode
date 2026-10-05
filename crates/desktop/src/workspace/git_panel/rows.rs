@@ -9,7 +9,6 @@ use std::{
 use gpui::{Entity, Subscription, UniformListScrollHandle};
 use runode_git_status::{self as git, FileStatus, Section};
 
-use super::super::project::DiffNote;
 use crate::text_area::TextArea;
 
 /// Git 面板里的一段。
@@ -50,6 +49,15 @@ pub(in crate::workspace) enum GitRow {
     Line(Section, usize, usize, usize),
     Note(Section, usize, DiffNote),
     Stash(usize),
+}
+
+/// 展开的文件下面不显示行时的说明。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(in crate::workspace) enum DiffNote {
+    Binary,
+    Truncated,
+    /// 只改了权限或者只改了名。
+    NoContent,
 }
 
 /// 正在跑的 git 操作，面板顶上写着它；跑完之前不接新的操作。

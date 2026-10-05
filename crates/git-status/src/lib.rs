@@ -29,7 +29,7 @@ const MAX_UNTRACKED_FILES: usize = 200;
 /// 比这大的文件 git 不算逐行改动，当二进制报，免得一个生成的大文件拖慢整次读取。
 const MAX_DIFF_BYTES: u64 = 1024 * 1024;
 
-/// 改动栏的两段：已经 `git add` 的改动（暂存区相对 HEAD），以及还没暂存的改动
+/// 改动分的两段：已经 `git add` 的改动（暂存区相对 HEAD），以及还没暂存的改动
 /// （工作区相对暂存区，含未跟踪的文件）。
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Section {

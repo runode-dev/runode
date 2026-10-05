@@ -7,12 +7,12 @@ use gpui::{
     AnyElement, Context, Div, ElementId, MouseButton, MouseDownEvent, SharedString, Stateful, Window, div, img,
     prelude::*, px, svg,
 };
-use runode_git_status::{self as git, FileStatus, HunkAction, Section, hunk_actionable};
+use runode_git_status::{self as git, FileDiff, FileStatus, HunkAction, Line, LineKind, Section, hunk_actionable};
 use runode_shared_types::color::Rgb;
 
 use super::{
     FileOp, GitFileAction,
-    rows::{GitPanel, GitRow, GitSection, section_of},
+    rows::{DiffNote, GitPanel, GitRow, GitSection, section_of},
     run::StashOp,
 };
 use crate::{
@@ -23,11 +23,17 @@ use crate::{
     file_icons::file_icon,
     terminal_view::hsla,
     tooltip::tooltip,
-    workspace::{WindowView, changes::diff_note_row, files::menu_item, project::status_color},
+    workspace::{
+        WindowView,
+        files::menu_item,
+        project::{ADDED, REMOVED, status_color},
+    },
 };
 
 /// 每一行的高度：段标题、文件、块头和改动的行一样高，列表才能只画看得见的部分。
 pub(super) const ROW_HEIGHT: f32 = 22.;
+/// 行号一栏的宽度，五位数的行号也放得下。
+const LINE_NUMBER_WIDTH: f32 = 44.;
 /// 文件比段标题、块头比文件往右缩进的宽度。
 const INDENT: f32 = 12.;
 /// 鼠标移到行上才露出按钮，各行共用这个组名，按钮找的是离它最近的那一行。
@@ -51,6 +57,71 @@ fn button(
 }
 
 impl WindowView {
+    /// 改动里的一行：旧行号、新行号、正负号和内容，加的和删的垫上底色。双击把「路径:行号」打进
+    /// 终端，给 agent 指出是哪一行。`root` 是 `file` 的路径相对的仓库根。
+    #[allow(clippy::too_many_arguments)]
+    fn render_diff_line(
+        &self,
+        id: ElementId,
+        height: f32,
+        root: &Path,
+        file: &FileDiff,
+        line: &Line,
+        fg: Rgb,
+        bg: Rgb,
+        font: &SharedString,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let dim = hsla(fg).opacity(0.45);
+        let (sign, line_bg, sign_color) = match line.kind {
+            LineKind::Added => ("+", Some(bg.mix(ADDED, 0.16)), hsla(ADDED)),
+            LineKind::Removed => ("-", Some(bg.mix(REMOVED, 0.16)), hsla(REMOVED)),
+            LineKind::Context => (" ", None, dim),
+        };
+        let number = |n: Option<u32>| {
+            div()
+                .flex_none()
+                .w(px(LINE_NUMBER_WIDTH))
+                .pr(px(8.))
+                .flex()
+                .justify_end()
+                .text_color(dim)
+                .children(n.map(|n| n.to_string()))
+        };
+        let target = (root.join(&file.path), line.new.or(line.old));
+        div()
+            .id(id)
+            .flex_none()
+            .h(px(height))
+            .w_full()
+            .flex()
+            .items_center()
+            .overflow_hidden()
+            .font_family(font.clone())
+            .when_some(line_bg, |row, line_bg| row.bg(hsla(line_bg)))
+            .child(number(line.old))
+            .child(number(line.new))
+            .child(div().flex_none().w(px(14.)).text_color(sign_color).child(sign))
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .overflow_hidden()
+                    .whitespace_nowrap()
+                    .text_color(hsla(fg))
+                    .child(SharedString::from(line.text.clone())),
+            )
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(move |this, event: &MouseDownEvent, window, cx| {
+                    if event.click_count >= 2 {
+                        this.insert_path(&target.0, target.1, window, cx);
+                    }
+                }),
+            )
+            .into_any_element()
+    }
+
     pub(super) fn render_git_rows(
         &self,
         range: Range<usize>,
@@ -402,4 +473,25 @@ fn chevron(expanded: bool, fg: Rgb) -> gpui::Svg {
 
 fn file_name(path: &Path) -> String {
     path.file_name().map_or_else(|| path.display().to_string(), |name| name.to_string_lossy().into_owned())
+}
+
+/// 改动里不显示行的说明：二进制文件、改动太多、内容没变。和行的内容对齐。
+fn diff_note_row(note: DiffNote, height: f32, fg: Rgb) -> AnyElement {
+    let text = match note {
+        DiffNote::Binary => rust_i18n::t!("panel.binary"),
+        DiffNote::Truncated => rust_i18n::t!("panel.truncated"),
+        DiffNote::NoContent => rust_i18n::t!("panel.no_content"),
+    };
+    div()
+        .flex_none()
+        .h(px(height))
+        .w_full()
+        .flex()
+        .items_center()
+        .overflow_hidden()
+        .pl(px(LINE_NUMBER_WIDTH * 2. + 14.))
+        .italic()
+        .text_color(hsla(fg).opacity(0.45))
+        .child(text.into_owned())
+        .into_any_element()
 }

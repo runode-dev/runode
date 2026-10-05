@@ -499,7 +499,7 @@ impl WindowView {
         )
     }
 
-    /// 点击（按下又松开、没拖动）选中，目录同时展开或收起，有改动的文件在改动栏里滚到它。文件按配置的 `PreviewClick`
+    /// 点击（按下又松开、没拖动）选中，目录同时展开或收起。文件按配置的 `PreviewClick`
     /// 在预览栏里打开：单击打开时单击开成临时标签，双击固定下来；双击打开时双击开成固定标签。
     fn click_file(&mut self, path: &Path, is_dir: bool, clicks: usize, cx: &mut Context<Self>) {
         self.workspace_mut().project.selected = Some(path.to_path_buf());
@@ -511,16 +511,8 @@ impl WindowView {
         let single = cx.global::<AppConfig>().0.file_tree_preview_click == PreviewClick::Single;
         if clicks >= 2 {
             self.open_preview(path, true, cx);
-        } else {
-            if self.changes_shown {
-                let project = &mut self.workspace_mut().project;
-                if let Some(row) = project.reveal_diff(path) {
-                    project.changes_scroll.scroll_to_item(row, ScrollStrategy::Top);
-                }
-            }
-            if single {
-                self.open_preview(path, false, cx);
-            }
+        } else if single {
+            self.open_preview(path, false, cx);
         }
         cx.notify();
     }

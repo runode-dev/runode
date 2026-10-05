@@ -39,12 +39,7 @@ pub struct SavedWindow {
     /// 用户拖动过侧栏宽度时是那个宽度；没拖过时为空，用默认宽度。
     #[serde(default)]
     pub sidebar_width: Option<f32>,
-    /// 右侧的改动栏和文件树是否显示，以及拖动过的宽度；没拖过时为空，用默认宽度。
-    #[serde(default)]
-    pub changes: bool,
-    #[serde(default)]
-    pub changes_width: Option<f32>,
-    /// Git 面板是否显示，以及拖动过的宽度。
+    /// 右侧的 Git 面板和文件树是否显示，以及拖动过的宽度；没拖过时为空，用默认宽度。
     #[serde(default)]
     pub git: bool,
     #[serde(default)]
@@ -202,8 +197,6 @@ mod tests {
             active: 0,
             sidebar: None,
             sidebar_width: Some(240.),
-            changes: true,
-            changes_width: None,
             git: true,
             git_width: Some(320.),
             files: false,

@@ -93,7 +93,6 @@ action:
   last_workspace: 最后一个工作区
   goto_workspace: 第 N 个工作区，从 1 数
   toggle_sidebar: 显示或隐藏工作区侧栏
-  toggle_changes: 显示或隐藏右侧的未提交改动
   toggle_git: 显示或隐藏右侧的 Git 面板：暂存、提交、切换分支、同步和储藏
   toggle_files: 显示或隐藏右侧的文件树，双击文件把路径打进终端
   goto_agent: 列出所有窗口里的 agent，选一个跳过去

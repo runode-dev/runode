@@ -39,7 +39,6 @@ menu:
   previous_prompt: Jump to Previous Prompt
   next_prompt: Jump to Next Prompt
   toggle_sidebar: Show or Hide Sidebar
-  toggle_changes: Show or Hide Changes
   toggle_git: Show or Hide Git
   toggle_files: Show or Hide Files
   toggle_full_screen: Toggle Full Screen
@@ -84,15 +83,11 @@ quit:
   agent: "%{agent} (%{workspace})"
   separator: ", "
 panel:
-  changes: Changes
-  uncommitted: "%{count} uncommitted changes"
   no_changes: No uncommitted changes
   not_repo: Not a git repository
   binary: Binary file
   truncated: Too many changes to show in full
   no_content: No content changes
-  staged: Staged Changes
-  unstaged: Changes
 preview:
   binary: Can't preview a binary file
   too_large: The image is too large to preview
@@ -139,8 +134,6 @@ files:
 tooltip:
   show_sidebar: Show Sidebar
   hide_sidebar: Hide Sidebar
-  show_changes: Show Changes
-  hide_changes: Hide Changes
   show_git: Show Git
   hide_git: Hide Git
   show_files: Show Files

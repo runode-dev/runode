@@ -39,7 +39,6 @@ menu:
   previous_prompt: 跳到上一个提示符
   next_prompt: 跳到下一个提示符
   toggle_sidebar: 显示或隐藏侧栏
-  toggle_changes: 显示或隐藏改动
   toggle_git: 显示或隐藏 Git
   toggle_files: 显示或隐藏文件
   toggle_full_screen: 切换全屏
@@ -84,15 +83,11 @@ quit:
   agent: "%{agent}（%{workspace}）"
   separator: "、"
 panel:
-  changes: 改动
-  uncommitted: "%{count} 个未提交的改动"
   no_changes: 没有未提交的改动
   not_repo: 不在 git 仓库里
   binary: 二进制文件
   truncated: 改动太多，没有全部显示
   no_content: 内容没有变化
-  staged: 已暂存的改动
-  unstaged: 未暂存的改动
 preview:
   binary: 无法预览二进制文件
   too_large: 图片太大，无法预览
@@ -139,8 +134,6 @@ files:
 tooltip:
   show_sidebar: 显示侧栏
   hide_sidebar: 隐藏侧栏
-  show_changes: 显示改动
-  hide_changes: 隐藏改动
   show_git: 显示 Git
   hide_git: 隐藏 Git
   show_files: 显示文件

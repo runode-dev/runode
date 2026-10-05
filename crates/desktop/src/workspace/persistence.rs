@@ -186,8 +186,6 @@ impl WindowView {
             active: self.active,
             sidebar: self.sidebar_shown,
             sidebar_width: self.sidebar_width,
-            changes: self.changes_shown,
-            changes_width: self.changes_width,
             git: self.git_shown,
             git_width: self.git_width,
             files: self.files_shown,
@@ -267,8 +265,6 @@ impl WindowView {
         if !self.workspaces.is_empty() {
             self.sidebar_shown = saved.sidebar;
             self.sidebar_width = saved.sidebar_width;
-            self.changes_shown = saved.changes;
-            self.changes_width = saved.changes_width;
             self.git_shown = saved.git;
             self.git_width = saved.git_width;
             self.files_shown = saved.files;

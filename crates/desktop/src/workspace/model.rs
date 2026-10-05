@@ -93,7 +93,7 @@ pub(super) struct Workspace {
     pub(super) active: usize,
     /// 标签条的滚动位置，切换标签时把当前标签滚进视野。
     pub(super) tab_scroll: ScrollHandle,
-    /// 改动栏和文件树显示的内容。
+    /// Git 面板和文件树显示的内容。
     pub(super) project: Project,
 }
 
