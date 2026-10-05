@@ -163,6 +163,7 @@ fn template_values(d: &Config, key: &str) -> Vec<String> {
         "palette" => d.palette.iter().map(|(i, c)| format!("{i}={}", hex(*c))).collect(),
         "cursor-style" => vec!["block".into()],
         "macos-option-as-alt" => vec!["false".into()],
+        "scrollback-limit" => vec![d.scrollback_limit.to_string()],
         "shell-integration" => vec!["detect".into()],
         "command-suggestions" => vec!["true".into()],
         "command-completions" => vec!["true".into()],
@@ -253,8 +254,9 @@ mod tests {
     fn fills_keys_added_after_the_file_was_written() {
         for locale in crate::i18n::available() {
             let full = template(&locale);
-            // 一组里缺了后面几个、整组都缺、多值的键缺了，补回来都和模板一样。
-            for keys in [&["preview-font-size", "file-tree-preview-click"][..], &["language"], &["palette"]] {
+            // 一组里缺了后面几个、整组都缺、多值的键缺了、组中间后来加的键缺了，补回来都和
+            // 模板一样。
+            for keys in [&["preview-font-size", "file-tree-preview-click"][..], &["language"], &["palette"], &["scrollback-limit"]] {
                 let old = without(&full, keys);
                 assert_ne!(old, full, "{keys:?}");
                 if keys == ["language"] {

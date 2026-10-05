@@ -8,7 +8,7 @@ use std::{
 use runode_shared_types::{
     agent::AgentKind,
     color::{Rgb, TerminalColor},
-    settings::{CursorStyle, OptionAsAlt},
+    settings::{CursorStyle, MIN_SCROLLBACK_LIMIT, OptionAsAlt},
     shell::{IntegrationMode, Shell},
 };
 
@@ -43,6 +43,7 @@ pub(crate) const KEYS: &[&[&str]] = &[
         "cursor-style",
         "cursor-style-blink",
         "macos-option-as-alt",
+        "scrollback-limit",
         "shell-integration",
         "command-suggestions",
         "command-completions",
@@ -223,6 +224,13 @@ impl Config {
                 let color = parse_color(color)?;
                 self.palette.retain(|(i, _)| *i != index);
                 self.palette.push((index, color));
+            }
+            "scrollback-limit" => {
+                self.scrollback_limit = if empty {
+                    defaults.scrollback_limit
+                } else {
+                    value.parse::<usize>().map_err(|_| "expected a number of bytes")?.max(MIN_SCROLLBACK_LIMIT)
+                };
             }
             "shell-integration" => {
                 self.shell_integration = match value {
@@ -471,6 +479,7 @@ background = #102030
 foreground = white
 palette = 1=#ff0000
 macos-option-as-alt = left
+scrollback-limit = 10000000
 unknown-key = whatever
 "#]);
         assert_eq!(config.font_family, ["Hack Nerd Font Mono", "Menlo"]);
@@ -484,6 +493,13 @@ unknown-key = whatever
         assert_eq!(config.foreground, Rgb(255, 255, 255));
         assert!(config.palette.contains(&(1, Rgb(255, 0, 0))));
         assert_eq!(config.macos_option_as_alt, OptionAsAlt::Left);
+        assert_eq!(config.scrollback_limit, 10_000_000);
+    }
+
+    #[test]
+    fn scrollback_limit_has_a_floor() {
+        let config = load(&["scrollback-limit = 0\n"]);
+        assert_eq!(config.scrollback_limit, MIN_SCROLLBACK_LIMIT);
     }
 
     #[test]

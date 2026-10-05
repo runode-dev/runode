@@ -16,9 +16,12 @@ use libghostty_vt::{
     snapshot::Decoder,
     terminal::{Point, PointCoordinate},
 };
-use runode_shared_types::grid::GridSize;
+use runode_shared_types::{grid::GridSize, settings::TermSettings};
 
-/// 回滚历史最多留多少行。
+/// 回滚历史最多留多少行。另有字节上限（`CommonOptions::scrollback_bytes`，默认 10 MiB），先到
+/// 哪个按哪个算。两个上限都按 page 整块丢弃最老的历史，实际留下的比上限少一些，最多少一个
+/// page。一行占的字节随列数变：默认上限下 80 列先到行数上限（留 9800 多行），200 列先到字节
+/// 上限（留五千多行）。
 pub(crate) const SCROLLBACK_LINES: usize = 10_000;
 
 /// 留给未知 OSC 的最多字节数：函数很多的 shell 报告的函数名能有几十 KB。更长的被截断，
@@ -29,24 +32,47 @@ pub(crate) const UNKNOWN_SEQUENCE_MAX_BYTES: usize = 256 * 1024;
 /// 要等它结束，见 `SnapshotError::Unfinished`。解码时也按它限制续接的长度。
 pub(crate) const CONTINUATION_MAX_BYTES: usize = 1024 * 1024;
 
-/// 按 `size` 新建一个 VT，设好 `configure_common` 的选项，并从一开始就记录没写完的序列
+/// `configure_common` 里随配置变的选项。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct CommonOptions {
+    /// 回滚历史最多占多少字节，即配置项 `scrollback-limit`；`None` 表示不限，只按行数算。
+    pub(crate) scrollback_bytes: Option<usize>,
+}
+
+impl CommonOptions {
+    pub(crate) fn from_settings(settings: &TermSettings) -> Self {
+        Self { scrollback_bytes: Some(settings.scrollback_limit) }
+    }
+}
+
+impl Default for CommonOptions {
+    fn default() -> Self {
+        Self::from_settings(&TermSettings::default())
+    }
+}
+
+/// 按 `size` 新建一个 VT，按默认配置设好 `configure_common` 的选项（之后 `apply_config` 再按
+/// 实际配置设一遍），并从一开始就记录没写完的序列
 /// （`track_continuation`），随时能编快照。记录的开销可以忽略（release 下喂 100 MiB 混合
 /// 输出实测，和不记录的差别在测量误差以内）。
 pub(crate) fn new_terminal(size: GridSize) -> Result<Terminal<'static, 'static>> {
     let mut terminal = Terminal::new(size.cols, size.rows)?;
-    configure_common(&mut terminal)?;
+    configure_common(&mut terminal, CommonOptions::default())?;
     track_continuation(&mut terminal)?;
     terminal.resize(size.cols, size.rows, u32::from(size.cell_width_px), u32::from(size.cell_height_px))?;
     Ok(terminal)
 }
 
-/// 设好两份 VT 必须一致、快照里又不带的选项。新建的和从快照解出来的 VT 都要调；快照里带着
-/// 的选项（比如回滚上限）照样设一遍，免得以后快照格式不再带它时两边悄悄分叉。
+/// 设好两份 VT 必须一致的选项：回滚历史的行数和字节上限，未知序列的长度上限。新建的、从
+/// 快照解出来的 VT 都要调，配置变了也要调；快照里带着的选项（比如回滚上限）照样设一遍，
+/// 免得哪天快照格式不再带它时两边悄悄分叉，或者退回 libghostty 自己的默认值。
 ///
-/// 默认颜色和光标样式随配置变，由 `Session::apply_config` 设，不在这里。
-pub(crate) fn configure_common(terminal: &mut Terminal<'_, '_>) -> Result<()> {
+/// 调低回滚上限会立刻丢掉超出的历史。默认颜色和光标样式由 `Session::apply_config` 设，不在
+/// 这里。
+pub(crate) fn configure_common(terminal: &mut Terminal<'_, '_>, options: CommonOptions) -> Result<()> {
     terminal
         .set_scrollback_max_lines(Some(SCROLLBACK_LINES))?
+        .set_scrollback_max_bytes(options.scrollback_bytes)?
         .set_unknown_sequence_max_bytes(UNKNOWN_SEQUENCE_MAX_BYTES)?;
     Ok(())
 }
@@ -102,13 +128,16 @@ pub(crate) fn encode_snapshot(terminal: &Terminal<'_, '_>) -> std::result::Resul
     }
 }
 
-/// 解出一份 `encode_snapshot` 编的快照，设好 `configure_common` 的选项，并接着记录没写完的
-/// 序列（`track_continuation`），所以解出来的 VT 也能再编快照。一次解完，不按页增量解码。
+/// 解出一份 `encode_snapshot` 编的快照，按编快照那份的回滚上限设好 `configure_common` 的选项，
+/// 并接着记录没写完的序列（`track_continuation`），所以解出来的 VT 也能再编快照。一次解完，
+/// 不按页增量解码。
 pub(crate) fn decode_snapshot(bytes: &[u8]) -> std::result::Result<Terminal<'static, 'static>, SnapshotError> {
     let mut decoder = Decoder::new_buf(bytes)?;
     decoder.set_max_continuation_bytes(CONTINUATION_MAX_BYTES)?.set_retain_continuation(true)?;
     let mut terminal = decoder.decode()?;
-    configure_common(&mut terminal)?;
+    // 快照里带着编快照那份的字节上限；照它设，不退回默认值。
+    let scrollback_bytes = terminal.scrollback_max_bytes()?;
+    configure_common(&mut terminal, CommonOptions { scrollback_bytes })?;
     Ok(terminal)
 }
 

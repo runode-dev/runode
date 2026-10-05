@@ -62,6 +62,8 @@ pub struct Config {
     /// 覆盖默认 256 色中的若干项。
     pub palette: Vec<(u8, Rgb)>,
     pub macos_option_as_alt: OptionAsAlt,
+    /// 每个终端的回滚历史最多占多少字节。
+    pub scrollback_limit: usize,
     pub shell_integration: IntegrationMode,
     /// 在 shell 提示符上输入时，按命令历史在光标后用灰字给出建议；关掉时也不读写命令历史。
     pub command_suggestions: bool,
@@ -111,6 +113,7 @@ impl Default for Config {
             search_selected_foreground: term.search_selected_foreground,
             palette: term.palette,
             macos_option_as_alt: term.option_as_alt,
+            scrollback_limit: term.scrollback_limit,
             shell_integration: IntegrationMode::Detect,
             command_suggestions: true,
             command_completions: true,
@@ -155,6 +158,7 @@ impl Config {
             search_selected_background: self.search_selected_background,
             search_selected_foreground: self.search_selected_foreground,
             option_as_alt: self.macos_option_as_alt,
+            scrollback_limit: self.scrollback_limit,
         }
     }
 }

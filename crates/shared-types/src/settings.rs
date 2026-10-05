@@ -1,4 +1,4 @@
-//! 终端状态机用到的设置：默认颜色、光标样式和 Option 键的用法。程序自己用转义序列设置的
+//! 终端状态机用到的设置：默认颜色、光标样式、Option 键的用法和回滚历史的上限。程序自己用转义序列设置的
 //! 颜色和光标形状照旧优先，这些只是默认值，所以可以随时重新应用。
 
 use crate::{
@@ -31,6 +31,14 @@ pub enum OptionAsAlt {
     Right,
 }
 
+/// 每个终端的回滚历史默认最多占多少字节，配置项 `scrollback-limit` 的默认值。另有行数上限，
+/// 先到哪个按哪个算。
+pub const DEFAULT_SCROLLBACK_LIMIT: usize = 10 * 1024 * 1024;
+
+/// 配置项 `scrollback-limit` 的下限，写得更小按它算。字节上限太紧时，从快照恢复的终端会把
+/// 回滚历史剪到只剩一页左右，和原来那份对不上；这个值离那道坎留了余量。
+pub const MIN_SCROLLBACK_LIMIT: usize = 2 * 1024 * 1024;
+
 /// 交给终端的设置。
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct TermSettings {
@@ -57,6 +65,8 @@ pub struct TermSettings {
     pub search_selected_background: TerminalColor,
     pub search_selected_foreground: TerminalColor,
     pub option_as_alt: OptionAsAlt,
+    /// 回滚历史最多占多少字节，见 `DEFAULT_SCROLLBACK_LIMIT`。
+    pub scrollback_limit: usize,
 }
 
 impl Default for TermSettings {
@@ -77,6 +87,7 @@ impl Default for TermSettings {
             search_selected_background: TerminalColor::Rgb(theme::SEARCH_SELECTED_BACKGROUND),
             search_selected_foreground: TerminalColor::Rgb(theme::SEARCH_FOREGROUND),
             option_as_alt: OptionAsAlt::False,
+            scrollback_limit: DEFAULT_SCROLLBACK_LIMIT,
         }
     }
 }

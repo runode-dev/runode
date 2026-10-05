@@ -7,7 +7,8 @@
 //! 唯一允许不同的是回滚历史最老的那几行留没留着：回滚按 page 整块丢弃，page 怎么划分不在
 //! 快照里，解出来的 VT 之后丢的行数可能多也可能少，见
 //! `scrollback_pruning_diverges_after_a_snapshot`。所以最后只比两边都还留着的那些行。
-//! 刚解完、还没接着喂的时候不一样：解出来的历史必须一行不少，见 `assert_history_survives`。
+//! 刚解完、还没接着喂的时候不一样：解出来的历史必须一行不少，见 `assert_history_survives`
+//! 和 `decoding_keeps_a_full_scrollback`。
 
 use libghostty_vt::{
     Terminal,
@@ -251,12 +252,14 @@ struct Sample {
     /// 随机切点的个数，另外还有落在序列中间的切点和两头，见 `cut_points`。调试构建的
     /// libghostty 每次写入都做完整性检查，几十 KB 就要喂好几秒，大的数据少切几刀。
     cuts: usize,
+    /// 回滚历史的字节上限；`None` 用默认的。
+    scrollback_bytes: Option<usize>,
 }
 
 /// 各份数据；`scale` 放大随机生成的数据和切点的个数，见 `snapshots_survive_a_long_soak`。
 fn samples(seed: u64, scale: usize) -> Vec<Sample> {
     let mut rng = Rng::new(seed);
-    let sample = |name, cols, rows, data: &[u8]| Sample { name, cols, rows, data: data.to_vec(), cuts: 6 * scale };
+    let sample = |name, cols, rows, data: &[u8]| Sample { name, cols, rows, data: data.to_vec(), cuts: 6 * scale, scrollback_bytes: None };
     let mut long_osc = b"\x1b]6973;token;functions=".to_vec();
     long_osc.extend(b"fn_name ".repeat(4096));
     long_osc.extend_from_slice(b"\x07prompt$ \x1b]2;");
@@ -335,15 +338,38 @@ fn samples(seed: u64, scale: usize) -> Vec<Sample> {
               \x1b[38:2::1:2:3mcolon\x1b[39;49m\x1b[100;97mbright\x1b[m\x1b[3$}\x1b[0$}",
         ),
         // 喂到要丢掉最老的 page 为止，见 `long_scrollback`。
-        Sample { name: "long scrollback", cols: LONG_SCROLLBACK_COLS, rows: 6, data: long_scrollback(), cuts: scale },
-        Sample { name: "mixed output", cols: 60, rows: 12, data: mixed_output(&mut rng, 100 * scale, 60), cuts: scale },
-        Sample { name: "random bytes", cols: 30, rows: 8, data: random_bytes(&mut rng, 8 * 1024 * scale), cuts: 3 * scale },
+        Sample {
+            name: "long scrollback",
+            cols: LONG_SCROLLBACK_COLS,
+            rows: 6,
+            data: long_scrollback(),
+            cuts: scale,
+            scrollback_bytes: LONG_SCROLLBACK_BYTES,
+        },
+        Sample {
+            name: "mixed output",
+            cols: 60,
+            rows: 12,
+            data: mixed_output(&mut rng, 100 * scale, 60),
+            cuts: scale,
+            scrollback_bytes: None,
+        },
+        Sample {
+            name: "random bytes",
+            cols: 30,
+            rows: 8,
+            data: random_bytes(&mut rng, 8 * 1024 * scale),
+            cuts: 3 * scale,
+            scrollback_bytes: None,
+        },
     ]
 }
 
-/// 一个 page 能放的行数随列数变：200 列时不到 500 行，20 列时四千多行。用宽的终端，少喂
-/// 一些就能让回滚历史丢掉好几个 page。
+/// 一个 page 能放的行数随列数变：200 列时不到 500 行，20 列时四千多行。用宽的终端、小一些的
+/// 字节上限（默认的 10 MiB 在 200 列要喂好几千行才满，调试构建太慢），少喂一些就能让回滚
+/// 历史丢掉好几个 page。字节上限不能太小，见 `decoding_drops_history_under_a_tight_byte_limit`。
 const LONG_SCROLLBACK_COLS: u16 = 200;
+const LONG_SCROLLBACK_BYTES: Option<usize> = Some(2_000_000);
 
 fn long_scrollback() -> Vec<u8> {
     (0..1000).flat_map(|i| format!("line {i}\r\n").into_bytes()).collect()
@@ -375,18 +401,9 @@ fn round_trip(terminal: &Terminal<'static, '_>) -> Option<Terminal<'static, 'sta
     }
 }
 
-/// 回滚历史的上限按 app 现在的配置：行数上限加 libghostty 默认的字节上限。字节上限下解码
-/// 会丢历史（见 `decoding_drops_history_under_the_default_byte_limit`），所以这里不查
-/// `assert_history_survives`。
 #[test]
 fn snapshots_resume_exactly_where_the_terminal_was() {
-    differential(1, 1, Limits::Default);
-}
-
-/// 去掉字节上限，只按行数上限：解出来的回滚历史必须一行不少。
-#[test]
-fn snapshots_keep_all_history_without_a_byte_limit() {
-    differential(1, 1, Limits::LinesOnly);
+    differential(1, 1);
 }
 
 /// 换更多种子、切更多刀、用更大的数据。调试构建太慢，在 release 下手动跑：
@@ -395,26 +412,8 @@ fn snapshots_keep_all_history_without_a_byte_limit() {
 #[ignore = "要跑几分钟，手动跑"]
 fn snapshots_survive_a_long_soak() {
     for seed in 2..22 {
-        differential(seed, 6, Limits::Default);
-        differential(seed, 6, Limits::LinesOnly);
+        differential(seed, 6);
     }
-}
-
-/// 差分测试里回滚历史的上限。
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum Limits {
-    /// `vt::new_terminal` 设的，即 app 现在用的。
-    Default,
-    /// 去掉字节上限。
-    LinesOnly,
-}
-
-fn new_terminal(cols: u16, rows: u16, limits: Limits) -> Terminal<'static, 'static> {
-    let mut terminal = vt::new_terminal(size(cols, rows)).unwrap();
-    if limits == Limits::LinesOnly {
-        terminal.set_scrollback_max_bytes(None).unwrap();
-    }
-    terminal
 }
 
 /// 刚解出来的 VT 和编快照的那份一样：回滚历史一行不少，文字（含回滚历史）一样。
@@ -425,33 +424,39 @@ fn assert_history_survives(context: &str, source: &Terminal<'static, 'static>, d
     assert_eq!(text(decoded), text(source), "{context}: text after decoding");
 }
 
-/// 编一份快照再解出来，`limits` 为 `LinesOnly` 时查 `assert_history_survives`；暂时编不出
-/// 或者会丢 pending wrap 时为 `None`。
-fn checked_round_trip(context: &str, source: &Terminal<'static, 'static>, limits: Limits) -> Option<Terminal<'static, 'static>> {
+/// 编一份快照再解出来，查 `assert_history_survives`；暂时编不出或者会丢 pending wrap 时为
+/// `None`。
+fn checked_round_trip(context: &str, source: &Terminal<'static, 'static>) -> Option<Terminal<'static, 'static>> {
     if loses_pending_wrap(source) {
         return None;
     }
     let decoded = round_trip(source)?;
-    if limits == Limits::LinesOnly {
-        assert_history_survives(context, source, &decoded);
-    }
+    assert_history_survives(context, source, &decoded);
     Some(decoded)
 }
 
-fn differential(seed: u64, scale: usize, limits: Limits) {
+fn differential(seed: u64, scale: usize) {
     let mut rng = Rng::new(seed);
     for sample in samples(seed + 41, scale) {
         let cuts = cut_points(&sample.data, &mut rng, sample.cuts);
         let mut skipped = 0;
         for (i, &cut) in cuts.iter().enumerate() {
             let context = format!("seed {seed}, {} cut at {cut}/{}", sample.name, sample.data.len());
-            let mut expected = new_terminal(sample.cols, sample.rows, limits);
+            let new_terminal = || {
+                let mut terminal = vt::new_terminal(size(sample.cols, sample.rows)).unwrap();
+                if sample.scrollback_bytes.is_some() {
+                    let options = vt::CommonOptions { scrollback_bytes: sample.scrollback_bytes };
+                    vt::configure_common(&mut terminal, options).unwrap();
+                }
+                terminal
+            };
+            let mut expected = new_terminal();
             feed_chunked(&mut expected, &sample.data, &mut rng, 512);
 
-            let mut actual = new_terminal(sample.cols, sample.rows, limits);
+            let mut actual = new_terminal();
             feed_chunked(&mut actual, &sample.data[..cut], &mut rng, 512);
             // 暂时编不出快照（`SnapshotError::Unfinished`）时，宿主会等下一批输出再编，这里换个切点。
-            let Some(mut actual) = checked_round_trip(&context, &actual, limits) else {
+            let Some(mut actual) = checked_round_trip(&context, &actual) else {
                 skipped += 1;
                 continue;
             };
@@ -460,7 +465,7 @@ fn differential(seed: u64, scale: usize, limits: Limits) {
             if i % 2 == 1 && !rest.is_empty() {
                 let second = rng.below(rest.len());
                 feed_chunked(&mut actual, &rest[..second], &mut rng, 512);
-                if let Some(again) = checked_round_trip(&context, &actual, limits) {
+                if let Some(again) = checked_round_trip(&context, &actual) {
                     actual = again;
                 }
                 rest = &rest[second..];
@@ -472,24 +477,47 @@ fn differential(seed: u64, scale: usize, limits: Limits) {
     }
 }
 
-/// 快照漏带的状态：libghostty 默认的回滚字节上限下，解出来的 VT 的回滚历史比编快照的那份
-/// 少一大截（80 列、喂 700 行时 651 行只剩几十行），多半是解码时按字节上限又剪了一遍。没有
-/// 字节上限时一行不少，见 `snapshots_keep_all_history_without_a_byte_limit`。哪天这里不成立
-/// 了，删掉这个测试，让 `Limits::Default` 也查 `assert_history_survives`。
+/// 回滚历史填满了，解码也一行不丢，解出来的 VT 还是同样的上限。默认的 10 MiB 在调试构建里
+/// 要喂太久才满，这里用 2 MB 的字节上限；默认上限下没填满的情形由差分测试逐个切点查。
 #[test]
-fn decoding_drops_history_under_the_default_byte_limit() {
-    let output: Vec<u8> = (0..700).flat_map(|i| format!("\x1b[38;5;{}mline {i}\x1b[0m\r\n", i % 256).into_bytes()).collect();
-    for limits in [Limits::Default, Limits::LinesOnly] {
-        let mut source = new_terminal(80, 50, limits);
-        source.vt_write(&output);
-        let decoded = round_trip(&source).unwrap();
-        let (before, after) = (source.scrollback_rows().unwrap(), decoded.scrollback_rows().unwrap());
-        if limits == Limits::Default {
-            assert!(after < before / 2, "{after} of {before} history rows survived");
-        } else {
-            assert_history_survives("lines only", &source, &decoded);
-        }
+fn decoding_keeps_a_full_scrollback() {
+    let mut source = vt::new_terminal(size(LONG_SCROLLBACK_COLS, 50)).unwrap();
+    vt::configure_common(&mut source, vt::CommonOptions { scrollback_bytes: LONG_SCROLLBACK_BYTES }).unwrap();
+    for i in 0..1500 {
+        source.vt_write(format!("\x1b[38;5;{}mline {i} with some text after it\x1b[0m\r\n", i % 256).as_bytes());
     }
+    let decoded = round_trip(&source).unwrap();
+    assert!(source.scrollback_rows().unwrap() < 1450, "the byte limit should have pruned some history");
+    assert_history_survives("full", &source, &decoded);
+    assert_eq!(decoded.scrollback_max_bytes().unwrap(), LONG_SCROLLBACK_BYTES);
+    assert_eq!(decoded.scrollback_max_lines().unwrap(), Some(vt::SCROLLBACK_LINES));
+}
+
+/// 新建的 VT 用默认的上限，解码出来的保留编快照那份的上限。
+#[test]
+fn decoding_keeps_the_scrollback_limits() {
+    let mut source = vt::new_terminal(size(20, 4)).unwrap();
+    assert_eq!(source.scrollback_max_bytes().unwrap(), Some(runode_shared_types::settings::DEFAULT_SCROLLBACK_LIMIT));
+    vt::configure_common(&mut source, vt::CommonOptions { scrollback_bytes: Some(3_000_000) }).unwrap();
+    let decoded = round_trip(&source).unwrap();
+    assert_eq!(decoded.scrollback_max_bytes().unwrap(), Some(3_000_000));
+    assert_eq!(decoded.scrollback_max_lines().unwrap(), Some(vt::SCROLLBACK_LINES));
+}
+
+/// 字节上限很紧（不到三个 page，约 1.2 MB；比如 libghostty 自己默认的 10000 字节）时，解码会
+/// 丢掉一大截回滚历史：80 列、700 行带样式的输出，651 行历史解出来只剩几十行，多半是解码后
+/// 按字节上限又剪了一遍。默认的 10 MiB 下不会这样，见 `decoding_keeps_a_full_scrollback`。
+/// 哪天这里不成立了，说明 libghostty 修好了，删掉这个测试。
+#[test]
+fn decoding_drops_history_under_a_tight_byte_limit() {
+    let mut source = vt::new_terminal(size(80, 50)).unwrap();
+    source.set_scrollback_max_bytes(Some(10_000)).unwrap();
+    for i in 0..700 {
+        source.vt_write(format!("\x1b[38;5;{}mline {i}\x1b[0m\r\n", i % 256).as_bytes());
+    }
+    let decoded = round_trip(&source).unwrap();
+    let (before, after) = (source.scrollback_rows().unwrap(), decoded.scrollback_rows().unwrap());
+    assert!(after < before / 2, "{after} of {before} history rows survived");
 }
 
 /// 光标停在右边距（不是最后一列）上等着折行：快照丢掉这个状态，见
@@ -573,10 +601,16 @@ fn apply_config_turns_cursor_blinking_back_on() {
 #[test]
 fn scrollback_pruning_diverges_after_a_snapshot() {
     let data = long_scrollback();
-    let cut = data.len() / 3;
-    let mut expected = vt::new_terminal(size(LONG_SCROLLBACK_COLS, 6)).unwrap();
+    // 切在哪里会分叉要看 page 怎么划分；这个切点上，原来那份最后留 757 行历史，解出来的留 885 行。
+    let cut = data.len() / 10;
+    let new_terminal = || {
+        let mut terminal = vt::new_terminal(size(LONG_SCROLLBACK_COLS, 6)).unwrap();
+        vt::configure_common(&mut terminal, vt::CommonOptions { scrollback_bytes: LONG_SCROLLBACK_BYTES }).unwrap();
+        terminal
+    };
+    let mut expected = new_terminal();
     expected.vt_write(&data);
-    let mut actual = vt::new_terminal(size(LONG_SCROLLBACK_COLS, 6)).unwrap();
+    let mut actual = new_terminal();
     actual.vt_write(&data[..cut]);
     let mut actual = round_trip(&actual).unwrap();
     actual.vt_write(&data[cut..]);
@@ -617,6 +651,9 @@ fn colors_set_by_programs_survive_apply_config() {
     assert_eq!(resumed.ansi_colors()[1], Rgb(100, 1, 0));
     assert_eq!(resumed.frame().background, Rgb(100, 100, 100));
 }
+
+
+
 
 
 

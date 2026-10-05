@@ -360,6 +360,9 @@ impl Session {
         if let Err(err) = applied {
             tracing::warn!("failed to apply config to the terminal: {err}");
         }
+        if let Err(err) = vt::configure_common(&mut self.terminal, vt::CommonOptions::from_settings(settings)) {
+            tracing::warn!("failed to apply the scrollback limit: {err}");
+        }
         let mut renderer = self.renderer.borrow_mut();
         renderer.selection_bg = settings.selection_background;
         renderer.selection_fg = settings.selection_foreground;
@@ -434,6 +437,19 @@ mod tests {
     use crate::session::testing::*;
     use runode_shared_types::input::{Key, KeyInput, Mods};
     use futures::{StreamExt as _, executor::block_on};
+
+    /// 回滚历史的字节上限随配置变，开着的终端也立刻按新上限来；0 表示不留回滚历史。
+    #[test]
+    fn apply_config_changes_the_scrollback_limit() {
+        let mut session = idle_session();
+        assert_eq!(session.terminal.scrollback_max_bytes().unwrap(), Some(settings::DEFAULT_SCROLLBACK_LIMIT));
+        session.feed(b"1\r\n2\r\n3\r\n4\r\n5\r\n6\r\n7");
+        assert!(scrollback_rows(&session) > 0);
+        session.apply_config(&TermSettings { scrollback_limit: 0, ..TermSettings::default() });
+        assert_eq!(session.terminal.scrollback_max_bytes().unwrap(), Some(0));
+        assert_eq!(scrollback_rows(&session), 0);
+        assert_eq!(session.terminal.scrollback_max_lines().unwrap(), Some(vt::SCROLLBACK_LINES));
+    }
 
     /// 端到端驱动真实 shell 经过 PTY 和 libghostty-vt：按键送达子进程，
     /// 彩色和宽字符输出落进帧，子进程退出时读到 EOF。

@@ -184,7 +184,7 @@ fn malformed_input_can_block_encoding_until_ground() {
 #[test]
 fn without_tracking_only_a_grounded_terminal_encodes() {
     let mut terminal = Terminal::new(20, 4).unwrap();
-    configure_common(&mut terminal).unwrap();
+    configure_common(&mut terminal, CommonOptions::default()).unwrap();
     terminal.vt_write(b"done");
     assert!(encode_snapshot(&terminal).is_ok());
     terminal.vt_write(b"\x1b[3");
@@ -303,9 +303,8 @@ fn replay_loses_what_the_formatter_cannot_express() {
 fn snapshot_costs() {
     let mut rng = Rng::new(7);
 
-    // 10k 行回滚、200 列的快照，分两种输出各测一次：像日志那样只有几种颜色的，和
-    // `mixed_output` 那样颜色很杂的。回滚按行数和字节数两个上限取先到的，libghostty 默认的
-    // 字节上限只够一个 page（几百行），这里去掉它才留得住 10k 行。
+    // 回滚历史按默认上限填满时、200 列的快照，分两种输出各测一次：像日志那样只有几种颜色的，
+    // 和 `mixed_output` 那样颜色很杂的。200 列时先到的是字节上限，留不到 1 万行。
     let log: Vec<u8> = (0..SCROLLBACK_LINES + 200)
         .flat_map(|i| {
             let level = ["\x1b[32mINFO\x1b[0m", "\x1b[33mWARN\x1b[0m", "\x1b[1;31mERROR\x1b[0m"][i % 3];
@@ -315,7 +314,6 @@ fn snapshot_costs() {
         .collect();
     for (name, output) in [("log-like", log), ("mixed", mixed_output(&mut rng, SCROLLBACK_LINES + 200, 200))] {
         let mut terminal = new_terminal(size(200, 50)).unwrap();
-        terminal.set_scrollback_max_bytes(None).unwrap();
         terminal.vt_write(&output);
         let scrollbar = terminal.scrollbar().unwrap();
         let (encode, bytes) = timed(5, || encode_snapshot(&terminal).unwrap());
@@ -356,6 +354,57 @@ fn snapshot_costs() {
         let mib = (rounds * chunk.len()) as f64 / f64::from(1 << 20);
         eprintln!("feed {mib:.0} MiB, tracking {tracking}: {:.0} ms, {:.0} MiB/s", ms(elapsed), mib / elapsed.as_secs_f64());
     }
+}
+
+/// 回滚历史填满时实际留下多少行、占多少内存、快照多大。各跑一个进程才量得准 RSS：
+/// `cargo test --release -p runode-terminal vt::tests::scrollback_capacity_80_cols -- --ignored --exact --nocapture`
+#[test]
+#[ignore = "测量内存，手动跑"]
+fn scrollback_capacity_80_cols() {
+    scrollback_capacity(80);
+}
+
+/// 同 `scrollback_capacity_80_cols`。
+#[test]
+#[ignore = "测量内存，手动跑"]
+fn scrollback_capacity_200_cols() {
+    scrollback_capacity(200);
+}
+
+#[allow(clippy::print_stderr, reason = "手动跑的测量，结果直接打出来看")]
+fn scrollback_capacity(cols: u16) {
+    let max_rss = || {
+        let mut usage = std::mem::MaybeUninit::<libc::rusage>::zeroed();
+        // SAFETY: getrusage 只往传进去的结构里写。
+        unsafe { libc::getrusage(libc::RUSAGE_SELF, usage.as_mut_ptr()) };
+        // macOS 上 ru_maxrss 的单位是字节。
+        unsafe { usage.assume_init() }.ru_maxrss as f64 / f64::from(1 << 20)
+    };
+    let before = max_rss();
+    let mut terminal = new_terminal(size(cols, 50)).unwrap();
+    let fill = |terminal: &mut Terminal<'_, '_>, styled: bool| {
+        for i in 0..40_000 {
+            let line = if styled {
+                format!("\x1b[38;5;{}m2026-10-06T12:00:00Z INFO {i:6}\x1b[0m request served in 12ms path=/api/v1/items\r\n", i % 256)
+            } else {
+                format!("2026-10-06T12:00:00Z INFO {i:6} request served in 12ms path=/api/v1/items\r\n")
+            };
+            terminal.vt_write(line.as_bytes());
+        }
+    };
+    fill(&mut terminal, false);
+    let after = max_rss();
+    let resident = terminal.memory_usage().unwrap().primary_resident_bytes as f64 / f64::from(1 << 20);
+    let snapshot = encode_snapshot(&terminal).unwrap().len() as f64 / f64::from(1 << 20);
+    eprintln!(
+        "{cols} cols plain: {} history rows + 50 on screen, resident {resident:.1} MiB, max RSS {before:.1} -> {after:.1} MiB (+{:.1}), snapshot {snapshot:.1} MiB",
+        terminal.scrollback_rows().unwrap(),
+        after - before,
+    );
+    let mut styled = new_terminal(size(cols, 50)).unwrap();
+    fill(&mut styled, true);
+    let resident = styled.memory_usage().unwrap().primary_resident_bytes as f64 / f64::from(1 << 20);
+    eprintln!("{cols} cols 256 styles: {} history rows, resident {resident:.1} MiB", styled.scrollback_rows().unwrap());
 }
 
 fn timed<T>(runs: u32, mut f: impl FnMut() -> T) -> (Duration, T) {

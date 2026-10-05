@@ -36,6 +36,7 @@ config:
   cursor_style: 光标形状：block、bar、underline、block_hollow。
   cursor_style_blink: 光标是否闪烁：true、false；留空时默认闪烁，运行中的程序仍可改变。
   macos_option_as_alt: macOS 上把 Option 当作 Alt：true（两边都是）、false、left（只有左边）、right（只有右边）。
+  scrollback_limit: 每个终端的回滚历史最多占多少字节：非负整数，小于 2 MiB（2097152）时按 2 MiB 算。另外最多留 1 万行，先到哪个上限就按哪个算。改了对已经开着的终端也生效。
   shell_integration: shell 集成：detect（按 shell 的程序名判断）、none（关闭）、bash、zsh、fish。
   command_suggestions: 在 shell 提示符上输入时，按命令历史在光标后用灰字给出建议，按 → 或 End 接受，Option+→ 接受一个词。false 时也不读写命令历史。
   command_completions: 在 shell 提示符上按 Tab 时从菜单里选命令名、子命令、选项或参数（参数只限 runode 认识的命令），没有可选的时 Tab 照常交给 shell。false 时 Tab 总是交给 shell。
