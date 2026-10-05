@@ -18,7 +18,7 @@ use libghostty_vt::{
     key::{self, OptionAsAlt},
     mouse,
     paste::PasteSource,
-    render::{CellIterator, CursorVisualStyle, Dirty, RenderState, RowIterator, Snapshot},
+    render::{CellIterator, CursorVisualStyle, Dirty, Overscan, RenderState, RowIterator, Snapshot},
     screen::{CellSemanticContent, CellWide, GridRef, RowSemanticPrompt, Screen},
     search::Search,
     selection::{
@@ -118,6 +118,11 @@ pub struct Cursor {
 pub struct Frame {
     pub cols: u16,
     pub rows: u16,
+    /// 视口上面紧挨着的一行，平滑滚动时露出它的一部分；视口已在回滚历史最顶上（或备用屏幕
+    /// 没有历史）时为空。
+    pub above: Vec<Cell>,
+    /// 整屏往下错开的行数，0 到 1 之间，露出 `above` 的下半部分；`above` 为空时总是 0。
+    pub scroll_offset: f32,
     /// 按行优先存放，共 `cols * rows` 个单元格。
     pub cells: Vec<Cell>,
     pub background: Rgb,
@@ -259,6 +264,8 @@ pub struct Session {
     progress: Option<bool>,
     /// 打开搜索栏期间的搜索；关掉就丢弃。
     search: Option<Search<'static>>,
+    /// 平滑滚动不足一行的部分，0 到 1 之间：画面整体往下错开这么多行，见 `scroll_smoothly`。
+    scroll_offset: f32,
     /// 程序没设置标题时用的名字，见 `Pty::foreground_title`；由 `refresh_fallback_title` 更新。
     pub fallback_title: Option<String>,
     pub exited: bool,
@@ -334,8 +341,11 @@ impl Session {
 
         let shared_size = Rc::new(StdCell::new(size));
         let effects = Rc::new(Effects::default());
+        let mut render_state = RenderState::new()?;
+        // 多取视口上面一行：平滑滚动时画面往下错开，顶上要露出它的一部分。
+        render_state.set_overscan(Overscan { above: 1, below: 0 })?;
         let renderer = Rc::new(RefCell::new(Renderer {
-            render_state: RenderState::new()?,
+            render_state,
             row_it: RowIterator::new()?,
             cell_it: CellIterator::new()?,
             frame: Frame::default(),
@@ -452,6 +462,7 @@ impl Session {
             title_agent: None,
             progress: None,
             search: None,
+            scroll_offset: 0.,
             fallback_title: None,
             exited: false,
             option_as_alt: OptionAsAlt::False,
@@ -593,6 +604,7 @@ impl Session {
             return;
         }
         self.size.set(size);
+        self.scroll_offset = 0.;
         if let Err(err) = self.terminal.resize(
             size.cols,
             size.rows,
@@ -852,6 +864,25 @@ impl Session {
         }
     }
 
+    /// 不开鼠标上报时按像素滚动回滚历史：`lines` 为正往回看，可以是零点几行。凑够整行的
+    /// 部分挪视口，剩下的记在 `scroll_offset`，绘制时整屏往下错开这么多，露出视口上面那一行
+    /// 的一部分。返回画面是否变了。
+    pub fn scroll_smoothly(&mut self, lines: f32) -> bool {
+        let top = |terminal: &Terminal<'static, 'static>| terminal.scrollbar().map_or(0, |s| s.offset);
+        let before = (top(&self.terminal), self.scroll_offset);
+        let mut offset = self.scroll_offset + lines;
+        let whole = offset.floor();
+        if whole != 0. {
+            self.terminal.scroll_viewport(ScrollViewport::Delta(-(whole as isize)));
+            // 到了历史顶上或者已经在底部时视口挪不动，按实际挪了多少扣。
+            offset -= before.0 as f32 - top(&self.terminal) as f32;
+        }
+        // 视口上面没有行时不能往下错开；在底部继续往下滚时也不会错开成负的。
+        let top = top(&self.terminal);
+        self.scroll_offset = if top == 0 { 0. } else { offset.clamp(0., 0.999) };
+        (top, self.scroll_offset) != before
+    }
+
     /// 运行中的程序是否开启了鼠标上报。
     pub fn mouse_tracking(&self) -> bool {
         self.terminal.is_mouse_tracking().unwrap_or(false)
@@ -1060,6 +1091,7 @@ impl Session {
 
     /// 滚动视口，让屏幕第 `row` 行落在视口中间。
     fn scroll_to_row(&mut self, row: u32) {
+        self.scroll_offset = 0.;
         let half = usize::from(self.size.get().rows / 2);
         self.terminal
             .scroll_viewport(ScrollViewport::Row((row as usize).saturating_sub(half)));
@@ -1067,6 +1099,7 @@ impl Session {
 
     /// 滚动视口；`Page(n)` 按视口高度翻 n 页，负数往回翻。
     pub fn scroll_viewport(&mut self, scroll: ViewportScroll) {
+        self.scroll_offset = 0.;
         let scroll = match scroll {
             ViewportScroll::Top => ScrollViewport::Top,
             ViewportScroll::Bottom => ScrollViewport::Bottom,
@@ -1080,6 +1113,7 @@ impl Session {
     /// 视口跳到上一个（`backward`）或下一个提示符所在的行，靠 shell 集成标在提示符上的记号。
     /// 往后没有提示符时回到底部。
     pub fn jump_to_prompt(&mut self, backward: bool) {
+        self.scroll_offset = 0.;
         let result = self.terminal.scrollbar().map(|scrollbar| {
             let is_prompt = |y: u64| {
                 self.terminal
@@ -1209,6 +1243,8 @@ impl Session {
         if !self.terminal.viewport_active().unwrap_or(true) {
             self.terminal.scroll_viewport(ScrollViewport::Bottom);
         }
+        // 打字时回到底部对齐整行，不留半行错开。
+        self.scroll_offset = 0.;
     }
 
     /// 清屏（⌘K）：清掉屏幕和回滚历史。备用屏幕归全屏程序（vim、less 等）自己管，不动。
@@ -1288,6 +1324,8 @@ impl Session {
         if let Err(err) = renderer.refresh(&self.terminal) {
             tracing::warn!("render state update failed: {err}");
         }
+        let frame = &mut renderer.frame;
+        frame.scroll_offset = if frame.above.is_empty() { 0. } else { self.scroll_offset };
     }
 }
 
@@ -1366,17 +1404,31 @@ impl Renderer {
             frame.rows = rows;
             frame.cells = vec![Cell::default(); usize::from(cols) * usize::from(rows)];
         }
+        // 视口上面那一行这次有没有取到；刚出现时它的脏标记不一定反映我们这边是空的，要整行读。
+        let above_len = if snapshot.overscan()?.above > 0 { usize::from(cols) } else { 0 };
+        let above_fresh = frame.above.len() != above_len;
+        if above_fresh {
+            frame.above = vec![Cell::default(); above_len];
+        }
         frame.background = background;
         frame.foreground = foreground;
         let full = dirty == Dirty::Full || reshaped || recolored || std::mem::take(&mut self.force_full);
 
         let mut row_it = self.row_it.update(&snapshot)?;
-        let mut y = 0usize;
         while let Some(row) = row_it.next() {
-            if y >= usize::from(rows) {
+            // 视口里的行从 0 数，视口上面那一行是 -1。
+            let y = row.viewport_y()?;
+            if y >= i32::from(rows) {
                 break;
             }
-            if full || row.dirty()? {
+            let cells = match usize::try_from(y) {
+                Ok(y) => &mut frame.cells[y * usize::from(cols)..(y + 1) * usize::from(cols)],
+                Err(_) => &mut frame.above[..],
+            };
+            if cells.is_empty() {
+                continue;
+            }
+            if full || (y < 0 && above_fresh) || row.dirty()? {
                 let selection = row.selection()?;
                 let mut cell_it = self.cell_it.update(row)?;
                 let mut x = 0usize;
@@ -1384,7 +1436,7 @@ impl Renderer {
                     if x >= usize::from(cols) {
                         break;
                     }
-                    let out = &mut frame.cells[y * usize::from(cols) + x];
+                    let out = &mut cells[x];
                     // 一次批量读取拿到渲染所需的全部字段，比逐个 getter 少几次 FFI。
                     let read = cell.read(&colors.palette, &mut out.text)?;
                     out.wide = read.wide == CellWide::Wide;
@@ -1414,7 +1466,7 @@ impl Renderer {
                     // 宽字符的右半格跟着左半格：匹配的终点只落在宽字符的头格上。
                     let tail = read.wide == CellWide::SpacerTail;
                     let highlight = self.highlights.iter().find(|h| {
-                        usize::from(h.y) == y
+                        i32::from(h.y) == y
                             && h.x0 <= x16
                             && (x16 <= h.x1 || (tail && x16 == h.x1 + 1))
                     });
@@ -1446,7 +1498,6 @@ impl Renderer {
                 }
                 row.set_dirty(false)?;
             }
-            y += 1;
         }
 
         frame.cursor = read_cursor(&snapshot, frame, cursor_colors)?;
@@ -1697,6 +1748,36 @@ mod tests {
         assert_eq!(row_text(&session.frame(), 0), "4");
         session.scroll_viewport(ViewportScroll::Bottom);
         assert_eq!(row_text(&session.frame(), 0), "17");
+    }
+
+    #[test]
+    fn smooth_scrolling_shifts_by_fractions_and_stops_at_the_ends() {
+        let mut session = idle_session();
+        for n in 0..20 {
+            session.feed(format!("{n}\r\n").as_bytes());
+        }
+        // 在底部往回滚半行：视口不动，整屏错开半行，露出上面那一行。
+        assert!(session.scroll_smoothly(0.5));
+        let frame = session.frame();
+        assert_eq!((row_text(&frame, 0).as_str(), frame.scroll_offset), ("17", 0.5));
+        assert_eq!(frame.above.iter().map(|c| c.text.as_str()).collect::<String>().trim_end(), "16");
+        drop(frame);
+        // 再滚 0.75 行：凑够一行挪视口，剩下 0.25 行。
+        session.scroll_smoothly(0.75);
+        let frame = session.frame();
+        assert_eq!(row_text(&frame, 0), "16");
+        assert!((frame.scroll_offset - 0.25).abs() < 1e-6);
+        drop(frame);
+        // 往底部滚过头：回到底部，不留错开。
+        session.scroll_smoothly(-5.);
+        let frame = session.frame();
+        assert_eq!((row_text(&frame, 0).as_str(), frame.scroll_offset), ("17", 0.));
+        drop(frame);
+        // 滚到历史顶上以后不能再错开。
+        session.scroll_smoothly(100.5);
+        let frame = session.frame();
+        assert_eq!((row_text(&frame, 0).as_str(), frame.scroll_offset), ("0", 0.));
+        assert!(frame.above.is_empty());
     }
 
     #[test]

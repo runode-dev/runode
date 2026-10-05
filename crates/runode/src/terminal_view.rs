@@ -10,7 +10,7 @@ use std::{
 
 use futures::{FutureExt as _, StreamExt as _};
 use gpui::{
-    Action, App, AppContext as _, Bounds, ClipboardItem, Context, CursorStyle, DispatchPhase, ElementId,
+    Action, App, AppContext as _, Bounds, ClipboardItem, ContentMask, Context, CursorStyle, DispatchPhase, ElementId,
     ElementInputHandler, Entity, EntityInputHandler, EventEmitter, FocusHandle, Focusable, Font,
     FontStyle, FontWeight, GlobalElementId, Hsla, KeyDownEvent, Keystroke, LayoutId, Modifiers, MouseButton,
     MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, Point, PromptLevel, Render, ScrollDelta,
@@ -150,11 +150,12 @@ pub struct TerminalView {
     glyphs: GlyphCache,
     /// 输入法尚未上屏的预编辑文本，画在光标处。
     marked_text: Option<String>,
-    /// 精确滚动（触控板）不足一行的余量。
+    /// 程序开着鼠标上报时，精确滚动（触控板）不足一行的余量；滚回滚历史时余量由
+    /// `Session::scroll_smoothly` 记着，画成平滑滚动。
     scroll_remainder: f32,
     /// 光标单元格上次绘制的位置，供输入法候选窗定位。
     cursor_bounds: Option<Bounds<Pixels>>,
-    /// 单元格网格的原点，用于把指针位置换算成单元格。
+    /// 单元格网格的原点，用于把指针位置换算成单元格；平滑滚动错开时是错开后的位置。
     grid_origin: Point<Pixels>,
     /// 左键按下后正在拖动选择，这次的移动和松开都归选区，不上报给程序。
     selecting: bool,
@@ -577,7 +578,15 @@ impl TerminalView {
             ScrollDelta::Lines(delta) => delta.y,
             ScrollDelta::Pixels(delta) => f32::from(delta.y) / f32::from(metrics.cell.height),
         };
-        // 滚轮增量为正表示内容向下移动，即往回滚到历史输出。
+        // 滚轮增量为正表示内容向下移动，即往回滚到历史输出。程序没开鼠标上报时按像素
+        // 平滑滚动回滚历史；开着时只能按整行发给程序。
+        if !self.session.mouse_tracking() {
+            self.scroll_remainder = 0.;
+            if self.session.scroll_smoothly(lines) {
+                cx.notify();
+            }
+            return;
+        }
         self.scroll_remainder -= lines;
         let whole = self.scroll_remainder.trunc();
         self.scroll_remainder -= whole;
@@ -1450,11 +1459,17 @@ fn paint_frame(
 ) {
     let cw = metrics.cell.width;
     let ch = metrics.cell.height;
-    let cell_origin = |x: u16, y: u16| origin + point(cw * f32::from(x), ch * f32::from(y));
     let grid = Bounds::new(
         origin,
         size(cw * f32::from(frame.cols), ch * f32::from(frame.rows)),
     );
+    // 平滑滚动时整屏往下错开不足一行，视口上面那一行（y 为 -1）从顶上露出一部分，最下面一行
+    // 被网格的下边裁掉。指针换算也跟着错开。
+    let origin = origin + point(px(0.), ch * frame.scroll_offset);
+    view.grid_origin = origin;
+    let cell_origin = |x: u16, y: i32| origin + point(cw * f32::from(x), ch * y as f32);
+    let above = (!frame.above.is_empty()).then_some((-1, frame.above.as_slice()));
+    let rows = || above.into_iter().chain((0..frame.rows).map(|y| (i32::from(y), frame.row(y))));
 
     let scale = window.scale_factor();
     let sprite_metrics = sprites::Metrics::new(
@@ -1475,10 +1490,10 @@ fn paint_frame(
         focused && !cursor_hidden && c.shape == CursorShape::Block && view.marked_text.is_none()
     });
 
-    window.paint_layer(grid, |window| {
+    let mask = ContentMask { bounds: grid };
+    window.with_content_mask(Some(mask), |window| window.paint_layer(grid, |window| {
         // 背景：每行把同色的相邻单元格合并成一块画。
-        for y in 0..frame.rows {
-            let row = frame.row(y);
+        for (y, row) in rows() {
             let mut x = 0usize;
             while x < row.len() {
                 let Some(bg) = row[x].bg else {
@@ -1502,15 +1517,15 @@ fn paint_frame(
         if let Some(cursor) = filled_cursor {
             let width = if cursor.wide { cw * 2. } else { cw };
             window.paint_quad(fill(
-                Bounds::new(cell_origin(cursor.x, cursor.y), size(width, ch)),
+                Bounds::new(cell_origin(cursor.x, i32::from(cursor.y)), size(width, ch)),
                 hsla(cursor.color),
             ));
         }
 
         // 字形和装饰线。
         let baseline = (ch - metrics.ascent - metrics.descent) / 2. + metrics.ascent;
-        for y in 0..frame.rows {
-            for (x, cell) in frame.row(y).iter().enumerate() {
+        for (y, row) in rows() {
+            for (x, cell) in row.iter().enumerate() {
                 let x = x as u16;
                 if cell.spacer {
                     continue;
@@ -1521,7 +1536,7 @@ fn paint_frame(
                 } else {
                     cell.fg
                 };
-                if let Some(cursor) = filled_cursor.filter(|c| c.x == x && c.y == y) {
+                if let Some(cursor) = filled_cursor.filter(|c| c.x == x && i32::from(c.y) == y) {
                     fg = cursor.text;
                 }
                 let position = cell_origin(x, y);
@@ -1552,16 +1567,16 @@ fn paint_frame(
                 paint_glyphs(&line, position + point(px(0.), baseline), hsla(fg), window);
             }
         }
-    });
+    }));
 
     // 盖在文字上方的光标形状，以及输入法预编辑文本。
     let mut cursor_bounds = None;
     if let Some(cursor) = frame.cursor {
-        let position = cell_origin(cursor.x, cursor.y);
+        let position = cell_origin(cursor.x, i32::from(cursor.y));
         let width = if cursor.wide { cw * 2. } else { cw };
         cursor_bounds = Some(Bounds::new(position, size(width, ch)));
         let color = hsla(cursor.color);
-        window.paint_layer(grid, |window| {
+        window.with_content_mask(Some(mask), |window| window.paint_layer(grid, |window| {
             if let Some(text) = view.marked_text.clone() {
                 let line = view.shape(&text, Attrs::default(), window);
                 let area = Bounds::new(position, size(line.width.max(cw), ch));
@@ -1598,7 +1613,7 @@ fn paint_frame(
             for quad in quads {
                 window.paint_quad(fill(*quad, color));
             }
-        });
+        }));
     }
     view.cursor_bounds = cursor_bounds;
 }
