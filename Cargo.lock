@@ -4990,10 +4990,10 @@ dependencies = [
  "objc2 0.6.4",
  "objc2-app-kit 0.3.2",
  "objc2-foundation 0.3.2",
- "portable-pty",
  "runode-dirs",
  "runode-git",
  "runode-model",
+ "runode-term",
  "rust-i18n",
  "serde",
  "serde_json",
@@ -5015,6 +5015,22 @@ name = "runode-model"
 version = "0.1.0"
 dependencies = [
  "serde",
+]
+
+[[package]]
+name = "runode-term"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "futures",
+ "libc",
+ "libghostty-vt",
+ "portable-pty",
+ "runode-dirs",
+ "runode-model",
+ "serde",
+ "serde_json",
+ "tracing",
 ]
 
 [[package]]

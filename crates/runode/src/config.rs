@@ -20,9 +20,8 @@ use runode_model::{
     color::{Rgb, TerminalColor},
     settings::{CursorStyle, OptionAsAlt, TermSettings},
     shell::{IntegrationMode, Shell},
+    theme,
 };
-
-use crate::theme;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum CellHeight {
@@ -740,6 +739,11 @@ mod tests {
         let path = dir.join(n.to_string());
         std::fs::write(&path, text).unwrap();
         read_entries(&path, &mut Vec::new())
+    }
+
+    #[test]
+    fn default_config_gives_the_default_term_settings() {
+        assert_eq!(Config::default().term_settings(), TermSettings::default());
     }
 
     fn load(layers: &[&str]) -> Config {

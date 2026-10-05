@@ -383,7 +383,7 @@ impl TerminalView {
             }
         };
         for (i, c) in span.text.chars().enumerate() {
-            let width = usize::from(libghostty_vt::unicode::codepoint_width(c));
+            let width = usize::from(runode_term::cell_width(c));
             if width == 0 {
                 continue;
             }

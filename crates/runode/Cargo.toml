@@ -10,14 +10,15 @@ publish.workspace = true
 runode-dirs.workspace = true
 runode-git.workspace = true
 runode-model.workspace = true
+runode-term.workspace = true
+# 配置里的颜色按终端的颜色语法解析。
 libghostty-vt.workspace = true
 gpui.workspace = true
 # 不开 font-kit 时，gpui_macos 退回到空实现的文字系统，一个字形都画不出来。
 gpui_platform = { workspace = true, features = ["font-kit"] }
 anyhow.workspace = true
-portable-pty.workspace = true
 futures.workspace = true
-# 读终端前台进程的名字和当前目录，作程序没设置标题时的标签名。
+# 补全的生成器命令跑在自己的进程组里，超时时整组结束。
 libc.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true

@@ -2,26 +2,19 @@
 //! 窗口和绘制用 GPUI。
 
 mod about;
-mod agent;
 mod assets;
 mod completion;
 mod config;
 mod file_icons;
-mod history;
 mod i18n;
 mod keybinds;
 mod keys;
 mod menus;
 mod persist;
 mod prespawn;
-mod prompt_input;
-mod pty;
 mod search_bar;
-mod session;
-mod shell_integration;
 mod sprites;
 mod terminal_view;
-mod theme;
 mod workspace;
 
 // 界面文字的翻译，见 `i18n`；某种语言缺了某个键时取英文。

@@ -9,8 +9,9 @@ use std::{
     sync::{Arc, Mutex, OnceLock, PoisonError},
 };
 
+use runode_term::history;
+
 use super::line;
-use crate::history;
 
 /// 各个命令名和「命令 + 子命令」在历史里出现了几条。
 #[derive(Debug, Default)]

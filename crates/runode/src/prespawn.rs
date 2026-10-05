@@ -16,11 +16,9 @@ use std::{
 
 use futures::channel::mpsc::UnboundedReceiver;
 use runode_model::grid::GridSize;
+use runode_term::pty::{Pty, PtyEvent};
 
-use crate::{
-    config::Config,
-    pty::{Pty, PtyEvent},
-};
+use crate::config::Config;
 
 /// 提前启动好的 shell，以及启动时用的尺寸。
 pub struct Prespawned {

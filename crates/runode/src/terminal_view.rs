@@ -27,16 +27,20 @@ use runode_model::{
     input::{self, Mods, SelectionAdjust},
 };
 
+use runode_term::{
+    history,
+    pty::PtyEvent,
+    session::{Paste as PasteResult, SYNC_OUTPUT_TIMEOUT, Session},
+};
+
 use crate::{
     config::{AppConfig, CellHeight, Config},
-    history, keys,
+    keys,
     prespawn::Prespawned,
-    pty::PtyEvent,
     search_bar::{
         EndSearch, SearchField, SearchFieldEvent, SearchNext, SearchPrevious, SearchSelection,
         StartSearch,
     },
-    session::{Paste as PasteResult, SYNC_OUTPUT_TIMEOUT, Session},
     sprites,
 };
 use completion_menu::{CompletionMenu, PendingKey};
@@ -1727,7 +1731,7 @@ fn paint_frame(
             let dim = faint(frame.foreground, frame.background);
             let mut x = cursor.x;
             for c in rest.chars() {
-                let width = u16::from(libghostty_vt::unicode::codepoint_width(c));
+                let width = u16::from(runode_term::cell_width(c));
                 if width == 0 {
                     continue;
                 }

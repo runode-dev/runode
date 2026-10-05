@@ -1,7 +1,10 @@
 //! 终端状态机用到的设置：默认颜色、光标样式和 Option 键的用法。程序自己用转义序列设置的
 //! 颜色和光标形状照旧优先，这些只是默认值，所以可以随时重新应用。
 
-use crate::color::{Rgb, TerminalColor};
+use crate::{
+    color::{Rgb, TerminalColor},
+    theme,
+};
 
 /// 配置的光标样式。
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -52,4 +55,26 @@ pub struct TermSettings {
     pub search_selected_background: TerminalColor,
     pub search_selected_foreground: TerminalColor,
     pub option_as_alt: OptionAsAlt,
+}
+
+impl Default for TermSettings {
+    /// 没有配置时的设置：默认配色，块状光标，Option 键不当 Alt。
+    fn default() -> Self {
+        Self {
+            background: theme::BACKGROUND,
+            foreground: theme::FOREGROUND,
+            palette: theme::ANSI.iter().enumerate().map(|(i, c)| (i as u8, *c)).collect(),
+            cursor_style: CursorStyle::Block,
+            cursor_blink: None,
+            cursor_color: None,
+            cursor_text: None,
+            selection_background: None,
+            selection_foreground: None,
+            search_background: TerminalColor::Rgb(theme::SEARCH_BACKGROUND),
+            search_foreground: TerminalColor::Rgb(theme::SEARCH_FOREGROUND),
+            search_selected_background: TerminalColor::Rgb(theme::SEARCH_SELECTED_BACKGROUND),
+            search_selected_foreground: TerminalColor::Rgb(theme::SEARCH_FOREGROUND),
+            option_as_alt: OptionAsAlt::False,
+        }
+    }
 }

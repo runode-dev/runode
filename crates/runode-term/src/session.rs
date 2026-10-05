@@ -41,6 +41,7 @@ use runode_model::{
     input::{Key, KeyInput, Mods, MouseAction, MouseButton, SelectionAdjust},
     settings::{self, TermSettings},
     shell::{IntegrationMode, ShellNames},
+    theme,
 };
 
 use crate::{
@@ -362,7 +363,7 @@ impl Session {
             highlights: Vec::new(),
             // 应用配置之前用默认配色里的搜索高亮。
             search_colors: {
-                use crate::theme::{SEARCH_BACKGROUND, SEARCH_FOREGROUND, SEARCH_SELECTED_BACKGROUND};
+                use runode_model::theme::{SEARCH_BACKGROUND, SEARCH_FOREGROUND, SEARCH_SELECTED_BACKGROUND};
                 [
                     (TerminalColor::Rgb(SEARCH_BACKGROUND), TerminalColor::Rgb(SEARCH_FOREGROUND)),
                     (TerminalColor::Rgb(SEARCH_SELECTED_BACKGROUND), TerminalColor::Rgb(SEARCH_FOREGROUND)),
@@ -407,7 +408,7 @@ impl Session {
                     tertiary: Default::default(),
                 })
             })?
-            .on_xtversion(|_| Some(concat!("runode ", env!("CARGO_PKG_VERSION"))))?
+            .on_xtversion(|_| Some(crate::XTVERSION))?
             .on_title_changed({
                 let effects = effects.clone();
                 move |_| effects.title_changed.set(true)
@@ -1701,7 +1702,7 @@ fn log_err<T>(what: &str, result: libghostty_vt::error::Result<T>) -> Option<T> 
 fn default_selection_bg(background: Rgb) -> Rgb {
     let Rgb(r, g, b) = background;
     let luma = 0.299 * f32::from(r) + 0.587 * f32::from(g) + 0.114 * f32::from(b);
-    if luma < 128. { crate::theme::SELECTION_ON_DARK } else { crate::theme::SELECTION_ON_LIGHT }
+    if luma < 128. { theme::SELECTION_ON_DARK } else { theme::SELECTION_ON_LIGHT }
 }
 
 fn resolve(color: TerminalColor, fg: Rgb, bg: Rgb) -> Rgb {
@@ -1872,7 +1873,6 @@ pub enum Paste {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{config::Config, theme};
     use futures::{StreamExt as _, executor::block_on};
 
     fn row_text(frame: &Frame, y: u16) -> String {
@@ -1947,7 +1947,7 @@ mod tests {
         };
         // `cat` 自己不输出，VT 只会收到测试喂进去的内容。
         let mut session = Session::spawn_shell(size, Some("/bin/cat")).unwrap().0;
-        session.apply_config(&Config::default().term_settings());
+        session.apply_config(&TermSettings::default());
         session
     }
 
@@ -2413,11 +2413,10 @@ mod tests {
         let mut session = idle_session();
         assert_eq!(option_s(&mut session, false), "ß".as_bytes());
 
-        session.apply_config(&Config {
-            macos_option_as_alt: settings::OptionAsAlt::Left,
-            ..Config::default()
-        }
-        .term_settings());
+        session.apply_config(&TermSettings {
+            option_as_alt: settings::OptionAsAlt::Left,
+            ..TermSettings::default()
+        });
         assert_eq!(option_s(&mut session, false), b"\x1bs");
         assert_eq!(option_s(&mut session, true), "ß".as_bytes());
     }
@@ -2478,12 +2477,11 @@ mod tests {
     #[test]
     fn selection_colors_can_follow_the_cell() {
         let mut session = idle_session();
-        session.apply_config(&Config {
+        session.apply_config(&TermSettings {
             selection_background: Some(TerminalColor::CellForeground),
             selection_foreground: Some(TerminalColor::Rgb(Rgb(1, 2, 3))),
-            ..Config::default()
-        }
-        .term_settings());
+            ..TermSettings::default()
+        });
         session.feed(b"\x1b[31mred\x1b[0m");
         session.select_press(at(0.2, 0.5), REPEAT);
         session.select_drag(at(2.8, 0.5), false);
@@ -2495,12 +2493,11 @@ mod tests {
     #[test]
     fn cursor_colors_can_follow_the_cell() {
         let mut session = idle_session();
-        session.apply_config(&Config {
+        session.apply_config(&TermSettings {
             cursor_color: Some(TerminalColor::CellForeground),
             cursor_text: Some(TerminalColor::CellBackground),
-            ..Config::default()
-        }
-        .term_settings());
+            ..TermSettings::default()
+        });
         // 光标退回到红色的 X 上。
         session.feed(b"\x1b[31mX\x1b[0m\x1b[D");
         let cursor = session.frame().cursor.unwrap();
@@ -2523,11 +2520,10 @@ mod tests {
         session.feed(b"\x1b[2 q");
         assert_eq!(blinking(&mut session), Some(false));
 
-        session.apply_config(&Config {
-            cursor_style_blink: Some(false),
-            ..Config::default()
-        }
-        .term_settings());
+        session.apply_config(&TermSettings {
+            cursor_blink: Some(false),
+            ..TermSettings::default()
+        });
         session.feed(b"\x1b[0 q");
         assert_eq!(blinking(&mut session), Some(false));
     }

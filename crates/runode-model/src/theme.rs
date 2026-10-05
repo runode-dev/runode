@@ -1,6 +1,6 @@
 //! 没有配置时使用的默认配色。
 
-use runode_model::color::Rgb;
+use crate::color::Rgb;
 
 const fn rgb(hex: u32) -> Rgb {
     Rgb((hex >> 16) as u8, (hex >> 8) as u8, hex as u8)

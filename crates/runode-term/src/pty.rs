@@ -129,7 +129,7 @@ impl Pty {
         cmd.env("TERM", "xterm-256color");
         cmd.env("COLORTERM", "truecolor");
         cmd.env("TERM_PROGRAM", "runode");
-        cmd.env("TERM_PROGRAM_VERSION", env!("CARGO_PKG_VERSION"));
+        cmd.env("TERM_PROGRAM_VERSION", crate::VERSION);
         // macOS 自带的 BSD ls 只在设置了 CLICOLOR 时才着色；用户已有设置就不覆盖。
         if std::env::var_os("CLICOLOR").is_none() {
             cmd.env("CLICOLOR", "1");

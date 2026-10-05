@@ -226,12 +226,12 @@ pub fn escape(text: &str, quote: Quote, at_word_start: bool) -> String {
 /// shell 行编辑里这段文字算几个字符，方向键和退格按它走：零宽的组合字符跟着前一个字，
 /// 宽字符也只算一个。
 pub fn edit_chars(text: &str) -> usize {
-    text.chars().filter(|&c| libghostty_vt::unicode::codepoint_width(c) > 0).count()
+    text.chars().filter(|&c| runode_term::cell_width(c) > 0).count()
 }
 
 /// 这段文字在终端里占几格。
 pub fn cells(text: &str) -> usize {
-    text.chars().map(|c| usize::from(libghostty_vt::unicode::codepoint_width(c))).sum()
+    text.chars().map(|c| usize::from(runode_term::cell_width(c))).sum()
 }
 
 #[cfg(test)]
