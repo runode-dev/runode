@@ -1,9 +1,8 @@
 //! 内置规则对各 agent 典型界面的判断。屏幕文字的格式同 `Signals::screen`：行尾空白去掉，
 //! 一行一个 `\n`。
 
+use runode_agent_detect::{RuleBook, Signals, Verdict};
 use runode_shared_types::agent::{AgentKind, AgentState};
-
-use crate::{RuleBook, Signals, Verdict};
 
 fn verdict(kind: AgentKind, screen: &str, title: &str, progress: &str) -> &'static str {
     let book = RuleBook::new(None);

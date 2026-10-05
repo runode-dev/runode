@@ -23,6 +23,3 @@ pub use rules::{ENGINE_VERSION, RuleSet, Signals, Verdict};
 pub use tracker::{
     BURST_GAP, BURST_MIN, EVAL_INTERVAL, Foreground, IDLE_CAP, IDLE_CONFIRMATIONS, IDLE_RECHECK, STARTUP_GRACE, Tracker,
 };
-
-#[cfg(test)]
-mod screens;

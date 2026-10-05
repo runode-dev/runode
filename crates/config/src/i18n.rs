@@ -74,22 +74,6 @@ pub fn set(locale: &str) {
 mod tests {
     use super::*;
 
-    #[test]
-    fn resolves_language_tags() {
-        let resolve = |tag| resolve(tag);
-        assert_eq!(resolve("en-US").as_deref(), Some("en"));
-        assert_eq!(resolve("en_GB.UTF-8").as_deref(), Some("en"));
-        assert_eq!(resolve("zh-Hans-SG").as_deref(), Some("zh-Hans"));
-        assert_eq!(resolve("zh_CN.UTF-8").as_deref(), Some("zh-Hans"));
-        assert_eq!(resolve("zh").as_deref(), Some("zh-Hans"));
-        assert_eq!(resolve("zh-hant").as_deref(), Some("zh-Hant"));
-        assert_eq!(resolve("zh-Hant-HK").as_deref(), Some("zh-Hant"));
-        assert_eq!(resolve("zh_TW").as_deref(), Some("zh-Hant"));
-        assert_eq!(resolve("zh-HK").as_deref(), Some("zh-Hant"));
-        assert_eq!(resolve("ja-JP"), None);
-        assert_eq!(resolve(""), None);
-    }
-
     /// 英文是兜底，其余每种语言都要有英文的全部键，新增文字时漏翻译会在这里失败。
     #[test]
     fn every_locale_has_every_key() {

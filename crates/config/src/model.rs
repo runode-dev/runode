@@ -162,13 +162,3 @@ impl Config {
         }
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn default_config_gives_the_default_term_settings() {
-        assert_eq!(Config::default().term_settings(), TermSettings::default());
-    }
-}
