@@ -40,6 +40,7 @@ menu:
   next_prompt: 跳到下一個提示符號
   toggle_sidebar: 顯示或隱藏側欄
   toggle_changes: 顯示或隱藏改動
+  toggle_git: 顯示或隱藏 Git
   toggle_files: 顯示或隱藏檔案
   toggle_full_screen: 切換全螢幕
   window: 視窗
@@ -140,12 +141,98 @@ tooltip:
   hide_sidebar: 隱藏側欄
   show_changes: 顯示改動
   hide_changes: 隱藏改動
+  show_git: 顯示 Git
+  hide_git: 隱藏 Git
   show_files: 顯示檔案
   hide_files: 隱藏檔案
   show_ignored: 顯示被 git 忽略的檔案
   hide_ignored: 隱藏被 git 忽略的檔案
   close_preview: 關閉預覽
   close_search: 關閉搜尋
+git:
+  title: 原始碼控制
+  refresh: 重新整理
+  ok: 好
+  cancel: 取消
+  failed: Git 操作沒有完成
+  busy:
+    stage: 正在暫存…
+    discard: 正在捨棄變更…
+    commit: 正在提交…
+    checkout: 正在切換分支…
+    fetch: 正在擷取…
+    pull: 正在提取…
+    push: 正在推送…
+    sync: 正在同步…
+    stash: 正在儲藏…
+  section:
+    merge: 合併衝突
+    staged: 暫存的變更
+    unstaged: 變更
+    stashes: 儲藏
+  message_placeholder: 提交說明（⌘↩ 提交）
+  message_placeholder_branch: 提交說明（⌘↩ 提交到「%{branch}」）
+  commit: 提交
+  commit_amend: 提交（修改上次提交）
+  commit_and_push: 提交並推送
+  commit_and_sync: 提交並同步
+  undo_last_commit: 復原上次提交
+  sync_changes: "同步變更 %{behind}↓ %{ahead}↑"
+  publish_branch: 發佈分支
+  publish: 發佈
+  publish_tooltip: 把這個分支推送到遠端，並設為上游分支
+  sync_tooltip: 和「%{upstream}」同步：先提取，再推送
+  detached: "分離於 %{head}"
+  no_commits: 還沒有提交
+  checkout: 切換分支…
+  create_branch: 新增分支…
+  pull: 提取
+  push: 推送
+  sync: 同步
+  fetch: 擷取
+  stage: 暫存變更
+  unstage: 取消暫存變更
+  discard: 捨棄變更
+  mark_resolved: 暫存（標記為已解決）
+  open_file: 開啟檔案
+  stage_all: 暫存所有變更
+  unstage_all: 取消暫存所有變更
+  discard_all: 捨棄所有變更
+  stage_hunk: 暫存這一塊
+  unstage_hunk: 取消暫存這一塊
+  discard_hunk: 捨棄這一塊
+  stash: 儲藏
+  stash_include_untracked: 儲藏（包括未追蹤的檔案）
+  stash_pop_latest: 彈出最新的儲藏
+  stash_apply: 套用儲藏
+  stash_pop: 彈出儲藏
+  stash_drop: 刪除儲藏
+  discard_title: 捨棄「%{name}」的變更？
+  delete_untracked_title: 刪除未追蹤的檔案「%{name}」？
+  delete_untracked_detail: 這個檔案會從磁碟上刪掉，無法復原。
+  discard_all_title: 捨棄全部 %{count} 個檔案的變更？
+  discard_all_untracked_detail: 其中 %{count} 個未追蹤的檔案會從磁碟上刪掉。此操作無法復原。
+  irreversible: 此操作無法復原。
+  discard_confirm: 捨棄變更
+  drop_stash_title: "刪除儲藏 #%{index}？"
+  drop_stash_confirm: 刪除
+  stage_all_title: 沒有暫存的變更
+  stage_all_detail: 要把所有變更都暫存起來，直接提交嗎？
+  stage_all_confirm: 暫存並提交
+  operation:
+    merge: 正在合併：解決衝突並暫存後提交
+    rebase: 正在重定基底：解決衝突後在終端機裡繼續
+    cherry_pick: 正在揀選：解決衝突並暫存後提交
+    revert: 正在還原：解決衝突並暫存後提交
+  picker:
+    placeholder: 選擇要切換到的分支，或者輸入新分支名稱
+    new_branch: 輸入新分支的名稱
+    loading: 正在讀取分支…
+    no_matches: 沒有相符的分支
+    type_name: 輸入一個合法的分支名稱
+    create: "新增分支「%{name}」"
+    local: 本機
+    remote: 遠端
 completion:
   loading: 載入中…
   no_matches: 沒有符合項目

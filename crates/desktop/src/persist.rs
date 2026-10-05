@@ -44,6 +44,11 @@ pub struct SavedWindow {
     pub changes: bool,
     #[serde(default)]
     pub changes_width: Option<f32>,
+    /// Git 面板是否显示，以及拖动过的宽度。
+    #[serde(default)]
+    pub git: bool,
+    #[serde(default)]
+    pub git_width: Option<f32>,
     #[serde(default)]
     pub files: bool,
     #[serde(default)]
@@ -194,6 +199,8 @@ mod tests {
             sidebar_width: Some(240.),
             changes: true,
             changes_width: None,
+            git: true,
+            git_width: Some(320.),
             files: false,
             files_width: Some(200.),
             preview_width: Some(420.),

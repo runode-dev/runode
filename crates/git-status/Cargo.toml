@@ -1,6 +1,6 @@
 [package]
 name = "runode-git-status"
-description = "Reads a project's git status and line-level changes through the git command line"
+description = "Reads a project's git status and line-level changes, and stages, commits, switches branches, stashes and syncs, through the git command line"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

@@ -9,7 +9,7 @@ use gpui::{
     App, Bounds, ClipboardItem, Context, DispatchPhase, Element, ElementId, ElementInputHandler,
     Entity, EntityInputHandler, EventEmitter, FocusHandle, Focusable, GlobalElementId, KeyDownEvent,
     LayoutId, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, PaintQuad, Pixels, Point,
-    Render, ShapedLine, Style, TextAlign, TextRun, UTF16Selection, UnderlineStyle, Window, actions,
+    Render, ShapedLine, SharedString, Style, TextAlign, TextRun, UTF16Selection, UnderlineStyle, Window, actions,
     div, fill, point, prelude::*, px, relative, size,
 };
 
@@ -63,8 +63,8 @@ pub struct SearchField {
     redo: Vec<Snapshot>,
     /// 上一次编辑的类型，连续打字或连续删除合成一步撤销；挪光标后清空。
     last_edit: Option<EditKind>,
-    /// 空着时画「搜索」提示；拿来就地改名时不画。
-    placeholder: bool,
+    /// 空着时画的提示，默认是「搜索」；拿来就地改名时不画。
+    placeholder: Option<SharedString>,
     /// 上一帧排好的文字、输入框位置和横向滚动量，鼠标点选、输入法摆候选窗都靠它们换算。
     layout: Option<ShapedLine>,
     bounds: Option<Bounds<Pixels>>,
@@ -105,7 +105,7 @@ impl SearchField {
             undo: Vec::new(),
             redo: Vec::new(),
             last_edit: None,
-            placeholder: true,
+            placeholder: Some(rust_i18n::t!("search.placeholder").into_owned().into()),
             layout: None,
             bounds: None,
             scroll_x: px(0.),
@@ -117,9 +117,15 @@ impl SearchField {
     pub fn editing(text: String, select: usize, cx: &mut Context<Self>) -> Self {
         let select = (0..=select.min(text.len())).rev().find(|&i| text.is_char_boundary(i)).unwrap_or(0);
         let mut field = Self::new(text, cx);
-        field.placeholder = false;
+        field.placeholder = None;
         field.selected = 0..select;
         field
+    }
+
+    /// 空着时画的提示换成 `text`。
+    pub fn with_placeholder(mut self, text: impl Into<SharedString>) -> Self {
+        self.placeholder = Some(text.into());
+        self
     }
 
     pub fn query(&self) -> &str {
@@ -681,12 +687,9 @@ impl Element for SearchText {
             None => vec![run(field.text.len(), style.color)],
         };
         let line = window.text_system().shape_line(field.text.clone().into(), font_size, &runs, None);
-        let placeholder = (field.placeholder && field.text.is_empty()).then(|| {
-            let text = rust_i18n::t!("search.placeholder").into_owned();
+        let placeholder = field.placeholder.clone().filter(|_| field.text.is_empty()).map(|text| {
             let len = text.len();
-            window
-                .text_system()
-                .shape_line(text.into(), font_size, &[run(len, style.color.opacity(0.4))], None)
+            window.text_system().shape_line(text, font_size, &[run(len, style.color.opacity(0.4))], None)
         });
 
         // 横向滚动到光标露出来为止，文字缩短时也别在右边留空。

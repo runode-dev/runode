@@ -105,6 +105,7 @@ action:
   goto_workspace: The Nth workspace, counting from 1
   toggle_sidebar: Show or hide the workspace sidebar
   toggle_changes: Show or hide the uncommitted changes panel on the right
+  toggle_git: Show or hide the Git panel on the right to stage, commit, switch branches, sync and stash
   toggle_files: Show or hide the file tree on the right; double-click a file to type its path into the terminal
   goto_agent: List the agents in every window and jump to the one you pick
   next_agent: Jump to the next agent that needs you, those waiting for an answer first, then those that finished

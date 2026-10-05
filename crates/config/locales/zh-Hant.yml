@@ -94,6 +94,7 @@ action:
   goto_workspace: 第 N 個工作區，從 1 數
   toggle_sidebar: 顯示或隱藏工作區側欄
   toggle_changes: 顯示或隱藏右側的未提交改動
+  toggle_git: 顯示或隱藏右側的 Git 面板：暫存、提交、切換分支、同步和儲藏
   toggle_files: 顯示或隱藏右側的檔案樹，按兩下檔案把路徑打進終端機
   goto_agent: 列出所有視窗裡的 agent，選一個跳過去
   next_agent: 跳到下一個要處理的 agent：先是等你回答的，再是做完了還沒看的

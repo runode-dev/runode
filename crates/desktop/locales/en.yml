@@ -40,6 +40,7 @@ menu:
   next_prompt: Jump to Next Prompt
   toggle_sidebar: Show or Hide Sidebar
   toggle_changes: Show or Hide Changes
+  toggle_git: Show or Hide Git
   toggle_files: Show or Hide Files
   toggle_full_screen: Toggle Full Screen
   window: Window
@@ -140,12 +141,98 @@ tooltip:
   hide_sidebar: Hide Sidebar
   show_changes: Show Changes
   hide_changes: Hide Changes
+  show_git: Show Git
+  hide_git: Hide Git
   show_files: Show Files
   hide_files: Hide Files
   show_ignored: Show Files Ignored by Git
   hide_ignored: Hide Files Ignored by Git
   close_preview: Close Preview
   close_search: Close Search
+git:
+  title: Source Control
+  refresh: Refresh
+  ok: OK
+  cancel: Cancel
+  failed: The Git operation didn't complete
+  busy:
+    stage: Staging…
+    discard: Discarding changes…
+    commit: Committing…
+    checkout: Switching branch…
+    fetch: Fetching…
+    pull: Pulling…
+    push: Pushing…
+    sync: Syncing…
+    stash: Stashing…
+  section:
+    merge: Merge Changes
+    staged: Staged Changes
+    unstaged: Changes
+    stashes: Stashes
+  message_placeholder: Message (⌘↩ to commit)
+  message_placeholder_branch: "Message (⌘↩ to commit on “%{branch}”)"
+  commit: Commit
+  commit_amend: Commit (Amend)
+  commit_and_push: Commit & Push
+  commit_and_sync: Commit & Sync
+  undo_last_commit: Undo Last Commit
+  sync_changes: "Sync Changes %{behind}↓ %{ahead}↑"
+  publish_branch: Publish Branch
+  publish: Publish
+  publish_tooltip: Push this branch to the remote and set it as the upstream
+  sync_tooltip: "Sync with “%{upstream}”: pull, then push"
+  detached: "Detached at %{head}"
+  no_commits: No commits yet
+  checkout: Checkout to…
+  create_branch: Create Branch…
+  pull: Pull
+  push: Push
+  sync: Sync
+  fetch: Fetch
+  stage: Stage Changes
+  unstage: Unstage Changes
+  discard: Discard Changes
+  mark_resolved: Stage (Mark as Resolved)
+  open_file: Open File
+  stage_all: Stage All Changes
+  unstage_all: Unstage All Changes
+  discard_all: Discard All Changes
+  stage_hunk: Stage Hunk
+  unstage_hunk: Unstage Hunk
+  discard_hunk: Discard Hunk
+  stash: Stash
+  stash_include_untracked: Stash (Include Untracked)
+  stash_pop_latest: Pop Latest Stash
+  stash_apply: Apply Stash
+  stash_pop: Pop Stash
+  stash_drop: Drop Stash
+  discard_title: "Discard changes in “%{name}”?"
+  delete_untracked_title: "Delete the untracked file “%{name}”?"
+  delete_untracked_detail: The file will be deleted from disk. This can't be undone.
+  discard_all_title: "Discard changes in all %{count} files?"
+  discard_all_untracked_detail: "%{count} untracked files among them will be deleted from disk. This can't be undone."
+  irreversible: This can't be undone.
+  discard_confirm: Discard Changes
+  drop_stash_title: "Drop stash #%{index}?"
+  drop_stash_confirm: Drop
+  stage_all_title: There are no staged changes
+  stage_all_detail: Stage all your changes and commit them directly?
+  stage_all_confirm: Stage and Commit
+  operation:
+    merge: "Merging: resolve the conflicts, stage them, then commit"
+    rebase: "Rebasing: resolve the conflicts, then continue in the terminal"
+    cherry_pick: "Cherry-picking: resolve the conflicts, stage them, then commit"
+    revert: "Reverting: resolve the conflicts, stage them, then commit"
+  picker:
+    placeholder: Select a branch to switch to, or type a new branch name
+    new_branch: Type a name for the new branch
+    loading: Loading branches…
+    no_matches: No matching branches
+    type_name: Type a valid branch name
+    create: "Create branch “%{name}”"
+    local: Local
+    remote: Remote
 completion:
   loading: Loading…
   no_matches: No matches

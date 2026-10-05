@@ -1,5 +1,18 @@
-//! 读项目目录的 git 状态：工作区相对 HEAD 的逐行改动，以及每个文件的状态，供右侧的改动
-//! 面板和文件树使用。只调 `git` 命令行读，不写仓库。
+//! 项目目录的 git：读工作区相对 HEAD 的逐行改动、每个文件的状态、分支和 stash，供右侧的
+//! 改动面板、文件树和 Git 面板使用；暂存、按块暂存、提交、切分支、stash 和同步远端这些
+//! 写操作挂在 `Repo` 上。一律调 `git` 命令行，不直接读写 git 目录里的对象。
+
+mod branch;
+mod info;
+mod ops;
+mod patch;
+#[cfg(test)]
+mod test_repo;
+
+pub use branch::{Branch, valid_branch_name};
+pub use info::{Operation, RepoInfo, Stash};
+pub use ops::{CommitOptions, GitError, Repo, Result};
+pub use patch::{HunkAction, hunk_actionable};
 
 use std::{
     collections::{HashMap, HashSet},
@@ -102,6 +115,8 @@ pub struct Snapshot {
     pub statuses: HashMap<PathBuf, FileStatus>,
     /// 被忽略的文件和目录，相对仓库根；目录被忽略时里面的不再单列。
     pub ignored: HashSet<PathBuf>,
+    /// 顶层仓库的分支、上游、进行中的操作和 stash；嵌套的仓库不读。
+    pub info: RepoInfo,
 }
 
 impl Snapshot {
@@ -136,6 +151,11 @@ impl Snapshot {
     /// `rel` 相对仓库根，它或者它所在的目录被忽略。
     pub fn is_ignored(&self, rel: &Path) -> bool {
         rel.ancestors().any(|dir| self.ignored.contains(dir))
+    }
+
+    /// 这个仓库的句柄，暂存、提交这些写操作挂在它上面。
+    pub fn repo(&self) -> Repo {
+        Repo::new(self.root.clone())
     }
 }
 
@@ -173,6 +193,7 @@ pub fn snapshot(dir: &Path, cache: &mut UntrackedCache) -> Option<Snapshot> {
         unstaged: Vec::new(),
         statuses: HashMap::new(),
         ignored: HashSet::new(),
+        info: RepoInfo::default(),
     };
     let mut seen = UntrackedCache::default();
     collect(&root, Path::new(""), &mut snapshot, cache, &mut seen)?;
@@ -214,7 +235,8 @@ fn starts_binary(path: &Path) -> bool {
 }
 
 /// 读 `repo` 这个仓库的改动，路径前面加上 `prefix` 并进 `out`。未跟踪的目录是嵌套的
-/// 仓库（比如放在仓库里的 worktree），git 不往里看，就当另一个仓库接着读。
+/// 仓库（比如放在仓库里的 worktree），git 不往里看，就当另一个仓库接着读。`prefix` 为空
+/// 即顶层仓库时顺带读 `out.info`。
 fn collect(
     repo: &Path,
     prefix: &Path,
@@ -222,27 +244,41 @@ fn collect(
     cache: &UntrackedCache,
     seen: &mut UntrackedCache,
 ) -> Option<()> {
-    // 状态、暂存段和未暂存段互不依赖，几个 git 进程同时跑。
-    let (status, staged, mut unstaged) = std::thread::scope(|scope| {
+    let top = prefix.as_os_str().is_empty();
+    // 状态、暂存段和未暂存段互不依赖，几个 git 进程同时跑；顶层仓库的 stash 和远端也一起读。
+    let (status, staged, mut unstaged, extra) = std::thread::scope(|scope| {
         let status = scope.spawn(|| {
-            git(repo, &["status", "--porcelain=v1", "-z", "--untracked-files=all", "--ignored=matching"])
+            let mut args = vec!["status", "--porcelain=v1", "-z", "--untracked-files=all", "--ignored=matching"];
+            if top {
+                // 开头多一项 `## 分支...上游 [ahead 1, behind 2]`。
+                args.extend(["--branch", "--ahead-behind"]);
+            }
+            git(repo, &args)
         });
         let staged = scope.spawn(|| {
-            // 还没有提交时和空树比，暂存了的新文件也算进来。
-            let base = match git(repo, &["rev-parse", "--verify", "--quiet", "HEAD"]) {
+            // 还没有提交时和空树比，暂存了的新文件也算进来。短哈希顺带给 `RepoInfo::head`。
+            let head = git(repo, &["rev-parse", "--verify", "--quiet", "--short", "HEAD"])
+                .map(|head| String::from_utf8_lossy(&head).trim().to_owned());
+            let base = match head {
                 Some(_) => "HEAD".to_owned(),
                 None => String::from_utf8_lossy(&git(repo, &["hash-object", "-t", "tree", "/dev/null"])?).trim().to_owned(),
             };
-            Some(diff(repo, &["--cached", &base]))
+            Some((diff(repo, &["--cached", &base]), head))
         });
+        let extra = top.then(|| scope.spawn(|| info::read_extra(repo)));
         // 冲突的文件和「我方」比，不然 git 给的是三方合并的格式。
         let unstaged = diff(repo, &["-2"]);
         let status = status.join().unwrap_or_else(|panic| std::panic::resume_unwind(panic));
         let staged = staged.join().unwrap_or_else(|panic| std::panic::resume_unwind(panic));
-        (status, staged, unstaged)
+        let extra = extra.map(|extra| extra.join().unwrap_or_else(|panic| std::panic::resume_unwind(panic)));
+        (status, staged, unstaged, extra)
     });
-    let (statuses, ignored) = parse_status(&status?);
-    let mut staged = staged?;
+    let status = status?;
+    let (statuses, ignored) = parse_status(&status);
+    let (mut staged, head) = staged?;
+    if let Some(extra) = extra {
+        out.info = info::read(&status, head, &out.git_dir, extra);
+    }
     let mut untracked: Vec<_> = statuses
         .iter()
         .filter(|(_, status)| **status == FileStatus::Untracked)
@@ -287,13 +323,14 @@ fn local_root(dir: &Path, root: PathBuf) -> PathBuf {
     dir.ancestors().nth(rel.components().count()).map_or(root, Path::to_path_buf)
 }
 
-/// 解析 `git status --porcelain=v1 -z` 的输出：各个文件的状态，以及被忽略的路径。
+/// 解析 `git status --porcelain=v1 -z` 的输出：各个文件的状态，以及被忽略的路径。带
+/// `--branch` 时开头的分支那一项跳过，由 `info::parse_branch` 读。
 fn parse_status(output: &[u8]) -> (HashMap<PathBuf, FileStatus>, Vec<PathBuf>) {
     let mut statuses = HashMap::new();
     let mut ignored = Vec::new();
     let mut fields = output.split(|b| *b == 0).filter(|field| !field.is_empty());
     while let Some(field) = fields.next() {
-        if field.len() < 4 {
+        if field.len() < 4 || field.starts_with(b"## ") {
             continue;
         }
         let (x, y) = (field[0], field[1]);
@@ -631,7 +668,7 @@ Binary files /dev/null and b/logo.png differ
 
     #[test]
     fn parses_porcelain_status() {
-        let output = b" M src/a.rs\0?? new.txt\0R  b.rs\0a.rs\0!! target/\0UU both.rs\0A  added.rs\0";
+        let output = b"## main...origin/main [ahead 1]\0 M src/a.rs\0?? new.txt\0R  b.rs\0a.rs\0!! target/\0UU both.rs\0A  added.rs\0";
         let (statuses, ignored) = parse_status(output);
         assert_eq!(statuses[Path::new("src/a.rs")], FileStatus::Modified);
         assert_eq!(statuses[Path::new("new.txt")], FileStatus::Untracked);
@@ -639,6 +676,7 @@ Binary files /dev/null and b/logo.png differ
         assert_eq!(statuses[Path::new("both.rs")], FileStatus::Conflicted);
         assert_eq!(statuses[Path::new("added.rs")], FileStatus::Added);
         assert!(!statuses.contains_key(Path::new("a.rs")));
+        assert_eq!(statuses.len(), 5);
         assert_eq!(ignored, vec![PathBuf::from("target")]);
     }
 
@@ -651,6 +689,7 @@ Binary files /dev/null and b/logo.png differ
             unstaged: Vec::new(),
             statuses: HashMap::new(),
             ignored: HashSet::from(["target".into(), "out/gen".into()]),
+            info: RepoInfo::default(),
         };
         assert!(snapshot.is_ignored(Path::new("target")));
         assert!(snapshot.is_ignored(Path::new("target/debug/x")));

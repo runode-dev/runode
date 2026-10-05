@@ -87,6 +87,8 @@ pub(in crate::workspace) struct Project {
     pub selected: Option<PathBuf>,
     /// 预览栏的标签。
     pub previews: super::super::preview::PreviewTabs,
+    /// Git 面板排成的行、展开收起和提交说明。
+    pub git_panel: super::super::git_panel::GitPanel,
     pub diff_rows: Vec<DiffRow>,
     pub diff_groups: Vec<DiffGroup>,
     pub file_rows: Vec<FileRow>,
@@ -457,6 +459,7 @@ impl Workspace {
             project.listings.clear();
             project.toggled_diffs.clear();
             project.collapsed_groups.clear();
+            project.git_panel.forget_expanded();
             project.changes_scroll.scroll_to_item(0, ScrollStrategy::Top);
             project.files_scroll.scroll_to_item(0, ScrollStrategy::Top);
             changed = true;
@@ -485,6 +488,7 @@ impl Workspace {
         }
         if changed {
             project.rebuild_diff_rows();
+            project.git_panel.rebuild(project.git.as_ref());
             project.rebuild_file_rows(&scan.root, show_ignored);
         }
         // 终端换了目录，文件树跟过去。
@@ -516,6 +520,7 @@ mod tests {
                 ("src/c.rs".into(), FileStatus::Added),
             ]),
             ignored: HashSet::from(["target".into()]),
+            info: Default::default(),
         }
     }
 

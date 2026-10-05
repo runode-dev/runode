@@ -167,7 +167,7 @@ impl WindowView {
                         cx.notify();
                         return;
                     }
-                    Divider::Changes | Divider::Preview | Divider::Files => {
+                    Divider::Changes | Divider::Preview | Divider::Git | Divider::Files => {
                         let viewport = f32::from(window.viewport_size().width);
                         this.resize_right_panel(divider, f32::from(event.position.x), viewport);
                         cx.notify();

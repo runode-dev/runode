@@ -16,6 +16,7 @@ mod scrollbar;
 mod search_bar;
 mod sprites;
 mod terminal_view;
+mod text_area;
 mod tooltip;
 mod window;
 mod workspace;

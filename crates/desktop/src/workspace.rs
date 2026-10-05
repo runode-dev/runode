@@ -1,12 +1,12 @@
 //! 一个窗口：左侧列出 workspace 的侧栏，顶部的标签栏，标签里的分屏，以及右侧可以打开的
-//! 改动栏、预览栏和文件树。workspace 对应一个项目目录，各有一组标签；窗口的布局随改随存，下次启动
+//! 改动栏、预览栏、Git 面板和文件树。workspace 对应一个项目目录，各有一组标签；窗口的布局随改随存，下次启动
 //! 时恢复。
 //!
 //! 这里是窗口的根视图 `WindowView`、窗口绑定的动作，以及把各部分拼起来的渲染。其余按职责分在
 //! 子模块里：workspace、标签和分屏的数据与增删切换（`model`）、动作的处理（`actions`）、
 //! agent 的状态标记、提醒和跳转（`agents`）、列出所有 agent 的浮层（`agent_picker`）、
 //! 标签里的分屏（`panes`）、标题栏和标签（`titlebar`）、侧栏（`sidebar`）、右侧的改动栏、
-//! 预览栏和文件树（`project`、`changes`、`preview`、`files`），侧栏和文件树共用的就地输入框
+//! 预览栏、Git 面板和文件树（`project`、`changes`、`preview`、`git_panel`、`files`），侧栏和文件树共用的就地输入框
 //! （`inline_edit`），存档（`persistence`），以及退出前的确认（`quit`）。
 
 mod actions;
@@ -14,6 +14,7 @@ mod agent_picker;
 mod agents;
 mod changes;
 mod files;
+mod git_panel;
 mod inline_edit;
 mod model;
 mod panes;
@@ -84,6 +85,8 @@ actions!(
         ToggleSidebar,
         /// 显示或隐藏右侧的改动栏。
         ToggleChanges,
+        /// 显示或隐藏右侧的 Git 面板。
+        ToggleGit,
         /// 显示或隐藏右侧的文件树。
         ToggleFiles,
         /// 打开或关掉列出所有窗口里 agent 的浮层。
@@ -155,9 +158,10 @@ enum Divider {
     Split(SplitId, Axis),
     /// 侧栏右边的分隔线，拖动改变侧栏宽度。
     Sidebar,
-    /// 改动栏、预览栏和文件树左边的分隔线，拖动改变它们的宽度。
+    /// 改动栏、预览栏、Git 面板和文件树左边的分隔线，拖动改变它们的宽度。
     Changes,
     Preview,
+    Git,
     Files,
 }
 
@@ -183,6 +187,13 @@ pub struct WindowView {
     files_shown: bool,
     changes_width: Option<f32>,
     files_width: Option<f32>,
+    /// Git 面板是否显示，拖动过宽度时是那个宽度。
+    git_shown: bool,
+    git_width: Option<f32>,
+    /// Git 面板的焦点：右键菜单的动作派发到这里；提交说明框在它里面。
+    git_focus: FocusHandle,
+    /// 开着的分支列表。
+    branch_picker: Option<git_panel::BranchPicker>,
     /// 预览栏拖动过宽度时是那个宽度；预览栏在打开文件时出现，标签都关掉时收起，不存档。
     preview_width: Option<f32>,
     /// 预览栏的焦点：点了预览的文字后 cmd+c 复制选中的行。
@@ -285,6 +296,10 @@ impl WindowView {
             files_shown: false,
             changes_width: None,
             files_width: None,
+            git_shown: false,
+            git_width: None,
+            git_focus: cx.focus_handle(),
+            branch_picker: None,
             preview_width: None,
             preview_focus: cx.focus_handle(),
             show_ignored: false,
@@ -378,15 +393,21 @@ impl Render for WindowView {
         let font = view.read(cx).font_family();
         let preview_shown = self.preview_shown();
         let changes = self.changes_shown.then(|| {
-            self.render_changes_panel(widths.changes, !self.files_shown && !preview_shown, fg, bg, font.clone(), cx)
+            let rightmost = !self.files_shown && !self.git_shown && !preview_shown;
+            self.render_changes_panel(widths.changes, rightmost, fg, bg, font.clone(), cx)
         });
-        let preview = self.render_preview_panel(widths.preview, !self.files_shown, fg, bg, font, cx);
+        let preview =
+            self.render_preview_panel(widths.preview, !self.files_shown && !self.git_shown, fg, bg, font.clone(), cx);
+        let git = self.git_shown.then(|| self.render_git_panel(widths.git, !self.files_shown, fg, bg, font, window, cx));
         let files = self.files_shown.then(|| self.render_files_panel(widths.files, fg, bg, cx));
         let file_menu = self.render_file_menu(fg, bg, cx);
         let agent_picker = self.render_agent_picker(fg, bg, window, cx);
+        let branch_picker = self.render_branch_picker(fg, bg, cx);
         let right_handles = [
             self.changes_shown.then(|| self.render_right_handle(Divider::Changes, widths.total(), cx)),
-            preview_shown.then(|| self.render_right_handle(Divider::Preview, widths.preview + widths.files, cx)),
+            preview_shown
+                .then(|| self.render_right_handle(Divider::Preview, widths.preview + widths.git + widths.files, cx)),
+            self.git_shown.then(|| self.render_right_handle(Divider::Git, widths.git + widths.files, cx)),
             self.files_shown.then(|| self.render_right_handle(Divider::Files, widths.files, cx)),
         ];
         let titlebar_shown = !fullscreen || show_tabs;
@@ -483,9 +504,11 @@ impl Render for WindowView {
             .on_action(cx.listener(Self::select_last_workspace))
             .on_action(cx.listener(Self::toggle_sidebar))
             .on_action(cx.listener(Self::toggle_changes))
+            .on_action(cx.listener(Self::toggle_git))
             .on_action(cx.listener(Self::toggle_files))
             .on_action(cx.listener(Self::goto_agent))
             .on_action(cx.listener(Self::next_agent))
+            .map(|window| Self::bind_git_actions(window, cx))
             .relative()
             .size_full()
             .flex()
@@ -503,6 +526,7 @@ impl Render for WindowView {
             )
             .children(changes)
             .children(preview)
+            .children(git)
             .children(files)
             .children(sidebar_handle)
             .children(right_handles.into_iter().flatten())
@@ -511,6 +535,7 @@ impl Render for WindowView {
             .children(drag)
             .children(file_menu)
             .children(agent_picker)
+            .children(branch_picker)
     }
 }
 

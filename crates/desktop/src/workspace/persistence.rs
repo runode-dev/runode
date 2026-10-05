@@ -194,6 +194,8 @@ impl WindowView {
             sidebar_width: self.sidebar_width,
             changes: self.changes_shown,
             changes_width: self.changes_width,
+            git: self.git_shown,
+            git_width: self.git_width,
             files: self.files_shown,
             files_width: self.files_width,
             preview_width: self.preview_width,
@@ -273,6 +275,8 @@ impl WindowView {
             self.sidebar_width = saved.sidebar_width;
             self.changes_shown = saved.changes;
             self.changes_width = saved.changes_width;
+            self.git_shown = saved.git;
+            self.git_width = saved.git_width;
             self.files_shown = saved.files;
             self.files_width = saved.files_width;
             self.preview_width = saved.preview_width;

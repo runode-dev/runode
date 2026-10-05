@@ -40,6 +40,7 @@ menu:
   next_prompt: 跳到下一个提示符
   toggle_sidebar: 显示或隐藏侧栏
   toggle_changes: 显示或隐藏改动
+  toggle_git: 显示或隐藏 Git
   toggle_files: 显示或隐藏文件
   toggle_full_screen: 切换全屏
   window: 窗口
@@ -140,12 +141,98 @@ tooltip:
   hide_sidebar: 隐藏侧栏
   show_changes: 显示改动
   hide_changes: 隐藏改动
+  show_git: 显示 Git
+  hide_git: 隐藏 Git
   show_files: 显示文件
   hide_files: 隐藏文件
   show_ignored: 显示被 git 忽略的文件
   hide_ignored: 隐藏被 git 忽略的文件
   close_preview: 关闭预览
   close_search: 关闭搜索
+git:
+  title: 源代码管理
+  refresh: 刷新
+  ok: 好
+  cancel: 取消
+  failed: Git 操作没有完成
+  busy:
+    stage: 正在暂存…
+    discard: 正在放弃更改…
+    commit: 正在提交…
+    checkout: 正在切换分支…
+    fetch: 正在抓取…
+    pull: 正在拉取…
+    push: 正在推送…
+    sync: 正在同步…
+    stash: 正在储藏…
+  section:
+    merge: 合并冲突
+    staged: 暂存的更改
+    unstaged: 更改
+    stashes: 储藏
+  message_placeholder: 提交说明（⌘↩ 提交）
+  message_placeholder_branch: 提交说明（⌘↩ 提交到“%{branch}”）
+  commit: 提交
+  commit_amend: 提交（修改上次提交）
+  commit_and_push: 提交并推送
+  commit_and_sync: 提交并同步
+  undo_last_commit: 撤销上次提交
+  sync_changes: "同步更改 %{behind}↓ %{ahead}↑"
+  publish_branch: 发布分支
+  publish: 发布
+  publish_tooltip: 把这个分支推送到远端，并设为上游分支
+  sync_tooltip: 和“%{upstream}”同步：先拉取，再推送
+  detached: "分离于 %{head}"
+  no_commits: 还没有提交
+  checkout: 切换分支…
+  create_branch: 新建分支…
+  pull: 拉取
+  push: 推送
+  sync: 同步
+  fetch: 抓取
+  stage: 暂存更改
+  unstage: 取消暂存更改
+  discard: 放弃更改
+  mark_resolved: 暂存（标记为已解决）
+  open_file: 打开文件
+  stage_all: 暂存所有更改
+  unstage_all: 取消暂存所有更改
+  discard_all: 放弃所有更改
+  stage_hunk: 暂存这一块
+  unstage_hunk: 取消暂存这一块
+  discard_hunk: 放弃这一块
+  stash: 储藏
+  stash_include_untracked: 储藏（包括未跟踪的文件）
+  stash_pop_latest: 弹出最新的储藏
+  stash_apply: 应用储藏
+  stash_pop: 弹出储藏
+  stash_drop: 删除储藏
+  discard_title: 放弃“%{name}”的更改？
+  delete_untracked_title: 删除未跟踪的文件“%{name}”？
+  delete_untracked_detail: 这个文件会从磁盘上删掉，不能撤销。
+  discard_all_title: 放弃全部 %{count} 个文件的更改？
+  discard_all_untracked_detail: 其中 %{count} 个未跟踪的文件会从磁盘上删掉。此操作不能撤销。
+  irreversible: 此操作不能撤销。
+  discard_confirm: 放弃更改
+  drop_stash_title: "删除储藏 #%{index}？"
+  drop_stash_confirm: 删除
+  stage_all_title: 没有暂存的更改
+  stage_all_detail: 要把所有更改都暂存起来，直接提交吗？
+  stage_all_confirm: 暂存并提交
+  operation:
+    merge: 正在合并：解决冲突并暂存后提交
+    rebase: 正在变基：解决冲突后在终端里继续
+    cherry_pick: 正在拣选：解决冲突并暂存后提交
+    revert: 正在还原：解决冲突并暂存后提交
+  picker:
+    placeholder: 选择要切换到的分支，或者输入新分支名
+    new_branch: 输入新分支的名字
+    loading: 正在读取分支…
+    no_matches: 没有匹配的分支
+    type_name: 输入一个合法的分支名
+    create: "新建分支“%{name}”"
+    local: 本地
+    remote: 远端
 completion:
   loading: 加载中…
   no_matches: 没有匹配项

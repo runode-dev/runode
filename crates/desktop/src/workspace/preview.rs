@@ -1138,6 +1138,7 @@ mod tests {
             unstaged: vec![unstaged],
             statuses: HashMap::new(),
             ignored: HashSet::new(),
+            info: Default::default(),
         };
         let marks = line_marks(&snapshot, Path::new("a.rs"));
         // 工作区新加的第 1 行，以及暂存区里加的第 2 行，在工作区里是第 3 行。
