@@ -3,6 +3,8 @@
 #   133;A  提示符开始       133;B  提示符结束、用户输入开始
 #   133;C  命令开始执行     133;D  命令执行完（带退出码）
 #   133;P;k=r  右侧提示符开始，画完后用 133;B 回到用户输入
+#   6973;<口令>;cwd=…  runode 私有：shell 的当前目录（百分号编码），每次显示提示符前都发；
+#                提示符出来后插件管理器可能临时切进插件目录，runode 那时再读目录就不准了
 #   6973;<口令>;path=…  runode 私有：shell 的 PATH（百分号编码），变了才发，补全跑命令时用
 #   6973;<口令>;aliases=… 以及 functions、builtins、keywords  runode 私有：shell 里的这些
 #                名字，名字之间用 %20 隔开，变了才发，补命令名时用
@@ -58,11 +60,15 @@ _runode_precmd() {
         _runode_rps1=$'%{\e]133;P;k=r\a%}'"$RPROMPT"$'%{\e]133;B\a%}'
         RPROMPT=$_runode_rps1
     fi
-    if [[ -n ${_runode_report_token-} && $PATH != "$_runode_path" ]]; then
-        _runode_path=$PATH
+    if [[ -n ${_runode_report_token-} ]]; then
         'builtin' 'local' REPLY
-        _runode_urlencode "$PATH"
-        'builtin' 'print' -rn -- $'\e]6973;'"$_runode_report_token;path=$REPLY"$'\a'
+        _runode_urlencode "$PWD"
+        'builtin' 'print' -rn -- $'\e]6973;'"$_runode_report_token;cwd=$REPLY"$'\a'
+        if [[ $PATH != "$_runode_path" ]]; then
+            _runode_path=$PATH
+            _runode_urlencode "$PATH"
+            'builtin' 'print' -rn -- $'\e]6973;'"$_runode_report_token;path=$REPLY"$'\a'
+        fi
     fi
     _runode_report_names
     # 有的插件会在运行时往钩子列表里追加函数，每次都把自己挪回两头。

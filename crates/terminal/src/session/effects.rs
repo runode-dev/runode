@@ -25,6 +25,8 @@ pub(super) struct Effects {
     pub(super) prompts: RefCell<Vec<PromptEvent>>,
     /// shell 集成用 `SHELL_REPORT` 报告的 shell 自己的 PATH，见 `Session::shell_path`。
     pub(super) shell_path: RefCell<Option<std::ffi::OsString>>,
+    /// shell 集成在这次显示提示符前报告的目录，由下一个 `PromptEvent::InputStart` 取走。
+    pub(super) shell_cwd: RefCell<Option<std::path::PathBuf>>,
     /// shell 集成用 `SHELL_REPORT` 报告的别名、函数、内建命令和关键字，见 `Session::shell_names`。
     pub(super) shell_names: RefCell<ShellNames>,
     /// 启动 shell 时交给集成脚本的报告口令（见 `shell_integration::prepare`），`SHELL_REPORT`
@@ -37,7 +39,8 @@ pub(super) struct Effects {
 }
 
 /// shell 集成在显示提示符时、内容和上次报告的不一样时用的私有 OSC：
-/// `ESC ] 6973;<口令>;<字段>=<百分号编码的值> BEL`。字段是 `path`（PATH）或 `aliases`、
+/// `ESC ] 6973;<口令>;<字段>=<百分号编码的值> BEL`。字段是 `cwd`（shell 的当前目录，每次显示
+/// 提示符前都发）、`path`（PATH）或 `aliases`、
 /// `functions`、`builtins`、`keywords`（名字之间用空格分开）、`alias_values`（一行一个
 /// 「名字<Tab>值」）。另有 `command`：shell 开始运行命令时紧接在 OSC 133;C 前面发，值是命令
 /// 原文（拿不到时为空），见 `Effects::command_report`。
@@ -84,6 +87,13 @@ impl Effects {
             if let Ok(mut path) = self.shell_path.try_borrow_mut() {
                 use std::os::unix::ffi::OsStringExt as _;
                 *path = Some(std::ffi::OsString::from_vec(value));
+            }
+            return;
+        }
+        if field == b"cwd" {
+            if let Ok(mut cwd) = self.shell_cwd.try_borrow_mut() {
+                use std::os::unix::ffi::OsStringExt as _;
+                *cwd = (!value.is_empty()).then(|| std::ffi::OsString::from_vec(value).into());
             }
             return;
         }
@@ -174,7 +184,12 @@ impl Session {
         let mut finished = Vec::new();
         for event in events {
             match event {
-                PromptEvent::InputStart => self.prompt_cwd = self.cwd(),
+                // 用 shell 显示提示符前报告的目录：等这里处理到时，插件管理器可能已经在提示符出来
+                // 之后临时切进了插件目录，这时再读 shell 的目录就错了。没报告时（续行提示符、
+                // 拿不到口令的 shell）才现读。
+                PromptEvent::InputStart => {
+                    self.prompt_cwd = self.effects.shell_cwd.take().or_else(|| self.cwd());
+                }
                 PromptEvent::OutputStart(command) => {
                     self.running = command.map(|command| {
                         history::Entry::now(command, self.prompt_cwd.clone().or_else(|| self.cwd()))
@@ -323,6 +338,25 @@ mod tests {
         // 没在运行命令时的结束报告（有的 shell 每次出提示符都发）不算。
         session.feed(b"\x1b]133;D;0\x07");
         assert!(session.take_commands().is_empty());
+    }
+
+    #[test]
+    fn the_prompt_directory_comes_from_the_shell_report() {
+        let mut session = reporting_session();
+        // 提示符前报告的目录（插件管理器之后切去别处也不受影响），由这个提示符取走。
+        session.feed(format!("\x1b]6973;{TOKEN};cwd=/work/my%20repo\x07").as_bytes());
+        session.feed(PROMPT);
+        session.take_commands();
+        assert_eq!(session.prompt_cwd(), Some("/work/my repo".into()));
+        // 下一个提示符前没有报告（续行提示符、拿不到口令的 shell）：现读 shell 的目录。
+        session.feed(PROMPT);
+        session.take_commands();
+        assert_eq!(session.prompt_cwd(), session.cwd());
+        // 口令不对的报告不采用。
+        session.feed(b"\x1b]6973;0123456789abcdef0123456789abcdee;cwd=/fake\x07");
+        session.feed(PROMPT);
+        session.take_commands();
+        assert_eq!(session.prompt_cwd(), session.cwd());
     }
 
     #[test]

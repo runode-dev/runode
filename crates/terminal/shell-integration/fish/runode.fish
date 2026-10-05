@@ -3,6 +3,7 @@
 #   133;A  提示符开始       133;B  提示符结束、用户输入开始
 #   133;C  命令开始执行     133;D  命令执行完（带退出码）
 #   133;P;k=r  右侧提示符开始，画完后用 133;B 回到用户输入
+#   6973;<口令>;cwd=…  runode 私有：shell 的当前目录（百分号编码），每次显示提示符前都发
 #   6973;<口令>;path=…  runode 私有：shell 的 PATH（百分号编码），变了才发，补全跑命令时用
 #   6973;<口令>;aliases=… 以及 functions、builtins  runode 私有：shell 里的缩写（当作别名）、
 #                函数和内建命令，名字之间用 %20 隔开，变了才发，补命令名时用
@@ -62,9 +63,10 @@ function __runode_wrap_prompt --on-event fish_prompt
     end
 end
 
-# 每次显示提示符前，PATH 和上次报告的不一样就报告给 runode。
+# 每次显示提示符前报告当前目录；PATH 和上次报告的不一样时也报告给 runode。
 function __runode_report_path --on-event fish_prompt
     test -n "$__runode_report_token"; or return
+    printf '\e]6973;%s;cwd=%s\a' $__runode_report_token (string escape --style=url -- $PWD)
     set -l path (string join : -- $PATH)
     if test "$path" != "$__runode_path"
         set -g __runode_path $path

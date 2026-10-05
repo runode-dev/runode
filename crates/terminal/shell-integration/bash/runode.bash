@@ -4,6 +4,7 @@
 #
 #   133;A  提示符开始       133;B  提示符结束、用户输入开始
 #   133;C  命令开始执行     133;D  命令执行完（带退出码）
+#   6973;<口令>;cwd=…  runode 私有：shell 的当前目录（百分号编码），每次显示提示符前都发
 #   6973;<口令>;path=…  runode 私有：shell 的 PATH（百分号编码），变了才发，补全跑命令时用
 #   6973;<口令>;aliases=… 以及 functions、builtins、keywords  runode 私有：shell 里的这些
 #                名字，名字之间用 %20 隔开，变了才发，补命令名时用
@@ -82,6 +83,10 @@ if [ -z "${_runode_integrated-}" ]; then
         if [ "$PS2" != "$_runode_ps2" ]; then
             _runode_ps2='\[\033]133;A;k=s\007\]'"$PS2"'\[\033]133;B\007\]'
             PS2=$_runode_ps2
+        fi
+        if [ -n "${_runode_report_token-}" ]; then
+            _runode_urlencode "$PWD"
+            printf '\033]6973;%s;cwd=%s\007' "$_runode_report_token" "$_runode_encoded"
         fi
         if [ -n "${_runode_report_token-}" ] && [ "$PATH" != "$_runode_path" ]; then
             _runode_path=$PATH
