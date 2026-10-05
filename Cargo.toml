@@ -50,3 +50,34 @@ opt-level = 2
 # 的最新版仍依赖 block 0.1，等它们不再依赖或 block 出修复版，再删掉这段 patch 和副本。
 [patch.crates-io]
 block = { path = "vendor/crates/block" }
+
+# 只开现有代码已经满足的规则，防着以后倒退；新加规则时先把代码改干净。
+[workspace.lints.rust]
+unused_lifetimes = "warn"
+redundant_lifetimes = "warn"
+unused_import_braces = "warn"
+unused_macro_rules = "warn"
+trivial_casts = "warn"
+trivial_numeric_casts = "warn"
+unit_bindings = "warn"
+non_ascii_idents = "warn"
+
+[workspace.lints.clippy]
+# 调试用的宏和占位不留在代码里。
+dbg_macro = "warn"
+todo = "warn"
+unimplemented = "warn"
+# 输出一律走 tracing；构建脚本不受这两条限制。以后加命令行程序时在它自己的 crate 里放开。
+print_stdout = "warn"
+print_stderr = "warn"
+redundant_clone = "warn"
+implicit_clone = "warn"
+cloned_instead_of_copied = "warn"
+inefficient_to_string = "warn"
+large_types_passed_by_value = "warn"
+uninlined_format_args = "warn"
+manual_let_else = "warn"
+mut_mut = "warn"
+ptr_as_ptr = "warn"
+ref_option_ref = "warn"
+wildcard_imports = "warn"

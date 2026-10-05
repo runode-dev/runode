@@ -9,3 +9,6 @@ publish.workspace = true
 [dependencies]
 # 分屏方向随窗口布局一起存档。
 serde.workspace = true
+
+[lints]
+workspace = true

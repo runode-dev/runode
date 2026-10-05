@@ -25,3 +25,6 @@ tracing.workspace = true
 # 构建脚本把命令规格的 JSON 压紧、逐个压缩后嵌进二进制。
 miniz_oxide.workspace = true
 serde_json.workspace = true
+
+[lints]
+workspace = true

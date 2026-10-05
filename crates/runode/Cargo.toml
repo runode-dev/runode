@@ -35,3 +35,6 @@ notify.workspace = true
 objc2.workspace = true
 objc2-foundation = { workspace = true, features = ["std", "NSArray", "NSData", "NSLocale", "NSString"] }
 objc2-app-kit = { workspace = true, features = ["std", "NSApplication", "NSResponder", "NSImage", "NSMenu", "NSMenuItem", "NSEvent"] }
+
+[lints]
+workspace = true

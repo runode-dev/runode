@@ -19,3 +19,6 @@ tracing.workspace = true
 # 命令历史存成一行一条的 JSON。
 serde.workspace = true
 serde_json.workspace = true
+
+[lints]
+workspace = true
