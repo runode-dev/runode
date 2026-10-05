@@ -32,6 +32,6 @@ notify.workspace = true
 
 # 标准「关于」面板、系统偏好的语言和窗口菜单只有 AppKit 提供，GPUI 没有封装。
 [target.'cfg(target_os = "macos")'.dependencies]
-objc2 = "0.6"
-objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSArray", "NSData", "NSLocale", "NSString"] }
-objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSApplication", "NSResponder", "NSImage", "NSMenu", "NSMenuItem", "NSEvent"] }
+objc2.workspace = true
+objc2-foundation = { workspace = true, features = ["std", "NSArray", "NSData", "NSLocale", "NSString"] }
+objc2-app-kit = { workspace = true, features = ["std", "NSApplication", "NSResponder", "NSImage", "NSMenu", "NSMenuItem", "NSEvent"] }

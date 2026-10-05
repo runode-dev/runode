@@ -37,6 +37,10 @@ notify = "8"
 # 规格数据改由构建脚本压缩后嵌入。
 warp-command-signatures = { path = "vendor/command-signatures/command-signatures", default-features = false }
 miniz_oxide = "0.9"
+# AppKit 和 Foundation 的绑定，只在 macOS 上用。不要默认特性，各 crate 按用到的类型自己开。
+objc2 = "0.6"
+objc2-foundation = { version = "0.3", default-features = false }
+objc2-app-kit = { version = "0.3", default-features = false }
 
 [profile.dev.package."*"]
 opt-level = 2
