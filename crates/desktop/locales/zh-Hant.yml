@@ -84,6 +84,17 @@ paste:
 search:
   placeholder: 搜尋
   no_results: 沒有結果
+tooltip:
+  show_sidebar: 顯示側欄
+  hide_sidebar: 隱藏側欄
+  show_changes: 顯示改動
+  hide_changes: 隱藏改動
+  show_files: 顯示檔案
+  hide_files: 隱藏檔案
+  show_ignored: 顯示被 git 忽略的檔案
+  hide_ignored: 隱藏被 git 忽略的檔案
+  close_preview: 關閉預覽
+  close_search: 關閉搜尋
 completion:
   loading: 載入中…
   no_matches: 沒有符合項目

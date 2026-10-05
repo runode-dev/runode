@@ -18,7 +18,7 @@ use std::{
 
 use gpui::{
     AnyElement, App, ClipboardItem, Context, Div, Focusable as _, FontStyle, FontWeight, HighlightStyle, Image, ImageSource,
-    ListHorizontalSizingBehavior, MouseButton, MouseDownEvent, MouseMoveEvent, Render, SharedString, Stateful,
+    ListHorizontalSizingBehavior, MouseButton, MouseDownEvent, MouseMoveEvent, SharedString, Stateful,
     StyledText, UniformListScrollHandle, Window, div, img, prelude::*, px, uniform_list,
 };
 use runode_git_status::{self as git, LineKind, Section};
@@ -32,6 +32,7 @@ use super::{
 use crate::{
     config::AppConfig,
     terminal_view::{Copy, SelectAll, hsla},
+    tooltip::tooltip,
 };
 
 /// 行高比字号多出的部分。
@@ -262,28 +263,6 @@ fn highlight_style(style: runode_preview::Style, fg: Rgb, palette: &[Rgb; 16]) -
     }
 }
 
-/// 悬停在预览栏标题上时显示文件的完整路径。
-struct PathTooltip {
-    path: SharedString,
-    fg: Rgb,
-    bg: Rgb,
-}
-
-impl Render for PathTooltip {
-    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
-        div()
-            .px(px(8.))
-            .py(px(4.))
-            .rounded(px(4.))
-            .border_1()
-            .border_color(hsla(self.fg).opacity(0.15))
-            .bg(hsla(self.bg.mix(self.fg, 0.08)))
-            .text_size(px(12.))
-            .text_color(hsla(self.fg))
-            .child(self.path.clone())
-    }
-}
-
 impl WindowView {
     pub(super) fn preview(&self) -> Option<&Preview> {
         self.workspace().project.preview.as_ref()
@@ -485,7 +464,7 @@ impl WindowView {
             .truncate()
             .text_color(hsla(fg))
             .child(name)
-            .tooltip(move |_, cx| cx.new(|_| PathTooltip { path: full_path.clone(), fg, bg }).into());
+            .tooltip(tooltip(full_path, None, fg, bg));
         let close = div()
             .id("preview-close")
             .flex_none()
@@ -497,6 +476,7 @@ impl WindowView {
             .text_color(dim)
             .hover(|close| close.bg(hsla(bg.mix(fg, 0.14))).text_color(hsla(fg)))
             .child("×")
+            .tooltip(tooltip(rust_i18n::t!("tooltip.close_preview"), None, fg, bg))
             // 标题栏按下会拖动窗口，按钮自己接住。
             .on_mouse_down(
                 MouseButton::Left,

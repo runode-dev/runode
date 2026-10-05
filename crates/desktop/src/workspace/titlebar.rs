@@ -13,7 +13,10 @@ use super::{
     AGENT_MARK_WIDTH, NEW_TAB_BUTTON_WIDTH, NewTab, SelectLastTab, SelectTab, TAB_CLOSE_SIZE, TITLEBAR_HEIGHT,
     TRAFFIC_LIGHTS_ORIGIN, WindowView, model::TabId,
 };
-use crate::terminal_view::{DEFAULT_TITLE, hsla};
+use crate::{
+    terminal_view::{DEFAULT_TITLE, hsla},
+    tooltip::{shortcut_text, tooltip},
+};
 
 /// 标签右侧槽位的宽度，放快捷键提示或响铃标记；和关闭按钮一边一个，标题才在标签里居中。
 const TAB_SIDE_SLOT: f32 = 20.;
@@ -124,15 +127,7 @@ pub(super) fn agent_mark(agent: Agent, id: impl Into<ElementId>, fg: Hsla) -> An
 /// 快捷键提示，从键位表里查，快捷键改了也跟着变：先找 `select` 的绑定，`is_last` 时再找
 /// `last` 的。后加的绑定优先，显示最后一个。
 pub(super) fn shortcut_hint(select: &dyn Action, last: &dyn Action, is_last: bool, cx: &App) -> Option<SharedString> {
-    let keymap = cx.key_bindings();
-    let keymap = keymap.borrow();
-    let text = |action: &dyn Action| {
-        keymap.bindings_for_action(action).next_back().map(|binding| {
-            let strokes: Vec<_> = binding.keystrokes().iter().map(ToString::to_string).collect();
-            SharedString::from(strokes.join(" "))
-        })
-    };
-    text(select).or_else(|| if is_last { text(last) } else { None })
+    shortcut_text(select, cx).or_else(|| if is_last { shortcut_text(last, cx) } else { None })
 }
 
 /// 第 `ix` 个标签的快捷键提示。默认是 ⌘1 到 ⌘8 对应前八个，⌘9 对应最后一个。
@@ -158,6 +153,7 @@ impl WindowView {
         let active = ix == workspace.active;
         let active_bg = hsla(bg.mix(fg, 0.08));
         let hover_bg = hsla(bg.mix(fg, 0.04));
+        let close_tooltip = tooltip(rust_i18n::t!("menu.close_tab"), None, fg, bg);
         let fg = hsla(fg);
         let group = SharedString::from(format!("tab-{ix}"));
         // 当前标签自己就是一块亮色，和它相邻的分隔线去掉，只是不画颜色，免得宽度跳动。
@@ -279,6 +275,7 @@ impl WindowView {
                     .text_color(fg.opacity(0.75))
                     .hover(|close| close.bg(fg.opacity(0.18)).text_color(fg))
                     .child("×")
+                    .tooltip(close_tooltip)
                     .on_mouse_down(
                         MouseButton::Left,
                         cx.listener(move |this, _, window, cx| {
@@ -293,6 +290,7 @@ impl WindowView {
 
     pub(super) fn render_new_tab_button(&self, fg: Rgb, bg: Rgb, cx: &mut Context<Self>) -> Stateful<Div> {
         let hover_bg = hsla(bg.mix(fg, 0.04));
+        let tooltip = tooltip(rust_i18n::t!("menu.new_tab"), Some(&NewTab), fg, bg);
         let fg = hsla(fg);
         div()
             .id("new-tab")
@@ -308,6 +306,7 @@ impl WindowView {
             .text_color(fg.opacity(0.55))
             .hover(|button| button.bg(hover_bg).text_color(fg))
             .child("+")
+            .tooltip(tooltip)
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(|this, _, window, cx| {

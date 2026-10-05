@@ -84,6 +84,17 @@ paste:
 search:
   placeholder: 搜索
   no_results: 无结果
+tooltip:
+  show_sidebar: 显示侧栏
+  hide_sidebar: 隐藏侧栏
+  show_changes: 显示改动
+  hide_changes: 隐藏改动
+  show_files: 显示文件
+  hide_files: 隐藏文件
+  show_ignored: 显示被 git 忽略的文件
+  hide_ignored: 隐藏被 git 忽略的文件
+  close_preview: 关闭预览
+  close_search: 关闭搜索
 completion:
   loading: 加载中…
   no_matches: 没有匹配项

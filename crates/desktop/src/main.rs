@@ -14,6 +14,7 @@ mod prespawn;
 mod search_bar;
 mod sprites;
 mod terminal_view;
+mod tooltip;
 mod window;
 mod workspace;
 

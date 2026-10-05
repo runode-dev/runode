@@ -3,8 +3,9 @@
 use gpui::{AppContext as _, Context, CursorStyle, Entity, Focusable, Window, div, prelude::*, px};
 
 use super::{TerminalView, hsla};
-use crate::search_bar::{
-    EndSearch, SearchField, SearchFieldEvent, SearchNext, SearchPrevious, SearchSelection, StartSearch,
+use crate::{
+    search_bar::{EndSearch, SearchField, SearchFieldEvent, SearchNext, SearchPrevious, SearchSelection, StartSearch},
+    tooltip::tooltip,
 };
 
 impl TerminalView {
@@ -147,15 +148,15 @@ impl TerminalView {
                     .text_color(fg.opacity(0.6))
                     .child(status),
             )
-            .child(button("search-previous", "↑").on_click(cx.listener(|view, _, _, cx| {
+            .child(button("search-previous", "↑").tooltip(tooltip(rust_i18n::t!("menu.find_previous"), Some(&SearchPrevious), frame.0, frame.1)).on_click(cx.listener(|view, _, _, cx| {
                 view.session.search_step(true);
                 cx.notify();
             })))
-            .child(button("search-next", "↓").on_click(cx.listener(|view, _, _, cx| {
+            .child(button("search-next", "↓").tooltip(tooltip(rust_i18n::t!("menu.find_next"), Some(&SearchNext), frame.0, frame.1)).on_click(cx.listener(|view, _, _, cx| {
                 view.session.search_step(false);
                 cx.notify();
             })))
-            .child(button("search-close", "×").on_click(cx.listener(|view, _, window, cx| {
+            .child(button("search-close", "×").tooltip(tooltip(rust_i18n::t!("tooltip.close_search"), Some(&EndSearch), frame.0, frame.1)).on_click(cx.listener(|view, _, window, cx| {
                 view.close_search(window, cx);
             })))
     }

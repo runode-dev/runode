@@ -15,7 +15,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use gpui::{Context, CursorStyle, Div, MouseButton, MouseDownEvent, Stateful, Window, div, prelude::*, px, svg};
+use gpui::{Action, Context, CursorStyle, Div, MouseButton, MouseDownEvent, Stateful, Window, div, prelude::*, px, svg};
 use runode_git_status::FileStatus;
 use runode_shared_types::color::Rgb;
 
@@ -23,6 +23,7 @@ use super::{DIVIDER_GRAB_WIDTH, Divider, TITLEBAR_HEIGHT, ToggleChanges, ToggleF
 use crate::{
     assets::{CHANGES_ICON, FILES_ICON},
     terminal_view::hsla,
+    tooltip::tooltip,
 };
 use scan::scan;
 
@@ -329,6 +330,15 @@ impl WindowView {
     /// 标题栏右上角开关改动栏和文件树的两个按钮，打开着的那个底色亮一些。
     pub(super) fn render_panel_toggles(&self, fg: Rgb, bg: Rgb, cx: &mut Context<Self>) -> Div {
         let button = |id: &'static str, icon: &'static str, shown: bool, cx: &mut Context<Self>| {
+            let changes = id == "toggle-changes";
+            let text = match (changes, shown) {
+                (true, true) => rust_i18n::t!("tooltip.hide_changes"),
+                (true, false) => rust_i18n::t!("tooltip.show_changes"),
+                (false, true) => rust_i18n::t!("tooltip.hide_files"),
+                (false, false) => rust_i18n::t!("tooltip.show_files"),
+            };
+            let action: &dyn Action = if changes { &ToggleChanges } else { &ToggleFiles };
+            let tooltip = tooltip(text, Some(action), fg, bg);
             let hover_bg = hsla(bg.mix(fg, 0.10));
             let active_bg = hsla(bg.mix(fg, 0.14));
             let fg = hsla(fg);
@@ -350,11 +360,12 @@ impl WindowView {
                         .text_color(fg.opacity(if shown { 0.9 } else { 0.55 }))
                         .group_hover(id, |icon| icon.text_color(fg)),
                 )
+                .tooltip(tooltip)
                 .on_mouse_down(
                     MouseButton::Left,
                     cx.listener(move |this, _, window, cx| {
                         cx.stop_propagation();
-                        if id == "toggle-changes" {
+                        if changes {
                             this.toggle_changes(&ToggleChanges, window, cx);
                         } else {
                             this.toggle_files(&ToggleFiles, window, cx);

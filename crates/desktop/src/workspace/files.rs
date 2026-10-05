@@ -19,6 +19,7 @@ use crate::{
     config::AppConfig,
     file_icons::{file_icon, folder_icon},
     terminal_view::hsla,
+    tooltip::tooltip,
 };
 
 /// 行高比字号多出的部分。
@@ -66,6 +67,12 @@ impl WindowView {
                     .size(px(14.))
                     .text_color(hsla(fg).opacity(if show_ignored { 0.9 } else { 0.55 })),
             )
+            .tooltip(tooltip(
+                if show_ignored { rust_i18n::t!("tooltip.hide_ignored") } else { rust_i18n::t!("tooltip.show_ignored") },
+                None,
+                fg,
+                bg,
+            ))
             .on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| this.toggle_show_ignored(cx)));
         let header = self.panel_header(true, fg).child(div().flex_1().min_w_0().truncate().text_color(hsla(fg)).child(name));
         // 标题下面一行：左边是没提交的改动一共加减了多少行，右边是显示忽略文件的开关。

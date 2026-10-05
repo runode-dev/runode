@@ -16,6 +16,7 @@ use crate::{
     assets::SIDEBAR_ICON,
     search_bar::{SearchField, SearchFieldEvent},
     terminal_view::hsla,
+    tooltip::tooltip,
 };
 
 /// 侧栏的默认宽度，比红绿灯宽得多，红绿灯落在侧栏顶上。
@@ -116,6 +117,8 @@ impl WindowView {
     /// 红绿灯右边收起、展开侧栏的按钮，侧栏收着时也在原处，不随侧栏跳动。
     pub(super) fn render_sidebar_toggle(&self, fg: Rgb, bg: Rgb, cx: &mut Context<Self>) -> Stateful<Div> {
         let hover_bg = hsla(bg.mix(fg, 0.10));
+        let text = if self.sidebar_visible() { rust_i18n::t!("tooltip.hide_sidebar") } else { rust_i18n::t!("tooltip.show_sidebar") };
+        let tooltip = tooltip(text, Some(&ToggleSidebar), fg, bg);
         let fg = hsla(fg);
         let group = "sidebar-toggle";
         div()
@@ -138,6 +141,7 @@ impl WindowView {
                     .text_color(fg.opacity(0.55))
                     .group_hover(group, |icon| icon.text_color(fg)),
             )
+            .tooltip(tooltip)
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(|this, _, window, cx| {
@@ -197,6 +201,7 @@ impl WindowView {
         let active_bg = hsla(bg.mix(fg, 0.10));
         let hover_bg = hsla(bg.mix(fg, 0.06));
         let field_bg = hsla(bg);
+        let close_tooltip = tooltip(rust_i18n::t!("menu.close_workspace"), None, fg, bg);
         let fg = hsla(fg);
         let group = SharedString::from(format!("workspace-{ix}"));
         let renaming = self.renaming.as_ref().filter(|renaming| renaming.id == id).map(|r| r.field.clone());
@@ -333,6 +338,7 @@ impl WindowView {
                             .text_color(fg.opacity(0.75))
                             .hover(|close| close.bg(fg.opacity(0.18)).text_color(fg))
                             .child("×")
+                            .tooltip(close_tooltip)
                             .on_mouse_down(
                                 MouseButton::Left,
                                 cx.listener(move |this, _, window, cx| {
@@ -348,6 +354,7 @@ impl WindowView {
 
     fn render_new_workspace_button(&self, fg: Rgb, bg: Rgb, cx: &mut Context<Self>) -> Stateful<Div> {
         let hover_bg = hsla(bg.mix(fg, 0.06));
+        let tooltip = tooltip(rust_i18n::t!("workspace.new"), Some(&NewWorkspace), fg, bg);
         let fg = hsla(fg);
         div()
             .id("new-workspace")
@@ -371,6 +378,7 @@ impl WindowView {
                     .child("+"),
             )
             .child(div().min_w_0().truncate().child(rust_i18n::t!("workspace.new").into_owned()))
+            .tooltip(tooltip)
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(|this, _, window, cx| {

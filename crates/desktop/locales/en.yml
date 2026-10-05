@@ -84,6 +84,17 @@ paste:
 search:
   placeholder: Search
   no_results: No results
+tooltip:
+  show_sidebar: Show Sidebar
+  hide_sidebar: Hide Sidebar
+  show_changes: Show Changes
+  hide_changes: Hide Changes
+  show_files: Show Files
+  hide_files: Hide Files
+  show_ignored: Show Files Ignored by Git
+  hide_ignored: Hide Files Ignored by Git
+  close_preview: Close Preview
+  close_search: Close Search
 completion:
   loading: Loading…
   no_matches: No matches
