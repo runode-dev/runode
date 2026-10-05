@@ -46,6 +46,9 @@ pub struct Pty {
     /// `Drop` 里交给回收线程，所以是 `Option`。
     child: Option<Box<dyn Child + Send + Sync>>,
     pub writer: PtyWriter,
+    /// 启动 shell 时交给集成脚本的报告口令，见 `shell_integration::prepare`；没注入集成或者
+    /// 还没启动时为 `None`。
+    report_token: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -99,6 +102,7 @@ impl Pty {
                 pending: Some((pair.slave, tx)),
                 child: None,
                 writer: PtyWriter(Arc::new(Mutex::new(writer))),
+                report_token: None,
             },
             rx,
         ))
@@ -107,6 +111,11 @@ impl Pty {
     /// 已经启动了 shell。
     pub fn started(&self) -> bool {
         self.pending.is_none()
+    }
+
+    /// shell 报告 PATH 等信息时要带的口令，见 `shell_integration::prepare`。
+    pub fn report_token(&self) -> Option<&str> {
+        self.report_token.as_deref()
     }
 
     /// 在 `cwd` 下启动 shell 和读线程，参数同 `spawn`。已经启动过时什么都不做。
@@ -125,7 +134,7 @@ impl Pty {
             .unwrap_or_else(|| "/bin/zsh".into());
         let mut cmd = CommandBuilder::new(&shell);
         // 用登录 shell，这样会执行用户的 profile。
-        shell_integration::prepare(integration, &shell, &mut cmd);
+        let report_token = shell_integration::prepare(integration, &shell, &mut cmd);
         cmd.env("TERM", "xterm-256color");
         cmd.env("COLORTERM", "truecolor");
         cmd.env("TERM_PROGRAM", "runode");
@@ -143,6 +152,7 @@ impl Pty {
 
         let child = slave.spawn_command(cmd).context("failed to spawn shell")?;
         self.child = Some(child);
+        self.report_token = report_token;
         // 子进程持有自己的 slave 副本；我们这份必须关掉，子进程退出时才会读到 EOF。
         drop(slave);
 

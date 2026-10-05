@@ -21,7 +21,7 @@ pub fn executables(path: &OsStr) -> Vec<String> {
     let cache = CACHE.get_or_init(Default::default);
     let mut names = BTreeSet::new();
     for dir in std::env::split_paths(path) {
-        // 空的一项表示当前目录，那里的东西不算命令。
+        // 空的一项、`.` 和别的相对路径都相对于当前目录，那里的东西不算命令。
         if dir.as_os_str().is_empty() || !dir.is_absolute() {
             continue;
         }
@@ -81,6 +81,12 @@ mod tests {
         std::thread::sleep(std::time::Duration::from_millis(1100));
         make("aa-tool", 0o755);
         assert!(executables(&path).contains(&"aa-tool".to_owned()));
+        // 同一个目录写成相对路径时不列。
+        let cwd = std::env::current_dir().unwrap();
+        let up = "../".repeat(cwd.components().count() - 1);
+        let relative = Path::new(&up).join(dir.strip_prefix("/").unwrap());
+        assert!(relative.is_relative() && relative.join("zz-tool").exists());
+        assert!(executables(relative.as_os_str()).is_empty());
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

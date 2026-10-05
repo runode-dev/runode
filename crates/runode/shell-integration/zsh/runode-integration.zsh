@@ -3,14 +3,21 @@
 #   133;A  提示符开始       133;B  提示符结束、用户输入开始
 #   133;C  命令开始执行     133;D  命令执行完（带退出码）
 #   133;P;k=r  右侧提示符开始，画完后用 133;B 回到用户输入
-#   6973;path=…  runode 私有：shell 的 PATH（百分号编码），变了才发，补全跑命令时用
-#   6973;aliases=… 以及 functions、builtins、keywords  runode 私有：shell 里的这些名字，
-#                名字之间用 %20 隔开，变了才发，补命令名时用
-#   6973;alias_values=…  runode 私有：别名展开成什么，一行一个「名字<Tab>值」，整体百分号
-#                编码，变了才发，补命令名时当说明显示
+#   6973;<口令>;path=…  runode 私有：shell 的 PATH（百分号编码），变了才发，补全跑命令时用
+#   6973;<口令>;aliases=… 以及 functions、builtins、keywords  runode 私有：shell 里的这些
+#                名字，名字之间用 %20 隔开，变了才发，补命令名时用
+#   6973;<口令>;alias_values=…  runode 私有：别名展开成什么，一行一个「名字<Tab>值」，整体
+#                百分号编码，变了才发，补命令名时当说明显示
+#   6973;<口令>;command=…  runode 私有：紧接在 133;C 前面，说明这次命令开始是真的，值是用户
+#                输入的命令原文（百分号编码），拿不到时为空，终端从屏幕上读；runode 只把这样
+#                认过的命令记进历史
 #
 # 标记直接写进 PS1、PS2、RPROMPT，提示符因为改窗口大小等原因重画时会跟着重发。
-# 133;C 带上用户输入的命令原文（cmdline_url，百分号编码），终端不必再从屏幕上读。
+#
+# 口令是 runode 启动这个 shell 时随机生成、经环境变量 RUNODE_REPORT_TOKEN 给的，集成目录里的
+# .zshenv 最先把它读进不导出的 _runode_report_token 并从环境里删掉。runode 只认带着这个口令的
+# 6973 报告，屏幕上的别的输出伪造不了。没有口令时不发 6973 报告：比如 exec zsh 或者在里面再开
+# 一层 zsh，新的 shell 拿不到口令，runode 就沿用之前报告的内容。
 
 [[ -o interactive ]] || 'builtin' 'return' 0
 (( ${+_runode_integrated} )) && 'builtin' 'return' 0
@@ -51,11 +58,11 @@ _runode_precmd() {
         _runode_rps1=$'%{\e]133;P;k=r\a%}'"$RPROMPT"$'%{\e]133;B\a%}'
         RPROMPT=$_runode_rps1
     fi
-    if [[ $PATH != "$_runode_path" ]]; then
+    if [[ -n ${_runode_report_token-} && $PATH != "$_runode_path" ]]; then
         _runode_path=$PATH
         'builtin' 'local' REPLY
         _runode_urlencode "$PATH"
-        'builtin' 'print' -rn -- $'\e]6973;path='"$REPLY"$'\a'
+        'builtin' 'print' -rn -- $'\e]6973;'"$_runode_report_token;path=$REPLY"$'\a'
     fi
     _runode_report_names
     # 有的插件会在运行时往钩子列表里追加函数，每次都把自己挪回两头。
@@ -69,6 +76,7 @@ _runode_precmd() {
 # 百分号编码，也顺带滤掉补全系统和 runode 自己以 `_` 开头的内部函数。全是 zsh 内部的展开，
 # 不起子进程。
 _runode_report_names() {
+    [[ -n ${_runode_report_token-} ]] || 'builtin' 'return' 0
     'builtin' 'emulate' -L zsh -o extended_glob
     'builtin' 'local' kind raw joined
     'builtin' 'local' -a names
@@ -87,7 +95,7 @@ _runode_report_names() {
         joined=${(j:%20:)names}
         if [[ $joined != "${_runode_names[$kind]-}" ]]; then
             _runode_names[$kind]=$joined
-            'builtin' 'print' -rn -- $'\e]6973;'"$kind=$joined"$'\a'
+            'builtin' 'print' -rn -- $'\e]6973;'"$_runode_report_token;$kind=$joined"$'\a'
         fi
     done
     # 别名的值可能含任何字，逐字编码比较慢，只在别名有变化时做。值里有换行或 Tab 的不报告。
@@ -100,7 +108,7 @@ _runode_report_names() {
         lines+=$name$'\t'${aliases[$name]}$'\n'
     done
     _runode_urlencode "$lines"
-    'builtin' 'print' -rn -- $'\e]6973;alias_values='"$REPLY"$'\a'
+    'builtin' 'print' -rn -- $'\e]6973;'"$_runode_report_token;alias_values=$REPLY"$'\a'
 }
 
 # 把 $1 按字节做百分号编码，结果放在 REPLY 里：分号、换行、ESC、BEL 和非 ASCII 字节都不会
@@ -120,15 +128,15 @@ _runode_urlencode() {
     done
 }
 
-# $1 是用户输入的命令原文；拿不到时只报告命令开始，终端从屏幕上读。
+# $1 是用户输入的命令原文，放在带口令的 command 报告里；拿不到时报告的原文为空，终端从屏幕上
+# 读。没有口令时只报告命令开始，runode 不把它记进历史。
 _runode_preexec() {
-    if [[ -n $1 ]]; then
-        'builtin' 'local' REPLY
-        _runode_urlencode "$1"
-        'builtin' 'print' -rn -- $'\e]133;C;cmdline_url='"$REPLY"$'\a'
-    else
-        'builtin' 'print' -rn -- $'\e]133;C\a'
+    if [[ -n ${_runode_report_token-} ]]; then
+        'builtin' 'local' REPLY=
+        [[ -z $1 ]] || _runode_urlencode "$1"
+        'builtin' 'print' -rn -- $'\e]6973;'"$_runode_report_token;command=$REPLY"$'\a'
     fi
+    'builtin' 'print' -rn -- $'\e]133;C\a'
     _runode_ran=1
 }
 

@@ -4,6 +4,14 @@
 #
 # 这个文件可能在别名生效时被读取，命令都加了引号，免得被别名替换。
 
+# runode 给的报告口令最先读进不导出的变量，再从环境里删掉：后面加载用户配置时启动的程序，以及
+# 这个 shell 里运行的所有程序都继承不到它。集成脚本报告 PATH 等信息时带上它，见集成脚本
+# 开头的说明。
+if [[ -n "${RUNODE_REPORT_TOKEN-}" ]]; then
+    'builtin' 'typeset' -g +x _runode_report_token="$RUNODE_REPORT_TOKEN"
+fi
+'builtin' 'unset' 'RUNODE_REPORT_TOKEN'
+
 if [[ -n "${RUNODE_ZSH_ZDOTDIR+X}" ]]; then
     'builtin' 'export' ZDOTDIR="$RUNODE_ZSH_ZDOTDIR"
     'builtin' 'unset' 'RUNODE_ZSH_ZDOTDIR'

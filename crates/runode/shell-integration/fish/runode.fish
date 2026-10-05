@@ -3,14 +3,28 @@
 #   133;A  提示符开始       133;B  提示符结束、用户输入开始
 #   133;C  命令开始执行     133;D  命令执行完（带退出码）
 #   133;P;k=r  右侧提示符开始，画完后用 133;B 回到用户输入
-#   6973;path=…  runode 私有：shell 的 PATH（百分号编码），变了才发，补全跑命令时用
-#   6973;aliases=… 以及 functions、builtins  runode 私有：shell 里的缩写（当作别名）、函数和
-#                内建命令，名字之间用 %20 隔开，变了才发，补命令名时用
+#   6973;<口令>;path=…  runode 私有：shell 的 PATH（百分号编码），变了才发，补全跑命令时用
+#   6973;<口令>;aliases=… 以及 functions、builtins  runode 私有：shell 里的缩写（当作别名）、
+#                函数和内建命令，名字之间用 %20 隔开，变了才发，补命令名时用
+#   6973;<口令>;command=…  runode 私有：紧接在 133;C 前面，说明这次命令开始是真的，值是用户
+#                输入的命令原文（百分号编码），拿不到时为空，终端从屏幕上读；runode 只把这样
+#                认过的命令记进历史
 #
-# 133;C 带上用户输入的命令原文（cmdline_url，百分号编码），终端不必再从屏幕上读。
+# 口令是 runode 启动这个 shell 时随机生成、经环境变量 RUNODE_REPORT_TOKEN 给的。runode 只认
+# 带着这个口令的 6973 报告，屏幕上的别的输出伪造不了。没有口令时不发 6973 报告：比如 exec fish
+# 或者在里面再开一层 fish，新的 shell 拿不到口令，runode 就沿用之前报告的内容。
 #
 # runode 把这个文件所在的数据目录加进 XDG_DATA_DIRS，fish 启动时会自动加载
 # vendor_conf.d 里的脚本。先把加进去的那一项去掉，免得在这个 shell 里启动的程序继承它。
+
+# 口令最先读进不导出的变量，再从环境里删掉，这个 shell 里运行的程序都继承不到它。这个文件又被
+# 加载一次时环境里已经没有口令，保留已经读到的。
+if set -q RUNODE_REPORT_TOKEN
+    if test -n "$RUNODE_REPORT_TOKEN"
+        set -gu __runode_report_token $RUNODE_REPORT_TOKEN
+    end
+    set -e RUNODE_REPORT_TOKEN
+end
 
 if set -q RUNODE_FISH_DATA_DIR
     if set -l index (contains --index -- $RUNODE_FISH_DATA_DIR $XDG_DATA_DIRS)
@@ -50,10 +64,11 @@ end
 
 # 每次显示提示符前，PATH 和上次报告的不一样就报告给 runode。
 function __runode_report_path --on-event fish_prompt
+    test -n "$__runode_report_token"; or return
     set -l path (string join : -- $PATH)
     if test "$path" != "$__runode_path"
         set -g __runode_path $path
-        printf '\e]6973;path=%s\a' (string escape --style=url -- $path)
+        printf '\e]6973;%s;path=%s\a' $__runode_report_token (string escape --style=url -- $path)
     end
 end
 
@@ -61,6 +76,7 @@ end
 # 一样就不发。只报告以字母或数字开头、由字母数字和 `_.:+@,=-` 组成的名字，名字之间写 %20 就是
 # 百分号编码。这些都是 fish 的内建命令，在命令替换里不起子进程。
 function __runode_report_names --on-event fish_prompt
+    test -n "$__runode_report_token"; or return
     for kind in aliases functions builtins
         set -l names
         switch $kind
@@ -80,18 +96,23 @@ function __runode_report_names --on-event fish_prompt
         set -l var __runode_names_$kind
         if test "$joined" != "$$var"
             set -g $var $joined
-            printf '\e]6973;%s=%s\a' $kind $joined
+            printf '\e]6973;%s;%s=%s\a' $__runode_report_token $kind $joined
         end
     end
 end
 
-# $argv[1] 是用户输入的命令原文，按百分号编码发出，分号、换行和控制字符都不会打断转义序列。
+# $argv[1] 是用户输入的命令原文，按百分号编码放进带口令的 command 报告，分号、换行和控制字符
+# 都不会打断转义序列；拿不到时报告的原文为空，终端从屏幕上读。没有口令时只报告命令开始，
+# runode 不把它记进历史。
 function __runode_preexec --on-event fish_preexec
-    if test -n "$argv[1]"
-        printf '\e]133;C;cmdline_url=%s\a' (string escape --style=url -- $argv[1])
-    else
-        printf '\e]133;C\a'
+    if test -n "$__runode_report_token"
+        set -l command
+        if test -n "$argv[1]"
+            set command (string escape --style=url -- $argv[1])
+        end
+        printf '\e]6973;%s;command=%s\a' $__runode_report_token "$command"
     end
+    printf '\e]133;C\a'
 end
 
 function __runode_postexec --on-event fish_postexec

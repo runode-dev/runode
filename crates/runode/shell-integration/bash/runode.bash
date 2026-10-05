@@ -4,13 +4,27 @@
 #
 #   133;A  提示符开始       133;B  提示符结束、用户输入开始
 #   133;C  命令开始执行     133;D  命令执行完（带退出码）
-#   6973;path=…  runode 私有：shell 的 PATH（百分号编码），变了才发，补全跑命令时用
-#   6973;aliases=… 以及 functions、builtins、keywords  runode 私有：shell 里的这些名字，
-#                名字之间用 %20 隔开，变了才发，补命令名时用
-#   6973;alias_values=…  runode 私有：别名展开成什么，一行一个「名字<Tab>值」，整体百分号
-#                编码，变了才发（bash 4 起），补命令名时当说明显示
+#   6973;<口令>;path=…  runode 私有：shell 的 PATH（百分号编码），变了才发，补全跑命令时用
+#   6973;<口令>;aliases=… 以及 functions、builtins、keywords  runode 私有：shell 里的这些
+#                名字，名字之间用 %20 隔开，变了才发，补命令名时用
+#   6973;<口令>;alias_values=…  runode 私有：别名展开成什么，一行一个「名字<Tab>值」，整体
+#                百分号编码，变了才发（bash 4 起），补命令名时当说明显示
+#   6973;<口令>;command=…  runode 私有：紧接在 133;C 前面，说明这次命令开始是真的，值尽量是
+#                命令原文（百分号编码），拿不到时为空，终端从屏幕上读；runode 只把这样认过的
+#                命令记进历史。bash 4.4 起才有，更老的 bash 没有命令开始的标记
 #
-# 133;C 尽量带上命令原文（cmdline_url，百分号编码），终端不必再从屏幕上读。
+# 口令是 runode 启动这个 shell 时随机生成、经环境变量 RUNODE_REPORT_TOKEN 给的。runode 只认
+# 带着这个口令的 6973 报告，屏幕上的别的输出伪造不了。没有口令时不发 6973 报告：比如 exec bash
+# 或者在里面再开一层 bash，新的 shell 拿不到口令，runode 就沿用之前报告的内容。
+
+# 加载用户配置之前就把口令读进不导出的变量，再从环境里删掉：加载配置时启动的程序，以及这个
+# shell 里运行的所有程序都继承不到它。这个文件又被加载一次时环境里已经没有口令，保留已经读到的。
+if [ -n "${RUNODE_REPORT_TOKEN-}" ]; then
+    # 先删掉同名变量：它要是从环境里继承来的，直接赋值还会带着导出属性。
+    unset _runode_report_token
+    _runode_report_token=$RUNODE_REPORT_TOKEN
+fi
+unset RUNODE_REPORT_TOKEN
 
 if [ -r /etc/profile ]; then
     . /etc/profile
@@ -69,10 +83,10 @@ if [ -z "${_runode_integrated-}" ]; then
             _runode_ps2='\[\033]133;A;k=s\007\]'"$PS2"'\[\033]133;B\007\]'
             PS2=$_runode_ps2
         fi
-        if [ "$PATH" != "$_runode_path" ]; then
+        if [ -n "${_runode_report_token-}" ] && [ "$PATH" != "$_runode_path" ]; then
             _runode_path=$PATH
             _runode_urlencode "$PATH"
-            printf '\033]6973;path=%s\007' "$_runode_encoded"
+            printf '\033]6973;%s;path=%s\007' "$_runode_report_token" "$_runode_encoded"
         fi
         _runode_report_names
     }
@@ -89,7 +103,7 @@ if [ -z "${_runode_integrated-}" ]; then
         var=_runode_names_$kind
         if [ "$joined" != "${!var}" ]; then
             printf -v "$var" '%s' "$joined"
-            printf '\033]6973;%s=%s\007' "$kind" "$joined"
+            printf '\033]6973;%s;%s=%s\007' "$_runode_report_token" "$kind" "$joined"
         fi
     }
 
@@ -106,11 +120,12 @@ if [ -z "${_runode_integrated-}" ]; then
         [ "$lines" = "$_runode_alias_values" ] && return
         _runode_alias_values=$lines
         _runode_urlencode "$lines"
-        printf '\033]6973;alias_values=%s\007' "$_runode_encoded"
+        printf '\033]6973;%s;alias_values=%s\007' "$_runode_report_token" "$_runode_encoded"
     }
 
     # 把别名、函数、内建命令和关键字报告给 runode，补命令名时用。
     _runode_report_names() {
+        [ -n "${_runode_report_token-}" ] || return 0
         local -a list
         if [ -n "$_runode_compgen_v" ]; then
             compgen -V list -a
@@ -159,26 +174,29 @@ if [ -z "${_runode_integrated-}" ]; then
         done
     }
 
-    # 在 PS0 里运行：历史里最新一条的编号正是这条命令该有的编号时，它就是刚输入的命令，
-    # 带上原文报告命令开始。命令没进历史（以空格开头、被 HISTIGNORE 忽略、关了历史等）时
-    # 最新一条是别的命令，只报告命令开始，终端从屏幕上读。
+    # 在 PS0 里运行：先发带口令的 command 报告，再报告命令开始。历史里最新一条的编号正是这条
+    # 命令该有的编号时，它就是刚输入的命令，报告里带上原文。命令没进历史（以空格开头、被
+    # HISTIGNORE 忽略、关了历史等）时最新一条是别的命令，报告的原文为空，终端从屏幕上读。
+    # 没有口令时只报告命令开始，runode 不把它记进历史。
     _runode_command_start() {
-        local entry num
-        entry=$(HISTTIMEFORMAT= builtin history 1)
-        entry=${entry#"${entry%%[![:space:]]*}"}
-        num=${entry%%[!0-9]*}
-        entry=${entry#"$num"}
-        entry=${entry#\*}
-        entry=${entry#"  "}
-        if [ -n "$num" ] && [ "$num" = "$_runode_histnext" ] && [ -n "$entry" ]; then
-            _runode_urlencode "$entry"
-            printf '\033]133;C;cmdline_url=%s\007' "$_runode_encoded"
-        else
-            printf '\033]133;C\007'
+        if [ -n "${_runode_report_token-}" ]; then
+            local entry num
+            entry=$(HISTTIMEFORMAT= builtin history 1)
+            entry=${entry#"${entry%%[![:space:]]*}"}
+            num=${entry%%[!0-9]*}
+            entry=${entry#"$num"}
+            entry=${entry#\*}
+            entry=${entry#"  "}
+            _runode_encoded=
+            if [ -n "$num" ] && [ "$num" = "$_runode_histnext" ] && [ -n "$entry" ]; then
+                _runode_urlencode "$entry"
+            fi
+            printf '\033]6973;%s;command=%s\007' "$_runode_report_token" "$_runode_encoded"
         fi
+        printf '\033]133;C\007'
     }
 
-    # 关了 promptvars 时 PS0 里的命令替换不展开，只发不带原文的标记。
+    # 关了 promptvars 时 PS0 里的命令替换不展开，只发不带报告的标记，runode 不记这些命令。
     if [ -n "$_runode_ps0" ]; then
         if shopt -q promptvars; then
             PS0='$(_runode_command_start)'"${PS0-}"

@@ -109,6 +109,17 @@ pub fn spawn(
     (Job { cancelled }, rx)
 }
 
+/// shell 报告的 PATH 里以 `/` 开头的那些目录。空的一项、`.` 和别的相对路径都相对于生成器命令
+/// 运行的目录，也就是用户当前所在、可能是刚下载下来的目录，那里的程序不该被补全悄悄运行，一律
+/// 去掉。一个都不剩时为 `None`，沿用 runode 自己的 PATH：空的 PATH 同样表示当前目录。
+fn absolute_dirs(path: &std::ffi::OsStr) -> Option<OsString> {
+    let dirs: Vec<PathBuf> = std::env::split_paths(path).filter(|dir| dir.is_absolute()).collect();
+    if dirs.is_empty() {
+        return None;
+    }
+    std::env::join_paths(dirs).ok()
+}
+
 /// 跑命令拿到标准输出；超时、被取消或者跑不起来时为 `None`。
 fn run(command: &str, env: &Environment, cancelled: &AtomicBool) -> Option<String> {
     if !env.cwd.is_dir() {
@@ -119,7 +130,7 @@ fn run(command: &str, env: &Environment, cancelled: &AtomicBool) -> Option<Strin
     // 自成一个进程组，超时时整组杀掉，管道里的其他命令也一起结束。
     cmd.process_group(0);
     cmd.current_dir(&env.cwd);
-    if let Some(path) = &env.path {
+    if let Some(path) = env.path.as_deref().and_then(absolute_dirs) {
         cmd.env("PATH", path);
     }
     let mut child = match cmd.spawn() {
@@ -199,6 +210,12 @@ mod tests {
         let (_job, rx) = spawn("pwd; echo \"$PATH\"; echo err >&2".into(), env, lines);
         let names: Vec<String> = wait(rx).unwrap().suggestions.into_iter().map(|s| s.exact_string).collect();
         assert_eq!(names, ["/", "/bin:/usr/bin:/reported"]);
+        // 相对路径和空的一项都去掉，只剩相对路径时沿用 runode 自己的 PATH。
+        let env = Environment { cwd: "/".into(), path: Some(".:/bin::rel/bin:/usr/bin:".into()) };
+        let (_job, rx) = spawn("echo \"$PATH\"".into(), env, lines);
+        let names: Vec<String> = wait(rx).unwrap().suggestions.into_iter().map(|s| s.exact_string).collect();
+        assert_eq!(names, ["/bin:/usr/bin"]);
+        assert_eq!(absolute_dirs(".::bin".as_ref()), None);
         // 目录不存在时不跑，也不退回别的目录。
         let env = Environment { cwd: "/nonexistent-runode-dir".into(), path: None };
         let (_job, rx) = spawn("echo ran".into(), env, lines);
