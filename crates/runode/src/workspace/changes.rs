@@ -7,6 +7,7 @@ use gpui::{
     AnyElement, Context, Div, MouseButton, MouseDownEvent, SharedString, Stateful, div, img, prelude::*, px, svg,
     uniform_list,
 };
+use runode_git::{LineKind, Section};
 
 use super::{
     WindowView,
@@ -15,7 +16,6 @@ use super::{
 use crate::{
     assets::{CHEVRON_DOWN_ICON, CHEVRON_RIGHT_ICON},
     file_icons::{file_icon, folder_icon},
-    git::{LineKind, Section},
     session::Rgb,
     terminal_view::hsla,
 };

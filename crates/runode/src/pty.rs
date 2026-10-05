@@ -143,9 +143,7 @@ impl Pty {
         if std::env::var_os("CLICOLOR").is_none() {
             cmd.env("CLICOLOR", "1");
         }
-        let cwd = cwd
-            .map(Into::into)
-            .or_else(|| std::env::var_os("HOME").map(Into::into));
+        let cwd = cwd.map(Into::into).or_else(|| runode_dirs::Dirs::from_env().home);
         if let Some(cwd) = cwd {
             cmd.cwd::<std::path::PathBuf>(cwd);
         }
@@ -201,7 +199,7 @@ impl Pty {
 }
 
 pub fn dir_label(path: &Path) -> String {
-    if std::env::var_os("HOME").is_some_and(|home| Path::new(&home) == path) {
+    if runode_dirs::Dirs::from_env().is_home(path) {
         return "~".into();
     }
     match path.file_name() {

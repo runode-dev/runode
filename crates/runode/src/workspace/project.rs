@@ -16,11 +16,11 @@ use gpui::{
     Window, div, prelude::*, px, svg,
 };
 use notify::Watcher as _;
+use runode_git::{self as git, FileStatus, Section};
 
 use super::{DIVIDER_GRAB_WIDTH, Divider, TITLEBAR_HEIGHT, ToggleChanges, ToggleFiles, WindowView, Workspace};
 use crate::{
     assets::{CHANGES_ICON, FILES_ICON},
-    git::{self, FileStatus, Section},
     session::Rgb,
     terminal_view::hsla,
 };

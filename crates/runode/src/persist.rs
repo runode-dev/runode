@@ -157,22 +157,7 @@ pub fn set_aside() {
 }
 
 fn path() -> Option<PathBuf> {
-    Some(data_dir()?.join("windows.json"))
-}
-
-/// runode 存放自己数据的目录：macOS 上在 Application Support 里，别的系统在 XDG_STATE_HOME
-/// 里。窗口布局的存档和命令历史都放在这里。
-pub fn data_dir() -> Option<PathBuf> {
-    let home = std::env::var_os("HOME").filter(|v| !v.is_empty()).map(PathBuf::from);
-    let dir = if cfg!(target_os = "macos") {
-        home?.join("Library/Application Support")
-    } else {
-        std::env::var_os("XDG_STATE_HOME")
-            .filter(|v| !v.is_empty())
-            .map(PathBuf::from)
-            .or_else(|| home.map(|home| home.join(".local/state")))?
-    };
-    Some(dir.join("runode"))
+    runode_dirs::Dirs::from_env().windows_file()
 }
 
 #[cfg(test)]

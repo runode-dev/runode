@@ -270,7 +270,7 @@ fn tab_shortcut(ix: usize, len: usize, cx: &App) -> Option<SharedString> {
 }
 
 fn home_dir() -> Option<PathBuf> {
-    std::env::var_os("HOME").filter(|v| !v.is_empty()).map(PathBuf::from)
+    runode_dirs::Dirs::from_env().home
 }
 
 /// 新 workspace 的名字：家目录叫 `~`；在 git 仓库里取仓库根的目录名，其余取目录名。

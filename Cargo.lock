@@ -4991,6 +4991,8 @@ dependencies = [
  "objc2-app-kit 0.3.2",
  "objc2-foundation 0.3.2",
  "portable-pty",
+ "runode-dirs",
+ "runode-git",
  "rust-i18n",
  "serde",
  "serde_json",
@@ -4998,6 +5000,14 @@ dependencies = [
  "tracing-subscriber",
  "warp-command-signatures",
 ]
+
+[[package]]
+name = "runode-dirs"
+version = "0.1.0"
+
+[[package]]
+name = "runode-git"
+version = "0.1.0"
 
 [[package]]
 name = "rust-i18n"

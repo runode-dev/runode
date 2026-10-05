@@ -34,13 +34,13 @@ dmg: ## 发布构建并打包 Runode.app 与 dmg，产物在 target/release/bund
 	CARGO=$(CARGO) scripts/bundle-macos.sh
 
 check: ## 只做类型检查，不生成二进制
-	$(CARGO) check --all-targets
+	$(CARGO) check --workspace --all-targets
 
 test: ## 运行测试
-	$(CARGO) test
+	$(CARGO) test --workspace
 
 clippy: ## 运行 clippy
-	$(CARGO) clippy --all-targets
+	$(CARGO) clippy --workspace --all-targets
 
 clean: ## 清理构建产物
 	$(CARGO) clean

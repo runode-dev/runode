@@ -101,7 +101,7 @@ impl Request {
     /// `shell` 里的命令名。
     pub fn local_candidates(&self, cwd: Option<&Path>, shell: &Shell) -> Vec<Candidate> {
         let mut candidates = self.plan.candidates.clone();
-        let home = std::env::var_os("HOME").map(std::path::PathBuf::from);
+        let home = runode_dirs::Dirs::from_env().home;
         for source in &self.plan.sources {
             match source {
                 Source::Commands => command_names(shell, &mut candidates),
@@ -246,7 +246,7 @@ mod tests {
 
     #[test]
     fn ls_lists_the_home_directory() {
-        let Some(home) = std::env::var_os("HOME").map(std::path::PathBuf::from) else {
+        let Some(home) = runode_dirs::Dirs::from_env().home else {
             return;
         };
         let request = request("ls ~/^").unwrap();

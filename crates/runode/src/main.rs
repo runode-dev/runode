@@ -7,7 +7,6 @@ mod assets;
 mod completion;
 mod config;
 mod file_icons;
-mod git;
 mod history;
 mod i18n;
 mod keybinds;

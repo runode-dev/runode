@@ -323,7 +323,7 @@ fn run_background(rx: mpsc::Receiver<Entry>) {
 }
 
 fn own_history_path() -> Option<PathBuf> {
-    Some(crate::persist::data_dir()?.join("history.jsonl"))
+    runode_dirs::Dirs::from_env().history_file()
 }
 
 /// 读 runode 自己的历史文件，坏掉的行跳过。行数太多时只留最近的 `LIMIT` 行重写一遍。
@@ -388,7 +388,7 @@ fn read_shell_history(shell: &str) -> Option<Vec<Entry>> {
 
 fn shell_history_path(shell: Shell) -> Option<PathBuf> {
     let env = |key: &str| std::env::var_os(key).filter(|v| !v.is_empty()).map(PathBuf::from);
-    let home = env("HOME")?;
+    let home = runode_dirs::Dirs::from_env().home?;
     Some(match shell {
         Shell::Zsh => env("HISTFILE").unwrap_or_else(|| env("ZDOTDIR").unwrap_or(home).join(".zsh_history")),
         Shell::Bash => env("HISTFILE").unwrap_or_else(|| home.join(".bash_history")),

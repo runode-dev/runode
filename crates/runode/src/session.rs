@@ -413,9 +413,7 @@ impl Session {
     ) -> Result<(Self, UnboundedReceiver<PtyEvent>)> {
         let (pty, rx) = Pty::open(size)?;
         let mut session = Self::with_pty(size, pty)?;
-        session.start_dir = cwd
-            .map(Into::into)
-            .or_else(|| std::env::var_os("HOME").map(Into::into));
+        session.start_dir = cwd.map(Into::into).or_else(|| runode_dirs::Dirs::from_env().home);
         session.fallback_title = session.start_dir.as_deref().map(crate::pty::dir_label);
         Ok((session, rx))
     }

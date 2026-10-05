@@ -145,9 +145,9 @@ fn install_dir() -> Result<&'static Path, String> {
 }
 
 fn install() -> io::Result<PathBuf> {
-    let dir = cache_dir()
-        .ok_or_else(|| io::Error::other("no home directory"))?
-        .join("runode/shell-integration");
+    let dir = runode_dirs::Dirs::from_env()
+        .shell_integration_dir()
+        .ok_or_else(|| io::Error::other("no home directory"))?;
     for (path, contents) in [
         ("zsh/.zshenv", ZSH_ENV),
         ("zsh/runode-integration.zsh", ZSH_INTEGRATION),
@@ -164,18 +164,6 @@ fn install() -> io::Result<PathBuf> {
         std::fs::write(&path, contents)?;
     }
     Ok(dir)
-}
-
-/// 放在用户自己的缓存目录里，而不是可能多人共用的临时目录：这些脚本会被 shell 执行。
-pub(crate) fn cache_dir() -> Option<PathBuf> {
-    let home = std::env::var_os("HOME").filter(|v| !v.is_empty()).map(PathBuf::from);
-    if cfg!(target_os = "macos") {
-        return home.map(|home| home.join("Library/Caches"));
-    }
-    std::env::var_os("XDG_CACHE_HOME")
-        .filter(|v| !v.is_empty())
-        .map(PathBuf::from)
-        .or_else(|| home.map(|home| home.join(".cache")))
 }
 
 #[cfg(test)]

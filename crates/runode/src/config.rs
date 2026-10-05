@@ -141,8 +141,10 @@ const WATCH_INTERVAL: Duration = Duration::from_secs(1);
 pub fn install(cx: &mut App) {
     reload(cx);
     // 模板按界面语言写，所以先加载配置定下语言。
-    if let Err(err) = create_config_file() {
-        tracing::warn!("failed to create {}: {err}", runode_config_path().display());
+    if let Some(path) = runode_config_path()
+        && let Err(err) = create_config_file(&path)
+    {
+        tracing::warn!("failed to create {}: {err}", path.display());
     }
     cx.spawn(async move |cx| {
         let mut seen = None;
@@ -190,7 +192,7 @@ fn system_is_dark(cx: &App) -> bool {
 /// 所有可能的配置文件的修改时间。还不存在的文件也算在内，新建配置文件同样会触发重载。
 fn watch_stamp(config: &Config) -> Vec<(PathBuf, Option<SystemTime>)> {
     let mut paths = ghostty_config_paths();
-    paths.push(runode_config_path());
+    paths.extend(runode_config_path());
     paths.extend(config.sources.iter().cloned());
     paths.dedup();
     paths
@@ -219,7 +221,9 @@ impl Config {
             .flat_map(|path| read_entries(path, &mut sources))
             .filter(|e| e.key != "keybind")
             .collect();
-        let runode = read_entries(&runode_config_path(), &mut sources);
+        let runode = runode_config_path()
+            .map(|path| read_entries(&path, &mut sources))
+            .unwrap_or_default();
         Self::from_layers(&[ghostty, runode], dark, &mut sources)
     }
 
@@ -462,7 +466,7 @@ fn read_entries(path: &Path, sources: &mut Vec<PathBuf>) -> Vec<Entry> {
                 Some(file) => (true, file),
                 None => (false, entry.value.as_str()),
             };
-            let file = expand_home(file);
+            let file = runode_dirs::Dirs::from_env().expand_home(file);
             let file = path.parent().map_or(file.clone(), |dir| dir.join(&file));
             if !optional && !file.exists() {
                 tracing::warn!("{}: config-file not found: {}", entry.origin, file.display());
@@ -501,25 +505,13 @@ fn parse_entries(text: &str, name: &str) -> Vec<Entry> {
     entries
 }
 
-fn home() -> PathBuf {
-    std::env::var_os("HOME").map(PathBuf::from).unwrap_or_default()
-}
-
-fn expand_home(path: &str) -> PathBuf {
-    match path.strip_prefix("~/") {
-        Some(rest) => home().join(rest),
-        None => PathBuf::from(path),
-    }
-}
-
-/// runode 的配置文件不存在时写入 `template`；已存在（哪怕是空文件）就不动。
-fn create_config_file() -> std::io::Result<()> {
+/// runode 的配置文件 `path` 不存在时写入 `template`；已存在（哪怕是空文件）就不动。
+fn create_config_file(path: &Path) -> std::io::Result<()> {
     use std::io::Write;
-    let path = runode_config_path();
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir)?;
     }
-    match std::fs::OpenOptions::new().write(true).create_new(true).open(&path) {
+    match std::fs::OpenOptions::new().write(true).create_new(true).open(path) {
         Ok(mut file) => file.write_all(template(&crate::i18n::current()).as_bytes()),
         Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => Ok(()),
         Err(err) => Err(err),
@@ -638,8 +630,11 @@ fn wrap_names<'a>(names: impl Iterator<Item = &'a str>) -> String {
 
 /// 用文本编辑器打开 runode 自己的配置文件；文件还不存在时先写一份模板。
 pub fn open(cx: &App) {
-    let path = runode_config_path();
-    if let Err(err) = create_config_file() {
+    let Some(path) = runode_config_path() else {
+        tracing::warn!("no home directory to keep the config file in");
+        return;
+    };
+    if let Err(err) = create_config_file(&path) {
         tracing::warn!("failed to create {}: {err}", path.display());
         return;
     }
@@ -656,27 +651,13 @@ pub fn open(cx: &App) {
     }
 }
 
-fn runode_config_path() -> PathBuf {
-    config_dir().join("runode/config.conf")
+fn runode_config_path() -> Option<PathBuf> {
+    runode_dirs::Dirs::from_env().config_file()
 }
 
-fn config_dir() -> PathBuf {
-    std::env::var_os("XDG_CONFIG_HOME")
-        .filter(|v| !v.is_empty())
-        .map(PathBuf::from)
-        .unwrap_or_else(|| home().join(".config"))
-}
-
-/// Ghostty 配置文件的位置，按加载顺序：XDG 目录的旧名与新名，macOS 上再加
-/// Application Support 的旧名与新名。
+/// Ghostty 配置文件的位置，按 Ghostty 的加载顺序。
 fn ghostty_config_paths() -> Vec<PathBuf> {
-    let xdg = config_dir().join("ghostty");
-    let mut paths = vec![xdg.join("config"), xdg.join("config.ghostty")];
-    if cfg!(target_os = "macos") {
-        let support = home().join("Library/Application Support/com.mitchellh.ghostty");
-        paths.extend([support.join("config"), support.join("config.ghostty")]);
-    }
-    paths
+    runode_dirs::Dirs::from_env().ghostty_config_files()
 }
 
 /// 编进二进制的配色主题，按名字排序。
@@ -690,14 +671,12 @@ enum Theme {
 /// 主题可以是绝对路径，否则依次在 runode、Ghostty 的用户主题目录、
 /// Ghostty 自带的主题目录里找同名文件，都没有再用内置的同名主题。
 fn find_theme(name: &str) -> Option<Theme> {
-    let path = expand_home(name);
+    let paths = runode_dirs::Dirs::from_env();
+    let path = paths.expand_home(name);
     if path.is_absolute() {
         return path.is_file().then_some(Theme::File(path));
     }
-    let mut dirs = vec![
-        config_dir().join("runode/themes"),
-        config_dir().join("ghostty/themes"),
-    ];
+    let mut dirs: Vec<PathBuf> = paths.themes_dir().into_iter().chain(paths.ghostty_themes_dir()).collect();
     dirs.extend(ghostty_resources_dir().map(|dir| dir.join("themes")));
     if let Some(path) = dirs.into_iter().map(|dir| dir.join(name)).find(|p| p.is_file()) {
         return Some(Theme::File(path));

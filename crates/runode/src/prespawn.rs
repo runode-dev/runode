@@ -121,5 +121,5 @@ fn recorded(key: &str) -> Option<GridSize> {
 }
 
 fn record_path() -> Option<PathBuf> {
-    Some(crate::shell_integration::cache_dir()?.join("runode/first-terminal-size"))
+    runode_dirs::Dirs::from_env().prespawn_size_file()
 }
