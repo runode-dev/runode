@@ -1,5 +1,6 @@
 //! 启动时提前拉起第一个终端的 shell。shell 读完启动配置要几十毫秒，放在后台和 GPUI
-//! 初始化、建窗口同时进行，等视图建好时提示符多半已经输出，第一帧就能画出来。
+//! 初始化、建窗口同时进行，等视图建好时提示符多半已经输出，第一帧就能画出来。shell 由宿主
+//! 拉起，在视图连上之前的输出由宿主攒着，连上时补发。
 //!
 //! 伪终端的行列数得在窗口量出来之前定下，所以沿用上次启动时第一个终端量到的尺寸，连同
 //! 影响尺寸的那几项配置记在缓存目录里。配置变了或者还没有记录时不提前启动，照常在建视图
@@ -14,17 +15,30 @@ use std::{
     thread::{self, JoinHandle},
 };
 
-use futures::channel::mpsc::UnboundedReceiver;
+use runode_host::{ClientMsg, SessionId, SpawnOptions};
 use runode_shared_types::grid::GridSize;
-use runode_terminal::pty::{Pty, PtyEvent};
 
 use runode_config::Config;
 
-/// 提前启动好的 shell，以及启动时用的尺寸。
+/// 宿主里提前启动好的 shell，以及启动时用的尺寸。没被视图接走就丢掉时结束它。
 pub struct Prespawned {
     pub size: GridSize,
-    pub pty: Pty,
-    pub rx: UnboundedReceiver<PtyEvent>,
+    id: Option<SessionId>,
+}
+
+impl Prespawned {
+    /// 交出会话，之后由接走它的视图负责结束它。
+    pub fn into_id(mut self) -> SessionId {
+        self.id.take().expect("a prespawned shell is taken once")
+    }
+}
+
+impl Drop for Prespawned {
+    fn drop(&mut self) {
+        if let Some(id) = self.id.take() {
+            crate::session_host::client().send(ClientMsg::Kill { id });
+        }
+    }
 }
 
 static PENDING: Mutex<Option<JoinHandle<Option<Prespawned>>>> = Mutex::new(None);
@@ -37,8 +51,17 @@ pub fn start() {
             Config::load(true)
         });
         let size = recorded(&key(&config))?;
-        match Pty::spawn(size, None, None, config.shell_integration) {
-            Ok((pty, rx)) => Some(Prespawned { size, pty, rx }),
+        let spawned = crate::session_host::client().spawn(SpawnOptions {
+            size,
+            cwd: None,
+            integration: config.shell_integration,
+            start: true,
+            shell: None,
+            // 宿主还没从主线程拿到配置时先用这里读的；主线程的配置到了、主题不一样时再换。
+            settings: Some(config.term_settings()),
+        });
+        match spawned {
+            Ok(id) => Some(Prespawned { size, id: Some(id) }),
             Err(err) => {
                 tracing::warn!("failed to start the shell early: {err:#}");
                 None

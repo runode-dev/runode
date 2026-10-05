@@ -11,11 +11,11 @@ pub(super) fn rgb(color: RgbColor) -> Rgb {
     Rgb(color.r, color.g, color.b)
 }
 
-pub(super) fn ghostty_rgb(Rgb(r, g, b): Rgb) -> RgbColor {
+pub(crate) fn ghostty_rgb(Rgb(r, g, b): Rgb) -> RgbColor {
     RgbColor { r, g, b }
 }
 
-pub(super) fn ghostty_cursor_style(style: settings::CursorStyle) -> CursorStyle {
+pub(crate) fn ghostty_cursor_style(style: settings::CursorStyle) -> CursorStyle {
     match style {
         settings::CursorStyle::Block => CursorStyle::Block,
         settings::CursorStyle::BlockHollow => CursorStyle::BlockHollow,

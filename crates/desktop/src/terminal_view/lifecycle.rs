@@ -1,26 +1,27 @@
-//! 终端视图的生命周期：建视图、启动 shell、读输出、跟踪前台进程，以及光标闪烁和同步输出的计时器。
+//! 终端视图的生命周期：在宿主里开会话、连上它、启动 shell、处理宿主发来的输出和状态，以及
+//! 光标闪烁和同步输出的计时器。前台进程的轮询和 agent 状态的判断在宿主里，结果随
+//! `HostMsg::Meta` 到达。
 
 use std::{
     collections::HashMap,
+    sync::Arc,
     time::{Duration, Instant},
 };
 
-use futures::{FutureExt as _, StreamExt as _};
+use futures::{FutureExt as _, StreamExt as _, channel::mpsc::UnboundedReceiver};
 use gpui::{App, AppContext as _, Context, Entity, Font, Point, SharedString, Task, Window, font, px};
+use runode_host::{ClientMsg, HostEvent, HostMsg, SessionId, SpawnOptions};
 use runode_shared_types::{agent::Agent, color::Rgb, grid::GridSize};
 use runode_terminal::{
     history,
-    pty::PtyEvent,
-    session::{SYNC_OUTPUT_TIMEOUT, Session},
+    session::{Request, SYNC_OUTPUT_TIMEOUT, Session},
 };
 
 use super::{DEFAULT_TITLE, MAX_FONT_SIZE, MIN_FONT_SIZE, TerminalEvent, TerminalView};
-use crate::{config::AppConfig, prespawn::Prespawned};
+use crate::{config::AppConfig, prespawn::Prespawned, session_host};
 
 /// 配置的字体都不可用时使用的等宽字体，macOS 自带。
 const FALLBACK_FONT_FAMILY: &str = "Menlo";
-/// 重新读取前台进程的间隔：不输出的程序（比如 `sleep`）启动后，标签名也能跟上。
-const FOREGROUND_POLL_INTERVAL: Duration = Duration::from_secs(1);
 /// 视图建好时伪终端的临时尺寸；第一次布局时会按实际大小重设，shell 等到那之后才启动。
 const PROVISIONAL_SIZE: GridSize = GridSize {
     cols: 80,
@@ -33,10 +34,32 @@ const PROVISIONAL_SIZE: GridSize = GridSize {
 const EARLY_OUTPUT_LIMIT: usize = 64 * 1024;
 /// 一次最多合并这么多排队的输出再交给 VT：积压很多时不必为它们另拼一整块大缓冲。
 const MAX_OUTPUT_BATCH: usize = 1024 * 1024;
-/// 有输出时重读前台进程的最短间隔：大量输出时不必每批都做几次系统调用，推迟的那次到点补上。
-const FOREGROUND_REFRESH_INTERVAL: Duration = Duration::from_millis(50);
 /// 光标闪烁时亮、灭各持续的时长。
 const CURSOR_BLINK_INTERVAL: Duration = Duration::from_millis(600);
+
+/// 连上宿主里的会话 `id`，建好界面这边的 `Session`，返回它、收事件的一端和 shell 是否已经
+/// 启动。连不上时结束这个会话。
+fn connect(id: SessionId) -> anyhow::Result<(Session, UnboundedReceiver<HostEvent>, bool)> {
+    let client = session_host::client();
+    let (tx, rx) = futures::channel::mpsc::unbounded();
+    let connected = client.attach(id, Box::new(move |event| tx.unbounded_send(event).is_ok())).and_then(|attached| {
+        let sender = Box::new(move |request| match request {
+            Request::Input(data) => client.input(id, data),
+            Request::Resize(size) => client.send(ClientMsg::Resize { id, size }),
+            Request::ClearScreen => client.send(ClientMsg::ClearScreen { id }),
+        });
+        let mut session = Session::new(attached.size, &attached.settings, sender)?;
+        session.apply_meta(attached.meta);
+        Ok((session, attached.started))
+    });
+    match connected {
+        Ok((session, started)) => Ok((session, rx, started)),
+        Err(err) => {
+            client.send(ClientMsg::Kill { id });
+            Err(err)
+        }
+    }
+}
 
 impl TerminalView {
     /// 建好视图，在 `cwd` 下启动 shell，`cwd` 为 `None` 时从家目录开始；shell 等第一次布局后
@@ -58,91 +81,59 @@ impl TerminalView {
         window: &mut Window,
         cx: &mut App,
     ) -> anyhow::Result<Entity<Self>> {
-        let (session, rx) = Session::unstarted(PROVISIONAL_SIZE, cwd)?;
-        Ok(cx.new(|cx| Self::new(session, rx, window, cx)))
+        let integration = cx.global::<AppConfig>().0.shell_integration;
+        let id = session_host::client().spawn(SpawnOptions {
+            size: PROVISIONAL_SIZE,
+            cwd: cwd.map(Into::into),
+            integration,
+            start: false,
+            shell: None,
+            settings: None,
+        })?;
+        let (session, rx, started) = connect(id)?;
+        Ok(cx.new(|cx| Self::new(id, session, started, rx, window, cx)))
     }
 
     pub fn started(&self) -> bool {
-        self.session.started()
+        self.started
     }
 
     /// 启动 `unstarted` 建的视图的 shell：等下一次布局量出实际尺寸再启动，见 `start_pending`。
     pub fn start(&mut self, cx: &mut Context<Self>) {
-        if !self.session.started() {
+        if !self.started {
             self.start_pending = true;
             cx.notify();
         }
     }
 
-    /// 按已经设好的实际尺寸启动 shell；启动不了时按 shell 已退出处理，关掉这个终端。
-    pub(super) fn start_now(&mut self, cx: &mut Context<Self>) {
-        if self.session.started() {
+    /// 按已经设好的实际尺寸启动 shell。启动不了时宿主发 `HostMsg::Exited`，按 shell 已退出
+    /// 处理，关掉这个终端。
+    pub(super) fn start_now(&mut self, _cx: &mut Context<Self>) {
+        if std::mem::replace(&mut self.started, true) {
             return;
         }
-        if let Err(err) = self.session.start(self.config.shell_integration) {
-            tracing::error!("failed to start terminal session: {err:#}");
-            self.session.exited = true;
-            cx.emit(TerminalEvent::Exited);
-            return;
-        }
-        self._foreground_poll = Some(Self::poll_foreground(cx));
-        if self.session.refresh_fallback_title() {
-            cx.emit(TerminalEvent::TitleChanged);
-        }
+        session_host::client().start(self.id, self.config.shell_integration);
     }
 
-    /// 读输出的任务：把排队的输出合并着喂给 VT，转发标题、响铃、退出等事件，再重绘。
-    fn read_output(
-        mut rx: impl futures::Stream<Item = PtyEvent> + Unpin + 'static,
+    /// 收宿主发来的事件的任务：把排队的事件合并成一批处理，再重绘。
+    fn read_events(
+        mut rx: impl futures::Stream<Item = HostEvent> + Unpin + 'static,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Task<()> {
         cx.spawn_in(window, async move |this, cx| {
             while let Some(first) = rx.next().await {
                 // 把已排队的输出合并成一次 VT 写入和一次重绘。
-                let mut output = Vec::new();
-                let mut exited = false;
-                let mut next = Some(first);
-                while let Some(event) = next.take() {
-                    match event {
-                        PtyEvent::Output(data) => output.extend_from_slice(&data),
-                        PtyEvent::Exited => exited = true,
-                    }
-                    if output.len() < MAX_OUTPUT_BATCH {
-                        next = rx.next().now_or_never().flatten();
-                    }
+                let mut bytes = output_len(&first);
+                let mut events = vec![first];
+                while bytes < MAX_OUTPUT_BATCH
+                    && let Some(Some(event)) = rx.next().now_or_never()
+                {
+                    bytes += output_len(&event);
+                    events.push(event);
                 }
-                let updated = this.update_in(cx, |view, window, cx| {
-                    if !output.is_empty() {
-                        view.notify_agent_finished(cx, |view, cx| {
-                            // 进出目录、启动或退出程序时通常都有输出，顺带重读前台进程。
-                            let fallback_changed = view.refresh_foreground_soon(cx);
-                            if view.session.feed(&output) || fallback_changed {
-                                cx.emit(TerminalEvent::TitleChanged);
-                            }
-                            // 关掉建议时也取走，只是不记。
-                            let commands = view.session.take_commands();
-                            if view.config.command_suggestions {
-                                commands.into_iter().for_each(history::record);
-                            }
-                            view.input_changed = true;
-                            view.completion_output(cx);
-                        });
-                        // 有输出（包括键入的回显）时光标先亮起，免得打字时看不到它。
-                        view.reset_cursor_blink(window, cx);
-                    }
-                    if view.session.take_bell() {
-                        cx.emit(TerminalEvent::Bell);
-                    }
-                    if exited {
-                        view.session.exited = true;
-                        cx.emit(TerminalEvent::Exited);
-                    }
-                    if view.session.render_held() {
-                        view.schedule_hold_timeout(cx);
-                    }
-                    cx.notify();
-                });
+                let exited = events.iter().any(is_exited);
+                let updated = this.update_in(cx, |view, window, cx| view.handle_host_events(events, window, cx));
                 if updated.is_err() || exited {
                     break;
                 }
@@ -150,11 +141,94 @@ impl TerminalView {
         })
     }
 
+    /// 按先后处理宿主发来的一批事件：输出喂给 VT（连着的几块合成一次写入），在标出的位置改
+    /// 尺寸、换主题，写入对外公布的状态，转发标题、响铃、退出等事件，再重绘。
+    fn handle_host_events(&mut self, events: Vec<HostEvent>, window: &mut Window, cx: &mut Context<Self>) {
+        let mut pending: Vec<Arc<[u8]>> = Vec::new();
+        let mut fed = false;
+        let mut exited = false;
+        for event in events {
+            let message = match event {
+                HostEvent::Output(data) => {
+                    pending.push(data);
+                    continue;
+                }
+                HostEvent::Msg(message) => *message,
+            };
+            fed |= self.feed_output(&mut pending, cx);
+            match message {
+                HostMsg::Meta { meta, .. } => self.notify_agent_finished(cx, |view, cx| {
+                    if view.session.apply_meta(meta) {
+                        cx.emit(TerminalEvent::TitleChanged);
+                    }
+                }),
+                HostMsg::Resized { size, .. } => self.session.apply_resized(size),
+                // 用最新的配置：宿主按主线程最近一次发的主题换，这时全局配置已经是它了。
+                HostMsg::ThemeApplied { .. } => {
+                    let settings = cx.global::<AppConfig>().0.term_settings();
+                    self.session.apply_theme(&settings);
+                }
+                HostMsg::CommandFinished { command, .. } => {
+                    // 关掉建议时宿主不记，这边也不加。
+                    if self.config.command_suggestions {
+                        history::observe(history::Entry {
+                            cmd: command.cmd,
+                            cwd: command.cwd,
+                            exit: command.exit,
+                            ts: command.ts,
+                        });
+                    }
+                }
+                HostMsg::Exited { .. } => exited = true,
+                _ => {}
+            }
+        }
+        fed |= self.feed_output(&mut pending, cx);
+        if fed {
+            // 有输出（包括键入的回显）时光标先亮起，免得打字时看不到它。
+            self.reset_cursor_blink(window, cx);
+        }
+        if self.session.take_bell() {
+            cx.emit(TerminalEvent::Bell);
+        }
+        if exited {
+            self.session.exited = true;
+            cx.emit(TerminalEvent::Exited);
+        }
+        if self.session.render_held() {
+            self.schedule_hold_timeout(cx);
+        }
+        cx.notify();
+    }
+
+    /// 把攒着的几块输出一次喂给 VT，返回是否喂了。
+    fn feed_output(&mut self, pending: &mut Vec<Arc<[u8]>>, cx: &mut Context<Self>) -> bool {
+        match pending.len() {
+            0 => return false,
+            1 => self.session.feed(&pending[0]),
+            _ => self.session.feed(&pending.concat()),
+        }
+        pending.clear();
+        self.input_changed = true;
+        self.completion_output(cx);
+        true
+    }
+
     /// 提前启动的 shell 按上次记下的尺寸启动，和这次量到的不一样（窗口大小或侧栏变了）时，
     /// 换一个按实际尺寸启动的 shell。不直接调整尺寸：那时提示符多半已经画好，shell 收到尺寸
     /// 变化会重画提示符，可能正赶上插件管理器延迟加载插件、临时切进了插件目录，画出错的路径。
     pub(super) fn respawn(&mut self, size: GridSize, window: &mut Window, cx: &mut Context<Self>) {
-        let (mut session, rx) = match Session::spawn(size, None, self.config.shell_integration) {
+        let spawned = session_host::client()
+            .spawn(SpawnOptions {
+                size,
+                cwd: None,
+                integration: self.config.shell_integration,
+                start: true,
+                shell: None,
+                settings: None,
+            })
+            .and_then(|id| Ok((id, connect(id)?)));
+        let (id, (mut session, rx, started)) = match spawned {
             Ok(spawned) => spawned,
             Err(err) => {
                 tracing::warn!("failed to restart the early shell at its real size: {err:#}");
@@ -163,70 +237,39 @@ impl TerminalView {
             }
         };
         session.apply_config(&self.config.term_settings());
-        session.refresh_fallback_title();
-        // 换下来的会话随之结束，它的 shell 由 `Pty` 收拾。
+        // 换下来的会话随之结束。
+        let old = std::mem::replace(&mut self.id, id);
+        session_host::client().send(ClientMsg::Kill { id: old });
         self.session = session;
-        self._reader = Self::read_output(rx, window, cx);
-    }
-
-    /// 定时重读前台进程，不输出的程序（比如 `sleep`）启动后标签名也能跟上。
-    fn poll_foreground(cx: &mut Context<Self>) -> Task<()> {
-        cx.spawn(async move |this, cx| {
-            loop {
-                cx.background_executor().timer(FOREGROUND_POLL_INTERVAL).await;
-                let updated = this.update(cx, |view, cx| {
-                    view.notify_agent_finished(cx, |view, cx| {
-                        if view.session.refresh_fallback_title() {
-                            cx.emit(TerminalEvent::TitleChanged);
-                        }
-                    });
-                });
-                if updated.is_err() {
-                    break;
-                }
-            }
-        })
+        self.started = started;
+        self._reader = Self::read_events(rx, window, cx);
     }
 
     /// 接上启动时提前拉起的 shell（见 `prespawn`）并建好它的视图。
     pub fn adopt(shell: Prespawned, window: &mut Window, cx: &mut App) -> anyhow::Result<Entity<Self>> {
-        let session = Session::with_pty(shell.size, shell.pty)?;
-        Ok(cx.new(|cx| Self {
-            adopted_size: Some(shell.size),
-            ..Self::new(session, shell.rx, window, cx)
+        let size = shell.size;
+        let id = shell.into_id();
+        let (session, rx, started) = connect(id)?;
+        Ok(cx.new(|cx| {
+            let mut view = Self::new(id, session, started, rx, window, cx);
+            view.adopted_size = Some(size);
+            view
         }))
     }
 
     fn new(
-        mut session: Session,
-        mut rx: futures::channel::mpsc::UnboundedReceiver<PtyEvent>,
+        id: SessionId,
+        session: Session,
+        started: bool,
+        mut rx: UnboundedReceiver<HostEvent>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
         let config = cx.global::<AppConfig>().0.clone();
-        session.apply_config(&config.term_settings());
-        // 提前启动的 shell 多半已经输出了提示符：现在就喂进去，第一帧就画得出来，
-        // 不用等下面读输出的任务排上主线程。已经读到的退出留给那个任务照常处理。
-        let mut exited_early = None;
-        let mut early = Vec::new();
-        while early.len() < EARLY_OUTPUT_LIMIT
-            && let Ok(event) = rx.try_recv()
-        {
-            match event {
-                PtyEvent::Output(data) => early.extend_from_slice(&data),
-                PtyEvent::Exited => exited_early = Some(PtyEvent::Exited),
-            }
-        }
-        if !early.is_empty() {
-            session.feed(&early);
-        }
 
-        let reader = Self::read_output(futures::stream::iter(exited_early).chain(rx), window, cx);
-
-        // shell 已经在起始目录里跑起来了，不等第一次输出，新标签一出现就有名字。
-        session.refresh_fallback_title();
         let config_watch = cx.observe_global_in::<AppConfig>(window, |view, window, cx| {
             view.config = cx.global::<AppConfig>().0.clone();
+            // 主题等宿主标出位置后再换，见 `HostMsg::ThemeApplied`。
             view.session.apply_config(&view.config.term_settings());
             view.font = resolve_font(&view.config.font_family, window);
             view.font_size = px(view.config.font_size.clamp(MIN_FONT_SIZE, MAX_FONT_SIZE));
@@ -239,7 +282,6 @@ impl TerminalView {
         let appearance_watch =
             cx.observe_window_appearance(window, |_, _, cx| crate::config::follow_appearance(cx));
 
-        let foreground_poll = session.started().then(|| Self::poll_foreground(cx));
         // 第一次用到时开始在后台读命令历史，开着建议时现在就读起来。
         if config.command_suggestions {
             history::load_in_background();
@@ -259,8 +301,10 @@ impl TerminalView {
             }),
         ];
 
-        Self {
+        let mut view = Self {
             session,
+            id,
+            started,
             font: resolve_font(&config.font_family, window),
             font_size: px(config.font_size.clamp(MIN_FONT_SIZE, MAX_FONT_SIZE)),
             config,
@@ -287,11 +331,7 @@ impl TerminalView {
             adopted_size: None,
             start_pending: false,
             search_field: None,
-            _reader: reader,
-            _foreground_poll: foreground_poll,
-            foreground_read_at: Instant::now(),
-            _foreground_refresh: None,
-            agent_poll: None,
+            _reader: Task::ready(()),
             agent_changed_at: Instant::now(),
             _hold_timeout: None,
             _cursor_blink: None,
@@ -300,7 +340,29 @@ impl TerminalView {
             _appearance_watch: appearance_watch,
             pane_focus,
             _focus_watch: focus_watch,
+        };
+        view.session.apply_config(&view.config.term_settings());
+
+        // 提前启动的 shell 多半已经输出了提示符，宿主补发的事件现在就处理，第一帧就画得出来，
+        // 不用等下面读事件的任务排上主线程。退出留给那个任务：现在还没有谁订阅这个视图的事件。
+        let mut early = Vec::new();
+        let mut exited_early = None;
+        let mut bytes = 0;
+        while bytes < EARLY_OUTPUT_LIMIT
+            && let Ok(event) = rx.try_recv()
+        {
+            if is_exited(&event) {
+                exited_early = Some(event);
+                break;
+            }
+            bytes += output_len(&event);
+            early.push(event);
         }
+        if !early.is_empty() {
+            view.handle_host_events(early, window, cx);
+        }
+        view._reader = Self::read_events(futures::stream::iter(exited_early).chain(rx), window, cx);
+        view
     }
 
     /// shell 当前所在的目录，新建标签或分屏时沿用。
@@ -338,38 +400,10 @@ impl TerminalView {
         (frame.foreground, frame.background)
     }
 
-    /// 有输出时重读前台进程，返回程序没设置标题时用的名字或 agent 状态是否变了。离上次读
-    /// 不到 `FOREGROUND_REFRESH_INTERVAL` 时推迟到间隔满了再读，那时有变化再通知外层。
-    fn refresh_foreground_soon(&mut self, cx: &mut Context<Self>) -> bool {
-        if self._foreground_refresh.is_some() {
-            return false;
-        }
-        let elapsed = self.foreground_read_at.elapsed();
-        if elapsed >= FOREGROUND_REFRESH_INTERVAL {
-            self.foreground_read_at = Instant::now();
-            return self.session.refresh_fallback_title();
-        }
-        let timer = cx.background_executor().timer(FOREGROUND_REFRESH_INTERVAL - elapsed);
-        self._foreground_refresh = Some(cx.spawn(async move |this, cx| {
-            timer.await;
-            this.update(cx, |view, cx| {
-                view._foreground_refresh = None;
-                view.foreground_read_at = Instant::now();
-                view.notify_agent_finished(cx, |view, cx| {
-                    if view.session.refresh_fallback_title() {
-                        cx.emit(TerminalEvent::TitleChanged);
-                    }
-                });
-            })
-            .ok();
-        }));
-        false
-    }
-
     /// 执行 `update`；前台 agent 本来在工作、执行完不在工作了（干完了、等着用户回答或者退出了）
     /// 时通知外层 `TerminalEvent::AgentFinished`，刚停下来等用户回答时通知
-    /// `TerminalEvent::AgentBlocked`，从工作中直接变成等用户回答时两个都发。之后按需要定好下次
-    /// 判断 agent 状态的时刻，见 `schedule_agent_poll`。
+    /// `TerminalEvent::AgentBlocked`，从工作中直接变成等用户回答时两个都发。agent 的状态由宿主
+    /// 判断，随 `HostMsg::Meta` 到达，`update` 里写进 `Session`。
     fn notify_agent_finished(&mut self, cx: &mut Context<Self>, update: impl FnOnce(&mut Self, &mut Context<Self>)) {
         let before = self.session.agent;
         update(self, cx);
@@ -383,34 +417,6 @@ impl TerminalView {
         if !before.is_some_and(Agent::is_blocked) && after.is_some_and(Agent::is_blocked) {
             cx.emit(TerminalEvent::AgentBlocked);
         }
-        self.schedule_agent_poll(cx);
-    }
-
-    /// 前台 agent 的状态有些要过一会儿再判断（输出节流、确认是不是真停下了、启动宽限期），
-    /// 按 `Session::agent_deadline` 定一个计时器，到点调 `Session::poll_agent`。已经定在更早的
-    /// 时刻时不动。
-    fn schedule_agent_poll(&mut self, cx: &mut Context<Self>) {
-        let Some(at) = self.session.agent_deadline() else {
-            return;
-        };
-        if self.agent_poll.as_ref().is_some_and(|(due, _)| *due <= at) {
-            return;
-        }
-        let timer = cx.background_executor().timer(at.saturating_duration_since(Instant::now()));
-        let task = cx.spawn(async move |this, cx| {
-            timer.await;
-            this.update(cx, |view, cx| {
-                view.agent_poll = None;
-                view.notify_agent_finished(cx, |view, cx| {
-                    if view.session.poll_agent() {
-                        cx.emit(TerminalEvent::TitleChanged);
-                        cx.notify();
-                    }
-                });
-            })
-            .ok();
-        });
-        self.agent_poll = Some((at, task));
     }
 
     /// 让光标立即亮起，并从头开始计闪烁周期；没有焦点时不闪，也就不启动计时器。
@@ -471,4 +477,16 @@ fn resolve_font(families: &[String], window: &Window) -> Font {
         .map_or(FALLBACK_FONT_FAMILY, String::as_str);
     tracing::debug!("terminal font: {family}");
     font(family.to_owned())
+}
+
+/// 事件里输出的字节数，合并批次时用。
+fn output_len(event: &HostEvent) -> usize {
+    match event {
+        HostEvent::Output(data) => data.len(),
+        HostEvent::Msg(_) => 0,
+    }
+}
+
+fn is_exited(event: &HostEvent) -> bool {
+    matches!(event, HostEvent::Msg(message) if matches!(**message, HostMsg::Exited { .. }))
 }

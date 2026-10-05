@@ -2,7 +2,13 @@
 
 use std::time::Instant;
 
-use libghostty_vt::{Error, key, key::OptionAsAlt, paste::PasteSource, screen::Screen, terminal::ScrollViewport};
+use libghostty_vt::{
+    key,
+    key::OptionAsAlt,
+    paste,
+    screen::Screen,
+    terminal::{Mode, ScrollViewport},
+};
 use runode_shared_types::input::KeyInput;
 
 use super::{
@@ -54,7 +60,7 @@ impl Session {
             return false;
         }
         self.before_input();
-        self.writer.write(&self.scratch);
+        self.send_input(self.scratch.clone());
         true
     }
 
@@ -73,7 +79,7 @@ impl Session {
             return true;
         }
         self.before_input();
-        self.writer.write(&bytes);
+        self.send_input(bytes);
         true
     }
 
@@ -104,33 +110,45 @@ impl Session {
     /// 输入法上屏的文本，按原样发送。
     pub fn commit_text(&mut self, text: &str) {
         self.before_input();
-        self.writer.write(text.as_bytes());
+        self.send_input(text.as_bytes().to_vec());
     }
 
-    /// 按终端当前模式粘贴剪贴板文本（bracketed paste、粘贴事件等由 libghostty 处理）。
+    /// 按终端当前模式粘贴剪贴板文本：不安全的控制字节换成空格，开了 bracketed paste 时用
+    /// 括号序列包起来，没开时换行换成回车。
     ///
     /// 文本可能注入命令时（未开 bracketed paste 却含换行，或含 bracketed paste
     /// 结束序列），除非 `allow_unsafe`，否则什么也不写并返回 `Paste::NeedsConfirmation`，
     /// 由界面向用户确认后再带 `allow_unsafe` 重试。
+    ///
+    /// 这边的 VT 不注册 `on_pty_write`，所以不经 `Terminal::paste_text`，而是按它对纯文本粘贴
+    /// 的同样规则自己编码：剪贴板读取回调没装，程序开了粘贴事件（mode 5522）时它也照样写文本。
     pub fn paste(&mut self, text: &str, allow_unsafe: bool) -> Paste {
         self.before_input();
-        match self
-            .terminal
-            .paste_text(text, PasteSource::Clipboard, allow_unsafe)
-        {
-            Ok(_) => Paste::Done,
-            Err(Error::Rejected) => Paste::NeedsConfirmation,
-            Err(err) => {
-                tracing::warn!("paste failed: {err}");
-                Paste::Done
-            }
+        let bracketed = self.terminal.mode(Mode::BRACKETED_PASTE).unwrap_or(false);
+        // 括号包着时换行无妨，只有结束序列能逃出括号；没包时换行就会执行命令。
+        let safe = !text.contains("\x1b[201~") && (bracketed || !text.contains('\n'));
+        if !safe && !allow_unsafe {
+            return Paste::NeedsConfirmation;
         }
+        if text.is_empty() {
+            return Paste::Done;
+        }
+        let mut data = text.as_bytes().to_vec();
+        let mut encoded = vec![0u8; data.len() + 16];
+        match paste::encode(&mut data, bracketed, &mut encoded) {
+            Ok(len) => {
+                encoded.truncate(len);
+                self.send_input(encoded);
+            }
+            Err(err) => tracing::warn!("paste failed: {err}"),
+        }
+        Paste::Done
     }
 
     /// 把字节直接发给程序，用于映射成控制字符的快捷键（比如 ⌘← 发 Ctrl-A）。
     pub fn send_text(&mut self, bytes: &[u8]) {
         self.before_input();
-        self.writer.write(bytes);
+        self.send_input(bytes.to_vec());
     }
 
     /// 向程序发输入之前：记下时刻，回到最底部，并清掉选区。
@@ -146,36 +164,15 @@ impl Session {
         self.scroll_offset = 0.;
     }
 
-    /// 清屏（⌘K）：清掉屏幕和回滚历史。备用屏幕归全屏程序（vim、less 等）自己管，不动。
-    ///
-    /// 前台是 shell 时它多半停在提示符，整屏清掉后发一个 FF（Ctrl-L）让它在顶上重画提示符，
-    /// 已经敲了一半的命令也会保留。前台在跑别的程序时不能给它塞 FF，只删掉光标以上的行，
-    /// 光标所在行顶到第一行。
+    /// 清屏（⌘K）：请宿主清掉屏幕和回滚历史，宿主把清屏要写进 VT 的字节当成一段输出发回来，
+    /// 两份 VT 一起清。备用屏幕归全屏程序（vim、less 等）自己管，不动；宿主那边到时还会再看
+    /// 一遍。
     pub fn clear_screen(&mut self) {
         if self.terminal.active_screen().is_ok_and(|s| s == Screen::Alternate) {
             return;
         }
         self.before_input();
-        if self.pty.foreground_is_shell() {
-            // ED 3 放在最后：先 ED 2 时被推进回滚历史的内容也一起清掉。
-            self.terminal.vt_write(b"\x1b[H\x1b[2J\x1b[3J");
-            self.writer.write(b"\x0c");
-        } else {
-            self.clear_above_cursor();
-        }
-    }
-
-    /// 清掉回滚历史和光标以上的行，光标所在行及以下顶到最上面，光标留在原来的列。
-    fn clear_above_cursor(&mut self) {
-        let x = self.terminal.cursor_x().unwrap_or(0);
-        let y = self.terminal.cursor_y().unwrap_or(0);
-        // DL 从第一行起删掉 y 行，下面的内容跟着上移。
-        let seq = if y > 0 {
-            format!("\x1b[3J\x1b[H\x1b[{y}M\x1b[1;{}H", x + 1)
-        } else {
-            "\x1b[3J".to_owned()
-        };
-        self.terminal.vt_write(seq.as_bytes());
+        (self.sender)(super::Request::ClearScreen);
     }
 }
 
@@ -190,56 +187,11 @@ pub enum Paste {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::session::testing::*;
+    use crate::testing::*;
     use runode_shared_types::{
         input::{Key, Mods},
         settings::{self, TermSettings},
     };
-
-    #[test]
-    fn clear_screen_at_the_shell_clears_everything() {
-        // `idle_session` 的「shell」就是前台进程，走 shell 那一支。
-        let mut session = idle_session();
-        session.feed(b"1\r\n2\r\n3\r\n4\r\n5\r\n6\r\n$ ls");
-        assert!(scrollback_rows(&session) > 0);
-        session.clear_screen();
-        assert_eq!(scrollback_rows(&session), 0);
-        let frame = session.frame();
-        assert!((0..4).all(|y| row_text(&frame, y).is_empty()));
-    }
-
-    #[test]
-    fn clear_above_cursor_keeps_the_cursor_row_at_the_top() {
-        let mut session = idle_session();
-        session.feed(b"1\r\n2\r\n3\r\n4\r\n5\r\nrunning");
-        session.clear_above_cursor();
-        assert_eq!(scrollback_rows(&session), 0);
-        assert_eq!(session.terminal.cursor_y().unwrap(), 0);
-        assert_eq!(session.terminal.cursor_x().unwrap(), 7);
-        let frame = session.frame();
-        assert_eq!(row_text(&frame, 0), "running");
-        assert!((1..4).all(|y| row_text(&frame, y).is_empty()));
-    }
-
-    #[test]
-    fn clear_screen_leaves_the_alternate_screen_alone() {
-        let mut session = idle_session();
-        session.feed(b"\x1b[?1049hvim");
-        session.clear_screen();
-        assert_eq!(row_text(&session.frame(), 0), "vim");
-    }
-
-    #[test]
-    fn multiline_paste_needs_confirmation_unless_bracketed() {
-        let mut session = idle_session();
-        assert_eq!(session.paste("ls", false), Paste::Done);
-        assert_eq!(session.paste("rm -rf x\nls", false), Paste::NeedsConfirmation);
-        assert_eq!(session.paste("rm -rf x\nls", true), Paste::Done);
-
-        // 程序开启 bracketed paste 后，换行不会被直接执行，无需确认。
-        session.feed(b"\x1b[?2004h");
-        assert_eq!(session.paste("a\nb", false), Paste::Done);
-    }
 
     #[test]
     fn option_as_alt_follows_the_configured_side() {

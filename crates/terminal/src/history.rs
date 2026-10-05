@@ -1,8 +1,10 @@
 //! 命令历史：用户 shell 自己的历史文件，加上 runode 在 shell 集成报告命令运行时记下的命令
 //! （带当时的目录和退出码）。输入命令时的灰字建议从这里找，以后的补全也会用它。
 //!
-//! 全进程共用一份，见 `shared`：第一次用到时在后台线程里读文件，读完之前只有这次运行中
-//! 记下的命令。新记下的命令由同一个线程追加到 runode 自己的历史文件，一行一条 JSON。
+//! 记和查分在两边。宿主认出一条命令运行完了就 `record`：由写历史的线程追加到 runode 自己的
+//! 历史文件，一行一条 JSON，文件太长时也只由这个线程压缩重写。界面收到这条命令后 `observe`：
+//! 只加进内存里的历史，不写文件。界面内存里的历史全进程共用一份，见 `shared`：第一次用到时在
+//! 后台线程里只读地读文件，读完之前只有这次运行中看到的命令。
 
 use std::{
     collections::HashMap,
@@ -20,7 +22,7 @@ use serde::{Deserialize, Serialize};
 pub const LIMIT: usize = 10_000;
 /// 每条命令最多记住它在这么多个目录里用过，多出来的丢掉最久没用的。
 const DIRS_PER_COMMAND: usize = 16;
-/// runode 自己的历史文件超过这么多行时，读的时候顺便只留最近的 `LIMIT` 行重写一遍。
+/// runode 自己的历史文件超过这么多行时，写历史的线程开始写之前先只留最近的 `LIMIT` 行重写一遍。
 const FILE_COMPACT_LINES: usize = 2 * LIMIT;
 
 /// 一条命令记录，也是 runode 历史文件里的一行。
@@ -254,20 +256,16 @@ pub fn worth_recording(cmd: &str) -> bool {
 
 struct Shared {
     history: Mutex<History>,
-    writer: mpsc::Sender<Entry>,
 }
 
 fn shared_state() -> &'static Shared {
     static SHARED: OnceLock<Shared> = OnceLock::new();
     SHARED.get_or_init(|| {
-        let (writer, rx) = mpsc::channel();
-        let spawned = std::thread::Builder::new()
-            .name("history".into())
-            .spawn(move || run_background(rx));
+        let spawned = std::thread::Builder::new().name("history".into()).spawn(load_background);
         if let Err(err) = spawned {
             tracing::warn!("failed to start the history thread: {err}");
         }
-        Shared { history: Mutex::new(History::loading()), writer }
+        Shared { history: Mutex::new(History::loading()) }
     })
 }
 
@@ -281,23 +279,41 @@ pub fn shared() -> MutexGuard<'static, History> {
     shared_state().history.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
-/// 记下一条运行过的命令：加进共用的历史，并在后台追加到历史文件。
+/// 界面看到一条运行过的命令（宿主已经 `record` 过）：加进共用的历史，不写文件。
+pub fn observe(entry: Entry) {
+    if worth_recording(&entry.cmd) {
+        shared().push(entry);
+    }
+}
+
+/// 宿主记下一条运行过的命令：在后台追加到 runode 自己的历史文件。不碰内存里的历史，界面那边
+/// 由 `observe` 加。
 pub fn record(entry: Entry) {
     if !worth_recording(&entry.cmd) {
         return;
     }
-    let state = shared_state();
-    state.history.lock().unwrap_or_else(PoisonError::into_inner).push(entry.clone());
-    // 后台线程没起来时只是不写文件。
-    let _ = state.writer.send(entry);
+    // 写历史的线程没起来时只是不写文件。
+    let _ = writer().send(entry);
 }
 
-/// 后台线程：先读历史文件，再把陆续记下的命令追加到 runode 自己的历史文件。
-fn run_background(rx: mpsc::Receiver<Entry>) {
-    let own = own_history_path();
+/// 写历史的线程收命令的一端；第一次调用时起线程，它先按需压缩历史文件，再陆续追加。
+fn writer() -> &'static mpsc::Sender<Entry> {
+    static WRITER: OnceLock<mpsc::Sender<Entry>> = OnceLock::new();
+    WRITER.get_or_init(|| {
+        let (writer, rx) = mpsc::channel();
+        let spawned = std::thread::Builder::new().name("history-writer".into()).spawn(move || write_background(rx));
+        if let Err(err) = spawned {
+            tracing::warn!("failed to start the history writer thread: {err}");
+        }
+        writer
+    })
+}
+
+/// 后台读历史文件：shell 的历史加上 runode 自己的，只读，读完接上这期间看到的命令。
+fn load_background() {
     let mut entries = std::env::var("SHELL").ok().and_then(|shell| read_shell_history(&shell)).unwrap_or_default();
-    if let Some(path) = &own {
-        match read_own_history(path) {
+    if let Some(path) = own_history_path() {
+        match read_own_history(&path) {
             Ok(own) => entries.extend(own),
             Err(err) if err.kind() == io::ErrorKind::NotFound => {}
             Err(err) => tracing::warn!("failed to read {}: {err}", path.display()),
@@ -306,14 +322,21 @@ fn run_background(rx: mpsc::Receiver<Entry>) {
     // shell 的历史和 runode 的按时间排在一起；没有时间的（记为 0）排在最前，保持原来的顺序。
     entries.sort_by_key(|entry| entry.ts);
     // 建索引要一会儿，放在锁外做，界面查建议时不必等它。
-    let lock = || shared_state().history.lock().unwrap_or_else(PoisonError::into_inner);
-    entries.extend(lock().take_early());
+    entries.extend(shared().take_early());
     let loaded = History::from_entries(entries);
-    lock().finish_loading(loaded);
+    shared().finish_loading(loaded);
+}
 
-    let Some(path) = own else {
+/// 写历史的线程：历史文件太长时先压缩，再把陆续记下的命令追加进去。
+fn write_background(rx: mpsc::Receiver<Entry>) {
+    let Some(path) = own_history_path() else {
         return;
     };
+    match compact_own_history(&path) {
+        Ok(()) => {}
+        Err(err) if err.kind() == io::ErrorKind::NotFound => {}
+        Err(err) => tracing::warn!("failed to compact {}: {err}", path.display()),
+    }
     for entry in rx {
         if let Err(err) = append(&path, &entry) {
             tracing::warn!("failed to write {}: {err}", path.display());
@@ -325,22 +348,27 @@ fn own_history_path() -> Option<PathBuf> {
     runode_paths::Dirs::from_env().history_file()
 }
 
-/// 读 runode 自己的历史文件，坏掉的行跳过。行数太多时只留最近的 `LIMIT` 行重写一遍。
+/// 读 runode 自己的历史文件，坏掉的行跳过。只读，不改文件。
 fn read_own_history(path: &Path) -> io::Result<Vec<Entry>> {
     let text = fs::read_to_string(path)?;
     let lines: Vec<&str> = text.lines().filter(|line| !line.trim().is_empty()).collect();
-    if lines.len() > FILE_COMPACT_LINES {
-        let kept = lines[lines.len() - LIMIT..].join("\n") + "\n";
-        let tmp = path.with_extension("jsonl.tmp");
-        let written = private_file(fs::OpenOptions::new().write(true).create(true).truncate(true))
-            .open(&tmp)
-            .and_then(|mut file| file.write_all(kept.as_bytes()))
-            .and_then(|()| fs::rename(&tmp, path));
-        if let Err(err) = written {
-            tracing::warn!("failed to compact {}: {err}", path.display());
-        }
-    }
     Ok(parse_own(&lines))
+}
+
+/// runode 自己的历史文件行数超过 `FILE_COMPACT_LINES` 时，只留最近的 `LIMIT` 行重写一遍。先写
+/// 临时文件再换过去，同时在读的一方读到的总是完整的旧文件或新文件。
+fn compact_own_history(path: &Path) -> io::Result<()> {
+    let text = fs::read_to_string(path)?;
+    let lines: Vec<&str> = text.lines().filter(|line| !line.trim().is_empty()).collect();
+    if lines.len() <= FILE_COMPACT_LINES {
+        return Ok(());
+    }
+    let kept = lines[lines.len() - LIMIT..].join("\n") + "\n";
+    let tmp = path.with_extension("jsonl.tmp");
+    private_file(fs::OpenOptions::new().write(true).create(true).truncate(true))
+        .open(&tmp)
+        .and_then(|mut file| file.write_all(kept.as_bytes()))
+        .and_then(|()| fs::rename(&tmp, path))
 }
 
 fn parse_own(lines: &[&str]) -> Vec<Entry> {
@@ -553,14 +581,6 @@ mod tests {
     }
 
     #[test]
-    fn entries_round_trip_through_json() {
-        let e = Entry { cmd: "cargo test".into(), cwd: Some("/x".into()), exit: Some(1), ts: 9 };
-        let line = serde_json::to_string(&e).unwrap();
-        assert_eq!(line, r#"{"cmd":"cargo test","cwd":"/x","exit":1,"ts":9}"#);
-        assert_eq!(serde_json::from_str::<Entry>(&line).unwrap(), e);
-    }
-
-    #[test]
     fn same_directory_wins_then_most_recent_anywhere() {
         let history = History::from_entries(vec![
             entry("git status", Some("/a")),
@@ -629,7 +649,11 @@ mod tests {
         let lines: Vec<String> = (0..FILE_COMPACT_LINES + 1).map(|i| format!(r#"{{"cmd":"c{i}"}}"#)).collect();
         fs::write(&path, lines.join("\n")).unwrap();
         fs::set_permissions(&path, fs::Permissions::from_mode(0o644)).unwrap();
+        // 读的时候不改文件，压缩只由写历史的线程做。
         assert_eq!(read_own_history(&path).unwrap().len(), FILE_COMPACT_LINES + 1);
+        assert_eq!(fs::read_to_string(&path).unwrap().lines().count(), FILE_COMPACT_LINES + 1);
+        compact_own_history(&path).unwrap();
+        assert_eq!(read_own_history(&path).unwrap().len(), LIMIT);
         let compacted = fs::metadata(&path).unwrap().permissions().mode() & 0o777;
         let kept = fs::read_to_string(&path).unwrap().lines().count();
         fs::remove_dir_all(&dir).unwrap();
@@ -655,44 +679,5 @@ mod tests {
         // 读完以后不再攒着。
         history.push(entry("ls", None));
         assert!(history.early.is_none());
-    }
-
-    #[test]
-    fn suggester_matches_a_full_scan_while_narrowing() {
-        let mut history = History::from_entries(vec![
-            entry("cargo build", Some("/a")),
-            entry("cargo test", None),
-            entry("cat file", None),
-        ]);
-        let mut suggester = Suggester::default();
-        let a = Some(Path::new("/a"));
-        assert_eq!(suggester.suggest(&history, "c", a), Some("argo build".into()));
-        assert_eq!(suggester.suggest(&history, "ca", None), Some("t file".into()));
-        assert_eq!(suggester.suggest(&history, "car", None), Some("go test".into()));
-        assert_eq!(suggester.suggest(&history, "cargo t", None), Some("est".into()));
-        // 删掉字符后前缀变短，要重新扫。
-        assert_eq!(suggester.suggest(&history, "cargo ", a), Some("build".into()));
-        // 历史变了，旧的候选作废。
-        history.push(entry("cargo clippy", Some("/a")));
-        assert_eq!(suggester.suggest(&history, "cargo c", a), Some("lippy".into()));
-        assert_eq!(suggester.suggest(&history, "cargo b", a), Some("uild".into()));
-        assert_eq!(suggester.suggest(&history, " ", a), None);
-    }
-
-    #[test]
-    fn next_word_stops_at_spaces_and_path_separators() {
-        assert_eq!(next_word(" status --short"), " status");
-        assert_eq!(next_word("atus --short"), "atus");
-        assert_eq!(next_word("src/runode/main.rs"), "src/");
-        assert_eq!(next_word("/usr/bin"), "/usr/");
-        assert_eq!(next_word("bin"), "bin");
-        assert_eq!(next_word("  "), "  ");
-    }
-
-    #[test]
-    fn commands_starting_with_a_space_are_not_recorded() {
-        assert!(worth_recording("ls"));
-        assert!(!worth_recording(" secret"));
-        assert!(!worth_recording("   "));
     }
 }

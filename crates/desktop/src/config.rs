@@ -52,6 +52,8 @@ pub fn reload(cx: &mut App) {
     let config = Config::load(dark);
     // 先换语言再广播，观察配置的菜单和视图重画时就是新语言。
     crate::i18n::set(&config.language.clone().unwrap_or_else(crate::i18n::system));
+    // 宿主先换主题，视图等它在各个会话的输出流里标出位置后再跟着换。
+    crate::session_host::configure(&config);
     cx.set_global(AppConfig(Arc::new(config)));
 }
 

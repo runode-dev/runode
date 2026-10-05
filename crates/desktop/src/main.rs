@@ -14,6 +14,7 @@ mod persist;
 mod prespawn;
 mod scrollbar;
 mod search_bar;
+mod session_host;
 mod sprites;
 mod terminal_view;
 mod text_area;

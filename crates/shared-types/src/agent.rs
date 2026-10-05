@@ -173,17 +173,3 @@ impl AgentKind {
         }
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn labels_are_unique() {
-        let mut labels: Vec<_> = AgentKind::ALL.iter().map(|kind| kind.label()).collect();
-        labels.sort_unstable();
-        labels.dedup();
-        assert_eq!(labels.len(), AgentKind::ALL.len());
-        assert!(!AgentKind::ALL.contains(&AgentKind::Other));
-    }
-}

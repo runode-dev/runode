@@ -27,6 +27,7 @@ use gpui::{
     Pixels, Point, Render, ShapedLine, Subscription, Task, Window, actions, div, prelude::*, px, rgb,
 };
 use runode_config::Config;
+use runode_host::{ClientMsg, SessionId};
 use runode_shared_types::{color::Rgb, grid::GridSize};
 use runode_terminal::{history, session::Session};
 
@@ -117,6 +118,10 @@ pub enum TerminalEvent {
 
 pub struct TerminalView {
     session: Session,
+    /// 宿主里的会话。视图没了就结束它，见 `Drop`。
+    id: SessionId,
+    /// 已经请宿主启动了 shell。
+    started: bool,
     config: Arc<Config>,
     focus_handle: FocusHandle,
     font: Font,
@@ -166,15 +171,8 @@ pub struct TerminalView {
     start_pending: bool,
     /// 打开着的搜索栏输入框，以及对它事件的订阅。
     search_field: Option<(Entity<SearchField>, Subscription)>,
+    /// 收宿主发来的输出和状态的任务，见 `read_events`。
     _reader: Task<()>,
-    /// shell 启动后才有。
-    _foreground_poll: Option<Task<()>>,
-    /// 上次因为有输出而重读前台进程的时刻。
-    foreground_read_at: Instant,
-    /// 输出太密时推迟的那次重读。
-    _foreground_refresh: Option<Task<()>>,
-    /// 下次判断前台 agent 状态的时刻和计时器，见 `schedule_agent_poll`。
-    agent_poll: Option<(Instant, Task<()>)>,
     /// 前台 agent 上次换了种类或状态的时刻，agent 列表按它排同一状态里的先后。
     agent_changed_at: Instant,
     _hold_timeout: Option<Task<()>>,
@@ -190,6 +188,14 @@ pub struct TerminalView {
 }
 
 impl EventEmitter<TerminalEvent> for TerminalView {}
+
+/// 关掉标签、分屏或窗口时视图随之销毁，宿主里的会话也结束，shell 收到 SIGHUP，和关掉终端
+/// 窗口一样。
+impl Drop for TerminalView {
+    fn drop(&mut self) {
+        crate::session_host::client().send(ClientMsg::Kill { id: self.id });
+    }
+}
 
 impl Focusable for TerminalView {
     fn focus_handle(&self, _: &App) -> FocusHandle {

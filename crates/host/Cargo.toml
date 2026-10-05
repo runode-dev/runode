@@ -1,0 +1,17 @@
+[package]
+name = "runode-host"
+description = "runode's terminal host: owns the PTYs and the authoritative terminal state, one thread per session, and talks to front ends in runode-protocol messages"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+runode-terminal.workspace = true
+runode-protocol.workspace = true
+runode-shared-types.workspace = true
+anyhow.workspace = true
+tracing.workspace = true
+
+[lints]
+workspace = true

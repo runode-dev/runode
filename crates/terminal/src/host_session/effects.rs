@@ -1,4 +1,4 @@
-//! VT 回调累积下来、UI 关心的变化：标题和 agent 状态、响铃，以及 shell 集成报告的命令步骤、
+//! 宿主那份 VT 的回调累积下来的变化：标题和 agent 状态，以及 shell 集成报告的命令步骤、
 //! PATH 和各种名字。
 
 use std::{
@@ -8,26 +8,24 @@ use std::{
 
 use runode_shared_types::shell::ShellNames;
 
-use super::{Session, log_err};
-use crate::{
-    history,
-    prompt_input::{self, PromptInput},
-};
+use super::HostSession;
+use crate::history;
 
-/// VT 回调累积下来、UI 关心的变化。
+/// 宿主那份 VT 的回调累积下来的变化。
 #[derive(Default)]
 pub(super) struct Effects {
     pub(super) title_changed: StdCell<bool>,
-    pub(super) bell: StdCell<bool>,
+    /// 采用了一条 PATH 或各种名字的报告，对外公布的状态可能变了，由 `HostSession::take_meta` 取走。
+    pub(super) reported: StdCell<bool>,
     /// 最近一次 OSC 9;4 进度报告是不是在进行中。
     pub(super) progress: StdCell<Option<bool>>,
     /// shell 集成报告的命令步骤，按到达的先后，由 `take_commands` 取走。
     pub(super) prompts: RefCell<Vec<PromptEvent>>,
-    /// shell 集成用 `SHELL_REPORT` 报告的 shell 自己的 PATH，见 `Session::shell_path`。
+    /// shell 集成用 `SHELL_REPORT` 报告的 shell 自己的 PATH，对外见 `SessionMeta::shell_path`。
     pub(super) shell_path: RefCell<Option<std::ffi::OsString>>,
     /// shell 集成在这次显示提示符前报告的目录，由下一个 `PromptEvent::InputStart` 取走。
     pub(super) shell_cwd: RefCell<Option<std::path::PathBuf>>,
-    /// shell 集成用 `SHELL_REPORT` 报告的别名、函数、内建命令和关键字，见 `Session::shell_names`。
+    /// shell 集成用 `SHELL_REPORT` 报告的别名、函数、内建命令和关键字，对外见 `SessionMeta::shell_names`。
     pub(super) shell_names: RefCell<ShellNames>,
     /// 启动 shell 时交给集成脚本的报告口令（见 `shell_integration::prepare`），`SHELL_REPORT`
     /// 带的口令和它一致才采用；没有口令时一条报告都不采用。
@@ -83,6 +81,7 @@ impl Effects {
             if let Ok(mut path) = self.shell_path.try_borrow_mut() {
                 use std::os::unix::ffi::OsStringExt as _;
                 *path = Some(std::ffi::OsString::from_vec(value));
+                self.reported.set(true);
             }
             return;
         }
@@ -96,6 +95,7 @@ impl Effects {
         let Ok(mut names) = self.shell_names.try_borrow_mut() else {
             return;
         };
+        self.reported.set(true);
         if field == b"alias_values" {
             let text = String::from_utf8_lossy(&value);
             names.alias_values =
@@ -124,9 +124,9 @@ pub(super) enum PromptEvent {
     CommandEnd(Option<i32>),
 }
 
-impl Session {
+impl HostSession {
     /// 把 PTY 输出喂给 VT，返回标题或 agent 状态是否变化。agent 状态要读屏幕判断的部分按
-    /// 时间节流，不一定在这次判断，见 `Session::agent_deadline`。
+    /// 时间节流，不一定在这次判断，见 `HostSession::agent_deadline`。
     pub fn feed(&mut self, data: &[u8]) -> bool {
         self.terminal.vt_write(data);
         let now = Instant::now();
@@ -147,7 +147,9 @@ impl Session {
             let pty = &self.pty;
             self.agent_tracker.progress(active, now, || pty.foreground_is_shell());
         }
-        changed | self.poll_agent_at(now)
+        let changed = changed | self.poll_agent_at(now);
+        self.meta_dirty |= changed;
+        changed
     }
 
     /// 取走 shell 集成报告运行完了的命令，带着运行的目录和退出码，按结束的先后。每次 `feed`
@@ -161,11 +163,12 @@ impl Session {
                 // 之后临时切进了插件目录，这时再读 shell 的目录就错了。没报告时（续行提示符、
                 // 拿不到口令的 shell）才现读。
                 PromptEvent::InputStart => {
-                    self.prompt_cwd = self.effects.shell_cwd.take().or_else(|| self.cwd());
+                    self.prompt_cwd = self.effects.shell_cwd.take().or_else(|| self.live_cwd());
+                    self.meta_dirty = true;
                 }
                 PromptEvent::OutputStart(command) => {
                     self.running = command.map(|command| {
-                        history::Entry::now(command, self.prompt_cwd.clone().or_else(|| self.cwd()))
+                        history::Entry::now(command, self.prompt_cwd.clone().or_else(|| self.live_cwd()))
                     });
                 }
                 // 有的 shell 每次出提示符都报告一次结束，没在运行的命令时不算。
@@ -180,30 +183,10 @@ impl Session {
         finished
     }
 
-    /// 光标停在 shell 提示符上时正在编辑的那条输入，见 `prompt_input::read`。
-    pub fn prompt_input(&self) -> Option<PromptInput> {
-        log_err("read prompt input", prompt_input::read(&self.terminal)).flatten()
-    }
-
-    /// shell 集成报告的 shell 自己的 PATH（每次显示提示符时 PATH 变了才报告）；还没报告过时
-    /// 为 `None`。补全跑生成器命令时用它，和用户在 shell 里能找到的命令一致。
-    pub fn shell_path(&self) -> Option<std::ffi::OsString> {
-        self.effects.shell_path.borrow().clone()
-    }
-
-    /// shell 集成报告的别名、函数、内建命令和关键字（内容变了才报告）；没报告过的为空。
-    pub fn shell_names(&self) -> ShellNames {
-        self.effects.shell_names.borrow().clone()
-    }
-
-    /// shell 最近一次等着输入时所在的目录；还没等过输入时现读一次。
-    pub fn prompt_cwd(&self) -> Option<std::path::PathBuf> {
-        self.prompt_cwd.clone().or_else(|| self.cwd())
-    }
-
-    /// 重新读取终端的前台进程，返回 `fallback_title` 或 `agent` 是否变化。前台换了程序时
-    /// 顺带认它是不是 agent；回到 shell 时 agent 已经退出，它留下的标题不再代表任何状态。
-    pub fn refresh_fallback_title(&mut self) -> bool {
+    /// 重新读取终端的前台进程和 shell 的目录，返回 `fallback_title` 或 `agent` 是否变化。前台
+    /// 换了程序时顺带认它是不是 agent；回到 shell 时 agent 已经退出，它留下的标题不再代表任何
+    /// 状态。
+    pub fn refresh_foreground(&mut self) -> bool {
         // 还没启动时没有前台进程，标题保持起始目录的名字。
         if !self.pty.started() {
             return false;
@@ -211,17 +194,22 @@ impl Session {
         let now = Instant::now();
         self.probe_foreground(now);
         let agent_changed = self.poll_agent_at(now);
+        let cwd = self.live_cwd();
+        let foreground_is_shell = self.pty.foreground_is_shell();
+        if cwd != self.cwd || foreground_is_shell != self.foreground_is_shell {
+            self.cwd = cwd;
+            self.foreground_is_shell = foreground_is_shell;
+            self.meta_dirty = true;
+        }
         // shell 在前台时不读它此刻的目录：插件管理器在提示符出来后延迟加载插件，会临时切进插件目录。
         let title = self.pty.foreground_title(|| self.prompt_cwd());
         if title == self.fallback_title {
+            self.meta_dirty |= agent_changed;
             return agent_changed;
         }
         self.fallback_title = title;
+        self.meta_dirty = true;
         true
-    }
-
-    pub fn take_bell(&self) -> bool {
-        self.effects.bell.take()
     }
 }
 
@@ -253,12 +241,16 @@ fn percent_decode(bytes: &[u8]) -> Vec<u8> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::session::testing::*;
+    use crate::testing::*;
     use runode_shared_types::agent::{Agent, AgentKind, AgentState};
+
+    fn prompt_input(session: &HostSession) -> Option<crate::PromptInput> {
+        crate::prompt_input::read(session.terminal()).unwrap()
+    }
 
     #[test]
     fn agent_status_prefix_is_split_from_the_title() {
-        let mut session = idle_session();
+        let mut session = idle_host();
         assert!(session.feed("\x1b]0;⠋ 美化图标 | runode\x07".as_bytes()));
         assert_eq!(session.title.as_deref(), Some("美化图标 | runode"));
         assert_eq!(session.agent, Some(Agent { kind: AgentKind::Codex, state: AgentState::Working }));
@@ -274,7 +266,7 @@ mod tests {
 
     #[test]
     fn progress_report_marks_the_agent_working() {
-        let mut session = idle_session();
+        let mut session = idle_host();
         let pi_working = Some(Agent { kind: AgentKind::Pi, state: AgentState::Working });
         assert!(session.feed("\x1b]0;π - runode\x07\x1b]9;4;3\x07".as_bytes()));
         assert_eq!(session.agent, pi_working);
@@ -289,19 +281,19 @@ mod tests {
 
     #[test]
     fn finished_commands_carry_the_prompt_directory_and_exit_code() {
-        let mut session = reporting_session();
+        let mut session = reporting_host();
         session.feed(PROMPT);
         assert!(session.take_commands().is_empty());
         let cwd = session.prompt_cwd();
-        assert_eq!(session.prompt_input().map(|input| input.text), Some(String::new()));
+        assert_eq!(prompt_input(&session).map(|input| input.text), Some(String::new()));
         session.feed(b"git st");
-        let input = session.prompt_input().unwrap();
+        let input = prompt_input(&session).unwrap();
         assert_eq!((input.before_cursor(), input.at_end), ("git st", true));
         // 报告没带原文，从屏幕上读。
         session.feed(format!("atus\r\n\x1b]6973;{TOKEN};command=\x07\x1b]133;C\x07clean\r\n").as_bytes());
         // 命令还在跑，没有结束报告。
         assert!(session.take_commands().is_empty());
-        assert_eq!(session.prompt_input(), None);
+        assert_eq!(prompt_input(&session), None);
         session.feed(b"\x1b]133;D;1\x07");
         let commands = session.take_commands();
         assert_eq!(commands.len(), 1);
@@ -313,7 +305,7 @@ mod tests {
 
     #[test]
     fn the_prompt_directory_comes_from_the_shell_report() {
-        let mut session = reporting_session();
+        let mut session = reporting_host();
         // 提示符前报告的目录（插件管理器之后切去别处也不受影响），由这个提示符取走。
         session.feed(format!("\x1b]6973;{TOKEN};cwd=/work/my%20repo\x07").as_bytes());
         session.feed(PROMPT);
@@ -322,23 +314,23 @@ mod tests {
         // 下一个提示符前没有报告（续行提示符、拿不到口令的 shell）：现读 shell 的目录。
         session.feed(PROMPT);
         session.take_commands();
-        assert_eq!(session.prompt_cwd(), session.cwd());
+        assert_eq!(session.prompt_cwd(), session.live_cwd());
         // 口令不对的报告不采用。
         session.feed(b"\x1b]6973;0123456789abcdef0123456789abcdee;cwd=/fake\x07");
         session.feed(PROMPT);
         session.take_commands();
-        assert_eq!(session.prompt_cwd(), session.cwd());
+        assert_eq!(session.prompt_cwd(), session.live_cwd());
     }
 
     #[test]
     fn the_shell_reports_its_path() {
-        let mut session = reporting_session();
-        assert_eq!(session.shell_path(), None);
+        let mut session = reporting_host();
+        assert_eq!(session.meta().shell_path, None);
         session.feed(format!("\x1b]6973;{TOKEN};path=/usr/bin%3A/opt/my%20bin\x07").as_bytes());
-        assert_eq!(session.shell_path(), Some("/usr/bin:/opt/my bin".into()));
+        assert_eq!(session.meta().shell_path, Some("/usr/bin:/opt/my bin".into()));
         // 别的私有 OSC 不算。
         session.feed(format!("\x1b]69730;{TOKEN};path=/x\x07\x1b]6973;{TOKEN};other=1\x1b\\").as_bytes());
-        assert_eq!(session.shell_path(), Some("/usr/bin:/opt/my bin".into()));
+        assert_eq!(session.meta().shell_path, Some("/usr/bin:/opt/my bin".into()));
         // 各种名字，空格编码成 %20；很长的列表也收得下。
         let functions: Vec<String> = (0..3000).map(|i| format!("function_number_{i}")).collect();
         let mut report = format!("\x1b]6973;{TOKEN};functions=").into_bytes();
@@ -350,7 +342,7 @@ mod tests {
             .bytes(),
         );
         session.feed(&report);
-        let names = session.shell_names();
+        let names = session.meta().shell_names;
         assert_eq!(names.aliases, ["ll", "gs"]);
         assert_eq!(names.alias_values, [("ll".into(), "ls -l".into()), ("gs".into(), "git status".into())]);
         assert_eq!(names.functions, functions);
@@ -360,25 +352,25 @@ mod tests {
 
     #[test]
     fn shell_reports_without_the_right_token_are_ignored() {
-        let mut session = reporting_session();
+        let mut session = reporting_host();
         let wrong = "0123456789abcdef0123456789abcdee";
         // 口令不对、少一位、缺口令（旧格式）、空口令，都不采用。
         session.feed(format!("\x1b]6973;{wrong};path=/evil\x07").as_bytes());
         session.feed(format!("\x1b]6973;{};path=/evil\x07", &TOKEN[1..]).as_bytes());
         session.feed(b"\x1b]6973;path=/evil\x07\x1b]6973;;path=/evil\x07\x1b]6973;aliases=git\x07");
-        assert_eq!(session.shell_path(), None);
-        assert!(session.shell_names().aliases.is_empty());
+        assert_eq!(session.meta().shell_path, None);
+        assert!(session.meta().shell_names.aliases.is_empty());
         // 先伪造命令结束、回到提示符也没用。
         session.feed(format!("\x1b]133;D;0\x07\x1b]133;A\x07$ \x1b]133;B\x07\x1b]6973;{wrong};path=/evil\x07").as_bytes());
-        assert_eq!(session.shell_path(), None);
+        assert_eq!(session.meta().shell_path, None);
         session.feed(format!("\x1b]6973;{TOKEN};path=/usr/bin\x07").as_bytes());
-        assert_eq!(session.shell_path(), Some("/usr/bin".into()));
+        assert_eq!(session.meta().shell_path, Some("/usr/bin".into()));
 
         // 没注入集成、没有口令的 shell 报告什么都不采用。
-        let mut session = idle_session();
+        let mut session = idle_host();
         session.feed(format!("\x1b]6973;{TOKEN};path=/evil\x07\x1b]6973;;path=/evil\x07").as_bytes());
         session.feed(b"\x1b]6973;path=/evil\x07");
-        assert_eq!(session.shell_path(), None);
+        assert_eq!(session.meta().shell_path, None);
 
         assert!(same_token(b"abc", b"abc"));
         assert!(!same_token(b"abc", b"abd") && !same_token(b"abc", b"ab") && !same_token(b"", b"a"));
@@ -386,7 +378,7 @@ mod tests {
 
     #[test]
     fn the_command_line_sent_by_the_shell_wins_over_the_screen() {
-        let mut session = reporting_session();
+        let mut session = reporting_host();
         session.feed(PROMPT);
         // 屏幕上只看得到一部分（比如被插件改写过），shell 报告的原文用百分号编码，分号、
         // 换行和 ESC 都原样还原；133;C 自带的原文不用。
@@ -401,7 +393,7 @@ mod tests {
 
     #[test]
     fn forged_command_starts_stay_out_of_the_history() {
-        let mut session = reporting_session();
+        let mut session = reporting_host();
         let wrong = "0123456789abcdef0123456789abcdee";
         let forged = [
             // 程序输出里伪造整套提示符和带原文的命令开始。
@@ -418,7 +410,7 @@ mod tests {
             assert!(session.take_commands().is_empty(), "{bytes:?}");
         }
         // 没有口令的 shell 不记任何命令。
-        let mut session = idle_session();
+        let mut session = idle_host();
         session.feed(PROMPT);
         session.feed(format!("ls\r\n\x1b]6973;{TOKEN};command=ls\x07\x1b]133;C\x07\x1b]133;D;0\x07").as_bytes());
         assert!(session.take_commands().is_empty());
@@ -426,7 +418,7 @@ mod tests {
 
     #[test]
     fn full_reset_clears_the_title() {
-        let mut session = idle_session();
+        let mut session = idle_host();
         assert!(session.feed(b"\x1b]2;hello\x07"));
         assert_eq!(session.title.as_deref(), Some("hello"));
         assert!(session.feed(b"\x1bc"));

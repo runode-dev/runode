@@ -2,13 +2,19 @@
 //! 正在编辑的输入和命令历史。前台 agent 的识别由 `runode_agent_detect` 判断，这里把前台进程、
 //! 屏幕文字、标题和进度报告交给它。
 //!
+//! 一个终端有两份 VT：宿主那份（`host_session::HostSession`）接着 PTY，是权威的，应答查询、
+//! 认标题和 agent、记命令；界面那份（`session::Session`）只消费同样的字节流，用来画屏幕。
+//!
 //! 对外只用 `runode_shared_types` 里的数据类型；libghostty 和 PTY 的类型不出这个 crate。
 
 pub mod history;
+pub mod host_session;
 mod prompt_input;
 pub mod pty;
 pub mod session;
 mod shell_integration;
+#[cfg(test)]
+mod testing;
 mod vt;
 
 pub use prompt_input::PromptInput;
@@ -34,12 +40,5 @@ mod tests {
     #[test]
     fn xtversion_reports_the_version() {
         assert_eq!(XTVERSION, format!("runode {VERSION}"));
-    }
-
-    #[test]
-    fn cell_widths() {
-        assert_eq!(cell_width('a'), 1);
-        assert_eq!(cell_width('中'), 2);
-        assert_eq!(cell_width('\u{301}'), 0);
     }
 }

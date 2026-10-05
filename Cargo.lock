@@ -5031,6 +5031,7 @@ dependencies = [
  "runode-completion",
  "runode-config",
  "runode-git-status",
+ "runode-host",
  "runode-paths",
  "runode-preview",
  "runode-shared-types",
@@ -5084,6 +5085,17 @@ name = "runode-git-status"
 version = "0.1.0"
 
 [[package]]
+name = "runode-host"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "runode-protocol",
+ "runode-shared-types",
+ "runode-terminal",
+ "tracing",
+]
+
+[[package]]
 name = "runode-paths"
 version = "0.1.0"
 
@@ -5117,7 +5129,6 @@ name = "runode-terminal"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "futures",
  "libc",
  "libghostty-vt",
  "portable-pty",

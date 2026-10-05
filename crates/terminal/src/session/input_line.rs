@@ -55,7 +55,7 @@ impl Session {
             return false;
         };
         self.before_input();
-        self.writer.write(&bytes);
+        self.send_input(bytes);
         true
     }
 
@@ -85,7 +85,7 @@ impl Session {
         let mut bytes = arrows;
         bytes.extend(backspace.repeat(count));
         self.before_input();
-        self.writer.write(&bytes);
+        self.send_input(bytes);
         true
     }
 
@@ -155,9 +155,10 @@ impl Session {
                 }
             }
         }
+        // 没有提示符标记时只能看宿主最近一次读到的前台进程。
         let at_prompt = match prompt_end {
             Some(_) => self.terminal.is_cursor_at_prompt()?,
-            None => self.pty.foreground_is_shell(),
+            None => self.foreground_is_shell(),
         };
         if !at_prompt {
             return Ok(None);
@@ -180,7 +181,7 @@ impl Session {
 
 #[cfg(test)]
 mod tests {
-    use crate::session::testing::*;
+    use crate::testing::*;
 
     #[test]
     fn click_to_move_counts_characters_on_the_cursor_line() {

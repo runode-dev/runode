@@ -19,6 +19,7 @@ runode-shared-types = { path = "crates/shared-types" }
 runode-protocol = { path = "crates/protocol" }
 runode-git-status = { path = "crates/git-status" }
 runode-terminal = { path = "crates/terminal" }
+runode-host = { path = "crates/host" }
 runode-completion = { path = "crates/completion" }
 runode-config = { path = "crates/config" }
 runode-preview = { path = "crates/preview" }

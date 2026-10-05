@@ -1,50 +1,88 @@
 //! 子 shell 及其伪终端。
 //!
-//! 读线程通过 channel 转发 PTY 输出，因为接收输出的 VT 状态（`Terminal`）
-//! 只能单线程使用，放在 UI 线程上。写入（按键和 VT 查询的回复）可以从任意线程
-//! 经共享的 writer 直接写进 PTY。
+//! 读线程把 PTY 输出交给创建时给的 `PtySink`，由宿主那边的会话线程接着处理。写入（按键、
+//! 粘贴和 VT 查询的回复）经 `PtyWriter` 排进这个伪终端自己的写队列，由写线程按顺序写出，
+//! 所以写入方从不阻塞：给一个不读 stdin 的程序粘贴一大段时，等着的只有写线程。
 
 use std::{
     io::{Read, Write},
     path::{Path, PathBuf},
-    sync::{Arc, Mutex},
+    sync::{Arc, Mutex, mpsc},
     thread,
 };
 
 use anyhow::{Context as _, Result};
-use futures::channel::mpsc::{UnboundedReceiver, UnboundedSender, unbounded};
 use portable_pty::{Child, CommandBuilder, MasterPty, PtySize, SlavePty, native_pty_system};
 use runode_agent_detect::{ForegroundJob, ForegroundProcess};
 use runode_shared_types::{grid::GridSize, shell::IntegrationMode};
 
 use crate::shell_integration;
 
-/// 读线程报告给 UI 线程的事件。
+/// 读线程交给 `PtySink` 的事件。
 pub enum PtyEvent {
-    Output(Vec<u8>),
+    Output(Arc<[u8]>),
     /// PTY 读到 EOF 或出错：子进程已经退出。
     Exited,
 }
 
+/// 收 PTY 输出的一方，在读线程里调用。返回 false 表示不再要了，读线程随之结束。可以阻塞，
+/// 用来给读线程限流：收的一方积压太多时让它先别读。
+pub type PtySink = Box<dyn FnMut(PtyEvent) -> bool + Send>;
+
+/// 往 PTY 写的一端：只把数据排进写队列，不等它写出去。
 #[derive(Clone)]
-pub struct PtyWriter(Arc<Mutex<Box<dyn Write + Send>>>);
+pub struct PtyWriter(mpsc::Sender<Vec<u8>>);
 
 impl PtyWriter {
     pub fn write(&self, data: &[u8]) {
-        if data.is_empty() {
-            return;
+        if !data.is_empty() {
+            self.send(data.to_vec());
         }
-        let mut writer = self.0.lock().unwrap_or_else(|e| e.into_inner());
-        if let Err(err) = writer.write_all(data).and_then(|()| writer.flush()) {
-            tracing::warn!("pty write failed: {err}");
+    }
+
+    /// 同 `write`，数据已经在自己的缓冲里时不必再复制一份。
+    pub fn send(&self, data: Vec<u8>) {
+        // 写线程已经结束（PTY 出错或关了）时没有可写的地方，丢掉。
+        if !data.is_empty() && self.0.send(data).is_err() {
+            tracing::debug!("pty writer is gone, input dropped");
+        }
+    }
+
+    /// 起写线程，把排进队列的数据按顺序写进 `writer`。所有发送端都没了、或者写出错时结束。
+    fn start(mut writer: Box<dyn Write + Send>) -> Result<Self> {
+        let (tx, rx) = mpsc::channel::<Vec<u8>>();
+        thread::Builder::new()
+            .name("pty-writer".into())
+            .spawn(move || {
+                set_current_thread_interactive();
+                for data in rx {
+                    if let Err(err) = writer.write_all(&data).and_then(|()| writer.flush()) {
+                        tracing::warn!("pty write failed: {err}");
+                        return;
+                    }
+                }
+            })
+            .context("failed to start pty writer thread")?;
+        Ok(Self(tx))
+    }
+}
+
+/// 把当前线程设成交互用的服务质量（macOS 的 `QOS_CLASS_USER_INTERACTIVE`），按键到回显路上的
+/// 线程不被调度到能效核上排队。别的系统上什么都不做。
+pub fn set_current_thread_interactive() {
+    #[cfg(target_os = "macos")]
+    {
+        let result = unsafe { libc::pthread_set_qos_class_self_np(libc::qos_class_t::QOS_CLASS_USER_INTERACTIVE, 0) };
+        if result != 0 {
+            tracing::debug!("failed to raise the thread's QoS: {result}");
         }
     }
 }
 
 pub struct Pty {
     master: Box<dyn MasterPty + Send>,
-    /// 还没启动 shell 时的从设备和读线程要用的发送端，`start` 时交出去。
-    pending: Option<(Box<dyn SlavePty + Send>, UnboundedSender<PtyEvent>)>,
+    /// 还没启动 shell 时的从设备和读线程要交给的 `PtySink`，`start` 时交出去。
+    pending: Option<(Box<dyn SlavePty + Send>, PtySink)>,
     /// `Drop` 里交给回收线程，所以是 `Option`。
     child: Option<Box<dyn Child + Send + Sync>>,
     pub writer: PtyWriter,
@@ -64,20 +102,22 @@ fn pty_size(size: GridSize) -> PtySize {
 
 impl Pty {
     /// 在 `cwd` 下以登录 shell 方式启动 `shell`（为 `None` 时用用户的 `$SHELL`），按 `integration`
-    /// 注入 shell 集成，并启动读线程。
+    /// 注入 shell 集成，并启动读线程，输出交给 `sink`。
     pub fn spawn(
         size: GridSize,
         shell: Option<&str>,
         cwd: Option<&std::path::Path>,
         integration: IntegrationMode,
-    ) -> Result<(Self, UnboundedReceiver<PtyEvent>)> {
-        let (mut pty, rx) = Self::open(size)?;
+        sink: PtySink,
+    ) -> Result<Self> {
+        let mut pty = Self::open(size, sink)?;
         pty.start(shell, cwd, integration)?;
-        Ok((pty, rx))
+        Ok(pty)
     }
 
-    /// 只打开伪终端，shell 等 `start` 时再启动；在那之前没有子进程，也没有读线程。
-    pub fn open(size: GridSize) -> Result<(Self, UnboundedReceiver<PtyEvent>)> {
+    /// 只打开伪终端，shell 等 `start` 时再启动；在那之前没有子进程，也没有读线程。写线程现在
+    /// 就起，写进去的内容等 shell 启动后读。
+    pub fn open(size: GridSize, sink: PtySink) -> Result<Self> {
         // 系统的 openpty 内部用了不可重入的 ptsname，多个线程同时开伪终端会互相踩，
         // 拿到错的从设备名而失败。
         static OPENPTY: Mutex<()> = Mutex::new(());
@@ -86,18 +126,8 @@ impl Pty {
             native_pty_system().openpty(pty_size(size))
         }
         .context("openpty failed")?;
-        let writer = pair.master.take_writer().context("pty writer")?;
-        let (tx, rx) = unbounded();
-        Ok((
-            Self {
-                master: pair.master,
-                pending: Some((pair.slave, tx)),
-                child: None,
-                writer: PtyWriter(Arc::new(Mutex::new(writer))),
-                report_token: None,
-            },
-            rx,
-        ))
+        let writer = PtyWriter::start(pair.master.take_writer().context("pty writer")?)?;
+        Ok(Self { master: pair.master, pending: Some((pair.slave, sink)), child: None, writer, report_token: None })
     }
 
     /// 已经启动了 shell。
@@ -117,7 +147,7 @@ impl Pty {
         cwd: Option<&std::path::Path>,
         integration: IntegrationMode,
     ) -> Result<()> {
-        let Some((slave, tx)) = self.pending.take() else {
+        let Some((slave, sink)) = self.pending.take() else {
             return Ok(());
         };
         let shell = shell
@@ -149,7 +179,7 @@ impl Pty {
         let reader = self.master.try_clone_reader().context("pty reader")?;
         thread::Builder::new()
             .name("pty-reader".into())
-            .spawn(move || read_loop(reader, tx))
+            .spawn(move || read_loop(reader, sink))
             .context("failed to start pty reader thread")?;
         Ok(())
     }
@@ -345,13 +375,14 @@ impl Drop for Pty {
     }
 }
 
-fn read_loop(mut reader: Box<dyn Read + Send>, tx: UnboundedSender<PtyEvent>) {
+fn read_loop(mut reader: Box<dyn Read + Send>, mut sink: PtySink) {
+    set_current_thread_interactive();
     let mut buf = vec![0u8; 64 * 1024];
     loop {
         match reader.read(&mut buf) {
             Ok(0) => break,
             Ok(n) => {
-                if tx.unbounded_send(PtyEvent::Output(buf[..n].to_vec())).is_err() {
+                if !sink(PtyEvent::Output(buf[..n].into())) {
                     return;
                 }
             }
@@ -362,5 +393,5 @@ fn read_loop(mut reader: Box<dyn Read + Send>, tx: UnboundedSender<PtyEvent>) {
             }
         }
     }
-    let _ = tx.unbounded_send(PtyEvent::Exited);
+    sink(PtyEvent::Exited);
 }

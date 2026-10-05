@@ -16,7 +16,9 @@ use libghostty_vt::{
     snapshot::Decoder,
     terminal::{Point, PointCoordinate},
 };
-use runode_shared_types::{grid::GridSize, settings::TermSettings};
+use runode_shared_types::{color::TerminalColor, grid::GridSize, settings::TermSettings};
+
+use crate::session::convert::{ghostty_cursor_style, ghostty_rgb};
 
 /// 回滚历史最多留多少行。另有字节上限（`CommonOptions::scrollback_bytes`，默认 10 MiB），先到
 /// 哪个按哪个算。两个上限都按 page 整块丢弃最老的历史，实际留下的比上限少一些，最多少一个
@@ -51,7 +53,7 @@ impl Default for CommonOptions {
     }
 }
 
-/// 按 `size` 新建一个 VT，按默认配置设好 `configure_common` 的选项（之后 `apply_config` 再按
+/// 按 `size` 新建一个 VT，按默认配置设好 `configure_common` 的选项（之后 `apply_theme` 再按
 /// 实际配置设一遍），并从一开始就记录没写完的序列
 /// （`track_continuation`），随时能编快照。记录的开销可以忽略（release 下喂 100 MiB 混合
 /// 输出实测，和不记录的差别在测量误差以内）。
@@ -63,18 +65,70 @@ pub(crate) fn new_terminal(size: GridSize) -> Result<Terminal<'static, 'static>>
     Ok(terminal)
 }
 
+/// VT 现在的尺寸，单元格的像素按总像素除以行列数算。
+pub(crate) fn terminal_size(terminal: &Terminal<'_, '_>) -> Result<GridSize> {
+    let (cols, rows) = (terminal.cols()?, terminal.rows()?);
+    let cell = |total: u32, cells: u16| u16::try_from(total / u32::from(cells.max(1))).unwrap_or(u16::MAX);
+    Ok(GridSize {
+        cols,
+        rows,
+        cell_width_px: cell(terminal.width_px()?, cols),
+        cell_height_px: cell(terminal.height_px()?, rows),
+    })
+}
+
 /// 设好两份 VT 必须一致的选项：回滚历史的行数和字节上限，未知序列的长度上限。新建的、从
 /// 快照解出来的 VT 都要调，配置变了也要调；快照里带着的选项（比如回滚上限）照样设一遍，
 /// 免得哪天快照格式不再带它时两边悄悄分叉，或者退回 libghostty 自己的默认值。
 ///
-/// 调低回滚上限会立刻丢掉超出的历史。默认颜色和光标样式由 `Session::apply_config` 设，不在
-/// 这里。
+/// 调低回滚上限会立刻丢掉超出的历史。默认颜色和光标样式由 `apply_theme` 设，不在这里。
 pub(crate) fn configure_common(terminal: &mut Terminal<'_, '_>, options: CommonOptions) -> Result<()> {
     terminal
         .set_scrollback_max_lines(Some(SCROLLBACK_LINES))?
         .set_scrollback_max_bytes(options.scrollback_bytes)?
         .set_unknown_sequence_max_bytes(UNKNOWN_SEQUENCE_MAX_BYTES)?;
     Ok(())
+}
+
+/// 把配置里和 VT 状态有关的部分（主题）套到 `terminal` 上：默认颜色、调色板、光标样式和闪烁，
+/// 以及 `configure_common` 的选项。改的是默认值：程序自己用转义序列设置的颜色和光标形状照旧
+/// 优先，所以配置可以随时重载。
+///
+/// 它不只改默认值：重设默认闪烁会把程序关掉的光标闪烁重新打开，调低回滚上限会丢掉历史。
+/// 所以宿主和界面两份 VT 要在输出流的同一个位置套用同样的主题，见 `HostMsg::ThemeApplied`。
+pub(crate) fn apply_theme(terminal: &mut Terminal<'_, '_>, settings: &TermSettings) {
+    // 默认调色板读出来的是上次设置的值，先重置回内置调色板再叠加配置，
+    // 否则旧主题设过、新主题没设的条目会残留。
+    let mut palette = match terminal.set_default_color_palette(None).and_then(|t| t.default_color_palette()) {
+        Ok(palette) => palette,
+        Err(err) => {
+            tracing::warn!("failed to read the default palette: {err}");
+            return;
+        }
+    };
+    for &(index, color) in &settings.palette {
+        palette.0[usize::from(index)] = ghostty_rgb(color);
+    }
+    let applied = terminal
+        .set_default_bg_color(Some(ghostty_rgb(settings.background)))
+        .and_then(|t| t.set_default_fg_color(Some(ghostty_rgb(settings.foreground))))
+        // 跟随单元格的光标色由渲染时按光标所在单元格解析，VT 里不设默认值。
+        .and_then(|t| {
+            t.set_default_cursor_color(match settings.cursor_color {
+                Some(TerminalColor::Rgb(color)) => Some(ghostty_rgb(color)),
+                _ => None,
+            })
+        })
+        .and_then(|t| t.set_default_cursor_style(Some(ghostty_cursor_style(settings.cursor_style))))
+        // 没配置时默认闪烁；libghostty 的 `None` 是不闪烁，所以这里显式给 true。
+        .and_then(|t| t.set_default_cursor_blink(Some(settings.cursor_blink.unwrap_or(true))))
+        .and_then(|t| t.set_default_color_palette(Some(palette)));
+    if let Err(err) = applied {
+        tracing::warn!("failed to apply config to the terminal: {err}");
+    }
+    if let Err(err) = configure_common(terminal, CommonOptions::from_settings(settings)) {
+        tracing::warn!("failed to apply the scrollback limit: {err}");
+    }
 }
 
 /// 开始记录没写完的序列，之后停在序列中间的 VT 也能编码快照。要在喂输入之前开：开的时候

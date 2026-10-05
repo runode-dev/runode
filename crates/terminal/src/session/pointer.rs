@@ -27,7 +27,7 @@ impl Session {
                     return;
                 }
             }
-            self.writer.write(&self.scratch);
+            self.send_input(self.scratch.clone());
         } else {
             self.terminal.scroll_viewport(ScrollViewport::Delta(lines));
         }
@@ -57,7 +57,7 @@ impl Session {
             .set_any_button_pressed(action != mouse::Action::Release && button.is_some());
         self.scratch.clear();
         if self.encode_mouse(action, button, at, mods) && !self.scratch.is_empty() {
-            self.writer.write(&self.scratch);
+            self.send_input(self.scratch.clone());
         }
     }
 

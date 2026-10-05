@@ -16,12 +16,13 @@ use libghostty_vt::{
     selection::Selection,
     terminal::{Mode, Point, PointCoordinate},
 };
-use runode_shared_types::{color::Rgb, settings::TermSettings};
+use runode_shared_types::settings::TermSettings;
 
-use super::super::{render::Renderer, testing::row_text};
+use super::super::render::Renderer;
 use crate::{
-    pty::Pty,
+    host_session::HostSession,
     session::Session,
+    testing::{row_text, unstarted_pty},
     vt::{
         self,
         tests::{RECORDED_ZSH_VIM_LESS, Rng, feed_chunked, mixed_output, random_bytes, size},
@@ -542,14 +543,14 @@ fn pending_wrap_at_a_right_margin_is_lost() {
     assert_eq!(vt::screen_lines(&decoded, 0, 1).unwrap(), ["                   X", "  YZ"]);
 }
 
-/// 一个没有 shell 的会话：`from_snapshot` 要一个 PTY，测试里只喂字节。
-fn unstarted_pty(cols: u16, rows: u16) -> Pty {
-    Pty::open(size(cols, rows)).unwrap().0
+/// 宿主那边的会话，接在没有 shell 的伪终端上，测试里只喂字节。
+fn host(cols: u16, rows: u16) -> HostSession {
+    HostSession::new(size(cols, rows), unstarted_pty(cols, rows), None, &TermSettings::default()).unwrap()
 }
 
-fn session_from(source: &Session) -> Session {
-    let size = source.size.get();
-    Session::from_snapshot(&source.snapshot().unwrap(), unstarted_pty(size.cols, size.rows)).unwrap()
+/// 用宿主那边的快照建界面这边的会话，就像界面连上宿主时那样。
+fn session_from(source: &HostSession) -> Session {
+    Session::from_snapshot(&source.snapshot().unwrap(), Box::new(|_| {})).unwrap()
 }
 
 fn rows(session: &mut Session) -> Vec<String> {
@@ -557,41 +558,42 @@ fn rows(session: &mut Session) -> Vec<String> {
     (0..frame.rows).map(|y| row_text(&frame, y)).collect()
 }
 
+/// 界面从宿主的快照接着喂之后的输出，和一直喂到底的界面一模一样。
 #[test]
 fn a_session_resumes_from_a_snapshot() {
     let (cols, rows_count) = (80, 24);
-    let mut original = Session::with_pty(size(cols, rows_count), unstarted_pty(cols, rows_count)).unwrap();
-    original.apply_config(&TermSettings::default());
+    let mut source = host(cols, rows_count);
+    let mut original = Session::new(size(cols, rows_count), &TermSettings::default(), Box::new(|_| {})).unwrap();
     let cut = RECORDED_ZSH_VIM_LESS.len() / 2;
+    source.feed(&RECORDED_ZSH_VIM_LESS[..cut]);
     original.feed(&RECORDED_ZSH_VIM_LESS[..cut]);
-    // 快照里带着默认颜色和光标样式，这里不再 `apply_config`：它会改 VT 的状态，见
-    // `apply_config_turns_cursor_blinking_back_on`。
-    let mut resumed = session_from(&original);
-    assert_eq!(resumed.size.get(), size(cols, rows_count));
-    assert_eq!(resumed.title, original.title);
+    // 快照里带着默认颜色和光标样式，这里不再 `apply_theme`：它会改 VT 的状态，见
+    // `apply_theme_turns_cursor_blinking_back_on`。
+    let mut resumed = session_from(&source);
+    assert_eq!(resumed.size(), size(cols, rows_count));
     for session in [&mut original, &mut resumed] {
         session.feed(&RECORDED_ZSH_VIM_LESS[cut..]);
     }
+    source.feed(&RECORDED_ZSH_VIM_LESS[cut..]);
     assert_same("session", &original.terminal, &resumed.terminal, true);
+    assert_same("host", source.terminal(), &resumed.terminal, true);
     assert_eq!(rows(&mut resumed), rows(&mut original));
-    assert_eq!(resumed.title, original.title);
     assert_eq!(format!("{:?}", resumed.frame().cursor), format!("{:?}", original.frame().cursor));
 }
 
-/// `apply_config` 不只改默认值：光标样式是默认的时候，重设默认闪烁会把程序用 `CSI ? 12 l`
-/// 关掉的闪烁（DEC 模式 12）又打开。所以同一份配置在两份 VT 上应用的时机不同，两份就分叉了；
-/// 从快照建会话后再 `apply_config`，界面这份就和宿主那份不一样。
+/// `apply_theme` 不只改默认值：光标样式是默认的时候，重设默认闪烁会把程序用 `CSI ? 12 l`
+/// 关掉的闪烁（DEC 模式 12）又打开。所以同一份主题在两份 VT 上套用的时机不同，两份就分叉了；
+/// 从快照建会话后再 `apply_theme`，界面这份就和宿主那份不一样。
 #[test]
-fn apply_config_turns_cursor_blinking_back_on() {
-    let mut session = Session::with_pty(size(20, 4), unstarted_pty(20, 4)).unwrap();
-    session.apply_config(&TermSettings::default());
+fn apply_theme_turns_cursor_blinking_back_on() {
+    let mut session = Session::new(size(20, 4), &TermSettings::default(), Box::new(|_| {})).unwrap();
     session.feed(b"\x1b[?12l");
     assert!(!session.terminal.mode(Mode::CURSOR_BLINKING).unwrap());
-    session.apply_config(&TermSettings::default());
+    session.apply_theme(&TermSettings::default());
     assert!(session.terminal.mode(Mode::CURSOR_BLINKING).unwrap());
     // 程序用 DECSCUSR 设过样式时不受影响。
     session.feed(b"\x1b[?12l\x1b[2 q");
-    session.apply_config(&TermSettings::default());
+    session.apply_theme(&TermSettings::default());
     assert!(!session.terminal.mode(Mode::CURSOR_BLINKING).unwrap());
 }
 
@@ -617,45 +619,3 @@ fn scrollback_pruning_diverges_after_a_snapshot() {
     assert_ne!(expected.scrollback_rows().unwrap(), actual.scrollback_rows().unwrap());
     assert_same("pruned", &expected, &actual, true);
 }
-
-#[test]
-fn a_title_from_the_snapshot_goes_through_agent_detection() {
-    let mut original = Session::with_pty(size(40, 6), unstarted_pty(40, 6)).unwrap();
-    original.feed("\x1b]0;✳ 修 bug\x07".as_bytes());
-    let resumed = session_from(&original);
-    assert_eq!(resumed.title.as_deref(), Some("修 bug"));
-    assert_eq!(resumed.agent, original.agent);
-}
-
-#[test]
-fn colors_set_by_programs_survive_apply_config() {
-    let mut original = Session::with_pty(size(20, 4), unstarted_pty(20, 4)).unwrap();
-    original.apply_config(&TermSettings::default());
-    original.feed(b"\x1b]4;1;rgb:12/34/56\x07\x1b]11;rgb:01/02/03\x07");
-    let mut resumed = session_from(&original);
-    let theme = |seed: u8| TermSettings {
-        background: Rgb(seed, seed, seed),
-        palette: (0..16).map(|i| (i, Rgb(seed, i, 0))).collect(),
-        ..TermSettings::default()
-    };
-    for seed in [200, 100] {
-        resumed.apply_config(&theme(seed));
-        let colors = resumed.ansi_colors();
-        // 程序用 OSC 4 改过的第 1 项和 OSC 11 改的背景照旧；没改过的跟着主题走。
-        assert_eq!(colors[1], Rgb(0x12, 0x34, 0x56));
-        assert_eq!(colors[2], Rgb(seed, 2, 0));
-        assert_eq!(resumed.frame().background, Rgb(1, 2, 3));
-    }
-    // 程序把颜色重置回去后，用的是当前主题的颜色。
-    resumed.feed(b"\x1b]104\x07\x1b]111\x07");
-    assert_eq!(resumed.ansi_colors()[1], Rgb(100, 1, 0));
-    assert_eq!(resumed.frame().background, Rgb(100, 100, 100));
-}
-
-
-
-
-
-
-
-

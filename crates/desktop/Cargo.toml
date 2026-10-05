@@ -11,6 +11,8 @@ runode-paths.workspace = true
 runode-git-status.workspace = true
 runode-shared-types.workspace = true
 runode-terminal.workspace = true
+# 终端会话的宿主，现在跑在 app 进程里。
+runode-host.workspace = true
 # 按 Tab 弹出的命令补全。
 runode-completion.workspace = true
 # 配置文件的读取、主题、快捷键的写法和配置模板。
