@@ -1,7 +1,7 @@
 //! 在后台读一次项目：git 状态和文件树要显示的目录内容，以及按 git 状态给路径找标记。
 
 use std::{
-    collections::HashSet,
+    collections::{HashMap, HashSet},
     fs,
     path::{Path, PathBuf},
     time::{Duration, Instant},
@@ -103,26 +103,49 @@ pub(super) fn scan(dir: PathBuf, expanded: Vec<PathBuf>, mut untracked: git::Unt
 pub(in crate::workspace) enum Decoration {
     None,
     Status(FileStatus),
-    /// 目录里有改动的文件。
-    ContainsChanges,
+    /// 目录里有改动的文件，带着按 `dir_status` 归总出的状态。
+    ContainsChanges(FileStatus),
     Ignored,
+}
+
+/// 目录里已归总的状态 `current` 再并进一个文件的状态 `status`，第一个文件时 `current` 为空：
+/// 有冲突的算冲突，有改动已跟踪文件的（修改、删除、改名）都算修改，只有新文件的才保留新增
+/// 或未跟踪。
+fn dir_status(current: Option<FileStatus>, status: FileStatus) -> FileStatus {
+    let rank = |status| match status {
+        FileStatus::Conflicted => 3,
+        FileStatus::Modified | FileStatus::Deleted | FileStatus::Renamed => 2,
+        FileStatus::Added => 1,
+        FileStatus::Untracked => 0,
+    };
+    let status = match status {
+        FileStatus::Deleted | FileStatus::Renamed => FileStatus::Modified,
+        status => status,
+    };
+    match current {
+        Some(current) if rank(current) >= rank(status) => current,
+        _ => status,
+    }
 }
 
 /// 按 git 状态给文件树里的路径找标记。
 pub(super) struct Decorator<'a> {
     git: Option<&'a git::Snapshot>,
-    /// 含有改动文件的目录，相对仓库根。
-    changed_dirs: HashSet<&'a Path>,
+    /// 含有改动文件的目录，相对仓库根，值是归总后的状态。
+    changed_dirs: HashMap<&'a Path, FileStatus>,
     ignored: HashSet<&'a Path>,
 }
 
 impl<'a> Decorator<'a> {
     pub(super) fn new(git: Option<&'a git::Snapshot>) -> Self {
-        let mut changed_dirs = HashSet::new();
+        let mut changed_dirs = HashMap::new();
         let mut ignored = HashSet::new();
         if let Some(git) = git {
-            for path in git.statuses.keys() {
-                changed_dirs.extend(path.ancestors().skip(1).filter(|dir| !dir.as_os_str().is_empty()));
+            for (path, &status) in &git.statuses {
+                for dir in path.ancestors().skip(1).filter(|dir| !dir.as_os_str().is_empty()) {
+                    let current = changed_dirs.get(dir).copied();
+                    changed_dirs.insert(dir, dir_status(current, status));
+                }
             }
             ignored.extend(git.ignored.iter().map(PathBuf::as_path));
         }
@@ -145,8 +168,8 @@ impl<'a> Decorator<'a> {
             return Decoration::Ignored;
         }
         if is_dir {
-            if self.changed_dirs.contains(rel) {
-                return Decoration::ContainsChanges;
+            if let Some(status) = self.changed_dirs.get(rel) {
+                return Decoration::ContainsChanges(*status);
             }
         } else if let Some(status) = git.statuses.get(rel) {
             return Decoration::Status(*status);

@@ -1,4 +1,4 @@
-//! 右侧的文件树：当前终端所在仓库或目录下的文件，图标按文件类型，名字按 git 状态着色。
+//! 右侧的文件树：当前终端所在仓库或目录下的文件，图标按文件类型，名字按 git 状态着色，行尾标出状态。
 //! 单击目录展开收起，双击文件把它的路径打进当前终端。
 
 use std::{ops::Range, path::Path};
@@ -11,7 +11,7 @@ use runode_shared_types::color::Rgb;
 
 use super::{
     WindowView,
-    project::{Decoration, MODIFIED, status_color},
+    project::{Decoration, status_color},
 };
 use crate::{
     assets::{CHEVRON_DOWN_ICON, CHEVRON_RIGHT_ICON, EYE_ICON, EYE_OFF_ICON},
@@ -118,8 +118,7 @@ impl WindowView {
             .map(|(ix, row)| {
                 let color = match row.decoration {
                     Decoration::None | Decoration::Ignored => fg.opacity(0.85),
-                    Decoration::Status(status) => hsla(status_color(status)),
-                    Decoration::ContainsChanges => hsla(MODIFIED),
+                    Decoration::Status(status) | Decoration::ContainsChanges(status) => hsla(status_color(status)),
                 };
                 let selected = project.selected.as_ref() == Some(&row.path);
                 let chevron = row.is_dir.then(|| {
@@ -135,6 +134,13 @@ impl WindowView {
                 let guides = (0..row.depth).map(|_| {
                     div().flex_none().w(px(INDENT)).h_full().flex().justify_center().child(div().w(px(1.)).h_full().bg(guide))
                 });
+                // 行尾的 git 标记：文件写状态字母，含改动的目录画一个点。
+                let badge = match row.decoration {
+                    Decoration::Status(status) => Some(status.letter()),
+                    Decoration::ContainsChanges(_) => Some("•"),
+                    Decoration::None | Decoration::Ignored => None,
+                };
+                let badge = badge.map(|text| div().flex_none().pl(px(6.)).text_color(color).child(text));
                 let path = row.path.clone();
                 let is_dir = row.is_dir;
                 div()
@@ -163,6 +169,7 @@ impl WindowView {
                             .child(img(icon).flex_none().size(px(font_size + 2.)))
                             .child(div().min_w_0().truncate().text_color(color).child(row.name.clone())),
                     )
+                    .children(badge)
                     .on_mouse_down(
                         MouseButton::Left,
                         cx.listener(move |this, event: &MouseDownEvent, window, cx| {

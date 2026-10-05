@@ -387,6 +387,9 @@ mod tests {
             statuses: HashMap::from([
                 ("src/a/b.rs".into(), FileStatus::Modified),
                 ("new.txt".into(), FileStatus::Untracked),
+                ("docs/new/a.md".into(), FileStatus::Untracked),
+                ("docs/old.md".into(), FileStatus::Deleted),
+                ("src/c.rs".into(), FileStatus::Added),
             ]),
             ignored: vec!["target".into()],
         }
@@ -423,9 +426,12 @@ mod tests {
         let decorator = Decorator::new(Some(&git));
         let of = |path: &str, is_dir| decorator.of(Path::new(path), is_dir);
         assert_eq!(of("/repo/src/a/b.rs", false), Decoration::Status(FileStatus::Modified));
-        assert_eq!(of("/repo/src", true), Decoration::ContainsChanges);
-        assert_eq!(of("/repo/src/a", true), Decoration::ContainsChanges);
-        assert_eq!(of("/repo/docs", true), Decoration::None);
+        // 目录按里面最要紧的改动着色：有修改算修改，只有新文件的才算新增或未跟踪。
+        assert_eq!(of("/repo/src", true), Decoration::ContainsChanges(FileStatus::Modified));
+        assert_eq!(of("/repo/src/a", true), Decoration::ContainsChanges(FileStatus::Modified));
+        assert_eq!(of("/repo/docs/new", true), Decoration::ContainsChanges(FileStatus::Untracked));
+        assert_eq!(of("/repo/docs", true), Decoration::ContainsChanges(FileStatus::Modified));
+        assert_eq!(of("/repo/lib", true), Decoration::None);
         assert_eq!(of("/repo/new.txt", false), Decoration::Status(FileStatus::Untracked));
         assert_eq!(of("/repo/target", true), Decoration::Ignored);
         assert_eq!(of("/repo/target/debug/x", false), Decoration::Ignored);
