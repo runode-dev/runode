@@ -271,6 +271,37 @@ pub(crate) fn detection_text(terminal: &Terminal<'_, '_>) -> Result<Option<Strin
     Ok(Some(text))
 }
 
+/// 屏幕底部的文字，给前端读屏幕用：`lines` 为 `None` 时是活动区的一屏，否则是整个屏幕（含
+/// 回滚历史）里最后一个有字的行往上这么多行，活动区里还没写到的空行不算。一行一个 `\n`，
+/// 行尾空白去掉，末尾的空行去掉。
+pub(crate) fn screen_tail(terminal: &Terminal<'_, '_>, lines: Option<u32>) -> Result<String> {
+    let total = terminal.total_rows()?;
+    let rows = usize::from(terminal.rows()?);
+    if total == 0 || lines == Some(0) {
+        return Ok(String::new());
+    }
+    // 末尾的空行都在活动区里，最多一屏；按行数取时多读一屏，去掉它们后还够数。
+    let count = lines.map_or(rows, |lines| lines as usize + rows);
+    let mut picked = screen_lines(terminal, total.saturating_sub(count), total - 1)?;
+    while picked.last().is_some_and(String::is_empty) {
+        picked.pop();
+    }
+    if let Some(lines) = lines {
+        picked.drain(..picked.len().saturating_sub(lines as usize));
+    }
+    Ok(picked.into_iter().map(|line| line + "\n").collect())
+}
+
+/// 这个构建编的快照的格式版本：快照开头 `GHOSTSNP` 后面的 u16。libghostty 没有单独给出这个
+/// 数，这里编一份最小的快照读出来。
+pub(crate) fn snapshot_format() -> std::result::Result<u16, SnapshotError> {
+    let bytes = encode_snapshot(&new_terminal(GridSize { cols: 1, rows: 1, cell_width_px: 1, cell_height_px: 1 })?)?;
+    match bytes.get(..10) {
+        Some([b'G', b'H', b'O', b'S', b'T', b'S', b'N', b'P', lo, hi]) => Ok(u16::from_le_bytes([*lo, *hi])),
+        _ => Err(SnapshotError::Vt("snapshot has no GHOSTSNP header".into())),
+    }
+}
+
 /// 整个屏幕（含回滚历史）第 `first` 到 `last` 行的纯文字，一行一项，行尾空白去掉。软换行
 /// 不接起来，和屏幕上的行一一对应；末尾的空行可能没有。
 pub(crate) fn screen_lines(terminal: &Terminal<'_, '_>, first: usize, last: usize) -> Result<Vec<String>> {

@@ -17,8 +17,8 @@ use std::{
 };
 
 use anyhow::{Context as _, Result, anyhow};
-use runode_protocol::{FinishedCommand, HostMsg, SessionId};
-use runode_shared_types::{grid::GridSize, settings::TermSettings, shell::IntegrationMode};
+use runode_protocol::{AttachMode, FinishedCommand, HostMsg, SessionId, SessionInfo};
+use runode_shared_types::{grid::GridSize, session::SessionMeta, settings::TermSettings, shell::IntegrationMode};
 use runode_terminal::{
     history,
     host_session::HostSession,
@@ -41,17 +41,58 @@ const BACKLOG_LIMIT: usize = 16 << 20;
 /// 会话线程收到的消息。
 pub(crate) enum Inbox {
     Pty(PtyEvent),
-    Attach { connection: u64, sink: Sink, reply: mpsc::Sender<Result<Attached>> },
-    Detach { connection: u64 },
-    Start { integration: IntegrationMode },
+    Attach {
+        connection: u64,
+        sink: Sink,
+        reply: mpsc::Sender<Result<Attached>>,
+    },
+    Detach {
+        connection: u64,
+    },
+    Start {
+        integration: IntegrationMode,
+    },
     Input(Vec<u8>),
     Resize(GridSize),
     ClearScreen,
     Theme(Arc<TermSettings>),
+    /// socket 上的前端连上来，见 `Subscribe`。
+    Subscribe(Subscribe),
+    /// 要这个会话在 `SessionList` 里的一项。
+    Info(mpsc::Sender<SessionInfo>),
+    /// 读屏幕底部的文字，见 `HostSession::screen_text`。
+    ReadScreen {
+        lines: Option<u32>,
+        reply: mpsc::Sender<Result<String>>,
+    },
     Kill,
 }
 
+/// socket 上的前端连上一个会话。和进程内的 `Inbox::Attach` 不同，不补发攒着的事件，而是
+/// 当场给一份现在的屏幕（快照或 VT 重放），之后的事件接着它；一个会话能这样连上任意多次。
+pub(crate) struct Subscribe {
+    pub(crate) connection: u64,
+    /// 前端视图的尺寸，先按它改会话的尺寸，屏幕按改好的尺寸给。
+    pub(crate) size: Option<GridSize>,
+    /// 要什么样的屏幕；`Snapshot` 编不出来时退成 `VtReplay`。
+    pub(crate) mode: AttachMode,
+    /// 在会话线程里调用，交给它当前的屏幕，返回之后收事件的 `Sink`；为 `None` 时不连了。
+    /// 它和之后的事件在同一个线程里按先后发生，前端收到的屏幕和输出之间不会漏也不会重。
+    pub(crate) start: Box<dyn FnOnce(Screen) -> Option<Sink> + Send>,
+}
+
+/// `Subscribe` 时会话当前的样子。
+pub(crate) struct Screen {
+    pub(crate) size: GridSize,
+    pub(crate) meta: SessionMeta,
+    /// 实际给的屏幕，见 `HostMsg::Attached::mode`。
+    pub(crate) mode: AttachMode,
+    /// 快照或 VT 重放的字节；`MetaOnly` 时为空。
+    pub(crate) data: Vec<u8>,
+}
+
 /// 往会话线程发消息的一端。
+#[derive(Clone)]
 pub(crate) struct Handle {
     inbox: mpsc::Sender<Inbox>,
 }
@@ -70,6 +111,7 @@ pub(crate) fn spawn(
     options: SpawnOptions,
     settings: TermSettings,
     record_history: Arc<AtomicBool>,
+    keep_backlog: bool,
 ) -> Result<Handle> {
     let (inbox, rx) = mpsc::channel();
     let credits = Arc::new(Credits::default());
@@ -98,7 +140,7 @@ pub(crate) fn spawn(
                 }
             };
             let _ = ready.send(Ok(()));
-            Runner::new(id, session, options, settings, credits, record_history).run(&rx);
+            Runner::new(id, session, options, settings, credits, record_history, keep_backlog).run(&rx);
         })
         .context("failed to start the session thread")?;
     created.recv().map_err(|_| anyhow!("the session thread ended while starting"))??;
@@ -133,6 +175,8 @@ struct Runner {
     backlog: Option<Vec<HostEvent>>,
     backlog_bytes: usize,
     backlog_lost: bool,
+    /// 会话是 socket 上开的，从来不攒，见 `Client::spawn_with`。
+    unbuffered: bool,
     /// 会话开出来时 VT 的尺寸和主题，攒着的事件要从这样一份 VT 喂起。
     created: (GridSize, TermSettings),
     /// `Inbox::Start` 时启动的程序，见 `SpawnOptions::shell`。
@@ -157,15 +201,17 @@ impl Runner {
         settings: TermSettings,
         credits: Arc<Credits>,
         record_history: Arc<AtomicBool>,
+        keep_backlog: bool,
     ) -> Self {
         let now = Instant::now();
         let mut runner = Self {
             id,
             session,
             subscribers: Vec::new(),
-            backlog: Some(Vec::new()),
+            backlog: keep_backlog.then(Vec::new),
             backlog_bytes: 0,
             backlog_lost: false,
+            unbuffered: !keep_backlog,
             created: (options.size, settings),
             shell: options.shell,
             credits,
@@ -262,8 +308,52 @@ impl Runner {
                     self.emit(HostEvent::msg(HostMsg::ThemeApplied { id: self.id }));
                 }
             }
+            Inbox::Subscribe(subscribe) => self.subscribe(subscribe),
+            Inbox::Info(reply) => {
+                let _ = reply.send(SessionInfo {
+                    id: self.id,
+                    size: self.session.size(),
+                    meta: self.session.meta(),
+                    clients: u32::try_from(self.subscribers.len()).unwrap_or(u32::MAX),
+                    exited: self.exited,
+                });
+            }
+            Inbox::ReadScreen { lines, reply } => {
+                let _ = reply.send(self.session.screen_text(lines));
+            }
             Inbox::Kill => {}
         }
+    }
+
+    /// socket 上的前端连上来：按它的尺寸改好会话，给它当前的屏幕，之后的事件接着发给它。
+    fn subscribe(&mut self, Subscribe { connection, size, mode, start }: Subscribe) {
+        if let Some(size) = size
+            && self.session.resize(size)
+        {
+            self.emit(HostEvent::msg(HostMsg::Resized { id: self.id, size }));
+        }
+        let (mode, data) = match mode {
+            AttachMode::MetaOnly => (mode, Vec::new()),
+            AttachMode::Snapshot => match self.session.snapshot() {
+                Ok(data) => (mode, data),
+                Err(err) => {
+                    tracing::debug!("session {} falls back to a VT replay: {err}", self.id);
+                    (AttachMode::VtReplay, self.replay())
+                }
+            },
+            AttachMode::VtReplay => (mode, self.replay()),
+        };
+        let screen = Screen { size: self.session.size(), meta: self.session.meta(), mode, data };
+        if let Some(sink) = start(screen) {
+            self.subscribers.push((connection, sink));
+        }
+    }
+
+    fn replay(&self) -> Vec<u8> {
+        self.session.vt_replay().unwrap_or_else(|err| {
+            tracing::warn!("session {} cannot replay its screen: {err:#}", self.id);
+            Vec::new()
+        })
     }
 
     /// 一块 PTY 输出：先原样转给前端，再喂宿主的 VT，然后处理它带来的变化。
@@ -334,6 +424,8 @@ impl Runner {
         let Some(backlog) = self.backlog.take() else {
             return Err(anyhow!(if self.backlog_lost {
                 "too much output before the session was attached"
+            } else if self.unbuffered {
+                "the session was opened over the socket and has no earlier output to replay"
             } else {
                 "the session is already attached"
             }));

@@ -1,15 +1,19 @@
 //! 管终端会话的宿主：每个会话的 PTY 和权威的那份 VT（`HostSession`）都在这里，一个会话一个
 //! 线程。前端（桌面的界面、以后的命令行和 TUI）连上来，收 PTY 输出和状态，发输入和请求。
 //!
-//! 现在宿主跑在 app 进程里，前端用 `Host::connect_in_process` 拿到的 `Client` 经 channel 和它
-//! 说话，不经 socket，也不序列化；消息尽量直接用 `runode_protocol` 的类型（`ClientMsg`、
+//! 现在宿主跑在 app 进程里，桌面的界面用 `Host::connect_in_process` 拿到的 `Client` 经 channel
+//! 和它说话，不经 socket，也不序列化；消息尽量直接用 `runode_protocol` 的类型（`ClientMsg`、
 //! `HostMsg`），以后宿主搬到单独的进程时只换传输层。新开、连上、启动会话这几样要等回复的
 //! 请求，进程内直接是 `Client` 的方法。
+//!
+//! 别的进程（以后的命令行、TUI）经 `Host::listen` 开的 Unix socket 连上来，按 `runode_protocol`
+//! 的帧和消息说话，见 `server`。
 //!
 //! 每个会话的线程按到达的先后处理 PTY 输出和前端的请求：输出先原样转给连着的前端，再喂宿主
 //! 的 VT；改 VT 状态的请求（改尺寸、换主题、清屏）在输出流里插一条标记（`HostMsg::Resized`、
 //! `HostMsg::ThemeApplied`）或者一段输出，前端在同一个位置做同样的事，两份 VT 才不会分叉。
 
+mod server;
 mod session;
 
 use std::{
@@ -22,7 +26,7 @@ use std::{
 };
 
 use anyhow::{Result, anyhow};
-pub use runode_protocol::{ClientMsg, HostMsg, SessionId};
+pub use runode_protocol::{BuildId, ClientMsg, HostMsg, SessionId};
 use runode_shared_types::{grid::GridSize, session::SessionMeta, settings::TermSettings, shell::IntegrationMode};
 
 /// 宿主发给前端的一件事，同一个会话的按发生的先后到达。
@@ -104,9 +108,19 @@ impl Shared {
     }
 
     fn send(&self, id: SessionId, message: session::Inbox) {
-        if let Some(handle) = self.registry().sessions.get(&id) {
-            handle.send(message);
-        }
+        self.deliver(id, message);
+    }
+
+    /// 往会话线程发消息；没有这个会话、或者它的线程已经结束时返回 false。
+    fn deliver(&self, id: SessionId, message: session::Inbox) -> bool {
+        self.registry().sessions.get(&id).is_some_and(|handle| handle.send(message))
+    }
+
+    /// 所有会话，按标识排好。
+    fn handles(&self) -> Vec<(SessionId, session::Handle)> {
+        let mut handles: Vec<_> = self.registry().sessions.iter().map(|(id, handle)| (*id, handle.clone())).collect();
+        handles.sort_by_key(|(id, _)| *id);
+        handles
     }
 }
 
@@ -135,6 +149,11 @@ impl Client {
     /// 新开一个会话，返回它的标识。伪终端开不了、`start` 时 shell 启动不了时返回错误。开好的
     /// 会话不会自动连上，接着 `attach`。
     pub fn spawn(&self, options: SpawnOptions) -> Result<SessionId> {
+        self.spawn_with(options, true)
+    }
+
+    /// `keep_backlog` 为 false 时不攒连上之前的事件：socket 上开的会话连上时当场给屏幕，用不着。
+    fn spawn_with(&self, options: SpawnOptions, keep_backlog: bool) -> Result<SessionId> {
         let id = SessionId::random()?;
         let (settings, generation) = {
             let registry = self.shared.registry();
@@ -145,7 +164,7 @@ impl Client {
             (settings, registry.theme_generation)
         };
         // 开伪终端、启动 shell 要几毫秒，不占着锁。
-        let handle = session::spawn(id, options, settings, self.shared.record_history.clone())?;
+        let handle = session::spawn(id, options, settings, self.shared.record_history.clone(), keep_backlog)?;
         let mut registry = self.shared.registry();
         // 这期间换过主题的话，那次换主题没赶上这个会话，补上。
         if registry.theme_generation != generation {

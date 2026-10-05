@@ -428,3 +428,26 @@ fn timed<T>(runs: u32, mut f: impl FnMut() -> T) -> (Duration, T) {
 fn ms(duration: Duration) -> f64 {
     duration.as_secs_f64() * 1000.
 }
+
+/// 读屏幕底部：默认一屏，末尾的空行去掉；指定行数时连回滚历史一起取。
+#[test]
+fn screen_tail_reads_the_bottom_of_the_screen() {
+    let mut t = new_terminal(GridSize { cols: 10, rows: 3, cell_width_px: 1, cell_height_px: 1 }).unwrap();
+    t.vt_write(b"one\r\ntwo\r\nthree\r\nfour");
+    assert_eq!(screen_tail(&t, None).unwrap(), "two\nthree\nfour\n");
+    assert_eq!(screen_tail(&t, Some(4)).unwrap(), "one\ntwo\nthree\nfour\n");
+    assert_eq!(screen_tail(&t, Some(0)).unwrap(), "");
+    let mut short = new_terminal(GridSize { cols: 10, rows: 3, cell_width_px: 1, cell_height_px: 1 }).unwrap();
+    short.vt_write(b"hi  ");
+    assert_eq!(screen_tail(&short, None).unwrap(), "hi\n");
+    // 内容只占屏幕上方时，按行数取的是有字的那几行，不是活动区底下的空行。
+    assert_eq!(screen_tail(&short, Some(1)).unwrap(), "hi\n");
+    let mut top = new_terminal(GridSize { cols: 10, rows: 6, cell_width_px: 1, cell_height_px: 1 }).unwrap();
+    top.vt_write(b"a\r\nb\r\nc");
+    assert_eq!(screen_tail(&top, Some(2)).unwrap(), "b\nc\n");
+}
+
+#[test]
+fn snapshot_format_reads_the_envelope() {
+    assert_eq!(snapshot_format().unwrap(), 1);
+}

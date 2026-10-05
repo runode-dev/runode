@@ -11,6 +11,8 @@ fn main() {
     let commit = git_short_head().unwrap_or_else(|| "unknown".into());
     // 关于面板显示为「版本 0.1.0 (0.1.0.<commit>)」。
     let build = format!("{version}.{commit}");
+    // 宿主在握手时报这个构建号，前端的一样才给快照。
+    println!("cargo:rustc-env=RUNODE_BUILD={build}");
 
     if env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("macos") {
         // 模板里的 @VERSION@、@BUILD@ 换成实际版本号与构建号。

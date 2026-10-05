@@ -39,6 +39,7 @@ fn main() {
         .init();
     // shell 启动要几十毫秒，先在后台拉起来，和 GPUI 初始化同时进行。
     prespawn::start();
+    session_host::listen();
 
     application().with_assets(assets::Assets).run(|cx: &mut App| {
         config::install(cx);

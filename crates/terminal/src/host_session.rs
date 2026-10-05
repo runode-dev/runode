@@ -392,6 +392,12 @@ impl HostSession {
         Ok(vt::format_replay(&self.terminal)?)
     }
 
+    /// 屏幕底部的文字：`lines` 为 `None` 时是当前一屏，否则是含回滚历史的最底下这么多行，
+    /// 见 `vt::screen_tail`。
+    pub fn screen_text(&self, lines: Option<u32>) -> Result<String> {
+        Ok(vt::screen_tail(&self.terminal, lines)?)
+    }
+
     #[cfg(test)]
     pub(crate) fn terminal(&self) -> &Terminal<'static, 'static> {
         &self.terminal
@@ -402,6 +408,11 @@ impl HostSession {
     pub(crate) fn set_report_token(&self, token: &str) {
         *self.effects.report_token.borrow_mut() = Some(token.into());
     }
+}
+
+/// 这个构建编的快照的格式版本，前端据此判断解不解得了宿主的快照，见 `vt::snapshot_format`。
+pub fn snapshot_format() -> Result<u16, SnapshotError> {
+    vt::snapshot_format()
 }
 
 /// 记日志并吞掉错误：读屏幕这类失败只影响这一下。

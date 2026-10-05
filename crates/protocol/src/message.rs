@@ -154,8 +154,8 @@ pub enum ClientMsg {
     SetTheme { settings: TermSettings },
     /// 改宿主的选项。
     SetOptions { record_history: bool },
-    /// 读会话屏幕上的文字，宿主回 `ScreenText`。`lines` 为 `None` 时是当前一屏，否则是从底部
-    /// 往上这么多行，含回滚历史。
+    /// 读会话屏幕上的文字，宿主回 `ScreenText`。`lines` 为 `None` 时是当前一屏，否则是从最后
+    /// 一个有字的行往上这么多行，含回滚历史。
     ReadScreen { id: SessionId, lines: Option<u32> },
     /// 新版本的宿主要接手：旧宿主把 PTY 和监听的 socket 交过去后退出。
     Handoff,
