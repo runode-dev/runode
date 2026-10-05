@@ -4983,12 +4983,12 @@ dependencies = [
  "futures",
  "gpui-pre",
  "gpui-pre-platform",
- "libghostty-vt",
  "notify",
  "objc2 0.6.4",
  "objc2-app-kit 0.3.2",
  "objc2-foundation 0.3.2",
  "runode-completion",
+ "runode-config",
  "runode-dirs",
  "runode-git",
  "runode-model",
@@ -5013,6 +5013,19 @@ dependencies = [
  "serde_json",
  "tracing",
  "warp-command-signatures",
+]
+
+[[package]]
+name = "runode-config"
+version = "0.1.0"
+dependencies = [
+ "libghostty-vt",
+ "objc2-app-kit 0.3.2",
+ "objc2-foundation 0.3.2",
+ "runode-dirs",
+ "runode-model",
+ "rust-i18n",
+ "tracing",
 ]
 
 [[package]]

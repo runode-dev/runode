@@ -19,6 +19,7 @@ use gpui::{
     ScrollWheelEvent, ShapedLine, SharedString, Style, Subscription, Task, TextRun, UTF16Selection,
     Window, actions, div, fill, font, point, prelude::*, px, relative, rgb, size,
 };
+use runode_config::{CellHeight, Config};
 use runode_model::{
     agent::Agent,
     color::Rgb,
@@ -34,7 +35,7 @@ use runode_term::{
 };
 
 use crate::{
-    config::{AppConfig, CellHeight, Config},
+    config::AppConfig,
     keys,
     prespawn::Prespawned,
     search_bar::{

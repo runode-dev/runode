@@ -1,15 +1,14 @@
-//! 可配置的快捷键：配置文件里写 `keybind = 触发键=动作`。
-//!
-//! 默认绑定和动作表都只在这里写一次：`DEFAULTS` 用的就是配置文件的写法，和用户写的
-//! 走同一个解析器；配置模板也从这两张表生成，新增动作或默认绑定会自动出现在模板里，
-//! 动作的说明在翻译的 `action.<name>` 里。
-//! 搜索框里的文字编辑键（回车、Esc、剪切、撤销等）属于输入框本身，不开放配置。
+//! 装上快捷键：`keybind` 的写法、动作名和默认绑定在 `runode_config::keybind`，这里把解析好的
+//! 动作换成 GPUI 的动作，定下各自在哪些上下文里生效，再加上搜索框自己的编辑键。
 
-use gpui::{Action, App, Global, KeyBinding};
-use runode_model::pane::Direction;
+use gpui::{App, Global, KeyBinding};
+use runode_config::{
+    Keybind,
+    keybind::{self, Action},
+};
 
 use crate::{
-    config::{AppConfig, Keybind},
+    config::AppConfig,
     menus::{
         About, CloseAllWindows, CloseWindow, Hide, HideOthers, Minimize, NewWindow, OpenConfiguration,
         Quit, ReloadConfiguration, ShowAll, ToggleFullScreen, Zoom,
@@ -28,315 +27,89 @@ use crate::{
     },
 };
 
-/// 一个可绑定的动作。
-pub struct ActionSpec {
-    pub name: &'static str,
-    /// 参数的写法，`None` 表示不带参数。说明在翻译的 `action.<name>` 里。
-    pub param: Option<&'static str>,
-    /// 绑定生效的上下文，`None` 表示全局。
-    contexts: &'static [Option<&'static str>],
-    build: fn(Option<&str>) -> Result<Box<dyn Action>, String>,
-}
+/// 绑定生效的上下文，`None` 表示全局。
+type Contexts = &'static [Option<&'static str>];
 
-const GLOBAL: &[Option<&str>] = &[None];
-const WINDOW: &[Option<&str>] = &[Some("Window")];
-const TERMINAL: &[Option<&str>] = &[Some("Terminal")];
+const GLOBAL: Contexts = &[None];
+const WINDOW: Contexts = &[Some("Window")];
+const TERMINAL: Contexts = &[Some("Terminal")];
 /// 搜索框不在 `Terminal` 上下文里，复制粘贴和搜索导航在那里也要能用。
-const TERMINAL_AND_SEARCH: &[Option<&str>] = &[Some("Terminal"), Some("SearchBar")];
+const TERMINAL_AND_SEARCH: Contexts = &[Some("Terminal"), Some("SearchBar")];
 
-fn plain<A: Action + Clone>(action: A) -> impl Fn(Option<&str>) -> Result<Box<dyn Action>, String> {
-    move |param| match param {
-        None => Ok(action.boxed_clone()),
-        Some(_) => Err("this action takes no parameter".into()),
+/// 配置里的动作对应的 GPUI 动作，以及它生效的上下文。
+fn gpui_action(action: Action) -> (Box<dyn gpui::Action>, Contexts) {
+    fn boxed(action: impl gpui::Action) -> Box<dyn gpui::Action> {
+        Box::new(action)
     }
-}
-
-macro_rules! plain {
-    ($name:literal, $contexts:expr, $action:expr) => {
-        ActionSpec {
-            name: $name,
-            param: None,
-            contexts: $contexts,
-            build: |param| plain($action)(param),
+    match action {
+        Action::About => (boxed(About), GLOBAL),
+        Action::Quit => (boxed(Quit), GLOBAL),
+        Action::OpenConfig => (boxed(OpenConfiguration), GLOBAL),
+        Action::ReloadConfig => (boxed(ReloadConfiguration), GLOBAL),
+        Action::Hide => (boxed(Hide), GLOBAL),
+        Action::HideOthers => (boxed(HideOthers), GLOBAL),
+        Action::ShowAll => (boxed(ShowAll), GLOBAL),
+        Action::NewWindow => (boxed(NewWindow), GLOBAL),
+        Action::CloseWindow => (boxed(CloseWindow), GLOBAL),
+        Action::CloseAllWindows => (boxed(CloseAllWindows), GLOBAL),
+        Action::Minimize => (boxed(Minimize), GLOBAL),
+        Action::ToggleMaximize => (boxed(Zoom), GLOBAL),
+        Action::ToggleFullscreen => (boxed(ToggleFullScreen), GLOBAL),
+        Action::NewTab => (boxed(NewTab), WINDOW),
+        Action::CloseTab => (boxed(CloseTab), WINDOW),
+        Action::NextTab => (boxed(NextTab), WINDOW),
+        Action::PreviousTab => (boxed(PreviousTab), WINDOW),
+        Action::LastTab => (boxed(SelectLastTab), WINDOW),
+        Action::GotoTab(n) => (boxed(SelectTab(n)), WINDOW),
+        Action::NewSplitRight => (boxed(NewSplitRight), WINDOW),
+        Action::NewSplitDown => (boxed(NewSplitDown), WINDOW),
+        Action::CloseSurface => (boxed(ClosePane), WINDOW),
+        Action::FocusPreviousSplit => (boxed(FocusPreviousPane), WINDOW),
+        Action::FocusNextSplit => (boxed(FocusNextPane), WINDOW),
+        Action::FocusSplit(direction) => (boxed(FocusPane(direction)), WINDOW),
+        Action::ResizeSplit(direction) => (boxed(ResizePane(direction)), WINDOW),
+        Action::EqualizeSplits => (boxed(EqualizePanes), WINDOW),
+        Action::ToggleSplitZoom => (boxed(TogglePaneZoom), WINDOW),
+        Action::NewWorkspace => (boxed(NewWorkspace), WINDOW),
+        Action::CloseWorkspace => (boxed(CloseWorkspace), WINDOW),
+        Action::RenameWorkspace => (boxed(RenameWorkspace), WINDOW),
+        Action::NextWorkspace => (boxed(NextWorkspace), WINDOW),
+        Action::PreviousWorkspace => (boxed(PreviousWorkspace), WINDOW),
+        Action::LastWorkspace => (boxed(SelectLastWorkspace), WINDOW),
+        Action::GotoWorkspace(n) => (boxed(SelectWorkspace(n)), WINDOW),
+        Action::ToggleSidebar => (boxed(ToggleSidebar), WINDOW),
+        Action::ToggleChanges => (boxed(ToggleChanges), WINDOW),
+        Action::ToggleFiles => (boxed(ToggleFiles), WINDOW),
+        Action::Copy => (boxed(Copy), TERMINAL_AND_SEARCH),
+        Action::Paste => (boxed(Paste), TERMINAL_AND_SEARCH),
+        Action::PasteSelection => (boxed(PasteSelection), TERMINAL),
+        Action::SelectAll => (boxed(SelectAll), TERMINAL_AND_SEARCH),
+        Action::ClearScreen => (boxed(ClearScreen), TERMINAL),
+        Action::ScrollToTop => (boxed(ScrollToTop), TERMINAL),
+        Action::ScrollToBottom => (boxed(ScrollToBottom), TERMINAL),
+        Action::ScrollPageUp => (boxed(ScrollPageUp), TERMINAL),
+        Action::ScrollPageDown => (boxed(ScrollPageDown), TERMINAL),
+        Action::ScrollToSelection => (boxed(ScrollToSelection), TERMINAL),
+        Action::JumpToPrompt(n) => (boxed(JumpToPrompt(n)), TERMINAL),
+        Action::SendText(text) => (boxed(SendText(text)), TERMINAL),
+        Action::StartSearch => (boxed(StartSearch), TERMINAL),
+        Action::SearchSelection => (boxed(SearchSelection), TERMINAL),
+        Action::SearchNext => (boxed(SearchNext), TERMINAL_AND_SEARCH),
+        Action::SearchPrevious => (boxed(SearchPrevious), TERMINAL_AND_SEARCH),
+        Action::EndSearch => (boxed(EndSearch), TERMINAL_AND_SEARCH),
+        Action::WriteScreenFile(file) => {
+            let file = match file {
+                keybind::ScreenFile::CopyPath => ScreenFile::CopyPath,
+                keybind::ScreenFile::PastePath => ScreenFile::PastePath,
+                keybind::ScreenFile::Open => ScreenFile::Open,
+            };
+            (boxed(WriteScreenFile(file)), TERMINAL)
         }
-    };
-}
-
-fn required(param: Option<&str>) -> Result<&str, String> {
-    param.filter(|p| !p.is_empty()).ok_or_else(|| "this action needs a parameter".into())
-}
-
-fn direction(param: Option<&str>) -> Result<Direction, String> {
-    match required(param)? {
-        "left" => Ok(Direction::Left),
-        "right" => Ok(Direction::Right),
-        "up" | "top" => Ok(Direction::Up),
-        "down" | "bottom" => Ok(Direction::Down),
-        _ => Err("expected left, right, up or down".into()),
+        Action::IncreaseFontSize => (boxed(IncreaseFontSize), TERMINAL),
+        Action::DecreaseFontSize => (boxed(DecreaseFontSize), TERMINAL),
+        Action::ResetFontSize => (boxed(ResetFontSize), TERMINAL),
     }
 }
-
-/// 字号步长固定，`increase_font_size:1` 这类写法里的数值只校验不使用。
-fn optional_amount(param: Option<&str>) -> Result<(), String> {
-    match param {
-        None => Ok(()),
-        Some(p) => p.trim().parse::<f32>().map(drop).map_err(|_| "expected a number".into()),
-    }
-}
-
-pub static ACTIONS: &[ActionSpec] = &[
-    plain!("about", GLOBAL, About),
-    plain!("quit", GLOBAL, Quit),
-    plain!("open_config", GLOBAL, OpenConfiguration),
-    plain!("reload_config", GLOBAL, ReloadConfiguration),
-    plain!("hide", GLOBAL, Hide),
-    plain!("hide_others", GLOBAL, HideOthers),
-    plain!("show_all", GLOBAL, ShowAll),
-    plain!("new_window", GLOBAL, NewWindow),
-    plain!("close_window", GLOBAL, CloseWindow),
-    plain!("close_all_windows", GLOBAL, CloseAllWindows),
-    plain!("minimize", GLOBAL, Minimize),
-    plain!("toggle_maximize", GLOBAL, Zoom),
-    plain!("toggle_fullscreen", GLOBAL, ToggleFullScreen),
-    plain!("new_tab", WINDOW, NewTab),
-    plain!("close_tab", WINDOW, CloseTab),
-    plain!("next_tab", WINDOW, NextTab),
-    plain!("previous_tab", WINDOW, PreviousTab),
-    plain!("last_tab", WINDOW, SelectLastTab),
-    ActionSpec {
-        name: "goto_tab",
-        param: Some("N"),
-        contexts: WINDOW,
-        build: |param| match required(param)?.parse::<usize>() {
-            Ok(n) if n >= 1 => Ok(Box::new(SelectTab(n - 1))),
-            _ => Err("expected a tab number starting from 1".into()),
-        },
-    },
-    ActionSpec {
-        name: "new_split",
-        param: Some("right|down"),
-        contexts: WINDOW,
-        build: |param| match required(param)? {
-            "right" => Ok(Box::new(NewSplitRight)),
-            "down" => Ok(Box::new(NewSplitDown)),
-            _ => Err("expected right or down".into()),
-        },
-    },
-    plain!("close_surface", WINDOW, ClosePane),
-    ActionSpec {
-        name: "goto_split",
-        param: Some("previous|next|left|right|up|down"),
-        contexts: WINDOW,
-        build: |param| match param {
-            Some("previous") => Ok(Box::new(FocusPreviousPane)),
-            Some("next") => Ok(Box::new(FocusNextPane)),
-            _ => Ok(Box::new(FocusPane(direction(param)?))),
-        },
-    },
-    ActionSpec {
-        name: "resize_split",
-        param: Some("left|right|up|down"),
-        contexts: WINDOW,
-        // 兼容 `resize_split:left,10` 的写法，数值只校验不使用。
-        build: |param| {
-            let (dir, amount) = match param.and_then(|p| p.split_once(',')) {
-                Some((dir, amount)) => (Some(dir), Some(amount)),
-                None => (param, None),
-            };
-            optional_amount(amount)?;
-            Ok(Box::new(ResizePane(direction(dir)?)))
-        },
-    },
-    plain!("equalize_splits", WINDOW, EqualizePanes),
-    plain!("toggle_split_zoom", WINDOW, TogglePaneZoom),
-    plain!("new_workspace", WINDOW, NewWorkspace),
-    plain!("close_workspace", WINDOW, CloseWorkspace),
-    plain!("rename_workspace", WINDOW, RenameWorkspace),
-    plain!("next_workspace", WINDOW, NextWorkspace),
-    plain!("previous_workspace", WINDOW, PreviousWorkspace),
-    plain!("last_workspace", WINDOW, SelectLastWorkspace),
-    ActionSpec {
-        name: "goto_workspace",
-        param: Some("N"),
-        contexts: WINDOW,
-        build: |param| match required(param)?.parse::<usize>() {
-            Ok(n) if n >= 1 => Ok(Box::new(SelectWorkspace(n - 1))),
-            _ => Err("expected a workspace number starting from 1".into()),
-        },
-    },
-    plain!("toggle_sidebar", WINDOW, ToggleSidebar),
-    plain!("toggle_changes", WINDOW, ToggleChanges),
-    plain!("toggle_files", WINDOW, ToggleFiles),
-    plain!("copy_to_clipboard", TERMINAL_AND_SEARCH, Copy),
-    plain!("paste_from_clipboard", TERMINAL_AND_SEARCH, Paste),
-    plain!("paste_from_selection", TERMINAL, PasteSelection),
-    plain!("select_all", TERMINAL_AND_SEARCH, SelectAll),
-    plain!("clear_screen", TERMINAL, ClearScreen),
-    plain!("scroll_to_top", TERMINAL, ScrollToTop),
-    plain!("scroll_to_bottom", TERMINAL, ScrollToBottom),
-    plain!("scroll_page_up", TERMINAL, ScrollPageUp),
-    plain!("scroll_page_down", TERMINAL, ScrollPageDown),
-    plain!("scroll_to_selection", TERMINAL, ScrollToSelection),
-    ActionSpec {
-        name: "jump_to_prompt",
-        param: Some("N"),
-        contexts: TERMINAL,
-        build: |param| match required(param)?.parse::<isize>() {
-            Ok(n) if n != 0 => Ok(Box::new(JumpToPrompt(n))),
-            _ => Err("expected a non-zero number".into()),
-        },
-    },
-    ActionSpec {
-        name: "text",
-        param: Some("TEXT"),
-        contexts: TERMINAL,
-        build: |param| Ok(Box::new(SendText(unescape(required(param)?)?))),
-    },
-    ActionSpec {
-        name: "esc",
-        param: Some("TEXT"),
-        contexts: TERMINAL,
-        build: |param| Ok(Box::new(SendText(format!("\x1b{}", required(param)?)))),
-    },
-    ActionSpec {
-        name: "csi",
-        param: Some("TEXT"),
-        contexts: TERMINAL,
-        build: |param| Ok(Box::new(SendText(format!("\x1b[{}", required(param)?)))),
-    },
-    plain!("start_search", TERMINAL, StartSearch),
-    plain!("search_selection", TERMINAL, SearchSelection),
-    ActionSpec {
-        name: "navigate_search",
-        param: Some("next|previous"),
-        contexts: TERMINAL_AND_SEARCH,
-        build: |param| match required(param)? {
-            "next" => Ok(Box::new(SearchNext)),
-            "previous" => Ok(Box::new(SearchPrevious)),
-            _ => Err("expected next or previous".into()),
-        },
-    },
-    plain!("end_search", TERMINAL_AND_SEARCH, EndSearch),
-    ActionSpec {
-        name: "write_screen_file",
-        param: Some("copy|paste|open"),
-        contexts: TERMINAL,
-        build: |param| {
-            let file = match required(param)? {
-                "copy" => ScreenFile::CopyPath,
-                "paste" => ScreenFile::PastePath,
-                "open" => ScreenFile::Open,
-                _ => return Err("expected copy, paste or open".into()),
-            };
-            Ok(Box::new(WriteScreenFile(file)))
-        },
-    },
-    ActionSpec {
-        name: "increase_font_size",
-        param: Some("N"),
-        contexts: TERMINAL,
-        build: |param| optional_amount(param).map(|()| IncreaseFontSize.boxed_clone()),
-    },
-    ActionSpec {
-        name: "decrease_font_size",
-        param: Some("N"),
-        contexts: TERMINAL,
-        build: |param| optional_amount(param).map(|()| DecreaseFontSize.boxed_clone()),
-    },
-    plain!("reset_font_size", TERMINAL, ResetFontSize),
-];
-
-/// 默认绑定，写法与配置文件里 `keybind =` 的值相同。
-pub static DEFAULTS: &[&str] = &[
-    "cmd+q=quit",
-    "cmd+,=open_config",
-    "cmd+shift+,=reload_config",
-    "cmd+h=hide",
-    "alt+cmd+h=hide_others",
-    "cmd+n=new_window",
-    "cmd+shift+w=close_window",
-    "cmd+shift+alt+w=close_all_windows",
-    "cmd+m=minimize",
-    "ctrl+cmd+f=toggle_fullscreen",
-    "cmd+enter=toggle_fullscreen",
-    "cmd+t=new_tab",
-    "cmd+w=close_surface",
-    "cmd+alt+w=close_tab",
-    "cmd+}=next_tab",
-    "ctrl+tab=next_tab",
-    "cmd+{=previous_tab",
-    "ctrl+shift+tab=previous_tab",
-    "cmd+1=goto_tab:1",
-    "cmd+2=goto_tab:2",
-    "cmd+3=goto_tab:3",
-    "cmd+4=goto_tab:4",
-    "cmd+5=goto_tab:5",
-    "cmd+6=goto_tab:6",
-    "cmd+7=goto_tab:7",
-    "cmd+8=goto_tab:8",
-    "cmd+9=last_tab",
-    "cmd+d=new_split:right",
-    "cmd+shift+d=new_split:down",
-    "cmd+[=goto_split:previous",
-    "cmd+]=goto_split:next",
-    "cmd+alt+left=goto_split:left",
-    "cmd+alt+right=goto_split:right",
-    "cmd+alt+up=goto_split:up",
-    "cmd+alt+down=goto_split:down",
-    "ctrl+cmd+left=resize_split:left",
-    "ctrl+cmd+right=resize_split:right",
-    "ctrl+cmd+up=resize_split:up",
-    "ctrl+cmd+down=resize_split:down",
-    "ctrl+cmd+equal=equalize_splits",
-    "cmd+shift+enter=toggle_split_zoom",
-    "cmd+shift+n=new_workspace",
-    "ctrl+cmd+]=next_workspace",
-    "ctrl+cmd+[=previous_workspace",
-    "ctrl+cmd+1=goto_workspace:1",
-    "ctrl+cmd+2=goto_workspace:2",
-    "ctrl+cmd+3=goto_workspace:3",
-    "ctrl+cmd+4=goto_workspace:4",
-    "ctrl+cmd+5=goto_workspace:5",
-    "ctrl+cmd+6=goto_workspace:6",
-    "ctrl+cmd+7=goto_workspace:7",
-    "ctrl+cmd+8=goto_workspace:8",
-    "ctrl+cmd+9=last_workspace",
-    "cmd+b=toggle_sidebar",
-    "cmd+alt+g=toggle_changes",
-    "cmd+shift+e=toggle_files",
-    "cmd+c=copy_to_clipboard",
-    "cmd+v=paste_from_clipboard",
-    "cmd+shift+v=paste_from_selection",
-    "cmd+a=select_all",
-    "cmd+k=clear_screen",
-    "cmd+home=scroll_to_top",
-    "cmd+end=scroll_to_bottom",
-    "cmd+page_up=scroll_page_up",
-    "cmd+page_down=scroll_page_down",
-    "cmd+j=scroll_to_selection",
-    "cmd+up=jump_to_prompt:-1",
-    "cmd+down=jump_to_prompt:1",
-    "cmd+shift+up=jump_to_prompt:-1",
-    "cmd+shift+down=jump_to_prompt:1",
-    // 行编辑：跳到行首、行尾，删到行首，按词左右移动。
-    r"cmd+left=text:\x01",
-    r"cmd+right=text:\x05",
-    r"cmd+backspace=text:\x15",
-    "alt+left=esc:b",
-    "alt+right=esc:f",
-    "cmd+f=start_search",
-    "cmd+e=search_selection",
-    "cmd+g=navigate_search:next",
-    "cmd+shift+g=navigate_search:previous",
-    "cmd+shift+f=end_search",
-    "ctrl+shift+cmd+j=write_screen_file:copy",
-    "cmd+shift+j=write_screen_file:paste",
-    "cmd+shift+alt+j=write_screen_file:open",
-    "cmd+equal=increase_font_size:1",
-    "cmd+plus=increase_font_size:1",
-    "cmd+minus=decrease_font_size:1",
-    "cmd+0=reset_font_size",
-];
 
 /// 搜索框自己的编辑键，以及搜索时在终端里按 Esc 关掉搜索栏，不开放配置。
 fn fixed_bindings() -> Vec<KeyBinding> {
@@ -350,164 +123,6 @@ fn fixed_bindings() -> Vec<KeyBinding> {
         // 点回终端后搜索栏还开着，Esc 照样关掉它；没在搜索时 Esc 照常发给程序。
         KeyBinding::new("escape", EndSearch, Some("Terminal && searching")),
     ]
-}
-
-/// 解析一条 `keybind` 的值。触发键转成 GPUI 的写法，动作原样保留并校验过。
-pub fn parse(value: &str) -> Result<Keybind, String> {
-    if value == "clear" {
-        return Ok(Keybind::Clear);
-    }
-    // 触发键里不会出现 `=`（等号键写作 equal），第一个 `=` 就是分隔。
-    let (trigger, action) = value.split_once('=').ok_or("expected TRIGGER=ACTION or clear")?;
-    let keys = parse_trigger(trigger.trim())?;
-    let action = action.trim();
-    if action == "unbind" {
-        return Ok(Keybind::Unbind(keys));
-    }
-    build(action)?;
-    Ok(Keybind::Bind { keys, action: action.to_owned() })
-}
-
-fn find(action: &str) -> Result<(&'static ActionSpec, Option<&str>), String> {
-    let (name, param) = match action.split_once(':') {
-        Some((name, param)) => (name, Some(param)),
-        None => (action, None),
-    };
-    let spec = ACTIONS.iter().find(|a| a.name == name).ok_or_else(|| format!("unknown action: {name}"))?;
-    Ok((spec, param))
-}
-
-fn build(action: &str) -> Result<(Box<dyn Action>, &'static [Option<&'static str>]), String> {
-    let (spec, param) = find(action)?;
-    Ok(((spec.build)(param)?, spec.contexts))
-}
-
-/// `cmd+shift+t`、`ctrl+a>n` 这类触发键转成 GPUI 的 `shift-cmd-t`、`ctrl-a n`。
-/// 修饰键按固定顺序输出，同一个组合不管怎么写都得到同一个字符串，便于覆盖和解绑。
-fn parse_trigger(trigger: &str) -> Result<String, String> {
-    let mut strokes = Vec::new();
-    for stroke in trigger.split('>') {
-        let mut parts: Vec<&str> = stroke.split('+').map(str::trim).collect();
-        let key = parts.pop().filter(|k| !k.is_empty()).ok_or("missing key")?;
-        let (mut ctrl, mut alt, mut shift, mut cmd) = (false, false, false, false);
-        for part in parts {
-            match part {
-                "ctrl" | "control" => ctrl = true,
-                "alt" | "opt" | "option" => alt = true,
-                "shift" => shift = true,
-                "cmd" | "command" | "super" => cmd = true,
-                _ => return Err(format!("unknown modifier: {part}")),
-            }
-        }
-        let mut out = String::new();
-        for (on, name) in [(ctrl, "ctrl-"), (alt, "alt-"), (shift, "shift-"), (cmd, "cmd-")] {
-            if on {
-                out.push_str(name);
-            }
-        }
-        out.push_str(&key_name(key)?);
-        gpui::Keystroke::parse(&out).map_err(|_| format!("invalid key: {key}"))?;
-        strokes.push(out);
-    }
-    Ok(strokes.join(" "))
-}
-
-fn key_name(key: &str) -> Result<String, String> {
-    let key = key.to_lowercase();
-    let named = match key.as_str() {
-        "arrow_up" | "up" => "up",
-        "arrow_down" | "down" => "down",
-        "arrow_left" | "left" => "left",
-        "arrow_right" | "right" => "right",
-        "page_up" | "pageup" => "pageup",
-        "page_down" | "pagedown" => "pagedown",
-        "home" => "home",
-        "end" => "end",
-        "insert" => "insert",
-        "delete" => "delete",
-        "enter" | "return" => "enter",
-        "escape" | "esc" => "escape",
-        "backspace" => "backspace",
-        "tab" => "tab",
-        "space" => "space",
-        "equal" => "=",
-        "plus" => "+",
-        "minus" => "-",
-        "comma" => ",",
-        "period" => ".",
-        "slash" => "/",
-        "backslash" => "\\",
-        "semicolon" => ";",
-        "quote" => "'",
-        "backquote" | "grave" => "`",
-        "bracket_left" => "[",
-        "bracket_right" => "]",
-        _ => {
-            if let Some(rest) = key.strip_prefix("digit_").or_else(|| key.strip_prefix("key_")) {
-                return Ok(rest.to_owned());
-            }
-            let is_function_key =
-                key.strip_prefix('f').is_some_and(|n| n.parse::<u8>().is_ok_and(|n| (1..=24).contains(&n)));
-            if is_function_key || key.chars().count() == 1 {
-                return Ok(key);
-            }
-            return Err(format!("unknown key: {key}"));
-        }
-    };
-    Ok(named.to_owned())
-}
-
-/// 展开 `text:` 里的转义：`\xHH`、`\u{...}`、`\n`、`\r`、`\t`、`\\`、`\"`、`\'`。
-fn unescape(text: &str) -> Result<String, String> {
-    let mut out = String::new();
-    let mut chars = text.chars();
-    while let Some(c) = chars.next() {
-        if c != '\\' {
-            out.push(c);
-            continue;
-        }
-        match chars.next() {
-            Some('n') => out.push('\n'),
-            Some('r') => out.push('\r'),
-            Some('t') => out.push('\t'),
-            Some(c @ ('\\' | '"' | '\'')) => out.push(c),
-            Some('x') => {
-                let hex: String = chars.by_ref().take(2).collect();
-                let byte = u8::from_str_radix(&hex, 16).map_err(|_| "expected \\xHH")?;
-                out.push(char::from(byte));
-            }
-            Some('u') => {
-                let rest = chars.as_str();
-                let body = rest.strip_prefix('{').and_then(|r| r.split_once('}')).map(|(b, _)| b);
-                let code = body
-                    .and_then(|b| u32::from_str_radix(b, 16).ok())
-                    .and_then(char::from_u32)
-                    .ok_or("expected \\u{HEX}")?;
-                out.push(code);
-                chars = rest[body.unwrap_or_default().len() + 2..].chars();
-            }
-            _ => return Err("unknown escape".into()),
-        }
-    }
-    Ok(out)
-}
-
-/// 默认绑定叠上配置里的 `keybind`，得到最终的 (触发键, 动作) 列表。同一个触发键只保留
-/// 最后一次绑定。
-pub fn resolve(keybinds: &[Keybind]) -> Vec<(String, String)> {
-    let mut table: Vec<(String, String)> = Vec::new();
-    let defaults = DEFAULTS.iter().map(|d| parse(d).expect("default keybind parses"));
-    for keybind in defaults.chain(keybinds.iter().cloned()) {
-        match keybind {
-            Keybind::Clear => table.clear(),
-            Keybind::Unbind(keys) => table.retain(|(k, _)| *k != keys),
-            Keybind::Bind { keys, action } => {
-                table.retain(|(k, _)| *k != keys);
-                table.push((keys, action));
-            }
-        }
-    }
-    table
 }
 
 /// 上次装上的 `keybind` 和界面语言，配置重载但两者都没变时不必重绑、重设菜单。
@@ -528,8 +143,9 @@ fn bind(cx: &mut App) {
         return;
     }
     let mut bindings = Vec::new();
-    for (keys, action) in resolve(&keybinds) {
-        let (action, contexts) = build(&action).expect("keybind was validated when parsed");
+    for (keys, action) in keybind::resolve(&keybinds) {
+        let action = keybind::parse_action(&action).expect("keybind was validated when parsed");
+        let (action, contexts) = gpui_action(action);
         for context in contexts {
             let predicate = context.map(|c| gpui::KeyBindingContextPredicate::parse(c).unwrap().into());
             match KeyBinding::load(&keys, action.boxed_clone(), predicate, false, None, &gpui::DummyKeyboardMapper) {
@@ -552,80 +168,55 @@ fn bind(cx: &mut App) {
 mod tests {
     use super::*;
 
+    /// 配置里的每个动作名都能换成 GPUI 动作，生效的上下文都是 GPUI 认的写法。默认绑定之外，
+    /// 带参数的动作再按参数的写法各试一个值。
     #[test]
-    fn defaults_parse_and_every_action_builds() {
-        for default in DEFAULTS {
-            assert!(matches!(parse(default), Ok(Keybind::Bind { .. })), "{default}");
+    fn every_action_name_builds() {
+        let samples = ["", ":1", ":-1", ":right", ":previous", ":next", ":copy", ":x"];
+        for spec in keybind::ACTIONS {
+            let built: Vec<_> = samples
+                .iter()
+                .filter_map(|param| keybind::parse_action(&format!("{}{param}", spec.name)).ok())
+                .map(gpui_action)
+                .collect();
+            assert!(!built.is_empty(), "no sample parameter builds {}", spec.name);
+            for (action, contexts) in built {
+                assert!(!contexts.is_empty(), "{} has no context", action.name());
+                for context in contexts.iter().flatten() {
+                    assert!(gpui::KeyBindingContextPredicate::parse(context).is_ok(), "{context}");
+                }
+            }
         }
-        let names: Vec<_> = ACTIONS.iter().map(|a| a.name).collect();
-        let mut unique = names.clone();
-        unique.sort();
-        unique.dedup();
-        assert_eq!(names.len(), unique.len());
+        for (keys, action) in keybind::resolve(&[]) {
+            let (action, contexts) = gpui_action(keybind::parse_action(&action).unwrap());
+            for context in contexts {
+                let predicate = context.map(|c| gpui::KeyBindingContextPredicate::parse(c).unwrap().into());
+                let loaded = KeyBinding::load(&keys, action.boxed_clone(), predicate, false, None, &gpui::DummyKeyboardMapper);
+                assert!(loaded.is_ok(), "{keys}");
+            }
+        }
     }
 
+    /// 配置这边转出来的触发键 GPUI 都认：每个有名字的键、功能键、单个字符，各配上修饰键和按键序列。
     #[test]
-    fn triggers_normalize() {
-        assert_eq!(parse_trigger("super+shift+t").unwrap(), "shift-cmd-t");
-        assert_eq!(parse_trigger("shift+cmd+t").unwrap(), "shift-cmd-t");
-        assert_eq!(parse_trigger("ctrl+a>n").unwrap(), "ctrl-a n");
-        assert_eq!(parse_trigger("cmd+equal").unwrap(), "cmd-=");
-        assert_eq!(parse_trigger("cmd+bracket_left").unwrap(), "cmd-[");
-        assert_eq!(parse_trigger("opt+arrow_left").unwrap(), "alt-left");
-        assert!(parse_trigger("hyper+t").is_err());
-        assert!(parse_trigger("cmd+").is_err());
-    }
-
-    #[test]
-    fn rejects_bad_actions() {
-        assert!(parse("cmd+t=nope").is_err());
-        assert!(parse("cmd+t=new_tab:1").is_err());
-        assert!(parse("cmd+t=new_split:left").is_err());
-        assert!(parse("cmd+t=goto_tab:0").is_err());
-        assert!(parse("cmd+t").is_err());
-        assert!(parse("cmd+t=resize_split:left,10").is_ok());
-        assert!(parse("cmd+t=increase_font_size").is_ok());
-    }
-
-    #[test]
-    fn unescapes_text() {
-        assert_eq!(unescape(r"\x1bb").unwrap(), "\x1bb");
-        assert_eq!(unescape(r"a\nb\t\\").unwrap(), "a\nb\t\\");
-        assert_eq!(unescape(r"\u{263a}!").unwrap(), "☺!");
-        assert!(unescape(r"\q").is_err());
-    }
-
-    #[test]
-    fn user_keybinds_override_unbind_and_clear() {
-        let keybinds = [
-            parse("super+t=new_window").unwrap(),
-            parse("cmd+w=unbind").unwrap(),
-            parse("ctrl+a>c=new_tab").unwrap(),
-        ];
-        let table = resolve(&keybinds);
-        let lookup = |keys: &str| table.iter().filter(|(k, _)| k == keys).map(|(_, a)| a.as_str()).collect::<Vec<_>>();
-        assert_eq!(lookup("cmd-t"), ["new_window"]);
-        assert!(lookup("cmd-w").is_empty());
-        assert_eq!(lookup("ctrl-a c"), ["new_tab"]);
-        assert_eq!(lookup("cmd-q"), ["quit"]);
-
-        let table = resolve(&[parse("clear").unwrap(), parse("cmd+q=quit").unwrap()]);
-        assert_eq!(table, [("cmd-q".to_owned(), "quit".to_owned())]);
-    }
-
-    /// 默认绑定转换后与原来写死的 GPUI 写法一致，升级后快捷键不变。
-    #[test]
-    fn defaults_keep_gpui_keystrokes() {
-        let table = resolve(&[]);
-        let has = |keys: &str, action: &str| table.iter().any(|(k, a)| k == keys && a == action);
-        assert!(has("shift-cmd-,", "reload_config"));
-        assert!(has("alt-cmd-h", "hide_others"));
-        assert!(has("alt-shift-cmd-w", "close_all_windows"));
-        assert!(has("cmd-}", "next_tab"));
-        assert!(has("cmd-+", "increase_font_size:1"));
-        assert!(has("cmd--", "decrease_font_size:1"));
-        assert!(has("ctrl-cmd-=", "equalize_splits"));
-        assert!(has("cmd-pageup", "scroll_page_up"));
-        assert!(has("ctrl-shift-cmd-j", "write_screen_file:copy"));
+    fn every_accepted_trigger_is_a_gpui_keystroke() {
+        let mut keys: Vec<String> = keybind::NAMED_KEYS.iter().map(|(name, _)| (*name).to_owned()).collect();
+        keys.extend((1..=24).map(|n| format!("f{n}")));
+        keys.extend((b'!'..=b'~').filter(|&b| b != b'+' && b != b'>').map(|b| char::from(b).to_string()));
+        keys.extend(["digit_1", "key_a", "key_a-b", "key_-"].map(str::to_owned));
+        let mut accepted = 0;
+        for key in &keys {
+            for trigger in [key.clone(), format!("ctrl+shift+{key}"), format!("cmd+alt+{key}"), format!("ctrl+a>{key}")] {
+                let Ok(keys) = keybind::parse_trigger(&trigger) else {
+                    continue;
+                };
+                accepted += 1;
+                for stroke in keys.split(' ') {
+                    assert!(gpui::Keystroke::parse(stroke).is_ok(), "{trigger} gives {stroke}, which GPUI rejects");
+                }
+            }
+        }
+        assert!(accepted > 400, "{accepted}");
+        assert!(keybind::parse_trigger("cmd+key_a-b").is_err());
     }
 }
