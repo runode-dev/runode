@@ -45,7 +45,7 @@ This project is indexed by GitNexus as **runode** (225 symbols, 587 relationship
 
 # Crate 分层
 
-代码分在 `crates/` 下的几个 crate 里，依赖只能自上而下：
+代码分在 `crates/` 下的几个 crate 里，依赖只能自上而下。目录名不带前缀（`crates/term`），包名带 `runode-` 前缀（`runode-term`）：依赖树里已经有 `dirs` 这类同名的第三方 crate，包名不加前缀会撞名，`cargo -p` 也会有歧义。
 
 | crate | 职责 | 可以依赖 |
 | --- | --- | --- |

@@ -14,12 +14,12 @@ license = "Apache-2.0"
 publish = false
 
 [workspace.dependencies]
-runode-dirs = { path = "crates/runode-dirs" }
-runode-model = { path = "crates/runode-model" }
-runode-git = { path = "crates/runode-git" }
-runode-term = { path = "crates/runode-term" }
-runode-completion = { path = "crates/runode-completion" }
-runode-config = { path = "crates/runode-config" }
+runode-dirs = { path = "crates/dirs" }
+runode-model = { path = "crates/model" }
+runode-git = { path = "crates/git" }
+runode-term = { path = "crates/term" }
+runode-completion = { path = "crates/completion" }
+runode-config = { path = "crates/config" }
 libghostty-vt = { path = "vendor/libghostty-rs/crates/libghostty-vt" }
 gpui = { package = "gpui-pre", version = "=0.3.7" }
 gpui_platform = { package = "gpui-pre-platform", version = "=0.3.7" }
