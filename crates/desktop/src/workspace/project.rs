@@ -1,6 +1,7 @@
 //! 右侧各栏共用的项目状态：当前终端所在仓库的 git 改动和文件树。面板显示时监听仓库目录，
 //! 有文件变了才在后台重读，监听不了时定时重读。改动栏、Git 面板和文件树的开关，右侧各栏的
-//! 宽度、分隔线，以及标题栏右上角的开关按钮也在这里。
+//! 宽度、分隔线，以及标题栏右上角 Git 面板和文件树的开关按钮也在这里；改动栏的开关在 Git 面板
+//! 的标题栏上。
 //!
 //! 读目录和 git 状态、给路径找标记在 `scan`，改动栏和文件树排成行的状态在 `state`，监听目录
 //! 在 `watch`；这三处不碰界面。
@@ -26,7 +27,7 @@ use super::{
     drag_window, titlebar::icon_toggle,
 };
 use crate::{
-    assets::{CHANGES_ICON, FILES_ICON, GIT_ICON},
+    assets::{FILES_ICON, GIT_ICON},
     terminal_view::hsla,
     tooltip::tooltip,
 };
@@ -65,7 +66,7 @@ const TOGGLE_HEIGHT: f32 = 24.;
 const TOGGLE_GAP: f32 = 4.;
 const TOGGLE_MARGIN: f32 = 10.;
 /// 右侧面板都收着时标题栏右边给开关按钮让出的宽度。
-pub(super) const PANEL_TOGGLES_INSET: f32 = TOGGLE_WIDTH * 3. + TOGGLE_GAP * 2. + TOGGLE_MARGIN + 6.;
+pub(super) const PANEL_TOGGLES_INSET: f32 = TOGGLE_WIDTH * 2. + TOGGLE_GAP + TOGGLE_MARGIN + 6.;
 
 /// 改动和文件状态的颜色，深浅背景上都看得清。
 pub(super) const ADDED: Rgb = Rgb(0x57, 0xAB, 0x5A);
@@ -372,17 +373,11 @@ impl WindowView {
             )
     }
 
-    /// 标题栏右上角开关改动栏、Git 面板和文件树的三个按钮，打开着的底色亮一些。
+    /// 标题栏右上角开关 Git 面板和文件树的两个按钮，打开着的底色亮一些。
     pub(super) fn render_panel_toggles(&self, fg: Rgb, bg: Rgb, cx: &mut Context<Self>) -> Div {
         type Toggle = fn(&mut WindowView, &mut Window, &mut Context<WindowView>);
         let button = |id: &'static str, icon: &'static str, shown: bool, cx: &mut Context<Self>| {
             let (show, hide, action, toggle): (_, _, &dyn Action, Toggle) = match id {
-                "toggle-changes" => (
-                    rust_i18n::t!("tooltip.show_changes"),
-                    rust_i18n::t!("tooltip.hide_changes"),
-                    &ToggleChanges,
-                    |this, window, cx| this.toggle_changes(&ToggleChanges, window, cx),
-                ),
                 "toggle-git" => (
                     rust_i18n::t!("tooltip.show_git"),
                     rust_i18n::t!("tooltip.hide_git"),
@@ -415,7 +410,6 @@ impl WindowView {
             .right(px(TOGGLE_MARGIN))
             .flex()
             .gap(px(TOGGLE_GAP))
-            .child(button("toggle-changes", CHANGES_ICON, self.changes_shown, cx))
             .child(button("toggle-git", GIT_ICON, self.git_shown, cx))
             .child(button("toggle-files", FILES_ICON, self.files_shown, cx))
     }
