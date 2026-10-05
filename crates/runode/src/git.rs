@@ -2,10 +2,11 @@
 //! 面板和文件树使用。只调 `git` 命令行读，不写仓库。
 
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     fs,
     path::{Path, PathBuf},
     process::{Command, Stdio},
+    time::SystemTime,
 };
 
 /// 一个文件最多读这么多行改动，再多的只记总数。
@@ -14,6 +15,16 @@ const MAX_FILE_LINES: usize = 3000;
 const MAX_UNTRACKED_BYTES: u64 = 256 * 1024;
 /// 未跟踪的文件最多读这么多个的内容，其余只列出来。
 const MAX_UNTRACKED_FILES: usize = 200;
+/// 比这大的文件 git 不算逐行改动，当二进制报，免得一个生成的大文件拖慢整次读取。
+const MAX_DIFF_BYTES: u64 = 1024 * 1024;
+
+/// 改动栏的两段：已经 `git add` 的改动（暂存区相对 HEAD），以及还没暂存的改动
+/// （工作区相对暂存区，含未跟踪的文件）。
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Section {
+    Staged,
+    Unstaged,
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum FileStatus {
@@ -82,8 +93,11 @@ pub struct FileDiff {
 pub struct Snapshot {
     /// 仓库根目录。
     pub root: PathBuf,
-    /// 有改动的文件，按路径排序。
-    pub files: Vec<FileDiff>,
+    /// 仓库的 git 目录；worktree 的不在 `root` 下面，要另外监听才知道提交和暂存。
+    pub git_dir: PathBuf,
+    /// 两段各自有改动的文件，按路径排序；部分暂存的文件两段里都有。
+    pub staged: Vec<FileDiff>,
+    pub unstaged: Vec<FileDiff>,
     /// 有改动的文件的状态，键是相对仓库根的路径。
     pub statuses: HashMap<PathBuf, FileStatus>,
     /// 被忽略的文件和目录，相对仓库根；目录被忽略时里面的不再单列。
@@ -91,14 +105,38 @@ pub struct Snapshot {
 }
 
 impl Snapshot {
+    pub fn files(&self, section: Section) -> &[FileDiff] {
+        match section {
+            Section::Staged => &self.staged,
+            Section::Unstaged => &self.unstaged,
+        }
+    }
+
+    fn all(&self) -> impl Iterator<Item = &FileDiff> {
+        self.staged.iter().chain(&self.unstaged)
+    }
+
     pub fn added(&self) -> usize {
-        self.files.iter().map(|file| file.added).sum()
+        self.all().map(|file| file.added).sum()
     }
 
     pub fn removed(&self) -> usize {
-        self.files.iter().map(|file| file.removed).sum()
+        self.all().map(|file| file.removed).sum()
+    }
+
+    /// 有改动的文件数，部分暂存的只算一个。
+    pub fn changed(&self) -> usize {
+        self.all().map(|file| &file.path).collect::<HashSet<_>>().len()
+    }
+
+    pub fn is_clean(&self) -> bool {
+        self.staged.is_empty() && self.unstaged.is_empty()
     }
 }
+
+/// 上次读到的未跟踪文件，按绝对路径记着读时的大小和修改时间；没变的下次不再读内容。
+#[derive(Default)]
+pub struct UntrackedCache(HashMap<PathBuf, (u64, SystemTime, FileDiff)>);
 
 fn git(dir: &Path, args: &[&str]) -> Option<Vec<u8>> {
     let output = Command::new("git")
@@ -115,19 +153,70 @@ fn git(dir: &Path, args: &[&str]) -> Option<Vec<u8>> {
     output.status.success().then_some(output.stdout)
 }
 
-/// 读 `dir` 所在仓库的状态；`dir` 不在 git 仓库里或者没装 git 时为空。
-pub fn snapshot(dir: &Path) -> Option<Snapshot> {
-    let root = git(dir, &["rev-parse", "--show-toplevel"])?;
-    let root = local_root(dir, PathBuf::from(String::from_utf8_lossy(&root).trim_end_matches('\n')));
-    let mut snapshot = Snapshot { root: root.clone(), files: Vec::new(), statuses: HashMap::new(), ignored: Vec::new() };
-    collect(&root, Path::new(""), &mut snapshot)?;
-    snapshot.files.sort_by(|a, b| a.path.cmp(&b.path));
+/// 读 `dir` 所在仓库的状态；`dir` 不在 git 仓库里或者没装 git 时为空。没变过的未跟踪文件
+/// 从 `cache` 里取，读完后 `cache` 只留这次还在的。
+pub fn snapshot(dir: &Path, cache: &mut UntrackedCache) -> Option<Snapshot> {
+    let paths = git(dir, &["rev-parse", "--show-toplevel", "--absolute-git-dir"])?;
+    let paths = String::from_utf8_lossy(&paths);
+    let mut paths = paths.lines();
+    let root = local_root(dir, PathBuf::from(paths.next()?));
+    let git_dir = PathBuf::from(paths.next()?);
+    let mut snapshot = Snapshot {
+        root: root.clone(),
+        git_dir,
+        staged: Vec::new(),
+        unstaged: Vec::new(),
+        statuses: HashMap::new(),
+        ignored: Vec::new(),
+    };
+    let mut seen = UntrackedCache::default();
+    collect(&root, Path::new(""), &mut snapshot, cache, &mut seen)?;
+    *cache = seen;
+    snapshot.staged.sort_by(|a, b| a.path.cmp(&b.path));
+    snapshot.unstaged.sort_by(|a, b| a.path.cmp(&b.path));
     Some(snapshot)
+}
+
+/// `repo` 里的 `git diff`，再加上 `args`。前缀写明，免得用户配置了 `diff.noprefix` 之类
+/// 改掉 `a/`、`b/`。
+fn diff(repo: &Path, args: &[&str]) -> Vec<FileDiff> {
+    let threshold = format!("core.bigFileThreshold={MAX_DIFF_BYTES}");
+    let mut full = vec!["-c", &threshold, "diff", "-M", "--no-color", "--no-ext-diff", "--no-textconv"];
+    full.extend(["--src-prefix=a/", "--dst-prefix=b/"]);
+    full.extend(args);
+    let mut files = parse_diff(&String::from_utf8_lossy(&git(repo, &full).unwrap_or_default()));
+    // 超过大小上限的文本文件也被报成二进制：工作区里的文件超过上限、开头又没有 NUL 字节的
+    // 认回来，提示改动太多。暂存段也按工作区里的文件认，暂存后又改过的可能认错，只影响提示。
+    for file in files.iter_mut().filter(|file| file.binary) {
+        let full = repo.join(&file.path);
+        if fs::metadata(&full).is_ok_and(|meta| meta.len() > MAX_DIFF_BYTES) && !starts_binary(&full) {
+            file.binary = false;
+            file.truncated = true;
+        }
+    }
+    files
+}
+
+/// 文件开头一段里有 NUL 字节，像 git 一样当作二进制。
+fn starts_binary(path: &Path) -> bool {
+    use std::io::Read;
+    let mut head = [0; 8000];
+    let Ok(mut file) = fs::File::open(path) else {
+        return true;
+    };
+    let len = file.read(&mut head).unwrap_or(0);
+    head[..len].contains(&0)
 }
 
 /// 读 `repo` 这个仓库的改动，路径前面加上 `prefix` 并进 `out`。未跟踪的目录是嵌套的
 /// 仓库（比如放在仓库里的 worktree），git 不往里看，就当另一个仓库接着读。
-fn collect(repo: &Path, prefix: &Path, out: &mut Snapshot) -> Option<()> {
+fn collect(
+    repo: &Path,
+    prefix: &Path,
+    out: &mut Snapshot,
+    cache: &UntrackedCache,
+    seen: &mut UntrackedCache,
+) -> Option<()> {
     let status = git(repo, &["status", "--porcelain=v1", "-z", "--untracked-files=all", "--ignored=matching"])?;
     let (statuses, ignored) = parse_status(&status);
     // 还没有提交时和空树比，暂存了的新文件也算进来。
@@ -135,22 +224,9 @@ fn collect(repo: &Path, prefix: &Path, out: &mut Snapshot) -> Option<()> {
         Some(_) => "HEAD".to_owned(),
         None => String::from_utf8_lossy(&git(repo, &["hash-object", "-t", "tree", "/dev/null"])?).trim().to_owned(),
     };
-    // 前缀写明，免得用户配置了 `diff.noprefix` 之类改掉 `a/`、`b/`。
-    let diff = git(
-        repo,
-        &[
-            "diff",
-            &base,
-            "-M",
-            "--no-color",
-            "--no-ext-diff",
-            "--no-textconv",
-            "--src-prefix=a/",
-            "--dst-prefix=b/",
-        ],
-    )
-    .unwrap_or_default();
-    let mut files = parse_diff(&String::from_utf8_lossy(&diff));
+    let mut staged = diff(repo, &["--cached", &base]);
+    // 冲突的文件和「我方」比，不然 git 给的是三方合并的格式。
+    let mut unstaged = diff(repo, &["-2"]);
     let mut untracked: Vec<_> = statuses
         .iter()
         .filter(|(_, status)| **status == FileStatus::Untracked)
@@ -162,23 +238,23 @@ fn collect(repo: &Path, prefix: &Path, out: &mut Snapshot) -> Option<()> {
         .into_iter()
         .partition(|path| fs::symlink_metadata(repo.join(path)).is_ok_and(|meta| meta.is_dir()));
     for (ix, path) in untracked.into_iter().enumerate() {
-        files.push(untracked_diff(repo, path, ix < MAX_UNTRACKED_FILES));
+        unstaged.push(untracked_diff(repo, path, ix < MAX_UNTRACKED_FILES, cache, seen));
     }
-    // 冲突等状态以 `git status` 为准，diff 只看得出增删改名。
-    for file in &mut files {
-        if let Some(status) = statuses.get(&file.path)
-            && matches!(status, FileStatus::Conflicted)
-        {
-            file.status = *status;
+    // 冲突等状态以 `git status` 为准，diff 只看得出增删改名。冲突的文件不在暂存区里。
+    staged.retain(|file| statuses.get(&file.path) != Some(&FileStatus::Conflicted));
+    for file in staged.iter_mut().chain(&mut unstaged) {
+        if statuses.get(&file.path) == Some(&FileStatus::Conflicted) {
+            file.status = FileStatus::Conflicted;
         }
         file.path = prefix.join(&file.path);
         file.old_path = file.old_path.take().map(|old| prefix.join(old));
     }
-    out.files.extend(files);
+    out.staged.extend(staged);
+    out.unstaged.extend(unstaged);
     out.statuses.extend(statuses.into_iter().map(|(path, status)| (prefix.join(path), status)));
     out.ignored.extend(ignored.into_iter().map(|path| prefix.join(path)));
     for path in nested {
-        collect(&repo.join(&path), &prefix.join(&path), out);
+        collect(&repo.join(&path), &prefix.join(&path), out, cache, seen);
     }
     Some(())
 }
@@ -235,8 +311,15 @@ fn parse_diff(text: &str) -> Vec<FileDiff> {
     let mut in_hunk = false;
     // 当前块的头有没有记下来；超过行数上限后不再记新块，它的行也不能并进上一个块。
     let mut hunk_kept = false;
+    // 不是 `diff --git` 开头的文件（三方合并的格式之类）整个跳过。
+    let mut skipping = false;
     for line in text.lines() {
+        if line.starts_with("diff ") && !line.starts_with("diff --git ") {
+            skipping = true;
+            continue;
+        }
         if let Some(header) = line.strip_prefix("diff --git ") {
+            skipping = false;
             files.push(FileDiff {
                 path: header_path(header).unwrap_or_default(),
                 old_path: None,
@@ -248,6 +331,9 @@ fn parse_diff(text: &str) -> Vec<FileDiff> {
                 truncated: false,
             });
             in_hunk = false;
+            continue;
+        }
+        if skipping {
             continue;
         }
         let Some(file) = files.last_mut() else {
@@ -391,8 +477,36 @@ fn expand_tabs(text: &str) -> String {
     text.replace('\t', "    ")
 }
 
-/// 未跟踪的文件当作整个新增；`read` 为假或者文件太大时不读内容。
-fn untracked_diff(root: &Path, path: PathBuf, read: bool) -> FileDiff {
+/// 未跟踪的文件当作整个新增；`read` 为假或者文件太大时不读内容。大小和修改时间都没变时
+/// 用 `cache` 里上次读的，读过的记进 `seen`。
+fn untracked_diff(
+    root: &Path,
+    path: PathBuf,
+    read: bool,
+    cache: &UntrackedCache,
+    seen: &mut UntrackedCache,
+) -> FileDiff {
+    let full = root.join(&path);
+    let meta = fs::metadata(&full).ok();
+    let stamp = meta.as_ref().and_then(|meta| Some((meta.len(), meta.modified().ok()?)));
+    if let Some((len, modified)) = stamp
+        && read
+        && let Some((cached_len, cached_modified, file)) = cache.0.get(&full)
+        && (*cached_len, *cached_modified) == (len, modified)
+    {
+        seen.0.insert(full, (len, modified, file.clone()));
+        return file.clone();
+    }
+    let file = read_untracked(&full, path, read && meta.is_some_and(|meta| meta.len() <= MAX_UNTRACKED_BYTES));
+    if let Some((len, modified)) = stamp
+        && read
+    {
+        seen.0.insert(full, (len, modified, file.clone()));
+    }
+    file
+}
+
+fn read_untracked(full: &Path, path: PathBuf, read: bool) -> FileDiff {
     let mut file = FileDiff {
         path,
         old_path: None,
@@ -403,9 +517,7 @@ fn untracked_diff(root: &Path, path: PathBuf, read: bool) -> FileDiff {
         binary: false,
         truncated: false,
     };
-    let full = root.join(&file.path);
-    let small = fs::metadata(&full).is_ok_and(|meta| meta.len() <= MAX_UNTRACKED_BYTES);
-    let content = (read && small).then(|| fs::read(&full).ok()).flatten();
+    let content = read.then(|| fs::read(full).ok()).flatten();
     let Some(content) = content else {
         file.truncated = true;
         return file;
@@ -542,11 +654,53 @@ Binary files /dev/null and b/logo.png differ
         };
         commit(&base);
         commit(&nested);
-        let snapshot = snapshot(&base).unwrap();
-        let paths: Vec<_> = snapshot.files.iter().map(|file| file.path.clone()).collect();
+        let snapshot = snapshot(&base, &mut UntrackedCache::default()).unwrap();
+        let paths: Vec<_> = snapshot.unstaged.iter().map(|file| file.path.clone()).collect();
         assert_eq!(paths, vec![PathBuf::from("a.txt"), PathBuf::from("wt/inner/a.txt")]);
-        assert_eq!((snapshot.files[1].added, snapshot.files[1].removed), (1, 1));
+        assert_eq!((snapshot.unstaged[1].added, snapshot.unstaged[1].removed), (1, 1));
         assert_eq!(snapshot.statuses[Path::new("wt/inner/a.txt")], FileStatus::Modified);
+        std::fs::remove_dir_all(&base).unwrap();
+    }
+
+    #[test]
+    fn splits_staged_and_unstaged_changes() {
+        let base = std::env::temp_dir().join(format!("runode-git-sections-{}", std::process::id()));
+        std::fs::create_dir_all(&base).unwrap();
+        let run = |args: &[&str]| assert!(git(&base, args).is_some(), "git {args:?}");
+        std::fs::write(base.join("a.txt"), "one\n").unwrap();
+        std::fs::write(base.join("big.txt"), "x\n").unwrap();
+        run(&["init", "-q"]);
+        run(&["add", "."]);
+        run(&["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "init"]);
+        // a.txt 暂存了一处改动，工作区里又改了一处；big.txt 改得超过大小上限。
+        std::fs::write(base.join("a.txt"), "two\n").unwrap();
+        run(&["add", "a.txt"]);
+        std::fs::write(base.join("a.txt"), "three\n").unwrap();
+        std::fs::write(base.join("big.txt"), "y\n".repeat(MAX_DIFF_BYTES as usize)).unwrap();
+        std::fs::write(base.join("blob.bin"), vec![0u8; MAX_DIFF_BYTES as usize * 2]).unwrap();
+        run(&["add", "-N", "blob.bin"]);
+        std::fs::write(base.join("new.txt"), "n\n").unwrap();
+
+        let mut cache = UntrackedCache::default();
+        let snapshot = snapshot(&base, &mut cache).unwrap();
+        let paths = |files: &[FileDiff]| files.iter().map(|file| file.path.clone()).collect::<Vec<_>>();
+        assert_eq!(paths(&snapshot.staged), [PathBuf::from("a.txt")]);
+        assert_eq!(paths(&snapshot.unstaged), [PathBuf::from("a.txt"), "big.txt".into(), "blob.bin".into(), "new.txt".into()]);
+        assert_eq!(snapshot.staged[0].hunks[0].lines[1].text, "two");
+        assert_eq!(snapshot.unstaged[0].hunks[0].lines[1].text, "three");
+        assert_eq!(snapshot.changed(), 4);
+        let big = &snapshot.unstaged[1];
+        assert!(big.truncated && !big.binary);
+        // 真的二进制文件超过上限也还是二进制。
+        assert!(snapshot.unstaged[2].binary && !snapshot.unstaged[2].truncated);
+        assert_eq!(snapshot.unstaged[3].status, FileStatus::Untracked);
+        assert!(snapshot.git_dir.ends_with(".git"));
+
+        // 没变的未跟踪文件下次从缓存里取，删掉的不再留着。
+        assert_eq!(cache.0.len(), 1);
+        std::fs::remove_file(base.join("new.txt")).unwrap();
+        super::snapshot(&base, &mut cache).unwrap();
+        assert!(cache.0.is_empty());
         std::fs::remove_dir_all(&base).unwrap();
     }
 

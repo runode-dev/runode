@@ -1,8 +1,11 @@
-//! 编进二进制的界面资源：`svg()` 这类元素按路径向 GPUI 要文件，GPUI 再来这里取。
+//! 编进二进制的界面资源：`svg()`、`img()` 这类元素按路径向 GPUI 要文件，GPUI 再来这里取。
+//! 文件树的彩色类型图标数量多，单独列在 `file_icons::FILES`，这里一并查。
 
 use std::borrow::Cow;
 
 use gpui::{AssetSource, SharedString};
+
+use crate::file_icons;
 
 /// 侧栏开关的图标。
 pub const SIDEBAR_ICON: &str = "icons/sidebar.svg";
@@ -14,6 +17,9 @@ pub const CHEVRON_RIGHT_ICON: &str = "icons/chevron-right.svg";
 pub const CHEVRON_DOWN_ICON: &str = "icons/chevron-down.svg";
 pub const FOLDER_ICON: &str = "icons/folder.svg";
 pub const FILE_ICON: &str = "icons/file.svg";
+/// 文件树标题栏上显示、隐藏被 git 忽略的文件的开关。
+pub const EYE_ICON: &str = "icons/eye.svg";
+pub const EYE_OFF_ICON: &str = "icons/eye-off.svg";
 
 const FILES: &[(&str, &[u8])] = &[
     (SIDEBAR_ICON, include_bytes!("../assets/icons/sidebar.svg")),
@@ -23,16 +29,22 @@ const FILES: &[(&str, &[u8])] = &[
     (CHEVRON_DOWN_ICON, include_bytes!("../assets/icons/chevron-down.svg")),
     (FOLDER_ICON, include_bytes!("../assets/icons/folder.svg")),
     (FILE_ICON, include_bytes!("../assets/icons/file.svg")),
+    (EYE_ICON, include_bytes!("../assets/icons/eye.svg")),
+    (EYE_OFF_ICON, include_bytes!("../assets/icons/eye-off.svg")),
 ];
+
+fn all_files() -> impl Iterator<Item = &'static (&'static str, &'static [u8])> {
+    FILES.iter().chain(file_icons::FILES)
+}
 
 pub struct Assets;
 
 impl AssetSource for Assets {
     fn load(&self, path: &str) -> anyhow::Result<Option<Cow<'static, [u8]>>> {
-        Ok(FILES.iter().find(|(name, _)| *name == path).map(|(_, data)| Cow::Borrowed(*data)))
+        Ok(all_files().find(|(name, _)| *name == path).map(|(_, data)| Cow::Borrowed(*data)))
     }
 
     fn list(&self, path: &str) -> anyhow::Result<Vec<SharedString>> {
-        Ok(FILES.iter().filter(|(name, _)| name.starts_with(path)).map(|(name, _)| (*name).into()).collect())
+        Ok(all_files().filter(|(name, _)| name.starts_with(path)).map(|(name, _)| (*name).into()).collect())
     }
 }

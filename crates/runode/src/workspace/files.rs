@@ -1,11 +1,11 @@
-//! 右侧的文件树：workspace 目录下的文件，按 git 状态着色。单击目录展开收起，双击文件把它的
-//! 路径打进当前终端。
+//! 右侧的文件树：当前终端所在仓库或目录下的文件，图标按文件类型，名字按 git 状态着色。
+//! 单击目录展开收起，双击文件把它的路径打进当前终端。
 
 use std::{ops::Range, path::Path};
 
 use gpui::{
     AnyElement, Context, Div, Focusable, MouseButton, MouseDownEvent, ScrollStrategy, SharedString, Stateful, Window, div,
-    prelude::*, px, svg, uniform_list,
+    img, prelude::*, px, svg, uniform_list,
 };
 
 use super::{
@@ -13,7 +13,8 @@ use super::{
     project::{Decoration, MODIFIED, status_color},
 };
 use crate::{
-    assets::{CHEVRON_DOWN_ICON, CHEVRON_RIGHT_ICON, FILE_ICON, FOLDER_ICON},
+    assets::{CHEVRON_DOWN_ICON, CHEVRON_RIGHT_ICON, EYE_ICON, EYE_OFF_ICON},
+    file_icons::{file_icon, folder_icon},
     session::Rgb,
     terminal_view::hsla,
 };
@@ -21,6 +22,8 @@ use crate::{
 const ROW_HEIGHT: f32 = 22.;
 /// 每深一层往右缩进的宽度。
 const INDENT: f32 = 12.;
+/// 行的左边距。
+const ROW_PADDING: f32 = 4.;
 
 /// 打进 shell 的路径：只含常见字符时原样，否则用单引号括起来。开头是 `=` 或 `%` 时也括起来，
 /// zsh 会把 `=foo` 展开成命令的路径。
@@ -41,7 +44,35 @@ impl WindowView {
             }
             _ => workspace.name.clone(),
         };
-        let header = self.panel_header(true, fg).child(div().min_w_0().truncate().text_color(hsla(fg)).child(name));
+        let show_ignored = self.show_ignored;
+        let ignored_toggle = div()
+            .id("toggle-ignored")
+            .flex_none()
+            .size(px(20.))
+            .rounded(px(4.))
+            .flex()
+            .items_center()
+            .justify_center()
+            .when(show_ignored, |button| button.bg(hsla(bg.mix(fg, 0.10))))
+            .hover(|button| button.bg(hsla(bg.mix(fg, 0.14))))
+            .child(
+                svg()
+                    .path(if show_ignored { EYE_ICON } else { EYE_OFF_ICON })
+                    .size(px(14.))
+                    .text_color(hsla(fg).opacity(if show_ignored { 0.9 } else { 0.55 })),
+            )
+            // 标题栏按下会拖动窗口，按钮自己接住。
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(|this, _, _, cx| {
+                    cx.stop_propagation();
+                    this.toggle_show_ignored(cx);
+                }),
+            );
+        let header = self
+            .panel_header(true, fg)
+            .child(div().flex_1().min_w_0().truncate().text_color(hsla(fg)).child(name))
+            .child(ignored_toggle);
         let list = uniform_list(
             "files",
             workspace.project.file_rows.len(),
@@ -69,15 +100,15 @@ impl WindowView {
         let project = &self.workspace().project;
         let selected_bg = hsla(bg.mix(fg, 0.12));
         let hover_bg = hsla(bg.mix(fg, 0.06));
+        let guide = hsla(fg).opacity(0.2);
         let fg = hsla(fg);
         range
             .filter_map(|ix| project.file_rows.get(ix).map(|row| (ix, row)))
             .map(|(ix, row)| {
                 let color = match row.decoration {
-                    Decoration::None => fg.opacity(0.8),
+                    Decoration::None | Decoration::Ignored => fg.opacity(0.85),
                     Decoration::Status(status) => hsla(status_color(status)),
                     Decoration::ContainsChanges => hsla(MODIFIED),
-                    Decoration::Ignored => fg.opacity(0.35),
                 };
                 let selected = project.selected.as_ref() == Some(&row.path);
                 let chevron = row.is_dir.then(|| {
@@ -86,6 +117,13 @@ impl WindowView {
                         .size(px(12.))
                         .text_color(fg.opacity(0.5))
                 });
+                // 并成一行的目录按最里层的名字挑图标。
+                let last = row.path.file_name().map(|name| name.to_string_lossy()).unwrap_or_default();
+                let icon = if row.is_dir { folder_icon(&last, row.expanded) } else { file_icon(&last) };
+                // 缩进里每一层一格，格子中间一条竖线，对准那一层的箭头，上下相邻的行连成一条。
+                let guides = (0..row.depth).map(|_| {
+                    div().flex_none().w(px(INDENT)).h_full().flex().justify_center().child(div().w(px(1.)).h_full().bg(guide))
+                });
                 let path = row.path.clone();
                 let is_dir = row.is_dir;
                 div()
@@ -93,23 +131,26 @@ impl WindowView {
                     .flex_none()
                     .h(px(ROW_HEIGHT))
                     .mx(px(4.))
-                    .pl(px(4. + row.depth as f32 * INDENT))
+                    .pl(px(ROW_PADDING))
                     .pr(px(6.))
                     .rounded(px(4.))
                     .flex()
                     .items_center()
-                    .gap(px(4.))
                     .overflow_hidden()
+                    .when(row.decoration == Decoration::Ignored, |item| item.opacity(0.45))
                     .map(|item| if selected { item.bg(selected_bg) } else { item.hover(|item| item.bg(hover_bg)) })
-                    .child(div().flex_none().w(px(12.)).flex().items_center().children(chevron))
+                    .children(guides)
                     .child(
-                        svg()
-                            .flex_none()
-                            .path(if row.is_dir { FOLDER_ICON } else { FILE_ICON })
-                            .size(px(14.))
-                            .text_color(color.opacity(color.a * 0.8)),
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .flex()
+                            .items_center()
+                            .gap(px(4.))
+                            .child(div().flex_none().w(px(12.)).flex().items_center().children(chevron))
+                            .child(img(icon).flex_none().size(px(14.)))
+                            .child(div().min_w_0().truncate().text_color(color).child(row.name.clone())),
                     )
-                    .child(div().min_w_0().truncate().text_color(color).child(row.name.clone()))
                     .on_mouse_down(
                         MouseButton::Left,
                         cx.listener(move |this, event: &MouseDownEvent, window, cx| {
@@ -124,20 +165,17 @@ impl WindowView {
 
     /// 单击选中，目录同时展开或收起，有改动的文件在改动栏里滚到它；双击文件把路径打进终端。
     fn click_file(&mut self, path: &Path, is_dir: bool, clicks: usize, window: &mut Window, cx: &mut Context<Self>) {
+        let show_ignored = self.show_ignored;
         let workspace = self.workspace_mut();
         workspace.project.selected = Some(path.to_path_buf());
         if is_dir {
             let root = workspace.project.root.clone().unwrap_or_else(|| workspace.dir.clone());
-            workspace.project.toggle_dir(path, &root);
+            workspace.project.toggle_dir(path, &root, show_ignored);
         } else if clicks >= 2 {
             self.insert_path(path, None, window, cx);
         } else if self.changes_shown {
             let project = &mut self.workspace_mut().project;
-            if let Some((row, rel)) = project.diff_row_of(path) {
-                let file = project.git.as_ref().and_then(|git| git.files.iter().find(|file| file.path == rel));
-                if file.is_some_and(|file| !project.diff_expanded(file)) {
-                    project.toggle_diff(&rel);
-                }
+            if let Some(row) = project.reveal_diff(path) {
                 project.changes_scroll.scroll_to_item(row, ScrollStrategy::Top);
             }
         }

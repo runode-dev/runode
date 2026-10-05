@@ -16,6 +16,7 @@ use std::{
     time::Instant,
 };
 
+use futures::StreamExt as _;
 use gpui::{
     Action, Animation, AnimationExt, AnyElement, App, Bounds, BoxShadow, Context, CursorStyle, Div,
     ElementId, Entity, EntityId, FocusHandle, Focusable, Hsla, MouseButton, MouseDownEvent,
@@ -388,6 +389,8 @@ pub struct WindowView {
     files_shown: bool,
     changes_width: Option<f32>,
     files_width: Option<f32>,
+    /// 文件树里显示被 git 忽略的文件。
+    show_ignored: bool,
     renaming: Option<Renaming>,
     /// workspace、标签和分屏节点的标识都从这里取。
     next_id: u64,
@@ -404,8 +407,12 @@ pub struct WindowView {
     _bounds_watch: Subscription,
     /// 窗口切到前台时重读右侧面板的内容。
     _activation_watch: Subscription,
-    /// 右侧面板显示时定时重读。
+    /// 右侧面板显示时定时看终端换没换目录，监听不了目录时定时重读。
     _project_poll: Task<()>,
+    /// 监听右侧面板在看的目录，事件发到 `project_events`，由 `_project_events` 收。
+    project_watch: Option<project::ProjectWatch>,
+    project_events: futures::channel::mpsc::UnboundedSender<Vec<PathBuf>>,
+    _project_events: Task<()>,
 }
 
 impl WindowView {
@@ -433,6 +440,21 @@ impl WindowView {
                 }
             }
         });
+        let (project_events, mut events) = futures::channel::mpsc::unbounded::<Vec<PathBuf>>();
+        let project_events_task = cx.spawn_in(window, async move |this, cx| {
+            while let Some(mut paths) = events.next().await {
+                cx.background_executor().timer(project::WATCH_DEBOUNCE).await;
+                while let Ok(more) = events.try_recv() {
+                    paths.extend(more);
+                }
+                let alive = this.update_in(cx, |this, window, cx| {
+                    this.project_changed(paths, window.is_window_active(), cx);
+                });
+                if alive.is_err() {
+                    break;
+                }
+            }
+        });
         persistence::track(cx);
         Self {
             workspaces: Vec::new(),
@@ -444,6 +466,7 @@ impl WindowView {
             files_shown: false,
             changes_width: None,
             files_width: None,
+            show_ignored: false,
             renaming: None,
             next_id: 0,
             layout: Rc::default(),
@@ -455,6 +478,9 @@ impl WindowView {
             _bounds_watch: bounds_watch,
             _activation_watch: activation_watch,
             _project_poll: project_poll,
+            project_watch: None,
+            project_events,
+            _project_events: project_events_task,
         }
     }
 

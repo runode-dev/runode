@@ -69,6 +69,8 @@ panel:
   binary: 二进制文件
   truncated: 改动太多，没有全部显示
   no_content: 内容没有变化
+  staged: 已暂存的改动
+  unstaged: 未暂存的改动
 paste:
   title: 粘贴的内容可能会直接执行命令
   detail: 内容含有换行或终端控制序列，粘贴后可能被当作命令立即运行。

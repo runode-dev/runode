@@ -49,6 +49,9 @@ pub struct SavedWindow {
     pub files: bool,
     #[serde(default)]
     pub files_width: Option<f32>,
+    /// 文件树里显示被 git 忽略的文件。
+    #[serde(default)]
+    pub show_ignored: bool,
 }
 
 /// 窗口的位置和大小，相对于它所在的屏幕；放大和全屏时是还原后的位置和大小。
@@ -200,6 +203,7 @@ mod tests {
             changes_width: None,
             files: false,
             files_width: Some(200.),
+            show_ignored: true,
         }])
     }
 

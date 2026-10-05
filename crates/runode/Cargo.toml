@@ -23,6 +23,8 @@ rust-i18n.workspace = true
 # 窗口布局的存档，存成 JSON。
 serde.workspace = true
 serde_json.workspace = true
+# 右侧面板监听仓库目录，有文件变了才重读 git 状态。
+notify.workspace = true
 
 # 标准「关于」面板、系统偏好的语言和窗口菜单只有 AppKit 提供，GPUI 没有封装。
 [target.'cfg(target_os = "macos")'.dependencies]

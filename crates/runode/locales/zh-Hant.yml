@@ -69,6 +69,8 @@ panel:
   binary: 二進位檔案
   truncated: 改動太多，沒有全部顯示
   no_content: 內容沒有變化
+  staged: 已暫存的改動
+  unstaged: 未暫存的改動
 paste:
   title: 貼上的內容可能會直接執行指令
   detail: 內容含有換行或終端機控制序列，貼上後可能被當作指令立即執行。

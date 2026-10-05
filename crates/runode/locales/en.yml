@@ -69,6 +69,8 @@ panel:
   binary: Binary file
   truncated: Too many changes to show in full
   no_content: No content changes
+  staged: Staged Changes
+  unstaged: Changes
 paste:
   title: The pasted text may run commands
   detail: It contains line breaks or terminal control sequences, so it may run as a command right after pasting.
