@@ -21,8 +21,9 @@ mod git_panel;
 mod inline_edit;
 mod layout_report;
 mod model;
+mod open;
 mod panes;
-mod persistence;
+mod persist;
 mod preview;
 mod project;
 mod quit;
@@ -46,13 +47,15 @@ pub use files::{
     CollapseSelectedFile, CopyPath, CopyRelativePath, DeleteFile, ExpandSelectedFile, FocusTerminal, OpenSelectedFile,
     RenameFile, RevealInFinder, SelectFirstFile, SelectLastFile, SelectNextFile, SelectPreviousFile,
 };
-pub use persistence::{install, saved_window_options};
+pub(crate) use open::{open_window, open_window_with};
+pub use persist::{install, saved_window_options};
 pub use quit::{close_all_windows, close_window, end_sessions_in_menu, quit, quit_and_end_sessions, should_close};
 pub use remote::serve_requests;
 pub use titlebar::titlebar_options;
 
-use crate::{config::AppConfig, persist::SavedWindow, prespawn::Prespawned, terminal_view::TerminalView, ui::hsla};
+use crate::{config::AppConfig, prespawn::Prespawned, terminal_view::TerminalView, ui::hsla};
 use model::{PaneLayout, Workspace, WorkspaceId, home_dir};
+use persist::format::SavedWindow;
 use titlebar::titled;
 
 actions!(
@@ -278,7 +281,7 @@ impl WindowView {
             }
         });
         let config_watch = cx.observe_global::<AppConfig>(|_, cx| cx.notify());
-        persistence::track(cx);
+        persist::track(cx);
         // 窗口关掉后它的分屏都没了，发过的通知点了也跳不过去，一并收回。
         cx.on_release(|view, cx| {
             let panes =

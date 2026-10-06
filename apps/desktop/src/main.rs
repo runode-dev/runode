@@ -4,7 +4,6 @@
 //! `host_process`。
 
 mod about;
-mod agent_alert;
 mod assets;
 mod config;
 mod host_client;
@@ -12,13 +11,11 @@ mod host_process;
 mod i18n;
 mod keybinds;
 mod menus;
-mod persist;
 mod prespawn;
 mod remote_access;
 mod startup;
 mod terminal_view;
 mod ui;
-mod window;
 mod workspace;
 
 // 界面文字的翻译，见 `i18n`；某种语言缺了某个键时取英文。
@@ -27,7 +24,7 @@ rust_i18n::i18n!("locales", fallback = "en");
 use gpui::App;
 use gpui_platform::application;
 
-use crate::window::{open_window, open_window_with};
+use crate::workspace::{open_window, open_window_with};
 
 fn main() {
     startup::begin();

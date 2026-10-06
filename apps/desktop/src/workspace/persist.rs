@@ -6,7 +6,9 @@
 //! 窗口不留。终端的目录随 `cd` 变化，不单独盯着：下次布局变化或退出时一并记下。
 //!
 //! 每个终端记着宿主里的会话。恢复时先问宿主还有哪些会话，接得上的接上，其余在原目录新开，
-//! 见 `persist::plan_restore`。
+//! 见 `format::plan_restore`。
+
+pub(super) mod format;
 
 use std::{collections::HashMap, io, path::Path, time::Duration};
 
@@ -22,10 +24,10 @@ use super::{
 };
 use crate::{
     host_client::{self, Mode},
-    persist::{self, SavedBounds, SavedNode, SavedTab, SavedWindow, SavedWorkspace, State, WindowMode},
     prespawn::Prespawned,
     terminal_view::TerminalView,
 };
+use format::{SavedBounds, SavedNode, SavedTab, SavedWindow, SavedWorkspace, State, WindowMode};
 
 /// 布局变化后等这么久再写文件，拖动窗口、连续切标签时只写一次。
 const WRITE_DELAY: Duration = Duration::from_millis(500);
@@ -80,22 +82,22 @@ pub(super) fn freeze(cx: &mut App) {
 
 /// 上次存下的各个窗口，以及恢复时打开它们用的窗口选项（位置、大小、所在屏幕）。没有存档或
 /// 读不了时为空；文件坏了时挪到一边，从默认布局开始。终端记的会话按宿主里还活着的会话定下
-/// 接不接（`persist::plan_restore`）；宿主里已经退出又没人连着的、存档记着却一直没启动的会话
+/// 接不接（`format::plan_restore`）；宿主里已经退出又没人连着的、存档记着却一直没启动的会话
 /// 这时结束掉（没有存档也照样做）。
 pub fn saved_window_options(cx: &App) -> Vec<(SavedWindow, WindowOptions)> {
-    let windows = match persist::load() {
+    let windows = match format::load() {
         Ok(state) => state.map(|state| state.windows).unwrap_or_default(),
         Err(err) => {
             tracing::warn!("failed to read the saved window layout, starting fresh: {err}");
             if matches!(err.kind(), io::ErrorKind::InvalidData | io::ErrorKind::UnexpectedEof) {
-                persist::set_aside();
+                format::set_aside();
             }
             Vec::new()
         }
     };
     let windows: Vec<_> = windows.into_iter().filter(|window| !window.workspaces.is_empty()).collect();
     let live = live_sessions();
-    let plan = persist::plan_restore(windows, &live);
+    let plan = format::plan_restore(windows, &live);
     let link = host_client::link();
     for id in plan.end {
         tracing::info!("ending the session {id}: its shell exited or never started");
@@ -136,7 +138,7 @@ fn window_options(saved: &SavedBounds, cx: &App) -> WindowOptions {
         let screen = Bounds { origin: point(px(0.), px(0.)), size: display.bounds().size };
         saved.width >= 100. && saved.height >= 100. && screen.intersects(&bounds)
     });
-    let mut options = crate::window::window_options(cx);
+    let mut options = super::open::window_options(cx);
     if let Some(display) = placed {
         options.display_id = Some(display.id());
         options.window_bounds = Some(match saved.mode {
@@ -224,7 +226,7 @@ fn write(cx: &mut App) {
     if saver.written.as_ref() == Some(&state) {
         return;
     }
-    match persist::write(&state) {
+    match format::write(&state) {
         Ok(()) => saver.written = Some(state),
         Err(err) => tracing::warn!("failed to save the window layout: {err}"),
     }
@@ -260,7 +262,7 @@ impl WindowView {
         }
     }
 
-    /// 按存档建出 workspace、标签和分屏：记着的会话接得上（`persist::plan_restore` 留下了）就
+    /// 按存档建出 workspace、标签和分屏：记着的会话接得上（`format::plan_restore` 留下了）就
     /// 接上，否则在记下的目录里开一个终端。开不起来的终端跳过，一个终端都没有的标签和
     /// workspace 也跳过。新开的终端先不启动 shell，切到所在标签时由 `activate` 启动，所以启动
     /// 时只有窗口里显示的那个标签占进程。`shell` 是启动时在家目录提前拉起的 shell，交给显示的
@@ -370,7 +372,7 @@ impl WindowView {
                 let view = match reattached {
                     Some(view) => view,
                     None => {
-                        let start = persist::start_dir(cwd.as_deref(), dir);
+                        let start = format::start_dir(cwd.as_deref(), dir);
                         // 提前拉起的 shell 在家目录里，只交给同样从家目录开始的终端。
                         let in_home = start.is_none() || start.as_deref() == home;
                         let view = match shell.and_then(|shell| shell.take_if(|_| in_home)) {

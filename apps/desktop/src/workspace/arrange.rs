@@ -14,8 +14,9 @@ use runode_shared_types::{
     pane::{Axis, Node, Rect, SplitId},
 };
 
+use super::persist::format;
 use super::{TITLEBAR_HEIGHT, WindowView, divider_color};
-use crate::{persist, ui::hsla};
+use crate::ui::hsla;
 
 actions!(
     runode,
@@ -182,7 +183,7 @@ impl WindowView {
         let original = self.tab().focused;
         // 目录已经被删掉时 shell 起不来，退回 workspace 的目录，再退回家目录。
         let cwd = self.tab().focused_view().read(cx).cwd();
-        let cwd = persist::start_dir(cwd.as_deref(), &self.workspace().dir);
+        let cwd = format::start_dir(cwd.as_deref(), &self.workspace().dir);
         let mut entries = Vec::new();
         for _ in 0..count {
             let Some(view) = self.spawn_terminal(cwd.as_deref(), window, cx) else {

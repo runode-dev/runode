@@ -2,6 +2,8 @@
 //! 等回答、done、工作中、空闲的优先级汇总到标签、标题栏和侧栏；用户没在看时发通知、出提示音；
 //! 列出所有窗口里的 agent，以及跳到某个 agent 的分屏。
 
+pub(super) mod alert;
+
 use std::time::Instant;
 
 use gpui::{App, Context, Entity, EntityId, SharedString, Window, WindowHandle};
@@ -11,10 +13,8 @@ use super::{
     NextAgent, WindowView,
     model::{Tab, Workspace},
 };
-use crate::{
-    agent_alert::{self, AgentAlert, Alert},
-    terminal_view::TerminalView,
-};
+use crate::terminal_view::TerminalView;
+use alert::{AgentAlert, Alert};
 
 /// 标记上显示的状态，按优先级从高到低排列，汇总时取最靠前的。
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -97,7 +97,7 @@ fn tag_prefix() -> String {
 /// 收回这些分屏发过的通知，分屏要关掉时用。
 pub(super) fn dismiss_alerts(panes: impl IntoIterator<Item = EntityId>, cx: &mut App) {
     for pane in panes {
-        agent_alert::dismiss(&notification_tag(pane), cx);
+        alert::dismiss(&notification_tag(pane), cx);
     }
 }
 
@@ -255,7 +255,7 @@ impl WindowView {
         let tab = &mut self.workspaces[wi].tabs[ti];
         if tab.done.contains(&pane) && tab.pane_mark(pane, cx).is_none_or(|mark| mark.status != Status::Done) {
             tab.done.remove(&pane);
-            agent_alert::dismiss(&notification_tag(pane), cx);
+            alert::dismiss(&notification_tag(pane), cx);
         }
     }
 
@@ -263,7 +263,7 @@ impl WindowView {
         let workspace = &self.workspaces[wi];
         let tab = workspace.tabs[ti].focused_view().read(cx).title().to_owned();
         let alert = AgentAlert { kind, alert, tag: notification_tag(pane), workspace: workspace.name.to_string(), tab };
-        agent_alert::alert(alert, cx);
+        alert::alert(alert, cx);
     }
 
     /// 用户看到了当前分屏（窗口在前台）：清掉它的 done，收回它的通知。
@@ -276,7 +276,7 @@ impl WindowView {
         if tab.done.remove(&pane) {
             cx.notify();
         }
-        agent_alert::dismiss(&notification_tag(pane), cx);
+        alert::dismiss(&notification_tag(pane), cx);
     }
 
     /// 这个窗口里所有前台是 agent 的分屏。

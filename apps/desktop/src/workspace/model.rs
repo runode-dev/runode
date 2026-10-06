@@ -11,11 +11,12 @@ use gpui::{
 };
 use runode_shared_types::pane::{Node, SplitId};
 
-use super::{WindowView, persistence, project::Project};
-use crate::{
-    persist,
-    terminal_view::{SHOW_WAIT, TerminalEvent, TerminalView},
+use super::{
+    WindowView,
+    persist::{self, format},
+    project::Project,
 };
+use crate::terminal_view::{SHOW_WAIT, TerminalEvent, TerminalView};
 
 /// 标签的标识，标签挪动位置后不变。
 pub(super) type TabId = u64;
@@ -148,7 +149,7 @@ impl WindowView {
 
     /// 记下刚开出来的终端从哪个目录开始，`start` 为空表示家目录。
     pub(super) fn record_spawn(&mut self, view: &Entity<TerminalView>, start: Option<&Path>) {
-        self.spawned.retain(|_, (at, _)| at.elapsed() < persistence::SHELL_STARTUP);
+        self.spawned.retain(|_, (at, _)| at.elapsed() < persist::SHELL_STARTUP);
         let start = start.map(Path::to_path_buf).or_else(home_dir);
         self.spawned.insert(view.entity_id(), (Instant::now(), start));
     }
@@ -353,7 +354,7 @@ impl WindowView {
     /// 把当前布局交给存档，有变化时稍后写进文件。
     pub(super) fn save(&self, cx: &mut Context<Self>) {
         let snapshot = self.snapshot(cx);
-        persistence::update(cx.weak_entity(), snapshot, cx);
+        persist::update(cx.weak_entity(), snapshot, cx);
     }
 
     /// 关掉第 `wi` 个 workspace 的第 `ti` 个标签；关掉的是它的当前标签时切到右边那个（没有
@@ -409,7 +410,7 @@ impl WindowView {
             return;
         };
         self.end_sessions(Closing::Pane(pane), cx);
-        crate::agent_alert::dismiss(&super::agents::notification_tag(pane), cx);
+        super::agents::alert::dismiss(&super::agents::notification_tag(pane), cx);
         let shown = self.is_shown(wi, ti);
         let tab = &mut self.workspaces[wi].tabs[ti];
         tab.done.remove(&pane);
@@ -518,7 +519,7 @@ impl WindowView {
     ) -> Option<Entity<TerminalView>> {
         // 目录已经被删掉时 shell 起不来，退回 workspace 的目录，再退回家目录。
         let cwd = self.tab().focused_view().read(cx).cwd();
-        let cwd = persist::start_dir(cwd.as_deref(), &self.workspace().dir);
+        let cwd = format::start_dir(cwd.as_deref(), &self.workspace().dir);
         self.spawn_terminal(cwd.as_deref(), window, cx)
     }
 }

@@ -54,7 +54,7 @@ pub fn install(cx: &mut App) {
     cx.on_action(|_: &Hide, cx| cx.hide());
     cx.on_action(|_: &HideOthers, cx| cx.hide_other_apps());
     cx.on_action(|_: &ShowAll, cx| cx.unhide_other_apps());
-    cx.on_action(|_: &NewWindow, cx| crate::window::open_window(cx, None));
+    cx.on_action(|_: &NewWindow, cx| crate::workspace::open_window(cx, None));
     cx.on_action(|_: &CloseWindow, cx| {
         if let Some(window) = cx.active_window() {
             crate::workspace::close_window(window, cx);

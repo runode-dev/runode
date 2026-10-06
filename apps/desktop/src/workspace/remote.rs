@@ -10,8 +10,9 @@ use gpui::{App, Context, EntityId, Window, WindowHandle};
 use runode_protocol::{ClientMsg, HostMsg, Placement, SessionId};
 use runode_shared_types::pane::Axis;
 
+use super::persist::format;
 use super::{WindowView, agents::reveal, layout_report};
-use crate::{host_client, persist};
+use crate::host_client;
 
 /// 开始收别的进程的请求。
 pub fn serve_requests(cx: &mut App) {
@@ -122,7 +123,7 @@ impl WindowView {
         let (wi, ti) = self.locate(beside)?;
         let near = self.workspaces[wi].tabs[ti].panes[&beside].0.clone();
         let cwd = cwd.or_else(|| near.read(cx).cwd());
-        let cwd = persist::start_dir(cwd.as_deref(), &self.workspaces[wi].dir);
+        let cwd = format::start_dir(cwd.as_deref(), &self.workspaces[wi].dir);
         let view = self.spawn_terminal(cwd.as_deref(), window, cx)?;
         // `spawn` 建的视图当场开好了会话。
         let session = view.read(cx).session_id();

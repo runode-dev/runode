@@ -2,11 +2,8 @@
 
 use gpui::{App, AppContext as _, Bounds, WindowBounds, WindowOptions, px, size};
 
-use crate::{
-    persist::SavedWindow,
-    prespawn::Prespawned,
-    workspace::{self, WindowView},
-};
+use super::{WindowView, persist::format::SavedWindow};
+use crate::{prespawn::Prespawned, workspace};
 
 /// 新窗口的默认选项：屏幕居中的默认大小。
 pub(crate) fn window_options(cx: &App) -> WindowOptions {
