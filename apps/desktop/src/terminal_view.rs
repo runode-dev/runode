@@ -1,7 +1,8 @@
 //! 单个终端会话的 GPUI 视图：输入分发和单元格绘制。
 //!
 //! 这里是 `TerminalView` 本身、它的动作和事件，以及渲染出的元素树。其余按职责分在子模块里：
-//! 建视图、启动 shell 和读输出（`lifecycle`）、按键和鼠标（`input`）、绑定的动作（`actions`）、
+//! 建视图、启动 shell 和读输出（`lifecycle`）、界面这份 VT 的状态机（`screen`）、按键和鼠标
+//! （`input`）、绑定的动作（`actions`）、
 //! 搜索栏（`search`）、灰字建议（`suggestion`）、输入的语法高亮（`highlight`）、
 //! 命令补全菜单（`completion_menu`）、输入法（`ime`）、终端网格元素（`element`），以及画一帧（`paint`）。
 
@@ -13,28 +14,33 @@ mod ime;
 mod input;
 mod lifecycle;
 mod paint;
+mod screen;
 mod search;
 mod suggestion;
 
 use std::{
+    cell::RefCell,
     collections::HashMap,
+    path::PathBuf,
     rc::Rc,
     sync::Arc,
     time::{Duration, Instant},
 };
 
+use futures::channel::mpsc::UnboundedReceiver;
 use gpui::{
     Action, App, Bounds, Context, CursorStyle, Entity, EventEmitter, FocusHandle, Focusable, Font, Hsla, Pixels, Point,
     Render, ShapedLine, Subscription, Task, Window, actions, div, prelude::*, px, rgb,
 };
 use runode_config::Config;
 use runode_protocol::SessionId;
-use runode_shared_types::{color::Rgb, grid::GridSize, session::SessionMeta};
+use runode_shared_types::{color::Rgb, grid::GridSize};
 use runode_terminal::{history, session::Session};
 
-use crate::search_bar::SearchField;
+use crate::{search_bar::SearchField, session_host::LinkEvent};
 use completion_menu::{CompletionMenu, PendingKey};
 use element::TerminalElement;
+use screen::ScreenState;
 
 actions!(
     runode,
@@ -117,14 +123,25 @@ pub enum TerminalEvent {
     Exited,
 }
 
+/// 收宿主发来的事件的一端。读事件的任务和回到显示时主线程上的等待（见 `set_visible`）轮流用它。
+type Events = Rc<RefCell<UnboundedReceiver<LinkEvent>>>;
+
 pub struct TerminalView {
-    session: Session,
+    /// 界面这份 VT 现在的样子，以及宿主公布的会话状态（标题、agent、目录）、视图的尺寸、shell
+    /// 退出了没有，见 `ScreenState`。
+    screen: ScreenState<Session>,
+    /// 收这个会话的事件的一端；重新登记（断开后重连、换会话）时换掉。
+    events: Events,
+    /// 离开显示后等 `HIDE_GRACE` 再丢掉界面这份 VT 的计时器。
+    _hide_timer: Option<Task<()>>,
+    /// 最近画出的默认前景色和背景色；没有界面这份 VT（只看状态、断开）时标签栏和背景用它。
+    colors: (Rgb, Rgb),
+    /// 调用方记着的这个终端的目录，宿主还没报告目录时用，见 `reattach`。
+    start_dir: Option<PathBuf>,
     /// 宿主里的会话。用 `end` 结束它；视图没了只是不再看它，见 `Drop`。
     id: SessionId,
     /// 已经用 `end` 结束了会话，丢掉视图时不再发。
     ended: bool,
-    /// 宿主最近一次公布的这个会话的状态。
-    meta: SessionMeta,
     /// 宿主发来了 `HostMsg::Bell`，还没通知外层，见 `ring_bell`。
     bell_pending: bool,
     /// 已经请宿主启动了 shell。
@@ -191,6 +208,8 @@ pub struct TerminalView {
     _autoscroll: Option<Task<()>>,
     _config_watch: Subscription,
     _appearance_watch: Subscription,
+    /// 别的终端在和宿主断开后点了「在原目录重开」、重新连上了宿主，见 `host_reconnected`。
+    _reconnect_watch: Subscription,
     /// 包住终端和搜索栏的外层：焦点进到其中任何一处都算这个终端获得了焦点。
     pane_focus: FocusHandle,
     _focus_watch: [Subscription; 3],
@@ -216,7 +235,7 @@ impl Focusable for TerminalView {
 
 impl Render for TerminalView {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let background = self.session.frame().background;
+        let (foreground, background) = self.colors();
         self.check_completion();
         // 搜索栏和终端是兄弟节点，不在 `Terminal` 按键上下文里：在搜索栏里打字时，
         // ⌘← 之类映射给程序的快捷键不能生效。
@@ -262,10 +281,55 @@ impl Render for TerminalView {
                     .pb(px(self.config.window_padding_y.1))
                     .on_any_mouse_down(cx.listener(Self::mouse_down))
                     // 程序开了鼠标上报时点击归程序，指针不显示成文本选择的样子。
-                    .cursor(if self.session.mouse_tracking() { CursorStyle::Arrow } else { CursorStyle::IBeam })
+                    .cursor(if self.screen.live().is_some_and(Session::mouse_tracking) {
+                        CursorStyle::Arrow
+                    } else {
+                        CursorStyle::IBeam
+                    })
                     .child(TerminalElement { view: cx.entity() }),
             );
-        div().track_focus(&self.pane_focus).relative().size_full().child(terminal).children(search_bar)
+        let lost = self.screen.is_lost().then(|| self.render_lost_bar(foreground, background, cx));
+        div().track_focus(&self.pane_focus).relative().size_full().child(terminal).children(search_bar).children(lost)
+    }
+}
+
+impl TerminalView {
+    /// 和宿主断开后盖在底部的提示：画面停在最后一屏，以及「在原目录重开」。
+    fn render_lost_bar(&self, foreground: Rgb, background: Rgb, cx: &mut Context<Self>) -> gpui::Stateful<gpui::Div> {
+        let fg = hsla(foreground);
+        div()
+            .id("host-lost")
+            .absolute()
+            .bottom(px(8.))
+            .left(px(8.))
+            .right(px(8.))
+            .px(px(10.))
+            .py(px(6.))
+            .flex()
+            .items_center()
+            .gap(px(8.))
+            .rounded(px(6.))
+            .bg(hsla(background.mix(foreground, 0.1)))
+            .border_1()
+            .border_color(fg.opacity(0.15))
+            .shadow_md()
+            .occlude()
+            .text_size(px(12.))
+            .text_color(fg)
+            .cursor(CursorStyle::Arrow)
+            .child(div().flex_1().min_w_0().child(rust_i18n::t!("host_lost.message").into_owned()))
+            .child(
+                div()
+                    .id("host-lost-reopen")
+                    .flex_none()
+                    .px(px(8.))
+                    .py(px(2.))
+                    .rounded(px(4.))
+                    .bg(fg.opacity(0.1))
+                    .hover(|button| button.bg(fg.opacity(0.2)))
+                    .child(rust_i18n::t!("host_lost.reopen").into_owned())
+                    .on_click(cx.listener(|view, _, window, cx| view.reopen(window, cx))),
+            )
     }
 }
 

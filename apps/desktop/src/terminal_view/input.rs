@@ -10,6 +10,7 @@ use runode_shared_types::{
     grid::GridPoint,
     input::{self, Mods, SelectionAdjust},
 };
+use runode_terminal::session::Session;
 
 use super::TerminalView;
 use crate::keys;
@@ -45,7 +46,7 @@ impl TerminalView {
         let keystroke = &event.keystroke;
         if matches!(keystroke.key.as_str(), "backspace" | "delete")
             && !keystroke.modifiers.modified()
-            && self.session.delete_selection()
+            && self.screen.live_mut().is_some_and(Session::delete_selection)
         {
             cx.stop_propagation();
             cx.notify();
@@ -53,7 +54,7 @@ impl TerminalView {
         }
         // Shift 加方向键等在有选区时用来扩展选区，没有选区时照常发给程序。
         if let Some(adjustment) = selection_adjustment(&event.keystroke)
-            && self.session.adjust_selection(adjustment)
+            && self.screen.shown_mut().is_some_and(|session| session.adjust_selection(adjustment))
         {
             cx.stop_propagation();
             cx.notify();
@@ -85,7 +86,8 @@ impl TerminalView {
         let Some(input) = keys::translate(&event.keystroke) else {
             return;
         };
-        if self.session.key(&input) {
+        // 没在看（重新连上的过程中、和宿主断开了）时按键丢掉。
+        if self.screen.live_mut().is_some_and(|session| session.key(&input)) {
             cx.stop_propagation();
             cx.notify();
         }
@@ -102,9 +104,9 @@ impl TerminalView {
         let lines = wheel_lines(event.delta, metrics.cell.height);
         // 滚轮增量为正表示内容向下移动，即往回滚到历史输出。程序没开鼠标上报时按像素
         // 平滑滚动回滚历史；开着时只能按整行发给程序。
-        if !self.session.mouse_tracking() {
+        if !self.screen.live().is_some_and(Session::mouse_tracking) {
             self.scroll_remainder = 0.;
-            if self.session.scroll_smoothly(lines) {
+            if self.screen.shown_mut().is_some_and(|session| session.scroll_smoothly(lines)) {
                 cx.notify();
             }
             return;
@@ -113,8 +115,10 @@ impl TerminalView {
         let Some(at) = self.grid_point(event.position) else {
             return;
         };
-        self.session.scroll(whole, at, mouse_mods(&event.modifiers));
-        cx.notify();
+        if let Some(session) = self.screen.live_mut() {
+            session.scroll(whole, at, mouse_mods(&event.modifiers));
+            cx.notify();
+        }
     }
 
     /// 窗口坐标换算成网格位置；单元格尺寸还没量出来时为 `None`。
@@ -141,10 +145,13 @@ impl TerminalView {
             return;
         };
         // 程序开了鼠标上报时按键归程序，按住 Shift 照常选择。
-        if self.session.mouse_tracking() && !event.modifiers.shift {
+        if let Some(session) = self.screen.live_mut()
+            && session.mouse_tracking()
+            && !event.modifiers.shift
+        {
             if let Some(button) = mouse_button(event.button) {
                 let mods = mouse_mods(&event.modifiers);
-                self.session.mouse_report(input::MouseAction::Press, Some(button), at, mods);
+                session.mouse_report(input::MouseAction::Press, Some(button), at, mods);
                 self.reporting_press = true;
             }
             return;
@@ -152,10 +159,13 @@ impl TerminalView {
         if event.button != MouseButton::Left {
             return;
         }
+        let Some(session) = self.screen.shown_mut() else {
+            return;
+        };
+        session.select_press(at, double_click_interval());
         self.selecting = true;
         let plain = !event.modifiers.modified() && event.click_count == 1;
         self.click_cell = plain.then(|| grid_cell(at));
-        self.session.select_press(at, double_click_interval());
         cx.notify();
     }
 
@@ -170,7 +180,7 @@ impl TerminalView {
                 return;
             }
             // Option 拖出矩形块。
-            if self.session.select_drag(at, event.modifiers.alt) {
+            if self.screen.shown_mut().is_some_and(|session| session.select_drag(at, event.modifiers.alt)) {
                 self.start_autoscroll(cx);
             } else {
                 self._autoscroll = None;
@@ -180,10 +190,13 @@ impl TerminalView {
         }
         // 没按键的移动只报给指针下的终端；按着键的拖动只报给按下时所在的终端。
         let ours = if event.pressed_button.is_some() { self.reporting_press } else { inside };
-        if ours && self.session.mouse_tracking() {
+        if ours
+            && let Some(session) = self.screen.live_mut()
+            && session.mouse_tracking()
+        {
             let pressed = event.pressed_button.and_then(mouse_button);
             let mods = mouse_mods(&event.modifiers);
-            self.session.mouse_report(input::MouseAction::Motion, pressed, at, mods);
+            session.mouse_report(input::MouseAction::Motion, pressed, at, mods);
         }
     }
 
@@ -195,8 +208,11 @@ impl TerminalView {
             if event.button == MouseButton::Left {
                 self.finish_selecting(at, cx);
                 // 原地单击、没选出东西：在 shell 提示符上时把光标挪到点击处。
-                if self.click_cell.take() == Some(grid_cell(at)) && self.session.selection_text().is_none() {
-                    self.session.click_to_move(at);
+                if self.click_cell.take() == Some(grid_cell(at))
+                    && let Some(session) = self.screen.live_mut()
+                    && session.selection_text().is_none()
+                {
+                    session.click_to_move(at);
                 }
             }
             return;
@@ -204,18 +220,21 @@ impl TerminalView {
         if !std::mem::take(&mut self.reporting_press) {
             return;
         }
-        if self.session.mouse_tracking()
+        if let Some(session) = self.screen.live_mut()
+            && session.mouse_tracking()
             && let Some(button) = mouse_button(event.button)
         {
             let mods = mouse_mods(&event.modifiers);
-            self.session.mouse_report(input::MouseAction::Release, Some(button), at, mods);
+            session.mouse_report(input::MouseAction::Release, Some(button), at, mods);
         }
     }
 
     fn finish_selecting(&mut self, at: GridPoint, cx: &mut Context<Self>) {
         self.selecting = false;
         self._autoscroll = None;
-        self.session.select_release(at);
+        if let Some(session) = self.screen.shown_mut() {
+            session.select_release(at);
+        }
         cx.notify();
     }
 
@@ -228,7 +247,7 @@ impl TerminalView {
             loop {
                 cx.background_executor().timer(AUTOSCROLL_INTERVAL).await;
                 let updated = this.update(cx, |view, cx| {
-                    if view.session.select_autoscroll() {
+                    if view.screen.shown_mut().is_some_and(Session::select_autoscroll) {
                         cx.notify();
                     }
                 });

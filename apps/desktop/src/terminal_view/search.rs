@@ -1,6 +1,7 @@
 //! 终端里的搜索：打开和关闭搜索栏、转发它的事件、切换匹配，以及画右上角的搜索栏。
 
 use gpui::{AppContext as _, Context, CursorStyle, Entity, Focusable, Window, div, prelude::*, px};
+use runode_terminal::session::Session;
 
 use super::{TerminalView, hsla};
 use crate::{
@@ -14,7 +15,7 @@ impl TerminalView {
     }
 
     pub(super) fn search_selection(&mut self, _: &SearchSelection, window: &mut Window, cx: &mut Context<Self>) {
-        if let Some(text) = self.session.selection_text() {
+        if let Some(text) = self.screen.shown().and_then(Session::selection_text) {
             // 搜索只在一行里找，多行选区只取第一行。
             let line = text.lines().next().unwrap_or_default().to_owned();
             self.open_search(Some(line), window, cx);
@@ -33,7 +34,9 @@ impl TerminalView {
             }
         };
         if let Some(query) = query {
-            self.session.search(&query);
+            if let Some(session) = self.screen.shown_mut() {
+                session.search(&query);
+            }
             field.update(cx, |field, cx| field.set_query(query, cx));
         }
         window.focus(&field.focus_handle(cx), cx);
@@ -47,33 +50,41 @@ impl TerminalView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        match event {
-            SearchFieldEvent::Changed(query) => self.session.search(query),
-            SearchFieldEvent::Next => self.session.search_step(false),
-            SearchFieldEvent::Previous => self.session.search_step(true),
-            SearchFieldEvent::Dismiss => self.close_search(window, cx),
+        match (event, self.screen.shown_mut()) {
+            (SearchFieldEvent::Dismiss, _) => self.close_search(window, cx),
+            (SearchFieldEvent::Changed(query), Some(session)) => session.search(query),
+            (SearchFieldEvent::Next, Some(session)) => session.search_step(false),
+            (SearchFieldEvent::Previous, Some(session)) => session.search_step(true),
+            // 没有界面这份 VT 时没有可搜的，回到显示时按搜索栏里的词重新搜，见 `vt_replaced`。
+            (_, None) => {}
         }
         cx.notify();
     }
 
     fn close_search(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.search_field = None;
-        self.session.end_search();
+        if let Some(session) = self.screen.shown_mut() {
+            session.end_search();
+        }
         window.focus(&self.focus_handle, cx);
         cx.notify();
     }
 
     /// 搜索栏开着时切到下一个或上一个匹配；没开时这些键不做事。
     pub(super) fn search_next(&mut self, _: &SearchNext, _: &mut Window, cx: &mut Context<Self>) {
-        if self.search_field.is_some() {
-            self.session.search_step(false);
+        if self.search_field.is_some()
+            && let Some(session) = self.screen.shown_mut()
+        {
+            session.search_step(false);
             cx.notify();
         }
     }
 
     pub(super) fn search_previous(&mut self, _: &SearchPrevious, _: &mut Window, cx: &mut Context<Self>) {
-        if self.search_field.is_some() {
-            self.session.search_step(true);
+        if self.search_field.is_some()
+            && let Some(session) = self.screen.shown_mut()
+        {
+            session.search_step(true);
             cx.notify();
         }
     }
@@ -90,10 +101,10 @@ impl TerminalView {
         field: &Entity<SearchField>,
         cx: &mut Context<Self>,
     ) -> gpui::Stateful<gpui::Div> {
-        let frame = self.session.peek_colors();
+        let frame = self.colors;
         let fg = hsla(frame.0);
         let bar_bg = hsla(frame.1.mix(frame.0, 0.1));
-        let status = match self.session.search_status() {
+        let status = match self.screen.shown().and_then(Session::search_status) {
             Some((_, 0)) if !field.read(cx).query().is_empty() => rust_i18n::t!("search.no_results").into_owned(),
             Some((Some(selected), total)) => format!("{}/{total}", selected + 1),
             Some((None, total)) if total > 0 => format!("-/{total}"),
@@ -149,7 +160,9 @@ impl TerminalView {
                 button("search-previous", "↑")
                     .tooltip(tooltip(rust_i18n::t!("menu.find_previous"), Some(&SearchPrevious), frame.0, frame.1))
                     .on_click(cx.listener(|view, _, _, cx| {
-                        view.session.search_step(true);
+                        if let Some(session) = view.screen.shown_mut() {
+                            session.search_step(true);
+                        }
                         cx.notify();
                     })),
             )
@@ -157,7 +170,9 @@ impl TerminalView {
                 button("search-next", "↓")
                     .tooltip(tooltip(rust_i18n::t!("menu.find_next"), Some(&SearchNext), frame.0, frame.1))
                     .on_click(cx.listener(|view, _, _, cx| {
-                        view.session.search_step(false);
+                        if let Some(session) = view.screen.shown_mut() {
+                            session.search_step(false);
+                        }
                         cx.notify();
                     })),
             )

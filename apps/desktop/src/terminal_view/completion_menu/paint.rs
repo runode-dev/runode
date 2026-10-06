@@ -20,6 +20,7 @@ use runode_shared_types::{
     color::Rgb,
     frame::{Attrs, Frame},
 };
+use runode_terminal::session::Session;
 
 use super::super::{
     Metrics, TerminalView, hsla,
@@ -218,7 +219,9 @@ impl TerminalView {
             }
             return;
         };
-        let ansi = self.session.ansi_colors();
+        let Some(ansi) = self.screen.shown().map(Session::ansi_colors) else {
+            return;
+        };
         let Some(menu) = &mut self.completion else {
             return;
         };

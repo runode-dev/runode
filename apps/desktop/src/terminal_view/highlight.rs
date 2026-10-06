@@ -5,7 +5,7 @@ use std::rc::Rc;
 
 use runode_highlight::Shell;
 use runode_shared_types::color::Rgb;
-use runode_terminal::PromptInput;
+use runode_terminal::{PromptInput, session::Session};
 
 use super::TerminalView;
 
@@ -56,8 +56,11 @@ impl TerminalView {
         let end =
             cells.last().map_or(0, |cell| cell.at + input.text[cell.at..].chars().next().map_or(0, char::len_utf8));
         let text = &input.text[..end];
-        let shell = Shell { path: self.session.shell_path(), names: self.session.shell_names(), ..Default::default() };
-        let spans = runode_highlight::highlight(text, &shell, self.session.prompt_cwd().as_deref());
+        let Some(session) = self.screen.live() else {
+            return;
+        };
+        let shell = Shell { path: session.shell_path(), names: session.shell_names(), ..Default::default() };
+        let spans = runode_highlight::highlight(text, &shell, session.prompt_cwd().as_deref());
         if spans.is_empty() {
             return;
         }
@@ -66,7 +69,7 @@ impl TerminalView {
         for span in spans {
             kinds[span.range].fill(Some(span.kind));
         }
-        let palette = self.session.palette();
+        let palette = session.palette();
         let mut styled: Vec<_> = cells
             .iter()
             .filter_map(|cell| {
@@ -81,6 +84,7 @@ impl TerminalView {
 
     /// 现在该画出来的高亮：视口翻到回滚历史里时屏幕上的不是活动区，不画。
     pub(super) fn visible_highlight(&self) -> Option<Rc<Highlight>> {
-        (self.config.command_highlighting && self.session.viewport_at_bottom()).then(|| self.highlight.clone())
+        (self.config.command_highlighting && self.screen.live().is_some_and(Session::viewport_at_bottom))
+            .then(|| self.highlight.clone())
     }
 }

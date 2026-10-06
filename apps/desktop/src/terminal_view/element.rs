@@ -5,6 +5,7 @@ use gpui::{
     MouseUpEvent, Pixels, Style, Window, prelude::*, relative,
 };
 use runode_shared_types::grid::GridSize;
+use runode_terminal::session::Session;
 
 use super::{TerminalView, paint::paint_frame};
 
@@ -73,10 +74,12 @@ impl Element for TerminalElement {
             if view.adopted_size.take().is_some_and(|adopted| adopted != size) {
                 view.respawn(size, window, cx);
             } else {
-                view.session.resize(size);
+                view.screen.resize(size);
             }
-            // 尺寸已经按实际设好，现在启动 shell；放到这一帧画完再做，启动失败时要关掉终端。
-            if std::mem::take(&mut view.start_pending) {
+            // 尺寸已经按实际设好，现在启动 shell；放到这一帧画完再做，启动失败时要关掉终端。还在等
+            // 宿主给屏幕时实际尺寸还没请宿主改，等看上了（之后还会布局）再启动。
+            if view.start_pending && view.screen.live().is_some() {
+                view.start_pending = false;
                 cx.defer_in(window, |view, _, cx| view.start_now(cx));
             }
             view.grid_origin = bounds.origin;
@@ -122,12 +125,17 @@ impl Element for TerminalElement {
             }
             let metrics = view.metrics(window);
             view.refresh_input();
-            // 绘制时要同时用到帧和 `&mut view`（字形缓存），所以先把帧取出来，画完再放回。
-            let frame = view.session.take_frame();
+            // 绘制时要同时用到帧和 `&mut view`（字形缓存），所以先把帧取出来，画完再放回。没有界面
+            // 这份 VT（只看状态、还在等屏幕、断开时没有屏幕）时只有背景。
+            let Some(frame) = view.screen.shown_mut().map(Session::take_frame) else {
+                return;
+            };
             paint_frame(view, &frame, bounds.origin, metrics, focused, window);
             // 补全菜单盖在终端内容上面。
             view.paint_completion(&frame, metrics, window);
-            view.session.restore_frame(frame);
+            if let Some(session) = view.screen.shown_mut() {
+                session.restore_frame(frame);
+            }
         });
     }
 }

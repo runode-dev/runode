@@ -10,6 +10,7 @@ use gpui::{Context, Keystroke, MouseDownEvent, ScrollWheelEvent, Task};
 use runode_completion::{
     self as completion, Candidate, GeneratorJob, GeneratorResults, Kind, Request, Shell, generators,
 };
+use runode_terminal::session::Session;
 
 use super::{
     ECHO_WAIT, TerminalView,
@@ -158,15 +159,15 @@ impl TerminalView {
     /// 一次没有菜单时的 Tab：光标在提示符输入里、所在命令有规格、光标不在命令名上时由
     /// runode 补全，返回 true；否则返回 false，Tab 交给 shell。
     fn complete_on_tab(&mut self, cx: &mut Context<Self>) -> bool {
+        // 没在看（重新连上的过程中、和宿主断开了）时也不接管，这个键随之丢掉。
         if !self.config.command_completions
             || self.marked_text.is_some()
-            || self.session.has_selection()
-            || !self.session.viewport_at_bottom()
+            || !self.screen.live().is_some_and(|session| !session.has_selection() && session.viewport_at_bottom())
         {
             return false;
         }
         // 全屏程序里、光标不在提示符上时不管回显没回显都直接交给程序，不耽搁这个键。
-        if self.session.prompt_input().is_none() {
+        if self.screen.live().and_then(Session::prompt_input).is_none() {
             return false;
         }
         // 上一次 Tab 还在等回显。
@@ -186,13 +187,16 @@ impl TerminalView {
         let Some(request) = self.completion_request() else {
             return false;
         };
+        let Some(session) = self.screen.live() else {
+            return false;
+        };
         self.completion = Some(CompletionMenu {
             before_word: request.before_word().to_owned(),
             cells_before_cursor: 0,
-            cwd: self.session.cwd(),
+            cwd: session.cwd(),
             shell: Shell {
-                path: self.session.shell_path(),
-                names: self.session.shell_names(),
+                path: session.shell_path(),
+                names: session.shell_names(),
                 usage: completion::usage::current(),
             },
             typed: String::new(),
@@ -216,7 +220,7 @@ impl TerminalView {
 
     /// 从屏幕上读出提示符上的输入，看光标处能不能补全。
     fn completion_request(&self) -> Option<Request> {
-        let input = self.session.prompt_input()?;
+        let input = self.screen.live()?.prompt_input()?;
         Request::new(&input.text, input.cursor)
     }
 
@@ -291,19 +295,23 @@ impl TerminalView {
         match decisive.len() {
             0 => {
                 self.completion = None;
-                self.session.send_text(b"\t");
+                self.send_tab();
             }
             _ if echo_pending => {}
             1 => {
                 let candidate = menu.candidates[decisive[0]].clone();
                 self.completion = None;
                 let edit = request.accept(&candidate);
-                self.session.edit_input(edit.backspace, &edit.text);
+                if let Some(session) = self.screen.live_mut() {
+                    session.edit_input(edit.backspace, &edit.text);
+                }
             }
             _ => {
                 if let Some((from, prefix)) = completion::common_prefix(&menu.candidates, decisive, &menu.typed) {
                     let edit = request.insert_prefix(from, &prefix);
-                    self.session.edit_input(edit.backspace, &edit.text);
+                    if let Some(session) = self.screen.live_mut() {
+                        session.edit_input(edit.backspace, &edit.text);
+                    }
                 }
             }
         }
@@ -334,8 +342,9 @@ impl TerminalView {
 
     /// 刚发出的输入还没回显：之后屏幕上还没有输出，又没过多久。
     fn echo_pending(&self) -> bool {
-        self.session
-            .last_input()
+        self.screen
+            .live()
+            .and_then(Session::last_input)
             .is_some_and(|at| at.elapsed() < ECHO_WAIT && self.output_at.is_none_or(|output| output < at))
     }
 
@@ -356,7 +365,7 @@ impl TerminalView {
         match self.completion_pending.take() {
             Some(PendingKey::Tab) => {
                 if !self.open_completion(cx) {
-                    self.session.send_text(b"\t");
+                    self.send_tab();
                 }
             }
             Some(PendingKey::Accept(candidate, before)) => self.accept_candidate(candidate, before, cx),
@@ -375,7 +384,16 @@ impl TerminalView {
             return;
         };
         let edit = request.accept(&candidate);
-        self.session.edit_input(edit.backspace, &edit.text);
+        if let Some(session) = self.screen.live_mut() {
+            session.edit_input(edit.backspace, &edit.text);
+        }
+    }
+
+    /// 这次 Tab 由 shell 自己处理。
+    fn send_tab(&mut self) {
+        if let Some(session) = self.screen.live_mut() {
+            session.send_text(b"\t");
+        }
     }
 
     /// 菜单上次画在网格里的第几行；点击或滚轮落在 `position` 上时用。
@@ -421,7 +439,8 @@ impl TerminalView {
     /// 菜单现在该不该显示；不该时（视口离开了底部、有了选区、关掉了这项配置）直接关掉。
     pub(super) fn check_completion(&mut self) {
         if self.completion.is_some()
-            && (!self.config.command_completions || self.session.has_selection() || !self.session.viewport_at_bottom())
+            && (!self.config.command_completions
+                || !self.screen.live().is_some_and(|session| !session.has_selection() && session.viewport_at_bottom()))
         {
             self.completion = None;
         }

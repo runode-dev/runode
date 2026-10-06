@@ -137,8 +137,11 @@ impl WindowView {
             }
         }
         if !focus {
+            // 旁边那个终端在后台标签里时没有界面这份 VT，尺寸是它最后量出的。
             let size = near.read(cx).size();
             view.update(cx, |view, cx| view.start_at(size, cx));
+            // 开在不显示的标签里的，到时丢掉界面这份 VT。
+            self.sync_visibility(window, cx);
         }
         self.save(cx);
         cx.notify();

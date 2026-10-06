@@ -37,8 +37,10 @@ impl EntityInputHandler for TerminalView {
 
     fn replace_text_in_range(&mut self, _: Option<Range<usize>>, text: &str, _: &mut Window, cx: &mut Context<Self>) {
         self.marked_text = None;
-        if !text.is_empty() {
-            self.session.commit_text(text);
+        if !text.is_empty()
+            && let Some(session) = self.screen.live_mut()
+        {
+            session.commit_text(text);
         }
         cx.notify();
     }

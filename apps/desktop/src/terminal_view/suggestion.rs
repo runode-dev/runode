@@ -2,7 +2,7 @@
 
 use std::time::Instant;
 
-use runode_terminal::{PromptInput, history};
+use runode_terminal::{PromptInput, history, session::Session};
 
 use super::{ECHO_WAIT, Suggestion, TerminalView};
 
@@ -19,7 +19,8 @@ impl TerminalView {
             self.history_generation = generation;
         }
         let wanted = self.config.command_suggestions || self.config.command_highlighting;
-        let input = if wanted { self.session.prompt_input() } else { None };
+        // 只在正看着时读：冻结着的屏幕上的输入接不上 shell 了。
+        let input = if wanted { self.screen.live().and_then(Session::prompt_input) } else { None };
         self.refresh_suggestion(input.as_ref());
         self.refresh_highlight(input.as_ref());
     }
@@ -34,7 +35,7 @@ impl TerminalView {
             self.suggestion = None;
             return;
         };
-        let cwd = self.session.prompt_cwd();
+        let cwd = self.screen.live().and_then(Session::prompt_cwd);
         let rest = self.suggester.suggest(&history::shared(), input.before_cursor(), cwd.as_deref());
         self.suggestion = rest.map(|rest| Suggestion { rest, read_at: Instant::now() });
     }
@@ -45,8 +46,7 @@ impl TerminalView {
             self.config.command_suggestions
                 && self.completion.is_none()
                 && self.marked_text.is_none()
-                && !self.session.has_selection()
-                && self.session.viewport_at_bottom()
+                && self.screen.live().is_some_and(|session| !session.has_selection() && session.viewport_at_bottom())
         })
     }
 
@@ -57,19 +57,25 @@ impl TerminalView {
         if self.input_changed {
             self.refresh_input();
         }
-        // 程序把光标藏起来时建议也不画，同样不接受。
-        if self.session.frame().cursor.is_none() {
+        // 程序把光标藏起来时建议也不画，同样不接受；没在看时也不接受。
+        if self.screen.live_mut().is_none_or(|session| session.frame().cursor.is_none()) {
             return false;
         }
         let Some(suggestion) = self.visible_suggestion() else {
             return false;
         };
-        if self.session.last_input().is_some_and(|at| at > suggestion.read_at && at.elapsed() < ECHO_WAIT) {
+        let last_input = self.screen.live().and_then(Session::last_input);
+        if last_input.is_some_and(|at| at > suggestion.read_at && at.elapsed() < ECHO_WAIT) {
             return false;
         }
         let text = if word { history::next_word(&suggestion.rest) } else { suggestion.rest.as_str() };
         let text = text.to_owned();
-        self.session.send_text(text.as_bytes());
-        true
+        match self.screen.live_mut() {
+            Some(session) => {
+                session.send_text(text.as_bytes());
+                true
+            }
+            None => false,
+        }
     }
 }

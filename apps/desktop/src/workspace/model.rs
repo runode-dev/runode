@@ -292,6 +292,7 @@ impl WindowView {
         workspace.tabs[ix].bell = false;
         workspace.tab_scroll.scroll_to_item(ix);
         self.start_shown(cx);
+        self.sync_visibility(window, cx);
         window.focus(&self.tab().focused_view().focus_handle(cx), cx);
         self.sync_window_title(window, cx);
         self.mark_seen(window, cx);
@@ -308,6 +309,22 @@ impl WindowView {
             view.update(cx, |view, cx| view.start(cx));
             // shell 现在才开始读启动配置，存档时这段时间仍记起始目录。
             self.record_spawn(&view, start.as_deref());
+        }
+    }
+
+    /// 告诉窗口里的每个终端它显示着没有：当前 workspace 当前标签里的分屏都算显示着（被放大的
+    /// 分屏挡住的也算，取消放大时要马上画得出来），其余的离开显示一段时间后丢掉界面这份 VT、只看
+    /// 状态，见 `TerminalView::set_visible`。显示的标签变了、往不显示的标签里加了终端时调。
+    pub(super) fn sync_visibility(&self, window: &mut Window, cx: &mut Context<Self>) {
+        for (wi, workspace) in self.workspaces.iter().enumerate() {
+            for (ti, tab) in workspace.tabs.iter().enumerate() {
+                let shown = self.is_shown(wi, ti);
+                for (view, _) in tab.panes.values() {
+                    if view.read(cx).visible() != shown {
+                        view.update(cx, |view, cx| view.set_visible(shown, window, cx));
+                    }
+                }
+            }
         }
     }
 
