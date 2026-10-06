@@ -1,11 +1,12 @@
 //! 编进二进制的界面资源：`svg()`、`img()` 这类元素按路径向 GPUI 要文件，GPUI 再来这里取。
-//! 文件树的彩色类型图标数量多，单独列在 `file_icons::FILES`，这里一并查。
+//! 文件树的彩色类型图标和 agent 的 logo 数量多，单独列在 `file_icons::FILES` 和
+//! `window::AGENT_LOGO_FILES`，这里一并查。
 
 use std::borrow::Cow;
 
 use gpui::{AssetSource, SharedString};
 
-use crate::ui::file_icons;
+use crate::{ui::file_icons, window};
 
 /// 侧栏开关的图标。
 pub const SIDEBAR_ICON: &str = "icons/sidebar.svg";
@@ -43,6 +44,21 @@ pub const VIEW_LIST_ICON: &str = "icons/view-list.svg";
 pub const DIFF_ICON: &str = "icons/diff.svg";
 pub const ARROW_UP_ICON: &str = "icons/arrow-up.svg";
 pub const ARROW_DOWN_ICON: &str = "icons/arrow-down.svg";
+/// 卡片样式下标题栏左边这台机器的图标：笔记本或者台式机。
+pub const LAPTOP_ICON: &str = "icons/laptop.svg";
+pub const DESKTOP_ICON: &str = "icons/desktop.svg";
+/// 卡片样式下分屏标题条上的图标：前台不是 agent 时的终端图标，以及右边向右、向下分屏，放大、
+/// 还原和关闭分屏的按钮。
+pub const TERMINAL_ICON: &str = "icons/terminal.svg";
+pub const SPLIT_RIGHT_ICON: &str = "icons/split-right.svg";
+pub const SPLIT_DOWN_ICON: &str = "icons/split-down.svg";
+pub const MAXIMIZE_ICON: &str = "icons/maximize.svg";
+pub const MINIMIZE_ICON: &str = "icons/minimize.svg";
+pub const CLOSE_ICON: &str = "icons/close.svg";
+/// 卡片样式下标签图标叠里代表 shell 和普通程序的那块：深色底上的提示符。
+pub const PROMPT_ICON: &str = "icons/prompt.svg";
+/// 卡片样式下 agent 等你回答时的标记：像素画的问号。
+pub const PIXEL_QUESTION_ICON: &str = "icons/pixel-question.svg";
 
 const FILES: &[(&str, &[u8])] = &[
     (SIDEBAR_ICON, include_bytes!("../assets/icons/sidebar.svg")),
@@ -72,10 +88,20 @@ const FILES: &[(&str, &[u8])] = &[
     (DIFF_ICON, include_bytes!("../assets/icons/diff.svg")),
     (ARROW_UP_ICON, include_bytes!("../assets/icons/arrow-up.svg")),
     (ARROW_DOWN_ICON, include_bytes!("../assets/icons/arrow-down.svg")),
+    (LAPTOP_ICON, include_bytes!("../assets/icons/laptop.svg")),
+    (DESKTOP_ICON, include_bytes!("../assets/icons/desktop.svg")),
+    (TERMINAL_ICON, include_bytes!("../assets/icons/terminal.svg")),
+    (SPLIT_RIGHT_ICON, include_bytes!("../assets/icons/split-right.svg")),
+    (SPLIT_DOWN_ICON, include_bytes!("../assets/icons/split-down.svg")),
+    (MAXIMIZE_ICON, include_bytes!("../assets/icons/maximize.svg")),
+    (MINIMIZE_ICON, include_bytes!("../assets/icons/minimize.svg")),
+    (CLOSE_ICON, include_bytes!("../assets/icons/close.svg")),
+    (PROMPT_ICON, include_bytes!("../assets/icons/prompt.svg")),
+    (PIXEL_QUESTION_ICON, include_bytes!("../assets/icons/pixel-question.svg")),
 ];
 
 fn all_files() -> impl Iterator<Item = &'static (&'static str, &'static [u8])> {
-    FILES.iter().chain(file_icons::FILES)
+    FILES.iter().chain(file_icons::FILES).chain(window::AGENT_LOGO_FILES)
 }
 
 pub struct Assets;

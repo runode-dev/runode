@@ -8,7 +8,7 @@ use runode_shared_types::{
     shell::{IntegrationMode, Shell},
 };
 
-use crate::{CellHeight, Config, PreviewClick};
+use crate::{CellHeight, Config, PreviewClick, WindowStyle};
 
 impl Config {
     /// `key` 在这份配置里的值，按配置文件的写法每项一行，写回配置文件再读进来得到同样的值；
@@ -29,6 +29,13 @@ impl Config {
             },
             "window-padding-x" => vec![pair(self.window_padding_x)],
             "window-padding-y" => vec![pair(self.window_padding_y)],
+            "window-style" => vec![
+                match self.window_style {
+                    WindowStyle::Cards => "cards",
+                    WindowStyle::Classic => "classic",
+                }
+                .into(),
+            ],
             "file-tree-font-size" => vec![self.file_tree_font_size.to_string()],
             "file-tree-preview-click" => vec![
                 match self.file_tree_preview_click {

@@ -2,13 +2,15 @@
 //! 操作某个分屏时右上角的驱动标记。
 
 use std::{
+    borrow::Cow,
     collections::HashMap,
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
 use gpui::{
-    AnyElement, App, Context, CursorStyle, Div, EntityId, ExternalPaths, MouseButton, MouseDownEvent, MouseMoveEvent,
-    SharedString, StyleRefinement, Window, canvas, div, prelude::*, px, relative,
+    Action, AnyElement, App, Context, CursorStyle, Div, EntityId, ExternalPaths, Focusable, FontWeight, MouseButton,
+    MouseDownEvent, MouseMoveEvent, SharedString, Stateful, StyleRefinement, Window, canvas, div, prelude::*, px,
+    relative, svg,
 };
 use runode_protocol::SessionId;
 use runode_shared_types::{
@@ -18,11 +20,24 @@ use runode_shared_types::{
     session::{DriveAction, Driver},
 };
 
-use super::{DIVIDER_GRAB_WIDTH, Divider, WindowView, files::DraggedFile, model::Tab};
-use crate::ui::hsla;
+use super::{
+    AGENT_MARK_WIDTH, CARD_GAP, ClosePane, DIVIDER_GRAB_WIDTH, Divider, NewSplitDown, NewSplitRight,
+    PANE_HEADER_HEIGHT, TogglePaneZoom, WindowView,
+    agents::logo::agent_logo,
+    card, cards,
+    files::DraggedFile,
+    model::Tab,
+    titlebar::{icon_toggle, pane_label, styled_agent_mark},
+};
+use crate::{
+    assets::{CLOSE_ICON, MAXIMIZE_ICON, MINIMIZE_ICON, SPLIT_DOWN_ICON, SPLIT_RIGHT_ICON, TERMINAL_ICON},
+    ui::{hsla, tooltip::tooltip},
+};
 
 /// 没有焦点的分屏蒙上一层背景色，这是蒙层的不透明度。
 const UNFOCUSED_DIM: f32 = 0.3;
+/// 卡片样式下分屏比这窄时标题条上不放按钮，标题留着位置；分屏、放大和关闭照样能用快捷键和菜单。
+const PANE_BUTTONS_MIN_WIDTH: f32 = 240.;
 /// 驱动标记从最近一次操作起显示这么久，之后自己消失。
 const DRIVER_SHOWN_MS: u64 = 10_000;
 
@@ -178,9 +193,10 @@ impl WindowView {
         let dimmed = !tab.zoomed && !tab.root.is_leaf() && id != tab.focused;
         let layout = self.layout.clone();
         let badge = badges.get(&id).map(|text| driver_badge(text.clone(), fg, bg));
-        div()
+        let cards = cards(cx);
+        let terminal = div()
             .relative()
-            .size_full()
+            .when(!cards, |terminal| terminal.size_full())
             // 终端自己没变时复用上一帧画好的内容：标题栏和侧栏的转圈每一下都会重画整个窗口，
             // 不缓存的话每一下都要把所有终端格子重新排一遍。
             .child(view.cached(StyleRefinement::default().size_full()))
@@ -203,8 +219,163 @@ impl WindowView {
             }))
             .on_drop(cx.listener(move |this, dropped: &ExternalPaths, window, cx| {
                 this.drop_paths_on_pane(id, dropped.paths(), window, cx);
-            }))
+            }));
+        if !cards {
+            return terminal.into_any_element();
+        }
+        // 卡片：上面是标题条，下面是终端。终端四周留一点，它的方角落在卡片的圆角里面。终端用四边
+        // 定位撑满标题条下面的部分：百分比的高度在这里会按整张卡片算，比剩下的高出一个标题条。
+        let group = SharedString::from(format!("pane-{}", id.as_u64()));
+        let inset = px(4.);
+        card(hsla(fg), hsla(bg))
+            .group(group.clone())
+            .size_full()
+            .flex()
+            .flex_col()
+            .child(self.render_pane_header(tab, id, group, fg, bg, cx))
+            .child(
+                div()
+                    .relative()
+                    .flex_1()
+                    .min_h_0()
+                    .child(terminal.absolute().top_0().left(inset).right(inset).bottom(inset)),
+            )
             .into_any_element()
+    }
+
+    /// 卡片样式下分屏顶上的标题条：agent 的状态标记（前台不是 agent 时是终端图标）和终端标题，
+    /// 右边是向右、向下分屏，放大或还原，关闭分屏的按钮，当前分屏一直显示，别的分屏悬停时显示；
+    /// 分屏窄于 `PANE_BUTTONS_MIN_WIDTH` 时不放。
+    /// 点标题条切到这个分屏，双击放大或还原。
+    fn render_pane_header(
+        &self,
+        tab: &Tab,
+        id: EntityId,
+        group: SharedString,
+        fg: Rgb,
+        bg: Rgb,
+        cx: &mut Context<Self>,
+    ) -> Stateful<Div> {
+        let split = !tab.root.is_leaf();
+        let current = id == tab.focused;
+        // 宽度取上一帧画出来的；还没画过时当它够宽。
+        let narrow =
+            self.layout.borrow().panes.get(&id).is_some_and(|bounds| bounds.size.width < px(PANE_BUTTONS_MIN_WIDTH));
+        let (name, dir) = pane_label(tab.panes[&id].0.read(cx));
+        let fg_hsla = hsla(fg);
+        // 有 logo 的 agent：前面放 logo，状态标记跟在标题后面；没有 logo 的 agent 状态标记放前面。
+        let mark = tab.pane_mark(id, cx);
+        let logo = mark.and_then(|mark| agent_logo(mark.kind, px(14.), fg_hsla.opacity(0.85)));
+        let trailing_mark = logo.is_some().then_some(mark).flatten();
+        let icon = match (logo, mark) {
+            (Some(logo), _) => logo,
+            (None, Some(mark)) => styled_agent_mark(mark, ("pane-agent", id), fg_hsla, true),
+            (None, None) => div()
+                .flex_none()
+                .w(px(AGENT_MARK_WIDTH + 2.))
+                .flex()
+                .justify_center()
+                .child(svg().path(TERMINAL_ICON).size(px(14.)).text_color(fg_hsla.opacity(0.6)))
+                .into_any_element(),
+        };
+        type Handler = fn(&mut WindowView, EntityId, &mut Window, &mut Context<WindowView>);
+        let button =
+            |key: &'static str, icon: &'static str, text: Cow<'static, str>, action: &dyn Action, handler: Handler| {
+                icon_toggle(key, icon, 13., false, fg, bg)
+                    .flex_none()
+                    .size(px(22.))
+                    .tooltip(tooltip(text, Some(action), fg, bg))
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(move |this, _, window, cx| {
+                            cx.stop_propagation();
+                            handler(this, id, window, cx);
+                        }),
+                    )
+            };
+        let (zoom_icon, zoom_text) = if tab.zoomed {
+            (MINIMIZE_ICON, rust_i18n::t!("tooltip.restore_split"))
+        } else {
+            (MAXIMIZE_ICON, rust_i18n::t!("menu.zoom_split"))
+        };
+        let buttons = div()
+            .flex_none()
+            .flex()
+            .gap(px(2.))
+            .child(button(
+                "pane-split-right",
+                SPLIT_RIGHT_ICON,
+                rust_i18n::t!("menu.split_right"),
+                &NewSplitRight,
+                |this, id, window, cx| {
+                    this.focus_pane_from_header(id, window, cx);
+                    this.new_split_right(&NewSplitRight, window, cx);
+                },
+            ))
+            .child(button(
+                "pane-split-down",
+                SPLIT_DOWN_ICON,
+                rust_i18n::t!("menu.split_down"),
+                &NewSplitDown,
+                |this, id, window, cx| {
+                    this.focus_pane_from_header(id, window, cx);
+                    this.new_split_down(&NewSplitDown, window, cx);
+                },
+            ))
+            .when(split, |buttons| {
+                buttons.child(button("pane-zoom", zoom_icon, zoom_text, &TogglePaneZoom, |this, id, window, cx| {
+                    this.focus_pane_from_header(id, window, cx);
+                    this.toggle_pane_zoom(&TogglePaneZoom, window, cx);
+                }))
+            })
+            .child(button(
+                "pane-close",
+                CLOSE_ICON,
+                rust_i18n::t!("tooltip.close_split"),
+                &ClosePane,
+                |this, id, window, cx| {
+                    this.close_pane_by_id(id, window, cx);
+                },
+            ))
+            // 不能用 display 切换，见 `render_tab` 里关闭按钮的说明。
+            .when(!(current && split), |buttons| buttons.invisible().group_hover(group, |buttons| buttons.visible()));
+        div()
+            .id(("pane-header", id))
+            .flex_none()
+            .h(px(PANE_HEADER_HEIGHT))
+            .pl(px(10.))
+            .pr(px(6.))
+            .flex()
+            .items_center()
+            .gap(px(6.))
+            .text_size(px(12.))
+            .font_weight(FontWeight::MEDIUM)
+            .text_color(fg_hsla.opacity(if current || !split { 0.9 } else { 0.55 }))
+            .child(icon)
+            .child(div().flex_shrink_0().max_w(relative(0.6)).truncate().child(name))
+            .children(dir.map(|dir| div().min_w_0().truncate().text_color(fg_hsla.opacity(0.45)).child(dir)))
+            .children(trailing_mark.map(|mark| styled_agent_mark(mark, ("pane-agent", id), fg_hsla, true)))
+            .child(div().flex_1())
+            .children((!narrow).then_some(buttons))
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(move |this, event: &MouseDownEvent, window, cx| {
+                    cx.stop_propagation();
+                    this.focus_pane_from_header(id, window, cx);
+                    if event.click_count >= 2 {
+                        this.toggle_pane_zoom(&TogglePaneZoom, window, cx);
+                    }
+                }),
+            )
+    }
+
+    /// 在分屏的标题条上点了一下：切到这个分屏。已经是当前分屏时不动，放大着也不还原。
+    fn focus_pane_from_header(&mut self, id: EntityId, window: &mut Window, cx: &mut Context<Self>) {
+        if self.tab().focused == id {
+            window.focus(&self.tab().focused_view().focus_handle(cx), cx);
+        } else {
+            self.focus_pane_in_active_tab(id, window, cx);
+        }
     }
 
     fn render_node(
@@ -224,7 +395,11 @@ impl WindowView {
         let horizontal = axis == Axis::Horizontal;
         let first = self.render_node(tab, &split.first, badges, fg, bg, cx);
         let second = self.render_node(tab, &split.second, badges, fg, bg, cx);
-        let line = hsla(fg).opacity(0.15);
+        // 卡片样式下两张卡片之间空出 `CARD_GAP`，空隙本身就是分隔线；经典样式下是一像素的线。
+        let cards = cards(cx);
+        let line = if cards { hsla(fg).opacity(0.) } else { hsla(fg).opacity(0.15) };
+        let gap = if cards { CARD_GAP } else { 1. };
+        let grab = if cards { CARD_GAP } else { DIVIDER_GRAB_WIDTH };
         let layout = self.layout.clone();
         div()
             .relative()
@@ -247,7 +422,7 @@ impl WindowView {
                 div()
                     .flex_none()
                     .bg(line)
-                    .map(|divider| if horizontal { divider.w(px(1.)).h_full() } else { divider.h(px(1.)).w_full() }),
+                    .map(|divider| if horizontal { divider.w(px(gap)).h_full() } else { divider.h(px(gap)).w_full() }),
             )
             .child(div().flex_1().min_w_0().min_h_0().child(second))
             .child(
@@ -270,17 +445,17 @@ impl WindowView {
                             handle
                                 .top_0()
                                 .h_full()
-                                .w(px(DIVIDER_GRAB_WIDTH))
+                                .w(px(grab))
                                 .left(relative(ratio))
-                                .ml(px(-DIVIDER_GRAB_WIDTH / 2.))
+                                .ml(px((gap - grab) / 2.))
                                 .cursor(CursorStyle::ResizeLeftRight)
                         } else {
                             handle
                                 .left_0()
                                 .w_full()
-                                .h(px(DIVIDER_GRAB_WIDTH))
+                                .h(px(grab))
                                 .top(relative(ratio))
-                                .mt(px(-DIVIDER_GRAB_WIDTH / 2.))
+                                .mt(px((gap - grab) / 2.))
                                 .cursor(CursorStyle::ResizeUpDown)
                         }
                     })
@@ -326,18 +501,30 @@ impl WindowView {
                 let (id, axis) = match divider {
                     Divider::Split(id, axis) => (id, axis),
                     Divider::Sidebar => {
-                        this.resize_sidebar(f32::from(event.position.x));
+                        // 卡片样式下分隔线落在侧栏和卡片之间的空隙中间。
+                        let spacing = if cards(cx) { CARD_GAP / 2. } else { 0. };
+                        this.resize_sidebar(f32::from(event.position.x) - spacing);
                         cx.notify();
                         return;
                     }
                     Divider::Preview | Divider::Git | Divider::Files => {
                         let viewport = f32::from(window.viewport_size().width);
-                        this.resize_right_panel(divider, f32::from(event.position.x), viewport);
+                        // 卡片样式下分隔线和窗口右边之间还有卡片的间距，按经典样式算宽度前先扣掉。
+                        let widths = this.right_panel_widths(viewport);
+                        let spacing = if cards(cx) {
+                            this.right_divider_offset(divider, widths, true)
+                                - this.right_divider_offset(divider, widths, false)
+                        } else {
+                            0.
+                        };
+                        this.resize_right_panel(divider, f32::from(event.position.x), viewport - spacing);
                         cx.notify();
                         return;
                     }
                     Divider::GitGraph => {
-                        let viewport = f32::from(window.viewport_size().height);
+                        // 卡片样式下面板的卡片底下离窗口底边还有一段间距。
+                        let spacing = if cards(cx) { CARD_GAP } else { 0. };
+                        let viewport = f32::from(window.viewport_size().height) - spacing;
                         this.resize_git_graph(f32::from(event.position.y), viewport);
                         cx.notify();
                         return;

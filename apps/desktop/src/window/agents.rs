@@ -1,8 +1,9 @@
 //! agent 的状态标记和提醒：在 agent 自己的状态之外记下「干完了、用户还没看」（done），按
 //! 等回答、done、工作中、空闲的优先级汇总到标签、标题栏和侧栏；用户没在看时发通知、出提示音；
-//! 列出所有窗口里的 agent，以及跳到某个 agent 的分屏。
+//! 列出所有窗口里的 agent，以及跳到某个 agent 的分屏。各家 agent 的 logo 在 `logo`。
 
 pub(super) mod alert;
+pub(crate) mod logo;
 
 use std::time::Instant;
 

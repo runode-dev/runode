@@ -15,6 +15,7 @@ config:
   adjust_cell_height: 字元格高度的調整量：像素（例如 2、-1）或百分比（例如 10%），留空表示不調整。
   window_padding_x: 左右內距：一個數表示兩邊相同，或寫成 左,右，單位是點。
   window_padding_y: 上下內距：一個數表示兩邊相同，或寫成 上,下，單位是點。
+  window_style: 視窗的樣子：cards（卡片，預設）或 classic（經典）。cards 時每個分割畫面和右側面板各是一張帶標題列的圓角卡片，襯在深一階的外框上，標題列顯示這台 Mac 的名稱和膠囊樣式的分頁；classic 時終端機鋪滿視窗，分割畫面之間一條細線。
   file_tree_font_size: 右側檔案樹的字級：正數，單位是點。
   file_tree_preview_click: 檔案樹裡怎樣在預覽欄開啟檔案：single（按一下，預設）或 double（按兩下）。single 時按一下開成暫時分頁，再開啟別的檔案時會被換掉，按兩下則固定下來；double 時按兩下開成固定分頁。
   preview_font_size: 預覽欄的字級：正數，單位是點。

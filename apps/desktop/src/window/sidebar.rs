@@ -7,12 +7,12 @@ use gpui::{
 use runode_shared_types::color::Rgb;
 
 use super::{
-    AGENT_MARK_WIDTH, DIVIDER_GRAB_WIDTH, Divider, NewWorkspace, RenameWorkspace, Renaming, SelectLastWorkspace,
-    SelectWorkspace, TAB_CLOSE_SIZE, TITLEBAR_HEIGHT, TRAFFIC_LIGHTS_WIDTH, ToggleSidebar, WindowView, background,
-    divider_color, drag_window,
+    AGENT_MARK_WIDTH, CARD_GAP, DIVIDER_GRAB_WIDTH, Divider, NewWorkspace, RenameWorkspace, Renaming,
+    SelectLastWorkspace, SelectWorkspace, TAB_CLOSE_SIZE, TITLEBAR_HEIGHT, TRAFFIC_LIGHTS_WIDTH, ToggleSidebar,
+    WindowView, background, cards, divider_color, drag_window,
     inline_edit::InlineEdit,
     model::{WorkspaceId, display_dir},
-    titlebar::{agent_mark, close_button, drag_chip, icon_toggle, shortcut_hint},
+    titlebar::{close_button, drag_chip, icon_toggle, shortcut_hint, styled_agent_mark},
 };
 use crate::{
     assets::SIDEBAR_ICON,
@@ -72,12 +72,14 @@ impl WindowView {
     /// 侧栏右边的分隔线只有一像素宽，在它两侧放一条透明的把手供拖动。盖在窗口的最上层，
     /// 伸进终端区的一半才能先于终端接到鼠标。
     pub(super) fn render_sidebar_handle(&self, cx: &mut Context<Self>) -> Stateful<Div> {
+        // 卡片样式下分隔线落在侧栏和卡片之间的空隙中间。
+        let spacing = if cards(cx) { CARD_GAP / 2. } else { 0. };
         div()
             .id("sidebar-divider")
             .absolute()
             .top_0()
             .h_full()
-            .left(px(self.sidebar_width() - DIVIDER_GRAB_WIDTH / 2.))
+            .left(px(self.sidebar_width() + spacing - DIVIDER_GRAB_WIDTH / 2.))
             .w(px(DIVIDER_GRAB_WIDTH))
             .cursor(CursorStyle::ResizeLeftRight)
             .on_mouse_down(
@@ -129,9 +131,10 @@ impl WindowView {
             .h_full()
             .flex()
             .flex_col()
-            .bg(hsla(bg.mix(fg, 0.03)))
-            .border_r_1()
-            .border_color(divider_color(hsla(fg)))
+            // 卡片样式下侧栏直接画在外框上。
+            .when(!cards(cx), |sidebar| {
+                sidebar.bg(hsla(bg.mix(fg, 0.03))).border_r_1().border_color(divider_color(hsla(fg)))
+            })
             .text_size(px(12.))
             // 顶上这条放红绿灯，和标题栏一样能拖动窗口、双击缩放，比标题栏多留一点，第一行
             // 不贴着红绿灯；全屏时没有红绿灯。
@@ -170,7 +173,7 @@ impl WindowView {
         let group = SharedString::from(format!("workspace-{ix}"));
         let renaming = self.renaming.as_ref().filter(|renaming| renaming.id == id);
         let mark = match workspace.mark(cx) {
-            Some(mark) => agent_mark(mark, ("workspace-agent", ix), fg),
+            Some(mark) => styled_agent_mark(mark, ("workspace-agent", ix), fg, cards(cx)),
             None => div().flex_none().w(px(AGENT_MARK_WIDTH)).into_any_element(),
         };
         let name: AnyElement = match renaming {

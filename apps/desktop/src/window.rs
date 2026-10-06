@@ -10,7 +10,11 @@
 //! 就地输入框（`inline_edit`），开窗口（`open`），存档（`persist`，存档文件的格式在
 //! `persist::format`），侧栏里没在窗口里显示的后台会话（`background`），退出和关窗口时会话怎么办
 //! （`quit`），以及别的进程经宿主请 app 开终端、切到某个终端、问各个终端摆在哪（`remote`、
-//! `layout_report`），以及一次在当前分屏旁开几个分屏（`arrange`）。
+//! `layout_report`），一次在当前分屏旁开几个分屏（`arrange`），以及卡片样式下标题栏左边的这台
+//! 机器（`machine`）。
+//!
+//! 窗口有两种样子，按配置的 `WindowStyle` 画：卡片样式（`render_cards_body`）和经典样式
+//! （`render_classic_body`）。
 
 mod actions;
 mod agent_picker;
@@ -22,6 +26,7 @@ mod files;
 mod git_panel;
 mod inline_edit;
 mod layout_report;
+mod machine;
 mod model;
 mod open;
 mod panes;
@@ -37,18 +42,23 @@ use std::{cell::RefCell, collections::HashMap, path::PathBuf, rc::Rc, time::Inst
 
 use futures::StreamExt as _;
 use gpui::{
-    Action, App, Context, EntityId, FocusHandle, Focusable, MouseButton, MouseDownEvent, Render, ScrollHandle,
-    SharedString, Subscription, Task, Window, WindowBounds, actions, div, prelude::*, px,
+    Action, AnyElement, App, BoxShadow, Context, EntityId, FocusHandle, Focusable, Hsla, MouseButton, MouseDownEvent,
+    Render, ScrollHandle, SharedString, Subscription, Task, Window, WindowBounds, actions, div, point, prelude::*, px,
 };
-use runode_shared_types::pane::{Axis, Direction, SplitId};
+use runode_config::WindowStyle;
+use runode_shared_types::{
+    color::Rgb,
+    pane::{Axis, Direction, SplitId},
+};
 
-pub(crate) use agents::reveal_notified;
+pub(crate) use agents::{logo::FILES as AGENT_LOGO_FILES, reveal_notified};
 pub use arrange::ArrangePanes;
 pub use background::watch as watch_background;
 pub use files::{
     CollapseSelectedFile, CopyPath, CopyRelativePath, DeleteFile, ExpandSelectedFile, FocusTerminal, OpenSelectedFile,
     RenameFile, RevealInFinder, SelectFirstFile, SelectLastFile, SelectNextFile, SelectPreviousFile,
 };
+pub use machine::load as load_machine;
 pub(crate) use open::{open_window, open_window_with};
 pub use persist::{install, saved_window_options};
 pub use quit::{
@@ -142,6 +152,47 @@ const DIVIDER_GRAB_WIDTH: f32 = 6.;
 /// 面板之间、标题下面和标签之间这些分隔线的颜色：前景色调淡，各处一样深。
 fn divider_color(fg: gpui::Hsla) -> gpui::Hsla {
     fg.opacity(0.09)
+}
+
+/// 卡片样式下卡片的圆角，卡片之间、卡片到窗口边的间距，分屏顶上标题条的高度。
+const CARD_RADIUS: f32 = 10.;
+const CARD_GAP: f32 = 8.;
+const PANE_HEADER_HEIGHT: f32 = 30.;
+/// 卡片样式下标题栏里标签条的高度，标签是条里的胶囊，上下各留 2 点。
+const TAB_TRACK_HEIGHT: f32 = 28.;
+
+/// 窗口用卡片样式，见 `WindowStyle`。
+fn cards(cx: &App) -> bool {
+    cx.global::<AppConfig>().0.window_style == WindowStyle::Cards
+}
+
+/// 背景比前景亮，是浅色主题。
+fn is_light(fg: Rgb, bg: Rgb) -> bool {
+    let luma = |c: Rgb| 0.299 * f32::from(c.0) + 0.587 * f32::from(c.1) + 0.114 * f32::from(c.2);
+    luma(bg) > luma(fg)
+}
+
+/// 卡片样式下窗口的底色，衬在卡片后面：浅色主题往前景色混一点，深色主题往黑色压一些，两种都比
+/// 终端背景深一档。
+fn frame_color(fg: Rgb, bg: Rgb) -> Rgb {
+    if is_light(fg, bg) { bg.mix(fg, 0.06) } else { bg.mix(Rgb(0, 0, 0), 0.4) }
+}
+
+/// 卡片样式下标签条的底色，以及条里当前标签那颗胶囊的颜色。浅色主题里条介于外框
+/// 和卡片之间、胶囊就是卡片的白；深色主题里卡片已经比外框亮，条用卡片的颜色，胶囊再亮一档。
+fn tab_track_colors(fg: Rgb, bg: Rgb) -> (Rgb, Rgb) {
+    if is_light(fg, bg) { (frame_color(fg, bg).mix(bg, 0.5), bg) } else { (bg, bg.mix(fg, 0.12)) }
+}
+
+/// 卡片的外观：终端背景色的圆角块，一圈淡淡的边和一点阴影，从外框上浮起来。
+fn card(fg: Hsla, bg: Hsla) -> gpui::Div {
+    div().rounded(px(CARD_RADIUS)).bg(bg).border_1().border_color(fg.opacity(0.08)).shadow(vec![BoxShadow {
+        color: Hsla::black().opacity(0.06),
+        offset: point(px(0.), px(1.)),
+        blur_radius: px(3.),
+        spread_radius: px(0.),
+        inset: false,
+    }])
 }
 
 /// 在标题栏这类能拖动窗口的地方按下鼠标：双击缩放窗口，否则开始拖动窗口。
@@ -384,13 +435,76 @@ impl Focusable for WindowView {
 
 impl Render for WindowView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let (fg, bg) = self.tab().focused_view().update(cx, |view, _| view.colors());
+        let (base, body) = if cards(cx) {
+            (frame_color(fg, bg), self.render_cards_body(fg, bg, window, cx))
+        } else {
+            (bg, self.render_classic_body(fg, bg, window, cx))
+        };
+        let drag = self.dragging_divider.map(|divider| self.render_divider_drag(divider, cx));
+        let file_menu = self.render_file_menu(fg, bg, cx);
+        let agent_picker = self.render_agent_picker(fg, bg, window, cx);
+        let arrange_picker = self.render_arrange_picker(fg, bg, cx);
+        let branch_picker = self.render_branch_picker(fg, bg, cx);
+        div()
+            .id("window")
+            .key_context("Window")
+            .on_action(cx.listener(Self::new_tab))
+            .on_action(cx.listener(Self::close_tab))
+            .on_action(cx.listener(Self::next_tab))
+            .on_action(cx.listener(Self::previous_tab))
+            .on_action(cx.listener(Self::select_tab))
+            .on_action(cx.listener(Self::select_last_tab))
+            .on_action(cx.listener(Self::new_split_right))
+            .on_action(cx.listener(Self::new_split_down))
+            .on_action(cx.listener(Self::close_pane))
+            .on_action(cx.listener(Self::focus_next_pane))
+            .on_action(cx.listener(Self::focus_previous_pane))
+            .on_action(cx.listener(Self::focus_pane))
+            .on_action(cx.listener(Self::resize_pane))
+            .on_action(cx.listener(Self::equalize_panes))
+            .on_action(cx.listener(Self::toggle_pane_zoom))
+            .on_action(cx.listener(Self::new_workspace))
+            .on_action(cx.listener(Self::close_workspace))
+            .on_action(cx.listener(Self::rename_workspace))
+            .on_action(cx.listener(Self::next_workspace))
+            .on_action(cx.listener(Self::previous_workspace))
+            .on_action(cx.listener(Self::select_workspace))
+            .on_action(cx.listener(Self::select_last_workspace))
+            .on_action(cx.listener(Self::toggle_sidebar))
+            .on_action(cx.listener(Self::toggle_git))
+            .on_action(cx.listener(Self::toggle_files))
+            .on_action(cx.listener(Self::goto_agent))
+            .on_action(cx.listener(Self::next_agent))
+            .on_action(cx.listener(Self::arrange_panes))
+            .map(|window| Self::bind_git_actions(window, cx))
+            .relative()
+            .size_full()
+            .flex()
+            .bg(hsla(base))
+            .children(body)
+            .children(drag)
+            .children(file_menu)
+            .children(agent_picker)
+            .children(arrange_picker)
+            .children(branch_picker)
+    }
+}
+
+impl WindowView {
+    /// 经典样式：终端铺满窗口，侧栏、标题栏和右侧面板之间一条细线；只有一个标签时标题栏只写标题。
+    fn render_classic_body(
+        &mut self,
+        fg: Rgb,
+        bg: Rgb,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Vec<AnyElement> {
         let view = self.tab().focused_view().clone();
-        let (fg, bg) = view.update(cx, |view, _| view.colors());
         let fullscreen = window.is_fullscreen();
         let tab_count = self.workspace().tabs.len();
         let show_tabs = tab_count > 1;
         let panes = self.render_panes(fg, bg, window, cx);
-        let drag = self.dragging_divider.map(|divider| self.render_divider_drag(divider, cx));
         let sidebar = self.sidebar_visible().then(|| self.render_sidebar(fg, bg, fullscreen, cx));
         // 标题栏透明后内容铺到红绿灯下面，顶部这条要能拖动窗口、双击缩放。红绿灯和侧栏开关
         // 落在侧栏上或者全屏时没有红绿灯，标题栏不用让位；全屏又只有一个标签时不留这一条。
@@ -404,10 +518,6 @@ impl Render for WindowView {
         let preview = self.render_preview_panel(widths.preview, !self.files_shown && !self.git_shown, fg, bg, font, cx);
         let git = self.git_shown.then(|| self.render_git_panel(widths.git, !self.files_shown, fg, bg, window, cx));
         let files = self.files_shown.then(|| self.render_files_panel(widths.files, fg, bg, cx));
-        let file_menu = self.render_file_menu(fg, bg, cx);
-        let agent_picker = self.render_agent_picker(fg, bg, window, cx);
-        let arrange_picker = self.render_arrange_picker(fg, bg, cx);
-        let branch_picker = self.render_branch_picker(fg, bg, cx);
         let right_handles = [
             preview_shown
                 .then(|| self.render_right_handle(Divider::Preview, widths.preview + widths.git + widths.files, cx)),
@@ -418,7 +528,12 @@ impl Render for WindowView {
         // 右侧面板的开关按钮：面板都收着时落在标题栏右端，标题栏给它们让位；打开着时落在
         // 面板顶上。全屏又只有一个标签、面板也都收着时没有地方放，不画。
         let right_inset = if titlebar_shown && !self.project_visible() { project::PANEL_TOGGLES_INSET } else { 0. };
-        let panel_toggles = (titlebar_shown || self.project_visible()).then(|| self.render_panel_toggles(fg, bg, cx));
+        let panel_toggles = (titlebar_shown || self.project_visible()).then(|| {
+            self.render_panel_toggles(fg, bg, cx)
+                .absolute()
+                .top(px((TITLEBAR_HEIGHT - project::TOGGLE_HEIGHT) / 2.))
+                .right(px(project::TOGGLE_MARGIN))
+        });
         let tabs: Vec<_> = if show_tabs {
             // 标签平分标题栏除去两头的宽度，限制在 `TAB_MIN_WIDTH` 到 `TAB_MAX_WIDTH` 之间，
             // 挤不下就让标签条滚动；拖动时的预览也照这个宽度画。
@@ -435,7 +550,9 @@ impl Render for WindowView {
                 .flex()
                 .overflow_x_scroll()
                 .track_scroll(&self.workspace().tab_scroll)
-                .children((0..tab_count).map(|ix| self.render_tab(ix, tab_width, fg, bg, cx)).collect::<Vec<_>>());
+                .children(
+                    (0..tab_count).map(|ix| self.render_tab(ix, tab_width, false, fg, bg, cx)).collect::<Vec<_>>(),
+                );
             let inset = div()
                 .id("panel-toggles-inset")
                 .flex_none()
@@ -479,64 +596,116 @@ impl Render for WindowView {
                 }))
                 .children(tabs)
         });
-        div()
-            .id("window")
-            .key_context("Window")
-            .on_action(cx.listener(Self::new_tab))
-            .on_action(cx.listener(Self::close_tab))
-            .on_action(cx.listener(Self::next_tab))
-            .on_action(cx.listener(Self::previous_tab))
-            .on_action(cx.listener(Self::select_tab))
-            .on_action(cx.listener(Self::select_last_tab))
-            .on_action(cx.listener(Self::new_split_right))
-            .on_action(cx.listener(Self::new_split_down))
-            .on_action(cx.listener(Self::close_pane))
-            .on_action(cx.listener(Self::focus_next_pane))
-            .on_action(cx.listener(Self::focus_previous_pane))
-            .on_action(cx.listener(Self::focus_pane))
-            .on_action(cx.listener(Self::resize_pane))
-            .on_action(cx.listener(Self::equalize_panes))
-            .on_action(cx.listener(Self::toggle_pane_zoom))
-            .on_action(cx.listener(Self::new_workspace))
-            .on_action(cx.listener(Self::close_workspace))
-            .on_action(cx.listener(Self::rename_workspace))
-            .on_action(cx.listener(Self::next_workspace))
-            .on_action(cx.listener(Self::previous_workspace))
-            .on_action(cx.listener(Self::select_workspace))
-            .on_action(cx.listener(Self::select_last_workspace))
-            .on_action(cx.listener(Self::toggle_sidebar))
-            .on_action(cx.listener(Self::toggle_git))
-            .on_action(cx.listener(Self::toggle_files))
-            .on_action(cx.listener(Self::goto_agent))
-            .on_action(cx.listener(Self::next_agent))
-            .on_action(cx.listener(Self::arrange_panes))
-            .map(|window| Self::bind_git_actions(window, cx))
-            .relative()
-            .size_full()
+        let main = div()
+            .flex_1()
+            .min_w_0()
+            .h_full()
             .flex()
-            .bg(hsla(bg))
-            .children(sidebar)
-            .child(
-                div()
-                    .flex_1()
-                    .min_w_0()
-                    .h_full()
-                    .flex()
-                    .flex_col()
-                    .children(titlebar)
-                    .child(div().relative().flex_1().min_h_0().child(panes)),
-            )
+            .flex_col()
+            .children(titlebar)
+            .child(div().relative().flex_1().min_h_0().child(panes));
+        let mut body: Vec<AnyElement> = Vec::new();
+        body.extend(sidebar.map(IntoElement::into_any_element));
+        body.push(main.into_any_element());
+        body.extend(preview.map(IntoElement::into_any_element));
+        body.extend(git.map(IntoElement::into_any_element));
+        body.extend(files.map(IntoElement::into_any_element));
+        body.extend(sidebar_handle.map(IntoElement::into_any_element));
+        body.extend(right_handles.into_iter().flatten().map(IntoElement::into_any_element));
+        body.extend(sidebar_toggle.map(IntoElement::into_any_element));
+        body.extend(panel_toggles.map(IntoElement::into_any_element));
+        body
+    }
+
+    /// 卡片样式：窗口底色是比终端深一档的外框，分屏和右侧面板各是一张圆角卡片，卡片之间和卡片
+    /// 到窗口边留出 `CARD_GAP`。标题栏横跨侧栏以外的整个宽度：左边是这台机器，中间是胶囊样式的
+    /// 标签（只有一个标签时也画），右边是新建标签和右侧面板的开关。
+    fn render_cards_body(&mut self, fg: Rgb, bg: Rgb, window: &mut Window, cx: &mut Context<Self>) -> Vec<AnyElement> {
+        let frame = frame_color(fg, bg);
+        let fullscreen = window.is_fullscreen();
+        let viewport = f32::from(window.viewport_size().width);
+        let tab_count = self.workspace().tabs.len();
+        let panes = self.render_panes(fg, bg, window, cx);
+        let sidebar = self.sidebar_visible().then(|| self.render_sidebar(fg, bg, fullscreen, cx));
+        let left_inset = if fullscreen || sidebar.is_some() { CARD_GAP } else { sidebar::SIDEBAR_TOGGLE_INSET };
+        let sidebar_toggle = (!fullscreen).then(|| self.render_sidebar_toggle(fg, frame, cx));
+        let sidebar_width = if sidebar.is_some() { self.sidebar_width() } else { 0. };
+        let sidebar_handle = sidebar.is_some().then(|| self.render_sidebar_handle(cx));
+        let widths = self.right_panel_widths(viewport);
+        let font = self.tab().focused_view().read(cx).font_family();
+        let preview = self.render_preview_panel(widths.preview, false, fg, bg, font, cx);
+        let git = self.git_shown.then(|| self.render_git_panel(widths.git, false, fg, bg, window, cx));
+        let files = self.files_shown.then(|| self.render_files_panel(widths.files, fg, bg, cx));
+        let right_handles = [
+            self.preview_shown().then_some(Divider::Preview),
+            self.git_shown.then_some(Divider::Git),
+            self.files_shown.then_some(Divider::Files),
+        ]
+        .into_iter()
+        .flatten()
+        .map(|divider| {
+            let right = self.right_divider_offset(divider, widths, true);
+            self.render_right_handle(divider, right, cx)
+        })
+        .collect::<Vec<_>>();
+        let machine = machine::render_machine(fg);
+        // 标签平分标签条，最窄 `TAB_MIN_WIDTH`，挤不下就让标签条滚动。这里估一个宽度，决定标签
+        // 要不要收成紧凑的样子，拖动时的预览也照它画。
+        let fixed = sidebar_width
+            + left_inset
+            + machine.as_ref().map_or(0., |_| machine::MACHINE_MAX_WIDTH + 12.)
+            + NEW_TAB_BUTTON_WIDTH
+            + project::PANEL_TOGGLES_INSET
+            + widths.total();
+        let tab_width = px(((viewport - fixed) / tab_count as f32).max(TAB_MIN_WIDTH));
+        let track_bg = hsla(tab_track_colors(fg, bg).0);
+        let strip = div()
+            .id("tabs")
+            .flex_1()
+            .min_w_0()
+            .h(px(TAB_TRACK_HEIGHT))
+            .p(px(2.))
+            .gap(px(2.))
+            .rounded(px(TAB_TRACK_HEIGHT / 2. - 4.))
+            .bg(track_bg)
+            .flex()
+            .items_center()
+            .overflow_x_scroll()
+            .track_scroll(&self.workspace().tab_scroll)
+            .children((0..tab_count).map(|ix| self.render_tab(ix, tab_width, true, fg, bg, cx)).collect::<Vec<_>>());
+        let titlebar = div()
+            .id("titlebar")
+            .h(px(TITLEBAR_HEIGHT))
+            .flex_none()
+            .flex()
+            .items_center()
+            .pr(px(CARD_GAP))
+            .text_size(px(12.))
+            .on_mouse_down(MouseButton::Left, drag_window)
+            .child(div().flex_none().w(px(left_inset)))
+            .children(machine.map(|machine| machine.mr(px(12.))))
+            .child(strip)
+            .child(self.render_new_tab_button_card(fg, frame, cx))
+            .child(self.render_panel_toggles(fg, frame, cx));
+        let content = div()
+            .flex_1()
+            .min_h_0()
+            .flex()
+            .gap(px(CARD_GAP))
+            .pl(px(CARD_GAP))
+            .pr(px(CARD_GAP))
+            .pb(px(CARD_GAP))
+            .child(div().relative().flex_1().min_w_0().h_full().child(panes))
             .children(preview)
             .children(git)
-            .children(files)
-            .children(sidebar_handle)
-            .children(right_handles.into_iter().flatten())
-            .children(sidebar_toggle)
-            .children(panel_toggles)
-            .children(drag)
-            .children(file_menu)
-            .children(agent_picker)
-            .children(arrange_picker)
-            .children(branch_picker)
+            .children(files);
+        let main = div().flex_1().min_w_0().h_full().flex().flex_col().child(titlebar).child(content);
+        let mut body: Vec<AnyElement> = Vec::new();
+        body.extend(sidebar.map(IntoElement::into_any_element));
+        body.push(main.into_any_element());
+        body.extend(sidebar_handle.map(IntoElement::into_any_element));
+        body.extend(right_handles.into_iter().map(IntoElement::into_any_element));
+        body.extend(sidebar_toggle.map(IntoElement::into_any_element));
+        body
     }
 }

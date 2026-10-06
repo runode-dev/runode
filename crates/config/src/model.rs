@@ -25,6 +25,15 @@ pub enum PreviewClick {
     Double,
 }
 
+/// 窗口的样子：卡片是每个分屏、右侧面板各是一张圆角卡片，衬在比终端深一档的外框上，分屏顶上有
+/// 标题条，标题栏左边是这台机器的名字、标签是胶囊；经典是终端铺满窗口，分屏之间一条细线，标签是
+/// 平铺的格子。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum WindowStyle {
+    Cards,
+    Classic,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct Config {
     /// 依次尝试的字体族，第一个能解析的生效。
@@ -35,6 +44,7 @@ pub struct Config {
     pub window_padding_x: (f32, f32),
     /// (上, 下)
     pub window_padding_y: (f32, f32),
+    pub window_style: WindowStyle,
     /// 右侧文件树的字号。
     pub file_tree_font_size: f32,
     pub file_tree_preview_click: PreviewClick,
@@ -118,6 +128,7 @@ impl Default for Config {
             adjust_cell_height: None,
             window_padding_x: (2., 2.),
             window_padding_y: (0., 6.),
+            window_style: WindowStyle::Cards,
             file_tree_font_size: 13.,
             file_tree_preview_click: PreviewClick::Single,
             preview_font_size: 13.,

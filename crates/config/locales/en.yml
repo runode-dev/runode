@@ -16,6 +16,7 @@ config:
   adjust_cell_height: "Cell height adjustment: pixels (e.g. 2, -1) or a percentage (e.g. 10%); empty means no adjustment."
   window_padding_x: "Left and right padding: one number for both sides, or left,right, in points."
   window_padding_y: "Top and bottom padding: one number for both sides, or top,bottom, in points."
+  window_style: "Window style: cards (default) or classic. With cards, each split and side panel is a rounded card with a title bar on a slightly darker frame, and the title bar shows this Mac's name and pill-shaped tabs. With classic, the terminal fills the window and splits are divided by thin lines."
   file_tree_font_size: "File tree font size: a positive number, in points."
   file_tree_preview_click: "How to open a file from the file tree in the preview pane: single (default) or double. With single, a click opens a temporary tab that the next opened file replaces, and a double-click keeps it open. With double, a double-click opens a tab that stays."
   preview_font_size: "Preview pane font size: a positive number, in points."

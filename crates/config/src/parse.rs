@@ -15,7 +15,7 @@ use runode_shared_types::{
 };
 
 use crate::{
-    CellHeight, Config, PreviewClick, color,
+    CellHeight, Config, PreviewClick, WindowStyle, color,
     theme::{Theme, find_theme, pick_theme},
 };
 
@@ -25,7 +25,7 @@ use crate::{
 /// 在应用各层之前就已处理，列在这里是为了写进模板。
 pub const KEYS: &[&[&str]] = &[
     &["language"],
-    &["font-family", "font-size", "adjust-cell-height", "window-padding-x", "window-padding-y"],
+    &["font-family", "font-size", "adjust-cell-height", "window-padding-x", "window-padding-y", "window-style"],
     &["file-tree-font-size", "file-tree-preview-click", "preview-font-size"],
     &[
         "theme",
@@ -167,6 +167,13 @@ impl Config {
             }
             "window-padding-y" => {
                 self.window_padding_y = if empty { defaults.window_padding_y } else { parse_pair(value)? };
+            }
+            "window-style" => {
+                self.window_style = match value {
+                    "" | "cards" => WindowStyle::Cards,
+                    "classic" => WindowStyle::Classic,
+                    _ => return Err("expected cards or classic".into()),
+                };
             }
             "file-tree-font-size" => {
                 self.file_tree_font_size = if empty { defaults.file_tree_font_size } else { parse_positive(value)? };
@@ -677,6 +684,15 @@ unknown-key = whatever
             load(&["file-tree-preview-click = double\nfile-tree-preview-click = triple"]).file_tree_preview_click,
             PreviewClick::Double
         );
+    }
+
+    #[test]
+    fn window_style_defaults_to_cards() {
+        assert_eq!(Config::default().window_style, WindowStyle::Cards);
+        assert_eq!(load(&["window-style = classic"]).window_style, WindowStyle::Classic);
+        assert_eq!(load(&["window-style = classic\nwindow-style ="]).window_style, WindowStyle::Cards);
+        // 认不出的值跳过，保留前面的值。
+        assert_eq!(load(&["window-style = classic\nwindow-style = glass"]).window_style, WindowStyle::Classic);
     }
 
     #[test]

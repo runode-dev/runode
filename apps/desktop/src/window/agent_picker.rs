@@ -12,9 +12,9 @@ use runode_shared_types::color::Rgb;
 use super::{
     GotoAgent, TITLEBAR_HEIGHT, WindowView,
     agents::{AgentEntry, matches_query, reveal},
-    divider_color,
+    cards, divider_color,
     model::display_dir,
-    titlebar::agent_mark,
+    titlebar::styled_agent_mark,
 };
 use crate::ui::{
     hsla,
@@ -210,7 +210,7 @@ impl WindowView {
                             reveal(target, pane, cx);
                         }),
                     )
-                    .child(agent_mark(entry.mark, ("picker-agent", ix), fg))
+                    .child(styled_agent_mark(entry.mark, ("picker-agent", ix), fg, cards(cx)))
                     .child(
                         div()
                             .flex_1()

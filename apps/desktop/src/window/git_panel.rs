@@ -292,7 +292,7 @@ impl WindowView {
         // 多个仓库时各块的忙碌状态写在块头上。
         let busy = main_root.as_deref().filter(|_| !multi).and_then(|root| panel.busy(root));
         let header = self
-            .panel_header(rightmost, fg)
+            .panel_header(rightmost, fg, cx)
             .child(div().flex_none().text_color(hsla(fg)).child(rust_i18n::t!("git.title").into_owned()))
             .child(div().flex_1().min_w_0().truncate().text_color(dim).children(busy.map(Busy::label)))
             .when_some(main_root, |header, root| {
@@ -378,7 +378,7 @@ impl WindowView {
             .as_ref()
             .filter(|_| project.root.is_some())
             .map(|git| self.render_graph_pane(git, room, fg, bg, cx));
-        panel_shell("git-panel", width, fg)
+        panel_shell("git-panel", width, fg, bg, cx)
             .track_focus(&self.git_focus)
             .bg(hsla(bg))
             .text_size(px(12.))

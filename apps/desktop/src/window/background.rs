@@ -21,7 +21,9 @@ use gpui::{
 use runode_protocol::{SessionId, SessionInfo};
 use runode_shared_types::{agent::AgentKind, color::Rgb};
 
-use super::{AGENT_MARK_WIDTH, WindowView, agents::Mark, divider_color, model::display_dir, titlebar::agent_mark};
+use super::{
+    AGENT_MARK_WIDTH, WindowView, agents::Mark, cards, divider_color, model::display_dir, titlebar::styled_agent_mark,
+};
 use crate::{
     host_client::{self, Mode},
     terminal_view::{DEFAULT_TITLE, TerminalView},
@@ -301,7 +303,7 @@ fn background_row(ix: usize, session: &SessionInfo, fg: Rgb, bg: Rgb, cx: &mut C
     let hover_bg = hsla(bg.mix(fg, 0.06));
     let fg = hsla(fg);
     let mark = match session.meta.agent {
-        Some(agent) => agent_mark(Mark::new(agent, false), ("background-agent", ix), fg),
+        Some(agent) => styled_agent_mark(Mark::new(agent, false), ("background-agent", ix), fg, cards(cx)),
         None => div().flex_none().w(px(AGENT_MARK_WIDTH)).into_any_element(),
     };
     let agent = session.meta.agent.map(|agent| {

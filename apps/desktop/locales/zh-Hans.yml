@@ -188,6 +188,8 @@ tooltip:
   hide_ignored: 隐藏被 git 忽略的文件
   close_preview: 关闭预览
   close_search: 关闭搜索
+  close_split: 关闭分屏
+  restore_split: 还原分屏
 git:
   title: 源代码管理
   refresh: 刷新
@@ -405,6 +407,7 @@ settings:
     adjust_cell_height: 行高调整
     window_padding_x: 左右内边距
     window_padding_y: 上下内边距
+    window_style: 样式
     file_tree_font_size: 文件树字号
     file_tree_preview_click: 在预览栏打开文件
     preview_font_size: 预览栏字号
@@ -447,6 +450,7 @@ settings:
     adjust_cell_height: 像素（比如 2、-1）或百分比（比如 10%），留空表示不调整。
     window_padding_x: 单位是点。一个数表示两边相同，或者写成 左,右。
     window_padding_y: 单位是点。一个数表示上下相同，或者写成 上,下。
+    window_style: 卡片：每个分屏和右侧面板各是一张圆角卡片；经典：终端铺满窗口。
     file_tree_font_size: 单位是点。
     file_tree_preview_click: 单击开成临时标签，打开别的文件时被换掉；双击固定下来。
     preview_font_size: 单位是点。
@@ -483,6 +487,9 @@ settings:
     config_file: 读完这个文件之后再读的配置文件。相对路径从这个文件所在目录算；路径前加 ? 表示文件可以不存在。
     keybind: 你的快捷键叠在默认快捷键上。
   choice:
+    window_style:
+      cards: 卡片
+      classic: 经典
     cursor_style:
       block: 方块
       bar: 竖线

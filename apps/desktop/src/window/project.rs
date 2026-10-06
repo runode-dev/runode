@@ -16,14 +16,15 @@ use std::{
 };
 
 use gpui::{
-    Action, Context, CursorStyle, Div, Focusable, MouseButton, MouseDownEvent, Stateful, Window, div, prelude::*, px,
+    Action, App, Context, CursorStyle, Div, Focusable, MouseButton, MouseDownEvent, Stateful, Window, div, prelude::*,
+    px,
 };
 use runode_git::FileStatus;
 use runode_shared_types::color::Rgb;
 
 use super::{
-    DIVIDER_GRAB_WIDTH, Divider, TITLEBAR_HEIGHT, ToggleFiles, ToggleGit, WindowView, divider_color, drag_window,
-    titlebar::icon_toggle,
+    CARD_GAP, DIVIDER_GRAB_WIDTH, Divider, PANE_HEADER_HEIGHT, TITLEBAR_HEIGHT, ToggleFiles, ToggleGit, WindowView,
+    card, cards, divider_color, drag_window, titlebar::icon_toggle,
 };
 use crate::{
     assets::{FILES_ICON, GIT_ICON},
@@ -63,9 +64,9 @@ const PREVIEW_MIN_WIDTH: f32 = 240.;
 const MAIN_MIN_WIDTH: f32 = 240.;
 /// 标题栏右上角开关按钮的尺寸和间距。
 const TOGGLE_WIDTH: f32 = 28.;
-const TOGGLE_HEIGHT: f32 = 24.;
+pub(super) const TOGGLE_HEIGHT: f32 = 24.;
 const TOGGLE_GAP: f32 = 4.;
-const TOGGLE_MARGIN: f32 = 10.;
+pub(super) const TOGGLE_MARGIN: f32 = 10.;
 /// 右侧面板都收着时标题栏右边给开关按钮让出的宽度。
 pub(super) const PANEL_TOGGLES_INSET: f32 = TOGGLE_WIDTH * 2. + TOGGLE_GAP + TOGGLE_MARGIN + 6.;
 
@@ -389,8 +390,9 @@ impl WindowView {
         div()
             .id(id)
             .absolute()
-            .top_0()
-            .h_full()
+            // 卡片样式下标题栏横跨右侧面板，分隔线从标题栏下面开始，不挡着拖动窗口。
+            .top(px(if cards(cx) { TITLEBAR_HEIGHT } else { 0. }))
+            .bottom_0()
             .right(px(right - DIVIDER_GRAB_WIDTH / 2.))
             .w(px(DIVIDER_GRAB_WIDTH))
             .cursor(CursorStyle::ResizeLeftRight)
@@ -419,7 +421,25 @@ impl WindowView {
         self.git_shown || self.workspace().project.in_repo != Some(false)
     }
 
-    /// 标题栏右上角开关 Git 面板和文件树的两个按钮，打开着的底色亮一些。
+    /// 右侧面板左边的分隔线离窗口右边多远：经典样式下是它和右边各栏的宽度；卡片样式下还要加上
+    /// 卡片到窗口右边的间距、右边各张卡片之间的间距，分隔线落在两张卡片中间。
+    pub(super) fn right_divider_offset(&self, divider: Divider, widths: PanelWidths, cards: bool) -> f32 {
+        let panels = match divider {
+            Divider::Preview => {
+                [(widths.preview, true), (widths.git, self.git_shown), (widths.files, self.files_shown)]
+            }
+            Divider::Git => [(0., false), (widths.git, true), (widths.files, self.files_shown)],
+            _ => [(0., false), (0., false), (widths.files, true)],
+        };
+        let width: f32 = panels.iter().map(|(width, _)| width).sum();
+        if !cards {
+            return width;
+        }
+        let shown = panels.iter().filter(|(_, shown)| *shown).count() as f32;
+        width + CARD_GAP * shown + CARD_GAP / 2.
+    }
+
+    /// 标题栏右上角开关 Git 面板和文件树的两个按钮，打开着的底色亮一些。位置由调用方接着写。
     pub(super) fn render_panel_toggles(&self, fg: Rgb, bg: Rgb, cx: &mut Context<Self>) -> Div {
         type Toggle = fn(&mut WindowView, &mut Window, &mut Context<WindowView>);
         let button = |id: &'static str, icon: &'static str, shown: bool, cx: &mut Context<Self>| {
@@ -451,9 +471,7 @@ impl WindowView {
                 )
         };
         div()
-            .absolute()
-            .top(px((TITLEBAR_HEIGHT - TOGGLE_HEIGHT) / 2.))
-            .right(px(TOGGLE_MARGIN))
+            .flex_none()
             .flex()
             .gap(px(TOGGLE_GAP))
             .when(self.git_button_visible(), |toggles| {
@@ -462,18 +480,23 @@ impl WindowView {
             .child(button("toggle-files", FILES_ICON, self.files_shown, cx))
     }
 
-    /// 右侧面板顶上和标题栏等高的一条：能拖动窗口、双击缩放，最右边的面板给开关按钮让位。
-    pub(super) fn panel_header(&self, rightmost: bool, fg: Rgb) -> Div {
-        div()
+    /// 右侧面板顶上的一条。经典样式下和标题栏等高，能拖动窗口、双击缩放，最右边的面板给开关按钮
+    /// 让位；卡片样式下是卡片的标题条，和分屏的一样高。
+    pub(super) fn panel_header(&self, rightmost: bool, fg: Rgb, cx: &App) -> Div {
+        let header = div()
             .flex_none()
-            .h(px(TITLEBAR_HEIGHT))
             .px(px(10.))
-            .when(rightmost, |header| header.pr(px(PANEL_TOGGLES_INSET)))
             .flex()
             .items_center()
             .gap(px(8.))
             .border_b_1()
-            .border_color(divider_color(hsla(fg)))
+            .border_color(divider_color(hsla(fg)));
+        if cards(cx) {
+            return header.h(px(PANE_HEADER_HEIGHT));
+        }
+        header
+            .h(px(TITLEBAR_HEIGHT))
+            .when(rightmost, |header| header.pr(px(PANEL_TOGGLES_INSET)))
             .on_mouse_down(MouseButton::Left, drag_window)
     }
 }
@@ -483,7 +506,13 @@ pub(super) fn panel_message(text: String, fg: Rgb) -> Div {
     div().flex_1().flex().items_center().justify_center().px(px(16.)).text_color(hsla(fg).opacity(0.5)).child(text)
 }
 
-/// 右侧面板的外框：定宽、占满高度、竖着排，左边一条分隔线。底色和字号由调用方接着写。
-pub(super) fn panel_shell(id: &'static str, width: f32, fg: Rgb) -> Stateful<Div> {
-    div().id(id).flex_none().w(px(width)).h_full().flex().flex_col().border_l_1().border_color(divider_color(hsla(fg)))
+/// 右侧面板的外框：定宽、占满高度、竖着排。经典样式下左边一条分隔线，卡片样式下是一张卡片。
+/// 底色和字号由调用方接着写。
+pub(super) fn panel_shell(id: &'static str, width: f32, fg: Rgb, bg: Rgb, cx: &App) -> Stateful<Div> {
+    let shell = if cards(cx) {
+        card(hsla(fg), hsla(bg)).overflow_hidden()
+    } else {
+        div().border_l_1().border_color(divider_color(hsla(fg)))
+    };
+    shell.id(id).flex_none().w(px(width)).h_full().flex().flex_col()
 }

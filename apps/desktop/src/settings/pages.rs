@@ -99,6 +99,7 @@ impl Page {
                 Row("font-size", Text(80.)),
                 Row("adjust-cell-height", Text(80.)),
                 Section("window"),
+                Row("window-style", Choice(&["cards", "classic"])),
                 Row("window-padding-x", Text(80.)),
                 Row("window-padding-y", Text(80.)),
             ],

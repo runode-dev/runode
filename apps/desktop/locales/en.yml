@@ -188,6 +188,8 @@ tooltip:
   hide_ignored: Hide Files Ignored by Git
   close_preview: Close Preview
   close_search: Close Search
+  close_split: Close Split
+  restore_split: Restore Split
 git:
   title: Source Control
   refresh: Refresh
@@ -405,6 +407,7 @@ settings:
     adjust_cell_height: Cell height adjustment
     window_padding_x: Horizontal padding
     window_padding_y: Vertical padding
+    window_style: Style
     file_tree_font_size: File tree font size
     file_tree_preview_click: Open files in the preview with
     preview_font_size: Preview font size
@@ -447,6 +450,7 @@ settings:
     adjust_cell_height: Pixels such as 2 or -1, or a percentage such as 10%. Empty means no adjustment.
     window_padding_x: Left and right, in points. One number for both sides, or left,right.
     window_padding_y: Top and bottom, in points. One number for both, or top,bottom.
+    window_style: Cards puts each split and side panel on its own rounded card; classic lets the terminal fill the window.
     file_tree_font_size: In points.
     file_tree_preview_click: A single click opens a temporary tab that the next file replaces; a double click keeps it.
     preview_font_size: In points.
@@ -483,6 +487,9 @@ settings:
     config_file: Other configuration files to read after this one. Relative paths start from this file's folder; a leading ? means the file may be missing.
     keybind: Your shortcuts are added on top of the defaults.
   choice:
+    window_style:
+      cards: Cards
+      classic: Classic
     cursor_style:
       block: Block
       bar: Bar

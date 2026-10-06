@@ -188,6 +188,8 @@ tooltip:
   hide_ignored: 隱藏被 git 忽略的檔案
   close_preview: 關閉預覽
   close_search: 關閉搜尋
+  close_split: 關閉分割畫面
+  restore_split: 還原分割畫面
 git:
   title: 原始碼控制
   refresh: 重新整理
@@ -405,6 +407,7 @@ settings:
     adjust_cell_height: 行高調整
     window_padding_x: 左右內距
     window_padding_y: 上下內距
+    window_style: 樣式
     file_tree_font_size: 檔案樹字級
     file_tree_preview_click: 在預覽欄打開檔案
     preview_font_size: 預覽欄字級
@@ -447,6 +450,7 @@ settings:
     adjust_cell_height: 像素（例如 2、-1）或百分比（例如 10%），留空表示不調整。
     window_padding_x: 單位是點。一個數表示兩邊相同，或寫成 左,右。
     window_padding_y: 單位是點。一個數表示上下相同，或寫成 上,下。
+    window_style: 卡片：每個分割畫面和右側面板各是一張圓角卡片；經典：終端機鋪滿視窗。
     file_tree_font_size: 單位是點。
     file_tree_preview_click: 單擊開成暫時分頁，打開別的檔案時被換掉；雙擊固定下來。
     preview_font_size: 單位是點。
@@ -483,6 +487,9 @@ settings:
     config_file: 讀完這個檔案之後再讀的設定檔。相對路徑從這個檔案所在目錄算；路徑前加 ? 表示檔案可以不存在。
     keybind: 你的快速鍵疊在預設快速鍵上。
   choice:
+    window_style:
+      cards: 卡片
+      classic: 經典
     cursor_style:
       block: 方塊
       bar: 直線

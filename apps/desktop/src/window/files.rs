@@ -241,7 +241,7 @@ impl WindowView {
         let ignored_toggle =
             button("toggle-ignored", icon, show_ignored, text, None, |this, _, cx| this.toggle_show_ignored(cx), cx);
         let header =
-            self.panel_header(true, fg).child(div().flex_1().min_w_0().truncate().text_color(hsla(fg)).child(name));
+            self.panel_header(true, fg, cx).child(div().flex_1().min_w_0().truncate().text_color(hsla(fg)).child(name));
         // 标题下面一行：左边是没提交的改动一共加减了多少行，右边是新建、全部收起和显示忽略
         // 文件的按钮。
         let dirty = workspace.project.git.as_ref().filter(|git| !git.is_clean());
@@ -298,7 +298,7 @@ impl WindowView {
             Axis::Vertical,
             hsla(fg),
         ));
-        panel_shell("files-panel", width, fg)
+        panel_shell("files-panel", width, fg, bg, cx)
             // 新建或改名时输入框在文件树里面，方向键这些归输入框。
             .key_context(if self.file_edit.is_some() { "FileTree editing" } else { "FileTree" })
             .track_focus(&self.files_focus)

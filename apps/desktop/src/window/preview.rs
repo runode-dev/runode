@@ -583,10 +583,10 @@ impl WindowView {
             .h_full()
             .relative()
             .child(tab_underline(fg));
-        let header = self.panel_header(false, fg).border_b_0().px_0().gap_0().child(strip).child(filler);
+        let header = self.panel_header(false, fg, cx).border_b_0().px_0().gap_0().child(strip).child(filler);
         let body = self.render_preview_body(preview, width, font, fg, bg, cx);
         Some(
-            panel_shell("preview-panel", width, fg)
+            panel_shell("preview-panel", width, fg, bg, cx)
                 .key_context("Preview")
                 .track_focus(&self.preview_focus)
                 .on_action(cx.listener(Self::copy_preview))
