@@ -12,6 +12,7 @@ use gpui::{
 };
 use runode_protocol::SessionId;
 use runode_shared_types::{
+    agent::AgentKind,
     color::Rgb,
     pane::{Axis, Node},
     session::{DriveAction, Driver},
@@ -42,11 +43,11 @@ pub(super) fn now_ms() -> u64 {
     SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |since| since.as_millis() as u64)
 }
 
-/// 驱动方怎么称呼：它所在会话的终端标题，找不到那个终端时是会话标识的前 8 位；不在 runode 的
-/// 终端里跑的程序为 `None`。
-fn driver_name(by: Option<&str>, title_of: impl Fn(SessionId) -> Option<String>) -> Option<String> {
+/// 驱动方怎么称呼：`name_of` 给出它所在会话的称呼（见 `WindowView::session_label`），找不到那个
+/// 终端时是会话标识的前 8 位；不在 runode 的终端里跑的程序为 `None`。
+fn driver_name(by: Option<&str>, name_of: impl Fn(SessionId) -> Option<String>) -> Option<String> {
     let by = by?;
-    let title = by.parse::<SessionId>().ok().and_then(title_of);
+    let title = by.parse::<SessionId>().ok().and_then(name_of);
     Some(title.unwrap_or_else(|| by.chars().take(8).collect()))
 }
 
@@ -100,15 +101,16 @@ impl WindowView {
             let Some(secs) = driven_secs_ago(driver.at_ms, now) else {
                 continue;
             };
-            let name = driver_name(driver.by.as_deref(), |id| self.session_title(id, window, cx));
+            let name = driver_name(driver.by.as_deref(), |id| self.session_label(id, window, cx));
             badges.insert(*pane, driver_text(name.as_deref(), driver.action, secs, &locale).into());
         }
         badges
     }
 
-    /// 显示会话 `id` 的终端的标题，在所有窗口里找。这个窗口正在更新、从窗口表里读不到，直接用
-    /// `self`。
-    fn session_title(&self, id: SessionId, window: &Window, cx: &App) -> Option<String> {
+    /// 会话 `id` 怎么称呼：前台是 agent 时用 agent 的名字，前台是别的程序时用程序名，前台是
+    /// shell 时用终端标题（shell 的标题多半只是目录名，看不出是谁，所以排在最后）。在所有窗口里
+    /// 找；这个窗口正在更新、从窗口表里读不到，直接用 `self`。
+    fn session_label(&self, id: SessionId, window: &Window, cx: &App) -> Option<String> {
         let title_in = |view: &WindowView| {
             view.workspaces
                 .iter()
@@ -116,7 +118,16 @@ impl WindowView {
                 .flat_map(|tab| tab.panes.values())
                 .map(|(terminal, _)| terminal.read(cx))
                 .find(|terminal| terminal.session_id() == id)
-                .map(|terminal| terminal.title().to_owned())
+                .map(|terminal| {
+                    if let Some(agent) = terminal.agent().filter(|agent| agent.kind != AgentKind::Other) {
+                        return agent.kind.display_name().to_owned();
+                    }
+                    let meta = terminal.meta();
+                    match &meta.foreground {
+                        Some(program) if !meta.foreground_is_shell => program.clone(),
+                        _ => terminal.title().to_owned(),
+                    }
+                })
         };
         if let Some(title) = title_in(self) {
             return Some(title);
@@ -389,14 +400,14 @@ mod tests {
     }
 
     #[test]
-    fn the_driver_is_named_by_its_terminal_title_or_its_id() {
+    fn the_driver_is_named_by_its_session_or_its_id() {
         let by = "0123456789abcdef0123456789abcdef";
         let known: SessionId = by.parse().unwrap();
-        let title_of = |id: SessionId| (id == known).then(|| "claude · runode".to_owned());
-        assert_eq!(driver_name(Some(by), title_of).as_deref(), Some("claude · runode"));
-        assert_eq!(driver_name(Some("fedcba9876543210fedcba9876543210"), title_of).as_deref(), Some("fedcba98"));
-        assert_eq!(driver_name(Some("abc"), title_of).as_deref(), Some("abc"));
-        assert_eq!(driver_name(None, title_of), None);
+        let name_of = |id: SessionId| (id == known).then(|| "Claude Code".to_owned());
+        assert_eq!(driver_name(Some(by), name_of).as_deref(), Some("Claude Code"));
+        assert_eq!(driver_name(Some("fedcba9876543210fedcba9876543210"), name_of).as_deref(), Some("fedcba98"));
+        assert_eq!(driver_name(Some("abc"), name_of).as_deref(), Some("abc"));
+        assert_eq!(driver_name(None, name_of), None);
     }
 
     #[test]
