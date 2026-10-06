@@ -21,7 +21,7 @@ fn wait(rx: futures::channel::oneshot::Receiver<GeneratorResults>) -> Option<Gen
 }
 
 fn here() -> Environment {
-    Environment { cwd: "/".into(), path: None }
+    Environment { cwd: "/".into(), path: None, vars: Vec::new() }
 }
 
 #[test]

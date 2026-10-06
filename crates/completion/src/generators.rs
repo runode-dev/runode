@@ -69,6 +69,9 @@ pub struct Environment {
     pub cwd: PathBuf,
     /// shell 集成报告的 PATH；没报告过时为 `None`，沿用 runode 自己的。
     pub path: Option<OsString>,
+    /// shell 里另外有的环境变量，生成器命令也带上：比如所在会话的标识，runode 自己的命令行靠它
+    /// 知道是从哪个终端补全的。
+    pub vars: Vec<(OsString, OsString)>,
 }
 
 /// 跑着的一条生成器命令；丢掉它就取消，命令还没结束时会被杀掉。
@@ -130,6 +133,7 @@ fn run(command: &str, env: &Environment, cancelled: &AtomicBool) -> Option<Strin
     // 自成一个进程组，超时时整组杀掉，管道里的其他命令也一起结束。
     cmd.process_group(0);
     cmd.current_dir(&env.cwd);
+    cmd.envs(env.vars.iter().map(|(key, value)| (key, value)));
     if let Some(path) = env.path.as_deref().and_then(absolute_dirs) {
         cmd.env("PATH", path);
     }
@@ -201,19 +205,23 @@ mod tests {
     }
 
     #[test]
-    fn runs_in_the_directory_with_the_shell_path() {
-        let env = Environment { cwd: "/".into(), path: Some("/bin:/usr/bin:/reported".into()) };
-        let (_job, rx) = spawn("pwd; echo \"$PATH\"; echo err >&2".into(), env, lines);
+    fn runs_in_the_directory_with_the_shell_path_and_variables() {
+        let env = Environment {
+            cwd: "/".into(),
+            path: Some("/bin:/usr/bin:/reported".into()),
+            vars: vec![("RUNODE_SESSION".into(), "0123".into())],
+        };
+        let (_job, rx) = spawn("pwd; echo \"$PATH\"; echo \"$RUNODE_SESSION\"; echo err >&2".into(), env, lines);
         let names: Vec<String> = wait(rx).unwrap().suggestions.into_iter().map(|s| s.exact_string).collect();
-        assert_eq!(names, ["/", "/bin:/usr/bin:/reported"]);
+        assert_eq!(names, ["/", "/bin:/usr/bin:/reported", "0123"]);
         // 相对路径和空的一项都去掉，只剩相对路径时沿用 runode 自己的 PATH。
-        let env = Environment { cwd: "/".into(), path: Some(".:/bin::rel/bin:/usr/bin:".into()) };
+        let env = Environment { cwd: "/".into(), path: Some(".:/bin::rel/bin:/usr/bin:".into()), vars: Vec::new() };
         let (_job, rx) = spawn("echo \"$PATH\"".into(), env, lines);
         let names: Vec<String> = wait(rx).unwrap().suggestions.into_iter().map(|s| s.exact_string).collect();
         assert_eq!(names, ["/bin:/usr/bin"]);
         assert_eq!(absolute_dirs(".::bin".as_ref()), None);
         // 目录不存在时不跑，也不退回别的目录。
-        let env = Environment { cwd: "/nonexistent-runode-dir".into(), path: None };
+        let env = Environment { cwd: "/nonexistent-runode-dir".into(), path: None, vars: Vec::new() };
         let (_job, rx) = spawn("echo ran".into(), env, lines);
         assert!(wait(rx).unwrap().suggestions.is_empty());
     }

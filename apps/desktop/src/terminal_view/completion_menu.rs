@@ -3,7 +3,7 @@
 
 mod paint;
 
-use std::{path::PathBuf, time::Instant};
+use std::{ffi::OsString, path::PathBuf, time::Instant};
 
 use gpui::{Context, Keystroke, MouseDownEvent, ScrollWheelEvent, Task};
 
@@ -226,6 +226,11 @@ impl TerminalView {
 
     /// 按新的输入重算候选：过滤用的词、文件列表；生成器的命令变了的重新跑，没变的留着。
     fn update_completion(&mut self, request: &Request, cx: &mut Context<Self>) {
+        // shell 里有的这两个变量生成器也带上：`runode` 的会话补全靠它们找到这个 app 的命令行，
+        // 知道是从哪个终端补的。
+        let session = self.id.map(|id| (runode_protocol::ENV_SESSION.into(), id.to_string().into()));
+        let bin = std::env::current_exe().ok().map(|exe| (runode_cli::ENV_BIN.into(), exe.into()));
+        let vars: Vec<(OsString, OsString)> = session.into_iter().chain(bin).collect();
         let Some(menu) = &mut self.completion else {
             return;
         };
@@ -243,8 +248,11 @@ impl TerminalView {
             if menu.generated.iter().any(|g| g.is_for(&job)) {
                 continue;
             }
-            let env =
-                generators::Environment { cwd: menu.cwd.clone().unwrap_or_default(), path: menu.shell.path.clone() };
+            let env = generators::Environment {
+                cwd: menu.cwd.clone().unwrap_or_default(),
+                path: menu.shell.path.clone(),
+                vars: vars.clone(),
+            };
             let (handle, rx) = generators::spawn(job.command.clone(), env, job.parse);
             let (command, from, group) = (job.command.clone(), job.from, job.group);
             // 取消时这个任务随生成器一起丢掉，不会走到这里；收不到结果只可能是解析时 panic 或者

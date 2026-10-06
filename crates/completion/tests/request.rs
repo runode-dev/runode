@@ -116,9 +116,12 @@ fn runode_completes_its_own_commands() {
     let jobs = |input: &str| -> Vec<String> {
         request(input).unwrap().generator_jobs().into_iter().map(|job| job.command).collect()
     };
-    assert!(jobs("runode kill ^").iter().any(|command| command.contains("runode list --json")));
-    assert!(jobs("runode open --near ^").iter().any(|command| command.contains("runode list --json")));
-    assert!(jobs("runode remote revoke ^").iter().any(|command| command.contains("runode remote devices --json")));
+    assert!(jobs("runode kill ^").iter().any(|command| command.contains("runode}\" list --json")));
+    assert!(jobs("runode open --near ^").iter().any(|command| command.contains("runode}\" list --json")));
+    assert!(jobs("runode remote revoke ^").iter().any(|command| command.contains("runode}\" remote devices --json")));
+    // app 自己用的启动参数平时不列，写全了才列。
+    assert!(!names("runode --^").contains(&"--host".to_owned()));
+    assert_eq!(names("runode --host^"), ["--host"]);
     // `open --` 后面是另一条命令，按那条命令的规格补。
     assert!(names("runode open -- git chec^").contains(&"checkout".to_owned()));
 }
