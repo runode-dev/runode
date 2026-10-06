@@ -21,7 +21,13 @@ use std::{
 
 use anyhow::{Context as _, Result, anyhow};
 use runode_protocol::{AttachMode, FinishedCommand, HostMsg, SessionId, SessionInfo};
-use runode_shared_types::{grid::GridSize, session::SessionMeta, settings::TermSettings, shell::IntegrationMode};
+use runode_shared_types::{
+    grid::GridSize,
+    input::KeyChord,
+    session::{DriveAction, SessionMeta},
+    settings::TermSettings,
+    shell::IntegrationMode,
+};
 use runode_terminal::{
     history,
     host_session::{HostSession, ReportRedactor},
@@ -95,12 +101,28 @@ pub(crate) enum Inbox {
     Subscribe(Subscribe),
     /// 要这个会话在 `SessionList` 里的一项。
     Info(mpsc::Sender<SessionInfo>),
-    /// 读屏幕底部的文字，见 `HostSession::screen_text`。
+    /// 读屏幕底部的文字（见 `HostSession::screen_text`），`command` 给了时改读倒数第几条命令的
+    /// 输出（见 `HostSession::command_output`）。回的是文字和开头是否已经被挤出回滚历史。
     ReadScreen {
         lines: Option<u32>,
-        reply: mpsc::Sender<Result<String>>,
+        command: Option<u32>,
+        reply: mpsc::Sender<Result<(String, bool)>>,
     },
+    /// 按宿主 VT 当前的模式编好这些键写给程序，见 `HostSession::encode_keys`。
+    Keys(Vec<KeyChord>),
+    /// 按宿主 VT 当前的模式把这段文字当粘贴写给程序，见 `HostSession::encode_paste`。
+    Paste(String),
+    /// 谁最近在操作这个会话，见 `SessionMeta::driver`：`Some` 是别的终端里的程序经 socket 做了
+    /// 一件事，排在那件事前面；`None` 是用户在界面里打了字，清掉记录。
+    Driven(Option<Drive>),
     Kill,
+}
+
+/// 别的终端里的程序对会话做了什么，见 `Inbox::Driven`。
+pub(crate) struct Drive {
+    /// 发消息的程序所在的会话，见 `ClientMsg::Hello::session`。
+    pub(crate) by: Option<SessionId>,
+    pub(crate) action: DriveAction,
 }
 
 /// socket 上的前端连上一个会话。和进程内的 `Inbox::Attach` 不同，不补发攒着的事件，而是
@@ -137,13 +159,20 @@ pub(crate) struct Handle {
     /// 前端要结束会话。`Inbox::Kill` 排在积压的输出后面，会话线程处理每条消息前先看这个，
     /// 不用等积压的输出（最多 `PTY_BACKLOG_BYTES`）都喂完。
     killed: Arc<AtomicBool>,
+    /// 发过 `Inbox::Driven(Some(..))`、之后还没清过：桌面每次打字都要清一下，没被标过时
+    /// `Inbox::Driven(None)` 不必进收件箱。
+    driven: Arc<AtomicBool>,
 }
 
 impl Handle {
-    /// 发一条消息，会话线程已经结束时返回 false。
+    /// 发一条消息，会话线程已经结束时返回 false。没被标过的会话收到 `Inbox::Driven(None)` 时
+    /// 什么都不发，返回 true。
     pub(crate) fn send(&self, message: Inbox) -> bool {
-        if matches!(message, Inbox::Kill) {
-            self.killed.store(true, Ordering::Release);
+        match &message {
+            Inbox::Kill => self.killed.store(true, Ordering::Release),
+            Inbox::Driven(Some(_)) => self.driven.store(true, Ordering::Release),
+            Inbox::Driven(None) if !self.driven.swap(false, Ordering::AcqRel) => return true,
+            _ => {}
         }
         self.inbox.send(message).is_ok()
     }
@@ -194,7 +223,7 @@ pub(crate) fn spawn(
         })
         .context("failed to start the session thread")?;
     created.recv().map_err(|_| anyhow!("the session thread ended while starting"))??;
-    Ok(Handle { inbox, killed })
+    Ok(Handle { inbox, killed, driven: Arc::default() })
 }
 
 /// 会话线程里的状态。
@@ -421,9 +450,30 @@ impl Runner {
                     exited: self.exited,
                 });
             }
-            Inbox::ReadScreen { lines, reply } => {
-                let _ = reply.send(self.session.screen_text(lines));
+            Inbox::ReadScreen { lines, command, reply } => {
+                let text = match command {
+                    Some(n) => self.session.command_output(n),
+                    None => self.session.screen_text(lines).map(|text| (text, false)),
+                };
+                let _ = reply.send(text);
             }
+            Inbox::Keys(keys) => match self.session.encode_keys(&keys) {
+                Ok(bytes) if !bytes.is_empty() => self.session.write(bytes),
+                Ok(_) => {}
+                Err(err) => tracing::warn!("session {} cannot encode keys: {err:#}", self.id),
+            },
+            Inbox::Paste(text) => match self.session.encode_paste(&text) {
+                Ok(bytes) if !bytes.is_empty() => self.session.write(bytes),
+                Ok(_) => {}
+                Err(err) => tracing::warn!("session {} cannot encode a paste: {err:#}", self.id),
+            },
+            Inbox::Driven(Some(Drive { by, action })) => {
+                let at_ms = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map_or(0, |since| u64::try_from(since.as_millis()).unwrap_or(u64::MAX));
+                self.session.drive(by.map(|by| by.to_string()), action, at_ms);
+            }
+            Inbox::Driven(None) => self.session.clear_driver(),
             Inbox::Kill => {}
         }
     }

@@ -40,12 +40,12 @@ use runode_protocol::{
     AttachMode, ClientKind, ClientMsg, Frame, FrameError, FrameKind, GoodbyeReason, HostMsg, PROTOCOL_VERSION,
     SessionId, SessionInfo, read_frame, write_frame,
 };
-use runode_shared_types::grid::GridSize;
+use runode_shared_types::{grid::GridSize, input::parse_keys, session::DriveAction};
 use runode_terminal::pty;
 
 use crate::{
     Host, Shared, SpawnOptions, Stopped,
-    session::{Event, EventSink, Inbox, Screen, Subscribe},
+    session::{Drive, Event, EventSink, Inbox, Screen, Subscribe},
 };
 
 /// 快照分成这么大的帧发，不必一帧装下整份（上限见 `runode_protocol::MAX_PAYLOAD`）。
@@ -372,6 +372,7 @@ fn serve(shared: &Arc<Shared>, id: u64, stream: UnixStream, check_peer: bool) {
         id,
         out,
         kind: ClientKind::Unknown,
+        by: None,
         snapshots: false,
         channels: HashMap::new(),
         next_channel: 1,
@@ -489,6 +490,8 @@ struct Connection {
     out: Outbox,
     /// `Hello` 里说的前端种类。
     kind: ClientKind,
+    /// `Hello` 里说的前端所在的会话，记谁在操作会话时用，见 `drive`。
+    by: Option<SessionId>,
     /// 前端解得了快照：自己说能解，构建也和宿主一样。
     snapshots: bool,
     /// 连着的会话，按通道。
@@ -506,7 +509,7 @@ impl Connection {
                 return;
             }
         };
-        let Some(ClientMsg::Hello { protocol, build, caps, client, .. }) = hello else {
+        let Some(ClientMsg::Hello { protocol, build, caps, client, session }) = hello else {
             self.goodbye("the first message must be hello");
             return;
         };
@@ -519,6 +522,7 @@ impl Connection {
             return;
         }
         self.kind = client;
+        self.by = session;
         self.snapshots = caps.snapshot && build == self.shared.build;
         // 登记界面和回 `Welcome` 在同一把锁里做：界面收到 `Welcome` 后，别的连接转来的请求一定
         // 交给它；别的连接也只有在 `Welcome` 排进 `Outbox` 之后才看得到它，请求不会抢在前面。
@@ -550,6 +554,7 @@ impl Connection {
                 FrameKind::Input => match self.channels.get(&frame.channel) {
                     // 会话已经没了（比如别的前端结束了它）：通道跟着作废。
                     Some(&id) => {
+                        self.drive(id, DriveAction::Input);
                         if !self.shared.deliver(id, Inbox::Input(frame.payload)) {
                             self.channels.remove(&frame.channel);
                         }
@@ -594,11 +599,15 @@ impl Connection {
                 self.shared.send(id, Inbox::Detach { connection: self.id });
             }
             ClientMsg::Kill { id } => {
+                self.drive(id, DriveAction::Kill);
                 self.forget(id);
                 self.shared.kill(id);
             }
             ClientMsg::Resize { id, size } => self.shared.send(id, Inbox::Resize(size)),
-            ClientMsg::ClearScreen { id } => self.shared.send(id, Inbox::ClearScreen),
+            ClientMsg::ClearScreen { id } => {
+                self.drive(id, DriveAction::ClearScreen);
+                self.shared.send(id, Inbox::ClearScreen);
+            }
             ClientMsg::SetTheme { settings } => self.shared.set_theme(settings),
             // 记不记命令历史是用户在 app 里的设置，别的程序不能改。
             ClientMsg::SetOptions { record_history } => {
@@ -610,13 +619,15 @@ impl Connection {
             }
             // 通知在界面那边发，宿主不用知道哪个会话被看着。
             ClientMsg::Focus { .. } => {}
-            ClientMsg::ReadScreen { id, lines, command: None } => self.read_screen(id, lines),
-            ClientMsg::ReadScreen { id, command: Some(_), .. } => {
-                self.error(None, Some(id), "not supported yet".into());
+            ClientMsg::ReadScreen { id, lines, command } => self.read_screen(id, lines, command),
+            ClientMsg::SendKeys { req, id, keys } => {
+                let parsed: Result<Vec<_>, _> = keys.iter().map(|key| parse_keys(key)).collect();
+                match parsed {
+                    Ok(keys) => self.deliver_done(req, id, DriveAction::Keys, Inbox::Keys(keys.concat())),
+                    Err(err) => self.error(Some(req), Some(id), err.to_string()),
+                }
             }
-            ClientMsg::SendKeys { req, id, .. } | ClientMsg::Paste { req, id, .. } => {
-                self.error(Some(req), Some(id), "not supported yet".into());
-            }
+            ClientMsg::Paste { req, id, text } => self.deliver_done(req, id, DriveAction::Paste, Inbox::Paste(text)),
             ClientMsg::Open { req, .. } | ClientMsg::Reveal { req, .. } | ClientMsg::Layout { req } => {
                 self.to_ui(req, message);
             }
@@ -738,17 +749,22 @@ impl Connection {
         }
     }
 
-    /// 读屏幕：请求在这里送到会话线程（排在这条连接之前送去的输入后面），回话另起线程等。
-    fn read_screen(&self, id: SessionId, lines: Option<u32>) {
+    /// 读屏幕，`command` 给了时读倒数第几条命令的输出：请求在这里送到会话线程（排在这条连接
+    /// 之前送去的输入后面），回话另起线程等。
+    fn read_screen(&self, id: SessionId, lines: Option<u32>, command: Option<u32>) {
         let (reply, text) = mpsc::channel();
-        if !self.shared.deliver(id, Inbox::ReadScreen { lines, reply }) {
+        if !self.shared.deliver(id, Inbox::ReadScreen { lines, command, reply }) {
             self.error(None, Some(id), format!("no session {id}"));
             return;
         }
         let out = self.out.clone();
         answer_later("host-read-screen", move || {
             let message = match text.recv_timeout(REPLY_TIMEOUT) {
-                Ok(Ok(text)) => HostMsg::ScreenText { id, text, truncated: false },
+                Ok(Ok((text, truncated))) => HostMsg::ScreenText { id, text, truncated },
+                // 读命令输出时的错误（没有 shell 集成这类）本身就是给读的一方看的说明。
+                Ok(Err(err)) if command.is_some() => {
+                    HostMsg::Error { req: None, id: Some(id), message: format!("{err:#}") }
+                }
                 Ok(Err(err)) => {
                     HostMsg::Error { req: None, id: Some(id), message: format!("failed to read the screen: {err:#}") }
                 }
@@ -756,6 +772,25 @@ impl Connection {
             };
             out.control(&message);
         });
+    }
+
+    /// 这条连接要对会话做 `action`，先告诉会话谁在操作它（见 `SessionMeta::driver`）：桌面的
+    /// 界面上是用户自己，清掉记录（会话没被标过时 `Handle::send` 直接丢掉，不进收件箱）；别的
+    /// 前端记下来。只有会改会话的操作才调。
+    fn drive(&self, id: SessionId, action: DriveAction) {
+        let drive = (self.kind != ClientKind::Desktop).then_some(Drive { by: self.by, action });
+        self.shared.deliver(id, Inbox::Driven(drive));
+    }
+
+    /// 把一件只回 `Done` 的事（发控制键、粘贴）交给会话，先记下谁在操作它。会话线程按到达的先后
+    /// 处理，在这之后发来的输入不会抢到前面。
+    fn deliver_done(&self, req: u32, id: SessionId, action: DriveAction, message: Inbox) {
+        self.drive(id, action);
+        if self.shared.deliver(id, message) {
+            self.out.control(&HostMsg::Done { req });
+        } else {
+            self.error(Some(req), Some(id), format!("no session {id}"));
+        }
     }
 
     /// 不再记着这个会话的通道，之后它的输入帧不再转发；原来连着时返回 true。

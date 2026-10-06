@@ -89,13 +89,18 @@ impl Peer {
     }
 
     /// 握手，`snapshot` 时说自己能解同一个构建的快照。
-    pub fn greet(mut self, client: ClientKind, snapshot: bool) -> Self {
+    pub fn greet(self, client: ClientKind, snapshot: bool) -> Self {
+        self.greet_from(client, snapshot, None)
+    }
+
+    /// 握手，`session` 是前端自己所在的会话（在 runode 的终端里跑的命令行带着它）。
+    pub fn greet_from(mut self, client: ClientKind, snapshot: bool, session: Option<SessionId>) -> Self {
         self.send(&ClientMsg::Hello {
             protocol: PROTOCOL_VERSION,
             build: BuildId(BUILD.into()),
             client,
             caps: Caps { snapshot, vt_replay: true },
-            session: None,
+            session,
         });
         assert!(matches!(self.message(), HostMsg::Welcome { protocol: PROTOCOL_VERSION, .. }));
         self
