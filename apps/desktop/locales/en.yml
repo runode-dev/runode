@@ -68,6 +68,10 @@ agent:
   picker:
     none: No agents are running
     no_matches: No matching agents
+host:
+  incompatible_title: An older Runode terminal host is still running
+  incompatible_detail: "Terminals run inside this window for now, and command-line tools such as runode list cannot reach them. Quit the other Runode, or end its host process, then reopen Runode. (%{reason})"
+  ok: OK
 workspace:
   new: New Workspace
   choose: Open

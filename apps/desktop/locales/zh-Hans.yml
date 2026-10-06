@@ -68,6 +68,10 @@ agent:
   picker:
     none: 没有在运行的 agent
     no_matches: 没有匹配的 agent
+host:
+  incompatible_title: 旧版本 Runode 的终端宿主还在运行
+  incompatible_detail: 这次终端跑在 app 里，runode list 这类命令行连不上它们。退出另一个 Runode 或者结束它的宿主进程后，重新打开 Runode。（%{reason}）
+  ok: 好
 workspace:
   new: 新建工作区
   choose: 打开

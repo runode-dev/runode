@@ -1,14 +1,12 @@
 //! 别的进程经宿主请 app 办的事（`runode open`、`runode focus`）：在某个终端旁边开新终端，切到
-//! 某个终端。宿主在连接的线程里把 `UiRequest` 交过来，这里转到主线程，按会话找到它所在的窗口
-//! 和分屏再办。
-// 还在用宿主旧的进程内通路，改走 `Host::connect_pair` 时去掉。
-#![allow(deprecated)]
+//! 某个终端。宿主把请求包成 `HostMsg::UiRequest` 经连接转过来（见 `session_host::serve_ui`），这里
+//! 在主线程上按会话找到它所在的窗口和分屏再办，用 `Link::ui_reply` 回话。
 
 use std::path::PathBuf;
 
 use futures::StreamExt as _;
 use gpui::{App, Context, EntityId, Window, WindowHandle};
-use runode_host::{ClientMsg, HostMsg, Placement, SessionId, UiRequest};
+use runode_protocol::{ClientMsg, HostMsg, Placement, SessionId};
 use runode_shared_types::pane::Axis;
 
 use super::{WindowView, agents::reveal};
@@ -16,33 +14,37 @@ use crate::{persist, session_host};
 
 /// 开始收别的进程的请求。
 pub fn serve_requests(cx: &mut App) {
-    let (tx, mut rx) = futures::channel::mpsc::unbounded::<UiRequest>();
-    session_host::set_ui(Box::new(move |request| {
-        // app 在退出，主线程不再收了：请求丢掉时宿主替它回话。
-        let _ = tx.unbounded_send(request);
-    }));
+    let Some(mut requests) = session_host::serve_ui() else {
+        tracing::warn!("requests from other processes are already being served");
+        return;
+    };
     cx.spawn(async move |cx| {
-        while let Some(request) = rx.next().await {
-            cx.update(|cx| handle(request, cx));
+        while let Some((ui, request)) = requests.next().await {
+            let reply = cx.update(|cx| handle(request, cx));
+            session_host::link().ui_reply(ui, reply);
         }
     })
     .detach();
 }
 
-fn handle(request: UiRequest, cx: &mut App) {
-    match request.message {
-        ClientMsg::Open { req, placement, near, ref cwd, focus } => {
+/// 办一条请求，返回回话。
+fn handle(request: ClientMsg, cx: &mut App) -> HostMsg {
+    let fail = |req: u32, message: String| HostMsg::Error { req: Some(req), id: None, message };
+    match request {
+        ClientMsg::Open { req, placement, near, cwd, focus } => {
             let target = match near {
                 Some(id) => find_session(id, cx),
                 None => front_pane(cx),
             };
             let Some((window, pane)) = target else {
-                return request.fail(match near {
-                    Some(id) => format!("no runode window shows session {id}"),
-                    None => "there is no runode window to open it in".into(),
-                });
+                return fail(
+                    req,
+                    match near {
+                        Some(id) => format!("no runode window shows session {id}"),
+                        None => "there is no runode window to open it in".into(),
+                    },
+                );
             };
-            let cwd = cwd.clone();
             let opened = window
                 .update(cx, |view, window, cx| view.open_beside(pane, placement, cwd, focus, window, cx))
                 .ok()
@@ -52,19 +54,20 @@ fn handle(request: UiRequest, cx: &mut App) {
                     if focus {
                         reveal(window, pane_of(window, id, cx).unwrap_or(pane), cx);
                     }
-                    request.reply(HostMsg::Opened { req, id });
+                    HostMsg::Opened { req, id }
                 }
-                None => request.fail("could not start a terminal"),
+                None => fail(req, "could not start a terminal".into()),
             }
         }
         ClientMsg::Reveal { req, id } => match find_session(id, cx) {
             Some((window, pane)) => {
                 reveal(window, pane, cx);
-                request.reply(HostMsg::Done { req });
+                HostMsg::Done { req }
             }
-            None => request.fail(format!("no runode window shows session {id}")),
+            None => fail(req, format!("no runode window shows session {id}")),
         },
-        _ => request.fail("the runode app does not handle this request"),
+        ClientMsg::Layout { req } => fail(req, "the runode app does not handle this request".into()),
+        other => HostMsg::Error { req: None, id: None, message: format!("the runode app does not handle {other:?}") },
     }
 }
 

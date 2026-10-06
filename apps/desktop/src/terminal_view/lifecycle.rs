@@ -1,26 +1,32 @@
 //! 终端视图的生命周期：在宿主里开会话、连上它、启动 shell、处理宿主发来的输出和状态，以及
 //! 光标闪烁和同步输出的计时器。前台进程的轮询和 agent 状态的判断在宿主里，结果随
 //! `HostMsg::Meta` 到达。
-// 还在用宿主旧的进程内通路，改走 `Host::connect_pair` 时去掉。
-#![allow(deprecated)]
+//!
+//! 和宿主之间经 `session_host::link()` 说话：连上会话时宿主给一份当时的屏幕（同一个构建时是
+//! 快照，否则是 VT 重放），之后的输出和标记按先后到达。响铃只认宿主的 `HostMsg::Bell`，不看界面
+//! 这份 VT 的 `on_bell`：两边认的是同一个 BEL，都认会响两次；宿主那份在视图只看状态时也认得到，
+//! VT 重放出来的屏幕也不会再响一遍。
 
 use std::{
     collections::HashMap,
-    sync::Arc,
     time::{Duration, Instant},
 };
 
 use futures::{FutureExt as _, StreamExt as _, channel::mpsc::UnboundedReceiver};
 use gpui::{App, AppContext as _, Context, Entity, Font, Point, SharedString, Task, Window, font, px};
-use runode_host::{ClientMsg, HostEvent, HostMsg, SessionId, SpawnOptions};
-use runode_shared_types::{agent::Agent, color::Rgb, grid::GridSize, session::SessionMeta};
+use runode_protocol::{AttachMode, ClientMsg, HostMsg, SessionId};
+use runode_shared_types::{agent::Agent, color::Rgb, grid::GridSize, session::SessionMeta, settings::TermSettings};
 use runode_terminal::{
     history,
-    session::{Request, SYNC_OUTPUT_TIMEOUT, Session},
+    session::{self, Request, SYNC_OUTPUT_TIMEOUT, Session},
 };
 
 use super::{DEFAULT_TITLE, MAX_FONT_SIZE, MIN_FONT_SIZE, TerminalEvent, TerminalView};
-use crate::{config::AppConfig, prespawn::Prespawned, session_host};
+use crate::{
+    config::AppConfig,
+    prespawn::Prespawned,
+    session_host::{self, LinkEvent, Screen, SpawnOptions},
+};
 
 /// 配置的字体都不可用时使用的等宽字体，macOS 自带。
 const FALLBACK_FONT_FAMILY: &str = "Menlo";
@@ -33,29 +39,53 @@ const EARLY_OUTPUT_LIMIT: usize = 64 * 1024;
 const MAX_OUTPUT_BATCH: usize = 1024 * 1024;
 /// 光标闪烁时亮、灭各持续的时长。
 const CURSOR_BLINK_INTERVAL: Duration = Duration::from_millis(600);
+/// 连上会话时最多等这么久宿主给的第一份屏幕。
+const ATTACH_TIMEOUT: Duration = Duration::from_secs(5);
 
-/// 连上宿主里的会话 `id`，建好界面这边的 `Session`，返回它、收事件的一端和 shell 是否已经
-/// 启动。连不上时结束这个会话。
-fn connect(id: SessionId) -> anyhow::Result<(Session, UnboundedReceiver<HostEvent>, bool)> {
-    let client = session_host::client();
-    let (tx, rx) = futures::channel::mpsc::unbounded();
-    let connected = client.attach(id, Box::new(move |event| tx.unbounded_send(event).is_ok())).and_then(|attached| {
-        let sender = Box::new(move |request| match request {
-            Request::Input(data) => client.input(id, data),
-            Request::Resize(size) => client.send(ClientMsg::Resize { id, size }),
-            Request::ClearScreen => client.send(ClientMsg::ClearScreen { id }),
-        });
-        let mut session = Session::new(attached.size, &attached.settings, sender)?;
-        session.apply_meta(attached.meta);
-        Ok((session, attached.started))
-    });
-    match connected {
-        Ok((session, started)) => Ok((session, rx, started)),
-        Err(err) => {
-            client.send(ClientMsg::Kill { id });
-            Err(err)
+/// 界面这边的 `Session` 要宿主做的事，经连接发给会话 `id`。
+fn sender(id: SessionId) -> session::Sender {
+    Box::new(move |request| {
+        let link = session_host::link();
+        match request {
+            Request::Input(data) => link.input(id, &data),
+            Request::Resize(size) => link.send(ClientMsg::Resize { id, size }),
+            Request::ClearScreen => link.send(ClientMsg::ClearScreen { id }),
         }
+    })
+}
+
+/// 按宿主给的屏幕建界面这边的 `Session`：快照直接解出来；VT 重放按宿主给的尺寸和主题（没给时
+/// 用 `fallback`）新建一份 VT 再喂。宿主公布的状态也写进去，另外返回一份给视图记着。
+fn build_session(id: SessionId, screen: Screen, fallback: &TermSettings) -> anyhow::Result<(Session, SessionMeta)> {
+    let Screen { attached, data } = screen;
+    let mut session = match attached.mode {
+        AttachMode::Snapshot => Session::from_snapshot(&data, sender(id))?,
+        AttachMode::VtReplay | AttachMode::MetaOnly => {
+            let settings = attached.settings.as_ref().unwrap_or(fallback);
+            let mut session = Session::new(attached.size, settings, sender(id))?;
+            session.feed(&data);
+            session
+        }
+    };
+    session.apply_meta(attached.meta.clone());
+    Ok((session, attached.meta))
+}
+
+/// 连上宿主里的会话 `id`，等它给第一份屏幕，建好界面这边的 `Session`，返回它和收之后的事件的
+/// 一端。连不上时结束这个会话。
+fn connect(
+    id: SessionId,
+    fallback: &TermSettings,
+) -> anyhow::Result<(Session, SessionMeta, UnboundedReceiver<LinkEvent>)> {
+    let link = session_host::link();
+    let connected = link.attach_now(id, None, AttachMode::Snapshot, ATTACH_TIMEOUT).and_then(|(screen, rx)| {
+        let (session, meta) = build_session(id, screen, fallback)?;
+        Ok((session, meta, rx))
+    });
+    if connected.is_err() {
+        link.kill(id);
     }
+    connected
 }
 
 impl TerminalView {
@@ -70,17 +100,18 @@ impl TerminalView {
     /// 建好视图但先不启动 shell，等 `start` 时再在 `cwd` 下启动。恢复布局时看不见的终端用它，
     /// 不切过去就不占进程。
     pub fn unstarted(cwd: Option<&std::path::Path>, window: &mut Window, cx: &mut App) -> anyhow::Result<Entity<Self>> {
-        let integration = cx.global::<AppConfig>().0.shell_integration;
-        let id = session_host::client().spawn(SpawnOptions {
+        let config = cx.global::<AppConfig>().0.clone();
+        let id = session_host::link().spawn(SpawnOptions {
             size: PROVISIONAL_SIZE,
             cwd: cwd.map(Into::into),
-            integration,
+            integration: config.shell_integration,
             start: false,
             shell: None,
             settings: None,
+            env: Vec::new(),
         })?;
-        let (session, rx, started) = connect(id)?;
-        Ok(cx.new(|cx| Self::new(id, session, started, rx, window, cx)))
+        let (session, meta, rx) = connect(id, &config.term_settings())?;
+        Ok(cx.new(|cx| Self::new(id, session, meta, false, rx, window, cx)))
     }
 
     pub fn started(&self) -> bool {
@@ -101,12 +132,12 @@ impl TerminalView {
         if std::mem::replace(&mut self.started, true) {
             return;
         }
-        session_host::client().start(self.id, self.config.shell_integration);
+        session_host::link().send(ClientMsg::Start { id: self.id, integration: self.config.shell_integration });
     }
 
     /// 收宿主发来的事件的任务：把排队的事件合并成一批处理，再重绘。
     fn read_events(
-        mut rx: impl futures::Stream<Item = HostEvent> + Unpin + 'static,
+        mut rx: impl futures::Stream<Item = LinkEvent> + Unpin + 'static,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Task<()> {
@@ -121,9 +152,9 @@ impl TerminalView {
                     bytes += output_len(&event);
                     events.push(event);
                 }
-                let exited = events.iter().any(is_exited);
+                let exited = events.iter().any(ends);
                 let updated = this.update_in(cx, |view, window, cx| {
-                    view.handle_host_events(events, window, cx);
+                    view.handle_link_events(events, window, cx);
                     view.ring_bell(cx);
                 });
                 if updated.is_err() || exited {
@@ -136,17 +167,28 @@ impl TerminalView {
     /// 按先后处理宿主发来的一批事件：输出喂给 VT（连着的几块合成一次写入），在标出的位置改
     /// 尺寸、换主题，写入对外公布的状态，转发标题、退出等事件，再重绘。响铃留给调用方用
     /// `ring_bell` 转发，见 `new`；这一批里有退出时在退出之前转发。
-    fn handle_host_events(&mut self, events: Vec<HostEvent>, window: &mut Window, cx: &mut Context<Self>) {
-        let mut pending: Vec<Arc<[u8]>> = Vec::new();
+    fn handle_link_events(&mut self, events: Vec<LinkEvent>, window: &mut Window, cx: &mut Context<Self>) {
+        let mut pending: Vec<Vec<u8>> = Vec::new();
         let mut fed = false;
         let mut exited = false;
         for event in events {
             let message = match event {
-                HostEvent::Output(data) => {
+                LinkEvent::Output(data) => {
                     pending.push(data);
                     continue;
                 }
-                HostEvent::Msg(message) => *message,
+                LinkEvent::Msg(message) => message,
+                LinkEvent::Screen(screen) => {
+                    fed |= self.feed_output(&mut pending, cx);
+                    self.replace_screen(screen, cx);
+                    continue;
+                }
+                LinkEvent::Lost => {
+                    fed |= self.feed_output(&mut pending, cx);
+                    // 画面停在最后一屏。
+                    tracing::warn!("session {} lost its host", self.id);
+                    continue;
+                }
             };
             fed |= self.feed_output(&mut pending, cx);
             match message {
@@ -175,7 +217,14 @@ impl TerminalView {
                         });
                     }
                 }
+                HostMsg::Bell { .. } => self.bell_pending = true,
                 HostMsg::Exited { .. } => exited = true,
+                // 宿主没法再保证两份 VT 一样（这边读得太慢）：重新连上，从新的屏幕接着。
+                HostMsg::Resync { reason, .. } => {
+                    tracing::info!("session {} resyncs: {reason}", self.id);
+                    session_host::link().reattach(self.id, None, AttachMode::Snapshot);
+                }
+                HostMsg::Error { message, .. } => tracing::warn!("session {}: {message}", self.id),
                 _ => {}
             }
         }
@@ -196,15 +245,31 @@ impl TerminalView {
         cx.notify();
     }
 
-    /// 程序响过铃的话通知外层。
+    /// 程序响过铃（宿主发了 `HostMsg::Bell`）的话通知外层。
     fn ring_bell(&mut self, cx: &mut Context<Self>) {
-        if self.session.take_bell() {
+        if std::mem::take(&mut self.bell_pending) {
             cx.emit(TerminalEvent::Bell);
         }
     }
 
+    /// 重新连上后宿主给了新的屏幕：换上按它建的 `Session`，之后的输出接着它喂。建不出来时留着
+    /// 原来的。
+    fn replace_screen(&mut self, screen: Screen, cx: &mut Context<Self>) {
+        match build_session(self.id, screen, &self.config.term_settings()) {
+            Ok((mut session, meta)) => {
+                session.apply_config(&self.config.term_settings());
+                session.exited = self.session.exited;
+                self.session = session;
+                self.meta = meta;
+                self.input_changed = true;
+                cx.emit(TerminalEvent::TitleChanged);
+            }
+            Err(err) => tracing::warn!("failed to rebuild session {} from the host: {err:#}", self.id),
+        }
+    }
+
     /// 把攒着的几块输出一次喂给 VT，返回是否喂了。
-    fn feed_output(&mut self, pending: &mut Vec<Arc<[u8]>>, cx: &mut Context<Self>) -> bool {
+    fn feed_output(&mut self, pending: &mut Vec<Vec<u8>>, cx: &mut Context<Self>) -> bool {
         match pending.len() {
             0 => return false,
             1 => self.session.feed(&pending[0]),
@@ -220,7 +285,8 @@ impl TerminalView {
     /// 换一个按实际尺寸启动的 shell。不直接调整尺寸：那时提示符多半已经画好，shell 收到尺寸
     /// 变化会重画提示符，可能正赶上插件管理器延迟加载插件、临时切进了插件目录，画出错的路径。
     pub(super) fn respawn(&mut self, size: GridSize, window: &mut Window, cx: &mut Context<Self>) {
-        let spawned = session_host::client()
+        let link = session_host::link();
+        let spawned = link
             .spawn(SpawnOptions {
                 size,
                 cwd: None,
@@ -228,9 +294,10 @@ impl TerminalView {
                 start: true,
                 shell: None,
                 settings: None,
+                env: Vec::new(),
             })
-            .and_then(|id| Ok((id, connect(id)?)));
-        let (id, (mut session, rx, started)) = match spawned {
+            .and_then(|id| Ok((id, connect(id, &self.config.term_settings())?)));
+        let (id, (mut session, meta, rx)) = match spawned {
             Ok(spawned) => spawned,
             Err(err) => {
                 tracing::warn!("failed to restart the early shell at its real size: {err:#}");
@@ -241,9 +308,10 @@ impl TerminalView {
         session.apply_config(&self.config.term_settings());
         // 换下来的会话随之结束。
         let old = std::mem::replace(&mut self.id, id);
-        session_host::client().send(ClientMsg::Kill { id: old });
+        link.kill(old);
+        self.meta = meta;
         self.session = session;
-        self.started = started;
+        self.started = true;
         self._reader = Self::read_events(rx, window, cx);
     }
 
@@ -251,9 +319,9 @@ impl TerminalView {
     pub fn adopt(shell: Prespawned, window: &mut Window, cx: &mut App) -> anyhow::Result<Entity<Self>> {
         let size = shell.size;
         let id = shell.into_id();
-        let (session, rx, started) = connect(id)?;
+        let (session, meta, rx) = connect(id, &cx.global::<AppConfig>().0.term_settings())?;
         Ok(cx.new(|cx| {
-            let mut view = Self::new(id, session, started, rx, window, cx);
+            let mut view = Self::new(id, session, meta, true, rx, window, cx);
             view.adopted_size = Some(size);
             view
         }))
@@ -262,8 +330,9 @@ impl TerminalView {
     fn new(
         id: SessionId,
         session: Session,
+        meta: SessionMeta,
         started: bool,
-        mut rx: UnboundedReceiver<HostEvent>,
+        mut rx: UnboundedReceiver<LinkEvent>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
@@ -306,7 +375,8 @@ impl TerminalView {
             session,
             id,
             ended: false,
-            meta: SessionMeta::default(),
+            meta,
+            bell_pending: false,
             started,
             font: resolve_font(&config.font_family, window),
             font_size: px(config.font_size.clamp(MIN_FONT_SIZE, MAX_FONT_SIZE)),
@@ -355,7 +425,7 @@ impl TerminalView {
         while bytes < EARLY_OUTPUT_LIMIT
             && let Ok(event) = rx.try_recv()
         {
-            if is_exited(&event) {
+            if ends(&event) {
                 exited_early = Some(event);
                 break;
             }
@@ -363,7 +433,7 @@ impl TerminalView {
             early.push(event);
         }
         if !early.is_empty() {
-            view.handle_host_events(early, window, cx);
+            view.handle_link_events(early, window, cx);
             // 补发的输出里响过铃的话，这时通知外层会丢：订阅要等这一轮的副作用处理到时才生效，
             // 排在它前面发出的事件没人收。推迟到外层订阅好以后再通知。
             cx.defer_in(window, |view, _, cx| view.ring_bell(cx));
@@ -378,7 +448,7 @@ impl TerminalView {
     }
 
     /// 宿主最近一次公布的这个会话的状态。
-    // 接口骨架：关闭路径和后台标签用上它们之前先放着。
+    // 关闭路径、后台标签和存档恢复用上它之前先放着。
     #[allow(dead_code)]
     pub fn meta(&self) -> &SessionMeta {
         &self.meta
@@ -389,7 +459,7 @@ impl TerminalView {
     #[allow(dead_code)]
     pub fn end(&mut self) {
         if !std::mem::replace(&mut self.ended, true) {
-            session_host::client().send(ClientMsg::Kill { id: self.id });
+            session_host::link().kill(self.id);
         }
     }
 
@@ -518,13 +588,14 @@ fn resolve_font(families: &[String], window: &Window) -> Font {
 }
 
 /// 事件里输出的字节数，合并批次时用。
-fn output_len(event: &HostEvent) -> usize {
+fn output_len(event: &LinkEvent) -> usize {
     match event {
-        HostEvent::Output(data) => data.len(),
-        HostEvent::Msg(_) => 0,
+        LinkEvent::Output(data) => data.len(),
+        _ => 0,
     }
 }
 
-fn is_exited(event: &HostEvent) -> bool {
-    matches!(event, HostEvent::Msg(message) if matches!(**message, HostMsg::Exited { .. }))
+/// 这件事之后不会再有这个会话的事件：shell 退出了，或者和宿主断开了。
+fn ends(event: &LinkEvent) -> bool {
+    matches!(event, LinkEvent::Lost | LinkEvent::Msg(HostMsg::Exited { .. }))
 }

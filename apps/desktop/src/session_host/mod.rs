@@ -7,10 +7,6 @@
 //! 主题和要不要记命令历史跟着配置走，见 `configure`；别的进程经宿主请界面办的事见 `serve_ui`；
 //! 连接断了以后用 `reconnect` 重新连上。
 
-// 接口骨架：桌面还走宿主旧的进程内通路，接上 `Link` 时去掉这两行。
-#![allow(deprecated)]
-#![allow(dead_code, unused_imports)]
-
 mod launch;
 mod link;
 
@@ -23,11 +19,14 @@ use std::{
 
 use anyhow::{Result, anyhow};
 use futures::channel::mpsc::UnboundedReceiver;
+use gpui::{App, PromptLevel};
 use runode_config::Config;
-use runode_host::{BuildId, Client, ClientMsg, Host};
+use runode_host::{BuildId, ClientMsg, Host};
 use runode_protocol::SessionInfo;
 
 use launch::{Choice, Probe};
+// `Attached` 给视图状态机（重新连上、只看状态）用。
+#[allow(unused_imports)]
 pub use link::{Attached, ConnectError, Link, LinkEvent, Screen, SpawnOptions};
 
 /// 宿主现在怎么跑。
@@ -42,6 +41,7 @@ pub enum Mode {
 }
 
 /// 列会话最多等这么久。
+#[allow(dead_code)]
 const LIST_TIMEOUT: Duration = Duration::from_secs(2);
 /// 让留下的宿主退出后，最多等这么久拿到它放开的锁、开自己的 socket。
 const LISTEN_RETRY: Duration = Duration::from_secs(2);
@@ -107,6 +107,8 @@ pub fn link() -> &'static Link {
 }
 
 /// 宿主现在怎么跑。
+// 退出（是否保留会话）和断开后的提示用上它之前先放着。
+#[allow(dead_code)]
 pub fn mode() -> Mode {
     *MODE.lock().unwrap_or_else(PoisonError::into_inner)
 }
@@ -133,6 +135,8 @@ pub fn serve_ui() -> Option<UnboundedReceiver<(u64, ClientMsg)>> {
 /// 和宿主的连接断了以后重新连上：跑在 app 里时重开一对 socket；单独一个进程时重连它的 socket，
 /// 没有就重新拉起（`terminal-host` 已经关了、只是接回上次的会话时，改成跑在 app 里）。重连期间
 /// 最多卡住调用的线程约 2 秒。已经连着时什么都不做。之前的会话要重新 `attach`。
+// 宿主断开后「在原目录重开」用上它之前先放着。
+#[allow(dead_code)]
 pub fn reconnect() -> Result<()> {
     let link = link();
     if link.connected() {
@@ -163,6 +167,8 @@ pub fn reconnect() -> Result<()> {
 }
 
 /// 宿主里所有的会话。
+// 存档恢复和后台会话用上它之前先放着。
+#[allow(dead_code)]
 pub fn list_sessions() -> Result<Vec<SessionInfo>> {
     link().list_sessions(LIST_TIMEOUT)
 }
@@ -278,35 +284,21 @@ fn listen_in_app(host: &Host) {
     }
 }
 
-// ---- 旧的进程内通路，视图改走 `link` 后删掉。
-
-/// 全进程共用的进程内连接。
-pub fn client() -> &'static Client {
-    static CLIENT: OnceLock<Client> = OnceLock::new();
-    CLIENT.get_or_init(|| old_host().connect_in_process())
-}
-
-fn old_host() -> &'static Host {
-    static HOST: OnceLock<Host> = OnceLock::new();
-    HOST.get_or_init(|| Host::new(build()))
-}
-
-/// 开宿主的 socket，见 `listen_in_app`。
-pub fn listen() {
-    if let Ok(exe) = std::env::current_exe() {
-        old_host().set_env(runode_cli::ENV_BIN, exe);
+/// 有要告诉用户的宿主的事（见 `Notice`）时，在最前面的窗口上弹框说一声。
+pub fn show_notice(cx: &mut App) {
+    let Some(Notice::Incompatible(reason)) = take_notice() else { return };
+    let Some(window) = cx.active_window().or_else(|| cx.windows().into_iter().next()) else {
+        return;
+    };
+    let title = rust_i18n::t!("host.incompatible_title");
+    let detail = rust_i18n::t!("host.incompatible_detail", reason = reason);
+    let answer = window.update(cx, |_, window, cx| {
+        window.prompt(PromptLevel::Warning, &title, Some(&detail), &[&*rust_i18n::t!("host.ok")], cx)
+    });
+    if let Ok(answer) = answer {
+        cx.spawn(async move |_| {
+            let _ = answer.await;
+        })
+        .detach();
     }
-    listen_in_app(old_host());
-}
-
-/// 登记办 `runode_host::UiRequest` 的界面。
-pub fn set_ui(handler: runode_host::UiHandler) {
-    old_host().set_ui(handler);
-}
-
-/// 旧通路的 `configure`。
-pub fn configure_old(config: &Config) {
-    let client = client();
-    client.send(ClientMsg::SetTheme { settings: config.term_settings() });
-    client.send(ClientMsg::SetOptions { record_history: config.command_suggestions });
 }

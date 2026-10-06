@@ -1,6 +1,6 @@
 //! 启动时提前拉起第一个终端的 shell。shell 读完启动配置要几十毫秒，放在后台和 GPUI
 //! 初始化、建窗口同时进行，等视图建好时提示符多半已经输出，第一帧就能画出来。shell 由宿主
-//! 拉起，在视图连上之前的输出由宿主攒着，连上时补发。
+//! 拉起，视图连上时宿主给一份当时的屏幕，之前的输出都在里面。
 //!
 //! 伪终端的行列数得在窗口量出来之前定下，所以沿用上次启动时第一个终端量到的尺寸，连同
 //! 影响尺寸的那几项配置记在缓存目录里。配置变了或者还没有记录时不提前启动，照常在建视图
@@ -11,14 +11,17 @@ use std::{
     sync::{
         Mutex,
         atomic::{AtomicBool, Ordering},
+        mpsc,
     },
-    thread::{self, JoinHandle},
+    thread,
 };
 
-use runode_host::{ClientMsg, SessionId, SpawnOptions};
+use runode_protocol::SessionId;
 use runode_shared_types::grid::GridSize;
 
 use runode_config::Config;
+
+use crate::session_host::{self, SpawnOptions};
 
 /// 宿主里提前启动好的 shell，以及启动时用的尺寸。没被视图接走就丢掉时结束它。
 pub struct Prespawned {
@@ -36,47 +39,48 @@ impl Prespawned {
 impl Drop for Prespawned {
     fn drop(&mut self) {
         if let Some(id) = self.id.take() {
-            crate::session_host::client().send(ClientMsg::Kill { id });
+            session_host::link().kill(id);
         }
     }
 }
 
-static PENDING: Mutex<Option<JoinHandle<Option<Prespawned>>>> = Mutex::new(None);
+static PENDING: Mutex<Option<mpsc::Receiver<Option<Prespawned>>>> = Mutex::new(None);
 
-/// 在后台线程里读记下的尺寸并启动 shell，不耽误主线程初始化 GPUI。
-pub fn start() {
-    let spawned = thread::Builder::new().name("prespawn".into()).spawn(|| {
-        // 配置有问题时由主线程加载配置时报告，这里不重复。
-        let config =
-            tracing::subscriber::with_default(tracing::subscriber::NoSubscriber::default(), || Config::load(true));
-        let size = recorded(&key(&config))?;
-        let spawned = crate::session_host::client().spawn(SpawnOptions {
-            size,
-            cwd: None,
-            integration: config.shell_integration,
-            start: true,
-            shell: None,
-            // 宿主还没从主线程拿到配置时先用这里读的；主线程的配置到了、主题不一样时再换。
-            settings: Some(config.term_settings()),
-        });
-        match spawned {
-            Ok(id) => Some(Prespawned { size, id: Some(id) }),
-            Err(err) => {
-                tracing::warn!("failed to start the shell early: {err:#}");
-                None
-            }
-        }
+/// 返回连上宿主之后在 `session_host::start` 的后台线程里要做的事：按记下的尺寸启动 shell，不耽误
+/// 主线程初始化 GPUI。主线程用 `take` 取。
+pub fn start() -> impl FnOnce(&Config) + Send + 'static {
+    let (tx, rx) = mpsc::channel();
+    *PENDING.lock().unwrap_or_else(|e| e.into_inner()) = Some(rx);
+    move |config| {
+        let _ = tx.send(spawn(config));
+    }
+}
+
+fn spawn(config: &Config) -> Option<Prespawned> {
+    let size = recorded(&key(config))?;
+    let spawned = session_host::link().spawn(SpawnOptions {
+        size,
+        cwd: None,
+        integration: config.shell_integration,
+        start: true,
+        shell: None,
+        // 宿主还没从主线程拿到配置时先用这里读的；主线程的配置到了、主题不一样时再换。
+        settings: Some(config.term_settings()),
+        env: Vec::new(),
     });
     match spawned {
-        Ok(handle) => *PENDING.lock().unwrap_or_else(|e| e.into_inner()) = Some(handle),
-        Err(err) => tracing::warn!("failed to start the prespawn thread: {err}"),
+        Ok(id) => Some(Prespawned { size, id: Some(id) }),
+        Err(err) => {
+            tracing::warn!("failed to start the shell early: {err:#}");
+            None
+        }
     }
 }
 
 /// 取走提前启动的 shell；后台线程还没做完时等它。只有第一次调用可能取到。
 pub fn take() -> Option<Prespawned> {
-    let handle = PENDING.lock().unwrap_or_else(|e| e.into_inner()).take()?;
-    handle.join().ok().flatten()
+    let pending = PENDING.lock().unwrap_or_else(|e| e.into_inner()).take()?;
+    pending.recv().ok().flatten()
 }
 
 /// 记下启动时第一个终端量到的尺寸，供下次启动用。只有进程里的第一次调用算数，

@@ -68,6 +68,10 @@ agent:
   picker:
     none: 沒有在執行的 agent
     no_matches: 沒有相符的 agent
+host:
+  incompatible_title: 舊版 Runode 的終端機宿主還在執行
+  incompatible_detail: 這次終端機跑在 app 裡，runode list 這類指令列連不上它們。結束另一個 Runode 或者它的宿主程序後，重新開啟 Runode。（%{reason}）
+  ok: 好
 workspace:
   new: 新增工作區
   choose: 打開

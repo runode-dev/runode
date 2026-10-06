@@ -28,7 +28,7 @@ use gpui::{
     Render, ShapedLine, Subscription, Task, Window, actions, div, prelude::*, px, rgb,
 };
 use runode_config::Config;
-use runode_host::{ClientMsg, SessionId};
+use runode_protocol::SessionId;
 use runode_shared_types::{color::Rgb, grid::GridSize, session::SessionMeta};
 use runode_terminal::{history, session::Session};
 
@@ -125,6 +125,8 @@ pub struct TerminalView {
     ended: bool,
     /// 宿主最近一次公布的这个会话的状态。
     meta: SessionMeta,
+    /// 宿主发来了 `HostMsg::Bell`，还没通知外层，见 `ring_bell`。
+    bell_pending: bool,
     /// 已经请宿主启动了 shell。
     started: bool,
     config: Arc<Config>,
@@ -201,7 +203,7 @@ impl EventEmitter<TerminalEvent> for TerminalView {}
 impl Drop for TerminalView {
     fn drop(&mut self) {
         if !self.ended {
-            crate::session_host::client().send(ClientMsg::Kill { id: self.id });
+            crate::session_host::link().kill(self.id);
         }
     }
 }

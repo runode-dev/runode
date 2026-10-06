@@ -1,11 +1,13 @@
-//! runode：面向 AI 编程 agent 的桌面工作台。终端在进程内用 libghostty-vt 仿真，
-//! 窗口和绘制用 GPUI。带子命令启动时是命令行（`runode list` 等），不开窗口，见 `runode_cli`。
+//! runode：面向 AI 编程 agent 的桌面工作台。终端用 libghostty-vt 仿真，窗口和绘制用 GPUI。
+//! 带子命令启动时是命令行（`runode list` 等），不开窗口，见 `runode_cli`；`runode --host` 是单独
+//! 一个进程跑的终端宿主，见 `host_process`。
 
 mod about;
 mod agent_alert;
 mod assets;
 mod config;
 mod file_icons;
+mod host_process;
 mod i18n;
 mod keybinds;
 mod keys;
@@ -32,6 +34,9 @@ use crate::window::{open_window, open_window_with};
 
 fn main() {
     let args: Vec<std::ffi::OsString> = std::env::args_os().skip(1).collect();
+    if args == ["--host"] {
+        std::process::exit(host_process::run());
+    }
     if runode_cli::wants_cli(&args) {
         let args: Vec<String> = args.iter().map(|arg| arg.to_string_lossy().into_owned()).collect();
         let env = runode_cli::Env::from_process(env!("RUNODE_BUILD"));
@@ -44,10 +49,13 @@ fn main() {
                 .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
         )
         .init();
-    // 先开 socket，之后启动的 shell（包括提前拉起的那个）才知道命令行该连哪里。
-    session_host::listen();
-    // shell 启动要几十毫秒，先在后台拉起来，和 GPUI 初始化同时进行。
-    prespawn::start();
+    // 每个终端占两个描述符，从 Finder 启动时软上限只有 256。
+    if let Err(err) = runode_terminal::pty::raise_fd_limit() {
+        tracing::warn!("failed to raise the open file limit: {err}");
+    }
+    // 在后台线程里读配置、定宿主怎么跑、连上它，再提前拉起第一个 shell（启动要几十毫秒），和 GPUI
+    // 初始化同时进行；主线程第一次用到宿主时等它连好。
+    session_host::start(prespawn::start());
 
     application().with_assets(assets::Assets).run(|cx: &mut App| {
         config::install(cx);
@@ -72,6 +80,7 @@ fn main() {
             open_window_with(cx, options, Some(saved), shell.take());
         }
         cx.activate(true);
+        session_host::show_notice(cx);
         // 窗口先出来；未打包运行时才需要的图标解码放到最后。
         about::install_icon();
     });
