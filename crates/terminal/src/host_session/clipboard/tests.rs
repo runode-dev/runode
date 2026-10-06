@@ -96,6 +96,13 @@ fn reads_are_recognized_however_they_are_split_or_ended() {
     // 任何 ESC 都结束 OSC：后面不是 `\` 也算以 ST 结尾，接着开始的是一条新的序列。
     every_split(b"\x1b]52;c;?\x1b]0;title\x07", &[read(b'c', false)]);
     every_split(b"\x1b\x1b]52;c;?\x07", &[read(b'c', true)]);
+    // ESC 和 `]` 之间的控制字符 VT 照常执行，仍是 OSC。
+    every_split(b"\x1b\n]52;c;?\x07", &[read(b'c', true)]);
+    every_split(b"\x1b\x7f]52;c;?\x07", &[read(b'c', true)]);
+    // 别的字符串里的 ESC 结束那条字符串，接着的是 OSC。
+    for start in [&b"\x1bPq"[..], b"\x1b_G", b"\x1b^", b"\x1bX", b"\x1b]2;title"] {
+        every_split(&[start, b"\x1b]52;c;?\x07"].concat(), &[read(b'c', true)]);
+    }
 }
 
 #[test]
@@ -110,6 +117,15 @@ fn only_queries_the_vt_also_sees_count() {
         b"\x1b]52;c?\x07",
         // ESC 和 `]` 之间夹着别的字节就不是 OSC 了。
         b"\x1b(]52;c;?\x07",
+        b"\x1b\x18]52;c;?\x07",
+        // DCS、APC、PM、SOS 的内容里出现的字样（没有 ESC 就还在那条字符串里）。
+        b"\x1bPq]52;c;?\x07\x1b\\",
+        b"\x1b_G]52;c;?\x07\x1b\\",
+        b"\x1b^]52;c;?\x07\x1b\\",
+        b"\x1bX]52;c;?\x07\x1b\\",
+        // 8 位的 C1 控制字符不认：单个字节的 OSC 开头、ST（在 OSC 里是内容）。
+        b"\x9d52;c;?\x07",
+        b"\x1b]52;c;?\x9c",
         b"]52;c;?\x07",
         // CAN、SUB 取消正在进行的 OSC。
         b"\x1b]52;c\x18;?\x07",
@@ -210,4 +226,118 @@ fn denied_writes_are_refused_by_the_vt() {
     session.set_clipboard_writes(true);
     session.feed(b"\x1b]52;c;aGk=\x07");
     assert_eq!(session.take_clipboard(), [write("hi")]);
+}
+
+/// 一份装了读剪贴板回调（一律拒绝）的 VT 回给程序的 OSC 52 回话，按先后：VT 自己认出的读请求，
+/// 拒绝时它回空的剪贴板，目标和终止符照请求的。
+fn vt_answers(bytes: &[u8]) -> Vec<Vec<u8>> {
+    let mut terminal =
+        crate::vt::new_terminal(GridSize { cols: 20, rows: 4, cell_width_px: 8, cell_height_px: 16 }).unwrap();
+    let written = Rc::new(RefCell::new(Vec::new()));
+    terminal
+        .on_pty_write({
+            let written = written.clone();
+            move |_, data| written.borrow_mut().push(data.to_vec())
+        })
+        .unwrap()
+        .on_clipboard_read(|_, read| read.reply(Err(libghostty_vt::terminal::ClipboardReadError::Denied)))
+        .unwrap();
+    terminal.vt_write(bytes);
+    written.take().into_iter().filter(|answer| answer.starts_with(b"\x1b]52;")).collect()
+}
+
+/// `QueryScanner` 认出的读请求，按切成的块一块块扫，回空的剪贴板时写的字节。
+fn scanner_answers(bytes: &[u8], cuts: &[usize]) -> Vec<Vec<u8>> {
+    let mut scanner = QueryScanner::default();
+    let mut answers = Vec::new();
+    let mut start = 0;
+    for end in cuts.iter().copied().chain([bytes.len()]) {
+        let mut rest = &bytes[start..end];
+        while let Some((at, query)) = scanner.scan(rest) {
+            answers.push(query.answer(""));
+            rest = &rest[at..];
+        }
+        start = end;
+    }
+    answers
+}
+
+/// 一个固定种子的伪随机数（xorshift），测试每次跑的都是同样的输入。
+struct Rng(u64);
+
+impl Rng {
+    fn below(&mut self, n: usize) -> usize {
+        self.0 ^= self.0 << 13;
+        self.0 ^= self.0 >> 7;
+        self.0 ^= self.0 << 17;
+        (self.0 % n as u64) as usize
+    }
+}
+
+/// 拿真的 VT 对拍：同一串字节喂给装了读回调的 VT 和 `QueryScanner`（随机切块），扫描器认出的每个
+/// 读请求 VT 也认出了，目标和终止符一样、先后一样。输入由容易拼出各种转义序列的片段随机连成；只有
+/// 7 位字节时两边应当完全一样，加上 8 位的 C1 控制字符和 UTF-8 的字节时扫描器只许漏认。
+#[test]
+fn the_scanner_agrees_with_the_vt() {
+    let seven_bit: &[&[u8]] = &[
+        b"\x1b", b"\x1b", b"]", b"]", b"52;", b"52;", b"5522;", b"c;", b"s;", b";", b"?", b"?", b"\x07", b"\x1b\\",
+        b"\\", b"\x18", b"\x1a", b"\n", b"\x01", b"\x7f", b"\x1bP", b"\x1b_", b"\x1b^", b"\x1bX", b"\x1b(", b"q", b"x",
+        b"2;t", b" ",
+    ];
+    let c1: &[&[u8]] = &[b"\x9d", b"\x9c", b"\x90", b"\x9b", b"\xc3", b"\xa9"];
+    let with_c1: Vec<&[u8]> = seven_bit.iter().chain(c1).copied().collect();
+    // 先对拍几条挑出来的：控制字符夹在 ESC 和 `]` 之间、别的字符串里的 ESC、取消。
+    for bytes in [
+        &b"\x1b\n]52;c;?\x07"[..],
+        b"\x1b\x7f]52;p;?\x1b\\",
+        b"\x1b\x18]52;c;?\x07",
+        b"\x1b(]52;c;?\x07",
+        b"\x1bPq\x1b]52;c;?\x07",
+        b"\x1b_G]52;c;?\x07\x1b\\",
+        b"\x1b]52;c\x18;?\x07",
+        b"\x1b]52;c\n;?\x07",
+        b"\x1b]52;c;?\x1b]0;x\x07",
+        b"\x1b]52;;;?\x07",
+    ] {
+        assert_eq!(scanner_answers(bytes, &[]), vt_answers(bytes), "{:?}", String::from_utf8_lossy(bytes));
+    }
+    let mut rng = Rng(0x5eed_0052_c0de_cafe);
+    for round in 0..1000 {
+        let pieces = if round % 2 == 0 { seven_bit } else { &with_c1[..] };
+        let random = |rng: &mut Rng, count: usize| -> Vec<u8> {
+            (0..count).flat_map(|_| pieces[rng.below(pieces.len())].iter().copied()).collect()
+        };
+        // 一半是随便连的片段；一半是差一点的读请求：每一段之前有一定机会夹进随机的片段。
+        let bytes = if round % 4 < 2 {
+            let count = 1 + rng.below(16);
+            random(&mut rng, count)
+        } else {
+            let count = rng.below(3);
+            let mut bytes = random(&mut rng, count);
+            let target: &[u8] = [&b"c;"[..], b";", b"p;", b"0;"][rng.below(4)];
+            let end: &[u8] = [&b"\x07"[..], b"\x1b\\"][rng.below(2)];
+            for part in [&b"\x1b"[..], b"]", b"52;", target, b"?", end] {
+                if rng.below(4) == 0 {
+                    let count = 1 + rng.below(2);
+                    bytes.extend(random(&mut rng, count));
+                }
+                bytes.extend_from_slice(part);
+            }
+            bytes
+        };
+        let mut cuts: Vec<usize> = (0..rng.below(4)).map(|_| rng.below(bytes.len() + 1)).collect();
+        cuts.sort_unstable();
+        let vt = vt_answers(&bytes);
+        let scanned = scanner_answers(&bytes, &cuts);
+        let shown = String::from_utf8_lossy(&bytes).into_owned();
+        if pieces.len() == seven_bit.len() {
+            assert_eq!(scanned, vt, "round {round}: {shown:?} cut at {cuts:?}");
+        } else {
+            // 扫描器认出的按先后是 VT 认出的里的一部分。
+            let mut vt = vt.iter();
+            for answer in &scanned {
+                assert!(vt.any(|seen| seen == answer), "round {round}: {shown:?} cut at {cuts:?}");
+            }
+        }
+    }
 }
