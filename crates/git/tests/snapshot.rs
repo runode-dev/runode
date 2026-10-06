@@ -5,7 +5,7 @@ use std::{
     path::Path,
 };
 
-use runode_git_status::{RepoInfo, RepoKind, Snapshot};
+use runode_git::{RepoInfo, RepoKind, Snapshot};
 
 #[test]
 fn ignored_dirs_cover_their_contents() {

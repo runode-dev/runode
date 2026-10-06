@@ -9,7 +9,7 @@ use std::{
     sync::atomic::{AtomicUsize, Ordering},
 };
 
-use runode_git_status::{Repos, Snapshot, UntrackedCache, snapshot, snapshot_repos};
+use runode_git::{Repos, Snapshot, UntrackedCache, snapshot, snapshot_repos};
 
 pub struct TestRepo {
     dir: PathBuf,
@@ -43,7 +43,7 @@ impl TestRepo {
     fn empty_dir(name: &str) -> Self {
         static NEXT: AtomicUsize = AtomicUsize::new(0);
         let n = NEXT.fetch_add(1, Ordering::Relaxed);
-        let dir = std::env::temp_dir().join(format!("runode-git-status-{name}-{}-{n}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("runode-git-{name}-{}-{n}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         Self { dir }
@@ -149,6 +149,6 @@ pub fn read_all(repo: &TestRepo) -> Repos {
 }
 
 /// 改动的文件路径，按路径排。
-pub fn paths_of(files: &[runode_git_status::FileDiff]) -> Vec<String> {
+pub fn paths_of(files: &[runode_git::FileDiff]) -> Vec<String> {
     files.iter().map(|file| file.path.to_string_lossy().into_owned()).collect()
 }

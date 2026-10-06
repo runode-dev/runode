@@ -6,7 +6,7 @@
 use std::path::{Path, PathBuf};
 
 use gpui::{Context, PromptLevel, Window, prelude::*};
-use runode_git_status::{self as git, CommitOptions, FileDiff, Section};
+use runode_git::{self as git, CommitOptions, FileDiff, Section};
 
 use super::{
     DirOp, FileOp, GitCheckout, GitCommit, GitCommitAmend, GitCommitAndPush, GitCommitAndSync, GitCreateBranch,

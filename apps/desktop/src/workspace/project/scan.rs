@@ -8,7 +8,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use runode_git_status::{self as git, FileStatus};
+use runode_git::{self as git, FileStatus};
 
 use super::MAX_COMPACT;
 

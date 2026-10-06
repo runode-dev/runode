@@ -6,9 +6,9 @@ mod common;
 use std::path::{Path, PathBuf};
 
 use common::{TestRepo, paths_of, read_all};
-use runode_git_status::{FileStatus, RepoKind, Section, hunk_actionable};
+use runode_git::{FileStatus, RepoKind, Section, hunk_actionable};
 
-fn layout(repos: &runode_git_status::Repos) -> Vec<(String, RepoKind)> {
+fn layout(repos: &runode_git::Repos) -> Vec<(String, RepoKind)> {
     repos.iter().map(|repo| (repo.prefix.to_string_lossy().into_owned(), repo.kind)).collect()
 }
 
@@ -171,7 +171,7 @@ struct TempDir(std::path::PathBuf);
 
 impl TempDir {
     fn new(name: &str) -> Self {
-        let dir = std::env::temp_dir().join(format!("runode-git-status-{name}-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("runode-git-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         Self(dir)
     }
@@ -213,7 +213,7 @@ fn reads_other_worktrees() {
     assert_eq!(repos.get(1).map(|wt| wt.kind), Some(RepoKind::Worktree));
 
     // 从链接工作树里读：主仓库是它，主工作树成了其他工作树之一。
-    let from_feat = runode_git_status::snapshot_repos(&feat.0, &mut Default::default(), Default::default()).unwrap();
+    let from_feat = runode_git::snapshot_repos(&feat.0, &mut Default::default(), Default::default()).unwrap();
     assert_eq!(real(&from_feat.main.root), real(&feat.0));
     assert!(from_feat.worktrees.iter().any(|wt| real(&wt.root) == real(repo.path())));
     assert_eq!(from_feat.worktrees.len(), 2);
@@ -222,8 +222,8 @@ fn reads_other_worktrees() {
     assert!(!primary.is_linked_worktree());
 
     // 不要其他工作树时不读。
-    let options = runode_git_status::ReadOptions { worktrees: false };
-    let local = runode_git_status::snapshot_repos(repo.path(), &mut Default::default(), options).unwrap();
+    let options = runode_git::ReadOptions { worktrees: false };
+    let local = runode_git::snapshot_repos(repo.path(), &mut Default::default(), options).unwrap();
     assert!(local.worktrees.is_empty());
 
     // 目录被删掉的工作树 git 记作 prunable，跳过。

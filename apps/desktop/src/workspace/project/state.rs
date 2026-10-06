@@ -7,7 +7,7 @@ use std::{
 };
 
 use gpui::{ScrollStrategy, SharedString, UniformListScrollHandle};
-use runode_git_status as git;
+use runode_git as git;
 
 use super::{
     MAX_COMPACT,
@@ -341,7 +341,7 @@ impl Workspace {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use runode_git_status::FileStatus;
+    use runode_git::FileStatus;
 
     fn snapshot() -> git::Repos {
         git::Repos::new(git::Snapshot {

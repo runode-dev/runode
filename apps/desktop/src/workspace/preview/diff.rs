@@ -3,7 +3,7 @@
 //! 旧行号和新行号，按文件类型高亮。每块改动前面一行块头，工作区和暂存区的块头上有按块暂存、丢弃、
 //! 取消暂存的按钮。顶上一条能跳到上一处、下一处改动，打开时先滚到第一处。
 //!
-//! 整篇 diff 由 `runode_git_status::Repo::file_view` 读；工作区和暂存区的 diff 跟着扫描结果重读，
+//! 整篇 diff 由 `runode_git::Repo::file_view` 读；工作区和暂存区的 diff 跟着扫描结果重读，
 //! 滚动位置不动，文件已经没有这种改动时写一句「没有改动」，标签留着。
 
 use std::{
@@ -20,7 +20,7 @@ use gpui::{
     SharedString, StyledText, Window, div, linear_color_stop, linear_gradient, prelude::*, px, svg, uniform_list,
 };
 use runode_config::PreviewClick;
-use runode_git_status::{self as git, DiffRow, DiffSide, DiffView, FileStatus, HunkAction, LineKind, hunk_actionable};
+use runode_git::{self as git, DiffRow, DiffSide, DiffView, FileStatus, HunkAction, LineKind, hunk_actionable};
 use runode_preview::Span;
 use runode_shared_types::color::Rgb;
 
@@ -570,7 +570,7 @@ impl WindowView {
 mod tests {
     use super::*;
     use crate::workspace::preview::PreviewTabs;
-    use runode_git_status::{FileDiff, Hunk, Line};
+    use runode_git::{FileDiff, Hunk, Line};
     use std::path::Path;
 
     fn view() -> DiffView {

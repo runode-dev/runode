@@ -3,7 +3,7 @@
 mod common;
 
 use common::TestRepo;
-use runode_git_status::{Operation, RepoInfo, Stash, UntrackedCache, snapshot};
+use runode_git::{Operation, RepoInfo, Stash, UntrackedCache, snapshot};
 
 fn info(repo: &TestRepo) -> RepoInfo {
     snapshot(repo.path(), &mut UntrackedCache::default()).unwrap().info

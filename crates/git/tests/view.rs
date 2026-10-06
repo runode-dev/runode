@@ -6,7 +6,7 @@ mod common;
 use std::path::Path;
 
 use common::{TestRepo, read};
-use runode_git_status::{DiffRow, DiffSide, FileDiff, FileStatus, Hunk, Line, LineKind, merge_rows};
+use runode_git::{DiffRow, DiffSide, FileDiff, FileStatus, Hunk, Line, LineKind, merge_rows};
 
 fn line(kind: LineKind, old: Option<u32>, new: Option<u32>, text: &str) -> Line {
     Line { kind, old, new, text: text.into() }
@@ -93,7 +93,7 @@ fn refuses_hunks_that_do_not_match_the_file() {
 }
 
 /// 一行行地列出整篇 diff：块头写成 `@@`，块里的行带正负号，块外的行带两个行号。
-fn render(view: &runode_git_status::DiffView) -> Vec<String> {
+fn render(view: &runode_git::DiffView) -> Vec<String> {
     view.rows
         .iter()
         .map(|row| match *row {

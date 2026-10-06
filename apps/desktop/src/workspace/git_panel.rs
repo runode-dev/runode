@@ -10,7 +10,7 @@
 //! 块头的菜单见 `worktree`。
 //!
 //! 排成行的状态在 `rows`，列表的各行在 `list`，在后台跑 git 在 `run`，切换和新建分支的浮层在
-//! `branch_picker`。git 命令本身由 `runode_git_status::Repo` 去跑。
+//! `branch_picker`。git 命令本身由 `runode_git::Repo` 去跑。
 
 mod branch_picker;
 mod graph;
@@ -29,7 +29,7 @@ use gpui::{
     Action, AnyElement, Context, Div, Focusable, MouseButton, MouseDownEvent, Stateful, Window, actions, div, list,
     prelude::*, px, svg, uniform_list,
 };
-use runode_git_status::{self as git, Operation, RepoKind, Section};
+use runode_git::{self as git, Operation, RepoKind, Section};
 use runode_shared_types::color::Rgb;
 
 use super::{

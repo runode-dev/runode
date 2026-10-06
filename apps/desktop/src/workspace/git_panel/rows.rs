@@ -9,7 +9,7 @@ use std::{
 };
 
 use gpui::{Entity, ListAlignment, ListState, Subscription, UniformListScrollHandle, px};
-use runode_git_status::{self as git, FileStatus, RepoKind, Section};
+use runode_git::{self as git, FileStatus, RepoKind, Section};
 
 use super::tree::{TreeItem, file_tree};
 use crate::text_area::TextArea;
@@ -579,7 +579,7 @@ mod tests {
     use std::collections::HashMap;
 
     use super::*;
-    use runode_git_status::{FileDiff, RepoInfo};
+    use runode_git::{FileDiff, RepoInfo};
 
     fn repo(prefix: &str, kind: RepoKind, unstaged: &[&str]) -> git::Snapshot {
         let file = |path: &&str| FileDiff {

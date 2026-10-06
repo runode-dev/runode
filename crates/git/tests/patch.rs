@@ -5,7 +5,7 @@ mod common;
 use std::path::Path;
 
 use common::{TestRepo, read, read_all};
-use runode_git_status::{FileDiff, HunkAction, Section, Snapshot, hunk_actionable};
+use runode_git::{FileDiff, HunkAction, Section, Snapshot, hunk_actionable};
 
 fn file<'a>(snapshot: &'a Snapshot, section: Section, path: &str) -> &'a FileDiff {
     snapshot.files(section).iter().find(|file| file.path == Path::new(path)).unwrap()

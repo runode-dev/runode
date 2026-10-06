@@ -11,7 +11,7 @@ use std::{
 use gpui::{
     AnyElement, Context, Div, ElementId, MouseButton, MouseDownEvent, Stateful, Window, div, img, prelude::*, px, svg,
 };
-use runode_git_status::{self as git, DiffSide, FileStatus, Section};
+use runode_git::{self as git, DiffSide, FileStatus, Section};
 use runode_shared_types::color::Rgb;
 
 use super::{

@@ -5,7 +5,7 @@ mod common;
 use std::{fs, path::PathBuf};
 
 use common::{TestRepo, read, read_all};
-use runode_git_status::{CommitOptions, Section};
+use runode_git::{CommitOptions, Section};
 
 fn paths(names: &[&str]) -> Vec<PathBuf> {
     names.iter().map(PathBuf::from).collect()

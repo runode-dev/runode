@@ -6,7 +6,7 @@ mod common;
 use std::collections::HashMap;
 
 use common::{TestRepo, paths_of, read};
-use runode_git_status::{Commit, FileStatus, GraphLine, Half, RefKind, graph_layout, refs_changed};
+use runode_git::{Commit, FileStatus, GraphLine, Half, RefKind, graph_layout, refs_changed};
 
 fn commit(id: &str, parents: &[&str]) -> Commit {
     Commit {
@@ -119,7 +119,7 @@ fn a_merge_into_a_lane_that_is_already_waiting() {
 }
 
 /// 按说明首行找提交。
-fn by_subject(history: &runode_git_status::History) -> HashMap<&str, &Commit> {
+fn by_subject(history: &runode_git::History) -> HashMap<&str, &Commit> {
     history.commits.iter().map(|commit| (commit.subject.as_str(), commit)).collect()
 }
 
@@ -214,7 +214,7 @@ fn tells_ref_changes_from_other_files() {
     // worktree 自己的 git 目录里只有 HEAD，分支和 tag 在共用的 git 目录里。
     let worktree = repo.path().join("wt");
     repo.git(&["worktree", "add", "-q", "-b", "wt", &worktree.to_string_lossy()]);
-    let wt_dir = runode_git_status::snapshot(&worktree, &mut Default::default()).unwrap().git_dir;
+    let wt_dir = runode_git::snapshot(&worktree, &mut Default::default()).unwrap().git_dir;
     assert_ne!(wt_dir, git_dir);
     assert!(refs_changed(&wt_dir, &wt_dir.join("HEAD")));
     assert!(refs_changed(&wt_dir, &git_dir.join("refs/tags/v2")));

@@ -8,7 +8,7 @@ use gpui::{
     Context, Div, Entity, Focusable, KeyDownEvent, MouseButton, ScrollHandle, SharedString, Subscription, Window, div,
     prelude::*, px, svg,
 };
-use runode_git_status::{self as git, Branch};
+use runode_git::{self as git, Branch};
 use runode_shared_types::color::Rgb;
 
 use super::super::{TITLEBAR_HEIGHT, WindowView, divider_color};

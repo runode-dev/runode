@@ -3,7 +3,7 @@
 //! 它在这个提交里的 diff；右键可以复制提交号、切到这个提交或者从它新建分支。
 //!
 //! 历史在后台读，只在图表展开着时读；仓库的 `RepoInfo` 变了（提交、切分支、拉取、储藏之后）或者
-//! 点了刷新才重读，工作区里的文件变了不重读。lane 怎么排由 `runode_git_status::graph_layout`
+//! 点了刷新才重读，工作区里的文件变了不重读。lane 怎么排由 `runode_git::graph_layout`
 //! 算好，这里只照着画。
 
 use std::path::{Path, PathBuf};
@@ -12,7 +12,7 @@ use gpui::{
     Action, AnyElement, BorderStyle, Bounds, ClipboardItem, ContentMask, Context, Hsla, MouseButton, MouseDownEvent,
     PathBuilder, Pixels, PromptLevel, Window, canvas, div, img, point, prelude::*, px, quad,
 };
-use runode_git_status::{self as git, Commit, DiffSide, GraphRow, Half, RefKind};
+use runode_git::{self as git, Commit, DiffSide, GraphRow, Half, RefKind};
 use runode_shared_types::color::Rgb;
 
 use super::{
@@ -664,7 +664,7 @@ fn lanes_canvas(row: GraphRow, lane: f32, width: f32, merge: bool, head: bool, b
 #[cfg(test)]
 mod tests {
     use super::*;
-    use runode_git_status::CommitRef;
+    use runode_git::CommitRef;
 
     fn commit(refs: &[&str]) -> Commit {
         Commit {

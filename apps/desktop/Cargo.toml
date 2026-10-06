@@ -8,7 +8,7 @@ publish.workspace = true
 
 [dependencies]
 runode-paths.workspace = true
-runode-git-status.workspace = true
+runode-git.workspace = true
 runode-shared-types.workspace = true
 runode-terminal.workspace = true
 # 终端会话的宿主：跑在 app 进程里，或者由 app 拉起成单独一个进程（`runode --host`）。

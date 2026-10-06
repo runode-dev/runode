@@ -3,7 +3,7 @@
 mod common;
 
 use common::TestRepo;
-use runode_git_status::valid_branch_name;
+use runode_git::valid_branch_name;
 
 #[test]
 fn checks_branch_names() {

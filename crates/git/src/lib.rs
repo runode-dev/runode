@@ -755,7 +755,7 @@ Binary files /dev/null and b/logo.png differ
 
     #[test]
     fn keeps_the_symlinked_spelling_of_the_root() {
-        let base = std::env::temp_dir().join(format!("runode-git-status-root-{}", std::process::id()));
+        let base = std::env::temp_dir().join(format!("runode-git-root-{}", std::process::id()));
         let real = base.join("real");
         std::fs::create_dir_all(real.join("sub")).unwrap();
         let link = base.join("link");
@@ -768,7 +768,7 @@ Binary files /dev/null and b/logo.png differ
 
     #[test]
     fn reads_only_the_one_repository() {
-        let base = std::env::temp_dir().join(format!("runode-git-status-nested-{}", std::process::id()));
+        let base = std::env::temp_dir().join(format!("runode-git-nested-{}", std::process::id()));
         let nested = base.join("wt/inner");
         std::fs::create_dir_all(&nested).unwrap();
         let run = |dir: &Path, args: &[&str]| assert!(git(dir, args).is_some(), "git {args:?}");
@@ -792,7 +792,7 @@ Binary files /dev/null and b/logo.png differ
 
     #[test]
     fn splits_staged_and_unstaged_changes() {
-        let base = std::env::temp_dir().join(format!("runode-git-status-sections-{}", std::process::id()));
+        let base = std::env::temp_dir().join(format!("runode-git-sections-{}", std::process::id()));
         std::fs::create_dir_all(&base).unwrap();
         let run = |args: &[&str]| assert!(git(&base, args).is_some(), "git {args:?}");
         std::fs::write(base.join("a.txt"), "one\n").unwrap();

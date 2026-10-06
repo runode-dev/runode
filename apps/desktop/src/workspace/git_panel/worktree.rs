@@ -4,7 +4,7 @@
 use std::path::{Path, PathBuf};
 
 use gpui::{Action, Context, Pixels, Point, PromptLevel, Window};
-use runode_git_status::{self as git, RepoKind};
+use runode_git::{self as git, RepoKind};
 
 use super::rows::Busy;
 use crate::workspace::{

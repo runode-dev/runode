@@ -29,7 +29,7 @@ use gpui::{
     StyledText, SvgRenderer, UniformListScrollHandle, Window, actions, canvas, div, fill, img, linear_color_stop,
     linear_gradient, point, prelude::*, px, size, svg, uniform_list,
 };
-use runode_git_status::{self as git, FileStatus, LineKind, Section};
+use runode_git::{self as git, FileStatus, LineKind, Section};
 use runode_preview::{Content, ImageFormat, Span};
 use runode_shared_types::{color::Rgb, theme};
 
