@@ -94,6 +94,15 @@ impl Runner {
     /// 界面回了会话请它办的事（`Inbox::UiAnswer`）：是在等的读请求的话把结果回给程序；写剪贴板的
     /// 回话只在出错时记一笔。
     pub(super) fn ui_answered(&mut self, ui: u64, reply: HostMsg) {
+        // 回话里说的是别的会话：多半是换过宿主以后旧询问框的回话凭同样的编号找了过来。不认，接着等
+        // 真的回话（等太久照样回空）。
+        if let HostMsg::ClipboardText { id, .. } = &reply
+            && *id != self.id
+            && self.clipboard_read.as_ref().is_some_and(|read| read.ui == ui)
+        {
+            tracing::warn!("session {} ignored a clipboard answer about session {id}", self.id);
+            return;
+        }
         if let Some(read) = self.clipboard_read.take_if(|read| read.ui == ui) {
             let text = match reply {
                 HostMsg::ClipboardText { text, .. } => text,

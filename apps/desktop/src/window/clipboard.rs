@@ -11,7 +11,7 @@ use super::{
     WindowView,
     remote::{find_session, front_window},
 };
-use crate::host_client;
+use crate::host_client::{self, UiTicket};
 
 /// 程序要写剪贴板：照写，回 `Done`（`req` 为 0，见 `ClientMsg::WriteClipboard`）。
 pub(super) fn write(text: String, cx: &mut App) -> HostMsg {
@@ -19,11 +19,11 @@ pub(super) fn write(text: String, cx: &mut App) -> HostMsg {
     HostMsg::Done { req: 0 }
 }
 
-/// 程序要读剪贴板，`ui` 是宿主转来的请求的编号。不用问时当场读；要问时在显示这个会话的窗口上
+/// 程序要读剪贴板，`ticket` 是宿主转来的请求的回执。不用问时当场读；要问时在显示这个会话的窗口上
 /// （没有时在最前面的窗口上）弹框，用户点了允许才读。都用 `Link::ui_reply` 回 `ClipboardText`，
 /// 不让读、没有窗口可问、剪贴板里没有文字时 `text` 为空。
-pub(super) fn read(ui: u64, id: SessionId, ask: bool, program: Option<String>, cx: &mut App) {
-    let reply = move |text| host_client::link().ui_reply(ui, HostMsg::ClipboardText { id, text });
+pub(super) fn read(ticket: UiTicket, id: SessionId, ask: bool, program: Option<String>, cx: &mut App) {
+    let reply = move |text| host_client::link().ui_reply(ticket, HostMsg::ClipboardText { id, text });
     if !ask {
         reply(clipboard_text(cx));
         return;

@@ -183,3 +183,24 @@ fn device_attributes_report_osc_52_when_writes_are_allowed() {
     let (_, channel) = reader_session(&mut desktop, "clip-da-deny", r"printf '\033[c'");
     desktop.wait_for_output(channel, b"^[[?62;1;6;22c");
 }
+
+/// 回话里说的是别的会话的不认：程序拿不到那段文字，读请求接着等（这期间再来的读请求回空的）。
+#[test]
+fn answers_about_another_session_are_ignored() {
+    let host = host();
+    let mut desktop = Peer::pair(&host);
+    set_access(&mut desktop, ClipboardWrite::Allow, ClipboardRead::Allow);
+    let (id, channel) = reader_session(
+        &mut desktop,
+        "clip-other",
+        r"printf '\033]52;c;?\007'; head -c 1 >/dev/null; printf '\033]52;c;?\007'",
+    );
+    let (ui, _) = ui_request(&desktop);
+    let other = SessionId(id.0 ^ 1);
+    let reply = HostMsg::ClipboardText { id: other, text: Some("evil".into()) };
+    desktop.send(&ClientMsg::UiReply { ui, reply: Box::new(reply) });
+    desktop.input(channel, b"x");
+    let output = desktop.wait_for_output(channel, b"^[]52;c;^G");
+    assert!(!contains(&output, b"ZXZpbA=="), "{}", String::from_utf8_lossy(&output));
+    desktop.send(&ClientMsg::Kill { id });
+}

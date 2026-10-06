@@ -31,7 +31,7 @@ pub use handoff::{HandoffFailure, HandoffStatus, READY_BY};
 use launch::{Choice, Probe};
 // `Attached` 给视图状态机（重新连上、只看状态）用。
 #[allow(unused_imports)]
-pub use link::{Attached, ConnectError, Link, LinkEvent, Screen, SpawnOptions};
+pub use link::{Attached, ConnectError, Link, LinkEvent, Screen, SpawnOptions, UiTicket};
 
 /// 宿主现在怎么跑。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -192,7 +192,7 @@ pub fn configure(config: &Config) {
 
 /// 宿主转给界面去办的请求（`runode open`、`runode focus` 这类），带着回话用的编号，办完了用
 /// `Link::ui_reply` 回话。只能取一次。
-pub fn serve_ui() -> Option<UnboundedReceiver<(u64, ClientMsg)>> {
+pub fn serve_ui() -> Option<UnboundedReceiver<(UiTicket, ClientMsg)>> {
     link().ui_requests()
 }
 

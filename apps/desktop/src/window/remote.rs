@@ -23,14 +23,14 @@ pub fn serve_requests(cx: &mut App) {
         return;
     };
     cx.spawn(async move |cx| {
-        while let Some((ui, request)) = requests.next().await {
+        while let Some((ticket, request)) = requests.next().await {
             // 读剪贴板可能要等用户点询问框，自己回话，不挡住后面的请求。
             if let ClientMsg::ReadClipboard { id, ask, program } = request {
-                cx.update(|cx| clipboard::read(ui, id, ask, program, cx));
+                cx.update(|cx| clipboard::read(ticket, id, ask, program, cx));
                 continue;
             }
             let reply = cx.update(|cx| handle(request, cx));
-            host_client::link().ui_reply(ui, reply);
+            host_client::link().ui_reply(ticket, reply);
         }
     })
     .detach();

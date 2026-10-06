@@ -151,9 +151,24 @@ struct Inner {
     state: Mutex<State>,
     /// 现在这条连接的写的一端。锁的先后：拿着 `state` 时可以再拿它，反过来不行。
     writer: Mutex<Option<Writer>>,
-    ui: UnboundedSender<(u64, ClientMsg)>,
-    ui_requests: Mutex<Option<UnboundedReceiver<(u64, ClientMsg)>>>,
+    ui: UnboundedSender<(UiTicket, ClientMsg)>,
+    ui_requests: Mutex<Option<UnboundedReceiver<(UiTicket, ClientMsg)>>>,
     next_req: AtomicU32,
+}
+
+/// 宿主转来的一条请求（`HostMsg::UiRequest`）的回执，回话时交回 `Link::ui_reply`：请求的编号，和它
+/// 是从第几条连接来的。回话前连接换过了（比如宿主换了一个）的，编号对现在的宿主没有意义，还可能撞上
+/// 它的另一条请求，回话丢掉。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct UiTicket {
+    ui: u64,
+    generation: u64,
+}
+
+impl UiTicket {
+    pub(super) fn new(ui: u64, generation: u64) -> Self {
+        Self { ui, generation }
+    }
 }
 
 struct Writer {
@@ -246,10 +261,18 @@ impl Inner {
     /// 写一帧并刷出去。没连着时返回错误；写不出去（对面断了、超时）时关掉连接，读线程随之
     /// 读到结尾，给各个会话发 `Lost`。
     fn write(&self, kind: FrameKind, channel: u32, payload: &[u8]) -> io::Result<()> {
+        self.write_on(None, kind, channel, payload)
+    }
+
+    /// 同 `write`；`generation` 给了时只写在第这么多条连接上，连接换过了时返回错误。
+    fn write_on(&self, generation: Option<u64>, kind: FrameKind, channel: u32, payload: &[u8]) -> io::Result<()> {
         let mut guard = self.writer();
         let Some(writer) = guard.as_mut() else {
             return Err(io::Error::new(io::ErrorKind::NotConnected, "not connected to the host"));
         };
+        if generation.is_some_and(|generation| generation != writer.generation) {
+            return Err(io::Error::new(io::ErrorKind::NotConnected, "connected to another host since"));
+        }
         let written = write_frame(&mut writer.stream, kind, channel, payload)
             .map_err(|err| match err {
                 FrameError::Io(err) => err,
@@ -597,14 +620,21 @@ impl Link {
         }
     }
 
-    /// 回宿主转来的 `HostMsg::UiRequest`，`ui` 是那条请求的编号。
-    pub fn ui_reply(&self, ui: u64, reply: HostMsg) {
-        self.send(ClientMsg::UiReply { ui, reply: Box::new(reply) });
+    /// 回宿主转来的 `HostMsg::UiRequest`，`ticket` 是收到它时的回执。之后连接换过了的不回，见
+    /// `UiTicket`。
+    pub fn ui_reply(&self, ticket: UiTicket, reply: HostMsg) {
+        let message = ClientMsg::UiReply { ui: ticket.ui, reply: Box::new(reply) };
+        let written = Frame::control(&message)
+            .map_err(io::Error::other)
+            .and_then(|frame| self.inner.write_on(Some(ticket.generation), FrameKind::Control, 0, &frame.payload));
+        if let Err(err) = written {
+            tracing::debug!("dropped the answer to ui request {}: {err}", ticket.ui);
+        }
     }
 
     /// 宿主转给界面去办的请求（`Open`、`Reveal`、`Layout`），带着回话要用的编号。只能取一次，
     /// 第二次返回 `None`；取走之前到的请求攒着。
-    pub fn ui_requests(&self) -> Option<UnboundedReceiver<(u64, ClientMsg)>> {
+    pub fn ui_requests(&self) -> Option<UnboundedReceiver<(UiTicket, ClientMsg)>> {
         self.inner.ui_requests.lock().unwrap_or_else(PoisonError::into_inner).take()
     }
 

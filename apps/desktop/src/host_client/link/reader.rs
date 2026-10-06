@@ -6,7 +6,7 @@ use std::{io::BufReader, os::unix::net::UnixStream, sync::mpsc};
 
 use runode_protocol::{AttachMode, ClientMsg, FrameKind, GoodbyeReason, HostMsg, SessionId, read_frame};
 
-use super::{Attached, Inner, LinkEvent, READ_BUFFER, Screen, State};
+use super::{Attached, Inner, LinkEvent, READ_BUFFER, Screen, State, UiTicket};
 
 /// 读线程：读到连接断开（或者宿主说 `Goodbye`）为止。
 pub(super) fn read_loop(inner: &Inner, generation: u64, stream: UnixStream) {
@@ -98,8 +98,9 @@ pub(super) fn dispatch(inner: &Inner, message: HostMsg) {
             }
         }
         HostMsg::UiRequest { ui, request } => {
+            let ticket = UiTicket::new(ui, state.generation);
             drop(state);
-            if inner.ui.unbounded_send((ui, *request)).is_err() {
+            if inner.ui.unbounded_send((ticket, *request)).is_err() {
                 let reply = HostMsg::Error { req: None, id: None, message: "the runode app is quitting".into() };
                 let _ = inner.control(&ClientMsg::UiReply { ui, reply: Box::new(reply) });
             }

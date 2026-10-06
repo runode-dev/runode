@@ -184,7 +184,7 @@ fn ui_requests_go_to_the_desktop_and_replies_come_back() {
     let id = SessionId(7);
     send(&mut cli, &ClientMsg::Reveal { req: 3, id });
     let deadline = Instant::now() + WAIT;
-    let (ui, request) = loop {
+    let (ticket, request) = loop {
         match requests.try_recv() {
             Ok(request) => break request,
             _ if Instant::now() < deadline => thread::sleep(Duration::from_millis(2)),
@@ -192,8 +192,58 @@ fn ui_requests_go_to_the_desktop_and_replies_come_back() {
         }
     };
     assert_eq!(request, ClientMsg::Reveal { req: 3, id });
-    link.ui_reply(ui, HostMsg::Done { req: 3 });
+    link.ui_reply(ticket, HostMsg::Done { req: 3 });
     assert_eq!(receive(&mut cli), HostMsg::Done { req: 3 });
+}
+
+/// 收到请求以后连接换过了（宿主换了一个）：回话不发给新的宿主，编号对它没有意义。
+#[test]
+fn answers_to_requests_from_an_earlier_connection_are_dropped() {
+    let (send_request, request_sent) = mpsc::channel::<()>();
+    let link = fake_host(move |mut stream| {
+        let request = HostMsg::UiRequest { ui: 1, request: Box::new(ClientMsg::Layout { req: 2 }) };
+        let frame = Frame::control(&request).unwrap();
+        write_frame(&mut stream, frame.kind, 0, &frame.payload).unwrap();
+        let _ = send_request.send(());
+        // 留着连接，直到对面换了一条。
+        let _ = read_frame(&mut stream);
+    });
+    request_sent.recv_timeout(WAIT).unwrap();
+    let mut requests = link.ui_requests().unwrap();
+    let deadline = Instant::now() + WAIT;
+    let (ticket, _) = loop {
+        match requests.try_recv() {
+            Ok(request) => break request,
+            _ if Instant::now() < deadline => thread::sleep(Duration::from_millis(2)),
+            _ => panic!("no ui request"),
+        }
+    };
+    let (seen, seen_rx) = mpsc::channel();
+    let (ours, theirs) = UnixStream::pair().unwrap();
+    thread::spawn(move || {
+        let mut stream = theirs;
+        let _hello = read_frame(&mut stream).unwrap().unwrap();
+        let welcome = HostMsg::Welcome {
+            protocol: PROTOCOL_VERSION,
+            build: BuildId(BUILD.into()),
+            host_pid: 2,
+            snapshot_format: 1,
+            standalone: true,
+            handoff: 0,
+        };
+        let frame = Frame::control(&welcome).unwrap();
+        write_frame(&mut stream, frame.kind, 0, &frame.payload).unwrap();
+        while let Ok(Some(frame)) = read_frame(&mut stream) {
+            if seen.send(frame.message::<ClientMsg>().unwrap()).is_err() {
+                break;
+            }
+        }
+    });
+    link.close();
+    link.connect(ours).unwrap();
+    link.ui_reply(ticket, HostMsg::Layout { req: 2, windows: Vec::new() });
+    link.send(ClientMsg::ListSessions);
+    assert_eq!(seen_rx.recv_timeout(WAIT).unwrap(), ClientMsg::ListSessions);
 }
 
 #[test]
