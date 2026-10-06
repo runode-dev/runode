@@ -160,7 +160,10 @@ impl MetalRenderer {
         // Support direct-to-display rendering if the window is not transparent
         // https://developer.apple.com/documentation/metal/managing-your-game-window-for-metal-in-macos
         layer.set_opaque(!transparent);
-        layer.set_maximum_drawable_count(3);
+        // runode：上游是 3。每个 drawable 和窗口一样大（像素数 × 4 字节，默认窗口在 Retina 屏上约
+        // 9 MiB，全屏 5K 约 56 MiB），终端一帧的活很轻，两个轮换就够。代价是 GPU 这一帧还没画完
+        // 时，主线程在 `next_drawable` 上多等一帧（下面关了它的超时）。
+        layer.set_maximum_drawable_count(2);
         // Allow texture reading for visual tests (captures screenshots without ScreenCaptureKit)
         #[cfg(any(test, feature = "test-support"))]
         layer.set_framebuffer_only(false);
