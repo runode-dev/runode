@@ -1,6 +1,6 @@
 import Foundation
 
-/// Mac 证书的指纹：叶子证书 DER 的 SHA-256，32 字节。
+/// 电脑证书的指纹：叶子证书 DER 的 SHA-256，32 字节。
 public struct CertificateFingerprint: Hashable, Sendable, Codable, CustomStringConvertible {
     public let bytes: Data
 
@@ -10,7 +10,7 @@ public struct CertificateFingerprint: Hashable, Sendable, Codable, CustomStringC
     }
 
     /// 读二维码和 Bonjour TXT 里的 `fp`。规格说二进制字段一律 base64url，这里另外认 64 位
-    /// 十六进制，Mac 那边万一写成十六进制也对得上。
+    /// 十六进制，电脑那边万一写成十六进制也对得上。
     public init?(text: String) {
         if text.count == 64, text.allSatisfy(\.isHexDigit) {
             var bytes = Data(capacity: 32)
@@ -56,7 +56,7 @@ public struct PairingInvitation: Hashable, Sendable {
     /// 32 字节的一次性配对口令。
     public var secret: Data
     public var port: UInt16
-    /// 生成二维码时 Mac 的非回环地址，挨个试。
+    /// 生成二维码时电脑的非回环地址，挨个试。
     public var addresses: [String]
     public var expiresAt: Date
 

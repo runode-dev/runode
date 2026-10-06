@@ -3,13 +3,13 @@ import Observation
 import RunodeConnection
 import RunodeProtocol
 
-/// 配对页：扫 Mac 上的二维码，或者粘贴 `runode://pair?...` 链接（模拟器上没有摄像头时用）。
+/// 配对页：扫电脑上的二维码，或者粘贴 `runode://pair?...` 链接（模拟器上没有摄像头时用）。
 @Observable
 @MainActor
 public final class PairingModel {
     public enum Phase: Hashable, Sendable {
         case idle
-        /// 正在和这台 Mac 配对。
+        /// 正在和这台电脑配对。
         case pairing(hostName: String)
         case paired(MachineRecord)
         case failed(String)

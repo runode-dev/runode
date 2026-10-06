@@ -5,7 +5,7 @@ import Testing
 
 @testable import RunodeFeatures
 
-/// 一台假 Mac 上的三个会话：等回答的 Claude、干活的 Codex、普通 shell。
+/// 一台假电脑上的三个会话：等回答的 Claude、干活的 Codex、普通 shell。
 private let waiting = SessionId("11111111111111111111111111111111")!
 private let working = SessionId("22222222222222222222222222222222")!
 private let plain = SessionId("33333333333333333333333333333333")!
@@ -274,8 +274,8 @@ private func readScreens(_ sent: [ClientMsg]) -> [SessionId] {
 
 @MainActor
 @Suite struct NavigationTests {
-    /// 从列表打开终端页：列表知道有没有 Mac 在显示它，据此决定一开始就适配手机还是跟随 Mac。
-    @Test func terminalsKnowWhetherTheMacShowsThem() async throws {
+    /// 从列表打开终端页：列表知道有没有电脑在显示它，据此决定一开始就适配手机还是跟随电脑。
+    @Test func terminalsKnowWhetherTheMachineShowsThem() async throws {
         let store = InMemoryMachineStore()
         let machine = machineRecord()
         await store.upsert(machine)
@@ -288,7 +288,7 @@ private func readScreens(_ sent: [ClientMsg]) -> [SessionId] {
         app.path = [.machine(machine.id)]
         let list = try #require(app.sessionList(for: machine.id))
         list.handle(.ready(generation: 1))
-        list.handle(.message(.sessionList([info(waiting, .blocked, owner: "Mac"), info(plain, nil)])))
+        list.handle(.message(.sessionList([info(waiting, .blocked, owner: "homelab"), info(plain, nil)])))
         let shown = try #require(app.terminal(machine: machine.id, session: waiting))
         let background = try #require(app.terminal(machine: machine.id, session: plain))
         #expect(!shown.fitsPhone)
@@ -308,8 +308,13 @@ private func readScreens(_ sent: [ClientMsg]) -> [SessionId] {
     @Test func terminalSubtitleCombinesAgentAndLink() {
         let agent = Agent(kind: AgentKind("claude"), state: .blocked)
         #expect(
-            Presentation.terminalSubtitle(agent: agent, link: .connected(hostName: "Mac", address: nil), phase: .live)
-                == "Claude Code · 等你回答 · 已连接")
+            Presentation.terminalSubtitle(agent: agent, link: .connected(hostName: "homelab", address: nil), phase: .live)
+                == "Claude Code · 等你回答")
+        #expect(
+            Presentation.terminalSubtitle(agent: agent, link: .connecting, phase: .live) == "Claude Code · 等你回答 · 连接中…")
+        #expect(
+            Presentation.terminalSubtitle(agent: nil, link: .connected(hostName: "homelab", address: nil), phase: .live)
+                == "已连接")
         #expect(Presentation.terminalSubtitle(agent: nil, link: .connecting, phase: .exited(0)) == "shell 已退出")
     }
 

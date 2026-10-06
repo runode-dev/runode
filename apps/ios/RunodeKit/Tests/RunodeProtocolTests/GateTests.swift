@@ -3,7 +3,7 @@ import Testing
 
 @testable import RunodeProtocol
 
-/// Mac 那边放的门禁样例目录：`crates/protocol/tests/fixtures/remote`。还没有时相关测试跳过。
+/// Rust 那边放的门禁样例目录：`crates/protocol/tests/fixtures/remote`。还没有时相关测试跳过。
 let remoteFixtureDirectory: URL = URL(filePath: #filePath)
     .deletingLastPathComponent()  // RunodeProtocolTests
     .deletingLastPathComponent()  // Tests
@@ -77,9 +77,9 @@ func remoteFixtures() -> [URL] {
         #expect(try sameJSON(JSONEncoder().encode(pair), pairExpected))
     }
 
-    /// Mac 那边的门禁消息样例（`remote_*.json`）：每个都能读；认识的读出来再写回去和原文一样，
+    /// Rust 那边的门禁消息样例（`remote_*.json`）：每个都能读；认识的读出来再写回去和原文一样，
     /// 以后才有的拒绝原因读成 `unknown`。
-    @Test(.enabled(if: !remoteFixtures().isEmpty, "Mac 侧还没放门禁样例"))
+    @Test(.enabled(if: !remoteFixtures().isEmpty, "Rust 侧还没放门禁样例"))
     func macGateMessagesRoundTrip() throws {
         for url in remoteFixtures() where url.lastPathComponent.hasPrefix("remote_") {
             let data = try Data(contentsOf: url)
@@ -95,8 +95,8 @@ func remoteFixtures() -> [URL] {
         }
     }
 
-    /// Mac 那边被签字节串的样例（`signed_bytes_*.json`）和这里拼出来的一样。
-    @Test(.enabled(if: !remoteFixtures().isEmpty, "Mac 侧还没放门禁样例"))
+    /// Rust 那边被签字节串的样例（`signed_bytes_*.json`）和这里拼出来的一样。
+    @Test(.enabled(if: !remoteFixtures().isEmpty, "Rust 侧还没放门禁样例"))
     func macSignedBytesMatch() throws {
         struct Sample: Decodable {
             var nonce: String
@@ -116,7 +116,7 @@ func remoteFixtures() -> [URL] {
         }
     }
 
-    /// Mac 那边配对链接的样例（`pair_uri.json`）解出来的各项和它列的一样。
+    /// Rust 那边配对链接的样例（`pair_uri.json`）解出来的各项和它列的一样。
     @Test(.enabled(if: FileManager.default.fileExists(atPath: remoteFixtureDirectory.appending(path: "pair_uri.json").path)))
     func macPairingLinkParses() throws {
         struct Sample: Decodable {

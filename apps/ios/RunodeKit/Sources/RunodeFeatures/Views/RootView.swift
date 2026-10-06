@@ -4,7 +4,7 @@
 
     extension PairingModel: Identifiable {}
 
-    /// App 的根视图：首页，往里是一台 Mac 的会话列表和终端页。
+    /// App 的根视图：首页，往里是一台电脑的会话列表和终端页。
     public struct RootView: View {
         @Bindable var app: AppModel
         @Environment(\.scenePhase) private var scenePhase
@@ -46,7 +46,7 @@
                         app.openTerminal(machine: id, session: session)
                     }
                 } else {
-                    ContentUnavailableView("找不到这台 Mac", systemImage: "desktopcomputer.trianglebadge.exclamationmark")
+                    ContentUnavailableView("找不到这台电脑", systemImage: "desktopcomputer.trianglebadge.exclamationmark")
                 }
             case .terminal(let machine, let session):
                 if let model = app.terminal(machine: machine, session: session) {

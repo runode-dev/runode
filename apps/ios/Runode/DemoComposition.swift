@@ -5,7 +5,7 @@
     import RunodeProtocol
     import Synchronization
 
-    /// 只在调试构建里有的演示模式：启动参数带 `-runode-demo` 时不连真的 Mac，换成本地的假连接：一台
+    /// 只在调试构建里有的演示模式：启动参数带 `-runode-demo` 时不连真的电脑，换成本地的假连接：一台
     /// 列出三个会话（等你回答的 Claude、在干活的 Codex、普通的 zsh），另一台一直连不上，用来在模拟器
     /// 里看界面。
     @MainActor
@@ -17,8 +17,8 @@
             port: 7866, addresses: ["127.0.0.1"], lastAddress: "192.168.1.20", deviceId: "00000000000000000000000000000000")
         /// 连不上的那台。
         static let offlineMachine = MachineRecord(
-            id: UUID(uuidString: "00000000-0000-0000-0000-00000000DE71")!, name: "Mac mini",
-            hostName: "Mac mini", fingerprint: CertificateFingerprint(bytes: Data(repeating: 8, count: 32))!,
+            id: UUID(uuidString: "00000000-0000-0000-0000-00000000DE71")!, name: "homelab",
+            hostName: "homelab", fingerprint: CertificateFingerprint(bytes: Data(repeating: 8, count: 32))!,
             port: 7866, addresses: ["127.0.0.2"], lastAddress: nil, deviceId: "00000000000000000000000000000001",
             pairedAt: .now + 1)
 
@@ -79,11 +79,11 @@
         }
     }
 
-    /// 一直连不上的 Mac：只报连接失败。
+    /// 一直连不上的电脑：只报连接失败。
     private final class DemoOfflineLink: HostLink {
         func events() async -> AsyncStream<HostEvent> {
             let (stream, continuation) = AsyncStream.makeStream(of: HostEvent.self)
-            continuation.yield(.state(.failed(.connectionFailed("找不到这台 Mac"))))
+            continuation.yield(.state(.failed(.connectionFailed("找不到这台电脑"))))
             return stream
         }
 
@@ -130,7 +130,7 @@
             if ProcessInfo.processInfo.arguments.contains("offline") {
                 Task {
                     try? await Task.sleep(for: .milliseconds(1500))
-                    self.emit(.state(.waiting(reason: "Mac 关闭了连接", retryAt: .now + 9)))
+                    self.emit(.state(.waiting(reason: "电脑关闭了连接", retryAt: .now + 9)))
                 }
             }
             return stream

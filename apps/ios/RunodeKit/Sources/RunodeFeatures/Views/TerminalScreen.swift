@@ -78,7 +78,7 @@
                 ) {
                     Label("自动", systemImage: "wand.and.stars").tag(SizePreference.automatic)
                     Label("适配手机", systemImage: "iphone").tag(SizePreference.fitPhone)
-                    Label("跟随 Mac", systemImage: "laptopcomputer").tag(SizePreference.followMac)
+                    Label("跟随电脑", systemImage: "laptopcomputer").tag(SizePreference.followMachine)
                 }
                 .pickerStyle(.inline)
                 Section {
@@ -90,8 +90,8 @@
             } label: {
                 Image(systemName: model.fitsPhone ? "iphone" : "laptopcomputer")
             }
-            .accessibilityLabel("终端尺寸：\(model.fitsPhone ? "适配手机" : "跟随 Mac")")
-            .accessibilityHint("在适配手机和跟随 Mac 之间切换")
+            .accessibilityLabel("终端尺寸：\(model.fitsPhone ? "适配手机" : "跟随电脑")")
+            .accessibilityHint("在适配手机和跟随电脑之间切换")
         }
 
         private var moreMenu: some View {
@@ -127,7 +127,7 @@
                     .padding(.horizontal, 14)
                     .padding(.vertical, 6)
                     .frame(minHeight: 44)
-                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14))
+                    .background(.regularMaterial, in: .card)
                     .environment(\.colorScheme, scheme)
                     .padding(.horizontal, 12)
                     .padding(.top, 8)
@@ -186,20 +186,18 @@
                         .padding(.vertical, 10)
                         .transition(.move(edge: .bottom).combined(with: .opacity))
                 }
+                // 尺寸跟随谁看导航栏右边的图标，这里只放「键盘」。
                 if !model.keyboardVisible {
                     HStack {
                         Button {
                             model.showKeyboard()
                         } label: {
                             Label("键盘", systemImage: "keyboard")
+                                .font(.subheadline.weight(.semibold))
                                 .frame(minHeight: 44)
                         }
                         .accessibilityHint("打开键盘在终端里打字")
                         Spacer()
-                        Text(Presentation.sizePreference(model.fitsPhone ? .fitPhone : .followMac))
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
-                            .accessibilityHidden(true)
                     }
                     .padding(.horizontal)
                     .transition(.opacity)

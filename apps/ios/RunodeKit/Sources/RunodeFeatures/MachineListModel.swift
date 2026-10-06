@@ -3,7 +3,7 @@ import Observation
 import RunodeConnection
 import RunodeProtocol
 
-/// 配对过的 Mac：列出、改名、删除（连同 Keychain 里的设备私钥）。
+/// 配对过的电脑：列出、改名、删除（连同 Keychain 里的设备私钥）。
 @Observable
 @MainActor
 public final class MachineListModel {
@@ -18,9 +18,9 @@ public final class MachineListModel {
 
     @ObservationIgnored private let store: any MachineStore
     @ObservationIgnored private let keyStore: any DeviceKeyStore
-    /// 删掉一台 Mac 之前先断开它的连接、退出它的页面。
+    /// 删掉一台电脑之前先断开它的连接、退出它的页面。
     @ObservationIgnored public var willDelete: @MainActor (UUID) -> Void = { _ in }
-    /// 每次重新读完列表（配对、改名、删除之后都会读）以后调，`AppModel` 据此给每台 Mac 建好连接。
+    /// 每次重新读完列表（配对、改名、删除之后都会读）以后调，`AppModel` 据此给每台电脑建好连接。
     @ObservationIgnored public var didLoad: @MainActor () -> Void = {}
 
     public init(store: any MachineStore, keyStore: any DeviceKeyStore) {
@@ -48,7 +48,7 @@ public final class MachineListModel {
             }
             try await store.upsert(machine)
         } catch {
-            errorMessage = "存不下这台 Mac：\(error.localizedDescription)"
+            errorMessage = "存不下这台电脑：\(error.localizedDescription)"
         }
         await load()
     }
@@ -87,7 +87,7 @@ public final class MachineListModel {
             try keyStore.deleteKey(for: id)
             try await store.remove(id: id)
         } catch {
-            errorMessage = "删不掉这台 Mac：\(error.localizedDescription)"
+            errorMessage = "删不掉这台电脑：\(error.localizedDescription)"
         }
         await load()
     }

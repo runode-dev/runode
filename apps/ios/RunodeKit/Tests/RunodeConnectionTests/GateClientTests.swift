@@ -102,7 +102,7 @@ import Testing
         #expect(try key.publicKeyX963.count == 65)
     }
 
-    /// Mac 那边用 OpenSSL 签的样例（`signature_p256.json`），CryptoKit 验得过：两边对 DER 签名和
+    /// Rust 那边用 OpenSSL 签的样例（`signature_p256.json`），CryptoKit 验得过：两边对 DER 签名和
     /// X9.63 公钥的理解一样。
     @Test(.enabled(if: FileManager.default.fileExists(atPath: signatureFixture.path)))
     func macSignatureFixtureVerifies() throws {

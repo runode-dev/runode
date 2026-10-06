@@ -17,9 +17,9 @@ private func info(_ id: SessionId, _ state: AgentState?, exited: Bool = false) -
         exited: exited)
 }
 
-/// 两台 Mac，各自一条假连接。
+/// 两台电脑，各自一条假连接。
 @MainActor
-private struct TwoMacs {
+private struct TwoMachines {
     let first = machineRecord(name: "一", fingerprintByte: 1)
     let second: MachineRecord = {
         var record = machineRecord(name: "二", fingerprintByte: 2)
@@ -59,91 +59,91 @@ private struct TwoMacs {
 
 @MainActor
 @Suite struct HomeTests {
-    @Test func everyPairedMacIsConnected() async {
-        let macs = await TwoMacs()
-        #expect(await eventually { macs.firstLink.starts == 1 && macs.secondLink.starts == 1 })
-        #expect(macs.app.machineLists.map(\.machine.name) == ["一", "二"])
+    @Test func everyPairedMachineIsConnected() async {
+        let machines = await TwoMachines()
+        #expect(await eventually { machines.firstLink.starts == 1 && machines.secondLink.starts == 1 })
+        #expect(machines.app.machineLists.map(\.machine.name) == ["一", "二"])
     }
 
-    @Test func theSummaryCountsConnectedMacsOnly() async throws {
-        let macs = await TwoMacs()
-        try macs.connectFirst([info(waiting, .blocked), info(working, .working), info(plain, nil), info(sessionA, nil, exited: true)])
+    @Test func theSummaryCountsConnectedMachinesOnly() async throws {
+        let machines = await TwoMachines()
+        try machines.connectFirst([info(waiting, .blocked), info(working, .working), info(plain, nil), info(sessionA, nil, exited: true)])
         // 第二台没连着，留下的旧列表不算。
-        let second = try #require(macs.app.sessionList(for: macs.second.id))
+        let second = try #require(machines.app.sessionList(for: machines.second.id))
         second.handle(.ready(generation: 1))
         second.handle(.message(.sessionList([info(sessionB, .blocked)])))
         second.handle(.state(.waiting(reason: "断了", retryAt: .now + 5)))
-        #expect(macs.app.summary == HomeSummary(waiting: 1, working: 1, sessions: 3))
-        #expect(macs.app.waitingSessions.map(\.session.id) == [waiting])
-        #expect(macs.app.spawnableLists.map(\.machine.id) == [macs.first.id])
+        #expect(machines.app.summary == HomeSummary(waiting: 1, working: 1, sessions: 3))
+        #expect(machines.app.waitingSessions.map(\.session.id) == [waiting])
+        #expect(machines.app.spawnableLists.map(\.machine.id) == [machines.first.id])
     }
 
     @Test func openingATerminalIsRememberedForResume() async throws {
-        let macs = await TwoMacs()
-        try macs.connectFirst([info(waiting, .blocked), info(plain, nil)])
-        macs.app.openTerminal(machine: macs.first.id, session: plain)
-        #expect(macs.app.path == [.machine(macs.first.id), .terminal(machine: macs.first.id, session: plain)])
-        let saved = try #require(macs.recents.load())
-        #expect(saved == RecentTerminal(machine: macs.first.id, session: plain, title: "\(plain)", directory: "/Users/ethan/dev"))
-        macs.app.path = []
-        #expect(macs.app.resume?.session == plain)
-        macs.app.resumeRecent()
-        #expect(macs.app.path == [.machine(macs.first.id), .terminal(machine: macs.first.id, session: plain)])
+        let machines = await TwoMachines()
+        try machines.connectFirst([info(waiting, .blocked), info(plain, nil)])
+        machines.app.openTerminal(machine: machines.first.id, session: plain)
+        #expect(machines.app.path == [.machine(machines.first.id), .terminal(machine: machines.first.id, session: plain)])
+        let saved = try #require(machines.recents.load())
+        #expect(saved == RecentTerminal(machine: machines.first.id, session: plain, title: "\(plain)", directory: "/Users/ethan/dev"))
+        machines.app.path = []
+        #expect(machines.app.resume?.session == plain)
+        machines.app.resumeRecent()
+        #expect(machines.app.path == [.machine(machines.first.id), .terminal(machine: machines.first.id, session: plain)])
         // 会话结束了，「继续」就不出现。
-        macs.app.path = []
-        let list = try #require(macs.app.sessionList(for: macs.first.id))
+        machines.app.path = []
+        let list = try #require(machines.app.sessionList(for: machines.first.id))
         list.handle(.message(.sessionList([info(waiting, .blocked)])))
-        #expect(macs.app.resume == nil)
+        #expect(machines.app.resume == nil)
     }
 
     /// 还没连上时「继续」用记下的标题；连上后列表里没有这个会话（结束了）就不显示。
     @Test func resumeShowsTheSavedTitleBeforeConnecting() async throws {
-        let macs = await TwoMacs(savedTitle: "上次的")
-        #expect(macs.app.resume?.title == "上次的")
-        #expect(macs.app.resume?.machine.id == macs.second.id)
-        let list = try #require(macs.app.sessionList(for: macs.second.id))
+        let machines = await TwoMachines(savedTitle: "上次的")
+        #expect(machines.app.resume?.title == "上次的")
+        #expect(machines.app.resume?.machine.id == machines.second.id)
+        let list = try #require(machines.app.sessionList(for: machines.second.id))
         list.handle(.ready(generation: 1))
         list.handle(.message(.sessionList([info(sessionA, nil)])))
-        #expect(macs.app.resume == nil)
-        // 那台 Mac 删掉了也不显示。
-        let other = await TwoMacs(savedTitle: "上次的")
+        #expect(machines.app.resume == nil)
+        // 那台电脑删掉了也不显示。
+        let other = await TwoMachines(savedTitle: "上次的")
         await other.app.machineList.delete(other.second.id)
         #expect(other.app.resume == nil)
     }
 
     /// 新开的会话开好以后打开它：在会话列表上开的压在列表上面，首页开的连同列表一起换上。
     @Test func spawnedSessionsOpen() async throws {
-        let macs = await TwoMacs()
-        try macs.connectFirst([])
-        let list = try #require(macs.app.sessionList(for: macs.first.id))
+        let machines = await TwoMachines()
+        try machines.connectFirst([])
+        let list = try #require(machines.app.sessionList(for: machines.first.id))
         await list.spawn()
-        guard case .spawn(let req, _, _, _, _)? = macs.firstLink.sent.last else {
-            Issue.record("expected a spawn, got \(macs.firstLink.sent)")
+        guard case .spawn(let req, _, _, _, _)? = machines.firstLink.sent.last else {
+            Issue.record("expected a spawn, got \(machines.firstLink.sent)")
             return
         }
         list.handle(.message(.spawned(req: req, id: sessionA)))
-        #expect(macs.app.path == [.machine(macs.first.id), .terminal(machine: macs.first.id, session: sessionA)])
+        #expect(machines.app.path == [.machine(machines.first.id), .terminal(machine: machines.first.id, session: sessionA)])
 
-        macs.app.path = [.machine(macs.first.id)]
+        machines.app.path = [.machine(machines.first.id)]
         await list.spawn()
-        guard case .spawn(let next, _, _, _, _)? = macs.firstLink.sent.last else {
-            Issue.record("expected a spawn, got \(macs.firstLink.sent)")
+        guard case .spawn(let next, _, _, _, _)? = machines.firstLink.sent.last else {
+            Issue.record("expected a spawn, got \(machines.firstLink.sent)")
             return
         }
         list.handle(.message(.spawned(req: next, id: sessionB)))
-        #expect(macs.app.path == [.machine(macs.first.id), .terminal(machine: macs.first.id, session: sessionB)])
+        #expect(machines.app.path == [.machine(machines.first.id), .terminal(machine: machines.first.id, session: sessionB)])
     }
 
     @Test func renamingUpdatesTheConnectedList() async throws {
-        let macs = await TwoMacs()
-        let list = try #require(macs.app.sessionList(for: macs.first.id))
-        await macs.app.machineList.rename(macs.first.id, to: "新名字")
+        let machines = await TwoMachines()
+        let list = try #require(machines.app.sessionList(for: machines.first.id))
+        await machines.app.machineList.rename(machines.first.id, to: "新名字")
         #expect(list.machine.name == "新名字")
-        #expect(macs.app.sessionList(for: macs.first.id) === list)
+        #expect(machines.app.sessionList(for: machines.first.id) === list)
     }
 
     @Test func machineCardsSummariseTheirSessions() {
-        let connected = LinkState.connected(hostName: "Mac", address: nil)
+        let connected = LinkState.connected(hostName: "homelab", address: nil)
         #expect(
             Presentation.machineSummary(
                 connected, sessions: [info(waiting, .blocked), info(working, .working), info(plain, nil)], loaded: true)

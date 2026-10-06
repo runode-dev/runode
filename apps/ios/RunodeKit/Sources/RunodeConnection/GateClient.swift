@@ -3,9 +3,9 @@ import RunodeProtocol
 
 /// 门禁时出示的凭据。
 public enum GateCredential: Sendable {
-    /// 已配对过：宿主发的 `device_id` 加这台 Mac 的设备私钥。
+    /// 已配对过：宿主发的 `device_id` 加这台电脑的设备私钥。
     case auth(deviceId: String, key: StoredDeviceKey)
-    /// 第一次配对：二维码里的口令、报给 Mac 的设备名、新生成的设备私钥。
+    /// 第一次配对：二维码里的口令、报给电脑的设备名、新生成的设备私钥。
     case pair(secret: Data, deviceName: String, key: StoredDeviceKey)
 }
 
@@ -32,7 +32,7 @@ struct FrameReader {
             }
             guard let chunk = try await transport.receive() else {
                 try decoder.finish()
-                throw LinkFailure.closed("Mac 关闭了连接")
+                throw LinkFailure.closed("电脑关闭了连接")
             }
             decoder.append(chunk)
         }

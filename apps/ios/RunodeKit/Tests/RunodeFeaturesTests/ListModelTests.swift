@@ -15,7 +15,7 @@ import Testing
 
     @Test func listsAndWatchesEverySession() {
         let model = SessionListModel(machine: machineRecord(), link: link)
-        model.handle(.state(.connected(hostName: "Mac", address: nil)))
+        model.handle(.state(.connected(hostName: "homelab", address: nil)))
         model.handle(.ready(generation: 1))
         #expect(link.sent == [.listSessions])
         model.screenOpened(sessionB)
@@ -44,7 +44,7 @@ import Testing
 
     @Test func closingATerminalGoesBackToMetaOnly() {
         let model = SessionListModel(machine: machineRecord(), link: link)
-        model.handle(.state(.connected(hostName: "Mac", address: nil)))
+        model.handle(.state(.connected(hostName: "homelab", address: nil)))
         model.handle(.ready(generation: 1))
         model.screenOpened(sessionA)
         model.handle(.message(.sessionList([info(sessionA, title: "a")])))
@@ -150,7 +150,7 @@ extension LinkState {
         #expect(try keys.key(for: machine.id) == nil)
     }
 
-    @Test func repairingTheSameMacReplacesTheOldRecord() async throws {
+    @Test func repairingTheSameMachineReplacesTheOldRecord() async throws {
         let store = InMemoryMachineStore()
         let keys = InMemoryKeyStore()
         let model = MachineListModel(store: store, keyStore: keys)
@@ -170,7 +170,7 @@ extension LinkState {
     let secret = Base64URL.encode(Data(repeating: 2, count: 32))
 
     func link(exp: Int = 1_900_000_000) -> String {
-        "runode://pair?v=1&name=Mac&fp=\(fingerprint)&secret=\(secret)&port=7866&addr=192.168.1.20&exp=\(exp)"
+        "runode://pair?v=1&name=homelab&fp=\(fingerprint)&secret=\(secret)&port=7866&addr=192.168.1.20&exp=\(exp)"
     }
 
     @Test func pairsAndHandsTheMachineOver() async {
@@ -178,7 +178,7 @@ extension LinkState {
         let machine = machineRecord()
         let model = PairingModel(
             pairing: FakePairing { invitation in
-                #expect(invitation.hostName == "Mac")
+                #expect(invitation.hostName == "homelab")
                 return machine
             }, deviceName: "测试 iPhone", now: { Date(timeIntervalSince1970: 1_800_000_000) },
             onPaired: { paired.append($0) })
@@ -202,7 +202,7 @@ extension LinkState {
         #expect(model.phase == .failed("这不是 Runode 的配对链接"))
         model.linkText = link()
         await model.submitLink()
-        #expect(model.phase == .failed("二维码已经过期，请在 Mac 上重新生成"))
+        #expect(model.phase == .failed("二维码已经过期，请在电脑上重新生成"))
     }
 
     @Test func rejectionsAreExplained() async {
@@ -210,7 +210,7 @@ extension LinkState {
             pairing: FakePairing { _ in throw LinkFailure.rejected(.pairingInvalid) }, deviceName: "x",
             now: { Date(timeIntervalSince1970: 1_800_000_000) }, onPaired: { _ in })
         await model.scanned(link())
-        #expect(model.phase == .failed("配对口令不对、已过期或已经用过，请在 Mac 上重新生成二维码"))
+        #expect(model.phase == .failed("配对口令不对、已过期或已经用过，请在电脑上重新生成二维码"))
         model.reset()
         #expect(model.phase == .idle)
     }
@@ -218,8 +218,8 @@ extension LinkState {
 
 @MainActor
 @Suite struct AppModelTests {
-    /// 配对过的 Mac 一读进来就连上，进出它的页面不断开；终端页退出去就关掉。
-    @Test func pairedMacsStayConnected() async throws {
+    /// 配对过的电脑一读进来就连上，进出它的页面不断开；终端页退出去就关掉。
+    @Test func pairedMachinesStayConnected() async throws {
         let store = InMemoryMachineStore()
         let machine = machineRecord()
         await store.upsert(machine)
@@ -240,7 +240,7 @@ extension LinkState {
         #expect(app.sessionList(for: machine.id) === list)
         try await Task.sleep(for: .milliseconds(20))
         #expect(link.stops == 0)
-        // 删掉这台 Mac 才断开。
+        // 删掉这台电脑才断开。
         await app.machineList.delete(machine.id)
         #expect(await eventually { link.stops == 1 })
     }

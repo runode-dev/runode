@@ -2,7 +2,7 @@ import CryptoKit
 import Foundation
 import Security
 
-/// 一台 Mac 对应的设备签名私钥（P-256）。只存私钥的数据：Secure Enclave 的是加密过的句柄（离开
+/// 一台电脑对应的设备签名私钥（P-256）。只存私钥的数据：Secure Enclave 的是加密过的句柄（离开
 /// 这部手机的 Secure Enclave 就没用），软件的是原始私钥。每次签名时现场还原，这个值本身只是数据，
 /// 能在各个并发域之间传。
 public struct StoredDeviceKey: Hashable, Sendable, Codable {
@@ -30,7 +30,7 @@ public struct StoredDeviceKey: Hashable, Sendable, Codable {
         return StoredDeviceKey(kind: .software, data: P256.Signing.PrivateKey().rawRepresentation)
     }
 
-    /// 公钥，X9.63 未压缩格式（65 字节），配对时发给 Mac。
+    /// 公钥，X9.63 未压缩格式（65 字节），配对时发给电脑。
     public var publicKeyX963: Data {
         get throws {
             switch kind {
@@ -61,7 +61,7 @@ public protocol DeviceKeyStore: Sendable {
     func deleteKey(for machine: UUID) throws
 }
 
-/// 把设备私钥存进 Keychain 的通用密码项：`service` 固定，`account` 是这台 Mac 记录的编号，
+/// 把设备私钥存进 Keychain 的通用密码项：`service` 固定，`account` 是这台电脑记录的编号，
 /// 只在本机首次解锁后可读，不随备份迁到别的设备。
 public struct KeychainDeviceKeyStore: DeviceKeyStore {
     public let service: String

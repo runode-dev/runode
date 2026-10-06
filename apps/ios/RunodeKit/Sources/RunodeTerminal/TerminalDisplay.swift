@@ -22,7 +22,7 @@ public protocol TerminalDisplay: AnyObject {
     func terminalSettingsDidChange(_ settings: TermSettings)
     /// 程序响了铃。
     func terminalDidRingBell()
-    /// 尺寸方式换了：适配手机时网格马上会变成正好铺满视图的大小，视图回到不缩放；跟随 Mac 时按可读的
+    /// 尺寸方式换了：适配手机时网格马上会变成正好铺满视图的大小，视图回到不缩放；跟随电脑时按可读的
     /// 最小字号缩放，超出的部分横向平移。
     func terminalSizeModeDidChange(fitsPhone: Bool)
     /// 用户要打字：唤起键盘。

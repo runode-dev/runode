@@ -18,7 +18,7 @@ public struct ReconnectPolicy: Hashable, Sendable {
     }
 }
 
-/// 一台 Mac 上宿主的连接：找地址、TLS、门禁、`Hello`，之后收发帧，断了自动重连。网络读写、
+/// 一台电脑上宿主的连接：找地址、TLS、门禁、`Hello`，之后收发帧，断了自动重连。网络读写、
 /// 门禁和重连都在这个 actor 里；Network.framework 的回调只在 `TLSChannel` 里。
 public actor HostConnection: HostLink {
     private var machine: MachineRecord
@@ -100,8 +100,8 @@ public actor HostConnection: HostLink {
         outbox.yield(.input(data, channel: channel, generation: generation))
     }
 
-    /// 要连接。上次是不能重试的失败（比如 `unknown_device`：Mac 上撤销了这台设备）时不自动再连：
-    /// Mac 把这类失败也计入限速，App 每回前台就试一次很快会变成 `rate_limited`。要用户点「重试」
+    /// 要连接。上次是不能重试的失败（比如 `unknown_device`：电脑上撤销了这台设备）时不自动再连：
+    /// 电脑把这类失败也计入限速，App 每回前台就试一次很快会变成 `rate_limited`。要用户点「重试」
     /// （`reconnectNow`）才再试。
     public func start() {
         if case .failed = state { return }
@@ -295,11 +295,11 @@ public actor HostConnection: HostLink {
             return (error as? LinkFailure)?.errorDescription ?? error.localizedDescription
         }
         switch goodbye {
-        case .handoff?: return "Mac 上的 Runode 升级了，正在重新连接"
-        case .shutdown?: return "Mac 上的 Runode 退出了"
-        case .idle?: return "Mac 上的 Runode 空闲退出了"
-        case .error(let message)?: return "Mac 断开了连接：\(message)"
-        default: return "Mac 关闭了连接"
+        case .handoff?: return "电脑上的 Runode 升级了，正在重新连接"
+        case .shutdown?: return "电脑上的 Runode 退出了"
+        case .idle?: return "电脑上的 Runode 空闲退出了"
+        case .error(let message)?: return "电脑断开了连接：\(message)"
+        default: return "电脑关闭了连接"
         }
     }
 

@@ -2,7 +2,7 @@ import Foundation
 import Network
 import RunodeProtocol
 
-/// 按证书指纹在局域网里找 Mac 现在的地址。
+/// 按证书指纹在局域网里找电脑现在的地址。
 public protocol HostDiscovery: Sendable {
     /// `timeout` 内找到 TXT 里 `fp` 对得上的服务就返回它，找不到返回 `nil`。
     func locate(_ fingerprint: CertificateFingerprint, timeout: Duration) async -> TransportTarget?
@@ -17,7 +17,7 @@ public struct NoDiscovery: HostDiscovery {
     }
 }
 
-/// 用 Bonjour 浏览 `_runode._tcp`：Mac 开着远程访问时公布这个服务，TXT 记录里有 `v=1` 和 `fp=<指纹>`。
+/// 用 Bonjour 浏览 `_runode._tcp`：电脑开着远程访问时公布这个服务，TXT 记录里有 `v=1` 和 `fp=<指纹>`。
 /// 要 Info.plist 里的 `NSLocalNetworkUsageDescription` 和 `NSBonjourServices`。
 public struct BonjourDiscovery: HostDiscovery {
     public static let serviceType = "_runode._tcp"

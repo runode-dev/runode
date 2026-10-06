@@ -33,13 +33,13 @@ public enum LinkState: Hashable, Sendable {
 /// 连接或配对失败的原因，带给人看的中文说明。
 public enum LinkFailure: Error, Hashable, Sendable, LocalizedError {
     case rejected(GateRejection)
-    /// Mac 上的门禁版本这个 app 不认识。
+    /// 电脑上的门禁版本这个 app 不认识。
     case gateVersion(UInt32)
     /// 宿主的协议版本和这个 app 不一样。
     case incompatible(String)
-    /// 这台 Mac 的设备私钥不在 Keychain 里了。
+    /// 这台电脑的设备私钥不在 Keychain 里了。
     case missingKey
-    /// Mac 出示的证书和配对时记下的指纹不一样。
+    /// 电脑出示的证书和配对时记下的指纹不一样。
     case fingerprintMismatch
     case timeout
     /// 一个能试的地址都没有。
@@ -56,7 +56,7 @@ public enum LinkFailure: Error, Hashable, Sendable, LocalizedError {
         switch self {
         case .rejected(let reason):
             switch reason {
-            // 设备被撤销、签名不对、口令作废、远程访问关了：再试也一样，Mac 还会把这些失败计入限速。
+            // 设备被撤销、签名不对、口令作废、远程访问关了：再试也一样，电脑还会把这些失败计入限速。
             case .unknownDevice, .badSignature, .pairingInvalid, .disabled: true
             case .rateLimited, .unknown: false
             }
@@ -69,21 +69,21 @@ public enum LinkFailure: Error, Hashable, Sendable, LocalizedError {
         switch self {
         case .rejected(let reason):
             switch reason {
-            case .unknownDevice: "这台 Mac 不认识这部手机了：配对可能已在 Mac 上撤销，请删除后重新配对"
-            case .badSignature: "签名校验失败，请删除这台 Mac 后重新配对"
-            case .pairingInvalid: "配对口令不对、已过期或已经用过，请在 Mac 上重新生成二维码"
-            case .rateLimited: "尝试太频繁，Mac 暂时拒绝了连接，稍后自动重试"
-            case .disabled: "Mac 上没有打开远程访问"
-            case .unknown(let kind): "Mac 拒绝了连接（\(kind)）"
+            case .unknownDevice: "这台电脑不认识这部手机了：配对可能已在电脑上撤销，请删除后重新配对"
+            case .badSignature: "签名校验失败，请删除这台电脑后重新配对"
+            case .pairingInvalid: "配对口令不对、已过期或已经用过，请在电脑上重新生成二维码"
+            case .rateLimited: "尝试太频繁，电脑暂时拒绝了连接，稍后自动重试"
+            case .disabled: "电脑上没有打开远程访问"
+            case .unknown(let kind): "电脑拒绝了连接（\(kind)）"
             }
-        case .gateVersion(let version): "Mac 上的 Runode 使用了更新的连接方式（版本 \(version)），请升级这个 app"
-        case .incompatible(let reason): "Mac 上的 Runode 和这个 app 版本不兼容：\(reason)"
-        case .missingKey: "找不到这台 Mac 的设备密钥，请删除后重新配对"
+        case .gateVersion(let version): "电脑上的 Runode 使用了更新的连接方式（版本 \(version)），请升级这个 app"
+        case .incompatible(let reason): "电脑上的 Runode 和这个 app 版本不兼容：\(reason)"
+        case .missingKey: "找不到这台电脑的设备密钥，请删除后重新配对"
         case .fingerprintMismatch: "对方的证书指纹和配对时的不一样，可能连到了别的设备"
         case .timeout: "连接超时"
         case .noAddress: "没有可以尝试的地址"
-        case .invitationExpired: "二维码已经过期，请在 Mac 上重新生成"
-        case .protocolViolation(let detail): "Mac 的回应不符合协议：\(detail)"
+        case .invitationExpired: "二维码已经过期，请在电脑上重新生成"
+        case .protocolViolation(let detail): "电脑的回应不符合协议：\(detail)"
         case .connectionFailed(let detail): "连接失败：\(detail)"
         case .closed(let detail): "连接断开：\(detail)"
         case .keychain(let detail): "Keychain 出错：\(detail)"
@@ -91,7 +91,7 @@ public enum LinkFailure: Error, Hashable, Sendable, LocalizedError {
     }
 }
 
-/// 一台 Mac 上宿主的连接，各个视图模型经它收发。实现是 `HostConnection` 这个 actor；单元测试换成
+/// 一台电脑上宿主的连接，各个视图模型经它收发。实现是 `HostConnection` 这个 actor；单元测试换成
 /// 假的。`send`、`sendInput` 是同步的：消息排进一条队列，由连接按先后写出去，调用方不必等，
 /// 也不会因为各自开的任务先后不定而乱序。
 public protocol HostLink: AnyObject, Sendable {

@@ -42,7 +42,7 @@
         private var lastBell = ContinuousClock.now - .seconds(1)
         /// 用户最近一次自己拖动、缩放网格的时刻：之后一会儿不自动跟着光标走，免得和手指抢。
         private var lastUserScroll = ContinuousClock.now - .seconds(10)
-        /// 按手机屏幕决定尺寸（网格铺满视图、不缩放）；为假时跟随 Mac，按可读字号缩放。
+        /// 按手机屏幕决定尺寸（网格铺满视图、不缩放）；为假时跟随电脑，按可读字号缩放。
         private var fitsPhone = false
 
         /// 视图顶上被叠着的东西（断线横幅）挡住的高度。网格上方的空白不够时，在滚动区顶上让出这段，
@@ -246,7 +246,7 @@
             centerContent()
         }
 
-        /// 默认的缩放：适配手机时不缩放（网格本来就按视图排）；跟随 Mac 时网格比屏幕宽就缩到正好一屏宽，
+        /// 默认的缩放：适配手机时不缩放（网格本来就按视图排）；跟随电脑时网格比屏幕宽就缩到正好一屏宽，
         /// 但字不小于可读字号，再宽的横着拖。捏合也不能缩到可读字号以下。
         private func applyDefaultZoom() {
             guard grid.gridSize.width > 0, bounds.width > 0 else { return }

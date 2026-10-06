@@ -19,26 +19,219 @@
         }
     }
 
-    /// agent 的状态：图标加文字，不只靠颜色区分。
-    struct AgentBadge: View {
-        let agent: Agent?
+    /// 界面上的两档圆角：卡片（列表里的一块、首页的统计格、终端页的横幅）和卡片里的小块（按键、输入框、
+    /// 预览、图标底）。系统分组列表自带的圆角太大，还会按它裁掉行里的内容，所以列表一律用 `cardList`，
+    /// 卡片自己画，见 `cardBackground`。
+    enum CornerRadius {
+        static let card: CGFloat = 14
+        static let inner: CGFloat = 8
+    }
+
+    extension Shape where Self == RoundedRectangle {
+        static var card: RoundedRectangle { RoundedRectangle(cornerRadius: CornerRadius.card, style: .continuous) }
+        static var inner: RoundedRectangle { RoundedRectangle(cornerRadius: CornerRadius.inner, style: .continuous) }
+    }
+
+    extension View {
+        /// 画成一张卡片：四周留边，分组列表的底色，`CornerRadius.card` 的圆角。
+        func cardBackground() -> some View {
+            padding(.horizontal, 16)
+                .padding(.vertical, 12)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Color(.secondarySystemGroupedBackground), in: .card)
+                .contentShape(.contextMenuPreview, .card)
+        }
+
+        /// 列表里自己画卡片的一行：左右留出卡片到屏幕边的空，去掉系统给的底色和分隔线。
+        func plainListRow() -> some View {
+            listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
+                .listRowBackground(Color.clear)
+                .listRowSeparator(.hidden)
+        }
+
+        /// 一列卡片的列表：普通样式的 `List`（分组样式会按它的大圆角裁掉行），铺分组列表的底色，
+        /// 卡片之间留空。分组的标题用 `ListSectionHeader` 当作一行放进去，不用 `Section` 的标题，
+        /// 免得滚动时钉在顶上；行不设最小高度，标题和说明这种一行小字的行才不会被撑高。
+        func cardList() -> some View {
+            listStyle(.plain)
+                .listRowSpacing(10)
+                .environment(\.defaultMinListRowHeight, 0)
+                .scrollContentBackground(.hidden)
+                .background(Color(.systemGroupedBackground))
+        }
+    }
+
+    /// `cardList` 里一组卡片上面的标题，和卡片里的字对齐。
+    struct ListSectionHeader: View {
+        let title: String
+        var systemImage: String?
+        var tint: Color = .secondary
 
         var body: some View {
-            if let status = Presentation.agentStatus(agent) {
+            HStack(spacing: 6) {
+                if let systemImage {
+                    Image(systemName: systemImage)
+                        .accessibilityHidden(true)
+                }
+                Text(title)
+            }
+            .font(.subheadline.weight(.semibold))
+            .foregroundStyle(tint)
+            .padding(.leading, 16)
+            .padding(.top, 12)
+            .accessibilityAddTraits(.isHeader)
+            .plainListRow()
+        }
+    }
+
+    /// `cardList` 里一组卡片下面的说明小字。
+    struct ListSectionFooter: View {
+        let text: String
+
+        var body: some View {
+            Text(text)
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 16)
+                .padding(.bottom, 8)
+                .plainListRow()
+        }
+    }
+
+    extension View {
+        /// 标题放在导航栏左边（下面可以再带一行小字，前面可以带应用的标志），不随内容滚动变大变小，
+        /// 也不居中。`navigationTitle` 照样设上，下一页的返回按钮用得到，只是不显示在导航栏中间。
+        func leadingNavigationTitle(_ title: String, subtitle: String? = nil, showsMark: Bool = false) -> some View {
+            navigationTitle(title)
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar(removing: .title)
+                .toolbar { LeadingTitleItem(title: title, subtitle: subtitle, showsMark: showsMark) }
+        }
+    }
+
+    /// 应用的标志：应用图标里的提示符 `>`、光标和指示灯，不带图标的底，能放在任何底色上。坐标照抄
+    /// 图标的几个图层（824 见方，原点在 100,100）。
+    struct RunodeMark: View {
+        var body: some View {
+            Canvas { context, size in
+                let scale = min(size.width, size.height) / 824
+                func point(_ x: CGFloat, _ y: CGFloat) -> CGPoint {
+                    CGPoint(x: (x - 100) * scale, y: (y - 100) * scale)
+                }
+                var prompt = Path()
+                prompt.move(to: point(310, 374))
+                prompt.addLine(to: point(472, 512))
+                prompt.addLine(to: point(310, 650))
+                context.stroke(
+                    prompt, with: .style(.primary),
+                    style: StrokeStyle(lineWidth: 70 * scale, lineCap: .round, lineJoin: .round))
+                let cursor = CGRect(origin: point(548, 618), size: CGSize(width: 194 * scale, height: 66 * scale))
+                context.fill(Path(roundedRect: cursor, cornerRadius: 33 * scale), with: .color(Self.mint))
+                let led = CGRect(origin: point(734 - 28, 300 - 28), size: CGSize(width: 56 * scale, height: 56 * scale))
+                context.fill(Path(ellipseIn: led), with: .color(Self.green))
+            }
+            .aspectRatio(1, contentMode: .fit)
+            .accessibilityHidden(true)
+        }
+
+        private static let mint = Color(red: 0x51 / 255, green: 0xCD / 255, blue: 0xB9 / 255)
+        private static let green = Color(red: 0x2C / 255, green: 0xB4 / 255, blue: 0x83 / 255)
+    }
+
+    private struct LeadingTitleItem: ToolbarContent {
+        let title: String
+        let subtitle: String?
+        let showsMark: Bool
+
+        var body: some ToolbarContent {
+            // iOS 26 起导航栏上的按钮都有一块玻璃底，标题不要。
+            if #available(iOS 26, *) {
+                item.sharedBackgroundVisibility(.hidden)
+            } else {
+                item
+            }
+        }
+
+        private var item: some ToolbarContent {
+            ToolbarItem(placement: .topBarLeading) {
+                HStack(spacing: 8) {
+                    if showsMark {
+                        RunodeMark().frame(width: 22, height: 22)
+                    }
+                    VStack(alignment: .leading, spacing: 0) {
+                        Text(title)
+                            .font(.headline)
+                            .lineLimit(1)
+                        if let subtitle {
+                            Text(subtitle)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                        }
+                    }
+                }
+                .dynamicTypeSize(...DynamicTypeSize.xxLarge)
+                // 不固定尺寸时导航栏按占位的宽度排它，字会被截掉。
+                .fixedSize()
+                .accessibilityElement(children: .combine)
+                .accessibilityAddTraits(.isHeader)
+            }
+        }
+    }
+
+    /// 整张卡片是一个按钮：按下时卡片变暗一点，和系统列表行的高亮一样。
+    struct CardButtonStyle: ButtonStyle {
+        func makeBody(configuration: Configuration) -> some View {
+            configuration.label
+                .contentShape(Rectangle())
+                .cardBackground()
+                .overlay {
+                    if configuration.isPressed {
+                        RoundedRectangle.card.fill(Color(.systemFill))
+                    }
+                }
+                .contentShape(.card)
+        }
+    }
+
+    /// 卡片右边表示能点进去的小箭头。
+    struct DisclosureChevron: View {
+        var body: some View {
+            Image(systemName: "chevron.right")
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(.tertiary)
+                .accessibilityHidden(true)
+        }
+    }
+
+    /// agent 的状态：图标加文字，不只靠颜色区分。放在已经按状态分了组的地方（分组标题写着「等你回答」）
+    /// 时 `showsState` 给假，只写 agent 的名字，图标和颜色照旧。
+    struct AgentBadge: View {
+        let agent: Agent?
+        var showsState = true
+
+        var body: some View {
+            if let agent, let status = Presentation.agentStatus(agent) {
                 let group: SessionGroup =
                     switch status.state {
                     case .blocked: .waiting
                     case .working: .working
                     default: .other
                     }
-                Label(status.text, systemImage: group == .other ? "moon.zzz.fill" : Presentation.symbol(for: group))
-                    .font(.caption.weight(.semibold))
-                    .labelStyle(.titleAndIcon)
-                    .foregroundStyle(Self.tint(for: group))
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 3)
-                    .background(Self.tint(for: group).opacity(0.14), in: Capsule())
-                    .accessibilityElement(children: .combine)
+                let tint = Self.tint(for: group)
+                HStack(spacing: 4) {
+                    Image(systemName: group == .other ? "moon.zzz.fill" : Presentation.symbol(for: group))
+                        .imageScale(.small)
+                    Text(showsState ? status.text : agent.kind.displayName)
+                        .lineLimit(1)
+                }
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(tint)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 3)
+                .background(tint.opacity(0.14), in: Capsule())
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(status.text)
             }
         }
 
@@ -47,6 +240,21 @@
             case .waiting: .orange
             case .working: .blue
             case .other: .secondary
+            }
+        }
+    }
+
+    /// 小图标加一行字，图标和字挨得紧（系统的 `Label` 在列表里留的空太大）。
+    struct CompactLabel: View {
+        let text: String
+        let systemImage: String
+
+        var body: some View {
+            HStack(alignment: .firstTextBaseline, spacing: 5) {
+                Image(systemName: systemImage)
+                    .imageScale(.small)
+                    .accessibilityHidden(true)
+                Text(text)
             }
         }
     }
@@ -67,7 +275,7 @@
             .foregroundStyle(.secondary)
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(8)
-            .background(Color(.secondarySystemFill), in: RoundedRectangle(cornerRadius: 8))
+            .background(Color(.secondarySystemFill), in: .inner)
             .accessibilityLabel("屏幕预览：\(lines.joined(separator: "，"))")
         }
 
@@ -114,48 +322,20 @@
         @Bindable var model: QuickReplyModel
         /// 栏的标题，比如「Claude Code 在等你回答」；为空时不显示。
         var prompt: String?
+        /// 栏两边到容器边缘留的空（列表行、终端页底栏的左右边距）。按键那一排横着滚时伸进这段空里，
+        /// 滚出去的键在边缘淡出，不会被生硬地切掉。
+        var edgeInset: CGFloat = 16
+        @FocusState private var draftFocused: Bool
 
         var body: some View {
-            VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: 10) {
                 if let prompt {
                     Label(prompt, systemImage: "exclamationmark.bubble.fill")
                         .font(.subheadline.weight(.semibold))
                         .foregroundStyle(.orange)
                 }
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 6) {
-                        ForEach(QuickKey.standard) { key in
-                            Button {
-                                Task { await model.press(key) }
-                            } label: {
-                                Text(key.label)
-                                    .font(.body.monospaced().weight(.semibold))
-                                    .frame(minWidth: 30, minHeight: 30)
-                            }
-                            .buttonStyle(.bordered)
-                            .accessibilityLabel("发送 \(key.accessibilityLabel)")
-                        }
-                    }
-                }
-                .scrollClipDisabled()
-                HStack(spacing: 8) {
-                    TextField("输入回复，发送后按回车", text: $model.draft)
-                        .textFieldStyle(.roundedBorder)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                        .submitLabel(.send)
-                        .onSubmit { Task { await model.sendDraft() } }
-                    Button {
-                        Task { await model.sendDraft() }
-                    } label: {
-                        Image(systemName: "arrow.up.circle.fill")
-                            .font(.title2)
-                            .frame(minWidth: 44, minHeight: 44)
-                    }
-                    .buttonStyle(.borderless)
-                    .disabled(!model.canSendDraft)
-                    .accessibilityLabel("发送回复")
-                }
+                keys
+                draftField
                 if let error = model.errorMessage {
                     Label(error, systemImage: "exclamationmark.triangle.fill")
                         .font(.footnote)
@@ -164,6 +344,79 @@
             }
             .sensoryFeedback(.success, trigger: model.deliveredCount)
             .sensoryFeedback(.error, trigger: model.failedCount)
+        }
+
+        private var keys: some View {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 6) {
+                    ForEach(QuickKey.standard) { key in
+                        Button {
+                            Task { await model.press(key) }
+                        } label: {
+                            Text(key.label)
+                                .font(.callout.monospaced().weight(.semibold))
+                                .lineLimit(1)
+                                .padding(.horizontal, 10)
+                                .frame(minWidth: 44, minHeight: 40)
+                        }
+                        .buttonStyle(QuickKeyStyle())
+                        .accessibilityLabel("发送 \(key.accessibilityLabel)")
+                    }
+                }
+            }
+            .contentMargins(.horizontal, edgeInset, for: .scrollContent)
+            .padding(.horizontal, -edgeInset)
+            .mask {
+                HStack(spacing: 0) {
+                    LinearGradient(colors: [.clear, .black], startPoint: .leading, endPoint: .trailing)
+                        .frame(width: edgeInset)
+                    Color.black
+                    LinearGradient(colors: [.black, .clear], startPoint: .leading, endPoint: .trailing)
+                        .frame(width: edgeInset)
+                }
+                .padding(.horizontal, -edgeInset)
+            }
+        }
+
+        /// 输入框，发送按钮在框里的右端。
+        private var draftField: some View {
+            HStack(spacing: 4) {
+                TextField("输入回复，发送时带回车", text: $model.draft)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    .submitLabel(.send)
+                    .focused($draftFocused)
+                    .onSubmit { Task { await model.sendDraft() } }
+                    .padding(.leading, 14)
+                    .frame(minHeight: 40)
+                Button {
+                    Task { await model.sendDraft() }
+                } label: {
+                    Image(systemName: "arrow.up.circle.fill")
+                        .font(.title2)
+                        .frame(width: 44, height: 40)
+                }
+                .buttonStyle(.borderless)
+                .disabled(!model.canSendDraft)
+                .accessibilityLabel("发送回复")
+            }
+            .background(Color(.tertiarySystemFill), in: .inner)
+            .contentShape(.inner)
+            .onTapGesture { draftFocused = true }
+        }
+    }
+
+    /// 快速回复的一个键：浅底圆角块，字用强调色，按下时变暗。比 `.bordered` 矮，一排能多放几个。
+    private struct QuickKeyStyle: ButtonStyle {
+        @Environment(\.isEnabled) private var isEnabled
+
+        func makeBody(configuration: Configuration) -> some View {
+            configuration.label
+                .foregroundStyle(isEnabled ? AnyShapeStyle(.tint) : AnyShapeStyle(.tertiary))
+                .background(Color(.tertiarySystemFill), in: .inner)
+                .contentShape(.inner)
+                .opacity(configuration.isPressed ? 0.55 : 1)
+                .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
         }
     }
 

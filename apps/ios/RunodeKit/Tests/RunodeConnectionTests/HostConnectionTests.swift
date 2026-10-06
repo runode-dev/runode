@@ -101,8 +101,8 @@ import Testing
         await link.stop()
     }
 
-    /// `unknown_device`（Mac 上撤销了这台设备）不自动重连：不换下一个地址、不按退避重试，App 回到前台
-    /// 再 `start` 也不连；只有用户点重试（`reconnectNow`）才再试一次。Mac 把这类失败计入限速。
+    /// `unknown_device`（电脑上撤销了这台设备）不自动重连：不换下一个地址、不按退避重试，App 回到前台
+    /// 再 `start` 也不连；只有用户点重试（`reconnectNow`）才再试一次。电脑把这类失败计入限速。
     @Test func aRevokedDeviceStopsRetrying() async throws {
         let transport = FakeTransport()
         supply.add(transport)

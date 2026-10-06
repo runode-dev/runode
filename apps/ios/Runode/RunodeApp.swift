@@ -15,8 +15,8 @@ struct RunodeApp: App {
     }
 }
 
-/// 把真的依赖组装起来：Keychain 里的设备私钥、Application Support 里的 Mac 列表、Bonjour 发现、
-/// 每台 Mac 一条 `HostConnection`。
+/// 把真的依赖组装起来：Keychain 里的设备私钥、Application Support 里的电脑列表、Bonjour 发现、
+/// 每台电脑一条 `HostConnection`。
 @MainActor
 enum AppComposition {
     static func dependencies() -> AppDependencies {
@@ -48,7 +48,7 @@ enum AppComposition {
         #endif
     }
 
-    /// 报给宿主的构建标识，固定不变。宿主只拿它和自己的比，一样才给快照；Mac 的是
+    /// 报给宿主的构建标识，固定不变。宿主只拿它和自己的比，一样才给快照；桌面端的是
     /// `<版本>.<提交号>`，和这个永远对不上，所以手机一律用 VT 重放。
     nonisolated static let buildIdentifier = "dev.runode.mobile"
 }

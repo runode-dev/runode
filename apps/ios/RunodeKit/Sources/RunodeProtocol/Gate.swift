@@ -9,13 +9,13 @@ public let gateVersion: UInt32 = 1
 
 /// 宿主为什么拒绝。不认识的取值读成 `unknown`，按通用失败处理。
 public enum GateRejection: Hashable, Sendable, Codable {
-    /// 没配对，或者已经在 Mac 上撤销了。
+    /// 没配对，或者已经在电脑上撤销了。
     case unknownDevice
     case badSignature
     /// 配对口令不对、过期或已经用过。
     case pairingInvalid
     case rateLimited
-    /// Mac 上关了远程访问。
+    /// 电脑上关了远程访问。
     case disabled
     case unknown(String)
 

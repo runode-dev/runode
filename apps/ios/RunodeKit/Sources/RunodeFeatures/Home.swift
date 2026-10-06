@@ -55,7 +55,7 @@ public final class UserDefaultsRecentTerminalStore: RecentTerminalStore {
     }
 }
 
-/// 首页顶上的几个数：连着的 Mac 上加起来。
+/// 首页顶上的几个数：连着的电脑上加起来。
 public struct HomeSummary: Hashable, Sendable {
     public var waiting = 0
     public var working = 0
@@ -73,11 +73,11 @@ public struct ResumeItem: Hashable, Sendable {
     public var agent: Agent?
 }
 
-/// 首页「等你回答」里的一个会话，带着它所在的 Mac 和会话列表（快速回复经那条连接发）。
+/// 首页「等你回答」里的一个会话，带着它所在的电脑和会话列表（快速回复经那条连接发）。
 public struct WaitingSession: Identifiable {
     public let list: SessionListModel
     public let session: SessionInfo
-    /// 哪台 Mac 上的哪个会话。
+    /// 哪台电脑上的哪个会话。
     public let id: String
 
     @MainActor
@@ -89,12 +89,12 @@ public struct WaitingSession: Identifiable {
 }
 
 extension AppModel {
-    /// 配对过的每台 Mac 的会话列表，按配对的先后。
+    /// 配对过的每台电脑的会话列表，按配对的先后。
     public var machineLists: [SessionListModel] {
         machineList.machines.compactMap { sessionList(for: $0.id) }
     }
 
-    /// 连着的 Mac 上的统计；断开的 Mac 上留着的旧列表不算。
+    /// 连着的电脑上的统计；断开的电脑上留着的旧列表不算。
     public var summary: HomeSummary {
         var summary = HomeSummary()
         for list in machineLists where list.linkState.isConnected {
@@ -110,14 +110,14 @@ extension AppModel {
         return summary
     }
 
-    /// 连着的 Mac 上等用户回答的会话，按 Mac 的先后、再按宿主给的先后。
+    /// 连着的电脑上等用户回答的会话，按电脑的先后、再按宿主给的先后。
     public var waitingSessions: [WaitingSession] {
         machineLists.filter(\.linkState.isConnected).flatMap { list in
             list.sessions.filter { SessionGroup.of($0) == .waiting }.map { WaitingSession(list: list, session: $0) }
         }
     }
 
-    /// 上次打开的终端；那台 Mac 删掉了，或者连上后列表里已经没有这个会话（结束了）时为空。
+    /// 上次打开的终端；那台电脑删掉了，或者连上后列表里已经没有这个会话（结束了）时为空。
     public var resume: ResumeItem? {
         guard let recent, let machine = machineList.machine(recent.machine) else { return nil }
         let list = sessionList(for: recent.machine)
@@ -129,7 +129,7 @@ extension AppModel {
             directory: live?.meta.cwd ?? recent.directory, agent: live?.meta.agent)
     }
 
-    /// 能新开会话的 Mac：连着的。
+    /// 能新开会话的电脑：连着的。
     public var spawnableLists: [SessionListModel] {
         machineLists.filter(\.linkState.isConnected)
     }
@@ -140,7 +140,7 @@ extension AppModel {
         openTerminal(machine: resume.machine.id, session: resume.session)
     }
 
-    /// 首页在看着的时候：每台 Mac 都定时刷新列表和在干活、等回答的会话的预览。
+    /// 首页在看着的时候：每台电脑都定时刷新列表和在干活、等回答的会话的预览。
     public func keepHomeRefreshing() async {
         await withTaskGroup(of: Void.self) { group in
             for list in machineLists {

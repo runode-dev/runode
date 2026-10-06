@@ -69,7 +69,7 @@ struct PreviewThrottle {
     }
 }
 
-/// 一台 Mac 的会话列表：连上后 `ListSessions`，给每个会话发只看状态（`MetaOnly`）的 `Attach` 收实时的
+/// 一台电脑的会话列表：连上后 `ListSessions`，给每个会话发只看状态（`MetaOnly`）的 `Attach` 收实时的
 /// 标题、目录和 agent 状态；用 `ReadScreen` 读屏幕底部几行做预览；等回答的会话能直接快速回复
 /// （`SendKeys`、`Paste`，不用连上会话）；能新开、结束会话。
 ///
@@ -165,7 +165,7 @@ public final class SessionListModel {
         }
     }
 
-    /// 离开这台 Mac 或者 App 进了后台：停止订阅，断开连接。
+    /// 离开这台电脑或者 App 进了后台：停止订阅，断开连接。
     public func stop() {
         task?.cancel()
         task = nil

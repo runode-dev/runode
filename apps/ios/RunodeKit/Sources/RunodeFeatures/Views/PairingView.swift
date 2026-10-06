@@ -3,59 +3,75 @@
     import SwiftUI
     import UIKit
 
-    /// 配对页：先说清 Mac 上要做的两步（打开远程访问、运行 `runode remote pair`），再扫码；没有摄像头时
-    /// 粘贴链接。配好后显示结果，点「完成」进到这台 Mac。
+    /// 配对页：先说清电脑上要做的两步（打开远程访问、运行 `runode remote pair`），再扫码；没有摄像头时
+    /// 粘贴链接。配好后显示结果，点「完成」进到这台电脑。
     struct PairingView: View {
         @Bindable var model: PairingModel
-        /// 关掉配对页；配对成功时带着那台 Mac。
+        /// 关掉配对页；配对成功时带着那台电脑。
         let onFinish: (MachineRecord?) -> Void
 
         var body: some View {
             NavigationStack {
-                Form {
+                List {
                     Section {
-                        CommandRow(
-                            step: 1, text: "在 Runode 的配置文件里加上这一行，打开远程访问：",
-                            command: "remote-access = true")
-                        CommandRow(step: 2, text: "在 Mac 的终端里运行：", command: "runode remote pair")
-                    } header: {
-                        Text("在 Mac 上")
-                    } footer: {
-                        Text("终端里会出现一个二维码，5 分钟内有效。")
+                        ListSectionHeader(title: "在电脑上")
+                        VStack(alignment: .leading, spacing: 12) {
+                            CommandRow(
+                                step: 1, text: "在 Runode 的配置文件里加上这一行，打开远程访问：",
+                                command: "remote-access = true")
+                            Divider()
+                            CommandRow(step: 2, text: "在电脑的终端里运行：", command: "runode remote pair")
+                        }
+                        .cardBackground()
+                        .plainListRow()
+                        ListSectionFooter(text: "终端里会出现一个二维码，5 分钟内有效。")
                     }
-                    Section("扫二维码") {
+                    Section {
+                        ListSectionHeader(title: "扫二维码")
                         scanner
                     }
-                    Section("或者粘贴配对链接") {
-                        TextField("runode://pair?…", text: $model.linkText, axis: .vertical)
-                            .font(.footnote.monospaced())
-                            .textInputAutocapitalization(.never)
-                            .autocorrectionDisabled()
-                            .lineLimit(1...4)
-                        HStack {
-                            PasteButton(payloadType: String.self) { strings in
-                                guard let link = strings.first else { return }
-                                Task { @MainActor in
-                                    model.linkText = link
-                                    await model.submitLink()
+                    Section {
+                        ListSectionHeader(title: "或者粘贴配对链接")
+                        VStack(alignment: .leading, spacing: 12) {
+                            TextField("runode://pair?…", text: $model.linkText, axis: .vertical)
+                                .font(.footnote.monospaced())
+                                .textInputAutocapitalization(.never)
+                                .autocorrectionDisabled()
+                                .lineLimit(1...4)
+                                .padding(10)
+                                .background(Color(.tertiarySystemFill), in: .inner)
+                            HStack {
+                                PasteButton(payloadType: String.self) { strings in
+                                    guard let link = strings.first else { return }
+                                    Task { @MainActor in
+                                        model.linkText = link
+                                        await model.submitLink()
+                                    }
                                 }
+                                .labelStyle(.titleAndIcon)
+                                .buttonBorderShape(.capsule)
+                                Spacer()
+                                Button("配对") {
+                                    Task { await model.submitLink() }
+                                }
+                                .buttonStyle(.borderedProminent)
+                                .disabled(model.linkText.isEmpty || model.isBusy)
                             }
-                            .labelStyle(.titleAndIcon)
-                            .buttonBorderShape(.capsule)
-                            Spacer()
-                            Button("配对") {
-                                Task { await model.submitLink() }
-                            }
-                            .buttonStyle(.borderedProminent)
-                            .disabled(model.linkText.isEmpty || model.isBusy)
+                            .frame(minHeight: 44)
                         }
-                        .frame(minHeight: 44)
+                        .cardBackground()
+                        .plainListRow()
                     }
                     if model.phase != .idle {
-                        Section { status }
+                        Section {
+                            status
+                                .cardBackground()
+                                .plainListRow()
+                        }
                     }
                 }
-                .navigationTitle("配对 Mac")
+                .cardList()
+                .navigationTitle("配对电脑")
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar {
                     ToolbarItem(placement: .cancellationAction) {
@@ -72,14 +88,16 @@
             if let message = model.scannerUnavailable {
                 Label(message, systemImage: "camera.badge.ellipsis")
                     .foregroundStyle(.secondary)
-                    .padding(.vertical, 4)
+                    .cardBackground()
+                    .plainListRow()
             } else {
                 QRScannerView(
                     onCode: { code in Task { await model.scanned(code) } },
                     onUnavailable: { message in model.scannerUnavailable = message }
                 )
                 .frame(height: 240)
-                .listRowInsets(EdgeInsets())
+                .clipShape(.card)
+                .plainListRow()
                 .accessibilityLabel("二维码取景框")
             }
         }
@@ -136,7 +154,7 @@
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(.horizontal, 10)
                         .padding(.vertical, 8)
-                        .background(Color(.tertiarySystemFill), in: RoundedRectangle(cornerRadius: 8))
+                        .background(Color(.tertiarySystemFill), in: .inner)
                     Button {
                         UIPasteboard.general.string = command
                         copied = true

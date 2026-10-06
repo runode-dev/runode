@@ -42,7 +42,7 @@ public enum Presentation {
     /// 终端页里尺寸由谁控制。
     public static func sizeOwnership(_ ownership: SizeOwnership) -> String {
         switch ownership {
-        case .unknown: "尺寸跟随 Mac"
+        case .unknown: "尺寸跟随电脑"
         case .mine: "尺寸跟随本机"
         case .other(let name?): "尺寸跟随 \(name)"
         case .other(nil): "尺寸跟随其他设备"
@@ -72,7 +72,7 @@ public enum Presentation {
         }
     }
 
-    /// 首页 Mac 卡片上的一行：连着时是会话数和在干活、等回答的个数（前面的绿点已经说明连着，不再写
+    /// 首页电脑卡片上的一行：连着时是会话数和在干活、等回答的个数（前面的绿点已经说明连着，不再写
     /// 「已连接」），没连着时是连接状态。
     public static func machineSummary(_ state: LinkState, sessions: [SessionInfo], loaded: Bool, now: Date = .now)
         -> String
@@ -128,7 +128,8 @@ public enum Presentation {
         }
     }
 
-    /// 终端页标题下面那行：agent 状态和连接状态。
+    /// 终端页标题下面那行：agent 状态和连接状态。有 agent 状态又连得好好的时不写「已连接」，只在
+    /// 连接出了状况时才占地方。
     public static func terminalSubtitle(agent: Agent?, link: LinkState, phase: TerminalModel.Phase, now: Date = .now)
         -> String
     {
@@ -137,7 +138,8 @@ public enum Presentation {
         switch phase {
         case .exited: parts.append("shell 已退出")
         case .gone: parts.append("会话已结束")
-        default: parts.append(linkStatus(link, now: now))
+        default:
+            if parts.isEmpty || !link.isConnected { parts.append(linkStatus(link, now: now)) }
         }
         return parts.joined(separator: " · ")
     }
@@ -146,7 +148,7 @@ public enum Presentation {
         switch preference {
         case .automatic: "自动"
         case .fitPhone: "适配手机"
-        case .followMac: "跟随 Mac"
+        case .followMachine: "跟随电脑"
         }
     }
 

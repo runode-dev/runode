@@ -5,7 +5,7 @@ import RunodeProtocol
 
 /// 导航栈里的一页。
 public enum Route: Hashable, Sendable {
-    /// 一台 Mac 的会话列表。
+    /// 一台电脑的会话列表。
     case machine(UUID)
     /// 一个会话的终端页。
     case terminal(machine: UUID, session: SessionId)
@@ -16,9 +16,9 @@ public struct AppDependencies {
     public var store: any MachineStore
     public var keyStore: any DeviceKeyStore
     public var pairing: any Pairing
-    /// 给一台 Mac 建连接。
+    /// 给一台电脑建连接。
     public var makeLink: @MainActor (MachineRecord) -> any HostLink
-    /// 报给 Mac 的设备名。
+    /// 报给电脑的设备名。
     public var deviceName: String
     /// 上次打开的终端记在哪里；不给时只记在内存里（测试、演示模式）。
     public var recents: any RecentTerminalStore
@@ -38,7 +38,7 @@ public struct AppDependencies {
     }
 }
 
-/// 整个 App 的状态：导航栈、各页的视图模型、每台 Mac 一条连接。配对过的每台 Mac 在 App 处于前台
+/// 整个 App 的状态：导航栈、各页的视图模型、每台电脑一条连接。配对过的每台电脑在 App 处于前台
 /// 时都连着，首页据此显示各台的状态、等回答的会话和统计；App 进后台时全部断开，回到前台再连上、
 /// 各页重新 `Attach`。
 @Observable
@@ -66,7 +66,7 @@ public final class AppModel {
         machineList.didLoad = { [weak self] in self?.syncConnections() }
     }
 
-    /// 打开一个终端页：在这台 Mac 的会话列表上时压在它上面，别处（首页、别的 Mac）打开时连同它的
+    /// 打开一个终端页：在这台电脑的会话列表上时压在它上面，别处（首页、别的电脑）打开时连同它的
     /// 会话列表一起换上，返回时先回到列表。
     public func openTerminal(machine: UUID, session: SessionId) {
         let route = Route.terminal(machine: machine, session: session)
@@ -107,7 +107,7 @@ public final class AppModel {
         if let existing = terminals[route] { return existing }
         guard let list = sessionList(for: machineId) else { return nil }
         let info = list.session(session)
-        // 列表里知道这个会话有没有前端在决定尺寸（Mac 上的窗口在显示它）；不在列表里时连上再看。
+        // 列表里知道这个会话有没有前端在决定尺寸（电脑上的窗口在显示它）；不在列表里时连上再看。
         let hint: SizeOwnerHint =
             switch info {
             case .some(let info): info.sizeOwner == nil ? .none : .someone
@@ -148,7 +148,7 @@ public final class AppModel {
         }
     }
 
-    /// 配对过的 Mac 变了（配对、改名、删除之后重新读了列表）：每台都有一条连接，删掉的断开，改了
+    /// 配对过的电脑变了（配对、改名、删除之后重新读了列表）：每台都有一条连接，删掉的断开，改了
     /// 名字的换上新记录。
     private func syncConnections() {
         let machines = machineList.machines
@@ -178,7 +178,7 @@ public final class AppModel {
         dependencies.recents.save(entry)
     }
 
-    /// 要删掉的 Mac：先退出它的页面、断开连接。
+    /// 要删掉的电脑：先退出它的页面、断开连接。
     private func forget(machine id: UUID) {
         path.removeAll { route in
             switch route {

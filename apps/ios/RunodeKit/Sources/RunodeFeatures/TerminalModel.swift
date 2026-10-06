@@ -15,19 +15,19 @@ public enum SizeOwnership: Hashable, Sendable {
 
 /// 用户在终端页上选的尺寸方式。
 public enum SizePreference: Hashable, Sendable, CaseIterable {
-    /// 按情况自动选：没有别的前端在决定尺寸时适配手机，有 Mac 在显示时跟随 Mac。
+    /// 按情况自动选：没有别的前端在决定尺寸时适配手机，有电脑在显示时跟随电脑。
     case automatic
     /// 按手机屏幕决定尺寸。
     case fitPhone
-    /// 跟随 Mac 的尺寸，手机这边缩放、平移着看。
-    case followMac
+    /// 跟随电脑的尺寸，手机这边缩放、平移着看。
+    case followMachine
 }
 
 /// 打开终端页时从会话列表知道的、这个会话有没有别的前端在决定尺寸。
 public enum SizeOwnerHint: Hashable, Sendable {
-    /// 没有：Mac 上没有窗口在显示它（手机新开的、后台会话）。
+    /// 没有：电脑上没有窗口在显示它（手机新开的、后台会话）。
     case none
-    /// 有，比如 Mac 上的窗口。
+    /// 有，比如电脑上的窗口。
     case someone
     /// 不知道（不是从列表打开的）：连上后等宿主的 `SizeOwner`，等不到就当作没有。
     case unknown
@@ -36,8 +36,8 @@ public enum SizeOwnerHint: Hashable, Sendable {
 /// 终端页的视图模型：连上一个会话、持有手机这边的那份 VT、把用户的输入编码后发出去。
 ///
 /// 尺寸：自动模式下，会话没有尺寸 owner 时（`SizeOwnerHint.none`，或连上后宿主没报 `SizeOwner`）
-/// 按手机屏幕适配，带尺寸 `Attach` 或发 `Resize` 加 `Focus` 接管；有 Mac 在决定尺寸时不带尺寸
-/// `Attach`，跟随 Mac，视图按可读的最小字号缩放、横向平移。owner 变了（`SizeOwner`）自动模式跟着
+/// 按手机屏幕适配，带尺寸 `Attach` 或发 `Resize` 加 `Focus` 接管；有电脑在决定尺寸时不带尺寸
+/// `Attach`，跟随电脑，视图按可读的最小字号缩放、横向平移。owner 变了（`SizeOwner`）自动模式跟着
 /// 重新判断；用户手动选过以后以用户为准。从适配换成跟随时 `Detach` 后不带尺寸重新 `Attach`，丢掉
 /// 宿主记着的这条连接请求过的尺寸：宿主对没请求过尺寸的连接，打字不算交互，不会把尺寸抢回来。
 ///
@@ -127,7 +127,7 @@ public final class TerminalModel {
         switch sizePreference {
         case .automatic: autoFit
         case .fitPhone: true
-        case .followMac: false
+        case .followMachine: false
         }
     }
 
@@ -243,7 +243,7 @@ public final class TerminalModel {
 
     // MARK: 尺寸
 
-    /// 适配手机和跟随 Mac 之间换了：适配时要尺寸，跟随时放手。
+    /// 适配手机和跟随电脑之间换了：适配时要尺寸，跟随时放手。
     private func applySizeMode(wasFitting: Bool) {
         let fitting = fitsPhone
         display?.terminalSizeModeDidChange(fitsPhone: fitting)
@@ -263,7 +263,7 @@ public final class TerminalModel {
         link.send(.focus(id: sessionId, focused: true))
     }
 
-    /// 不再决定尺寸：断开后不带尺寸重新连上，宿主忘掉这条连接请求过的尺寸，尺寸交还给 Mac 上最近用过
+    /// 不再决定尺寸：断开后不带尺寸重新连上，宿主忘掉这条连接请求过的尺寸，尺寸交还给电脑上最近用过
     /// 它的前端。
     private func releaseSize() {
         guard generation != nil, requestedFit != nil || channel != nil else { return }

@@ -1,9 +1,9 @@
 import Foundation
 import RunodeProtocol
 
-/// 拿着二维码里的邀请和 Mac 配对。
+/// 拿着二维码里的邀请和电脑配对。
 public protocol Pairing: Sendable {
-    /// 配对成功时设备私钥已经存好，返回这台 Mac 的记录（还没存进 `MachineStore`）。
+    /// 配对成功时设备私钥已经存好，返回这台电脑的记录（还没存进 `MachineStore`）。
     func pair(with invitation: PairingInvitation, deviceName: String) async throws -> MachineRecord
 }
 

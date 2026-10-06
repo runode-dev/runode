@@ -1,12 +1,12 @@
 import Foundation
 import RunodeProtocol
 
-/// 一台配对过的 Mac。私钥不在这里，在 `DeviceKeyStore` 里按 `id` 存。
+/// 一台配对过的电脑。私钥不在这里，在 `DeviceKeyStore` 里按 `id` 存。
 public struct MachineRecord: Hashable, Sendable, Codable, Identifiable {
     public var id: UUID
     /// 列表里显示的名字，用户可以改；配对时取二维码里的主机名。
     public var name: String
-    /// 门禁时 Mac 报的主机名。
+    /// 门禁时电脑报的主机名。
     public var hostName: String
     public var fingerprint: CertificateFingerprint
     public var port: UInt16
@@ -43,7 +43,7 @@ public struct MachineRecord: Hashable, Sendable, Codable, Identifiable {
     }
 }
 
-/// 配对过的 Mac 存在哪里。
+/// 配对过的电脑存在哪里。
 public protocol MachineStore: Sendable {
     func all() async -> [MachineRecord]
     /// 加一台，或者按 `id` 换掉已有的。
