@@ -77,6 +77,17 @@ host:
   unreachable_title: 连不上 Runode 的终端宿主
   unreachable_detail: 这次终端跑在 app 里，退出 Runode 时一起结束。（%{reason}）
   ok: 好
+  handoff_failed_title: 没能把终端交给这个版本的 Runode
+  handoff_failed_detail: 旧版本的 %{count} 个终端还在它的宿主里照常运行，没受影响。这次终端跑在这个 app 里，runode list 这类命令行连到的仍是旧终端。保留的话，下次打开 Runode 时再试；结束的话，旧终端会全部关闭。（%{reason}）
+  handoff_failed_detail_uncounted: 旧版本的终端还在它的宿主里照常运行，没受影响。这次终端跑在这个 app 里，runode list 这类命令行连到的仍是旧终端。保留的话，下次打开 Runode 时再试；结束的话，旧终端会全部关闭。（%{reason}）
+  pre_handoff_title: 旧版本 Runode 的终端宿主还在运行
+  pre_handoff_detail: 它的版本太旧，没法把终端交给这个版本。保留的话，旧终端照常运行，这次终端跑在这个 app 里，下次打开 Runode 时再问；结束的话，它的终端会全部关闭。
+  old_app_title: 旧版本的 Runode 还开着
+  old_app_detail: 它开着时终端没法交给这个版本，这次终端跑在这个 app 里，退出时一起结束。先退出旧版本的 Runode，再重新打开这一个。
+  keep_old: 保留旧会话
+  end_old: 结束旧会话
+  degraded_title: Runode 已更新
+  degraded_detail: 升级时 %{count} 个终端的回滚历史没能带过来，屏幕和正在运行的程序都不受影响。
 workspace:
   new: 新建工作区
   choose: 打开

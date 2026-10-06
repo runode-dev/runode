@@ -77,6 +77,17 @@ host:
   unreachable_title: 連不上 Runode 的終端機宿主
   unreachable_detail: 這次終端機跑在 app 裡，結束 Runode 時一起關閉。（%{reason}）
   ok: 好
+  handoff_failed_title: 沒能把終端機交給這個版本的 Runode
+  handoff_failed_detail: 舊版的 %{count} 個終端機還在它的宿主裡照常執行，沒有受到影響。這次終端機跑在這個 app 裡，runode list 這類指令列連到的仍是舊的終端機。保留的話，下次開啟 Runode 時再試；終止的話，舊的終端機會全部關閉。（%{reason}）
+  handoff_failed_detail_uncounted: 舊版的終端機還在它的宿主裡照常執行，沒有受到影響。這次終端機跑在這個 app 裡，runode list 這類指令列連到的仍是舊的終端機。保留的話，下次開啟 Runode 時再試；終止的話，舊的終端機會全部關閉。（%{reason}）
+  pre_handoff_title: 舊版 Runode 的終端機宿主還在執行
+  pre_handoff_detail: 它的版本太舊，沒辦法把終端機交給這個版本。保留的話，舊的終端機照常執行，這次終端機跑在這個 app 裡，下次開啟 Runode 時再詢問；終止的話，它的終端機會全部關閉。
+  old_app_title: 舊版的 Runode 還開著
+  old_app_detail: 它開著的時候，終端機沒辦法交給這個版本，這次終端機跑在這個 app 裡，結束時一起關閉。請先結束舊版的 Runode，再重新開啟這一個。
+  keep_old: 保留舊工作階段
+  end_old: 終止舊工作階段
+  degraded_title: Runode 已更新
+  degraded_detail: 升級時有 %{count} 個終端機的捲動紀錄沒能帶過來，畫面和正在執行的程式都不受影響。
 workspace:
   new: 新增工作區
   choose: 打開
