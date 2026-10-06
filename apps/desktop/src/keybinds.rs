@@ -14,12 +14,15 @@ use crate::{
         ReloadConfiguration, ShowAll, ToggleFullScreen, Zoom,
     },
     terminal_view::{
-        ClearScreen, Copy, DecreaseFontSize, IncreaseFontSize, JumpToPrompt, Paste, PasteSelection, ResetFontSize,
-        ScrollPageDown, ScrollPageUp, ScrollToBottom, ScrollToSelection, ScrollToTop, SelectAll, SendText,
+        ClearScreen, DecreaseFontSize, IncreaseFontSize, JumpToPrompt, PasteSelection, ResetFontSize, ScrollPageDown,
+        ScrollPageUp, ScrollToBottom, ScrollToSelection, ScrollToTop, SearchSelection, SendText, StartSearch,
         WriteScreenFile,
     },
-    ui::text_area::SubmitText,
-    ui::text_field::{Cut, EndSearch, Redo, SearchNext, SearchPrevious, SearchSelection, StartSearch, Undo},
+    ui::{
+        actions::{Copy, Cut, Paste, Redo, SelectAll, Undo},
+        text_area::SubmitText,
+        text_field::{EndSearch, SearchNext, SearchPrevious},
+    },
     workspace::{
         ArrangePanes, ClosePane, CloseTab, CloseWorkspace, CollapseSelectedFile, CopyPath, CopyRelativePath,
         DeleteFile, EqualizePanes, ExpandSelectedFile, FocusNextPane, FocusPane, FocusPreviousPane, FocusTerminal,

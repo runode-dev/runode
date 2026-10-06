@@ -28,9 +28,7 @@ use super::{BODY_PADDING, FADE_WIDTH, Loaded, MAX_COLUMNS, Note, ROW_EXTRA_HEIGH
 use crate::{
     assets::{ARROW_DOWN_ICON, ARROW_UP_ICON, DISCARD_ICON, MINUS_ICON, PLUS_ICON},
     config::AppConfig,
-    terminal_view::hsla,
-    ui::scrollbar::scrollbar,
-    ui::tooltip::tooltip,
+    ui::{hsla, scrollbar::scrollbar, tooltip::tooltip},
     workspace::{
         WindowView, divider_color,
         git_panel::Busy,

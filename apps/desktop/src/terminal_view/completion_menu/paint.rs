@@ -14,6 +14,7 @@
 
 use std::ops::Range;
 
+use crate::ui::hsla;
 use gpui::{Bounds, ContentMask, Pixels, Point, Window, fill, point, px, size};
 use runode_completion::{self as completion, Candidate, Kind};
 use runode_shared_types::{
@@ -23,7 +24,7 @@ use runode_shared_types::{
 use runode_terminal::session::Session;
 
 use super::super::{
-    Metrics, TerminalView, hsla,
+    Metrics, TerminalView,
     paint::{faint, paint_glyphs},
 };
 

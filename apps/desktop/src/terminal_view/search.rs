@@ -1,15 +1,24 @@
 //! 终端里的搜索：打开和关闭搜索栏、转发它的事件、切换匹配，以及画右上角的搜索栏。
 
-use gpui::{AppContext as _, Context, CursorStyle, Entity, Focusable, Window, div, prelude::*, px};
+use gpui::{AppContext as _, Context, CursorStyle, Entity, Focusable, Window, actions, div, prelude::*, px};
 use runode_terminal::session::Session;
 
-use super::{TerminalView, hsla};
-use crate::{
-    ui::text_field::{
-        EndSearch, SearchField, SearchFieldEvent, SearchNext, SearchPrevious, SearchSelection, StartSearch,
-    },
-    ui::tooltip::tooltip,
+use super::TerminalView;
+use crate::ui::{
+    hsla,
+    text_field::{EndSearch, SearchField, SearchFieldEvent, SearchNext, SearchPrevious},
+    tooltip::tooltip,
 };
+
+actions!(
+    runode,
+    [
+        /// 打开搜索栏；已经打开时把焦点移过去。
+        StartSearch,
+        /// 用当前选区的文字搜索。
+        SearchSelection
+    ]
+);
 
 impl TerminalView {
     pub(super) fn start_search(&mut self, _: &StartSearch, window: &mut Window, cx: &mut Context<Self>) {

@@ -8,10 +8,13 @@ use runode_cli::SetupTarget;
 
 use crate::{
     terminal_view::{
-        ClearScreen, Copy, DecreaseFontSize, IncreaseFontSize, JumpToPrompt, Paste, PasteSelection, ResetFontSize,
-        SelectAll,
+        ClearScreen, DecreaseFontSize, IncreaseFontSize, JumpToPrompt, PasteSelection, ResetFontSize, SearchSelection,
+        StartSearch,
     },
-    ui::text_field::{Cut, Redo, SearchNext, SearchPrevious, SearchSelection, StartSearch, Undo},
+    ui::{
+        actions::{Copy, Cut, Paste, Redo, SelectAll, Undo},
+        text_field::{SearchNext, SearchPrevious},
+    },
     workspace::{
         ArrangePanes, ClosePane, CloseTab, CloseWorkspace, EqualizePanes, FocusNextPane, FocusPreviousPane, GotoAgent,
         NewSplitDown, NewSplitRight, NewTab, NewWorkspace, NextAgent, NextTab, NextWorkspace, PreviousTab,

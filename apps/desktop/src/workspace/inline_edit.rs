@@ -5,9 +5,9 @@ use gpui::{App, Context, Div, Entity, FocusHandle, Focusable, Pixels, Subscripti
 use runode_shared_types::color::Rgb;
 
 use super::WindowView;
-use crate::{
-    terminal_view::hsla,
-    ui::text_field::{SearchField, SearchFieldEvent},
+use crate::ui::{
+    hsla,
+    text_field::{SearchField, SearchFieldEvent},
 };
 
 /// 输入框结束时调的函数，`commit` 为真是确定，为假是取消。

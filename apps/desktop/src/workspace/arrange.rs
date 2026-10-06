@@ -15,7 +15,7 @@ use runode_shared_types::{
 };
 
 use super::{TITLEBAR_HEIGHT, WindowView, divider_color};
-use crate::{persist, terminal_view::hsla};
+use crate::{persist, ui::hsla};
 
 actions!(
     runode,

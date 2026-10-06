@@ -27,8 +27,7 @@ use super::{
 };
 use crate::{
     assets::{FILES_ICON, GIT_ICON},
-    terminal_view::hsla,
-    ui::tooltip::tooltip,
+    ui::{hsla, tooltip::tooltip},
 };
 use scan::scan;
 

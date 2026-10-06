@@ -14,7 +14,10 @@ use super::{
     model::{WorkspaceId, display_dir},
     titlebar::{agent_mark, close_button, drag_chip, icon_toggle, shortcut_hint},
 };
-use crate::{assets::SIDEBAR_ICON, terminal_view::hsla, ui::tooltip::tooltip};
+use crate::{
+    assets::SIDEBAR_ICON,
+    ui::{hsla, tooltip::tooltip},
+};
 
 /// 侧栏的默认宽度，比红绿灯宽得多，红绿灯落在侧栏顶上。
 const SIDEBAR_WIDTH: f32 = 200.;

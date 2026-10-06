@@ -15,10 +15,7 @@ use gpui::{
     Window, WrappedLine, actions, div, fill, point, prelude::*, px, relative, size,
 };
 
-use crate::{
-    terminal_view::{Copy, Paste, SelectAll},
-    ui::text_field::{Cut, Redo, Undo},
-};
+use crate::ui::actions::{Copy, Cut, Paste, Redo, SelectAll, Undo};
 
 actions!(
     runode,

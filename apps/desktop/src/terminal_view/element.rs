@@ -11,10 +11,9 @@ use runode_terminal::session::Session;
 use super::{
     TerminalView,
     crop::{Edges, pad_color},
-    hsla,
     paint::paint_frame,
 };
-use crate::startup;
+use crate::{startup, ui::hsla};
 
 pub(super) struct TerminalElement {
     pub(super) view: gpui::Entity<TerminalView>,

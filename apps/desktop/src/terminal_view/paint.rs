@@ -13,8 +13,8 @@ use runode_shared_types::{
     frame::{Attrs, CursorShape, Frame},
 };
 
-use super::{Metrics, TerminalView, hsla};
-use crate::sprites;
+use super::{Metrics, TerminalView};
+use crate::{sprites, ui::hsla};
 
 /// 字体的下划线粗细（em 的比例），自绘字符的线宽由它算出。GPUI 不公开字体的下划线粗细，
 /// 这里取 Hack 与 Menlo 的 post 表数值，两者都是 90/2048。

@@ -20,9 +20,11 @@ use super::{
     rows::{Busy, CommitChanges, CommitNote, GRAPH_PAGE, Graph, GraphNote},
 };
 use crate::{
-    terminal_view::hsla,
-    ui::file_icons::{file_icon, folder_icon},
-    ui::tooltip::tooltip,
+    ui::{
+        file_icons::{file_icon, folder_icon},
+        hsla,
+        tooltip::tooltip,
+    },
     workspace::{
         WindowView,
         files::menu_item,

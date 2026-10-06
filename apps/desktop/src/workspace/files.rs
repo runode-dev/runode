@@ -36,11 +36,13 @@ use crate::{
         NEW_FOLDER_ICON,
     },
     config::AppConfig,
-    terminal_view::{Copy, Paste, hsla},
-    ui::file_icons::{file_icon, folder_icon},
-    ui::scrollbar::scrollbar,
-    ui::text_field::Cut,
-    ui::tooltip::tooltip,
+    ui::{
+        actions::{Copy, Cut, Paste},
+        file_icons::{file_icon, folder_icon},
+        hsla,
+        scrollbar::scrollbar,
+        tooltip::tooltip,
+    },
 };
 
 actions!(

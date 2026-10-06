@@ -32,7 +32,7 @@ use std::{
 
 use futures::channel::mpsc::UnboundedReceiver;
 use gpui::{
-    Action, App, Bounds, Context, CursorStyle, Entity, EventEmitter, FocusHandle, Focusable, Font, Hsla, Pixels, Point,
+    Action, App, Bounds, Context, CursorStyle, Entity, EventEmitter, FocusHandle, Focusable, Font, Pixels, Point,
     Render, ShapedLine, Subscription, Task, Window, actions, div, prelude::*, px, rgb,
 };
 use runode_config::Config;
@@ -40,7 +40,10 @@ use runode_protocol::SessionId;
 use runode_shared_types::{color::Rgb, frame::Frame, grid::GridSize};
 use runode_terminal::{history, session::Session};
 
-use crate::{session_host::LinkEvent, ui::text_field::SearchField};
+use crate::{
+    session_host::LinkEvent,
+    ui::{hsla, text_field::SearchField},
+};
 use completion_menu::{CompletionMenu, PendingKey};
 use crop::Crop;
 use element::TerminalElement;
@@ -49,10 +52,7 @@ use screen::ScreenState;
 actions!(
     runode,
     [
-        Copy,
-        Paste,
         PasteSelection,
-        SelectAll,
         ClearScreen,
         ScrollToTop,
         ScrollToBottom,
@@ -85,6 +85,7 @@ pub struct WriteScreenFile(pub ScreenFile);
 pub use runode_config::keybind::ScreenFile;
 /// 回到显示时主线程最多等这么久拿到宿主给的屏幕，见 `TerminalView::wait_for_screen`。
 pub(crate) use screen::SHOW_WAIT;
+pub use search::{SearchSelection, StartSearch};
 
 const MIN_FONT_SIZE: f32 = 6.;
 const MAX_FONT_SIZE: f32 = 72.;
@@ -423,8 +424,4 @@ impl TerminalView {
                     .on_click(cx.listener(|view, _, window, cx| view.reopen(window, cx))),
             )
     }
-}
-
-pub fn hsla(color: Rgb) -> Hsla {
-    rgb(color.to_u32()).into()
 }

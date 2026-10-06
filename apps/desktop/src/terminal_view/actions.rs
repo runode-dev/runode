@@ -7,10 +7,11 @@ use runode_shared_types::grid::ViewportScroll;
 use runode_terminal::session::{Paste as PasteResult, Session};
 
 use super::{
-    ClearScreen, Copy, DecreaseFontSize, IncreaseFontSize, JumpToPrompt, MAX_FONT_SIZE, MIN_FONT_SIZE, Paste,
-    PasteSelection, ResetFontSize, ScreenFile, ScrollPageDown, ScrollPageUp, ScrollToBottom, ScrollToSelection,
-    ScrollToTop, SelectAll, SendText, TerminalView, WriteScreenFile,
+    ClearScreen, DecreaseFontSize, IncreaseFontSize, JumpToPrompt, MAX_FONT_SIZE, MIN_FONT_SIZE, PasteSelection,
+    ResetFontSize, ScreenFile, ScrollPageDown, ScrollPageUp, ScrollToBottom, ScrollToSelection, ScrollToTop, SendText,
+    TerminalView, WriteScreenFile,
 };
+use crate::ui::actions::{Copy, Paste, SelectAll};
 
 impl TerminalView {
     pub(super) fn paste(&mut self, _: &Paste, window: &mut Window, cx: &mut Context<Self>) {

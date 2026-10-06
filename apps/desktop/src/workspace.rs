@@ -51,12 +51,7 @@ pub use quit::{close_all_windows, close_window, end_sessions_in_menu, quit, quit
 pub use remote::serve_requests;
 pub use titlebar::titlebar_options;
 
-use crate::{
-    config::AppConfig,
-    persist::SavedWindow,
-    prespawn::Prespawned,
-    terminal_view::{TerminalView, hsla},
-};
+use crate::{config::AppConfig, persist::SavedWindow, prespawn::Prespawned, terminal_view::TerminalView, ui::hsla};
 use model::{PaneLayout, Workspace, WorkspaceId, home_dir};
 use titlebar::titled;
 

@@ -3,7 +3,7 @@
 use gpui::{Action, AnyView, App, Context, IntoElement, Render, SharedString, Window, div, prelude::*, px};
 use runode_shared_types::color::Rgb;
 
-use crate::terminal_view::hsla;
+use crate::ui::hsla;
 
 /// `action` 在键位表里的快捷键。后加的绑定优先，取最后一个，快捷键改了也跟着变。
 pub fn shortcut_text(action: &dyn Action, cx: &App) -> Option<SharedString> {

@@ -42,9 +42,11 @@ use crate::{
         BRANCH_ICON, CHECK_ICON, CHEVRON_DOWN_ICON, GIT_ICON, MORE_ICON, REFRESH_ICON, SYNC_ICON, VIEW_LIST_ICON,
         VIEW_TREE_ICON,
     },
-    terminal_view::hsla,
-    ui::text_area::{TextArea, TextAreaEvent},
-    ui::tooltip::tooltip,
+    ui::{
+        hsla,
+        text_area::{TextArea, TextAreaEvent},
+        tooltip::tooltip,
+    },
 };
 use rows::{GitRow, GitSection};
 

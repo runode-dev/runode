@@ -19,7 +19,7 @@ use runode_shared_types::{
 };
 
 use super::{DIVIDER_GRAB_WIDTH, Divider, WindowView, files::DraggedFile, model::Tab};
-use crate::terminal_view::hsla;
+use crate::ui::hsla;
 
 /// 没有焦点的分屏蒙上一层背景色，这是蒙层的不透明度。
 const UNFOCUSED_DIM: f32 = 0.3;

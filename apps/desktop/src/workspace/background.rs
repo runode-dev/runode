@@ -24,7 +24,8 @@ use runode_shared_types::{agent::AgentKind, color::Rgb};
 use super::{AGENT_MARK_WIDTH, WindowView, agents::Mark, divider_color, model::display_dir, titlebar::agent_mark};
 use crate::{
     session_host::{self, Mode},
-    terminal_view::{DEFAULT_TITLE, TerminalView, hsla},
+    terminal_view::{DEFAULT_TITLE, TerminalView},
+    ui::hsla,
 };
 
 /// 列表不空时隔这么久重问一次宿主。

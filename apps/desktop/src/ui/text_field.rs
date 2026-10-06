@@ -13,24 +13,9 @@ use gpui::{
     size,
 };
 
-use crate::terminal_view::{Copy, Paste, SelectAll};
+use crate::ui::actions::{Copy, Cut, Paste, Redo, SelectAll, Undo};
 
-actions!(
-    runode,
-    [
-        /// 打开搜索栏；已经打开时把焦点移过去。
-        StartSearch,
-        /// 用当前选区的文字搜索。
-        SearchSelection,
-        SearchNext,
-        SearchPrevious,
-        EndSearch,
-        /// 以下几个只在搜索框里用：终端里没有可编辑的文字。
-        Cut,
-        Undo,
-        Redo
-    ]
-);
+actions!(runode, [SearchNext, SearchPrevious, EndSearch]);
 
 const CARET_WIDTH: Pixels = px(1.5);
 const CARET_HEIGHT: Pixels = px(14.);
