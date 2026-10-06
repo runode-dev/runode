@@ -2,6 +2,7 @@
 //! 都从这里取，和 `Config::apply` 的解析互为逆运算。
 
 use runode_shared_types::{
+    clipboard::{ClipboardRead, ClipboardWrite},
     color::{Rgb, TerminalColor},
     settings::{CursorStyle, OptionAsAlt},
     shell::{IntegrationMode, Shell},
@@ -86,6 +87,21 @@ impl Config {
             "command-suggestions" => bool(self.command_suggestions),
             "command-completions" => bool(self.command_completions),
             "command-highlighting" => bool(self.command_highlighting),
+            "clipboard-write" => vec![
+                match self.clipboard_write {
+                    ClipboardWrite::Allow => "allow",
+                    ClipboardWrite::Deny => "deny",
+                }
+                .into(),
+            ],
+            "clipboard-read" => vec![
+                match self.clipboard_read {
+                    ClipboardRead::Allow => "allow",
+                    ClipboardRead::Ask => "ask",
+                    ClipboardRead::Deny => "deny",
+                }
+                .into(),
+            ],
             "terminal-host" => bool(self.terminal_host),
             "remote-access" => bool(self.remote_access),
             "remote-access-port" => vec![self.remote_access_port.to_string()],
@@ -124,7 +140,8 @@ mod tests {
              cursor-color = cell-foreground\ncursor-style = block_hollow\ncursor-style-blink = false\n\
              cursor-style-blink-timeout = 0\nmacos-option-as-alt = left\nshell-integration = fish\n\
              agent-notifications-exclude = codex,claude\nagent-done-sound = none\nlanguage = en\n\
-             file-tree-preview-click = double\npalette = 3=#010203\nremote-access = true"]);
+             file-tree-preview-click = double\npalette = 3=#010203\nremote-access = true\n\
+             clipboard-write = deny\nclipboard-read = allow"]);
         let text: String = KEYS
             .iter()
             .flat_map(|group| group.iter())
@@ -133,6 +150,8 @@ mod tests {
         assert_eq!(load(&[&text]), config);
         assert_eq!(config.values("adjust-cell-height"), ["10%"]);
         assert_eq!(config.values("cursor-style-blink-timeout"), ["0"]);
+        assert_eq!(config.values("clipboard-read"), ["allow"]);
+        assert_eq!(Config::default().values("clipboard-write"), ["allow"]);
         assert!(Config::default().values("cursor-color").is_empty());
     }
 }

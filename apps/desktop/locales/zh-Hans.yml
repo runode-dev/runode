@@ -390,6 +390,7 @@ settings:
     keyboard: 键盘
     shell: Shell
     scrollback: 回滚历史
+    clipboard: 剪贴板
   theme:
     none: 不用主题
     single: 一个主题
@@ -428,6 +429,8 @@ settings:
     command_suggestions: 命令建议
     command_completions: Tab 补全菜单
     command_highlighting: 命令行高亮
+    clipboard_write: 程序写剪贴板
+    clipboard_read: 程序读剪贴板
     terminal_host: 退出后保留会话
     remote_access: 远程访问
     remote_access_port: 端口
@@ -468,6 +471,8 @@ settings:
     command_suggestions: 输入时按命令历史用灰字给出后半截，按 → 或 End 接受。关掉时也不读写命令历史。
     command_completions: 按 Tab 弹出命令、子命令、选项和参数的菜单。关掉时 Tab 总是交给 shell。
     command_highlighting: 输入时给命令、选项、字符串和路径上色；shell 自己已经上了色时不管。
+    clipboard_write: 终端里的程序（vim、tmux、经 ssh 连到远端的 shell 等）能把文字放进剪贴板。
+    clipboard_read: 终端里的程序能读到你复制过的文字，密码也在内。选“询问”时先说明是哪个程序要读。
     terminal_host: 会话放在后台进程里，退出 Runode 后照常运行，下次打开接着用。下次启动才生效。
     remote_access: 让配对过的手机经局域网或 Tailscale 连上这台 Mac 的终端。用 runode remote pair 配对。
     remote_access_port: TCP 端口，1 到 65535。
@@ -500,6 +505,13 @@ settings:
     file_tree_preview_click:
       single: 单击
       double: 双击
+    clipboard_write:
+      allow: 允许
+      deny: 拒绝
+    clipboard_read:
+      allow: 允许
+      ask: 询问
+      deny: 拒绝
   keybind:
     action: 动作
     unbind: 去掉快捷键

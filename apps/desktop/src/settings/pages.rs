@@ -131,6 +131,9 @@ impl Page {
                 Row("command-highlighting", Switch),
                 Section("scrollback"),
                 Row("scrollback-limit", Text(120.)),
+                Section("clipboard"),
+                Row("clipboard-write", Choice(&["allow", "deny"])),
+                Row("clipboard-read", Choice(&["ask", "allow", "deny"])),
             ],
             Self::Files => &[
                 Row("file-tree-font-size", Text(80.)),
