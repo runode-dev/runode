@@ -654,7 +654,7 @@ fn handshake(stream: &UnixStream, build: &BuildId) -> Result<Welcome, ConnectErr
     answer
 }
 
-/// 报给宿主的设备名：这台机器的主机名，去掉局域网里自动加的 `.local`。几个前端看同一个会话时，
+/// 报给宿主的设备名：这台机器的主机名的第一段，见 `short_host_name`。几个前端看同一个会话时，
 /// 别的前端据此显示「尺寸由谁控制」，见 `HostMsg::SizeOwner`。取不到时为 `None`。
 fn device_name() -> Option<String> {
     let mut buf = [0u8; 256];
@@ -664,8 +664,13 @@ fn device_name() -> Option<String> {
         return None;
     }
     let end = buf.iter().position(|&b| b == 0).unwrap_or(buf.len());
-    let name = String::from_utf8_lossy(&buf[..end]);
-    let name = name.strip_suffix(".local").unwrap_or(&name).trim();
+    short_host_name(&String::from_utf8_lossy(&buf[..end]))
+}
+
+/// 主机名第一个点之前的部分：局域网和路由器会给主机名加上 `.local`、`.lan`、`.home` 这类域名，
+/// 显示给人看的只要机器自己的名字。空的为 `None`。
+fn short_host_name(host: &str) -> Option<String> {
+    let name = host.trim().split('.').next().unwrap_or_default().trim();
     (!name.is_empty()).then(|| name.to_owned())
 }
 
@@ -1249,6 +1254,22 @@ mod tests {
         link.close();
         assert!(matches!(rx.try_recv(), Ok(LinkEvent::Msg(HostMsg::Exited { .. }))));
         assert!(matches!(rx.try_recv(), Ok(LinkEvent::Lost)));
+    }
+
+    /// 设备名只要主机名第一个点之前的部分，不管加的是哪个域名。
+    #[test]
+    fn the_device_name_is_the_first_label_of_the_host_name() {
+        assert_eq!(short_host_name("Mac.lan").as_deref(), Some("Mac"));
+        assert_eq!(short_host_name("Ethans-MacBook-Pro.local").as_deref(), Some("Ethans-MacBook-Pro"));
+        assert_eq!(short_host_name("studio.home.example.com").as_deref(), Some("studio"));
+        assert_eq!(short_host_name("  build-box \n").as_deref(), Some("build-box"));
+        assert_eq!(short_host_name("plain").as_deref(), Some("plain"));
+        assert_eq!(short_host_name(""), None);
+        assert_eq!(short_host_name(".lan"), None);
+        // 这台机器上取得到的也是不带点的一段。
+        if let Some(name) = device_name() {
+            assert!(!name.is_empty() && !name.contains('.'), "{name}");
+        }
     }
 
     #[test]
