@@ -41,7 +41,6 @@ pub enum Mode {
 }
 
 /// 列会话最多等这么久。
-#[allow(dead_code)]
 const LIST_TIMEOUT: Duration = Duration::from_secs(2);
 /// 让留下的宿主退出后，最多等这么久拿到它放开的锁、开自己的 socket。
 const LISTEN_RETRY: Duration = Duration::from_secs(2);
@@ -107,8 +106,6 @@ pub fn link() -> &'static Link {
 }
 
 /// 宿主现在怎么跑；`start` 还没定下时等它，同 `link`。
-// 退出（是否保留会话）和断开后的提示用上它之前先放着。
-#[allow(dead_code)]
 pub fn mode() -> Mode {
     link();
     *MODE.lock().unwrap_or_else(PoisonError::into_inner)
@@ -168,8 +165,6 @@ pub fn reconnect() -> Result<()> {
 }
 
 /// 宿主里所有的会话。
-// 存档恢复和后台会话用上它之前先放着。
-#[allow(dead_code)]
 pub fn list_sessions() -> Result<Vec<SessionInfo>> {
     link().list_sessions(LIST_TIMEOUT)
 }

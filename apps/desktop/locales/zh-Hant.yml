@@ -86,6 +86,7 @@ quit:
   confirm: 結束
   cancel: 取消
   agent: "%{agent}（%{workspace}）"
+  background_agent: "%{agent}（背景）"
   separator: "、"
   end_title: 終止所有工作階段並結束 Runode？
   end_detail: 還有 %{count} 個 agent 在執行。所有終端機工作階段都會一併終止，包括沒在視窗裡顯示的背景工作階段。

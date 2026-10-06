@@ -86,6 +86,7 @@ quit:
   confirm: 退出
   cancel: 取消
   agent: "%{agent}（%{workspace}）"
+  background_agent: "%{agent}（后台）"
   separator: "、"
   end_title: 结束所有会话并退出 Runode？
   end_detail: 还有 %{count} 个 agent 在运行。所有终端会话都会一起结束，包括没在窗口里显示的后台会话。

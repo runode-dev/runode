@@ -86,6 +86,7 @@ quit:
   confirm: Quit
   cancel: Cancel
   agent: "%{agent} (%{workspace})"
+  background_agent: "%{agent} (background)"
   separator: ", "
   end_title: End all sessions and quit Runode?
   end_detail: "Agents still running: %{count}. They will be stopped along with every terminal session, including background sessions that aren't shown in any window."

@@ -503,7 +503,6 @@ impl Link {
     }
 
     /// 宿主里所有的会话，最多等 `timeout`。
-    #[allow(dead_code)]
     pub fn list_sessions(&self, timeout: Duration) -> Result<Vec<SessionInfo>> {
         let (tx, rx) = mpsc::channel();
         {
@@ -523,7 +522,6 @@ impl Link {
     /// 等宿主读完之前发的所有消息，最多等 `timeout`：发一个 `ListSessions` 等它回话，宿主按先后
     /// 处理同一条连接上的消息。宿主读完后断开（比如收到 `Shutdown` 后发了 `Goodbye`）也算。
     /// 超时返回 false。
-    #[allow(dead_code)]
     pub fn flush(&self, timeout: Duration) -> bool {
         match self.list_sessions(timeout) {
             Ok(_) => true,

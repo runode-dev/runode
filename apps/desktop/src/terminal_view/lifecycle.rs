@@ -456,7 +456,6 @@ impl TerminalView {
 
     /// 结束宿主里的会话（关标签、关分屏这类用户明确要关掉终端的时候）。之后丢掉视图时不再
     /// 另外发什么；没调过它就丢掉视图时见 `Drop`。
-    #[allow(dead_code)]
     pub fn end(&mut self) {
         if !std::mem::replace(&mut self.ended, true) {
             session_host::link().kill(self.id);

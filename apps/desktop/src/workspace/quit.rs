@@ -12,14 +12,17 @@
 //! 弹框之前都先推迟到当前的更新结束：动作和关闭按钮的回调运行时，触发它的窗口正被借出，这时
 //! 既读不到它里面的 agent，也没法在它上面弹框。
 
-use std::time::Duration;
+use std::{collections::HashSet, time::Duration};
 
 use gpui::{AnyWindowHandle, App, Global, PromptLevel, Window};
-use runode_protocol::{ClientMsg, SessionInfo};
+use runode_protocol::{ClientMsg, SessionId, SessionInfo};
 use runode_shared_types::agent::AgentKind;
 
 use super::{WindowView, model::Closing};
-use crate::session_host::{self, Mode};
+use crate::{
+    session_host::{self, Mode},
+    terminal_view::TerminalView,
+};
 
 /// 让单独跑的宿主连会话一起退出后，最多等它这么久读完之前发的消息。
 const SHUTDOWN_FLUSH: Duration = Duration::from_millis(200);
@@ -185,43 +188,42 @@ fn run(action: QuitAction, window: Option<AnyWindowHandle>, cx: &mut App, then: 
         return;
     }
     let mode = session_host::mode();
-    match ending(mode, action) {
-        Ending::Keep => then(cx),
-        Ending::WithApp => {
-            let agents = window_agents(cx);
-            let names = agent_names(&agents);
-            let plan = quit_plan(mode, action, agents.len());
-            confirm(window, plan.prompt.map(|prompt| prompt_text(prompt, &names, agents.len())), cx, then);
-        }
-        Ending::ShutdownHost => {
-            // 没在窗口里显示的后台会话里的 agent 也会被结束，要问宿主；问它最多要等上
-            // `session_host::list_sessions` 的超时，放到后台线程，期间不再接退出。
-            cx.set_global(Prompting(true));
-            let sessions = cx.background_executor().spawn(async { session_host::list_sessions() });
-            cx.spawn(async move |cx| {
-                let sessions = sessions.await;
-                cx.update(|cx| {
-                    cx.set_global(Prompting(false));
-                    let agents = match sessions {
-                        Ok(sessions) => session_agents(&sessions),
-                        Err(err) => {
-                            tracing::warn!(
-                                "failed to list the host's sessions, counting the agents in windows: {err:#}"
-                            );
-                            window_agents(cx).len()
-                        }
-                    };
-                    let plan = quit_plan(mode, action, agents);
-                    let text = plan.prompt.map(|prompt| prompt_text(prompt, &[], agents));
-                    confirm(window, text, cx, move |cx| {
-                        shutdown_host();
-                        then(cx);
-                    });
-                });
-            })
-            .detach();
-        }
+    let ending = ending(mode, action);
+    if ending == Ending::Keep {
+        then(cx);
+        return;
     }
+    // 没被窗口里的终端占着的会话（丢掉视图后留在宿主里的、后台会话）也会被结束，里面的 agent
+    // 也要算，得问宿主；问它最多要等上 `session_host::list_sessions` 的超时，放到后台线程，期间
+    // 不再接退出。问不到时只数窗口里的。
+    cx.set_global(Prompting(true));
+    let sessions = cx.background_executor().spawn(async { session_host::list_sessions() });
+    cx.spawn(async move |cx| {
+        let sessions = sessions.await;
+        cx.update(|cx| {
+            cx.set_global(Prompting(false));
+            let sessions = sessions
+                .inspect_err(|err| {
+                    tracing::warn!("failed to list the host's sessions, counting the agents in windows: {err:#}");
+                })
+                .unwrap_or_default();
+            let shown = window_agents(cx);
+            let held = held_sessions(cx);
+            let hidden = hidden_agents(&sessions, &held);
+            let count = shown.len() + hidden.len();
+            let plan = quit_plan(mode, action, count);
+            let text = plan.prompt.map(|prompt| prompt_text(prompt, &agent_names(&shown, &hidden), count));
+            if ending == Ending::ShutdownHost {
+                confirm(window, text, cx, move |cx| {
+                    shutdown_host();
+                    then(cx);
+                });
+            } else {
+                confirm(window, text, cx, then);
+            }
+        });
+    })
+    .detach();
 }
 
 /// 让单独跑的宿主连会话一起退出，等它读完（最多 `SHUTDOWN_FLUSH`）。
@@ -303,9 +305,14 @@ fn confirm(
     .detach();
 }
 
-/// 宿主的会话里前台在跑的 agent 有几个，已经退出的不算。
-fn session_agents(sessions: &[SessionInfo]) -> usize {
-    sessions.iter().filter(|session| !session.exited && is_agent(session.meta.agent.as_ref().map(|a| a.kind))).count()
+/// 宿主的会话里没被窗口里的终端占着（不在 `held` 里）、前台在跑的 agent，已经退出的不算。
+fn hidden_agents(sessions: &[SessionInfo], held: &HashSet<SessionId>) -> Vec<AgentKind> {
+    sessions
+        .iter()
+        .filter(|session| !session.exited && !held.contains(&session.id))
+        .filter_map(|session| session.meta.agent.map(|agent| agent.kind))
+        .filter(|kind| is_agent(Some(*kind)))
+        .collect()
 }
 
 /// 不算 `AgentKind::Other`：那是用 OSC 9;4 报进度的普通程序，不是 agent 会话。
@@ -313,38 +320,68 @@ fn is_agent(kind: Option<AgentKind>) -> bool {
     kind.is_some_and(|kind| kind != AgentKind::Other)
 }
 
-/// 各窗口里前台在跑 agent 的终端，每个一项：agent 的种类和所在 workspace 的名字。
-fn window_agents(cx: &App) -> Vec<(AgentKind, String)> {
-    let mut agents = Vec::new();
+/// 窗口里一个前台在跑 agent 的终端。
+struct ShownAgent {
+    kind: AgentKind,
+    /// 所在 workspace 的名字。
+    workspace: String,
+}
+
+/// 各窗口里的终端，对每个终端调 `f`（带上所在 workspace 的名字）。
+fn for_each_view(cx: &App, mut f: impl FnMut(&TerminalView, &str)) {
     for window in cx.windows() {
         let Some(view) = window.downcast::<WindowView>().and_then(|window| window.read(cx).ok()) else {
             continue;
         };
         for workspace in &view.workspaces {
             for tab in &workspace.tabs {
-                for id in tab.root.leaves() {
-                    let kind = tab.panes[&id].0.read(cx).agent().map(|agent| agent.kind);
-                    if let Some(kind) = kind.filter(|kind| is_agent(Some(*kind))) {
-                        agents.push((kind, workspace.name.to_string()));
-                    }
+                for (view, _) in tab.panes.values() {
+                    f(view.read(cx), &workspace.name);
                 }
             }
         }
     }
+}
+
+/// 各窗口里前台在跑 agent 的终端，每个一项。
+fn window_agents(cx: &App) -> Vec<ShownAgent> {
+    let mut agents = Vec::new();
+    for_each_view(cx, |view, workspace| {
+        if let Some(kind) = view.agent().map(|agent| agent.kind).filter(|kind| is_agent(Some(*kind))) {
+            agents.push(ShownAgent { kind, workspace: workspace.to_owned() });
+        }
+    });
     agents
 }
 
-/// 确认框里列出的 agent，写成「名字（workspace）」；同一个 workspace 里同种 agent 只列一次。
-fn agent_names(agents: &[(AgentKind, String)]) -> Vec<String> {
-    let mut seen: Vec<&(AgentKind, String)> = Vec::new();
-    for agent in agents {
+/// 各窗口里的终端占着的会话。
+fn held_sessions(cx: &App) -> HashSet<SessionId> {
+    let mut held = HashSet::new();
+    for_each_view(cx, |view, _| {
+        held.insert(view.session_id());
+    });
+    held
+}
+
+/// 确认框里列出的 agent：窗口里的写成「名字（workspace）」，同一个 workspace 里同种 agent 只列
+/// 一次；没在窗口里的写成「名字（后台）」，同种只列一次。
+fn agent_names(shown: &[ShownAgent], hidden: &[AgentKind]) -> Vec<String> {
+    let all = shown
+        .iter()
+        .map(|agent| (agent.kind, Some(agent.workspace.as_str())))
+        .chain(hidden.iter().map(|kind| (*kind, None)));
+    let mut seen: Vec<(AgentKind, Option<&str>)> = Vec::new();
+    for agent in all {
         if !seen.contains(&agent) {
             seen.push(agent);
         }
     }
     seen.into_iter()
-        .map(|(kind, workspace)| {
-            rust_i18n::t!("quit.agent", agent = kind.display_name(), workspace = workspace).into_owned()
+        .map(|(kind, workspace)| match workspace {
+            Some(workspace) => {
+                rust_i18n::t!("quit.agent", agent = kind.display_name(), workspace = workspace).into_owned()
+            }
+            None => rust_i18n::t!("quit.background_agent", agent = kind.display_name()).into_owned(),
         })
         .collect()
 }
@@ -419,16 +456,15 @@ mod tests {
     }
 
     #[test]
-    fn only_live_agents_count() {
-        use runode_protocol::SessionId;
+    fn only_live_agents_out_of_windows_count() {
         use runode_shared_types::{
             agent::{Agent, AgentState},
             grid::GridSize,
             session::SessionMeta,
         };
 
-        let session = |kind: Option<AgentKind>, exited: bool| SessionInfo {
-            id: SessionId(1),
+        let session = |id: u128, kind: Option<AgentKind>, exited: bool| SessionInfo {
+            id: SessionId(id),
             size: GridSize { cols: 80, rows: 24, cell_width_px: 8, cell_height_px: 16 },
             meta: SessionMeta {
                 agent: kind.map(|kind| Agent { kind, state: AgentState::Working }),
@@ -439,12 +475,16 @@ mod tests {
             exited,
         };
         let sessions = [
-            session(Some(AgentKind::Claude), false),
-            session(Some(AgentKind::Codex), false),
-            session(Some(AgentKind::Claude), true),
-            session(Some(AgentKind::Other), false),
-            session(None, false),
+            session(1, Some(AgentKind::Claude), false),
+            session(2, Some(AgentKind::Codex), false),
+            session(3, Some(AgentKind::Claude), true),
+            session(4, Some(AgentKind::Other), false),
+            session(5, None, false),
+            session(6, Some(AgentKind::Codex), false),
         ];
-        assert_eq!(session_agents(&sessions), 2);
+        // 窗口里的终端占着 2，它已经按窗口里的算过了。
+        let held = HashSet::from([SessionId(2)]);
+        assert_eq!(hidden_agents(&sessions, &held), [AgentKind::Claude, AgentKind::Codex]);
+        assert_eq!(hidden_agents(&sessions, &HashSet::new()).len(), 3);
     }
 }
