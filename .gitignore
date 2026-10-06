@@ -1,3 +1,4 @@
 /target
 .gitnexus/
 .DS_Store
+.worktrees/
