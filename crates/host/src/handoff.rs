@@ -16,9 +16,18 @@
 mod give;
 mod take;
 
-use std::fmt;
+use std::{
+    fmt,
+    os::{fd::AsRawFd as _, unix::net::UnixStream},
+    time::Duration,
+};
 
+pub(crate) use give::give;
 use runode_protocol::{HandoffRefusal, SessionId};
+
+/// 交出会话时默认最多等新宿主这么久，见 `Host::set_handoff_deadline`。要短于 app 等新宿主
+/// 报告结果的时限（30 秒），超时回滚后 app 那边还来得及知道。
+pub(crate) const DEFAULT_DEADLINE: Duration = Duration::from_secs(20);
 
 /// `Host::take_over` 的选项。
 #[derive(Clone, Debug, Default)]
@@ -58,3 +67,64 @@ impl fmt::Display for TakeOverError {
 }
 
 impl std::error::Error for TakeOverError {}
+
+/// 连在 `stream` 另一头的进程号，读的是连上时记下的（`LOCAL_PEERPID`）；对面已经断开时读不到。
+#[cfg(target_os = "macos")]
+fn peer_pid(stream: &UnixStream) -> Option<libc::pid_t> {
+    let mut pid: libc::pid_t = 0;
+    let mut len = libc::socklen_t::try_from(size_of::<libc::pid_t>()).unwrap_or_default();
+    // SAFETY: 描述符来自 `stream`；值指向本地变量，长度是它的大小。
+    let result = unsafe {
+        libc::getsockopt(stream.as_raw_fd(), libc::SOL_LOCAL, libc::LOCAL_PEERPID, (&raw mut pid).cast(), &raw mut len)
+    };
+    (result == 0 && pid > 0).then_some(pid)
+}
+
+#[cfg(not(target_os = "macos"))]
+fn peer_pid(stream: &UnixStream) -> Option<libc::pid_t> {
+    let mut cred = libc::ucred { pid: 0, uid: 0, gid: 0 };
+    let mut len = libc::socklen_t::try_from(size_of::<libc::ucred>()).unwrap_or_default();
+    // SAFETY: 描述符来自 `stream`；值指向本地变量，长度是它的大小。
+    let result = unsafe {
+        libc::getsockopt(stream.as_raw_fd(), libc::SOL_SOCKET, libc::SO_PEERCRED, (&raw mut cred).cast(), &raw mut len)
+    };
+    (result == 0 && cred.pid > 0).then_some(cred.pid)
+}
+
+/// 杀掉连在 `stream` 另一头的进程（卡住的新宿主）：它手里那些停着的 PTY 随之关掉，不影响这边。
+fn kill_peer(stream: &UnixStream) {
+    // SAFETY: 没有参数，总是成功。
+    let own = unsafe { libc::getpid() };
+    match peer_pid(stream) {
+        Some(pid) if pid > 1 && pid != own => {
+            tracing::warn!("killing the stuck new host {pid}");
+            // SAFETY: 只发信号。
+            if unsafe { libc::kill(pid, libc::SIGKILL) } != 0 {
+                tracing::warn!("failed to kill the new host {pid}: {}", std::io::Error::last_os_error());
+            }
+        }
+        _ => tracing::warn!("cannot tell which process the stuck new host is"),
+    }
+}
+
+/// 进程 `pid` 还在跑：已经退出、等着被收尸的不算。
+#[cfg(target_os = "macos")]
+fn running(pid: libc::pid_t) -> bool {
+    // SAFETY: `proc_bsdinfo` 是纯数据的 C 结构，全零是合法的初值。
+    let mut info: libc::proc_bsdinfo = unsafe { std::mem::zeroed() };
+    let size = libc::c_int::try_from(size_of::<libc::proc_bsdinfo>()).unwrap_or(libc::c_int::MAX);
+    // SAFETY: 输出参数指向本地变量，长度是它的大小。
+    let written = unsafe { libc::proc_pidinfo(pid, libc::PROC_PIDTBSDINFO, 0, (&raw mut info).cast(), size) };
+    written == size && info.pbi_status != libc::SZOMB
+}
+
+#[cfg(not(target_os = "macos"))]
+fn running(pid: libc::pid_t) -> bool {
+    // SAFETY: 信号 0 只检查进程在不在。
+    unsafe { libc::kill(pid, 0) == 0 }
+}
+
+/// 日志里的毫秒数。
+fn ms(duration: Duration) -> u128 {
+    duration.as_millis()
+}

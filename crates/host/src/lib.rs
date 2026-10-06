@@ -4,7 +4,8 @@
 //! 前端一律经一条连接按 `runode_protocol` 的帧和消息说话，见 `server`：别的进程连 `Host::listen`
 //! 开的 Unix socket，同一个进程里的桌面用 `Host::connect_pair` 拿到的一对 socket 的一端，两条路
 //! 走的是同一套代码。宿主可以跑在 app 进程里，也可以单独一个进程（`runode --host`，见
-//! `Host::run_until_idle` 和 `launch`）。
+//! `Host::run_until_idle` 和 `launch`）。单独跑的宿主升级时，新版本的宿主经同一个 socket 接过
+//! 所有会话和 socket 本身，shell 不中断（`Host::take_over`，见 `handoff`）。
 //!
 //! 每个会话的线程按到达的先后处理 PTY 输出和前端的请求：输出先转给连着的前端，再喂宿主的
 //! VT；改 VT 状态的请求（改尺寸、换主题、清屏）在输出流里插一条标记（`HostMsg::Resized`、
@@ -28,6 +29,7 @@ use std::{
         Arc, Condvar, Mutex, MutexGuard, PoisonError,
         atomic::{AtomicBool, AtomicU64, Ordering},
     },
+    time::Duration,
 };
 
 use anyhow::Result;
@@ -77,6 +79,8 @@ struct Shared {
     peers: Mutex<server::Peers>,
     /// 有连接断开、或者要退出时通知，`Host::run_until_idle` 等在它上面。
     peers_changed: Condvar,
+    /// 交出会话时最多等新宿主这么久回 `HandoffReady`，见 `Host::set_handoff_deadline`。
+    handoff_deadline: Mutex<Duration>,
 }
 
 /// 会话和主题放在同一把锁下：新会话加进来和换主题不会互相错过，见 `Shared::spawn`。
@@ -120,6 +124,8 @@ impl Shared {
 
     /// 新开一个会话，返回它的标识。`extra_env` 是这一个会话另外设的环境变量，盖过 `Host::set_env` 设的同名变量，但盖不了
     /// `runode_protocol::ENV_SESSION`。
+    ///
+    /// 交接给新宿主期间不开新会话（交出去的会话已经定了，新开的会跟着这个宿主一起退出）。
     fn spawn(&self, options: SpawnOptions, extra_env: Vec<(String, String)>) -> Result<SessionId> {
         let id = SessionId::random()?;
         let (settings, generation) = {
@@ -131,14 +137,14 @@ impl Shared {
             (settings, registry.theme_generation)
         };
         // 开伪终端、启动 shell 要几毫秒，不占着锁。
-        let mut env = self.env.lock().unwrap_or_else(PoisonError::into_inner).clone();
-        for (key, value) in extra_env {
-            env.retain(|(k, _)| *k != key);
-            env.push((key, value.into()));
+        let handle = session::spawn(self.setup(id, settings, extra_env), options)?;
+        // 锁的先后：拿着 `peers` 再拿 `registry`；交接开始时在同一把锁里定下要交的会话。
+        let peers = self.peers();
+        if peers.handoff.is_some() {
+            drop(peers);
+            handle.send(session::Inbox::Kill);
+            anyhow::bail!("the host is being upgraded; try again in a moment");
         }
-        env.retain(|(k, _)| k != runode_protocol::ENV_SESSION);
-        env.push((runode_protocol::ENV_SESSION.into(), id.to_string().into()));
-        let handle = session::spawn(id, options, settings, env, self.record_history.clone())?;
         let mut registry = self.registry();
         // 这期间换过主题的话，那次换主题没赶上这个会话，补上。
         if registry.theme_generation != generation {
@@ -146,6 +152,19 @@ impl Shared {
         }
         registry.sessions.insert(id, handle);
         Ok(id)
+    }
+
+    /// 会话 `id` 的设置：主题是 `settings`；启动 shell 时设宿主的环境变量（见 `Host::set_env`），
+    /// 同名的由 `extra_env` 盖过，再加上 `runode_protocol::ENV_SESSION`。
+    fn setup(&self, id: SessionId, settings: TermSettings, extra_env: Vec<(String, String)>) -> session::Setup {
+        let mut env = self.env.lock().unwrap_or_else(PoisonError::into_inner).clone();
+        for (key, value) in &extra_env {
+            env.retain(|(k, _)| k != key);
+            env.push((key.clone(), value.into()));
+        }
+        env.retain(|(k, _)| k != runode_protocol::ENV_SESSION);
+        env.push((runode_protocol::ENV_SESSION.into(), id.to_string().into()));
+        session::Setup { id, settings, env, extra_env, record_history: self.record_history.clone() }
     }
 
     /// 结束会话：先从登记表里拿掉，再叫它的线程结束，见 `Runner::answer_pending`。没有这个会话
@@ -195,8 +214,15 @@ impl Host {
             env: Mutex::default(),
             peers: Mutex::default(),
             peers_changed: Condvar::new(),
+            handoff_deadline: Mutex::new(handoff::DEFAULT_DEADLINE),
         };
         Self { shared: Arc::new(shared) }
+    }
+
+    /// 交出会话时最多等接手的新宿主这么久（默认 20 秒，短于 app 等新宿主结果的时限），等不到就
+    /// 杀掉它、回滚。测试用来缩短。
+    pub fn set_handoff_deadline(&self, deadline: Duration) {
+        *self.shared.handoff_deadline.lock().unwrap_or_else(PoisonError::into_inner) = deadline;
     }
 
     /// 之后启动的每个 shell 都设上这个环境变量，同名的换掉；已经启动的不受影响。每个 shell
