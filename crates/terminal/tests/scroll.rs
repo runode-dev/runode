@@ -2,8 +2,8 @@
 
 mod common;
 
-use common::{PROMPT, idle_session, row_text};
-use runode_shared_types::grid::ViewportScroll;
+use common::{PROMPT, capturing_session_sized, idle_session, row_text};
+use runode_shared_types::grid::{GridSize, ViewportScroll};
 
 #[test]
 fn scrolling_the_viewport_by_page_and_to_the_ends() {
@@ -65,4 +65,30 @@ fn jumping_between_marked_prompts() {
     assert_eq!(row_text(&session.frame(), 0), "$ cmd0");
     session.jump_to_prompt(false);
     assert_eq!(row_text(&session.frame(), 0), "$ cmd1");
+}
+
+/// 录下来的真实会话：隔离了家目录的 zsh 加载 runode 的集成，左提示符两行（`%1~` 换行 `%%`）、
+/// 右侧提示符 `<r>`，依次跑 `echo one` 到 `echo four`，40 列 8 行。
+const RECORDED_ZSH_TWO_LINE_RPROMPT: &[u8] = include_bytes!("../testdata/zsh-two-line-rprompt.typescript");
+
+/// 两行的左提示符配上右侧提示符：右侧提示符画在第二行，每个提示符仍只停一次，停在第一行。
+#[test]
+fn jumping_stops_once_per_two_line_prompt_with_a_right_prompt() {
+    let (mut session, _) =
+        capturing_session_sized(GridSize { cols: 40, rows: 8, cell_width_px: 8, cell_height_px: 16 });
+    session.feed(RECORDED_ZSH_TWO_LINE_RPROMPT);
+    let top = |session: &mut runode_terminal::session::Session| {
+        let frame = session.frame();
+        // 右侧提示符前面空出来的那段不比较。
+        let words = |y| row_text(&frame, y).split_whitespace().collect::<Vec<_>>().join(" ");
+        (words(0), words(1))
+    };
+    // 视口最上面是 `echo three` 的提示符。
+    assert_eq!(top(&mut session), ("proj".into(), "% echo three <r>".into()));
+    session.jump_to_prompt(true);
+    assert_eq!(top(&mut session), ("proj".into(), "% echo two <r>".into()));
+    session.jump_to_prompt(true);
+    assert_eq!(top(&mut session), ("proj".into(), "% echo one <r>".into()));
+    session.jump_to_prompt(false);
+    assert_eq!(top(&mut session), ("proj".into(), "% echo two <r>".into()));
 }
