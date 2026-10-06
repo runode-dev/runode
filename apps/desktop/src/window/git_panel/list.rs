@@ -29,7 +29,7 @@ use crate::{
         hsla,
         tooltip::tooltip,
     },
-    workspace::{WindowView, files::menu_item, preview::DiffTarget, project::status_color},
+    window::{WindowView, files::menu_item, preview::DiffTarget, project::status_color},
 };
 
 /// 每一行的高度：段标题、文件、提交都一样高，列表才能只画看得见的部分。

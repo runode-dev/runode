@@ -27,7 +27,7 @@ const VISIBLE_ROWS: f32 = 12.;
 const INPUT_HEIGHT: f32 = 34.;
 
 /// 开着的分支列表。
-pub(in crate::workspace) struct BranchPicker {
+pub(in crate::window) struct BranchPicker {
     /// 在哪个仓库里切换、新建分支：它的根目录。
     repo: PathBuf,
     /// 从哪个提交新建分支，为空时从当前提交。只在从图表里新建分支时有。
@@ -151,7 +151,7 @@ impl WindowView {
     }
 
     /// 关掉分支列表；焦点还在输入框里时还给当前终端。
-    pub(in crate::workspace) fn close_branch_picker(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    pub(in crate::window) fn close_branch_picker(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(picker) = self.branch_picker.take() else {
             return;
         };
@@ -213,7 +213,7 @@ impl WindowView {
     }
 
     /// 浮在标题栏下方正中的列表：上面是输入框，下面是各行。
-    pub(in crate::workspace) fn render_branch_picker(&self, fg: Rgb, bg: Rgb, cx: &mut Context<Self>) -> Option<Div> {
+    pub(in crate::window) fn render_branch_picker(&self, fg: Rgb, bg: Rgb, cx: &mut Context<Self>) -> Option<Div> {
         let picker = self.branch_picker.as_ref()?;
         let rows = picker.rows(cx);
         let selected = picker.selected.min(rows.len().saturating_sub(1));

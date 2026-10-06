@@ -33,7 +33,7 @@ use runode_git::{self as git, FileStatus, LineKind, Section};
 use runode_preview::{Content, ImageFormat, Span};
 use runode_shared_types::{color::Rgb, theme};
 
-pub(in crate::workspace) use diff::DiffTarget;
+pub(in crate::window) use diff::DiffTarget;
 
 use super::{
     CloseTab, TITLEBAR_HEIGHT, WindowView, divider_color,
@@ -91,7 +91,7 @@ fn tab_underline(fg: Rgb) -> Div {
 
 /// 预览栏的标签：一个文件一个，没固定的临时标签最多一个。没有标签时预览栏不显示。不进存档。
 #[derive(Default)]
-pub(in crate::workspace) struct PreviewTabs {
+pub(in crate::window) struct PreviewTabs {
     pub tabs: Vec<Preview>,
     /// 当前显示的标签。
     pub active: usize,
@@ -187,7 +187,7 @@ impl Render for DraggedPreviewTab {
 }
 
 /// 预览栏打开的文件和读到的内容。
-pub(in crate::workspace) struct Preview {
+pub(in crate::window) struct Preview {
     pub path: PathBuf,
     /// 不为空时这是 `path` 的 diff 标签，和同一个文件的普通标签是两个。
     pub diff: Option<DiffTarget>,
@@ -426,7 +426,7 @@ fn widest_line(lines: &[String]) -> usize {
 
 /// 行号旁的改动标记。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(in crate::workspace) enum Mark {
+pub(in crate::window) enum Mark {
     Added,
     Modified,
     /// 这一行上面删掉了行。

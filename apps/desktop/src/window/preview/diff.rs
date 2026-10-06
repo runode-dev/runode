@@ -29,7 +29,7 @@ use crate::{
     assets::{ARROW_DOWN_ICON, ARROW_UP_ICON, DISCARD_ICON, MINUS_ICON, PLUS_ICON},
     config::AppConfig,
     ui::{hsla, scrollbar::scrollbar, tooltip::tooltip},
-    workspace::{
+    window::{
         WindowView, divider_color,
         git_panel::Busy,
         project::{ADDED, REMOVED, added_label, removed_label},
@@ -41,7 +41,7 @@ const TOOLBAR_HEIGHT: f32 = 26.;
 
 /// 预览栏里看哪个文件的哪种 diff。
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(in crate::workspace) struct DiffTarget {
+pub(in crate::window) struct DiffTarget {
     /// 文件所在仓库的根目录。
     pub root: PathBuf,
     /// 相对仓库根的路径；改名的文件 `old_rel` 是原来的路径。
@@ -122,7 +122,7 @@ fn row_text<'a>(view: &'a DiffView, row: &DiffRow, removed: &'a [String], at: Op
 impl WindowView {
     /// Git 面板里点了改动的文件：按配置的 `PreviewClick` 在预览栏里打开它的 diff，单击打开时单击开成
     /// 临时标签、双击固定；双击打开时双击开成固定标签。
-    pub(in crate::workspace) fn click_diff(&mut self, target: DiffTarget, clicks: usize, cx: &mut Context<Self>) {
+    pub(in crate::window) fn click_diff(&mut self, target: DiffTarget, clicks: usize, cx: &mut Context<Self>) {
         let single = cx.global::<AppConfig>().0.file_tree_preview_click == PreviewClick::Single;
         if clicks >= 2 {
             self.open_diff(target, true, cx);
@@ -138,7 +138,7 @@ impl WindowView {
     }
 
     /// 扫描结果换上以后，当前显示的 diff 标签对应的 git 状态变了就重读；别的标签等切过去时再读。
-    pub(in crate::workspace) fn reload_stale_diff(&mut self, cx: &mut Context<Self>) {
+    pub(in crate::window) fn reload_stale_diff(&mut self, cx: &mut Context<Self>) {
         if self.preview().is_some_and(|preview| preview.diff.is_some() && preview.diff_stale) {
             self.load_diff(cx);
         }
@@ -567,7 +567,7 @@ impl WindowView {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::workspace::preview::PreviewTabs;
+    use crate::window::preview::PreviewTabs;
     use runode_git::{FileDiff, Hunk, Line};
     use std::path::Path;
 

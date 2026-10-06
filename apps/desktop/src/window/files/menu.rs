@@ -19,7 +19,7 @@ use crate::{
         hsla,
         tooltip::shortcut_text,
     },
-    workspace::WindowView,
+    window::WindowView,
 };
 
 /// 菜单离窗口边缘至少留这么宽。
@@ -27,7 +27,7 @@ const MENU_MARGIN: f32 = 8.;
 const MENU_WIDTH: f32 = 240.;
 
 /// 菜单里的一项：点了把 `action` 派发给菜单的 `target`，和按快捷键走同一条路。
-pub(in crate::workspace) struct MenuItem {
+pub(in crate::window) struct MenuItem {
     label: String,
     action: Box<dyn Action>,
     shortcut: Option<SharedString>,
@@ -35,14 +35,14 @@ pub(in crate::workspace) struct MenuItem {
 }
 
 /// 菜单里的一项，快捷键在这时查，查的是这一刻的键位表。
-pub(in crate::workspace) fn menu_item(key: &str, action: Box<dyn Action>, enabled: bool, cx: &App) -> MenuItem {
+pub(in crate::window) fn menu_item(key: &str, action: Box<dyn Action>, enabled: bool, cx: &App) -> MenuItem {
     let shortcut = shortcut_text(action.as_ref(), cx);
     MenuItem { label: rust_i18n::t!(key).into_owned(), action, shortcut, enabled }
 }
 
 /// 打开着的右键菜单：右键按下的位置，打开时就定下的各项（`None` 是分隔线），以及点了以后
 /// 先把焦点交给谁、再派发动作。
-pub(in crate::workspace) struct FileMenu {
+pub(in crate::window) struct FileMenu {
     position: Point<Pixels>,
     items: Vec<Option<MenuItem>>,
     target: FocusHandle,
@@ -50,7 +50,7 @@ pub(in crate::workspace) struct FileMenu {
 
 impl WindowView {
     /// 在 `position` 弹出 `items`，点了的那项先把焦点交给 `target` 再派发。
-    pub(in crate::workspace) fn open_menu(
+    pub(in crate::window) fn open_menu(
         &mut self,
         position: Point<Pixels>,
         items: Vec<Option<MenuItem>>,
@@ -103,12 +103,7 @@ impl WindowView {
     }
 
     /// 右键菜单，盖在窗口最上层；点到菜单外面就关掉。
-    pub(in crate::workspace) fn render_file_menu(
-        &self,
-        fg: Rgb,
-        bg: Rgb,
-        cx: &mut Context<Self>,
-    ) -> Option<AnyElement> {
+    pub(in crate::window) fn render_file_menu(&self, fg: Rgb, bg: Rgb, cx: &mut Context<Self>) -> Option<AnyElement> {
         let menu = self.file_menu.as_ref()?;
         let hover_bg = hsla(bg.mix(fg, 0.12));
         let menu_bg = hsla(bg.mix(fg, 0.06));

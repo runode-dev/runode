@@ -7,7 +7,7 @@ use gpui::{Action, Context, Pixels, Point, PromptLevel, Window};
 use runode_git::{self as git, RepoKind};
 
 use super::rows::Busy;
-use crate::workspace::{
+use crate::window::{
     WindowView,
     files::{MenuItem, menu_item},
 };

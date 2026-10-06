@@ -14,7 +14,7 @@ use super::{
     GitStashIncludeUntracked, GitStashPopLatest, GitSync, GitUndoLastCommit, GitUnstageAll, PrimaryAction,
     rows::{Busy, GitPanel, GitSection},
 };
-use crate::workspace::WindowView;
+use crate::window::WindowView;
 
 /// 提交成功以后接着做什么。
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -41,7 +41,7 @@ impl WindowView {
     /// 在后台对当前 workspace 里根目录是 `root` 的仓库跑 `op`，跑的时候这个仓库写着 `busy`。
     /// 跑完马上重读，成功时再调 `done`，出错时弹框。
     #[allow(clippy::too_many_arguments)]
-    pub(in crate::workspace) fn run_git<T: Send + 'static>(
+    pub(in crate::window) fn run_git<T: Send + 'static>(
         &mut self,
         root: &Path,
         busy: Busy,

@@ -81,7 +81,7 @@ fn post(alert: AgentAlert, cx: &mut App) {
     notified.posted.insert(alert.tag.clone());
     // 第一次发通知时才接收点击：注册回调就会建起通知中心。
     if listen {
-        cx.on_system_notification_response(|response, cx| crate::workspace::reveal_notified(&response.tag, cx));
+        cx.on_system_notification_response(|response, cx| crate::window::reveal_notified(&response.tag, cx));
     }
     cx.show_system_notification(SystemNotification {
         tag: alert.tag.into(),

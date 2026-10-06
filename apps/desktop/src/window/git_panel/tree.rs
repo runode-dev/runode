@@ -9,7 +9,7 @@ use std::{
 
 /// 排成树以后的一行。
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(in crate::workspace) enum TreeItem {
+pub(in crate::window) enum TreeItem {
     /// 目录：`path` 是相对仓库根的路径，并成一行的是链条最深的那个；`name` 是显示的名字。
     Dir { path: PathBuf, name: String, depth: usize, expanded: bool },
     /// 文件：`index` 是调用方给的下标。
@@ -39,7 +39,7 @@ impl Node {
 
 /// 把 `files`（下标和相对仓库根的路径）排成树。`expanded` 说某个目录（并成一行的按链条最深的
 /// 那个）展开着没有，收起的目录下面的不排。
-pub(in crate::workspace) fn file_tree(files: &[(usize, &Path)], expanded: impl Fn(&Path) -> bool) -> Vec<TreeItem> {
+pub(in crate::window) fn file_tree(files: &[(usize, &Path)], expanded: impl Fn(&Path) -> bool) -> Vec<TreeItem> {
     let mut root = Node::default();
     for &(index, path) in files {
         let mut node = &mut root;

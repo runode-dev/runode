@@ -11,7 +11,7 @@ use notify::Watcher as _;
 use super::state::Project;
 
 /// 右侧面板在看的仓库或目录的监听。
-pub(in crate::workspace) struct ProjectWatch {
+pub(in crate::window) struct ProjectWatch {
     pub(super) root: PathBuf,
     /// 不在 `root` 下面的 git 目录（worktree 的，worktree 里子模块的），也要听。
     pub(super) git_dirs: Vec<PathBuf>,

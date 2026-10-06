@@ -25,7 +25,7 @@ use crate::{
         hsla,
         tooltip::tooltip,
     },
-    workspace::{
+    window::{
         WindowView,
         files::menu_item,
         preview::DiffTarget,
@@ -133,7 +133,7 @@ impl WindowView {
 
     /// 监听到 `paths` 变了：落在哪个仓库的引用上（新建、删除、移动分支或 tag，HEAD 变了），那个
     /// 仓库读过的图表就要重读，展开着时下次显示就读。`RepoInfo` 看不出别的分支和 tag 的变化。
-    pub(in crate::workspace) fn graph_refs_changed(&mut self, paths: &[PathBuf], cx: &mut Context<Self>) {
+    pub(in crate::window) fn graph_refs_changed(&mut self, paths: &[PathBuf], cx: &mut Context<Self>) {
         let project = &mut self.workspace_mut().project;
         let Some(git) = &project.git else {
             return;

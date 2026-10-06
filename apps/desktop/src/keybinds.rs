@@ -23,7 +23,7 @@ use crate::{
         text_area::SubmitText,
         text_field::{EndSearch, SearchNext, SearchPrevious},
     },
-    workspace::{
+    window::{
         ArrangePanes, ClosePane, CloseTab, CloseWorkspace, CollapseSelectedFile, CopyPath, CopyRelativePath,
         DeleteFile, EqualizePanes, ExpandSelectedFile, FocusNextPane, FocusPane, FocusPreviousPane, FocusTerminal,
         GotoAgent, NewSplitDown, NewSplitRight, NewTab, NewWorkspace, NextAgent, NextTab, NextWorkspace,

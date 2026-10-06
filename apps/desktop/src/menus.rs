@@ -15,7 +15,7 @@ use crate::{
         actions::{Copy, Cut, Paste, Redo, SelectAll, Undo},
         text_field::{SearchNext, SearchPrevious},
     },
-    workspace::{
+    window::{
         ArrangePanes, ClosePane, CloseTab, CloseWorkspace, EqualizePanes, FocusNextPane, FocusPreviousPane, GotoAgent,
         NewSplitDown, NewSplitRight, NewTab, NewWorkspace, NextAgent, NextTab, NextWorkspace, PreviousTab,
         PreviousWorkspace, RenameWorkspace, ToggleFiles, ToggleGit, TogglePaneZoom, ToggleSidebar,
@@ -49,18 +49,18 @@ pub fn install(cx: &mut App) {
     cx.on_action(|_: &About, _| crate::about::show());
     cx.on_action(|_: &OpenConfiguration, cx| crate::config::open(cx));
     cx.on_action(|_: &ReloadConfiguration, cx| crate::config::reload(cx));
-    cx.on_action(|_: &Quit, cx| crate::workspace::quit(cx));
-    cx.on_action(|_: &QuitAndEndSessions, cx| crate::workspace::quit_and_end_sessions(cx));
+    cx.on_action(|_: &Quit, cx| crate::window::quit(cx));
+    cx.on_action(|_: &QuitAndEndSessions, cx| crate::window::quit_and_end_sessions(cx));
     cx.on_action(|_: &Hide, cx| cx.hide());
     cx.on_action(|_: &HideOthers, cx| cx.hide_other_apps());
     cx.on_action(|_: &ShowAll, cx| cx.unhide_other_apps());
-    cx.on_action(|_: &NewWindow, cx| crate::workspace::open_window(cx, None));
+    cx.on_action(|_: &NewWindow, cx| crate::window::open_window(cx, None));
     cx.on_action(|_: &CloseWindow, cx| {
         if let Some(window) = cx.active_window() {
-            crate::workspace::close_window(window, cx);
+            crate::window::close_window(window, cx);
         }
     });
-    cx.on_action(|_: &CloseAllWindows, cx| crate::workspace::close_all_windows(cx));
+    cx.on_action(|_: &CloseAllWindows, cx| crate::window::close_all_windows(cx));
     cx.on_action(|_: &Minimize, cx| with_active_window(cx, |w| w.minimize_window()));
     cx.on_action(|_: &Zoom, cx| with_active_window(cx, |w| w.zoom_window()));
     cx.on_action(|_: &ToggleFullScreen, cx| with_active_window(cx, |w| w.toggle_fullscreen()));
@@ -79,7 +79,7 @@ fn tr(key: &str) -> String {
 /// 读，决定有没有「退出并结束所有会话」。
 pub fn set_menus(cx: &mut App) {
     let mut quit = vec![MenuItem::action(tr("menu.quit"), Quit)];
-    if crate::workspace::end_sessions_in_menu() {
+    if crate::window::end_sessions_in_menu() {
         quit.push(MenuItem::action(tr("menu.quit_end_sessions"), QuitAndEndSessions));
     }
     cx.set_menus([

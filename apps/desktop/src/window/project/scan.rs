@@ -14,7 +14,7 @@ use super::MAX_COMPACT;
 
 /// 目录里的一项。
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(in crate::workspace) struct DirEntry {
+pub(in crate::window) struct DirEntry {
     pub name: String,
     pub is_dir: bool,
 }
@@ -113,7 +113,7 @@ pub(super) fn scan(
 
 /// 文件树里一项的 git 标记。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(in crate::workspace) enum Decoration {
+pub(in crate::window) enum Decoration {
     None,
     Status(FileStatus),
     /// 目录里有改动的文件，带着按 `dir_status` 归总出的状态。

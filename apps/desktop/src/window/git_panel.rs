@@ -118,7 +118,7 @@ pub enum DirOp {
 /// 下面的所有文件做 `op`。
 #[derive(Clone, PartialEq, Action)]
 #[action(namespace = runode, no_json)]
-pub(in crate::workspace) struct GitDirAction {
+pub(in crate::window) struct GitDirAction {
     pub repo: PathBuf,
     pub section: GitSection,
     pub dir: PathBuf,

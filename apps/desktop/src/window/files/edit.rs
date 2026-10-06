@@ -12,12 +12,12 @@ use super::{
 };
 use crate::{
     ui::file_icons::{file_icon, folder_icon},
-    workspace::{WindowView, inline_edit::InlineEdit},
+    window::{WindowView, inline_edit::InlineEdit},
 };
 
 /// 剪切或复制下来等着粘贴的文件或目录。
 #[derive(Clone)]
-pub(in crate::workspace) struct FileClipboard {
+pub(in crate::window) struct FileClipboard {
     pub path: PathBuf,
     /// 剪切的粘贴时挪过去，粘贴一次就清掉；复制的可以一直粘贴。
     pub cut: bool,
@@ -31,7 +31,7 @@ enum EditTarget {
 }
 
 /// 文件树里正在新建或改名的输入框。
-pub(in crate::workspace) struct FileEdit {
+pub(in crate::window) struct FileEdit {
     target: EditTarget,
     edit: InlineEdit,
 }

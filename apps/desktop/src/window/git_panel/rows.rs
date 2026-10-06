@@ -19,7 +19,7 @@ const LIST_OVERDRAW: f32 = 200.;
 
 /// Git 面板里的一段。
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub(in crate::workspace) enum GitSection {
+pub(in crate::window) enum GitSection {
     /// 有冲突、等着解决的文件，从未暂存的改动里挑出来放在最前面。
     Merge,
     Staged,
@@ -40,7 +40,7 @@ impl GitSection {
 }
 
 /// 文件在 Git 面板里归哪一段：未暂存的冲突文件单独成段。
-pub(in crate::workspace) fn section_of(file: &git::FileDiff, section: Section) -> GitSection {
+pub(in crate::window) fn section_of(file: &git::FileDiff, section: Section) -> GitSection {
     match section {
         Section::Staged => GitSection::Staged,
         Section::Unstaged if file.status == FileStatus::Conflicted => GitSection::Merge,
@@ -51,7 +51,7 @@ pub(in crate::workspace) fn section_of(file: &git::FileDiff, section: Section) -
 /// Git 面板里的一行。第一个下标是仓库在 `git::Repos::iter` 里的位置（0 是主仓库），后面的指向
 /// 那个仓库的 `git::Snapshot` 那一段里的文件、块和行，或者储藏列表。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(in crate::workspace) enum GitRow {
+pub(in crate::window) enum GitRow {
     /// 多个仓库时每块开头：仓库的标题，展开时连着分支栏和提交说明框，高度不固定。只有一个
     /// 仓库时没有这一行，分支栏和提交说明框固定在列表上面。
     Repo(usize),
@@ -92,7 +92,7 @@ impl GitRow {
 
 /// 图表里不是提交的那一行。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(in crate::workspace) enum GraphNote {
+pub(in crate::window) enum GraphNote {
     Loading,
     Failed,
     Empty,
@@ -102,7 +102,7 @@ pub(in crate::workspace) enum GraphNote {
 
 /// 展开的提交下面不列文件时的说明。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(in crate::workspace) enum CommitNote {
+pub(in crate::window) enum CommitNote {
     Loading,
     Failed,
     /// 没改文件，比如空提交。
@@ -110,10 +110,10 @@ pub(in crate::workspace) enum CommitNote {
 }
 
 /// 图表一次多读这么多个提交。
-pub(in crate::workspace) const GRAPH_PAGE: usize = 50;
+pub(in crate::window) const GRAPH_PAGE: usize = 50;
 
 /// 读到的一个提交改了什么。
-pub(in crate::workspace) enum CommitChanges {
+pub(in crate::window) enum CommitChanges {
     Loading,
     Failed,
     Ready(Vec<git::FileDiff>),
@@ -122,7 +122,7 @@ pub(in crate::workspace) enum CommitChanges {
 /// 一个仓库的图表：读到的历史、读到哪儿了，以及展开了哪些提交和文件。历史不跟着每次扫描读，
 /// 图表展开着、而且仓库的 HEAD、分支、上游或 stash 变了（`RepoInfo` 变了）或者点了刷新时才重读。
 #[derive(Default)]
-pub(in crate::workspace) struct Graph {
+pub(in crate::window) struct Graph {
     /// 读到的历史，读不了时是错误；还没读过时为空。
     pub history: Option<Result<git::History, String>>,
     /// 读到的图最多用到几条 lane，各行按它定 lane 的宽度，线才连得上。
@@ -168,7 +168,7 @@ impl Graph {
 
 /// 正在跑的 git 操作，写在面板顶上或者那个仓库的标题上；跑完之前这个仓库不接新的操作。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(in crate::workspace) enum Busy {
+pub(in crate::window) enum Busy {
     Stage,
     Discard,
     Commit,
@@ -202,7 +202,7 @@ impl Busy {
 /// 一个仓库在 Git 面板里自己的东西：提交说明框和正在跑的操作。按仓库的根目录记，终端换到
 /// 别处再回来时说明框里写了一半的话还在。
 #[derive(Default)]
-pub(in crate::workspace) struct RepoPanel {
+pub(in crate::window) struct RepoPanel {
     /// 提交说明框，第一次显示这个仓库时建出来；以及它的事件订阅。
     pub commit_box: Option<Entity<TextArea>>,
     pub commit_events: Option<Subscription>,
@@ -214,7 +214,7 @@ pub(in crate::workspace) struct RepoPanel {
 
 /// 以树形式查看时的一个目录行。
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(in crate::workspace) struct DirRow {
+pub(in crate::window) struct DirRow {
     /// 所在仓库的根目录。
     pub root: PathBuf,
     /// 相对仓库根的路径，并成一行的是链条最深的那个；`name` 是显示的名字，如 `crates/desktop/src`。
@@ -226,7 +226,7 @@ pub(in crate::workspace) struct DirRow {
 
 /// 目录行是哪儿的：工作区改动的哪一段，还是图表里展开的哪个提交（`Graph::history` 里的下标）。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(in crate::workspace) enum DirOwner {
+pub(in crate::window) enum DirOwner {
     Section(GitSection),
     Commit(usize),
 }
@@ -256,7 +256,7 @@ impl Out {
 }
 
 /// 一个 workspace 的 Git 面板。
-pub(in crate::workspace) struct GitPanel {
+pub(in crate::window) struct GitPanel {
     pub rows: Vec<GitRow>,
     /// 和 `rows` 一一对应：以树形式查看时这一行在第几层，列表形式时都是 0。
     pub depth: Vec<usize>,

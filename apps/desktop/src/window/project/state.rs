@@ -13,11 +13,11 @@ use super::{
     MAX_COMPACT,
     scan::{Decoration, Decorator, DirEntry, Scan, list_dirs, single_dir},
 };
-use crate::workspace::model::Workspace;
+use crate::window::model::Workspace;
 
 /// 文件树里的一行。
 #[derive(Clone, Debug)]
-pub(in crate::workspace) struct FileRow {
+pub(in crate::window) struct FileRow {
     /// 并成一行的目录是链条最深的那个。
     pub path: PathBuf,
     /// 并成一行的目录是「a / b / c」。
@@ -30,7 +30,7 @@ pub(in crate::workspace) struct FileRow {
 
 /// 一个 workspace 的改动和文件树。
 #[derive(Default)]
-pub(in crate::workspace) struct Project {
+pub(in crate::window) struct Project {
     /// 文件树的根目录，跟着当前终端的目录变；还没读过时为空，读到过一次之后就一直有。
     pub root: Option<PathBuf>,
     /// 上次读的是哪个目录，终端换了目录时据此在文件树里定位过去。

@@ -16,7 +16,7 @@ mod remote_access;
 mod startup;
 mod terminal_view;
 mod ui;
-mod workspace;
+mod window;
 
 // 界面文字的翻译，见 `i18n`；某种语言缺了某个键时取英文。
 rust_i18n::i18n!("locales", fallback = "en");
@@ -24,7 +24,7 @@ rust_i18n::i18n!("locales", fallback = "en");
 use gpui::App;
 use gpui_platform::application;
 
-use crate::workspace::{open_window, open_window_with};
+use crate::window::{open_window, open_window_with};
 
 fn main() {
     startup::begin();
@@ -63,9 +63,9 @@ fn main() {
         startup::mark("config_install");
         menus::install(cx);
         startup::mark("menus_install");
-        workspace::install(cx);
+        window::install(cx);
         startup::mark("workspace_install");
-        workspace::serve_requests(cx);
+        window::serve_requests(cx);
         cx.on_window_closed(|cx, _| {
             if cx.windows().is_empty() {
                 cx.quit();
@@ -77,7 +77,7 @@ fn main() {
         // 交给第一个窗口里从家目录开始的终端；没用上就丢掉，丢掉时会结束它。
         let mut shell = prespawn::take();
         startup::mark("prespawn_take");
-        let saved = workspace::saved_window_options(cx);
+        let saved = window::saved_window_options(cx);
         if saved.is_empty() {
             open_window(cx, shell.take());
         }
@@ -87,7 +87,7 @@ fn main() {
         startup::mark("open_window");
         // 先结束没用上的 shell，再看宿主里有没有没在窗口里显示的会话，免得把它也列进去。
         drop(shell);
-        workspace::watch_background(cx);
+        window::watch_background(cx);
         cx.activate(true);
         host_client::show_notice(cx);
         // 窗口先出来；未打包运行时才需要的图标解码放到最后。
