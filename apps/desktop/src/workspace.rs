@@ -211,8 +211,9 @@ pub struct WindowView {
     agent_picker: Option<agent_picker::AgentPicker>,
     /// 开着的排列分屏浮层。
     arrange_picker: Option<arrange::ArrangePicker>,
-    /// 显示着驱动标记时，到它下一次要变的时候重画的计时器，见 `schedule_driver_redraw`。
-    driver_redraw: Option<Task<()>>,
+    /// 显示着驱动标记时，到最早的那个该消失的时候（`now_ms` 的毫秒数）重画的计时器，见
+    /// `schedule_driver_redraw`。
+    driver_redraw: Option<(u64, Task<()>)>,
     /// workspace、标签和分屏节点的标识都从这里取。
     next_id: u64,
     layout: Rc<RefCell<PaneLayout>>,

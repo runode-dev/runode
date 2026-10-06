@@ -321,7 +321,7 @@ completion:
     file: 檔案
     named: "%{group}：%{name}"
 driver:
-  badge: "由 %{who} 操作 · %{action} %{secs}s 前"
+  badge: "由 %{who} 操作 · %{action}"
   outside: runode 以外的程式
   tab: 有分割畫面正被別的終端機裡的程式操作
   action:

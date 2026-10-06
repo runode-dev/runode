@@ -321,7 +321,7 @@ completion:
     file: file
     named: "%{group}: %{name}"
 driver:
-  badge: "Driven by %{who} · %{action} %{secs}s ago"
+  badge: "Driven by %{who} · %{action}"
   outside: a program outside Runode
   tab: A program in another terminal is driving a split here
   action:

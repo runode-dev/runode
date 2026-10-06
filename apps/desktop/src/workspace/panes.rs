@@ -26,17 +26,11 @@ const UNFOCUSED_DIM: f32 = 0.3;
 /// 驱动标记从最近一次操作起显示这么久，之后自己消失。
 const DRIVER_SHOWN_MS: u64 = 10_000;
 
-/// 操作过去了几秒；过了 `DRIVER_SHOWN_MS`、不该再显示时为 `None`。宿主的钟比这边快一点时算
-/// 刚刚操作。
-fn driven_secs_ago(at_ms: u64, now_ms: u64) -> Option<u64> {
+/// 驱动标记还要显示多久；过了 `DRIVER_SHOWN_MS`、不该再显示时为 `None`。宿主的钟比这边快一点
+/// 时算刚刚操作。
+fn driver_shown_for(at_ms: u64, now_ms: u64) -> Option<Duration> {
     let ago = now_ms.saturating_sub(at_ms);
-    (ago < DRIVER_SHOWN_MS).then_some(ago / 1000)
-}
-
-/// 到驱动标记上的文字下一次要变（秒数加一或者消失）还要多久。
-fn until_next_change(at_ms: u64, now_ms: u64) -> Duration {
-    let ago = now_ms.saturating_sub(at_ms);
-    Duration::from_millis(1000 - ago % 1000)
+    (ago < DRIVER_SHOWN_MS).then(|| Duration::from_millis(DRIVER_SHOWN_MS - ago))
 }
 
 pub(super) fn now_ms() -> u64 {
@@ -51,8 +45,9 @@ fn driver_name(by: Option<&str>, name_of: impl Fn(SessionId) -> Option<String>) 
     Some(title.unwrap_or_else(|| by.chars().take(8).collect()))
 }
 
-/// 驱动标记上的文字：「由 <驱动方> 操作 · <动作> <N>s 前」，按 `locale` 的语言。
-fn driver_text(name: Option<&str>, action: DriveAction, secs: u64, locale: &str) -> String {
+/// 驱动标记上的文字：「由 <驱动方> 操作 · <动作>」，按 `locale` 的语言。不写过了几秒：那样标记
+/// 显示着的十秒里要每秒重画一次，窗口就一直在画帧；标记还在就说明是十秒内的操作。
+fn driver_text(name: Option<&str>, action: DriveAction, locale: &str) -> String {
     let who = match name {
         Some(name) => name.to_owned(),
         None => rust_i18n::t!("driver.outside", locale = locale).into_owned(),
@@ -65,14 +60,14 @@ fn driver_text(name: Option<&str>, action: DriveAction, secs: u64, locale: &str)
         DriveAction::Kill => rust_i18n::t!("driver.action.kill", locale = locale),
         DriveAction::Unknown => rust_i18n::t!("driver.action.unknown", locale = locale),
     };
-    rust_i18n::t!("driver.badge", locale = locale, who = who, action = action, secs = secs).into_owned()
+    rust_i18n::t!("driver.badge", locale = locale, who = who, action = action).into_owned()
 }
 
 impl Tab {
     /// 这个标签里有分屏正被别的终端里的程序操作着（驱动标记还没消失）。
     pub(super) fn driven(&self, now_ms: u64, cx: &App) -> bool {
         self.panes.values().any(|(view, _)| {
-            view.read(cx).driver().is_some_and(|driver| driven_secs_ago(driver.at_ms, now_ms).is_some())
+            view.read(cx).driver().is_some_and(|driver| driver_shown_for(driver.at_ms, now_ms).is_some())
         })
     }
 }
@@ -98,11 +93,11 @@ impl WindowView {
             let Some(driver) = view.read(cx).driver() else {
                 continue;
             };
-            let Some(secs) = driven_secs_ago(driver.at_ms, now) else {
+            if driver_shown_for(driver.at_ms, now).is_none() {
                 continue;
-            };
+            }
             let name = driver_name(driver.by.as_deref(), |id| self.session_label(id, window, cx));
-            badges.insert(*pane, driver_text(name.as_deref(), driver.action, secs, &locale).into());
+            badges.insert(*pane, driver_text(name.as_deref(), driver.action, &locale).into());
         }
         badges
     }
@@ -140,32 +135,34 @@ impl WindowView {
             .find_map(|handle| title_in(handle.read(cx).ok()?))
     }
 
-    /// 当前 workspace 里还有驱动标记（分屏上的文字或者标签上的图标）显示着时，到它下一次要变的
-    /// 时候重画一次，过期的标记就自己消失了。
+    /// 当前 workspace 里还有驱动标记（分屏上的文字或者标签上的图标）显示着时，到最早的那个该消失
+    /// 的时候重画一次，它就自己消失了；标记显示着的时候不重画。已经约好的重画不晚于这个时候就
+    /// 留着，晚了（比如切到了另一个 workspace）就换成早的。
     fn schedule_driver_redraw(&mut self, now: u64, cx: &mut Context<Self>) {
-        if self.driver_redraw.is_some() {
-            return;
-        }
         let next = self
             .workspace()
             .tabs
             .iter()
             .flat_map(|tab| tab.panes.values())
             .filter_map(|(view, _)| view.read(cx).driver().map(|driver: &Driver| driver.at_ms))
-            .filter(|at| driven_secs_ago(*at, now).is_some())
-            .map(|at| until_next_change(at, now))
+            .filter_map(|at| driver_shown_for(at, now))
             .min();
         let Some(next) = next else {
             return;
         };
-        self.driver_redraw = Some(cx.spawn(async move |this, cx| {
+        let due = now + next.as_millis() as u64;
+        if self.driver_redraw.as_ref().is_some_and(|(at, _)| *at <= due) {
+            return;
+        }
+        let task = cx.spawn(async move |this, cx| {
             cx.background_executor().timer(next).await;
             this.update(cx, |this, cx| {
                 this.driver_redraw = None;
                 cx.notify();
             })
             .ok();
-        }));
+        });
+        self.driver_redraw = Some((due, task));
     }
 
     fn render_leaf(
@@ -388,15 +385,13 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_badge_counts_seconds_and_goes_away_after_ten() {
-        assert_eq!(driven_secs_ago(1_000, 1_000), Some(0));
-        assert_eq!(driven_secs_ago(1_000, 4_999), Some(3));
-        assert_eq!(driven_secs_ago(1_000, 10_999), Some(9));
-        assert_eq!(driven_secs_ago(1_000, 11_000), None);
+    fn the_badge_goes_away_ten_seconds_after_the_drive() {
+        assert_eq!(driver_shown_for(1_000, 1_000), Some(Duration::from_secs(10)));
+        assert_eq!(driver_shown_for(1_000, 4_250), Some(Duration::from_millis(6_750)));
+        assert_eq!(driver_shown_for(1_000, 10_999), Some(Duration::from_millis(1)));
+        assert_eq!(driver_shown_for(1_000, 11_000), None);
         // 宿主的钟快一点时算刚刚。
-        assert_eq!(driven_secs_ago(5_000, 4_000), Some(0));
-        assert_eq!(until_next_change(1_000, 4_250), Duration::from_millis(750));
-        assert_eq!(until_next_change(1_000, 1_000), Duration::from_secs(1));
+        assert_eq!(driver_shown_for(5_000, 4_000), Some(Duration::from_secs(10)));
     }
 
     #[test]
@@ -411,13 +406,13 @@ mod tests {
     }
 
     #[test]
-    fn badge_text_names_the_driver_the_action_and_how_long_ago() {
-        assert_eq!(driver_text(Some("claude"), DriveAction::Input, 3, "zh-Hans"), "由 claude 操作 · 打字 3s 前");
-        assert_eq!(driver_text(Some("claude"), DriveAction::Keys, 0, "en"), "Driven by claude · keys 0s ago");
-        assert_eq!(driver_text(None, DriveAction::Paste, 9, "en"), "Driven by a program outside Runode · paste 9s ago");
+    fn badge_text_names_the_driver_and_the_action() {
+        assert_eq!(driver_text(Some("claude"), DriveAction::Input, "zh-Hans"), "由 claude 操作 · 打字");
+        assert_eq!(driver_text(Some("claude"), DriveAction::Keys, "en"), "Driven by claude · keys");
+        assert_eq!(driver_text(None, DriveAction::Paste, "en"), "Driven by a program outside Runode · paste");
         for action in [DriveAction::ClearScreen, DriveAction::Kill, DriveAction::Unknown] {
             for locale in ["en", "zh-Hans", "zh-Hant"] {
-                let text = driver_text(Some("x"), action, 1, locale);
+                let text = driver_text(Some("x"), action, locale);
                 assert!(!text.contains("driver."), "{locale}: {text}");
             }
         }

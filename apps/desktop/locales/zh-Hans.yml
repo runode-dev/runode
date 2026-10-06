@@ -321,7 +321,7 @@ completion:
     file: 文件
     named: "%{group}：%{name}"
 driver:
-  badge: "由 %{who} 操作 · %{action} %{secs}s 前"
+  badge: "由 %{who} 操作 · %{action}"
   outside: runode 以外的程序
   tab: 有分屏正被别的终端里的程序操作
   action:
