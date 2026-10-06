@@ -45,7 +45,7 @@ This project is indexed by GitNexus as **runode** (225 symbols, 587 relationship
 
 # Crate 分层
 
-代码分在几个 crate 里，依赖只能自上而下。能单独运行的 app 放在 `apps/` 下（现在只有 `apps/desktop`），给它们用的库放在 `crates/` 下。目录名直接说明职责，包名是目录名加 `runode-` 前缀（`crates/terminal` 是 `runode-terminal`），只有桌面 app 的包名是 `runode`，让可执行文件仍叫 runode。包名带前缀是因为依赖树里已有 `dirs` 这类同名的第三方 crate，不加前缀会撞名，`cargo -p` 也会有歧义。
+代码分在几个 crate 里，依赖只能自上而下。能单独运行的 app 放在 `apps/` 下（现在只有 `apps/desktop`），给它们用的库放在 `crates/` 下。`apps/` 下不全是 Rust 项目，新加的 Rust app 要在根 `Cargo.toml` 的 `members` 和 `default-members` 里列出。目录名直接说明职责，包名是目录名加 `runode-` 前缀（`crates/terminal` 是 `runode-terminal`），只有桌面 app 的包名是 `runode`，让可执行文件仍叫 runode。包名带前缀是因为依赖树里已有 `dirs` 这类同名的第三方 crate，不加前缀会撞名，`cargo -p` 也会有歧义。
 
 | 目录 | 职责 | 可以依赖 |
 | --- | --- | --- |

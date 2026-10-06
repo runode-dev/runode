@@ -1,8 +1,9 @@
 [workspace]
 resolver = "3"
-members = ["crates/*", "apps/*"]
+# apps/ 下不全是 Rust 项目（以后的手机端是各平台自己的工程），桌面 app 单独列出。
+members = ["crates/*", "apps/desktop"]
 # 不带 -p 的 cargo 命令覆盖全部 crate。
-default-members = ["crates/*", "apps/*"]
+default-members = ["crates/*", "apps/desktop"]
 # vendor/libghostty-rs 自成一个 workspace；不排除的话，根目录下的 path 依赖
 # 会被自动收编为本 workspace 的成员。
 exclude = ["vendor"]
