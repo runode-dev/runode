@@ -57,7 +57,7 @@ mkdir -p "$build_dir"
 xcframework="$build_dir/install/lib/ghostty-vt.xcframework"
 for slice in ios-arm64 ios-arm64-simulator; do
   if [[ ! -d "$xcframework/$slice" ]]; then
-    echo "xcframework 里没有 $slice：ghostty 只在检测到 iOS SDK 时编 iOS 切片，到 Xcode 的设置里装上 iOS 平台" >&2
+    echo "xcframework 里没有 ${slice}：ghostty 只在检测到 iOS SDK 时编 iOS 切片，到 Xcode 的设置里装上 iOS 平台" >&2
     exit 1
   fi
 done

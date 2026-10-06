@@ -128,7 +128,7 @@ launch() {
     pid=$(sed -n 's/^pid=\([0-9]*\).*/\1/p' <<<"$out")
     window_ms=$(sed -n 's/.*window_ms=\(.*\)$/\1/p' <<<"$out")
     if [[ -z $pid || ! $window_ms =~ ^[0-9.]+$ ]]; then
-        echo "perf.sh: 没等到窗口（$out），日志：" >&2
+        echo "perf.sh: 没等到窗口（${out}），日志：" >&2
         cat "$log" >&2
         exit 1
     fi

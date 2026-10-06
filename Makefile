@@ -8,7 +8,7 @@ CLIPPY_ARGS ?=
 link_rn = @mkdir -p target/$(1) && ln -sfn runode target/$(1)/rn
 
 .DEFAULT_GOAL := help
-.PHONY: help submodules build release run run-release run-ios run-ios-device app install dmg check test clippy fmt fmt-check clean
+.PHONY: help submodules build release run run-release run-ios run-ios-device app install restart dmg check test clippy fmt fmt-check clean
 
 help: ## 列出所有目标
 	@awk 'BEGIN {FS = ":.*## "} /^[a-zA-Z_-]+:.*## / {printf "  %-16s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -46,6 +46,10 @@ app: ## 发布构建并打包 Runode.app，产物在 target/release/bundle
 install: app ## 打包 Runode.app 并装到 /Applications，覆盖旧版本
 	rm -rf /Applications/Runode.app
 	ditto target/release/bundle/Runode.app /Applications/Runode.app
+
+# 改了代码没提交时构建号不变，重开 app 不会换掉还在跑的宿主，用这个让新宿主接手会话。
+restart: ## 重启装好的 Runode.app，宿主也换成新装的（make install restart 装好再重启）
+	scripts/restart-macos.sh
 
 dmg: ## 发布构建并打包 Runode.app 与 dmg，产物在 target/release/bundle
 	CARGO=$(CARGO) scripts/bundle-macos.sh
