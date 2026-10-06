@@ -1,8 +1,15 @@
 The agent logos in this directory come from lobe-icons
 (https://github.com/lobehub/lobe-icons, package @lobehub/icons-static-svg 1.95.1),
-with the width and height set to 24 and the inline style removed. The logos are
+with the width and height set to 24 and the inline style removed, except jules.svg,
+which comes from Simple Icons (https://simpleicons.org, package simple-icons 16.34.0,
+released under CC0 1.0) with the width, height and fill set, and omp.svg, which is
+the icon of Oh My Pi (https://github.com/can1357/oh-my-pi, assets/icon.svg, MIT
+License, Copyright (c) 2025 Mario Zechner, (c) 2025-2026 Can Bölük, (c) 2026
+Stencil Labs, Inc.) redrawn in one color on a square canvas. The logos are
 trademarks of their respective owners and are used only to tell which agent is
 running in a terminal.
+
+The MIT License below covers the lobe-icons files.
 
 MIT License
 

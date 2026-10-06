@@ -40,6 +40,20 @@ pub enum AgentKind {
     Letta,
     Maki,
     Muse,
+    Aider,
+    Goose,
+    Crush,
+    Auggie,
+    ContinueCli,
+    Junie,
+    OpenHands,
+    Trae,
+    CodeBuddy,
+    Iflow,
+    Codebuff,
+    MistralVibe,
+    Jules,
+    Plandex,
     Other,
 }
 
@@ -66,7 +80,7 @@ const BRAILLE_FRAMES: [&str; 10] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "�
 
 impl AgentKind {
     /// 认得的全部 agent，不含 `Other`。
-    pub const ALL: [Self; 24] = [
+    pub const ALL: [Self; 38] = [
         Self::Pi,
         Self::Claude,
         Self::Codex,
@@ -91,6 +105,20 @@ impl AgentKind {
         Self::Letta,
         Self::Maki,
         Self::Muse,
+        Self::Aider,
+        Self::Goose,
+        Self::Crush,
+        Self::Auggie,
+        Self::ContinueCli,
+        Self::Junie,
+        Self::OpenHands,
+        Self::Trae,
+        Self::CodeBuddy,
+        Self::Iflow,
+        Self::Codebuff,
+        Self::MistralVibe,
+        Self::Jules,
+        Self::Plandex,
     ];
 
     /// 短名：识别规则文件按它命名（`<短名>.toml`），也是它最常见的命令名。
@@ -120,6 +148,20 @@ impl AgentKind {
             Self::Letta => "letta",
             Self::Maki => "maki",
             Self::Muse => "muse",
+            Self::Aider => "aider",
+            Self::Goose => "goose",
+            Self::Crush => "crush",
+            Self::Auggie => "auggie",
+            Self::ContinueCli => "cn",
+            Self::Junie => "junie",
+            Self::OpenHands => "openhands",
+            Self::Trae => "trae",
+            Self::CodeBuddy => "codebuddy",
+            Self::Iflow => "iflow",
+            Self::Codebuff => "codebuff",
+            Self::MistralVibe => "vibe",
+            Self::Jules => "jules",
+            Self::Plandex => "plandex",
             Self::Other => "other",
         }
     }
@@ -151,6 +193,20 @@ impl AgentKind {
             Self::Letta => "Letta Code",
             Self::Maki => "Maki",
             Self::Muse => "Muse",
+            Self::Aider => "Aider",
+            Self::Goose => "Goose",
+            Self::Crush => "Crush",
+            Self::Auggie => "Auggie",
+            Self::ContinueCli => "Continue",
+            Self::Junie => "Junie",
+            Self::OpenHands => "OpenHands",
+            Self::Trae => "Trae Agent",
+            Self::CodeBuddy => "CodeBuddy Code",
+            Self::Iflow => "iFlow CLI",
+            Self::Codebuff => "Codebuff",
+            Self::MistralVibe => "Mistral Vibe",
+            Self::Jules => "Jules",
+            Self::Plandex => "Plandex",
             Self::Other => "Agent",
         }
     }

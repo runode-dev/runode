@@ -2,9 +2,10 @@
 //! 的出处和许可写在图标目录的 `LICENSE` 里。
 //!
 //! 有品牌色的 logo 用 `img()` 按原色画；只有一种颜色的用 `svg()` 染成前景色，深浅两种背景上都
-//! 看得清。没收 logo 的 agent 为 `None`，由调用方退回状态标记。
+//! 看得清。没收 logo 的 agent 画成圆角方框里它名字的头一个字母，认不出是哪个的（`Other`）为
+//! `None`，由调用方退回状态标记。
 
-use gpui::{AnyElement, Hsla, Pixels, img, prelude::*, svg};
+use gpui::{AnyElement, FontWeight, Hsla, Pixels, div, img, prelude::*, svg};
 use runode_shared_types::agent::AgentKind;
 
 /// 列出所有 logo：给每个 logo 一个资源路径常量，并把它们连同文件内容收进 `FILES`，
@@ -21,6 +22,7 @@ macro_rules! logos {
 }
 
 logos! {
+    PI = "pi",
     CLAUDE = "claude",
     CODEX = "codex",
     GEMINI = "gemini",
@@ -39,17 +41,27 @@ logos! {
     KILO = "kilo",
     QODER = "qoder",
     QWEN = "qwen",
+    GOOSE = "goose",
+    JUNIE = "junie",
+    OPENHANDS = "openhands",
+    TRAE = "trae",
+    CODEBUDDY = "codebuddy",
+    MISTRAL_VIBE = "mistral-vibe",
+    JULES = "jules",
+    OMP = "omp",
 }
 
-/// 一个 logo 怎么画：按原色，还是染成前景色。
+/// 一个 logo 怎么画：按原色，染成前景色，还是没有 logo、写名字的头一个字母。
 enum Logo {
     Colored(&'static str),
     Mono(&'static str),
+    Initial(char),
 }
 
 fn logo_of(kind: AgentKind) -> Option<Logo> {
-    use Logo::{Colored, Mono};
+    use Logo::{Colored, Initial, Mono};
     Some(match kind {
+        AgentKind::Pi => Mono(PI),
         AgentKind::Claude => Colored(CLAUDE),
         AgentKind::Codex => Mono(CODEX),
         AgentKind::Gemini => Colored(GEMINI),
@@ -68,13 +80,26 @@ fn logo_of(kind: AgentKind) -> Option<Logo> {
         AgentKind::Kilo => Mono(KILO),
         AgentKind::Qodercli => Mono(QODER),
         AgentKind::Qwen => Colored(QWEN),
-        AgentKind::Pi
-        | AgentKind::Omp
-        | AgentKind::Droid
+        AgentKind::Goose => Mono(GOOSE),
+        AgentKind::Junie => Colored(JUNIE),
+        AgentKind::OpenHands => Mono(OPENHANDS),
+        AgentKind::Trae => Colored(TRAE),
+        AgentKind::CodeBuddy => Colored(CODEBUDDY),
+        AgentKind::MistralVibe => Colored(MISTRAL_VIBE),
+        AgentKind::Jules => Mono(JULES),
+        AgentKind::Omp => Mono(OMP),
+        AgentKind::Droid
         | AgentKind::Letta
         | AgentKind::Maki
         | AgentKind::Muse
-        | AgentKind::Other => return None,
+        | AgentKind::Aider
+        | AgentKind::Crush
+        | AgentKind::Auggie
+        | AgentKind::ContinueCli
+        | AgentKind::Iflow
+        | AgentKind::Codebuff
+        | AgentKind::Plandex => Initial(kind.display_name().chars().next()?),
+        AgentKind::Other => return None,
     })
 }
 
@@ -93,22 +118,44 @@ pub(in crate::window) fn brand_color(kind: AgentKind) -> Option<u32> {
         AgentKind::Hermes => 0x7C3AED,
         AgentKind::Qodercli => 0x2ADB5C,
         AgentKind::Qwen => 0x6F69F7,
+        AgentKind::Junie => 0x47E054,
+        AgentKind::OpenHands => 0xE0C34A,
+        AgentKind::Trae => 0x32F08C,
+        AgentKind::CodeBuddy => 0x6C4DFF,
+        AgentKind::MistralVibe => 0xFA500F,
+        AgentKind::Jules => 0x715CD7,
+        AgentKind::Omp => 0xF97316,
         _ => return None,
     })
 }
 
-/// 标签图标叠里压在后面的那几块铺的颜色：`brand_color`，没有的用灰色；没有 logo 的 agent 为
+/// 标签图标叠里压在后面的那几块铺的颜色：`brand_color`，没有的用灰色；认不出是哪个的 agent 为
 /// `None`，和普通程序一样画。
 pub(in crate::window) fn accent(kind: AgentKind) -> Option<u32> {
     logo_of(kind)?;
     Some(brand_color(kind).unwrap_or(0x6B7280))
 }
 
-/// `kind` 的 logo，边长 `size`；单色的染成 `fg`。没有 logo 时为 `None`。
+/// `kind` 的 logo，边长 `size`；单色的和首字母都染成 `fg`。认不出是哪个的 agent 为 `None`。
 pub(in crate::window) fn agent_logo(kind: AgentKind, size: Pixels, fg: Hsla) -> Option<AnyElement> {
     Some(match logo_of(kind)? {
         Logo::Colored(path) => img(path).flex_none().size(size).into_any_element(),
         Logo::Mono(path) => svg().path(path).flex_none().size(size).text_color(fg).into_any_element(),
+        Logo::Initial(initial) => div()
+            .flex_none()
+            .size(size)
+            .rounded(size * 0.25)
+            .border_1()
+            .border_color(fg)
+            .flex()
+            .items_center()
+            .justify_center()
+            .text_size(size * 0.62)
+            .line_height(size)
+            .font_weight(FontWeight::BOLD)
+            .text_color(fg)
+            .child(initial.to_string())
+            .into_any_element(),
     })
 }
 
@@ -117,33 +164,19 @@ mod tests {
     use super::*;
 
     #[test]
-    fn every_logo_is_a_listed_file() {
-        let kinds = [
-            AgentKind::Claude,
-            AgentKind::Codex,
-            AgentKind::Gemini,
-            AgentKind::Cursor,
-            AgentKind::Devin,
-            AgentKind::Antigravity,
-            AgentKind::Cline,
-            AgentKind::Mastracode,
-            AgentKind::OpenCode,
-            AgentKind::GithubCopilot,
-            AgentKind::Kimi,
-            AgentKind::Kiro,
-            AgentKind::Amp,
-            AgentKind::Grok,
-            AgentKind::Hermes,
-            AgentKind::Kilo,
-            AgentKind::Qodercli,
-            AgentKind::Qwen,
-        ];
-        for kind in kinds {
-            let Some(Logo::Colored(path) | Logo::Mono(path)) = logo_of(kind) else {
-                panic!("{kind:?} has no logo");
-            };
-            assert!(FILES.iter().any(|(listed, _)| *listed == path), "{path}");
+    fn every_known_agent_has_a_logo_or_an_initial() {
+        let mut files = 0;
+        for kind in AgentKind::ALL {
+            match logo_of(kind) {
+                Some(Logo::Colored(path) | Logo::Mono(path)) => {
+                    assert!(FILES.iter().any(|(listed, _)| *listed == path), "{path}");
+                    files += 1;
+                }
+                Some(Logo::Initial(_)) => {}
+                None => panic!("{kind:?} has neither a logo nor an initial"),
+            }
         }
-        assert_eq!(FILES.len(), kinds.len());
+        assert_eq!(files, FILES.len());
+        assert!(logo_of(AgentKind::Other).is_none());
     }
 }

@@ -88,6 +88,20 @@ pub fn agent_from_name(name: &str) -> Option<AgentKind> {
         "letta" | "letta-code" | "letta code" => Letta,
         "maki" => Maki,
         "muse" | "muse-code" | "muse-cli" => Muse,
+        "aider" => Aider,
+        "goose" => Goose,
+        "crush" => Crush,
+        "auggie" | "augment" => Auggie,
+        "cn" | "continue-cli" => ContinueCli,
+        "junie" => Junie,
+        "openhands" | "open-hands" => OpenHands,
+        "trae" | "trae-cli" | "trae-agent" => Trae,
+        "codebuddy" | "codebuddy-code" => CodeBuddy,
+        "iflow" | "iflow-cli" => Iflow,
+        "codebuff" => Codebuff,
+        "vibe" | "mistral-vibe" => MistralVibe,
+        "jules" => Jules,
+        "plandex" | "pdx" => Plandex,
         // muse 的启动脚本最后执行的是带版本号的 `muse-bin-<版本>`。
         other if other.strip_prefix("muse-bin-").is_some_and(|rest| rest.starts_with(|c: char| c.is_ascii_digit())) => {
             Muse

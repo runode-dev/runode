@@ -349,7 +349,12 @@ public struct AgentKind: Hashable, Sendable, Codable {
             "mastracode": "Mastra Code", "open_code": "OpenCode", "github_copilot": "GitHub Copilot",
             "kimi": "Kimi Code", "kiro": "Kiro", "droid": "Droid", "amp": "Amp", "grok": "Grok", "hermes": "Hermes",
             "kilo": "Kilo Code", "qodercli": "Qoder CLI", "qwen": "Qwen Code", "letta": "Letta Code", "maki": "Maki",
-            "muse": "Muse", "other": "Agent",
+            "muse": "Muse",
+            "aider": "Aider", "goose": "Goose", "crush": "Crush", "auggie": "Auggie",
+            "continue_cli": "Continue", "junie": "Junie", "open_hands": "OpenHands", "trae": "Trae Agent",
+            "code_buddy": "CodeBuddy Code", "iflow": "iFlow CLI", "codebuff": "Codebuff", "mistral_vibe": "Mistral Vibe",
+            "jules": "Jules", "plandex": "Plandex",
+            "other": "Agent",
         ]
         return names[label] ?? label
     }
