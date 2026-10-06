@@ -8,7 +8,7 @@ use std::{
     process::{Command, Stdio},
 };
 
-use crate::{FileDiff, FileStatus, git};
+use crate::{FileDiff, FileStatus, find_repo, git};
 
 /// 能在后台线程里用的仓库句柄，写操作都挂在它上面；由 `Snapshot::repo` 取得。git 命令
 /// 可能要跑好几秒（推送、拉取），界面线程别直接调。子模块和嵌套的仓库各用各的句柄。
@@ -134,6 +134,12 @@ fn first_error(results: impl IntoIterator<Item = Result>) -> Result {
 impl Repo {
     pub(crate) fn new(root: PathBuf) -> Self {
         Self { root }
+    }
+
+    /// `dir` 所在仓库的句柄，根目录和 `snapshot` 读到的一样；`dir` 不在 git 仓库里时为空。只问一次
+    /// git，不读状态。
+    pub fn open(dir: &Path) -> Option<Self> {
+        find_repo(dir).map(|(root, _)| Self::new(root))
     }
 
     /// `path` 相对 `root`，落在哪个仓库里：那个仓库的根目录，以及相对它的路径。路径里

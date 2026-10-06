@@ -39,7 +39,7 @@
         }
 
         /// 参数里还带着 `terminal` 时直接打开等回答的那个会话的终端页，`shell` 时打开普通 shell 的，
-        /// `list` 时打开会话列表，`pair` 时打开配对页，`settings` 时打开设置页，不带参数停在首页。再带上 `offline` 时连上一会儿
+        /// `list` 时打开会话列表，`git` 时打开普通 shell 所在仓库的 Git 页，`pair` 时打开配对页，`settings` 时打开设置页，不带参数停在首页。再带上 `offline` 时连上一会儿
         /// 后假装断线。
         static func openIfRequested(_ app: AppModel) {
             guard requested else { return }
@@ -50,6 +50,8 @@
                 app.path = [.machine(machine.id), .terminal(machine: machine.id, session: DemoLink.shell.id)]
             } else if arguments.contains("list") {
                 app.path = [.machine(machine.id)]
+            } else if arguments.contains("git") {
+                app.path = [.machine(machine.id), .git(machine: machine.id, session: DemoLink.shell.id)]
             } else if arguments.contains("pair") {
                 app.startPairing()
             } else if arguments.contains("settings") {
@@ -182,9 +184,86 @@
                 emit(.message(.screenText(id: id, text: text, truncated: false)))
             case .sendKeys(let req, _, _), .paste(let req, _, _):
                 emit(.message(.done(req: req)))
+            case .git(let req, let id, let request):
+                emit(.message(git(req: req, id: id, request: request)))
             default:
                 break
             }
+        }
+
+        /// 假仓库：暂存、提交、切分支都改它，读状态时照它回。
+        private let repo = Mutex(
+            GitStatus(
+                root: "/Users/ethan/dev/runode", branch: "main", head: "581d7b4", upstream: "origin/main", ahead: 1,
+                behind: 2, hasRemote: true,
+                staged: [GitFile(path: "crates/protocol/src/git.rs", status: .added, added: 182)],
+                unstaged: [
+                    GitFile(path: "crates/host/src/server.rs", status: .modified, added: 34, removed: 3),
+                    GitFile(path: "apps/ios/RunodeKit/Sources/RunodeFeatures/GitModel.swift", status: .untracked, added: 290),
+                    GitFile(path: "docs/old-notes.md", status: .deleted, removed: 41),
+                ]))
+
+        private func git(req: UInt32, id: SessionId, request: GitRequest) -> HostMsg {
+            func move(_ paths: [String], toStaged: Bool) {
+                repo.withLock { status in
+                    let from = toStaged ? status.unstaged : status.staged
+                    let moving = from.filter { paths.contains($0.path) }
+                    if toStaged {
+                        status.unstaged.removeAll { paths.contains($0.path) }
+                        status.staged = (status.staged + moving).sorted { $0.path < $1.path }
+                    } else {
+                        status.staged.removeAll { paths.contains($0.path) }
+                        status.unstaged = (status.unstaged + moving).sorted { $0.path < $1.path }
+                    }
+                }
+            }
+            switch request {
+            case .status, .fetch: break
+            case .stage(let paths): move(paths, toStaged: true)
+            case .unstage(let paths): move(paths, toStaged: false)
+            case .stageAll: move(repo.withLock { $0.unstaged.map(\.path) }, toStaged: true)
+            case .unstageAll: move(repo.withLock { $0.staged.map(\.path) }, toStaged: false)
+            case .commit(_, let stageAll):
+                repo.withLock { status in
+                    if stageAll { status.unstaged = [] }
+                    status.staged = []
+                    status.ahead += 1
+                    status.head = "9c0ffee"
+                }
+            case .pull: repo.withLock { $0.behind = 0 }
+            case .push: repo.withLock { $0.ahead = 0 }
+            case .sync: repo.withLock { $0.ahead = 0; $0.behind = 0 }
+            case .checkout(let branch, _): repo.withLock { $0.branch = branch.replacingOccurrences(of: "origin/", with: "") }
+            case .branches:
+                let current = repo.withLock { $0.branch }
+                let branches = [
+                    GitBranch(name: "main", upstream: "origin/main", subject: "feat: iOS 加设置页", date: "2 hours ago"),
+                    GitBranch(name: "mobile-git", subject: "wip: 手机端 Git", date: "5 minutes ago"),
+                    GitBranch(name: "origin/main", remote: true, subject: "feat: iOS 加设置页", date: "2 hours ago"),
+                    GitBranch(name: "origin/release", remote: true, subject: "chore: 0.4.0", date: "3 days ago"),
+                ].map { branch in
+                    var branch = branch
+                    branch.current = branch.name == current
+                    return branch
+                }
+                return .gitBranches(req: req, id: id, branches: branches)
+            case .diff(let path, let staged):
+                let file = repo.withLock { (staged ? $0.staged : $0.unstaged).first { $0.path == path } }
+                guard let file else { return .gitDiff(req: req, id: id, diff: nil) }
+                let lines: [GitLine] = [
+                    GitLine(kind: .context, old: 940, new: 940, text: "            ClientMsg::Paste { req, id, text } => {"),
+                    GitLine(kind: .context, old: 941, new: 941, text: "                self.deliver_done(req, id, DriveAction::Paste, Inbox::Paste(text))"),
+                    GitLine(kind: .context, old: 942, new: 942, text: "            }"),
+                    GitLine(kind: .added, new: 943, text: "            ClientMsg::Git { req, id, request } => self.git(req, id, request),"),
+                    GitLine(kind: .removed, old: 943, text: "            ClientMsg::UiReply { ui, reply } => self.ui_reply(ui, reply),"),
+                    GitLine(kind: .added, new: 944, text: "            ClientMsg::UiReply { ui, reply } => self.ui_reply(ui, *reply),"),
+                    GitLine(kind: .context, old: 944, new: 945, text: "            // 读写剪贴板是宿主替会话里的程序请界面办的，前端不能直接要。"),
+                ]
+                return .gitDiff(
+                    req: req, id: id,
+                    diff: GitFileDiff(file: file, hunks: [GitHunk(header: "@@ -940,5 +940,6 @@ fn handle", lines: lines)]))
+            }
+            return .gitStatus(req: req, id: id, status: repo.withLock { $0 })
         }
 
         func sendInput(_ data: Data, channel: UInt32, generation: UInt64) {

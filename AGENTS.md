@@ -6,7 +6,7 @@
 | --- | --- | --- |
 | `paths` | 配置、数据和缓存放在哪：`Dirs::from_env()` 和每个文件的路径 | 只有 std |
 | `shared-types` | 各端共用的纯数据：终端帧、网格、分屏布局、agent 状态、会话对外公布的状态、终端设置、读写剪贴板的规矩（`clipboard-write`、`clipboard-read` 的取值和一次读写的上限）、输入事件 | std、serde |
-| `protocol` | 宿主进程和各个前端之间的消息：帧格式、控制消息、会话标识，以及手机经网络连上来时的门禁（`remote`：门禁消息、签名的字节串、base64url、配对 URI，是远程访问线上格式的正式定义） | shared-types、serde、serde_json |
+| `protocol` | 宿主进程和各个前端之间的消息：帧格式、控制消息、会话标识，请宿主在会话所在的仓库里读写 git 的消息（`git`），以及手机经网络连上来时的门禁（`remote`：门禁消息、签名的字节串、base64url、配对 URI，是远程访问线上格式的正式定义） | shared-types、serde、serde_json |
 | `git` | 用 git 命令行读仓库的状态、逐行改动、分支、stash 和提交图，也做暂存（含按块暂存）、丢弃、提交、切换分支、stash 和与远端同步这些操作 | 只有 std |
 | `preview` | 文件预览不碰界面的部分：读文件、判断是文本、图片还是二进制，语法高亮出调色板语义的颜色 | std、syntect、two-face |
 | `agent-detect` | 认出终端前台在跑哪个 AI 编程 agent，判断它在干活、空闲还是等用户回答：按前台进程识别、识别规则的格式和求值（内置规则编进二进制）、状态去抖 | shared-types、serde、regex、toml |
@@ -14,7 +14,7 @@
 | `completion` | 按 Tab 的命令补全：命令规格、候选排序、生成器 | terminal、shared-types、paths |
 | `prompt-highlight` | 提示符上输入的语法高亮：把命令行分成命令名、关键字、选项、字符串、变量、路径等几类，按 fast-syntax-highlighting 的默认主题定色；命令名和子命令借 `completion` 查 | completion、paths |
 | `config` | Ghostty 兼容的配置文件、主题、快捷键写法和配置模板，生成 `TermSettings` | shared-types、paths |
-| `host` | 管终端会话的宿主（只有 lib）：每个会话一个线程，持有 PTY 和权威的那份 VT，应答终端查询、认标题和 agent、记命令历史。跑在 app 进程里，或者由 app 拉起成单独一个进程（`runode --host`，配置项 `terminal-host`）；前端一律经一条连接按 protocol 的帧和它说话：桌面在同一个进程里时用 `Host::connect_pair` 的一对 socket，别的时候连 Unix socket。app 升级后，新版本拉起的新宿主（`Host::take_over`）以 `ClientKind::Successor` 连上旧宿主的 socket，接过各会话的 PTY 和监听的 socket，会话不断 | terminal、protocol、shared-types、libc |
+| `host` | 管终端会话的宿主（只有 lib）：每个会话一个线程，持有 PTY 和权威的那份 VT，应答终端查询、认标题和 agent、记命令历史。跑在 app 进程里，或者由 app 拉起成单独一个进程（`runode --host`，配置项 `terminal-host`）；前端一律经一条连接按 protocol 的帧和它说话：桌面在同一个进程里时用 `Host::connect_pair` 的一对 socket，别的时候连 Unix socket。app 升级后，新版本拉起的新宿主（`Host::take_over`）以 `ClientKind::Successor` 连上旧宿主的 socket，接过各会话的 PTY 和监听的 socket，会话不断；前端（手机）请它在某个会话所在的仓库里读写 git 时，经 `git` 办；手机新建工作区时浏览电脑上的目录也由它列出来，没给目录时列 `paths` 给的家目录 | terminal、protocol、shared-types、git、paths、libc |
 | `remote-access` | 远程访问：TLS 1.3 监听（rustls，ring 后端，自签证书用 rcgen 生成）、门禁（验签、配对口令、限速）、设备表、Bonjour 公布，过了门禁的连接经调用方给的闭包接到宿主上；也给命令行用的配对口令文件、设备表和监听方状态 | protocol、paths、rustls、rcgen、ring、libc、serde、serde_json |
 | `cli` | 命令行前端（`runode list`、`read`、`send`、`wait`、`open`、`kill`、`focus`、`remote`）：经宿主的 Unix socket 按 protocol 说话，列会话、读屏幕、发输入、等 agent，请 app 开终端、切到终端；`remote` 不经宿主，经 `remote-access` 给手机配对、列出和撤销设备，配对成了以后问用户要不要在配置里打开 `terminal-host`（经 `config` 改配置文件），让退出 app 后远程访问留在后台 | protocol、shared-types、paths、config、remote-access、qrcode |
 | `desktop` | GPUI 桌面 app：窗口、视图、菜单、窗口存档和 Info.plist；带子命令启动时交给 `cli`、带 `--host` 时是单独一个进程的宿主、带 `--host --take-over` 时是升级时接手旧宿主会话的新宿主，和命令行、宿主是同一个可执行文件；远程访问的监听开在宿主所在的那个进程里（`remote_access`）；打包脚本按 `apps/desktop#` 找它的构建产物 | 以上全部（含 host、protocol、cli、remote-access）、GPUI |

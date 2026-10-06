@@ -11,6 +11,8 @@
         @Bindable var model: TerminalModel
         /// 设置里的字号和响铃震动。
         let preferences: AppPreferences
+        /// 打开这个会话所在仓库的 Git 页。
+        var onOpenGit: () -> Void = {}
         /// 断线横幅占的高度，终端视图据此在顶上让出地方，横幅不挡内容。
         @State private var bannerHeight: CGFloat = 0
 
@@ -101,6 +103,7 @@
             Menu {
                 Button("键盘", systemImage: "keyboard") { model.showKeyboard() }
                 Button("回到最新", systemImage: "arrow.down.to.line") { model.scrollToBottom() }
+                Button("Git", systemImage: "arrow.triangle.branch") { onOpenGit() }
                 Button("结束会话", systemImage: "xmark.circle", role: .destructive) {
                     model.isConfirmingKill = true
                 }

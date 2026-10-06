@@ -9,6 +9,15 @@ public enum Route: Hashable, Sendable {
     case machine(UUID)
     /// 一个会话的终端页。
     case terminal(machine: UUID, session: SessionId)
+    /// 一个会话所在仓库的 Git 页。
+    case git(machine: UUID, session: SessionId)
+
+    /// 这一页属于哪台电脑。
+    public var machine: UUID {
+        switch self {
+        case .machine(let machine), .terminal(let machine, _), .git(let machine, _): machine
+        }
+    }
 }
 
 /// App 用到的外部依赖，由 App 入口组装，测试换成假的。
@@ -65,6 +74,7 @@ public final class AppModel {
     @ObservationIgnored private let dependencies: AppDependencies
     @ObservationIgnored private var sessionLists: [UUID: SessionListModel] = [:]
     @ObservationIgnored private var terminals: [Route: TerminalModel] = [:]
+    @ObservationIgnored private var gits: [Route: GitModel] = [:]
     @ObservationIgnored private var active = true
 
     public init(dependencies: AppDependencies) {
@@ -86,6 +96,28 @@ public final class AppModel {
         } else {
             path = [.machine(machine), route]
         }
+    }
+
+    /// 打开一个会话所在仓库的 Git 页，压在当前页上面：从终端页打开时返回回到终端，从会话列表打开时
+    /// 回到列表；别的电脑上的页面先换成这台电脑的会话列表。
+    public func openGit(machine: UUID, session: SessionId) {
+        let route = Route.git(machine: machine, session: session)
+        if path.last == route { return }
+        if path.first == .machine(machine) {
+            path.append(route)
+        } else {
+            path = [.machine(machine), route]
+        }
+    }
+
+    public func git(machine machineId: UUID, session: SessionId) -> GitModel? {
+        let route = Route.git(machine: machineId, session: session)
+        if let existing = gits[route] { return existing }
+        guard let list = sessionList(for: machineId) else { return nil }
+        let model = GitModel(sessionId: session, link: list.link)
+        gits[route] = model
+        model.open()
+        return model
     }
 
     /// 打开配对页；`link` 是从别处（比如系统打开的 `runode://pair` 链接）带来的配对链接。
@@ -147,12 +179,16 @@ public final class AppModel {
         }
     }
 
-    /// 导航栈变了：退出去的终端页关掉，新打开的终端记作「继续」。会话列表的连接不跟导航栈走。
+    /// 导航栈变了：退出去的终端页、Git 页关掉，新打开的终端记作「继续」。会话列表的连接不跟导航栈走。
     private func pathChanged() {
         let live = Set(path)
         for (route, model) in terminals where !live.contains(route) {
             model.close()
             terminals[route] = nil
+        }
+        for (route, model) in gits where !live.contains(route) {
+            model.close()
+            gits[route] = nil
         }
         if case .terminal(let machine, let session)? = path.last {
             remember(machine: machine, session: session)
@@ -207,12 +243,7 @@ public final class AppModel {
 
     /// 要删掉的电脑：先退出它的页面、断开连接。
     private func forget(machine id: UUID) {
-        path.removeAll { route in
-            switch route {
-            case .machine(let machine): machine == id
-            case .terminal(let machine, _): machine == id
-            }
-        }
+        path.removeAll { $0.machine == id }
         sessionLists[id]?.stop()
         sessionLists[id] = nil
     }

@@ -300,6 +300,164 @@
    "id": "0123456789abcdef0011223344556677",
    "type": "focus"
   },
+  "git_branches": {
+   "branches": [
+    {
+     "current": true,
+     "date": "2 days ago",
+     "name": "main",
+     "remote": false,
+     "subject": "init",
+     "upstream": "origin/main"
+    },
+    {
+     "current": false,
+     "date": "1 hour ago",
+     "name": "origin/feat",
+     "remote": true,
+     "subject": "wip",
+     "upstream": null
+    }
+   ],
+   "id": "0123456789abcdef0011223344556677",
+   "req": 4,
+   "type": "git_branches"
+  },
+  "git_checkout_request": {
+   "id": "0123456789abcdef0011223344556677",
+   "req": 5,
+   "request": {
+    "branch": "origin/feat",
+    "op": "checkout",
+    "remote": true
+   },
+   "type": "git"
+  },
+  "git_commit_request": {
+   "id": "0123456789abcdef0011223344556677",
+   "req": 4,
+   "request": {
+    "message": "修好了",
+    "op": "commit",
+    "stage_all": true
+   },
+   "type": "git"
+  },
+  "git_diff": {
+   "diff": {
+    "file": {
+     "added": 1,
+     "binary": false,
+     "gitlink": false,
+     "old_path": null,
+     "path": "a.txt",
+     "removed": 1,
+     "status": "modified"
+    },
+    "hunks": [
+     {
+      "header": "@@ -1,2 +1,2 @@ fn main",
+      "lines": [
+       {
+        "kind": "context",
+        "new": 1,
+        "old": 1,
+        "text": "keep"
+       },
+       {
+        "kind": "removed",
+        "new": null,
+        "old": 2,
+        "text": "old"
+       },
+       {
+        "kind": "added",
+        "new": 2,
+        "old": null,
+        "text": "new"
+       }
+      ]
+     }
+    ],
+    "truncated": false
+   },
+   "id": "0123456789abcdef0011223344556677",
+   "req": 3,
+   "type": "git_diff"
+  },
+  "git_diff_request": {
+   "id": "0123456789abcdef0011223344556677",
+   "req": 2,
+   "request": {
+    "op": "diff",
+    "path": "src/a.rs",
+    "staged": true
+   },
+   "type": "git"
+  },
+  "git_status": {
+   "id": "0123456789abcdef0011223344556677",
+   "req": 1,
+   "status": {
+    "ahead": 2,
+    "behind": 1,
+    "branch": "main",
+    "has_remote": true,
+    "head": "1a2b3c4",
+    "operation": "cherry_pick",
+    "root": "/Users/me/app",
+    "staged": [
+     {
+      "added": 3,
+      "binary": false,
+      "gitlink": false,
+      "old_path": "src/old.rs",
+      "path": "src/new.rs",
+      "removed": 1,
+      "status": "renamed"
+     }
+    ],
+    "unstaged": [
+     {
+      "added": 1,
+      "binary": false,
+      "gitlink": false,
+      "old_path": null,
+      "path": "notes.txt",
+      "removed": 0,
+      "status": "untracked"
+     }
+    ],
+    "upstream": "origin/main"
+   },
+   "type": "git_status"
+  },
+  "git_status_none": {
+   "id": "0123456789abcdef0011223344556677",
+   "req": 2,
+   "status": null,
+   "type": "git_status"
+  },
+  "git_status_request": {
+   "id": "0123456789abcdef0011223344556677",
+   "req": 1,
+   "request": {
+    "op": "status"
+   },
+   "type": "git"
+  },
+  "git_unstage_request": {
+   "id": "0123456789abcdef0011223344556677",
+   "req": 3,
+   "request": {
+    "op": "unstage",
+    "paths": [
+     "b.rs",
+     "a.rs"
+    ]
+   },
+   "type": "git"
+  },
   "goodbye": {
    "reason": {
     "kind": "error",

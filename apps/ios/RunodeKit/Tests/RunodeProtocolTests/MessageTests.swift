@@ -87,11 +87,12 @@ func sameJSON(_ a: Data, _ b: Data) throws -> Bool {
             .attach(id: id, size: nil, mode: .vtReplay), .detach(id: id), .resize(id: id, size: size),
             .focus(id: id, focused: true), .clearScreen(id: id), .kill(id: id), .readScreen(id: id, lines: 3),
             .sendKeys(req: 1, id: id, keys: ["enter"]), .paste(req: 2, id: id, text: "y"),
+            .git(req: 3, id: id, request: .status),
         ]
         func covered(_ message: ClientMsg) -> Bool {
             switch message {
             case .hello, .listSessions, .spawn, .attach, .detach, .resize, .focus, .clearScreen, .kill, .readScreen,
-                .sendKeys, .paste:
+                .sendKeys, .paste, .git:
                 true
             }
         }

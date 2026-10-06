@@ -5,10 +5,12 @@
 //! 由宿主在输出流里插一条控制消息标出位置，两边的 VT 在同一个位置做同样的事，才不会分叉。
 //!
 //! 手机这类别的设备经网络连上来时，先过一段门禁才说这些消息，门禁的消息和整个流程见 `remote`。
+//! 它们没有自己的 git，请宿主在会话所在的仓库里读写，线上的类型见 `git`。
 //!
 //! 这里只放数据和编解码，只依赖 `runode_shared_types` 和 serde；终端仿真和 PTY 都不碰。
 
 pub mod frame;
+pub mod git;
 pub mod handoff;
 pub mod layout;
 pub mod message;
@@ -37,5 +39,5 @@ pub const ENV_SOCKET: &str = "RUNODE_SOCKET";
 /// 第 4 版加了升级时的交接（`ClientKind::Successor`、`ClientMsg::Handoff` 等）和尺寸归属
 /// （`HostMsg::SizeOwner`）。之后加的读写剪贴板（`ClientMsg::WriteClipboard`、`ReadClipboard`、
 /// `HostMsg::ClipboardText` 和 `SetOptions::clipboard`）是新的消息种类和带默认值的字段，旧的一方
-/// 读成 `Unknown` 或者按默认值读，没加版本号。有些东西加版本号也不能改，见 `message` 的模块文档。
+/// 读成 `Unknown` 或者按默认值读，没加版本号；读写 git（`ClientMsg::Git` 和它的几种回话）也一样。有些东西加版本号也不能改，见 `message` 的模块文档。
 pub const PROTOCOL_VERSION: u32 = 4;

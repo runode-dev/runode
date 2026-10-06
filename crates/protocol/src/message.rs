@@ -36,7 +36,10 @@ use runode_shared_types::{
 };
 use serde::{Deserialize, Serialize};
 
-use crate::layout::WindowLayout;
+use crate::{
+    git::{GitBranch, GitFileDiff, GitRequest, GitStatus},
+    layout::WindowLayout,
+};
 
 /// 一个终端会话的标识：128 位随机数，写成 32 个小写十六进制数字。宿主重启、交接后照旧，
 /// 前端靠它找回原来的会话。
@@ -249,6 +252,10 @@ pub enum ClientMsg {
     },
     /// 在 app 里切到显示这个会话的分屏，激活它的窗口，回 `Done`。
     Reveal { req: u32, id: SessionId },
+    /// 在会话 `id` 的 shell 当前所在的仓库里读写 git，见 `git` 模块。一条连接上的这些请求按到达的
+    /// 先后一件一件办，推送、拉取这类要等网络的会排着后面的。办不了时回的 `Error` 只带 `req`、不带
+    /// `id`：错是这件请求的（git 的报错、没有这个会话），不是会话出了事。
+    Git { req: u32, id: SessionId, request: GitRequest },
     /// 会话 `id` 里的程序用 OSC 52 写剪贴板，`text` 是解码好的文字（不超过
     /// `clipboard::MAX_CLIPBOARD_BYTES`）。宿主自己发起的请求，只出现在 `HostMsg::UiRequest` 里：
     /// 界面写好后回 `Done`，`req` 为 0（没有发请求的一方，也就没有它的编号）。前端直接发给宿主的
@@ -390,6 +397,25 @@ pub enum HostMsg {
     /// 回 `Reveal` 这类没有别的结果要给的请求：办好了。
     Done {
         req: u32,
+    },
+    /// 回 `ClientMsg::Git` 里读状态和改仓库的操作：办完以后仓库的样子。会话的目录不在 git 仓库里时
+    /// `status` 为空。
+    GitStatus {
+        req: u32,
+        id: SessionId,
+        status: Option<GitStatus>,
+    },
+    /// 回 `GitRequest::Diff`；这个文件在那一段里已经没有改动时 `diff` 为空。
+    GitDiff {
+        req: u32,
+        id: SessionId,
+        diff: Option<GitFileDiff>,
+    },
+    /// 回 `GitRequest::Branches`：本地分支在前，远端分支在后，各按最近一次提交的时间倒序。
+    GitBranches {
+        req: u32,
+        id: SessionId,
+        branches: Vec<GitBranch>,
     },
     /// 回 `ReadScreen`：一行一个 `\n`，行尾空白去掉。`truncated` 为真时要的内容开头已经被挤出
     /// 回滚历史，给的只是还留着的部分。

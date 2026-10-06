@@ -10,6 +10,8 @@
     struct SessionListView: View {
         @Bindable var model: SessionListModel
         let onOpen: (SessionId) -> Void
+        /// 打开会话所在仓库的 Git 页。
+        var onOpenGit: (SessionId) -> Void = { _ in }
         @Environment(\.displayScale) private var displayScale
         @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
@@ -125,6 +127,7 @@
                 .contextMenu {
                     Button("打开", systemImage: "terminal") { onOpen(session.id) }
                     if let cwd = session.meta.cwd {
+                        Button("Git", systemImage: "arrow.triangle.branch") { onOpenGit(session.id) }
                         Button("复制目录", systemImage: "doc.on.doc") { UIPasteboard.general.string = cwd }
                     }
                     Section(

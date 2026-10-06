@@ -45,15 +45,24 @@
             switch route {
             case .machine(let id):
                 if let model = app.sessionList(for: id) {
-                    SessionListView(model: model) { session in
-                        app.openTerminal(machine: id, session: session)
-                    }
+                    SessionListView(
+                        model: model,
+                        onOpen: { session in app.openTerminal(machine: id, session: session) },
+                        onOpenGit: { session in app.openGit(machine: id, session: session) })
                 } else {
                     ContentUnavailableView("找不到这台电脑", systemImage: "desktopcomputer.trianglebadge.exclamationmark")
                 }
             case .terminal(let machine, let session):
                 if let model = app.terminal(machine: machine, session: session) {
-                    TerminalScreen(model: model, preferences: app.settings.preferences)
+                    TerminalScreen(model: model, preferences: app.settings.preferences) {
+                        app.openGit(machine: machine, session: session)
+                    }
+                } else {
+                    ContentUnavailableView("找不到这个终端", systemImage: "terminal")
+                }
+            case .git(let machine, let session):
+                if let model = app.git(machine: machine, session: session) {
+                    GitScreen(model: model)
                 } else {
                     ContentUnavailableView("找不到这个终端", systemImage: "terminal")
                 }

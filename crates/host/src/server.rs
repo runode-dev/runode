@@ -39,13 +39,15 @@ use std::{
 use anyhow::{Context as _, Result, anyhow};
 use runode_protocol::{
     AttachMode, ClientKind, ClientMsg, Frame, FrameError, FrameKind, GoodbyeReason, HANDOFF_FORMAT, HostMsg,
-    PROTOCOL_VERSION, SessionId, SessionInfo, read_frame, write_frame,
+    PROTOCOL_VERSION, SessionId, SessionInfo, git::GitRequest, read_frame, write_frame,
 };
 use runode_shared_types::{grid::GridSize, input::parse_keys, session::DriveAction};
 use runode_terminal::pty;
 
 use crate::{
-    Host, Shared, SpawnOptions, Stopped, handoff,
+    Host, Shared, SpawnOptions, Stopped,
+    git::{GitWorker, Job},
+    handoff,
     session::{Drive, Event, EventSink, Inbox, Screen, Subscribe},
 };
 
@@ -54,8 +56,8 @@ const SNAPSHOT_CHUNK: usize = 1 << 20;
 /// 一条连接最多积压这么多字节还没写出去，再多就让输出最多的会话改发 `Resync`。
 const OUTBOX_LIMIT: usize = 32 << 20;
 /// 等会话线程回话（列会话、读屏幕）的最长时间。
-const REPLY_TIMEOUT: Duration = Duration::from_secs(5);
-/// 一条连接上最多同时有这么多列会话、读屏幕的请求在等会话线程回话，见 `Waiting`。
+pub(crate) const REPLY_TIMEOUT: Duration = Duration::from_secs(5);
+/// 一条连接上最多同时有这么多列会话、读屏幕、读写 git 的请求在等回话，见 `Waiting`。
 const MAX_WAITING: usize = 16;
 /// 接受连接出错（比如文件描述符用完了）后等一会儿再接，免得空转。
 const ACCEPT_BACKOFF: Duration = Duration::from_millis(100);
@@ -517,7 +519,7 @@ impl Waiting {
 }
 
 /// `Waiting` 里的一个名额，回完话（或者没起成线程、丢掉了）时放开。
-struct WaitSlot(Arc<AtomicUsize>);
+pub(crate) struct WaitSlot(Arc<AtomicUsize>);
 
 impl Drop for WaitSlot {
     fn drop(&mut self) {
@@ -635,6 +637,7 @@ fn serve(shared: &Arc<Shared>, id: u64, stream: UnixStream, check_peer: bool) {
         channels: HashMap::new(),
         next_channel: 1,
         waiting: Waiting::default(),
+        git: None,
     };
     connection.run(&mut BufReader::new(&stream));
     connection.detach_all();
@@ -778,8 +781,10 @@ struct Connection {
     /// 连着的会话，按通道。
     channels: HashMap<u32, SessionId>,
     next_channel: u32,
-    /// 在等会话线程回话的列会话、读屏幕请求。
+    /// 在等回话的列会话、读屏幕、读写 git 的请求。
     waiting: Waiting,
+    /// 办 git 请求的工作线程，第一次要时才起。
+    git: Option<GitWorker>,
 }
 
 impl Connection {
@@ -958,6 +963,7 @@ impl Connection {
             ClientMsg::Open { req, .. } | ClientMsg::Reveal { req, .. } | ClientMsg::Layout { req } => {
                 self.to_ui(req, message);
             }
+            ClientMsg::Git { req, id, request } => self.git(req, id, request),
             ClientMsg::UiReply { ui, reply } => self.ui_reply(ui, *reply),
             // 读写剪贴板是宿主替会话里的程序请界面办的，前端不能直接要。
             ClientMsg::WriteClipboard { .. } | ClientMsg::ReadClipboard { .. } => {
@@ -1111,6 +1117,36 @@ impl Connection {
             out.control(&message);
             drop(slot);
         });
+    }
+
+    /// 在会话 `id` 所在的仓库里办 git 请求：向会话线程要它的目录，连同请求交给这条连接的 git
+    /// 工作线程，见 `git` 模块。
+    fn git(&mut self, req: u32, id: SessionId, request: GitRequest) {
+        let Some(slot) = self.waiting.enter() else {
+            self.error(Some(req), None, "too many requests are waiting for an answer".into());
+            return;
+        };
+        let (reply, info) = mpsc::channel();
+        if !self.shared.deliver(id, Inbox::Info(reply)) {
+            self.error(Some(req), None, format!("no session {id}"));
+            return;
+        }
+        if self.git.is_none() {
+            match GitWorker::start() {
+                Ok(worker) => self.git = Some(worker),
+                Err(err) => {
+                    self.error(Some(req), None, format!("failed to start git: {err}"));
+                    return;
+                }
+            }
+        }
+        let job = Job { req, id, request, info, out: self.out.clone(), slot };
+        if let Some(worker) = &self.git
+            && let Err(job) = worker.submit(job)
+        {
+            self.git = None;
+            self.error(Some(job.req), None, "the git worker stopped".into());
+        }
     }
 
     /// 这条连接要对会话做 `action`，先告诉会话谁在操作它（见 `SessionMeta::driver`）：桌面的

@@ -5213,6 +5213,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "libc",
+ "runode-git",
  "runode-protocol",
  "runode-shared-types",
  "runode-terminal",

@@ -82,6 +82,10 @@ impl Repo {
     /// 切到 `branch`。远端分支：已经有同名的本地分支就切过去，否则新建一个跟踪它的本地分支。
     /// 工作区的改动和目标分支冲突时报 git 的错。
     pub fn checkout(&self, branch: &Branch) -> Result {
+        // 名字原样交给 `git switch`，`-` 开头的会被当成选项。
+        if branch.name.starts_with('-') {
+            return Err(GitError::new(format!("不是分支名：{}", branch.name)));
+        }
         if !branch.remote {
             return run(&self.root, ["switch", &branch.name], None).map(drop);
         }

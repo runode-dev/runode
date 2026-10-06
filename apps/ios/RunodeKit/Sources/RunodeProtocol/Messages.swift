@@ -64,7 +64,7 @@ public enum ClientKind: Hashable, Sendable, Codable {
 }
 
 /// 前端发给宿主的消息。只列出手机这个前端会发的几种：`Hello`、`ListSessions`、`Spawn`、`Attach`、
-/// `Detach`、`Resize`、`Focus`、`ClearScreen`、`Kill`、`ReadScreen`、`SendKeys`、`Paste`。JSON 的样子和
+/// `Detach`、`Resize`、`Focus`、`ClearScreen`、`Kill`、`ReadScreen`、`SendKeys`、`Paste`、`Git`。JSON 的样子和
 /// 宿主的 `ClientMsg` 一致，可缺省的字段也照宿主序列化的样子写出 `null`。宿主对手机连接上的 `Shutdown`、
 /// 交接（`Handoff` 等）、`UiReply`、`SetOptions`、`SetTheme` 只回 `Error`，这里故意不定义它们，手机就
 /// 发不出去。
@@ -93,6 +93,9 @@ public enum ClientMsg: Hashable, Sendable, Encodable {
     case sendKeys(req: UInt32, id: SessionId, keys: [String])
     /// 粘贴一段文字，程序开着括号粘贴时宿主套上括号，回 `Done`。不用连上会话。
     case paste(req: UInt32, id: SessionId, text: String)
+    /// 在会话 shell 当前所在的仓库里读写 git，回 `GitStatus`、`GitDiff` 或 `GitBranches`；办不了时回
+    /// 只带 `req`、不带会话 `id` 的 `Error`。一条连接上的这些请求宿主按先后一件一件办。
+    case git(req: UInt32, id: SessionId, request: GitRequest)
 
     private struct Key: CodingKey {
         var stringValue: String
@@ -162,6 +165,11 @@ public enum ClientMsg: Hashable, Sendable, Encodable {
             try c.encode(req, forKey: Key("req"))
             try c.encode(id, forKey: Key("id"))
             try c.encode(text, forKey: Key("text"))
+        case let .git(req, id, request):
+            try c.encode("git", forKey: Key("type"))
+            try c.encode(req, forKey: Key("req"))
+            try c.encode(id, forKey: Key("id"))
+            try c.encode(request, forKey: Key("request"))
         }
     }
 }
@@ -263,6 +271,12 @@ public enum HostMsg: Hashable, Sendable, Decodable {
     case done(req: UInt32)
     case screenText(id: SessionId, text: String, truncated: Bool)
     case layout(req: UInt32)
+    /// 回 `Git` 里读状态和改仓库的操作：办完以后仓库的样子；会话的目录不在 git 仓库里时为空。
+    case gitStatus(req: UInt32, id: SessionId, status: GitStatus?)
+    /// 回 `GitRequest.diff`；这个文件在那一段里已经没有改动时为空。
+    case gitDiff(req: UInt32, id: SessionId, diff: GitFileDiff?)
+    /// 回 `GitRequest.branches`：本地分支在前，远端分支在后，各按最近一次提交的时间倒序。
+    case gitBranches(req: UInt32, id: SessionId, branches: [GitBranch])
     case uiRequest(ui: UInt64)
     case error(req: UInt32?, id: SessionId?, message: String)
     case goodbye(GoodbyeReason)
@@ -297,6 +311,10 @@ public enum HostMsg: Hashable, Sendable, Decodable {
         }
     }
 
+    /// 宿主收到不认识的消息时回的 `Error` 的说明（不带请求编号）。手机发了比电脑上的 runode 新的消息时
+    /// 据此知道它太旧。
+    public static let unknownMessage = "unknown message"
+
     /// 这条消息说的是哪个会话；不针对某个会话的消息为空。
     public var sessionId: SessionId? {
         switch self {
@@ -312,7 +330,7 @@ public enum HostMsg: Hashable, Sendable, Decodable {
 
     private enum Keys: String, CodingKey {
         case type, `protocol`, build, reason, sessions, req, id, channel, size, mode, meta, settings, command
-        case status, text, truncated, ui, message, format, mine, owner, standalone
+        case status, text, truncated, ui, message, format, mine, owner, standalone, diff, branches
         case hostPid = "host_pid"
         case snapshotFormat = "snapshot_format"
     }
@@ -378,6 +396,21 @@ public enum HostMsg: Hashable, Sendable, Decodable {
                 truncated: try c.decodeIfPresent(Bool.self, forKey: .truncated) ?? false)
         case "layout":
             self = .layout(req: try c.decode(UInt32.self, forKey: .req))
+        case "git_status":
+            self = .gitStatus(
+                req: try c.decode(UInt32.self, forKey: .req),
+                id: try c.decode(SessionId.self, forKey: .id),
+                status: try c.decodeIfPresent(GitStatus.self, forKey: .status))
+        case "git_diff":
+            self = .gitDiff(
+                req: try c.decode(UInt32.self, forKey: .req),
+                id: try c.decode(SessionId.self, forKey: .id),
+                diff: try c.decodeIfPresent(GitFileDiff.self, forKey: .diff))
+        case "git_branches":
+            self = .gitBranches(
+                req: try c.decode(UInt32.self, forKey: .req),
+                id: try c.decode(SessionId.self, forKey: .id),
+                branches: try c.decode([GitBranch].self, forKey: .branches))
         case "ui_request":
             self = .uiRequest(ui: try c.decode(UInt64.self, forKey: .ui))
         case "error":
