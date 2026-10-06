@@ -1,12 +1,14 @@
 //! 应用图标与「关于 Runode」面板。
 
-/// 应用图标，由矢量源图渲染成 PNG 后编进二进制。
+/// 应用图标，由矢量源图渲染成 256×256 的 PNG 后编进二进制，只给未打包运行时用。
+/// 不用 1024 的大图：Dock 图标最大也就 128 点（Retina 下 256 像素），而设成应用图标时
+/// AppKit 按原尺寸栅格化。实测未打包运行时换成 256 的，开窗早了四十毫秒左右，静置后的
+/// phys_footprint 少了约 30 MiB。
 #[cfg(target_os = "macos")]
 const ICON_PNG: &[u8] = include_bytes!("../assets/icon.png");
 
 /// 设置 Dock 和关于面板用的应用图标。程序还没打包成 .app 时系统找不到图标文件，
-/// 只能在启动时显式设置；打包后系统直接用 bundle 里的图标，这里什么都不做——
-/// 解码这张大图要几十毫秒，不该拖慢启动。
+/// 只能在启动时显式设置；打包后系统直接用 bundle 里的图标，这里什么都不做。
 #[cfg(target_os = "macos")]
 pub fn install_icon() {
     use objc2::{AllocAnyThread as _, MainThreadMarker};
