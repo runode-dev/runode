@@ -21,6 +21,14 @@ impl TerminalView {
         let wanted = self.config.command_suggestions || self.config.command_highlighting;
         // 只在正看着时读：冻结着的屏幕上的输入接不上 shell 了。
         let input = if wanted { self.screen.live().and_then(Session::prompt_input) } else { None };
+        // 高亮只按名字查命令，不列 PATH 里的目录；第一次按 Tab 补命令名要的整份列表在后台先列好。
+        if self.config.command_completions
+            && input.is_some()
+            && let Some(session) = self.screen.live()
+        {
+            let path = session.shell_path().or_else(|| std::env::var_os("PATH")).unwrap_or_default();
+            runode_completion::warm_executables(&path);
+        }
         self.refresh_suggestion(input.as_ref());
         self.refresh_highlight(input.as_ref());
     }

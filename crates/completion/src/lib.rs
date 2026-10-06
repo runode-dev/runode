@@ -20,7 +20,7 @@ use runode_shared_types::shell::ShellNames;
 pub use warp_command_signatures::GeneratorResults;
 use warp_command_signatures::{PathSuggestionType, Suggestion, TemplateType};
 
-pub use commands::is_command;
+pub use commands::{is_command, warm_executables};
 pub use engine::{Candidate, Edit, Kind, common_prefix, decisive, highlight, rank};
 use engine::{Plan, Source};
 use line::Segment;
