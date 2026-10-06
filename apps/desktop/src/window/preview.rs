@@ -6,9 +6,13 @@
 //!
 //! 从 Git 面板点开的是 diff 标签，和同一个文件的普通标签分开，见 `diff`。
 //!
-//! 读文件、判断类型和高亮在 `runode_preview`，这里只管状态、后台任务和画。
+//! 读文件、判断类型和高亮在 `runode_preview`，这里只管状态、后台任务和画：标签条在 `tabs`，正文的
+//! 行和图片在 `body`，行号旁的改动标记在 `marks`。
 
+mod body;
 mod diff;
+mod marks;
+mod tabs;
 
 use std::{
     collections::HashMap,
@@ -23,168 +27,38 @@ use std::{
 };
 
 use gpui::{
-    Action, AnyElement, App, Axis, Bounds, ClipboardItem, Context, Div, Focusable as _, FontStyle, FontWeight,
-    HighlightStyle, Hsla, Image, ImageSource, ListHorizontalSizingBehavior, MouseButton, MouseDownEvent,
-    MouseMoveEvent, Pixels, Point, RenderImage, SMOOTH_SVG_SCALE_FACTOR, ScrollHandle, SharedString, Stateful,
-    StyledText, SvgRenderer, UniformListScrollHandle, Window, actions, canvas, div, fill, img, linear_color_stop,
-    linear_gradient, point, prelude::*, px, size, svg, uniform_list,
+    App, ClipboardItem, Context, Div, Focusable as _, Image, ImageSource, MouseButton, MouseMoveEvent, RenderImage,
+    SMOOTH_SVG_SCALE_FACTOR, SharedString, Stateful, SvgRenderer, UniformListScrollHandle, Window, div, prelude::*, px,
 };
-use runode_git::{self as git, FileStatus, LineKind, Section};
+use runode_git::{self as git, FileStatus, Section};
 use runode_preview::{Content, ImageFormat, Span};
-use runode_shared_types::{color::Rgb, theme};
+use runode_shared_types::color::Rgb;
 
 pub(in crate::window) use diff::DiffTarget;
+pub(in crate::window) use tabs::PreviewTabs;
 
 use super::{
-    CloseTab, TITLEBAR_HEIGHT, WindowView, divider_color,
-    files::menu_item,
-    project::{ADDED, MODIFIED, PANEL_TOGGLES_INSET, REMOVED, RENAMED, panel_message, panel_shell, status_color},
-    titlebar::{close_button, drag_chip},
+    WindowView,
+    project::{PANEL_TOGGLES_INSET, panel_shell},
 };
 use crate::{
-    assets::DIFF_ICON,
     config::AppConfig,
     ui::{
         actions::{Copy, SelectAll},
-        file_icons::file_icon,
         hsla,
-        scrollbar::scrollbar,
-        tooltip::tooltip,
     },
 };
-
-actions!(
-    runode,
-    [
-        /// 关掉当前以外的预览标签。
-        CloseOtherPreviews,
-        /// 关掉当前预览标签右边的所有标签。
-        ClosePreviewsToRight,
-        CloseAllPreviews,
-        /// 把临时的预览标签固定下来，不再被下一个打开的文件换掉。
-        KeepPreviewOpen
-    ]
-);
+use marks::{Mark, line_marks};
+use tabs::tab_underline;
 
 /// 行高比字号多出的部分。
 const ROW_EXTRA_HEIGHT: f32 = 8.;
 /// 一行最多画这么多列，再长的截掉；复制时仍是整行。
 const MAX_COLUMNS: usize = 2000;
-/// 改动标记的宽度；只删了行的地方在下一行顶上画一小段，这么高。
-const MARK_WIDTH: f32 = 3.;
-const REMOVED_MARK_HEIGHT: f32 = 5.;
-/// 预览标签最宽这么宽，名字再长就截断。
-const TAB_MAX_WIDTH: f32 = 180.;
-/// 拖动预览标签时跟着鼠标的卡片宽度。
-const DRAG_CHIP_WIDTH: f32 = 140.;
-/// 当前标签顶上那条强调色细线的粗细。
-const TAB_ACCENT_HEIGHT: f32 = 2.;
 /// 正文上下留的空。
 const BODY_PADDING: f32 = 6.;
 /// 长行右边缘渐隐的宽度。
 const FADE_WIDTH: f32 = 24.;
-
-/// 标签条底下的分隔线，叠在不是当前标签的标签和标签后面的空白底部。
-fn tab_underline(fg: Rgb) -> Div {
-    div().absolute().bottom_0().left_0().w_full().h(px(1.)).bg(divider_color(hsla(fg)))
-}
-
-/// 预览栏的标签：一个文件一个，没固定的临时标签最多一个。没有标签时预览栏不显示。不进存档。
-#[derive(Default)]
-pub(in crate::window) struct PreviewTabs {
-    pub tabs: Vec<Preview>,
-    /// 当前显示的标签。
-    pub active: usize,
-    /// 标签条的横向滚动位置。
-    pub scroll: ScrollHandle,
-}
-
-impl PreviewTabs {
-    pub fn active(&self) -> Option<&Preview> {
-        self.tabs.get(self.active)
-    }
-
-    fn active_mut(&mut self) -> Option<&mut Preview> {
-        self.tabs.get_mut(self.active)
-    }
-
-    /// 打开 `path`（`diff` 不为空时是它的 diff）并切过去，`pin` 时固定下来。已经开着就切过去；
-    /// 没开着时换掉临时标签，没有临时标签就插在当前标签右边。返回被换掉的临时标签。
-    fn open(&mut self, path: &Path, diff: Option<DiffTarget>, pin: bool) -> Option<Preview> {
-        if let Some(ix) = self.tabs.iter().position(|tab| tab.path == path && tab.diff == diff) {
-            self.active = ix;
-            self.tabs[ix].pinned |= pin;
-            return None;
-        }
-        let tab = Preview::new(path.to_path_buf(), diff, pin);
-        if let Some(ix) = self.tabs.iter().position(|tab| !tab.pinned) {
-            self.active = ix;
-            return Some(std::mem::replace(&mut self.tabs[ix], tab));
-        }
-        let ix = if self.tabs.is_empty() { 0 } else { self.active + 1 };
-        self.tabs.insert(ix, tab);
-        self.active = ix;
-        None
-    }
-
-    /// 只留下 `keep` 为真的标签，返回关掉的。当前标签关掉时切到它右边的那个，右边没有了就切到
-    /// 最后一个。
-    fn retain(&mut self, mut keep: impl FnMut(usize, &Preview) -> bool) -> Vec<Preview> {
-        let mut kept_before_active = 0;
-        let (mut kept, mut closed) = (Vec::new(), Vec::new());
-        for (ix, tab) in std::mem::take(&mut self.tabs).into_iter().enumerate() {
-            if keep(ix, &tab) {
-                kept_before_active += usize::from(ix < self.active);
-                kept.push(tab);
-            } else {
-                closed.push(tab);
-            }
-        }
-        self.tabs = kept;
-        self.active = kept_before_active.min(self.tabs.len().saturating_sub(1));
-        closed
-    }
-
-    /// 把第 `from` 个标签挪到第 `to` 个位置并切过去。
-    fn move_tab(&mut self, from: usize, to: usize) {
-        if from >= self.tabs.len() {
-            return;
-        }
-        let tab = self.tabs.remove(from);
-        let to = to.min(self.tabs.len());
-        self.tabs.insert(to, tab);
-        self.active = to;
-    }
-
-    /// `from` 改了名或挪到了 `to`：它和它下面的文件的标签换成新路径，固定与否不变。返回换下来的
-    /// 旧标签。diff 标签不跟，扫描到新的改动时它自己会重读。
-    fn moved(&mut self, from: &Path, to: &Path) -> Vec<Preview> {
-        let mut old = Vec::new();
-        for tab in self.tabs.iter_mut().filter(|tab| tab.diff.is_none()) {
-            if let Ok(rest) = tab.path.strip_prefix(from) {
-                let new = Preview::new(to.join(rest), None, tab.pinned);
-                old.push(std::mem::replace(tab, new));
-            }
-        }
-        old
-    }
-}
-
-/// 拖动中的预览标签：跟着鼠标画出来，放到另一个标签上时挪过去。
-#[derive(Clone)]
-struct DraggedPreviewTab {
-    /// 开始拖动时所在的位置：挪的是这个标签，落点提示也按它画在目标标签的哪一边。
-    ix: usize,
-    name: SharedString,
-    fg: Hsla,
-    bg: Hsla,
-}
-
-impl Render for DraggedPreviewTab {
-    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
-        drag_chip(px(DRAG_CHIP_WIDTH), px(TITLEBAR_HEIGHT), self.name.clone(), self.fg, self.bg)
-    }
-}
 
 /// 预览栏打开的文件和读到的内容。
 pub(in crate::window) struct Preview {
@@ -384,10 +258,6 @@ fn gpui_format(format: ImageFormat) -> gpui::ImageFormat {
 /// SVG 按自身尺寸画太小时（图标常是 16×16）放大到长边有这么多逻辑像素，放大是重画不是拉伸，
 /// 线条照样清楚。
 const SVG_MIN_SIDE: f32 = 256.;
-/// 图片底下棋盘格的两种颜色和格子边长。
-const CHECKER_LIGHT: Rgb = Rgb(0xFF, 0xFF, 0xFF);
-const CHECKER_DARK: Rgb = Rgb(0xE4, 0xE4, 0xE4);
-const CHECKER_CELL: f32 = 8.;
 
 /// 画 SVG：先按自身尺寸画，太小的按 `SVG_MIN_SIDE` 再画一遍。
 fn render_svg(renderer: &SvgRenderer, bytes: &[u8]) -> Result<Arc<RenderImage>, String> {
@@ -422,115 +292,6 @@ fn loaded(content: Content, svg: &SvgRenderer) -> Loaded {
 /// 字符数最多的那一行；等宽字体下它最宽。
 fn widest_line(lines: &[String]) -> usize {
     lines.iter().enumerate().max_by_key(|(_, line)| line.chars().count().min(MAX_COLUMNS)).map_or(0, |(ix, _)| ix)
-}
-
-/// 行号旁的改动标记。
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(in crate::window) enum Mark {
-    Added,
-    Modified,
-    /// 这一行上面删掉了行。
-    Removed,
-}
-
-/// 一个文件的改动换算成新文件里每一行的标记，键是从 1 数的行号。一串连着的删除和新增里，
-/// 有删除的新增行算修改；只删不增的标在删除处的下一行，删在末尾时标在新文件的最后一行之后。
-fn diff_marks(diff: &git::FileDiff) -> HashMap<u32, Mark> {
-    let mut marks = HashMap::new();
-    for hunk in &diff.hunks {
-        let mut removed = 0;
-        let mut added = Vec::new();
-        let mut last_new = 0;
-        let flush = |removed: &mut usize, added: &mut Vec<u32>, next: u32, marks: &mut HashMap<u32, Mark>| {
-            if added.is_empty() && *removed > 0 {
-                marks.entry(next.max(1)).or_insert(Mark::Removed);
-            }
-            let mark = if *removed > 0 { Mark::Modified } else { Mark::Added };
-            for line in added.drain(..) {
-                marks.insert(line, mark);
-            }
-            *removed = 0;
-        };
-        for line in &hunk.lines {
-            match line.kind {
-                LineKind::Removed => removed += 1,
-                LineKind::Added => added.extend(line.new),
-                LineKind::Context => flush(&mut removed, &mut added, line.new.unwrap_or(last_new + 1), &mut marks),
-            }
-            if let Some(new) = line.new {
-                last_new = new;
-            }
-        }
-        flush(&mut removed, &mut added, last_new + 1, &mut marks);
-    }
-    marks
-}
-
-/// 暂存区里的第 `line` 行在工作区里是第几行；工作区里删掉了就为空。`unstaged` 是工作区相对
-/// 暂存区的改动。
-fn index_to_worktree(unstaged: &git::FileDiff, line: u32) -> Option<u32> {
-    let mut delta: i64 = 0;
-    for diff_line in unstaged.hunks.iter().flat_map(|hunk| &hunk.lines) {
-        match diff_line.old {
-            Some(old) if old == line => {
-                return if diff_line.kind == LineKind::Context { diff_line.new } else { None };
-            }
-            Some(old) if old > line => break,
-            _ => {}
-        }
-        match diff_line.kind {
-            LineKind::Added => delta += 1,
-            LineKind::Removed => delta -= 1,
-            LineKind::Context => {}
-        }
-    }
-    u32::try_from(i64::from(line) + delta).ok().filter(|line| *line > 0)
-}
-
-/// 工作区里这个文件相对 HEAD 改了哪些行：未暂存的改动直接用，已暂存的换算到工作区的行号上。
-fn line_marks(snapshot: &git::Snapshot, rel: &Path) -> HashMap<u32, Mark> {
-    let find = |section: Section| snapshot.files(section).iter().find(|file| file.path == rel);
-    let unstaged = find(Section::Unstaged);
-    let mut marks = HashMap::new();
-    if let Some(staged) = find(Section::Staged) {
-        for (line, mark) in diff_marks(staged) {
-            let line = match unstaged {
-                Some(unstaged) => index_to_worktree(unstaged, line),
-                None => Some(line),
-            };
-            if let Some(line) = line {
-                marks.insert(line, mark);
-            }
-        }
-    }
-    if let Some(unstaged) = unstaged {
-        marks.extend(diff_marks(unstaged));
-    }
-    marks
-}
-
-/// 当前终端主题的 ANSI 16 色：默认配色上盖上配置里改过的那几项。
-fn ansi_palette(cx: &App) -> [Rgb; 16] {
-    let mut colors = theme::ANSI;
-    for &(ix, rgb) in &cx.global::<AppConfig>().0.palette {
-        if let Some(slot) = colors.get_mut(usize::from(ix)) {
-            *slot = rgb;
-        }
-    }
-    colors
-}
-
-fn highlight_style(style: runode_preview::Style, fg: Rgb, palette: &[Rgb; 16]) -> HighlightStyle {
-    let color = match style.color {
-        runode_preview::Color::Foreground => fg,
-        runode_preview::Color::Ansi(ix) => palette[usize::from(ix.min(15))],
-    };
-    HighlightStyle {
-        color: Some(hsla(color)),
-        font_weight: style.bold.then_some(FontWeight::BOLD),
-        font_style: style.italic.then_some(FontStyle::Italic),
-        ..HighlightStyle::default()
-    }
 }
 
 impl WindowView {
@@ -651,47 +412,6 @@ impl WindowView {
         {
             self.load_preview(cx);
         }
-    }
-
-    fn close_preview_tab(&mut self, _: &CloseTab, window: &mut Window, cx: &mut Context<Self>) {
-        let active = self.workspace().project.previews.active;
-        self.retain_previews(|ix, _| ix != active, window, cx);
-    }
-
-    fn close_other_previews(&mut self, _: &CloseOtherPreviews, window: &mut Window, cx: &mut Context<Self>) {
-        let active = self.workspace().project.previews.active;
-        self.retain_previews(|ix, _| ix == active, window, cx);
-    }
-
-    fn close_previews_to_right(&mut self, _: &ClosePreviewsToRight, window: &mut Window, cx: &mut Context<Self>) {
-        let active = self.workspace().project.previews.active;
-        self.retain_previews(|ix, _| ix <= active, window, cx);
-    }
-
-    fn close_all_previews(&mut self, _: &CloseAllPreviews, window: &mut Window, cx: &mut Context<Self>) {
-        self.retain_previews(|_, _| false, window, cx);
-    }
-
-    fn keep_preview_open(&mut self, _: &KeepPreviewOpen, _: &mut Window, cx: &mut Context<Self>) {
-        if let Some(preview) = self.preview_mut() {
-            preview.pinned = true;
-            cx.notify();
-        }
-    }
-
-    /// 把第 `from` 个标签挪到第 `to` 个位置并切过去。
-    fn move_preview(&mut self, from: usize, to: usize, cx: &mut Context<Self>) {
-        let previews = &mut self.workspace_mut().project.previews;
-        if from >= previews.tabs.len() {
-            return;
-        }
-        let before = previews.active().map(|tab| (tab.path.clone(), tab.diff.clone()));
-        previews.move_tab(from, to);
-        let new = previews.active;
-        // 先指回原来的当前标签，`activate_preview` 才知道换下去的是哪个。
-        previews.active =
-            previews.tabs.iter().position(|tab| Some((tab.path.clone(), tab.diff.clone())) == before).unwrap_or(new);
-        self.activate_preview(new, cx);
     }
 
     /// 在后台读当前 workspace 预览的文件，读完换上；是文本时接着在后台高亮。diff 标签读 diff。
@@ -864,94 +584,7 @@ impl WindowView {
             .relative()
             .child(tab_underline(fg));
         let header = self.panel_header(false, fg).border_b_0().px_0().gap_0().child(strip).child(filler);
-        let body: AnyElement = match &preview.content {
-            None => div().flex_1().into_any_element(),
-            Some(Loaded::Note(note)) => {
-                let text = match note {
-                    Note::Binary => rust_i18n::t!("preview.binary").into_owned(),
-                    Note::TooLarge => rust_i18n::t!("preview.too_large").into_owned(),
-                    Note::Unreadable(err) => rust_i18n::t!("preview.unreadable", error = err).into_owned(),
-                    Note::NoChanges => rust_i18n::t!("preview.diff.no_changes").into_owned(),
-                    Note::NoContent => rust_i18n::t!("panel.no_content").into_owned(),
-                    Note::DiffTooLarge => rust_i18n::t!("preview.diff.too_large").into_owned(),
-                };
-                panel_message(text, fg).into_any_element()
-            }
-            Some(Loaded::Image(image)) => div()
-                .flex_1()
-                .min_h_0()
-                .p(px(12.))
-                .flex()
-                .justify_center()
-                .items_start()
-                .child(img(image.clone()).max_w_full().max_h_full())
-                .into_any_element(),
-            Some(Loaded::Svg(image)) => {
-                // 宽了就按预览栏的宽度等比缩小；高了能上下滚。
-                let size = image.size(0);
-                let (w, h) =
-                    (size.width.0 as f32 / SMOOTH_SVG_SCALE_FACTOR, size.height.0 as f32 / SMOOTH_SVG_SCALE_FACTOR);
-                let fit = ((width - 24.) / w).min(1.);
-                div()
-                    .id("preview-svg")
-                    .flex_1()
-                    .min_h_0()
-                    .overflow_y_scroll()
-                    .p(px(12.))
-                    .flex()
-                    .justify_center()
-                    .items_start()
-                    .child(
-                        div()
-                            .flex_none()
-                            .relative()
-                            .w(px(w * fit))
-                            .h(px(h * fit))
-                            .child(checkerboard())
-                            .child(img(ImageSource::Render(image.clone())).absolute().size_full()),
-                    )
-                    .into_any_element()
-            }
-            Some(Loaded::Diff(content)) => self.render_diff_body(content, font, font_size, fg, bg, cx),
-            Some(Loaded::Text { lines, truncated, widest, .. }) => {
-                let count = lines.len() + usize::from(*truncated);
-                let digits = lines.len().to_string().len();
-                // 行号一栏按位数定宽，等宽字体一个数字大约 0.6 个字号宽。
-                let gutter = (digits as f32 * font_size * 0.62 + 16.).ceil();
-                let list = uniform_list(
-                    "preview",
-                    count,
-                    cx.processor(move |this, range: Range<usize>, _, cx| {
-                        this.render_preview_rows(range, font_size, gutter, fg, bg, cx)
-                    }),
-                )
-                .with_width_from_item(Some(*widest))
-                .with_horizontal_sizing_behavior(ListHorizontalSizingBehavior::Unconstrained)
-                .track_scroll(&preview.scroll)
-                .size_full()
-                .py(px(BODY_PADDING))
-                .font_family(font);
-                let handle = preview.scroll.0.borrow().base_handle.clone();
-                // 长行往右还有内容时，右边缘渐隐，提示能横着滚。
-                let (offset, max) = (handle.offset().x, handle.max_offset().x);
-                let fade = (max > px(1.) && -offset < max - px(1.)).then(|| {
-                    div().absolute().top_0().right_0().h_full().w(px(FADE_WIDTH)).bg(linear_gradient(
-                        90.,
-                        linear_color_stop(hsla(bg).opacity(0.), 0.),
-                        linear_color_stop(hsla(bg), 1.),
-                    ))
-                });
-                div()
-                    .flex_1()
-                    .min_h_0()
-                    .relative()
-                    .child(list)
-                    .children(fade)
-                    .child(scrollbar("preview-scroll-y", handle.clone(), Axis::Vertical, hsla(fg)))
-                    .child(scrollbar("preview-scroll-x", handle, Axis::Horizontal, hsla(fg)))
-                    .into_any_element()
-            }
-        };
+        let body = self.render_preview_body(preview, width, font, fg, bg, cx);
         Some(
             panel_shell("preview-panel", width, fg)
                 .key_context("Preview")
@@ -970,440 +603,16 @@ impl WindowView {
                 .child(body),
         )
     }
-
-    /// 第 `ix` 个预览标签：文件图标和名字，名字按 git 状态上色，临时标签用斜体；当前标签和
-    /// 悬停着的标签显示关闭按钮。
-    fn render_preview_tab(&self, ix: usize, fg: Rgb, bg: Rgb, cx: &mut Context<Self>) -> Stateful<Div> {
-        let previews = &self.workspace().project.previews;
-        let tab = &previews.tabs[ix];
-        let active = ix == previews.active;
-        let name = tab.name();
-        let active_bg = hsla(bg.mix(fg, 0.08));
-        let hover_bg = hsla(bg.mix(fg, 0.04));
-        let underline = tab_underline(fg);
-        let close_tooltip = tooltip(rust_i18n::t!("tooltip.close_preview"), None, fg, bg);
-        let path_tooltip = tooltip(SharedString::from(tab.path.display().to_string()), None, fg, bg);
-        let fg = hsla(fg);
-        let color = tab.status.map_or(fg, |status| hsla(status_color(status)));
-        let group = SharedString::from(format!("preview-tab-{ix}"));
-        let dragged = DraggedPreviewTab { ix, name: name.clone(), fg, bg: active_bg };
-        // diff 标签的图标是 diff 的样子，不是文件类型的。
-        let icon = match &tab.diff {
-            Some(_) => svg().path(DIFF_ICON).flex_none().size(px(14.)).text_color(fg.opacity(0.8)).into_any_element(),
-            None => img(file_icon(&tab.file_name())).flex_none().size(px(14.)).into_any_element(),
-        };
-        div()
-            .id(("preview-tab", ix))
-            .group(group.clone())
-            .flex_none()
-            .max_w(px(TAB_MAX_WIDTH))
-            .h_full()
-            .pl(px(10.))
-            .pr(px(4.))
-            .flex()
-            .items_center()
-            .gap(px(6.))
-            .relative()
-            .border_r_1()
-            .border_color(divider_color(fg))
-            // 当前标签顶上一条强调色，底下不画分隔线，和正文连成一块；别的标签悬停时稍亮。
-            .map(|tab| {
-                if active {
-                    tab.child(div().absolute().top_0().left_0().w_full().h(px(TAB_ACCENT_HEIGHT)).bg(hsla(RENAMED)))
-                } else {
-                    tab.hover(|tab| tab.bg(hover_bg)).child(underline)
-                }
-            })
-            .child(div().flex_none().flex().when(!active, |icon| icon.opacity(0.6)).child(icon))
-            .child(
-                div()
-                    .id(("preview-tab-name", ix))
-                    .min_w_0()
-                    .truncate()
-                    .text_color(if active { color } else { color.opacity(0.6) })
-                    .when(!tab.pinned, |name| name.italic())
-                    .child(name)
-                    .tooltip(path_tooltip),
-            )
-            .child(
-                close_button(("preview-tab-close", ix), fg)
-                    .flex_none()
-                    .when(!active, |close| close.invisible().group_hover(group, |close| close.visible()))
-                    .tooltip(close_tooltip)
-                    .on_mouse_down(
-                        MouseButton::Left,
-                        cx.listener(move |this, _, window, cx| {
-                            cx.stop_propagation();
-                            this.retain_previews(|i, _| i != ix, window, cx);
-                        }),
-                    ),
-            )
-            // 标题栏按下会拖动窗口，标签自己接住。双击把临时标签固定下来。
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(move |this, event: &MouseDownEvent, window, cx| {
-                    cx.stop_propagation();
-                    window.focus(&this.preview_focus, cx);
-                    if event.click_count >= 2
-                        && let Some(tab) = this.workspace_mut().project.previews.tabs.get_mut(ix)
-                    {
-                        tab.pinned = true;
-                    }
-                    this.activate_preview(ix, cx);
-                }),
-            )
-            .on_mouse_down(
-                MouseButton::Middle,
-                cx.listener(move |this, _, window, cx| {
-                    cx.stop_propagation();
-                    this.retain_previews(|i, _| i != ix, window, cx);
-                }),
-            )
-            // 右键先切到这个标签，菜单里的操作都对着当前标签。
-            .on_mouse_down(
-                MouseButton::Right,
-                cx.listener(move |this, event: &MouseDownEvent, window, cx| {
-                    cx.stop_propagation();
-                    window.focus(&this.preview_focus, cx);
-                    this.activate_preview(ix, cx);
-                    this.open_preview_menu(event.position, cx);
-                }),
-            )
-            .on_drag(dragged, |dragged, _, _, cx| cx.new(|_| dragged.clone()))
-            // 落点提示画在目标标签靠近原位置的另一侧：往右拖插到它右边，往左拖插到它左边。
-            .drag_over::<DraggedPreviewTab>(move |style, dragged, _, _| {
-                let marker = fg.opacity(0.6);
-                if dragged.ix < ix {
-                    style.border_r_2().border_color(marker)
-                } else if dragged.ix > ix {
-                    style.border_l_2().border_color(marker)
-                } else {
-                    style
-                }
-            })
-            .on_drop(cx.listener(move |this, dragged: &DraggedPreviewTab, _, cx| {
-                this.move_preview(dragged.ix, ix, cx);
-            }))
-    }
-
-    /// 在 `position` 弹出当前预览标签的右键菜单。
-    fn open_preview_menu(&mut self, position: Point<Pixels>, cx: &mut Context<Self>) {
-        let previews = &self.workspace().project.previews;
-        let (count, active) = (previews.tabs.len(), previews.active);
-        let pinned = previews.active().is_some_and(|tab| tab.pinned);
-        let item = |key: &str, action: Box<dyn Action>, enabled: bool| Some(menu_item(key, action, enabled, cx));
-        let mut items = vec![
-            item("preview.close", Box::new(CloseTab), true),
-            item("preview.close_others", Box::new(CloseOtherPreviews), count > 1),
-            item("preview.close_right", Box::new(ClosePreviewsToRight), active + 1 < count),
-            item("preview.close_all", Box::new(CloseAllPreviews), true),
-        ];
-        if !pinned {
-            items.extend([None, item("preview.keep_open", Box::new(KeepPreviewOpen), true)]);
-        }
-        let target = self.preview_focus.clone();
-        self.open_menu(position, items, target, cx);
-    }
-
-    /// 预览栏的行，行高跟着字号 `font_size` 缩放。
-    fn render_preview_rows(
-        &self,
-        range: Range<usize>,
-        font_size: f32,
-        gutter: f32,
-        fg: Rgb,
-        bg: Rgb,
-        cx: &mut Context<Self>,
-    ) -> Vec<AnyElement> {
-        let Some(preview) = self.preview() else {
-            return Vec::new();
-        };
-        let Some(Loaded::Text { lines, highlights, .. }) = &preview.content else {
-            return Vec::new();
-        };
-        let marks = &preview.marks;
-        let palette = ansi_palette(cx);
-        let selected = preview.selected_lines().unwrap_or(0..0);
-        let selected_bg = hsla(bg.mix(RENAMED, 0.30));
-        let dim = hsla(fg).opacity(0.4);
-        let last = lines.len();
-        let row_height = font_size + ROW_EXTRA_HEIGHT;
-        range
-            .map(|ix| {
-                let row = div().flex_none().h(px(row_height)).w_full().flex().items_center().whitespace_nowrap();
-                let Some(line) = lines.get(ix) else {
-                    // 截断了的文件末尾多一行说明。
-                    return row
-                        .pl(px(gutter + MARK_WIDTH + 8.))
-                        .italic()
-                        .text_color(dim)
-                        .child(rust_i18n::t!("preview.truncated", count = last).into_owned())
-                        .into_any_element();
-                };
-                let number = u32::try_from(ix + 1).unwrap_or(u32::MAX);
-                // 删在文件末尾的标记落在最后一行之后，挪到最后一行上。
-                let mark = marks.get(&number).copied().or_else(|| {
-                    (ix + 1 == last)
-                        .then(|| marks.get(&(number + 1)).copied().filter(|m| *m == Mark::Removed))
-                        .flatten()
-                });
-                let marker =
-                    div().flex_none().w(px(MARK_WIDTH)).h_full().flex().flex_col().children(mark.map(|mark| {
-                        let (color, height) = match mark {
-                            Mark::Added => (ADDED, row_height),
-                            Mark::Modified => (MODIFIED, row_height),
-                            Mark::Removed => (REMOVED, REMOVED_MARK_HEIGHT),
-                        };
-                        div().w_full().h(px(height)).bg(hsla(color))
-                    }));
-                let spans = highlights.as_ref().and_then(|all| all.get(ix)).map_or(&[][..], Vec::as_slice);
-                let shown = runode_preview::display_line(line, spans, MAX_COLUMNS);
-                let runs: Vec<_> = shown
-                    .spans
-                    .iter()
-                    .map(|span| (span.range.clone(), highlight_style(span.style, fg, &palette)))
-                    .collect();
-                let mut content = shown.text;
-                if shown.cut {
-                    content.push('…');
-                }
-                row.id(("preview-line", ix))
-                    .when(selected.contains(&ix), |row| row.bg(selected_bg))
-                    .child(marker)
-                    .child(
-                        div()
-                            .flex_none()
-                            .w(px(gutter))
-                            .pr(px(10.))
-                            .flex()
-                            .justify_end()
-                            .text_color(dim)
-                            .child(number.to_string()),
-                    )
-                    .child(
-                        div()
-                            .flex_none()
-                            .pr(px(12.))
-                            .text_color(hsla(fg))
-                            .child(StyledText::new(content).with_highlights(runs)),
-                    )
-                    .on_mouse_down(
-                        MouseButton::Left,
-                        cx.listener(move |this, event: &MouseDownEvent, window, cx| {
-                            this.press_preview_line(ix, event.modifiers.shift, window, cx);
-                        }),
-                    )
-                    .on_mouse_move(cx.listener(move |this, event: &MouseMoveEvent, _, cx| {
-                        this.drag_preview_line(ix, event, cx);
-                    }))
-                    .on_mouse_up(
-                        MouseButton::Left,
-                        cx.listener(|this, _, _, _| {
-                            if let Some(preview) = this.preview_mut() {
-                                preview.selecting = false;
-                            }
-                        }),
-                    )
-                    .into_any_element()
-            })
-            .collect()
-    }
-}
-
-/// 图片底下的棋盘格：透明的地方看得出来，深色背景上黑色的线条也看得清。
-fn checkerboard() -> impl IntoElement {
-    canvas(
-        |_, _, _| {},
-        |bounds, _, window, _| {
-            window.paint_quad(fill(bounds, hsla(CHECKER_LIGHT)));
-            let cell = px(CHECKER_CELL);
-            let (columns, rows) =
-                ((bounds.size.width / cell).ceil() as usize, (bounds.size.height / cell).ceil() as usize);
-            for row in 0..rows {
-                for column in (row % 2..columns).step_by(2) {
-                    let origin = bounds.origin + point(cell * column as f32, cell * row as f32);
-                    let cell_bounds = Bounds::new(origin, size(cell, cell)).intersect(&bounds);
-                    window.paint_quad(fill(cell_bounds, hsla(CHECKER_DARK)));
-                }
-            }
-        },
-    )
-    .absolute()
-    .size_full()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use git::{FileDiff, FileStatus, Hunk, Line};
-    use std::collections::HashSet;
-
-    fn line(kind: LineKind, old: Option<u32>, new: Option<u32>) -> Line {
-        Line { kind, old, new, text: String::new() }
-    }
-
-    fn diff(lines: Vec<Line>) -> FileDiff {
-        FileDiff {
-            path: "a.rs".into(),
-            old_path: None,
-            status: FileStatus::Modified,
-            added: 0,
-            removed: 0,
-            hunks: vec![Hunk { header: String::new(), lines }],
-            binary: false,
-            truncated: false,
-            gitlink: false,
-        }
-    }
-
-    use LineKind::{Added as A, Context as C, Removed as R};
-
-    #[test]
-    fn marks_added_modified_and_removed_lines() {
-        let file = diff(vec![
-            line(C, Some(1), Some(1)),
-            line(R, Some(2), None),
-            line(A, None, Some(2)),
-            line(C, Some(3), Some(3)),
-            line(A, None, Some(4)),
-            line(C, Some(4), Some(5)),
-            line(R, Some(5), None),
-            line(C, Some(6), Some(6)),
-            line(R, Some(7), None),
-        ]);
-        let marks = diff_marks(&file);
-        assert_eq!(marks.get(&2), Some(&Mark::Modified));
-        assert_eq!(marks.get(&4), Some(&Mark::Added));
-        assert_eq!(marks.get(&6), Some(&Mark::Removed));
-        // 删在末尾：标在最后一行之后，画的时候挪到最后一行。
-        assert_eq!(marks.get(&7), Some(&Mark::Removed));
-        assert_eq!(marks.len(), 4);
-    }
-
-    #[test]
-    fn maps_index_lines_through_unstaged_changes() {
-        // 工作区在第 1 行后加了两行，删了原来的第 4 行。
-        let unstaged = diff(vec![
-            line(C, Some(1), Some(1)),
-            line(A, None, Some(2)),
-            line(A, None, Some(3)),
-            line(C, Some(2), Some(4)),
-            line(C, Some(3), Some(5)),
-            line(R, Some(4), None),
-            line(C, Some(5), Some(6)),
-        ]);
-        assert_eq!(index_to_worktree(&unstaged, 1), Some(1));
-        assert_eq!(index_to_worktree(&unstaged, 2), Some(4));
-        assert_eq!(index_to_worktree(&unstaged, 4), None);
-        assert_eq!(index_to_worktree(&unstaged, 5), Some(6));
-        // 改动块之外的行按前面增减的行数平移。
-        assert_eq!(index_to_worktree(&unstaged, 20), Some(21));
-    }
-
-    #[test]
-    fn combines_staged_and_unstaged_marks() {
-        let mut staged = diff(vec![line(C, Some(1), Some(1)), line(A, None, Some(2)), line(C, Some(2), Some(3))]);
-        staged.path = "a.rs".into();
-        let unstaged = diff(vec![line(A, None, Some(1)), line(C, Some(1), Some(2)), line(C, Some(2), Some(3))]);
-        let snapshot = git::Snapshot {
-            root: "/repo".into(),
-            git_dir: "/repo/.git".into(),
-            prefix: PathBuf::new(),
-            kind: git::RepoKind::Main,
-            staged: vec![staged],
-            unstaged: vec![unstaged],
-            statuses: HashMap::new(),
-            ignored: HashSet::new(),
-            info: Default::default(),
-        };
-        let marks = line_marks(&snapshot, Path::new("a.rs"));
-        // 工作区新加的第 1 行，以及暂存区里加的第 2 行，在工作区里是第 3 行。
-        assert_eq!(marks.get(&1), Some(&Mark::Added));
-        assert_eq!(marks.get(&3), Some(&Mark::Added));
-        assert_eq!(marks.len(), 2);
-    }
 
     #[test]
     fn picks_the_widest_line() {
         let lines: Vec<String> = ["ab", "abcd", "中文字"].iter().map(|s| (*s).to_owned()).collect();
         assert_eq!(widest_line(&lines), 1);
         assert_eq!(widest_line(&[]), 0);
-    }
-
-    /// 各标签的文件名，临时标签后面带 `*`，当前标签前面带 `>`。
-    fn tabs(previews: &PreviewTabs) -> Vec<String> {
-        previews
-            .tabs
-            .iter()
-            .enumerate()
-            .map(|(ix, tab)| {
-                let mark = if ix == previews.active { ">" } else { "" };
-                let temp = if tab.pinned { "" } else { "*" };
-                format!("{mark}{}{temp}", tab.path.display())
-            })
-            .collect()
-    }
-
-    #[test]
-    fn temporary_tab_is_replaced_and_pinned_tabs_open_beside_the_active_one() {
-        let mut previews = PreviewTabs::default();
-        assert!(previews.open(Path::new("a"), None, false).is_none());
-        assert_eq!(previews.open(Path::new("b"), None, false).map(|old| old.path.clone()), Some(PathBuf::from("a")));
-        assert_eq!(tabs(&previews), [">b*"]);
-        // 再开已经开着的文件只是切过去，带 `pin` 时固定下来。
-        previews.open(Path::new("b"), None, true);
-        assert_eq!(tabs(&previews), [">b"]);
-        previews.open(Path::new("c"), None, true);
-        previews.open(Path::new("d"), None, false);
-        assert_eq!(tabs(&previews), ["b", "c", ">d*"]);
-        // 开固定标签也先占掉临时标签的位置。
-        previews.open(Path::new("e"), None, true);
-        assert_eq!(tabs(&previews), ["b", "c", ">e"]);
-        // 没有临时标签时插在当前标签右边。
-        previews.active = 0;
-        previews.open(Path::new("f"), None, false);
-        assert_eq!(tabs(&previews), ["b", ">f*", "c", "e"]);
-        // 临时标签不论在哪都被换掉，位置不变。
-        previews.active = 3;
-        previews.open(Path::new("g"), None, false);
-        assert_eq!(tabs(&previews), ["b", ">g*", "c", "e"]);
-    }
-
-    #[test]
-    fn closing_the_active_tab_moves_to_its_right_neighbour() {
-        let mut previews = PreviewTabs::default();
-        for name in ["a", "b", "c", "d"] {
-            previews.open(Path::new(name), None, true);
-        }
-        previews.active = 1;
-        assert_eq!(previews.retain(|ix, _| ix != 1).len(), 1);
-        assert_eq!(tabs(&previews), ["a", ">c", "d"]);
-        // 关掉当前标签左边的，当前标签不变。
-        previews.retain(|ix, _| ix != 0);
-        assert_eq!(tabs(&previews), [">c", "d"]);
-        // 右边没有了切到最后一个。
-        previews.active = 1;
-        previews.retain(|ix, _| ix != 1);
-        assert_eq!(tabs(&previews), [">c"]);
-        previews.retain(|_, _| false);
-        assert!(previews.tabs.is_empty());
-        assert!(previews.active().is_none());
-    }
-
-    #[test]
-    fn moves_tabs_and_follows_renames() {
-        let mut previews = PreviewTabs::default();
-        for name in ["a", "dir/b", "dir/c"] {
-            previews.open(Path::new(name), None, true);
-        }
-        previews.move_tab(0, 2);
-        assert_eq!(tabs(&previews), ["dir/b", "dir/c", ">a"]);
-        previews.move_tab(2, 0);
-        assert_eq!(tabs(&previews), [">a", "dir/b", "dir/c"]);
-        previews.open(Path::new("dir/c"), None, false);
-        previews.tabs[2].pinned = false;
-        let old = previews.moved(Path::new("dir"), Path::new("new"));
-        assert_eq!(old.len(), 2);
-        assert_eq!(tabs(&previews), ["a", "new/b", ">new/c*"]);
     }
 }
