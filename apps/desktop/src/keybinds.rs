@@ -39,13 +39,13 @@ type Contexts = &'static [Option<&'static str>];
 const GLOBAL: Contexts = &[None];
 const WINDOW: Contexts = &[Some("Window")];
 const TERMINAL: Contexts = &[Some("Terminal")];
-/// 搜索框不在 `Terminal` 上下文里，复制粘贴和搜索导航在那里也要能用。
-const TERMINAL_AND_SEARCH: Contexts = &[Some("Terminal"), Some("SearchBar")];
-/// 预览栏里选中的行也能全选；多行输入框和搜索框一样能全选、复制、粘贴。
-const SELECT_ALL: Contexts = &[Some("Terminal"), Some("SearchBar"), Some("TextArea"), Some("Preview")];
+/// 终端的搜索框（单行输入框 `TextField`）不在 `Terminal` 上下文里，搜索导航在那里也要能用。
+const TERMINAL_AND_TEXT_FIELD: Contexts = &[Some("Terminal"), Some("TextField")];
+/// 预览栏里选中的行也能全选；单行、多行输入框都能全选、复制、粘贴。
+const SELECT_ALL: Contexts = &[Some("Terminal"), Some("TextField"), Some("TextArea"), Some("Preview")];
 /// 预览栏里选中的行也能复制；文件树里复制、粘贴的是选中的文件。
-const COPY: Contexts = &[Some("Terminal"), Some("SearchBar"), Some("TextArea"), Some("Preview"), Some("FileTree")];
-const PASTE: Contexts = &[Some("Terminal"), Some("SearchBar"), Some("TextArea"), Some("FileTree")];
+const COPY: Contexts = &[Some("Terminal"), Some("TextField"), Some("TextArea"), Some("Preview"), Some("FileTree")];
+const PASTE: Contexts = &[Some("Terminal"), Some("TextField"), Some("TextArea"), Some("FileTree")];
 /// 文件树有焦点、又不在新建或改名时；改名时方向键这些归输入框。
 const FILE_TREE: &str = "FileTree && !editing";
 
@@ -110,9 +110,9 @@ fn gpui_action(action: Action) -> (Box<dyn gpui::Action>, Contexts) {
         Action::SendText(text) => (boxed(SendText(text)), TERMINAL),
         Action::StartSearch => (boxed(StartSearch), TERMINAL),
         Action::SearchSelection => (boxed(SearchSelection), TERMINAL),
-        Action::SearchNext => (boxed(SearchNext), TERMINAL_AND_SEARCH),
-        Action::SearchPrevious => (boxed(SearchPrevious), TERMINAL_AND_SEARCH),
-        Action::EndSearch => (boxed(EndSearch), TERMINAL_AND_SEARCH),
+        Action::SearchNext => (boxed(SearchNext), TERMINAL_AND_TEXT_FIELD),
+        Action::SearchPrevious => (boxed(SearchPrevious), TERMINAL_AND_TEXT_FIELD),
+        Action::EndSearch => (boxed(EndSearch), TERMINAL_AND_TEXT_FIELD),
         Action::WriteScreenFile(file) => (boxed(WriteScreenFile(file)), TERMINAL),
         Action::IncreaseFontSize => (boxed(IncreaseFontSize), TERMINAL),
         Action::DecreaseFontSize => (boxed(DecreaseFontSize), TERMINAL),
@@ -120,16 +120,16 @@ fn gpui_action(action: Action) -> (Box<dyn gpui::Action>, Contexts) {
     }
 }
 
-/// 搜索框和多行输入框自己的编辑键，搜索时在终端里按 Esc 关掉搜索栏，以及文件树里的按键，不开放配置。
+/// 单行、多行输入框自己的编辑键，搜索时在终端里按 Esc 关掉搜索栏，以及文件树里的按键，不开放配置。
 fn fixed_bindings() -> Vec<KeyBinding> {
     let tree = Some(FILE_TREE);
     vec![
-        KeyBinding::new("enter", SearchNext, Some("SearchBar")),
-        KeyBinding::new("shift-enter", SearchPrevious, Some("SearchBar")),
-        KeyBinding::new("escape", EndSearch, Some("SearchBar")),
-        KeyBinding::new("cmd-x", Cut, Some("SearchBar")),
-        KeyBinding::new("cmd-z", Undo, Some("SearchBar")),
-        KeyBinding::new("cmd-shift-z", Redo, Some("SearchBar")),
+        KeyBinding::new("enter", SearchNext, Some("TextField")),
+        KeyBinding::new("shift-enter", SearchPrevious, Some("TextField")),
+        KeyBinding::new("escape", EndSearch, Some("TextField")),
+        KeyBinding::new("cmd-x", Cut, Some("TextField")),
+        KeyBinding::new("cmd-z", Undo, Some("TextField")),
+        KeyBinding::new("cmd-shift-z", Redo, Some("TextField")),
         // 点回终端后搜索栏还开着，Esc 照样关掉它；没在搜索时 Esc 照常发给程序。
         KeyBinding::new("escape", EndSearch, Some("Terminal && searching")),
         // 多行输入框里回车换行（输入框自己处理），cmd-enter 提交。默认配置里 cmd-enter 是全局的

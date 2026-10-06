@@ -42,7 +42,7 @@ use runode_terminal::{history, session::Session};
 
 use crate::{
     session_host::LinkEvent,
-    ui::{hsla, text_field::SearchField},
+    ui::{hsla, text_field::TextField},
 };
 use completion_menu::{CompletionMenu, PendingKey};
 use crop::Crop;
@@ -215,7 +215,7 @@ pub struct TerminalView {
     /// 反白的 `%` 就留在了提示符上面一行。
     start_pending: bool,
     /// 打开着的搜索栏输入框，以及对它事件的订阅。
-    search_field: Option<(Entity<SearchField>, Subscription)>,
+    search_field: Option<(Entity<TextField>, Subscription)>,
     /// 收宿主发来的输出和状态的任务，见 `read_events`。
     _reader: Task<()>,
     /// 前台 agent 上次换了种类或状态的时刻，agent 列表按它排同一状态里的先后。

@@ -1,7 +1,9 @@
-//! 终端里的搜索：搜索栏的输入框，以及打开、切换、关闭搜索的动作。
+//! 单行文字输入框：终端的搜索栏、选 agent 和分支的弹窗、文件树和 workspace 就地改名都用它。
 //!
-//! 输入框管文字编辑（光标、选区、鼠标点选拖选、输入法组字），把搜索词的变化作为事件
-//! 交给终端视图；匹配数、上下切换按钮由终端视图画在输入框旁边。
+//! 输入框管文字编辑（光标、选区、鼠标点选拖选、输入法组字、撤销重做），把文字的变化和回车、
+//! Shift+回车、Esc 作为 `TextFieldEvent` 交给调用方；输入框外面的东西（搜索的匹配数、上下切换
+//! 按钮、候选列表）由调用方画。回车、Shift+回车、Esc 绑定的是 `SearchNext`、`SearchPrevious`、
+//! `EndSearch`，终端没开搜索栏时这几个动作也由终端自己响应。
 
 use std::ops::Range;
 
@@ -22,14 +24,16 @@ const CARET_HEIGHT: Pixels = px(14.);
 /// 撤销最多能退回的步数。
 const UNDO_LIMIT: usize = 100;
 
-pub enum SearchFieldEvent {
+/// 输入框交给调用方的事件：文字变了（`Changed`，不含正在组的字）、回车（`Next`）、
+/// Shift+回车（`Previous`）和 Esc（`Dismiss`）。
+pub enum TextFieldEvent {
     Changed(String),
     Next,
     Previous,
     Dismiss,
 }
 
-pub struct SearchField {
+pub struct TextField {
     focus_handle: FocusHandle,
     /// 输入框里的全部文字；输入法组字时也包括正在组的字。
     text: String,
@@ -37,9 +41,9 @@ pub struct SearchField {
     selected: Range<usize>,
     /// 光标在选区开头，即选区是从右往左选出来的。
     reversed: bool,
-    /// 正在组的字在 `text` 里的范围，确认后才算进搜索词。
+    /// 正在组的字在 `text` 里的范围，确认后才算进 `query`。
     marked: Option<Range<usize>>,
-    /// 最近一次交给终端视图的搜索词，不含组字。
+    /// 最近一次经 `TextFieldEvent::Changed` 交出去的文字，不含组字。
     query: String,
     /// 按住鼠标拖选中；双击后拖动按词扩展。
     drag: Option<Drag>,
@@ -74,9 +78,9 @@ struct Snapshot {
     reversed: bool,
 }
 
-impl EventEmitter<SearchFieldEvent> for SearchField {}
+impl EventEmitter<TextFieldEvent> for TextField {}
 
-impl SearchField {
+impl TextField {
     pub fn new(query: String, cx: &mut Context<Self>) -> Self {
         let end = query.len();
         Self {
@@ -219,7 +223,7 @@ impl SearchField {
         self.sync_query(cx);
     }
 
-    /// 去掉组字后的文字有变化时通知终端视图重新搜索。
+    /// 去掉组字后的文字有变化时发 `TextFieldEvent::Changed`。
     fn sync_query(&mut self, cx: &mut Context<Self>) {
         let committed = match &self.marked {
             Some(marked) => [&self.text[..marked.start], &self.text[marked.end..]].concat(),
@@ -227,7 +231,7 @@ impl SearchField {
         };
         if committed != self.query {
             self.query = committed.clone();
-            cx.emit(SearchFieldEvent::Changed(committed));
+            cx.emit(TextFieldEvent::Changed(committed));
         }
         cx.notify();
     }
@@ -366,7 +370,7 @@ impl SearchField {
         let Some(text) = cx.read_from_clipboard().and_then(|item| item.text()) else {
             return;
         };
-        // 搜索只在一行里找，多行内容只取第一行。
+        // 输入框只有一行，多行内容只取第一行。
         let line = text.lines().next().unwrap_or_default();
         self.record(None);
         self.replace(self.selected.clone(), line, cx);
@@ -422,16 +426,16 @@ fn is_word_char(c: char) -> bool {
     c.is_alphanumeric() || c == '_'
 }
 
-impl Focusable for SearchField {
+impl Focusable for TextField {
     fn focus_handle(&self, _: &App) -> FocusHandle {
         self.focus_handle.clone()
     }
 }
 
-impl Render for SearchField {
+impl Render for TextField {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         div()
-            .key_context("SearchBar")
+            .key_context("TextField")
             .track_focus(&self.focus_handle)
             .on_key_down(cx.listener(Self::key_down))
             .on_mouse_down(MouseButton::Left, cx.listener(Self::mouse_down))
@@ -441,18 +445,18 @@ impl Render for SearchField {
             .on_action(cx.listener(Self::undo))
             .on_action(cx.listener(Self::redo))
             .on_action(cx.listener(Self::select_all))
-            .on_action(cx.listener(|_, _: &SearchNext, _, cx| cx.emit(SearchFieldEvent::Next)))
-            .on_action(cx.listener(|_, _: &SearchPrevious, _, cx| cx.emit(SearchFieldEvent::Previous)))
-            .on_action(cx.listener(|_, _: &EndSearch, _, cx| cx.emit(SearchFieldEvent::Dismiss)))
+            .on_action(cx.listener(|_, _: &SearchNext, _, cx| cx.emit(TextFieldEvent::Next)))
+            .on_action(cx.listener(|_, _: &SearchPrevious, _, cx| cx.emit(TextFieldEvent::Previous)))
+            .on_action(cx.listener(|_, _: &EndSearch, _, cx| cx.emit(TextFieldEvent::Dismiss)))
             .size_full()
             .flex()
             .items_center()
             .overflow_hidden()
-            .child(SearchText { field: cx.entity() })
+            .child(TextFieldText { field: cx.entity() })
     }
 }
 
-impl EntityInputHandler for SearchField {
+impl EntityInputHandler for TextField {
     fn text_for_range(
         &mut self,
         range: Range<usize>,
@@ -487,7 +491,7 @@ impl EntityInputHandler for SearchField {
     ) {
         let range =
             range.map(|range| self.range_from_utf16(&range)).or(self.marked.clone()).unwrap_or(self.selected.clone());
-        // 回车、制表符等由按键绑定处理，不进搜索词。
+        // 回车、制表符等由按键绑定处理，不进文字。
         let text: String = text.chars().filter(|c| !c.is_control()).collect();
         if text.is_empty() && range.is_empty() && self.marked.is_none() {
             return;
@@ -561,11 +565,11 @@ impl EntityInputHandler for SearchField {
 }
 
 /// 输入框里的文字、选区和光标，自己排版绘制以便按位置换算字符。
-struct SearchText {
-    field: Entity<SearchField>,
+struct TextFieldText {
+    field: Entity<TextField>,
 }
 
-struct SearchTextLayout {
+struct TextFieldTextLayout {
     line: ShapedLine,
     /// 占位文字；有内容时为 `None`。
     placeholder: Option<ShapedLine>,
@@ -575,7 +579,7 @@ struct SearchTextLayout {
     caret: Option<PaintQuad>,
 }
 
-impl IntoElement for SearchText {
+impl IntoElement for TextFieldText {
     type Element = Self;
 
     fn into_element(self) -> Self::Element {
@@ -583,9 +587,9 @@ impl IntoElement for SearchText {
     }
 }
 
-impl Element for SearchText {
+impl Element for TextFieldText {
     type RequestLayoutState = ();
-    type PrepaintState = SearchTextLayout;
+    type PrepaintState = TextFieldTextLayout;
 
     fn id(&self) -> Option<ElementId> {
         None
@@ -616,7 +620,7 @@ impl Element for SearchText {
         _: &mut (),
         window: &mut Window,
         cx: &mut App,
-    ) -> SearchTextLayout {
+    ) -> TextFieldTextLayout {
         let field = self.field.read(cx);
         let style = window.text_style();
         let font_size = style.font_size.to_pixels(window.rem_size());
@@ -685,7 +689,7 @@ impl Element for SearchText {
                 style.color,
             )
         });
-        SearchTextLayout { line, placeholder, scroll_x, selection, caret }
+        TextFieldTextLayout { line, placeholder, scroll_x, selection, caret }
     }
 
     fn paint(
@@ -694,7 +698,7 @@ impl Element for SearchText {
         _: Option<&gpui::InspectorElementId>,
         bounds: Bounds<Pixels>,
         _: &mut (),
-        layout: &mut SearchTextLayout,
+        layout: &mut TextFieldTextLayout,
         window: &mut Window,
         cx: &mut App,
     ) {

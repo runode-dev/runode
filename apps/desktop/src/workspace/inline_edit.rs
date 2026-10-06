@@ -7,14 +7,14 @@ use runode_shared_types::color::Rgb;
 use super::WindowView;
 use crate::ui::{
     hsla,
-    text_field::{SearchField, SearchFieldEvent},
+    text_field::{TextField, TextFieldEvent},
 };
 
 /// 输入框结束时调的函数，`commit` 为真是确定，为假是取消。
 type Finish = fn(&mut WindowView, bool, &mut Window, &mut Context<WindowView>);
 
 pub(super) struct InlineEdit {
-    pub field: Entity<SearchField>,
+    pub field: Entity<TextField>,
     _subscriptions: [Subscription; 2],
 }
 
@@ -22,15 +22,14 @@ impl InlineEdit {
     /// 打开输入框并把焦点给它，`text` 的前 `select` 个字节选中，直接打字就替换掉。结束时调
     /// `finish`；文字变了时重画窗口，旁边跟着文字变的东西（比如文件图标）也跟着变。
     pub fn new(text: String, select: usize, finish: Finish, window: &mut Window, cx: &mut Context<WindowView>) -> Self {
-        let field = cx.new(|cx| SearchField::editing(text, select, cx));
+        let field = cx.new(|cx| TextField::editing(text, select, cx));
         // 输入框原本是搜索框：回车是「下一个」，Esc 是「关闭搜索」，在这里分别是确定和取消。
-        let events =
-            cx.subscribe_in(&field, window, move |this, _, event: &SearchFieldEvent, window, cx| match event {
-                SearchFieldEvent::Next => finish(this, true, window, cx),
-                SearchFieldEvent::Dismiss => finish(this, false, window, cx),
-                SearchFieldEvent::Changed(_) => cx.notify(),
-                SearchFieldEvent::Previous => {}
-            });
+        let events = cx.subscribe_in(&field, window, move |this, _, event: &TextFieldEvent, window, cx| match event {
+            TextFieldEvent::Next => finish(this, true, window, cx),
+            TextFieldEvent::Dismiss => finish(this, false, window, cx),
+            TextFieldEvent::Changed(_) => cx.notify(),
+            TextFieldEvent::Previous => {}
+        });
         let focus = field.focus_handle(cx);
         let blur = cx.on_blur(&focus, window, move |this, window, cx| {
             if window.is_window_active() {

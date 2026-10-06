@@ -6,7 +6,7 @@ use runode_terminal::session::Session;
 use super::TerminalView;
 use crate::ui::{
     hsla,
-    text_field::{EndSearch, SearchField, SearchFieldEvent, SearchNext, SearchPrevious},
+    text_field::{EndSearch, SearchNext, SearchPrevious, TextField, TextFieldEvent},
     tooltip::tooltip,
 };
 
@@ -38,7 +38,7 @@ impl TerminalView {
         let field = match &self.search_field {
             Some((field, _)) => field.clone(),
             None => {
-                let field = cx.new(|cx| SearchField::new(String::new(), cx));
+                let field = cx.new(|cx| TextField::new(String::new(), cx));
                 let events = cx.subscribe_in(&field, window, Self::handle_search_event);
                 self.search_field = Some((field.clone(), events));
                 field
@@ -56,16 +56,16 @@ impl TerminalView {
 
     fn handle_search_event(
         &mut self,
-        _: &Entity<SearchField>,
-        event: &SearchFieldEvent,
+        _: &Entity<TextField>,
+        event: &TextFieldEvent,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         match (event, self.screen.shown_mut()) {
-            (SearchFieldEvent::Dismiss, _) => self.close_search(window, cx),
-            (SearchFieldEvent::Changed(query), Some(session)) => session.search(query),
-            (SearchFieldEvent::Next, Some(session)) => session.search_step(false),
-            (SearchFieldEvent::Previous, Some(session)) => session.search_step(true),
+            (TextFieldEvent::Dismiss, _) => self.close_search(window, cx),
+            (TextFieldEvent::Changed(query), Some(session)) => session.search(query),
+            (TextFieldEvent::Next, Some(session)) => session.search_step(false),
+            (TextFieldEvent::Previous, Some(session)) => session.search_step(true),
             // 没有界面这份 VT 时没有可搜的，回到显示时按搜索栏里的词重新搜，见 `vt_replaced`。
             (_, None) => {}
         }
@@ -109,7 +109,7 @@ impl TerminalView {
     /// 右上角的搜索栏：输入框、匹配进度、上下切换和关闭按钮。
     pub(super) fn render_search_bar(
         &self,
-        field: &Entity<SearchField>,
+        field: &Entity<TextField>,
         cx: &mut Context<Self>,
     ) -> gpui::Stateful<gpui::Div> {
         let frame = self.colors;

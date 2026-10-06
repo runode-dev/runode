@@ -18,7 +18,7 @@ use super::{
 };
 use crate::ui::{
     hsla,
-    text_field::{SearchField, SearchFieldEvent},
+    text_field::{TextField, TextFieldEvent},
 };
 
 /// 浮层的宽度；窗口窄时随窗口收窄。
@@ -31,7 +31,7 @@ const INPUT_HEIGHT: f32 = 34.;
 
 /// 开着的 agent 列表。
 pub(super) struct AgentPicker {
-    field: Entity<SearchField>,
+    field: Entity<TextField>,
     /// 选中的那一行的分屏；状态变化让行重新排序时选中项跟着走。还没选过或者它不在列表里了时
     /// 选第一行。
     selected: Option<EntityId>,
@@ -48,19 +48,19 @@ impl WindowView {
             self.close_agent_picker(window, cx);
             return;
         }
-        let field = cx.new(|cx| SearchField::new(String::new(), cx));
+        let field = cx.new(|cx| TextField::new(String::new(), cx));
         // 输入框原本是搜索框：回车是「下一个」，Esc 是「关闭搜索」，在这里分别是跳过去和关掉。
-        let events = cx.subscribe_in(&field, window, |this, _, event: &SearchFieldEvent, window, cx| match event {
-            SearchFieldEvent::Changed(_) => {
+        let events = cx.subscribe_in(&field, window, |this, _, event: &TextFieldEvent, window, cx| match event {
+            TextFieldEvent::Changed(_) => {
                 if let Some(picker) = &mut this.agent_picker {
                     picker.selected = None;
                     picker.scroll.scroll_to_item(0);
                 }
                 cx.notify();
             }
-            SearchFieldEvent::Next => this.confirm_agent_picker(window, cx),
-            SearchFieldEvent::Dismiss => this.close_agent_picker(window, cx),
-            SearchFieldEvent::Previous => {}
+            TextFieldEvent::Next => this.confirm_agent_picker(window, cx),
+            TextFieldEvent::Dismiss => this.close_agent_picker(window, cx),
+            TextFieldEvent::Previous => {}
         });
         let focus = field.focus_handle(cx);
         // 点到别处就关掉；切到别的应用时窗口失去焦点，回来接着用。
