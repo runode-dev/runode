@@ -41,6 +41,8 @@ config:
   shell_integration: Shell 整合：detect（依 shell 的程式名稱判斷）、none（關閉）、bash、zsh、fish。
   command_suggestions: 在 shell 提示字元上輸入時，依指令歷史在游標後用灰字給出建議，按 → 或 End 接受，Option+→ 接受一個詞。false 時也不讀寫指令歷史。
   command_highlighting: 在 shell 提示字元上輸入時替指令列上色：指令、關鍵字、選項、字串、變數、存在的路徑各有顏色，找不到的指令標紅，顏色參照 zsh 外掛 fast-syntax-highlighting、取自主題的調色盤。shell 自己已經上了色（裝了高亮外掛）時不管。
+  clipboard_write: 終端機裡的程式用 OSC 52 寫入系統剪貼簿時（vim、tmux 和經 ssh 連到遠端的 shell 都這樣複製）：allow 照寫，deny 丟掉。ask 還不支援，當作 deny。
+  clipboard_read: 終端機裡的程式用 OSC 52 讀取剪貼簿時：ask 先跳出對話框說明是哪個終端機、哪個程式要讀，你同意了才給；allow 不問直接給；deny 回給程式一個空的剪貼簿。剪貼簿裡可能有密碼，只對信得過的程式用 allow。
   terminal_host: 終端機工作階段放在單獨的背景程序裡：true、false。true 時結束 Runode 後工作階段照常執行，下次開啟接著用；false 時工作階段跟著 app 一起結束。只在 Runode 啟動時讀取，改了下次啟動才生效。背景還有工作階段時改成 false，下次啟動仍會接回這些工作階段，那次結束時才結束它們。
   remote_access: 讓手機經區域網路或 Tailscale 連上這台 Mac 的終端機：true、false。用 runode remote pair 為手機配對，runode remote devices 列出配對過的手機，runode remote revoke 撤銷一台。改了幾秒內生效，不必重新啟動 Runode。
   remote_access_port: 遠端存取在所有網路介面上監聽的 TCP 連接埠：1 到 65535。

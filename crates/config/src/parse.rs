@@ -8,6 +8,7 @@ use std::{
 
 use runode_shared_types::{
     agent::AgentKind,
+    clipboard::{ClipboardRead, ClipboardWrite},
     color::{Rgb, TerminalColor},
     settings::{CursorStyle, MIN_SCROLLBACK_LIMIT, OptionAsAlt},
     shell::{IntegrationMode, Shell},
@@ -51,6 +52,7 @@ pub const KEYS: &[&[&str]] = &[
         "command-completions",
         "command-highlighting",
     ],
+    &["clipboard-write", "clipboard-read"],
     &["terminal-host"],
     &["remote-access", "remote-access-port"],
     &["agent-notifications", "agent-notifications-exclude", "agent-done-sound", "agent-blocked-sound"],
@@ -259,6 +261,26 @@ impl Config {
             }
             "command-highlighting" => {
                 self.command_highlighting = if empty { defaults.command_highlighting } else { parse_bool(value)? };
+            }
+            "clipboard-write" => {
+                self.clipboard_write = match value {
+                    "" | "allow" => ClipboardWrite::Allow,
+                    "deny" => ClipboardWrite::Deny,
+                    // 写之前问用户还没做；写成 ask 的按 deny 办，不比用户要的更松，同时报出来。
+                    "ask" => {
+                        self.clipboard_write = ClipboardWrite::Deny;
+                        return Err("asking before a write is not supported yet, using deny".into());
+                    }
+                    _ => return Err("expected allow or deny".into()),
+                };
+            }
+            "clipboard-read" => {
+                self.clipboard_read = match value {
+                    "" | "ask" => ClipboardRead::Ask,
+                    "allow" => ClipboardRead::Allow,
+                    "deny" => ClipboardRead::Deny,
+                    _ => return Err("expected ask, allow or deny".into()),
+                };
             }
             "terminal-host" => {
                 self.terminal_host = if empty { defaults.terminal_host } else { parse_bool(value)? };
@@ -469,6 +491,8 @@ fn ghostty_config_paths() -> Vec<PathBuf> {
 
 #[cfg(test)]
 pub(crate) mod tests {
+    use runode_shared_types::clipboard::ClipboardAccess;
+
     use super::*;
 
     fn entries(text: &str) -> Vec<Entry> {
@@ -616,6 +640,28 @@ unknown-key = whatever
             );
         }
         assert_eq!(load(&["remote-access-port = 9000\nremote-access-port ="]).remote_access_port, 7866);
+    }
+
+    #[test]
+    fn clipboard_access_defaults_to_writing_and_asking_before_reads() {
+        let d = Config::default();
+        assert_eq!((d.clipboard_write, d.clipboard_read), (ClipboardWrite::Allow, ClipboardRead::Ask));
+        assert_eq!(d.clipboard_access(), ClipboardAccess::default());
+        let config = load(&["clipboard-write = deny\nclipboard-read = allow"]);
+        assert_eq!(
+            config.clipboard_access(),
+            ClipboardAccess { write: ClipboardWrite::Deny, read: ClipboardRead::Allow }
+        );
+        assert_eq!(load(&["clipboard-read = deny"]).clipboard_read, ClipboardRead::Deny);
+        // 认不出的值跳过，保留前面的值；值为空回到默认。
+        let config =
+            load(&["clipboard-write = deny\nclipboard-write = maybe\nclipboard-read = allow\nclipboard-read = 1"]);
+        assert_eq!((config.clipboard_write, config.clipboard_read), (ClipboardWrite::Deny, ClipboardRead::Allow));
+        let config = load(&["clipboard-write = deny\nclipboard-read = deny", "clipboard-write =\nclipboard-read ="]);
+        assert_eq!(config.clipboard_access(), ClipboardAccess::default());
+        // 写之前问用户还没做，写成 ask 的按 deny 办。
+        assert_eq!(load(&["clipboard-write = ask"]).clipboard_write, ClipboardWrite::Deny);
+        assert!(Config::default().apply("clipboard-write", "ask", true).is_err());
     }
 
     #[test]
