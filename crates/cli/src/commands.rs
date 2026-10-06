@@ -159,11 +159,25 @@ pub(crate) fn run(command: Command, env: &Env, out: &mut dyn Write, err: &mut dy
                 other => return Err(unexpected(&other)),
             };
             if !command.is_empty() {
-                let (channel, meta) = attach(&connection, id)?;
-                wait_for_prompt(&connection, id, meta)?;
-                connection.input(channel, command.as_bytes())?;
-                thread::sleep(ENTER_DELAY);
-                connection.input(channel, b"\r")?;
+                // 终端已经开了：这时宿主升级，叫人重跑会再开一个终端，所以说清开好的是哪个。
+                let typed = (|| -> Result<(), Failure> {
+                    let (channel, meta) = attach(&connection, id)?;
+                    wait_for_prompt(&connection, id, meta)?;
+                    connection.input(channel, command.as_bytes())?;
+                    thread::sleep(ENTER_DELAY);
+                    connection.input(channel, b"\r")?;
+                    Ok(())
+                })();
+                if let Err(Failure::Error(err)) = &typed
+                    && is_upgrading(err)
+                {
+                    return Err(anyhow!(
+                        "opened session {id}, but the runode host was upgraded before the command was typed; \
+                         check it with `runode read {id}` instead of opening another"
+                    )
+                    .into());
+                }
+                typed?;
             }
             writeln!(out, "{id}")?;
         }

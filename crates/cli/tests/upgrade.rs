@@ -354,3 +354,19 @@ fn a_host_that_never_comes_back_times_out() {
     assert_eq!(code, exit::TIMEOUT, "{err}");
     assert!(started.elapsed() < Duration::from_secs(5), "{:?}", started.elapsed());
 }
+
+/// `open -- COMMAND` 已经开好终端、还没打命令时宿主升级了：说出开好的是哪个，不叫用户重跑
+/// （那会再开一个终端）。
+#[test]
+fn an_opened_terminal_cut_off_before_its_command_is_named() {
+    let fake = FakeHost::start("openup", |message| match message {
+        ClientMsg::ListSessions => vec![HostMsg::SessionList { sessions: vec![session(id(S), meta("zsh", None))] }],
+        ClientMsg::Open { req, .. } => vec![HostMsg::Opened { req: *req, id: id(S) }],
+        ClientMsg::Attach { .. } => vec![handoff()],
+        _ => vec![],
+    });
+    let (code, _, err) = run("open --tab -- ls", &fake.env);
+    assert_eq!(code, exit::FAILED, "{err}");
+    assert!(err.contains(&format!("opened session {}", id(S))), "{err}");
+    assert!(!err.contains("run the command again"), "{err}");
+}
