@@ -275,10 +275,6 @@ impl HostSession {
         Ok(())
     }
 
-    pub fn started(&self) -> bool {
-        self.pty.started()
-    }
-
     /// 交接的第一步：让 PTY 的读线程停下，见 `Pty::stop_reading`。之后还要把 `PtySink` 那头
     /// 已经收到的输出喂完，等 `pty_reader_finished` 为 true，再编快照、`release_pty`。快照编不
     /// 出来（`SnapshotError::Unfinished`）或者不交了时 `resume_reading`。
