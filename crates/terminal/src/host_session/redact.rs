@@ -12,13 +12,24 @@ const SUB: u8 = 0x1a;
 const PREFIX_LEN: usize = 2 + SHELL_REPORT.len();
 
 /// 报告开头的第 `i` 个字节。
-fn prefix_byte(i: usize) -> u8 {
+const fn prefix_byte(i: usize) -> u8 {
     match i {
         0 => ESC,
         1 => b']',
         _ => SHELL_REPORT[i - 2],
     }
 }
+
+/// 报告的开头 `ESC ] 6973;`：抹过的报告只剩它和结束序列。
+pub(super) const REPORT_START: [u8; PREFIX_LEN] = {
+    let mut start = [0; PREFIX_LEN];
+    let mut i = 0;
+    while i < PREFIX_LEN {
+        start[i] = prefix_byte(i);
+        i += 1;
+    }
+    start
+};
 
 /// 把 PTY 输出转给别的进程前，抹掉 shell 集成报告（`ESC ] 6973;<口令>;<字段>=<值> BEL`）
 /// 的内容：报告带着这个 shell 的口令，口令不能出宿主。
@@ -42,6 +53,13 @@ pub struct ReportRedactor {
 impl ReportRedactor {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// 输出流正停在一条报告里：开头的 `ESC ] 6973;` 已经过去了，结束序列还没到。这时宿主那份
+    /// VT 也停在这条报告中间，没写完的报告连着口令都在它的续接里，给别的进程的屏幕要另外处理，
+    /// 见 `HostSession::redacted_snapshot`。
+    pub fn in_report(&self) -> bool {
+        self.inside
     }
 
     /// 处理接下来的一块输出：有要抹的内容时返回抹过的一份，没有时返回 `None`，原样转发即可。

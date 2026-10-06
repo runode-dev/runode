@@ -412,6 +412,34 @@ impl HostSession {
         Ok(vt::format_replay(&self.terminal)?)
     }
 
+    /// 给别的进程的快照，之后给它的输出是经 `redactor` 抹过的。和 `snapshot` 不同的只在输出流
+    /// 正停在一条 shell 集成报告里（`ReportRedactor::in_report`）时：VT 这时停在报告中间，
+    /// `snapshot` 会把没写完的报告连着口令原样编进续接。这里在快照解出来的一份 VT 上先结束这条
+    /// 报告（ST，报告本来就不改 VT 的状态，见 `ReportRedactor`），再开一条只有开头 `ESC ] 6973;`
+    /// 的，编出的快照停在同样的状态，只是没有报告的内容；之后抹过的输出接着喂，报告照样在
+    /// 原来的结束序列处结束。
+    pub fn redacted_snapshot(&self, redactor: &ReportRedactor) -> Result<Vec<u8>, SnapshotError> {
+        let snapshot = self.snapshot()?;
+        if !redactor.in_report() {
+            return Ok(snapshot);
+        }
+        let mut copy = vt::decode_snapshot(&snapshot)?;
+        copy.vt_write(b"\x1b\\");
+        copy.vt_write(&redact::REPORT_START);
+        vt::encode_snapshot(&copy)
+    }
+
+    /// 给别的进程的 VT 重放，之后给它的输出是经 `redactor` 抹过的。重放不带没写完的序列；输出流
+    /// 正停在一条 shell 集成报告里时，末尾补上报告的开头 `ESC ] 6973;`，前端的 VT 也停进一条
+    /// 报告里，之后抹过的输出里报告的结束序列结束它，不会落到别的状态里（比如 BEL 成了响铃）。
+    pub fn redacted_vt_replay(&self, redactor: &ReportRedactor) -> Result<Vec<u8>> {
+        let mut replay = self.vt_replay()?;
+        if redactor.in_report() {
+            replay.extend_from_slice(&redact::REPORT_START);
+        }
+        Ok(replay)
+    }
+
     /// 屏幕底部的文字：`lines` 为 `None` 时是当前一屏，否则是含回滚历史的最底下这么多行，
     /// 见 `vt::screen_tail`。
     pub fn screen_text(&self, lines: Option<u32>) -> Result<String> {

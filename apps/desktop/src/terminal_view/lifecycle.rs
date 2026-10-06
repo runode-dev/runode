@@ -133,7 +133,7 @@ impl TerminalView {
 
     /// 按先后处理宿主发来的一批事件：输出喂给 VT（连着的几块合成一次写入），在标出的位置改
     /// 尺寸、换主题，写入对外公布的状态，转发标题、退出等事件，再重绘。响铃留给调用方用
-    /// `ring_bell` 转发，见 `new`。
+    /// `ring_bell` 转发，见 `new`；这一批里有退出时在退出之前转发。
     fn handle_host_events(&mut self, events: Vec<HostEvent>, window: &mut Window, cx: &mut Context<Self>) {
         let mut pending: Vec<Arc<[u8]>> = Vec::new();
         let mut fed = false;
@@ -182,6 +182,8 @@ impl TerminalView {
             self.reset_cursor_blink(window, cx);
         }
         if exited {
+            // 退出前响过的铃先通知：外层收到 `Exited` 就关掉分屏，之后再通知就找不到这个终端了。
+            self.ring_bell(cx);
             self.session.exited = true;
             cx.emit(TerminalEvent::Exited);
         }

@@ -234,6 +234,7 @@ impl Runner {
             };
             if killed.load(Ordering::Acquire) {
                 self.ended();
+                self.answer_pending(message, inbox);
                 return;
             }
             // 处理一条消息时 panic 的话，`HostSession` 可能停在半路，不能再往下处理；告诉前端会话
@@ -273,6 +274,23 @@ impl Runner {
     fn ended(&mut self) {
         if !std::mem::replace(&mut self.exited, true) {
             self.emit(HostEvent::msg(HostMsg::Exited { id: self.id, status: None }));
+        }
+    }
+
+    /// 被结束时还排在收件箱里的消息（`first` 是已经取出来的那条）：积压的输出和别的请求都丢掉，
+    /// 等着回话的一方随之收到断开；只有 socket 上的前端连上来（`Subscribe`）要回，不然它收不到
+    /// `Attached`，干等到超时。照常给它现在的屏幕，`subscribe` 见会话已经结束，接着补发 `Exited`；
+    /// 不按它的尺寸改会话。
+    ///
+    /// 宿主先把会话从登记表里拿掉、再置上 `Handle::killed` 的标记，`Subscribe` 又是经登记表送来
+    /// 的，所以看到标记时，所有送得到的 `Subscribe` 都已经在收件箱里了。
+    fn answer_pending(&mut self, first: Option<Inbox>, inbox: &mpsc::Receiver<Inbox>) {
+        for message in first.into_iter().chain(std::iter::from_fn(|| inbox.try_recv().ok())) {
+            match message {
+                Inbox::Subscribe(subscribe) => self.subscribe(Subscribe { size: None, ..subscribe }),
+                Inbox::Kill => return,
+                _ => {}
+            }
         }
     }
 
@@ -375,9 +393,11 @@ impl Runner {
         {
             self.emit(HostEvent::msg(HostMsg::Resized { id: self.id, size }));
         }
+        // 屏幕给的是之后收抹过的输出的前端：输出流正停在一条报告里时，宿主这份 VT 的续接里
+        // 带着口令，见 `HostSession::redacted_snapshot`。
         let (mode, data) = match mode {
             AttachMode::MetaOnly => (mode, Vec::new()),
-            AttachMode::Snapshot => match self.session.snapshot() {
+            AttachMode::Snapshot => match self.session.redacted_snapshot(&self.redactor) {
                 Ok(data) => (mode, data),
                 Err(err) => {
                     tracing::debug!("session {} falls back to a VT replay: {err}", self.id);
@@ -397,7 +417,7 @@ impl Runner {
     }
 
     fn replay(&self) -> Vec<u8> {
-        self.session.vt_replay().unwrap_or_else(|err| {
+        self.session.redacted_vt_replay(&self.redactor).unwrap_or_else(|err| {
             tracing::warn!("session {} cannot replay its screen: {err:#}", self.id);
             Vec::new()
         })

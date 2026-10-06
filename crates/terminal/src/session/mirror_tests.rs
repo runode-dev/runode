@@ -264,3 +264,124 @@ fn redacted_shell_reports_keep_the_terminals_in_step() {
     assert!(!redacted.windows(16).any(|w| w == b"0123456789abcdef"), "a report survived");
     assert_same("redacted", &host, &view);
 }
+
+/// `haystack` 里有没有 `needle`。
+fn contains(haystack: &[u8], needle: &[u8]) -> bool {
+    haystack.windows(needle.len()).any(|w| w == needle)
+}
+
+/// VT 里没写完的序列（续接）。
+fn continuation(terminal: &Terminal<'static, 'static>) -> Vec<u8> {
+    terminal.continuation_alloc(None).unwrap().map(|bytes| bytes.to_vec()).unwrap_or_default()
+}
+
+/// 输出流停在一条 shell 集成报告中间时，socket 上的前端连上来拿屏幕：从报告开头到结束序列前的
+/// 每一个字节处切开。`redacted_snapshot` 里没有报告的内容（同一处的 `snapshot` 里有，说明
+/// 找得到），解出来的界面停在一条只有开头的报告里，接着喂抹过的输出后和宿主那份一样。
+/// `redacted_vt_replay` 也一样没有；停在报告里时，前端喂完后屏幕和宿主的一样，报告的 BEL 不会
+/// 成了响铃。
+#[test]
+fn a_screen_given_inside_a_shell_report_leaves_out_its_contents() {
+    const TOKEN: &[u8] = b"0123456789abcdef";
+    const HEAD: &[u8] = b"before \x1b]6973;";
+    let size = GridSize { cols: 30, rows: 6, cell_width_px: 8, cell_height_px: 16 };
+    for end in [&b"\x07"[..], b"\x1b\\", b"\x18", b"\x1a", b"\x1b[31m"] {
+        let mut data = HEAD.to_vec();
+        data.extend(TOKEN);
+        data.extend(b";alias_values=ll%3Dls");
+        let report_end = data.len();
+        data.extend(end);
+        data.extend(b" after\r\n$ ");
+        for cut in "before ".len()..=report_end {
+            let context = format!("{:?} cut at {cut}", String::from_utf8_lossy(end));
+            let (head, tail) = data.split_at(cut);
+            let mut host = HostSession::new(size, unstarted_pty(size.cols, size.rows), None, &base_theme()).unwrap();
+            let mut redactor = ReportRedactor::new();
+            redactor.redact(head);
+            host.feed(head);
+            assert_eq!(redactor.in_report(), cut >= HEAD.len(), "{context}");
+
+            let snapshot = host.redacted_snapshot(&redactor).unwrap();
+            let replay = host.redacted_vt_replay(&redactor).unwrap();
+            // 已经喂进去的那截报告（连着编号）：原样的快照里有，抹过的屏幕里没有。
+            if cut > HEAD.len() {
+                let fed = &data[HEAD.len() - b"6973;".len()..cut];
+                assert!(contains(&host.snapshot().unwrap(), fed), "{context}: the plain snapshot has the report");
+                for (name, screen) in [("snapshot", &snapshot), ("replay", &replay)] {
+                    assert!(!contains(screen, fed), "{context}: {name}");
+                }
+            }
+            let redactor_was_inside = redactor.in_report();
+            let mut view = Session::from_snapshot(&snapshot, Box::new(|_| {})).unwrap();
+            if redactor_was_inside {
+                assert_eq!(continuation(&view.terminal), b"\x1b]6973;", "{context}");
+            }
+            let mut replayed = Session::new(size, &base_theme(), Box::new(|_| {})).unwrap();
+            replayed.feed(&replay);
+
+            let public = redactor.redact(tail).unwrap_or_else(|| tail.to_vec());
+            assert!(!contains(&public, b"alias"), "{context}");
+            host.feed(tail);
+            view.feed(&public);
+            replayed.feed(&public);
+            assert_same(&context, &host, &view);
+            // 重放本来就不带没写完的序列，停在报告开头的半截里（比如刚到 ESC）时前端会把剩下的
+            // 半截当文字；只看停在报告里的。
+            if redactor_was_inside {
+                assert!(!replayed.take_bell(), "{context}: the replay rang the bell");
+                let text = |terminal: &Terminal<'static, 'static>| vt::screen_lines(terminal, 0, 5).unwrap();
+                assert_eq!(text(&replayed.terminal), text(host.terminal()), "{context}: replay");
+                assert!(replayed.terminal.is_vt_ground().unwrap(), "{context}: replay");
+            }
+        }
+    }
+}
+
+/// 抹报告的差分测试加上中途换前端：输出里夹着很长的报告（几 KB 的 `alias_values` 会被切成好
+/// 几块），每喂一块都可能按 `redacted_snapshot` 换一个新连上的界面，不少正停在报告中间；换上
+/// 的界面接着喂抹过的输出，每一步都和宿主那份一样，前端收到的所有字节里都没有口令。
+#[test]
+fn clients_attached_inside_shell_reports_stay_in_step() {
+    const TOKEN: &[u8] = b"0123456789abcdef";
+    let mut rng = Rng::new(5);
+    let output = mixed_output(&mut rng, 60, 60);
+    let mut data = Vec::new();
+    for &byte in &output {
+        data.push(byte);
+        if byte == b'\n' && rng.chance(40) {
+            let aliases: String = (0..200).map(|i| format!("a{i}%3Dls%20-la%0A")).collect();
+            let end: &[u8] = rng.pick(&[&b"\x07"[..], b"\x1b\\", b"\x18", b"\x1b[32m"]);
+            data.extend(b"\x1b]6973;");
+            data.extend(TOKEN);
+            data.extend(format!(";alias_values={aliases}").as_bytes());
+            data.extend(end);
+        }
+    }
+    let size = GridSize { cols: 60, rows: 12, cell_width_px: 8, cell_height_px: 16 };
+    let (mut host, mut view) = pair(size, false);
+    let mut redactor = ReportRedactor::new();
+    let mut received = Vec::new();
+    let (mut attached, mut inside) = (0, 0);
+    let mut rest = &data[..];
+    let mut step = 0;
+    while !rest.is_empty() {
+        let n = (1 + rng.below(1024)).min(rest.len());
+        let chunk = &rest[..n];
+        rest = &rest[n..];
+        step += 1;
+        let public = redactor.redact(chunk).unwrap_or_else(|| chunk.to_vec());
+        host.feed(chunk);
+        view.feed(&public);
+        received.extend(public);
+        if rng.chance(if redactor.in_report() { 50 } else { 10 }) {
+            let snapshot = host.redacted_snapshot(&redactor).unwrap();
+            view = Session::from_snapshot(&snapshot, Box::new(|_| {})).unwrap();
+            received.extend(snapshot);
+            attached += 1;
+            inside += usize::from(redactor.in_report());
+        }
+        assert_same(&format!("step {step}"), &host, &view);
+    }
+    assert!(inside >= 5, "only {inside} of {attached} clients attached inside a report");
+    assert!(!contains(&received, TOKEN), "a token left the host");
+}

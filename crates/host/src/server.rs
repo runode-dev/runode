@@ -305,7 +305,12 @@ impl Connection<'_> {
                     Err(err) => self.error(None, None, format!("unreadable message: {err}")),
                 },
                 FrameKind::Input => match self.channels.get(&frame.channel) {
-                    Some(&id) => self.client.input(id, frame.payload),
+                    // 会话已经没了（比如别的前端结束了它）：通道跟着作废。
+                    Some(&id) => {
+                        if !self.client.shared.deliver(id, Inbox::Input(frame.payload)) {
+                            self.channels.remove(&frame.channel);
+                        }
+                    }
                     None => tracing::debug!("input for unknown channel {}", frame.channel),
                 },
                 FrameKind::Output | FrameKind::Snapshot => {

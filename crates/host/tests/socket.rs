@@ -382,6 +382,122 @@ fn shell_reports_do_not_leave_the_host() {
     client.send(ClientMsg::Kill { id });
 }
 
+/// 在 `dir` 里写一个可执行的脚本当 shell 用，返回它的路径。
+fn shell_script(dir: &std::path::Path, body: &str) -> String {
+    use std::os::unix::fs::PermissionsExt as _;
+
+    let path = dir.join("shell.sh");
+    std::fs::write(&path, format!("#!/bin/sh\n{body}\n")).unwrap();
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+    path.to_string_lossy().into_owned()
+}
+
+/// 报告写到一半时连上来要快照：宿主那份 VT 正停在报告里，没写完的报告连着口令在它的续接里。
+/// 前端收到的快照和之后的输出里都没有口令；解出快照接着喂输出，屏幕和宿主读到的一样。
+#[test]
+fn a_snapshot_taken_inside_a_shell_report_has_no_token() {
+    use runode_terminal::session::Session;
+
+    const TOKEN: &str = "0123456789abcdef0123456789abcdef";
+    let dir = temp_dir("midreport");
+    let (host, socket) = listen(&dir);
+    // 报告的前半截写出去后停下等一行输入，前端这时连上来；之后写完报告和别的输出。
+    let aliases: String = (0..300).map(|i| format!("a{i}.ls-la.")).collect();
+    let shell = shell_script(
+        &dir,
+        &format!(
+            "printf '\\033]6973;{TOKEN};alias_values={aliases}'\nread line\nprintf 'tail\\007visible\\n'\nexec /bin/cat"
+        ),
+    );
+    let client = host.connect_in_process();
+    let options = SpawnOptions {
+        size: SIZE,
+        cwd: None,
+        integration: IntegrationMode::Off,
+        start: true,
+        shell: Some(shell),
+        settings: None,
+    };
+    let id = client.spawn(options).unwrap();
+    // 进程内的桌面收到报告的前半截时，宿主那份 VT 已经喂过它了（先转发再喂，都在会话线程里，
+    // 之后的 `Attach` 排在后面）。
+    let (tx, desktop) = mpsc::channel();
+    client.attach(id, Box::new(move |event| tx.send(event).is_ok())).unwrap();
+    let mut raw = Vec::new();
+    while !raw.windows(TOKEN.len()).any(|w| w == TOKEN.as_bytes()) {
+        if let HostEvent::Output(data) = desktop.recv_timeout(WAIT).expect("timed out") {
+            raw.extend_from_slice(&data);
+        }
+    }
+
+    let mut peer = Peer::hello(&socket, true);
+    let (channel, snapshot) = peer.attach(id, AttachMode::Snapshot);
+    assert!(snapshot.starts_with(b"GHOSTSNP"), "same build gets a snapshot");
+    let mut view = Session::from_snapshot(&snapshot, Box::new(|_| {})).unwrap();
+    peer.input(channel, b"go\r");
+    let deadline = Instant::now() + WAIT;
+    let mut output = Vec::new();
+    while !output.windows(7).any(|w| w == b"visible") {
+        let frame = peer.frames.recv_timeout(deadline.saturating_duration_since(Instant::now())).expect("timed out");
+        if frame.kind == FrameKind::Output && frame.channel == channel {
+            output.extend_from_slice(&frame.payload);
+        }
+    }
+    for (name, bytes) in [("snapshot", &snapshot), ("output", &output)] {
+        assert!(!bytes.windows(TOKEN.len()).any(|w| w == TOKEN.as_bytes()), "the {name} has the token");
+        assert!(!bytes.windows(12).any(|w| w == b"alias_values"), "the {name} has the report");
+    }
+    view.feed(&output);
+    assert!(!view.take_bell(), "the end of the report rang the bell");
+    peer.send(&ClientMsg::ReadScreen { id, lines: None });
+    let HostMsg::ScreenText { text, .. } = peer.reply() else { panic!("expected screen text") };
+    assert!(text.contains("visible"), "{text:?}");
+    assert_eq!(view.screen_text().unwrap().trim_end(), text.trim_end());
+    client.send(ClientMsg::Kill { id });
+}
+
+/// 会话被结束时，还排在积压的输出后面没连上的前端也有回话：`Attached`，接着 `Exited`，不会
+/// 干等到超时。
+#[test]
+fn clients_still_attaching_when_a_session_is_killed_get_an_answer() {
+    let dir = temp_dir("killq");
+    let (host, socket) = listen(&dir);
+    let client = host.connect_in_process();
+    let options = SpawnOptions {
+        size: SIZE,
+        cwd: None,
+        integration: IntegrationMode::Off,
+        start: true,
+        shell: Some(shell_script(&dir, "exec yes runode-kill-queued")),
+        settings: None,
+    };
+    let id = client.spawn(options).unwrap();
+    let (tx, desktop) = mpsc::channel();
+    client.attach(id, Box::new(move |event| tx.send(event).is_ok())).unwrap();
+    // 等它刷起屏来，读线程那边积压一大堆输出（调试构建里宿主的 VT 处理得慢得多）。
+    let mut flooded = 0;
+    while flooded < 64 * 1024 {
+        if let HostEvent::Output(data) = desktop.recv_timeout(WAIT).expect("timed out") {
+            flooded += data.len();
+        }
+    }
+    let mut peer = Peer::hello(&socket, false);
+    // 同一条连接上先连再结束：`Attach` 一定先送到会话线程，排在积压的输出后面。
+    peer.send(&ClientMsg::Attach { id, size: Some(SIZE), mode: AttachMode::VtReplay });
+    peer.send(&ClientMsg::Kill { id });
+    assert!(matches!(peer.reply(), HostMsg::Attached { id: attached, .. } if attached == id));
+    loop {
+        match peer.reply() {
+            HostMsg::Exited { id: exited, .. } => {
+                assert_eq!(exited, id);
+                break;
+            }
+            HostMsg::SnapshotEnd { .. } => {}
+            other => panic!("unexpected {other:?}"),
+        }
+    }
+}
+
 /// 会话被结束时，连着的前端收到 `Exited`。
 #[test]
 fn killing_a_session_tells_its_clients() {
