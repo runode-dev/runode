@@ -82,6 +82,18 @@ import Testing
         await link.stop()
     }
 
+    @Test func helloCarriesTheRenamedDevice() async throws {
+        let transport = FakeTransport()
+        supply.add(transport)
+        let link = connection()
+        await link.setDeviceName("书房的 iPhone")
+        await link.start()
+        var host = FakeHost(transport)
+        let hello = try await admit(&host)
+        #expect(hello["device"] as? String == "书房的 iPhone")
+        await link.stop()
+    }
+
     @Test func reconnectsAfterTheHostGoesAway() async throws {
         let first = FakeTransport()
         let second = FakeTransport()

@@ -20,6 +20,9 @@
                     destination(for: route)
                 }
             }
+            .sheet(isPresented: $app.showingSettings, onDismiss: app.settingsDismissed) {
+                SettingsView(app: app, settings: app.settings, machines: app.machineList)
+            }
             .sheet(item: $app.pairing) { model in
                 PairingView(model: model) { machine in
                     app.pairing = nil
@@ -50,7 +53,7 @@
                 }
             case .terminal(let machine, let session):
                 if let model = app.terminal(machine: machine, session: session) {
-                    TerminalScreen(model: model)
+                    TerminalScreen(model: model, preferences: app.settings.preferences)
                 } else {
                     ContentUnavailableView("找不到这个终端", systemImage: "terminal")
                 }

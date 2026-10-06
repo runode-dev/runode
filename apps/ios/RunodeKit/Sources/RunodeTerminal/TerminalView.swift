@@ -65,12 +65,26 @@
             }
         }
 
-        /// 默认字号（13 点）和可读的最小字号（9 点），都按动态字体放大缩小。
-        static func fontSizes(for traits: UITraitCollection) -> (base: CGFloat, readable: CGFloat) {
+        /// 用户在设置里定的字号（点）；为空时跟随系统的动态字体。
+        public var fontSizeOverride: CGFloat? {
+            didSet {
+                guard fontSizeOverride != oldValue else { return }
+                contentSizeDidChange()
+            }
+        }
+
+        /// 程序响铃时震一下。
+        public var bellHaptics = true
+
+        /// 默认字号（13 点）和可读的最小字号（9 点），都按动态字体放大缩小；用户定了字号时默认字号用它，
+        /// 可读的最小字号不超过它。
+        static func fontSizes(for traits: UITraitCollection, override: CGFloat? = nil) -> (
+            base: CGFloat, readable: CGFloat
+        ) {
             let metrics = UIFontMetrics(forTextStyle: .body)
-            let base = metrics.scaledValue(for: 13, compatibleWith: traits)
-            let readable = metrics.scaledValue(for: 9, compatibleWith: traits)
-            return (min(max(base, 11), 28), min(max(readable, 9), 20))
+            let base = override ?? min(max(metrics.scaledValue(for: 13, compatibleWith: traits), 11), 28)
+            let readable = min(max(metrics.scaledValue(for: 9, compatibleWith: traits), 9), 20)
+            return (base, min(readable, base))
         }
 
         /// 辅助栏上粘住的 Ctrl：下一个打的字按 Ctrl 组合键发。
@@ -128,15 +142,15 @@
             accessibilityLabel = "终端"
             accessibilityHint = "轻点两下打开键盘"
             accessibilityTraits = [.allowsDirectInteraction, .updatesFrequently]
-            setFont(TerminalFont(size: Self.fontSizes(for: traitCollection).base))
+            setFont(TerminalFont(size: Self.fontSizes(for: traitCollection, override: fontSizeOverride).base))
             registerForTraitChanges([UITraitPreferredContentSizeCategory.self]) { (view: TerminalView, _) in
                 view.contentSizeDidChange()
             }
         }
 
-        /// 动态字体改了：换字号，重新排网格、算「适配手机」的尺寸。
+        /// 动态字体或设置里的字号改了：换字号，重新排网格、算「适配手机」的尺寸。
         private func contentSizeDidChange() {
-            setFont(TerminalFont(size: Self.fontSizes(for: traitCollection).base))
+            setFont(TerminalFont(size: Self.fontSizes(for: traitCollection, override: fontSizeOverride).base))
             userZoomed = false
             layoutGrid()
             reportFitSize()
@@ -194,6 +208,7 @@
         }
 
         public func ringBell() {
+            guard bellHaptics else { return }
             // 连着响铃时最多每 200 毫秒震一下。
             let now = ContinuousClock.now
             guard now - lastBell > .milliseconds(200) else { return }
@@ -286,7 +301,7 @@
         /// 但字不小于可读字号，再宽的横着拖。捏合也不能缩到可读字号以下。
         private func applyDefaultZoom() {
             guard grid.gridSize.width > 0, bounds.width > 0 else { return }
-            let sizes = Self.fontSizes(for: traitCollection)
+            let sizes = Self.fontSizes(for: traitCollection, override: fontSizeOverride)
             let readable = min(sizes.readable / grid.font.size, 1)
             scrollView.minimumZoomScale = readable
             guard !userZoomed else { return }
@@ -393,12 +408,15 @@
                 fitting: bounds.size, scale: window?.screen.scale ?? traitCollection.displayScale, font: grid.font)
         }
 
-        /// 用终端的默认字号（按 `contentSize` 这档动态字体）铺满 `size`（点）的网格；新开会话时按它定尺寸。
+        /// 用终端的默认字号（按 `contentSize` 这档动态字体，或者用户定的 `fontSize`）铺满 `size`（点）的
+        /// 网格；新开会话时按它定尺寸。
         public static func gridSize(
-            fitting size: CGSize, scale: CGFloat, contentSize: UIContentSizeCategory = .large
+            fitting size: CGSize, scale: CGFloat, contentSize: UIContentSizeCategory = .large,
+            fontSize: CGFloat? = nil
         ) -> GridSize {
             let traits = UITraitCollection(preferredContentSizeCategory: contentSize)
-            return gridSize(fitting: size, scale: scale, font: TerminalFont(size: fontSizes(for: traits).base))
+            let base = fontSizes(for: traits, override: fontSize).base
+            return gridSize(fitting: size, scale: scale, font: TerminalFont(size: base))
         }
 
         static func gridSize(fitting size: CGSize, scale: CGFloat, font: TerminalFont) -> GridSize {

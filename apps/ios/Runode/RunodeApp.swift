@@ -28,15 +28,18 @@ enum AppComposition {
         let keyStore = KeychainDeviceKeyStore()
         let store = FileMachineStore(url: FileMachineStore.defaultURL())
         let discovery = BonjourDiscovery()
-        let identity = ClientIdentity(
-            build: buildIdentifier, deviceName: UIDevice.current.name)
+        let preferences = UserDefaultsPreferencesStore()
+        let systemName = UIDevice.current.name
         return AppDependencies(
             store: store, keyStore: keyStore, pairing: RemotePairing(keyStore: keyStore, discovery: discovery),
+            // 设备名按建连接时存着的设置取；之后改了由 `AppModel` 转给已有的连接。
             makeLink: { machine in
                 HostConnection(
-                    machine: machine, keyStore: keyStore, machines: store, discovery: discovery, identity: identity)
+                    machine: machine, keyStore: keyStore, machines: store, discovery: discovery,
+                    identity: ClientIdentity(
+                        build: buildIdentifier, deviceName: preferences.load().deviceName ?? systemName))
             },
-            deviceName: identity.deviceName, recents: UserDefaultsRecentTerminalStore())
+            deviceName: systemName, recents: UserDefaultsRecentTerminalStore(), preferences: preferences)
     }
 
     /// 启动后要做的事；演示模式下直接打开演示的终端，调试用的启动参数见 `DebugLaunch`。

@@ -14,7 +14,7 @@ public enum SizeOwnership: Hashable, Sendable {
 }
 
 /// 用户在终端页上选的尺寸方式。
-public enum SizePreference: Hashable, Sendable, CaseIterable {
+public enum SizePreference: String, Hashable, Sendable, CaseIterable, Codable {
     /// 按情况自动选：没有别的前端在决定尺寸时适配手机，有电脑在显示时跟随电脑。
     case automatic
     /// 按手机屏幕决定尺寸。
@@ -106,7 +106,8 @@ public final class TerminalModel {
     /// 时，重放完以后等宿主报 `SizeOwner` 的时间，等不到就当作没有 owner。
     public init(
         sessionId: SessionId, title: String, agent: Agent? = nil, link: any HostLink,
-        ownerHint: SizeOwnerHint = .unknown, ownerProbeDelay: Duration = .milliseconds(400),
+        ownerHint: SizeOwnerHint = .unknown, sizePreference: SizePreference = .automatic,
+        ownerProbeDelay: Duration = .milliseconds(400),
         onOpen: @escaping @MainActor (SessionId) -> Void = { _ in },
         onClose: @escaping @MainActor (SessionId) -> Void
     ) {
@@ -115,6 +116,7 @@ public final class TerminalModel {
         self.agent = agent
         self.link = link
         self.ownerHint = ownerHint
+        self.sizePreference = sizePreference
         self.ownerProbeDelay = ownerProbeDelay
         self.autoFit = ownerHint == .none
         self.onOpen = onOpen

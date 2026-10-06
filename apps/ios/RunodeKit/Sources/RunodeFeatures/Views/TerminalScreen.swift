@@ -9,6 +9,8 @@
     /// 键盘没弹出时底部常驻一条带「键盘」按钮的细栏。
     struct TerminalScreen: View {
         @Bindable var model: TerminalModel
+        /// 设置里的字号和响铃震动。
+        let preferences: AppPreferences
         /// 断线横幅占的高度，终端视图据此在顶上让出地方，横幅不挡内容。
         @State private var bannerHeight: CGFloat = 0
 
@@ -16,7 +18,8 @@
         private var scheme: ColorScheme { model.background.isDark ? .dark : .light }
 
         var body: some View {
-            TerminalViewRepresentable(model: model, topObstruction: bannerMessage == nil ? 0 : bannerHeight)
+            TerminalViewRepresentable(
+                model: model, preferences: preferences, topObstruction: bannerMessage == nil ? 0 : bannerHeight)
                 .ignoresSafeArea(.container, edges: .horizontal)
                 .overlay(alignment: .top) { banner }
                 .overlay(alignment: .bottomTrailing) {
@@ -216,6 +219,7 @@
     /// 把 UIKit 的 `TerminalView` 嵌进 SwiftUI，用户的输入转给视图模型。
     struct TerminalViewRepresentable: UIViewRepresentable {
         let model: TerminalModel
+        let preferences: AppPreferences
         /// 叠在终端顶上的横幅的高度。
         var topObstruction: CGFloat = 0
 
@@ -232,6 +236,8 @@
 
         func updateUIView(_ view: TerminalView, context: Context) {
             view.topObstruction = topObstruction
+            view.fontSizeOverride = preferences.fontSize.map { CGFloat($0) }
+            view.bellHaptics = preferences.bellHaptics
         }
 
         @MainActor

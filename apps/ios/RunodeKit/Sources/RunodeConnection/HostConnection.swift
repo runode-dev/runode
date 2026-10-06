@@ -25,7 +25,7 @@ public actor HostConnection: HostLink {
     private let keyStore: any DeviceKeyStore
     private let machines: any MachineStore
     private let discovery: any HostDiscovery
-    private let identity: ClientIdentity
+    private var identity: ClientIdentity
     private let policy: ReconnectPolicy
     private let open: TransportOpener
 
@@ -138,6 +138,11 @@ public actor HostConnection: HostLink {
         } else {
             backoffTask?.cancel()
         }
+    }
+
+    /// 下次握手起在 `Hello` 里报新的设备名；这次连接上已经报过的不改。
+    public func setDeviceName(_ name: String) {
+        identity.deviceName = name
     }
 
     public func nextRequestId() -> UInt32 {

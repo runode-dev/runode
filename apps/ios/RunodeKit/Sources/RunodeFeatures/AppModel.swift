@@ -18,16 +18,19 @@ public struct AppDependencies {
     public var pairing: any Pairing
     /// 给一台电脑建连接。
     public var makeLink: @MainActor (MachineRecord) -> any HostLink
-    /// 报给电脑的设备名。
+    /// 系统给的设备名；用户在设置里起了名字时报那个。
     public var deviceName: String
     /// 上次打开的终端记在哪里；不给时只记在内存里（测试、演示模式）。
     public var recents: any RecentTerminalStore
+    /// 设置存在哪里；不给时只记在内存里。
+    public var preferences: any PreferencesStore
 
     @MainActor
     public init(
         store: any MachineStore, keyStore: any DeviceKeyStore, pairing: any Pairing,
         makeLink: @escaping @MainActor (MachineRecord) -> any HostLink, deviceName: String,
-        recents: any RecentTerminalStore = MemoryRecentTerminalStore()
+        recents: any RecentTerminalStore = MemoryRecentTerminalStore(),
+        preferences: any PreferencesStore = MemoryPreferencesStore()
     ) {
         self.store = store
         self.keyStore = keyStore
@@ -35,6 +38,7 @@ public struct AppDependencies {
         self.makeLink = makeLink
         self.deviceName = deviceName
         self.recents = recents
+        self.preferences = preferences
     }
 }
 
@@ -49,7 +53,12 @@ public final class AppModel {
     }
     /// 配对页开着时的视图模型。
     public var pairing: PairingModel?
+    /// 设置页开着。
+    public var showingSettings = false
+    /// 在设置页里点了「配对新电脑」：设置页关掉以后再打开配对页，两个页面不叠着弹。
+    public var pairsAfterSettings = false
     public let machineList: MachineListModel
+    public let settings: SettingsModel
     /// 上次打开的终端，首页的「继续」用它。
     public private(set) var recent: RecentTerminal?
 
@@ -61,9 +70,11 @@ public final class AppModel {
     public init(dependencies: AppDependencies) {
         self.dependencies = dependencies
         machineList = MachineListModel(store: dependencies.store, keyStore: dependencies.keyStore)
+        settings = SettingsModel(store: dependencies.preferences, systemDeviceName: dependencies.deviceName)
         recent = dependencies.recents.load()
         machineList.willDelete = { [weak self] id in self?.forget(machine: id) }
         machineList.didLoad = { [weak self] in self?.syncConnections() }
+        settings.deviceNameDidChange = { [weak self] name in self?.deviceNameChanged(name) }
     }
 
     /// 打开一个终端页：在这台电脑的会话列表上时压在它上面，别处（首页、别的电脑）打开时连同它的
@@ -79,7 +90,7 @@ public final class AppModel {
 
     /// 打开配对页；`link` 是从别处（比如系统打开的 `runode://pair` 链接）带来的配对链接。
     public func startPairing(link: String? = nil) {
-        let model = PairingModel(pairing: dependencies.pairing, deviceName: dependencies.deviceName) {
+        let model = PairingModel(pairing: dependencies.pairing, deviceName: settings.deviceName) {
             [weak self] machine in
             await self?.machineList.add(machine)
         }
@@ -115,7 +126,7 @@ public final class AppModel {
             }
         let model = TerminalModel(
             sessionId: session, title: info?.meta.displayTitle ?? "终端", agent: info?.meta.agent,
-            link: list.link, ownerHint: hint,
+            link: list.link, ownerHint: hint, sizePreference: settings.preferences.defaultSize,
             onOpen: { [weak list] id in list?.screenOpened(id) },
             onClose: { [weak list] id in list?.screenClosed(id) })
         terminals[route] = model
@@ -176,6 +187,22 @@ public final class AppModel {
         guard entry != recent else { return }
         recent = entry
         dependencies.recents.save(entry)
+    }
+
+    /// 设置页关掉了：在里面点过「配对新电脑」的，这时打开配对页。
+    public func settingsDismissed() {
+        guard pairsAfterSettings else { return }
+        pairsAfterSettings = false
+        startPairing()
+    }
+
+    /// 设备名改了：各台电脑的连接下次连上时报新名字。新建的连接由 `AppDependencies.makeLink` 按存着的
+    /// 设置取名字。
+    private func deviceNameChanged(_ name: String) {
+        for list in sessionLists.values {
+            let link = list.link
+            Task { await link.setDeviceName(name) }
+        }
     }
 
     /// 要删掉的电脑：先退出它的页面、断开连接。

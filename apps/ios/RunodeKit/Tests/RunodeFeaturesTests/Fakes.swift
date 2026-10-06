@@ -16,6 +16,7 @@ final class FakeLink: HostLink {
         var stops = 0
         var reconnects = 0
         var request: UInt32 = 0
+        var deviceNames: [String] = []
     }
 
     private let state = Mutex(State())
@@ -25,6 +26,7 @@ final class FakeLink: HostLink {
     var starts: Int { state.withLock { $0.starts } }
     var stops: Int { state.withLock { $0.stops } }
     var subscriberCount: Int { state.withLock { $0.subscribers.count } }
+    var deviceNames: [String] { state.withLock { $0.deviceNames } }
 
     func clearSent() {
         state.withLock { $0.sent.removeAll() }
@@ -53,6 +55,7 @@ final class FakeLink: HostLink {
     func start() async { state.withLock { $0.starts += 1 } }
     func stop() async { state.withLock { $0.stops += 1 } }
     func reconnectNow() async { state.withLock { $0.reconnects += 1 } }
+    func setDeviceName(_ name: String) async { state.withLock { $0.deviceNames.append(name) } }
 
     func nextRequestId() async -> UInt32 {
         state.withLock {

@@ -14,17 +14,19 @@
         @Environment(\.displayScale) private var displayScale
         @Environment(\.dynamicTypeSize) private var dynamicTypeSize
         @State private var choosingSpawnMachine = false
-        /// 新开会话用的网格尺寸，按首页的大小（和终端页差不多）算。
-        @State private var spawnSize: GridSize?
+        /// 首页的大小，和终端页差不多；新开会话按它和设置里的字号算网格尺寸。
+        @State private var pageSize: CGSize?
 
         var body: some View {
             content
                 .leadingNavigationTitle("Runode", showsMark: true)
-                .task(id: machines.machines.map(\.id)) { await app.keepHomeRefreshing() }
-                .onGeometryChange(for: CGSize.self) { $0.size } action: { size in
-                    spawnSize = TerminalView.gridSize(
-                        fitting: size, scale: displayScale, contentSize: UIContentSizeCategory(dynamicTypeSize))
+                .toolbar {
+                    ToolbarItem(placement: .primaryAction) {
+                        Button("设置", systemImage: "gearshape") { app.showingSettings = true }
+                    }
                 }
+                .task(id: machines.machines.map(\.id)) { await app.keepHomeRefreshing() }
+                .onGeometryChange(for: CGSize.self) { $0.size } action: { pageSize = $0 }
                 .confirmationDialog("在哪台电脑上新开终端？", isPresented: $choosingSpawnMachine, titleVisibility: .visible) {
                     ForEach(app.spawnableLists, id: \.machine.id) { list in
                         Button(list.machine.name) { spawn(on: list) }
@@ -189,7 +191,11 @@
         }
 
         private func spawn(on list: SessionListModel) {
-            if let spawnSize { list.spawnSize = spawnSize }
+            if let pageSize {
+                list.spawnSize = TerminalView.gridSize(
+                    fitting: pageSize, scale: displayScale, contentSize: UIContentSizeCategory(dynamicTypeSize),
+                    fontSize: app.settings.preferences.fontSize.map { CGFloat($0) })
+            }
             Task { await list.spawn() }
         }
 

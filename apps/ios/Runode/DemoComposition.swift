@@ -39,7 +39,7 @@
         }
 
         /// 参数里还带着 `terminal` 时直接打开等回答的那个会话的终端页，`shell` 时打开普通 shell 的，
-        /// `list` 时打开会话列表，`pair` 时打开配对页，不带参数停在首页。再带上 `offline` 时连上一会儿
+        /// `list` 时打开会话列表，`pair` 时打开配对页，`settings` 时打开设置页，不带参数停在首页。再带上 `offline` 时连上一会儿
         /// 后假装断线。
         static func openIfRequested(_ app: AppModel) {
             guard requested else { return }
@@ -52,6 +52,8 @@
                 app.path = [.machine(machine.id)]
             } else if arguments.contains("pair") {
                 app.startPairing()
+            } else if arguments.contains("settings") {
+                app.showingSettings = true
             }
         }
     }
@@ -92,6 +94,7 @@
         func start() async {}
         func stop() async {}
         func reconnectNow() async {}
+        func setDeviceName(_ name: String) async {}
         func nextRequestId() async -> UInt32 { 0 }
     }
 
@@ -192,6 +195,7 @@
         func start() async {}
         func stop() async {}
         func reconnectNow() async {}
+        func setDeviceName(_ name: String) async {}
 
         private let request = Mutex<UInt32>(0)
         func nextRequestId() async -> UInt32 {
