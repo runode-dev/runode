@@ -10,7 +10,7 @@ use std::{
 };
 
 use common::{BUILD, Peer, SIZE, WAIT, contains, host, listen, script, temp_dir};
-use runode_host::{ClientMsg, Host, HostMsg, Placement, SessionId, SpawnOptions, Stopped};
+use runode_host::{ClientMsg, Host, HostMsg, Placement, SessionId, Stopped};
 use runode_protocol::{
     AttachMode, BuildId, Caps, ClientKind, FrameKind, GoodbyeReason, PROTOCOL_VERSION, PaneLayout, PaneRect, TabLayout,
     WindowLayout, WorkspaceLayout,
@@ -261,10 +261,9 @@ fn socket_clients_can_change_the_theme() {
     desktop.send(&ClientMsg::Kill { id });
 }
 
-/// shell 集成的报告带着口令，转给连接上的前端时抹掉内容，报告被切在两块输出之间也一样；旧的
-/// 进程内通路照旧原样收。之后连上来的前端拿到的屏幕（VT 重放）里本来就没有这些报告。
+/// shell 集成的报告带着口令，转给连接上的前端（经 socket 的、经一对 socket 的桌面）时抹掉内容，
+/// 报告被切在两块输出之间也一样。之后连上来的前端拿到的屏幕（VT 重放）里本来就没有这些报告。
 #[test]
-#[allow(deprecated)]
 fn shell_reports_do_not_leave_the_host() {
     const TOKEN: &str = "0123456789abcdef0123456789abcdef";
     let dir = temp_dir("redact");
@@ -275,24 +274,12 @@ fn shell_reports_do_not_leave_the_host() {
         "shell.sh",
         &format!("printf '\\033]6973;{TOKEN};cwd=/tm'\nsleep 0.3\nprintf 'p\\007visible\\n'\nexec /bin/cat"),
     );
-    let client = host.connect_in_process();
-    let id = client
-        .spawn(SpawnOptions {
-            size: SIZE,
-            cwd: None,
-            integration: IntegrationMode::Off,
-            start: false,
-            shell: Some(shell),
-            settings: None,
-        })
-        .unwrap();
-    let (tx, in_process) = mpsc::channel();
-    client.attach(id, Box::new(move |event| tx.send(event).is_ok())).unwrap();
+    let mut pair = Peer::pair(&host);
+    let id = pair.spawn_with(&shell, false, Vec::new(), None);
+    let (pair_channel, _) = pair.attach(id, AttachMode::Snapshot);
     let mut peer = Peer::hello(&socket, false);
     let (channel, _) = peer.attach(id, AttachMode::VtReplay);
-    let mut pair = Peer::pair(&host);
-    let (pair_channel, _) = pair.attach(id, AttachMode::Snapshot);
-    client.start(id, IntegrationMode::Off);
+    pair.send(&ClientMsg::Start { id, integration: IntegrationMode::Off });
 
     for (peer, channel) in [(&peer, channel), (&pair, pair_channel)] {
         let output = peer.wait_for_output(channel, b"visible");
@@ -301,31 +288,22 @@ fn shell_reports_do_not_leave_the_host() {
         assert!(text.contains("\x1b]6973;\x07visible"), "{text:?}");
     }
 
-    let mut raw = Vec::new();
-    while !contains(&raw, b"visible") {
-        if let runode_host::HostEvent::Output(data) = in_process.recv_timeout(WAIT).expect("timed out") {
-            raw.extend_from_slice(&data);
-        }
-    }
-    assert!(String::from_utf8_lossy(&raw).contains(&format!("\x1b]6973;{TOKEN};cwd=/tmp\x07")));
-
     let mut late = Peer::hello(&socket, false);
     let (_, screen) = late.attach(id, AttachMode::VtReplay);
     let screen = String::from_utf8_lossy(&screen);
     assert!(screen.contains("visible") && !screen.contains(TOKEN), "{screen:?}");
-    client.send(ClientMsg::Kill { id });
+    pair.send(&ClientMsg::Kill { id });
 }
 
 /// 报告写到一半时连上来要快照：宿主那份 VT 正停在报告里，没写完的报告连着口令在它的续接里。
 /// 前端收到的快照和之后的输出里都没有口令；解出快照接着喂输出，屏幕和宿主读到的一样。
 #[test]
-#[allow(deprecated)]
 fn a_snapshot_taken_inside_a_shell_report_has_no_token() {
     use runode_terminal::session::Session;
 
     const TOKEN: &str = "0123456789abcdef0123456789abcdef";
     let dir = temp_dir("midreport");
-    let (host, socket) = listen(&dir);
+    let (_host, socket) = listen(&dir);
     // 报告的前半截写出去后停下等一行输入，前端这时连上来；之后写完报告和别的输出。
     let aliases: String = (0..300).map(|i| format!("a{i}.ls-la.")).collect();
     let shell = script(
@@ -335,26 +313,13 @@ fn a_snapshot_taken_inside_a_shell_report_has_no_token() {
             "printf '\\033]6973;{TOKEN};alias_values={aliases}'\nread line\nprintf 'tail\\007visible\\n'\nexec /bin/cat"
         ),
     );
-    let client = host.connect_in_process();
-    let options = SpawnOptions {
-        size: SIZE,
-        cwd: None,
-        integration: IntegrationMode::Off,
-        start: true,
-        shell: Some(shell),
-        settings: None,
-    };
-    let id = client.spawn(options).unwrap();
-    // 进程内的前端收到报告的前半截时，宿主那份 VT 已经喂过它了（先转发再喂，都在会话线程里，
-    // 之后的 `Attach` 排在后面）。原样收的只有进程内这条旧通路，借它看报告写到了哪里。
-    let (tx, in_process) = mpsc::channel();
-    client.attach(id, Box::new(move |event| tx.send(event).is_ok())).unwrap();
-    let mut raw = Vec::new();
-    while !contains(&raw, TOKEN.as_bytes()) {
-        if let runode_host::HostEvent::Output(data) = in_process.recv_timeout(WAIT).expect("timed out") {
-            raw.extend_from_slice(&data);
-        }
-    }
+    // 先连上一个前端看着输出：它收到抹过的报告开头时，宿主那份 VT 已经喂过报告的前半截（先转发
+    // 再喂，都在会话线程里，之后的 `Attach` 排在后面）。
+    let mut watcher = Peer::hello(&socket, false);
+    let id = watcher.spawn_with(&shell, false, Vec::new(), None);
+    let (watched, _) = watcher.attach(id, AttachMode::VtReplay);
+    watcher.send(&ClientMsg::Start { id, integration: IntegrationMode::Off });
+    watcher.wait_for_output(watched, b"\x1b]6973;");
 
     let mut peer = Peer::hello(&socket, true);
     let (channel, snapshot) = peer.attach(id, AttachMode::Snapshot);
@@ -372,7 +337,7 @@ fn a_snapshot_taken_inside_a_shell_report_has_no_token() {
     let HostMsg::ScreenText { text, .. } = peer.reply() else { panic!("expected screen text") };
     assert!(text.contains("visible"), "{text:?}");
     assert_eq!(view.screen_text().unwrap().trim_end(), text.trim_end());
-    client.send(ClientMsg::Kill { id });
+    peer.send(&ClientMsg::Kill { id });
 }
 
 /// 会话被结束时，还排在积压的输出后面没连上的前端也有回话：`Attached`，接着 `Exited`，不会
@@ -548,22 +513,21 @@ fn window_requests_follow_the_latest_desktop() {
     }
 }
 
-/// 没有界面连接时退回旧的进程内通路登记的界面（`Host::set_ui`），界面没回话就丢掉请求时回 `Error`。
+/// 没有界面连接时，开终端、切到终端的请求都回 `Error`，连接照旧。
 #[test]
-#[allow(deprecated)]
-fn window_requests_fall_back_to_the_in_process_handler() {
-    let dir = temp_dir("uiold");
-    let (host, socket) = listen(&dir);
+fn window_requests_without_a_desktop_fail() {
+    let dir = temp_dir("nowindow");
+    let (_host, socket) = listen(&dir);
     let mut peer = Peer::hello(&socket, false);
-    let open = |req| ClientMsg::Open { req, placement: Placement::Tab, near: None, cwd: None, focus: false };
-    host.set_ui(Box::new(|request| match request.message {
-        ClientMsg::Open { req, .. } => request.reply(HostMsg::Opened { req, id: SessionId(9) }),
-        _ => drop(request),
-    }));
-    peer.send(&open(2));
-    assert_eq!(peer.reply(), HostMsg::Opened { req: 2, id: SessionId(9) });
+    peer.send(&ClientMsg::Open { req: 2, placement: Placement::Tab, near: None, cwd: None, focus: false });
+    assert!(
+        matches!(peer.reply(), HostMsg::Error { req: Some(2), message, .. } if message.contains("no runode window"))
+    );
     peer.send(&ClientMsg::Reveal { req: 3, id: SessionId(9) });
-    assert!(matches!(peer.reply(), HostMsg::Error { req: Some(3), .. }));
+    assert!(
+        matches!(peer.reply(), HostMsg::Error { req: Some(3), message, .. } if message.contains("no runode window"))
+    );
+    assert!(peer.sessions().is_empty());
 }
 
 /// `claimed` 只算桌面的界面连着的（只看状态的也算），命令行连着的不算。
@@ -621,73 +585,6 @@ fn bells_follow_the_output_that_rang() {
         }
     }
     viewer.send(&ClientMsg::Kill { id });
-}
-
-/// 列会话、读屏幕要等会话线程回话，等的时候同一条连接上的输入照常转发：这里有个会话的线程被
-/// 进程内旧通路的前端卡住，答不了话。
-#[test]
-#[allow(deprecated)]
-fn waiting_for_answers_does_not_hold_up_input() {
-    let dir = temp_dir("nonblock");
-    let (host, socket) = listen(&dir);
-    let client = host.connect_in_process();
-    let stuck = client
-        .spawn(SpawnOptions {
-            size: SIZE,
-            cwd: None,
-            integration: IntegrationMode::Off,
-            start: true,
-            shell: Some("/bin/cat".into()),
-            settings: None,
-        })
-        .unwrap();
-    let (release, released) = mpsc::channel::<()>();
-    client
-        .attach(
-            stuck,
-            Box::new(move |event| {
-                if matches!(event, runode_host::HostEvent::Output(_)) {
-                    // 卡住会话线程，直到测试放开（丢掉发送的一端）。
-                    let _ = released.recv();
-                }
-                true
-            }),
-        )
-        .unwrap();
-    client.input(stuck, b"x\r".to_vec());
-
-    let mut peer = Peer::hello(&socket, false);
-    let id = peer.spawn("/bin/cat");
-    let (channel, _) = peer.attach(id, AttachMode::VtReplay);
-    // 等卡住的那个会话真的卡住：它答不了列会话。
-    thread::sleep(Duration::from_millis(200));
-    peer.send(&ClientMsg::ListSessions);
-    peer.send(&ClientMsg::ReadScreen { id: stuck, lines: None, command: None });
-    peer.input(channel, b"through\r");
-    peer.wait(channel, |message, output| {
-        assert!(
-            !matches!(message, Some(HostMsg::SessionList { .. } | HostMsg::ScreenText { .. })),
-            "answered while a session was stuck"
-        );
-        contains(output, b"through")
-    });
-    drop(release);
-    let mut answers = Vec::new();
-    while answers.len() < 2 {
-        match peer.reply() {
-            HostMsg::SessionList { sessions } => {
-                assert_eq!(sessions.len(), 2);
-                answers.push("list");
-            }
-            HostMsg::ScreenText { id: read, .. } => {
-                assert_eq!(read, stuck);
-                answers.push("read");
-            }
-            _ => {}
-        }
-    }
-    peer.send(&ClientMsg::Kill { id });
-    client.send(ClientMsg::Kill { id: stuck });
 }
 
 /// 有没有带着 `marker` 的进程在跑。

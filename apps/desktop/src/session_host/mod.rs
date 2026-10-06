@@ -106,10 +106,11 @@ pub fn link() -> &'static Link {
     &LINK
 }
 
-/// 宿主现在怎么跑。
+/// 宿主现在怎么跑；`start` 还没定下时等它，同 `link`。
 // 退出（是否保留会话）和断开后的提示用上它之前先放着。
 #[allow(dead_code)]
 pub fn mode() -> Mode {
+    link();
     *MODE.lock().unwrap_or_else(PoisonError::into_inner)
 }
 

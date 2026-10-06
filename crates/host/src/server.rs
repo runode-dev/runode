@@ -581,7 +581,7 @@ impl Connection {
             }
             ClientMsg::Spawn { req, size, cwd, integration, start, shell, settings, env } => {
                 let options = SpawnOptions { size, cwd, integration, start, shell, settings };
-                match self.shared.spawn(options, false, env) {
+                match self.shared.spawn(options, env) {
                     Ok(id) => self.out.control(&HostMsg::Spawned { req, id }),
                     Err(err) => {
                         self.out.control(&HostMsg::Error { req: Some(req), id: None, message: format!("{err:#}") })
@@ -645,7 +645,7 @@ impl Connection {
     }
 
     /// 把要界面办的请求转给现在的界面（最近连上的 `ClientKind::Desktop` 连接）。没有界面连接
-    /// 时交给旧的进程内通路登记的界面（`Host::set_ui`），也没有时回一句没办成。
+    /// 时回一句没办成。
     fn to_ui(&self, req: u32, request: ClientMsg) {
         let mut peers = self.shared.peers();
         if let Some(&desktop) = peers.desktops.last()
@@ -670,21 +670,7 @@ impl Connection {
             return;
         }
         drop(peers);
-        #[allow(deprecated)]
-        let handler = self.shared.ui.lock().unwrap_or_else(std::sync::PoisonError::into_inner).clone();
-        match handler {
-            Some(handler) => {
-                let out = self.out.clone();
-                #[allow(deprecated)]
-                handler(crate::UiRequest::new(
-                    request,
-                    Box::new(move |reply| {
-                        out.control(&reply);
-                    }),
-                ));
-            }
-            None => self.error(Some(req), None, "there is no runode window to do this in".into()),
-        }
+        self.error(Some(req), None, "there is no runode window to do this in".into());
     }
 
     /// 界面回话：转给发请求的一方。只认被转去的那个界面回的；对不上的（请求已经回过、不是转给
@@ -835,4 +821,122 @@ fn session_sink(id: SessionId, channel: u32, meta_only: bool, out: Outbox) -> Ev
             out.control(&message)
         }
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use runode_protocol::{BuildId, Caps};
+    use runode_shared_types::shell::IntegrationMode;
+
+    use super::*;
+
+    const SIZE: GridSize = GridSize { cols: 20, rows: 4, cell_width_px: 8, cell_height_px: 16 };
+    const WAIT: Duration = Duration::from_secs(10);
+
+    fn send(stream: &mut UnixStream, message: &ClientMsg) {
+        let frame = Frame::control(message).unwrap();
+        write_frame(stream, frame.kind, 0, &frame.payload).unwrap();
+    }
+
+    /// 后台线程把读到的帧交过来，测试按超时等。
+    fn frames(stream: &UnixStream) -> mpsc::Receiver<Frame> {
+        let mut reader = stream.try_clone().unwrap();
+        let (tx, rx) = mpsc::channel();
+        thread::spawn(move || {
+            while let Ok(Some(frame)) = read_frame(&mut reader) {
+                if tx.send(frame).is_err() {
+                    break;
+                }
+            }
+        });
+        rx
+    }
+
+    fn message(frames: &mpsc::Receiver<Frame>) -> HostMsg {
+        loop {
+            let frame = frames.recv_timeout(WAIT).expect("timed out");
+            if frame.kind == FrameKind::Control {
+                return frame.message().unwrap();
+            }
+        }
+    }
+
+    /// 列会话、读屏幕要等会话线程回话，等的时候同一条连接上的输入照常转发：这里有个会话的线程
+    /// 卡在一个不返回的 `Subscribe::start` 里，答不了话。
+    #[test]
+    fn waiting_for_answers_does_not_hold_up_input() {
+        let host = Host::new(BuildId("test".into()));
+        let options = |shell: &str| SpawnOptions {
+            size: SIZE,
+            cwd: None,
+            integration: IntegrationMode::Off,
+            start: true,
+            shell: Some(shell.into()),
+            settings: None,
+        };
+        let stuck = host.shared.spawn(options("/bin/cat"), Vec::new()).unwrap();
+        let (release, released) = mpsc::channel::<()>();
+        let (entered, stuck_now) = mpsc::channel();
+        let start = Box::new(move |_: Screen| {
+            let _ = entered.send(());
+            // 卡住会话线程，直到测试放开（丢掉发送的一端）。
+            let _ = released.recv();
+            None
+        });
+        let subscribe = Subscribe { connection: 0, size: None, mode: AttachMode::MetaOnly, start, desktop: false };
+        assert!(host.shared.deliver(stuck, Inbox::Subscribe(subscribe)));
+        stuck_now.recv_timeout(WAIT).unwrap();
+
+        let mut stream = host.connect_pair().unwrap();
+        let frames = frames(&stream);
+        send(
+            &mut stream,
+            &ClientMsg::Hello {
+                protocol: PROTOCOL_VERSION,
+                build: BuildId("test".into()),
+                client: ClientKind::Cli,
+                caps: Caps::default(),
+                session: None,
+            },
+        );
+        assert!(matches!(message(&frames), HostMsg::Welcome { .. }));
+        let other = host.shared.spawn(options("/bin/cat"), Vec::new()).unwrap();
+        send(&mut stream, &ClientMsg::Attach { id: other, size: None, mode: AttachMode::VtReplay });
+        let channel = loop {
+            if let HostMsg::Attached { channel, .. } = message(&frames) {
+                break channel;
+            }
+        };
+        send(&mut stream, &ClientMsg::ListSessions);
+        send(&mut stream, &ClientMsg::ReadScreen { id: stuck, lines: None, command: None });
+        write_frame(&mut stream, FrameKind::Input, channel, b"through\r").unwrap();
+        let mut output = Vec::new();
+        while !output.windows(7).any(|w| w == b"through") {
+            let frame = frames.recv_timeout(WAIT).expect("timed out");
+            match frame.kind {
+                FrameKind::Output if frame.channel == channel => output.extend_from_slice(&frame.payload),
+                FrameKind::Control => assert!(
+                    !matches!(frame.message().unwrap(), HostMsg::SessionList { .. } | HostMsg::ScreenText { .. }),
+                    "answered while a session was stuck"
+                ),
+                _ => {}
+            }
+        }
+        drop(release);
+        let mut answers = Vec::new();
+        while answers.len() < 2 {
+            match message(&frames) {
+                HostMsg::SessionList { sessions } => {
+                    assert_eq!(sessions.len(), 2);
+                    answers.push("list");
+                }
+                HostMsg::ScreenText { id, .. } => {
+                    assert_eq!(id, stuck);
+                    answers.push("read");
+                }
+                _ => {}
+            }
+        }
+        host.shared.kill_all();
+    }
 }

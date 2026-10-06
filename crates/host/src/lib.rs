@@ -13,10 +13,6 @@
 //! 宿主不管窗口：要界面办的请求（`Open`、`Reveal`、`Layout`）包成 `HostMsg::UiRequest` 转给
 //! 登记为界面的那条连接（`Hello` 里说自己是 `ClientKind::Desktop` 的），界面用 `ClientMsg::UiReply`
 //! 回话，宿主再原样转回发请求的一方。
-//!
-//! 旧的进程内通路（`Host::connect_in_process` 拿到的 `Client`，经 channel 收 `HostEvent`，
-//! 以及 `Host::set_ui` 登记的 `UiHandler`）还留着给桌面过渡，都标了弃用，桌面改走
-//! `connect_pair` 后删掉。
 
 mod idle;
 mod launch;
@@ -33,85 +29,11 @@ use std::{
     },
 };
 
-use anyhow::{Result, anyhow};
+use anyhow::Result;
 pub use idle::Stopped;
 pub use launch::launch;
 pub use runode_protocol::{BuildId, ClientMsg, HostMsg, Placement, SessionId};
-use runode_shared_types::{grid::GridSize, session::SessionMeta, settings::TermSettings, shell::IntegrationMode};
-
-/// 宿主发给进程内前端的一件事，同一个会话的按发生的先后到达。
-#[deprecated(note = "attach over `Host::connect_pair` and read `runode_protocol` frames instead")]
-#[derive(Clone, Debug, PartialEq)]
-pub enum HostEvent {
-    /// PTY 的输出，原样的字节；也可能是宿主为清屏插进输出流的字节，见 `ClientMsg::ClearScreen`。
-    /// 进程内的前端收到的是原样的，连接上的前端收到的抹掉了 shell 集成报告的内容。
-    Output(Arc<[u8]>),
-    /// 控制消息。装在盒子里：输出最常见，每件事挪动时不必带着最大那种消息的大小。
-    Msg(Box<HostMsg>),
-}
-
-#[allow(deprecated)]
-impl HostEvent {
-    pub fn msg(message: HostMsg) -> Self {
-        Self::Msg(Box::new(message))
-    }
-}
-
-/// 收一个会话的 `HostEvent` 的一方，在会话的线程里调用，不能阻塞。返回 false 表示不再要了，
-/// 之后不再调用。
-#[deprecated(note = "attach over `Host::connect_pair` and read `runode_protocol` frames instead")]
-#[allow(deprecated)]
-pub type Sink = Box<dyn FnMut(HostEvent) -> bool + Send>;
-
-/// 要 app 的界面去办的请求：`ClientMsg::Open`、`ClientMsg::Reveal`。宿主不管窗口，没有登记为
-/// 界面的连接时把这样的请求交给 `Host::set_ui` 登记的界面。界面办完了用 `reply` 回话；没回就
-/// 丢掉时替它回一句 `HostMsg::Error`，发请求的一方不会白等。
-#[deprecated(note = "the desktop receives `HostMsg::UiRequest` over its connection instead")]
-pub struct UiRequest {
-    pub message: ClientMsg,
-    reply: Option<Box<dyn FnOnce(HostMsg) + Send>>,
-}
-
-#[allow(deprecated)]
-impl UiRequest {
-    pub(crate) fn new(message: ClientMsg, reply: Box<dyn FnOnce(HostMsg) + Send>) -> Self {
-        Self { message, reply: Some(reply) }
-    }
-
-    /// 请求的编号，回话时带上。
-    pub fn req(&self) -> Option<u32> {
-        match self.message {
-            ClientMsg::Open { req, .. } | ClientMsg::Reveal { req, .. } | ClientMsg::Layout { req } => Some(req),
-            _ => None,
-        }
-    }
-
-    pub fn reply(mut self, message: HostMsg) {
-        if let Some(reply) = self.reply.take() {
-            reply(message);
-        }
-    }
-
-    /// 回一句没办成。
-    pub fn fail(self, message: impl Into<String>) {
-        let req = self.req();
-        self.reply(HostMsg::Error { req, id: None, message: message.into() });
-    }
-}
-
-#[allow(deprecated)]
-impl Drop for UiRequest {
-    fn drop(&mut self) {
-        if let Some(reply) = self.reply.take() {
-            reply(HostMsg::Error { req: self.req(), id: None, message: "the runode app dropped the request".into() });
-        }
-    }
-}
-
-/// 收 `UiRequest` 的界面，在发请求的连接的线程里调用，不能阻塞，自己转到界面的线程去办。
-#[deprecated(note = "the desktop receives `HostMsg::UiRequest` over its connection instead")]
-#[allow(deprecated)]
-pub type UiHandler = Box<dyn Fn(UiRequest) + Send + Sync>;
+use runode_shared_types::{grid::GridSize, settings::TermSettings, shell::IntegrationMode};
 
 /// 新开一个会话。
 #[derive(Clone, Debug)]
@@ -130,19 +52,6 @@ pub struct SpawnOptions {
     pub settings: Option<TermSettings>,
 }
 
-/// 进程内连上一个会话时宿主给的东西。前端按 `size` 和 `settings` 新建自己的 VT，接着按先后处理
-/// `Sink` 收到的事件：会话开出来以后、连上之前的输出和标记会先补发，所以两份 VT 从同一个起点
-/// 喂同样的字节。
-#[deprecated(note = "attach over `Host::connect_pair`; `HostMsg::Attached` carries the same")]
-#[derive(Clone, Debug, PartialEq)]
-pub struct Attached {
-    pub size: GridSize,
-    pub settings: TermSettings,
-    pub meta: SessionMeta,
-    /// shell 已经启动了。
-    pub started: bool,
-}
-
 /// 宿主本身。可以随意克隆，各份是同一个宿主。
 #[derive(Clone)]
 pub struct Host {
@@ -157,13 +66,10 @@ struct Shared {
     registry: Mutex<Registry>,
     /// 要不要把 shell 集成报告的命令记进历史文件，见 `ClientMsg::SetOptions`。
     record_history: Arc<AtomicBool>,
-    /// 下一条连接（含旧的进程内连接）的编号。
+    /// 下一条连接的编号。
     next_connection: AtomicU64,
     /// 之后启动的 shell 另外设的环境变量，见 `Host::set_env`。
     env: Mutex<Vec<(String, OsString)>>,
-    /// 旧的进程内通路办 `UiRequest` 的界面，见 `Host::set_ui`。
-    #[allow(deprecated)]
-    ui: Mutex<Option<Arc<UiHandler>>>,
     /// 连着的前端、转给界面的请求，以及监听和退出的状态，见 `server::Peers`。锁的先后：拿着它时
     /// 可以再拿 `registry`，反过来不行。
     peers: Mutex<server::Peers>,
@@ -210,10 +116,9 @@ impl Shared {
         self.next_connection.fetch_add(1, Ordering::Relaxed)
     }
 
-    /// 新开一个会话，返回它的标识。`keep_backlog` 时攒着连上之前的事件，见 `Inbox::Attach`；
-    /// `extra_env` 是这一个会话另外设的环境变量，盖过 `Host::set_env` 设的同名变量，但盖不了
+    /// 新开一个会话，返回它的标识。`extra_env` 是这一个会话另外设的环境变量，盖过 `Host::set_env` 设的同名变量，但盖不了
     /// `runode_protocol::ENV_SESSION`。
-    fn spawn(&self, options: SpawnOptions, keep_backlog: bool, extra_env: Vec<(String, String)>) -> Result<SessionId> {
+    fn spawn(&self, options: SpawnOptions, extra_env: Vec<(String, String)>) -> Result<SessionId> {
         let id = SessionId::random()?;
         let (settings, generation) = {
             let registry = self.registry();
@@ -231,7 +136,7 @@ impl Shared {
         }
         env.retain(|(k, _)| k != runode_protocol::ENV_SESSION);
         env.push((runode_protocol::ENV_SESSION.into(), id.to_string().into()));
-        let handle = session::spawn(id, options, settings, env, self.record_history.clone(), keep_backlog)?;
+        let handle = session::spawn(id, options, settings, env, self.record_history.clone())?;
         let mut registry = self.registry();
         // 这期间换过主题的话，那次换主题没赶上这个会话，补上。
         if registry.theme_generation != generation {
@@ -286,26 +191,10 @@ impl Host {
             record_history: Arc::new(AtomicBool::new(true)),
             next_connection: AtomicU64::new(1),
             env: Mutex::default(),
-            ui: Mutex::default(),
             peers: Mutex::default(),
             peers_changed: Condvar::new(),
         };
         Self { shared: Arc::new(shared) }
-    }
-
-    /// 在进程内连上宿主。
-    #[deprecated(note = "use `Host::connect_pair` and speak `runode_protocol` over it")]
-    #[allow(deprecated)]
-    pub fn connect_in_process(&self) -> Client {
-        Client { shared: self.shared.clone(), connection: self.shared.next_connection() }
-    }
-
-    /// 登记办 `UiRequest` 的界面，换掉之前登记的。有登记为界面的连接（`ClientKind::Desktop`）时
-    /// 请求先交给连接。
-    #[deprecated(note = "connect with `ClientKind::Desktop` and answer `HostMsg::UiRequest` instead")]
-    #[allow(deprecated)]
-    pub fn set_ui(&self, handler: UiHandler) {
-        *self.shared.ui.lock().unwrap_or_else(PoisonError::into_inner) = Some(Arc::new(handler));
     }
 
     /// 之后启动的每个 shell 都设上这个环境变量，同名的换掉；已经启动的不受影响。每个 shell
@@ -314,74 +203,5 @@ impl Host {
         let mut env = self.shared.env.lock().unwrap_or_else(PoisonError::into_inner);
         env.retain(|(k, _)| k != key);
         env.push((key.into(), value.into()));
-    }
-}
-
-/// 进程内连到宿主的一个前端。克隆出来的是同一个连接。
-#[deprecated(note = "use `Host::connect_pair` and speak `runode_protocol` over it")]
-#[derive(Clone)]
-pub struct Client {
-    shared: Arc<Shared>,
-    connection: u64,
-}
-
-#[allow(deprecated)]
-impl Client {
-    /// 新开一个会话，返回它的标识。伪终端开不了、`start` 时 shell 启动不了时返回错误。开好的
-    /// 会话不会自动连上，接着 `attach`。
-    pub fn spawn(&self, options: SpawnOptions) -> Result<SessionId> {
-        self.shared.spawn(options, true, Vec::new())
-    }
-
-    /// 连上会话，之后它的事件交给 `sink`。这样一个会话只能连一次，第二次返回错误。
-    pub fn attach(&self, id: SessionId, mut sink: Sink) -> Result<Attached> {
-        let (reply, attached) = std::sync::mpsc::channel();
-        let sink: session::EventSink = Box::new(move |event| {
-            sink(match event {
-                session::Event::Output(data) => HostEvent::Output(data),
-                session::Event::Msg(message) => HostEvent::Msg(message),
-            })
-        });
-        let attach = session::Inbox::Attach { connection: self.connection, sink, reply };
-        if !self.shared.deliver(id, attach) {
-            return Err(anyhow!("no session {id}"));
-        }
-        let attached = attached.recv().map_err(|_| anyhow!("session {id} ended before it was attached"))??;
-        Ok(Attached {
-            size: attached.size,
-            settings: attached.settings,
-            meta: attached.meta,
-            started: attached.started,
-        })
-    }
-
-    /// 启动 `SpawnOptions::start` 为 false 时开的会话的 shell。启动不了时宿主发 `HostMsg::Exited`。
-    pub fn start(&self, id: SessionId, integration: IntegrationMode) {
-        self.shared.send(id, session::Inbox::Start { integration });
-    }
-
-    /// 把输入写给会话里的程序，不等它写出去。
-    pub fn input(&self, id: SessionId, data: Vec<u8>) {
-        self.shared.send(id, session::Inbox::Input(data));
-    }
-
-    /// 发一条控制消息。进程内用不着的（`Hello`、`Spawn`、`Attach` 等，换成了上面的方法）记一笔
-    /// 日志后忽略。
-    pub fn send(&self, message: ClientMsg) {
-        match message {
-            ClientMsg::Resize { id, size } => self.shared.send(id, session::Inbox::Resize(size)),
-            ClientMsg::ClearScreen { id } => self.shared.send(id, session::Inbox::ClearScreen),
-            ClientMsg::Kill { id } => {
-                self.shared.kill(id);
-            }
-            ClientMsg::Detach { id } => self.shared.send(id, session::Inbox::Detach { connection: self.connection }),
-            ClientMsg::SetTheme { settings } => self.shared.set_theme(settings),
-            ClientMsg::SetOptions { record_history } => {
-                self.shared.record_history.store(record_history, Ordering::Relaxed);
-            }
-            // 通知还在界面那边发，宿主不用知道哪个会话被看着。
-            ClientMsg::Focus { .. } => {}
-            other => tracing::debug!(?other, "message not used in process"),
-        }
     }
 }

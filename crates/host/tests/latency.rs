@@ -11,8 +11,8 @@
 //! - `cat` 一个大文件的吞吐：从宿主读到输出到界面那份 VT（`Session::feed`）喂完，`RUNODE_THROUGHPUT_MB`
 //!   改大小，默认 100 MiB。
 //!
-//! 各有两种连法：经 `Host::connect_pair` 按协议收发帧（桌面以后走的路），和旧的进程内通路
-//! （`Client` 经 channel 收 `HostEvent`），比较两者的差别。
+//! 都经 `Host::connect_pair` 按协议收发帧，在同一个线程里写帧、读帧，量的是宿主本身；桌面那一层
+//! （经 `Link` 的读线程转手）的基准在桌面的 `session_host::link` 里。
 
 mod common;
 
@@ -20,7 +20,6 @@ use std::{
     io::{BufReader, Write as _},
     os::unix::net::UnixStream,
     path::PathBuf,
-    sync::mpsc,
     time::{Duration, Instant},
 };
 
@@ -236,98 +235,6 @@ fn cat_throughput_through_a_pair() {
     let _ = std::fs::remove_file(data);
     report(&format!(
         "pair cat {mb} MiB: {total} bytes in {elapsed:?} = {:.1} MiB/s",
-        total as f64 / 1048576.0 / elapsed.as_secs_f64()
-    ));
-}
-
-#[test]
-#[ignore = "测量延迟，手动跑"]
-#[allow(deprecated)]
-fn echo_latency_in_process() {
-    use runode_host::HostEvent;
-
-    let dir = common::temp_dir("latency-in-process");
-    let client = common::host().connect_in_process();
-    let id = client
-        .spawn(runode_host::SpawnOptions {
-            size: LATENCY_SIZE,
-            cwd: None,
-            integration: IntegrationMode::Off,
-            start: true,
-            shell: Some(echo_script(&dir)),
-            settings: None,
-        })
-        .unwrap();
-    let (tx, rx) = mpsc::channel();
-    client.attach(id, Box::new(move |event| tx.send(event).is_ok())).unwrap();
-    std::thread::sleep(Duration::from_millis(500));
-    let wait_for = |byte: u8| loop {
-        match rx.recv_timeout(Duration::from_secs(10)).expect("no echo") {
-            HostEvent::Output(data) if data.contains(&byte) => return,
-            _ => {}
-        }
-    };
-    client.input(id, b"!".to_vec());
-    wait_for(b'!');
-
-    let mut samples = Vec::with_capacity(iterations());
-    for i in 0..iterations() {
-        let byte = b'a' + (i % 26) as u8;
-        let start = Instant::now();
-        client.input(id, vec![byte]);
-        wait_for(byte);
-        samples.push(start.elapsed());
-    }
-    client.send(ClientMsg::Kill { id });
-    percentiles("in-process", samples);
-}
-
-#[test]
-#[ignore = "测量吞吐，手动跑"]
-#[allow(deprecated)]
-fn cat_throughput_in_process() {
-    use runode_host::HostEvent;
-
-    let dir = common::temp_dir("throughput-in-process");
-    let (script, data, mb) = cat_script(&dir);
-    let client = common::host().connect_in_process();
-    let id = client
-        .spawn(runode_host::SpawnOptions {
-            size: THROUGHPUT_SIZE,
-            cwd: None,
-            integration: IntegrationMode::Off,
-            start: true,
-            shell: Some(script),
-            settings: None,
-        })
-        .unwrap();
-    let (tx, rx) = mpsc::channel();
-    let attached = client.attach(id, Box::new(move |event| tx.send(event).is_ok())).unwrap();
-    let mut session = Session::new(attached.size, &attached.settings, Box::new(|_| {})).unwrap();
-    std::thread::sleep(Duration::from_millis(500));
-    // 开出来以后的输出（这里没有）照样要喂，两份 VT 才一样。
-    while let Ok(event) = rx.try_recv() {
-        if let HostEvent::Output(chunk) = event {
-            session.feed(&chunk);
-        }
-    }
-    let start = Instant::now();
-    client.input(id, b"go\r".to_vec());
-    let (mut tail, mut total) = (Tail::default(), 0);
-    loop {
-        if let HostEvent::Output(chunk) = rx.recv_timeout(Duration::from_secs(60)).expect("stalled") {
-            session.feed(&chunk);
-            total += chunk.len();
-            if tail.saw_done(&chunk) {
-                break;
-            }
-        }
-    }
-    let elapsed = start.elapsed();
-    client.send(ClientMsg::Kill { id });
-    let _ = std::fs::remove_file(data);
-    report(&format!(
-        "in-process cat {mb} MiB: {total} bytes in {elapsed:?} = {:.1} MiB/s",
         total as f64 / 1048576.0 / elapsed.as_secs_f64()
     ));
 }
