@@ -222,11 +222,17 @@ impl Client {
     /// 新开一个会话，返回它的标识。伪终端开不了、`start` 时 shell 启动不了时返回错误。开好的
     /// 会话不会自动连上，接着 `attach`。
     pub fn spawn(&self, options: SpawnOptions) -> Result<SessionId> {
-        self.spawn_with(options, true)
+        self.spawn_with(options, true, Vec::new())
     }
 
     /// `keep_backlog` 为 false 时不攒连上之前的事件：socket 上开的会话连上时当场给屏幕，用不着。
-    fn spawn_with(&self, options: SpawnOptions, keep_backlog: bool) -> Result<SessionId> {
+    /// `extra_env` 是这一个会话另外设的环境变量，盖过 `Host::set_env` 设的同名变量。
+    fn spawn_with(
+        &self,
+        options: SpawnOptions,
+        keep_backlog: bool,
+        extra_env: Vec<(String, String)>,
+    ) -> Result<SessionId> {
         let id = SessionId::random()?;
         let (settings, generation) = {
             let registry = self.shared.registry();
@@ -238,6 +244,11 @@ impl Client {
         };
         // 开伪终端、启动 shell 要几毫秒，不占着锁。
         let mut env = self.shared.env.lock().unwrap_or_else(PoisonError::into_inner).clone();
+        for (key, value) in extra_env {
+            env.retain(|(k, _)| *k != key);
+            env.push((key, value.into()));
+        }
+        env.retain(|(k, _)| k != runode_protocol::ENV_SESSION);
         env.push((runode_protocol::ENV_SESSION.into(), id.to_string().into()));
         let handle = session::spawn(id, options, settings, env, self.shared.record_history.clone(), keep_backlog)?;
         let mut registry = self.shared.registry();

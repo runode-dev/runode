@@ -2,7 +2,7 @@
 
 use runode_shared_types::{
     agent::{Agent, AgentKind, AgentState},
-    session::SessionMeta,
+    session::{DriveAction, Driver, SessionMeta},
     shell::ShellNames,
 };
 
@@ -23,8 +23,25 @@ fn round_trips_through_json() {
         foreground_is_shell: false,
         shell_path: Some("/usr/bin:/bin".into()),
         shell_names: ShellNames { aliases: vec!["ll".into()], ..ShellNames::default() }.into(),
+        foreground: Some("vim".into()),
+        driver: Some(Driver {
+            by: Some("0123456789abcdef0123456789abcdef".into()),
+            action: DriveAction::Keys,
+            at_ms: 7,
+        }),
     };
     let json = serde_json::to_string(&meta).unwrap();
     assert!(json.contains(r#""kind":"github_copilot","state":"blocked""#), "{json}");
     assert_eq!(serde_json::from_str::<SessionMeta>(&json).unwrap(), meta);
+}
+
+/// 操作记录：`by` 可以缺，新的一方才有的操作读成 `Unknown`，整份状态照样读得了。
+#[test]
+fn driver_tolerates_missing_and_newer_fields() {
+    let meta: SessionMeta =
+        serde_json::from_str(r#"{"driver":{"action":"teleport","at_ms":5},"foreground":"zsh"}"#).unwrap();
+    assert_eq!(meta.driver, Some(Driver { by: None, action: DriveAction::Unknown, at_ms: 5 }));
+    assert_eq!(meta.foreground.as_deref(), Some("zsh"));
+    let json = serde_json::to_string(&Driver { by: None, action: DriveAction::ClearScreen, at_ms: 1 }).unwrap();
+    assert_eq!(json, r#"{"by":null,"action":"clear_screen","at_ms":1}"#);
 }

@@ -380,6 +380,9 @@ impl HostSession {
             shell_path: self.effects.shell_path.borrow().clone(),
             shell_names: self.effects.shell_names.borrow().clone(),
             prompt_cwd: self.prompt_cwd.clone(),
+            // 前台程序名和谁在操作还没有人填。
+            foreground: None,
+            driver: None,
         }
     }
 

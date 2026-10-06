@@ -88,6 +88,8 @@ pub(crate) struct Subscribe {
 pub(crate) struct Screen {
     pub(crate) size: GridSize,
     pub(crate) meta: SessionMeta,
+    /// 宿主那份 VT 现在套着的主题。
+    pub(crate) settings: TermSettings,
     /// 实际给的屏幕，见 `HostMsg::Attached::mode`。
     pub(crate) mode: AttachMode,
     /// 快照或 VT 重放的字节；`MetaOnly` 时为空。
@@ -178,6 +180,8 @@ struct Runner {
     unbuffered: bool,
     /// 会话开出来时 VT 的尺寸和主题，攒着的事件要从这样一份 VT 喂起。
     created: (GridSize, TermSettings),
+    /// 宿主那份 VT 现在套着的主题：最近一次 `Inbox::Theme` 的，还没有过时是开出来时的。
+    settings: Arc<TermSettings>,
     /// `Inbox::Start` 时启动的程序，见 `SpawnOptions::shell`。
     shell: Option<String>,
     credits: Arc<Credits>,
@@ -212,6 +216,7 @@ impl Runner {
             backlog_bytes: 0,
             backlog_lost: false,
             unbuffered: !keep_backlog,
+            settings: Arc::new(settings.clone()),
             created: (options.size, settings),
             shell: options.shell,
             credits,
@@ -364,6 +369,7 @@ impl Runner {
                 self.try_clear();
             }
             Inbox::Theme(settings) => {
+                self.settings = settings.clone();
                 if self.session.apply_theme(&settings) {
                     let settings = (*settings).clone();
                     self.emit(HostEvent::msg(HostMsg::ThemeApplied { id: self.id, settings }));
@@ -376,6 +382,7 @@ impl Runner {
                     size: self.session.size(),
                     meta: self.session.meta(),
                     clients: u32::try_from(self.subscribers.len()).unwrap_or(u32::MAX),
+                    claimed: false,
                     exited: self.exited,
                 });
             }
@@ -406,7 +413,8 @@ impl Runner {
             },
             AttachMode::VtReplay => (mode, self.replay()),
         };
-        let screen = Screen { size: self.session.size(), meta: self.session.meta(), mode, data };
+        let settings = (*self.settings).clone();
+        let screen = Screen { size: self.session.size(), meta: self.session.meta(), settings, mode, data };
         let Some(mut sink) = start(screen) else { return };
         // shell 已经退出了：`Exited` 只在退出那一刻发过一次，晚连上的前端在这里补上，免得一直等。
         if self.exited && !sink(HostEvent::msg(HostMsg::Exited { id: self.id, status: None })) {

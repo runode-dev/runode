@@ -327,9 +327,9 @@ impl Connection<'_> {
             ClientMsg::ListSessions => {
                 self.out.control(&HostMsg::SessionList { sessions: self.server.host.session_list() });
             }
-            ClientMsg::Spawn { req, size, cwd, integration } => {
-                let options = SpawnOptions { size, cwd, integration, start: true, shell: None, settings: None };
-                match self.client.spawn_with(options, false) {
+            ClientMsg::Spawn { req, size, cwd, integration, start, shell, settings, env } => {
+                let options = SpawnOptions { size, cwd, integration, start, shell, settings };
+                match self.client.spawn_with(options, false, env) {
                     Ok(id) => self.out.control(&HostMsg::Spawned { req, id }),
                     Err(err) => {
                         self.out.control(&HostMsg::Error { req: Some(req), id: None, message: format!("{err:#}") })
@@ -345,7 +345,16 @@ impl Connection<'_> {
                 self.forget(id);
                 self.client.send(message);
             }
-            ClientMsg::ReadScreen { id, lines } => self.read_screen(id, lines),
+            ClientMsg::Start { id, integration } => self.client.start(id, integration),
+            ClientMsg::ReadScreen { id, lines, command: None } => self.read_screen(id, lines),
+            ClientMsg::ReadScreen { id, command: Some(_), .. } => {
+                self.error(None, Some(id), "not supported yet".into());
+            }
+            ClientMsg::SendKeys { req, id, .. } | ClientMsg::Paste { req, id, .. } => {
+                self.error(Some(req), Some(id), "not supported yet".into());
+            }
+            ClientMsg::Layout { req } => self.error(Some(req), None, "not supported yet".into()),
+            ClientMsg::UiReply { .. } => self.error(None, None, "not supported yet".into()),
             ClientMsg::Open { .. } | ClientMsg::Reveal { .. } => {
                 let out = self.out.clone();
                 self.server.host.to_ui(UiRequest::new(
@@ -383,7 +392,14 @@ impl Connection<'_> {
         let out = self.out.clone();
         let start = Box::new(move |screen: Screen| {
             let meta_only = screen.mode == AttachMode::MetaOnly;
-            let attached = HostMsg::Attached { id, channel, size: screen.size, mode: screen.mode, meta: screen.meta };
+            let attached = HostMsg::Attached {
+                id,
+                channel,
+                size: screen.size,
+                mode: screen.mode,
+                meta: screen.meta,
+                settings: Some(screen.settings),
+            };
             if !out.control(&attached) {
                 return None;
             }
@@ -411,7 +427,7 @@ impl Connection<'_> {
         }
         match text.recv_timeout(REPLY_TIMEOUT) {
             Ok(Ok(text)) => {
-                self.out.control(&HostMsg::ScreenText { id, text });
+                self.out.control(&HostMsg::ScreenText { id, text, truncated: false });
             }
             Ok(Err(err)) => self.error(None, Some(id), format!("failed to read the screen: {err:#}")),
             Err(_) => self.error(None, Some(id), format!("session {id} did not answer")),

@@ -26,12 +26,13 @@ fn host(name: &str, state: Option<AgentState>, then: Vec<AgentState>) -> FakeHos
                 size: SIZE,
                 mode: AttachMode::MetaOnly,
                 meta: meta("claude here", state.map(|state| (AgentKind::Claude, state))),
+                settings: None,
             }];
             replies.extend(then.iter().map(|&state| agent_now(*id, state)));
             replies
         }
-        ClientMsg::ReadScreen { id, lines } => {
-            vec![HostMsg::ScreenText { id: *id, text: format!("screen of {id}, {lines:?} lines\n") }]
+        ClientMsg::ReadScreen { id, lines, .. } => {
+            vec![HostMsg::ScreenText { id: *id, text: format!("screen of {id}, {lines:?} lines\n"), truncated: false }]
         }
         _ => vec![],
     })
@@ -164,6 +165,7 @@ fn wait_reports_an_exited_session() {
                 size: SIZE,
                 mode: AttachMode::MetaOnly,
                 meta: meta("x", Some((AgentKind::Codex, AgentState::Working))),
+                settings: None,
             },
             HostMsg::Exited { id: *id, status: None },
         ],

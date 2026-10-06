@@ -102,7 +102,7 @@ pub fn meta(title: &str, agent: Option<(AgentKind, AgentState)>) -> SessionMeta 
 }
 
 pub fn session(id: SessionId, meta: SessionMeta) -> SessionInfo {
-    SessionInfo { id, size: SIZE, meta, clients: 1, exited: false }
+    SessionInfo { id, size: SIZE, meta, clients: 1, claimed: true, exited: false }
 }
 
 /// 状态变成 `state` 的 `Meta`。

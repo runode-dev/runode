@@ -7,9 +7,11 @@
 //! 这里只放数据和编解码，只依赖 `runode_shared_types` 和 serde；终端仿真和 PTY 都不碰。
 
 pub mod frame;
+pub mod layout;
 pub mod message;
 
 pub use frame::{Frame, FrameError, FrameKind, MAX_PAYLOAD, read_frame, write_frame};
+pub use layout::{PaneLayout, PaneRect, TabLayout, WindowLayout, WorkspaceLayout};
 pub use message::{
     AttachMode, BuildId, Caps, ClientKind, ClientMsg, FinishedCommand, GoodbyeReason, HostMsg, Placement, SessionId,
     SessionInfo,
@@ -24,4 +26,4 @@ pub const ENV_SESSION: &str = "RUNODE_SESSION";
 pub const ENV_SOCKET: &str = "RUNODE_SOCKET";
 
 /// 协议的版本。消息的含义或帧格式变了、旧的一方读不懂时加一；只是加了可以缺省的字段不用加。
-pub const PROTOCOL_VERSION: u32 = 2;
+pub const PROTOCOL_VERSION: u32 = 3;

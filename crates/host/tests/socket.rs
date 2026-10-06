@@ -64,6 +64,7 @@ impl Peer {
             build: BuildId(BUILD.into()),
             client: ClientKind::Cli,
             caps: Caps { snapshot, vt_replay: true },
+            session: None,
         });
         assert!(matches!(peer.message(), HostMsg::Welcome { protocol: PROTOCOL_VERSION, .. }));
         peer
@@ -165,6 +166,7 @@ fn a_different_protocol_is_refused() {
         build: BuildId(BUILD.into()),
         client: ClientKind::Cli,
         caps: Caps::default(),
+        session: None,
     });
     assert!(matches!(peer.message(), HostMsg::Incompatible { protocol: PROTOCOL_VERSION, .. }));
     assert!(peer.frames.recv_timeout(WAIT).is_err(), "the host should close the connection");
@@ -181,7 +183,7 @@ fn input_and_output_flow_over_the_socket() {
     peer.input(channel, b"hello\r");
     peer.wait_for_output(channel, b"hello");
 
-    peer.send(&ClientMsg::ReadScreen { id, lines: None });
+    peer.send(&ClientMsg::ReadScreen { id, lines: None, command: None });
     let HostMsg::ScreenText { text, .. } = peer.reply() else { panic!("expected screen text") };
     assert!(text.contains("hello"), "{text:?}");
 
@@ -239,7 +241,16 @@ fn sessions_can_be_spawned_over_the_socket() {
     let dir = temp_dir("spawn");
     let (_host, socket) = listen(&dir);
     let mut peer = Peer::hello(&socket, false);
-    peer.send(&ClientMsg::Spawn { req: 7, size: SIZE, cwd: None, integration: IntegrationMode::Off });
+    peer.send(&ClientMsg::Spawn {
+        req: 7,
+        size: SIZE,
+        cwd: None,
+        integration: IntegrationMode::Off,
+        start: true,
+        shell: None,
+        settings: None,
+        env: Vec::new(),
+    });
     let HostMsg::Spawned { req: 7, id } = peer.reply() else { panic!("expected spawned") };
     peer.attach(id, AttachMode::VtReplay);
     peer.send(&ClientMsg::Kill { id });
@@ -272,7 +283,7 @@ fn attaching_again_replaces_the_channel() {
     peer.send(&ClientMsg::ListSessions);
     let HostMsg::SessionList { sessions } = peer.reply() else { panic!("expected a session list") };
     assert_eq!(sessions.iter().find(|info| info.id == id).map(|info| info.clients), Some(1));
-    peer.send(&ClientMsg::ReadScreen { id, lines: None });
+    peer.send(&ClientMsg::ReadScreen { id, lines: None, command: None });
     let HostMsg::ScreenText { text, .. } = peer.reply() else { panic!("expected screen text") };
     assert!(!text.contains("ignored"), "{text:?}");
     peer.send(&ClientMsg::Kill { id });
@@ -449,7 +460,7 @@ fn a_snapshot_taken_inside_a_shell_report_has_no_token() {
     }
     view.feed(&output);
     assert!(!view.take_bell(), "the end of the report rang the bell");
-    peer.send(&ClientMsg::ReadScreen { id, lines: None });
+    peer.send(&ClientMsg::ReadScreen { id, lines: None, command: None });
     let HostMsg::ScreenText { text, .. } = peer.reply() else { panic!("expected screen text") };
     assert!(text.contains("visible"), "{text:?}");
     assert_eq!(view.screen_text().unwrap().trim_end(), text.trim_end());
@@ -548,4 +559,22 @@ fn window_requests_go_to_the_app() {
     assert_eq!(peer.reply(), HostMsg::Opened { req: 2, id: SessionId(9) });
     peer.send(&ClientMsg::Reveal { req: 3, id: SessionId(9) });
     assert!(matches!(peer.reply(), HostMsg::Error { req: Some(3), .. }));
+}
+
+/// 按键、粘贴和读命令输出还没做：回 `Error`，带着对得上的 `req` 和会话，连接照旧。
+#[test]
+fn not_yet_supported_requests_are_refused() {
+    let dir = temp_dir("later");
+    let (host, socket) = listen(&dir);
+    let id = cat(&host);
+    let mut peer = Peer::hello(&socket, false);
+    peer.send(&ClientMsg::SendKeys { req: 1, id, keys: vec!["ctrl-c".into()] });
+    assert!(matches!(peer.reply(), HostMsg::Error { req: Some(1), id: Some(errored), .. } if errored == id));
+    peer.send(&ClientMsg::Paste { req: 2, id, text: "x".into() });
+    assert!(matches!(peer.reply(), HostMsg::Error { req: Some(2), .. }));
+    peer.send(&ClientMsg::ReadScreen { id, lines: None, command: Some(1) });
+    assert!(matches!(peer.reply(), HostMsg::Error { id: Some(errored), .. } if errored == id));
+    peer.send(&ClientMsg::ListSessions);
+    assert!(matches!(peer.reply(), HostMsg::SessionList { .. }));
+    peer.send(&ClientMsg::Kill { id });
 }

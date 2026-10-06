@@ -17,7 +17,14 @@ fn app(name: &str) -> FakeHost {
         ClientMsg::Open { req, .. } => vec![HostMsg::Opened { req: *req, id: id(NEW) }],
         // 新 shell 连上时还没显示提示符，接着报告它在等输入了。
         ClientMsg::Attach { id, .. } => vec![
-            HostMsg::Attached { id: *id, channel: 5, size: SIZE, mode: AttachMode::MetaOnly, meta: meta("zsh", None) },
+            HostMsg::Attached {
+                id: *id,
+                channel: 5,
+                size: SIZE,
+                mode: AttachMode::MetaOnly,
+                meta: meta("zsh", None),
+                settings: None,
+            },
             HostMsg::Meta { id: *id, meta: SessionMeta { prompt_cwd: Some("/tmp".into()), ..meta("zsh", None) } },
         ],
         ClientMsg::Kill { id } => vec![HostMsg::Exited { id: *id, status: None }],

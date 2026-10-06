@@ -16,6 +16,8 @@ use std::{fmt, path::PathBuf, str::FromStr};
 use runode_shared_types::{grid::GridSize, session::SessionMeta, settings::TermSettings, shell::IntegrationMode};
 use serde::{Deserialize, Serialize};
 
+use crate::layout::WindowLayout;
+
 /// 一个终端会话的标识：128 位随机数，写成 32 个小写十六进制数字。宿主重启、交接后照旧，
 /// 前端靠它找回原来的会话。
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -123,18 +125,43 @@ pub enum AttachMode {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ClientMsg {
     /// 连上后的第一条消息。宿主回 `HostMsg::Welcome`，协议版本对不上时回 `Incompatible`。
+    /// `session` 是发消息的程序自己所在的会话（在 runode 的终端里跑的命令行带上它），宿主据此
+    /// 记下是谁在操作别的会话，见 `SessionMeta::driver`。
     Hello {
         protocol: u32,
         build: BuildId,
         client: ClientKind,
         #[serde(default)]
         caps: Caps,
+        #[serde(default)]
+        session: Option<SessionId>,
     },
     /// 要所有会话的列表，宿主回 `SessionList`。
     ListSessions,
     /// 新开一个会话。`req` 是前端自己编的号，宿主回 `Spawned` 时带回来。开好的会话不会自动
     /// 连上，前端接着发 `Attach`。
-    Spawn { req: u32, size: GridSize, cwd: Option<PathBuf>, integration: IntegrationMode },
+    Spawn {
+        req: u32,
+        size: GridSize,
+        cwd: Option<PathBuf>,
+        integration: IntegrationMode,
+        /// 现在就启动 shell；为假时只开好伪终端，等 `Start`。
+        #[serde(default = "yes")]
+        start: bool,
+        /// 要启动的程序，为空时用用户的 `$SHELL`。
+        #[serde(default)]
+        shell: Option<String>,
+        /// 宿主还没收到过 `SetTheme` 时这个会话的 VT 一开始套的主题，比如配置还没加载完就
+        /// 提前开的会话用前端自己读到的配置；收到过时一律用宿主当前的主题。
+        #[serde(default)]
+        settings: Option<TermSettings>,
+        /// 启动 shell 时另外设的环境变量，同名的盖过宿主自己设的。
+        #[serde(default)]
+        env: Vec<(String, String)>,
+    },
+    /// 启动 `Spawn` 时 `start` 为假的会话的 shell；已经启动过时什么都不做。启动不了时宿主在
+    /// 这个会话的输出流里发 `HostMsg::Exited`。
+    Start { id: SessionId, integration: IntegrationMode },
     /// 连上一个会话，宿主回 `Attached`。`size` 是前端视图的尺寸，宿主按它改会话的尺寸；
     /// 只看状态（`MetaOnly`）的不带。
     Attach { id: SessionId, size: Option<GridSize>, mode: AttachMode },
@@ -156,8 +183,24 @@ pub enum ClientMsg {
     /// 改宿主的选项。
     SetOptions { record_history: bool },
     /// 读会话屏幕上的文字，宿主回 `ScreenText`。`lines` 为 `None` 时是当前一屏，否则是从最后
-    /// 一个有字的行往上这么多行，含回滚历史。
-    ReadScreen { id: SessionId, lines: Option<u32> },
+    /// 一个有字的行往上这么多行，含回滚历史。`command` 为 `Some(n)` 时不看 `lines`，读倒数第
+    /// n 条命令（1 是最近一条）的输出，要 shell 集成标出的提示符。
+    ReadScreen {
+        id: SessionId,
+        lines: Option<u32>,
+        #[serde(default)]
+        command: Option<u32>,
+    },
+    /// 给会话里的程序发控制键，按宿主那份 VT 当前的模式（应用光标键、Kitty 键盘协议等）编码后
+    /// 写进去，回 `Done`。`keys` 每项是一个键的写法：`ctrl-c`、`up`、`f5`、`down*3` 这类。
+    SendKeys { req: u32, id: SessionId, keys: Vec<String> },
+    /// 往会话里粘贴一段文字，程序开着括号粘贴模式（mode 2004）时套上括号，回 `Done`。
+    Paste { req: u32, id: SessionId, text: String },
+    /// 要 app 里各个终端摆在哪，宿主转给界面，回 `HostMsg::Layout`。
+    Layout { req: u32 },
+    /// 界面办完了宿主转来的 `HostMsg::UiRequest`：`ui` 是那条请求的编号，`reply` 原样转给发请求
+    /// 的一方。只有桌面的界面发。
+    UiReply { ui: u64, reply: Box<HostMsg> },
     /// 在 app 里开一个新终端，宿主转给 app 的界面，回 `Opened`。`near` 是放在哪个会话的分屏
     /// 旁边，为空时放在最前面那个窗口当前的分屏旁边；`cwd` 为空时沿用旁边那个终端的目录；
     /// `focus` 为假时不切过去，不打断用户手上的事。
@@ -211,13 +254,16 @@ pub enum HostMsg {
     },
     /// 回 `Attach`。`channel` 是这个会话的帧在这条连接上用的通道，见 `Frame::channel`；
     /// `mode` 是宿主实际给的，前端要快照、构建又不一样时退成 `VtReplay`。之后先是快照帧和
-    /// `SnapshotEnd`（`MetaOnly` 时没有），再是输出。
+    /// `SnapshotEnd`（`MetaOnly` 时没有），再是输出。`settings` 是宿主那份 VT 现在套着的主题，
+    /// `VtReplay` 时前端按它和 `size` 新建自己的 VT 再喂重放（快照里本来就带着）。
     Attached {
         id: SessionId,
         channel: u32,
         size: GridSize,
         mode: AttachMode,
         meta: SessionMeta,
+        #[serde(default)]
+        settings: Option<TermSettings>,
     },
     /// 快照或 VT 重放发完了，之后的 `Output` 帧接着它喂。
     SnapshotEnd {
@@ -256,6 +302,11 @@ pub enum HostMsg {
         id: SessionId,
         status: Option<i32>,
     },
+    /// 程序响了铃（BEL）。紧跟在含这个 BEL 的那块 `Output` 之后；只看状态（`MetaOnly`）的前端
+    /// 也收得到，后台标签据此标出响过铃。
+    Bell {
+        id: SessionId,
+    },
     /// 回 `Open`：新终端的会话。
     Opened {
         req: u32,
@@ -265,10 +316,25 @@ pub enum HostMsg {
     Done {
         req: u32,
     },
-    /// 回 `ReadScreen`：一行一个 `\n`，行尾空白去掉。
+    /// 回 `ReadScreen`：一行一个 `\n`，行尾空白去掉。`truncated` 为真时要的内容开头已经被挤出
+    /// 回滚历史，给的只是还留着的部分。
     ScreenText {
         id: SessionId,
         text: String,
+        #[serde(default)]
+        truncated: bool,
+    },
+    /// 回 `ClientMsg::Layout`。
+    Layout {
+        req: u32,
+        windows: Vec<WindowLayout>,
+    },
+    /// 宿主转给界面去办的请求（`Open`、`Reveal`、`Layout`），只发给登记为界面的连接（`Hello`
+    /// 里 `client` 是 `Desktop` 的，有几个时是最近连上的那个）。`request` 原样带着发请求一方的
+    /// `req`；界面办完了用 `ClientMsg::UiReply` 带着同一个 `ui` 回话。
+    UiRequest {
+        ui: u64,
+        request: Box<ClientMsg>,
     },
     /// 请求没法办，`req`、`id` 是对得上的那条请求的。
     Error {
@@ -303,9 +369,12 @@ pub struct SessionInfo {
     pub id: SessionId,
     pub size: GridSize,
     pub meta: SessionMeta,
-    /// 现在连着它的前端有几个；为 0 的是没有窗口在看的后台会话。
+    /// 现在连着它的前端有几个。
     #[serde(default)]
     pub clients: u32,
+    /// 有桌面的界面连着它（只看状态的也算）；为假的是没有窗口在显示的后台会话。
+    #[serde(default)]
+    pub claimed: bool,
     /// shell 已经退出，会话还留着给前端看最后的屏幕。
     #[serde(default)]
     pub exited: bool,
@@ -337,4 +406,9 @@ pub enum GoodbyeReason {
     Idle,
     /// 宿主出了错。
     Error { message: String },
+}
+
+/// `ClientMsg::Spawn::start` 缺省时为真：旧的前端开会话时一律当场启动。
+fn yes() -> bool {
+    true
 }

@@ -50,6 +50,7 @@ impl Connection {
             build: BuildId(env.build.clone()),
             client: ClientKind::Cli,
             caps: Caps::default(),
+            session: None,
         })?;
         match connection.reply()? {
             HostMsg::Welcome { .. } => Ok(connection),

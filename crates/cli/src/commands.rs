@@ -54,7 +54,7 @@ pub(crate) fn run(command: Command, env: &Env, out: &mut dyn Write) -> Result<()
                 .ok_or_else(|| anyhow!("read needs a SESSION outside a runode terminal"))?;
             let mut connection = Connection::open(env)?;
             let id = resolve(&mut connection, &session)?.id;
-            connection.send(&ClientMsg::ReadScreen { id, lines })?;
+            connection.send(&ClientMsg::ReadScreen { id, lines, command: None })?;
             match connection.reply()? {
                 HostMsg::ScreenText { text, .. } => out.write_all(text.as_bytes())?,
                 other => return Err(unexpected(&other)),
