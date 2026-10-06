@@ -1,12 +1,31 @@
 #!/bin/bash
-# 量一个 runode 二进制的体积、命令行冷启动、开窗时间、稳定后的内存和线程、空闲时的 CPU 和唤醒。
+# 量一个 runode 二进制的体积、命令行冷启动、开窗时间、内存的峰值和稳定值、线程、空闲时的 CPU 和唤醒。
 #
-# 用法：perf.sh [--json] [--rounds N] [--settle SECS] [--idle SECS] BINARY
+# 用法：perf.sh [--json] [--rounds N] [--settle SECS] [--samples N] [--idle SECS] BINARY|APP
 #
 #   --json         输出 JSON，默认输出表格
 #   --rounds N     开窗测几轮，默认 5；各项取中位数和最大值
-#   --settle SECS  开窗后等多久再量内存和线程，默认 5
+#   --settle SECS  开窗后静置多久再量内存和线程，默认 30，理由见下面的「内存」
+#   --samples N    静置后 footprint 每秒取一次样、共取几次，默认 10
 #   --idle SECS    量空闲 CPU 和唤醒的秒数，默认 5
+#
+# 要量用户实际拿到的样子，给 .app 的路径（`scripts/bundle-macos.sh app` 的产物在
+# target/release/bundle/Runode.app），脚本直接 exec 它 Contents/MacOS 下的可执行文件，HOME 照样
+# 换成临时目录。给裸二进制也能量，但未打包运行时 app 会在启动时自己设 Dock 图标
+# （`about::install_icon`），打包后不做，开窗时间和内存会比 .app 多出这一块。
+#
+# 内存：footprint 的 phys_footprint 里有一块 GPU 驱动替进程占着的临时内存，记在「Owned physical
+# footprint (unmapped) (graphics)」这一项（默认窗口约 178 MiB；这一项也含渲染器 GPU 私有的纹理）。
+# 只要还在画帧它就一直在，停止绘制约 3 秒后退掉，再画又回来。窗口在前台时光标每半秒闪一次、每次
+# 都重画，它就一直退不掉；窗口在不在前台又看别的程序有没有抢走焦点，所以开窗后过几秒取一次样会
+# 随机落在有它或没它的那一档。为此：
+#   - 临时目录里的配置写上 cursor-style-blink = false，静置时没有东西在重画。空闲 CPU 和唤醒因此
+#     也不含光标闪烁的那部分。
+#   - 分开报两个数。峰值是内核记的 phys_footprint_peak，进程启动以来的最高值，含这块临时内存；
+#     稳定后是静置 --settle 秒后每秒取一次样、共 --samples 次，取 phys_footprint 最小的那次，同时
+#     列出这次的 IOSurface（窗口的 drawable 在这里）、IOAccelerator (graphics)（渲染器 CPU 也能
+#     访问的纹理和缓冲）和上面那一项。
+# 静置期间不要碰窗口，否则稳定值会偏高。
 #
 # 每轮用一个新的临时目录当 HOME 和 XDG_CONFIG_HOME，配置、窗口存档、提前启动 shell 的尺寸记录
 # 和宿主的 socket 都在里面，不碰自己的 runode，跑完删掉。每轮开两次窗口：
@@ -26,7 +45,8 @@ set -euo pipefail
 
 json=0
 rounds=5
-settle=5
+settle=30
+samples=10
 idle=5
 binary=
 while (($#)); do
@@ -34,6 +54,7 @@ while (($#)); do
         --json) json=1 ;;
         --rounds) rounds=$2; shift ;;
         --settle) settle=$2; shift ;;
+        --samples) samples=$2; shift ;;
         --idle) idle=$2; shift ;;
         -h | --help) sed -n '2,/^set -euo/p' "$0" | sed '$d; s/^# \{0,1\}//'; exit 0 ;;
         -*) echo "perf.sh: 不认识的选项 $1" >&2; exit 2 ;;
@@ -41,7 +62,19 @@ while (($#)); do
     esac
     shift
 done
-[[ -n $binary ]] || { echo "用法：perf.sh [--json] [--rounds N] [--settle SECS] [--idle SECS] BINARY" >&2; exit 2; }
+[[ -n $binary ]] || {
+    echo "用法：perf.sh [--json] [--rounds N] [--settle SECS] [--samples N] [--idle SECS] BINARY|APP" >&2
+    exit 2
+}
+((samples >= 1)) || { echo "perf.sh: --samples 至少是 1" >&2; exit 2; }
+# 给的是 .app 时换成它里面的可执行文件，名字按 Info.plist 的 CFBundleExecutable。
+bundle=
+if [[ -d $binary && $binary == *.app ]]; then
+    bundle=$(cd "$binary" && pwd)
+    exe_name=$(/usr/libexec/PlistBuddy -c "Print :CFBundleExecutable" "$bundle/Contents/Info.plist" 2>/dev/null) ||
+        { echo "perf.sh: $bundle/Contents/Info.plist 里没有 CFBundleExecutable" >&2; exit 2; }
+    binary=$bundle/Contents/MacOS/$exe_name
+fi
 [[ -x $binary ]] || { echo "perf.sh: $binary 不是可执行文件" >&2; exit 2; }
 binary=$(cd "$(dirname "$binary")" && pwd)/$(basename "$binary")
 
@@ -119,6 +152,7 @@ startup_points() {
 }
 
 say "二进制：$binary"
+[[ -n $bundle ]] || say "（裸二进制：启动时会设 Dock 图标，比打包后的 .app 多一点开窗时间和内存）"
 size=$(stat -f %z "$binary")
 
 # 新写出的二进制第一次 exec 时系统要先检查它（实测几百毫秒），不算进下面的结果。
@@ -143,6 +177,8 @@ fi
 for ((round = 1; round <= rounds; round++)); do
     say "第 $round/$rounds 轮……"
     home=$(mktemp -d "${TMPDIR:-/tmp}/runode-perf-home.XXXXXX")
+    mkdir -p "$home/.config/runode"
+    echo 'cursor-style-blink = false' >"$home/.config/runode/config.conf"
     socket="$home/.config/runode/run/host.sock"
     if ((round == 1 && ${#socket} >= 104)); then
         echo "perf.sh: 临时目录太长，宿主的 socket 路径超过 104 字节，app 会不开 socket；可设短一点的 TMPDIR" >&2
@@ -159,15 +195,17 @@ for ((round = 1; round <= rounds; round++)); do
     stop_app "$pid"
     pid=
 
-    # 第二次启动：量开窗时间，等稳定后量内存和线程，再静置量空闲。
+    # 第二次启动：量开窗时间，静置后量内存和线程，再量空闲。
     launch "$raw/$round.second.log"
     echo "$window_ms" >"$raw/$round.second.window"
     wait_content "$raw/$round.second.log" 5
     sleep_s "$settle"
     echo "$(($(ps -o rss= -p "$pid") * 1024))" >"$raw/$round.rss"
-    footprint -f bytes --noCategories -p "$pid" 2>/dev/null |
-        sed -n 's/.*Footprint: *\([0-9]*\) B.*/\1/p' | head -1 >"$raw/$round.footprint"
     echo "$(($(ps -M -p "$pid" | wc -l) - 1))" >"$raw/$round.threads"
+    for ((sample = 1; sample <= samples; sample++)); do
+        ((sample == 1)) || sleep_s 1
+        footprint -p "$pid" -j "$raw/$round.footprint.$sample.json" >/dev/null 2>&1 || true
+    done
     top -l $((idle + 1)) -s 1 -pid "$pid" -stats pid,cpu,idlew,time | awk -v pid="$pid" '$1 == pid' >"$raw/$round.top"
     stop_app "$pid"
     pid=
@@ -179,11 +217,11 @@ for ((round = 1; round <= rounds; round++)); do
 done
 
 # 汇总成中位数和最大值。
-python3 -I - "$raw" "$rounds" "$json" "$binary" "$size" "$cli_tool" "$idle" <<'PY'
+python3 -I - "$raw" "$rounds" "$json" "$binary" "$size" "$cli_tool" "$idle" "$settle" "$samples" <<'PY'
 import json, os, statistics, subprocess, sys
 
-raw, rounds, as_json, binary, size, cli_tool, idle = sys.argv[1:]
-rounds, as_json, size, idle = int(rounds), as_json == "1", int(size), int(idle)
+raw, rounds, as_json, binary, size, cli_tool, idle, settle, samples = sys.argv[1:]
+rounds, as_json, size, idle, samples = int(rounds), as_json == "1", int(size), int(idle), int(samples)
 
 def read(name):
     with open(os.path.join(raw, name)) as f:
@@ -204,6 +242,32 @@ cli = stat([t * 1e3 for t in times])
 def number(name):
     text = read(name).strip()
     return float(text) if text else None
+
+# footprint 分项里看的几项：窗口的 drawable、渲染器 CPU 也能访问的纹理和缓冲、GPU 驱动的临时内存
+# 和 GPU 私有的纹理。
+CATEGORIES = {
+    "iosurface": "IOSurface",
+    "ioaccelerator_graphics": "IOAccelerator (graphics)",
+    "graphics_unmapped": "Owned physical footprint (unmapped) (graphics)",
+}
+
+def footprint_stats(r):
+    # 返回（峰值，稳定后那次的 phys_footprint 和分项）；一次样都没取到时是 None。
+    taken = []
+    for n in range(1, samples + 1):
+        try:
+            process = json.loads(read(f"{r}.footprint.{n}.json"))["processes"][0]
+        except (OSError, ValueError, KeyError, IndexError):
+            continue
+        taken.append(process)
+    if not taken:
+        return None, None
+    peak = max(p["auxiliary"]["phys_footprint_peak"] for p in taken)
+    low = min(taken, key=lambda p: p["auxiliary"]["phys_footprint"])
+    stable = {"phys_footprint": low["auxiliary"]["phys_footprint"]}
+    for key, name in CATEGORIES.items():
+        stable[key] = low["categories"].get(name, {}).get("dirty", 0)
+    return peak, stable
 
 def idle_stats(r):
     # 每行：pid %CPU IDLEW TIME。第一个样本是从进程启动累计的，不算；IDLEW 是累计的唤醒次数，
@@ -234,9 +298,16 @@ result = {
     "cli_tool": cli_tool,
     "window_first_ms": stat([number(f"{r}.first.window") for r in range(1, rounds + 1)]),
     "window_second_ms": stat([number(f"{r}.second.window") for r in range(1, rounds + 1)]),
+    "settle_s": float(settle),
+    "footprint_samples": samples,
     "rss_bytes": stat([number(f"{r}.rss") for r in range(1, rounds + 1)]),
-    "footprint_bytes": stat([number(f"{r}.footprint") for r in range(1, rounds + 1)]),
     "threads": stat([number(f"{r}.threads") for r in range(1, rounds + 1)]),
+}
+footprints = [footprint_stats(r) for r in range(1, rounds + 1)]
+result["footprint_peak_bytes"] = stat([peak for peak, _ in footprints])
+result["footprint_stable_bytes"] = {
+    key: stat([stable[key] if stable else None for _, stable in footprints])
+    for key in ["phys_footprint", *CATEGORIES]
 }
 idles = [idle_stats(r) for r in range(1, rounds + 1)]
 result["idle_cpu_percent"] = stat([c for c, _ in idles])
@@ -258,14 +329,19 @@ def fmt(s, unit="", scale=1, digits=1):
         return "—", "—"
     return tuple(f"{s[k] / scale:.{digits}f}{unit}" for k in ("median", "max"))
 
+stable = result["footprint_stable_bytes"]
 rows = [
     ("体积", (f"{size:,} B ({size / 2**20:.2f} MiB)", "")),
     (f"命令行 help 冷启动（{cli_tool}，{cli['n']} 次）", fmt(cli, " ms", digits=2)),
     ("开窗：首次（无尺寸记录）", fmt(result["window_first_ms"], " ms")),
     ("开窗：第二次（提前启动 shell）", fmt(result["window_second_ms"], " ms")),
-    ("RSS（第二次，稳定后）", fmt(result["rss_bytes"], " MiB", 2**20)),
-    ("phys_footprint（同上）", fmt(result["footprint_bytes"], " MiB", 2**20)),
+    (f"RSS（第二次，静置 {settle} 秒后）", fmt(result["rss_bytes"], " MiB", 2**20)),
     ("线程数（同上）", fmt(result["threads"], "", digits=0)),
+    ("phys_footprint 峰值（phys_footprint_peak）", fmt(result["footprint_peak_bytes"], " MiB", 2**20)),
+    (f"phys_footprint 稳定后（静置后 {samples} 次取样的最小值）", fmt(stable["phys_footprint"], " MiB", 2**20)),
+    ("　其中 IOSurface", fmt(stable["iosurface"], " MiB", 2**20)),
+    ("　其中 IOAccelerator (graphics)", fmt(stable["ioaccelerator_graphics"], " MiB", 2**20)),
+    ("　其中 Owned physical footprint (unmapped) (graphics)", fmt(stable["graphics_unmapped"], " MiB", 2**20)),
     (f"空闲 CPU（{idle} 秒）", fmt(result["idle_cpu_percent"], " %", digits=2)),
     (f"空闲唤醒（{idle} 秒）", fmt(result["idle_wakeups_per_s"], " 次/秒", digits=2)),
 ]
