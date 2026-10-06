@@ -44,6 +44,11 @@ pub(crate) fn idle_host() -> HostSession {
     HostSession::new(SIZE, pty, None, &TermSettings::default()).unwrap()
 }
 
+/// 宿主这边没有 shell 的会话：只喂字节、不看前台进程的测试用它，不用每次起一个进程。
+pub(crate) fn bare_host() -> HostSession {
+    HostSession::new(SIZE, unstarted_pty(SIZE.cols, SIZE.rows), None, &TermSettings::default()).unwrap()
+}
+
 /// 一个持有 `TOKEN` 的宿主会话，就像启动 shell 时注入了集成一样。
 pub(crate) fn reporting_host() -> HostSession {
     let session = idle_host();

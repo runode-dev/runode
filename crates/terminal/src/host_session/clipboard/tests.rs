@@ -4,7 +4,7 @@ use libghostty_vt::Terminal;
 use runode_shared_types::grid::GridSize;
 
 use super::*;
-use crate::testing::idle_host;
+use crate::testing::bare_host;
 
 fn write(text: &str) -> ClipboardRequest {
     ClipboardRequest::Write(text.into())
@@ -17,7 +17,7 @@ fn read(target: u8, bel: bool) -> ClipboardRequest {
 /// 把 `bytes` 从每一个位置切成两块分别喂给一个新会话，每种切法都要认出同样的请求。
 fn every_split(bytes: &[u8], expected: &[ClipboardRequest]) {
     for at in 0..=bytes.len() {
-        let mut session = idle_host();
+        let mut session = bare_host();
         session.feed(&bytes[..at]);
         session.feed(&bytes[at..]);
         assert_eq!(session.take_clipboard(), expected, "split at {at} of {:?}", String::from_utf8_lossy(bytes));
@@ -25,7 +25,7 @@ fn every_split(bytes: &[u8], expected: &[ClipboardRequest]) {
 }
 
 fn requests(bytes: &[u8]) -> Vec<ClipboardRequest> {
-    let mut session = idle_host();
+    let mut session = bare_host();
     session.feed(bytes);
     session.take_clipboard()
 }
@@ -36,7 +36,7 @@ fn writes_arrive_decoded_however_they_are_split_or_ended() {
     every_split(b"\x1b]52;c;aGVsbG8=\x1b\\", &[write("hello")]);
     // 中文按 UTF-8 编码。
     every_split("\x1b]52;c;5Lit5paH\x07".as_bytes(), &[write("中文")]);
-    let mut session = idle_host();
+    let mut session = bare_host();
     session.feed(b"\x1b]52;c;aGVs");
     assert!(session.take_clipboard().is_empty(), "not finished yet");
     session.feed(b"bG8=\x07");
@@ -68,7 +68,7 @@ fn bad_writes_are_dropped() {
     assert!(matches!(&written[..], [ClipboardRequest::Write(text)] if text.len() == MAX_CLIPBOARD_BYTES));
     let mut over = Vec::new();
     encode_base64(&vec![b'x'; MAX_CLIPBOARD_BYTES + 1], &mut over);
-    let mut session = idle_host();
+    let mut session = bare_host();
     session.feed(&sequence(&over));
     assert!(session.take_clipboard().is_empty());
     // 丢掉的不影响之后的。
@@ -150,7 +150,7 @@ fn reads_and_writes_keep_their_order() {
 /// VT 自己不回应读请求（没装读的回调），回话全由宿主经 `answer_clipboard` 写。
 #[test]
 fn the_vt_itself_does_not_answer_reads() {
-    let mut session = idle_host();
+    let mut session = bare_host();
     let before = session.replies();
     session.feed(b"\x1b]52;c;?\x07\x1b]52;c;?\x1b\\");
     assert_eq!(session.replies(), before);
@@ -219,7 +219,7 @@ fn denied_writes_are_refused_by_the_vt() {
         }
     }
     // 会话上的开关。
-    let mut session = idle_host();
+    let mut session = bare_host();
     session.set_clipboard_writes(false);
     session.feed(b"\x1b]52;c;aGk=\x07\x1b]52;c;?\x07");
     assert_eq!(session.take_clipboard(), [read(b'c', true)], "reads are not writes");

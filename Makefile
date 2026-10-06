@@ -38,8 +38,14 @@ dmg: ## 发布构建并打包 Runode.app 与 dmg，产物在 target/release/bund
 check: ## 只做类型检查，不生成二进制
 	$(CARGO) check --workspace --all-targets
 
-test: ## 运行测试
-	$(CARGO) test --workspace
+# 装了 cargo-nextest 就用它：各测试二进制并行跑，cargo test 是一个跑完再跑下一个。nextest 不跑
+# 文档测试，工作区里现在一个都没有；以后加了要在这里补上 `$(CARGO) test --workspace --doc`。
+test: ## 运行测试（装了 cargo-nextest 时并行跑）
+	@if $(CARGO) nextest --version >/dev/null 2>&1; then \
+		$(CARGO) nextest run --workspace; \
+	else \
+		$(CARGO) test --workspace; \
+	fi
 
 clippy: ## 运行 clippy
 	$(CARGO) clippy --workspace --all-targets $(CLIPPY_ARGS)
