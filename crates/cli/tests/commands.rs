@@ -34,8 +34,14 @@ fn host(name: &str, state: Option<AgentState>, then: Vec<AgentState>) -> FakeHos
         ClientMsg::ReadScreen { id, lines, .. } => {
             vec![HostMsg::ScreenText { id: *id, text: format!("screen of {id}, {lines:?} lines\n"), truncated: false }]
         }
+        ClientMsg::Layout { req } => no_window(*req),
         _ => vec![],
     })
+}
+
+/// app 没开窗口时宿主对 `Layout` 的回话。
+fn no_window(req: u32) -> Vec<HostMsg> {
+    vec![HostMsg::Error { req: Some(req), id: None, message: "there is no runode window to do this in".into() }]
 }
 
 fn full(n: u128) -> String {
@@ -61,8 +67,10 @@ fn list_shows_sessions_and_marks_your_own() {
     let (code, out, _) = run("list", &fake.env);
     assert_eq!(code, exit::OK);
     let lines: Vec<&str> = out.lines().collect();
-    assert!(lines[0].contains("ID") && lines[0].contains("AGENT") && lines[0].contains("STATE"), "{out}");
-    assert!(lines[1].starts_with("  abcd0000  Claude Code  working  claude here"), "{out}");
+    let words = |line: &str| line.split_whitespace().map(str::to_owned).collect::<Vec<_>>().join(" ");
+    // app 没开窗口：没有位置那几列，都是后台会话。
+    assert_eq!(words(lines[0]), "ID AGENT STATE FG TITLE DIR VIEW", "{out}");
+    assert_eq!(words(lines[1]), "abcd0000 Claude Code working - claude here /tmp/project bg", "{out}");
     assert!(lines[2].starts_with("* abce0000  -"), "{out}");
 }
 
@@ -72,10 +80,17 @@ fn list_as_json() {
     let (code, out, _) = run("list --json", &fake.env);
     assert_eq!(code, exit::OK);
     let json: serde_json::Value = serde_json::from_str(&out).unwrap();
-    assert_eq!(json[0]["id"], full(A));
-    assert_eq!(json[0]["agent"], "claude");
-    assert_eq!(json[0]["state"], "blocked");
-    assert_eq!(json[1]["agent"], serde_json::Value::Null);
+    assert_eq!(json["self"], serde_json::Value::Null);
+    assert_eq!(json["layout"], serde_json::Value::Null);
+    let sessions = &json["sessions"];
+    assert_eq!(sessions[0]["id"], full(A));
+    assert_eq!(sessions[0]["agent"], "claude");
+    assert_eq!(sessions[0]["state"], "blocked");
+    assert_eq!(sessions[0]["claimed"], true);
+    assert_eq!(sessions[0]["driver"], serde_json::Value::Null);
+    assert_eq!(sessions[0]["place"], serde_json::Value::Null);
+    assert_eq!(sessions[0]["view"], "bg");
+    assert_eq!(sessions[1]["agent"], serde_json::Value::Null);
 }
 
 #[test]
@@ -109,6 +124,10 @@ fn unclear_sessions_are_refused() {
     let (code, _, err) = run("read 99", &fake.env);
     assert_eq!(code, exit::FAILED);
     assert!(err.contains("no session 99"), "{err}");
+    // 认不出的写法是参数错误。
+    let (code, _, err) = run("read sideways", &fake.env);
+    assert_eq!(code, exit::USAGE);
+    assert!(err.contains("sideways"), "{err}");
 }
 
 #[test]

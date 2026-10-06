@@ -5060,6 +5060,7 @@ name = "runode-cli"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "regex",
  "runode-paths",
  "runode-protocol",
  "runode-shared-types",

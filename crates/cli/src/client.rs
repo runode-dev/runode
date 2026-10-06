@@ -4,6 +4,8 @@
 //! 读到一半。命令行只看状态，输出帧和快照帧直接丢掉。
 
 use std::{
+    cell::{Cell, RefCell},
+    collections::{HashSet, VecDeque},
     os::unix::net::UnixStream,
     sync::mpsc,
     thread,
@@ -12,7 +14,8 @@ use std::{
 
 use anyhow::{Context as _, Result, anyhow, bail};
 use runode_protocol::{
-    BuildId, Caps, ClientKind, ClientMsg, Frame, FrameKind, HostMsg, PROTOCOL_VERSION, read_frame, write_frame,
+    BuildId, Caps, ClientKind, ClientMsg, Frame, FrameKind, HostMsg, PROTOCOL_VERSION, SessionId, WindowLayout,
+    read_frame, write_frame,
 };
 
 use crate::Env;
@@ -23,6 +26,13 @@ const REPLY_TIMEOUT: Duration = Duration::from_secs(10);
 pub(crate) struct Connection {
     stream: UnixStream,
     messages: mpsc::Receiver<HostMsg>,
+    /// 等回话时跳过去的会话事件（状态、命令结束这些），按到达的先后，`next` 先交出它们：先连上
+    /// 会话再发请求的命令，等回话期间会话变了的话不会漏掉。
+    pending: RefCell<VecDeque<HostMsg>>,
+    /// 等回话时见过 `Exited` 的会话，见 `exited`。
+    exited: RefCell<HashSet<SessionId>>,
+    /// 下一个请求的编号。
+    next_req: Cell<u32>,
 }
 
 impl Connection {
@@ -44,13 +54,15 @@ impl Connection {
                 }
             }
         })?;
-        let mut connection = Self { stream, messages };
+        let connection =
+            Self { stream, messages, pending: RefCell::default(), exited: RefCell::default(), next_req: Cell::new(1) };
         connection.send(&ClientMsg::Hello {
             protocol: PROTOCOL_VERSION,
             build: BuildId(env.build.clone()),
             client: ClientKind::Cli,
             caps: Caps::default(),
-            session: None,
+            // 宿主据此记下是哪个终端里的程序在操作别的终端，见 `SessionMeta::driver`。
+            session: env.session.as_deref().and_then(|own| own.parse().ok()),
         })?;
         match connection.reply()? {
             HostMsg::Welcome { .. } => Ok(connection),
@@ -59,19 +71,22 @@ impl Connection {
         }
     }
 
-    pub(crate) fn send(&mut self, message: &ClientMsg) -> Result<()> {
+    pub(crate) fn send(&self, message: &ClientMsg) -> Result<()> {
         let frame = Frame::control(message)?;
-        write_frame(&mut self.stream, frame.kind, frame.channel, &frame.payload)
+        write_frame(&mut &self.stream, frame.kind, frame.channel, &frame.payload)
             .map_err(|err| anyhow!("lost the runode app: {err}"))
     }
 
-    pub(crate) fn input(&mut self, channel: u32, data: &[u8]) -> Result<()> {
-        write_frame(&mut self.stream, FrameKind::Input, channel, data)
+    pub(crate) fn input(&self, channel: u32, data: &[u8]) -> Result<()> {
+        write_frame(&mut &self.stream, FrameKind::Input, channel, data)
             .map_err(|err| anyhow!("lost the runode app: {err}"))
     }
 
     /// 下一条消息，到 `deadline` 还没有时为 `None`；为 `None` 的 `deadline` 一直等。
     pub(crate) fn next(&self, deadline: Option<Instant>) -> Result<Option<HostMsg>> {
+        if let Some(message) = self.pending.borrow_mut().pop_front() {
+            return Ok(Some(message));
+        }
         let received = match deadline {
             Some(at) => match self.messages.recv_timeout(at.saturating_duration_since(Instant::now())) {
                 Ok(message) => Ok(message),
@@ -83,17 +98,82 @@ impl Connection {
         received.map(Some).map_err(|()| anyhow!("the runode app closed the connection"))
     }
 
-    /// 回话：跳过 `Meta` 这类随时会插进来的状态，宿主报错时返回错误。
+    /// 回话：跳过 `Meta` 这类随时会插进来的会话事件，宿主报错时返回错误。
     pub(crate) fn reply(&self) -> Result<HostMsg> {
+        self.answer()?.map_err(|message| anyhow!(message))
+    }
+
+    /// 回话，宿主报的错放在里层，由调用方决定怎么办。跳过的事件里有会话结束（`Exited`）时记下来。
+    fn answer(&self) -> Result<Result<HostMsg, String>> {
         let deadline = Instant::now() + REPLY_TIMEOUT;
         loop {
-            match self.next(Some(deadline))? {
-                None => bail!("the runode app did not answer"),
-                Some(HostMsg::Meta { .. } | HostMsg::CommandFinished { .. }) => {}
-                Some(HostMsg::Error { message, .. }) => bail!("{message}"),
-                Some(message) => return Ok(message),
+            // 不从 `pending` 取：那里的都是已经跳过的事件。
+            let message = match self.messages.recv_timeout(deadline.saturating_duration_since(Instant::now())) {
+                Ok(message) => message,
+                Err(mpsc::RecvTimeoutError::Timeout) => bail!("the runode app did not answer"),
+                Err(mpsc::RecvTimeoutError::Disconnected) => bail!("the runode app closed the connection"),
+            };
+            match message {
+                HostMsg::Exited { id, .. } => {
+                    self.exited.borrow_mut().insert(id);
+                    self.pending.borrow_mut().push_back(message);
+                }
+                HostMsg::Meta { .. }
+                | HostMsg::CommandFinished { .. }
+                | HostMsg::Bell { .. }
+                | HostMsg::Resized { .. }
+                | HostMsg::ThemeApplied { .. }
+                | HostMsg::SnapshotEnd { .. }
+                | HostMsg::Resync { .. } => self.pending.borrow_mut().push_back(message),
+                HostMsg::UiRequest { .. } | HostMsg::Unknown => {}
+                HostMsg::Error { message, .. } => return Ok(Err(message)),
+                message => return Ok(Ok(message)),
             }
         }
+    }
+
+    /// 等回话时见过这个会话结束了。
+    pub(crate) fn exited(&self, id: SessionId) -> bool {
+        self.exited.borrow().contains(&id)
+    }
+
+    /// 丢掉等回话时跳过的事件：一遍遍读屏幕的命令用不着它们，免得越攒越多。
+    pub(crate) fn drop_pending(&self) {
+        self.pending.borrow_mut().clear();
+    }
+
+    /// 新请求的编号。
+    pub(crate) fn req(&self) -> u32 {
+        let req = self.next_req.get();
+        self.next_req.set(req.wrapping_add(1).max(1));
+        req
+    }
+
+    /// 发一个只回 `Done` 的请求（`SendKeys`、`Paste` 这类），等它办完。
+    pub(crate) fn request_done(&self, message: &ClientMsg) -> Result<()> {
+        self.send(message)?;
+        match self.reply()? {
+            HostMsg::Done { .. } => Ok(()),
+            other => bail!("unexpected answer: {}", kind(&other)),
+        }
+    }
+
+    /// app 里各个终端摆在哪；app 没开窗口、回答不了时为 `None`。
+    pub(crate) fn layout(&self) -> Result<Option<Vec<WindowLayout>>> {
+        let req = self.req();
+        self.send(&ClientMsg::Layout { req })?;
+        match self.answer()? {
+            Ok(HostMsg::Layout { windows, .. }) => Ok(Some(windows)),
+            Ok(other) => bail!("unexpected answer: {}", kind(&other)),
+            Err(_) => Ok(None),
+        }
+    }
+}
+
+impl Drop for Connection {
+    /// 关掉连接，读的线程随之结束，宿主那边也知道这条连接没了。
+    fn drop(&mut self) {
+        let _ = self.stream.shutdown(std::net::Shutdown::Both);
     }
 }
 

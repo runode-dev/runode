@@ -1,6 +1,6 @@
 [package]
 name = "runode-cli"
-description = "runode's command line front end: lists terminal sessions, reads their screens, sends them input and waits for their agents, over the host's Unix socket"
+description = "runode's command line front end: finds terminal sessions, reads their screens and command output, sends them text and keys, and waits for their agents and commands, over the host's Unix socket"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -11,6 +11,8 @@ runode-paths.workspace = true
 runode-protocol.workspace = true
 runode-shared-types.workspace = true
 anyhow.workspace = true
+# `wait --for text` 按正则找屏幕上的行。
+regex.workspace = true
 # `list --json` 的输出。
 serde_json.workspace = true
 

@@ -3,6 +3,9 @@
 use std::{path::PathBuf, time::Duration};
 
 use runode_protocol::Placement;
+use runode_shared_types::input::parse_keys;
+
+use crate::{SetupTarget, select::Selector};
 
 /// 用法说明，`runode help` 打印它。
 pub(crate) const HELP: &str = "\
@@ -12,24 +15,66 @@ Without a command, runode opens its window. Commands talk to the running runode
 app; inside a runode terminal they find it through RUNODE_SOCKET, and
 RUNODE_SESSION names the terminal they run in.
 
-A SESSION is a session id or any unique prefix of it, as `runode list` shows.
+SESSION picks one terminal; it must match exactly one, else runode lists the
+candidates. It is one of
+  ID            a session id or any unique prefix of it, as `runode list` shows
+  self, .       your own terminal
+  left, right, up, down
+                the pane next to yours in that direction
+  next, prev    the next or previous pane in your tab, wrapping around
+  pane:N        pane N of your tab (of the front window's tab outside runode)
+  tab:N, tab:N.M
+                the focused pane of tab N in your workspace, or its pane M
+  win:W/..., ws:K/...
+                look in window W or workspace K instead: win:2, win:2/tab:1.2,
+                ws:3/pane:1
+  title:TEXT    the title contains TEXT, ignoring case
+  agent:KIND[:STATE]
+                runs that agent (claude, codex, ...), in that state
+  cwd:DIR       works in DIR; a bare name matches the last part of the path
+Windows, workspaces, tabs and panes count from 1 in the order the app shows
+them. The positional forms need a runode window.
 
 commands:
-  list [--json]               list the terminal sessions; * marks your own
-  read [SESSION] [--lines N]  print the text on the screen; N lines from the
-                              bottom, scrollback included; SESSION defaults to
-                              your own
-  send SESSION [TEXT...] [--enter] [--wait] [--timeout SECS]
-                              type TEXT (words joined by spaces; - reads stdin)
-                              into the session; --enter presses Enter after it;
-                              --wait then waits like `wait --for done`
-  wait SESSION [--for STATE] [--timeout SECS]
-                              wait for the session's agent. STATE is one of
-                                stopped  not working: idle, asking you, or no
-                                         agent (default)
-                                done     working, then stopped
+  list [--json]               list the terminal sessions: * marks your own, REL
+                              where they sit next to yours, FG the program in
+                              front, VIEW shown, hidden (another tab) or bg (in
+                              no window)
+  read [SESSION] [--lines N] [--command [N]]
+                              print the text on the screen; --lines: N lines
+                              from the bottom, scrollback included; --command:
+                              the output of the Nth last command (default 1),
+                              which needs shell integration. SESSION defaults
+                              to your own
+  send SESSION [TEXT...] [--paste] [--key KEY]... [--enter] [--wait]
+       [--timeout SECS]       type TEXT (words joined by spaces; - reads stdin)
+                              into the session, or paste it with --paste; then
+                              press each KEY; then Enter with --enter. A KEY is
+                              ctrl-c, alt-b, shift-tab, esc, enter, tab, up,
+                              pageup, f5 and the like; down*3 presses it three
+                              times. --wait then waits: for the agent like
+                              --for done if one runs there, for the command
+                              like --for command if Enter ran one at a shell
+                              prompt with shell integration, else until the
+                              screen is quiet for 2 seconds; it says which on
+                              stderr
+  wait SESSION [--for UNTIL] [--timeout SECS]
+                              wait until UNTIL, one of
+                                stopped  the agent is not working: idle, asking
+                                         you, or no agent (default)
+                                done     the agent worked, then stopped
                                 working, idle, blocked
-                              prints the agent's state when it gets there
+                                         the agent is in that state
+                                command  the next command at the shell prompt
+                                         finished; prints exit N and fails with
+                                         status 4 if N is not 0
+                                text REGEX [--lines N] [--new]
+                                         a line on the screen (or in the last N
+                                         lines) matches REGEX; --new skips the
+                                         lines already there; prints the line
+                                quiet SECS
+                                         the screen did not change for SECS
+                              agent states print the state they reached
   open [--tab|--right|--down] [--near SESSION] [--cwd DIR] [--focus]
        [-- COMMAND...]        open a terminal in the app: a new tab after the
                               one SESSION is in (default), or split SESSION's
@@ -41,11 +86,15 @@ commands:
   kill SESSION                end the session and close its pane
   focus [SESSION]             show the session's pane and bring its window to
                               the front; SESSION defaults to your own
+  setup claude|codex [--print]
+                              teach the agent to use runode: installs a skill
+                              in ~/.claude/skills/runode, or a section in
+                              ~/.codex/AGENTS.md; --print shows it instead
   help                        show this help
   version                     show the version
 
 exit status: 0 done, 1 failed, 2 bad arguments, 3 the session exited,
-124 timed out.
+4 the command waited for failed, 124 timed out.
 ";
 
 /// 一条命令。
@@ -53,26 +102,61 @@ exit status: 0 done, 1 failed, 2 bad arguments, 3 the session exited,
 pub(crate) enum Command {
     Help,
     Version,
-    List { json: bool },
-    Read { session: Option<String>, lines: Option<u32> },
-    Send { session: String, text: Text, enter: bool, wait: bool, timeout: Option<Duration> },
-    Wait { session: String, until: Until, timeout: Option<Duration> },
-    Open { placement: Placement, near: Option<String>, cwd: Option<PathBuf>, focus: bool, command: String },
-    Kill { session: String },
-    Focus { session: Option<String> },
+    List {
+        json: bool,
+    },
+    Read {
+        session: Option<Selector>,
+        lines: Option<u32>,
+        /// 读倒数第几条命令的输出。
+        command: Option<u32>,
+    },
+    Send {
+        session: Selector,
+        text: Text,
+        /// 文字按粘贴发，不逐字打。
+        paste: bool,
+        /// 打完字以后依次按的键，每项是 `runode_shared_types::input::parse_keys` 认的写法。
+        keys: Vec<String>,
+        enter: bool,
+        wait: bool,
+        timeout: Option<Duration>,
+    },
+    Wait {
+        session: Selector,
+        until: Until,
+        timeout: Option<Duration>,
+    },
+    Open {
+        placement: Placement,
+        near: Option<Selector>,
+        cwd: Option<PathBuf>,
+        focus: bool,
+        command: String,
+    },
+    Kill {
+        session: Selector,
+    },
+    Focus {
+        session: Option<Selector>,
+    },
+    Setup {
+        target: SetupTarget,
+        print: bool,
+    },
 }
 
 /// `send` 要打的字。
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum Text {
-    /// 参数里给的，可能为空（只按回车）。
+    /// 参数里给的，可能为空（只按键或回车）。
     Given(String),
     /// 从标准输入读。
     Stdin,
 }
 
 /// `wait` 等到什么时候。
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub(crate) enum Until {
     /// 不在干活：空闲、等回答，或者前台没有 agent。
     Stopped,
@@ -81,13 +165,24 @@ pub(crate) enum Until {
     Working,
     Idle,
     Blocked,
+    /// shell 集成报告下一条命令运行完了。
+    Command,
+    /// 屏幕上（`lines` 给了时是最后这么多行里）有一行对上 `pattern`；`new` 时开始等的时候已经在
+    /// 的行不算。`pattern` 已经确认能编译。
+    Text {
+        pattern: String,
+        lines: Option<u32>,
+        new: bool,
+    },
+    /// 屏幕上的字这么久没变。
+    Quiet(Duration),
 }
 
 /// 解析参数，出错时返回说明。
 pub(crate) fn parse(args: &[String]) -> Result<Command, String> {
     let mut words = Vec::new();
     let mut flags = Flags::default();
-    let mut rest = args.iter();
+    let mut rest = args.iter().peekable();
     while let Some(arg) = rest.next() {
         match arg.as_str() {
             "--" => {
@@ -98,9 +193,25 @@ pub(crate) fn parse(args: &[String]) -> Result<Command, String> {
             "--json" => flags.json = true,
             "--enter" => flags.enter = true,
             "--wait" => flags.wait = true,
+            "--paste" => flags.paste = true,
+            "--new" => flags.new = true,
+            "--print" => flags.print = true,
+            "--key" => {
+                let key = value(&mut rest, arg)?;
+                parse_keys(key).map_err(|err| format!("--key: {err}"))?;
+                flags.keys.push(key.to_owned());
+            }
             "--lines" => flags.lines = Some(value(&mut rest, arg)?.parse().map_err(|_| "--lines takes a count")?),
-            "--timeout" => flags.timeout = Some(seconds(value(&mut rest, arg)?)?),
-            "--for" => flags.until = Some(until(value(&mut rest, arg)?)?),
+            "--command" => {
+                // 次数可以不给。会话标识也可能全是数字，所以只把短的数字当次数，长的留给会话。
+                let count = rest.next_if(|next| next.len() <= 4 && next.bytes().all(|b| b.is_ascii_digit()));
+                flags.command = Some(count.map_or(Ok(1), |count| command_count(count))?);
+            }
+            option if option.starts_with("--command=") => {
+                flags.command = Some(command_count(&option["--command=".len()..])?);
+            }
+            "--timeout" => flags.timeout = Some(seconds(value(&mut rest, arg)?, arg)?),
+            "--for" => flags.until = Some(until(&mut rest)?),
             "--tab" | "--right" | "--down" => {
                 let placement = match arg.as_str() {
                     "--tab" => Placement::Tab,
@@ -111,7 +222,7 @@ pub(crate) fn parse(args: &[String]) -> Result<Command, String> {
                     return Err("give only one of --tab, --right and --down".into());
                 }
             }
-            "--near" => flags.near = Some(value(&mut rest, arg)?.to_owned()),
+            "--near" => flags.near = Some(Selector::parse(value(&mut rest, arg)?)?),
             "--cwd" => flags.cwd = Some(value(&mut rest, arg)?.into()),
             "--focus" => flags.focus = true,
             // 单独一个 `-` 是位置参数（`send` 从标准输入读）。
@@ -128,6 +239,7 @@ pub(crate) fn parse(args: &[String]) -> Result<Command, String> {
     let Some((name, words)) = words.split_first() else {
         return Ok(Command::Help);
     };
+    let session = |word: Option<&String>| word.map(|word| Selector::parse(word)).transpose();
     let command = match name.as_str() {
         "help" => Command::Help,
         "version" => Command::Version,
@@ -137,20 +249,26 @@ pub(crate) fn parse(args: &[String]) -> Result<Command, String> {
         }
         "read" => {
             no_more(words, 1, name)?;
-            Command::Read { session: words.first().cloned(), lines: flags.lines.take() }
+            let command = flags.command.take();
+            if command.is_some() && flags.lines.is_some() {
+                return Err("give only one of --lines and --command".into());
+            }
+            Command::Read { session: session(words.first())?, lines: flags.lines.take(), command }
         }
         "send" => {
-            let (session, text) = words.split_first().ok_or("send needs a SESSION")?;
+            let (target, text) = words.split_first().ok_or("send needs a SESSION")?;
             let text = match text {
                 [dash] if dash == "-" => Text::Stdin,
                 words => Text::Given(words.join(" ")),
             };
-            if text == Text::Given(String::new()) && !flags.enter {
-                return Err("send needs TEXT or --enter".into());
+            if text == Text::Given(String::new()) && flags.keys.is_empty() && !flags.enter {
+                return Err("send needs TEXT, --key or --enter".into());
             }
             Command::Send {
-                session: session.clone(),
+                session: Selector::parse(target)?,
                 text,
+                paste: std::mem::take(&mut flags.paste),
+                keys: std::mem::take(&mut flags.keys),
                 enter: std::mem::take(&mut flags.enter),
                 wait: std::mem::take(&mut flags.wait),
                 timeout: flags.timeout.take(),
@@ -158,12 +276,13 @@ pub(crate) fn parse(args: &[String]) -> Result<Command, String> {
         }
         "wait" => {
             no_more(words, 1, name)?;
-            let session = words.first().ok_or("wait needs a SESSION")?.clone();
-            Command::Wait {
-                session,
-                until: flags.until.take().unwrap_or(Until::Stopped),
-                timeout: flags.timeout.take(),
+            let target = words.first().ok_or("wait needs a SESSION")?;
+            let mut until = flags.until.take().unwrap_or(Until::Stopped);
+            if let Until::Text { lines, new, .. } = &mut until {
+                *lines = flags.lines.take();
+                *new = std::mem::take(&mut flags.new);
             }
+            Command::Wait { session: Selector::parse(target)?, until, timeout: flags.timeout.take() }
         }
         "open" => Command::Open {
             placement: flags.placement.take().unwrap_or(Placement::Tab),
@@ -174,11 +293,21 @@ pub(crate) fn parse(args: &[String]) -> Result<Command, String> {
         },
         "kill" => {
             no_more(words, 1, name)?;
-            Command::Kill { session: words.first().ok_or("kill needs a SESSION")?.clone() }
+            Command::Kill { session: Selector::parse(words.first().ok_or("kill needs a SESSION")?)? }
         }
         "focus" => {
             no_more(words, 1, name)?;
-            Command::Focus { session: words.first().cloned() }
+            Command::Focus { session: session(words.first())? }
+        }
+        "setup" => {
+            no_more(words, 1, name)?;
+            let target = match words.first().map(String::as_str) {
+                Some("claude") => SetupTarget::Claude,
+                Some("codex") => SetupTarget::Codex,
+                Some(other) => return Err(format!("setup knows claude and codex, not {other}")),
+                None => return Err("setup needs claude or codex".into()),
+            };
+            Command::Setup { target, print: std::mem::take(&mut flags.print) }
         }
         other => return Err(format!("unknown command {other}")),
     };
@@ -193,11 +322,16 @@ struct Flags {
     json: bool,
     enter: bool,
     wait: bool,
+    paste: bool,
+    new: bool,
+    print: bool,
+    keys: Vec<String>,
     lines: Option<u32>,
+    command: Option<u32>,
     timeout: Option<Duration>,
     until: Option<Until>,
     placement: Option<Placement>,
-    near: Option<String>,
+    near: Option<Selector>,
     cwd: Option<PathBuf>,
     focus: bool,
 }
@@ -208,7 +342,12 @@ impl Flags {
             (self.json, "--json"),
             (self.enter, "--enter"),
             (self.wait, "--wait"),
+            (self.paste, "--paste"),
+            (self.new, "--new"),
+            (self.print, "--print"),
+            (!self.keys.is_empty(), "--key"),
             (self.lines.is_some(), "--lines"),
+            (self.command.is_some(), "--command"),
             (self.timeout.is_some(), "--timeout"),
             (self.until.is_some(), "--for"),
             (self.placement.is_some(), "--tab, --right or --down"),
@@ -225,22 +364,38 @@ fn value<'a>(rest: &mut impl Iterator<Item = &'a String>, option: &str) -> Resul
     rest.next().map(String::as_str).ok_or_else(|| format!("{option} needs a value"))
 }
 
-fn seconds(value: &str) -> Result<Duration, String> {
+fn seconds(value: &str, option: &str) -> Result<Duration, String> {
     value
         .parse::<f64>()
         .ok()
         .and_then(|secs| Duration::try_from_secs_f64(secs).ok())
-        .ok_or_else(|| format!("--timeout takes seconds, not {value}"))
+        .ok_or_else(|| format!("{option} takes seconds, not {value}"))
 }
 
-fn until(value: &str) -> Result<Until, String> {
-    Ok(match value {
+fn command_count(value: &str) -> Result<u32, String> {
+    value.parse().ok().filter(|&n| n > 0).ok_or_else(|| format!("--command takes a count from 1, not {value}"))
+}
+
+/// `--for` 后面的写法；`text` 和 `quiet` 还要再取一个值。
+fn until<'a>(rest: &mut impl Iterator<Item = &'a String>) -> Result<Until, String> {
+    Ok(match value(rest, "--for")? {
         "stopped" => Until::Stopped,
         "done" => Until::Done,
         "working" => Until::Working,
         "idle" => Until::Idle,
         "blocked" => Until::Blocked,
-        other => return Err(format!("--for takes stopped, done, working, idle or blocked, not {other}")),
+        "command" => Until::Command,
+        "text" => {
+            let pattern = value(rest, "--for text")?;
+            regex::Regex::new(pattern).map_err(|err| format!("--for text: {err}"))?;
+            Until::Text { pattern: pattern.to_owned(), lines: None, new: false }
+        }
+        "quiet" => Until::Quiet(seconds(value(rest, "--for quiet")?, "--for quiet")?),
+        other => {
+            return Err(format!(
+                "--for takes stopped, done, working, idle, blocked, command, text REGEX or quiet SECS, not {other}"
+            ));
+        }
     })
 }
 
@@ -259,43 +414,103 @@ mod tests {
         super::parse(&args.split_whitespace().map(str::to_owned).collect::<Vec<_>>())
     }
 
+    fn id(prefix: &str) -> Selector {
+        Selector::parse(prefix).unwrap()
+    }
+
+    fn send(session: &str, text: &str) -> Command {
+        Command::Send {
+            session: id(session),
+            text: Text::Given(text.into()),
+            paste: false,
+            keys: Vec::new(),
+            enter: false,
+            wait: false,
+            timeout: None,
+        }
+    }
+
     #[test]
     fn commands_and_their_options() {
         assert_eq!(parse(""), Ok(Command::Help));
         assert_eq!(parse("list --json"), Ok(Command::List { json: true }));
-        assert_eq!(parse("--lines 5 read ab12"), Ok(Command::Read { session: Some("ab12".into()), lines: Some(5) }));
         assert_eq!(
-            parse("send ab12 hello  world --enter --wait --timeout 1.5"),
+            parse("--lines 5 read ab12"),
+            Ok(Command::Read { session: Some(id("ab12")), lines: Some(5), command: None })
+        );
+        let Ok(Command::Send { enter, wait, timeout, .. }) =
+            parse("send ab12 hello  world --enter --wait --timeout 1.5")
+        else {
+            panic!("not a send");
+        };
+        assert_eq!((enter, wait, timeout), (true, true, Some(Duration::from_millis(1500))));
+        assert_eq!(parse("send ab12 hello  world"), Ok(send("ab12", "hello world")));
+        assert!(matches!(parse("send ab12 -"), Ok(Command::Send { text: Text::Stdin, .. })));
+        assert_eq!(parse("send ab12 -- --enter"), Ok(send("ab12", "--enter")));
+        assert_eq!(
+            parse("wait ab12 --for done"),
+            Ok(Command::Wait { session: id("ab12"), until: Until::Done, timeout: None })
+        );
+        assert_eq!(parse("wait ab12"), Ok(Command::Wait { session: id("ab12"), until: Until::Stopped, timeout: None }));
+    }
+
+    #[test]
+    fn keys_and_paste() {
+        assert_eq!(
+            parse("send left --key ctrl-c --key down*3 --enter"),
             Ok(Command::Send {
-                session: "ab12".into(),
-                text: Text::Given("hello world".into()),
+                session: Selector::parse("left").unwrap(),
+                text: Text::Given(String::new()),
+                paste: false,
+                keys: vec!["ctrl-c".into(), "down*3".into()],
                 enter: true,
-                wait: true,
-                timeout: Some(Duration::from_millis(1500)),
-            })
-        );
-        assert_eq!(
-            parse("send ab12 -"),
-            Ok(Command::Send { session: "ab12".into(), text: Text::Stdin, enter: false, wait: false, timeout: None })
-        );
-        assert_eq!(
-            parse("send ab12 -- --enter"),
-            Ok(Command::Send {
-                session: "ab12".into(),
-                text: Text::Given("--enter".into()),
-                enter: false,
                 wait: false,
                 timeout: None,
             })
         );
+        assert!(matches!(parse("send ab12 --paste some text"), Ok(Command::Send { paste: true, .. })));
+        // 写错的键在发出去之前就报，算参数错误。
+        assert!(parse("send ab12 --key ctrl-?").unwrap_err().contains("--key"));
+        assert!(parse("send ab12 --key down*0").unwrap_err().contains("--key"));
+        assert!(parse("send ab12").unwrap_err().contains("TEXT, --key or --enter"));
+    }
+
+    #[test]
+    fn reading_a_command() {
+        let read = |session: Option<&str>, command| Command::Read { session: session.map(id), lines: None, command };
+        assert_eq!(parse("read --command"), Ok(read(None, Some(1))));
+        assert_eq!(parse("read --command 2"), Ok(read(None, Some(2))));
+        assert_eq!(parse("read ab12 --command 3"), Ok(read(Some("ab12"), Some(3))));
+        assert_eq!(parse("read --command=2 ab12"), Ok(read(Some("ab12"), Some(2))));
+        // 长的数字是会话标识的前缀，不是次数。
+        assert_eq!(parse("read --command 12345678"), Ok(read(Some("12345678"), Some(1))));
+        assert!(parse("read --command 0").unwrap_err().contains("--command"));
+        assert!(parse("read --command --lines 3").unwrap_err().contains("only one"));
+    }
+
+    #[test]
+    fn waiting_for_commands_text_and_quiet() {
+        let wait = |until| Ok(Command::Wait { session: id("ab12"), until, timeout: None });
+        assert_eq!(parse("wait ab12 --for command"), wait(Until::Command));
         assert_eq!(
-            parse("wait ab12 --for done"),
-            Ok(Command::Wait { session: "ab12".into(), until: Until::Done, timeout: None })
+            parse("wait ab12 --for text error|warn --lines 50 --new"),
+            wait(Until::Text { pattern: "error|warn".into(), lines: Some(50), new: true })
         );
-        assert_eq!(
-            parse("wait ab12"),
-            Ok(Command::Wait { session: "ab12".into(), until: Until::Stopped, timeout: None })
-        );
+        assert_eq!(parse("wait ab12 --for quiet 2.5"), wait(Until::Quiet(Duration::from_millis(2500))));
+        assert!(parse("wait ab12 --for text (").unwrap_err().contains("--for text"));
+        assert!(parse("wait ab12 --for text").unwrap_err().contains("needs a value"));
+        assert!(parse("wait ab12 --for quiet").unwrap_err().contains("needs a value"));
+        assert!(parse("wait ab12 --for quiet soon").unwrap_err().contains("seconds"));
+        assert!(parse("wait ab12 --for done --new").unwrap_err().contains("does not take --new"));
+        assert!(parse("wait ab12 --lines 5").unwrap_err().contains("does not take --lines"));
+    }
+
+    #[test]
+    fn setup_targets() {
+        assert_eq!(parse("setup claude"), Ok(Command::Setup { target: SetupTarget::Claude, print: false }));
+        assert_eq!(parse("setup codex --print"), Ok(Command::Setup { target: SetupTarget::Codex, print: true }));
+        assert!(parse("setup").unwrap_err().contains("claude or codex"));
+        assert!(parse("setup vim").unwrap_err().contains("not vim"));
     }
 
     #[test]
@@ -314,13 +529,13 @@ mod tests {
             parse("open --right --near ab12 --cwd /tmp --focus -- claude --model opus"),
             Ok(Command::Open {
                 placement: Placement::Right,
-                near: Some("ab12".into()),
+                near: Some(id("ab12")),
                 cwd: Some("/tmp".into()),
                 focus: true,
                 command: "claude --model opus".into(),
             })
         );
-        assert_eq!(parse("kill ab12"), Ok(Command::Kill { session: "ab12".into() }));
+        assert_eq!(parse("kill ab12"), Ok(Command::Kill { session: id("ab12") }));
         assert_eq!(parse("focus"), Ok(Command::Focus { session: None }));
         assert!(parse("open --right --down").unwrap_err().contains("only one"));
         assert!(parse("kill").unwrap_err().contains("SESSION"));
@@ -334,9 +549,11 @@ mod tests {
         assert!(parse("list --enter").unwrap_err().contains("does not take --enter"));
         assert!(parse("read a b").unwrap_err().contains("does not take b"));
         assert!(parse("send").unwrap_err().contains("SESSION"));
-        assert!(parse("send ab12").unwrap_err().contains("TEXT"));
         assert!(parse("wait ab12 --for sleeping").unwrap_err().contains("--for"));
         assert!(parse("wait ab12 --timeout soon").unwrap_err().contains("--timeout"));
         assert!(parse("read --lines").unwrap_err().contains("needs a value"));
+        // 认不出的会话写法也算参数错误。
+        assert!(parse("read sideways").unwrap_err().contains("sideways"));
+        assert!(parse("read tab:x").unwrap_err().contains("tab:x"));
     }
 }
