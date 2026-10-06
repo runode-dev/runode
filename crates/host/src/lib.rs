@@ -35,7 +35,7 @@ use std::{
 use anyhow::Result;
 pub use handoff::{TakeOverError, TakeOverOptions, TakeOverReport};
 pub use idle::Stopped;
-pub use launch::launch;
+pub use launch::{STATUS_FD, Successor, launch, launch_successor};
 pub use runode_protocol::{BuildId, ClientMsg, HandoffRefusal, HostMsg, Placement, SessionId};
 use runode_shared_types::{grid::GridSize, settings::TermSettings, shell::IntegrationMode};
 
