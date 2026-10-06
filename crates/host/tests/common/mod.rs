@@ -145,11 +145,15 @@ impl Peer {
         }
     }
 
-    /// 回话：下一条不是 `Meta`、`CommandFinished`、`Bell` 这类随时会插进来的状态的控制消息。
+    /// 回话：下一条不是 `Meta`、`CommandFinished`、`Bell`、`SizeOwner` 这类随时会插进来的状态的
+    /// 控制消息。
     pub fn reply(&self) -> HostMsg {
         loop {
             match self.message() {
-                HostMsg::Meta { .. } | HostMsg::CommandFinished { .. } | HostMsg::Bell { .. } => {}
+                HostMsg::Meta { .. }
+                | HostMsg::CommandFinished { .. }
+                | HostMsg::Bell { .. }
+                | HostMsg::SizeOwner { .. } => {}
                 message => return message,
             }
         }

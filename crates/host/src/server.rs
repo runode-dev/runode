@@ -569,6 +569,7 @@ fn serve(shared: &Arc<Shared>, id: u64, stream: UnixStream, check_peer: bool) {
         out,
         kind: ClientKind::Unknown,
         by: None,
+        device: None,
         snapshots: false,
         channels: HashMap::new(),
         next_channel: 1,
@@ -709,6 +710,8 @@ struct Connection {
     kind: ClientKind,
     /// `Hello` 里说的前端所在的会话，记谁在操作会话时用，见 `drive`。
     by: Option<SessionId>,
+    /// `Hello` 里报的设备名，尺寸归这条连接时告诉别的前端，见 `HostMsg::SizeOwner`。
+    device: Option<String>,
     /// 前端解得了快照：自己说能解，构建也和宿主一样。
     snapshots: bool,
     /// 连着的会话，按通道。
@@ -728,8 +731,7 @@ impl Connection {
                 return;
             }
         };
-        // 尺寸归属还没做，前端报的设备名先不用。
-        let Some(ClientMsg::Hello { protocol, build, caps, client, session, device: _ }) = hello else {
+        let Some(ClientMsg::Hello { protocol, build, caps, client, session, device }) = hello else {
             self.goodbye("the first message must be hello");
             return;
         };
@@ -751,6 +753,7 @@ impl Connection {
         }
         self.kind = client;
         self.by = session;
+        self.device = device;
         self.snapshots = caps.snapshot && build == self.shared.build;
         // 登记界面和回 `Welcome` 在同一把锁里做：界面收到 `Welcome` 后，别的连接转来的请求一定
         // 交给它；别的连接也只有在 `Welcome` 排进 `Outbox` 之后才看得到它，请求不会抢在前面。
@@ -778,7 +781,8 @@ impl Connection {
                     // 会话已经没了（比如别的前端结束了它）：通道跟着作废。
                     Some(&id) => {
                         self.drive(id, DriveAction::Input);
-                        if !self.shared.deliver(id, Inbox::Input(frame.payload)) {
+                        let input = Inbox::Input { connection: self.id, data: frame.payload };
+                        if !self.shared.deliver(id, input) {
                             self.channels.remove(&frame.channel);
                         }
                     }
@@ -860,7 +864,7 @@ impl Connection {
                 self.forget(id);
                 self.shared.kill(id);
             }
-            ClientMsg::Resize { id, size } => self.shared.send(id, Inbox::Resize(size)),
+            ClientMsg::Resize { id, size } => self.shared.send(id, Inbox::Resize { connection: self.id, size }),
             ClientMsg::ClearScreen { id } => {
                 self.drive(id, DriveAction::ClearScreen);
                 self.shared.send(id, Inbox::ClearScreen);
@@ -874,8 +878,10 @@ impl Connection {
                     self.error(None, None, "only the runode app changes the host's options".into());
                 }
             }
-            // 通知在界面那边发，宿主不用知道哪个会话被看着。
-            ClientMsg::Focus { .. } => {}
+            // 获得焦点算一次交互，可能轮到这条连接决定尺寸；失去焦点只是不在看了，不让出。通知在
+            // 界面那边发，宿主不用知道哪个会话被看着。
+            ClientMsg::Focus { id, focused: true } => self.shared.send(id, Inbox::Focus { connection: self.id }),
+            ClientMsg::Focus { focused: false, .. } => {}
             ClientMsg::ReadScreen { id, lines, command } => self.read_screen(id, lines, command),
             ClientMsg::SendKeys { req, id, keys } => {
                 let parsed: Result<Vec<_>, _> = keys.iter().map(|key| parse_keys(key)).collect();
@@ -960,13 +966,12 @@ impl Connection {
         }
     }
 
-    /// 连上会话。已经连着的先断开再重新连，前端收到 `Resync` 后就是这样重新连上的；
-    /// `MetaOnly` 和看屏幕之间来回切换也是这样。`Detach` 和之后的 `Subscribe` 按先后送到会话
-    /// 线程，旧通道的帧都在新的 `Attached` 之前，新通道的帧都在它之后。
+    /// 连上会话。已经连着的换一个新通道重新连，前端收到 `Resync` 后就是这样重新连上的；
+    /// `MetaOnly` 和看屏幕之间来回切换也是这样。不先发 `Detach`：会话线程收到同一条连接的
+    /// `Subscribe` 时换掉旧的订阅，尺寸归属的状态（见 `Runner::subscribe`）留着；旧通道的帧都在
+    /// 新的 `Attached` 之前，新通道的帧都在它之后。
     fn attach(&mut self, id: SessionId, size: Option<GridSize>, mode: AttachMode) {
-        if self.forget(id) {
-            self.shared.send(id, Inbox::Detach { connection: self.id });
-        }
+        self.forget(id);
         let mode = match mode {
             AttachMode::Snapshot if !self.snapshots => AttachMode::VtReplay,
             mode => mode,
@@ -996,7 +1001,8 @@ impl Connection {
             Some(session_sink(id, channel, meta_only, out))
         });
         let desktop = self.kind == ClientKind::Desktop;
-        let subscribe = Subscribe { connection: self.id, size, mode, start, desktop };
+        let device = self.device.clone();
+        let subscribe = Subscribe { connection: self.id, size, mode, start, desktop, device };
         if self.shared.deliver(id, Inbox::Subscribe(subscribe)) {
             self.channels.insert(channel, id);
         } else {
@@ -1176,7 +1182,8 @@ mod tests {
             let _ = released.recv();
             None
         });
-        let subscribe = Subscribe { connection: 0, size: None, mode: AttachMode::MetaOnly, start, desktop: false };
+        let subscribe =
+            Subscribe { connection: 0, size: None, mode: AttachMode::MetaOnly, start, desktop: false, device: None };
         assert!(host.shared.deliver(stuck, Inbox::Subscribe(subscribe)));
         stuck_now.recv_timeout(WAIT).unwrap();
         (stuck, release)
@@ -1292,12 +1299,13 @@ mod tests {
             });
             Some(sink)
         });
-        let subscribe = Subscribe { connection: 0, size: None, mode: AttachMode::VtReplay, start, desktop: false };
+        let subscribe =
+            Subscribe { connection: 0, size: None, mode: AttachMode::VtReplay, start, desktop: false, device: None };
         assert!(host.shared.deliver(id, Inbox::Subscribe(subscribe)));
-        assert!(host.shared.deliver(id, Inbox::Input(b"boom\r".to_vec())));
+        assert!(host.shared.deliver(id, Inbox::Input { connection: 0, data: b"boom\r".to_vec() }));
         let next = || loop {
             match rx.recv_timeout(WAIT).expect("timed out") {
-                HostMsg::Meta { .. } | HostMsg::Resized { .. } => {}
+                HostMsg::Meta { .. } | HostMsg::Resized { .. } | HostMsg::SizeOwner { .. } => {}
                 message => return message,
             }
         };
