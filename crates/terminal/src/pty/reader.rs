@@ -267,11 +267,26 @@ mod tests {
         assert!(reader.finished());
         pipe_tx.write_all(b"after").unwrap();
         drop(pipe_tx);
-        let mut rest = Vec::new();
+        // 非阻塞的读端：读出写进去的那几个字节，不指望紧接着读到 EOF。同一个进程里别的测试正在
+        // 拉起子进程时，子进程在 exec 完成之前握着这边所有描述符的副本（设了 close-on-exec 的也
+        // 一样），写端要等它 exec 完才真正关掉，这期间读得到的是 `WouldBlock`。
         let mut pipe_rx = pipe_rx;
-        // 非阻塞的读端：写端关了，读到 EOF 为止。
-        pipe_rx.read_to_end(&mut rest).unwrap();
-        assert_eq!(rest, b"after");
+        let mut rest = [0u8; 5];
+        let mut got = 0;
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        while got < rest.len() {
+            match pipe_rx.read(&mut rest[got..]) {
+                Ok(0) => break,
+                Ok(n) => got += n,
+                Err(err) if err.kind() == io::ErrorKind::WouldBlock && std::time::Instant::now() < deadline => {
+                    std::thread::sleep(Duration::from_millis(1));
+                }
+                Err(err) => panic!("{err}"),
+            }
+        }
+        assert_eq!(&rest[..got], b"after");
+        // 后面没有别的了：读到 EOF，或者写端的副本还没关、暂时没有数据。
+        assert!(!matches!(pipe_rx.read(&mut [0u8; 16]), Ok(n) if n > 0));
         // 叫停的读线程不报告退出。
         assert!(rx.recv_timeout(Duration::from_millis(100)).is_err());
     }
