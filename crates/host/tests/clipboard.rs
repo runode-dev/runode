@@ -119,17 +119,17 @@ fn allowed_reads_answer_with_the_desktop_text() {
     desktop.send(&ClientMsg::Kill { id });
 }
 
-/// 问用户的期间再来的读请求当场回空的，不再转给桌面；问的那个回话后照常回它。
+/// 问用户的期间再来的读请求不再转给桌面，回空的，排在问的那个的回话后面，程序按请求的先后收到。
 #[test]
-fn reads_while_asking_are_answered_with_nothing() {
+fn reads_while_asking_are_answered_with_nothing_after_the_first() {
     let host = host();
     let mut desktop = Peer::pair(&host);
     let (id, channel) = reader_session(&mut desktop, "clip-ask", r"printf '\033]52;c;?\007\033]52;c;?\033\\'");
     let (ui, request) = ui_request(&desktop);
     assert!(matches!(request, ClientMsg::ReadClipboard { ask: true, .. }), "{request:?}");
-    assert!(requests_until(&desktop, channel, br"^[]52;c;^[\").is_empty());
     desktop.send(&ClientMsg::UiReply { ui, reply: Box::new(HostMsg::ClipboardText { id, text: Some("hi".into()) }) });
-    desktop.wait_for_output(channel, b"^[]52;c;aGk=^G");
+    let requests = requests_until(&desktop, channel, br"^[]52;c;aGk=^G^[]52;c;^[\");
+    assert!(requests.is_empty(), "{requests:?}");
     desktop.send(&ClientMsg::Kill { id });
 }
 
@@ -185,10 +185,12 @@ fn device_attributes_report_osc_52_when_writes_are_allowed() {
     desktop.wait_for_output(channel, b"^[[?62;1;6;22c");
 }
 
-/// 回话里说的是别的会话的不认：程序拿不到那段文字，读请求接着等（这期间再来的读请求回空的）。
+/// 回话里说的是别的会话的不认：程序拿不到那段文字，读请求接着等，等太久回空的（这期间再来的读请求
+/// 排在它后面回空的）。
 #[test]
 fn answers_about_another_session_are_ignored() {
     let host = host();
+    host.set_clipboard_read_patience(std::time::Duration::from_millis(300));
     let mut desktop = Peer::pair(&host);
     set_access(&mut desktop, ClipboardWrite::Allow, ClipboardRead::Allow);
     let (id, channel) = reader_session(
@@ -201,7 +203,7 @@ fn answers_about_another_session_are_ignored() {
     let reply = HostMsg::ClipboardText { id: other, text: Some("evil".into()) };
     desktop.send(&ClientMsg::UiReply { ui, reply: Box::new(reply) });
     desktop.input(channel, b"x");
-    let output = desktop.wait_for_output(channel, b"^[]52;c;^G");
+    let output = desktop.wait_for_output(channel, b"^[]52;c;^G^[]52;c;^G");
     assert!(!contains(&output, b"ZXZpbA=="), "{}", String::from_utf8_lossy(&output));
     desktop.send(&ClientMsg::Kill { id });
 }

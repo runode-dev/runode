@@ -28,7 +28,13 @@ pub(super) struct PendingRead {
     deadline: Instant,
     /// 请求时的前台程序（进程号和名字），见 `HostSession::foreground_program`。
     program: Option<(u32, Option<String>)>,
+    /// 等它期间又来的读请求，见 `Runner::read_clipboard`；它回完话后一个个回空的。
+    later: Vec<ClipboardQuery>,
 }
+
+/// 等着一个读请求时最多再排这么多个，回空的话排在它的回话后面。再多的当场回空：程序回话的先后
+/// 乱了，但这只发生在程序连发读请求的时候。
+const MAX_LATER_READS: usize = 16;
 
 impl Runner {
     /// 办宿主那份 VT 认出的一个剪贴板请求，见模块文档。
@@ -64,11 +70,15 @@ impl Runner {
             self.session.answer_clipboard(query, None);
             return;
         }
-        // 已经在等桌面回一个读请求（多半正问着用户）：这条当场回空的，不再弹一个询问框，程序连发
-        // 也只有一个框。等的那个回话时只回它自己。
-        if self.clipboard_read.is_some() {
-            tracing::debug!("session {} answered a clipboard read with nothing: another one is pending", self.id);
-            self.session.answer_clipboard(query, None);
+        // 已经在等桌面回一个读请求（多半正问着用户）：这条不再转给桌面、不再弹一个询问框，程序连发
+        // 也只有一个框。它回空的，排在等着的那个的回话后面写，程序按请求的先后收到回话。
+        if let Some(pending) = &mut self.clipboard_read {
+            tracing::debug!("session {} answers a clipboard read with nothing: another one is pending", self.id);
+            if pending.later.len() < MAX_LATER_READS {
+                pending.later.push(query);
+            } else {
+                self.session.answer_clipboard(query, None);
+            }
             return;
         }
         let program = self.session.foreground_program();
@@ -77,7 +87,7 @@ impl Runner {
         match self.ui.ask(self.id, self.ui_connection(), request) {
             Some(ui) => {
                 let deadline = Instant::now() + self.read_patience;
-                self.clipboard_read = Some(PendingRead { ui, query, deadline, program });
+                self.clipboard_read = Some(PendingRead { ui, query, deadline, program, later: Vec::new() });
             }
             None => {
                 tracing::info!(
@@ -128,7 +138,7 @@ impl Runner {
                     None
                 }
             };
-            self.session.answer_clipboard(read.query, text.as_deref());
+            self.finish_read(read, text.as_deref());
             return;
         }
         match reply {
@@ -154,7 +164,15 @@ impl Runner {
                 "session {} answered a clipboard read with nothing: the runode window did not answer",
                 self.id
             );
-            self.session.answer_clipboard(read.query, None);
+            self.finish_read(read, None);
+        }
+    }
+
+    /// 回等着的读请求 `read`（`text` 见 `HostSession::answer_clipboard`），再给它后面排着的回空的。
+    fn finish_read(&mut self, read: PendingRead, text: Option<&str>) {
+        self.session.answer_clipboard(read.query, text);
+        for query in read.later {
+            self.session.answer_clipboard(query, None);
         }
     }
 
