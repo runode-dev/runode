@@ -15,7 +15,13 @@ use std::{
 use futures::{FutureExt as _, StreamExt as _, channel::mpsc::UnboundedReceiver};
 use gpui::{App, AppContext as _, Context, Entity, Font, Point, SharedString, Task, Window, font, px};
 use runode_protocol::{AttachMode, ClientMsg, HostMsg, SessionId};
-use runode_shared_types::{agent::Agent, color::Rgb, grid::GridSize, session::SessionMeta, settings::TermSettings};
+use runode_shared_types::{
+    agent::Agent,
+    color::Rgb,
+    grid::GridSize,
+    session::{Driver, SessionMeta},
+    settings::TermSettings,
+};
 use runode_terminal::{
     history,
     session::{self, Request, SYNC_OUTPUT_TIMEOUT, Session},
@@ -442,6 +448,34 @@ impl TerminalView {
         view
     }
 
+    /// 用宿主里已有的会话 `id` 建视图（存档恢复、接上后台会话）。`cwd` 是调用方记着的目录，宿主
+    /// 还没报告目录时当作它的目录。`visible` 为假时视图只看状态（`AttachMode::MetaOnly`），等
+    /// `set_visible` 再看屏幕。会话已经启动过，不再 `start`。连不上时返回错误，不结束会话。
+    // 存档恢复和后台会话用上它之前先放着。
+    #[allow(dead_code)]
+    pub fn reattach(
+        id: SessionId,
+        cwd: Option<&std::path::Path>,
+        visible: bool,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> anyhow::Result<Entity<Self>> {
+        // 桩：先一律看屏幕，状态机落地后按 `visible` 分。
+        let _ = (cwd, visible);
+        let config = cx.global::<AppConfig>().0.clone();
+        let (screen, rx) = session_host::link().attach_now(id, None, AttachMode::Snapshot, ATTACH_TIMEOUT)?;
+        let (session, meta) = build_session(id, screen, &config.term_settings())?;
+        Ok(cx.new(|cx| Self::new(id, session, meta, true, rx, window, cx)))
+    }
+
+    /// 视图在不在窗口里显示（窗口当前 workspace 当前标签里的分屏，被放大的分屏挡住的也算）。
+    /// 离开显示一段时间后只看状态、丢掉界面这份 VT，回到显示时重新看屏幕。
+    // 桩：状态机落地前什么都不做。
+    #[allow(dead_code)]
+    pub fn set_visible(&mut self, visible: bool, _window: &mut Window, _cx: &mut Context<Self>) {
+        let _ = visible;
+    }
+
     /// 宿主里这个终端的会话。
     pub fn session_id(&self) -> SessionId {
         self.id
@@ -452,6 +486,13 @@ impl TerminalView {
     #[allow(dead_code)]
     pub fn meta(&self) -> &SessionMeta {
         &self.meta
+    }
+
+    /// 最近一次别的终端里的程序操作这个会话的记录，见 `SessionMeta::driver`。
+    // 驱动标记的显示用上它之前先放着。
+    #[allow(dead_code)]
+    pub fn driver(&self) -> Option<&Driver> {
+        self.meta.driver.as_ref()
     }
 
     /// 结束宿主里的会话（关标签、关分屏这类用户明确要关掉终端的时候）。之后丢掉视图时不再
