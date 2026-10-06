@@ -1,9 +1,9 @@
-//! 提示符上输入的语法高亮：读屏幕上的输入，按 `runode_highlight` 分好类、按调色板
+//! 提示符上输入的语法高亮：读屏幕上的输入，按 `runode_prompt_highlight` 分好类、按调色板
 //! 定好颜色，绘制时换掉这些单元格的前景色、粗细和下划线。不写进屏幕，shell 照常回显。
 
 use std::rc::Rc;
 
-use runode_highlight::Shell;
+use runode_prompt_highlight::Shell;
 use runode_shared_types::color::Rgb;
 use runode_terminal::{PromptInput, session::Session};
 
@@ -60,7 +60,7 @@ impl TerminalView {
             return;
         };
         let shell = Shell { path: session.shell_path(), names: session.shell_names(), ..Default::default() };
-        let spans = runode_highlight::highlight(text, &shell, session.prompt_cwd().as_deref());
+        let spans = runode_prompt_highlight::highlight(text, &shell, session.prompt_cwd().as_deref());
         if spans.is_empty() {
             return;
         }

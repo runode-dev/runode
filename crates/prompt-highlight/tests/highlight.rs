@@ -5,7 +5,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use runode_highlight::{Kind, Shell, highlight};
+use runode_prompt_highlight::{Kind, Shell, highlight};
 use runode_shared_types::shell::ShellNames;
 
 /// 测试用的临时目录：`bin` 里放几个可执行文件当 PATH，另有一个文件和一个子目录。用完删掉。

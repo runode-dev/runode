@@ -1,5 +1,5 @@
 [package]
-name = "runode-highlight"
+name = "runode-prompt-highlight"
 description = "Syntax highlighting of the command line at the shell prompt, styled after fast-syntax-highlighting"
 version.workspace = true
 edition.workspace = true
