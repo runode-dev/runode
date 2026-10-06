@@ -12,6 +12,7 @@ use super::{
     agents::{Mark, Status},
     divider_color,
     model::TabId,
+    panes::now_ms,
 };
 use crate::{
     terminal_view::{DEFAULT_TITLE, hsla},
@@ -165,6 +166,11 @@ pub(super) fn agent_mark(mark: Mark, id: impl Into<ElementId>, fg: Hsla) -> AnyE
     }
 }
 
+/// 标签上的小图标：这个标签里有分屏正被别的终端里的程序操作着（分屏右上角有驱动标记）。
+fn driven_icon(id: impl Into<ElementId>, fg: Hsla) -> Stateful<Div> {
+    div().id(id).flex_none().text_size(px(15.)).line_height(px(15.)).text_color(fg.opacity(0.8)).child("⌨")
+}
+
 /// agent 等用户回答时标记的颜色。
 const AGENT_BLOCKED_COLOR: u32 = 0xE5A50A;
 /// agent 干完了、用户还没看时标记的颜色。
@@ -199,6 +205,7 @@ impl WindowView {
         let active_bg = hsla(bg.mix(fg, 0.08));
         let hover_bg = hsla(bg.mix(fg, 0.04));
         let close_tooltip = tooltip(rust_i18n::t!("menu.close_tab"), None, fg, bg);
+        let driven_tooltip = tab.driven(now_ms(), cx).then(|| tooltip(rust_i18n::t!("driver.tab"), None, fg, bg));
         let fg = hsla(fg);
         let group = SharedString::from(format!("tab-{ix}"));
         // 当前标签自己就是一块亮色，和它相邻的分隔线去掉，只是不画颜色，免得宽度跳动。
@@ -297,6 +304,7 @@ impl WindowView {
                     ),
             )
             .child(titled(title, mark, ("tab-agent", ix), fg).flex_1())
+            .children(driven_tooltip.map(|driven| driven_icon(("tab-driven", ix), fg).tooltip(driven)))
             .children(side_slot)
     }
 

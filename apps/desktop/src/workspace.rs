@@ -8,14 +8,17 @@
 //! 标签里的分屏（`panes`）、标题栏和标签（`titlebar`）、侧栏（`sidebar`）、右侧的预览栏、
 //! Git 面板和文件树（`project`、`preview`、`git_panel`、`files`），侧栏和文件树共用的就地输入框
 //! （`inline_edit`），存档（`persistence`），退出和关窗口时会话怎么办（`quit`），以及别的进程经
-//! 宿主请 app 开终端、切到某个终端（`remote`）。
+//! 宿主请 app 开终端、切到某个终端、问各个终端摆在哪（`remote`、`layout_report`），以及一次在
+//! 当前分屏旁开几个分屏（`arrange`）。
 
 mod actions;
 mod agent_picker;
 mod agents;
+mod arrange;
 mod files;
 mod git_panel;
 mod inline_edit;
+mod layout_report;
 mod model;
 mod panes;
 mod persistence;
@@ -36,6 +39,7 @@ use gpui::{
 use runode_shared_types::pane::{Axis, Direction, SplitId};
 
 pub(crate) use agents::reveal_notified;
+pub use arrange::ArrangePanes;
 pub use files::{
     CollapseSelectedFile, CopyPath, CopyRelativePath, DeleteFile, ExpandSelectedFile, FocusTerminal, OpenSelectedFile,
     RenameFile, RevealInFinder, SelectFirstFile, SelectLastFile, SelectNextFile, SelectPreviousFile,
@@ -203,6 +207,10 @@ pub struct WindowView {
     renaming: Option<Renaming>,
     /// 开着的 agent 列表。
     agent_picker: Option<agent_picker::AgentPicker>,
+    /// 开着的排列分屏浮层。
+    arrange_picker: Option<arrange::ArrangePicker>,
+    /// 显示着驱动标记时，到它下一次要变的时候重画的计时器，见 `schedule_driver_redraw`。
+    driver_redraw: Option<Task<()>>,
     /// workspace、标签和分屏节点的标识都从这里取。
     next_id: u64,
     layout: Rc<RefCell<PaneLayout>>,
@@ -302,6 +310,8 @@ impl WindowView {
             file_clipboard: None,
             renaming: None,
             agent_picker: None,
+            arrange_picker: None,
+            driver_redraw: None,
             next_id: 0,
             layout: Rc::default(),
             dragging_divider: None,
@@ -367,7 +377,7 @@ impl Render for WindowView {
         let fullscreen = window.is_fullscreen();
         let tab_count = self.workspace().tabs.len();
         let show_tabs = tab_count > 1;
-        let panes = self.render_panes(fg, bg, cx);
+        let panes = self.render_panes(fg, bg, window, cx);
         let drag = self.dragging_divider.map(|divider| self.render_divider_drag(divider, cx));
         let sidebar = self.sidebar_visible().then(|| self.render_sidebar(fg, bg, fullscreen, cx));
         // 标题栏透明后内容铺到红绿灯下面，顶部这条要能拖动窗口、双击缩放。红绿灯和侧栏开关
@@ -384,6 +394,7 @@ impl Render for WindowView {
         let files = self.files_shown.then(|| self.render_files_panel(widths.files, fg, bg, cx));
         let file_menu = self.render_file_menu(fg, bg, cx);
         let agent_picker = self.render_agent_picker(fg, bg, window, cx);
+        let arrange_picker = self.render_arrange_picker(fg, bg, cx);
         let branch_picker = self.render_branch_picker(fg, bg, cx);
         let right_handles = [
             preview_shown
@@ -486,6 +497,7 @@ impl Render for WindowView {
             .on_action(cx.listener(Self::toggle_files))
             .on_action(cx.listener(Self::goto_agent))
             .on_action(cx.listener(Self::next_agent))
+            .on_action(cx.listener(Self::arrange_panes))
             .map(|window| Self::bind_git_actions(window, cx))
             .relative()
             .size_full()
@@ -512,6 +524,7 @@ impl Render for WindowView {
             .children(drag)
             .children(file_menu)
             .children(agent_picker)
+            .children(arrange_picker)
             .children(branch_picker)
     }
 }

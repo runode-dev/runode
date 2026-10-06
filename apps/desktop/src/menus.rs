@@ -3,7 +3,8 @@
 //! 菜单项上显示的快捷键由 GPUI 从键位绑定里反查，快捷键只在 `keybinds` 里绑，
 //! 菜单和键盘自动保持一致。
 
-use gpui::{App, Menu, MenuItem, OsAction, SystemMenuType, actions};
+use gpui::{App, Menu, MenuItem, OsAction, PromptLevel, SystemMenuType, actions};
+use runode_cli::SetupTarget;
 
 use crate::{
     search_bar::{Cut, Redo, SearchNext, SearchPrevious, SearchSelection, StartSearch, Undo},
@@ -12,9 +13,9 @@ use crate::{
         SelectAll,
     },
     workspace::{
-        ClosePane, CloseTab, CloseWorkspace, EqualizePanes, FocusNextPane, FocusPreviousPane, GotoAgent, NewSplitDown,
-        NewSplitRight, NewTab, NewWorkspace, NextAgent, NextTab, NextWorkspace, PreviousTab, PreviousWorkspace,
-        RenameWorkspace, ToggleFiles, ToggleGit, TogglePaneZoom, ToggleSidebar,
+        ArrangePanes, ClosePane, CloseTab, CloseWorkspace, EqualizePanes, FocusNextPane, FocusPreviousPane, GotoAgent,
+        NewSplitDown, NewSplitRight, NewTab, NewWorkspace, NextAgent, NextTab, NextWorkspace, PreviousTab,
+        PreviousWorkspace, RenameWorkspace, ToggleFiles, ToggleGit, TogglePaneZoom, ToggleSidebar,
     },
 };
 
@@ -36,6 +37,8 @@ actions!(
         Minimize,
         Zoom,
         ToggleFullScreen,
+        /// 给 Claude Code 和 Codex 装上 runode 命令行的使用说明（`runode setup`），先确认一句。
+        InstallAgentIntegration,
     ]
 );
 
@@ -58,6 +61,8 @@ pub fn install(cx: &mut App) {
     cx.on_action(|_: &Minimize, cx| with_active_window(cx, |w| w.minimize_window()));
     cx.on_action(|_: &Zoom, cx| with_active_window(cx, |w| w.zoom_window()));
     cx.on_action(|_: &ToggleFullScreen, cx| with_active_window(cx, |w| w.toggle_fullscreen()));
+    // 从菜单派发时窗口正在处理这个动作，这时在它上面弹不了框，等这一轮更新结束再弹。
+    cx.on_action(|_: &InstallAgentIntegration, cx| cx.defer(install_agent_integration));
 
     // 装快捷键时会顺带设置菜单。
     crate::keybinds::install(cx);
@@ -82,6 +87,7 @@ pub fn set_menus(cx: &mut App) {
                 MenuItem::separator(),
                 MenuItem::action(tr("menu.open_config"), OpenConfiguration),
                 MenuItem::action(tr("menu.reload_config"), ReloadConfiguration),
+                MenuItem::action(tr("setup.menu"), InstallAgentIntegration),
                 MenuItem::separator(),
                 MenuItem::os_submenu(tr("menu.services"), SystemMenuType::Services),
                 MenuItem::separator(),
@@ -100,6 +106,7 @@ pub fn set_menus(cx: &mut App) {
             MenuItem::separator(),
             MenuItem::action(tr("menu.split_right"), NewSplitRight),
             MenuItem::action(tr("menu.split_down"), NewSplitDown),
+            MenuItem::action(tr("layout.menu"), ArrangePanes),
             MenuItem::separator(),
             MenuItem::action(tr("menu.close"), ClosePane),
             MenuItem::action(tr("menu.close_tab"), CloseTab),
@@ -203,6 +210,66 @@ fn fix_key_equivalents(menu: &objc2_app_kit::NSMenu) {
             fix_key_equivalents(&submenu);
         }
     }
+}
+
+/// 装给哪些 agent。
+const SETUP_TARGETS: [SetupTarget; 2] = [SetupTarget::Claude, SetupTarget::Codex];
+
+/// 问一句要不要装，列出会写的文件；装好后说装到了哪里，失败时说原因。
+fn install_agent_integration(cx: &mut App) {
+    let Some(home) = runode_paths::Dirs::from_env().home else {
+        tracing::warn!("cannot install the agent integration: no home directory");
+        return;
+    };
+    let Some(window) = cx.active_window().or_else(|| cx.windows().into_iter().next()) else {
+        return;
+    };
+    let paths = setup_paths(SETUP_TARGETS.iter().map(|target| runode_cli::setup_path(*target, &home)), &home);
+    let title = rust_i18n::t!("setup.confirm_title");
+    let detail = rust_i18n::t!("setup.confirm_detail", paths = paths);
+    let answers = [&*rust_i18n::t!("setup.install"), &*rust_i18n::t!("setup.cancel")];
+    let Ok(answer) =
+        window.update(cx, |_, window, cx| window.prompt(PromptLevel::Info, &title, Some(&detail), &answers, cx))
+    else {
+        return;
+    };
+    cx.spawn(async move |cx| {
+        if answer.await.ok() != Some(0) {
+            return;
+        }
+        let installed: anyhow::Result<Vec<_>> =
+            SETUP_TARGETS.iter().map(|target| runode_cli::setup(*target, &home)).collect();
+        let (level, title, detail) = match installed {
+            Ok(paths) => (
+                PromptLevel::Info,
+                rust_i18n::t!("setup.done_title"),
+                rust_i18n::t!("setup.done_detail", paths = setup_paths(paths, &home)),
+            ),
+            Err(err) => {
+                tracing::error!("failed to install the agent integration: {err:#}");
+                (PromptLevel::Critical, rust_i18n::t!("setup.failed_title"), format!("{err:#}").into())
+            }
+        };
+        let answer = window.update(cx, |_, window, cx| {
+            window.prompt(level, &title, Some(&detail), &[&*rust_i18n::t!("setup.ok")], cx)
+        });
+        if let Ok(answer) = answer {
+            let _ = answer.await;
+        }
+    })
+    .detach();
+}
+
+/// 提示框里一行一个文件，`home` 底下的写成 `~/…`。
+fn setup_paths(paths: impl IntoIterator<Item = std::path::PathBuf>, home: &std::path::Path) -> String {
+    paths
+        .into_iter()
+        .map(|path| match path.strip_prefix(home) {
+            Ok(rest) => format!("~/{}", rest.display()),
+            Err(_) => path.display().to_string(),
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 fn with_active_window(cx: &mut App, f: impl FnOnce(&mut gpui::Window)) {

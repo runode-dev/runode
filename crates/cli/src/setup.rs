@@ -37,13 +37,18 @@ fn body() -> &'static str {
         .map_or(SKILL, |(_, body)| body.trim_start_matches('\n'))
 }
 
-/// 把使用说明装到 `home` 下 `target` 读的地方，返回写的文件。可以重复执行：skill 整个换掉，
-/// AGENTS.md 只换掉标记之间的那段，没有时加在末尾。
-pub fn setup(target: SetupTarget, home: &Path) -> Result<PathBuf> {
-    let path = match target {
+/// `setup` 往 `home` 下哪个文件装给 `target` 的使用说明。
+pub fn setup_path(target: SetupTarget, home: &Path) -> PathBuf {
+    match target {
         SetupTarget::Claude => home.join(".claude/skills/runode/SKILL.md"),
         SetupTarget::Codex => home.join(".codex/AGENTS.md"),
-    };
+    }
+}
+
+/// 把使用说明装到 `home` 下 `target` 读的地方（见 `setup_path`），返回写的文件。可以重复执行：
+/// skill 整个换掉，AGENTS.md 只换掉标记之间的那段，没有时加在末尾。
+pub fn setup(target: SetupTarget, home: &Path) -> Result<PathBuf> {
+    let path = setup_path(target, home);
     let contents = match target {
         SetupTarget::Claude => text(target),
         SetupTarget::Codex => {

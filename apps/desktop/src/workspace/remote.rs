@@ -1,6 +1,7 @@
-//! 别的进程经宿主请 app 办的事（`runode open`、`runode focus`）：在某个终端旁边开新终端，切到
-//! 某个终端。宿主把请求包成 `HostMsg::UiRequest` 经连接转过来（见 `session_host::serve_ui`），这里
-//! 在主线程上按会话找到它所在的窗口和分屏再办，用 `Link::ui_reply` 回话。
+//! 别的进程经宿主请 app 办的事（`runode open`、`runode focus`，以及命令行问各个终端摆在哪）：在
+//! 某个终端旁边开新终端，切到某个终端，回答布局（见 `layout_report`）。宿主把请求包成
+//! `HostMsg::UiRequest` 经连接转过来（见 `session_host::serve_ui`），这里在主线程上按会话找到它
+//! 所在的窗口和分屏再办，用 `Link::ui_reply` 回话。
 
 use std::path::PathBuf;
 
@@ -9,11 +10,12 @@ use gpui::{App, Context, EntityId, Window, WindowHandle};
 use runode_protocol::{ClientMsg, HostMsg, Placement, SessionId};
 use runode_shared_types::pane::Axis;
 
-use super::{WindowView, agents::reveal};
+use super::{WindowView, agents::reveal, layout_report};
 use crate::{persist, session_host};
 
 /// 开始收别的进程的请求。
 pub fn serve_requests(cx: &mut App) {
+    layout_report::track_windows(cx);
     let Some(mut requests) = session_host::serve_ui() else {
         tracing::warn!("requests from other processes are already being served");
         return;
@@ -66,7 +68,7 @@ fn handle(request: ClientMsg, cx: &mut App) -> HostMsg {
             }
             None => fail(req, format!("no runode window shows session {id}")),
         },
-        ClientMsg::Layout { req } => fail(req, "the runode app does not handle this request".into()),
+        ClientMsg::Layout { req } => HostMsg::Layout { req, windows: layout_report::current(cx) },
         other => HostMsg::Error { req: None, id: None, message: format!("the runode app does not handle {other:?}") },
     }
 }
@@ -85,17 +87,22 @@ fn pane_of(window: WindowHandle<WindowView>, id: SessionId, cx: &App) -> Option<
         .find_map(|(pane, (terminal, _))| (terminal.read(cx).session_id() == id).then_some(*pane))
 }
 
-/// 最前面那个窗口当前的分屏。app 不在前台时没有活动窗口，按窗口的前后顺序取最前面的。
+/// 最前面那个窗口当前的分屏。
 fn front_pane(cx: &App) -> Option<(WindowHandle<WindowView>, EntityId)> {
+    let window = front_window(cx)?;
+    Some((window, window.read(cx).ok()?.tab().focused))
+}
+
+/// 最前面那个窗口。app 不在前台时没有活动窗口，按窗口的前后顺序取最前面的。
+pub(super) fn front_window(cx: &App) -> Option<WindowHandle<WindowView>> {
     let front = cx
         .active_window()
         .and_then(|window| window.downcast::<WindowView>())
         .or_else(|| cx.window_stack()?.into_iter().find_map(|window| window.downcast::<WindowView>()));
-    let window = front.or_else(|| windows(cx).into_iter().next())?;
-    Some((window, window.read(cx).ok()?.tab().focused))
+    front.or_else(|| windows(cx).into_iter().next())
 }
 
-fn windows(cx: &App) -> Vec<WindowHandle<WindowView>> {
+pub(super) fn windows(cx: &App) -> Vec<WindowHandle<WindowView>> {
     cx.windows().into_iter().filter_map(|window| window.downcast::<WindowView>()).collect()
 }
 

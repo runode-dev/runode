@@ -301,3 +301,34 @@ completion:
     folder: 目录
     file: 文件
     named: "%{group}：%{name}"
+driver:
+  badge: "由 %{who} 操作 · %{action} %{secs}s 前"
+  outside: runode 以外的程序
+  tab: 有分屏正被别的终端里的程序操作
+  action:
+    input: 打字
+    keys: 按键
+    paste: 粘贴
+    clear_screen: 清屏
+    kill: 结束
+    unknown: 操作
+layout:
+  menu: 排列分屏…
+  title: 排列分屏
+  direction: 方向
+  right: 右边
+  down: 下边
+  right_stack: 右侧叠放
+  count: 个数
+  open: 打开
+  hint: ←→ 选方向 · 1–4 选个数 · 回车打开 · Esc 取消
+setup:
+  menu: 安装 agent 集成…
+  confirm_title: 给 Claude Code 和 Codex 装上 runode 的使用说明？
+  confirm_detail: "装好后它们就知道怎样用 runode 命令行查看和操作别的终端。会写这两个文件：\n%{paths}"
+  install: 安装
+  cancel: 取消
+  done_title: 装好了 agent 集成
+  done_detail: "写好了：\n%{paths}\n\n之后新开的 Claude Code、Codex 会话会读到。"
+  failed_title: 没能装好 agent 集成
+  ok: 好

@@ -98,6 +98,7 @@ action:
   resize_split: Move the nearest divider in this direction by a fixed step
   equalize_splits: Make all splits the same size
   toggle_split_zoom: Zoom or restore the current split
+  arrange_splits: Open a few new terminals beside the current split in one go, picking the direction and how many
   new_workspace: Choose a directory and open a workspace there
   close_workspace: Close the workspace and all of its tabs
   rename_workspace: Rename the workspace in the sidebar

@@ -21,12 +21,12 @@ use crate::{
     },
     text_area::SubmitText,
     workspace::{
-        ClosePane, CloseTab, CloseWorkspace, CollapseSelectedFile, CopyPath, CopyRelativePath, DeleteFile,
-        EqualizePanes, ExpandSelectedFile, FocusNextPane, FocusPane, FocusPreviousPane, FocusTerminal, GotoAgent,
-        NewSplitDown, NewSplitRight, NewTab, NewWorkspace, NextAgent, NextTab, NextWorkspace, OpenSelectedFile,
-        PreviousTab, PreviousWorkspace, RenameFile, RenameWorkspace, ResizePane, RevealInFinder, SelectFirstFile,
-        SelectLastFile, SelectLastTab, SelectLastWorkspace, SelectNextFile, SelectPreviousFile, SelectTab,
-        SelectWorkspace, ToggleFiles, ToggleGit, TogglePaneZoom, ToggleSidebar,
+        ArrangePanes, ClosePane, CloseTab, CloseWorkspace, CollapseSelectedFile, CopyPath, CopyRelativePath,
+        DeleteFile, EqualizePanes, ExpandSelectedFile, FocusNextPane, FocusPane, FocusPreviousPane, FocusTerminal,
+        GotoAgent, NewSplitDown, NewSplitRight, NewTab, NewWorkspace, NextAgent, NextTab, NextWorkspace,
+        OpenSelectedFile, PreviousTab, PreviousWorkspace, RenameFile, RenameWorkspace, ResizePane, RevealInFinder,
+        SelectFirstFile, SelectLastFile, SelectLastTab, SelectLastWorkspace, SelectNextFile, SelectPreviousFile,
+        SelectTab, SelectWorkspace, ToggleFiles, ToggleGit, TogglePaneZoom, ToggleSidebar,
     },
 };
 
@@ -80,6 +80,7 @@ fn gpui_action(action: Action) -> (Box<dyn gpui::Action>, Contexts) {
         Action::ResizeSplit(direction) => (boxed(ResizePane(direction)), WINDOW),
         Action::EqualizeSplits => (boxed(EqualizePanes), WINDOW),
         Action::ToggleSplitZoom => (boxed(TogglePaneZoom), WINDOW),
+        Action::ArrangeSplits => (boxed(ArrangePanes), WINDOW),
         Action::NewWorkspace => (boxed(NewWorkspace), WINDOW),
         Action::CloseWorkspace => (boxed(CloseWorkspace), WINDOW),
         Action::RenameWorkspace => (boxed(RenameWorkspace), WINDOW),

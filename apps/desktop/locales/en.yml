@@ -301,3 +301,34 @@ completion:
     folder: directory
     file: file
     named: "%{group}: %{name}"
+driver:
+  badge: "Driven by %{who} · %{action} %{secs}s ago"
+  outside: a program outside Runode
+  tab: A program in another terminal is driving a split here
+  action:
+    input: typing
+    keys: keys
+    paste: paste
+    clear_screen: clear screen
+    kill: kill
+    unknown: action
+layout:
+  menu: Arrange Splits…
+  title: Arrange Splits
+  direction: Direction
+  right: Right
+  down: Down
+  right_stack: Stacked on the Right
+  count: Count
+  open: Open
+  hint: ←→ direction · 1–4 count · Return to open · Esc to cancel
+setup:
+  menu: Install Agent Integration…
+  confirm_title: Install the runode instructions for Claude Code and Codex?
+  confirm_detail: "They will then know how to use the runode command line to read and drive other terminals. These files will be written:\n%{paths}"
+  install: Install
+  cancel: Cancel
+  done_title: Agent integration installed
+  done_detail: "Written:\n%{paths}\n\nNew Claude Code and Codex sessions will pick them up."
+  failed_title: Could not install the agent integration
+  ok: OK
