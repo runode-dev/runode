@@ -4,6 +4,8 @@
 #
 #   133;A  提示符开始       133;B  提示符结束、用户输入开始
 #   133;C  命令开始执行     133;D  命令执行完（带退出码）
+#   133;I  提示符结束、用户输入开始，输入到这一行的换行为止：bash 4.4 以下没有 133;C，用它
+#          代替 133;B
 #   6973;<口令>;cwd=…  runode 私有：shell 的当前目录（百分号编码），每次显示提示符前都发
 #   6973;<口令>;path=…  runode 私有：shell 的 PATH（百分号编码），变了才发，补全跑命令时用
 #   6973;<口令>;aliases=… 以及 functions、builtins、keywords  runode 私有：shell 里的这些
@@ -63,8 +65,16 @@ if [ -z "${_runode_integrated-}" ]; then
     _runode_bang='\!'
     # 4.4 起才有 PS0：命令开始执行前显示一次。更老的 bash 没有命令开始的标记。
     _runode_ps0=
+    # 提示符之后用户输入开始的标记。终端在输入状态下遇到换行，会把下一行也当成输入（续行），
+    # 直到 133;C 说输出开始；没有 133;C 的老 bash 里命令的输出就全成了输入，按提示符切出来的
+    # 命令输出（`runode read --command`）读成空的，命令在跑时也像是还在提示符上编辑。所以老
+    # bash 用 133;I：输入到换行为止，之后是输出。bash 的输入不会不带续行提示符地跨行（续行
+    # 都有 PS2，PS2 自己标成续行），只有 4.4 起括号粘贴进来的多行命令会，这时有 133;C，还用
+    # 133;B 把多行都算输入。
+    _runode_input_mark=I
     if [ "${BASH_VERSINFO[0]}" -gt 4 ] || { [ "${BASH_VERSINFO[0]}" -eq 4 ] && [ "${BASH_VERSINFO[1]}" -ge 4 ]; }; then
         _runode_ps0=1
+        _runode_input_mark=B
     fi
 
     _runode_prompt_command() {
@@ -77,11 +87,11 @@ if [ -z "${_runode_integrated-}" ]; then
             _runode_histnext=${_runode_bang@P}
         fi
         if [ "$PS1" != "$_runode_ps1" ]; then
-            _runode_ps1='\[\033]133;A;cl=line\007\]'"$PS1"'\[\033]133;B\007\]'
+            _runode_ps1='\[\033]133;A;cl=line\007\]'"$PS1"'\[\033]133;'$_runode_input_mark'\007\]'
             PS1=$_runode_ps1
         fi
         if [ "$PS2" != "$_runode_ps2" ]; then
-            _runode_ps2='\[\033]133;A;k=s\007\]'"$PS2"'\[\033]133;B\007\]'
+            _runode_ps2='\[\033]133;A;k=s\007\]'"$PS2"'\[\033]133;'$_runode_input_mark'\007\]'
             PS2=$_runode_ps2
         fi
         if [ -n "${_runode_report_token-}" ]; then

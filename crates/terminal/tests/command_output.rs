@@ -1,10 +1,20 @@
-//! 按 shell 集成标出的提示符读某条命令的输出（`read --command`）。
+//! 按 shell 集成标出的提示符读某条命令的输出（`read --command`）：先是手写的理想序列，后面
+//! 是真的 bash、zsh 加载仓库里的集成脚本发出的序列。
 
 mod common;
 
+use std::{
+    path::{Path, PathBuf},
+    sync::mpsc,
+    time::{Duration, Instant},
+};
+
 use common::{PROMPT, idle_host};
-use runode_shared_types::{grid::GridSize, settings::TermSettings};
-use runode_terminal::host_session::HostSession;
+use runode_shared_types::{grid::GridSize, settings::TermSettings, shell::IntegrationMode};
+use runode_terminal::{
+    host_session::HostSession,
+    pty::{Pty, PtyEvent},
+};
 
 /// 40 列 12 行的宿主会话。
 fn host() -> HostSession {
@@ -93,4 +103,190 @@ fn output_whose_start_scrolled_away_is_marked_truncated() {
     assert!(!text.contains("seq 20"), "{text:?}");
     // 再往前就什么都没了。
     assert!(session.command_output(2).is_err());
+}
+
+/// 一个真的 shell：在伪终端里加载仓库里的集成脚本（和 `shell_integration::prepare` 注入的是同一份），
+/// 输出喂给宿主会话。环境是干净的，家目录是临时目录，提示符由 `rc` 设，不受跑测试的人自己的
+/// 配置影响。
+struct RealShell {
+    session: HostSession,
+    output: mpsc::Receiver<Vec<u8>>,
+    /// 提示符最后一行的第一个词，每出一个提示符屏幕上就多一行以它开头。
+    prompt: &'static str,
+    /// 提示符最后一行空着、等输入时的样子，按空白分开的各个词（含右侧提示符）。
+    idle: &'static [&'static str],
+    /// 已经出过的提示符。
+    prompts: usize,
+    name: String,
+    /// 临时的家目录，用完删掉。
+    home: PathBuf,
+}
+
+impl Drop for RealShell {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.home);
+    }
+}
+
+const REAL_SIZE: GridSize = GridSize { cols: 40, rows: 12, cell_width_px: 8, cell_height_px: 16 };
+const REAL_WAIT: Duration = Duration::from_secs(10);
+
+/// 仓库里的集成脚本所在的目录。
+fn integration_dir() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("shell-integration")
+}
+
+impl RealShell {
+    /// 起 `/bin/` 下的 `shell`（`bash` 或 `zsh`），`rc` 写进它的启动配置；`name` 在同时跑的测试里
+    /// 各不相同，失败时也用它说是哪一个。系统里没有这个 shell 时为 `None`。
+    fn start(shell: &str, name: &str, rc: &str, prompt: &'static str, idle: &'static [&'static str]) -> Option<Self> {
+        let program = format!("/bin/{shell}");
+        if !Path::new(&program).exists() {
+            return None;
+        }
+        let home = std::env::temp_dir().join(format!("rn-cmdout-{}-{name}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&home);
+        std::fs::create_dir_all(&home).unwrap();
+        // 和 `shell_integration::prepare` 一样：bash 用 --rcfile 起非登录的交互式 shell，脚本自己加载
+        // 登录配置；zsh 把 ZDOTDIR 指到集成目录，那里的 .zshenv 还原 ZDOTDIR 后加载用户配置和集成。
+        let (rc_file, launch) = if shell == "bash" {
+            let script = integration_dir().join("bash/runode.bash");
+            (".bash_profile", format!("{program} --rcfile '{}'", script.display()))
+        } else {
+            (".zshrc", format!("ZDOTDIR='{}' {program} -l", integration_dir().join("zsh").display()))
+        };
+        std::fs::write(home.join(rc_file), rc).unwrap();
+        let launcher = home.join("launch.sh");
+        std::fs::write(
+            &launcher,
+            format!(
+                "#!/bin/sh\nexec /usr/bin/env -i HOME='{}' PATH=/usr/bin:/bin TERM=xterm-256color LANG=en_US.UTF-8 \
+                 BASH_SILENCE_DEPRECATION_WARNING=1 RUNODE_REPORT_TOKEN=0123456789abcdef {launch}\n",
+                home.display()
+            ),
+        )
+        .unwrap();
+        {
+            use std::os::unix::fs::PermissionsExt as _;
+            std::fs::set_permissions(&launcher, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        let (tx, output) = mpsc::channel();
+        let sink = Box::new(move |event| match event {
+            PtyEvent::Output(data) => tx.send(data.to_vec()).is_ok(),
+            PtyEvent::Exited => false,
+        });
+        let pty =
+            Pty::spawn(REAL_SIZE, Some(launcher.to_str().unwrap()), Some(&home), IntegrationMode::Off, sink).unwrap();
+        let session = HostSession::new(REAL_SIZE, pty, None, &TermSettings::default()).unwrap();
+        let mut real = Self { session, output, prompt, idle, prompts: 0, name: name.into(), home };
+        real.wait_for_prompt();
+        Some(real)
+    }
+
+    /// 喂进收到的输出，直到 `done`；超时就失败，带上屏幕上的内容。
+    fn wait_until(&mut self, what: &str, done: impl Fn(&HostSession) -> bool) {
+        let until = Instant::now() + REAL_WAIT;
+        while !done(&self.session) {
+            let left = until.saturating_duration_since(Instant::now());
+            match self.output.recv_timeout(left.min(Duration::from_millis(50))) {
+                Ok(data) => {
+                    self.session.feed(&data);
+                }
+                Err(mpsc::RecvTimeoutError::Timeout) if !left.is_zero() => {}
+                // 超时，或者 shell 退出了。
+                Err(_) => panic!("{}: {what} never came; screen:\n{}", self.name, self.screen()),
+            }
+        }
+    }
+
+    fn screen(&self) -> String {
+        self.session.screen_text(Some(200)).unwrap()
+    }
+
+    /// 等到又出了一个提示符、空着等输入。
+    fn wait_for_prompt(&mut self) {
+        self.prompts += 1;
+        let (prompt, idle, count) = (self.prompt, self.idle, self.prompts);
+        self.wait_until(&format!("prompt #{count}"), |session| {
+            let text = session.screen_text(Some(200)).unwrap();
+            let shown = text.lines().filter(|line| line.split_whitespace().next() == Some(prompt)).count();
+            let last = text.lines().last().unwrap_or("");
+            shown == count && last.split_whitespace().eq(idle.iter().copied())
+        });
+    }
+
+    /// 敲一行命令回车，等它跑完、回到提示符。
+    fn run(&mut self, command: &str) {
+        self.session.write(format!("{command}\r").into_bytes());
+        self.wait_for_prompt();
+    }
+
+    fn output(&self, n: u32) -> String {
+        let (text, truncated) = self.session.command_output(n).unwrap();
+        assert!(!truncated, "{}: command {n} truncated", self.name);
+        text
+    }
+}
+
+/// 在真 shell 里跑一串命令，按提示符读各条命令的输出。
+fn read_commands_from(shell: Option<RealShell>) {
+    let Some(mut shell) = shell else { return };
+    let name = shell.name.clone();
+    // 刚起来的 shell 还没跑过命令：开头打印的内容（如果有）算一条截断的，没有就是一条都没有。
+    assert!(shell.session.command_output(1).map_or(true, |(_, truncated)| truncated), "{name}");
+
+    // 多行输出。
+    shell.run("printf 'a\\nb\\nc\\n'");
+    assert_eq!(shell.output(1), "a\nb\nc\n", "{name}");
+    // 没有输出；之前那条是第二条。
+    shell.run("true");
+    assert_eq!(shell.output(1), "", "{name}");
+    assert_eq!(shell.output(2), "a\nb\nc\n", "{name}");
+    // 空着回车不算一条命令。
+    shell.run("");
+    assert_eq!(shell.output(1), "", "{name}");
+    assert_eq!(shell.output(2), "a\nb\nc\n", "{name}");
+    // 命令行和输出都比终端宽，软折行。
+    let wide = "y".repeat(45);
+    shell.run(&format!("echo {wide}"));
+    assert_eq!(shell.output(1), format!("{}\n{}\n", &wide[..40], &wide[40..]), "{name}");
+    assert_eq!(shell.output(3), "a\nb\nc\n", "{name}");
+
+    // 还在跑的命令读到底：`read` 等着输入时只有第一行。
+    shell.session.write(b"echo one; read x; echo two\r".to_vec());
+    shell.wait_until("the first line", |session| session.screen_text(Some(200)).unwrap().contains("\none\n"));
+    assert_eq!(shell.output(1), "one\n", "{name}");
+    assert_eq!(shell.output(2), format!("{}\n{}\n", &wide[..40], &wide[40..]), "{name}");
+    shell.session.write(b"\r".to_vec());
+    shell.wait_for_prompt();
+    // 回车被终端回显成一个空行。
+    assert_eq!(shell.output(1), "one\n\ntwo\n", "{name}");
+    assert_eq!(shell.output(4), "a\nb\nc\n", "{name}");
+}
+
+#[test]
+fn real_bash_commands_are_read() {
+    read_commands_from(RealShell::start("bash", "bash", "PS1='[b]\\$ '\n", "[b]$", &["[b]$"]));
+}
+
+#[test]
+fn real_bash_commands_are_read_under_a_two_line_prompt() {
+    read_commands_from(RealShell::start("bash", "bash-two-line", "PS1='\\W\\n[b]\\$ '\n", "[b]$", &["[b]$"]));
+}
+
+#[test]
+fn real_zsh_commands_are_read() {
+    read_commands_from(RealShell::start("zsh", "zsh", "PROMPT='[z]%% '\nRPROMPT='<r>'\n", "[z]%", &["[z]%", "<r>"]));
+}
+
+/// 两行的左提示符配上右侧提示符：右侧提示符画在第二行，那一行被标成了主提示符。
+#[test]
+fn real_zsh_commands_are_read_under_a_two_line_prompt() {
+    read_commands_from(RealShell::start(
+        "zsh",
+        "zsh-two-line",
+        "PROMPT=$'%1~\\n[z]%% '\nRPROMPT='<r>'\n",
+        "[z]%",
+        &["[z]%", "<r>"],
+    ));
 }

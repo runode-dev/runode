@@ -11,7 +11,7 @@ use libghostty_vt::{
     Terminal,
     error::{Error, Result},
     fmt::{Format, Formatter, FormatterOptions},
-    screen::{RowSemanticPrompt, Screen},
+    screen::{CellSemanticContent, RowSemanticPrompt, Screen},
     selection::Selection,
     snapshot::Decoder,
     terminal::{Mode, Point, PointCoordinate},
@@ -333,35 +333,60 @@ pub(crate) enum CommandOutput {
 /// （`RowSemanticPrompt::Prompt`）分块：从底往上数提示符，一块从提示符那行起，到下一个提示符
 /// 之前；输出是输入那几行（提示符行和接在后面的软折行、续行提示符的行）之后的部分。
 ///
+/// 一个提示符的几行里还没有用户输入时，紧接着又标成主提示符的行算同一个提示符的下一行：
+/// 多行的左提示符配上右侧提示符时，右侧提示符画在左提示符最后一行，shell 集成用 `133;P;k=r`
+/// 标它，libghostty 就把那一行从续行改标成了主提示符。空着回车之后紧接着的新提示符也这样并进
+/// 上一个，没输入过东西的提示符本来就不算一条命令。
+///
 /// 光标还在最后一个提示符的输入行里时，那是正等着输入的提示符，不算一条命令；光标已经到了
 /// 输入行下面时那条命令还在跑，输出取到底。最早那个提示符上面还有内容、又正好要它前面那条
 /// 时，那条命令的提示符已经被挤出回滚历史，给剩下的部分并标上截断；shell 启动时打印的内容
 /// 也会这样被当成一条截断的输出。读的是活动的屏幕，全屏程序在备用屏幕上时没有标记。
 pub(crate) fn command_output(terminal: &Terminal<'_, '_>, n: u32) -> Result<CommandOutput> {
     let total = terminal.total_rows()?;
-    let row = |y: usize| {
-        terminal.grid_ref(Point::Screen(PointCoordinate { x: 0, y: u32::try_from(y).unwrap_or(u32::MAX) }))?.row()
+    let cols = terminal.cols()?;
+    let point = |x: u16, y: usize| Point::Screen(PointCoordinate { x, y: u32::try_from(y).unwrap_or(u32::MAX) });
+    let row = |y: usize| terminal.grid_ref(point(0, y))?.row();
+    let typed_in = |y: usize| -> Result<bool> {
+        for x in 0..cols {
+            if terminal.grid_ref(point(x, y))?.cell()?.semantic_content()? == CellSemanticContent::Input {
+                return Ok(true);
+            }
+        }
+        Ok(false)
+    };
+    // 提示符行之后、仍属于这个提示符和它的输入的行。
+    let input_end = |prompt: usize| -> Result<usize> {
+        let mut typed = typed_in(prompt)?;
+        let mut y = prompt + 1;
+        while y < total {
+            let row = row(y)?;
+            let same = row.is_wrap_continuation()?
+                || match row.semantic_prompt()? {
+                    RowSemanticPrompt::Continuation => true,
+                    RowSemanticPrompt::Prompt => !typed,
+                    RowSemanticPrompt::None => false,
+                };
+            if !same {
+                break;
+            }
+            typed = typed || typed_in(y)?;
+            y += 1;
+        }
+        Ok(y)
     };
     let mut prompts = Vec::new();
-    for y in 0..total {
+    let mut y = 0;
+    while y < total {
         if row(y)?.semantic_prompt()? == RowSemanticPrompt::Prompt {
             prompts.push(y);
+            y = input_end(y)?;
+        } else {
+            y += 1;
         }
     }
     let Some(&last) = prompts.last() else {
         return Ok(CommandOutput::NoMarks);
-    };
-    // 提示符行之后、仍属于输入的行。
-    let input_end = |prompt: usize| -> Result<usize> {
-        let mut y = prompt + 1;
-        while y < total {
-            let row = row(y)?;
-            if !row.is_wrap_continuation()? && row.semantic_prompt()? != RowSemanticPrompt::Continuation {
-                break;
-            }
-            y += 1;
-        }
-        Ok(y)
     };
     let cursor = total.saturating_sub(usize::from(terminal.rows()?)) + usize::from(terminal.cursor_y()?);
     let editing = cursor >= last && cursor < input_end(last)?;
