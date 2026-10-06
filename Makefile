@@ -5,10 +5,10 @@ ARGS ?=
 CLIPPY_ARGS ?=
 
 .DEFAULT_GOAL := help
-.PHONY: help submodules build release run run-release run-ios app install dmg check test clippy fmt fmt-check clean
+.PHONY: help submodules build release run run-release run-ios run-ios-device app install dmg check test clippy fmt fmt-check clean
 
 help: ## 列出所有目标
-	@awk 'BEGIN {FS = ":.*## "} /^[a-zA-Z_-]+:.*## / {printf "  %-12s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
+	@awk 'BEGIN {FS = ":.*## "} /^[a-zA-Z_-]+:.*## / {printf "  %-16s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 
 submodules: ## 拉取 vendor 下的 ghostty、libghostty-rs 与 command-signatures 子模块
 	git submodule update --init --recursive
@@ -28,6 +28,10 @@ run-release: ## 发布构建并启动
 # 模拟器用哪台，例如 make run-ios IOS_SIM="iPhone 18 Pro"；不给时用开着的那台。
 run-ios: ## 调试构建 iOS app，装到模拟器上启动
 	IOS_SIM="$(IOS_SIM)" apps/ios/scripts/run-simulator.sh
+
+# 真机用哪台，例如 make run-ios-device IOS_DEVICE="我的 iPhone"；不给时用连着的那台 iPhone。
+run-ios-device: ## 调试构建 iOS app，装到连着的真机上启动
+	IOS_DEVICE="$(IOS_DEVICE)" apps/ios/scripts/run-device.sh
 
 app: ## 发布构建并打包 Runode.app，产物在 target/release/bundle
 	CARGO=$(CARGO) scripts/bundle-macos.sh app
