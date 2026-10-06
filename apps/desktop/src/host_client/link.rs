@@ -43,7 +43,9 @@ use runode_protocol::{
     AttachMode, BuildId, Caps, ClientKind, ClientMsg, Frame, FrameError, FrameKind, HostMsg, PROTOCOL_VERSION,
     SessionId, SessionInfo, read_frame, write_frame,
 };
-use runode_shared_types::{grid::GridSize, session::SessionMeta, settings::TermSettings, shell::IntegrationMode};
+use runode_shared_types::{
+    clipboard::ClipboardAccess, grid::GridSize, session::SessionMeta, settings::TermSettings, shell::IntegrationMode,
+};
 
 /// 写一帧最多等这么久，超时按连接断开处理。
 const WRITE_TIMEOUT: Duration = Duration::from_secs(2);
@@ -172,9 +174,9 @@ struct State {
     replies: HashMap<u32, mpsc::Sender<HostMsg>>,
     /// 等 `SessionList` 的调用方，按发请求的先后。
     lists: VecDeque<mpsc::Sender<Vec<SessionInfo>>>,
-    /// 最近一次换的主题和选项，重连后补发。
+    /// 最近一次换的主题和选项（`SetOptions` 的两项），重连后补发。
     theme: Option<TermSettings>,
-    record_history: Option<bool>,
+    options: Option<(bool, ClipboardAccess)>,
     /// 现在这条连接上的宿主编的快照这边解得了，见 `snapshots_usable`；为假时要快照改要 VT 重放。
     snapshots: bool,
 }
@@ -377,15 +379,15 @@ impl Link {
             self.inner.lost(generation);
             return Err(ConnectError::Io(err));
         }
-        let (theme, record_history) = {
+        let (theme, options) = {
             let state = self.inner.state();
-            (state.theme.clone(), state.record_history)
+            (state.theme.clone(), state.options)
         };
         if let Some(settings) = theme {
             let _ = self.inner.control(&ClientMsg::SetTheme { settings });
         }
-        if let Some(record_history) = record_history {
-            let _ = self.inner.control(&ClientMsg::SetOptions { record_history });
+        if let Some((record_history, clipboard)) = options {
+            let _ = self.inner.control(&ClientMsg::SetOptions { record_history, clipboard });
         }
         tracing::info!("connected to the host (pid {host_pid})");
         Ok(())
@@ -408,7 +410,9 @@ impl Link {
     pub fn send(&self, message: ClientMsg) {
         match &message {
             ClientMsg::SetTheme { settings } => self.inner.state().theme = Some(settings.clone()),
-            ClientMsg::SetOptions { record_history } => self.inner.state().record_history = Some(*record_history),
+            ClientMsg::SetOptions { record_history, clipboard } => {
+                self.inner.state().options = Some((*record_history, *clipboard));
+            }
             ClientMsg::Kill { id } | ClientMsg::Detach { id } => self.forget(*id),
             _ => {}
         }

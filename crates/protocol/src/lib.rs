@@ -35,5 +35,7 @@ pub const ENV_SOCKET: &str = "RUNODE_SOCKET";
 
 /// 协议的版本。消息的含义或帧格式变了、旧的一方读不懂时加一；只是加了可以缺省的字段不用加。
 /// 第 4 版加了升级时的交接（`ClientKind::Successor`、`ClientMsg::Handoff` 等）和尺寸归属
-/// （`HostMsg::SizeOwner`）。有些东西加版本号也不能改，见 `message` 的模块文档。
+/// （`HostMsg::SizeOwner`）。之后加的读写剪贴板（`ClientMsg::WriteClipboard`、`ReadClipboard`、
+/// `HostMsg::ClipboardText` 和 `SetOptions::clipboard`）是新的消息种类和带默认值的字段，旧的一方
+/// 读成 `Unknown` 或者按默认值读，没加版本号。有些东西加版本号也不能改，见 `message` 的模块文档。
 pub const PROTOCOL_VERSION: u32 = 4;

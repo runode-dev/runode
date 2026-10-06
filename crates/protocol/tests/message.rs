@@ -7,6 +7,7 @@ use runode_protocol::{
 };
 use runode_shared_types::{
     agent::{Agent, AgentKind, AgentState},
+    clipboard::{ClipboardAccess, ClipboardRead, ClipboardWrite},
     grid::GridSize,
     session::{DriveAction, Driver, SessionMeta},
     settings::TermSettings,
@@ -125,7 +126,14 @@ fn client_messages_round_trip() {
         ClientMsg::ClearScreen { id: ID },
         ClientMsg::Kill { id: ID },
         ClientMsg::SetTheme { settings: TermSettings::default() },
-        ClientMsg::SetOptions { record_history: false },
+        ClientMsg::SetOptions { record_history: false, clipboard: ClipboardAccess::default() },
+        ClientMsg::SetOptions {
+            record_history: true,
+            clipboard: ClipboardAccess { write: ClipboardWrite::Deny, read: ClipboardRead::Allow },
+        },
+        ClientMsg::WriteClipboard { id: ID, text: "复制的 文字\n\u{1b}".into() },
+        ClientMsg::ReadClipboard { id: ID, ask: true, program: Some("nvim".into()) },
+        ClientMsg::ReadClipboard { id: ID, ask: false, program: None },
         ClientMsg::ReadScreen { id: ID, lines: Some(100), command: None },
         ClientMsg::ReadScreen { id: ID, lines: None, command: Some(2) },
         ClientMsg::SendKeys { req: 5, id: ID, keys: vec!["ctrl-c".into(), "down*3".into(), "f5".into()] },
@@ -238,6 +246,13 @@ fn host_messages_round_trip() {
                 focus: false,
             }),
         },
+        HostMsg::UiRequest { ui: 3, request: Box::new(ClientMsg::WriteClipboard { id: ID, text: "x".into() }) },
+        HostMsg::UiRequest {
+            ui: 4,
+            request: Box::new(ClientMsg::ReadClipboard { id: ID, ask: true, program: Some("vim".into()) }),
+        },
+        HostMsg::ClipboardText { id: ID, text: Some("剪贴板".into()) },
+        HostMsg::ClipboardText { id: ID, text: None },
         HostMsg::Opened { req: 3, id: ID },
         HostMsg::Done { req: 4 },
         HostMsg::Error { req: Some(3), id: None, message: "no such directory".into() },
@@ -478,4 +493,57 @@ fn handoff_wire_format() {
     let refused: HostMsg =
         serde_json::from_str(r#"{"type":"handoff_refused","reason":{"kind":"disk_full","free":0}}"#).unwrap();
     assert_eq!(refused, HostMsg::HandoffRefused { reason: HandoffRefusal::Unknown });
+}
+
+/// 读写剪贴板的消息的 JSON 样子，以及旧的一方读到它们时的读法：旧的界面把宿主转来的读写请求读成
+/// `Unknown`，照样能回 `Error`；旧的桌面发的 `SetOptions` 没有 `clipboard`，按默认的规矩（照写、
+/// 读前先问）读；回话里缺了文字读成没读到。
+#[test]
+fn clipboard_messages_and_their_old_readings() {
+    let json = serde_json::to_string(&ClientMsg::ReadClipboard { id: ID, ask: true, program: None }).unwrap();
+    assert_eq!(json, format!(r#"{{"type":"read_clipboard","id":"{ID}","ask":true,"program":null}}"#));
+    let json = serde_json::to_string(&ClientMsg::SetOptions {
+        record_history: true,
+        clipboard: ClipboardAccess { write: ClipboardWrite::Deny, read: ClipboardRead::Ask },
+    })
+    .unwrap();
+    assert_eq!(json, r#"{"type":"set_options","record_history":true,"clipboard":{"write":"deny","read":"ask"}}"#);
+
+    let options: ClientMsg = serde_json::from_str(r#"{"type":"set_options","record_history":false}"#).unwrap();
+    assert_eq!(options, ClientMsg::SetOptions { record_history: false, clipboard: ClipboardAccess::default() });
+    assert_eq!(ClipboardAccess::default(), ClipboardAccess { write: ClipboardWrite::Allow, read: ClipboardRead::Ask });
+    let partial: ClientMsg =
+        serde_json::from_str(r#"{"type":"set_options","record_history":true,"clipboard":{"read":"deny"}}"#).unwrap();
+    assert_eq!(
+        partial,
+        ClientMsg::SetOptions {
+            record_history: true,
+            clipboard: ClipboardAccess { write: ClipboardWrite::Allow, read: ClipboardRead::Deny },
+        }
+    );
+    let text: HostMsg = serde_json::from_str(&format!(r#"{{"type":"clipboard_text","id":"{ID}"}}"#)).unwrap();
+    assert_eq!(text, HostMsg::ClipboardText { id: ID, text: None });
+    let read: ClientMsg =
+        serde_json::from_str(&format!(r#"{{"type":"read_clipboard","id":"{ID}","ask":false}}"#)).unwrap();
+    assert_eq!(read, ClientMsg::ReadClipboard { id: ID, ask: false, program: None });
+
+    // 旧的界面（以及旧的宿主）不认识这几种消息：整条读成 `Unknown`，不至于读不了。
+    #[derive(serde::Deserialize, Debug, PartialEq)]
+    #[serde(tag = "type", rename_all = "snake_case")]
+    enum OldClientMsg {
+        Layout {
+            req: u32,
+        },
+        #[serde(other)]
+        Unknown,
+    }
+    for message in [
+        ClientMsg::WriteClipboard { id: ID, text: "x".into() },
+        ClientMsg::ReadClipboard { id: ID, ask: true, program: Some("vim".into()) },
+    ] {
+        let old: OldClientMsg = serde_json::from_str(&serde_json::to_string(&message).unwrap()).unwrap();
+        assert_eq!(old, OldClientMsg::Unknown);
+    }
+    let old: OldClientMsg = serde_json::from_str(r#"{"type":"layout","req":2}"#).unwrap();
+    assert_eq!(old, OldClientMsg::Layout { req: 2 });
 }

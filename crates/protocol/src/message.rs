@@ -31,7 +31,9 @@
 
 use std::{fmt, path::PathBuf, str::FromStr};
 
-use runode_shared_types::{grid::GridSize, session::SessionMeta, settings::TermSettings, shell::IntegrationMode};
+use runode_shared_types::{
+    clipboard::ClipboardAccess, grid::GridSize, session::SessionMeta, settings::TermSettings, shell::IntegrationMode,
+};
 use serde::{Deserialize, Serialize};
 
 use crate::layout::WindowLayout;
@@ -206,8 +208,13 @@ pub enum ClientMsg {
     /// VT 后，在每个会话的输出流里发带着这份设置的 `ThemeApplied`，连着的前端到那里才应用，
     /// 不管是不是自己发的，见 `HostMsg::ThemeApplied`。
     SetTheme { settings: TermSettings },
-    /// 改宿主的选项。
-    SetOptions { record_history: bool },
+    /// 改宿主的选项：记不记命令历史，以及终端里的程序读写剪贴板（OSC 52）的规矩。旧的界面不带
+    /// `clipboard`，按默认值（照写、读前先问）。
+    SetOptions {
+        record_history: bool,
+        #[serde(default)]
+        clipboard: ClipboardAccess,
+    },
     /// 读会话屏幕上的文字，宿主回 `ScreenText`。`lines` 为 `None` 时是当前一屏，否则是从最后
     /// 一个有字的行往上这么多行，含回滚历史。`command` 为 `Some(n)` 时不看 `lines`，读倒数第
     /// n 条命令（1 是最近一条）的输出，要 shell 集成标出的提示符。
@@ -242,6 +249,21 @@ pub enum ClientMsg {
     },
     /// 在 app 里切到显示这个会话的分屏，激活它的窗口，回 `Done`。
     Reveal { req: u32, id: SessionId },
+    /// 会话 `id` 里的程序用 OSC 52 写剪贴板，`text` 是解码好的文字（不超过
+    /// `clipboard::MAX_CLIPBOARD_BYTES`）。宿主自己发起的请求，只出现在 `HostMsg::UiRequest` 里：
+    /// 界面写好后回 `Done`，`req` 为 0（没有发请求的一方，也就没有它的编号）。前端直接发给宿主的
+    /// 回 `Error`。旧的界面读成 `Unknown`，回 `Error`，宿主记一笔日志。
+    WriteClipboard { id: SessionId, text: String },
+    /// 会话 `id` 里的程序用 OSC 52 读剪贴板。和 `WriteClipboard` 一样只出现在 `HostMsg::UiRequest`
+    /// 里。`ask` 为真时界面先弹框问用户（配置项 `clipboard-read` 是 `ask`），`program` 是那时会话
+    /// 前台的程序名，问的时候给用户看。界面回 `HostMsg::ClipboardText`；用户不让读、剪贴板里没有
+    /// 文字或者文字太长时 `text` 为空，宿主回给程序一个空的剪贴板。
+    ReadClipboard {
+        id: SessionId,
+        ask: bool,
+        #[serde(default)]
+        program: Option<String>,
+    },
     /// 新版本的宿主（`ClientKind::Successor`）要接手：旧宿主把 PTY 和监听的 socket 交过去后退出。
     /// `min_format`..=`max_format` 是新宿主读得了的交接格式（`handoff::HANDOFF_FORMAT`），旧宿主
     /// 只写自己的那一个，不在范围里时回 `HandoffRefused { UnsupportedFormat }`，否则回
@@ -385,6 +407,9 @@ pub enum HostMsg {
     /// 宿主转给界面去办的请求（`Open`、`Reveal`、`Layout`），只发给登记为界面的连接（`Hello`
     /// 里 `client` 是 `Desktop` 的，有几个时是最近连上的那个）。`request` 原样带着发请求一方的
     /// `req`；界面办完了用 `ClientMsg::UiReply` 带着同一个 `ui` 回话。
+    ///
+    /// 宿主自己也用它请界面读写剪贴板（`ClientMsg::WriteClipboard`、`ClientMsg::ReadClipboard`），
+    /// 这两种优先发给最近和那个会话交互过的界面，没有时才是最近连上的那个。
     UiRequest {
         ui: u64,
         request: Box<ClientMsg>,
@@ -418,6 +443,13 @@ pub enum HostMsg {
         mine: bool,
         #[serde(default)]
         owner: Option<String>,
+    },
+    /// 回 `ClientMsg::ReadClipboard`：剪贴板里的文字；没读（用户不让读、剪贴板里没有文字、文字
+    /// 太长）时为空。只在 `ClientMsg::UiReply` 里出现。
+    ClipboardText {
+        id: SessionId,
+        #[serde(default)]
+        text: Option<String>,
     },
     /// 比自己新的宿主才有的消息，前端忽略它。
     #[serde(other)]

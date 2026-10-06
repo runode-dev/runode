@@ -15,7 +15,7 @@ use runode_protocol::{
     AttachMode, BuildId, Caps, ClientKind, FrameKind, GoodbyeReason, PROTOCOL_VERSION, PaneLayout, PaneRect, TabLayout,
     WindowLayout, WorkspaceLayout,
 };
-use runode_shared_types::{settings::TermSettings, shell::IntegrationMode};
+use runode_shared_types::{clipboard::ClipboardAccess, settings::TermSettings, shell::IntegrationMode};
 
 /// 协议版本对不上时回 `Incompatible` 后断开。
 #[test]
@@ -252,9 +252,9 @@ fn socket_clients_can_change_the_theme() {
     desktop.attach(id, AttachMode::Snapshot);
     let mut peer = Peer::hello(&socket, false);
     peer.attach(id, AttachMode::VtReplay);
-    peer.send(&ClientMsg::SetOptions { record_history: false });
+    peer.send(&ClientMsg::SetOptions { record_history: false, clipboard: ClipboardAccess::default() });
     assert!(matches!(peer.reply(), HostMsg::Error { .. }));
-    desktop.send(&ClientMsg::SetOptions { record_history: false });
+    desktop.send(&ClientMsg::SetOptions { record_history: false, clipboard: ClipboardAccess::default() });
     let settings = TermSettings { cursor_blink: Some(false), scrollback_limit: 1 << 20, ..TermSettings::default() };
     peer.send(&ClientMsg::SetTheme { settings: settings.clone() });
     assert_eq!(peer.reply(), HostMsg::ThemeApplied { id, settings: settings.clone() });

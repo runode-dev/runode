@@ -876,7 +876,7 @@ impl Connection {
             }
             ClientMsg::SetTheme { settings } => self.shared.set_theme(settings),
             // 记不记命令历史是用户在 app 里的设置，别的程序不能改。
-            ClientMsg::SetOptions { record_history } => {
+            ClientMsg::SetOptions { record_history, .. } => {
                 if self.kind == ClientKind::Desktop {
                     self.shared.record_history.store(record_history, Ordering::Relaxed);
                 } else {
@@ -900,6 +900,10 @@ impl Connection {
                 self.to_ui(req, message);
             }
             ClientMsg::UiReply { ui, reply } => self.ui_reply(ui, *reply),
+            // 读写剪贴板是宿主替会话里的程序请界面办的，前端不能直接要。
+            ClientMsg::WriteClipboard { .. } | ClientMsg::ReadClipboard { .. } => {
+                self.error(None, None, "only the host asks the runode window to use the clipboard".into());
+            }
             ClientMsg::Shutdown { kill_sessions: true } => {
                 self.channels.clear();
                 self.shared.kill_all();

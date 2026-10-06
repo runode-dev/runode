@@ -26,6 +26,7 @@ use gpui::{App, PromptLevel};
 use runode_config::Config;
 use runode_host::{BuildId, ClientMsg, Host};
 use runode_protocol::{HandoffRefusal, SessionInfo};
+use runode_shared_types::clipboard::ClipboardAccess;
 
 pub use handoff::{HandoffFailure, HandoffStatus, READY_BY};
 use launch::{Choice, Probe};
@@ -172,7 +173,10 @@ pub fn take_notice() -> Option<Notice> {
 pub fn configure(config: &Config) {
     let link = link();
     link.send(ClientMsg::SetTheme { settings: config.term_settings() });
-    link.send(ClientMsg::SetOptions { record_history: config.command_suggestions });
+    link.send(ClientMsg::SetOptions {
+        record_history: config.command_suggestions,
+        clipboard: ClipboardAccess::default(),
+    });
     let in_app = mode() == Mode::InProcess;
     let port = if in_app { crate::remote_access::wanted_port(config) } else { None };
     let mut remote = REMOTE.lock().unwrap_or_else(PoisonError::into_inner);
