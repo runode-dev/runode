@@ -4,7 +4,11 @@
 
 use std::{fs, path::Path};
 
-use crate::{FileDiff, FileStatus, LineKind, MAX_DIFF_BYTES, Repo, Result, diff, expand_tabs, git, read_untracked};
+use crate::{
+    FileDiff, FileStatus, LineKind, Repo, Result, git,
+    parse::expand_tabs,
+    snapshot::{MAX_DIFF_BYTES, diff, read_untracked},
+};
 
 /// 新的那一边超过这么多行时不读全文，只显示各块。
 const MAX_VIEW_LINES: usize = 50_000;

@@ -15,7 +15,11 @@ use std::{
     path::{Component, Path, PathBuf},
 };
 
-use crate::{FileStatus, Found, Repo, Result, Snapshot, UntrackedCache, find_repo, git, ops::run, read_repo};
+use crate::{
+    FileStatus, Repo, Result, Snapshot, UntrackedCache, find_repo, git,
+    ops::run,
+    snapshot::{Found, read_repo},
+};
 
 /// 子仓库最多往下找这么多层：主仓库里的子模块和嵌套仓库是第一层，它们里面的是第二层。
 const MAX_DEPTH: usize = 3;

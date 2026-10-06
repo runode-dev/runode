@@ -3,7 +3,7 @@
 
 use std::{collections::HashSet, fs, path::Path};
 
-use crate::{FileDiff, GitError, MAX_DIFF_BYTES, Repo, Result, git, ops::run, parse_diff};
+use crate::{FileDiff, GitError, Repo, Result, git, ops::run, parse::parse_diff, snapshot::MAX_DIFF_BYTES};
 
 /// 历史里的一个提交。
 #[derive(Clone, Debug, PartialEq, Eq)]

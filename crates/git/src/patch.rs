@@ -2,7 +2,10 @@
 
 use std::{ffi::OsStr, path::Path};
 
-use crate::{FileDiff, FileStatus, GitError, Hunk, LineKind, MAX_DIFF_BYTES, Repo, Result, expand_tabs, ops::run};
+use crate::{
+    FileDiff, FileStatus, GitError, Hunk, LineKind, Repo, Result, ops::run, parse::expand_tabs,
+    snapshot::MAX_DIFF_BYTES,
+};
 
 /// 对一块改动做什么。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
