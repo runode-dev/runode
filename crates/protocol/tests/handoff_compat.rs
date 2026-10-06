@@ -104,6 +104,22 @@ fn handoff_requests_are_readable() {
     }
 }
 
+/// `Goodbye` 的各种原因，包括以后的版本才有的：认不出的原因读成 `Unknown`，不至于整条读不了。
+#[test]
+fn goodbye_reasons_are_readable() {
+    let cases = [
+        (r#"{"kind":"shutdown"}"#, GoodbyeReason::Shutdown),
+        (r#"{"kind":"handoff"}"#, GoodbyeReason::Handoff),
+        (r#"{"kind":"idle"}"#, GoodbyeReason::Idle),
+        (r#"{"kind":"error","message":"boom"}"#, GoodbyeReason::Error { message: "boom".into() }),
+        (r#"{"kind":"maintenance","until":1790000000}"#, GoodbyeReason::Unknown),
+    ];
+    for (reason, expected) in cases {
+        let json = format!(r#"{{"type":"goodbye","reason":{reason}}}"#);
+        assert_eq!(serde_json::from_str::<HostMsg>(&json).unwrap(), HostMsg::Goodbye { reason: expected }, "{json}");
+    }
+}
+
 #[test]
 fn handoff_answers_are_readable() {
     let cases = [

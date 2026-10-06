@@ -5,8 +5,9 @@
 //! - 对面多发了自己不认识的字段：忽略，照常读。
 //! - 新加的字段带 `#[serde(default)]`：旧的一方发来的消息里没有它，按默认值读。
 //! - 新加的字段是必填的（没有 `#[serde(default)]`）：旧的一方发来的这条消息解析失败。
-//! - 新加的消息种类、新加的 `ClientKind`：旧的一方读成 `Unknown`，能回一句「不认识」而不是
-//!   断开；其他枚举（`AttachMode`、`GoodbyeReason` 等）新加的取值读不了，整条消息解析失败。
+//! - 新加的消息种类、新加的 `ClientKind`、`GoodbyeReason`、`HandoffRefusal`：旧的一方读成
+//!   `Unknown`，能回一句「不认识」或者照常断开，而不是整条读不了；其他枚举（`AttachMode` 等）
+//!   新加的取值读不了，整条消息解析失败。
 //!
 //! 所以加字段时带上 `#[serde(default)]`；改了已有消息的含义、新加必填字段或者新加枚举取值
 //! （上面能读成 `Unknown` 的除外）时，加 `PROTOCOL_VERSION`。
@@ -17,8 +18,10 @@
 //!   小端 u32 字节数加小端 u32 描述符个数）。
 //! - `ClientMsg::Hello`、`HostMsg::Welcome`、`HostMsg::Incompatible`，以及交接用的
 //!   `ClientMsg::Handoff`、`HandoffReady`、`HandoffAbort`、`HandoffDone`、
-//!   `HostMsg::HandoffRefused`、`HandoffBegin` 和它们用到的 `HandoffRefusal`：
-//!   已有字段的名字、类型和含义都不改，以后只能加带 `#[serde(default)]` 的字段。
+//!   `HostMsg::HandoffRefused`、`HandoffBegin`、`Goodbye` 和它们用到的 `HandoffRefusal`、
+//!   `GoodbyeReason`：已有字段的名字、类型和含义都不改，以后只能加带 `#[serde(default)]` 的字段；
+//!   `HandoffRefusal`、`GoodbyeReason` 可以加新的取值，旧的一方读成 `Unknown`。交接时旧宿主要
+//!   给不同版本的前端发 `Goodbye { Handoff }`，前端也要和不同版本的宿主谈握手。
 //! - `Hello` 里 `client` 是 `ClientKind::Successor` 的连接，宿主不比对协议版本，照样回
 //!   `Welcome`；之后只认交接用的消息。新宿主据此能和协议版本不同的旧宿主谈交接。
 //! - 交接时一条描述符消息里数据的编法和 `HandoffPart` 的格式，见 `handoff`；格式有自己的版本号
@@ -480,6 +483,9 @@ pub enum GoodbyeReason {
     Idle,
     /// 宿主出了错。
     Error { message: String },
+    /// 比自己新的宿主才有的原因，前端当作连接断了处理。
+    #[serde(other)]
+    Unknown,
 }
 
 /// 宿主为什么不交接，见 `HostMsg::HandoffRefused`。
