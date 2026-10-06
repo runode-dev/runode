@@ -307,8 +307,9 @@ fn pty_sink(inbox: &mpsc::Sender<Inbox>, credits: &Arc<Credits>) -> pty::PtySink
 /// `Adopting::finish`。闸门等 `Inbox::Open` 打开，不接手了发 `Inbox::Release`。
 ///
 /// 失败时 PTY 已经原样交回、关掉了这边的描述符，shell 不受影响（交出方还拿着自己那份）。
-/// PTY 在会话线程起好之后才经 channel 交过去：起不了线程时它还在这里，交回去，不会随着丢掉
-/// 结束 shell。
+/// PTY 在会话线程起好之后才经 channel 交过去：起不了线程时它还在这里，用 `Pty::release` 交回去。
+/// 停着、从没开过闸的 `Pty` 直接丢掉其实也不结束 shell（见 `Pty::adopt_paused`），明着交回是把
+/// 「不接手了」说清楚、出错时记一笔，不靠丢掉时对停着的 `Pty` 的特殊处理。
 pub(crate) fn adopt(setup: Setup, adopted: Adopted) -> Result<Adopting> {
     let Setup { id, settings: _, env: _, extra_env, record_history } = setup;
     let Adopted { handoff, export, snapshot, replay, redactor, shell } = adopted;
