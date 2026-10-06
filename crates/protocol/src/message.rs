@@ -231,12 +231,17 @@ pub enum ClientMsg {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum HostMsg {
-    /// 回 `Hello`。`snapshot_format` 是宿主编的快照的格式版本（libghostty 快照开头的版本号）。
+    /// 回 `Hello`。`snapshot_format` 是宿主编的快照的格式版本（libghostty 快照开头的版本号），
+    /// 前端解不了这个格式时改要 `VtReplay`。`standalone` 是宿主单独一个进程在跑（`runode --host`）；
+    /// 为假时宿主跑在某个 app 的进程里，那个 app 才是它的界面，别的 app 不该接手它的会话、也不该
+    /// 让它退出。
     Welcome {
         protocol: u32,
         build: BuildId,
         host_pid: u32,
         snapshot_format: u16,
+        #[serde(default)]
+        standalone: bool,
     },
     /// 协议版本对不上，宿主接着关掉连接。
     Incompatible {

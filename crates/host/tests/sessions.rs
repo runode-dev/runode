@@ -52,6 +52,50 @@ fn resize_and_theme_changes_are_marked_in_the_stream() {
     peer.send(&ClientMsg::Kill { id });
 }
 
+/// 开会话时带的主题只在宿主还没收到过 `SetTheme` 时生效，之后一律用宿主当前的主题；连上时
+/// `Attached` 带着会话那份 VT 现在套着的主题。
+#[test]
+fn spawn_settings_apply_only_before_the_first_theme() {
+    let host = host();
+    let mut peer = Peer::pair(&host);
+    let early = TermSettings { scrollback_limit: 3 << 20, ..TermSettings::default() };
+    let spawn = |peer: &mut Peer, req: u32| {
+        peer.send(&ClientMsg::Spawn {
+            req,
+            size: SIZE,
+            cwd: None,
+            integration: IntegrationMode::Off,
+            start: true,
+            shell: Some("/bin/cat".into()),
+            settings: Some(early.clone()),
+            env: Vec::new(),
+        });
+        match peer.reply() {
+            HostMsg::Spawned { req: answered, id } if answered == req => id,
+            other => panic!("expected spawned, got {other:?}"),
+        }
+    };
+    let attached_settings = |peer: &mut Peer, id: SessionId| {
+        peer.send(&ClientMsg::Attach { id, size: None, mode: AttachMode::MetaOnly });
+        match peer.reply() {
+            HostMsg::Attached { id: attached, settings, .. } if attached == id => settings,
+            other => panic!("expected attached, got {other:?}"),
+        }
+    };
+    let first = spawn(&mut peer, 1);
+    assert_eq!(attached_settings(&mut peer, first), Some(early.clone()));
+
+    let theme = TermSettings { cursor_blink: Some(false), scrollback_limit: 1 << 20, ..TermSettings::default() };
+    // 只看状态的前端收不到 `ThemeApplied`；宿主按先后处理同一条连接上的消息，之后的 `Attach`
+    // 一定在换主题之后。
+    peer.send(&ClientMsg::SetTheme { settings: theme.clone() });
+    assert_eq!(attached_settings(&mut peer, first), Some(theme.clone()));
+    let second = spawn(&mut peer, 2);
+    assert_eq!(attached_settings(&mut peer, second), Some(theme));
+    peer.send(&ClientMsg::Kill { id: first });
+    peer.send(&ClientMsg::Kill { id: second });
+}
+
 /// 清屏的字节当成一段输出发回来；前台是 shell 时还给它发一个 FF，`cat` 把它回显成 `^L`。
 #[test]
 fn clear_screen_comes_back_as_output() {

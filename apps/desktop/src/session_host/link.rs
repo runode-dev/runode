@@ -1074,6 +1074,7 @@ mod tests {
                 build: BuildId(BUILD.into()),
                 host_pid: 1,
                 snapshot_format: 1,
+                standalone: true,
             };
             let frame = Frame::control(&welcome).unwrap();
             write_frame(&mut stream, frame.kind, 0, &frame.payload).unwrap();
@@ -1158,6 +1159,7 @@ mod tests {
                 build: BuildId(BUILD.into()),
                 host_pid: 1,
                 snapshot_format: 1,
+                standalone: true,
             };
             let frame = Frame::control(&welcome).unwrap();
             write_frame(&mut stream, frame.kind, 0, &frame.payload).unwrap();

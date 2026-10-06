@@ -90,6 +90,7 @@ fn serve(mut stream: UnixStream, tx: &mpsc::Sender<Received>, script: &Mutex<imp
                 build: BuildId("test".into()),
                 host_pid: 1,
                 snapshot_format: 1,
+                standalone: false,
             }],
             other => (script.lock().unwrap())(other),
         };

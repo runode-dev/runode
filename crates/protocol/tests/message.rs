@@ -139,7 +139,14 @@ fn client_messages_round_trip() {
 #[test]
 fn host_messages_round_trip() {
     let messages = [
-        HostMsg::Welcome { protocol: 1, build: BuildId("b".into()), host_pid: 42, snapshot_format: 1 },
+        HostMsg::Welcome {
+            protocol: 1,
+            build: BuildId("b".into()),
+            host_pid: 42,
+            snapshot_format: 1,
+            standalone: false,
+        },
+        HostMsg::Welcome { protocol: 3, build: BuildId("b".into()), host_pid: 7, snapshot_format: 1, standalone: true },
         HostMsg::Incompatible { protocol: 2, build: BuildId("b".into()), reason: "too new".into() },
         HostMsg::SessionList {
             sessions: vec![
@@ -328,6 +335,16 @@ fn version_3_fields_have_old_defaults() {
     ))
     .unwrap();
     assert_eq!((info.clients, info.claimed, info.exited), (0, false, false));
+}
+
+/// `Welcome` 后加的 `standalone`：没有它的宿主读成跑在 app 里。第 3 版协议还没发布过，没有哪个
+/// 已发布的宿主会少这个字段，所以不升协议版本。
+#[test]
+fn welcome_without_standalone_reads_as_in_app() {
+    let welcome: HostMsg =
+        serde_json::from_str(r#"{"type":"welcome","protocol":3,"build":"x","host_pid":9,"snapshot_format":1}"#)
+            .unwrap();
+    assert!(matches!(welcome, HostMsg::Welcome { standalone: false, host_pid: 9, .. }));
 }
 
 /// 转给界面的请求和界面的回话里套着另一种消息，JSON 里就是嵌着的一条消息。

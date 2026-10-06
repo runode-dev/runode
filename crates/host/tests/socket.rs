@@ -599,6 +599,7 @@ fn shutdown_ends_a_standalone_host() {
     let dir = temp_dir("shutdown");
     let (host, socket) = listen(&dir);
     let stopped = {
+        let host = host.clone();
         let (tx, rx) = mpsc::channel();
         thread::spawn(move || tx.send(host.run_until_idle(Duration::from_secs(60))));
         rx
@@ -620,6 +621,7 @@ fn shutdown_ends_a_standalone_host() {
     }
     assert_eq!(stopped.recv_timeout(WAIT), Ok(Stopped::Shutdown));
     assert!(!socket.exists());
+    assert!(host.connect_pair().is_err(), "a host that shut down takes no more connections");
     common::host().listen(&socket, &dir.join("host.lock")).unwrap();
     let deadline = Instant::now() + WAIT;
     while running(&format!("sleep {marker}")) {
@@ -665,4 +667,54 @@ fn a_stopped_host_takes_no_connections() {
     let host: Host = host();
     assert_eq!(host.run_until_idle(Duration::from_millis(10)), Stopped::Idle);
     assert!(host.connect_pair().is_err());
+}
+
+/// `Welcome` 说宿主是不是单独一个进程在跑：只开着 socket（跑在某个 app 里）时为假，进了
+/// `Host::run_until_idle` 后为真。
+#[test]
+fn welcome_tells_whether_the_host_runs_on_its_own() {
+    let dir = temp_dir("standalone");
+    let (host, socket) = listen(&dir);
+    let welcome = || {
+        let mut peer = Peer::connect(&socket);
+        peer.send(&ClientMsg::Hello {
+            protocol: PROTOCOL_VERSION,
+            build: BuildId(BUILD.into()),
+            client: ClientKind::Cli,
+            caps: Caps::default(),
+            session: None,
+        });
+        match peer.message() {
+            HostMsg::Welcome { standalone, .. } => (peer, standalone),
+            other => panic!("expected welcome, got {other:?}"),
+        }
+    };
+    assert!(!welcome().1);
+    let stopped = {
+        let (tx, rx) = mpsc::channel();
+        thread::spawn(move || tx.send(host.run_until_idle(Duration::from_secs(60))));
+        rx
+    };
+    let deadline = Instant::now() + WAIT;
+    let mut peer = loop {
+        match welcome() {
+            (peer, true) => break peer,
+            _ => assert!(Instant::now() < deadline, "the host never said it runs on its own"),
+        }
+        thread::sleep(Duration::from_millis(5));
+    };
+    peer.send(&ClientMsg::Shutdown { kill_sessions: true });
+    assert_eq!(stopped.recv_timeout(WAIT), Ok(Stopped::Shutdown));
+}
+
+/// 界面读不懂转来的请求时回的 `Error` 不带 `req`，宿主转回去时补上原请求的。
+#[test]
+fn ui_errors_without_req_get_the_request_s() {
+    let dir = temp_dir("uierr");
+    let (_host, socket) = listen(&dir);
+    let mut desktop = Peer::desktop(&socket);
+    let mut cli = Peer::hello(&socket, false);
+    cli.send(&ClientMsg::Reveal { req: 12, id: SessionId(9) });
+    answer_ui(&mut desktop, |_| HostMsg::Error { req: None, id: None, message: "unknown request".into() });
+    assert_eq!(cli.reply(), HostMsg::Error { req: Some(12), id: None, message: "unknown request".into() });
 }
