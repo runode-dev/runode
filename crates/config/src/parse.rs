@@ -511,6 +511,18 @@ unknown-key = whatever
         assert_eq!(config.scrollback_limit, 10_000_000);
     }
 
+    /// 没写或写空时交给终端的是 `None`（不闪烁），只有显式写 true 才闪；终端那边怎么解释见
+    /// `runode_terminal` 的测试 `cursor_is_steady_unless_configured_or_requested`。
+    #[test]
+    fn cursor_blinks_only_when_configured() {
+        assert_eq!(Config::default().term_settings().cursor_blink, None);
+        assert_eq!(load(&[""]).term_settings().cursor_blink, None);
+        assert_eq!(load(&["cursor-style-blink = true\n"]).term_settings().cursor_blink, Some(true));
+        assert_eq!(load(&["cursor-style-blink = false\n"]).term_settings().cursor_blink, Some(false));
+        // Ghostty 那层开了、runode 这层写空：回到默认的不闪烁。
+        assert_eq!(load(&["cursor-style-blink = true\n", "cursor-style-blink =\n"]).term_settings().cursor_blink, None);
+    }
+
     #[test]
     fn scrollback_limit_has_a_floor() {
         let config = load(&["scrollback-limit = 0\n"]);

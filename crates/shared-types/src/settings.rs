@@ -47,7 +47,7 @@ pub struct TermSettings {
     /// 覆盖默认 256 色中的若干项。
     pub palette: Vec<(u8, Rgb)>,
     pub cursor_style: CursorStyle,
-    /// `None` 表示默认闪烁，运行中的程序仍可改变。
+    /// `None` 表示默认不闪烁，运行中的程序仍可改变。
     pub cursor_blink: Option<bool>,
     /// `None` 表示用前景色。
     pub cursor_color: Option<TerminalColor>,

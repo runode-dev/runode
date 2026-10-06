@@ -324,7 +324,7 @@ impl TerminalView {
             self.input_changed = true;
             self.completion_output(cx);
             // 有输出（包括键入的回显）时光标先亮起，免得打字时看不到它。
-            self.reset_cursor_blink(window, cx);
+            self.reset_cursor_blink(cx);
         }
         if changes.theme_applied {
             // 高亮的颜色取自调色板。
@@ -709,8 +709,8 @@ impl TerminalView {
                 cx.emit(TerminalEvent::Focused);
             }),
             cx.on_focus_out(&pane_focus, window, |view, _, _, _| view.report_focus(false)),
-            cx.on_focus(&focus_handle, window, |view, window, cx| {
-                view.reset_cursor_blink(window, cx);
+            cx.on_focus(&focus_handle, window, |view, _, cx| {
+                view.reset_cursor_blink(cx);
             }),
             cx.on_blur(&focus_handle, window, |view, _, _| {
                 view._cursor_blink = None;
@@ -891,14 +891,33 @@ impl TerminalView {
         self.colors
     }
 
-    /// 让光标立即亮起，并从头开始计闪烁周期；没有焦点时不闪，也就不启动计时器。
-    /// 每批输出都会调用，所以计时器只建一次，重新计周期只是改 `cursor_blink_since`。
-    pub(super) fn reset_cursor_blink(&mut self, window: &Window, cx: &mut Context<Self>) {
-        self.cursor_blink_visible = true;
+    /// 让光标立即亮起，并从头开始计闪烁周期。每批输出都会调用，所以这里不碰计时器，只改
+    /// `cursor_blink_since`；计时器由绘制时的 `sync_cursor_blink` 按要不要闪来起停。
+    pub(super) fn reset_cursor_blink(&mut self, cx: &mut Context<Self>) {
+        if !self.cursor_blink_visible {
+            // 正灭着：要重画一次才亮得起来。
+            self.cursor_blink_visible = true;
+            cx.notify();
+        }
         self.cursor_blink_since = Instant::now();
-        if self._cursor_blink.is_some() || !self.focus_handle.is_focused(window) {
+    }
+
+    /// 绘制时调用，`blinking` 是这一帧光标要不要闪（有焦点、有光标、光标在闪）。要闪而计时器
+    /// 没在跑时起一个，不闪时停掉：光标不闪时没有任何计时器在跑，空闲的窗口就不再重画。
+    /// 光标从不闪变成闪只会因为有输出、换了主题或者重新获得焦点，这几样都会引起重画，所以只在
+    /// 绘制时检查就够了。
+    pub(super) fn sync_cursor_blink(&mut self, blinking: bool, cx: &mut Context<Self>) {
+        if !blinking {
+            if self._cursor_blink.take().is_some() {
+                self.cursor_blink_visible = true;
+            }
             return;
         }
+        if self._cursor_blink.is_some() {
+            return;
+        }
+        self.cursor_blink_visible = true;
+        self.cursor_blink_since = Instant::now();
         self._cursor_blink = Some(cx.spawn(async move |this, cx| {
             let mut wait = CURSOR_BLINK_INTERVAL;
             loop {
@@ -911,10 +930,8 @@ impl TerminalView {
                     }
                     view.cursor_blink_visible = !view.cursor_blink_visible;
                     view.cursor_blink_since = Instant::now();
-                    if view.screen.shown_mut().is_some_and(|session| session.frame().cursor.is_some_and(|c| c.blinking))
-                    {
-                        cx.notify();
-                    }
+                    // 光标这期间不闪了的话，这次重画时 `sync_cursor_blink` 会停掉计时器。
+                    cx.notify();
                     CURSOR_BLINK_INTERVAL
                 });
                 match next {

@@ -128,18 +128,17 @@ impl Element for TerminalElement {
         });
         let focused = focus_handle.is_focused(window);
         self.view.update(cx, |view, cx| {
-            // 窗口刚建好时设的焦点不触发 `on_focus`，之后要等有输出才会开始闪；提前启动的
-            // shell 输出早已喂完，所以画的时候发现有焦点却没在闪就补上。
-            if focused && view._cursor_blink.is_none() {
-                view.reset_cursor_blink(window, cx);
-            }
             let metrics = view.metrics(window);
             view.refresh_input();
             // 绘制时要同时用到帧和 `&mut view`（字形缓存），所以先把帧取出来，画完再放回。没有界面
             // 这份 VT（只看状态、还在等屏幕、断开时没有屏幕）时只有背景。
             let Some(frame) = view.screen.shown_mut().map(Session::take_frame) else {
+                view.sync_cursor_blink(false, cx);
                 return;
             };
+            // 闪烁计时器按这一帧起停。窗口刚建好时设的焦点不触发 `on_focus`，提前启动的 shell 的
+            // 输出也早已喂完，所以要在画的时候起。
+            view.sync_cursor_blink(focused && frame.cursor.is_some_and(|c| c.blinking), cx);
             let crop = view.crop_for(&frame);
             match crop {
                 None => {

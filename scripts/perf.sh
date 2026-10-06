@@ -16,15 +16,12 @@
 #
 # 内存：footprint 的 phys_footprint 里有一块 GPU 驱动替进程占着的临时内存，记在「Owned physical
 # footprint (unmapped) (graphics)」这一项（默认窗口约 178 MiB；这一项也含渲染器 GPU 私有的纹理）。
-# 只要还在画帧它就一直在，停止绘制约 3 秒后退掉，再画又回来。窗口在前台时光标每半秒闪一次、每次
-# 都重画，它就一直退不掉；窗口在不在前台又看别的程序有没有抢走焦点，所以开窗后过几秒取一次样会
-# 随机落在有它或没它的那一档。为此：
-#   - 临时目录里的配置写上 cursor-style-blink = false，静置时没有东西在重画。空闲 CPU 和唤醒因此
-#     也不含光标闪烁的那部分。
-#   - 分开报两个数。峰值是内核记的 phys_footprint_peak，进程启动以来的最高值，含这块临时内存；
-#     稳定后是静置 --settle 秒后每秒取一次样、共 --samples 次，取 phys_footprint 最小的那次，同时
-#     列出这次的 IOSurface（窗口的 drawable 在这里）、IOAccelerator (graphics)（渲染器 CPU 也能
-#     访问的纹理和缓冲）和上面那一项。
+# 只要还在画帧它就一直在，停止绘制约 3 秒后退掉，再画又回来。光标默认不闪，静置时没有东西在重画，
+# 它就会退掉；默认还在闪的老版本在前台时每次闪都重画，它一直退不掉，稳定值和空闲 CPU、唤醒都含着
+# 这部分，和新版本比时要记得。所以分开报两个数：峰值是内核记的 phys_footprint_peak，进程启动以来
+# 的最高值，含这块临时内存；稳定后是静置 --settle 秒后每秒取一次样、共 --samples 次，取
+# phys_footprint 最小的那次，同时列出这次的 IOSurface（窗口的 drawable 在这里）、IOAccelerator
+# (graphics)（渲染器 CPU 也能访问的纹理和缓冲）和上面那一项。
 # 静置期间不要碰窗口，否则稳定值会偏高。
 #
 # 每轮用一个新的临时目录当 HOME 和 XDG_CONFIG_HOME，配置、窗口存档、提前启动 shell 的尺寸记录
@@ -178,7 +175,6 @@ for ((round = 1; round <= rounds; round++)); do
     say "第 $round/$rounds 轮……"
     home=$(mktemp -d "${TMPDIR:-/tmp}/runode-perf-home.XXXXXX")
     mkdir -p "$home/.config/runode"
-    echo 'cursor-style-blink = false' >"$home/.config/runode/config.conf"
     socket="$home/.config/runode/run/host.sock"
     if ((round == 1 && ${#socket} >= 104)); then
         echo "perf.sh: 临时目录太长，宿主的 socket 路径超过 104 字节，app 会不开 socket；可设短一点的 TMPDIR" >&2

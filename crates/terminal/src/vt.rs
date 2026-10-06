@@ -147,8 +147,8 @@ fn set_default_cursor<'a, 't, 's>(
     let blinking = terminal.mode(Mode::CURSOR_BLINKING)?;
     terminal.set_default_cursor_style(Some(ghostty_cursor_style(settings.cursor_style)))?;
     let old_default = terminal.mode(Mode::CURSOR_BLINKING)?;
-    // 没配置时默认闪烁；libghostty 的 `None` 是不闪烁，所以这里显式给 true。
-    terminal.set_default_cursor_blink(Some(settings.cursor_blink.unwrap_or(true)))?;
+    // 没配置时默认不闪烁：闪烁要一直重画，进程就一直多占着画帧的那些内存。
+    terminal.set_default_cursor_blink(Some(settings.cursor_blink.unwrap_or(false)))?;
     if blinking != old_default {
         terminal.set_mode(Mode::CURSOR_BLINKING, blinking)?;
     }

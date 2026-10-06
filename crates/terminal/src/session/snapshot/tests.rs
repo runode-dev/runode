@@ -716,7 +716,8 @@ fn a_theme_applied_after_a_snapshot_keeps_the_programs_cursor_blinking() {
         TermSettings { cursor_style: CursorStyle::Bar, cursor_blink: Some(false), ..TermSettings::default() };
     let blinking_underline =
         TermSettings { cursor_style: CursorStyle::Underline, cursor_blink: Some(true), ..TermSettings::default() };
-    let themes = [TermSettings::default(), steady_bar.clone(), blinking_underline, steady_bar.clone()];
+    let blinking_block = TermSettings { cursor_blink: Some(true), ..TermSettings::default() };
+    let themes = [blinking_block, steady_bar.clone(), blinking_underline, steady_bar.clone()];
     // 起始主题、程序输出、依次套完 `themes` 后各自的闪烁。
     let cases: [(&TermSettings, &[u8], [bool; 4]); 7] = [
         // 程序没动过闪烁：跟着配置。
@@ -751,18 +752,19 @@ fn a_theme_applied_after_a_snapshot_keeps_the_programs_cursor_blinking() {
     }
 }
 
-/// 界面这边的会话从快照建好后套主题，和宿主那份一样，程序关掉的闪烁也还关着。
+/// 界面这边的会话从快照建好后套主题，和宿主那份一样，程序打开的闪烁也还开着。
 #[test]
 fn a_session_from_a_snapshot_applies_the_theme_like_the_host() {
+    use runode_shared_types::settings::CursorStyle;
     let mut source = host(20, 4);
-    source.feed(b"\x1b[?12l");
+    source.feed(b"\x1b[?12h");
     let mut resumed = session_from(&source);
-    let theme = TermSettings { cursor_blink: Some(true), ..TermSettings::default() };
+    let theme = TermSettings { cursor_style: CursorStyle::Bar, cursor_blink: Some(false), ..TermSettings::default() };
     assert!(source.apply_theme(&theme));
     resumed.apply_theme(&theme);
-    assert!(!resumed.terminal.mode(Mode::CURSOR_BLINKING).unwrap());
+    assert!(resumed.terminal.mode(Mode::CURSOR_BLINKING).unwrap());
     assert_same("theme", source.terminal(), &resumed.terminal, true);
-    assert_eq!(resumed.frame().cursor.map(|c| c.blinking), Some(false));
+    assert_eq!(resumed.frame().cursor.map(|c| c.blinking), Some(true));
 }
 
 /// 回滚历史按 page 整块丢弃，page 的划分不在快照里：解出来的 VT 之后丢掉的行数和原来那份

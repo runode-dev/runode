@@ -40,7 +40,7 @@ pub struct Config {
     /// 预览栏的字号。
     pub preview_font_size: f32,
     pub cursor_style: CursorStyle,
-    /// `None` 表示默认闪烁，运行中的程序仍可改变。
+    /// `None` 表示默认不闪烁，运行中的程序仍可改变。
     pub cursor_style_blink: Option<bool>,
     pub background: Rgb,
     pub foreground: Rgb,

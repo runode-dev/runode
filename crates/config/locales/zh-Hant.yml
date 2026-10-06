@@ -34,7 +34,7 @@ config:
   search_selected_foreground: 目前選中的搜尋符合項目的文字顏色：同上。
   palette: 調色盤：序號=顏色，序號為 0 到 255，可以寫多行；0-7 是一般色，8-15 是亮色。
   cursor_style: 游標形狀：block、bar、underline、block_hollow。
-  cursor_style_blink: 游標是否閃爍：true、false；留空時預設閃爍，執行中的程式仍可改變。
+  cursor_style_blink: 游標是否閃爍：true、false（預設，游標常亮不閃）；執行中的程式仍可打開或關掉閃爍。
   macos_option_as_alt: macOS 上把 Option 當作 Alt：true（兩邊都是）、false、left（只有左邊）、right（只有右邊）。
   scrollback_limit: 每個終端的捲動歷史最多佔多少位元組：非負整數，小於 2 MiB（2097152）時按 2 MiB 算。另外最多留 1 萬行，先到哪個上限就按哪個算。改了對已經開著的終端也生效。
   shell_integration: Shell 整合：detect（依 shell 的程式名稱判斷）、none（關閉）、bash、zsh、fish。

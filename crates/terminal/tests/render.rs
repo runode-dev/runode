@@ -72,18 +72,33 @@ fn cursor_colors_can_follow_the_cell() {
     assert_eq!(color, Rgb(1, 2, 3));
 }
 
+/// 没配置时光标不闪；程序用 DECSCUSR 或 DEC 模式 12 要闪就闪，配置显式开了闪烁时也闪。
 #[test]
-fn cursor_blinks_unless_configured_or_steadied() {
+fn cursor_is_steady_unless_configured_or_requested() {
     let blinking = |session: &mut Session| session.frame().cursor.map(|c| c.blinking);
     let mut session = idle_session();
     session.feed(b"ok");
+    assert_eq!(blinking(&mut session), Some(false));
+    // DECSCUSR 1：闪烁的块状光标；2：稳定的块状光标。
+    session.feed(b"\x1b[1 q");
     assert_eq!(blinking(&mut session), Some(true));
-    // DECSCUSR 2：稳定的块状光标。
     session.feed(b"\x1b[2 q");
+    assert_eq!(blinking(&mut session), Some(false));
+    // DECSCUSR 0 回到默认的形状和闪烁；DEC 模式 12 单开、单关闪烁。
+    session.feed(b"\x1b[0 q");
+    assert_eq!(blinking(&mut session), Some(false));
+    session.feed(b"\x1b[?12h");
+    assert_eq!(blinking(&mut session), Some(true));
+    session.feed(b"\x1b[?12l");
     assert_eq!(blinking(&mut session), Some(false));
 
     // 光标闪烁是主题的一部分，改的是 VT 的默认值。
-    session.apply_theme(&TermSettings { cursor_blink: Some(false), ..TermSettings::default() });
+    session.apply_theme(&TermSettings { cursor_blink: Some(true), ..TermSettings::default() });
+    assert_eq!(blinking(&mut session), Some(true));
+    session.feed(b"\x1b[2 q");
+    assert_eq!(blinking(&mut session), Some(false));
     session.feed(b"\x1b[0 q");
+    assert_eq!(blinking(&mut session), Some(true));
+    session.apply_theme(&TermSettings::default());
     assert_eq!(blinking(&mut session), Some(false));
 }
