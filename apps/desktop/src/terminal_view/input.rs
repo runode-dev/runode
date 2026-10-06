@@ -38,6 +38,8 @@ pub(super) fn take_whole_lines(remainder: &mut f32, lines: f32) -> isize {
 
 impl TerminalView {
     pub(super) fn key_down(&mut self, event: &KeyDownEvent, _: &mut Window, cx: &mut Context<Self>) {
+        // 按键（包括输入法组字时的）算一次活动：光标亮起，停了的闪烁恢复。
+        self.reset_cursor_blink(cx);
         // 输入法正在组字时，按键归输入法处理。
         if self.marked_text.is_some() {
             return;

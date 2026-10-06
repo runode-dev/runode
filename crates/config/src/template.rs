@@ -162,6 +162,9 @@ fn template_values(d: &Config, key: &str) -> Vec<String> {
         "search-selected-foreground" => vec![color(d.search_selected_foreground)],
         "palette" => d.palette.iter().map(|(i, c)| format!("{i}={}", hex(*c))).collect(),
         "cursor-style" => vec!["block".into()],
+        "cursor-style-blink-timeout" => {
+            d.cursor_style_blink_timeout.iter().map(|t| t.as_secs_f32().to_string()).collect()
+        }
         "macos-option-as-alt" => vec!["false".into()],
         "scrollback-limit" => vec![d.scrollback_limit.to_string()],
         "shell-integration" => vec!["detect".into()],

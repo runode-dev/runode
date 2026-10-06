@@ -3,6 +3,7 @@
 use std::{
     collections::HashSet,
     path::{Path, PathBuf},
+    time::Duration,
 };
 
 use runode_shared_types::{
@@ -42,6 +43,7 @@ pub(crate) const KEYS: &[&[&str]] = &[
     &[
         "cursor-style",
         "cursor-style-blink",
+        "cursor-style-blink-timeout",
         "macos-option-as-alt",
         "scrollback-limit",
         "shell-integration",
@@ -188,6 +190,10 @@ impl Config {
             "cursor-style-blink" => {
                 self.cursor_style_blink = if empty { None } else { Some(parse_bool(value)?) };
             }
+            "cursor-style-blink-timeout" => {
+                self.cursor_style_blink_timeout =
+                    if empty { defaults.cursor_style_blink_timeout } else { parse_timeout(value)? };
+            }
             "background" => {
                 self.background = if empty { defaults.background } else { parse_color(value)? };
             }
@@ -326,6 +332,15 @@ impl Config {
 
 fn parse_f32(value: &str) -> Result<f32, String> {
     value.trim().parse().map_err(|_| "expected a number".into())
+}
+
+/// 秒数，可以带小数；0 表示没有期限，为 `None`。
+fn parse_timeout(value: &str) -> Result<Option<Duration>, String> {
+    let secs = parse_f32(value)?;
+    if secs == 0. {
+        return Ok(None);
+    }
+    Duration::try_from_secs_f32(secs).map(Some).map_err(|_| "expected a non-negative number of seconds".into())
 }
 
 /// 大于 0 的数。
@@ -521,6 +536,25 @@ unknown-key = whatever
         assert_eq!(load(&["cursor-style-blink = false\n"]).term_settings().cursor_blink, Some(false));
         // Ghostty 那层开了、runode 这层写空：回到默认的不闪烁。
         assert_eq!(load(&["cursor-style-blink = true\n", "cursor-style-blink =\n"]).term_settings().cursor_blink, None);
+    }
+
+    #[test]
+    fn cursor_blink_timeout_is_in_seconds_and_zero_means_never() {
+        assert_eq!(Config::default().cursor_style_blink_timeout, Some(Duration::from_secs(5)));
+        assert_eq!(
+            load(&["cursor-style-blink-timeout = 2.5\n"]).cursor_style_blink_timeout,
+            Some(Duration::from_millis(2500))
+        );
+        assert_eq!(load(&["cursor-style-blink-timeout = 0\n"]).cursor_style_blink_timeout, None);
+        assert_eq!(
+            load(&["cursor-style-blink-timeout = 0\n", "cursor-style-blink-timeout =\n"]).cursor_style_blink_timeout,
+            Some(Duration::from_secs(5))
+        );
+        // 写错了保留原来的值。
+        for bad in ["-1", "abc", "inf"] {
+            let config = load(&[&format!("cursor-style-blink-timeout = {bad}\n")]);
+            assert_eq!(config.cursor_style_blink_timeout, Some(Duration::from_secs(5)), "{bad}");
+        }
     }
 
     #[test]

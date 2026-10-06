@@ -43,6 +43,7 @@ config:
   palette: "Palette: N=COLOR with N from 0 to 255, can be repeated; 0-7 are the normal colors, 8-15 the bright ones."
   cursor_style: "Cursor shape: block, bar, underline, block_hollow."
   cursor_style_blink: "Cursor blinking: true, false (the default, the cursor stays solid); running programs can still turn blinking on or off."
+  cursor_style_blink_timeout: "When the cursor blinks, stop blinking and keep it solid after this many seconds without typing, terminal output or the window regaining focus; any of those starts it blinking again. 0 keeps it blinking."
   macos_option_as_alt: "Treat Option as Alt on macOS: true (both sides), false, left (left only), right (right only)."
   scrollback_limit: "How much scrollback each terminal keeps, in bytes: a whole number; anything below 2 MiB (2097152) counts as 2 MiB. At most 10,000 lines are kept as well; whichever limit is reached first applies. Changes apply to open terminals too."
   shell_integration: "Shell integration: detect (by the shell's program name), none (off), bash, zsh, fish."

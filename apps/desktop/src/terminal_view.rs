@@ -10,6 +10,7 @@
 mod actions;
 mod completion_menu;
 mod crop;
+mod cursor_blink;
 mod element;
 mod ime;
 mod input;
@@ -202,6 +203,10 @@ pub struct TerminalView {
     cursor_blink_visible: bool,
     /// 当前这半个闪烁周期从何时开始。
     cursor_blink_since: Instant,
+    /// 最近一次键盘输入、终端输出或重新获得焦点的时刻，闪烁的空闲期限从这里算。
+    cursor_blink_active_at: Instant,
+    /// 闪烁因空闲到期停了，光标常亮；有了活动（`reset_cursor_blink`）才恢复。
+    cursor_blink_stopped: bool,
     /// 接上的是提前启动的 shell 时它启动用的尺寸，第一次布局时比对过就清掉。
     adopted_size: Option<GridSize>,
     /// 要启动 shell，等下一次布局量出实际尺寸再启动。shell 读启动配置期间才收到尺寸变化时，

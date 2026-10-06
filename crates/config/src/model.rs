@@ -1,6 +1,6 @@
 //! 配置的内容：各项设置和默认值。
 
-use std::path::PathBuf;
+use std::{path::PathBuf, time::Duration};
 
 use runode_shared_types::{
     agent::AgentKind,
@@ -42,6 +42,9 @@ pub struct Config {
     pub cursor_style: CursorStyle,
     /// `None` 表示默认不闪烁，运行中的程序仍可改变。
     pub cursor_style_blink: Option<bool>,
+    /// 光标闪烁时，没有键盘输入、终端没有输出、窗口没有重新获得焦点这么久之后停止闪烁、常亮，
+    /// 有了就立刻恢复；`None` 表示一直闪。光标不闪时用不上。
+    pub cursor_style_blink_timeout: Option<Duration>,
     pub background: Rgb,
     pub foreground: Rgb,
     /// `None` 表示用前景色。
@@ -113,6 +116,7 @@ impl Default for Config {
             preview_font_size: 13.,
             cursor_style: term.cursor_style,
             cursor_style_blink: term.cursor_blink,
+            cursor_style_blink_timeout: Some(Duration::from_secs(5)),
             background: term.background,
             foreground: term.foreground,
             cursor_color: term.cursor_color,

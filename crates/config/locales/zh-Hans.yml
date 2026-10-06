@@ -35,6 +35,7 @@ config:
   palette: 调色板：序号=颜色，序号为 0 到 255，可以写多行；0-7 是普通色，8-15 是亮色。
   cursor_style: 光标形状：block、bar、underline、block_hollow。
   cursor_style_blink: 光标是否闪烁：true、false（默认，光标常亮不闪）；运行中的程序仍可打开或关掉闪烁。
+  cursor_style_blink_timeout: 光标闪烁时，这么多秒没有键盘输入、终端没有输出、窗口也没有重新获得焦点，就停止闪烁、光标常亮，有了其中任何一样就立刻恢复闪烁。0 表示一直闪。
   macos_option_as_alt: macOS 上把 Option 当作 Alt：true（两边都是）、false、left（只有左边）、right（只有右边）。
   scrollback_limit: 每个终端的回滚历史最多占多少字节：非负整数，小于 2 MiB（2097152）时按 2 MiB 算。另外最多留 1 万行，先到哪个上限就按哪个算。改了对已经开着的终端也生效。
   shell_integration: shell 集成：detect（按 shell 的程序名判断）、none（关闭）、bash、zsh、fish。
