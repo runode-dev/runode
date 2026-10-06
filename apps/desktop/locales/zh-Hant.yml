@@ -8,6 +8,7 @@ menu:
   hide_others: 隱藏其他
   show_all: 顯示全部
   quit: 結束 Runode
+  quit_end_sessions: 結束 Runode 並終止所有工作階段
   file: 檔案
   new_tab: 新增分頁
   new_workspace: 新增工作區…
@@ -86,6 +87,16 @@ quit:
   cancel: 取消
   agent: "%{agent}（%{workspace}）"
   separator: "、"
+  end_title: 終止所有工作階段並結束 Runode？
+  end_detail: 還有 %{count} 個 agent 在執行。所有終端機工作階段都會一併終止，包括沒在視窗裡顯示的背景工作階段。
+  end_confirm: 終止並結束
+host_lost:
+  message: 和終端機工作階段的連線中斷了，現在看到的是中斷前的最後一個畫面。
+  reopen: 在原目錄重新開啟
+background:
+  title: 背景工作階段
+  end_all: 全部終止
+  empty: 沒有背景工作階段
 panel:
   no_changes: 沒有未提交的改動
   not_repo: 不在 git 倉庫裡

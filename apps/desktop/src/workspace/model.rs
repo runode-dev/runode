@@ -334,6 +334,7 @@ impl WindowView {
     /// 关掉第 `wi` 个 workspace 的第 `ti` 个标签；关掉的是它的当前标签时切到右边那个（没有
     /// 就左边）。workspace 里只剩这一个标签时关掉整个 workspace。
     pub(super) fn close_tab_at(&mut self, wi: usize, ti: usize, window: &mut Window, cx: &mut Context<Self>) {
+        self.end_sessions(Closing::Tab { workspace: wi, tab: ti }, cx);
         if self.workspaces[wi].tabs.len() == 1 {
             self.close_workspace_at(wi, window, cx);
             return;
@@ -359,12 +360,30 @@ impl WindowView {
         }
     }
 
+    /// 结束关掉 `closing` 时要结束的会话（见 `sessions_to_end`）。要在把终端从窗口里拿掉之前调。
+    pub(super) fn end_sessions(&self, closing: Closing<EntityId>, cx: &mut App) {
+        let layout: Vec<Vec<Vec<EntityId>>> = self
+            .workspaces
+            .iter()
+            .map(|workspace| workspace.tabs.iter().map(|tab| tab.root.leaves()).collect())
+            .collect();
+        let ending = sessions_to_end(&layout, closing);
+        for tab in self.workspaces.iter().flat_map(|workspace| &workspace.tabs) {
+            for (id, (view, _)) in &tab.panes {
+                if ending.contains(id) {
+                    view.update(cx, |view, _| view.end());
+                }
+            }
+        }
+    }
+
     /// 关掉一个终端：它的兄弟分屏顶替上来，焦点交给兄弟一侧离它最近的终端；
     /// 标签里只剩它时关掉整个标签。
     pub(super) fn close_pane_by_id(&mut self, pane: EntityId, window: &mut Window, cx: &mut Context<Self>) {
         let Some((wi, ti)) = self.locate(pane) else {
             return;
         };
+        self.end_sessions(Closing::Pane(pane), cx);
         crate::agent_alert::dismiss(&super::agents::notification_tag(pane), cx);
         let shown = self.is_shown(wi, ti);
         let tab = &mut self.workspaces[wi].tabs[ti];
@@ -393,6 +412,7 @@ impl WindowView {
     /// 关掉第 `ix` 个 workspace，里面的终端都随之结束；关掉的是当前 workspace 时切到下面那个
     /// （没有就上面）。最后一个关掉时关窗口。
     fn close_workspace_at(&mut self, ix: usize, window: &mut Window, cx: &mut Context<Self>) {
+        self.end_sessions(Closing::Workspace(ix), cx);
         if self.renaming.as_ref().is_some_and(|renaming| renaming.id == self.workspaces[ix].id) {
             self.renaming = None;
         }
@@ -478,9 +498,83 @@ impl WindowView {
     }
 }
 
+/// 用户要关掉的东西，见 `sessions_to_end`。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum Closing<T> {
+    /// 一个分屏。
+    Pane(T),
+    /// 第 `workspace` 个 workspace 的第 `tab` 个标签。
+    Tab { workspace: usize, tab: usize },
+    /// 第几个 workspace。
+    Workspace(usize),
+    /// 整个窗口；`windows` 是关之前一共开着几个窗口。
+    Window { windows: usize },
+}
+
+/// 关掉 `closing` 时要结束哪些会话（按分屏给出），`layout` 是窗口里各个 workspace 各个标签的分屏。
+/// 关分屏、标签、workspace 是用户明确不要这些终端了，结束它们（连带关掉的标签、workspace 和窗口
+/// 里也只有这些）；关窗口时还有别的窗口才结束这个窗口里的全部，关最后一个窗口时 app 跟着退出，
+/// 会话怎么办归退出管，见 `quit::quit_plan`。
+pub(super) fn sessions_to_end<T: Copy + PartialEq>(layout: &[Vec<Vec<T>>], closing: Closing<T>) -> Vec<T> {
+    match closing {
+        Closing::Pane(pane) => {
+            if layout.iter().flatten().flatten().any(|id| *id == pane) {
+                vec![pane]
+            } else {
+                Vec::new()
+            }
+        }
+        Closing::Tab { workspace, tab } => {
+            layout.get(workspace).and_then(|tabs| tabs.get(tab)).cloned().unwrap_or_default()
+        }
+        Closing::Workspace(workspace) => layout.get(workspace).map(|tabs| tabs.concat()).unwrap_or_default(),
+        Closing::Window { windows } if windows > 1 => layout.iter().flatten().flatten().copied().collect(),
+        Closing::Window { .. } => Vec::new(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    const NONE: [u32; 0] = [];
+
+    /// 两个 workspace：第一个有两个标签（分屏 1、2 在同一个标签里，3 单独一个），第二个只有分屏 4。
+    fn layout() -> Vec<Vec<Vec<u32>>> {
+        vec![vec![vec![1, 2], vec![3]], vec![vec![4]]]
+    }
+
+    #[test]
+    fn closing_a_pane_ends_only_that_pane() {
+        assert_eq!(sessions_to_end(&layout(), Closing::Pane(2)), [2]);
+        // 标签里只剩它时连标签、workspace 一起关，要结束的还是只有它。
+        assert_eq!(sessions_to_end(&layout(), Closing::Pane(4)), [4]);
+        assert_eq!(sessions_to_end(&layout(), Closing::Pane(9)), NONE);
+    }
+
+    #[test]
+    fn closing_a_tab_ends_its_panes() {
+        assert_eq!(sessions_to_end(&layout(), Closing::Tab { workspace: 0, tab: 0 }), [1, 2]);
+        assert_eq!(sessions_to_end(&layout(), Closing::Tab { workspace: 1, tab: 0 }), [4]);
+        assert_eq!(sessions_to_end(&layout(), Closing::Tab { workspace: 1, tab: 1 }), NONE);
+    }
+
+    #[test]
+    fn closing_a_workspace_ends_every_tab_in_it() {
+        assert_eq!(sessions_to_end(&layout(), Closing::Workspace(0)), [1, 2, 3]);
+        // 窗口里最后一个 workspace 关掉时窗口跟着关，它里面的会话也结束：这是用户点名要关的。
+        assert_eq!(sessions_to_end(&[vec![vec![7]]], Closing::Workspace(0)), [7]);
+    }
+
+    #[test]
+    fn closing_one_of_several_windows_ends_all_of_it() {
+        assert_eq!(sessions_to_end(&layout(), Closing::Window { windows: 2 }), [1, 2, 3, 4]);
+    }
+
+    #[test]
+    fn closing_the_last_window_leaves_it_to_quitting() {
+        assert_eq!(sessions_to_end(&layout(), Closing::Window { windows: 1 }), NONE);
+    }
 
     #[test]
     fn workspace_name_uses_the_repository_root() {

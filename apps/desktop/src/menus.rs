@@ -25,6 +25,8 @@ actions!(
         OpenConfiguration,
         ReloadConfiguration,
         Quit,
+        /// 退出并结束宿主里所有的会话，包括没在窗口里显示的；只在退出会把会话留下时有用。
+        QuitAndEndSessions,
         Hide,
         HideOthers,
         ShowAll,
@@ -42,6 +44,7 @@ pub fn install(cx: &mut App) {
     cx.on_action(|_: &OpenConfiguration, cx| crate::config::open(cx));
     cx.on_action(|_: &ReloadConfiguration, cx| crate::config::reload(cx));
     cx.on_action(|_: &Quit, cx| crate::workspace::quit(cx));
+    cx.on_action(|_: &QuitAndEndSessions, cx| crate::workspace::quit_and_end_sessions(cx));
     cx.on_action(|_: &Hide, cx| cx.hide());
     cx.on_action(|_: &HideOthers, cx| cx.hide_other_apps());
     cx.on_action(|_: &ShowAll, cx| cx.unhide_other_apps());
@@ -64,24 +67,32 @@ fn tr(key: &str) -> String {
     rust_i18n::t!(key).into_owned()
 }
 
-/// 设置菜单栏。菜单项上的快捷键在这时从键位表里查，换了绑定要重新调用。
+/// 设置菜单栏。菜单项上的快捷键在这时从键位表里查，换了绑定要重新调用。宿主怎么跑也在这时
+/// 读，决定有没有「退出并结束所有会话」。
 pub fn set_menus(cx: &mut App) {
+    let mut quit = vec![MenuItem::action(tr("menu.quit"), Quit)];
+    if crate::workspace::end_sessions_in_menu() {
+        quit.push(MenuItem::action(tr("menu.quit_end_sessions"), QuitAndEndSessions));
+    }
     cx.set_menus([
         // macOS 总把第一个菜单当作应用菜单，标题显示为应用名。
-        Menu::new("Runode").items([
-            MenuItem::action(tr("menu.about"), About),
-            MenuItem::separator(),
-            MenuItem::action(tr("menu.open_config"), OpenConfiguration),
-            MenuItem::action(tr("menu.reload_config"), ReloadConfiguration),
-            MenuItem::separator(),
-            MenuItem::os_submenu(tr("menu.services"), SystemMenuType::Services),
-            MenuItem::separator(),
-            MenuItem::action(tr("menu.hide"), Hide),
-            MenuItem::action(tr("menu.hide_others"), HideOthers),
-            MenuItem::action(tr("menu.show_all"), ShowAll),
-            MenuItem::separator(),
-            MenuItem::action(tr("menu.quit"), Quit),
-        ]),
+        Menu::new("Runode").items(
+            [
+                MenuItem::action(tr("menu.about"), About),
+                MenuItem::separator(),
+                MenuItem::action(tr("menu.open_config"), OpenConfiguration),
+                MenuItem::action(tr("menu.reload_config"), ReloadConfiguration),
+                MenuItem::separator(),
+                MenuItem::os_submenu(tr("menu.services"), SystemMenuType::Services),
+                MenuItem::separator(),
+                MenuItem::action(tr("menu.hide"), Hide),
+                MenuItem::action(tr("menu.hide_others"), HideOthers),
+                MenuItem::action(tr("menu.show_all"), ShowAll),
+                MenuItem::separator(),
+            ]
+            .into_iter()
+            .chain(quit),
+        ),
         Menu::new(tr("menu.file")).items([
             MenuItem::action(tr("menu.new_tab"), NewTab),
             MenuItem::action(tr("menu.new_workspace"), NewWorkspace),

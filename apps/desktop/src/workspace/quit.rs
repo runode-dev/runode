@@ -1,15 +1,108 @@
-//! 退出应用，以及关掉最后一个窗口（关掉后应用跟着退出）：各窗口里还有 claude、codex 这类 agent
-//! 在跑时先问一句，免得一按 cmd+q 或者点一下关闭按钮，把正在干活或者攒着上下文的会话一起结束掉。
+//! 退出应用、关掉窗口时宿主里的会话怎么办，以及要结束正在干活的 agent 之前先问一句。
+//!
+//! 会话结不结束看宿主怎么跑（`session_host::Mode`）和用户做了什么（`QuitAction`），决策在
+//! `quit_plan`：宿主跑在 app 里时，退出（包括关掉最后一个窗口、关掉所有窗口）必然结束所有会话；
+//! 宿主单独一个进程时，退出只是不再看它们，会话留在宿主里等下次启动接回来，要连会话一起结束用
+//! 「退出并结束所有会话」；配置项 `terminal-host` 已经关了、这次只是接回上次留下的会话时，退出
+//! 让宿主连会话一起退出。只有会结束会话、又有 agent 在跑时才弹框确认，免得一按 cmd+q 把正在干活
+//! 或者攒着上下文的会话一起结束掉。
+//!
+//! 关掉的窗口不是最后一个时，app 不退出，结束这个窗口里的会话（`WindowView::end_sessions`），不问。
 //!
 //! 弹框之前都先推迟到当前的更新结束：动作和关闭按钮的回调运行时，触发它的窗口正被借出，这时
 //! 既读不到它里面的 agent，也没法在它上面弹框。
 
+use std::time::Duration;
+
 use gpui::{AnyWindowHandle, App, Global, PromptLevel, Window};
+use runode_protocol::{ClientMsg, SessionInfo};
 use runode_shared_types::agent::AgentKind;
 
-use super::WindowView;
+use super::{WindowView, model::Closing};
+use crate::session_host::{self, Mode};
 
-/// 退出确认框开着；这时再按退出或者关窗口不再弹第二个。
+/// 让单独跑的宿主连会话一起退出后，最多等它这么久读完之前发的消息。
+const SHUTDOWN_FLUSH: Duration = Duration::from_millis(200);
+
+/// 用户做的会让 app 退出的事。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum QuitAction {
+    /// 退出应用（cmd+q）。
+    Quit,
+    /// 关掉最后一个窗口，app 跟着退出。
+    CloseLastWindow,
+    /// 关掉所有窗口。
+    CloseAllWindows,
+    /// 菜单里的「退出并结束所有会话」。
+    QuitAndEndSessions,
+}
+
+/// 退出时宿主里的会话怎么办。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum Ending {
+    /// 留在宿主里，下次启动接回来。
+    Keep,
+    /// 宿主跑在 app 里，随 app 退出一起结束。
+    WithApp,
+    /// 先让单独跑的宿主连会话一起退出（`ClientMsg::Shutdown`），再退出。
+    ShutdownHost,
+}
+
+/// 退出前弹哪种确认框。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum Prompt {
+    /// 退出会结束各窗口里的 agent，按 workspace 列出它们。
+    Quit,
+    /// 退出会结束所有会话（包括没在窗口里显示的），给出 agent 的个数。
+    QuitEndingAll,
+    /// 「退出并结束所有会话」，给出 agent 的个数。
+    EndAll,
+}
+
+/// 一次退出怎么做。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) struct Plan {
+    pub(super) ending: Ending,
+    /// 先弹框确认，确认了才退出；`None` 时直接退出。
+    pub(super) prompt: Option<Prompt>,
+}
+
+/// `action` 让 app 退出时会话怎么办。
+pub(super) fn ending(mode: Mode, action: QuitAction) -> Ending {
+    match (mode, action) {
+        (Mode::InProcess, _) => Ending::WithApp,
+        (Mode::Standalone { end_on_quit: true }, _) | (Mode::Standalone { .. }, QuitAction::QuitAndEndSessions) => {
+            Ending::ShutdownHost
+        }
+        (Mode::Standalone { end_on_quit: false }, _) => Ending::Keep,
+    }
+}
+
+/// `action` 让 app 退出时怎么做；`agents` 是退出会结束掉的会话里有几个 agent 在跑（宿主单独跑时
+/// 连没在窗口里显示的会话也算）。会话留下时不问，会结束会话又有 agent 时先确认。
+pub(super) fn quit_plan(mode: Mode, action: QuitAction, agents: usize) -> Plan {
+    let ending = ending(mode, action);
+    let prompt = match ending {
+        _ if agents == 0 => None,
+        Ending::Keep => None,
+        Ending::WithApp => Some(Prompt::Quit),
+        Ending::ShutdownHost if action == QuitAction::QuitAndEndSessions => Some(Prompt::EndAll),
+        Ending::ShutdownHost => Some(Prompt::QuitEndingAll),
+    };
+    Plan { ending, prompt }
+}
+
+/// 菜单里有没有「退出并结束所有会话」：只在退出会把会话留下时才有，否则和退出一样。
+pub(super) fn offers_end_sessions(mode: Mode) -> bool {
+    ending(mode, QuitAction::Quit) == Ending::Keep
+}
+
+/// 菜单里要不要放「退出并结束所有会话」，见 `offers_end_sessions`。
+pub fn end_sessions_in_menu() -> bool {
+    offers_end_sessions(session_host::mode())
+}
+
+/// 退出确认框开着（或者正问宿主有几个 agent）；这时再按退出或者关窗口不再弹第二个。
 #[derive(Default)]
 struct Prompting(bool);
 
@@ -19,34 +112,46 @@ fn prompting(cx: &App) -> bool {
     cx.try_global::<Prompting>().is_some_and(|prompting| prompting.0)
 }
 
-/// 退出应用；有 agent 在跑时先弹框确认，确认了才退出。
+/// 退出应用，会话怎么办见 `quit_plan`。
 pub fn quit(cx: &mut App) {
     cx.defer(|cx| {
-        // 弹在当前窗口上；当前没有窗口在前台时弹在第一个窗口上。
-        let window = cx.active_window().or_else(|| cx.windows().into_iter().next());
-        confirm(window, cx, |cx| cx.quit());
+        let window = front_window(cx);
+        run(QuitAction::Quit, window, cx, |cx| cx.quit());
     });
 }
 
-/// 关掉 `window`。它是最后一个窗口时应用会跟着退出，这时跟退出一样，有 agent 在跑先确认。
+/// 退出应用并结束宿主里所有的会话，包括没在窗口里显示的；有 agent 在跑时先确认。
+pub fn quit_and_end_sessions(cx: &mut App) {
+    cx.defer(|cx| {
+        let window = front_window(cx);
+        run(QuitAction::QuitAndEndSessions, window, cx, |cx| cx.quit());
+    });
+}
+
+/// 关掉 `window`。还有别的窗口时结束它里面的会话；它是最后一个窗口时应用会跟着退出，这时跟
+/// 退出一样。
 pub fn close_window(window: AnyWindowHandle, cx: &mut App) {
     cx.defer(move |cx| {
         let remove = move |cx: &mut App| {
             window.update(cx, |_, window, _| window.remove_window()).ok();
         };
-        if cx.windows().len() > 1 {
+        let windows = cx.windows().len();
+        if windows > 1 {
+            if let Some(window) = window.downcast::<WindowView>() {
+                window.update(cx, |view, _, cx| view.end_sessions(Closing::Window { windows }, cx)).ok();
+            }
             remove(cx);
         } else {
-            confirm(Some(window), cx, remove);
+            run(QuitAction::CloseLastWindow, Some(window), cx, remove);
         }
     });
 }
 
-/// 关掉所有窗口，应用跟着退出；有 agent 在跑时先确认。
+/// 关掉所有窗口，应用跟着退出，会话怎么办和退出一样。
 pub fn close_all_windows(cx: &mut App) {
     cx.defer(|cx| {
-        let window = cx.active_window().or_else(|| cx.windows().into_iter().next());
-        confirm(window, cx, |cx| {
+        let window = front_window(cx);
+        run(QuitAction::CloseAllWindows, window, cx, |cx| {
             for window in cx.windows() {
                 window.update(cx, |_, window, _| window.remove_window()).ok();
             }
@@ -54,34 +159,131 @@ pub fn close_all_windows(cx: &mut App) {
     });
 }
 
-/// 点了窗口的关闭按钮：不是最后一个窗口时照常关；是最后一个时先不关，交给 `close_window` 确认后再关。
+/// 点了窗口的关闭按钮：不是最后一个窗口时结束它里面的会话、照常关；是最后一个时先不关，交给
+/// `close_window` 按退出处理。
 pub fn should_close(window: &mut Window, cx: &mut App) -> bool {
-    if cx.windows().len() > 1 {
+    let windows = cx.windows().len();
+    if windows > 1 {
+        if let Some(Some(view)) = window.root::<WindowView>() {
+            view.update(cx, |view, cx| view.end_sessions(Closing::Window { windows }, cx));
+        }
         return true;
     }
     close_window(window.window_handle(), cx);
     false
 }
 
-/// 没有 agent 在跑时直接做 `then`；有的话在 `window` 上弹框，确认了再做。确认框已经开着时
-/// 什么都不做。
-fn confirm(window: Option<AnyWindowHandle>, cx: &mut App, then: impl FnOnce(&mut App) + 'static) {
+/// 确认框弹在当前窗口上；当前没有窗口在前台时弹在第一个窗口上。
+fn front_window(cx: &App) -> Option<AnyWindowHandle> {
+    cx.active_window().or_else(|| cx.windows().into_iter().next())
+}
+
+/// 按 `quit_plan` 做 `action`：该问就在 `window` 上问，确认了（或者不用问）再做 `then`，要让宿主
+/// 连会话一起退出时先让它退出。
+fn run(action: QuitAction, window: Option<AnyWindowHandle>, cx: &mut App, then: impl FnOnce(&mut App) + 'static) {
     if prompting(cx) {
         return;
     }
-    let agents = running_agents(cx);
-    let Some(window) = window.filter(|_| !agents.is_empty()) else {
+    let mode = session_host::mode();
+    match ending(mode, action) {
+        Ending::Keep => then(cx),
+        Ending::WithApp => {
+            let agents = window_agents(cx);
+            let names = agent_names(&agents);
+            let plan = quit_plan(mode, action, agents.len());
+            confirm(window, plan.prompt.map(|prompt| prompt_text(prompt, &names, agents.len())), cx, then);
+        }
+        Ending::ShutdownHost => {
+            // 没在窗口里显示的后台会话里的 agent 也会被结束，要问宿主；问它最多要等上
+            // `session_host::list_sessions` 的超时，放到后台线程，期间不再接退出。
+            cx.set_global(Prompting(true));
+            let sessions = cx.background_executor().spawn(async { session_host::list_sessions() });
+            cx.spawn(async move |cx| {
+                let sessions = sessions.await;
+                cx.update(|cx| {
+                    cx.set_global(Prompting(false));
+                    let agents = match sessions {
+                        Ok(sessions) => session_agents(&sessions),
+                        Err(err) => {
+                            tracing::warn!(
+                                "failed to list the host's sessions, counting the agents in windows: {err:#}"
+                            );
+                            window_agents(cx).len()
+                        }
+                    };
+                    let plan = quit_plan(mode, action, agents);
+                    let text = plan.prompt.map(|prompt| prompt_text(prompt, &[], agents));
+                    confirm(window, text, cx, move |cx| {
+                        shutdown_host();
+                        then(cx);
+                    });
+                });
+            })
+            .detach();
+        }
+    }
+}
+
+/// 让单独跑的宿主连会话一起退出，等它读完（最多 `SHUTDOWN_FLUSH`）。
+fn shutdown_host() {
+    let link = session_host::link();
+    link.send(ClientMsg::Shutdown { kill_sessions: true });
+    if !link.flush(SHUTDOWN_FLUSH) {
+        tracing::warn!("the host did not take the shutdown in time");
+    }
+}
+
+/// 确认框的标题、说明和确认按钮。
+struct PromptText {
+    title: String,
+    detail: String,
+    confirm: String,
+}
+
+/// `names` 是 `Prompt::Quit` 要列出的 agent，`count` 是别的几种给出的个数。
+fn prompt_text(prompt: Prompt, names: &[String], count: usize) -> PromptText {
+    let t = |key: &str| rust_i18n::t!(key).into_owned();
+    match prompt {
+        Prompt::Quit => PromptText {
+            title: t("quit.title"),
+            detail: rust_i18n::t!("quit.detail", agents = names.join(rust_i18n::t!("quit.separator").as_ref()))
+                .into_owned(),
+            confirm: t("quit.confirm"),
+        },
+        Prompt::QuitEndingAll => PromptText {
+            title: t("quit.title"),
+            detail: rust_i18n::t!("quit.end_detail", count = count).into_owned(),
+            confirm: t("quit.confirm"),
+        },
+        Prompt::EndAll => PromptText {
+            title: t("quit.end_title"),
+            detail: rust_i18n::t!("quit.end_detail", count = count).into_owned(),
+            confirm: t("quit.end_confirm"),
+        },
+    }
+}
+
+/// 没有要问的（`text` 为空）或者没有窗口能弹框时直接做 `then`；否则在 `window` 上弹框，确认了
+/// 再做。确认框已经开着时什么都不做。
+fn confirm(
+    window: Option<AnyWindowHandle>,
+    text: Option<PromptText>,
+    cx: &mut App,
+    then: impl FnOnce(&mut App) + 'static,
+) {
+    if prompting(cx) {
+        return;
+    }
+    let (Some(window), Some(text)) = (window, text) else {
         then(cx);
         return;
     };
-    let title = rust_i18n::t!("quit.title");
-    let detail = rust_i18n::t!("quit.detail", agents = agents.join(rust_i18n::t!("quit.separator").as_ref()));
     let answer = window.update(cx, |_, window, cx| {
         window.prompt(
             PromptLevel::Warning,
-            &title,
-            Some(&detail),
-            &[&*rust_i18n::t!("quit.confirm"), &*rust_i18n::t!("quit.cancel")],
+            &text.title,
+            Some(&text.detail),
+            &[&*text.confirm, &*rust_i18n::t!("quit.cancel")],
             cx,
         )
     });
@@ -101,30 +303,148 @@ fn confirm(window: Option<AnyWindowHandle>, cx: &mut App, then: impl FnOnce(&mut
     .detach();
 }
 
-/// 各窗口里前台在跑的 agent，写成「名字（workspace）」；同一个 workspace 里同种 agent 只列一次。
+/// 宿主的会话里前台在跑的 agent 有几个，已经退出的不算。
+fn session_agents(sessions: &[SessionInfo]) -> usize {
+    sessions.iter().filter(|session| !session.exited && is_agent(session.meta.agent.as_ref().map(|a| a.kind))).count()
+}
+
 /// 不算 `AgentKind::Other`：那是用 OSC 9;4 报进度的普通程序，不是 agent 会话。
-fn running_agents(cx: &App) -> Vec<String> {
+fn is_agent(kind: Option<AgentKind>) -> bool {
+    kind.is_some_and(|kind| kind != AgentKind::Other)
+}
+
+/// 各窗口里前台在跑 agent 的终端，每个一项：agent 的种类和所在 workspace 的名字。
+fn window_agents(cx: &App) -> Vec<(AgentKind, String)> {
     let mut agents = Vec::new();
     for window in cx.windows() {
         let Some(view) = window.downcast::<WindowView>().and_then(|window| window.read(cx).ok()) else {
             continue;
         };
         for workspace in &view.workspaces {
-            let mut kinds: Vec<AgentKind> = Vec::new();
             for tab in &workspace.tabs {
                 for id in tab.root.leaves() {
-                    let Some(agent) = tab.panes[&id].0.read(cx).agent() else {
-                        continue;
-                    };
-                    if agent.kind != AgentKind::Other && !kinds.contains(&agent.kind) {
-                        kinds.push(agent.kind);
+                    let kind = tab.panes[&id].0.read(cx).agent().map(|agent| agent.kind);
+                    if let Some(kind) = kind.filter(|kind| is_agent(Some(*kind))) {
+                        agents.push((kind, workspace.name.to_string()));
                     }
                 }
             }
-            agents.extend(kinds.into_iter().map(|kind| {
-                rust_i18n::t!("quit.agent", agent = kind.display_name(), workspace = workspace.name).into_owned()
-            }));
         }
     }
     agents
+}
+
+/// 确认框里列出的 agent，写成「名字（workspace）」；同一个 workspace 里同种 agent 只列一次。
+fn agent_names(agents: &[(AgentKind, String)]) -> Vec<String> {
+    let mut seen: Vec<&(AgentKind, String)> = Vec::new();
+    for agent in agents {
+        if !seen.contains(&agent) {
+            seen.push(agent);
+        }
+    }
+    seen.into_iter()
+        .map(|(kind, workspace)| {
+            rust_i18n::t!("quit.agent", agent = kind.display_name(), workspace = workspace).into_owned()
+        })
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const IN_PROCESS: Mode = Mode::InProcess;
+    const KEEPING: Mode = Mode::Standalone { end_on_quit: false };
+    const LEFTOVER: Mode = Mode::Standalone { end_on_quit: true };
+
+    const QUITTING: [QuitAction; 3] = [QuitAction::Quit, QuitAction::CloseLastWindow, QuitAction::CloseAllWindows];
+
+    fn plan(ending: Ending, prompt: Option<Prompt>) -> Plan {
+        Plan { ending, prompt }
+    }
+
+    /// 开关开着：退出、关最后一个窗口、关所有窗口都把会话留在宿主里，不问。
+    #[test]
+    fn a_standalone_host_keeps_sessions_on_quit() {
+        for action in QUITTING {
+            assert_eq!(quit_plan(KEEPING, action, 0), plan(Ending::Keep, None), "{action:?}");
+            assert_eq!(quit_plan(KEEPING, action, 3), plan(Ending::Keep, None), "{action:?}");
+        }
+    }
+
+    /// 开关开着时「退出并结束所有会话」让宿主连会话一起退出，有 agent 才问。
+    #[test]
+    fn ending_sessions_shuts_the_host_down() {
+        assert_eq!(quit_plan(KEEPING, QuitAction::QuitAndEndSessions, 0), plan(Ending::ShutdownHost, None));
+        assert_eq!(
+            quit_plan(KEEPING, QuitAction::QuitAndEndSessions, 2),
+            plan(Ending::ShutdownHost, Some(Prompt::EndAll))
+        );
+    }
+
+    /// 接回上次留下的会话（开关已经关了）：退出时让宿主连会话一起退出，有 agent 才问。
+    #[test]
+    fn a_leftover_host_is_shut_down_on_quit() {
+        for action in QUITTING {
+            assert_eq!(quit_plan(LEFTOVER, action, 0), plan(Ending::ShutdownHost, None), "{action:?}");
+            assert_eq!(
+                quit_plan(LEFTOVER, action, 1),
+                plan(Ending::ShutdownHost, Some(Prompt::QuitEndingAll)),
+                "{action:?}"
+            );
+        }
+        // 菜单里没有这一项，万一触发了也和退出一样结束会话。
+        assert_eq!(quit_plan(LEFTOVER, QuitAction::QuitAndEndSessions, 0), plan(Ending::ShutdownHost, None));
+        assert_eq!(
+            quit_plan(LEFTOVER, QuitAction::QuitAndEndSessions, 1),
+            plan(Ending::ShutdownHost, Some(Prompt::EndAll))
+        );
+    }
+
+    /// 开关关着：会话随 app 退出结束，有 agent 时先问，和以前一样。
+    #[test]
+    fn an_in_process_host_ends_sessions_with_the_app() {
+        for action in QUITTING.into_iter().chain([QuitAction::QuitAndEndSessions]) {
+            assert_eq!(quit_plan(IN_PROCESS, action, 0), plan(Ending::WithApp, None), "{action:?}");
+            assert_eq!(quit_plan(IN_PROCESS, action, 2), plan(Ending::WithApp, Some(Prompt::Quit)), "{action:?}");
+        }
+    }
+
+    /// 只有退出会把会话留下时菜单里才有「退出并结束所有会话」。
+    #[test]
+    fn the_end_sessions_item_is_only_offered_when_quitting_keeps_sessions() {
+        assert!(offers_end_sessions(KEEPING));
+        assert!(!offers_end_sessions(LEFTOVER));
+        assert!(!offers_end_sessions(IN_PROCESS));
+    }
+
+    #[test]
+    fn only_live_agents_count() {
+        use runode_protocol::SessionId;
+        use runode_shared_types::{
+            agent::{Agent, AgentState},
+            grid::GridSize,
+            session::SessionMeta,
+        };
+
+        let session = |kind: Option<AgentKind>, exited: bool| SessionInfo {
+            id: SessionId(1),
+            size: GridSize { cols: 80, rows: 24, cell_width_px: 8, cell_height_px: 16 },
+            meta: SessionMeta {
+                agent: kind.map(|kind| Agent { kind, state: AgentState::Working }),
+                ..SessionMeta::default()
+            },
+            clients: 0,
+            claimed: false,
+            exited,
+        };
+        let sessions = [
+            session(Some(AgentKind::Claude), false),
+            session(Some(AgentKind::Codex), false),
+            session(Some(AgentKind::Claude), true),
+            session(Some(AgentKind::Other), false),
+            session(None, false),
+        ];
+        assert_eq!(session_agents(&sessions), 2);
+    }
 }

@@ -7,8 +7,8 @@
 //! agent 的状态标记、提醒和跳转（`agents`）、列出所有 agent 的浮层（`agent_picker`）、
 //! 标签里的分屏（`panes`）、标题栏和标签（`titlebar`）、侧栏（`sidebar`）、右侧的预览栏、
 //! Git 面板和文件树（`project`、`preview`、`git_panel`、`files`），侧栏和文件树共用的就地输入框
-//! （`inline_edit`），存档（`persistence`），退出前的确认（`quit`），以及别的进程经宿主请 app
-//! 开终端、切到某个终端（`remote`）。
+//! （`inline_edit`），存档（`persistence`），退出和关窗口时会话怎么办（`quit`），以及别的进程经
+//! 宿主请 app 开终端、切到某个终端（`remote`）。
 
 mod actions;
 mod agent_picker;
@@ -41,7 +41,7 @@ pub use files::{
     RenameFile, RevealInFinder, SelectFirstFile, SelectLastFile, SelectNextFile, SelectPreviousFile,
 };
 pub use persistence::{install, saved_window_options};
-pub use quit::{close_all_windows, close_window, quit, should_close};
+pub use quit::{close_all_windows, close_window, end_sessions_in_menu, quit, quit_and_end_sessions, should_close};
 pub use remote::serve_requests;
 pub use titlebar::titlebar_options;
 

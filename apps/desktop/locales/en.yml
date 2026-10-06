@@ -8,6 +8,7 @@ menu:
   hide_others: Hide Others
   show_all: Show All
   quit: Quit Runode
+  quit_end_sessions: Quit Runode and End All Sessions
   file: File
   new_tab: New Tab
   new_workspace: New Workspace…
@@ -86,6 +87,16 @@ quit:
   cancel: Cancel
   agent: "%{agent} (%{workspace})"
   separator: ", "
+  end_title: End all sessions and quit Runode?
+  end_detail: "Agents still running: %{count}. They will be stopped along with every terminal session, including background sessions that aren't shown in any window."
+  end_confirm: End and Quit
+host_lost:
+  message: Lost the connection to this terminal's session; what you see is the last screen before it dropped.
+  reopen: Reopen in This Directory
+background:
+  title: Background Sessions
+  end_all: End All
+  empty: No background sessions
 panel:
   no_changes: No uncommitted changes
   not_repo: Not a git repository

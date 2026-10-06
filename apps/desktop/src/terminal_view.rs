@@ -119,7 +119,7 @@ pub enum TerminalEvent {
 
 pub struct TerminalView {
     session: Session,
-    /// 宿主里的会话。视图没了就结束它，见 `Drop`。
+    /// 宿主里的会话。用 `end` 结束它；视图没了只是不再看它，见 `Drop`。
     id: SessionId,
     /// 已经用 `end` 结束了会话，丢掉视图时不再发。
     ended: bool,
@@ -198,12 +198,12 @@ pub struct TerminalView {
 
 impl EventEmitter<TerminalEvent> for TerminalView {}
 
-/// 关掉标签、分屏或窗口时视图随之销毁，宿主里的会话也结束，shell 收到 SIGHUP，和关掉终端
-/// 窗口一样。
+/// 丢掉视图只算不再看这个会话，会话在宿主里照旧跑着（宿主在 app 里时随 app 退出结束）。
+/// 关标签、关分屏这类用户明确不要这个终端的路径先调 `end` 结束它，之后丢掉时不再发什么。
 impl Drop for TerminalView {
     fn drop(&mut self) {
         if !self.ended {
-            crate::session_host::link().kill(self.id);
+            crate::session_host::link().detach(self.id);
         }
     }
 }
