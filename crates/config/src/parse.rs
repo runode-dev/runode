@@ -76,6 +76,12 @@ impl Config {
         Self::from_layers(&[ghostty, runode], dark, &mut sources)
     }
 
+    /// 这份配置拿到系统外观为 `dark` 时还能不能用，也就是按 `dark` 重新加载会不会得到同样的结果
+    /// （`dark` 这一项除外）。
+    pub fn fits_appearance(&self, dark: bool) -> bool {
+        self.dark == dark || !self.theme_follows_appearance
+    }
+
     /// 所有可能的配置文件，供监视它们是否变化：Ghostty 和 runode 的配置文件（还不存在的也算在内，
     /// 新建配置文件同样要重载），以及上次加载时读到的主题和引入的文件。
     pub fn watch_paths(&self) -> Vec<PathBuf> {
@@ -91,6 +97,7 @@ impl Config {
         // 先套主题，再让显式写出的键覆盖它。后一层的主题覆盖前一层的。
         let theme = layers.iter().flatten().rfind(|e| e.key == "theme").map(|e| e.value.clone());
         if let Some(theme) = theme.filter(|t| !t.is_empty()) {
+            config.theme_follows_appearance = pick_theme(&theme, true) != pick_theme(&theme, false);
             let name = pick_theme(&theme, dark);
             match find_theme(&name) {
                 Some(Theme::File(path)) => config.apply_layer(&read_entries(&path, sources)),
@@ -584,6 +591,21 @@ unknown-key = whatever
         let config = load(&[&format!("theme = {}\nforeground = #333333", theme.display())]);
         assert_eq!(config.background, Rgb(0x11, 0x11, 0x11));
         assert_eq!(config.foreground, Rgb(0x33, 0x33, 0x33));
+    }
+
+    #[test]
+    fn config_fits_the_other_appearance_unless_the_theme_follows_it() {
+        // `load` 按深色外观加载。
+        let plain = load(&["theme = Dracula"]);
+        assert!(!plain.theme_follows_appearance);
+        assert!(plain.fits_appearance(true) && plain.fits_appearance(false));
+        let pair = load(&["theme = light:Day, dark:Night"]);
+        assert!(pair.theme_follows_appearance);
+        assert!(pair.fits_appearance(true));
+        assert!(!pair.fits_appearance(false));
+        // 两边是同一个主题时外观不影响结果。
+        assert!(load(&["theme = light:Same, dark:Same"]).fits_appearance(false));
+        assert!(load(&[""]).fits_appearance(false));
     }
 
     #[test]

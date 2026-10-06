@@ -3,7 +3,8 @@
 //! socket），或者单独一个进程（`runode --host`，app 退出后会话还在），由配置项 `terminal-host`
 //! 在启动时定下，见 `launch::choose_mode`。
 //!
-//! 启动时 `start` 在后台线程里读配置、定模式、连上宿主，主线程第一次用 `link` 时等它连好。
+//! 启动时 `start` 在后台线程里读配置、定模式、连上宿主，主线程第一次用 `link` 时等它连好，读到的
+//! 配置交给主线程当第一份生效的配置（`take_config`）。
 //! 主题和要不要记命令历史跟着配置走，见 `configure`；别的进程经宿主请界面办的事见 `serve_ui`；
 //! 连接断了以后用 `reconnect` 重新连上。
 
@@ -57,6 +58,8 @@ static READY_CHANGED: Condvar = Condvar::new();
 static MODE: Mutex<Mode> = Mutex::new(Mode::InProcess);
 /// 跑在 app 里的宿主，用到时才建。
 static IN_PROCESS: OnceLock<Host> = OnceLock::new();
+/// `start` 的后台线程读到的配置，见 `take_config`。
+static LOADED_CONFIG: Mutex<Option<Config>> = Mutex::new(None);
 /// 要在界面上告诉用户的事（比如旧版本的宿主还活着），见 `take_notice`。
 static NOTICE: Mutex<Option<Notice>> = Mutex::new(None);
 
@@ -77,14 +80,16 @@ fn notify(notice: Notice) {
 }
 
 /// 启动时在后台线程 `host-connect` 里：读配置、定宿主怎么跑、连上它，再做 `then`（比如提前拉起
-/// 第一个 shell）。主线程第一次调 `link` 时等它连好。
+/// 第一个 shell）。主线程第一次调 `link` 时等它连好。读到的配置留一份，主线程用 `take_config`
+/// 取去当第一份生效的配置，不用再读一遍。
 pub fn start(then: impl FnOnce(&Config) + Send + 'static) {
     let spawned = thread::Builder::new().name("host-connect".into()).spawn(move || {
         let ready = MarkReady;
-        // 配置有问题时由主线程加载配置时报告，这里不重复。
-        let config =
-            tracing::subscriber::with_default(tracing::subscriber::NoSubscriber::default(), || Config::load(true));
+        // 还不知道系统外观，先按深色读；主线程拿到时外观不一样、主题又跟着外观走就重读，见
+        // `Config::fits_appearance`。配置有问题时在这里报告。
+        let config = Config::load(true);
         establish(config.terminal_host);
+        *LOADED_CONFIG.lock().unwrap_or_else(PoisonError::into_inner) = Some(config.clone());
         drop(ready);
         then(&config);
     });
@@ -103,6 +108,13 @@ impl Drop for MarkReady {
         *READY.lock().unwrap_or_else(PoisonError::into_inner) = true;
         READY_CHANGED.notify_all();
     }
+}
+
+/// `start` 的后台线程读到的配置，只给一次；`start` 还没连好时等它，没读（后台线程没起来）时为
+/// `None`。
+pub fn take_config() -> Option<Config> {
+    link();
+    LOADED_CONFIG.lock().unwrap_or_else(PoisonError::into_inner).take()
 }
 
 /// 到宿主的连接；`start` 还没连好时等它。连不上时返回的连接没连着，用起来什么都不做。

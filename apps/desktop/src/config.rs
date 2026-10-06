@@ -18,9 +18,18 @@ impl Global for AppConfig {}
 /// 两次检查配置文件是否变化的间隔。
 const WATCH_INTERVAL: Duration = Duration::from_secs(1);
 
-/// 加载配置并开始监视配置文件，保存后自动重载。
+/// 加载配置并开始监视配置文件，保存后自动重载。启动时后台线程已经读过一遍（见
+/// `session_host::take_config`），拿它对得上系统外观时直接用，不再读。
 pub fn install(cx: &mut App) {
-    reload(cx);
+    let dark = system_is_dark(cx);
+    let loaded = crate::session_host::take_config().filter(|config| config.fits_appearance(dark));
+    match loaded {
+        Some(mut config) => {
+            config.dark = dark;
+            apply(cx, config);
+        }
+        None => reload(cx),
+    }
     // 模板按界面语言写，所以先加载配置定下语言。
     if let Some(path) = runode_config::config_path()
         && let Err(err) = runode_config::create_config_file(&path)
@@ -49,7 +58,11 @@ pub fn install(cx: &mut App) {
 /// 重新读取全部配置文件并广播给各视图。
 pub fn reload(cx: &mut App) {
     let dark = system_is_dark(cx);
-    let config = Config::load(dark);
+    apply(cx, Config::load(dark));
+}
+
+/// 让 `config` 生效并广播给各视图。
+fn apply(cx: &mut App, config: Config) {
     // 先换语言再广播，观察配置的菜单和视图重画时就是新语言。
     crate::i18n::set(&config.language.clone().unwrap_or_else(crate::i18n::system));
     // 宿主先换主题，视图等它在各个会话的输出流里标出位置后再跟着换。

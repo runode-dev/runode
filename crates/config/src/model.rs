@@ -90,6 +90,8 @@ pub struct Config {
     pub sources: Vec<PathBuf>,
     /// 加载时系统是否为深色外观，`theme = light:A,dark:B` 据此选了其中一个。
     pub dark: bool,
+    /// 主题按系统外观选（`theme = light:A,dark:B`，两边不是同一个）：外观不同时加载出来的配置不同。
+    pub theme_follows_appearance: bool,
 }
 
 impl Default for Config {
@@ -133,6 +135,7 @@ impl Default for Config {
             keybinds: Vec::new(),
             sources: Vec::new(),
             dark: true,
+            theme_follows_appearance: false,
         }
     }
 }

@@ -1,6 +1,6 @@
 //! 配色主题：按名字在用户的主题目录、已安装的 Ghostty 和编进二进制的主题里找。
 
-use std::path::PathBuf;
+use std::{path::PathBuf, sync::OnceLock};
 
 /// `light:A,dark:B` 按系统外观取一个，否则原样返回。
 pub(crate) fn pick_theme(value: &str, dark: bool) -> String {
@@ -17,19 +17,25 @@ pub(crate) enum Theme {
 }
 
 /// 主题可以是绝对路径，否则依次在 runode、Ghostty 的用户主题目录、
-/// Ghostty 自带的主题目录里找同名文件，都没有再用内置的同名主题。
+/// Ghostty 自带的主题目录里找同名文件，都没有再用内置的同名主题。Ghostty 自带的目录要向系统
+/// 查，前面的目录里找到了就不查。
 pub(crate) fn find_theme(name: &str) -> Option<Theme> {
     let paths = runode_paths::Dirs::from_env();
     let path = paths.expand_home(name);
     if path.is_absolute() {
         return path.is_file().then_some(Theme::File(path));
     }
-    let mut dirs: Vec<PathBuf> = paths.themes_dir().into_iter().chain(paths.ghostty_themes_dir()).collect();
-    dirs.extend(ghostty_resources_dir().map(|dir| dir.join("themes")));
-    if let Some(path) = dirs.into_iter().map(|dir| dir.join(name)).find(|p| p.is_file()) {
+    let bundled_dir = std::iter::once_with(|| ghostty_resources_dir().map(|dir| dir.join("themes"))).flatten();
+    let dirs = paths.themes_dir().into_iter().chain(paths.ghostty_themes_dir()).chain(bundled_dir);
+    if let Some(path) = theme_file(name, dirs) {
         return Some(Theme::File(path));
     }
     bundled_theme(name).map(Theme::Bundled)
+}
+
+/// 按顺序在 `dirs` 里找名为 `name` 的主题文件，找到就停，后面的目录不再取。
+fn theme_file(name: &str, dirs: impl IntoIterator<Item = PathBuf>) -> Option<PathBuf> {
+    dirs.into_iter().map(|dir| dir.join(name)).find(|path| path.is_file())
 }
 
 fn bundled_theme(name: &str) -> Option<&'static str> {
@@ -37,8 +43,14 @@ fn bundled_theme(name: &str) -> Option<&'static str> {
 }
 
 /// Ghostty 的资源目录：在 Ghostty 里启动的进程有 `GHOSTTY_RESOURCES_DIR`；
-/// 否则按 bundle id 向系统查已安装的 Ghostty.app。
+/// 否则按 bundle id 向系统查已安装的 Ghostty.app。查一次要经 LaunchServices，结果在进程里
+/// 记下，之后重载配置不再查；所以 app 开着时才装的 Ghostty 要等下次启动才找得到。
 fn ghostty_resources_dir() -> Option<PathBuf> {
+    static DIR: OnceLock<Option<PathBuf>> = OnceLock::new();
+    DIR.get_or_init(look_up_ghostty_resources_dir).clone()
+}
+
+fn look_up_ghostty_resources_dir() -> Option<PathBuf> {
     if let Some(dir) = std::env::var_os("GHOSTTY_RESOURCES_DIR") {
         return Some(dir.into());
     }
@@ -84,6 +96,27 @@ mod tests {
                 config.apply(&entry.key, &entry.value, false).unwrap_or_else(|err| panic!("{}: {err}", entry.origin));
             }
         }
+    }
+
+    #[test]
+    fn theme_file_stops_at_the_first_match() {
+        let dir = std::env::temp_dir().join(format!("runode-theme-file-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("Mine"), "background = #000000\n").unwrap();
+        // 前面的目录里找到了就不该再取后面的目录（它代表要向系统查的 Ghostty 自带目录）。
+        let later = std::iter::once_with(|| -> PathBuf { panic!("looked past the directory that has the theme") });
+        let found = theme_file("Mine", std::iter::once(dir.clone()).chain(later));
+        assert_eq!(found, Some(dir.join("Mine")));
+        // 前面都没有时才取后面的。
+        let mut asked = false;
+        let later = std::iter::once_with(|| {
+            asked = true;
+            dir.clone()
+        });
+        assert_eq!(theme_file("Mine", std::iter::once(dir.join("missing")).chain(later)), Some(dir.join("Mine")));
+        assert!(asked);
+        assert_eq!(theme_file("Other", [dir.clone()]), None);
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]
