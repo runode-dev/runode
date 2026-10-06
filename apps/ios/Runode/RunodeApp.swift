@@ -36,13 +36,12 @@ enum AppComposition {
                 HostConnection(
                     machine: machine, keyStore: keyStore, machines: store, discovery: discovery, identity: identity)
             },
-            deviceName: identity.deviceName)
+            deviceName: identity.deviceName, recents: UserDefaultsRecentTerminalStore())
     }
 
     /// 启动后要做的事；演示模式下直接打开演示的终端，调试用的启动参数见 `DebugLaunch`。
     static func prepare(_ app: AppModel) async {
         await app.machineList.load()
-        app.openSoleMachineIfNeeded()
         #if DEBUG
             DemoComposition.openIfRequested(app)
             DebugLaunch.apply(app)

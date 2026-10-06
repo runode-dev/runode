@@ -72,6 +72,23 @@ public enum Presentation {
         }
     }
 
+    /// 首页 Mac 卡片上的一行：连着时是会话数和在干活、等回答的个数（前面的绿点已经说明连着，不再写
+    /// 「已连接」），没连着时是连接状态。
+    public static func machineSummary(_ state: LinkState, sessions: [SessionInfo], loaded: Bool, now: Date = .now)
+        -> String
+    {
+        guard state.isConnected else { return linkStatus(state, now: now) }
+        guard loaded else { return "已连接" }
+        let live = sessions.filter { !$0.exited }
+        guard !live.isEmpty else { return "没有终端" }
+        var parts = ["\(live.count) 个会话"]
+        let waiting = live.filter { SessionGroup.of($0) == .waiting }.count
+        let working = live.filter { SessionGroup.of($0) == .working }.count
+        if waiting > 0 { parts.append("\(waiting) 个等你回答") }
+        if working > 0 { parts.append("\(working) 个在干活") }
+        return parts.joined(separator: " · ")
+    }
+
     /// 给人看的地址：去掉 IPv4/IPv6 链路本地地址后面的网卡作用域（`%en0`）。连接用的地址本身不改。
     public static func displayAddress(_ address: String) -> String {
         guard let percent = address.firstIndex(of: "%") else { return address }

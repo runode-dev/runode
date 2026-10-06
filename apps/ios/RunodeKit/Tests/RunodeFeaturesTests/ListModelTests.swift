@@ -64,10 +64,12 @@ import Testing
             return
         }
         #expect(size == model.spawnSize)
+        var spawned: [SessionId] = []
+        model.onSpawned = { spawned.append($0) }
         model.handle(.message(.spawned(req: req &+ 1, id: sessionB)))
-        #expect(model.spawnedSession == nil)
+        #expect(spawned.isEmpty)
         model.handle(.message(.spawned(req: req, id: sessionA)))
-        #expect(model.spawnedSession == sessionA)
+        #expect(spawned == [sessionA])
         #expect(!model.isSpawning)
     }
 
@@ -216,7 +218,8 @@ extension LinkState {
 
 @MainActor
 @Suite struct AppModelTests {
-    @Test func connectionsFollowTheNavigationStack() async throws {
+    /// 配对过的 Mac 一读进来就连上，进出它的页面不断开；终端页退出去就关掉。
+    @Test func pairedMacsStayConnected() async throws {
         let store = InMemoryMachineStore()
         let machine = machineRecord()
         await store.upsert(machine)
@@ -226,17 +229,20 @@ extension LinkState {
                 store: store, keyStore: InMemoryKeyStore(),
                 pairing: FakePairing { _ in machine }, makeLink: { _ in link }, deviceName: "测试 iPhone"))
         await app.machineList.load()
-        app.path = [.machine(machine.id)]
-        let list = try #require(app.sessionList(for: machine.id))
         #expect(await eventually { link.starts == 1 })
-        app.path.append(.terminal(machine: machine.id, session: sessionA))
+        let list = try #require(app.sessionList(for: machine.id))
+        app.path = [.machine(machine.id), .terminal(machine: machine.id, session: sessionA)]
         let terminal = try #require(app.terminal(machine: machine.id, session: sessionA))
         #expect(app.terminal(machine: machine.id, session: sessionA) === terminal)
         #expect(list.link === link)
-        // 退出到根：终端页关掉、连接断开。
         app.path = []
+        #expect(app.terminal(machine: machine.id, session: sessionA) !== terminal)
+        #expect(app.sessionList(for: machine.id) === list)
+        try await Task.sleep(for: .milliseconds(20))
+        #expect(link.stops == 0)
+        // 删掉这台 Mac 才断开。
+        await app.machineList.delete(machine.id)
         #expect(await eventually { link.stops == 1 })
-        #expect(app.sessionList(for: machine.id) !== list)
     }
 
     @Test func backgroundDisconnectsAndForegroundReconnects() async throws {
@@ -249,8 +255,6 @@ extension LinkState {
                 store: store, keyStore: InMemoryKeyStore(),
                 pairing: FakePairing { _ in machine }, makeLink: { _ in link }, deviceName: "测试 iPhone"))
         await app.machineList.load()
-        app.path = [.machine(machine.id)]
-        _ = app.sessionList(for: machine.id)
         #expect(await eventually { link.starts == 1 })
         app.setActive(false)
         #expect(await eventually { link.stops == 1 })

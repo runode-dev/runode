@@ -1,7 +1,9 @@
 #if os(iOS)
     import RunodeConnection
     import RunodeProtocol
+    import RunodeTerminal
     import SwiftUI
+    import UIKit
 
     extension Color {
         init(_ rgb: Rgb) {
@@ -46,6 +48,63 @@
             case .working: .blue
             case .other: .secondary
             }
+        }
+    }
+
+    /// 屏幕最后几行的预览：等宽小字，浅底圆角，每行单独截断（长行折下去会把别的行挤掉）。
+    struct ScreenPreview: View {
+        let lines: [String]
+        @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
+        var body: some View {
+            VStack(alignment: .leading, spacing: 2) {
+                ForEach(Array(lines.enumerated()), id: \.offset) { _, line in
+                    text(line)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                }
+            }
+            .foregroundStyle(.secondary)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(8)
+            .background(Color(.secondarySystemFill), in: RoundedRectangle(cornerRadius: 8))
+            .accessibilityLabel("屏幕预览：\(lines.joined(separator: "，"))")
+        }
+
+        /// 预览的字号：等宽小字，跟着动态字体走。
+        private var size: CGFloat {
+            let traits = UITraitCollection(preferredContentSizeCategory: UIContentSizeCategory(dynamicTypeSize))
+            return UIFont.preferredFont(forTextStyle: .caption1, compatibleWith: traits).pointSize
+        }
+
+        /// 一行预览：私用区的字（提示符里的 Powerline、Nerd Font 图标）那几段用随包的符号字体，其余用
+        /// 等宽系统字体。SwiftUI 的 `Font` 不带 Core Text 的后备列表，只能这样分段指定。
+        private func text(_ line: String) -> Text {
+            let size = size
+            var result = AttributedString()
+            var run = ""
+            var runIsSymbol = false
+            func flush() {
+                guard !run.isEmpty else { return }
+                var piece = AttributedString(run)
+                if runIsSymbol, let name = SymbolFont.postScriptName {
+                    piece.font = .custom(name, fixedSize: size)
+                } else {
+                    piece.font = .system(size: size, design: .monospaced)
+                }
+                result += piece
+                run = ""
+            }
+            for character in line {
+                let symbol = character.unicodeScalars.first.map(SymbolFont.isPrivateUse) ?? false
+                if symbol != runIsSymbol {
+                    flush()
+                    runIsSymbol = symbol
+                }
+                run.append(character)
+            }
+            flush()
+            return Text(result)
         }
     }
 

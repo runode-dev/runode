@@ -5,8 +5,9 @@
     import RunodeProtocol
     import Synchronization
 
-    /// 只在调试构建里有的演示模式：启动参数带 `-runode-demo` 时不连真的 Mac，换成一条本地的假连接，
-    /// 列出三个会话（等你回答的 Claude、在干活的 Codex、普通的 zsh），用来在模拟器里看界面。
+    /// 只在调试构建里有的演示模式：启动参数带 `-runode-demo` 时不连真的 Mac，换成本地的假连接：一台
+    /// 列出三个会话（等你回答的 Claude、在干活的 Codex、普通的 zsh），另一台一直连不上，用来在模拟器
+    /// 里看界面。
     @MainActor
     enum DemoComposition {
         static let argument = "-runode-demo"
@@ -14,6 +15,12 @@
             id: UUID(uuidString: "00000000-0000-0000-0000-00000000DE70")!, name: "Ethan 的 MacBook Pro",
             hostName: "Ethan 的 MacBook Pro", fingerprint: CertificateFingerprint(bytes: Data(repeating: 7, count: 32))!,
             port: 7866, addresses: ["127.0.0.1"], lastAddress: "192.168.1.20", deviceId: "00000000000000000000000000000000")
+        /// 连不上的那台。
+        static let offlineMachine = MachineRecord(
+            id: UUID(uuidString: "00000000-0000-0000-0000-00000000DE71")!, name: "Mac mini",
+            hostName: "Mac mini", fingerprint: CertificateFingerprint(bytes: Data(repeating: 8, count: 32))!,
+            port: 7866, addresses: ["127.0.0.2"], lastAddress: nil, deviceId: "00000000000000000000000000000001",
+            pairedAt: .now + 1)
 
         static var requested: Bool {
             ProcessInfo.processInfo.arguments.contains(argument)
@@ -21,15 +28,19 @@
 
         static func dependenciesIfRequested() -> AppDependencies? {
             guard requested else { return nil }
-            let store = DemoMachineStore(machines: [machine])
+            let store = DemoMachineStore(machines: [machine, offlineMachine])
             return AppDependencies(
                 store: store, keyStore: DemoKeyStore(), pairing: DemoPairing(),
-                makeLink: { _ in DemoLink() }, deviceName: "演示 iPhone")
+                makeLink: { record -> any HostLink in record.id == offlineMachine.id ? DemoOfflineLink() : DemoLink() },
+                deviceName: "演示 iPhone",
+                // 上次打开的终端记在单独的一份设置里，和正式的分开；先带 `shell` 启动一次，再不带参数启动，
+                // 首页就有「继续」。
+                recents: UserDefaultsRecentTerminalStore(defaults: UserDefaults(suiteName: "demo") ?? .standard))
         }
 
         /// 参数里还带着 `terminal` 时直接打开等回答的那个会话的终端页，`shell` 时打开普通 shell 的，
-        /// `pair` 时打开配对页；只配对了一台 Mac，不带参数也会直接进它的会话列表。再带上 `offline` 时
-        /// 连上一会儿后假装断线。
+        /// `list` 时打开会话列表，`pair` 时打开配对页，不带参数停在首页。再带上 `offline` 时连上一会儿
+        /// 后假装断线。
         static func openIfRequested(_ app: AppModel) {
             guard requested else { return }
             let arguments = ProcessInfo.processInfo.arguments
@@ -37,6 +48,8 @@
                 app.path = [.machine(machine.id), .terminal(machine: machine.id, session: DemoLink.claude.id)]
             } else if arguments.contains("shell") {
                 app.path = [.machine(machine.id), .terminal(machine: machine.id, session: DemoLink.shell.id)]
+            } else if arguments.contains("list") {
+                app.path = [.machine(machine.id)]
             } else if arguments.contains("pair") {
                 app.startPairing()
             }
@@ -64,6 +77,22 @@
         func pair(with invitation: PairingInvitation, deviceName: String) async throws -> MachineRecord {
             throw LinkFailure.connectionFailed("演示模式不能配对")
         }
+    }
+
+    /// 一直连不上的 Mac：只报连接失败。
+    private final class DemoOfflineLink: HostLink {
+        func events() async -> AsyncStream<HostEvent> {
+            let (stream, continuation) = AsyncStream.makeStream(of: HostEvent.self)
+            continuation.yield(.state(.failed(.connectionFailed("找不到这台 Mac"))))
+            return stream
+        }
+
+        func send(_ message: ClientMsg) {}
+        func sendInput(_ data: Data, channel: UInt32, generation: UInt64) {}
+        func start() async {}
+        func stop() async {}
+        func reconnectNow() async {}
+        func nextRequestId() async -> UInt32 { 0 }
     }
 
     /// 假的宿主：收到什么就照协议回什么。

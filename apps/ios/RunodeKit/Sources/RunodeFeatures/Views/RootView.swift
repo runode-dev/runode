@@ -4,7 +4,7 @@
 
     extension PairingModel: Identifiable {}
 
-    /// App 的根视图：配对过的 Mac 列表，往里是会话列表和终端页。
+    /// App 的根视图：首页，往里是一台 Mac 的会话列表和终端页。
     public struct RootView: View {
         @Bindable var app: AppModel
         @Environment(\.scenePhase) private var scenePhase
@@ -15,10 +15,7 @@
 
         public var body: some View {
             NavigationStack(path: $app.path) {
-                MachineListView(
-                    model: app.machineList, onPair: { app.startPairing() },
-                    onOpen: { app.path.append(.machine($0)) }
-                )
+                HomeView(app: app, machines: app.machineList)
                 .navigationDestination(for: Route.self) { route in
                     destination(for: route)
                 }
@@ -46,7 +43,7 @@
             case .machine(let id):
                 if let model = app.sessionList(for: id) {
                     SessionListView(model: model) { session in
-                        app.path.append(.terminal(machine: id, session: session))
+                        app.openTerminal(machine: id, session: session)
                     }
                 } else {
                     ContentUnavailableView("找不到这台 Mac", systemImage: "desktopcomputer.trianglebadge.exclamationmark")

@@ -75,11 +75,6 @@
                 model.spawnSize = TerminalView.gridSize(
                     fitting: size, scale: displayScale, contentSize: UIContentSizeCategory(dynamicTypeSize))
             }
-            .onChange(of: model.spawnedSession) { _, session in
-                guard let session else { return }
-                model.spawnedSession = nil
-                onOpen(session)
-            }
             .confirmationDialog(
                 "结束这个终端？", isPresented: $model.isConfirmingKill, titleVisibility: .visible,
                 presenting: model.killTarget.flatMap(model.session)
@@ -147,43 +142,6 @@
         let session: SessionInfo
         let preview: [String]
         let group: SessionGroup
-        @Environment(\.dynamicTypeSize) private var dynamicTypeSize
-
-        /// 预览的字号：等宽小字，跟着动态字体走。
-        private var previewSize: CGFloat {
-            let traits = UITraitCollection(preferredContentSizeCategory: UIContentSizeCategory(dynamicTypeSize))
-            return UIFont.preferredFont(forTextStyle: .caption1, compatibleWith: traits).pointSize
-        }
-
-        /// 一行预览：私用区的字（提示符里的 Powerline、Nerd Font 图标）那几段用随包的符号字体，其余用
-        /// 等宽系统字体。SwiftUI 的 `Font` 不带 Core Text 的后备列表，只能这样分段指定。
-        private func previewText(_ line: String) -> Text {
-            let size = previewSize
-            var result = AttributedString()
-            var run = ""
-            var runIsSymbol = false
-            func flush() {
-                guard !run.isEmpty else { return }
-                var piece = AttributedString(run)
-                if runIsSymbol, let name = SymbolFont.postScriptName {
-                    piece.font = .custom(name, fixedSize: size)
-                } else {
-                    piece.font = .system(size: size, design: .monospaced)
-                }
-                result += piece
-                run = ""
-            }
-            for character in line {
-                let symbol = character.unicodeScalars.first.map(SymbolFont.isPrivateUse) ?? false
-                if symbol != runIsSymbol {
-                    flush()
-                    runIsSymbol = symbol
-                }
-                run.append(character)
-            }
-            flush()
-            return Text(result)
-        }
 
         var body: some View {
             VStack(alignment: .leading, spacing: 6) {
@@ -211,19 +169,7 @@
                         .labelStyle(.titleAndIcon)
                 }
                 if !preview.isEmpty {
-                    // 每行单独截断：长行折下去会把别的行挤掉。
-                    VStack(alignment: .leading, spacing: 2) {
-                        ForEach(Array(preview.enumerated()), id: \.offset) { _, line in
-                            previewText(line)
-                                .lineLimit(1)
-                                .truncationMode(.tail)
-                        }
-                    }
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(8)
-                        .background(Color(.secondarySystemFill), in: RoundedRectangle(cornerRadius: 8))
-                        .accessibilityLabel("屏幕预览：\(preview.joined(separator: "，"))")
+                    ScreenPreview(lines: preview)
                 }
             }
             .padding(.vertical, 4)

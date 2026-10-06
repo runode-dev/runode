@@ -274,36 +274,6 @@ private func readScreens(_ sent: [ClientMsg]) -> [SessionId] {
 
 @MainActor
 @Suite struct NavigationTests {
-    @Test func aSoleMacOpensStraightAway() async {
-        let store = InMemoryMachineStore()
-        let machine = machineRecord()
-        await store.upsert(machine)
-        let app = AppModel(
-            dependencies: AppDependencies(
-                store: store, keyStore: InMemoryKeyStore(), pairing: FakePairing { _ in machine },
-                makeLink: { _ in FakeLink() }, deviceName: "测试 iPhone"))
-        await app.machineList.load()
-        app.openSoleMachineIfNeeded()
-        #expect(app.path == [.machine(machine.id)])
-        // 返回到 Mac 列表以后不再自动进去。
-        app.path = []
-        app.openSoleMachineIfNeeded()
-        #expect(app.path.isEmpty)
-    }
-
-    @Test func severalMacsShowTheList() async {
-        let store = InMemoryMachineStore()
-        await store.upsert(machineRecord(name: "一", fingerprintByte: 1))
-        await store.upsert(machineRecord(name: "二", fingerprintByte: 2))
-        let app = AppModel(
-            dependencies: AppDependencies(
-                store: store, keyStore: InMemoryKeyStore(), pairing: FakePairing { _ in machineRecord() },
-                makeLink: { _ in FakeLink() }, deviceName: "测试 iPhone"))
-        await app.machineList.load()
-        app.openSoleMachineIfNeeded()
-        #expect(app.path.isEmpty)
-    }
-
     /// 从列表打开终端页：列表知道有没有 Mac 在显示它，据此决定一开始就适配手机还是跟随 Mac。
     @Test func terminalsKnowWhetherTheMacShowsThem() async throws {
         let store = InMemoryMachineStore()

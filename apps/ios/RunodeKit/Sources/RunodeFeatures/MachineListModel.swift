@@ -20,6 +20,8 @@ public final class MachineListModel {
     @ObservationIgnored private let keyStore: any DeviceKeyStore
     /// 删掉一台 Mac 之前先断开它的连接、退出它的页面。
     @ObservationIgnored public var willDelete: @MainActor (UUID) -> Void = { _ in }
+    /// 每次重新读完列表（配对、改名、删除之后都会读）以后调，`AppModel` 据此给每台 Mac 建好连接。
+    @ObservationIgnored public var didLoad: @MainActor () -> Void = {}
 
     public init(store: any MachineStore, keyStore: any DeviceKeyStore) {
         self.store = store
@@ -29,6 +31,7 @@ public final class MachineListModel {
     public func load() async {
         machines = await store.all().sorted { $0.pairedAt < $1.pairedAt }
         loaded = true
+        didLoad()
     }
 
     public func machine(_ id: UUID) -> MachineRecord? {

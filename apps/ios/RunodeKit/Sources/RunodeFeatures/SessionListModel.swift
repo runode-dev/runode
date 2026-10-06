@@ -83,7 +83,8 @@ public final class SessionListModel {
     /// 预览显示几行。
     public static let previewLines = 3
 
-    public let machine: MachineRecord
+    /// 改名以后 `AppModel` 换上新的记录。
+    public internal(set) var machine: MachineRecord
     public private(set) var linkState: LinkState = .idle
     public private(set) var sessions: [SessionInfo] = []
     /// 每个会话屏幕底部的几行，去掉了空行。
@@ -91,8 +92,6 @@ public final class SessionListModel {
     /// 连上后收到过一次列表。
     public private(set) var loaded = false
     public private(set) var isSpawning = false
-    /// 新开好的会话，视图据此打开它的终端页，打开后清掉。
-    public var spawnedSession: SessionId?
     public var errorMessage: String?
     /// 等用户确认结束的会话。
     public var killTarget: SessionId?
@@ -100,6 +99,8 @@ public final class SessionListModel {
     public var spawnSize = GridSize(cols: 80, rows: 24, cellWidthPx: 16, cellHeightPx: 32)
 
     @ObservationIgnored public let link: any HostLink
+    /// 新开的会话开好了（宿主回了 `Spawned`），`AppModel` 据此打开它的终端页。
+    @ObservationIgnored public var onSpawned: @MainActor (SessionId) -> Void = { _ in }
     @ObservationIgnored private var task: Task<Void, Never>?
     @ObservationIgnored private var connected = false
     /// 这次连接上已经发过只看状态的 `Attach` 的会话。
@@ -206,7 +207,7 @@ public final class SessionListModel {
         Task { await link.reconnectNow() }
     }
 
-    /// 新开一个会话；宿主回 `Spawned` 后 `spawnedSession` 被设上。
+    /// 新开一个会话；宿主回 `Spawned` 后调 `onSpawned`。
     public func spawn() async {
         guard connected, !isSpawning else { return }
         isSpawning = true
@@ -377,8 +378,8 @@ public final class SessionListModel {
         case .spawned(let req, let id) where req == pendingSpawn:
             pendingSpawn = nil
             isSpawning = false
-            spawnedSession = id
             link.send(.listSessions)
+            onSpawned(id)
         case .error(let req, let id, let message):
             if let req, req == pendingSpawn {
                 pendingSpawn = nil
