@@ -7,9 +7,10 @@
 //! 和 `Session` 一样不是 `Send`：libghostty 的 `Terminal` 只能单线程用，回调之间用 `Rc` 共享
 //! 状态。宿主在会话自己的线程里建它，从不挪到别的线程。
 //!
-//! 这里是会话本身：创建、接上 PTY、注册 VT 回调、套用主题、改尺寸、写入和清屏。VT 回调累积的
-//! 变化和 shell 集成的报告在 `effects`，前台 agent 的识别在 `detect`，转给别的进程前抹掉报告
-//! 内容的 `ReportRedactor` 在 `redact`，别的进程发来的控制键和粘贴的编码在 `keys`。
+//! 这里是会话本身：创建、接上 PTY、注册 VT 回调、套用主题、改尺寸、写入和清屏，以及宿主升级时
+//! 把会话交给新宿主（`HostSession::export`、`HostSession::import`）。VT 回调累积的变化和 shell
+//! 集成的报告在 `effects`，前台 agent 的识别在 `detect`，转给别的进程前抹掉报告内容的
+//! `ReportRedactor` 在 `redact`，别的进程发来的控制键和粘贴的编码在 `keys`。
 
 mod detect;
 mod effects;
@@ -18,6 +19,8 @@ mod redact;
 
 use std::{
     cell::{Cell as StdCell, RefCell},
+    fmt,
+    os::fd::OwnedFd,
     path::{Path, PathBuf},
     rc::Rc,
     time::Instant,
@@ -46,7 +49,88 @@ use crate::{
     vt::{self, CommandOutput, SnapshotError},
 };
 use effects::{Effects, PromptEvent, SHELL_REPORT};
-pub use redact::ReportRedactor;
+pub use redact::{RedactorState, ReportRedactor};
+
+/// 宿主升级时随会话交给新宿主的状态（`HostSession::export`），新宿主用它和交过来的 PTY、
+/// 屏幕重建会话（`HostSession::import`）。VT 本身经快照或重放走，PTY 经 `Pty::adopt_paused`
+/// 接手，转给前端的输出流停在哪里另见 `ReportRedactor::state`；启动 shell 用的程序、集成方式
+/// 这些宿主自己记着的不在这里。
+#[derive(Clone, PartialEq)]
+pub struct SessionExport {
+    /// 对外公布的状态，导入后 `meta()` 原样是它。
+    pub meta: SessionMeta,
+    /// VT 和 PTY 的尺寸。从快照导入时尺寸取快照里的，从重放导入时用它。
+    pub size: GridSize,
+    /// 已经启动了 shell。没启动的会话没有要接手的 PTY，新宿主另开一个、用 `HostSession::new`
+    /// 重建，用不着导入。
+    pub started: bool,
+    /// shell 集成报告带的口令（见 `Pty::report_token`），接手方建 `PtyHandoff` 时填进去；导入时
+    /// 以交过来的 PTY 的为准。
+    pub report_token: Option<String>,
+    /// 现在套用着的主题。
+    pub settings: TermSettings,
+    /// 还没启动 shell 时它要从哪个目录开始。
+    pub start_dir: Option<PathBuf>,
+    /// 这一轮提示符的目录是 shell 报告的，见 `HostSession::take_commands`。
+    pub prompt_reported: bool,
+    /// 正在运行、还没报告结束的那条命令，结束时带着原来的开始时刻和目录记进历史。
+    pub running: Option<history::Entry>,
+    /// shell 集成报告了、还没被提示符取走的目录。
+    pub pending_shell_cwd: Option<PathBuf>,
+    /// 收到了带口令的 `command` 报告、还没等到命令开始运行：外层为 `None` 表示没收到，里面是
+    /// 命令原文。
+    pub pending_command: Option<Option<String>>,
+}
+
+impl fmt::Debug for SessionExport {
+    /// 口令不打出来，只说有没有。
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("SessionExport")
+            .field("meta", &self.meta)
+            .field("size", &self.size)
+            .field("started", &self.started)
+            .field("report_token", &self.report_token.as_ref().map(|_| "<redacted>"))
+            .field("settings", &self.settings)
+            .field("start_dir", &self.start_dir)
+            .field("prompt_reported", &self.prompt_reported)
+            .field("running", &self.running)
+            .field("pending_shell_cwd", &self.pending_shell_cwd)
+            .field("pending_command", &self.pending_command)
+            .finish()
+    }
+}
+
+/// 导入会话时 VT 的来源，见 `HostSession::import`。
+#[derive(Clone, Copy, Debug)]
+pub enum ImportScreen<'a> {
+    /// 交出方 `HostSession::snapshot` 编的原始快照：没抹口令，输出流停在一条报告中间时，续接里
+    /// 带着这半条报告，之后从 PTY 读到的剩余部分照样认、照样采用。
+    Snapshot(&'a [u8]),
+    /// 快照用不了（格式不同、解不开）时，交出方 `HostSession::vt_replay` 的重放，以及交出时
+    /// 输出流的 `ReportRedactor` 停在哪里。重放丢了回滚历史和没写完的序列；报告的开头按
+    /// `RedactorState::resume_bytes` 补回来。
+    Replay { bytes: &'a [u8], redactor: RedactorState },
+}
+
+/// `HostSession::import` 失败：交来的 `Pty` 原样还给调用方，没读也没写。
+pub struct ImportError {
+    pub pty: Pty,
+    pub error: anyhow::Error,
+}
+
+impl fmt::Debug for ImportError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ImportError").field("error", &self.error).finish_non_exhaustive()
+    }
+}
+
+impl fmt::Display for ImportError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "failed to import the session: {:#}", self.error)
+    }
+}
+
+impl std::error::Error for ImportError {}
 
 pub struct HostSession {
     terminal: Terminal<'static, 'static>,
@@ -128,9 +212,19 @@ impl HostSession {
     fn with_terminal(
         size: GridSize,
         pty: Pty,
-        mut terminal: Terminal<'static, 'static>,
+        terminal: Terminal<'static, 'static>,
         settings: TermSettings,
     ) -> Result<Self> {
+        Self::attach(size, pty, terminal, settings).map_err(|err| err.error)
+    }
+
+    /// 同 `with_terminal`，失败时把 `pty` 还回来。
+    fn attach(
+        size: GridSize,
+        pty: Pty,
+        mut terminal: Terminal<'static, 'static>,
+        settings: TermSettings,
+    ) -> Result<Self, Box<ImportError>> {
         let writer = pty.writer.clone();
         let shared_size = Rc::new(StdCell::new(size));
         // 已经启动的 shell 的报告口令；还没启动的等 `start` 时再设。
@@ -139,106 +233,9 @@ impl HostSession {
             ..Effects::default()
         });
         let replies = Rc::new(StdCell::new(0));
-
-        // 查询回复（DA、DECRQM、DSR 等）写回子进程，和用户的输入排在同一个写队列里。
-        // 没有回复的话，vim、tmux 这类程序探测终端能力时会卡住。
-        terminal
-            .on_pty_write({
-                let reply = writer.clone();
-                let replies = replies.clone();
-                move |_, data| {
-                    replies.set(replies.get() + 1);
-                    tracing::trace!(target: "runode::host::reply", bytes = data.len(), "answered a terminal query");
-                    reply.write(data);
-                }
-            })?
-            .on_size({
-                let size = shared_size.clone();
-                move |_| {
-                    let size = size.get();
-                    Some(SizeReportSize {
-                        rows: size.rows,
-                        columns: size.cols,
-                        cell_width: u32::from(size.cell_width_px),
-                        cell_height: u32::from(size.cell_height_px),
-                    })
-                }
-            })?
-            .on_device_attributes(|_| {
-                Some(DeviceAttributes {
-                    primary: PrimaryDeviceAttributes::new(
-                        ConformanceLevel::VT220,
-                        &[
-                            DeviceAttributeFeature::COLUMNS_132,
-                            DeviceAttributeFeature::SELECTIVE_ERASE,
-                            DeviceAttributeFeature::ANSI_COLOR,
-                        ],
-                    ),
-                    secondary: SecondaryDeviceAttributes {
-                        device_type: DeviceType::VT220,
-                        firmware_version: 1,
-                        rom_cartridge: 0,
-                    },
-                    tertiary: Default::default(),
-                })
-            })?
-            .on_xtversion(|_| Some(crate::XTVERSION))?
-            .on_title_changed({
-                let effects = effects.clone();
-                move |_| effects.title_changed.set(true)
-            })?
-            .on_bell({
-                let effects = effects.clone();
-                move |_| effects.bell.set(true)
-            })?
-            .on_progress_report({
-                let effects = effects.clone();
-                move |_, report| {
-                    let active = matches!(report.state(), Ok(ProgressState::Set | ProgressState::Indeterminate));
-                    effects.progress.set(Some(active));
-                }
-            })?
-            // 命令开始运行的那一刻它还原样留在屏幕上，在这里就读出来，之后的输出可能把它冲掉。
-            // 只有 shell 集成用带口令的 `command` 报告认过的命令开始才记，133;C 自带的原文不用，
-            // 见 `Effects::command_report`。回调运行在 extern "C" 函数里，不能 panic，所以借用
-            // 失败时丢掉这一步。
-            .on_semantic_prompt({
-                let effects = effects.clone();
-                move |term, event| {
-                    let pending = effects.command_report.try_borrow_mut().ok().and_then(|mut pending| pending.take());
-                    let event = match event {
-                        SemanticPrompt::InputStart => PromptEvent::InputStart,
-                        SemanticPrompt::OutputStart { .. } => PromptEvent::OutputStart(match pending {
-                            Some(Some(command)) => Some(command),
-                            Some(None) => {
-                                log_err("read submitted command", prompt_input::submitted_command(term)).flatten()
-                            }
-                            None => None,
-                        }),
-                        SemanticPrompt::CommandEnd { exit_code, .. } => PromptEvent::CommandEnd(exit_code),
-                        _ => return,
-                    };
-                    if let Ok(mut prompts) = effects.prompts.try_borrow_mut() {
-                        prompts.push(event);
-                    }
-                }
-            })?
-            // shell 集成报告的 PATH 和各种名字；别的未知序列不管。回调同样不能 panic。
-            .on_unknown_sequence({
-                let effects = effects.clone();
-                move |_, sequence| {
-                    if let UnknownSequence::Osc { content, truncated: false, .. } = sequence
-                        && let Some(report) = content.strip_prefix(SHELL_REPORT)
-                    {
-                        effects.shell_report(report);
-                    }
-                }
-            })?
-            // RIS 会清空标题，但不会触发标题变化回调。
-            .on_reset({
-                let effects = effects.clone();
-                move |_| effects.title_changed.set(true)
-            })?;
+        if let Err(err) = register_callbacks(&mut terminal, &writer, &shared_size, &effects, &replies) {
+            return Err(Box::new(ImportError { pty, error: err }));
+        }
 
         Ok(Self {
             terminal,
@@ -286,9 +283,12 @@ impl HostSession {
         self.pty.stop_reading();
     }
 
-    /// `stop_reading` 之后接着读，见 `Pty::resume_reading`。
+    /// `stop_reading` 之后接着读，见 `Pty::resume_reading`；`import` 导入、PTY 还停着的会话在这里
+    /// 打开闸门。交接前按输出活动判成工作中的 agent 从这一刻接着算，见 `Tracker::output_resumed`。
     pub fn resume_reading(&mut self) -> Result<()> {
-        self.pty.resume_reading()
+        self.pty.resume_reading()?;
+        self.agent_tracker.output_resumed(Instant::now());
+        Ok(())
     }
 
     /// PTY 的读线程已经结束，`PtySink` 不会再收到东西，见 `Pty::reader_finished`。
@@ -301,6 +301,118 @@ impl HostSession {
     /// 照样能编快照。出错时什么都没动。
     pub fn release_pty(&mut self) -> Result<PtyHandoff> {
         self.pty.release()
+    }
+
+    /// 复制一份 PTY master 的描述符，交接时先传给新宿主，自己这份照常用，见 `Pty::dup_master`。
+    pub fn dup_master(&self) -> std::io::Result<OwnedFd> {
+        self.pty.dup_master()
+    }
+
+    /// shell 的进程号；还没启动或者 PTY 交出去以后为 `None`。
+    pub fn shell_pid(&self) -> Option<u32> {
+        self.pty.shell_pid().and_then(|pid| u32::try_from(pid).ok())
+    }
+
+    /// 交接时要交给新宿主的会话状态，见 `SessionExport`。在 `take_commands` 之后取：还没取走的
+    /// 命令步骤不在里面。
+    pub fn export(&self) -> SessionExport {
+        SessionExport {
+            meta: self.meta(),
+            size: self.size(),
+            started: self.pty.started(),
+            report_token: self.pty.report_token().map(str::to_owned),
+            settings: self.settings.clone(),
+            start_dir: self.start_dir.clone(),
+            prompt_reported: self.prompt_reported,
+            running: self.running.clone(),
+            pending_shell_cwd: self.effects.shell_cwd.borrow().clone(),
+            pending_command: self.effects.command_report.borrow().clone(),
+        }
+    }
+
+    /// 在新宿主里重建交接过来的会话：VT 从 `screen` 来，接到 `pty`（多半是 `Pty::adopt_paused`
+    /// 接手来、还停着的）上，其余状态取自 `export`。导入后 `meta()` 和交出时一样，而且不算变化
+    /// （`take_meta` 没有要交的）；前台 agent 接着交出时的状态（`Tracker::resume`），不重新认、
+    /// 不闪；正在运行的命令结束时带着原来的开始时刻和目录记进历史。
+    ///
+    /// 从快照导入时不套主题（快照里带着），尺寸取快照里的，`pty` 要已经是这个尺寸；从重放导入时
+    /// 按 `export.size` 新建 VT、套上 `export.settings`，喂完重放再补喂 `RedactorState::resume_bytes`。
+    /// 往 VT 里喂这些时还没注册回调，不会往 PTY 写查询的回复。
+    ///
+    /// `export.started` 和 `pty` 对不上、快照解不开时失败，`pty` 原样放在 `ImportError` 里还回来
+    /// （比如快照解不开时换成重放再导入）。
+    pub fn import(pty: Pty, screen: ImportScreen<'_>, export: SessionExport) -> Result<Self, Box<ImportError>> {
+        let started = pty.started();
+        if export.started != started {
+            let error = anyhow!("the exported session was started: {}, the pty was started: {started}", export.started);
+            return Err(Box::new(ImportError { pty, error }));
+        }
+        let built = match screen {
+            ImportScreen::Snapshot(snapshot) => {
+                vt::decode_snapshot(snapshot).map_err(anyhow::Error::from).and_then(|mut terminal| {
+                    recapture_report(&mut terminal);
+                    Ok((vt::terminal_size(&terminal)?, terminal))
+                })
+            }
+            ImportScreen::Replay { bytes, redactor } => vt::new_terminal(export.size)
+                .map(|mut terminal| {
+                    vt::apply_theme(&mut terminal, &export.settings);
+                    terminal.vt_write(bytes);
+                    terminal.vt_write(redactor.resume_bytes());
+                    (export.size, terminal)
+                })
+                .map_err(anyhow::Error::from),
+        };
+        let (size, terminal) = match built {
+            Ok(built) => built,
+            Err(error) => {
+                return Err(Box::new(ImportError { pty, error: error.context("failed to rebuild the terminal") }));
+            }
+        };
+        let mut session = Self::attach(size, pty, terminal, export.settings.clone())?;
+        session.restore(export);
+        Ok(session)
+    }
+
+    /// `import` 的后半：把 `export` 里的状态放回刚建好的会话。
+    fn restore(&mut self, export: SessionExport) {
+        let SessionExport {
+            meta,
+            size: _,
+            started: _,
+            report_token: _,
+            settings: _,
+            start_dir,
+            prompt_reported,
+            running,
+            pending_shell_cwd,
+            pending_command,
+        } = export;
+        self.start_dir = start_dir;
+        self.prompt_reported = prompt_reported;
+        self.running = running;
+        *self.effects.shell_cwd.borrow_mut() = pending_shell_cwd;
+        *self.effects.command_report.borrow_mut() = pending_command;
+        self.effects.shell_path.borrow_mut().clone_from(&meta.shell_path);
+        *self.effects.shell_names.borrow_mut() = meta.shell_names.clone();
+        self.title.clone_from(&meta.title);
+        self.fallback_title.clone_from(&meta.fallback_title);
+        self.agent = meta.agent;
+        self.cwd.clone_from(&meta.cwd);
+        self.prompt_cwd.clone_from(&meta.prompt_cwd);
+        self.foreground_is_shell = meta.foreground_is_shell;
+        self.foreground.clone_from(&meta.foreground);
+        self.driver.clone_from(&meta.driver);
+        // agent 识别：先喂眼下拿得到的信号（VT 里的标题、前台进程），再接着交出时的状态。显示的
+        // 标题仍用交出时的。
+        let now = Instant::now();
+        let raw = self.terminal.title().ok().unwrap_or_default();
+        let pty = &self.pty;
+        self.agent_tracker.title(raw, now, || pty.foreground_is_shell());
+        self.probe_foreground(now);
+        self.agent_tracker.resume(meta.agent, now);
+        self.meta_dirty = false;
+        self.last_meta = Some(meta);
     }
 
     pub fn size(&self) -> GridSize {
@@ -527,10 +639,146 @@ impl HostSession {
     }
 }
 
+/// 从快照解出来的 VT 停在一条 shell 集成报告（或者它的开头 `ESC ] 6973;` 的一部分）中间时，
+/// 把续接重喂一遍。解码时续接是在设好 `vt::UNKNOWN_SEQUENCE_MAX_BYTES` 之前恢复的，这时开始的
+/// 未知 OSC 不收内容，剩下的部分到了以后报告认不出来、不采用。续接以 ESC 开头，重喂时这个 ESC
+/// 先结束停着的那条（不收内容的未知 OSC，结束了什么都不做），再从头开始同一条，VT 停在和原来
+/// 一样的位置。别的序列不动：结束它们可能有副作用（比如半个标题被设上）。
+fn recapture_report(terminal: &mut Terminal<'static, 'static>) {
+    let continuation = match terminal.continuation_alloc(None) {
+        Ok(Some(continuation)) => continuation.to_vec(),
+        Ok(None) => return,
+        Err(err) => {
+            tracing::warn!("failed to read the snapshot's continuation: {err}");
+            return;
+        }
+    };
+    let start = &redact::REPORT_START[..];
+    if continuation.len() >= 2 && (continuation.starts_with(start) || start.starts_with(&continuation)) {
+        terminal.vt_write(&continuation);
+    }
+}
+
+/// 给宿主那份 VT 注册回调：查询的回复写回 `writer`，标题、响铃、进度、提示符和 shell 集成的
+/// 报告记进 `effects`。
+fn register_callbacks(
+    terminal: &mut Terminal<'static, 'static>,
+    writer: &PtyWriter,
+    size: &Rc<StdCell<GridSize>>,
+    effects: &Rc<Effects>,
+    replies: &Rc<StdCell<u64>>,
+) -> Result<()> {
+    // 查询回复（DA、DECRQM、DSR 等）写回子进程，和用户的输入排在同一个写队列里。
+    // 没有回复的话，vim、tmux 这类程序探测终端能力时会卡住。
+    terminal
+        .on_pty_write({
+            let reply = writer.clone();
+            let replies = replies.clone();
+            move |_, data| {
+                replies.set(replies.get() + 1);
+                tracing::trace!(target: "runode::host::reply", bytes = data.len(), "answered a terminal query");
+                reply.write(data);
+            }
+        })?
+        .on_size({
+            let size = size.clone();
+            move |_| {
+                let size = size.get();
+                Some(SizeReportSize {
+                    rows: size.rows,
+                    columns: size.cols,
+                    cell_width: u32::from(size.cell_width_px),
+                    cell_height: u32::from(size.cell_height_px),
+                })
+            }
+        })?
+        .on_device_attributes(|_| {
+            Some(DeviceAttributes {
+                primary: PrimaryDeviceAttributes::new(
+                    ConformanceLevel::VT220,
+                    &[
+                        DeviceAttributeFeature::COLUMNS_132,
+                        DeviceAttributeFeature::SELECTIVE_ERASE,
+                        DeviceAttributeFeature::ANSI_COLOR,
+                    ],
+                ),
+                secondary: SecondaryDeviceAttributes {
+                    device_type: DeviceType::VT220,
+                    firmware_version: 1,
+                    rom_cartridge: 0,
+                },
+                tertiary: Default::default(),
+            })
+        })?
+        .on_xtversion(|_| Some(crate::XTVERSION))?
+        .on_title_changed({
+            let effects = effects.clone();
+            move |_| effects.title_changed.set(true)
+        })?
+        .on_bell({
+            let effects = effects.clone();
+            move |_| effects.bell.set(true)
+        })?
+        .on_progress_report({
+            let effects = effects.clone();
+            move |_, report| {
+                let active = matches!(report.state(), Ok(ProgressState::Set | ProgressState::Indeterminate));
+                effects.progress.set(Some(active));
+            }
+        })?
+        // 命令开始运行的那一刻它还原样留在屏幕上，在这里就读出来，之后的输出可能把它冲掉。
+        // 只有 shell 集成用带口令的 `command` 报告认过的命令开始才记，133;C 自带的原文不用，
+        // 见 `Effects::command_report`。回调运行在 extern "C" 函数里，不能 panic，所以借用
+        // 失败时丢掉这一步。
+        .on_semantic_prompt({
+            let effects = effects.clone();
+            move |term, event| {
+                let pending = effects.command_report.try_borrow_mut().ok().and_then(|mut pending| pending.take());
+                let event = match event {
+                    SemanticPrompt::InputStart => PromptEvent::InputStart,
+                    SemanticPrompt::OutputStart { .. } => PromptEvent::OutputStart(match pending {
+                        Some(Some(command)) => Some(command),
+                        Some(None) => {
+                            log_err("read submitted command", prompt_input::submitted_command(term)).flatten()
+                        }
+                        None => None,
+                    }),
+                    SemanticPrompt::CommandEnd { exit_code, .. } => PromptEvent::CommandEnd(exit_code),
+                    _ => return,
+                };
+                if let Ok(mut prompts) = effects.prompts.try_borrow_mut() {
+                    prompts.push(event);
+                }
+            }
+        })?
+        // shell 集成报告的 PATH 和各种名字；别的未知序列不管。回调同样不能 panic。
+        .on_unknown_sequence({
+            let effects = effects.clone();
+            move |_, sequence| {
+                if let UnknownSequence::Osc { content, truncated: false, .. } = sequence
+                    && let Some(report) = content.strip_prefix(SHELL_REPORT)
+                {
+                    effects.shell_report(report);
+                }
+            }
+        })?
+        // RIS 会清空标题，但不会触发标题变化回调。
+        .on_reset({
+            let effects = effects.clone();
+            move |_| effects.title_changed.set(true)
+        })?;
+    Ok(())
+}
+
 /// `SessionMeta::driver` 的时刻最多这么久更新一次，毫秒。
 const DRIVER_RESOLUTION_MS: u64 = 1000;
 
 /// 这个构建编的快照的格式版本，前端据此判断解不解得了宿主的快照，见 `vt::snapshot_format`。
+/// 宿主升级时也按它决定交接用快照还是退回 VT 重放：格式号相同就当解得了，不再比较构建。
+///
+/// 所以改了快照的编码（升级 libghostty 时尤其要看）必须同时改格式号，即 libghostty 快照信封里
+/// 的 `version`，并按 `snapshot_format` 黑盒测试开头的说明生成新格式号的 golden 文件；快照的字节
+/// 变了、格式号没变时那个测试失败。
 pub fn snapshot_format() -> Result<u16, SnapshotError> {
     vt::snapshot_format()
 }

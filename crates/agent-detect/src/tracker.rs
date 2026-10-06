@@ -18,6 +18,9 @@
 //! 求值要读屏幕、跑正则，不在每段输出时都做：只在有新输出、信号变了、或者正等着确认空闲时
 //! 求值，而且两次之间至少隔 `EVAL_INTERVAL`。agent 自己报告的状态变了、前台换了程序时立即
 //! 求值。调用方在 `Tracker::deadline` 到了时再调 `Tracker::poll`。
+//!
+//! 宿主升级时会话换到新宿主，`Tracker` 也换成新的一个：`Tracker::resume` 接着交接前公布的状态，
+//! 不从「没有 agent」重新认起，见那里。
 
 use std::time::{Duration, Instant};
 
@@ -82,6 +85,12 @@ pub struct Tracker {
     last_eval: Option<Instant>,
     /// 上次求值时是靠输出活动判成工作中的，输出停下后要再求值一次。
     by_activity: bool,
+    /// 交接前公布的 agent，见 `resume`：前台换程序或回到 shell 之前，别的信号认不出是哪个 agent
+    /// 时按它算；它的进程这时才被认出来的，不算刚启动，没有启动宽限期。
+    carried: Option<Agent>,
+    /// 交接前那阵输出还算在继续，见 `resume`：输出重新流起来（`output_resumed` 或下一段输出）
+    /// 之前，按输出活动判的工作中不撤。
+    held_burst: bool,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -126,12 +135,39 @@ impl Tracker {
         self.published
     }
 
+    /// 接着交接前公布的状态 `agent`：宿主升级时会话换了一个 `Tracker`，先喂好眼下能拿到的信号
+    /// （前台进程、标题），再调这里。对外的状态直接是 `agent`；`agent` 的进程已经认出来的，不再
+    /// 等启动宽限期；交接时丢了的信号（进度报告、空闲的 codex 不带前缀的标题）认不出是哪个
+    /// agent 时，前台换程序或回到 shell 之前按 `agent` 算。交接前靠输出活动判成工作中的，交接
+    /// 期间读线程停着、没有输出，等输出重新流起来（`output_resumed`）再从那一刻接着算。之后照常
+    /// 立即求值一次，按眼前的屏幕和信号校正；结论和 `agent` 一样时 `poll` 不报变化，界面上的
+    /// agent 指示不会闪一下。
+    pub fn resume(&mut self, agent: Option<Agent>, now: Instant) {
+        self.published = agent;
+        self.carried = agent;
+        self.pending_idle = None;
+        if agent.is_some_and(|agent| self.process == Some(agent.kind)) {
+            self.grace_from = None;
+        }
+        self.held_burst = agent.is_some_and(Agent::is_working);
+        self.urgent = Some(now);
+    }
+
+    /// 交接后输出又开始流了（接手的宿主打开了读线程）：`resume` 按住的那阵输出从 `now` 接着算，
+    /// 之后输出停下时照常确认空闲。没有按住时什么都不做。
+    pub fn output_resumed(&mut self, now: Instant) {
+        if std::mem::take(&mut self.held_burst) {
+            self.activity = Activity { start: Some(now.checked_sub(BURST_MIN).unwrap_or(now)), last: Some(now) };
+        }
+    }
+
     /// 程序的一段输出，进 VT 之前或之后都行。
     pub fn output(&mut self, bytes: &[u8], now: Instant) {
         if bytes.is_empty() {
             return;
         }
         self.progress_text.observe(bytes);
+        self.output_resumed(now);
         self.activity.record(now);
         self.dirty = true;
     }
@@ -178,19 +214,29 @@ impl Tracker {
     pub fn foreground(&mut self, foreground: Foreground, now: Instant) {
         match foreground {
             Foreground::Shell => {
-                if self.process.is_some() || self.title_agent.is_some() || self.progress.is_some() {
+                if self.process.is_some()
+                    || self.title_agent.is_some()
+                    || self.progress.is_some()
+                    || self.carried.is_some()
+                {
                     self.urgent = Some(now);
                 }
                 self.process = None;
                 self.grace_from = None;
                 self.forget_reports();
+                self.forget_carried();
             }
             Foreground::Program(kind) if kind != self.process => {
                 if self.process.is_some() {
                     self.forget_reports();
                 }
+                // 交接前就在跑的同一个 agent 不算刚启动。
+                let carried = kind.is_some() && kind == self.carried.map(|agent| agent.kind);
+                if !carried {
+                    self.forget_carried();
+                }
                 self.process = kind;
-                self.grace_from = kind.map(|_| now);
+                self.grace_from = kind.filter(|_| !carried).map(|_| now);
                 self.pending_idle = None;
                 self.urgent = Some(now);
             }
@@ -247,6 +293,7 @@ impl Tracker {
         self.process
             .or(self.title_agent.map(|agent| agent.kind))
             .or(self.progress.map(|_| if self.pi_title { AgentKind::Pi } else { AgentKind::Other }))
+            .or(self.carried.map(|agent| agent.kind))
     }
 
     /// agent 在标题和进度里自己报告的状态。
@@ -265,6 +312,12 @@ impl Tracker {
         self.progress_text.clear();
         self.pending_idle = None;
         self.by_activity = false;
+    }
+
+    /// 交接前的 agent 已经不在前台了，不再按它算。
+    fn forget_carried(&mut self) {
+        self.carried = None;
+        self.held_burst = false;
     }
 
     fn evaluate(
@@ -305,7 +358,8 @@ impl Tracker {
             Verdict::Unknown => reported.map_or((AgentState::Idle, false), |state| (state, true)),
         };
 
-        self.by_activity = state == AgentState::Idle && !visible && self.activity.sustained(now, last_input);
+        self.by_activity =
+            state == AgentState::Idle && !visible && (self.held_burst || self.activity.sustained(now, last_input));
         let state = if self.by_activity { AgentState::Working } else { state };
 
         let was_working = self.published.is_some_and(|agent| agent.kind == kind && agent.is_working());

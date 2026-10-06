@@ -1,6 +1,7 @@
-//! 宿主转给别的进程的输出里抹掉 shell 集成报告的内容，报告被切在哪里都一样。
+//! 宿主转给别的进程的输出里抹掉 shell 集成报告的内容，报告被切在哪里都一样；宿主升级时
+//! 在哪里切开、换一个 `ReportRedactor` 接着抹也一样。
 
-use runode_terminal::host_session::ReportRedactor;
+use runode_terminal::host_session::{RedactorState, ReportRedactor};
 
 /// 一次喂完和任意切成两块喂，结果一样。
 fn redact_split(data: &[u8]) -> Vec<u8> {
@@ -13,6 +14,13 @@ fn redact_split(data: &[u8]) -> Vec<u8> {
             out.extend(redactor.redact(part).unwrap_or_else(|| part.to_vec()));
         }
         assert_eq!(out, expected, "split at {at}");
+        // 切开的地方换成另一个，从前一个的状态接着抹。
+        let mut before = ReportRedactor::new();
+        let mut out = before.redact(&data[..at]).unwrap_or_else(|| data[..at].to_vec());
+        let mut after = ReportRedactor::from_state(before.state());
+        assert_eq!(after.state(), before.state());
+        out.extend(after.redact(&data[at..]).unwrap_or_else(|| data[at..].to_vec()));
+        assert_eq!(out, expected, "handed over at {at}");
     }
     expected
 }
@@ -44,4 +52,27 @@ fn other_output_passes_through_untouched() {
     assert_eq!(redactor.redact(b"\x1b]6973;tok"), Some(b"\x1b]6973;".to_vec()));
     assert_eq!(redactor.redact(b"en;cwd=/"), Some(Vec::new()));
     assert_eq!(redactor.redact(b"\x07after"), None);
+}
+
+/// 从重放建起来的 VT 要补喂的字节：对上了几个字节的开头补几个，在报告里面补完整的开头。
+#[test]
+fn the_resume_bytes_follow_the_state() {
+    let mut redactor = ReportRedactor::new();
+    assert_eq!(redactor.state(), RedactorState::default());
+    assert_eq!(redactor.state().resume_bytes(), b"");
+    redactor.redact(b"x\x1b]69");
+    assert_eq!(redactor.state(), RedactorState { matched: 4, inside: false });
+    assert_eq!(redactor.state().resume_bytes(), b"\x1b]69");
+    redactor.redact(b"73;");
+    assert_eq!(redactor.state(), RedactorState { matched: 0, inside: true });
+    assert_eq!(redactor.state().resume_bytes(), b"\x1b]6973;");
+    // 报告被下一条序列的 ESC 结束：停在这个 ESC 上。
+    redactor.redact(b"tok\x1b");
+    assert_eq!(redactor.state().resume_bytes(), b"\x1b");
+    // 不合理的状态按能对上的最多算。
+    let odd = ReportRedactor::from_state(RedactorState { matched: 200, inside: false });
+    assert_eq!(odd.state(), RedactorState { matched: 6, inside: false });
+    assert_eq!(RedactorState { matched: 200, inside: false }.resume_bytes(), b"\x1b]6973");
+    let odd = ReportRedactor::from_state(RedactorState { matched: 3, inside: true });
+    assert_eq!(odd.state(), RedactorState { matched: 0, inside: true });
 }
