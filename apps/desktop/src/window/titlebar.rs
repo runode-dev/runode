@@ -321,20 +321,28 @@ impl WindowView {
         let dragged = DraggedTab { id, ix, title: title.clone(), width, fg, bg: active_bg };
         let compact = width < px(TAB_COMPACT_WIDTH);
         let bell_dot = || div().size(px(6.)).rounded_full().bg(fg.opacity(0.8));
-        // 右侧槽位：响铃标记优先，其次快捷键提示；紧凑时只在响铃时占一个圆点的宽度。
+        // 右侧槽位的内容：响铃标记优先，其次快捷键提示。
+        let side_content = |shortcut: Option<SharedString>| {
+            if tab.bell {
+                bell_dot().into_any_element()
+            } else {
+                div().text_size(px(11.)).text_color(fg.opacity(0.35)).children(shortcut).into_any_element()
+            }
+        };
+        let shortcut = tab_shortcut(ix, workspace.tabs.len(), cx);
+        // 紧凑时只在响铃时占一个圆点的宽度。
         let side_slot = if compact {
             tab.bell.then(|| div().flex_none().child(bell_dot()))
         } else {
-            let content = if tab.bell {
-                bell_dot().into_any_element()
-            } else {
+            Some(
                 div()
-                    .text_size(px(11.))
-                    .text_color(fg.opacity(0.35))
-                    .children(tab_shortcut(ix, workspace.tabs.len(), cx))
-                    .into_any_element()
-            };
-            Some(div().flex_none().w(px(TAB_SIDE_SLOT)).flex().justify_end().items_center().child(content))
+                    .flex_none()
+                    .w(px(TAB_SIDE_SLOT))
+                    .flex()
+                    .justify_end()
+                    .items_center()
+                    .child(side_content(shortcut.clone())),
+            )
         };
         div()
             .id(("tab", ix))
@@ -446,23 +454,48 @@ impl WindowView {
                     .child(label)
                     .children(driven_tooltip.map(|driven| driven_icon(("tab-driven", ix), fg).tooltip(driven)))
                     .children(mark.map(|mark| styled_agent_mark(mark, ("tab-agent", ix), fg, true)))
-                    .children(tab.bell.then(|| div().flex_none().child(bell_dot())))
-                    .child(
-                        close_button(("tab-close", ix), fg)
-                            .flex_none()
-                            // 平时宽度为零，悬停时才撑开；不能用 display 切换，见下面经典样式的说明。
-                            .w_0()
-                            .overflow_hidden()
-                            .group_hover(group, |close| close.w(px(TAB_CLOSE_SIZE)))
-                            .tooltip(close_tooltip)
-                            .on_mouse_down(
+                    .map(|el| {
+                        let close =
+                            close_button(("tab-close", ix), fg).flex_none().tooltip(close_tooltip).on_mouse_down(
                                 MouseButton::Left,
                                 cx.listener(move |this, _, window, cx| {
                                     cx.stop_propagation();
                                     this.close_tab_by_id(id, window, cx);
                                 }),
-                            ),
-                    )
+                            );
+                        if compact {
+                            // 平时宽度为零，悬停时才撑开；不能用 display 切换，见下面经典样式的说明。
+                            el.children(tab.bell.then(|| div().flex_none().child(bell_dot()))).child(
+                                close.w_0().overflow_hidden().group_hover(group, |close| close.w(px(TAB_CLOSE_SIZE))),
+                            )
+                        } else {
+                            // 右侧槽位平时放响铃标记或快捷键提示，悬停时换成关闭按钮，宽度不变。
+                            el.child(
+                                div()
+                                    .flex_none()
+                                    .relative()
+                                    .h_full()
+                                    .min_w(px(TAB_CLOSE_SIZE))
+                                    .flex()
+                                    .items_center()
+                                    .justify_end()
+                                    .child(
+                                        div()
+                                            .group_hover(group.clone(), |hint| hint.invisible())
+                                            .child(side_content(shortcut)),
+                                    )
+                                    .child(
+                                        div()
+                                            .absolute()
+                                            .inset_0()
+                                            .flex()
+                                            .items_center()
+                                            .justify_end()
+                                            .child(close.invisible().group_hover(group, |close| close.visible())),
+                                    ),
+                            )
+                        }
+                    })
                 }
                 _ => el
                     .child(
