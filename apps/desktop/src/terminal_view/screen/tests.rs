@@ -1,4 +1,4 @@
-use std::{cell::Cell, rc::Rc};
+use std::{cell::Cell, collections::HashSet, rc::Rc};
 
 use runode_protocol::SessionId;
 use runode_shared_types::agent::{Agent, AgentKind, AgentState};
@@ -285,28 +285,86 @@ fn fifty_background_tabs_hold_no_view_vt() {
 }
 
 #[test]
-fn the_meta_from_attaching_does_not_notify() {
-    // 连上时 agent 正等着回答：不算刚停下来。
-    let mut h = Harness::live(b"");
-    h.apply(vec![msg(HostMsg::Resync { id: SessionId(1), reason: "slow".into() })]);
-    let changes = h.apply(vec![screen(AttachMode::Snapshot, 2, agent(AgentState::Blocked), b"")]);
+fn the_first_meta_does_not_notify() {
+    // 只看状态建的视图（存档恢复、后台会话）第一次拿到的状态：agent 正等着回答，不算刚停下来。
+    let now = Instant::now();
+    let mut state: ScreenState<Fake> = ScreenState::new_attaching(AttachMode::MetaOnly, SIZE, now);
+    let alive = Rc::new(Cell::new(0));
+    let mut build = |screen: HostScreen| Ok(Fake::new(&screen.data, &alive));
+    let changes = state.apply(vec![screen(AttachMode::MetaOnly, 1, agent(AgentState::Blocked), b"")], &mut build, now);
     assert!(!changes.agent_finished && !changes.agent_blocked);
     assert!(changes.agent_changed && changes.title_changed);
-    assert_eq!(h.state.live().unwrap().meta, agent(AgentState::Blocked), "the VT gets the meta too");
+    // 之后的变化照常通知，只看状态时也是。
+    let changes =
+        state.apply(vec![meta(agent(AgentState::Working)), meta(agent(AgentState::Blocked))], &mut build, now);
+    assert!(changes.agent_finished && changes.agent_blocked);
 
-    // 视图记着在工作，回到显示时宿主说已经停了：也不通知（那一下发生在看不见的时候已经通知过，
-    // 或者属于连上之前）。
-    let changes = h.apply(vec![meta(agent(AgentState::Working))]);
-    assert!(!changes.agent_finished);
+    // 断开前在工作，重新连上时已经停了：断开期间的事不通知。
+    let mut h = Harness::live(b"");
+    h.apply(vec![meta(agent(AgentState::Working)), LinkEvent::Lost]);
+    h.state.reconnect(h.now);
+    let changes = h.apply(vec![screen(AttachMode::Snapshot, 2, agent(AgentState::Idle), b"")]);
+    assert!(!changes.agent_finished && !changes.agent_blocked);
+    assert_eq!(h.state.live().unwrap().meta, agent(AgentState::Idle), "the VT gets the meta too");
+}
+
+#[test]
+fn a_stop_missed_while_attaching_again_still_notifies() {
+    // 视图记着在工作，降成只看状态时 agent 停了：那条 `Meta` 夹在 `Attach` 和 `Attached` 之间被连接
+    // 那一层丢掉了，`Attached` 带的状态和记着的比，照样通知。
+    let mut h = Harness::live(b"");
+    h.apply(vec![meta(agent(AgentState::Working))]);
     h.state.set_visible(false, h.now);
     let now = h.later(HIDE_GRACE);
     h.state.tick(now);
-    // 只看状态时第一次给的状态也不通知。
-    let changes = h.apply(vec![screen(AttachMode::MetaOnly, 3, agent(AgentState::Idle), b"")]);
-    assert!(!changes.agent_finished && !changes.agent_blocked);
-    // 之后的变化照常通知，只看状态时也是。
-    let changes = h.apply(vec![meta(agent(AgentState::Working)), meta(agent(AgentState::Blocked))]);
+    let changes = h.apply(vec![screen(AttachMode::MetaOnly, 2, agent(AgentState::Blocked), b"")]);
     assert!(changes.agent_finished && changes.agent_blocked);
+    // 回到显示时同样比；没在工作的不因为连上就通知。
+    h.state.set_visible(true, now);
+    let changes = h.apply(vec![screen(AttachMode::Snapshot, 3, agent(AgentState::Blocked), b"")]);
+    assert!(!changes.agent_finished && !changes.agent_blocked);
+    let changes = h.apply(vec![
+        meta(agent(AgentState::Working)),
+        msg(HostMsg::Resync { id: SessionId(1), reason: "slow".into() }),
+    ]);
+    assert!(!changes.agent_finished);
+    let changes = h.apply(vec![screen(AttachMode::Snapshot, 4, agent(AgentState::Idle), b"")]);
+    assert!(changes.agent_finished && !changes.agent_blocked);
+}
+
+#[test]
+fn a_stale_screen_of_the_other_kind_is_ignored() {
+    let mut h = Harness::live(b"");
+    h.state.set_visible(false, h.now);
+    let now = h.later(HIDE_GRACE);
+    h.state.tick(now);
+    h.apply(vec![screen(AttachMode::MetaOnly, 2, SessionMeta::default(), b"")]);
+    h.state.set_visible(true, now);
+    // 在要屏幕，到的却是只看状态的：是之前那次的，不能把视图拉回只看状态。
+    let changes = h.apply(vec![screen(AttachMode::MetaOnly, 3, agent(AgentState::Idle), b"")]);
+    assert!(!changes.replaced && !changes.agent_changed);
+    assert_eq!(name(h.state.screen()), "Attaching");
+    // 宿主给不了快照时退成 VT 重放，也算要到的屏幕。
+    h.apply(vec![screen(AttachMode::VtReplay, 4, SessionMeta::default(), b"replay")]);
+    assert_eq!(h.fed(), b"replay");
+    // 反过来：在要只看状态，到的是屏幕。
+    h.state.set_visible(false, now);
+    let now = h.later(HIDE_GRACE);
+    h.state.tick(now);
+    h.apply(vec![screen(AttachMode::Snapshot, 5, SessionMeta::default(), b"stale")]);
+    assert_eq!(name(h.state.screen()), "Hidden");
+    assert_eq!(h.alive.get(), 0);
+}
+
+#[test]
+fn reopening_only_replaces_a_session_the_host_does_not_have() {
+    let id = SessionId(1);
+    let other: HashSet<SessionId> = [SessionId(2)].into();
+    let with: HashSet<SessionId> = [id, SessionId(2)].into();
+    assert_eq!(reopen_plan(id, Some(&with)), Reopen::Resume);
+    assert_eq!(reopen_plan(id, Some(&other)), Reopen::Replace);
+    // 列不出会话（宿主一时没回话）时不能当成没了：换上新会话会结束原来那个。
+    assert_eq!(reopen_plan(id, None), Reopen::Resume);
 }
 
 #[test]
@@ -347,15 +405,30 @@ fn bells_ring_with_or_without_the_view_vt() {
 }
 
 #[test]
-fn a_failed_attach_counts_as_lost() {
+fn a_failed_attach_means_the_session_is_gone() {
+    let error = HostMsg::Error { req: None, id: Some(SessionId(1)), message: "no session".into() };
+    // 平常连不成（会话被命令行结束了，它的 `Exited` 在连的时候被丢掉了）：按 shell 退出，关掉终端。
     let mut h = Harness::live(b"");
     h.apply(vec![msg(HostMsg::Resync { id: SessionId(1), reason: "slow".into() })]);
-    let error = HostMsg::Error { req: None, id: Some(SessionId(1)), message: "no session".into() };
-    assert!(h.apply(vec![msg(error.clone())]).lost);
+    let changes = h.apply(vec![msg(error.clone())]);
+    assert!(changes.exited && !changes.lost);
+    // 只看状态时也是。
+    let mut h = Harness::live(b"");
+    h.state.set_visible(false, h.now);
+    let now = h.later(HIDE_GRACE);
+    h.state.tick(now);
+    assert!(h.apply(vec![msg(error.clone())]).exited);
+    // 断开后重新连上时连不成：回到断开，用户可以再点重开。
+    let mut h = Harness::live(b"last");
+    h.apply(vec![LinkEvent::Lost]);
+    h.state.reconnect(h.now);
+    let changes = h.apply(vec![msg(error.clone())]);
+    assert!(changes.lost && !changes.exited);
     assert_eq!(name(h.state.screen()), "Lost(screen)");
     // 不在连的时候的错误只记日志。
     let mut h = Harness::live(b"");
-    assert!(!h.apply(vec![msg(error)]).lost);
+    let changes = h.apply(vec![msg(error)]);
+    assert!(!changes.lost && !changes.exited);
     assert_eq!(name(h.state.screen()), "Live");
 }
 

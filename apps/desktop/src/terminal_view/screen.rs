@@ -10,12 +10,17 @@
 //! 后台标签不留界面这份 VT：离开显示 `HIDE_GRACE` 后改成只看状态（`AttachMode::MetaOnly`），回到
 //! 显示时重新要一份屏幕。只看状态时标题、agent、响铃、命令历史照常从宿主来。
 //!
-//! 通知：连上时宿主给的状态（`Attached` 里带的，包括只看状态时第一次给的）是「现在的样子」，不是
-//! 刚发生的变化，不发 agent 停下来的通知；和宿主断开以后也不发。
+//! 通知：第一次连上（建视图、断开后重新连上）时宿主给的状态（`Attached` 里带的，包括只看状态时
+//! 第一次给的）是「现在的样子」，不是刚发生的变化，不发 agent 停下来的通知；和宿主断开以后也不发。
+//! 之后在看屏幕和只看状态之间切换、`Resync` 时重新连上，`Attached` 带的状态和视图记着的比：发出
+//! `Attach` 到收到 `Attached` 之间的 `Meta` 被连接那一层丢掉了，agent 恰好在这时停下来的话靠它通知。
 
-use std::time::{Duration, Instant};
+use std::{
+    collections::HashSet,
+    time::{Duration, Instant},
+};
 
-use runode_protocol::{AttachMode, FinishedCommand, HostMsg};
+use runode_protocol::{AttachMode, FinishedCommand, HostMsg, SessionId};
 use runode_shared_types::{agent::Agent, grid::GridSize, session::SessionMeta, settings::TermSettings};
 
 use crate::session_host::{LinkEvent, Screen as HostScreen};
@@ -23,7 +28,7 @@ use crate::session_host::{LinkEvent, Screen as HostScreen};
 /// 离开显示这么久后丢掉界面这份 VT、只看状态；这期间切回来就什么都不用做。
 pub(super) const HIDE_GRACE: Duration = Duration::from_secs(5);
 /// 回到显示时主线程最多等这么久拿到宿主给的屏幕；等不到先画背景，到了再补上。
-pub(super) const SHOW_WAIT: Duration = Duration::from_millis(30);
+pub(crate) const SHOW_WAIT: Duration = Duration::from_millis(30);
 
 /// 界面这份 VT 要状态机做的事。`Session` 实现它；测试里用假的。
 pub(super) trait Vt {
@@ -127,6 +132,31 @@ pub(super) struct ScreenState<S> {
     visible: bool,
     /// 从什么时候起不显示，见 `tick`。
     hidden_since: Option<Instant>,
+    /// `meta` 是宿主给过的（不是建视图时的空白），`Attached` 带的状态可以和它比，见 `screen_arrived`。
+    meta_known: bool,
+    /// 正在断开后重新连上：这时连不成多半是宿主还没准备好，按断开处理，用户可以再点重开；平常连不成
+    /// 是会话已经没了，按 shell 退出处理。
+    reconnecting: bool,
+}
+
+/// 和宿主断开后点了「在原目录重开」、重新连上宿主以后怎么办。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum Reopen {
+    /// 接着用原来的会话（重新连上它）。宿主列不出会话时也这样：会话真没了宿主会回错，视图回到断开，
+    /// 用户可以再点。
+    Resume,
+    /// 宿主确实没有这个会话了：在原来的目录开一个新的换上。
+    Replace,
+}
+
+/// 重新连上宿主以后，按宿主列出的还活着的会话（列不出时为 `None`）决定会话 `id` 怎么办。列不出时
+/// 不能当成会话都没了：换上新会话会结束原来那个，宿主只是一时没回话的话，用户还活着的会话（可能
+/// 有 agent 在跑）就被结束掉了。
+pub(super) fn reopen_plan(id: SessionId, alive: Option<&HashSet<SessionId>>) -> Reopen {
+    match alive {
+        Some(alive) if !alive.contains(&id) => Reopen::Replace,
+        _ => Reopen::Resume,
+    }
 }
 
 impl<S: Vt> ScreenState<S> {
@@ -142,6 +172,8 @@ impl<S: Vt> ScreenState<S> {
             attaching: None,
             visible: true,
             hidden_since: None,
+            meta_known: true,
+            reconnecting: false,
         }
     }
 
@@ -158,6 +190,8 @@ impl<S: Vt> ScreenState<S> {
             attaching: Some(mode),
             visible: !meta_only,
             hidden_since: meta_only.then_some(now),
+            meta_known: false,
+            reconnecting: false,
         }
     }
 
@@ -280,6 +314,9 @@ impl<S: Vt> ScreenState<S> {
             return None;
         };
         let keep = session.take();
+        self.reconnecting = true;
+        // 断开期间的变化不通知，重新连上时宿主给的状态当作第一次给的。
+        self.meta_known = false;
         if self.visible {
             self.screen = Screen::Attaching { since: now, keep };
             self.attaching = Some(AttachMode::Snapshot);
@@ -349,12 +386,24 @@ impl<S: Vt> ScreenState<S> {
         }
         let attached = &screen.attached;
         let (mode, channel, size) = (attached.mode, attached.channel, attached.size);
+        // 只认最近一次 `Attach` 要的那种：要屏幕时到了只看状态的（或者反过来）是之前那次的，不管它。
+        // 连接那一层已经只交最近一次的，这里再挡一道。
+        if let Some(wanted) = self.attaching
+            && (wanted == AttachMode::MetaOnly) != (mode == AttachMode::MetaOnly)
+        {
+            tracing::debug!("ignored a {mode:?} screen while waiting for {wanted:?}");
+            return;
+        }
         if !self.sized {
             self.last_size = size;
         }
         self.attaching = None;
-        // 连上时的状态是现在的样子，不是刚发生的变化，不通知。
-        self.set_meta(attached.meta.clone(), false, changes);
+        self.reconnecting = false;
+        // 第一次连上时的状态是现在的样子，不是刚发生的变化，不通知；之后重新连上时和记着的比，agent
+        // 从工作中停了下来照样通知（这个变化的 `Meta` 被连接那一层丢掉了）。
+        let notify = self.meta_known && self.meta.agent.is_some_and(Agent::is_working);
+        self.set_meta(attached.meta.clone(), notify, changes);
+        self.meta_known = true;
         changes.replaced = true;
         if mode == AttachMode::MetaOnly {
             self.screen = Screen::Hidden;
@@ -399,6 +448,7 @@ impl<S: Vt> ScreenState<S> {
         };
         self.screen = Screen::Lost { session };
         self.attaching = None;
+        self.reconnecting = false;
         changes.lost = true;
     }
 
@@ -439,10 +489,19 @@ impl<S: Vt> ScreenState<S> {
                     other => self.screen = other,
                 }
             }
-            // 正连着时的错误是这次没连成（多半是会话已经没了）：按断开处理，能在原目录重开。
+            // 正连着时的错误是这次没连成。断开后重新连上时按断开处理，用户可以再点重开；平常是会话
+            // 已经没了（比如被命令行结束了，它的 `Exited` 在连的时候被连接那一层丢掉了），按 shell
+            // 退出处理，关掉这个终端。
             HostMsg::Error { message, .. } if self.attaching.is_some() => {
                 tracing::warn!("failed to attach: {message}");
-                self.lose(changes);
+                if self.reconnecting {
+                    self.reconnecting = false;
+                    self.lose(changes);
+                } else {
+                    self.attaching = None;
+                    self.exited = true;
+                    changes.exited = true;
+                }
             }
             HostMsg::Error { message, .. } => tracing::warn!("the host reported: {message}"),
             _ => {}

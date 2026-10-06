@@ -79,6 +79,8 @@ pub struct WriteScreenFile(pub ScreenFile);
 /// 写好的文件怎么处理：复制路径（`CopyPath`）、把路径粘贴进终端（`PastePath`）或者用系统默认
 /// 程序打开（`Open`）。和快捷键配置里解析出来的是同一个类型，不用再转换。
 pub use runode_config::keybind::ScreenFile;
+/// 回到显示时主线程最多等这么久拿到宿主给的屏幕，见 `TerminalView::wait_for_screen`。
+pub(crate) use screen::SHOW_WAIT;
 
 const MIN_FONT_SIZE: f32 = 6.;
 const MAX_FONT_SIZE: f32 = 72.;
@@ -134,6 +136,9 @@ pub struct TerminalView {
     events: Events,
     /// 离开显示后等 `HIDE_GRACE` 再丢掉界面这份 VT 的计时器。
     _hide_timer: Option<Task<()>>,
+    /// 建视图时就已经到了的那件「之后不再有事件」的事（退出、断开）：要等外层订阅好这个视图的事件
+    /// 再处理，读事件的任务和回到显示时等屏幕的地方先处理它。
+    pending_end: Option<LinkEvent>,
     /// 最近画出的默认前景色和背景色；没有界面这份 VT（只看状态、断开）时标签栏和背景用它。
     colors: (Rgb, Rgb),
     /// 调用方记着的这个终端的目录，宿主还没报告目录时用，见 `reattach`。

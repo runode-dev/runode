@@ -14,7 +14,7 @@ use runode_shared_types::pane::{Node, SplitId};
 use super::{WindowView, persistence, project::Project};
 use crate::{
     persist,
-    terminal_view::{TerminalEvent, TerminalView},
+    terminal_view::{SHOW_WAIT, TerminalEvent, TerminalView},
 };
 
 /// 标签的标识，标签挪动位置后不变。
@@ -315,16 +315,24 @@ impl WindowView {
     /// 告诉窗口里的每个终端它显示着没有：当前 workspace 当前标签里的分屏都算显示着（被放大的
     /// 分屏挡住的也算，取消放大时要马上画得出来），其余的离开显示一段时间后丢掉界面这份 VT、只看
     /// 状态，见 `TerminalView::set_visible`。显示的标签变了、往不显示的标签里加了终端时调。
+    ///
+    /// 要重新要屏幕的先一起发出去，再按同一个截止时间依次等，一次显示好几个分屏时总共最多等
+    /// `SHOW_WAIT`，不是每个各等一份。
     pub(super) fn sync_visibility(&self, window: &mut Window, cx: &mut Context<Self>) {
+        let deadline = Instant::now() + SHOW_WAIT;
+        let mut waiting = Vec::new();
         for (wi, workspace) in self.workspaces.iter().enumerate() {
             for (ti, tab) in workspace.tabs.iter().enumerate() {
                 let shown = self.is_shown(wi, ti);
                 for (view, _) in tab.panes.values() {
-                    if view.read(cx).visible() != shown {
-                        view.update(cx, |view, cx| view.set_visible(shown, window, cx));
+                    if view.read(cx).visible() != shown && view.update(cx, |view, cx| view.request_visible(shown, cx)) {
+                        waiting.push(view.clone());
                     }
                 }
             }
+        }
+        for view in waiting {
+            view.update(cx, |view, cx| view.wait_for_screen(deadline, window, cx));
         }
     }
 

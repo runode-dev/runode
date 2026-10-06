@@ -35,7 +35,7 @@ use runode_terminal::{
 
 use super::{
     DEFAULT_TITLE, Events, MAX_FONT_SIZE, MIN_FONT_SIZE, TerminalEvent, TerminalView,
-    screen::{Attach, Changes, HIDE_GRACE, SHOW_WAIT, ScreenState},
+    screen::{Attach, Changes, HIDE_GRACE, Reopen, SHOW_WAIT, ScreenState, reopen_plan},
 };
 use crate::{
     config::AppConfig,
@@ -171,7 +171,14 @@ impl TerminalView {
         }
         let (screen, rx) = if visible {
             let (screen, rx) = link.attach_now(id, None, AttachMode::Snapshot, ATTACH_TIMEOUT)?;
-            (live(id, screen, &config.term_settings())?, rx)
+            match live(id, screen, &config.term_settings()) {
+                Ok(screen) => (screen, rx),
+                Err(err) => {
+                    // 不留着订阅：不然宿主一直当它有窗口在看，进不了后台会话。
+                    link.detach(id);
+                    return Err(err);
+                }
+            }
         } else {
             let rx = link.attach(id, None, AttachMode::MetaOnly);
             (ScreenState::new_attaching(AttachMode::MetaOnly, PROVISIONAL_SIZE, Instant::now()), rx)
@@ -209,6 +216,11 @@ impl TerminalView {
     /// 只在取事件时借用：回到显示时主线程要直接从它取（见 `wait_for_screen`）。
     fn read_events(events: Events, window: &mut Window, cx: &mut Context<Self>) -> Task<()> {
         cx.spawn_in(window, async move |this, cx| {
+            // 建视图时已经到了的结束（见 `pending_end`）先处理：任务排上主线程时外层已经订阅好了。
+            let ended = this.update_in(cx, |view, window, cx| view.handle_pending_end(window, cx));
+            if !matches!(ended, Ok(false)) {
+                return;
+            }
             loop {
                 let next = futures::future::poll_fn(|task| events.borrow_mut().poll_next_unpin(task)).await;
                 let Some(first) = next else { break };
@@ -294,8 +306,12 @@ impl TerminalView {
         }
         if changes.exited {
             // 退出前响过的铃先通知：外层收到 `Exited` 就关掉分屏，之后再通知就找不到这个终端了。
-            self.ring_bell(cx);
-            cx.emit(TerminalEvent::Exited);
+            // 推迟到这一轮的副作用处理时再发：刚建好的视图（比如建好就切到显示、在主线程上等屏幕时
+            // 收到了退出）外层的订阅要到那时才生效。
+            cx.defer_in(window, |view, _, cx| {
+                view.ring_bell(cx);
+                cx.emit(TerminalEvent::Exited);
+            });
         }
         if self.screen.live().is_some_and(Session::render_held) {
             self.schedule_hold_timeout(cx);
@@ -343,18 +359,29 @@ impl TerminalView {
 
     /// 视图在不在窗口里显示（窗口当前 workspace 当前标签里的分屏，被放大的分屏挡住的也算）。
     /// 离开显示 `HIDE_GRACE` 后只看状态、丢掉界面这份 VT；回到显示时已经丢了的话按视图的尺寸
-    /// 重新要一份屏幕，最多等 `SHOW_WAIT`，等不到先画背景，到了再补上。
+    /// 重新要一份屏幕，最多等 `SHOW_WAIT`，等不到先画背景，到了再补上。窗口里一次调度好几个终端的
+    /// 用 `request_visible` 加 `wait_for_screen`。
+    // 窗口的调度（`WindowView::sync_visibility`）分两步做；只显示一个终端的调用方用它。
+    #[allow(dead_code)]
     pub fn set_visible(&mut self, visible: bool, window: &mut Window, cx: &mut Context<Self>) {
-        let now = Instant::now();
-        let attach = self.screen.set_visible(visible, now);
+        if self.request_visible(visible, cx) {
+            self.wait_for_screen(Instant::now() + SHOW_WAIT, window, cx);
+        }
+    }
+
+    /// `set_visible` 的前一半：记下显示与否，回到显示时要是已经丢了界面这份 VT，发出要屏幕的
+    /// `Attach` 并返回 true，接着用 `wait_for_screen` 等。一次显示好几个终端时先都发出去再一起等
+    /// （见 `WindowView::sync_visibility`），不必一个等完再要下一个。
+    pub fn request_visible(&mut self, visible: bool, cx: &mut Context<Self>) -> bool {
+        let attach = self.screen.set_visible(visible, Instant::now());
         if visible {
             self._hide_timer = None;
             if let Some(attach) = attach {
                 self.send_attach(attach);
-                self.wait_for_screen(window, cx);
                 cx.notify();
+                return true;
             }
-            return;
+            return false;
         }
         if self._hide_timer.is_none() && !self.screen.visible() {
             self._hide_timer = Some(cx.spawn(async move |this, cx| {
@@ -362,6 +389,7 @@ impl TerminalView {
                 this.update(cx, |view, cx| view.hide_if_due(cx)).ok();
             }));
         }
+        false
     }
 
     /// 视图显示着，见 `set_visible`。
@@ -380,14 +408,15 @@ impl TerminalView {
         }
     }
 
-    /// 在主线程上等宿主给屏幕，最多等到 `SHOW_WAIT`，期间到的事件照常处理。等的时候直接从收事件
+    /// 在主线程上等宿主给屏幕，最多等到 `deadline`，期间到的事件照常处理。等的时候直接从收事件
     /// 的一端取，用的是自己的唤醒方，所以之后要重新起读事件的任务。
-    fn wait_for_screen(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    pub fn wait_for_screen(&mut self, deadline: Instant, window: &mut Window, cx: &mut Context<Self>) {
         let started = Instant::now();
-        let deadline = started + SHOW_WAIT;
+        // 建视图时已经到了的结束先处理：屏幕不会再来了，不用等。
+        let ended = self.handle_pending_end(window, cx);
         let waker = futures::task::waker(Arc::new(Unpark(thread::current())));
         let mut task = std::task::Context::from_waker(&waker);
-        while self.screen.is_attaching() {
+        while !ended && self.screen.is_attaching() {
             let mut events = Vec::new();
             let mut closed = false;
             {
@@ -406,6 +435,7 @@ impl TerminalView {
             let got = !events.is_empty();
             if got {
                 self.handle_link_events(events, window, cx);
+                self.ring_bell(cx);
             }
             let now = Instant::now();
             if closed || now >= deadline {
@@ -416,11 +446,27 @@ impl TerminalView {
             }
         }
         if self.screen.is_attaching() {
-            tracing::debug!("session {}: no screen within {SHOW_WAIT:?}, drawing the background first", self.id);
+            tracing::debug!(
+                "session {}: no screen after {:?}, drawing the background first",
+                self.id,
+                started.elapsed()
+            );
         } else {
             tracing::debug!("session {}: screen shown after {:?}", self.id, started.elapsed());
         }
         self._reader = Self::read_events(self.events.clone(), window, cx);
+        cx.notify();
+    }
+
+    /// 处理建视图时就已经到了的那件「之后不再有事件」的事（退出、断开），见 `pending_end`；返回
+    /// 有没有。
+    fn handle_pending_end(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
+        let Some(end) = self.pending_end.take() else {
+            return false;
+        };
+        self.handle_link_events(vec![end], window, cx);
+        self.ring_bell(cx);
+        true
     }
 
     /// 和宿主断开后点了「在原目录重开」：先重新连上宿主；这个终端的会话还在就接着用它，不在了就
@@ -433,23 +479,29 @@ impl TerminalView {
             tracing::warn!("failed to reconnect to the host: {err:#}");
             return;
         }
-        let alive: HashSet<SessionId> = match session_host::list_sessions() {
-            Ok(sessions) => sessions.into_iter().filter(|session| !session.exited).map(|session| session.id).collect(),
+        let alive: Option<HashSet<SessionId>> = match session_host::list_sessions() {
+            Ok(sessions) => {
+                Some(sessions.into_iter().filter(|session| !session.exited).map(|session| session.id).collect())
+            }
             Err(err) => {
                 tracing::warn!("failed to list the host's sessions after reconnecting: {err:#}");
-                HashSet::new()
+                None
             }
         };
-        if alive.contains(&self.id) {
-            self.resume(window, cx);
-        } else {
-            let (size, cwd) = (self.screen.last_size(), self.cwd());
-            if let Err(err) = self.replace_session(size, cwd, window, cx) {
-                tracing::warn!("failed to reopen the terminal: {err:#}");
+        match reopen_plan(self.id, alive.as_ref()) {
+            Reopen::Resume => self.resume(window, cx),
+            Reopen::Replace => {
+                let (size, cwd) = (self.screen.last_size(), self.cwd());
+                if let Err(err) = self.replace_session(size, cwd, window, cx) {
+                    tracing::warn!("failed to reopen the terminal: {err:#}");
+                }
             }
         }
-        let generation = cx.try_global::<HostReconnected>().map_or(0, |reconnected| reconnected.generation) + 1;
-        cx.set_global(HostReconnected { generation, alive: Rc::new(alive) });
+        // 列不出会话时不知道别的终端的会话还在不在，不替它们决定，各自点重开时再看。
+        if let Some(alive) = alive {
+            let generation = cx.try_global::<HostReconnected>().map_or(0, |reconnected| reconnected.generation) + 1;
+            cx.set_global(HostReconnected { generation, alive: Rc::new(alive) });
+        }
     }
 
     /// 别的终端重新连上了宿主：自己也断开着、会话还在的话重新连上。
@@ -474,7 +526,7 @@ impl TerminalView {
         if attach.mode == AttachMode::MetaOnly {
             self._reader = Self::read_events(self.events.clone(), window, cx);
         } else {
-            self.wait_for_screen(window, cx);
+            self.wait_for_screen(Instant::now() + SHOW_WAIT, window, cx);
         }
         cx.notify();
     }
@@ -505,6 +557,8 @@ impl TerminalView {
         self.screen = screen;
         self.started = true;
         self.events = Rc::new(RefCell::new(rx));
+        // 换下来的会话的结束不再要。
+        self.pending_end = None;
         self._reader = Self::read_events(self.events.clone(), window, cx);
         self.vt_replaced(cx);
         cx.emit(TerminalEvent::TitleChanged);
@@ -548,8 +602,11 @@ impl TerminalView {
             view.config = cx.global::<AppConfig>().0.clone();
             // 主题等宿主标出位置后再换，见 `HostMsg::ThemeApplied`。
             let settings = view.config.term_settings();
-            if let Some(session) = view.screen.shown_mut() {
-                session.apply_config(&settings);
+            match view.screen.shown_mut() {
+                Some(session) => session.apply_config(&settings),
+                // 没有界面这份 VT 的（后台标签）收不到宿主换主题的标记，标签栏的颜色按新配置的走，
+                // 回到显示时再从屏幕读。
+                None => view.colors = (settings.foreground, settings.background),
             }
             view.font = resolve_font(&view.config.font_family, window);
             view.font_size = px(view.config.font_size.clamp(MIN_FONT_SIZE, MAX_FONT_SIZE));
@@ -587,6 +644,7 @@ impl TerminalView {
             screen,
             events: Rc::new(RefCell::new(rx)),
             _hide_timer: None,
+            pending_end: None,
             colors: (settings.foreground, settings.background),
             start_dir: None,
             id,
@@ -651,30 +709,16 @@ impl TerminalView {
                 early.push(event);
             }
         }
-        let last = if ended_early { early.pop() } else { None };
+        // 结束留给读事件的任务（或者回到显示时等屏幕的地方）：现在还没有谁订阅这个视图的事件。
+        view.pending_end = if ended_early { early.pop() } else { None };
         if !early.is_empty() {
             view.handle_link_events(early, window, cx);
             // 补发的输出里响过铃的话，这时通知外层会丢：订阅要等这一轮的副作用处理到时才生效，
             // 排在它前面发出的事件没人收。推迟到外层订阅好以后再通知。
             cx.defer_in(window, |view, _, cx| view.ring_bell(cx));
         }
-        view._reader = match last {
-            Some(last) => Self::handle_later(last, window, cx),
-            None => Self::read_events(view.events.clone(), window, cx),
-        };
+        view._reader = Self::read_events(view.events.clone(), window, cx);
         view
-    }
-
-    /// 建视图时就已经到了的那件「之后不再有事件」的事（退出、断开）留到外层订阅好这个视图的事件
-    /// 以后再处理。
-    fn handle_later(last: LinkEvent, window: &mut Window, cx: &mut Context<Self>) -> Task<()> {
-        cx.spawn_in(window, async move |this, cx| {
-            this.update_in(cx, |view, window, cx| {
-                view.handle_link_events(vec![last], window, cx);
-                view.ring_bell(cx);
-            })
-            .ok();
-        })
     }
 
     /// 宿主里这个终端的会话。
@@ -683,15 +727,11 @@ impl TerminalView {
     }
 
     /// 宿主最近一次公布的这个会话的状态。
-    // 后台标签和存档恢复用上它之前先放着。
-    #[allow(dead_code)]
     pub fn meta(&self) -> &SessionMeta {
         self.screen.meta()
     }
 
     /// 最近一次别的终端里的程序操作这个会话的记录，见 `SessionMeta::driver`。
-    // 驱动标记的显示用上它之前先放着。
-    #[allow(dead_code)]
     pub fn driver(&self) -> Option<&Driver> {
         self.screen.meta().driver.as_ref()
     }
