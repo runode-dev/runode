@@ -54,6 +54,11 @@ pub(crate) fn find_repo(dir: &Path) -> Option<(PathBuf, PathBuf)> {
     Some((root, git_dir))
 }
 
+/// `dir` 在不在 git 仓库里；比读整份状态便宜，只问一次 git。
+pub fn in_repo(dir: &Path) -> bool {
+    find_repo(dir).is_some()
+}
+
 /// git 给的仓库根解析过符号链接；按 `dir` 的写法换回来，界面拿 `dir` 下的路径和它比前缀
 /// 才对得上。`dir` 本身不在仓库根下面（仓库内部的符号链接）时保持原样。
 fn local_root(dir: &Path, root: PathBuf) -> PathBuf {

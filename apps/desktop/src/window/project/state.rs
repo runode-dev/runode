@@ -37,6 +37,11 @@ pub(in crate::window) struct Project {
     pub(super) dir: Option<PathBuf>,
     /// 最近一次读到的 git 状态：主仓库以及它里面的子模块和嵌套仓库；不在 git 仓库里时为空。
     pub git: Option<git::Repos>,
+    /// 当前目录在不在 git 仓库里，没问过时为空；面板都收着时只靠它决定显不显示 Git 按钮。
+    pub(super) in_repo: Option<bool>,
+    /// 上次问 `in_repo` 的目录和时刻，以及后台是不是正在问。
+    pub(super) probed: Option<(PathBuf, Instant)>,
+    pub(super) probing: bool,
     pub expanded_dirs: HashSet<PathBuf>,
     pub(super) listings: HashMap<PathBuf, Vec<DirEntry>>,
     /// 文件树里选中的路径。
@@ -294,6 +299,8 @@ impl Workspace {
         // 第一次读时 `root` 还是空的，下面换上根目录时一定算作有变化。
         let mut changed = false;
         project.untracked = scan.untracked;
+        project.in_repo = Some(scan.git.is_some());
+        project.probed = Some((scan.dir.clone(), Instant::now()));
         // 终端换到了别的仓库或目录：上一处的目录列表不再相干。展开的目录
         // 是绝对路径，留着，回到原处时还是展开的。
         if project.root.as_ref() != Some(&scan.root) {

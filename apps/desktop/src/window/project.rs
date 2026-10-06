@@ -37,6 +37,8 @@ pub(super) use watch::ProjectWatch;
 
 /// 显示右侧面板时隔这么久看一次终端换没换目录。
 pub(super) const POLL_INTERVAL: Duration = Duration::from_secs(1);
+/// 面板都收着时，隔多久再问一次当前目录在不在 git 仓库里（`git init` 之后按钮才出得来）。
+const REPO_PROBE_INTERVAL: Duration = Duration::from_secs(5);
 /// 监听不了目录时退回定时重读，至少隔这么久；上次读得慢时，至少隔上次耗时的
 /// `POLL_BACKOFF` 倍，大仓库里不至于一直有 git 在跑。
 const FALLBACK_INTERVAL: Duration = Duration::from_secs(2);
@@ -194,6 +196,7 @@ impl WindowView {
         if !self.project_visible() {
             // 切到右侧什么都不显示的 workspace 时，放掉上一个 workspace 的目录监听。
             self.sync_project_watch();
+            self.probe_repo(cx);
             return;
         }
         let dir = self.project_dir(cx);
@@ -236,10 +239,48 @@ impl WindowView {
         .detach();
     }
 
+    /// 面板都收着时不读整份状态，只在终端换了目录、或离上次问过 `REPO_PROBE_INTERVAL` 之后
+    /// 问一下当前目录在不在 git 仓库里，标题栏据此决定显不显示 Git 按钮。
+    fn probe_repo(&mut self, cx: &mut Context<Self>) {
+        let dir = self.project_dir(cx);
+        let workspace = &mut self.workspaces[self.active];
+        let project = &mut workspace.project;
+        let fresh =
+            project.probed.as_ref().is_some_and(|(probed, at)| *probed == dir && at.elapsed() < REPO_PROBE_INTERVAL);
+        if project.probing || fresh {
+            return;
+        }
+        project.probing = true;
+        let id = workspace.id;
+        let job = cx.background_spawn({
+            let dir = dir.clone();
+            async move { runode_git::in_repo(&dir) }
+        });
+        cx.spawn(async move |this, cx| {
+            let in_repo = job.await;
+            this.update(cx, |this, cx| {
+                // 问的时候 workspace 可能已经关掉了。
+                let Some(workspace) = this.workspaces.iter_mut().find(|workspace| workspace.id == id) else {
+                    return;
+                };
+                let project = &mut workspace.project;
+                project.probing = false;
+                if project.in_repo != Some(in_repo) {
+                    project.in_repo = Some(in_repo);
+                    cx.notify();
+                }
+                project.probed = Some((dir, Instant::now()));
+            })
+            .ok();
+        })
+        .detach();
+    }
+
     /// 定时检查：终端换了目录时重读；有没读的改动时按 `refresh_if_due` 重读；监听不了时
     /// 退回定时重读，离上次开始读至少隔 `FALLBACK_INTERVAL`，上次读得慢时按耗时拉长。
     pub(super) fn poll_project(&mut self, cx: &mut Context<Self>) {
         if !self.project_visible() {
+            self.probe_repo(cx);
             return;
         }
         let dir = self.project_dir(cx);
@@ -373,10 +414,9 @@ impl WindowView {
             )
     }
 
-    /// 当前目录读过了且不在 git 仓库里时藏起 Git 按钮；面板开着时仍留着，不然没处关它。
+    /// 当前目录问过或读过了且不在 git 仓库里时藏起 Git 按钮；面板开着时仍留着，不然没处关它。
     fn git_button_visible(&self) -> bool {
-        let project = &self.workspace().project;
-        self.git_shown || project.dir.is_none() || project.git.is_some()
+        self.git_shown || self.workspace().project.in_repo != Some(false)
     }
 
     /// 标题栏右上角开关 Git 面板和文件树的两个按钮，打开着的底色亮一些。
