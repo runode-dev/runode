@@ -10,6 +10,7 @@ use gpui::{
 use runode_shared_types::color::Rgb;
 
 use super::{DiffTarget, Preview};
+use crate::window::project::follow_move;
 use crate::{
     assets::DIFF_ICON,
     ui::{file_icons::file_icon, hsla, tooltip::tooltip},
@@ -118,8 +119,8 @@ impl PreviewTabs {
     pub(super) fn moved(&mut self, from: &Path, to: &Path) -> Vec<Preview> {
         let mut old = Vec::new();
         for tab in self.tabs.iter_mut().filter(|tab| tab.diff.is_none()) {
-            if let Ok(rest) = tab.path.strip_prefix(from) {
-                let new = Preview::new(to.join(rest), None, tab.pinned);
+            if let Some(path) = follow_move(&tab.path, from, to) {
+                let new = Preview::new(path, None, tab.pinned);
                 old.push(std::mem::replace(tab, new));
             }
         }
@@ -406,5 +407,8 @@ mod tests {
         let old = previews.moved(Path::new("dir"), Path::new("new"));
         assert_eq!(old.len(), 2);
         assert_eq!(tabs(&previews), ["a", "new/b", ">new/c*"]);
+        // 改名的就是开着的文件：新路径不带结尾的 `/`。
+        previews.moved(Path::new("a"), Path::new("z"));
+        assert_eq!(previews.tabs[0].path.as_os_str(), "z");
     }
 }

@@ -32,7 +32,7 @@ use crate::{
 use scan::scan;
 
 pub(super) use scan::Decoration;
-pub(super) use state::Project;
+pub(super) use state::{Project, follow_move};
 pub(super) use watch::ProjectWatch;
 
 /// 显示右侧面板时隔这么久看一次终端换没换目录。

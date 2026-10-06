@@ -12,7 +12,7 @@ use super::{
 };
 use crate::{
     ui::file_icons::{file_icon, folder_icon},
-    window::{WindowView, inline_edit::InlineEdit},
+    window::{WindowView, inline_edit::InlineEdit, project::follow_move},
 };
 
 /// 剪切或复制下来等着粘贴的文件或目录。
@@ -209,9 +209,9 @@ impl WindowView {
     fn after_move(&mut self, from: &Path, to: &Path, cx: &mut Context<Self>) {
         self.workspace_mut().project.moved(from, to);
         if let Some(clip) = &mut self.file_clipboard
-            && let Ok(rest) = clip.path.strip_prefix(from)
+            && let Some(path) = follow_move(&clip.path, from, to)
         {
-            clip.path = to.join(rest);
+            clip.path = path;
         }
         let dirs = [from.parent(), to.parent()].into_iter().flatten().map(Path::to_path_buf).collect();
         self.relist_and_reveal(dirs, to, cx);

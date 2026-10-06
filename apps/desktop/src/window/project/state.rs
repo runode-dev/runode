@@ -215,7 +215,7 @@ impl Project {
 
     /// `from` 改名或挪到了 `to`：展开的目录和选中的路径跟过去，旧路径下读过的目录不再要。
     pub fn moved(&mut self, from: &Path, to: &Path) {
-        let follow = |path: &Path| path.strip_prefix(from).ok().map(|rest| to.join(rest));
+        let follow = |path: &Path| follow_move(path, from, to);
         self.expanded_dirs = self.expanded_dirs.drain().map(|dir| follow(&dir).unwrap_or(dir)).collect();
         self.listings.retain(|dir, _| !dir.starts_with(from));
         if let Some(selected) = self.selected.as_deref().and_then(follow) {
@@ -336,6 +336,13 @@ impl Workspace {
         }
         changed
     }
+}
+
+/// `from` 改名或挪到了 `to` 之后 `path` 的新路径；`path` 不是 `from` 也不在它下面时为 `None`。
+/// `path` 就是 `from` 时直接是 `to`：`to.join("")` 会多出结尾的 `/`，把文件当成目录去读。
+pub fn follow_move(path: &Path, from: &Path, to: &Path) -> Option<PathBuf> {
+    let rest = path.strip_prefix(from).ok()?;
+    Some(if rest.as_os_str().is_empty() { to.to_path_buf() } else { to.join(rest) })
 }
 
 #[cfg(test)]
