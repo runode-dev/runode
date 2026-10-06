@@ -1,14 +1,19 @@
 //! `WindowView` 和存档之间的转换，以及什么时候写存档。
 //!
 //! 布局一变就把新快照交给 `Saver`，攒一小会儿再写文件；退出时把各窗口最新的布局写一次。
-//! 关掉最后一个窗口也会退出，这时留下它的布局，下次启动恢复；里面的终端都关完了的窗口
-//! 不留。终端的目录随 `cd` 变化，不单独盯着：下次布局变化或退出时一并记下。
+//! 关掉最后一个窗口、一下关掉所有窗口也会退出，这时关掉的窗口都留下布局，下次启动恢复，和
+//! 退出一样；还有别的窗口开着时单独关掉的窗口（里面的会话随之结束）和里面的终端都关完了的
+//! 窗口不留。终端的目录随 `cd` 变化，不单独盯着：下次布局变化或退出时一并记下。
+//!
+//! 每个终端记着宿主里的会话。恢复时先问宿主还有哪些会话，接得上的接上，其余在原目录新开，
+//! 见 `persist::plan_restore`。
 
 use std::{collections::HashMap, io, path::Path, time::Duration};
 
 use gpui::{
     App, Bounds, Context, EntityId, Global, Task, WeakEntity, Window, WindowBounds, WindowOptions, point, px, size,
 };
+use runode_protocol::SessionInfo;
 use runode_shared_types::pane::{Node, Split};
 
 use super::{
@@ -18,6 +23,7 @@ use super::{
 use crate::{
     persist::{self, SavedBounds, SavedNode, SavedTab, SavedWindow, SavedWorkspace, State, WindowMode},
     prespawn::Prespawned,
+    session_host::{self, Mode},
     terminal_view::TerminalView,
 };
 
@@ -29,10 +35,9 @@ pub(super) const SHELL_STARTUP: Duration = Duration::from_secs(5);
 
 #[derive(Default)]
 struct Saver {
-    /// 开着的窗口和它们最近一次的布局，按打开的先后。
+    /// 开着的窗口和它们最近一次的布局，按打开的先后；关掉它们 app 随即退出的窗口（见 `closed`）
+    /// 也留着，记关掉时的布局。
     windows: Vec<(WeakEntity<WindowView>, SavedWindow)>,
-    /// 用户关掉的最后一个窗口的布局：关掉它随后就退出了，下次启动要恢复它。
-    last_closed: Option<SavedWindow>,
     /// 上次写进文件的内容，没变就不再写。
     written: Option<State>,
     /// 等着写文件的任务。
@@ -64,7 +69,8 @@ pub fn install(cx: &mut App) {
 }
 
 /// 上次存下的各个窗口，以及恢复时打开它们用的窗口选项（位置、大小、所在屏幕）。没有存档或
-/// 读不了时为空；文件坏了时挪到一边，从默认布局开始。
+/// 读不了时为空；文件坏了时挪到一边，从默认布局开始。终端记的会话按宿主里还活着的会话定下
+/// 接不接（`persist::plan_restore`），接不上又没人要的会话这时结束掉。
 pub fn saved_window_options(cx: &App) -> Vec<(SavedWindow, WindowOptions)> {
     let windows = match persist::load() {
         Ok(state) => state.map(|state| state.windows).unwrap_or_default(),
@@ -76,14 +82,33 @@ pub fn saved_window_options(cx: &App) -> Vec<(SavedWindow, WindowOptions)> {
             Vec::new()
         }
     };
-    windows
+    let windows: Vec<_> = windows.into_iter().filter(|window| !window.workspaces.is_empty()).collect();
+    let live = if windows.is_empty() { Vec::new() } else { live_sessions() };
+    let plan = persist::plan_restore(windows, &live);
+    let link = session_host::link();
+    for id in plan.end {
+        tracing::info!("ending the saved session {id}: its shell exited or never started");
+        link.kill(id);
+    }
+    plan.windows
         .into_iter()
-        .filter(|window| !window.workspaces.is_empty())
         .map(|window| {
             let options = window_options(&window.bounds, cx);
             (window, options)
         })
         .collect()
+}
+
+/// 宿主里还活着的会话。宿主跑在 app 里时它刚建好，没有上次的会话，不问；问不到时当作没有，
+/// 终端都在原目录新开，没接上的会话留在宿主里成为后台会话。
+fn live_sessions() -> Vec<SessionInfo> {
+    if session_host::mode() == Mode::InProcess {
+        return Vec::new();
+    }
+    session_host::list_sessions().unwrap_or_else(|err| {
+        tracing::warn!("failed to list the host's sessions, starting every saved terminal over: {err:#}");
+        Vec::new()
+    })
 }
 
 /// 按存档放窗口：回到原来那块屏幕的原来位置；那块屏幕不在了（比如拔掉了外接显示器）或者
@@ -132,30 +157,38 @@ pub(super) fn update(window: WeakEntity<WindowView>, snapshot: SavedWindow, cx: 
     }
 }
 
-/// 窗口关掉时把它从存档里拿掉；关掉的是最后一个窗口时留下它的布局。
+/// 窗口关掉时按 `closed` 更新存档。
 pub(super) fn track(cx: &mut Context<WindowView>) {
-    let id = cx.entity_id();
-    cx.on_release(move |view, cx| closed(view, id, cx)).detach();
+    let window = cx.weak_entity();
+    cx.on_release(move |view, cx| closed(view, window, cx)).detach();
 }
 
-fn closed(view: &mut WindowView, id: EntityId, cx: &mut App) {
+/// 窗口关掉了。关掉它以后一个窗口都不剩时，是关掉了最后一个窗口或者一下关掉了所有窗口（这时
+/// 各个窗口都先从 app 里拿掉，再一个个放掉），app 随即退出：和退出一样留下它关掉时的布局，下次
+/// 启动恢复。还有别的窗口开着时是单独关掉了它，里面的会话随之结束，从存档里拿掉。所有
+/// workspace 都关掉了的窗口不留。
+fn closed(view: &mut WindowView, window: WeakEntity<WindowView>, cx: &mut App) {
     if cx.global::<Saver>().quitting {
         return;
     }
-    let snapshot = (!view.emptied).then(|| view.snapshot(cx));
+    let leaving = cx.windows().is_empty();
+    let snapshot = (leaving && !view.emptied).then(|| view.snapshot(cx));
     let saver = cx.global_mut::<Saver>();
-    saver.windows.retain(|(window, _)| window.entity_id() != id);
-    saver.last_closed = if saver.windows.is_empty() { snapshot } else { None };
+    let id = window.entity_id();
+    match snapshot {
+        Some(snapshot) => match saver.windows.iter_mut().find(|(w, _)| w.entity_id() == id) {
+            Some((_, saved)) => *saved = snapshot,
+            None => saver.windows.push((window, snapshot)),
+        },
+        None => saver.windows.retain(|(w, _)| w.entity_id() != id),
+    }
     write(cx);
 }
 
 fn write(cx: &mut App) {
     let saver = cx.global_mut::<Saver>();
     saver.pending = None;
-    let mut windows: Vec<_> = saver.windows.iter().map(|(_, saved)| saved.clone()).collect();
-    if windows.is_empty() {
-        windows.extend(saver.last_closed.clone());
-    }
+    let windows: Vec<_> = saver.windows.iter().map(|(_, saved)| saved.clone()).collect();
     let state = State::new(windows);
     if saver.written.as_ref() == Some(&state) {
         return;
@@ -196,10 +229,11 @@ impl WindowView {
         }
     }
 
-    /// 按存档建出 workspace、标签和分屏，在记下的目录里各开一个终端。开不起来的终端跳过，
-    /// 一个终端都没有的标签和 workspace 也跳过。终端先不启动 shell，切到所在标签时由
-    /// `activate` 启动，所以启动时只有窗口里显示的那个标签占进程。`shell` 是启动时在家目录
-    /// 提前拉起的 shell，交给显示的标签里从家目录开始的终端；没用上时还回去，由调用方处理。
+    /// 按存档建出 workspace、标签和分屏：记着的会话接得上（`persist::plan_restore` 留下了）就
+    /// 接上，否则在记下的目录里开一个终端。开不起来的终端跳过，一个终端都没有的标签和
+    /// workspace 也跳过。新开的终端先不启动 shell，切到所在标签时由 `activate` 启动，所以启动
+    /// 时只有窗口里显示的那个标签占进程。`shell` 是启动时在家目录提前拉起的 shell，交给显示的
+    /// 标签里从家目录开始的新终端；没用上时还回去，由调用方处理。
     pub(super) fn restore_workspaces(
         &mut self,
         saved: SavedWindow,
@@ -220,6 +254,7 @@ impl WindowView {
                     &saved_tab.root,
                     &saved_workspace.dir,
                     home.as_deref(),
+                    shown,
                     shown.then_some(&mut shell),
                     &mut panes,
                     window,
@@ -278,41 +313,56 @@ impl WindowView {
         shell
     }
 
+    /// `shown`：这个标签显示在窗口里，接上的会话要看屏幕，否则只看状态。
     #[allow(clippy::too_many_arguments)]
     fn restore_node(
         &mut self,
         saved: &SavedNode,
         dir: &Path,
         home: Option<&Path>,
+        shown: bool,
         mut shell: Option<&mut Option<Prespawned>>,
         panes: &mut HashMap<EntityId, (gpui::Entity<TerminalView>, gpui::Subscription)>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Option<Node<EntityId>> {
         match saved {
-            SavedNode::Leaf { cwd } => {
-                let start = persist::start_dir(cwd.as_deref(), dir);
-                // 提前拉起的 shell 在家目录里，只交给同样从家目录开始的终端。
-                let in_home = start.is_none() || start.as_deref() == home;
-                let view = match shell.and_then(|shell| shell.take_if(|_| in_home)) {
-                    Some(shell) => TerminalView::adopt(shell, window, cx),
-                    None => TerminalView::unstarted(start.as_deref(), window, cx),
-                };
-                let view = match view {
-                    Ok(view) => view,
-                    Err(err) => {
-                        tracing::error!("failed to restore terminal session: {err:#}");
-                        return None;
+            SavedNode::Leaf { cwd, session, .. } => {
+                let reattached = (*session).and_then(|id| {
+                    TerminalView::reattach(id, cwd.as_deref(), shown, window, cx)
+                        .inspect_err(|err| {
+                            tracing::warn!("failed to reattach session {id}, starting over in its directory: {err:#}");
+                        })
+                        .ok()
+                });
+                let view = match reattached {
+                    Some(view) => view,
+                    None => {
+                        let start = persist::start_dir(cwd.as_deref(), dir);
+                        // 提前拉起的 shell 在家目录里，只交给同样从家目录开始的终端。
+                        let in_home = start.is_none() || start.as_deref() == home;
+                        let view = match shell.and_then(|shell| shell.take_if(|_| in_home)) {
+                            Some(shell) => TerminalView::adopt(shell, window, cx),
+                            None => TerminalView::unstarted(start.as_deref(), window, cx),
+                        };
+                        let view = match view {
+                            Ok(view) => view,
+                            Err(err) => {
+                                tracing::error!("failed to restore terminal session: {err:#}");
+                                return None;
+                            }
+                        };
+                        self.record_spawn(&view, start.as_deref());
+                        view
                     }
                 };
-                self.record_spawn(&view, start.as_deref());
                 let (id, entry) = self.pane_entry(view, window, cx);
                 panes.insert(id, entry);
                 Some(Node::Leaf(id))
             }
             SavedNode::Split { axis, ratio, first, second } => {
-                let first = self.restore_node(first, dir, home, shell.as_deref_mut(), panes, window, cx);
-                let second = self.restore_node(second, dir, home, shell, panes, window, cx);
+                let first = self.restore_node(first, dir, home, shown, shell.as_deref_mut(), panes, window, cx);
+                let second = self.restore_node(second, dir, home, shown, shell, panes, window, cx);
                 match (first, second) {
                     (Some(first), Some(second)) => {
                         let id = self.next_id();
@@ -357,12 +407,13 @@ impl WindowView {
     fn save_node(&self, node: &Node<EntityId>, tab: &Tab, cx: &App) -> SavedNode {
         match node {
             Node::Leaf(id) => {
+                let view = tab.panes[id].0.read(cx);
                 let starting = self.spawned.get(id).filter(|(at, _)| at.elapsed() < SHELL_STARTUP);
                 let cwd = match starting {
                     Some((_, start)) => start.clone(),
-                    None => tab.panes[id].0.read(cx).cwd(),
+                    None => view.cwd(),
                 };
-                SavedNode::Leaf { cwd }
+                SavedNode::Leaf { cwd, session: Some(view.session_id()), unstarted: !view.started() }
             }
             Node::Split(split) => SavedNode::Split {
                 axis: split.axis,

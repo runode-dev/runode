@@ -1,13 +1,16 @@
-//! 窗口布局的存档：开着哪些窗口，各自的 workspace、标签和分屏，以及每个终端所在的目录。
-//! 布局一变就写，下次启动时读回来，在原来的目录里重新开 shell；进程本身不保留。
+//! 窗口布局的存档：开着哪些窗口，各自的 workspace、标签和分屏，以及每个终端所在的目录和
+//! 宿主里的会话。布局一变就写，下次启动时读回来：会话还在宿主里（宿主单独一个进程跑时）就
+//! 接上它，不在了就在原来的目录里重新开 shell，见 `plan_restore`。
 //!
-//! 这里只管存档的格式和读写文件，和界面之间的转换由 `WindowView` 负责。
+//! 这里只管存档的格式、读写文件和恢复时哪些会话接得上，和界面之间的转换由 `WindowView` 负责。
 
 use std::{
+    collections::HashSet,
     fs, io,
     path::{Path, PathBuf},
 };
 
+use runode_protocol::{SessionId, SessionInfo};
 use runode_shared_types::pane::Axis;
 use serde::{Deserialize, Serialize};
 
@@ -98,13 +101,20 @@ pub struct SavedTab {
     pub zoomed: bool,
 }
 
-/// 分屏树，结构和 `pane::Node` 一样，叶子记终端所在的目录。
+/// 分屏树，结构和 `pane::Node` 一样，叶子记终端所在的目录和宿主里的会话。
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "lowercase")]
 pub enum SavedNode {
     Leaf {
         /// 取不到时为空，恢复时从 workspace 的目录开始。
         cwd: Option<PathBuf>,
+        /// 终端在宿主里的会话；记这一项以前的存档里没有。
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        session: Option<SessionId>,
+        /// 会话的 shell 还没启动过（恢复布局后一直没切过去的标签）：这样的会话接上也是空的，
+        /// 下次启动时结束它，在原目录另开。
+        #[serde(default, skip_serializing_if = "is_false")]
+        unstarted: bool,
     },
     Split {
         axis: Axis,
@@ -112,6 +122,71 @@ pub enum SavedNode {
         first: Box<SavedNode>,
         second: Box<SavedNode>,
     },
+}
+
+fn is_false(value: &bool) -> bool {
+    !*value
+}
+
+impl SavedNode {
+    /// 叶子，从左到右、从上到下。
+    fn leaves_mut(&mut self) -> Vec<&mut SavedNode> {
+        match self {
+            SavedNode::Leaf { .. } => vec![self],
+            SavedNode::Split { first, second, .. } => {
+                let mut leaves = first.leaves_mut();
+                leaves.extend(second.leaves_mut());
+                leaves
+            }
+        }
+    }
+}
+
+/// 恢复时会话怎么办，见 `plan_restore`。
+#[derive(Clone, Debug, PartialEq)]
+pub struct RestorePlan {
+    /// 要恢复的窗口：叶子的 `session` 只留下这次接得上的，其余清空（在原目录新开）。
+    pub windows: Vec<SavedWindow>,
+    /// 存档里记着、这次接不上也没人要的会话（shell 已经退出了，或者上次一直没启动），启动时
+    /// 结束掉，免得一直留在宿主里。
+    pub end: Vec<SessionId>,
+}
+
+/// 按宿主里还活着的会话 `live` 定下存档里每个终端怎么恢复。叶子记的会话要接上，得同时满足：
+/// 还在宿主里、shell 没退出、上次启动过、没有别的界面连着（`SessionInfo::claimed`），而且是
+/// 存档里第一次出现（按窗口、workspace、标签和叶子的先后；手改或者旧版本写出的重复的，后面
+/// 的在原目录新开）。不满足的清掉 `session`，在原目录新开；其中还在宿主里、没人连着、又已经
+/// 退出或者没启动过的，放进 `end`。宿主跑在 app 里时它是新的，`live` 里没有存档记的会话，全部
+/// 新开。
+pub fn plan_restore(mut windows: Vec<SavedWindow>, live: &[SessionInfo]) -> RestorePlan {
+    let mut seen = HashSet::new();
+    let mut end = Vec::new();
+    let leaves = windows
+        .iter_mut()
+        .flat_map(|window| &mut window.workspaces)
+        .flat_map(|workspace| &mut workspace.tabs)
+        .flat_map(|tab| tab.root.leaves_mut());
+    for leaf in leaves {
+        let SavedNode::Leaf { session, unstarted, .. } = leaf else {
+            continue;
+        };
+        let Some(id) = session.take() else {
+            continue;
+        };
+        let first = seen.insert(id);
+        let Some(info) = live.iter().find(|info| info.id == id) else {
+            continue;
+        };
+        if !first || info.claimed {
+            continue;
+        }
+        if info.exited || *unstarted {
+            end.push(id);
+        } else {
+            *session = Some(id);
+        }
+    }
+    RestorePlan { windows, end }
 }
 
 /// 恢复的终端从哪里开始：记下的目录还在就用它，否则用 workspace 的目录；都不在了为空，
@@ -168,7 +243,11 @@ mod tests {
     use super::*;
 
     fn leaf(cwd: &str) -> SavedNode {
-        SavedNode::Leaf { cwd: Some(cwd.into()) }
+        SavedNode::Leaf { cwd: Some(cwd.into()), session: None, unstarted: false }
+    }
+
+    fn session_leaf(id: u128, unstarted: bool) -> SavedNode {
+        SavedNode::Leaf { cwd: Some("/tmp".into()), session: Some(SessionId(id)), unstarted }
     }
 
     fn state() -> State {
@@ -180,7 +259,7 @@ mod tests {
                 second: Box::new(SavedNode::Split {
                     axis: Axis::Vertical,
                     ratio: 0.5,
-                    first: Box::new(SavedNode::Leaf { cwd: None }),
+                    first: Box::new(SavedNode::Leaf { cwd: None, session: Some(SessionId(7)), unstarted: true }),
                     second: Box::new(leaf("/")),
                 }),
             },
@@ -225,6 +304,109 @@ mod tests {
         let text = serde_json::to_string(&state).unwrap();
         assert_eq!(serde_json::from_str::<State>(&text).unwrap(), state);
         assert!(text.contains(r#""type":"split","axis":"horizontal""#), "{text}");
+    }
+
+    #[test]
+    fn leaves_keep_their_sessions_through_json() {
+        let state = state();
+        let text = serde_json::to_string(&state).unwrap();
+        assert!(text.contains(r#""session":"00000000000000000000000000000007","unstarted":true"#), "{text}");
+        // 没有会话、启动过的叶子不写这两项。
+        assert!(text.contains(r#"{"type":"leaf","cwd":"/tmp"}"#), "{text}");
+        assert_eq!(serde_json::from_str::<State>(&text).unwrap(), state);
+    }
+
+    #[test]
+    fn reads_leaves_saved_before_sessions_were_recorded() {
+        let old = r#"{"version":1,"windows":[{"bounds":{"mode":"windowed","x":0,"y":0,"width":960,"height":620},
+            "workspaces":[{"name":"tmp","dir":"/tmp","active":0,
+            "tabs":[{"focused":0,"root":{"type":"leaf","cwd":"/tmp"}}]}],"active":0}]}"#;
+        let state: State = serde_json::from_str(old).unwrap();
+        assert_eq!(
+            state.windows[0].workspaces[0].tabs[0].root,
+            SavedNode::Leaf { cwd: Some("/tmp".into()), session: None, unstarted: false }
+        );
+    }
+
+    fn info(id: u128, claimed: bool, exited: bool) -> SessionInfo {
+        SessionInfo {
+            id: SessionId(id),
+            size: runode_shared_types::grid::GridSize { cols: 80, rows: 24, cell_width_px: 8, cell_height_px: 16 },
+            meta: Default::default(),
+            clients: 0,
+            claimed,
+            exited,
+        }
+    }
+
+    fn window(tabs: Vec<SavedNode>) -> SavedWindow {
+        let mut window = state().windows.remove(0);
+        window.workspaces[0].tabs = tabs.into_iter().map(|root| SavedTab { root, focused: 0, zoomed: false }).collect();
+        window
+    }
+
+    fn sessions(windows: &[SavedWindow]) -> Vec<Option<u128>> {
+        let mut windows = windows.to_vec();
+        windows
+            .iter_mut()
+            .flat_map(|window| &mut window.workspaces)
+            .flat_map(|workspace| &mut workspace.tabs)
+            .flat_map(|tab| tab.root.leaves_mut())
+            .map(|leaf| match leaf {
+                SavedNode::Leaf { session, .. } => session.map(|id| id.0),
+                SavedNode::Split { .. } => unreachable!(),
+            })
+            .collect()
+    }
+
+    #[test]
+    fn live_sessions_are_reattached_and_the_rest_start_over() {
+        let split = SavedNode::Split {
+            axis: Axis::Vertical,
+            ratio: 0.5,
+            first: Box::new(session_leaf(1, false)),
+            second: Box::new(session_leaf(2, false)),
+        };
+        let windows =
+            vec![window(vec![split, session_leaf(3, false), leaf("/")]), window(vec![session_leaf(4, false)])];
+        // 2 已经不在宿主里了；4 有别的界面连着。
+        let live = [info(1, false, false), info(3, false, false), info(4, true, false), info(9, false, false)];
+        let plan = plan_restore(windows, &live);
+        assert_eq!(sessions(&plan.windows), [Some(1), None, Some(3), None, None]);
+        assert!(plan.end.is_empty());
+    }
+
+    #[test]
+    fn a_session_saved_twice_is_reattached_only_the_first_time() {
+        let windows =
+            vec![window(vec![session_leaf(1, false), session_leaf(1, false)]), window(vec![session_leaf(1, false)])];
+        let plan = plan_restore(windows, &[info(1, false, false)]);
+        assert_eq!(sessions(&plan.windows), [Some(1), None, None]);
+        assert!(plan.end.is_empty());
+    }
+
+    #[test]
+    fn exited_and_unstarted_sessions_start_over_and_are_ended() {
+        let windows = vec![window(vec![
+            session_leaf(1, false),
+            session_leaf(2, true),
+            session_leaf(2, true),
+            session_leaf(3, true),
+            session_leaf(4, false),
+        ])];
+        // 1 的 shell 退出了；2 上次没启动过；3 没启动过但别的界面连着，不归这里结束；4 不在了。
+        let live = [info(1, false, true), info(2, false, false), info(3, true, false)];
+        let plan = plan_restore(windows, &live);
+        assert_eq!(sessions(&plan.windows), [None; 5]);
+        assert_eq!(plan.end, [SessionId(1), SessionId(2)]);
+    }
+
+    #[test]
+    fn nothing_is_reattached_when_the_host_is_new() {
+        let windows = vec![window(vec![session_leaf(1, false), session_leaf(2, true)])];
+        let plan = plan_restore(windows, &[]);
+        assert_eq!(sessions(&plan.windows), [None, None]);
+        assert!(plan.end.is_empty());
     }
 
     #[test]
