@@ -1,4 +1,4 @@
-//! Git 面板下半部分的列表：每段的标题、改动的文件和储藏。各行的按钮平时藏着，鼠标移到行上才
+//! Git 面板中间的列表：每段的标题、改动的文件和储藏；面板底部图表的各行也由 `render_git_row` 画。各行的按钮平时藏着，鼠标移到行上才
 //! 露出来，和 VSCode 一样。每一行都属于某个仓库，按钮作用到那个仓库。点文件在预览栏里看它的整篇
 //! diff。
 
@@ -21,8 +21,8 @@ use super::{
 };
 use crate::{
     assets::{
-        CHEVRON_DOWN_ICON, CHEVRON_RIGHT_ICON, DISCARD_ICON, MINUS_ICON, OPEN_FILE_ICON, PLUS_ICON, REFRESH_ICON,
-        STASH_APPLY_ICON, STASH_POP_ICON, TRASH_ICON,
+        CHEVRON_DOWN_ICON, CHEVRON_RIGHT_ICON, DISCARD_ICON, MINUS_ICON, OPEN_FILE_ICON, PLUS_ICON, STASH_APPLY_ICON,
+        STASH_POP_ICON, TRASH_ICON,
     },
     ui::{
         file_icons::{file_icon, folder_icon},
@@ -76,7 +76,8 @@ impl WindowView {
             .collect()
     }
 
-    /// 第 `ix` 行。块头不在这里画，见 `render_repo_block`。
+    /// 第 `ix` 行；图表里的行 `ix` 是在 `GitPanel::graph_rows` 里的下标。块头不在这里画，见
+    /// `render_repo_block`。
     #[allow(clippy::too_many_arguments)]
     pub(super) fn render_git_row(
         &self,
@@ -188,8 +189,6 @@ impl WindowView {
             GitSection::Staged => (rust_i18n::t!("git.section.staged"), GitPanel::files(git, section).len()),
             GitSection::Unstaged => (rust_i18n::t!("git.section.unstaged"), GitPanel::files(git, section).len()),
             GitSection::Stashes => (rust_i18n::t!("git.section.stashes"), git.info.stashes.len()),
-            // 图表不写个数：读了多少个只是读到哪儿了。
-            GitSection::Graph => (rust_i18n::t!("git.section.graph"), 0),
         };
         let section_button = |icon, key: &'static str, stage: bool| {
             let root = root.clone();
@@ -207,12 +206,6 @@ impl WindowView {
                 ]
             }
             GitSection::Stashes => Vec::new(),
-            GitSection::Graph => {
-                let root = root.clone();
-                vec![button(REFRESH_ICON, rust_i18n::t!("git.graph.refresh"), move |this, _, cx| {
-                    this.refresh_graph(&root, cx);
-                })]
-            }
         };
         self.git_row(("git-section", ix), 0., fg, bg)
             .child(chevron(panel.section_expanded(&root, section), fg))
@@ -226,7 +219,7 @@ impl WindowView {
                     .child(label.into_owned()),
             )
             .child(self.row_buttons(&root, buttons, fg, bg, cx))
-            .when(section != GitSection::Graph, |row| row.child(count_badge(count, fg, bg)))
+            .child(count_badge(count, fg, bg))
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |this, _, _, cx| {

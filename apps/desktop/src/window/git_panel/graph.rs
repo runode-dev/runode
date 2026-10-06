@@ -1,32 +1,40 @@
-//! Git 面板每个仓库最后的「图表」，仿 VSCode 源代码管理的图表：每行一个提交，左边画分支的线和
-//! 点，右边是引用标签和说明首行，行尾淡色写着多久以前。点提交展开它改的文件，点文件在预览栏里看
-//! 它在这个提交里的 diff；右键可以复制提交号、切到这个提交或者从它新建分支。
+//! Git 面板底部的「图表」，仿 VSCode 源代码管理底下单独一栏的图表：标题一行可以收起，上沿的分隔线
+//! 拖动改变高度，展开时每行一个提交，左边画分支的线和点，右边是引用标签和说明首行，行尾淡色写着
+//! 多久以前。点提交展开它改的文件，点文件在预览栏里看它在这个提交里的 diff；右键可以复制提交号、
+//! 切到这个提交或者从它新建分支。多个仓库时显示最近点过的那块的仓库（`GitPanel::graph_repo`），
+//! 仓库名写在标题上。
 //!
-//! 历史在后台读，只在图表展开着时读；仓库的 `RepoInfo` 变了（提交、切分支、拉取、储藏之后）或者
-//! 点了刷新才重读，工作区里的文件变了不重读。lane 怎么排由 `runode_git::graph_layout`
-//! 算好，这里只照着画。
+//! 历史在后台读，只在图表展开着时读显示的那个仓库的；仓库的 `RepoInfo` 变了（提交、切分支、拉取、
+//! 储藏之后）或者点了刷新才重读，工作区里的文件变了不重读。lane 怎么排由
+//! `runode_git::graph_layout` 算好，这里只照着画。
 
-use std::path::{Path, PathBuf};
+use std::{
+    ops::Range,
+    path::{Path, PathBuf},
+};
 
 use gpui::{
-    Action, AnyElement, BorderStyle, Bounds, ClipboardItem, ContentMask, Context, Hsla, MouseButton, MouseDownEvent,
-    PathBuilder, Pixels, PromptLevel, Window, canvas, div, img, point, prelude::*, px, quad,
+    Action, AnyElement, BorderStyle, Bounds, ClipboardItem, ContentMask, Context, CursorStyle, Div, Hsla, MouseButton,
+    MouseDownEvent, PathBuilder, Pixels, PromptLevel, Window, canvas, div, fill, img, point, prelude::*, px, quad, svg,
+    uniform_list,
 };
 use runode_git::{self as git, Commit, DiffSide, GraphRow, Half, RefKind};
 use runode_shared_types::color::Rgb;
 
 use super::{
     list::{ROW_HEIGHT, chevron},
+    repo_name,
     rows::{Busy, CommitChanges, CommitNote, GRAPH_PAGE, Graph, GraphNote},
 };
 use crate::{
+    assets::{ARROW_DOWN_ICON, REFRESH_ICON},
     ui::{
         file_icons::{file_icon, folder_icon},
         hsla,
         tooltip::tooltip,
     },
     window::{
-        WindowView,
+        DIVIDER_GRAB_WIDTH, Divider, TITLEBAR_HEIGHT, WindowView, divider_color,
         files::menu_item,
         preview::DiffTarget,
         project::{ADDED, MODIFIED, REMOVED, RENAMED, added_label, removed_label, status_color},
@@ -50,8 +58,15 @@ const MIN_SUBJECT_WIDTH: f32 = 80.;
 /// 行尾日期占的宽度，和「+N」占的宽度。
 const DATE_WIDTH: f32 = 56.;
 const MORE_LABEL_WIDTH: f32 = 22.;
+/// 鼠标移到「加载更多」那一行时链接的底色变亮，用这个组名。
+const GRAPH_MORE_GROUP: &str = "git-graph-more";
 /// 文件比提交、块头比文件往右缩进的宽度。
 const INDENT: f32 = 12.;
+/// 图表展开着时没拖过的高度占面板标题以下的几成；拖动时最矮这么高，上面的改动列表至少留
+/// `CHANGES_MIN_HEIGHT`。
+const GRAPH_SHARE: f32 = 0.4;
+const GRAPH_MIN_HEIGHT: f32 = 90.;
+const CHANGES_MIN_HEIGHT: f32 = 120.;
 
 /// 图表里一个提交的右键菜单项。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -70,6 +85,11 @@ pub struct GitCommitAction {
     pub op: CommitOp,
 }
 
+/// 图表展开着时多高：`saved` 是拖过的高度，`room` 是面板标题以下的高度。
+fn graph_height(saved: Option<f32>, room: f32) -> f32 {
+    saved.unwrap_or(room * GRAPH_SHARE).min(room - CHANGES_MIN_HEIGHT).max(GRAPH_MIN_HEIGHT)
+}
+
 /// 图有 `lanes` 条 lane 时一条 lane 画多宽，以及整个图多宽。
 fn lane_geometry(lanes: usize) -> (f32, f32) {
     let lanes = lanes.max(1) as f32;
@@ -78,24 +98,136 @@ fn lane_geometry(lanes: usize) -> (f32, f32) {
 }
 
 impl WindowView {
-    /// 看得见的图表里，没读过的或者仓库变了的，在后台读一遍。
+    /// 图表展开着、显示的仓库还没读过或者变了时，在后台读一遍。
     pub(super) fn sync_graphs(&mut self, cx: &mut Context<Self>) {
+        if self.git_graph_collapsed {
+            return;
+        }
         let project = &self.workspace().project;
         let Some(git) = project.git.as_ref() else {
             return;
         };
         let panel = &project.git_panel;
-        let multi = git.count() > 1;
-        let due: Vec<_> = git
-            .iter()
-            .filter(|repo| !multi || panel.repo_expanded(repo))
-            .filter(|repo| panel.section_expanded(&repo.root, super::rows::GitSection::Graph))
-            .filter(|repo| panel.repos.get(&repo.root).is_none_or(|state| state.graph.needs_read(&repo.info)))
-            .map(|repo| (repo.repo(), repo.info.clone()))
-            .collect();
-        for (repo, info) in due {
+        let Some(repo) = git.get(panel.graph_repo(git)) else {
+            return;
+        };
+        if panel.repos.get(&repo.root).is_none_or(|state| state.graph.needs_read(&repo.info)) {
+            let (repo, info) = (repo.repo(), repo.info.clone());
             self.load_history(repo, info, cx);
         }
+    }
+
+    /// 面板底部的图表：标题一行，点了收起展开；展开时下面是提交的列表，高度由标题上沿的分隔线
+    /// 拖动，双击分隔线恢复默认高度。`room` 是面板标题以下的高度。
+    pub(super) fn render_graph_pane(
+        &self,
+        git: &git::Repos,
+        room: f32,
+        fg: Rgb,
+        bg: Rgb,
+        cx: &mut Context<Self>,
+    ) -> Div {
+        let panel = &self.workspace().project.git_panel;
+        let open = !self.git_graph_collapsed;
+        let fg_hsla = hsla(fg);
+        let repo = git.get(panel.graph_repo(git));
+        let name = repo.filter(|_| git.count() > 1).map(repo_name);
+        let root = repo.map(|repo| repo.root.clone());
+        let header = div()
+            .id("git-graph-header")
+            .flex_none()
+            .h(px(ROW_HEIGHT + 4.))
+            .w_full()
+            .px(px(8.))
+            .flex()
+            .items_center()
+            .gap(px(6.))
+            .border_t_1()
+            .border_color(divider_color(fg_hsla))
+            .text_color(fg_hsla)
+            .hover(|header| header.bg(hsla(bg.mix(fg, 0.06))))
+            .child(chevron(open, fg))
+            .child(
+                div()
+                    .flex_none()
+                    .text_size(px(11.))
+                    .font_weight(gpui::FontWeight::SEMIBOLD)
+                    .child(rust_i18n::t!("git.section.graph").into_owned()),
+            )
+            .child(
+                div().flex_1().min_w_0().truncate().text_size(px(11.)).text_color(fg_hsla.opacity(0.5)).children(name),
+            )
+            .when_some(root.filter(|_| open), |header, root| {
+                header.child(self.header_button(
+                    "git-graph-refresh",
+                    REFRESH_ICON,
+                    Some(rust_i18n::t!("git.graph.refresh").into_owned()),
+                    fg,
+                    bg,
+                    cx,
+                    move |this, _, _, cx| this.refresh_graph(&root, cx),
+                ))
+            })
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(|this, _, _, cx| {
+                    cx.stop_propagation();
+                    this.git_graph_collapsed = !this.git_graph_collapsed;
+                    this.save(cx);
+                    cx.notify();
+                }),
+            );
+        let pane = div().relative().flex_none().w_full().flex().flex_col().child(header);
+        if !open {
+            return pane;
+        }
+        let list = uniform_list(
+            "git-graph-rows",
+            panel.graph_rows.len(),
+            cx.processor(move |this, range: Range<usize>, _, cx| this.render_graph_rows(range, fg, bg, cx)),
+        )
+        .track_scroll(&panel.graph_scroll)
+        .flex_1();
+        let handle = div()
+            .id("git-graph-divider")
+            .absolute()
+            .left_0()
+            .top(px(-DIVIDER_GRAB_WIDTH / 2.))
+            .w_full()
+            .h(px(DIVIDER_GRAB_WIDTH))
+            .cursor(CursorStyle::ResizeUpDown)
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(|this, event: &MouseDownEvent, _, cx| {
+                    cx.stop_propagation();
+                    if event.click_count >= 2 {
+                        this.git_graph_height = None;
+                        this.save(cx);
+                    } else {
+                        this.dragging_divider = Some(Divider::GitGraph);
+                    }
+                    cx.notify();
+                }),
+            );
+        pane.h(px(graph_height(self.git_graph_height, room))).child(list).child(handle)
+    }
+
+    /// 拖动图表上沿的分隔线，上沿跟到窗口里的纵坐标 `y`；面板从窗口顶上一直到底。
+    pub(in crate::window) fn resize_git_graph(&mut self, y: f32, viewport: f32) {
+        self.git_graph_height = Some(graph_height(Some(viewport - y), viewport - TITLEBAR_HEIGHT));
+    }
+
+    /// 图表的列表里看得见的那些行。
+    fn render_graph_rows(&self, range: Range<usize>, fg: Rgb, bg: Rgb, cx: &mut Context<Self>) -> Vec<AnyElement> {
+        let project = &self.workspace().project;
+        let Some(git) = &project.git else {
+            return Vec::new();
+        };
+        let panel = &project.git_panel;
+        range
+            .filter_map(|ix| panel.graph_rows.get(ix).map(|row| (ix, *row)))
+            .map(|(ix, row)| self.render_git_row(ix, row, git, fg, bg, cx))
+            .collect()
     }
 
     /// 在后台读 `repo` 的历史，读完换上、重排行。
@@ -399,7 +531,7 @@ impl WindowView {
         };
         let (_, width) = lane_geometry(graph.lanes);
         let panel = &self.workspace().project.git_panel;
-        let depth = panel.depth.get(ix).copied().unwrap_or(0) as f32;
+        let depth = panel.graph_depth.get(ix).copied().unwrap_or(0) as f32;
         let tree = panel.tree;
         let name = file
             .path
@@ -455,7 +587,7 @@ impl WindowView {
         let Some(dir) = panel.dirs.get(di) else {
             return div().into_any_element();
         };
-        let depth = panel.depth.get(ix).copied().unwrap_or(0) as f32;
+        let depth = panel.graph_depth.get(ix).copied().unwrap_or(0) as f32;
         let width = self.graph(&dir.root).map_or(0., |graph| lane_geometry(graph.lanes).1);
         let last = dir.path.file_name().map(|name| name.to_string_lossy().into_owned()).unwrap_or_default();
         self.git_commit_row(("git-commit-dir", ix), fg, bg)
@@ -475,7 +607,9 @@ impl WindowView {
             .into_any_element()
     }
 
-    /// 图表里不是提交的那一行；「加载更多」点了多读一页。
+    /// 图表里不是提交的那一行。读到了提交以后的「加载更多」和「正在读取」接在最后一个提交下面：
+    /// 还往下走的 lane 画成虚线，文字和说明首行对齐；「加载更多」是带向下箭头的链接，点了多读
+    /// 一页。还没有提交时的说明缩进写在开头。
     pub(super) fn render_graph_note(
         &self,
         ix: usize,
@@ -491,21 +625,50 @@ impl WindowView {
             GraphNote::Empty => rust_i18n::t!("git.no_commits"),
             GraphNote::More => rust_i18n::t!("git.graph.more"),
         };
-        let row = self.git_commit_row(("git-graph-note", ix), fg, bg).pl(px(8. + INDENT));
+        let graph = self.graph(&repo.root);
+        let last = graph
+            .and_then(|graph| graph.history.as_ref()?.as_ref().ok()?.rows.last())
+            .map(|row| (row, lane_geometry(graph.map_or(0, |graph| graph.lanes))));
+        let row = self.git_commit_row(("git-graph-note", ix), fg, bg);
+        let Some((last, (lane, width))) = last else {
+            return row
+                .pl(px(8. + INDENT))
+                .italic()
+                .text_color(hsla(fg).opacity(0.45))
+                .child(text.into_owned())
+                .into_any_element();
+        };
+        let row = row.child(lanes_tail(last, lane, width));
         if note != GraphNote::More {
             return row.italic().text_color(hsla(fg).opacity(0.45)).child(text.into_owned()).into_any_element();
         }
+        let accent = hsla(RENAMED);
         let root = repo.root.clone();
-        row.text_color(hsla(RENAMED))
-            .child(text.into_owned())
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(move |this, _, _, cx| {
-                    cx.stop_propagation();
-                    this.load_more_commits(&root, cx);
-                }),
-            )
-            .into_any_element()
+        row.child(
+            div()
+                .flex_none()
+                .h(px(18.))
+                .px(px(6.))
+                .ml(px(-6.))
+                .rounded(px(4.))
+                .flex()
+                .items_center()
+                .gap(px(4.))
+                .text_color(accent)
+                .group_hover(GRAPH_MORE_GROUP, |link| link.bg(accent.opacity(0.15)))
+                .child(svg().flex_none().path(ARROW_DOWN_ICON).size(px(12.)).text_color(accent))
+                .child(text.into_owned()),
+        )
+        .group(GRAPH_MORE_GROUP)
+        .cursor_pointer()
+        .on_mouse_down(
+            MouseButton::Left,
+            cx.listener(move |this, _, _, cx| {
+                cx.stop_propagation();
+                this.load_more_commits(&root, cx);
+            }),
+        )
+        .into_any_element()
     }
 
     /// 展开的提交下面不列文件时的说明。
@@ -616,6 +779,40 @@ fn ref_labels(commit: &Commit, shown: usize, fg: Rgb, bg: Rgb) -> Vec<gpui::Div>
     labels
 }
 
+/// 接在最后一个提交下面的那一行的线：那一行底下还往下走的 lane 画成淡色的虚线，表示后面还有。
+fn lanes_tail(last: &GraphRow, lane: f32, width: f32) -> impl IntoElement {
+    let mut lanes: Vec<_> = last
+        .lines
+        .iter()
+        .filter(|line| line.half == Half::Bottom)
+        .map(|line| (line.to, LANE_COLORS[line.color % LANE_COLORS.len()]))
+        .collect();
+    lanes.sort_by_key(|&(column, _)| column);
+    lanes.dedup_by_key(|&mut (column, _)| column);
+    canvas(
+        |_, _, _| {},
+        move |bounds: Bounds<Pixels>, (), window, _| {
+            let left = f32::from(bounds.origin.x);
+            let top = f32::from(bounds.origin.y);
+            let height = f32::from(bounds.size.height);
+            window.with_content_mask(Some(ContentMask { bounds }), |window| {
+                for &(column, color) in &lanes {
+                    let x = left + lane * (column as f32 + 0.5) - 0.75;
+                    let mut y = top;
+                    while y < top + height {
+                        let dash = Bounds::new(point(px(x), px(y)), gpui::size(px(1.5), px(3.)));
+                        window.paint_quad(fill(dash, hsla(color).opacity(0.5)));
+                        y += 5.;
+                    }
+                }
+            });
+        },
+    )
+    .flex_none()
+    .w(px(width))
+    .h_full()
+}
+
 /// 一行的线和点。线：上半段从行顶连到点的高度，下半段从点的高度连到行底，换列的用曲线连。点：
 /// 合并提交是空心的，HEAD 大一圈。超出图宽的 lane 截掉，点贴在右边界上。
 fn lanes_canvas(row: GraphRow, lane: f32, width: f32, merge: bool, head: bool, bg: Rgb) -> impl IntoElement {
@@ -692,6 +889,16 @@ mod tests {
         assert_eq!(label_width(&long.refs[0].name), MAX_LABEL_WIDTH);
         assert_eq!(fit_commit_row(0., 20., &long), Fit { labels: 1, date: true });
         assert_eq!(short_date("2 days ago"), "2 days");
+    }
+
+    #[test]
+    fn keeps_room_for_the_changes_above() {
+        // 没拖过时占四成；拖得太高给上面的改动留够地方，太矮不矮于下限。
+        assert_eq!(graph_height(None, 600.), 240.);
+        assert_eq!(graph_height(Some(550.), 600.), 480.);
+        assert_eq!(graph_height(Some(10.), 600.), GRAPH_MIN_HEIGHT);
+        // 窗口矮得两头都顾不上时保住图表的下限。
+        assert_eq!(graph_height(None, 150.), GRAPH_MIN_HEIGHT);
     }
 
     #[test]

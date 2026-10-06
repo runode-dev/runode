@@ -6,8 +6,8 @@
 //! 分支，展开后是这个仓库自己的分支栏、提交说明框和各段改动，「更多」菜单挪到块头上。块里的
 //! 按钮作用到这块的仓库；菜单和快捷键派发的动作作用到 `WindowView::git_target` 选的仓库。
 //!
-//! 每个仓库的最后是提交历史的图表，见 `graph`。同一个仓库的其他工作树排在子仓库后面，各占一块，
-//! 块头的菜单见 `worktree`。
+//! 面板底部单独一栏是提交历史的图表，可以收起，上沿拖动改变高度，见 `graph`。同一个仓库的其他
+//! 工作树排在子仓库后面，各占一块，块头的菜单见 `worktree`。
 //!
 //! 排成行的状态在 `rows`，列表的各行在 `list`，在后台跑 git 在 `run`，切换和新建分支的浮层在
 //! `branch_picker`。git 命令本身由 `runode_git::Repo` 去跑。
@@ -33,7 +33,7 @@ use runode_git::{self as git, Operation, RepoKind, Section};
 use runode_shared_types::color::Rgb;
 
 use super::{
-    WindowView, divider_color,
+    TITLEBAR_HEIGHT, WindowView, divider_color,
     files::menu_item,
     project::{RENAMED, panel_message, panel_shell},
 };
@@ -218,11 +218,12 @@ impl WindowView {
         Some(focused.or(active).unwrap_or(&git.main).root.clone())
     }
 
-    /// 记下点的是哪一块的仓库，菜单和快捷键的动作随后作用到它。
+    /// 记下点的是哪一块的仓库，菜单和快捷键的动作随后作用到它，图表也换成它的。
     fn set_git_active(&mut self, root: &Path) {
-        let panel = &mut self.workspace_mut().project.git_panel;
-        if panel.active.as_deref() != Some(root) {
-            panel.active = Some(root.to_path_buf());
+        let project = &mut self.workspace_mut().project;
+        if project.git_panel.active.as_deref() != Some(root) {
+            project.git_panel.active = Some(root.to_path_buf());
+            project.git_panel.rebuild(project.git.as_ref());
         }
     }
 
@@ -256,11 +257,18 @@ impl WindowView {
             project.git_panel.tree = tree;
             project.git_panel.rebuild(project.git.as_ref());
         }
+        let graph_root = project
+            .git
+            .as_ref()
+            .and_then(|git| git.get(project.git_panel.graph_repo(git)))
+            .map(|repo| repo.root.clone());
         let panel = &mut project.git_panel;
         panel.width = width;
         let mut lost_focus = false;
+        // 图表显示的仓库的块收着时也留着，读到的历史才在。
         panel.repos.retain(|root, repo| {
             let keep = shown.iter().any(|(shown, _)| shown == root)
+                || graph_root.as_ref() == Some(root)
                 || repo.busy.is_some()
                 || repo.commit_box.as_ref().is_some_and(|area| !area.read(cx).text().is_empty());
             if !keep && repo.commit_box.as_ref().is_some_and(|area| area.focus_handle(cx).is_focused(window)) {
@@ -363,12 +371,19 @@ impl WindowView {
                     .into_any_element()
             }
         };
+        let room = f32::from(window.viewport_size().height) - TITLEBAR_HEIGHT;
+        let graph = project
+            .git
+            .as_ref()
+            .filter(|_| project.root.is_some())
+            .map(|git| self.render_graph_pane(git, room, fg, bg, cx));
         panel_shell("git-panel", width, fg)
             .track_focus(&self.git_focus)
             .bg(hsla(bg))
             .text_size(px(12.))
             .child(header)
             .child(body)
+            .children(graph)
     }
 
     /// 多个仓库时列表里的一项：块头是仓库标题连着分支栏和提交说明框，其余和只有一个仓库时的行
@@ -416,14 +431,7 @@ impl WindowView {
         let active = panel.active.as_deref() == Some(repo.root.as_path());
         let fg_hsla = hsla(fg);
         let dim = fg_hsla.opacity(0.5);
-        let name = match repo.kind {
-            // 工作树多半不在主仓库目录里，写目录名，完整路径在 tooltip 里。
-            RepoKind::Main | RepoKind::Worktree => repo
-                .root
-                .file_name()
-                .map_or_else(|| repo.root.display().to_string(), |name| name.to_string_lossy().into_owned()),
-            RepoKind::Submodule | RepoKind::Nested => repo.prefix.display().to_string(),
-        };
+        let name = repo_name(repo);
         let kind = match repo.kind {
             RepoKind::Main => rust_i18n::t!("git.repo_kind.main"),
             RepoKind::Submodule => rust_i18n::t!("git.repo_kind.submodule"),
@@ -806,6 +814,18 @@ impl WindowView {
         self.git_tree = !self.git_tree;
         self.save(cx);
         cx.notify();
+    }
+}
+
+/// 块头和图表标题上写的仓库名：主仓库和工作树是目录名（工作树多半不在主仓库目录里，完整路径在
+/// 块头的 tooltip 里），子仓库是相对主仓库的路径。
+fn repo_name(repo: &git::Snapshot) -> String {
+    match repo.kind {
+        RepoKind::Main | RepoKind::Worktree => repo
+            .root
+            .file_name()
+            .map_or_else(|| repo.root.display().to_string(), |name| name.to_string_lossy().into_owned()),
+        RepoKind::Submodule | RepoKind::Nested => repo.prefix.display().to_string(),
     }
 }
 

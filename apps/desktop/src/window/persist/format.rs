@@ -60,6 +60,11 @@ pub struct SavedWindow {
     /// Git 面板里改动的文件以树形式查看；默认是列表。
     #[serde(default)]
     pub git_tree: bool,
+    /// Git 面板底部的图表收起来了，以及拖动过的高度；没拖过时为空，用默认高度。
+    #[serde(default)]
+    pub git_graph_collapsed: bool,
+    #[serde(default)]
+    pub git_graph_height: Option<f32>,
 }
 
 /// 窗口的位置和大小，相对于它所在的屏幕；放大和全屏时是还原后的位置和大小。
@@ -298,6 +303,8 @@ mod tests {
             preview_width: Some(420.),
             show_ignored: true,
             git_tree: true,
+            git_graph_collapsed: true,
+            git_graph_height: Some(260.),
         }])
     }
 
@@ -308,6 +315,17 @@ mod tests {
         assert_ne!(old, text);
         let state: State = serde_json::from_str(&old).unwrap();
         assert!(!state.windows[0].git_tree);
+    }
+
+    #[test]
+    fn reads_windows_saved_before_the_graph_pane() {
+        let text = serde_json::to_string(&state()).unwrap();
+        let old = text.replace(r#","git_graph_collapsed":true,"git_graph_height":260.0"#, "");
+        assert_ne!(old, text);
+        // 以前存的窗口图表展开着，用默认高度。
+        let state: State = serde_json::from_str(&old).unwrap();
+        assert!(!state.windows[0].git_graph_collapsed);
+        assert_eq!(state.windows[0].git_graph_height, None);
     }
 
     #[test]

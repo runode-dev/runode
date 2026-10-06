@@ -334,7 +334,7 @@ impl WindowView {
                 let width = (viewport - x).min(room - preview - git).max(FILES_MIN_WIDTH);
                 self.files_width = Some(width);
             }
-            Divider::Split(..) | Divider::Sidebar => {}
+            Divider::Split(..) | Divider::Sidebar | Divider::GitGraph => {}
         }
     }
 

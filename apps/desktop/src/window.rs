@@ -161,6 +161,8 @@ enum Divider {
     Preview,
     Git,
     Files,
+    /// Git 面板底部图表上沿的分隔线，拖动改变图表的高度。
+    GitGraph,
 }
 
 /// 侧栏里正在改名的 workspace，以及改名用的输入框。
@@ -188,6 +190,9 @@ pub struct WindowView {
     git_width: Option<f32>,
     /// Git 面板里改动的文件以树形式查看，否则是列表；整个窗口一个设置。
     git_tree: bool,
+    /// Git 面板底部的图表收起来了；拖动过高度时是那个高度。整个窗口一个设置。
+    git_graph_collapsed: bool,
+    git_graph_height: Option<f32>,
     /// Git 面板的焦点：右键菜单的动作派发到这里；提交说明框在它里面。
     git_focus: FocusHandle,
     /// 开着的分支列表。
@@ -301,6 +306,8 @@ impl WindowView {
             git_shown: false,
             git_width: None,
             git_tree: false,
+            git_graph_collapsed: false,
+            git_graph_height: None,
             git_focus: cx.focus_handle(),
             branch_picker: None,
             preview_width: None,
