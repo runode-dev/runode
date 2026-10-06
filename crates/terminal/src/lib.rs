@@ -7,6 +7,7 @@
 //!
 //! 对外只用 `runode_shared_types` 里的数据类型；libghostty 和 PTY 的类型不出这个 crate。
 
+pub mod fd_passing;
 pub mod history;
 pub mod host_session;
 mod prompt_input;

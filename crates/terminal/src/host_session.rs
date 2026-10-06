@@ -37,7 +37,7 @@ use runode_shared_types::{
 
 use crate::{
     history, prompt_input,
-    pty::{Pty, PtyWriter},
+    pty::{Pty, PtyHandoff, PtyWriter},
     vt::{self, SnapshotError},
 };
 use effects::{Effects, PromptEvent, SHELL_REPORT};
@@ -262,6 +262,23 @@ impl HostSession {
 
     pub fn started(&self) -> bool {
         self.pty.started()
+    }
+
+    /// 交接的第一步：让 PTY 的读线程停下，见 `Pty::stop_reading`。之后还要把 `PtySink` 那头
+    /// 已经收到的输出喂完，等 `pty_reader_finished` 为 true，再编快照、`release_pty`。
+    pub fn stop_reading(&mut self) {
+        self.pty.stop_reading();
+    }
+
+    /// PTY 的读线程已经结束，`PtySink` 不会再收到东西，见 `Pty::reader_finished`。
+    pub fn pty_reader_finished(&self) -> bool {
+        self.pty.reader_finished()
+    }
+
+    /// 把 PTY 交出去，不结束 shell，见 `Pty::release`。交出后这个会话不再管 shell：写进去的丢掉，
+    /// 读不到前台进程，丢掉它也不结束 shell；VT 还在，照样能编快照。出错时什么都没动。
+    pub fn release_pty(&mut self) -> Result<PtyHandoff> {
+        self.pty.release()
     }
 
     pub fn size(&self) -> GridSize {

@@ -3,26 +3,44 @@
 //! 读线程把 PTY 输出交给创建时给的 `PtySink`，由宿主那边的会话线程接着处理。写入（按键、
 //! 粘贴和 VT 查询的回复）经 `PtyWriter` 排进这个伪终端自己的写队列，由写线程按顺序写出，
 //! 所以写入方从不阻塞：给一个不读 stdin 的程序粘贴一大段时，等着的只有写线程。
+//!
+//! 宿主升级时会话要交给新宿主，shell 不中断：`Pty::release` 交出 PTY master 的描述符、shell 的
+//! pid 和重建要的其余状态（`PtyHandoff`），不结束 shell；对面用 `Pty::adopt` 接上。所以 master
+//! 的描述符由这里自己持有：伪终端和 shell 仍由 portable-pty 打开和启动，打开后就复制一份 master
+//! 的描述符，读、写、改尺寸、读前台进程组都用自己这份，portable-pty 的 master 随即关掉。
+
+mod exit_watch;
+mod reader;
 
 use std::{
+    cell::Cell,
     ffi::OsString,
-    io::{Read, Write},
+    fs::File,
+    io::Write,
+    os::fd::{AsFd, AsRawFd, BorrowedFd, OwnedFd},
     path::{Path, PathBuf},
     sync::{Arc, Mutex, mpsc},
     thread,
+    time::Duration,
 };
 
-use anyhow::{Context as _, Result};
-use portable_pty::{Child, CommandBuilder, MasterPty, PtySize, SlavePty, native_pty_system};
+use anyhow::{Context as _, Result, anyhow, bail};
+use portable_pty::{Child, CommandBuilder, PtySize, SlavePty, native_pty_system};
 use runode_agent_detect::{ForegroundJob, ForegroundProcess};
 use runode_shared_types::{grid::GridSize, shell::IntegrationMode};
 
 use crate::shell_integration;
+use exit_watch::ExitWatch;
+use reader::Reader;
+
+/// `Pty::release` 等写线程把排着的输入写完的最长时间。程序不读 stdin、写线程卡住时不再等，
+/// 卡住的那些等它读了照样写出去，可能和接手一方写的交错。
+const WRITER_FLUSH_TIMEOUT: Duration = Duration::from_secs(1);
 
 /// 读线程交给 `PtySink` 的事件。
 pub enum PtyEvent {
     Output(Arc<[u8]>),
-    /// PTY 读到 EOF 或出错：子进程已经退出。
+    /// PTY 读到 EOF 或出错：子进程已经退出。接手来的会话里 shell 退出也算，见 `Pty::adopt`。
     Exited,
 }
 
@@ -30,9 +48,16 @@ pub enum PtyEvent {
 /// 用来给读线程限流：收的一方积压太多时让它先别读。
 pub type PtySink = Box<dyn FnMut(PtyEvent) -> bool + Send>;
 
+/// 写队列里的一项。
+enum WriterMsg {
+    Data(Vec<u8>),
+    /// 前面的都写完后回个话，然后写线程结束，见 `Pty::release`。
+    Finish(mpsc::Sender<()>),
+}
+
 /// 往 PTY 写的一端：只把数据排进写队列，不等它写出去。
 #[derive(Clone)]
-pub struct PtyWriter(mpsc::Sender<Vec<u8>>);
+pub struct PtyWriter(mpsc::Sender<WriterMsg>);
 
 impl PtyWriter {
     pub fn write(&self, data: &[u8]) {
@@ -43,28 +68,52 @@ impl PtyWriter {
 
     /// 同 `write`，数据已经在自己的缓冲里时不必再复制一份。
     pub fn send(&self, data: Vec<u8>) {
-        // 写线程已经结束（PTY 出错或关了）时没有可写的地方，丢掉。
-        if !data.is_empty() && self.0.send(data).is_err() {
+        // 写线程已经结束（PTY 出错、关了或者交出去了）时没有可写的地方，丢掉。
+        if !data.is_empty() && self.0.send(WriterMsg::Data(data)).is_err() {
             tracing::debug!("pty writer is gone, input dropped");
         }
     }
 
-    /// 起写线程，把排进队列的数据按顺序写进 `writer`。所有发送端都没了、或者写出错时结束。
-    fn start(mut writer: Box<dyn Write + Send>) -> Result<Self> {
-        let (tx, rx) = mpsc::channel::<Vec<u8>>();
+    /// 起写线程，把排进队列的数据按顺序写进 `master`。所有发送端都没了、写出错或者收到
+    /// `WriterMsg::Finish` 时结束。
+    fn start(master: OwnedFd) -> Result<Self> {
+        let (tx, rx) = mpsc::channel::<WriterMsg>();
+        let mut master = File::from(master);
         thread::Builder::new()
             .name("pty-writer".into())
             .spawn(move || {
                 set_current_thread_interactive();
-                for data in rx {
-                    if let Err(err) = writer.write_all(&data).and_then(|()| writer.flush()) {
-                        tracing::warn!("pty write failed: {err}");
-                        return;
+                for message in rx {
+                    match message {
+                        WriterMsg::Data(data) => {
+                            if let Err(err) = master.write_all(&data) {
+                                tracing::warn!("pty write failed: {err}");
+                                return;
+                            }
+                        }
+                        WriterMsg::Finish(done) => {
+                            drop(master);
+                            let _ = done.send(());
+                            return;
+                        }
                     }
                 }
             })
             .context("failed to start pty writer thread")?;
         Ok(Self(tx))
+    }
+
+    /// 让写线程写完已经排着的输入后结束，最多等 `timeout`；之后再写的都丢掉。返回写完了没有。
+    fn finish(&self, timeout: Duration) -> bool {
+        let (done, finished) = mpsc::channel();
+        if self.0.send(WriterMsg::Finish(done)).is_err() {
+            // 写线程已经结束了。
+            return true;
+        }
+        match finished.recv_timeout(timeout) {
+            Ok(()) | Err(mpsc::RecvTimeoutError::Disconnected) => true,
+            Err(mpsc::RecvTimeoutError::Timeout) => false,
+        }
     }
 }
 
@@ -80,18 +129,46 @@ pub fn set_current_thread_interactive() {
     }
 }
 
+/// 交出去的会话：在另一个进程（或者同一个进程的别处）用 `Pty::adopt` 重建。`master` 要经
+/// Unix socket 的 `SCM_RIGHTS` 传过去，其余字段由调用方自己编码。丢掉它会关掉这份描述符；
+/// 交出方和接手方都关了以后，shell 收到 SIGHUP。
+#[derive(Debug)]
+pub struct PtyHandoff {
+    /// PTY master 的描述符，带 `FD_CLOEXEC`。
+    pub master: OwnedFd,
+    /// shell 的进程号。它是交出方的子进程，接手方不是它的父进程。
+    pub pid: u32,
+    /// PTY 现在的尺寸。内核里的尺寸随描述符一起留着，这里只是给接手方记账用。
+    pub size: GridSize,
+    /// 启动 shell 时交给集成脚本的报告口令，见 `Pty::report_token`。
+    pub report_token: Option<String>,
+}
+
+/// PTY 上跑着的 shell。
+enum Shell {
+    /// 自己启动的子进程，退出时自己回收。
+    Child(Box<dyn Child + Send + Sync>),
+    /// 接手来的：不是自己的子进程，只能看着它退出，见 `ExitWatch`。
+    Adopted(Arc<ExitWatch>),
+}
+
 pub struct Pty {
-    master: Box<dyn MasterPty + Send>,
+    /// PTY master 的描述符。读线程和写线程各用一份复制的。
+    master: OwnedFd,
     /// 还没启动 shell 时的从设备和读线程要交给的 `PtySink`，`start` 时交出去。
     pending: Option<(Box<dyn SlavePty + Send>, PtySink)>,
-    /// `Drop` 里交给回收线程，所以是 `Option`。
-    child: Option<Box<dyn Child + Send + Sync>>,
+    /// `Drop` 和 `release` 里取走，所以是 `Option`。
+    shell: Option<Shell>,
+    /// 读线程；还没启动 shell 时为 `None`。
+    reader: Option<Reader>,
     pub writer: PtyWriter,
     /// 启动 shell 时交给集成脚本的报告口令，见 `shell_integration::prepare`；没注入集成或者
     /// 还没启动时为 `None`。
     report_token: Option<String>,
     /// 启动 shell 时另外设的环境变量，见 `set_env`。
     env: Vec<(OsString, OsString)>,
+    /// 最近一次设给 PTY 的尺寸。
+    size: Cell<GridSize>,
 }
 
 fn pty_size(size: GridSize) -> PtySize {
@@ -101,6 +178,29 @@ fn pty_size(size: GridSize) -> PtySize {
         pixel_width: size.cols.saturating_mul(size.cell_width_px),
         pixel_height: size.rows.saturating_mul(size.cell_height_px),
     }
+}
+
+/// 改 PTY 的尺寸（`TIOCSWINSZ`），前台程序随之收到 SIGWINCH。
+fn set_winsize(master: BorrowedFd<'_>, size: GridSize) -> std::io::Result<()> {
+    let size = pty_size(size);
+    let winsize = libc::winsize {
+        ws_row: size.rows,
+        ws_col: size.cols,
+        ws_xpixel: size.pixel_width,
+        ws_ypixel: size.pixel_height,
+    };
+    // SAFETY: `master` 在这次调用期间一直开着；`TIOCSWINSZ` 只读传进去的结构。
+    if unsafe { libc::ioctl(master.as_raw_fd(), libc::TIOCSWINSZ, &raw const winsize) } != 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    Ok(())
+}
+
+/// 终端的前台进程组号；没有前台进程组或者读不到时为 `None`。
+fn foreground_group(master: BorrowedFd<'_>) -> Option<libc::pid_t> {
+    // SAFETY: `master` 在这次调用期间一直开着。
+    let group = unsafe { libc::tcgetpgrp(master.as_raw_fd()) };
+    (group > 0).then_some(group)
 }
 
 impl Pty {
@@ -129,20 +229,103 @@ impl Pty {
             native_pty_system().openpty(pty_size(size))
         }
         .context("openpty failed")?;
-        let writer = PtyWriter::start(pair.master.take_writer().context("pty writer")?)?;
+        let raw = pair.master.as_raw_fd().ok_or_else(|| anyhow!("the pty master has no file descriptor"))?;
+        // SAFETY: `raw` 是 `pair.master` 持有的描述符，复制完之前它一直开着。
+        let master =
+            unsafe { BorrowedFd::borrow_raw(raw) }.try_clone_to_owned().context("failed to dup the pty master")?;
+        // 自己这份复制好了，portable-pty 的 master 不再需要；它的写端从来没取过，关掉时也不会
+        // 往 PTY 里写东西。
+        drop(pair.master);
+        let writer = PtyWriter::start(master.try_clone().context("pty writer")?)?;
         Ok(Self {
-            master: pair.master,
+            master,
             pending: Some((pair.slave, sink)),
-            child: None,
+            shell: None,
+            reader: None,
             writer,
             report_token: None,
             env: Vec::new(),
+            size: Cell::new(size),
         })
     }
 
     /// 启动 shell 时给它设这个环境变量，盖过从 app 继承来的同名变量；已经启动了的不受影响。
     pub fn set_env(&mut self, key: impl Into<OsString>, value: impl Into<OsString>) {
         self.env.push((key.into(), value.into()));
+    }
+
+    /// 接手 `Pty::release` 交出来的会话：用交来的 master 起读写线程，输出交给 `sink`。shell 不是
+    /// 本进程的子进程，不回收它也拿不到退出码；它退出时即使 PTY 还没读到 EOF（比如后台程序还
+    /// 开着终端），读完剩下的输出也报告 `PtyEvent::Exited`。丢掉返回的 `Pty` 会结束 shell 的
+    /// 进程组，见 `Drop`。
+    pub fn adopt(handoff: PtyHandoff, sink: PtySink) -> Result<Self> {
+        let PtyHandoff { master, pid, size, report_token } = handoff;
+        let pid = libc::pid_t::try_from(pid).ok().filter(|&pid| pid > 0).context("invalid shell pid")?;
+        let exit = Arc::new(ExitWatch::new(pid));
+        let writer = PtyWriter::start(master.try_clone().context("pty writer")?)?;
+        let reader = Reader::start(master.try_clone().context("pty reader")?, Some(exit.clone()), sink)?;
+        Ok(Self {
+            master,
+            pending: None,
+            shell: Some(Shell::Adopted(exit)),
+            reader: Some(reader),
+            writer,
+            report_token,
+            // 接手来的 shell 早就启动了，没有要设的环境变量。
+            env: Vec::new(),
+            size: Cell::new(size),
+        })
+    }
+
+    /// 交接的第一步（可选）：让读线程停下，之后不再从 PTY 读，没读的输出留给接手方。读线程已经
+    /// 读出来的那块照样交给 `PtySink`，交完就结束，不报告 `PtyEvent::Exited`；`reader_finished`
+    /// 为 true 后，`PtySink` 不会再收到东西。不等读线程结束。
+    pub fn stop_reading(&mut self) {
+        if let Some(reader) = &mut self.reader {
+            reader.stop();
+        }
+    }
+
+    /// 读线程已经结束（或者还没启动 shell，根本没有读线程）。
+    pub fn reader_finished(&self) -> bool {
+        self.reader.as_ref().is_none_or(Reader::finished)
+    }
+
+    /// 交出会话，不结束 shell：停下读线程并等它结束（同 `stop_reading`），让写线程写完排着的输入
+    /// （最多等 `WRITER_FLUSH_TIMEOUT`），然后交出复制的一份 master 描述符、shell 的 pid、尺寸和
+    /// 报告口令。交出后这个 `Pty` 不再管这个会话：经它的 `writer` 写的都丢掉，读不到前台进程，
+    /// 丢掉它也不结束 shell，只关掉自己那份描述符。出错时（还没启动 shell、复制描述符失败）什么
+    /// 都没动，`Pty` 照常可用。
+    ///
+    /// 等读线程结束时，它要是正卡在 `PtySink` 里等调用方腾地方（限流），就会一直等下去；这种
+    /// `PtySink` 要先 `stop_reading`，一边处理收到的输出一边等 `reader_finished`，再来交出。
+    ///
+    /// shell 是自己的子进程时，交出后还在这边起一个线程等它退出、回收它，免得留下僵尸；不影响
+    /// 接手方发现它退出。
+    pub fn release(&mut self) -> Result<PtyHandoff> {
+        if !self.started() {
+            bail!("the shell has not been started");
+        }
+        let pid = self.shell_pid().context("the shell's pid is unknown")?;
+        let pid = u32::try_from(pid).context("invalid shell pid")?;
+        // 先做会失败的事，失败时什么都没动。
+        let master = self.master.try_clone().context("failed to dup the pty master")?;
+        if let Some(reader) = &mut self.reader {
+            reader.stop();
+            reader.join();
+        }
+        if !self.writer.finish(WRITER_FLUSH_TIMEOUT) {
+            tracing::warn!("the pty writer is stuck, handing off with input still queued");
+        }
+        if let Some(Shell::Child(mut child)) = self.shell.take() {
+            let reaped = thread::Builder::new().name("pty-reaper".into()).spawn(move || {
+                let _ = child.wait();
+            });
+            if let Err(err) = reaped {
+                tracing::warn!("failed to start the pty reaper thread: {err}");
+            }
+        }
+        Ok(PtyHandoff { master, pid, size: self.size.get(), report_token: self.report_token.clone() })
     }
 
     /// 已经启动了 shell。
@@ -187,22 +370,20 @@ impl Pty {
         }
 
         let child = slave.spawn_command(cmd).context("failed to spawn shell")?;
-        self.child = Some(child);
+        self.shell = Some(Shell::Child(child));
         self.report_token = report_token;
         // 子进程持有自己的 slave 副本；我们这份必须关掉，子进程退出时才会读到 EOF。
         drop(slave);
 
-        let reader = self.master.try_clone_reader().context("pty reader")?;
-        thread::Builder::new()
-            .name("pty-reader".into())
-            .spawn(move || read_loop(reader, sink))
-            .context("failed to start pty reader thread")?;
+        let master = self.master.try_clone().context("pty reader")?;
+        self.reader = Some(Reader::start(master, None, sink)?);
         Ok(())
     }
 
     pub fn resize(&self, size: GridSize) {
-        if let Err(err) = self.master.resize(pty_size(size)) {
-            tracing::warn!("pty resize failed: {err}");
+        match set_winsize(self.master.as_fd(), size) {
+            Ok(()) => self.size.set(size),
+            Err(err) => tracing::warn!("pty resize failed: {err}"),
         }
     }
 
@@ -215,8 +396,7 @@ impl Pty {
 
     /// shell 自己当前所在的目录（不管前台在跑什么）。
     pub fn shell_cwd(&self) -> Option<PathBuf> {
-        let pid = self.child.as_ref()?.process_id()?;
-        process_cwd(libc::pid_t::try_from(pid).ok()?)
+        process_cwd(self.shell_pid()?)
     }
 
     /// 前台是不是 shell 自己，也就是没有在跑别的程序。取不到时当作不是。
@@ -226,9 +406,17 @@ impl Pty {
 
     /// 终端前台进程组的组长，以及它是不是 shell 自己。
     pub(crate) fn foreground(&self) -> Option<(libc::pid_t, bool)> {
-        let leader = self.master.process_group_leader()?;
-        let shell = self.child.as_ref()?.process_id()?;
-        Some((leader, u32::try_from(leader).ok() == Some(shell)))
+        let leader = foreground_group(self.master.as_fd())?;
+        let shell = self.shell_pid()?;
+        Some((leader, leader == shell))
+    }
+
+    /// shell 的进程号；还没启动时为 `None`。
+    fn shell_pid(&self) -> Option<libc::pid_t> {
+        match self.shell.as_ref()? {
+            Shell::Child(child) => libc::pid_t::try_from(child.process_id()?).ok(),
+            Shell::Adopted(exit) => Some(exit.pid()),
+        }
     }
 }
 
@@ -371,35 +559,44 @@ fn process_cwd(_pid: libc::pid_t) -> Option<PathBuf> {
 
 impl Drop for Pty {
     fn drop(&mut self) {
-        // 关窗口即结束会话；master 关闭后 shell 本来也会收到 SIGHUP，kill() 只是让它立即退出。
-        // 子进程退出后还得 wait 才会被系统回收，否则每关一个标签就留一个僵尸进程；
-        // shell 可能忽略 SIGHUP，所以放到单独的线程里等，不阻塞界面。
-        if let Some(mut child) = self.child.take() {
-            let _ = child.kill();
-            let _ = thread::Builder::new().name("pty-reaper".into()).spawn(move || {
-                let _ = child.wait();
-            });
+        match self.shell.take() {
+            // 关窗口即结束会话；master 关闭后 shell 本来也会收到 SIGHUP，kill() 只是让它立即退出。
+            // 子进程退出后还得 wait 才会被系统回收，否则每关一个标签就留一个僵尸进程；
+            // shell 可能忽略 SIGHUP，所以放到单独的线程里等，不阻塞界面。
+            Some(Shell::Child(mut child)) => {
+                let _ = child.kill();
+                let _ = thread::Builder::new().name("pty-reaper".into()).spawn(move || {
+                    let _ = child.wait();
+                });
+            }
+            // 接手来的 shell 不是自己的子进程，不能 wait，也不归这边回收；给它的进程组和前台
+            // 进程组发 SIGHUP，不退出再 SIGKILL。
+            Some(Shell::Adopted(exit)) => exit.terminate(foreground_group(self.master.as_fd())),
+            None => {}
         }
     }
 }
 
-fn read_loop(mut reader: Box<dyn Read + Send>, mut sink: PtySink) {
-    set_current_thread_interactive();
-    let mut buf = vec![0u8; 64 * 1024];
-    loop {
-        match reader.read(&mut buf) {
-            Ok(0) => break,
-            Ok(n) => {
-                if !sink(PtyEvent::Output(buf[..n].into())) {
-                    return;
-                }
-            }
-            Err(err) if err.kind() == std::io::ErrorKind::Interrupted => continue,
-            Err(err) => {
-                tracing::debug!("pty read ended: {err}");
-                break;
-            }
-        }
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn winsize(master: BorrowedFd<'_>) -> libc::winsize {
+        let mut size = libc::winsize { ws_row: 0, ws_col: 0, ws_xpixel: 0, ws_ypixel: 0 };
+        // SAFETY: `master` 开着；`TIOCGWINSZ` 只往传进去的结构里写。
+        let result = unsafe { libc::ioctl(master.as_raw_fd(), libc::TIOCGWINSZ, &raw mut size) };
+        assert_eq!(result, 0, "{}", std::io::Error::last_os_error());
+        size
     }
-    sink(PtyEvent::Exited);
+
+    #[test]
+    fn resize_sets_the_window_size() {
+        let size = GridSize { cols: 20, rows: 4, cell_width_px: 8, cell_height_px: 16 };
+        let pty = Pty::open(size, Box::new(|_| true)).unwrap();
+        let got = winsize(pty.master.as_fd());
+        assert_eq!((got.ws_col, got.ws_row), (20, 4));
+        pty.resize(GridSize { cols: 100, rows: 40, ..size });
+        let got = winsize(pty.master.as_fd());
+        assert_eq!((got.ws_col, got.ws_row, got.ws_xpixel, got.ws_ypixel), (100, 40, 800, 640));
+    }
 }
