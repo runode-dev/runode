@@ -511,3 +511,9 @@ settings:
     defaults: 默认快捷键
     unbind_default: 去掉
     overridden: 已改动
+clipboard:
+  read_title: 允许程序读取剪贴板？
+  read_detail: "「%{terminal}」里的 %{program} 想读取剪贴板里的文字。只在信得过它时允许：你最近复制的内容（包括密码）会交给这个程序。"
+  read_detail_unknown: "「%{terminal}」里的一个程序想读取剪贴板里的文字。只在信得过它时允许：你最近复制的内容（包括密码）会交给这个程序。"
+  allow: 允许
+  deny: 不允许

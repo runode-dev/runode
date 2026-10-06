@@ -511,3 +511,9 @@ settings:
     defaults: 預設快速鍵
     unbind_default: 去掉
     overridden: 已改動
+clipboard:
+  read_title: 允許程式讀取剪貼簿？
+  read_detail: "「%{terminal}」裡的 %{program} 想讀取剪貼簿裡的文字。只在信得過它時允許：你最近拷貝的內容（包括密碼）會交給這個程式。"
+  read_detail_unknown: "「%{terminal}」裡的一個程式想讀取剪貼簿裡的文字。只在信得過它時允許：你最近拷貝的內容（包括密碼）會交給這個程式。"
+  allow: 允許
+  deny: 不允許

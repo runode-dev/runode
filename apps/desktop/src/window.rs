@@ -17,6 +17,7 @@ mod agent_picker;
 mod agents;
 mod arrange;
 mod background;
+mod clipboard;
 mod files;
 mod git_panel;
 mod inline_edit;

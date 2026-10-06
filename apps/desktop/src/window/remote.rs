@@ -1,7 +1,8 @@
 //! 别的进程经宿主请 app 办的事（`runode open`、`runode focus`，以及命令行问各个终端摆在哪）：在
 //! 某个终端旁边开新终端，切到某个终端，回答布局（见 `layout_report`）。宿主把请求包成
 //! `HostMsg::UiRequest` 经连接转过来（见 `host_client::serve_ui`），这里在主线程上按会话找到它
-//! 所在的窗口和分屏再办，用 `Link::ui_reply` 回话。
+//! 所在的窗口和分屏再办，用 `Link::ui_reply` 回话。终端里的程序读写剪贴板也这样转过来，见
+//! `clipboard`。
 
 use std::path::PathBuf;
 
@@ -11,7 +12,7 @@ use runode_protocol::{ClientMsg, HostMsg, Placement, SessionId};
 use runode_shared_types::pane::Axis;
 
 use super::persist::format;
-use super::{WindowView, agents::reveal, layout_report};
+use super::{WindowView, agents::reveal, clipboard, layout_report};
 use crate::host_client;
 
 /// 开始收别的进程的请求。
@@ -23,6 +24,11 @@ pub fn serve_requests(cx: &mut App) {
     };
     cx.spawn(async move |cx| {
         while let Some((ui, request)) = requests.next().await {
+            // 读剪贴板可能要等用户点询问框，自己回话，不挡住后面的请求。
+            if let ClientMsg::ReadClipboard { id, ask, program } = request {
+                cx.update(|cx| clipboard::read(ui, id, ask, program, cx));
+                continue;
+            }
             let reply = cx.update(|cx| handle(request, cx));
             host_client::link().ui_reply(ui, reply);
         }
@@ -70,12 +76,13 @@ fn handle(request: ClientMsg, cx: &mut App) -> HostMsg {
             None => fail(req, format!("no runode window shows session {id}")),
         },
         ClientMsg::Layout { req } => HostMsg::Layout { req, windows: layout_report::current(cx) },
+        ClientMsg::WriteClipboard { text, .. } => clipboard::write(text, cx),
         other => HostMsg::Error { req: None, id: None, message: format!("the runode app does not handle {other:?}") },
     }
 }
 
 /// 显示这个会话的窗口和分屏。
-fn find_session(id: SessionId, cx: &App) -> Option<(WindowHandle<WindowView>, EntityId)> {
+pub(super) fn find_session(id: SessionId, cx: &App) -> Option<(WindowHandle<WindowView>, EntityId)> {
     windows(cx).into_iter().find_map(|window| Some((window, pane_of(window, id, cx)?)))
 }
 

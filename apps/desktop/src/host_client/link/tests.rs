@@ -479,7 +479,11 @@ fn theme_and_options_are_sent_again_after_reconnecting() {
     let link = connected(&host);
     let settings = TermSettings { scrollback_limit: 3 << 20, ..TermSettings::default() };
     link.send(ClientMsg::SetTheme { settings: settings.clone() });
-    link.send(ClientMsg::SetOptions { record_history: false, clipboard: ClipboardAccess::default() });
+    let clipboard = ClipboardAccess {
+        write: runode_shared_types::clipboard::ClipboardWrite::Deny,
+        read: runode_shared_types::clipboard::ClipboardRead::Allow,
+    };
+    link.send(ClientMsg::SetOptions { record_history: false, clipboard });
     let (seen, seen_rx) = mpsc::channel();
     let (ours, theirs) = UnixStream::pair().unwrap();
     thread::spawn(move || {
@@ -502,10 +506,7 @@ fn theme_and_options_are_sent_again_after_reconnecting() {
     });
     link.connect(ours).unwrap();
     assert_eq!(seen_rx.recv_timeout(WAIT).unwrap(), ClientMsg::SetTheme { settings });
-    assert_eq!(
-        seen_rx.recv_timeout(WAIT).unwrap(),
-        ClientMsg::SetOptions { record_history: false, clipboard: ClipboardAccess::default() }
-    );
+    assert_eq!(seen_rx.recv_timeout(WAIT).unwrap(), ClientMsg::SetOptions { record_history: false, clipboard });
 }
 
 /// 基准：经 `Link` 的按键到回显延迟和 `cat` 大文件的吞吐，宿主跑在 app 里（一对 socket）和单独

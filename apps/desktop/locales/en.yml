@@ -511,3 +511,9 @@ settings:
     defaults: Default Shortcuts
     unbind_default: Remove
     overridden: Changed
+clipboard:
+  read_title: Let a program read the clipboard?
+  read_detail: "%{program} in “%{terminal}” wants to read the text on your clipboard. Allow it only if you trust it: whatever you copied last, passwords included, goes to the program."
+  read_detail_unknown: "A program in “%{terminal}” wants to read the text on your clipboard. Allow it only if you trust it: whatever you copied last, passwords included, goes to the program."
+  allow: Allow
+  deny: Don’t Allow
