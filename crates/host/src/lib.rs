@@ -22,7 +22,8 @@ mod session;
 use std::{
     collections::HashMap,
     ffi::OsString,
-    path::PathBuf,
+    fmt,
+    path::{Path, PathBuf},
     sync::{
         Arc, Condvar, Mutex, MutexGuard, PoisonError,
         atomic::{AtomicBool, AtomicU64, Ordering},
@@ -31,8 +32,8 @@ use std::{
 
 use anyhow::Result;
 pub use idle::Stopped;
-pub use launch::launch;
-pub use runode_protocol::{BuildId, ClientMsg, HostMsg, Placement, SessionId};
+pub use launch::{STATUS_FD, Successor, launch, launch_successor};
+pub use runode_protocol::{BuildId, ClientMsg, HandoffRefusal, HostMsg, Placement, SessionId};
 use runode_shared_types::{grid::GridSize, settings::TermSettings, shell::IntegrationMode};
 
 /// 新开一个会话。
@@ -203,5 +204,55 @@ impl Host {
         let mut env = self.shared.env.lock().unwrap_or_else(PoisonError::into_inner);
         env.retain(|(k, _)| k != key);
         env.push((key.into(), value.into()));
+    }
+}
+
+/// `Host::take_over` 的选项，缺省就是正常升级时用的。
+#[derive(Clone, Debug, Default)]
+pub struct TakeOverOptions {
+    /// 测试用：当作自己编得了的快照格式版本，`None` 时用这个构建的（见 `HostMsg::Welcome` 的
+    /// `snapshot_format`）。和旧宿主的不同时会话退成 VT 重放。
+    pub snapshot_format: Option<u16>,
+}
+
+/// `Host::take_over` 接手成功。
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct TakeOverReport {
+    /// 接过来的会话个数。
+    pub sessions: usize,
+    /// 其中快照用不了、退成 VT 重放的会话（回滚历史没带过来）。
+    pub replayed: Vec<SessionId>,
+}
+
+/// `Host::take_over` 没接手，会话还在旧宿主手里。
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum TakeOverError {
+    /// 旧宿主不交（`HostMsg::HandoffRefused`）。
+    Refused(HandoffRefusal),
+    /// 旧宿主太老，不会交接（协议 3 及以前）。
+    PreHandoff,
+    /// 连不上、谈崩了或者接手时出了错。
+    Failed(String),
+}
+
+impl fmt::Display for TakeOverError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Refused(reason) => write!(f, "the old host refused to hand over: {reason:?}"),
+            Self::PreHandoff => write!(f, "the old host is too old to hand over its sessions"),
+            Self::Failed(reason) => write!(f, "the handoff failed: {reason}"),
+        }
+    }
+}
+
+impl std::error::Error for TakeOverError {}
+
+impl Host {
+    /// 升级时接手 `socket` 上旧宿主的会话和监听的 socket（以 `ClientKind::Successor` 连上去谈），
+    /// 成功后这个宿主就在 `socket` 上接受连接；失败时会话照旧在旧宿主手里，这个宿主什么都没接。
+    // 桩：宿主一侧的交接还没做，一律失败；接口先给桌面的 `runode --host --take-over` 用。
+    pub fn take_over(&self, socket: &Path, options: TakeOverOptions) -> Result<TakeOverReport, TakeOverError> {
+        let _ = (socket, options);
+        Err(TakeOverError::Failed("not implemented".into()))
     }
 }
