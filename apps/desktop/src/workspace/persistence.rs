@@ -80,7 +80,8 @@ pub(super) fn freeze(cx: &mut App) {
 
 /// 上次存下的各个窗口，以及恢复时打开它们用的窗口选项（位置、大小、所在屏幕）。没有存档或
 /// 读不了时为空；文件坏了时挪到一边，从默认布局开始。终端记的会话按宿主里还活着的会话定下
-/// 接不接（`persist::plan_restore`），接不上又没人要的会话这时结束掉。
+/// 接不接（`persist::plan_restore`）；宿主里已经退出又没人连着的、存档记着却一直没启动的会话
+/// 这时结束掉（没有存档也照样做）。
 pub fn saved_window_options(cx: &App) -> Vec<(SavedWindow, WindowOptions)> {
     let windows = match persist::load() {
         Ok(state) => state.map(|state| state.windows).unwrap_or_default(),
@@ -93,11 +94,11 @@ pub fn saved_window_options(cx: &App) -> Vec<(SavedWindow, WindowOptions)> {
         }
     };
     let windows: Vec<_> = windows.into_iter().filter(|window| !window.workspaces.is_empty()).collect();
-    let live = if windows.is_empty() { Vec::new() } else { live_sessions() };
+    let live = live_sessions();
     let plan = persist::plan_restore(windows, &live);
     let link = session_host::link();
     for id in plan.end {
-        tracing::info!("ending the saved session {id}: its shell exited or never started");
+        tracing::info!("ending the session {id}: its shell exited or never started");
         link.kill(id);
     }
     plan.windows

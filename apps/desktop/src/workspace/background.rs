@@ -5,7 +5,8 @@
 //! 列表全 app 一份（`BackgroundSessions`）：问宿主有哪些会话（`session_host::list_sessions`），
 //! 减去各窗口里的终端占着的、有别的界面连着的（`SessionInfo::claimed`）和 shell 已经退出的。列表
 //! 里的会话不 attach，免得宿主把它们算成有界面连着。列表不空时每 `POLL_INTERVAL` 重问一次，空了
-//! 就停；启动、接上、结束之后各问一次。
+//! 就停；启动、接上、结束之后各问一次。问到 shell 已经退出、谁都没连着的会话（多半是列表里的后台
+//! 会话自己退出了）顺手结束，免得它一直留在宿主里、挡着宿主空闲退出。
 
 use std::{
     collections::HashSet,
@@ -85,7 +86,15 @@ fn apply(live: Option<Result<Vec<SessionInfo>>>, cx: &mut App) {
     let previous = cx.default_global::<BackgroundSessions>().sessions.clone();
     let sessions = match live {
         None => Vec::new(),
-        Some(Ok(live)) => background(&live, &held_sessions(cx), &previous),
+        Some(Ok(live)) => {
+            let held = held_sessions(cx);
+            let link = session_host::link();
+            for id in orphans(&live, &held) {
+                tracing::info!("ending the background session {id}: its shell exited");
+                link.kill(id);
+            }
+            background(&live, &held, &previous)
+        }
         Some(Err(err)) => {
             tracing::debug!("failed to list the host's sessions for the background list: {err:#}");
             previous
@@ -131,6 +140,17 @@ fn background(live: &[SessionInfo], held: &HashSet<SessionId>, previous: &[Sessi
     let rank = |id: SessionId| previous.iter().position(|session| session.id == id).unwrap_or(usize::MAX);
     sessions.sort_by_key(|session| (rank(session.id), session.id));
     sessions
+}
+
+/// shell 已经退出、谁都没连着（没有界面，也没有命令行这类前端）、也不是窗口里的终端占着的会话，
+/// 同一个会话只给一次。
+fn orphans(live: &[SessionInfo], held: &HashSet<SessionId>) -> Vec<SessionId> {
+    let mut seen = HashSet::new();
+    live.iter()
+        .filter(|session| session.exited && !session.claimed && session.clients == 0 && !held.contains(&session.id))
+        .map(|session| session.id)
+        .filter(|id| seen.insert(*id))
+        .collect()
 }
 
 /// 各窗口里的终端占着的会话。
@@ -370,6 +390,22 @@ mod tests {
         let held = HashSet::from([SessionId(5)]);
         assert_eq!(ids(&background(&live, &held, &[])), [1, 4]);
         assert!(background(&[], &held, &[]).is_empty());
+    }
+
+    #[test]
+    fn exited_sessions_nobody_holds_are_orphans() {
+        let attached = SessionInfo { clients: 1, ..session(4, false, true) };
+        let live = [
+            session(1, false, true),
+            session(2, true, true),
+            session(3, false, false),
+            attached,
+            session(5, false, true),
+            session(1, false, true),
+        ];
+        // 2 有界面连着；3 还在跑；4 有命令行连着；5 是窗口里的终端占着的。
+        let held = HashSet::from([SessionId(5)]);
+        assert_eq!(orphans(&live, &held), [SessionId(1)]);
     }
 
     #[test]

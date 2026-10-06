@@ -7,9 +7,9 @@
 //! agent 的状态标记、提醒和跳转（`agents`）、列出所有 agent 的浮层（`agent_picker`）、
 //! 标签里的分屏（`panes`）、标题栏和标签（`titlebar`）、侧栏（`sidebar`）、右侧的预览栏、
 //! Git 面板和文件树（`project`、`preview`、`git_panel`、`files`），侧栏和文件树共用的就地输入框
-//! （`inline_edit`），存档（`persistence`），退出和关窗口时会话怎么办（`quit`），以及别的进程经
-//! 宿主请 app 开终端、切到某个终端、问各个终端摆在哪（`remote`、`layout_report`），以及一次在
-//! 当前分屏旁开几个分屏（`arrange`）。
+//! （`inline_edit`），存档（`persistence`），侧栏里没在窗口里显示的后台会话（`background`），
+//! 退出和关窗口时会话怎么办（`quit`），以及别的进程经宿主请 app 开终端、切到某个终端、问各个
+//! 终端摆在哪（`remote`、`layout_report`），以及一次在当前分屏旁开几个分屏（`arrange`）。
 
 mod actions;
 mod agent_picker;
