@@ -93,6 +93,9 @@
             configuration.contentInsets = NSDirectionalEdgeInsets(top: 4, leading: 10, bottom: 4, trailing: 10)
             if symbol {
                 configuration.image = UIImage(systemName: title)
+                // 比旁边 15 点的字小一号，图标看着才和字一样大。
+                configuration.preferredSymbolConfigurationForImage = UIImage.SymbolConfiguration(
+                    pointSize: 13, weight: .medium)
             } else {
                 var attributed = AttributedString(title)
                 attributed.font = .monospacedSystemFont(ofSize: 15, weight: .medium)
