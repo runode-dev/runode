@@ -6,7 +6,8 @@
 
     /// 终端页：整页铺终端的背景色，导航栏是和终端协调的半透明深色（浅色主题时是浅色），标题下面一行
     /// agent 和连接的状态。断线时终端上方叠一条带「重试」的横幅；agent 等回答时底部出现快速回复栏；
-    /// 键盘没弹出时底部常驻一条带「键盘」按钮的细栏。
+    /// 软键盘没弹出时底部常驻一条按键栏（Esc、Ctrl、方向键……最后一个键打开软键盘），弹出后由键盘上方的
+    /// 辅助栏接手。
     struct TerminalScreen: View {
         @Bindable var model: TerminalModel
         /// 设置里的字号和响铃震动。
@@ -15,13 +16,16 @@
         var onOpenGit: () -> Void = {}
         /// 断线横幅占的高度，终端视图据此在顶上让出地方，横幅不挡内容。
         @State private var bannerHeight: CGFloat = 0
+        /// 嵌着的终端视图，底部的按键栏按了发给它。
+        @State private var terminalView: TerminalView?
 
         private var background: Color { Color(model.background) }
         private var scheme: ColorScheme { model.background.isDark ? .dark : .light }
 
         var body: some View {
             TerminalViewRepresentable(
-                model: model, preferences: preferences, topObstruction: bannerMessage == nil ? 0 : bannerHeight)
+                model: model, preferences: preferences, topObstruction: bannerMessage == nil ? 0 : bannerHeight,
+                onMake: { view in terminalView = view })
                 .ignoresSafeArea(.container, edges: .horizontal)
                 .overlay(alignment: .top) { banner }
                 .overlay(alignment: .bottomTrailing) {
@@ -46,11 +50,6 @@
                     ToolbarItem(placement: .principal) { titleView }
                     ToolbarItem(placement: .primaryAction) { sizeMenu }
                     ToolbarItem(placement: .primaryAction) { moreMenu }
-                }
-                .confirmationDialog("结束这个终端？", isPresented: $model.isConfirmingKill, titleVisibility: .visible) {
-                    Button("结束会话", role: .destructive) { model.kill() }
-                } message: {
-                    Text("里面正在跑的程序会收到 SIGHUP 并退出。")
                 }
         }
 
@@ -111,6 +110,12 @@
                 Image(systemName: "ellipsis")
             }
             .accessibilityLabel("终端选项")
+            // 挂在菜单按钮上，确认框的气泡才指着它。
+            .confirmationDialog("结束这个终端？", isPresented: $model.isConfirmingKill, titleVisibility: .visible) {
+                Button("结束会话", role: .destructive) { model.kill() }
+            } message: {
+                Text("里面正在跑的程序会收到 SIGHUP 并退出。")
+            }
         }
 
         @ViewBuilder
@@ -192,21 +197,11 @@
                         .padding(.vertical, 10)
                         .transition(.move(edge: .bottom).combined(with: .opacity))
                 }
-                // 尺寸跟随谁看导航栏右边的图标，这里只放「键盘」。
-                if !model.keyboardVisible {
-                    HStack {
-                        Button {
-                            model.showKeyboard()
-                        } label: {
-                            Label("键盘", systemImage: "keyboard")
-                                .font(.subheadline.weight(.semibold))
-                                .frame(minHeight: 44)
-                        }
-                        .accessibilityHint("打开键盘在终端里打字")
-                        Spacer()
-                    }
-                    .padding(.horizontal)
-                    .transition(.opacity)
+                // 软键盘弹出时键盘上方有一样的辅助栏，这条就收起来。尺寸跟随谁看导航栏右边的图标。
+                if !model.keyboardVisible, let terminalView {
+                    RestingKeyBar(terminalView: terminalView)
+                        .frame(height: 44)
+                        .transition(.opacity)
                 }
             }
             .background(.bar)
@@ -219,12 +214,25 @@
         }
     }
 
+    /// 软键盘收着时底部的按键栏（`TerminalView.makeRestingKeyBar`）。
+    private struct RestingKeyBar: UIViewRepresentable {
+        let terminalView: TerminalView
+
+        func makeUIView(context: Context) -> UIView {
+            terminalView.makeRestingKeyBar()
+        }
+
+        func updateUIView(_ view: UIView, context: Context) {}
+    }
+
     /// 把 UIKit 的 `TerminalView` 嵌进 SwiftUI，用户的输入转给视图模型。
     struct TerminalViewRepresentable: UIViewRepresentable {
         let model: TerminalModel
         let preferences: AppPreferences
         /// 叠在终端顶上的横幅的高度。
         var topObstruction: CGFloat = 0
+        /// 建好了终端视图，页面的按键栏要用它。
+        var onMake: (TerminalView) -> Void = { _ in }
 
         func makeCoordinator() -> Coordinator {
             Coordinator(model: model)
@@ -234,6 +242,8 @@
             let view = TerminalView(frame: .zero)
             view.delegate = context.coordinator
             model.attachDisplay(view)
+            // 正在更新视图时不能改页面的状态，下一轮再交出去。
+            Task { @MainActor in onMake(view) }
             return view
         }
 

@@ -33,13 +33,16 @@ public struct AppDependencies {
     public var recents: any RecentTerminalStore
     /// 设置存在哪里；不给时只记在内存里。
     public var preferences: any PreferencesStore
+    /// 上次用的主题记在哪里；不给时只记在内存里。
+    public var themes: any ThemeStore
 
     @MainActor
     public init(
         store: any MachineStore, keyStore: any DeviceKeyStore, pairing: any Pairing,
         makeLink: @escaping @MainActor (MachineRecord) -> any HostLink, deviceName: String,
         recents: any RecentTerminalStore = MemoryRecentTerminalStore(),
-        preferences: any PreferencesStore = MemoryPreferencesStore()
+        preferences: any PreferencesStore = MemoryPreferencesStore(),
+        themes: any ThemeStore = MemoryThemeStore()
     ) {
         self.store = store
         self.keyStore = keyStore
@@ -48,6 +51,7 @@ public struct AppDependencies {
         self.deviceName = deviceName
         self.recents = recents
         self.preferences = preferences
+        self.themes = themes
     }
 }
 
@@ -70,6 +74,8 @@ public final class AppModel {
     public let settings: SettingsModel
     /// 上次打开的终端，首页的「继续」用它。
     public private(set) var recent: RecentTerminal?
+    /// 上次用的主题，电脑还没连上时用它。
+    private var savedTheme: AppTheme?
 
     @ObservationIgnored private let dependencies: AppDependencies
     @ObservationIgnored private var sessionLists: [UUID: SessionListModel] = [:]
@@ -82,6 +88,7 @@ public final class AppModel {
         machineList = MachineListModel(store: dependencies.store, keyStore: dependencies.keyStore)
         settings = SettingsModel(store: dependencies.preferences, systemDeviceName: dependencies.deviceName)
         recent = dependencies.recents.load()
+        savedTheme = dependencies.themes.load()
         machineList.willDelete = { [weak self] id in self?.forget(machine: id) }
         machineList.didLoad = { [weak self] in self?.syncConnections() }
         settings.deviceNameDidChange = { [weak self] name in self?.deviceNameChanged(name) }
@@ -140,6 +147,7 @@ public final class AppModel {
         guard let machine = machineList.machine(machineId) else { return nil }
         let model = SessionListModel(machine: machine, link: dependencies.makeLink(machine))
         model.onSpawned = { [weak self] session in self?.openTerminal(machine: machineId, session: session) }
+        model.onThemeChanged = { [weak self] in self?.saveTheme() }
         sessionLists[machineId] = model
         if active { model.start() }
         return model
@@ -164,6 +172,28 @@ public final class AppModel {
         terminals[route] = model
         if active { model.open() }
         return model
+    }
+
+    /// 终端页以外的界面用的主题：上次打开的终端所在的那台电脑的，它还没报主题时用配对列表里第一台报了
+    /// 的，都没有时用上次记下的；从没连上过电脑时用 runode 默认的深色主题，和终端页没设主题时一样。
+    /// 几台电脑主题不同时，进出会话列表也不换主题，免得翻页时整个界面变色。
+    public var theme: AppTheme {
+        reportedTheme ?? savedTheme ?? AppTheme(.default)
+    }
+
+    /// 电脑报来的主题，按 `theme` 说的先后挑；还没有电脑报过时为空。
+    private var reportedTheme: AppTheme? {
+        let order = (recent.map { [$0.machine] } ?? []) + machineList.machines.map(\.id)
+        for id in order {
+            if let theme = sessionLists[id]?.theme { return theme }
+        }
+        return nil
+    }
+
+    private func saveTheme() {
+        guard let theme = reportedTheme, theme != savedTheme else { return }
+        savedTheme = theme
+        dependencies.themes.save(theme)
     }
 
     /// App 回到前台或进了后台。后台里 iOS 会挂起 App，连接迟早被断，主动断开干净；回来时重连。
@@ -223,6 +253,7 @@ public final class AppModel {
         guard entry != recent else { return }
         recent = entry
         dependencies.recents.save(entry)
+        saveTheme()
     }
 
     /// 设置页关掉了：在里面点过「配对新电脑」的，这时打开配对页。

@@ -91,6 +91,9 @@ public final class SessionListModel {
     public private(set) var previews: [SessionId: [String]] = [:]
     /// 连上后收到过一次列表。
     public private(set) var loaded = false
+    /// 这台电脑上终端的主题：只看状态的 `Attach` 回话里带着，终端页开着时它收到的 `ThemeApplied`
+    /// 也经同一条连接到这里。没收到过时为空。
+    public private(set) var theme: AppTheme?
     public private(set) var isSpawning = false
     public var errorMessage: String?
     /// 等用户确认结束的会话。
@@ -101,6 +104,8 @@ public final class SessionListModel {
     @ObservationIgnored public let link: any HostLink
     /// 新开的会话开好了（宿主回了 `Spawned`），`AppModel` 据此打开它的终端页。
     @ObservationIgnored public var onSpawned: @MainActor (SessionId) -> Void = { _ in }
+    /// `theme` 变了，`AppModel` 据此记下 App 现在用的主题。
+    @ObservationIgnored var onThemeChanged: @MainActor () -> Void = {}
     @ObservationIgnored private var task: Task<Void, Never>?
     @ObservationIgnored private var connected = false
     /// 这次连接上已经发过只看状态的 `Attach` 的会话。
@@ -332,6 +337,12 @@ public final class SessionListModel {
         }
     }
 
+    private func setTheme(_ newTheme: AppTheme) {
+        guard theme != newTheme else { return }
+        theme = newTheme
+        onThemeChanged()
+    }
+
     private func handle(_ message: HostMsg) {
         if quickReplies.values.contains(where: { $0.handle(message) }) {
             return
@@ -352,6 +363,9 @@ public final class SessionListModel {
             }
         case .attached(let attached):
             update(attached.id) { $0.meta = attached.meta }
+            if let settings = attached.settings { setTheme(AppTheme(settings)) }
+        case .themeApplied(_, let settings):
+            setTheme(AppTheme(settings))
         case .meta(let id, let meta):
             update(id) { $0.meta = meta }
             requestPreview(id)

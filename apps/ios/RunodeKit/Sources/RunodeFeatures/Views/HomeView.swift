@@ -13,6 +13,7 @@
         @Bindable var machines: MachineListModel
         @Environment(\.displayScale) private var displayScale
         @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+        @Environment(\.themeColors) private var colors
         @State private var choosingSpawnMachine = false
         /// 首页的大小，和终端页差不多；新开会话按它和设置里的字号算网格尺寸。
         @State private var pageSize: CGSize?
@@ -27,11 +28,6 @@
                 }
                 .task(id: machines.machines.map(\.id)) { await app.keepHomeRefreshing() }
                 .onGeometryChange(for: CGSize.self) { $0.size } action: { pageSize = $0 }
-                .confirmationDialog("在哪台电脑上新开终端？", isPresented: $choosingSpawnMachine, titleVisibility: .visible) {
-                    ForEach(app.spawnableLists, id: \.machine.id) { list in
-                        Button(list.machine.name) { spawn(on: list) }
-                    }
-                }
                 // 按钮里用 `presenting` 带进来的编号：对话框关掉时绑定先被清掉，不能再从模型里读。
                 .alert("改名", isPresented: $machines.isRenaming, presenting: machines.renameTarget) { id in
                     TextField("名字", text: $machines.renameText)
@@ -40,14 +36,6 @@
                         let name = machines.renameText
                         Task { await machines.rename(id, to: name) }
                     }
-                }
-                .confirmationDialog(
-                    "删除这台电脑？", isPresented: $machines.isConfirmingDelete, titleVisibility: .visible,
-                    presenting: machines.deleteTarget
-                ) { id in
-                    Button("删除", role: .destructive) { Task { await machines.delete(id) } }
-                } message: { _ in
-                    Text("会删掉这部手机上为它保存的设备密钥，以后要重新扫码配对。电脑上的配对记录请在那台电脑上撤销。")
                 }
                 .alert("出错了", isPresented: showsError) {
                     Button("好") {}
@@ -72,7 +60,7 @@
                     }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .background(Color(.systemGroupedBackground))
+                .background(colors.page)
             } else {
                 List {
                     summarySection
@@ -137,9 +125,11 @@
                     .buttonStyle(CardButtonStyle())
                     .plainListRow()
                     .swipeActions(edge: .trailing) {
-                        Button("删除", systemImage: "trash", role: .destructive) {
+                        // 不用 `.destructive`，理由同会话列表左滑结束：系统会先把这一行移走，确认框跟着消失。
+                        Button("删除", systemImage: "trash") {
                             machines.deleteTarget = machine.id
                         }
+                        .tint(.red)
                         Button("改名", systemImage: "pencil") {
                             machines.beginRename(machine.id)
                         }
@@ -150,8 +140,23 @@
                         Button("改名", systemImage: "pencil") { machines.beginRename(machine.id) }
                         Button("删除", systemImage: "trash", role: .destructive) { machines.deleteTarget = machine.id }
                     }
+                    // 确认框挂在卡片上：iOS 26 起它是指向所挂视图的气泡，挂在整页上会指到屏幕中间。
+                    .confirmationDialog(
+                        "删除这台电脑？", isPresented: confirmsDelete(machine.id), titleVisibility: .visible
+                    ) {
+                        Button("删除", role: .destructive) { Task { await machines.delete(machine.id) } }
+                    } message: {
+                        Text("会删掉这部手机上为它保存的设备密钥，以后要重新扫码配对。电脑上的配对记录请在那台电脑上撤销。")
+                    }
                 }
             }
+        }
+
+        /// 这台电脑是不是等着确认删除。
+        private func confirmsDelete(_ id: UUID) -> Binding<Bool> {
+            Binding(
+                get: { machines.deleteTarget == id },
+                set: { if !$0, machines.deleteTarget == id { machines.deleteTarget = nil } })
         }
 
         @ViewBuilder
@@ -184,6 +189,13 @@
                         }
                     }
                     .disabled(spawnable.isEmpty)
+                    .confirmationDialog(
+                        "在哪台电脑上新开终端？", isPresented: $choosingSpawnMachine, titleVisibility: .visible
+                    ) {
+                        ForEach(app.spawnableLists, id: \.machine.id) { list in
+                            Button(list.machine.name) { spawn(on: list) }
+                        }
+                    }
                 }
                 .padding(.bottom, 16)
                 .plainListRow()
@@ -286,6 +298,7 @@
         let number: Int
         let title: String
         let detail: LocalizedStringKey
+        @Environment(\.themeColors) private var colors
 
         var body: some View {
             HStack(alignment: .top, spacing: 12) {
@@ -293,7 +306,7 @@
                     .font(.footnote.weight(.semibold).monospacedDigit())
                     .foregroundStyle(.secondary)
                     .frame(width: 28, height: 28)
-                    .background(Color(.tertiarySystemFill), in: .inner)
+                    .background(colors.fill, in: .inner)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(title)
                         .font(.subheadline.weight(.semibold))
@@ -312,13 +325,14 @@
     private struct IconTile: View {
         let systemImage: String
         var tint: Color = .secondary
+        @Environment(\.themeColors) private var colors
 
         var body: some View {
             Image(systemName: systemImage)
                 .font(.title3)
                 .foregroundStyle(tint)
                 .frame(width: 40, height: 40)
-                .background(Color(.tertiarySystemFill), in: .inner)
+                .background(colors.fill, in: .inner)
                 .accessibilityHidden(true)
         }
     }
@@ -329,6 +343,7 @@
         let title: String
         let systemImage: String
         let tint: Color
+        @Environment(\.themeColors) private var colors
 
         var body: some View {
             VStack(alignment: .leading, spacing: 2) {
@@ -349,7 +364,7 @@
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(12)
-            .background(Color(.secondarySystemGroupedBackground), in: .card)
+            .background(colors.card, in: .card)
             .animation(.default, value: value)
             .accessibilityElement(children: .ignore)
             .accessibilityLabel("\(title) \(value)")
@@ -363,6 +378,7 @@
         let busy: Bool
         let action: () -> Void
         @Environment(\.isEnabled) private var isEnabled
+        @Environment(\.themeColors) private var colors
 
         var body: some View {
             Button(action: action) {
@@ -376,7 +392,7 @@
                         }
                     }
                     .frame(width: 32, height: 32)
-                    .background(Color(.tertiarySystemFill), in: .inner)
+                    .background(colors.fill, in: .inner)
                     Text(title)
                         .font(.subheadline.weight(.semibold))
                         .lineLimit(1)
@@ -385,7 +401,7 @@
                 }
                 .padding(12)
                 .frame(maxWidth: .infinity, minHeight: 56)
-                .background(Color(.secondarySystemGroupedBackground), in: .card)
+                .background(colors.card, in: .card)
                 .contentShape(.card)
             }
             .buttonStyle(.plain)

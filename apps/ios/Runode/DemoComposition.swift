@@ -40,7 +40,7 @@
 
         /// 参数里还带着 `terminal` 时直接打开等回答的那个会话的终端页，`shell` 时打开普通 shell 的，
         /// `list` 时打开会话列表，`git` 时打开普通 shell 所在仓库的 Git 页，`pair` 时打开配对页，`settings` 时打开设置页，不带参数停在首页。再带上 `offline` 时连上一会儿
-        /// 后假装断线。
+        /// 后假装断线，带上 `light` 时终端用浅色主题。
         static func openIfRequested(_ app: AppModel) {
             guard requested else { return }
             let arguments = ProcessInfo.processInfo.arguments
@@ -165,12 +165,21 @@
                         .attached(
                             .init(
                                 id: id, channel: 1, size: size(of: session), mode: .vtReplay, meta: session.meta,
-                                settings: .default))))
+                                settings: Self.theme))))
                 emit(.frame(Frame(kind: .snapshot, channel: 1, payload: Data(Self.screen(for: id).utf8)), generation: 1))
                 emit(.message(.snapshotEnd(id: id)))
                 if let owner = session.sizeOwner {
                     emit(.message(.sizeOwner(id: id, mine: false, owner: owner)))
                 }
+            case .attach(let id, _, .metaOnly):
+                // 和真的宿主一样，只看状态的 `Attach` 也带着主题，首页和列表据此上色。
+                guard let session = Self.sessions.first(where: { $0.id == id }) else { return }
+                emit(
+                    .message(
+                        .attached(
+                            .init(
+                                id: id, channel: 0, size: size(of: session), mode: .metaOnly, meta: session.meta,
+                                settings: Self.theme))))
             case .resize(let id, let size):
                 guard Self.sessions.first(where: { $0.id == id })?.sizeOwner == nil else { return }
                 sizes.withLock { $0[id] = size }
@@ -283,6 +292,15 @@
                 return $0
             }
         }
+
+        /// 终端的主题：默认的深色，启动参数带 `light` 时换成浅色。
+        static let theme: TermSettings = {
+            guard ProcessInfo.processInfo.arguments.contains("light") else { return .default }
+            var settings = TermSettings.default
+            settings.background = Rgb(hex: 0xFBF8F1)
+            settings.foreground = Rgb(hex: 0x3B3A36)
+            return settings
+        }()
 
         static func screen(for id: SessionId) -> String {
             switch id {

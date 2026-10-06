@@ -71,14 +71,6 @@
                 model.spawnSize = TerminalView.gridSize(
                     fitting: size, scale: displayScale, contentSize: UIContentSizeCategory(dynamicTypeSize))
             }
-            .confirmationDialog(
-                "结束这个终端？", isPresented: $model.isConfirmingKill, titleVisibility: .visible,
-                presenting: model.killTarget.flatMap(model.session)
-            ) { session in
-                Button("结束会话", role: .destructive) { model.kill(session.id) }
-            } message: { session in
-                Text("「\(Presentation.sessionTitle(session))」里正在跑的程序会收到 SIGHUP 并退出。")
-            }
             .alert(
                 "出错了", isPresented: Binding(get: { model.errorMessage != nil }, set: { if !$0 { model.errorMessage = nil } })
             ) {
@@ -120,9 +112,12 @@
             card(session, group: group)
                 .plainListRow()
                 .swipeActions(edge: .trailing) {
-                    Button("结束", systemImage: "xmark.circle", role: .destructive) {
+                    // 不用 `.destructive`：那样系统当作这一行被删了，先把它动画移走，挂在上面的确认框
+                    // 跟着消失。只要红色。
+                    Button("结束", systemImage: "xmark.circle") {
                         model.killTarget = session.id
                     }
+                    .tint(.red)
                 }
                 .contextMenu {
                     Button("打开", systemImage: "terminal") { onOpen(session.id) }
@@ -138,6 +133,19 @@
                         }
                     }
                 }
+                // 挂在卡片上：iOS 26 起确认框是指向所挂视图的气泡，挂在整个列表上会指到屏幕中间。
+                .confirmationDialog(
+                    "结束这个终端？", isPresented: confirmsKill(session.id), titleVisibility: .visible
+                ) {
+                    Button("结束会话", role: .destructive) { model.kill(session.id) }
+                } message: {
+                    Text("「\(Presentation.sessionTitle(session))」里正在跑的程序会收到 SIGHUP 并退出。")
+                }
+        }
+
+        /// 这个会话是不是等着确认结束。
+        private func confirmsKill(_ id: SessionId) -> Binding<Bool> {
+            Binding(get: { model.killTarget == id }, set: { if !$0, model.killTarget == id { model.killTarget = nil } })
         }
     }
 

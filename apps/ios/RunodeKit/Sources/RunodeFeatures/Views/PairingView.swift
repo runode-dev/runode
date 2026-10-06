@@ -9,6 +9,7 @@
         @Bindable var model: PairingModel
         /// 关掉配对页；配对成功时带着那台电脑。
         let onFinish: (MachineRecord?) -> Void
+        @Environment(\.themeColors) private var colors
 
         var body: some View {
             NavigationStack {
@@ -39,7 +40,7 @@
                                 .autocorrectionDisabled()
                                 .lineLimit(1...4)
                                 .padding(10)
-                                .background(Color(.tertiarySystemFill), in: .inner)
+                                .background(colors.fill, in: .inner)
                             HStack {
                                 PasteButton(payloadType: String.self) { strings in
                                     guard let link = strings.first else { return }
@@ -138,6 +139,7 @@
         let text: String
         let command: String
         @State private var copied = false
+        @Environment(\.themeColors) private var colors
 
         var body: some View {
             VStack(alignment: .leading, spacing: 8) {
@@ -154,7 +156,7 @@
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(.horizontal, 10)
                         .padding(.vertical, 8)
-                        .background(Color(.tertiarySystemFill), in: .inner)
+                        .background(colors.fill, in: .inner)
                     Button {
                         UIPasteboard.general.string = command
                         copied = true

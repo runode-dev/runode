@@ -11,11 +11,53 @@
         }
     }
 
-    extension Rgb {
-        /// 按相对亮度看是深色还是浅色背景，决定上面的导航栏、底栏用深色还是浅色模式。
-        var isDark: Bool {
-            let luminance = 0.2126 * Double(r) + 0.7152 * Double(g) + 0.0722 * Double(b)
-            return luminance < 128
+    /// 终端页以外的界面上的几种底色，从主题（`AppTheme`）的底色和前景色推出来；环境里没设时（预览）用
+    /// 系统的。界面上不直接用系统的底色和填充色，一律从环境里的这一份取。
+    struct ThemeColors {
+        /// 页面，相当于 `systemGroupedBackground`。
+        var page: Color
+        /// 卡片，相当于 `secondarySystemGroupedBackground`。
+        var card: Color
+        /// 卡片里的小块（按键、输入框、图标底），相当于 `tertiarySystemFill`。
+        var fill: Color
+        /// 屏幕预览的底，相当于 `secondarySystemFill`。
+        var secondaryFill: Color
+        /// 按下时盖在卡片上的一层，相当于 `systemFill`。
+        var pressed: Color
+
+        static let system = ThemeColors(
+            page: Color(.systemGroupedBackground), card: Color(.secondarySystemGroupedBackground),
+            fill: Color(.tertiarySystemFill), secondaryFill: Color(.secondarySystemFill), pressed: Color(.systemFill))
+
+        /// 填充色是前景色加透明度，放在页面和卡片上都看得出来，和系统的填充色一样。
+        init(_ theme: AppTheme) {
+            let foreground = Color(theme.foreground)
+            page = Color(theme.page)
+            card = Color(theme.card)
+            fill = foreground.opacity(0.10)
+            secondaryFill = foreground.opacity(0.14)
+            pressed = foreground.opacity(0.18)
+        }
+
+        private init(page: Color, card: Color, fill: Color, secondaryFill: Color, pressed: Color) {
+            self.page = page
+            self.card = card
+            self.fill = fill
+            self.secondaryFill = secondaryFill
+            self.pressed = pressed
+        }
+    }
+
+    extension EnvironmentValues {
+        @Entry var themeColors = ThemeColors.system
+    }
+
+    extension View {
+        /// 套用主题：底色放进环境，深色主题用深色模式（字、系统控件、键盘跟着变），浅色主题用浅色模式。
+        /// 放在根视图上，弹出的页面也跟着。
+        func appTheme(_ theme: AppTheme) -> some View {
+            environment(\.themeColors, ThemeColors(theme))
+                .preferredColorScheme(theme.isDark ? .dark : .light)
         }
     }
 
@@ -33,13 +75,9 @@
     }
 
     extension View {
-        /// 画成一张卡片：四周留边，分组列表的底色，`CornerRadius.card` 的圆角。
+        /// 画成一张卡片：四周留边，`ThemeColors.card` 的底色，`CornerRadius.card` 的圆角。
         func cardBackground() -> some View {
-            padding(.horizontal, 16)
-                .padding(.vertical, 12)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(Color(.secondarySystemGroupedBackground), in: .card)
-                .contentShape(.contextMenuPreview, .card)
+            modifier(CardBackground())
         }
 
         /// 列表里自己画卡片的一行：左右留出卡片到屏幕边的空，去掉系统给的底色和分隔线。
@@ -49,15 +87,57 @@
                 .listRowSeparator(.hidden)
         }
 
-        /// 一列卡片的列表：普通样式的 `List`（分组样式会按它的大圆角裁掉行），铺分组列表的底色，
+        /// 一列卡片的列表：普通样式的 `List`（分组样式会按它的大圆角裁掉行），铺 `ThemeColors.page`，
         /// 卡片之间留空。分组的标题用 `ListSectionHeader` 当作一行放进去，不用 `Section` 的标题，
         /// 免得滚动时钉在顶上；行不设最小高度，标题和说明这种一行小字的行才不会被撑高。
         func cardList() -> some View {
             listStyle(.plain)
                 .listRowSpacing(10)
                 .environment(\.defaultMinListRowHeight, 0)
+                .modifier(PageBackground())
+        }
+
+        /// 系统样式的 `Form` 或分组 `List`（开关、选择器要系统的行样式）换上主题的页面和行的底色。
+        /// 行的底色要逐个 `Section` 用 `themedRows` 设。
+        func themedForm() -> some View {
+            modifier(PageBackground())
+        }
+
+        /// `themedForm` 里一个 `Section` 的行用卡片的底色。
+        func themedRows() -> some View {
+            modifier(ThemedRows())
+        }
+    }
+
+    private struct CardBackground: ViewModifier {
+        @Environment(\.themeColors) private var colors
+
+        func body(content: Content) -> some View {
+            content
+                .padding(.horizontal, 16)
+                .padding(.vertical, 12)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(colors.card, in: .card)
+                .contentShape(.contextMenuPreview, .card)
+        }
+    }
+
+    /// 滚动视图（`List`、`Form`）去掉系统的底色，铺 `ThemeColors.page`。
+    private struct PageBackground: ViewModifier {
+        @Environment(\.themeColors) private var colors
+
+        func body(content: Content) -> some View {
+            content
                 .scrollContentBackground(.hidden)
-                .background(Color(.systemGroupedBackground))
+                .background(colors.page)
+        }
+    }
+
+    private struct ThemedRows: ViewModifier {
+        @Environment(\.themeColors) private var colors
+
+        func body(content: Content) -> some View {
+            content.listRowBackground(colors.card)
         }
     }
 
@@ -181,13 +261,15 @@
 
     /// 整张卡片是一个按钮：按下时卡片变暗一点，和系统列表行的高亮一样。
     struct CardButtonStyle: ButtonStyle {
+        @Environment(\.themeColors) private var colors
+
         func makeBody(configuration: Configuration) -> some View {
             configuration.label
                 .contentShape(Rectangle())
                 .cardBackground()
                 .overlay {
                     if configuration.isPressed {
-                        RoundedRectangle.card.fill(Color(.systemFill))
+                        RoundedRectangle.card.fill(colors.pressed)
                     }
                 }
                 .contentShape(.card)
@@ -263,6 +345,7 @@
     struct ScreenPreview: View {
         let lines: [String]
         @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+        @Environment(\.themeColors) private var colors
 
         var body: some View {
             VStack(alignment: .leading, spacing: 2) {
@@ -275,7 +358,7 @@
             .foregroundStyle(.secondary)
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(8)
-            .background(Color(.secondarySystemFill), in: .inner)
+            .background(colors.secondaryFill, in: .inner)
             .accessibilityLabel("屏幕预览：\(lines.joined(separator: "，"))")
         }
 
@@ -326,6 +409,7 @@
         /// 滚出去的键在边缘淡出，不会被生硬地切掉。
         var edgeInset: CGFloat = 16
         @FocusState private var draftFocused: Bool
+        @Environment(\.themeColors) private var colors
 
         var body: some View {
             VStack(alignment: .leading, spacing: 10) {
@@ -400,7 +484,7 @@
                 .disabled(!model.canSendDraft)
                 .accessibilityLabel("发送回复")
             }
-            .background(Color(.tertiarySystemFill), in: .inner)
+            .background(colors.fill, in: .inner)
             .contentShape(.inner)
             .onTapGesture { draftFocused = true }
         }
@@ -409,11 +493,12 @@
     /// 快速回复的一个键：浅底圆角块，字用强调色，按下时变暗。比 `.bordered` 矮，一排能多放几个。
     private struct QuickKeyStyle: ButtonStyle {
         @Environment(\.isEnabled) private var isEnabled
+        @Environment(\.themeColors) private var colors
 
         func makeBody(configuration: Configuration) -> some View {
             configuration.label
                 .foregroundStyle(isEnabled ? AnyShapeStyle(.tint) : AnyShapeStyle(.tertiary))
-                .background(Color(.tertiarySystemFill), in: .inner)
+                .background(colors.fill, in: .inner)
                 .contentShape(.inner)
                 .opacity(configuration.isPressed ? 0.55 : 1)
                 .animation(.easeOut(duration: 0.12), value: configuration.isPressed)

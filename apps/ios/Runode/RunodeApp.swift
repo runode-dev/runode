@@ -39,7 +39,8 @@ enum AppComposition {
                     identity: ClientIdentity(
                         build: buildIdentifier, deviceName: preferences.load().deviceName ?? systemName))
             },
-            deviceName: systemName, recents: UserDefaultsRecentTerminalStore(), preferences: preferences)
+            deviceName: systemName, recents: UserDefaultsRecentTerminalStore(), preferences: preferences,
+            themes: UserDefaultsThemeStore())
     }
 
     /// 启动后要做的事；演示模式下直接打开演示的终端，调试用的启动参数见 `DebugLaunch`。

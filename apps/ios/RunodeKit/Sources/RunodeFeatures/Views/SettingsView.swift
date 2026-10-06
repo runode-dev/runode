@@ -19,6 +19,7 @@
                     deviceSection
                     aboutSection
                 }
+                .themedForm()
                 .navigationTitle("设置")
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar {
@@ -58,6 +59,7 @@
             } footer: {
                 Text("默认尺寸用在新打开的终端上，终端页右上角还能临时换。「自动」在电脑上没有窗口显示这个终端时适配手机，有时跟随电脑。")
             }
+            .themedRows()
         }
 
         private var followsSystemFont: Binding<Bool> {
@@ -91,6 +93,7 @@
                     Label("配对新电脑", systemImage: "qrcode.viewfinder")
                 }
             }
+            .themedRows()
         }
 
         // MARK: 本机
@@ -103,6 +106,7 @@
             } footer: {
                 Text("电脑上提到这部手机时用这个名字，比如终端尺寸由谁决定。下次连上电脑时生效；电脑上已配对设备列表里的名字是配对时的，重新配对后才会更新。留空用系统的名字。")
             }
+            .themedRows()
         }
 
         // MARK: 关于
@@ -121,6 +125,7 @@
             } footer: {
                 Text("终端仿真用的是 Ghostty 的 libghostty-vt，图标字体来自 Nerd Fonts，点开看它们的许可。")
             }
+            .themedRows()
         }
 
         /// 「0.1.0（1）」：营销版本号和构建号。
@@ -199,6 +204,7 @@
                     ContentUnavailableView("这台电脑已经删掉了", systemImage: "laptopcomputer.slash")
                 }
             }
+            .themedForm()
             .navigationTitle(machines.machine(id)?.name ?? "电脑")
             .navigationBarTitleDisplayMode(.inline)
         }
@@ -218,6 +224,7 @@
                 } footer: {
                     Text("只改这部手机上显示的名字。")
                 }
+                .themedRows()
                 Section("配对信息") {
                     LabeledContent("电脑名", value: machine.hostName)
                     LabeledContent("配对时间", value: machine.pairedAt.formatted(date: .abbreviated, time: .shortened))
@@ -239,19 +246,22 @@
                             .textSelection(.enabled)
                     }
                 }
+                .themedRows()
                 Section {
                     Button("删除这台电脑", role: .destructive) { confirmingDelete = true }
+                        // 挂在按钮上，确认框的气泡才指着它。
+                        .confirmationDialog("删除这台电脑？", isPresented: $confirmingDelete, titleVisibility: .visible) {
+                            Button("删除", role: .destructive) {
+                                Task {
+                                    await machines.delete(id)
+                                    dismiss()
+                                }
+                            }
+                        }
                 } footer: {
                     Text("会删掉这部手机上为它保存的设备密钥，以后要重新扫码配对。电脑上的配对记录要在那台电脑上撤销：运行 `runode remote revoke \(machine.deviceId.prefix(8))`。")
                 }
-            }
-            .confirmationDialog("删除这台电脑？", isPresented: $confirmingDelete, titleVisibility: .visible) {
-                Button("删除", role: .destructive) {
-                    Task {
-                        await machines.delete(id)
-                        dismiss()
-                    }
-                }
+                .themedRows()
             }
         }
 

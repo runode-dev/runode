@@ -37,6 +37,8 @@
         private let aboveGrid = TerminalGridView()
         private let markedLabel = UILabel()
         private lazy var accessoryBar = KeyboardAccessoryBar(owner: self)
+        /// 软键盘收着时界面底部那条按键栏，由 `makeRestingKeyBar` 给出去。
+        private weak var restingBar: KeyboardAccessoryBar?
         private var refreshScheduled = false
         /// 用户自己捏合缩放过：网格尺寸变了也不再自动按屏幕宽度缩放。
         private var userZoomed = false
@@ -89,7 +91,10 @@
 
         /// 辅助栏上粘住的 Ctrl：下一个打的字按 Ctrl 组合键发。
         var controlLatched = false {
-            didSet { accessoryBar.setControlLatched(controlLatched) }
+            didSet {
+                accessoryBar.setControlLatched(controlLatched)
+                restingBar?.setControlLatched(controlLatched)
+            }
         }
 
         // 输入法组字中的文字，以及组字里光标的位置（UTF-16 偏移）。
@@ -450,6 +455,15 @@
                 becomeFirstResponder()
             }
             revealCursor()
+        }
+
+        /// 软键盘收着时放在界面底部的按键栏：和键盘上方的辅助栏一样的键，按了直接发给这个终端，最后
+        /// 一个键打开软键盘。不用先弹软键盘就能按 Esc、Ctrl、方向键。
+        public func makeRestingKeyBar() -> UIView {
+            let bar = KeyboardAccessoryBar(owner: self, resting: true)
+            bar.setControlLatched(controlLatched)
+            restingBar = bar
+            return bar
         }
 
         /// 把光标所在的位置滚进可见区域（键盘弹出、打字时）。
