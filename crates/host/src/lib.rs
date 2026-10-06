@@ -14,6 +14,7 @@
 //! 登记为界面的那条连接（`Hello` 里说自己是 `ClientKind::Desktop` 的），界面用 `ClientMsg::UiReply`
 //! 回话，宿主再原样转回发请求的一方。
 
+mod handoff;
 mod idle;
 mod launch;
 mod server;
@@ -30,9 +31,10 @@ use std::{
 };
 
 use anyhow::Result;
+pub use handoff::{TakeOverError, TakeOverOptions, TakeOverReport};
 pub use idle::Stopped;
 pub use launch::launch;
-pub use runode_protocol::{BuildId, ClientMsg, HostMsg, Placement, SessionId};
+pub use runode_protocol::{BuildId, ClientMsg, HandoffRefusal, HostMsg, Placement, SessionId};
 use runode_shared_types::{grid::GridSize, settings::TermSettings, shell::IntegrationMode};
 
 /// 新开一个会话。
