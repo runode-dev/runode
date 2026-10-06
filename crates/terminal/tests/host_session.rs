@@ -2,6 +2,11 @@
 
 mod common;
 
+use std::{
+    thread,
+    time::{Duration, Instant},
+};
+
 use common::idle_host;
 
 #[test]
@@ -26,9 +31,18 @@ fn meta_is_handed_out_only_when_it_changed() {
 #[test]
 fn meta_names_the_foreground_program() {
     let mut session = idle_host();
-    session.refresh_foreground();
-    // `idle_host` 的「shell」是 `cat`，它就在前台。
-    assert_eq!(session.meta().foreground.as_deref(), Some("cat"));
+    // `idle_host` 的「shell」是 `cat`，它就在前台。刚拉起时子进程可能还没 exec 成 `cat`，前台的
+    // 进程名还是测试程序自己的，所以重读到它换过来为止。
+    let until = Instant::now() + Duration::from_secs(10);
+    loop {
+        session.refresh_foreground();
+        let foreground = session.meta().foreground;
+        if foreground.as_deref() == Some("cat") {
+            break;
+        }
+        assert!(Instant::now() < until, "timed out waiting for cat in the foreground, last saw {foreground:?}");
+        thread::sleep(Duration::from_millis(20));
+    }
 }
 
 #[test]
