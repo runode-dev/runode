@@ -866,9 +866,13 @@ impl TerminalView {
         self.start_now(cx);
     }
 
-    /// shell 当前所在的目录，新建标签或分屏时沿用；宿主还没报告时是建视图时给的目录。
+    /// shell 当前所在的目录，新建标签或分屏、右侧面板读项目时沿用；宿主还没报告时是建视图时给的
+    /// 目录。shell 在前台时用它显示提示符时的目录（`SessionMeta::prompt_cwd`）：插件管理器在提示符
+    /// 出来后延迟加载插件，会临时切进插件目录，这时现读的 `SessionMeta::cwd` 是插件的仓库。
     pub fn cwd(&self) -> Option<PathBuf> {
-        self.screen.meta().cwd.clone().or_else(|| self.start_dir.clone())
+        let meta = self.screen.meta();
+        let prompt_cwd = meta.prompt_cwd.as_ref().filter(|_| meta.foreground_is_shell);
+        prompt_cwd.or(meta.cwd.as_ref()).cloned().or_else(|| self.start_dir.clone())
     }
 
     /// 程序设置的标题；没设置时为前台进程的目录名或进程名，都没有时为 `DEFAULT_TITLE`。
