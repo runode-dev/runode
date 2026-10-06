@@ -19,11 +19,14 @@
             stack.spacing = 6
             stack.translatesAutoresizingMaskIntoConstraints = false
             scroll.addSubview(stack)
+            // 软键盘不弹出时（接了硬件键盘）这条栏贴在屏幕最底下，按钮要排在安全区里，避开 Home 条和圆角；
+            // 栏自己的背景照样铺到底。横屏时左右也让开刘海。
+            let safe = safeAreaLayoutGuide
             NSLayoutConstraint.activate([
-                scroll.leadingAnchor.constraint(equalTo: leadingAnchor),
-                scroll.trailingAnchor.constraint(equalTo: trailingAnchor),
+                scroll.leadingAnchor.constraint(equalTo: safe.leadingAnchor),
+                scroll.trailingAnchor.constraint(equalTo: safe.trailingAnchor),
                 scroll.topAnchor.constraint(equalTo: topAnchor),
-                scroll.bottomAnchor.constraint(equalTo: bottomAnchor),
+                scroll.bottomAnchor.constraint(equalTo: safe.bottomAnchor),
                 scroll.heightAnchor.constraint(equalToConstant: 44),
                 stack.leadingAnchor.constraint(equalTo: scroll.contentLayoutGuide.leadingAnchor, constant: 8),
                 stack.trailingAnchor.constraint(equalTo: scroll.contentLayoutGuide.trailingAnchor, constant: -8),
