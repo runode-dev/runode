@@ -66,7 +66,11 @@ shell integration it waits for the command to finish, prints `exit N` and fails
 with status 4 if N is not 0; for an agent it waits until the agent has worked
 and stopped; otherwise until the screen has been quiet for 2 seconds.
 
-You can also wait separately:
+`--wait` is the reliable way to wait for something you just sent. A separate
+`runode wait` only sees what happens after it starts: `--for command` waits for
+the *next* command to finish, and `--new` ignores lines already on the screen,
+so a command that finished before you started waiting is never seen. Use them
+for things that are still to come:
 
 ```sh
 runode wait right --for command --timeout 600     # next command finishes: exit N
@@ -95,7 +99,7 @@ output. When its start has scrolled away, runode says so on stderr.
 
 ```sh
 runode send right --key ctrl-c                 # interrupt the running program
-runode send right --key down*3 --key enter     # press down three times, then Enter
+runode send right --key 'down*3' --key enter   # press down three times, then Enter
 runode send right --key esc                    # leave insert mode in vim...
 runode send right ':wq' --enter                # ...then save and quit
 runode send right --paste "$(cat snippet.py)"  # paste instead of typing
@@ -103,7 +107,7 @@ runode send right --paste "$(cat snippet.py)"  # paste instead of typing
 
 Keys are `ctrl-`, `alt-` or `shift-` plus a letter, digit or one of
 `` - = [ ] \ ; ' , . / ` ``, or a name: `esc tab enter backspace delete insert
-space up down left right home end pageup pagedown f1`..`f12`; `down*3` repeats.
+space up down left right home end pageup pagedown f1`..`f12`; `'down*3'` repeats (quote it: the shell would expand the `*`).
 They are encoded for whatever the program has switched on (application cursor
 keys, the kitty keyboard protocol), as if the user pressed them.
 
@@ -130,11 +134,14 @@ runode wait "$id" --for text 'ready|error' --timeout 120
 runode read "$id" --lines 30
 ```
 
-Ask another agent to do something and collect the answer:
+Ask another agent to do something and collect the answer. Start it in a
+terminal of your own rather than typing into an agent the user is talking to:
 
 ```sh
-runode send agent:codex 'Review the diff in src/parser.rs and list bugs' --enter --wait --timeout 1800
-runode read agent:codex --lines 80
+id=$(runode open --right -- codex)
+runode wait "$id" --for idle --timeout 60
+runode send "$id" 'Review the diff in src/parser.rs and list bugs' --enter --wait --timeout 1800
+runode read "$id" --lines 80
 ```
 
 ## Be careful

@@ -51,13 +51,13 @@ commands:
                               into the session, or paste it with --paste; then
                               press each KEY; then Enter with --enter. A KEY is
                               ctrl-c, alt-b, shift-tab, esc, enter, tab, up,
-                              pageup, f5 and the like; down*3 presses it three
-                              times. --wait then waits: for the agent like
-                              --for done if one runs there, for the command
-                              like --for command if Enter ran one at a shell
-                              prompt with shell integration, else until the
-                              screen is quiet for 2 seconds; it says which on
-                              stderr
+                              pageup, f5 and the like; 'down*3' (quoted for
+                              the shell) presses it three times. --wait then
+                              waits: for the agent like --for done if one runs
+                              there, for the command like --for command if
+                              Enter ran one at a shell prompt with shell
+                              integration, else until the screen is quiet for
+                              2 seconds; it says which on stderr
   wait SESSION [--for UNTIL] [--timeout SECS]
                               wait until UNTIL, one of
                                 stopped  the agent is not working: idle, asking

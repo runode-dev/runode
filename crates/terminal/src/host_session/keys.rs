@@ -20,9 +20,10 @@ impl HostSession {
         let mut out = Vec::new();
         let mut buf = vec![0u8; 64];
         for chord in keys {
-            // 平台给的按键事件带着这个键打出的字：Ctrl 和 Alt 按着时编码器自己按没按 Shift 的字符
-            // 处理，Shift 打出的大写字母、符号算用掉了 Shift。
-            let shift_typed = chord.mods.shift && !chord.mods.ctrl && !chord.mods.alt;
+            // 平台给的按键事件带着这个键打出的字：Ctrl 按着时编码器自己按没按 Shift 的字符处理，
+            // Shift 打出的大写字母、符号算用掉了 Shift。Alt 不改打出的字，`alt-shift-.` 发的是
+            // ESC 加 `>`。
+            let shift_typed = chord.mods.shift && !chord.mods.ctrl;
             let text = if shift_typed { chord.key.shifted_char() } else { chord.key.unshifted_char() };
             let consumed =
                 if shift_typed && text.is_some() { Mods { shift: true, ..Mods::default() } } else { Mods::default() };

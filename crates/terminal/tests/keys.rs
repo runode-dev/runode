@@ -34,6 +34,8 @@ fn control_keys_and_text_keys() {
     assert_eq!(encode("shift-a"), b"A");
     assert_eq!(encode("shift-/"), b"?");
     assert_eq!(encode("alt-b"), b"\x1bb");
+    assert_eq!(encode("alt-shift-a"), b"\x1bA");
+    assert_eq!(encode("alt-shift-."), b"\x1b>");
     assert_eq!(encode("space"), b" ");
     assert_eq!(encode("shift-tab"), b"\x1b[Z");
     assert_eq!(encode("f5"), b"\x1b[15~");
