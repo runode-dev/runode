@@ -156,7 +156,7 @@ fn block_rect(m: Metrics, align: Align, fw: f32, fh: f32, out: &mut Vec<Shape>) 
 
 #[cfg(test)]
 mod tests {
-    use crate::sprites::{
+    use crate::terminal_view::sprites::{
         Shape, shapes,
         testing::{art, metrics, raster},
     };

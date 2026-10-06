@@ -14,11 +14,13 @@ mod cursor_blink;
 mod element;
 mod ime;
 mod input;
+mod keys;
 mod lifecycle;
 mod paint;
 mod prompt_highlight;
 mod screen;
 mod search;
+mod sprites;
 mod suggestion;
 
 use std::{

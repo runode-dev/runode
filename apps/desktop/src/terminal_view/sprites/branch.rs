@@ -109,7 +109,7 @@ fn fade(m: Metrics, vertical: bool, toward_end: bool, out: &mut Vec<Shape>) {
 
 #[cfg(test)]
 mod tests {
-    use crate::sprites::testing::{metrics, raster};
+    use crate::terminal_view::sprites::testing::{metrics, raster};
 
     #[test]
     fn branch_symbols() {

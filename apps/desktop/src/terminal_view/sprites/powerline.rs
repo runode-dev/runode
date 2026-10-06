@@ -56,7 +56,7 @@ fn half_circle(w: f32, h: f32) -> Vec<[f32; 2]> {
 
 #[cfg(test)]
 mod tests {
-    use crate::sprites::{
+    use crate::terminal_view::sprites::{
         Shape, shapes,
         testing::{metrics, raster},
     };

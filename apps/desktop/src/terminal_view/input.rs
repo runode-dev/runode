@@ -13,7 +13,7 @@ use runode_shared_types::{
 use runode_terminal::session::Session;
 
 use super::TerminalView;
-use crate::keys;
+use super::keys;
 
 /// 拖选到网格外时自动滚动的间隔，每次滚一行。
 const AUTOSCROLL_INTERVAL: Duration = Duration::from_millis(15);

@@ -260,7 +260,7 @@ pub(super) fn diagonal(m: Metrics, rising: bool, out: &mut Vec<Shape>) {
 
 #[cfg(test)]
 mod tests {
-    use crate::sprites::testing::{art, metrics, raster};
+    use crate::terminal_view::sprites::testing::{art, metrics, raster};
 
     #[test]
     fn box_lines() {
