@@ -1,5 +1,6 @@
 //! 把一个真 shell 的 PTY 交出去、经 socket 传过去、在另一端接上：shell 不中断，输入输出、
-//! 改尺寸和前台进程照常，丢掉接手的一端会结束 shell，shell 退出时接手的一端能发现。宿主那份
+//! 改尺寸和前台进程照常，丢掉接手的一端会结束 shell（停着接手、还没开闸的不会），shell 退出时
+//! 接手的一端能发现。宿主那份
 //! 会话导出、在另一端导入后状态照旧：对外公布的状态、正在跑的命令、停在报告中间的输出流。
 
 use std::{
@@ -568,6 +569,95 @@ fn a_paused_pty_is_released_untouched() {
     assert!(!new_output.text.contains("never-2") && !new_output.text.contains("also-4"));
     new.writer.write(b"exit\n");
     new_output.wait_exit();
+}
+
+/// 描述符 `fd` 已经关了，或者号码已经被别处重用、指的不是 `device` 这个设备了。
+fn closed_or_reused(fd: libc::c_int, device: libc::dev_t) -> bool {
+    let mut stat = std::mem::MaybeUninit::<libc::stat>::zeroed();
+    // SAFETY: 只往本地结构里写；描述符关了时返回 -1。
+    if unsafe { libc::fstat(fd, stat.as_mut_ptr()) } != 0 {
+        return true;
+    }
+    // SAFETY: `fstat` 成功时填好了整个结构。
+    unsafe { stat.assume_init() }.st_rdev != device
+}
+
+fn device_of(fd: BorrowedFd<'_>) -> libc::dev_t {
+    let mut stat = std::mem::MaybeUninit::<libc::stat>::zeroed();
+    // SAFETY: `fd` 开着，只往本地结构里写。
+    assert_eq!(unsafe { libc::fstat(fd.as_raw_fd(), stat.as_mut_ptr()) }, 0);
+    // SAFETY: 上面成功了，结构已经填好。
+    unsafe { stat.assume_init() }.st_rdev
+}
+
+/// 交出方还没提交时（它的 `Pty` 照常留着，交出去的是复制的一份 master），接手方停着的 `Pty` 在
+/// 一个 panic 的线程里随栈展开丢掉：shell 不被结束，前台程序也不受影响，接手方那份 master 关掉了，
+/// 交出方接着读写照常。
+#[test]
+fn dropping_a_paused_pty_on_panic_leaves_the_shell_to_the_old_side() {
+    let (mut old, mut old_output) = shell();
+    let pid = shell_pid(&old, &mut old_output);
+    // 前台跑着一个程序，丢掉停着的一端时它也不能收到 SIGHUP。
+    old.writer.write(b"sleep 30\n");
+    eventually("sleep in the foreground", || !old.foreground_is_shell());
+    old.stop_reading();
+    eventually("the reader to finish", || old.reader_finished());
+    let handoff = PtyHandoff {
+        master: old.dup_master().unwrap(),
+        pid,
+        size: SIZE,
+        report_token: None,
+        pending_input: b"echo never-$((1+1))\n".to_vec(),
+    };
+    let handoff = send_across(handoff);
+    let raw = handoff.master.as_raw_fd();
+    let device = device_of(handoff.master.as_fd());
+    let (sink, mut paused_output) = output();
+    let paused = Pty::adopt_paused(handoff, sink).unwrap();
+    paused.writer.write(b"echo also-$((2+2))\n");
+    let panicked = thread::spawn(move || {
+        let _paused = paused;
+        panic!("the session thread panics while the pty is paused");
+    })
+    .join();
+    assert!(panicked.is_err());
+    assert!(closed_or_reused(raw, device), "the paused pty's master must be closed");
+    paused_output.drain();
+    assert!(!paused_output.exited && paused_output.text.is_empty());
+
+    // 结束接手来的 shell 时等 SIGHUP 的时限过了也还活着，前台的 sleep 也还在。
+    thread::sleep(Duration::from_millis(500));
+    assert!(alive(pid), "the shell must survive a paused pty being dropped");
+    assert!(!old.foreground_is_shell(), "the foreground program must survive too");
+
+    // 交出方回滚：接着读，按 Ctrl-C 结束 sleep，照常用；停着那端排着的输入一个字节都没写。
+    old.resume_reading().unwrap();
+    old.writer.write(b"\x03");
+    eventually("the shell back in the foreground", || old.foreground_is_shell());
+    old.writer.write(b"echo alive-$((3+3))\n");
+    old_output.wait_for("alive-6");
+    assert!(!old_output.text.contains("never-2") && !old_output.text.contains("also-4"));
+    old.writer.write(b"exit\n");
+    old_output.wait_exit();
+}
+
+/// 停着接手、开过闸以后丢掉，和 `Pty::adopt` 接手来的一样结束 shell。
+#[test]
+fn dropping_a_resumed_paused_pty_ends_the_shell() {
+    let (mut old, mut old_output) = shell();
+    old.writer.write(b"echo ready\n");
+    old_output.wait_for("ready");
+    let handoff = old.release().unwrap();
+    drop(old);
+    let pid = handoff.pid;
+    let (sink, mut new_output) = output();
+    let mut new = Pty::adopt_paused(send_across(handoff), sink).unwrap();
+    new.resume_reading().unwrap();
+    new.writer.write(b"echo open-$((5+5))\n");
+    new_output.wait_for("open-10");
+    drop(new);
+    new_output.wait_exit();
+    eventually("the shell to be gone", || !alive(pid));
 }
 
 /// 输出流停在一条报告中间时交接：原始快照的续接里带着半条报告，接着别处的抹口令状态，剩下的
