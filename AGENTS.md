@@ -81,3 +81,11 @@ This project is indexed by GitNexus as **runode** (225 symbols, 587 relationship
 - `tui`、`mobile`（各个前端，放在 `apps/` 下）：和 `cli` 一样，经 protocol 跟宿主说话，不依赖 GPUI，也不直接依赖 libghostty-vt。
 
 加了这些 crate 后，相应地更新 `deny.toml` 的 `wrappers` 和上面这张表。
+
+# 命名
+
+- crate 的目录名是 kebab-case 的领域名词，要说清它管的是什么，不能只说它做的一部分：`git` 读状态之外还做暂存、提交、分支和同步，所以不叫 `git-status`。
+- 同一个泛词在两处出现时，各自加上领域限定，读代码时才分得清说的是哪一个：提示符上输入的高亮叫 `prompt-highlight`，和预览、补全里的高亮分开。
+- 包名是 `runode-` 加目录名；`apps/` 下的包名等于可执行文件名，所以桌面 app 的包名是 `runode`。
+- 模块名用 snake_case。有子模块的模块写成 `foo.rs` 加 `foo/` 目录，不用 `foo/mod.rs`；只有 `tests/common/mod.rs` 按 cargo 的惯例保留，这样 cargo 不把它当成一个单独的测试。
+- 一个模块的单元测试超过三百行左右时挪到 `foo/tests.rs`，`foo.rs` 里只留 `#[cfg(test)] mod tests;`。
