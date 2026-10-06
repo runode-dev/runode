@@ -2,9 +2,10 @@
 //!
 //! 这里是 `TerminalView` 本身、它的动作和事件，以及渲染出的元素树。其余按职责分在子模块里：
 //! 建视图、启动 shell 和读输出（`lifecycle`）、界面这份 VT 的状态机（`screen`）、按键和鼠标
-//! （`input`）、绑定的动作（`actions`）、
+//! （`input`，按键翻译成终端的按键事件在 `keys`）、绑定的动作（`actions`）、
 //! 搜索栏（`search`）、灰字建议（`suggestion`）、输入的语法高亮（`prompt_highlight`）、
-//! 命令补全菜单（`completion_menu`）、输入法（`ime`）、终端网格元素（`element`）、画一帧（`paint`），
+//! 命令补全菜单（`completion_menu`）、输入法（`ime`）、终端网格元素（`element`）、画一帧（`paint`，
+//! 方框线、块元素这些自绘字符在 `sprites`），
 //! 以及尺寸归别的前端管时 VT 的哪一块画进视图（`crop`）。
 
 mod actions;
