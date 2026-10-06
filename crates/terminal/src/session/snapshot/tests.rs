@@ -463,12 +463,8 @@ fn assert_history_survives(context: &str, source: &Terminal<'static, 'static>, d
     assert_eq!(text(decoded), text(source), "{context}: text after decoding");
 }
 
-/// 编一份快照再解出来，查 `assert_history_survives`；暂时编不出或者会丢 pending wrap 时为
-/// `None`。
+/// 编一份快照再解出来，查 `assert_history_survives`；暂时编不出时为 `None`。
 fn checked_round_trip(context: &str, source: &Terminal<'static, 'static>) -> Option<Terminal<'static, 'static>> {
-    if loses_pending_wrap(source) {
-        return None;
-    }
     let decoded = round_trip(source)?;
     assert_history_survives(context, source, &decoded);
     Some(decoded)
@@ -559,49 +555,55 @@ fn decoding_drops_history_under_a_tight_byte_limit() {
     assert!(after < before / 2, "{after} of {before} history rows survived");
 }
 
-/// 光标停在右边距（不是最后一列）上等着折行：快照丢掉这个状态，见
-/// `pending_wrap_at_a_right_margin_is_lost`。差分测试不在这时候编快照。
-fn loses_pending_wrap(terminal: &Terminal<'static, 'static>) -> bool {
-    terminal.is_cursor_pending_wrap().unwrap() && terminal.cursor_x().unwrap() + 1 != terminal.cols().unwrap()
-}
-
-/// 快照漏带的状态：用 DECSLRM 设了左右边距、光标写到右边距上等着折行时，解出来的 VT 不再
-/// 等着折行，下一个字写在边距的最后一格上，而不是折到下一行。光标在最后一列等着折行时没有
-/// 这个问题。DECSC 存下的光标也一样，所以存光标后移走、或者进了备用屏幕（1049 进出时存取
-/// 主屏幕的光标）时编的快照，恢复光标后同样错位。
-///
-/// 毛病在 libghostty 的解码：快照里带着「等着折行」，解码时却只在光标位于最后一列时才留着
-/// 它，没有看左右边距（编码那份 VT 能正常处在这个状态）。VT 的接口既读不到也设不了存下的
-/// 光标，也没法不改单元格地让光标等着折行，在这边补不上，要改 libghostty。哪天这里不成立了，
-/// 说明 libghostty 修好了，删掉这个测试和 `loses_pending_wrap`。
+/// 光标不在最后一列却等着折行时编的快照，解出来的 VT 也等着折行，下一个字照样折到下一行。
+/// 写到右边距（DECSLRM 设的，不是最后一列）上会这样；之后关掉左右边距模式也还等着。DECSC
+/// 存的光标不管停在哪一列都原样存着，DECRC 恢复时也原样恢复，即使中间改过边距；1049 进出
+/// 备用屏幕时存取主屏幕的光标也一样。
 #[test]
-fn pending_wrap_at_a_right_margin_is_lost() {
-    for (name, head, tail) in [
-        ("cursor", &b""[..], &b""[..]),
-        ("saved cursor", b"\x1b7\x1b[3;3H", b"\x1b8"),
-        ("alternate screen", b"\x1b[?1049h", b"\x1b[?1049l"),
+fn pending_wrap_off_the_last_column_survives() {
+    const MARGINS: &[u8] = b"\x1b[?69h\x1b[3;20s\x1b[1;20Hi";
+    // 第二行是接着写的 XYZ，折到当时的左边距上；关掉左右边距模式后左边距回到第一列。
+    for (name, head, tail, wrapped) in [
+        ("cursor", &b""[..], &b""[..], "  XYZ"),
+        ("margin mode reset", b"\x1b[?69l", b"", "XYZ"),
+        ("saved cursor", b"\x1b7\x1b[3;3H", b"\x1b8", "  XYZ"),
+        ("saved cursor, margins changed", b"\x1b7\x1b[3;25s", b"\x1b8", "  XYZ"),
+        ("alternate screen", b"\x1b[?1049h", b"\x1b[?1049l", "  XYZ"),
+        ("alternate screen, margin mode reset", b"\x1b[?1049h\x1b[?69l", b"\x1b[?1049l", "XYZ"),
     ] {
         let mut original = vt::new_terminal(size(30, 4)).unwrap();
-        original.vt_write(b"\x1b[?69h\x1b[3;20s\x1b[1;20Hi");
+        original.vt_write(MARGINS);
         assert!(original.is_cursor_pending_wrap().unwrap());
         original.vt_write(head);
         let mut decoded = round_trip(&original).unwrap();
+        assert_same(name, &original, &decoded, true);
         for terminal in [&mut original, &mut decoded] {
             terminal.vt_write(tail);
             terminal.vt_write(b"XYZ");
         }
-        assert_eq!(vt::screen_lines(&original, 0, 1).unwrap(), ["                   i", "  XYZ"], "{name}");
-        assert_eq!(vt::screen_lines(&decoded, 0, 1).unwrap(), ["                   X", "  YZ"], "{name}");
+        assert_eq!(vt::screen_lines(&decoded, 0, 1).unwrap(), ["                   i", wrapped], "{name}");
+        probe(name, &mut original, &mut decoded);
     }
+
+    // 左边距不在第一列：停在右边距上等着折行，折到下一行的左边距上。
+    let mut original = vt::new_terminal(size(30, 4)).unwrap();
+    original.vt_write(b"\x1b[?69h\x1b[3;5s\x1b[1;3Habc");
+    assert!(original.is_cursor_pending_wrap().unwrap());
+    let mut decoded = round_trip(&original).unwrap();
+    assert_same("left margin", &original, &decoded, true);
+    for terminal in [&mut original, &mut decoded] {
+        terminal.vt_write(b"XY");
+    }
+    assert_eq!(vt::screen_lines(&decoded, 0, 1).unwrap(), ["  abc", "  XY"]);
+    probe("left margin", &mut original, &mut decoded);
 }
 
 /// 停在各种序列的每一个字节后面编快照：都编得出，解出来的 VT 停在同一个地方（是否在 ground），
 /// 不用等回到 ground 就能再编（宿主交接时就是这样），接着喂剩下的字节后和一口气喂完的那份
-/// 一样。编不出的只有 `SnapshotError::Unfinished` 说的那几种，见
-/// `vt::tests::malformed_input_can_block_encoding_until_ground`。
+/// 一样。8 位 C1 字节开头的序列也编得出，见 `vt::tests::a_c1_control_ending_a_string_still_encodes`。
 #[test]
 fn a_snapshot_cut_inside_any_sequence_resumes() {
-    const SEQUENCES: [&[u8]; 22] = [
+    const SEQUENCES: [&[u8]; 26] = [
         // CSI：带冒号的 SGR、私有模式、带中间字节的、中间夹着 C0 控制字符和 CAN 的。
         b"\x1b[1;38:2::10:20:30mrgb",
         b"\x1b[?2004h\x1b[?1049h",
@@ -630,6 +632,13 @@ fn a_snapshot_cut_inside_any_sequence_resumes() {
         // ESC 后面跟着 8 位 C1 引导字节。
         b"\x1b\x9b31mred",
         b"\x1b\x9d2;c1\x07",
+        // 8 位 C1 字节结束 SOS、PM、APC，开始 DCS、OSC、CSI。
+        b"\x1bXsos\x90$qm\x1b\\",
+        b"\x1b^pm\x9d2;c1\x07",
+        b"\x1b_Gx\x9b31mred",
+        // 左右边距里写到右边距上等着折行，存光标（DECSC 和 1049）后再恢复，中间改边距、关掉
+        // 左右边距模式。
+        b"\x1b[?69h\x1b[1;6sabcdef\x1b7\x1b[Hx\x1b8\x1b7\x1b[1;9s\x1b8\x1b[?1049h\x1b[?69lz\x1b[?1049ly",
         // Kitty 键盘协议的栈、XTWINOPS 存取标题。
         b"\x1b[>1u\x1b[>3u\x1b[<u",
         b"\x1b]2;a\x07\x1b[22;0t\x1b]2;b\x07\x1b[23;0t",

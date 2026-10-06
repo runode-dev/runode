@@ -166,10 +166,8 @@ fn track_continuation(terminal: &mut Terminal<'_, '_>) -> Result<()> {
 #[derive(Debug)]
 pub enum SnapshotError {
     /// VT 停在一条还没写完的序列中间，现在编不出快照：这条序列长过 `CONTINUATION_MAX_BYTES`，
-    /// 或者是在开始记录之前开始的，或者是由 SOS、PM、APC 这类字符串序列里的一个 8 位 C1 字节
-    /// （0x90 DCS、0x9B CSI 等）开头的。最后这种 libghostty 记下的续接从前一条字符串序列的 ESC
-    /// 算起，重喂会把那条已经结束的序列再做一遍，所以它不肯编。正常程序的输出（7 位的 ESC 开头
-    /// 的序列，包括停在 UTF-8 字符中间）都编得出，见差分测试 `a_snapshot_cut_inside_any_sequence_resumes`。
+    /// 或者是在开始记录之前开始的。别的停法都编得出，包括停在 UTF-8 字符中间、由 8 位 C1 字节
+    /// 开头的序列（含结束了 SOS、PM、APC 的那种），见差分测试 `a_snapshot_cut_inside_any_sequence_resumes`。
     /// 等下一批输出让 VT 回到 ground 后再试；程序停在这里不再输出的话会一直这样。
     Unfinished,
     /// libghostty 报的其他错误，只留说明文字，libghostty 的类型不出这个 crate。解码时多半是

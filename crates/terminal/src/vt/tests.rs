@@ -170,21 +170,28 @@ fn a_sequence_longer_than_the_limit_waits_until_it_ends() {
     assert_eq!(format_replay(&decoded).unwrap(), format_replay(&terminal).unwrap());
 }
 
-/// 乱码也会让 VT 暂时编不出快照：字符串序列（SOS、PM、APC）里的 8 位 C1 字节会结束它、开始
-/// 一条新序列，libghostty 记下的续接却还从前一条的 ESC 算起，重喂会把结束了的那条再做一遍，
-/// 所以续接取得到、快照编不出。第一份数据里 0xC6 结束 ESC、0x9F 开始 APC、0x9D 开始 OSC。
-/// 和太长的序列一样，等它回到 ground 再编。哪天这里不成立了，说明 libghostty 修好了，改
-/// `SnapshotError::Unfinished` 的说明和这个测试。
+/// 字符串序列（SOS、PM、APC）里的 8 位 C1 字节会结束它、开始一条新序列（0x90 DCS、0x9B CSI、
+/// 0x9D OSC）。停在新序列中间时照样编得出快照：续接从这个 C1 字节算起，写成等价的 7 位形式
+/// （ESC 加上它减 0x40），不带前面已经结束的那条，重喂时不会再做一遍。第一份数据里 ESC 不认
+/// 0xC6、跳过它，0x9F 开始 APC，0x9D 结束 APC、开始 OSC。
 #[test]
-fn malformed_input_can_block_encoding_until_ground() {
-    for bytes in [&[0x1b, 0xc6, 0x9f, b'[', b'r', 0x9d][..], b"\x1bXab\x90$q", b"\x1b_Gx\x9b3"] {
-        let mut terminal = new_terminal(size(20, 4)).unwrap();
-        terminal.vt_write(bytes);
-        assert!(terminal.continuation_alloc(None).is_ok(), "{bytes:?}");
-        assert!(matches!(encode_snapshot(&terminal), Err(SnapshotError::Unfinished)), "{bytes:?}");
-        terminal.vt_write(b"\x1b\\");
-        assert!(terminal.is_vt_ground().unwrap(), "{bytes:?}");
-        assert!(encode_snapshot(&terminal).is_ok(), "{bytes:?}");
+fn a_c1_control_ending_a_string_still_encodes() {
+    for (head, continuation, tail) in [
+        (&[0x1b, 0xc6, 0x9f, b'[', b'r', 0x9d][..], &b"\x1b]"[..], &b"2;c1 title\x07after"[..]),
+        (b"\x1bXab\x90$q", b"\x1bP$q", b"m\x1b\\after"),
+        (b"\x1b_Gx\x9b3", b"\x1b[3", b"1mred"),
+    ] {
+        let mut whole = new_terminal(size(20, 4)).unwrap();
+        whole.vt_write(head);
+        whole.vt_write(tail);
+        let mut split = new_terminal(size(20, 4)).unwrap();
+        split.vt_write(head);
+        assert_eq!(&*split.continuation_alloc(None).unwrap().unwrap(), continuation, "{head:?}");
+        let mut resumed = decode_snapshot(&encode_snapshot(&split).unwrap()).unwrap();
+        assert!(!resumed.is_vt_ground().unwrap(), "{head:?}");
+        resumed.vt_write(tail);
+        assert_eq!(format_replay(&resumed).unwrap(), format_replay(&whole).unwrap(), "{head:?}");
+        assert_eq!(resumed.title().unwrap(), whole.title().unwrap(), "{head:?}");
     }
 }
 
