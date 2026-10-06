@@ -41,6 +41,14 @@ const RECONNECT_INTERVAL: Duration = Duration::from_millis(100);
 /// `list` 显示的标识的长度，够区分几十个会话，命令里也能直接用。
 pub(crate) const SHORT_ID: usize = 8;
 
+/// `send` 正在发输入（`Paste`、`SendKeys` 这类请求还没回话）时宿主升级了：宿主冻结期间收下的
+/// 请求会交给新宿主或者在回滚后照常办，输入可能已经送到。
+const UPGRADED_WHILE_SENDING: &str = "the runode host was upgraded while the input was being sent; it may have \
+     been delivered, so check with `runode read` before sending it again";
+/// `send --wait` 发完输入、在等结果时宿主升级了，而且没能接着等（比如等的是命令运行完）。
+const UPGRADED_WHILE_WAITING: &str = "the input was sent, but the runode host was upgraded while waiting for the \
+     result; check with `runode read` or `runode wait` instead of sending it again";
+
 /// 命令没做成的原因，各自对应一个退出码。
 pub(crate) enum Failure {
     Error(anyhow::Error),
@@ -92,34 +100,40 @@ pub(crate) fn run(command: Command, env: &Env, out: &mut dyn Write, err: &mut dy
                 Text::Given(text) => text,
                 Text::Stdin => stdin_text()?,
             };
-            let mut sent = false;
-            if !text.is_empty() {
-                if paste {
+            // 从这里起宿主升级打断时不叫用户重跑：输入可能已经送到了，见 `after_sending`。
+            let delivered = (|| -> Result<(), Failure> {
+                let mut sent = false;
+                if !text.is_empty() {
+                    if paste {
+                        let req = connection.req();
+                        connection.request_done(&ClientMsg::Paste { req, id, text })?;
+                    } else {
+                        connection.input(channel, text.as_bytes())?;
+                    }
+                    sent = true;
+                }
+                if !keys.is_empty() {
+                    if sent {
+                        thread::sleep(ENTER_DELAY);
+                    }
                     let req = connection.req();
-                    connection.request_done(&ClientMsg::Paste { req, id, text })?;
-                } else {
-                    connection.input(channel, text.as_bytes())?;
+                    connection.request_done(&ClientMsg::SendKeys { req, id, keys: keys.clone() })?;
+                    sent = true;
                 }
-                sent = true;
-            }
-            if !keys.is_empty() {
-                if sent {
-                    thread::sleep(ENTER_DELAY);
+                if enter {
+                    if sent {
+                        thread::sleep(ENTER_DELAY);
+                    }
+                    connection.input(channel, b"\r")?;
                 }
-                let req = connection.req();
-                connection.request_done(&ClientMsg::SendKeys { req, id, keys: keys.clone() })?;
-                sent = true;
-            }
-            if enter {
-                if sent {
-                    thread::sleep(ENTER_DELAY);
-                }
-                connection.input(channel, b"\r")?;
-            }
+                Ok(())
+            })();
+            delivered.map_err(|failure| after_sending(failure, UPGRADED_WHILE_SENDING))?;
             if wait {
                 let (until, waiting) = send_wait(&meta, enter || presses_enter(&keys));
                 writeln!(err, "runode: waiting {waiting}")?;
-                wait_until(&mut Watch { env, connection, id }, &meta, &until, timeout, out)?;
+                wait_until(&mut Watch { env, connection, id }, &meta, &until, timeout, out)
+                    .map_err(|failure| after_sending(failure, UPGRADED_WHILE_WAITING))?;
             }
         }
         Command::Wait { session, until, timeout } => {
@@ -318,6 +332,15 @@ fn send_wait(meta: &SessionMeta, enter: bool) -> (Until, &'static str) {
     }
 }
 
+/// `send` 发出输入以后的失败：宿主在升级（`client::Upgrading`）时换成 `message`，不说「重跑」
+/// （那会把输入再打一遍，比如再执行一次 `git push`）。退出码仍是失败：结果不知道，不能当成做成了。
+fn after_sending(failure: Failure, message: &'static str) -> Failure {
+    match failure {
+        Failure::Error(err) if is_upgrading(&err) => Failure::Error(anyhow!(message)),
+        failure => failure,
+    }
+}
+
 /// 要按的键里有没有不带修饰键的回车。
 fn presses_enter(keys: &[String]) -> bool {
     keys.iter()
@@ -370,6 +393,16 @@ impl Watch<'_> {
         let (_, meta) = attach(&connection, self.id)?;
         self.connection = connection;
         Ok(meta)
+    }
+
+    /// 读一次整屏；宿主在升级时先重新连上新宿主再读，见 `recover`。
+    fn read_screen(&mut self, deadline: Option<Instant>) -> Result<String, Failure> {
+        loop {
+            match screen(&self.connection, self.id, None) {
+                Ok(text) => return Ok(text),
+                Err(failure) => self.recover(failure, deadline).map(drop)?,
+            }
+        }
     }
 }
 
@@ -429,12 +462,7 @@ fn wait_until(
             }
         }
         Until::Quiet(quiet) => {
-            let mut last = loop {
-                match screen(&watch.connection, id, None) {
-                    Ok(text) => break text,
-                    Err(failure) => watch.recover(failure, deadline).map(drop)?,
-                }
-            };
+            let mut last = watch.read_screen(deadline)?;
             let mut since = Instant::now();
             loop {
                 if since.elapsed() >= *quiet {
@@ -446,6 +474,10 @@ fn wait_until(
                         Ok(text) => text,
                         Err(failure) => {
                             watch.recover(failure, deadline)?;
+                            // 交接本身要花时间，期间屏幕也可能变了：在新宿主上重新读一次、重新计时，
+                            // 不把交接的那几秒算成安静。
+                            last = watch.read_screen(deadline)?;
+                            since = Instant::now();
                             continue;
                         }
                     };
