@@ -74,7 +74,9 @@ commands:
                                          lines already there; prints the line
                                 quiet SECS
                                          the screen did not change for SECS
-                              agent states print the state they reached
+                              agent states print the state they reached. If
+                              runode is upgraded meanwhile, the wait goes on
+                              (except --for command, which fails)
   open [--tab|--right|--down] [--near SESSION] [--cwd DIR] [--focus]
        [-- COMMAND...]        open a terminal in the app: a new tab after the
                               one SESSION is in (default), or split SESSION's

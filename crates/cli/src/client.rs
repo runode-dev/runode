@@ -14,14 +14,42 @@ use std::{
 
 use anyhow::{Context as _, Result, anyhow, bail};
 use runode_protocol::{
-    BuildId, Caps, ClientKind, ClientMsg, Frame, FrameKind, HostMsg, PROTOCOL_VERSION, SessionId, WindowLayout,
-    read_frame, write_frame,
+    BuildId, Caps, ClientKind, ClientMsg, Frame, FrameKind, GoodbyeReason, HostMsg, PROTOCOL_VERSION, SessionId,
+    WindowLayout, read_frame, write_frame,
 };
 
 use crate::Env;
 
 /// 等宿主回话的最长时间；`wait` 等 agent 不受它限制。
 const REPLY_TIMEOUT: Duration = Duration::from_secs(10);
+/// 宿主断开了连接（`Goodbye`，或者连接直接断了）。
+const CLOSED: &str = "the runode app closed the connection";
+
+/// 宿主正把会话交给新版本的宿主（`Goodbye { reason: GoodbyeReason::Handoff }`），这条连接断了。
+/// 过一会儿重新连上就是新宿主，见 `is_upgrading`。
+#[derive(Debug)]
+pub(crate) struct Upgrading;
+
+impl std::fmt::Display for Upgrading {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("the runode host is being upgraded; run the command again")
+    }
+}
+
+impl std::error::Error for Upgrading {}
+
+/// 错误是不是宿主在升级（`Upgrading`）。
+pub(crate) fn is_upgrading(err: &anyhow::Error) -> bool {
+    err.chain().any(|cause| cause.is::<Upgrading>())
+}
+
+/// 宿主说 `Goodbye` 时的错误：在升级时是 `Upgrading`，别的原因（含认不出的）一律当作连接断了。
+fn goodbye(reason: &GoodbyeReason) -> anyhow::Error {
+    match reason {
+        GoodbyeReason::Handoff => Upgrading.into(),
+        _ => anyhow!(CLOSED),
+    }
+}
 
 pub(crate) struct Connection {
     stream: UnixStream,
@@ -84,7 +112,8 @@ impl Connection {
             .map_err(|err| anyhow!("lost the runode app: {err}"))
     }
 
-    /// 下一条消息，到 `deadline` 还没有时为 `None`；为 `None` 的 `deadline` 一直等。
+    /// 下一条消息，到 `deadline` 还没有时为 `None`；为 `None` 的 `deadline` 一直等。宿主说
+    /// `Goodbye` 时是错误，见 `goodbye`。
     pub(crate) fn next(&self, deadline: Option<Instant>) -> Result<Option<HostMsg>> {
         if let Some(message) = self.pending.borrow_mut().pop_front() {
             return Ok(Some(message));
@@ -97,7 +126,11 @@ impl Connection {
             },
             None => self.messages.recv().map_err(|_| ()),
         };
-        received.map(Some).map_err(|()| anyhow!("the runode app closed the connection"))
+        match received {
+            Ok(HostMsg::Goodbye { reason }) => Err(goodbye(&reason)),
+            Ok(message) => Ok(Some(message)),
+            Err(()) => Err(anyhow!(CLOSED)),
+        }
     }
 
     /// 回话：跳过 `Meta` 这类随时会插进来的会话事件，宿主报错时返回错误。
@@ -106,6 +139,7 @@ impl Connection {
     }
 
     /// 回话，宿主报的错放在里层，由调用方决定怎么办。跳过的事件里有会话结束（`Exited`）时记下来。
+    /// 宿主说 `Goodbye` 时是外层的错误，见 `goodbye`。
     fn answer(&self) -> Result<Result<HostMsg, String>> {
         let deadline = Instant::now() + REPLY_TIMEOUT;
         loop {
@@ -113,7 +147,7 @@ impl Connection {
             let message = match self.messages.recv_timeout(deadline.saturating_duration_since(Instant::now())) {
                 Ok(message) => message,
                 Err(mpsc::RecvTimeoutError::Timeout) => bail!("the runode app did not answer"),
-                Err(mpsc::RecvTimeoutError::Disconnected) => bail!("the runode app closed the connection"),
+                Err(mpsc::RecvTimeoutError::Disconnected) => bail!(CLOSED),
             };
             match message {
                 HostMsg::Exited { id, .. } => {
@@ -129,6 +163,7 @@ impl Connection {
                 | HostMsg::Resync { .. } => self.pending.borrow_mut().push_back(message),
                 HostMsg::UiRequest { .. } | HostMsg::Unknown => {}
                 HostMsg::Error { message, .. } => return Ok(Err(message)),
+                HostMsg::Goodbye { reason } => return Err(goodbye(&reason)),
                 message => return Ok(Ok(message)),
             }
         }
