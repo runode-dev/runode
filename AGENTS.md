@@ -1,25 +1,23 @@
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **runode** (225 symbols, 587 relationships, 20 execution flows).
+This project is indexed by GitNexus as **runode**. Current counts and index freshness: `gitnexus://repo/runode/context`.
 
 > Index stale? Run `node .gitnexus/run.cjs analyze --index-only` from the project root — it auto-selects an available runner. No `.gitnexus/run.cjs` yet? Bootstrap with `npx`, `bunx`, or `pnpm dlx` — e.g. `bunx gitnexus@latest analyze` (npm 11 npx crash; #1939).
 
-## Always Do
+## Rules
 
-- **MUST run impact before editing.** Use `impact({target: "symbolName", direction: "upstream"})` or `node .gitnexus/run.cjs impact "symbolName" --direction upstream --repo .`; report callers, processes, and risk. Never substitute grep for graph analysis.
-- **MUST analyze graph changes before committing.** Use `detect_changes({scope: "all"})` (MCP) or `node .gitnexus/run.cjs detect-changes --scope all --repo .` (CLI fallback). `partial: true` or `truncated: true` is not a clean check — a zero means unseen, not unaffected; re-run it. For regression review: `detect_changes({scope: "compare", base_ref: "main"})` or `node .gitnexus/run.cjs detect-changes --scope compare --base-ref "main" --repo .`.
-- MUST warn on HIGH/CRITICAL `risk` pre-edit; never use `riskSharedAxes` to waive a HIGH/CRITICAL `risk` warning. Compare File/symbol: MCP File omits axes; Graph-RAG expands File.
-- **MUST treat `risk: UNKNOWN` as unresolved, not as low.** An empty caller set is not evidence the symbol is unused — it can also mean the callers are not resolvable by the index (plain-object property access, dynamic dispatch, cross-language calls). `impact` pairs `UNKNOWN` with a `riskNote` saying so. Confirm with a text search before treating the symbol as safe to change or delete; do not proceed on the strength of a zero.
-- **MUST use `query({search_query: "concept"})` for concepts/flows, `context({name: "symbolName"})` for a named symbol, or `impact` for blast radius, on read-only callers, dependencies, imports, or execution flow.** Graph first; text search only for empty/`UNKNOWN`/literals.
-- For security review, `explain({target: "fileOrSymbol"})` lists taint findings (source→sink flows; needs `analyze --pdg`).
+Before editing a function, class or method, run `impact({target: "symbolName", direction: "upstream"})` (CLI: `node .gitnexus/run.cjs impact "symbolName" --direction upstream --repo .`) and report its callers, affected processes and `risk`. Warn the user on HIGH or CRITICAL; `riskSharedAxes` does not lower that warning.
 
-## Never Do
+`risk: UNKNOWN` means the walk could not answer, not that the risk is low: an empty caller set can also mean the index cannot see the callers (plain-object property access, dynamic dispatch, cross-language calls). Confirm with a text search before treating such a symbol as safe to change or delete.
 
-- NEVER edit a function, class, or method before MCP/CLI impact analysis.
-- NEVER ignore HIGH or CRITICAL risk warnings from impact analysis, and never read `UNKNOWN` as an all-clear — it means the walk could not answer, which is the one verdict that requires confirming by other means.
-- NEVER rename symbols with find-and-replace — use `rename` which understands the call graph.
-- NEVER commit before MCP/CLI graph change analysis.
+For read-only questions about callers, dependencies, imports or execution flow, ask the graph first — `query({search_query: "concept"})` for a concept or flow, `context({name: "symbolName"})` for a named symbol — and use text search for literals and to fill the gaps the graph cannot see.
+
+Rename symbols with `rename`, which follows the call graph; find-and-replace misses or over-matches references.
+
+Before committing, run `detect_changes({scope: "all"})` (CLI: `node .gitnexus/run.cjs detect-changes --scope all --repo .`). A result with `partial: true` or `truncated: true` is incomplete — a zero there means unseen, not unaffected — so re-run it. For a regression review against main, use `scope: "compare", base_ref: "main"`.
+
+For security review, `explain({target: "fileOrSymbol"})` lists taint findings (source→sink flows; needs `analyze --pdg`).
 
 ## Resources
 

@@ -37,19 +37,6 @@ the bound repository and index freshness alongside your explanation.
 
 > If step 2 says "Index is stale" → run `node .gitnexus/run.cjs analyze` in terminal.
 
-## Checklist
-
-```
-- [ ] list_repos {} — bind repo; explicit repo when >1 indexed, ask if ambiguous
-- [ ] READ gitnexus://repo/{name}/context
-- [ ] query for the concept you want to understand
-- [ ] Review returned processes (execution flows)
-- [ ] context on key symbols for callers/callees
-- [ ] READ process resource for full execution traces
-- [ ] Read source files for implementation details
-- [ ] State the repository and index freshness with the explanation
-```
-
 ## Resources
 
 | Resource                                | What you get                                            |

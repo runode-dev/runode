@@ -55,19 +55,6 @@ Repository: <name> (<path>)   Worktree: <path>   Index: <commit>, <n> behind HEA
 > If "Index is stale" → run `node .gitnexus/run.cjs analyze` in terminal.
 > If `.gitnexus/run.cjs` is missing, replace `node .gitnexus/run.cjs` with `npx gitnexus` in the fallback commands.
 
-## Checklist
-
-```
-- [ ] list_repos {} — bind repo; explicit repo when >1 indexed, ask if ambiguous
-- [ ] impact({target, direction: "upstream"}) or CLI fallback to find dependents
-- [ ] Review d=1 items first (these WILL BREAK)
-- [ ] Check high-confidence (>0.8) dependencies
-- [ ] READ processes to check affected execution flows
-- [ ] detect_changes({scope: "all"}) or CLI fallback for pre-commit check
-- [ ] Confirm the checkout you edited is the checkout that was diffed
-- [ ] Assess risk level and report, stating repo/worktree/index identity
-```
-
 ## Understanding Output
 
 | Depth | Risk Level       | Meaning                  |

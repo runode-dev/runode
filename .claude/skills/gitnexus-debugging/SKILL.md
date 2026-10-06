@@ -43,20 +43,6 @@ diagnosis.
 
 > If "Index is stale" → run `node .gitnexus/run.cjs analyze` in terminal.
 
-## Checklist
-
-```
-- [ ] list_repos {} — bind repo; explicit repo when >1 indexed, ask if ambiguous
-- [ ] Understand the symptom (error message, unexpected behavior)
-- [ ] query for error text or related code
-- [ ] Identify the suspect function from returned processes
-- [ ] context to see callers and callees
-- [ ] Trace execution flow via process resource if applicable
-- [ ] cypher for custom call chain traces if needed
-- [ ] Read source files to confirm root cause
-- [ ] State the repository and index freshness with the diagnosis
-```
-
 ## Debugging Patterns
 
 | Symptom              | GitNexus Approach                                          |
