@@ -28,7 +28,7 @@ use std::{
     },
     path::{Path, PathBuf},
     sync::{
-        Arc, Mutex, PoisonError,
+        Arc, Mutex, PoisonError, Weak,
         atomic::{AtomicUsize, Ordering},
         mpsc,
     },
@@ -41,7 +41,7 @@ use runode_protocol::{
     AttachMode, ClientKind, ClientMsg, Frame, FrameError, FrameKind, GoodbyeReason, HANDOFF_FORMAT, HostMsg,
     PROTOCOL_VERSION, SessionId, SessionInfo, read_frame, write_frame,
 };
-use runode_shared_types::{grid::GridSize, input::parse_keys, session::DriveAction};
+use runode_shared_types::{clipboard::ClipboardAccess, grid::GridSize, input::parse_keys, session::DriveAction};
 use runode_terminal::pty;
 
 use crate::{
@@ -142,11 +142,46 @@ struct Peer {
 struct Pending {
     /// 转给了哪条界面的连接；只认它回的话。
     desktop: u64,
-    /// 发请求的那条连接的编号；它断开时这条请求跟着撤掉。
-    from: u64,
-    /// 发请求的那条连接，回话交给它。
-    origin: Outbox,
-    req: u32,
+    /// 回话交给谁。
+    asker: Asker,
+}
+
+/// 请界面办事的一方。
+enum Asker {
+    /// 别的连接发来的请求（`Open`、`Reveal`、`Layout`）。
+    Client {
+        /// 发请求的那条连接的编号；它断开时这条请求跟着撤掉。
+        from: u64,
+        /// 发请求的那条连接，回话交给它。
+        origin: Outbox,
+        req: u32,
+    },
+    /// 会话自己的请求（读写剪贴板），回话交给会话线程（`Inbox::UiAnswer`）。
+    Session(SessionId),
+}
+
+/// 会话线程请界面办事的一头，见 `Shared::ask_ui`；也从这里读剪贴板的规矩。拿着宿主的弱引用：
+/// 会话线程不该让宿主留着不放，宿主没了时什么都办不成。
+#[derive(Clone, Default)]
+pub(crate) struct UiPort(Weak<Shared>);
+
+impl UiPort {
+    pub(crate) fn new(shared: Weak<Shared>) -> Self {
+        Self(shared)
+    }
+
+    /// 见 `Shared::ask_ui`。
+    pub(crate) fn ask(&self, session: SessionId, preferred: Option<u64>, request: ClientMsg) -> Option<u64> {
+        self.0.upgrade()?.ask_ui(session, preferred, request)
+    }
+
+    /// 现在的剪贴板规矩；宿主没了时是默认的。
+    pub(crate) fn clipboard_access(&self) -> ClipboardAccess {
+        self.0
+            .upgrade()
+            .map(|shared| *shared.clipboard.lock().unwrap_or_else(PoisonError::into_inner))
+            .unwrap_or_default()
+    }
 }
 
 /// `Host::listen` 开着的 socket。丢掉时放开锁，socket 文件由退出的一方删。
@@ -383,27 +418,33 @@ fn start_serving(shared: &Arc<Shared>, id: u64, stream: UnixStream, check_peer: 
     true
 }
 
-/// 连接结束：撤掉登记。它是界面的话，转给它还没回话的请求都回一句没办成；它发出去、界面还没
-/// 回话的请求撤掉，回话没人收了。
+/// 连接结束：撤掉登记。它是界面的话，转给它还没回话的请求都回一句没办成（会话的请求交回会话
+/// 线程）；它发出去、界面还没回话的请求撤掉，回话没人收了。
 fn unregister(shared: &Shared, id: u64) {
     let mut peers = shared.peers();
     peers.connections.remove(&id);
     peers.desktops.retain(|&desktop| desktop != id);
-    peers.pending.retain(|_, pending| pending.from != id);
+    peers.pending.retain(|_, pending| !matches!(pending.asker, Asker::Client { from, .. } if from == id));
     let orphaned: Vec<u64> =
         peers.pending.iter().filter(|(_, pending)| pending.desktop == id).map(|(&ui, _)| ui).collect();
+    let gone = || "the runode window went away before answering".to_owned();
+    let mut sessions = Vec::new();
     for ui in orphaned {
-        if let Some(pending) = peers.pending.remove(&ui) {
-            pending.origin.control(&HostMsg::Error {
-                req: Some(pending.req),
-                id: None,
-                message: "the runode window went away before answering".into(),
-            });
+        match peers.pending.remove(&ui).map(|pending| pending.asker) {
+            Some(Asker::Client { origin, req, .. }) => {
+                origin.control(&HostMsg::Error { req: Some(req), id: None, message: gone() });
+            }
+            Some(Asker::Session(session)) => sessions.push((session, ui)),
+            None => {}
         }
     }
     peers.activity_at = Instant::now();
     drop(peers);
     shared.peers_changed.notify_all();
+    for (session, ui) in sessions {
+        let reply = Box::new(HostMsg::Error { req: None, id: Some(session), message: gone() });
+        shared.deliver(session, Inbox::UiAnswer { ui, reply });
+    }
 }
 
 impl Shared {
@@ -420,6 +461,27 @@ impl Shared {
         drop(peers);
         self.peers_changed.notify_all();
         true
+    }
+
+    /// 会话 `session` 请界面办一件事（`request`），返回这条请求的编号，界面的回话经
+    /// `Inbox::UiAnswer` 带着它交回会话线程。交给 `preferred` 这条界面的连接，它不是（或者不再是）
+    /// 界面时交给最近连上的界面；没有界面连着时返回 `None`。
+    fn ask_ui(&self, session: SessionId, preferred: Option<u64>, request: ClientMsg) -> Option<u64> {
+        let mut peers = self.peers();
+        let desktop =
+            preferred.filter(|connection| peers.desktops.contains(connection)).or(peers.desktops.last().copied())?;
+        let out = peers.connections.get(&desktop).and_then(|peer| peer.out.clone())?;
+        let ui = peers.next_ui;
+        peers.next_ui += 1;
+        peers.pending.insert(ui, Pending { desktop, asker: Asker::Session(session) });
+        drop(peers);
+        if out.control(&HostMsg::UiRequest { ui, request: Box::new(request) }) {
+            return Some(ui);
+        }
+        // 界面的连接刚断开：撤掉这条请求（读线程撤掉登记时已经替它回过话的话，那条回话会话线程
+        // 认不出，丢掉）。
+        self.peers().pending.remove(&ui);
+        None
     }
 
     /// 所有会话在 `SessionList` 里的样子：在调用的线程里把请求按先后送到各个会话线程，返回等
@@ -876,9 +938,10 @@ impl Connection {
             }
             ClientMsg::SetTheme { settings } => self.shared.set_theme(settings),
             // 记不记命令历史是用户在 app 里的设置，别的程序不能改。
-            ClientMsg::SetOptions { record_history, .. } => {
+            ClientMsg::SetOptions { record_history, clipboard } => {
                 if self.kind == ClientKind::Desktop {
                     self.shared.record_history.store(record_history, Ordering::Relaxed);
+                    *self.shared.clipboard.lock().unwrap_or_else(PoisonError::into_inner) = clipboard;
                 } else {
                     self.error(None, None, "only the runode app changes the host's options".into());
                 }
@@ -932,15 +995,16 @@ impl Connection {
         {
             let ui = peers.next_ui;
             peers.next_ui += 1;
-            peers.pending.insert(ui, Pending { desktop, from: self.id, origin: self.out.clone(), req });
+            let asker = Asker::Client { from: self.id, origin: self.out.clone(), req };
+            peers.pending.insert(ui, Pending { desktop, asker });
             drop(peers);
             if !out.control(&HostMsg::UiRequest { ui, request: Box::new(request) }) {
                 // 界面的连接刚断开：它的读线程撤掉登记时会替还在等的请求回话；已经撤掉了的话
                 // 这条请求是登记之后才加的，在这里回。
                 let pending = self.shared.peers().pending.remove(&ui);
-                if let Some(pending) = pending {
-                    pending.origin.control(&HostMsg::Error {
-                        req: Some(pending.req),
+                if let Some(Pending { asker: Asker::Client { origin, req, .. }, .. }) = pending {
+                    origin.control(&HostMsg::Error {
+                        req: Some(req),
                         id: None,
                         message: "the runode window went away before answering".into(),
                     });
@@ -952,9 +1016,10 @@ impl Connection {
         self.error(Some(req), None, "there is no runode window to do this in".into());
     }
 
-    /// 界面回话：转给发请求的一方。只认被转去的那个界面回的；对不上的（请求已经回过、不是转给
-    /// 这条连接的、发请求的一方已经断开的）丢掉。界面读不懂请求（读成 `ClientMsg::Unknown`）时
-    /// 回的 `Error` 不知道 `req`，这里补上原请求的，发请求的一方才认得出是哪条没办成。
+    /// 界面回话：转给发请求的一方，会话自己的请求交回会话线程。只认被转去的那个界面回的；对不上的
+    /// （请求已经回过、不是转给这条连接的、发请求的一方已经断开的）丢掉。界面读不懂请求（读成
+    /// `ClientMsg::Unknown`）时回的 `Error` 不知道 `req`，这里补上原请求的，发请求的一方才认得出是
+    /// 哪条没办成。
     fn ui_reply(&self, ui: u64, reply: HostMsg) {
         let pending = {
             let mut peers = self.shared.peers();
@@ -963,13 +1028,16 @@ impl Connection {
                 _ => None,
             }
         };
-        match pending {
-            Some(pending) => {
+        match pending.map(|pending| pending.asker) {
+            Some(Asker::Client { origin, req, .. }) => {
                 let reply = match reply {
-                    HostMsg::Error { req: None, id, message } => HostMsg::Error { req: Some(pending.req), id, message },
+                    HostMsg::Error { req: None, id, message } => HostMsg::Error { req: Some(req), id, message },
                     reply => reply,
                 };
-                pending.origin.control(&reply);
+                origin.control(&reply);
+            }
+            Some(Asker::Session(session)) => {
+                self.shared.deliver(session, Inbox::UiAnswer { ui, reply: Box::new(reply) });
             }
             None => tracing::debug!("dropped a reply to unknown ui request {ui}"),
         }

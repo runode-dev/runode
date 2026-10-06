@@ -9,9 +9,11 @@
 //!
 //! 这里是会话本身：创建、接上 PTY、注册 VT 回调、套用主题、改尺寸、写入和清屏，以及宿主升级时
 //! 把会话交给新宿主（`HostSession::export`、`HostSession::import`）。VT 回调累积的变化和 shell
-//! 集成的报告在 `effects`，前台 agent 的识别在 `detect`，转给别的进程前抹掉报告内容的
-//! `ReportRedactor` 在 `redact`，别的进程发来的控制键和粘贴的编码在 `keys`。
+//! 集成的报告在 `effects`，程序读写剪贴板（OSC 52）的请求在 `clipboard`，前台 agent 的识别在
+//! `detect`，转给别的进程前抹掉报告内容的 `ReportRedactor` 在 `redact`，别的进程发来的控制键和
+//! 粘贴的编码在 `keys`。
 
+mod clipboard;
 mod detect;
 mod effects;
 mod keys;
@@ -48,6 +50,7 @@ use crate::{
     pty::{Pty, PtyHandoff, PtyWriter},
     vt::{self, CommandOutput, SnapshotError},
 };
+pub use clipboard::{ClipboardQuery, ClipboardRequest};
 use effects::{Effects, PromptEvent, SHELL_REPORT};
 pub use redact::{RedactorState, ReportRedactor};
 
@@ -171,6 +174,8 @@ pub struct HostSession {
     input_at: Option<Instant>,
     /// 现在套用着的主题，见 `apply_theme`。
     settings: TermSettings,
+    /// 在喂给 VT 的字节流旁边认剪贴板的读请求，见 `clipboard`。
+    clipboard_queries: clipboard::QueryScanner,
     /// `SessionMeta` 里的东西可能变了，见 `take_meta`。
     meta_dirty: bool,
     /// 上次交出去的 `SessionMeta`，没变的不再交。
@@ -259,6 +264,7 @@ impl HostSession {
             running: None,
             input_at: None,
             settings,
+            clipboard_queries: clipboard::QueryScanner::default(),
             meta_dirty: true,
             last_meta: None,
         })
@@ -565,6 +571,25 @@ impl HostSession {
         self.effects.bell.take()
     }
 
+    /// 取走程序读写剪贴板的请求，按到达的先后。每次 `feed` 之后调用。
+    pub fn take_clipboard(&mut self) -> Vec<ClipboardRequest> {
+        self.effects.clipboard.take()
+    }
+
+    /// 回程序读剪贴板的请求 `query`：`text` 是剪贴板里的文字，为空（没读、不让读）或者超过
+    /// `MAX_CLIPBOARD_BYTES` 时回一个空的剪贴板。等着回话的程序（比如粘贴时等剪贴板内容的编辑器）
+    /// 收到空的就接着往下走，不用干等到自己超时。
+    pub fn answer_clipboard(&self, query: ClipboardQuery, text: Option<&str>) {
+        let text = match text {
+            Some(text) if text.len() > runode_shared_types::clipboard::MAX_CLIPBOARD_BYTES => {
+                tracing::warn!("answered a clipboard read with nothing: {} bytes is over the limit", text.len());
+                ""
+            }
+            text => text.unwrap_or_default(),
+        };
+        self.writer.write(&query.answer(text));
+    }
+
     /// VT 应答查询写回程序的次数。
     pub fn replies(&self) -> u64 {
         self.replies.get()
@@ -665,8 +690,8 @@ fn recapture_report(terminal: &mut Terminal<'static, 'static>) {
     }
 }
 
-/// 给宿主那份 VT 注册回调：查询的回复写回 `writer`，标题、响铃、进度、提示符和 shell 集成的
-/// 报告记进 `effects`。
+/// 给宿主那份 VT 注册回调：查询的回复写回 `writer`，标题、响铃、进度、提示符、shell 集成的
+/// 报告和写剪贴板的请求记进 `effects`。
 fn register_callbacks(
     terminal: &mut Terminal<'static, 'static>,
     writer: &PtyWriter,
@@ -767,6 +792,11 @@ fn register_callbacks(
                     effects.shell_report(report);
                 }
             }
+        })?
+        // 程序写剪贴板（OSC 52），见 `clipboard`。读剪贴板不装回调，原因也在那里。
+        .on_clipboard_write({
+            let effects = effects.clone();
+            move |_, write| clipboard::take_write(write, &effects.clipboard)
         })?
         // RIS 会清空标题，但不会触发标题变化回调。
         .on_reset({

@@ -9,7 +9,7 @@ use std::{
 
 use runode_shared_types::shell::ShellNames;
 
-use super::HostSession;
+use super::{ClipboardRequest, HostSession};
 use crate::{history, pty};
 
 /// 宿主那份 VT 的回调累积下来的变化。
@@ -38,6 +38,8 @@ pub(super) struct Effects {
     /// 表示没收到；里面是命令原文，shell 拿不到原文时为 `None`，到时从屏幕上读。由下一个
     /// 133;C 取走，先来了 133;A、133;B 或 133;D 就作废，免得被之后伪造的 133;C 借用。
     pub(super) command_report: RefCell<Option<Option<String>>>,
+    /// 程序读写剪贴板的请求，按到达的先后，由 `HostSession::take_clipboard` 取走。
+    pub(super) clipboard: RefCell<Vec<ClipboardRequest>>,
 }
 
 /// shell 集成在显示提示符时、内容和上次报告的不一样时用的私有 OSC：
@@ -134,9 +136,19 @@ pub(super) enum PromptEvent {
 
 impl HostSession {
     /// 把 PTY 输出喂给 VT，返回标题或 agent 状态是否变化。agent 状态要读屏幕判断的部分按
-    /// 时间节流，不一定在这次判断，见 `HostSession::agent_deadline`。
+    /// 时间节流，不一定在这次判断，见 `HostSession::agent_deadline`。程序读写剪贴板的请求记下来，
+    /// 由 `take_clipboard` 取走。
     pub fn feed(&mut self, data: &[u8]) -> bool {
-        self.terminal.vt_write(data);
+        // 读剪贴板的请求在 VT 处理到它的那个位置记下，和回调记下的写请求按真实的先后排。
+        let mut rest = data;
+        while let Some((end, query)) = self.clipboard_queries.scan(rest) {
+            self.terminal.vt_write(&rest[..end]);
+            if let Ok(mut requests) = self.effects.clipboard.try_borrow_mut() {
+                requests.push(ClipboardRequest::Read(query));
+            }
+            rest = &rest[end..];
+        }
+        self.terminal.vt_write(rest);
         let now = Instant::now();
         self.agent_tracker.output(data, now);
         let mut changed = false;

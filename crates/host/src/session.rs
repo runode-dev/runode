@@ -20,6 +20,8 @@
 //! 当上 owner 时再用；还没有 owner 时谁的都照旧应用。尺寸照旧只在宿主插进输出流的 `HostMsg::Resized` 处改，两份 VT 不会分叉；
 //! owner 换了用 `HostMsg::SizeOwner` 告诉带着屏幕连着的前端。owner 是连接级的状态，交接时所有
 //! 连接都断了，新宿主上的会话从没有 owner 开始。
+//!
+//! 程序读写剪贴板（OSC 52）的请求按配置办，要桌面办的交给最近和这个会话交互过的桌面，见 `clipboard`。
 
 use std::{
     any::Any,
@@ -50,7 +52,9 @@ use runode_terminal::{
     pty::{self, Pty, PtyEvent, PtyHandoff},
 };
 
-use crate::SpawnOptions;
+use crate::{SpawnOptions, server::UiPort};
+
+mod clipboard;
 
 /// PTY 读线程最多积压这么多字节的输出，再多就等会话线程处理：64 块读满的缓冲（每块 64 KiB）。
 /// 按字节而不按块数算：程序不停输出时一次只读到 1 KiB 左右，按块数限的话积压不了多少，会话
@@ -141,6 +145,12 @@ pub(crate) enum Inbox {
     Resume,
     /// 交接提交了（新宿主）：先把旧宿主没写进 PTY 的这些输入排进写队列，再打开读写线程的闸门。
     Open(Vec<u8>),
+    /// 界面回了会话经 `UiPort::ask` 请它办的事，`ui` 是那条请求的编号；界面没回就断开了时是
+    /// `HostMsg::Error`。
+    UiAnswer {
+        ui: u64,
+        reply: Box<HostMsg>,
+    },
 }
 
 /// 会话对 `Inbox::Prepare` 的回话。
@@ -192,6 +202,8 @@ pub(crate) struct Setup {
     /// 其中开会话时指定的那些，交接还没启动的会话时带给新宿主。
     pub(crate) extra_env: Vec<(String, String)>,
     pub(crate) record_history: Arc<AtomicBool>,
+    /// 请界面办事（读写剪贴板）、读剪贴板规矩的一头。
+    pub(crate) ui: UiPort,
 }
 
 /// 别的终端里的程序对会话做了什么，见 `Inbox::Driven`。
@@ -261,7 +273,7 @@ impl Handle {
 /// 开会话：在调用的线程里打开伪终端（`start` 时连 shell 一起启动），错误当场返回；再起会话线程，
 /// 等它把 `HostSession` 建好。
 pub(crate) fn spawn(setup: Setup, options: SpawnOptions) -> Result<Handle> {
-    let Setup { id, settings, env, extra_env, record_history } = setup;
+    let Setup { id, settings, env, extra_env, record_history, ui } = setup;
     let (inbox, rx) = mpsc::channel();
     let credits = Arc::new(Credits::default());
     let sink = pty_sink(&inbox, &credits);
@@ -291,6 +303,7 @@ pub(crate) fn spawn(setup: Setup, options: SpawnOptions) -> Result<Handle> {
             let _ = ready.send(Ok(()));
             let mut runner = Runner::new(id, session, options.shell, settings, credits, record_history);
             runner.extra_env = extra_env;
+            runner.ui = ui;
             runner.run(&rx, &killed_flag);
         })
         .context("failed to start the session thread")?;
@@ -314,7 +327,7 @@ fn pty_sink(inbox: &mpsc::Sender<Inbox>, credits: &Arc<Credits>) -> pty::PtySink
 /// 停着、从没开过闸的 `Pty` 直接丢掉其实也不结束 shell（见 `Pty::adopt_paused`），明着交回是把
 /// 「不接手了」说清楚、出错时记一笔，不靠丢掉时对停着的 `Pty` 的特殊处理。
 pub(crate) fn adopt(setup: Setup, adopted: Adopted) -> Result<Adopting> {
-    let Setup { id, settings: _, env: _, extra_env, record_history } = setup;
+    let Setup { id, settings: _, env: _, extra_env, record_history, ui } = setup;
     let Adopted { handoff, export, snapshot, replay, redactor, shell } = adopted;
     let (inbox, rx) = mpsc::channel();
     let credits = Arc::new(Credits::default());
@@ -341,6 +354,7 @@ pub(crate) fn adopt(setup: Setup, adopted: Adopted) -> Result<Adopting> {
         let mut runner = Runner::new(id, session, shell, settings, credits, record_history);
         runner.redactor = ReportRedactor::from_state(redactor);
         runner.extra_env = extra_env;
+        runner.ui = ui;
         runner.run(&rx, &killed_flag);
     });
     if let Err(err) = spawned {
@@ -438,6 +452,10 @@ struct Runner {
     /// 上次因为有输出而重读前台进程的时刻，以及推迟到的那次。
     foreground_read_at: Instant,
     foreground_due: Option<Instant>,
+    /// 请界面办事、读剪贴板规矩的一头，见 `Setup::ui`。
+    ui: UiPort,
+    /// 在等界面回的那个读剪贴板的请求，见 `clipboard`。
+    clipboard_read: Option<clipboard::PendingRead>,
 }
 
 impl Runner {
@@ -468,6 +486,8 @@ impl Runner {
             next_poll: None,
             foreground_read_at: now,
             foreground_due: None,
+            ui: UiPort::default(),
+            clipboard_read: None,
         };
         // shell 已经在起始目录里跑起来了，不等第一次输出，前端一连上就有名字。
         runner.refresh_foreground(now);
@@ -582,7 +602,10 @@ impl Runner {
         if self.exited {
             return None;
         }
-        [self.next_poll, self.foreground_due, self.session.agent_deadline()].into_iter().flatten().min()
+        [self.next_poll, self.foreground_due, self.session.agent_deadline(), self.clipboard_deadline()]
+            .into_iter()
+            .flatten()
+            .min()
     }
 
     fn handle(&mut self, message: Inbox) {
@@ -670,6 +693,7 @@ impl Runner {
                     tracing::error!("session {} cannot read its pty after the handoff: {err:#}", self.id);
                 }
             }
+            Inbox::UiAnswer { ui, reply } => self.ui_answered(ui, *reply),
             // 交接以外的时候收到的：`Prepare` 在 `run` 里办，丢掉回话的一端，等的一方当会话没了；
             // `Release` 在 `step` 里办；没有冻结着时 `Resume` 没什么可做。
             Inbox::Kill | Inbox::Prepare(_) | Inbox::Release(_) | Inbox::Resume => {}
@@ -1031,6 +1055,9 @@ impl Runner {
             }
             self.emit(Event::msg(HostMsg::CommandFinished { id: self.id, command }));
         }
+        for request in self.session.take_clipboard() {
+            self.clipboard(request);
+        }
         self.try_clear();
         // 进出目录、启动或退出程序时通常都有输出，顺带重读前台进程：离上次读满了间隔就读，
         // 不满就定在满的时刻；已经定了、到点了也读。
@@ -1064,6 +1091,7 @@ impl Runner {
         if self.session.agent_deadline().is_some_and(|at| now >= at) {
             self.session.poll_agent();
         }
+        self.clipboard_tick(now);
     }
 
     /// 重读前台进程，排好下一次轮询；shell 还没启动时不排，见 `next_poll`。

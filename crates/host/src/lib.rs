@@ -13,7 +13,8 @@
 //!
 //! 宿主不管窗口：要界面办的请求（`Open`、`Reveal`、`Layout`）包成 `HostMsg::UiRequest` 转给
 //! 登记为界面的那条连接（`Hello` 里说自己是 `ClientKind::Desktop` 的），界面用 `ClientMsg::UiReply`
-//! 回话，宿主再原样转回发请求的一方。
+//! 回话，宿主再原样转回发请求的一方。会话里的程序读写剪贴板（OSC 52）也这样请界面办，回话交回
+//! 会话线程，见 `session` 的 `clipboard`。
 
 mod handoff;
 mod idle;
@@ -26,7 +27,7 @@ use std::{
     ffi::OsString,
     path::PathBuf,
     sync::{
-        Arc, Condvar, Mutex, MutexGuard, PoisonError,
+        Arc, Condvar, Mutex, MutexGuard, PoisonError, Weak,
         atomic::{AtomicBool, AtomicU64, Ordering},
     },
     time::Duration,
@@ -37,7 +38,7 @@ pub use handoff::{GIVE_READY_WINDOW, TAKE_OVER_AFTER_READY, TakeOverError, TakeO
 pub use idle::Stopped;
 pub use launch::{STATUS_FD, Successor, launch, launch_successor};
 pub use runode_protocol::{BuildId, ClientMsg, HandoffRefusal, HostMsg, Placement, SessionId};
-use runode_shared_types::{grid::GridSize, settings::TermSettings, shell::IntegrationMode};
+use runode_shared_types::{clipboard::ClipboardAccess, grid::GridSize, settings::TermSettings, shell::IntegrationMode};
 
 /// 新开一个会话。
 #[derive(Clone, Debug)]
@@ -63,6 +64,8 @@ pub struct Host {
 }
 
 struct Shared {
+    /// 自己的弱引用，交给会话线程请界面办事用，见 `server::UiPort`。
+    me: Weak<Shared>,
     /// 这次构建的标识，前端的一样时才给快照，见 `AttachMode`。
     build: BuildId,
     /// 这个构建编的快照的格式版本，见 `HostMsg::Welcome`。
@@ -70,6 +73,8 @@ struct Shared {
     registry: Mutex<Registry>,
     /// 要不要把 shell 集成报告的命令记进历史文件，见 `ClientMsg::SetOptions`。
     record_history: Arc<AtomicBool>,
+    /// 会话里的程序读写剪贴板的规矩，见 `ClientMsg::SetOptions`。
+    clipboard: Mutex<ClipboardAccess>,
     /// 下一条连接的编号。
     next_connection: AtomicU64,
     /// 之后启动的 shell 另外设的环境变量，见 `Host::set_env`。
@@ -164,7 +169,8 @@ impl Shared {
         }
         env.retain(|(k, _)| k != runode_protocol::ENV_SESSION);
         env.push((runode_protocol::ENV_SESSION.into(), id.to_string().into()));
-        session::Setup { id, settings, env, extra_env, record_history: self.record_history.clone() }
+        let ui = server::UiPort::new(self.me.clone());
+        session::Setup { id, settings, env, extra_env, record_history: self.record_history.clone(), ui }
     }
 
     /// 结束会话：先从登记表里拿掉，再叫它的线程结束，见 `Runner::answer_pending`。没有这个会话
@@ -205,18 +211,20 @@ impl Host {
             tracing::warn!("cannot tell the snapshot format: {err}");
             0
         });
-        let shared = Shared {
+        let shared = |me: &Weak<Shared>| Shared {
+            me: me.clone(),
             build,
             snapshot_format,
             registry: Mutex::default(),
             record_history: Arc::new(AtomicBool::new(true)),
+            clipboard: Mutex::default(),
             next_connection: AtomicU64::new(1),
             env: Mutex::default(),
             peers: Mutex::default(),
             peers_changed: Condvar::new(),
             handoff_deadline: Mutex::new(handoff::DEFAULT_DEADLINE),
         };
-        Self { shared: Arc::new(shared) }
+        Self { shared: Arc::new_cyclic(shared) }
     }
 
     /// 交出会话时给接手的新宿主多久收下会话（发送也算在内）、回 `HandoffReady`，默认 20 秒，
