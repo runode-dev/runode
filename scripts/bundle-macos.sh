@@ -35,6 +35,8 @@ dmg="$bundle_dir/Runode-$version-$arch.dmg"
 rm -rf "$app"
 mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
 cp "$exe" "$app/Contents/MacOS/runode"
+# 命令行的短名字：app 把这个目录加进终端的 PATH，敲 rn 和敲 runode 一样。
+ln -s runode "$app/Contents/MacOS/rn"
 cp "$plist" "$app/Contents/Info.plist"
 
 # 应用图标用 Icon Composer 的 .icon 文档，由 Xcode 的 actool 编译成 Assets.car，系统按

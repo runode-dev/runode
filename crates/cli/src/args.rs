@@ -12,6 +12,7 @@ use crate::{SetupTarget, select::Selector};
 pub(crate) const HELP: &str = "\
 usage: runode [COMMAND]
 
+rn is a short name for runode: `rn list` is `runode list`.
 Without a command, runode opens its window. Commands talk to the running runode
 app; inside a runode terminal they find it through RUNODE_SOCKET, and
 RUNODE_SESSION names the terminal they run in.

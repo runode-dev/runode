@@ -3,6 +3,9 @@ CARGO ?= cargo
 ARGS ?=
 # 追加给 clippy 的参数，例如 CI 里 make clippy CLIPPY_ARGS="-- -D warnings" 让警告算失败。
 CLIPPY_ARGS ?=
+# 命令行的短名字：可执行文件旁边一个叫 rn 的符号链接。app 把可执行文件所在的目录加进终端的
+# PATH，开发版里也能敲 rn；打包时 scripts/bundle-macos.sh 在 Runode.app 里放同样的链接。
+link_rn = @mkdir -p target/$(1) && ln -sfn runode target/$(1)/rn
 
 .DEFAULT_GOAL := help
 .PHONY: help submodules build release run run-release run-ios run-ios-device app install dmg check test clippy fmt fmt-check clean
@@ -14,15 +17,19 @@ submodules: ## 拉取 vendor 下的 ghostty、libghostty-rs 与 command-signatur
 	git submodule update --init --recursive
 
 build: ## 调试构建
+	$(call link_rn,debug)
 	$(CARGO) build
 
 release: ## 发布构建
+	$(call link_rn,release)
 	$(CARGO) build --release
 
 run: ## 调试构建并启动
+	$(call link_rn,debug)
 	$(CARGO) run -- $(ARGS)
 
 run-release: ## 发布构建并启动
+	$(call link_rn,release)
 	$(CARGO) run --release -- $(ARGS)
 
 # 模拟器用哪台，例如 make run-ios IOS_SIM="iPhone 18 Pro"；不给时用开着的那台。

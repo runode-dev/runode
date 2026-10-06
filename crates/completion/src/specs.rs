@@ -23,8 +23,18 @@ pub struct Spec {
     pub hidden: HashSet<String>,
 }
 
+/// 和别的命令同一个可执行文件的短名字，按它指的那个命令补全：`rn` 是 runode 放在自己旁边的
+/// 符号链接。
+const ALIASES: &[(&str, &str)] = &[("rn", "runode")];
+
+/// `name` 是短名字时换成它指的命令。
+fn canonical(name: &str) -> &str {
+    ALIASES.iter().find(|(alias, _)| *alias == name).map_or(name, |(_, command)| command)
+}
+
 /// 名为 `name` 的命令的规格；没有时为 `None`。
 pub fn lookup(name: &str) -> Option<Arc<Spec>> {
+    let name = canonical(name);
     static CACHE: OnceLock<Mutex<HashMap<String, Option<Arc<Spec>>>>> = OnceLock::new();
     let cache = CACHE.get_or_init(Default::default);
     if let Some(spec) = cache.lock().unwrap_or_else(PoisonError::into_inner).get(name) {
@@ -37,6 +47,7 @@ pub fn lookup(name: &str) -> Option<Arc<Spec>> {
 
 /// 规格里命令本身的说明；没有规格或者规格里没写时为 `None`。不用解压规格。
 pub fn description(name: &str) -> Option<&'static str> {
+    let name = canonical(name);
     let i = INDEX.binary_search_by(|(n, ..)| (*n).cmp(name)).ok()?;
     Some(INDEX[i].3).filter(|description| !description.is_empty())
 }
@@ -50,7 +61,7 @@ pub fn dynamic(command: &str) -> Option<&'static DynamicCompletionData> {
         data.extend([crate::runode_cli::generators().into()]);
         data
     })
-    .get(command)
+    .get(canonical(command))
 }
 
 /// 嵌进来的所有命令名。
@@ -148,6 +159,13 @@ mod tests {
         assert_eq!(description("git"), Some("The stupid content tracker"));
         assert_eq!(description("no-such-command-here"), None);
         assert!(dynamic("git").is_some_and(|data| !data.generators().is_empty()));
+    }
+
+    #[test]
+    fn rn_completes_as_runode() {
+        assert!(Arc::ptr_eq(&lookup("rn").unwrap(), &lookup("runode").unwrap()));
+        assert!(dynamic("rn").is_some());
+        assert_eq!(description("rn"), description("runode"));
     }
 
     #[test]
