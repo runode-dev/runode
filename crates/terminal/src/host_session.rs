@@ -175,6 +175,10 @@ impl HostSession {
                 let effects = effects.clone();
                 move |_| effects.title_changed.set(true)
             })?
+            .on_bell({
+                let effects = effects.clone();
+                move |_| effects.bell.set(true)
+            })?
             .on_progress_report({
                 let effects = effects.clone();
                 move |_, report| {
@@ -397,6 +401,11 @@ impl HostSession {
         }
         self.last_meta = Some(meta.clone());
         Some(meta)
+    }
+
+    /// 自上次以来程序响过铃（喂给 VT 的输出里有不属于任何序列的 BEL）的话返回 true。
+    pub fn take_bell(&self) -> bool {
+        self.effects.bell.take()
     }
 
     /// VT 应答查询写回程序的次数。

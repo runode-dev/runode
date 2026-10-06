@@ -1,5 +1,5 @@
 //! 一个会话的线程：`HostSession` 在这个线程里建好，从不离开它（它不是 `Send`）。线程之间只传
-//! `Send` 的数据：PTY 的读线程交来的输出、前端的请求，以及发给前端的 `HostEvent`。
+//! `Send` 的数据：PTY 的读线程交来的输出、前端的请求，以及发给前端的 `Event`。
 //!
 //! 收件箱是一个 `std::sync::mpsc` 的 channel，PTY 输出和前端的请求都排在里面，按到达的先后
 //! 处理。PTY 输出另外限了量：读线程最多积压 `PTY_BACKLOG_BYTES` 字节，再多就等会话线程处理掉
@@ -28,7 +28,7 @@ use runode_terminal::{
     pty::{self, Pty, PtyEvent},
 };
 
-use crate::{Attached, HostEvent, Sink, SpawnOptions};
+use crate::SpawnOptions;
 
 /// PTY 读线程最多积压这么多字节的输出，再多就等会话线程处理：64 块读满的缓冲（每块 64 KiB）。
 /// 按字节而不按块数算：程序不停输出时一次只读到 1 KiB 左右，按块数限的话积压不了多少，会话
@@ -39,15 +39,47 @@ const FOREGROUND_POLL_INTERVAL: Duration = Duration::from_secs(1);
 /// 有输出时重读前台进程的最短间隔：大量输出时不必每块都做几次系统调用，推迟的那次到点补上。
 const FOREGROUND_REFRESH_INTERVAL: Duration = Duration::from_millis(50);
 /// 还没有前端连上时攒着的事件最多这么多字节的输出，再多就不攒了，之后的连接会失败。
+/// 只有旧的进程内通路（`Inbox::Attach`）用。
 const BACKLOG_LIMIT: usize = 16 << 20;
+
+/// 会话发给一个连着的前端的一件事，同一个会话的按发生的先后。
+#[derive(Clone, Debug)]
+pub(crate) enum Event {
+    /// PTY 的输出，或者宿主为清屏插进输出流的字节。
+    Output(Arc<[u8]>),
+    /// 控制消息。装在盒子里：输出最常见，每件事挪动时不必带着最大那种消息的大小。
+    Msg(Box<HostMsg>),
+}
+
+impl Event {
+    pub(crate) fn msg(message: HostMsg) -> Self {
+        Self::Msg(Box::new(message))
+    }
+}
+
+/// 收一个会话的 `Event` 的一方，在会话的线程里调用，不能阻塞。返回 false 表示不再要了，之后
+/// 不再调用。
+pub(crate) type EventSink = Box<dyn FnMut(Event) -> bool + Send>;
+
+/// 旧的进程内通路连上时会话给的东西，见 `Inbox::Attach`。
+pub(crate) struct Backlogged {
+    pub(crate) size: GridSize,
+    pub(crate) settings: TermSettings,
+    pub(crate) meta: SessionMeta,
+    pub(crate) started: bool,
+}
 
 /// 会话线程收到的消息。
 pub(crate) enum Inbox {
     Pty(PtyEvent),
+    /// 旧的进程内通路：补发会话开出来以后攒着的事件，之后接着发；一个会话只能这样连一次。
+    /// 桌面改用 `Subscribe`（经 `Host::connect_pair`）后随 `Client` 一起删掉，连同 `Runner` 里
+    /// 攒事件的 `backlog`。
+    #[deprecated(note = "the in-process path goes away once the desktop attaches over `Host::connect_pair`")]
     Attach {
         connection: u64,
-        sink: Sink,
-        reply: mpsc::Sender<Result<Attached>>,
+        sink: EventSink,
+        reply: mpsc::Sender<Result<Backlogged>>,
     },
     Detach {
         connection: u64,
@@ -79,9 +111,11 @@ pub(crate) struct Subscribe {
     pub(crate) size: Option<GridSize>,
     /// 要什么样的屏幕；`Snapshot` 编不出来时退成 `VtReplay`。
     pub(crate) mode: AttachMode,
-    /// 在会话线程里调用，交给它当前的屏幕，返回之后收事件的 `Sink`；为 `None` 时不连了。
+    /// 在会话线程里调用，交给它当前的屏幕，返回之后收事件的 `EventSink`；为 `None` 时不连了。
     /// 它和之后的事件在同一个线程里按先后发生，前端收到的屏幕和输出之间不会漏也不会重。
-    pub(crate) start: Box<dyn FnOnce(Screen) -> Option<Sink> + Send>,
+    pub(crate) start: Box<dyn FnOnce(Screen) -> Option<EventSink> + Send>,
+    /// 是桌面的界面连上来，`SessionInfo::claimed` 据此算。
+    pub(crate) desktop: bool,
 }
 
 /// `Subscribe` 时会话当前的样子。
@@ -172,8 +206,8 @@ struct Runner {
     /// 给 socket 上的前端的输出抹掉 shell 集成报告的内容，从会话开出来起每块输出都经过它。
     redactor: ReportRedactor,
     /// 还没有前端连上过时攒着的事件，第一个连上的前端先收到它们；为 `None` 时已经连上过，或者
-    /// 攒得太多放弃了（`backlog_lost`）。
-    backlog: Option<Vec<HostEvent>>,
+    /// 攒得太多放弃了（`backlog_lost`）。只有旧的进程内通路（`Inbox::Attach`）用，随它删掉。
+    backlog: Option<Vec<Event>>,
     backlog_bytes: usize,
     backlog_lost: bool,
     /// 会话是 socket 上开的，从来不攒，见 `Client::spawn_with`。
@@ -278,7 +312,7 @@ impl Runner {
     /// （比如经 socket 等着 agent 的命令行）；叫结束的那一方多半已经不收了。
     fn ended(&mut self) {
         if !std::mem::replace(&mut self.exited, true) {
-            self.emit(HostEvent::msg(HostMsg::Exited { id: self.id, status: None }));
+            self.emit(Event::msg(HostMsg::Exited { id: self.id, status: None }));
         }
     }
 
@@ -308,9 +342,9 @@ impl Runner {
             .unwrap_or_else(|| "unknown panic".into());
         tracing::error!("session {} panicked: {message}", self.id);
         let error = HostMsg::Error { req: None, id: Some(self.id), message: format!("the session crashed: {message}") };
-        // 发给前端时又 panic 的（比如出事的正是前端的 `Sink`），也只能到此为止。
+        // 发给前端时又 panic 的（比如出事的正是前端的 `EventSink`），也只能到此为止。
         let _ = panic::catch_unwind(AssertUnwindSafe(|| {
-            self.emit(HostEvent::msg(error));
+            self.emit(Event::msg(error));
             self.ended();
         }));
     }
@@ -343,8 +377,9 @@ impl Runner {
             }
             Inbox::Pty(PtyEvent::Exited) => {
                 self.exited = true;
-                self.emit(HostEvent::msg(HostMsg::Exited { id: self.id, status: None }));
+                self.emit(Event::msg(HostMsg::Exited { id: self.id, status: None }));
             }
+            #[allow(deprecated)]
             Inbox::Attach { connection, sink, reply } => {
                 let _ = reply.send(self.attach(connection, sink));
             }
@@ -353,7 +388,7 @@ impl Runner {
                 if let Err(err) = self.session.start(self.shell.as_deref(), integration) {
                     tracing::error!("failed to start terminal session: {err:#}");
                     self.exited = true;
-                    self.emit(HostEvent::msg(HostMsg::Exited { id: self.id, status: None }));
+                    self.emit(Event::msg(HostMsg::Exited { id: self.id, status: None }));
                     return;
                 }
                 self.refresh_foreground(Instant::now());
@@ -361,7 +396,7 @@ impl Runner {
             Inbox::Input(data) => self.session.write(data),
             Inbox::Resize(size) => {
                 if self.session.resize(size) {
-                    self.emit(HostEvent::msg(HostMsg::Resized { id: self.id, size }));
+                    self.emit(Event::msg(HostMsg::Resized { id: self.id, size }));
                 }
             }
             Inbox::ClearScreen => {
@@ -372,7 +407,7 @@ impl Runner {
                 self.settings = settings.clone();
                 if self.session.apply_theme(&settings) {
                     let settings = (*settings).clone();
-                    self.emit(HostEvent::msg(HostMsg::ThemeApplied { id: self.id, settings }));
+                    self.emit(Event::msg(HostMsg::ThemeApplied { id: self.id, settings }));
                 }
             }
             Inbox::Subscribe(subscribe) => self.subscribe(subscribe),
@@ -382,7 +417,7 @@ impl Runner {
                     size: self.session.size(),
                     meta: self.session.meta(),
                     clients: u32::try_from(self.subscribers.len()).unwrap_or(u32::MAX),
-                    claimed: false,
+                    claimed: self.subscribers.iter().any(|s| s.desktop),
                     exited: self.exited,
                 });
             }
@@ -394,11 +429,11 @@ impl Runner {
     }
 
     /// socket 上的前端连上来：按它的尺寸改好会话，给它当前的屏幕，之后的事件接着发给它。
-    fn subscribe(&mut self, Subscribe { connection, size, mode, start }: Subscribe) {
+    fn subscribe(&mut self, Subscribe { connection, size, mode, start, desktop }: Subscribe) {
         if let Some(size) = size
             && self.session.resize(size)
         {
-            self.emit(HostEvent::msg(HostMsg::Resized { id: self.id, size }));
+            self.emit(Event::msg(HostMsg::Resized { id: self.id, size }));
         }
         // 屏幕给的是之后收抹过的输出的前端：输出流正停在一条报告里时，宿主这份 VT 的续接里
         // 带着口令，见 `HostSession::redacted_snapshot`。
@@ -417,11 +452,13 @@ impl Runner {
         let screen = Screen { size: self.session.size(), meta: self.session.meta(), settings, mode, data };
         let Some(mut sink) = start(screen) else { return };
         // shell 已经退出了：`Exited` 只在退出那一刻发过一次，晚连上的前端在这里补上，免得一直等。
-        if self.exited && !sink(HostEvent::msg(HostMsg::Exited { id: self.id, status: None })) {
+        if self.exited && !sink(Event::msg(HostMsg::Exited { id: self.id, status: None })) {
             return;
         }
-        // 别的进程拿不到 shell 集成报告的口令，见 `ReportRedactor`。
-        self.subscribers.push(Subscriber { connection, sink, redacted: true });
+        // 连接上的前端一律收抹过的输出，见 `ReportRedactor`：别的进程拿不到 shell 集成报告的
+        // 口令。桌面经 `Host::connect_pair` 连上来时也一样：它那份 VT 不认这些报告（标题、目录、
+        // shell 的名字都从 `Meta` 来），抹过的流喂出来的状态和宿主的一样。
+        self.subscribers.push(Subscriber { connection, sink, redacted: true, desktop });
     }
 
     fn replay(&self) -> Vec<u8> {
@@ -431,10 +468,14 @@ impl Runner {
         })
     }
 
-    /// 一块 PTY 输出：先原样转给前端，再喂宿主的 VT，然后处理它带来的变化。
+    /// 一块 PTY 输出：先原样转给前端，再喂宿主的 VT，然后处理它带来的变化。这块输出里响了铃的，
+    /// 紧跟着它发 `Bell`：界面那份 VT 降成只看状态（后台标签）时，响铃靠它。
     fn output(&mut self, data: &Arc<[u8]>) {
-        self.emit(HostEvent::Output(data.clone()));
+        self.emit(Event::Output(data.clone()));
         self.session.feed(data);
+        if self.session.take_bell() {
+            self.emit(Event::msg(HostMsg::Bell { id: self.id }));
+        }
         let record = self.record_history.load(Ordering::Relaxed);
         for entry in self.session.take_commands() {
             let command =
@@ -442,7 +483,7 @@ impl Runner {
             if record {
                 history::record(entry);
             }
-            self.emit(HostEvent::msg(HostMsg::CommandFinished { id: self.id, command }));
+            self.emit(Event::msg(HostMsg::CommandFinished { id: self.id, command }));
         }
         self.try_clear();
         // 进出目录、启动或退出程序时通常都有输出，顺带重读前台进程：离上次读满了间隔就读，
@@ -463,7 +504,7 @@ impl Runner {
         }
         self.clear_pending = false;
         if let Some(bytes) = self.session.clear_screen() {
-            self.emit(HostEvent::Output(bytes.into()));
+            self.emit(Event::Output(bytes.into()));
         }
     }
 
@@ -489,13 +530,14 @@ impl Runner {
     /// 对外公布的状态变了就发给前端。
     fn publish_meta(&mut self) {
         if let Some(meta) = self.session.take_meta() {
-            let event = HostEvent::msg(HostMsg::Meta { id: self.id, meta });
+            let event = Event::msg(HostMsg::Meta { id: self.id, meta });
             // 状态不攒：连上时直接给最新的。
             self.subscribers.retain_mut(|s| (s.sink)(event.clone()));
         }
     }
 
-    fn attach(&mut self, connection: u64, mut sink: Sink) -> Result<Attached> {
+    /// 旧的进程内通路连上来，见 `Inbox::Attach`。
+    fn attach(&mut self, connection: u64, mut sink: EventSink) -> Result<Backlogged> {
         let Some(backlog) = self.backlog.take() else {
             return Err(anyhow!(if self.backlog_lost {
                 "too much output before the session was attached"
@@ -508,22 +550,22 @@ impl Runner {
         let alive = backlog.into_iter().all(&mut sink);
         if alive {
             // 进程内的桌面原样收，报告由宿主这份 VT 认，界面那份不看。
-            self.subscribers.push(Subscriber { connection, sink, redacted: false });
+            self.subscribers.push(Subscriber { connection, sink, redacted: false, desktop: true });
         }
         self.backlog_bytes = 0;
         let (size, settings) = self.created.clone();
-        Ok(Attached { size, settings, meta: self.session.meta(), started: self.session.started() })
+        Ok(Backlogged { size, settings, meta: self.session.meta(), started: self.session.started() })
     }
 
     /// 把一件事发给连着的前端；还没有前端连上过时攒起来。输出要先经过 `redactor`：它跟着整条
     /// 输出流走，不管这时有没有 socket 上的前端。
-    fn emit(&mut self, event: HostEvent) {
+    fn emit(&mut self, event: Event) {
         let redacted = match &event {
-            HostEvent::Output(data) => self.redactor.redact(data).map(|data| HostEvent::Output(data.into())),
-            HostEvent::Msg(_) => None,
+            Event::Output(data) => self.redactor.redact(data).map(|data| Event::Output(data.into())),
+            Event::Msg(_) => None,
         };
         if let Some(backlog) = &mut self.backlog {
-            if let HostEvent::Output(data) = &event {
+            if let Event::Output(data) = &event {
                 self.backlog_bytes += data.len();
             }
             if self.backlog_bytes > BACKLOG_LIMIT {
@@ -536,7 +578,7 @@ impl Runner {
         }
         self.subscribers.retain_mut(|subscriber| match &redacted {
             // 整块都是报告的内容，抹完什么都不剩，不用发。
-            Some(HostEvent::Output(data)) if subscriber.redacted && data.is_empty() => true,
+            Some(Event::Output(data)) if subscriber.redacted && data.is_empty() => true,
             Some(redacted) if subscriber.redacted => (subscriber.sink)(redacted.clone()),
             _ => (subscriber.sink)(event.clone()),
         });
@@ -547,9 +589,12 @@ impl Runner {
 struct Subscriber {
     /// 连接的编号，`Inbox::Detach` 按它找。
     connection: u64,
-    sink: Sink,
-    /// 收抹掉了 shell 集成报告内容的输出：socket 上别的进程的前端。
+    sink: EventSink,
+    /// 收抹掉了 shell 集成报告内容的输出：连接上的前端（socket 上别的进程的、经 `Host::connect_pair`
+    /// 的桌面）都是；只有旧的进程内通路原样收。
     redacted: bool,
+    /// 是桌面的界面，见 `SessionInfo::claimed`。
+    desktop: bool,
 }
 
 /// 读线程交来、会话线程还没处理完的输出有多少字节：读线程每交一块先记上（超过

@@ -16,6 +16,8 @@ use crate::history;
 #[derive(Default)]
 pub(super) struct Effects {
     pub(super) title_changed: StdCell<bool>,
+    /// 程序响过铃（BEL），由 `HostSession::take_bell` 取走。
+    pub(super) bell: StdCell<bool>,
     /// 采用了一条 PATH 或各种名字的报告，对外公布的状态可能变了，由 `HostSession::take_meta` 取走。
     pub(super) reported: StdCell<bool>,
     /// 最近一次 OSC 9;4 进度报告是不是在进行中。

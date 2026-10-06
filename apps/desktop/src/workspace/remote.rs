@@ -1,6 +1,8 @@
 //! 别的进程经宿主请 app 办的事（`runode open`、`runode focus`）：在某个终端旁边开新终端，切到
 //! 某个终端。宿主在连接的线程里把 `UiRequest` 交过来，这里转到主线程，按会话找到它所在的窗口
 //! 和分屏再办。
+// 还在用宿主旧的进程内通路，改走 `Host::connect_pair` 时去掉。
+#![allow(deprecated)]
 
 use std::path::PathBuf;
 

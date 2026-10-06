@@ -1,6 +1,8 @@
 //! app 进程里的终端宿主：各个终端视图经 `client` 连到同一个宿主，宿主管着每个会话的 PTY 和
 //! 权威的那份 VT，见 `runode_host`。主题和要不要记命令历史跟着配置走，见 `configure`；别的
 //! 进程经 `listen` 开的 Unix socket 连上来。
+// 还在用宿主旧的进程内通路，改走 `Host::connect_pair` 时去掉。
+#![allow(deprecated)]
 
 use std::sync::OnceLock;
 
@@ -10,7 +12,7 @@ use runode_host::{BuildId, Client, ClientMsg, Host};
 /// 全进程共用的宿主，第一次用到时建好。
 fn host() -> &'static Host {
     static HOST: OnceLock<Host> = OnceLock::new();
-    HOST.get_or_init(Host::new)
+    HOST.get_or_init(|| Host::new(BuildId(env!("RUNODE_BUILD").into())))
 }
 
 /// 全进程共用的进程内连接。
@@ -30,7 +32,7 @@ pub fn listen() {
     let result = dirs.create_runtime_dir().map_err(anyhow::Error::from).and_then(|_| {
         let socket = dirs.host_socket_file().ok_or_else(|| anyhow::anyhow!("the socket path is too long"))?;
         let lock = dirs.host_lock_file().ok_or_else(|| anyhow::anyhow!("no place for the host lock"))?;
-        host().listen(&socket, &lock, BuildId(env!("RUNODE_BUILD").into()))?;
+        host().listen(&socket, &lock)?;
         tracing::info!("host listening on {}", socket.display());
         Ok(())
     });

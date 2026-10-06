@@ -1,6 +1,8 @@
 //! 终端视图的生命周期：在宿主里开会话、连上它、启动 shell、处理宿主发来的输出和状态，以及
 //! 光标闪烁和同步输出的计时器。前台进程的轮询和 agent 状态的判断在宿主里，结果随
 //! `HostMsg::Meta` 到达。
+// 还在用宿主旧的进程内通路，改走 `Host::connect_pair` 时去掉。
+#![allow(deprecated)]
 
 use std::{
     collections::HashMap,
