@@ -26,6 +26,8 @@ use std::{
 pub(crate) use give::{Asked, give};
 use runode_protocol::{HandoffRefusal, SessionId};
 
+use crate::Host;
+
 /// 交出会话时默认给新宿主多久收下会话、回 `HandoffReady`（从开始发会话算起，发送本身也在内），
 /// 见 `Host::set_handoff_deadline`。期限之和见 `GIVE_READY_WINDOW`。
 pub(crate) const DEFAULT_DEADLINE: Duration = Duration::from_secs(20);
@@ -95,6 +97,16 @@ impl fmt::Display for TakeOverError {
 }
 
 impl std::error::Error for TakeOverError {}
+
+impl Host {
+    /// 宿主跑在 app 里，app 要退出、会话要留下：`yielding` 时把会话交给这个 app 拉起的单独一个
+    /// 进程的宿主（`Host::take_over`），和升级时一样，只是不拦同一个构建的、不拦连着的界面、不拦
+    /// 自己不是单独跑的，交接时也不给界面发 `Goodbye`（交接没成时 app 接着用这些会话）。交接没成时
+    /// 调用方改回 false。没在监听（`Host::listen`）时交不了。
+    pub fn yield_on_quit(&self, yielding: bool) {
+        self.shared.peers().yielding = yielding;
+    }
+}
 
 /// 连在 `stream` 另一头的进程号；对面已经断开时读不到。macOS 上（`LOCAL_PEERPID`）是最近用过
 /// 对面那个 socket 的进程：连的一方读时，对方要已经 accept 过这条连接才准，之前读到的是最早建

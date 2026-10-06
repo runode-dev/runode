@@ -109,6 +109,10 @@ quit:
   end_title: End all sessions and quit Runode?
   end_detail: "Agents still running: %{count}. They will be stopped along with every terminal session, including background sessions that aren't shown in any window."
   end_confirm: End and Quit
+  keep: Keep in Background and Quit
+  keep_detail: "If you keep them in the background, sessions keep running after Runode quits and come back when it opens again. This also turns on “Keep sessions after quitting” in Settings."
+  yield_failed_title: Couldn't keep the sessions in the background
+  yield_failed_detail: "%{reason}\n\nQuitting now ends every session."
 host_lost:
   message: Lost the connection to this terminal's session; what you see is the last screen before it dropped.
   reopen: Reopen in This Directory
@@ -477,7 +481,7 @@ settings:
     command_highlighting: Colors commands, options, strings and paths as you type, unless the shell already does.
     clipboard_write: Lets programs in the terminal, such as vim, tmux or a shell over ssh, put text on the clipboard.
     clipboard_read: Lets programs in the terminal read the text you copied, passwords included. Ask shows which program wants it first.
-    terminal_host: Sessions run in a background process and come back when Runode opens again. Takes effect on the next launch.
+    terminal_host: Sessions keep running in a background process after Runode quits and come back when it opens again.
     remote_access: Lets a paired phone reach the terminals over the local network or Tailscale. Pair with runode remote pair.
     remote_access_port: TCP port, 1 to 65535.
     agent_notifications: Notifies you when an agent you are not looking at finishes or needs an answer. Only the packaged Runode.app can notify.

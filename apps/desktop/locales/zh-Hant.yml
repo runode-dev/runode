@@ -109,6 +109,10 @@ quit:
   end_title: 終止所有工作階段並結束 Runode？
   end_detail: 還有 %{count} 個 agent 在執行。所有終端機工作階段都會一併終止，包括沒在視窗裡顯示的背景工作階段。
   end_confirm: 終止並結束
+  keep: 保留在背景並結束
+  keep_detail: 選「保留在背景」的話，工作階段在結束後照常執行，下次打開接著用，設定裡的「結束後保留工作階段」也會一併打開。
+  yield_failed_title: 沒能把工作階段留在背景
+  yield_failed_detail: "%{reason}\n\n現在結束，所有工作階段都會一併終止。"
 host_lost:
   message: 和終端機工作階段的連線中斷了，現在看到的是中斷前的最後一個畫面。
   reopen: 在原目錄重新開啟
@@ -477,7 +481,7 @@ settings:
     command_highlighting: 輸入時給指令、選項、字串和路徑上色；shell 自己已經上了色時不管。
     clipboard_write: 終端機裡的程式（vim、tmux、經 ssh 連到遠端的 shell 等）能把文字放進剪貼簿。
     clipboard_read: 終端機裡的程式能讀到你複製過的文字，密碼也在內。選「詢問」時先說明是哪個程式要讀。
-    terminal_host: 工作階段放在背景程序裡，結束 Runode 後照常執行，下次打開接著用。下次啟動才生效。
+    terminal_host: 結束 Runode 後工作階段留在背景程序裡照常執行，下次打開接著用。
     remote_access: 讓配對過的手機經區域網路或 Tailscale 連上這台 Mac 的終端機。用 runode remote pair 配對。
     remote_access_port: TCP 連接埠，1 到 65535。
     agent_notifications: agent 在你沒在看的分割畫面裡完成或等你回答時發系統通知。只有打包好的 Runode.app 能發通知。

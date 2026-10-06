@@ -86,6 +86,8 @@ pub(crate) struct Peers {
     /// 正在把会话交给新宿主：那条连接的编号，见 `handoff::give`。这期间新来的连接收到
     /// `Goodbye { Handoff }`，也不开新会话。
     pub(crate) handoff: Option<u64>,
+    /// 跑在 app 里的宿主要在 app 退出时交出会话，见 `Host::yield_on_quit`。
+    pub(crate) yielding: bool,
     /// 最近一次有连接连上或者断开的时刻，空闲从这时起算。
     pub(crate) activity_at: Instant,
     /// 没有会话也没有连接时也不算空闲，见 `Host::set_stay_up`。
@@ -104,6 +106,7 @@ impl Default for Peers {
             standalone: false,
             stop: None,
             handoff: None,
+            yielding: false,
             activity_at: Instant::now(),
             stay_up: false,
         }
@@ -120,11 +123,12 @@ impl Peers {
         !self.desktops.is_empty()
     }
 
-    /// 给 `except` 以外的连接都发 `Goodbye`，写完后断开。写线程还没起好的连接起好时自己发，见
-    /// `serve`。
-    pub(crate) fn say_goodbye(&self, except: Option<u64>, reason: &GoodbyeReason) {
+    /// 给 `except` 以外的连接都发 `Goodbye`，写完后断开；`spare_desktops` 时桌面的界面也不发。
+    /// 写线程还没起好的连接起好时自己发，见 `serve`。
+    pub(crate) fn say_goodbye(&self, except: Option<u64>, spare_desktops: bool, reason: &GoodbyeReason) {
         for (&id, peer) in &self.connections {
             if Some(id) != except
+                && !(spare_desktops && self.desktops.contains(&id))
                 && let Some(out) = &peer.out
             {
                 out.control(&HostMsg::Goodbye { reason: reason.clone() });
@@ -449,7 +453,7 @@ impl Shared {
         }
         peers.stop.get_or_insert(Stopped::Shutdown);
         peers.accepting = false;
-        peers.say_goodbye(None, &GoodbyeReason::Shutdown);
+        peers.say_goodbye(None, false, &GoodbyeReason::Shutdown);
         drop(peers);
         self.peers_changed.notify_all();
         true

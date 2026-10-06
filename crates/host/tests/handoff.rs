@@ -647,6 +647,32 @@ fn a_connected_desktop_or_an_in_app_host_refuses() {
     }
 }
 
+/// app 退出时把会话留下（`Host::yield_on_quit`）：跑在 app 里、连着界面的宿主把会话交给同一个
+/// 构建的新宿主，数数的程序接着数完；命令行收到 `Goodbye { Handoff }`，界面不收，还连着。
+#[test]
+fn an_in_app_host_yields_its_sessions_on_quit() {
+    let dir = temp_dir("yield");
+    let in_app = Host::new(BuildId(OLD_BUILD.into()));
+    let socket = socket_in(&dir);
+    in_app.listen(&socket, &dir.join("host.lock")).unwrap();
+    let mut desktop = Peer::pair(&in_app);
+    let count = 200;
+    let counting = desktop.spawn(&counter(&dir, "count.sh", count, 1, "0.01", 0));
+    let cli = Peer::hello(&socket, false);
+    wait_counted(&mut desktop, counting, 20);
+
+    in_app.yield_on_quit(true);
+    let (_successor, result) = take_over(&dir, &[(SUCCESSOR_BUILD, OLD_BUILD)]);
+    assert_eq!(result, "ok 1");
+    assert_handoff_goodbye(&cli);
+    assert!(desktop.sessions().is_empty(), "the session went to the new host");
+
+    let (mut new, build) = hello_build(&socket);
+    assert_eq!(build.0, OLD_BUILD);
+    assert_eq!(new.sessions().into_iter().map(|s| s.id).collect::<Vec<_>>(), [counting]);
+    assert_counted(&mut new, counting, count);
+}
+
 /// 要接手的和旧宿主是同一个构建（另一个新 app 抢先让这个构建的新宿主接手了，后来的 app 探到的
 /// 已经过时）：回 `Busy`，什么都不动，连着的命令行也不受影响。
 #[test]

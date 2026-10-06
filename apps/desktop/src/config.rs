@@ -72,6 +72,17 @@ fn apply(cx: &mut App, config: Config) {
     cx.set_global(AppConfig(Arc::new(config)));
 }
 
+/// 把 runode 配置文件里 `key` 的值换成 `value` 并重载配置，文件里别的行原样留着。先重新读一遍
+/// 文件，别盖掉在编辑器里刚改的。
+pub fn set(key: &str, value: &str, cx: &mut App) -> anyhow::Result<()> {
+    let path = runode_config::config_path().ok_or_else(|| anyhow::anyhow!("no home directory"))?;
+    let mut file = runode_config::ConfigFile::read(&path)?;
+    file.set(key, &[value.to_owned()]);
+    file.write(&path)?;
+    reload(cx);
+    Ok(())
+}
+
 /// 系统深浅色变了就重载，让 `theme = light:A,dark:B` 换到对应的主题。每个窗口都会
 /// 收到外观变化，第一个窗口重载后外观已经对上，其余窗口直接跳过。
 pub fn follow_appearance(cx: &mut App) {

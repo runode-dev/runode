@@ -160,8 +160,9 @@ fn fixed_bindings() -> Vec<KeyBinding> {
     ]
 }
 
-/// 上次装上的 `keybind` 和界面语言，配置重载但两者都没变时不必重绑、重设菜单。
-struct Bound(Vec<Keybind>, String);
+/// 上次装上的 `keybind`、界面语言和菜单里有没有「退出并结束所有会话」（跟着配置项
+/// `terminal-host` 变），配置重载但三者都没变时不必重绑、重设菜单。
+struct Bound(Vec<Keybind>, String, bool);
 
 impl Global for Bound {}
 
@@ -174,7 +175,9 @@ pub fn install(cx: &mut App) {
 fn bind(cx: &mut App) {
     let keybinds = cx.global::<AppConfig>().0.keybinds.clone();
     let locale = crate::i18n::current();
-    if cx.try_global::<Bound>().is_some_and(|bound| bound.0 == keybinds && bound.1 == locale) {
+    let end_sessions = crate::window::end_sessions_in_menu();
+    if cx.try_global::<Bound>().is_some_and(|bound| bound.0 == keybinds && bound.1 == locale && bound.2 == end_sessions)
+    {
         return;
     }
     let mut bindings = Vec::new();
@@ -203,7 +206,7 @@ fn bind(cx: &mut App) {
     cx.bind_keys(bindings);
     // 菜单上显示的快捷键是设置菜单时从键位表里查的，换了绑定要重设一次。
     crate::menus::set_menus(cx);
-    cx.set_global(Bound(keybinds, locale));
+    cx.set_global(Bound(keybinds, locale, end_sessions));
 }
 
 #[cfg(test)]

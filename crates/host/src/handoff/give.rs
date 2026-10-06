@@ -206,16 +206,19 @@ impl Giving {
 /// 会话。都在同一把锁里，之后新开的会话（见 `Shared::spawn`）和新连上的连接（见 `serve`）都
 /// 看得到正在交接。
 fn begin(shared: &Shared, connection: u64, asked: &Asked) -> Result<Giving, HandoffRefusal> {
+    let mut peers = shared.peers();
+    // 跑在 app 里、app 要退出了（`Host::yield_on_quit`）：来接手的是这个 app 刚拉起的同构建
+    // 宿主，连着的界面就是这个 app 自己，下面三条都不拦。
+    let yielding = peers.yielding;
     // 要接手的和自己是同一个构建：另一个新 app 抢先让这个构建的新宿主接手了，这是它拉起的宿主，
     // 后来的 app 的探测已经过时。按正在交接回话，那边过一会儿重新探，会连上这里。
-    if asked.build == shared.build {
+    if asked.build == shared.build && !yielding {
         return Err(HandoffRefusal::Busy);
     }
-    let mut peers = shared.peers();
-    if peers.has_desktop() {
+    if peers.has_desktop() && !yielding {
         return Err(HandoffRefusal::DesktopConnected);
     }
-    if !peers.standalone {
+    if !peers.standalone && !yielding {
         return Err(HandoffRefusal::NotStandalone);
     }
     if peers.handoff.is_some() || peers.stop.is_some() {
@@ -238,7 +241,8 @@ fn begin(shared: &Shared, connection: u64, asked: &Asked) -> Result<Giving, Hand
     peers.handoff = Some(connection);
     // 返回时接受连接的线程已经不会再接，之后连上来的排在 backlog 里，留给新宿主。
     control.pause();
-    peers.say_goodbye(Some(connection), &GoodbyeReason::Handoff);
+    // app 退出前交出会话时，它自己的界面不用走：交接没成时它还得接着用这些会话。
+    peers.say_goodbye(Some(connection), yielding, &GoodbyeReason::Handoff);
     let handles = shared.handles();
     Ok(Giving { control, listener, lock, socket, handles })
 }

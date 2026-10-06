@@ -1,12 +1,15 @@
 //! 退出应用、关掉窗口时宿主里的会话怎么办，以及要结束正在干活的 agent 之前先问一句。
 //!
-//! 会话结不结束看宿主怎么跑（`host_client::Mode`）和用户做了什么（`QuitAction`），决策在
-//! `quit_plan`：宿主跑在 app 里时，退出（包括关掉最后一个窗口、关掉所有窗口）必然结束所有会话；
-//! 宿主单独一个进程时，退出只是不再看它们，会话留在宿主里等下次启动接回来，要连会话一起结束用
-//! 「退出并结束所有会话」；配置项 `terminal-host` 已经关了、这次只是接回上次留下的会话时，退出
-//! 让宿主连会话一起退出。只有会结束会话、又有 agent 在跑时才弹框确认，免得一按 cmd+q 把正在干活
-//! 或者攒着上下文的会话一起结束掉。让宿主连会话一起退出之前先冻结存档（`persist::freeze`）：
-//! 视图会先收到会话结束、一个个关掉分屏，冻结了才不会把存档清空，下次启动照原样在原目录新开。
+//! 会话结不结束看宿主怎么跑（`host_client::Mode`）、配置项 `terminal-host`（退出后保留会话，设置里
+//! 改了马上算数，见 `Keeping`）和用户做了什么（`QuitAction`），决策在 `quit_plan`：开关开着时，
+//! 退出（包括关掉最后一个窗口、关掉所有窗口）把会话留下等下次启动接回来，宿主单独一个进程时只是
+//! 不再看它们，跑在 app 里时先把会话交给单独一个进程的宿主（`host_client::yield_sessions`）；要连
+//! 会话一起结束用「退出并结束所有会话」。开关关着时退出结束所有会话：跑在 app 里的随 app 结束，
+//! 单独跑的（上次留下的）让它连会话一起退出。只有会结束会话、又有 agent 在跑时才弹框确认，免得
+//! 一按 cmd+q 把正在干活或者攒着上下文的会话一起结束掉；留得下会话时框里默认的按钮是「保留在后台
+//! 并退出」，选了它顺带打开开关。让宿主连会话一起退出、把会话交出去之前先冻结存档
+//! （`persist::freeze`）：视图会先收到会话结束、一个个关掉分屏，冻结了才不会把存档清空，下次启动
+//! 照原样接回会话或者在原目录新开。
 //!
 //! 关掉的窗口不是最后一个时，app 不退出，结束这个窗口里的会话（`WindowView::end_sessions`），不问。
 //!
@@ -44,8 +47,11 @@ pub(super) enum QuitAction {
 /// 退出时宿主里的会话怎么办。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum Ending {
-    /// 留在宿主里，下次启动接回来。
+    /// 留在单独跑的宿主里，下次启动接回来。
     Keep,
+    /// 宿主跑在 app 里：先把会话交给单独一个进程的宿主（`host_client::yield_sessions`），再退出，
+    /// 下次启动接回来。
+    Yield,
     /// 宿主跑在 app 里，随 app 退出一起结束。
     WithApp,
     /// 先让单独跑的宿主连会话一起退出（`ClientMsg::Shutdown`），再退出。
@@ -69,41 +75,62 @@ pub(super) struct Plan {
     pub(super) ending: Ending,
     /// 先弹框确认，确认了才退出；`None` 时直接退出。
     pub(super) prompt: Option<Prompt>,
+    /// 框里有「保留在后台并退出」（默认的按钮）：开关关着、会话本来要结束，但留得下。
+    pub(super) offer_keep: bool,
+}
+
+/// 退出时会话要不要留下、留不留得下。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) struct Keeping {
+    /// 配置项 `terminal-host` 开着，见 `host_client::quit_keeps_sessions`。
+    pub(super) wanted: bool,
+    /// 留得下，见 `host_client::can_keep_sessions`。
+    pub(super) possible: bool,
+}
+
+impl Keeping {
+    fn now() -> Self {
+        Self { wanted: host_client::quit_keeps_sessions(), possible: host_client::can_keep_sessions() }
+    }
 }
 
 /// `action` 让 app 退出时会话怎么办。
-pub(super) fn ending(mode: Mode, action: QuitAction) -> Ending {
-    match (mode, action) {
-        (Mode::InProcess, _) => Ending::WithApp,
-        (Mode::Standalone { end_on_quit: true }, _) | (Mode::Standalone { .. }, QuitAction::QuitAndEndSessions) => {
-            Ending::ShutdownHost
-        }
-        (Mode::Standalone { end_on_quit: false }, _) => Ending::Keep,
+pub(super) fn ending(mode: Mode, keeping: Keeping, action: QuitAction) -> Ending {
+    let keep = keeping.wanted && keeping.possible && action != QuitAction::QuitAndEndSessions;
+    match mode {
+        Mode::InProcess if keep => Ending::Yield,
+        Mode::InProcess => Ending::WithApp,
+        Mode::Standalone if keep => Ending::Keep,
+        Mode::Standalone => Ending::ShutdownHost,
     }
 }
 
 /// `action` 让 app 退出时怎么做；`agents` 是退出会结束掉的会话里有几个 agent 在跑（宿主单独跑时
-/// 连没在窗口里显示的会话也算）。会话留下时不问，会结束会话又有 agent 时先确认。
-pub(super) fn quit_plan(mode: Mode, action: QuitAction, agents: usize) -> Plan {
-    let ending = ending(mode, action);
+/// 连没在窗口里显示的会话也算）。会话留下时不问，会结束会话又有 agent 时先确认；不是「退出并结束
+/// 所有会话」、会话又留得下时，框里给一个留下的选项。
+pub(super) fn quit_plan(mode: Mode, keeping: Keeping, action: QuitAction, agents: usize) -> Plan {
+    let ending = ending(mode, keeping, action);
     let prompt = match ending {
         _ if agents == 0 => None,
-        Ending::Keep => None,
+        Ending::Keep | Ending::Yield => None,
         Ending::WithApp => Some(Prompt::Quit),
         Ending::ShutdownHost if action == QuitAction::QuitAndEndSessions => Some(Prompt::EndAll),
         Ending::ShutdownHost => Some(Prompt::QuitEndingAll),
     };
-    Plan { ending, prompt }
+    let offer_keep = matches!(prompt, Some(Prompt::Quit | Prompt::QuitEndingAll))
+        && action != QuitAction::QuitAndEndSessions
+        && keeping.possible;
+    Plan { ending, prompt, offer_keep }
 }
 
 /// 菜单里有没有「退出并结束所有会话」：只在退出会把会话留下时才有，否则和退出一样。
-pub(super) fn offers_end_sessions(mode: Mode) -> bool {
-    ending(mode, QuitAction::Quit) == Ending::Keep
+pub(super) fn offers_end_sessions(mode: Mode, keeping: Keeping) -> bool {
+    matches!(ending(mode, keeping, QuitAction::Quit), Ending::Keep | Ending::Yield)
 }
 
 /// 菜单里要不要放「退出并结束所有会话」，见 `offers_end_sessions`。
 pub fn end_sessions_in_menu() -> bool {
-    offers_end_sessions(host_client::mode())
+    offers_end_sessions(host_client::mode(), Keeping::now())
 }
 
 /// 退出确认框开着（或者正问宿主有几个 agent）；这时再按退出或者关窗口不再弹第二个。
@@ -192,16 +219,23 @@ fn front_window(cx: &App) -> Option<AnyWindowHandle> {
 }
 
 /// 按 `quit_plan` 做 `action`：该问就在 `window` 上问，确认了（或者不用问）再做 `then`，要让宿主
-/// 连会话一起退出时先让它退出。
+/// 连会话一起退出时先让它退出，要把会话交出去时先交出去。
 fn run(action: QuitAction, window: Option<AnyWindowHandle>, cx: &mut App, then: impl FnOnce(&mut App) + 'static) {
     if prompting(cx) {
         return;
     }
     let mode = host_client::mode();
-    let ending = ending(mode, action);
-    if ending == Ending::Keep {
-        then(cx);
-        return;
+    let keeping = Keeping::now();
+    match ending(mode, keeping, action) {
+        Ending::Keep => {
+            then(cx);
+            return;
+        }
+        Ending::Yield => {
+            yield_then(window, cx, then);
+            return;
+        }
+        Ending::WithApp | Ending::ShutdownHost => {}
     }
     // 没被窗口里的终端占着的会话（丢掉视图后留在宿主里的、后台会话）也会被结束，里面的 agent
     // 也要算，得问宿主；问它最多要等上 `host_client::list_sessions` 的超时，放到后台线程，期间
@@ -221,19 +255,68 @@ fn run(action: QuitAction, window: Option<AnyWindowHandle>, cx: &mut App, then: 
             let held = held_sessions(cx);
             let hidden = hidden_agents(&sessions, &held);
             let count = shown.len() + hidden.len();
-            let plan = quit_plan(mode, action, count);
-            let text = plan.prompt.map(|prompt| prompt_text(prompt, &agent_names(&shown, &hidden), count));
-            if ending == Ending::ShutdownHost {
-                confirm(window, text, cx, move |cx| {
+            let plan = quit_plan(mode, keeping, action, count);
+            let text =
+                plan.prompt.map(|prompt| prompt_text(prompt, &agent_names(&shown, &hidden), count, plan.offer_keep));
+            confirm(window, text, cx, move |answer, cx| match (answer, plan.ending) {
+                (Answer::Keep, ending) => {
+                    keep_from_now_on(cx);
+                    if ending == Ending::WithApp {
+                        yield_then(window, cx, then);
+                    } else {
+                        then(cx);
+                    }
+                }
+                (Answer::End, Ending::ShutdownHost) => {
                     // 宿主连会话一起退出后，视图会先收到会话结束、关掉分屏，存档要在那之前定下来，
                     // 下次启动才能照原样在原目录新开。
                     persist::freeze(cx);
                     shutdown_host();
                     then(cx);
-                });
-            } else {
-                confirm(window, text, cx, then);
-            }
+                }
+                (Answer::End, _) => then(cx),
+            });
+        });
+    })
+    .detach();
+}
+
+/// 在退出确认框里选了「保留在后台并退出」：打开配置项 `terminal-host`，以后退出都留下会话。写不了
+/// 配置文件时只记一笔，这次照样留下。
+fn keep_from_now_on(cx: &mut App) {
+    if let Err(err) = crate::config::set("terminal-host", "true", cx) {
+        tracing::warn!("failed to turn terminal-host on: {err:#}");
+    }
+}
+
+/// 宿主跑在 app 里，退出前把会话交给单独一个进程的宿主（`host_client::yield_sessions`），成了再做
+/// `then`。交接要拉起新进程、等它接手，放到后台线程，期间不再接退出。没成时会话照旧在 app 里，在
+/// `window` 上问用户：结束会话退出，还是不退出了。
+fn yield_then(window: Option<AnyWindowHandle>, cx: &mut App, then: impl FnOnce(&mut App) + 'static) {
+    // 交出去以后视图会收到会话没了、一个个关掉分屏，存档要在那之前定下来，下次启动才能接回会话。
+    persist::freeze(cx);
+    cx.set_global(Prompting(true));
+    let yielded = cx.background_executor().spawn(async { host_client::yield_sessions() });
+    cx.spawn(async move |cx| {
+        let yielded = yielded.await;
+        cx.update(|cx| {
+            cx.set_global(Prompting(false));
+            let reason = match yielded {
+                Ok(()) => {
+                    then(cx);
+                    return;
+                }
+                Err(reason) => reason,
+            };
+            tracing::warn!("failed to keep the sessions in the background: {reason}");
+            persist::thaw(cx);
+            let text = PromptText {
+                title: rust_i18n::t!("quit.yield_failed_title").into_owned(),
+                detail: rust_i18n::t!("quit.yield_failed_detail", reason = reason).into_owned(),
+                keep: None,
+                confirm: rust_i18n::t!("quit.end_confirm").into_owned(),
+            };
+            confirm(window, Some(text), cx, |_, cx| then(cx));
         });
     })
     .detach();
@@ -248,70 +331,96 @@ fn shutdown_host() {
     }
 }
 
-/// 确认框的标题、说明和确认按钮。
+/// 确认框的标题、说明和按钮。
 struct PromptText {
     title: String,
     detail: String,
+    /// 「保留在后台并退出」，有时是默认的（第一个）按钮。
+    keep: Option<String>,
+    /// 结束会话、退出的按钮。
     confirm: String,
 }
 
-/// `names` 是 `Prompt::Quit` 要列出的 agent，`count` 是别的几种给出的个数。
-fn prompt_text(prompt: Prompt, names: &[String], count: usize) -> PromptText {
+/// 确认框里选了什么，取消不算。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Answer {
+    /// 「保留在后台并退出」。
+    Keep,
+    /// 结束会话、退出；没问就退出时也是它。
+    End,
+}
+
+/// `names` 是 `Prompt::Quit` 要列出的 agent，`count` 是别的几种给出的个数。`offer_keep` 时多一个
+/// 「保留在后台并退出」，说明里补一句选了它会怎样，结束的按钮写明会结束会话。
+fn prompt_text(prompt: Prompt, names: &[String], count: usize, offer_keep: bool) -> PromptText {
     let t = |key: &str| rust_i18n::t!(key).into_owned();
-    match prompt {
+    let mut text = match prompt {
         Prompt::Quit => PromptText {
             title: t("quit.title"),
             detail: rust_i18n::t!("quit.detail", agents = names.join(rust_i18n::t!("quit.separator").as_ref()))
                 .into_owned(),
+            keep: None,
             confirm: t("quit.confirm"),
         },
         Prompt::QuitEndingAll => PromptText {
             title: t("quit.title"),
             detail: rust_i18n::t!("quit.end_detail", count = count).into_owned(),
+            keep: None,
             confirm: t("quit.confirm"),
         },
         Prompt::EndAll => PromptText {
             title: t("quit.end_title"),
             detail: rust_i18n::t!("quit.end_detail", count = count).into_owned(),
+            keep: None,
             confirm: t("quit.end_confirm"),
         },
+    };
+    if offer_keep {
+        text.detail = format!("{}\n\n{}", text.detail, t("quit.keep_detail"));
+        text.keep = Some(t("quit.keep"));
+        text.confirm = t("quit.end_confirm");
     }
+    text
 }
 
-/// 没有要问的（`text` 为空）或者没有窗口能弹框时直接做 `then`；否则在 `window` 上弹框，确认了
-/// 再做。确认框已经开着时什么都不做。
+/// 没有要问的（`text` 为空）或者没有窗口能弹框时直接做 `then`（`Answer::End`）；否则在 `window`
+/// 上弹框，选了保留或者结束再做，取消了什么都不做。确认框已经开着时什么都不做。
 fn confirm(
     window: Option<AnyWindowHandle>,
     text: Option<PromptText>,
     cx: &mut App,
-    then: impl FnOnce(&mut App) + 'static,
+    then: impl FnOnce(Answer, &mut App) + 'static,
 ) {
     if prompting(cx) {
         return;
     }
     let (Some(window), Some(text)) = (window, text) else {
-        then(cx);
+        then(Answer::End, cx);
         return;
     };
-    let answer = window.update(cx, |_, window, cx| {
-        window.prompt(
-            PromptLevel::Warning,
-            &text.title,
-            Some(&text.detail),
-            &[&*text.confirm, &*rust_i18n::t!("quit.cancel")],
-            cx,
-        )
-    });
+    let cancel = rust_i18n::t!("quit.cancel");
+    // 有「保留在后台并退出」时它在第一个，是默认的按钮。
+    let answers: Vec<(&str, Option<Answer>)> = text
+        .keep
+        .as_deref()
+        .map(|keep| (keep, Some(Answer::Keep)))
+        .into_iter()
+        .chain([(&*text.confirm, Some(Answer::End)), (&*cancel, None)])
+        .collect();
+    let labels: Vec<&str> = answers.iter().map(|(label, _)| *label).collect();
+    let answer = window
+        .update(cx, |_, window, cx| window.prompt(PromptLevel::Warning, &text.title, Some(&text.detail), &labels, cx));
     let Ok(answer) = answer else {
         return;
     };
+    let choices: Vec<Option<Answer>> = answers.iter().map(|(_, choice)| *choice).collect();
     cx.set_global(Prompting(true));
     cx.spawn(async move |cx| {
-        let confirmed = answer.await.ok() == Some(0);
+        let chosen = answer.await.ok().and_then(|index| choices.get(index).copied().flatten());
         cx.update(|cx| {
             cx.set_global(Prompting(false));
-            if confirmed {
-                then(cx);
+            if let Some(chosen) = chosen {
+                then(chosen, cx);
             }
         });
     })
@@ -404,68 +513,105 @@ mod tests {
     use super::*;
 
     const IN_PROCESS: Mode = Mode::InProcess;
-    const KEEPING: Mode = Mode::Standalone { end_on_quit: false };
-    const LEFTOVER: Mode = Mode::Standalone { end_on_quit: true };
+    const STANDALONE: Mode = Mode::Standalone;
+
+    /// 开关开着，留得下。
+    const KEEP: Keeping = Keeping { wanted: true, possible: true };
+    /// 开关关着，留得下（单独跑的宿主，或者开着 socket 的 app 里的宿主）。
+    const END: Keeping = Keeping { wanted: false, possible: true };
+    /// 开关开着，app 里的宿主却没开 socket（另一个宿主拿着锁），交不出去。
+    const STUCK: Keeping = Keeping { wanted: true, possible: false };
+    /// 开关关着，也留不下。
+    const END_STUCK: Keeping = Keeping { wanted: false, possible: false };
 
     const QUITTING: [QuitAction; 3] = [QuitAction::Quit, QuitAction::CloseLastWindow, QuitAction::CloseAllWindows];
 
-    fn plan(ending: Ending, prompt: Option<Prompt>) -> Plan {
-        Plan { ending, prompt }
+    fn plan(ending: Ending, prompt: Option<Prompt>, offer_keep: bool) -> Plan {
+        Plan { ending, prompt, offer_keep }
     }
 
-    /// 开关开着：退出、关最后一个窗口、关所有窗口都把会话留在宿主里，不问。
+    /// 开关开着、宿主单独跑：退出、关最后一个窗口、关所有窗口都把会话留在宿主里，不问。
     #[test]
     fn a_standalone_host_keeps_sessions_on_quit() {
         for action in QUITTING {
-            assert_eq!(quit_plan(KEEPING, action, 0), plan(Ending::Keep, None), "{action:?}");
-            assert_eq!(quit_plan(KEEPING, action, 3), plan(Ending::Keep, None), "{action:?}");
+            assert_eq!(quit_plan(STANDALONE, KEEP, action, 0), plan(Ending::Keep, None, false), "{action:?}");
+            assert_eq!(quit_plan(STANDALONE, KEEP, action, 3), plan(Ending::Keep, None, false), "{action:?}");
         }
     }
 
-    /// 开关开着时「退出并结束所有会话」让宿主连会话一起退出，有 agent 才问。
+    /// 开关开着、宿主跑在 app 里（运行中才打开的）：退出前把会话交出去，不问。
     #[test]
-    fn ending_sessions_shuts_the_host_down() {
-        assert_eq!(quit_plan(KEEPING, QuitAction::QuitAndEndSessions, 0), plan(Ending::ShutdownHost, None));
-        assert_eq!(
-            quit_plan(KEEPING, QuitAction::QuitAndEndSessions, 2),
-            plan(Ending::ShutdownHost, Some(Prompt::EndAll))
-        );
+    fn an_in_process_host_yields_its_sessions_when_keeping() {
+        for action in QUITTING {
+            assert_eq!(quit_plan(IN_PROCESS, KEEP, action, 0), plan(Ending::Yield, None, false), "{action:?}");
+            assert_eq!(quit_plan(IN_PROCESS, KEEP, action, 2), plan(Ending::Yield, None, false), "{action:?}");
+        }
     }
 
-    /// 接回上次留下的会话（开关已经关了）：退出时让宿主连会话一起退出，有 agent 才问。
+    /// 「退出并结束所有会话」不管开关都结束会话，有 agent 才问，不给留下的选项。
     #[test]
-    fn a_leftover_host_is_shut_down_on_quit() {
+    fn ending_sessions_ends_them_whatever_the_switch() {
+        let action = QuitAction::QuitAndEndSessions;
+        assert_eq!(quit_plan(STANDALONE, KEEP, action, 0), plan(Ending::ShutdownHost, None, false));
+        assert_eq!(quit_plan(STANDALONE, KEEP, action, 2), plan(Ending::ShutdownHost, Some(Prompt::EndAll), false));
+        assert_eq!(quit_plan(IN_PROCESS, KEEP, action, 0), plan(Ending::WithApp, None, false));
+        assert_eq!(quit_plan(IN_PROCESS, KEEP, action, 2), plan(Ending::WithApp, Some(Prompt::Quit), false));
+    }
+
+    /// 开关关着、宿主单独跑（接回上次留下的会话，或者运行中关了开关）：退出时让宿主连会话一起退出，
+    /// 有 agent 才问，框里可以选留下。
+    #[test]
+    fn a_standalone_host_is_shut_down_when_not_keeping() {
         for action in QUITTING {
-            assert_eq!(quit_plan(LEFTOVER, action, 0), plan(Ending::ShutdownHost, None), "{action:?}");
+            assert_eq!(quit_plan(STANDALONE, END, action, 0), plan(Ending::ShutdownHost, None, false), "{action:?}");
             assert_eq!(
-                quit_plan(LEFTOVER, action, 1),
-                plan(Ending::ShutdownHost, Some(Prompt::QuitEndingAll)),
+                quit_plan(STANDALONE, END, action, 1),
+                plan(Ending::ShutdownHost, Some(Prompt::QuitEndingAll), true),
                 "{action:?}"
             );
         }
-        // 菜单里没有这一项，万一触发了也和退出一样结束会话。
-        assert_eq!(quit_plan(LEFTOVER, QuitAction::QuitAndEndSessions, 0), plan(Ending::ShutdownHost, None));
-        assert_eq!(
-            quit_plan(LEFTOVER, QuitAction::QuitAndEndSessions, 1),
-            plan(Ending::ShutdownHost, Some(Prompt::EndAll))
-        );
     }
 
-    /// 开关关着：会话随 app 退出结束，有 agent 时先问，和以前一样。
+    /// 开关关着、宿主跑在 app 里：会话随 app 退出结束，有 agent 时先问；开着 socket 交得出去时框里
+    /// 可以选留下，交不出去时不给。
     #[test]
-    fn an_in_process_host_ends_sessions_with_the_app() {
-        for action in QUITTING.into_iter().chain([QuitAction::QuitAndEndSessions]) {
-            assert_eq!(quit_plan(IN_PROCESS, action, 0), plan(Ending::WithApp, None), "{action:?}");
-            assert_eq!(quit_plan(IN_PROCESS, action, 2), plan(Ending::WithApp, Some(Prompt::Quit)), "{action:?}");
+    fn an_in_process_host_ends_sessions_with_the_app_when_not_keeping() {
+        for action in QUITTING {
+            assert_eq!(quit_plan(IN_PROCESS, END, action, 0), plan(Ending::WithApp, None, false), "{action:?}");
+            assert_eq!(quit_plan(IN_PROCESS, END, action, 2), plan(Ending::WithApp, Some(Prompt::Quit), true));
+            assert_eq!(quit_plan(IN_PROCESS, END_STUCK, action, 2), plan(Ending::WithApp, Some(Prompt::Quit), false));
         }
     }
 
-    /// 只有退出会把会话留下时菜单里才有「退出并结束所有会话」。
+    /// 开关开着，app 里的宿主却交不出去：只好随 app 结束，有 agent 时照样问，不给留下的选项。
+    #[test]
+    fn an_in_process_host_that_cannot_yield_ends_sessions() {
+        for action in QUITTING {
+            assert_eq!(quit_plan(IN_PROCESS, STUCK, action, 0), plan(Ending::WithApp, None, false), "{action:?}");
+            assert_eq!(quit_plan(IN_PROCESS, STUCK, action, 1), plan(Ending::WithApp, Some(Prompt::Quit), false));
+        }
+    }
+
+    /// 只有退出会把会话留下时菜单里才有「退出并结束所有会话」，跟着开关变。
     #[test]
     fn the_end_sessions_item_is_only_offered_when_quitting_keeps_sessions() {
-        assert!(offers_end_sessions(KEEPING));
-        assert!(!offers_end_sessions(LEFTOVER));
-        assert!(!offers_end_sessions(IN_PROCESS));
+        assert!(offers_end_sessions(STANDALONE, KEEP));
+        assert!(offers_end_sessions(IN_PROCESS, KEEP));
+        assert!(!offers_end_sessions(STANDALONE, END));
+        assert!(!offers_end_sessions(IN_PROCESS, END));
+        assert!(!offers_end_sessions(IN_PROCESS, STUCK));
+    }
+
+    /// 给留下的选项时它是第一个按钮，结束的按钮写明会结束会话，说明里补一句。
+    #[test]
+    fn the_keep_button_comes_first_when_offered() {
+        let names = ["Claude".to_owned()];
+        let offered = prompt_text(Prompt::Quit, &names, 1, true);
+        let plain = prompt_text(Prompt::Quit, &names, 1, false);
+        assert!(offered.keep.is_some());
+        assert!(plain.keep.is_none());
+        assert_ne!(offered.confirm, plain.confirm);
+        assert!(offered.detail.starts_with(&plain.detail) && offered.detail.len() > plain.detail.len());
     }
 
     #[test]

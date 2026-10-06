@@ -109,6 +109,10 @@ quit:
   end_title: 结束所有会话并退出 Runode？
   end_detail: 还有 %{count} 个 agent 在运行。所有终端会话都会一起结束，包括没在窗口里显示的后台会话。
   end_confirm: 结束并退出
+  keep: 保留在后台并退出
+  keep_detail: 选「保留在后台」的话，会话在退出后照常运行，下次打开接着用，设置里的「退出后保留会话」也会一并打开。
+  yield_failed_title: 没能把会话留在后台
+  yield_failed_detail: "%{reason}\n\n现在退出，所有会话都会一起结束。"
 host_lost:
   message: 和终端会话的连接断开了，现在看到的是断开前的最后一屏。
   reopen: 在原目录重新打开
@@ -477,7 +481,7 @@ settings:
     command_highlighting: 输入时给命令、选项、字符串和路径上色；shell 自己已经上了色时不管。
     clipboard_write: 终端里的程序（vim、tmux、经 ssh 连到远端的 shell 等）能把文字放进剪贴板。
     clipboard_read: 终端里的程序能读到你复制过的文字，密码也在内。选“询问”时先说明是哪个程序要读。
-    terminal_host: 会话放在后台进程里，退出 Runode 后照常运行，下次打开接着用。下次启动才生效。
+    terminal_host: 退出 Runode 后会话留在后台进程里照常运行，下次打开接着用。
     remote_access: 让配对过的手机经局域网或 Tailscale 连上这台 Mac 的终端。用 runode remote pair 配对。
     remote_access_port: TCP 端口，1 到 65535。
     agent_notifications: agent 在你没在看的分屏里干完了或者等你回答时发系统通知。只有打包好的 Runode.app 能发通知。

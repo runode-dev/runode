@@ -80,6 +80,11 @@ pub(super) fn freeze(cx: &mut App) {
     cx.global_mut::<Saver>().frozen = true;
 }
 
+/// 冻结之后又不退出了（退出前没能把会话交出去，用户取消了）：存档重新跟着布局变。
+pub(super) fn thaw(cx: &mut App) {
+    cx.global_mut::<Saver>().frozen = false;
+}
+
 /// 上次存下的各个窗口，以及恢复时打开它们用的窗口选项（位置、大小、所在屏幕）。没有存档或
 /// 读不了时为空；文件坏了时挪到一边，从默认布局开始。终端记的会话按宿主里还活着的会话定下
 /// 接不接（`format::plan_restore`）；宿主里已经退出又没人连着的、存档记着却一直没启动的会话
