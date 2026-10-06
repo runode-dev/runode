@@ -689,7 +689,15 @@ impl TerminalView {
             view.metrics = None;
             view.glyphs.iter_mut().for_each(HashMap::clear);
             view.input_changed = true;
+            // 闪不闪、空闲期限都可能改了，空闲停下的闪烁按新配置重新算。
+            view.reset_cursor_blink(cx);
             cx.notify();
+        });
+        // 切回这个窗口也算一次活动：焦点一直在这个终端上时不会触发 `on_focus`。
+        let activation_watch = cx.observe_window_activation(window, |view, window, cx| {
+            if window.is_window_active() {
+                view.reset_cursor_blink(cx);
+            }
         });
         let appearance_watch = cx.observe_window_appearance(window, |_, _, cx| crate::config::follow_appearance(cx));
         let reconnect_watch =
@@ -766,6 +774,7 @@ impl TerminalView {
             _cursor_blink: None,
             _autoscroll: None,
             _config_watch: config_watch,
+            _activation_watch: activation_watch,
             _appearance_watch: appearance_watch,
             _reconnect_watch: reconnect_watch,
             pane_focus,
@@ -892,9 +901,9 @@ impl TerminalView {
         self.colors
     }
 
-    /// 有了活动（键盘输入、终端输出、重新获得焦点）：让光标立即亮起，从头开始计闪烁周期和空闲
-    /// 期限，空闲停了的闪烁也恢复。每批输出都会调用，所以这里不碰计时器，只改时刻；计时器由
-    /// 绘制时的 `sync_cursor_blink` 按要不要闪来起停。
+    /// 有了活动（键盘输入、终端输出、重新获得焦点、窗口重新激活、改了配置）：让光标立即亮起，
+    /// 从头开始计闪烁周期和空闲期限，空闲停了的闪烁也恢复。每批输出都会调用，所以这里不碰
+    /// 计时器，只改时刻；计时器由绘制时的 `sync_cursor_blink` 按要不要闪来起停。
     pub(super) fn reset_cursor_blink(&mut self, cx: &mut Context<Self>) {
         if !self.cursor_blink_visible || self.cursor_blink_stopped {
             // 正灭着要重画一次才亮得起来；停了的要重画一次，绘制时才会重新起计时器。

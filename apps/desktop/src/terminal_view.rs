@@ -225,6 +225,8 @@ pub struct TerminalView {
     /// 拖选到网格外时运行的自动滚动计时器。
     _autoscroll: Option<Task<()>>,
     _config_watch: Subscription,
+    /// 窗口重新激活时恢复空闲停下的光标闪烁，见 `reset_cursor_blink`。
+    _activation_watch: Subscription,
     _appearance_watch: Subscription,
     /// 别的终端在和宿主断开后点了「在原目录重开」、重新连上了宿主，见 `host_reconnected`。
     _reconnect_watch: Subscription,
