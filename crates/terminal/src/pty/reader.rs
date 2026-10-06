@@ -1,14 +1,13 @@
 //! PTY 的读线程：把输出交给 `PtySink`，读到 EOF 或出错时报告 `PtyEvent::Exited`。
 //!
-//! 读之前先 `poll`，同时等着一根唤醒用的管道和（接手来的会话里）shell 的退出通知，这样交接时
-//! 能让它停下而不再从 PTY 里多读一个字节，见 `Reader::stop`。PTY 的描述符始终是阻塞的：
-//! `O_NONBLOCK` 记在打开的文件上，和写线程、和交接对面的进程共用，不能改。
+//! 读之前先 `poll`，同时等着 `Notifier`：交接时用它叫醒读线程、让它停下而不再从 PTY 里多读一个
+//! 字节，接手来的会话里还用它知道 shell 退出了。叫停后读线程把 `PtySink` 交回来，可以接着读，
+//! 见 `Reader::resume`。PTY 的描述符是非阻塞的，见 `Pty::open`。
 
 use std::{
-    fs::File,
-    io::{self, PipeWriter, Read, Write as _},
-    os::fd::{AsRawFd, OwnedFd, RawFd},
-    sync::{Arc, Mutex, PoisonError},
+    io,
+    os::fd::{AsRawFd, OwnedFd},
+    sync::{Arc, Mutex, MutexGuard, PoisonError},
     thread::{self, JoinHandle},
 };
 
@@ -16,7 +15,7 @@ use anyhow::{Context as _, Result};
 
 use super::{
     PtyEvent, PtySink,
-    exit_watch::{EXIT_POLL_INTERVAL, ExitWatch},
+    notify::{EXIT_POLL_INTERVAL, Notifier},
     set_current_thread_interactive,
 };
 
@@ -24,37 +23,79 @@ use super::{
 /// 退出前写的输出读完，然后报告退出。
 const DRAIN_READS: usize = 64;
 
+/// 读线程的状态，和「看一眼状态、读一次」一起在锁里，见 `Reader::stop`。
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum State {
+    Running,
+    /// 叫停了，读线程还没看到。
+    StopRequested,
+    /// 读线程看到了叫停，交回 `PtySink` 后结束了（或者正在结束）。
+    Stopped,
+}
+
 pub(super) struct Reader {
-    /// 为 true 时读线程不再读。读线程在「看一眼这个标记、读一次」期间一直拿着锁，所以
-    /// `stop` 拿到锁、置上标记之后，读线程不会再读。
-    stopped: Arc<Mutex<bool>>,
-    /// 往里写一个字节，叫醒等在 `poll` 里的读线程。丢掉它不算叫停，见 `read_loop`。
-    wake: PipeWriter,
-    thread: Option<JoinHandle<()>>,
+    master: Arc<OwnedFd>,
+    notifier: Arc<Notifier>,
+    state: Arc<Mutex<State>>,
+    /// 读线程；叫停后结束时交回 `PtySink`，读到 EOF 或者 `PtySink` 不要了时交回 `None`。
+    thread: Option<JoinHandle<Option<PtySink>>>,
 }
 
 impl Reader {
-    /// 起读线程，从 `master` 读，输出交给 `sink`。`exit` 给出时，shell 退出也算会话结束，
-    /// 不必等到 PTY 读到 EOF。
-    pub(super) fn start(master: OwnedFd, exit: Option<Arc<ExitWatch>>, sink: PtySink) -> Result<Self> {
-        let (wake_rx, wake) = io::pipe().context("failed to create the pty reader's wake pipe")?;
-        let stopped = Arc::new(Mutex::new(false));
+    /// 起读线程，从 `master` 读，输出交给 `sink`。`notifier` 看着 shell 时，shell 退出也算会话
+    /// 结束，不必等到 PTY 读到 EOF。
+    pub(super) fn start(master: Arc<OwnedFd>, notifier: Arc<Notifier>, sink: PtySink) -> Result<Self> {
+        let mut reader = Self { master, notifier, state: Arc::new(Mutex::new(State::Running)), thread: None };
+        reader.spawn(sink)?;
+        Ok(reader)
+    }
+
+    fn spawn(&mut self, sink: PtySink) -> Result<()> {
+        let (master, notifier, state) = (self.master.clone(), self.notifier.clone(), self.state.clone());
         let thread = thread::Builder::new()
             .name("pty-reader".into())
-            .spawn({
-                let stopped = stopped.clone();
-                move || read_loop(File::from(master), &OwnedFd::from(wake_rx), &stopped, exit.as_deref(), sink)
-            })
+            .spawn(move || read_loop(&master, &notifier, &state, sink))
             .context("failed to start pty reader thread")?;
-        Ok(Self { stopped, wake, thread: Some(thread) })
+        self.thread = Some(thread);
+        Ok(())
+    }
+
+    fn lock(&self) -> MutexGuard<'_, State> {
+        self.state.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
     /// 让读线程停下。返回之后它不会再从 PTY 读；已经读出来、正在交给 `PtySink` 的那块照样交出去，
     /// 交完线程就结束，不报告 `PtyEvent::Exited`。不等线程结束，见 `finished`、`join`。
     pub(super) fn stop(&mut self) {
-        *self.stopped.lock().unwrap_or_else(PoisonError::into_inner) = true;
-        if let Err(err) = self.wake.write_all(&[0]) {
-            tracing::debug!("failed to wake the pty reader: {err}");
+        let mut state = self.lock();
+        if *state == State::Running {
+            *state = State::StopRequested;
+        }
+        drop(state);
+        // 线程已经结束时没有要叫醒的。
+        if !self.finished() {
+            self.notifier.wake();
+        }
+    }
+
+    /// 接着读：叫停后线程还没看到时撤回叫停，已经停下时用交回的 `PtySink` 重新起读线程。读到
+    /// EOF 已经结束的不再起。
+    pub(super) fn resume(&mut self) -> Result<()> {
+        let mut state = self.lock();
+        match *state {
+            State::Running => Ok(()),
+            State::StopRequested => {
+                *state = State::Running;
+                Ok(())
+            }
+            State::Stopped => {
+                drop(state);
+                if let Some(sink) = self.join() {
+                    *self.lock() = State::Running;
+                    self.spawn(sink)?;
+                }
+                Ok(())
+            }
         }
     }
 
@@ -63,31 +104,44 @@ impl Reader {
         self.thread.as_ref().is_none_or(JoinHandle::is_finished)
     }
 
-    /// 等读线程结束。它正卡在 `PtySink` 里时会一直等下去，见 `Pty::release`。
-    pub(super) fn join(&mut self) {
-        if let Some(thread) = self.thread.take()
-            && thread.join().is_err()
-        {
+    /// 等读线程结束，返回它交回的 `PtySink`。它正卡在 `PtySink` 里时会一直等下去，见 `Pty::release`。
+    pub(super) fn join(&mut self) -> Option<PtySink> {
+        let thread = self.thread.take()?;
+        thread.join().unwrap_or_else(|_| {
             tracing::warn!("the pty reader thread panicked");
+            None
+        })
+    }
+}
+
+fn poll_entry(fd: libc::c_int) -> libc::pollfd {
+    libc::pollfd { fd, events: libc::POLLIN, revents: 0 }
+}
+
+/// 读一次。`Ok(None)` 是 EOF，`Err` 是读不下去了；被打断或者暂时没有数据时为 `Ok(Some(0))`。
+fn read_once(master: &OwnedFd, buf: &mut [u8]) -> io::Result<Option<usize>> {
+    // SAFETY: `master` 开着，`buf` 是可写的缓冲，长度如实传入。
+    let n = unsafe { libc::read(master.as_raw_fd(), buf.as_mut_ptr().cast(), buf.len()) };
+    match usize::try_from(n) {
+        Ok(0) => Ok(None),
+        Ok(n) => Ok(Some(n)),
+        Err(_) => {
+            let err = io::Error::last_os_error();
+            if matches!(err.kind(), io::ErrorKind::Interrupted | io::ErrorKind::WouldBlock) {
+                Ok(Some(0))
+            } else {
+                Err(err)
+            }
         }
     }
 }
 
-fn poll_entry(fd: RawFd) -> libc::pollfd {
-    libc::pollfd { fd, events: libc::POLLIN, revents: 0 }
-}
-
-fn read_loop(mut master: File, wake: &OwnedFd, stopped: &Mutex<bool>, exit: Option<&ExitWatch>, mut sink: PtySink) {
+fn read_loop(master: &OwnedFd, notifier: &Notifier, state: &Mutex<State>, mut sink: PtySink) -> Option<PtySink> {
     set_current_thread_interactive();
     let mut buf = vec![0u8; 64 * 1024];
-    // `poll` 忽略描述符为负的项。
-    let mut fds = [
-        poll_entry(master.as_raw_fd()),
-        poll_entry(wake.as_raw_fd()),
-        poll_entry(exit.and_then(ExitWatch::fd).map_or(-1, |fd| fd.as_raw_fd())),
-    ];
-    // 没有可等的退出通知时定时问一次。
-    let exit_poll = exit.is_some_and(|exit| exit.fd().is_none());
+    let mut fds = [poll_entry(master.as_raw_fd()), poll_entry(notifier.fd().as_raw_fd())];
+    // 拿不到退出通知时定时问一次。
+    let exit_poll = notifier.polls_exit();
     // shell 退出后还能再读几次；为 `None` 时 shell 还在，或者不看 shell 退不退出。
     let mut draining: Option<usize> = None;
     loop {
@@ -109,21 +163,17 @@ fn read_loop(mut master: File, wake: &OwnedFd, stopped: &Mutex<bool>, exit: Opti
             tracing::warn!("pty poll failed: {err}");
             break;
         }
-        let guard = stopped.lock().unwrap_or_else(PoisonError::into_inner);
-        if *guard {
-            return;
-        }
         if fds[1].revents != 0 {
-            // 没叫停却有动静：`Reader` 被丢掉、管道的写端关了。这时还照常读到 EOF，只是不再等这根管道。
-            fds[1].fd = -1;
+            // 收走唤醒和退出通知；叫停看下面的状态。
+            notifier.collect();
         }
-        if draining.is_none()
-            && let Some(exit) = exit
-            && (fds[2].revents != 0 || exit_poll)
-            && exit.has_exited()
-        {
+        let mut guard = state.lock().unwrap_or_else(PoisonError::into_inner);
+        if *guard == State::StopRequested {
+            *guard = State::Stopped;
+            return Some(sink);
+        }
+        if draining.is_none() && (fds[1].revents != 0 || exit_poll) && notifier.has_exited() {
             draining = Some(0);
-            fds[2].fd = -1;
         }
         if fds[0].revents == 0 {
             if draining.is_some() {
@@ -138,16 +188,16 @@ fn read_loop(mut master: File, wake: &OwnedFd, stopped: &Mutex<bool>, exit: Opti
             }
             *reads += 1;
         }
-        // `poll` 说可读，又只有这一个线程在读，所以这里不会阻塞，拿着锁读不耽误 `stop`。
-        match master.read(&mut buf) {
-            Ok(0) => break,
-            Ok(n) => {
+        // 描述符是非阻塞的，拿着锁读不耽误 `stop`。
+        match read_once(master, &mut buf) {
+            Ok(None) => break,
+            Ok(Some(0)) => {}
+            Ok(Some(n)) => {
                 drop(guard);
                 if !sink(PtyEvent::Output(buf[..n].into())) {
-                    return;
+                    return None;
                 }
             }
-            Err(err) if matches!(err.kind(), io::ErrorKind::Interrupted | io::ErrorKind::WouldBlock) => {}
             Err(err) => {
                 // shell 退出、从设备都关了以后读 master 得到 EIO，和 EOF 一样。
                 tracing::debug!("pty read ended: {err}");
@@ -156,11 +206,16 @@ fn read_loop(mut master: File, wake: &OwnedFd, stopped: &Mutex<bool>, exit: Opti
         }
     }
     sink(PtyEvent::Exited);
+    None
 }
 
 #[cfg(test)]
 mod tests {
-    use std::{sync::mpsc, time::Duration};
+    use std::{
+        io::{Read as _, Write as _},
+        sync::mpsc,
+        time::Duration,
+    };
 
     use super::*;
 
@@ -171,35 +226,65 @@ mod tests {
         }
     }
 
+    fn pipe() -> (io::PipeReader, io::PipeWriter) {
+        let (rx, tx) = io::pipe().unwrap();
+        super::super::set_nonblocking(std::os::fd::AsFd::as_fd(&rx)).unwrap();
+        (rx, tx)
+    }
+
+    fn start(rx: OwnedFd, notifier: Option<libc::pid_t>) -> (Reader, mpsc::Receiver<PtyEvent>) {
+        let (tx, events) = mpsc::channel();
+        let notifier = Arc::new(Notifier::new(notifier).unwrap());
+        let reader = Reader::start(Arc::new(rx), notifier, Box::new(move |event| tx.send(event).is_ok())).unwrap();
+        (reader, events)
+    }
+
     /// 叫停之后读线程不再从描述符里读：后来写进去的字节还原样留着，可以交给别人读。
     #[test]
     fn stop_leaves_unread_bytes_in_place() {
-        let (pipe_rx, mut pipe_tx) = io::pipe().unwrap();
-        let (tx, rx) = mpsc::channel();
-        let mut reader =
-            Reader::start(pipe_rx.try_clone().unwrap().into(), None, Box::new(move |event| tx.send(event).is_ok()))
-                .unwrap();
+        let (pipe_rx, mut pipe_tx) = pipe();
+        let (mut reader, rx) = start(pipe_rx.try_clone().unwrap().into(), None);
         pipe_tx.write_all(b"before").unwrap();
         assert_eq!(output(&rx).as_deref(), Some(&b"before"[..]));
         reader.stop();
-        reader.join();
+        assert!(reader.join().is_some(), "a stopped reader hands its sink back");
         assert!(reader.finished());
         pipe_tx.write_all(b"after").unwrap();
         drop(pipe_tx);
         let mut rest = Vec::new();
         let mut pipe_rx = pipe_rx;
+        // 非阻塞的读端：写端关了，读到 EOF 为止。
         pipe_rx.read_to_end(&mut rest).unwrap();
         assert_eq!(rest, b"after");
         // 叫停的读线程不报告退出。
         assert!(rx.recv_timeout(Duration::from_millis(100)).is_err());
     }
 
+    /// 叫停后接着读：同一个 `PtySink` 收到后来的输出。线程停下前后撤回都行。
+    #[test]
+    fn a_stopped_reader_resumes_with_the_same_sink() {
+        let (pipe_rx, mut pipe_tx) = pipe();
+        let (mut reader, rx) = start(pipe_rx.into(), None);
+        reader.stop();
+        reader.resume().unwrap();
+        pipe_tx.write_all(b"one").unwrap();
+        assert_eq!(output(&rx).as_deref(), Some(&b"one"[..]));
+        reader.stop();
+        while !reader.finished() {
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        pipe_tx.write_all(b"two").unwrap();
+        reader.resume().unwrap();
+        assert_eq!(output(&rx).as_deref(), Some(&b"two"[..]));
+        drop(pipe_tx);
+        assert!(matches!(rx.recv_timeout(Duration::from_secs(5)), Ok(PtyEvent::Exited)));
+    }
+
     /// 丢掉 `Reader` 不叫停读线程，它照常读到 EOF 并报告退出。
     #[test]
     fn dropping_the_reader_keeps_reading_until_eof() {
-        let (pipe_rx, mut pipe_tx) = io::pipe().unwrap();
-        let (tx, rx) = mpsc::channel();
-        let reader = Reader::start(pipe_rx.into(), None, Box::new(move |event| tx.send(event).is_ok())).unwrap();
+        let (pipe_rx, mut pipe_tx) = pipe();
+        let (reader, rx) = start(pipe_rx.into(), None);
         drop(reader);
         pipe_tx.write_all(b"still").unwrap();
         assert_eq!(output(&rx).as_deref(), Some(&b"still"[..]));
@@ -211,10 +296,8 @@ mod tests {
     #[test]
     fn the_watched_process_exiting_ends_reading() {
         let mut child = std::process::Command::new("/bin/sleep").arg("30").spawn().unwrap();
-        let exit = Arc::new(ExitWatch::new(libc::pid_t::try_from(child.id()).unwrap()));
-        let (pipe_rx, mut pipe_tx) = io::pipe().unwrap();
-        let (tx, rx) = mpsc::channel();
-        let _reader = Reader::start(pipe_rx.into(), Some(exit), Box::new(move |event| tx.send(event).is_ok())).unwrap();
+        let (pipe_rx, mut pipe_tx) = pipe();
+        let (_reader, rx) = start(pipe_rx.into(), Some(libc::pid_t::try_from(child.id()).unwrap()));
         pipe_tx.write_all(b"last words").unwrap();
         assert_eq!(output(&rx).as_deref(), Some(&b"last words"[..]));
         child.kill().unwrap();

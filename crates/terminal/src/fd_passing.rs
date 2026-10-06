@@ -18,6 +18,13 @@ pub const MAX_FDS: usize = 32;
 /// 一条消息最多这么多字节，收的一方据此拒绝不像样的长度，不按它分配内存。
 pub const MAX_MESSAGE_BYTES: usize = 256 << 20;
 
+/// 收的时候控制消息的缓冲放得下这么多描述符：一次 `sendmsg` 能带的最多个数（macOS 上实测
+/// 254，再多 `sendmsg` 报 `EINVAL`；Linux 是 `SCM_MAX_FD`，253）。缓冲比 `MAX_FDS` 大得多，
+/// 是因为 macOS 截断时不会替我们关掉放不下的那些：它们照样装进本进程，只是不出现在控制消息里，
+/// 收的一方无从关起，就漏了。缓冲开到一次能发的上限，就不会截断；对面不按 `MAX_FDS` 来时，
+/// 收下的照样都接住，再按头里的个数报错、关掉。
+const RECV_FDS: usize = 254;
+
 const HEADER_LEN: usize = 8;
 const FD_SIZE: usize = size_of::<RawFd>();
 
@@ -47,8 +54,8 @@ pub fn send_with_fds(stream: &UnixStream, data: &[u8], fds: &[BorrowedFd<'_>]) -
 }
 
 /// 收一条消息：那段字节和随它来的描述符，描述符都设了 `FD_CLOEXEC`。对面关了连接时返回
-/// `UnexpectedEof`；头不像样、描述符被截断（`MSG_CTRUNC`）或者个数对不上时返回 `InvalidData`，
-/// 已经收到的描述符都关掉。被信号打断时重试。
+/// `UnexpectedEof`；头不像样（超过 `MAX_FDS` 个描述符也算）、描述符被截断（`MSG_CTRUNC`，见
+/// `RECV_FDS`）或者个数对不上时返回 `InvalidData`，已经收到的描述符都关掉。被信号打断时重试。
 pub fn recv_with_fds(stream: &UnixStream) -> io::Result<(Vec<u8>, Vec<OwnedFd>)> {
     let mut fds = Vec::new();
     let mut header = [0u8; HEADER_LEN];
@@ -161,7 +168,7 @@ fn recv_exact(stream: &UnixStream, buf: &mut [u8], fds: &mut Vec<OwnedFd>) -> io
 
 /// 收一次，返回收到的字节数（0 是对面关了），随之来的描述符放进 `fds`。
 fn recv_some(stream: &UnixStream, buf: &mut [u8], fds: &mut Vec<OwnedFd>) -> io::Result<usize> {
-    let (mut control, control_len) = control_buffer(MAX_FDS);
+    let (mut control, control_len) = control_buffer(RECV_FDS);
     let mut iov = libc::iovec { iov_base: buf.as_mut_ptr().cast(), iov_len: buf.len() };
     // SAFETY: msghdr 是纯数据的 C 结构，全零是合法的初值。
     let mut msg: libc::msghdr = unsafe { std::mem::zeroed() };
@@ -236,17 +243,22 @@ mod tests {
 
     use super::*;
 
-    /// 描述符多得控制消息的缓冲放不下时，收的一方报错，不把截断后的当成完整的消息。
+    /// 对面不按 `MAX_FDS` 来、一次塞满能发的上限时，收的一方报错，收下的描述符一个不漏地关掉：
+    /// 管道读端的副本全关了，写端才会 `EPIPE`。
     #[test]
-    fn truncated_descriptors_are_an_error() {
+    fn too_many_descriptors_from_the_peer_are_all_closed() {
         let (a, b) = UnixStream::pair().unwrap();
-        let (pipe_rx, _pipe_tx) = io::pipe().unwrap();
-        let many: Vec<RawFd> = (0..MAX_FDS + 8).map(|_| pipe_rx.as_fd().as_raw_fd()).collect();
+        let (pipe_rx, mut pipe_tx) = io::pipe().unwrap();
+        let many: Vec<RawFd> = (0..RECV_FDS).map(|_| pipe_rx.as_fd().as_raw_fd()).collect();
         let mut header = [0u8; HEADER_LEN];
         header[4..].copy_from_slice(&u32::try_from(many.len()).unwrap().to_le_bytes());
         send_some(&a, [&header, &[]], 0, &many).unwrap();
+        drop(pipe_rx);
         let err = recv_with_fds(&b).unwrap_err();
         assert_eq!(err.kind(), io::ErrorKind::InvalidData, "{err}");
+        drop((a, b));
+        use std::io::Write as _;
+        assert_eq!(pipe_tx.write(b"x").unwrap_err().kind(), io::ErrorKind::BrokenPipe);
     }
 
     #[test]
