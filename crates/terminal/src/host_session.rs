@@ -511,6 +511,13 @@ impl HostSession {
         self.prompt_cwd.clone().or_else(|| self.live_cwd())
     }
 
+    /// 前台程序：进程组组长的进程号和进程名，现读；还没启动、读不到时为 `None`。进程号和名字一起
+    /// 比，才认得出前台换了一个程序（哪怕同名）。
+    pub fn foreground_program(&self) -> Option<(u32, Option<String>)> {
+        let (leader, _) = self.pty.foreground()?;
+        Some((u32::try_from(leader).ok()?, crate::pty::process_name(leader)))
+    }
+
     /// 前台是不是 shell 自己，现读。
     pub fn foreground_is_shell(&self) -> bool {
         self.pty.foreground_is_shell()

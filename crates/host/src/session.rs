@@ -57,6 +57,8 @@ use crate::{SpawnOptions, server::UiPort};
 
 mod clipboard;
 
+pub(crate) use clipboard::CLIPBOARD_READ_PATIENCE;
+
 /// PTY 读线程最多积压这么多字节的输出，再多就等会话线程处理：64 块读满的缓冲（每块 64 KiB）。
 /// 按字节而不按块数算：程序不停输出时一次只读到 1 KiB 左右，按块数限的话积压不了多少，会话
 /// 线程稍一耽搁读线程就得停下。
@@ -209,6 +211,8 @@ pub(crate) struct Setup {
     pub(crate) ui: UiPort,
     /// 一开始的读写剪贴板的规矩，之后改了经 `Inbox::Clipboard` 送来。
     pub(crate) clipboard: ClipboardAccess,
+    /// 读剪贴板最多等界面多久，见 `Host::set_clipboard_read_patience`。
+    pub(crate) read_patience: Duration,
 }
 
 /// 别的终端里的程序对会话做了什么，见 `Inbox::Driven`。
@@ -278,7 +282,7 @@ impl Handle {
 /// 开会话：在调用的线程里打开伪终端（`start` 时连 shell 一起启动），错误当场返回；再起会话线程，
 /// 等它把 `HostSession` 建好。
 pub(crate) fn spawn(setup: Setup, options: SpawnOptions) -> Result<Handle> {
-    let Setup { id, settings, env, extra_env, record_history, ui, clipboard } = setup;
+    let Setup { id, settings, env, extra_env, record_history, ui, clipboard, read_patience } = setup;
     let (inbox, rx) = mpsc::channel();
     let credits = Arc::new(Credits::default());
     let sink = pty_sink(&inbox, &credits);
@@ -310,6 +314,7 @@ pub(crate) fn spawn(setup: Setup, options: SpawnOptions) -> Result<Handle> {
             runner.extra_env = extra_env;
             runner.ui = ui;
             runner.set_clipboard(clipboard);
+            runner.read_patience = read_patience;
             runner.run(&rx, &killed_flag);
         })
         .context("failed to start the session thread")?;
@@ -333,7 +338,7 @@ fn pty_sink(inbox: &mpsc::Sender<Inbox>, credits: &Arc<Credits>) -> pty::PtySink
 /// 停着、从没开过闸的 `Pty` 直接丢掉其实也不结束 shell（见 `Pty::adopt_paused`），明着交回是把
 /// 「不接手了」说清楚、出错时记一笔，不靠丢掉时对停着的 `Pty` 的特殊处理。
 pub(crate) fn adopt(setup: Setup, adopted: Adopted) -> Result<Adopting> {
-    let Setup { id, settings: _, env: _, extra_env, record_history, ui, clipboard } = setup;
+    let Setup { id, settings: _, env: _, extra_env, record_history, ui, clipboard, read_patience } = setup;
     let Adopted { handoff, export, snapshot, replay, redactor, shell } = adopted;
     let (inbox, rx) = mpsc::channel();
     let credits = Arc::new(Credits::default());
@@ -362,6 +367,7 @@ pub(crate) fn adopt(setup: Setup, adopted: Adopted) -> Result<Adopting> {
         runner.extra_env = extra_env;
         runner.ui = ui;
         runner.set_clipboard(clipboard);
+        runner.read_patience = read_patience;
         runner.run(&rx, &killed_flag);
     });
     if let Err(err) = spawned {
@@ -463,6 +469,8 @@ struct Runner {
     ui: UiPort,
     /// 读写剪贴板的规矩，见 `set_clipboard`。
     clipboard: ClipboardAccess,
+    /// 读剪贴板最多等界面多久，见 `Setup::read_patience`。
+    read_patience: Duration,
     /// 在等界面回的那个读剪贴板的请求，见 `clipboard`。
     clipboard_read: Option<clipboard::PendingRead>,
 }
@@ -497,6 +505,7 @@ impl Runner {
             foreground_due: None,
             ui: UiPort::default(),
             clipboard: ClipboardAccess::default(),
+            read_patience: CLIPBOARD_READ_PATIENCE,
             clipboard_read: None,
         };
         // shell 已经在起始目录里跑起来了，不等第一次输出，前端一连上就有名字。

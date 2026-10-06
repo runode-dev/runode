@@ -84,6 +84,8 @@ struct Shared {
     peers_changed: Condvar,
     /// 交出会话时给新宿主多久收下会话、回 `HandoffReady`，见 `Host::set_handoff_deadline`。
     handoff_deadline: Mutex<Duration>,
+    /// 读剪贴板最多等界面多久，见 `Host::set_clipboard_read_patience`。
+    clipboard_patience: Mutex<Duration>,
 }
 
 /// 会话、主题和剪贴板的规矩放在同一把锁下：新会话加进来和换主题、改规矩不会互相错过，见
@@ -179,7 +181,9 @@ impl Shared {
         env.push((runode_protocol::ENV_SESSION.into(), id.to_string().into()));
         let ui = server::UiPort::new(self.me.clone());
         let clipboard = self.registry().clipboard;
-        session::Setup { id, settings, env, extra_env, record_history: self.record_history.clone(), ui, clipboard }
+        let read_patience = *self.clipboard_patience.lock().unwrap_or_else(PoisonError::into_inner);
+        let record_history = self.record_history.clone();
+        session::Setup { id, settings, env, extra_env, record_history, ui, clipboard, read_patience }
     }
 
     /// 改剪贴板的规矩，告诉每个会话；和现在的一样时什么都不做。
@@ -243,6 +247,7 @@ impl Host {
             peers: Mutex::default(),
             peers_changed: Condvar::new(),
             handoff_deadline: Mutex::new(handoff::DEFAULT_DEADLINE),
+            clipboard_patience: Mutex::new(session::CLIPBOARD_READ_PATIENCE),
         };
         Self { shared: Arc::new_cyclic(shared) }
     }
@@ -251,6 +256,12 @@ impl Host {
     /// 到期就杀掉它、回滚。改了它，`GIVE_READY_WINDOW` 就不准了；测试用来缩短。
     pub fn set_handoff_deadline(&self, deadline: Duration) {
         *self.shared.handoff_deadline.lock().unwrap_or_else(PoisonError::into_inner) = deadline;
+    }
+
+    /// 之后开的会话里的程序读剪贴板时最多等界面多久（多半在等用户点询问框），过了就回程序一个空的
+    /// 剪贴板，默认 30 秒；已经开着的会话不受影响。测试用来缩短。
+    pub fn set_clipboard_read_patience(&self, patience: Duration) {
+        *self.shared.clipboard_patience.lock().unwrap_or_else(PoisonError::into_inner) = patience;
     }
 
     /// 之后启动的每个 shell 都设上这个环境变量，同名的换掉；已经启动的不受影响。每个 shell

@@ -16,9 +16,9 @@ use runode_terminal::host_session::{ClipboardQuery, ClipboardRequest};
 
 use super::Runner;
 
-/// 读剪贴板最多等桌面这么久（多半是在等用户点询问框）。过了就回程序一个空的剪贴板，用户之后再点
-/// 允许也不再读：程序多半早就不等了。
-const READ_PATIENCE: Duration = Duration::from_secs(120);
+/// 读剪贴板默认最多等桌面这么久（多半是在等用户点询问框），见 `Host::set_clipboard_read_patience`。
+/// 过了就回程序一个空的剪贴板，用户之后再点允许也不再读：程序多半早就不等了。
+pub(crate) const CLIPBOARD_READ_PATIENCE: Duration = Duration::from_secs(30);
 
 /// 已经交给桌面、还在等它回话的读剪贴板请求。
 pub(super) struct PendingRead {
@@ -26,6 +26,8 @@ pub(super) struct PendingRead {
     ui: u64,
     query: ClipboardQuery,
     deadline: Instant,
+    /// 请求时的前台程序（进程号和名字），见 `HostSession::foreground_program`。
+    program: Option<(u32, Option<String>)>,
 }
 
 impl Runner {
@@ -69,11 +71,13 @@ impl Runner {
             self.session.answer_clipboard(query, None);
             return;
         }
-        let program = self.session.meta().foreground;
-        let request = ClientMsg::ReadClipboard { id: self.id, ask: policy == ClipboardRead::Ask, program };
+        let program = self.session.foreground_program();
+        let name = program.as_ref().and_then(|(_, name)| name.clone());
+        let request = ClientMsg::ReadClipboard { id: self.id, ask: policy == ClipboardRead::Ask, program: name };
         match self.ui.ask(self.id, self.ui_connection(), request) {
             Some(ui) => {
-                self.clipboard_read = Some(PendingRead { ui, query, deadline: Instant::now() + READ_PATIENCE });
+                let deadline = Instant::now() + self.read_patience;
+                self.clipboard_read = Some(PendingRead { ui, query, deadline, program });
             }
             None => {
                 tracing::info!(
@@ -105,6 +109,15 @@ impl Runner {
         }
         if let Some(read) = self.clipboard_read.take_if(|read| read.ui == ui) {
             let text = match reply {
+                // 等回话期间前台换了程序（比如要读的编辑器退出了、回到了 shell）：用户同意的是交给
+                // 原来那个程序，不交给现在的。
+                HostMsg::ClipboardText { text: Some(_), .. } if self.session.foreground_program() != read.program => {
+                    tracing::info!(
+                        "session {} answered a clipboard read with nothing: the program in front changed",
+                        self.id
+                    );
+                    None
+                }
                 HostMsg::ClipboardText { text, .. } => text.map(|text| text.0),
                 HostMsg::Error { message, .. } => {
                     tracing::info!("session {} answered a clipboard read with nothing: {message}", self.id);

@@ -37,10 +37,11 @@ fn requests_until(peer: &Peer, channel: u32, needle: &[u8]) -> Vec<ClientMsg> {
     requests
 }
 
-/// 跑 `body` 的会话（先等一行输入再往下走），桌面带着屏幕连上它，返回会话和通道。
+/// 跑 `body` 的会话（先等一行输入再往下走），之后的输入原样显示出来，桌面带着屏幕连上它，返回会话和通道。
 fn reader_session(desktop: &mut Peer, name: &str, body: &str) -> (SessionId, u32) {
     let dir = temp_dir(name);
-    let id = desktop.spawn(&script(&dir, name, &format!("read go; stty raw -echo; {body}; exec cat -v")));
+    // `cat -v` 不用 exec：前台程序（进程组组长）一直是这个 shell，回话时核对得上。
+    let id = desktop.spawn(&script(&dir, name, &format!("read go; stty raw -echo; {body}; cat -v")));
     let (channel, _) = desktop.attach(id, AttachMode::VtReplay);
     desktop.input(channel, b"go\r");
     (id, channel)
@@ -202,5 +203,37 @@ fn answers_about_another_session_are_ignored() {
     desktop.input(channel, b"x");
     let output = desktop.wait_for_output(channel, b"^[]52;c;^G");
     assert!(!contains(&output, b"ZXZpbA=="), "{}", String::from_utf8_lossy(&output));
+    desktop.send(&ClientMsg::Kill { id });
+}
+
+/// 桌面一直不回话：等满 `Host::set_clipboard_read_patience` 给的时间，回程序一个空的剪贴板。
+#[test]
+fn reads_without_an_answer_time_out() {
+    let host = host();
+    host.set_clipboard_read_patience(std::time::Duration::from_millis(200));
+    let mut desktop = Peer::pair(&host);
+    let (id, channel) = reader_session(&mut desktop, "clip-timeout", r"printf '\033]52;c;?\007'");
+    let (_, request) = ui_request(&desktop);
+    assert!(matches!(request, ClientMsg::ReadClipboard { .. }));
+    desktop.wait_for_output(channel, b"^[]52;c;^G");
+    desktop.send(&ClientMsg::Kill { id });
+}
+
+/// 用户点允许时前台已经换了程序（要读的那个退出了）：回空的，不把剪贴板交给现在的前台程序。
+#[test]
+fn reads_answered_after_the_program_left_get_nothing() {
+    let host = host();
+    let mut desktop = Peer::pair(&host);
+    set_access(&mut desktop, ClipboardWrite::Allow, ClipboardRead::Allow);
+    // 开了作业控制，子 shell 自己一个进程组、占着前台，读一个字节后退出，前台回到脚本的 shell。
+    let body = r#"set -m; sh -c "printf '\033]52;c;?\007'; head -c 1 >/dev/null"; printf back"#;
+    let (id, channel) = reader_session(&mut desktop, "clip-left", body);
+    let (ui, _) = ui_request(&desktop);
+    desktop.input(channel, b"x");
+    desktop.wait_for_output(channel, b"back");
+    let reply = HostMsg::ClipboardText { id, text: Some("secret".into()) };
+    desktop.send(&ClientMsg::UiReply { ui, reply: Box::new(reply) });
+    let output = desktop.wait_for_output(channel, b"^[]52;c;^G");
+    assert!(!contains(&output, b"c2VjcmV0"), "{}", String::from_utf8_lossy(&output));
     desktop.send(&ClientMsg::Kill { id });
 }
