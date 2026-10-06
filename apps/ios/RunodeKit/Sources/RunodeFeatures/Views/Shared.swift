@@ -437,7 +437,13 @@
                         Button {
                             Task { await model.press(key) }
                         } label: {
-                            Text(key.label)
+                            Group {
+                                if let symbol = key.symbol {
+                                    Image(systemName: symbol)
+                                } else {
+                                    Text(key.label)
+                                }
+                            }
                                 .font(.callout.monospaced().weight(.semibold))
                                 .lineLimit(1)
                                 .padding(.horizontal, 10)

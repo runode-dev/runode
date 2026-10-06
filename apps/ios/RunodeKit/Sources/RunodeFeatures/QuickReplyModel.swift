@@ -4,10 +4,12 @@ import RunodeConnection
 import RunodeProtocol
 
 /// 快速回复栏上的一个键：显示的字、发给宿主的键名（`send_keys` 的写法）、给 VoiceOver 读的名字。
+/// 功能键显示 Mac 键盘上的符号（SF Symbols 的名字），这时不显示字。
 public struct QuickKey: Hashable, Sendable, Identifiable {
     public let label: String
     public let key: String
     public let accessibilityLabel: String
+    public var symbol: String?
 
     public var id: String { key }
 
@@ -18,10 +20,10 @@ public struct QuickKey: Hashable, Sendable, Identifiable {
         QuickKey(label: "3", key: "3", accessibilityLabel: "3"),
         QuickKey(label: "y", key: "y", accessibilityLabel: "y"),
         QuickKey(label: "n", key: "n", accessibilityLabel: "n"),
-        QuickKey(label: "⏎", key: "enter", accessibilityLabel: "回车"),
-        QuickKey(label: "Esc", key: "esc", accessibilityLabel: "Esc"),
-        QuickKey(label: "↑", key: "up", accessibilityLabel: "上"),
-        QuickKey(label: "↓", key: "down", accessibilityLabel: "下"),
+        QuickKey(label: "⏎", key: "enter", accessibilityLabel: "回车", symbol: "return"),
+        QuickKey(label: "Esc", key: "esc", accessibilityLabel: "Esc", symbol: "escape"),
+        QuickKey(label: "↑", key: "up", accessibilityLabel: "上", symbol: "arrowtriangle.up.fill"),
+        QuickKey(label: "↓", key: "down", accessibilityLabel: "下", symbol: "arrowtriangle.down.fill"),
     ]
 }
 
