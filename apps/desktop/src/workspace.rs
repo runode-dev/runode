@@ -4,12 +4,13 @@
 //!
 //! 这里是窗口的根视图 `WindowView`、窗口绑定的动作，以及把各部分拼起来的渲染。其余按职责分在
 //! 子模块里：workspace、标签和分屏的数据与增删切换（`model`）、动作的处理（`actions`）、
-//! agent 的状态标记、提醒和跳转（`agents`）、列出所有 agent 的浮层（`agent_picker`）、
-//! 标签里的分屏（`panes`）、标题栏和标签（`titlebar`）、侧栏（`sidebar`）、右侧的预览栏、
-//! Git 面板和文件树（`project`、`preview`、`git_panel`、`files`），侧栏和文件树共用的就地输入框
-//! （`inline_edit`），存档（`persistence`），侧栏里没在窗口里显示的后台会话（`background`），
-//! 退出和关窗口时会话怎么办（`quit`），以及别的进程经宿主请 app 开终端、切到某个终端、问各个
-//! 终端摆在哪（`remote`、`layout_report`），以及一次在当前分屏旁开几个分屏（`arrange`）。
+//! agent 的状态标记、提醒和跳转（`agents`，系统通知和提示音在 `agents::alert`）、列出所有 agent
+//! 的浮层（`agent_picker`）、标签里的分屏（`panes`）、标题栏和标签（`titlebar`）、侧栏（`sidebar`）、
+//! 右侧的预览栏、Git 面板和文件树（`project`、`preview`、`git_panel`、`files`），侧栏和文件树共用的
+//! 就地输入框（`inline_edit`），开窗口（`open`），存档（`persist`，存档文件的格式在
+//! `persist::format`），侧栏里没在窗口里显示的后台会话（`background`），退出和关窗口时会话怎么办
+//! （`quit`），以及别的进程经宿主请 app 开终端、切到某个终端、问各个终端摆在哪（`remote`、
+//! `layout_report`），以及一次在当前分屏旁开几个分屏（`arrange`）。
 
 mod actions;
 mod agent_picker;
