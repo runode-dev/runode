@@ -42,8 +42,9 @@ struct Saver {
     written: Option<State>,
     /// 等着写文件的任务。
     pending: Option<Task<()>>,
-    /// 已经开始退出：之后窗口一个个被关掉，不能当作用户关的。
-    quitting: bool,
+    /// 已经开始退出，最后的布局已经写好（`freeze`）：之后窗口一个个被关掉、分屏随会话结束一个个
+    /// 关掉，都不是用户改了布局，不再改存档。
+    frozen: bool,
 }
 
 impl Global for Saver {}
@@ -52,20 +53,29 @@ impl Global for Saver {}
 pub fn install(cx: &mut App) {
     cx.set_global(Saver::default());
     cx.on_app_quit(|cx| {
-        let windows: Vec<_> = cx.global::<Saver>().windows.iter().map(|(window, _)| window.clone()).collect();
-        let fresh: Vec<_> =
-            windows.iter().map(|window| window.upgrade().map(|view| view.read(cx).snapshot(cx))).collect();
-        let saver = cx.global_mut::<Saver>();
-        for ((_, saved), fresh) in saver.windows.iter_mut().zip(fresh) {
-            if let Some(fresh) = fresh {
-                *saved = fresh;
-            }
-        }
-        write(cx);
-        cx.global_mut::<Saver>().quitting = true;
+        freeze(cx);
         async {}
     })
     .detach();
+}
+
+/// 要退出了：把各窗口现在的布局写进存档，之后布局怎么变都不再写。退出时一定会做；会话要先于
+/// app 结束时（让单独跑的宿主连会话一起退出），视图会先收到会话结束、一个个关掉分屏，要在那之前
+/// 调，下次启动才能照原样在原目录新开。已经冻结了时什么都不做。
+pub(super) fn freeze(cx: &mut App) {
+    if cx.global::<Saver>().frozen {
+        return;
+    }
+    let windows: Vec<_> = cx.global::<Saver>().windows.iter().map(|(window, _)| window.clone()).collect();
+    let fresh: Vec<_> = windows.iter().map(|window| window.upgrade().map(|view| view.read(cx).snapshot(cx))).collect();
+    let saver = cx.global_mut::<Saver>();
+    for ((_, saved), fresh) in saver.windows.iter_mut().zip(fresh) {
+        if let Some(fresh) = fresh {
+            *saved = fresh;
+        }
+    }
+    write(cx);
+    cx.global_mut::<Saver>().frozen = true;
 }
 
 /// 上次存下的各个窗口，以及恢复时打开它们用的窗口选项（位置、大小、所在屏幕）。没有存档或
@@ -140,7 +150,7 @@ fn window_options(saved: &SavedBounds, cx: &App) -> WindowOptions {
 /// 记下窗口的最新布局，和上次不同时稍后写文件。
 pub(super) fn update(window: WeakEntity<WindowView>, snapshot: SavedWindow, cx: &mut App) {
     let saver = cx.global_mut::<Saver>();
-    if saver.quitting {
+    if saver.frozen {
         return;
     }
     match saver.windows.iter_mut().find(|(w, _)| w.entity_id() == window.entity_id()) {
@@ -157,6 +167,27 @@ pub(super) fn update(window: WeakEntity<WindowView>, snapshot: SavedWindow, cx: 
     }
 }
 
+/// 窗口关掉时存档怎么办。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum OnClose {
+    /// 不动存档。
+    Ignore,
+    /// 留下它关掉时的布局，下次启动恢复。
+    Keep,
+    /// 从存档里拿掉。
+    Forget,
+}
+
+/// 关掉一个窗口时存档怎么办（见 `closed`）。`frozen`：已经冻结了（`freeze`）；`leaving`：关掉它
+/// 以后一个窗口都不剩；`emptied`：它的 workspace 都关掉了。
+fn on_close(frozen: bool, leaving: bool, emptied: bool) -> OnClose {
+    match () {
+        _ if frozen => OnClose::Ignore,
+        _ if leaving && !emptied => OnClose::Keep,
+        _ => OnClose::Forget,
+    }
+}
+
 /// 窗口关掉时按 `closed` 更新存档。
 pub(super) fn track(cx: &mut Context<WindowView>) {
     let window = cx.weak_entity();
@@ -168,19 +199,18 @@ pub(super) fn track(cx: &mut Context<WindowView>) {
 /// 启动恢复。还有别的窗口开着时是单独关掉了它，里面的会话随之结束，从存档里拿掉。所有
 /// workspace 都关掉了的窗口不留。
 fn closed(view: &mut WindowView, window: WeakEntity<WindowView>, cx: &mut App) {
-    if cx.global::<Saver>().quitting {
-        return;
-    }
-    let leaving = cx.windows().is_empty();
-    let snapshot = (leaving && !view.emptied).then(|| view.snapshot(cx));
-    let saver = cx.global_mut::<Saver>();
     let id = window.entity_id();
-    match snapshot {
-        Some(snapshot) => match saver.windows.iter_mut().find(|(w, _)| w.entity_id() == id) {
-            Some((_, saved)) => *saved = snapshot,
-            None => saver.windows.push((window, snapshot)),
-        },
-        None => saver.windows.retain(|(w, _)| w.entity_id() != id),
+    match on_close(cx.global::<Saver>().frozen, cx.windows().is_empty(), view.emptied) {
+        OnClose::Ignore => return,
+        OnClose::Keep => {
+            let snapshot = view.snapshot(cx);
+            let saver = cx.global_mut::<Saver>();
+            match saver.windows.iter_mut().find(|(w, _)| w.entity_id() == id) {
+                Some((_, saved)) => *saved = snapshot,
+                None => saver.windows.push((window, snapshot)),
+            }
+        }
+        OnClose::Forget => cx.global_mut::<Saver>().windows.retain(|(w, _)| w.entity_id() != id),
     }
     write(cx);
 }
@@ -422,6 +452,37 @@ impl WindowView {
                 first: Box::new(self.save_node(&split.first, tab, cx)),
                 second: Box::new(self.save_node(&split.second, tab, cx)),
             },
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 关掉的窗口不是最后一个时，里面的会话随之结束，从存档里拿掉；workspace 都关掉了的窗口也拿掉。
+    #[test]
+    fn a_window_closed_on_its_own_is_forgotten() {
+        assert_eq!(on_close(false, false, false), OnClose::Forget);
+        assert_eq!(on_close(false, false, true), OnClose::Forget);
+        assert_eq!(on_close(false, true, true), OnClose::Forget);
+    }
+
+    /// 关掉以后一个窗口都不剩（关最后一个窗口、关掉所有窗口），app 随即退出：每个这样关掉的窗口
+    /// 都留下。
+    #[test]
+    fn windows_closed_on_the_way_out_are_kept() {
+        assert_eq!(on_close(false, true, false), OnClose::Keep);
+    }
+
+    /// 冻结以后（会话随宿主一起结束、视图一个个关掉分屏乃至窗口），不管怎么关都不动存档，留下
+    /// 冻结时的布局。
+    #[test]
+    fn closing_after_freezing_leaves_the_layout_alone() {
+        for leaving in [false, true] {
+            for emptied in [false, true] {
+                assert_eq!(on_close(true, leaving, emptied), OnClose::Ignore, "{leaving} {emptied}");
+            }
         }
     }
 }

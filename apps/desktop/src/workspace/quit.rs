@@ -5,7 +5,8 @@
 //! 宿主单独一个进程时，退出只是不再看它们，会话留在宿主里等下次启动接回来，要连会话一起结束用
 //! 「退出并结束所有会话」；配置项 `terminal-host` 已经关了、这次只是接回上次留下的会话时，退出
 //! 让宿主连会话一起退出。只有会结束会话、又有 agent 在跑时才弹框确认，免得一按 cmd+q 把正在干活
-//! 或者攒着上下文的会话一起结束掉。
+//! 或者攒着上下文的会话一起结束掉。让宿主连会话一起退出之前先冻结存档（`persistence::freeze`）：
+//! 视图会先收到会话结束、一个个关掉分屏，冻结了才不会把存档清空，下次启动照原样在原目录新开。
 //!
 //! 关掉的窗口不是最后一个时，app 不退出，结束这个窗口里的会话（`WindowView::end_sessions`），不问。
 //!
@@ -18,7 +19,7 @@ use gpui::{AnyWindowHandle, App, Global, PromptLevel, Window};
 use runode_protocol::{ClientMsg, SessionId, SessionInfo};
 use runode_shared_types::agent::AgentKind;
 
-use super::{WindowView, model::Closing};
+use super::{WindowView, model::Closing, persistence};
 use crate::{
     session_host::{self, Mode},
     terminal_view::TerminalView,
@@ -215,6 +216,9 @@ fn run(action: QuitAction, window: Option<AnyWindowHandle>, cx: &mut App, then: 
             let text = plan.prompt.map(|prompt| prompt_text(prompt, &agent_names(&shown, &hidden), count));
             if ending == Ending::ShutdownHost {
                 confirm(window, text, cx, move |cx| {
+                    // 宿主连会话一起退出后，视图会先收到会话结束、关掉分屏，存档要在那之前定下来，
+                    // 下次启动才能照原样在原目录新开。
+                    persistence::freeze(cx);
                     shutdown_host();
                     then(cx);
                 });

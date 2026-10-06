@@ -157,8 +157,6 @@ impl TerminalView {
     /// 用宿主里已有的会话 `id` 建视图（存档恢复、接上后台会话）。`cwd` 是调用方记着的目录，宿主
     /// 还没报告目录时当作它的目录。`visible` 为假时视图只看状态（`AttachMode::MetaOnly`），等
     /// `set_visible` 再看屏幕。会话已经启动过，不再 `start`。连不上时返回错误，不结束会话。
-    // 存档恢复和后台会话用上它之前先放着。
-    #[allow(dead_code)]
     pub fn reattach(
         id: SessionId,
         cwd: Option<&Path>,
