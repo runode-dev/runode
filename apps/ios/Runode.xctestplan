@@ -1,0 +1,51 @@
+{
+  "configurations": [
+    {
+      "id": "9C1F2C3A-7B5E-4D6A-9E8F-0A1B2C3D4E5F",
+      "name": "默认",
+      "options": {}
+    }
+  ],
+  "defaultOptions": {
+    "language": "zh-Hans",
+    "region": "CN"
+  },
+  "testTargets": [
+    {
+      "target": {
+        "containerPath": "container:Runode.xcodeproj",
+        "identifier": "A10000000000000000000009",
+        "name": "RunodeTests"
+      }
+    },
+    {
+      "target": {
+        "containerPath": "container:RunodeKit",
+        "identifier": "RunodeProtocolTests",
+        "name": "RunodeProtocolTests"
+      }
+    },
+    {
+      "target": {
+        "containerPath": "container:RunodeKit",
+        "identifier": "RunodeConnectionTests",
+        "name": "RunodeConnectionTests"
+      }
+    },
+    {
+      "target": {
+        "containerPath": "container:RunodeKit",
+        "identifier": "RunodeTerminalTests",
+        "name": "RunodeTerminalTests"
+      }
+    },
+    {
+      "target": {
+        "containerPath": "container:RunodeKit",
+        "identifier": "RunodeFeaturesTests",
+        "name": "RunodeFeaturesTests"
+      }
+    }
+  ],
+  "version": 1
+}

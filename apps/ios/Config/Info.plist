@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleDisplayName</key>
+	<string>runode</string>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>zh-Hans</string>
+	<key>NSCameraUsageDescription</key>
+	<string>扫 Mac 上 runode 显示的配对二维码。</string>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>在局域网里找到并连接你 Mac 上的 runode。</string>
+	<key>NSBonjourServices</key>
+	<array>
+		<string>_runode._tcp</string>
+	</array>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>dev.runode.app.ios.pair</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>runode</string>
+			</array>
+		</dict>
+	</array>
+</dict>
+</plist>

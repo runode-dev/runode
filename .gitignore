@@ -2,3 +2,9 @@
 .gitnexus/
 .DS_Store
 .worktrees/
+# iOS：从 ghostty 子模块编出的 libghostty-vt xcframework 和它的缓存，SwiftPM、Xcode 的本地产物
+/apps/ios/Frameworks/
+/apps/ios/build/
+/apps/ios/RunodeKit/.build/
+/apps/ios/RunodeKit/.swiftpm/
+xcuserdata/
