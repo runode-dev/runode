@@ -373,6 +373,12 @@ impl WindowView {
             )
     }
 
+    /// 当前目录读过了且不在 git 仓库里时藏起 Git 按钮；面板开着时仍留着，不然没处关它。
+    fn git_button_visible(&self) -> bool {
+        let project = &self.workspace().project;
+        self.git_shown || project.dir.is_none() || project.git.is_some()
+    }
+
     /// 标题栏右上角开关 Git 面板和文件树的两个按钮，打开着的底色亮一些。
     pub(super) fn render_panel_toggles(&self, fg: Rgb, bg: Rgb, cx: &mut Context<Self>) -> Div {
         type Toggle = fn(&mut WindowView, &mut Window, &mut Context<WindowView>);
@@ -410,7 +416,9 @@ impl WindowView {
             .right(px(TOGGLE_MARGIN))
             .flex()
             .gap(px(TOGGLE_GAP))
-            .child(button("toggle-git", GIT_ICON, self.git_shown, cx))
+            .when(self.git_button_visible(), |toggles| {
+                toggles.child(button("toggle-git", GIT_ICON, self.git_shown, cx))
+            })
             .child(button("toggle-files", FILES_ICON, self.files_shown, cx))
     }
 
