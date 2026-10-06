@@ -66,9 +66,10 @@ impl HostSession {
         changed
     }
 
-    /// 看前台在跑什么程序，认出是哪个 agent 交给 tracker。取不到前台进程时什么都不做。
-    pub(super) fn probe_foreground(&mut self, now: Instant) {
-        let Some((leader, is_shell)) = self.pty.foreground() else {
+    /// 看前台在跑什么程序（`foreground` 是刚读的 `Pty::foreground`），认出是哪个 agent 交给
+    /// tracker。取不到前台进程时什么都不做。
+    pub(super) fn probe_foreground(&mut self, foreground: Option<(libc::pid_t, bool)>, now: Instant) {
+        let Some((leader, is_shell)) = foreground else {
             return;
         };
         if is_shell {

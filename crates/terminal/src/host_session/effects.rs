@@ -10,7 +10,7 @@ use std::{
 use runode_shared_types::shell::ShellNames;
 
 use super::HostSession;
-use crate::history;
+use crate::{history, pty};
 
 /// 宿主那份 VT 的回调累积下来的变化。
 #[derive(Default)]
@@ -207,19 +207,26 @@ impl HostSession {
             return false;
         }
         let now = Instant::now();
-        self.probe_foreground(now);
+        // 前台进程组只读一次，下面各项都按它算，进程名也只取一次。
+        let foreground = self.pty.foreground();
+        self.probe_foreground(foreground, now);
         let agent_changed = self.poll_agent_at(now);
         let cwd = self.live_cwd();
-        let foreground_is_shell = self.pty.foreground_is_shell();
-        let foreground = self.pty.foreground_name();
-        if cwd != self.cwd || foreground_is_shell != self.foreground_is_shell || foreground != self.foreground {
+        let foreground_is_shell = foreground.is_some_and(|(_, is_shell)| is_shell);
+        let name = foreground.and_then(|(leader, _)| pty::process_name(leader));
+        if cwd != self.cwd || foreground_is_shell != self.foreground_is_shell || name != self.foreground {
             self.cwd = cwd;
             self.foreground_is_shell = foreground_is_shell;
-            self.foreground = foreground;
+            self.foreground.clone_from(&name);
             self.meta_dirty = true;
         }
-        // shell 在前台时不读它此刻的目录：插件管理器在提示符出来后延迟加载插件，会临时切进插件目录。
-        let title = self.pty.foreground_title(|| self.prompt_cwd());
+        // 同 `Pty::foreground_title`。shell 在前台时不读它此刻的目录：插件管理器在提示符出来后延迟
+        // 加载插件，会临时切进插件目录。
+        let title = match foreground {
+            Some((_, true)) => self.prompt_cwd().map(|cwd| pty::dir_label(&cwd)),
+            Some((_, false)) => name,
+            None => None,
+        };
         if title == self.fallback_title {
             self.meta_dirty |= agent_changed;
             return agent_changed;

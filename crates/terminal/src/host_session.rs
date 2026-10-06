@@ -267,6 +267,11 @@ impl HostSession {
         })
     }
 
+    /// shell 启动了没有（`start` 过，或者接过来的 PTY 本来就启动了）。
+    pub fn started(&self) -> bool {
+        self.pty.started()
+    }
+
     /// 还没启动 shell 时在起始目录下启动它，`shell` 为 `None` 时用用户的 `$SHELL`；已经启动过时
     /// 什么都不做。
     pub fn start(&mut self, shell: Option<&str>, integration: IntegrationMode) -> Result<()> {

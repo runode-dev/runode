@@ -222,8 +222,9 @@ struct Runner {
     /// 前端要清屏，等 VT 回到 ground 再清。
     clear_pending: bool,
     exited: bool,
-    /// 下次按 `FOREGROUND_POLL_INTERVAL` 重读前台进程的时刻。
-    next_poll: Instant,
+    /// 下次按 `FOREGROUND_POLL_INTERVAL` 重读前台进程的时刻；shell 还没启动时没有前台进程可读，
+    /// 为 `None`，不为它醒来，启动后再排上。
+    next_poll: Option<Instant>,
     /// 上次因为有输出而重读前台进程的时刻，以及推迟到的那次。
     foreground_read_at: Instant,
     foreground_due: Option<Instant>,
@@ -250,12 +251,12 @@ impl Runner {
             record_history,
             clear_pending: false,
             exited: false,
-            next_poll: now + FOREGROUND_POLL_INTERVAL,
+            next_poll: None,
             foreground_read_at: now,
             foreground_due: None,
         };
         // shell 已经在起始目录里跑起来了，不等第一次输出，前端一连上就有名字。
-        runner.session.refresh_foreground();
+        runner.refresh_foreground(now);
         runner
     }
 
@@ -354,12 +355,12 @@ impl Runner {
         })
     }
 
-    /// 下次没有消息也要醒来的时刻；shell 退出以后不再轮询。
+    /// 下次没有消息也要醒来的时刻；shell 还没启动时和退出以后不再轮询。
     fn deadline(&self) -> Option<Instant> {
         if self.exited {
             return None;
         }
-        [Some(self.next_poll), self.foreground_due, self.session.agent_deadline()].into_iter().flatten().min()
+        [self.next_poll, self.foreground_due, self.session.agent_deadline()].into_iter().flatten().min()
     }
 
     fn handle(&mut self, message: Inbox) {
@@ -522,7 +523,7 @@ impl Runner {
     /// 状态。
     fn tick(&mut self) {
         let now = Instant::now();
-        if self.foreground_due.is_some_and(|due| now >= due) || now >= self.next_poll {
+        if self.foreground_due.is_some_and(|due| now >= due) || self.next_poll.is_some_and(|at| now >= at) {
             self.refresh_foreground(now);
         }
         if self.session.agent_deadline().is_some_and(|at| now >= at) {
@@ -530,11 +531,12 @@ impl Runner {
         }
     }
 
+    /// 重读前台进程，排好下一次轮询；shell 还没启动时不排，见 `next_poll`。
     fn refresh_foreground(&mut self, now: Instant) {
         self.session.refresh_foreground();
         self.foreground_read_at = now;
         self.foreground_due = None;
-        self.next_poll = now + FOREGROUND_POLL_INTERVAL;
+        self.next_poll = self.session.started().then_some(now + FOREGROUND_POLL_INTERVAL);
     }
 
     /// 对外公布的状态变了就发给前端。
@@ -626,5 +628,52 @@ struct CloseOnDrop(Arc<Credits>);
 impl Drop for CloseOnDrop {
     fn drop(&mut self) {
         self.0.close();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const SIZE: GridSize = GridSize { cols: 20, rows: 4, cell_width_px: 8, cell_height_px: 16 };
+
+    /// `cat` 当 shell 的会话线程状态，`start` 时已经启动。
+    fn runner(start: bool) -> Runner {
+        let mut pty = Pty::open(SIZE, Box::new(|_| true)).unwrap();
+        if start {
+            pty.start(Some("/bin/cat"), None, IntegrationMode::Off).unwrap();
+        }
+        let session = HostSession::new(SIZE, pty, None, &TermSettings::default()).unwrap();
+        let options = SpawnOptions {
+            size: SIZE,
+            cwd: None,
+            integration: IntegrationMode::Off,
+            start,
+            shell: Some("/bin/cat".into()),
+            settings: None,
+        };
+        Runner::new(SessionId(1), session, options, TermSettings::default(), Arc::default(), Arc::default())
+    }
+
+    #[test]
+    fn unstarted_sessions_do_not_wake_up_until_started() {
+        let mut runner = runner(false);
+        assert_eq!(runner.deadline(), None, "an unstarted session has nothing to poll");
+        // 没到点的醒来（比如别的消息）也不该排上轮询。
+        runner.tick();
+        assert_eq!(runner.deadline(), None);
+        let before = Instant::now();
+        runner.handle(Inbox::Start { integration: IntegrationMode::Off });
+        assert!(runner.session.started());
+        let deadline = runner.deadline().expect("a started session polls its foreground");
+        assert!(deadline >= before + FOREGROUND_POLL_INTERVAL && deadline <= Instant::now() + FOREGROUND_POLL_INTERVAL);
+    }
+
+    #[test]
+    fn started_sessions_poll_the_foreground() {
+        let before = Instant::now();
+        let runner = runner(true);
+        let deadline = runner.deadline().expect("a started session polls its foreground");
+        assert!(deadline >= before + FOREGROUND_POLL_INTERVAL && deadline <= Instant::now() + FOREGROUND_POLL_INTERVAL);
     }
 }

@@ -681,7 +681,7 @@ pub fn dir_label(path: &Path) -> String {
 }
 
 #[cfg(target_os = "macos")]
-fn process_name(pid: libc::pid_t) -> Option<String> {
+pub(crate) fn process_name(pid: libc::pid_t) -> Option<String> {
     // 内核里的进程名最长 2 * MAXCOMLEN 字节。
     let mut buf = [0u8; 64];
     let len = unsafe { libc::proc_name(pid, buf.as_mut_ptr().cast(), buf.len() as u32) };
@@ -774,7 +774,7 @@ fn process_argv(_pid: libc::pid_t) -> Option<Vec<String>> {
 }
 
 #[cfg(not(target_os = "macos"))]
-fn process_name(_pid: libc::pid_t) -> Option<String> {
+pub(crate) fn process_name(_pid: libc::pid_t) -> Option<String> {
     None
 }
 
