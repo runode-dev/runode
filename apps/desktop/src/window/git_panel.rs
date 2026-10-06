@@ -23,11 +23,12 @@ mod worktree;
 use std::{
     ops::Range,
     path::{Path, PathBuf},
+    time::Duration,
 };
 
 use gpui::{
-    Action, AnyElement, Context, Div, Focusable, MouseButton, MouseDownEvent, Stateful, Window, actions, div, list,
-    prelude::*, px, svg, uniform_list,
+    Action, Animation, AnimationExt, AnyElement, Context, Div, ElementId, Focusable, Hsla, MouseButton, MouseDownEvent,
+    Stateful, Transformation, Window, actions, div, list, percentage, prelude::*, px, svg, uniform_list,
 };
 use runode_git::{self as git, Operation, RepoKind, Section};
 use runode_shared_types::color::Rgb;
@@ -544,7 +545,9 @@ impl WindowView {
     /// 提交，没有上游时是发布分支。
     fn render_branch_bar(&self, ri: usize, repo: &git::Snapshot, fg: Rgb, bg: Rgb, cx: &mut Context<Self>) -> Div {
         let info = &repo.info;
-        let busy = self.workspace().project.git_panel.busy(&repo.root).is_some();
+        let busy = self.workspace().project.git_panel.busy(&repo.root);
+        let spinning = busy.is_some_and(Busy::is_remote);
+        let busy = busy.is_some();
         let fg_hsla = hsla(fg);
         let hover_bg = hsla(bg.mix(fg, 0.08));
         let name = branch_name(info);
@@ -596,11 +599,7 @@ impl WindowView {
                 .gap(px(4.))
                 .text_color(fg_hsla.opacity(if busy { 0.35 } else { 0.75 }))
                 .tooltip(tooltip(text, None, fg, bg))
-                .child(svg().flex_none().path(SYNC_ICON).size(px(13.)).text_color(fg_hsla.opacity(if busy {
-                    0.35
-                } else {
-                    0.75
-                })))
+                .child(sync_icon(("git-sync-icon", ri), spinning, 13., fg_hsla.opacity(if busy { 0.35 } else { 0.75 })))
                 .child(label)
                 .when(!busy, |sync| {
                     sync.hover(|sync| sync.bg(hover_bg)).on_mouse_down(
@@ -638,7 +637,8 @@ impl WindowView {
     ) -> Div {
         let panel = &self.workspace().project.git_panel;
         let (info, dirty, root) = (&repo.info, !repo.is_clean(), repo.root.clone());
-        let busy = panel.busy(&root).is_some();
+        let running = panel.busy(&root);
+        let busy = running.is_some();
         let fg_hsla = hsla(fg);
         let Some(area) = panel.repos.get(&root).and_then(|repo| repo.commit_box.clone()) else {
             return div();
@@ -661,9 +661,15 @@ impl WindowView {
             }
             PrimaryAction::Publish => (SYNC_ICON, rust_i18n::t!("git.publish_branch").into_owned()),
         };
+        // 推送、拉取要跑好几秒：跑的时候按钮写着在做什么，连远端的图标还转着圈，免得以为没点上。
+        let label = running.map_or(label, Busy::label);
+        let on_accent = gpui::white();
+        let icon = match running {
+            Some(running) if running.is_remote() => sync_icon(("git-commit-icon", ri), true, 14., on_accent),
+            _ => svg().flex_none().path(icon).size(px(14.)).text_color(on_accent).into_any_element(),
+        };
         let enabled = !busy && (primary != PrimaryAction::Commit || (dirty && has_message));
         let accent = hsla(RENAMED);
-        let on_accent = gpui::white();
         let box_border = if focused { accent } else { fg_hsla.opacity(0.15) };
         let commit_box = div()
             .id(("git-commit-box", ri))
@@ -694,7 +700,7 @@ impl WindowView {
             .gap(px(6.))
             .bg(accent)
             .text_color(on_accent)
-            .child(svg().flex_none().path(icon).size(px(14.)).text_color(on_accent))
+            .child(icon)
             .child(div().min_w_0().truncate().child(label))
             .when(enabled, |main| {
                 let root = root.clone();
@@ -815,6 +821,18 @@ impl WindowView {
         self.save(cx);
         cx.notify();
     }
+}
+
+/// 同步图标；`spinning` 时一直转圈，表示还在连远端。
+fn sync_icon(id: impl Into<ElementId>, spinning: bool, size: f32, color: Hsla) -> AnyElement {
+    let icon = svg().flex_none().path(SYNC_ICON).size(px(size)).text_color(color);
+    if !spinning {
+        return icon.into_any_element();
+    }
+    icon.with_animation(id, Animation::new(Duration::from_secs(1)).repeat(), |icon, delta| {
+        icon.with_transformation(Transformation::rotate(percentage(delta)))
+    })
+    .into_any_element()
 }
 
 /// 块头和图表标题上写的仓库名：主仓库和工作树是目录名（工作树多半不在主仓库目录里，完整路径在

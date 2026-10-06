@@ -181,6 +181,11 @@ pub(in crate::window) enum Busy {
 }
 
 impl Busy {
+    /// 要连远端的操作：要跑好几秒，同步按钮在跑的时候转圈。
+    pub fn is_remote(self) -> bool {
+        matches!(self, Self::Fetch | Self::Pull | Self::Push | Self::Sync)
+    }
+
     pub fn label(self) -> String {
         match self {
             Self::Stage => rust_i18n::t!("git.busy.stage"),
