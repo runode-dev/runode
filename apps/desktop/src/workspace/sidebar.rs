@@ -1,4 +1,4 @@
-//! 窗口左侧的 workspace 列表：切换、拖动排序、改名、关闭和新建。
+//! 窗口左侧的 workspace 列表：切换、拖动排序、改名、关闭和新建；下面是后台会话（`background`）。
 
 use gpui::{
     AnyElement, Context, CursorStyle, Div, Focusable, Hsla, MouseButton, MouseDownEvent, Render, SharedString,
@@ -8,8 +8,8 @@ use runode_shared_types::color::Rgb;
 
 use super::{
     AGENT_MARK_WIDTH, DIVIDER_GRAB_WIDTH, Divider, NewWorkspace, RenameWorkspace, Renaming, SelectLastWorkspace,
-    SelectWorkspace, TAB_CLOSE_SIZE, TITLEBAR_HEIGHT, TRAFFIC_LIGHTS_WIDTH, ToggleSidebar, WindowView, divider_color,
-    drag_window,
+    SelectWorkspace, TAB_CLOSE_SIZE, TITLEBAR_HEIGHT, TRAFFIC_LIGHTS_WIDTH, ToggleSidebar, WindowView, background,
+    divider_color, drag_window,
     inline_edit::InlineEdit,
     model::{WorkspaceId, display_dir},
     titlebar::{agent_mark, close_button, drag_chip, icon_toggle, shortcut_hint},
@@ -51,9 +51,10 @@ impl Render for DraggedWorkspace {
 }
 
 impl WindowView {
-    /// 用户手动收起或展开过就按那个来，否则多于一个 workspace 时显示；改名时总要显示。
+    /// 用户手动收起或展开过就按那个来，否则多于一个 workspace 或者有后台会话时显示；改名时总要
+    /// 显示。
     pub(super) fn sidebar_visible(&self) -> bool {
-        self.renaming.is_some() || self.sidebar_shown.unwrap_or(self.workspaces.len() > 1)
+        self.renaming.is_some() || self.sidebar_shown.unwrap_or(self.workspaces.len() > 1 || background::any())
     }
 
     pub(super) fn sidebar_width(&self) -> f32 {
@@ -150,6 +151,7 @@ impl WindowView {
                     .gap(px(2.))
                     .children(rows),
             )
+            .children(self.render_background(fg, bg, cx))
             .child(self.render_new_workspace_button(fg, bg, cx))
     }
 

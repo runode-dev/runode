@@ -79,6 +79,9 @@ fn main() {
         for (saved, options) in saved {
             open_window_with(cx, options, Some(saved), shell.take());
         }
+        // 先结束没用上的 shell，再看宿主里有没有没在窗口里显示的会话，免得把它也列进去。
+        drop(shell);
+        workspace::watch_background(cx);
         cx.activate(true);
         session_host::show_notice(cx);
         // 窗口先出来；未打包运行时才需要的图标解码放到最后。

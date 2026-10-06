@@ -15,6 +15,7 @@ mod actions;
 mod agent_picker;
 mod agents;
 mod arrange;
+mod background;
 mod files;
 mod git_panel;
 mod inline_edit;
@@ -40,6 +41,7 @@ use runode_shared_types::pane::{Axis, Direction, SplitId};
 
 pub(crate) use agents::reveal_notified;
 pub use arrange::ArrangePanes;
+pub use background::watch as watch_background;
 pub use files::{
     CollapseSelectedFile, CopyPath, CopyRelativePath, DeleteFile, ExpandSelectedFile, FocusTerminal, OpenSelectedFile,
     RenameFile, RevealInFinder, SelectFirstFile, SelectLastFile, SelectNextFile, SelectPreviousFile,

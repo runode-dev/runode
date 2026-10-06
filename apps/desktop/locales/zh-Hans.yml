@@ -102,6 +102,8 @@ background:
   title: 后台会话
   end_all: 全部结束
   empty: 没有后台会话
+  end_title: 结束所有后台会话？
+  end_detail: 其中还有 %{count} 个 agent 在运行，会随之结束。
 panel:
   no_changes: 没有未提交的改动
   not_repo: 不在 git 仓库里

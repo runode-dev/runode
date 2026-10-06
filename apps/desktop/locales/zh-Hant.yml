@@ -102,6 +102,8 @@ background:
   title: 背景工作階段
   end_all: 全部終止
   empty: 沒有背景工作階段
+  end_title: 終止所有背景工作階段？
+  end_detail: 其中還有 %{count} 個 agent 在執行，會一併終止。
 panel:
   no_changes: 沒有未提交的改動
   not_repo: 不在 git 倉庫裡
