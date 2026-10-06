@@ -78,6 +78,9 @@ pub struct HostSession {
     start_dir: Option<PathBuf>,
     /// shell 最近一次等着输入时所在的目录，记命令时当作命令运行的目录。
     prompt_cwd: Option<PathBuf>,
+    /// 这一轮提示符的目录是 shell 报告的：同一轮里后面再来的输入开始（右提示符、续行提示符、
+    /// 重画）不再现读去盖掉它，见 `take_commands`。命令开始运行时清掉。
+    prompt_reported: bool,
     /// 正在运行、还没报告结束的那条命令。
     running: Option<history::Entry>,
     /// 最近一次收到界面发来的输入的时刻，agent 识别据此区分程序是自己在动还是在回显。
@@ -255,6 +258,7 @@ impl HostSession {
             driver: None,
             start_dir: None,
             prompt_cwd: None,
+            prompt_reported: false,
             running: None,
             input_at: None,
             settings,

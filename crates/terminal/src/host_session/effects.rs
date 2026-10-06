@@ -168,13 +168,20 @@ impl HostSession {
         for event in events {
             match event {
                 // 用 shell 显示提示符前报告的目录：等这里处理到时，插件管理器可能已经在提示符出来
-                // 之后临时切进了插件目录，这时再读 shell 的目录就错了。没报告时（续行提示符、
-                // 拿不到口令的 shell）才现读。
+                // 之后临时切进了插件目录，这时再读 shell 的目录就错了。同一轮提示符里后面的输入
+                // 开始（右提示符也标一个、续行提示符、重画）不带报告，沿用这一轮报告的；这一轮
+                // 没报告过（拿不到口令的 shell）才现读。
                 PromptEvent::InputStart => {
-                    self.prompt_cwd = self.effects.shell_cwd.take().or_else(|| self.live_cwd());
+                    if let Some(cwd) = self.effects.shell_cwd.take() {
+                        self.prompt_cwd = Some(cwd);
+                        self.prompt_reported = true;
+                    } else if !self.prompt_reported {
+                        self.prompt_cwd = self.live_cwd();
+                    }
                     self.meta_dirty = true;
                 }
                 PromptEvent::OutputStart(command) => {
+                    self.prompt_reported = false;
                     self.running = command.map(|command| {
                         history::Entry::now(command, self.prompt_cwd.clone().or_else(|| self.live_cwd()))
                     });
@@ -322,7 +329,14 @@ mod tests {
         session.feed(PROMPT);
         session.take_commands();
         assert_eq!(session.prompt_cwd(), Some("/work/my repo".into()));
-        // 下一个提示符前没有报告（续行提示符、拿不到口令的 shell）：现读 shell 的目录。
+        // 同一轮里右提示符、续行提示符、重画又标的输入开始不带报告：沿用报告的目录，不现读
+        // （这时 shell 可能正待在插件目录里）。
+        session.feed(b"\x1b]133;P;k=r\x0712:34\x1b]133;B\x07");
+        session.feed(PROMPT);
+        session.take_commands();
+        assert_eq!(session.prompt_cwd(), Some("/work/my repo".into()));
+        // 命令跑过以后的下一轮没有报告（拿不到口令的 shell）：现读 shell 的目录。
+        session.feed(b"\x1b]133;C\x07");
         session.feed(PROMPT);
         session.take_commands();
         assert_eq!(session.prompt_cwd(), session.live_cwd());
