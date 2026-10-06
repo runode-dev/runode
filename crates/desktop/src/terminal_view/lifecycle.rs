@@ -154,6 +154,8 @@ impl TerminalView {
                 HostMsg::ThemeApplied { .. } => {
                     let settings = cx.global::<AppConfig>().0.term_settings();
                     self.session.apply_theme(&settings);
+                    // 高亮的颜色取自调色板。
+                    self.input_changed = true;
                 }
                 HostMsg::CommandFinished { command, .. } => {
                     // 关掉建议时宿主不记，这边也不加。
@@ -300,6 +302,7 @@ impl TerminalView {
             marked_text: None,
             suggestion: None,
             suggester: Default::default(),
+            highlight: Default::default(),
             input_changed: true,
             history_generation: 0,
             completion: None,

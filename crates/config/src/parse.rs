@@ -47,6 +47,7 @@ pub(crate) const KEYS: &[&[&str]] = &[
         "shell-integration",
         "command-suggestions",
         "command-completions",
+        "command-highlighting",
     ],
     &["agent-notifications", "agent-notifications-exclude", "agent-done-sound", "agent-blocked-sound"],
     &["config-file"],
@@ -239,6 +240,9 @@ impl Config {
             }
             "command-completions" => {
                 self.command_completions = if empty { defaults.command_completions } else { parse_bool(value)? };
+            }
+            "command-highlighting" => {
+                self.command_highlighting = if empty { defaults.command_highlighting } else { parse_bool(value)? };
             }
             "agent-notifications" => {
                 self.agent_notifications = if empty { defaults.agent_notifications } else { parse_bool(value)? };

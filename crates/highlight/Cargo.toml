@@ -1,0 +1,18 @@
+[package]
+name = "runode-highlight"
+description = "Syntax highlighting of the command line at the shell prompt, styled after fast-syntax-highlighting"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+# 命令名查 shell 报告的名字和 PATH，子命令查补全用的命令规格。
+runode-completion.workspace = true
+runode-paths.workspace = true
+
+[dev-dependencies]
+runode-shared-types.workspace = true
+
+[lints]
+workspace = true

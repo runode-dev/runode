@@ -47,6 +47,7 @@ config:
   scrollback_limit: "How much scrollback each terminal keeps, in bytes: a whole number; anything below 2 MiB (2097152) counts as 2 MiB. At most 10,000 lines are kept as well; whichever limit is reached first applies. Changes apply to open terminals too."
   shell_integration: "Shell integration: detect (by the shell's program name), none (off), bash, zsh, fish."
   command_suggestions: "Suggest a command from the history in gray after the cursor while typing at the shell prompt; accept it with → or End, one word with Option+→. false also stops reading and recording the command history."
+  command_highlighting: "Color the command line while typing at the shell prompt: commands, keywords, options, strings, variables and existing paths each get a color and unknown commands turn red, styled after the zsh plugin fast-syntax-highlighting with colors from the theme palette. Left alone when the shell already colors it (a highlighting plugin is installed)."
   command_completions: "Press Tab at the shell prompt to pick a command name, subcommand, option or argument from a menu (arguments only for commands runode has a spec for); when there is nothing to offer, Tab goes to the shell. false always sends Tab to the shell."
   agent_notifications: "Post a system notification when an agent is waiting for your answer or has finished in a split you are not looking at: true, false. Notifications only work in the packaged Runode.app."
   agent_notifications_exclude: |-

@@ -69,6 +69,9 @@ pub struct Config {
     pub command_suggestions: bool,
     /// 按 Tab 时由 runode 弹出补全菜单（命令名，以及有规格的命令的参数）；关掉时 Tab 总是交给 shell。
     pub command_completions: bool,
+    /// 在 shell 提示符上输入时给命令行上色，样子参照 zsh 插件 fast-syntax-highlighting；shell 自己
+    /// 已经上了色时不管。
+    pub command_highlighting: bool,
     /// 界面语言，是 locales 里的某个语言标签；`None` 表示跟随系统。
     pub language: Option<String>,
     /// agent 等用户回答或者干完了、用户又没在看那个分屏时，发系统通知。
@@ -117,6 +120,7 @@ impl Default for Config {
             shell_integration: IntegrationMode::Detect,
             command_suggestions: true,
             command_completions: true,
+            command_highlighting: true,
             language: None,
             agent_notifications: true,
             agent_notifications_exclude: Vec::new(),

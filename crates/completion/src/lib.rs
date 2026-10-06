@@ -20,10 +20,12 @@ use runode_shared_types::shell::ShellNames;
 pub use warp_command_signatures::GeneratorResults;
 use warp_command_signatures::{PathSuggestionType, Suggestion, TemplateType};
 
+pub use commands::is_command;
 pub use engine::{Candidate, Edit, Kind, common_prefix, decisive, highlight, rank};
 use engine::{Plan, Source};
 use line::Segment;
 pub use line::cells;
+pub use paths::is_executable;
 
 /// 光标所在 shell 的情况：它报告的 PATH 和各种名字，以及 runode 记下的命令历史里各命令的
 /// 常用程度。
@@ -222,6 +224,21 @@ fn command_names(shell: &Shell, candidates: &mut Vec<Candidate>) {
         let description = specs::description(&name).map(str::to_owned);
         Candidate { description, ..engine::command(name, Kind::Command) }
     }));
+}
+
+/// 有规格的命令 `command` 在已经认出子命令 `path` 之后，`word` 是不是下一层的子命令。
+pub fn is_subcommand(command: &str, path: &[String], word: &str) -> bool {
+    let Some(spec) = specs::lookup(command) else {
+        return false;
+    };
+    let mut signature = &spec.signature;
+    for name in path {
+        match signature.subcommands().iter().find(|s| s.name == *name) {
+            Some(sub) => signature = sub,
+            None => return false,
+        }
+    }
+    signature.subcommands().iter().any(|s| s.name == word)
 }
 
 /// 候选里能列出来的一共有多少个，和 `rank` 用同样的规则（去掉带控制字符的、隐藏的和重复的），

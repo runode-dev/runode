@@ -19,6 +19,20 @@ pub struct PromptInput {
     pub cursor: usize,
     /// 光标之后（这一行剩下的单元格，以及软换行接在后面的行）一个字也没有。
     pub at_end: bool,
+    /// `text` 里各个字所在的单元格，按顺序。
+    pub cells: Vec<InputCell>,
+}
+
+/// 输入里的一个字所在的单元格。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct InputCell {
+    /// 这个字在 `PromptInput::text` 里的字节位置。
+    pub at: usize,
+    /// 在活动区里的列和行。
+    pub x: u16,
+    pub y: u16,
+    /// 程序给这一格设了颜色或别的样式，比如 shell 自己的语法高亮或者灰字建议。
+    pub styled: bool,
 }
 
 impl PromptInput {
@@ -68,33 +82,44 @@ pub fn read(terminal: &Terminal<'_, '_>) -> Result<Option<PromptInput>> {
         bottom += 1;
     }
 
-    // 各行的单元格按顺序连成一串，各自记下是不是提示符。
+    // 各行的单元格按顺序连成一串，各自记下是不是提示符、在哪一格、有没有样式。
     let mut slots = Vec::with_capacity((bottom - top + 1) as usize * usize::from(cols));
     for y in top..=bottom {
         for x in 0..cols {
             let grid_ref = terminal.grid_ref(Point::Active(PointCoordinate { x, y }))?;
-            let prompt = grid_ref.cell()?.semantic_content()? == CellSemanticContent::Prompt;
-            slots.push((slot(&grid_ref)?, prompt));
+            let cell = grid_ref.cell()?;
+            let prompt = cell.semantic_content()? == CellSemanticContent::Prompt;
+            let at = InputCell { at: 0, x, y: y as u16, styled: cell.has_styling()? };
+            slots.push((slot(&grid_ref)?, prompt, at));
         }
     }
     let cursor = (cursor_y - top) as usize * usize::from(cols) + usize::from(cursor_x);
     // 输入从光标前最后一个提示符单元格之后开始。光标后面的提示符单元格是画在行尾的右侧
     // 提示符，不算输入，也不挡住「光标在输入末尾」。
-    let Some(start) = slots[..cursor].iter().rposition(|(_, prompt)| *prompt).map(|i| i + 1) else {
+    let Some(start) = slots[..cursor].iter().rposition(|(_, prompt, _)| *prompt).map(|i| i + 1) else {
         return Ok(None);
     };
 
     let mut text = String::new();
-    for (slot, _) in &slots[start..cursor] {
-        slot.push_to(&mut text);
+    let mut cells = Vec::new();
+    let mut push = |slot: &Slot, at: InputCell, text: &mut String| {
+        if !matches!(slot, Slot::Spacer) {
+            cells.push(InputCell { at: text.len(), ..at });
+        }
+        slot.push_to(text);
+    };
+    for (slot, _, at) in &slots[start..cursor] {
+        push(slot, *at, &mut text);
     }
     let before = text.len();
-    let rest: Vec<&Slot> = slots[cursor..].iter().filter(|(_, prompt)| !prompt).map(|(slot, _)| slot).collect();
-    for slot in &rest {
-        slot.push_to(&mut text);
+    let rest: Vec<_> = slots[cursor..].iter().filter(|(_, prompt, _)| !prompt).collect();
+    for (slot, _, at) in &rest {
+        push(slot, *at, &mut text);
     }
     text.truncate(before + text[before..].trim_end().len());
-    Ok(Some(PromptInput { text, cursor: before, at_end: !rest.iter().any(|slot| matches!(slot, Slot::Text(_))) }))
+    cells.retain(|cell| cell.at < text.len());
+    let at_end = !rest.iter().any(|(slot, ..)| matches!(slot, Slot::Text(_)));
+    Ok(Some(PromptInput { text, cursor: before, at_end, cells }))
 }
 
 /// 刚提交的那条命令：从光标所在行往上，把 shell 集成标为用户输入的单元格读出来，直到主
@@ -198,6 +223,20 @@ mod tests {
         let input = read(&t).unwrap().unwrap();
         assert_eq!(input.before_cursor(), "git ");
         assert!(!input.at_end);
+    }
+
+    #[test]
+    fn records_where_each_character_is_and_whether_it_is_styled() {
+        let mut t = terminal(8, 5);
+        // 第二行接着软换行；`中` 占两格；`ok` 是程序上了色的。
+        t.vt_write(b"\x1b]133;A\x07$ \x1b]133;B\x07ab \xe4\xb8\xad\x1b[32mok\x1b[0m");
+        let input = read(&t).unwrap().unwrap();
+        assert_eq!(input.text, "ab 中ok");
+        let cells: Vec<_> = input.cells.iter().map(|c| (c.at, c.x, c.y, c.styled)).collect();
+        assert_eq!(
+            cells,
+            [(0, 2, 0, false), (1, 3, 0, false), (2, 4, 0, false), (3, 5, 0, false), (6, 7, 0, true), (7, 0, 1, true)]
+        );
     }
 
     #[test]

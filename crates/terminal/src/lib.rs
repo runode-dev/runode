@@ -17,7 +17,7 @@ mod shell_integration;
 mod testing;
 mod vt;
 
-pub use prompt_input::PromptInput;
+pub use prompt_input::{InputCell, PromptInput};
 pub use vt::SnapshotError;
 
 /// runode 的版本号，即整个工作区的版本；终端回答 XTVERSION、设置 `TERM_PROGRAM_VERSION` 时用。

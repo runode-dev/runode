@@ -22,6 +22,7 @@ runode-terminal = { path = "crates/terminal" }
 runode-host = { path = "crates/host" }
 runode-cli = { path = "crates/cli" }
 runode-completion = { path = "crates/completion" }
+runode-highlight = { path = "crates/highlight" }
 runode-config = { path = "crates/config" }
 runode-preview = { path = "crates/preview" }
 runode-agent-detect = { path = "crates/agent-detect" }

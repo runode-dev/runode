@@ -2,12 +2,13 @@
 //!
 //! 这里是 `TerminalView` 本身、它的动作和事件，以及渲染出的元素树。其余按职责分在子模块里：
 //! 建视图、启动 shell 和读输出（`lifecycle`）、按键和鼠标（`input`）、绑定的动作（`actions`）、
-//! 搜索栏（`search`）、灰字建议（`suggestion`）、命令补全菜单（`completion_menu`）、
-//! 输入法（`ime`）、终端网格元素（`element`），以及画一帧（`paint`）。
+//! 搜索栏（`search`）、灰字建议（`suggestion`）、输入的语法高亮（`highlight`）、
+//! 命令补全菜单（`completion_menu`）、输入法（`ime`）、终端网格元素（`element`），以及画一帧（`paint`）。
 
 mod actions;
 mod completion_menu;
 mod element;
+mod highlight;
 mod ime;
 mod input;
 mod lifecycle;
@@ -137,7 +138,9 @@ pub struct TerminalView {
     /// 按命令历史给出的灰字建议，画在光标后面。
     suggestion: Option<Suggestion>,
     suggester: history::Suggester,
-    /// 有了新输出或配置变了，屏幕上的输入可能变了，下次绘制前重读，见 `refresh_suggestion`。
+    /// 提示符上输入的语法高亮，绘制时盖在单元格上。
+    highlight: Rc<highlight::Highlight>,
+    /// 有了新输出或配置变了，屏幕上的输入可能变了，下次绘制前重读，见 `refresh_input`。
     input_changed: bool,
     /// 上次查建议时命令历史的版本，历史变了也要重查。
     history_generation: u64,

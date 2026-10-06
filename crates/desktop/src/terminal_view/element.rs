@@ -121,7 +121,7 @@ impl Element for TerminalElement {
                 view.reset_cursor_blink(window, cx);
             }
             let metrics = view.metrics(window);
-            view.refresh_suggestion();
+            view.refresh_input();
             // 绘制时要同时用到帧和 `&mut view`（字形缓存），所以先把帧取出来，画完再放回。
             let frame = view.session.take_frame();
             paint_frame(view, &frame, bounds.origin, metrics, focused, window);

@@ -17,6 +17,7 @@ runode-host.workspace = true
 runode-cli.workspace = true
 # 按 Tab 弹出的命令补全。
 runode-completion.workspace = true
+runode-highlight.workspace = true
 # 配置文件的读取、主题、快捷键的写法和配置模板。
 runode-config.workspace = true
 # 预览栏读文件、判断类型和语法高亮。

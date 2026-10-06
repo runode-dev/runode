@@ -46,14 +46,20 @@ pub(super) struct Highlight {
 }
 
 impl Session {
-    /// 终端当前的 16 个 ANSI 颜色，跟着主题、配置和程序用 OSC 4 改的颜色走。读不到时用
-    /// 默认前景色代替。
+    /// 终端当前的 16 个 ANSI 颜色，见 `palette`。
     pub fn ansi_colors(&self) -> [Rgb; 16] {
+        let palette = self.palette();
+        std::array::from_fn(|i| palette[i])
+    }
+
+    /// 终端当前的 256 色调色板，跟着主题、配置和程序用 OSC 4 改的颜色走。读不到时用默认
+    /// 前景色代替。
+    pub fn palette(&self) -> [Rgb; 256] {
         match self.terminal.color_palette() {
             Ok(palette) => std::array::from_fn(|i| rgb(palette.0[i])),
             Err(err) => {
                 tracing::warn!("failed to read the palette: {err}");
-                [self.peek_colors().0; 16]
+                [self.peek_colors().0; 256]
             }
         }
     }

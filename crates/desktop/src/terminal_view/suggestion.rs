@@ -1,26 +1,36 @@
-//! 按命令历史给出的灰字建议：重查、判断现在能不能画，以及接受整条或一个词。
+//! 按命令历史给出的灰字建议：重读输入、重查，判断现在能不能画，以及接受整条或一个词。
 
 use std::time::Instant;
 
-use runode_terminal::history;
+use runode_terminal::{PromptInput, history};
 
 use super::{ECHO_WAIT, Suggestion, TerminalView};
 
 impl TerminalView {
-    /// 屏幕上的输入或命令历史变了时重查建议；输入没变就沿用上次的结果。在绘制前调用。
-    pub(super) fn refresh_suggestion(&mut self) {
+    /// 屏幕上的输入或命令历史变了时重读输入，重查建议和高亮（`refresh_highlight`）；都没变就
+    /// 沿用上次的结果。在绘制前调用。
+    pub(super) fn refresh_input(&mut self) {
+        let generation = self.config.command_suggestions.then(|| history::shared().generation());
+        if !self.input_changed && generation.is_none_or(|generation| generation == self.history_generation) {
+            return;
+        }
+        self.input_changed = false;
+        if let Some(generation) = generation {
+            self.history_generation = generation;
+        }
+        let wanted = self.config.command_suggestions || self.config.command_highlighting;
+        let input = if wanted { self.session.prompt_input() } else { None };
+        self.refresh_suggestion(input.as_ref());
+        self.refresh_highlight(input.as_ref());
+    }
+
+    fn refresh_suggestion(&mut self, input: Option<&PromptInput>) {
         if !self.config.command_suggestions {
             self.suggestion = None;
             return;
         }
-        let generation = history::shared().generation();
-        if !self.input_changed && generation == self.history_generation {
-            return;
-        }
-        self.input_changed = false;
-        self.history_generation = generation;
         // 光标后面还有字（包括插件自己画的建议）时不给建议，免得叠在一起。
-        let Some(input) = self.session.prompt_input().filter(|input| input.at_end) else {
+        let Some(input) = input.filter(|input| input.at_end) else {
             self.suggestion = None;
             return;
         };
@@ -45,7 +55,7 @@ impl TerminalView {
     pub(super) fn accept_suggestion(&mut self, word: bool) -> bool {
         // 有了新输出还没重画时，先按现在的屏幕重查一次，不接受已经过时的建议。
         if self.input_changed {
-            self.refresh_suggestion();
+            self.refresh_input();
         }
         // 程序把光标藏起来时建议也不画，同样不接受。
         if self.session.frame().cursor.is_none() {

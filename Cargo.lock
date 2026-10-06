@@ -5032,6 +5032,7 @@ dependencies = [
  "runode-completion",
  "runode-config",
  "runode-git-status",
+ "runode-highlight",
  "runode-host",
  "runode-paths",
  "runode-preview",
@@ -5095,6 +5096,15 @@ dependencies = [
 [[package]]
 name = "runode-git-status"
 version = "0.1.0"
+
+[[package]]
+name = "runode-highlight"
+version = "0.1.0"
+dependencies = [
+ "runode-completion",
+ "runode-paths",
+ "runode-shared-types",
+]
 
 [[package]]
 name = "runode-host"
