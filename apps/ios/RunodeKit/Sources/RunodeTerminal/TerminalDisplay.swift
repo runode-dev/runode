@@ -8,6 +8,11 @@ public enum TerminalInput: Sendable, Hashable {
     case text(String)
     /// 粘贴的文字，按括号粘贴的规矩编码。
     case paste(String)
+    /// 程序自己管滚动时（见 `VTerminal.programScrolls`）在第 `row` 行第 `column` 列滚了 `lines` 行，
+    /// 负数往上看更早的内容。
+    case wheel(lines: Int, column: Int, row: Int)
+    /// 程序开着鼠标上报时在第 `row` 行第 `column` 列点了一下（全屏 agent 界面里的按钮、链接）。
+    case click(column: Int, row: Int)
 }
 
 /// 画终端的一方。视图模型在 VT 换了、内容变了、响铃时通知它；它自己从 VT 读要画的东西。

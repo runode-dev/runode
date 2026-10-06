@@ -186,6 +186,8 @@ public final class TerminalModel {
             case .key(let key): terminal.encode(key)
             case .text(let text): Array(text.utf8)
             case .paste(let text): terminal.encodePaste(text)
+            case .wheel(let lines, let column, let row): terminal.encodeWheel(lines: lines, column: column, row: row)
+            case .click(let column, let row): terminal.encodeClick(column: column, row: row)
             }
         guard !bytes.isEmpty else { return }
         link.sendInput(Data(bytes), channel: channel, generation: generation)

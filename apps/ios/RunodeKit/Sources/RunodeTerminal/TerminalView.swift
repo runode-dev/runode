@@ -20,8 +20,10 @@
     /// 辅助栏。字号跟着系统的动态字体走。网格比视图矮时贴着底边放，上面空出来的是终端背景色。
     ///
     /// 结构：自己是第一响应者，负责键盘输入（`UITextInput`）；里面一个 `UIScrollView` 管缩放和平移，
-    /// 再里面 `TerminalGridView` 用 CoreText 画网格。网格按字体的自然大小排，缩放靠滚动视图的
-    /// `zoomScale`，缩放结束后按新的比例重画，字不发虚。
+    /// 再里面一个和网格一样大的容器，容器里 `TerminalGridView` 用 CoreText 画网格。网格按字体的自然
+    /// 大小排，缩放靠滚动视图的 `zoomScale`（缩放的是容器），缩放结束后按新的比例重画，字不发虚。
+    /// 平滑滚动错开不足一行时，网格在容器里往下挪，容器顶上露出另画的视口上面那一行，底下多出的被
+    /// 容器裁掉；挪的是现成的位图，不用每帧重画。
     public final class TerminalView: UIView, UIScrollViewDelegate, UIGestureRecognizerDelegate {
         public weak var delegate: (any TerminalViewDelegate)?
 
@@ -29,6 +31,10 @@
         private var terminal: VTerminal?
         private let scrollView = UIScrollView()
         private let grid = TerminalGridView()
+        /// 缩放的对象：装着网格和视口上面那一行，平滑滚动错开时裁掉露出网格的部分。
+        private let gridContainer = UIView()
+        /// 视口上面那一行（`ScreenFrame.above`），平滑滚动错开时从顶上露出来。
+        private let aboveGrid = TerminalGridView()
         private let markedLabel = UILabel()
         private lazy var accessoryBar = KeyboardAccessoryBar(owner: self)
         private var refreshScheduled = false
@@ -37,6 +43,11 @@
         private var lastFitSize: GridSize?
         private var lastScrolledBack = false
         private var scrollbackRemainder: CGFloat = 0
+        /// 松手后接着滚的惯性：速度（点每秒，往下拖为正）和驱动它的显示刷新。
+        private var momentumVelocity: CGFloat = 0
+        private var momentumLink: CADisplayLink?
+        /// 拖动开始时手指所在的格子，程序自己管滚动时滚轮事件报在这里。
+        private var scrollAnchor = (column: 0, row: 0)
         private var repeatTask: Task<Void, Never>?
         private let bellFeedback = UIImpactFeedbackGenerator(style: .light)
         private var lastBell = ContinuousClock.now - .seconds(1)
@@ -86,14 +97,17 @@
             scrollView.delaysContentTouches = false
             scrollView.keyboardDismissMode = .none
             addSubview(scrollView)
-            scrollView.addSubview(grid)
+            scrollView.addSubview(gridContainer)
+            gridContainer.addSubview(aboveGrid)
+            gridContainer.addSubview(grid)
+            aboveGrid.isHidden = true
 
             markedLabel.isHidden = true
             markedLabel.textColor = .white
             markedLabel.backgroundColor = UIColor.darkGray
             grid.addSubview(markedLabel)
 
-            let tap = UITapGestureRecognizer(target: self, action: #selector(handleTap))
+            let tap = UITapGestureRecognizer(target: self, action: #selector(handleTap(_:)))
             addGestureRecognizer(tap)
             let oneFinger = UIPanGestureRecognizer(target: self, action: #selector(handleScrollback(_:)))
             oneFinger.maximumNumberOfTouches = 1
@@ -104,11 +118,17 @@
             twoFingers.maximumNumberOfTouches = 2
             twoFingers.delegate = self
             scrollView.addGestureRecognizer(twoFingers)
+            // 手指一按下就停住惯性，和系统的滚动视图一样；不认成别的手势，也不拦触摸。
+            let touchDown = UILongPressGestureRecognizer(target: self, action: #selector(handleTouchDown(_:)))
+            touchDown.minimumPressDuration = 0
+            touchDown.cancelsTouchesInView = false
+            touchDown.delegate = self
+            scrollView.addGestureRecognizer(touchDown)
             isAccessibilityElement = true
             accessibilityLabel = "终端"
             accessibilityHint = "轻点两下打开键盘"
             accessibilityTraits = [.allowsDirectInteraction, .updatesFrequently]
-            grid.font = TerminalFont(size: Self.fontSizes(for: traitCollection).base)
+            setFont(TerminalFont(size: Self.fontSizes(for: traitCollection).base))
             registerForTraitChanges([UITraitPreferredContentSizeCategory.self]) { (view: TerminalView, _) in
                 view.contentSizeDidChange()
             }
@@ -116,11 +136,17 @@
 
         /// 动态字体改了：换字号，重新排网格、算「适配手机」的尺寸。
         private func contentSizeDidChange() {
-            grid.font = TerminalFont(size: Self.fontSizes(for: traitCollection).base)
+            setFont(TerminalFont(size: Self.fontSizes(for: traitCollection).base))
             userZoomed = false
             layoutGrid()
-            grid.setNeedsDisplay()
             reportFitSize()
+        }
+
+        private func setFont(_ font: TerminalFont) {
+            grid.font = font
+            aboveGrid.font = font
+            grid.setNeedsDisplay()
+            aboveGrid.setNeedsDisplay()
         }
 
         /// VoiceOver 读屏幕底部几行有字的内容。
@@ -138,8 +164,10 @@
 
         /// 换一份 VT（重新 `Attach` 后新建的），整屏重画。
         public func show(_ terminal: VTerminal?, settings: TermSettings) {
+            stopMomentum()
             self.terminal = terminal
             grid.settings = settings
+            aboveGrid.settings = settings
             grid.screen = ScreenFrame()
             backgroundColor = Self.uiColor(settings.background)
             refreshNow()
@@ -147,8 +175,10 @@
 
         public func updateSettings(_ settings: TermSettings) {
             grid.settings = settings
+            aboveGrid.settings = settings
             backgroundColor = Self.uiColor(settings.background)
             grid.setNeedsDisplay()
+            aboveGrid.setNeedsDisplay()
             scheduleRefresh()
         }
 
@@ -201,8 +231,12 @@
                     grid.invalidateCursor()
                 }
             }
+            if change.full || change.aboveChanged {
+                updateAboveRow()
+            }
+            applyScrollOffset()
             positionMarkedText()
-            let scrolledBack = !terminal.scrollbar.atBottom
+            let scrolledBack = !terminal.viewportAtBottom
             if scrolledBack != lastScrolledBack {
                 lastScrolledBack = scrolledBack
                 delegate?.terminalView(self, didScrollBack: scrolledBack)
@@ -235,8 +269,10 @@
         private func layoutGrid() {
             let zoom = scrollView.zoomScale
             scrollView.zoomScale = 1
-            grid.frame = CGRect(origin: .zero, size: grid.gridSize)
-            scrollView.contentSize = grid.frame.size
+            gridContainer.frame = CGRect(origin: .zero, size: grid.gridSize)
+            grid.frame = gridContainer.bounds
+            applyScrollOffset()
+            scrollView.contentSize = gridContainer.frame.size
             if userZoomed {
                 scrollView.zoomScale = zoom
             } else {
@@ -260,7 +296,7 @@
         }
 
         public func viewForZooming(in scrollView: UIScrollView) -> UIView? {
-            grid
+            gridContainer
         }
 
         public func scrollViewDidZoom(_ scrollView: UIScrollView) {
@@ -291,8 +327,37 @@
             scale = max(scale, 1)
             if abs(grid.contentScaleFactor - scale) > 0.01 {
                 grid.contentScaleFactor = scale
+                aboveGrid.contentScaleFactor = scale
                 grid.setNeedsDisplay()
+                aboveGrid.setNeedsDisplay()
             }
+        }
+
+        /// 把视口上面那一行抄成只有一行、没有光标的一屏，交给 `aboveGrid` 画。
+        private func updateAboveRow() {
+            var row = ScreenFrame()
+            row.columns = grid.screen.columns
+            row.rows = grid.screen.above.isEmpty ? 0 : 1
+            row.cells = grid.screen.above.isEmpty ? [] : [grid.screen.above]
+            row.background = grid.screen.background
+            row.foreground = grid.screen.foreground
+            row.cursorColor = grid.screen.cursorColor
+            aboveGrid.screen = row
+            aboveGrid.setNeedsDisplay()
+        }
+
+        /// 平滑滚动的错开量：网格在容器里往下挪不足一行，视口上面那一行跟在它上面。只挪位置，不重画。
+        private func applyScrollOffset() {
+            let rowHeight = grid.font.cellHeight
+            let shift = CGFloat(grid.screen.scrollOffset) * rowHeight
+            let width = gridContainer.bounds.width
+            if grid.frame.minY != shift {
+                grid.frame.origin.y = shift
+            }
+            aboveGrid.frame = CGRect(x: 0, y: shift - rowHeight, width: width, height: rowHeight)
+            aboveGrid.isHidden = shift == 0
+            // 不错开时不裁，组字的文字超出网格右边也看得见。
+            gridContainer.clipsToBounds = shift != 0
         }
 
         /// 网格比屏幕窄时左右居中；比屏幕矮时贴着底边（靠近键盘和底栏，新输出在那里），上面空着的地方
@@ -399,27 +464,79 @@
         }
 
         @objc private func handleScrollback(_ pan: UIPanGestureRecognizer) {
-            guard let terminal else { return }
-            let rowHeight = grid.font.cellHeight * scrollView.zoomScale
             switch pan.state {
             case .began:
+                stopMomentum()
                 scrollbackRemainder = 0
+                let point = pan.location(in: grid)
+                scrollAnchor = (
+                    column: Int(point.x / max(grid.font.cellWidth, 1)), row: Int(point.y / max(grid.font.cellHeight, 1))
+                )
             case .changed:
-                scrollbackRemainder += pan.translation(in: self).y
+                let distance = pan.translation(in: self).y
                 pan.setTranslation(.zero, in: self)
-                let rows = Int(scrollbackRemainder / rowHeight)
-                guard rows != 0 else { return }
-                scrollbackRemainder -= CGFloat(rows) * rowHeight
-                // 往下拖看更早的内容：视口往上滚。
-                terminal.scroll(by: -rows)
-                refreshNow()
+                scrollContent(by: distance)
+            case .ended:
+                startMomentum(velocity: pan.velocity(in: self).y)
             default:
                 break
             }
         }
 
+        @objc private func handleTouchDown(_ press: UILongPressGestureRecognizer) {
+            if press.state == .began { stopMomentum() }
+        }
+
+        /// 手指（或惯性）往下挪了 `distance` 点，往下拖看更早的内容：回滚历史跟着手指按像素滚；程序自己
+        /// 管滚动时（全屏的 agent 界面、开着备用滚动的分页器）只能按整行，攒够一行给它发一个滚轮。返回假
+        /// 表示回滚历史已经到头、挪不动了。
+        @discardableResult
+        private func scrollContent(by distance: CGFloat) -> Bool {
+            guard let terminal else { return false }
+            let rowHeight = grid.font.cellHeight * scrollView.zoomScale
+            guard rowHeight > 0 else { return false }
+            guard terminal.programScrolls else {
+                guard terminal.scrollSmoothly(lines: Double(distance / rowHeight)) else { return false }
+                refreshNow()
+                return true
+            }
+            scrollbackRemainder += distance
+            let rows = Int(scrollbackRemainder / rowHeight)
+            guard rows != 0 else { return true }
+            scrollbackRemainder -= CGFloat(rows) * rowHeight
+            delegate?.terminalView(
+                self, didInput: .wheel(lines: -rows, column: scrollAnchor.column, row: scrollAnchor.row))
+            return true
+        }
+
+        /// 松手时还在快速拖：按系统滚动视图的减速率接着滚，滚到头或者慢下来就停。
+        private func startMomentum(velocity: CGFloat) {
+            stopMomentum()
+            guard abs(velocity) > 200 else { return }
+            momentumVelocity = velocity
+            let link = CADisplayLink(target: self, selector: #selector(stepMomentum(_:)))
+            link.add(to: .main, forMode: .common)
+            momentumLink = link
+        }
+
+        @objc private func stepMomentum(_ link: CADisplayLink) {
+            let elapsed = min(link.targetTimestamp - link.timestamp, 0.05)
+            momentumVelocity *= pow(UIScrollView.DecelerationRate.normal.rawValue, elapsed * 1000)
+            guard abs(momentumVelocity) > 30, scrollContent(by: momentumVelocity * elapsed) else {
+                stopMomentum()
+                return
+            }
+        }
+
+        private func stopMomentum() {
+            momentumLink?.invalidate()
+            momentumLink = nil
+            momentumVelocity = 0
+        }
+
         /// 回到最底下，跟着新输出走。
         public func scrollToBottom() {
+            stopMomentum()
             terminal?.scrollToBottom()
             refreshNow()
         }
@@ -446,14 +563,36 @@
             return resigned
         }
 
-        @objc private func handleTap() {
+        /// 轻点：程序开着鼠标上报时当成一次点击发给它（全屏 agent 界面里「跳到底部」这类按钮）。只有点在
+        /// 光标那行的上一行及以下（输入框和它下面的状态栏）才弹键盘，点上面的对话、输出不弹，键盘开着时
+        /// 收起；看不到光标时，程序管鼠标就只点击，不管就照旧弹键盘。
+        @objc private func handleTap(_ tap: UITapGestureRecognizer) {
+            let point = tap.location(in: grid)
+            let row = Int((point.y / grid.font.cellHeight).rounded(.down))
+            let tracking = terminal?.mouseTracking == true
+            if tracking, grid.bounds.contains(point) {
+                let column = Int(point.x / grid.font.cellWidth)
+                delegate?.terminalView(self, didInput: .click(column: column, row: row))
+            }
+            let atInput = grid.screen.cursor.map { row >= $0.row - 1 } ?? !tracking
+            if atInput {
+                showKeyboard()
+            } else if isFirstResponder {
+                resignFirstResponder()
+            }
+        }
+
+        /// VoiceOver 下轻点两下：直接打开键盘，不按位置判断。
+        public override func accessibilityActivate() -> Bool {
             showKeyboard()
+            return true
         }
 
         // MARK: 输入
 
         /// 发一份输入给上层；打字时回到最底下、把光标露出来。
         func emit(_ input: TerminalInput) {
+            stopMomentum()
             if lastScrolledBack {
                 terminal?.scrollToBottom()
                 scheduleRefresh()

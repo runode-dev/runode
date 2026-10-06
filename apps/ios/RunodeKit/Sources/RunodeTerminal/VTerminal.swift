@@ -21,10 +21,15 @@ public final class VTerminal {
     private let rowCells: GhosttyRenderStateRowCells
     private let keyEncoder: GhosttyKeyEncoder
     private let keyEvent: GhosttyKeyEvent
+    private let mouseEncoder: GhosttyMouseEncoder
+    private let mouseEvent: GhosttyMouseEvent
     /// 读字素簇的缓冲，够大多数字素簇用，不够时临时分配。
     private let graphemeBuffer: UnsafeMutablePointer<UInt8>
     private static let graphemeCapacity = 64
     private let hold = RenderHold()
+    /// 平滑滚动时视口之外再往回看的零点几行：画的时候整屏往下错开这么多，露出视口上面那一行的
+    /// 一部分。和桌面 `Session` 的 `scroll_offset` 一样，取值在 [0, 1)，视口在历史最顶上时为 0。
+    private var scrollFraction: Double = 0
 
     public private(set) var size: GridSize
     public private(set) var settings: TermSettings
@@ -40,11 +45,15 @@ public final class VTerminal {
         var cells: GhosttyRenderStateRowCells?
         var encoder: GhosttyKeyEncoder?
         var event: GhosttyKeyEvent?
+        var mouseEncoder: GhosttyMouseEncoder?
+        var mouseEvent: GhosttyMouseEvent?
         guard ghostty_render_state_new(nil, &state) == GHOSTTY_SUCCESS, let state,
             ghostty_render_state_row_iterator_new(nil, &iterator) == GHOSTTY_SUCCESS, let iterator,
             ghostty_render_state_row_cells_new(nil, &cells) == GHOSTTY_SUCCESS, let cells,
             ghostty_key_encoder_new(nil, &encoder) == GHOSTTY_SUCCESS, let encoder,
-            ghostty_key_event_new(nil, &event) == GHOSTTY_SUCCESS, let event
+            ghostty_key_event_new(nil, &event) == GHOSTTY_SUCCESS, let event,
+            ghostty_mouse_encoder_new(nil, &mouseEncoder) == GHOSTTY_SUCCESS, let mouseEncoder,
+            ghostty_mouse_event_new(nil, &mouseEvent) == GHOSTTY_SUCCESS, let mouseEvent
         else {
             ghostty_terminal_free(terminal)
             throw .creationFailed
@@ -55,6 +64,8 @@ public final class VTerminal {
         rowCells = cells
         keyEncoder = encoder
         keyEvent = event
+        self.mouseEncoder = mouseEncoder
+        self.mouseEvent = mouseEvent
         graphemeBuffer = .allocate(capacity: Self.graphemeCapacity)
         self.size = size
         self.settings = settings
@@ -62,10 +73,15 @@ public final class VTerminal {
         ghostty_terminal_resize(
             handle, max(size.cols, 1), max(size.rows, 1), UInt32(size.cellWidthPx), UInt32(size.cellHeightPx))
         installRenderHold()
+        // 多取视口上面一行：平滑滚动时画面往下错开，顶上要露出它的一部分。
+        var overscan = GhosttyRenderStateOverscan(above: 1, below: 0)
+        ghostty_render_state_set(renderState, GHOSTTY_RENDER_STATE_OPTION_OVERSCAN, &overscan)
         applyTheme(settings)
     }
 
     deinit {
+        ghostty_mouse_event_free(mouseEvent)
+        ghostty_mouse_encoder_free(mouseEncoder)
         ghostty_key_event_free(keyEvent)
         ghostty_key_encoder_free(keyEncoder)
         ghostty_render_state_row_cells_free(rowCells)
@@ -93,6 +109,7 @@ public final class VTerminal {
     public func resize(_ newSize: GridSize) {
         guard newSize.cols > 0, newSize.rows > 0, newSize != size else { return }
         size = newSize
+        scrollFraction = 0
         ghostty_terminal_resize(
             handle, newSize.cols, newSize.rows, UInt32(newSize.cellWidthPx), UInt32(newSize.cellHeightPx))
     }
@@ -207,6 +224,9 @@ public final class VTerminal {
         public var atBottom: Bool { offset + length >= total }
     }
 
+    /// 视口停在最底下，也没有平滑滚动错开的零点几行。
+    public var viewportAtBottom: Bool { scrollbar.atBottom && scrollFraction == 0 }
+
     public var scrollbar: Scrollbar {
         var bar = GhosttyTerminalScrollbar()
         guard ghostty_terminal_get(handle, GHOSTTY_TERMINAL_DATA_SCROLLBAR, &bar) == GHOSTTY_SUCCESS else {
@@ -218,6 +238,7 @@ public final class VTerminal {
     /// 视口往上（负数）或往下滚 `rows` 行。
     public func scroll(by rows: Int) {
         guard rows != 0 else { return }
+        scrollFraction = 0
         var behavior = GhosttyTerminalScrollViewport()
         behavior.tag = GHOSTTY_SCROLL_VIEWPORT_DELTA
         behavior.value.delta = rows
@@ -226,9 +247,118 @@ public final class VTerminal {
 
     /// 回到最底下，跟着新输出走。
     public func scrollToBottom() {
+        scrollFraction = 0
         var behavior = GhosttyTerminalScrollViewport()
         behavior.tag = GHOSTTY_SCROLL_VIEWPORT_BOTTOM
         ghostty_terminal_scroll_viewport(handle, behavior)
+    }
+
+    /// 按像素滚动回滚历史：`lines` 为正往回看更早的内容，可以是零点几行。凑够整行的部分挪视口，
+    /// 剩下的记成错开量（`ScreenFrame.scrollOffset`），做法同桌面的 `Session::scroll_smoothly`。
+    /// 返回画面是否变了；到了历史顶上或者已经在最底下、挪不动时为假。
+    @discardableResult
+    public func scrollSmoothly(lines: Double) -> Bool {
+        let before = (scrollbar.offset, scrollFraction)
+        var offset = scrollFraction + lines
+        let whole = offset.rounded(.down)
+        if whole != 0 {
+            var behavior = GhosttyTerminalScrollViewport()
+            behavior.tag = GHOSTTY_SCROLL_VIEWPORT_DELTA
+            behavior.value.delta = -Int(whole)
+            ghostty_terminal_scroll_viewport(handle, behavior)
+            // 到了历史顶上或者已经在底部时视口挪不动，按实际挪了多少扣。
+            offset -= Double(before.0 - scrollbar.offset)
+        }
+        // 视口上面没有行时不能往下错开；在底部继续往下滚时也不会错开成负的。
+        let top = scrollbar.offset
+        scrollFraction = top == 0 ? 0 : min(max(offset, 0), 0.999)
+        return (top, scrollFraction) != before
+    }
+
+    /// 滚动归程序管：开着鼠标上报时滚轮发给它（全屏的 agent 界面多半这样自己滚）；在备用屏上开着
+    /// 备用滚动（模式 1007）时换成上下方向键。两样都不是时滚的是这份 VT 的回滚历史。
+    public var programScrolls: Bool {
+        mouseTracking || (alternateScreen && mode(1007, ansi: false))
+    }
+
+    /// 程序开着鼠标上报（任何一种）。
+    public var mouseTracking: Bool {
+        var tracking = false
+        guard ghostty_terminal_get(handle, GHOSTTY_TERMINAL_DATA_MOUSE_TRACKING, &tracking) == GHOSTTY_SUCCESS else {
+            return false
+        }
+        return tracking
+    }
+
+    private var alternateScreen: Bool {
+        var screen = GHOSTTY_TERMINAL_SCREEN_PRIMARY
+        ghostty_terminal_get(handle, GHOSTTY_TERMINAL_DATA_ACTIVE_SCREEN, &screen)
+        return screen == GHOSTTY_TERMINAL_SCREEN_ALTERNATE
+    }
+
+    /// 在第 `row` 行第 `column` 列滚 `lines` 行（负数往上看更早的内容）要发给程序的字节：开着鼠标上报
+    /// 时每行一个滚轮事件（同桌面的 `Session::scroll`），否则按备用滚动每行一个方向键。程序不管滚动时为空。
+    public func encodeWheel(lines: Int, column: Int, row: Int) -> [UInt8] {
+        guard lines != 0 else { return [] }
+        guard mouseTracking else {
+            guard programScrolls else { return [] }
+            let arrow = encode(KeyInput(key: lines < 0 ? .up : .down))
+            return Array([[UInt8]](repeating: arrow, count: abs(lines)).joined())
+        }
+        let button = lines < 0 ? GHOSTTY_MOUSE_BUTTON_FOUR : GHOSTTY_MOUSE_BUTTON_FIVE
+        var bytes: [UInt8] = []
+        for _ in 0..<abs(lines) {
+            guard encodeMouse(GHOSTTY_MOUSE_ACTION_PRESS, button: button, column: column, row: row, into: &bytes)
+            else { break }
+        }
+        return bytes
+    }
+
+    /// 在第 `row` 行第 `column` 列点一下（左键按下再松开）要发给程序的字节；程序没开鼠标上报时为空。
+    public func encodeClick(column: Int, row: Int) -> [UInt8] {
+        guard mouseTracking else { return [] }
+        var bytes: [UInt8] = []
+        for action in [GHOSTTY_MOUSE_ACTION_PRESS, GHOSTTY_MOUSE_ACTION_RELEASE] {
+            guard encodeMouse(action, button: GHOSTTY_MOUSE_BUTTON_LEFT, column: column, row: row, into: &bytes)
+            else { return [] }
+        }
+        return bytes
+    }
+
+    /// 按程序要的鼠标上报格式编码一个事件，追加到 `bytes`；编码失败时返回假。
+    private func encodeMouse(
+        _ action: GhosttyMouseAction, button: GhosttyMouseButton, column: Int, row: Int, into bytes: inout [UInt8]
+    ) -> Bool {
+        let cellWidth = UInt32(max(size.cellWidthPx, 1))
+        let cellHeight = UInt32(max(size.cellHeightPx, 1))
+        var encoderSize = GhosttyMouseEncoderSize()
+        encoderSize.size = MemoryLayout<GhosttyMouseEncoderSize>.size
+        encoderSize.screen_width = UInt32(size.cols) * cellWidth
+        encoderSize.screen_height = UInt32(size.rows) * cellHeight
+        encoderSize.cell_width = cellWidth
+        encoderSize.cell_height = cellHeight
+        ghostty_mouse_encoder_setopt_from_terminal(mouseEncoder, handle)
+        ghostty_mouse_encoder_setopt(mouseEncoder, GHOSTTY_MOUSE_ENCODER_OPT_SIZE, &encoderSize)
+        var pressed = action != GHOSTTY_MOUSE_ACTION_RELEASE
+        ghostty_mouse_encoder_setopt(mouseEncoder, GHOSTTY_MOUSE_ENCODER_OPT_ANY_BUTTON_PRESSED, &pressed)
+        ghostty_mouse_event_set_action(mouseEvent, action)
+        ghostty_mouse_event_set_button(mouseEvent, button)
+        ghostty_mouse_event_set_mods(mouseEvent, 0)
+        // 落在格子中间，像素坐标换算成格子时不会因为舍入落到隔壁。
+        let clampedColumn = min(max(column, 0), Int(size.cols) - 1)
+        let clampedRow = min(max(row, 0), Int(size.rows) - 1)
+        ghostty_mouse_event_set_position(
+            mouseEvent,
+            GhosttyMousePosition(
+                x: (Float(clampedColumn) + 0.5) * Float(cellWidth), y: (Float(clampedRow) + 0.5) * Float(cellHeight)))
+        var output = [CChar](repeating: 0, count: 64)
+        var written = 0
+        let result = output.withUnsafeMutableBufferPointer { buffer in
+            ghostty_mouse_encoder_encode(mouseEncoder, mouseEvent, buffer.baseAddress, buffer.count, &written)
+        }
+        guard result == GHOSTTY_SUCCESS else { return false }
+        bytes.append(contentsOf: output.prefix(written).map { UInt8(bitPattern: $0) })
+        return true
     }
 
     // MARK: 读屏幕
@@ -263,19 +393,34 @@ public final class VTerminal {
         frame.foreground = foreground
         frame.cursorColor = cursorColor
 
+        // 视口在历史最顶上时取不到上面那一行，也就不能往下错开。
+        var captured = GhosttyRenderStateOverscan()
+        ghostty_render_state_get(renderState, GHOSTTY_RENDER_STATE_DATA_OVERSCAN, &captured)
+        let aboveCount = captured.above > 0 ? frame.columns : 0
+        var aboveChanged = frame.above.count != aboveCount
+        if aboveChanged {
+            frame.above = Array(repeating: .blank, count: aboveCount)
+        }
+        frame.scrollOffset = aboveCount == 0 ? 0 : scrollFraction
+
         var changedRows: [Int] = []
-        if dirty != GHOSTTY_RENDER_STATE_DIRTY_FALSE || full {
+        if dirty != GHOSTTY_RENDER_STATE_DIRTY_FALSE || full || aboveChanged {
             var iterator: GhosttyRenderStateRowIterator? = rowIterator
             ghostty_render_state_get(renderState, GHOSTTY_RENDER_STATE_DATA_ROW_ITERATOR, &iterator)
-            var y = 0
-            while ghostty_render_state_row_iterator_next(rowIterator), y < frame.rows {
+            while ghostty_render_state_row_iterator_next(rowIterator) {
+                var y: Int32 = 0
+                ghostty_render_state_row_get(rowIterator, GHOSTTY_RENDER_STATE_ROW_DATA_VIEWPORT_Y, &y)
                 var rowDirty = false
                 ghostty_render_state_row_get(rowIterator, GHOSTTY_RENDER_STATE_ROW_DATA_DIRTY, &rowDirty)
-                if full || rowDirty {
-                    readRow(into: &frame.cells[y], columns: frame.columns)
-                    changedRows.append(y)
+                if y == -1, aboveCount > 0 {
+                    if full || rowDirty || aboveChanged {
+                        readRow(into: &frame.above, columns: frame.columns)
+                        aboveChanged = true
+                    }
+                } else if y >= 0, Int(y) < frame.rows, full || rowDirty {
+                    readRow(into: &frame.cells[Int(y)], columns: frame.columns)
+                    changedRows.append(Int(y))
                 }
-                y += 1
             }
         }
 
@@ -283,7 +428,8 @@ public final class VTerminal {
         let cursorChanged = cursor != frame.cursor
         frame.cursor = cursor
         ghostty_render_state_clean(renderState)
-        return FrameChange(full: full, rows: full ? [] : changedRows, cursorChanged: cursorChanged)
+        return FrameChange(
+            full: full, rows: full ? [] : changedRows, cursorChanged: cursorChanged, aboveChanged: aboveChanged)
     }
 
     /// 当前一屏的文字，一行一个，行尾空白去掉。测试和调试用。

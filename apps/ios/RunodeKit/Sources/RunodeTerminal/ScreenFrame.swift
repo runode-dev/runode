@@ -82,6 +82,10 @@ public struct ScreenFrame: Sendable {
     public var rows: Int
     /// 一行一个数组，每个数组 `columns` 个格子。
     public var cells: [[ScreenCell]]
+    /// 视口上面那一行，平滑滚动错开时从顶上露出一部分；视口在历史最顶上时为空。
+    public var above: [ScreenCell]
+    /// 平滑滚动时整屏往下错开几分之一行，在 [0, 1) 里；`above` 为空时总是 0。
+    public var scrollOffset: Double
     public var background: Rgb
     public var foreground: Rgb
     /// 程序或主题明确设了的光标色。
@@ -93,6 +97,8 @@ public struct ScreenFrame: Sendable {
         columns = 0
         rows = 0
         cells = []
+        above = []
+        scrollOffset = 0
         background = TermSettings.default.background
         foreground = TermSettings.default.foreground
         cursorColor = nil
@@ -101,14 +107,17 @@ public struct ScreenFrame: Sendable {
 
     /// 屏幕上的文字，一行一个，行尾空白去掉；宽字符的占位格不算。
     public var lines: [String] {
-        cells.map { row in
-            var line = ""
-            for cell in row where cell.width != .spacerTail && cell.width != .spacerHead {
-                line += cell.text.isEmpty ? " " : cell.text
-            }
-            while line.last == " " { line.removeLast() }
-            return line
+        cells.map(Self.text(of:))
+    }
+
+    /// 一行的文字，行尾空白去掉；宽字符的占位格不算。
+    static func text(of row: [ScreenCell]) -> String {
+        var line = ""
+        for cell in row where cell.width != .spacerTail && cell.width != .spacerHead {
+            line += cell.text.isEmpty ? " " : cell.text
         }
+        while line.last == " " { line.removeLast() }
+        return line
     }
 }
 
@@ -118,8 +127,10 @@ public struct FrameChange: Sendable, Hashable {
     public var rows: [Int]
     /// 光标变了（位置、形状、可见）。
     public var cursorChanged: Bool
+    /// 视口上面那一行（`ScreenFrame.above`）变了。
+    public var aboveChanged: Bool
 
-    public var isEmpty: Bool { !full && rows.isEmpty && !cursorChanged }
+    public var isEmpty: Bool { !full && rows.isEmpty && !cursorChanged && !aboveChanged }
 
-    public static let none = FrameChange(full: false, rows: [], cursorChanged: false)
+    public static let none = FrameChange(full: false, rows: [], cursorChanged: false, aboveChanged: false)
 }

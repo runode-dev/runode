@@ -111,6 +111,66 @@ import Testing
         #expect(vt.scrollbar.atBottom)
     }
 
+    @Test func smoothScrollKeepsTheFractionAndTheRowAbove() throws {
+        let vt = try terminal()
+        for line in 1...20 {
+            vt.feed(Array("line \(line)\r\n".utf8))
+        }
+        var frame = ScreenFrame()
+        _ = vt.refresh(&frame)
+        #expect(frame.scrollOffset == 0)
+        // 往回看一行半：视口挪一行，再错开半行，露出的是视口上面的第 15 行。
+        #expect(vt.scrollSmoothly(lines: 1.5))
+        let change = vt.refresh(&frame)
+        #expect(change.aboveChanged)
+        #expect(frame.lines.first == "line 16")
+        #expect(frame.scrollOffset == 0.5)
+        #expect(ScreenFrame.text(of: frame.above) == "line 15")
+        #expect(!vt.viewportAtBottom)
+        // 往下滚过头：回到底部，不会错开成负的；再往下挪不动。
+        #expect(vt.scrollSmoothly(lines: -3))
+        _ = vt.refresh(&frame)
+        #expect(frame.scrollOffset == 0)
+        #expect(vt.viewportAtBottom)
+        #expect(!vt.scrollSmoothly(lines: -1))
+        // 滚到历史最顶上：上面没有行了，也就不错开。
+        vt.scrollSmoothly(lines: 100.5)
+        _ = vt.refresh(&frame)
+        #expect(frame.above.isEmpty)
+        #expect(frame.scrollOffset == 0)
+        #expect(!vt.scrollSmoothly(lines: 0.5))
+    }
+
+    @Test func wheelGoesToProgramsThatTrackTheMouse() throws {
+        let vt = try terminal()
+        #expect(!vt.programScrolls)
+        #expect(vt.encodeWheel(lines: -1, column: 2, row: 3).isEmpty)
+        // 开 SGR 格式的鼠标上报：往上滚是 64 号键，往下是 65，坐标从 1 数。
+        vt.feed(Array("\u{1b}[?1000h\u{1b}[?1006h".utf8))
+        #expect(vt.programScrolls)
+        #expect(vt.encodeWheel(lines: -2, column: 2, row: 3) == Array("\u{1b}[<64;3;4M\u{1b}[<64;3;4M".utf8))
+        #expect(vt.encodeWheel(lines: 1, column: 99, row: 0) == Array("\u{1b}[<65;20;1M".utf8))
+    }
+
+    @Test func clickGoesToProgramsThatTrackTheMouse() throws {
+        let vt = try terminal()
+        #expect(vt.encodeClick(column: 2, row: 3).isEmpty)
+        // SGR 格式：左键按下是 M 结尾，松开是 m 结尾。
+        vt.feed(Array("\u{1b}[?1000h\u{1b}[?1006h".utf8))
+        #expect(vt.encodeClick(column: 2, row: 3) == Array("\u{1b}[<0;3;4M\u{1b}[<0;3;4m".utf8))
+    }
+
+    @Test func wheelOnAlternateScreenSendsArrows() throws {
+        let vt = try terminal()
+        vt.feed(Array("\u{1b}[?1049h".utf8))
+        #expect(vt.programScrolls)
+        #expect(vt.encodeWheel(lines: 2, column: 0, row: 0) == Array("\u{1b}[B\u{1b}[B".utf8))
+        // 程序关了备用滚动：滚的是 VT 自己的视口，不发东西。
+        vt.feed(Array("\u{1b}[?1007l".utf8))
+        #expect(!vt.programScrolls)
+        #expect(vt.encodeWheel(lines: -1, column: 0, row: 0).isEmpty)
+    }
+
     @Test func keysFollowTerminalModes() throws {
         let vt = try terminal()
         #expect(vt.encode(KeyInput(key: .up)) == Array("\u{1b}[A".utf8))
