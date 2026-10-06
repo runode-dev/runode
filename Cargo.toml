@@ -61,7 +61,7 @@ objc2-app-kit = { version = "0.3", default-features = false }
 rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }
 rcgen = { version = "0.14", default-features = false, features = ["crypto", "ring"] }
 ring = "0.17"
-# `runode remote pair` 在终端里画配对的二维码；不要默认特性（画成图片、SVG 用不上）。
+# 配对的二维码：`runode remote pair` 画在终端里，设置窗口画在界面上；不要默认特性（画成图片、SVG 用不上）。
 qrcode = { version = "0.14", default-features = false }
 
 [profile.dev.package."*"]

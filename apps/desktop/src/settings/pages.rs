@@ -38,6 +38,7 @@ enum Item {
     AgentExclude,
     ConfigFiles,
     ConfigFileActions,
+    Pairing,
 }
 
 #[derive(Clone, Copy)]
@@ -147,7 +148,9 @@ impl Page {
                 Row("agent-blocked-sound", Sound),
                 AgentExclude,
             ],
-            Self::Remote => &[Row("remote-access", Switch), Row("remote-access-port", Text(80.))],
+            Self::Remote => {
+                &[Row("remote-access", Switch), Row("remote-access-port", Text(80.)), Section("pairing"), Pairing]
+            }
             Self::Keybinds => &[],
         }
     }
@@ -167,7 +170,7 @@ impl Page {
                 Item::Palette => Some("palette"),
                 Item::AgentExclude => Some("agent-notifications-exclude"),
                 Item::ConfigFiles => Some("config-file"),
-                Item::Section(_) | Item::ConfigFileActions => None,
+                Item::Section(_) | Item::ConfigFileActions | Item::Pairing => None,
             })
             .collect()
     }
@@ -277,6 +280,7 @@ impl SettingsView {
                 Item::AgentExclude => self.render_agent_exclude(colors, cx).into_any_element(),
                 Item::ConfigFiles => self.render_config_files(colors, window, cx).into_any_element(),
                 Item::ConfigFileActions => self.render_config_file_actions(colors, cx).into_any_element(),
+                Item::Pairing => self.render_pairing(colors, cx).into_any_element(),
             };
             page = page.child(element);
         }

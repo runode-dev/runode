@@ -7,16 +7,18 @@
 //! 用文件而不是经宿主转交，是因为监听方和宿主在同一个进程里，宿主却不依赖远程访问；命令行和
 //! 监听方本来就都能读写数据目录。
 
-use std::{io, path::PathBuf, time::Duration};
+use std::{io, net::IpAddr, path::PathBuf, time::Duration};
 
 use runode_paths::Dirs;
-use runode_protocol::remote::{Bytes, DeviceId, PAIRING_MAX_FAILURES, RejectReason, SECRET_LEN};
+use runode_protocol::remote::{Bytes, DeviceId, PAIRING_MAX_FAILURES, PairingUri, RejectReason, SECRET_LEN};
 use serde::{Deserialize, Serialize};
 
 use crate::{
+    addrs::local_addresses,
     devices::{self, Device},
     files::{no_home, random, read_json, write_json},
     now_unix,
+    status::ListenerStatus,
 };
 
 /// 配对口令文件的内容。
@@ -96,6 +98,31 @@ impl PairingTicket {
     /// 过期的时刻，Unix 秒。
     pub fn expires_at(&self) -> u64 {
         self.expires_at
+    }
+
+    /// 手机扫的配对 URI：监听方 `status` 的主机名、证书指纹和端口，这次的口令，地址先列 `extra`，
+    /// 再列本机的各个地址。监听方写的指纹长度不对时报 `InvalidData`。
+    pub fn uri(&self, status: &ListenerStatus, extra: &[IpAddr]) -> io::Result<PairingUri> {
+        let fingerprint = status
+            .fingerprint
+            .0
+            .as_slice()
+            .try_into()
+            .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "the listener wrote a bad fingerprint"))?;
+        let mut addrs = extra.to_vec();
+        for addr in local_addresses() {
+            if !addrs.contains(&addr) {
+                addrs.push(addr);
+            }
+        }
+        Ok(PairingUri {
+            host_name: status.host_name.clone(),
+            fingerprint,
+            secret: self.secret,
+            port: status.port,
+            addrs,
+            expires_at: self.expires_at,
+        })
     }
 
     /// 看一眼口令文件，配对进行到哪了。

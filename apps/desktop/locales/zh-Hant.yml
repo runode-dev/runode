@@ -397,6 +397,7 @@ settings:
     shell: Shell
     scrollback: 回捲歷史
     clipboard: 剪貼簿
+    pairing: 配對手機
   theme:
     none: 不用主題
     single: 一個主題
@@ -482,7 +483,7 @@ settings:
     clipboard_write: 終端機裡的程式（vim、tmux、經 ssh 連到遠端的 shell 等）能把文字放進剪貼簿。
     clipboard_read: 終端機裡的程式能讀到你複製過的文字，密碼也在內。選「詢問」時先說明是哪個程式要讀。
     terminal_host: 結束 Runode 後工作階段留在背景程序裡照常執行，下次打開接著用。
-    remote_access: 讓配對過的手機經區域網路或 Tailscale 連上這台 Mac 的終端機。用 runode remote pair 配對。
+    remote_access: 讓配對過的手機經區域網路或 Tailscale 連上這台 Mac 的終端機。在下面配對，或者用 runode remote pair。
     remote_access_port: TCP 連接埠，1 到 65535。
     agent_notifications: agent 在你沒在看的分割畫面裡完成或等你回答時發系統通知。只有打包好的 Runode.app 能發通知。
     agent_notifications_exclude: 選中的 agent 不發通知也不出提示音，狀態標記照常顯示。
@@ -523,6 +524,24 @@ settings:
       allow: 允許
       ask: 詢問
       deny: 拒絕
+  pairing:
+    title: 配對手機
+    hint: 用手機上的 Runode 掃碼配對。配好的手機在遠端存取打開時能連上這台 Mac。
+    "off": 先打開上面的遠端存取，再來配對。
+    start: 配對…
+    again: 再配一台
+    cancel: 取消
+    copy: 拷貝連結
+    waiting: "用手機上的 Runode 掃這個 QR 碼，或者把連結傳到手機上打開。%{time} 內有效，等手機連上來。"
+    paired: "已和 %{name} 配對。"
+    background: 結束 Runode 時遠端存取跟著停，手機就連不上了。打開後結束時工作階段和遠端存取留在背景。
+    not_listening: 遠端存取沒在監聽。剛打開的話等幾秒再試；一直這樣的話，連接埠可能被占用了，宿主的日誌裡有原因。
+    stopped: 等手機時遠端存取停了。
+    invalidated: 口令輸錯太多次，已經作廢，再配對一次。
+    expired: 口令過期了，手機沒來配對。
+    replaced: 另一處（比如 runode remote pair）開始了新的配對，這個口令作廢了。
+    too_long: 配對連結太長，畫不成 QR 碼。
+    io_failed: "沒能讀寫配對口令：%{err}"
   keybind:
     action: 動作
     unbind: 去掉快速鍵

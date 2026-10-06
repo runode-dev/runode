@@ -13,10 +13,8 @@ use std::{
 use anyhow::{Context as _, anyhow, bail};
 use qrcode::{Color, EcLevel, QrCode};
 use runode_config::ConfigFile;
-use runode_protocol::remote::{PAIRING_TTL, PairingUri};
-use runode_remote_access::{
-    Device, PairingProgress, PairingTicket, list_devices, listener_status, local_addresses, revoke_device,
-};
+use runode_protocol::remote::PAIRING_TTL;
+use runode_remote_access::{Device, PairingProgress, PairingTicket, list_devices, listener_status, revoke_device};
 
 use crate::Env;
 
@@ -39,23 +37,8 @@ pub(crate) fn pair(
     let Some(status) = listener_status(&env.dirs).context("cannot tell whether remote access is on")? else {
         return Err(not_listening(env));
     };
-    let fingerprint = status.fingerprint.0.as_slice().try_into().context("the listener wrote a bad fingerprint")?;
     let ticket = PairingTicket::begin(&env.dirs, PAIRING_TTL).context("cannot write the pairing code")?;
-    let mut addrs = extra.to_vec();
-    for addr in local_addresses() {
-        if !addrs.contains(&addr) {
-            addrs.push(addr);
-        }
-    }
-    let uri = PairingUri {
-        host_name: status.host_name.clone(),
-        fingerprint,
-        secret: ticket.secret(),
-        port: status.port,
-        addrs,
-        expires_at: ticket.expires_at(),
-    }
-    .to_string();
+    let uri = ticket.uri(&status, extra)?.to_string();
     out.write_all(qr_code(&uri)?.as_bytes())?;
     writeln!(out, "\n{uri}\n")?;
     writeln!(

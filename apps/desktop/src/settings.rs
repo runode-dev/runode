@@ -6,11 +6,12 @@
 //! 一会儿、按回车或者失去焦点时写回，写之前按读配置时的规矩检查，不对就不写、在那一项下面说原因。
 //!
 //! 哪一页有哪些项在 `pages`，开关、选项这些控件在 `controls`，从长列表里挑一项的浮层在 `picker`，
-//! 快捷键那一页在 `keybinds`。窗口同时只开一个，再打开时切到已经开着的那个。
+//! 快捷键那一页在 `keybinds`，远程访问那一页的配对手机在 `pairing`。窗口同时只开一个，再打开时切到已经开着的那个。
 
 mod controls;
 mod keybinds;
 mod pages;
+mod pairing;
 mod picker;
 
 use std::{collections::HashMap, sync::Arc, time::Duration};
@@ -100,6 +101,8 @@ pub struct SettingsView {
     errors: HashMap<String, String>,
     picker: Option<Picker>,
     keybinds: keybinds::State,
+    /// 配对手机进行到哪了；换页时留着，关窗口时随窗口丢掉，口令随之作废。
+    pairing: pairing::Pairing,
     scroll: ScrollHandle,
     _observe: Subscription,
 }
@@ -118,6 +121,7 @@ impl SettingsView {
             errors: HashMap::new(),
             picker: None,
             keybinds: keybinds::State::default(),
+            pairing: pairing::Pairing::default(),
             scroll: ScrollHandle::new(),
             _observe: observe,
         }

@@ -397,6 +397,7 @@ settings:
     shell: Shell
     scrollback: 回滚历史
     clipboard: 剪贴板
+    pairing: 配对手机
   theme:
     none: 不用主题
     single: 一个主题
@@ -482,7 +483,7 @@ settings:
     clipboard_write: 终端里的程序（vim、tmux、经 ssh 连到远端的 shell 等）能把文字放进剪贴板。
     clipboard_read: 终端里的程序能读到你复制过的文字，密码也在内。选“询问”时先说明是哪个程序要读。
     terminal_host: 退出 Runode 后会话留在后台进程里照常运行，下次打开接着用。
-    remote_access: 让配对过的手机经局域网或 Tailscale 连上这台 Mac 的终端。用 runode remote pair 配对。
+    remote_access: 让配对过的手机经局域网或 Tailscale 连上这台 Mac 的终端。在下面配对，或者用 runode remote pair。
     remote_access_port: TCP 端口，1 到 65535。
     agent_notifications: agent 在你没在看的分屏里干完了或者等你回答时发系统通知。只有打包好的 Runode.app 能发通知。
     agent_notifications_exclude: 选中的 agent 不发通知也不出提示音，状态标记照常显示。
@@ -523,6 +524,24 @@ settings:
       allow: 允许
       ask: 询问
       deny: 拒绝
+  pairing:
+    title: 配对手机
+    hint: 用手机上的 Runode 扫码配对。配好的手机在远程访问打开时能连上这台 Mac。
+    "off": 先打开上面的远程访问，再来配对。
+    start: 配对…
+    again: 再配一台
+    cancel: 取消
+    copy: 拷贝链接
+    waiting: "用手机上的 Runode 扫这个二维码，或者把链接发到手机上打开。%{time} 内有效，等手机连上来。"
+    paired: "已和 %{name} 配对。"
+    background: 退出 Runode 时远程访问跟着停，手机就连不上了。打开后退出时会话和远程访问留在后台。
+    not_listening: 远程访问没在监听。刚打开的话等几秒再试；一直这样的话，端口可能被占了，宿主的日志里有原因。
+    stopped: 等手机时远程访问停了。
+    invalidated: 口令输错太多次，已经作废，再配对一次。
+    expired: 口令过期了，手机没来配对。
+    replaced: 另一处（比如 runode remote pair）开始了新的配对，这个口令作废了。
+    too_long: 配对链接太长，画不成二维码。
+    io_failed: "没能读写配对口令：%{err}"
   keybind:
     action: 动作
     unbind: 去掉快捷键

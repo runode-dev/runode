@@ -397,6 +397,7 @@ settings:
     shell: Shell
     scrollback: Scrollback
     clipboard: Clipboard
+    pairing: Pair a Phone
   theme:
     none: No Theme
     single: One Theme
@@ -482,7 +483,7 @@ settings:
     clipboard_write: Lets programs in the terminal, such as vim, tmux or a shell over ssh, put text on the clipboard.
     clipboard_read: Lets programs in the terminal read the text you copied, passwords included. Ask shows which program wants it first.
     terminal_host: Sessions keep running in a background process after Runode quits and come back when it opens again.
-    remote_access: Lets a paired phone reach the terminals over the local network or Tailscale. Pair with runode remote pair.
+    remote_access: Lets a paired phone reach the terminals over the local network or Tailscale. Pair below, or with runode remote pair.
     remote_access_port: TCP port, 1 to 65535.
     agent_notifications: Notifies you when an agent you are not looking at finishes or needs an answer. Only the packaged Runode.app can notify.
     agent_notifications_exclude: These agents get neither notifications nor sounds; their status marks still show.
@@ -523,6 +524,24 @@ settings:
       allow: Allow
       ask: Ask
       deny: Deny
+  pairing:
+    title: Pair a phone
+    hint: Scan a code with Runode on your phone. A paired phone can reach this Mac while remote access is on.
+    "off": Turn on remote access above, then pair.
+    start: Pair…
+    again: Pair Another
+    cancel: Cancel
+    copy: Copy Link
+    waiting: "Scan this code with Runode on your phone, or open the link on the phone. It works for %{time}; waiting for the phone."
+    paired: "Paired with %{name}."
+    background: Remote access stops when Runode quits, and the phone can no longer connect. With this on, sessions and remote access keep running in the background.
+    not_listening: Remote access is not listening. If you just turned it on, try again in a few seconds; otherwise the port may be taken, and the host's log says why.
+    stopped: Remote access stopped while waiting for the phone.
+    invalidated: The code was entered wrongly too many times and no longer works. Pair again.
+    expired: The code expired before a phone used it.
+    replaced: Another pairing (such as runode remote pair) replaced this code.
+    too_long: The pairing link is too long to draw as a code.
+    io_failed: "Could not read or write the pairing code: %{err}"
   keybind:
     action: Action
     unbind: Remove shortcut
