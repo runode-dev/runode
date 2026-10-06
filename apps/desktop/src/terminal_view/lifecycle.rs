@@ -2,7 +2,7 @@
 //! 和不显示之间切换，和宿主断开后重开，以及光标闪烁和同步输出的计时器。前台进程的轮询和 agent
 //! 状态的判断在宿主里，结果随 `HostMsg::Meta` 到达。
 //!
-//! 和宿主之间经 `session_host::link()` 说话：连上会话时宿主给一份当时的屏幕（同一个构建时是
+//! 和宿主之间经 `host_client::link()` 说话：连上会话时宿主给一份当时的屏幕（同一个构建时是
 //! 快照，否则是 VT 重放），之后的输出和标记按先后到达；事件按界面这份 VT 现在的样子怎么处理见
 //! `ScreenState`。响铃只认宿主的 `HostMsg::Bell`，不看界面这份 VT 的 `on_bell`：两边认的是同一个
 //! BEL，都认会响两次；宿主那份在视图只看状态时也认得到，VT 重放出来的屏幕也不会再响一遍。
@@ -41,8 +41,8 @@ use super::{
 };
 use crate::{
     config::AppConfig,
+    host_client::{self, LinkEvent, Screen, SpawnOptions},
     prespawn::Prespawned,
-    session_host::{self, LinkEvent, Screen, SpawnOptions},
 };
 
 /// 配置的字体都不可用时使用的等宽字体，macOS 自带。
@@ -70,7 +70,7 @@ impl Global for HostReconnected {}
 /// 界面这边的 `Session` 要宿主做的事，经连接发给会话 `id`。
 fn sender(id: SessionId) -> session::Sender {
     Box::new(move |request| {
-        let link = session_host::link();
+        let link = host_client::link();
         match request {
             Request::Input(data) => link.input(id, &data),
             Request::Resize(size) => link.send(ClientMsg::Resize { id, size }),
@@ -109,7 +109,7 @@ fn connect(
     id: SessionId,
     settings: &TermSettings,
 ) -> anyhow::Result<(ScreenState<Session>, UnboundedReceiver<LinkEvent>)> {
-    let link = session_host::link();
+    let link = host_client::link();
     let connected = link
         .attach_now(id, None, AttachMode::Snapshot, ATTACH_TIMEOUT)
         .and_then(|(screen, rx)| Ok((live(id, screen, settings)?, rx)));
@@ -141,7 +141,7 @@ impl TerminalView {
     /// 等第一次布局量出尺寸再启动；看不见的连会话都不开，见 `deferred`。
     pub fn unstarted(cwd: Option<&Path>, window: &mut Window, cx: &mut App) -> anyhow::Result<Entity<Self>> {
         let config = cx.global::<AppConfig>().0.clone();
-        let id = session_host::link().spawn(SpawnOptions {
+        let id = host_client::link().spawn(SpawnOptions {
             size: PROVISIONAL_SIZE,
             cwd: cwd.map(Into::into),
             integration: config.shell_integration,
@@ -176,7 +176,7 @@ impl TerminalView {
     /// 的事件由调用方起读事件的任务（或者等屏幕）来收。开不了时当作和宿主断开了：断开交给那个任务
     /// 处理，视图显示断开的提示，点「在原目录重开」再开。
     fn open_session(&mut self, start: bool, attach: Attach) {
-        let link = session_host::link();
+        let link = host_client::link();
         let spawned = link.spawn(SpawnOptions {
             size: self.screen.last_size(),
             cwd: self.start_dir.clone(),
@@ -211,7 +211,7 @@ impl TerminalView {
         cx: &mut App,
     ) -> anyhow::Result<Entity<Self>> {
         let config = cx.global::<AppConfig>().0.clone();
-        let link = session_host::link();
+        let link = host_client::link();
         if !link.connected() {
             anyhow::bail!("not connected to the host");
         }
@@ -256,7 +256,7 @@ impl TerminalView {
         let Some(id) = self.id else {
             return;
         };
-        session_host::link().send(ClientMsg::Focus { id, focused });
+        host_client::link().send(ClientMsg::Focus { id, focused });
     }
 
     /// 按已经设好的实际尺寸启动 shell。启动不了时宿主发 `HostMsg::Exited`，按 shell 已退出
@@ -268,7 +268,7 @@ impl TerminalView {
         if std::mem::replace(&mut self.started, true) {
             return;
         }
-        session_host::link().send(ClientMsg::Start { id, integration: self.config.shell_integration });
+        host_client::link().send(ClientMsg::Start { id, integration: self.config.shell_integration });
     }
 
     /// 收宿主发来的事件的任务：把排队的事件合并成一批处理，再重绘。收事件的一端在视图里，
@@ -382,7 +382,7 @@ impl TerminalView {
         let Some(id) = self.id else {
             return;
         };
-        if !session_host::link().reattach(id, attach.size, attach.mode) {
+        if !host_client::link().reattach(id, attach.size, attach.mode) {
             // 连接已经断了：断开的消息已经排在收事件的一端里，处理到时按断开显示。
             tracing::debug!("session {id} cannot attach again: not connected");
         }
@@ -545,11 +545,11 @@ impl TerminalView {
         if !self.screen.is_lost() {
             return;
         }
-        if let Err(err) = session_host::reconnect() {
+        if let Err(err) = host_client::reconnect() {
             tracing::warn!("failed to reconnect to the host: {err:#}");
             return;
         }
-        let alive: Option<HashSet<SessionId>> = match session_host::list_sessions() {
+        let alive: Option<HashSet<SessionId>> = match host_client::list_sessions() {
             Ok(sessions) => {
                 Some(sessions.into_iter().filter(|session| !session.exited).map(|session| session.id).collect())
             }
@@ -595,7 +595,7 @@ impl TerminalView {
             return;
         };
         tracing::info!("session {id} attaches again after reconnecting");
-        let rx = session_host::link().attach(id, attach.size, attach.mode);
+        let rx = host_client::link().attach(id, attach.size, attach.mode);
         self.events = Rc::new(RefCell::new(rx));
         if attach.mode == AttachMode::MetaOnly {
             self._reader = Self::read_events(self.events.clone(), window, cx);
@@ -614,7 +614,7 @@ impl TerminalView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> anyhow::Result<()> {
-        let link = session_host::link();
+        let link = host_client::link();
         let id = link.spawn(SpawnOptions {
             size,
             cwd,
@@ -833,7 +833,7 @@ impl TerminalView {
         if !std::mem::replace(&mut self.ended, true)
             && let Some(id) = self.id
         {
-            session_host::link().kill(id);
+            host_client::link().kill(id);
         }
     }
 
@@ -861,7 +861,7 @@ impl TerminalView {
         };
         if self.screen.live().is_none() {
             // 没有界面这份 VT 替它请宿主改尺寸，直接请。
-            session_host::link().send(ClientMsg::Resize { id, size });
+            host_client::link().send(ClientMsg::Resize { id, size });
         }
         self.start_now(cx);
     }

@@ -2,7 +2,7 @@
 //! （`text_area`）、滚动条（`scrollbar`）、悬停提示（`tooltip`）、按文件类型区分的图标（`file_icons`）、
 //! 复制粘贴这类共用的编辑动作（`actions`），以及把调色板的颜色换成 GPUI 颜色的 `hsla`。
 //!
-//! 依赖只能从功能模块指向这里：`ui` 不依赖 `terminal_view`、`workspace`、`session_host` 这些具体
+//! 依赖只能从功能模块指向这里：`ui` 不依赖 `terminal_view`、`workspace`、`host_client` 这些具体
 //! 功能的模块，它们要的东西由调用方经参数或事件交过来。
 
 pub mod actions;

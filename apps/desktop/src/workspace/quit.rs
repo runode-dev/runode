@@ -1,6 +1,6 @@
 //! 退出应用、关掉窗口时宿主里的会话怎么办，以及要结束正在干活的 agent 之前先问一句。
 //!
-//! 会话结不结束看宿主怎么跑（`session_host::Mode`）和用户做了什么（`QuitAction`），决策在
+//! 会话结不结束看宿主怎么跑（`host_client::Mode`）和用户做了什么（`QuitAction`），决策在
 //! `quit_plan`：宿主跑在 app 里时，退出（包括关掉最后一个窗口、关掉所有窗口）必然结束所有会话；
 //! 宿主单独一个进程时，退出只是不再看它们，会话留在宿主里等下次启动接回来，要连会话一起结束用
 //! 「退出并结束所有会话」；配置项 `terminal-host` 已经关了、这次只是接回上次留下的会话时，退出
@@ -21,7 +21,7 @@ use runode_shared_types::agent::AgentKind;
 
 use super::{WindowView, model::Closing, persistence};
 use crate::{
-    session_host::{self, Mode},
+    host_client::{self, Mode},
     terminal_view::TerminalView,
 };
 
@@ -103,7 +103,7 @@ pub(super) fn offers_end_sessions(mode: Mode) -> bool {
 
 /// 菜单里要不要放「退出并结束所有会话」，见 `offers_end_sessions`。
 pub fn end_sessions_in_menu() -> bool {
-    offers_end_sessions(session_host::mode())
+    offers_end_sessions(host_client::mode())
 }
 
 /// 退出确认框开着（或者正问宿主有几个 agent）；这时再按退出或者关窗口不再弹第二个。
@@ -188,17 +188,17 @@ fn run(action: QuitAction, window: Option<AnyWindowHandle>, cx: &mut App, then: 
     if prompting(cx) {
         return;
     }
-    let mode = session_host::mode();
+    let mode = host_client::mode();
     let ending = ending(mode, action);
     if ending == Ending::Keep {
         then(cx);
         return;
     }
     // 没被窗口里的终端占着的会话（丢掉视图后留在宿主里的、后台会话）也会被结束，里面的 agent
-    // 也要算，得问宿主；问它最多要等上 `session_host::list_sessions` 的超时，放到后台线程，期间
+    // 也要算，得问宿主；问它最多要等上 `host_client::list_sessions` 的超时，放到后台线程，期间
     // 不再接退出。问不到时只数窗口里的。
     cx.set_global(Prompting(true));
-    let sessions = cx.background_executor().spawn(async { session_host::list_sessions() });
+    let sessions = cx.background_executor().spawn(async { host_client::list_sessions() });
     cx.spawn(async move |cx| {
         let sessions = sessions.await;
         cx.update(|cx| {
@@ -232,7 +232,7 @@ fn run(action: QuitAction, window: Option<AnyWindowHandle>, cx: &mut App, then: 
 
 /// 让单独跑的宿主连会话一起退出，等它读完（最多 `SHUTDOWN_FLUSH`）。
 fn shutdown_host() {
-    let link = session_host::link();
+    let link = host_client::link();
     link.send(ClientMsg::Shutdown { kill_sessions: true });
     if !link.flush(SHUTDOWN_FLUSH) {
         tracing::warn!("the host did not take the shutdown in time");

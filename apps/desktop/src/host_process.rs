@@ -18,7 +18,7 @@ use std::{
 
 use runode_host::{BuildId, Host, STATUS_FD, TakeOverError, TakeOverOptions};
 
-use crate::session_host::{HandoffFailure, HandoffStatus, READY_BY};
+use crate::host_client::{HandoffFailure, HandoffStatus, READY_BY};
 
 /// 没有会话也没有连接，持续这么久就退出。
 const IDLE_EXIT: Duration = Duration::from_secs(30);
@@ -53,7 +53,7 @@ pub fn run() -> i32 {
 /// `runode --host --take-over`：接手 socket 上旧宿主的会话（见 `Host::take_over`），把结果写成一行
 /// `HandoffStatus` 交给拉起它的 app（状态管道，`STATUS_FD`），成了就照 `run` 跑下去；没成时会话
 /// 还在旧宿主手里，退出。要回 `HandoffReady` 之前先写一行 `HandoffStatus::ready`，从启动起过了
-/// `READY_BY` 就不再回，见 `session_host::handoff` 的模块文档。返回进程的退出码。
+/// `READY_BY` 就不再回，见 `host_client::handoff` 的模块文档。返回进程的退出码。
 pub fn take_over() -> i32 {
     let ready_by = Instant::now() + READY_BY;
     // 先于打开任何文件：没有状态管道时 `STATUS_FD` 这个号会被日志文件这类占去。

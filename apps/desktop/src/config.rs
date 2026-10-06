@@ -19,10 +19,10 @@ impl Global for AppConfig {}
 const WATCH_INTERVAL: Duration = Duration::from_secs(1);
 
 /// 加载配置并开始监视配置文件，保存后自动重载。启动时后台线程已经读过一遍（见
-/// `session_host::take_config`），拿它对得上系统外观时直接用，不再读。
+/// `host_client::take_config`），拿它对得上系统外观时直接用，不再读。
 pub fn install(cx: &mut App) {
     let dark = system_is_dark(cx);
-    let loaded = crate::session_host::take_config().filter(|config| config.fits_appearance(dark));
+    let loaded = crate::host_client::take_config().filter(|config| config.fits_appearance(dark));
     match loaded {
         Some(mut config) => {
             config.dark = dark;
@@ -66,7 +66,7 @@ fn apply(cx: &mut App, config: Config) {
     // 先换语言再广播，观察配置的菜单和视图重画时就是新语言。
     crate::i18n::set(&config.language.clone().unwrap_or_else(crate::i18n::system));
     // 宿主先换主题，视图等它在各个会话的输出流里标出位置后再跟着换。
-    crate::session_host::configure(&config);
+    crate::host_client::configure(&config);
     cx.set_global(AppConfig(Arc::new(config)));
 }
 

@@ -2,7 +2,7 @@
 //! 就开在哪个进程里，门禁过了的连接经 `Host::connect_pair` 接到宿主上。开关（配置项
 //! `remote-access`）和端口（`remote-access-port`）随配置变，几秒内生效。
 //!
-//! 宿主跑在 app 里时，app 每次应用配置都告诉它（见 `session_host::configure`）；单独跑的宿主
+//! 宿主跑在 app 里时，app 每次应用配置都告诉它（见 `host_client::configure`）；单独跑的宿主
 //! （`runode --host`）不管界面，自己读配置文件，文件变了就重读（`follow_config`）。app 连着单独跑的
 //! 宿主时不开监听，免得两个进程抢同一个端口。
 

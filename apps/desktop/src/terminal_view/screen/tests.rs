@@ -4,7 +4,7 @@ use runode_protocol::SessionId;
 use runode_shared_types::agent::{Agent, AgentKind, AgentState};
 
 use super::*;
-use crate::session_host::Attached;
+use crate::host_client::Attached;
 
 const SIZE: GridSize = GridSize { cols: 80, rows: 24, cell_width_px: 8, cell_height_px: 16 };
 const BIG: GridSize = GridSize { cols: 120, rows: 40, cell_width_px: 8, cell_height_px: 16 };

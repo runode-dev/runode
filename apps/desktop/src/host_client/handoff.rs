@@ -1,7 +1,7 @@
 //! 升级时把旧宿主的会话交给新宿主：app 拉起这个构建的 `runode --host --take-over`（见
 //! `runode_host::launch_successor`），它以 `ClientKind::Successor` 连上旧宿主谈交接、接过会话和
 //! 监听的 socket，再往状态管道写一行 `HandoffStatus`；这边读到结果再决定怎么办（见
-//! `session_host::establish`）。新宿主那一侧的入口是 `host_process::take_over`。
+//! `host_client::establish`）。新宿主那一侧的入口是 `host_process::take_over`。
 //!
 //! 等结果分两段，各有上限，保证这边当作失败放弃以后新宿主不会再接手成功（否则会话到了新宿主
 //! 手里，这边却弹框说没交成）：

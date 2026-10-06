@@ -60,7 +60,7 @@ pub enum Choice {
 /// 按配置项 `terminal-host`、socket 上探到的宿主和这个构建（`build`）决定这次怎么跑：
 ///
 /// - 开着：连上在跑的宿主，没有就拉起一个。在跑的是别的构建时让新宿主接手（`HandOver`），
-///   它没有会话时也一样（交接不成再让它退出、拉起新的，见 `session_host::establish`）。
+///   它没有会话时也一样（交接不成再让它退出、拉起新的，见 `host_client::establish`）。
 /// - 关着：没有在跑的宿主时跑在 app 里。有（上次开着时留下的）而且带着没有界面连着的会话时，
 ///   这次接着连它、把会话接回来（别的构建时先让新宿主接手），这次退出时让它连会话一起退出，
 ///   下次就跑在 app 里；没有会话时让它退出。有会话连着别的桌面时，那是另一个 runode 的宿主，
@@ -516,7 +516,7 @@ mod tests {
         use runode_shared_types::{grid::GridSize, shell::IntegrationMode};
 
         use super::*;
-        use crate::session_host::link::SpawnOptions;
+        use crate::host_client::link::SpawnOptions;
 
         const BUILD: &str = "launch-test";
         const SIZE: GridSize = GridSize { cols: 20, rows: 4, cell_width_px: 8, cell_height_px: 16 };

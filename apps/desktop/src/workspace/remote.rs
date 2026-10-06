@@ -1,6 +1,6 @@
 //! 别的进程经宿主请 app 办的事（`runode open`、`runode focus`，以及命令行问各个终端摆在哪）：在
 //! 某个终端旁边开新终端，切到某个终端，回答布局（见 `layout_report`）。宿主把请求包成
-//! `HostMsg::UiRequest` 经连接转过来（见 `session_host::serve_ui`），这里在主线程上按会话找到它
+//! `HostMsg::UiRequest` 经连接转过来（见 `host_client::serve_ui`），这里在主线程上按会话找到它
 //! 所在的窗口和分屏再办，用 `Link::ui_reply` 回话。
 
 use std::path::PathBuf;
@@ -11,19 +11,19 @@ use runode_protocol::{ClientMsg, HostMsg, Placement, SessionId};
 use runode_shared_types::pane::Axis;
 
 use super::{WindowView, agents::reveal, layout_report};
-use crate::{persist, session_host};
+use crate::{host_client, persist};
 
 /// 开始收别的进程的请求。
 pub fn serve_requests(cx: &mut App) {
     layout_report::track_windows(cx);
-    let Some(mut requests) = session_host::serve_ui() else {
+    let Some(mut requests) = host_client::serve_ui() else {
         tracing::warn!("requests from other processes are already being served");
         return;
     };
     cx.spawn(async move |cx| {
         while let Some((ui, request)) = requests.next().await {
             let reply = cx.update(|cx| handle(request, cx));
-            session_host::link().ui_reply(ui, reply);
+            host_client::link().ui_reply(ui, reply);
         }
     })
     .detach();

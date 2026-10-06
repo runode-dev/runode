@@ -21,7 +21,7 @@ use runode_shared_types::grid::GridSize;
 
 use runode_config::Config;
 
-use crate::session_host::{self, SpawnOptions};
+use crate::host_client::{self, SpawnOptions};
 
 /// 宿主里提前启动好的 shell，以及启动时用的尺寸。没被视图接走就丢掉时结束它。
 pub struct Prespawned {
@@ -39,14 +39,14 @@ impl Prespawned {
 impl Drop for Prespawned {
     fn drop(&mut self) {
         if let Some(id) = self.id.take() {
-            session_host::link().kill(id);
+            host_client::link().kill(id);
         }
     }
 }
 
 static PENDING: Mutex<Option<mpsc::Receiver<Option<Prespawned>>>> = Mutex::new(None);
 
-/// 返回连上宿主之后在 `session_host::start` 的后台线程里要做的事：按记下的尺寸启动 shell，不耽误
+/// 返回连上宿主之后在 `host_client::start` 的后台线程里要做的事：按记下的尺寸启动 shell，不耽误
 /// 主线程初始化 GPUI。主线程用 `take` 取。
 pub fn start() -> impl FnOnce(&Config) + Send + 'static {
     let (tx, rx) = mpsc::channel();
@@ -58,7 +58,7 @@ pub fn start() -> impl FnOnce(&Config) + Send + 'static {
 
 fn spawn(config: &Config) -> Option<Prespawned> {
     let size = recorded(&key(config))?;
-    let spawned = session_host::link().spawn(SpawnOptions {
+    let spawned = host_client::link().spawn(SpawnOptions {
         size,
         cwd: None,
         integration: config.shell_integration,

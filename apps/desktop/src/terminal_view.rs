@@ -44,7 +44,7 @@ use runode_shared_types::{color::Rgb, frame::Frame, grid::GridSize};
 use runode_terminal::{history, session::Session};
 
 use crate::{
-    session_host::LinkEvent,
+    host_client::LinkEvent,
     ui::{hsla, text_field::TextField},
 };
 use completion_menu::{CompletionMenu, PendingKey};
@@ -248,7 +248,7 @@ impl Drop for TerminalView {
         if !self.ended
             && let Some(id) = self.id
         {
-            crate::session_host::link().detach(id);
+            crate::host_client::link().detach(id);
         }
     }
 }

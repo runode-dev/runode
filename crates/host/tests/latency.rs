@@ -12,7 +12,7 @@
 //!   改大小，默认 100 MiB。
 //!
 //! 都经 `Host::connect_pair` 按协议收发帧，在同一个线程里写帧、读帧，量的是宿主本身；桌面那一层
-//! （经 `Link` 的读线程转手）的基准在桌面的 `session_host::link` 里。
+//! （经 `Link` 的读线程转手）的基准在桌面的 `host_client::link` 里。
 
 mod common;
 

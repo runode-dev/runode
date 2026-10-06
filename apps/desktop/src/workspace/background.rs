@@ -2,7 +2,7 @@
 //! 里列成「后台会话」一组：点一个就在当前 workspace 新开标签接上它，也可以全部结束。宿主跑在
 //! app 里时没有这回事（app 退出会话就结束了），不列。
 //!
-//! 列表全 app 一份（`BackgroundSessions`）：问宿主有哪些会话（`session_host::list_sessions`），
+//! 列表全 app 一份（`BackgroundSessions`）：问宿主有哪些会话（`host_client::list_sessions`），
 //! 减去各窗口里的终端占着的、有别的界面连着的（`SessionInfo::claimed`）和 shell 已经退出的。列表
 //! 里的会话不 attach，免得宿主把它们算成有界面连着。列表不空时每 `POLL_INTERVAL` 重问一次，空了
 //! 就停；启动、接上、结束之后各问一次。问到 shell 已经退出、谁都没连着的会话（多半是列表里的后台
@@ -23,7 +23,7 @@ use runode_shared_types::{agent::AgentKind, color::Rgb};
 
 use super::{AGENT_MARK_WIDTH, WindowView, agents::Mark, divider_color, model::display_dir, titlebar::agent_mark};
 use crate::{
-    session_host::{self, Mode},
+    host_client::{self, Mode},
     terminal_view::{DEFAULT_TITLE, TerminalView},
     ui::hsla,
 };
@@ -70,7 +70,7 @@ fn schedule(delay: Duration, cx: &mut App) {
         if !delay.is_zero() {
             cx.background_executor().timer(delay).await;
         }
-        // 问宿主最多要等上 `session_host::list_sessions` 的超时，放到后台线程。
+        // 问宿主最多要等上 `host_client::list_sessions` 的超时，放到后台线程。
         let live = cx.background_executor().spawn(async { live_sessions() }).await;
         cx.update(|cx| apply(live, cx));
     });
@@ -79,7 +79,7 @@ fn schedule(delay: Duration, cx: &mut App) {
 
 /// 宿主里的会话；宿主跑在 app 里时为 `None`，没有后台会话可言。
 fn live_sessions() -> Option<Result<Vec<SessionInfo>>> {
-    (session_host::mode() != Mode::InProcess).then(session_host::list_sessions)
+    (host_client::mode() != Mode::InProcess).then(host_client::list_sessions)
 }
 
 /// 按问到的会话更新列表，重画窗口；列表不空时排好下一次。问不到时列表不变。
@@ -89,7 +89,7 @@ fn apply(live: Option<Result<Vec<SessionInfo>>>, cx: &mut App) {
         None => Vec::new(),
         Some(Ok(live)) => {
             let held = held_sessions(cx);
-            let link = session_host::link();
+            let link = host_client::link();
             for id in orphans(&live, &held) {
                 tracing::info!("ending the background session {id}: its shell exited");
                 link.kill(id);
@@ -286,7 +286,7 @@ impl WindowView {
 
 /// 结束这些会话。
 fn end_sessions(ids: &[SessionId], cx: &mut App) {
-    let link = session_host::link();
+    let link = host_client::link();
     for id in ids {
         link.kill(*id);
     }

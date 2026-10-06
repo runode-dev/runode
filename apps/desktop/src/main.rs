@@ -7,6 +7,7 @@ mod about;
 mod agent_alert;
 mod assets;
 mod config;
+mod host_client;
 mod host_process;
 mod i18n;
 mod keybinds;
@@ -14,7 +15,6 @@ mod menus;
 mod persist;
 mod prespawn;
 mod remote_access;
-mod session_host;
 mod startup;
 mod terminal_view;
 mod ui;
@@ -58,7 +58,7 @@ fn main() {
     }
     // 在后台线程里读配置、定宿主怎么跑、连上它，再提前拉起第一个 shell（启动要几十毫秒），和 GPUI
     // 初始化同时进行；主线程第一次用到宿主时等它连好。
-    session_host::start(prespawn::start());
+    host_client::start(prespawn::start());
 
     application().with_assets(assets::Assets).run(|cx: &mut App| {
         startup::mark("app_run");
@@ -92,7 +92,7 @@ fn main() {
         drop(shell);
         workspace::watch_background(cx);
         cx.activate(true);
-        session_host::show_notice(cx);
+        host_client::show_notice(cx);
         // 窗口先出来；未打包运行时才需要的图标解码放到最后。
         about::install_icon();
     });

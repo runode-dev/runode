@@ -29,7 +29,7 @@ use std::{
 use runode_protocol::{AttachMode, FinishedCommand, HostMsg, SessionId};
 use runode_shared_types::{agent::Agent, grid::GridSize, session::SessionMeta, settings::TermSettings};
 
-use crate::session_host::{LinkEvent, Screen as HostScreen};
+use crate::host_client::{LinkEvent, Screen as HostScreen};
 
 /// 离开显示这么久后丢掉界面这份 VT、只看状态；这期间切回来就什么都不用做。
 pub(super) const HIDE_GRACE: Duration = Duration::from_secs(5);

@@ -21,9 +21,9 @@ use super::{
     model::{Tab, Workspace, home_dir, workspace_name},
 };
 use crate::{
+    host_client::{self, Mode},
     persist::{self, SavedBounds, SavedNode, SavedTab, SavedWindow, SavedWorkspace, State, WindowMode},
     prespawn::Prespawned,
-    session_host::{self, Mode},
     terminal_view::TerminalView,
 };
 
@@ -96,7 +96,7 @@ pub fn saved_window_options(cx: &App) -> Vec<(SavedWindow, WindowOptions)> {
     let windows: Vec<_> = windows.into_iter().filter(|window| !window.workspaces.is_empty()).collect();
     let live = live_sessions();
     let plan = persist::plan_restore(windows, &live);
-    let link = session_host::link();
+    let link = host_client::link();
     for id in plan.end {
         tracing::info!("ending the session {id}: its shell exited or never started");
         link.kill(id);
@@ -113,10 +113,10 @@ pub fn saved_window_options(cx: &App) -> Vec<(SavedWindow, WindowOptions)> {
 /// 宿主里还活着的会话。宿主跑在 app 里时它刚建好，没有上次的会话，不问；问不到时当作没有，
 /// 终端都在原目录新开，没接上的会话留在宿主里成为后台会话。
 fn live_sessions() -> Vec<SessionInfo> {
-    if session_host::mode() == Mode::InProcess {
+    if host_client::mode() == Mode::InProcess {
         return Vec::new();
     }
-    session_host::list_sessions().unwrap_or_else(|err| {
+    host_client::list_sessions().unwrap_or_else(|err| {
         tracing::warn!("failed to list the host's sessions, starting every saved terminal over: {err:#}");
         Vec::new()
     })
