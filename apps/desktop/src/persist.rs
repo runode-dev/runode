@@ -111,8 +111,9 @@ pub enum SavedNode {
         /// 终端在宿主里的会话；记这一项以前的存档里没有。
         #[serde(default, skip_serializing_if = "Option::is_none")]
         session: Option<SessionId>,
-        /// 会话的 shell 还没启动过（恢复布局后一直没切过去的标签）：这样的会话接上也是空的，
-        /// 下次启动时结束它，在原目录另开。
+        /// 写存档时会话的 shell 还没启动过（恢复布局后一直没切过去的标签）：这样的会话接上也是
+        /// 空的，下次启动时宿主那边看着也没启动的话结束它，在原目录另开。shell 启动时布局不变、
+        /// 不一定重写存档，所以这一项可能已经过时，恢复时以宿主为准（见 `plan_restore`）。
         #[serde(default, skip_serializing_if = "is_false")]
         unstarted: bool,
     },
@@ -153,11 +154,12 @@ pub struct RestorePlan {
 }
 
 /// 按宿主里还活着的会话 `live` 定下存档里每个终端怎么恢复。叶子记的会话要接上，得同时满足：
-/// 还在宿主里、shell 没退出、上次启动过、没有别的界面连着（`SessionInfo::claimed`），而且是
-/// 存档里第一次出现（按窗口、workspace、标签和叶子的先后；手改或者旧版本写出的重复的，后面
-/// 的在原目录新开）。不满足的清掉 `session`，在原目录新开；其中还在宿主里、没人连着、又已经
-/// 退出或者没启动过的，放进 `end`。宿主跑在 app 里时它是新的，`live` 里没有存档记的会话，全部
-/// 新开。
+/// 还在宿主里、shell 没退出、启动过、没有别的界面连着（`SessionInfo::claimed`），而且是存档里
+/// 第一次出现（按窗口、workspace、标签和叶子的先后；手改或者旧版本写出的重复的，后面的在原
+/// 目录新开）。不满足的清掉 `session`，在原目录新开；其中还在宿主里、没人连着、又已经退出或者
+/// 没启动过的，放进 `end`。没启动过要存档和宿主都这么说：存档记着 `unstarted`、宿主也读不到
+/// 前台程序（`SessionMeta::foreground`，shell 启动后就是 shell 自己）；存档的记录过时了、宿主
+/// 那边其实已经启动的照样接上。宿主跑在 app 里时它是新的，`live` 里没有存档记的会话，全部新开。
 pub fn plan_restore(mut windows: Vec<SavedWindow>, live: &[SessionInfo]) -> RestorePlan {
     let mut seen = HashSet::new();
     let mut end = Vec::new();
@@ -180,7 +182,8 @@ pub fn plan_restore(mut windows: Vec<SavedWindow>, live: &[SessionInfo]) -> Rest
         if !first || info.claimed {
             continue;
         }
-        if info.exited || *unstarted {
+        let never_started = *unstarted && info.meta.foreground.is_none();
+        if info.exited || never_started {
             end.push(id);
         } else {
             *session = Some(id);
@@ -399,6 +402,18 @@ mod tests {
         let plan = plan_restore(windows, &live);
         assert_eq!(sessions(&plan.windows), [None; 5]);
         assert_eq!(plan.end, [SessionId(1), SessionId(2)]);
+    }
+
+    /// 存档说没启动过，宿主那边却已经有前台程序（标签切过去启动了 shell，存档没来得及重写）：
+    /// 以宿主为准接上，不结束它。
+    #[test]
+    fn a_stale_unstarted_mark_does_not_end_a_running_shell() {
+        let windows = vec![window(vec![session_leaf(1, true)])];
+        let mut running = info(1, false, false);
+        running.meta.foreground = Some("zsh".into());
+        let plan = plan_restore(windows, &[running]);
+        assert_eq!(sessions(&plan.windows), [Some(1)]);
+        assert!(plan.end.is_empty());
     }
 
     #[test]
