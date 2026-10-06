@@ -89,3 +89,4 @@ This project is indexed by GitNexus as **runode** (225 symbols, 587 relationship
 - 包名是 `runode-` 加目录名；`apps/` 下的包名等于可执行文件名，所以桌面 app 的包名是 `runode`。
 - 模块名用 snake_case。有子模块的模块写成 `foo.rs` 加 `foo/` 目录，不用 `foo/mod.rs`；只有 `tests/common/mod.rs` 按 cargo 的惯例保留，这样 cargo 不把它当成一个单独的测试。
 - 一个模块的单元测试超过三百行左右时挪到 `foo/tests.rs`，`foo.rs` 里只留 `#[cfg(test)] mod tests;`。
+- 桌面 app 的 `session_host` 模块还是 `mod.rs` 写法、它的 `link` 模块还把六百多行测试写在文件里，是这两条定下之前留下的，改到时一并迁走。
