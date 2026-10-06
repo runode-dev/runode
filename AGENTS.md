@@ -52,7 +52,7 @@ This project is indexed by GitNexus as **runode** (225 symbols, 587 relationship
 | `paths` | 配置、数据和缓存放在哪：`Dirs::from_env()` 和每个文件的路径 | 只有 std |
 | `shared-types` | 各端共用的纯数据：终端帧、网格、分屏布局、agent 状态、会话对外公布的状态、终端设置、输入事件 | std、serde |
 | `protocol` | 宿主进程和各个前端之间的消息：帧格式、控制消息、会话标识 | shared-types、serde、serde_json |
-| `git` | 用 git 命令行读仓库的状态、逐行改动、分支和 stash，也做暂存（含按块暂存）、丢弃、提交、切换分支、stash 和与远端同步这些操作 | 只有 std |
+| `git` | 用 git 命令行读仓库的状态、逐行改动、分支、stash 和提交图，也做暂存（含按块暂存）、丢弃、提交、切换分支、stash 和与远端同步这些操作 | 只有 std |
 | `preview` | 文件预览不碰界面的部分：读文件、判断是文本、图片还是二进制，语法高亮出调色板语义的颜色 | std、syntect、two-face |
 | `agent-detect` | 认出终端前台在跑哪个 AI 编程 agent，判断它在干活、空闲还是等用户回答：按前台进程识别、识别规则的格式和求值（内置规则编进二进制）、状态去抖 | shared-types、serde、regex、toml |
 | `terminal` | 终端会话：libghostty-vt 状态机接在 shell 的 PTY 上，shell 集成、命令历史；把前台进程、屏幕文字、标题和进度报告交给 `agent-detect` | shared-types、paths、agent-detect、libghostty-vt、portable-pty |
