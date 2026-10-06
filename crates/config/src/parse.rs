@@ -49,6 +49,7 @@ pub(crate) const KEYS: &[&[&str]] = &[
         "command-completions",
         "command-highlighting",
     ],
+    &["terminal-host"],
     &["agent-notifications", "agent-notifications-exclude", "agent-done-sound", "agent-blocked-sound"],
     &["config-file"],
     &["keybind"],
@@ -243,6 +244,9 @@ impl Config {
             }
             "command-highlighting" => {
                 self.command_highlighting = if empty { defaults.command_highlighting } else { parse_bool(value)? };
+            }
+            "terminal-host" => {
+                self.terminal_host = if empty { defaults.terminal_host } else { parse_bool(value)? };
             }
             "agent-notifications" => {
                 self.agent_notifications = if empty { defaults.agent_notifications } else { parse_bool(value)? };

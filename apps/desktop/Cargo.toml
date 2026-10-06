@@ -11,8 +11,10 @@ runode-paths.workspace = true
 runode-git-status.workspace = true
 runode-shared-types.workspace = true
 runode-terminal.workspace = true
-# 终端会话的宿主，现在跑在 app 进程里。
+# 终端会话的宿主：跑在 app 进程里，或者由 app 拉起成单独一个进程（`runode --host`）。
 runode-host.workspace = true
+# 和宿主之间的帧和消息，两种跑法都经一条连接说话。
+runode-protocol.workspace = true
 # 带子命令启动时走命令行，见 `runode_cli::wants_cli`。
 runode-cli.workspace = true
 # 按 Tab 弹出的命令补全。
@@ -27,6 +29,8 @@ gpui.workspace = true
 gpui_platform = { workspace = true, features = ["font-kit"] }
 anyhow.workspace = true
 futures.workspace = true
+# 和宿主的连接设 socket 缓冲。
+libc.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
 # 界面文字的翻译：每种语言一个 locales/<语言>.yml，编译时嵌进二进制；配置模板的翻译在 runode-config。

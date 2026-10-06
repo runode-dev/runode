@@ -29,7 +29,7 @@ use gpui::{
 };
 use runode_config::Config;
 use runode_host::{ClientMsg, SessionId};
-use runode_shared_types::{color::Rgb, grid::GridSize};
+use runode_shared_types::{color::Rgb, grid::GridSize, session::SessionMeta};
 use runode_terminal::{history, session::Session};
 
 use crate::search_bar::SearchField;
@@ -121,6 +121,10 @@ pub struct TerminalView {
     session: Session,
     /// 宿主里的会话。视图没了就结束它，见 `Drop`。
     id: SessionId,
+    /// 已经用 `end` 结束了会话，丢掉视图时不再发。
+    ended: bool,
+    /// 宿主最近一次公布的这个会话的状态。
+    meta: SessionMeta,
     /// 已经请宿主启动了 shell。
     started: bool,
     config: Arc<Config>,
@@ -196,7 +200,9 @@ impl EventEmitter<TerminalEvent> for TerminalView {}
 /// 窗口一样。
 impl Drop for TerminalView {
     fn drop(&mut self) {
-        crate::session_host::client().send(ClientMsg::Kill { id: self.id });
+        if !self.ended {
+            crate::session_host::client().send(ClientMsg::Kill { id: self.id });
+        }
     }
 }
 

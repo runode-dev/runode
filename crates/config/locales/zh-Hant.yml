@@ -40,6 +40,7 @@ config:
   shell_integration: Shell 整合：detect（依 shell 的程式名稱判斷）、none（關閉）、bash、zsh、fish。
   command_suggestions: 在 shell 提示字元上輸入時，依指令歷史在游標後用灰字給出建議，按 → 或 End 接受，Option+→ 接受一個詞。false 時也不讀寫指令歷史。
   command_highlighting: 在 shell 提示字元上輸入時替指令列上色：指令、關鍵字、選項、字串、變數、存在的路徑各有顏色，找不到的指令標紅，顏色參照 zsh 外掛 fast-syntax-highlighting、取自主題的調色盤。shell 自己已經上了色（裝了高亮外掛）時不管。
+  terminal_host: 終端機工作階段放在單獨的背景程序裡：true、false。true 時結束 Runode 後工作階段照常執行，下次開啟接著用；false 時工作階段跟著 app 一起結束。只在 Runode 啟動時讀取，改了下次啟動才生效。背景還有工作階段時改成 false，下次啟動仍會接回這些工作階段，那次結束時才結束它們。
   command_completions: 在 shell 提示字元上按 Tab 時從選單裡選指令名稱、子指令、選項或參數（參數只限 runode 認得的指令），沒有可選的時 Tab 照常交給 shell。false 時 Tab 總是交給 shell。
   agent_notifications: agent 在你沒在看的分割畫面裡等你回答或者做完了時，發系統通知：true、false。只有打包好的 Runode.app 能發通知。
   agent_notifications_exclude: |-

@@ -72,6 +72,9 @@ pub struct Config {
     /// 在 shell 提示符上输入时给命令行上色，样子参照 zsh 插件 fast-syntax-highlighting；shell 自己
     /// 已经上了色时不管。
     pub command_highlighting: bool,
+    /// 终端会话放在单独一个进程（`runode --host`）里，退出 app 后会话还在，下次打开接着用；关着时
+    /// 会话跑在 app 进程里，跟着 app 一起结束。只在 app 启动时读，改了下次启动才生效。
+    pub terminal_host: bool,
     /// 界面语言，是 locales 里的某个语言标签；`None` 表示跟随系统。
     pub language: Option<String>,
     /// agent 等用户回答或者干完了、用户又没在看那个分屏时，发系统通知。
@@ -121,6 +124,7 @@ impl Default for Config {
             command_suggestions: true,
             command_completions: true,
             command_highlighting: true,
+            terminal_host: false,
             language: None,
             agent_notifications: true,
             agent_notifications_exclude: Vec::new(),

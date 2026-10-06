@@ -13,7 +13,7 @@ use std::{
 use futures::{FutureExt as _, StreamExt as _, channel::mpsc::UnboundedReceiver};
 use gpui::{App, AppContext as _, Context, Entity, Font, Point, SharedString, Task, Window, font, px};
 use runode_host::{ClientMsg, HostEvent, HostMsg, SessionId, SpawnOptions};
-use runode_shared_types::{agent::Agent, color::Rgb, grid::GridSize};
+use runode_shared_types::{agent::Agent, color::Rgb, grid::GridSize, session::SessionMeta};
 use runode_terminal::{
     history,
     session::{Request, SYNC_OUTPUT_TIMEOUT, Session},
@@ -151,6 +151,7 @@ impl TerminalView {
             fed |= self.feed_output(&mut pending, cx);
             match message {
                 HostMsg::Meta { meta, .. } => self.notify_agent_finished(cx, |view, cx| {
+                    view.meta.clone_from(&meta);
                     if view.session.apply_meta(meta) {
                         cx.emit(TerminalEvent::TitleChanged);
                     }
@@ -304,6 +305,8 @@ impl TerminalView {
         let mut view = Self {
             session,
             id,
+            ended: false,
+            meta: SessionMeta::default(),
             started,
             font: resolve_font(&config.font_family, window),
             font_size: px(config.font_size.clamp(MIN_FONT_SIZE, MAX_FONT_SIZE)),
@@ -372,6 +375,22 @@ impl TerminalView {
     /// 宿主里这个终端的会话。
     pub fn session_id(&self) -> SessionId {
         self.id
+    }
+
+    /// 宿主最近一次公布的这个会话的状态。
+    // 接口骨架：关闭路径和后台标签用上它们之前先放着。
+    #[allow(dead_code)]
+    pub fn meta(&self) -> &SessionMeta {
+        &self.meta
+    }
+
+    /// 结束宿主里的会话（关标签、关分屏这类用户明确要关掉终端的时候）。之后丢掉视图时不再
+    /// 另外发什么；没调过它就丢掉视图时见 `Drop`。
+    #[allow(dead_code)]
+    pub fn end(&mut self) {
+        if !std::mem::replace(&mut self.ended, true) {
+            session_host::client().send(ClientMsg::Kill { id: self.id });
+        }
     }
 
     /// 终端现在的尺寸。

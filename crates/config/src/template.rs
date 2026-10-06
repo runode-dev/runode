@@ -168,6 +168,7 @@ fn template_values(d: &Config, key: &str) -> Vec<String> {
         "command-suggestions" => vec!["true".into()],
         "command-completions" => vec!["true".into()],
         "command-highlighting" => vec!["true".into()],
+        "terminal-host" => vec!["false".into()],
         "agent-notifications" => vec![d.agent_notifications.to_string()],
         "agent-done-sound" => d.agent_done_sound.iter().cloned().collect(),
         "agent-blocked-sound" => d.agent_blocked_sound.iter().cloned().collect(),
