@@ -785,8 +785,14 @@ fn dispatch(inner: &Inner, message: HostMsg) {
             }
         },
         HostMsg::SessionList { sessions } => {
-            if let Some(reply) = state.lists.pop_front() {
-                let _ = reply.send(sessions);
+            // 等的一方超时走了，它的位置还排在队里：跳过这些，交给下一个还在等的。回话按先后
+            // 到，交出去的可能是前一个请求的，那也只早一点。
+            let mut sessions = sessions;
+            while let Some(reply) = state.lists.pop_front() {
+                match reply.send(sessions) {
+                    Ok(()) => break,
+                    Err(mpsc::SendError(back)) => sessions = back,
+                }
             }
         }
         HostMsg::UiRequest { ui, request } => {
