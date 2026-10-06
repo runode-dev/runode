@@ -170,3 +170,16 @@ fn front_ends_cannot_ask_for_the_clipboard() {
     cli.send(&ClientMsg::ReadClipboard { id: SessionId(1), ask: false, program: None });
     assert!(matches!(cli.reply(), HostMsg::Error { .. }));
 }
+
+/// 能写剪贴板时 DA1 的回答里有特性 52（OSC 52），不能写时没有；只看写，不看读。
+#[test]
+fn device_attributes_report_osc_52_when_writes_are_allowed() {
+    let host = host();
+    let mut desktop = Peer::pair(&host);
+    set_access(&mut desktop, ClipboardWrite::Allow, ClipboardRead::Deny);
+    let (_, channel) = reader_session(&mut desktop, "clip-da", r"printf '\033[c'");
+    desktop.wait_for_output(channel, b"^[[?62;1;6;22;52c");
+    set_access(&mut desktop, ClipboardWrite::Deny, ClipboardRead::Allow);
+    let (_, channel) = reader_session(&mut desktop, "clip-da-deny", r"printf '\033[c'");
+    desktop.wait_for_output(channel, b"^[[?62;1;6;22c");
+}

@@ -730,23 +730,35 @@ fn register_callbacks(
                 })
             }
         })?
-        .on_device_attributes(|_| {
-            Some(DeviceAttributes {
-                primary: PrimaryDeviceAttributes::new(
-                    ConformanceLevel::VT220,
+        // 能写剪贴板时在 DA1 里说支持 OSC 52（特性 52），程序据此决定用不用它复制；读剪贴板问不问
+        // 用户不影响这一项。
+        .on_device_attributes({
+            let effects = effects.clone();
+            move |_| {
+                let features: &[DeviceAttributeFeature] = if effects.clipboard_writes.get() {
                     &[
                         DeviceAttributeFeature::COLUMNS_132,
                         DeviceAttributeFeature::SELECTIVE_ERASE,
                         DeviceAttributeFeature::ANSI_COLOR,
-                    ],
-                ),
-                secondary: SecondaryDeviceAttributes {
-                    device_type: DeviceType::VT220,
-                    firmware_version: 1,
-                    rom_cartridge: 0,
-                },
-                tertiary: Default::default(),
-            })
+                        DeviceAttributeFeature::CLIPBOARD,
+                    ]
+                } else {
+                    &[
+                        DeviceAttributeFeature::COLUMNS_132,
+                        DeviceAttributeFeature::SELECTIVE_ERASE,
+                        DeviceAttributeFeature::ANSI_COLOR,
+                    ]
+                };
+                Some(DeviceAttributes {
+                    primary: PrimaryDeviceAttributes::new(ConformanceLevel::VT220, features),
+                    secondary: SecondaryDeviceAttributes {
+                        device_type: DeviceType::VT220,
+                        firmware_version: 1,
+                        rom_cartridge: 0,
+                    },
+                    tertiary: Default::default(),
+                })
+            }
         })?
         .on_xtversion(|_| Some(crate::XTVERSION))?
         .on_title_changed({
