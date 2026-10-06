@@ -98,6 +98,10 @@ quit:
 host_lost:
   message: 和終端機工作階段的連線中斷了，現在看到的是中斷前的最後一個畫面。
   reopen: 在原目錄重新開啟
+size_owner:
+  controlled_by: 尺寸由 %{device} 控制
+  controlled_elsewhere: 尺寸由另一台裝置控制
+  take_over: 點一下接管
 background:
   title: 背景工作階段
   end_all: 全部終止
