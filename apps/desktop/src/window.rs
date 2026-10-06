@@ -50,7 +50,9 @@ pub use files::{
 };
 pub(crate) use open::{open_window, open_window_with};
 pub use persist::{install, saved_window_options};
-pub use quit::{close_all_windows, close_window, end_sessions_in_menu, quit, quit_and_end_sessions, should_close};
+pub use quit::{
+    close_all_windows, close_window, end_sessions_in_menu, quit, quit_and_end_sessions, should_close, terminal_windows,
+};
 pub use remote::serve_requests;
 pub use titlebar::titlebar_options;
 

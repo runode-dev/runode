@@ -1,5 +1,5 @@
 //! 界面这边的配置：把加载好的配置放进全局，配置文件保存后自动重载，系统深浅色变了时
-//! 换到对应的主题，以及用文本编辑器打开配置文件。配置的读取和解析见 `runode_config`。
+//! 换到对应的主题，以及用文本编辑器打开配置文件。在界面里改设置见 `settings`。配置的读取和解析见 `runode_config`。
 
 use std::{
     path::PathBuf,
@@ -37,23 +37,24 @@ pub fn install(cx: &mut App) {
         tracing::warn!("failed to create {}: {err}", path.display());
     }
     cx.spawn(async move |cx| {
-        let mut seen = None;
         loop {
             cx.background_executor().timer(WATCH_INTERVAL).await;
-            let mut stamp = cx.update(|cx| watch_stamp(&cx.global::<AppConfig>().0));
-            // 第一次只记录，之后有变化才重载。重载可能引入新的文件（比如换了主题），
-            // 所以重载后按新配置重新记录，免得下一轮又因文件列表变化再重载一次。
-            if seen.as_ref().is_some_and(|seen| *seen != stamp) {
-                stamp = cx.update(|cx| {
+            cx.update(|cx| {
+                let stamp = watch_stamp(&cx.global::<AppConfig>().0);
+                if cx.try_global::<Seen>().is_some_and(|seen| seen.0 != stamp) {
                     reload(cx);
-                    watch_stamp(&cx.global::<AppConfig>().0)
-                });
-            }
-            seen = Some(stamp);
+                }
+            });
         }
     })
     .detach();
 }
+
+/// 上次加载配置时各配置文件的修改时间。每次加载后按新配置重新记录：重载可能引入新的文件（比如
+/// 换了主题），设置窗口写回后也会自己重载，这样监视的那一轮不会因为这些再重载一次。
+struct Seen(Vec<(PathBuf, Option<SystemTime>)>);
+
+impl Global for Seen {}
 
 /// 重新读取全部配置文件并广播给各视图。
 pub fn reload(cx: &mut App) {
@@ -67,6 +68,7 @@ fn apply(cx: &mut App, config: Config) {
     crate::i18n::set(&config.language.clone().unwrap_or_else(crate::i18n::system));
     // 宿主先换主题，视图等它在各个会话的输出流里标出位置后再跟着换。
     crate::host_client::configure(&config);
+    cx.set_global(Seen(watch_stamp(&config)));
     cx.set_global(AppConfig(Arc::new(config)));
 }
 

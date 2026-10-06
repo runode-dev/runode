@@ -67,6 +67,7 @@ config:
 action:
   about: 關於 runode
   quit: 結束
+  open_settings: 打開設定
   open_config: 打開設定檔
   reload_config: 重新載入設定
   hide: 隱藏 runode

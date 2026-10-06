@@ -139,11 +139,14 @@ pub fn close_window(window: AnyWindowHandle, cx: &mut App) {
         let remove = move |cx: &mut App| {
             window.update(cx, |_, window, _| window.remove_window()).ok();
         };
-        let windows = cx.windows().len();
+        // 设置窗口这类不是终端窗口的，直接关。
+        let Some(view) = window.downcast::<WindowView>() else {
+            remove(cx);
+            return;
+        };
+        let windows = terminal_windows(cx);
         if windows > 1 {
-            if let Some(window) = window.downcast::<WindowView>() {
-                window.update(cx, |view, _, cx| view.end_sessions(Closing::Window { windows }, cx)).ok();
-            }
+            view.update(cx, |view, _, cx| view.end_sessions(Closing::Window { windows }, cx)).ok();
             remove(cx);
         } else {
             run(QuitAction::CloseLastWindow, Some(window), cx, remove);
@@ -166,15 +169,21 @@ pub fn close_all_windows(cx: &mut App) {
 /// 点了窗口的关闭按钮：不是最后一个窗口时结束它里面的会话、照常关；是最后一个时先不关，交给
 /// `close_window` 按退出处理。
 pub fn should_close(window: &mut Window, cx: &mut App) -> bool {
-    let windows = cx.windows().len();
+    let Some(Some(view)) = window.root::<WindowView>() else {
+        return true;
+    };
+    let windows = terminal_windows(cx);
     if windows > 1 {
-        if let Some(Some(view)) = window.root::<WindowView>() {
-            view.update(cx, |view, cx| view.end_sessions(Closing::Window { windows }, cx));
-        }
+        view.update(cx, |view, cx| view.end_sessions(Closing::Window { windows }, cx));
         return true;
     }
     close_window(window.window_handle(), cx);
     false
+}
+
+/// 开着的终端窗口有几个，设置窗口不算。
+pub fn terminal_windows(cx: &App) -> usize {
+    cx.windows().into_iter().filter(|window| window.downcast::<WindowView>().is_some()).count()
 }
 
 /// 确认框弹在当前窗口上；当前没有窗口在前台时弹在第一个窗口上。

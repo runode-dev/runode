@@ -3,10 +3,7 @@
 
 use std::path::Path;
 
-use runode_shared_types::{
-    agent::AgentKind,
-    color::{Rgb, TerminalColor},
-};
+use runode_shared_types::agent::AgentKind;
 
 use crate::{Config, parse::KEYS, theme::BUNDLED_THEMES};
 
@@ -137,48 +134,12 @@ fn template(locale: &str) -> String {
     out
 }
 
-/// 模板里一个键注释掉的默认值，每项一行；没有默认值的键（默认跟随别的设置或不设）为空。
+/// 模板里一个键注释掉的默认值，每项一行；没有默认值的键（默认跟随别的设置或不设）为空。默认的快捷键
+/// 也列出来，重写一遍和不写一样。
 fn template_values(d: &Config, key: &str) -> Vec<String> {
-    let hex = |Rgb(r, g, b): Rgb| format!("#{r:02x}{g:02x}{b:02x}");
-    let color = |c: TerminalColor| match c {
-        TerminalColor::Rgb(c) => hex(c),
-        TerminalColor::CellForeground => "cell-foreground".into(),
-        TerminalColor::CellBackground => "cell-background".into(),
-    };
-    let pair = |(a, b): (f32, f32)| if a == b { a.to_string() } else { format!("{a},{b}") };
     match key {
-        "font-family" => d.font_family.clone(),
-        "font-size" => vec![d.font_size.to_string()],
-        "window-padding-x" => vec![pair(d.window_padding_x)],
-        "window-padding-y" => vec![pair(d.window_padding_y)],
-        "file-tree-font-size" => vec![d.file_tree_font_size.to_string()],
-        "file-tree-preview-click" => vec!["single".into()],
-        "preview-font-size" => vec![d.preview_font_size.to_string()],
-        "background" => vec![hex(d.background)],
-        "foreground" => vec![hex(d.foreground)],
-        "search-background" => vec![color(d.search_background)],
-        "search-foreground" => vec![color(d.search_foreground)],
-        "search-selected-background" => vec![color(d.search_selected_background)],
-        "search-selected-foreground" => vec![color(d.search_selected_foreground)],
-        "palette" => d.palette.iter().map(|(i, c)| format!("{i}={}", hex(*c))).collect(),
-        "cursor-style" => vec!["block".into()],
-        "cursor-style-blink-timeout" => {
-            d.cursor_style_blink_timeout.iter().map(|t| t.as_secs_f32().to_string()).collect()
-        }
-        "macos-option-as-alt" => vec!["false".into()],
-        "scrollback-limit" => vec![d.scrollback_limit.to_string()],
-        "shell-integration" => vec!["detect".into()],
-        "command-suggestions" => vec!["true".into()],
-        "command-completions" => vec!["true".into()],
-        "command-highlighting" => vec!["true".into()],
-        "terminal-host" => vec!["false".into()],
-        "remote-access" => vec![d.remote_access.to_string()],
-        "remote-access-port" => vec![d.remote_access_port.to_string()],
-        "agent-notifications" => vec![d.agent_notifications.to_string()],
-        "agent-done-sound" => d.agent_done_sound.iter().cloned().collect(),
-        "agent-blocked-sound" => d.agent_blocked_sound.iter().cloned().collect(),
         "keybind" => crate::keybind::DEFAULTS.iter().map(|k| k.to_string()).collect(),
-        _ => Vec::new(),
+        _ => d.values(key),
     }
 }
 

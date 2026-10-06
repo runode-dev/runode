@@ -10,8 +10,8 @@ use runode_config::{
 use crate::{
     config::AppConfig,
     menus::{
-        About, CloseAllWindows, CloseWindow, Hide, HideOthers, Minimize, NewWindow, OpenConfiguration, Quit,
-        ReloadConfiguration, ShowAll, ToggleFullScreen, Zoom,
+        About, CloseAllWindows, CloseWindow, Hide, HideOthers, Minimize, NewWindow, OpenConfiguration, OpenSettings,
+        Quit, ReloadConfiguration, ShowAll, ToggleFullScreen, Zoom,
     },
     terminal_view::{
         ClearScreen, DecreaseFontSize, IncreaseFontSize, JumpToPrompt, PasteSelection, ResetFontSize, ScrollPageDown,
@@ -57,6 +57,7 @@ fn gpui_action(action: Action) -> (Box<dyn gpui::Action>, Contexts) {
     match action {
         Action::About => (boxed(About), GLOBAL),
         Action::Quit => (boxed(Quit), GLOBAL),
+        Action::OpenSettings => (boxed(OpenSettings), GLOBAL),
         Action::OpenConfig => (boxed(OpenConfiguration), GLOBAL),
         Action::ReloadConfig => (boxed(ReloadConfiguration), GLOBAL),
         Action::Hide => (boxed(Hide), GLOBAL),
@@ -178,6 +179,14 @@ fn bind(cx: &mut App) {
     }
     let mut bindings = Vec::new();
     for (keys, action) in keybind::resolve(&keybinds) {
+        // 设置窗口里没有分屏，关分屏的键关掉设置窗口。
+        if action == Action::CloseSurface {
+            let predicate = Some(gpui::KeyBindingContextPredicate::parse("Settings").unwrap().into());
+            match KeyBinding::load(&keys, Box::new(CloseWindow), predicate, false, None, &gpui::DummyKeyboardMapper) {
+                Ok(binding) => bindings.push(binding),
+                Err(err) => tracing::warn!("keybind {keys}: {err}"),
+            }
+        }
         let (action, contexts) = gpui_action(action);
         for context in contexts {
             let predicate = context.map(|c| gpui::KeyBindingContextPredicate::parse(c).unwrap().into());

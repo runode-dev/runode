@@ -20,9 +20,9 @@ use crate::{
 
 /// runode 认的全部键，按配置模板里的顺序分组，组与组之间在模板里空一行。`apply` 只处理
 /// 这里列出的键，模板也按这张表逐个写出，所以新增配置项只要在这里加上键名、在 `apply` 里
-/// 解析、在 `template_values` 里给出默认值、在翻译里写好说明。`theme` 和 `config-file`
+/// 解析、在 `Config::values` 里写出值、在翻译里写好说明。`theme` 和 `config-file`
 /// 在应用各层之前就已处理，列在这里是为了写进模板。
-pub(crate) const KEYS: &[&[&str]] = &[
+pub const KEYS: &[&[&str]] = &[
     &["language"],
     &["font-family", "font-size", "adjust-cell-height", "window-padding-x", "window-padding-y"],
     &["file-tree-font-size", "file-tree-preview-click", "preview-font-size"],
@@ -100,6 +100,7 @@ impl Config {
         // 先套主题，再让显式写出的键覆盖它。后一层的主题覆盖前一层的。
         let theme = layers.iter().flatten().rfind(|e| e.key == "theme").map(|e| e.value.clone());
         if let Some(theme) = theme.filter(|t| !t.is_empty()) {
+            config.theme = Some(theme.clone());
             config.theme_follows_appearance = pick_theme(&theme, true) != pick_theme(&theme, false);
             let name = pick_theme(&theme, dark);
             match find_theme(&name) {

@@ -203,7 +203,8 @@ pub(super) fn track(cx: &mut Context<WindowView>) {
 /// workspace 都关掉了的窗口不留。
 fn closed(view: &mut WindowView, window: WeakEntity<WindowView>, cx: &mut App) {
     let id = window.entity_id();
-    match on_close(cx.global::<Saver>().frozen, cx.windows().is_empty(), view.emptied) {
+    // 设置窗口不算，只剩它时也是关掉了最后一个终端窗口。
+    match on_close(cx.global::<Saver>().frozen, super::terminal_windows(cx) == 0, view.emptied) {
         OnClose::Ignore => return,
         OnClose::Keep => {
             let snapshot = view.snapshot(cx);

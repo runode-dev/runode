@@ -26,6 +26,7 @@ actions!(
     runode,
     [
         About,
+        OpenSettings,
         OpenConfiguration,
         ReloadConfiguration,
         Quit,
@@ -47,6 +48,7 @@ actions!(
 
 pub fn install(cx: &mut App) {
     cx.on_action(|_: &About, _| crate::about::show());
+    cx.on_action(|_: &OpenSettings, cx| crate::settings::open(cx));
     cx.on_action(|_: &OpenConfiguration, cx| crate::config::open(cx));
     cx.on_action(|_: &ReloadConfiguration, cx| crate::config::reload(cx));
     cx.on_action(|_: &Quit, cx| crate::window::quit(cx));
@@ -88,6 +90,7 @@ pub fn set_menus(cx: &mut App) {
             [
                 MenuItem::action(tr("menu.about"), About),
                 MenuItem::separator(),
+                MenuItem::action(tr("menu.settings"), OpenSettings),
                 MenuItem::action(tr("menu.open_config"), OpenConfiguration),
                 MenuItem::action(tr("menu.reload_config"), ReloadConfiguration),
                 MenuItem::action(tr("setup.menu"), InstallAgentIntegration),

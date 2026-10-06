@@ -15,6 +15,7 @@ use crate::Keybind;
 pub enum Action {
     About,
     Quit,
+    OpenSettings,
     OpenConfig,
     ReloadConfig,
     Hide,
@@ -138,6 +139,7 @@ fn optional_amount(param: Option<&str>) -> Result<(), String> {
 pub static ACTIONS: &[ActionSpec] = &[
     plain!("about", Action::About),
     plain!("quit", Action::Quit),
+    plain!("open_settings", Action::OpenSettings),
     plain!("open_config", Action::OpenConfig),
     plain!("reload_config", Action::ReloadConfig),
     plain!("hide", Action::Hide),
@@ -283,10 +285,16 @@ pub static ACTIONS: &[ActionSpec] = &[
     plain!("reset_font_size", Action::ResetFontSize),
 ];
 
+/// 动作的说明，按当前的界面语言，取自翻译里的 `action.<name>`。
+pub fn describe(name: &str) -> String {
+    let key = format!("action.{name}");
+    rust_i18n::t!(&key).into_owned()
+}
+
 /// 默认绑定，写法与配置文件里 `keybind =` 的值相同。
 pub static DEFAULTS: &[&str] = &[
     "cmd+q=quit",
-    "cmd+,=open_config",
+    "cmd+,=open_settings",
     "cmd+shift+,=reload_config",
     "cmd+h=hide",
     "alt+cmd+h=hide_others",
@@ -435,6 +443,42 @@ pub fn parse_trigger(trigger: &str) -> Result<String, String> {
         strokes.push(out);
     }
     Ok(strokes.join(" "))
+}
+
+/// `parse_trigger` 的逆运算：GPUI 写法的触发键（比如录下来的按键 `shift-cmd-t`、`ctrl-a n`）
+/// 写成配置文件的写法 `shift+cmd+t`、`ctrl+a>n`。配置里写不出来的（带 fn 键、键名认不出）为
+/// `None`。
+pub fn format_trigger(keys: &str) -> Option<String> {
+    const MODIFIERS: [&str; 4] = ["ctrl", "alt", "shift", "cmd"];
+    let mut strokes = Vec::new();
+    for stroke in keys.split(' ').filter(|s| !s.is_empty()) {
+        let mut rest = stroke;
+        let mut on = [false; 4];
+        // 键本身可能是 `-`，所以一个个剥掉认得的修饰键前缀，剩下的就是键；修饰键按 `parse_trigger`
+        // 的顺序写出，GPUI 录下来的 `cmd-shift-t` 写成 `shift+cmd+t`。
+        while let Some(ix) = MODIFIERS
+            .iter()
+            .position(|m| rest.strip_prefix(m).and_then(|r| r.strip_prefix('-')).is_some_and(|key| !key.is_empty()))
+        {
+            on[ix] = true;
+            rest = &rest[MODIFIERS[ix].len() + 1..];
+        }
+        let key = match rest {
+            "=" => "equal",
+            "+" => "plus",
+            "-" => "minus",
+            "pageup" => "page_up",
+            "pagedown" => "page_down",
+            " " => "space",
+            key => key,
+        };
+        let mut parts: Vec<&str> = MODIFIERS.iter().zip(on).filter(|(_, on)| *on).map(|(m, _)| *m).collect();
+        parts.push(key);
+        strokes.push(parts.join("+"));
+    }
+    let trigger = strokes.join(">");
+    // 带 `fn-` 或键名认不出的，配置里写不出来。
+    (!trigger.is_empty() && parse_trigger(&trigger).is_ok()).then_some(trigger)
 }
 
 /// 有名字的键：(配置里的写法, GPUI 的写法)。

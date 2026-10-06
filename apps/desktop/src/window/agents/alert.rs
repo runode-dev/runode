@@ -52,7 +52,7 @@ pub fn alert(alert: AgentAlert, cx: &mut App) {
         Alert::Blocked => &config.agent_blocked_sound,
     };
     if let Some(sound) = sound {
-        play_sound(sound);
+        crate::ui::sound::play(sound);
     }
     if config.agent_notifications && notifications_available() {
         post(alert, cx);
@@ -100,21 +100,3 @@ fn notifications_available() -> bool {
 fn notifications_available() -> bool {
     false
 }
-
-/// 按名字播放系统声音；正在放着的先停下，从头放。
-#[cfg(target_os = "macos")]
-fn play_sound(name: &str) {
-    use objc2_app_kit::NSSound;
-    use objc2_foundation::NSString;
-
-    match NSSound::soundNamed(&NSString::from_str(name)) {
-        Some(sound) => {
-            sound.stop();
-            sound.play();
-        }
-        None => tracing::warn!("no system sound named {name}"),
-    }
-}
-
-#[cfg(not(target_os = "macos"))]
-fn play_sound(_: &str) {}

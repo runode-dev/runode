@@ -1,7 +1,8 @@
 _version: 1
 menu:
   about: 關於 Runode
-  open_config: 打開設定
+  settings: 設定…
+  open_config: 打開設定檔
   reload_config: 重新載入設定
   services: 服務
   hide: 隱藏 Runode
@@ -351,3 +352,162 @@ setup:
   done_detail: "已寫入：\n%{paths}\n\n之後新開的 Claude Code、Codex 工作階段會讀到。"
   failed_title: 未能裝好 agent 整合
   ok: 好
+settings:
+  title: 設定
+  language_name: 繁體中文
+  invalid: "這個值不對：%{err}"
+  no_home: 找不到主目錄，沒地方放設定檔
+  write_failed: "沒能寫入設定檔：%{err}"
+  reset: 從設定檔裡刪掉這一項，回到預設
+  default: 預設
+  follow_system: 跟隨系統
+  no_sound: 無
+  no_matches: 沒有符合的
+  fallback_font: 備用字體 %{n}
+  add_fallback_font: 加入備用字體…
+  other_agents: 其他程式
+  config_file: 位置
+  config_file_hint: "這裡的設定寫進 %{path}，檔案裡別的行原樣保留。Ghostty 設定裡寫的值也生效，這裡設了的以這裡為準。"
+  config_file_placeholder: 要引入的檔案路徑，例如 ~/.config/runode/colors.conf
+  open_config: 在編輯器裡打開
+  reload_config: 重新載入
+  page:
+    general: 一般
+    appearance: 外觀
+    colors: 顏色
+    terminal: 終端機
+    files: 檔案與預覽
+    agents: Agent
+    remote: 遠端存取
+    keybinds: 快速鍵
+  section:
+    config_file: 設定檔
+    font: 字體
+    window: 視窗
+    colors: 顏色
+    palette: 調色盤
+    cursor: 游標
+    keyboard: 鍵盤
+    shell: Shell
+    scrollback: 回捲歷史
+  theme:
+    none: 不用主題
+    single: 一個主題
+    pair: 淺色深色分開
+    name: 主題
+    light: 淺色外觀時
+    dark: 深色外觀時
+  key:
+    language: 語言
+    font_family: 字體
+    font_size: 字級
+    adjust_cell_height: 行高調整
+    window_padding_x: 左右內距
+    window_padding_y: 上下內距
+    file_tree_font_size: 檔案樹字級
+    file_tree_preview_click: 在預覽欄打開檔案
+    preview_font_size: 預覽欄字級
+    theme: 主題
+    background: 背景
+    foreground: 前景
+    cursor_color: 游標
+    cursor_text: 游標下的文字
+    selection_background: 選取範圍底色
+    selection_foreground: 選取範圍文字
+    search_background: 搜尋符合底色
+    search_foreground: 搜尋符合文字
+    search_selected_background: 目前符合底色
+    search_selected_foreground: 目前符合文字
+    palette: 調色盤
+    cursor_style: 游標形狀
+    cursor_style_blink: 游標閃爍
+    cursor_style_blink_timeout: 停止閃爍的等待時間
+    macos_option_as_alt: 把 Option 當作 Alt
+    scrollback_limit: 回捲歷史大小
+    shell_integration: Shell 整合
+    command_suggestions: 指令建議
+    command_completions: Tab 補全選單
+    command_highlighting: 指令列上色
+    terminal_host: 結束後保留工作階段
+    remote_access: 遠端存取
+    remote_access_port: 連接埠
+    agent_notifications: 通知
+    agent_notifications_exclude: 不提醒的 agent
+    agent_done_sound: agent 完成時的提示音
+    agent_blocked_sound: agent 等你回答時的提示音
+    config_file: 引入的檔案
+    keybind: 快速鍵
+  hint:
+    language: 選單和視窗裡的文字用哪種語言。
+    font_family: 終端機用的字體。第一個沒裝時依序用備用字體。
+    font_size: 單位是點。
+    adjust_cell_height: 像素（例如 2、-1）或百分比（例如 10%），留空表示不調整。
+    window_padding_x: 單位是點。一個數表示兩邊相同，或寫成 左,右。
+    window_padding_y: 單位是點。一個數表示上下相同，或寫成 上,下。
+    file_tree_font_size: 單位是點。
+    file_tree_preview_click: 單擊開成暫時分頁，打開別的檔案時被換掉；雙擊固定下來。
+    preview_font_size: 單位是點。
+    theme: 下面寫了的顏色會蓋過主題。選「淺色深色分開」時跟著系統外觀換。
+    background: "顏色，例如 #1e1e2e，或顏色名稱。"
+    foreground: 文字的顏色。
+    cursor_color: 顏色，或 cell-foreground、cell-background（跟隨游標所在格子）。留空用前景色。
+    cursor_text: 方塊游標下文字的顏色。留空用背景色。
+    selection_background: 顏色，或 cell-foreground、cell-background。留空依背景深淺用一種藍色。
+    selection_foreground: 顏色，或 cell-foreground、cell-background。留空保持文字原來的顏色。
+    search_background: 顏色，或 cell-foreground、cell-background。
+    search_foreground: 顏色，或 cell-foreground、cell-background。
+    search_selected_background: 顏色，或 cell-foreground、cell-background。
+    search_selected_foreground: 顏色，或 cell-foreground、cell-background。
+    palette: 0–7 是一般色，8–15 是亮色。清空一格就回到主題裡的顏色。
+    cursor_style: 執行中的程式仍然可以改。
+    cursor_style_blink: 執行中的程式仍然可以打開或關掉閃爍。
+    cursor_style_blink_timeout: 這麼多秒沒有輸入也沒有輸出，游標就停止閃爍、常亮。0 表示一直閃。
+    macos_option_as_alt: 打開後按 Option 組合鍵送出的是 Alt 組合，不再輸入特殊字元。
+    scrollback_limit: 每個終端機的回捲歷史最多佔多少位元組，至少 2 MiB（2097152），另外最多 1 萬行。
+    shell_integration: 自動偵測依 shell 的程式名判斷。跳提示字元、指令歷史和建議都靠它。
+    command_suggestions: 輸入時依指令歷史用灰字給出後半段，按 → 或 End 接受。關掉時也不讀寫指令歷史。
+    command_completions: 按 Tab 彈出指令、子指令、選項和參數的選單。關掉時 Tab 總是交給 shell。
+    command_highlighting: 輸入時給指令、選項、字串和路徑上色；shell 自己已經上了色時不管。
+    terminal_host: 工作階段放在背景程序裡，結束 Runode 後照常執行，下次打開接著用。下次啟動才生效。
+    remote_access: 讓配對過的手機經區域網路或 Tailscale 連上這台 Mac 的終端機。用 runode remote pair 配對。
+    remote_access_port: TCP 連接埠，1 到 65535。
+    agent_notifications: agent 在你沒在看的分割畫面裡完成或等你回答時發系統通知。只有打包好的 Runode.app 能發通知。
+    agent_notifications_exclude: 選中的 agent 不發通知也不出提示音，狀態標記照常顯示。
+    agent_done_sound: 系統內建的聲音。
+    agent_blocked_sound: 系統內建的聲音。
+    config_file: 讀完這個檔案之後再讀的設定檔。相對路徑從這個檔案所在目錄算；路徑前加 ? 表示檔案可以不存在。
+    keybind: 你的快速鍵疊在預設快速鍵上。
+  choice:
+    cursor_style:
+      block: 方塊
+      bar: 直線
+      underline: 底線
+      block_hollow: 空心方塊
+    cursor_style_blink:
+      "true": 閃爍
+      "false": 不閃爍
+    macos_option_as_alt:
+      "false": 關
+      "true": 兩邊
+      left: 左邊
+      right: 右邊
+    shell_integration:
+      detect: 自動偵測
+      none: 關
+      zsh: zsh
+      bash: bash
+      fish: fish
+    file_tree_preview_click:
+      single: 單擊
+      double: 雙擊
+  keybind:
+    action: 動作
+    unbind: 去掉快速鍵
+    use_defaults: 使用預設快速鍵
+    use_defaults_hint: 關掉後只有下面你寫的快速鍵生效。
+    yours: 你的快速鍵
+    add: 加入快速鍵…
+    press: 按下快速鍵…（Esc 取消）
+    defaults: 預設快速鍵
+    unbind_default: 去掉
+    overridden: 已改動

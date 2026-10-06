@@ -78,6 +78,7 @@ config:
 action:
   about: About runode
   quit: Quit
+  open_settings: Open settings
   open_config: Open the configuration file
   reload_config: Reload the configuration
   hide: Hide runode

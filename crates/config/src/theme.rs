@@ -33,6 +33,26 @@ pub(crate) fn find_theme(name: &str) -> Option<Theme> {
     bundled_theme(name).map(Theme::Bundled)
 }
 
+/// 能选的主题名：用户的主题目录、Ghostty 的用户和自带主题目录里的文件，以及内置的主题，去重后
+/// 按名字排序（不分大小写）。
+pub fn theme_names() -> Vec<String> {
+    let paths = runode_paths::Dirs::from_env();
+    let bundled_dir = ghostty_resources_dir().map(|dir| dir.join("themes"));
+    let dirs = paths.themes_dir().into_iter().chain(paths.ghostty_themes_dir()).chain(bundled_dir);
+    let mut names: Vec<String> = dirs
+        .filter_map(|dir| std::fs::read_dir(dir).ok())
+        .flatten()
+        .flatten()
+        .filter(|entry| entry.path().is_file())
+        .filter_map(|entry| entry.file_name().into_string().ok())
+        .filter(|name| !name.starts_with('.'))
+        .chain(BUNDLED_THEMES.iter().map(|(name, _)| (*name).to_owned()))
+        .collect();
+    names.sort_by_key(|name| name.to_lowercase());
+    names.dedup();
+    names
+}
+
 /// 按顺序在 `dirs` 里找名为 `name` 的主题文件，找到就停，后面的目录不再取。
 fn theme_file(name: &str, dirs: impl IntoIterator<Item = PathBuf>) -> Option<PathBuf> {
     dirs.into_iter().map(|dir| dir.join(name)).find(|path| path.is_file())

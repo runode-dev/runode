@@ -1,7 +1,8 @@
 _version: 1
 menu:
   about: About Runode
-  open_config: Open Configuration
+  settings: Settings…
+  open_config: Open Configuration File
   reload_config: Reload Configuration
   services: Services
   hide: Hide Runode
@@ -351,3 +352,162 @@ setup:
   done_detail: "Written:\n%{paths}\n\nNew Claude Code and Codex sessions will pick them up."
   failed_title: Could not install the agent integration
   ok: OK
+settings:
+  title: Settings
+  language_name: English
+  invalid: "Not a valid value: %{err}"
+  no_home: There is no home directory to keep the configuration file in
+  write_failed: "Could not write the configuration file: %{err}"
+  reset: Remove from the configuration file and go back to the default
+  default: Default
+  follow_system: Follow system
+  no_sound: None
+  no_matches: No matches
+  fallback_font: Fallback font %{n}
+  add_fallback_font: Add Fallback Font…
+  other_agents: Other programs
+  config_file: Location
+  config_file_hint: "Settings here are written to %{path}; other lines in the file are kept. Values set in the Ghostty configuration also apply unless overridden here."
+  config_file_placeholder: Path of a file to include, such as ~/.config/runode/colors.conf
+  open_config: Open in Editor
+  reload_config: Reload
+  page:
+    general: General
+    appearance: Appearance
+    colors: Colors
+    terminal: Terminal
+    files: Files & Preview
+    agents: Agents
+    remote: Remote Access
+    keybinds: Keyboard Shortcuts
+  section:
+    config_file: Configuration File
+    font: Font
+    window: Window
+    colors: Colors
+    palette: Palette
+    cursor: Cursor
+    keyboard: Keyboard
+    shell: Shell
+    scrollback: Scrollback
+  theme:
+    none: No Theme
+    single: One Theme
+    pair: Light & Dark
+    name: Theme
+    light: Light appearance
+    dark: Dark appearance
+  key:
+    language: Language
+    font_family: Font
+    font_size: Font size
+    adjust_cell_height: Cell height adjustment
+    window_padding_x: Horizontal padding
+    window_padding_y: Vertical padding
+    file_tree_font_size: File tree font size
+    file_tree_preview_click: Open files in the preview with
+    preview_font_size: Preview font size
+    theme: Theme
+    background: Background
+    foreground: Foreground
+    cursor_color: Cursor
+    cursor_text: Text under the cursor
+    selection_background: Selection background
+    selection_foreground: Selection text
+    search_background: Search match background
+    search_foreground: Search match text
+    search_selected_background: Current match background
+    search_selected_foreground: Current match text
+    palette: Palette
+    cursor_style: Cursor shape
+    cursor_style_blink: Cursor blinking
+    cursor_style_blink_timeout: Stop blinking after
+    macos_option_as_alt: Use Option as Alt
+    scrollback_limit: Scrollback size
+    shell_integration: Shell integration
+    command_suggestions: Command suggestions
+    command_completions: Tab completion menu
+    command_highlighting: Command line highlighting
+    terminal_host: Keep sessions after quitting
+    remote_access: Remote access
+    remote_access_port: Port
+    agent_notifications: Notifications
+    agent_notifications_exclude: Agents without alerts
+    agent_done_sound: Sound when an agent finishes
+    agent_blocked_sound: Sound when an agent needs you
+    config_file: Included files
+    keybind: Keyboard shortcuts
+  hint:
+    language: Language of menus and windows.
+    font_family: The terminal font. Fallback fonts are used when the first one is not installed.
+    font_size: In points.
+    adjust_cell_height: Pixels such as 2 or -1, or a percentage such as 10%. Empty means no adjustment.
+    window_padding_x: Left and right, in points. One number for both sides, or left,right.
+    window_padding_y: Top and bottom, in points. One number for both, or top,bottom.
+    file_tree_font_size: In points.
+    file_tree_preview_click: A single click opens a temporary tab that the next file replaces; a double click keeps it.
+    preview_font_size: In points.
+    theme: Colors below override the theme. With Light & Dark the theme follows the system appearance.
+    background: "A color such as #1e1e2e, or a color name."
+    foreground: The color of text.
+    cursor_color: A color, or cell-foreground / cell-background to follow the cell. Empty uses the foreground.
+    cursor_text: Text color under a block cursor. Empty uses the background.
+    selection_background: A color, or cell-foreground / cell-background. Empty uses a blue that suits the background.
+    selection_foreground: A color, or cell-foreground / cell-background. Empty keeps the text color.
+    search_background: A color, or cell-foreground / cell-background.
+    search_foreground: A color, or cell-foreground / cell-background.
+    search_selected_background: A color, or cell-foreground / cell-background.
+    search_selected_foreground: A color, or cell-foreground / cell-background.
+    palette: Colors 0–7 are the normal colors and 8–15 the bright ones. Clear a box to go back to the theme's color.
+    cursor_style: Programs can still change it while they run.
+    cursor_style_blink: Programs can still turn blinking on or off while they run.
+    cursor_style_blink_timeout: Seconds without typing or output before the cursor stops blinking. 0 keeps blinking.
+    macos_option_as_alt: Option then sends Alt combinations instead of typing special characters.
+    scrollback_limit: Bytes of history kept per terminal, at least 2 MiB (2097152), and at most 10,000 lines.
+    shell_integration: Detect picks by the shell's program name. Needed for prompt jumps, command history and suggestions.
+    command_suggestions: Suggests the rest of a command from history in gray; → or End accepts it. Off also stops reading and writing history.
+    command_completions: Tab shows a menu of commands, subcommands, options and arguments. Off always passes Tab to the shell.
+    command_highlighting: Colors commands, options, strings and paths as you type, unless the shell already does.
+    terminal_host: Sessions run in a background process and come back when Runode opens again. Takes effect on the next launch.
+    remote_access: Lets a paired phone reach the terminals over the local network or Tailscale. Pair with runode remote pair.
+    remote_access_port: TCP port, 1 to 65535.
+    agent_notifications: Notifies you when an agent you are not looking at finishes or needs an answer. Only the packaged Runode.app can notify.
+    agent_notifications_exclude: These agents get neither notifications nor sounds; their status marks still show.
+    agent_done_sound: A system sound.
+    agent_blocked_sound: A system sound.
+    config_file: Other configuration files to read after this one. Relative paths start from this file's folder; a leading ? means the file may be missing.
+    keybind: Your shortcuts are added on top of the defaults.
+  choice:
+    cursor_style:
+      block: Block
+      bar: Bar
+      underline: Underline
+      block_hollow: Hollow
+    cursor_style_blink:
+      "true": Blink
+      "false": Steady
+    macos_option_as_alt:
+      "false": "Off"
+      "true": Both
+      left: Left
+      right: Right
+    shell_integration:
+      detect: Detect
+      none: "Off"
+      zsh: zsh
+      bash: bash
+      fish: fish
+    file_tree_preview_click:
+      single: Single click
+      double: Double click
+  keybind:
+    action: Action
+    unbind: Remove shortcut
+    use_defaults: Use default shortcuts
+    use_defaults_hint: When off, only the shortcuts below are bound.
+    yours: Your Shortcuts
+    add: Add Shortcut…
+    press: Press a key… (Esc to cancel)
+    defaults: Default Shortcuts
+    unbind_default: Remove
+    overridden: Changed

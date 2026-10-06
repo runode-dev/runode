@@ -39,6 +39,8 @@ pub struct Config {
     pub file_tree_preview_click: PreviewClick,
     /// 预览栏的字号。
     pub preview_font_size: f32,
+    /// 配置里写的 `theme`，原样保留（可能是 `light:A,dark:B`）；没写时为 `None`。
+    pub theme: Option<String>,
     pub cursor_style: CursorStyle,
     /// `None` 表示默认不闪烁，运行中的程序仍可改变。
     pub cursor_style_blink: Option<bool>,
@@ -114,6 +116,7 @@ impl Default for Config {
             file_tree_font_size: 13.,
             file_tree_preview_click: PreviewClick::Single,
             preview_font_size: 13.,
+            theme: None,
             cursor_style: term.cursor_style,
             cursor_style_blink: term.cursor_blink,
             cursor_style_blink_timeout: Some(Duration::from_secs(5)),

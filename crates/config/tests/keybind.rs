@@ -3,7 +3,7 @@
 
 use runode_config::{
     Keybind,
-    keybind::{ACTIONS, Action, DEFAULTS, ScreenFile, parse, parse_action, parse_trigger, resolve},
+    keybind::{ACTIONS, Action, DEFAULTS, ScreenFile, format_trigger, parse, parse_action, parse_trigger, resolve},
 };
 use runode_shared_types::pane::Direction;
 
@@ -31,6 +31,31 @@ fn triggers_normalize() {
     assert!(parse_trigger("cmd+").is_err());
     assert_eq!(parse_trigger("cmd+minus").unwrap(), "cmd--");
     assert!(parse_trigger("cmd+key_a-b").is_err());
+}
+
+/// 录下来的 GPUI 写法写回配置的写法，再解析回去是同一个触发键。
+#[test]
+fn recorded_keystrokes_format_back() {
+    for (gpui, config) in [
+        ("cmd-shift-t", "shift+cmd+t"),
+        ("ctrl-a n", "ctrl+a>n"),
+        ("cmd-=", "cmd+equal"),
+        ("cmd--", "cmd+minus"),
+        ("alt-pageup", "alt+page_up"),
+        ("cmd-,", "cmd+,"),
+        ("f5", "f5"),
+    ] {
+        assert_eq!(format_trigger(gpui).as_deref(), Some(config), "{gpui}");
+        let normalized = parse_trigger(config).unwrap();
+        assert_eq!(format_trigger(&normalized).as_deref(), Some(config));
+    }
+    for default in DEFAULTS {
+        let keys = parse_trigger(default.split_once('=').unwrap().0).unwrap();
+        let formatted = format_trigger(&keys).unwrap_or_else(|| panic!("{default}"));
+        assert_eq!(parse_trigger(&formatted).unwrap(), keys);
+    }
+    assert_eq!(format_trigger("fn-f1"), None);
+    assert_eq!(format_trigger(""), None);
 }
 
 #[test]
