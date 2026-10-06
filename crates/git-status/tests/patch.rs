@@ -4,7 +4,7 @@ mod common;
 
 use std::path::Path;
 
-use common::{TestRepo, read};
+use common::{TestRepo, read, read_all};
 use runode_git_status::{FileDiff, HunkAction, Section, Snapshot, hunk_actionable};
 
 fn file<'a>(snapshot: &'a Snapshot, section: Section, path: &str) -> &'a FileDiff {
@@ -103,18 +103,13 @@ fn refuses_stale_hunks_and_other_files() {
 fn stages_hunks_in_nested_repositories() {
     let repo = TestRepo::new("hunk-nested");
     repo.commit_file("top.txt", "top\n", "init");
-    let inner = repo.path().join("wt/inner");
-    std::fs::create_dir_all(&inner).unwrap();
-    repo.git(&["-C", "wt/inner", "init", "-q", "-b", "main"]);
-    for (key, value) in [("user.name", "t"), ("user.email", "t@t"), ("commit.gpgsign", "false")] {
-        repo.git(&["-C", "wt/inner", "config", key, value]);
-    }
+    repo.nested("wt/inner");
     repo.write("wt/inner/a.txt", BASE);
-    repo.git(&["-C", "wt/inner", "add", "a.txt"]);
-    repo.git(&["-C", "wt/inner", "commit", "-q", "-m", "init"]);
+    repo.git(&["-C", "wt/inner", "commit", "-q", "-am", "base"]);
     repo.write("wt/inner/a.txt", CHANGED);
-    let snapshot = read(&repo);
-    let a = file(&snapshot, Section::Unstaged, "wt/inner/a.txt");
-    snapshot.repo().apply_hunk(a, 0, HunkAction::Stage).unwrap();
+    let repos = read_all(&repo);
+    let inner = &repos.subs[0];
+    let a = file(inner, Section::Unstaged, "a.txt");
+    inner.repo().apply_hunk(a, 0, HunkAction::Stage).unwrap();
     assert_eq!(repo.git(&["-C", "wt/inner", "show", ":a.txt"]), "1\ntwo\n3\n4\n5\n6\n7\n8\n9\n10\n11\n12");
 }

@@ -16,9 +16,9 @@ pub enum HunkAction {
 }
 
 /// 这个文件能不能按块操作：只有普通文本文件的修改可以。新增、删除、改名、未跟踪、
-/// 冲突的文件和二进制文件只能整个操作。
+/// 冲突的文件和二进制文件只能整个操作；子模块那样的 gitlink 只能整个暂存或撤回。
 pub fn hunk_actionable(file: &FileDiff) -> bool {
-    file.status == FileStatus::Modified && !file.binary
+    file.status == FileStatus::Modified && !file.binary && !file.gitlink
 }
 
 /// 原样的 `git diff` 输出切成文件头和一块一块，每一行都带着结尾的换行。
@@ -94,7 +94,7 @@ impl Repo {
         let threshold = format!("core.bigFileThreshold={MAX_DIFF_BYTES}");
         let mut args: Vec<&OsStr> = ["--literal-pathspecs", "-c", &threshold, "diff", "--no-color", "--no-ext-diff"]
             .into_iter()
-            .chain(["--no-textconv", "--src-prefix=a/", "--dst-prefix=b/"])
+            .chain(["--no-textconv", "--src-prefix=a/", "--dst-prefix=b/", "--ignore-submodules=dirty"])
             .map(OsStr::new)
             .collect();
         if action == HunkAction::Unstage {

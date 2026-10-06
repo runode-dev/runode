@@ -4,7 +4,11 @@
 //! 语法高亮在后台做完再换上；图片按栏宽等比缩小；二进制、读不了、太大的文件只给一句说明。
 //! 文件在磁盘上变了就重读，没显示的标签等切过去时再看要不要重读。
 //!
+//! 从 Git 面板点开的是 diff 标签，和同一个文件的普通标签分开，见 `diff`。
+//!
 //! 读文件、判断类型和高亮在 `runode_preview`，这里只管状态、后台任务和画。
+
+mod diff;
 
 use std::{
     collections::HashMap,
@@ -19,14 +23,17 @@ use std::{
 };
 
 use gpui::{
-    Action, AnyElement, App, Axis, ClipboardItem, Context, Div, Focusable as _, FontStyle, FontWeight, HighlightStyle,
-    Hsla, Image, ImageSource, ListHorizontalSizingBehavior, MouseButton, MouseDownEvent, MouseMoveEvent, Pixels, Point,
-    ScrollHandle, SharedString, Stateful, StyledText, UniformListScrollHandle, Window, actions, div, img,
-    linear_color_stop, linear_gradient, prelude::*, px, uniform_list,
+    Action, AnyElement, App, Axis, Bounds, ClipboardItem, Context, Div, Focusable as _, FontStyle, FontWeight,
+    HighlightStyle, Hsla, Image, ImageSource, ListHorizontalSizingBehavior, MouseButton, MouseDownEvent,
+    MouseMoveEvent, Pixels, Point, RenderImage, SMOOTH_SVG_SCALE_FACTOR, ScrollHandle, SharedString, Stateful,
+    StyledText, SvgRenderer, UniformListScrollHandle, Window, actions, canvas, div, fill, img, linear_color_stop,
+    linear_gradient, point, prelude::*, px, size, svg, uniform_list,
 };
 use runode_git_status::{self as git, FileStatus, LineKind, Section};
 use runode_preview::{Content, ImageFormat, Span};
 use runode_shared_types::{color::Rgb, theme};
+
+pub(in crate::workspace) use diff::DiffTarget;
 
 use super::{
     CloseTab, TITLEBAR_HEIGHT, WindowView, divider_color,
@@ -35,6 +42,7 @@ use super::{
     titlebar::{close_button, drag_chip},
 };
 use crate::{
+    assets::DIFF_ICON,
     config::AppConfig,
     file_icons::file_icon,
     scrollbar::scrollbar,
@@ -97,15 +105,15 @@ impl PreviewTabs {
         self.tabs.get_mut(self.active)
     }
 
-    /// 打开 `path` 并切过去，`pin` 时固定下来。已经开着就切过去；没开着时换掉临时标签，没有
-    /// 临时标签就插在当前标签右边。返回被换掉的临时标签。
-    fn open(&mut self, path: &Path, pin: bool) -> Option<Preview> {
-        if let Some(ix) = self.tabs.iter().position(|tab| tab.path == path) {
+    /// 打开 `path`（`diff` 不为空时是它的 diff）并切过去，`pin` 时固定下来。已经开着就切过去；
+    /// 没开着时换掉临时标签，没有临时标签就插在当前标签右边。返回被换掉的临时标签。
+    fn open(&mut self, path: &Path, diff: Option<DiffTarget>, pin: bool) -> Option<Preview> {
+        if let Some(ix) = self.tabs.iter().position(|tab| tab.path == path && tab.diff == diff) {
             self.active = ix;
             self.tabs[ix].pinned |= pin;
             return None;
         }
-        let tab = Preview::new(path.to_path_buf(), pin);
+        let tab = Preview::new(path.to_path_buf(), diff, pin);
         if let Some(ix) = self.tabs.iter().position(|tab| !tab.pinned) {
             self.active = ix;
             return Some(std::mem::replace(&mut self.tabs[ix], tab));
@@ -146,12 +154,12 @@ impl PreviewTabs {
     }
 
     /// `from` 改了名或挪到了 `to`：它和它下面的文件的标签换成新路径，固定与否不变。返回换下来的
-    /// 旧标签。
+    /// 旧标签。diff 标签不跟，扫描到新的改动时它自己会重读。
     fn moved(&mut self, from: &Path, to: &Path) -> Vec<Preview> {
         let mut old = Vec::new();
-        for tab in &mut self.tabs {
+        for tab in self.tabs.iter_mut().filter(|tab| tab.diff.is_none()) {
             if let Ok(rest) = tab.path.strip_prefix(from) {
-                let new = Preview::new(to.join(rest), tab.pinned);
+                let new = Preview::new(to.join(rest), None, tab.pinned);
                 old.push(std::mem::replace(tab, new));
             }
         }
@@ -162,8 +170,7 @@ impl PreviewTabs {
 /// 拖动中的预览标签：跟着鼠标画出来，放到另一个标签上时挪过去。
 #[derive(Clone)]
 struct DraggedPreviewTab {
-    path: PathBuf,
-    /// 开始拖动时所在的位置，用来决定落点提示画在目标标签的哪一边。
+    /// 开始拖动时所在的位置：挪的是这个标签，落点提示也按它画在目标标签的哪一边。
     ix: usize,
     name: SharedString,
     fg: Hsla,
@@ -179,6 +186,10 @@ impl Render for DraggedPreviewTab {
 /// 预览栏打开的文件和读到的内容。
 pub(in crate::workspace) struct Preview {
     pub path: PathBuf,
+    /// 不为空时这是 `path` 的 diff 标签，和同一个文件的普通标签是两个。
+    pub diff: Option<DiffTarget>,
+    /// diff 标签：扫描到 git 状态变了，下次显示时重读。
+    diff_stale: bool,
     /// 固定的标签；临时标签为假，下一个打开的文件会换掉它。
     pub pinned: bool,
     /// 文件的 git 状态，标签名按它上色；和 `marks` 一起重算。
@@ -213,6 +224,10 @@ enum Loaded {
         widest: usize,
     },
     Image(Arc<Image>),
+    /// SVG 在后台画好的位图，太小的已经放大过。
+    Svg(Arc<RenderImage>),
+    /// diff 标签读到的整篇 diff。
+    Diff(diff::DiffContent),
     Note(Note),
 }
 
@@ -221,13 +236,21 @@ enum Note {
     Binary,
     TooLarge,
     Unreadable(String),
+    /// diff 标签：文件已经没有这一种改动了（比如全暂存了）。
+    NoChanges,
+    /// diff 标签：只改了权限或者只改了名，内容没变。
+    NoContent,
+    /// diff 标签：改动太多或者文件太大，不显示。
+    DiffTooLarge,
 }
 
 impl Preview {
-    fn new(path: PathBuf, pinned: bool) -> Self {
+    fn new(path: PathBuf, diff: Option<DiffTarget>, pinned: bool) -> Self {
         let real_path = fs::canonicalize(&path).unwrap_or_else(|_| path.clone());
         Self {
             path,
+            diff,
+            diff_stale: false,
             pinned,
             status: None,
             real_path,
@@ -241,30 +264,61 @@ impl Preview {
         }
     }
 
-    /// 按仓库的 git 状态 `git` 重算改动标记和标签上的状态；不在仓库里或文件不在仓库下时都没有。
-    pub fn refresh_marks(&mut self, git: Option<&git::Snapshot>) {
+    /// 按 git 状态 `git` 重算改动标记和标签上的状态：子模块和嵌套仓库里的文件按它们自己那个
+    /// 仓库算；不在仓库里或文件不在仓库下时都没有。
+    pub fn refresh_marks(&mut self, git: Option<&git::Repos>) {
         (self.marks, self.status) = git
             .and_then(|git| {
-                let rel = self.path.strip_prefix(&git.root).ok().map(Path::to_path_buf).or_else(|| {
-                    let root = fs::canonicalize(&git.root).ok()?;
+                let rel = self.path.strip_prefix(&git.main.root).ok().map(Path::to_path_buf).or_else(|| {
+                    let root = fs::canonicalize(&git.main.root).ok()?;
                     self.real_path.strip_prefix(root).ok().map(Path::to_path_buf)
                 })?;
-                Some((line_marks(git, &rel), git.statuses.get(&rel).copied()))
+                let (repo, rel) = git.locate(&rel);
+                Some((line_marks(repo, rel), repo.statuses.get(rel).copied()))
             })
             .unwrap_or_default();
     }
 
-    /// 标签上的名字。
-    fn name(&self) -> SharedString {
+    /// 扫描到 git 状态从 `old` 变成了 `new`：重算改动标记；工作区和暂存区的 diff 标签在这个文件的
+    /// 那一段改动变了时记下要重读，别的文件、别的仓库变了不管；提交里的不会变。
+    pub fn git_changed(&mut self, old: Option<&git::Repos>, new: Option<&git::Repos>) {
+        self.refresh_marks(new);
+        if let Some(diff) = &self.diff
+            && diff_file(old, diff) != diff_file(new, diff)
+        {
+            self.diff_stale = true;
+        }
+    }
+
+    /// 文件名，不带 diff 的后缀。
+    fn file_name(&self) -> String {
         self.path
             .file_name()
             .map_or_else(|| self.path.display().to_string(), |name| name.to_string_lossy().into_owned())
-            .into()
     }
 
-    /// 监听到的这些路径里有没有正在预览的文件。
+    /// 标签上的名字；diff 标签带上和什么比：「a.rs（工作区）」「a.rs（已暂存）」「a.rs @ 1a2b3c4」。
+    fn name(&self) -> SharedString {
+        let name = self.file_name();
+        match self.diff.as_ref().map(|diff| &diff.side) {
+            None => name,
+            Some(git::DiffSide::Worktree) => rust_i18n::t!("preview.diff.worktree_tab", name = name).into_owned(),
+            Some(git::DiffSide::Index) => rust_i18n::t!("preview.diff.staged_tab", name = name).into_owned(),
+            Some(git::DiffSide::Commit { id, .. }) => format!("{name} @ {}", id.get(..7).unwrap_or(id)),
+        }
+        .into()
+    }
+
+    /// 监听到的这些路径里有没有正在预览的文件。diff 标签不看文件事件：文件变了会带来一次扫描，
+    /// 扫描结果里这个文件的改动变了才重读，见 `git_changed`。
     pub fn affected_by(&self, paths: &[PathBuf]) -> bool {
-        paths.iter().any(|path| *path == self.path || *path == self.real_path)
+        self.diff.is_none() && paths.iter().any(|path| *path == self.path || *path == self.real_path)
+    }
+
+    /// 这个标签要不要重读：还没读过；普通标签是文件在磁盘上变过，diff 标签是 git 状态变过。
+    fn stale(&self) -> bool {
+        self.content.is_none()
+            || if self.diff.is_some() { self.diff_stale } else { file_stamp(&self.path) != self.stamp }
     }
 
     fn lines(&self) -> Option<&[String]> {
@@ -281,8 +335,10 @@ impl Preview {
 
     /// 换下或关掉预览时调用：显示过的图片解码结果留在 GPUI 的全局缓存里，不清掉就一直占着内存。
     fn release_image(&self, cx: &mut App) {
-        if let Some(Loaded::Image(image)) = &self.content {
-            ImageSource::Image(image.clone()).remove_asset(cx);
+        match &self.content {
+            Some(Loaded::Image(image)) => ImageSource::Image(image.clone()).remove_asset(cx),
+            Some(Loaded::Svg(image)) => cx.drop_image(image.clone(), None),
+            _ => {}
         }
     }
 }
@@ -291,6 +347,17 @@ impl Drop for Preview {
     fn drop(&mut self) {
         self.cancel.store(true, Ordering::Relaxed);
     }
+}
+
+/// `git` 里 diff 标签 `diff` 看的那个文件在那一段的改动；提交里的为空（不随扫描变）。
+fn diff_file<'a>(git: Option<&'a git::Repos>, diff: &DiffTarget) -> Option<&'a git::FileDiff> {
+    let section = match diff.side {
+        git::DiffSide::Worktree => Section::Unstaged,
+        git::DiffSide::Index => Section::Staged,
+        git::DiffSide::Commit { .. } => return None,
+    };
+    let repo = git?.iter().find(|repo| repo.root == diff.root)?;
+    repo.files(section).iter().find(|file| file.path == diff.rel)
 }
 
 fn file_stamp(path: &Path) -> Option<(u64, SystemTime)> {
@@ -311,13 +378,37 @@ fn gpui_format(format: ImageFormat) -> gpui::ImageFormat {
     }
 }
 
-/// 读到的内容换成预览栏存的样子，在后台做：文本包进 `Arc`、找出最长的行，UI 线程只管换上。
-fn loaded(content: Content) -> Loaded {
+/// SVG 按自身尺寸画太小时（图标常是 16×16）放大到长边有这么多逻辑像素，放大是重画不是拉伸，
+/// 线条照样清楚。
+const SVG_MIN_SIDE: f32 = 256.;
+/// 图片底下棋盘格的两种颜色和格子边长。
+const CHECKER_LIGHT: Rgb = Rgb(0xFF, 0xFF, 0xFF);
+const CHECKER_DARK: Rgb = Rgb(0xE4, 0xE4, 0xE4);
+const CHECKER_CELL: f32 = 8.;
+
+/// 画 SVG：先按自身尺寸画，太小的按 `SVG_MIN_SIDE` 再画一遍。
+fn render_svg(renderer: &SvgRenderer, bytes: &[u8]) -> Result<Arc<RenderImage>, String> {
+    let image = renderer.render_single_frame(bytes, 1.).map_err(|err| err.to_string())?;
+    // 按 1 倍画出来的像素是逻辑尺寸的 `SMOOTH_SVG_SCALE_FACTOR` 倍。
+    let size = image.size(0);
+    let longest = size.width.0.max(size.height.0) as f32 / SMOOTH_SVG_SCALE_FACTOR;
+    if longest <= 0. || longest >= SVG_MIN_SIDE {
+        return Ok(image);
+    }
+    renderer.render_single_frame(bytes, SVG_MIN_SIDE / longest).map_err(|err| err.to_string())
+}
+
+/// 读到的内容换成预览栏存的样子，在后台做：文本包进 `Arc`、找出最长的行、画好 SVG，UI 线程只管换上。
+fn loaded(content: Content, svg: &SvgRenderer) -> Loaded {
     match content {
         Content::Text(text) => {
             let widest = widest_line(&text.lines);
             Loaded::Text { lines: Arc::new(text.lines), truncated: text.truncated, highlights: None, widest }
         }
+        Content::Image { format: ImageFormat::Svg, bytes } => match render_svg(svg, &bytes) {
+            Ok(image) => Loaded::Svg(image),
+            Err(err) => Loaded::Note(Note::Unreadable(err)),
+        },
         Content::Image { format, bytes } => Loaded::Image(Arc::new(Image::from_bytes(gpui_format(format), bytes))),
         Content::Binary => Loaded::Note(Note::Binary),
         Content::TooLarge => Loaded::Note(Note::TooLarge),
@@ -456,12 +547,19 @@ impl WindowView {
     /// 在预览栏里打开 `path` 并切到它的标签：`pin` 时开成固定标签，否则开成临时标签；已经开着
     /// 时重读一次。文件树跟着定位到它。
     pub(super) fn open_preview(&mut self, path: &Path, pin: bool, cx: &mut Context<Self>) {
+        self.open_tab(path, None, pin, cx);
+    }
+
+    /// 打开 `path` 的普通标签（`diff` 为空）或 diff 标签。
+    fn open_tab(&mut self, path: &Path, diff: Option<DiffTarget>, pin: bool, cx: &mut Context<Self>) {
         let shown = self.preview_shown();
-        if let Some(old) = self.preview().filter(|old| old.path != path) {
+        if let Some(old) = self.preview().filter(|old| old.path != path || old.diff != diff) {
             old.release_image(cx);
         }
+        // 提交里的文件工作区里不一定还有，文件树不跟过去。
+        let reveal = diff.as_ref().is_none_or(|diff| !matches!(diff.side, git::DiffSide::Commit { .. }));
         let previews = &mut self.workspace_mut().project.previews;
-        let replaced = previews.open(path, pin);
+        let replaced = previews.open(path, diff, pin);
         previews.scroll.scroll_to_item(previews.active);
         if let Some(old) = replaced {
             old.release_image(cx);
@@ -470,7 +568,9 @@ impl WindowView {
             self.sync_project_watch();
             self.refresh_project(cx);
         }
-        self.reveal_in_tree(path);
+        if reveal {
+            self.reveal_in_tree(path);
+        }
         self.load_preview(cx);
     }
 
@@ -485,7 +585,7 @@ impl WindowView {
         let Some(tab) = previews.tabs.get(ix) else {
             return;
         };
-        let (path, stale) = (tab.path.clone(), tab.content.is_none() || file_stamp(&tab.path) != tab.stamp);
+        let (path, stale) = (tab.path.clone(), tab.stale());
         // 换下去的标签不显示了，图片的解码结果先放掉，切回来时再解码。
         if ix != previews.active
             && let Some(old) = previews.active()
@@ -510,7 +610,7 @@ impl WindowView {
         cx: &mut Context<Self>,
     ) {
         let previews = &mut self.workspace_mut().project.previews;
-        let before = previews.active().map(|tab| tab.path.clone());
+        let before = previews.active().map(|tab| (tab.path.clone(), tab.diff.clone()));
         let closed = previews.retain(keep);
         if closed.is_empty() {
             return;
@@ -523,7 +623,7 @@ impl WindowView {
             if self.preview_focus.is_focused(window) {
                 window.focus(&self.tab().focused_view().focus_handle(cx), cx);
             }
-        } else if self.preview().map(|tab| &tab.path) != before.as_ref() {
+        } else if self.preview().map(|tab| (tab.path.clone(), tab.diff.clone())) != before {
             self.activate_preview(self.workspace().project.previews.active, cx);
         }
         cx.notify();
@@ -544,7 +644,7 @@ impl WindowView {
     pub(super) fn refresh_preview_if_changed(&mut self, cx: &mut Context<Self>) {
         if let Some(preview) = self.preview()
             && preview.content.is_some()
-            && file_stamp(&preview.path) != preview.stamp
+            && preview.stale()
         {
             self.load_preview(cx);
         }
@@ -576,22 +676,27 @@ impl WindowView {
         }
     }
 
-    /// 把 `path` 的标签挪到第 `to` 个位置并切过去。
-    fn move_preview(&mut self, path: &Path, to: usize, cx: &mut Context<Self>) {
+    /// 把第 `from` 个标签挪到第 `to` 个位置并切过去。
+    fn move_preview(&mut self, from: usize, to: usize, cx: &mut Context<Self>) {
         let previews = &mut self.workspace_mut().project.previews;
-        let Some(from) = previews.tabs.iter().position(|tab| tab.path == path) else {
+        if from >= previews.tabs.len() {
             return;
-        };
-        let before = previews.active().map(|tab| tab.path.clone());
+        }
+        let before = previews.active().map(|tab| (tab.path.clone(), tab.diff.clone()));
         previews.move_tab(from, to);
         let new = previews.active;
         // 先指回原来的当前标签，`activate_preview` 才知道换下去的是哪个。
-        previews.active = previews.tabs.iter().position(|tab| Some(&tab.path) == before.as_ref()).unwrap_or(new);
+        previews.active =
+            previews.tabs.iter().position(|tab| Some((tab.path.clone(), tab.diff.clone())) == before).unwrap_or(new);
         self.activate_preview(new, cx);
     }
 
-    /// 在后台读当前 workspace 预览的文件，读完换上；是文本时接着在后台高亮。
+    /// 在后台读当前 workspace 预览的文件，读完换上；是文本时接着在后台高亮。diff 标签读 diff。
     pub(super) fn load_preview(&mut self, cx: &mut Context<Self>) {
+        if self.preview().is_some_and(|preview| preview.diff.is_some()) {
+            self.load_diff(cx);
+            return;
+        }
         let id = self.workspace().id;
         let Some(preview) = self.preview_mut() else {
             return;
@@ -600,11 +705,12 @@ impl WindowView {
         preview.cancel = Arc::new(AtomicBool::new(false));
         let cancel = preview.cancel.clone();
         let path = preview.path.clone();
+        let svg = cx.svg_renderer();
         let job = cx.background_spawn({
             let path = path.clone();
             async move {
                 let stamp = file_stamp(&path);
-                (loaded(runode_preview::load(&path)), stamp)
+                (loaded(runode_preview::load(&path), &svg), stamp)
             }
         });
         cx.spawn(async move |this, cx| {
@@ -668,7 +774,7 @@ impl WindowView {
         &mut self,
         id: super::model::WorkspaceId,
         cancel: &Arc<AtomicBool>,
-    ) -> Option<(&mut Preview, Option<&git::Snapshot>)> {
+    ) -> Option<(&mut Preview, Option<&git::Repos>)> {
         let workspace = self.workspaces.iter_mut().find(|workspace| workspace.id == id)?;
         let project = &mut workspace.project;
         let preview = project.previews.tabs.iter_mut().find(|preview| Arc::ptr_eq(&preview.cancel, cancel))?;
@@ -762,6 +868,9 @@ impl WindowView {
                     Note::Binary => rust_i18n::t!("preview.binary").into_owned(),
                     Note::TooLarge => rust_i18n::t!("preview.too_large").into_owned(),
                     Note::Unreadable(err) => rust_i18n::t!("preview.unreadable", error = err).into_owned(),
+                    Note::NoChanges => rust_i18n::t!("preview.diff.no_changes").into_owned(),
+                    Note::NoContent => rust_i18n::t!("panel.no_content").into_owned(),
+                    Note::DiffTooLarge => rust_i18n::t!("preview.diff.too_large").into_owned(),
                 };
                 panel_message(text, fg).into_any_element()
             }
@@ -774,6 +883,33 @@ impl WindowView {
                 .items_start()
                 .child(img(image.clone()).max_w_full().max_h_full())
                 .into_any_element(),
+            Some(Loaded::Svg(image)) => {
+                // 宽了就按预览栏的宽度等比缩小；高了能上下滚。
+                let size = image.size(0);
+                let (w, h) =
+                    (size.width.0 as f32 / SMOOTH_SVG_SCALE_FACTOR, size.height.0 as f32 / SMOOTH_SVG_SCALE_FACTOR);
+                let fit = ((width - 24.) / w).min(1.);
+                div()
+                    .id("preview-svg")
+                    .flex_1()
+                    .min_h_0()
+                    .overflow_y_scroll()
+                    .p(px(12.))
+                    .flex()
+                    .justify_center()
+                    .items_start()
+                    .child(
+                        div()
+                            .flex_none()
+                            .relative()
+                            .w(px(w * fit))
+                            .h(px(h * fit))
+                            .child(checkerboard())
+                            .child(img(ImageSource::Render(image.clone())).absolute().size_full()),
+                    )
+                    .into_any_element()
+            }
+            Some(Loaded::Diff(content)) => self.render_diff_body(content, font, font_size, fg, bg, cx),
             Some(Loaded::Text { lines, truncated, widest, .. }) => {
                 let count = lines.len() + usize::from(*truncated);
                 let digits = lines.len().to_string().len();
@@ -847,7 +983,12 @@ impl WindowView {
         let fg = hsla(fg);
         let color = tab.status.map_or(fg, |status| hsla(status_color(status)));
         let group = SharedString::from(format!("preview-tab-{ix}"));
-        let dragged = DraggedPreviewTab { path: tab.path.clone(), ix, name: name.clone(), fg, bg: active_bg };
+        let dragged = DraggedPreviewTab { ix, name: name.clone(), fg, bg: active_bg };
+        // diff 标签的图标是 diff 的样子，不是文件类型的。
+        let icon = match &tab.diff {
+            Some(_) => svg().path(DIFF_ICON).flex_none().size(px(14.)).text_color(fg.opacity(0.8)).into_any_element(),
+            None => img(file_icon(&tab.file_name())).flex_none().size(px(14.)).into_any_element(),
+        };
         div()
             .id(("preview-tab", ix))
             .group(group.clone())
@@ -870,7 +1011,7 @@ impl WindowView {
                     tab.hover(|tab| tab.bg(hover_bg)).child(underline)
                 }
             })
-            .child(img(file_icon(&name)).flex_none().size(px(14.)).when(!active, |icon| icon.opacity(0.6)))
+            .child(div().flex_none().flex().when(!active, |icon| icon.opacity(0.6)).child(icon))
             .child(
                 div()
                     .id(("preview-tab-name", ix))
@@ -938,7 +1079,7 @@ impl WindowView {
                 }
             })
             .on_drop(cx.listener(move |this, dragged: &DraggedPreviewTab, _, cx| {
-                this.move_preview(&dragged.path, ix, cx);
+                this.move_preview(dragged.ix, ix, cx);
             }))
     }
 
@@ -1066,6 +1207,28 @@ impl WindowView {
     }
 }
 
+/// 图片底下的棋盘格：透明的地方看得出来，深色背景上黑色的线条也看得清。
+fn checkerboard() -> impl IntoElement {
+    canvas(
+        |_, _, _| {},
+        |bounds, _, window, _| {
+            window.paint_quad(fill(bounds, hsla(CHECKER_LIGHT)));
+            let cell = px(CHECKER_CELL);
+            let (columns, rows) =
+                ((bounds.size.width / cell).ceil() as usize, (bounds.size.height / cell).ceil() as usize);
+            for row in 0..rows {
+                for column in (row % 2..columns).step_by(2) {
+                    let origin = bounds.origin + point(cell * column as f32, cell * row as f32);
+                    let cell_bounds = Bounds::new(origin, size(cell, cell)).intersect(&bounds);
+                    window.paint_quad(fill(cell_bounds, hsla(CHECKER_DARK)));
+                }
+            }
+        },
+    )
+    .absolute()
+    .size_full()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1086,6 +1249,7 @@ mod tests {
             hunks: vec![Hunk { header: String::new(), lines }],
             binary: false,
             truncated: false,
+            gitlink: false,
         }
     }
 
@@ -1141,6 +1305,8 @@ mod tests {
         let snapshot = git::Snapshot {
             root: "/repo".into(),
             git_dir: "/repo/.git".into(),
+            prefix: PathBuf::new(),
+            kind: git::RepoKind::Main,
             staged: vec![staged],
             unstaged: vec![unstaged],
             statuses: HashMap::new(),
@@ -1178,25 +1344,25 @@ mod tests {
     #[test]
     fn temporary_tab_is_replaced_and_pinned_tabs_open_beside_the_active_one() {
         let mut previews = PreviewTabs::default();
-        assert!(previews.open(Path::new("a"), false).is_none());
-        assert_eq!(previews.open(Path::new("b"), false).map(|old| old.path.clone()), Some(PathBuf::from("a")));
+        assert!(previews.open(Path::new("a"), None, false).is_none());
+        assert_eq!(previews.open(Path::new("b"), None, false).map(|old| old.path.clone()), Some(PathBuf::from("a")));
         assert_eq!(tabs(&previews), [">b*"]);
         // 再开已经开着的文件只是切过去，带 `pin` 时固定下来。
-        previews.open(Path::new("b"), true);
+        previews.open(Path::new("b"), None, true);
         assert_eq!(tabs(&previews), [">b"]);
-        previews.open(Path::new("c"), true);
-        previews.open(Path::new("d"), false);
+        previews.open(Path::new("c"), None, true);
+        previews.open(Path::new("d"), None, false);
         assert_eq!(tabs(&previews), ["b", "c", ">d*"]);
         // 开固定标签也先占掉临时标签的位置。
-        previews.open(Path::new("e"), true);
+        previews.open(Path::new("e"), None, true);
         assert_eq!(tabs(&previews), ["b", "c", ">e"]);
         // 没有临时标签时插在当前标签右边。
         previews.active = 0;
-        previews.open(Path::new("f"), false);
+        previews.open(Path::new("f"), None, false);
         assert_eq!(tabs(&previews), ["b", ">f*", "c", "e"]);
         // 临时标签不论在哪都被换掉，位置不变。
         previews.active = 3;
-        previews.open(Path::new("g"), false);
+        previews.open(Path::new("g"), None, false);
         assert_eq!(tabs(&previews), ["b", ">g*", "c", "e"]);
     }
 
@@ -1204,7 +1370,7 @@ mod tests {
     fn closing_the_active_tab_moves_to_its_right_neighbour() {
         let mut previews = PreviewTabs::default();
         for name in ["a", "b", "c", "d"] {
-            previews.open(Path::new(name), true);
+            previews.open(Path::new(name), None, true);
         }
         previews.active = 1;
         assert_eq!(previews.retain(|ix, _| ix != 1).len(), 1);
@@ -1225,13 +1391,13 @@ mod tests {
     fn moves_tabs_and_follows_renames() {
         let mut previews = PreviewTabs::default();
         for name in ["a", "dir/b", "dir/c"] {
-            previews.open(Path::new(name), true);
+            previews.open(Path::new(name), None, true);
         }
         previews.move_tab(0, 2);
         assert_eq!(tabs(&previews), ["dir/b", "dir/c", ">a"]);
         previews.move_tab(2, 0);
         assert_eq!(tabs(&previews), [">a", "dir/b", "dir/c"]);
-        previews.open(Path::new("dir/c"), false);
+        previews.open(Path::new("dir/c"), None, false);
         previews.tabs[2].pinned = false;
         let old = previews.moved(Path::new("dir"), Path::new("new"));
         assert_eq!(old.len(), 2);

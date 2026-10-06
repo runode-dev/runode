@@ -85,8 +85,6 @@ quit:
 panel:
   no_changes: 没有未提交的改动
   not_repo: 不在 git 仓库里
-  binary: 二进制文件
-  truncated: 改动太多，没有全部显示
   no_content: 内容没有变化
 preview:
   binary: 无法预览二进制文件
@@ -98,6 +96,14 @@ preview:
   close_right: 关闭右侧
   close_all: 全部关闭
   keep_open: 保持打开
+  diff:
+    worktree_tab: "%{name}（工作区）"
+    staged_tab: "%{name}（已暂存）"
+    no_changes: 没有改动
+    previous_change: 上一处改动
+    next_change: 下一处改动
+    discard_hunk_title: 丢掉这一块改动？
+    too_large: 改动太多，不显示
 paste:
   title: 粘贴的内容可能会直接执行命令
   detail: 内容含有换行或终端控制序列，粘贴后可能被当作命令立即运行。
@@ -145,6 +151,8 @@ tooltip:
 git:
   title: 源代码管理
   refresh: 刷新
+  view_as_tree: 以树形式查看
+  view_as_list: 以列表形式查看
   ok: 好
   cancel: 取消
   failed: Git 操作没有完成
@@ -158,11 +166,13 @@ git:
     push: 正在推送…
     sync: 正在同步…
     stash: 正在储藏…
+    remove_worktree: 正在删除工作树…
   section:
     merge: 合并冲突
     staged: 暂存的更改
     unstaged: 更改
     stashes: 储藏
+    graph: 图表
   message_placeholder: 提交说明（⌘↩ 提交）
   message_placeholder_branch: 提交说明（⌘↩ 提交到“%{branch}”）
   commit: 提交
@@ -177,6 +187,11 @@ git:
   sync_tooltip: 和“%{upstream}”同步：先拉取，再推送
   detached: "分离于 %{head}"
   no_commits: 还没有提交
+  repo_kind:
+    main: 仓库
+    submodule: 子模块
+    nested: 嵌套仓库
+    worktree: 工作树
   checkout: 切换分支…
   create_branch: 新建分支…
   pull: 拉取
@@ -217,9 +232,33 @@ git:
     rebase: 正在变基：解决冲突后在终端里继续
     cherry_pick: 正在拣选：解决冲突并暂存后提交
     revert: 正在还原：解决冲突并暂存后提交
+  worktree:
+    open_in_new_tab: 在新的终端标签页里打开
+    remove: 删除工作树…
+    remove_title: "删除工作树「%{name}」？"
+    remove_detail: 它的目录会被删掉，它所在的分支保留。
+    remove_dirty_detail: 它还有没提交的改动或未跟踪的文件，会随目录一起删掉，删了找不回来。
+    remove_detached_detail: 它的 HEAD 是游离的，只在这个工作树里做的提交删了以后可能就找不到了。
+    remove_confirm: 删除
+    remove_force: 仍然删除
+  graph:
+    loading: 正在读取提交历史…
+    failed: 读不出提交历史
+    more: 加载更多…
+    refresh: 刷新图表
+    loading_changes: 正在读取改动…
+    changes_failed: 读不出这个提交的改动
+    no_files: 没有改动文件
+    copy_id: 复制提交号
+    checkout: 切到这个提交（分离头指针）
+    create_branch: 从这里新建分支…
+    checkout_title: "切到提交 %{id}？"
+    checkout_detail: HEAD 会分离在这个提交上。要保留在这里做的新提交，请新建一个分支。
+    checkout_confirm: 切换
   picker:
     placeholder: 选择要切换到的分支，或者输入新分支名
     new_branch: 输入新分支的名字
+    new_branch_at: "输入在 %{id} 新建的分支名"
     loading: 正在读取分支…
     no_matches: 没有匹配的分支
     type_name: 输入一个合法的分支名

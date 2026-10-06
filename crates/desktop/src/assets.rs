@@ -36,6 +36,13 @@ pub const OPEN_FILE_ICON: &str = "icons/open-file.svg";
 pub const STASH_APPLY_ICON: &str = "icons/stash-apply.svg";
 pub const STASH_POP_ICON: &str = "icons/stash-pop.svg";
 pub const TRASH_ICON: &str = "icons/trash.svg";
+/// Git 面板标题栏上切换改动的文件以树形式还是列表形式查看的按钮，画的是切过去以后的样子。
+pub const VIEW_TREE_ICON: &str = "icons/view-tree.svg";
+pub const VIEW_LIST_ICON: &str = "icons/view-list.svg";
+/// 预览栏里 diff 标签的图标，以及 diff 顶上跳到上一处、下一处改动的按钮。
+pub const DIFF_ICON: &str = "icons/diff.svg";
+pub const ARROW_UP_ICON: &str = "icons/arrow-up.svg";
+pub const ARROW_DOWN_ICON: &str = "icons/arrow-down.svg";
 
 const FILES: &[(&str, &[u8])] = &[
     (SIDEBAR_ICON, include_bytes!("../assets/icons/sidebar.svg")),
@@ -60,6 +67,11 @@ const FILES: &[(&str, &[u8])] = &[
     (STASH_APPLY_ICON, include_bytes!("../assets/icons/stash-apply.svg")),
     (STASH_POP_ICON, include_bytes!("../assets/icons/stash-pop.svg")),
     (TRASH_ICON, include_bytes!("../assets/icons/trash.svg")),
+    (VIEW_TREE_ICON, include_bytes!("../assets/icons/view-tree.svg")),
+    (VIEW_LIST_ICON, include_bytes!("../assets/icons/view-list.svg")),
+    (DIFF_ICON, include_bytes!("../assets/icons/diff.svg")),
+    (ARROW_UP_ICON, include_bytes!("../assets/icons/arrow-up.svg")),
+    (ARROW_DOWN_ICON, include_bytes!("../assets/icons/arrow-down.svg")),
 ];
 
 fn all_files() -> impl Iterator<Item = &'static (&'static str, &'static [u8])> {

@@ -85,8 +85,6 @@ quit:
 panel:
   no_changes: No uncommitted changes
   not_repo: Not a git repository
-  binary: Binary file
-  truncated: Too many changes to show in full
   no_content: No content changes
 preview:
   binary: Can't preview a binary file
@@ -98,6 +96,14 @@ preview:
   close_right: Close to the Right
   close_all: Close All
   keep_open: Keep Open
+  diff:
+    worktree_tab: "%{name} (Working Tree)"
+    staged_tab: "%{name} (Staged)"
+    no_changes: No changes
+    previous_change: Previous Change
+    next_change: Next Change
+    discard_hunk_title: Discard this change?
+    too_large: Too many changes to show
 paste:
   title: The pasted text may run commands
   detail: It contains line breaks or terminal control sequences, so it may run as a command right after pasting.
@@ -145,6 +151,8 @@ tooltip:
 git:
   title: Source Control
   refresh: Refresh
+  view_as_tree: View as Tree
+  view_as_list: View as List
   ok: OK
   cancel: Cancel
   failed: The Git operation didn't complete
@@ -158,11 +166,13 @@ git:
     push: Pushing…
     sync: Syncing…
     stash: Stashing…
+    remove_worktree: Removing worktree…
   section:
     merge: Merge Changes
     staged: Staged Changes
     unstaged: Changes
     stashes: Stashes
+    graph: Graph
   message_placeholder: Message (⌘↩ to commit)
   message_placeholder_branch: "Message (⌘↩ to commit on “%{branch}”)"
   commit: Commit
@@ -177,6 +187,11 @@ git:
   sync_tooltip: "Sync with “%{upstream}”: pull, then push"
   detached: "Detached at %{head}"
   no_commits: No commits yet
+  repo_kind:
+    main: Repository
+    submodule: Submodule
+    nested: Nested Repository
+    worktree: Worktree
   checkout: Checkout to…
   create_branch: Create Branch…
   pull: Pull
@@ -217,9 +232,33 @@ git:
     rebase: "Rebasing: resolve the conflicts, then continue in the terminal"
     cherry_pick: "Cherry-picking: resolve the conflicts, stage them, then commit"
     revert: "Reverting: resolve the conflicts, stage them, then commit"
+  worktree:
+    open_in_new_tab: Open in New Terminal Tab
+    remove: Remove Worktree…
+    remove_title: "Remove the worktree “%{name}”?"
+    remove_detail: Its directory will be deleted. The branch it was on stays.
+    remove_dirty_detail: It has uncommitted changes or untracked files, which will be deleted along with its directory. This can't be undone.
+    remove_detached_detail: Its HEAD is detached, so commits made only in this worktree may be lost.
+    remove_confirm: Remove
+    remove_force: Remove Anyway
+  graph:
+    loading: Loading history…
+    failed: Couldn't read the commit history
+    more: Load More…
+    refresh: Refresh Graph
+    loading_changes: Loading changes…
+    changes_failed: Couldn't read this commit's changes
+    no_files: No file changes
+    copy_id: Copy Commit ID
+    checkout: Checkout (Detached)
+    create_branch: Create Branch from Here…
+    checkout_title: "Switch to commit %{id}?"
+    checkout_detail: HEAD will be detached at this commit. Create a branch if you want to keep new commits made there.
+    checkout_confirm: Switch
   picker:
     placeholder: Select a branch to switch to, or type a new branch name
     new_branch: Type a name for the new branch
+    new_branch_at: "Type a name for the new branch at %{id}"
     loading: Loading branches…
     no_matches: No matching branches
     type_name: Type a valid branch name

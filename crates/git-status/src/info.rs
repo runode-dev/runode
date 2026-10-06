@@ -4,7 +4,7 @@ use std::path::Path;
 
 use crate::git;
 
-/// 顶层仓库此刻在哪个分支上、和上游差几个提交、有没有做到一半的合并，以及 stash 列表。
+/// 仓库此刻在哪个分支上、和上游差几个提交、有没有做到一半的合并，以及 stash 列表。
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct RepoInfo {
     /// 当前分支名；分离头指针时为空。

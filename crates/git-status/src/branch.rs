@@ -1,4 +1,4 @@
-//! 分支：列出本地和远端分支，切换、新建分支。只对顶层仓库。
+//! 分支：列出本地和远端分支，切换、新建分支。只对句柄所指的那个仓库。
 
 use std::process::{Command, Stdio};
 
@@ -71,7 +71,7 @@ fn parse_branches(output: &str) -> Vec<Branch> {
 }
 
 impl Repo {
-    /// 顶层仓库的本地分支和远端分支，本地的在前、远端的在后，各按最近一次提交的时间
+    /// 本地分支和远端分支，本地的在前、远端的在后，各按最近一次提交的时间
     /// 倒序。读不出来时为空。
     pub fn branches(&self) -> Vec<Branch> {
         let format = "--format=%(refname)%00%(HEAD)%00%(upstream:strip=2)%00%(symref)%00%(committerdate:relative)%00%(contents:subject)";

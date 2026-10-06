@@ -35,8 +35,8 @@ pub(in crate::workspace) struct Project {
     pub root: Option<PathBuf>,
     /// 上次读的是哪个目录，终端换了目录时据此在文件树里定位过去。
     pub(super) dir: Option<PathBuf>,
-    /// 最近一次读到的 git 状态；不在 git 仓库里时为空。
-    pub git: Option<git::Snapshot>,
+    /// 最近一次读到的 git 状态：主仓库以及它里面的子模块和嵌套仓库；不在 git 仓库里时为空。
+    pub git: Option<git::Repos>,
     pub expanded_dirs: HashSet<PathBuf>,
     pub(super) listings: HashMap<PathBuf, Vec<DirEntry>>,
     /// 文件树里选中的路径。
@@ -294,19 +294,18 @@ impl Workspace {
         // 第一次读时 `root` 还是空的，下面换上根目录时一定算作有变化。
         let mut changed = false;
         project.untracked = scan.untracked;
-        // 终端换到了别的仓库或目录：上一处的目录列表和展开过的改动不再相干。展开的目录
+        // 终端换到了别的仓库或目录：上一处的目录列表不再相干。展开的目录
         // 是绝对路径，留着，回到原处时还是展开的。
         if project.root.as_ref() != Some(&scan.root) {
             project.root = Some(scan.root.clone());
             project.listings.clear();
-            project.git_panel.forget_expanded();
             project.files_scroll.scroll_to_item(0, ScrollStrategy::Top);
             changed = true;
         }
         if project.git != scan.git {
-            project.git = scan.git;
+            let old = std::mem::replace(&mut project.git, scan.git);
             for preview in &mut project.previews.tabs {
-                preview.refresh_marks(project.git.as_ref());
+                preview.git_changed(old.as_ref(), project.git.as_ref());
             }
             changed = true;
         }
@@ -344,10 +343,12 @@ mod tests {
     use super::*;
     use runode_git_status::FileStatus;
 
-    fn snapshot() -> git::Snapshot {
-        git::Snapshot {
+    fn snapshot() -> git::Repos {
+        git::Repos::new(git::Snapshot {
             root: "/repo".into(),
             git_dir: "/repo/.git".into(),
+            prefix: PathBuf::new(),
+            kind: git::RepoKind::Main,
             staged: Vec::new(),
             unstaged: Vec::new(),
             statuses: HashMap::from([
@@ -359,7 +360,7 @@ mod tests {
             ]),
             ignored: HashSet::from(["target".into()]),
             info: Default::default(),
-        }
+        })
     }
 
     fn dir(name: &str) -> DirEntry {
@@ -390,6 +391,33 @@ mod tests {
         assert_eq!(of("/repo/target", true), Decoration::Ignored);
         assert_eq!(of("/repo/target/debug/x", false), Decoration::Ignored);
         assert_eq!(of("/elsewhere/x", false), Decoration::None);
+    }
+
+    #[test]
+    fn decorates_paths_inside_sub_repositories() {
+        let mut git = snapshot();
+        git.main.statuses.insert("libs/lib".into(), FileStatus::Modified);
+        git.subs.push(git::Snapshot {
+            root: "/repo/libs/lib".into(),
+            git_dir: "/repo/.git/modules/libs/lib".into(),
+            prefix: "libs/lib".into(),
+            kind: git::RepoKind::Submodule,
+            staged: Vec::new(),
+            unstaged: Vec::new(),
+            statuses: HashMap::from([("src/x.rs".into(), FileStatus::Added)]),
+            ignored: HashSet::from(["build".into()]),
+            info: Default::default(),
+        });
+        let decorator = Decorator::new(Some(&git));
+        let of = |path: &str, is_dir| decorator.of(Path::new(path), is_dir);
+        // 子模块里的文件按子模块自己的状态，忽略也按它自己的规则。
+        assert_eq!(of("/repo/libs/lib/src/x.rs", false), Decoration::Status(FileStatus::Added));
+        assert_eq!(of("/repo/libs/lib/build/out", false), Decoration::Ignored);
+        // 子模块那个目录：提交号变了算修改，和里面的新增并在一起还是修改。
+        assert_eq!(of("/repo/libs/lib", true), Decoration::ContainsChanges(FileStatus::Modified));
+        assert_eq!(of("/repo/libs/lib/src", true), Decoration::ContainsChanges(FileStatus::Added));
+        assert_eq!(of("/repo/libs", true), Decoration::ContainsChanges(FileStatus::Modified));
+        assert_eq!(of("/repo/src/a/b.rs", false), Decoration::Status(FileStatus::Modified));
     }
 
     #[test]
@@ -431,7 +459,7 @@ mod tests {
         assert_eq!(project.file_rows.len(), 3);
 
         // 只装着被忽略目录的目录不和它并成一行。
-        project.git.as_mut().unwrap().ignored.insert("out/target".into());
+        project.git.as_mut().unwrap().main.ignored.insert("out/target".into());
         project.listings.insert(root.into(), vec![dir("out")]);
         project.listings.insert("/repo/out".into(), vec![dir("target")]);
         project.rebuild_file_rows(root, false);

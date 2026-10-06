@@ -192,6 +192,7 @@ impl WindowView {
             files_width: self.files_width,
             preview_width: self.preview_width,
             show_ignored: self.show_ignored,
+            git_tree: self.git_tree,
         }
     }
 
@@ -271,6 +272,7 @@ impl WindowView {
             self.files_width = saved.files_width;
             self.preview_width = saved.preview_width;
             self.show_ignored = saved.show_ignored;
+            self.git_tree = saved.git_tree;
             self.activate_workspace(active, window, cx);
         }
         shell

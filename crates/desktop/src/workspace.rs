@@ -181,6 +181,8 @@ pub struct WindowView {
     /// Git 面板是否显示，拖动过宽度时是那个宽度。
     git_shown: bool,
     git_width: Option<f32>,
+    /// Git 面板里改动的文件以树形式查看，否则是列表；整个窗口一个设置。
+    git_tree: bool,
     /// Git 面板的焦点：右键菜单的动作派发到这里；提交说明框在它里面。
     git_focus: FocusHandle,
     /// 开着的分支列表。
@@ -288,6 +290,7 @@ impl WindowView {
             files_width: None,
             git_shown: false,
             git_width: None,
+            git_tree: false,
             git_focus: cx.focus_handle(),
             branch_picker: None,
             preview_width: None,
@@ -376,10 +379,8 @@ impl Render for WindowView {
         let widths = self.right_panel_widths(f32::from(window.viewport_size().width));
         let font = view.read(cx).font_family();
         let preview_shown = self.preview_shown();
-        let preview =
-            self.render_preview_panel(widths.preview, !self.files_shown && !self.git_shown, fg, bg, font.clone(), cx);
-        let git =
-            self.git_shown.then(|| self.render_git_panel(widths.git, !self.files_shown, fg, bg, font, window, cx));
+        let preview = self.render_preview_panel(widths.preview, !self.files_shown && !self.git_shown, fg, bg, font, cx);
+        let git = self.git_shown.then(|| self.render_git_panel(widths.git, !self.files_shown, fg, bg, window, cx));
         let files = self.files_shown.then(|| self.render_files_panel(widths.files, fg, bg, cx));
         let file_menu = self.render_file_menu(fg, bg, cx);
         let agent_picker = self.render_agent_picker(fg, bg, window, cx);

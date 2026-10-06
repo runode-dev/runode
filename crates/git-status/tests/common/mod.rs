@@ -9,7 +9,7 @@ use std::{
     sync::atomic::{AtomicUsize, Ordering},
 };
 
-use runode_git_status::{Snapshot, UntrackedCache, snapshot};
+use runode_git_status::{Repos, Snapshot, UntrackedCache, snapshot, snapshot_repos};
 
 pub struct TestRepo {
     dir: PathBuf,
@@ -97,6 +97,30 @@ impl TestRepo {
         self.git(&["commit", "-q", "-m", message]);
     }
 
+    /// 在 `path`（相对仓库根）建一个有一次提交的嵌套仓库，里面有 `a.txt`；返回它的绝对路径。
+    pub fn nested(&self, path: &str) -> PathBuf {
+        let inner = self.dir.join(path);
+        std::fs::create_dir_all(&inner).unwrap();
+        self.git(&["-C", path, "init", "-q", "-b", "main"]);
+        for (key, value) in [("user.name", "t"), ("user.email", "t@t"), ("commit.gpgsign", "false")] {
+            self.git(&["-C", path, "config", key, value]);
+        }
+        self.write(&format!("{path}/a.txt"), "one\n");
+        self.git(&["-C", path, "add", "a.txt"]);
+        self.git(&["-C", path, "commit", "-q", "-m", "init"]);
+        inner
+    }
+
+    /// 把 `source` 作为子模块加到 `path` 并提交；本地路径的子模块要显式允许 file 协议。
+    pub fn add_submodule(&self, source: &TestRepo, path: &str) {
+        let source = source.path().to_string_lossy().into_owned();
+        self.git(&["-c", "protocol.file.allow=always", "submodule", "add", "-q", &source, path]);
+        self.git(&["commit", "-q", "-m", &format!("add {path}")]);
+        self.git(&["-C", path, "config", "user.name", "t"]);
+        self.git(&["-C", path, "config", "user.email", "t@t"]);
+        self.git(&["-C", path, "config", "commit.gpgsign", "false"]);
+    }
+
     /// `git status --porcelain` 的短格式，按行列出，方便断言。
     pub fn status(&self) -> Vec<String> {
         let output = Command::new("git")
@@ -117,4 +141,14 @@ impl Drop for TestRepo {
 
 pub fn read(repo: &TestRepo) -> Snapshot {
     snapshot(repo.path(), &mut UntrackedCache::default()).unwrap()
+}
+
+/// 主仓库连同子仓库一起读。
+pub fn read_all(repo: &TestRepo) -> Repos {
+    snapshot_repos(repo.path(), &mut UntrackedCache::default(), Default::default()).unwrap()
+}
+
+/// 改动的文件路径，按路径排。
+pub fn paths_of(files: &[runode_git_status::FileDiff]) -> Vec<String> {
+    files.iter().map(|file| file.path.to_string_lossy().into_owned()).collect()
 }

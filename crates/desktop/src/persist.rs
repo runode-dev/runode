@@ -54,6 +54,9 @@ pub struct SavedWindow {
     /// 文件树里显示被 git 忽略的文件。
     #[serde(default)]
     pub show_ignored: bool,
+    /// Git 面板里改动的文件以树形式查看；默认是列表。
+    #[serde(default)]
+    pub git_tree: bool,
 }
 
 /// 窗口的位置和大小，相对于它所在的屏幕；放大和全屏时是还原后的位置和大小。
@@ -203,7 +206,17 @@ mod tests {
             files_width: Some(200.),
             preview_width: Some(420.),
             show_ignored: true,
+            git_tree: true,
         }])
+    }
+
+    #[test]
+    fn reads_windows_saved_before_the_git_tree_setting() {
+        let text = serde_json::to_string(&state()).unwrap();
+        let old = text.replace(r#","git_tree":true"#, "");
+        assert_ne!(old, text);
+        let state: State = serde_json::from_str(&old).unwrap();
+        assert!(!state.windows[0].git_tree);
     }
 
     #[test]

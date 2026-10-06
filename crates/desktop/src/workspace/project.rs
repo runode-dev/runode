@@ -42,6 +42,9 @@ pub(super) const POLL_INTERVAL: Duration = Duration::from_secs(1);
 /// `POLL_BACKOFF` 倍，大仓库里不至于一直有 git 在跑。
 const FALLBACK_INTERVAL: Duration = Duration::from_secs(2);
 const POLL_BACKOFF: u32 = 10;
+/// 有其他工作树时至少隔这么久重读一次：它们的工作目录不在监听的范围里，只有 git 目录（暂存、
+/// 提交、切分支）在。上次读得慢时按 `POLL_BACKOFF` 拉长。
+const WORKTREE_INTERVAL: Duration = Duration::from_secs(10);
 /// 监听到改动后先攒这么久再读：保存文件、提交这类操作会连着来一串事件。
 pub(super) const WATCH_DEBOUNCE: Duration = Duration::from_millis(150);
 /// 监听到改动时，离上次开始读至少隔上次耗时的这么多倍。
@@ -129,14 +132,24 @@ impl WindowView {
             return;
         };
         let real_root = fs::canonicalize(&root).unwrap_or_else(|_| root.clone());
-        let git_dir = project.git.as_ref().map(|git| git.git_dir.clone()).filter(|dir| {
-            let real = fs::canonicalize(dir).unwrap_or_else(|_| dir.clone());
-            !real.starts_with(&real_root)
-        });
-        if self.project_watch.as_ref().is_some_and(|watch| watch.root == root && watch.git_dir == git_dir) {
+        // 主仓库是 worktree 时它的 git 目录、连同里面子模块的 git 目录都不在 `root` 下面；一个
+        // 套在另一个里面的只听外面那个。
+        let mut git_dirs: Vec<(PathBuf, PathBuf)> = project
+            .git
+            .iter()
+            .flat_map(|git| git.iter())
+            .map(|repo| {
+                (repo.git_dir.clone(), fs::canonicalize(&repo.git_dir).unwrap_or_else(|_| repo.git_dir.clone()))
+            })
+            .filter(|(_, real)| !real.starts_with(&real_root))
+            .collect();
+        git_dirs.sort_by(|a, b| a.1.cmp(&b.1));
+        git_dirs.dedup_by(|inner, outer| inner.1.starts_with(&outer.1));
+        let git_dirs: Vec<_> = git_dirs.into_iter().map(|(dir, _)| dir).collect();
+        if self.project_watch.as_ref().is_some_and(|watch| watch.root == root && watch.git_dirs == git_dirs) {
             return;
         }
-        self.project_watch = ProjectWatch::new(root, git_dir, self.project_events.clone());
+        self.project_watch = ProjectWatch::new(root, git_dirs, self.project_events.clone());
         // 监听建好之前那次读的期间改了什么听不到，按有改动再读一次。
         if self.project_watch.is_some() {
             self.workspace_mut().project.stale = true;
@@ -148,6 +161,10 @@ impl WindowView {
         // 预览的文件变了就重读；窗口在后台时等切回前台再按修改时间判断。
         if active && self.preview().is_some_and(|preview| preview.affected_by(&paths)) {
             self.load_preview(cx);
+        }
+        // 分支、tag 变了时图表重读；工作区里的文件变了不重读。
+        if self.git_shown {
+            self.graph_refs_changed(&paths, cx);
         }
         let Some(watch) = &self.project_watch else {
             return;
@@ -193,7 +210,9 @@ impl WindowView {
         let id = workspace.id;
         let expanded = project.expanded_dirs.iter().cloned().collect();
         let untracked = std::mem::take(&mut project.untracked);
-        let job = cx.background_spawn(async move { scan(dir, expanded, untracked) });
+        // 其他工作树只在 Git 面板里显示，面板没开时不读；打开面板时 `toggle_git` 会重读一次。
+        let options = runode_git_status::ReadOptions { worktrees: self.git_shown };
+        let job = cx.background_spawn(async move { scan(dir, expanded, untracked, options) });
         cx.spawn(async move |this, cx| {
             let scan = job.await;
             this.update(cx, |this, cx| {
@@ -209,6 +228,7 @@ impl WindowView {
                 }
                 if this.workspace().id == id {
                     this.sync_project_watch();
+                    this.reload_stale_diff(cx);
                     this.refresh_if_due(cx);
                 }
             })
@@ -231,6 +251,11 @@ impl WindowView {
             self.refresh_if_due(cx);
         } else if !self.watching() {
             let wait = FALLBACK_INTERVAL.max(project.scan_cost * POLL_BACKOFF);
+            if project.refreshed_at.is_none_or(|at| at.elapsed() >= wait) {
+                self.refresh_project(cx);
+            }
+        } else if self.git_shown && project.git.as_ref().is_some_and(|git| !git.worktrees.is_empty()) {
+            let wait = WORKTREE_INTERVAL.max(project.scan_cost * POLL_BACKOFF);
             if project.refreshed_at.is_none_or(|at| at.elapsed() >= wait) {
                 self.refresh_project(cx);
             }

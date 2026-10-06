@@ -11,11 +11,11 @@ use std::{
 use crate::{FileDiff, FileStatus, git};
 
 /// 能在后台线程里用的仓库句柄，写操作都挂在它上面；由 `Snapshot::repo` 取得。git 命令
-/// 可能要跑好几秒（推送、拉取），界面线程别直接调。
+/// 可能要跑好几秒（推送、拉取），界面线程别直接调。子模块和嵌套的仓库各用各的句柄。
 #[derive(Clone, Debug)]
 #[non_exhaustive]
 pub struct Repo {
-    /// 顶层仓库的根目录，和 `Snapshot::root` 一样。
+    /// 仓库的根目录，和 `Snapshot::root` 一样。
     pub root: PathBuf,
 }
 
@@ -165,18 +165,6 @@ impl Repo {
         Ok(groups)
     }
 
-    /// 顶层仓库以及所有嵌套在里面的仓库，顶层的在前。
-    fn all_repos(&self) -> Vec<PathBuf> {
-        let mut repos = vec![self.root.clone()];
-        let mut ix = 0;
-        while ix < repos.len() {
-            let nested: Vec<_> = nested_repos(&repos[ix]).into_iter().map(|path| repos[ix].join(path)).collect();
-            repos.extend(nested);
-            ix += 1;
-        }
-        repos
-    }
-
     /// 在 `dir` 里对 `paths` 跑 `args`；路径按字面认，不当通配符。
     fn run_paths(dir: &Path, args: &[&str], paths: &[PathBuf]) -> Result {
         let mut full: Vec<&OsStr> = vec![OsStr::new("--literal-pathspecs")];
@@ -209,12 +197,13 @@ impl Repo {
     /// 丢掉工作区里还没暂存的改动，`files` 来自未暂存段。未跟踪的文件从磁盘上删掉（只删
     /// 文件不删目录，删完把因此变空的上层目录也删掉）；`git add -N` 记下的新文件同样删掉并
     /// 移出暂存区；其余的按暂存区里的样子恢复。已经暂存的改动不受影响；冲突的文件暂存区
-    /// 里没有单一的版本，报 git 的错。一个文件失败不影响其余的，返回第一个错误。
+    /// 里没有单一的版本，报 git 的错。一个文件失败不影响其余的，返回第一个错误。子模块那样的
+    /// gitlink 跳过：工作区里的提交号要到子仓库里切，`git restore` 对它什么也不做。
     pub fn discard(&self, files: &[FileDiff]) -> Result {
         let mut results = Vec::new();
         let mut restore = Vec::new();
         let mut remove = Vec::new();
-        for file in files {
+        for file in files.iter().filter(|file| !file.gitlink) {
             match file.status {
                 FileStatus::Untracked => results.push(self.delete_untracked(&file.path)),
                 // 未暂存段里的新增和改名都是 `git add -N` 的文件，暂存区里只有个占位。
@@ -251,23 +240,23 @@ impl Repo {
         Ok(())
     }
 
-    /// 暂存所有改动，含未跟踪和删掉的文件，嵌套的仓库各自暂存自己的。
+    /// 暂存这个仓库的所有改动，含未跟踪和删掉的文件，以及子模块记着的提交号；嵌套的仓库不碰，
+    /// 它们用自己的句柄暂存。
     pub fn stage_all(&self) -> Result {
-        first_error(self.all_repos().iter().map(|dir| add_all(dir)))
+        add_all(&self.root)
     }
 
-    /// 撤回所有暂存的改动，嵌套的仓库也一样。合并做到一半时不会因此放弃合并。
+    /// 撤回这个仓库所有暂存的改动，嵌套的仓库不碰。合并做到一半时不会因此放弃合并。
     pub fn unstage_all(&self) -> Result {
-        first_error(self.all_repos().iter().map(|dir| {
-            if has_head(dir) {
-                Self::run_paths(dir, &["restore", "--staged"], &[".".into()])
-            } else {
-                Self::run_paths(dir, &["rm", "--cached", "-r", "-f", "-q", "--ignore-unmatch"], &[".".into()])
-            }
-        }))
+        let dir = &self.root;
+        if has_head(dir) {
+            Self::run_paths(dir, &["restore", "--staged"], &[".".into()])
+        } else {
+            Self::run_paths(dir, &["rm", "--cached", "-r", "-f", "-q", "--ignore-unmatch"], &[".".into()])
+        }
     }
 
-    /// 提交顶层仓库暂存的改动；说明经标准输入交给 git，不经命令行。`amend` 且说明为空时
+    /// 提交这个仓库暂存的改动；说明经标准输入交给 git，不经命令行。`amend` 且说明为空时
     /// 沿用上一次提交的说明。没有可提交的改动、说明为空时报 git 的错。
     pub fn commit(&self, message: &str, options: CommitOptions) -> Result {
         if options.stage_all {
@@ -285,14 +274,14 @@ impl Repo {
         run(&self.root, args, Some(message.as_bytes())).map(drop)
     }
 
-    /// 顶层仓库最近一次提交的完整说明，给 amend 时填进输入框；还没有提交时为空。
+    /// 最近一次提交的完整说明，给 amend 时填进输入框；还没有提交时为空。
     pub fn last_commit_message(&self) -> Option<String> {
         let message = git(&self.root, &["log", "-1", "--format=%B", "HEAD"])?;
         let message = String::from_utf8_lossy(&message).trim_end().to_owned();
         (!message.is_empty()).then_some(message)
     }
 
-    /// 撤销顶层仓库最近一次提交，改动留在暂存区里；返回被撤销的提交的完整说明，好填回
+    /// 撤销最近一次提交，改动留在暂存区里；返回被撤销的提交的完整说明，好填回
     /// 输入框。只有一个提交时删掉分支，仓库回到还没有提交的样子。
     pub fn undo_last_commit(&self) -> Result<String> {
         let message = run(&self.root, ["log", "-1", "--format=%B", "HEAD"], None)?;
@@ -344,7 +333,7 @@ impl Repo {
         git(&self.root, &["rev-parse", "--verify", "--quiet", "@{upstream}"]).is_some()
     }
 
-    /// 把顶层仓库的改动收进一个新的 stash，工作区回到 HEAD 的样子。`include_untracked`
+    /// 把这个仓库的改动收进一个新的 stash，工作区回到 HEAD 的样子。`include_untracked`
     /// 时未跟踪的文件也收进去（被忽略的不收）。没有改动时 git 什么也不做，也不算失败。
     pub fn stash(&self, message: Option<&str>, include_untracked: bool) -> Result {
         let mut args = vec!["stash", "push"];

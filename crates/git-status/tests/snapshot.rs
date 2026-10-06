@@ -5,13 +5,15 @@ use std::{
     path::Path,
 };
 
-use runode_git_status::{RepoInfo, Snapshot};
+use runode_git_status::{RepoInfo, RepoKind, Snapshot};
 
 #[test]
 fn ignored_dirs_cover_their_contents() {
     let snapshot = Snapshot {
         root: "/repo".into(),
         git_dir: "/repo/.git".into(),
+        prefix: "".into(),
+        kind: RepoKind::Main,
         staged: Vec::new(),
         unstaged: Vec::new(),
         statuses: HashMap::new(),

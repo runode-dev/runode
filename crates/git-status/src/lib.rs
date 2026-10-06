@@ -1,16 +1,24 @@
 //! 项目目录的 git：读工作区相对 HEAD 的逐行改动、每个文件的状态、分支和 stash，供右侧的
-//! 改动面板、文件树和 Git 面板使用；暂存、按块暂存、提交、切分支、stash 和同步远端这些
-//! 写操作挂在 `Repo` 上。一律调 `git` 命令行，不直接读写 git 目录里的对象。
+//! 文件树、预览栏和 Git 面板使用；主仓库里的子模块和嵌套仓库各读一份，见 `snapshot_repos`。
+//! 暂存、按块暂存、提交、切分支、stash 和同步远端这些写操作，以及读提交历史和图表（`graph`），
+//! 挂在 `Repo` 上；预览栏看一个文件的整篇 diff 见 `view`。一律调 `git` 命令行，不直接读写 git
+//! 目录里的对象。
 
 mod branch;
+mod graph;
 mod info;
 mod ops;
 mod patch;
+mod repos;
+mod view;
 
 pub use branch::{Branch, valid_branch_name};
+pub use graph::{Commit, CommitRef, GraphLine, GraphRow, Half, History, RefKind, graph_layout, refs_changed};
 pub use info::{Operation, RepoInfo, Stash};
 pub use ops::{CommitOptions, GitError, Repo, Result};
 pub use patch::{HunkAction, hunk_actionable};
+pub use repos::{ReadOptions, RepoKind, Repos, snapshot_repos};
+pub use view::{DiffRow, DiffSide, DiffView, merge_rows};
 
 use std::{
     collections::{HashMap, HashSet},
@@ -98,22 +106,30 @@ pub struct FileDiff {
     pub binary: bool,
     /// 改动超过 `MAX_FILE_LINES` 行，或者是没读内容的未跟踪文件，`hunks` 不全。
     pub truncated: bool,
+    /// 是子模块那样记着一个提交号的条目（gitlink），改动是提交号变了。它的内容在子仓库里，
+    /// 在这个仓库里只能暂存或撤回暂存，丢不掉，也不能按块操作。
+    pub gitlink: bool,
 }
 
+/// 一个仓库的状态。只管这一个仓库：里面的子模块只是一个记着提交号的条目，嵌套的仓库是一个
+/// 不往里看的未跟踪目录，它们各自另有一份，见 `Repos`。
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Snapshot {
     /// 仓库根目录。
     pub root: PathBuf,
-    /// 仓库的 git 目录；worktree 的不在 `root` 下面，要另外监听才知道提交和暂存。
+    /// 仓库的 git 目录；worktree 和子模块的不在 `root` 下面，要另外监听才知道提交和暂存。
     pub git_dir: PathBuf,
-    /// 两段各自有改动的文件，按路径排序；部分暂存的文件两段里都有。
+    /// 相对主仓库根的路径，主仓库自己为空；其他工作树不在主仓库里，是它的根目录（绝对路径）。
+    pub prefix: PathBuf,
+    pub kind: RepoKind,
+    /// 两段各自有改动的文件，按路径排序；部分暂存的文件两段里都有。路径相对这个仓库的根。
     pub staged: Vec<FileDiff>,
     pub unstaged: Vec<FileDiff>,
-    /// 有改动的文件的状态，键是相对仓库根的路径。
+    /// 有改动的文件的状态，键是相对这个仓库根的路径。
     pub statuses: HashMap<PathBuf, FileStatus>,
-    /// 被忽略的文件和目录，相对仓库根；目录被忽略时里面的不再单列。
+    /// 被忽略的文件和目录，相对这个仓库的根；目录被忽略时里面的不再单列。
     pub ignored: HashSet<PathBuf>,
-    /// 顶层仓库的分支、上游、进行中的操作和 stash；嵌套的仓库不读。
+    /// 这个仓库的分支、上游、进行中的操作和 stash。
     pub info: RepoInfo,
 }
 
@@ -151,6 +167,12 @@ impl Snapshot {
         rel.ancestors().any(|dir| self.ignored.contains(dir))
     }
 
+    /// 是 `git worktree add` 出来的链接工作树：git 目录在共用 git 目录的 `worktrees/` 下面。主工作树
+    /// 和普通仓库不是。
+    pub fn is_linked_worktree(&self) -> bool {
+        self.git_dir.parent().and_then(Path::file_name).is_some_and(|name| name == "worktrees")
+    }
+
     /// 这个仓库的句柄，暂存、提交这些写操作挂在它上面。
     pub fn repo(&self) -> Repo {
         Repo::new(self.root.clone())
@@ -161,7 +183,7 @@ impl Snapshot {
 #[derive(Default)]
 pub struct UntrackedCache(HashMap<PathBuf, (u64, SystemTime, FileDiff)>);
 
-fn git(dir: &Path, args: &[&str]) -> Option<Vec<u8>> {
+pub(crate) fn git(dir: &Path, args: &[&str]) -> Option<Vec<u8>> {
     let output = Command::new("git")
         .arg("-C")
         .arg(dir)
@@ -176,37 +198,33 @@ fn git(dir: &Path, args: &[&str]) -> Option<Vec<u8>> {
     output.status.success().then_some(output.stdout)
 }
 
-/// 读 `dir` 所在仓库的状态；`dir` 不在 git 仓库里或者没装 git 时为空。没变过的未跟踪文件
-/// 从 `cache` 里取，读完后 `cache` 只留这次还在的。
+/// 读 `dir` 所在仓库的状态，只读这一个仓库，子模块和嵌套的仓库不往里看；`dir` 不在 git
+/// 仓库里或者没装 git 时为空。没变过的未跟踪文件从 `cache` 里取，读完后 `cache` 只留这次还在的。
 pub fn snapshot(dir: &Path, cache: &mut UntrackedCache) -> Option<Snapshot> {
+    let (root, git_dir) = find_repo(dir)?;
+    let mut seen = UntrackedCache::default();
+    let found = read_repo(root, git_dir, PathBuf::new(), RepoKind::Main, cache, &mut seen)?;
+    *cache = seen;
+    Some(found.snapshot)
+}
+
+/// `dir` 所在仓库的根目录（按 `dir` 的写法）和 git 目录。
+pub(crate) fn find_repo(dir: &Path) -> Option<(PathBuf, PathBuf)> {
     let paths = git(dir, &["rev-parse", "--show-toplevel", "--absolute-git-dir"])?;
     let paths = String::from_utf8_lossy(&paths);
     let mut paths = paths.lines();
     let root = local_root(dir, PathBuf::from(paths.next()?));
     let git_dir = PathBuf::from(paths.next()?);
-    let mut snapshot = Snapshot {
-        root: root.clone(),
-        git_dir,
-        staged: Vec::new(),
-        unstaged: Vec::new(),
-        statuses: HashMap::new(),
-        ignored: HashSet::new(),
-        info: RepoInfo::default(),
-    };
-    let mut seen = UntrackedCache::default();
-    collect(&root, Path::new(""), &mut snapshot, cache, &mut seen)?;
-    *cache = seen;
-    snapshot.staged.sort_by(|a, b| a.path.cmp(&b.path));
-    snapshot.unstaged.sort_by(|a, b| a.path.cmp(&b.path));
-    Some(snapshot)
+    Some((root, git_dir))
 }
 
 /// `repo` 里的 `git diff`，再加上 `args`。前缀写明，免得用户配置了 `diff.noprefix` 之类
-/// 改掉 `a/`、`b/`。
+/// 改掉 `a/`、`b/`。子模块只在记着的提交号变了时算改动，里面改了文件不算：那些改动在子模块
+/// 自己的那份里，在这里既暂存不了也丢不掉。
 fn diff(repo: &Path, args: &[&str]) -> Vec<FileDiff> {
     let threshold = format!("core.bigFileThreshold={MAX_DIFF_BYTES}");
     let mut full = vec!["-c", &threshold, "diff", "-M", "--no-color", "--no-ext-diff", "--no-textconv"];
-    full.extend(["--src-prefix=a/", "--dst-prefix=b/"]);
+    full.extend(["--src-prefix=a/", "--dst-prefix=b/", "--ignore-submodules=dirty"]);
     full.extend(args);
     let mut files = parse_diff(&String::from_utf8_lossy(&git(repo, &full).unwrap_or_default()));
     // 超过大小上限的文本文件也被报成二进制：工作区里的文件超过上限、开头又没有 NUL 字节的
@@ -232,26 +250,43 @@ fn starts_binary(path: &Path) -> bool {
     head[..len].contains(&0)
 }
 
-/// 读 `repo` 这个仓库的改动，路径前面加上 `prefix` 并进 `out`。未跟踪的目录是嵌套的
-/// 仓库（比如放在仓库里的 worktree），git 不往里看，就当另一个仓库接着读。`prefix` 为空
-/// 即顶层仓库时顺带读 `out.info`。
-fn collect(
-    repo: &Path,
-    prefix: &Path,
-    out: &mut Snapshot,
+/// `read_repo` 读到的一个仓库，以及在它里面找到的子仓库。
+pub(crate) struct Found {
+    pub snapshot: Snapshot,
+    /// 已经检出的子模块和未跟踪的嵌套仓库，相对这个仓库的根。
+    pub children: Vec<(PathBuf, RepoKind)>,
+}
+
+/// 读根目录是 `root`、git 目录是 `git_dir` 的这一个仓库。未跟踪的目录是嵌套的仓库（比如放在
+/// 仓库里的 worktree），git 不往里看，这里也不读，记进 `Found::children`；`.gitmodules` 里登记
+/// 而且检出了的子模块也记进去。
+pub(crate) fn read_repo(
+    root: PathBuf,
+    git_dir: PathBuf,
+    prefix: PathBuf,
+    kind: RepoKind,
     cache: &UntrackedCache,
     seen: &mut UntrackedCache,
-) -> Option<()> {
-    let top = prefix.as_os_str().is_empty();
-    // 状态、暂存段和未暂存段互不依赖，几个 git 进程同时跑；顶层仓库的 stash 和远端也一起读。
-    let (status, staged, mut unstaged, extra) = std::thread::scope(|scope| {
+) -> Option<Found> {
+    let repo = root.as_path();
+    // 状态、暂存段和未暂存段互不依赖，几个 git 进程同时跑；stash、远端和子模块也一起读。
+    let (status, staged, mut unstaged, extra, submodules) = std::thread::scope(|scope| {
         let status = scope.spawn(|| {
-            let mut args = vec!["status", "--porcelain=v1", "-z", "--untracked-files=all", "--ignored=matching"];
-            if top {
-                // 开头多一项 `## 分支...上游 [ahead 1, behind 2]`。
-                args.extend(["--branch", "--ahead-behind"]);
-            }
-            git(repo, &args)
+            // 开头多一项 `## 分支...上游 [ahead 1, behind 2]`。里面有改动的子模块也报出来，连同没
+            // 写进 `.gitmodules` 的 gitlink，据此认出子仓库；列进改动的条目以 `diff` 为准。
+            git(
+                repo,
+                &[
+                    "status",
+                    "--porcelain=v1",
+                    "-z",
+                    "--untracked-files=all",
+                    "--ignored=matching",
+                    "--ignore-submodules=none",
+                    "--branch",
+                    "--ahead-behind",
+                ],
+            )
         });
         let staged = scope.spawn(|| {
             // 还没有提交时和空树比，暂存了的新文件也算进来。短哈希顺带给 `RepoInfo::head`。
@@ -265,23 +300,24 @@ fn collect(
             };
             Some((diff(repo, &["--cached", &base]), head))
         });
-        let extra = top.then(|| scope.spawn(|| info::read_extra(repo)));
+        let extra = scope.spawn(|| info::read_extra(repo));
+        let submodules = scope.spawn(|| repos::submodules(repo));
         // 冲突的文件和「我方」比，不然 git 给的是三方合并的格式。
         let unstaged = diff(repo, &["-2"]);
         let status = status.join().unwrap_or_else(|panic| std::panic::resume_unwind(panic));
         let staged = staged.join().unwrap_or_else(|panic| std::panic::resume_unwind(panic));
-        let extra = extra.map(|extra| extra.join().unwrap_or_else(|panic| std::panic::resume_unwind(panic)));
-        (status, staged, unstaged, extra)
+        let extra = extra.join().unwrap_or_else(|panic| std::panic::resume_unwind(panic));
+        let submodules = submodules.join().unwrap_or_else(|panic| std::panic::resume_unwind(panic));
+        (status, staged, unstaged, extra, submodules)
     });
     let status = status?;
-    let (statuses, ignored) = parse_status(&status);
+    let (mut statuses, ignored) = parse_status(&status);
     let (mut staged, head) = staged?;
-    if let Some(extra) = extra {
-        out.info = info::read(&status, head, &out.git_dir, extra);
-    }
+    let info = info::read(&status, head, &git_dir, extra);
     let mut untracked: Vec<_> =
         statuses.iter().filter(|(_, status)| **status == FileStatus::Untracked).map(|(path, _)| path.clone()).collect();
     untracked.sort();
+    // `--untracked-files=all` 把未跟踪的文件一个个列出来，只有嵌套的仓库整个报成一个目录。
     // 指向目录的符号链接 git 当文件报，这里也不跟进去。
     let (nested, untracked): (Vec<_>, Vec<_>) =
         untracked.into_iter().partition(|path| fs::symlink_metadata(repo.join(path)).is_ok_and(|meta| meta.is_dir()));
@@ -294,17 +330,48 @@ fn collect(
         if statuses.get(&file.path) == Some(&FileStatus::Conflicted) {
             file.status = FileStatus::Conflicted;
         }
-        file.path = prefix.join(&file.path);
-        file.old_path = file.old_path.take().map(|old| prefix.join(old));
     }
-    out.staged.extend(staged);
-    out.unstaged.extend(unstaged);
-    out.statuses.extend(statuses.into_iter().map(|(path, status)| (prefix.join(path), status)));
-    out.ignored.extend(ignored.into_iter().map(|path| prefix.join(path)));
-    for path in nested {
-        collect(&repo.join(&path), &prefix.join(&path), out, cache, seen);
+    staged.sort_by(|a, b| a.path.cmp(&b.path));
+    unstaged.sort_by(|a, b| a.path.cmp(&b.path));
+    // 已跟踪、自带 `.git` 的目录是 gitlink：`.gitmodules` 里登记的子模块，或者没登记、直接
+    // `git add` 进来的仓库。后者只能从 `git status` 认出来，所以只有它有改动时才读得到。只是
+    // 里面有改动、提交号没变的不算这个仓库的改动，状态里也不留。
+    let gitlinks: Vec<PathBuf> = statuses
+        .iter()
+        .filter(|(path, status)| **status != FileStatus::Untracked && repo.join(path).join(".git").exists())
+        .map(|(path, _)| path.clone())
+        .collect();
+    for path in &gitlinks {
+        if !staged.iter().chain(&unstaged).any(|file| &file.path == path) {
+            statuses.remove(path);
+        }
     }
-    Some(())
+    let mut submodules = submodules;
+    submodules.extend(gitlinks);
+    submodules.sort();
+    submodules.dedup();
+    let children = submodules
+        .into_iter()
+        .map(|path| (path, RepoKind::Submodule))
+        .chain(
+            nested
+                .into_iter()
+                .filter(|path| repo.join(path).join(".git").exists())
+                .map(|path| (path, RepoKind::Nested)),
+        )
+        .collect();
+    let snapshot = Snapshot {
+        root,
+        git_dir,
+        prefix,
+        kind,
+        staged,
+        unstaged,
+        statuses,
+        ignored: ignored.into_iter().collect(),
+        info,
+    };
+    Some(Found { snapshot, children })
 }
 
 /// git 给的仓库根解析过符号链接；按 `dir` 的写法换回来，界面拿 `dir` 下的路径和它比前缀
@@ -378,6 +445,7 @@ fn parse_diff(text: &str) -> Vec<FileDiff> {
                 hunks: Vec::new(),
                 binary: false,
                 truncated: false,
+                gitlink: false,
             });
             in_hunk = false;
             continue;
@@ -389,6 +457,10 @@ fn parse_diff(text: &str) -> Vec<FileDiff> {
             continue;
         };
         if !in_hunk {
+            // 文件头里的模式是 160000 的是 gitlink：`index 旧..新 160000`、`new file mode 160000`。
+            if (line.starts_with("index ") || line.contains(" mode ")) && line.ends_with(" 160000") {
+                file.gitlink = true;
+            }
             if line.starts_with("new file mode") {
                 file.status = FileStatus::Added;
             } else if line.starts_with("deleted file mode") {
@@ -565,6 +637,7 @@ fn read_untracked(full: &Path, path: PathBuf, read: bool) -> FileDiff {
         hunks: Vec::new(),
         binary: false,
         truncated: false,
+        gitlink: false,
     };
     let content = read.then(|| fs::read(full).ok()).flatten();
     let Some(content) = content else {
@@ -694,7 +767,7 @@ Binary files /dev/null and b/logo.png differ
     }
 
     #[test]
-    fn reads_nested_repositories() {
+    fn reads_only_the_one_repository() {
         let base = std::env::temp_dir().join(format!("runode-git-status-nested-{}", std::process::id()));
         let nested = base.join("wt/inner");
         std::fs::create_dir_all(&nested).unwrap();
@@ -708,11 +781,12 @@ Binary files /dev/null and b/logo.png differ
         };
         commit(&base);
         commit(&nested);
+        // 嵌套的仓库不并进来，只记着它是个未跟踪的目录。
         let snapshot = snapshot(&base, &mut UntrackedCache::default()).unwrap();
         let paths: Vec<_> = snapshot.unstaged.iter().map(|file| file.path.clone()).collect();
-        assert_eq!(paths, vec![PathBuf::from("a.txt"), PathBuf::from("wt/inner/a.txt")]);
-        assert_eq!((snapshot.unstaged[1].added, snapshot.unstaged[1].removed), (1, 1));
-        assert_eq!(snapshot.statuses[Path::new("wt/inner/a.txt")], FileStatus::Modified);
+        assert_eq!(paths, vec![PathBuf::from("a.txt")]);
+        assert_eq!(snapshot.statuses[Path::new("wt/inner")], FileStatus::Untracked);
+        assert_eq!((snapshot.kind, snapshot.prefix.as_os_str().is_empty()), (RepoKind::Main, true));
         std::fs::remove_dir_all(&base).unwrap();
     }
 

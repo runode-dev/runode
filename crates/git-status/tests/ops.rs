@@ -4,25 +4,11 @@ mod common;
 
 use std::{fs, path::PathBuf};
 
-use common::{TestRepo, read};
+use common::{TestRepo, read, read_all};
 use runode_git_status::{CommitOptions, Section};
 
 fn paths(names: &[&str]) -> Vec<PathBuf> {
     names.iter().map(PathBuf::from).collect()
-}
-
-/// 在 `repo` 里的 `wt/inner` 建一个有一次提交的嵌套仓库。
-fn nested(repo: &TestRepo) -> PathBuf {
-    let inner = repo.path().join("wt/inner");
-    fs::create_dir_all(&inner).unwrap();
-    repo.git(&["-C", "wt/inner", "init", "-q", "-b", "main"]);
-    for (key, value) in [("user.name", "t"), ("user.email", "t@t"), ("commit.gpgsign", "false")] {
-        repo.git(&["-C", "wt/inner", "config", key, value]);
-    }
-    repo.write("wt/inner/a.txt", "one\n");
-    repo.git(&["-C", "wt/inner", "add", "a.txt"]);
-    repo.git(&["-C", "wt/inner", "commit", "-q", "-m", "init"]);
-    inner
 }
 
 #[test]
@@ -70,21 +56,30 @@ fn unstages_before_the_first_commit() {
 fn stages_inside_nested_repositories() {
     let repo = TestRepo::new("ops-nested");
     repo.commit_file("top.txt", "top\n", "init");
-    let inner = nested(&repo);
+    let inner = repo.nested("wt/inner");
     repo.write("wt/inner/a.txt", "two\n");
     repo.write("wt/inner/new.txt", "n\n");
     repo.write("top.txt", "changed\n");
     let handle = read(&repo).repo();
+    // 顶层仓库的句柄拿到嵌套仓库里的路径，转到那个仓库里暂存。
     handle.stage(&paths(&["wt/inner/a.txt"])).unwrap();
     let inner_status = || repo.git(&["-C", "wt/inner", "status", "--porcelain=v1", "--untracked-files=all"]);
     assert_eq!(inner_status(), "M  a.txt\n?? new.txt");
     assert_eq!(repo.status(), [" M top.txt", "?? wt/inner/"]);
 
-    // 全部暂存不把嵌套的仓库当子模块记进顶层仓库。
+    // 全部暂存只管自己这个仓库，也不把嵌套的仓库当子模块记进来。
     handle.stage_all().unwrap();
-    assert_eq!(inner_status(), "M  a.txt\nA  new.txt");
+    assert_eq!(inner_status(), "M  a.txt\n?? new.txt");
     assert_eq!(repo.status(), ["M  top.txt", "?? wt/inner/"]);
     handle.unstage_all().unwrap();
+    assert_eq!(inner_status(), "M  a.txt\n?? new.txt");
+    assert_eq!(repo.status(), [" M top.txt", "?? wt/inner/"]);
+
+    // 嵌套仓库自己的句柄管它自己的。
+    let inner_handle = read_all(&repo).subs[0].repo();
+    inner_handle.stage_all().unwrap();
+    assert_eq!(inner_status(), "M  a.txt\nA  new.txt");
+    inner_handle.unstage_all().unwrap();
     assert_eq!(inner_status(), " M a.txt\n?? new.txt");
     assert_eq!(repo.status(), [" M top.txt", "?? wt/inner/"]);
 
@@ -124,11 +119,13 @@ fn discards_unstaged_changes() {
 fn discards_inside_nested_repositories() {
     let repo = TestRepo::new("ops-discard-nested");
     repo.commit_file("top.txt", "top\n", "init");
-    nested(&repo);
+    repo.nested("wt/inner");
     repo.write("wt/inner/a.txt", "changed\n");
     repo.write("wt/inner/extra.txt", "x\n");
-    let snapshot = read(&repo);
-    snapshot.repo().discard(snapshot.files(Section::Unstaged)).unwrap();
+    let repos = read_all(&repo);
+    assert!(repos.main.unstaged.is_empty());
+    let inner = &repos.subs[0];
+    inner.repo().discard(inner.files(Section::Unstaged)).unwrap();
     assert_eq!(repo.read("wt/inner/a.txt"), "one\n");
     assert!(!repo.path().join("wt/inner/extra.txt").exists());
     assert!(repo.path().join("wt/inner/.git").exists());
@@ -269,7 +266,7 @@ fn stashes_and_restores_changes() {
 fn stash_keeps_nested_repositories() {
     let repo = TestRepo::new("ops-stash-nested");
     repo.commit_file("top.txt", "top\n", "init");
-    let inner = nested(&repo);
+    let inner = repo.nested("wt/inner");
     repo.write("new.txt", "n\n");
     let handle = read(&repo).repo();
     handle.stash(None, true).unwrap();

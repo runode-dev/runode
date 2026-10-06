@@ -1,5 +1,8 @@
 //! 分支列表：盖在窗口上面的浮层，列出本地和远端分支，输入文字过滤；输入的是还没有的分支名时
-//! 第一行是「新建分支」。上下键选、回车切过去、Esc 关掉。只新建分支时只有新建那一行。
+//! 第一行是「新建分支」。上下键选、回车切过去、Esc 关掉。只新建分支时只有新建那一行。列的是
+//! 打开时选定的那个仓库（主仓库或子仓库）的分支，切换、新建也在那个仓库里做。
+
+use std::path::{Path, PathBuf};
 
 use gpui::{
     Context, Div, Entity, Focusable, KeyDownEvent, MouseButton, ScrollHandle, SharedString, Subscription, Window, div,
@@ -23,6 +26,10 @@ const INPUT_HEIGHT: f32 = 34.;
 
 /// 开着的分支列表。
 pub(in crate::workspace) struct BranchPicker {
+    /// 在哪个仓库里切换、新建分支：它的根目录。
+    repo: PathBuf,
+    /// 从哪个提交新建分支，为空时从当前提交。只在从图表里新建分支时有。
+    start: Option<String>,
     field: Entity<SearchField>,
     /// 后台读到的分支；还没读完时为空。
     branches: Option<Vec<Branch>>,
@@ -61,17 +68,31 @@ impl BranchPicker {
 }
 
 impl WindowView {
-    /// 打开分支列表，在后台读分支；已经开着时关掉。
-    pub(super) fn open_branch_picker(&mut self, create_only: bool, window: &mut Window, cx: &mut Context<Self>) {
+    /// 打开根目录是 `root` 的仓库的分支列表，在后台读分支；已经开着时关掉。`start` 是新建分支时
+    /// 的起点提交，为空时从当前提交。
+    pub(super) fn open_branch_picker(
+        &mut self,
+        root: &Path,
+        create_only: bool,
+        start: Option<String>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         if self.branch_picker.is_some() {
             self.close_branch_picker(window, cx);
             return;
         }
-        let Some(repo) = self.workspace().project.git.as_ref().map(git::Snapshot::repo) else {
+        let git = self.workspace().project.git.as_ref();
+        let Some(repo) = git.and_then(|git| git.iter().find(|repo| repo.root == root)).map(git::Snapshot::repo) else {
             return;
         };
-        let placeholder =
-            if create_only { rust_i18n::t!("git.picker.new_branch") } else { rust_i18n::t!("git.picker.placeholder") };
+        let placeholder = match &start {
+            Some(start) => {
+                rust_i18n::t!("git.picker.new_branch_at", id = start.chars().take(7).collect::<String>())
+            }
+            None if create_only => rust_i18n::t!("git.picker.new_branch"),
+            None => rust_i18n::t!("git.picker.placeholder"),
+        };
         let field = cx.new(|cx| SearchField::new(String::new(), cx).with_placeholder(placeholder.into_owned()));
         // 输入框原本是搜索框：回车是「下一个」，Esc 是「关闭搜索」，在这里分别是确定和关掉。
         let events = cx.subscribe_in(&field, window, |this, _, event: &SearchFieldEvent, window, cx| match event {
@@ -98,6 +119,8 @@ impl WindowView {
         });
         window.focus(&focus, cx);
         self.branch_picker = Some(BranchPicker {
+            repo: root.to_path_buf(),
+            start,
             field,
             branches: None,
             create_only,
@@ -106,11 +129,15 @@ impl WindowView {
             scroll: ScrollHandle::new(),
             _subscriptions: [events, blur],
         });
+        // 读的时候列表可能关掉又为别的仓库打开了，读完只交给这一次打开的列表。
+        let opened = self.branch_picker.as_ref().map(|picker| picker.field.entity_id());
         let job = cx.background_spawn(async move { repo.branches() });
         cx.spawn(async move |this, cx| {
             let branches = job.await;
             this.update(cx, |this, cx| {
-                if let Some(picker) = &mut this.branch_picker {
+                if let Some(picker) = &mut this.branch_picker
+                    && Some(picker.field.entity_id()) == opened
+                {
                     picker.branches = Some(branches);
                     cx.notify();
                 }
@@ -164,21 +191,22 @@ impl WindowView {
 
     /// 回车：切到选中的分支，或者新建分支。
     fn confirm_branch_picker(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let choice = {
+        let (root, start, choice) = {
             let Some(picker) = &self.branch_picker else {
                 return;
             };
             let rows = picker.rows(cx);
-            match rows.get(picker.selected.min(rows.len().saturating_sub(1))) {
+            let choice = match rows.get(picker.selected.min(rows.len().saturating_sub(1))) {
                 Some(PickerRow::Create(name)) => Ok(name.clone()),
                 Some(PickerRow::Branch(branch)) => Err((*branch).clone()),
                 None => return,
-            }
+            };
+            (picker.repo.clone(), picker.start.clone(), choice)
         };
         self.close_branch_picker(window, cx);
         match choice {
-            Ok(name) => self.create_branch(name, window, cx),
-            Err(branch) => self.checkout_branch(branch, window, cx),
+            Ok(name) => self.create_branch(&root, name, start, window, cx),
+            Err(branch) => self.checkout_branch(&root, branch, window, cx),
         }
     }
 
