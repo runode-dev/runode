@@ -21,7 +21,7 @@
 
 use std::{fmt, path::PathBuf};
 
-use runode_shared_types::{grid::GridSize, session::SessionMeta, settings::TermSettings};
+use runode_shared_types::{clipboard::ClipboardAccess, grid::GridSize, session::SessionMeta, settings::TermSettings};
 use serde::{Deserialize, Deserializer, Serialize};
 
 use crate::message::{BuildId, SessionId};
@@ -54,6 +54,10 @@ pub enum HandoffPart {
         record_history: bool,
         /// 监听的 socket 的路径。描述符传过去后路径不变，shell 里的 `RUNODE_SOCKET` 照样有效。
         socket: PathBuf,
+        /// 会话里的程序读写剪贴板的规矩，见 `ClientMsg::SetOptions`。旧宿主没有这一项，新宿主按默认值读，
+        /// 等桌面重连后补发。
+        #[serde(default)]
+        clipboard: ClipboardAccess,
     },
     /// 一个会话。已经启动的会话带一个描述符 `[PTY master]`，还没启动的不带，新宿主重新打开伪终端；
     /// 两个块依次是 `snapshot`（宿主那份 VT 的原始快照，没抹掉报告口令；编不出来时为空）和

@@ -10,6 +10,7 @@ use runode_protocol::{
     ReportToken, RunningCommand, SessionId, decode_part, read_frame,
 };
 use runode_shared_types::{
+    clipboard::ClipboardAccess,
     color::{Rgb, TerminalColor},
     grid::GridSize,
     settings::TermSettings,
@@ -165,6 +166,8 @@ fn host_part_is_readable() {
             theme: Some(settings()),
             record_history: true,
             socket: "/tmp/runode/host.sock".into(),
+            // 格式 1 的旧宿主没有这一项，按默认的规矩读。
+            clipboard: ClipboardAccess::default(),
         }
     );
     assert!(blocks.is_empty());

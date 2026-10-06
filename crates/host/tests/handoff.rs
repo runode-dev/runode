@@ -32,6 +32,7 @@ use runode_protocol::{
 };
 use runode_shared_types::{
     agent::{Agent, AgentKind, AgentState},
+    clipboard::{ClipboardAccess, ClipboardRead, ClipboardWrite},
     grid::GridSize,
     shell::IntegrationMode,
 };
@@ -456,6 +457,36 @@ fn a_new_host_takes_every_session_over() {
     thread::sleep(Duration::from_millis(1500));
     let agent_later = new.sessions().into_iter().find(|s| s.id == agent).unwrap().meta.agent;
     assert_eq!(agent_later, Some(agent_before));
+}
+
+/// 剪贴板的规矩跟着交接过去：旧宿主上设成不让写，新宿主上的会话照样不让写（DA1 的回答里没有 52），
+/// 不用等桌面重新设。
+#[test]
+fn the_clipboard_rules_go_with_the_handoff() {
+    let dir = temp_dir("clipboard");
+    let (_old, socket) = old_process(&dir);
+    let mut desktop = Peer::desktop(&socket);
+    let clipboard = ClipboardAccess { write: ClipboardWrite::Deny, read: ClipboardRead::Ask };
+    desktop.send(&ClientMsg::SetOptions { record_history: false, clipboard });
+    let id = desktop.spawn(&script(&dir, "da.sh", r"while read line; do printf '\033[c'; done"));
+    drop(desktop);
+    // 桌面连着时旧宿主不交；断开要一会儿才登记下来，拒绝了就再试。
+    let mut tries = 0;
+    let _successor = loop {
+        tries += 1;
+        let tag = format!("successor{tries}");
+        let (successor, result) = take_over(&dir, &[(TAG, &tag), (SUCCESSOR_BUILD, &tag)]);
+        if result.starts_with("ok") {
+            break successor;
+        }
+        assert!(tries < 5 && result.contains("DesktopConnected"), "{result}");
+        thread::sleep(Duration::from_millis(100));
+    };
+    let mut desktop = Peer::desktop(&socket);
+    let (channel, _) = desktop.attach(id, AttachMode::VtReplay);
+    desktop.input(channel, b"x\r");
+    // 行规程把 DA1 的回答回显出来。
+    desktop.wait_for_output(channel, b"^[[?62;1;6;22c");
 }
 
 /// 交接时程序不读输入，写不进 PTY 的输入跟着交过去，新宿主写进去，程序读到的每一行正好一次。

@@ -283,9 +283,9 @@ fn send_parts<'a>(
     giving: &Giving,
     handed: impl ExactSizeIterator<Item = &'a mut (SessionId, Box<Exported>)>,
 ) -> io::Result<()> {
-    let theme = {
+    let (theme, clipboard) = {
         let registry = shared.registry();
-        (registry.theme_generation > 0).then(|| (*registry.settings).clone())
+        ((registry.theme_generation > 0).then(|| (*registry.settings).clone()), registry.clipboard)
     };
     let host = HandoffPart::Host {
         format: HANDOFF_FORMAT,
@@ -295,6 +295,7 @@ fn send_parts<'a>(
         theme,
         record_history: shared.record_history.load(std::sync::atomic::Ordering::Relaxed),
         socket: giving.socket.clone(),
+        clipboard,
     };
     send_part(stream, &host, &[], &[giving.listener.as_fd(), giving.lock.as_fd()])?;
     for (id, exported) in handed {

@@ -6,6 +6,7 @@ use runode_protocol::{
 };
 use runode_shared_types::{
     agent::{Agent, AgentKind, AgentState},
+    clipboard::{ClipboardAccess, ClipboardRead, ClipboardWrite},
     grid::GridSize,
     session::SessionMeta,
     settings::TermSettings,
@@ -22,6 +23,7 @@ fn host() -> HandoffPart {
         theme: Some(TermSettings { cursor_blink: Some(false), ..TermSettings::default() }),
         record_history: false,
         socket: "/tmp/runode/host.sock".into(),
+        clipboard: ClipboardAccess { write: ClipboardWrite::Deny, read: ClipboardRead::Allow },
     }
 }
 
@@ -176,6 +178,7 @@ fn non_utf8_paths_fail_to_encode() {
         theme: None,
         record_history: true,
         socket: PathBuf::from(OsStr::from_bytes(b"/tmp/\xff.sock")),
+        clipboard: ClipboardAccess::default(),
     };
     assert!(matches!(encode_part(&part, &[]), Err(HandoffPartError::Json(_))));
 }
