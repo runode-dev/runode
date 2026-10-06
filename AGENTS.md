@@ -45,7 +45,7 @@ This project is indexed by GitNexus as **runode** (225 symbols, 587 relationship
 
 # Crate 分层
 
-代码分在 `crates/` 下的几个 crate 里，依赖只能自上而下。目录名直接说明职责，包名是目录名加 `runode-` 前缀（`crates/terminal` 是 `runode-terminal`），只有桌面 app 的包名是 `runode`，让可执行文件仍叫 runode。包名带前缀是因为依赖树里已有 `dirs` 这类同名的第三方 crate，不加前缀会撞名，`cargo -p` 也会有歧义。
+代码分在几个 crate 里，依赖只能自上而下。能单独运行的 app 放在 `apps/` 下（现在只有 `apps/desktop`），给它们用的库放在 `crates/` 下。目录名直接说明职责，包名是目录名加 `runode-` 前缀（`crates/terminal` 是 `runode-terminal`），只有桌面 app 的包名是 `runode`，让可执行文件仍叫 runode。包名带前缀是因为依赖树里已有 `dirs` 这类同名的第三方 crate，不加前缀会撞名，`cargo -p` 也会有歧义。
 
 | 目录 | 职责 | 可以依赖 |
 | --- | --- | --- |
@@ -61,7 +61,7 @@ This project is indexed by GitNexus as **runode** (225 symbols, 587 relationship
 | `config` | Ghostty 兼容的配置文件、主题、快捷键写法和配置模板，生成 `TermSettings` | shared-types、paths |
 | `host` | 管终端会话的宿主（只有 lib，现在跑在 app 进程里）：每个会话一个线程，持有 PTY 和权威的那份 VT，应答终端查询、认标题和 agent、记命令历史；桌面经进程内的 channel、别的进程经 Unix socket 上 protocol 的帧和它说话 | terminal、protocol、paths、shared-types、libc |
 | `cli` | 命令行前端（`runode list`、`read`、`send`、`wait`、`open`、`kill`、`focus`）：经宿主的 Unix socket 按 protocol 说话，列会话、读屏幕、发输入、等 agent，请 app 开终端、切到终端 | protocol、shared-types、paths |
-| `desktop` | GPUI 桌面 app：窗口、视图、菜单、窗口存档和 Info.plist；带子命令启动时交给 `cli`，和命令行是同一个可执行文件；打包脚本按 `crates/desktop#` 找它的构建产物 | 以上全部（含 host、cli）、GPUI |
+| `desktop` | GPUI 桌面 app：窗口、视图、菜单、窗口存档和 Info.plist；带子命令启动时交给 `cli`，和命令行是同一个可执行文件；打包脚本按 `apps/desktop#` 找它的构建产物 | 以上全部（含 host、cli）、GPUI |
 
 不变量：
 
@@ -78,6 +78,6 @@ This project is indexed by GitNexus as **runode** (225 symbols, 587 relationship
 
 以后要加的 crate 放在这些位置，命名沿用同样的规则：
 
-- `tui`、`mobile`（各个前端）：和 `cli` 一样，经 protocol 跟宿主说话，不依赖 GPUI，也不直接依赖 libghostty-vt。
+- `tui`、`mobile`（各个前端，放在 `apps/` 下）：和 `cli` 一样，经 protocol 跟宿主说话，不依赖 GPUI，也不直接依赖 libghostty-vt。
 
 加了这些 crate 后，相应地更新 `deny.toml` 的 `wrappers` 和上面这张表。

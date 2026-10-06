@@ -21,7 +21,7 @@ cd "$root"
 # 构建脚本已把 Info.plist 写进 OUT_DIR 并嵌进二进制；从 cargo 的 JSON 消息里取它的位置，
 # 保证 .app 里的信息表和二进制里的完全一致。
 messages=$("$CARGO" build --release --message-format=json-render-diagnostics)
-out_dir=$(jq -r 'select(.reason == "build-script-executed" and (.package_id | test("crates/desktop#"))) | .out_dir' <<<"$messages")
+out_dir=$(jq -r 'select(.reason == "build-script-executed" and (.package_id | test("apps/desktop#"))) | .out_dir' <<<"$messages")
 exe=$(jq -r 'select(.reason == "compiler-artifact" and .target.name == "runode" and .executable != null) | .executable' <<<"$messages")
 plist="$out_dir/Info.plist"
 [[ -f "$plist" && -x "$exe" ]] || { echo "找不到构建产物：$plist / $exe" >&2; exit 1; }
@@ -41,7 +41,7 @@ cp "$plist" "$app/Contents/Info.plist"
 # 统一的圆角方形裁剪，跟着切换深色和染色；形状不合规的旧式 icns 在 macOS 26 起会被套进
 # 灰框缩小显示。actool 同时生成给旧系统用的 runode.icns。
 icon_build=$(mktemp -d)
-xcrun actool crates/desktop/assets/runode.icon --compile "$app/Contents/Resources" \
+xcrun actool apps/desktop/assets/runode.icon --compile "$app/Contents/Resources" \
     --output-format human-readable-text --errors \
     --output-partial-info-plist "$icon_build/partial.plist" \
     --app-icon runode --include-all-app-icons --enable-on-demand-resources NO \

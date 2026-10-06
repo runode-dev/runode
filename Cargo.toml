@@ -1,8 +1,8 @@
 [workspace]
 resolver = "3"
-members = ["crates/*"]
+members = ["crates/*", "apps/*"]
 # 不带 -p 的 cargo 命令覆盖全部 crate。
-default-members = ["crates/*"]
+default-members = ["crates/*", "apps/*"]
 # vendor/libghostty-rs 自成一个 workspace；不排除的话，根目录下的 path 依赖
 # 会被自动收编为本 workspace 的成员。
 exclude = ["vendor"]
