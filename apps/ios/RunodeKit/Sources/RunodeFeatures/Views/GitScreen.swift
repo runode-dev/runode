@@ -10,6 +10,7 @@
         @State private var diffTarget: GitDiffTarget?
         @State private var showingBranches = false
         @FocusState private var editingMessage: Bool
+        @Environment(\.themeColors) private var colors
 
         var body: some View {
             List {
@@ -156,7 +157,7 @@
                     .lineLimit(1...6)
                     .focused($editingMessage)
                     .padding(10)
-                    .background(Color(.tertiarySystemFill), in: .inner)
+                    .background(colors.fill, in: .inner)
                 Button {
                     editingMessage = false
                     Task { await model.commit() }
@@ -328,9 +329,12 @@
         let model: GitModel
         let target: GitDiffTarget
         @Environment(\.dismiss) private var dismiss
+        @Environment(\.themeColors) private var colors
 
         var body: some View {
             content
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(colors.page)
                 .navigationTitle(Presentation.gitPathParts(target.path).name)
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar {
@@ -392,6 +396,7 @@
     /// 一块改动：块头，接着一行一行。
     private struct GitHunkView: View {
         let hunk: GitHunk
+        @Environment(\.themeColors) private var colors
 
         var body: some View {
             VStack(alignment: .leading, spacing: 0) {
@@ -402,7 +407,7 @@
                     .padding(.horizontal, 12)
                     .padding(.vertical, 6)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(Color(.secondarySystemBackground))
+                    .background(colors.card)
                 ForEach(Array(hunk.lines.enumerated()), id: \.offset) { _, line in
                     GitLineView(line: line)
                 }
@@ -472,6 +477,7 @@
                     section("本地分支", model.branches.filter { !$0.remote })
                     section("远端分支", model.branches.filter(\.remote))
                 }
+                .themedForm()
                 .overlay {
                     if model.isLoadingBranches, model.branches.isEmpty {
                         ProgressView("正在读取分支…")
@@ -524,6 +530,7 @@
                         .disabled(branch.current || model.running != nil)
                     }
                 }
+                .themedRows()
             }
         }
     }
