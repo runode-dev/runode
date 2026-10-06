@@ -4,10 +4,12 @@
 //! 建视图、启动 shell 和读输出（`lifecycle`）、界面这份 VT 的状态机（`screen`）、按键和鼠标
 //! （`input`）、绑定的动作（`actions`）、
 //! 搜索栏（`search`）、灰字建议（`suggestion`）、输入的语法高亮（`prompt_highlight`）、
-//! 命令补全菜单（`completion_menu`）、输入法（`ime`）、终端网格元素（`element`），以及画一帧（`paint`）。
+//! 命令补全菜单（`completion_menu`）、输入法（`ime`）、终端网格元素（`element`）、画一帧（`paint`），
+//! 以及尺寸归别的前端管时 VT 的哪一块画进视图（`crop`）。
 
 mod actions;
 mod completion_menu;
+mod crop;
 mod element;
 mod ime;
 mod input;
@@ -34,11 +36,12 @@ use gpui::{
 };
 use runode_config::Config;
 use runode_protocol::SessionId;
-use runode_shared_types::{color::Rgb, grid::GridSize};
+use runode_shared_types::{color::Rgb, frame::Frame, grid::GridSize};
 use runode_terminal::{history, session::Session};
 
 use crate::{search_bar::SearchField, session_host::LinkEvent};
 use completion_menu::{CompletionMenu, PendingKey};
+use crop::Crop;
 use element::TerminalElement;
 use screen::ScreenState;
 
@@ -182,8 +185,12 @@ pub struct TerminalView {
     output_at: Option<Instant>,
     /// 光标单元格上次绘制的位置，供输入法候选窗定位。
     cursor_bounds: Option<Bounds<Pixels>>,
-    /// 单元格网格的原点，用于把指针位置换算成单元格；平滑滚动错开时是错开后的位置。
+    /// 单元格网格的原点，用于把指针位置换算成单元格；平滑滚动错开时是错开后的位置，尺寸归别的前端管、
+    /// 只画了 VT 的一块时是裁掉的那几列几行挪出视图后 VT 第 0 列第 0 行的位置。
     grid_origin: Point<Pixels>,
+    /// 尺寸归别的前端管、VT 和视图对不上时上一帧画了 VT 的哪一块，下一帧光标没出视图就接着画这一块；
+    /// 对得上时为空。
+    crop: Option<Crop>,
     /// 左键按下后正在拖动选择，这次的移动和松开都归选区，不上报给程序。
     selecting: bool,
     /// 按下的那一下已经上报给了程序。分屏时每个终端都在窗口上监听移动和松开，
@@ -218,7 +225,7 @@ pub struct TerminalView {
     _reconnect_watch: Subscription,
     /// 包住终端和搜索栏的外层：焦点进到其中任何一处都算这个终端获得了焦点。
     pane_focus: FocusHandle,
-    _focus_watch: [Subscription; 3],
+    _focus_watch: [Subscription; 4],
 }
 
 impl EventEmitter<TerminalEvent> for TerminalView {}
@@ -297,11 +304,81 @@ impl Render for TerminalView {
                     .child(TerminalElement { view: cx.entity() }),
             );
         let lost = self.screen.is_lost().then(|| self.render_lost_bar(foreground, background, cx));
-        div().track_focus(&self.pane_focus).relative().size_full().child(terminal).children(search_bar).children(lost)
+        let size_owner = self.render_size_owner(foreground, background, cx);
+        div()
+            .track_focus(&self.pane_focus)
+            .relative()
+            .size_full()
+            .child(terminal)
+            .children(search_bar)
+            .children(size_owner)
+            .children(lost)
     }
 }
 
 impl TerminalView {
+    /// 尺寸归别的前端管、VT 和视图的行列对不上时这一帧画 VT 的哪一块（见 `Crop::follow`），记下来给
+    /// 下一帧接着用；对得上或者尺寸归这边管时为空，照常从视图左上角画。
+    fn crop_for(&mut self, frame: &Frame) -> Option<Crop> {
+        let view = self.screen.last_size();
+        if self.screen.size_owner().is_none() || (frame.cols, frame.rows) == (view.cols, view.rows) {
+            self.crop = None;
+            return None;
+        }
+        let vt = GridSize { cols: frame.cols, rows: frame.rows, ..view };
+        let crop = Crop::follow(vt, view, frame.cursor.map(|cursor| (cursor.x, cursor.y)), self.crop);
+        self.crop = Some(crop);
+        Some(crop)
+    }
+
+    /// 尺寸归别的前端管、VT 和视图的行列对不上时右下角的提示「尺寸由 ‹设备› 控制」（右上角让给搜索栏）；
+    /// 点它（或者点终端、在这里打字）就接管。
+    fn render_size_owner(
+        &self,
+        foreground: Rgb,
+        background: Rgb,
+        cx: &mut Context<Self>,
+    ) -> Option<gpui::Stateful<gpui::Div>> {
+        let owner = self.screen.size_owner()?;
+        let vt = self.screen.live()?.size();
+        let view = self.screen.last_size();
+        if (vt.cols, vt.rows) == (view.cols, view.rows) {
+            return None;
+        }
+        let message = match &owner.device {
+            Some(device) => rust_i18n::t!("size_owner.controlled_by", device = device),
+            None => rust_i18n::t!("size_owner.controlled_elsewhere"),
+        };
+        let fg = hsla(foreground);
+        Some(
+            div()
+                .id("size-owner")
+                .absolute()
+                .bottom(px(6.))
+                .right(px(8.))
+                .px(px(8.))
+                .py(px(2.))
+                .flex()
+                .items_center()
+                .gap(px(6.))
+                .rounded(px(4.))
+                .bg(hsla(background.mix(foreground, 0.1)))
+                .border_1()
+                .border_color(fg.opacity(0.15))
+                .occlude()
+                .text_size(px(11.))
+                .text_color(fg.opacity(0.8))
+                .cursor(CursorStyle::PointingHand)
+                .hover(|label| label.text_color(fg))
+                .child(message.into_owned())
+                .child(div().text_color(fg.opacity(0.5)).child(rust_i18n::t!("size_owner.take_over").into_owned()))
+                .on_click(cx.listener(|view, _, window, cx| {
+                    window.focus(&view.focus_handle, cx);
+                    view.report_focus(true);
+                })),
+        )
+    }
+
     /// 和宿主断开后盖在底部的提示：画面停在最后一屏，以及「在原目录重开」。
     fn render_lost_bar(&self, foreground: Rgb, background: Rgb, cx: &mut Context<Self>) -> gpui::Stateful<gpui::Div> {
         let fg = hsla(foreground);

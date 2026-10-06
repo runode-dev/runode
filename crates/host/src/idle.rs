@@ -17,6 +17,9 @@ pub enum Stopped {
     Idle,
     /// 前端发来 `ClientMsg::Shutdown`：会话都结束了，各条连接收到了 `Goodbye`。
     Shutdown,
+    /// 会话和监听的 socket 都交给了接手的新版本宿主（见 `Host::take_over`），各条连接收到了
+    /// `Goodbye`。socket 文件留着，新宿主接着在上面监听；进程照常退出。
+    Handoff,
 }
 
 impl Host {
@@ -25,7 +28,7 @@ impl Host {
     ///
     /// 退出前不再接新连接，删掉 `Host::listen` 开的 socket、放开锁：判断空闲和停止接新连接在同一把
     /// 锁里，不会有连接在两者之间连上来又被丢下；之后来的前端连不上，自己拉起新的宿主，新宿主
-    /// 拿得到锁。
+    /// 拿得到锁。交接给了新宿主（`Stopped::Handoff`）时 socket 文件不删，锁也还在新宿主手里。
     ///
     /// 调用之后的 `Shutdown` 才会让宿主退出，在这之前（以及从不调用、宿主跑在 app 进程里时）
     /// `Shutdown` 只结束所有会话。
@@ -61,7 +64,10 @@ impl Host {
         };
         peers.accepting = false;
         if let Some(listening) = peers.listening.take() {
-            if let Err(err) = std::fs::remove_file(&listening.socket) {
+            listening.control.stop();
+            if reason != Stopped::Handoff
+                && let Err(err) = std::fs::remove_file(&listening.socket)
+            {
                 tracing::debug!("failed to remove {}: {err}", listening.socket.display());
             }
             // 丢掉时放开锁。

@@ -19,7 +19,7 @@ use runode_shared_types::{
 use crate::{
     Env,
     args::{self, Command, Text, Until},
-    client::{Connection, kind},
+    client::{Connection, is_upgrading, kind},
     select::{Place, Selector, World, place_name},
 };
 
@@ -34,8 +34,20 @@ const KILL_TIMEOUT: Duration = Duration::from_secs(5);
 const POLL_INTERVAL: Duration = Duration::from_millis(100);
 /// `send --wait` 既没有 agent、也等不了命令时，屏幕这么久不变就算完。
 const SEND_QUIET: Duration = Duration::from_secs(2);
+/// 宿主升级（`client::Upgrading`）时，`wait` 最多花这么久重新连上新宿主，见 `Watch::recover`。
+const RECONNECT_TIMEOUT: Duration = Duration::from_secs(10);
+/// 重连之间隔这么久。
+const RECONNECT_INTERVAL: Duration = Duration::from_millis(100);
 /// `list` 显示的标识的长度，够区分几十个会话，命令里也能直接用。
 pub(crate) const SHORT_ID: usize = 8;
+
+/// `send` 正在发输入（`Paste`、`SendKeys` 这类请求还没回话）时宿主升级了：宿主冻结期间收下的
+/// 请求会交给新宿主或者在回滚后照常办，输入可能已经送到。
+const UPGRADED_WHILE_SENDING: &str = "the runode host was upgraded while the input was being sent; it may have \
+     been delivered, so check with `runode read` before sending it again";
+/// `send --wait` 发完输入、在等结果时宿主升级了，而且没能接着等（比如等的是命令运行完）。
+const UPGRADED_WHILE_WAITING: &str = "the input was sent, but the runode host was upgraded while waiting for the \
+     result; check with `runode read` or `runode wait` instead of sending it again";
 
 /// 命令没做成的原因，各自对应一个退出码。
 pub(crate) enum Failure {
@@ -88,34 +100,40 @@ pub(crate) fn run(command: Command, env: &Env, out: &mut dyn Write, err: &mut dy
                 Text::Given(text) => text,
                 Text::Stdin => stdin_text()?,
             };
-            let mut sent = false;
-            if !text.is_empty() {
-                if paste {
+            // 从这里起宿主升级打断时不叫用户重跑：输入可能已经送到了，见 `after_sending`。
+            let delivered = (|| -> Result<(), Failure> {
+                let mut sent = false;
+                if !text.is_empty() {
+                    if paste {
+                        let req = connection.req();
+                        connection.request_done(&ClientMsg::Paste { req, id, text })?;
+                    } else {
+                        connection.input(channel, text.as_bytes())?;
+                    }
+                    sent = true;
+                }
+                if !keys.is_empty() {
+                    if sent {
+                        thread::sleep(ENTER_DELAY);
+                    }
                     let req = connection.req();
-                    connection.request_done(&ClientMsg::Paste { req, id, text })?;
-                } else {
-                    connection.input(channel, text.as_bytes())?;
+                    connection.request_done(&ClientMsg::SendKeys { req, id, keys: keys.clone() })?;
+                    sent = true;
                 }
-                sent = true;
-            }
-            if !keys.is_empty() {
-                if sent {
-                    thread::sleep(ENTER_DELAY);
+                if enter {
+                    if sent {
+                        thread::sleep(ENTER_DELAY);
+                    }
+                    connection.input(channel, b"\r")?;
                 }
-                let req = connection.req();
-                connection.request_done(&ClientMsg::SendKeys { req, id, keys: keys.clone() })?;
-                sent = true;
-            }
-            if enter {
-                if sent {
-                    thread::sleep(ENTER_DELAY);
-                }
-                connection.input(channel, b"\r")?;
-            }
+                Ok(())
+            })();
+            delivered.map_err(|failure| after_sending(failure, UPGRADED_WHILE_SENDING))?;
             if wait {
                 let (until, waiting) = send_wait(&meta, enter || presses_enter(&keys));
                 writeln!(err, "runode: waiting {waiting}")?;
-                wait_until(&connection, id, &meta, &until, timeout, out)?;
+                wait_until(&mut Watch { env, connection, id }, &meta, &until, timeout, out)
+                    .map_err(|failure| after_sending(failure, UPGRADED_WHILE_WAITING))?;
             }
         }
         Command::Wait { session, until, timeout } => {
@@ -125,7 +143,7 @@ pub(crate) fn run(command: Command, env: &Env, out: &mut dyn Write, err: &mut dy
                 return Err(Failure::Exited);
             }
             let (_, meta) = attach(&connection, info.id)?;
-            wait_until(&connection, info.id, &meta, &until, timeout, out)?;
+            wait_until(&mut Watch { env, connection, id: info.id }, &meta, &until, timeout, out)?;
         }
         Command::Open { placement, near, cwd, focus, command } => {
             let connection = Connection::open(env)?;
@@ -141,11 +159,25 @@ pub(crate) fn run(command: Command, env: &Env, out: &mut dyn Write, err: &mut dy
                 other => return Err(unexpected(&other)),
             };
             if !command.is_empty() {
-                let (channel, meta) = attach(&connection, id)?;
-                wait_for_prompt(&connection, id, meta)?;
-                connection.input(channel, command.as_bytes())?;
-                thread::sleep(ENTER_DELAY);
-                connection.input(channel, b"\r")?;
+                // 终端已经开了：这时宿主升级，叫人重跑会再开一个终端，所以说清开好的是哪个。
+                let typed = (|| -> Result<(), Failure> {
+                    let (channel, meta) = attach(&connection, id)?;
+                    wait_for_prompt(&connection, id, meta)?;
+                    connection.input(channel, command.as_bytes())?;
+                    thread::sleep(ENTER_DELAY);
+                    connection.input(channel, b"\r")?;
+                    Ok(())
+                })();
+                if let Err(Failure::Error(err)) = &typed
+                    && is_upgrading(err)
+                {
+                    return Err(anyhow!(
+                        "opened session {id}, but the runode host was upgraded before the command was typed; \
+                         check it with `runode read {id}` instead of opening another"
+                    )
+                    .into());
+                }
+                typed?;
             }
             writeln!(out, "{id}")?;
         }
@@ -314,6 +346,15 @@ fn send_wait(meta: &SessionMeta, enter: bool) -> (Until, &'static str) {
     }
 }
 
+/// `send` 发出输入以后的失败：宿主在升级（`client::Upgrading`）时换成 `message`，不说「重跑」
+/// （那会把输入再打一遍，比如再执行一次 `git push`）。退出码仍是失败：结果不知道，不能当成做成了。
+fn after_sending(failure: Failure, message: &'static str) -> Failure {
+    match failure {
+        Failure::Error(err) if is_upgrading(&err) => Failure::Error(anyhow!(message)),
+        failure => failure,
+    }
+}
+
 /// 要按的键里有没有不带修饰键的回车。
 fn presses_enter(keys: &[String]) -> bool {
     keys.iter()
@@ -322,27 +363,91 @@ fn presses_enter(keys: &[String]) -> bool {
         .any(|chord| chord.key == Key::Enter && chord.mods == Mods::default())
 }
 
-/// 等到 `until`，到了就打印结果。`meta` 是连上时的状态。
-fn wait_until(
-    connection: &Connection,
+/// `wait`（和 `send --wait`）等着的会话和连着它的连接。宿主把会话交给新版本的宿主时（连接上
+/// 来了 `Goodbye { reason: Handoff }`），重新连上新宿主接着等，见 `recover`。
+struct Watch<'a> {
+    env: &'a Env,
+    connection: Connection,
     id: SessionId,
+}
+
+impl Watch<'_> {
+    /// `failure` 是宿主在升级（`client::Upgrading`）时，重新连上宿主、只看状态地重新连上会话，
+    /// 返回这时会话的状态；每隔 `RECONNECT_INTERVAL` 试一次，最多 `RECONNECT_TIMEOUT`，也不超过
+    /// `deadline`（超过了是 `Timeout`）。新宿主里没有这个会话了（交接时它已经结束）是 `Exited`。
+    /// 别的失败原样返回。
+    fn recover(&mut self, failure: Failure, deadline: Option<Instant>) -> Result<SessionMeta, Failure> {
+        match &failure {
+            Failure::Error(err) if is_upgrading(err) => {}
+            _ => return Err(failure),
+        }
+        let give_up = Instant::now() + RECONNECT_TIMEOUT;
+        let give_up = deadline.map_or(give_up, |at| at.min(give_up));
+        let connection = loop {
+            match Connection::open(self.env) {
+                Ok(connection) => break connection,
+                Err(err) => {
+                    let now = Instant::now();
+                    if deadline.is_some_and(|at| now >= at) {
+                        return Err(Failure::Timeout);
+                    }
+                    if now >= give_up {
+                        return Err(err.context("the runode host was being upgraded and did not come back").into());
+                    }
+                }
+            }
+            thread::sleep(RECONNECT_INTERVAL);
+        };
+        connection.send(&ClientMsg::ListSessions)?;
+        match connection.reply()? {
+            HostMsg::SessionList { sessions } if sessions.iter().any(|info| info.id == self.id && !info.exited) => {}
+            HostMsg::SessionList { .. } => return Err(Failure::Exited),
+            other => return Err(unexpected(&other)),
+        }
+        let (_, meta) = attach(&connection, self.id)?;
+        self.connection = connection;
+        Ok(meta)
+    }
+
+    /// 读一次整屏；宿主在升级时先重新连上新宿主再读，见 `recover`。
+    fn read_screen(&mut self, deadline: Option<Instant>) -> Result<String, Failure> {
+        loop {
+            match screen(&self.connection, self.id, None) {
+                Ok(text) => return Ok(text),
+                Err(failure) => self.recover(failure, deadline).map(drop)?,
+            }
+        }
+    }
+}
+
+/// 等到 `until`，到了就打印结果。`meta` 是连上时的状态。宿主升级时重新连上接着等（见
+/// `Watch::recover`），等命令运行完（`Until::Command`）除外：新宿主不会重报交接时正在跑的命令。
+fn wait_until(
+    watch: &mut Watch<'_>,
     meta: &SessionMeta,
     until: &Until,
     timeout: Option<Duration>,
     out: &mut dyn Write,
 ) -> Result<(), Failure> {
     let deadline = timeout.map(|timeout| Instant::now() + timeout);
-    if connection.exited(id) {
+    let id = watch.id;
+    if watch.connection.exited(id) {
         return Err(Failure::Exited);
     }
     match until {
-        Until::Command => wait_for_command(connection, id, meta, deadline, out),
+        Until::Command => wait_for_command(&watch.connection, id, meta, deadline, out),
         Until::Text { pattern, lines, new } => {
             let regex = regex::Regex::new(pattern)?;
             // 上一次读到的、对上的行各有几行：`new` 时比它多出来的才算新出现的。
             let mut before: Option<HashMap<String, usize>> = None;
             loop {
-                let text = screen(connection, id, *lines)?;
+                let text = match screen(&watch.connection, id, *lines) {
+                    Ok(text) => text,
+                    Err(failure) => {
+                        watch.recover(failure, deadline)?;
+                        continue;
+                    }
+                };
                 let matched: Vec<&str> = text.lines().filter(|line| regex.is_match(line)).collect();
                 let hit = match (&before, new) {
                     (_, false) => matched.first().copied(),
@@ -365,26 +470,38 @@ fn wait_until(
                     *counts.entry(line.to_owned()).or_default() += 1;
                 }
                 before = Some(counts);
-                pause(connection, id, deadline)?;
+                if let Err(failure) = pause(&watch.connection, id, deadline) {
+                    watch.recover(failure, deadline)?;
+                }
             }
         }
         Until::Quiet(quiet) => {
-            let mut last = screen(connection, id, None)?;
+            let mut last = watch.read_screen(deadline)?;
             let mut since = Instant::now();
             loop {
                 if since.elapsed() >= *quiet {
                     writeln!(out, "quiet")?;
                     return Ok(());
                 }
-                pause(connection, id, deadline)?;
-                let text = screen(connection, id, None)?;
+                let text =
+                    match pause(&watch.connection, id, deadline).and_then(|()| screen(&watch.connection, id, None)) {
+                        Ok(text) => text,
+                        Err(failure) => {
+                            watch.recover(failure, deadline)?;
+                            // 交接本身要花时间，期间屏幕也可能变了：在新宿主上重新读一次、重新计时，
+                            // 不把交接的那几秒算成安静。
+                            last = watch.read_screen(deadline)?;
+                            since = Instant::now();
+                            continue;
+                        }
+                    };
                 if text != last {
                     last = text;
                     since = Instant::now();
                 }
             }
         }
-        agent => wait_for_agent(connection, id, meta.agent, agent, deadline, out),
+        agent => wait_for_agent(watch, meta.agent, agent, deadline, out),
     }
 }
 
@@ -462,8 +579,7 @@ fn wait_for_command(
 
 /// 等 agent 到 `until` 说的状态，到了就打印它现在的状态。`agent` 是连上时的样子。
 fn wait_for_agent(
-    connection: &Connection,
-    id: SessionId,
+    watch: &mut Watch<'_>,
     mut agent: Option<Agent>,
     until: &Until,
     deadline: Option<Instant>,
@@ -484,7 +600,15 @@ fn wait_for_agent(
             writeln!(out, "{}", state.map_or("no agent", state_name))?;
             return Ok(());
         }
-        match connection.next(deadline)? {
+        let id = watch.id;
+        let next = match watch.connection.next(deadline) {
+            Ok(next) => next,
+            Err(err) => {
+                agent = watch.recover(err.into(), deadline)?.agent;
+                continue;
+            }
+        };
+        match next {
             None => return Err(Failure::Timeout),
             Some(HostMsg::Meta { id: changed, meta }) if changed == id => agent = meta.agent,
             Some(HostMsg::Exited { id: exited, .. }) if exited == id => return Err(Failure::Exited),

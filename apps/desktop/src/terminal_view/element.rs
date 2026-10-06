@@ -1,13 +1,19 @@
 //! 终端网格的 GPUI 元素：布局时按单元格尺寸调整终端大小、启动 shell，绘制时挂上输入和鼠标事件再画一帧。
 
 use gpui::{
-    App, Bounds, DispatchPhase, ElementId, ElementInputHandler, GlobalElementId, LayoutId, MouseMoveEvent,
-    MouseUpEvent, Pixels, Style, Window, prelude::*, relative,
+    App, Bounds, ContentMask, DispatchPhase, ElementId, ElementInputHandler, GlobalElementId, LayoutId, MouseMoveEvent,
+    MouseUpEvent, Pixels, Size, Style, Window, fill, linear_color_stop, linear_gradient, point, prelude::*, px,
+    relative, size,
 };
-use runode_shared_types::grid::GridSize;
+use runode_shared_types::{color::Rgb, grid::GridSize};
 use runode_terminal::session::Session;
 
-use super::{TerminalView, paint::paint_frame};
+use super::{
+    TerminalView,
+    crop::{Edges, pad_color},
+    hsla,
+    paint::paint_frame,
+};
 use crate::startup;
 
 pub(super) struct TerminalElement {
@@ -134,15 +140,72 @@ impl Element for TerminalElement {
             let Some(frame) = view.screen.shown_mut().map(Session::take_frame) else {
                 return;
             };
-            paint_frame(view, &frame, bounds.origin, metrics, focused, window);
+            let crop = view.crop_for(&frame);
+            match crop {
+                None => {
+                    paint_frame(view, &frame, bounds.origin, metrics, focused, window);
+                    // 补全菜单盖在终端内容上面。
+                    view.paint_completion(&frame, metrics, window);
+                }
+                // 尺寸归别的前端管、VT 和视图对不上：只画 VT 落在视图里的那一块，裁掉的那几边渐隐，VT
+                // 小了空出来的地方留白。
+                Some(crop) => {
+                    let view_size = view.screen.last_size();
+                    let vt = GridSize { cols: frame.cols, rows: frame.rows, ..view_size };
+                    paint_padding(bounds, vt, metrics.cell, pad_color(frame.background, frame.foreground), window);
+                    window.with_content_mask(Some(ContentMask { bounds }), |window| {
+                        let origin = crop.vt_origin(bounds.origin, metrics.cell);
+                        paint_frame(view, &frame, origin, metrics, focused, window);
+                        paint_fades(bounds, crop.edges(vt, view_size), metrics.cell, frame.background, window);
+                        view.paint_completion(&frame, metrics, window);
+                    });
+                }
+            }
             // 第一次画出字（多半是 shell 的提示符）的那一帧。
             static FIRST_CONTENT: startup::Once = startup::Once::new();
             FIRST_CONTENT.mark_when("first_content", || frame.cells.iter().any(|cell| !cell.text.trim().is_empty()));
-            // 补全菜单盖在终端内容上面。
-            view.paint_completion(&frame, metrics, window);
             if let Some(session) = view.screen.shown_mut() {
                 session.restore_frame(frame);
             }
         });
+    }
+}
+
+/// VT 比视图小时空出来的右边和下边用较暗的底色 `color` 铺上。VT 从视图左上角画起。
+fn paint_padding(bounds: Bounds<Pixels>, vt: GridSize, cell: Size<Pixels>, color: Rgb, window: &mut Window) {
+    let used = size(cell.width * f32::from(vt.cols), cell.height * f32::from(vt.rows));
+    let color = hsla(color);
+    if used.width < bounds.size.width {
+        let strip = size(bounds.size.width - used.width, bounds.size.height);
+        window.paint_quad(fill(Bounds::new(bounds.origin + point(used.width, px(0.)), strip), color));
+    }
+    if used.height < bounds.size.height {
+        let strip = size(used.width.min(bounds.size.width), bounds.size.height - used.height);
+        window.paint_quad(fill(Bounds::new(bounds.origin + point(px(0.), used.height), strip), color));
+    }
+}
+
+/// 裁掉了内容的那几边画一格宽的渐隐：从透明过渡到终端背景色 `background`。
+fn paint_fades(bounds: Bounds<Pixels>, edges: Edges, cell: Size<Pixels>, background: Rgb, window: &mut Window) {
+    let solid = hsla(background);
+    let clear = solid.opacity(0.);
+    // 渐变的角度：0 是从下往上，顺时针增加；颜色从透明变成背景色，背景色那头贴着视图的边。
+    let fades = [
+        (edges.left, Bounds::new(bounds.origin, size(cell.width, bounds.size.height)), 270.),
+        (
+            edges.right,
+            Bounds::new(bounds.top_right() - point(cell.width, px(0.)), size(cell.width, bounds.size.height)),
+            90.,
+        ),
+        (edges.top, Bounds::new(bounds.origin, size(bounds.size.width, cell.height)), 0.),
+        (
+            edges.bottom,
+            Bounds::new(bounds.bottom_left() - point(px(0.), cell.height), size(bounds.size.width, cell.height)),
+            180.,
+        ),
+    ];
+    for (_, area, angle) in fades.into_iter().filter(|(cropped, ..)| *cropped) {
+        window
+            .paint_quad(fill(area, linear_gradient(angle, linear_color_stop(clear, 0.), linear_color_stop(solid, 1.))));
     }
 }

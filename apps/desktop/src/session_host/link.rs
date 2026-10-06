@@ -627,6 +627,7 @@ fn handshake(stream: &UnixStream, build: &BuildId) -> Result<Welcome, ConnectErr
         client: ClientKind::Desktop,
         caps: Caps { snapshot: true, vt_replay: true },
         session: None,
+        device: device_name(),
     };
     let frame = Frame::control(&hello).map_err(|err| ConnectError::Io(io::Error::other(err)))?;
     let mut writer = stream;
@@ -651,6 +652,26 @@ fn handshake(stream: &UnixStream, build: &BuildId) -> Result<Welcome, ConnectErr
     };
     stream.set_read_timeout(None).map_err(ConnectError::Io)?;
     answer
+}
+
+/// 报给宿主的设备名：这台机器的主机名的第一段，见 `short_host_name`。几个前端看同一个会话时，
+/// 别的前端据此显示「尺寸由谁控制」，见 `HostMsg::SizeOwner`。取不到时为 `None`。
+fn device_name() -> Option<String> {
+    let mut buf = [0u8; 256];
+    // SAFETY: `buf` 可写、长度如实传入；`gethostname` 最多写这么多字节，名字太长时可能不带结尾的 0，
+    // 下面按找得到的第一个 0 或者整块截取。
+    if unsafe { libc::gethostname(buf.as_mut_ptr().cast(), buf.len()) } != 0 {
+        return None;
+    }
+    let end = buf.iter().position(|&b| b == 0).unwrap_or(buf.len());
+    short_host_name(&String::from_utf8_lossy(&buf[..end]))
+}
+
+/// 主机名第一个点之前的部分：局域网和路由器会给主机名加上 `.local`、`.lan`、`.home` 这类域名，
+/// 显示给人看的只要机器自己的名字。空的为 `None`。
+fn short_host_name(host: &str) -> Option<String> {
+    let name = host.trim().split('.').next().unwrap_or_default().trim();
+    (!name.is_empty()).then(|| name.to_owned())
 }
 
 /// 这个构建的界面 VT 解得了的快照格式，算一次；算不出来时为 `None`。
@@ -896,7 +917,8 @@ fn session_of(message: &HostMsg) -> Option<SessionId> {
         | HostMsg::Resync { id, .. }
         | HostMsg::Exited { id, .. }
         | HostMsg::Bell { id }
-        | HostMsg::ScreenText { id, .. } => Some(*id),
+        | HostMsg::ScreenText { id, .. }
+        | HostMsg::SizeOwner { id, .. } => Some(*id),
         _ => None,
     }
 }
@@ -1079,6 +1101,7 @@ mod tests {
             client: ClientKind::Cli,
             caps: Caps::default(),
             session: None,
+            device: None,
         };
         send(&mut cli, &hello);
         assert!(matches!(receive(&mut cli), HostMsg::Welcome { .. }));
@@ -1140,6 +1163,8 @@ mod tests {
         assert!(matches!(rx.try_recv(), Ok(LinkEvent::Output(data)) if data == b"new"));
         dispatch(&link.inner, HostMsg::Bell { id });
         assert!(matches!(rx.try_recv(), Ok(LinkEvent::Msg(HostMsg::Bell { .. }))));
+        dispatch(&link.inner, HostMsg::SizeOwner { id, mine: false, owner: Some("studio".into()) });
+        assert!(matches!(rx.try_recv(), Ok(LinkEvent::Msg(HostMsg::SizeOwner { mine: false, .. }))));
     }
 
     #[test]
@@ -1231,6 +1256,22 @@ mod tests {
         assert!(matches!(rx.try_recv(), Ok(LinkEvent::Lost)));
     }
 
+    /// 设备名只要主机名第一个点之前的部分，不管加的是哪个域名。
+    #[test]
+    fn the_device_name_is_the_first_label_of_the_host_name() {
+        assert_eq!(short_host_name("Mac.lan").as_deref(), Some("Mac"));
+        assert_eq!(short_host_name("Ethans-MacBook-Pro.local").as_deref(), Some("Ethans-MacBook-Pro"));
+        assert_eq!(short_host_name("studio.home.example.com").as_deref(), Some("studio"));
+        assert_eq!(short_host_name("  build-box \n").as_deref(), Some("build-box"));
+        assert_eq!(short_host_name("plain").as_deref(), Some("plain"));
+        assert_eq!(short_host_name(""), None);
+        assert_eq!(short_host_name(".lan"), None);
+        // 这台机器上取得到的也是不带点的一段。
+        if let Some(name) = device_name() {
+            assert!(!name.is_empty() && !name.contains('.'), "{name}");
+        }
+    }
+
     #[test]
     fn snapshots_need_the_same_format() {
         assert!(snapshots_usable(1, Some(1)));
@@ -1257,6 +1298,7 @@ mod tests {
                 host_pid: 1,
                 snapshot_format: local_snapshot_format().unwrap() + 1,
                 standalone: true,
+                handoff: 0,
             };
             let frame = Frame::control(&welcome).unwrap();
             write_frame(&mut stream, frame.kind, 0, &frame.payload).unwrap();
@@ -1290,6 +1332,7 @@ mod tests {
                 host_pid: 1,
                 snapshot_format: 1,
                 standalone: true,
+                handoff: 0,
             };
             let frame = Frame::control(&welcome).unwrap();
             write_frame(&mut stream, frame.kind, 0, &frame.payload).unwrap();
@@ -1375,6 +1418,7 @@ mod tests {
                 host_pid: 1,
                 snapshot_format: 1,
                 standalone: true,
+                handoff: 0,
             };
             let frame = Frame::control(&welcome).unwrap();
             write_frame(&mut stream, frame.kind, 0, &frame.payload).unwrap();

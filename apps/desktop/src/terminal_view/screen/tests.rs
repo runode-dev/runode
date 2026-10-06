@@ -513,3 +513,96 @@ fn an_unopened_view_started_while_hidden_only_watches_the_state() {
     assert_eq!(h.state.last_size(), BIG);
     assert_eq!(h.state.set_visible(true, h.now), Some(Attach { size: Some(BIG), mode: AttachMode::Snapshot }));
 }
+
+fn size_owner(mine: bool, owner: Option<&str>) -> LinkEvent {
+    msg(HostMsg::SizeOwner { id: SessionId(1), mine, owner: owner.map(str::to_owned) })
+}
+
+fn owner_device(state: &ScreenState<Fake>) -> Option<Option<&str>> {
+    state.size_owner().map(|owner| owner.device.as_deref())
+}
+
+#[test]
+fn the_size_owner_is_remembered_while_watching_with_a_size() {
+    let mut h = Harness::live(b"");
+    // 只有这一个前端：没收到过，照常画。
+    assert_eq!(owner_device(&h.state), None);
+    h.apply(vec![size_owner(false, Some("studio"))]);
+    assert_eq!(owner_device(&h.state), Some(Some("studio")));
+    // 别的前端没报设备名。
+    h.apply(vec![size_owner(false, None)]);
+    assert_eq!(owner_device(&h.state), Some(None));
+    // 轮到这边。
+    h.apply(vec![size_owner(true, Some("this mac"))]);
+    assert_eq!(owner_device(&h.state), None);
+
+    // Resync 时重新连上不改归属，记着的接着用。
+    h.apply(vec![size_owner(false, Some("studio"))]);
+    h.apply(vec![msg(HostMsg::Resync { id: SessionId(1), reason: "slow".into() })]);
+    h.apply(vec![screen(AttachMode::Snapshot, 2, SessionMeta::default(), b"")]);
+    assert_eq!(owner_device(&h.state), Some(Some("studio")));
+
+    // 降成只看状态：不带尺寸了，忘掉；这时漏过来的也不记。
+    h.state.set_visible(false, h.now);
+    let now = h.later(HIDE_GRACE);
+    h.state.tick(now);
+    h.apply(vec![screen(AttachMode::MetaOnly, 3, SessionMeta::default(), b"")]);
+    assert_eq!(owner_device(&h.state), None);
+    h.apply(vec![size_owner(false, Some("studio"))]);
+    assert_eq!(owner_device(&h.state), None);
+    // 回到显示、屏幕到之前就说了归属：记下。
+    h.state.set_visible(true, now);
+    h.apply(vec![size_owner(false, Some("studio")), screen(AttachMode::Snapshot, 4, SessionMeta::default(), b"")]);
+    assert_eq!(owner_device(&h.state), Some(Some("studio")));
+
+    // 断开：忘掉，之后漏过来的也不记。
+    h.apply(vec![LinkEvent::Lost, size_owner(false, Some("studio"))]);
+    assert_eq!(owner_device(&h.state), None);
+    h.state.reconnect(h.now);
+    h.apply(vec![screen(AttachMode::Snapshot, 5, SessionMeta::default(), b"")]);
+    assert_eq!(owner_device(&h.state), None);
+}
+
+#[test]
+fn a_resize_from_the_owner_is_not_answered_with_our_size() {
+    const MID: GridSize = GridSize { cols: 100, rows: 30, cell_width_px: 8, cell_height_px: 16 };
+    let mut h = Harness::live(b"");
+    // 第一次布局量出的尺寸照常请宿主改。
+    h.state.resize(SIZE);
+    assert_eq!(h.state.live().unwrap().requested, [SIZE]);
+    // 别的前端成了 owner，宿主按它的尺寸改了 VT：这边每次布局量的还是原来的，不再请。
+    h.apply(vec![size_owner(false, Some("studio")), msg(HostMsg::Resized { id: SessionId(1), size: BIG })]);
+    for _ in 0..3 {
+        h.state.resize(SIZE);
+    }
+    let live = h.state.live().unwrap();
+    assert_eq!(live.resized, [BIG]);
+    assert_eq!(live.requested, [SIZE]);
+    // 视图真的变了：照样报给宿主（它记着，轮到这边当 owner 时用），只报一次。
+    h.state.resize(MID);
+    h.state.resize(MID);
+    h.apply(vec![msg(HostMsg::Resized { id: SessionId(1), size: BIG })]);
+    h.state.resize(MID);
+    assert_eq!(h.state.live().unwrap().requested, [SIZE, MID]);
+    // Resync 重新要的屏幕是 owner 的尺寸：新的那份 VT 补报一次这边的尺寸，之后同样不再报。
+    h.apply(vec![msg(HostMsg::Resync { id: SessionId(1), reason: "slow".into() })]);
+    let attached = Attached {
+        id: SessionId(1),
+        channel: 2,
+        size: BIG,
+        mode: AttachMode::Snapshot,
+        meta: SessionMeta::default(),
+        settings: None,
+    };
+    h.apply(vec![LinkEvent::Screen(HostScreen { attached, data: Vec::new() })]);
+    h.apply(vec![msg(HostMsg::Resized { id: SessionId(1), size: BIG })]);
+    h.state.resize(MID);
+    assert_eq!(h.state.live().unwrap().requested, [MID]);
+
+    // 只有一个前端时同样：宿主改好了就对得上，量出一样的不再请。
+    let mut h = Harness::live(b"");
+    h.state.resize(BIG);
+    h.apply(vec![msg(HostMsg::Resized { id: SessionId(1), size: BIG })]);
+    h.state.resize(BIG);
+    assert_eq!(h.state.live().unwrap().requested, [BIG]);
+}

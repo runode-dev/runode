@@ -2,7 +2,8 @@
 //!
 //! 读之前先 `poll`，同时等着 `Notifier`：交接时用它叫醒读线程、让它停下而不再从 PTY 里多读一个
 //! 字节，接手来的会话里还用它知道 shell 退出了。叫停后读线程把 `PtySink` 交回来，可以接着读，
-//! 见 `Reader::resume`。PTY 的描述符是非阻塞的，见 `Pty::open`。
+//! 见 `Reader::resume`。PTY 的描述符是非阻塞的，见 `Pty::open`。`Pty::adopt_paused` 接手来的，
+//! 读线程开始读之前先等闸门（`Gate`）打开。
 
 use std::{
     io,
@@ -14,7 +15,7 @@ use std::{
 use anyhow::{Context as _, Result};
 
 use super::{
-    PtyEvent, PtySink,
+    Gate, PtyEvent, PtySink,
     notify::{EXIT_POLL_INTERVAL, Notifier},
     set_current_thread_interactive,
 };
@@ -43,18 +44,32 @@ pub(super) struct Reader {
 
 impl Reader {
     /// 起读线程，从 `master` 读，输出交给 `sink`。`notifier` 看着 shell 时，shell 退出也算会话
-    /// 结束，不必等到 PTY 读到 EOF。
-    pub(super) fn start(master: Arc<OwnedFd>, notifier: Arc<Notifier>, sink: PtySink) -> Result<Self> {
+    /// 结束，不必等到 PTY 读到 EOF。给了 `gate` 时读线程先等它打开再读；放弃了就不读，像叫停了
+    /// 一样交回 `PtySink`。
+    pub(super) fn start(
+        master: Arc<OwnedFd>,
+        notifier: Arc<Notifier>,
+        sink: PtySink,
+        gate: Option<Arc<Gate>>,
+    ) -> Result<Self> {
         let mut reader = Self { master, notifier, state: Arc::new(Mutex::new(State::Running)), thread: None };
-        reader.spawn(sink)?;
+        reader.spawn(sink, gate)?;
         Ok(reader)
     }
 
-    fn spawn(&mut self, sink: PtySink) -> Result<()> {
+    fn spawn(&mut self, sink: PtySink, gate: Option<Arc<Gate>>) -> Result<()> {
         let (master, notifier, state) = (self.master.clone(), self.notifier.clone(), self.state.clone());
         let thread = thread::Builder::new()
             .name("pty-reader".into())
-            .spawn(move || read_loop(&master, &notifier, &state, sink))
+            .spawn(move || {
+                if let Some(gate) = gate
+                    && !gate.wait()
+                {
+                    *state.lock().unwrap_or_else(PoisonError::into_inner) = State::Stopped;
+                    return Some(sink);
+                }
+                read_loop(&master, &notifier, &state, sink)
+            })
             .context("failed to start pty reader thread")?;
         self.thread = Some(thread);
         Ok(())
@@ -92,7 +107,7 @@ impl Reader {
                 drop(state);
                 if let Some(sink) = self.join() {
                     *self.lock() = State::Running;
-                    self.spawn(sink)?;
+                    self.spawn(sink, None)?;
                 }
                 Ok(())
             }
@@ -235,7 +250,8 @@ mod tests {
     fn start(rx: OwnedFd, notifier: Option<libc::pid_t>) -> (Reader, mpsc::Receiver<PtyEvent>) {
         let (tx, events) = mpsc::channel();
         let notifier = Arc::new(Notifier::new(notifier).unwrap());
-        let reader = Reader::start(Arc::new(rx), notifier, Box::new(move |event| tx.send(event).is_ok())).unwrap();
+        let reader =
+            Reader::start(Arc::new(rx), notifier, Box::new(move |event| tx.send(event).is_ok()), None).unwrap();
         (reader, events)
     }
 
@@ -251,11 +267,26 @@ mod tests {
         assert!(reader.finished());
         pipe_tx.write_all(b"after").unwrap();
         drop(pipe_tx);
-        let mut rest = Vec::new();
+        // 非阻塞的读端：读出写进去的那几个字节，不指望紧接着读到 EOF。同一个进程里别的测试正在
+        // 拉起子进程时，子进程在 exec 完成之前握着这边所有描述符的副本（设了 close-on-exec 的也
+        // 一样），写端要等它 exec 完才真正关掉，这期间读得到的是 `WouldBlock`。
         let mut pipe_rx = pipe_rx;
-        // 非阻塞的读端：写端关了，读到 EOF 为止。
-        pipe_rx.read_to_end(&mut rest).unwrap();
-        assert_eq!(rest, b"after");
+        let mut rest = [0u8; 5];
+        let mut got = 0;
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        while got < rest.len() {
+            match pipe_rx.read(&mut rest[got..]) {
+                Ok(0) => break,
+                Ok(n) => got += n,
+                Err(err) if err.kind() == io::ErrorKind::WouldBlock && std::time::Instant::now() < deadline => {
+                    std::thread::sleep(Duration::from_millis(1));
+                }
+                Err(err) => panic!("{err}"),
+            }
+        }
+        assert_eq!(&rest[..got], b"after");
+        // 后面没有别的了：读到 EOF，或者写端的副本还没关、暂时没有数据。
+        assert!(!matches!(pipe_rx.read(&mut [0u8; 16]), Ok(n) if n > 0));
         // 叫停的读线程不报告退出。
         assert!(rx.recv_timeout(Duration::from_millis(100)).is_err());
     }

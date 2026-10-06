@@ -218,3 +218,56 @@ fn skip_rules_end_the_wait_for_output_to_stop() {
     assert_eq!(f.poll(at), agent(Claude, Working));
     assert!(f.tracker.deadline().is_none_or(|deadline| deadline > f.at(at)));
 }
+
+/// 交接后接着交接前的状态：前台进程这时才认出来也不等启动宽限期，交接期间没有输出也不撤
+/// 按输出活动判的工作中，一次都不变；输出重新流起来后停下，照常确认空闲。
+#[test]
+fn a_resumed_agent_keeps_its_state_across_the_handoff() {
+    let mut f = Fixture::new();
+    // 导入时先喂眼下的信号（这里是前台进程），再接着交接前的状态。
+    f.tracker.foreground(Foreground::Program(Some(Omp)), f.at(0));
+    f.tracker.resume(agent(Omp, Working), f.at(0));
+    assert_eq!(f.tracker.agent(), agent(Omp, Working));
+    // 立即求值一次，看的是屏幕，不是宽限期里的「空闲」。
+    assert_eq!(f.tracker.deadline(), Some(f.at(0)));
+    let mut changed = Vec::new();
+    for ms in (0..=2000).step_by(100) {
+        changed.push(f.tracker.poll(f.at(ms), None, &f.rules, || Some(String::new())));
+    }
+    assert!(changed.iter().all(|changed| !changed), "{changed:?}");
+    assert_eq!(f.tracker.agent(), agent(Omp, Working));
+    // 读线程打开了：输出接着来就一直是工作中。
+    f.tracker.output_resumed(f.at(2000));
+    for ms in (2100..=3000).step_by(100) {
+        f.output(ms, "");
+        assert_eq!(f.poll(ms), agent(Omp, Working));
+    }
+    // 输出停了：过了 `BURST_GAP` 再确认几次就是空闲。
+    let stop = 3000 + BURST_GAP.as_millis() as u64 + 1;
+    assert_eq!(f.poll(stop), agent(Omp, Working));
+    f.poll(stop + 100);
+    f.poll(stop + 200);
+    assert_eq!(f.poll(stop + 300), agent(Omp, Idle));
+}
+
+/// 交接时丢了的信号认不出 agent 时按交接前的算；它的进程后来才认出来也不算刚启动；回到 shell
+/// 就不再算。
+#[test]
+fn a_resumed_agent_survives_lost_signals_until_the_shell_is_back() {
+    let mut f = Fixture::new();
+    f.screen = "Do you want to proceed?\n❯ 1. Yes\n  2. No\nEsc to cancel\n".into();
+    f.tracker.resume(agent(Claude, Blocked), f.at(0));
+    assert_eq!(f.poll(0), agent(Claude, Blocked));
+    f.tracker.foreground(Foreground::Program(Some(Claude)), f.at(10));
+    assert_eq!(f.poll(10), agent(Claude, Blocked));
+    assert_eq!(f.tracker.deadline(), None);
+    f.tracker.foreground(Foreground::Shell, f.at(20));
+    assert_eq!(f.poll(20), None);
+
+    // 换成了另一个 agent：不再沿用交接前的，新的照常从启动宽限期开始。
+    let mut f = Fixture::new();
+    f.tracker.resume(agent(Claude, Working), f.at(0));
+    f.tracker.foreground(Foreground::Program(Some(Codex)), f.at(10));
+    assert_eq!(f.poll(10), agent(Codex, Idle));
+    assert_eq!(f.tracker.deadline(), Some(f.at(10 + GRACE_MS)));
+}

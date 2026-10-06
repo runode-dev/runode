@@ -250,6 +250,16 @@ impl TerminalView {
         }
     }
 
+    /// 告诉宿主这个会话在这边是不是当前看着的（焦点进出这个终端，包括它的搜索栏）。获得焦点也算一次
+    /// 交互：几个前端看同一个会话时，宿主让最近交互的那个决定尺寸，见 `ScreenState::size_owner`。
+    /// 宿主里还没开会话时没什么可报的。
+    pub(super) fn report_focus(&self, focused: bool) {
+        let Some(id) = self.id else {
+            return;
+        };
+        session_host::link().send(ClientMsg::Focus { id, focused });
+    }
+
     /// 按已经设好的实际尺寸启动 shell。启动不了时宿主发 `HostMsg::Exited`，按 shell 已退出
     /// 处理，关掉这个终端。还没开会话（`deferred`）时什么都不做，开了以后照常启动。
     pub(super) fn start_now(&mut self, _cx: &mut Context<Self>) {
@@ -694,7 +704,11 @@ impl TerminalView {
         let focus_handle = cx.focus_handle();
         let pane_focus = cx.focus_handle();
         let focus_watch = [
-            cx.on_focus_in(&pane_focus, window, |_, _, cx| cx.emit(TerminalEvent::Focused)),
+            cx.on_focus_in(&pane_focus, window, |view, _, cx| {
+                view.report_focus(true);
+                cx.emit(TerminalEvent::Focused);
+            }),
+            cx.on_focus_out(&pane_focus, window, |view, _, _, _| view.report_focus(false)),
             cx.on_focus(&focus_handle, window, |view, window, cx| {
                 view.reset_cursor_blink(window, cx);
             }),
@@ -736,6 +750,7 @@ impl TerminalView {
             scroll_remainder: 0.,
             cursor_bounds: None,
             grid_origin: Point::default(),
+            crop: None,
             selecting: false,
             reporting_press: false,
             click_cell: None,

@@ -19,7 +19,7 @@
 use std::{
     collections::HashMap,
     fs::{File, OpenOptions},
-    io::{self, BufReader, BufWriter, Write as _},
+    io::{self, BufReader, BufWriter, Read as _, Write as _},
     net::Shutdown,
     os::unix::{
         fs::{OpenOptionsExt as _, PermissionsExt as _},
@@ -28,7 +28,7 @@ use std::{
     },
     path::{Path, PathBuf},
     sync::{
-        Arc,
+        Arc, Mutex, PoisonError,
         atomic::{AtomicUsize, Ordering},
         mpsc,
     },
@@ -38,14 +38,14 @@ use std::{
 
 use anyhow::{Context as _, Result, anyhow};
 use runode_protocol::{
-    AttachMode, ClientKind, ClientMsg, Frame, FrameError, FrameKind, GoodbyeReason, HostMsg, PROTOCOL_VERSION,
-    SessionId, SessionInfo, read_frame, write_frame,
+    AttachMode, ClientKind, ClientMsg, Frame, FrameError, FrameKind, GoodbyeReason, HANDOFF_FORMAT, HostMsg,
+    PROTOCOL_VERSION, SessionId, SessionInfo, read_frame, write_frame,
 };
 use runode_shared_types::{grid::GridSize, input::parse_keys, session::DriveAction};
 use runode_terminal::pty;
 
 use crate::{
-    Host, Shared, SpawnOptions, Stopped,
+    Host, Shared, SpawnOptions, Stopped, handoff,
     session::{Drive, Event, EventSink, Inbox, Screen, Subscribe},
 };
 
@@ -83,6 +83,9 @@ pub(crate) struct Peers {
     pub(crate) standalone: bool,
     /// 要退出了，为什么。
     pub(crate) stop: Option<Stopped>,
+    /// 正在把会话交给新宿主：那条连接的编号，见 `handoff::give`。这期间新来的连接收到
+    /// `Goodbye { Handoff }`，也不开新会话。
+    pub(crate) handoff: Option<u64>,
     /// 最近一次有连接连上或者断开的时刻，空闲从这时起算。
     pub(crate) activity_at: Instant,
 }
@@ -98,6 +101,7 @@ impl Default for Peers {
             listening: None,
             standalone: false,
             stop: None,
+            handoff: None,
             activity_at: Instant::now(),
         }
     }
@@ -106,6 +110,24 @@ impl Default for Peers {
 impl Peers {
     pub(crate) fn connection_count(&self) -> usize {
         self.connections.len()
+    }
+
+    /// 有桌面的界面连着。
+    pub(crate) fn has_desktop(&self) -> bool {
+        !self.desktops.is_empty()
+    }
+
+    /// 给 `except` 以外的连接都发 `Goodbye`，写完后断开。写线程还没起好的连接起好时自己发，见
+    /// `serve`。
+    pub(crate) fn say_goodbye(&self, except: Option<u64>, reason: &GoodbyeReason) {
+        for (&id, peer) in &self.connections {
+            if Some(id) != except
+                && let Some(out) = &peer.out
+            {
+                out.control(&HostMsg::Goodbye { reason: reason.clone() });
+                out.close();
+            }
+        }
     }
 }
 
@@ -127,7 +149,132 @@ struct Pending {
 /// `Host::listen` 开着的 socket。丢掉时放开锁，socket 文件由退出的一方删。
 pub(crate) struct Listening {
     pub(crate) socket: PathBuf,
-    _lock: File,
+    /// 监听的 socket，和接受连接的线程共用；交接时把它的描述符交给新宿主。
+    pub(crate) listener: Arc<UnixListener>,
+    /// 锁住了的锁文件，交接时连同描述符交给新宿主。
+    pub(crate) lock: File,
+    /// 让接受连接的线程停下、接着接或者结束。
+    pub(crate) control: Arc<ListenControl>,
+}
+
+/// 接受连接的线程该做什么，见 `ListenControl`。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ListenState {
+    Accepting,
+    /// 不接，来的连接排在 backlog 里：交接期间，连接留给接手的新宿主或者回滚后的自己。
+    Paused,
+    /// 结束线程，之后不再变。只关自己这份描述符，不 `shutdown` 监听的 socket：交接后新宿主
+    /// 用的是同一个打开的 socket。
+    Stopped,
+}
+
+/// 管接受连接的线程：线程 `poll` 监听的 socket 和一根唤醒管道，改状态时往管道里写一个字节
+/// 叫醒它。
+pub(crate) struct ListenControl {
+    /// 线程接连接时一直拿着它，所以 `pause`、`stop` 返回之后线程不会再接。
+    state: Mutex<ListenState>,
+    wake: io::PipeWriter,
+}
+
+impl ListenControl {
+    /// 不再接新连接，返回时已经不会再接，见 `ListenState::Paused`。
+    pub(crate) fn pause(&self) {
+        self.set(ListenState::Paused);
+    }
+
+    /// 接着接新连接，先接 backlog 里排着的。
+    pub(crate) fn resume(&self) {
+        self.set(ListenState::Accepting);
+    }
+
+    /// 结束接受连接的线程，见 `ListenState::Stopped`。
+    pub(crate) fn stop(&self) {
+        self.set(ListenState::Stopped);
+    }
+
+    fn set(&self, to: ListenState) {
+        {
+            let mut state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
+            if *state != ListenState::Stopped {
+                *state = to;
+            }
+        }
+        if let Err(err) = (&self.wake).write_all(&[1]) {
+            tracing::warn!("failed to wake the listener thread: {err}");
+        }
+    }
+}
+
+/// 接受连接的线程：按 `control` 的状态 `poll` 唤醒管道（停着时只等它）和监听的 socket，有连接
+/// 就接下来、登记、起线程服务。
+fn accept_loop(shared: &Arc<Shared>, listener: &UnixListener, control: &ListenControl, wake: &io::PipeReader) {
+    loop {
+        let state = *control.state.lock().unwrap_or_else(PoisonError::into_inner);
+        if state == ListenState::Stopped {
+            return;
+        }
+        let mut fds = [
+            libc::pollfd { fd: wake.as_raw_fd(), events: libc::POLLIN, revents: 0 },
+            libc::pollfd { fd: listener.as_raw_fd(), events: libc::POLLIN, revents: 0 },
+        ];
+        let count: libc::nfds_t = if state == ListenState::Accepting { 2 } else { 1 };
+        // SAFETY: `fds` 是本地数组，`count` 不超过它的长度；两个描述符在这次调用期间都开着。
+        if unsafe { libc::poll(fds.as_mut_ptr(), count, -1) } < 0 {
+            let err = io::Error::last_os_error();
+            if err.kind() != io::ErrorKind::Interrupted {
+                tracing::warn!("failed to wait for connections: {err}");
+                thread::sleep(ACCEPT_BACKOFF);
+            }
+            continue;
+        }
+        if fds[0].revents != 0 {
+            let mut drained = [0u8; 64];
+            let _ = (&*wake).read(&mut drained);
+        }
+        if count < 2 || fds[1].revents == 0 {
+            continue;
+        }
+        let (accepted, failed) = {
+            let state = control.state.lock().unwrap_or_else(PoisonError::into_inner);
+            if *state != ListenState::Accepting {
+                continue;
+            }
+            accept_ready(listener)
+        };
+        for stream in accepted {
+            // 判断还接不接和登记连接在同一把锁里，空闲退出时不会漏掉刚连上的。
+            let Some(id) = register(shared) else {
+                drop(stream);
+                continue;
+            };
+            start_serving(shared, id, stream, true);
+        }
+        if failed {
+            thread::sleep(ACCEPT_BACKOFF);
+        }
+    }
+}
+
+/// 把 backlog 里排着的连接都接下来；出错（比如文件描述符用完了）时停下，第二项为 true。
+fn accept_ready(listener: &UnixListener) -> (Vec<UnixStream>, bool) {
+    let mut accepted = Vec::new();
+    loop {
+        match listener.accept() {
+            Ok((stream, _)) => {
+                // macOS 上接到的连接沿用监听的 socket 的 `O_NONBLOCK`，连接一律按阻塞的读写。
+                match stream.set_nonblocking(false) {
+                    Ok(()) => accepted.push(stream),
+                    Err(err) => tracing::warn!("failed to set up a connection: {err}"),
+                }
+            }
+            Err(err) if err.kind() == io::ErrorKind::WouldBlock => return (accepted, false),
+            Err(err) if err.kind() == io::ErrorKind::Interrupted => {}
+            Err(err) => {
+                tracing::warn!("failed to accept a connection: {err}");
+                return (accepted, true);
+            }
+        }
+    }
 }
 
 impl Host {
@@ -147,32 +294,48 @@ impl Host {
         let listener =
             UnixListener::bind(socket).with_context(|| format!("failed to listen on {}", socket.display()))?;
         std::fs::set_permissions(socket, std::fs::Permissions::from_mode(0o600))?;
+        self.listen_on(listener, lock, socket)
+    }
+
+    /// 在已经开好的 `listener` 上接受别的进程来的前端，同 `Host::listen`。`lock` 是锁住了的锁文件
+    /// （`flock` 锁的是打开的文件，交接时连同描述符一起交过来的仍锁着），丢掉时放开；`socket` 是
+    /// `listener` 的路径，宿主退出时删掉它（交接给新宿主时不删）。已经在监听时返回错误。
+    pub fn listen_on(&self, listener: UnixListener, lock: File, socket: &Path) -> Result<()> {
+        self.start_listening(listener, lock, socket, false)?;
         // 之后开的 shell 里的命令行连这个 socket，开发版和装好的版本同时开着时也不会连错。
         self.set_env(runode_protocol::ENV_SOCKET, socket.as_os_str());
-        self.shared.peers().listening = Some(Listening { socket: socket.into(), _lock: lock });
+        Ok(())
+    }
+
+    /// `listen_on`，但不设 shell 的环境变量；`paused` 时接受连接的线程先停着（连接排在 backlog
+    /// 里），等 `ListenControl::resume`。
+    pub(crate) fn start_listening(
+        &self,
+        listener: UnixListener,
+        lock: File,
+        socket: &Path,
+        paused: bool,
+    ) -> Result<Arc<ListenControl>> {
+        if self.shared.peers().listening.is_some() {
+            return Err(anyhow!("the host is already listening"));
+        }
+        // 非阻塞：接受连接的线程先 `poll` 再接，`poll` 之后没接到（别的进程抢先接走了，或者交接
+        // 前后两个宿主共用这个打开的 socket）时回去接着等，不卡在 `accept` 里叫不停。
+        listener.set_nonblocking(true).context("failed to make the listener non-blocking")?;
+        let listener = Arc::new(listener);
+        let (wake_rx, wake_tx) = io::pipe().context("failed to create the listener's wake pipe")?;
+        let state = if paused { ListenState::Paused } else { ListenState::Accepting };
+        let control = Arc::new(ListenControl { state: Mutex::new(state), wake: wake_tx });
         let shared = self.shared.clone();
+        let thread_listener = listener.clone();
+        let thread_control = control.clone();
         thread::Builder::new()
             .name("host-listener".into())
-            .spawn(move || {
-                for stream in listener.incoming() {
-                    match stream {
-                        Ok(stream) => {
-                            // 判断还接不接和登记连接在同一把锁里，空闲退出时不会漏掉刚连上的。
-                            let Some(id) = register(&shared) else {
-                                drop(stream);
-                                continue;
-                            };
-                            start_serving(&shared, id, stream, true);
-                        }
-                        Err(err) => {
-                            tracing::warn!("failed to accept a connection: {err}");
-                            thread::sleep(ACCEPT_BACKOFF);
-                        }
-                    }
-                }
-            })
+            .spawn(move || accept_loop(&shared, &thread_listener, &thread_control, &wake_rx))
             .context("failed to start the listener thread")?;
-        Ok(())
+        self.shared.peers().listening =
+            Some(Listening { socket: socket.into(), listener, lock, control: control.clone() });
+        Ok(control)
     }
 
     /// 在同一个进程里连上宿主：开一对互相连着的 socket，宿主这边起和 socket 上一样的连接，返回
@@ -250,12 +413,7 @@ impl Shared {
         }
         peers.stop.get_or_insert(Stopped::Shutdown);
         peers.accepting = false;
-        for peer in peers.connections.values() {
-            if let Some(out) = &peer.out {
-                out.control(&HostMsg::Goodbye { reason: GoodbyeReason::Shutdown });
-                out.close();
-            }
-        }
+        peers.say_goodbye(None, &GoodbyeReason::Shutdown);
         drop(peers);
         self.peers_changed.notify_all();
         true
@@ -389,9 +547,16 @@ fn serve(shared: &Arc<Shared>, id: u64, stream: UnixStream, check_peer: bool) {
     };
     {
         let mut peers = shared.peers();
-        // 登记之后、写线程起好之前宿主要退出了：这条连接也收 `Goodbye`。
-        if peers.stop == Some(Stopped::Shutdown) {
-            out.control(&HostMsg::Goodbye { reason: GoodbyeReason::Shutdown });
+        // 登记之后、写线程起好之前宿主要退出了，或者开始把会话交给新宿主了：这条连接也收
+        // `Goodbye`。
+        let reason = match peers.stop {
+            Some(Stopped::Shutdown) => Some(GoodbyeReason::Shutdown),
+            Some(Stopped::Handoff) => Some(GoodbyeReason::Handoff),
+            _ if peers.handoff.is_some() => Some(GoodbyeReason::Handoff),
+            _ => None,
+        };
+        if let Some(reason) = reason {
+            out.control(&HostMsg::Goodbye { reason });
             out.close();
         }
         if let Some(peer) = peers.connections.get_mut(&id) {
@@ -404,6 +569,7 @@ fn serve(shared: &Arc<Shared>, id: u64, stream: UnixStream, check_peer: bool) {
         out,
         kind: ClientKind::Unknown,
         by: None,
+        device: None,
         snapshots: false,
         channels: HashMap::new(),
         next_channel: 1,
@@ -441,7 +607,7 @@ fn start_writer(stream: &UnixStream) -> Option<Outbox> {
 
 /// 一条连接上等着写出去的帧。可以随意克隆，各份往同一个写的线程送。
 #[derive(Clone)]
-struct Outbox {
+pub(crate) struct Outbox {
     tx: mpsc::Sender<Out>,
     /// 已经交给写的线程、还没写出去的载荷字节数。
     queued: Arc<AtomicUsize>,
@@ -455,6 +621,9 @@ enum Out {
     },
     /// 之前的帧写完后断开连接。
     Close,
+    /// 之前的帧写完后写的线程结束，但不断开连接，写完时往里发一声：交接时之后由交出会话的线程
+    /// 直接在 socket 上发描述符消息，见 `handoff::give`。
+    Detach(mpsc::Sender<()>),
 }
 
 impl Outbox {
@@ -464,7 +633,7 @@ impl Outbox {
         self.tx.send(Out::Frame { kind, channel, payload }).is_ok()
     }
 
-    fn control(&self, message: &HostMsg) -> bool {
+    pub(crate) fn control(&self, message: &HostMsg) -> bool {
         match Frame::control(message) {
             Ok(frame) => self.push(FrameKind::Control, 0, frame.payload.into()),
             Err(err) => {
@@ -475,8 +644,16 @@ impl Outbox {
     }
 
     /// 已经交给写线程的帧写完后断开连接，之后交的不再写。
-    fn close(&self) {
+    pub(crate) fn close(&self) {
         let _ = self.tx.send(Out::Close);
+    }
+
+    /// 已经交给写线程的帧写完后写线程结束，连接留着，之后交的不再写；返回的一端在写完时收到
+    /// 一声，写不出去（对面断了）时断开。
+    pub(crate) fn detach(&self) -> mpsc::Receiver<()> {
+        let (done, finished) = mpsc::channel();
+        let _ = self.tx.send(Out::Detach(done));
+        finished
     }
 
     fn backed_up(&self) -> bool {
@@ -485,10 +662,10 @@ impl Outbox {
 }
 
 /// 写的线程：有帧就写，一批写完再刷出去。写不出去（对面断了）或者要断开时关掉连接，读的那边
-/// 也随之结束。
+/// 也随之结束；`Out::Detach` 时写完就结束，不断开。
 fn write_out(stream: UnixStream, frames: &mpsc::Receiver<Out>, queued: &AtomicUsize) {
     let mut writer = BufWriter::with_capacity(WRITE_BUFFER, &stream);
-    let mut write_all = || -> Result<(), FrameError> {
+    let mut write_all = || -> Result<Option<mpsc::Sender<()>>, FrameError> {
         while let Ok(first) = frames.recv() {
             let mut next = Some(first);
             while let Some(out) = next {
@@ -499,17 +676,26 @@ fn write_out(stream: UnixStream, frames: &mpsc::Receiver<Out>, queued: &AtomicUs
                     }
                     Out::Close => {
                         writer.flush()?;
-                        return Ok(());
+                        return Ok(None);
+                    }
+                    Out::Detach(done) => {
+                        writer.flush()?;
+                        return Ok(Some(done));
                     }
                 }
                 next = frames.try_recv().ok();
             }
             writer.flush()?;
         }
-        Ok(())
+        Ok(None)
     };
-    if let Err(err) = write_all() {
-        tracing::debug!("connection closed while writing: {err}");
+    match write_all() {
+        Ok(Some(done)) => {
+            let _ = done.send(());
+            return;
+        }
+        Ok(None) => {}
+        Err(err) => tracing::debug!("connection closed while writing: {err}"),
     }
     let _ = stream.shutdown(Shutdown::Both);
 }
@@ -524,6 +710,8 @@ struct Connection {
     kind: ClientKind,
     /// `Hello` 里说的前端所在的会话，记谁在操作会话时用，见 `drive`。
     by: Option<SessionId>,
+    /// `Hello` 里报的设备名，尺寸归这条连接时告诉别的前端，见 `HostMsg::SizeOwner`。
+    device: Option<String>,
     /// 前端解得了快照：自己说能解，构建也和宿主一样。
     snapshots: bool,
     /// 连着的会话，按通道。
@@ -543,10 +731,18 @@ impl Connection {
                 return;
             }
         };
-        let Some(ClientMsg::Hello { protocol, build, caps, client, session }) = hello else {
+        let Some(ClientMsg::Hello { protocol, build, caps, client, session, device }) = hello else {
             self.goodbye("the first message must be hello");
             return;
         };
+        // 接手的新宿主不比对协议版本，永远如此，见 `runode_protocol::message` 的模块文档。
+        if client == ClientKind::Successor {
+            self.kind = client;
+            let standalone = self.shared.peers().standalone;
+            self.out.control(&self.welcome(standalone));
+            self.successor(reader, build);
+            return;
+        }
         if protocol != PROTOCOL_VERSION {
             self.out.control(&HostMsg::Incompatible {
                 protocol: PROTOCOL_VERSION,
@@ -557,6 +753,7 @@ impl Connection {
         }
         self.kind = client;
         self.by = session;
+        self.device = device;
         self.snapshots = caps.snapshot && build == self.shared.build;
         // 登记界面和回 `Welcome` 在同一把锁里做：界面收到 `Welcome` 后，别的连接转来的请求一定
         // 交给它；别的连接也只有在 `Welcome` 排进 `Outbox` 之后才看得到它，请求不会抢在前面。
@@ -564,13 +761,7 @@ impl Connection {
         if client == ClientKind::Desktop {
             peers.desktops.push(self.id);
         }
-        self.out.control(&HostMsg::Welcome {
-            protocol: PROTOCOL_VERSION,
-            build: self.shared.build.clone(),
-            host_pid: std::process::id(),
-            snapshot_format: self.shared.snapshot_format,
-            standalone: peers.standalone,
-        });
+        self.out.control(&self.welcome(peers.standalone));
         drop(peers);
         loop {
             let frame = match read_frame(reader) {
@@ -590,7 +781,8 @@ impl Connection {
                     // 会话已经没了（比如别的前端结束了它）：通道跟着作废。
                     Some(&id) => {
                         self.drive(id, DriveAction::Input);
-                        if !self.shared.deliver(id, Inbox::Input(frame.payload)) {
+                        let input = Inbox::Input { connection: self.id, data: frame.payload };
+                        if !self.shared.deliver(id, input) {
                             self.channels.remove(&frame.channel);
                         }
                     }
@@ -601,6 +793,37 @@ impl Connection {
                     return;
                 }
             }
+        }
+    }
+
+    fn welcome(&self, standalone: bool) -> HostMsg {
+        HostMsg::Welcome {
+            protocol: PROTOCOL_VERSION,
+            build: self.shared.build.clone(),
+            host_pid: std::process::id(),
+            snapshot_format: self.shared.snapshot_format,
+            standalone,
+            handoff: HANDOFF_FORMAT,
+        }
+    }
+
+    /// 接手的新宿主（构建是 `build`）连上来：只认 `ClientMsg::Handoff`，交给 `handoff::give`，之后
+    /// 这条连接归它。
+    fn successor(&self, reader: &mut BufReader<&UnixStream>, build: runode_protocol::BuildId) {
+        let message = match read_frame(reader) {
+            Ok(Some(frame)) if frame.kind == FrameKind::Control => frame.message::<ClientMsg>().ok(),
+            Ok(_) => None,
+            Err(err) => {
+                tracing::debug!("the successor went away before asking for the handoff: {err}");
+                return;
+            }
+        };
+        match message {
+            Some(ClientMsg::Handoff { min_format, max_format }) => {
+                let asked = handoff::Asked { formats: min_format..=max_format, build };
+                handoff::give(&self.shared, self.id, &self.out, reader, &asked);
+            }
+            _ => self.goodbye("a successor must ask for the handoff"),
         }
     }
 
@@ -643,7 +866,7 @@ impl Connection {
                 self.forget(id);
                 self.shared.kill(id);
             }
-            ClientMsg::Resize { id, size } => self.shared.send(id, Inbox::Resize(size)),
+            ClientMsg::Resize { id, size } => self.shared.send(id, Inbox::Resize { connection: self.id, size }),
             ClientMsg::ClearScreen { id } => {
                 self.drive(id, DriveAction::ClearScreen);
                 self.shared.send(id, Inbox::ClearScreen);
@@ -657,8 +880,10 @@ impl Connection {
                     self.error(None, None, "only the runode app changes the host's options".into());
                 }
             }
-            // 通知在界面那边发，宿主不用知道哪个会话被看着。
-            ClientMsg::Focus { .. } => {}
+            // 获得焦点算一次交互，可能轮到这条连接决定尺寸；失去焦点只是不在看了，不让出。通知在
+            // 界面那边发，宿主不用知道哪个会话被看着。
+            ClientMsg::Focus { id, focused: true } => self.shared.send(id, Inbox::Focus { connection: self.id }),
+            ClientMsg::Focus { focused: false, .. } => {}
             ClientMsg::ReadScreen { id, lines, command } => self.read_screen(id, lines, command),
             ClientMsg::SendKeys { req, id, keys } => {
                 let parsed: Result<Vec<_>, _> = keys.iter().map(|key| parse_keys(key)).collect();
@@ -677,8 +902,15 @@ impl Connection {
                 self.shared.kill_all();
                 self.shared.shut_down();
             }
-            ClientMsg::Shutdown { kill_sessions: false } | ClientMsg::Handoff => {
+            ClientMsg::Shutdown { kill_sessions: false } => {
                 self.error(None, None, "the host cannot hand its sessions over yet".into());
+            }
+            // 交接只在 `Hello` 里说自己是 `ClientKind::Successor` 的连接上谈，见 `successor`。
+            ClientMsg::Handoff { .. }
+            | ClientMsg::HandoffReady
+            | ClientMsg::HandoffAbort { .. }
+            | ClientMsg::HandoffDone => {
+                self.error(None, None, "only a successor host can take the sessions over".into());
             }
             ClientMsg::Unknown => self.error(None, None, "unknown message".into()),
         }
@@ -736,13 +968,12 @@ impl Connection {
         }
     }
 
-    /// 连上会话。已经连着的先断开再重新连，前端收到 `Resync` 后就是这样重新连上的；
-    /// `MetaOnly` 和看屏幕之间来回切换也是这样。`Detach` 和之后的 `Subscribe` 按先后送到会话
-    /// 线程，旧通道的帧都在新的 `Attached` 之前，新通道的帧都在它之后。
+    /// 连上会话。已经连着的换一个新通道重新连，前端收到 `Resync` 后就是这样重新连上的；
+    /// `MetaOnly` 和看屏幕之间来回切换也是这样。不先发 `Detach`：会话线程收到同一条连接的
+    /// `Subscribe` 时换掉旧的订阅，尺寸归属的状态（见 `Runner::subscribe`）留着；旧通道的帧都在
+    /// 新的 `Attached` 之前，新通道的帧都在它之后。
     fn attach(&mut self, id: SessionId, size: Option<GridSize>, mode: AttachMode) {
-        if self.forget(id) {
-            self.shared.send(id, Inbox::Detach { connection: self.id });
-        }
+        self.forget(id);
         let mode = match mode {
             AttachMode::Snapshot if !self.snapshots => AttachMode::VtReplay,
             mode => mode,
@@ -772,7 +1003,8 @@ impl Connection {
             Some(session_sink(id, channel, meta_only, out))
         });
         let desktop = self.kind == ClientKind::Desktop;
-        let subscribe = Subscribe { connection: self.id, size, mode, start, desktop };
+        let device = self.device.clone();
+        let subscribe = Subscribe { connection: self.id, size, mode, start, desktop, device };
         if self.shared.deliver(id, Inbox::Subscribe(subscribe)) {
             self.channels.insert(channel, id);
         } else {
@@ -934,6 +1166,7 @@ mod tests {
                 client,
                 caps: Caps::default(),
                 session: None,
+                device: None,
             },
         );
         assert!(matches!(message(&frames), HostMsg::Welcome { .. }));
@@ -951,7 +1184,8 @@ mod tests {
             let _ = released.recv();
             None
         });
-        let subscribe = Subscribe { connection: 0, size: None, mode: AttachMode::MetaOnly, start, desktop: false };
+        let subscribe =
+            Subscribe { connection: 0, size: None, mode: AttachMode::MetaOnly, start, desktop: false, device: None };
         assert!(host.shared.deliver(stuck, Inbox::Subscribe(subscribe)));
         stuck_now.recv_timeout(WAIT).unwrap();
         (stuck, release)
@@ -1067,12 +1301,13 @@ mod tests {
             });
             Some(sink)
         });
-        let subscribe = Subscribe { connection: 0, size: None, mode: AttachMode::VtReplay, start, desktop: false };
+        let subscribe =
+            Subscribe { connection: 0, size: None, mode: AttachMode::VtReplay, start, desktop: false, device: None };
         assert!(host.shared.deliver(id, Inbox::Subscribe(subscribe)));
-        assert!(host.shared.deliver(id, Inbox::Input(b"boom\r".to_vec())));
+        assert!(host.shared.deliver(id, Inbox::Input { connection: 0, data: b"boom\r".to_vec() }));
         let next = || loop {
             match rx.recv_timeout(WAIT).expect("timed out") {
-                HostMsg::Meta { .. } | HostMsg::Resized { .. } => {}
+                HostMsg::Meta { .. } | HostMsg::Resized { .. } | HostMsg::SizeOwner { .. } => {}
                 message => return message,
             }
         };

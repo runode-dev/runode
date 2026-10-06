@@ -13,6 +13,13 @@
 //! master 设成非阻塞的，读写线程都先 `poll` 再读写：读线程要能被叫停，写线程卡住时要能把没写出
 //! 的输入交出来。非阻塞记在打开的文件上，交出去的描述符也是非阻塞的，接手方用的同样是这里的
 //! 读写线程。
+//!
+//! 交接分两步走，交出方提交之前接手方不能碰 PTY：`Pty::adopt_paused` 把读写线程先起好、停在
+//! 闸门（`Gate`）上，一个字节都不读不写；`Pty::resume_reading` 打开闸门，不接手了就
+//! `Pty::release` 原样交回去。线程事先起好，开闸这一步不会失败。从没开过闸的 `Pty` 直接丢掉
+//! （比如接手方的会话线程 panic 了）也不碰 shell：只放读写线程过去、等它们结束，关掉自己的
+//! 描述符，不发信号：那时 shell 还归交出方管，它回滚后照常用。开过闸以后丢掉照常结束 shell，
+//! 见 `Drop`。
 
 mod notify;
 mod reader;
@@ -24,7 +31,7 @@ use std::{
     os::fd::{AsFd, AsRawFd, BorrowedFd, OwnedFd},
     path::{Path, PathBuf},
     sync::{
-        Arc, Mutex,
+        Arc, Condvar, Mutex, PoisonError,
         atomic::{AtomicBool, Ordering},
         mpsc,
     },
@@ -69,6 +76,42 @@ enum WriterMsg {
 #[derive(Clone)]
 pub struct PtyWriter(mpsc::Sender<WriterMsg>);
 
+/// 闸门的状态，见 `Gate`。
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum GateState {
+    Closed,
+    Open,
+    /// 不接手了：读线程不读就交回 `PtySink`，写线程一个字节都不写，排着的输入原样交回去。
+    Abandoned,
+}
+
+/// `Pty::adopt_paused` 接手来的 PTY 上，读写线程起好后先等着的闸门：交出方提交之前，接手方
+/// 不能从 PTY 读走输出，也不能往里写输入。只开（或放弃）一次。
+struct Gate {
+    state: Mutex<GateState>,
+    changed: Condvar,
+}
+
+impl Gate {
+    fn closed() -> Arc<Self> {
+        Arc::new(Self { state: Mutex::new(GateState::Closed), changed: Condvar::new() })
+    }
+
+    /// 等闸门打开，返回 true；放弃了（`GateState::Abandoned`）时返回 false。
+    fn wait(&self) -> bool {
+        let mut state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
+        while *state == GateState::Closed {
+            state = self.changed.wait(state).unwrap_or_else(PoisonError::into_inner);
+        }
+        *state == GateState::Open
+    }
+
+    fn set(&self, to: GateState) {
+        *self.state.lock().unwrap_or_else(PoisonError::into_inner) = to;
+        self.changed.notify_all();
+    }
+}
+
 /// 写线程，交接时要叫停它、等它结束。
 struct WriterThread {
     /// 置上后写线程写不进去时不再等，把没写出的交回来。
@@ -100,15 +143,24 @@ impl PtyWriter {
     }
 
     /// 起写线程，把排进队列的数据按顺序写进 `master`。所有发送端都没了、写出错或者收到
-    /// `WriterMsg::Finish` 时结束。
-    fn start(master: Arc<OwnedFd>) -> Result<(Self, WriterThread)> {
+    /// `WriterMsg::Finish` 时结束。给了 `gate` 时先等它打开再写，放弃了就一个字节都不写，排着的
+    /// 输入等 `WriterMsg::Finish` 原样交回去。
+    fn start(master: Arc<OwnedFd>, gate: Option<Arc<Gate>>) -> Result<(Self, WriterThread)> {
         let (tx, rx) = mpsc::channel::<WriterMsg>();
         let stop = Arc::new(AtomicBool::new(false));
         let handle = thread::Builder::new()
             .name("pty-writer".into())
             .spawn({
                 let stop = stop.clone();
-                move || write_loop(&master, &rx, &stop)
+                move || {
+                    if let Some(gate) = gate
+                        && !gate.wait()
+                    {
+                        hand_back(&rx, Vec::new());
+                        return;
+                    }
+                    write_loop(&master, &rx, &stop);
+                }
             })
             .context("failed to start pty writer thread")?;
         Ok((Self(tx), WriterThread { stop, handle }))
@@ -153,7 +205,8 @@ fn write_loop(master: &OwnedFd, rx: &mpsc::Receiver<WriterMsg>, stop: &AtomicBoo
     }
 }
 
-/// 把 `pending` 和队列里排在 `Finish` 前面的输入一起交回去。
+/// 把 `pending` 和队列里排在 `Finish` 前面的输入一起交回去。发送端都没了也没等到 `Finish` 时
+/// 丢掉。
 fn hand_back(rx: &mpsc::Receiver<WriterMsg>, mut pending: Vec<u8>) {
     for message in rx {
         match message {
@@ -284,6 +337,9 @@ pub struct Pty {
     /// PTY master 的描述符，和读线程、写线程共用；交出去以后为 `None`，改尺寸、读前台进程都不再
     /// 碰 PTY。
     master: Option<Arc<OwnedFd>>,
+    /// `adopt_paused` 接手来、还没 `resume_reading` 时读写线程等着的闸门，开了或者放弃了以后为
+    /// `None`。丢掉时它还在就说明从没开过闸，不结束 shell，见 `Drop`。
+    gate: Option<Arc<Gate>>,
     /// 叫醒读线程；接手来的会话里还看着 shell 退出。
     notifier: Arc<Notifier>,
     /// 还没启动 shell 时的从设备和读线程要交给的 `PtySink`，`start` 时交出去。
@@ -398,9 +454,10 @@ impl Pty {
         set_nonblocking(master.as_fd()).context("failed to make the pty master non-blocking")?;
         let notifier = Arc::new(Notifier::new(None).context("failed to create the pty reader's notifier")?);
         let master = Arc::new(master);
-        let (writer, writer_thread) = PtyWriter::start(master.clone())?;
+        let (writer, writer_thread) = PtyWriter::start(master.clone(), None)?;
         Ok(Self {
             master: Some(master),
+            gate: None,
             notifier,
             pending: Some((pair.slave, sink)),
             shell: None,
@@ -423,6 +480,27 @@ impl Pty {
     /// 读到 EOF（比如后台程序还开着终端），读完剩下的输出也报告 `PtyEvent::Exited`。丢掉返回的
     /// `Pty` 会结束 shell 的进程组，见 `Drop`。失败时交来的东西原样放在 `AdoptError` 里还回去。
     pub fn adopt(handoff: PtyHandoff, sink: PtySink) -> Result<Self, AdoptError> {
+        Self::adopt_with(handoff, sink, None)
+    }
+
+    /// 同 `adopt`，但读写线程起好后先停在闸门上：不从 PTY 读，`handoff.pending_input` 和之后经
+    /// `writer` 写的都排着不写，直到 `resume_reading` 打开闸门，排着的按先后写出去（交出时没写
+    /// 出去的在最前面）。交出方还没提交、可能回滚时用它：在这之前 PTY 原封未动。
+    ///
+    /// 停着时改尺寸、读前台进程照常（它们不读写 PTY）；不接手了用 `release` 原样交回去，
+    /// `pending_input` 和排着的输入都在交回的 `PtyHandoff::pending_input` 里。
+    ///
+    /// 还没 `resume_reading` 就丢掉（包括持有它的线程 panic、栈展开时丢掉）不结束 shell：交出方
+    /// 还没提交，shell 仍归它管，丢掉只是放弃接手。读写线程放过去并等它们结束，排着的输入丢掉，
+    /// 关掉这边的 master 和 `Notifier`，不给 shell 和前台进程组发任何信号。这时交出方要是也已经
+    /// 关了它那份 master，这里关的就是最后一份，shell 照终端的规矩收到内核发的 SIGHUP。开过闸
+    /// 以后丢掉和 `adopt` 的一样结束 shell。
+    pub fn adopt_paused(handoff: PtyHandoff, sink: PtySink) -> Result<Self, AdoptError> {
+        Self::adopt_with(handoff, sink, Some(Gate::closed()))
+    }
+
+    /// `adopt` 和 `adopt_paused`：给了 `gate` 时读写线程先等它。
+    fn adopt_with(handoff: PtyHandoff, sink: PtySink, gate: Option<Arc<Gate>>) -> Result<Self, AdoptError> {
         let Some(pid) = libc::pid_t::try_from(handoff.pid).ok().filter(|&pid| pid > 0) else {
             let error = anyhow!("invalid shell pid {}", handoff.pid);
             return Err(AdoptError { handoff, error });
@@ -445,14 +523,17 @@ impl Pty {
             let master = Arc::into_inner(master).expect("the threads holding the master have ended");
             AdoptError { handoff: PtyHandoff { master, pid: raw_pid, size, report_token, pending_input }, error }
         };
-        let (writer, writer_thread) = match PtyWriter::start(master.clone()) {
+        let (writer, writer_thread) = match PtyWriter::start(master.clone(), gate.clone()) {
             Ok(started) => started,
             Err(error) => return Err(give_back(master, report_token, pending_input, error)),
         };
-        let reader = match Reader::start(master.clone(), notifier.clone(), sink) {
+        let reader = match Reader::start(master.clone(), notifier.clone(), sink, gate.clone()) {
             Ok(reader) => reader,
             Err(error) => {
-                // 写线程收不到东西了就结束，等它放开 master。
+                // 写线程收不到东西了就结束，等它放开 master；停在闸门上的先放它过去。
+                if let Some(gate) = &gate {
+                    gate.set(GateState::Abandoned);
+                }
                 drop(writer);
                 if writer_thread.handle.join().is_err() {
                     tracing::warn!("the pty writer thread panicked");
@@ -463,6 +544,7 @@ impl Pty {
         writer.send(pending_input);
         Ok(Self {
             master: Some(master),
+            gate,
             notifier,
             pending: None,
             shell: Some(Shell::Adopted(pid)),
@@ -488,7 +570,12 @@ impl Pty {
 
     /// `stop_reading` 之后接着读，输出还交给原来的 `PtySink`。读线程还没停下时撤回叫停，已经
     /// 停下时重新起读线程。没有叫停过、或者已经读到 EOF 时什么都不做。
+    ///
+    /// `adopt_paused` 接手来的在这里打开闸门：读线程开始读，排着的输入开始写。这一步不会失败。
     pub fn resume_reading(&mut self) -> Result<()> {
+        if let Some(gate) = self.gate.take() {
+            gate.set(GateState::Open);
+        }
         match &mut self.reader {
             Some(reader) if self.master.is_some() => reader.resume(),
             _ => Ok(()),
@@ -521,6 +608,10 @@ impl Pty {
         let pid = self.shell_pid().context("the shell's pid is unknown")?;
         let pid = u32::try_from(pid).context("invalid shell pid")?;
         // 上面是会失败的检查，失败时什么都没动；下面不再失败，只剩取回 master 那一步理论上的退路。
+        // `adopt_paused` 接手来、还停着的：读写线程不读不写就结束，排着的输入原样交回来。
+        if let Some(gate) = self.gate.take() {
+            gate.set(GateState::Abandoned);
+        }
         if let Some(reader) = &mut self.reader {
             reader.stop();
             reader.join();
@@ -537,6 +628,23 @@ impl Pty {
         let master = self.master.take().context("the pty has already been handed off")?;
         let master = take_master(master).context("failed to take back the pty master")?;
         Ok(PtyHandoff { master, pid, size: self.size.get(), report_token: self.report_token.clone(), pending_input })
+    }
+
+    /// 丢掉还停在闸门上、从没开过闸的 `Pty`：放读写线程过去并等它们结束（它们都还停在闸门上，
+    /// 放过去就结束，不会卡住），排着的输入丢掉；shell 不碰，见 `adopt_paused`。读写线程手里的
+    /// master 和 `Notifier` 随它们结束放开，这个 `Pty` 自己的那份随后在字段丢掉时关掉。
+    fn drop_paused(&mut self, gate: &Gate) {
+        gate.set(GateState::Abandoned);
+        if let Some(reader) = &mut self.reader {
+            // 交回来的 `PtySink` 不要了。
+            drop(reader.join());
+        }
+        if let Some(thread) = self.writer_thread.take() {
+            // 停在闸门上的写线程放过去后收到 `WriterMsg::Finish` 就交回排着的输入结束，不管
+            // 别处还有没有 `PtyWriter` 的克隆。
+            drop(self.writer.finish(thread));
+        }
+        self.shell = None;
     }
 
     /// 已经启动了 shell。
@@ -593,8 +701,18 @@ impl Pty {
         // 子进程持有自己的 slave 副本；我们这份必须关掉，子进程退出时才会读到 EOF。
         drop(slave);
 
-        self.reader = Some(Reader::start(master, self.notifier.clone(), sink)?);
+        self.reader = Some(Reader::start(master, self.notifier.clone(), sink, None)?);
         Ok(())
+    }
+
+    /// 复制一份 PTY master 的描述符（带 `FD_CLOEXEC`，和这份共用同一个打开的文件，也是非阻塞
+    /// 的）。交接时交出方先把复制的一份传过去，自己这份照常用，提交时才 `release`；交出去以后
+    /// 出错。
+    pub fn dup_master(&self) -> std::io::Result<OwnedFd> {
+        match &self.master {
+            Some(master) => master.try_clone(),
+            None => Err(std::io::Error::other("the pty has been handed off")),
+        }
     }
 
     /// 改 PTY 的尺寸；交出去以后什么都不做。
@@ -638,7 +756,7 @@ impl Pty {
     }
 
     /// shell 的进程号；还没启动或者交出去以后为 `None`。
-    fn shell_pid(&self) -> Option<libc::pid_t> {
+    pub(crate) fn shell_pid(&self) -> Option<libc::pid_t> {
         match self.shell.as_ref()? {
             Shell::Child(child) => libc::pid_t::try_from(child.process_id()?).ok(),
             Shell::Adopted(pid) => Some(*pid),
@@ -785,6 +903,12 @@ fn process_cwd(_pid: libc::pid_t) -> Option<PathBuf> {
 
 impl Drop for Pty {
     fn drop(&mut self) {
+        // `adopt_paused` 接手来、从没开过闸：交出方还没提交，shell 归它管，这里只关自己的描述符，
+        // 不结束 shell。读写线程还停在闸门上，不放过去的话它们一直等着、master 也一直关不掉。
+        if let Some(gate) = self.gate.take() {
+            self.drop_paused(&gate);
+            return;
+        }
         match self.shell.take() {
             // 关窗口即结束会话；master 关闭后 shell 本来也会收到 SIGHUP，kill() 只是让它立即退出。
             // 子进程退出后还得 wait 才会被系统回收，否则每关一个标签就留一个僵尸进程；
@@ -841,6 +965,40 @@ mod tests {
         assert!(raised >= before.rlim_cur);
         assert!(raised <= before.rlim_max);
         assert_eq!(raise_fd_limit().unwrap(), raised);
+    }
+
+    fn alive(pid: libc::pid_t) -> bool {
+        // SAFETY: 信号 0 不发信号，只检查进程在不在。
+        unsafe { libc::kill(pid, 0) == 0 }
+    }
+
+    /// 从没开过闸的 `Pty` 丢掉时读写线程都已结束、放开了 master 和 `Notifier`（丢完就没有别的
+    /// 引用，描述符随之关掉），shell 不受影响。
+    #[test]
+    fn dropping_a_paused_pty_closes_its_descriptors_and_spares_the_shell() {
+        let size = GridSize { cols: 20, rows: 4, cell_width_px: 8, cell_height_px: 16 };
+        let old = Pty::spawn(size, Some("/bin/sh"), None, IntegrationMode::Off, Box::new(|_| true)).unwrap();
+        let pid = old.shell_pid().unwrap();
+        let handoff = PtyHandoff {
+            master: old.dup_master().unwrap(),
+            pid: u32::try_from(pid).unwrap(),
+            size,
+            report_token: None,
+            pending_input: b"exit\n".to_vec(),
+        };
+        let paused = Pty::adopt_paused(handoff, Box::new(|_| true)).unwrap();
+        // 别处还留着一个 `PtyWriter` 的克隆，写线程照样结束。
+        let writer = paused.writer.clone();
+        let master = Arc::downgrade(paused.master.as_ref().unwrap());
+        let notifier = Arc::downgrade(&paused.notifier);
+        drop(paused);
+        assert!(master.upgrade().is_none(), "the paused pty's master must be closed");
+        assert!(notifier.upgrade().is_none(), "the paused pty's notifier must be closed");
+        writer.write(b"exit\n");
+        // 结束接手来的 shell 时等 SIGHUP 的时限过了也还活着。
+        thread::sleep(Duration::from_millis(500));
+        assert!(alive(pid), "dropping a paused pty must not end the shell");
+        drop(old);
     }
 
     /// `PtyHandoff` 的 `Debug` 不打出口令。

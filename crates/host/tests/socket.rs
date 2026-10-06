@@ -29,6 +29,7 @@ fn a_different_protocol_is_refused() {
         client: ClientKind::Cli,
         caps: Caps::default(),
         session: None,
+        device: None,
     });
     assert!(matches!(peer.message(), HostMsg::Incompatible { protocol: PROTOCOL_VERSION, .. }));
     assert!(peer.frames.recv_timeout(WAIT).is_err(), "the host should close the connection");
@@ -231,7 +232,7 @@ fn shutting_down_inside_the_app_only_ends_sessions() {
     let mut peer = Peer::hello(&socket, false);
     let id = peer.spawn("/bin/cat");
     peer.attach(id, AttachMode::MetaOnly);
-    for message in [ClientMsg::Shutdown { kill_sessions: false }, ClientMsg::Handoff] {
+    for message in [ClientMsg::Shutdown { kill_sessions: false }, ClientMsg::Handoff { min_format: 1, max_format: 1 }] {
         peer.send(&message);
         assert!(matches!(peer.reply(), HostMsg::Error { .. }), "{message:?}");
     }
@@ -683,6 +684,7 @@ fn welcome_tells_whether_the_host_runs_on_its_own() {
             client: ClientKind::Cli,
             caps: Caps::default(),
             session: None,
+            device: None,
         });
         match peer.message() {
             HostMsg::Welcome { standalone, .. } => (peer, standalone),

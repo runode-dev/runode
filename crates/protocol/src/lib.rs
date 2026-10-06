@@ -7,14 +7,19 @@
 //! 这里只放数据和编解码，只依赖 `runode_shared_types` 和 serde；终端仿真和 PTY 都不碰。
 
 pub mod frame;
+pub mod handoff;
 pub mod layout;
 pub mod message;
 
 pub use frame::{Frame, FrameError, FrameKind, MAX_PAYLOAD, read_frame, write_frame};
+pub use handoff::{
+    HANDOFF_FORMAT, HandoffPart, HandoffPartError, OLDEST_READABLE_HANDOFF_FORMAT, RedactorState, ReportToken,
+    RunningCommand, decode_part, encode_part,
+};
 pub use layout::{PaneLayout, PaneRect, TabLayout, WindowLayout, WorkspaceLayout};
 pub use message::{
-    AttachMode, BuildId, Caps, ClientKind, ClientMsg, FinishedCommand, GoodbyeReason, HostMsg, Placement, SessionId,
-    SessionInfo,
+    AttachMode, BuildId, Caps, ClientKind, ClientMsg, FinishedCommand, GoodbyeReason, HandoffRefusal, HostMsg,
+    Placement, SessionId, SessionInfo,
 };
 
 /// 宿主给每个会话的 shell 设的环境变量：这个会话的 `SessionId`。在终端里跑的命令行据此知道
@@ -26,4 +31,6 @@ pub const ENV_SESSION: &str = "RUNODE_SESSION";
 pub const ENV_SOCKET: &str = "RUNODE_SOCKET";
 
 /// 协议的版本。消息的含义或帧格式变了、旧的一方读不懂时加一；只是加了可以缺省的字段不用加。
-pub const PROTOCOL_VERSION: u32 = 3;
+/// 第 4 版加了升级时的交接（`ClientKind::Successor`、`ClientMsg::Handoff` 等）和尺寸归属
+/// （`HostMsg::SizeOwner`）。有些东西加版本号也不能改，见 `message` 的模块文档。
+pub const PROTOCOL_VERSION: u32 = 4;

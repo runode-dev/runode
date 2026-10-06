@@ -50,9 +50,39 @@ pub struct ReportRedactor {
     inside: bool,
 }
 
+/// `ReportRedactor` 停在输出流的哪里，宿主升级时随会话交给新宿主，见 `ReportRedactor::state`。
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct RedactorState {
+    /// 已经对上了报告开头 `ESC ] 6973;` 的几个字节，0 到 6；`inside` 时为 0。
+    pub matched: u8,
+    /// 正在一条报告里面：开头已经过去了，结束序列还没到。
+    pub inside: bool,
+}
+
+impl RedactorState {
+    /// 从 VT 重放（不带没写完的序列）建起来的 VT 要补喂的字节，让它停在和输出流同样的位置：
+    /// 对上了几个字节的报告开头就补这几个，在报告里面就补完整的开头。之后接着喂的输出里报告的
+    /// 剩余部分照样被当成报告，不会把口令当成普通文字画上屏幕。
+    pub fn resume_bytes(&self) -> &'static [u8] {
+        if self.inside { &REPORT_START } else { &REPORT_START[..usize::from(self.matched).min(PREFIX_LEN - 1)] }
+    }
+}
+
 impl ReportRedactor {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// 现在停在输出流的哪里。交接时交给新宿主，那边用 `from_state` 接着抹之后的输出。
+    pub fn state(&self) -> RedactorState {
+        RedactorState { matched: u8::try_from(self.matched).unwrap_or(u8::MAX), inside: self.inside }
+    }
+
+    /// 接着别处（交接前的宿主）的 `ReportRedactor` 抹之后的输出。不合理的状态（对上的字节数
+    /// 超出开头、在报告里面又对上了开头）按能对上的最多算。
+    pub fn from_state(state: RedactorState) -> Self {
+        let matched = if state.inside { 0 } else { usize::from(state.matched).min(PREFIX_LEN - 1) };
+        Self { matched, inside: state.inside }
     }
 
     /// 输出流正停在一条报告里：开头的 `ESC ] 6973;` 已经过去了，结束序列还没到。这时宿主那份

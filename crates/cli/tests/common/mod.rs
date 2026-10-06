@@ -91,6 +91,7 @@ fn serve(mut stream: UnixStream, tx: &mpsc::Sender<Received>, script: &Mutex<imp
                 host_pid: 1,
                 snapshot_format: 1,
                 standalone: false,
+                handoff: 0,
             }],
             other => (script.lock().unwrap())(other),
         };
@@ -123,7 +124,7 @@ pub fn meta(title: &str, agent: Option<(AgentKind, AgentState)>) -> SessionMeta 
 }
 
 pub fn session(id: SessionId, meta: SessionMeta) -> SessionInfo {
-    SessionInfo { id, size: SIZE, meta, clients: 1, claimed: true, exited: false }
+    SessionInfo { id, size: SIZE, meta, clients: 1, claimed: true, exited: false, size_owner: None }
 }
 
 /// 状态变成 `state` 的 `Meta`。

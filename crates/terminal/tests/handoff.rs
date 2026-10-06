@@ -1,5 +1,7 @@
 //! 把一个真 shell 的 PTY 交出去、经 socket 传过去、在另一端接上：shell 不中断，输入输出、
-//! 改尺寸和前台进程照常，丢掉接手的一端会结束 shell，shell 退出时接手的一端能发现。
+//! 改尺寸和前台进程照常，丢掉接手的一端会结束 shell（停着接手、还没开闸的不会），shell 退出时
+//! 接手的一端能发现。宿主那份
+//! 会话导出、在另一端导入后状态照旧：对外公布的状态、正在跑的命令、停在报告中间的输出流。
 
 use std::{
     os::{
@@ -11,10 +13,11 @@ use std::{
     time::{Duration, Instant},
 };
 
-use runode_shared_types::{grid::GridSize, settings::TermSettings, shell::IntegrationMode};
+use runode_shared_types::{grid::GridSize, session::DriveAction, settings::TermSettings, shell::IntegrationMode};
 use runode_terminal::{
     fd_passing::{recv_with_fds, send_with_fds},
-    host_session::HostSession,
+    history::Entry,
+    host_session::{HostSession, ImportScreen, RedactorState, ReportRedactor, SessionExport},
     pty::{Pty, PtyEvent, PtyHandoff, PtySink},
 };
 
@@ -97,8 +100,9 @@ fn winsize(master: BorrowedFd<'_>) -> (u16, u16) {
 }
 
 /// 经 socketpair 把交出来的会话传到「另一端」：master 走 `SCM_RIGHTS`，其余字段编成一行文字，
-/// 没写出去的输入原样跟在后面。交出方自己那份描述符随后就关掉。
+/// 没写出去的输入原样跟在后面；口令不经 socket，直接带过去。交出方自己那份描述符随后就关掉。
 fn send_across(handoff: PtyHandoff) -> PtyHandoff {
+    let report_token = handoff.report_token.clone();
     let (a, b) = UnixStream::pair().unwrap();
     let mut message = format!(
         "{} {} {} {} {}\n",
@@ -125,7 +129,40 @@ fn send_across(handoff: PtyHandoff) -> PtyHandoff {
         cell_height_px: u16::try_from(cell_height_px).unwrap(),
     };
     assert_eq!(fds.len(), 1);
-    PtyHandoff { master: fds.remove(0), pid, size, report_token: None, pending_input }
+    PtyHandoff { master: fds.remove(0), pid, size, report_token, pending_input }
+}
+
+/// 装作启动时注入了 shell 集成的报告口令。
+const TOKEN: &str = "0123456789abcdef0123456789abcdef";
+/// shell 集成标出的提示符：`$ ` 是提示符，后面是用户输入。
+const PROMPT: &[u8] = b"\x1b]133;A\x07$ \x1b]133;B\x07";
+
+/// 宿主那份会话，接在一个真 dash 上，装作启动时注入了集成、口令是 `TOKEN`（dash 自己不报告，
+/// 报告由测试喂进 VT）：起好 dash，交出来，带上口令再接手。
+fn reporting_session() -> (HostSession, Output) {
+    let (mut pty, _) = shell();
+    let mut handoff = pty.release().unwrap();
+    drop(pty);
+    handoff.report_token = Some(TOKEN.into());
+    let (sink, output) = output();
+    let pty = Pty::adopt(handoff, sink).unwrap();
+    (HostSession::new(SIZE, pty, None, &TermSettings::default()).unwrap(), output)
+}
+
+/// 交接时宿主那份会话的交出方一侧：叫停读线程、等它结束，导出状态，交出 PTY 经 socket 传过去，
+/// 在另一端停着接手。返回导出的状态、停着的 `Pty` 和收它输出的一端。
+fn hand_over(session: &mut HostSession) -> (SessionExport, Pty, Output) {
+    session.stop_reading();
+    eventually("the reader to finish", || session.pty_reader_finished());
+    let export = session.export();
+    let handoff = session.release_pty().unwrap();
+    let (sink, output) = output();
+    let pty = Pty::adopt_paused(send_across(handoff), sink).unwrap();
+    (export, pty, output)
+}
+
+fn import(pty: Pty, screen: ImportScreen<'_>, export: SessionExport) -> HostSession {
+    HostSession::import(pty, screen, export).unwrap_or_else(|err| panic!("{err}"))
 }
 
 /// 问 shell 自己的进程号。
@@ -412,4 +449,320 @@ fn an_unstarted_pty_cannot_be_released() {
     assert!(pty.release().is_err());
     // 出错时什么都没动，照常可用。
     assert!(!pty.started());
+}
+
+/// 导出、交出 PTY、在另一端停着接手再导入：对外公布的状态原样，不算变化；正在跑的命令结束时
+/// 带着原来的开始时刻和目录记下来；报告了还没用上的目录和命令照样用上。再导出一遍和交出时的
+/// 一样。
+#[test]
+fn an_exported_session_is_imported_as_it_was() {
+    let (mut session, _out) = reporting_session();
+    session.feed(format!("\x1b]2;my title\x07\x1b]6973;{TOKEN};path=/usr/bin%3A/bin\x07").as_bytes());
+    session.feed(format!("\x1b]6973;{TOKEN};aliases=ll%20gs\x07\x1b]6973;{TOKEN};cwd=/work/repo\x07").as_bytes());
+    session.feed(PROMPT);
+    assert!(session.take_commands().is_empty());
+    session.feed(format!("make\r\n\x1b]6973;{TOKEN};command=make\x07\x1b]133;C\x07building\r\n").as_bytes());
+    assert!(session.take_commands().is_empty());
+    // 下一个提示符前的目录和下一条命令已经报告了，还没用上。
+    session.feed(format!("\x1b]6973;{TOKEN};cwd=/next\x07").as_bytes());
+    session.drive(Some("someone".into()), DriveAction::Keys, 1234);
+    session.refresh_foreground();
+    let snapshot = session.snapshot().unwrap();
+
+    let (mut export, pty, _new_out) = hand_over(&mut session);
+    assert_eq!(export.meta.title.as_deref(), Some("my title"));
+    assert_eq!(export.meta.shell_path, Some("/usr/bin:/bin".into()));
+    assert_eq!(export.meta.prompt_cwd, Some("/work/repo".into()));
+    assert!(export.meta.driver.is_some());
+    // 命令开始运行时这一轮提示符就过去了。
+    assert!(export.started && !export.prompt_reported);
+    assert_eq!(export.report_token.as_deref(), Some(TOKEN));
+    assert_eq!(export.pending_shell_cwd, Some("/next".into()));
+    let running = export.running.as_mut().unwrap();
+    assert_eq!((running.cmd.as_str(), running.cwd.as_deref()), ("make", Some(std::path::Path::new("/work/repo"))));
+    // 开始时刻换成一个认得出的，看导入后用的是不是它。
+    running.ts = 1000;
+    // 口令不出现在调试输出里。
+    assert!(!format!("{export:?}").contains(TOKEN));
+
+    let mut imported = import(pty, ImportScreen::Snapshot(&snapshot), export.clone());
+    assert_eq!(imported.meta(), export.meta);
+    assert_eq!(imported.take_meta(), None);
+    assert_eq!(imported.export(), export);
+    assert!(imported.screen_text(None).unwrap().contains("building"));
+
+    imported.feed(b"done\r\n\x1b]133;D;3\x07");
+    let finished = imported.take_commands();
+    assert_eq!(finished, [Entry { cmd: "make".into(), cwd: Some("/work/repo".into()), exit: Some(3), ts: 1000 }]);
+    imported.feed(PROMPT);
+    imported.take_commands();
+    assert_eq!(imported.prompt_cwd(), Some("/next".into()));
+    // 口令也带过来了：之后的报告照样采用。
+    imported.feed(format!("\x1b]6973;{TOKEN};path=/opt/bin\x07").as_bytes());
+    assert_eq!(imported.meta().shell_path, Some("/opt/bin".into()));
+}
+
+/// 停着接手：打开闸门之前一个字节都不从 PTY 读，交出时没写出去的输入和之后写的都不写；打开
+/// 之后按先后写出去，PTY 里攒着的输出照常读到。
+#[test]
+fn an_adopted_pty_stays_paused_until_resumed() {
+    let (mut old, mut old_output) = shell();
+    old.writer.write(b"echo ready\n");
+    old_output.wait_for("ready");
+    old.stop_reading();
+    eventually("the reader to finish", || old.reader_finished());
+    // 读线程停了以后 shell 的输出攒在 PTY 里。
+    old.writer.write(b"echo queued-$((3+4))\n");
+    thread::sleep(Duration::from_millis(300));
+    let mut handoff = old.release().unwrap();
+    drop(old);
+    old_output.drain();
+    assert!(!old_output.text.contains("queued-7"));
+
+    let marker = std::env::temp_dir().join(format!("runode-paused-{}-{}", std::process::id(), handoff.pid));
+    let _ = std::fs::remove_file(&marker);
+    handoff.pending_input = format!("touch {}\n", marker.display()).into_bytes();
+    let (sink, mut new_output) = output();
+    let mut new = Pty::adopt_paused(send_across(handoff), sink).unwrap();
+    new.writer.write(b"echo later-$((1+1))\n");
+    thread::sleep(Duration::from_millis(500));
+    new_output.drain();
+    assert_eq!(new_output.text, "", "a paused pty must not be read");
+    assert!(!marker.exists(), "a paused pty must not be written to");
+
+    new.resume_reading().unwrap();
+    new_output.wait_for("queued-7");
+    new_output.wait_for("later-2");
+    // 交出时没写出去的排在最前面。
+    assert!(marker.exists());
+    std::fs::remove_file(&marker).unwrap();
+    new.writer.write(b"exit\n");
+    new_output.wait_exit();
+}
+
+/// 停着接手后不接了（交出方回滚）：交回来的输入原样都在，一个字节都没写，shell 照常能再接。
+#[test]
+fn a_paused_pty_is_released_untouched() {
+    let (mut old, mut old_output) = shell();
+    old.writer.write(b"echo ready\n");
+    old_output.wait_for("ready");
+    let mut handoff = old.release().unwrap();
+    drop(old);
+    let pid = handoff.pid;
+    handoff.pending_input = b"echo never-$((1+1))\n".to_vec();
+    let (sink, mut paused_output) = output();
+    let mut paused = Pty::adopt_paused(send_across(handoff), sink).unwrap();
+    paused.writer.write(b"echo also-$((2+2))\n");
+    let mut handoff = paused.release().unwrap();
+    drop(paused);
+    assert_eq!(handoff.pending_input, b"echo never-$((1+1))\necho also-$((2+2))\n");
+    paused_output.drain();
+    assert!(!paused_output.exited && paused_output.text.is_empty());
+    thread::sleep(Duration::from_millis(200));
+    assert!(alive(pid));
+
+    handoff.pending_input.clear();
+    let (sink, mut new_output) = output();
+    let new = Pty::adopt(handoff, sink).unwrap();
+    new.writer.write(b"echo alive-$((3+3))\n");
+    new_output.wait_for("alive-6");
+    assert!(!new_output.text.contains("never-2") && !new_output.text.contains("also-4"));
+    new.writer.write(b"exit\n");
+    new_output.wait_exit();
+}
+
+/// 描述符 `fd` 已经关了，或者号码已经被别处重用、指的不是 `device` 这个设备了。
+fn closed_or_reused(fd: libc::c_int, device: libc::dev_t) -> bool {
+    let mut stat = std::mem::MaybeUninit::<libc::stat>::zeroed();
+    // SAFETY: 只往本地结构里写；描述符关了时返回 -1。
+    if unsafe { libc::fstat(fd, stat.as_mut_ptr()) } != 0 {
+        return true;
+    }
+    // SAFETY: `fstat` 成功时填好了整个结构。
+    unsafe { stat.assume_init() }.st_rdev != device
+}
+
+fn device_of(fd: BorrowedFd<'_>) -> libc::dev_t {
+    let mut stat = std::mem::MaybeUninit::<libc::stat>::zeroed();
+    // SAFETY: `fd` 开着，只往本地结构里写。
+    assert_eq!(unsafe { libc::fstat(fd.as_raw_fd(), stat.as_mut_ptr()) }, 0);
+    // SAFETY: 上面成功了，结构已经填好。
+    unsafe { stat.assume_init() }.st_rdev
+}
+
+/// 交出方还没提交时（它的 `Pty` 照常留着，交出去的是复制的一份 master），接手方停着的 `Pty` 在
+/// 一个 panic 的线程里随栈展开丢掉：shell 不被结束，前台程序也不受影响，接手方那份 master 关掉了，
+/// 交出方接着读写照常。
+#[test]
+fn dropping_a_paused_pty_on_panic_leaves_the_shell_to_the_old_side() {
+    let (mut old, mut old_output) = shell();
+    let pid = shell_pid(&old, &mut old_output);
+    // 前台跑着一个程序，丢掉停着的一端时它也不能收到 SIGHUP。
+    old.writer.write(b"sleep 30\n");
+    eventually("sleep in the foreground", || !old.foreground_is_shell());
+    old.stop_reading();
+    eventually("the reader to finish", || old.reader_finished());
+    let handoff = PtyHandoff {
+        master: old.dup_master().unwrap(),
+        pid,
+        size: SIZE,
+        report_token: None,
+        pending_input: b"echo never-$((1+1))\n".to_vec(),
+    };
+    let handoff = send_across(handoff);
+    let raw = handoff.master.as_raw_fd();
+    let device = device_of(handoff.master.as_fd());
+    let (sink, mut paused_output) = output();
+    let paused = Pty::adopt_paused(handoff, sink).unwrap();
+    paused.writer.write(b"echo also-$((2+2))\n");
+    let panicked = thread::spawn(move || {
+        let _paused = paused;
+        panic!("the session thread panics while the pty is paused");
+    })
+    .join();
+    assert!(panicked.is_err());
+    assert!(closed_or_reused(raw, device), "the paused pty's master must be closed");
+    paused_output.drain();
+    assert!(!paused_output.exited && paused_output.text.is_empty());
+
+    // 结束接手来的 shell 时等 SIGHUP 的时限过了也还活着，前台的 sleep 也还在。
+    thread::sleep(Duration::from_millis(500));
+    assert!(alive(pid), "the shell must survive a paused pty being dropped");
+    assert!(!old.foreground_is_shell(), "the foreground program must survive too");
+
+    // 交出方回滚：接着读，按 Ctrl-C 结束 sleep，照常用；停着那端排着的输入一个字节都没写。
+    old.resume_reading().unwrap();
+    old.writer.write(b"\x03");
+    eventually("the shell back in the foreground", || old.foreground_is_shell());
+    old.writer.write(b"echo alive-$((3+3))\n");
+    old_output.wait_for("alive-6");
+    assert!(!old_output.text.contains("never-2") && !old_output.text.contains("also-4"));
+    old.writer.write(b"exit\n");
+    old_output.wait_exit();
+}
+
+/// 停着接手、开过闸以后丢掉，和 `Pty::adopt` 接手来的一样结束 shell。
+#[test]
+fn dropping_a_resumed_paused_pty_ends_the_shell() {
+    let (mut old, mut old_output) = shell();
+    old.writer.write(b"echo ready\n");
+    old_output.wait_for("ready");
+    let handoff = old.release().unwrap();
+    drop(old);
+    let pid = handoff.pid;
+    let (sink, mut new_output) = output();
+    let mut new = Pty::adopt_paused(send_across(handoff), sink).unwrap();
+    new.resume_reading().unwrap();
+    new.writer.write(b"echo open-$((5+5))\n");
+    new_output.wait_for("open-10");
+    drop(new);
+    new_output.wait_exit();
+    eventually("the shell to be gone", || !alive(pid));
+}
+
+/// 输出流停在一条报告中间时交接：原始快照的续接里带着半条报告，接着别处的抹口令状态，剩下的
+/// 部分到了以后报告照样采用，转给前端的那份里没有口令和报告的内容。
+#[test]
+fn a_report_split_by_the_handoff_is_adopted_and_redacted() {
+    let (mut session, _out) = reporting_session();
+    let mut redactor = ReportRedactor::new();
+    let first = format!("before\x1b]6973;{}", &TOKEN[..10]);
+    session.feed(first.as_bytes());
+    redactor.redact(first.as_bytes());
+    let state = redactor.state();
+    assert_eq!(state, RedactorState { matched: 0, inside: true });
+    let snapshot = session.snapshot().unwrap();
+
+    let (export, pty, _new_out) = hand_over(&mut session);
+    let mut imported = import(pty, ImportScreen::Snapshot(&snapshot), export);
+    let mut redactor = ReportRedactor::from_state(state);
+    assert!(redactor.in_report());
+    let rest = format!("{};path=/opt/bin\x07after", &TOKEN[10..]);
+    imported.feed(rest.as_bytes());
+    assert_eq!(imported.meta().shell_path, Some("/opt/bin".into()));
+    assert_eq!(redactor.redact(rest.as_bytes()).as_deref(), Some(&b"\x07after"[..]));
+    let screen = imported.screen_text(None).unwrap();
+    assert!(screen.contains("beforeafter"), "{screen:?}");
+}
+
+/// 快照用不了、退回重放时，重放不带没写完的序列：输出流刚对上报告开头的几个字节就交接了，
+/// 补喂这几个字节，剩下的报告不会当成文字画上屏幕，照样采用。
+#[test]
+fn a_replay_resumes_a_report_prefix() {
+    let (mut session, _out) = reporting_session();
+    let mut redactor = ReportRedactor::new();
+    let first = b"hello\x1b]6";
+    session.feed(first);
+    redactor.redact(first);
+    let state = redactor.state();
+    assert_eq!(state, RedactorState { matched: 3, inside: false });
+    assert_eq!(state.resume_bytes(), b"\x1b]6");
+    let replay = session.vt_replay().unwrap();
+
+    let (export, pty, _new_out) = hand_over(&mut session);
+    let rest = format!("973;{TOKEN};path=/opt/bin\x07world");
+    // 快照解不开时 `pty` 还回来，换成重放再导入。
+    let pty = HostSession::import(pty, ImportScreen::Snapshot(b"not a snapshot"), export.clone())
+        .err()
+        .expect("a bad snapshot must not import")
+        .pty;
+    let mut imported = import(pty, ImportScreen::Replay { bytes: &replay, redactor: state }, export.clone());
+    assert_eq!(imported.meta(), export.meta);
+    imported.feed(rest.as_bytes());
+    let screen = imported.screen_text(None).unwrap();
+    assert!(screen.contains("helloworld") && !screen.contains("973;"), "{screen:?}");
+    assert_eq!(imported.meta().shell_path, Some("/opt/bin".into()));
+
+    // 不补喂的话，剩下的报告连着口令画上了屏幕。
+    let (sink, _unused) = output();
+    let unstarted = SessionExport { started: false, ..export };
+    let mut bare = import(
+        Pty::open(SIZE, sink).unwrap(),
+        ImportScreen::Replay { bytes: &replay, redactor: RedactorState::default() },
+        unstarted,
+    );
+    bare.feed(rest.as_bytes());
+    assert!(bare.screen_text(None).unwrap().contains("973;"));
+}
+
+/// 导出的会话启动过、接手的 PTY 却没启动（或者反过来）时不导入，PTY 还回来。
+#[test]
+fn an_import_onto_the_wrong_pty_gives_it_back() {
+    let (sink, _unused) = output();
+    let session = HostSession::new(SIZE, Pty::open(SIZE, sink).unwrap(), None, &TermSettings::default()).unwrap();
+    let export = SessionExport { started: true, ..session.export() };
+    let snapshot = session.snapshot().unwrap();
+    let (sink, _unused) = output();
+    let err = HostSession::import(Pty::open(SIZE, sink).unwrap(), ImportScreen::Snapshot(&snapshot), export)
+        .err()
+        .expect("must not import");
+    assert!(!err.pty.started());
+    assert!(err.to_string().contains("started"), "{err}");
+}
+
+/// 导入后前台 agent 接着交出时的状态：从快照或重放导入都一样，马上求值也不变，界面上的指示
+/// 不会闪一下。
+#[test]
+fn an_imported_agent_does_not_flicker() {
+    for title in ["⠋ 修 bug", "✳ 修 bug"] {
+        let (sink, _unused) = output();
+        let mut session =
+            HostSession::new(SIZE, Pty::open(SIZE, sink).unwrap(), None, &TermSettings::default()).unwrap();
+        session.feed(format!("\x1b]0;{title}\x07").as_bytes());
+        let agent = session.meta().agent;
+        assert!(agent.is_some(), "{title}");
+        let (snapshot, replay) = (session.snapshot().unwrap(), session.vt_replay().unwrap());
+        let screens = [
+            ("snapshot", ImportScreen::Snapshot(&snapshot)),
+            ("replay", ImportScreen::Replay { bytes: &replay, redactor: RedactorState::default() }),
+        ];
+        for (how, screen) in screens {
+            let (sink, _unused) = output();
+            let mut imported = import(Pty::open(SIZE, sink).unwrap(), screen, session.export());
+            assert_eq!(imported.meta().agent, agent, "{title} {how}");
+            assert!(!imported.poll_agent(), "{title} {how}");
+            assert_eq!(imported.meta().agent, agent, "{title} {how}");
+            assert_eq!(imported.take_meta(), None, "{title} {how}");
+        }
+    }
 }

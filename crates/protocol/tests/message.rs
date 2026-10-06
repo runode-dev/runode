@@ -1,8 +1,8 @@
 //! 控制消息经帧编码往返、JSON 的样子、对缺字段和新取值的容忍，以及会话标识的写法。
 
 use runode_protocol::{
-    AttachMode, BuildId, Caps, ClientKind, ClientMsg, FinishedCommand, Frame, FrameKind, GoodbyeReason, HostMsg,
-    PaneLayout, PaneRect, Placement, SessionId, SessionInfo, TabLayout, WindowLayout, WorkspaceLayout,
+    AttachMode, BuildId, Caps, ClientKind, ClientMsg, FinishedCommand, Frame, FrameKind, GoodbyeReason, HandoffRefusal,
+    HostMsg, PaneLayout, PaneRect, Placement, SessionId, SessionInfo, TabLayout, WindowLayout, WorkspaceLayout,
     message::InvalidSessionId, read_frame, write_frame,
 };
 use runode_shared_types::{
@@ -77,6 +77,7 @@ fn client_messages_round_trip() {
             client: ClientKind::Desktop,
             caps: Caps { snapshot: true, vt_replay: true },
             session: None,
+            device: Some("Ethan 的 MacBook".into()),
         },
         ClientMsg::Hello {
             protocol: 3,
@@ -84,6 +85,15 @@ fn client_messages_round_trip() {
             client: ClientKind::Cli,
             caps: Caps::default(),
             session: Some(ID),
+            device: None,
+        },
+        ClientMsg::Hello {
+            protocol: 4,
+            build: BuildId("new".into()),
+            client: ClientKind::Successor,
+            caps: Caps::default(),
+            session: None,
+            device: None,
         },
         ClientMsg::ListSessions,
         ClientMsg::Spawn {
@@ -128,7 +138,10 @@ fn client_messages_round_trip() {
         },
         ClientMsg::Open { req: 10, placement: Placement::Down, near: Some(ID), cwd: Some("/tmp".into()), focus: true },
         ClientMsg::Reveal { req: 11, id: ID },
-        ClientMsg::Handoff,
+        ClientMsg::Handoff { min_format: 1, max_format: 3 },
+        ClientMsg::HandoffReady,
+        ClientMsg::HandoffAbort { reason: "cannot adopt the pty".into() },
+        ClientMsg::HandoffDone,
         ClientMsg::Shutdown { kill_sessions: true },
     ];
     for message in messages {
@@ -145,12 +158,28 @@ fn host_messages_round_trip() {
             host_pid: 42,
             snapshot_format: 1,
             standalone: false,
+            handoff: 0,
         },
-        HostMsg::Welcome { protocol: 3, build: BuildId("b".into()), host_pid: 7, snapshot_format: 1, standalone: true },
+        HostMsg::Welcome {
+            protocol: 4,
+            build: BuildId("b".into()),
+            host_pid: 7,
+            snapshot_format: 1,
+            standalone: true,
+            handoff: 1,
+        },
         HostMsg::Incompatible { protocol: 2, build: BuildId("b".into()), reason: "too new".into() },
         HostMsg::SessionList {
             sessions: vec![
-                SessionInfo { id: ID, size: size(), meta: meta(), clients: 0, claimed: false, exited: false },
+                SessionInfo {
+                    id: ID,
+                    size: size(),
+                    meta: meta(),
+                    clients: 0,
+                    claimed: false,
+                    exited: false,
+                    size_owner: None,
+                },
                 SessionInfo {
                     id: SessionId(2),
                     size: size(),
@@ -158,6 +187,7 @@ fn host_messages_round_trip() {
                     clients: 2,
                     claimed: true,
                     exited: true,
+                    size_owner: Some("iPad".into()),
                 },
             ],
         },
@@ -213,6 +243,13 @@ fn host_messages_round_trip() {
         HostMsg::Error { req: Some(3), id: None, message: "no such directory".into() },
         HostMsg::Goodbye { reason: GoodbyeReason::Handoff },
         HostMsg::Goodbye { reason: GoodbyeReason::Error { message: "boom".into() } },
+        HostMsg::HandoffRefused { reason: HandoffRefusal::DesktopConnected },
+        HostMsg::HandoffRefused { reason: HandoffRefusal::Busy },
+        HostMsg::HandoffRefused { reason: HandoffRefusal::NotStandalone },
+        HostMsg::HandoffRefused { reason: HandoffRefusal::UnsupportedFormat { writes: 2 } },
+        HostMsg::HandoffBegin { format: 1, sessions: 12 },
+        HostMsg::SizeOwner { id: ID, mine: true, owner: Some("Ethan 的 MacBook".into()) },
+        HostMsg::SizeOwner { id: ID, mine: false, owner: None },
     ];
     for message in messages {
         assert_eq!(through_frame(&message), message);
@@ -239,6 +276,7 @@ fn missing_and_unknown_fields_are_tolerated() {
             client: ClientKind::Cli,
             caps: Caps::default(),
             session: None,
+            device: None,
         }
     );
     // 必填字段缺了读不了。
@@ -391,4 +429,53 @@ fn layouts_read_with_defaults() {
             }],
         }
     );
+}
+
+/// 第 4 版协议新加的字段，旧的一方发来的消息里没有时的读法：前端没报设备名，宿主不会交接，
+/// 会话没有 owner。
+#[test]
+fn version_4_fields_have_old_defaults() {
+    let hello: ClientMsg =
+        serde_json::from_str(r#"{"type":"hello","protocol":3,"build":"x","client":"desktop"}"#).unwrap();
+    assert!(matches!(hello, ClientMsg::Hello { device: None, client: ClientKind::Desktop, .. }));
+    let welcome: HostMsg = serde_json::from_str(
+        r#"{"type":"welcome","protocol":3,"build":"x","host_pid":9,"snapshot_format":1,"standalone":true}"#,
+    )
+    .unwrap();
+    assert!(matches!(welcome, HostMsg::Welcome { handoff: 0, standalone: true, .. }));
+    let info: SessionInfo = serde_json::from_str(&format!(
+        r#"{{"id":"{ID}","size":{},"meta":{{}},"clients":2}}"#,
+        serde_json::to_string(&size()).unwrap()
+    ))
+    .unwrap();
+    assert_eq!((info.clients, info.size_owner), (2, None));
+    let owner: HostMsg = serde_json::from_str(&format!(r#"{{"type":"size_owner","id":"{ID}","mine":false}}"#)).unwrap();
+    assert_eq!(owner, HostMsg::SizeOwner { id: ID, mine: false, owner: None });
+}
+
+/// 早先的 `Handoff` 是不带字段的，读成格式范围 0..=0，哪个格式都不在里面；`HandoffAbort` 缺了
+/// 原因读成空的。
+#[test]
+fn bare_handoff_reads_as_an_empty_range() {
+    let handoff: ClientMsg = serde_json::from_str(r#"{"type":"handoff"}"#).unwrap();
+    assert_eq!(handoff, ClientMsg::Handoff { min_format: 0, max_format: 0 });
+    let abort: ClientMsg = serde_json::from_str(r#"{"type":"handoff_abort"}"#).unwrap();
+    assert_eq!(abort, ClientMsg::HandoffAbort { reason: String::new() });
+}
+
+/// 交接相关的写法：前端种类 `successor`，拒绝的原因和 `Goodbye` 一样用 `kind` 区分，新宿主不认识
+/// 的原因读成 `Unknown`，不至于整条读不了。
+#[test]
+fn handoff_wire_format() {
+    let json = serde_json::to_string(&ClientKind::Successor).unwrap();
+    assert_eq!(json, r#""successor""#);
+    let json = serde_json::to_string(&ClientMsg::Handoff { min_format: 1, max_format: 2 }).unwrap();
+    assert_eq!(json, r#"{"type":"handoff","min_format":1,"max_format":2}"#);
+    let json =
+        serde_json::to_string(&HostMsg::HandoffRefused { reason: HandoffRefusal::UnsupportedFormat { writes: 3 } })
+            .unwrap();
+    assert_eq!(json, r#"{"type":"handoff_refused","reason":{"kind":"unsupported_format","writes":3}}"#);
+    let refused: HostMsg =
+        serde_json::from_str(r#"{"type":"handoff_refused","reason":{"kind":"disk_full","free":0}}"#).unwrap();
+    assert_eq!(refused, HostMsg::HandoffRefused { reason: HandoffRefusal::Unknown });
 }

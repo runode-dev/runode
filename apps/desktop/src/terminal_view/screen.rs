@@ -14,6 +14,12 @@
 //! 第一次给的）是「现在的样子」，不是刚发生的变化，不发 agent 停下来的通知；和宿主断开以后也不发。
 //! 之后在看屏幕和只看状态之间切换、`Resync` 时重新连上，`Attached` 带的状态和视图记着的比：发出
 //! `Attach` 到收到 `Attached` 之间的 `Meta` 被连接那一层丢掉了，agent 恰好在这时停下来的话靠它通知。
+//!
+//! 尺寸归属：几个前端看同一个会话时，宿主按最近交互的那个前端（owner）的视图改会话的尺寸，用
+//! `HostMsg::SizeOwner` 告诉各个带尺寸连着的前端是不是自己。这里记下别的前端是 owner 时它的设备名，
+//! 视图据此把对不上的 VT 裁切或留白着画（`Crop`）。视图照旧把自己量出的尺寸报给宿主（宿主记着，轮到
+//! 这边当 owner 时用），但只在尺寸真的变了时报：收到 owner 的 `Resized` 不会让视图再发一遍自己的，
+//! 两个前端不会来回抢。只有一个前端（没收到过 `SizeOwner`，或者说是自己）时一切照旧。
 
 use std::{
     collections::HashSet,
@@ -79,6 +85,13 @@ pub(super) enum Screen<S> {
     Lost { session: Option<S> },
 }
 
+/// 别的前端的视图在决定这个会话的尺寸，见 `HostMsg::SizeOwner`。
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) struct SizeOwner {
+    /// 那个前端在 `Hello` 里报的设备名；没报时为空。
+    pub(super) device: Option<String>,
+}
+
 /// 要视图经连接重新连上会话：`Link::reattach(id, size, mode)`。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) struct Attach {
@@ -137,6 +150,9 @@ pub(super) struct ScreenState<S> {
     /// 正在断开后重新连上：这时连不成多半是宿主还没准备好，按断开处理，用户可以再点重开；平常连不成
     /// 是会话已经没了，按 shell 退出处理。
     reconnecting: bool,
+    /// 别的前端在决定尺寸时是它；是这边、或者没收到过 `SizeOwner`（只有这一个前端）时为空。只看状态和
+    /// 断开时不带尺寸，宿主不再告诉这边，清掉。
+    size_owner: Option<SizeOwner>,
 }
 
 /// 和宿主断开后点了「在原目录重开」、重新连上宿主以后怎么办。
@@ -174,6 +190,7 @@ impl<S: Vt> ScreenState<S> {
             hidden_since: None,
             meta_known: true,
             reconnecting: false,
+            size_owner: None,
         }
     }
 
@@ -192,6 +209,7 @@ impl<S: Vt> ScreenState<S> {
             hidden_since: meta_only.then_some(now),
             meta_known: false,
             reconnecting: false,
+            size_owner: None,
         }
     }
 
@@ -210,6 +228,7 @@ impl<S: Vt> ScreenState<S> {
             hidden_since: Some(now),
             meta_known: false,
             reconnecting: false,
+            size_owner: None,
         }
     }
 
@@ -245,6 +264,11 @@ impl<S: Vt> ScreenState<S> {
 
     pub(super) fn is_lost(&self) -> bool {
         matches!(self.screen, Screen::Lost { .. })
+    }
+
+    /// 别的前端的视图在决定这个会话的尺寸时是它，见 `SizeOwner`。
+    pub(super) fn size_owner(&self) -> Option<&SizeOwner> {
+        self.size_owner.as_ref()
     }
 
     /// 正看着时的界面这份 VT。发给程序的输入、要宿主做的事只在这时才有：重新连上的过程中和
@@ -283,8 +307,13 @@ impl<S: Vt> ScreenState<S> {
         }
     }
 
-    /// 视图量出了尺寸：记下来，正看着时请宿主改。没在看时等回到显示时随 `Attach` 一起给宿主。
+    /// 视图量出了尺寸：记下来，正看着时请宿主改。没在看时等回到显示时随 `Attach` 一起给宿主。每次
+    /// 布局都会调，和上次量的一样时什么都不做：宿主按别的前端的尺寸改了 VT（`Resized`）以后，这边
+    /// 不能因为两边对不上就再请一遍。
     pub(super) fn resize(&mut self, size: GridSize) {
+        if self.sized && size == self.last_size {
+            return;
+        }
         self.last_size = size;
         self.sized = true;
         if let Some(session) = self.live_mut() {
@@ -425,6 +454,7 @@ impl<S: Vt> ScreenState<S> {
         changes.replaced = true;
         if mode == AttachMode::MetaOnly {
             self.screen = Screen::Hidden;
+            self.size_owner = None;
             return;
         }
         let keep = match std::mem::replace(&mut self.screen, Screen::Hidden) {
@@ -467,6 +497,7 @@ impl<S: Vt> ScreenState<S> {
         self.screen = Screen::Lost { session };
         self.attaching = None;
         self.reconnecting = false;
+        self.size_owner = None;
         changes.lost = true;
     }
 
@@ -488,6 +519,11 @@ impl<S: Vt> ScreenState<S> {
                     session.apply_theme(&settings);
                     changes.theme_applied = true;
                 }
+            }
+            // 只认带着尺寸看着时的：只看状态时宿主不该发，发了也用不上。
+            HostMsg::SizeOwner { mine, owner, .. } => {
+                let follows = !mine && !matches!(self.screen, Screen::Hidden);
+                self.size_owner = follows.then_some(SizeOwner { device: owner });
             }
             HostMsg::CommandFinished { command, .. } => changes.commands.push(command),
             HostMsg::Bell { .. } => changes.bell = true,

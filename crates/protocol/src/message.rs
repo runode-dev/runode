@@ -5,11 +5,29 @@
 //! - 对面多发了自己不认识的字段：忽略，照常读。
 //! - 新加的字段带 `#[serde(default)]`：旧的一方发来的消息里没有它，按默认值读。
 //! - 新加的字段是必填的（没有 `#[serde(default)]`）：旧的一方发来的这条消息解析失败。
-//! - 新加的消息种类、新加的 `ClientKind`：旧的一方读成 `Unknown`，能回一句「不认识」而不是
-//!   断开；其他枚举（`AttachMode`、`GoodbyeReason` 等）新加的取值读不了，整条消息解析失败。
+//! - 新加的消息种类、新加的 `ClientKind`、`GoodbyeReason`、`HandoffRefusal`：旧的一方读成
+//!   `Unknown`，能回一句「不认识」或者照常断开，而不是整条读不了；其他枚举（`AttachMode` 等）
+//!   新加的取值读不了，整条消息解析失败。
 //!
 //! 所以加字段时带上 `#[serde(default)]`；改了已有消息的含义、新加必填字段或者新加枚举取值
 //! （上面能读成 `Unknown` 的除外）时，加 `PROTOCOL_VERSION`。
+//!
+//! 升级时新版本的宿主要从旧宿主手里接过会话（见 `ClientKind::Successor`、`ClientMsg::Handoff`），
+//! 而旧宿主可能是任何一个已经发布过的版本，所以下面这些永远冻结，加 `PROTOCOL_VERSION` 也不能改：
+//! - 帧头的格式（见 `frame`），以及交接时传描述符的消息头（`runode_terminal` 的 `fd_passing`：
+//!   小端 u32 字节数加小端 u32 描述符个数）。
+//! - `ClientMsg::Hello`、`HostMsg::Welcome`、`HostMsg::Incompatible`，以及交接用的
+//!   `ClientMsg::Handoff`、`HandoffReady`、`HandoffAbort`、`HandoffDone`、
+//!   `HostMsg::HandoffRefused`、`HandoffBegin`、`Goodbye` 和它们用到的 `HandoffRefusal`、
+//!   `GoodbyeReason`：已有字段的名字、类型和含义都不改，以后只能加带 `#[serde(default)]` 的字段；
+//!   `HandoffRefusal`、`GoodbyeReason` 可以加新的取值，旧的一方读成 `Unknown`。交接时旧宿主要
+//!   给不同版本的前端发 `Goodbye { Handoff }`，前端也要和不同版本的宿主谈握手。
+//! - `Hello` 里 `client` 是 `ClientKind::Successor` 的连接，宿主不比对协议版本，照样回
+//!   `Welcome`；之后只认交接用的消息。新宿主据此能和协议版本不同的旧宿主谈交接。
+//! - 交接时一条描述符消息里数据的编法和 `HandoffPart` 的格式，见 `handoff`；格式有自己的版本号
+//!   `HANDOFF_FORMAT`。
+//!
+//! `handoff_compat` 测试里存着格式 1 的样例，永远要读得了。
 
 use std::{fmt, path::PathBuf, str::FromStr};
 
@@ -91,6 +109,9 @@ pub enum ClientKind {
     Cli,
     Tui,
     Mobile,
+    /// 要接手会话的新版本宿主（`runode --host --take-over`）。宿主对它不比对协议版本，照样回
+    /// `Welcome`，见本模块文档里冻结的规则；这条连接接着发 `ClientMsg::Handoff`。
+    Successor,
     /// 比自己新的一方才有的种类。旧宿主照样读得了 `Hello`，能按协议版本回 `Incompatible`。
     #[serde(other)]
     Unknown,
@@ -124,7 +145,8 @@ pub enum AttachMode {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ClientMsg {
-    /// 连上后的第一条消息。宿主回 `HostMsg::Welcome`，协议版本对不上时回 `Incompatible`。
+    /// 连上后的第一条消息。宿主回 `HostMsg::Welcome`，协议版本对不上时回 `Incompatible`（`client`
+    /// 是 `ClientKind::Successor` 时不比对，见模块文档）。
     /// `session` 是发消息的程序自己所在的会话（在 runode 的终端里跑的命令行带上它），宿主据此
     /// 记下是谁在操作别的会话，见 `SessionMeta::driver`。
     Hello {
@@ -135,6 +157,10 @@ pub enum ClientMsg {
         caps: Caps,
         #[serde(default)]
         session: Option<SessionId>,
+        /// 前端所在设备的名字（桌面填机器名），给别的前端看「尺寸由谁控制」，见
+        /// `HostMsg::SizeOwner`。没有时宿主不替它编名字。
+        #[serde(default)]
+        device: Option<String>,
     },
     /// 要所有会话的列表，宿主回 `SessionList`。
     ListSessions,
@@ -216,8 +242,27 @@ pub enum ClientMsg {
     },
     /// 在 app 里切到显示这个会话的分屏，激活它的窗口，回 `Done`。
     Reveal { req: u32, id: SessionId },
-    /// 新版本的宿主要接手：旧宿主把 PTY 和监听的 socket 交过去后退出。
-    Handoff,
+    /// 新版本的宿主（`ClientKind::Successor`）要接手：旧宿主把 PTY 和监听的 socket 交过去后退出。
+    /// `min_format`..=`max_format` 是新宿主读得了的交接格式（`handoff::HANDOFF_FORMAT`），旧宿主
+    /// 只写自己的那一个，不在范围里时回 `HandoffRefused { UnsupportedFormat }`，否则回
+    /// `HandoffBegin`，接着在同一条连接上发描述符消息（见 `handoff::HandoffPart`）。
+    /// 早先的写法 `{"type":"handoff"}` 没有范围，读成 0..=0，哪个格式都不在里面。
+    Handoff {
+        #[serde(default)]
+        min_format: u32,
+        #[serde(default)]
+        max_format: u32,
+    },
+    /// 新宿主收下了所有会话、准备好接手，等旧宿主发 `HandoffPart::Commit`。这是交接的提交点：
+    /// 之前旧宿主随时能回滚，之后会话归新宿主。
+    HandoffReady,
+    /// 新宿主在 `HandoffReady` 之前出了错，放弃接手，旧宿主回滚、照常跑下去。
+    HandoffAbort {
+        #[serde(default)]
+        reason: String,
+    },
+    /// 新宿主收到 `Commit` 并接管了监听的 socket，旧宿主可以退出了。
+    HandoffDone,
     /// 让宿主退出。`kill_sessions` 为假时会话跟着宿主一起留到交接或者下次启动，见
     /// `GoodbyeReason`。
     Shutdown { kill_sessions: bool },
@@ -234,7 +279,8 @@ pub enum HostMsg {
     /// 回 `Hello`。`snapshot_format` 是宿主编的快照的格式版本（libghostty 快照开头的版本号），
     /// 前端解不了这个格式时改要 `VtReplay`。`standalone` 是宿主单独一个进程在跑（`runode --host`）；
     /// 为假时宿主跑在某个 app 的进程里，那个 app 才是它的界面，别的 app 不该接手它的会话、也不该
-    /// 让它退出。
+    /// 让它退出。`handoff` 是宿主交出会话时写的交接格式（`handoff::HANDOFF_FORMAT`），0 是这个
+    /// 宿主不会交接。
     Welcome {
         protocol: u32,
         build: BuildId,
@@ -242,6 +288,8 @@ pub enum HostMsg {
         snapshot_format: u16,
         #[serde(default)]
         standalone: bool,
+        #[serde(default)]
+        handoff: u32,
     },
     /// 协议版本对不上，宿主接着关掉连接。
     Incompatible {
@@ -351,6 +399,26 @@ pub enum HostMsg {
     Goodbye {
         reason: GoodbyeReason,
     },
+    /// 回 `ClientMsg::Handoff`：这次不交接，宿主接着关掉连接，会话照旧在它手里。
+    HandoffRefused {
+        reason: HandoffRefusal,
+    },
+    /// 回 `ClientMsg::Handoff`：开始交接。`format` 是接下来的描述符消息用的交接格式，`sessions`
+    /// 是要交出的会话个数，即 `HandoffPart::Host` 之后跟着几条 `HandoffPart::Session`。这之后
+    /// 宿主在这条连接上只发描述符消息，不再发帧。
+    HandoffBegin {
+        format: u32,
+        sessions: u32,
+    },
+    /// 谁的视图尺寸决定这个会话的尺寸变了，只发给带着尺寸连着这个会话的前端。`mine` 为真是收到的
+    /// 这条连接自己；`owner` 是那个前端在 `Hello` 里报的设备名，没有 owner 或者它没报时为空。
+    /// 这是状态不是 VT 的标记，尺寸本身照旧只在输出流里的 `Resized` 处改。
+    SizeOwner {
+        id: SessionId,
+        mine: bool,
+        #[serde(default)]
+        owner: Option<String>,
+    },
     /// 比自己新的宿主才有的消息，前端忽略它。
     #[serde(other)]
     Unknown,
@@ -383,6 +451,10 @@ pub struct SessionInfo {
     /// shell 已经退出，会话还留着给前端看最后的屏幕。
     #[serde(default)]
     pub exited: bool,
+    /// 现在决定这个会话尺寸的前端的设备名，见 `HostMsg::SizeOwner`；没有 owner 或者它没报设备名
+    /// 时为空。
+    #[serde(default)]
+    pub size_owner: Option<String>,
 }
 
 /// shell 集成报告运行完的一条命令。
@@ -411,6 +483,26 @@ pub enum GoodbyeReason {
     Idle,
     /// 宿主出了错。
     Error { message: String },
+    /// 比自己新的宿主才有的原因，前端当作连接断了处理。
+    #[serde(other)]
+    Unknown,
+}
+
+/// 宿主为什么不交接，见 `HostMsg::HandoffRefused`。
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum HandoffRefusal {
+    /// 有桌面的界面连着它：多半是旧版本的 app 还开着，要先退出它。
+    DesktopConnected,
+    /// 已经在交给别的新宿主了。
+    Busy,
+    /// 宿主跑在某个 app 的进程里（`Welcome::standalone` 为假），会话归那个 app 管。
+    NotStandalone,
+    /// 宿主写的交接格式 `writes` 不在 `Handoff` 给的范围里。
+    UnsupportedFormat { writes: u32 },
+    /// 比自己新的宿主才有的原因。
+    #[serde(other)]
+    Unknown,
 }
 
 /// `ClientMsg::Spawn::start` 缺省时为真：旧的前端开会话时一律当场启动。

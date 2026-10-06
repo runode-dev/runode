@@ -77,6 +77,19 @@ host:
   unreachable_title: Couldn't reach the Runode terminal host
   unreachable_detail: "Terminals run inside this window for now and end when Runode quits. (%{reason})"
   ok: OK
+  handoff_failed_title: Couldn't move your terminals to this version of Runode
+  handoff_failed_detail: "The previous version's terminals (%{count}) are still running in its terminal host, untouched. This time terminals run inside this window, and command-line tools such as runode list still reach the old ones. Keep them, and Runode tries again next time it opens; or end them, and every old terminal is closed. (%{reason})"
+  handoff_failed_detail_uncounted: "The previous version's terminals are still running in its terminal host, untouched. This time terminals run inside this window, and command-line tools such as runode list still reach the old ones. Keep them, and Runode tries again next time it opens; or end them, and every old terminal is closed. (%{reason})"
+  pre_handoff_title: An older Runode terminal host is still running
+  pre_handoff_detail: "It comes from a version that can't hand its terminals over to this one. Keep it, and its terminals go on running while this window runs its own, until Runode asks again next time it opens; or end it, and every terminal it runs is closed."
+  old_app_title: An older version of Runode is still open
+  old_app_detail: "Its terminals can't move to this version while it's open, so terminals run inside this window for now and end when it quits. Quit the older Runode, then reopen this one."
+  keep_old: Keep Old Sessions
+  end_old: End Old Sessions
+  already_upgraded_title: Your terminals already moved to this version
+  already_upgraded_detail: "The terminal host is already running this version of Runode, so nothing was ended: the old terminals moved over after all and keep running there. This window still runs its own terminals; quit and reopen Runode to see the moved ones."
+  degraded_title: Runode was updated
+  degraded_detail: "Scrollback history couldn't be carried over for some terminals (%{count}). Their screens and running programs are fine."
 workspace:
   new: New Workspace
   choose: Open
@@ -98,6 +111,10 @@ quit:
 host_lost:
   message: Lost the connection to this terminal's session; what you see is the last screen before it dropped.
   reopen: Reopen in This Directory
+size_owner:
+  controlled_by: "Size set by %{device}"
+  controlled_elsewhere: Size set by another device
+  take_over: Click to take over
 background:
   title: Background Sessions
   end_all: End All

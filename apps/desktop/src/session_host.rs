@@ -1,13 +1,15 @@
 //! 桌面和终端宿主之间：宿主管着每个会话的 PTY 和权威的那份 VT（见 `runode_host`），桌面经一条
 //! 连接（`Link`）按 `runode_protocol` 和它说话。宿主跑在 app 进程里（`Host::connect_pair` 的一对
 //! socket），或者单独一个进程（`runode --host`，app 退出后会话还在），由配置项 `terminal-host`
-//! 在启动时定下，见 `launch::choose_mode`。
+//! 在启动时定下，见 `launch::choose_mode`。单独跑的宿主是别的构建时（app 升级了），先让这个构建
+//! 的新宿主接手它的会话，见 `handoff`。
 //!
 //! 启动时 `start` 在后台线程里读配置、定模式、连上宿主，主线程第一次用 `link` 时等它连好，读到的
 //! 配置交给主线程当第一份生效的配置（`take_config`）。
 //! 主题和要不要记命令历史跟着配置走，见 `configure`；别的进程经宿主请界面办的事见 `serve_ui`；
 //! 连接断了以后用 `reconnect` 重新连上。
 
+mod handoff;
 mod launch;
 mod link;
 
@@ -23,8 +25,9 @@ use futures::channel::mpsc::UnboundedReceiver;
 use gpui::{App, PromptLevel};
 use runode_config::Config;
 use runode_host::{BuildId, ClientMsg, Host};
-use runode_protocol::SessionInfo;
+use runode_protocol::{HandoffRefusal, SessionInfo};
 
+pub use handoff::{HandoffFailure, HandoffStatus, READY_BY};
 use launch::{Choice, Probe};
 // `Attached` 给视图状态机（重新连上、只看状态）用。
 #[allow(unused_imports)]
@@ -45,6 +48,13 @@ pub enum Mode {
 const LIST_TIMEOUT: Duration = Duration::from_secs(2);
 /// 让留下的宿主退出后，最多等这么久拿到它放开的锁、开自己的 socket。
 const LISTEN_RETRY: Duration = Duration::from_secs(2);
+/// 另一个新 app 正在让新宿主接手（`HandoffRefusal::Busy`）时，等这么久再探一次：多半会探到它
+/// 拉起的、和这边同一个构建的新宿主。
+const BUSY_RETRY: Duration = Duration::from_secs(1);
+/// 最多这么多次。
+const BUSY_TRIES: u32 = 5;
+/// 交接后有终端的回滚历史没带过来时发的通知的标识。
+const DEGRADED_TAG: &str = "runode-handoff-degraded";
 
 fn build() -> BuildId {
     BuildId(env!("RUNODE_BUILD").into())
@@ -73,6 +83,21 @@ pub enum Notice {
     OtherApp,
     /// 要单独一个进程的宿主，却连不上也拉不起来，这次跑在 app 里，退出时会话跟着结束。
     Unreachable(String),
+    /// 升级时没能让新宿主接手旧宿主的会话（拒绝、出错、超时、新宿主崩溃）：旧宿主连同它的
+    /// `sessions` 个会话（协议对不上时不知道几个）照常跑着，这次跑在 app 里、不开 socket。问用户
+    /// 留着它还是结束它。
+    HandoffFailed { reason: String, sessions: Option<usize> },
+    /// socket 上的旧宿主太老，不会交接：同上，问用户留着它还是结束它。
+    PreHandoff,
+    /// 交接成了，但 `count` 个终端退成了重放，回滚历史没带过来。不用用户做什么，不弹框。
+    HandoffDegraded { count: usize },
+    /// 旧版本的 app 还开着：它连着旧宿主、旧宿主不交（`HandoffRefusal::DesktopConnected`），或者
+    /// 用户要结束的旧宿主其实跑在它的进程里（见 `launch::Ended::NotAHost`）。这次跑在 app 里、
+    /// 不开 socket，请用户先退出旧版本。
+    OldAppRunning,
+    /// 用户要结束旧宿主，socket 上却已经是这个构建的宿主了（交接其实成了，或者另一个同版本的
+    /// app 让它接手了）：没结束它，会话在它那里；这个 app 已经跑着自己的宿主，下次打开时连上它。
+    AlreadyUpgraded,
 }
 
 fn notify(notice: Notice) {
@@ -210,52 +235,190 @@ fn socket_path() -> Option<PathBuf> {
 fn establish(terminal_host: bool) {
     let build = build();
     let socket = socket_path();
-    let probe = socket.as_deref().map_or(Probe::Absent, |socket| launch::probe(socket, &build));
-    let choice = launch::choose_mode(terminal_host, &probe);
-    tracing::info!("host: {probe:?} with terminal-host = {terminal_host}, so {choice:?}");
-    match &probe {
-        Probe::Incompatible(reason) => {
-            tracing::warn!("an incompatible host is running, so the host runs in the app without a socket: {reason}");
-            notify(Notice::Incompatible(reason.clone()));
-        }
-        Probe::OtherApp => {
+    let mut busy = 0;
+    let mode = loop {
+        let probe = socket.as_deref().map_or(Probe::Absent, |socket| launch::probe(socket, &build));
+        let choice = launch::choose_mode(terminal_host, &probe, &build);
+        tracing::info!("host: {probe:?} with terminal-host = {terminal_host}, so {choice:?}");
+        if probe == Probe::OtherApp {
             tracing::warn!("another runode app runs the host on the socket, so this one runs its own without a socket");
             notify(Notice::OtherApp);
         }
-        _ => {}
-    }
-    let mode = match (choice, socket) {
-        (Choice::InProcess { listen }, _) => in_process(listen),
-        (Choice::Retire, Some(socket)) => {
-            if let Err(err) = launch::retire(&socket, &build) {
-                tracing::warn!("failed to stop the leftover host: {err}");
+        break match (choice, socket.as_deref()) {
+            (Choice::InProcess { listen }, _) => in_process(listen),
+            (Choice::PreHandoff, _) => {
+                tracing::warn!("a host too old to hand over is running, so the host runs in the app without a socket");
+                notify(Notice::PreHandoff);
+                in_process(false)
             }
-            in_process(true)
-        }
-        (Choice::Keep { end_on_quit }, Some(socket)) => {
-            let connected = launch::connect(&LINK, &socket).or_else(|err| match err {
-                ConnectError::Incompatible(_) | ConnectError::NotStandalone => Err(err),
-                // 开关关着，只是来接上次留下的会话：不为它另拉起宿主。
-                err if end_on_quit => Err(err),
-                // 宿主在跑却连不上（比如卡住了，或者刚好在退出）：照开关开着时的办法，连不上就拉起
-                // 新的；它还拿着锁时新拉起的抢不到、自己退出，等它放开后再拉。
-                err => {
-                    tracing::warn!("failed to connect to the running host, starting one: {err}");
-                    launch_host(&socket)
+            (Choice::Retire, Some(socket)) => {
+                if let Err(err) = launch::retire(socket, &build) {
+                    tracing::warn!("failed to stop the leftover host: {err}");
                 }
-            });
-            match connected {
-                Ok(()) => Mode::Standalone { end_on_quit },
+                in_process(true)
+            }
+            (Choice::Keep { end_on_quit }, Some(socket)) => {
+                let connected = launch::connect(&LINK, socket).or_else(|err| match err {
+                    ConnectError::Incompatible(_) | ConnectError::NotStandalone => Err(err),
+                    // 开关关着，只是来接上次留下的会话：不为它另拉起宿主。
+                    err if end_on_quit => Err(err),
+                    // 宿主在跑却连不上（比如卡住了，或者刚好在退出）：照开关开着时的办法，连不上就拉起
+                    // 新的；它还拿着锁时新拉起的抢不到、自己退出，等它放开后再拉。
+                    err => {
+                        tracing::warn!("failed to connect to the running host, starting one: {err}");
+                        launch_host(socket)
+                    }
+                });
+                match connected {
+                    Ok(()) => Mode::Standalone { end_on_quit },
+                    Err(err) => fall_back(err),
+                }
+            }
+            (Choice::Launch, Some(socket)) => match launch_host(socket) {
+                Ok(()) => Mode::Standalone { end_on_quit: false },
+                Err(err) => fall_back(err),
+            },
+            (Choice::HandOver { end_on_quit }, Some(socket)) => {
+                let sessions = match &probe {
+                    Probe::Running { sessions, .. } => Some(*sessions),
+                    _ => None,
+                };
+                match hand_over(socket, end_on_quit, sessions) {
+                    Some(mode) => mode,
+                    None if busy < BUSY_TRIES => {
+                        busy += 1;
+                        thread::sleep(BUSY_RETRY);
+                        continue;
+                    }
+                    None => {
+                        let reason = "another runode kept upgrading the host".to_owned();
+                        tracing::warn!("{reason}, running the host in the app without a socket");
+                        notify(Notice::HandoffFailed { reason, sessions });
+                        in_process(false)
+                    }
+                }
+            }
+            (_, None) => in_process(false),
+        };
+    };
+    *MODE.lock().unwrap_or_else(PoisonError::into_inner) = mode;
+}
+
+/// 让这个构建的新宿主接手 `socket` 上旧宿主的会话（见 `handoff::hand_over`），成了就连上它。
+/// `sessions` 是旧宿主有几个会话，协议对不上时不知道。另一个新 app 正在交接时返回 `None`，由
+/// 调用方过一会儿重新探。
+///
+/// 没交成时旧宿主连同会话照常跑着，这次跑在 app 里、不开 socket（锁在它手里），弹框问用户；只有
+/// 开关开着、旧宿主又没有会话时，没什么可丢的，让它退出、拉起这个构建的。
+fn hand_over(socket: &Path, end_on_quit: bool, sessions: Option<usize>) -> Option<Mode> {
+    let started = Instant::now();
+    let outcome = match std::env::current_exe() {
+        Ok(exe) => handoff::hand_over(&exe, handoff::Timing::default()),
+        Err(err) => handoff::Outcome::Failed(format!("cannot tell where this app is: {err}")),
+    };
+    tracing::info!("handoff: {outcome:?} after {:?}", started.elapsed());
+    let failed = |reason: String| {
+        if sessions == Some(0) && !end_on_quit {
+            tracing::warn!("the handoff failed ({reason}); the old host has no sessions, so replacing it");
+            if let Err(err) = launch::retire(socket, &build()) {
+                tracing::warn!("failed to stop the old host: {err}");
+            }
+            return match launch_host(socket) {
+                Ok(()) => Mode::Standalone { end_on_quit: false },
+                Err(err) => fall_back(err),
+            };
+        }
+        tracing::warn!("the handoff failed, running the host in the app without a socket: {reason}");
+        notify(Notice::HandoffFailed { reason, sessions });
+        in_process(false)
+    };
+    let mode = match outcome {
+        handoff::Outcome::TookOver { sessions, replayed } => {
+            tracing::info!("the new host took over {sessions} sessions, {replayed} of them without scrollback");
+            // 接手的是这个构建的新宿主；对不上时（又被别的版本接手了）照样连，记一笔。
+            if let Probe::Running { build: theirs, .. } = launch::probe(socket, &build())
+                && theirs != build()
+            {
+                tracing::warn!("expected the new host to be build {:?}, found {theirs:?}", build());
+            }
+            match launch::connect(&LINK, socket) {
+                Ok(()) => {
+                    if replayed > 0 {
+                        notify(Notice::HandoffDegraded { count: replayed });
+                    }
+                    Mode::Standalone { end_on_quit }
+                }
                 Err(err) => fall_back(err),
             }
         }
-        (Choice::Launch, Some(socket)) => match launch_host(&socket) {
-            Ok(()) => Mode::Standalone { end_on_quit: false },
-            Err(err) => fall_back(err),
-        },
-        (_, None) => in_process(false),
+        handoff::Outcome::Refused(HandoffRefusal::Busy) => return None,
+        handoff::Outcome::Refused(HandoffRefusal::DesktopConnected) => {
+            tracing::warn!("an older runode app is still connected to the old host, running the host in the app");
+            notify(Notice::OldAppRunning);
+            in_process(false)
+        }
+        handoff::Outcome::Refused(HandoffRefusal::NotStandalone) => {
+            tracing::warn!("the host on the socket now runs inside another runode app, running this one's in the app");
+            notify(Notice::OtherApp);
+            in_process(false)
+        }
+        handoff::Outcome::PreHandoff => {
+            tracing::warn!("the old host cannot hand over, running the host in the app without a socket");
+            notify(Notice::PreHandoff);
+            in_process(false)
+        }
+        handoff::Outcome::Refused(reason) => failed(format!("the old host refused to hand over: {reason:?}")),
+        handoff::Outcome::Failed(reason) => failed(reason),
     };
-    *MODE.lock().unwrap_or_else(PoisonError::into_inner) = mode;
+    Some(mode)
+}
+
+/// 用户在弹框里选了结束旧宿主（连同它的会话）：在后台线程里结束它（`terminate` 时不管它说
+/// 什么协议，直接发 SIGTERM，见 `launch::terminate`；否则见 `launch::end_old_host`），之后
+/// 这个 app 里的宿主开 socket，让命令行连得上。对面不是单独的宿主进程（宿主跑在旧版本的 app
+/// 里）时不结束它，改请用户先退出旧版本（`Notice::OldAppRunning`）。
+///
+/// 动手前再探一次：弹框之后 socket 上可能已经换成这个构建的宿主（交接比这边等的久、最后成了，
+/// 或者另一个同版本的 app 让新宿主接手了），结束它就把刚接过去的会话全结束了。这时不结束，告诉
+/// 用户（`Notice::AlreadyUpgraded`）。不在运行中把这个 app 改连过去：窗口里的终端都在 app 自己
+/// 的宿主里，换了连接它们就断了。
+fn end_old_host(terminate: bool, cx: &mut gpui::AsyncApp) {
+    let (tx, rx) = futures::channel::oneshot::channel();
+    let spawned = thread::Builder::new().name("end-old-host".into()).spawn(move || {
+        let Some(socket) = socket_path() else { return };
+        if let Probe::Running { build: theirs, .. } = launch::probe(&socket, &build())
+            && theirs == build()
+        {
+            tracing::warn!("the host on the socket is already this build, so not ending it");
+            let _ = tx.send(Notice::AlreadyUpgraded);
+            return;
+        }
+        let ended = if terminate { launch::terminate(&socket) } else { launch::end_old_host(&socket, &build()) };
+        match ended {
+            Ok(launch::Ended::Ended) => {
+                tracing::info!("ended the old host and its sessions");
+                if let Some(host) = IN_PROCESS.get() {
+                    listen_in_app(host);
+                }
+            }
+            Ok(launch::Ended::NotAHost) => {
+                tracing::warn!("the old host runs inside an older runode app, asking to quit it instead");
+                let _ = tx.send(Notice::OldAppRunning);
+            }
+            Err(err) => tracing::warn!("failed to end the old host: {err}"),
+        }
+    });
+    if let Err(err) = spawned {
+        tracing::warn!("failed to start ending the old host: {err}");
+        return;
+    }
+    cx.spawn(async move |cx| {
+        if let Ok(notice) = rx.await {
+            notify(notice);
+            cx.update(show_notice);
+        }
+    })
+    .detach();
 }
 
 /// 连上 socket 上单独一个进程的宿主，没有就拉起一个，见 `launch::connect_or_launch`。
@@ -336,28 +499,70 @@ fn listen_in_app(host: &Host) {
     }
 }
 
-/// 有要告诉用户的宿主的事（见 `Notice`）时，在最前面的窗口上弹框说一声。
+/// 有要告诉用户的宿主的事（见 `Notice`）时，在最前面的窗口上弹框说一声；交接没成时弹框问用户
+/// 留着旧宿主（默认）还是结束它。回滚历史没带过来这种不用做决定的事发系统通知，不弹框。
 pub fn show_notice(cx: &mut App) {
     let Some(notice) = take_notice() else { return };
+    // 选了「结束旧会话」时怎么结束：`Some(true)` 直接发 SIGTERM，`Some(false)` 先试着让它自己退出。
+    let (title, detail, end) = match notice {
+        Notice::Incompatible(reason) => {
+            (rust_i18n::t!("host.incompatible_title"), rust_i18n::t!("host.incompatible_detail", reason = reason), None)
+        }
+        Notice::OtherApp => (rust_i18n::t!("host.other_app_title"), rust_i18n::t!("host.other_app_detail"), None),
+        Notice::Unreachable(reason) => {
+            (rust_i18n::t!("host.unreachable_title"), rust_i18n::t!("host.unreachable_detail", reason = reason), None)
+        }
+        Notice::OldAppRunning => (rust_i18n::t!("host.old_app_title"), rust_i18n::t!("host.old_app_detail"), None),
+        Notice::AlreadyUpgraded => {
+            (rust_i18n::t!("host.already_upgraded_title"), rust_i18n::t!("host.already_upgraded_detail"), None)
+        }
+        Notice::PreHandoff => {
+            (rust_i18n::t!("host.pre_handoff_title"), rust_i18n::t!("host.pre_handoff_detail"), Some(true))
+        }
+        Notice::HandoffFailed { reason, sessions } => {
+            let detail = match sessions {
+                Some(count) => rust_i18n::t!("host.handoff_failed_detail", count = count, reason = reason),
+                None => rust_i18n::t!("host.handoff_failed_detail_uncounted", reason = reason),
+            };
+            (rust_i18n::t!("host.handoff_failed_title"), detail, Some(false))
+        }
+        Notice::HandoffDegraded { count } => {
+            report_degraded(count, cx);
+            return;
+        }
+    };
     let Some(window) = cx.active_window().or_else(|| cx.windows().into_iter().next()) else {
         return;
     };
-    let (title, detail) = match notice {
-        Notice::Incompatible(reason) => {
-            (rust_i18n::t!("host.incompatible_title"), rust_i18n::t!("host.incompatible_detail", reason = reason))
-        }
-        Notice::OtherApp => (rust_i18n::t!("host.other_app_title"), rust_i18n::t!("host.other_app_detail")),
-        Notice::Unreachable(reason) => {
-            (rust_i18n::t!("host.unreachable_title"), rust_i18n::t!("host.unreachable_detail", reason = reason))
-        }
-    };
-    let answer = window.update(cx, |_, window, cx| {
-        window.prompt(PromptLevel::Warning, &title, Some(&detail), &[&*rust_i18n::t!("host.ok")], cx)
-    });
+    let ok = rust_i18n::t!("host.ok");
+    let (keep, end_old) = (rust_i18n::t!("host.keep_old"), rust_i18n::t!("host.end_old"));
+    // 默认（第一个）按钮留着旧宿主。
+    let answers: Vec<&str> = if end.is_some() { vec![&keep, &end_old] } else { vec![&ok] };
+    let answer =
+        window.update(cx, |_, window, cx| window.prompt(PromptLevel::Warning, &title, Some(&detail), &answers, cx));
     if let Ok(answer) = answer {
-        cx.spawn(async move |_| {
-            let _ = answer.await;
+        cx.spawn(async move |cx| {
+            if let (Some(terminate), Ok(1)) = (end, answer.await) {
+                end_old_host(terminate, cx);
+            }
         })
         .detach();
     }
+}
+
+/// 交接后 `count` 个终端的回滚历史没带过来：发一条系统通知。不在 .app 里时通知中心用不了，只记
+/// 日志。
+fn report_degraded(count: usize, cx: &mut App) {
+    tracing::warn!("the scrollback of {count} terminals was not carried over in the handoff");
+    #[cfg(target_os = "macos")]
+    if crate::about::in_app_bundle() {
+        cx.show_system_notification(gpui::SystemNotification {
+            tag: DEGRADED_TAG.into(),
+            title: rust_i18n::t!("host.degraded_title").into_owned().into(),
+            body: rust_i18n::t!("host.degraded_detail", count = count).into_owned().into(),
+            actions: Vec::new(),
+        });
+    }
+    #[cfg(not(target_os = "macos"))]
+    let _ = (cx, DEGRADED_TAG);
 }
