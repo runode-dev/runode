@@ -25,8 +25,8 @@
 /* Begin PBXFileReference section */
 		A10000000000000000000006 /* Runode.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Runode.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		A10000000000000000000007 /* RunodeTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = RunodeTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
-		A10000000000000000000024 /* RunodeKit */ = {isa = PBXFileReference; lastKnownFileType = wrapper; path = RunodeKit; sourceTree = "<group>"; };
 		A10000000000000000000022 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		A10000000000000000000024 /* RunodeKit */ = {isa = PBXFileReference; lastKnownFileType = wrapper; path = RunodeKit; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -298,6 +298,8 @@
 				INFOPLIST_FILE = Config/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = runode;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
+				INFOPLIST_KEY_NSCameraUsageDescription = "扫 Mac 上 runode 显示的配对二维码。";
+				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "在局域网里找到并连接你 Mac 上的 runode。";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -327,6 +329,8 @@
 				INFOPLIST_FILE = Config/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = runode;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
+				INFOPLIST_KEY_NSCameraUsageDescription = "扫 Mac 上 runode 显示的配对二维码。";
+				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "在局域网里找到并连接你 Mac 上的 runode。";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
