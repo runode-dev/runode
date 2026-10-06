@@ -148,9 +148,19 @@ pub fn retire(socket: &Path, build: &BuildId) -> io::Result<()> {
     Ok(())
 }
 
+/// `end_old_host`、`terminate` 做成了什么。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Ended {
+    /// 旧宿主连同会话结束了。
+    Ended,
+    /// socket 对面的进程不是以 `--host` 启动的单独宿主（多半是协议 3 及以前的旧 app，宿主跑在
+    /// 它的进程里）：没发信号，免得结束一整个 app。
+    NotAHost,
+}
+
 /// 用户要结束交接没成的旧宿主（连同它的会话）：说得通协议的同 `retire`；协议对不上的（`Probe`
 /// 是 `Incompatible`）没法让它自己退出，同 `terminate`。跑在另一个 app 里的不碰，返回错误。
-pub fn end_old_host(socket: &Path, build: &BuildId) -> io::Result<()> {
+pub fn end_old_host(socket: &Path, build: &BuildId) -> io::Result<Ended> {
     let mut stream = UnixStream::connect(socket)?;
     stream.set_read_timeout(Some(CONNECT_TIMEOUT))?;
     stream.set_write_timeout(Some(CONNECT_TIMEOUT))?;
@@ -168,18 +178,24 @@ pub fn end_old_host(socket: &Path, build: &BuildId) -> io::Result<()> {
     }
     send(&mut stream, &ClientMsg::Shutdown { kill_sessions: true })?;
     while read_frame(&mut stream).map_err(|err| io::Error::other(err.to_string()))?.is_some() {}
-    Ok(())
+    Ok(Ended::Ended)
 }
 
 /// 给 `socket` 上的宿主进程发 SIGTERM（连同它的会话一起结束），不管它说什么协议：pid 从连接
-/// 对端取（`LOCAL_PEERPID`），只认同一个用户的进程。等到 socket 连不上为止，最多
-/// `CONNECT_TIMEOUT`。
-pub fn terminate(socket: &Path) -> io::Result<()> {
+/// 对端取（`LOCAL_PEERPID`），只认同一个用户的进程，而且只认以 `--host` 启动的单独宿主进程
+/// （见 `launched_as_host`）；别的（旧 app 进程里的宿主）不发，返回 `Ended::NotAHost`。发了
+/// 之后等到 socket 连不上为止，最多 `CONNECT_TIMEOUT`。
+pub fn terminate(socket: &Path) -> io::Result<Ended> {
     let stream = UnixStream::connect(socket)?;
     let pid = peer_pid(&stream)?;
     drop(stream);
     if pid <= 0 || pid.unsigned_abs() == std::process::id() {
         return Err(io::Error::other(format!("refusing to end process {pid}")));
+    }
+    let args = process_args(pid)?;
+    if !launched_as_host(&args) {
+        tracing::warn!("process {pid} on the host socket is not a standalone host, leaving it alone");
+        return Ok(Ended::NotAHost);
     }
     // SAFETY: 只发信号，参数都是值。
     if unsafe { libc::kill(pid, libc::SIGTERM) } != 0 {
@@ -194,7 +210,58 @@ pub fn terminate(socket: &Path) -> io::Result<()> {
         }
         thread::sleep(Duration::from_millis(20));
     }
-    Ok(())
+    Ok(Ended::Ended)
+}
+
+/// 启动参数（不含程序名）里有没有 `--host`：有的是单独跑的宿主进程（`runode --host`，以及
+/// `--host --take-over`），没有的是 app 本身。
+fn launched_as_host(args: &[Vec<u8>]) -> bool {
+    args.iter().skip(1).any(|arg| arg == b"--host")
+}
+
+/// 进程 `pid` 的启动参数（含程序名），用 `sysctl(KERN_PROCARGS2)` 读，见 `parse_procargs`。
+fn process_args(pid: libc::pid_t) -> io::Result<Vec<Vec<u8>>> {
+    let mut max: libc::c_int = 0;
+    let mut size = std::mem::size_of::<libc::c_int>();
+    let mut mib = [libc::CTL_KERN, libc::KERN_ARGMAX];
+    // SAFETY: mib 和输出参数都指向本地变量，长度是它们的大小；不写入新值。
+    let result =
+        unsafe { libc::sysctl(mib.as_mut_ptr(), 2, (&raw mut max).cast(), &mut size, std::ptr::null_mut(), 0) };
+    if result != 0 {
+        return Err(io::Error::last_os_error());
+    }
+    let mut buffer = vec![0u8; usize::try_from(max).unwrap_or(0).max(4)];
+    let mut size = buffer.len();
+    let mut mib = [libc::CTL_KERN, libc::KERN_PROCARGS2, pid];
+    // SAFETY: 输出缓冲区长 `size` 字节，内核最多写这么多并把实际长度写回 `size`；不写入新值。
+    let result =
+        unsafe { libc::sysctl(mib.as_mut_ptr(), 3, buffer.as_mut_ptr().cast(), &mut size, std::ptr::null_mut(), 0) };
+    if result != 0 {
+        return Err(io::Error::last_os_error());
+    }
+    buffer.truncate(size);
+    parse_procargs(&buffer).ok_or_else(|| {
+        io::Error::new(io::ErrorKind::InvalidData, format!("cannot read the arguments of process {pid}"))
+    })
+}
+
+/// 解 `KERN_PROCARGS2` 的结果：本机字节序的 `int argc`，可执行文件的路径（以 NUL 结尾，后面可能
+/// 补几个 NUL 对齐），接着 `argc` 个以 NUL 结尾的参数（第一个是程序名），再往后是环境变量，不要。
+/// 格式不对时为 `None`。
+fn parse_procargs(data: &[u8]) -> Option<Vec<Vec<u8>>> {
+    let argc = usize::try_from(i32::from_ne_bytes(data.get(..4)?.try_into().ok()?)).ok()?;
+    let rest = &data[4..];
+    let path_end = rest.iter().position(|&byte| byte == 0)?;
+    let mut rest = &rest[path_end..];
+    let start = rest.iter().position(|&byte| byte != 0)?;
+    rest = &rest[start..];
+    let mut args = Vec::with_capacity(argc.min(64));
+    for _ in 0..argc {
+        let end = rest.iter().position(|&byte| byte == 0)?;
+        args.push(rest[..end].to_vec());
+        rest = &rest[end + 1..];
+    }
+    Some(args)
 }
 
 /// 连接对端进程的 pid，只认同一个用户的。
@@ -301,6 +368,80 @@ mod tests {
 
     fn incompatible(protocol: u32) -> Probe {
         Probe::Incompatible { protocol, reason: format!("protocol {protocol}") }
+    }
+
+    /// `KERN_PROCARGS2` 的布局：argc、可执行文件路径、补齐的 NUL、参数、环境变量。
+    fn procargs(path: &str, padding: usize, args: &[&str], env: &[&str]) -> Vec<u8> {
+        let mut data = i32::try_from(args.len()).unwrap().to_ne_bytes().to_vec();
+        data.extend_from_slice(path.as_bytes());
+        data.extend(std::iter::repeat_n(0, 1 + padding));
+        for item in args.iter().chain(env) {
+            data.extend_from_slice(item.as_bytes());
+            data.push(0);
+        }
+        data
+    }
+
+    fn owned(args: &[&str]) -> Vec<Vec<u8>> {
+        args.iter().map(|arg| arg.as_bytes().to_vec()).collect()
+    }
+
+    #[test]
+    fn process_arguments_are_read_from_the_kernel_layout() {
+        let exe = "/Applications/Runode.app/Contents/MacOS/runode";
+        let data = procargs(exe, 3, &[exe, "--host"], &["HOME=/Users/me", "TERM=xterm"]);
+        assert_eq!(parse_procargs(&data), Some(owned(&[exe, "--host"])));
+        // 没有补齐的 NUL，只有程序名。
+        assert_eq!(parse_procargs(&procargs(exe, 0, &[exe], &[])), Some(owned(&[exe])));
+        // 环境变量不要，没有也行。
+        let env = "HOME=/Users/me\0TERM=xterm\0".len();
+        assert_eq!(parse_procargs(&data[..data.len() - env]), Some(owned(&[exe, "--host"])));
+        // 参数被截断、argc 比实际多、负数、太短：读不出来。
+        assert_eq!(parse_procargs(&data[..data.len() - env - 3]), None);
+        assert_eq!(parse_procargs(&procargs(exe, 1, &[exe, "--host"], &[])[..60]), None);
+        let mut lying = procargs(exe, 1, &[exe], &[]);
+        lying[..4].copy_from_slice(&5i32.to_ne_bytes());
+        assert_eq!(parse_procargs(&lying), None);
+        let mut negative = procargs(exe, 1, &[exe], &[]);
+        negative[..4].copy_from_slice(&(-1i32).to_ne_bytes());
+        assert_eq!(parse_procargs(&negative), None);
+        assert_eq!(parse_procargs(&[1, 0]), None);
+    }
+
+    /// 只有以 `--host` 启动的才算单独的宿主；程序名本身不算，app 带的别的参数也不算。
+    #[test]
+    fn only_processes_started_with_host_are_hosts() {
+        assert!(launched_as_host(&owned(&["/x/runode", "--host"])));
+        assert!(launched_as_host(&owned(&["/x/runode", "--host", "--take-over"])));
+        assert!(!launched_as_host(&owned(&["/x/runode"])));
+        assert!(!launched_as_host(&owned(&["/x/runode", "-psn_0_12345"])));
+        assert!(!launched_as_host(&owned(&["--host"])));
+        assert!(!launched_as_host(&owned(&["/x/runode", "list", "--hosts"])));
+        assert!(!launched_as_host(&[]));
+    }
+
+    /// 真读一个进程：读这个测试进程自己，和它看到的参数一样，也不是宿主。
+    #[test]
+    fn this_process_reads_its_own_arguments() {
+        let pid = libc::pid_t::try_from(std::process::id()).unwrap();
+        let args = process_args(pid).unwrap();
+        let expected: Vec<Vec<u8>> = std::env::args_os().map(|arg| arg.into_encoded_bytes()).collect();
+        assert_eq!(args, expected);
+        assert!(!launched_as_host(&args));
+    }
+
+    /// 读另一个进程：启动参数里带 `--host` 的认得出来。
+    #[test]
+    fn another_process_started_with_host_is_recognised() {
+        // 后面的 `:` 让 sh 不直接 exec 成 sleep，参数留在 sh 身上。
+        let mut child = std::process::Command::new("/bin/sh").args(["-c", "sleep 5; :", "--host"]).spawn().unwrap();
+        let pid = libc::pid_t::try_from(child.id()).unwrap();
+        let args = process_args(pid);
+        let _ = child.kill();
+        let _ = child.wait();
+        let args = args.unwrap();
+        assert_eq!(args, owned(&["/bin/sh", "-c", "sleep 5; :", "--host"]));
+        assert!(launched_as_host(&args));
     }
 
     /// 决策表：开关 × 探到的宿主 → 怎么跑。

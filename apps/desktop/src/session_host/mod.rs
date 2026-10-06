@@ -88,8 +88,9 @@ pub enum Notice {
     PreHandoff,
     /// 交接成了，但 `count` 个终端退成了重放，回滚历史没带过来。不用用户做什么，不弹框。
     HandoffDegraded { count: usize },
-    /// 旧版本的 app 还连着旧宿主，旧宿主不交（`HandoffRefusal::DesktopConnected`）：这次跑在
-    /// app 里、不开 socket，请用户先退出旧版本。
+    /// 旧版本的 app 还开着：它连着旧宿主、旧宿主不交（`HandoffRefusal::DesktopConnected`），或者
+    /// 用户要结束的旧宿主其实跑在它的进程里（见 `launch::Ended::NotAHost`）。这次跑在 app 里、
+    /// 不开 socket，请用户先退出旧版本。
     OldAppRunning,
 }
 
@@ -359,24 +360,38 @@ fn hand_over(socket: &Path, end_on_quit: bool, sessions: Option<usize>) -> Optio
 
 /// 用户在弹框里选了结束旧宿主（连同它的会话）：在后台线程里结束它（`terminate` 时不管它说
 /// 什么协议，直接发 SIGTERM，见 `launch::terminate`；否则见 `launch::end_old_host`），之后
-/// 这个 app 里的宿主开 socket，让命令行连得上。
-fn end_old_host(terminate: bool) {
+/// 这个 app 里的宿主开 socket，让命令行连得上。对面不是单独的宿主进程（宿主跑在旧版本的 app
+/// 里）时不结束它，改请用户先退出旧版本（`Notice::OldAppRunning`）。
+fn end_old_host(terminate: bool, cx: &mut gpui::AsyncApp) {
+    let (tx, rx) = futures::channel::oneshot::channel();
     let spawned = thread::Builder::new().name("end-old-host".into()).spawn(move || {
         let Some(socket) = socket_path() else { return };
         let ended = if terminate { launch::terminate(&socket) } else { launch::end_old_host(&socket, &build()) };
         match ended {
-            Ok(()) => {
+            Ok(launch::Ended::Ended) => {
                 tracing::info!("ended the old host and its sessions");
                 if let Some(host) = IN_PROCESS.get() {
                     listen_in_app(host);
                 }
+            }
+            Ok(launch::Ended::NotAHost) => {
+                tracing::warn!("the old host runs inside an older runode app, asking to quit it instead");
+                let _ = tx.send(());
             }
             Err(err) => tracing::warn!("failed to end the old host: {err}"),
         }
     });
     if let Err(err) = spawned {
         tracing::warn!("failed to start ending the old host: {err}");
+        return;
     }
+    cx.spawn(async move |cx| {
+        if rx.await.is_ok() {
+            notify(Notice::OldAppRunning);
+            cx.update(show_notice);
+        }
+    })
+    .detach();
 }
 
 /// 连上 socket 上单独一个进程的宿主，没有就拉起一个，见 `launch::connect_or_launch`。
@@ -496,9 +511,9 @@ pub fn show_notice(cx: &mut App) {
     let answer =
         window.update(cx, |_, window, cx| window.prompt(PromptLevel::Warning, &title, Some(&detail), &answers, cx));
     if let Ok(answer) = answer {
-        cx.spawn(async move |_| {
+        cx.spawn(async move |cx| {
             if let (Some(terminate), Ok(1)) = (end, answer.await) {
-                end_old_host(terminate);
+                end_old_host(terminate, cx);
             }
         })
         .detach();
