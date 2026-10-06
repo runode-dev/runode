@@ -14,8 +14,8 @@ use runode_shared_types::color::Rgb;
 use super::super::{TITLEBAR_HEIGHT, WindowView, divider_color};
 use crate::{
     assets::{BRANCH_ICON, CHECK_ICON, PLUS_ICON},
-    search_bar::{SearchField, SearchFieldEvent},
     terminal_view::hsla,
+    ui::text_field::{SearchField, SearchFieldEvent},
 };
 
 const PICKER_WIDTH: f32 = 520.;

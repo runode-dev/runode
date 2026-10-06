@@ -329,7 +329,7 @@ impl WindowView {
     }
 
     /// 根目录是 `root` 的仓库的提交说明框，还没建出来时为空。
-    pub(super) fn commit_box(&self, root: &Path) -> Option<gpui::Entity<crate::text_area::TextArea>> {
+    pub(super) fn commit_box(&self, root: &Path) -> Option<gpui::Entity<crate::ui::text_area::TextArea>> {
         self.workspace().project.git_panel.repos.get(root)?.commit_box.clone()
     }
 

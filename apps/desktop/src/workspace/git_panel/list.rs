@@ -24,9 +24,9 @@ use crate::{
         CHEVRON_DOWN_ICON, CHEVRON_RIGHT_ICON, DISCARD_ICON, MINUS_ICON, OPEN_FILE_ICON, PLUS_ICON, REFRESH_ICON,
         STASH_APPLY_ICON, STASH_POP_ICON, TRASH_ICON,
     },
-    file_icons::{file_icon, folder_icon},
     terminal_view::hsla,
-    tooltip::tooltip,
+    ui::file_icons::{file_icon, folder_icon},
+    ui::tooltip::tooltip,
     workspace::{WindowView, files::menu_item, preview::DiffTarget, project::status_color},
 };
 

@@ -13,7 +13,7 @@ macro_rules! icons {
 
         /// 所有类型图标的资源路径和内容，`Assets` 按路径从这里取。
         pub const FILES: &[(&str, &[u8])] = &[
-            $(($konst, include_bytes!(concat!("../assets/icons/types/", $name, ".svg"))),)*
+            $(($konst, include_bytes!(concat!("../../assets/icons/types/", $name, ".svg"))),)*
         ];
     };
 }

@@ -14,9 +14,9 @@ use super::{
     RenameFile, RevealInFinder,
 };
 use crate::{
-    search_bar::Cut,
     terminal_view::{Copy, Paste, hsla},
-    tooltip::shortcut_text,
+    ui::text_field::Cut,
+    ui::tooltip::shortcut_text,
     workspace::WindowView,
 };
 

@@ -11,7 +11,7 @@ use super::{
     ops::{self, OpError},
 };
 use crate::{
-    file_icons::{file_icon, folder_icon},
+    ui::file_icons::{file_icon, folder_icon},
     workspace::{WindowView, inline_edit::InlineEdit},
 };
 

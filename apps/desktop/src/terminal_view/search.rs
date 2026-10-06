@@ -5,8 +5,10 @@ use runode_terminal::session::Session;
 
 use super::{TerminalView, hsla};
 use crate::{
-    search_bar::{EndSearch, SearchField, SearchFieldEvent, SearchNext, SearchPrevious, SearchSelection, StartSearch},
-    tooltip::tooltip,
+    ui::text_field::{
+        EndSearch, SearchField, SearchFieldEvent, SearchNext, SearchPrevious, SearchSelection, StartSearch,
+    },
+    ui::tooltip::tooltip,
 };
 
 impl TerminalView {

@@ -16,8 +16,8 @@ use gpui::{
 };
 
 use crate::{
-    search_bar::{Cut, Redo, Undo},
     terminal_view::{Copy, Paste, SelectAll},
+    ui::text_field::{Cut, Redo, Undo},
 };
 
 actions!(

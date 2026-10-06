@@ -17,8 +17,8 @@ use super::{
     titlebar::agent_mark,
 };
 use crate::{
-    search_bar::{SearchField, SearchFieldEvent},
     terminal_view::hsla,
+    ui::text_field::{SearchField, SearchFieldEvent},
 };
 
 /// 浮层的宽度；窗口窄时随窗口收窄。

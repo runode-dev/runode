@@ -16,7 +16,7 @@ use super::{
 };
 use crate::{
     terminal_view::{DEFAULT_TITLE, hsla},
-    tooltip::{shortcut_text, tooltip},
+    ui::tooltip::{shortcut_text, tooltip},
 };
 
 /// 标签右侧槽位的宽度，放快捷键提示或响铃标记；和关闭按钮一边一个，标题才在标签里居中。

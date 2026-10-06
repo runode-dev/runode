@@ -40,7 +40,7 @@ use runode_protocol::SessionId;
 use runode_shared_types::{color::Rgb, frame::Frame, grid::GridSize};
 use runode_terminal::{history, session::Session};
 
-use crate::{search_bar::SearchField, session_host::LinkEvent};
+use crate::{session_host::LinkEvent, ui::text_field::SearchField};
 use completion_menu::{CompletionMenu, PendingKey};
 use crop::Crop;
 use element::TerminalElement;

@@ -5,7 +5,7 @@ use std::borrow::Cow;
 
 use gpui::{AssetSource, SharedString};
 
-use crate::file_icons;
+use crate::ui::file_icons;
 
 /// 侧栏开关的图标。
 pub const SIDEBAR_ICON: &str = "icons/sidebar.svg";

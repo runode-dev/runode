@@ -12,7 +12,7 @@ use gpui::{Entity, ListAlignment, ListState, Subscription, UniformListScrollHand
 use runode_git::{self as git, FileStatus, RepoKind, Section};
 
 use super::tree::{TreeItem, file_tree};
-use crate::text_area::TextArea;
+use crate::ui::text_area::TextArea;
 
 /// 多个仓库时的列表往可见区域外多画这么高，滚动时块头不至于一下子冒出来。
 const LIST_OVERDRAW: f32 = 200.;

@@ -43,8 +43,8 @@ use crate::{
         VIEW_TREE_ICON,
     },
     terminal_view::hsla,
-    text_area::{TextArea, TextAreaEvent},
-    tooltip::tooltip,
+    ui::text_area::{TextArea, TextAreaEvent},
+    ui::tooltip::tooltip,
 };
 use rows::{GitRow, GitSection};
 

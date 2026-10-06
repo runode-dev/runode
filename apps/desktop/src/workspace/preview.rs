@@ -44,10 +44,10 @@ use super::{
 use crate::{
     assets::DIFF_ICON,
     config::AppConfig,
-    file_icons::file_icon,
-    scrollbar::scrollbar,
     terminal_view::{Copy, SelectAll, hsla},
-    tooltip::tooltip,
+    ui::file_icons::file_icon,
+    ui::scrollbar::scrollbar,
+    ui::tooltip::tooltip,
 };
 
 actions!(
