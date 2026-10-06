@@ -362,7 +362,7 @@ fn window_agents(cx: &App) -> Vec<ShownAgent> {
 fn held_sessions(cx: &App) -> HashSet<SessionId> {
     let mut held = HashSet::new();
     for_each_view(cx, |view, _| {
-        held.insert(view.session_id());
+        held.extend(view.session_id());
     });
     held
 }

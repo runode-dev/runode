@@ -161,7 +161,7 @@ fn held_sessions(cx: &App) -> HashSet<SessionId> {
             continue;
         };
         let views = view.workspaces.iter().flat_map(|workspace| &workspace.tabs).flat_map(|tab| tab.panes.values());
-        held.extend(views.map(|(view, _)| view.read(cx).session_id()));
+        held.extend(views.filter_map(|(view, _)| view.read(cx).session_id()));
     }
     held
 }

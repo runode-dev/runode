@@ -468,3 +468,48 @@ fn a_view_attached_while_hidden_learns_its_size_from_the_host() {
     state.resize(SIZE);
     assert_eq!(state.live().unwrap().requested, [SIZE]);
 }
+
+#[test]
+fn an_unopened_view_keeps_its_own_meta_until_the_host_answers() {
+    let alive = Rc::new(Cell::new(0));
+    let now = Instant::now();
+    let own =
+        SessionMeta { fallback_title: Some("proj".into()), cwd: Some("/tmp/proj".into()), ..SessionMeta::default() };
+    let mut h = Harness { state: ScreenState::new_unopened(own.clone(), SIZE, now), alive, now };
+    assert_eq!(name(h.state.screen()), "Hidden");
+    assert!(!h.state.visible());
+    assert_eq!(h.state.meta(), &own);
+    // 看不见放多久都没有可丢的。
+    assert_eq!(h.state.tick(h.now + HIDE_GRACE * 10), None);
+    // 回到显示时要一份按视图尺寸的屏幕；等的时候还是自己给的状态，标签上的名字不会闪成默认的。
+    assert_eq!(h.state.set_visible(true, h.now), Some(Attach { size: Some(SIZE), mode: AttachMode::Snapshot }));
+    assert_eq!(name(h.state.screen()), "Attaching");
+    assert_eq!(h.state.meta(), &own);
+    // 宿主给的状态是第一次给的，不通知。
+    let host =
+        SessionMeta { fallback_title: Some("proj".into()), cwd: Some("/tmp/proj".into()), ..agent(AgentState::Idle) };
+    let changes = h.apply(vec![screen(AttachMode::Snapshot, 3, host.clone(), b"$ ")]);
+    assert_eq!(name(h.state.screen()), "Live");
+    assert_eq!(h.state.meta(), &host);
+    assert!(!changes.agent_finished && !changes.agent_blocked);
+    assert_eq!(h.fed(), b"$ ");
+    assert_eq!(h.alive.get(), 1);
+}
+
+#[test]
+fn an_unopened_view_started_while_hidden_only_watches_the_state() {
+    let alive = Rc::new(Cell::new(0));
+    let now = Instant::now();
+    let mut h = Harness { state: ScreenState::new_unopened(SessionMeta::default(), SIZE, now), alive, now };
+    h.state.resize(BIG);
+    // 看不见时开的会话只看状态：宿主给的是只看状态的那种，不建界面这份 VT。
+    let host = SessionMeta { fallback_title: Some("x".into()), ..SessionMeta::default() };
+    let changes = h.apply(vec![screen(AttachMode::MetaOnly, 1, host.clone(), b"")]);
+    assert!(changes.title_changed);
+    assert_eq!(name(h.state.screen()), "Hidden");
+    assert_eq!(h.state.meta(), &host);
+    assert_eq!(h.alive.get(), 0);
+    // 量过的尺寸不跟着宿主给的走；回到显示时按它要屏幕。
+    assert_eq!(h.state.last_size(), BIG);
+    assert_eq!(h.state.set_visible(true, h.now), Some(Attach { size: Some(BIG), mode: AttachMode::Snapshot }));
+}

@@ -143,8 +143,9 @@ pub struct TerminalView {
     colors: (Rgb, Rgb),
     /// 调用方记着的这个终端的目录，宿主还没报告目录时用，见 `reattach`。
     start_dir: Option<PathBuf>,
-    /// 宿主里的会话。用 `end` 结束它；视图没了只是不再看它，见 `Drop`。
-    id: SessionId,
+    /// 宿主里的会话。用 `end` 结束它；视图没了只是不再看它，见 `Drop`。`deferred` 建的视图开会话
+    /// 之前为 `None`。
+    id: Option<SessionId>,
     /// 已经用 `end` 结束了会话，丢掉视图时不再发。
     ended: bool,
     /// 宿主发来了 `HostMsg::Bell`，还没通知外层，见 `ring_bell`。
@@ -226,8 +227,10 @@ impl EventEmitter<TerminalEvent> for TerminalView {}
 /// 关标签、关分屏这类用户明确不要这个终端的路径先调 `end` 结束它，之后丢掉时不再发什么。
 impl Drop for TerminalView {
     fn drop(&mut self) {
-        if !self.ended {
-            crate::session_host::link().detach(self.id);
+        if !self.ended
+            && let Some(id) = self.id
+        {
+            crate::session_host::link().detach(id);
         }
     }
 }

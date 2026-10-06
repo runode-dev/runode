@@ -344,7 +344,8 @@ impl WindowView {
         shell
     }
 
-    /// `shown`：这个标签显示在窗口里，接上的会话要看屏幕，否则只看状态。
+    /// `shown`：这个标签显示在窗口里，接上的会话要看屏幕，否则只看状态；要新开的，显示着的马上在
+    /// 宿主里开会话，看不见的等切过去时再开（`TerminalView::deferred`）。
     #[allow(clippy::too_many_arguments)]
     fn restore_node(
         &mut self,
@@ -374,7 +375,9 @@ impl WindowView {
                         let in_home = start.is_none() || start.as_deref() == home;
                         let view = match shell.and_then(|shell| shell.take_if(|_| in_home)) {
                             Some(shell) => TerminalView::adopt(shell, window, cx),
-                            None => TerminalView::unstarted(start.as_deref(), window, cx),
+                            None if shown => TerminalView::unstarted(start.as_deref(), window, cx),
+                            // 看不见的标签切过去时才在宿主里开会话。
+                            None => Ok(TerminalView::deferred(start.as_deref(), window, cx)),
                         };
                         let view = match view {
                             Ok(view) => view,
@@ -444,7 +447,7 @@ impl WindowView {
                     Some((_, start)) => start.clone(),
                     None => view.cwd(),
                 };
-                SavedNode::Leaf { cwd, session: Some(view.session_id()), unstarted: !view.started() }
+                SavedNode::Leaf { cwd, session: view.session_id(), unstarted: !view.started() }
             }
             Node::Split(split) => SavedNode::Split {
                 axis: split.axis,

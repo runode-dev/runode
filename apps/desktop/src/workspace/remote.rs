@@ -84,7 +84,7 @@ fn pane_of(window: WindowHandle<WindowView>, id: SessionId, cx: &App) -> Option<
         .iter()
         .flat_map(|workspace| &workspace.tabs)
         .flat_map(|tab| &tab.panes)
-        .find_map(|(pane, (terminal, _))| (terminal.read(cx).session_id() == id).then_some(*pane))
+        .find_map(|(pane, (terminal, _))| (terminal.read(cx).session_id() == Some(id)).then_some(*pane))
 }
 
 /// 最前面那个窗口当前的分屏。
@@ -124,6 +124,7 @@ impl WindowView {
         let cwd = cwd.or_else(|| near.read(cx).cwd());
         let cwd = persist::start_dir(cwd.as_deref(), &self.workspaces[wi].dir);
         let view = self.spawn_terminal(cwd.as_deref(), window, cx)?;
+        // `spawn` 建的视图当场开好了会话。
         let session = view.read(cx).session_id();
         match placement {
             Placement::Tab => {
@@ -146,12 +147,12 @@ impl WindowView {
         if !focus {
             // 旁边那个终端在后台标签里时没有界面这份 VT，尺寸是它最后量出的。
             let size = near.read(cx).size();
-            view.update(cx, |view, cx| view.start_at(size, cx));
+            view.update(cx, |view, cx| view.start_at(size, window, cx));
             // 开在不显示的标签里的，到时丢掉界面这份 VT。
             self.sync_visibility(window, cx);
         }
         self.save(cx);
         cx.notify();
-        Some(session)
+        session
     }
 }

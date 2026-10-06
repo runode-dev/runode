@@ -195,6 +195,24 @@ impl<S: Vt> ScreenState<S> {
         }
     }
 
+    /// 宿主里还没有会话（恢复布局时看不见、又从没启动过的终端，见 `TerminalView::deferred`）：不显示，
+    /// 没有界面这份 VT，状态是视图自己按起始目录给的 `meta`。开了会话以后照常连：回到显示时
+    /// `set_visible` 给出要屏幕的 `Attach`；没显示就要启动时只看状态。宿主给了状态再换掉 `meta`。
+    pub(super) fn new_unopened(meta: SessionMeta, size: GridSize, now: Instant) -> Self {
+        Self {
+            screen: Screen::Hidden,
+            meta,
+            last_size: size,
+            sized: false,
+            exited: false,
+            attaching: None,
+            visible: false,
+            hidden_since: Some(now),
+            meta_known: false,
+            reconnecting: false,
+        }
+    }
+
     #[cfg(test)]
     pub(super) fn screen(&self) -> &Screen<S> {
         &self.screen

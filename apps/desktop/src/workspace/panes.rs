@@ -117,7 +117,7 @@ impl WindowView {
                 .flat_map(|workspace| &workspace.tabs)
                 .flat_map(|tab| tab.panes.values())
                 .map(|(terminal, _)| terminal.read(cx))
-                .find(|terminal| terminal.session_id() == id)
+                .find(|terminal| terminal.session_id() == Some(id))
                 .map(|terminal| {
                     if let Some(agent) = terminal.agent().filter(|agent| agent.kind != AgentKind::Other) {
                         return agent.kind.display_name().to_owned();

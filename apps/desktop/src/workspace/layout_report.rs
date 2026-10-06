@@ -156,7 +156,7 @@ pub(super) fn current(cx: &mut App) -> Vec<WindowLayout> {
         .flat_map(|(_, root)| root.read(cx).workspaces.iter())
         .flat_map(|workspace| &workspace.tabs)
         .flat_map(|tab| &tab.panes)
-        .map(|(pane, (view, _))| (*pane, view.read(cx).session_id()))
+        .filter_map(|(pane, (view, _))| Some((*pane, view.read(cx).session_id()?)))
         .collect();
     report(inputs, |pane| sessions.get(&pane).copied())
 }

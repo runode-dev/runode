@@ -30,6 +30,7 @@ use runode_shared_types::{
 };
 use runode_terminal::{
     history,
+    pty::dir_label,
     session::{self, Request, SYNC_OUTPUT_TIMEOUT, Session},
 };
 
@@ -137,8 +138,8 @@ impl TerminalView {
         Ok(view)
     }
 
-    /// 建好视图但先不启动 shell，等 `start` 时再在 `cwd` 下启动。恢复布局时看不见的终端用它，
-    /// 不切过去就不占进程。
+    /// 建好视图但先不启动 shell，等 `start` 时再在 `cwd` 下启动。恢复布局时显示出来的终端用它，
+    /// 等第一次布局量出尺寸再启动；看不见的连会话都不开，见 `deferred`。
     pub fn unstarted(cwd: Option<&Path>, window: &mut Window, cx: &mut App) -> anyhow::Result<Entity<Self>> {
         let config = cx.global::<AppConfig>().0.clone();
         let id = session_host::link().spawn(SpawnOptions {
@@ -151,7 +152,53 @@ impl TerminalView {
             env: Vec::new(),
         })?;
         let (screen, rx) = connect(id, &config.term_settings())?;
-        Ok(cx.new(|cx| Self::new(id, screen, false, rx, window, cx)))
+        Ok(cx.new(|cx| Self::new(Some(id), screen, false, rx, window, cx)))
+    }
+
+    /// 建好视图但还不在宿主里开会话：不开伪终端、不起会话线程、不建 VT，回到显示
+    /// （`request_visible`）或者要启动（`start_at`）时再在 `cwd` 下开，为 `None` 时从家目录开始。
+    /// 恢复布局时看不见、又从没启动过的终端用它，恢复很多标签时只有显示出来的那几个马上开。
+    /// 开之前标题和目录按起始目录给，和宿主给还没启动的会话的一样。
+    pub fn deferred(cwd: Option<&Path>, window: &mut Window, cx: &mut App) -> Entity<Self> {
+        let dir = cwd.map(Path::to_path_buf).or_else(|| runode_paths::Dirs::from_env().home);
+        let meta = SessionMeta { fallback_title: dir.as_deref().map(dir_label), cwd: dir, ..SessionMeta::default() };
+        let screen = ScreenState::new_unopened(meta, PROVISIONAL_SIZE, Instant::now());
+        // 还没有会话也就没有事件：发的一端直接丢掉，读事件的任务一开始就结束，开了会话再起。
+        let (_, rx) = futures::channel::mpsc::unbounded();
+        let start_dir = cwd.map(Path::to_path_buf);
+        cx.new(|cx| {
+            let mut view = Self::new(None, screen, false, rx, window, cx);
+            view.start_dir = start_dir;
+            view
+        })
+    }
+
+    /// 给 `deferred` 建的视图在宿主里开会话（`start` 时连 shell 一起启动），按 `attach` 连上它，之后
+    /// 的事件由调用方起读事件的任务（或者等屏幕）来收。开不了时当作和宿主断开了：断开交给那个任务
+    /// 处理，视图显示断开的提示，点「在原目录重开」再开。
+    fn open_session(&mut self, start: bool, attach: Attach) {
+        let link = session_host::link();
+        let spawned = link.spawn(SpawnOptions {
+            size: self.screen.last_size(),
+            cwd: self.start_dir.clone(),
+            integration: self.config.shell_integration,
+            start,
+            shell: None,
+            settings: None,
+            env: Vec::new(),
+        });
+        match spawned {
+            Ok(id) => {
+                tracing::debug!("session {id} opened for a terminal that was put off");
+                self.id = Some(id);
+                self.started |= start;
+                self.events = Rc::new(RefCell::new(link.attach(id, attach.size, attach.mode)));
+            }
+            Err(err) => {
+                tracing::warn!("failed to open the session of a terminal that was put off: {err:#}");
+                self.pending_end = Some(LinkEvent::Lost);
+            }
+        }
     }
 
     /// 用宿主里已有的会话 `id` 建视图（存档恢复、接上后台会话）。`cwd` 是调用方记着的目录，宿主
@@ -185,7 +232,7 @@ impl TerminalView {
         };
         let start_dir = cwd.map(Path::to_path_buf);
         Ok(cx.new(|cx| {
-            let mut view = Self::new(id, screen, true, rx, window, cx);
+            let mut view = Self::new(Some(id), screen, true, rx, window, cx);
             view.start_dir = start_dir;
             view
         }))
@@ -204,12 +251,15 @@ impl TerminalView {
     }
 
     /// 按已经设好的实际尺寸启动 shell。启动不了时宿主发 `HostMsg::Exited`，按 shell 已退出
-    /// 处理，关掉这个终端。
+    /// 处理，关掉这个终端。还没开会话（`deferred`）时什么都不做，开了以后照常启动。
     pub(super) fn start_now(&mut self, _cx: &mut Context<Self>) {
+        let Some(id) = self.id else {
+            return;
+        };
         if std::mem::replace(&mut self.started, true) {
             return;
         }
-        session_host::link().send(ClientMsg::Start { id: self.id, integration: self.config.shell_integration });
+        session_host::link().send(ClientMsg::Start { id, integration: self.config.shell_integration });
     }
 
     /// 收宿主发来的事件的任务：把排队的事件合并成一批处理，再重绘。收事件的一端在视图里，
@@ -249,16 +299,15 @@ impl TerminalView {
     /// 退出等事件，命令历史，要重新连上的就连，然后重绘。响铃留给调用方用 `ring_bell` 转发，
     /// 见 `new`；这一批里有退出时在退出之前转发。
     fn handle_link_events(&mut self, events: Vec<LinkEvent>, window: &mut Window, cx: &mut Context<Self>) {
-        let id = self.id;
         let settings = self.config.term_settings();
-        let mut build = |screen: Screen| build_session(id, screen, &settings);
+        let mut build = |screen: Screen| build_session(screen.attached.id, screen, &settings);
         let changes = self.screen.apply(events, &mut build, Instant::now());
         self.apply_changes(changes, window, cx);
     }
 
     fn apply_changes(&mut self, changes: Changes, window: &mut Window, cx: &mut Context<Self>) {
         if changes.replaced {
-            tracing::debug!("session {}: new screen, channel {:?}", self.id, self.screen.channel());
+            tracing::debug!("session {}: new screen, channel {:?}", self.session_text(), self.screen.channel());
             self.vt_replaced(cx);
         }
         if changes.fed {
@@ -298,11 +347,11 @@ impl TerminalView {
             self.bell_pending = true;
         }
         if let Some(attach) = changes.attach {
-            tracing::info!("session {} attaches again ({:?})", self.id, attach.mode);
+            tracing::info!("session {} attaches again ({:?})", self.session_text(), attach.mode);
             self.send_attach(attach);
         }
         if changes.lost {
-            tracing::warn!("session {} lost its host; its last screen stays", self.id);
+            tracing::warn!("session {} lost its host; its last screen stays", self.session_text());
         }
         if changes.exited {
             // 退出前响过的铃先通知：外层收到 `Exited` 就关掉分屏，之后再通知就找不到这个终端了。
@@ -321,10 +370,18 @@ impl TerminalView {
 
     /// 经连接重新连上会话（沿用原来的登记和收事件的一端）。
     fn send_attach(&self, attach: Attach) {
-        if !session_host::link().reattach(self.id, attach.size, attach.mode) {
+        let Some(id) = self.id else {
+            return;
+        };
+        if !session_host::link().reattach(id, attach.size, attach.mode) {
             // 连接已经断了：断开的消息已经排在收事件的一端里，处理到时按断开显示。
-            tracing::debug!("session {} cannot attach again: not connected", self.id);
+            tracing::debug!("session {id} cannot attach again: not connected");
         }
+    }
+
+    /// 日志里写的会话：还没开（`deferred`）时写明。
+    fn session_text(&self) -> String {
+        self.id.map_or_else(|| "(not opened yet)".to_owned(), |id| id.to_string())
     }
 
     /// 界面这份 VT 换了或者没了：跟着旧 VT 的选区、补全、建议都作废，搜索栏开着的话在新的上面
@@ -377,7 +434,11 @@ impl TerminalView {
         if visible {
             self._hide_timer = None;
             if let Some(attach) = attach {
-                self.send_attach(attach);
+                match self.id {
+                    Some(_) => self.send_attach(attach),
+                    // `deferred` 建的视图第一次显示：这时才开会话。
+                    None => self.open_session(false, attach),
+                }
                 cx.notify();
                 return true;
             }
@@ -401,7 +462,7 @@ impl TerminalView {
     fn hide_if_due(&mut self, cx: &mut Context<Self>) {
         self._hide_timer = None;
         if let Some(attach) = self.screen.tick(Instant::now()) {
-            tracing::debug!("session {} hidden, dropping its screen", self.id);
+            tracing::debug!("session {} hidden, dropping its screen", self.session_text());
             self.send_attach(attach);
             self.vt_replaced(cx);
             cx.notify();
@@ -448,11 +509,11 @@ impl TerminalView {
         if self.screen.is_attaching() {
             tracing::debug!(
                 "session {}: no screen after {:?}, drawing the background first",
-                self.id,
+                self.session_text(),
                 started.elapsed()
             );
         } else {
-            tracing::debug!("session {}: screen shown after {:?}", self.id, started.elapsed());
+            tracing::debug!("session {}: screen shown after {:?}", self.session_text(), started.elapsed());
         }
         self._reader = Self::read_events(self.events.clone(), window, cx);
         cx.notify();
@@ -488,7 +549,8 @@ impl TerminalView {
                 None
             }
         };
-        match reopen_plan(self.id, alive.as_ref()) {
+        // 还没开过会话（`deferred` 的视图开的时候就断开了）时没有可接着用的，开一个新的。
+        match self.id.map_or(Reopen::Replace, |id| reopen_plan(id, alive.as_ref())) {
             Reopen::Resume => self.resume(window, cx),
             Reopen::Replace => {
                 let (size, cwd) = (self.screen.last_size(), self.cwd());
@@ -510,18 +572,21 @@ impl TerminalView {
             return;
         }
         let alive = cx.global::<HostReconnected>().alive.clone();
-        if alive.contains(&self.id) {
+        if self.id.is_some_and(|id| alive.contains(&id)) {
             self.resume(window, cx);
         }
     }
 
     /// 断开后宿主又连上了、会话还在：重新登记、连上它。显示着的冻结着最后一屏等新的屏幕。
     fn resume(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(id) = self.id else {
+            return;
+        };
         let Some(attach) = self.screen.reconnect(Instant::now()) else {
             return;
         };
-        tracing::info!("session {} attaches again after reconnecting", self.id);
-        let rx = session_host::link().attach(self.id, attach.size, attach.mode);
+        tracing::info!("session {id} attaches again after reconnecting");
+        let rx = session_host::link().attach(id, attach.size, attach.mode);
         self.events = Rc::new(RefCell::new(rx));
         if attach.mode == AttachMode::MetaOnly {
             self._reader = Self::read_events(self.events.clone(), window, cx);
@@ -551,8 +616,9 @@ impl TerminalView {
             env: Vec::new(),
         })?;
         let (mut screen, rx) = connect(id, &self.config.term_settings())?;
-        let old = std::mem::replace(&mut self.id, id);
-        link.kill(old);
+        if let Some(old) = self.id.replace(id) {
+            link.kill(old);
+        }
         screen.resize(size);
         self.screen = screen;
         self.started = true;
@@ -582,14 +648,14 @@ impl TerminalView {
         let id = shell.into_id();
         let (screen, rx) = connect(id, &cx.global::<AppConfig>().0.term_settings())?;
         Ok(cx.new(|cx| {
-            let mut view = Self::new(id, screen, true, rx, window, cx);
+            let mut view = Self::new(Some(id), screen, true, rx, window, cx);
             view.adopted_size = Some(size);
             view
         }))
     }
 
     fn new(
-        id: SessionId,
+        id: Option<SessionId>,
         screen: ScreenState<Session>,
         started: bool,
         rx: UnboundedReceiver<LinkEvent>,
@@ -721,8 +787,8 @@ impl TerminalView {
         view
     }
 
-    /// 宿主里这个终端的会话。
-    pub fn session_id(&self) -> SessionId {
+    /// 宿主里这个终端的会话；`deferred` 建的视图还没开会话时为 `None`。
+    pub fn session_id(&self) -> Option<SessionId> {
         self.id
     }
 
@@ -739,8 +805,10 @@ impl TerminalView {
     /// 结束宿主里的会话（关标签、关分屏这类用户明确要关掉终端的时候）。之后丢掉视图时不再
     /// 另外发什么；没调过它就丢掉视图时见 `Drop`。
     pub fn end(&mut self) {
-        if !std::mem::replace(&mut self.ended, true) {
-            session_host::link().kill(self.id);
+        if !std::mem::replace(&mut self.ended, true)
+            && let Some(id) = self.id
+        {
+            session_host::link().kill(id);
         }
     }
 
@@ -750,17 +818,23 @@ impl TerminalView {
     }
 
     /// 不等布局，按 `size` 现在就启动 shell。放在看不见的地方（后台标签、放大的分屏后面）的终端
-    /// 等不来 `start` 要的那次布局；之后显示出来时照常按实际尺寸改。
-    pub fn start_at(&mut self, size: GridSize, cx: &mut Context<Self>) {
+    /// 等不来 `start` 要的那次布局；之后显示出来时照常按实际尺寸改。还没开会话的（`deferred`）
+    /// 连 shell 一起开，只看状态。
+    pub fn start_at(&mut self, size: GridSize, window: &mut Window, cx: &mut Context<Self>) {
         if self.started {
             return;
         }
         self.screen.resize(size);
+        self.start_pending = false;
+        let Some(id) = self.id else {
+            self.open_session(true, Attach { size: None, mode: AttachMode::MetaOnly });
+            self._reader = Self::read_events(self.events.clone(), window, cx);
+            return;
+        };
         if self.screen.live().is_none() {
             // 没有界面这份 VT 替它请宿主改尺寸，直接请。
-            session_host::link().send(ClientMsg::Resize { id: self.id, size });
+            session_host::link().send(ClientMsg::Resize { id, size });
         }
-        self.start_pending = false;
         self.start_now(cx);
     }
 
