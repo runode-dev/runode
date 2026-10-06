@@ -248,6 +248,48 @@ impl Peer {
         }
     }
 
+    /// 开一个按 `size` 跑 `shell` 的会话（不开 shell 集成），`start` 为假时等 `Start`。
+    pub fn spawn_sized(&mut self, shell: &str, size: GridSize, start: bool) -> SessionId {
+        let req = self.next_req;
+        self.next_req += 1;
+        self.send(&ClientMsg::Spawn {
+            req,
+            size,
+            cwd: None,
+            integration: IntegrationMode::Off,
+            start,
+            shell: Some(shell.into()),
+            settings: None,
+            env: Vec::new(),
+        });
+        match self.reply() {
+            HostMsg::Spawned { req: answered, id } if answered == req => id,
+            other => panic!("expected spawned, got {other:?}"),
+        }
+    }
+
+    /// 读会话的屏幕：`lines` 为 `None` 时是当前一屏，否则是含回滚历史的最底下这么多行。
+    pub fn screen_text(&mut self, id: SessionId, lines: Option<u32>) -> String {
+        self.send(&ClientMsg::ReadScreen { id, lines, command: None });
+        match self.reply() {
+            HostMsg::ScreenText { id: read, text, .. } if read == id => text,
+            other => panic!("expected the screen, got {other:?}"),
+        }
+    }
+
+    /// 反复读屏幕，直到 `done` 认可，返回那一次读到的。
+    pub fn wait_screen(&mut self, id: SessionId, lines: Option<u32>, mut done: impl FnMut(&str) -> bool) -> String {
+        let deadline = Instant::now() + WAIT;
+        loop {
+            let text = self.screen_text(id, lines);
+            if done(&text) {
+                return text;
+            }
+            assert!(Instant::now() < deadline, "timed out waiting for the screen of {id}: {text:?}");
+            thread::sleep(Duration::from_millis(20));
+        }
+    }
+
     /// 列会话。
     pub fn sessions(&mut self) -> Vec<runode_protocol::SessionInfo> {
         self.send(&ClientMsg::ListSessions);
