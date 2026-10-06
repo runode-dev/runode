@@ -465,6 +465,28 @@ fn fall_back(err: ConnectError) -> Mode {
     }
 }
 
+/// 让宿主之后启动的 shell 能直接敲 `runode`：`runode_cli::ENV_BIN` 指向这个可执行文件，它所在的
+/// 目录追加到 `PATH` 末尾。设在环境里而不是只在 shell 集成里定义函数，是因为 agent 跑命令时另起
+/// 非交互的 shell，不加载集成脚本，但继承环境。追加在末尾，不盖过用户自己装的同名程序。
+pub(crate) fn expose_cli(host: &Host) {
+    let Ok(exe) = std::env::current_exe() else {
+        return;
+    };
+    if let Some(path) = exe.parent().and_then(|dir| path_with(std::env::var_os("PATH"), dir)) {
+        host.set_env("PATH", path);
+    }
+    host.set_env(runode_cli::ENV_BIN, exe);
+}
+
+/// `path` 末尾追加 `dir` 后的 `PATH`；已经在里面时原样返回，拼不出来（目录名里有分隔符）时为 `None`。
+fn path_with(path: Option<std::ffi::OsString>, dir: &Path) -> Option<std::ffi::OsString> {
+    let mut dirs: Vec<PathBuf> = path.as_deref().map(|path| std::env::split_paths(path).collect()).unwrap_or_default();
+    if !dirs.iter().any(|existing| existing == dir) {
+        dirs.push(dir.to_path_buf());
+    }
+    std::env::join_paths(dirs).ok()
+}
+
 /// 宿主跑在 app 里：建好它（已经建过就用原来的），`listen` 时先开 socket（之后启动的 shell 才知道
 /// 命令行该连哪里），再经一对 socket 连上。
 fn in_process(listen: bool) -> Mode {
@@ -472,10 +494,7 @@ fn in_process(listen: bool) -> Mode {
     let host = IN_PROCESS.get_or_init(|| {
         created = true;
         let host = Host::new(build());
-        // 之后启动的 shell 里有 `runode_cli::ENV_BIN`，指向这个可执行文件，没把 runode 放进 PATH 也能用命令行。
-        if let Ok(exe) = std::env::current_exe() {
-            host.set_env(runode_cli::ENV_BIN, exe);
-        }
+        expose_cli(&host);
         host
     });
     if listen && created {
@@ -582,4 +601,29 @@ fn report_degraded(count: usize, cx: &mut App) {
     }
     #[cfg(not(target_os = "macos"))]
     let _ = (cx, DEGRADED_TAG);
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{ffi::OsString, path::Path};
+
+    use super::path_with;
+
+    #[test]
+    fn the_runode_directory_goes_last_on_the_path() {
+        let path =
+            path_with(Some(OsString::from("/usr/bin:/bin")), Path::new("/Applications/Runode.app/Contents/MacOS"));
+        assert_eq!(path, Some(OsString::from("/usr/bin:/bin:/Applications/Runode.app/Contents/MacOS")));
+    }
+
+    #[test]
+    fn a_path_that_has_it_already_stays_as_it_is() {
+        let path = path_with(Some(OsString::from("/opt/runode:/usr/bin")), Path::new("/opt/runode"));
+        assert_eq!(path, Some(OsString::from("/opt/runode:/usr/bin")));
+    }
+
+    #[test]
+    fn without_a_path_it_is_the_only_entry() {
+        assert_eq!(path_with(None, Path::new("/opt/runode")), Some(OsString::from("/opt/runode")));
+    }
 }

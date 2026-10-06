@@ -126,10 +126,7 @@ fn prepare(dirs: &runode_paths::Dirs) -> Host {
     let host = Host::new(BuildId(env!("RUNODE_BUILD").into()));
     // 开 socket（或接手 socket）之前就标上：第一个连上来的前端也认得出这是单独跑的宿主。
     host.mark_standalone();
-    // 之后启动的 shell 里有 `runode_cli::ENV_BIN`，指向这个可执行文件，没把 runode 放进 PATH 也能用命令行。
-    if let Ok(exe) = std::env::current_exe() {
-        host.set_env(runode_cli::ENV_BIN, exe);
-    }
+    crate::host_client::expose_cli(&host);
     host
 }
 
