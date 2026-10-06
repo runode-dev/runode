@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use gpui::{
     Context, KeyDownEvent, Keystroke, Modifiers, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels,
-    Point, ScrollDelta, ScrollWheelEvent, Window,
+    Point, ScrollDelta, ScrollWheelEvent, Size, Window,
 };
 use runode_shared_types::{
     grid::GridPoint,
@@ -124,15 +124,15 @@ impl TerminalView {
     /// 窗口坐标换算成网格位置；单元格尺寸还没量出来时为 `None`。
     pub(super) fn grid_point(&self, position: Point<Pixels>) -> Option<GridPoint> {
         let metrics = self.metrics?;
-        let local = position - self.grid_origin;
-        Some(GridPoint {
-            x: f32::from(local.x) / f32::from(metrics.cell.width),
-            y: f32::from(local.y) / f32::from(metrics.cell.height),
-        })
+        Some(grid_point_at(position, self.grid_origin, metrics.cell))
     }
 
     pub(super) fn mouse_down(&mut self, event: &MouseDownEvent, window: &mut Window, cx: &mut Context<Self>) {
         window.focus(&self.focus_handle, cx);
+        // 尺寸归别的前端管时，点一下就接管：已经有焦点时不会再因为获得焦点报一次，这里补上。
+        if self.screen.size_owner().is_some() {
+            self.report_focus(true);
+        }
         // 激活窗口的那一下只用来激活，不选择也不上报。
         if event.first_mouse {
             return;
@@ -278,6 +278,14 @@ fn mouse_button(button: MouseButton) -> Option<input::MouseButton> {
         MouseButton::Middle => Some(input::MouseButton::Middle),
         _ => None,
     }
+}
+
+/// 窗口坐标 `position` 换算成网格位置。`origin` 是 VT 第 0 列第 0 行在窗口里的位置：平滑滚动时跟着
+/// 错开，尺寸归别的前端管、视图只画了 VT 的一块时按 `Crop::vt_origin` 挪过，所以落在视图左上角的是
+/// VT 里画在那里的那一格。`cell` 是单元格尺寸。
+pub(super) fn grid_point_at(position: Point<Pixels>, origin: Point<Pixels>, cell: Size<Pixels>) -> GridPoint {
+    let local = position - origin;
+    GridPoint { x: f32::from(local.x) / f32::from(cell.width), y: f32::from(local.y) / f32::from(cell.height) }
 }
 
 /// 网格位置所在的单元格。

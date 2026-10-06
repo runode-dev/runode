@@ -109,6 +109,10 @@ quit:
 host_lost:
   message: Lost the connection to this terminal's session; what you see is the last screen before it dropped.
   reopen: Reopen in This Directory
+size_owner:
+  controlled_by: "Size set by %{device}"
+  controlled_elsewhere: Size set by another device
+  take_over: Click to take over
 background:
   title: Background Sessions
   end_all: End All

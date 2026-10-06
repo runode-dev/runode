@@ -627,8 +627,7 @@ fn handshake(stream: &UnixStream, build: &BuildId) -> Result<Welcome, ConnectErr
         client: ClientKind::Desktop,
         caps: Caps { snapshot: true, vt_replay: true },
         session: None,
-        // 尺寸归属还没接上，先不报设备名。
-        device: None,
+        device: device_name(),
     };
     let frame = Frame::control(&hello).map_err(|err| ConnectError::Io(io::Error::other(err)))?;
     let mut writer = stream;
@@ -653,6 +652,21 @@ fn handshake(stream: &UnixStream, build: &BuildId) -> Result<Welcome, ConnectErr
     };
     stream.set_read_timeout(None).map_err(ConnectError::Io)?;
     answer
+}
+
+/// 报给宿主的设备名：这台机器的主机名，去掉局域网里自动加的 `.local`。几个前端看同一个会话时，
+/// 别的前端据此显示「尺寸由谁控制」，见 `HostMsg::SizeOwner`。取不到时为 `None`。
+fn device_name() -> Option<String> {
+    let mut buf = [0u8; 256];
+    // SAFETY: `buf` 可写、长度如实传入；`gethostname` 最多写这么多字节，名字太长时可能不带结尾的 0，
+    // 下面按找得到的第一个 0 或者整块截取。
+    if unsafe { libc::gethostname(buf.as_mut_ptr().cast(), buf.len()) } != 0 {
+        return None;
+    }
+    let end = buf.iter().position(|&b| b == 0).unwrap_or(buf.len());
+    let name = String::from_utf8_lossy(&buf[..end]);
+    let name = name.strip_suffix(".local").unwrap_or(&name).trim();
+    (!name.is_empty()).then(|| name.to_owned())
 }
 
 /// 这个构建的界面 VT 解得了的快照格式，算一次；算不出来时为 `None`。
@@ -898,7 +912,8 @@ fn session_of(message: &HostMsg) -> Option<SessionId> {
         | HostMsg::Resync { id, .. }
         | HostMsg::Exited { id, .. }
         | HostMsg::Bell { id }
-        | HostMsg::ScreenText { id, .. } => Some(*id),
+        | HostMsg::ScreenText { id, .. }
+        | HostMsg::SizeOwner { id, .. } => Some(*id),
         _ => None,
     }
 }
@@ -1143,6 +1158,8 @@ mod tests {
         assert!(matches!(rx.try_recv(), Ok(LinkEvent::Output(data)) if data == b"new"));
         dispatch(&link.inner, HostMsg::Bell { id });
         assert!(matches!(rx.try_recv(), Ok(LinkEvent::Msg(HostMsg::Bell { .. }))));
+        dispatch(&link.inner, HostMsg::SizeOwner { id, mine: false, owner: Some("studio".into()) });
+        assert!(matches!(rx.try_recv(), Ok(LinkEvent::Msg(HostMsg::SizeOwner { mine: false, .. }))));
     }
 
     #[test]
