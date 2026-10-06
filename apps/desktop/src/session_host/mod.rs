@@ -26,7 +26,7 @@ use runode_config::Config;
 use runode_host::{BuildId, ClientMsg, Host};
 use runode_protocol::{HandoffRefusal, SessionInfo};
 
-pub use handoff::{HandoffFailure, HandoffStatus};
+pub use handoff::{HandoffFailure, HandoffStatus, READY_BY};
 use launch::{Choice, Probe};
 // `Attached` 给视图状态机（重新连上、只看状态）用。
 #[allow(unused_imports)]
@@ -92,6 +92,9 @@ pub enum Notice {
     /// 用户要结束的旧宿主其实跑在它的进程里（见 `launch::Ended::NotAHost`）。这次跑在 app 里、
     /// 不开 socket，请用户先退出旧版本。
     OldAppRunning,
+    /// 用户要结束旧宿主，socket 上却已经是这个构建的宿主了（交接其实成了，或者另一个同版本的
+    /// app 让它接手了）：没结束它，会话在它那里；这个 app 已经跑着自己的宿主，下次打开时连上它。
+    AlreadyUpgraded,
 }
 
 fn notify(notice: Notice) {
@@ -362,10 +365,22 @@ fn hand_over(socket: &Path, end_on_quit: bool, sessions: Option<usize>) -> Optio
 /// 什么协议，直接发 SIGTERM，见 `launch::terminate`；否则见 `launch::end_old_host`），之后
 /// 这个 app 里的宿主开 socket，让命令行连得上。对面不是单独的宿主进程（宿主跑在旧版本的 app
 /// 里）时不结束它，改请用户先退出旧版本（`Notice::OldAppRunning`）。
+///
+/// 动手前再探一次：弹框之后 socket 上可能已经换成这个构建的宿主（交接比这边等的久、最后成了，
+/// 或者另一个同版本的 app 让新宿主接手了），结束它就把刚接过去的会话全结束了。这时不结束，告诉
+/// 用户（`Notice::AlreadyUpgraded`）。不在运行中把这个 app 改连过去：窗口里的终端都在 app 自己
+/// 的宿主里，换了连接它们就断了。
 fn end_old_host(terminate: bool, cx: &mut gpui::AsyncApp) {
     let (tx, rx) = futures::channel::oneshot::channel();
     let spawned = thread::Builder::new().name("end-old-host".into()).spawn(move || {
         let Some(socket) = socket_path() else { return };
+        if let Probe::Running { build: theirs, .. } = launch::probe(&socket, &build())
+            && theirs == build()
+        {
+            tracing::warn!("the host on the socket is already this build, so not ending it");
+            let _ = tx.send(Notice::AlreadyUpgraded);
+            return;
+        }
         let ended = if terminate { launch::terminate(&socket) } else { launch::end_old_host(&socket, &build()) };
         match ended {
             Ok(launch::Ended::Ended) => {
@@ -376,7 +391,7 @@ fn end_old_host(terminate: bool, cx: &mut gpui::AsyncApp) {
             }
             Ok(launch::Ended::NotAHost) => {
                 tracing::warn!("the old host runs inside an older runode app, asking to quit it instead");
-                let _ = tx.send(());
+                let _ = tx.send(Notice::OldAppRunning);
             }
             Err(err) => tracing::warn!("failed to end the old host: {err}"),
         }
@@ -386,8 +401,8 @@ fn end_old_host(terminate: bool, cx: &mut gpui::AsyncApp) {
         return;
     }
     cx.spawn(async move |cx| {
-        if rx.await.is_ok() {
-            notify(Notice::OldAppRunning);
+        if let Ok(notice) = rx.await {
+            notify(notice);
             cx.update(show_notice);
         }
     })
@@ -486,6 +501,9 @@ pub fn show_notice(cx: &mut App) {
             (rust_i18n::t!("host.unreachable_title"), rust_i18n::t!("host.unreachable_detail", reason = reason), None)
         }
         Notice::OldAppRunning => (rust_i18n::t!("host.old_app_title"), rust_i18n::t!("host.old_app_detail"), None),
+        Notice::AlreadyUpgraded => {
+            (rust_i18n::t!("host.already_upgraded_title"), rust_i18n::t!("host.already_upgraded_detail"), None)
+        }
         Notice::PreHandoff => {
             (rust_i18n::t!("host.pre_handoff_title"), rust_i18n::t!("host.pre_handoff_detail"), Some(true))
         }

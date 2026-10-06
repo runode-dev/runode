@@ -86,6 +86,8 @@ host:
   old_app_detail: 它开着时终端没法交给这个版本，这次终端跑在这个 app 里，退出时一起结束。先退出旧版本的 Runode，再重新打开这一个。
   keep_old: 保留旧会话
   end_old: 结束旧会话
+  already_upgraded_title: 终端已经交给这个版本了
+  already_upgraded_detail: 终端宿主已经是这个版本的 Runode，所以什么都没结束：旧终端最后还是交过来了，在那里照常运行。这个窗口仍用自己的终端；退出后重新打开 Runode 就能看到交过来的终端。
   degraded_title: Runode 已更新
   degraded_detail: 升级时 %{count} 个终端的回滚历史没能带过来，屏幕和正在运行的程序都不受影响。
 workspace:

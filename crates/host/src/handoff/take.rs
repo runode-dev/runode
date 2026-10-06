@@ -12,8 +12,8 @@ use std::{
 };
 
 use runode_protocol::{
-    BuildId, Caps, ClientKind, ClientMsg, Frame, FrameKind, HANDOFF_FORMAT, HandoffPart, HostMsg,
-    OLDEST_READABLE_HANDOFF_FORMAT, PROTOCOL_VERSION, SessionId, decode_part, read_frame, write_frame,
+    BuildId, Caps, ClientKind, ClientMsg, Frame, FrameKind, GoodbyeReason, HANDOFF_FORMAT, HandoffPart, HandoffRefusal,
+    HostMsg, OLDEST_READABLE_HANDOFF_FORMAT, PROTOCOL_VERSION, SessionId, decode_part, read_frame, write_frame,
 };
 use runode_shared_types::{settings::TermSettings, shell::IntegrationMode};
 use runode_terminal::{
@@ -33,12 +33,17 @@ use crate::{
 /// 发送也要一会儿。
 const RECEIVE_TIMEOUT: Duration = Duration::from_secs(25);
 /// 发出 `HandoffReady` 后最多等旧宿主这么久发 `Commit`。旧宿主收到 `HandoffReady` 后只是让会话
-/// 交出 PTY（最多五秒）就发。
-const COMMIT_TIMEOUT: Duration = Duration::from_secs(30);
+/// 交出 PTY（`give::RELEASE_TIMEOUT`）、写出 `Commit`（`give::DONE_TIMEOUT`），要比这两个之和宽。
+/// 算进 `TAKE_OVER_AFTER_READY`。
+pub(super) const COMMIT_TIMEOUT: Duration = Duration::from_secs(30);
 /// 旧宿主没发 `Commit` 就断开时，最多等它这么久退出完，再判断它是死了还是回滚了。
-const EXIT_GRACE: Duration = Duration::from_secs(2);
+pub(super) const EXIT_GRACE: Duration = Duration::from_secs(2);
 /// 不接手了时等各个会话交回 PTY 最多这么久。
-const RELEASE_TIMEOUT: Duration = Duration::from_secs(5);
+pub(super) const RELEASE_TIMEOUT: Duration = Duration::from_secs(5);
+
+const _: () = assert!(
+    COMMIT_TIMEOUT.as_millis() > super::give::RELEASE_TIMEOUT.as_millis() + super::give::DONE_TIMEOUT.as_millis()
+);
 
 impl Host {
     /// 从 `socket` 上单独跑着的旧宿主手里接过所有会话、监听的 socket 和锁：连上去说自己是
@@ -63,12 +68,10 @@ impl Host {
         }
         let stream = UnixStream::connect(socket)
             .map_err(|err| TakeOverError::Failed(format!("cannot connect to {}: {err}", socket.display())))?;
-        // 连上时就读出旧宿主的进程号：它断开以后就读不到了。
-        let old_pid = peer_pid(&stream);
         stream
             .set_read_timeout(Some(RECEIVE_TIMEOUT))
             .map_err(|err| TakeOverError::Failed(format!("cannot set up the connection: {err}")))?;
-        let (sessions, old_pid) = handshake(&self.shared, &stream, old_pid)?;
+        let (sessions, old_pid) = handshake(&self.shared, &stream)?;
         let begun_at = Instant::now();
         let our_format = options.snapshot_format.unwrap_or(self.shared.snapshot_format);
         let received = match receive(&self.shared, &stream, sessions, our_format) {
@@ -89,6 +92,15 @@ impl Host {
                 return Err(abort(&stream, format!("cannot listen on the socket: {err:#}"), started));
             }
         };
+        // 拉起这边的一方等结果有时限：过了 `ready_by` 它已经当作失败了，不能再接手成功。
+        if options.ready_by.is_some_and(|at| Instant::now() >= at) {
+            self.stop_listening(&control);
+            release_all(&taken.handles);
+            return Err(abort(&stream, "took too long to get ready".into(), started));
+        }
+        if let Some(on_ready) = &options.on_ready {
+            on_ready();
+        }
         if let Err(err) = send(&stream, &ClientMsg::HandoffReady) {
             self.stop_listening(&control);
             release_all(&taken.handles);
@@ -161,11 +173,10 @@ impl Host {
 }
 
 /// 握手：说自己是接手的新宿主，要旧宿主交接。返回要接手几个会话和旧宿主的进程号。
-fn handshake(
-    shared: &Shared,
-    stream: &UnixStream,
-    old_pid: Option<libc::pid_t>,
-) -> Result<(u32, Option<libc::pid_t>), TakeOverError> {
+///
+/// 旧宿主正在把会话交给别的新宿主时，这条连接收到的是 `Goodbye { Handoff }`（交接开始前连上、
+/// 或者交接期间被接受的连接都这样）：和它回 `HandoffRefused { Busy }` 一样，当作别人正在交接。
+fn handshake(shared: &Shared, stream: &UnixStream) -> Result<(u32, Option<libc::pid_t>), TakeOverError> {
     let failed = |what: &str, err: &dyn std::fmt::Display| TakeOverError::Failed(format!("{what}: {err}"));
     send(
         stream,
@@ -181,15 +192,19 @@ fn handshake(
     .map_err(|err| failed("cannot greet the old host", &err))?;
     let old_pid = match receive_message(stream).map_err(|err| failed("no answer from the old host", &err))? {
         HostMsg::Welcome { handoff: 0, .. } => return Err(TakeOverError::PreHandoff),
-        HostMsg::Welcome { host_pid, .. } => old_pid.or_else(|| libc::pid_t::try_from(host_pid).ok()),
+        HostMsg::Welcome { host_pid, .. } => old_host_pid(stream, host_pid),
         // 协议 3 及更早的宿主不认识 `Successor`，按协议版本回 `Incompatible`。
         HostMsg::Incompatible { protocol, .. } if protocol <= 3 => return Err(TakeOverError::PreHandoff),
+        HostMsg::Goodbye { reason: GoodbyeReason::Handoff } => {
+            return Err(TakeOverError::Refused(HandoffRefusal::Busy));
+        }
         other => return Err(TakeOverError::Failed(format!("unexpected answer to hello: {other:?}"))),
     };
     let handoff = ClientMsg::Handoff { min_format: OLDEST_READABLE_HANDOFF_FORMAT, max_format: HANDOFF_FORMAT };
     send(stream, &handoff).map_err(|err| failed("cannot ask for the handoff", &err))?;
     match receive_message(stream).map_err(|err| failed("no answer to the handoff", &err))? {
         HostMsg::HandoffRefused { reason } => Err(TakeOverError::Refused(reason)),
+        HostMsg::Goodbye { reason: GoodbyeReason::Handoff } => Err(TakeOverError::Refused(HandoffRefusal::Busy)),
         HostMsg::HandoffBegin { format, sessions }
             if (OLDEST_READABLE_HANDOFF_FORMAT..=HANDOFF_FORMAT).contains(&format) =>
         {
@@ -201,6 +216,24 @@ fn handshake(
             Err(TakeOverError::Failed(reason))
         }
         other => Err(TakeOverError::Failed(format!("unexpected answer to the handoff: {other:?}"))),
+    }
+}
+
+/// 旧宿主的进程号：用它在 `Welcome` 里自报的 `reported`，收到 `Welcome` 以后再读一次连接对端
+/// （`peer_pid`，这时它已经 accept 了这条连接）对照，对不上时记一笔、仍以自报的为准。连上时就读
+/// 的对端进程号不准：监听的 socket 交接过以后，读到的是最早建它的那个宿主，见 `peer_pid`。
+fn old_host_pid(stream: &UnixStream, reported: u32) -> Option<libc::pid_t> {
+    let reported = libc::pid_t::try_from(reported).ok().filter(|pid| *pid > 0);
+    let peer = peer_pid(stream);
+    match (reported, peer) {
+        (Some(reported), Some(peer)) if reported != peer => {
+            tracing::warn!(
+                "the old host says it is process {reported}, the connection says {peer}; going with {reported}"
+            );
+            Some(reported)
+        }
+        (Some(reported), _) => Some(reported),
+        (None, peer) => peer,
     }
 }
 

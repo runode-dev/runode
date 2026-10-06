@@ -740,7 +740,7 @@ impl Connection {
             self.kind = client;
             let standalone = self.shared.peers().standalone;
             self.out.control(&self.welcome(standalone));
-            self.successor(reader);
+            self.successor(reader, build);
             return;
         }
         if protocol != PROTOCOL_VERSION {
@@ -807,8 +807,9 @@ impl Connection {
         }
     }
 
-    /// 接手的新宿主连上来：只认 `ClientMsg::Handoff`，交给 `handoff::give`，之后这条连接归它。
-    fn successor(&self, reader: &mut BufReader<&UnixStream>) {
+    /// 接手的新宿主（构建是 `build`）连上来：只认 `ClientMsg::Handoff`，交给 `handoff::give`，之后
+    /// 这条连接归它。
+    fn successor(&self, reader: &mut BufReader<&UnixStream>, build: runode_protocol::BuildId) {
         let message = match read_frame(reader) {
             Ok(Some(frame)) if frame.kind == FrameKind::Control => frame.message::<ClientMsg>().ok(),
             Ok(_) => None,
@@ -819,7 +820,8 @@ impl Connection {
         };
         match message {
             Some(ClientMsg::Handoff { min_format, max_format }) => {
-                handoff::give(&self.shared, self.id, &self.out, reader, min_format..=max_format);
+                let asked = handoff::Asked { formats: min_format..=max_format, build };
+                handoff::give(&self.shared, self.id, &self.out, reader, &asked);
             }
             _ => self.goodbye("a successor must ask for the handoff"),
         }

@@ -181,14 +181,12 @@ pub fn end_old_host(socket: &Path, build: &BuildId) -> io::Result<Ended> {
     Ok(Ended::Ended)
 }
 
-/// 给 `socket` 上的宿主进程发 SIGTERM（连同它的会话一起结束），不管它说什么协议：pid 从连接
-/// 对端取（`LOCAL_PEERPID`），只认同一个用户的进程，而且只认以 `--host` 启动的单独宿主进程
-/// （见 `launched_as_host`）；别的（旧 app 进程里的宿主）不发，返回 `Ended::NotAHost`。发了
-/// 之后等到 socket 连不上为止，最多 `CONNECT_TIMEOUT`。
+/// 给 `socket` 上的宿主进程发 SIGTERM（连同它的会话一起结束），不管它说什么协议：pid 见
+/// `host_pid`，只认同一个用户的进程，而且只认以 `--host` 启动的单独宿主进程（见
+/// `launched_as_host`）；别的（旧 app 进程里的宿主）不发，返回 `Ended::NotAHost`。发了之后等到
+/// socket 连不上为止，最多 `CONNECT_TIMEOUT`。
 pub fn terminate(socket: &Path) -> io::Result<Ended> {
-    let stream = UnixStream::connect(socket)?;
-    let pid = peer_pid(&stream)?;
-    drop(stream);
+    let pid = host_pid(socket)?;
     if pid <= 0 || pid.unsigned_abs() == std::process::id() {
         return Err(io::Error::other(format!("refusing to end process {pid}")));
     }
@@ -264,7 +262,33 @@ fn parse_procargs(data: &[u8]) -> Option<Vec<Vec<u8>>> {
     Some(args)
 }
 
-/// 连接对端进程的 pid，只认同一个用户的。
+/// `socket` 上宿主进程的 pid：打个招呼，等它回话（`Welcome`，协议对不上的老宿主回
+/// `Incompatible`），回过话再读连接对端（`peer_pid`）。监听的 socket 交接过以后，对方 accept
+/// 之前读到的是最早建它的那个进程（可能早已退出、号被别的进程占了），回过话就一定 accept 了。
+/// `Welcome` 里有宿主自报的 `host_pid` 时以它为准，和对端对不上时记一笔；协议 3 及以前的
+/// `Incompatible` 不带 pid，用对端的。不回话的不猜，返回错误。
+fn host_pid(socket: &Path) -> io::Result<libc::pid_t> {
+    let mut stream = UnixStream::connect(socket)?;
+    stream.set_read_timeout(Some(CONNECT_TIMEOUT))?;
+    stream.set_write_timeout(Some(CONNECT_TIMEOUT))?;
+    send(&mut stream, &hello(&super::build(), ClientKind::Cli))?;
+    let reported = match receive(&mut stream)? {
+        HostMsg::Welcome { host_pid, .. } => libc::pid_t::try_from(host_pid).ok().filter(|pid| *pid > 0),
+        HostMsg::Incompatible { .. } => None,
+        other => return Err(io::Error::other(format!("unexpected answer {other:?}"))),
+    };
+    let peer = peer_pid(&stream)?;
+    match reported {
+        Some(reported) if reported != peer => {
+            tracing::warn!("the host says it is process {reported}, the connection says {peer}; going with {reported}");
+            Ok(reported)
+        }
+        Some(reported) => Ok(reported),
+        None => Ok(peer),
+    }
+}
+
+/// 连接对端进程的 pid，只认同一个用户的。要在对方回过话之后读，见 `host_pid`。
 fn peer_pid(stream: &UnixStream) -> io::Result<libc::pid_t> {
     let fd = stream.as_raw_fd();
     let (mut uid, mut gid) = (0, 0);

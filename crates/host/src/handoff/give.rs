@@ -11,12 +11,13 @@ use std::{
     },
     path::PathBuf,
     sync::{Arc, PoisonError, mpsc},
+    thread,
     time::{Duration, Instant},
 };
 
 use runode_protocol::{
-    ClientMsg, FrameError, FrameKind, GoodbyeReason, HANDOFF_FORMAT, HandoffPart, HandoffRefusal, HostMsg, ReportToken,
-    RunningCommand, SessionId, encode_part, read_frame,
+    BuildId, ClientMsg, FrameError, FrameKind, GoodbyeReason, HANDOFF_FORMAT, HandoffPart, HandoffRefusal, HostMsg,
+    ReportToken, RunningCommand, SessionId, encode_part, read_frame,
 };
 use runode_terminal::{fd_passing, host_session::SessionExport};
 
@@ -28,25 +29,34 @@ use crate::{
 };
 
 /// 各个会话停下来交出状态最多等这么久；它们并行地停，每个最多花一秒多编快照。
-const PREPARE_TIMEOUT: Duration = Duration::from_secs(5);
+pub(super) const PREPARE_TIMEOUT: Duration = Duration::from_secs(5);
 /// 等写线程把 `HandoffBegin` 和之前的帧写完。
-const DETACH_TIMEOUT: Duration = Duration::from_secs(5);
-/// 提交时等各个会话交出 PTY。
-const RELEASE_TIMEOUT: Duration = Duration::from_secs(5);
-/// 发出 `Commit` 后等新宿主回 `HandoffDone`。
-const DONE_TIMEOUT: Duration = Duration::from_secs(5);
+pub(super) const DETACH_TIMEOUT: Duration = Duration::from_secs(5);
+/// 提交时等各个会话交出 PTY。新宿主等 `Commit` 的时限（`take::COMMIT_TIMEOUT`）要比它加上写
+/// `Commit`（`DONE_TIMEOUT`）宽。
+pub(super) const RELEASE_TIMEOUT: Duration = Duration::from_secs(5);
+/// 写 `Commit` 最多这么久，发出后再等新宿主回 `HandoffDone` 也最多这么久。
+pub(super) const DONE_TIMEOUT: Duration = Duration::from_secs(5);
 
-/// 新宿主 `ClientMsg::Handoff` 要接手：`formats` 是它读得了的交接格式。`connection` 是这条连接
-/// 的编号，`out` 是它的写队列，`reader` 读它。回滚时会话和监听都照旧，这条连接随后断开。
+/// 新宿主要接手（`ClientMsg::Handoff`）时说的。
+pub(crate) struct Asked {
+    /// 它读得了的交接格式。
+    pub(crate) formats: RangeInclusive<u32>,
+    /// 它的构建（`Hello` 里说的）。
+    pub(crate) build: BuildId,
+}
+
+/// 新宿主要接手，见 `Asked`。`connection` 是这条连接的编号，`out` 是它的写队列，`reader` 读它。
+/// 回滚时会话和监听都照旧，这条连接随后断开。
 pub(crate) fn give(
     shared: &Arc<Shared>,
     connection: u64,
     out: &Outbox,
     reader: &mut BufReader<&UnixStream>,
-    formats: RangeInclusive<u32>,
+    asked: &Asked,
 ) {
     let started = Instant::now();
-    let giving = match begin(shared, connection, &formats) {
+    let giving = match begin(shared, connection, asked) {
         Ok(giving) => giving,
         Err(reason) => {
             tracing::info!("refused to hand the sessions over: {reason:?}");
@@ -79,7 +89,22 @@ pub(crate) fn give(
         return;
     }
     let stream = *reader.get_ref();
-    if let Err(err) = send_parts(shared, stream, &giving, handed.iter_mut()) {
+    // 发出会话和等 `HandoffReady` 合起来最多 `deadline`：新宿主卡住不读时发送也会卡住，到期时
+    // 看门狗杀掉它、断开连接，发送随之失败。
+    let deadline = *shared.handoff_deadline.lock().unwrap_or_else(PoisonError::into_inner);
+    let until = Instant::now() + deadline;
+    let sent = match Watchdog::arm(stream, until) {
+        Ok(watchdog) => {
+            let sent = send_parts(shared, stream, &giving, handed.iter_mut());
+            if watchdog.disarm() {
+                Err(io::Error::new(io::ErrorKind::TimedOut, format!("the new host took more than {deadline:?}")))
+            } else {
+                sent
+            }
+        }
+        Err(err) => Err(err),
+    };
+    if let Err(err) = sent {
         giving.roll_back(shared, started, &format!("failed to send the sessions: {err}"));
         return;
     }
@@ -87,8 +112,7 @@ pub(crate) fn give(
     let handed: Vec<SessionId> = handed.into_iter().map(|(id, _)| id).collect();
     let sent_at = Instant::now();
 
-    let deadline = *shared.handoff_deadline.lock().unwrap_or_else(PoisonError::into_inner);
-    match wait_for_ready(stream, reader, deadline) {
+    match wait_for_ready(stream, reader, until) {
         Reply::Ready => {}
         Reply::Abort(reason) => {
             giving.roll_back(shared, started, &format!("the new host gave up: {reason}"));
@@ -123,7 +147,10 @@ pub(crate) fn give(
     let blocks: Vec<&[u8]> = pending.iter().map(|(_, input)| input.as_slice()).collect();
     let sent = encode_part(&HandoffPart::Commit { pending_input: ids }, &blocks)
         .map_err(|err| io::Error::other(err.to_string()))
-        .and_then(|data| fd_passing::send_with_fds(stream, &data, &[]));
+        .and_then(|data| {
+            stream.set_write_timeout(Some(DONE_TIMEOUT))?;
+            fd_passing::send_with_fds(stream, &data, &[])
+        });
     if let Err(err) = sent {
         tracing::error!("failed to send the commit to the new host: {err}");
     }
@@ -178,7 +205,12 @@ impl Giving {
 /// 检查能不能交，能交就清场：记下正在交接、停下接受连接、给别的连接发 `Goodbye`，定下要交的
 /// 会话。都在同一把锁里，之后新开的会话（见 `Shared::spawn`）和新连上的连接（见 `serve`）都
 /// 看得到正在交接。
-fn begin(shared: &Shared, connection: u64, formats: &RangeInclusive<u32>) -> Result<Giving, HandoffRefusal> {
+fn begin(shared: &Shared, connection: u64, asked: &Asked) -> Result<Giving, HandoffRefusal> {
+    // 要接手的和自己是同一个构建：另一个新 app 抢先让这个构建的新宿主接手了，这是它拉起的宿主，
+    // 后来的 app 的探测已经过时。按正在交接回话，那边过一会儿重新探，会连上这里。
+    if asked.build == shared.build {
+        return Err(HandoffRefusal::Busy);
+    }
     let mut peers = shared.peers();
     if peers.has_desktop() {
         return Err(HandoffRefusal::DesktopConnected);
@@ -189,7 +221,7 @@ fn begin(shared: &Shared, connection: u64, formats: &RangeInclusive<u32>) -> Res
     if peers.handoff.is_some() || peers.stop.is_some() {
         return Err(HandoffRefusal::Busy);
     }
-    if !formats.contains(&HANDOFF_FORMAT) {
+    if !asked.formats.contains(&HANDOFF_FORMAT) {
         return Err(HandoffRefusal::UnsupportedFormat { writes: HANDOFF_FORMAT });
     }
     let Some(listening) = &peers.listening else {
@@ -324,9 +356,8 @@ enum Reply {
     TimedOut,
 }
 
-/// 等新宿主回 `HandoffReady` 或者 `HandoffAbort`，最多等 `deadline`。
-fn wait_for_ready(stream: &UnixStream, reader: &mut BufReader<&UnixStream>, deadline: Duration) -> Reply {
-    let until = Instant::now() + deadline;
+/// 等新宿主回 `HandoffReady` 或者 `HandoffAbort`，最多等到 `until`。
+fn wait_for_ready(stream: &UnixStream, reader: &mut BufReader<&UnixStream>, until: Instant) -> Reply {
     loop {
         let left = until.saturating_duration_since(Instant::now());
         if left.is_zero() {
@@ -347,6 +378,36 @@ fn wait_for_ready(stream: &UnixStream, reader: &mut BufReader<&UnixStream>, dead
             Err(FrameError::Io(err)) if matches!(err.kind(), io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut) => {}
             Err(err) => return Reply::Closed(err.to_string()),
         }
+    }
+}
+
+/// 发会话时的看门狗：到期还没撤掉就杀掉新宿主、断开连接，卡在发送上的那边随之失败。
+struct Watchdog {
+    disarm: mpsc::Sender<()>,
+    thread: thread::JoinHandle<bool>,
+}
+
+impl Watchdog {
+    fn arm(stream: &UnixStream, until: Instant) -> io::Result<Self> {
+        let stream = stream.try_clone()?;
+        let (disarm, disarmed) = mpsc::channel();
+        let thread = thread::Builder::new().name("handoff-watchdog".into()).spawn(move || {
+            match disarmed.recv_timeout(until.saturating_duration_since(Instant::now())) {
+                Err(mpsc::RecvTimeoutError::Timeout) => {
+                    kill_peer(&stream);
+                    let _ = stream.shutdown(std::net::Shutdown::Both);
+                    true
+                }
+                Ok(()) | Err(mpsc::RecvTimeoutError::Disconnected) => false,
+            }
+        })?;
+        Ok(Self { disarm, thread })
+    }
+
+    /// 撤掉，返回它是不是已经到期动手了。
+    fn disarm(self) -> bool {
+        let _ = self.disarm.send(());
+        self.thread.join().unwrap_or(true)
     }
 }
 

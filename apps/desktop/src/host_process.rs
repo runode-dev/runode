@@ -10,13 +10,13 @@ use std::{
     fs::{File, OpenOptions},
     io::Write as _,
     os::fd::FromRawFd as _,
-    sync::Mutex,
+    sync::{Arc, Mutex, PoisonError},
     time::{Duration, Instant},
 };
 
 use runode_host::{BuildId, Host, STATUS_FD, TakeOverError, TakeOverOptions};
 
-use crate::session_host::{HandoffFailure, HandoffStatus};
+use crate::session_host::{HandoffFailure, HandoffStatus, READY_BY};
 
 /// 没有会话也没有连接，持续这么久就退出。
 const IDLE_EXIT: Duration = Duration::from_secs(30);
@@ -47,8 +47,10 @@ pub fn run() -> i32 {
 
 /// `runode --host --take-over`：接手 socket 上旧宿主的会话（见 `Host::take_over`），把结果写成一行
 /// `HandoffStatus` 交给拉起它的 app（状态管道，`STATUS_FD`），成了就照 `run` 跑下去；没成时会话
-/// 还在旧宿主手里，退出。返回进程的退出码。
+/// 还在旧宿主手里，退出。要回 `HandoffReady` 之前先写一行 `HandoffStatus::ready`，从启动起过了
+/// `READY_BY` 就不再回，见 `session_host::handoff` 的模块文档。返回进程的退出码。
 pub fn take_over() -> i32 {
+    let ready_by = Instant::now() + READY_BY;
     // 先于打开任何文件：没有状态管道时 `STATUS_FD` 这个号会被日志文件这类占去。
     let mut status = StatusPipe::take();
     let dirs = runode_paths::Dirs::from_env();
@@ -64,7 +66,15 @@ pub fn take_over() -> i32 {
     };
     let started = Instant::now();
     tracing::info!("host {} taking over the sessions on {}", std::process::id(), socket.display());
-    match host.take_over(&socket, TakeOverOptions::default()) {
+    let status = Arc::new(Mutex::new(status));
+    let on_ready = {
+        let status = status.clone();
+        Arc::new(move || status.lock().unwrap_or_else(PoisonError::into_inner).note(&HandoffStatus::ready()))
+    };
+    let options = TakeOverOptions { ready_by: Some(ready_by), on_ready: Some(on_ready), ..TakeOverOptions::default() };
+    let result = host.take_over(&socket, options);
+    let mut status = std::mem::replace(&mut *status.lock().unwrap_or_else(PoisonError::into_inner), StatusPipe(None));
+    match result {
         Ok(report) => {
             tracing::info!(
                 "host {} took over {} sessions in {:?}; {} of them without scrollback: {:?}",
@@ -136,9 +146,15 @@ impl StatusPipe {
         Self(Some(unsafe { File::from_raw_fd(STATUS_FD) }))
     }
 
-    /// 写一行 JSON 后关掉；写过一次后再调什么都不做。写不了时记日志。
+    /// 写一行结果后关掉；写过一次后再调什么都不做。写不了时记日志。
     fn report(&mut self, status: &HandoffStatus) {
-        let Some(mut file) = self.0.take() else { return };
+        self.note(status);
+        self.0 = None;
+    }
+
+    /// 写一行 JSON，管道接着开着。写不了时记日志。
+    fn note(&mut self, status: &HandoffStatus) {
+        let Some(file) = &mut self.0 else { return };
         let written = serde_json::to_vec(status).map_err(std::io::Error::other).and_then(|mut line| {
             line.push(b'\n');
             file.write_all(&line)

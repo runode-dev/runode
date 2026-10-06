@@ -2,6 +2,15 @@
 //! `runode_host::launch_successor`），它以 `ClientKind::Successor` 连上旧宿主谈交接、接过会话和
 //! 监听的 socket，再往状态管道写一行 `HandoffStatus`；这边读到结果再决定怎么办（见
 //! `session_host::establish`）。新宿主那一侧的入口是 `host_process::take_over`。
+//!
+//! 等结果分两段，各有上限，保证这边当作失败放弃以后新宿主不会再接手成功（否则会话到了新宿主
+//! 手里，这边却弹框说没交成）：
+//! - 拉起后到新宿主说「要回 `HandoffReady` 了」（状态管道上 `ready` 为真的一行）最多
+//!   `READY_TIMEOUT`。新宿主从它启动起过了 `READY_BY` 就不再回 `HandoffReady`
+//!   （`TakeOverOptions::ready_by`），`READY_TIMEOUT` = `READY_BY` + `STARTUP_SLACK`，只要它从被
+//!   拉起到开始计时不超过 `STARTUP_SLACK`，这边放弃时它已经回不了了。`READY_BY` 又比旧宿主接受
+//!   `HandoffReady` 的窗口（`GIVE_READY_WINDOW`）宽，旧宿主还肯交时新宿主不会先放弃。
+//! - 之后再等结果最多 `RESULT_TIMEOUT`，比新宿主那之后最多还要花的 `TAKE_OVER_AFTER_READY` 宽。
 
 use std::{
     fs::File,
@@ -12,11 +21,21 @@ use std::{
     time::{Duration, Instant},
 };
 
+use runode_host::{GIVE_READY_WINDOW, TAKE_OVER_AFTER_READY};
 use runode_protocol::{HandoffRefusal, SessionId};
 use serde::{Deserialize, Serialize};
 
-/// 等新宿主报告结果最多这么久。比旧宿主等新宿主的期限长：到这时旧宿主已经提交或者回滚了。
-pub const STATUS_TIMEOUT: Duration = Duration::from_secs(30);
+/// 新宿主从它启动起过了这么久就不再回 `HandoffReady`，见模块文档。
+pub const READY_BY: Duration = Duration::from_secs(35);
+/// 留给新宿主启动（从被拉起到开始按 `READY_BY` 计时）的余量。
+const STARTUP_SLACK: Duration = Duration::from_secs(5);
+/// 拉起后等新宿主说「要回 `HandoffReady` 了」最多这么久，见模块文档。
+pub const READY_TIMEOUT: Duration = READY_BY.checked_add(STARTUP_SLACK).unwrap();
+/// 新宿主说「要回 `HandoffReady` 了」之后再等结果最多这么久，见模块文档。
+pub const RESULT_TIMEOUT: Duration = Duration::from_secs(45);
+
+const _: () = assert!(READY_BY.as_millis() > GIVE_READY_WINDOW.as_millis());
+const _: () = assert!(RESULT_TIMEOUT.as_millis() > TAKE_OVER_AFTER_READY.as_millis());
 /// 旧宿主说还有桌面连着（`HandoffRefusal::DesktopConnected`）时，最多重试这么久：旧版本的 app 刚
 /// 退出时，它的连接可能还没断干净。
 pub const DESKTOP_RETRY: Duration = Duration::from_secs(2);
@@ -29,6 +48,9 @@ const RETRY_PAUSE: Duration = Duration::from_millis(200);
 pub struct HandoffStatus {
     /// 接手成功，旧宿主已经交出会话和 socket。
     pub ok: bool,
+    /// 还没有结果：新宿主收下了会话、要回 `HandoffReady` 了，结果随后另写一行，见模块文档。
+    #[serde(default)]
+    pub ready: bool,
     /// 接过来的会话个数。
     #[serde(default)]
     pub sessions: usize,
@@ -57,12 +79,22 @@ pub enum HandoffFailure {
 impl HandoffStatus {
     /// 接手成功。
     pub fn took_over(sessions: usize, replayed: Vec<SessionId>) -> Self {
-        Self { ok: true, sessions, replayed, error: None }
+        Self { ok: true, sessions, replayed, ..Self::default() }
     }
 
     /// 没接手。
     pub fn failed(error: HandoffFailure) -> Self {
         Self { ok: false, error: Some(error), ..Self::default() }
+    }
+
+    /// 还没有结果，要回 `HandoffReady` 了。
+    pub fn ready() -> Self {
+        Self { ready: true, ..Self::default() }
+    }
+
+    /// 是 `ready` 那一行，不是结果。
+    fn in_progress(&self) -> bool {
+        self.ready && !self.ok && self.error.is_none()
     }
 }
 
@@ -80,18 +112,20 @@ pub enum Outcome {
     Failed(String),
 }
 
-/// 两个期限，测试里改短。
+/// 几个期限，测试里改短。
 #[derive(Clone, Copy, Debug)]
 pub struct Timing {
-    /// 等一个新宿主报告结果最多多久。
-    pub status: Duration,
+    /// 拉起一个新宿主后等它说「要回 `HandoffReady` 了」最多多久。
+    pub ready: Duration,
+    /// 那之后再等结果最多多久。
+    pub result: Duration,
     /// 旧宿主说还有桌面连着时最多重试多久。
     pub desktop_retry: Duration,
 }
 
 impl Default for Timing {
     fn default() -> Self {
-        Self { status: STATUS_TIMEOUT, desktop_retry: DESKTOP_RETRY }
+        Self { ready: READY_TIMEOUT, result: RESULT_TIMEOUT, desktop_retry: DESKTOP_RETRY }
     }
 }
 
@@ -100,7 +134,7 @@ impl Default for Timing {
 pub fn hand_over(exe: &Path, timing: Timing) -> Outcome {
     let deadline = Instant::now() + timing.desktop_retry;
     loop {
-        match attempt(exe, timing.status) {
+        match attempt(exe, timing) {
             Outcome::Refused(HandoffRefusal::DesktopConnected) if Instant::now() < deadline => {
                 tracing::info!("the old host still has a desktop connected, trying again");
                 thread::sleep(RETRY_PAUSE);
@@ -110,22 +144,31 @@ pub fn hand_over(exe: &Path, timing: Timing) -> Outcome {
     }
 }
 
-/// 拉起一个新宿主，等它报告结果，最多 `timeout`。超时时不杀它：它要是在旧宿主提交之后才卡住，
-/// 会话已经在它手里，杀掉会连会话一起结束；提交之前卡住的，旧宿主到期限会自己杀掉它、回滚。
-fn attempt(exe: &Path, timeout: Duration) -> Outcome {
+/// 拉起一个新宿主，等它报告结果，两段期限见 `Timing`。超时时不杀它：它要是在旧宿主提交之后才
+/// 卡住，会话已经在它手里，杀掉会连会话一起结束；提交之前卡住的，旧宿主到期限会自己杀掉它、回滚。
+fn attempt(exe: &Path, timing: Timing) -> Outcome {
     let successor = match runode_host::launch_successor(exe) {
         Ok(successor) => successor,
         Err(err) => return Outcome::Failed(format!("cannot start the new host: {err}")),
     };
     let pid = successor.pid;
     tracing::info!("started the new host {pid} to take the sessions over");
-    match read_status(&successor.status, timeout) {
-        Ok(Some(status)) => outcome(status),
-        Ok(None) => Outcome::Failed(format!("the new host (pid {pid}) exited without reporting")),
-        Err(err) if err.kind() == io::ErrorKind::TimedOut => {
-            Outcome::Failed(format!("the new host (pid {pid}) did not finish within {}s", timeout.as_secs()))
+    let mut lines = StatusLines::new(&successor.status);
+    let mut timeout = timing.ready;
+    loop {
+        match lines.next(Instant::now() + timeout) {
+            Ok(Some(status)) if status.in_progress() => {
+                tracing::info!("the new host {pid} is about to take the sessions over, waiting for the result");
+                timeout = timing.result;
+            }
+            Ok(Some(status)) => return outcome(status),
+            Ok(None) => return Outcome::Failed(format!("the new host (pid {pid}) exited without reporting")),
+            Err(err) if err.kind() == io::ErrorKind::TimedOut => {
+                let millis = timeout.as_millis();
+                return Outcome::Failed(format!("the new host (pid {pid}) did not finish within {millis} ms"));
+            }
+            Err(err) => return Outcome::Failed(format!("cannot read the new host's report: {err}")),
         }
-        Err(err) => Outcome::Failed(format!("cannot read the new host's report: {err}")),
     }
 }
 
@@ -141,46 +184,62 @@ fn outcome(status: HandoffStatus) -> Outcome {
     }
 }
 
-/// 从状态管道读一行、解出 `HandoffStatus`，最多等 `timeout`（超时时是 `TimedOut` 错误）。没写
-/// 完一行就到了结尾时按读到的解，什么都没读到时为 `None`。
-fn read_status(file: &File, timeout: Duration) -> io::Result<Option<HandoffStatus>> {
-    let deadline = Instant::now() + timeout;
-    let mut line = Vec::new();
-    let mut chunk = [0u8; 4096];
-    loop {
-        if let Some(end) = line.iter().position(|&byte| byte == b'\n') {
-            line.truncate(end);
-            break;
-        }
-        let left = deadline.saturating_duration_since(Instant::now());
-        if left.is_zero() {
-            return Err(io::Error::new(io::ErrorKind::TimedOut, "no report in time"));
-        }
-        let mut poll = libc::pollfd { fd: file.as_raw_fd(), events: libc::POLLIN, revents: 0 };
-        let millis = libc::c_int::try_from(left.as_millis().max(1)).unwrap_or(libc::c_int::MAX);
-        // SAFETY: 只有一项，指向本地变量；描述符来自 `file`，调用期间开着。
-        let ready = unsafe { libc::poll(&mut poll, 1, millis) };
-        if ready < 0 {
-            let err = io::Error::last_os_error();
-            if err.kind() == io::ErrorKind::Interrupted {
+/// 状态管道上一行一行的 `HandoffStatus`。
+struct StatusLines<'a> {
+    file: &'a File,
+    /// 读进来、还没交出去的字节。
+    buffer: Vec<u8>,
+    ended: bool,
+}
+
+impl<'a> StatusLines<'a> {
+    fn new(file: &'a File) -> Self {
+        Self { file, buffer: Vec::new(), ended: false }
+    }
+
+    /// 下一行，最多等到 `deadline`（超时时是 `TimedOut` 错误）。没写完一行就到了结尾时按读到的解，
+    /// 什么都没读到时为 `None`；解不开是错误。
+    fn next(&mut self, deadline: Instant) -> io::Result<Option<HandoffStatus>> {
+        let mut chunk = [0u8; 4096];
+        let line = loop {
+            if let Some(end) = self.buffer.iter().position(|&byte| byte == b'\n') {
+                let mut line: Vec<u8> = self.buffer.drain(..=end).collect();
+                line.pop();
+                break line;
+            }
+            if self.ended {
+                break std::mem::take(&mut self.buffer);
+            }
+            let left = deadline.saturating_duration_since(Instant::now());
+            if left.is_zero() {
+                return Err(io::Error::new(io::ErrorKind::TimedOut, "no report in time"));
+            }
+            let mut poll = libc::pollfd { fd: self.file.as_raw_fd(), events: libc::POLLIN, revents: 0 };
+            let millis = libc::c_int::try_from(left.as_millis().max(1)).unwrap_or(libc::c_int::MAX);
+            // SAFETY: 只有一项，指向本地变量；描述符来自 `file`，调用期间开着。
+            let ready = unsafe { libc::poll(&mut poll, 1, millis) };
+            if ready < 0 {
+                let err = io::Error::last_os_error();
+                if err.kind() == io::ErrorKind::Interrupted {
+                    continue;
+                }
+                return Err(err);
+            }
+            if ready == 0 {
                 continue;
             }
-            return Err(err);
+            match (&mut &*self.file).read(&mut chunk) {
+                Ok(0) => self.ended = true,
+                Ok(n) => self.buffer.extend_from_slice(&chunk[..n]),
+                Err(err) if err.kind() == io::ErrorKind::Interrupted => {}
+                Err(err) => return Err(err),
+            }
+        };
+        if line.iter().all(u8::is_ascii_whitespace) {
+            return Ok(None);
         }
-        if ready == 0 {
-            continue;
-        }
-        match (&mut &*file).read(&mut chunk) {
-            Ok(0) => break,
-            Ok(n) => line.extend_from_slice(&chunk[..n]),
-            Err(err) if err.kind() == io::ErrorKind::Interrupted => {}
-            Err(err) => return Err(err),
-        }
+        serde_json::from_slice(&line).map(Some).map_err(io::Error::other)
     }
-    if line.iter().all(u8::is_ascii_whitespace) {
-        return Ok(None);
-    }
-    serde_json::from_slice(&line).map(Some).map_err(io::Error::other)
 }
 
 #[cfg(test)]
@@ -189,7 +248,11 @@ mod tests {
 
     use super::*;
 
-    const QUICK: Timing = Timing { status: Duration::from_secs(10), desktop_retry: Duration::from_secs(2) };
+    const QUICK: Timing = Timing {
+        ready: Duration::from_secs(10),
+        result: Duration::from_secs(10),
+        desktop_retry: Duration::from_secs(2),
+    };
 
     /// 临时目录里的一个假的新宿主：shell 脚本 `body`，参数照收不用。
     fn fake_successor(name: &str, body: &str) -> PathBuf {
@@ -259,11 +322,37 @@ mod tests {
     fn a_successor_that_hangs_times_out() {
         // `exec` 让 sleep 接过 fd 3：脚本一直不写也不关。
         let exe = fake_successor("hang", "exec sleep 5");
-        let timing = Timing { status: Duration::from_millis(300), ..QUICK };
+        let timing = Timing { ready: Duration::from_millis(300), ..QUICK };
         let started = Instant::now();
         let outcome = hand_over(&exe, timing);
         assert!(matches!(&outcome, Outcome::Failed(reason) if reason.contains("did not finish")), "{outcome:?}");
         assert!(started.elapsed() < Duration::from_secs(5), "{:?}", started.elapsed());
+    }
+
+    /// 说了「要回 `HandoffReady` 了」以后改按第二段期限等：比第一段长的交接照样等到结果。
+    #[test]
+    fn a_successor_about_to_be_ready_gets_more_time() {
+        let ready = json(&HandoffStatus::ready());
+        let ok = json(&HandoffStatus::took_over(2, Vec::new()));
+        // 第一段留够新写的脚本第一次执行的时间（刚编出来的测试程序第一次跑时，系统要先检查一遍
+        // 新的可执行文件，可能要一两秒），整个交接比它长。
+        let exe = fake_successor("ready", &format!("echo '{ready}' >&3\nsleep 5\necho '{ok}' >&3"));
+        let timing = Timing { ready: Duration::from_secs(4), result: Duration::from_secs(10), ..QUICK };
+        assert_eq!(hand_over(&exe, timing), Outcome::TookOver { sessions: 2, replayed: 0 });
+
+        // 第二段也有上限。
+        let exe = fake_successor("ready-hang", &format!("echo '{ready}' >&3\nexec sleep 5"));
+        let timing = Timing { ready: Duration::from_secs(5), result: Duration::from_millis(300), ..QUICK };
+        let started = Instant::now();
+        let outcome = hand_over(&exe, timing);
+        assert!(matches!(&outcome, Outcome::Failed(reason) if reason.contains("did not finish")), "{outcome:?}");
+        // 远短于脚本卡住的 5 秒。
+        assert!(started.elapsed() < Duration::from_millis(4500), "{:?}", started.elapsed());
+
+        // 只说了「要回」就退出：没有结果。
+        let exe = fake_successor("ready-eof", &format!("echo '{ready}' >&3"));
+        let outcome = hand_over(&exe, QUICK);
+        assert!(matches!(&outcome, Outcome::Failed(reason) if reason.contains("without reporting")), "{outcome:?}");
     }
 
     /// 旧版本的 app 刚退出、连接还没断干净：重新拉起新宿主再试，第二次成了。

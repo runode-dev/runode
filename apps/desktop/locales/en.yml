@@ -86,6 +86,8 @@ host:
   old_app_detail: "Its terminals can't move to this version while it's open, so terminals run inside this window for now and end when it quits. Quit the older Runode, then reopen this one."
   keep_old: Keep Old Sessions
   end_old: End Old Sessions
+  already_upgraded_title: Your terminals already moved to this version
+  already_upgraded_detail: "The terminal host is already running this version of Runode, so nothing was ended: the old terminals moved over after all and keep running there. This window still runs its own terminals; quit and reopen Runode to see the moved ones."
   degraded_title: Runode was updated
   degraded_detail: "Scrollback history couldn't be carried over for some terminals (%{count}). Their screens and running programs are fine."
 workspace:

@@ -30,7 +30,11 @@ use runode_protocol::{
     AttachMode, Caps, ClientKind, Frame, FrameKind, GoodbyeReason, HANDOFF_FORMAT, HandoffPart,
     OLDEST_READABLE_HANDOFF_FORMAT, PROTOCOL_VERSION, decode_part, read_frame, write_frame,
 };
-use runode_shared_types::{agent::AgentState, grid::GridSize, shell::IntegrationMode};
+use runode_shared_types::{
+    agent::{Agent, AgentKind, AgentState},
+    grid::GridSize,
+    shell::IntegrationMode,
+};
 use runode_terminal::fd_passing;
 
 /// 角色进程演哪个角色：`old`、`successor`、`fake`。
@@ -41,6 +45,8 @@ const DIR: &str = "RUNODE_HANDOFF_DIR";
 const TAG: &str = "RUNODE_HANDOFF_TAG";
 /// 新宿主当自己的快照是这个格式版本，见 `TakeOverOptions::snapshot_format`。
 const SNAPSHOT_FORMAT: &str = "RUNODE_HANDOFF_SNAPSHOT_FORMAT";
+/// 新宿主的构建，没设时是 `NEW_BUILD`。连续交接时每一棒要是不同的构建：同一个构建的不交接。
+const SUCCESSOR_BUILD: &str = "RUNODE_HANDOFF_BUILD";
 /// 假的新宿主收下所有会话后怎么办：`die` 退出，`hang` 一直不回话，`abort` 回 `HandoffAbort`。
 const FAKE: &str = "RUNODE_HANDOFF_FAKE";
 
@@ -74,10 +80,11 @@ fn role_successor() {
     let Some(dir) = role("successor") else { return };
     let tag = std::env::var(TAG).unwrap_or_else(|_| "successor".into());
     log_to(&dir.join(format!("{tag}.log")));
-    let host = Host::new(BuildId(NEW_BUILD.into()));
+    let build = std::env::var(SUCCESSOR_BUILD).unwrap_or_else(|_| NEW_BUILD.into());
+    let host = Host::new(BuildId(build));
     host.mark_standalone();
     let snapshot_format = std::env::var(SNAPSHOT_FORMAT).ok().map(|format| format.parse().unwrap());
-    let result = host.take_over(&socket_in(&dir), TakeOverOptions { snapshot_format });
+    let result = host.take_over(&socket_in(&dir), TakeOverOptions { snapshot_format, ..TakeOverOptions::default() });
     let text = match &result {
         Ok(report) => {
             // 交接用的连接、管道这些稍后才关完。
@@ -391,7 +398,10 @@ fn a_new_host_takes_every_session_over() {
         let sessions = cli.sessions();
         let gone = sessions.iter().any(|s| s.id == exited && s.exited);
         let working = sessions.iter().find(|s| s.id == agent).and_then(|s| s.meta.agent);
-        if gone && let Some(working) = working.filter(|agent| agent.state == AgentState::Working) {
+        // 等到认出前台进程：在那之前只有标题里的盲文转圈，按 codex 算；认出叫 claude 的进程后
+        // 才是最终的 claude（前台进程优先）。不等的话，交接前后正好落在认出之前和之后，两边对不上。
+        let settled = Agent { kind: AgentKind::Claude, state: AgentState::Working };
+        if gone && let Some(working) = working.filter(|agent| *agent == settled) {
             break working;
         }
         assert!(Instant::now() < deadline, "the sessions did not settle: {sessions:?}");
@@ -606,6 +616,91 @@ fn a_connected_desktop_or_an_in_app_host_refuses() {
     }
 }
 
+/// 要接手的和旧宿主是同一个构建（另一个新 app 抢先让这个构建的新宿主接手了，后来的 app 探到的
+/// 已经过时）：回 `Busy`，什么都不动，连着的命令行也不受影响。
+#[test]
+fn a_successor_of_the_same_build_is_told_the_host_is_busy() {
+    let dir = temp_dir("same");
+    let (_old, socket) = old_here(&dir);
+    let mut cli = Peer::hello(&socket, false);
+    let id = cli.spawn("/bin/cat");
+    match Host::new(BuildId(OLD_BUILD.into())).take_over(&socket, TakeOverOptions::default()) {
+        Err(TakeOverError::Refused(HandoffRefusal::Busy)) => {}
+        other => panic!("expected busy, got {other:?}"),
+    }
+    assert_eq!(cli.sessions().into_iter().map(|s| s.id).collect::<Vec<_>>(), [id]);
+    // 别的构建照样能接手。
+    drop(cli);
+    let (_successor, result) = take_over(&dir, &[]);
+    assert_eq!(result, "ok 1");
+}
+
+/// 旧宿主正在交接时连上来的新宿主收到的是 `Goodbye { Handoff }`（交接开始前连上、还没要交接的，
+/// 和交接期间被接受的连接都这样）：当作 `Busy`，不当作失败。旧宿主要交接之后才说也一样。
+#[test]
+fn a_goodbye_for_a_handoff_means_busy() {
+    let dir = temp_dir("bye");
+    let socket = socket_in(&dir);
+    let listener = UnixListener::bind(&socket).unwrap();
+    let welcome = HostMsg::Welcome {
+        protocol: PROTOCOL_VERSION,
+        build: BuildId(OLD_BUILD.into()),
+        host_pid: std::process::id(),
+        snapshot_format: 1,
+        standalone: true,
+        handoff: HANDOFF_FORMAT,
+    };
+    let goodbye = HostMsg::Goodbye { reason: GoodbyeReason::Handoff };
+    let scripts = [vec![goodbye.clone()], vec![welcome, goodbye]];
+    let fake = thread::spawn(move || {
+        for script in scripts {
+            let (mut stream, _) = listener.accept().unwrap();
+            for answer in script {
+                // 先读对面的一条（`Hello`，然后是 `Handoff`），再回话。
+                read_frame(&mut stream).unwrap().unwrap();
+                let frame = Frame::control(&answer).unwrap();
+                write_frame(&mut stream, frame.kind, 0, &frame.payload).unwrap();
+            }
+        }
+    });
+    for _ in 0..2 {
+        let new = Host::new(BuildId(NEW_BUILD.into()));
+        match new.take_over(&socket, TakeOverOptions::default()) {
+            Err(TakeOverError::Refused(HandoffRefusal::Busy)) => {}
+            other => panic!("expected busy, got {other:?}"),
+        }
+    }
+    fake.join().unwrap();
+}
+
+/// 两个新 app 同时升级：两个新宿主一起来接手，一个接手成了，另一个得到 `Busy`（旧宿主正在交接、
+/// 交接期间被接受的连接收到 `Goodbye`，或者连到了刚接手的同构建新宿主），不会被当成失败。
+#[test]
+fn of_two_successors_at_once_one_is_told_the_host_is_busy() {
+    let dir = temp_dir("two");
+    let (_old, socket) = old_process(&dir);
+    let mut cli = Peer::hello(&socket, false);
+    let id = cli.spawn(&counter(&dir, "count.sh", 100, 1, "0.01", 0));
+    drop(cli);
+    let first = Role::start("successor", &dir, &[]);
+    let here = Host::new(BuildId(NEW_BUILD.into()));
+    here.mark_standalone();
+    let second = here.take_over(&socket, TakeOverOptions::default());
+    let first_result = wait_file(&dir.join("successor.result"));
+    match (&second, first_result.as_str()) {
+        (Ok(report), _) => {
+            assert_eq!(report.sessions, 1);
+            assert_eq!(first_result, format!("err {:?}", TakeOverError::Refused(HandoffRefusal::Busy)));
+        }
+        (Err(TakeOverError::Refused(HandoffRefusal::Busy)), "ok 1") => {}
+        (second, first) => panic!("expected one handoff and one busy, got {first} and {second:?}"),
+    }
+    let (mut new, build) = hello_build(&socket);
+    assert_eq!(build.0, NEW_BUILD);
+    assert_counted(&mut new, id, 100);
+    drop(first);
+}
+
 /// 不会交接的老宿主：协议 3 的回 `Incompatible`，`Welcome::handoff` 为 0 的也算。
 #[test]
 fn an_old_host_without_handoffs_is_pre_handoff() {
@@ -639,7 +734,7 @@ fn an_old_host_without_handoffs_is_pre_handoff() {
     fake.join().unwrap();
 }
 
-/// 一个宿主接一个宿主连续交接 20 次，每个新宿主开着的描述符一样多。
+/// 一个宿主接一个宿主连续交接 20 次（每一棒是不同的构建），每个新宿主开着的描述符一样多。
 #[test]
 fn twenty_handoffs_in_a_row_do_not_leak_descriptors() {
     let dir = temp_dir("chain");
@@ -652,7 +747,7 @@ fn twenty_handoffs_in_a_row_do_not_leak_descriptors() {
     let mut fds = Vec::new();
     for n in 0..20 {
         let tag = format!("host{n}");
-        let (successor, result) = take_over(&dir, &[(TAG, &tag)]);
+        let (successor, result) = take_over(&dir, &[(TAG, &tag), (SUCCESSOR_BUILD, &tag)]);
         assert_eq!(result, "ok 3", "handoff {n}");
         fds.push(wait_file(&dir.join(format!("{tag}.fds"))).parse::<usize>().unwrap());
         hosts.push(successor);
@@ -662,13 +757,53 @@ fn twenty_handoffs_in_a_row_do_not_leak_descriptors() {
         }
     }
     assert!(fds.iter().all(|&count| count == fds[0]), "descriptors per host: {fds:?}");
+    // 每个新宿主收到 `Welcome` 后读到的连接对端都是旧宿主自报的进程号，见 `peer_pid_after_an_answer`。
+    for n in 0..20 {
+        let log = std::fs::read_to_string(dir.join(format!("host{n}.log"))).unwrap();
+        assert!(!log.contains("the connection says"), "host{n}: {log}");
+    }
     let (mut last, build) = hello_build(&socket);
-    assert_eq!(build.0, NEW_BUILD);
+    assert_eq!(build.0, "host19");
     let mut listed: Vec<SessionId> = last.sessions().into_iter().map(|s| s.id).collect();
     listed.sort();
     let mut ids = ids;
     ids.sort();
     assert_eq!(listed, ids);
+}
+
+/// 监听的 socket 交接过以后，连上去的一方要等对方回过话再读对端进程号（`LOCAL_PEERPID`）：那时
+/// 读到的才是接手的新宿主，和它在 `Welcome` 里自报的一样。新宿主认旧宿主、桌面结束旧宿主都靠这条。
+#[cfg(target_os = "macos")]
+#[test]
+fn peer_pid_after_an_answer() {
+    use std::os::fd::AsRawFd as _;
+    let peer_pid = |stream: &UnixStream| {
+        let mut pid: libc::pid_t = 0;
+        let mut len = libc::socklen_t::try_from(size_of::<libc::pid_t>()).unwrap();
+        // SAFETY: 描述符来自 `stream`；值指向本地变量，长度是它的大小。
+        let result = unsafe {
+            libc::getsockopt(stream.as_raw_fd(), libc::SOL_LOCAL, libc::LOCAL_PEERPID, (&raw mut pid).cast(), &mut len)
+        };
+        assert_eq!(result, 0);
+        pid
+    };
+    let dir = temp_dir("peerpid");
+    let (mut old, socket) = old_process(&dir);
+    let (successor, result) = take_over(&dir, &[]);
+    assert_eq!(result, "ok 0");
+    assert!(old.wait().success());
+    let mut peer = Peer::connect(&socket);
+    peer.send(&ClientMsg::Hello {
+        protocol: PROTOCOL_VERSION,
+        build: BuildId(common::BUILD.into()),
+        client: ClientKind::Cli,
+        caps: Caps::default(),
+        session: None,
+        device: None,
+    });
+    let HostMsg::Welcome { host_pid, .. } = peer.message() else { panic!("expected welcome") };
+    assert_eq!(host_pid, successor.child.id());
+    assert_eq!(u32::try_from(peer_pid(&peer.stream)).unwrap(), host_pid);
 }
 
 /// 新宿主一次次放弃，旧宿主一次次回滚，描述符不增长。数描述符要整个进程里只有这一件事，所以

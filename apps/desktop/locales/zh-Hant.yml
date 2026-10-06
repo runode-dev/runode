@@ -86,6 +86,8 @@ host:
   old_app_detail: 它開著的時候，終端機沒辦法交給這個版本，這次終端機跑在這個 app 裡，結束時一起關閉。請先結束舊版的 Runode，再重新開啟這一個。
   keep_old: 保留舊工作階段
   end_old: 終止舊工作階段
+  already_upgraded_title: 終端機已經交給這個版本了
+  already_upgraded_detail: 終端機宿主已經是這個版本的 Runode，所以什麼都沒有終止：舊的終端機最後還是交過來了，在那裡照常執行。這個視窗仍用自己的終端機；結束後重新開啟 Runode 就能看到交過來的終端機。
   degraded_title: Runode 已更新
   degraded_detail: 升級時有 %{count} 個終端機的捲動紀錄沒能帶過來，畫面和正在執行的程式都不受影響。
 workspace:

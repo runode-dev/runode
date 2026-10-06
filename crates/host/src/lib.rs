@@ -33,7 +33,7 @@ use std::{
 };
 
 use anyhow::Result;
-pub use handoff::{TakeOverError, TakeOverOptions, TakeOverReport};
+pub use handoff::{GIVE_READY_WINDOW, TAKE_OVER_AFTER_READY, TakeOverError, TakeOverOptions, TakeOverReport};
 pub use idle::Stopped;
 pub use launch::{STATUS_FD, Successor, launch, launch_successor};
 pub use runode_protocol::{BuildId, ClientMsg, HandoffRefusal, HostMsg, Placement, SessionId};
@@ -79,7 +79,7 @@ struct Shared {
     peers: Mutex<server::Peers>,
     /// 有连接断开、或者要退出时通知，`Host::run_until_idle` 等在它上面。
     peers_changed: Condvar,
-    /// 交出会话时最多等新宿主这么久回 `HandoffReady`，见 `Host::set_handoff_deadline`。
+    /// 交出会话时给新宿主多久收下会话、回 `HandoffReady`，见 `Host::set_handoff_deadline`。
     handoff_deadline: Mutex<Duration>,
 }
 
@@ -219,8 +219,8 @@ impl Host {
         Self { shared: Arc::new(shared) }
     }
 
-    /// 交出会话时最多等接手的新宿主这么久（默认 20 秒，短于 app 等新宿主结果的时限），等不到就
-    /// 杀掉它、回滚。测试用来缩短。
+    /// 交出会话时给接手的新宿主多久收下会话（发送也算在内）、回 `HandoffReady`，默认 20 秒，
+    /// 到期就杀掉它、回滚。改了它，`GIVE_READY_WINDOW` 就不准了；测试用来缩短。
     pub fn set_handoff_deadline(&self, deadline: Duration) {
         *self.shared.handoff_deadline.lock().unwrap_or_else(PoisonError::into_inner) = deadline;
     }

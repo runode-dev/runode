@@ -19,22 +19,50 @@ mod take;
 use std::{
     fmt,
     os::{fd::AsRawFd as _, unix::net::UnixStream},
-    time::Duration,
+    sync::Arc,
+    time::{Duration, Instant},
 };
 
-pub(crate) use give::give;
+pub(crate) use give::{Asked, give};
 use runode_protocol::{HandoffRefusal, SessionId};
 
-/// 交出会话时默认最多等新宿主这么久，见 `Host::set_handoff_deadline`。要短于 app 等新宿主
-/// 报告结果的时限（30 秒），超时回滚后 app 那边还来得及知道。
+/// 交出会话时默认给新宿主多久收下会话、回 `HandoffReady`（从开始发会话算起，发送本身也在内），
+/// 见 `Host::set_handoff_deadline`。期限之和见 `GIVE_READY_WINDOW`。
 pub(crate) const DEFAULT_DEADLINE: Duration = Duration::from_secs(20);
 
+/// 旧宿主（默认期限下）从收到新宿主的 `ClientMsg::Handoff` 到不再接受 `HandoffReady`、回滚，最多
+/// 这么久：停下各个会话 + 写完 `HandoffBegin` + `DEFAULT_DEADLINE`（发出会话、等回话）。新宿主
+/// 这之后才回 `HandoffReady` 只会被回滚，拉起新宿主的一方等结果时要比它宽。
+pub const GIVE_READY_WINDOW: Duration =
+    give::PREPARE_TIMEOUT.checked_add(give::DETACH_TIMEOUT).unwrap().checked_add(DEFAULT_DEADLINE).unwrap();
+
+/// 新宿主从准备回 `HandoffReady`（`TakeOverOptions::on_ready` 被调用）到 `Host::take_over` 返回，
+/// 最多这么久：等旧宿主的 `Commit`、它没提交就断开时再等它退出完，以及失败时交回各个 PTY。
+pub const TAKE_OVER_AFTER_READY: Duration =
+    take::COMMIT_TIMEOUT.checked_add(take::EXIT_GRACE).unwrap().checked_add(take::RELEASE_TIMEOUT).unwrap();
+
 /// `Host::take_over` 的选项。
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Default)]
 pub struct TakeOverOptions {
     /// 测试用：把自己编的快照的格式版本当成这个。和旧宿主的不同时，会话的屏幕退成从 VT 重放
     /// 重建。`None` 时用这个构建真正的格式版本。
     pub snapshot_format: Option<u16>,
+    /// 过了这个时刻就不再回 `HandoffReady`，放弃接手（旧宿主回滚）。拉起新宿主的一方等结果有
+    /// 时限，过了时限它当作失败；这里保证它放弃以后这边不会再接手成功。`None` 时不限。
+    pub ready_by: Option<Instant>,
+    /// 回 `HandoffReady` 之前调一次：从这里起交接最多再花 `TAKE_OVER_AFTER_READY` 就有结果，
+    /// 等结果的一方可以据此放宽时限。
+    pub on_ready: Option<Arc<dyn Fn() + Send + Sync>>,
+}
+
+impl fmt::Debug for TakeOverOptions {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("TakeOverOptions")
+            .field("snapshot_format", &self.snapshot_format)
+            .field("ready_by", &self.ready_by)
+            .field("on_ready", &self.on_ready.is_some())
+            .finish()
+    }
 }
 
 /// 交接成功：接手了几个会话（含还没启动 shell 的），其中哪些的屏幕是从 VT 重放重建的（快照格式
@@ -68,7 +96,11 @@ impl fmt::Display for TakeOverError {
 
 impl std::error::Error for TakeOverError {}
 
-/// 连在 `stream` 另一头的进程号，读的是连上时记下的（`LOCAL_PEERPID`）；对面已经断开时读不到。
+/// 连在 `stream` 另一头的进程号；对面已经断开时读不到。macOS 上（`LOCAL_PEERPID`）是最近用过
+/// 对面那个 socket 的进程：连的一方读时，对方要已经 accept 过这条连接才准，之前读到的是最早建
+/// 监听 socket 的进程，监听的 socket 交接过以后那就不是现在的宿主了。Linux 上（`SO_PEERCRED`）
+/// 连的一方读到的总是调 `listen` 的进程，同样不跟着交接走。所以新宿主认旧宿主时以 `Welcome`
+/// 里自报的为准，见 `take::old_host_pid`；接受连接的一方读到的是连上来的进程，一直准。
 #[cfg(target_os = "macos")]
 fn peer_pid(stream: &UnixStream) -> Option<libc::pid_t> {
     let mut pid: libc::pid_t = 0;
