@@ -1,7 +1,7 @@
-//! 桌面和终端宿主之间：宿主管着每个会话的 PTY 和权威的那份 VT（见 `runode_host`），桌面经一条
-//! 连接（`Link`）按 `runode_protocol` 和它说话。宿主跑在 app 进程里（`Host::connect_pair` 的一对
-//! socket），或者单独一个进程（`runode --host`，app 退出后会话还在），由配置项 `terminal-host`
-//! 在启动时定下，见 `launch::choose_mode`。单独跑的宿主是别的构建时（app 升级了），先让这个构建
+//! 桌面这一侧连终端宿主的客户端：宿主管着每个会话的 PTY 和权威的那份 VT（见 `runode_host`），
+//! 桌面经一条连接（`Link`）按 `runode_protocol` 和它说话。宿主跑在 app 进程里（`Host::connect_pair`
+//! 的一对 socket），或者单独一个进程（`runode --host`，app 退出后会话还在），由配置项
+//! `terminal-host` 在启动时定下，见 `launch::choose_mode`。单独跑的宿主是别的构建时（app 升级了），先让这个构建
 //! 的新宿主接手它的会话，见 `handoff`。
 //!
 //! 启动时 `start` 在后台线程里读配置、定模式、连上宿主，主线程第一次用 `link` 时等它连好，读到的
