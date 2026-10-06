@@ -10,6 +10,7 @@ mod engine;
 pub mod generators;
 mod line;
 mod paths;
+mod runode_cli;
 mod specs;
 pub mod usage;
 

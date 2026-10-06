@@ -1,0 +1,164 @@
+{
+  "name": "runode",
+  "description": "Drive the terminals of the running runode app",
+  "subcommands": [
+    {
+      "name": "list",
+      "description": "List the terminal sessions",
+      "options": [
+        { "name": "--json", "description": "Print the sessions and the window layout as JSON" }
+      ]
+    },
+    {
+      "name": "read",
+      "description": "Print the text on a session's screen",
+      "args": { "name": "session", "isOptional": true, "generatorName": "sessions" },
+      "options": [
+        {
+          "name": "--lines",
+          "description": "Print N lines from the bottom, scrollback included",
+          "args": { "name": "N" }
+        },
+        {
+          "name": "--command",
+          "description": "Print the output of the Nth last command (needs shell integration)",
+          "args": { "name": "N", "isOptional": true }
+        }
+      ]
+    },
+    {
+      "name": "send",
+      "description": "Type text or press keys in a session",
+      "args": [
+        { "name": "session", "generatorName": "sessions" },
+        { "name": "text", "isOptional": true, "isVariadic": true, "suggestions": [{ "name": "-", "description": "Read the text from stdin" }] }
+      ],
+      "options": [
+        { "name": "--paste", "description": "Paste the text instead of typing it" },
+        {
+          "name": "--key",
+          "description": "Press KEY after the text; 'down*3' presses it three times",
+          "isRepeatable": true,
+          "args": {
+            "name": "KEY",
+            "suggestions": [
+              "enter", "tab", "shift-tab", "esc", "backspace", "space",
+              "up", "down", "left", "right", "home", "end", "pageup", "pagedown",
+              "ctrl-c", "ctrl-d", "ctrl-z", "ctrl-l", "ctrl-r", "alt-b", "alt-f"
+            ]
+          }
+        },
+        { "name": "--enter", "description": "Press Enter at the end" },
+        { "name": "--wait", "description": "Wait for the agent, the command or a quiet screen afterwards" },
+        { "name": "--timeout", "description": "Give up waiting after SECS seconds", "args": { "name": "SECS" } }
+      ]
+    },
+    {
+      "name": "wait",
+      "description": "Wait until a session's agent or screen reaches a state",
+      "args": { "name": "session", "generatorName": "sessions" },
+      "options": [
+        {
+          "name": "--for",
+          "description": "What to wait for (default: stopped)",
+          "args": [
+            {
+              "name": "UNTIL",
+              "suggestions": [
+                { "name": "stopped", "description": "The agent is not working: idle, asking you, or no agent" },
+                { "name": "done", "description": "The agent worked, then stopped" },
+                { "name": "working", "description": "The agent is working" },
+                { "name": "idle", "description": "The agent is idle" },
+                { "name": "blocked", "description": "The agent is asking you" },
+                { "name": "command", "description": "The next command at the shell prompt finished" },
+                { "name": "text", "description": "A line on the screen matches REGEX" },
+                { "name": "quiet", "description": "The screen did not change for SECS" }
+              ]
+            },
+            { "name": "REGEX or SECS", "isOptional": true }
+          ]
+        },
+        { "name": "--lines", "description": "With --for text: look only at the last N lines", "args": { "name": "N" } },
+        { "name": "--new", "description": "With --for text: skip the lines already there" },
+        { "name": "--timeout", "description": "Give up after SECS seconds", "args": { "name": "SECS" } }
+      ]
+    },
+    {
+      "name": "open",
+      "description": "Open a terminal in the app and print its session id",
+      "args": { "name": "command", "isOptional": true, "isVariadic": true, "isCommand": true },
+      "options": [
+        { "name": "--tab", "description": "Open a new tab after the session's (default)" },
+        { "name": "--right", "description": "Split the session's pane to the right" },
+        { "name": "--down", "description": "Split the session's pane downwards" },
+        {
+          "name": "--near",
+          "description": "Open next to SESSION instead of your own",
+          "args": { "name": "session", "generatorName": "sessions" }
+        },
+        { "name": "--cwd", "description": "Start the shell in DIR", "args": { "name": "DIR", "template": "folders" } },
+        { "name": "--focus", "description": "Switch the app to the new terminal" }
+      ]
+    },
+    {
+      "name": "kill",
+      "description": "End a session and close its pane",
+      "args": { "name": "session", "generatorName": "sessions" }
+    },
+    {
+      "name": "focus",
+      "description": "Show a session's pane and bring its window to the front",
+      "args": { "name": "session", "isOptional": true, "generatorName": "sessions" }
+    },
+    {
+      "name": "setup",
+      "description": "Teach an agent to use runode",
+      "args": {
+        "name": "agent",
+        "suggestions": [
+          { "name": "claude", "description": "Install a skill in ~/.claude/skills/runode" },
+          { "name": "codex", "description": "Add a section to ~/.codex/AGENTS.md" }
+        ]
+      },
+      "options": [
+        { "name": "--print", "description": "Show the instructions instead of installing them" }
+      ]
+    },
+    {
+      "name": "remote",
+      "description": "Pair phones for remote access",
+      "subcommands": [
+        {
+          "name": "pair",
+          "description": "Pair a phone: shows a QR code and waits for the phone",
+          "options": [
+            {
+              "name": "--addr",
+              "description": "Also offer ADDR, say 127.0.0.1 for a simulator on this Mac",
+              "isRepeatable": true,
+              "args": { "name": "ADDR", "suggestions": ["127.0.0.1"] }
+            }
+          ]
+        },
+        {
+          "name": "devices",
+          "description": "List the paired phones",
+          "options": [
+            { "name": "--json", "description": "Print the devices as JSON" }
+          ]
+        },
+        {
+          "name": "revoke",
+          "description": "Unpair a phone",
+          "args": { "name": "device", "generatorName": "devices" }
+        }
+      ]
+    },
+    { "name": "help", "description": "Show the help" },
+    { "name": "version", "description": "Show the version" }
+  ],
+  "options": [
+    { "name": ["-h", "--help"], "description": "Show the help" },
+    { "name": ["-V", "--version"], "description": "Show the version" }
+  ]
+}

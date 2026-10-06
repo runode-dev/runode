@@ -98,3 +98,27 @@ fn cargo_and_docker_have_specs() {
     assert!(names("docker ru^").contains(&"run".to_owned()));
     assert!(names("npm i^").contains(&"install".to_owned()));
 }
+
+#[test]
+fn runode_completes_its_own_commands() {
+    let names = |input: &str| -> Vec<String> {
+        let request = request(input).unwrap();
+        let candidates = request.local_candidates(None, &Shell::default());
+        rank(&candidates, request.typed()).into_iter().map(|i| candidates[i].value.clone()).collect()
+    };
+    assert_eq!(names("runode re^"), ["read", "remote"]);
+    assert_eq!(names("runode remote ^"), ["devices", "pair", "revoke"]);
+    assert!(names("runode wait ab12 --for ^").contains(&"done".to_owned()));
+    assert!(names("runode send ab12 --key ctrl-^").contains(&"ctrl-c".to_owned()));
+    // `--key` 可以写好几次。
+    assert!(names("runode send ab12 --key esc --^").contains(&"--key".to_owned()));
+    // 会话和设备由 runode 自己列。
+    let jobs = |input: &str| -> Vec<String> {
+        request(input).unwrap().generator_jobs().into_iter().map(|job| job.command).collect()
+    };
+    assert!(jobs("runode kill ^").iter().any(|command| command.contains("runode list --json")));
+    assert!(jobs("runode open --near ^").iter().any(|command| command.contains("runode list --json")));
+    assert!(jobs("runode remote revoke ^").iter().any(|command| command.contains("runode remote devices --json")));
+    // `open --` 后面是另一条命令，按那条命令的规格补。
+    assert!(names("runode open -- git chec^").contains(&"checkout".to_owned()));
+}

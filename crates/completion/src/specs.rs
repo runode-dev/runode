@@ -41,10 +41,16 @@ pub fn description(name: &str) -> Option<&'static str> {
     Some(INDEX[i].3).filter(|description| !description.is_empty())
 }
 
-/// 动态补全的数据（生成器和过滤函数），按命令名查；第一次用到时建好。
+/// 动态补全的数据（生成器和过滤函数），按命令名查；第一次用到时建好。runode 自己的命令行的
+/// 生成器在 `runode_cli` 里。
 pub fn dynamic(command: &str) -> Option<&'static DynamicCompletionData> {
     static DATA: OnceLock<HashMap<String, DynamicCompletionData>> = OnceLock::new();
-    DATA.get_or_init(warp_command_signatures::dynamic_command_signature_data).get(command)
+    DATA.get_or_init(|| {
+        let mut data = warp_command_signatures::dynamic_command_signature_data();
+        data.extend([crate::runode_cli::generators().into()]);
+        data
+    })
+    .get(command)
 }
 
 /// 嵌进来的所有命令名。
@@ -142,5 +148,19 @@ mod tests {
         assert_eq!(description("git"), Some("The stupid content tracker"));
         assert_eq!(description("no-such-command-here"), None);
         assert!(dynamic("git").is_some_and(|data| !data.generators().is_empty()));
+    }
+
+    #[test]
+    fn runode_has_its_own_spec_and_generators() {
+        let runode = lookup("runode").unwrap();
+        let subcommands: Vec<&str> = runode.signature.subcommands().iter().map(|s| s.name.as_str()).collect();
+        assert!(
+            ["list", "read", "send", "wait", "open", "kill", "focus", "setup", "remote"]
+                .iter()
+                .all(|name| subcommands.contains(name))
+        );
+        assert!(runode.repeatable.contains("--key"));
+        let generators = dynamic("runode").unwrap().generators();
+        assert!(generators.contains_key(&"sessions".into()) && generators.contains_key(&"devices".into()));
     }
 }

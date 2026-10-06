@@ -7,7 +7,8 @@ use runode_shared_types::input::parse_keys;
 
 use crate::{SetupTarget, select::Selector};
 
-/// 用法说明，`runode help` 打印它。
+/// 用法说明，`runode help` 打印它。改了命令或选项，`runode-completion` 里 runode 自己的命令规格
+/// 也要跟着改，按 Tab 才补得出来。
 pub(crate) const HELP: &str = "\
 usage: runode [COMMAND]
 
