@@ -76,7 +76,7 @@ fn handle(request: ClientMsg, cx: &mut App) -> HostMsg {
             None => fail(req, format!("no runode window shows session {id}")),
         },
         ClientMsg::Layout { req } => HostMsg::Layout { req, windows: layout_report::current(cx) },
-        ClientMsg::WriteClipboard { text, .. } => clipboard::write(text, cx),
+        ClientMsg::WriteClipboard { text, .. } => clipboard::write(text.0, cx),
         other => HostMsg::Error { req: None, id: None, message: format!("the runode app does not handle {other:?}") },
     }
 }

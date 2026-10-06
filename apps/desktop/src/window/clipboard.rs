@@ -23,7 +23,9 @@ pub(super) fn write(text: String, cx: &mut App) -> HostMsg {
 /// （没有时在最前面的窗口上）弹框，用户点了允许才读。都用 `Link::ui_reply` 回 `ClipboardText`，
 /// 不让读、没有窗口可问、剪贴板里没有文字时 `text` 为空。
 pub(super) fn read(ticket: UiTicket, id: SessionId, ask: bool, program: Option<String>, cx: &mut App) {
-    let reply = move |text| host_client::link().ui_reply(ticket, HostMsg::ClipboardText { id, text });
+    let reply = move |text: Option<String>| {
+        host_client::link().ui_reply(ticket, HostMsg::ClipboardText { id, text: text.map(Into::into) });
+    };
     if !ask {
         reply(clipboard_text(cx));
         return;

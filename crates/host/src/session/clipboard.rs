@@ -43,7 +43,7 @@ impl Runner {
                     );
                     return;
                 }
-                let request = ClientMsg::WriteClipboard { id: self.id, text };
+                let request = ClientMsg::WriteClipboard { id: self.id, text: text.into() };
                 if self.ui.ask(self.id, self.ui_connection(), request).is_none() {
                     tracing::info!(
                         "session {} dropped a clipboard write of {len} bytes: no runode window is connected",
@@ -105,7 +105,7 @@ impl Runner {
         }
         if let Some(read) = self.clipboard_read.take_if(|read| read.ui == ui) {
             let text = match reply {
-                HostMsg::ClipboardText { text, .. } => text,
+                HostMsg::ClipboardText { text, .. } => text.map(|text| text.0),
                 HostMsg::Error { message, .. } => {
                     tracing::info!("session {} answered a clipboard read with nothing: {message}", self.id);
                     None

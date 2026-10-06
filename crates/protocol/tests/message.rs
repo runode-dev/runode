@@ -547,3 +547,25 @@ fn clipboard_messages_and_their_old_readings() {
     let old: OldClientMsg = serde_json::from_str(r#"{"type":"layout","req":2}"#).unwrap();
     assert_eq!(old, OldClientMsg::Layout { req: 2 });
 }
+
+/// 剪贴板的文字在线上是普通的字符串，`Debug` 只写长度：带着它的消息（包括套在 `UiRequest`、`UiReply`
+/// 里的）记进日志时不会带出剪贴板的内容。
+#[test]
+fn clipboard_text_stays_out_of_debug_output() {
+    let write = ClientMsg::WriteClipboard { id: ID, text: "secret-password".into() };
+    assert_eq!(
+        serde_json::to_string(&write).unwrap(),
+        format!(r#"{{"type":"write_clipboard","id":"{ID}","text":"secret-password"}}"#)
+    );
+    let answer = HostMsg::ClipboardText { id: ID, text: Some("secret-password".into()) };
+    let nested = [
+        format!("{write:?}"),
+        format!("{answer:?}"),
+        format!("{:?}", HostMsg::UiRequest { ui: 1, request: Box::new(write) }),
+        format!("{:?}", ClientMsg::UiReply { ui: 1, reply: Box::new(answer) }),
+    ];
+    for text in nested {
+        assert!(!text.contains("secret"), "{text}");
+        assert!(text.contains("<15 bytes>"), "{text}");
+    }
+}

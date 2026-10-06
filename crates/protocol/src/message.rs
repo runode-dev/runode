@@ -253,7 +253,7 @@ pub enum ClientMsg {
     /// `clipboard::MAX_CLIPBOARD_BYTES`）。宿主自己发起的请求，只出现在 `HostMsg::UiRequest` 里：
     /// 界面写好后回 `Done`，`req` 为 0（没有发请求的一方，也就没有它的编号）。前端直接发给宿主的
     /// 回 `Error`。旧的界面读成 `Unknown`，回 `Error`，宿主记一笔日志。
-    WriteClipboard { id: SessionId, text: String },
+    WriteClipboard { id: SessionId, text: ClipboardContent },
     /// 会话 `id` 里的程序用 OSC 52 读剪贴板。和 `WriteClipboard` 一样只出现在 `HostMsg::UiRequest`
     /// 里。`ask` 为真时界面先弹框问用户（配置项 `clipboard-read` 是 `ask`），`program` 是那时会话
     /// 前台的程序名，问的时候给用户看。界面回 `HostMsg::ClipboardText`；用户不让读、剪贴板里没有
@@ -449,11 +449,36 @@ pub enum HostMsg {
     ClipboardText {
         id: SessionId,
         #[serde(default)]
-        text: Option<String>,
+        text: Option<ClipboardContent>,
     },
     /// 比自己新的宿主才有的消息，前端忽略它。
     #[serde(other)]
     Unknown,
+}
+
+/// 剪贴板里的文字，见 `ClientMsg::WriteClipboard`、`HostMsg::ClipboardText`。线上就是一个字符串；
+/// `Debug` 只写字节数，带着它的消息（以及包着它们的 `UiRequest`、`UiReply`）怎么记进日志都不会带出
+/// 剪贴板的内容。
+#[derive(Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct ClipboardContent(pub String);
+
+impl fmt::Debug for ClipboardContent {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "<{} bytes>", self.0.len())
+    }
+}
+
+impl From<String> for ClipboardContent {
+    fn from(text: String) -> Self {
+        Self(text)
+    }
+}
+
+impl From<&str> for ClipboardContent {
+    fn from(text: &str) -> Self {
+        Self(text.to_owned())
+    }
 }
 
 /// `Open` 的新终端放在哪里。

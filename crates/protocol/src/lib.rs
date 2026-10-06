@@ -21,8 +21,8 @@ pub use handoff::{
 };
 pub use layout::{PaneLayout, PaneRect, TabLayout, WindowLayout, WorkspaceLayout};
 pub use message::{
-    AttachMode, BuildId, Caps, ClientKind, ClientMsg, FinishedCommand, GoodbyeReason, HandoffRefusal, HostMsg,
-    Placement, SessionId, SessionInfo,
+    AttachMode, BuildId, Caps, ClientKind, ClientMsg, ClipboardContent, FinishedCommand, GoodbyeReason, HandoffRefusal,
+    HostMsg, Placement, SessionId, SessionInfo,
 };
 
 /// 宿主给每个会话的 shell 设的环境变量：这个会话的 `SessionId`。在终端里跑的命令行据此知道
