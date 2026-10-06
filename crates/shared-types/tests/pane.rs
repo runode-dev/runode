@@ -74,3 +74,21 @@ fn neighbor_prefers_the_closest_overlapping_terminal() {
     assert_eq!(neighbor(from(2), Direction::Up, others(2)), None);
     assert_eq!(neighbor(from(1), Direction::Left, others(1)), None);
 }
+
+#[test]
+fn rects_tile_the_area_by_the_ratios() {
+    let rect = |x, y, width, height| Rect { x, y, width, height };
+    let mut root = sample();
+    root.set_ratio(10, 0.25);
+    let rects = root.rects(rect(0., 0., 1000., 1000.));
+    assert_eq!(
+        rects,
+        [(1, rect(0., 0., 250., 1000.)), (2, rect(250., 0., 750., 500.)), (3, rect(250., 500., 750., 500.))]
+    );
+    // 按算出来的矩形找方向上的邻居，和画出来的一样。
+    let others = |id| rects.iter().copied().filter(move |(p, _)| *p != id);
+    assert_eq!(neighbor(rects[0].1, Direction::Right, others(1)), Some(2));
+    assert_eq!(neighbor(rects[2].1, Direction::Up, others(3)), Some(2));
+    // 区域不从原点开始时整体平移。
+    assert_eq!(Node::Leaf(7).rects(rect(10., 20., 30., 40.)), [(7, rect(10., 20., 30., 40.))]);
+}

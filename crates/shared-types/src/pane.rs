@@ -185,6 +185,34 @@ impl<T: Copy + PartialEq> Node<T> {
             Node::Split(split) => split.first.contains(leaf) || split.second.contains(leaf),
         }
     }
+
+    /// 整棵树铺满 `area` 时每个叶子占的矩形，按叶子顺序。只按比例切，不留分隔线的宽度，
+    /// 所以没画出来的（比如后台标签里的）布局也算得出；相邻的两块正好接上。
+    pub fn rects(&self, area: Rect) -> Vec<(T, Rect)> {
+        let mut out = Vec::new();
+        self.collect_rects(area, &mut out);
+        out
+    }
+
+    fn collect_rects(&self, area: Rect, out: &mut Vec<(T, Rect)>) {
+        match self {
+            Node::Leaf(leaf) => out.push((*leaf, area)),
+            Node::Split(split) => {
+                let (first, second) = match split.axis {
+                    Axis::Horizontal => {
+                        let width = area.width * split.ratio;
+                        (Rect { width, ..area }, Rect { x: area.x + width, width: area.width - width, ..area })
+                    }
+                    Axis::Vertical => {
+                        let height = area.height * split.ratio;
+                        (Rect { height, ..area }, Rect { y: area.y + height, height: area.height - height, ..area })
+                    }
+                };
+                split.first.collect_rects(first, out);
+                split.second.collect_rects(second, out);
+            }
+        }
+    }
 }
 
 /// 屏幕上的矩形，用于按方向找相邻的终端。

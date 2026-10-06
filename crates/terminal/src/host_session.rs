@@ -9,10 +9,11 @@
 //!
 //! 这里是会话本身：创建、接上 PTY、注册 VT 回调、套用主题、改尺寸、写入和清屏。VT 回调累积的
 //! 变化和 shell 集成的报告在 `effects`，前台 agent 的识别在 `detect`，转给别的进程前抹掉报告
-//! 内容的 `ReportRedactor` 在 `redact`。
+//! 内容的 `ReportRedactor` 在 `redact`，别的进程发来的控制键和粘贴的编码在 `keys`。
 
 mod detect;
 mod effects;
+mod keys;
 mod redact;
 
 use std::{
@@ -22,7 +23,7 @@ use std::{
     time::Instant,
 };
 
-use anyhow::Result;
+use anyhow::{Result, anyhow};
 use libghostty_vt::{
     screen::Screen,
     terminal::{
@@ -32,13 +33,17 @@ use libghostty_vt::{
 };
 use runode_agent_detect::Tracker;
 use runode_shared_types::{
-    agent::Agent, grid::GridSize, session::SessionMeta, settings::TermSettings, shell::IntegrationMode,
+    agent::Agent,
+    grid::GridSize,
+    session::{DriveAction, Driver, SessionMeta},
+    settings::TermSettings,
+    shell::IntegrationMode,
 };
 
 use crate::{
     history, prompt_input,
     pty::{Pty, PtyHandoff, PtyWriter},
-    vt::{self, SnapshotError},
+    vt::{self, CommandOutput, SnapshotError},
 };
 use effects::{Effects, PromptEvent, SHELL_REPORT};
 pub use redact::ReportRedactor;
@@ -65,6 +70,10 @@ pub struct HostSession {
     cwd: Option<PathBuf>,
     /// 上次读到的前台是不是 shell 自己，由 `refresh_foreground` 更新。
     foreground_is_shell: bool,
+    /// 上次读到的前台程序的名字，由 `refresh_foreground` 更新，对外见 `SessionMeta::foreground`。
+    foreground: Option<String>,
+    /// 最近一次别的终端里的程序操作这个会话的记录，见 `drive`。
+    driver: Option<Driver>,
     /// 还没启动 shell 时它要从哪个目录开始，见 `new`。
     start_dir: Option<PathBuf>,
     /// shell 最近一次等着输入时所在的目录，记命令时当作命令运行的目录。
@@ -242,6 +251,8 @@ impl HostSession {
             fallback_title: None,
             cwd: None,
             foreground_is_shell: false,
+            foreground: None,
+            driver: None,
             start_dir: None,
             prompt_cwd: None,
             running: None,
@@ -391,9 +402,30 @@ impl HostSession {
             shell_path: self.effects.shell_path.borrow().clone(),
             shell_names: self.effects.shell_names.borrow().clone(),
             prompt_cwd: self.prompt_cwd.clone(),
-            // 前台程序名和谁在操作还没有人填。
-            foreground: None,
-            driver: None,
+            foreground: self.foreground.clone(),
+            driver: self.driver.clone(),
+        }
+    }
+
+    /// 记下别的终端里的程序（`by` 是它所在会话的标识）在 `at_ms`（Unix 毫秒）这一刻对这个会话做了
+    /// `action`，对外见 `SessionMeta::driver`。同一方接着做同样的事时最多每秒更新一次时刻，免得
+    /// 对外公布的状态跟着每个按键变。
+    pub fn drive(&mut self, by: Option<String>, action: DriveAction, at_ms: u64) {
+        if let Some(driver) = &self.driver
+            && driver.by == by
+            && driver.action == action
+            && at_ms.saturating_sub(driver.at_ms) < DRIVER_RESOLUTION_MS
+        {
+            return;
+        }
+        self.driver = Some(Driver { by, action, at_ms });
+        self.meta_dirty = true;
+    }
+
+    /// 用户自己在界面里操作了：清掉 `drive` 的记录。
+    pub fn clear_driver(&mut self) {
+        if self.driver.take().is_some() {
+            self.meta_dirty = true;
         }
     }
 
@@ -465,6 +497,24 @@ impl HostSession {
         Ok(vt::screen_tail(&self.terminal, lines)?)
     }
 
+    /// 倒数第 `n` 条命令（1 是最近一条）的输出和它的开头是否已经被挤出回滚历史，见
+    /// `vt::command_output`。没有 shell 集成标出的提示符、全屏程序占着屏幕、或者没有这么多条命令
+    /// 时返回错误，说明里告诉读的一方怎么办。
+    pub fn command_output(&self, n: u32) -> Result<(String, bool)> {
+        if self.terminal.active_screen()? == Screen::Alternate {
+            return Err(anyhow!("a full-screen program is using the terminal; read the screen with --lines instead"));
+        }
+        match vt::command_output(&self.terminal, n)? {
+            CommandOutput::Found { text, truncated } => Ok((text, truncated)),
+            CommandOutput::NoMarks => Err(anyhow!("needs shell integration; use --lines")),
+            CommandOutput::Fewer(count) => Err(anyhow!(
+                "there {} only {count} command{} on the screen",
+                if count == 1 { "is" } else { "are" },
+                if count == 1 { "" } else { "s" }
+            )),
+        }
+    }
+
     #[cfg(test)]
     pub(crate) fn terminal(&self) -> &Terminal<'static, 'static> {
         &self.terminal
@@ -476,6 +526,9 @@ impl HostSession {
         *self.effects.report_token.borrow_mut() = Some(token.into());
     }
 }
+
+/// `SessionMeta::driver` 的时刻最多这么久更新一次，毫秒。
+const DRIVER_RESOLUTION_MS: u64 = 1000;
 
 /// 这个构建编的快照的格式版本，前端据此判断解不解得了宿主的快照，见 `vt::snapshot_format`。
 pub fn snapshot_format() -> Result<u16, SnapshotError> {

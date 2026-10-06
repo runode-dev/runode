@@ -11,7 +11,7 @@ use libghostty_vt::{
     Terminal,
     error::{Error, Result},
     fmt::{Format, Formatter, FormatterOptions},
-    screen::Screen,
+    screen::{RowSemanticPrompt, Screen},
     selection::Selection,
     snapshot::Decoder,
     terminal::{Mode, Point, PointCoordinate},
@@ -317,6 +317,72 @@ pub(crate) fn screen_tail(terminal: &Terminal<'_, '_>, lines: Option<u32>) -> Re
         picked.drain(..picked.len().saturating_sub(lines as usize));
     }
     Ok(picked.into_iter().map(|line| line + "\n").collect())
+}
+
+/// `command_output` 找到的结果。
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum CommandOutput {
+    /// 那条命令的输出，格式同 `screen_tail`。`truncated` 为真时它的提示符和输出的开头已经被挤出
+    /// 回滚历史，给的是还留着的部分。
+    Found { text: String, truncated: bool },
+    /// 屏幕上（含回滚历史）没有 shell 集成标出的提示符。
+    NoMarks,
+    /// 屏幕上只找得到这么多条命令。
+    Fewer(usize),
+}
+
+/// 倒数第 `n` 条命令（1 是最近一条）的输出，靠 shell 集成在提示符行上的标记
+/// （`RowSemanticPrompt::Prompt`）分块：从底往上数提示符，一块从提示符那行起，到下一个提示符
+/// 之前；输出是输入那几行（提示符行和接在后面的软折行、续行提示符的行）之后的部分。
+///
+/// 光标还在最后一个提示符的输入行里时，那是正等着输入的提示符，不算一条命令；光标已经到了
+/// 输入行下面时那条命令还在跑，输出取到底。最早那个提示符上面还有内容、又正好要它前面那条
+/// 时，那条命令的提示符已经被挤出回滚历史，给剩下的部分并标上截断；shell 启动时打印的内容
+/// 也会这样被当成一条截断的输出。读的是活动的屏幕，全屏程序在备用屏幕上时没有标记。
+pub(crate) fn command_output(terminal: &Terminal<'_, '_>, n: u32) -> Result<CommandOutput> {
+    let total = terminal.total_rows()?;
+    let row = |y: usize| {
+        terminal.grid_ref(Point::Screen(PointCoordinate { x: 0, y: u32::try_from(y).unwrap_or(u32::MAX) }))?.row()
+    };
+    let mut prompts = Vec::new();
+    for y in 0..total {
+        if row(y)?.semantic_prompt()? == RowSemanticPrompt::Prompt {
+            prompts.push(y);
+        }
+    }
+    let Some(&last) = prompts.last() else {
+        return Ok(CommandOutput::NoMarks);
+    };
+    // 提示符行之后、仍属于输入的行。
+    let input_end = |prompt: usize| -> Result<usize> {
+        let mut y = prompt + 1;
+        while y < total {
+            let row = row(y)?;
+            if !row.is_wrap_continuation()? && row.semantic_prompt()? != RowSemanticPrompt::Continuation {
+                break;
+            }
+            y += 1;
+        }
+        Ok(y)
+    };
+    let cursor = total.saturating_sub(usize::from(terminal.rows()?)) + usize::from(terminal.cursor_y()?);
+    let editing = cursor >= last && cursor < input_end(last)?;
+    let commands = prompts.len() - usize::from(editing);
+    let n = n.max(1) as usize;
+    let (first, end, truncated) = if n <= commands {
+        let index = commands - n;
+        let end = prompts.get(index + 1).copied().unwrap_or(total);
+        (input_end(prompts[index])?, end, false)
+    } else if n == commands + 1 && prompts[0] > 0 {
+        (0, prompts[0], true)
+    } else {
+        return Ok(CommandOutput::Fewer(commands));
+    };
+    let mut lines = if first < end { screen_lines(terminal, first, end - 1)? } else { Vec::new() };
+    while lines.last().is_some_and(String::is_empty) {
+        lines.pop();
+    }
+    Ok(CommandOutput::Found { text: lines.into_iter().map(|line| line + "\n").collect(), truncated })
 }
 
 /// 这个构建编的快照的格式版本：快照开头 `GHOSTSNP` 后面的 u16。libghostty 没有单独给出这个

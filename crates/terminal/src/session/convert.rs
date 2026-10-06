@@ -24,7 +24,7 @@ pub(crate) fn ghostty_cursor_style(style: settings::CursorStyle) -> CursorStyle 
     }
 }
 
-pub(super) fn ghostty_mods(mods: Mods) -> key::Mods {
+pub(crate) fn ghostty_mods(mods: Mods) -> key::Mods {
     let mut out = key::Mods::empty();
     for (on, flag) in [
         (mods.shift, key::Mods::SHIFT),
@@ -39,7 +39,7 @@ pub(super) fn ghostty_mods(mods: Mods) -> key::Mods {
     out
 }
 
-pub(super) fn ghostty_key(key: Key) -> key::Key {
+pub(crate) fn ghostty_key(key: Key) -> key::Key {
     match key {
         Key::Unidentified => key::Key::Unidentified,
         Key::A => key::Key::A,

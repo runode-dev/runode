@@ -191,9 +191,9 @@ impl HostSession {
         finished
     }
 
-    /// 重新读取终端的前台进程和 shell 的目录，返回 `fallback_title` 或 `agent` 是否变化。前台
-    /// 换了程序时顺带认它是不是 agent；回到 shell 时 agent 已经退出，它留下的标题不再代表任何
-    /// 状态。
+    /// 重新读取终端的前台进程（是不是 shell、叫什么）和 shell 的目录，返回 `fallback_title` 或
+    /// `agent` 是否变化。前台换了程序时顺带认它是不是 agent；回到 shell 时 agent 已经退出，它留下
+    /// 的标题不再代表任何状态。
     pub fn refresh_foreground(&mut self) -> bool {
         // 还没启动时没有前台进程，标题保持起始目录的名字。
         if !self.pty.started() {
@@ -204,9 +204,11 @@ impl HostSession {
         let agent_changed = self.poll_agent_at(now);
         let cwd = self.live_cwd();
         let foreground_is_shell = self.pty.foreground_is_shell();
-        if cwd != self.cwd || foreground_is_shell != self.foreground_is_shell {
+        let foreground = self.pty.foreground_name();
+        if cwd != self.cwd || foreground_is_shell != self.foreground_is_shell || foreground != self.foreground {
             self.cwd = cwd;
             self.foreground_is_shell = foreground_is_shell;
+            self.foreground = foreground;
             self.meta_dirty = true;
         }
         // shell 在前台时不读它此刻的目录：插件管理器在提示符出来后延迟加载插件，会临时切进插件目录。
