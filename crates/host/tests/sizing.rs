@@ -386,3 +386,78 @@ fn an_owner_without_a_device_name() {
     assert_eq!((info_now.size, info_now.size_owner), (SIZE_B, None));
     a.send(&ClientMsg::Kill { id });
 }
+
+fn mobile(host: &Host, device: &str) -> Peer {
+    connect(host, ClientKind::Mobile, Some(device))
+}
+
+/// 带着屏幕连上却从没请求过尺寸的连接（手机跟着 Mac 的尺寸看）没有资格：它打字、获得焦点都不算
+/// 交互，抢不走 owner，也不引起 `SizeOwner`、`Resized`。没有 owner 时它打字也不会当上。
+#[test]
+fn a_viewer_that_never_asked_for_a_size_does_not_take_it() {
+    let host = host();
+    let mut a = desktop(&host, "alpha");
+    let mut phone = mobile(&host, "phone");
+    let id = cat(&mut a);
+    let alone = cat(&mut a);
+    attach_view(&mut a, id, Some(SIZE_A));
+    let (channel, size, owner) = attach_view(&mut phone, id, None);
+    assert_eq!((size, owner), (SIZE_A, size_owner(false, "alpha")));
+    phone.input(channel, b"typed\r");
+    phone.send(&ClientMsg::Focus { id, focused: true });
+    settle(&mut phone, id);
+    let (info_now, seen) = info(&mut a, id);
+    assert_eq!((info_now.size, info_now.size_owner.as_deref()), (SIZE_A, Some("alpha")));
+    assert!(owners(&seen).is_empty(), "{seen:?}");
+    assert!(resized(&seen).is_empty(), "{seen:?}");
+    let (_, seen) = info(&mut phone, id);
+    assert!(owners(&seen).is_empty(), "{seen:?}");
+    a.send(&ClientMsg::Kill { id });
+
+    // 只有手机看着的会话：打字、获得焦点以后照样没有 owner。
+    let id = alone;
+    let (channel, ..) = attach(&mut phone, id, None, AttachMode::VtReplay);
+    phone.input(channel, b"typed\r");
+    phone.send(&ClientMsg::Focus { id, focused: true });
+    let (info_now, seen) = info(&mut phone, id);
+    assert_eq!(info_now.size_owner, None);
+    assert!(owners(&seen).is_empty(), "{seen:?}");
+    a.send(&ClientMsg::Kill { id });
+}
+
+/// owner 走了，只交给请求过尺寸的：剩下的里有就交给最近交互过的那个，只剩没请求过尺寸的就没有
+/// owner，不发 `SizeOwner`。
+#[test]
+fn the_owner_leaving_skips_viewers_without_a_size() {
+    let host = host();
+    let mut a = desktop(&host, "alpha");
+    let mut b = desktop(&host, "beta");
+    let mut phone = mobile(&host, "phone");
+    let id = cat(&mut a);
+    attach_view(&mut b, id, Some(SIZE_B));
+    let (channel_a, ..) = attach_view(&mut a, id, Some(SIZE_A));
+    let (channel_phone, ..) = attach_view(&mut phone, id, None);
+    a.input(channel_a, b"x");
+    settle(&mut a, id);
+    // 手机最后打的字，也不算。
+    phone.input(channel_phone, b"y");
+    settle(&mut phone, id);
+    info(&mut b, id);
+
+    a.send(&ClientMsg::Detach { id });
+    let seen = until(&b, |message| matches!(message, HostMsg::SizeOwner { .. }));
+    assert_eq!(owners(&seen), [size_owner(true, "beta")]);
+    assert_eq!(resized(&seen).last(), Some(&SIZE_B));
+    let (info_now, seen) = info(&mut phone, id);
+    assert_eq!((info_now.size, info_now.size_owner.as_deref()), (SIZE_B, Some("beta")));
+    assert_eq!(owners(&seen), [size_owner(false, "beta")]);
+
+    // b 也走了：只剩手机，没有 owner。
+    drop(b);
+    settle(&mut phone, id);
+    let (info_now, seen) = info(&mut phone, id);
+    assert_eq!((info_now.size, info_now.size_owner), (SIZE_B, None));
+    assert!(owners(&seen).is_empty(), "{seen:?}");
+    assert!(resized(&seen).is_empty(), "{seen:?}");
+    a.send(&ClientMsg::Kill { id });
+}

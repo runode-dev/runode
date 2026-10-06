@@ -11,9 +11,12 @@
 //! 接手，PTY 停在闸门上，`Inbox::Open` 提交后打开闸门，`Inbox::Release` 不接手了原样交回去。
 //!
 //! 尺寸归属：几个前端带着屏幕看同一个会话时，会话的尺寸由最近交互过的那个（owner）决定，见
-//! `Runner::owner`。带着屏幕连着的连接（`Viewer`）才有资格，只看状态的（命令行都是）没有。交互是
-//! 带尺寸的 `Inbox::Subscribe`、这条连接发来的 `Inbox::Input` 和 `Inbox::Focus`；命令行发的键和
-//! 粘贴（`Inbox::Keys`、`Inbox::Paste`）不算。owner 的 `Inbox::Resize` 当场应用，别的只记下，等它
+//! `Runner::owner`。带着屏幕连着、请求过尺寸（带尺寸的 `Inbox::Subscribe` 或者 `Inbox::Resize`）的
+//! 连接（`Viewer`）才有资格；只看状态的（命令行都是）没有，带着屏幕却从不说尺寸的（比如手机跟着 Mac
+//! 的尺寸看）也没有：它们的输入和获得焦点都不算交互，免得手机打一个字就把 owner 抢走，它不报尺寸，
+//! 当上 owner 也不改尺寸，桌面却以为尺寸归别人管、裁切着画。交互是带尺寸的 `Inbox::Subscribe`、这条
+//! 连接发来的 `Inbox::Input` 和 `Inbox::Focus`；命令行发的键和粘贴（`Inbox::Keys`、`Inbox::Paste`）
+//! 不算。owner 的 `Inbox::Resize` 当场应用，别的只记下，等它
 //! 当上 owner 时再用；还没有 owner 时谁的都照旧应用。尺寸照旧只在宿主插进输出流的 `HostMsg::Resized` 处改，两份 VT 不会分叉；
 //! owner 换了用 `HostMsg::SizeOwner` 告诉带着屏幕连着的前端。owner 是连接级的状态，交接时所有
 //! 连接都断了，新宿主上的会话从没有 owner 开始。
@@ -936,10 +939,10 @@ impl Runner {
         }
     }
 
-    /// 连接 `connection` 交互了一次：是 `Viewer` 的话轮到它决定尺寸。没资格的（只看状态、命令行）
-    /// 什么都不做。
+    /// 连接 `connection` 交互了一次：是请求过尺寸的 `Viewer` 的话轮到它决定尺寸。没资格的（只看
+    /// 状态、命令行，以及带着屏幕却从没请求过尺寸的）什么都不做，见模块文档。
     fn interact(&mut self, connection: u64) {
-        let Some(viewer) = self.viewers.iter_mut().find(|v| v.connection == connection) else {
+        let Some(viewer) = self.viewers.iter_mut().find(|v| v.connection == connection && v.requested.is_some()) else {
             return;
         };
         self.interactions += 1;
@@ -950,14 +953,15 @@ impl Runner {
     }
 
     /// 连接 `connection` 不再带着屏幕连着（断开、`Detach`、改成只看状态）：不再有资格；它是 owner
-    /// 的话交给剩下的里面最近交互过的，应用那边的尺寸。
+    /// 的话交给剩下的、请求过尺寸的里面最近交互过的，应用那边的尺寸；没有这样的就没有 owner。
     fn forget_viewer(&mut self, connection: u64) {
         self.viewers.retain(|v| v.connection != connection);
         if self.owner != Some(connection) {
             return;
         }
         self.owner = None;
-        let next = self.viewers.iter().max_by_key(|v| v.last_active).map(|v| v.connection);
+        let next =
+            self.viewers.iter().filter(|v| v.requested.is_some()).max_by_key(|v| v.last_active).map(|v| v.connection);
         if let Some(next) = next {
             self.make_owner(next);
         }
@@ -1126,7 +1130,7 @@ struct Viewer {
     /// 连接在 `Hello` 里报的设备名。
     device: Option<String>,
     /// 这个前端最近一次请求的尺寸（带尺寸的 `Subscribe` 或者 `Inbox::Resize`），轮到它当 owner 时
-    /// 应用；还没请求过时为空，当上 owner 也不改尺寸。
+    /// 应用；还没请求过时为空，这时没资格当 owner，见 `Runner::interact`。
     requested: Option<GridSize>,
     /// 最近一次交互的序号（`Runner::interactions`），没交互过为 0。
     last_active: u64,
