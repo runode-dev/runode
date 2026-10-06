@@ -235,6 +235,7 @@ impl HostSession {
         // 已经启动的 shell 的报告口令；还没启动的等 `start` 时再设。
         let effects = Rc::new(Effects {
             report_token: RefCell::new(pty.report_token().map(str::to_owned)),
+            clipboard_writes: StdCell::new(true),
             ..Effects::default()
         });
         let replies = Rc::new(StdCell::new(0));
@@ -571,6 +572,12 @@ impl HostSession {
         self.effects.bell.take()
     }
 
+    /// 程序可不可以写剪贴板（配置项 `clipboard-write`），新建的会话可以。不可以时 VT 当场拒绝写
+    /// 请求（有应答的剪贴板协议收到「不允许」），`take_clipboard` 里不会有写请求。
+    pub fn set_clipboard_writes(&self, allowed: bool) {
+        self.effects.clipboard_writes.set(allowed);
+    }
+
     /// 取走程序读写剪贴板的请求，按到达的先后。每次 `feed` 之后调用。
     pub fn take_clipboard(&mut self) -> Vec<ClipboardRequest> {
         self.effects.clipboard.take()
@@ -796,7 +803,7 @@ fn register_callbacks(
         // 程序写剪贴板（OSC 52），见 `clipboard`。读剪贴板不装回调，原因也在那里。
         .on_clipboard_write({
             let effects = effects.clone();
-            move |_, write| clipboard::take_write(write, &effects.clipboard)
+            move |_, write| clipboard::take_write(write, &effects)
         })?
         // RIS 会清空标题，但不会触发标题变化回调。
         .on_reset({

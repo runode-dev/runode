@@ -11,7 +11,7 @@
 use std::time::{Duration, Instant};
 
 use runode_protocol::{ClientMsg, HostMsg};
-use runode_shared_types::clipboard::{ClipboardRead, ClipboardWrite};
+use runode_shared_types::clipboard::{ClipboardAccess, ClipboardRead, ClipboardWrite};
 use runode_terminal::host_session::{ClipboardQuery, ClipboardRequest};
 
 use super::Runner;
@@ -31,10 +31,11 @@ pub(super) struct PendingRead {
 impl Runner {
     /// 办宿主那份 VT 认出的一个剪贴板请求，见模块文档。
     pub(super) fn clipboard(&mut self, request: ClipboardRequest) {
-        let access = self.ui.clipboard_access();
+        let access = self.clipboard;
         match request {
             ClipboardRequest::Write(text) => {
                 let len = text.len();
+                // VT 那边已经按同一份规矩拒绝了，这里兜底。
                 if access.write == ClipboardWrite::Deny {
                     tracing::debug!(
                         "session {} dropped a clipboard write of {len} bytes: clipboard-write = deny",
@@ -82,6 +83,12 @@ impl Runner {
                 self.session.answer_clipboard(query, None);
             }
         }
+    }
+
+    /// 改读写剪贴板的规矩：自己记一份，写的开关交给 VT（见 `HostSession::set_clipboard_writes`）。
+    pub(super) fn set_clipboard(&mut self, clipboard: ClipboardAccess) {
+        self.clipboard = clipboard;
+        self.session.set_clipboard_writes(clipboard.write == ClipboardWrite::Allow);
     }
 
     /// 界面回了会话请它办的事（`Inbox::UiAnswer`）：是在等的读请求的话把结果回给程序；写剪贴板的

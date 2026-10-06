@@ -40,6 +40,9 @@ pub(super) struct Effects {
     pub(super) command_report: RefCell<Option<Option<String>>>,
     /// 程序读写剪贴板的请求，按到达的先后，由 `HostSession::take_clipboard` 取走。
     pub(super) clipboard: RefCell<Vec<ClipboardRequest>>,
+    /// 程序可以写剪贴板（配置项 `clipboard-write` 是 allow），见 `HostSession::set_clipboard_writes`。
+    /// 关着时写请求当场拒绝、不记下来，DA1 的回答里也不说支持 OSC 52。
+    pub(super) clipboard_writes: StdCell<bool>,
 }
 
 /// shell 集成在显示提示符时、内容和上次报告的不一样时用的私有 OSC：

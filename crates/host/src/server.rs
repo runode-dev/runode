@@ -41,7 +41,7 @@ use runode_protocol::{
     AttachMode, ClientKind, ClientMsg, Frame, FrameError, FrameKind, GoodbyeReason, HANDOFF_FORMAT, HostMsg,
     PROTOCOL_VERSION, SessionId, SessionInfo, read_frame, write_frame,
 };
-use runode_shared_types::{clipboard::ClipboardAccess, grid::GridSize, input::parse_keys, session::DriveAction};
+use runode_shared_types::{grid::GridSize, input::parse_keys, session::DriveAction};
 use runode_terminal::pty;
 
 use crate::{
@@ -160,7 +160,7 @@ enum Asker {
     Session(SessionId),
 }
 
-/// 会话线程请界面办事的一头，见 `Shared::ask_ui`；也从这里读剪贴板的规矩。拿着宿主的弱引用：
+/// 会话线程请界面办事的一头，见 `Shared::ask_ui`。拿着宿主的弱引用：
 /// 会话线程不该让宿主留着不放，宿主没了时什么都办不成。
 #[derive(Clone, Default)]
 pub(crate) struct UiPort(Weak<Shared>);
@@ -173,14 +173,6 @@ impl UiPort {
     /// 见 `Shared::ask_ui`。
     pub(crate) fn ask(&self, session: SessionId, preferred: Option<u64>, request: ClientMsg) -> Option<u64> {
         self.0.upgrade()?.ask_ui(session, preferred, request)
-    }
-
-    /// 现在的剪贴板规矩；宿主没了时是默认的。
-    pub(crate) fn clipboard_access(&self) -> ClipboardAccess {
-        self.0
-            .upgrade()
-            .map(|shared| *shared.clipboard.lock().unwrap_or_else(PoisonError::into_inner))
-            .unwrap_or_default()
     }
 }
 
@@ -941,7 +933,7 @@ impl Connection {
             ClientMsg::SetOptions { record_history, clipboard } => {
                 if self.kind == ClientKind::Desktop {
                     self.shared.record_history.store(record_history, Ordering::Relaxed);
-                    *self.shared.clipboard.lock().unwrap_or_else(PoisonError::into_inner) = clipboard;
+                    self.shared.set_clipboard(clipboard);
                 } else {
                     self.error(None, None, "only the runode app changes the host's options".into());
                 }

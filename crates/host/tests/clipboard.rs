@@ -58,15 +58,15 @@ fn writes_go_to_the_desktop() {
     desktop.send(&ClientMsg::Kill { id });
 }
 
-/// `clipboard-write = deny` 时写请求不出宿主。
+/// `clipboard-write = deny` 时写请求不出宿主；规矩改在会话开出来之后也照样生效。
 #[test]
 fn denied_writes_are_dropped() {
     let host = host();
     let mut desktop = Peer::pair(&host);
-    set_access(&mut desktop, ClipboardWrite::Deny, ClipboardRead::Ask);
     let marked = r"while read line; do printf '\033]52;c;%s\007' $line; echo wrote-$line; done";
     let id = desktop.spawn(&script(&temp_dir("clip-deny"), "writer", marked));
     let (channel, _) = desktop.attach(id, AttachMode::VtReplay);
+    set_access(&mut desktop, ClipboardWrite::Deny, ClipboardRead::Ask);
     desktop.input(channel, b"aGk=\r");
     let mut requests = requests_until(&desktop, channel, b"wrote-aGk=");
     // 写请求要转的话紧跟在它那块输出后面；下一行的输出在之后的块里，到它为止都没有就是丢掉了。

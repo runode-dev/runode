@@ -1,3 +1,8 @@
+use std::{cell::RefCell, rc::Rc};
+
+use libghostty_vt::Terminal;
+use runode_shared_types::grid::GridSize;
+
 use super::*;
 use crate::testing::idle_host;
 
@@ -148,4 +153,61 @@ fn answers_use_the_target_and_terminator_of_the_query() {
         encode_base64(text.as_bytes(), &mut out);
         assert_eq!(out, encoded.as_bytes(), "{text:?}");
     }
+}
+
+/// 一份只接了写剪贴板回调的 VT，`writes` 是写剪贴板的开关；返回 VT、记下的请求和它写回程序的字节。
+fn writing_terminal(writes: bool) -> (Terminal<'static, 'static>, Rc<Effects>, Rc<RefCell<Vec<u8>>>) {
+    let mut terminal =
+        crate::vt::new_terminal(GridSize { cols: 20, rows: 4, cell_width_px: 8, cell_height_px: 16 }).unwrap();
+    let effects = Rc::new(Effects::default());
+    effects.clipboard_writes.set(writes);
+    let written = Rc::new(RefCell::new(Vec::new()));
+    terminal
+        .on_pty_write({
+            let written = written.clone();
+            move |_, data| written.borrow_mut().extend_from_slice(data)
+        })
+        .unwrap()
+        .on_clipboard_write({
+            let effects = effects.clone();
+            move |_, write| take_write(write, &effects)
+        })
+        .unwrap();
+    (terminal, effects, written)
+}
+
+/// 一次带应答的写事务（OSC 5522）：写 "Ghost"。
+const KITTY_WRITE: &[u8] =
+    b"\x1b]5522;type=write:id=c1\x1b\\\x1b]5522;type=wdata:mime=dGV4dC9wbGFpbg==;R2hvc3Q=\x1b\\\x1b]5522;type=wdata\x1b\\";
+
+/// 不让写时，每种写剪贴板的序列都当场拒绝、不记下来，带应答的写事务收到「不允许」；让写时照常
+/// 记下，应答是成功。
+#[test]
+fn denied_writes_are_refused_by_the_vt() {
+    let sequences: [&[u8]; 3] = [b"\x1b]52;c;aGk=\x07", b"\x1b]1337;Copy=:aGk=\x07", KITTY_WRITE];
+    for bytes in sequences {
+        let (mut terminal, effects, written) = writing_terminal(false);
+        terminal.vt_write(bytes);
+        assert!(effects.clipboard.borrow().is_empty(), "{:?}", String::from_utf8_lossy(bytes));
+        if bytes == KITTY_WRITE {
+            assert_eq!(&*written.borrow(), b"\x1b]5522;type=write:status=EPERM:id=c1\x1b\\");
+        }
+    }
+    let expected = [write("hi"), write("hi"), write("Ghost")];
+    for (bytes, expected) in sequences.into_iter().zip(expected) {
+        let (mut terminal, effects, written) = writing_terminal(true);
+        terminal.vt_write(bytes);
+        assert_eq!(*effects.clipboard.borrow(), [expected]);
+        if bytes == KITTY_WRITE {
+            assert_eq!(&*written.borrow(), b"\x1b]5522;type=write:status=DONE:id=c1\x1b\\");
+        }
+    }
+    // 会话上的开关。
+    let mut session = idle_host();
+    session.set_clipboard_writes(false);
+    session.feed(b"\x1b]52;c;aGk=\x07\x1b]52;c;?\x07");
+    assert_eq!(session.take_clipboard(), [read(b'c', true)], "reads are not writes");
+    session.set_clipboard_writes(true);
+    session.feed(b"\x1b]52;c;aGk=\x07");
+    assert_eq!(session.take_clipboard(), [write("hi")]);
 }

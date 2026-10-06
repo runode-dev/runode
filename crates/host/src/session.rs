@@ -40,6 +40,7 @@ use std::{
 use anyhow::{Context as _, Result, anyhow};
 use runode_protocol::{AttachMode, FinishedCommand, HostMsg, SessionId, SessionInfo};
 use runode_shared_types::{
+    clipboard::ClipboardAccess,
     grid::GridSize,
     input::KeyChord,
     session::{DriveAction, SessionMeta},
@@ -145,6 +146,8 @@ pub(crate) enum Inbox {
     Resume,
     /// 交接提交了（新宿主）：先把旧宿主没写进 PTY 的这些输入排进写队列，再打开读写线程的闸门。
     Open(Vec<u8>),
+    /// 读写剪贴板的规矩改了，见 `ClientMsg::SetOptions`。
+    Clipboard(ClipboardAccess),
     /// 界面回了会话经 `UiPort::ask` 请它办的事，`ui` 是那条请求的编号；界面没回就断开了时是
     /// `HostMsg::Error`。
     UiAnswer {
@@ -202,8 +205,10 @@ pub(crate) struct Setup {
     /// 其中开会话时指定的那些，交接还没启动的会话时带给新宿主。
     pub(crate) extra_env: Vec<(String, String)>,
     pub(crate) record_history: Arc<AtomicBool>,
-    /// 请界面办事（读写剪贴板）、读剪贴板规矩的一头。
+    /// 请界面办事（读写剪贴板）的一头。
     pub(crate) ui: UiPort,
+    /// 一开始的读写剪贴板的规矩，之后改了经 `Inbox::Clipboard` 送来。
+    pub(crate) clipboard: ClipboardAccess,
 }
 
 /// 别的终端里的程序对会话做了什么，见 `Inbox::Driven`。
@@ -273,7 +278,7 @@ impl Handle {
 /// 开会话：在调用的线程里打开伪终端（`start` 时连 shell 一起启动），错误当场返回；再起会话线程，
 /// 等它把 `HostSession` 建好。
 pub(crate) fn spawn(setup: Setup, options: SpawnOptions) -> Result<Handle> {
-    let Setup { id, settings, env, extra_env, record_history, ui } = setup;
+    let Setup { id, settings, env, extra_env, record_history, ui, clipboard } = setup;
     let (inbox, rx) = mpsc::channel();
     let credits = Arc::new(Credits::default());
     let sink = pty_sink(&inbox, &credits);
@@ -304,6 +309,7 @@ pub(crate) fn spawn(setup: Setup, options: SpawnOptions) -> Result<Handle> {
             let mut runner = Runner::new(id, session, options.shell, settings, credits, record_history);
             runner.extra_env = extra_env;
             runner.ui = ui;
+            runner.set_clipboard(clipboard);
             runner.run(&rx, &killed_flag);
         })
         .context("failed to start the session thread")?;
@@ -327,7 +333,7 @@ fn pty_sink(inbox: &mpsc::Sender<Inbox>, credits: &Arc<Credits>) -> pty::PtySink
 /// 停着、从没开过闸的 `Pty` 直接丢掉其实也不结束 shell（见 `Pty::adopt_paused`），明着交回是把
 /// 「不接手了」说清楚、出错时记一笔，不靠丢掉时对停着的 `Pty` 的特殊处理。
 pub(crate) fn adopt(setup: Setup, adopted: Adopted) -> Result<Adopting> {
-    let Setup { id, settings: _, env: _, extra_env, record_history, ui } = setup;
+    let Setup { id, settings: _, env: _, extra_env, record_history, ui, clipboard } = setup;
     let Adopted { handoff, export, snapshot, replay, redactor, shell } = adopted;
     let (inbox, rx) = mpsc::channel();
     let credits = Arc::new(Credits::default());
@@ -355,6 +361,7 @@ pub(crate) fn adopt(setup: Setup, adopted: Adopted) -> Result<Adopting> {
         runner.redactor = ReportRedactor::from_state(redactor);
         runner.extra_env = extra_env;
         runner.ui = ui;
+        runner.set_clipboard(clipboard);
         runner.run(&rx, &killed_flag);
     });
     if let Err(err) = spawned {
@@ -452,8 +459,10 @@ struct Runner {
     /// 上次因为有输出而重读前台进程的时刻，以及推迟到的那次。
     foreground_read_at: Instant,
     foreground_due: Option<Instant>,
-    /// 请界面办事、读剪贴板规矩的一头，见 `Setup::ui`。
+    /// 请界面办事的一头，见 `Setup::ui`。
     ui: UiPort,
+    /// 读写剪贴板的规矩，见 `set_clipboard`。
+    clipboard: ClipboardAccess,
     /// 在等界面回的那个读剪贴板的请求，见 `clipboard`。
     clipboard_read: Option<clipboard::PendingRead>,
 }
@@ -487,6 +496,7 @@ impl Runner {
             foreground_read_at: now,
             foreground_due: None,
             ui: UiPort::default(),
+            clipboard: ClipboardAccess::default(),
             clipboard_read: None,
         };
         // shell 已经在起始目录里跑起来了，不等第一次输出，前端一连上就有名字。
@@ -693,6 +703,7 @@ impl Runner {
                     tracing::error!("session {} cannot read its pty after the handoff: {err:#}", self.id);
                 }
             }
+            Inbox::Clipboard(clipboard) => self.set_clipboard(clipboard),
             Inbox::UiAnswer { ui, reply } => self.ui_answered(ui, *reply),
             // 交接以外的时候收到的：`Prepare` 在 `run` 里办，丢掉回话的一端，等的一方当会话没了；
             // `Release` 在 `step` 里办；没有冻结着时 `Resume` 没什么可做。

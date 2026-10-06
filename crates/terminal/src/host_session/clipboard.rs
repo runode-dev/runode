@@ -11,10 +11,10 @@
 //! 所以读的回调不装（没有它时 VT 不回应 OSC 52 的读），由 `QueryScanner` 在喂给 VT 的字节流旁边
 //! 认出读请求，宿主拿到结果后按请求的终止符自己回话（`ClipboardQuery::answer`）。
 
-use std::cell::RefCell;
-
 use libghostty_vt::terminal::{ClipboardWrite, ClipboardWriteError};
 use runode_shared_types::clipboard::MAX_CLIPBOARD_BYTES;
+
+use super::effects::Effects;
 
 /// 宿主那份 VT 认出的一个剪贴板请求，由 `HostSession::take_clipboard` 按到达的先后取走。
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -48,16 +48,20 @@ impl ClipboardQuery {
     }
 }
 
-/// `on_clipboard_write` 的回调：取出文字，记进 `requests`。
+/// `on_clipboard_write` 的回调：取出文字，记进 `effects.clipboard`。
 ///
 /// 目标不看：macOS 只有一个系统剪贴板，没有 selection 和 primary，`s`、`p`、空目标（惯例是
 /// `s 0`）和别的目标一律当作系统剪贴板。VT 只认一个字符的目标，`sc` 这种写了几个目标的整条
 /// 不办。
 ///
-/// 回给程序的应答（只有带应答的剪贴板协议用得上，OSC 52 没有应答）在这里就给：收下了算成功，
-/// 写不写、写给谁由宿主按配置定，VT 这一层等不到结果。
-pub(super) fn take_write(write: ClipboardWrite<'_>, requests: &RefCell<Vec<ClipboardRequest>>) {
-    let result = if write.contents().len() == 0 {
+/// 回给程序的应答（只有带应答的剪贴板协议用得上，OSC 52 没有应答）在这里就给：不让写
+/// （`Effects::clipboard_writes` 关着）时是「不允许」，收下了算成功；收下的转给谁由宿主定，VT 这一层
+/// 等不到结果。
+pub(super) fn take_write(write: ClipboardWrite<'_>, effects: &Effects) {
+    let result = if !effects.clipboard_writes.get() {
+        tracing::debug!("denied a clipboard write: clipboard-write = deny");
+        Err(ClipboardWriteError::Denied)
+    } else if write.contents().len() == 0 {
         // 空的载荷是要清空剪贴板。清掉只会弄丢用户自己复制的东西，程序也看不到清没清，不办。
         tracing::debug!("ignored a request to clear the clipboard");
         Err(ClipboardWriteError::Unsupported)
@@ -72,7 +76,7 @@ pub(super) fn take_write(write: ClipboardWrite<'_>, requests: &RefCell<Vec<Clipb
                 tracing::warn!("dropped a clipboard write of {} bytes, over the limit", content.data.len());
                 Err(ClipboardWriteError::InvalidData)
             }
-            Some(content) => match requests.try_borrow_mut() {
+            Some(content) => match effects.clipboard.try_borrow_mut() {
                 // 剪贴板放的是文字，系统剪贴板只收合法的 Unicode：不是 UTF-8 的字节换成 U+FFFD，其余
                 // 照写，比整条丢掉更接近程序的本意。
                 Ok(mut requests) => {

@@ -73,8 +73,6 @@ struct Shared {
     registry: Mutex<Registry>,
     /// 要不要把 shell 集成报告的命令记进历史文件，见 `ClientMsg::SetOptions`。
     record_history: Arc<AtomicBool>,
-    /// 会话里的程序读写剪贴板的规矩，见 `ClientMsg::SetOptions`。
-    clipboard: Mutex<ClipboardAccess>,
     /// 下一条连接的编号。
     next_connection: AtomicU64,
     /// 之后启动的 shell 另外设的环境变量，见 `Host::set_env`。
@@ -88,7 +86,8 @@ struct Shared {
     handoff_deadline: Mutex<Duration>,
 }
 
-/// 会话和主题放在同一把锁下：新会话加进来和换主题不会互相错过，见 `Shared::spawn`。
+/// 会话、主题和剪贴板的规矩放在同一把锁下：新会话加进来和换主题、改规矩不会互相错过，见
+/// `Shared::spawn`。
 #[derive(Default)]
 struct Registry {
     sessions: HashMap<SessionId, session::Handle>,
@@ -96,6 +95,9 @@ struct Registry {
     settings: Arc<TermSettings>,
     /// 收到过几次 `SetTheme`。
     theme_generation: u64,
+    /// 会话里的程序读写剪贴板的规矩，见 `ClientMsg::SetOptions`。改了就发给每个会话
+    /// （`Inbox::Clipboard`），会话线程自己记着一份，不必每块输出都来拿锁。
+    clipboard: ClipboardAccess,
 }
 
 impl Shared {
@@ -141,8 +143,10 @@ impl Shared {
             };
             (settings, registry.theme_generation)
         };
+        let setup = self.setup(id, settings, extra_env);
+        let clipboard = setup.clipboard;
         // 开伪终端、启动 shell 要几毫秒，不占着锁。
-        let handle = session::spawn(self.setup(id, settings, extra_env), options)?;
+        let handle = session::spawn(setup, options)?;
         // 锁的先后：拿着 `peers` 再拿 `registry`；交接开始时在同一把锁里定下要交的会话。
         let peers = self.peers();
         if peers.handoff.is_some() {
@@ -154,6 +158,10 @@ impl Shared {
         // 这期间换过主题的话，那次换主题没赶上这个会话，补上。
         if registry.theme_generation != generation {
             handle.send(session::Inbox::Theme(registry.settings.clone()));
+        }
+        // 剪贴板的规矩也一样。
+        if registry.clipboard != clipboard {
+            handle.send(session::Inbox::Clipboard(registry.clipboard));
         }
         registry.sessions.insert(id, handle);
         Ok(id)
@@ -170,7 +178,20 @@ impl Shared {
         env.retain(|(k, _)| k != runode_protocol::ENV_SESSION);
         env.push((runode_protocol::ENV_SESSION.into(), id.to_string().into()));
         let ui = server::UiPort::new(self.me.clone());
-        session::Setup { id, settings, env, extra_env, record_history: self.record_history.clone(), ui }
+        let clipboard = self.registry().clipboard;
+        session::Setup { id, settings, env, extra_env, record_history: self.record_history.clone(), ui, clipboard }
+    }
+
+    /// 改剪贴板的规矩，告诉每个会话；和现在的一样时什么都不做。
+    fn set_clipboard(&self, clipboard: ClipboardAccess) {
+        let mut registry = self.registry();
+        if registry.clipboard == clipboard {
+            return;
+        }
+        registry.clipboard = clipboard;
+        for handle in registry.sessions.values() {
+            handle.send(session::Inbox::Clipboard(clipboard));
+        }
     }
 
     /// 结束会话：先从登记表里拿掉，再叫它的线程结束，见 `Runner::answer_pending`。没有这个会话
@@ -217,7 +238,6 @@ impl Host {
             snapshot_format,
             registry: Mutex::default(),
             record_history: Arc::new(AtomicBool::new(true)),
-            clipboard: Mutex::default(),
             next_connection: AtomicU64::new(1),
             env: Mutex::default(),
             peers: Mutex::default(),
