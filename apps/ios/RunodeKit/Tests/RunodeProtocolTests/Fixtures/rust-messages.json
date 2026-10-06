@@ -275,6 +275,17 @@
    "id": "0123456789abcdef0011223344556677",
    "type": "detach"
   },
+  "dirs": {
+   "dirs": [
+    ".config",
+    "dev",
+    "中文"
+   ],
+   "path": "/Users/ethan",
+   "req": 5,
+   "truncated": true,
+   "type": "dirs"
+  },
   "done": {
    "req": 9,
    "type": "done"
@@ -496,8 +507,94 @@
    "id": "0123456789abcdef0011223344556677",
    "type": "kill"
   },
+  "layout": {
+   "req": 0,
+   "type": "layout",
+   "windows": [
+    {
+     "front": true,
+     "index": 1,
+     "workspaces": [
+      {
+       "active": true,
+       "dir": "/Users/ethan/dev/runode",
+       "index": 1,
+       "name": "runode",
+       "tabs": [
+        {
+         "active": false,
+         "index": 1,
+         "panes": [
+          {
+           "focused": true,
+           "id": "0123456789abcdef0011223344556677",
+           "index": 1,
+           "rect": {
+            "height": 1000,
+            "width": 1000,
+            "x": 0,
+            "y": 0
+           }
+          }
+         ]
+        },
+        {
+         "active": true,
+         "index": 2,
+         "panes": [
+          {
+           "focused": false,
+           "id": "11111111111111111111111111111111",
+           "index": 1,
+           "rect": {
+            "height": 1000,
+            "width": 500,
+            "x": 0,
+            "y": 0
+           }
+          },
+          {
+           "focused": true,
+           "id": "22222222222222222222222222222222",
+           "index": 2,
+           "rect": {
+            "height": 1000,
+            "width": 500,
+            "x": 500,
+            "y": 0
+           }
+          }
+         ]
+        }
+       ]
+      },
+      {
+       "active": false,
+       "dir": null,
+       "index": 2,
+       "name": "blog",
+       "tabs": []
+      }
+     ]
+    }
+   ]
+  },
+  "layout_request": {
+   "req": 0,
+   "type": "layout"
+  },
   "list": {
    "type": "list_sessions"
+  },
+  "list_dirs": {
+   "path": "/Users/ethan",
+   "req": 5,
+   "type": "list_dirs"
+  },
+  "list_dirs_home": {
+   "path": null,
+   "req": 5,
+   "type": "list_dirs"
   },
   "meta": {
    "id": "0123456789abcdef0011223344556677",
@@ -520,6 +617,25 @@
     "title": null
    },
    "type": "meta"
+  },
+  "open": {
+   "cwd": null,
+   "focus": false,
+   "near": null,
+   "placement": "tab",
+   "req": 7,
+   "type": "open"
+  },
+  "open_workspace": {
+   "dir": "/Users/ethan/dev/中文",
+   "focus": false,
+   "req": 8,
+   "type": "open_workspace"
+  },
+  "opened": {
+   "id": "0123456789abcdef0011223344556677",
+   "req": 7,
+   "type": "opened"
   },
   "paste": {
    "id": "0123456789abcdef0011223344556677",

@@ -4,6 +4,8 @@
 //! 序号一律从 1 开始。窗口按打开的先后编号；工作区、标签按界面上的先后；分屏按标签里从左到右、
 //! 从上到下的叶子顺序。
 
+use std::path::PathBuf;
+
 use serde::{Deserialize, Serialize};
 
 use crate::SessionId;
@@ -26,6 +28,9 @@ pub struct WorkspaceLayout {
     /// 工作区在侧栏里显示的名字。
     #[serde(default)]
     pub name: Option<String>,
+    /// 工作区的目录。
+    #[serde(default)]
+    pub dir: Option<PathBuf>,
     /// 是窗口当前显示的工作区。
     #[serde(default)]
     pub active: bool,

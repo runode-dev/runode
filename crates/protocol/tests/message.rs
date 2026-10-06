@@ -48,13 +48,14 @@ fn layout() -> Vec<WindowLayout> {
             WorkspaceLayout {
                 index: 1,
                 name: Some("runode".into()),
+                dir: Some("/Users/me/dev/runode".into()),
                 active: true,
                 tabs: vec![
                     TabLayout { index: 1, active: false, panes: vec![pane(1, 1, 0, true)] },
                     TabLayout { index: 2, active: true, panes: vec![pane(1, 2, 0, false), pane(2, 3, 500, true)] },
                 ],
             },
-            WorkspaceLayout { index: 2, name: None, active: false, tabs: Vec::new() },
+            WorkspaceLayout { index: 2, name: None, dir: None, active: false, tabs: Vec::new() },
         ],
     }]
 }
@@ -146,6 +147,9 @@ fn client_messages_round_trip() {
         },
         ClientMsg::Open { req: 10, placement: Placement::Down, near: Some(ID), cwd: Some("/tmp".into()), focus: true },
         ClientMsg::Reveal { req: 11, id: ID },
+        ClientMsg::ListDirs { req: 12, path: None },
+        ClientMsg::ListDirs { req: 13, path: Some("/Users/me/中文".into()) },
+        ClientMsg::OpenWorkspace { req: 14, dir: "/Users/me/dev".into(), focus: true },
         ClientMsg::Handoff { min_format: 1, max_format: 3 },
         ClientMsg::HandoffReady,
         ClientMsg::HandoffAbort { reason: "cannot adopt the pty".into() },
@@ -255,6 +259,8 @@ fn host_messages_round_trip() {
         HostMsg::ClipboardText { id: ID, text: None },
         HostMsg::Opened { req: 3, id: ID },
         HostMsg::Done { req: 4 },
+        HostMsg::Dirs { req: 5, path: "/Users/me".into(), dirs: vec!["dev".into(), "文档".into()], truncated: false },
+        HostMsg::Dirs { req: 6, path: "/".into(), dirs: Vec::new(), truncated: true },
         HostMsg::Error { req: Some(3), id: None, message: "no such directory".into() },
         HostMsg::Goodbye { reason: GoodbyeReason::Handoff },
         HostMsg::Goodbye { reason: GoodbyeReason::Error { message: "boom".into() } },
@@ -430,6 +436,7 @@ fn layouts_read_with_defaults() {
             workspaces: vec![WorkspaceLayout {
                 index: 1,
                 name: None,
+                dir: None,
                 active: false,
                 tabs: vec![TabLayout {
                     index: 1,
@@ -568,4 +575,85 @@ fn clipboard_text_stays_out_of_debug_output() {
         assert!(!text.contains("secret"), "{text}");
         assert!(text.contains("<15 bytes>"), "{text}");
     }
+}
+
+/// 手机浏览目录、新建工作区的消息的 JSON 样子（手机端按这个写），以及缺了可缺省的字段时的读法。
+#[test]
+fn directory_and_workspace_messages() {
+    let list = ClientMsg::ListDirs { req: 5, path: None };
+    assert_eq!(serde_json::to_string(&list).unwrap(), r#"{"type":"list_dirs","req":5,"path":null}"#);
+    assert_eq!(serde_json::from_str::<ClientMsg>(r#"{"type":"list_dirs","req":5}"#).unwrap(), list);
+    let list = ClientMsg::ListDirs { req: 6, path: Some("/Users/me/dev".into()) };
+    let json = serde_json::to_string(&list).unwrap();
+    assert_eq!(json, r#"{"type":"list_dirs","req":6,"path":"/Users/me/dev"}"#);
+    assert_eq!(serde_json::from_str::<ClientMsg>(&json).unwrap(), list);
+
+    let dirs = HostMsg::Dirs {
+        req: 5,
+        path: "/Users/me".into(),
+        dirs: vec!["dev".into(), "Documents".into()],
+        truncated: false,
+    };
+    let json = serde_json::to_string(&dirs).unwrap();
+    assert_eq!(json, r#"{"type":"dirs","req":5,"path":"/Users/me","dirs":["dev","Documents"],"truncated":false}"#);
+    assert_eq!(serde_json::from_str::<HostMsg>(&json).unwrap(), dirs);
+    let short: HostMsg =
+        serde_json::from_str(r#"{"type":"dirs","req":5,"path":"/Users/me","dirs":["dev","Documents"]}"#).unwrap();
+    assert_eq!(short, dirs);
+
+    let open = ClientMsg::OpenWorkspace { req: 8, dir: "/Users/me/dev".into(), focus: false };
+    let json = serde_json::to_string(&open).unwrap();
+    assert_eq!(json, r#"{"type":"open_workspace","req":8,"dir":"/Users/me/dev","focus":false}"#);
+    assert_eq!(serde_json::from_str::<ClientMsg>(&json).unwrap(), open);
+    assert_eq!(
+        serde_json::from_str::<ClientMsg>(r#"{"type":"open_workspace","req":8,"dir":"/Users/me/dev"}"#).unwrap(),
+        open
+    );
+    // 转给界面时原样套在 `UiRequest` 里。
+    let json = serde_json::to_string(&HostMsg::UiRequest { ui: 2, request: Box::new(open) }).unwrap();
+    assert_eq!(
+        json,
+        r#"{"type":"ui_request","ui":2,"request":{"type":"open_workspace","req":8,"dir":"/Users/me/dev","focus":false}}"#
+    );
+}
+
+/// 布局里的工作区带着目录；旧的界面不给时读成空的。
+#[test]
+fn workspace_layouts_carry_their_directory() {
+    let workspace = WorkspaceLayout {
+        index: 1,
+        name: Some("runode".into()),
+        dir: Some("/Users/me/dev/runode".into()),
+        active: true,
+        tabs: Vec::new(),
+    };
+    let json = serde_json::to_string(&workspace).unwrap();
+    assert_eq!(json, r#"{"index":1,"name":"runode","dir":"/Users/me/dev/runode","active":true,"tabs":[]}"#);
+    assert_eq!(serde_json::from_str::<WorkspaceLayout>(&json).unwrap(), workspace);
+    let old: WorkspaceLayout = serde_json::from_str(r#"{"index":1,"name":"runode","active":true,"tabs":[]}"#).unwrap();
+    assert_eq!(old, WorkspaceLayout { dir: None, ..workspace });
+
+    // 整个窗口的样子：工作区的目录在名字后面。
+    let window = &layout()[0];
+    let json = serde_json::to_string(window).unwrap();
+    let pane = |index, id: u32, x, focused| {
+        format!(
+            r#"{{"index":{index},"id":"{}","rect":{{"x":{x},"y":0,"width":500,"height":1000}},"focused":{focused}}}"#,
+            SessionId(id.into())
+        )
+    };
+    let expected = format!(
+        concat!(
+            r#"{{"index":1,"front":true,"workspaces":["#,
+            r#"{{"index":1,"name":"runode","dir":"/Users/me/dev/runode","active":true,"tabs":["#,
+            r#"{{"index":1,"active":false,"panes":[{}]}},"#,
+            r#"{{"index":2,"active":true,"panes":[{},{}]}}]}},"#,
+            r#"{{"index":2,"name":null,"dir":null,"active":false,"tabs":[]}}]}}"#,
+        ),
+        pane(1, 1, 0, true),
+        pane(1, 2, 0, false),
+        pane(2, 3, 500, true),
+    );
+    assert_eq!(json, expected);
+    assert_eq!(&serde_json::from_str::<WindowLayout>(&json).unwrap(), window);
 }

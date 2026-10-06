@@ -153,7 +153,7 @@ pub fn tab(index: u32, active: bool, panes: Vec<PaneLayout>) -> TabLayout {
 }
 
 pub fn workspace(index: u32, active: bool, tabs: Vec<TabLayout>) -> WorkspaceLayout {
-    WorkspaceLayout { index, name: None, active, tabs }
+    WorkspaceLayout { index, name: None, dir: None, active, tabs }
 }
 
 pub fn window(index: u32, front: bool, workspaces: Vec<WorkspaceLayout>) -> WindowLayout {

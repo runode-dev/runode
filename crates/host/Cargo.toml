@@ -8,6 +8,8 @@ publish.workspace = true
 
 [dependencies]
 runode-git.workspace = true
+# 前端没说列哪个目录时列家目录。
+runode-paths.workspace = true
 runode-terminal.workspace = true
 runode-protocol.workspace = true
 runode-shared-types.workspace = true

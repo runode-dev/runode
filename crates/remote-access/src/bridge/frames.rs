@@ -211,6 +211,8 @@ mod tests {
             frame(FrameKind::Input, 3, b""),
             control(r#"{"type":"something_newer"}"#),
             control("not json"),
+            control(r#"{"type":"list_dirs","req":5,"path":null}"#),
+            control(r#"{"type":"open_workspace","req":8,"dir":"/Users/me/dev","focus":false}"#),
         ];
         let refused = [
             control(r#"{"type":"shutdown","kill_sessions":true}"#),
@@ -226,7 +228,6 @@ mod tests {
             stream.extend_from_slice(allowed);
             stream.extend_from_slice(refused);
         }
-        stream.extend_from_slice(&refused[6]);
         for split in [1, 2, 5, 9, 10, 64, stream.len()] {
             let (to_host, refusals) = feed_in_pieces(&stream, split);
             assert_eq!(to_host, allowed.concat(), "split {split}");

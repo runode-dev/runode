@@ -13,6 +13,16 @@ public enum AttachMode: String, Hashable, Sendable, Codable {
     case metaOnly = "meta_only"
 }
 
+/// `Open` 的新终端放在桌面 app 里的哪里，见宿主的 `Placement`。
+public enum Placement: String, Hashable, Sendable, Codable {
+    /// 紧跟在旁边那个终端的标签后面的新标签。
+    case tab
+    /// 把旁边那个终端一分为二，新终端在右边。
+    case right
+    /// 把旁边那个终端一分为二，新终端在下边。
+    case down
+}
+
 /// 前端能做什么，缺的项按不能。
 public struct Caps: Hashable, Sendable, Codable {
     public var snapshot: Bool
@@ -63,8 +73,9 @@ public enum ClientKind: Hashable, Sendable, Codable {
     }
 }
 
-/// 前端发给宿主的消息。只列出手机这个前端会发的几种：`Hello`、`ListSessions`、`Spawn`、`Attach`、
-/// `Detach`、`Resize`、`Focus`、`ClearScreen`、`Kill`、`ReadScreen`、`SendKeys`、`Paste`、`Git`。JSON 的样子和
+/// 前端发给宿主的消息。只列出手机这个前端会发的几种：`Hello`、`ListSessions`、`Layout`、`Open`、
+/// `OpenWorkspace`、`ListDirs`、`Spawn`、`Attach`、`Detach`、`Resize`、`Focus`、`ClearScreen`、`Kill`、
+/// `ReadScreen`、`SendKeys`、`Paste`、`Git`。JSON 的样子和
 /// 宿主的 `ClientMsg` 一致，可缺省的字段也照宿主序列化的样子写出 `null`。宿主对手机连接上的 `Shutdown`、
 /// 交接（`Handoff` 等）、`UiReply`、`SetOptions`、`SetTheme` 只回 `Error`，这里故意不定义它们，手机就
 /// 发不出去。
@@ -72,6 +83,17 @@ public enum ClientMsg: Hashable, Sendable, Encodable {
     /// 连上后的第一条消息。手机的 `client` 是 `mobile`，`caps` 只要 VT 重放。
     case hello(protocol: UInt32, build: String, client: ClientKind, caps: Caps, session: SessionId?, device: String?)
     case listSessions
+    /// 要电脑上的 app 里各个终端摆在哪，宿主转给桌面的界面，回 `Layout`；没有桌面的界面时回 `Error`。
+    case layout(req: UInt32)
+    /// 请电脑上的 app 在窗口里开一个新终端，宿主转给桌面的界面，回 `Opened`；没有桌面窗口时回
+    /// `Error`。`near` 为空时放在最前面那个窗口当前的分屏旁边，`cwd` 为空时沿用旁边那个终端的目录，
+    /// `focus` 为假时不切过去。
+    case open(req: UInt32, placement: Placement, near: SessionId?, cwd: String?, focus: Bool)
+    /// 请电脑上的 app 在最前面那个窗口里新建一个目录是 `dir`（绝对路径）的工作区，回 `Opened`，带着它的
+    /// 第一个终端；已经有这个目录的工作区时回那个工作区当前的终端。`focus` 为假时电脑上不切过去。
+    case openWorkspace(req: UInt32, dir: String, focus: Bool)
+    /// 列电脑上一个目录（绝对路径）里的子目录，为空时是家目录，宿主回 `Dirs`，出错时回 `Error`。
+    case listDirs(req: UInt32, path: String?)
     /// 新开一个会话；宿主回 `Spawned`，开好的会话要另外 `Attach`。
     case spawn(req: UInt32, size: GridSize, cwd: String?, integration: IntegrationMode, start: Bool)
     /// 连上会话。`size` 为空时不改会话的尺寸，也不算一次交互（见宿主的尺寸归属）。
@@ -118,6 +140,25 @@ public enum ClientMsg: Hashable, Sendable, Encodable {
             try c.encode(device, forKey: Key("device"))
         case .listSessions:
             try c.encode("list_sessions", forKey: Key("type"))
+        case let .layout(req):
+            try c.encode("layout", forKey: Key("type"))
+            try c.encode(req, forKey: Key("req"))
+        case let .open(req, placement, near, cwd, focus):
+            try c.encode("open", forKey: Key("type"))
+            try c.encode(req, forKey: Key("req"))
+            try c.encode(placement, forKey: Key("placement"))
+            try c.encode(near, forKey: Key("near"))
+            try c.encode(cwd, forKey: Key("cwd"))
+            try c.encode(focus, forKey: Key("focus"))
+        case let .openWorkspace(req, dir, focus):
+            try c.encode("open_workspace", forKey: Key("type"))
+            try c.encode(req, forKey: Key("req"))
+            try c.encode(dir, forKey: Key("dir"))
+            try c.encode(focus, forKey: Key("focus"))
+        case let .listDirs(req, path):
+            try c.encode("list_dirs", forKey: Key("type"))
+            try c.encode(req, forKey: Key("req"))
+            try c.encode(path, forKey: Key("path"))
         case let .spawn(req, size, cwd, integration, start):
             try c.encode("spawn", forKey: Key("type"))
             try c.encode(req, forKey: Key("req"))
@@ -252,7 +293,7 @@ public enum GoodbyeReason: Hashable, Sendable, Decodable {
 
 /// 宿主发给前端的消息，和宿主的 `HostMsg` 一一对应。不认识的种类读成 `unknown`（和宿主的
 /// `#[serde(other)]` 一样），认识的种类缺了必填字段时整条解析失败。手机用不上的几种（界面转来的
-/// 请求、窗口布局、交接）只解出编号，内容不读。
+/// 请求、交接）只解出编号，内容不读。
 public enum HostMsg: Hashable, Sendable, Decodable {
     case welcome(protocol: UInt32, build: String, hostPid: UInt32, snapshotFormat: UInt16, standalone: Bool)
     case incompatible(protocol: UInt32, build: String, reason: String)
@@ -270,7 +311,11 @@ public enum HostMsg: Hashable, Sendable, Decodable {
     case opened(req: UInt32, id: SessionId)
     case done(req: UInt32)
     case screenText(id: SessionId, text: String, truncated: Bool)
-    case layout(req: UInt32)
+    /// 回 `Layout`。
+    case layout(req: UInt32, windows: [WindowLayout])
+    /// 回 `ListDirs`：实际列的目录（规范化后的绝对路径）和它的子目录名，按名字排好；`truncated` 为真时
+    /// 子目录太多，只给了前面一部分。
+    case dirs(req: UInt32, path: String, dirs: [String], truncated: Bool)
     /// 回 `Git` 里读状态和改仓库的操作：办完以后仓库的样子；会话的目录不在 git 仓库里时为空。
     case gitStatus(req: UInt32, id: SessionId, status: GitStatus?)
     /// 回 `GitRequest.diff`；这个文件在那一段里已经没有改动时为空。
@@ -330,7 +375,7 @@ public enum HostMsg: Hashable, Sendable, Decodable {
 
     private enum Keys: String, CodingKey {
         case type, `protocol`, build, reason, sessions, req, id, channel, size, mode, meta, settings, command
-        case status, text, truncated, ui, message, format, mine, owner, standalone, diff, branches
+        case status, text, truncated, ui, message, format, mine, owner, standalone, windows, path, dirs, diff, branches
         case hostPid = "host_pid"
         case snapshotFormat = "snapshot_format"
     }
@@ -395,7 +440,15 @@ public enum HostMsg: Hashable, Sendable, Decodable {
                 text: try c.decode(String.self, forKey: .text),
                 truncated: try c.decodeIfPresent(Bool.self, forKey: .truncated) ?? false)
         case "layout":
-            self = .layout(req: try c.decode(UInt32.self, forKey: .req))
+            self = .layout(
+                req: try c.decode(UInt32.self, forKey: .req),
+                windows: try c.decode([WindowLayout].self, forKey: .windows))
+        case "dirs":
+            self = .dirs(
+                req: try c.decode(UInt32.self, forKey: .req),
+                path: try c.decode(String.self, forKey: .path),
+                dirs: try c.decode([String].self, forKey: .dirs),
+                truncated: try c.decodeIfPresent(Bool.self, forKey: .truncated) ?? false)
         case "git_status":
             self = .gitStatus(
                 req: try c.decode(UInt32.self, forKey: .req),

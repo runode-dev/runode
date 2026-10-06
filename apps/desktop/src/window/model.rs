@@ -213,6 +213,20 @@ impl WindowView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        self.add_workspace(ix, dir, view, window, cx);
+        self.activate_workspace(ix, window, cx);
+    }
+
+    /// 在第 `ix` 个位置放一个目录是 `dir` 的新 workspace，`view` 是它的第一个终端，不切过去：当前的
+    /// workspace 还是原来那个。
+    pub(super) fn add_workspace(
+        &mut self,
+        ix: usize,
+        dir: PathBuf,
+        view: Entity<TerminalView>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let tab = self.single_pane_tab(view, window, cx);
         let workspace = Workspace {
             id: self.next_id(),
@@ -224,7 +238,10 @@ impl WindowView {
             project: Project::default(),
         };
         self.workspaces.insert(ix, workspace);
-        self.activate_workspace(ix, window, cx);
+        // 插在当前 workspace 前面时它往后挪了一位；窗口里本来没有 workspace 时调用方接着切过去。
+        if self.workspaces.len() > 1 && ix <= self.active {
+            self.active += 1;
+        }
     }
 
     /// 装着这个终端的 workspace 和标签。

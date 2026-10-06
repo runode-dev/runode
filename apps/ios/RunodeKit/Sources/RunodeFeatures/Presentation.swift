@@ -120,11 +120,32 @@ public enum Presentation {
         }
     }
 
-    public static func title(for group: SessionGroup) -> String {
-        switch group {
-        case .waiting: "等你回答"
-        case .working: "干活中"
-        case .other: "其他会话"
+    /// 会话列表里一节的标题：工作区的名字，没有名字时是目录的最后一段；不在任何窗口里的是「后台」。
+    public static func sectionTitle(_ section: SessionSection) -> String {
+        switch section.id {
+        case .background: return "后台"
+        case .workspace(_, let index):
+            if let name = section.name, !name.isEmpty { return name }
+            if let dir = section.dir, !dir.isEmpty { return (dir as NSString).lastPathComponent }
+            return "工作区 \(index)"
+        }
+    }
+
+    public static func sectionSymbol(_ section: SessionSection) -> String {
+        switch section.id {
+        case .background: "moon.zzz"
+        case .workspace: "folder"
+        }
+    }
+
+    /// 一节标题下面那行小字：工作区的目录，开着不止一个窗口时带上第几个窗口；后台那一节说明它是什么。
+    public static func sectionDetail(_ section: SessionSection) -> String? {
+        switch section.id {
+        case .background:
+            return "电脑上没有窗口在显示这些终端"
+        case .workspace:
+            let parts = [section.window.map { "窗口 \($0)" }, directory(section.dir)].compactMap { $0 }
+            return parts.isEmpty ? nil : parts.joined(separator: " · ")
         }
     }
 

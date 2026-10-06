@@ -5214,6 +5214,7 @@ dependencies = [
  "anyhow",
  "libc",
  "runode-git",
+ "runode-paths",
  "runode-protocol",
  "runode-shared-types",
  "runode-terminal",

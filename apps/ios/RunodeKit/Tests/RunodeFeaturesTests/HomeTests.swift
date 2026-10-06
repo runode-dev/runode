@@ -117,20 +117,20 @@ private struct TwoMachines {
         try machines.connectFirst([])
         let list = try #require(machines.app.sessionList(for: machines.first.id))
         await list.spawn()
-        guard case .spawn(let req, _, _, _, _)? = machines.firstLink.sent.last else {
-            Issue.record("expected a spawn, got \(machines.firstLink.sent)")
+        guard case .open(let req, _, _, _, _)? = machines.firstLink.sent.last else {
+            Issue.record("expected an open, got \(machines.firstLink.sent)")
             return
         }
-        list.handle(.message(.spawned(req: req, id: sessionA)))
+        list.handle(.message(.opened(req: req, id: sessionA)))
         #expect(machines.app.path == [.machine(machines.first.id), .terminal(machine: machines.first.id, session: sessionA)])
 
         machines.app.path = [.machine(machines.first.id)]
         await list.spawn()
-        guard case .spawn(let next, _, _, _, _)? = machines.firstLink.sent.last else {
-            Issue.record("expected a spawn, got \(machines.firstLink.sent)")
+        guard case .open(let next, _, _, _, _)? = machines.firstLink.sent.last else {
+            Issue.record("expected an open, got \(machines.firstLink.sent)")
             return
         }
-        list.handle(.message(.spawned(req: next, id: sessionB)))
+        list.handle(.message(.opened(req: next, id: sessionB)))
         #expect(machines.app.path == [.machine(machines.first.id), .terminal(machine: machines.first.id, session: sessionB)])
     }
 

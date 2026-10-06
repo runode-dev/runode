@@ -5,8 +5,9 @@
     import SwiftUI
     import UIKit
 
-    /// 一台电脑上的会话，以 agent 为中心：等你回答的放最上面（带快速回复），接着是干活中的，最后是
-    /// 其他。一个会话一张卡片，带屏幕最后几行的预览。点开终端，左滑结束，长按有更多操作。
+    /// 一台电脑上的会话，按电脑上的 app 里的工作区分节，节头能在那个工作区里新开终端；不在任何窗口里的
+    /// 会话放在最后的「后台」一节。一个会话一张卡片，带 agent 状态和屏幕最后几行的预览，等你回答的带
+    /// 快速回复。点开终端，左滑结束，长按有更多操作。右上角能新开终端、新建工作区。
     struct SessionListView: View {
         @Bindable var model: SessionListModel
         let onOpen: (SessionId) -> Void
@@ -26,12 +27,11 @@
                 }
                 ForEach(model.sections) { section in
                     Section {
-                        ListSectionHeader(
-                            title: Presentation.title(for: section.group),
-                            systemImage: Presentation.symbol(for: section.group),
-                            tint: section.group == .other ? Color.secondary : AgentBadge.tint(for: section.group))
+                        WorkspaceHeader(section: section, isSpawning: model.isSpawning) { anchor in
+                            Task { await model.spawn(near: anchor) }
+                        }
                         ForEach(section.sessions, id: \.id) { session in
-                            row(session, group: section.group)
+                            row(session, group: SessionGroup.of(session))
                         }
                     }
                 }
@@ -56,10 +56,26 @@
             .leadingNavigationTitle(model.machine.name, subtitle: linkSubtitle)
             .toolbar {
                 ToolbarItem(placement: .primaryAction) {
-                    Button("新开会话", systemImage: "plus") {
-                        Task { await model.spawn() }
+                    Menu("新建", systemImage: "plus") {
+                        Button("新开终端", systemImage: "terminal") {
+                            Task { await model.spawn() }
+                        }
+                        Button("新建工作区", systemImage: "folder.badge.plus") {
+                            model.beginNewWorkspace()
+                        }
+                        .disabled(!model.canCreateWorkspace)
                     }
                     .disabled(!model.linkState.isConnected || model.isSpawning)
+                }
+            }
+            .sheet(
+                isPresented: Binding(
+                    get: { model.directoryPicker != nil }, set: { if !$0 { model.cancelNewWorkspace() } })
+            ) {
+                if let picker = model.directoryPicker {
+                    DirectoryPickerView(picker: picker, onCancel: model.cancelNewWorkspace) { dir in
+                        Task { await model.createWorkspace(at: dir) }
+                    }
                 }
             }
             .refreshable {
@@ -83,7 +99,7 @@
         /// 一个会话一张卡片，整张能点开终端。等回答的会话卡片下半截是快速回复，只有上半截能点开。
         @ViewBuilder
         private func card(_ session: SessionInfo, group: SessionGroup) -> some View {
-            let summary = SessionRow(session: session, preview: model.previews[session.id] ?? [], group: group)
+            let summary = SessionRow(session: session, preview: model.previews[session.id] ?? [])
             if group == .waiting {
                 VStack(alignment: .leading, spacing: 10) {
                     Button { onOpen(session.id) } label: { summary.contentShape(Rectangle()) }
@@ -149,10 +165,46 @@
         }
     }
 
+    /// 一节的标题：工作区的名字和目录，右边一个在这个工作区里新开终端的按钮；后台那一节只有标题。
+    private struct WorkspaceHeader: View {
+        let section: SessionSection
+        let isSpawning: Bool
+        let onSpawn: (SessionId) -> Void
+
+        var body: some View {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Label(Presentation.sectionTitle(section), systemImage: Presentation.sectionSymbol(section))
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.primary)
+                        .accessibilityAddTraits(.isHeader)
+                    if let detail = Presentation.sectionDetail(section) {
+                        Text(detail)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                            .truncationMode(.head)
+                    }
+                }
+                Spacer(minLength: 8)
+                if let anchor = section.anchor {
+                    Button("在这里新开终端", systemImage: "plus") { onSpawn(anchor) }
+                        .labelStyle(.iconOnly)
+                        .font(.body.weight(.semibold))
+                        .buttonStyle(.borderless)
+                        .disabled(isSpawning)
+                        .accessibilityLabel("在「\(Presentation.sectionTitle(section))」里新开终端")
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, 12)
+            .plainListRow()
+        }
+    }
+
     private struct SessionRow: View {
         let session: SessionInfo
         let preview: [String]
-        let group: SessionGroup
 
         var body: some View {
             VStack(alignment: .leading, spacing: 6) {
@@ -171,8 +223,7 @@
                     DisclosureChevron()
                 }
                 if session.meta.agent != nil {
-                    // 等回答、干活中的分组标题已经写了状态，徽标上只写 agent 的名字。
-                    AgentBadge(agent: session.meta.agent, showsState: group == .other)
+                    AgentBadge(agent: session.meta.agent)
                 }
                 if let directory = Presentation.directory(session.meta.cwd) {
                     CompactLabel(text: directory, systemImage: "folder")

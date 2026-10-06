@@ -252,6 +252,22 @@ pub enum ClientMsg {
     },
     /// 在 app 里切到显示这个会话的分屏，激活它的窗口，回 `Done`。
     Reveal { req: u32, id: SessionId },
+    /// 列出宿主这台电脑上 `path` 这个目录里的子目录，回 `HostMsg::Dirs`；`path` 为空时列家目录。
+    /// 手机新建工作区时一级级浏览电脑上的目录用它。宿主自己办，不转给界面。
+    ListDirs {
+        req: u32,
+        #[serde(default)]
+        path: Option<PathBuf>,
+    },
+    /// 在 app 最前面那个窗口里开一个目录是 `dir` 的工作区，宿主转给 app 的界面，回 `Opened`：新工作区
+    /// 第一个终端的会话。窗口里已经有这个目录的工作区时不新建，回它当前标签里有焦点的那个分屏的会话。
+    /// `focus` 为假时不切过去，不打断用户手上的事。
+    OpenWorkspace {
+        req: u32,
+        dir: PathBuf,
+        #[serde(default)]
+        focus: bool,
+    },
     /// 在会话 `id` 的 shell 当前所在的仓库里读写 git，见 `git` 模块。一条连接上的这些请求按到达的
     /// 先后一件一件办，推送、拉取这类要等网络的会排着后面的。办不了时回的 `Error` 只带 `req`、不带
     /// `id`：错是这件请求的（git 的报错、没有这个会话），不是会话出了事。
@@ -389,7 +405,7 @@ pub enum HostMsg {
     Bell {
         id: SessionId,
     },
-    /// 回 `Open`：新终端的会话。
+    /// 回 `Open`、`OpenWorkspace`：新终端的会话。
     Opened {
         req: u32,
         id: SessionId,
@@ -430,9 +446,19 @@ pub enum HostMsg {
         req: u32,
         windows: Vec<WindowLayout>,
     },
-    /// 宿主转给界面去办的请求（`Open`、`Reveal`、`Layout`），只发给登记为界面的连接（`Hello`
-    /// 里 `client` 是 `Desktop` 的，有几个时是最近连上的那个）。`request` 原样带着发请求一方的
-    /// `req`；界面办完了用 `ClientMsg::UiReply` 带着同一个 `ui` 回话。
+    /// 回 `ClientMsg::ListDirs`。`path` 是实际列的目录：规范化后的绝对路径，请求里没给时是家目录。
+    /// `dirs` 只有子目录的名字（跟着符号链接看是不是目录，含隐藏目录，不是 UTF-8 的名字跳过），按名字
+    /// 不分大小写排好，最多 `MAX_DIRS` 个；多出来的不给，`truncated` 为真。
+    Dirs {
+        req: u32,
+        path: PathBuf,
+        dirs: Vec<String>,
+        #[serde(default)]
+        truncated: bool,
+    },
+    /// 宿主转给界面去办的请求（`Open`、`OpenWorkspace`、`Reveal`、`Layout`），只发给登记为界面的
+    /// 连接（`Hello` 里 `client` 是 `Desktop` 的，有几个时是最近连上的那个）。`request` 原样带着
+    /// 发请求一方的 `req`；界面办完了用 `ClientMsg::UiReply` 带着同一个 `ui` 回话。
     ///
     /// 宿主自己也用它请界面读写剪贴板（`ClientMsg::WriteClipboard`、`ClientMsg::ReadClipboard`），
     /// 这两种优先发给最近和那个会话交互过的界面，没有时才是最近连上的那个。
@@ -506,6 +532,9 @@ impl From<&str> for ClipboardContent {
         Self(text.to_owned())
     }
 }
+
+/// `HostMsg::Dirs` 一次最多给这么多个子目录。
+pub const MAX_DIRS: usize = 1000;
 
 /// `Open` 的新终端放在哪里。
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]

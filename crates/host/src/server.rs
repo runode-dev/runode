@@ -10,8 +10,8 @@
 //!
 //! 读的线程不等会话线程回话：列会话、读屏幕先在读的线程里把请求按先后送到会话线程，再起一个
 //! 短命的线程等回话、交给 `Outbox`，同一条连接上之后的输入照常转发。一条连接上这样在等的请求
-//! 最多 `MAX_WAITING` 个，再多的当场回 `Error`，前端狂发也堆不起线程。开会话还在读的线程里办
-//! （开伪终端、启动 shell 要几毫秒）。
+//! 最多 `MAX_WAITING` 个，再多的当场回 `Error`，前端狂发也堆不起线程。开会话和列目录
+//! （`ClientMsg::ListDirs`）还在读的线程里办（开伪终端、启动 shell 要几毫秒，读一次目录项更快）。
 //!
 //! 能连上 socket 就能读写所有终端：socket 放在只有自己能进的目录里（见调用方建目录的方式），
 //! 连上来的进程也要是同一个用户的。
@@ -45,7 +45,7 @@ use runode_shared_types::{grid::GridSize, input::parse_keys, session::DriveActio
 use runode_terminal::pty;
 
 use crate::{
-    Host, Shared, SpawnOptions, Stopped,
+    Host, Shared, SpawnOptions, Stopped, browse,
     git::{GitWorker, Job},
     handoff,
     session::{Drive, Event, EventSink, Inbox, Screen, Subscribe},
@@ -960,9 +960,18 @@ impl Connection {
                 }
             }
             ClientMsg::Paste { req, id, text } => self.deliver_done(req, id, DriveAction::Paste, Inbox::Paste(text)),
-            ClientMsg::Open { req, .. } | ClientMsg::Reveal { req, .. } | ClientMsg::Layout { req } => {
+            ClientMsg::Open { req, .. }
+            | ClientMsg::OpenWorkspace { req, .. }
+            | ClientMsg::Reveal { req, .. }
+            | ClientMsg::Layout { req } => {
                 self.to_ui(req, message);
             }
+            ClientMsg::ListDirs { req, path } => match browse::list_dirs(path) {
+                Ok(browse::Listing { path, dirs, truncated }) => {
+                    self.out.control(&HostMsg::Dirs { req, path, dirs, truncated });
+                }
+                Err(message) => self.error(Some(req), None, message),
+            },
             ClientMsg::Git { req, id, request } => self.git(req, id, request),
             ClientMsg::UiReply { ui, reply } => self.ui_reply(ui, *reply),
             // 读写剪贴板是宿主替会话里的程序请界面办的，前端不能直接要。

@@ -17,7 +17,7 @@ import Testing
         let model = SessionListModel(machine: machineRecord(), link: link)
         model.handle(.state(.connected(hostName: "homelab", address: nil)))
         model.handle(.ready(generation: 1))
-        #expect(link.sent == [.listSessions])
+        #expect(link.sent == [.listSessions, .layout(req: 0)])
         model.screenOpened(sessionB)
         model.handle(.message(.sessionList([info(sessionA, title: "a"), info(sessionB, title: "b")])))
         #expect(model.sessions.count == 2)
@@ -53,20 +53,49 @@ import Testing
         #expect(link.sent == [.attach(id: sessionA, size: nil, mode: .metaOnly)])
     }
 
-    @Test func spawnWaitsForItsReply() async {
+    /// 新开会话先请电脑上的 app 在窗口里开一个不抢焦点的新标签，电脑上也看得到。
+    @Test func spawnOpensATabOnTheComputer() async {
         let model = SessionListModel(machine: machineRecord(), link: link)
         model.handle(.ready(generation: 1))
         link.clearSent()
         await model.spawn()
         #expect(model.isSpawning)
+        guard case .open(let req, .tab, nil, nil, false)? = link.sent.first else {
+            Issue.record("expected an open, got \(link.sent)")
+            return
+        }
+        var spawned: [SessionId] = []
+        model.onSpawned = { spawned.append($0) }
+        model.handle(.message(.opened(req: req &+ 7, id: sessionB)))
+        #expect(spawned.isEmpty)
+        model.handle(.message(.opened(req: req, id: sessionA)))
+        #expect(spawned == [sessionA])
+        #expect(!model.isSpawning)
+    }
+
+    /// 电脑上的 app 没开着窗口时退回自己开一个后台会话。
+    @Test func spawnFallsBackWithoutADesktopWindow() async {
+        let model = SessionListModel(machine: machineRecord(), link: link)
+        model.handle(.ready(generation: 1))
+        link.clearSent()
+        await model.spawn()
+        guard case .open(let openReq, _, _, _, _)? = link.sent.first else {
+            Issue.record("expected an open, got \(link.sent)")
+            return
+        }
+        link.clearSent()
+        model.handle(.message(.error(req: openReq, id: nil, message: "there is no runode window to do this in")))
+        #expect(model.errorMessage == nil)
+        #expect(model.isSpawning)
         guard case .spawn(let req, let size, nil, .detect, true)? = link.sent.first else {
             Issue.record("expected a spawn, got \(link.sent)")
             return
         }
+        #expect(req != openReq)
         #expect(size == model.spawnSize)
         var spawned: [SessionId] = []
         model.onSpawned = { spawned.append($0) }
-        model.handle(.message(.spawned(req: req &+ 1, id: sessionB)))
+        model.handle(.message(.spawned(req: openReq, id: sessionB)))
         #expect(spawned.isEmpty)
         model.handle(.message(.spawned(req: req, id: sessionA)))
         #expect(spawned == [sessionA])
@@ -76,10 +105,83 @@ import Testing
     @Test func spawnErrorsAreShown() async {
         let model = SessionListModel(machine: machineRecord(), link: link)
         model.handle(.ready(generation: 1))
+        link.clearSent()
         await model.spawn()
-        model.handle(.message(.error(req: 1, id: nil, message: "no shell")))
+        guard case .open(let openReq, _, _, _, _)? = link.sent.first else {
+            Issue.record("expected an open, got \(link.sent)")
+            return
+        }
+        model.handle(.message(.error(req: openReq, id: nil, message: "no window")))
+        guard case .spawn(let req, _, _, _, _)? = link.sent.last else {
+            Issue.record("expected a spawn, got \(link.sent)")
+            return
+        }
+        model.handle(.message(.error(req: req, id: nil, message: "no shell")))
         #expect(model.errorMessage?.contains("no shell") == true)
         #expect(!model.isSpawning)
+    }
+
+    /// 在某个工作区里新开终端：挨着那个工作区的 `anchor` 开新标签，开好后连列表带布局再要一次。
+    @Test func spawnInAWorkspaceOpensBesideItsAnchor() async {
+        let model = SessionListModel(machine: machineRecord(), link: link)
+        model.handle(.ready(generation: 1))
+        link.clearSent()
+        await model.spawn(near: sessionB)
+        guard case .open(let req, .tab, sessionB?, nil, false)? = link.sent.first else {
+            Issue.record("expected an open beside sessionB, got \(link.sent)")
+            return
+        }
+        link.clearSent()
+        model.handle(.message(.opened(req: req, id: sessionA)))
+        #expect(link.sent == [.listSessions, .layout(req: 0)])
+    }
+
+    /// 新建工作区：选目录的页面收起，`OpenWorkspace` 开好后和新开终端一样打开它的终端。
+    @Test func createWorkspaceOpensItsFirstTerminal() async {
+        let model = SessionListModel(machine: machineRecord(), link: link)
+        model.handle(.ready(generation: 1))
+        model.beginNewWorkspace()
+        #expect(model.directoryPicker != nil)
+        link.clearSent()
+        await model.createWorkspace(at: "/Users/ethan/dev")
+        #expect(model.directoryPicker == nil)
+        #expect(model.isSpawning)
+        guard case .openWorkspace(let req, "/Users/ethan/dev", false)? = link.sent.first else {
+            Issue.record("expected an open_workspace, got \(link.sent)")
+            return
+        }
+        var spawned: [SessionId] = []
+        model.onSpawned = { spawned.append($0) }
+        model.handle(.message(.opened(req: req, id: sessionA)))
+        #expect(spawned == [sessionA])
+        #expect(!model.isSpawning)
+    }
+
+    /// 新建工作区没成时不退回 `Spawn`，直接提示。
+    @Test func createWorkspaceErrorsAreShown() async {
+        let model = SessionListModel(machine: machineRecord(), link: link)
+        model.handle(.ready(generation: 1))
+        link.clearSent()
+        await model.createWorkspace(at: "/nope")
+        guard case .openWorkspace(let req, _, _)? = link.sent.first else {
+            Issue.record("expected an open_workspace, got \(link.sent)")
+            return
+        }
+        link.clearSent()
+        model.handle(.message(.error(req: req, id: nil, message: "not a directory: /nope")))
+        #expect(link.sent.isEmpty)
+        #expect(model.errorMessage == "建不了工作区：not a directory: /nope")
+        #expect(!model.isSpawning)
+    }
+
+    /// 旧电脑不认识 `OpenWorkspace`，回不带编号的「unknown message」：提示升级，不一直转圈。
+    @Test func anOldComputerCannotCreateWorkspaces() async {
+        let model = SessionListModel(machine: machineRecord(), link: link)
+        model.handle(.ready(generation: 1))
+        await model.createWorkspace(at: "/Users/ethan")
+        model.handle(.message(.error(req: nil, id: nil, message: HostMsg.unknownMessage)))
+        #expect(!model.isSpawning)
+        #expect(model.errorMessage?.contains("太旧") == true)
     }
 
     @Test func killRemovesTheSession() {
@@ -299,5 +401,72 @@ extension LinkState {
         #expect(Presentation.sizeOwner("Ethan 的 MacBook") == "尺寸跟随 Ethan 的 MacBook")
         #expect(Presentation.sizeOwner(nil) == "尺寸无人控制")
         #expect(Presentation.sizeOwnership(.mine) == "尺寸跟随本机")
+    }
+}
+
+@MainActor
+@Suite struct DirectoryPickerTests {
+    let link = FakeLink()
+
+    func listed(_ path: String, _ dirs: [String]) async -> DirectoryPickerModel {
+        let picker = DirectoryPickerModel(link: link)
+        await picker.load(nil)
+        guard case .listDirs(let req, nil)? = link.sent.last else {
+            Issue.record("expected list_dirs for home, got \(link.sent)")
+            return picker
+        }
+        #expect(picker.isLoading)
+        #expect(picker.handle(.dirs(req: req, path: path, dirs: dirs, truncated: false)))
+        return picker
+    }
+
+    @Test func startsAtHomeAndHidesDotDirectories() async {
+        let picker = await listed("/Users/ethan", [".config", "dev", "中文"])
+        #expect(!picker.isLoading)
+        #expect(picker.path == "/Users/ethan")
+        #expect(picker.visibleDirs == ["dev", "中文"])
+        picker.showsHidden = true
+        #expect(picker.visibleDirs == [".config", "dev", "中文"])
+        #expect(picker.parent == "/Users")
+    }
+
+    @Test func entersAndGoesUp() async {
+        let picker = await listed("/Users/ethan", ["dev"])
+        await picker.enter("dev")
+        #expect(link.sent.last.map { if case .listDirs(_, "/Users/ethan/dev") = $0 { true } else { false } } == true)
+        await picker.goUp()
+        #expect(link.sent.last.map { if case .listDirs(_, "/Users") = $0 { true } else { false } } == true)
+    }
+
+    /// 只认最后一次请求的回话：点得快时前面的回话丢掉。
+    @Test func onlyTheLatestReplyCounts() async {
+        let picker = await listed("/Users/ethan", ["a", "b"])
+        await picker.enter("a")
+        guard case .listDirs(let first, _)? = link.sent.last else { return }
+        await picker.enter("b")
+        guard case .listDirs(let second, _)? = link.sent.last else { return }
+        #expect(!picker.handle(.dirs(req: first, path: "/Users/ethan/a", dirs: [], truncated: false)))
+        #expect(picker.handle(.dirs(req: second, path: "/Users/ethan/b", dirs: ["x"], truncated: true)))
+        #expect(picker.path == "/Users/ethan/b")
+        #expect(picker.truncated)
+    }
+
+    @Test func errorsKeepTheLastListingAndCanRetry() async {
+        let picker = await listed("/Users/ethan", ["secret"])
+        await picker.enter("secret")
+        guard case .listDirs(let req, let path)? = link.sent.last else { return }
+        #expect(picker.handle(.error(req: req, id: nil, message: "permission denied")))
+        #expect(picker.errorMessage == "permission denied")
+        #expect(picker.path == "/Users/ethan")
+        await picker.retry()
+        #expect(link.sent.last.map { if case .listDirs(_, path) = $0 { true } else { false } } == true)
+        #expect(picker.errorMessage == nil)
+    }
+
+    @Test func theRootHasNoParent() async {
+        let picker = await listed("/", ["Users"])
+        #expect(picker.parent == nil)
+        await picker.enter("Users")
+        #expect(link.sent.last.map { if case .listDirs(_, "/Users") = $0 { true } else { false } } == true)
     }
 }

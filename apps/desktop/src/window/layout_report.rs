@@ -1,13 +1,13 @@
 //! 回答别的进程问 app 里各个终端摆在哪（`ClientMsg::Layout`）：窗口、工作区、标签和分屏，命令行
-//! 据此按位置找终端、列出每个会话在哪。
+//! 据此按位置找终端、列出每个会话在哪，手机据此按工作区把会话分组。
 //!
 //! 窗口按打开的先后从 1 编号，最前面那个标 `front`；工作区、标签按界面上的先后从 1 编号，当前的
-//! 标 `active`；分屏按 `Node::leaves` 的叶子顺序从 1 编号，有焦点的标 `focused`。分屏的位置按
+//! 标 `active`，工作区还带着侧栏里的名字和它的目录；分屏按 `Node::leaves` 的叶子顺序从 1 编号，有焦点的标 `focused`。分屏的位置按
 //! 整个标签区域 0..`PaneRect::EXTENT` 归一化，由分屏树按比例算出，不看实际画出来的像素，所以
 //! 后台标签也有。放大着的分屏照常按没放大时的布局给：放大只是暂时把别的分屏挡住，命令行按
 //! 左右上下找相邻分屏时要的是分屏之间的位置关系，放大时也不变。
 
-use std::collections::HashMap;
+use std::{collections::HashMap, path::Path};
 
 use gpui::{App, EntityId, Global};
 use runode_protocol::{PaneLayout, PaneRect, SessionId, TabLayout, WindowLayout, WorkspaceLayout};
@@ -26,6 +26,7 @@ pub(super) struct WindowInput<'a, P> {
 
 pub(super) struct WorkspaceInput<'a, P> {
     pub(super) name: String,
+    pub(super) dir: &'a Path,
     pub(super) active: usize,
     pub(super) tabs: Vec<TabInput<'a, P>>,
 }
@@ -56,6 +57,7 @@ pub(super) fn report<P: Copy + PartialEq>(
                 .map(|((wi, workspace), index)| WorkspaceLayout {
                     index,
                     name: Some(workspace.name.clone()),
+                    dir: Some(workspace.dir.to_path_buf()),
                     active: wi == window.active,
                     tabs: workspace
                         .tabs
@@ -144,6 +146,7 @@ pub(super) fn current(cx: &mut App) -> Vec<WindowLayout> {
                 .iter()
                 .map(|workspace| WorkspaceInput {
                     name: workspace.name.to_string(),
+                    dir: &workspace.dir,
                     active: workspace.active,
                     tabs: workspace.tabs.iter().map(|tab| TabInput { root: &tab.root, focused: tab.focused }).collect(),
                 })
@@ -193,6 +196,7 @@ mod tests {
             active: 0,
             workspaces: vec![WorkspaceInput {
                 name: "app".into(),
+                dir: Path::new("/Users/me/app"),
                 active: 0,
                 tabs: vec![TabInput { root: &root, focused: 3 }],
             }],
@@ -229,7 +233,8 @@ mod tests {
     fn windows_are_numbered_by_opening_order_and_mark_the_front() {
         let a = Node::Leaf(1);
         let b = Node::Leaf(2);
-        let one_tab = |name: &str, root| WorkspaceInput { name: name.into(), active: 0, tabs: vec![root] };
+        let one_tab =
+            |name: &str, root| WorkspaceInput { name: name.into(), dir: Path::new("/"), active: 0, tabs: vec![root] };
         // 后开的窗口排在前面给，序号仍按打开的先后。
         let windows = vec![
             WindowInput {
@@ -263,9 +268,15 @@ mod tests {
             front: true,
             active: 1,
             workspaces: vec![
-                WorkspaceInput { name: "a".into(), active: 0, tabs: vec![TabInput { root: &other, focused: 9 }] },
+                WorkspaceInput {
+                    name: "a".into(),
+                    dir: Path::new("/Users/me/a"),
+                    active: 0,
+                    tabs: vec![TabInput { root: &other, focused: 9 }],
+                },
                 WorkspaceInput {
                     name: "b".into(),
+                    dir: Path::new("/Users/me/b"),
                     active: 0,
                     tabs: vec![TabInput { root: &shown, focused: 1 }, TabInput { root: &background, focused: 2 }],
                 },
@@ -274,6 +285,9 @@ mod tests {
         let report = report(windows, |pane| Some(id(pane)));
         let workspaces = &report[0].workspaces;
         assert_eq!(workspaces.iter().map(|w| (w.index, w.active)).collect::<Vec<_>>(), [(1, false), (2, true)]);
+        // 每个工作区带着自己的目录。
+        let dirs: Vec<_> = workspaces.iter().map(|w| w.dir.clone()).collect();
+        assert_eq!(dirs, [Some("/Users/me/a".into()), Some("/Users/me/b".into())]);
         let tabs = &workspaces[1].tabs;
         assert_eq!(tabs.iter().map(|t| (t.index, t.active)).collect::<Vec<_>>(), [(1, true), (2, false)]);
         // 后台标签的分屏也按比例给出位置，焦点照样标出来。

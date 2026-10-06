@@ -410,11 +410,11 @@ fn layout(id: SessionId) -> Vec<WindowLayout> {
     let rect = PaneRect { x: 0, y: 0, width: PaneRect::EXTENT, height: PaneRect::EXTENT };
     let pane = PaneLayout { index: 1, id, rect, focused: true };
     let tab = TabLayout { index: 1, active: true, panes: vec![pane] };
-    let workspace = WorkspaceLayout { index: 1, name: None, active: true, tabs: vec![tab] };
+    let workspace = WorkspaceLayout { index: 1, name: None, dir: None, active: true, tabs: vec![tab] };
     vec![WindowLayout { index: 1, front: true, workspaces: vec![workspace] }]
 }
 
-/// `Open`、`Reveal`、`Layout` 包成 `UiRequest` 转给界面的连接，原样带着请求方的 `req`；界面的
+/// `Open`、`OpenWorkspace`、`Reveal`、`Layout` 包成 `UiRequest` 转给界面的连接，原样带着请求方的 `req`；界面的
 /// `UiReply` 原样转回请求方。别的连接冒充界面回话不算。
 #[test]
 fn window_requests_go_to_the_desktop_connection() {
@@ -427,6 +427,12 @@ fn window_requests_go_to_the_desktop_connection() {
     let forwarded = answer_ui(&mut desktop, |_| HostMsg::Opened { req: 4, id: SessionId(9) });
     assert_eq!(forwarded, open);
     assert_eq!(cli.reply(), HostMsg::Opened { req: 4, id: SessionId(9) });
+
+    let open = ClientMsg::OpenWorkspace { req: 7, dir, focus: false };
+    cli.send(&open);
+    let forwarded = answer_ui(&mut desktop, |_| HostMsg::Opened { req: 7, id: SessionId(10) });
+    assert_eq!(forwarded, open);
+    assert_eq!(cli.reply(), HostMsg::Opened { req: 7, id: SessionId(10) });
 
     cli.send(&ClientMsg::Reveal { req: 5, id: SessionId(9) });
     let HostMsg::UiRequest { ui, request } = desktop.reply() else { panic!("expected a ui request") };

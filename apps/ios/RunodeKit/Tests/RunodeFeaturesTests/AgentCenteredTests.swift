@@ -31,45 +31,89 @@ private func readScreens(_ sent: [ClientMsg]) -> [SessionId] {
     }
 }
 
+private func workspace(_ index: UInt32, _ name: String, tabs: [[SessionId]], activeTab: Int = 0) -> WorkspaceLayout {
+    WorkspaceLayout(
+        index: index, name: name, dir: "/Users/ethan/\(name)",
+        tabs: tabs.enumerated().map { ti, panes in
+            TabLayout(
+                index: UInt32(ti + 1), active: ti == activeTab,
+                panes: panes.enumerated().map { pi, id in PaneLayout(index: UInt32(pi + 1), id: id, focused: pi == 0) })
+        })
+}
+
 @MainActor
-@Suite struct SessionGroupingTests {
+@Suite struct SessionSectionTests {
     let link = FakeLink()
 
-    @Test func waitingComesFirstThenWorkingThenTheRest() {
+    func model(_ sessions: [SessionInfo]) -> SessionListModel {
         let model = SessionListModel(machine: machineRecord(), link: link)
         model.handle(.ready(generation: 1))
+        model.handle(.message(.sessionList(sessions)))
+        return model
+    }
+
+    /// 连上后连同列表一起问布局，编号固定是 0。
+    @Test func asksForTheLayoutWithTheList() {
+        _ = model([])
+        #expect(link.sent.prefix(2) == [.listSessions, .layout(req: 0)])
+    }
+
+    /// 按工作区分节，节内按标签、分屏的先后；不在任何窗口里的放在最后的后台一节。
+    @Test func sessionsAreGroupedByWorkspace() {
+        let background = SessionId("44444444444444444444444444444444")!
+        let model = model([info(plain, nil), info(working, .working), info(waiting, .blocked), info(background, nil)])
         model.handle(
             .message(
-                .sessionList([
-                    info(plain, nil), info(working, .working), info(waiting, .blocked),
-                    info(SessionId("44444444444444444444444444444444")!, .idle),
-                    // 退出了的不再算等回答。
-                    info(SessionId("55555555555555555555555555555555")!, .blocked, exited: true),
-                ])))
+                .layout(
+                    req: 0,
+                    windows: [
+                        WindowLayout(
+                            index: 1, front: true,
+                            workspaces: [
+                                workspace(1, "runode", tabs: [[waiting], [plain]], activeTab: 1),
+                                workspace(2, "blog", tabs: [[working]]),
+                                // 列表里还没有的会话不出现，没有会话的工作区也不出现。
+                                workspace(3, "empty", tabs: [[SessionId("66666666666666666666666666666666")!]]),
+                            ])
+                    ])))
         let sections = model.sections
-        #expect(sections.map(\.group) == [.waiting, .working, .other])
-        #expect(sections[0].sessions.map(\.id) == [waiting])
+        #expect(sections.map(\.id) == [.workspace(window: 1, index: 1), .workspace(window: 1, index: 2), .background])
+        #expect(sections[0].sessions.map(\.id) == [waiting, plain])
+        #expect(sections[0].name == "runode")
+        #expect(sections[0].dir == "/Users/ethan/runode")
+        #expect(sections[0].window == nil)
+        // 在工作区里新开终端挨着当前标签里有焦点的分屏。
+        #expect(sections[0].anchor == plain)
         #expect(sections[1].sessions.map(\.id) == [working])
-        #expect(sections[2].sessions.count == 3)
-        // 组内按宿主给的先后。
-        #expect(sections[2].sessions.first?.id == plain)
+        #expect(sections[2].sessions.map(\.id) == [background])
+        #expect(sections[2].anchor == nil)
+        #expect(model.canCreateWorkspace)
     }
 
-    @Test func groupsFollowLiveAgentState() {
-        let model = SessionListModel(machine: machineRecord(), link: link)
-        model.handle(.ready(generation: 1))
-        model.handle(.message(.sessionList([info(working, .working)])))
-        #expect(model.sections.map(\.group) == [.working])
-        model.handle(.message(.meta(id: working, meta: SessionMeta(agent: Agent(kind: AgentKind("codex"), state: .blocked)))))
-        #expect(model.sections.map(\.group) == [.waiting])
-        #expect(model.sections.isEmpty == false)
+    /// 开着几个窗口时节上标出第几个窗口。
+    @Test func severalWindowsAreTold() {
+        let model = model([info(plain, nil), info(working, .working)])
+        model.handle(
+            .message(
+                .layout(
+                    req: 0,
+                    windows: [
+                        WindowLayout(index: 2, workspaces: [workspace(1, "b", tabs: [[working]])]),
+                        WindowLayout(index: 1, workspaces: [workspace(1, "a", tabs: [[plain]])]),
+                    ])))
+        #expect(model.sections.map(\.window) == [1, 2])
+        #expect(model.sections.map(\.name) == ["a", "b"])
     }
 
-    @Test func emptyGroupsAreLeftOut() {
-        let model = SessionListModel(machine: machineRecord(), link: link)
-        model.handle(.ready(generation: 1))
-        model.handle(.message(.sessionList([info(plain, nil)])))
-        #expect(model.sections.map(\.group) == [.other])
+    /// 电脑上没有 app 的界面时宿主回 `Error`：都放进后台，也不能新建工作区。
+    @Test func withoutTheAppEverythingIsInTheBackground() {
+        let model = model([info(plain, nil), info(working, .working)])
+        let window = WindowLayout(index: 1, workspaces: [workspace(1, "a", tabs: [[plain]])])
+        model.handle(.message(.layout(req: 0, windows: [window])))
+        model.handle(.message(.error(req: 0, id: nil, message: "there is no runode window")))
+        #expect(model.sections.map(\.id) == [.background])
+        #expect(model.sections[0].sessions.map(\.id) == [plain, working])
+        #expect(!model.canCreateWorkspace)
     }
 }
 

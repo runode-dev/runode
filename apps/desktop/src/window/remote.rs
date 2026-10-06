@@ -1,10 +1,10 @@
-//! 别的进程经宿主请 app 办的事（`runode open`、`runode focus`，以及命令行问各个终端摆在哪）：在
-//! 某个终端旁边开新终端，切到某个终端，回答布局（见 `layout_report`）。宿主把请求包成
-//! `HostMsg::UiRequest` 经连接转过来（见 `host_client::serve_ui`），这里在主线程上按会话找到它
-//! 所在的窗口和分屏再办，用 `Link::ui_reply` 回话。终端里的程序读写剪贴板也这样转过来，见
-//! `clipboard`。
+//! 别的进程经宿主请 app 办的事（`runode open`、`runode focus`，命令行问各个终端摆在哪，以及手机
+//! 新建工作区）：在某个终端旁边开新终端，切到某个终端，回答布局（见 `layout_report`），在最前面
+//! 那个窗口里开一个某个目录的 workspace（已经有了就用它）。宿主把请求包成 `HostMsg::UiRequest`
+//! 经连接转过来（见 `host_client::serve_ui`），这里在主线程上按会话找到它所在的窗口和分屏再办，
+//! 用 `Link::ui_reply` 回话。终端里的程序读写剪贴板也这样转过来，见 `clipboard`。
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use futures::StreamExt as _;
 use gpui::{App, Context, EntityId, Window, WindowHandle};
@@ -66,6 +66,25 @@ fn handle(request: ClientMsg, cx: &mut App) -> HostMsg {
                     HostMsg::Opened { req, id }
                 }
                 None => fail(req, "could not start a terminal".into()),
+            }
+        }
+        ClientMsg::OpenWorkspace { req, dir, focus } => {
+            let Some(window) = front_window(cx) else {
+                return fail(req, "there is no runode window to open it in".into());
+            };
+            if !dir.is_absolute() || !dir.is_dir() {
+                return fail(req, format!("{} is not a directory", dir.display()));
+            }
+            let opened = window.update(cx, |view, window, cx| view.open_workspace_at(&dir, focus, window, cx));
+            match opened {
+                Ok(Ok((pane, id))) => {
+                    if focus {
+                        reveal(window, pane, cx);
+                    }
+                    HostMsg::Opened { req, id }
+                }
+                Ok(Err(message)) => fail(req, message.into()),
+                Err(_) => fail(req, "the runode window went away".into()),
             }
         }
         ClientMsg::Reveal { req, id } => match find_session(id, cx) {
@@ -162,5 +181,58 @@ impl WindowView {
         self.save(cx);
         cx.notify();
         session
+    }
+
+    /// 切到或者新建目录是 `dir` 的 workspace，返回它当前标签里有焦点的分屏和那个分屏的会话。已经有
+    /// 这个目录的 workspace 时不新建（目录按规范化后的比，`dir` 经过符号链接也认得出）；那个分屏还没
+    /// 开会话时在这个 workspace 末尾另开一个标签。没有时在 `dir` 开一个终端，新 workspace 插在当前
+    /// workspace 后面，和菜单里新建的一样。不切过去（`focus` 为假）时当前的 workspace 不动，新终端按
+    /// 当前显示的分屏的尺寸现在就启动 shell，别的进程马上就能往里打字；切过去时由调用方 `reveal` 它。
+    fn open_workspace_at(
+        &mut self,
+        dir: &Path,
+        focus: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Result<(EntityId, SessionId), &'static str> {
+        let canonical = |path: &Path| std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+        let dir = canonical(dir);
+        let dir = dir.as_path();
+        if let Some(wi) = self.workspaces.iter().position(|workspace| canonical(&workspace.dir) == dir) {
+            let workspace = &self.workspaces[wi];
+            let tab = &workspace.tabs[workspace.active];
+            if let Some(session) = tab.focused_view().read(cx).session_id() {
+                return Ok((tab.focused, session));
+            }
+            // 恢复布局时看不见的终端要等显示出来才开会话，见 `TerminalView::deferred`。
+            let view = self.spawn_terminal(Some(dir), window, cx).ok_or("could not start a terminal")?;
+            let session = view.read(cx).session_id().ok_or("could not start a terminal")?;
+            let pane = view.entity_id();
+            let size = self.tab().focused_view().read(cx).size();
+            let tab = self.single_pane_tab(view.clone(), window, cx);
+            self.workspaces[wi].tabs.push(tab);
+            view.update(cx, |view, cx| view.start_at(size, window, cx));
+            self.sync_visibility(window, cx);
+            self.save(cx);
+            cx.notify();
+            return Ok((pane, session));
+        }
+        let view = self.spawn_terminal(Some(dir), window, cx).ok_or("could not start a terminal")?;
+        // `spawn` 建的视图当场开好了会话。
+        let session = view.read(cx).session_id().ok_or("could not start a terminal")?;
+        let pane = view.entity_id();
+        let ix = self.active + 1;
+        if focus {
+            self.insert_workspace(ix, dir.to_path_buf(), view, window, cx);
+        } else {
+            let size = self.tab().focused_view().read(cx).size();
+            self.add_workspace(ix, dir.to_path_buf(), view.clone(), window, cx);
+            view.update(cx, |view, cx| view.start_at(size, window, cx));
+            // 开在不显示的 workspace 里，到时丢掉界面这份 VT。
+            self.sync_visibility(window, cx);
+        }
+        self.save(cx);
+        cx.notify();
+        Ok((pane, session))
     }
 }
