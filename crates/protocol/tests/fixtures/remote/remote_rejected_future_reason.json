@@ -1,0 +1,7 @@
+{
+  "type": "remote_rejected",
+  "reason": {
+    "kind": "some_future_reason",
+    "detail": "ignored"
+  }
+}

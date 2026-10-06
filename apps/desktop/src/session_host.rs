@@ -68,6 +68,8 @@ static READY_CHANGED: Condvar = Condvar::new();
 static MODE: Mutex<Mode> = Mutex::new(Mode::InProcess);
 /// 跑在 app 里的宿主，用到时才建。
 static IN_PROCESS: OnceLock<Host> = OnceLock::new();
+/// 跑在 app 里的宿主的远程访问，第一次要开时才建，见 `configure`。
+static REMOTE: Mutex<Option<runode_remote_access::Service>> = Mutex::new(None);
 /// `start` 的后台线程读到的配置，见 `take_config`。
 static LOADED_CONFIG: Mutex<Option<Config>> = Mutex::new(None);
 /// 要在界面上告诉用户的事（比如旧版本的宿主还活着），见 `take_notice`。
@@ -164,10 +166,25 @@ pub fn take_notice() -> Option<Notice> {
 
 /// 把配置里宿主关心的部分告诉它：主题（各个会话在输出流里标出换主题的位置，视图到那里再换）
 /// 和要不要把命令记进历史文件。和宿主现在的一样时它什么都不做；重连后 `Link` 自己补发。
+///
+/// 宿主跑在 app 里时，远程访问的监听也开在 app 里，在这里按配置开关；单独跑的宿主自己读配置，
+/// 见 `remote_access`。
 pub fn configure(config: &Config) {
     let link = link();
     link.send(ClientMsg::SetTheme { settings: config.term_settings() });
     link.send(ClientMsg::SetOptions { record_history: config.command_suggestions });
+    let in_app = mode() == Mode::InProcess;
+    let port = if in_app { crate::remote_access::wanted_port(config) } else { None };
+    let mut remote = REMOTE.lock().unwrap_or_else(PoisonError::into_inner);
+    if remote.is_none()
+        && port.is_some()
+        && let Some(host) = IN_PROCESS.get()
+    {
+        *remote = crate::remote_access::service(host);
+    }
+    if let Some(service) = remote.as_ref() {
+        service.set_port(port);
+    }
 }
 
 /// 宿主转给界面去办的请求（`runode open`、`runode focus` 这类），带着回话用的编号，办完了用

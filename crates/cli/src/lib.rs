@@ -1,16 +1,18 @@
-//! 命令行前端：`runode list`、`read`、`send`、`wait`、`open`、`kill`、`focus` 和 `setup`。经宿主的
-//! Unix socket 按 `runode_protocol` 说话，不碰终端仿真和界面。
+//! 命令行前端：`runode list`、`read`、`send`、`wait`、`open`、`kill`、`focus`、`setup` 和 `remote`。
+//! 经宿主的 Unix socket 按 `runode_protocol` 说话，不碰终端仿真和界面；`remote`（给手机配对远程
+//! 访问、列出和撤销配对过的设备）不经宿主，读写 `runode_remote_access` 管的文件。
 //!
 //! 和桌面 app 是同一个可执行文件：带子命令时走这里（见 `wants_cli`），不带时开窗口。在 runode
 //! 的终端里跑时，宿主设的环境变量告诉它连哪个 socket（`runode_protocol::ENV_SOCKET`）、自己在
 //! 哪个会话里（`runode_protocol::ENV_SESSION`），所以 agent 能在自己的终端里调度别的终端。
 //!
 //! 命令的解析在 `args`，连宿主和收发消息在 `client`，按写法找会话在 `select`，各个命令在
-//! `commands`，给 agent 装使用说明在 `setup`。
+//! `commands`，给 agent 装使用说明在 `setup`，远程访问在 `remote`。
 
 mod args;
 mod client;
 mod commands;
+mod remote;
 mod select;
 mod setup;
 
@@ -47,6 +49,8 @@ pub struct Env {
     pub build: String,
     /// 家目录：显示目录时缩成 `~`，`setup` 往这里装使用说明。
     pub home: Option<PathBuf>,
+    /// runode 的各个目录，`remote` 在这里找远程访问的文件。
+    pub dirs: runode_paths::Dirs,
 }
 
 impl Env {
@@ -58,7 +62,8 @@ impl Env {
             socket: var(runode_protocol::ENV_SOCKET).map(PathBuf::from).or_else(|| dirs.host_socket_file()),
             session: var(runode_protocol::ENV_SESSION).map(|value| value.to_string_lossy().into_owned()),
             build: build.into(),
-            home: dirs.home,
+            home: dirs.home.clone(),
+            dirs,
         }
     }
 }

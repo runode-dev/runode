@@ -15,6 +15,7 @@ mod keys;
 mod menus;
 mod persist;
 mod prespawn;
+mod remote_access;
 mod scrollbar;
 mod search_bar;
 mod session_host;

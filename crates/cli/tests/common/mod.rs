@@ -57,7 +57,7 @@ impl FakeHost {
         });
         let home = dir.join("home");
         std::fs::create_dir_all(&home).unwrap();
-        let env = Env { socket: Some(socket), session: None, build: "test".into(), home: Some(home) };
+        let env = Env { socket: Some(socket), build: "test".into(), home: Some(home), ..Env::default() };
         Self { env, received, dir }
     }
 

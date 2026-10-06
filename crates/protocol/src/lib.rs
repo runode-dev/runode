@@ -4,14 +4,17 @@
 //! （`message`）编成 JSON。同一条连接上的帧按顺序到达，改 VT 状态的操作（改尺寸、换主题）
 //! 由宿主在输出流里插一条控制消息标出位置，两边的 VT 在同一个位置做同样的事，才不会分叉。
 //!
+//! 手机这类别的设备经网络连上来时，先过一段门禁才说这些消息，门禁的消息和整个流程见 `remote`。
+//!
 //! 这里只放数据和编解码，只依赖 `runode_shared_types` 和 serde；终端仿真和 PTY 都不碰。
 
 pub mod frame;
 pub mod handoff;
 pub mod layout;
 pub mod message;
+pub mod remote;
 
-pub use frame::{Frame, FrameError, FrameKind, MAX_PAYLOAD, read_frame, write_frame};
+pub use frame::{Frame, FrameError, FrameKind, MAX_PAYLOAD, read_frame, read_frame_limited, write_frame};
 pub use handoff::{
     HANDOFF_FORMAT, HandoffPart, HandoffPartError, OLDEST_READABLE_HANDOFF_FORMAT, RedactorState, ReportToken,
     RunningCommand, decode_part, encode_part,

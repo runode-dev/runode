@@ -662,6 +662,25 @@ fn an_idle_standalone_host_stops() {
     common::host().listen(&socket, &dir.join("host.lock")).unwrap();
 }
 
+/// `set_stay_up` 时没有会话也没有连接也不退出；改回去以后空闲从那一刻起算，到时照常退出。
+#[test]
+fn a_host_told_to_stay_up_does_not_stop_when_idle() {
+    const IDLE: Duration = Duration::from_millis(200);
+    let host: Host = host();
+    host.set_stay_up(true);
+    let stopped = {
+        let (tx, rx) = mpsc::channel();
+        let host = host.clone();
+        thread::spawn(move || tx.send(host.run_until_idle(IDLE)));
+        rx
+    };
+    assert!(stopped.recv_timeout(IDLE * 4).is_err());
+    let released = Instant::now();
+    host.set_stay_up(false);
+    assert_eq!(stopped.recv_timeout(WAIT), Ok(Stopped::Idle));
+    assert!(released.elapsed() >= IDLE, "stopped {:?} after staying up ended", released.elapsed());
+}
+
 /// 退出以后不再接新连接：`connect_pair` 返回错误。
 #[test]
 fn a_stopped_host_takes_no_connections() {

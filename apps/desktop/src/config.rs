@@ -83,7 +83,7 @@ fn system_is_dark(cx: &App) -> bool {
 }
 
 /// 所有可能的配置文件的修改时间。还不存在的文件也算在内，新建配置文件同样会触发重载。
-fn watch_stamp(config: &Config) -> Vec<(PathBuf, Option<SystemTime>)> {
+pub(crate) fn watch_stamp(config: &Config) -> Vec<(PathBuf, Option<SystemTime>)> {
     config
         .watch_paths()
         .into_iter()

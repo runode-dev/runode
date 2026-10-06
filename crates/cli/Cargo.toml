@@ -10,11 +10,15 @@ publish.workspace = true
 runode-paths.workspace = true
 runode-protocol.workspace = true
 runode-shared-types.workspace = true
+# `remote` 命令：配对口令、设备表和监听方的状态，以及配对 URI 里的本机地址。
+runode-remote-access.workspace = true
 anyhow.workspace = true
 # `wait --for text` 按正则找屏幕上的行。
 regex.workspace = true
 # `list --json` 的输出。
 serde_json.workspace = true
+# `remote pair` 在终端里画配对的二维码。
+qrcode.workspace = true
 
 [lints]
 workspace = true

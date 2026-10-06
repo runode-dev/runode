@@ -75,6 +75,10 @@ pub struct Config {
     /// 终端会话放在单独一个进程（`runode --host`）里，退出 app 后会话还在，下次打开接着用；关着时
     /// 会话跑在 app 进程里，跟着 app 一起结束。只在 app 启动时读，改了下次启动才生效。
     pub terminal_host: bool,
+    /// 让手机这类别的设备经网络连上宿主（远程访问）。改了几秒内生效，不用重启 app。
+    pub remote_access: bool,
+    /// 远程访问监听的 TCP 端口。
+    pub remote_access_port: u16,
     /// 界面语言，是 locales 里的某个语言标签；`None` 表示跟随系统。
     pub language: Option<String>,
     /// agent 等用户回答或者干完了、用户又没在看那个分屏时，发系统通知。
@@ -127,6 +131,9 @@ impl Default for Config {
             command_completions: true,
             command_highlighting: true,
             terminal_host: false,
+            remote_access: false,
+            // 和 `runode_protocol::remote::DEFAULT_PORT` 一样；config 不依赖 protocol，桌面的测试对着两边。
+            remote_access_port: 7866,
             language: None,
             agent_notifications: true,
             agent_notifications_exclude: Vec::new(),

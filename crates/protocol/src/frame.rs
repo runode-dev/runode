@@ -65,7 +65,7 @@ impl Frame {
 #[derive(Debug)]
 pub enum FrameError {
     Io(io::Error),
-    /// 载荷超过 `MAX_PAYLOAD`；读的时候是对面声明的长度。
+    /// 载荷超过 `MAX_PAYLOAD`（`read_frame_limited` 时是给的上限）；读的时候是对面声明的长度。
     TooLong(u64),
     /// 不认识的帧类型，对面多半是别的协议版本。
     UnknownKind(u8),
@@ -77,7 +77,7 @@ impl std::fmt::Display for FrameError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Io(err) => write!(f, "frame i/o failed: {err}"),
-            Self::TooLong(len) => write!(f, "frame payload of {len} bytes exceeds {MAX_PAYLOAD}"),
+            Self::TooLong(len) => write!(f, "frame payload of {len} bytes is over the limit"),
             Self::UnknownKind(kind) => write!(f, "unknown frame kind {kind}"),
             Self::Truncated => write!(f, "connection closed in the middle of a frame"),
         }
@@ -102,12 +102,18 @@ impl From<io::Error> for FrameError {
 /// 读一帧。连接在两帧之间正常关闭时返回 `None`；帧读到一半断了、声明的载荷超长或者类型
 /// 不认识时报错，这时连接上的数据已经对不齐了，只能断开。
 pub fn read_frame(reader: &mut impl Read) -> Result<Option<Frame>, FrameError> {
+    read_frame_limited(reader, MAX_PAYLOAD)
+}
+
+/// 同 `read_frame`，但载荷超过 `limit` 就报 `FrameError::TooLong`（`limit` 比 `MAX_PAYLOAD` 大时
+/// 按 `MAX_PAYLOAD`）。对面还没证明自己是谁时用小的上限，见 `remote::GATE_MAX_PAYLOAD`。
+pub fn read_frame_limited(reader: &mut impl Read, limit: u32) -> Result<Option<Frame>, FrameError> {
     let mut header = [0u8; HEADER_LEN];
     if !read_full(reader, &mut header)? {
         return Ok(None);
     }
     let len = u32::from_le_bytes([header[0], header[1], header[2], header[3]]);
-    if len > MAX_PAYLOAD {
+    if len > limit.min(MAX_PAYLOAD) {
         return Err(FrameError::TooLong(u64::from(len)));
     }
     let kind = FrameKind::from_u8(header[4]).ok_or(FrameError::UnknownKind(header[4]))?;

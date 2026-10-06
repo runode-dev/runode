@@ -1,0 +1,24 @@
+[package]
+name = "runode-remote-access"
+description = "runode's remote access: a TLS 1.3 listener with a pairing and signature gate that bridges phones to the terminal host, plus pairing codes, the paired device table and Bonjour discovery"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+runode-paths.workspace = true
+runode-protocol.workspace = true
+anyhow.workspace = true
+# 枚举本机地址（getifaddrs）、poll、IPv6 监听设 IPV6_V6ONLY。
+libc.workspace = true
+serde.workspace = true
+# 设备表、配对口令和监听方状态的文件是 JSON。
+serde_json.workspace = true
+tracing.workspace = true
+rustls.workspace = true
+rcgen.workspace = true
+ring.workspace = true
+
+[lints]
+workspace = true

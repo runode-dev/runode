@@ -1,0 +1,6 @@
+{
+  "type": "remote_rejected",
+  "reason": {
+    "kind": "unknown_device"
+  }
+}

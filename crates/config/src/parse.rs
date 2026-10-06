@@ -50,6 +50,7 @@ pub(crate) const KEYS: &[&[&str]] = &[
         "command-highlighting",
     ],
     &["terminal-host"],
+    &["remote-access", "remote-access-port"],
     &["agent-notifications", "agent-notifications-exclude", "agent-done-sound", "agent-blocked-sound"],
     &["config-file"],
     &["keybind"],
@@ -254,6 +255,16 @@ impl Config {
             }
             "terminal-host" => {
                 self.terminal_host = if empty { defaults.terminal_host } else { parse_bool(value)? };
+            }
+            "remote-access" => {
+                self.remote_access = if empty { defaults.remote_access } else { parse_bool(value)? };
+            }
+            "remote-access-port" => {
+                self.remote_access_port = if empty {
+                    defaults.remote_access_port
+                } else {
+                    value.trim().parse().ok().filter(|&port| port > 0).ok_or("expected a port from 1 to 65535")?
+                };
             }
             "agent-notifications" => {
                 self.agent_notifications = if empty { defaults.agent_notifications } else { parse_bool(value)? };
@@ -542,6 +553,22 @@ unknown-key = whatever
         assert_eq!(load(&["preview-font-size = 12.5"]).preview_font_size, 12.5);
         assert_eq!(load(&["preview-font-size = 15\npreview-font-size = 0"]).preview_font_size, 15.);
         assert_eq!(load(&["preview-font-size = 15\npreview-font-size ="]).preview_font_size, 13.);
+    }
+
+    #[test]
+    fn remote_access_is_off_by_default_and_takes_a_port() {
+        let d = Config::default();
+        assert_eq!((d.remote_access, d.remote_access_port), (false, 7866));
+        let config = load(&["remote-access = true\nremote-access-port = 9000"]);
+        assert_eq!((config.remote_access, config.remote_access_port), (true, 9000));
+        // 不是端口的跳过，保留前面的值；值为空回到默认。
+        for bad in ["0", "65536", "port"] {
+            assert_eq!(
+                load(&[&format!("remote-access-port = 9000\nremote-access-port = {bad}")]).remote_access_port,
+                9000
+            );
+        }
+        assert_eq!(load(&["remote-access-port = 9000\nremote-access-port ="]).remote_access_port, 7866);
     }
 
     #[test]

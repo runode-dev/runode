@@ -1,0 +1,13 @@
+{
+  "uri": "runode://pair?v=1&name=Ethan%20%E7%9A%84%20MacBook%20Pro&fp=EBESExQVFhcYGRobHB0eHyAhIiMkJSYnKCkqKywtLi8&secret=oKGio6SlpqeoqaqrrK2ur7CxsrO0tba3uLm6u7y9vr8&port=7866&addr=192.168.1.20,100.101.102.103,fd7a:115c:a1e0::1&exp=1790000000",
+  "host_name": "Ethan 的 MacBook Pro",
+  "fingerprint": "EBESExQVFhcYGRobHB0eHyAhIiMkJSYnKCkqKywtLi8",
+  "secret": "oKGio6SlpqeoqaqrrK2ur7CxsrO0tba3uLm6u7y9vr8",
+  "port": 7866,
+  "addrs": [
+    "192.168.1.20",
+    "100.101.102.103",
+    "fd7a:115c:a1e0::1"
+  ],
+  "expires_at": 1790000000
+}

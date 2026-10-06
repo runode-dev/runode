@@ -24,6 +24,8 @@ runode-prompt-highlight.workspace = true
 runode-config.workspace = true
 # 预览栏读文件、判断类型和语法高亮。
 runode-preview.workspace = true
+# 远程访问的监听跟着宿主活：宿主跑在 app 里时由 app 开，单独跑时由 `runode --host` 开。
+runode-remote-access.workspace = true
 gpui.workspace = true
 # 不开 font-kit 时，gpui_macos 退回到空实现的文字系统，一个字形都画不出来。
 gpui_platform = { workspace = true, features = ["font-kit"] }

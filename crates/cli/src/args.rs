@@ -1,6 +1,6 @@
 //! 解析命令行参数。选项可以写在位置参数前后，`--` 之后的都当位置参数。
 
-use std::{path::PathBuf, time::Duration};
+use std::{net::IpAddr, path::PathBuf, time::Duration};
 
 use runode_protocol::Placement;
 use runode_shared_types::input::parse_keys;
@@ -92,6 +92,16 @@ commands:
                               teach the agent to use runode: installs a skill
                               in ~/.claude/skills/runode, or a section in
                               ~/.codex/AGENTS.md; --print shows it instead
+  remote pair [--addr ADDR]...
+                              pair a phone for remote access: shows a QR code
+                              and its link, valid for 5 minutes, and waits for
+                              the phone; --addr also offers ADDR (say
+                              127.0.0.1 for a simulator on this Mac). Needs
+                              remote-access = true in the config
+  remote devices [--json]     list the paired phones
+  remote revoke DEVICE        unpair a phone (an id or a unique prefix of it,
+                              as `runode remote devices` shows); it is
+                              disconnected within seconds
   help                        show this help
   version                     show the version
 
@@ -145,6 +155,17 @@ pub(crate) enum Command {
     Setup {
         target: SetupTarget,
         print: bool,
+    },
+    /// 给手机配对远程访问。`addrs` 是除了本机地址以外另外放进配对 URI 的地址，排在前面。
+    RemotePair {
+        addrs: Vec<IpAddr>,
+    },
+    RemoteDevices {
+        json: bool,
+    },
+    /// 撤销一台配对过的设备；`device` 是它的标识或者标识的前缀。
+    RemoteRevoke {
+        device: String,
     },
 }
 
@@ -225,6 +246,10 @@ pub(crate) fn parse(args: &[String]) -> Result<Command, String> {
                 }
             }
             "--near" => flags.near = Some(Selector::parse(value(&mut rest, arg)?)?),
+            "--addr" => {
+                let addr = value(&mut rest, arg)?;
+                flags.addrs.push(addr.parse().map_err(|_| format!("--addr takes an IP address, not {addr}"))?);
+            }
             "--cwd" => flags.cwd = Some(value(&mut rest, arg)?.into()),
             "--focus" => flags.focus = true,
             // 单独一个 `-` 是位置参数（`send` 从标准输入读）。
@@ -311,6 +336,24 @@ pub(crate) fn parse(args: &[String]) -> Result<Command, String> {
             };
             Command::Setup { target, print: std::mem::take(&mut flags.print) }
         }
+        "remote" => {
+            let (what, words) = words.split_first().ok_or("remote needs pair, devices or revoke")?;
+            match what.as_str() {
+                "pair" => {
+                    no_more(words, 0, "remote pair")?;
+                    Command::RemotePair { addrs: std::mem::take(&mut flags.addrs) }
+                }
+                "devices" => {
+                    no_more(words, 0, "remote devices")?;
+                    Command::RemoteDevices { json: std::mem::take(&mut flags.json) }
+                }
+                "revoke" => {
+                    no_more(words, 1, "remote revoke")?;
+                    Command::RemoteRevoke { device: words.first().ok_or("remote revoke needs a DEVICE")?.clone() }
+                }
+                other => return Err(format!("remote knows pair, devices and revoke, not {other}")),
+            }
+        }
         other => return Err(format!("unknown command {other}")),
     };
     flags.unused().map_or(Ok(command), |flag| Err(format!("{name} does not take {flag}")))
@@ -336,6 +379,7 @@ struct Flags {
     near: Option<Selector>,
     cwd: Option<PathBuf>,
     focus: bool,
+    addrs: Vec<IpAddr>,
 }
 
 impl Flags {
@@ -356,6 +400,7 @@ impl Flags {
             (self.near.is_some(), "--near"),
             (self.cwd.is_some(), "--cwd"),
             (self.focus, "--focus"),
+            (!self.addrs.is_empty(), "--addr"),
         ]
         .into_iter()
         .find_map(|(set, flag)| set.then_some(flag))
@@ -542,6 +587,23 @@ mod tests {
         assert!(parse("open --right --down").unwrap_err().contains("only one"));
         assert!(parse("kill").unwrap_err().contains("SESSION"));
         assert!(parse("focus --right").unwrap_err().contains("does not take"));
+    }
+
+    #[test]
+    fn remote_access_commands() {
+        assert_eq!(parse("remote pair"), Ok(Command::RemotePair { addrs: Vec::new() }));
+        assert_eq!(
+            parse("remote pair --addr 127.0.0.1 --addr ::1"),
+            Ok(Command::RemotePair { addrs: vec!["127.0.0.1".parse().unwrap(), "::1".parse().unwrap()] })
+        );
+        assert_eq!(parse("remote devices --json"), Ok(Command::RemoteDevices { json: true }));
+        assert_eq!(parse("remote revoke 0a1b"), Ok(Command::RemoteRevoke { device: "0a1b".into() }));
+        assert!(parse("remote").unwrap_err().contains("pair, devices or revoke"));
+        assert!(parse("remote frob").unwrap_err().contains("not frob"));
+        assert!(parse("remote revoke").unwrap_err().contains("DEVICE"));
+        assert!(parse("remote pair --addr nowhere").unwrap_err().contains("IP address"));
+        assert!(parse("remote devices --addr 127.0.0.1").unwrap_err().contains("does not take --addr"));
+        assert!(parse("remote pair extra").unwrap_err().contains("does not take extra"));
     }
 
     #[test]

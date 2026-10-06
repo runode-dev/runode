@@ -1,5 +1,5 @@
 //! 宿主单独一个进程跑时（`runode --host`）什么时候退出：没有会话也没有连接、持续一段时间后
-//! 自己退出，或者前端发来 `Shutdown`。
+//! 自己退出（`Host::set_stay_up` 时不因空闲退出），或者前端发来 `Shutdown`。
 
 use std::time::{Duration, Instant};
 
@@ -49,7 +49,7 @@ impl Host {
                 break reason;
             }
             // 锁的先后：拿着 `peers` 再拿 `registry`。
-            let quiet = peers.connection_count() == 0 && shared.registry().sessions.is_empty();
+            let quiet = !peers.stay_up && peers.connection_count() == 0 && shared.registry().sessions.is_empty();
             if quiet {
                 let since = *quiet_since.get_or_insert_with(Instant::now);
                 let since = since.max(peers.activity_at);
@@ -85,5 +85,19 @@ impl Host {
         }
         tracing::info!("the host stops: {reason:?}");
         reason
+    }
+
+    /// `stay_up` 时没有会话也没有连接也不算空闲，`run_until_idle` 不因为空闲返回（`Shutdown`、交接
+    /// 照旧）：比如开着远程访问、有配对过的手机，手机随时可能连上来开新会话。改回 false 时空闲从
+    /// 这一刻重新算起。
+    pub fn set_stay_up(&self, stay_up: bool) {
+        let mut peers = self.shared.peers();
+        if peers.stay_up == stay_up {
+            return;
+        }
+        peers.stay_up = stay_up;
+        peers.activity_at = Instant::now();
+        drop(peers);
+        self.shared.peers_changed.notify_all();
     }
 }

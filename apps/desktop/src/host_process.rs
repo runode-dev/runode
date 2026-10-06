@@ -1,7 +1,9 @@
 //! `runode --host`：终端宿主单独一个进程跑，由 app 拉起（见 `runode_host::launch`），app 退出后
 //! 会话照常跑着。只开宿主的 socket 等前端连上来，没有会话也没有连接、持续 `IDLE_EXIT` 后自己退出，
-//! 收到 `Shutdown` 时结束所有会话后退出。不碰 GPUI、配置、提前拉起 shell 和通知：主题、要不要记
-//! 命令历史由连上来的桌面告诉它。
+//! 收到 `Shutdown` 时结束所有会话后退出。不碰 GPUI、提前拉起 shell 和通知：主题、要不要记命令历史
+//! 由连上来的桌面告诉它。配置只读远程访问的两项，自己跟着配置文件开关监听（见
+//! `remote_access::follow_config`），app 关着时手机也连得上；开着远程访问、又有手机可能连上来
+//! （配对过的设备，或者正在配对）时不因空闲退出。
 //!
 //! `runode --host --take-over`（`take_over`）是升级时新版本的 app 拉起的新宿主：先接手 socket 上
 //! 旧宿主的会话和 socket，再照常跑。
@@ -40,7 +42,10 @@ pub fn run() -> i32 {
         tracing::info!("the host does not start: {err:#}");
         return 1;
     }
+    let remote = crate::remote_access::follow_config(&host);
     let stopped = host.run_until_idle(IDLE_EXIT);
+    // 先停远程访问再退出：交接时新宿主在等这个进程放开端口。
+    drop(remote);
     tracing::info!("host {} exits: {stopped:?}", std::process::id());
     0
 }
@@ -87,7 +92,10 @@ pub fn take_over() -> i32 {
             status.report(&HandoffStatus::took_over(report.sessions, report.replayed));
             // 关掉管道，app 不必等这个进程退出。
             drop(status);
+            // 旧宿主退出前还占着远程访问的端口和锁，这边开不了时隔一会儿再试，见 `runode_remote_access::Service`。
+            let remote = crate::remote_access::follow_config(&host);
             let stopped = host.run_until_idle(IDLE_EXIT);
+            drop(remote);
             tracing::info!("host {} exits: {stopped:?}", std::process::id());
             0
         }

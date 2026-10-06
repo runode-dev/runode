@@ -212,6 +212,9 @@ pub(crate) fn run(command: Command, env: &Env, out: &mut dyn Write, err: &mut dy
                 writeln!(out, "installed {}", path.display())?;
             }
         }
+        Command::RemotePair { addrs } => crate::remote::pair(env, &addrs, out)?,
+        Command::RemoteDevices { json } => crate::remote::devices(env, json, out)?,
+        Command::RemoteRevoke { device } => crate::remote::revoke(env, &device, out)?,
     }
     Ok(())
 }

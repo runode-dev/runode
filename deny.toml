@@ -1,6 +1,7 @@
 # cargo-deny 的配置，CI 里只跑 `cargo deny check bans`，用来守住 crate 的分层：
 # 界面框架只许 app（runode）直接依赖，终端仿真和 PTY 只许 runode-terminal 直接依赖，
-# 语法高亮只许 runode-preview 直接依赖，终端宿主只许 app 直接依赖。
+# 语法高亮只许 runode-preview 直接依赖，终端宿主只许 app 直接依赖，TLS 和密码学只许
+# runode-remote-access 直接依赖。
 # `wrappers` 列出的 crate 可以直接依赖被禁的 crate，其他 crate 直接依赖时报错；经由这些
 # crate 间接用到不算违规。
 
@@ -26,4 +27,8 @@ deny = [
     # two-face 打包的语法定义要和 syntect 配套，它也直接依赖 syntect。
     { crate = "syntect", wrappers = ["runode-preview", "two-face"], reason = "语法高亮只在 runode-preview 里，对外给与界面无关的高亮结果" },
     { crate = "two-face", wrappers = ["runode-preview"], reason = "语法高亮只在 runode-preview 里，对外给与界面无关的高亮结果" },
+    { crate = "rustls", wrappers = ["runode-remote-access"], reason = "远程访问的 TLS 只在 runode-remote-access 里，别的 crate 经它的接口用" },
+    { crate = "rcgen", wrappers = ["runode-remote-access"], reason = "远程访问的自签证书只在 runode-remote-access 里生成" },
+    # rustls、它的证书校验（rustls-webpki）和 rcgen 拿 ring 当密码学后端，也直接依赖它。
+    { crate = "ring", wrappers = ["runode-remote-access", "rustls", "rustls-webpki", "rcgen"], reason = "远程访问的签名校验和随机数只在 runode-remote-access 里" },
 ]

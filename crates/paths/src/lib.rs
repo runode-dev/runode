@@ -3,7 +3,8 @@
 //! runode 自己的东西在所有系统上都放在同一个根目录：`$XDG_CONFIG_HOME/runode`，没设时
 //! `~/.config/runode`。配置文件和要留着的数据（窗口布局的存档、命令历史）直接放在根目录，
 //! 随时能重新生成的缓存（shell 集成脚本、首个终端的尺寸、宿主进程的日志）放在根目录的
-//! `cache/` 里，宿主进程的 socket 和锁放在根目录的 `run/` 里。
+//! `cache/` 里，宿主进程的 socket 和锁放在根目录的 `run/` 里，远程访问的证书、设备表和配对口令放在
+//! 根目录的 `remote-access/` 里。
 //! Ghostty 自己的配置和主题照旧在它原来的位置读。
 
 use std::{
@@ -84,23 +85,55 @@ impl Dirs {
     /// 目录，用户自己的）不一样时拒绝，不去改它的权限：那多半是别人布下的。
     #[cfg(unix)]
     pub fn create_runtime_dir(&self) -> std::io::Result<PathBuf> {
-        use std::{
-            io::{Error, ErrorKind},
-            os::unix::fs::{DirBuilderExt as _, MetadataExt as _, PermissionsExt as _},
-        };
+        create_private_dir(self.runtime_dir())
+    }
 
-        let dir = self.runtime_dir().ok_or_else(|| Error::new(ErrorKind::NotFound, "no home directory"))?;
-        std::fs::DirBuilder::new().recursive(true).mode(0o700).create(&dir)?;
-        let meta = std::fs::symlink_metadata(&dir)?;
-        if !meta.file_type().is_dir() {
-            return Err(Error::new(ErrorKind::InvalidInput, format!("{} is not a directory", dir.display())));
-        }
-        let parent = dir.parent().ok_or_else(|| Error::new(ErrorKind::NotFound, "runtime dir has no parent"))?;
-        if meta.uid() != std::fs::metadata(parent)?.uid() {
-            return Err(Error::new(ErrorKind::PermissionDenied, format!("{} belongs to another user", dir.display())));
-        }
-        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700))?;
-        Ok(dir)
+    /// 远程访问的东西：服务端证书和私钥、配对过的设备表、监听方的锁和状态、命令行交给监听方的
+    /// 配对口令，即 `data` 下的 `remote-access`。只有自己能进，见 `create_remote_access_dir`。
+    /// 调试构建和发布构建共用：两者只有一个能占着端口，手机配对一次两边都认。
+    pub fn remote_access_dir(&self) -> Option<PathBuf> {
+        self.data_file("remote-access")
+    }
+
+    /// 建好 `remote_access_dir`，权限和检查同 `create_runtime_dir`：里面有私钥和配对口令。
+    #[cfg(unix)]
+    pub fn create_remote_access_dir(&self) -> std::io::Result<PathBuf> {
+        create_private_dir(self.remote_access_dir())
+    }
+
+    /// 远程访问的自签证书（DER），见 `remote_access_dir`。
+    pub fn remote_access_cert_file(&self) -> Option<PathBuf> {
+        self.remote_access_file("cert.der")
+    }
+
+    /// 证书的私钥（PKCS#8 DER）。
+    pub fn remote_access_key_file(&self) -> Option<PathBuf> {
+        self.remote_access_file("key.der")
+    }
+
+    /// 配对过的设备表（JSON）。
+    pub fn remote_access_devices_file(&self) -> Option<PathBuf> {
+        self.remote_access_file("devices.json")
+    }
+
+    /// 改设备表时拿着的锁：监听方和命令行都会改它，设备表本身是整个换掉写的，锁不住。
+    pub fn remote_access_devices_lock_file(&self) -> Option<PathBuf> {
+        self.remote_access_file("devices.lock")
+    }
+
+    /// 命令行（`runode remote pair`）交给监听方的配对口令，用完就删。
+    pub fn remote_access_pairing_file(&self) -> Option<PathBuf> {
+        self.remote_access_file("pairing.json")
+    }
+
+    /// 监听方开着时一直锁着的锁，保证只有一个监听方；命令行据此知道它在不在。
+    pub fn remote_access_lock_file(&self) -> Option<PathBuf> {
+        self.remote_access_file("listener.lock")
+    }
+
+    /// 监听方开好后写的状态（端口、证书指纹、主机名），命令行拼配对 URI 时读。
+    pub fn remote_access_status_file(&self) -> Option<PathBuf> {
+        self.remote_access_file("listener.json")
     }
 
     /// 用户自己的配色主题目录，按名字找主题时最先找这里。
@@ -168,6 +201,32 @@ impl Dirs {
     fn cache_file(&self, name: &str) -> Option<PathBuf> {
         Some(self.cache.as_ref()?.join(name))
     }
+
+    fn remote_access_file(&self, name: &str) -> Option<PathBuf> {
+        Some(self.remote_access_dir()?.join(name))
+    }
+}
+
+/// 建好 `dir`（`None` 时报没有家目录），权限设成只有自己能进（0700），见 `Dirs::create_runtime_dir`。
+#[cfg(unix)]
+fn create_private_dir(dir: Option<PathBuf>) -> std::io::Result<PathBuf> {
+    use std::{
+        io::{Error, ErrorKind},
+        os::unix::fs::{DirBuilderExt as _, MetadataExt as _, PermissionsExt as _},
+    };
+
+    let dir = dir.ok_or_else(|| Error::new(ErrorKind::NotFound, "no home directory"))?;
+    std::fs::DirBuilder::new().recursive(true).mode(0o700).create(&dir)?;
+    let meta = std::fs::symlink_metadata(&dir)?;
+    if !meta.file_type().is_dir() {
+        return Err(Error::new(ErrorKind::InvalidInput, format!("{} is not a directory", dir.display())));
+    }
+    let parent = dir.parent().ok_or_else(|| Error::new(ErrorKind::NotFound, "the directory has no parent"))?;
+    if meta.uid() != std::fs::metadata(parent)?.uid() {
+        return Err(Error::new(ErrorKind::PermissionDenied, format!("{} belongs to another user", dir.display())));
+    }
+    std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700))?;
+    Ok(dir)
 }
 
 /// 放得进 `sun_path` 的 socket 路径原样返回，放不进时为 `None`。
@@ -195,6 +254,25 @@ mod tests {
         assert_eq!(dirs.shell_integration_dir(), Some("/home/me/.config/runode/cache/shell-integration".into()));
         assert_eq!(dirs.prespawn_size_file(), Some("/home/me/.config/runode/cache/first-terminal-size".into()));
         assert_eq!(dirs.ghostty_themes_dir(), Some("/home/me/.config/ghostty/themes".into()));
+    }
+
+    #[test]
+    fn remote_access_files_share_one_directory() {
+        let dirs = dirs(&[("HOME", "/home/me")]);
+        let dir = PathBuf::from("/home/me/.config/runode/remote-access");
+        assert_eq!(dirs.remote_access_dir(), Some(dir.clone()));
+        for (file, name) in [
+            (dirs.remote_access_cert_file(), "cert.der"),
+            (dirs.remote_access_key_file(), "key.der"),
+            (dirs.remote_access_devices_file(), "devices.json"),
+            (dirs.remote_access_devices_lock_file(), "devices.lock"),
+            (dirs.remote_access_pairing_file(), "pairing.json"),
+            (dirs.remote_access_lock_file(), "listener.lock"),
+            (dirs.remote_access_status_file(), "listener.json"),
+        ] {
+            assert_eq!(file, Some(dir.join(name)));
+        }
+        assert_eq!(Dirs::default().remote_access_cert_file(), None);
     }
 
     #[test]

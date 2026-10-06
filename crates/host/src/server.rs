@@ -88,6 +88,8 @@ pub(crate) struct Peers {
     pub(crate) handoff: Option<u64>,
     /// 最近一次有连接连上或者断开的时刻，空闲从这时起算。
     pub(crate) activity_at: Instant,
+    /// 没有会话也没有连接时也不算空闲，见 `Host::set_stay_up`。
+    pub(crate) stay_up: bool,
 }
 
 impl Default for Peers {
@@ -103,6 +105,7 @@ impl Default for Peers {
             stop: None,
             handoff: None,
             activity_at: Instant::now(),
+            stay_up: false,
         }
     }
 }

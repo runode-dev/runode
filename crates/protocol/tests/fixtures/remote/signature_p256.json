@@ -1,0 +1,6 @@
+{
+  "comment": "ECDSA P-256 + SHA-256 over signed_bytes_auth.json's signed bytes, DER signature, made with OpenSSL",
+  "public_key": "BFBbYgE1JIhKILIz8F3KgtSK8Wh0Mvm_wzhXJ1Oo-RVbVamf5ABUb4inhRGs6Jtc11ZONhRTKv2lhKkxgW-UsrM",
+  "signed": "cnVub2RlLXJlbW90ZS12MQABAgMEBQYHCAkKCwwNDg8QERITFBUWFxgZGhscHR4f__79_Pv6-fj39vX08_Lx8O_u7ezr6uno5-bl5OPi4eBhdXRo",
+  "signature": "MEUCIFdO3oRhjVULyj0OmtKOe2TkSczDR1X-RHuCiUUIvfX2AiEAkt5EYgEsZc6P2zEdoIfY66S1m67OnVzDhZU_N86ILuM"
+}

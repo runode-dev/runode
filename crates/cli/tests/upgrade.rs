@@ -183,7 +183,7 @@ fn an_unknown_goodbye_reason_closes_the_connection() {
             }
         }
     });
-    let env = runode_cli::Env { socket: Some(path), session: None, build: "test".into(), home: None };
+    let env = runode_cli::Env { socket: Some(path), build: "test".into(), ..runode_cli::Env::default() };
     let (code, _, err) = run("wait 5e55 --for idle --timeout 5", &env);
     assert_eq!(code, exit::FAILED, "{err}");
     assert!(err.contains(CLOSED), "{err}");
