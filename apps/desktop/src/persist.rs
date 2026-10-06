@@ -111,8 +111,10 @@ pub enum SavedNode {
         /// 终端在宿主里的会话；记这一项以前的存档里没有。
         #[serde(default, skip_serializing_if = "Option::is_none")]
         session: Option<SessionId>,
-        /// 写存档时会话的 shell 还没启动过（恢复布局后一直没切过去的标签）：这样的会话接上也是
-        /// 空的，下次启动时宿主那边看着也没启动的话结束它，在原目录另开。shell 启动时布局不变、
+        /// 写存档时终端的 shell 还没启动过。宿主里有会话的（接上的会话一直没切过去）接上也是空的，
+        /// 下次启动时宿主那边看着也没启动的话结束它，在原目录另开；从没在宿主里开过会话的
+        /// （`TerminalView::deferred` 建的、一直没显示过）`session` 为空，下次启动直接在原目录
+        /// 新开。shell 启动时布局不变、
         /// 不一定重写存档，所以这一项可能已经过时，恢复时以宿主为准（见 `plan_restore`）。
         #[serde(default, skip_serializing_if = "is_false")]
         unstarted: bool,

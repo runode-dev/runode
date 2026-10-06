@@ -827,6 +827,9 @@ impl TerminalView {
         self.screen.resize(size);
         self.start_pending = false;
         let Some(id) = self.id else {
+            // 现在的调用方给的都是已有会话的视图，走不到这里。以后若有 `deferred` 建的视图走到
+            // 这里，界面这份状态没标成正在附着（不像 `request_visible` 经 `set_visible` 标上），
+            // 附着失败时宿主回的错误就不会被认成会话没了，要先补上这一步。
             self.open_session(true, Attach { size: None, mode: AttachMode::MetaOnly });
             self._reader = Self::read_events(self.events.clone(), window, cx);
             return;
