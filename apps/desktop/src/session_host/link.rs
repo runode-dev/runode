@@ -627,6 +627,8 @@ fn handshake(stream: &UnixStream, build: &BuildId) -> Result<Welcome, ConnectErr
         client: ClientKind::Desktop,
         caps: Caps { snapshot: true, vt_replay: true },
         session: None,
+        // 尺寸归属还没接上，先不报设备名。
+        device: None,
     };
     let frame = Frame::control(&hello).map_err(|err| ConnectError::Io(io::Error::other(err)))?;
     let mut writer = stream;
@@ -1079,6 +1081,7 @@ mod tests {
             client: ClientKind::Cli,
             caps: Caps::default(),
             session: None,
+            device: None,
         };
         send(&mut cli, &hello);
         assert!(matches!(receive(&mut cli), HostMsg::Welcome { .. }));
@@ -1257,6 +1260,7 @@ mod tests {
                 host_pid: 1,
                 snapshot_format: local_snapshot_format().unwrap() + 1,
                 standalone: true,
+                handoff: 0,
             };
             let frame = Frame::control(&welcome).unwrap();
             write_frame(&mut stream, frame.kind, 0, &frame.payload).unwrap();
@@ -1290,6 +1294,7 @@ mod tests {
                 host_pid: 1,
                 snapshot_format: 1,
                 standalone: true,
+                handoff: 0,
             };
             let frame = Frame::control(&welcome).unwrap();
             write_frame(&mut stream, frame.kind, 0, &frame.payload).unwrap();
@@ -1375,6 +1380,7 @@ mod tests {
                 host_pid: 1,
                 snapshot_format: 1,
                 standalone: true,
+                handoff: 0,
             };
             let frame = Frame::control(&welcome).unwrap();
             write_frame(&mut stream, frame.kind, 0, &frame.payload).unwrap();

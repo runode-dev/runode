@@ -175,7 +175,14 @@ pub fn connect_or_launch(link: &Link, socket: &Path, exe: &Path) -> Result<(), C
 }
 
 fn hello(build: &BuildId, client: ClientKind) -> ClientMsg {
-    ClientMsg::Hello { protocol: PROTOCOL_VERSION, build: build.clone(), client, caps: Caps::default(), session: None }
+    ClientMsg::Hello {
+        protocol: PROTOCOL_VERSION,
+        build: build.clone(),
+        client,
+        caps: Caps::default(),
+        session: None,
+        device: None,
+    }
 }
 
 fn send(stream: &mut UnixStream, message: &ClientMsg) -> io::Result<()> {

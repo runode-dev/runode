@@ -543,7 +543,8 @@ impl Connection {
                 return;
             }
         };
-        let Some(ClientMsg::Hello { protocol, build, caps, client, session }) = hello else {
+        // 尺寸归属还没做，前端报的设备名先不用。
+        let Some(ClientMsg::Hello { protocol, build, caps, client, session, device: _ }) = hello else {
             self.goodbye("the first message must be hello");
             return;
         };
@@ -570,6 +571,8 @@ impl Connection {
             host_pid: std::process::id(),
             snapshot_format: self.shared.snapshot_format,
             standalone: peers.standalone,
+            // 还不会交接。
+            handoff: 0,
         });
         drop(peers);
         loop {
@@ -677,8 +680,14 @@ impl Connection {
                 self.shared.kill_all();
                 self.shared.shut_down();
             }
-            ClientMsg::Shutdown { kill_sessions: false } | ClientMsg::Handoff => {
+            ClientMsg::Shutdown { kill_sessions: false } => {
                 self.error(None, None, "the host cannot hand its sessions over yet".into());
+            }
+            ClientMsg::Handoff { .. }
+            | ClientMsg::HandoffReady
+            | ClientMsg::HandoffAbort { .. }
+            | ClientMsg::HandoffDone => {
+                self.error(None, None, "not supported yet".into());
             }
             ClientMsg::Unknown => self.error(None, None, "unknown message".into()),
         }
@@ -934,6 +943,7 @@ mod tests {
                 client,
                 caps: Caps::default(),
                 session: None,
+                device: None,
             },
         );
         assert!(matches!(message(&frames), HostMsg::Welcome { .. }));

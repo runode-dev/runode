@@ -477,6 +477,7 @@ mod tests {
             clients: 0,
             claimed: false,
             exited,
+            size_owner: None,
         };
         let sessions = [
             session(1, Some(AgentKind::Claude), false),

@@ -63,6 +63,8 @@ impl Connection {
             caps: Caps::default(),
             // 宿主据此记下是哪个终端里的程序在操作别的终端，见 `SessionMeta::driver`。
             session: env.session.as_deref().and_then(|own| own.parse().ok()),
+            // 命令行不决定会话的尺寸，用不着设备名。
+            device: None,
         })?;
         match connection.reply()? {
             HostMsg::Welcome { .. } => Ok(connection),

@@ -346,6 +346,7 @@ mod tests {
             clients: 0,
             claimed,
             exited,
+            size_owner: None,
         }
     }
 

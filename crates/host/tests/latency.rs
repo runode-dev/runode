@@ -107,6 +107,7 @@ impl PairDesktop {
             client: ClientKind::Desktop,
             caps: Caps { snapshot: true, vt_replay: true },
             session: None,
+            device: None,
         });
         assert!(matches!(desktop.message(), HostMsg::Welcome { .. }));
         desktop

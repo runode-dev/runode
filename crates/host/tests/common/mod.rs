@@ -101,6 +101,7 @@ impl Peer {
             client,
             caps: Caps { snapshot, vt_replay: true },
             session,
+            device: None,
         });
         assert!(matches!(self.message(), HostMsg::Welcome { protocol: PROTOCOL_VERSION, .. }));
         self

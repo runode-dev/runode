@@ -408,6 +408,8 @@ impl Runner {
                     clients: u32::try_from(self.subscribers.len()).unwrap_or(u32::MAX),
                     claimed: self.subscribers.iter().any(|s| s.desktop),
                     exited: self.exited,
+                    // 尺寸归属还没做。
+                    size_owner: None,
                 });
             }
             Inbox::ReadScreen { lines, command, reply } => {
