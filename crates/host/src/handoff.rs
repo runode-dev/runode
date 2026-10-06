@@ -46,7 +46,7 @@ pub struct TakeOverReport {
 }
 
 /// 交接没成。旧宿主照旧跑着、会话都在它手里，这边的 `Host` 也没留下任何状态。
-#[derive(Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum TakeOverError {
     /// 旧宿主不交，见 `HandoffRefusal`。
     Refused(HandoffRefusal),
