@@ -18,6 +18,7 @@ mod scrollbar;
 mod search_bar;
 mod session_host;
 mod sprites;
+mod startup;
 mod terminal_view;
 mod text_area;
 mod tooltip;
@@ -33,6 +34,7 @@ use gpui_platform::application;
 use crate::window::{open_window, open_window_with};
 
 fn main() {
+    startup::begin();
     let args: Vec<std::ffi::OsString> = std::env::args_os().skip(1).collect();
     if args == ["--host"] {
         std::process::exit(host_process::run());
@@ -46,9 +48,11 @@ fn main() {
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
+                // 启动计时点默认不打，要看时设 `RUST_LOG=runode::startup=info`，见 `startup`。
+                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new(format!("info,{}=off", startup::TARGET))),
         )
         .init();
+    startup::mark_main();
     // 每个终端占两个描述符，从 Finder 启动时软上限只有 256。
     if let Err(err) = runode_terminal::pty::raise_fd_limit() {
         tracing::warn!("failed to raise the open file limit: {err}");
@@ -58,9 +62,13 @@ fn main() {
     session_host::start(prespawn::start());
 
     application().with_assets(assets::Assets).run(|cx: &mut App| {
+        startup::mark("app_run");
         config::install(cx);
+        startup::mark("config_install");
         menus::install(cx);
+        startup::mark("menus_install");
         workspace::install(cx);
+        startup::mark("workspace_install");
         workspace::serve_requests(cx);
         cx.on_window_closed(|cx, _| {
             if cx.windows().is_empty() {
@@ -72,6 +80,7 @@ fn main() {
         // 上次退出时开着的窗口原样恢复，没有时开一个新窗口。提前拉起的 shell 在家目录里，
         // 交给第一个窗口里从家目录开始的终端；没用上就丢掉，丢掉时会结束它。
         let mut shell = prespawn::take();
+        startup::mark("prespawn_take");
         let saved = workspace::saved_window_options(cx);
         if saved.is_empty() {
             open_window(cx, shell.take());
@@ -79,6 +88,7 @@ fn main() {
         for (saved, options) in saved {
             open_window_with(cx, options, Some(saved), shell.take());
         }
+        startup::mark("open_window");
         // 先结束没用上的 shell，再看宿主里有没有没在窗口里显示的会话，免得把它也列进去。
         drop(shell);
         workspace::watch_background(cx);

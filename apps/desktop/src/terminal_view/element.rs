@@ -8,6 +8,7 @@ use runode_shared_types::grid::GridSize;
 use runode_terminal::session::Session;
 
 use super::{TerminalView, paint::paint_frame};
+use crate::startup;
 
 pub(super) struct TerminalElement {
     pub(super) view: gpui::Entity<TerminalView>,
@@ -96,6 +97,9 @@ impl Element for TerminalElement {
         window: &mut Window,
         cx: &mut App,
     ) {
+        // 窗口第一次画终端，这时多半还只有背景。
+        static FIRST_PAINT: startup::Once = startup::Once::new();
+        FIRST_PAINT.mark_when("first_paint", || true);
         let focus_handle = self.view.read(cx).focus_handle.clone();
         window.handle_input(&focus_handle, ElementInputHandler::new(bounds, self.view.clone()), cx);
         // 移动和松开挂在窗口上：拖到网格外甚至窗口外时也要收到。
@@ -131,6 +135,9 @@ impl Element for TerminalElement {
                 return;
             };
             paint_frame(view, &frame, bounds.origin, metrics, focused, window);
+            // 第一次画出字（多半是 shell 的提示符）的那一帧。
+            static FIRST_CONTENT: startup::Once = startup::Once::new();
+            FIRST_CONTENT.mark_when("first_content", || frame.cells.iter().any(|cell| !cell.text.trim().is_empty()));
             // 补全菜单盖在终端内容上面。
             view.paint_completion(&frame, metrics, window);
             if let Some(session) = view.screen.shown_mut() {
