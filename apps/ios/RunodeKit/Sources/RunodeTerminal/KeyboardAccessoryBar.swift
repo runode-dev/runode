@@ -1,9 +1,10 @@
 #if os(iOS)
     import UIKit
 
-    /// 键盘上方的一条辅助栏：软键盘上没有的 Esc、粘住的 Ctrl、Tab、方向键和几个常用符号，横着能拖。
-    /// 软键盘收着时界面底部放一条一样的（`resting` 为真，见 `TerminalView.makeRestingKeyBar`）。开关
-    /// 软键盘的键固定在右端，不跟着别的键滚走：底部那条是「打开键盘」，跟着软键盘的那条是「收起键盘」。
+    /// 键盘上方的一条辅助栏：软键盘上没有的 Esc、粘住的 Ctrl、Tab，回车（软键盘收着时也按得到）、方向键
+    /// 和几个常用符号，横着能拖。软键盘收着时界面底部放一条一样的（`resting` 为真，见
+    /// `TerminalView.makeRestingKeyBar`）。开关软键盘的键固定在右端，不跟着别的键滚走，两条都用键盘图标：
+    /// 底部那条是「打开键盘」，跟着软键盘的那条是「收起键盘」，按下去的样子表示键盘开着。
     final class KeyboardAccessoryBar: UIInputView {
         private weak var owner: TerminalView?
         private var controlButton: UIButton?
@@ -26,7 +27,8 @@
             let keyboard =
                 resting
                 ? button("keyboard", symbol: true, label: "打开键盘") { $0.showKeyboard() }
-                : button("keyboard.chevron.compact.down", symbol: true, label: "收起键盘") { $0.resignFirstResponder() }
+                : button("keyboard", symbol: true, label: "收起键盘") { $0.resignFirstResponder() }
+            if !resting { highlight(keyboard, true) }
             keyboard.translatesAutoresizingMaskIntoConstraints = false
             addSubview(keyboard)
             // 软键盘不弹出时（接了硬件键盘）这条栏贴在屏幕最底下，按钮要排在安全区里，避开 Home 条和圆角；
@@ -48,15 +50,16 @@
                 stack.heightAnchor.constraint(equalTo: scroll.frameLayoutGuide.heightAnchor, constant: -12),
             ])
 
-            stack.addArrangedSubview(button("esc", label: "Esc") { $0.press(.escape) })
-            let control = button("ctrl", label: "Ctrl（粘住）") { $0.controlLatched.toggle() }
+            stack.addArrangedSubview(button("escape", symbol: true, label: "Esc") { $0.press(.escape) })
+            let control = button("control", symbol: true, label: "Ctrl（粘住）") { $0.controlLatched.toggle() }
             controlButton = control
             stack.addArrangedSubview(control)
-            stack.addArrangedSubview(button("tab", label: "Tab") { $0.press(.tab) })
-            stack.addArrangedSubview(button("arrow.left", symbol: true, label: "左") { $0.press(.left) })
-            stack.addArrangedSubview(button("arrow.down", symbol: true, label: "下") { $0.press(.down) })
-            stack.addArrangedSubview(button("arrow.up", symbol: true, label: "上") { $0.press(.up) })
-            stack.addArrangedSubview(button("arrow.right", symbol: true, label: "右") { $0.press(.right) })
+            stack.addArrangedSubview(button("arrow.right.to.line", symbol: true, label: "Tab") { $0.press(.tab) })
+            stack.addArrangedSubview(button("return", symbol: true, label: "回车") { $0.press(.enter) })
+            stack.addArrangedSubview(button("arrowtriangle.left.fill", symbol: true, label: "左") { $0.press(.left) })
+            stack.addArrangedSubview(button("arrowtriangle.down.fill", symbol: true, label: "下") { $0.press(.down) })
+            stack.addArrangedSubview(button("arrowtriangle.up.fill", symbol: true, label: "上") { $0.press(.up) })
+            stack.addArrangedSubview(button("arrowtriangle.right.fill", symbol: true, label: "右") { $0.press(.right) })
             for symbol in ["|", "~", "/", "-", "_", "`"] {
                 stack.addArrangedSubview(button(symbol, label: symbol) { $0.typeText(symbol) })
             }
@@ -69,9 +72,15 @@
         }
 
         func setControlLatched(_ latched: Bool) {
-            controlButton?.isSelected = latched
-            controlButton?.configuration?.baseBackgroundColor = latched ? .tintColor : .secondarySystemFill
-            controlButton?.configuration?.baseForegroundColor = latched ? .white : .label
+            guard let controlButton else { return }
+            highlight(controlButton, latched)
+        }
+
+        /// 按下去的样子：粘住的 Ctrl、开着的键盘。
+        private func highlight(_ button: UIButton, _ on: Bool) {
+            button.isSelected = on
+            button.configuration?.baseBackgroundColor = on ? .tintColor : .secondarySystemFill
+            button.configuration?.baseForegroundColor = on ? .white : .label
         }
 
         private func button(
