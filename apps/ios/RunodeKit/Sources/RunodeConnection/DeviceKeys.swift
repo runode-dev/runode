@@ -66,7 +66,7 @@ public protocol DeviceKeyStore: Sendable {
 public struct KeychainDeviceKeyStore: DeviceKeyStore {
     public let service: String
 
-    public init(service: String = "dev.runode.app.ios.device-key") {
+    public init(service: String = "dev.runode.mobile.device-key") {
         self.service = service
     }
 

@@ -29,7 +29,7 @@ enum AppComposition {
         let store = FileMachineStore(url: FileMachineStore.defaultURL())
         let discovery = BonjourDiscovery()
         let identity = ClientIdentity(
-            build: buildIdentifier(info: Bundle.main.infoDictionary ?? [:]), deviceName: UIDevice.current.name)
+            build: buildIdentifier, deviceName: UIDevice.current.name)
         return AppDependencies(
             store: store, keyStore: keyStore, pairing: RemotePairing(keyStore: keyStore, discovery: discovery),
             makeLink: { machine in
@@ -48,10 +48,7 @@ enum AppComposition {
         #endif
     }
 
-    /// 报给宿主的构建标识：`ios-<版本>+<构建号>`。宿主只拿它判断能不能用快照，iOS 的永远不能。
-    nonisolated static func buildIdentifier(info: [String: Any]) -> String {
-        let version = info["CFBundleShortVersionString"] as? String ?? "0"
-        let build = info["CFBundleVersion"] as? String ?? "0"
-        return "ios-\(version)+\(build)"
-    }
+    /// 报给宿主的构建标识，固定不变。宿主只拿它和自己的比，一样才给快照；Mac 的是
+    /// `<版本>.<提交号>`，和这个永远对不上，所以手机一律用 VT 重放。
+    nonisolated static let buildIdentifier = "dev.runode.mobile"
 }
