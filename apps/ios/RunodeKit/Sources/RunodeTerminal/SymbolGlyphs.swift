@@ -5,9 +5,9 @@ import Foundation
 /// 打包在 app 里的 Nerd Fonts「Symbols Only」等宽版（Symbols Nerd Font Mono，Nerd Fonts v3.5.1，
 /// 字体本身 MIT 许可；各图标集的来源和许可写在随字体一起打包的 README 和 LICENSE 里）。zsh 提示符里的 Powerline、
 /// Git 分支这类私用区图标主字体里没有，画单元格时退到这里。
-enum SymbolFont {
+public enum SymbolFont {
     /// 字体的 PostScript 名字；注册失败（资源缺了）时为空。第一次用时把字体注册到本进程。
-    static let postScriptName: String? = {
+    public static let postScriptName: String? = {
         guard
             let url = Bundle.module.url(
                 forResource: "SymbolsNerdFontMono-Regular", withExtension: "ttf", subdirectory: "NerdFontsSymbolsOnly")
@@ -19,6 +19,13 @@ enum SymbolFont {
         else { return nil }
         return CTFontCopyPostScriptName(CTFontCreateWithFontDescriptor(descriptor, 12, nil)) as String
     }()
+
+    /// 私用区等码位：Powerline、Nerd Font 的图标都在这里，主字体缺字时退到符号字体。终端视图和会话列表的
+    /// 预览用同一个判断。
+    public static func isPrivateUse(_ scalar: Unicode.Scalar) -> Bool {
+        (0xE000...0xF8FF).contains(scalar.value) || (0xF0000...0xFFFFD).contains(scalar.value)
+            || (0x23FB...0x23FE).contains(scalar.value) || scalar.value == 0x2B58
+    }
 
     /// 这个字号的符号字体；字体没打包进来时为空。
     static func font(size: CGFloat) -> CTFont? {
@@ -119,5 +126,110 @@ enum PowerlineGlyph {
         path.addCurve(
             to: CGPoint(x: 0, y: h), control1: CGPoint(x: r, y: h - r + r * c), control2: CGPoint(x: r * c, y: h))
         if closed { path.closeSubpath() }
+    }
+}
+
+/// 制表符（U+2500–U+257F 里常用的那些：细线、粗线、直角和圆角、T 形、十字、半截线），照 Ghostty 的
+/// 做法不用字体按格子自己画。字体里的制表符画不满格子，一排 `─` 会成虚线；这里每条线从格子中心
+/// 画到边上，边按设备像素对齐，相邻格子算出同一条边界，接起来没有缝。
+enum BoxDrawing {
+    /// 一个字符四个方向上的线：0 没有，1 细，2 粗。
+    private struct Arms {
+        var up: Int, right: Int, down: Int, left: Int
+    }
+
+    private static let arms: [UInt32: Arms] = [
+        0x2500: Arms(up: 0, right: 1, down: 0, left: 1), 0x2501: Arms(up: 0, right: 2, down: 0, left: 2),
+        0x2502: Arms(up: 1, right: 0, down: 1, left: 0), 0x2503: Arms(up: 2, right: 0, down: 2, left: 0),
+        0x250C: Arms(up: 0, right: 1, down: 1, left: 0), 0x250F: Arms(up: 0, right: 2, down: 2, left: 0),
+        0x2510: Arms(up: 0, right: 0, down: 1, left: 1), 0x2513: Arms(up: 0, right: 0, down: 2, left: 2),
+        0x2514: Arms(up: 1, right: 1, down: 0, left: 0), 0x2517: Arms(up: 2, right: 2, down: 0, left: 0),
+        0x2518: Arms(up: 1, right: 0, down: 0, left: 1), 0x251B: Arms(up: 2, right: 0, down: 0, left: 2),
+        0x251C: Arms(up: 1, right: 1, down: 1, left: 0), 0x2523: Arms(up: 2, right: 2, down: 2, left: 0),
+        0x2524: Arms(up: 1, right: 0, down: 1, left: 1), 0x252B: Arms(up: 2, right: 0, down: 2, left: 2),
+        0x252C: Arms(up: 0, right: 1, down: 1, left: 1), 0x2533: Arms(up: 0, right: 2, down: 2, left: 2),
+        0x2534: Arms(up: 1, right: 1, down: 0, left: 1), 0x253B: Arms(up: 2, right: 2, down: 0, left: 2),
+        0x253C: Arms(up: 1, right: 1, down: 1, left: 1), 0x254B: Arms(up: 2, right: 2, down: 2, left: 2),
+        0x2574: Arms(up: 0, right: 0, down: 0, left: 1), 0x2575: Arms(up: 1, right: 0, down: 0, left: 0),
+        0x2576: Arms(up: 0, right: 1, down: 0, left: 0), 0x2577: Arms(up: 0, right: 0, down: 1, left: 0),
+        0x2578: Arms(up: 0, right: 0, down: 0, left: 2), 0x2579: Arms(up: 2, right: 0, down: 0, left: 0),
+        0x257A: Arms(up: 0, right: 2, down: 0, left: 0), 0x257B: Arms(up: 0, right: 0, down: 2, left: 0),
+    ]
+
+    static func handles(_ scalar: Unicode.Scalar) -> Bool {
+        arms[scalar.value] != nil || (0x256D...0x2570).contains(scalar.value)
+    }
+
+    /// `scalar` 在 `rect` 这个格子里要填的形状；不是这里画的字符返回 `nil`。`thickness` 是细线的粗细，
+    /// `scale` 是设备像素和点的比例，边按它对齐。
+    static func path(for scalar: Unicode.Scalar, in rect: CGRect, thickness: CGFloat, scale: CGFloat) -> CGPath? {
+        let snap = { (value: CGFloat) -> CGFloat in (value * scale).rounded() / scale }
+        let light = max(snap(thickness), 1 / scale)
+        let path = CGMutablePath()
+        let left = snap(rect.minX)
+        let right = snap(rect.maxX)
+        let top = snap(rect.minY)
+        let bottom = snap(rect.maxY)
+        /// 中线两边对称的一条带子：粗细 `width`，起止对齐像素。
+        func band(center: CGFloat, width: CGFloat) -> (CGFloat, CGFloat) {
+            let start = snap(center - width / 2)
+            return (start, start + max(snap(width), 1 / scale))
+        }
+        if let arms = arms[scalar.value] {
+            let widest = CGFloat(max(arms.up, arms.down, arms.left, arms.right)) * light
+            let (vx0, _) = band(center: rect.midX, width: widest)
+            let (hy0, _) = band(center: rect.midY, width: widest)
+            // 横线、竖线各自伸到中心那块的另一边，拐角和十字处补满。
+            func horizontal(_ weight: Int, from x0: CGFloat, to x1: CGFloat) {
+                guard weight > 0 else { return }
+                let (y0, y1) = band(center: rect.midY, width: CGFloat(weight) * light)
+                path.addRect(CGRect(x: x0, y: y0, width: x1 - x0, height: y1 - y0))
+            }
+            func vertical(_ weight: Int, from y0: CGFloat, to y1: CGFloat) {
+                guard weight > 0 else { return }
+                let (x0, x1) = band(center: rect.midX, width: CGFloat(weight) * light)
+                path.addRect(CGRect(x: x0, y: y0, width: x1 - x0, height: y1 - y0))
+            }
+            let joinRight = vx0 + max(snap(widest), 1 / scale)
+            let joinBottom = hy0 + max(snap(widest), 1 / scale)
+            horizontal(arms.left, from: left, to: arms.right > 0 ? right : joinRight)
+            if arms.left == 0 { horizontal(arms.right, from: vx0, to: right) } else if arms.right != arms.left {
+                horizontal(arms.right, from: vx0, to: right)
+            }
+            vertical(arms.up, from: top, to: arms.down > 0 ? bottom : joinBottom)
+            if arms.up == 0 { vertical(arms.down, from: hy0, to: bottom) } else if arms.down != arms.up {
+                vertical(arms.down, from: hy0, to: bottom)
+            }
+            return path
+        }
+        // 圆角：从一条边的中点画四分之一圆弧到另一条边的中点，描成细线，外轮廓转成可以填的形状。
+        let center = CGPoint(x: (left + right) / 2, y: (top + bottom) / 2)
+        let radius = min(rect.width, rect.height) / 2
+        let arc = CGMutablePath()
+        switch scalar.value {
+        case 0x256D:  // ╭ 向下、向右
+            arc.move(to: CGPoint(x: center.x, y: bottom))
+            arc.addLine(to: CGPoint(x: center.x, y: center.y + radius))
+            arc.addArc(tangent1End: center, tangent2End: CGPoint(x: right, y: center.y), radius: radius)
+            arc.addLine(to: CGPoint(x: right, y: center.y))
+        case 0x256E:  // ╮ 向下、向左
+            arc.move(to: CGPoint(x: center.x, y: bottom))
+            arc.addLine(to: CGPoint(x: center.x, y: center.y + radius))
+            arc.addArc(tangent1End: center, tangent2End: CGPoint(x: left, y: center.y), radius: radius)
+            arc.addLine(to: CGPoint(x: left, y: center.y))
+        case 0x256F:  // ╯ 向上、向左
+            arc.move(to: CGPoint(x: center.x, y: top))
+            arc.addLine(to: CGPoint(x: center.x, y: center.y - radius))
+            arc.addArc(tangent1End: center, tangent2End: CGPoint(x: left, y: center.y), radius: radius)
+            arc.addLine(to: CGPoint(x: left, y: center.y))
+        case 0x2570:  // ╰ 向上、向右
+            arc.move(to: CGPoint(x: center.x, y: top))
+            arc.addLine(to: CGPoint(x: center.x, y: center.y - radius))
+            arc.addArc(tangent1End: center, tangent2End: CGPoint(x: right, y: center.y), radius: radius)
+            arc.addLine(to: CGPoint(x: right, y: center.y))
+        default:
+            return nil
+        }
+        return arc.copy(strokingWithWidth: light, lineCap: .butt, lineJoin: .round, miterLimit: 1)
     }
 }

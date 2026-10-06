@@ -49,11 +49,21 @@ public final class AppModel {
     @ObservationIgnored private var sessionLists: [UUID: SessionListModel] = [:]
     @ObservationIgnored private var terminals: [Route: TerminalModel] = [:]
     @ObservationIgnored private var active = true
+    @ObservationIgnored private var openedSoleMachine = false
 
     public init(dependencies: AppDependencies) {
         self.dependencies = dependencies
         machineList = MachineListModel(store: dependencies.store, keyStore: dependencies.keyStore)
         machineList.willDelete = { [weak self] id in self?.forget(machine: id) }
+    }
+
+    /// 启动时只配对了一台 Mac：直接进它的会话列表，跳过 Mac 列表（返回时还在）。只在启动后第一次
+    /// 调用时做。
+    public func openSoleMachineIfNeeded() {
+        guard !openedSoleMachine else { return }
+        openedSoleMachine = true
+        guard path.isEmpty, machineList.machines.count == 1, let machine = machineList.machines.first else { return }
+        path = [.machine(machine.id)]
     }
 
     /// 打开配对页；`link` 是从别处（比如系统打开的 `runode://pair` 链接）带来的配对链接。
@@ -84,9 +94,16 @@ public final class AppModel {
         let route = Route.terminal(machine: machineId, session: session)
         if let existing = terminals[route] { return existing }
         guard let list = sessionList(for: machineId) else { return nil }
-        let title = list.session(session)?.meta.displayTitle ?? "终端"
+        let info = list.session(session)
+        // 列表里知道这个会话有没有前端在决定尺寸（Mac 上的窗口在显示它）；不在列表里时连上再看。
+        let hint: SizeOwnerHint =
+            switch info {
+            case .some(let info): info.sizeOwner == nil ? .none : .someone
+            case nil: .unknown
+            }
         let model = TerminalModel(
-            sessionId: session, title: title, link: list.link,
+            sessionId: session, title: info?.meta.displayTitle ?? "终端", agent: info?.meta.agent,
+            link: list.link, ownerHint: hint,
             onOpen: { [weak list] id in list?.screenOpened(id) },
             onClose: { [weak list] id in list?.screenClosed(id) })
         terminals[route] = model

@@ -11,12 +11,9 @@
         var body: some View {
             List {
                 ForEach(model.machines) { machine in
-                    Button {
-                        onOpen(machine.id)
-                    } label: {
+                    NavigationLink(value: Route.machine(machine.id)) {
                         MachineRow(machine: machine)
                     }
-                    .tint(.primary)
                     .swipeActions(edge: .trailing) {
                         Button("删除", systemImage: "trash", role: .destructive) {
                             model.deleteTarget = machine.id
@@ -27,6 +24,7 @@
                         .tint(.orange)
                     }
                     .contextMenu {
+                        Button("打开", systemImage: "terminal") { onOpen(machine.id) }
                         Button("改名", systemImage: "pencil") { model.beginRename(machine.id) }
                         Button("删除", systemImage: "trash", role: .destructive) { model.deleteTarget = machine.id }
                     }
@@ -35,19 +33,20 @@
             .overlay {
                 if model.loaded, model.machines.isEmpty {
                     ContentUnavailableView {
-                        Label("还没有配对的 Mac", systemImage: "desktopcomputer")
+                        Label("还没有配对的 Mac", systemImage: "laptopcomputer.and.iphone")
                     } description: {
-                        Text("在 Mac 上的 runode 里打开远程访问并生成配对二维码，再用这里扫码。")
+                        Text("在 Mac 上打开远程访问，运行 `runode\u{00A0}remote\u{00A0}pair`，再用这里扫出现的二维码。配对页里有详细步骤。")
                     } actions: {
                         Button("配对一台 Mac", action: onPair)
                             .buttonStyle(.borderedProminent)
+                            .controlSize(.large)
                     }
                 }
             }
             .navigationTitle("runode")
             .toolbar {
                 ToolbarItem(placement: .primaryAction) {
-                    Button("配对", systemImage: "qrcode.viewfinder", action: onPair)
+                    Button("配对 Mac", systemImage: "qrcode.viewfinder", action: onPair)
                 }
             }
             .task { await model.load() }
@@ -85,20 +84,17 @@
                     .font(.title2)
                     .foregroundStyle(.tint)
                     .frame(width: 36)
+                    .accessibilityHidden(true)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(machine.name)
                         .font(.headline)
-                    Text(machine.lastAddress.map { "上次连接 \($0)" } ?? machine.hostName)
+                    Text(machine.lastAddress.map { "上次连接 \(Presentation.displayAddress($0))" } ?? machine.hostName)
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                 }
-                Spacer()
-                Image(systemName: "chevron.right")
-                    .font(.footnote.weight(.semibold))
-                    .foregroundStyle(.tertiary)
             }
-            .contentShape(Rectangle())
             .padding(.vertical, 4)
+            .accessibilityElement(children: .combine)
         }
     }
 #endif

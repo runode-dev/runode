@@ -33,6 +33,7 @@ func sameJSON(_ a: Data, _ b: Data) throws -> Bool {
 
     @Test(arguments: [
         "hello", "list", "spawn", "attach_vt", "attach_meta", "attach_size", "detach", "resize", "focus", "kill",
+        "read_screen", "read_screen_command", "send_keys", "paste",
     ])
     func matchesTheHost(_ name: String) throws {
         let message: ClientMsg =
@@ -50,6 +51,10 @@ func sameJSON(_ a: Data, _ b: Data) throws -> Bool {
             case "resize": .resize(id: id, size: size)
             case "focus": .focus(id: id, focused: true)
             case "kill": .kill(id: id)
+            case "read_screen": .readScreen(id: id, lines: 8)
+            case "read_screen_command": .readScreen(id: id, lines: nil, command: 1)
+            case "send_keys": .sendKeys(req: 5, id: id, keys: ["1", "enter", "esc", "up"])
+            case "paste": .paste(req: 6, id: id, text: "继续，用方案 2\n")
             default: .listSessions
             }
         #expect(try sameJSON(JSONEncoder().encode(message), RustSamples.data(name)))
@@ -80,11 +85,14 @@ func sameJSON(_ a: Data, _ b: Data) throws -> Bool {
             .hello(protocol: 4, build: "b", client: .mobile, caps: Caps(snapshot: false, vtReplay: true), session: nil, device: nil),
             .listSessions, .spawn(req: 1, size: size, cwd: nil, integration: .detect, start: true),
             .attach(id: id, size: nil, mode: .vtReplay), .detach(id: id), .resize(id: id, size: size),
-            .focus(id: id, focused: true), .clearScreen(id: id), .kill(id: id),
+            .focus(id: id, focused: true), .clearScreen(id: id), .kill(id: id), .readScreen(id: id, lines: 3),
+            .sendKeys(req: 1, id: id, keys: ["enter"]), .paste(req: 2, id: id, text: "y"),
         ]
         func covered(_ message: ClientMsg) -> Bool {
             switch message {
-            case .hello, .listSessions, .spawn, .attach, .detach, .resize, .focus, .clearScreen, .kill: true
+            case .hello, .listSessions, .spawn, .attach, .detach, .resize, .focus, .clearScreen, .kill, .readScreen,
+                .sendKeys, .paste:
+                true
             }
         }
         let forbidden: Set<String> = [

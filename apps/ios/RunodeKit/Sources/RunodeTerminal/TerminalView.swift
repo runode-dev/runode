@@ -11,10 +11,13 @@
         func terminalView(_ view: TerminalView, fitSizeDidChange size: GridSize)
         /// 视口离开了最底下（在看回滚历史），或者回到了最底下。
         func terminalView(_ view: TerminalView, didScrollBack scrolledBack: Bool)
+        /// 终端拿到或交出了键盘焦点（软键盘弹出、收起）。
+        func terminalView(_ view: TerminalView, keyboardVisible visible: Bool)
     }
 
-    /// 终端视图：按宿主给的网格尺寸画（网格比屏幕大时可以缩放、平移），上下拖动看回滚历史，接软键盘
-    /// （含输入法的组字）、硬件键盘和键盘上方的辅助栏。
+    /// 终端视图：按宿主给的网格尺寸画（网格比屏幕大时缩放到不小于可读字号，超出的横向平移；有输出或
+    /// 打字时视口跟着光标），上下拖动看回滚历史，接软键盘（含输入法的组字）、硬件键盘和键盘上方的
+    /// 辅助栏。字号跟着系统的动态字体走。网格比视图矮时贴着底边放，上面空出来的是终端背景色。
     ///
     /// 结构：自己是第一响应者，负责键盘输入（`UITextInput`）；里面一个 `UIScrollView` 管缩放和平移，
     /// 再里面 `TerminalGridView` 用 CoreText 画网格。网格按字体的自然大小排，缩放靠滚动视图的
@@ -37,6 +40,27 @@
         private var repeatTask: Task<Void, Never>?
         private let bellFeedback = UIImpactFeedbackGenerator(style: .light)
         private var lastBell = ContinuousClock.now - .seconds(1)
+        /// 用户最近一次自己拖动、缩放网格的时刻：之后一会儿不自动跟着光标走，免得和手指抢。
+        private var lastUserScroll = ContinuousClock.now - .seconds(10)
+        /// 按手机屏幕决定尺寸（网格铺满视图、不缩放）；为假时跟随 Mac，按可读字号缩放。
+        private var fitsPhone = false
+
+        /// 视图顶上被叠着的东西（断线横幅）挡住的高度。网格上方的空白不够时，在滚动区顶上让出这段，
+        /// 网格停在底部、被挡的几行往上拖就看得到；不改网格的尺寸，免得断线、重连时让宿主多改两次尺寸。
+        public var topObstruction: CGFloat = 0 {
+            didSet {
+                guard abs(topObstruction - oldValue) > 0.5 else { return }
+                centerContent(stickToBottom: true)
+            }
+        }
+
+        /// 默认字号（13 点）和可读的最小字号（9 点），都按动态字体放大缩小。
+        static func fontSizes(for traits: UITraitCollection) -> (base: CGFloat, readable: CGFloat) {
+            let metrics = UIFontMetrics(forTextStyle: .body)
+            let base = metrics.scaledValue(for: 13, compatibleWith: traits)
+            let readable = metrics.scaledValue(for: 9, compatibleWith: traits)
+            return (min(max(base, 11), 28), min(max(readable, 9), 20))
+        }
 
         /// 辅助栏上粘住的 Ctrl：下一个打的字按 Ctrl 组合键发。
         var controlLatched = false {
@@ -82,6 +106,27 @@
             scrollView.addGestureRecognizer(twoFingers)
             isAccessibilityElement = true
             accessibilityLabel = "终端"
+            accessibilityHint = "轻点两下打开键盘"
+            accessibilityTraits = [.allowsDirectInteraction, .updatesFrequently]
+            grid.font = TerminalFont(size: Self.fontSizes(for: traitCollection).base)
+            registerForTraitChanges([UITraitPreferredContentSizeCategory.self]) { (view: TerminalView, _) in
+                view.contentSizeDidChange()
+            }
+        }
+
+        /// 动态字体改了：换字号，重新排网格、算「适配手机」的尺寸。
+        private func contentSizeDidChange() {
+            grid.font = TerminalFont(size: Self.fontSizes(for: traitCollection).base)
+            userZoomed = false
+            layoutGrid()
+            grid.setNeedsDisplay()
+            reportFitSize()
+        }
+
+        /// VoiceOver 读屏幕底部几行有字的内容。
+        public override var accessibilityValue: String? {
+            get { grid.screen.lines.filter { !$0.isEmpty }.suffix(5).joined(separator: "\n") }
+            set {}
         }
 
         @available(*, unavailable)
@@ -162,6 +207,16 @@
                 lastScrolledBack = scrolledBack
                 delegate?.terminalView(self, didScrollBack: scrolledBack)
             }
+            followCursor()
+        }
+
+        /// 有输出时视口跟着光标走（网格比屏幕宽、横着拖的时候尤其要）；用户正在拖、刚拖过，或者在看
+        /// 回滚历史时不动。
+        private func followCursor() {
+            guard !lastScrolledBack, !scrollView.isDragging, !scrollView.isDecelerating, !scrollView.isZooming,
+                ContinuousClock.now - lastUserScroll > .seconds(2)
+            else { return }
+            revealCursor()
         }
 
         // MARK: 布局、缩放
@@ -191,13 +246,16 @@
             centerContent()
         }
 
-        /// 默认的缩放：网格比屏幕宽时缩到正好一屏宽，但字不小于 5 点，更宽的就横着拖。
+        /// 默认的缩放：适配手机时不缩放（网格本来就按视图排）；跟随 Mac 时网格比屏幕宽就缩到正好一屏宽，
+        /// 但字不小于可读字号，再宽的横着拖。捏合也不能缩到可读字号以下。
         private func applyDefaultZoom() {
-            guard !userZoomed, grid.gridSize.width > 0, bounds.width > 0 else { return }
-            let minimum = 5 / grid.font.size
+            guard grid.gridSize.width > 0, bounds.width > 0 else { return }
+            let sizes = Self.fontSizes(for: traitCollection)
+            let readable = min(sizes.readable / grid.font.size, 1)
+            scrollView.minimumZoomScale = readable
+            guard !userZoomed else { return }
             let fitWidth = bounds.width / grid.gridSize.width
-            scrollView.minimumZoomScale = min(minimum, fitWidth, 1)
-            scrollView.zoomScale = max(min(fitWidth, 1), minimum)
+            scrollView.zoomScale = fitsPhone ? 1 : max(min(fitWidth, 1), readable)
             updateRasterScale()
         }
 
@@ -211,6 +269,11 @@
 
         public func scrollViewWillBeginZooming(_ scrollView: UIScrollView, with view: UIView?) {
             userZoomed = true
+            lastUserScroll = .now
+        }
+
+        public func scrollViewWillBeginDragging(_ scrollView: UIScrollView) {
+            lastUserScroll = .now
         }
 
         public func scrollViewDidEndZooming(_ scrollView: UIScrollView, with view: UIView?, atScale scale: CGFloat) {
@@ -232,10 +295,31 @@
             }
         }
 
-        /// 网格比屏幕窄时左右居中；竖直方向贴着顶。
-        private func centerContent() {
+        /// 网格比屏幕窄时左右居中；比屏幕矮时贴着底边（靠近键盘和底栏，新输出在那里），上面空着的地方
+        /// 露出视图的背景，也就是终端的背景色。
+        private func centerContent(stickToBottom: Bool = false) {
             let horizontal = max(0, (scrollView.bounds.width - scrollView.contentSize.width) / 2)
-            scrollView.contentInset = UIEdgeInsets(top: 0, left: horizontal, bottom: 0, right: 0)
+            let slack = scrollView.bounds.height - scrollView.contentSize.height
+            let top = max(0, slack, topObstruction)
+            let inset = UIEdgeInsets(top: top, left: horizontal, bottom: 0, right: 0)
+            if scrollView.contentInset != inset {
+                scrollView.contentInset = inset
+            }
+            // 放得下的方向上没有可滚的：停在正好露出整个网格的位置。顶上让出了地方、网格放不下时：整个
+            // 网格往下挪出横幅的高度后光标还看得见（光标下面多半是空行），就这样挪；否则停在最底下。
+            var offset = scrollView.contentOffset
+            if scrollView.contentSize.height + top <= scrollView.bounds.height + 0.5 {
+                offset.y = -top
+            } else if stickToBottom {
+                let cursorBottom = grid.cursorRect.map { grid.convert($0, to: scrollView).maxY } ?? .infinity
+                offset.y =
+                    cursorBottom + top <= scrollView.bounds.height
+                    ? -top : scrollView.contentSize.height - scrollView.bounds.height
+            }
+            if horizontal > 0 { offset.x = -horizontal }
+            if offset != scrollView.contentOffset, !scrollView.isZooming {
+                scrollView.contentOffset = offset
+            }
         }
 
         /// 「适配本机屏幕」要的网格：按 1 倍缩放下的字体，正好铺满视图。
@@ -244,9 +328,12 @@
                 fitting: bounds.size, scale: window?.screen.scale ?? traitCollection.displayScale, font: grid.font)
         }
 
-        /// 用终端的默认字体铺满 `size`（点）的网格；新开会话时按它定尺寸。
-        public static func gridSize(fitting size: CGSize, scale: CGFloat) -> GridSize {
-            gridSize(fitting: size, scale: scale, font: TerminalFont(size: 13))
+        /// 用终端的默认字号（按 `contentSize` 这档动态字体）铺满 `size`（点）的网格；新开会话时按它定尺寸。
+        public static func gridSize(
+            fitting size: CGSize, scale: CGFloat, contentSize: UIContentSizeCategory = .large
+        ) -> GridSize {
+            let traits = UITraitCollection(preferredContentSizeCategory: contentSize)
+            return gridSize(fitting: size, scale: scale, font: TerminalFont(size: fontSizes(for: traits).base))
         }
 
         static func gridSize(fitting size: CGSize, scale: CGFloat, font: TerminalFont) -> GridSize {
@@ -266,12 +353,20 @@
             delegate?.terminalView(self, fitSizeDidChange: size)
         }
 
-        /// 适配屏幕以后网格正好铺满：回到 1 倍缩放，以后照常按屏幕宽度自动缩放。
-        public func resetZoom() {
+        /// 尺寸方式换了：丢掉手动的缩放，按新的方式重新定默认缩放。
+        public func setFitsPhone(_ fits: Bool) {
+            fitsPhone = fits
             userZoomed = false
-            scrollView.setZoomScale(1, animated: false)
             applyDefaultZoom()
             centerContent()
+        }
+
+        /// 唤起键盘，把光标露出来。
+        public func showKeyboard() {
+            if !isFirstResponder {
+                becomeFirstResponder()
+            }
+            revealCursor()
         }
 
         /// 把光标所在的位置滚进可见区域（键盘弹出、打字时）。
@@ -339,6 +434,7 @@
         public override func becomeFirstResponder() -> Bool {
             let became = super.becomeFirstResponder()
             grid.hasKeyboardFocus = isFirstResponder
+            delegate?.terminalView(self, keyboardVisible: isFirstResponder)
             return became
         }
 
@@ -346,14 +442,12 @@
         public override func resignFirstResponder() -> Bool {
             let resigned = super.resignFirstResponder()
             grid.hasKeyboardFocus = isFirstResponder
+            delegate?.terminalView(self, keyboardVisible: isFirstResponder)
             return resigned
         }
 
         @objc private func handleTap() {
-            if !isFirstResponder {
-                becomeFirstResponder()
-            }
-            revealCursor()
+            showKeyboard()
         }
 
         // MARK: 输入
@@ -578,8 +672,12 @@
             ringBell()
         }
 
-        public func terminalWillFitScreen() {
-            resetZoom()
+        public func terminalSizeModeDidChange(fitsPhone: Bool) {
+            setFitsPhone(fitsPhone)
+        }
+
+        public func terminalShowKeyboard() {
+            showKeyboard()
         }
     }
 #endif

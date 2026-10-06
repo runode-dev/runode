@@ -68,7 +68,9 @@ final class FakeDisplay: TerminalDisplay {
     var resets = 0
     var changes = 0
     var bells = 0
-    var fits = 0
+    /// 每次尺寸方式变了时报的「是不是适配手机」。
+    var sizeModes: [Bool] = []
+    var keyboardRequests = 0
     var settings: TermSettings?
     weak var terminal: VTerminal?
 
@@ -81,7 +83,8 @@ final class FakeDisplay: TerminalDisplay {
     func terminalContentDidChange() { changes += 1 }
     func terminalSettingsDidChange(_ settings: TermSettings) { self.settings = settings }
     func terminalDidRingBell() { bells += 1 }
-    func terminalWillFitScreen() { fits += 1 }
+    func terminalSizeModeDidChange(fitsPhone: Bool) { sizeModes.append(fitsPhone) }
+    func terminalShowKeyboard() { keyboardRequests += 1 }
 }
 
 final class InMemoryKeyStore: DeviceKeyStore {

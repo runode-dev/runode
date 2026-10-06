@@ -107,41 +107,139 @@ import Testing
         #expect(link.inputs.isEmpty)
     }
 
-    @Test func fittingTheScreenAsksForTheSize() {
-        let model = live()
-        let fit = GridSize(cols: 45, rows: 30, cellWidthPx: 24, cellHeightPx: 48)
+    let fit = GridSize(cols: 45, rows: 30, cellWidthPx: 24, cellHeightPx: 48)
+
+    /// 有 Mac 在显示的会话（列表里有尺寸 owner）：不带尺寸连上，跟随 Mac。
+    func followingModel() -> TerminalModel {
+        let model = TerminalModel(sessionId: sessionA, title: "zsh", link: link, ownerHint: .someone, onClose: { _ in })
+        model.attachDisplay(display)
         model.updateFitSize(fit)
-        link.clearSent()
-        model.fitToScreen()
-        #expect(link.sent == [.resize(id: sessionA, size: fit), .focus(id: sessionA, focused: true)])
-        #expect(display.fits == 1)
-        model.handle(.message(.sizeOwner(id: sessionA, mine: true, owner: "测试 iPhone")))
-        #expect(model.sizeOwnership == .mine)
-        // 适配着的时候视图大小变了（转屏、弹键盘）跟着改。
-        link.clearSent()
-        let rotated = GridSize(cols: 90, rows: 15, cellWidthPx: 24, cellHeightPx: 48)
-        model.updateFitSize(rotated)
-        #expect(link.sent == [.resize(id: sessionA, size: rotated)])
+        model.handle(.ready(generation: 1))
+        model.handle(attached(channel: 5))
+        model.handle(.message(.snapshotEnd(id: sessionA)))
+        return model
     }
 
-    @Test func followingTheMacGivesTheSizeBack() {
-        let model = live()
-        model.updateFitSize(GridSize(cols: 45, rows: 30, cellWidthPx: 24, cellHeightPx: 48))
-        model.fitToScreen()
+    /// 没有 owner 的会话（Mac 上没有窗口在显示它）：自动适配手机，连上时就带着尺寸。
+    @Test func sessionsWithoutAnOwnerFitThePhone() {
+        let model = TerminalModel(sessionId: sessionA, title: "zsh", link: link, ownerHint: .none, onClose: { _ in })
+        model.attachDisplay(display)
+        model.updateFitSize(fit)
+        model.handle(.ready(generation: 1))
+        #expect(link.sent == [.attach(id: sessionA, size: fit, mode: .vtReplay)])
+        #expect(model.fitsPhone)
+        #expect(display.sizeModes.last == true)
+    }
+
+    /// 视图还没排好、不知道手机的尺寸时先不带尺寸连上，`Attached` 以后补发 `Resize` 加 `Focus`。
+    @Test func fitIsSentOnceTheViewKnowsItsSize() {
+        let model = TerminalModel(sessionId: sessionA, title: "zsh", link: link, ownerHint: .none, onClose: { _ in })
+        model.handle(.ready(generation: 1))
+        #expect(link.sent == [.attach(id: sessionA, size: nil, mode: .vtReplay)])
+        model.handle(attached(channel: 5))
         link.clearSent()
-        model.followHostSize()
-        #expect(link.sent == [.detach(id: sessionA), .attach(id: sessionA, size: nil, mode: .vtReplay)])
-        #expect(!model.fitsScreen)
+        model.updateFitSize(fit)
+        #expect(link.sent == [.resize(id: sessionA, size: fit), .focus(id: sessionA, focused: true)])
+        // 同样的尺寸不重复发。
+        link.clearSent()
+        model.updateFitSize(fit)
+        #expect(link.sent.isEmpty)
+    }
+
+    @Test func sessionsShownOnTheMacFollowIt() {
+        let model = followingModel()
+        #expect(link.sent == [.attach(id: sessionA, size: nil, mode: .vtReplay)])
         model.handle(.message(.sizeOwner(id: sessionA, mine: false, owner: "Ethan 的 MacBook")))
+        #expect(!model.fitsPhone)
         #expect(model.sizeOwnership == .other("Ethan 的 MacBook"))
     }
 
-    /// 「跟随 Mac」时手机不带尺寸：打字、视图大小变了、尺寸归属变了都不发 `Resize`、`Focus`，也不带尺寸
-    /// `Attach`。宿主据此不让这条连接的打字抢走尺寸归属。
-    @Test func followingTheMacNeverAsksForASize() {
-        let model = live()
+    /// 不知道有没有 owner 时：重放完以后宿主没报 `SizeOwner`，就当作没有，改成适配手机。
+    @Test func noOwnerReportMeansFitThePhone() async {
+        let model = TerminalModel(
+            sessionId: sessionA, title: "zsh", link: link, ownerProbeDelay: .milliseconds(10), onClose: { _ in })
+        model.attachDisplay(display)
+        model.updateFitSize(fit)
+        model.handle(.ready(generation: 1))
+        #expect(link.sent == [.attach(id: sessionA, size: nil, mode: .vtReplay)])
+        model.handle(attached(channel: 5))
+        model.handle(.message(.snapshotEnd(id: sessionA)))
+        #expect(await eventually { model.fitsPhone })
+        #expect(link.sent.suffix(2) == [.resize(id: sessionA, size: fit), .focus(id: sessionA, focused: true)])
+    }
+
+    /// 宿主报了 owner 就不再自动适配。
+    @Test func anOwnerReportStopsTheProbe() async throws {
+        let model = TerminalModel(
+            sessionId: sessionA, title: "zsh", link: link, ownerProbeDelay: .milliseconds(10), onClose: { _ in })
+        model.updateFitSize(fit)
+        model.handle(.ready(generation: 1))
+        model.handle(attached(channel: 5))
+        model.handle(.message(.snapshotEnd(id: sessionA)))
+        model.handle(.message(.sizeOwner(id: sessionA, mine: false, owner: "Mac")))
+        try await Task.sleep(for: .milliseconds(50))
+        #expect(!model.fitsPhone)
+        #expect(!link.sent.contains(.resize(id: sessionA, size: fit)))
+    }
+
+    /// 自动模式下 owner 变了跟着重新判断：Mac 关了窗口、尺寸轮到手机时适配手机；Mac 又接管时放手，
+    /// 不带尺寸重新连上，免得手机这边打字把尺寸抢回来。
+    @Test func automaticFollowsOwnerChanges() {
+        let model = followingModel()
+        model.handle(.message(.sizeOwner(id: sessionA, mine: false, owner: "Mac")))
         link.clearSent()
-        model.updateFitSize(GridSize(cols: 45, rows: 30, cellWidthPx: 24, cellHeightPx: 48))
+        model.handle(.message(.sizeOwner(id: sessionA, mine: true, owner: "测试 iPhone")))
+        #expect(model.fitsPhone)
+        #expect(link.sent == [.resize(id: sessionA, size: fit), .focus(id: sessionA, focused: true)])
+        link.clearSent()
+        model.handle(.message(.sizeOwner(id: sessionA, mine: false, owner: "Mac")))
+        #expect(!model.fitsPhone)
+        #expect(link.sent == [.detach(id: sessionA), .attach(id: sessionA, size: nil, mode: .vtReplay)])
+    }
+
+    /// 用户手动选了以后以用户为准：owner 再怎么变也不自动切换。
+    @Test func manualChoiceWins() {
+        let model = followingModel()
+        link.clearSent()
+        model.setSizePreference(.fitPhone)
+        #expect(model.fitsPhone)
+        #expect(link.sent == [.resize(id: sessionA, size: fit), .focus(id: sessionA, focused: true)])
+        #expect(display.sizeModes.last == true)
+        link.clearSent()
+        model.handle(.message(.sizeOwner(id: sessionA, mine: false, owner: "Mac")))
+        #expect(model.fitsPhone)
+        #expect(link.sent.isEmpty)
+        // 适配着的时候视图大小变了（转屏、弹键盘）跟着改。
+        model.handle(.message(.sizeOwner(id: sessionA, mine: true, owner: "测试 iPhone")))
+        link.clearSent()
+        let rotated = GridSize(cols: 90, rows: 15, cellWidthPx: 24, cellHeightPx: 48)
+        model.updateFitSize(rotated)
+        #expect(link.sent.first == .resize(id: sessionA, size: rotated))
+        // 换回跟随 Mac：放手尺寸。
+        link.clearSent()
+        model.setSizePreference(.followMac)
+        #expect(!model.fitsPhone)
+        #expect(link.sent == [.detach(id: sessionA), .attach(id: sessionA, size: nil, mode: .vtReplay)])
+        model.handle(.message(.sizeOwner(id: sessionA, mine: true, owner: "测试 iPhone")))
+        #expect(!model.fitsPhone)
+    }
+
+    @Test func reattachingAfterReconnectKeepsTheFit() {
+        let model = followingModel()
+        model.setSizePreference(.fitPhone)
+        model.handle(.state(.waiting(reason: "断了", retryAt: .now)))
+        #expect(model.phase == .disconnected("断了"))
+        link.clearSent()
+        model.handle(.ready(generation: 2))
+        #expect(link.sent == [.attach(id: sessionA, size: fit, mode: .vtReplay)])
+    }
+
+    /// 跟随 Mac 时手机不带尺寸：打字、视图大小变了、`Resync` 后重新连上，都不发 `Resize`、`Focus`，也不带
+    /// 尺寸 `Attach`。宿主据此不让这条连接的打字抢走尺寸归属。
+    @Test func followingTheMacNeverAsksForASize() {
+        let model = followingModel()
+        link.clearSent()
+        model.updateFitSize(GridSize(cols: 50, rows: 20, cellWidthPx: 24, cellHeightPx: 48))
         model.send(.text("ls\r"))
         model.handle(.message(.sizeOwner(id: sessionA, mine: false, owner: "Ethan 的 MacBook")))
         model.handle(.message(.resync(id: sessionA, reason: "slow")))
@@ -156,16 +254,31 @@ import Testing
         #expect(!link.inputs.isEmpty)
     }
 
-    @Test func reattachingAfterReconnectKeepsTheFit() {
-        let model = live()
-        let fit = GridSize(cols: 45, rows: 30, cellWidthPx: 24, cellHeightPx: 48)
-        model.updateFitSize(fit)
-        model.fitToScreen()
-        model.handle(.state(.waiting(reason: "断了", retryAt: .now)))
-        #expect(model.phase == .disconnected("断了"))
+    /// agent 停下来等回答时出现快速回复；快速回复的回话由它自己收，不当作这个会话的错误。
+    @Test func quickReplyAppearsWhileTheAgentWaits() async {
+        let model = followingModel()
+        #expect(!model.isAwaitingAnswer)
+        model.handle(.message(.meta(id: sessionA, meta: SessionMeta(agent: Agent(kind: AgentKind("claude"), state: .blocked)))))
+        #expect(model.isAwaitingAnswer)
         link.clearSent()
-        model.handle(.ready(generation: 2))
-        #expect(link.sent == [.attach(id: sessionA, size: fit, mode: .vtReplay)])
+        await model.quickReply.press(QuickKey.standard[0])
+        guard case .sendKeys(let req, sessionA, ["1"])? = link.sent.first else {
+            Issue.record("expected send_keys, got \(link.sent)")
+            return
+        }
+        model.handle(.message(.done(req: req)))
+        #expect(model.quickReply.deliveredCount == 1)
+        #expect(model.errorMessage == nil)
+        model.handle(.message(.meta(id: sessionA, meta: SessionMeta(agent: Agent(kind: AgentKind("claude"), state: .working)))))
+        #expect(!model.isAwaitingAnswer)
+    }
+
+    @Test func keyboardStateAndRequests() {
+        let model = followingModel()
+        model.showKeyboard()
+        #expect(display.keyboardRequests == 1)
+        model.setKeyboardVisible(true)
+        #expect(model.keyboardVisible)
     }
 
     @Test func exitBellAndGone() {

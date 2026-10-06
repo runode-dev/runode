@@ -23,11 +23,11 @@ import Testing
         #expect(model.sessions.count == 2)
         #expect(model.loaded)
         // 终端页开着的会话不发只看状态的 `Attach`，免得换掉终端页的订阅。
-        #expect(link.sent.dropFirst() == [.attach(id: sessionA, size: nil, mode: .metaOnly)])
+        #expect(attaches(link.sent) == [.attach(id: sessionA, size: nil, mode: .metaOnly)])
         // 再列一次不重复发。
         link.clearSent()
         model.handle(.message(.sessionList([info(sessionA, title: "a"), info(sessionB, title: "b")])))
-        #expect(link.sent.isEmpty)
+        #expect(attaches(link.sent).isEmpty)
     }
 
     @Test func metaUpdatesArriveLive() {
@@ -101,7 +101,16 @@ import Testing
         link.clearSent()
         model.handle(.ready(generation: 2))
         model.handle(.message(.sessionList([info(sessionA, title: "a")])))
-        #expect(link.sent == [.listSessions, .attach(id: sessionA, size: nil, mode: .metaOnly)])
+        #expect(link.sent.first == .listSessions)
+        #expect(attaches(link.sent) == [.attach(id: sessionA, size: nil, mode: .metaOnly)])
+    }
+}
+
+/// 发出去的消息里的 `Attach`。
+func attaches(_ sent: [ClientMsg]) -> [ClientMsg] {
+    sent.filter {
+        if case .attach = $0 { return true }
+        return false
     }
 }
 

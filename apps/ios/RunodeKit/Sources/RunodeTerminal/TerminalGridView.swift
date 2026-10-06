@@ -171,12 +171,6 @@
             flush()
         }
 
-        /// 私用区的码位：Powerline、Nerd Font 的图标都在这里，主字体缺字时退到符号字体。
-        private static func isPrivateUse(_ scalar: Unicode.Scalar) -> Bool {
-            (0xE000...0xF8FF).contains(scalar.value) || (0xF0000...0xFFFFD).contains(scalar.value)
-                || (0x23FB...0x23FE).contains(scalar.value) || scalar.value == 0x2B58
-        }
-
         /// 这一格后面紧跟着一个空格子：图标可以占两格宽，和 Ghostty 处理 Nerd Font 图标的做法一样。
         private func followedByBlank(row: Int, column: Int) -> Bool {
             guard let next = cellAt(row: row, column: column + 1) else { return false }
@@ -221,12 +215,23 @@
             }
         }
 
-        /// Powerline 的几何分隔符按格子自己画（见 `PowerlineGlyph`）；不是这类字符时返回 false。形状左右各
+        /// 制表符和 Powerline 的几何分隔符按格子自己画（见 `BoxDrawing`、`PowerlineGlyph`）；不是这类字符时
+        /// 返回 false。形状左右各
         /// 多画半个像素，盖住和相邻格子背景之间因为格子宽度不是整像素而露出的缝。
         private func drawPowerline(_ text: String, in rect: CGRect, color: CGColor, context: CGContext) -> Bool {
-            guard let scalar = text.unicodeScalars.first, text.unicodeScalars.count == 1,
-                PowerlineGlyph.handles(scalar)
-            else { return false }
+            guard let scalar = text.unicodeScalars.first, text.unicodeScalars.count == 1 else { return false }
+            if BoxDrawing.handles(scalar) {
+                let scale = max(contentScaleFactor, 1)
+                guard let path = BoxDrawing.path(for: scalar, in: rect, thickness: font.thickness, scale: scale)
+                else { return false }
+                context.saveGState()
+                defer { context.restoreGState() }
+                context.addPath(path)
+                context.setFillColor(color)
+                context.fillPath()
+                return true
+            }
+            guard PowerlineGlyph.handles(scalar) else { return false }
             let hair = 0.5 / max(contentScaleFactor, 1)
             let padded = rect.insetBy(dx: -hair, dy: 0)
             guard let (path, paint) = PowerlineGlyph.path(for: scalar, in: padded, thickness: font.thickness) else {
@@ -270,7 +275,7 @@
                     CTFontDrawGlyphs(ctFont, &glyphs, &position, 1, context)
                     return
                 }
-                if Self.isPrivateUse(scalar), let symbols = font.symbols,
+                if SymbolFont.isPrivateUse(scalar), let symbols = font.symbols,
                     CTFontGetGlyphsForCharacters(symbols, &units, &glyphs, units.count), glyphs[0] != 0
                 {
                     drawSymbol(glyphs[0], from: symbols, color: color, width: iconWidth, in: context)

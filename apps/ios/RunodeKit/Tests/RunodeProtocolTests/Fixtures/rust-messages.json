@@ -363,6 +363,24 @@
    },
    "type": "meta"
   },
+  "paste": {
+   "id": "0123456789abcdef0011223344556677",
+   "req": 6,
+   "text": "继续，用方案 2\n",
+   "type": "paste"
+  },
+  "read_screen": {
+   "command": null,
+   "id": "0123456789abcdef0011223344556677",
+   "lines": 8,
+   "type": "read_screen"
+  },
+  "read_screen_command": {
+   "command": 1,
+   "id": "0123456789abcdef0011223344556677",
+   "lines": null,
+   "type": "read_screen"
+  },
   "resize": {
    "id": "0123456789abcdef0011223344556677",
    "size": {
@@ -393,6 +411,17 @@
    "text": "a\n",
    "truncated": false,
    "type": "screen_text"
+  },
+  "send_keys": {
+   "id": "0123456789abcdef0011223344556677",
+   "keys": [
+    "1",
+    "enter",
+    "esc",
+    "up"
+   ],
+   "req": 5,
+   "type": "send_keys"
   },
   "session_list": {
    "sessions": [

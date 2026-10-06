@@ -63,3 +63,66 @@ import Testing
         #expect(PowerlineGlyph.path(for: "\u{F113}", in: CGRect(x: 0, y: 0, width: 8, height: 16), thickness: 1) == nil)
     }
 }
+
+@Suite struct BoxDrawingTests {
+    let rect = CGRect(x: 7.83, y: 16, width: 7.83, height: 16)
+
+    /// `─` 从格子左边画到右边，两头对齐设备像素：相邻两格算出同一条边，一排接起来没有缝。
+    @Test func horizontalLinesSpanTheCellOnPixelEdges() throws {
+        let scale: CGFloat = 3
+        let path = try #require(BoxDrawing.path(for: "\u{2500}", in: rect, thickness: 1, scale: scale))
+        let box = path.boundingBoxOfPath
+        #expect(abs(box.minX - (rect.minX * scale).rounded() / scale) < 0.0001)
+        #expect(abs(box.maxX - (rect.maxX * scale).rounded() / scale) < 0.0001)
+        let next = try #require(
+            BoxDrawing.path(for: "\u{2500}", in: rect.offsetBy(dx: rect.width, dy: 0), thickness: 1, scale: scale))
+        #expect(abs(next.boundingBoxOfPath.minX - box.maxX) < 0.0001)
+        #expect(box.height >= 1 / scale)
+        #expect(box.midY > rect.minY && box.midY < rect.maxY)
+    }
+
+    @Test func cornersReachTheirTwoEdges() throws {
+        let path = try #require(BoxDrawing.path(for: "\u{250C}", in: rect, thickness: 1, scale: 2))
+        let box = path.boundingBoxOfPath
+        // ┌ 往右、往下：碰到右边和下边，碰不到左边和上边。
+        #expect(abs(box.maxX - (rect.maxX * 2).rounded() / 2) < 0.0001)
+        #expect(abs(box.maxY - (rect.maxY * 2).rounded() / 2) < 0.0001)
+        #expect(box.minX > rect.minX + 1)
+        #expect(box.minY > rect.minY + 1)
+    }
+
+    @Test func heavyLinesAreThicker() throws {
+        let light = try #require(BoxDrawing.path(for: "\u{2500}", in: rect, thickness: 1, scale: 3))
+        let heavy = try #require(BoxDrawing.path(for: "\u{2501}", in: rect, thickness: 1, scale: 3))
+        #expect(heavy.boundingBoxOfPath.height > light.boundingBoxOfPath.height)
+    }
+
+    @Test func roundedCornersAndUnknowns() throws {
+        for value: UInt32 in [0x256D, 0x256E, 0x256F, 0x2570] {
+            let path = try #require(BoxDrawing.path(for: Unicode.Scalar(value)!, in: rect, thickness: 1, scale: 3))
+            #expect(!path.boundingBoxOfPath.isEmpty)
+        }
+        #expect(!BoxDrawing.handles("A"))
+        #expect(BoxDrawing.path(for: "\u{2550}", in: rect, thickness: 1, scale: 3) == nil)
+    }
+}
+
+@Suite struct SymbolFallbackTests {
+    /// 预览和终端视图用同一个判断决定哪些字退到符号字体：私用区（含辅助平面的）和几个电源符号，
+    /// 中文、emoji 照旧交给系统的后备字体。
+    @Test func privateUseDetection() {
+        for scalar in ["\u{E0A0}", "\u{E0B0}", "\u{F113}", "\u{F0001}", "\u{23FB}"] as [Unicode.Scalar] {
+            #expect(SymbolFont.isPrivateUse(scalar), "\(scalar)")
+        }
+        for scalar in ["A", "中", "✅", "\u{2500}"] as [Unicode.Scalar] {
+            #expect(!SymbolFont.isPrivateUse(scalar), "\(scalar)")
+        }
+    }
+
+    /// 符号字体注册到了本进程，SwiftUI 能按 PostScript 名字找到它。
+    @Test func bundledSymbolFontIsRegisteredByName() throws {
+        let name = try #require(SymbolFont.postScriptName)
+        let font = CTFontCreateWithName(name as CFString, 12, nil)
+        #expect(CTFontCopyPostScriptName(font) as String == name)
+    }
+}

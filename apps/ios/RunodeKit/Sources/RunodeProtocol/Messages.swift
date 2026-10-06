@@ -63,9 +63,11 @@ public enum ClientKind: Hashable, Sendable, Codable {
     }
 }
 
-/// 前端发给宿主的消息。只列出手机这个前端会发的几种；JSON 的样子和宿主的 `ClientMsg` 一致，
-/// 可缺省的字段也照宿主序列化的样子写出 `null`。宿主对手机连接上的 `Shutdown`、交接（`Handoff` 等）、
-/// `UiReply`、`SetOptions`、`SetTheme` 只回 `Error`，这里故意不定义它们，手机就发不出去。
+/// 前端发给宿主的消息。只列出手机这个前端会发的几种：`Hello`、`ListSessions`、`Spawn`、`Attach`、
+/// `Detach`、`Resize`、`Focus`、`ClearScreen`、`Kill`、`ReadScreen`、`SendKeys`、`Paste`。JSON 的样子和
+/// 宿主的 `ClientMsg` 一致，可缺省的字段也照宿主序列化的样子写出 `null`。宿主对手机连接上的 `Shutdown`、
+/// 交接（`Handoff` 等）、`UiReply`、`SetOptions`、`SetTheme` 只回 `Error`，这里故意不定义它们，手机就
+/// 发不出去。
 public enum ClientMsg: Hashable, Sendable, Encodable {
     /// 连上后的第一条消息。手机的 `client` 是 `mobile`，`caps` 只要 VT 重放。
     case hello(protocol: UInt32, build: String, client: ClientKind, caps: Caps, session: SessionId?, device: String?)
@@ -82,6 +84,15 @@ public enum ClientMsg: Hashable, Sendable, Encodable {
     case clearScreen(id: SessionId)
     /// 结束会话。
     case kill(id: SessionId)
+    /// 读会话屏幕底部的文字：从最后一个有字的行往上 `lines` 行（含回滚历史），为空时是当前一屏。
+    /// `command` 为 `n` 时不看 `lines`，读倒数第 n 条命令（1 是最近一条）的输出，不含提示符，要 shell
+    /// 集成标出的提示符。宿主回 `ScreenText`，出错时回带着会话标识的 `Error`。不用连上会话。
+    case readScreen(id: SessionId, lines: UInt32?, command: UInt32? = nil)
+    /// 发控制键（`enter`、`esc`、`up`、`1` 这类写法），宿主按它那份 VT 当前的模式编码后写进去，回
+    /// `Done`。不用连上会话。
+    case sendKeys(req: UInt32, id: SessionId, keys: [String])
+    /// 粘贴一段文字，程序开着括号粘贴时宿主套上括号，回 `Done`。不用连上会话。
+    case paste(req: UInt32, id: SessionId, text: String)
 
     private struct Key: CodingKey {
         var stringValue: String
@@ -136,6 +147,21 @@ public enum ClientMsg: Hashable, Sendable, Encodable {
         case let .kill(id):
             try c.encode("kill", forKey: Key("type"))
             try c.encode(id, forKey: Key("id"))
+        case let .readScreen(id, lines, command):
+            try c.encode("read_screen", forKey: Key("type"))
+            try c.encode(id, forKey: Key("id"))
+            try c.encode(lines, forKey: Key("lines"))
+            try c.encode(command, forKey: Key("command"))
+        case let .sendKeys(req, id, keys):
+            try c.encode("send_keys", forKey: Key("type"))
+            try c.encode(req, forKey: Key("req"))
+            try c.encode(id, forKey: Key("id"))
+            try c.encode(keys, forKey: Key("keys"))
+        case let .paste(req, id, text):
+            try c.encode("paste", forKey: Key("type"))
+            try c.encode(req, forKey: Key("req"))
+            try c.encode(id, forKey: Key("id"))
+            try c.encode(text, forKey: Key("text"))
         }
     }
 }
