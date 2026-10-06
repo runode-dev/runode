@@ -29,6 +29,10 @@ pub enum Probe {
     Absent,
     /// 有，但协议版本对不上，多半是旧版本的宿主还活着。
     Incompatible(String),
+    /// 有，但跑在另一个 app 的进程里（`Welcome::standalone` 为假）：那个 app 是它的界面，它的会话
+    /// 有没有被认领、有没有会话都说明不了什么（那个 app 可能刚提前拉起 shell 还没连上，或者还没
+    /// 开会话）。
+    OtherApp,
     /// 有，`sessions` 个会话，其中 `claimed` 个有桌面的界面连着。
     Running { sessions: usize, claimed: usize },
 }
@@ -53,9 +57,11 @@ pub enum Choice {
 ///   这次接着连它、把会话接回来，这次退出时让它连会话一起退出，下次就跑在 app 里；没有会话时
 ///   让它退出。有会话连着别的桌面时，那是另一个 runode 的宿主，不碰它，跑在 app 里也不开 socket。
 /// - 协议对不上：跑在 app 里，不开 socket（锁在它手里）。
+/// - socket 上是另一个 app 进程里的宿主：不管开关，都不连进去当它的界面、也不让它退出，跑在
+///   app 里，不开 socket（锁在那个 app 手里）。
 pub fn choose_mode(terminal_host: bool, probe: &Probe) -> Choice {
     match (terminal_host, probe) {
-        (_, Probe::Incompatible(_)) => Choice::InProcess { listen: false },
+        (_, Probe::Incompatible(_) | Probe::OtherApp) => Choice::InProcess { listen: false },
         (true, Probe::Running { .. }) => Choice::Keep { end_on_quit: false },
         (true, Probe::Absent) => Choice::Launch,
         (false, Probe::Absent) => Choice::InProcess { listen: true },
@@ -92,7 +98,8 @@ fn probe_once(socket: &Path, build: &BuildId) -> io::Result<Probe> {
     stream.set_write_timeout(Some(CONNECT_TIMEOUT))?;
     send(&mut stream, &hello(build, ClientKind::Cli))?;
     match receive(&mut stream)? {
-        HostMsg::Welcome { .. } => {}
+        HostMsg::Welcome { standalone: true, .. } => {}
+        HostMsg::Welcome { standalone: false, .. } => return Ok(Probe::OtherApp),
         HostMsg::Incompatible { reason, .. } => return Ok(Probe::Incompatible(reason)),
         other => return Err(io::Error::other(format!("unexpected answer {other:?}"))),
     }
@@ -105,14 +112,19 @@ fn probe_once(socket: &Path, build: &BuildId) -> io::Result<Probe> {
     }
 }
 
-/// 让 `socket` 上在跑的宿主结束所有会话后退出，等它断开，最多 `CONNECT_TIMEOUT`。
+/// 让 `socket` 上在跑的宿主结束所有会话后退出，等它断开，最多 `CONNECT_TIMEOUT`。宿主跑在另一个
+/// app 里时不碰它，返回错误。
 pub fn retire(socket: &Path, build: &BuildId) -> io::Result<()> {
     let mut stream = UnixStream::connect(socket)?;
     stream.set_read_timeout(Some(CONNECT_TIMEOUT))?;
     stream.set_write_timeout(Some(CONNECT_TIMEOUT))?;
     send(&mut stream, &hello(build, ClientKind::Cli))?;
-    if !matches!(receive(&mut stream)?, HostMsg::Welcome { .. }) {
-        return Err(io::Error::other("the host did not say welcome"));
+    match receive(&mut stream)? {
+        HostMsg::Welcome { standalone: true, .. } => {}
+        HostMsg::Welcome { standalone: false, .. } => {
+            return Err(io::Error::other("the host runs inside another runode app"));
+        }
+        _ => return Err(io::Error::other("the host did not say welcome")),
     }
     send(&mut stream, &ClientMsg::Shutdown { kill_sessions: true })?;
     // 宿主发完 `Goodbye` 就断开；读到断开为止。
@@ -120,11 +132,13 @@ pub fn retire(socket: &Path, build: &BuildId) -> io::Result<()> {
     Ok(())
 }
 
-/// `link` 连上 `socket` 上的宿主。连上却在 `Welcome` 前断开时过一会儿再试，最多 `CONNECT_TIMEOUT`。
+/// `link` 连上 `socket` 上单独一个进程的宿主（见 `Link::connect_standalone`）。连上却在 `Welcome` 前
+/// 断开时过一会儿再试，最多 `CONNECT_TIMEOUT`。
 pub fn connect(link: &Link, socket: &Path) -> Result<(), ConnectError> {
     let deadline = Instant::now() + CONNECT_TIMEOUT;
     loop {
-        let result = UnixStream::connect(socket).map_err(ConnectError::Io).and_then(|stream| link.connect(stream));
+        let result =
+            UnixStream::connect(socket).map_err(ConnectError::Io).and_then(|stream| link.connect_standalone(stream));
         match result {
             Err(ConnectError::Closed) if Instant::now() < deadline => thread::sleep(RETRY_INTERVAL),
             result => return result,
@@ -132,17 +146,18 @@ pub fn connect(link: &Link, socket: &Path) -> Result<(), ConnectError> {
     }
 }
 
-/// `link` 连上 `socket` 上的宿主，没有就用 `exe --host` 拉起一个：每 `RETRY_INTERVAL` 试连一次，
-/// 最多 `CONNECT_TIMEOUT`。连上却在 `Welcome` 前断开（撞上它正因空闲退出）时接着试，它退出后
-/// 再拉起新的。
+/// `link` 连上 `socket` 上单独一个进程的宿主，没有就用 `exe --host` 拉起一个：每 `RETRY_INTERVAL`
+/// 试连一次，最多 `CONNECT_TIMEOUT`。连上却在 `Welcome` 前断开（撞上它正因空闲退出）时接着试，
+/// 它退出后再拉起新的。socket 上是另一个 app 里的宿主时不拉起，返回 `ConnectError::NotStandalone`。
 pub fn connect_or_launch(link: &Link, socket: &Path, exe: &Path) -> Result<(), ConnectError> {
     let deadline = Instant::now() + CONNECT_TIMEOUT;
     let mut launched_at: Option<Instant> = None;
     loop {
-        let result = UnixStream::connect(socket).map_err(ConnectError::Io).and_then(|stream| link.connect(stream));
+        let result =
+            UnixStream::connect(socket).map_err(ConnectError::Io).and_then(|stream| link.connect_standalone(stream));
         match result {
             Ok(()) => return Ok(()),
-            Err(ConnectError::Incompatible(reason)) => return Err(ConnectError::Incompatible(reason)),
+            Err(err @ (ConnectError::Incompatible(_) | ConnectError::NotStandalone)) => return Err(err),
             Err(ConnectError::Closed) => {}
             Err(ConnectError::Io(err)) => {
                 if launched_at.is_none_or(|at| at.elapsed() >= RELAUNCH_AFTER) {
@@ -215,9 +230,113 @@ mod tests {
     }
 
     #[test]
+    fn a_host_inside_another_app_is_left_alone() {
+        assert_eq!(choose_mode(true, &Probe::OtherApp), Choice::InProcess { listen: false });
+        assert_eq!(choose_mode(false, &Probe::OtherApp), Choice::InProcess { listen: false });
+    }
+
+    #[test]
     fn an_incompatible_host_falls_back_to_the_app_without_a_socket() {
         let old = Probe::Incompatible("protocol 2".into());
         assert_eq!(choose_mode(true, &old), Choice::InProcess { listen: false });
         assert_eq!(choose_mode(false, &old), Choice::InProcess { listen: false });
+    }
+
+    /// 对着真的宿主探：socket 上是另一个 app 进程里的宿主（只 `listen`、没进 `Host::run_until_idle`）。
+    mod against_a_host {
+        use std::{path::PathBuf, sync::mpsc};
+
+        use runode_host::{Host, Stopped};
+        use runode_shared_types::{grid::GridSize, shell::IntegrationMode};
+
+        use super::*;
+        use crate::session_host::link::SpawnOptions;
+
+        const BUILD: &str = "launch-test";
+        const SIZE: GridSize = GridSize { cols: 20, rows: 4, cell_width_px: 8, cell_height_px: 16 };
+        const WAIT: Duration = Duration::from_secs(10);
+
+        fn build() -> BuildId {
+            BuildId(BUILD.into())
+        }
+
+        /// 一个宿主开着 `name` 目录里的 socket，返回它和 socket 的路径。
+        fn listening(name: &str) -> (Host, PathBuf) {
+            let dir = std::env::temp_dir().join(format!("rnm-{}-{name}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&dir);
+            std::fs::create_dir_all(&dir).unwrap();
+            let host = Host::new(build());
+            let socket = dir.join("host.sock");
+            host.listen(&socket, &dir.join("host.lock")).unwrap();
+            (host, socket)
+        }
+
+        /// 另一个 app 刚提前拉起了 shell（`start: false`，还没有视图连上它，没被认领）：探到的是
+        /// 别的 app 的宿主，开关开着关着都不连进去，也不让它退出，它的会话还在。
+        #[test]
+        fn another_app_that_just_prespawned() {
+            let (host, socket) = listening("prespawn");
+            let other_app = Link::new(build());
+            other_app.connect(host.connect_pair().unwrap()).unwrap();
+            let id = other_app
+                .spawn(SpawnOptions {
+                    size: SIZE,
+                    cwd: None,
+                    integration: IntegrationMode::Off,
+                    start: false,
+                    shell: Some("/bin/cat".into()),
+                    settings: None,
+                    env: Vec::new(),
+                })
+                .unwrap();
+            let probed = probe(&socket, &build());
+            assert_eq!(probed, Probe::OtherApp);
+            assert_eq!(choose_mode(false, &probed), Choice::InProcess { listen: false });
+            assert_eq!(choose_mode(true, &probed), Choice::InProcess { listen: false });
+            assert!(retire(&socket, &build()).is_err());
+            assert!(matches!(connect(&Link::new(build()), &socket), Err(ConnectError::NotStandalone)));
+            let sessions = other_app.list_sessions(WAIT).unwrap();
+            assert_eq!(sessions.iter().map(|s| s.id).collect::<Vec<_>>(), [id]);
+            other_app.kill(id);
+        }
+
+        /// 另一个 app 还没开会话：同样不碰它。
+        #[test]
+        fn another_app_without_sessions() {
+            let (host, socket) = listening("empty");
+            let other_app = Link::new(build());
+            other_app.connect(host.connect_pair().unwrap()).unwrap();
+            let probed = probe(&socket, &build());
+            assert_eq!(probed, Probe::OtherApp);
+            assert_eq!(choose_mode(false, &probed), Choice::InProcess { listen: false });
+            assert_eq!(choose_mode(true, &probed), Choice::InProcess { listen: false });
+            assert!(retire(&socket, &build()).is_err());
+            let exe = PathBuf::from("/nonexistent/runode");
+            assert!(matches!(connect_or_launch(&Link::new(build()), &socket, &exe), Err(ConnectError::NotStandalone)));
+            assert!(other_app.list_sessions(WAIT).is_ok(), "the other app's host is still there");
+        }
+
+        /// 单独一个进程的宿主没有会话：探得出来，开关关着时让它退出。
+        #[test]
+        fn a_standalone_host_without_sessions_is_retired() {
+            let (host, socket) = listening("retire");
+            let stopped = {
+                let (tx, rx) = mpsc::channel();
+                thread::spawn(move || tx.send(host.run_until_idle(Duration::from_secs(60))));
+                rx
+            };
+            // `run_until_idle` 起来之前宿主还说自己跑在 app 里。
+            let deadline = Instant::now() + WAIT;
+            let probed = loop {
+                match probe(&socket, &build()) {
+                    Probe::OtherApp if Instant::now() < deadline => thread::sleep(Duration::from_millis(5)),
+                    probed => break probed,
+                }
+            };
+            assert_eq!(probed, Probe::Running { sessions: 0, claimed: 0 });
+            assert_eq!(choose_mode(false, &probed), Choice::Retire);
+            retire(&socket, &build()).unwrap();
+            assert_eq!(stopped.recv_timeout(WAIT), Ok(Stopped::Shutdown));
+        }
     }
 }

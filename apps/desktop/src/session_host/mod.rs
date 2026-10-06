@@ -11,7 +11,7 @@ mod launch;
 mod link;
 
 use std::{
-    path::PathBuf,
+    path::{Path, PathBuf},
     sync::{Condvar, LazyLock, Mutex, OnceLock, PoisonError},
     thread,
     time::{Duration, Instant},
@@ -65,6 +65,15 @@ static NOTICE: Mutex<Option<Notice>> = Mutex::new(None);
 pub enum Notice {
     /// socket 上的宿主协议对不上（多半是旧版本的还活着），这次跑在 app 里，命令行连不上 app。
     Incompatible(String),
+    /// socket 上是另一个 runode app 进程里的宿主：这次跑在 app 里、不开 socket，命令行连到的是
+    /// 那个 app。
+    OtherApp,
+    /// 要单独一个进程的宿主，却连不上也拉不起来，这次跑在 app 里，退出时会话跟着结束。
+    Unreachable(String),
+}
+
+fn notify(notice: Notice) {
+    *NOTICE.lock().unwrap_or_else(PoisonError::into_inner) = Some(notice);
 }
 
 /// 启动时在后台线程 `host-connect` 里：读配置、定宿主怎么跑、连上它，再做 `then`（比如提前拉起
@@ -152,6 +161,10 @@ pub fn reconnect() -> Result<()> {
             };
             match connected {
                 Ok(()) => Mode::Standalone { end_on_quit },
+                Err(ConnectError::NotStandalone) => {
+                    tracing::warn!("another runode app took the host socket, running the host in this app");
+                    in_process(false)
+                }
                 Err(err) if end_on_quit => {
                     tracing::info!("the leftover host is gone, running the host in the app: {err}");
                     in_process(true)
@@ -188,9 +201,16 @@ fn establish(terminal_host: bool) {
     let probe = socket.as_deref().map_or(Probe::Absent, |socket| launch::probe(socket, &build));
     let choice = launch::choose_mode(terminal_host, &probe);
     tracing::info!("host: {probe:?} with terminal-host = {terminal_host}, so {choice:?}");
-    if let Probe::Incompatible(reason) = &probe {
-        tracing::warn!("an incompatible host is running, so the host runs in the app without a socket: {reason}");
-        *NOTICE.lock().unwrap_or_else(PoisonError::into_inner) = Some(Notice::Incompatible(reason.clone()));
+    match &probe {
+        Probe::Incompatible(reason) => {
+            tracing::warn!("an incompatible host is running, so the host runs in the app without a socket: {reason}");
+            notify(Notice::Incompatible(reason.clone()));
+        }
+        Probe::OtherApp => {
+            tracing::warn!("another runode app runs the host on the socket, so this one runs its own without a socket");
+            notify(Notice::OtherApp);
+        }
+        _ => {}
     }
     let mode = match (choice, socket) {
         (Choice::InProcess { listen }, _) => in_process(listen),
@@ -200,33 +220,57 @@ fn establish(terminal_host: bool) {
             }
             in_process(true)
         }
-        (Choice::Keep { end_on_quit }, Some(socket)) => match launch::connect(&LINK, &socket) {
-            Ok(()) => Mode::Standalone { end_on_quit },
-            Err(err) => {
-                tracing::warn!("failed to connect to the running host, running it in the app: {err}");
-                in_process(true)
-            }
-        },
-        (Choice::Launch, Some(socket)) => {
-            let launched = std::env::current_exe()
-                .map_err(ConnectError::Io)
-                .and_then(|exe| launch::connect_or_launch(&LINK, &socket, &exe));
-            match launched {
-                Ok(()) => Mode::Standalone { end_on_quit: false },
-                Err(ConnectError::Incompatible(reason)) => {
-                    tracing::warn!("an incompatible host took the socket, running the host in the app: {reason}");
-                    *NOTICE.lock().unwrap_or_else(PoisonError::into_inner) = Some(Notice::Incompatible(reason));
-                    in_process(false)
+        (Choice::Keep { end_on_quit }, Some(socket)) => {
+            let connected = launch::connect(&LINK, &socket).or_else(|err| match err {
+                ConnectError::Incompatible(_) | ConnectError::NotStandalone => Err(err),
+                // 开关关着，只是来接上次留下的会话：不为它另拉起宿主。
+                err if end_on_quit => Err(err),
+                // 宿主在跑却连不上（比如卡住了，或者刚好在退出）：照开关开着时的办法，连不上就拉起
+                // 新的；它还拿着锁时新拉起的抢不到、自己退出，等它放开后再拉。
+                err => {
+                    tracing::warn!("failed to connect to the running host, starting one: {err}");
+                    launch_host(&socket)
                 }
-                Err(err) => {
-                    tracing::warn!("failed to start the host process, running it in the app: {err}");
-                    in_process(true)
-                }
+            });
+            match connected {
+                Ok(()) => Mode::Standalone { end_on_quit },
+                Err(err) => fall_back(err),
             }
         }
+        (Choice::Launch, Some(socket)) => match launch_host(&socket) {
+            Ok(()) => Mode::Standalone { end_on_quit: false },
+            Err(err) => fall_back(err),
+        },
         (_, None) => in_process(false),
     };
     *MODE.lock().unwrap_or_else(PoisonError::into_inner) = mode;
+}
+
+/// 连上 socket 上单独一个进程的宿主，没有就拉起一个，见 `launch::connect_or_launch`。
+fn launch_host(socket: &Path) -> Result<(), ConnectError> {
+    std::env::current_exe().map_err(ConnectError::Io).and_then(|exe| launch::connect_or_launch(&LINK, socket, &exe))
+}
+
+/// 单独一个进程的宿主连不上也拉不起来（`err`）：这次跑在 app 里，告诉用户。协议对不上、socket 上
+/// 是另一个 app 的宿主时锁在别人手里，不开 socket。
+fn fall_back(err: ConnectError) -> Mode {
+    match err {
+        ConnectError::Incompatible(reason) => {
+            tracing::warn!("an incompatible host took the socket, running the host in the app: {reason}");
+            notify(Notice::Incompatible(reason));
+            in_process(false)
+        }
+        ConnectError::NotStandalone => {
+            tracing::warn!("another runode app runs the host on the socket, running this one's in the app");
+            notify(Notice::OtherApp);
+            in_process(false)
+        }
+        err => {
+            tracing::warn!("failed to reach or start the host process, running it in the app: {err}");
+            notify(Notice::Unreachable(err.to_string()));
+            in_process(true)
+        }
+    }
 }
 
 /// 宿主跑在 app 里：建好它（已经建过就用原来的），`listen` 时先开 socket（之后启动的 shell 才知道
@@ -282,12 +326,19 @@ fn listen_in_app(host: &Host) {
 
 /// 有要告诉用户的宿主的事（见 `Notice`）时，在最前面的窗口上弹框说一声。
 pub fn show_notice(cx: &mut App) {
-    let Some(Notice::Incompatible(reason)) = take_notice() else { return };
+    let Some(notice) = take_notice() else { return };
     let Some(window) = cx.active_window().or_else(|| cx.windows().into_iter().next()) else {
         return;
     };
-    let title = rust_i18n::t!("host.incompatible_title");
-    let detail = rust_i18n::t!("host.incompatible_detail", reason = reason);
+    let (title, detail) = match notice {
+        Notice::Incompatible(reason) => {
+            (rust_i18n::t!("host.incompatible_title"), rust_i18n::t!("host.incompatible_detail", reason = reason))
+        }
+        Notice::OtherApp => (rust_i18n::t!("host.other_app_title"), rust_i18n::t!("host.other_app_detail")),
+        Notice::Unreachable(reason) => {
+            (rust_i18n::t!("host.unreachable_title"), rust_i18n::t!("host.unreachable_detail", reason = reason))
+        }
+    };
     let answer = window.update(cx, |_, window, cx| {
         window.prompt(PromptLevel::Warning, &title, Some(&detail), &[&*rust_i18n::t!("host.ok")], cx)
     });

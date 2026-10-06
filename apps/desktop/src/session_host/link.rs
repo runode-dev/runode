@@ -10,7 +10,12 @@
 //!
 //! 连上一个会话（`attach`）时先登记再发 `Attach`。发出 `Attach` 到收到对应的 `Attached` 之间，
 //! 这个会话的输出和标记一律丢掉：宿主按先后处理同一条连接上的消息，旧订阅的帧都排在新的
-//! `Attached` 前面，新订阅从一份新的屏幕开始，旧的帧用不上。
+//! `Attached` 前面，新订阅从一份新的屏幕开始，旧的帧用不上。只有 `Exited` 留着，等这次连上（或者
+//! 没连成）之后再交出去：会话正好在这时被结束（比如重连时撞上 `runode kill`）的话，新的订阅连不上，
+//! 视图只能靠它知道会话没了。
+//!
+//! 宿主编的快照格式（`HostMsg::Welcome::snapshot_format`）和这边解得了的不一样时，要快照一律改要
+//! VT 重放。
 //!
 //! 换主题和改选项（`SetTheme`、`SetOptions`）记着最近一次的，重连后补发。
 
@@ -21,7 +26,7 @@ use std::{
     os::unix::{io::AsRawFd as _, net::UnixStream},
     path::PathBuf,
     sync::{
-        Arc, Mutex, MutexGuard, PoisonError,
+        Arc, Mutex, MutexGuard, OnceLock, PoisonError,
         atomic::{AtomicU32, Ordering},
         mpsc,
     },
@@ -108,6 +113,9 @@ pub struct SpawnOptions {
 pub enum ConnectError {
     /// 宿主说协议版本对不上，多半是旧版本的宿主还活着。
     Incompatible(String),
+    /// 要连单独一个进程的宿主，socket 上的却跑在另一个 app 里（`Welcome::standalone` 为假），见
+    /// `Link::connect_standalone`。
+    NotStandalone,
     /// 还没回 `Welcome` 就断开了，多半撞上它正因空闲退出，过一会儿再试。
     Closed,
     Io(io::Error),
@@ -117,6 +125,7 @@ impl std::fmt::Display for ConnectError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Incompatible(reason) => write!(f, "the host speaks another protocol: {reason}"),
+            Self::NotStandalone => write!(f, "the host runs inside another runode app"),
             Self::Closed => write!(f, "the host closed the connection before saying welcome"),
             Self::Io(err) => write!(f, "failed to talk to the host: {err}"),
         }
@@ -163,6 +172,8 @@ struct State {
     /// 最近一次换的主题和选项，重连后补发。
     theme: Option<TermSettings>,
     record_history: Option<bool>,
+    /// 现在这条连接上的宿主编的快照这边解得了，见 `snapshots_usable`；为假时要快照改要 VT 重放。
+    snapshots: bool,
 }
 
 /// 一个连着（或正连着）的会话。
@@ -179,11 +190,32 @@ struct Route {
     queued: Vec<Vec<u8>>,
     /// `attach_now` 的调用方等着的第一份屏幕；没连成时给它错误。
     first_screen: Option<mpsc::Sender<Result<Screen, String>>>,
+    /// 正连着时收到的 `Exited`，等这次连上（或者没连成）后交出去，见 `Route::settle`。
+    exited: Option<HostMsg>,
 }
 
 impl Route {
     fn new(events: UnboundedSender<LinkEvent>) -> Self {
-        Self { events, attaching: 0, channel: None, assembling: None, queued: Vec::new(), first_screen: None }
+        Self {
+            events,
+            attaching: 0,
+            channel: None,
+            assembling: None,
+            queued: Vec::new(),
+            first_screen: None,
+            exited: None,
+        }
+    }
+
+    /// 连上（或者没连成）了：交出正连着时留下的 `Exited`。返回收的一方还在不在。
+    fn settle(&mut self) -> bool {
+        match self.exited.take() {
+            Some(exited) if self.attaching == 0 => self.deliver(LinkEvent::Msg(exited)),
+            exited => {
+                self.exited = exited;
+                true
+            }
+        }
     }
 
     /// 交给会话一件事，返回收的一方还在不在。
@@ -254,6 +286,10 @@ impl Inner {
         }
         state.connected = false;
         for (_, mut route) in state.sessions.drain() {
+            // 已经知道会话结束了的，先说结束了。
+            if let Some(exited) = route.exited.take() {
+                route.deliver(LinkEvent::Msg(exited));
+            }
             route.deliver(LinkEvent::Lost);
         }
         state.channels.clear();
@@ -289,9 +325,31 @@ impl Link {
     /// 在 `stream` 上和宿主握手（以桌面界面的身份），成了就换上这条连接，起读线程，补发记着的
     /// 主题和选项。原来连着的连接先断开，上面的会话收到 `Lost`。
     pub fn connect(&self, stream: UnixStream) -> Result<(), ConnectError> {
+        self.connect_to(stream, false)
+    }
+
+    /// 同 `connect`，但只连单独一个进程的宿主：握手时宿主说自己跑在某个 app 里（那个 app 才是它的
+    /// 界面）时不换上这条连接，返回 `ConnectError::NotStandalone`。
+    pub fn connect_standalone(&self, stream: UnixStream) -> Result<(), ConnectError> {
+        self.connect_to(stream, true)
+    }
+
+    fn connect_to(&self, stream: UnixStream, standalone_only: bool) -> Result<(), ConnectError> {
         set_buffers(&stream);
         stream.set_write_timeout(Some(WRITE_TIMEOUT)).map_err(ConnectError::Io)?;
-        let host_pid = handshake(&stream, &self.inner.build)?;
+        let welcome = handshake(&stream, &self.inner.build)?;
+        if standalone_only && !welcome.standalone {
+            let _ = stream.shutdown(Shutdown::Both);
+            return Err(ConnectError::NotStandalone);
+        }
+        let host_pid = welcome.host_pid;
+        let snapshots = snapshots_usable(welcome.snapshot_format, local_snapshot_format());
+        if !snapshots {
+            tracing::warn!(
+                "the host encodes snapshots in format {}, which this build cannot read; attaching with VT replays",
+                welcome.snapshot_format
+            );
+        }
         let reader = stream.try_clone().map_err(ConnectError::Io)?;
         let generation = {
             let mut state = self.inner.state();
@@ -301,6 +359,7 @@ impl Link {
             state = self.inner.state();
             state.generation += 1;
             state.connected = true;
+            state.snapshots = snapshots;
             *self.inner.writer() =
                 Some(Writer { generation: state.generation, stream: BufWriter::with_capacity(WRITE_BUFFER, stream) });
             state.generation
@@ -448,9 +507,10 @@ impl Link {
 
     /// 登记（`route` 为 `None` 时沿用原来的登记）再发 `Attach`。没连着、或者要沿用却没有登记时
     /// 返回 false。
-    fn start_attach(&self, id: SessionId, size: Option<GridSize>, mode: AttachMode, route: Option<Route>) -> bool {
+    fn start_attach(&self, id: SessionId, size: Option<GridSize>, mut mode: AttachMode, route: Option<Route>) -> bool {
         {
             let mut state = self.inner.state();
+            let snapshots = state.snapshots;
             if !state.connected {
                 if let Some(mut route) = route {
                     route.deliver(LinkEvent::Lost);
@@ -470,6 +530,7 @@ impl Link {
             let Some(route) = route else {
                 return false;
             };
+            mode = attach_mode(mode, snapshots);
             route.attaching += 1;
             route.assembling = None;
             if let Some(channel) = route.channel.take() {
@@ -551,8 +612,15 @@ impl Link {
     }
 }
 
-/// 以桌面界面的身份握手，返回宿主的进程号。
-fn handshake(stream: &UnixStream, build: &BuildId) -> Result<u32, ConnectError> {
+/// `HostMsg::Welcome` 里这边要的。
+struct Welcome {
+    host_pid: u32,
+    snapshot_format: u16,
+    standalone: bool,
+}
+
+/// 以桌面界面的身份握手，返回宿主的 `Welcome`。
+fn handshake(stream: &UnixStream, build: &BuildId) -> Result<Welcome, ConnectError> {
     let hello = ClientMsg::Hello {
         protocol: PROTOCOL_VERSION,
         build: build.clone(),
@@ -570,7 +638,9 @@ fn handshake(stream: &UnixStream, build: &BuildId) -> Result<u32, ConnectError> 
         match read_frame(&mut reader).map_err(frame_error)? {
             None => return Err(ConnectError::Closed),
             Some(frame) if frame.kind == FrameKind::Control => match frame.message::<HostMsg>() {
-                Ok(HostMsg::Welcome { host_pid, .. }) => break Ok(host_pid),
+                Ok(HostMsg::Welcome { host_pid, snapshot_format, standalone, .. }) => {
+                    break Ok(Welcome { host_pid, snapshot_format, standalone });
+                }
                 Ok(HostMsg::Incompatible { reason, .. }) => break Err(ConnectError::Incompatible(reason)),
                 Ok(HostMsg::Goodbye { .. }) => break Err(ConnectError::Closed),
                 Ok(other) => tracing::debug!("unexpected message before welcome: {other:?}"),
@@ -581,6 +651,31 @@ fn handshake(stream: &UnixStream, build: &BuildId) -> Result<u32, ConnectError> 
     };
     stream.set_read_timeout(None).map_err(ConnectError::Io)?;
     answer
+}
+
+/// 这个构建的界面 VT 解得了的快照格式，算一次；算不出来时为 `None`。
+fn local_snapshot_format() -> Option<u16> {
+    static FORMAT: OnceLock<Option<u16>> = OnceLock::new();
+    *FORMAT.get_or_init(|| {
+        runode_terminal::host_session::snapshot_format()
+            .inspect_err(|err| tracing::warn!("cannot tell which snapshot format this build reads: {err}"))
+            .ok()
+    })
+}
+
+/// 宿主编的快照（格式 `host`）这边（格式 `ours`）解不解得了：格式一样才行，这边说不出自己的格式
+/// 时按解不了。
+fn snapshots_usable(host: u16, ours: Option<u16>) -> bool {
+    ours == Some(host)
+}
+
+/// 实际向宿主要的屏幕：解不了宿主的快照（`snapshots` 为假）时把 `Snapshot` 换成 `VtReplay`，免得
+/// 拿到一份解不了的快照、建不出视图；别的照旧。
+fn attach_mode(requested: AttachMode, snapshots: bool) -> AttachMode {
+    match requested {
+        AttachMode::Snapshot if !snapshots => AttachMode::VtReplay,
+        mode => mode,
+    }
 }
 
 fn frame_error(err: FrameError) -> ConnectError {
@@ -715,7 +810,7 @@ fn dispatch(inner: &Inner, message: HostMsg) {
             let queued = std::mem::take(&mut route.queued);
             let attached = Attached { id, channel, size, mode, meta, settings };
             let alive = if mode == AttachMode::MetaOnly {
-                route.deliver(LinkEvent::Screen(Screen { attached, data: Vec::new() }))
+                route.deliver(LinkEvent::Screen(Screen { attached, data: Vec::new() })) && route.settle()
             } else {
                 route.assembling = Some((attached, Vec::new()));
                 true
@@ -735,7 +830,7 @@ fn dispatch(inner: &Inner, message: HostMsg) {
         HostMsg::SnapshotEnd { id } => {
             let Some(route) = state.sessions.get_mut(&id) else { return };
             if let Some((attached, data)) = route.assembling.take()
-                && !route.deliver(LinkEvent::Screen(Screen { attached, data }))
+                && !(route.deliver(LinkEvent::Screen(Screen { attached, data })) && route.settle())
             {
                 drop_route(&mut state, id);
             }
@@ -758,7 +853,7 @@ fn dispatch(inner: &Inner, message: HostMsg) {
                     return;
                 }
             }
-            if !route.deliver(LinkEvent::Msg(HostMsg::Error { req, id: Some(id), message })) {
+            if !(route.deliver(LinkEvent::Msg(HostMsg::Error { req, id: Some(id), message })) && route.settle()) {
                 drop_route(&mut state, id);
             }
         }
@@ -769,8 +864,13 @@ fn dispatch(inner: &Inner, message: HostMsg) {
                 return;
             };
             let alive = match state.sessions.get_mut(&id) {
-                // 正连着时旧订阅的消息用不上：新的屏幕和 `Attached` 带着最新的状态。
                 Some(route) if route.attaching == 0 => route.deliver(LinkEvent::Msg(message)),
+                // 正连着时旧订阅的消息用不上：新的屏幕和 `Attached` 带着最新的状态。只有会话结束了
+                // 要留着：新的订阅可能连不上（会话已经没了），视图只能靠它知道。
+                Some(route) if matches!(message, HostMsg::Exited { .. }) => {
+                    route.exited = Some(message);
+                    true
+                }
                 _ => true,
             };
             if !alive {
@@ -1057,6 +1157,115 @@ mod tests {
         dispatch(&link.inner, attached(2));
         let LinkEvent::Screen(screen) = rx.try_recv().unwrap() else { panic!("expected the screen") };
         assert_eq!(screen.attached.channel, 2);
+    }
+
+    /// 连着、已经连上会话 `id`（通道 1）的 `Link`，返回收这个会话事件的一端。
+    fn attached_link(id: SessionId) -> (Link, UnboundedReceiver<LinkEvent>) {
+        let link = Link::new(BuildId(BUILD.into()));
+        let (events, rx) = unbounded();
+        let mut state = link.inner.state();
+        state.connected = true;
+        let mut route = Route::new(events);
+        route.channel = Some(1);
+        state.sessions.insert(id, route);
+        state.channels.insert(1, id);
+        drop(state);
+        (link, rx)
+    }
+
+    /// 重新连上时撞上会话被结束（比如 `runode kill`）：旧订阅的 `Exited` 先到、新的 `Attach` 因为
+    /// 会话没了回 `Error`。视图先收到 `Error`，再收到留下的 `Exited`，能关掉。
+    #[test]
+    fn an_exit_while_reattaching_reaches_the_view() {
+        let id = SessionId(1);
+        let (link, mut rx) = attached_link(id);
+        assert!(link.reattach(id, None, AttachMode::Snapshot));
+        dispatch(&link.inner, HostMsg::Meta { id, meta: SessionMeta::default() });
+        dispatch(&link.inner, HostMsg::Exited { id, status: None });
+        assert!(rx.try_recv().is_err(), "nothing reaches the view while attaching");
+        dispatch(&link.inner, HostMsg::Error { req: None, id: Some(id), message: format!("no session {id}") });
+        assert!(matches!(rx.try_recv(), Ok(LinkEvent::Msg(HostMsg::Error { id: Some(got), .. })) if got == id));
+        assert!(matches!(rx.try_recv(), Ok(LinkEvent::Msg(HostMsg::Exited { id: got, .. })) if got == id));
+        assert!(rx.try_recv().is_err());
+    }
+
+    /// 正连着时留下的 `Exited` 跟在新的屏幕后面交出去，快照和只看状态都一样；连接断了时先交它再
+    /// 交 `Lost`。
+    #[test]
+    fn an_exit_while_attaching_follows_the_new_screen() {
+        let id = SessionId(1);
+        let (link, mut rx) = attached_link(id);
+        assert!(link.reattach(id, None, AttachMode::Snapshot));
+        dispatch(&link.inner, HostMsg::Exited { id, status: None });
+        let attached = |channel, mode| HostMsg::Attached {
+            id,
+            channel,
+            size: SIZE,
+            mode,
+            meta: SessionMeta::default(),
+            settings: None,
+        };
+        dispatch(&link.inner, attached(2, AttachMode::Snapshot));
+        snapshot(&link.inner, 2, b"snap");
+        assert!(rx.try_recv().is_err(), "the exit waits for the screen");
+        dispatch(&link.inner, HostMsg::SnapshotEnd { id });
+        assert!(matches!(rx.try_recv(), Ok(LinkEvent::Screen(screen)) if screen.data == b"snap"));
+        assert!(matches!(rx.try_recv(), Ok(LinkEvent::Msg(HostMsg::Exited { .. }))));
+
+        assert!(link.reattach(id, None, AttachMode::MetaOnly));
+        dispatch(&link.inner, HostMsg::Exited { id, status: None });
+        dispatch(&link.inner, attached(3, AttachMode::MetaOnly));
+        assert!(matches!(rx.try_recv(), Ok(LinkEvent::Screen(_))));
+        assert!(matches!(rx.try_recv(), Ok(LinkEvent::Msg(HostMsg::Exited { .. }))));
+
+        assert!(link.reattach(id, None, AttachMode::MetaOnly));
+        dispatch(&link.inner, HostMsg::Exited { id, status: None });
+        link.close();
+        assert!(matches!(rx.try_recv(), Ok(LinkEvent::Msg(HostMsg::Exited { .. }))));
+        assert!(matches!(rx.try_recv(), Ok(LinkEvent::Lost)));
+    }
+
+    #[test]
+    fn snapshots_need_the_same_format() {
+        assert!(snapshots_usable(1, Some(1)));
+        assert!(!snapshots_usable(2, Some(1)));
+        assert!(!snapshots_usable(0, None));
+        assert_eq!(attach_mode(AttachMode::Snapshot, true), AttachMode::Snapshot);
+        assert_eq!(attach_mode(AttachMode::Snapshot, false), AttachMode::VtReplay);
+        assert_eq!(attach_mode(AttachMode::VtReplay, true), AttachMode::VtReplay);
+        assert_eq!(attach_mode(AttachMode::MetaOnly, false), AttachMode::MetaOnly);
+    }
+
+    /// 宿主编的快照格式和这边的对不上：要快照时改要 VT 重放，宿主给的也是重放，不至于拿到解不了的
+    /// 快照。
+    #[test]
+    fn a_host_with_another_snapshot_format_gets_asked_for_replays() {
+        let (asked, asked_rx) = mpsc::channel();
+        let (ours, theirs) = UnixStream::pair().unwrap();
+        thread::spawn(move || {
+            let mut stream = theirs;
+            let _hello = read_frame(&mut stream).unwrap().unwrap();
+            let welcome = HostMsg::Welcome {
+                protocol: PROTOCOL_VERSION,
+                build: BuildId(BUILD.into()),
+                host_pid: 1,
+                snapshot_format: local_snapshot_format().unwrap() + 1,
+                standalone: true,
+            };
+            let frame = Frame::control(&welcome).unwrap();
+            write_frame(&mut stream, frame.kind, 0, &frame.payload).unwrap();
+            loop {
+                let frame = read_frame(&mut stream).unwrap().unwrap();
+                if let Ok(ClientMsg::Attach { mode, .. }) = frame.message::<ClientMsg>() {
+                    asked.send(mode).unwrap();
+                    return;
+                }
+            }
+        });
+        let link = Link::new(BuildId(BUILD.into()));
+        link.connect(ours).unwrap();
+        let _rx = link.attach(SessionId(1), Some(SIZE), AttachMode::Snapshot);
+        assert_eq!(asked_rx.recv_timeout(WAIT).unwrap(), AttachMode::VtReplay);
     }
 
     /// 一个按脚本说话的宿主：握手后由 `then` 接着处理这条连接。
