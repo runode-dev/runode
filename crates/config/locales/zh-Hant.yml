@@ -1,8 +1,8 @@
 _version: 1
 config:
   header: |-
-    runode 設定檔，語法和鍵名與 Ghostty 相同。
-    runode 先讀 Ghostty 的設定，再讀這個檔案；同一個鍵以這裡為準。
+    Runode 設定檔，語法和鍵名與 Ghostty 相同。
+    Runode 先讀 Ghostty 的設定，再讀這個檔案；同一個鍵以這裡為準。
     ## 開頭的是說明；一個 # 開頭的是註解掉的預設值，去掉這個 # 再改值才生效，儲存後自動重新載入。
     每一項上面寫了能填的值。值留空（例如 `background =`）表示恢復預設。
     顏色可以寫 #RRGGBB、#RGB（# 可省略）、X11 顏色名稱（例如 white、dark slate gray），
@@ -47,7 +47,7 @@ config:
   terminal_host: 終端機工作階段放在單獨的背景程序裡：true、false。true 時結束 Runode 後工作階段照常執行，下次開啟接著用；false 時工作階段跟著 app 一起結束。只在 Runode 啟動時讀取，改了下次啟動才生效。背景還有工作階段時改成 false，下次啟動仍會接回這些工作階段，那次結束時才結束它們。
   remote_access: 讓手機經區域網路或 Tailscale 連上這台 Mac 的終端機：true、false。用 runode remote pair 為手機配對，runode remote devices 列出配對過的手機，runode remote revoke 撤銷一台。改了幾秒內生效，不必重新啟動 Runode。
   remote_access_port: 遠端存取在所有網路介面上監聽的 TCP 連接埠：1 到 65535。
-  command_completions: 在 shell 提示字元上按 Tab 時從選單裡選指令名稱、子指令、選項或參數（參數只限 runode 認得的指令），沒有可選的時 Tab 照常交給 shell。false 時 Tab 總是交給 shell。
+  command_completions: 在 shell 提示字元上按 Tab 時從選單裡選指令名稱、子指令、選項或參數（參數只限 Runode 認得的指令），沒有可選的時 Tab 照常交給 shell。false 時 Tab 總是交給 shell。
   agent_notifications: agent 在你沒在看的分割畫面裡等你回答或者做完了時，發系統通知：true、false。只有打包好的 Runode.app 能發通知。
   agent_notifications_exclude: |-
     不發通知也不出提示音的 agent（狀態標記照常顯示）：用逗號隔開的短名，可以寫多行，值為空時清空。
@@ -63,17 +63,17 @@ config:
     例如 ctrl+a>n。按鍵寫字元本身，或 left、right、up、down、page_up、page_down、home、end、
     enter、escape、tab、backspace、delete、space、equal、plus、minus、f1 到 f24 等名稱。
     觸發鍵=unbind 去掉一個綁定；keybind = clear 去掉之前的全部綁定，包括下面的預設綁定。
-    這裡只認 runode 自己的設定檔，Ghostty 設定裡的 keybind 不生效。
+    這裡只認 Runode 自己的設定檔，Ghostty 設定裡的 keybind 不生效。
     預設綁定：
   actions: 可用的動作，帶參數的寫成 動作:參數：
   themes: 可用的主題：
 action:
-  about: 關於 runode
+  about: 關於 Runode
   quit: 結束
   open_settings: 打開設定
   open_config: 打開設定檔
   reload_config: 重新載入設定
-  hide: 隱藏 runode
+  hide: 隱藏 Runode
   hide_others: 隱藏其他應用程式
   show_all: 顯示全部應用程式
   new_window: 新增視窗

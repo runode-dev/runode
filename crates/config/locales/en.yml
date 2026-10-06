@@ -1,8 +1,8 @@
 _version: 1
 config:
   header: |-
-    runode configuration file. Syntax and key names are the same as Ghostty's.
-    runode reads the Ghostty configuration first, then this file; when both set a key, this file wins.
+    Runode configuration file. Syntax and key names are the same as Ghostty's.
+    Runode reads the Ghostty configuration first, then this file; when both set a key, this file wins.
     Lines starting with ## are explanations; lines starting with a single # are commented-out defaults.
     Remove that # and change the value to apply it; the file reloads automatically when saved.
     The accepted values are described above each setting. An empty value (e.g. `background =`) restores the default.
@@ -55,7 +55,7 @@ config:
   terminal_host: "Keep terminal sessions in a separate background process: true, false. With true, quitting Runode leaves the sessions running and the next launch picks them up; with false they end with the app. Only read when Runode starts, so a change takes effect at the next launch. Switching it off while sessions are still running in the background brings them back once more; quitting then ends them."
   remote_access: "Let your phone reach this Mac's terminals over the local network or Tailscale: true, false. Pair a phone with `runode remote pair`, list paired phones with `runode remote devices`, and remove one with `runode remote revoke`. Takes effect within a few seconds, without restarting Runode."
   remote_access_port: "The TCP port remote access listens on, on all network interfaces: 1 to 65535."
-  command_completions: "Press Tab at the shell prompt to pick a command name, subcommand, option or argument from a menu (arguments only for commands runode has a spec for); when there is nothing to offer, Tab goes to the shell. false always sends Tab to the shell."
+  command_completions: "Press Tab at the shell prompt to pick a command name, subcommand, option or argument from a menu (arguments only for commands Runode has a spec for); when there is nothing to offer, Tab goes to the shell. false always sends Tab to the shell."
   agent_notifications: "Post a system notification when an agent is waiting for your answer or has finished in a split you are not looking at: true, false. Notifications only work in the packaged Runode.app."
   agent_notifications_exclude: |-
     Agents that get no notification and no sound (their marks still show): short names separated by commas,
@@ -73,18 +73,18 @@ config:
     minus, f1 to f24.
     TRIGGER=unbind removes a binding; keybind = clear removes every earlier binding, including the
     defaults below.
-    Only runode's own configuration file is read for keybind; keybind in the Ghostty configuration has
+    Only Runode's own configuration file is read for keybind; keybind in the Ghostty configuration has
     no effect.
     Default bindings:
   actions: "Available actions; ones with a parameter are written ACTION:PARAM:"
   themes: "Available themes:"
 action:
-  about: About runode
+  about: About Runode
   quit: Quit
   open_settings: Open settings
   open_config: Open the configuration file
   reload_config: Reload the configuration
-  hide: Hide runode
+  hide: Hide Runode
   hide_others: Hide other apps
   show_all: Show all apps
   new_window: New window
