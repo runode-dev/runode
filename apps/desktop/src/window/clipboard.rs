@@ -39,7 +39,10 @@ pub(super) fn read(ticket: UiTicket, id: SessionId, ask: bool, program: Option<S
         reply(None);
         return;
     };
-    let terminal = terminal_title(window, id, cx);
+    // 标题和程序名都是终端里的程序说了算（标题能用 OSC 设），去掉控制字符、截短再放进询问框，
+    // 免得被拿来冒充别的说明或者把按钮挤出去。
+    let terminal = shown(&terminal_title(window, id, cx));
+    let program = program.map(|program| shown(&program));
     let title = rust_i18n::t!("clipboard.read_title");
     let detail = match program.filter(|program| !program.is_empty()) {
         Some(program) => rust_i18n::t!("clipboard.read_detail", terminal = terminal, program = program),
@@ -72,6 +75,28 @@ fn clipboard_text(cx: &mut App) -> Option<String> {
     Some(text)
 }
 
+/// 询问框里的名字最多这么多个字符，再长截掉、末尾加省略号。
+const SHOWN_CHARS: usize = 40;
+
+/// 放进询问框的名字：去掉控制字符和改变文字方向、看不见的格式字符，空白压成一个空格，截到
+/// `SHOWN_CHARS` 个字符。
+fn shown(name: &str) -> String {
+    let invisible = |c: char| {
+        c.is_control()
+            || matches!(c, '\u{200b}'..='\u{200f}' | '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}' | '\u{feff}')
+    };
+    let cleaned: String =
+        name.chars().filter_map(|c| if c.is_whitespace() { Some(' ') } else { (!invisible(c)).then_some(c) }).collect();
+    let words: Vec<&str> = cleaned.split_whitespace().collect();
+    let joined = words.join(" ");
+    if joined.chars().count() <= SHOWN_CHARS {
+        return joined;
+    }
+    let mut cut: String = joined.chars().take(SHOWN_CHARS - 1).collect();
+    cut.push('…');
+    cut
+}
+
 /// 问的时候怎么称呼这个终端：它所在分屏的标题；不在 `window` 里显示时用会话标识的开头。
 fn terminal_title(window: WindowHandle<WindowView>, id: SessionId, cx: &App) -> String {
     let title = window.read(cx).ok().and_then(|view| {
@@ -84,4 +109,21 @@ fn terminal_title(window: WindowHandle<WindowView>, id: SessionId, cx: &App) -> 
             .map(|terminal| terminal.title().to_owned())
     });
     title.unwrap_or_else(|| id.to_string()[..8].to_owned())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn names_in_the_prompt_are_cleaned_and_cut() {
+        assert_eq!(shown("vim"), "vim");
+        assert_eq!(shown("a\x1b[31mb\x07\n\tc"), "a[31mb c");
+        assert_eq!(shown("evil\u{202e}txt.exe\u{200b}"), "eviltxt.exe");
+        let long = "长".repeat(100);
+        let cut = shown(&long);
+        assert_eq!(cut.chars().count(), SHOWN_CHARS);
+        assert!(cut.ends_with('…'));
+        assert_eq!(shown(&"x".repeat(SHOWN_CHARS)), "x".repeat(SHOWN_CHARS));
+    }
 }
