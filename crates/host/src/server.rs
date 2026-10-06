@@ -520,9 +520,11 @@ impl Connection {
         }
         self.kind = client;
         self.snapshots = caps.snapshot && build == self.shared.build;
-        // 先登记界面再回 `Welcome`：界面收到 `Welcome` 后，别的连接转来的请求一定交给它。
+        // 登记界面和回 `Welcome` 在同一把锁里做：界面收到 `Welcome` 后，别的连接转来的请求一定
+        // 交给它；别的连接也只有在 `Welcome` 排进 `Outbox` 之后才看得到它，请求不会抢在前面。
+        let mut peers = self.shared.peers();
         if client == ClientKind::Desktop {
-            self.shared.peers().desktops.push(self.id);
+            peers.desktops.push(self.id);
         }
         self.out.control(&HostMsg::Welcome {
             protocol: PROTOCOL_VERSION,
@@ -530,6 +532,7 @@ impl Connection {
             host_pid: std::process::id(),
             snapshot_format: self.shared.snapshot_format,
         });
+        drop(peers);
         loop {
             let frame = match read_frame(reader) {
                 Ok(Some(frame)) => frame,

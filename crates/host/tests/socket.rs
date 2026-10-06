@@ -480,6 +480,37 @@ fn window_requests_go_to_the_desktop_connection() {
     assert!(matches!(cli.reply(), HostMsg::SessionList { .. }), "no stray replies");
 }
 
+/// 命令行不停发要转给界面的请求时，新连上的界面收到的第一条仍是 `Welcome`：登记和回
+/// `Welcome` 之间没有空当让请求抢在前面。
+#[test]
+fn a_desktop_hears_welcome_before_any_request() {
+    let dir = temp_dir("ui-order");
+    let (_host, socket) = listen(&dir);
+    let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let spam = {
+        let stop = stop.clone();
+        let mut cli = Peer::hello(&socket, false);
+        thread::spawn(move || {
+            let mut req = 0;
+            while !stop.load(std::sync::atomic::Ordering::Relaxed) {
+                req += 1;
+                cli.send(&ClientMsg::Layout { req });
+            }
+        })
+    };
+    // 每个界面都留着不回话，请求就一直转给最新连上的那个。`Peer::desktop` 断言第一条是
+    // `Welcome`。
+    let mut desktops = Vec::new();
+    for _ in 0..500 {
+        desktops.push(Peer::desktop(&socket));
+        if desktops.len() > 20 {
+            desktops.remove(0);
+        }
+    }
+    stop.store(true, std::sync::atomic::Ordering::Relaxed);
+    spam.join().unwrap();
+}
+
 /// 有几个界面连接时转给最近连上的那个；它断开时还没回话的请求回 `Error`，之后的请求转给剩下
 /// 的；一个界面都没有时回 `Error`。
 #[test]
