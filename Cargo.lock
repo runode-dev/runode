@@ -5167,6 +5167,7 @@ dependencies = [
  "anyhow",
  "qrcode",
  "regex",
+ "runode-config",
  "runode-paths",
  "runode-protocol",
  "runode-remote-access",

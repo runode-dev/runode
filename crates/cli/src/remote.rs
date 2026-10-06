@@ -1,11 +1,18 @@
 //! `runode remote …`：给手机配对远程访问（`pair`）、列出（`devices`）和撤销（`revoke`）配对过的设备。
 //! 不经宿主，读写 `runode_remote_access` 管的文件：监听方（宿主所在的进程）开着时才能配对，列和
-//! 撤销不用它开着。
+//! 撤销不用它开着。配对成了以后，`terminal-host` 还没开时问一句要不要开，免得退出 app 后远程访问
+//! 跟着停掉、手机连不上。
 
-use std::{io::Write, net::IpAddr, thread, time::Duration};
+use std::{
+    io::{BufRead as _, IsTerminal as _, Write},
+    net::IpAddr,
+    thread,
+    time::Duration,
+};
 
 use anyhow::{Context as _, anyhow, bail};
 use qrcode::{Color, EcLevel, QrCode};
+use runode_config::ConfigFile;
 use runode_protocol::remote::{PAIRING_TTL, PairingUri};
 use runode_remote_access::{
     Device, PairingProgress, PairingTicket, list_devices, listener_status, local_addresses, revoke_device,
@@ -19,8 +26,16 @@ const POLL_INTERVAL: Duration = Duration::from_millis(250);
 const STATUS_EVERY: u32 = 8;
 /// 二维码四周留白的模块数。规范要 4 个，2 个手机照样扫得出，画出来窄一些。
 const QUIET_ZONE: usize = 2;
+/// 退出 app 后宿主留在后台的配置项，见 `offer_background`。
+const BACKGROUND_KEY: &str = "terminal-host";
 
-pub(crate) fn pair(env: &Env, extra: &[IpAddr], out: &mut dyn Write) -> anyhow::Result<()> {
+/// `answer` 读用户对「要不要在后台跑」的回答，见 `offer_background`。
+pub(crate) fn pair(
+    env: &Env,
+    extra: &[IpAddr],
+    out: &mut dyn Write,
+    answer: &mut dyn FnMut() -> Option<String>,
+) -> anyhow::Result<()> {
     let Some(status) = listener_status(&env.dirs).context("cannot tell whether remote access is on")? else {
         return Err(not_listening(env));
     };
@@ -56,7 +71,7 @@ pub(crate) fn pair(env: &Env, extra: &[IpAddr], out: &mut dyn Write) -> anyhow::
             PairingProgress::Waiting => {}
             PairingProgress::Paired { device_id, name } => {
                 writeln!(out, "Paired with {name} ({device_id}).")?;
-                return Ok(());
+                return offer_background(env, out, answer);
             }
             PairingProgress::Invalidated => {
                 bail!(
@@ -114,6 +129,71 @@ pub(crate) fn revoke(env: &Env, device: &str, out: &mut dyn Write) -> anyhow::Re
         bail!("{} was revoked meanwhile", found.device_id);
     }
     writeln!(out, "Revoked {} ({}); if it is connected, it is cut off within seconds.", found.name, found.device_id)?;
+    Ok(())
+}
+
+/// 从终端上读用户的一行回答；标准输入不是终端（脚本里、接着管道）或读到头时为 `None`。
+pub(crate) fn read_answer() -> Option<String> {
+    let stdin = std::io::stdin();
+    if !stdin.is_terminal() {
+        return None;
+    }
+    let mut line = String::new();
+    match stdin.lock().read_line(&mut line) {
+        Ok(0) | Err(_) => None,
+        Ok(_) => Some(line),
+    }
+}
+
+/// 配对成了以后：宿主跑在 app 里时，退出 app 远程访问跟着停，手机就连不上了。配置里还没开
+/// `BACKGROUND_KEY` 时问用户要不要开，直接回车算要；开了以后退出 app 时宿主连同各终端和远程访问
+/// 留在后台（app 运行中改这一项马上算数）。`answer` 为 `None`（问不了）或者回答不要时不改配置，
+/// 只说怎么自己开。写不了配置文件时也照样算配对成了，说明原因。
+fn offer_background(env: &Env, out: &mut dyn Write, answer: &mut dyn FnMut() -> Option<String>) -> anyhow::Result<()> {
+    let Some(path) = env.dirs.config_file() else {
+        return Ok(());
+    };
+    let shown = path.display();
+    let mut file = match ConfigFile::read(&path) {
+        Ok(file) => file,
+        Err(err) => {
+            writeln!(out, "Cannot read {shown} ({err}), so remote access may stop when you quit runode.")?;
+            return Ok(());
+        }
+    };
+    if file.values(BACKGROUND_KEY).last().is_some_and(|value| value == "true") {
+        return Ok(());
+    }
+    write!(out, "Keep runode running in the background after you quit it, so the phone can still connect? [Y/n] ")?;
+    out.flush()?;
+    let yes = match answer() {
+        Some(line) => matches!(line.trim().to_ascii_lowercase().as_str(), "" | "y" | "yes"),
+        // 用户没按回车，换个行再往下说。
+        None => {
+            writeln!(out)?;
+            false
+        }
+    };
+    if !yes {
+        writeln!(
+            out,
+            "Remote access stops when you quit runode. To keep it running, set `{BACKGROUND_KEY} = true` in {shown}."
+        )?;
+        return Ok(());
+    }
+    file.set(BACKGROUND_KEY, &["true".to_owned()]);
+    match file.write(&path) {
+        Ok(()) => writeln!(
+            out,
+            "Set `{BACKGROUND_KEY} = true` in {shown}: quitting runode now leaves its terminals and remote access \
+             running in the background."
+        )?,
+        Err(err) => writeln!(
+            out,
+            "Cannot write {shown} ({err}). To keep remote access running after you quit runode, set \
+             `{BACKGROUND_KEY} = true` there yourself."
+        )?,
+    }
     Ok(())
 }
 
@@ -186,6 +266,58 @@ mod tests {
         }
         // 第一行整行是留白：上下都是白的。
         assert!(!lines[0].contains("38;2;0;0;0m"));
+    }
+
+    /// 配置文件在临时目录里的 `Env`。
+    fn env_in(name: &str) -> (Env, std::path::PathBuf) {
+        let root = std::env::temp_dir().join(format!("rnb-{}-{name}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let dirs = runode_paths::Dirs {
+            home: Some(root.clone()),
+            config: Some(root.clone()),
+            data: Some(root.join("runode")),
+            cache: Some(root.join("runode/cache")),
+        };
+        (Env { dirs, ..Env::default() }, root)
+    }
+
+    fn offer(env: &Env, answer: Option<&str>) -> String {
+        let mut out = Vec::new();
+        offer_background(env, &mut out, &mut || answer.map(str::to_owned)).unwrap();
+        String::from_utf8(out).unwrap()
+    }
+
+    fn background_values(env: &Env) -> Vec<String> {
+        ConfigFile::read(&env.dirs.config_file().unwrap()).unwrap().values(BACKGROUND_KEY)
+    }
+
+    #[test]
+    fn pressing_enter_keeps_runode_in_the_background() {
+        let (env, root) = env_in("enter");
+        let path = env.dirs.config_file().unwrap();
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, "font-size = 14\nterminal-host = false\n").unwrap();
+        let out = offer(&env, Some("\n"));
+        assert!(out.contains("[Y/n]") && out.contains("running in the background"), "{out}");
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "font-size = 14\nterminal-host = true\n");
+        // 已经开着就不再问。
+        assert_eq!(offer(&env, None), "");
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn saying_no_or_not_answering_leaves_the_config_alone() {
+        let (env, root) = env_in("no");
+        for answer in [Some(" N \n"), Some("whatever\n"), None] {
+            let out = offer(&env, answer);
+            assert!(out.contains("set `terminal-host = true`"), "{answer:?}: {out}");
+            assert!(background_values(&env).is_empty(), "{answer:?}");
+        }
+        assert!(!env.dirs.config_file().unwrap().exists());
+        let out = offer(&env, Some("yes\n"));
+        assert!(out.contains("running in the background"), "{out}");
+        assert_eq!(background_values(&env), ["true"]);
+        let _ = std::fs::remove_dir_all(root);
     }
 
     #[test]

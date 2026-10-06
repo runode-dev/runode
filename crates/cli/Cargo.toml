@@ -8,6 +8,8 @@ publish.workspace = true
 
 [dependencies]
 runode-paths.workspace = true
+# `remote pair` 配对成了以后按用户的回答在配置文件里打开 `terminal-host`。
+runode-config.workspace = true
 runode-protocol.workspace = true
 runode-shared-types.workspace = true
 # `remote` 命令：配对口令、设备表和监听方的状态，以及配对 URI 里的本机地址。
