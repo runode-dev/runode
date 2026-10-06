@@ -89,3 +89,4 @@ For security review, `explain({target: "fileOrSymbol"})` lists taint findings (s
 - 包名是 `runode-` 加目录名；`apps/` 下的包名等于可执行文件名，所以桌面 app 的包名是 `runode`。
 - 模块名用 snake_case。有子模块的模块写成 `foo.rs` 加 `foo/` 目录，不用 `foo/mod.rs`；只有 `tests/common/mod.rs` 按 cargo 的惯例保留，这样 cargo 不把它当成一个单独的测试。
 - 一个模块的单元测试超过三百行左右时挪到 `foo/tests.rs`，`foo.rs` 里只留 `#[cfg(test)] mod tests;`。
+- 桌面 app 的模块按归属分组。顶层只放应用级的胶水（入口、菜单、快捷键、配置、语言、启动计时、提前拉起 shell、`--host` 进程、远程访问）和几个功能模块：终端视图 `terminal_view`、窗口 `window`、连宿主的客户端 `host_client`。几处界面共用的 GPUI 部件和小工具（输入框、滚动条、悬停提示、文件图标、共用的编辑动作、`hsla`）放进 `ui`，`ui` 不依赖任何功能模块。只被一个功能用的模块放进那个功能的目录：按键翻译和自绘字符在 `terminal_view` 下，开窗口、存档格式和 agent 提醒在 `window` 下。
