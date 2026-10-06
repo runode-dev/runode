@@ -278,8 +278,8 @@ fn continuation(terminal: &Terminal<'static, 'static>) -> Vec<u8> {
 /// 输出流停在一条 shell 集成报告中间时，socket 上的前端连上来拿屏幕：从报告开头到结束序列前的
 /// 每一个字节处切开。`redacted_snapshot` 里没有报告的内容（同一处的 `snapshot` 里有，说明
 /// 找得到），解出来的界面停在一条只有开头的报告里，接着喂抹过的输出后和宿主那份一样。
-/// `redacted_vt_replay` 也一样没有；停在报告里时，前端喂完后屏幕和宿主的一样，报告的 BEL 不会
-/// 成了响铃。
+/// `redacted_vt_replay` 也一样没有；停在报告里、或者刚对上报告开头的几个字节时，前端喂完后
+/// 屏幕和宿主的一样，报告的 BEL 不会成了响铃，剩下的半截开头也不会被当成文字。
 #[test]
 fn a_screen_given_inside_a_shell_report_leaves_out_its_contents() {
     const TOKEN: &[u8] = b"0123456789abcdef";
@@ -325,14 +325,12 @@ fn a_screen_given_inside_a_shell_report_leaves_out_its_contents() {
             view.feed(&public);
             replayed.feed(&public);
             assert_same(&context, &host, &view);
-            // 重放本来就不带没写完的序列，停在报告开头的半截里（比如刚到 ESC）时前端会把剩下的
-            // 半截当文字；只看停在报告里的。
-            if redactor_was_inside {
-                assert!(!replayed.take_bell(), "{context}: the replay rang the bell");
-                let text = |terminal: &Terminal<'static, 'static>| vt::screen_lines(terminal, 0, 5).unwrap();
-                assert_eq!(text(&replayed.terminal), text(host.terminal()), "{context}: replay");
-                assert!(replayed.terminal.is_vt_ground().unwrap(), "{context}: replay");
-            }
+            // 重放本来不带没写完的序列，停在报告开头的半截里（比如刚到 `ESC ] 6`）时靠
+            // `redacted_vt_replay` 补上的那几个字节，剩下的半截才不会被当成文字。
+            assert!(!replayed.take_bell(), "{context}: the replay rang the bell");
+            let text = |terminal: &Terminal<'static, 'static>| vt::screen_lines(terminal, 0, 5).unwrap();
+            assert_eq!(text(&replayed.terminal), text(host.terminal()), "{context}: replay");
+            assert!(replayed.terminal.is_vt_ground().unwrap(), "{context}: replay");
         }
     }
 }

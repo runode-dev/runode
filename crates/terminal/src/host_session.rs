@@ -595,11 +595,11 @@ impl HostSession {
     /// 给别的进程的 VT 重放，之后给它的输出是经 `redactor` 抹过的。重放不带没写完的序列；输出流
     /// 正停在一条 shell 集成报告里时，末尾补上报告的开头 `ESC ] 6973;`，前端的 VT 也停进一条
     /// 报告里，之后抹过的输出里报告的结束序列结束它，不会落到别的状态里（比如 BEL 成了响铃）。
+    /// 刚对上报告开头的几个字节时补这几个（见 `RedactorState::resume_bytes`），不然接着来的
+    /// `973;` 会被前端当成文字画上屏幕。
     pub fn redacted_vt_replay(&self, redactor: &ReportRedactor) -> Result<Vec<u8>> {
         let mut replay = self.vt_replay()?;
-        if redactor.in_report() {
-            replay.extend_from_slice(&redact::REPORT_START);
-        }
+        replay.extend_from_slice(redactor.state().resume_bytes());
         Ok(replay)
     }
 
