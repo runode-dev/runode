@@ -88,8 +88,22 @@ strip = "debuginfo"
 # block 0.1.6 已停止维护，新版 Rust 拒绝用空 enum 作外部 static 的类型，并对没写 ABI 的
 # extern 报弃用警告；用修好这两点的副本替换。GPUI 的 macOS 后端经 cocoa、metal、core-video
 # 的最新版仍依赖 block 0.1，等它们不再依赖或 block 出修复版，再删掉这段 patch 和副本。
+#
+# gpui-pre-apple 是 GPUI 的 Metal 渲染器（`MetalRenderer`），上游的写法按 Zed 那种大窗口、常画矢量
+# 图形的编辑器取舍，对终端多占显存；用副本改两处省内存，其余和 crates.io 上的 0.3.7 一字不差：
+#   - 窗口层（CAMetalLayer）的 drawable 最多 2 个，上游是 3 个。每个 drawable 和窗口一样大，
+#     默认窗口在 Retina 屏上每个约 9 MiB，全屏 5K 约 56 MiB。代价是 GPU 赶不上时主线程在
+#     nextDrawable 上多等一帧。
+#   - 画 path 用的整窗大小的中间纹理（`path_intermediate_texture`，连同 MSAA 那张）等第一次真要
+#     画 path 时才建，尺寸变了先作废、用到时再按新尺寸建；上游每次改尺寸都无条件建。runode 只有
+#     终端里 Powerline 这类多边形字符会画 path，不用这些字符时一直省着这张纹理。
+# 副本的第一个提交是从 crates.io 下的原样文件（只少了 cargo 解包时写的 .cargo-ok），改动都在后面的
+# 提交里，每处加了注释。升级 GPUI 时：gpui-pre 的版本写死，版本号变了这段 patch 就对不上新版本
+# （cargo 会警告 patch 没用上），要把新版的 gpui-pre-apple 原样复制进来单独提交，再看上游有没有
+# 做同样的事，没有就把副本自己的改动（对着原样提交的 git diff）补上；上游都改了就删掉副本和这一行。
 [patch.crates-io]
 block = { path = "vendor/crates/block" }
+gpui-pre-apple = { path = "vendor/crates/gpui-pre-apple" }
 
 # 只开现有代码已经满足的规则，防着以后倒退；新加规则时先把代码改干净。
 [workspace.lints.rust]
