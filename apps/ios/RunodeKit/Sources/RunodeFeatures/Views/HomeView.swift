@@ -43,7 +43,7 @@
                 }
             }
             .animation(.default, value: app.waitingSessions.map(\.id))
-            .navigationTitle("runode")
+            .navigationTitle("Runode")
             .task(id: machines.machines.map(\.id)) { await app.keepHomeRefreshing() }
             .refreshable { app.refreshHome() }
             .onGeometryChange(for: CGSize.self) { $0.size } action: { size in

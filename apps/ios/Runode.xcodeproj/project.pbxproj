@@ -300,10 +300,10 @@
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = Config/Info.plist;
-				INFOPLIST_KEY_CFBundleDisplayName = runode;
+				INFOPLIST_KEY_CFBundleDisplayName = Runode;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
-				INFOPLIST_KEY_NSCameraUsageDescription = "扫 Mac 上 runode 显示的配对二维码。";
-				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "在局域网里找到并连接你 Mac 上的 runode。";
+				INFOPLIST_KEY_NSCameraUsageDescription = "扫 Mac 上 Runode 显示的配对二维码。";
+				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "在局域网里找到并连接你 Mac 上的 Runode。";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -331,10 +331,10 @@
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = Config/Info.plist;
-				INFOPLIST_KEY_CFBundleDisplayName = runode;
+				INFOPLIST_KEY_CFBundleDisplayName = Runode;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
-				INFOPLIST_KEY_NSCameraUsageDescription = "扫 Mac 上 runode 显示的配对二维码。";
-				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "在局域网里找到并连接你 Mac 上的 runode。";
+				INFOPLIST_KEY_NSCameraUsageDescription = "扫 Mac 上 Runode 显示的配对二维码。";
+				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "在局域网里找到并连接你 Mac 上的 Runode。";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;

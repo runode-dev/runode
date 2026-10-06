@@ -65,7 +65,7 @@ public final class PairingModel {
         do {
             invitation = try PairingInvitation.parse(text)
         } catch {
-            phase = .failed(error.errorDescription ?? "这不是 runode 的配对链接")
+            phase = .failed(error.errorDescription ?? "这不是 Runode 的配对链接")
             return
         }
         guard !invitation.isExpired(at: now()) else {

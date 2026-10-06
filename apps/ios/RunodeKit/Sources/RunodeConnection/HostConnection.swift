@@ -295,9 +295,9 @@ public actor HostConnection: HostLink {
             return (error as? LinkFailure)?.errorDescription ?? error.localizedDescription
         }
         switch goodbye {
-        case .handoff?: return "Mac 上的 runode 升级了，正在重新连接"
-        case .shutdown?: return "Mac 上的 runode 退出了"
-        case .idle?: return "Mac 上的 runode 空闲退出了"
+        case .handoff?: return "Mac 上的 Runode 升级了，正在重新连接"
+        case .shutdown?: return "Mac 上的 Runode 退出了"
+        case .idle?: return "Mac 上的 Runode 空闲退出了"
         case .error(let message)?: return "Mac 断开了连接：\(message)"
         default: return "Mac 关闭了连接"
         }

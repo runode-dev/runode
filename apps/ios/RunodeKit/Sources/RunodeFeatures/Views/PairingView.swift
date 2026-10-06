@@ -15,7 +15,7 @@
                 Form {
                     Section {
                         CommandRow(
-                            step: 1, text: "在 runode 的配置文件里加上这一行，打开远程访问：",
+                            step: 1, text: "在 Runode 的配置文件里加上这一行，打开远程访问：",
                             command: "remote-access = true")
                         CommandRow(step: 2, text: "在 Mac 的终端里运行：", command: "runode remote pair")
                     } header: {

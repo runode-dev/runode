@@ -116,7 +116,7 @@ public enum PairingInvitationError: Error, Hashable, Sendable, LocalizedError {
 
     public var errorDescription: String? {
         switch self {
-        case .notAnInvitation: "这不是 runode 的配对链接"
+        case .notAnInvitation: "这不是 Runode 的配对链接"
         case .unsupportedVersion(let version): "配对链接的版本是 \(version)，这个 app 太旧了，请先升级"
         case .missing(let field): "配对链接里缺少 \(field)"
         case .invalid(let field): "配对链接里的 \(field) 不对"

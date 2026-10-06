@@ -199,7 +199,7 @@ extension LinkState {
             }, deviceName: "x", now: { Date(timeIntervalSince1970: 1_950_000_000) }, onPaired: { _ in })
         model.linkText = "https://example.com"
         await model.submitLink()
-        #expect(model.phase == .failed("这不是 runode 的配对链接"))
+        #expect(model.phase == .failed("这不是 Runode 的配对链接"))
         model.linkText = link()
         await model.submitLink()
         #expect(model.phase == .failed("二维码已经过期，请在 Mac 上重新生成"))

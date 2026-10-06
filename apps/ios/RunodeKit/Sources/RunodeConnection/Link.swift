@@ -76,8 +76,8 @@ public enum LinkFailure: Error, Hashable, Sendable, LocalizedError {
             case .disabled: "Mac 上没有打开远程访问"
             case .unknown(let kind): "Mac 拒绝了连接（\(kind)）"
             }
-        case .gateVersion(let version): "Mac 上的 runode 使用了更新的连接方式（版本 \(version)），请升级这个 app"
-        case .incompatible(let reason): "Mac 上的 runode 和这个 app 版本不兼容：\(reason)"
+        case .gateVersion(let version): "Mac 上的 Runode 使用了更新的连接方式（版本 \(version)），请升级这个 app"
+        case .incompatible(let reason): "Mac 上的 Runode 和这个 app 版本不兼容：\(reason)"
         case .missingKey: "找不到这台 Mac 的设备密钥，请删除后重新配对"
         case .fingerprintMismatch: "对方的证书指纹和配对时的不一样，可能连到了别的设备"
         case .timeout: "连接超时"
