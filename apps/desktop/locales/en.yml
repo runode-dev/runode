@@ -72,6 +72,10 @@ agent:
 host:
   incompatible_title: An older Runode terminal host is still running
   incompatible_detail: "Terminals run inside this window for now, and command-line tools such as runode list cannot reach them. Quit the other Runode, or end its host process, then reopen Runode. (%{reason})"
+  other_app_title: Another Runode is running the terminal host
+  other_app_detail: "Terminals run inside this window for now and end when it quits; command-line tools such as runode list reach the other Runode instead. Quit the other Runode, then reopen this one."
+  unreachable_title: Couldn't reach the Runode terminal host
+  unreachable_detail: "Terminals run inside this window for now and end when Runode quits. (%{reason})"
   ok: OK
 workspace:
   new: New Workspace

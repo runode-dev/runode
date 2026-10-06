@@ -72,6 +72,10 @@ agent:
 host:
   incompatible_title: 舊版 Runode 的終端機宿主還在執行
   incompatible_detail: 這次終端機跑在 app 裡，runode list 這類指令列連不上它們。結束另一個 Runode 或者它的宿主程序後，重新開啟 Runode。（%{reason}）
+  other_app_title: 另一個 Runode 正在執行終端機宿主
+  other_app_detail: 這次終端機跑在這個 app 裡，結束時一起關閉；runode list 這類指令列連到的是另一個 Runode。結束另一個 Runode 後，重新開啟這一個。
+  unreachable_title: 連不上 Runode 的終端機宿主
+  unreachable_detail: 這次終端機跑在 app 裡，結束 Runode 時一起關閉。（%{reason}）
   ok: 好
 workspace:
   new: 新增工作區

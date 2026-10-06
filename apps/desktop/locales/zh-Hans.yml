@@ -72,6 +72,10 @@ agent:
 host:
   incompatible_title: 旧版本 Runode 的终端宿主还在运行
   incompatible_detail: 这次终端跑在 app 里，runode list 这类命令行连不上它们。退出另一个 Runode 或者结束它的宿主进程后，重新打开 Runode。（%{reason}）
+  other_app_title: 另一个 Runode 正在运行终端宿主
+  other_app_detail: 这次终端跑在这个 app 里，退出时一起结束；runode list 这类命令行连到的是另一个 Runode。退出另一个 Runode 后，重新打开这一个。
+  unreachable_title: 连不上 Runode 的终端宿主
+  unreachable_detail: 这次终端跑在 app 里，退出 Runode 时一起结束。（%{reason}）
   ok: 好
 workspace:
   new: 新建工作区
