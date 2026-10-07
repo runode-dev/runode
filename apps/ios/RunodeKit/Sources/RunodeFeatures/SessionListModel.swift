@@ -162,6 +162,10 @@ public final class SessionListModel {
         var fallback: UInt32?
         /// 没开成时提示的前半句。
         var failure: String
+        /// 退回 `Spawn` 时用的目录，为空时用家目录。
+        var cwd: String? = nil
+        /// 开好后在新终端里跑的命令行（项目命令），带着预先取好的粘贴、回车的请求编号。
+        var command: (text: String, paste: UInt32, enter: UInt32)? = nil
     }
 
     /// 预览怎么读屏幕。
@@ -368,20 +372,36 @@ public final class SessionListModel {
         session.meta.cwd.flatMap { projectTasks[$0] } ?? []
     }
 
-    /// 能在这个会话里跑项目命令：shell 停在提示符上，打进去的命令不会落进别的程序。
+    /// 能跑这个会话目录里的项目命令：连着、终端没结束。
     public func canRunProjectTask(in session: SessionInfo) -> Bool {
-        connected && session.meta.foregroundIsShell && !session.exited
+        connected && !session.exited
     }
 
-    /// 在会话 `id` 里跑一条项目命令：像快速回复一样粘贴进去再回车。shell 不在提示符上时不发，返回假。
+    /// 跑一条会话 `id` 目录里的项目命令。shell 停在提示符上时像快速回复一样在这个会话里粘贴再回车，
+    /// 返回真；前台在跑别的程序（agent、vim……）时打进去会落进那个程序，改在它旁边开一个同目录的新终端
+    /// 跑，开好后调 `onSpawned` 打开新终端，返回假。
     @discardableResult
     public func runProjectTask(_ task: ProjectTask, in id: SessionId) async -> Bool {
         guard let session = session(id), canRunProjectTask(in: session) else { return false }
+        if session.meta.foregroundIsShell {
+            let paste = await link.nextRequestId()
+            let enter = await link.nextRequestId()
+            link.send(.paste(req: paste, id: id, text: task.command))
+            link.send(.sendKeys(req: enter, id: id, keys: ["enter"]))
+            return true
+        }
+        guard !isSpawning else { return false }
+        isSpawning = true
+        let req = await link.nextRequestId()
+        let fallback = await link.nextRequestId()
         let paste = await link.nextRequestId()
         let enter = await link.nextRequestId()
-        link.send(.paste(req: paste, id: id, text: task.command))
-        link.send(.sendKeys(req: enter, id: id, keys: ["enter"]))
-        return true
+        let cwd = session.meta.cwd
+        pendingSpawn = PendingSpawn(
+            req: req, fallback: fallback, failure: "开不了新终端", cwd: cwd,
+            command: (task.command, paste, enter))
+        link.send(.open(req: req, placement: .tab, near: id, cwd: cwd, focus: false))
+        return false
     }
 
     /// 列 `dir` 里的项目命令：卡片出现、会话换了目录时要一次，列过的不再要；`refreshing` 为真时（下拉
@@ -544,9 +564,16 @@ public final class SessionListModel {
             finishProjectTasks(req, sources: sources)
         case .opened(let req, let id) where req == pendingSpawn?.req,
             .spawned(let req, let id) where req == pendingSpawn?.req:
+            let command = pendingSpawn?.command
             pendingSpawn = nil
             isSpawning = false
             refresh()
+            if let command {
+                // ponytail: 不等提示符就发，靠伪终端把输入攒着等 shell 读；shell 启动时清掉预输入的话
+                // 命令会丢，那时改成等这个会话的 meta 报 shell 在提示符上再发。
+                link.send(.paste(req: command.paste, id: id, text: command.text))
+                link.send(.sendKeys(req: command.enter, id: id, keys: ["enter"]))
+            }
             onSpawned(id)
         case .error(let req, let id, let message):
             if let req, var pending = pendingSpawn, req == pending.req {
@@ -555,7 +582,8 @@ public final class SessionListModel {
                     pending.req = fallback
                     pending.fallback = nil
                     pendingSpawn = pending
-                    link.send(.spawn(req: fallback, size: spawnSize, cwd: nil, integration: .detect, start: true))
+                    link.send(
+                        .spawn(req: fallback, size: spawnSize, cwd: pending.cwd, integration: .detect, start: true))
                 } else {
                     pendingSpawn = nil
                     isSpawning = false

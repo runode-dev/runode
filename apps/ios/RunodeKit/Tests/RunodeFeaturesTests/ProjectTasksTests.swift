@@ -5,7 +5,7 @@ import Testing
 
 @testable import RunodeFeatures
 
-/// 会话卡片长按菜单里的项目命令：按会话目录列一次，点了在会话里粘贴再回车，shell 不在提示符上时不发。
+/// 菜单里的项目命令：按会话目录列一次，点了在会话里粘贴再回车，前台在跑别的程序时在新终端里跑。
 @MainActor
 @Suite struct ProjectTasksTests {
     let link = FakeLink()
@@ -90,18 +90,58 @@ import Testing
         }
     }
 
-    /// 前台在跑别的程序、终端结束了时不发，节标题说明原因。
-    @Test func onlyAShellAtItsPromptRunsTasks() async {
-        let busy = info(sessionA, atPrompt: false, foreground: "vim")
+    /// 前台在跑别的程序（agent、vim）时在旁边开一个同目录的新终端跑，开好后打开它；终端结束了时不发。
+    @Test func aBusySessionRunsTasksInANewTerminal() async {
+        let busy = info(sessionA, atPrompt: false, foreground: "claude")
         let gone = info(sessionB, exited: true)
         let model = model([busy, gone])
-        #expect(!model.canRunProjectTask(in: busy))
-        #expect(!(await model.runProjectTask(make.tasks[0], in: sessionA)))
+        var spawned: [SessionId] = []
+        model.onSpawned = { spawned.append($0) }
+        #expect(!model.canRunProjectTask(in: gone))
         #expect(!(await model.runProjectTask(make.tasks[0], in: sessionB)))
         #expect(link.sent.isEmpty)
-        #expect(Presentation.projectTasksHeader(busy, runnable: false) == "运行 · 前台在跑 vim，回到提示符后能用")
-        #expect(Presentation.projectTasksHeader(gone, runnable: false) == "运行 · 终端已经结束")
-        #expect(Presentation.projectTasksHeader(info(sessionA), runnable: true) == "运行")
+
+        #expect(!(await model.runProjectTask(make.tasks[0], in: sessionA)))
+        guard case .open(let req, .tab, sessionA, dir, false)? = link.sent.first, link.sent.count == 1 else {
+            Issue.record("expected an open beside the session, got \(link.sent)")
+            return
+        }
+        link.clearSent()
+        model.handle(.message(.opened(req: req, id: sessionC)))
+        let typed = link.sent.drop { if case .paste = $0 { false } else { true } }
+        guard case .paste(_, sessionC, "make build")? = typed.first,
+            case .sendKeys(_, sessionC, ["enter"])? = typed.dropFirst().first
+        else {
+            Issue.record("expected a paste and an enter in the new terminal, got \(link.sent)")
+            return
+        }
+        #expect(spawned == [sessionC])
+        #expect(!model.isSpawning)
+        #expect(Presentation.projectTasksHeader(busy) == "运行 · 前台在跑 claude，在新终端里跑")
+        #expect(Presentation.projectTasksHeader(gone) == "运行 · 终端已经结束")
+        #expect(Presentation.projectTasksHeader(info(sessionA)) == "运行")
+    }
+
+    /// 电脑上的 app 没开着窗口时退回在会话目录里开后台会话，命令照样在那里跑。
+    @Test func aBusySessionFallsBackToASpawnInItsDirectory() async {
+        let model = model([info(sessionA, atPrompt: false, foreground: "claude")])
+        await model.runProjectTask(make.tasks[0], in: sessionA)
+        guard case .open(let openReq, _, _, _, _)? = link.sent.first else {
+            Issue.record("expected an open, got \(link.sent)")
+            return
+        }
+        link.clearSent()
+        model.handle(.message(.error(req: openReq, id: nil, message: "there is no runode window to do this in")))
+        guard case .spawn(let req, _, dir, _, true)? = link.sent.first else {
+            Issue.record("expected a spawn in the session's directory, got \(link.sent)")
+            return
+        }
+        link.clearSent()
+        model.handle(.message(.spawned(req: req, id: sessionC)))
+        guard link.sent.contains(where: { if case .paste(_, sessionC, "make build") = $0 { true } else { false } }) else {
+            Issue.record("expected a paste in the new terminal, got \(link.sent)")
+            return
+        }
     }
 
     /// 文件不在会话目录里时标出在哪一级。

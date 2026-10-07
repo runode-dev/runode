@@ -194,13 +194,13 @@ public enum Presentation {
         }
     }
 
-    /// 会话卡片菜单里项目命令那一节的标题：shell 不在提示符上时说明为什么点不了。
-    public static func projectTasksHeader(_ session: SessionInfo, runnable: Bool) -> String {
-        if runnable { return "运行" }
+    /// 菜单里项目命令那一节的标题：终端结束了时说明为什么点不了，前台在跑别的程序时说明命令会在新终端里跑。
+    public static func projectTasksHeader(_ session: SessionInfo) -> String {
         if session.exited { return "运行 · 终端已经结束" }
+        if session.meta.foregroundIsShell { return "运行" }
         if let foreground = session.meta.foreground, !foreground.isEmpty {
-            return "运行 · 前台在跑 \(foreground)，回到提示符后能用"
+            return "运行 · 前台在跑 \(foreground)，在新终端里跑"
         }
-        return "运行 · 回到 shell 提示符后能用"
+        return "运行 · 在新终端里跑"
     }
 }

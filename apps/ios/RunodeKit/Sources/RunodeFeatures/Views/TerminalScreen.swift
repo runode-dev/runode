@@ -14,6 +14,8 @@
         let preferences: AppPreferences
         /// 打开这个会话所在仓库的 Git 页。
         var onOpenGit: () -> Void = {}
+        /// 这台电脑的会话列表，「⋯」菜单里的项目命令从它取、经它跑。
+        var sessions: SessionListModel?
         /// 断线横幅占的高度，终端视图据此在顶上让出地方，横幅不挡内容。
         @State private var bannerHeight: CGFloat = 0
         /// 嵌着的终端视图，底部的按键栏按了发给它。
@@ -51,6 +53,9 @@
                     ToolbarItem(placement: .primaryAction) { sizeMenu }
                     ToolbarItem(placement: .primaryAction) { moreMenu }
                 }
+                .task(id: session?.meta.cwd) {
+                    if let cwd = session?.meta.cwd { await sessions?.loadProjectTasks(in: cwd) }
+                }
         }
 
         private var titleView: some View {
@@ -73,6 +78,9 @@
                 .accessibilityAddTraits(.isHeader)
             }
         }
+
+        /// 会话列表里这个终端的信息（目录、前台程序），菜单里的项目命令据此列出、判断能不能跑。
+        private var session: SessionInfo? { sessions?.session(model.sessionId) }
 
         private var sizeMenu: some View {
             Menu {
@@ -103,6 +111,9 @@
                 Button("键盘", systemImage: "keyboard") { model.showKeyboard() }
                 Button("回到最新", systemImage: "arrow.down.to.line") { model.scrollToBottom() }
                 Button("Git", systemImage: "arrow.triangle.branch") { onOpenGit() }
+                if let sessions, let session {
+                    ProjectTasksSection(model: sessions, session: session) { model.scrollToBottom() }
+                }
                 Button("结束会话", systemImage: "xmark.circle", role: .destructive) {
                     model.isConfirmingKill = true
                 }

@@ -101,6 +101,7 @@ struct FakePairing: Pairing {
 
 let sessionA = SessionId("0123456789abcdef0011223344556677")!
 let sessionB = SessionId("ffffffffffffffff0000000000000000")!
+let sessionC = SessionId("cccccccccccccccc0000000000000000")!
 let smallGrid = GridSize(cols: 20, rows: 4, cellWidthPx: 8, cellHeightPx: 16)
 
 func machineRecord(name: String = "MacBook", fingerprintByte: UInt8 = 1) -> MachineRecord {

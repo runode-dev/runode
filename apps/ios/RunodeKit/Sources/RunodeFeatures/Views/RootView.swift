@@ -59,9 +59,10 @@
                 }
             case .terminal(let machine, let session):
                 if let model = app.terminal(machine: machine, session: session) {
-                    TerminalScreen(model: model, preferences: app.settings.preferences) {
-                        app.openGit(machine: machine, session: session)
-                    }
+                    TerminalScreen(
+                        model: model, preferences: app.settings.preferences,
+                        onOpenGit: { app.openGit(machine: machine, session: session) },
+                        sessions: app.sessionList(for: machine))
                 } else {
                     ContentUnavailableView("找不到这个终端", systemImage: "terminal")
                 }

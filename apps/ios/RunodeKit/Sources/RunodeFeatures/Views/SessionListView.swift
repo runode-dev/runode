@@ -144,7 +144,7 @@
                         Button("Git", systemImage: "arrow.triangle.branch") { onOpenGit(session.id) }
                         Button("复制目录", systemImage: "doc.on.doc") { UIPasteboard.general.string = cwd }
                     }
-                    projectTasksMenu(session)
+                    ProjectTasksSection(model: model, session: session) { onOpen(session.id) }
                     Section(
                         "\(Presentation.gridSize(session.size)) · \(Presentation.sizeOwner(session.sizeOwner))"
                     ) {
@@ -166,20 +166,31 @@
                 }
         }
 
-        /// 长按菜单里会话目录的项目命令：Makefile、package.json 各一个子菜单，点一条就在这个会话里跑，再
-        /// 打开它的终端看输出。shell 不在提示符上时子菜单点不开，节标题说明原因。
-        @ViewBuilder
-        private func projectTasksMenu(_ session: SessionInfo) -> some View {
+        /// 这个会话是不是等着确认结束。
+        private func confirmsKill(_ id: SessionId) -> Binding<Bool> {
+            Binding(get: { model.killTarget == id }, set: { if !$0, model.killTarget == id { model.killTarget = nil } })
+        }
+    }
+
+    /// 菜单里会话目录的项目命令：Makefile、package.json 各一个子菜单，点一条就跑（见
+    /// `SessionListModel.runProjectTask`），在这个会话里跑了时调 `onRun`，在新终端里跑时由会话列表打开
+    /// 新终端。终端结束了时子菜单点不开。会话卡片的长按菜单和终端页的「⋯」菜单都用它。
+    struct ProjectTasksSection: View {
+        let model: SessionListModel
+        let session: SessionInfo
+        var onRun: () -> Void = {}
+
+        var body: some View {
             let sources = model.projectTasks(for: session).filter { !$0.tasks.isEmpty }
             if !sources.isEmpty {
                 let runnable = model.canRunProjectTask(in: session)
-                Section(Presentation.projectTasksHeader(session, runnable: runnable)) {
+                Section(Presentation.projectTasksHeader(session)) {
                     ForEach(sources, id: \.file) { source in
                         Menu {
                             ForEach(source.tasks, id: \.name) { task in
                                 Button {
                                     Task {
-                                        if await model.runProjectTask(task, in: session.id) { onOpen(session.id) }
+                                        if await model.runProjectTask(task, in: session.id) { onRun() }
                                     }
                                 } label: {
                                     Text(task.name)
@@ -195,11 +206,6 @@
                     }
                 }
             }
-        }
-
-        /// 这个会话是不是等着确认结束。
-        private func confirmsKill(_ id: SessionId) -> Binding<Bool> {
-            Binding(get: { model.killTarget == id }, set: { if !$0, model.killTarget == id { model.killTarget = nil } })
         }
     }
 
