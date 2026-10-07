@@ -108,6 +108,9 @@ pub enum Notice {
     /// 用户要结束旧宿主，socket 上却已经是这个构建的宿主了（交接其实成了，或者另一个同版本的
     /// app 让它接手了）：没结束它，会话在它那里；这个 app 已经跑着自己的宿主，下次打开时连上它。
     AlreadyUpgraded,
+    /// 连上的单独宿主是别的构建（`host` 是它报的构建号）：交接时又被别的版本接手了之类。终端照常
+    /// 能用，提醒用户退出后重新打开，让这个构建的宿主接手。
+    BuildMismatch { host: String },
 }
 
 fn notify(notice: Notice) {
@@ -368,6 +371,13 @@ fn establish(terminal_host: bool) {
             (_, None) => in_process(false),
         };
     };
+    if mode == Mode::Standalone
+        && let Some(theirs) = LINK.host_build()
+        && theirs != build
+    {
+        tracing::warn!("connected to a host of build {theirs:?}, this app is {build:?}");
+        notify(Notice::BuildMismatch { host: theirs.0 });
+    }
     *MODE.lock().unwrap_or_else(PoisonError::into_inner) = mode;
 }
 
@@ -613,6 +623,11 @@ pub fn show_notice(cx: &mut App) {
             };
             (rust_i18n::t!("host.handoff_failed_title"), detail, Some(false))
         }
+        Notice::BuildMismatch { host } => (
+            rust_i18n::t!("host.build_mismatch_title"),
+            rust_i18n::t!("host.build_mismatch_detail", host = host, app = build().0),
+            None,
+        ),
         Notice::HandoffDegraded { count } => {
             report_degraded(count, cx);
             return;

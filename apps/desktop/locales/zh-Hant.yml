@@ -90,6 +90,8 @@ host:
   end_old: 終止舊工作階段
   already_upgraded_title: 終端機已經交給這個版本了
   already_upgraded_detail: 終端機宿主已經是這個版本的 Runode，所以什麼都沒有終止：舊的終端機最後還是交過來了，在那裡照常執行。這個視窗仍用自己的終端機；結束後重新開啟 Runode 就能看到交過來的終端機。
+  build_mismatch_title: 終端機宿主和這個 Runode 的版本不一致
+  build_mismatch_detail: 終端機宿主是 %{host}，這個 app 是 %{app}。終端機照常能用，但有些功能可能對不上。結束 Runode 後重新開啟，會讓這個版本的宿主接手終端機。
   degraded_title: Runode 已更新
   degraded_detail: 升級時有 %{count} 個終端機的捲動紀錄沒能帶過來，畫面和正在執行的程式都不受影響。
 workspace:

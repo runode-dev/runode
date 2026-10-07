@@ -90,6 +90,8 @@ host:
   end_old: 结束旧会话
   already_upgraded_title: 终端已经交给这个版本了
   already_upgraded_detail: 终端宿主已经是这个版本的 Runode，所以什么都没结束：旧终端最后还是交过来了，在那里照常运行。这个窗口仍用自己的终端；退出后重新打开 Runode 就能看到交过来的终端。
+  build_mismatch_title: 终端宿主和这个 Runode 的版本不一致
+  build_mismatch_detail: 终端宿主是 %{host}，这个 app 是 %{app}。终端照常能用，但有些功能可能对不上。退出 Runode 后重新打开，会让这个版本的宿主接手终端。
   degraded_title: Runode 已更新
   degraded_detail: 升级时 %{count} 个终端的回滚历史没能带过来，屏幕和正在运行的程序都不受影响。
 workspace:

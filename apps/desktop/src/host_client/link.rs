@@ -194,6 +194,8 @@ struct State {
     options: Option<(bool, ClipboardAccess)>,
     /// 现在这条连接上的宿主编的快照这边解得了，见 `snapshots_usable`；为假时要快照改要 VT 重放。
     snapshots: bool,
+    /// 现在这条连接上的宿主的构建，见 `Link::host_build`。
+    host_build: Option<BuildId>,
 }
 
 /// 一个连着（或正连着）的会话。
@@ -388,6 +390,7 @@ impl Link {
             state.generation += 1;
             state.connected = true;
             state.snapshots = snapshots;
+            state.host_build = Some(welcome.build);
             *self.inner.writer() =
                 Some(Writer { generation: state.generation, stream: BufWriter::with_capacity(WRITE_BUFFER, stream) });
             state.generation
@@ -426,6 +429,11 @@ impl Link {
     /// 现在连着宿主。
     pub fn connected(&self) -> bool {
         self.inner.state().connected
+    }
+
+    /// 最近一次连上的宿主在 `Welcome` 里报的构建；还没连上过时为 `None`。
+    pub fn host_build(&self) -> Option<BuildId> {
+        self.inner.state().host_build.clone()
     }
 
     /// 发一条控制消息，不等回话；没连着或写不出去时记一笔日志。`SetTheme`、`SetOptions` 记下来，
@@ -654,6 +662,7 @@ struct Welcome {
     host_pid: u32,
     snapshot_format: u16,
     standalone: bool,
+    build: BuildId,
 }
 
 /// 以桌面界面的身份握手，返回宿主的 `Welcome`。
@@ -676,8 +685,8 @@ fn handshake(stream: &UnixStream, build: &BuildId) -> Result<Welcome, ConnectErr
         match read_frame(&mut reader).map_err(frame_error)? {
             None => return Err(ConnectError::Closed),
             Some(frame) if frame.kind == FrameKind::Control => match frame.message::<HostMsg>() {
-                Ok(HostMsg::Welcome { host_pid, snapshot_format, standalone, .. }) => {
-                    break Ok(Welcome { host_pid, snapshot_format, standalone });
+                Ok(HostMsg::Welcome { host_pid, snapshot_format, standalone, build, .. }) => {
+                    break Ok(Welcome { host_pid, snapshot_format, standalone, build });
                 }
                 Ok(HostMsg::Incompatible { reason, .. }) => break Err(ConnectError::Incompatible(reason)),
                 Ok(HostMsg::Goodbye { .. }) => break Err(ConnectError::Closed),
