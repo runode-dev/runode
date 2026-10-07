@@ -37,6 +37,31 @@ public enum SymbolFont {
     }
 }
 
+/// 默认按文字画、却也有 emoji 样子的字（Claude Code 的 `⏺`、转圈的 `✳`、`✔`、`⚠` 这些）。等宽字体里
+/// 没有时，Core Text 按码位找后备字体会挑中 Apple Color Emoji，画成不跟前景色的彩色方块；后面跟上
+/// U+FE0E（文字样式选择符）它才去找有这个字的普通字体（STIX Two Math、Menlo 等）。`❗` 这类默认就是
+/// emoji 的不算，照旧画 emoji。
+public enum TextPresentation {
+    public static let selector: Character = "\u{FE0E}"
+
+    public static func prefersText(_ scalar: Unicode.Scalar) -> Bool {
+        // ASCII 里的数字、`#`、`*` 也算 emoji 字符，排除掉。
+        scalar.value > 0x7F && scalar.properties.isEmoji && !scalar.properties.isEmojiPresentation
+    }
+
+    /// 给 `text` 里单码位的这类字后面补上文字样式选择符，交给 SwiftUI `Text` 这类自己找后备字体的地方。
+    public static func apply(to text: String) -> String {
+        var result = ""
+        for character in text {
+            result.append(character)
+            if character.unicodeScalars.count == 1, let scalar = character.unicodeScalars.first, prefersText(scalar) {
+                result.append(selector)
+            }
+        }
+        return result
+    }
+}
+
 /// Powerline 和 Powerline Extra 里几何形状的分隔符（U+E0B0–U+E0BF、U+E0D2、U+E0D4），照 Ghostty 的
 /// 做法（它的 `drawE0B0` 这一组函数）不用字体，按单元格的矩形自己画：形状正好填满格子，和相邻格子的
 /// 背景色之间不会有缝。坐标系是 UIKit 的（原点在左上、y 向下），和 Ghostty 画布的一样。

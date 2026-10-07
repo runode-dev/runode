@@ -125,4 +125,12 @@ import Testing
         let font = CTFontCreateWithName(name as CFString, 12, nil)
         #expect(CTFontCopyPostScriptName(font) as String == name)
     }
+
+    /// 默认按文字画的 `⏺`、`✳` 补上文字样式选择符；默认就是 emoji 的 `❗`、ASCII、已经带了选择符的不动。
+    @Test func textPresentationMarksTextDefaultEmoji() {
+        #expect(TextPresentation.apply(to: "⏺ 改好了") == "⏺\u{FE0E} 改好了")
+        #expect(TextPresentation.apply(to: "✳") == "✳\u{FE0E}")
+        #expect(TextPresentation.apply(to: "❗ #1 *") == "❗ #1 *")
+        #expect(TextPresentation.apply(to: "✔\u{FE0F}") == "✔\u{FE0F}")
+    }
 }

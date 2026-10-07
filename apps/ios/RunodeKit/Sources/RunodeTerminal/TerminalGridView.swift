@@ -290,7 +290,10 @@
                 if CTFontGetGlyphsForCharacters(ctFont, &units, &glyphs, units.count), glyphs[0] != 0 {
                     plain = PlainGlyph(font: ctFont, glyph: glyphs[0], centeredAdvance: nil)
                 } else if !SymbolFont.isPrivateUse(scalar) {
-                    let fallback = CTFontCreateForString(ctFont, text as CFString, CFRange(location: 0, length: units.count))
+                    // 默认按文字画的字带上文字样式选择符去找，免得挑中彩色 emoji 字体（见 `TextPresentation`）。
+                    let query = TextPresentation.prefersText(scalar) ? text + String(TextPresentation.selector) : text
+                    let fallback = CTFontCreateForString(
+                        ctFont, query as CFString, CFRange(location: 0, length: query.utf16.count))
                     if CTFontGetGlyphsForCharacters(fallback, &units, &glyphs, units.count), glyphs[0] != 0 {
                         let advance = CTFontGetAdvancesForGlyphs(fallback, .horizontal, &glyphs, nil, 1)
                         plain = PlainGlyph(font: fallback, glyph: glyphs[0], centeredAdvance: CGFloat(advance))

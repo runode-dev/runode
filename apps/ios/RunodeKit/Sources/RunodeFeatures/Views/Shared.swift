@@ -357,11 +357,11 @@
                 if animates {
                     TimelineView(.periodic(from: .now, by: frameTime)) { context in
                         let tick = Int(context.date.timeIntervalSinceReferenceDate / frameTime)
-                        Text(frames[tick % frames.count])
+                        Text(TextPresentation.apply(to: frames[tick % frames.count]))
                     }
                 } else {
                     // 不动时挑中间一帧：Claude 的头一帧只是个小点。
-                    Text(frames[frames.count / 2])
+                    Text(TextPresentation.apply(to: frames[frames.count / 2]))
                 }
             }
             .frame(width: width)
@@ -484,7 +484,7 @@
                     flush()
                     runIsSymbol = symbol
                 }
-                run.append(character)
+                run += TextPresentation.apply(to: String(character))
             }
             flush()
             return Text(result)
