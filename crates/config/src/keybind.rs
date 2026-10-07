@@ -314,15 +314,7 @@ pub static DEFAULTS: &[&str] = &[
     "ctrl+tab=next_tab",
     "cmd+{=previous_tab",
     "ctrl+shift+tab=previous_tab",
-    "cmd+1=goto_tab:1",
-    "cmd+2=goto_tab:2",
-    "cmd+3=goto_tab:3",
-    "cmd+4=goto_tab:4",
-    "cmd+5=goto_tab:5",
-    "cmd+6=goto_tab:6",
-    "cmd+7=goto_tab:7",
-    "cmd+8=goto_tab:8",
-    "cmd+9=last_tab",
+    "cmd+digit=goto_tab",
     "cmd+d=new_split:right",
     "cmd+shift+d=new_split:down",
     "cmd+[=goto_split:previous",
@@ -341,15 +333,7 @@ pub static DEFAULTS: &[&str] = &[
     "cmd+shift+n=new_workspace",
     "ctrl+cmd+]=next_workspace",
     "ctrl+cmd+[=previous_workspace",
-    "ctrl+cmd+1=goto_workspace:1",
-    "ctrl+cmd+2=goto_workspace:2",
-    "ctrl+cmd+3=goto_workspace:3",
-    "ctrl+cmd+4=goto_workspace:4",
-    "ctrl+cmd+5=goto_workspace:5",
-    "ctrl+cmd+6=goto_workspace:6",
-    "ctrl+cmd+7=goto_workspace:7",
-    "ctrl+cmd+8=goto_workspace:8",
-    "ctrl+cmd+9=last_workspace",
+    "alt+digit=goto_workspace",
     "cmd+b=toggle_sidebar",
     "ctrl+shift+g=toggle_git",
     "cmd+shift+e=toggle_files",
@@ -389,15 +373,41 @@ pub static DEFAULTS: &[&str] = &[
     "cmd+0=reset_font_size",
 ];
 
+/// 触发键里代表数字 1 到 9 的键名，配置和 GPUI 的写法相同。
+const DIGIT: &str = "digit";
+
 /// 解析一条 `keybind` 的值。触发键转成 GPUI 的写法，动作解析成 `Action`。
-pub fn parse(value: &str) -> Result<Keybind, String> {
+///
+/// 最后一个键写 `digit` 时一条顶九条，数字 1 到 9 各绑一次：`goto_tab`、`goto_workspace` 不带
+/// 参数时按的数字就是第几个，9 是最后一个；别的动作九个数字都绑同一个。
+pub fn parse(value: &str) -> Result<Vec<Keybind>, String> {
     if value == "clear" {
-        return Ok(Keybind::Clear);
+        return Ok(vec![Keybind::Clear]);
     }
     // 触发键里不会出现 `=`（等号键写作 equal），第一个 `=` 就是分隔。
     let (trigger, action) = value.split_once('=').ok_or("expected TRIGGER=ACTION or clear")?;
     let keys = parse_trigger(trigger.trim())?;
     let action = action.trim();
+    let Some(prefix) = keys.strip_suffix(DIGIT) else {
+        if keys.contains(DIGIT) {
+            return Err("digit only works as the last key".into());
+        }
+        return Ok(vec![bind(keys, action)?]);
+    };
+    (1..=9)
+        .map(|n| {
+            let action = match (action, n) {
+                ("goto_tab", 9) => "last_tab".to_owned(),
+                ("goto_workspace", 9) => "last_workspace".to_owned(),
+                ("goto_tab" | "goto_workspace", n) => format!("{action}:{n}"),
+                _ => action.to_owned(),
+            };
+            bind(format!("{prefix}{n}"), &action)
+        })
+        .collect()
+}
+
+fn bind(keys: String, action: &str) -> Result<Keybind, String> {
     if action == "unbind" {
         return Ok(Keybind::Unbind(keys));
     }
@@ -526,6 +536,9 @@ pub const NAMED_KEYS: &[(&str, &str)] = &[
 
 fn key_name(key: &str) -> Result<String, String> {
     let key = key.to_lowercase();
+    if key == DIGIT {
+        return Ok(key);
+    }
     if let Some((_, named)) = NAMED_KEYS.iter().find(|(name, _)| *name == key) {
         return Ok((*named).to_owned());
     }
@@ -578,7 +591,7 @@ fn unescape(text: &str) -> Result<String, String> {
 /// 最后一次绑定。
 pub fn resolve(keybinds: &[Keybind]) -> Vec<(String, Action)> {
     let mut table: Vec<(String, Action)> = Vec::new();
-    let defaults = DEFAULTS.iter().map(|d| parse(d).expect("default keybind parses"));
+    let defaults = DEFAULTS.iter().flat_map(|d| parse(d).expect("default keybind parses"));
     for keybind in defaults.chain(keybinds.iter().cloned()) {
         match keybind {
             Keybind::Clear => table.clear(),

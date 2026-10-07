@@ -587,16 +587,29 @@ settings:
     too_long: 配對連結太長，畫不成 QR 碼。
     io_failed: "沒能讀寫配對口令：%{err}"
   keybind:
-    action: 動作
-    unbind: 去掉快速鍵
     use_defaults: 使用預設快速鍵
-    use_defaults_hint: 關掉後只有下面你寫的快速鍵生效。
-    yours: 你的快速鍵
-    add: 加入快速鍵…
-    press: 按下快速鍵…（Esc 取消）
-    defaults: 預設快速鍵
-    unbind_default: 去掉
-    overridden: 已改動
+    use_defaults_hint: 關掉後只有你自己加的快速鍵生效。
+    add: 新增快速鍵
+    remove: 去掉這個快速鍵
+    press: 按下按鍵…
+    press_hint: 按下快速鍵，Esc 取消。
+    press_digit_hint: 按修飾鍵加一個數字，1 到 9 一起綁上。Esc 取消。
+    conflict: "%{keys} 已經綁給「%{actions}」，替換後那邊就不再用這個鍵。"
+    replace: 替換
+    cancel: 取消
+    custom_hint: 傳送文字這類要自己填參數的快速鍵在設定檔裡寫。
+    group:
+      app: 應用程式
+      window: 視窗
+      tab: 分頁
+      split: 分割
+      workspace: 工作區
+      panels: 側欄和 agent
+      edit: 編輯
+      scroll: 捲動
+      text: 傳送文字
+      search: 搜尋
+      other: 其他
 clipboard:
   read_title: 允許程式讀取剪貼簿？
   read_detail: "「%{terminal}」裡的 %{program} 想讀取剪貼簿裡的文字。只在信得過它時允許：你最近拷貝的內容（包括密碼）會交給這個程式。"

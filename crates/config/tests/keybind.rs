@@ -10,7 +10,8 @@ use runode_shared_types::pane::Direction;
 #[test]
 fn defaults_parse_and_action_names_are_unique() {
     for default in DEFAULTS {
-        assert!(matches!(parse(default), Ok(Keybind::Bind { .. })), "{default}");
+        let binds = parse(default).unwrap_or_else(|err| panic!("{default}: {err}"));
+        assert!(binds.iter().all(|b| matches!(b, Keybind::Bind { .. })), "{default}");
     }
     let names: Vec<_> = ACTIONS.iter().map(|a| a.name).collect();
     let mut unique = names.clone();
@@ -49,7 +50,7 @@ fn recorded_keystrokes_format_back() {
         let normalized = parse_trigger(config).unwrap();
         assert_eq!(format_trigger(&normalized).as_deref(), Some(config));
     }
-    for default in DEFAULTS {
+    for default in DEFAULTS.iter().filter(|d| !d.contains("digit")) {
         let keys = parse_trigger(default.split_once('=').unwrap().0).unwrap();
         let formatted = format_trigger(&keys).unwrap_or_else(|| panic!("{default}"));
         assert_eq!(parse_trigger(&formatted).unwrap(), keys);
@@ -85,8 +86,8 @@ fn actions_carry_their_parameters() {
 
 #[test]
 fn user_keybinds_override_unbind_and_clear() {
-    let keybinds =
-        [parse("super+t=new_window").unwrap(), parse("cmd+w=unbind").unwrap(), parse("ctrl+a>c=new_tab").unwrap()];
+    let keybinds: Vec<_> =
+        ["super+t=new_window", "cmd+w=unbind", "ctrl+a>c=new_tab"].iter().flat_map(|k| parse(k).unwrap()).collect();
     let table = resolve(&keybinds);
     let lookup = |keys: &str| table.iter().filter(|(k, _)| k == keys).map(|(_, a)| a.clone()).collect::<Vec<_>>();
     assert_eq!(lookup("cmd-t"), [Action::NewWindow]);
@@ -94,7 +95,7 @@ fn user_keybinds_override_unbind_and_clear() {
     assert_eq!(lookup("ctrl-a c"), [Action::NewTab]);
     assert_eq!(lookup("cmd-q"), [Action::Quit]);
 
-    let table = resolve(&[parse("clear").unwrap(), parse("cmd+q=quit").unwrap()]);
+    let table = resolve(&[parse("clear").unwrap(), parse("cmd+q=quit").unwrap()].concat());
     assert_eq!(table, [("cmd-q".to_owned(), Action::Quit)]);
 }
 
@@ -112,4 +113,23 @@ fn defaults_keep_gpui_keystrokes() {
     assert!(has("ctrl-cmd-=", Action::EqualizeSplits));
     assert!(has("cmd-pageup", Action::ScrollPageUp));
     assert!(has("ctrl-shift-cmd-j", Action::WriteScreenFile(ScreenFile::CopyPath)));
+}
+
+/// `digit` 一条顶九条：按的数字就是第几个，9 是最后一个；解绑也一次解九个。
+#[test]
+fn digit_binds_one_to_nine() {
+    let table = resolve(&parse("ctrl+digit=goto_tab").unwrap());
+    let lookup = |keys: &str| table.iter().find(|(k, _)| k == keys).map(|(_, a)| a.clone());
+    assert_eq!(lookup("ctrl-1"), Some(Action::GotoTab(0)));
+    assert_eq!(lookup("ctrl-8"), Some(Action::GotoTab(7)));
+    assert_eq!(lookup("ctrl-9"), Some(Action::LastTab));
+    assert_eq!(lookup("cmd-3"), Some(Action::GotoTab(2)));
+    assert_eq!(lookup("alt-9"), Some(Action::LastWorkspace));
+
+    let table = resolve(&parse("cmd+digit=unbind").unwrap());
+    assert!(
+        !table.iter().any(|(k, _)| k.starts_with("cmd-") && k.ends_with(|c: char| c.is_ascii_digit()) && k != "cmd-0")
+    );
+    assert!(parse("cmd+digit>n=new_tab").is_err());
+    assert!(parse("cmd+t=goto_tab").is_err());
 }

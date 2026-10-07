@@ -64,6 +64,8 @@ config:
     触发键由修饰键和按键用 + 连起来，修饰键有 cmd、ctrl、alt、shift；连按几个键用 > 隔开，
     比如 ctrl+a>n。按键写字符本身，或者 left、right、up、down、page_up、page_down、home、end、
     enter、escape、tab、backspace、delete、space、equal、plus、minus、f1 到 f24 等名字。
+    按键写 digit 时一行顶九行，数字 1 到 9 各绑一次；goto_tab、goto_workspace 不带参数时按几就去第几个，
+    9 是最后一个，比如 cmd+digit=goto_tab。
     触发键=unbind 去掉一个绑定；keybind = clear 去掉之前的全部绑定，包括下面的默认绑定。
     这里只认 Runode 自己的配置文件，Ghostty 配置里的 keybind 不生效。
     默认绑定：

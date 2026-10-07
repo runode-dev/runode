@@ -191,7 +191,6 @@ mod tests {
         assert!(settings.contains("background = #171618"));
         let mut config = load(&[&settings]);
         // 默认快捷键全部重写一遍，结果与不写一样。
-        assert_eq!(config.keybinds.len(), crate::keybind::DEFAULTS.len());
         assert_eq!(crate::keybind::resolve(&config.keybinds), crate::keybind::resolve(&[]));
         config.keybinds.clear();
         assert_eq!(config, Config::default());

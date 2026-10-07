@@ -334,7 +334,7 @@ impl Config {
                 if empty {
                     self.keybinds.clear();
                 } else {
-                    self.keybinds.push(crate::keybind::parse(value)?);
+                    self.keybinds.extend(crate::keybind::parse(value)?);
                 }
             }
             // 主题和 `config-file` 在应用各层之前已处理。

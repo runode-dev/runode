@@ -77,8 +77,6 @@ enum Commit {
     Item(&'static str, usize),
     /// 调色板里的一个序号。
     Palette(u8),
-    /// 快捷键第几行的参数。
-    KeybindParam(usize),
 }
 
 struct Field {
@@ -173,7 +171,6 @@ impl SettingsView {
                 .rfind(|(i, _)| i == ix)
                 .map(|(_, c)| runode_config::hex(*c))
                 .unwrap_or_default(),
-            Commit::KeybindParam(row) => keybinds::param(&self.file, *row),
         }
     }
 
@@ -276,7 +273,6 @@ impl SettingsView {
                 }
                 self.write("palette", values, cx)
             }
-            Commit::KeybindParam(row) => keybinds::set_param(self, row, &text, cx),
         };
         match written {
             Ok(()) => drop(self.errors.remove(id)),

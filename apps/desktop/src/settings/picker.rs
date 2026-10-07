@@ -8,7 +8,7 @@ use gpui::{
     UniformListScrollHandle, Window, div, prelude::*, px, uniform_list,
 };
 
-use super::{SettingsView, controls::Colors, keybinds};
+use super::{SettingsView, controls::Colors};
 use crate::ui::text_field::{TextField, TextFieldEvent};
 
 const PICKER_WIDTH: f32 = 420.;
@@ -23,7 +23,6 @@ pub(super) enum PickTarget {
     /// 字体列表里的第几个，等于列表长度时是加一个。
     FontFamily(usize),
     Theme(ThemeSlot),
-    Keybind(keybinds::Target),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -163,7 +162,6 @@ impl SettingsView {
                 self.write_or_report("font-family", fonts, cx);
             }
             PickTarget::Theme(slot) => self.set_theme(slot, value, cx),
-            PickTarget::Keybind(target) => keybinds::picked(self, target, value, window, cx),
         }
         cx.notify();
     }

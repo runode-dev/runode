@@ -587,16 +587,29 @@ settings:
     too_long: The pairing link is too long to draw as a code.
     io_failed: "Could not read or write the pairing code: %{err}"
   keybind:
-    action: Action
-    unbind: Remove shortcut
     use_defaults: Use default shortcuts
-    use_defaults_hint: When off, only the shortcuts below are bound.
-    yours: Your Shortcuts
-    add: Add Shortcut…
-    press: Press a key… (Esc to cancel)
-    defaults: Default Shortcuts
-    unbind_default: Remove
-    overridden: Changed
+    use_defaults_hint: When off, only the shortcuts you add are bound.
+    add: Add Shortcut
+    remove: Remove This Shortcut
+    press: Press a key…
+    press_hint: Press a shortcut. Esc to cancel.
+    press_digit_hint: Press modifiers and a digit; 1 through 9 are bound together. Esc to cancel.
+    conflict: "%{keys} is already bound to “%{actions}”. Replacing it removes the key from there."
+    replace: Replace
+    cancel: Cancel
+    custom_hint: Shortcuts that need your own parameter, like sending text, are written in the configuration file.
+    group:
+      app: App
+      window: Window
+      tab: Tabs
+      split: Splits
+      workspace: Workspaces
+      panels: Sidebar & Agents
+      edit: Edit
+      scroll: Scrolling
+      text: Send Text
+      search: Search
+      other: Other
 clipboard:
   read_title: Let a program read the clipboard?
   read_detail: "%{program} in “%{terminal}” wants to read the text on your clipboard. Allow it only if you trust it: whatever you copied last, passwords included, goes to the program."
