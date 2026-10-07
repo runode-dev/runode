@@ -451,6 +451,7 @@ impl Render for WindowView {
             .id("window")
             .key_context("Window")
             .on_action(cx.listener(Self::new_tab))
+            .on_action(cx.listener(Self::revoke_device))
             .on_action(cx.listener(Self::close_tab))
             .on_action(cx.listener(Self::next_tab))
             .on_action(cx.listener(Self::previous_tab))
@@ -649,7 +650,7 @@ impl WindowView {
             self.render_right_handle(divider, right, cx)
         })
         .collect::<Vec<_>>();
-        let machine = machine::render_machine(fg);
+        let machine = self.render_machine(fg, left_inset, cx);
         // 标签平分标签条，最窄 `TAB_MIN_WIDTH`，挤不下就让标签条滚动。这里估一个宽度，决定标签
         // 要不要收成紧凑的样子，拖动时的预览也照它画。
         let fixed = sidebar_width

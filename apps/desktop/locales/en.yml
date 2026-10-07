@@ -591,3 +591,11 @@ clipboard:
   read_detail_unknown: "A program in “%{terminal}” wants to read the text on your clipboard. Allow it only if you trust it: whatever you copied last, passwords included, goes to the program."
   allow: Allow
   deny: Don’t Allow
+machine:
+  connected: "%{count} device(s) connected"
+  no_devices: No paired devices
+  live: Connected
+  revoke_title: "Revoke “%{device}”?"
+  revoke_detail: It's disconnected right away and has to pair again to connect.
+  revoke: Revoke
+  cancel: Cancel

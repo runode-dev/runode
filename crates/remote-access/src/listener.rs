@@ -82,6 +82,8 @@ pub struct Listener {
 pub(crate) struct Shared {
     pub(crate) dirs: Dirs,
     pub(crate) host_name: String,
+    /// 开监听时写进状态文件的，设备连上、断开时填上 `connected` 重写，见 `publish`。
+    status: ListenerStatus,
     pub(crate) tls: Arc<ServerConfig>,
     pub(crate) connect: Connect,
     /// 要停了：门禁阶段的连接回 `RejectReason::Disabled`。
@@ -123,6 +125,7 @@ impl Shared {
         if let Some(live) = connections.get_mut(&id) {
             live.device = Some(device);
         }
+        self.publish(&connections);
         let mut same: Vec<u64> =
             connections.iter().filter(|(_, live)| live.device == Some(device)).map(|(&id, _)| id).collect();
         same.sort_unstable();
@@ -132,6 +135,33 @@ impl Shared {
                 tracing::info!("remote device {device} has too many connections, closing an old one");
                 cut(live);
             }
+        }
+    }
+
+    /// 连接 `id` 结束了。过了门禁的连接结束时重写状态文件。
+    fn remove(&self, id: u64) {
+        let mut connections = self.connections();
+        if connections.remove(&id).is_some_and(|live| live.device.is_some()) {
+            self.publish(&connections);
+        }
+    }
+
+    /// 把正连着的设备写进状态文件，见 `ListenerStatus::connected`。写不了只记日志。
+    fn publish(&self, connections: &HashMap<u64, Live>) {
+        let mut live: Vec<(u64, DeviceId)> =
+            connections.iter().filter_map(|(&id, live)| Some((id, live.device?))).collect();
+        live.sort_unstable_by_key(|&(id, _)| id);
+        let mut connected = Vec::new();
+        for (_, device) in live {
+            if !connected.contains(&device) {
+                connected.push(device);
+            }
+        }
+        let status = ListenerStatus { connected, ..self.status.clone() };
+        let written =
+            self.dirs.remote_access_status_file().ok_or_else(no_home).and_then(|path| write_json(&path, &status));
+        if let Err(err) = written {
+            tracing::warn!("cannot update the remote access status: {err}");
         }
     }
 
@@ -173,11 +203,17 @@ impl Listener {
         let port = addrs.first().map_or(port, SocketAddr::port);
         let host_name = host_name.unwrap_or_else(addrs::host_name);
         let fp = encode_base64url(&fingerprint);
-        let status = ListenerStatus { port, fingerprint: Bytes(fingerprint.to_vec()), host_name: host_name.clone() };
+        let status = ListenerStatus {
+            port,
+            fingerprint: Bytes(fingerprint.to_vec()),
+            host_name: host_name.clone(),
+            connected: Vec::new(),
+        };
         write_json(&dirs.remote_access_status_file().ok_or_else(no_home)?, &status)?;
         let shared = Arc::new(Shared {
             dirs,
             host_name: host_name.clone(),
+            status,
             tls: Arc::new(tls),
             connect,
             stopping: AtomicBool::new(false),
@@ -391,11 +427,11 @@ fn accept_ready(shared: &Arc<Shared>, listener: &TcpListener) {
         let thread_shared = shared.clone();
         let spawned = thread::Builder::new().name("remote-connection".into()).spawn(move || {
             gate::serve(&thread_shared, id, &tcp, ip, &cut);
-            thread_shared.connections().remove(&id);
+            thread_shared.remove(id);
         });
         if let Err(err) = spawned {
             tracing::warn!("failed to start a remote connection thread: {err}");
-            shared.connections().remove(&id);
+            shared.remove(id);
         }
     }
 }

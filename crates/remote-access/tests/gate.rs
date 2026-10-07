@@ -349,3 +349,26 @@ fn a_device_keeps_at_most_eight_connections() {
     assert_eq!(second.read_host_msg(), done);
     drop(newest);
 }
+
+#[test]
+fn the_status_file_lists_the_connected_devices() {
+    let harness = Harness::start("connected");
+    let key = Key::generate();
+    let device_id = harness.pair(&key);
+    let connected = || runode_remote_access::listener_status(&harness.dirs).unwrap().unwrap().connected;
+    let wait_for = |want: &[DeviceId]| {
+        let start = std::time::Instant::now();
+        while connected() != want {
+            assert!(start.elapsed() < PATIENCE, "connected stays {:?}, want {want:?}", connected());
+            std::thread::sleep(Duration::from_millis(20));
+        }
+    };
+    let (phone, host) = harness.bridged(device_id, &key);
+    let (second, second_host) = harness.bridged(device_id, &key);
+    // 同一台设备连着两条也只算一次。
+    wait_for(&[device_id]);
+    drop((phone, host));
+    wait_for(&[device_id]);
+    drop((second, second_host));
+    wait_for(&[]);
+}

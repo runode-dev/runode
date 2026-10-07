@@ -1,11 +1,21 @@
 //! 卡片样式下标题栏左边的这台机器：电脑名和机型（「Ethan 的 MacBook Pro」「MacBook Pro」），
 //! 笔记本和台式机各一个图标。启动时在后台读一次，读到后重画各窗口；读到之前不显示。
+//!
+//! 有手机经远程访问连着时，机型那一行换成连着几台设备；点这一块弹出所有配对过的设备，连着的标出来，
+//! 点其中一台问过用户后撤销它（`RevokeDevice`），再点这一块关掉菜单。
+//! 设备表和连着哪些设备（监听方写在状态文件里的 `ListenerStatus::connected`）都是数据目录里的文件，
+//! 监听不一定开在这个进程里，所以每隔 `DEVICES_POLL` 读一次。
 
-use std::sync::OnceLock;
+use std::{sync::OnceLock, time::Duration};
 
-use gpui::{App, Div, SharedString, div, prelude::*, px, svg};
+use gpui::{
+    Action, App, Context, Div, Focusable as _, Global, MouseButton, PromptLevel, SharedString, Stateful, Window, div,
+    point, prelude::*, px, svg,
+};
+use runode_protocol::remote::DeviceId;
 use runode_shared_types::color::Rgb;
 
+use super::{TITLEBAR_HEIGHT, WindowView, files::text_item};
 use crate::{
     assets::{DESKTOP_ICON, LAPTOP_ICON},
     ui::hsla,
@@ -13,6 +23,8 @@ use crate::{
 
 /// 标题栏里这一块最宽这么宽，再长的电脑名截断。
 pub(super) const MACHINE_MAX_WIDTH: f32 = 180.;
+/// 隔多久读一次配对过的设备和连着哪些。
+const DEVICES_POLL: Duration = Duration::from_secs(2);
 
 struct Machine {
     name: SharedString,
@@ -22,7 +34,26 @@ struct Machine {
 
 static MACHINE: OnceLock<Machine> = OnceLock::new();
 
-/// 在后台读这台机器的名字和机型，读好后重画各窗口。
+/// 配对过的设备，按配对的先后。
+#[derive(PartialEq)]
+struct Devices(Vec<Paired>);
+
+impl Global for Devices {}
+
+#[derive(PartialEq)]
+struct Paired {
+    id: DeviceId,
+    name: SharedString,
+    /// 现在连着。
+    live: bool,
+}
+
+/// 撤销这台配对过的设备，先问用户。
+#[derive(Clone, PartialEq, Action)]
+#[action(namespace = runode, no_json)]
+pub struct RevokeDevice(pub DeviceId);
+
+/// 在后台读这台机器的名字和机型，读好后重画各窗口；之后一直跟着配对过的设备和连着哪些。
 pub fn load(cx: &mut App) {
     let task = cx.background_spawn(async {
         let model = model_name();
@@ -36,51 +67,148 @@ pub fn load(cx: &mut App) {
         }
     })
     .detach();
+    cx.spawn(async move |cx| {
+        loop {
+            let devices = cx.background_executor().spawn(async { read_devices() }).await;
+            cx.update(|cx| {
+                if cx.try_global::<Devices>() != Some(&devices) {
+                    cx.set_global(devices);
+                    cx.refresh_windows();
+                }
+            });
+            cx.background_executor().timer(DEVICES_POLL).await;
+        }
+    })
+    .detach();
 }
 
-/// 标题栏左边的这一块：图标，右边上下两行是电脑名和机型。还没读到时为 `None`。
-pub(super) fn render_machine(fg: Rgb) -> Option<Div> {
-    let machine = MACHINE.get()?;
-    let fg = hsla(fg);
-    Some(
-        div()
-            .flex_none()
-            .max_w(px(MACHINE_MAX_WIDTH))
-            .min_w_0()
-            .flex()
-            .items_center()
-            .gap(px(8.))
-            .child(
-                svg()
-                    .flex_none()
-                    .path(if machine.laptop { LAPTOP_ICON } else { DESKTOP_ICON })
-                    .size(px(16.))
-                    .text_color(fg.opacity(0.6)),
-            )
-            .child(
-                div()
-                    .min_w_0()
-                    .flex()
-                    .flex_col()
-                    .child(
-                        div()
-                            .truncate()
-                            .text_size(px(12.))
-                            .line_height(px(15.))
-                            .font_weight(gpui::FontWeight::SEMIBOLD)
-                            .text_color(fg.opacity(0.85))
-                            .child(machine.name.clone()),
-                    )
-                    .child(
-                        div()
-                            .truncate()
-                            .text_size(px(10.))
-                            .line_height(px(12.))
-                            .text_color(fg.opacity(0.5))
-                            .child(machine.model.clone()),
-                    ),
-            ),
+/// 读设备表和监听方的状态。读不了设备表时当没有设备；监听没开时都没连着。
+fn read_devices() -> Devices {
+    let dirs = runode_paths::Dirs::from_env();
+    let connected = runode_remote_access::listener_status(&dirs).ok().flatten().map(|status| status.connected);
+    let devices = runode_remote_access::list_devices(&dirs).unwrap_or_default();
+    Devices(
+        devices
+            .into_iter()
+            .map(|device| Paired {
+                id: device.device_id,
+                live: connected.as_ref().is_some_and(|ids| ids.contains(&device.device_id)),
+                name: device.name.into(),
+            })
+            .collect(),
     )
+}
+
+fn devices(cx: &App) -> &[Paired] {
+    cx.try_global::<Devices>().map_or(&[], |devices| &devices.0)
+}
+
+impl WindowView {
+    /// 标题栏左边的这一块：图标，右边上下两行是电脑名和机型（有设备连着时是连着几台）。点了在
+    /// 它下面弹出配对过的设备，`left` 是它离窗口左边多远。还没读到机器时为 `None`。
+    pub(super) fn render_machine(&self, fg: Rgb, left: f32, cx: &mut Context<Self>) -> Option<Stateful<Div>> {
+        let machine = MACHINE.get()?;
+        let count = devices(cx).iter().filter(|device| device.live).count();
+        let detail = if count == 0 {
+            machine.model.clone()
+        } else {
+            rust_i18n::t!("machine.connected", count = count).into_owned().into()
+        };
+        let position = point(px(left), px(TITLEBAR_HEIGHT));
+        let block = machine_block(machine, detail, fg)
+            .id("machine")
+            // 菜单开着时在捕获阶段就关掉、不再往下传：菜单自己的「点到外面就关」和下面再打开的都不跑。
+            .capture_any_mouse_down(cx.listener(move |this, _, _, cx| {
+                if this.menu_open_at(position) {
+                    cx.stop_propagation();
+                    this.file_menu = None;
+                    cx.notify();
+                }
+            }))
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(move |this, _, _, cx| {
+                    cx.stop_propagation();
+                    let devices = devices(cx);
+                    let items = if devices.is_empty() {
+                        vec![Some(text_item(rust_i18n::t!("machine.no_devices").into_owned(), None, None))]
+                    } else {
+                        let live: SharedString = rust_i18n::t!("machine.live").into_owned().into();
+                        devices
+                            .iter()
+                            .map(|device| {
+                                let detail = device.live.then(|| live.clone());
+                                let revoke: Box<dyn Action> = Box::new(RevokeDevice(device.id));
+                                Some(text_item(device.name.to_string(), detail, Some(revoke)))
+                            })
+                            .collect()
+                    };
+                    let target = this.focus_handle(cx);
+                    this.open_menu(position, items, target, cx);
+                }),
+            );
+        Some(block)
+    }
+
+    /// 问用户要不要撤销设备，撤销了马上重读设备表；它连着的连接几秒内断开。
+    pub(super) fn revoke_device(&mut self, action: &RevokeDevice, window: &mut Window, cx: &mut Context<Self>) {
+        let id = action.0;
+        let Some(device) = devices(cx).iter().find(|device| device.id == id) else { return };
+        let title = rust_i18n::t!("machine.revoke_title", device = device.name);
+        let detail = rust_i18n::t!("machine.revoke_detail");
+        let answers = [rust_i18n::t!("machine.revoke"), rust_i18n::t!("machine.cancel")];
+        let answers: Vec<&str> = answers.iter().map(AsRef::as_ref).collect();
+        let answer = window.prompt(PromptLevel::Warning, &title, Some(&detail), &answers, cx);
+        cx.spawn(async move |_, cx| {
+            if answer.await != Ok(0) {
+                return;
+            }
+            cx.update(|cx| {
+                if let Err(err) = runode_remote_access::revoke_device(&runode_paths::Dirs::from_env(), id) {
+                    tracing::warn!("cannot revoke remote device {id}: {err}");
+                }
+                cx.set_global(read_devices());
+                cx.refresh_windows();
+            });
+        })
+        .detach();
+    }
+}
+
+fn machine_block(machine: &Machine, detail: SharedString, fg: Rgb) -> Div {
+    let fg = hsla(fg);
+    div()
+        .flex_none()
+        .max_w(px(MACHINE_MAX_WIDTH))
+        .min_w_0()
+        .flex()
+        .items_center()
+        .gap(px(8.))
+        .child(
+            svg()
+                .flex_none()
+                .path(if machine.laptop { LAPTOP_ICON } else { DESKTOP_ICON })
+                .size(px(16.))
+                .text_color(fg.opacity(0.6)),
+        )
+        .child(
+            div()
+                .min_w_0()
+                .flex()
+                .flex_col()
+                .child(
+                    div()
+                        .truncate()
+                        .text_size(px(12.))
+                        .line_height(px(15.))
+                        .font_weight(gpui::FontWeight::SEMIBOLD)
+                        .text_color(fg.opacity(0.85))
+                        .child(machine.name.clone()),
+                )
+                .child(
+                    div().truncate().text_size(px(10.)).line_height(px(12.)).text_color(fg.opacity(0.5)).child(detail),
+                ),
+        )
 }
 
 /// 机型的名字，去掉括号里的尺寸和芯片：「MacBook Pro (16-inch, M5 Max)」是「MacBook Pro」。

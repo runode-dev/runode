@@ -1,5 +1,6 @@
 //! 监听方开着没有、在哪：监听方开着时一直锁着 `remote_access_lock_file`，开好后把端口、证书指纹
-//! 和主机名写进 `remote_access_status_file`。命令行据此拼配对 URI，或者告诉用户远程访问没开。
+//! 和主机名写进 `remote_access_status_file`，之后每有设备连上或断开就把正连着的设备重写进去。命令行
+//! 据此拼配对 URI，或者告诉用户远程访问没开；桌面 app 的标题栏据此显示连着哪些设备。
 
 use std::{
     fs::{File, OpenOptions, TryLockError},
@@ -8,7 +9,7 @@ use std::{
 };
 
 use runode_paths::Dirs;
-use runode_protocol::remote::Bytes;
+use runode_protocol::remote::{Bytes, DeviceId};
 use serde::{Deserialize, Serialize};
 
 use crate::files::{no_home, read_json};
@@ -20,6 +21,9 @@ pub struct ListenerStatus {
     /// 证书指纹，见 `runode_protocol::remote::FINGERPRINT_LEN`。
     pub fingerprint: Bytes,
     pub host_name: String,
+    /// 正连着（过了门禁）的设备，每台一次，按连上的先后。
+    #[serde(default)]
+    pub connected: Vec<DeviceId>,
 }
 
 /// 开着的监听方的状态；没有监听方在跑时为 `None`。

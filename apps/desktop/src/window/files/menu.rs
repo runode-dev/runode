@@ -26,10 +26,11 @@ use crate::{
 const MENU_MARGIN: f32 = 8.;
 const MENU_WIDTH: f32 = 240.;
 
-/// 菜单里的一项：点了把 `action` 派发给菜单的 `target`，和按快捷键走同一条路。
+/// 菜单里的一项：点了把 `action` 派发给菜单的 `target`，和按快捷键走同一条路；没有 `action` 的
+/// 只是一行字，点不了。
 pub(in crate::window) struct MenuItem {
     label: String,
-    action: Box<dyn Action>,
+    action: Option<Box<dyn Action>>,
     shortcut: Option<SharedString>,
     enabled: bool,
 }
@@ -37,7 +38,16 @@ pub(in crate::window) struct MenuItem {
 /// 菜单里的一项，快捷键在这时查，查的是这一刻的键位表。
 pub(in crate::window) fn menu_item(key: &str, action: Box<dyn Action>, enabled: bool, cx: &App) -> MenuItem {
     let shortcut = shortcut_text(action.as_ref(), cx);
-    MenuItem { label: rust_i18n::t!(key).into_owned(), action, shortcut, enabled }
+    MenuItem { label: rust_i18n::t!(key).into_owned(), action: Some(action), shortcut, enabled }
+}
+
+/// 菜单里写好了字的一项，`detail` 淡淡地写在右边快捷键的位置；没有 `action` 时点不了。
+pub(in crate::window) fn text_item(
+    label: String,
+    detail: Option<SharedString>,
+    action: Option<Box<dyn Action>>,
+) -> MenuItem {
+    MenuItem { label, action, shortcut: detail, enabled: true }
 }
 
 /// 打开着的右键菜单：右键按下的位置，打开时就定下的各项（`None` 是分隔线），以及点了以后
@@ -59,6 +69,11 @@ impl WindowView {
     ) {
         self.file_menu = Some(FileMenu { position, items, target });
         cx.notify();
+    }
+
+    /// 在 `position` 弹出的菜单开着。
+    pub(in crate::window) fn menu_open_at(&self, position: Point<Pixels>) -> bool {
+        self.file_menu.as_ref().is_some_and(|menu| menu.position == position)
     }
 
     /// 在 `position` 弹出文件树的右键菜单，作用在当前选中的那一项上：选中文件、选中目录和点在
@@ -112,7 +127,7 @@ impl WindowView {
             let Some(item) = item else {
                 return div().flex_none().h(px(1.)).mx(px(6.)).my(px(4.)).bg(fg.opacity(0.12)).into_any_element();
             };
-            let action = item.action.boxed_clone();
+            let action = item.action.as_ref().filter(|_| item.enabled).map(|action| action.boxed_clone());
             let target = menu.target.clone();
             div()
                 .id(("file-menu", ix))
@@ -125,7 +140,7 @@ impl WindowView {
                 .items_center()
                 .gap(px(16.))
                 .text_color(if item.enabled { fg } else { fg.opacity(0.35) })
-                .when(item.enabled, |row| {
+                .when_some(action, |row, action| {
                     row.hover(|row| row.bg(hover_bg)).on_mouse_down(
                         MouseButton::Left,
                         cx.listener(move |this, _, window, cx| {
