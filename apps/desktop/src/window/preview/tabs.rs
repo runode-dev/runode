@@ -15,7 +15,7 @@ use crate::{
     assets::DIFF_ICON,
     ui::{file_icons::file_icon, hsla, tooltip::tooltip},
     window::{
-        CloseTab, TITLEBAR_HEIGHT, WindowView, divider_color,
+        ClosePane, CloseTab, TITLEBAR_HEIGHT, WindowView, divider_color,
         files::menu_item,
         project::{RENAMED, status_color},
         titlebar::{close_button, drag_chip},
@@ -146,6 +146,15 @@ impl Render for DraggedPreviewTab {
 
 impl WindowView {
     pub(super) fn close_preview_tab(&mut self, _: &CloseTab, window: &mut Window, cx: &mut Context<Self>) {
+        self.close_active_preview(window, cx);
+    }
+
+    /// 预览栏里没有分屏，关分屏的键（cmd+w）也只关当前的预览标签，不连带关掉终端。
+    pub(super) fn close_preview_pane(&mut self, _: &ClosePane, window: &mut Window, cx: &mut Context<Self>) {
+        self.close_active_preview(window, cx);
+    }
+
+    fn close_active_preview(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let active = self.workspace().project.previews.active;
         self.retain_previews(|ix, _| ix != active, window, cx);
     }

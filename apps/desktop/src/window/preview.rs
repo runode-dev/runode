@@ -591,8 +591,9 @@ impl WindowView {
                 .track_focus(&self.preview_focus)
                 .on_action(cx.listener(Self::copy_preview))
                 .on_action(cx.listener(Self::select_all_preview))
-                // 焦点在预览栏里时，关标签页的快捷键关的是预览标签。
+                // 焦点在预览栏里时，关标签页和关分屏的快捷键关的都是预览标签。
                 .on_action(cx.listener(Self::close_preview_tab))
+                .on_action(cx.listener(Self::close_preview_pane))
                 .on_action(cx.listener(Self::close_other_previews))
                 .on_action(cx.listener(Self::close_previews_to_right))
                 .on_action(cx.listener(Self::close_all_previews))
