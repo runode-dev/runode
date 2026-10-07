@@ -26,11 +26,11 @@ release: ## 发布构建
 
 run: ## 调试构建并启动
 	$(call link_rn,debug)
-	$(CARGO) run -- $(ARGS)
+	$(CARGO) run -p runode -- $(ARGS)
 
 run-release: ## 发布构建并启动
 	$(call link_rn,release)
-	$(CARGO) run --release -- $(ARGS)
+	$(CARGO) run --release -p runode -- $(ARGS)
 
 # 模拟器用哪台，例如 make run-ios IOS_SIM="iPhone 18 Pro"；不给时用开着的那台。
 run-ios: ## 调试构建 iOS app，装到模拟器上启动
