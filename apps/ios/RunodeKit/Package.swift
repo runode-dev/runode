@@ -3,7 +3,9 @@
 //   RunodeProtocol（帧、消息、门禁，纯 Foundation）
 //   ← RunodeConnection（TLS、门禁流程、配对、Keychain、Bonjour、重连）
 //   RunodeTerminal（libghostty-vt 的封装和终端 UIView，只依赖 RunodeProtocol 里的数据类型）
-//   ← RunodeFeatures（视图模型和 SwiftUI 视图，依赖以上三个）
+//   RunodeActivity（灵动岛和锁屏上 Live Activity 的数据，只依赖 Foundation 和 ActivityKit，App 和小组件扩展共用）
+//   ← RunodeFeatures（视图模型和 SwiftUI 视图，依赖以上四个）
+// 小组件扩展只依赖 RunodeActivity，不能依赖 RunodeFeatures：那会把 libghostty-vt 也带进扩展。
 // 也给 macOS 声明了平台：没有界面的部分（以及视图模型）能直接在 Mac 上 `swift test`，UIKit 的部分
 // 用 `#if os(iOS)` 包着。
 import PackageDescription
@@ -16,6 +18,7 @@ let package = Package(
         .library(name: "RunodeProtocol", targets: ["RunodeProtocol"]),
         .library(name: "RunodeConnection", targets: ["RunodeConnection"]),
         .library(name: "RunodeTerminal", targets: ["RunodeTerminal"]),
+        .library(name: "RunodeActivity", targets: ["RunodeActivity"]),
         .library(name: "RunodeFeatures", targets: ["RunodeFeatures"]),
     ],
     targets: [
@@ -32,15 +35,17 @@ let package = Package(
             // libghostty-vt 里的 simdutf、highway 是 C++ 写的。
             linkerSettings: [.linkedLibrary("c++")]
         ),
+        .target(name: "RunodeActivity"),
         .target(
             name: "RunodeFeatures",
-            dependencies: ["RunodeProtocol", "RunodeConnection", "RunodeTerminal"],
+            dependencies: ["RunodeProtocol", "RunodeConnection", "RunodeTerminal", "RunodeActivity"],
             // 各家 agent 的 logo：图片是桌面资源里那几个 SVG 的符号链接，出处和许可见桌面那边的 LICENSE。
             resources: [.process("Resources/AgentLogos.xcassets")]
         ),
         .testTarget(name: "RunodeProtocolTests", dependencies: ["RunodeProtocol"]),
         .testTarget(name: "RunodeConnectionTests", dependencies: ["RunodeConnection"]),
         .testTarget(name: "RunodeTerminalTests", dependencies: ["RunodeTerminal"]),
+        .testTarget(name: "RunodeActivityTests", dependencies: ["RunodeActivity"]),
         .testTarget(name: "RunodeFeaturesTests", dependencies: ["RunodeFeatures"]),
     ]
 )

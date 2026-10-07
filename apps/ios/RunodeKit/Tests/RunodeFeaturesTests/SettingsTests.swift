@@ -40,6 +40,7 @@ import Testing
         #expect(decoded.defaultSize == .automatic)
         #expect(decoded.bellHaptics)
         #expect(decoded.deviceName == nil)
+        #expect(decoded.showsAgentActivity)
     }
 
     @Test func newTerminalsStartWithTheDefaultSize() async throws {

@@ -11,6 +11,8 @@ public struct AppPreferences: Hashable, Sendable, Codable {
     public var bellHaptics = true
     /// 报给电脑的设备名；为空时用系统给的名字。
     public var deviceName: String?
+    /// 在灵动岛和锁屏上显示各台电脑上 agent 的状态（Live Activity）。
+    public var showsAgentActivity = true
 
     public init() {}
 
@@ -24,10 +26,12 @@ public struct AppPreferences: Hashable, Sendable, Codable {
         fontSize = try container.decodeIfPresent(Double.self, forKey: .fontSize)
         bellHaptics = try container.decodeIfPresent(Bool.self, forKey: .bellHaptics) ?? true
         deviceName = try container.decodeIfPresent(String.self, forKey: .deviceName)
+        showsAgentActivity = try container.decodeIfPresent(Bool.self, forKey: .showsAgentActivity) ?? true
     }
 }
 
-/// 设置页的视图模型：改了马上存；设备名变了告诉 `AppModel`，由它转给各台电脑的连接。
+/// 设置页的视图模型：改了马上存；设备名变了告诉 `AppModel`，由它转给各台电脑的连接；灵动岛的开关
+/// 变了也告诉它，由它开关 Live Activity。
 @Observable
 @MainActor
 public final class SettingsModel {
@@ -38,6 +42,9 @@ public final class SettingsModel {
             if preferences.deviceName != oldValue.deviceName {
                 deviceNameDidChange(deviceName)
             }
+            if preferences.showsAgentActivity != oldValue.showsAgentActivity {
+                agentActivityDidChange(preferences.showsAgentActivity)
+            }
         }
     }
 
@@ -45,6 +52,7 @@ public final class SettingsModel {
     public let systemDeviceName: String
     @ObservationIgnored private let store: DefaultsStore<AppPreferences>
     @ObservationIgnored var deviceNameDidChange: @MainActor (String) -> Void = { _ in }
+    @ObservationIgnored var agentActivityDidChange: @MainActor (Bool) -> Void = { _ in }
 
     public init(store: DefaultsStore<AppPreferences>, systemDeviceName: String) {
         self.store = store

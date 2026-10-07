@@ -106,14 +106,20 @@ public final class SessionListModel {
 
     /// 改名以后 `AppModel` 换上新的记录。
     public internal(set) var machine: MachineRecord
-    public private(set) var linkState: LinkState = .idle
-    public private(set) var sessions: [SessionInfo] = []
+    public private(set) var linkState: LinkState = .idle {
+        didSet { onSessionsChanged() }
+    }
+    public private(set) var sessions: [SessionInfo] = [] {
+        didSet { onSessionsChanged() }
+    }
     /// 电脑上的 app 的窗口，按窗口的序号；app 没开着窗口时为空。
     public private(set) var windows: [WindowLayout] = []
     /// 每个会话屏幕底部的几行，去掉了空行。
     public private(set) var previews: [SessionId: [String]] = [:]
     /// 连上后收到过一次列表。
-    public private(set) var loaded = false
+    public private(set) var loaded = false {
+        didSet { onSessionsChanged() }
+    }
     /// 这台电脑上终端的主题：只看状态的 `Attach` 回话里带着，终端页开着时它收到的 `ThemeApplied`
     /// 也经同一条连接到这里。没收到过时为空。
     public private(set) var theme: AppTheme?
@@ -134,6 +140,8 @@ public final class SessionListModel {
     @ObservationIgnored public var onSpawned: @MainActor (SessionId) -> Void = { _ in }
     /// `theme` 变了，`AppModel` 据此记下 App 现在用的主题。
     @ObservationIgnored var onThemeChanged: @MainActor () -> Void = {}
+    /// 会话、连接状态变了，`AppModel` 据此更新灵动岛上的 agent 状态。
+    @ObservationIgnored var onSessionsChanged: @MainActor () -> Void = {}
     @ObservationIgnored private var task: Task<Void, Never>?
     @ObservationIgnored private var connected = false
     /// 这次连接上已经发过只看状态的 `Attach` 的会话。

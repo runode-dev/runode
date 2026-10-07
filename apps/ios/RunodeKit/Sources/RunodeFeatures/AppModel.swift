@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import RunodeActivity
 import RunodeConnection
 import RunodeProtocol
 
@@ -35,6 +36,10 @@ public struct AppDependencies {
     public var preferences: DefaultsStore<AppPreferences>
     /// 上次用的主题记在哪里，App 刚启动、电脑还没连上时先用它，用浅色主题的不会先闪一下默认的深色。
     public var themes: DefaultsStore<AppTheme>
+    /// 灵动岛和锁屏上 Live Activity 的系统接口；默认为空，什么都不显示（测试、演示模式）。
+    public var agentActivity: (any AgentActivityDriver)?
+    /// 进后台以后多要一会儿运行时间的系统接口；默认要不到，一进后台就断开（测试、演示模式）。
+    public var backgroundTime: any BackgroundTime
 
     @MainActor
     public init(
@@ -52,12 +57,15 @@ public struct AppDependencies {
         self.recents = recents
         self.preferences = preferences
         self.themes = themes
+        agentActivity = nil
+        backgroundTime = NoBackgroundTime()
     }
 }
 
 /// 整个 App 的状态：导航栈、各页的视图模型、每台电脑一条连接。配对过的每台电脑在 App 处于前台
-/// 时都连着，首页据此显示各台的状态、等回答的会话和统计；App 进后台时全部断开，回到前台再连上、
-/// 各页重新 `Attach`。
+/// 时都连着，首页据此显示各台的状态、等回答的会话和统计；App 进后台后向系统多要一会儿时间
+/// （`BackgroundTime`），这段时间里连接照常、灵动岛上的 agent 状态照常更新，时间到了全部断开，
+/// 回到前台再连上、各页重新 `Attach`。灵动岛和锁屏上的 agent 状态由 `AgentActivityModel` 管。
 @Observable
 @MainActor
 public final class AppModel {
@@ -81,17 +89,25 @@ public final class AppModel {
     @ObservationIgnored private var sessionLists: [UUID: SessionListModel] = [:]
     @ObservationIgnored private var terminals: [Route: TerminalModel] = [:]
     @ObservationIgnored private var gits: [Route: GitModel] = [:]
+    /// App 在前台。
     @ObservationIgnored private var active = true
+    /// 各台电脑的连接开着：在前台，或者进了后台、多要的时间还没用完。
+    @ObservationIgnored private var linksRunning = true
+    @ObservationIgnored private let agentActivity: AgentActivityModel
 
     public init(dependencies: AppDependencies) {
         self.dependencies = dependencies
         machineList = MachineListModel(store: dependencies.store, keyStore: dependencies.keyStore)
-        settings = SettingsModel(store: dependencies.preferences, systemDeviceName: dependencies.deviceName)
+        let settings = SettingsModel(store: dependencies.preferences, systemDeviceName: dependencies.deviceName)
+        self.settings = settings
+        agentActivity = AgentActivityModel(
+            driver: dependencies.agentActivity, enabled: settings.preferences.showsAgentActivity)
         recent = dependencies.recents.load()
         savedTheme = dependencies.themes.load()
         machineList.willDelete = { [weak self] id in self?.forget(machine: id) }
         machineList.didLoad = { [weak self] in self?.syncConnections() }
         settings.deviceNameDidChange = { [weak self] name in self?.deviceNameChanged(name) }
+        settings.agentActivityDidChange = { [weak self] enabled in self?.agentActivity.enabled = enabled }
     }
 
     /// 打开一个终端页：在这台电脑的会话列表上时压在它上面，别处（首页、别的电脑）打开时连同它的
@@ -148,8 +164,9 @@ public final class AppModel {
         let model = SessionListModel(machine: machine, link: dependencies.makeLink(machine))
         model.onSpawned = { [weak self] session in self?.openTerminal(machine: machineId, session: session) }
         model.onThemeChanged = { [weak self] in self?.saveTheme() }
+        model.onSessionsChanged = { [weak self] in self?.syncAgentActivity() }
         sessionLists[machineId] = model
-        if active { model.start() }
+        if linksRunning { model.start() }
         return model
     }
 
@@ -170,7 +187,7 @@ public final class AppModel {
             onOpen: { [weak list] id in list?.screenOpened(id) },
             onClose: { [weak list] id in list?.screenClosed(id) })
         terminals[route] = model
-        if active { model.open() }
+        if linksRunning { model.open() }
         return model
     }
 
@@ -196,17 +213,58 @@ public final class AppModel {
         dependencies.themes.save(theme)
     }
 
-    /// App 回到前台或进了后台。后台里 iOS 会挂起 App，连接迟早被断，主动断开干净；回来时重连。
+    /// App 回到前台或进了后台。后台里 iOS 会挂起 App，连接迟早被断，所以进后台时向系统多要一会儿时间，
+    /// 让灵动岛上的 agent 状态多跟一阵，时间快到了（要不到时马上）主动断开干净；回来时重连。在多要的
+    /// 时间里就回来了的，连接一直开着，不用重连。
     public func setActive(_ isActive: Bool) {
         guard isActive != active else { return }
         active = isActive
+        agentActivity.setForeground(isActive)
+        if isActive {
+            dependencies.backgroundTime.end()
+            resumeLinks()
+        } else {
+            let extended = dependencies.backgroundTime.begin { [weak self] in
+                self?.suspendLinks()
+                await self?.agentActivity.settle()
+            }
+            if !extended { suspendLinks() }
+        }
+    }
+
+    /// 断开所有连接，灵动岛上的 agent 状态改成已暂停。时间到期的那一刻 App 已经回到前台了的不断。
+    private func suspendLinks() {
+        guard linksRunning, !active else { return }
+        linksRunning = false
         for list in sessionLists.values {
-            if isActive {
-                list.start()
-            } else {
-                list.stop()
+            list.stop()
+        }
+        agentActivity.suspend()
+    }
+
+    private func resumeLinks() {
+        agentActivity.resume()
+        guard !linksRunning else { return }
+        linksRunning = true
+        for list in sessionLists.values {
+            list.start()
+        }
+    }
+
+    /// 按各台电脑现在的会话列表更新灵动岛上的 agent 状态：只算连着的电脑。还有电脑没连上、或者连上了
+    /// 还没收到列表时告诉它还没定下来，没有 agent 也先不结束。
+    private func syncAgentActivity() {
+        let lists = machineList.machines.compactMap { sessionLists[$0.id] }
+        let content = AgentActivityContent(
+            machines: lists.filter(\.linkState.isConnected).map { ($0.machine.id, $0.machine.name, $0.sessions) })
+        let settled = lists.allSatisfy { list in
+            switch list.linkState {
+            case .idle, .connecting: false
+            case .connected: list.loaded
+            case .waiting, .failed: true
             }
         }
+        agentActivity.refresh(content, settled: settled)
     }
 
     /// 导航栈变了：退出去的终端页、Git 页关掉，新打开的终端记作「上次打开」。会话列表的连接不跟导航栈走。
@@ -241,6 +299,7 @@ public final class AppModel {
                 _ = sessionList(for: machine.id)
             }
         }
+        syncAgentActivity()
     }
 
     private func remember(machine: UUID, session: SessionId) {

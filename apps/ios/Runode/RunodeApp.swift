@@ -16,7 +16,7 @@ struct RunodeApp: App {
 }
 
 /// 把真的依赖组装起来：Keychain 里的设备私钥、Application Support 里的电脑列表、Bonjour 发现、
-/// 每台电脑一条 `HostConnection`。
+/// 每台电脑一条 `HostConnection`，以及灵动岛上的 Live Activity 和进后台后多要的运行时间。
 @MainActor
 enum AppComposition {
     static func dependencies() -> AppDependencies {
@@ -30,7 +30,7 @@ enum AppComposition {
         let discovery = BonjourDiscovery()
         let preferences = DefaultsStore<AppPreferences>("preferences")
         let systemName = UIDevice.current.name
-        return AppDependencies(
+        var dependencies = AppDependencies(
             store: store, keyStore: keyStore, pairing: RemotePairing(keyStore: keyStore, discovery: discovery),
             // 设备名按建连接时存着的设置取；之后改了由 `AppModel` 转给已有的连接。
             makeLink: { machine in
@@ -41,6 +41,9 @@ enum AppComposition {
             },
             deviceName: systemName, recents: DefaultsStore("recentTerminal"), preferences: preferences,
             themes: DefaultsStore("theme"))
+        dependencies.agentActivity = SystemAgentActivity()
+        dependencies.backgroundTime = SystemBackgroundTime()
+        return dependencies
     }
 
     /// 启动后要做的事；演示模式下直接打开演示的终端。

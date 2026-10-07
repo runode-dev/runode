@@ -2,8 +2,8 @@
     import RunodeConnection
     import SwiftUI
 
-    /// 设置页：终端的默认尺寸方式、字号、响铃震动，配对过的电脑，报给电脑的设备名，以及版本和开源
-    /// 许可。开关、选择器要系统的行样式，所以用分组的 `Form`，不用首页那种自己画的卡片列表。改了马上
+    /// 设置页：终端的默认尺寸方式、字号、响铃震动，灵动岛上的 agent 状态，配对过的电脑，报给电脑的设备名，
+    /// 以及版本和开源许可。开关、选择器要系统的行样式，所以用分组的 `Form`，不用首页那种自己画的卡片列表。改了马上
     /// 生效、马上存（见 `SettingsModel`）。
     struct SettingsView: View {
         let app: AppModel
@@ -15,6 +15,7 @@
             NavigationStack {
                 Form {
                     terminalSection
+                    agentActivitySection
                     machineSection
                     deviceSection
                     aboutSection
@@ -78,6 +79,20 @@
             Binding(
                 get: { settings.preferences.fontSize ?? Double(TerminalViewFontDefaults.systemBase) },
                 set: { settings.setFontSize($0) })
+        }
+
+        // MARK: 灵动岛
+
+        private var agentActivitySection: some View {
+            Section {
+                Toggle("在灵动岛显示 agent 状态", isOn: $settings.preferences.showsAgentActivity)
+                    .tint(.green)
+            } header: {
+                Text("灵动岛")
+            } footer: {
+                Text("有 agent 的时候，在灵动岛和锁屏上显示各台电脑上有几个在干活、几个在等你回答。离开 Runode 一会儿后连接会断开，那时显示的是断开前的样子，打开 Runode 才会刷新。")
+            }
+            .themedRows()
         }
 
         // MARK: 电脑
