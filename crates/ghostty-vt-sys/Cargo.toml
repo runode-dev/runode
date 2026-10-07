@@ -1,0 +1,38 @@
+[package]
+name = "runode-ghostty-vt-sys"
+description = "Raw FFI bindings for libghostty-vt, the Ghostty terminal emulation library"
+version.workspace = true
+edition.workspace = true
+# 源自 libghostty-rs，沿用它的许可。
+license = "MIT OR Apache-2.0"
+publish.workspace = true
+links = "ghostty-vt"
+build = "build.rs"
+
+[lib]
+name = "libghostty_vt_sys"
+doctest = false
+
+[features]
+default = ["vendored"]
+vendored = []
+pkg-config = ["dep:pkg-config"]
+link-dynamic = []
+bindgen-tool = ["dep:bindgen", "dep:libc", "dep:heck"]
+kitty-graphics = []
+
+[dependencies]
+bindgen = { workspace = true, optional = true }
+libc = { workspace = true, optional = true }
+heck = { workspace = true, optional = true }
+
+[build-dependencies]
+pkg-config = { workspace = true, optional = true }
+
+[[bin]]
+name = "gen-bindings"
+path = "tools/gen_bindings.rs"
+required-features = ["bindgen-tool"]
+
+[lints]
+workspace = true

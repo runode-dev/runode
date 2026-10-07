@@ -1,4 +1,4 @@
 [env]
-# 从 vendor 里的 ghostty fork 编译 libghostty-vt，不让 libghostty-rs 自己去拉源码。
-# libghostty-rs 提交在仓库里的绑定与这个 commit 完全对应。
+# 从 vendor 里的 ghostty fork 编译 libghostty-vt，不让 runode-ghostty-vt-sys 的构建脚本自己去拉源码。
+# 它提交在仓库里的绑定与这个子模块的 commit 完全对应，升级子模块时一起重新生成。
 GHOSTTY_SOURCE_DIR = { value = "vendor/ghostty", relative = true }

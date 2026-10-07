@@ -143,6 +143,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "683d7910e743518b0e34f1186f92494becacb047c7b6bf616c96772180fef923"
 
 [[package]]
+name = "allocator-api2"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c880a97d28a3681c0267bd29cff89621202715b065127cd445fa0f0fe0aa2880"
+
+[[package]]
 name = "android_system_properties"
 version = "0.1.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -611,6 +617,25 @@ dependencies = [
  "rustc-hash 2.1.3",
  "shlex 1.3.0",
  "syn 2.0.119",
+]
+
+[[package]]
+name = "bindgen"
+version = "0.73.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "787ef8ef523575546b106a58213d6e6b06198a05c2f757258c68a74273670cfa"
+dependencies = [
+ "bitflags 2.13.2",
+ "cexpr",
+ "clang-sys",
+ "log",
+ "prettyplease",
+ "proc-macro2",
+ "quote",
+ "regex",
+ "rustc-hash 2.1.3",
+ "shlex 2.0.1",
+ "syn 3.0.6",
 ]
 
 [[package]]
@@ -2216,7 +2241,7 @@ dependencies = [
  "anyhow",
  "async-channel",
  "async-task",
- "bindgen",
+ "bindgen 0.72.1",
  "bitflags 2.13.2",
  "chrono",
  "core-video",
@@ -2707,7 +2732,7 @@ version = "0.16.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "841d1cc9bed7f9236f321df977030373f4a4163ae1a7dbfe1a51a2c1a51d9100"
 dependencies = [
- "allocator-api2",
+ "allocator-api2 0.2.21",
  "equivalent",
  "foldhash 0.2.0",
 ]
@@ -3336,19 +3361,6 @@ dependencies = [
  "arbitrary",
  "cc",
 ]
-
-[[package]]
-name = "libghostty-vt"
-version = "0.2.1"
-dependencies = [
- "bitflags 2.13.2",
- "int-enum",
- "libghostty-vt-sys",
-]
-
-[[package]]
-name = "libghostty-vt-sys"
-version = "0.2.1"
 
 [[package]]
 name = "libloading"
@@ -5205,6 +5217,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "runode-ghostty-vt"
+version = "0.1.0"
+dependencies = [
+ "allocator-api2 0.4.0",
+ "bitflags 2.13.2",
+ "int-enum",
+ "log",
+ "png 0.18.1",
+ "runode-ghostty-vt-sys",
+ "tracing",
+]
+
+[[package]]
+name = "runode-ghostty-vt-sys"
+version = "0.1.0"
+dependencies = [
+ "bindgen 0.73.2",
+ "heck 0.5.0",
+ "libc",
+ "pkg-config",
+]
+
+[[package]]
 name = "runode-git"
 version = "0.1.0"
 
@@ -5283,9 +5318,9 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "libc",
- "libghostty-vt",
  "portable-pty",
  "runode-agent-detect",
+ "runode-ghostty-vt",
  "runode-paths",
  "runode-shared-types",
  "serde",

@@ -1,0 +1,639 @@
+//! Encode and restore the complete state of a terminal via a binary format.
+//!
+//! A snapshot is an ordered, CRC-protected record stream. Its READY marker
+//! follows enough state to render and resume the terminal, including any
+//! unfinished VT parser input. Older scrollback pages follow READY and the
+//! FINISH marker terminates the complete snapshot.
+//!
+//! End-of-file before an operation's required READY or FINISH marker is
+//! malformed, truncated snapshot data and returns [`Error::InvalidValue`].
+//! [`Error::IoError`] is reserved for reader errors.
+//!
+//! Decoding is done with the dedicated [`Decoder`] struct; encoding, meanwhile,
+//! is supported by methods on [`Terminal`] like [`Terminal::encode_snapshot`].
+//!
+//! # Format
+//!
+//! Every integer is unsigned and little-endian.
+//! The stream begins with this fixed ten-byte envelope:
+//!
+//! ```text
+//! byte  0               8       10
+//!       +---------------+--------+
+//!       | "GHOSTSNP"    | version|
+//!       | 8-byte magic  | u16    |
+//!       +---------------+--------+
+//! ```
+//!
+//! The envelope is followed by independently checksummed records. A record's
+//! CRC32C covers its encoded tag and payload length followed by its payload;
+//! it does not cover the CRC field itself.
+//!
+//! ```text
+//! byte  0       2             6          10             10 + payload_len
+//!       +-------+-------------+-----------+----------------+
+//!       | tag   | payload_len | CRC32C    | payload        |
+//!       | u16   | u32         | u32       | payload_len B  |
+//!       +-------+-------------+-----------+----------------+
+//!       \____________________/             \______________/
+//!          CRC prefix                         CRC suffix
+//! ```
+//!
+//! Record groups occur in this strict order. SCREEN and HISTORY groups contain
+//! one entry for each screen declared by TERMINAL. Each manifest is followed by
+//! the number of PAGE records it declares. Active SCREEN pages make the terminal
+//! renderable; HISTORY pages are older scrollback ordered newest to oldest so
+//! an incremental decoder can prepend them as they arrive.
+//!
+//! ```text
+//!
+//! +---------------- TERMINAL ----------------+
+//! | terminal-wide state and screen count     |
+//! +----------------- SCREEN -----------------+  repeated per screen
+//! | active-screen manifest                   |
+//! +------------------ PAGE ------------------+  repeated per manifest
+//! | active screen rows                       |
+//! +------------- CONTINUATION ---------------+
+//! | unfinished VT/UTF-8 input, or ground     |
+//! +------------------ READY -----------------+
+//! | empty renderable-state marker            |  ready() returns here
+//! +----------------- HISTORY ----------------+  repeated per screen
+//! | scrollback manifest                      |
+//! +------------------ PAGE ------------------+  next() consumes one page
+//! | older screen rows                        |
+//! +------------------ FINISH ----------------+
+//! | empty end-of-snapshot marker             |  next() returns NO_VALUE
+//! +------------------------------------------+
+//! | trailing transport bytes (not consumed) |
+//! +------------------------------------------+
+//! ```
+//!
+//! READY separates the renderable prefix through CONTINUATION from history.
+//! FINISH terminates the record sequence. Both are empty records protected by
+//! CRC32C, like every other record. Declared record counts, tags, and strict
+//! decoding enforce the stream's ordering and completeness.
+//!
+//! Snapshot format version 1 is a work in progress and does not yet carry a
+//! binary-compatibility guarantee.
+//!
+//! ## See also
+//!
+//! [Snapshot format and Zig codec documentation](https://github.com/ghostty-org/ghostty/blob/main/src/terminal/snapshot/main.zig)
+use std::{
+    io::{Read, Write},
+    marker::PhantomData,
+    mem::MaybeUninit,
+};
+
+use crate::{
+    alloc::{Allocator, Bytes, Object},
+    error::{
+        Error, Result, from_optional_result, from_optional_result_uninit, from_optional_result_with_len, from_result,
+    },
+    ffi::{self, SnapshotDecoderData as Data, SnapshotDecoderOption as Opt},
+    screen::Screen,
+    terminal::Terminal,
+};
+
+/// Snapshot-related methods.
+impl Terminal<'_, '_> {
+    /// Encode a complete terminal snapshot to a writer.
+    ///
+    /// The terminal's persistent VT stream supplies the continuation bytes
+    /// needed to reconstruct unfinished parser state. The caller must prevent
+    /// concurrent writes or other terminal mutation for the duration of this
+    /// call. The writer callback must not call terminal APIs with the same
+    /// terminal handle. A terminal can be encoded with tracking disabled when
+    /// its VT parser and UTF-8 decoder are both at ground. If either is
+    /// unfinished, tracking must have been enabled before the input that
+    /// produced that state was written; otherwise this returns
+    /// [`Error::InvalidValue`].
+    ///
+    /// Encoding begins at the writer's current position. If an error occurs,
+    /// the writer may contain a partial snapshot without a valid FINISH
+    /// marker. Calls to the writer are synchronous; this function does not
+    /// flush or make the caller's destination durable.
+    ///
+    /// # Errors
+    ///
+    /// This function returns [`Error::IoError`] if the writer rejects output,
+    /// [`Error::LimitExceeded`] if output accounting overflows, or another
+    /// error code on failure.
+    pub fn encode_snapshot<W: Write>(&mut self, writer: &mut W) -> Result<()> {
+        self.touch();
+        let writer = crate::io::to_writer(writer);
+        let result = unsafe { ffi::ghostty_snapshot_encode(self.inner.as_raw(), writer) };
+        from_result(result)
+    }
+
+    /// Encode a complete terminal snapshot to an allocated buffer.
+    ///
+    /// The returned buffer is allocated with allocator, or the default
+    /// allocator when allocator is `None`.
+    ///
+    /// A terminal can be encoded with tracking disabled when its VT parser
+    /// and UTF-8 decoder are both at ground. If either is unfinished, tracking
+    /// must have been enabled before the input that produced that state was
+    /// written; otherwise this returns [`Error::InvalidValue`].
+    pub fn encode_snapshot_alloc<'a, 'ctx: 'a>(&self, alloc: Option<&'a Allocator<'ctx>>) -> Result<Option<Bytes<'a>>> {
+        let mut out = std::ptr::null_mut();
+        let mut out_len = 0usize;
+        let alloc = alloc.map_or(std::ptr::null(), super::alloc::Allocator::to_raw);
+
+        let result =
+            unsafe { ffi::ghostty_snapshot_encode_alloc(self.inner.as_raw(), alloc, &raw mut out, &raw mut out_len) };
+
+        let out = from_optional_result(result, out)?;
+        // SAFETY: On success, libghostty hands over `out_len` bytes allocated
+        // with `alloc`, or NULL for empty output.
+        Ok(out.map(|ptr| unsafe { Bytes::from_raw_parts(ptr, out_len, alloc) }))
+    }
+
+    /// Encode a complete terminal snapshot to a caller-provided buffer.
+    ///
+    /// Pass an empty `buf` to query the required size. A size query returns
+    /// [`Error::OutOfSpace`] with the required size, including zero when the
+    /// stream is at ground. If a non-empty buffer is too small, the function
+    /// has the same result and reports the full required size.
+    ///
+    /// A terminal can be encoded with tracking disabled when its VT parser
+    /// and UTF-8 decoder are both at ground. If either is unfinished, tracking
+    /// must have been enabled before the input that produced that state was
+    /// written; otherwise this returns [`Error::InvalidValue`].
+    pub fn encode_snapshot_buf(&self, buf: &mut [u8]) -> Result<Option<usize>> {
+        let mut written = 0usize;
+
+        let result = unsafe {
+            ffi::ghostty_snapshot_encode_buf(self.inner.as_raw(), buf.as_mut_ptr(), buf.len(), &raw mut written)
+        };
+
+        from_optional_result_with_len(result, written)
+    }
+}
+
+/// Opaque handle to a terminal snapshot decoder.
+#[derive(Debug)]
+pub struct Decoder<'alloc, 'r> {
+    inner: Object<'alloc, ffi::SnapshotDecoderImpl>,
+    _phan: PhantomData<&'r mut ffi::Reader>,
+}
+
+impl<'alloc, 'r> Decoder<'alloc, 'r> {
+    /// Create a snapshot decoder that reads from a caller-provided reader.
+    ///
+    /// Reads are synchronous and occur only during ready, next, or decode calls.
+    /// A zero-byte successful read is permanent end-of-file, not temporary
+    /// starvation; nonblocking sources must wait outside the decoder or block
+    /// in their callback. Reading zero bytes before a required marker
+    /// reports truncated snapshot data as [`Error::InvalidValue`].
+    pub fn new<R: Read>(r: &'r mut R) -> Result<Self> {
+        // SAFETY: A NULL allocator is always valid
+        unsafe { Self::new_inner(std::ptr::null(), r) }
+    }
+
+    /// Create a new snapshot decoder that reads from a caller-provided reader
+    /// with a custom allocator.
+    ///
+    /// Reads are synchronous and occur only during ready, next, or decode calls.
+    /// A zero-byte successful read is permanent end-of-file, not temporary
+    /// starvation; nonblocking sources must wait outside the decoder or block
+    /// in their callback. The read callback must not call APIs on or drop the
+    /// decoder that owns it. Reading zero bytes before a required marker
+    /// reports truncated snapshot data as [`Error::InvalidValue`].
+    ///
+    /// See the [crate-level documentation](crate#memory-management-and-lifetimes)
+    /// regarding custom memory management and lifetimes.
+    pub fn new_with_alloc<'ctx: 'alloc, R: Read>(alloc: &'alloc Allocator<'ctx>, r: &'r mut R) -> Result<Self> {
+        // SAFETY: Borrow checking should forbid invalid allocators
+        unsafe { Self::new_inner(alloc.to_raw(), r) }
+    }
+
+    unsafe fn new_inner<R: Read>(alloc: *const ffi::Allocator, r: &'r mut R) -> Result<Self> {
+        let reader = crate::io::to_reader(r);
+        let mut raw: ffi::SnapshotDecoder = std::ptr::null_mut();
+        let result = unsafe { ffi::ghostty_snapshot_decoder_new(alloc, &raw mut raw, reader) };
+        from_result(result)?;
+        Ok(Self { inner: Object::new(raw)?, _phan: PhantomData })
+    }
+
+    /// Create a snapshot decoder over a borrowed byte buffer.
+    ///
+    /// The bytes are not copied. Bytes after FINISH are not consumed;
+    /// query [`Decoder::source_offset`] to locate them.
+    pub fn new_buf(buf: &'r [u8]) -> Result<Self> {
+        // SAFETY: A NULL allocator is always valid
+        unsafe { Self::new_buf_inner(std::ptr::null(), buf) }
+    }
+
+    /// Create a new snapshot decoder over a borrowed byte buffer
+    /// with a custom allocator.
+    ///
+    /// The bytes are not copied. Bytes after FINISH are not consumed;
+    /// query [`Decoder::source_offset`] to locate them.
+    ///
+    /// See the [crate-level documentation](crate#memory-management-and-lifetimes)
+    /// regarding custom memory management and lifetimes.
+    pub fn new_buf_with_alloc<'ctx: 'alloc>(alloc: &'alloc Allocator<'ctx>, buf: &'r [u8]) -> Result<Self> {
+        // SAFETY: Borrow checking should forbid invalid allocators
+        unsafe { Self::new_buf_inner(alloc.to_raw(), buf) }
+    }
+
+    unsafe fn new_buf_inner(alloc: *const ffi::Allocator, buf: &[u8]) -> Result<Self> {
+        let mut raw: ffi::SnapshotDecoder = std::ptr::null_mut();
+        let result = unsafe { ffi::ghostty_snapshot_decoder_new_buf(alloc, &raw mut raw, buf.as_ptr(), buf.len()) };
+        from_result(result)?;
+        Ok(Self { inner: Object::new(raw)?, _phan: PhantomData })
+    }
+
+    /// Decode and validate one complete snapshot.
+    ///
+    /// This is the one-shot form of READY followed by all history pages
+    /// through FINISH. It may only be called before decoding starts. Bytes
+    /// following FINISH are left unread. On success this returns a
+    /// caller-owned terminal with its persistent VT stream restored.
+    /// Continuation tracking on the returned terminal is disabled and
+    /// [`Terminal::continuation_max_bytes`] returns zero.
+    ///
+    /// A decoding, I/O, or allocation error after input consumption begins
+    /// poisons the decoder, after which it must be dropped. An invalid
+    /// argument or lifecycle error detected before the operation consumes
+    /// input does not poison it.    
+    pub fn decode<'cb>(self) -> Result<Terminal<'alloc, 'cb>> {
+        let mut raw: ffi::Terminal = std::ptr::null_mut();
+        let result = unsafe { ffi::ghostty_snapshot_decoder_decode(self.inner.as_raw(), &raw mut raw) };
+        from_result(result)?;
+        unsafe { Terminal::from_raw(raw) }
+    }
+
+    /// Decode and validate the renderable snapshot prefix through READY.
+    ///
+    /// On success, terminal receives a caller-owned terminal with its
+    /// persistent VT stream already restored from the snapshot continuation.
+    /// The terminal is immediately usable for rendering and live input.
+    /// Older scrollback remains to be restored with [`IncrementalDecoder::next`].
+    ///
+    /// The restored parser state may be unfinished, but terminal continuation
+    /// tracking is disabled; [`Terminal::continuation_max_bytes`]
+    /// returns zero. The decoder's continuation option is an input limit,
+    /// not terminal runtime policy.
+    ///
+    /// A decoding, I/O, or allocation error after input consumption begins
+    /// poisons the decoder, after which it must be dropped. An invalid
+    /// argument or lifecycle error detected before the operation consumes
+    /// input does not poison it.    
+    pub fn ready<'cb>(self) -> Result<IncrementalDecoder<'alloc, 'r, 'cb>> {
+        let mut raw: ffi::Terminal = std::ptr::null_mut();
+        let result = unsafe { ffi::ghostty_snapshot_decoder_ready(self.inner.as_raw(), &raw mut raw) };
+        from_result(result)?;
+        Ok(IncrementalDecoder { decoder: self, terminal: unsafe { Terminal::from_raw(raw)? } })
+    }
+
+    fn get<T>(&self, tag: Data::Type) -> Result<T> {
+        let mut value = MaybeUninit::<T>::zeroed();
+        let result = unsafe { ffi::ghostty_snapshot_decoder_get(self.inner.as_raw(), tag, value.as_mut_ptr().cast()) };
+        from_result(result)?;
+        // SAFETY: Value should be initialized after successful call.
+        Ok(unsafe { value.assume_init() })
+    }
+    fn get_optional<T>(&self, tag: Data::Type) -> Result<Option<T>> {
+        let mut value = MaybeUninit::<T>::zeroed();
+        let result = unsafe { ffi::ghostty_snapshot_decoder_get(self.inner.as_raw(), tag, value.as_mut_ptr().cast()) };
+        from_optional_result_uninit(result, value)
+    }
+    fn set<T>(&self, tag: Opt::Type, v: &T) -> Result<()> {
+        let result =
+            unsafe { ffi::ghostty_snapshot_decoder_set(self.inner.as_raw(), tag, std::ptr::from_ref(v).cast()) };
+        from_result(result)
+    }
+
+    /// 一次 FFI 调用读取多个解码器字段，key 见 [`decoder_query`]。
+    ///
+    /// 结果与逐个调用对应的 getter 一致，详见 [`crate::multi`]。增量解码
+    /// 期间可通过 [`Progress::as_decoder`] 拿到解码器。
+    pub fn get_multi<K: crate::multi::Keys<crate::multi::domain::SnapshotDecoder>>(
+        &self,
+        keys: K,
+    ) -> Result<K::Output<'_>> {
+        let decoder = self.inner.as_raw();
+        // SAFETY: 参数原样交给 `ghostty_snapshot_decoder_get_multi`；这些
+        // key 的结果都按值返回。
+        unsafe {
+            keys.read(&mut |tags, values, written| {
+                ffi::ghostty_snapshot_decoder_get_multi(
+                    decoder,
+                    tags.len(),
+                    tags.as_ptr(),
+                    values.as_mut_ptr(),
+                    written,
+                )
+            })
+        }
+    }
+
+    /// Current maximum accepted continuation size.
+    ///
+    /// This value is available in every non-failed decoder state.
+    pub fn max_continuation_bytes(&self) -> Result<usize> {
+        self.get(Data::MAX_CONTINUATION_BYTES)
+    }
+
+    /// Largest non-ground continuation the decoder will accept.
+    ///
+    /// A value of zero accepts only snapshots whose VT parser is in the ground
+    /// state. The decoder default matches the largest built-in APC protocol
+    /// buffer limit, currently 65 MiB.
+    ///
+    /// This is an input validation limit only. It does not configure continuation
+    /// tracking on a terminal returned by the decoder.
+    pub fn set_max_continuation_bytes(&mut self, v: usize) -> Result<&mut Self> {
+        self.set(Opt::MAX_CONTINUATION_BYTES, &v)?;
+        Ok(self)
+    }
+
+    /// 返回的终端是否保留解码出的续接状态跟踪，见
+    /// [`Decoder::set_retain_continuation`]。
+    pub fn retain_continuation(&self) -> Result<bool> {
+        self.get(Data::RETAIN_CONTINUATION)
+    }
+
+    /// 让 [`Decoder::ready`] 和 [`Decoder::decode`] 返回的终端保留解码出的
+    /// 续接状态。
+    ///
+    /// 为 `true` 时，返回的终端以 [`Decoder::set_max_continuation_bytes`] 的值
+    /// 作为续接跟踪上限，于是 [`Terminal::continuation_alloc`] 等 API 可以导出
+    /// 快照中恢复的、未写完的 VT 或 UTF-8 输入。默认 `false`。
+    ///
+    /// 上限为 0 时跟踪仍然关闭。上限非零时，即使解码出的续接为空，跟踪也
+    /// 保持开启，导出空续接也不会关闭它；不需要持续跟踪的调用方应在导出后、
+    /// 写入快照之后的输入之前，用 [`Terminal::set_continuation_max_bytes`] 设回 0。
+    pub fn set_retain_continuation(&mut self, retain: bool) -> Result<&mut Self> {
+        self.set(Opt::RETAIN_CONTINUATION, &retain)?;
+        Ok(self)
+    }
+
+    /// 恢复历史时是否同时压缩，见 [`Decoder::set_compress_history`]。
+    pub fn compress_history(&self) -> Result<bool> {
+        self.get(Data::COMPRESS_HISTORY)
+    }
+
+    /// 恢复回滚区历史时逐页压缩。
+    ///
+    /// 默认情况下，恢复的回滚区全部是未压缩的（即使生成快照的终端压缩过），
+    /// 直到应用调用 [`Terminal::compress`]；回滚区很大时这可能比原来多占好几
+    /// 倍内存。开启后，解码器在恢复每个历史 page 后立即压缩它，恢复出的终端
+    /// 一开始就是压缩的，解码期间也最多只有一个未压缩的历史 page。结果等同
+    /// 于正常解码后再以 [`CompressionMode::Full`](crate::terminal::CompressionMode::Full)
+    /// 压缩，但没有中间的内存峰值。
+    ///
+    /// 恢复时正好在屏幕上的历史 page 不压缩（只会在增量解码期间视口滚到
+    /// 回滚区顶部时发生）。被压缩的历史之后被访问时会自动解压。快照格式
+    /// 不变，不支持压缩的平台上这个选项被接受但没有效果。默认 `false`。
+    pub fn set_compress_history(&mut self, compress: bool) -> Result<&mut Self> {
+        self.set(Opt::COMPRESS_HISTORY, &compress)?;
+        Ok(self)
+    }
+
+    /// Number of snapshot source bytes consumed so far.
+    ///
+    /// At FINISH this identifies the first byte after the snapshot. Trailing
+    /// bytes are not consumed. This value is unavailable after a decoding
+    /// error, because the decoder can no longer guarantee its source position.
+    pub fn source_offset(&self) -> Result<usize> {
+        self.get(Data::SOURCE_OFFSET)
+    }
+    /// Advisory complete logical history extent for the primary screen.
+    ///
+    /// The value counts rows before the active area, including any resident
+    /// overlap carried before READY. It becomes available after READY validates.
+    pub fn history_rows_primary(&self) -> Result<u64> {
+        self.get(Data::HISTORY_ROWS_PRIMARY)
+    }
+    /// Advisory complete logical history extent for the alternate screen.
+    ///
+    /// The value has the same semantics and lifetime as [`Decoder::history_rows_primary`]
+    /// Querying it returns `Ok(None)` when the snapshot does not declare an
+    /// alternate screen.
+    pub fn history_rows_alternate(&self) -> Result<Option<u64>> {
+        self.get_optional(Data::HISTORY_ROWS_ALTERNATE)
+    }
+}
+
+impl Drop for Decoder<'_, '_> {
+    fn drop(&mut self) {
+        unsafe {
+            ffi::ghostty_snapshot_decoder_free(self.inner.as_raw());
+        }
+    }
+}
+
+/// A [`Decoder`] that incrementally decodes history and appends it to the
+/// terminal, obtained by calling [`Decoder::ready`].
+///
+/// Call [`IncrementalDecoder::next`] repeatedly until `Ok(None)` is returned
+/// to keep decoding history from the snapshot.
+///
+/// The terminal is accessible for use during the decode process via methods
+/// like [`IncrementalDecoder::terminal`] and [`IncrementalDecoder::terminal_mut`],
+/// while obtaining ownership of the terminal requires halting the decode
+/// process via [`IncrementalDecoder::into_terminal`].
+#[derive(Debug)]
+pub struct IncrementalDecoder<'alloc, 'r, 'cb> {
+    // Drop order is significant here.
+    // First drop the decoder, then the terminal.
+    decoder: Decoder<'alloc, 'r>,
+    terminal: Terminal<'alloc, 'cb>,
+}
+
+impl<'alloc, 'r, 'cb> IncrementalDecoder<'alloc, 'r, 'cb> {
+    /// Decode one history page into the terminal returned by READY.
+    ///
+    /// Each `Ok(Some(progress))` result consumes and validates one PAGE
+    /// record. Query the values on the returned `progress` before
+    /// calling [`IncrementalDecoder::next`] again.
+    ///
+    /// `Ok(None)` means FINISH was validated; repeated calls after FINISH
+    /// also return `Ok(None)`.
+    ///
+    /// The terminal may be rendered, resized, and fed live PTY input between
+    /// calls. If a history page can no longer be applied safely, it is still
+    /// consumed and validated and progress reports zero rows. The decoder
+    /// applies history to the terminal produced by its READY operation.
+    ///
+    /// A decoding error invalidates the decoder's source position. The terminal
+    /// remains usable with its already-restored history, but the decoder can
+    /// only be dropped.
+    pub fn next<'d>(&'d mut self) -> Result<Option<Progress<'alloc, 'r, 'd>>> {
+        let result = unsafe { ffi::ghostty_snapshot_decoder_next(self.decoder.inner.as_raw()) };
+        from_optional_result(result, Progress { decoder: &self.decoder })
+    }
+
+    /// Return a shared reference to the terminal being decoded.
+    #[must_use]
+    pub fn terminal(&self) -> &Terminal<'alloc, 'cb> {
+        &self.terminal
+    }
+    /// Return an exclusive reference to the terminal being decoded.
+    pub fn terminal_mut(&mut self) -> &mut Terminal<'alloc, 'cb> {
+        &mut self.terminal
+    }
+    /// Stop decoding and obtain the final, fully decoded terminal.
+    #[must_use]
+    pub fn into_terminal(self) -> Terminal<'alloc, 'cb> {
+        self.terminal
+    }
+}
+
+/// The current progress of the decode process.
+#[derive(Debug, Clone, Copy)]
+pub struct Progress<'alloc, 'r, 'd> {
+    decoder: &'d Decoder<'alloc, 'r>,
+}
+
+impl<'alloc, 'r, 'd> Progress<'alloc, 'r, 'd> {
+    /// Screen associated with the most recently decoded history page.
+    pub fn screen(&self) -> Result<Screen> {
+        self.decoder
+            .get::<ffi::TerminalScreen::Type>(Data::PROGRESS_SCREEN)
+            .and_then(|v| v.try_into().map_err(|_| Error::InvalidValue))
+    }
+    /// Rows prepended by the most recently decoded history page.
+    ///
+    /// Zero means the page was consumed and validated but could not be
+    /// applied to the live terminal.
+    pub fn rows(&self) -> Result<usize> {
+        self.decoder.get(Data::PROGRESS_ROWS)
+    }
+    /// Page records remaining in the same screen's HISTORY sequence.
+    ///
+    /// This is not a count of all pages remaining in the snapshot.
+    pub fn remaining(&self) -> Result<u32> {
+        self.decoder.get(Data::PROGRESS_REMAINING)
+    }
+
+    /// Get a reference to the underlying decoder.
+    #[must_use]
+    pub fn as_decoder(self) -> &'d Decoder<'alloc, 'r> {
+        self.decoder
+    }
+}
+
+/// [`Decoder::get_multi`] 的 key，每个 key 的输出与同名 getter 相同。
+pub mod decoder_query {
+    use crate::{
+        ffi,
+        multi::{domain::SnapshotDecoder as D, multi_keys},
+    };
+
+    multi_keys! {
+        domain = D, tags = ffi::SnapshotDecoderData;
+        /// [`Decoder::max_continuation_bytes`](super::Decoder::max_continuation_bytes)
+        MaxContinuationBytes = MAX_CONTINUATION_BYTES: copy usize;
+        /// [`Decoder::source_offset`](super::Decoder::source_offset)
+        SourceOffset = SOURCE_OFFSET: copy usize;
+        /// [`Decoder::history_rows_primary`](super::Decoder::history_rows_primary)
+        HistoryRowsPrimary = HISTORY_ROWS_PRIMARY: copy u64;
+        /// [`Decoder::history_rows_alternate`](super::Decoder::history_rows_alternate)
+        HistoryRowsAlternate = HISTORY_ROWS_ALTERNATE: opt[NO_VALUE] u64 => u64;
+        /// [`Progress::screen`](super::Progress::screen)
+        ProgressScreen = PROGRESS_SCREEN: try ffi::TerminalScreen::Type => crate::screen::Screen;
+        /// [`Progress::rows`](super::Progress::rows)
+        ProgressRows = PROGRESS_ROWS: copy usize;
+        /// [`Progress::remaining`](super::Progress::remaining)
+        ProgressRemaining = PROGRESS_REMAINING: copy u32;
+        /// [`Decoder::retain_continuation`](super::Decoder::retain_continuation)
+        RetainContinuation = RETAIN_CONTINUATION: copy bool;
+        /// [`Decoder::compress_history`](super::Decoder::compress_history)
+        CompressHistory = COMPRESS_HISTORY: copy bool;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Length of a record header: u16 tag, u32 payload length, u32 CRC32C.
+    const RECORD_HEADER_LEN: usize = 10;
+
+    fn encoded_snapshot() -> Vec<u8> {
+        let mut terminal = Terminal::new(20, 5).expect("terminal should initialize");
+        terminal.vt_write(b"hello\r\nworld");
+        let bytes = terminal
+            .encode_snapshot_alloc(None)
+            .expect("snapshot should encode")
+            .expect("snapshot should not be empty");
+        bytes.to_vec()
+    }
+
+    #[test]
+    fn decoder_options_round_trip_and_apply() {
+        // 停在未写完的 CSI 中间，快照里就带着一段续接。
+        let mut terminal = Terminal::new(20, 5).expect("terminal should initialize");
+        terminal.set_continuation_max_bytes(64).unwrap();
+        terminal.vt_write(b"hello\x1b[3");
+        let bytes = terminal.encode_snapshot_alloc(None).unwrap().unwrap();
+
+        let mut decoder = Decoder::new_buf(&bytes).unwrap();
+        assert!(!decoder.retain_continuation().unwrap());
+        assert!(!decoder.compress_history().unwrap());
+        decoder
+            .set_max_continuation_bytes(64)
+            .unwrap()
+            .set_retain_continuation(true)
+            .unwrap()
+            .set_compress_history(true)
+            .unwrap();
+        assert!(decoder.retain_continuation().unwrap());
+        assert!(decoder.compress_history().unwrap());
+
+        // 保留续接时，恢复出的终端以解码器的上限继续跟踪，能导出那段续接。
+        let restored = decoder.decode().unwrap();
+        assert_eq!(restored.continuation_max_bytes().unwrap(), 64);
+        let continuation = restored.continuation_alloc(None).unwrap().unwrap();
+        assert_eq!(&*continuation, b"\x1b[3");
+    }
+
+    #[test]
+    fn finish_is_an_empty_marker_record() {
+        let bytes = encoded_snapshot();
+
+        // The envelope is "GHOSTSNP" followed by the u16 format version.
+        assert_eq!(&bytes[..8], b"GHOSTSNP");
+        assert_eq!(u16::from_le_bytes([bytes[8], bytes[9]]), 1);
+
+        // FINISH is the final record and carries no payload, so the stream
+        // ends with its bare header. Its declared payload length is zero.
+        let finish = &bytes[bytes.len() - RECORD_HEADER_LEN..];
+        assert_eq!(&finish[2..6], &0u32.to_le_bytes());
+
+        assert!(Decoder::new_buf(&bytes).unwrap().decode().is_ok());
+    }
+
+    #[test]
+    fn truncated_snapshot_is_invalid_value() {
+        let bytes = encoded_snapshot();
+
+        // Dropping FINISH means end-of-file before the required marker, which
+        // the snapshot contract documents as `Error::InvalidValue`.
+        let truncated = &bytes[..bytes.len() - RECORD_HEADER_LEN];
+        let result = Decoder::new_buf(truncated).unwrap().decode();
+        assert!(matches!(result, Err(Error::InvalidValue)));
+    }
+
+    #[test]
+    fn corrupted_record_fails_to_decode() {
+        let mut bytes = encoded_snapshot();
+
+        // Every record, including the empty FINISH marker, is protected by
+        // CRC32C. Flipping a bit in FINISH's checksum must be detected.
+        let mut finish_crc = bytes.clone();
+        let last = finish_crc.len() - 1;
+        finish_crc[last] ^= 0x01;
+        assert!(Decoder::new_buf(&finish_crc).unwrap().decode().is_err());
+
+        // Likewise for a payload byte of the first (TERMINAL) record, which
+        // starts right after the ten-byte envelope and its record header.
+        let payload = 10 + RECORD_HEADER_LEN;
+        bytes[payload] ^= 0x01;
+        assert!(Decoder::new_buf(&bytes).unwrap().decode().is_err());
+    }
+}

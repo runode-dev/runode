@@ -1,10 +1,6 @@
 [submodule "vendor/ghostty"]
 	path = vendor/ghostty
 	url = https://github.com/runode-dev/ghostty
-[submodule "vendor/libghostty-rs"]
-	path = vendor/libghostty-rs
-	url = https://github.com/runode-dev/libghostty-rs
-	branch = main
 [submodule "vendor/command-signatures"]
 	path = vendor/command-signatures
 	url = https://github.com/runode-dev/command-signatures

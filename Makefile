@@ -13,7 +13,7 @@ link_rn = @mkdir -p target/$(1) && ln -sfn runode target/$(1)/rn
 help: ## 列出所有目标
 	@awk 'BEGIN {FS = ":.*## "} /^[a-zA-Z_-]+:.*## / {printf "  %-16s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 
-submodules: ## 拉取 vendor 下的 ghostty、libghostty-rs 与 command-signatures 子模块
+submodules: ## 拉取 vendor 下的 ghostty 与 command-signatures 子模块
 	git submodule update --init --recursive
 
 build: ## 调试构建

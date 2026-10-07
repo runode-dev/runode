@@ -4,7 +4,7 @@ resolver = "3"
 members = ["crates/*", "apps/desktop"]
 # 不带 -p 的 cargo 命令覆盖全部 crate。
 default-members = ["crates/*", "apps/desktop"]
-# vendor/libghostty-rs 自成一个 workspace；不排除的话，根目录下的 path 依赖
+# vendor 下的依赖不是本 workspace 的成员；不排除的话，根目录下的 path 依赖
 # 会被自动收编为本 workspace 的成员。
 exclude = ["vendor"]
 
@@ -29,7 +29,18 @@ runode-preview = { path = "crates/preview" }
 runode-agent-detect = { path = "crates/agent-detect" }
 runode-remote-access = { path = "crates/remote-access" }
 runode-update = { path = "crates/update" }
-libghostty-vt = { path = "vendor/libghostty-rs/crates/libghostty-vt" }
+# libghostty-vt 的 Rust 绑定，源自 libghostty-rs（MIT 或 Apache-2.0）。依赖名沿用 libghostty-vt，
+# 包名加 runode- 前缀，免得和 crates.io 上原项目的同名 crate 撞名。
+libghostty-vt = { package = "runode-ghostty-vt", path = "crates/ghostty-vt" }
+libghostty-vt-sys = { package = "runode-ghostty-vt-sys", path = "crates/ghostty-vt-sys" }
+allocator-api2 = "0.4"
+bitflags = "2"
+int-enum = "1"
+png = "0.18"
+log = "0.4"
+bindgen = "0.73"
+heck = "0.5"
+pkg-config = "0.3"
 gpui = { package = "gpui-pre", version = "=0.3.7" }
 gpui_platform = { package = "gpui-pre-platform", version = "=0.3.7" }
 anyhow = "1"
