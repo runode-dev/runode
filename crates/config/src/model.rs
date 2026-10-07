@@ -104,6 +104,8 @@ pub struct Config {
     pub remote_access: bool,
     /// 远程访问监听的 TCP 端口。
     pub remote_access_port: u16,
+    /// 配对过的手机上显示的这台电脑的名字；`None` 时用系统设置里的电脑名。
+    pub remote_access_name: Option<String>,
     /// 界面语言，是 locales 里的某个语言标签；`None` 表示跟随系统。
     pub language: Option<String>,
     /// agent 等用户回答或者干完了、用户又没在看那个分屏时，发系统通知。
@@ -166,6 +168,7 @@ impl Default for Config {
             remote_access: false,
             // 和 `runode_protocol::remote::DEFAULT_PORT` 一样；config 不依赖 protocol，桌面的测试对着两边。
             remote_access_port: 7866,
+            remote_access_name: None,
             language: None,
             agent_notifications: true,
             agent_notifications_exclude: Vec::new(),

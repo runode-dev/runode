@@ -1,10 +1,15 @@
 //! 远程访问（手机经网络连上宿主，见 `runode_remote_access`）跟着宿主活：宿主跑在哪个进程里，监听
 //! 就开在哪个进程里，门禁过了的连接经 `Host::connect_pair` 接到宿主上。开关（配置项
-//! `remote-access`）和端口（`remote-access-port`）随配置变，几秒内生效。
+//! `remote-access`）、端口（`remote-access-port`）和给手机看的名字（`remote-access-name`）随配置变，
+//! 几秒内生效。
 //!
 //! 宿主跑在 app 里时，app 每次应用配置都告诉它（见 `host_client::configure`）；单独跑的宿主
 //! （`runode --host`）不管界面，自己读配置文件，文件变了就重读（`follow_config`）。app 连着单独跑的
 //! 宿主时不开监听，免得两个进程抢同一个端口。
+//!
+//! 设置窗口和手机端引导页在界面上给手机配对，见 `pairing`。
+
+pub mod pairing;
 
 use std::{
     sync::{Arc, Weak},
@@ -24,7 +29,7 @@ pub fn wanted_port(config: &Config) -> Option<u16> {
     config.remote_access.then_some(config.remote_access_port)
 }
 
-/// 门禁过了的连接接到 `host` 上的远程访问，先关着，由调用方按配置 `set_port`。起不了后台线程时
+/// 门禁过了的连接接到 `host` 上的远程访问，先关着，由调用方按配置 `set`。起不了后台线程时
 /// 记日志，返回 `None`。
 pub fn service(host: &Host) -> Option<Service> {
     let host = host.clone();
@@ -50,7 +55,7 @@ pub fn follow_config(host: &Host) -> Option<Arc<Service>> {
     // 宿主进程里没有界面，系统外观无从知道；远程访问的两项和主题无关，按深色读即可。
     let config = Config::load(true);
     let dirs = runode_paths::Dirs::from_env();
-    service.set_port(wanted_port(&config));
+    service.set(wanted_port(&config), config.remote_access_name.clone());
     host.set_stay_up(stays_up(&config, &dirs));
     let weak = Arc::downgrade(&service);
     let host = host.clone();
@@ -72,7 +77,7 @@ fn watch(service: &Weak<Service>, host: &Host, dirs: &runode_paths::Dirs, mut co
             config = Config::load(true);
             // 重读可能引入新的文件（比如换了主题），按新配置重新记录。
             seen = crate::config::watch_stamp(&config);
-            service.set_port(wanted_port(&config));
+            service.set(wanted_port(&config), config.remote_access_name.clone());
         }
         host.set_stay_up(stays_up(&config, dirs));
     }

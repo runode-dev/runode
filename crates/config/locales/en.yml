@@ -57,6 +57,7 @@ config:
   auto_update: "Check for a new version of Runode when it starts and every few hours after that: true, false. With true, a new version is downloaded in the background and installed when you quit Runode; with false, Runode only checks when you choose Check for Updates in the Runode menu. Only a Runode.app signed by its publisher updates itself."
   remote_access: "Let your phone reach this Mac's terminals over the local network or Tailscale: true, false. Pair a phone with `runode remote pair`, list paired phones with `runode remote devices`, and remove one with `runode remote revoke`. Takes effect within a few seconds, without restarting Runode."
   remote_access_port: "The TCP port remote access listens on, on all network interfaces: 1 to 65535."
+  remote_access_name: "The name paired phones show for this computer. When empty, the computer name from System Settings › General › Sharing. Takes effect within a few seconds; connected phones drop briefly and reconnect."
   command_completions: "Press Tab at the shell prompt to pick a command name, subcommand, option or argument from a menu (arguments only for commands Runode has a spec for); when there is nothing to offer, Tab goes to the shell. false always sends Tab to the shell."
   agent_notifications: "Post a system notification when an agent is waiting for your answer or has finished in a split you are not looking at: true, false. Notifications only work in the packaged Runode.app."
   agent_notifications_exclude: |-

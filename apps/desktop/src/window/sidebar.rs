@@ -1,4 +1,5 @@
-//! 窗口左侧的 workspace 列表：切换、拖动排序、改名、关闭和新建；下面是后台会话（`background`）。
+//! 窗口左侧的 workspace 列表：切换、拖动排序、改名、关闭和新建；顶上是手机端入口（`mobile`），下面是
+//! 后台会话（`background`）。
 
 use gpui::{
     AnyElement, Axis, Context, CursorStyle, Div, Focusable, Hsla, MouseButton, MouseDownEvent, Render, SharedString,
@@ -144,6 +145,7 @@ impl WindowView {
                     .h(px(if fullscreen { 6. } else { TITLEBAR_HEIGHT + 6. }))
                     .on_mouse_down(MouseButton::Left, drag_window),
             )
+            .child(self.render_mobile_entry(fg, bg, cx))
             .child(
                 div()
                     .id("workspace-list")
@@ -164,7 +166,8 @@ impl WindowView {
     fn render_row(&self, ix: usize, fg: Rgb, bg: Rgb, cx: &mut Context<Self>) -> Stateful<Div> {
         let workspace = &self.workspaces[ix];
         let id = workspace.id;
-        let active = ix == self.active;
+        // 开着手机端引导页时高亮的是入口。
+        let active = ix == self.active && self.mobile.is_none();
         let active_bg = hsla(bg.mix(fg, 0.10));
         let hover_bg = hsla(bg.mix(fg, 0.06));
         let close_tooltip = tooltip(rust_i18n::t!("menu.close_workspace"), None, fg, bg);

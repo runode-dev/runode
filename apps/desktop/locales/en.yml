@@ -481,6 +481,7 @@ settings:
     auto_update: Update automatically
     remote_access: Remote access
     remote_access_port: Port
+    remote_access_name: "Computer name"
     agent_notifications: Notifications
     agent_notifications_exclude: Agents without alerts
     agent_done_sound: Sound when an agent finishes
@@ -526,6 +527,7 @@ settings:
     auto_update: Check for new versions in the background, download them and install them when Runode quits.
     remote_access: Lets a paired phone reach the terminals over the local network or Tailscale. Pair below, or with runode remote pair.
     remote_access_port: TCP port, 1 to 65535.
+    remote_access_name: "The name paired phones show. When empty, the system computer name. Connected phones drop briefly when it changes."
     agent_notifications: Notifies you when an agent you are not looking at finishes or needs an answer. Only the packaged Runode.app can notify.
     agent_notifications_exclude: These agents get neither notifications nor sounds; their status marks still show.
     agent_done_sound: A system sound.
@@ -586,6 +588,7 @@ settings:
     replaced: Another pairing (such as runode remote pair) replaced this code.
     too_long: The pairing link is too long to draw as a code.
     io_failed: "Could not read or write the pairing code: %{err}"
+    starting: "Waiting for remote access to start…"
   keybind:
     use_defaults: Use default shortcuts
     use_defaults_hint: When off, only the shortcuts you add are bound.
@@ -646,3 +649,42 @@ status:
   no_ports: No program in a terminal is listening on a port
   external_ports: External Ports
   open_port: Open in Browser
+mobile:
+  entry: "Mobile"
+  menu: "Mobile…"
+  eyebrow: "RUNODE MOBILE"
+  intro_title: "Your workspaces, in your pocket."
+  intro_body: "See what your agents are doing on your iPhone, answer their questions, and pick up any terminal where you left off. The phone connects straight to this Mac over the local network or Tailscale, with no server in between."
+  start: "Get Started"
+  step: "Step %{n} of %{total}"
+  install_title: "Get the app."
+  install_body: "Scan the code with your iPhone, or open the install link, to get Runode."
+  open_link: "Open Link"
+  copy_link: "Copy Install Link"
+  next: "Continue"
+  back: "Back"
+  pair_title: "Pair this Mac."
+  pair_body: "Open Runode on your phone, tap Pair a Computer, then scan the code."
+  name_label: "Computer name"
+  name_hint: "Phones will see “%{name}”. Leave empty to use this computer's own name."
+  network_label: "Network"
+  network_auto: "Automatic (try every address in system order)"
+  network_hint: "The phone tries this address first, then the others. It needs to be on the same Wi-Fi as this Mac, or both on Tailscale."
+  cant_scan: "Can't scan?"
+  copy_code: "Copy Pairing Link"
+  expires: "Expires in %{time}"
+  regenerate: "New code"
+  off: "Remote access is off. With it on, paired phones can reach this Mac's terminals over the local network or Tailscale."
+  turn_on: "Turn On Remote Access"
+  generate: "Show Code"
+  retry: "Try Again"
+  paired_title: "Paired."
+  paired_body: "Paired with %{name}. This Mac now shows on the phone's home screen."
+  keep: "Stay Connected After Quitting"
+  done: "Done"
+  again: "Pair Another"
+  paired_intro_title: "Your phone is paired."
+  paired_intro_body: "Open Runode on your phone to pick up where you left off, or pair another device."
+  paired_on: "Paired %{date}"
+  date: "%{m}/%{d}/%{y}"
+  pair_another: "Pair Another Device"

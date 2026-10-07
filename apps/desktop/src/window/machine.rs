@@ -2,7 +2,8 @@
 //! 笔记本和台式机各一个图标。启动时在后台读一次，读到后重画各窗口；读到之前不显示。
 //!
 //! 有手机经远程访问连着时，机型那一行换成连着几台设备；点这一块弹出所有配对过的设备，连着的标出来，
-//! 点设备右边的叉问过用户后撤销它（`RevokeDevice`），再点这一块关掉菜单。
+//! 点设备右边的叉问过用户后撤销它（`RevokeDevice`），再点这一块关掉菜单。手机端引导页也经 `devices`
+//! 列出配对过的设备。
 //! 设备表和连着哪些设备（监听方写在状态文件里的 `ListenerStatus::connected`）都是数据目录里的文件，
 //! 监听不一定开在这个进程里，所以每隔 `DEVICES_POLL` 读一次。
 
@@ -43,12 +44,14 @@ struct Devices(Vec<Paired>);
 
 impl Global for Devices {}
 
-#[derive(PartialEq)]
-struct Paired {
-    id: DeviceId,
-    name: SharedString,
+#[derive(Clone, PartialEq)]
+pub(super) struct Paired {
+    pub(super) id: DeviceId,
+    pub(super) name: SharedString,
+    /// 配对的时刻，Unix 秒。
+    pub(super) paired_at: u64,
     /// 现在连着。
-    live: bool,
+    pub(super) live: bool,
 }
 
 /// 撤销这台配对过的设备，先问用户。
@@ -97,12 +100,14 @@ fn read_devices() -> Devices {
                 id: device.device_id,
                 live: connected.as_ref().is_some_and(|ids| ids.contains(&device.device_id)),
                 name: device.name.into(),
+                paired_at: device.paired_at,
             })
             .collect(),
     )
 }
 
-fn devices(cx: &App) -> &[Paired] {
+/// 配对过的设备，按配对的先后；启动后第一次读到之前是空的。
+pub(super) fn devices(cx: &App) -> &[Paired] {
     cx.try_global::<Devices>().map_or(&[], |devices| &devices.0)
 }
 

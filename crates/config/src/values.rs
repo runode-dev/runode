@@ -116,6 +116,7 @@ impl Config {
             "auto-update" => bool(self.auto_update),
             "remote-access" => bool(self.remote_access),
             "remote-access-port" => vec![self.remote_access_port.to_string()],
+            "remote-access-name" => self.remote_access_name.iter().cloned().collect(),
             "agent-notifications" => bool(self.agent_notifications),
             "agent-notifications-exclude" => {
                 self.agent_notifications_exclude.iter().map(|kind| kind.label().to_owned()).collect()

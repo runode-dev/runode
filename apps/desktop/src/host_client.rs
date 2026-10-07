@@ -235,7 +235,7 @@ pub fn configure(config: &Config) {
         *remote = crate::remote_access::service(host);
     }
     if let Some(service) = remote.as_ref() {
-        service.set_port(port);
+        service.set(port, config.remote_access_name.clone());
     }
 }
 

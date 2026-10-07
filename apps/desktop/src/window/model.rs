@@ -337,8 +337,10 @@ impl WindowView {
         }
     }
 
-    /// 切到当前 workspace 的第 `ix` 个标签；workspace 里没有标签时显示空的标签区。
+    /// 切到当前 workspace 的第 `ix` 个标签；workspace 里没有标签时显示空的标签区。开着的手机端引导页
+    /// 随之收起。
     pub(super) fn activate(&mut self, ix: usize, window: &mut Window, cx: &mut Context<Self>) {
+        self.mobile = None;
         let workspace = self.workspace_mut();
         workspace.active = ix;
         if let Some(tab) = workspace.tabs.get_mut(ix) {

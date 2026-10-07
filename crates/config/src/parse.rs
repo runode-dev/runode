@@ -56,7 +56,7 @@ pub const KEYS: &[&[&str]] = &[
     &["clipboard-write", "clipboard-read"],
     &["terminal-host"],
     &["auto-update"],
-    &["remote-access", "remote-access-port"],
+    &["remote-access", "remote-access-port", "remote-access-name"],
     &["agent-notifications", "agent-notifications-exclude", "agent-done-sound", "agent-blocked-sound"],
     &["config-file"],
     &["keybind"],
@@ -287,6 +287,9 @@ impl Config {
                 self.remote_access_port = or_default(empty, defaults.remote_access_port, || {
                     Ok(value.trim().parse().ok().filter(|&port| port > 0).ok_or("expected a port from 1 to 65535")?)
                 })?;
+            }
+            "remote-access-name" => {
+                self.remote_access_name = Some(value.trim().to_owned()).filter(|name| !name.is_empty());
             }
             "agent-notifications" => {
                 self.agent_notifications = or_default(empty, defaults.agent_notifications, || parse_bool(value))?;
@@ -670,6 +673,9 @@ unknown-key = whatever
             );
         }
         assert_eq!(load(&["remote-access-port = 9000\nremote-access-port ="]).remote_access_port, 7866);
+        assert_eq!(d.remote_access_name, None);
+        assert_eq!(load(&["remote-access-name =  书房的 Mac "]).remote_access_name.as_deref(), Some("书房的 Mac"));
+        assert_eq!(load(&["remote-access-name = 书房的 Mac\nremote-access-name ="]).remote_access_name, None);
     }
 
     #[test]

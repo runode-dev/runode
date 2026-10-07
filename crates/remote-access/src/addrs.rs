@@ -68,6 +68,11 @@ mod computer_name {
 /// 这台机器现在所有开着的网卡上的地址，配对 URI 里给手机挨个试：去掉回环和链路本地的（换一个
 /// 网络就到不了），IPv4 在前，各自按网卡的顺序，不重复。
 pub fn local_addresses() -> Vec<IpAddr> {
+    local_interfaces().into_iter().map(|(_, addr)| addr).collect()
+}
+
+/// 和 `local_addresses` 一样的地址，各带着所在网卡的名字（`en0`、`utun3` 这样），给人挑用哪个网络。
+pub fn local_interfaces() -> Vec<(String, IpAddr)> {
     let mut list: *mut libc::ifaddrs = std::ptr::null_mut();
     // SAFETY: 输出参数指向本地变量；成功时返回的链表下面用完释放。
     if unsafe { libc::getifaddrs(&mut list) } != 0 {
@@ -99,13 +104,15 @@ pub fn local_addresses() -> Vec<IpAddr> {
                 _ => continue,
             }
         };
-        if reachable(addr) && !addrs.contains(&addr) {
-            addrs.push(addr);
+        if reachable(addr) && !addrs.iter().any(|(_, seen)| *seen == addr) {
+            // SAFETY: `ifa_name` 是 getifaddrs 给的以 NUL 结尾的网卡名，释放前一直有效。
+            let name = unsafe { std::ffi::CStr::from_ptr(entry.ifa_name) }.to_string_lossy().into_owned();
+            addrs.push((name, addr));
         }
     }
     // SAFETY: 释放上面 getifaddrs 给的链表，之后不再用。
     unsafe { libc::freeifaddrs(list) };
-    addrs.sort_by_key(IpAddr::is_ipv6);
+    addrs.sort_by_key(|(_, addr)| addr.is_ipv6());
     addrs
 }
 
@@ -131,6 +138,7 @@ mod tests {
         }
         let addrs = local_addresses();
         assert!(addrs.iter().all(|addr| reachable(*addr)), "{addrs:?}");
+        assert!(local_interfaces().iter().all(|(name, _)| !name.is_empty()));
         assert!(!host_name().is_empty());
     }
 }

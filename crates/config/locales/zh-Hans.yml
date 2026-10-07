@@ -49,6 +49,7 @@ config:
   auto_update: 启动后和之后每隔几个小时查一次 Runode 的新版本：true、false。true 时有了新版本就在后台下载好，退出 Runode 时装上；false 时只在 Runode 菜单里点「检查更新…」时查。只有发布者签过名的 Runode.app 会自己更新。
   remote_access: 让手机经局域网或 Tailscale 连上这台 Mac 的终端：true、false。用 runode remote pair 给手机配对，runode remote devices 列出配对过的手机，runode remote revoke 撤销一台。改了几秒内生效，不用重启 Runode。
   remote_access_port: 远程访问在所有网卡上监听的 TCP 端口：1 到 65535。
+  remote_access_name: 配对过的手机上显示的这台电脑的名字，留空时用「系统设置 › 通用 › 共享」里的电脑名。改了几秒内生效，连着的手机会断开一下再自己连上。
   command_completions: 在 shell 提示符上按 Tab 时从菜单里选命令名、子命令、选项或参数（参数只限 Runode 认识的命令），没有可选的时 Tab 照常交给 shell。false 时 Tab 总是交给 shell。
   agent_notifications: agent 在你没在看的分屏里等你回答或者干完了时，发系统通知：true、false。只有打包好的 Runode.app 能发通知。
   agent_notifications_exclude: |-

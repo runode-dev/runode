@@ -150,9 +150,13 @@ impl Page {
                 Row("agent-blocked-sound", Sound),
                 AgentExclude,
             ],
-            Self::Remote => {
-                &[Row("remote-access", Switch), Row("remote-access-port", Text(80.)), Section("pairing"), Pairing]
-            }
+            Self::Remote => &[
+                Row("remote-access", Switch),
+                Row("remote-access-port", Text(80.)),
+                Row("remote-access-name", Text(200.)),
+                Section("pairing"),
+                Pairing,
+            ],
             Self::Keybinds => &[],
         }
     }

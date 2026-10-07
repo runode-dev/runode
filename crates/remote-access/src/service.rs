@@ -1,5 +1,6 @@
-//! 让远程访问的监听跟着配置走：调用方随时告诉它想要的端口（`None` 是关），它在后台线程里开、关、
-//! 换端口。开不了（端口被占、另一个 runode 进程正占着监听，比如交接时还没退出的旧宿主）就每隔
+//! 让远程访问的监听跟着配置走：调用方随时告诉它想要的端口（`None` 是关）和给手机看的名字，它在后台
+//! 线程里开、关、换端口；名字变了就重开一次监听，Bonjour、状态文件和门禁里的名字一起换掉，连着的
+//! 手机会断开后自己重连。开不了（端口被占、另一个 runode 进程正占着监听，比如交接时还没退出的旧宿主）就每隔
 //! `RETRY` 再试，直到开成或者不要了。
 
 use std::{
@@ -28,13 +29,15 @@ struct Wanted {
 #[derive(Default)]
 struct State {
     port: Option<u16>,
+    /// 给手机看的名字；`None` 时用电脑名，见 `Options::host_name`。
+    name: Option<String>,
     quit: bool,
     /// 每改一次加一，后台线程据此知道等的时候有没有变。
     generation: u64,
 }
 
 impl Service {
-    /// 起后台线程，先关着，等 `set_port`。`options.port` 不用，每次开时换成要的端口。
+    /// 起后台线程，先关着，等 `set`。`options.port` 和 `options.host_name` 不用，每次开时换成要的。
     pub fn start(options: Options) -> std::io::Result<Self> {
         let shared = Arc::new(Wanted::default());
         let thread_shared = shared.clone();
@@ -42,11 +45,13 @@ impl Service {
         Ok(Self { shared, thread: Some(thread) })
     }
 
-    /// 要在 `port` 上开着；`None` 时关掉。和现在的一样时什么都不做。
-    pub fn set_port(&self, port: Option<u16>) {
+    /// 要在 `port` 上开着，手机看到的名字是 `name`（`None` 是电脑名）；`port` 为 `None` 时关掉。和现在的
+    /// 一样时什么都不做。
+    pub fn set(&self, port: Option<u16>, name: Option<String>) {
         let mut state = self.shared.state.lock().unwrap_or_else(PoisonError::into_inner);
-        if state.port != port {
+        if state.port != port || state.name != name {
             state.port = port;
+            state.name = name;
             state.generation += 1;
             self.shared.changed.notify_all();
         }
@@ -69,7 +74,8 @@ impl Drop for Service {
 }
 
 fn run(shared: &Wanted, options: Options) {
-    let mut running: Option<Listener> = None;
+    // 开着的监听和开它时用的名字。
+    let mut running: Option<(Listener, Option<String>)> = None;
     // 连着开不成几次了：第一次记警告，之后只记调试日志，免得每两秒一条。
     let mut failures = 0u32;
     let mut state = shared.state.lock().unwrap_or_else(PoisonError::into_inner);
@@ -77,15 +83,15 @@ fn run(shared: &Wanted, options: Options) {
         if state.quit {
             break;
         }
-        let (wanted, generation) = (state.port, state.generation);
+        let (wanted, name, generation) = (state.port, state.name.clone(), state.generation);
         drop(state);
-        if running.as_ref().is_some_and(|listener| Some(listener.port()) != wanted) {
+        if running.as_ref().is_some_and(|(listener, named)| Some(listener.port()) != wanted || *named != name) {
             running = None;
         }
         if let (Some(port), None) = (wanted, &running) {
-            match Listener::start(Options { port, ..options.clone() }) {
+            match Listener::start(Options { port, host_name: name.clone(), ..options.clone() }) {
                 Ok(listener) => {
-                    running = Some(listener);
+                    running = Some((listener, name));
                     failures = 0;
                 }
                 Err(err) => {

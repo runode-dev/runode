@@ -481,6 +481,7 @@ settings:
     auto_update: 自動更新
     remote_access: 遠端存取
     remote_access_port: 連接埠
+    remote_access_name: "電腦名稱"
     agent_notifications: 通知
     agent_notifications_exclude: 不提醒的 agent
     agent_done_sound: agent 完成時的提示音
@@ -526,6 +527,7 @@ settings:
     auto_update: 在背景查新版本、下載好，結束 Runode 時裝上。
     remote_access: 讓配對過的手機經區域網路或 Tailscale 連上這台 Mac 的終端機。在下面配對，或者用 runode remote pair。
     remote_access_port: TCP 連接埠，1 到 65535。
+    remote_access_name: "配對過的手機上顯示的名稱，留空時用系統的電腦名稱。改了以後連著的手機會斷開一下再連上。"
     agent_notifications: agent 在你沒在看的分割畫面裡完成或等你回答時發系統通知。只有打包好的 Runode.app 能發通知。
     agent_notifications_exclude: 選中的 agent 不發通知也不出提示音，狀態標記照常顯示。
     agent_done_sound: 系統內建的聲音。
@@ -586,6 +588,7 @@ settings:
     replaced: 另一處（比如 runode remote pair）開始了新的配對，這個口令作廢了。
     too_long: 配對連結太長，畫不成 QR 碼。
     io_failed: "沒能讀寫配對口令：%{err}"
+    starting: "正在等遠端存取開好…"
   keybind:
     use_defaults: 使用預設快速鍵
     use_defaults_hint: 關掉後只有你自己加的快速鍵生效。
@@ -646,3 +649,42 @@ status:
   no_ports: 終端機裡沒有程式在監聽連接埠
   external_ports: 外部連接埠
   open_port: 在瀏覽器中開啟
+mobile:
+  entry: "手機端"
+  menu: "手機端…"
+  eyebrow: "RUNODE 手機端"
+  intro_title: "工作區隨身帶著。"
+  intro_body: "在 iPhone 上看 agent 在做什麼、回答它們的提問，打開任何一個終端機接著工作。手機經區域網路或 Tailscale 直接連到這台 Mac，不經過別的伺服器。"
+  start: "開始使用"
+  step: "第 %{n} 步（共 %{total} 步）"
+  install_title: "裝上 App。"
+  install_body: "用 iPhone 掃 QR 碼，或者打開安裝連結，裝上 Runode。"
+  open_link: "打開連結"
+  copy_link: "拷貝安裝連結"
+  next: "繼續"
+  back: "返回"
+  pair_title: "配對這台 Mac。"
+  pair_body: "在手機上打開 Runode，點「配對電腦」，然後掃碼。"
+  name_label: "電腦名稱"
+  name_hint: "手機上會看到「%{name}」。留空則用這台電腦自己的名稱。"
+  network_label: "網路"
+  network_auto: "自動（依系統順序試全部位址）"
+  network_hint: "手機先試這個位址，連不上再試別的。要和這台 Mac 連著同一個 Wi-Fi，或者都連著 Tailscale。"
+  cant_scan: "掃不了？"
+  copy_code: "拷貝配對連結"
+  expires: "%{time} 後過期"
+  regenerate: "重新產生"
+  off: "遠端存取還沒打開。打開後，配對過的手機能經區域網路或 Tailscale 連上這台 Mac 的終端機。"
+  turn_on: "打開遠端存取"
+  generate: "產生 QR 碼"
+  retry: "重試"
+  paired_title: "配好了。"
+  paired_body: "已和「%{name}」配對，手機首頁會列出這台 Mac。"
+  keep: "結束後保持連線"
+  done: "完成"
+  again: "再配一台"
+  paired_intro_title: "你的手機已配對。"
+  paired_intro_body: "打開手機上的 Runode 接著工作，或者再配一台。"
+  paired_on: "配對於 %{date}"
+  date: "%{y}/%{m}/%{d}"
+  pair_another: "與另一台裝置配對"

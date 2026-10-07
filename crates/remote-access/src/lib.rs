@@ -33,7 +33,7 @@ mod status;
 
 use std::{io, os::unix::net::UnixStream, sync::Arc};
 
-pub use addrs::{host_name, local_addresses};
+pub use addrs::{host_name, local_addresses, local_interfaces};
 pub use devices::{Device, list_devices, revoke_device};
 pub use listener::{Bind, Listener, Options};
 pub use pairing::{PairingProgress, PairingTicket, pairing_pending};

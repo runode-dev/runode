@@ -9,7 +9,7 @@
 //! 右侧的预览栏、Git 面板和文件树（`project`、`preview`、`git_panel`、`files`），侧栏和文件树共用的
 //! 就地输入框（`inline_edit`），新建 workspace 的对话框（`new_workspace`），开窗口（`open`），存档（`persist`，存档文件的格式在
 //! `persist::format`），侧栏里没在窗口里显示的后台会话（`background`），退出和关窗口时会话怎么办
-//! （`quit`），以及别的进程经宿主请 app 开终端、切到某个终端、问各个终端摆在哪（`remote`、
+//! （`quit`），侧栏顶上手机端入口打开的引导页（`mobile`），以及别的进程经宿主请 app 开终端、切到某个终端、问各个终端摆在哪（`remote`、
 //! `layout_report`），一次在当前分屏旁开几个分屏（`arrange`），卡片样式下标题栏左边的这台
 //! 机器（`machine`），以及窗口底部的状态栏（`status_bar`）。
 //!
@@ -27,6 +27,7 @@ mod git_panel;
 mod inline_edit;
 mod layout_report;
 mod machine;
+mod mobile;
 mod model;
 mod new_workspace;
 mod open;
@@ -108,7 +109,9 @@ actions!(
         /// 打开或关掉列出所有窗口里 agent 的浮层。
         GotoAgent,
         /// 跳到下一个要处理的 agent：先等回答的，再干完了没看的。
-        NextAgent
+        NextAgent,
+        /// 在窗口主区域打开手机端引导页：介绍、装 App、扫码配对。
+        ShowMobile
     ]
 );
 
@@ -273,6 +276,8 @@ pub struct WindowView {
     renaming: Option<Renaming>,
     /// 新建 workspace 的对话框。
     new_workspace: Option<new_workspace::NewWorkspaceDialog>,
+    /// 开着的手机端引导页，盖住标签和分屏。
+    mobile: Option<mobile::MobilePage>,
     /// 当前 workspace 里没有标签时窗口的焦点，快捷键（新开标签等）照常派发得到。
     empty_focus: FocusHandle,
     /// 开着的 agent 列表。
@@ -386,6 +391,7 @@ impl WindowView {
             file_clipboard: None,
             renaming: None,
             new_workspace: None,
+            mobile: None,
             empty_focus: cx.focus_handle(),
             agent_picker: None,
             arrange_picker: None,
@@ -465,8 +471,11 @@ impl WindowView {
 }
 
 impl Focusable for WindowView {
-    /// 有焦点的终端；当前 workspace 里没有终端时是窗口自己的。
+    /// 开着手机端引导页时是它；否则是有焦点的终端，当前 workspace 里没有终端时是窗口自己的。
     fn focus_handle(&self, cx: &App) -> FocusHandle {
+        if let Some(page) = &self.mobile {
+            return page.focus().clone();
+        }
         match self.focused_view() {
             Some(view) => view.focus_handle(cx),
             None => self.empty_focus.clone(),
@@ -477,7 +486,9 @@ impl Focusable for WindowView {
 impl Render for WindowView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let (fg, bg) = self.colors(cx);
-        let (base, body) = if cards(cx) {
+        let (base, body) = if self.mobile.is_some() {
+            (if cards(cx) { frame_color(fg, bg) } else { bg }, self.render_mobile_body(fg, bg, window, cx))
+        } else if cards(cx) {
             (frame_color(fg, bg), self.render_cards_body(fg, bg, window, cx))
         } else {
             (bg, self.render_classic_body(fg, bg, window, cx))
@@ -520,6 +531,7 @@ impl Render for WindowView {
             .on_action(cx.listener(Self::toggle_files))
             .on_action(cx.listener(Self::goto_agent))
             .on_action(cx.listener(Self::next_agent))
+            .on_action(cx.listener(Self::show_mobile))
             .on_action(cx.listener(Self::arrange_panes))
             .map(|window| Self::bind_git_actions(window, cx))
             .relative()

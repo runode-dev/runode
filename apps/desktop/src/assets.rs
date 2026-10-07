@@ -74,6 +74,8 @@ icons! {
     pub MEMORY_ICON = "memory",
     pub SHELL_ICON = "shell",
     pub PLUG_ICON = "plug",
+    /// 侧栏顶上手机端入口和引导页的图标。
+    pub PHONE_ICON = "phone",
 }
 
 fn all_files() -> impl Iterator<Item = &'static (&'static str, &'static [u8])> {
