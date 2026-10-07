@@ -41,8 +41,8 @@ log = "0.4"
 bindgen = "0.73"
 heck = "0.5"
 pkg-config = "0.3"
-gpui = { package = "gpui-pre", version = "=0.3.7" }
-gpui_platform = { package = "gpui-pre-platform", version = "=0.3.7" }
+gpui = { package = "gpui-pre", version = "=0.3.8" }
+gpui_platform = { package = "gpui-pre-platform", version = "=0.3.8" }
 anyhow = "1"
 portable-pty = "0.9"
 futures = "0.3"
@@ -106,28 +106,6 @@ codegen-units = 1
 # 那份从 22.87 到 19.36 MiB），但 RUST_BACKTRACE 打出的 panic 回溯一帧函数名都没有了，系统的
 # 崩溃报告里也只剩地址；panic 的消息和源码位置不靠符号表，两种都还在。
 strip = "debuginfo"
-
-# block 0.1.6 已停止维护，新版 Rust 拒绝用空 enum 作外部 static 的类型，并对没写 ABI 的
-# extern 报弃用警告；用修好这两点的副本替换。GPUI 的 macOS 后端经 cocoa、metal、core-video
-# 的最新版仍依赖 block 0.1，等它们不再依赖或 block 出修复版，再删掉这段 patch 和副本。
-#
-# gpui-pre-apple 是 GPUI 的 Metal 渲染器（`MetalRenderer`）。用副本改一处，其余和 crates.io 上的
-# 0.3.7 一字不差：
-#   - 窗口层（CAMetalLayer）的 drawable 最多 2 个，上游是 3 个。每个 drawable 和窗口一样大，
-#     有过输出之后上游会用满 3 个：实测默认窗口（960×620 点，Retina）IOSurface 从 27.8 MiB 降到
-#     18.5 MiB，1600×1000 点的窗口从 74.0 MiB 降到 49.3 MiB。代价是 GPU 赶不上时主线程在
-#     nextDrawable 上多等一帧。
-# 画 path 用的整窗中间纹理试过改成用到时才建，实测省不下内存（GPU 私有纹理第一次画进去才占物理
-# 内存），没留这处改动。
-# 另外在副本的 Cargo.toml 里关了 deprecated 这条 lint：路径依赖的警告 cargo 不压，上游用的 cocoa
-# 弃用类型每次构建都会报 12 条。
-# 副本的第一个提交是从 crates.io 下的原样文件（只少了 cargo 解包时写的 .cargo-ok），改动都在后面的
-# 提交里，每处加了注释。升级 GPUI 时：gpui-pre 的版本写死，版本号变了这段 patch 就对不上新版本
-# （cargo 会警告 patch 没用上），要把新版的 gpui-pre-apple 原样复制进来单独提交，再看上游有没有
-# 做同样的事，没有就把副本自己的改动（对着原样提交的 git diff）补上；上游都改了就删掉副本和这一行。
-[patch.crates-io]
-block = { path = "vendor/crates/block" }
-gpui-pre-apple = { path = "vendor/crates/gpui-pre-apple" }
 
 # 只开现有代码已经满足的规则，防着以后倒退；新加规则时先把代码改干净。
 [workspace.lints.rust]
