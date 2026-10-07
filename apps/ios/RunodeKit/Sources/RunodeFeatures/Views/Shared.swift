@@ -28,7 +28,9 @@
         static let system = ThemeColors(
             page: Color(.systemGroupedBackground), card: Color(.secondarySystemGroupedBackground),
             fill: Color(.tertiarySystemFill), secondaryFill: Color(.secondarySystemFill), pressed: Color(.systemFill))
+    }
 
+    extension ThemeColors {
         /// 填充色是前景色加透明度，放在页面和卡片上都看得出来，和系统的填充色一样。
         init(_ theme: AppTheme) {
             let foreground = Color(theme.foreground)
@@ -37,14 +39,6 @@
             fill = foreground.opacity(0.10)
             secondaryFill = foreground.opacity(0.14)
             pressed = foreground.opacity(0.18)
-        }
-
-        private init(page: Color, card: Color, fill: Color, secondaryFill: Color, pressed: Color) {
-            self.page = page
-            self.card = card
-            self.fill = fill
-            self.secondaryFill = secondaryFill
-            self.pressed = pressed
         }
     }
 

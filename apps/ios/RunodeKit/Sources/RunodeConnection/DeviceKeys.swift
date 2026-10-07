@@ -1,6 +1,7 @@
 import CryptoKit
 import Foundation
 import Security
+import Synchronization
 
 /// 一台电脑对应的设备签名私钥（P-256）。只存私钥的数据：Secure Enclave 的是加密过的句柄（离开
 /// 这部手机的 Secure Enclave 就没用），软件的是原始私钥。每次签名时现场还原，这个值本身只是数据，
@@ -59,6 +60,17 @@ public protocol DeviceKeyStore: Sendable {
     func save(_ key: StoredDeviceKey, for machine: UUID) throws
     func key(for machine: UUID) throws -> StoredDeviceKey?
     func deleteKey(for machine: UUID) throws
+}
+
+/// 只记在内存里，测试和演示模式用。
+public final class MemoryDeviceKeyStore: DeviceKeyStore {
+    private let keys = Mutex<[UUID: StoredDeviceKey]>([:])
+
+    public init() {}
+
+    public func save(_ key: StoredDeviceKey, for machine: UUID) throws { keys.withLock { $0[machine] = key } }
+    public func key(for machine: UUID) throws -> StoredDeviceKey? { keys.withLock { $0[machine] } }
+    public func deleteKey(for machine: UUID) throws { _ = keys.withLock { $0.removeValue(forKey: machine) } }
 }
 
 /// 把设备私钥存进 Keychain 的通用密码项：`service` 固定，`account` 是这台电脑记录的编号，

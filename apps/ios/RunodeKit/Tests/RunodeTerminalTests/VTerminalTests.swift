@@ -103,7 +103,7 @@ import Testing
         }
         #expect(vt.scrollbar.total > 5)
         #expect(vt.scrollbar.atBottom)
-        vt.scroll(by: -3)
+        vt.scrollSmoothly(lines: 3)
         #expect(!vt.scrollbar.atBottom)
         // 屏幕最后是 17 到 20 行和光标所在的空行，往上滚三行后顶上是第 14 行。
         #expect(vt.screenLines().first == "line 14")
@@ -197,11 +197,5 @@ import Testing
         vt.feed(Array("\u{1b}[?2004h".utf8))
         #expect(vt.bracketedPaste)
         #expect(vt.encodePaste("a\nb") == Array("\u{1b}[200~a\nb\u{1b}[201~".utf8))
-    }
-
-    @Test func titleComesFromOsc() throws {
-        let vt = try terminal()
-        vt.feed(Array("\u{1b}]2;构建\u{07}".utf8))
-        #expect(vt.title == "构建")
     }
 }

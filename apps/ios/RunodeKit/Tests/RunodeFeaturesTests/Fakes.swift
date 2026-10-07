@@ -90,27 +90,6 @@ final class FakeDisplay: TerminalDisplay {
     func terminalShowKeyboard() { keyboardRequests += 1 }
 }
 
-final class InMemoryKeyStore: DeviceKeyStore {
-    private let keys = Mutex<[UUID: StoredDeviceKey]>([:])
-
-    func save(_ key: StoredDeviceKey, for machine: UUID) throws { keys.withLock { $0[machine] = key } }
-    func key(for machine: UUID) throws -> StoredDeviceKey? { keys.withLock { $0[machine] } }
-    func deleteKey(for machine: UUID) throws { _ = keys.withLock { $0.removeValue(forKey: machine) } }
-}
-
-actor InMemoryMachineStore: MachineStore {
-    var machines: [MachineRecord] = []
-
-    func all() -> [MachineRecord] { machines }
-
-    func upsert(_ machine: MachineRecord) {
-        machines.removeAll { $0.id == machine.id }
-        machines.append(machine)
-    }
-
-    func remove(id: UUID) { machines.removeAll { $0.id == id } }
-}
-
 /// 假的配对：按预先给的结果回。
 struct FakePairing: Pairing {
     var result: @Sendable (PairingInvitation) throws -> MachineRecord

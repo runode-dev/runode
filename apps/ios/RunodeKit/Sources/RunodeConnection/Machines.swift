@@ -51,6 +51,24 @@ public protocol MachineStore: Sendable {
     func remove(id: UUID) async throws
 }
 
+/// 只记在内存里，测试和演示模式用。
+public actor MemoryMachineStore: MachineStore {
+    private var machines: [MachineRecord]
+
+    public init(_ machines: [MachineRecord] = []) {
+        self.machines = machines
+    }
+
+    public func all() -> [MachineRecord] { machines }
+
+    public func upsert(_ machine: MachineRecord) {
+        machines.removeAll { $0.id == machine.id }
+        machines.append(machine)
+    }
+
+    public func remove(id: UUID) { machines.removeAll { $0.id == id } }
+}
+
 /// 存在 app 自己目录下的一个 JSON 文件里；记录里没有秘密（私钥在 Keychain），文件照常加数据保护。
 public actor FileMachineStore: MachineStore {
     private let url: URL

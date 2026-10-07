@@ -203,15 +203,6 @@ public final class VTerminal {
     /// 程序开着括号粘贴（mode 2004）。
     public var bracketedPaste: Bool { mode(2004, ansi: false) }
 
-    /// 程序设的标题；没设时为空串。
-    public var title: String {
-        var text = GhosttyString()
-        guard ghostty_terminal_get(handle, GHOSTTY_TERMINAL_DATA_TITLE, &text) == GHOSTTY_SUCCESS,
-            let pointer = text.ptr, text.len > 0
-        else { return "" }
-        return String(decoding: UnsafeBufferPointer(start: pointer, count: text.len), as: UTF8.self)
-    }
-
     // MARK: 视口滚动
 
     /// 回滚历史的位置：总行数、视口顶在第几行、视口多高。
@@ -233,16 +224,6 @@ public final class VTerminal {
             return Scrollbar(total: Int(size.rows), offset: 0, length: Int(size.rows))
         }
         return Scrollbar(total: Int(bar.total), offset: Int(bar.offset), length: Int(bar.len))
-    }
-
-    /// 视口往上（负数）或往下滚 `rows` 行。
-    public func scroll(by rows: Int) {
-        guard rows != 0 else { return }
-        scrollFraction = 0
-        var behavior = GhosttyTerminalScrollViewport()
-        behavior.tag = GHOSTTY_SCROLL_VIEWPORT_DELTA
-        behavior.value.delta = rows
-        ghostty_terminal_scroll_viewport(handle, behavior)
     }
 
     /// 回到最底下，跟着新输出走。
@@ -584,19 +565,14 @@ public final class VTerminal {
                 }
             }
         }
-        var result: GhosttyResult
-        if let text {
-            result = text.withCString { run($0, strlen($0)) }
-            if result == GHOSTTY_OUT_OF_SPACE {
-                output = [UInt8](repeating: 0, count: written)
-                result = text.withCString { run($0, strlen($0)) }
-            }
-        } else {
-            result = run(nil, 0)
-            if result == GHOSTTY_OUT_OF_SPACE {
-                output = [UInt8](repeating: 0, count: written)
-                result = run(nil, 0)
-            }
+        func attempt() -> GhosttyResult {
+            guard let text else { return run(nil, 0) }
+            return text.withCString { run($0, strlen($0)) }
+        }
+        var result = attempt()
+        if result == GHOSTTY_OUT_OF_SPACE {
+            output = [UInt8](repeating: 0, count: written)
+            result = attempt()
         }
         guard result == GHOSTTY_SUCCESS else { return [] }
         return Array(output.prefix(written))

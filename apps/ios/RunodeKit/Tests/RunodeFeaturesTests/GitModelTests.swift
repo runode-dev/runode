@@ -186,7 +186,9 @@ import Testing
     @Test func refreshWaitsForTheAnswer() async throws {
         let model = try await connectedModel(status())
         let refreshing = Task { await model.refreshAndWait() }
-        #expect(await eventually { model.isRefreshing })
+        // `isRefreshing` 先变，请求要等拿到编号才发出去：等请求发出去再取它的编号。
+        #expect(await eventually { sentLast(.status) })
+        #expect(model.isRefreshing)
         let req = try lastGit(.status)
         model.handle(.gitStatus(req: req, id: sessionA, status: status(unstaged: [changed])))
         await refreshing.value

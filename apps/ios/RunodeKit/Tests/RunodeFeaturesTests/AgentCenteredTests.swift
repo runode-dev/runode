@@ -320,13 +320,13 @@ private func workspace(_ index: UInt32, _ name: String, tabs: [[SessionId]], act
 @Suite struct NavigationTests {
     /// 从列表打开终端页：列表知道有没有电脑在显示它，据此决定一开始就适配手机还是跟随电脑。
     @Test func terminalsKnowWhetherTheMachineShowsThem() async throws {
-        let store = InMemoryMachineStore()
+        let store = MemoryMachineStore()
         let machine = machineRecord()
         await store.upsert(machine)
         let link = FakeLink()
         let app = AppModel(
             dependencies: AppDependencies(
-                store: store, keyStore: InMemoryKeyStore(), pairing: FakePairing { _ in machine },
+                store: store, keyStore: MemoryDeviceKeyStore(), pairing: FakePairing { _ in machine },
                 makeLink: { _ in link }, deviceName: "测试 iPhone"))
         await app.machineList.load()
         app.path = [.machine(machine.id)]

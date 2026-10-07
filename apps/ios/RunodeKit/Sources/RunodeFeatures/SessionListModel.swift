@@ -323,11 +323,6 @@ public final class SessionListModel {
         !windows.isEmpty
     }
 
-    public var isConfirmingKill: Bool {
-        get { killTarget != nil }
-        set { if !newValue { killTarget = nil } }
-    }
-
     /// 结束会话（视图先让用户确认）。
     public func kill(_ id: SessionId) {
         link.send(.kill(id: id))
@@ -483,8 +478,7 @@ public final class SessionListModel {
         case .ready:
             connected = true
             watching = []
-            link.send(.listSessions)
-            link.send(.layout(req: Self.layoutRequest))
+            refresh()
         case .message(let message):
             handle(message)
         case .frame:
@@ -543,7 +537,7 @@ public final class SessionListModel {
         case .exited(let id, _):
             update(id) { $0.exited = true }
         case .sizeOwner(let id, let mine, let owner):
-            update(id) { $0.sizeOwner = mine ? machineLocalName : owner }
+            update(id) { $0.sizeOwner = mine ? "本机" : owner }
         case .layout(Self.layoutRequest, let windows):
             self.windows = windows
         case .projectTasks(let req, _, let sources):
@@ -598,9 +592,6 @@ public final class SessionListModel {
             break
         }
     }
-
-    /// 尺寸归这部手机时列表里显示的名字。
-    private var machineLocalName: String { "本机" }
 
     private func update(_ id: SessionId, _ change: (inout SessionInfo) -> Void) {
         guard let index = sessions.firstIndex(where: { $0.id == id }) else { return }

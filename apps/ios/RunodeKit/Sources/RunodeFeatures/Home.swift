@@ -18,43 +18,6 @@ public struct RecentTerminal: Hashable, Sendable, Codable {
     }
 }
 
-/// 上次打开的终端记在哪里。
-@MainActor
-public protocol RecentTerminalStore {
-    func load() -> RecentTerminal?
-    func save(_ recent: RecentTerminal)
-}
-
-/// 只记在内存里，App 退出就忘。
-@MainActor
-public final class MemoryRecentTerminalStore: RecentTerminalStore {
-    private var recent: RecentTerminal?
-
-    public init() {}
-
-    public func load() -> RecentTerminal? { recent }
-    public func save(_ recent: RecentTerminal) { self.recent = recent }
-}
-
-/// 记在 `UserDefaults` 里。里面只有会话标识、标题和目录，没有秘密。
-@MainActor
-public final class UserDefaultsRecentTerminalStore: RecentTerminalStore {
-    private let defaults: UserDefaults
-    private let key = "recentTerminal"
-
-    public init(defaults: UserDefaults = .standard) {
-        self.defaults = defaults
-    }
-
-    public func load() -> RecentTerminal? {
-        defaults.data(forKey: key).flatMap { try? JSONDecoder().decode(RecentTerminal.self, from: $0) }
-    }
-
-    public func save(_ recent: RecentTerminal) {
-        defaults.set(try? JSONEncoder().encode(recent), forKey: key)
-    }
-}
-
 /// 首页顶上的几个数：连着的电脑上加起来。
 public struct HomeSummary: Hashable, Sendable {
     public var waiting = 0

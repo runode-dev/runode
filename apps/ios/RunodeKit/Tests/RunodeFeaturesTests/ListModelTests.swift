@@ -214,7 +214,7 @@ import Testing
         model.handle(.ready(generation: 1))
         model.handle(.message(.sessionList([info(sessionA, title: "a")])))
         model.killTarget = sessionA
-        #expect(model.isConfirmingKill)
+        #expect(model.killTarget != nil)
         link.clearSent()
         model.kill(sessionA)
         #expect(link.sent == [.kill(id: sessionA)])
@@ -253,8 +253,8 @@ extension LinkState {
 @MainActor
 @Suite struct MachineListModelTests {
     @Test func addRenameDelete() async throws {
-        let store = InMemoryMachineStore()
-        let keys = InMemoryKeyStore()
+        let store = MemoryMachineStore()
+        let keys = MemoryDeviceKeyStore()
         let model = MachineListModel(store: store, keyStore: keys)
         var deleted: [UUID] = []
         model.willDelete = { deleted.append($0) }
@@ -278,8 +278,8 @@ extension LinkState {
     }
 
     @Test func repairingTheSameMachineReplacesTheOldRecord() async throws {
-        let store = InMemoryMachineStore()
-        let keys = InMemoryKeyStore()
+        let store = MemoryMachineStore()
+        let keys = MemoryDeviceKeyStore()
         let model = MachineListModel(store: store, keyStore: keys)
         let old = machineRecord(name: "旧")
         try keys.save(StoredDeviceKey(kind: .software, data: Data([1])), for: old.id)
@@ -347,13 +347,13 @@ extension LinkState {
 @Suite struct AppModelTests {
     /// 配对过的电脑一读进来就连上，进出它的页面不断开；终端页退出去就关掉。
     @Test func pairedMachinesStayConnected() async throws {
-        let store = InMemoryMachineStore()
+        let store = MemoryMachineStore()
         let machine = machineRecord()
         await store.upsert(machine)
         let link = FakeLink()
         let app = AppModel(
             dependencies: AppDependencies(
-                store: store, keyStore: InMemoryKeyStore(),
+                store: store, keyStore: MemoryDeviceKeyStore(),
                 pairing: FakePairing { _ in machine }, makeLink: { _ in link }, deviceName: "测试 iPhone"))
         await app.machineList.load()
         #expect(await eventually { link.starts == 1 })
@@ -373,13 +373,13 @@ extension LinkState {
     }
 
     @Test func backgroundDisconnectsAndForegroundReconnects() async throws {
-        let store = InMemoryMachineStore()
+        let store = MemoryMachineStore()
         let machine = machineRecord()
         await store.upsert(machine)
         let link = FakeLink()
         let app = AppModel(
             dependencies: AppDependencies(
-                store: store, keyStore: InMemoryKeyStore(),
+                store: store, keyStore: MemoryDeviceKeyStore(),
                 pairing: FakePairing { _ in machine }, makeLink: { _ in link }, deviceName: "测试 iPhone"))
         await app.machineList.load()
         #expect(await eventually { link.starts == 1 })
@@ -390,13 +390,13 @@ extension LinkState {
     }
 
     @Test func deletingAMachineLeavesItsPages() async throws {
-        let store = InMemoryMachineStore()
+        let store = MemoryMachineStore()
         let machine = machineRecord()
         await store.upsert(machine)
         let link = FakeLink()
         let app = AppModel(
             dependencies: AppDependencies(
-                store: store, keyStore: InMemoryKeyStore(),
+                store: store, keyStore: MemoryDeviceKeyStore(),
                 pairing: FakePairing { _ in machine }, makeLink: { _ in link }, deviceName: "测试 iPhone"))
         await app.machineList.load()
         app.path = [.machine(machine.id)]

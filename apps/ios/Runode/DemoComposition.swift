@@ -28,14 +28,14 @@
 
         static func dependenciesIfRequested() -> AppDependencies? {
             guard requested else { return nil }
-            let store = DemoMachineStore(machines: [machine, offlineMachine])
+            let store = MemoryMachineStore([machine, offlineMachine])
             return AppDependencies(
-                store: store, keyStore: DemoKeyStore(), pairing: DemoPairing(),
+                store: store, keyStore: MemoryDeviceKeyStore(), pairing: DemoPairing(),
                 makeLink: { record -> any HostLink in record.id == offlineMachine.id ? DemoOfflineLink() : DemoLink() },
                 deviceName: "演示 iPhone",
                 // 上次打开的终端记在单独的一份设置里，和正式的分开；先带 `shell` 启动一次，再不带参数启动，
                 // 首页就有「继续」。
-                recents: UserDefaultsRecentTerminalStore(defaults: UserDefaults(suiteName: "demo") ?? .standard))
+                recents: DefaultsStore("recentTerminal", defaults: UserDefaults(suiteName: "demo") ?? .standard))
         }
 
         /// 参数里还带着 `terminal` 时直接打开等回答的那个会话的终端页，`shell` 时打开普通 shell 的，
@@ -58,23 +58,6 @@
                 app.showingSettings = true
             }
         }
-    }
-
-    private actor DemoMachineStore: MachineStore {
-        var machines: [MachineRecord]
-        init(machines: [MachineRecord]) { self.machines = machines }
-        func all() -> [MachineRecord] { machines }
-        func upsert(_ machine: MachineRecord) {
-            machines.removeAll { $0.id == machine.id }
-            machines.append(machine)
-        }
-        func remove(id: UUID) { machines.removeAll { $0.id == id } }
-    }
-
-    private struct DemoKeyStore: DeviceKeyStore {
-        func save(_ key: StoredDeviceKey, for machine: UUID) throws {}
-        func key(for machine: UUID) throws -> StoredDeviceKey? { nil }
-        func deleteKey(for machine: UUID) throws {}
     }
 
     private struct DemoPairing: Pairing {

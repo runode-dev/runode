@@ -8,8 +8,8 @@ import Testing
 /// 连接 actor：门禁加 `Hello`，事件的先后，发的东西按先后写出，断线重连，不能重试的失败停下。
 @Suite struct HostConnectionTests {
     let machine = MachineRecord.sample()
-    let keys = InMemoryKeyStore()
-    let store = InMemoryMachineStore()
+    let keys = MemoryDeviceKeyStore()
+    let store = MemoryMachineStore()
     let supply = TransportSupply()
 
     init() throws {

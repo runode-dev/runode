@@ -13,7 +13,7 @@ private let light: TermSettings = {
     return settings
 }()
 
-/// 两台电脑，各自一条假连接；主题记在内存里。
+/// 两台电脑，各自一条假连接；主题记在临时的 `UserDefaults` 里。
 @MainActor
 private struct Setup {
     let first = machineRecord(name: "一", fingerprintByte: 1)
@@ -22,20 +22,20 @@ private struct Setup {
         record.pairedAt += 1
         return record
     }()
-    let themes: MemoryThemeStore
-    let recents = MemoryRecentTerminalStore()
+    let themes = DefaultsStore<AppTheme>("theme", defaults: .temporary())
+    let recents = DefaultsStore<RecentTerminal>("recentTerminal", defaults: .temporary())
     let app: AppModel
 
     init(saved: AppTheme? = nil) async {
-        themes = MemoryThemeStore(saved)
-        let store = InMemoryMachineStore()
+        if let saved { themes.save(saved) }
+        let store = MemoryMachineStore()
         await store.upsert(first)
         await store.upsert(second)
         let links = [first.id: FakeLink(), second.id: FakeLink()]
         let paired = second
         app = AppModel(
             dependencies: AppDependencies(
-                store: store, keyStore: InMemoryKeyStore(), pairing: FakePairing { _ in paired },
+                store: store, keyStore: MemoryDeviceKeyStore(), pairing: FakePairing { _ in paired },
                 makeLink: { links[$0.id]! }, deviceName: "测试 iPhone", recents: recents, themes: themes))
         await app.machineList.load()
     }
@@ -105,10 +105,9 @@ private struct Setup {
     }
 
     @Test func userDefaultsKeepsTheTheme() throws {
-        let defaults = try #require(UserDefaults(suiteName: "ThemeTests"))
-        defaults.removePersistentDomain(forName: "ThemeTests")
-        #expect(UserDefaultsThemeStore(defaults: defaults).load() == nil)
-        UserDefaultsThemeStore(defaults: defaults).save(AppTheme(light))
-        #expect(UserDefaultsThemeStore(defaults: defaults).load() == AppTheme(light))
+        let defaults = UserDefaults.temporary()
+        #expect(DefaultsStore<AppTheme>("theme", defaults: defaults).load() == nil)
+        DefaultsStore<AppTheme>("theme", defaults: defaults).save(AppTheme(light))
+        #expect(DefaultsStore<AppTheme>("theme", defaults: defaults).load() == AppTheme(light))
     }
 }

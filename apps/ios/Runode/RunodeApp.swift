@@ -28,7 +28,7 @@ enum AppComposition {
         let keyStore = KeychainDeviceKeyStore()
         let store = FileMachineStore(url: FileMachineStore.defaultURL())
         let discovery = BonjourDiscovery()
-        let preferences = UserDefaultsPreferencesStore()
+        let preferences = DefaultsStore<AppPreferences>("preferences")
         let systemName = UIDevice.current.name
         return AppDependencies(
             store: store, keyStore: keyStore, pairing: RemotePairing(keyStore: keyStore, discovery: discovery),
@@ -37,18 +37,17 @@ enum AppComposition {
                 HostConnection(
                     machine: machine, keyStore: keyStore, machines: store, discovery: discovery,
                     identity: ClientIdentity(
-                        build: buildIdentifier, deviceName: preferences.load().deviceName ?? systemName))
+                        build: buildIdentifier, deviceName: preferences.load()?.deviceName ?? systemName))
             },
-            deviceName: systemName, recents: UserDefaultsRecentTerminalStore(), preferences: preferences,
-            themes: UserDefaultsThemeStore())
+            deviceName: systemName, recents: DefaultsStore("recentTerminal"), preferences: preferences,
+            themes: DefaultsStore("theme"))
     }
 
-    /// 启动后要做的事；演示模式下直接打开演示的终端，调试用的启动参数见 `DebugLaunch`。
+    /// 启动后要做的事；演示模式下直接打开演示的终端。
     static func prepare(_ app: AppModel) async {
         await app.machineList.load()
         #if DEBUG
             DemoComposition.openIfRequested(app)
-            DebugLaunch.apply(app)
         #endif
     }
 

@@ -9,15 +9,15 @@ import Testing
 @Suite struct SettingsTests {
     let machine = machineRecord()
     let link = FakeLink()
-    let store = MemoryPreferencesStore()
+    let store = DefaultsStore<AppPreferences>("preferences", defaults: .temporary())
 
     func app() async -> AppModel {
-        let machines = InMemoryMachineStore()
+        let machines = MemoryMachineStore()
         await machines.upsert(machine)
         let link = self.link
         let app = AppModel(
             dependencies: AppDependencies(
-                store: machines, keyStore: InMemoryKeyStore(), pairing: FakePairing { _ in machineRecord() },
+                store: machines, keyStore: MemoryDeviceKeyStore(), pairing: FakePairing { _ in machineRecord() },
                 makeLink: { _ in link }, deviceName: "iPhone", preferences: store))
         await app.machineList.load()
         return app
@@ -28,10 +28,10 @@ import Testing
         app.settings.preferences.defaultSize = .followMachine
         app.settings.preferences.bellHaptics = false
         app.settings.setFontSize(40)
-        #expect(store.load().defaultSize == .followMachine)
-        #expect(!store.load().bellHaptics)
+        #expect(store.load()?.defaultSize == .followMachine)
+        #expect(store.load()?.bellHaptics == false)
         // 超出范围的字号拉回范围里。
-        #expect(store.load().fontSize == AppPreferences.fontSizes.upperBound)
+        #expect(store.load()?.fontSize == AppPreferences.fontSizes.upperBound)
     }
 
     @Test func oldArchivesKeepTheirDefaults() throws {
@@ -50,7 +50,7 @@ import Testing
         #expect(terminal.fitsPhone)
     }
 
-    @Test func renamingTheDeviceReachesEveryConnection() async {
+    @Test func renamingTheDeviceReachesEveryConnection() async throws {
         let app = await app()
         #expect(app.settings.deviceName == "iPhone")
         app.settings.setDeviceName("  书房的 iPhone ")
@@ -58,7 +58,7 @@ import Testing
         #expect(await eventually { link.deviceNames == ["书房的 iPhone"] })
         // 清空或者填回系统的名字，就是不再自己起名字。
         app.settings.setDeviceName("iPhone")
-        #expect(store.load().deviceName == nil)
+        #expect(try #require(store.load()).deviceName == nil)
         #expect(await eventually { link.deviceNames == ["书房的 iPhone", "iPhone"] })
         // 没变时不再转给连接。
         app.settings.setDeviceName("")

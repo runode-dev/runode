@@ -24,7 +24,7 @@
     /// 大小排，缩放靠滚动视图的 `zoomScale`（缩放的是容器），缩放结束后按新的比例重画，字不发虚。
     /// 平滑滚动错开不足一行时，网格在容器里往下挪，容器顶上露出另画的视口上面那一行，底下多出的被
     /// 容器裁掉；挪的是现成的位图，不用每帧重画。
-    public final class TerminalView: UIView, UIScrollViewDelegate, UIGestureRecognizerDelegate {
+    public final class TerminalView: UIView, UIScrollViewDelegate, UIGestureRecognizerDelegate, TerminalDisplay {
         public weak var delegate: (any TerminalViewDelegate)?
 
         /// 正在画的那份 VT，由视图模型给；视图只读它和滚它的视口。
@@ -182,7 +182,7 @@
         // MARK: 画
 
         /// 换一份 VT（重新 `Attach` 后新建的），整屏重画。
-        public func show(_ terminal: VTerminal?, settings: TermSettings) {
+        public func terminalDidReset(_ terminal: VTerminal?, settings: TermSettings) {
             stopMomentum()
             self.terminal = terminal
             grid.settings = settings
@@ -192,7 +192,7 @@
             refreshNow()
         }
 
-        public func updateSettings(_ settings: TermSettings) {
+        public func terminalSettingsDidChange(_ settings: TermSettings) {
             grid.settings = settings
             aboveGrid.settings = settings
             backgroundColor = Self.uiColor(settings.background)
@@ -212,7 +212,11 @@
             }
         }
 
-        public func ringBell() {
+        public func terminalContentDidChange() {
+            scheduleRefresh()
+        }
+
+        public func terminalDidRingBell() {
             guard bellHaptics else { return }
             // 连着响铃时最多每 200 毫秒震一下。
             let now = ContinuousClock.now
@@ -442,7 +446,7 @@
         }
 
         /// 尺寸方式换了：丢掉手动的缩放，按新的方式重新定默认缩放。
-        public func setFitsPhone(_ fits: Bool) {
+        public func terminalSizeModeDidChange(fitsPhone fits: Bool) {
             fitsPhone = fits
             userZoomed = false
             applyDefaultZoom()
@@ -455,6 +459,10 @@
                 becomeFirstResponder()
             }
             revealCursor()
+        }
+
+        public func terminalShowKeyboard() {
+            showKeyboard()
         }
 
         /// 软键盘收着时放在界面底部的按键栏：和键盘上方的辅助栏一样的键，按了直接发给这个终端，最后
@@ -741,6 +749,8 @@
             if flags.contains(.shift) { modifiers.insert(.shift) }
             if flags.contains(.control) { modifiers.insert(.control) }
             if flags.contains(.alternate) { modifiers.insert(.alt) }
+            // F1 到 F12 的 HID 用法码是连着的。
+            let function = key.keyCode.rawValue - UIKeyboardHIDUsage.keyboardF1.rawValue + 1
             let special: TerminalKey? =
                 switch key.keyCode {
                 case .keyboardEscape: .escape
@@ -755,19 +765,7 @@
                 case .keyboardDeleteForward: .delete
                 case .keyboardInsert: .insert
                 case .keyboardTab: .tab
-                case .keyboardF1: .function(1)
-                case .keyboardF2: .function(2)
-                case .keyboardF3: .function(3)
-                case .keyboardF4: .function(4)
-                case .keyboardF5: .function(5)
-                case .keyboardF6: .function(6)
-                case .keyboardF7: .function(7)
-                case .keyboardF8: .function(8)
-                case .keyboardF9: .function(9)
-                case .keyboardF10: .function(10)
-                case .keyboardF11: .function(11)
-                case .keyboardF12: .function(12)
-                default: nil
+                default: (1...12).contains(function) ? .function(function) : nil
                 }
             if let special {
                 return KeyInput(key: special, modifiers: modifiers)
@@ -821,34 +819,6 @@
         var cursorRectInSelf: CGRect {
             guard let rect = grid.cursorRect else { return CGRect(x: 0, y: 0, width: 1, height: 20) }
             return grid.convert(rect, to: self)
-        }
-    }
-#endif
-
-#if os(iOS)
-    extension TerminalView: TerminalDisplay {
-        public func terminalDidReset(_ terminal: VTerminal?, settings: TermSettings) {
-            show(terminal, settings: settings)
-        }
-
-        public func terminalContentDidChange() {
-            scheduleRefresh()
-        }
-
-        public func terminalSettingsDidChange(_ settings: TermSettings) {
-            updateSettings(settings)
-        }
-
-        public func terminalDidRingBell() {
-            ringBell()
-        }
-
-        public func terminalSizeModeDidChange(fitsPhone: Bool) {
-            setFitsPhone(fitsPhone)
-        }
-
-        public func terminalShowKeyboard() {
-            showKeyboard()
         }
     }
 #endif

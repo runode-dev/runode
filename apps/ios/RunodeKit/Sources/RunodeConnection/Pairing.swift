@@ -31,34 +31,20 @@ public struct RemotePairing: Pairing {
     public func pair(with invitation: PairingInvitation, deviceName: String) async throws -> MachineRecord {
         guard !invitation.isExpired() else { throw LinkFailure.invitationExpired }
         let key = try generateKey()
-        var targets: [TransportTarget] = []
-        if let found = await discovery.locate(invitation.fingerprint, timeout: .seconds(2)) {
-            targets.append(found)
+        let targets = await discovery.targets(
+            for: invitation.fingerprint,
+            then: invitation.addresses.compactMap { TransportTarget.address($0, port: invitation.port) })
+        return try await firstSuccess(of: targets) { target in
+            let transport = try await open(target, invitation.fingerprint)
+            defer { transport.close() }
+            let outcome = try await GateClient.run(
+                over: transport, credential: .pair(secret: invitation.secret, deviceName: deviceName, key: key))
+            let record = MachineRecord(
+                name: invitation.hostName, hostName: outcome.hostName.isEmpty ? invitation.hostName : outcome.hostName,
+                fingerprint: invitation.fingerprint, port: invitation.port, addresses: invitation.addresses,
+                lastAddress: transport.remoteAddress, deviceId: outcome.deviceId)
+            try keyStore.save(key, for: record.id)
+            return record
         }
-        targets += invitation.addresses.compactMap { TransportTarget.address($0, port: invitation.port) }
-        guard !targets.isEmpty else { throw LinkFailure.noAddress }
-        var lastError: any Error = LinkFailure.noAddress
-        for target in targets {
-            try Task.checkCancellation()
-            do {
-                let transport = try await open(target, invitation.fingerprint)
-                defer { transport.close() }
-                let outcome = try await GateClient.run(
-                    over: transport, credential: .pair(secret: invitation.secret, deviceName: deviceName, key: key))
-                let record = MachineRecord(
-                    name: invitation.hostName, hostName: outcome.hostName.isEmpty ? invitation.hostName : outcome.hostName,
-                    fingerprint: invitation.fingerprint, port: invitation.port, addresses: invitation.addresses,
-                    lastAddress: transport.remoteAddress, deviceId: outcome.deviceId)
-                try keyStore.save(key, for: record.id)
-                return record
-            } catch let failure as LinkFailure where failure.isFatal {
-                throw failure
-            } catch is CancellationError {
-                throw CancellationError()
-            } catch {
-                lastError = error
-            }
-        }
-        throw lastError
     }
 }

@@ -59,11 +59,6 @@ public final class MachineListModel {
         set { if !newValue { renameTarget = nil } }
     }
 
-    public var isConfirmingDelete: Bool {
-        get { deleteTarget != nil }
-        set { if !newValue { deleteTarget = nil } }
-    }
-
     public func beginRename(_ id: UUID) {
         renameText = machine(id)?.name ?? ""
         renameTarget = id

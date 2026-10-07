@@ -132,37 +132,6 @@ struct FakeHost {
         #"{"type":"welcome","protocol":4,"build":"0.1.0+abc","host_pid":1,"snapshot_format":1,"standalone":true,"handoff":1}"#
 }
 
-final class InMemoryKeyStore: DeviceKeyStore {
-    private let keys = Mutex<[UUID: StoredDeviceKey]>([:])
-
-    func save(_ key: StoredDeviceKey, for machine: UUID) throws {
-        keys.withLock { $0[machine] = key }
-    }
-
-    func key(for machine: UUID) throws -> StoredDeviceKey? {
-        keys.withLock { $0[machine] }
-    }
-
-    func deleteKey(for machine: UUID) throws {
-        _ = keys.withLock { $0.removeValue(forKey: machine) }
-    }
-}
-
-actor InMemoryMachineStore: MachineStore {
-    var machines: [MachineRecord] = []
-
-    func all() -> [MachineRecord] { machines }
-
-    func upsert(_ machine: MachineRecord) {
-        machines.removeAll { $0.id == machine.id }
-        machines.append(machine)
-    }
-
-    func remove(id: UUID) {
-        machines.removeAll { $0.id == id }
-    }
-}
-
 /// 交出预先准备好的连接，记下被要了几次、要的是哪个地址。
 final class TransportSupply: Sendable {
     private let state = Mutex<(transports: [FakeTransport], targets: [String])>(([], []))

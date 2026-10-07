@@ -225,26 +225,10 @@ public actor HostConnection: HostLink {
     /// 按顺序试各个地址：Bonjour 找到的、上次成功的、二维码里的。不能重试的失败直接报。
     private func establish() async throws -> Session {
         guard let key = try keyStore.key(for: machine.id) else { throw LinkFailure.missingKey }
-        var targets: [TransportTarget] = []
-        if let found = await discovery.locate(machine.fingerprint, timeout: .seconds(2)) {
-            targets.append(found)
+        let targets = await discovery.targets(for: machine.fingerprint, then: machine.fallbackTargets)
+        return try await firstSuccess(of: targets) { target in
+            try await handshake(with: target, key: key)
         }
-        targets += machine.fallbackTargets
-        guard !targets.isEmpty else { throw LinkFailure.noAddress }
-        var lastError: any Error = LinkFailure.noAddress
-        for target in targets {
-            try Task.checkCancellation()
-            do {
-                return try await handshake(with: target, key: key)
-            } catch let failure as LinkFailure where failure.isFatal {
-                throw failure
-            } catch is CancellationError {
-                throw CancellationError()
-            } catch {
-                lastError = error
-            }
-        }
-        throw lastError
     }
 
     private func handshake(with target: TransportTarget, key: StoredDeviceKey) async throws -> Session {

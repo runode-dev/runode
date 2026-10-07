@@ -193,13 +193,9 @@ enum BoxDrawing {
             let joinRight = vx0 + max(snap(widest), 1 / scale)
             let joinBottom = hy0 + max(snap(widest), 1 / scale)
             horizontal(arms.left, from: left, to: arms.right > 0 ? right : joinRight)
-            if arms.left == 0 { horizontal(arms.right, from: vx0, to: right) } else if arms.right != arms.left {
-                horizontal(arms.right, from: vx0, to: right)
-            }
+            if arms.right != arms.left { horizontal(arms.right, from: vx0, to: right) }
             vertical(arms.up, from: top, to: arms.down > 0 ? bottom : joinBottom)
-            if arms.up == 0 { vertical(arms.down, from: hy0, to: bottom) } else if arms.down != arms.up {
-                vertical(arms.down, from: hy0, to: bottom)
-            }
+            if arms.down != arms.up { vertical(arms.down, from: hy0, to: bottom) }
             return path
         }
         // 圆角：从一条边的中点画四分之一圆弧到另一条边的中点，描成细线，外轮廓转成可以填的形状。
@@ -207,26 +203,15 @@ enum BoxDrawing {
         let radius = min(rect.width, rect.height) / 2
         let arc = CGMutablePath()
         switch scalar.value {
-        case 0x256D:  // ╭ 向下、向右
-            arc.move(to: CGPoint(x: center.x, y: bottom))
-            arc.addLine(to: CGPoint(x: center.x, y: center.y + radius))
-            arc.addArc(tangent1End: center, tangent2End: CGPoint(x: right, y: center.y), radius: radius)
-            arc.addLine(to: CGPoint(x: right, y: center.y))
-        case 0x256E:  // ╮ 向下、向左
-            arc.move(to: CGPoint(x: center.x, y: bottom))
-            arc.addLine(to: CGPoint(x: center.x, y: center.y + radius))
-            arc.addArc(tangent1End: center, tangent2End: CGPoint(x: left, y: center.y), radius: radius)
-            arc.addLine(to: CGPoint(x: left, y: center.y))
-        case 0x256F:  // ╯ 向上、向左
-            arc.move(to: CGPoint(x: center.x, y: top))
-            arc.addLine(to: CGPoint(x: center.x, y: center.y - radius))
-            arc.addArc(tangent1End: center, tangent2End: CGPoint(x: left, y: center.y), radius: radius)
-            arc.addLine(to: CGPoint(x: left, y: center.y))
-        case 0x2570:  // ╰ 向上、向右
-            arc.move(to: CGPoint(x: center.x, y: top))
-            arc.addLine(to: CGPoint(x: center.x, y: center.y - radius))
-            arc.addArc(tangent1End: center, tangent2End: CGPoint(x: right, y: center.y), radius: radius)
-            arc.addLine(to: CGPoint(x: right, y: center.y))
+        case 0x256D...0x2570:
+            // ╭ ╮ 向下，╯ ╰ 向上；╭ ╰ 向右，╮ ╯ 向左。
+            let down = scalar.value <= 0x256E
+            let toRight = scalar.value == 0x256D || scalar.value == 0x2570
+            let side = toRight ? right : left
+            arc.move(to: CGPoint(x: center.x, y: down ? bottom : top))
+            arc.addLine(to: CGPoint(x: center.x, y: down ? center.y + radius : center.y - radius))
+            arc.addArc(tangent1End: center, tangent2End: CGPoint(x: side, y: center.y), radius: radius)
+            arc.addLine(to: CGPoint(x: side, y: center.y))
         default:
             return nil
         }

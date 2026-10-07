@@ -5,7 +5,7 @@ import RunodeProtocol
 /// 底色和明暗不跳。深色主题照系统深色模式的样子：页面铺终端的底色，卡片往前景色提亮一点；浅色主题
 /// 照系统浅色模式：卡片是终端的底色，页面往前景色压暗一点。字、强调色仍用系统的，按 `isDark` 选
 /// 深色或浅色模式。
-public struct AppTheme: Hashable, Sendable {
+public struct AppTheme: Hashable, Sendable, Codable {
     /// 终端的底色和前景色。
     public var background: Rgb
     public var foreground: Rgb
@@ -41,47 +41,5 @@ extension Rgb {
             UInt8((Double(a) + (Double(b) - Double(a)) * amount).rounded())
         }
         return Rgb(channel(r, other.r), channel(g, other.g), channel(b, other.b))
-    }
-}
-
-/// 上次用的主题记在哪里，App 刚启动、电脑还没连上时先用它，用浅色主题的不会先闪一下默认的深色。
-@MainActor
-public protocol ThemeStore {
-    func load() -> AppTheme?
-    func save(_ theme: AppTheme)
-}
-
-/// 只记在内存里，测试和演示模式用。
-@MainActor
-public final class MemoryThemeStore: ThemeStore {
-    private var theme: AppTheme?
-
-    public init(_ theme: AppTheme? = nil) {
-        self.theme = theme
-    }
-
-    public func load() -> AppTheme? { theme }
-    public func save(_ theme: AppTheme) { self.theme = theme }
-}
-
-/// 记在 `UserDefaults` 里：底色和前景色两个颜色。
-@MainActor
-public final class UserDefaultsThemeStore: ThemeStore {
-    private let defaults: UserDefaults
-    private let key = "theme"
-
-    public init(defaults: UserDefaults = .standard) {
-        self.defaults = defaults
-    }
-
-    public func load() -> AppTheme? {
-        guard let colors = defaults.data(forKey: key).flatMap({ try? JSONDecoder().decode([Rgb].self, from: $0) }),
-            colors.count == 2
-        else { return nil }
-        return AppTheme(background: colors[0], foreground: colors[1])
-    }
-
-    public func save(_ theme: AppTheme) {
-        defaults.set(try? JSONEncoder().encode([theme.background, theme.foreground]), forKey: key)
     }
 }

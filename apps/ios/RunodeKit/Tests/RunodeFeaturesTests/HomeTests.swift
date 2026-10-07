@@ -28,12 +28,12 @@ private struct TwoMachines {
     }()
     let firstLink = FakeLink()
     let secondLink = FakeLink()
-    let recents = MemoryRecentTerminalStore()
+    let recents = DefaultsStore<RecentTerminal>("recentTerminal", defaults: .temporary())
     let app: AppModel
 
     /// `savedTitle` 不为空时，先记下第二台上的普通 shell 是上次打开的终端。
     init(savedTitle: String? = nil) async {
-        let store = InMemoryMachineStore()
+        let store = MemoryMachineStore()
         await store.upsert(first)
         await store.upsert(second)
         if let savedTitle {
@@ -43,7 +43,7 @@ private struct TwoMachines {
         let paired = second
         app = AppModel(
             dependencies: AppDependencies(
-                store: store, keyStore: InMemoryKeyStore(), pairing: FakePairing { _ in paired },
+                store: store, keyStore: MemoryDeviceKeyStore(), pairing: FakePairing { _ in paired },
                 makeLink: { links[$0.id]! }, deviceName: "测试 iPhone", recents: recents))
         await app.machineList.load()
     }

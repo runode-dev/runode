@@ -27,46 +27,6 @@ public struct AppPreferences: Hashable, Sendable, Codable {
     }
 }
 
-/// 设置存在哪里。
-@MainActor
-public protocol PreferencesStore {
-    func load() -> AppPreferences
-    func save(_ preferences: AppPreferences)
-}
-
-/// 只记在内存里，测试和演示模式用。
-@MainActor
-public final class MemoryPreferencesStore: PreferencesStore {
-    private var preferences: AppPreferences
-
-    public init(_ preferences: AppPreferences = AppPreferences()) {
-        self.preferences = preferences
-    }
-
-    public func load() -> AppPreferences { preferences }
-    public func save(_ preferences: AppPreferences) { self.preferences = preferences }
-}
-
-/// 记在 `UserDefaults` 里。里面没有秘密。
-@MainActor
-public final class UserDefaultsPreferencesStore: PreferencesStore {
-    private let defaults: UserDefaults
-    private let key = "preferences"
-
-    public init(defaults: UserDefaults = .standard) {
-        self.defaults = defaults
-    }
-
-    public func load() -> AppPreferences {
-        defaults.data(forKey: key).flatMap { try? JSONDecoder().decode(AppPreferences.self, from: $0) }
-            ?? AppPreferences()
-    }
-
-    public func save(_ preferences: AppPreferences) {
-        defaults.set(try? JSONEncoder().encode(preferences), forKey: key)
-    }
-}
-
 /// 设置页的视图模型：改了马上存；设备名变了告诉 `AppModel`，由它转给各台电脑的连接。
 @Observable
 @MainActor
@@ -83,13 +43,13 @@ public final class SettingsModel {
 
     /// 系统给的设备名，没自己起名字时用它。
     public let systemDeviceName: String
-    @ObservationIgnored private let store: any PreferencesStore
+    @ObservationIgnored private let store: DefaultsStore<AppPreferences>
     @ObservationIgnored var deviceNameDidChange: @MainActor (String) -> Void = { _ in }
 
-    public init(store: any PreferencesStore, systemDeviceName: String) {
+    public init(store: DefaultsStore<AppPreferences>, systemDeviceName: String) {
         self.store = store
         self.systemDeviceName = systemDeviceName
-        preferences = store.load()
+        preferences = store.load() ?? AppPreferences()
     }
 
     /// 报给电脑的设备名。

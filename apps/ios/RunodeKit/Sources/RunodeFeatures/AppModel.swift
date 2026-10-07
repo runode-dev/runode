@@ -29,20 +29,20 @@ public struct AppDependencies {
     public var makeLink: @MainActor (MachineRecord) -> any HostLink
     /// 系统给的设备名；用户在设置里起了名字时报那个。
     public var deviceName: String
-    /// 上次打开的终端记在哪里；不给时只记在内存里（测试、演示模式）。
-    public var recents: any RecentTerminalStore
-    /// 设置存在哪里；不给时只记在内存里。
-    public var preferences: any PreferencesStore
-    /// 上次用的主题记在哪里；不给时只记在内存里。
-    public var themes: any ThemeStore
+    /// 上次打开的终端记在哪里。这三份不给时都记在临时的 `UserDefaults` 里（测试、演示模式）。
+    public var recents: DefaultsStore<RecentTerminal>
+    /// 设置存在哪里。
+    public var preferences: DefaultsStore<AppPreferences>
+    /// 上次用的主题记在哪里，App 刚启动、电脑还没连上时先用它，用浅色主题的不会先闪一下默认的深色。
+    public var themes: DefaultsStore<AppTheme>
 
     @MainActor
     public init(
         store: any MachineStore, keyStore: any DeviceKeyStore, pairing: any Pairing,
         makeLink: @escaping @MainActor (MachineRecord) -> any HostLink, deviceName: String,
-        recents: any RecentTerminalStore = MemoryRecentTerminalStore(),
-        preferences: any PreferencesStore = MemoryPreferencesStore(),
-        themes: any ThemeStore = MemoryThemeStore()
+        recents: DefaultsStore<RecentTerminal> = DefaultsStore("recentTerminal", defaults: .temporary()),
+        preferences: DefaultsStore<AppPreferences> = DefaultsStore("preferences", defaults: .temporary()),
+        themes: DefaultsStore<AppTheme> = DefaultsStore("theme", defaults: .temporary())
     ) {
         self.store = store
         self.keyStore = keyStore
