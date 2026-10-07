@@ -41,6 +41,11 @@ public enum SizeOwnerHint: Hashable, Sendable {
 /// 重新判断；用户手动选过以后以用户为准。从适配换成跟随时 `Detach` 后不带尺寸重新 `Attach`，丢掉
 /// 宿主记着的这条连接请求过的尺寸：宿主对没请求过尺寸的连接，打字不算交互，不会把尺寸抢回来。
 ///
+/// 重新连上时不抢尺寸：带尺寸的 `Attach` 和 `Focus` 宿主都算交互。`Resync` 后连接还在，宿主记着这条
+/// 连接请求过的尺寸，不带尺寸重新 `Attach` 就够了。断线重连是一条新连接，断着的时候电脑可能已经接过
+/// 尺寸，手机却没收到那条 `SizeOwner`：自动模式先当作不知道 owner，等宿主报、等不到才适配手机；手动选了
+/// 适配手机的只发 `Resize` 让宿主记下，不发 `Focus`，等用户在手机上打字时才轮到手机。
+///
 /// 帧的先后：宿主保证一个会话的控制消息和输出在连接上按发生的先后到达，`Resized`、`ThemeApplied`
 /// 就是 VT 要改的位置；这里严格按事件的先后处理。发出 `Attach` 到收到 `Attached` 之间，旧订阅
 /// 剩下的输出和标记都丢掉，`Attached` 时按宿主给的尺寸和主题新建一份 VT 再喂重放。
@@ -91,6 +96,10 @@ public final class TerminalModel {
     @ObservationIgnored private var generation: UInt64?
     @ObservationIgnored private var channel: UInt32?
     @ObservationIgnored private var awaitingAttach = false
+    /// 这一次 `Attach` 是怎么来的，见类型文档的「重新连上时不抢尺寸」。
+    @ObservationIgnored private var rejoin: Rejoin?
+    /// 收到过 `Attached`：之后的 `ready` 是断线重连。
+    @ObservationIgnored private var everAttached = false
     @ObservationIgnored private var fitSize: GridSize?
     /// 这次连接上已经替手机要过的尺寸；不要重复发。
     @ObservationIgnored private var requestedFit: GridSize?
@@ -304,13 +313,32 @@ public final class TerminalModel {
         attach()
     }
 
+    /// 重新连上后仍要适配手机：只让宿主记下手机想要的尺寸，不算交互，不从正在用的电脑那里抢。
+    private func rememberFit() {
+        guard let fitSize, channel != nil, !awaitingAttach, fitSize != requestedFit else { return }
+        requestedFit = fitSize
+        link.send(.resize(id: sessionId, size: fitSize))
+    }
+
     // MARK: 事件
 
-    private func attach() {
+    private enum Rejoin {
+        /// `Resync` 后在同一条连接上重新订阅。
+        case resync
+        /// 断线后的新连接。
+        case reconnect
+    }
+
+    /// `rejoin` 为空时适配手机就带上尺寸，算一次交互；重新连上时一律不带。
+    private func attach(_ rejoin: Rejoin? = nil) {
         awaitingAttach = true
         channel = nil
-        let size = fitsPhone ? fitSize : nil
-        requestedFit = size
+        self.rejoin = rejoin
+        let size = rejoin == nil && fitsPhone ? fitSize : nil
+        switch rejoin {
+        case .resync: break
+        case .reconnect, nil: requestedFit = size
+        }
         if case .exited = phase {} else { phase = .connecting }
         link.send(.attach(id: sessionId, size: size, mode: .vtReplay))
     }
@@ -331,7 +359,13 @@ public final class TerminalModel {
             }
         case .ready(let generation):
             self.generation = generation
-            attach()
+            guard everAttached else { return attach() }
+            // 不改视图的显示方式：宿主报了 owner 或者等不到时 `applySizeMode` 再定。
+            if sizePreference == .automatic {
+                sizeOwnership = .unknown
+                autoFit = false
+            }
+            attach(.reconnect)
         case .message(let message):
             if quickReply.handle(message) { return }
             guard message.sessionId == sessionId else { return }
@@ -369,14 +403,17 @@ public final class TerminalModel {
             }
             channel = attached.channel
             awaitingAttach = false
+            everAttached = true
             gridSize = attached.size
             background = settings.background
             if let title = attached.meta.displayTitle { self.title = title }
             agent = attached.meta.agent
             if case .exited = phase {} else { phase = .replaying }
             display?.terminalDidReset(terminal, settings: settings)
-            // 适配手机，但 `Attach` 时还不知道视图多大：现在补上。
-            if fitsPhone, requestedFit == nil { requestFit() }
+            // 适配手机，但 `Attach` 时还不知道视图多大（或者重新连上时没带）：现在补上。
+            if fitsPhone, requestedFit == nil {
+                if rejoin == .reconnect { rememberFit() } else { requestFit() }
+            }
         case .snapshotEnd:
             guard !awaitingAttach, channel != nil else { return }
             if phase == .replaying { phase = .live }
@@ -397,7 +434,7 @@ public final class TerminalModel {
             agent = meta.agent
         case .resync:
             guard generation != nil else { return }
-            attach()
+            attach(.resync)
         case .exited(_, let status):
             phase = .exited(status)
         case .bell:
@@ -421,10 +458,10 @@ public final class TerminalModel {
         }
     }
 
-    /// 不知道有没有 owner 时：重放完以后宿主若有 owner 会马上报 `SizeOwner`；等一会儿没等到就当作
-    /// 没有，自动模式改成适配手机。
+    /// 不知道有没有 owner 时（不是从列表打开的，或者断线重连了）：重放完以后宿主若有 owner 会马上报
+    /// `SizeOwner`；等一会儿没等到就当作没有，自动模式改成适配手机。
     private func probeOwnerIfNeeded() {
-        guard ownerHint == .unknown, sizePreference == .automatic, sizeOwnership == .unknown else { return }
+        guard ownerHint == .unknown || rejoin == .reconnect, sizePreference == .automatic, sizeOwnership == .unknown else { return }
         let delay = ownerProbeDelay
         Task { [weak self] in
             try? await Task.sleep(for: delay)

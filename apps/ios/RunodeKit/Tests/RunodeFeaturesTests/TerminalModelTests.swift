@@ -224,14 +224,68 @@ import Testing
         #expect(!model.fitsPhone)
     }
 
-    @Test func reattachingAfterReconnectKeepsTheFit() {
+    /// 手动选了适配手机的断线重连：不带尺寸连上，只发 `Resize` 让宿主记下，不发 `Focus` 抢尺寸。
+    @Test func reconnectingKeepsTheFitWithoutClaiming() {
         let model = followingModel()
         model.setSizePreference(.fitPhone)
         model.handle(.state(.waiting(reason: "断了", retryAt: .now)))
         #expect(model.phase == .disconnected("断了"))
         link.clearSent()
         model.handle(.ready(generation: 2))
-        #expect(link.sent == [.attach(id: sessionA, size: fit, mode: .vtReplay)])
+        #expect(link.sent == [.attach(id: sessionA, size: nil, mode: .vtReplay)])
+        model.handle(attached(channel: 7))
+        #expect(link.sent.suffix(1) == [.resize(id: sessionA, size: fit)])
+        #expect(model.fitsPhone)
+    }
+
+    /// 手机适配着，断线期间电脑接过了尺寸：重连后不带尺寸连上，宿主报 owner 是电脑就跟随，不抢回来。
+    @Test func reconnectingAfterTheMachineTookOverFollowsIt() {
+        let model = TerminalModel(
+            sessionId: sessionA, title: "zsh", link: link, ownerHint: .none, ownerProbeDelay: .milliseconds(10),
+            onClose: { _ in })
+        model.attachDisplay(display)
+        model.updateFitSize(fit)
+        model.handle(.ready(generation: 1))
+        model.handle(attached(channel: 5))
+        model.handle(.message(.snapshotEnd(id: sessionA)))
+        model.handle(.message(.sizeOwner(id: sessionA, mine: true, owner: "测试 iPhone")))
+        model.handle(.state(.waiting(reason: "断了", retryAt: .now)))
+        link.clearSent()
+        model.handle(.ready(generation: 2))
+        model.handle(attached(channel: 7))
+        model.handle(.message(.snapshotEnd(id: sessionA)))
+        model.handle(.message(.sizeOwner(id: sessionA, mine: false, owner: "Ethan 的 MacBook")))
+        #expect(!model.fitsPhone)
+        #expect(link.sent == [.attach(id: sessionA, size: nil, mode: .vtReplay)])
+    }
+
+    /// 重连后宿主没报 owner（没有别的前端在决定尺寸）：照旧适配手机。
+    @Test func reconnectingWithoutAnOwnerFitsThePhoneAgain() async {
+        let model = TerminalModel(
+            sessionId: sessionA, title: "zsh", link: link, ownerHint: .none, ownerProbeDelay: .milliseconds(10),
+            onClose: { _ in })
+        model.attachDisplay(display)
+        model.updateFitSize(fit)
+        model.handle(.ready(generation: 1))
+        model.handle(attached(channel: 5))
+        model.handle(.state(.waiting(reason: "断了", retryAt: .now)))
+        link.clearSent()
+        model.handle(.ready(generation: 2))
+        #expect(link.sent == [.attach(id: sessionA, size: nil, mode: .vtReplay)])
+        model.handle(attached(channel: 7))
+        model.handle(.message(.snapshotEnd(id: sessionA)))
+        #expect(await eventually { model.fitsPhone })
+        #expect(link.sent.suffix(2) == [.resize(id: sessionA, size: fit), .focus(id: sessionA, focused: true)])
+    }
+
+    /// 适配着的时候 `Resync`：宿主还记着这条连接要过的尺寸，不带尺寸重新订阅，也不再发 `Focus`。
+    @Test func resyncWhileFittingDoesNotClaimAgain() {
+        let model = followingModel()
+        model.setSizePreference(.fitPhone)
+        link.clearSent()
+        model.handle(.message(.resync(id: sessionA, reason: "slow")))
+        model.handle(attached(channel: 9))
+        #expect(link.sent == [.attach(id: sessionA, size: nil, mode: .vtReplay)])
     }
 
     /// 跟随电脑时手机不带尺寸：打字、视图大小变了、`Resync` 后重新连上，都不发 `Resize`、`Focus`，也不带
