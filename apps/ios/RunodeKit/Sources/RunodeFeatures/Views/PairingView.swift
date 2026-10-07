@@ -76,9 +76,8 @@
                 .accessibilityLabel("关闭")
                 .padding(.leading, 4)
                 VStack(alignment: .leading, spacing: 12) {
-                    StepRow(step: 1, text: "在配置文件里加上 `remote-access = true`", command: "remote-access = true")
-                    StepRow(step: 2, text: "在电脑的终端里运行 `runode remote pair`", command: "runode remote pair")
-                    StepRow(step: 3, text: "扫终端里的二维码（5 分钟内有效）")
+                    StepRow(step: 1, text: "在电脑的终端里运行 `runode remote pair`", command: "runode remote pair")
+                    StepRow(step: 2, text: "扫终端里的二维码（5 分钟内有效）")
                 }
                 .padding(.horizontal, 16)
             }

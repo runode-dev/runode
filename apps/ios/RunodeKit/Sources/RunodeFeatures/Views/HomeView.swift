@@ -278,15 +278,11 @@
                     .padding(.bottom, 10)
                     .accessibilityAddTraits(.isHeader)
                 OnboardingStep(
-                    number: 1, title: "打开远程访问",
-                    detail: "在电脑上 Runode 的配置文件里加上 `remote-access\u{00A0}=\u{00A0}true`。")
-                Divider().padding(.leading, 40)
-                OnboardingStep(
-                    number: 2, title: "运行配对命令",
+                    number: 1, title: "运行配对命令",
                     detail: "在电脑的终端里运行 `runode\u{00A0}remote\u{00A0}pair`，屏幕上会出现一个二维码。")
                 Divider().padding(.leading, 40)
                 OnboardingStep(
-                    number: 3, title: "扫码",
+                    number: 2, title: "扫码",
                     detail: "点上面的按钮打开扫码，对准电脑屏幕上的二维码。配好后电脑就出现在这里。")
             }
             .padding(.horizontal, 24)
