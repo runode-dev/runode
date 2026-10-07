@@ -12,7 +12,7 @@ use super::{
 };
 use crate::{
     ui::file_icons::{file_icon, folder_icon},
-    window::{WindowView, inline_edit::InlineEdit, project::follow_move},
+    window::{WindowView, inline_edit::InlineEdit, model::base_name, project::follow_move},
 };
 
 /// 剪切或复制下来等着粘贴的文件或目录。
@@ -34,11 +34,6 @@ enum EditTarget {
 pub(in crate::window) struct FileEdit {
     target: EditTarget,
     edit: InlineEdit,
-}
-
-/// 提示里写的名字。
-fn display_name(path: &Path) -> String {
-    path.file_name().map_or_else(|| path.display().to_string(), |name| name.to_string_lossy().into_owned())
 }
 
 /// 改 `name` 失败时提示里的说明。
@@ -133,7 +128,7 @@ impl WindowView {
                 (String::new(), 0)
             }
             EditTarget::Rename { path, is_dir } => {
-                let name = display_name(path);
+                let name = base_name(path);
                 let stem = if *is_dir { None } else { name.rfind('.').filter(|&dot| dot > 0) };
                 let select = stem.unwrap_or(name.len());
                 (name, select)
@@ -224,7 +219,7 @@ impl WindowView {
         let Some((path, is_dir)) = self.selected_entry() else {
             return;
         };
-        let name = display_name(&path);
+        let name = base_name(&path);
         let title = rust_i18n::t!("files.delete_title", name = name);
         let detail =
             if is_dir { rust_i18n::t!("files.delete_dir_detail") } else { rust_i18n::t!("files.delete_detail") };
@@ -304,7 +299,7 @@ impl WindowView {
         if src.parent() == Some(dir.as_path()) || dir.starts_with(src) {
             return;
         }
-        let title = rust_i18n::t!("files.move_title", name = display_name(src), dir = display_name(&dir));
+        let title = rust_i18n::t!("files.move_title", name = base_name(src), dir = base_name(&dir));
         let answer = window.prompt(
             PromptLevel::Info,
             &title,
@@ -340,7 +335,7 @@ impl WindowView {
                     }
                 }
                 Ok(dest) => this.relist_and_reveal(vec![dir], &dest, cx),
-                Err(err) => this.show_file_error(error_text(&err, &display_name(&src)), window, cx),
+                Err(err) => this.show_file_error(error_text(&err, &base_name(&src)), window, cx),
             })
             .ok();
         })

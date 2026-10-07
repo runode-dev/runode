@@ -22,7 +22,7 @@ use runode_git::{self as git, Commit, DiffSide, GraphRow, Half, RefKind};
 use runode_shared_types::color::Rgb;
 
 use super::{
-    list::{ROW_HEIGHT, chevron},
+    list::{ROW_HEIGHT, chevron, status_letter},
     repo_name,
     rows::{Busy, CommitChanges, CommitNote, GRAPH_PAGE, Graph, GraphNote},
 };
@@ -36,8 +36,9 @@ use crate::{
     window::{
         DIVIDER_GRAB_WIDTH, Divider, TITLEBAR_HEIGHT, WindowView, divider_color,
         files::menu_item,
+        model::base_name,
         preview::DiffTarget,
-        project::{ADDED, MODIFIED, REMOVED, RENAMED, added_label, removed_label, status_color},
+        project::{ADDED, MODIFIED, REMOVED, RENAMED, added_label, removed_label},
     },
 };
 
@@ -451,7 +452,7 @@ impl WindowView {
         let id = commit.id.clone();
         let fit = fit_commit_row(self.workspace().project.git_panel.width, width, commit);
         let labels = ref_labels(commit, fit.labels, fg, bg);
-        self.git_commit_row(("git-commit", ix), fg, bg)
+        self.git_row(("git-commit", ix), 0., fg, bg)
             .tooltip(tooltip(tip, None, fg, bg))
             .child(lanes_canvas(row.clone(), lane, width, commit.parents.len() > 1, head, bg))
             .children(labels)
@@ -494,23 +495,6 @@ impl WindowView {
             .into_any_element()
     }
 
-    /// 提交和图表说明的行：定高，鼠标移上去变亮；图紧贴左边。
-    fn git_commit_row(&self, id: impl Into<gpui::ElementId>, fg: Rgb, bg: Rgb) -> gpui::Stateful<gpui::Div> {
-        div()
-            .id(id)
-            .flex_none()
-            .h(px(ROW_HEIGHT))
-            .w_full()
-            .pl(px(8.))
-            .pr(px(8.))
-            .flex()
-            .items_center()
-            .gap(px(6.))
-            .overflow_hidden()
-            .text_color(hsla(fg))
-            .hover(|row| row.bg(hsla(bg.mix(fg, 0.06))))
-    }
-
     /// 展开的提交下面它改的一个文件：状态字母、文件名、所在目录和加减了多少行。
     #[allow(clippy::too_many_arguments)]
     pub(super) fn render_commit_file(
@@ -533,10 +517,7 @@ impl WindowView {
         let panel = &self.workspace().project.git_panel;
         let depth = panel.graph_depth.get(ix).copied().unwrap_or(0) as f32;
         let tree = panel.tree;
-        let name = file
-            .path
-            .file_name()
-            .map_or_else(|| file.path.display().to_string(), |name| name.to_string_lossy().into_owned());
+        let name = base_name(&file.path);
         // 以树形式查看时所在目录已经在上面的行里了，不再写。
         let dir = if tree {
             String::new()
@@ -547,7 +528,7 @@ impl WindowView {
         let side = DiffSide::Commit { id: commit.id.clone(), parent: commit.parents.first().cloned() };
         let target =
             DiffTarget { root: repo.root.clone(), rel: file.path.clone(), old_rel: file.old_path.clone(), side };
-        self.git_commit_row(("git-commit-file", ix), fg, bg)
+        self.git_row(("git-commit-file", ix), 0., fg, bg)
             .pl(px(8. + width + INDENT * (depth + 1.)))
             .when(tree, |row| row.child(div().flex_none().w(px(12.))))
             .child(img(file_icon(&name)).flex_none().size(px(14.)))
@@ -555,15 +536,7 @@ impl WindowView {
             .child(div().flex_1().min_w_0().truncate().text_size(px(11.)).text_color(dim).child(dir))
             .when(file.added > 0, |row| row.child(added_label(file.added)))
             .when(file.removed > 0, |row| row.child(removed_label(file.removed)))
-            .child(
-                div()
-                    .flex_none()
-                    .w(px(12.))
-                    .flex()
-                    .justify_center()
-                    .text_color(hsla(status_color(file.status)))
-                    .child(file.status.letter()),
-            )
+            .child(status_letter(file.status))
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |this, event: &MouseDownEvent, _, cx| {
@@ -590,7 +563,7 @@ impl WindowView {
         let depth = panel.graph_depth.get(ix).copied().unwrap_or(0) as f32;
         let width = self.graph(&dir.root).map_or(0., |graph| lane_geometry(graph.lanes).1);
         let last = dir.path.file_name().map(|name| name.to_string_lossy().into_owned()).unwrap_or_default();
-        self.git_commit_row(("git-commit-dir", ix), fg, bg)
+        self.git_row(("git-commit-dir", ix), 0., fg, bg)
             .pl(px(8. + width + INDENT * (depth + 1.)))
             .child(chevron(dir.expanded, fg))
             .child(img(folder_icon(&last, dir.expanded)).flex_none().size(px(14.)))
@@ -629,7 +602,7 @@ impl WindowView {
         let last = graph
             .and_then(|graph| graph.history.as_ref()?.as_ref().ok()?.rows.last())
             .map(|row| (row, lane_geometry(graph.map_or(0, |graph| graph.lanes))));
-        let row = self.git_commit_row(("git-graph-note", ix), fg, bg);
+        let row = self.git_row(("git-graph-note", ix), 0., fg, bg);
         let Some((last, (lane, width))) = last else {
             return row
                 .pl(px(8. + INDENT))
@@ -686,7 +659,7 @@ impl WindowView {
             CommitNote::Empty => rust_i18n::t!("git.graph.no_files"),
         };
         let width = self.graph(&repo.root).map_or(0., |graph| lane_geometry(graph.lanes).1);
-        self.git_commit_row(("git-commit-note", ix), fg, bg)
+        self.git_row(("git-commit-note", ix), 0., fg, bg)
             .pl(px(8. + width + INDENT))
             .italic()
             .text_color(hsla(fg).opacity(0.45))

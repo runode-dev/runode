@@ -36,6 +36,7 @@ use runode_shared_types::color::Rgb;
 use super::{
     TITLEBAR_HEIGHT, WindowView, divider_color,
     files::menu_item,
+    model::base_name,
     project::{RENAMED, panel_message, panel_shell},
 };
 use crate::{
@@ -839,10 +840,7 @@ fn sync_icon(id: impl Into<ElementId>, spinning: bool, size: f32, color: Hsla) -
 /// 块头的 tooltip 里），子仓库是相对主仓库的路径。
 fn repo_name(repo: &git::Snapshot) -> String {
     match repo.kind {
-        RepoKind::Main | RepoKind::Worktree => repo
-            .root
-            .file_name()
-            .map_or_else(|| repo.root.display().to_string(), |name| name.to_string_lossy().into_owned()),
+        RepoKind::Main | RepoKind::Worktree => base_name(&repo.root),
         RepoKind::Submodule | RepoKind::Nested => repo.prefix.display().to_string(),
     }
 }

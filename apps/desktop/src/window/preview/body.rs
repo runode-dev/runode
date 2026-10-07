@@ -6,11 +6,11 @@ use std::ops::Range;
 use gpui::{
     AnyElement, App, Axis, Bounds, Context, FontStyle, FontWeight, HighlightStyle, ImageSource,
     ListHorizontalSizingBehavior, MouseButton, MouseDownEvent, MouseMoveEvent, SMOOTH_SVG_SCALE_FACTOR, SharedString,
-    StyledText, canvas, div, fill, img, linear_color_stop, linear_gradient, point, prelude::*, px, size, uniform_list,
+    StyledText, canvas, div, fill, img, point, prelude::*, px, size, uniform_list,
 };
 use runode_shared_types::{color::Rgb, theme};
 
-use super::{BODY_PADDING, FADE_WIDTH, Loaded, MAX_COLUMNS, Note, Preview, ROW_EXTRA_HEIGHT, marks::Mark};
+use super::{BODY_PADDING, Loaded, MAX_COLUMNS, Note, Preview, ROW_EXTRA_HEIGHT, marks::Mark, right_fade};
 use crate::{
     config::AppConfig,
     ui::{hsla, scrollbar::scrollbar},
@@ -132,15 +132,7 @@ impl WindowView {
                 .py(px(BODY_PADDING))
                 .font_family(font);
                 let handle = preview.scroll.0.borrow().base_handle.clone();
-                // 长行往右还有内容时，右边缘渐隐，提示能横着滚。
-                let (offset, max) = (handle.offset().x, handle.max_offset().x);
-                let fade = (max > px(1.) && -offset < max - px(1.)).then(|| {
-                    div().absolute().top_0().right_0().h_full().w(px(FADE_WIDTH)).bg(linear_gradient(
-                        90.,
-                        linear_color_stop(hsla(bg).opacity(0.), 0.),
-                        linear_color_stop(hsla(bg), 1.),
-                    ))
-                });
+                let fade = right_fade(&handle, bg);
                 div()
                     .flex_1()
                     .min_h_0()

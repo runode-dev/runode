@@ -79,10 +79,7 @@ impl Mark {
 
 /// 汇总几个标记：取优先级最高的，同级的取先出现的，几种 agent 同时在时标记不会来回跳。
 pub(super) fn summarize(marks: impl IntoIterator<Item = Mark>) -> Option<Mark> {
-    marks.into_iter().fold(None, |best, mark| match best {
-        Some(best) if best.status <= mark.status => Some(best),
-        _ => Some(mark),
-    })
+    marks.into_iter().min_by_key(|mark| mark.status)
 }
 
 /// 分屏的通知标识，点通知时凭它找回分屏。实体的编号只在一次运行里唯一，所以带上进程号：

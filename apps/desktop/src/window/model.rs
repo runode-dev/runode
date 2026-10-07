@@ -66,6 +66,11 @@ pub(super) fn workspace_name(dir: &Path) -> String {
     root.file_name().map_or_else(|| dir.display().to_string(), |name| name.to_string_lossy().into_owned())
 }
 
+/// 路径的最后一段，用在标签、提示和列表里；没有最后一段（比如 `/`）时写整个路径。
+pub(super) fn base_name(path: &Path) -> String {
+    path.file_name().map_or_else(|| path.display().to_string(), |name| name.to_string_lossy().into_owned())
+}
+
 /// 侧栏里显示的目录，家目录写成 `~`。
 pub(super) fn display_dir(dir: &Path) -> String {
     if let Some(home) = home_dir()

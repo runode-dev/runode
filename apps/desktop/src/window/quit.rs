@@ -497,7 +497,7 @@ fn window_agents(cx: &App) -> Vec<ShownAgent> {
 }
 
 /// 各窗口里的终端占着的会话。
-fn held_sessions(cx: &App) -> HashSet<SessionId> {
+pub(super) fn held_sessions(cx: &App) -> HashSet<SessionId> {
     let mut held = HashSet::new();
     for_each_view(cx, |view, _| {
         held.extend(view.session_id());

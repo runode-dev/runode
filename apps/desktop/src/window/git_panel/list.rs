@@ -29,7 +29,7 @@ use crate::{
         hsla,
         tooltip::tooltip,
     },
-    window::{WindowView, files::menu_item, preview::DiffTarget, project::status_color},
+    window::{WindowView, files::menu_item, model::base_name, preview::DiffTarget, project::status_color},
 };
 
 /// 每一行的高度：段标题、文件、提交都一样高，列表才能只画看得见的部分。
@@ -119,8 +119,9 @@ impl WindowView {
         }
     }
 
-    /// 一行的外框：定高、横着排、鼠标移上去时底色变亮，按钮跟着露出来。
-    fn git_row(&self, id: impl Into<ElementId>, pl: f32, fg: Rgb, bg: Rgb) -> Stateful<Div> {
+    /// 一行的外框：定高、横着排、鼠标移上去时底色变亮，按钮跟着露出来。提交图里的行也用它，
+    /// 图紧贴左边（`pl` 给 0）。
+    pub(super) fn git_row(&self, id: impl Into<ElementId>, pl: f32, fg: Rgb, bg: Rgb) -> Stateful<Div> {
         div()
             .id(id)
             .group(ROW_GROUP)
@@ -246,7 +247,7 @@ impl WindowView {
         let file = &git.files(section)[fi];
         let shown_in = section_of(file, section);
         let root = git.root.clone();
-        let name = file_name(&file.path);
+        let name = base_name(&file.path);
         // 以树形式查看时所在目录已经在上面的行里了，不再写。
         let panel = &self.workspace().project.git_panel;
         let depth = panel.depth.get(ix).copied().unwrap_or(0) as f32;
@@ -291,15 +292,7 @@ impl WindowView {
             )
             .child(div().flex_1().min_w_0().truncate().text_size(px(11.)).text_color(dim).child(dir))
             .child(self.row_buttons(&root, buttons, fg, bg, cx))
-            .child(
-                div()
-                    .flex_none()
-                    .w(px(12.))
-                    .flex()
-                    .justify_center()
-                    .text_color(hsla(status_color(file.status)))
-                    .child(file.status.letter()),
-            )
+            .child(status_letter(file.status))
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |this, event: &MouseDownEvent, _, cx| {
@@ -470,14 +463,15 @@ pub(super) fn count_badge(count: usize, fg: Rgb, bg: Rgb) -> Div {
         .child(count.to_string())
 }
 
+/// 行尾的状态字母，按状态上色。
+pub(super) fn status_letter(status: FileStatus) -> Div {
+    div().flex_none().w(px(12.)).flex().justify_center().text_color(hsla(status_color(status))).child(status.letter())
+}
+
 pub(super) fn chevron(expanded: bool, fg: Rgb) -> gpui::Svg {
     svg()
         .flex_none()
         .path(if expanded { CHEVRON_DOWN_ICON } else { CHEVRON_RIGHT_ICON })
         .size(px(12.))
         .text_color(hsla(fg).opacity(0.45))
-}
-
-fn file_name(path: &Path) -> String {
-    path.file_name().map_or_else(|| path.display().to_string(), |name| name.to_string_lossy().into_owned())
 }

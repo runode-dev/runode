@@ -14,7 +14,7 @@ use super::{
     GitStashIncludeUntracked, GitStashPopLatest, GitSync, GitUndoLastCommit, GitUnstageAll, PrimaryAction,
     rows::{Busy, GitPanel, GitSection},
 };
-use crate::window::WindowView;
+use crate::window::{WindowView, model::base_name};
 
 /// 提交成功以后接着做什么。
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -171,10 +171,7 @@ impl WindowView {
         let (title, detail) = match files.as_slice() {
             [] => return,
             [file] => {
-                let name = file
-                    .path
-                    .file_name()
-                    .map_or_else(|| file.path.display().to_string(), |name| name.to_string_lossy().into_owned());
+                let name = base_name(&file.path);
                 if untracked == 1 {
                     (
                         rust_i18n::t!("git.delete_untracked_title", name = name),

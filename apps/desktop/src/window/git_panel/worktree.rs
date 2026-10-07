@@ -10,6 +10,7 @@ use super::rows::Busy;
 use crate::window::{
     WindowView,
     files::{MenuItem, menu_item},
+    model::base_name,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -98,8 +99,7 @@ impl WindowView {
         let main = git.main.root.clone();
         let dirty = !worktree.is_clean();
         let detached = worktree.info.branch.is_none();
-        let name =
-            path.file_name().map_or_else(|| path.display().to_string(), |name| name.to_string_lossy().into_owned());
+        let name = base_name(&path);
         let title = rust_i18n::t!("git.worktree.remove_title", name = name).into_owned();
         // 游离 HEAD 的工作树没有分支留下来，只在它这里的提交删了以后就找不到了。
         let detail = match (dirty, detached) {

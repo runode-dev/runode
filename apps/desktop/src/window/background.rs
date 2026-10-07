@@ -22,7 +22,8 @@ use runode_protocol::{SessionId, SessionInfo};
 use runode_shared_types::{agent::AgentKind, color::Rgb};
 
 use super::{
-    AGENT_MARK_WIDTH, WindowView, agents::Mark, cards, divider_color, model::display_dir, titlebar::styled_agent_mark,
+    AGENT_MARK_WIDTH, WindowView, agents::Mark, cards, divider_color, model::display_dir, quit::held_sessions,
+    titlebar::styled_agent_mark,
 };
 use crate::{
     host_client::{self, Mode},
@@ -154,19 +155,6 @@ fn orphans(live: &[SessionInfo], held: &HashSet<SessionId>) -> Vec<SessionId> {
         .map(|session| session.id)
         .filter(|id| seen.insert(*id))
         .collect()
-}
-
-/// 各窗口里的终端占着的会话。
-fn held_sessions(cx: &App) -> HashSet<SessionId> {
-    let mut held = HashSet::new();
-    for window in cx.windows() {
-        let Some(view) = window.downcast::<WindowView>().and_then(|window| window.read(cx).ok()) else {
-            continue;
-        };
-        let views = view.workspaces.iter().flat_map(|workspace| &workspace.tabs).flat_map(|tab| tab.panes.values());
-        held.extend(views.filter_map(|(view, _)| view.read(cx).session_id()));
-    }
-    held
 }
 
 /// 前台在跑 agent 的会话个数，不算 `AgentKind::Other`（用 OSC 9;4 报进度的普通程序）。

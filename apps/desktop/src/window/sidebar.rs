@@ -1,7 +1,7 @@
 //! 窗口左侧的 workspace 列表：切换、拖动排序、改名、关闭和新建；下面是后台会话（`background`）。
 
 use gpui::{
-    AnyElement, Context, CursorStyle, Div, Focusable, Hsla, MouseButton, MouseDownEvent, Render, SharedString,
+    AnyElement, Axis, Context, CursorStyle, Div, Focusable, Hsla, MouseButton, MouseDownEvent, Render, SharedString,
     Stateful, Window, div, prelude::*, px,
 };
 use runode_shared_types::color::Rgb;
@@ -12,7 +12,7 @@ use super::{
     WindowView, background, cards, divider_color, drag_window,
     inline_edit::InlineEdit,
     model::{WorkspaceId, display_dir},
-    titlebar::{close_button, drag_chip, icon_toggle, shortcut_hint, styled_agent_mark},
+    titlebar::{close_button, drag_chip, drop_marker, icon_toggle, shortcut_hint, styled_agent_mark},
 };
 use crate::{
     assets::SIDEBAR_ICON,
@@ -233,16 +233,8 @@ impl WindowView {
             )
             // 改名时在输入框里拖选文字，不能把整行拖走。
             .when(renaming.is_none(), |row| row.on_drag(dragged, |dragged, _, _, cx| cx.new(|_| dragged.clone())))
-            // 落点提示画在目标行靠近原位置的另一侧：往下拖插到它下面，往上拖插到它上面。
             .drag_over::<DraggedWorkspace>(move |style, dragged, _, _| {
-                let marker = fg.opacity(0.6);
-                if dragged.ix < ix {
-                    style.border_b_2().border_color(marker)
-                } else if dragged.ix > ix {
-                    style.border_t_2().border_color(marker)
-                } else {
-                    style
-                }
+                drop_marker(style, dragged.ix, ix, Axis::Vertical, fg)
             })
             .on_drop(cx.listener(move |this, dragged: &DraggedWorkspace, window, cx| {
                 this.move_workspace(dragged.id, ix, window, cx);

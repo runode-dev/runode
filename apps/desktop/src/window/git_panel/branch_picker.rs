@@ -11,7 +11,10 @@ use gpui::{
 use runode_git::{self as git, Branch};
 use runode_shared_types::color::Rgb;
 
-use super::super::{TITLEBAR_HEIGHT, WindowView, divider_color};
+use super::super::{
+    WindowView,
+    agent_picker::{nav_delta, picker_panel},
+};
 use crate::{
     assets::{BRANCH_ICON, CHECK_ICON, PLUS_ICON},
     ui::{
@@ -24,7 +27,6 @@ const PICKER_WIDTH: f32 = 520.;
 const ROW_HEIGHT: f32 = 28.;
 /// 最多显示这么多行，多了滚动。
 const VISIBLE_ROWS: f32 = 12.;
-const INPUT_HEIGHT: f32 = 34.;
 
 /// 开着的分支列表。
 pub(in crate::window) struct BranchPicker {
@@ -165,15 +167,8 @@ impl WindowView {
 
     /// 上下键选中上一行或下一行，到头了绕回另一头。输入框自己的上下键在这之前拦下。
     fn branch_picker_key(&mut self, event: &KeyDownEvent, _: &mut Window, cx: &mut Context<Self>) {
-        let keystroke = &event.keystroke;
-        let m = &keystroke.modifiers;
-        let ctrl = m.control && !m.alt && !m.shift && !m.platform;
-        let delta = match keystroke.key.as_str() {
-            "up" if !m.modified() => -1,
-            "down" if !m.modified() => 1,
-            "p" if ctrl => -1,
-            "n" if ctrl => 1,
-            _ => return,
+        let Some(delta) = nav_delta(event) else {
+            return;
         };
         cx.stop_propagation();
         let Some(picker) = &self.branch_picker else {
@@ -285,56 +280,14 @@ impl WindowView {
                     .child(div().flex_1().min_w_0().truncate().text_size(px(11.)).text_color(dim).child(detail))
             })
             .collect();
-        let panel = div()
-            .id("branch-picker")
-            .w(px(PICKER_WIDTH))
-            .max_w_full()
-            .flex()
-            .flex_col()
-            .rounded(px(8.))
-            .bg(panel_bg)
-            .border_1()
-            .border_color(fg.opacity(0.15))
-            .shadow_md()
-            .occlude()
-            .text_size(px(12.))
-            .text_color(fg)
-            .capture_key_down(cx.listener(Self::branch_picker_key))
-            .child(
-                div()
-                    .flex_none()
-                    .h(px(INPUT_HEIGHT))
-                    .px(px(10.))
-                    .flex()
-                    .items_center()
-                    .border_b_1()
-                    .border_color(divider_color(fg))
-                    .child(div().flex_1().min_w_0().h_full().child(picker.field.clone())),
-            )
-            .child(
-                div()
-                    .id("branch-list")
-                    .max_h(px(ROW_HEIGHT * VISIBLE_ROWS + 8.))
-                    .overflow_y_scroll()
-                    .track_scroll(&picker.scroll)
-                    .p(px(4.))
-                    .flex()
-                    .flex_col()
-                    .gap(px(1.))
-                    .children(items)
-                    .children(empty),
-            );
-        // 外层铺满窗口宽度、只为把列表摆到正中，没有鼠标处理，不挡下面的点击。
-        Some(
-            div()
-                .absolute()
-                .top(px(TITLEBAR_HEIGHT + 8.))
-                .left_0()
-                .right_0()
-                .px(px(16.))
-                .flex()
-                .justify_center()
-                .child(panel),
-        )
+        let panel =
+            div().id("branch-picker").w(px(PICKER_WIDTH)).capture_key_down(cx.listener(Self::branch_picker_key));
+        let list = div()
+            .id("branch-list")
+            .max_h(px(ROW_HEIGHT * VISIBLE_ROWS + 8.))
+            .track_scroll(&picker.scroll)
+            .children(items)
+            .children(empty);
+        Some(picker_panel(panel, picker.field.clone(), list, fg, panel_bg))
     }
 }

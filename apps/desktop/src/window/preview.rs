@@ -28,7 +28,8 @@ use std::{
 
 use gpui::{
     App, ClipboardItem, Context, Div, Focusable as _, Image, ImageSource, MouseButton, MouseMoveEvent, RenderImage,
-    SMOOTH_SVG_SCALE_FACTOR, SharedString, Stateful, SvgRenderer, UniformListScrollHandle, Window, div, prelude::*, px,
+    SMOOTH_SVG_SCALE_FACTOR, ScrollHandle, SharedString, Stateful, SvgRenderer, UniformListScrollHandle, Window, div,
+    linear_color_stop, linear_gradient, prelude::*, px,
 };
 use runode_git::{self as git, FileStatus, Section};
 use runode_preview::{Content, ImageFormat, Span};
@@ -39,6 +40,7 @@ pub(in crate::window) use tabs::PreviewTabs;
 
 use super::{
     WindowView,
+    model::base_name,
     project::{PANEL_TOGGLES_INSET, panel_shell},
 };
 use crate::{
@@ -167,16 +169,9 @@ impl Preview {
         }
     }
 
-    /// 文件名，不带 diff 的后缀。
-    fn file_name(&self) -> String {
-        self.path
-            .file_name()
-            .map_or_else(|| self.path.display().to_string(), |name| name.to_string_lossy().into_owned())
-    }
-
     /// 标签上的名字；diff 标签带上和什么比：「a.rs（工作区）」「a.rs（已暂存）」「a.rs @ 1a2b3c4」。
     fn name(&self) -> SharedString {
-        let name = self.file_name();
+        let name = base_name(&self.path);
         match self.diff.as_ref().map(|diff| &diff.side) {
             None => name,
             Some(git::DiffSide::Worktree) => rust_i18n::t!("preview.diff.worktree_tab", name = name).into_owned(),
@@ -235,6 +230,18 @@ fn diff_file<'a>(git: Option<&'a git::Repos>, diff: &DiffTarget) -> Option<&'a g
     };
     let repo = git?.iter().find(|repo| repo.root == diff.root)?;
     repo.files(section).iter().find(|file| file.path == diff.rel)
+}
+
+/// 长行往右还有内容时盖在右边缘的渐隐，提示能横着滚；滚到头了或者没有长行时没有。
+fn right_fade(handle: &ScrollHandle, bg: Rgb) -> Option<Div> {
+    let (offset, max) = (handle.offset().x, handle.max_offset().x);
+    (max > px(1.) && -offset < max - px(1.)).then(|| {
+        div().absolute().top_0().right_0().h_full().w(px(FADE_WIDTH)).bg(linear_gradient(
+            90.,
+            linear_color_stop(hsla(bg).opacity(0.), 0.),
+            linear_color_stop(hsla(bg), 1.),
+        ))
+    })
 }
 
 fn file_stamp(path: &Path) -> Option<(u64, SystemTime)> {

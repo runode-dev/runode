@@ -4,8 +4,8 @@
 use std::collections::HashMap;
 
 use gpui::{
-    Context, Div, Entity, EntityId, Focusable, KeyDownEvent, MouseButton, ScrollHandle, SharedString, Subscription,
-    Window, div, prelude::*, px,
+    Context, Div, Entity, EntityId, Focusable, Hsla, KeyDownEvent, MouseButton, ScrollHandle, SharedString, Stateful,
+    Subscription, Window, div, prelude::*, px,
 };
 use runode_shared_types::color::Rgb;
 
@@ -129,15 +129,8 @@ impl WindowView {
     /// 上下键：选中上一行（负数）或下一行，到头了绕回另一头。输入框自己的上下键（光标到行首、
     /// 行尾）在这之前拦下。
     fn agent_picker_key(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
-        let keystroke = &event.keystroke;
-        let m = &keystroke.modifiers;
-        let ctrl = m.control && !m.alt && !m.shift && !m.platform;
-        let delta = match keystroke.key.as_str() {
-            "up" if !m.modified() => -1,
-            "down" if !m.modified() => 1,
-            "p" if ctrl => -1,
-            "n" if ctrl => 1,
-            _ => return,
+        let Some(delta) = nav_delta(event) else {
+            return;
         };
         cx.stop_propagation();
         let rows = self.picker_rows(window, cx);
@@ -246,56 +239,65 @@ impl WindowView {
                     )
             })
             .collect();
-        let panel = div()
-            .id("agent-picker")
-            .w(px(PICKER_WIDTH))
-            .max_w_full()
-            .flex()
-            .flex_col()
-            .rounded(px(8.))
-            .bg(panel_bg)
-            .border_1()
-            .border_color(fg.opacity(0.15))
-            .shadow_md()
-            .occlude()
-            .text_size(px(12.))
-            .text_color(fg)
-            .capture_key_down(cx.listener(Self::agent_picker_key))
-            .child(
-                div()
-                    .flex_none()
-                    .h(px(INPUT_HEIGHT))
-                    .px(px(10.))
-                    .flex()
-                    .items_center()
-                    .border_b_1()
-                    .border_color(divider_color(fg))
-                    .child(div().flex_1().min_w_0().h_full().child(picker.field.clone())),
-            )
-            .child(
-                div()
-                    .id("agent-list")
-                    .max_h(px(ROW_HEIGHT * VISIBLE_ROWS + 8.))
-                    .overflow_y_scroll()
-                    .track_scroll(&picker.scroll)
-                    .p(px(4.))
-                    .flex()
-                    .flex_col()
-                    .gap(px(1.))
-                    .children(rows)
-                    .children(empty),
-            );
-        // 外层铺满窗口宽度、只为把列表摆到正中，没有鼠标处理，不挡下面的点击。
-        Some(
-            div()
-                .absolute()
-                .top(px(TITLEBAR_HEIGHT + 8.))
-                .left_0()
-                .right_0()
-                .px(px(16.))
-                .flex()
-                .justify_center()
-                .child(panel),
-        )
+        let panel = div().id("agent-picker").w(px(PICKER_WIDTH)).capture_key_down(cx.listener(Self::agent_picker_key));
+        let list = div()
+            .id("agent-list")
+            .max_h(px(ROW_HEIGHT * VISIBLE_ROWS + 8.))
+            .track_scroll(&picker.scroll)
+            .children(rows)
+            .children(empty);
+        Some(picker_panel(panel, picker.field.clone(), list, fg, panel_bg))
     }
+}
+
+/// 选择列表里挪选中行的键：上下键和 ctrl-p、ctrl-n，往上是 -1，往下是 1。
+pub(super) fn nav_delta(event: &KeyDownEvent) -> Option<isize> {
+    let keystroke = &event.keystroke;
+    let m = &keystroke.modifiers;
+    let ctrl = m.control && !m.alt && !m.shift && !m.platform;
+    match keystroke.key.as_str() {
+        "up" if !m.modified() => Some(-1),
+        "down" if !m.modified() => Some(1),
+        "p" if ctrl => Some(-1),
+        "n" if ctrl => Some(1),
+        _ => None,
+    }
+}
+
+/// agent 列表和分支列表共用的浮层：`panel` 是调用方定好 id、宽度和按键处理的外框，上面一行放
+/// 输入框，下面是 `list`（调用方定好 id、最高多高、各行和滚动位置），多了竖着滚动。整个浮在标题栏
+/// 下方正中。
+pub(super) fn picker_panel(
+    panel: Stateful<Div>,
+    field: Entity<TextField>,
+    list: Stateful<Div>,
+    fg: Hsla,
+    panel_bg: Hsla,
+) -> Div {
+    let panel = panel
+        .max_w_full()
+        .flex()
+        .flex_col()
+        .rounded(px(8.))
+        .bg(panel_bg)
+        .border_1()
+        .border_color(fg.opacity(0.15))
+        .shadow_md()
+        .occlude()
+        .text_size(px(12.))
+        .text_color(fg)
+        .child(
+            div()
+                .flex_none()
+                .h(px(INPUT_HEIGHT))
+                .px(px(10.))
+                .flex()
+                .items_center()
+                .border_b_1()
+                .border_color(divider_color(fg))
+                .child(div().flex_1().min_w_0().h_full().child(field)),
+        )
+        .child(list.overflow_y_scroll().p(px(4.)).flex().flex_col().gap(px(1.)));
+    // 外层铺满窗口宽度、只为把列表摆到正中，没有鼠标处理，不挡下面的点击。
+    div().absolute().top(px(TITLEBAR_HEIGHT + 8.)).left_0().right_0().px(px(16.)).flex().justify_center().child(panel)
 }

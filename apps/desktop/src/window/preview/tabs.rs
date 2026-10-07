@@ -4,7 +4,7 @@
 use std::path::Path;
 
 use gpui::{
-    Action, Context, Div, Hsla, MouseButton, MouseDownEvent, Pixels, Point, Render, ScrollHandle, SharedString,
+    Action, Axis, Context, Div, Hsla, MouseButton, MouseDownEvent, Pixels, Point, Render, ScrollHandle, SharedString,
     Stateful, Window, actions, div, img, prelude::*, px, svg,
 };
 use runode_shared_types::color::Rgb;
@@ -17,8 +17,9 @@ use crate::{
     window::{
         ClosePane, CloseTab, TITLEBAR_HEIGHT, WindowView, divider_color,
         files::menu_item,
+        model::base_name,
         project::{RENAMED, status_color},
-        titlebar::{close_button, drag_chip},
+        titlebar::{close_button, drag_chip, drop_marker},
     },
 };
 
@@ -219,7 +220,7 @@ impl WindowView {
         // diff 标签的图标是 diff 的样子，不是文件类型的。
         let icon = match &tab.diff {
             Some(_) => svg().path(DIFF_ICON).flex_none().size(px(14.)).text_color(fg.opacity(0.8)).into_any_element(),
-            None => img(file_icon(&tab.file_name())).flex_none().size(px(14.)).into_any_element(),
+            None => img(file_icon(&base_name(&tab.path))).flex_none().size(px(14.)).into_any_element(),
         };
         div()
             .id(("preview-tab", ix))
@@ -299,16 +300,8 @@ impl WindowView {
                 }),
             )
             .on_drag(dragged, |dragged, _, _, cx| cx.new(|_| dragged.clone()))
-            // 落点提示画在目标标签靠近原位置的另一侧：往右拖插到它右边，往左拖插到它左边。
             .drag_over::<DraggedPreviewTab>(move |style, dragged, _, _| {
-                let marker = fg.opacity(0.6);
-                if dragged.ix < ix {
-                    style.border_r_2().border_color(marker)
-                } else if dragged.ix > ix {
-                    style.border_l_2().border_color(marker)
-                } else {
-                    style
-                }
+                drop_marker(style, dragged.ix, ix, Axis::Horizontal, fg)
             })
             .on_drop(cx.listener(move |this, dragged: &DraggedPreviewTab, _, cx| {
                 this.move_preview(dragged.ix, ix, cx);
