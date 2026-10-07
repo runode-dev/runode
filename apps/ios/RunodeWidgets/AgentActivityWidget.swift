@@ -15,15 +15,22 @@ struct AgentActivityWidget: Widget {
             let paused = content.paused || context.isStale
             return DynamicIsland {
                 DynamicIslandExpandedRegion(.leading) {
-                    StatusIcon(state: content.overall)
+                    StatusIcon(state: content.overall, worker: content.leadingWorker, paused: paused)
                         .font(.title2)
                         .padding(.leading, 4)
                 }
                 DynamicIslandExpandedRegion(.trailing) {
-                    Text("Runode")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .padding(.trailing, 4)
+                    Group {
+                        if let since = runningSince(content, paused: paused) {
+                            ElapsedTime(since: since)
+                                .foregroundStyle(AgentActivityStyle.color(.working))
+                        } else {
+                            Text("Runode")
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .font(.caption)
+                    .padding(.trailing, 4)
                 }
                 DynamicIslandExpandedRegion(.center) {
                     Text(AgentActivityText.summary(content))
@@ -44,17 +51,23 @@ struct AgentActivityWidget: Widget {
                     .padding(.horizontal, 4)
                 }
             } compactLeading: {
-                StatusIcon(state: content.overall)
+                StatusIcon(state: content.overall, worker: content.leadingWorker, paused: paused)
             } compactTrailing: {
-                Text("\(content.headline)")
-                    .font(.body.monospacedDigit().weight(.semibold))
-                    .foregroundStyle(AgentActivityStyle.color(content.overall))
-                    .opacity(paused ? 0.6 : 1)
-                    .accessibilityLabel(AgentActivityText.summary(content))
+                // 在干活时是系统自己走的计时（Live Activity 里循环动画不播，只有计时会动），其余时候是个数。
+                Group {
+                    if let since = runningSince(content, paused: paused) {
+                        ElapsedTime(since: since)
+                    } else {
+                        Text("\(content.headline)")
+                    }
+                }
+                .font(.body.monospacedDigit().weight(.semibold))
+                .foregroundStyle(paused ? .gray : AgentActivityStyle.color(content.overall))
+                .accessibilityLabel(AgentActivityText.summary(content))
             } minimal: {
-                StatusIcon(state: content.overall)
+                StatusIcon(state: content.overall, worker: content.leadingWorker, paused: paused)
             }
-            .keylineTint(AgentActivityStyle.color(content.overall))
+            .keylineTint(paused ? .gray : AgentActivityStyle.color(content.overall))
         }
     }
 }
@@ -67,15 +80,21 @@ private struct LockScreenView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 8) {
-                StatusIcon(state: content.overall)
+                StatusIcon(state: content.overall, worker: content.leadingWorker, paused: paused)
                     .font(.title3)
                 Text(AgentActivityText.summary(content))
                     .font(.subheadline.weight(.semibold))
                     .lineLimit(1)
                 Spacer(minLength: 4)
-                Text("Runode")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                if let since = runningSince(content, paused: paused) {
+                    ElapsedTime(since: since)
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(AgentActivityStyle.color(.working))
+                } else {
+                    Text("Runode")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
             }
             ForEach(content.entries) { entry in
                 EntryRow(entry: entry)
@@ -94,8 +113,7 @@ private struct EntryRow: View {
 
     var body: some View {
         HStack(spacing: 6) {
-            Image(systemName: AgentActivityStyle.symbol(entry.state))
-                .foregroundStyle(AgentActivityStyle.color(entry.state))
+            StatusIcon(state: entry.state, worker: entry)
                 .frame(width: 16)
             Text(entry.title)
                 .lineLimit(1)
@@ -120,15 +138,56 @@ private struct PausedLine: View {
     }
 }
 
-/// 整体或一个会话的状态图标：等回答是醒目的橙色，在干活的转起来，空闲的是灰色。
-private struct StatusIcon: View {
-    let state: AgentActivityState
+/// 整体在干活、连接没停时，从什么时候开始算计时；不该显示计时时为空。
+private func runningSince(_ content: AgentActivityContent, paused: Bool) -> Date? {
+    guard !paused, content.overall == .working else { return nil }
+    return content.workingSince
+}
+
+/// 往上走的计时（「1:23」），由系统每秒刷新，不用 App 推更新。计时文字会按最长的样子占宽度，限住它。
+private struct ElapsedTime: View {
+    let since: Date
 
     var body: some View {
-        Image(systemName: AgentActivityStyle.symbol(state))
-            .foregroundStyle(AgentActivityStyle.color(state))
-            .symbolEffect(.rotate, options: .repeating, isActive: state == .working)
-            .accessibilityLabel(AgentActivityText.state(state))
+        Text(timerInterval: since...Date.distantFuture, countsDown: false)
+            .multilineTextAlignment(.trailing)
+            .lineLimit(1)
+            .minimumScaleFactor(0.6)
+            .frame(maxWidth: 56, alignment: .trailing)
+    }
+}
+
+/// 整体或一个会话的状态图标：在干活时是那个 agent 自己转圈里的一帧（`worker` 带着，和 App 里一样），
+/// 没带时是青色的齿轮；等回答是醒目的橙色，空闲的是灰色。连接停了或者内容过时了（`paused`）一律是灰色的
+/// 暂停，不再让人以为 agent 还在干活。
+private struct StatusIcon: View {
+    let state: AgentActivityState
+    var worker: AgentActivityContent.Entry?
+    var paused = false
+
+    var body: some View {
+        Group {
+            if paused {
+                Image(systemName: "pause.circle.fill")
+                    .foregroundStyle(.gray)
+            } else if state == .working, let spinner = worker?.spinner {
+                Text(spinner)
+                    .fontWeight(.bold)
+                    .foregroundStyle(worker?.spinnerColor.map(Color.init(hex:)) ?? .primary)
+            } else {
+                Image(systemName: AgentActivityStyle.symbol(state))
+                    .foregroundStyle(AgentActivityStyle.color(state))
+            }
+        }
+        .accessibilityLabel(paused ? "连接已暂停" : AgentActivityText.state(state))
+    }
+}
+
+extension Color {
+    /// 0xRRGGBB。
+    fileprivate init(hex: UInt32) {
+        self.init(
+            red: Double(hex >> 16 & 0xFF) / 255, green: Double(hex >> 8 & 0xFF) / 255, blue: Double(hex & 0xFF) / 255)
     }
 }
 

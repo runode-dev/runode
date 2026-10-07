@@ -48,13 +48,23 @@ public struct AgentActivityContent: Hashable, Sendable, Codable {
         /// agent 给人看的名字（「Claude Code」）。
         public var agent: String
         public var state: AgentActivityState
+        /// 在干活时代替通用图标画的字：这个 agent 自己转圈里的一帧，和 App、桌面上的一样（Claude 的
+        /// `✻`）。Live Activity 里不能逐帧动，只画一帧。
+        public var spinner: String?
+        /// 那个字的颜色（0xRRGGBB）；为空时用前景色。
+        public var spinnerColor: UInt32?
 
-        public init(id: String, machine: String, title: String, agent: String, state: AgentActivityState) {
+        public init(
+            id: String, machine: String, title: String, agent: String, state: AgentActivityState,
+            spinner: String? = nil, spinnerColor: UInt32? = nil
+        ) {
             self.id = id
             self.machine = machine
             self.title = title
             self.agent = agent
             self.state = state
+            self.spinner = spinner
+            self.spinnerColor = spinnerColor
         }
     }
 
@@ -70,13 +80,20 @@ public struct AgentActivityContent: Hashable, Sendable, Codable {
     public var entries: [Entry]
     /// App 进了后台、连接停了：显示的是停之前最后的样子，回到 App 才会刷新。
     public var paused: Bool
+    /// 整体是在干活（`overall` 为 `working`）时，从什么时候起一直是：灵动岛上按它显示系统自己走的计时。
+    /// 宿主不报状态变化的时刻，这是 App 头一次看到的时刻，由 `AgentActivityModel` 填。
+    public var workingSince: Date?
 
-    public init(blocked: Int = 0, working: Int = 0, idle: Int = 0, entries: [Entry] = [], paused: Bool = false) {
+    public init(
+        blocked: Int = 0, working: Int = 0, idle: Int = 0, entries: [Entry] = [], paused: Bool = false,
+        workingSince: Date? = nil
+    ) {
         self.blocked = blocked
         self.working = working
         self.idle = idle
         self.entries = entries
         self.paused = paused
+        self.workingSince = workingSince
     }
 
     /// 从所有带 agent 的会话（按电脑的先后、电脑上的先后排好）算出：数各种状态的个数，按 `rank` 挑出
@@ -100,6 +117,11 @@ public struct AgentActivityContent: Hashable, Sendable, Codable {
                 entry.title = Self.clipped(entry.title)
                 return entry
             }
+    }
+
+    /// 整体在干活时，排在最前面的那个在干活的会话：灵动岛上按它的转圈画整体的图标。
+    public var leadingWorker: Entry? {
+        overall == .working ? entries.first { $0.state == .working } : nil
     }
 
     /// 一个带 agent 的会话都没有。

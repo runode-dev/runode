@@ -101,7 +101,10 @@ private func content(_ states: [AgentActivityState]) -> AgentActivityContent {
         #expect(
             content.entries == [
                 .init(id: "\(second)/\(blocked)", machine: "homelab", title: "部署", agent: "Claude Code", state: .blocked),
-                .init(id: "\(first)/\(working)", machine: "MacBook", title: "构建", agent: "Claude Code", state: .working),
+                // 在干活的带上 Claude 自己转圈里的中间那帧和它的颜色。
+                .init(
+                    id: "\(first)/\(working)", machine: "MacBook", title: "构建", agent: "Claude Code", state: .working,
+                    spinner: "✽", spinnerColor: 0xD77757),
                 // 没有标题的会话照会话列表那样叫「终端」。
                 .init(id: "\(second)/\(idle)", machine: "homelab", title: "终端", agent: "Claude Code", state: .idle),
             ])
@@ -118,11 +121,38 @@ private func content(_ states: [AgentActivityState]) -> AgentActivityContent {
         return AgentActivityModel(driver: driver, enabled: enabled, now: { staleAt })
     }
 
+    /// 模型送出去的内容：整体在干活时带上开始干活的时刻（测试里 `now` 一直是 `staleAt`）。
+    func sent(_ states: [AgentActivityState]) -> AgentActivityContent {
+        var sent = content(states)
+        if sent.overall == .working { sent.workingSince = staleAt }
+        return sent
+    }
+
+    /// 整体一直在干活时沿用开始的时刻；中间停下来等回答过，再干活时重新算。
+    @Test func workingSinceStaysWhileStillWorking() async {
+        var clock = staleAt
+        let model = AgentActivityModel(driver: driver, enabled: true, now: { clock })
+        model.refresh(content([.working]), settled: true)
+        await model.settle()
+        #expect(driver.current?.workingSince == staleAt)
+        clock = staleAt.addingTimeInterval(30)
+        model.refresh(content([.working, .working]), settled: true)
+        await model.settle()
+        #expect(driver.current?.workingSince == staleAt)
+        model.refresh(content([.blocked]), settled: true)
+        await model.settle()
+        #expect(driver.current?.workingSince == nil)
+        clock = staleAt.addingTimeInterval(60)
+        model.refresh(content([.working]), settled: true)
+        await model.settle()
+        #expect(driver.current?.workingSince == clock)
+    }
+
     @Test func startsOnceAndOnlySendsChanges() async {
         let model = model()
         model.refresh(content([.working]), settled: true)
         await model.settle()
-        #expect(driver.starts == [content([.working])])
+        #expect(driver.starts == [sent([.working])])
         // 内容没变不发。
         model.refresh(content([.working]), settled: true)
         await model.settle()
@@ -188,6 +218,26 @@ private func content(_ states: [AgentActivityState]) -> AgentActivityContent {
         #expect(driver.current == content([.blocked]))
     }
 
+    /// 进了后台：内容不变也补发一次带过时时刻的，App 被杀掉、来不及改成暂停时系统到点也会把它当成过时的；
+    /// 回到前台去掉过时时刻。
+    @Test func backgroundUpdatesCarryAStaleDate() async {
+        let model = model()
+        model.refresh(content([.working]), settled: true)
+        await model.settle()
+        model.setForeground(false)
+        await model.settle()
+        let staleDate = staleAt.addingTimeInterval(AgentActivityModel.backgroundStaleAfter)
+        #expect(driver.updates.map(\.content) == [sent([.working])])
+        #expect(driver.updates.last?.staleDate == staleDate)
+        model.refresh(content([.blocked]), settled: true)
+        await model.settle()
+        #expect(driver.updates.last?.staleDate == staleDate)
+        model.setForeground(true)
+        await model.settle()
+        #expect(driver.updates.last?.staleDate == nil)
+        #expect(driver.current == content([.blocked]))
+    }
+
     @Test func aFailedStartIsRetriedOnTheNextChange() async {
         let model = model()
         driver.failsToStart = true
@@ -197,7 +247,7 @@ private func content(_ states: [AgentActivityState]) -> AgentActivityContent {
         driver.failsToStart = false
         model.refresh(content([.working, .idle]), settled: true)
         await model.settle()
-        #expect(driver.starts == [content([.working, .idle])])
+        #expect(driver.starts == [sent([.working, .idle])])
     }
 
     @Test func suspendingShowsTheLastStateAsPaused() async {
@@ -221,7 +271,7 @@ private func content(_ states: [AgentActivityState]) -> AgentActivityContent {
         #expect(driver.current?.paused == true)
         model.refresh(content([.working]), settled: true)
         await model.settle()
-        #expect(driver.current == content([.working]))
+        #expect(driver.current == sent([.working]))
         #expect(driver.updates.last?.staleDate == nil)
     }
 
@@ -232,7 +282,7 @@ private func content(_ states: [AgentActivityState]) -> AgentActivityContent {
         reused.refresh(content([.working]), settled: true)
         await reused.settle()
         #expect(driver.starts.isEmpty)
-        #expect(driver.updates.map(\.content) == [content([.working])])
+        #expect(driver.updates.map(\.content) == [sent([.working])])
         // 没有 agent 时结束掉。
         let other = FakeActivityDriver()
         other.isShowing = true

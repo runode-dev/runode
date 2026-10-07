@@ -1,6 +1,7 @@
 import Foundation
 import RunodeActivity
 import RunodeProtocol
+import RunodeTerminal
 
 #if os(iOS)
     import ActivityKit
@@ -20,9 +21,18 @@ extension AgentActivityContent {
                 case .idle: state = .idle
                 case .unknown: return nil
                 }
-                return Entry(
+                var entry = Entry(
                     id: "\(machine.id)/\(session.id)", machine: machine.name, title: Presentation.sessionTitle(session),
                     agent: agent.kind.displayName, state: state)
+                if state == .working {
+                    // 和 App 里不动时一样挑中间一帧：Claude 的头一帧只是个小点。
+                    let frames = agent.kind.spinner.frames
+                    entry.spinner = TextPresentation.apply(to: frames[frames.count / 2])
+                    entry.spinnerColor = agent.kind.spinnerColor.map {
+                        UInt32($0.r) << 16 | UInt32($0.g) << 8 | UInt32($0.b)
+                    }
+                }
+                return entry
             }
         }
         self.init(summarizing: entries)
@@ -48,6 +58,10 @@ public protocol AgentActivityDriver: AnyObject {
 /// 就结束。只能在前台新开，在后台只更新已经开着的。连接停了（`suspend`）时改成「已暂停」，显示停之前
 /// 最后的样子，回到前台（`resume`）后再跟着实时的内容走。
 ///
+/// 进了后台以后送出去的内容都带着过时的时刻（进后台后 `backgroundStaleAfter`）：后台时间一般撑不到那么久，
+/// 到期时会改成「已暂停」；App 在那之前被系统杀掉、来不及改的话，系统到点也会把它当成过时的，灵动岛上不会
+/// 一直挂着最后那个实时的状态。
+///
 /// 对系统的调用一个接一个做（`settle` 等它们做完），每次做之前按最新的状态重新算该怎么办，来得太勤的
 /// 变化合并成一次。
 @MainActor
@@ -61,10 +75,17 @@ public final class AgentActivityModel {
 
     /// 上次送出去、现在在显示的内容；没有在显示时为空。
     public private(set) var shown: AgentActivityContent?
+    /// 上次送出去的过时时刻。
+    private var shownStaleDate: Date?
+
+    /// 进后台多久以后，后台时送出去的内容算过时的。比系统给的后台时间长一些。
+    public static let backgroundStaleAfter: TimeInterval = 60
 
     private let driver: (any AgentActivityDriver)?
     private let now: () -> Date
     private var foreground = true
+    /// 进后台的时刻；在前台时为空。
+    private var backgroundSince: Date?
     /// 连着的电脑上实时的内容。
     private var live = AgentActivityContent()
     /// 各台电脑都连上并收到了列表，或者确定连不上：这时 `live` 是空的才说明真没有 agent 了。刚启动、
@@ -83,8 +104,12 @@ public final class AgentActivityModel {
         self.now = now
     }
 
-    /// 各台电脑的会话列表变了。
+    /// 各台电脑的会话列表变了。整体一直在干活时沿用开始干活的时刻，刚变成在干活时记下现在。
     public func refresh(_ content: AgentActivityContent, settled: Bool) {
+        var content = content
+        if content.overall == .working {
+            content.workingSince = live.overall == .working ? live.workingSince ?? now() : now()
+        }
         live = content
         self.settled = settled
         apply()
@@ -93,6 +118,11 @@ public final class AgentActivityModel {
     /// App 回到前台或进了后台。
     public func setForeground(_ isForeground: Bool) {
         foreground = isForeground
+        if isForeground {
+            backgroundSince = nil
+        } else if backgroundSince == nil {
+            backgroundSince = now()
+        }
         apply()
     }
 
@@ -131,7 +161,7 @@ public final class AgentActivityModel {
             return shown.map { .show($0.asPaused, staleDate: suspendedAt) } ?? .keep
         }
         if live.isEmpty { return settled ? .end : .keep }
-        return .show(live, staleDate: nil)
+        return .show(live, staleDate: backgroundSince.map { $0.addingTimeInterval(Self.backgroundStaleAfter) })
     }
 
     private func apply() {
@@ -156,16 +186,19 @@ public final class AgentActivityModel {
                 await driver.end()
             }
             shown = nil
+            shownStaleDate = nil
         case .show(let content, let staleDate):
             if driver.isShowing {
-                guard content != shown else { return }
+                guard content != shown || staleDate != shownStaleDate else { return }
                 await driver.update(content, staleDate: staleDate)
                 shown = content
+                shownStaleDate = staleDate
             } else if foreground {
                 // 没在显示（第一次，或者被系统、用户拿掉了）：前台时新开一个。
                 do {
                     try driver.start(content)
                     shown = content
+                    shownStaleDate = nil
                 } catch {
                     shown = nil
                 }
@@ -177,11 +210,21 @@ public final class AgentActivityModel {
 }
 
 #if os(iOS)
+    import UIKit
+
     /// 用 ActivityKit 显示那个 Live Activity。小组件扩展按 `AgentActivityAttributes` 画它。
     ///
     /// `Activity` 不是 `Sendable`，对它的异步调用放在不隔离的静态函数里，每次现取，不在主线程上留着。
+    ///
+    /// App 要退出时（用户在多任务界面划掉还在运行的 App）把它结束掉：App 不在了就没人更新它。
     public final class SystemAgentActivity: AgentActivityDriver {
-        public init() {}
+        public init() {
+            NotificationCenter.default.addObserver(
+                forName: UIApplication.willTerminateNotification, object: nil, queue: .main
+            ) { _ in
+                Self.endAllBeforeExit()
+            }
+        }
 
         public var isAllowed: Bool {
             ActivityAuthorizationInfo().areActivitiesEnabled
@@ -219,6 +262,16 @@ public final class AgentActivityModel {
                 await extra.end(nil, dismissalPolicy: .immediate)
             }
             await first.update(ActivityContent(state: content, staleDate: staleDate))
+        }
+
+        /// 退出前同步地结束：`willTerminate` 返回后进程就没了，最多等一秒。
+        private nonisolated static func endAllBeforeExit() {
+            let done = DispatchSemaphore(value: 0)
+            Task.detached {
+                await endAll()
+                done.signal()
+            }
+            _ = done.wait(timeout: .now() + 1)
         }
 
         private nonisolated static func endAll() async {
