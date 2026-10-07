@@ -146,6 +146,23 @@ _runode_preexec() {
     _runode_ran=1
 }
 
+# 吞掉漏到命令行上的 SGR 鼠标报告（ESC [ < 按键;列;行 M 或 m）。开着鼠标上报的程序退出前
+# 已经不读输入、还没关上报的那一小段里，鼠标一动报告就留在终端里，等提示符出来被 zsh 读到：
+# ESC [ < 没有绑定被丢掉，剩下的「51;72;30M」就成了用户敲的字。绑定匹配到 ESC [ < 以后这里
+# 读到 M 或 m 为止；最多读 32 个字，每个字最多等 0.1 秒，用户真的敲了 ESC [ < 也卡不住。
+_runode_drop_mouse_report() {
+    'builtin' 'local' c
+    'builtin' 'local' -i n
+    for (( n = 0; n < 32; n++ )); do
+        'builtin' 'read' -rs -k1 -t 0.1 c || 'builtin' 'break'
+        [[ $c == [Mm] ]] && 'builtin' 'break'
+    done
+}
+'builtin' 'zle' -N _runode_drop_mouse_report
+'builtin' 'bindkey' -M emacs '\e[<' _runode_drop_mouse_report
+'builtin' 'bindkey' -M viins '\e[<' _runode_drop_mouse_report
+'builtin' 'bindkey' -M vicmd '\e[<' _runode_drop_mouse_report
+
 'builtin' 'typeset' -ga precmd_functions preexec_functions
 precmd_functions=(_runode_save_status $precmd_functions _runode_precmd)
 preexec_functions+=(_runode_preexec)

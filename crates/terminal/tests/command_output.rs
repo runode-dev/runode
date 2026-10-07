@@ -290,3 +290,28 @@ fn real_zsh_commands_are_read_under_a_two_line_prompt() {
         &["[z]%", "<r>"],
     ));
 }
+
+/// 程序退出时漏在终端里的 SGR 鼠标报告被集成吞掉，不留在命令行上。
+fn drop_mouse_reports_in(shell: Option<RealShell>) {
+    let Some(mut shell) = shell else { return };
+    let name = shell.name.clone();
+    shell.run("echo a\x1b[<51;72;30Mb\x1b[<0;3;4mc");
+    assert_eq!(shell.output(1), "abc\n", "{name}");
+}
+
+#[test]
+fn real_zsh_drops_mouse_reports() {
+    drop_mouse_reports_in(RealShell::start("zsh", "zsh-mouse", "PROMPT='[z]%% '\n", "[z]%", &["[z]%"]));
+}
+
+/// readline 的 skip-csi-sequence 是 bash 4.2 才有的，更老的 bash（macOS 自带的 3.2）不测。
+#[test]
+fn real_bash_drops_mouse_reports() {
+    let new_enough = std::process::Command::new("/bin/bash")
+        .args(["-c", "[ \"${BASH_VERSINFO[0]}\" -gt 4 ] || { [ \"${BASH_VERSINFO[0]}\" -eq 4 ] && [ \"${BASH_VERSINFO[1]}\" -ge 2 ]; }"])
+        .status()
+        .is_ok_and(|status| status.success());
+    if new_enough {
+        drop_mouse_reports_in(RealShell::start("bash", "bash-mouse", "PS1='[b]\\$ '\n", "[b]$", &["[b]$"]));
+    }
+}

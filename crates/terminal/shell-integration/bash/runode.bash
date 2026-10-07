@@ -211,6 +211,15 @@ if [ -z "${_runode_integrated-}" ]; then
         printf '\033]133;C\007'
     }
 
+    # 吞掉漏到命令行上的 SGR 鼠标报告（ESC [ < 按键;列;行 M 或 m）。开着鼠标上报的程序退出前
+    # 已经不读输入、还没关上报的那一小段里，鼠标一动报告就留在终端里，等提示符出来被 readline
+    # 读到：ESC [ < 没有绑定被丢掉，剩下的「51;72;30M」就成了用户敲的字。readline 的
+    # skip-csi-sequence 读完一个 CSI 序列的参数和结尾字节，bash 4.2 起才有；更老的 bash 在
+    # bind -x 的函数里读不到剩下的字节，只能不管。
+    if [ "${BASH_VERSINFO[0]}" -gt 4 ] || { [ "${BASH_VERSINFO[0]}" -eq 4 ] && [ "${BASH_VERSINFO[1]}" -ge 2 ]; }; then
+        bind '"\e[<": skip-csi-sequence' 2>/dev/null
+    fi
+
     # 关了 promptvars 时 PS0 里的命令替换不展开，只发不带报告的标记，runode 不记这些命令。
     if [ -n "$_runode_ps0" ]; then
         if shopt -q promptvars; then
