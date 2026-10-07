@@ -191,7 +191,10 @@ impl WindowView {
                         None => Loaded::Note(Note::NoChanges),
                         Some(view) if view.file.binary => Loaded::Note(Note::Binary),
                         Some(view) if view.file.truncated => Loaded::Note(Note::DiffTooLarge),
-                        Some(view) if view.file.hunks.is_empty() => Loaded::Note(Note::NoContent),
+                        // 没有块又没读到全文（空文件只改了权限这类）才说内容没变；只改了名的读得到全文，照常显示。
+                        Some(view) if view.file.hunks.is_empty() && view.new_lines.is_empty() => {
+                            Loaded::Note(Note::NoContent)
+                        }
                         Some(view) => {
                             let mut content = DiffContent::new(view);
                             (content.new_spans, content.removed_spans) = (old_new, old_removed);

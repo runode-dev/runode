@@ -158,3 +158,16 @@ fn reads_whole_file_diffs() {
     assert!(gone.new_lines.is_empty());
     assert_eq!(render(&gone).len(), 13);
 }
+
+/// 只改了名、内容没变的文件没有块，全文照样读出来，按没改的行排。
+#[test]
+fn a_pure_rename_reads_the_whole_file() {
+    let repo = TestRepo::new("view-rename");
+    repo.commit_file("old.txt", "a\nb\n", "init");
+    repo.git(&["mv", "old.txt", "new.txt"]);
+    let handle = read(&repo).repo();
+    let view = handle.file_view(Path::new("new.txt"), Some(Path::new("old.txt")), &DiffSide::Index).unwrap().unwrap();
+    assert_eq!(view.file.status, FileStatus::Renamed);
+    assert!(view.file.hunks.is_empty());
+    assert_eq!(render(&view), ["1/1 a", "2/2 b"]);
+}
