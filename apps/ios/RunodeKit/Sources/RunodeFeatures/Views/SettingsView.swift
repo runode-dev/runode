@@ -125,8 +125,6 @@
                 }
             } header: {
                 Text("关于")
-            } footer: {
-                Text("终端仿真用的是 Ghostty 的 libghostty-vt，图标字体来自 Nerd Fonts，点开看它们的许可。")
             }
             .themedRows()
         }
