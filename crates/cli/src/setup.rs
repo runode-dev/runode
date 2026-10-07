@@ -17,7 +17,7 @@ pub enum SetupTarget {
 }
 
 /// 使用说明，开头是 skill 的元数据（名字和什么时候用）。
-const SKILL: &str = include_str!("../assets/skill/SKILL.md");
+const SKILL: &str = include_str!("../../../skills/runode/SKILL.md");
 const BEGIN: &str = "<!-- runode:begin -->";
 const END: &str = "<!-- runode:end -->";
 

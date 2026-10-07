@@ -1,6 +1,6 @@
 # Crate 分层
 
-代码分在几个 crate 里，依赖只能自上而下。能单独运行的 app 放在 `apps/` 下（Rust 的 `apps/desktop` 和 Swift 的 `apps/ios`），给它们用的库放在 `crates/` 下。`apps/` 下不全是 Rust 项目，新加的 Rust app 要在根 `Cargo.toml` 的 `members` 和 `default-members` 里列出。目录名直接说明职责，包名是目录名加 `runode-` 前缀（`crates/terminal` 是 `runode-terminal`），只有桌面 app 的包名是 `runode`，让可执行文件仍叫 runode。包名带前缀是因为依赖树里已有 `dirs` 这类同名的第三方 crate，不加前缀会撞名，`cargo -p` 也会有歧义。
+代码分在几个 crate 里，依赖只能自上而下。能单独运行的 app 放在 `apps/` 下（Rust 的 `apps/desktop` 和 Swift 的 `apps/ios`），给它们用的库放在 `crates/` 下。根目录的 `skills/` 放教 agent 用 runode 的 skill（`skills/runode/SKILL.md`），`cli` 的 `runode setup` 把它编进二进制，装给 Claude Code 或写进 Codex 的 AGENTS.md。`apps/` 下不全是 Rust 项目，新加的 Rust app 要在根 `Cargo.toml` 的 `members` 和 `default-members` 里列出。目录名直接说明职责，包名是目录名加 `runode-` 前缀（`crates/terminal` 是 `runode-terminal`），只有桌面 app 的包名是 `runode`，让可执行文件仍叫 runode。包名带前缀是因为依赖树里已有 `dirs` 这类同名的第三方 crate，不加前缀会撞名，`cargo -p` 也会有歧义。
 
 | 目录 | 职责 | 可以依赖 |
 | --- | --- | --- |
@@ -17,7 +17,7 @@
 | `host` | 管终端会话的宿主（只有 lib）：每个会话一个线程，持有 PTY 和权威的那份 VT，应答终端查询、认标题和 agent、记命令历史。跑在 app 进程里，或者由 app 拉起成单独一个进程（`runode --host`，配置项 `terminal-host`）；前端一律经一条连接按 protocol 的帧和它说话：桌面在同一个进程里时用 `Host::connect_pair` 的一对 socket，别的时候连 Unix socket。app 升级后，新版本拉起的新宿主（`Host::take_over`）以 `ClientKind::Successor` 连上旧宿主的 socket，接过各会话的 PTY 和监听的 socket，会话不断；前端（手机）请它在某个会话所在的仓库里读写 git 时，经 `git` 办；手机新建工作区时浏览电脑上的目录也由它列出来，没给目录时列 `paths` 给的家目录；手机会话卡片上能跑的 Makefile 目标和 package.json scripts 也由它从会话目录往上找、拼好命令行 | terminal、protocol、shared-types、git、paths、libc、serde_json |
 | `remote-access` | 远程访问：TLS 1.3 监听（rustls，ring 后端，自签证书用 rcgen 生成）、门禁（验签、配对口令、限速）、设备表、Bonjour 公布，过了门禁的连接经调用方给的闭包接到宿主上；也给命令行用的配对口令文件、设备表和监听方状态 | protocol、paths、rustls、rcgen、ring、libc、serde、serde_json |
 | `update` | 桌面 app 的自动更新：读 GitHub 上最新 Release 里的版本清单 `latest.json`、比版本号，经 NSURLSession 下载这台 Mac 架构的 zip、解压到装着的 .app 旁边，核对新包是 Developer ID 签的、和在跑的这份出自同一个 Team ID、同一个 bundle id，app 退出时再核对一次、用 `renamex_np` 原子地换上 | serde、serde_json、tracing、libc、objc2、block2、objc2-foundation |
-| `cli` | 命令行前端（`runode list`、`read`、`send`、`wait`、`open`、`kill`、`focus`、`remote`）：经宿主的 Unix socket 按 protocol 说话，列会话、读屏幕、发输入、等 agent，请 app 开终端、切到终端；`remote` 不经宿主，经 `remote-access` 给手机配对、列出和撤销设备，配对成了以后问用户要不要在配置里打开 `terminal-host`（经 `config` 改配置文件），让退出 app 后远程访问留在后台 | protocol、shared-types、paths、config、remote-access、qrcode |
+| `cli` | 命令行前端（`runode list`、`read`、`send`、`wait`、`open`、`kill`、`focus`、`setup`、`remote`）：经宿主的 Unix socket 按 protocol 说话，列会话、读屏幕、发输入、等 agent，请 app 开终端、切到终端；`setup` 把根目录 `skills/` 里的 skill 装给 agent；`remote` 不经宿主，经 `remote-access` 给手机配对、列出和撤销设备，配对成了以后问用户要不要在配置里打开 `terminal-host`（经 `config` 改配置文件），让退出 app 后远程访问留在后台 | protocol、shared-types、paths、config、remote-access、qrcode |
 | `desktop` | GPUI 桌面 app：窗口、视图、菜单、窗口存档和 Info.plist；带子命令启动时交给 `cli`、带 `--host` 时是单独一个进程的宿主、带 `--host --take-over` 时是升级时接手旧宿主会话的新宿主，和命令行、宿主是同一个可执行文件；远程访问的监听开在宿主所在的那个进程里（`remote_access`）；打包脚本按 `apps/desktop#` 找它的构建产物 | 以上全部（含 host、protocol、cli、remote-access）、GPUI |
 
 不变量：
