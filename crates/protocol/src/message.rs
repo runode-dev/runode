@@ -187,9 +187,6 @@ pub enum ClientMsg {
         /// 提前开的会话用前端自己读到的配置；收到过时一律用宿主当前的主题。
         #[serde(default)]
         settings: Option<TermSettings>,
-        /// 启动 shell 时另外设的环境变量，同名的盖过宿主自己设的。
-        #[serde(default)]
-        env: Vec<(String, String)>,
     },
     /// 启动 `Spawn` 时 `start` 为假的会话的 shell；已经启动过时什么都不做。启动不了时宿主在
     /// 这个会话的输出流里发 `HostMsg::Exited`。
@@ -603,8 +600,6 @@ pub enum GoodbyeReason {
     Shutdown,
     /// 交接给了新版本的宿主，前端重新连上就是新宿主。
     Handoff,
-    /// 没有会话也没有前端，空闲太久自己退出。
-    Idle,
     /// 宿主出了错。
     Error { message: String },
     /// 比自己新的宿主才有的原因，前端当作连接断了处理。

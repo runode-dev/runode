@@ -78,53 +78,40 @@ impl TerminalView {
         }
     }
 
-    pub(super) fn select_all(&mut self, _: &SelectAll, _: &mut Window, cx: &mut Context<Self>) {
+    /// 对显示着的那个会话做一件事，再请界面重画；没有会话时什么也不做。
+    fn with_shown(&mut self, cx: &mut Context<Self>, f: impl FnOnce(&mut Session)) {
         if let Some(session) = self.screen.shown_mut() {
-            session.select_all();
+            f(session);
             cx.notify();
         }
+    }
+
+    pub(super) fn select_all(&mut self, _: &SelectAll, _: &mut Window, cx: &mut Context<Self>) {
+        self.with_shown(cx, |s| s.select_all());
     }
 
     pub(super) fn scroll_to_top(&mut self, _: &ScrollToTop, _: &mut Window, cx: &mut Context<Self>) {
-        if let Some(session) = self.screen.shown_mut() {
-            session.scroll_viewport(ViewportScroll::Top);
-            cx.notify();
-        }
+        self.with_shown(cx, |s| s.scroll_viewport(ViewportScroll::Top));
     }
 
     pub(super) fn scroll_to_bottom(&mut self, _: &ScrollToBottom, _: &mut Window, cx: &mut Context<Self>) {
-        if let Some(session) = self.screen.shown_mut() {
-            session.scroll_viewport(ViewportScroll::Bottom);
-            cx.notify();
-        }
+        self.with_shown(cx, |s| s.scroll_viewport(ViewportScroll::Bottom));
     }
 
     pub(super) fn scroll_page_up(&mut self, _: &ScrollPageUp, _: &mut Window, cx: &mut Context<Self>) {
-        if let Some(session) = self.screen.shown_mut() {
-            session.scroll_viewport(ViewportScroll::Page(-1));
-            cx.notify();
-        }
+        self.with_shown(cx, |s| s.scroll_viewport(ViewportScroll::Page(-1)));
     }
 
     pub(super) fn scroll_page_down(&mut self, _: &ScrollPageDown, _: &mut Window, cx: &mut Context<Self>) {
-        if let Some(session) = self.screen.shown_mut() {
-            session.scroll_viewport(ViewportScroll::Page(1));
-            cx.notify();
-        }
+        self.with_shown(cx, |s| s.scroll_viewport(ViewportScroll::Page(1)));
     }
 
     pub(super) fn scroll_to_selection(&mut self, _: &ScrollToSelection, _: &mut Window, cx: &mut Context<Self>) {
-        if let Some(session) = self.screen.shown_mut() {
-            session.scroll_to_selection();
-            cx.notify();
-        }
+        self.with_shown(cx, |s| s.scroll_to_selection());
     }
 
     pub(super) fn jump_to_prompt(&mut self, action: &JumpToPrompt, _: &mut Window, cx: &mut Context<Self>) {
-        if let Some(session) = self.screen.shown_mut() {
-            session.jump_to_prompt(action.0 < 0);
-            cx.notify();
-        }
+        self.with_shown(cx, |s| s.jump_to_prompt(action.0 < 0));
     }
 
     pub(super) fn send_text(&mut self, action: &SendText, _: &mut Window, cx: &mut Context<Self>) {

@@ -340,7 +340,7 @@ impl WindowView {
                 dir_button(PLUS_ICON, "git.stage", DirOp::Stage),
             ],
         };
-        let last = path.file_name().map(|name| name.to_string_lossy().into_owned()).unwrap_or_default();
+        let last = base_name(&path);
         let menu = action(DirOp::Stage);
         self.git_row(("git-dir", ix), INDENT * (depth + 1.), fg, bg)
             .child(chevron(dir.expanded, fg))

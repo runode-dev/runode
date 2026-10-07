@@ -14,7 +14,6 @@ use gpui::{
 };
 use runode_protocol::SessionId;
 use runode_shared_types::{
-    agent::AgentKind,
     color::Rgb,
     pane::{Axis, Node},
     session::{DriveAction, Driver},
@@ -129,7 +128,7 @@ impl WindowView {
                 .map(|(terminal, _)| terminal.read(cx))
                 .find(|terminal| terminal.session_id() == Some(id))
                 .map(|terminal| {
-                    if let Some(agent) = terminal.agent().filter(|agent| agent.kind != AgentKind::Other) {
+                    if let Some(agent) = terminal.agent().filter(|agent| agent.kind.is_known()) {
                         return agent.kind.display_name().to_owned();
                     }
                     let meta = terminal.meta();

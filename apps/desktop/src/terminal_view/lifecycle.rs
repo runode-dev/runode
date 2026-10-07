@@ -22,7 +22,7 @@ use futures::{StreamExt as _, channel::mpsc::UnboundedReceiver, task::ArcWake};
 use gpui::{App, AppContext as _, Context, Entity, Font, Global, Point, SharedString, Task, Window, font, px};
 use runode_protocol::{AttachMode, ClientMsg, HostMsg, SessionId};
 use runode_shared_types::{
-    agent::{Agent, AgentKind},
+    agent::Agent,
     color::Rgb,
     grid::GridSize,
     session::{Driver, SessionMeta},
@@ -259,7 +259,7 @@ impl TerminalView {
 
     /// 按已经设好的实际尺寸启动 shell。启动不了时宿主发 `HostMsg::Exited`，按 shell 已退出
     /// 处理，关掉这个终端。还没开会话（`deferred`）时什么都不做，开了以后照常启动。
-    pub(super) fn start_now(&mut self, _cx: &mut Context<Self>) {
+    pub(super) fn start_now(&mut self) {
         let Some(id) = self.id else {
             return;
         };
@@ -851,7 +851,7 @@ impl TerminalView {
             // 没有界面这份 VT 替它请宿主改尺寸，直接请。
             host_client::link().send(ClientMsg::Resize { id, size });
         }
-        self.start_now(cx);
+        self.start_now();
     }
 
     /// shell 当前所在的目录，新建标签或分屏、右侧面板读项目时沿用；宿主还没报告时是建视图时给的
@@ -882,7 +882,7 @@ impl TerminalView {
             return None;
         }
         let meta = self.screen.meta();
-        if let Some(agent) = meta.agent.filter(|agent| agent.kind != AgentKind::Other) {
+        if let Some(agent) = meta.agent.filter(|agent| agent.kind.is_known()) {
             return Some(agent.kind.display_name().to_owned());
         }
         meta.foreground.clone().filter(|_| !meta.foreground_is_shell)

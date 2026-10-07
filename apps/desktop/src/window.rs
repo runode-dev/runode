@@ -53,7 +53,7 @@ use runode_shared_types::{
 
 pub(crate) use agents::{alert::listen as listen_notifications, logo::FILES as AGENT_LOGO_FILES, reveal_notified};
 pub use arrange::ArrangePanes;
-pub use background::watch as watch_background;
+pub use background::refresh as watch_background;
 pub use files::{
     CollapseSelectedFile, CopyPath, CopyRelativePath, DeleteFile, ExpandSelectedFile, FocusTerminal, OpenSelectedFile,
     RenameFile, RevealInFinder, SelectFirstFile, SelectLastFile, SelectNextFile, SelectPreviousFile,

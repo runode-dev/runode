@@ -185,19 +185,11 @@ fn bind(cx: &mut App) {
     for (keys, action) in keybind::resolve(&keybinds) {
         // 设置窗口里没有分屏，关分屏的键关掉设置窗口。
         if action == Action::CloseSurface {
-            let predicate = Some(gpui::KeyBindingContextPredicate::parse("Settings").unwrap().into());
-            match KeyBinding::load(&keys, Box::new(CloseWindow), predicate, false, None, &gpui::DummyKeyboardMapper) {
-                Ok(binding) => bindings.push(binding),
-                Err(err) => tracing::warn!("keybind {keys}: {err}"),
-            }
+            bindings.extend(load(&keys, Box::new(CloseWindow), Some("Settings")));
         }
         let (action, contexts) = gpui_action(action);
         for context in contexts {
-            let predicate = context.map(|c| gpui::KeyBindingContextPredicate::parse(c).unwrap().into());
-            match KeyBinding::load(&keys, action.boxed_clone(), predicate, false, None, &gpui::DummyKeyboardMapper) {
-                Ok(binding) => bindings.push(binding),
-                Err(err) => tracing::warn!("keybind {keys}: {err}"),
-            }
+            bindings.extend(load(&keys, action.boxed_clone(), *context));
         }
     }
     // 固定绑定放在后面：同一上下文里后加的优先，搜索时 Esc 照样先关搜索栏；菜单上的快捷键
@@ -208,6 +200,14 @@ fn bind(cx: &mut App) {
     // 菜单上显示的快捷键是设置菜单时从键位表里查的，换了绑定要重设一次。
     crate::menus::set_menus(cx);
     cx.set_global(Bound(keybinds, locale, end_sessions));
+}
+
+/// 把一条按键写法绑到 `action` 上，只在 `context` 里生效；写法不认得时记一条警告，返回 `None`。
+fn load(keys: &str, action: Box<dyn gpui::Action>, context: Option<&str>) -> Option<KeyBinding> {
+    let predicate = context.map(|c| gpui::KeyBindingContextPredicate::parse(c).unwrap().into());
+    KeyBinding::load(keys, action, predicate, false, None, &gpui::DummyKeyboardMapper)
+        .inspect_err(|err| tracing::warn!("keybind {keys}: {err}"))
+        .ok()
 }
 
 #[cfg(test)]

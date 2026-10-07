@@ -68,7 +68,6 @@ fn spawn_settings_apply_only_before_the_first_theme() {
             start: true,
             shell: Some("/bin/cat".into()),
             settings: Some(early.clone()),
-            env: Vec::new(),
         });
         match peer.reply() {
             HostMsg::Spawned { req: answered, id } if answered == req => id,
@@ -131,7 +130,7 @@ fn unstarted_sessions_start_on_request() {
     let host = host();
     let mut peer = Peer::pair(&host);
     let dir = std::env::temp_dir();
-    let id = peer.spawn_with("/bin/cat", false, Vec::new(), Some(dir.clone()));
+    let id = peer.spawn_with("/bin/cat", false, Some(dir.clone()));
     peer.send(&ClientMsg::Attach { id, size: Some(SIZE), mode: AttachMode::Snapshot });
     let HostMsg::Attached { channel, mode, meta, .. } = peer.reply() else { panic!("expected attached") };
     peer.screen(id, channel, mode);

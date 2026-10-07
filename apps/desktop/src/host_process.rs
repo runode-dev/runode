@@ -38,12 +38,17 @@ pub fn run() -> i32 {
             return 1;
         }
     }
-    let remote = crate::remote_access::follow_config(&host);
+    serve(&host);
+    0
+}
+
+/// 跟着配置开关远程访问，跑到空闲或收到 `Shutdown` 为止。
+fn serve(host: &Host) {
+    let remote = crate::remote_access::follow_config(host);
     let stopped = host.run_until_idle(IDLE_EXIT);
     // 先停远程访问再退出：交接时新宿主在等这个进程放开端口。
     drop(remote);
     tracing::info!("host {} exits: {stopped:?}", std::process::id());
-    0
 }
 
 /// `runode --host --take-over`：接手 socket 上旧宿主的会话（见 `Host::take_over`），把结果写成一行
@@ -89,10 +94,7 @@ pub fn take_over() -> i32 {
             // 关掉管道，app 不必等这个进程退出。
             drop(status);
             // 旧宿主退出前还占着远程访问的端口和锁，这边开不了时隔一会儿再试，见 `runode_remote_access::Service`。
-            let remote = crate::remote_access::follow_config(&host);
-            let stopped = host.run_until_idle(IDLE_EXIT);
-            drop(remote);
-            tracing::info!("host {} exits: {stopped:?}", std::process::id());
+            serve(&host);
             0
         }
         Err(err) => {

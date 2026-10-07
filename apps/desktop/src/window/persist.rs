@@ -51,6 +51,24 @@ struct Saver {
 
 impl Global for Saver {}
 
+impl Saver {
+    /// 把窗口 `window` 的布局记成 `snapshot`：已经记着这个窗口时替换，没有时加在后面。
+    /// 返回布局变了没有。
+    fn upsert(&mut self, window: WeakEntity<WindowView>, snapshot: SavedWindow) -> bool {
+        match self.windows.iter_mut().find(|(w, _)| w.entity_id() == window.entity_id()) {
+            Some((_, saved)) if *saved == snapshot => false,
+            Some((_, saved)) => {
+                *saved = snapshot;
+                true
+            }
+            None => {
+                self.windows.push((window, snapshot));
+                true
+            }
+        }
+    }
+}
+
 /// 装上存档，退出时把各窗口最新的布局写一次。要在打开窗口之前调用。
 pub fn install(cx: &mut App) {
     cx.set_global(Saver::default());
@@ -161,10 +179,8 @@ pub(super) fn update(window: WeakEntity<WindowView>, snapshot: SavedWindow, cx: 
     if saver.frozen {
         return;
     }
-    match saver.windows.iter_mut().find(|(w, _)| w.entity_id() == window.entity_id()) {
-        Some((_, saved)) if *saved == snapshot => return,
-        Some((_, saved)) => *saved = snapshot,
-        None => saver.windows.push((window, snapshot)),
+    if !saver.upsert(window, snapshot) {
+        return;
     }
     if saver.pending.is_none() {
         let task = cx.spawn(async |cx| {
@@ -213,11 +229,7 @@ fn closed(view: &mut WindowView, window: WeakEntity<WindowView>, cx: &mut App) {
         OnClose::Ignore => return,
         OnClose::Keep => {
             let snapshot = view.snapshot(cx);
-            let saver = cx.global_mut::<Saver>();
-            match saver.windows.iter_mut().find(|(w, _)| w.entity_id() == id) {
-                Some((_, saved)) => *saved = snapshot,
-                None => saver.windows.push((window, snapshot)),
-            }
+            cx.global_mut::<Saver>().upsert(window, snapshot);
         }
         OnClose::Forget => cx.global_mut::<Saver>().windows.retain(|(w, _)| w.entity_id() != id),
     }

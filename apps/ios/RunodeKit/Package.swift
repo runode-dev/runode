@@ -32,7 +32,7 @@ let package = Package(
             linkerSettings: [.linkedLibrary("c++")]
         ),
         .target(name: "RunodeFeatures", dependencies: ["RunodeProtocol", "RunodeConnection", "RunodeTerminal"]),
-        .testTarget(name: "RunodeProtocolTests", dependencies: ["RunodeProtocol"], resources: [.copy("Fixtures")]),
+        .testTarget(name: "RunodeProtocolTests", dependencies: ["RunodeProtocol"]),
         .testTarget(name: "RunodeConnectionTests", dependencies: ["RunodeConnection"]),
         .testTarget(name: "RunodeTerminalTests", dependencies: ["RunodeTerminal"]),
         .testTarget(name: "RunodeFeaturesTests", dependencies: ["RunodeFeatures"]),

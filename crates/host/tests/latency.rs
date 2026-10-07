@@ -140,7 +140,6 @@ impl PairDesktop {
             start: true,
             shell: Some(shell),
             settings: None,
-            env: Vec::new(),
         });
         loop {
             if let HostMsg::Spawned { id, .. } = self.message() {

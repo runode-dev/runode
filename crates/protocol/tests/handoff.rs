@@ -37,7 +37,6 @@ fn session(pending_command: Option<Option<String>>) -> HandoffPart {
         settings: TermSettings::default(),
         shell: Some("/bin/zsh".into()),
         start_dir: Some("/tmp/中文".into()),
-        env: vec![("RUNODE_BIN".into(), "/Applications/Runode.app/Contents/MacOS/runode".into())],
         meta: Box::new(SessionMeta {
             title: Some("修 bug".into()),
             agent: Some(Agent { kind: AgentKind::Claude, state: AgentState::Working }),

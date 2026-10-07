@@ -562,7 +562,7 @@ impl WindowView {
         };
         let depth = panel.graph_depth.get(ix).copied().unwrap_or(0) as f32;
         let width = self.graph(&dir.root).map_or(0., |graph| lane_geometry(graph.lanes).1);
-        let last = dir.path.file_name().map(|name| name.to_string_lossy().into_owned()).unwrap_or_default();
+        let last = base_name(&dir.path);
         self.git_row(("git-commit-dir", ix), 0., fg, bg)
             .pl(px(8. + width + INDENT * (depth + 1.)))
             .child(chevron(dir.expanded, fg))

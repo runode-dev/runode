@@ -139,7 +139,7 @@ fn waiting_for_a_command_is_not_resumed() {
 
 #[test]
 fn other_goodbyes_close_the_connection() {
-    for (i, reason) in [GoodbyeReason::Shutdown, GoodbyeReason::Idle, GoodbyeReason::Unknown].into_iter().enumerate() {
+    for (i, reason) in [GoodbyeReason::Shutdown, GoodbyeReason::Unknown].into_iter().enumerate() {
         let fake = FakeHost::start(&format!("bye{i}"), move |message| match message {
             ClientMsg::ListSessions => vec![HostMsg::Goodbye { reason: reason.clone() }],
             _ => vec![],

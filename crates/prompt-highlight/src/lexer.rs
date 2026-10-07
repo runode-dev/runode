@@ -95,6 +95,13 @@ fn is_name_char(c: char) -> bool {
     c.is_ascii_alphanumeric() || c == '_'
 }
 
+/// 往词的字面值后面接上 `s`；字面值已经因为变量、命令替换这些认不出而作废（`None`）时不管。
+fn push_literal(literal: &mut Option<String>, s: &str) {
+    if let Some(literal) = literal {
+        literal.push_str(s);
+    }
+}
+
 /// `NAME=`、`NAME+=`、`NAME[i]=` 开头的赋值，返回 `=` 之后的字节位置。
 fn assignment(raw: &str) -> Option<usize> {
     let name = raw.find(|c: char| !is_name_char(c)).unwrap_or(raw.len());
@@ -448,11 +455,6 @@ impl Lexer<'_> {
         let mut literal = Some(String::new());
         let mut glob = false;
         let mut quoted_start = false;
-        let push = |literal: &mut Option<String>, s: &str| {
-            if let Some(literal) = literal {
-                literal.push_str(s);
-            }
-        };
         while let Some(c) = self.peek() {
             let at = self.pos;
             if c == '`' && self.closing == Some('`') {
@@ -473,7 +475,7 @@ impl Lexer<'_> {
                     quoted_start |= at == start;
                     self.pos += 1;
                     if let Some(next) = self.bump() {
-                        push(&mut literal, &next.to_string());
+                        push_literal(&mut literal, &next.to_string());
                     }
                 }
                 '\'' => {
@@ -481,7 +483,7 @@ impl Lexer<'_> {
                     self.pos += 1;
                     let len = self.rest().find('\'').map_or(self.rest().len(), |i| i + 1);
                     let content = &self.text[self.pos..self.pos + len];
-                    push(&mut literal, content.strip_suffix('\'').unwrap_or(content));
+                    push_literal(&mut literal, content.strip_suffix('\'').unwrap_or(content));
                     self.pos += len;
                     self.span(at..self.pos, Kind::SingleQuotedArgument);
                 }
@@ -498,7 +500,7 @@ impl Lexer<'_> {
                     let before = self.pos;
                     self.dollar();
                     if self.pos == before + 1 {
-                        push(&mut literal, "$");
+                        push_literal(&mut literal, "$");
                     } else {
                         literal = None;
                     }
@@ -512,11 +514,11 @@ impl Lexer<'_> {
                     // `[`、`[[` 单独成词时是命令，不算通配。
                     glob |= c != '[' || self.rest()[1..].contains(']');
                     self.pos += 1;
-                    push(&mut literal, &c.to_string());
+                    push_literal(&mut literal, &c.to_string());
                 }
                 _ => {
                     self.pos += c.len_utf8();
-                    push(&mut literal, &c.to_string());
+                    push_literal(&mut literal, &c.to_string());
                 }
             }
         }

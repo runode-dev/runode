@@ -286,7 +286,6 @@ public actor HostConnection: HostLink {
         switch goodbye {
         case .handoff?: return "电脑上的 Runode 升级了，正在重新连接"
         case .shutdown?: return "电脑上的 Runode 退出了"
-        case .idle?: return "电脑上的 Runode 空闲退出了"
         case .error(let message)?: return "电脑断开了连接：\(message)"
         default: return "电脑关闭了连接"
         }

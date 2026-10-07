@@ -4,7 +4,7 @@
 
 use std::{
     io,
-    os::{fd::AsRawFd as _, unix::net::UnixStream},
+    os::unix::net::UnixStream,
     path::Path,
     thread,
     time::{Duration, Instant},
@@ -294,24 +294,10 @@ fn host_pid(socket: &Path) -> io::Result<libc::pid_t> {
 
 /// 连接对端进程的 pid，只认同一个用户的。要在对方回过话之后读，见 `host_pid`。
 fn peer_pid(stream: &UnixStream) -> io::Result<libc::pid_t> {
-    let fd = stream.as_raw_fd();
-    let (mut uid, mut gid) = (0, 0);
-    // SAFETY: 描述符来自 `stream`；两个输出参数指向本地变量。
-    if unsafe { libc::getpeereid(fd, &mut uid, &mut gid) } != 0 {
-        return Err(io::Error::last_os_error());
-    }
-    // SAFETY: 没有参数，不会失败。
-    if uid != unsafe { libc::geteuid() } {
+    if !runode_host::same_user(stream) {
         return Err(io::Error::new(io::ErrorKind::PermissionDenied, "the host belongs to another user"));
     }
-    let mut pid: libc::pid_t = 0;
-    let mut len = std::mem::size_of::<libc::pid_t>() as libc::socklen_t;
-    // SAFETY: 描述符来自 `stream`；值指向本地变量，长度是它的大小。
-    let result = unsafe { libc::getsockopt(fd, libc::SOL_LOCAL, libc::LOCAL_PEERPID, (&raw mut pid).cast(), &mut len) };
-    if result != 0 {
-        return Err(io::Error::last_os_error());
-    }
-    Ok(pid)
+    runode_host::peer_pid(stream).ok_or_else(|| io::Error::other("cannot read the host's process id"))
 }
 
 /// `link` 连上 `socket` 上单独一个进程的宿主（见 `Link::connect_standalone`）。连上却在 `Welcome` 前

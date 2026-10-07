@@ -1,8 +1,8 @@
 //! 命令名和参数位置上的词是什么：查 shell 报告的名字、PATH、补全用的命令规格和文件系统。
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
-use runode_completion::{is_command, is_executable};
+use runode_completion::{is_command, is_executable, resolve_path};
 
 use super::{Expect, Lexer, Word};
 use crate::Kind;
@@ -110,16 +110,6 @@ impl Lexer<'_> {
 
     /// 词里写的路径对应的实际路径：相对路径从 shell 所在目录算，`~` 开头的从主目录算。
     fn resolve(&self, literal: &str) -> Option<PathBuf> {
-        if literal == "~" {
-            return self.home.clone();
-        }
-        if let Some(rest) = literal.strip_prefix("~/") {
-            return Some(self.home.as_ref()?.join(rest));
-        }
-        if literal.starts_with('~') {
-            return None;
-        }
-        let path = Path::new(literal);
-        if path.is_absolute() { Some(path.to_owned()) } else { Some(self.cwd?.join(path)) }
+        resolve_path(literal, self.cwd, self.home.as_deref())
     }
 }

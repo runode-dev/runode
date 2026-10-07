@@ -533,8 +533,7 @@ impl WindowView {
         if self.renaming.as_ref().is_some_and(|renaming| renaming.id == self.workspaces[ix].id) {
             self.renaming = None;
         }
-        let panes = self.workspaces[ix].tabs.iter().flat_map(|tab| tab.panes.keys().copied()).collect::<Vec<_>>();
-        super::agents::dismiss_alerts(panes, cx);
+        super::agents::dismiss_alerts(self.workspaces[ix].tabs.iter().flat_map(|tab| tab.panes.keys().copied()), cx);
         if self.workspaces.len() == 1 {
             self.emptied = true;
             window.remove_window();

@@ -127,7 +127,6 @@ fn client_messages_round_trip() {
             start: false,
             shell: Some("/bin/zsh".into()),
             settings: Some(TermSettings { cursor_blink: Some(false), ..TermSettings::default() }),
-            env: vec![("RUNODE_BIN".into(), "/Applications/Runode.app/Contents/MacOS/runode".into())],
         },
         ClientMsg::Spawn {
             req: 4,
@@ -137,7 +136,6 @@ fn client_messages_round_trip() {
             start: true,
             shell: None,
             settings: None,
-            env: Vec::new(),
         },
         ClientMsg::Start { id: ID, integration: IntegrationMode::Off },
         ClientMsg::Attach { id: ID, size: Some(size()), mode: AttachMode::Snapshot },
@@ -305,8 +303,8 @@ fn host_messages_round_trip() {
 fn the_wire_format_is_readable_json() {
     let json = serde_json::to_string(&ClientMsg::Attach { id: ID, size: None, mode: AttachMode::MetaOnly }).unwrap();
     assert_eq!(json, r#"{"type":"attach","id":"0123456789abcdef0011223344556677","size":null,"mode":"meta_only"}"#);
-    let json = serde_json::to_string(&HostMsg::Goodbye { reason: GoodbyeReason::Idle }).unwrap();
-    assert_eq!(json, r#"{"type":"goodbye","reason":{"kind":"idle"}}"#);
+    let json = serde_json::to_string(&HostMsg::Goodbye { reason: GoodbyeReason::Shutdown }).unwrap();
+    assert_eq!(json, r#"{"type":"goodbye","reason":{"kind":"shutdown"}}"#);
 }
 
 #[test]
@@ -324,6 +322,13 @@ fn missing_and_unknown_fields_are_tolerated() {
             device: None,
         }
     );
+    // 旧客户端的 `Spawn` 还带着已经删掉的 `env`，照样读。
+    let spawn: ClientMsg = serde_json::from_str(&format!(
+        r#"{{"type":"spawn","req":1,"size":{},"cwd":null,"integration":"detect","env":[]}}"#,
+        serde_json::to_string(&size()).unwrap()
+    ))
+    .unwrap();
+    assert!(matches!(spawn, ClientMsg::Spawn { req: 1, .. }));
     // 必填字段缺了读不了。
     assert!(serde_json::from_str::<ClientMsg>(r#"{"type":"detach"}"#).is_err());
 }
@@ -399,7 +404,6 @@ fn version_3_fields_have_old_defaults() {
             start: true,
             shell: None,
             settings: None,
-            env: Vec::new(),
         }
     );
     let read: ClientMsg = serde_json::from_str(&format!(r#"{{"type":"read_screen","id":"{ID}","lines":3}}"#)).unwrap();

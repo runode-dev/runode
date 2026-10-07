@@ -42,11 +42,12 @@ use std::{
 };
 
 use anyhow::Result;
-pub use handoff::{GIVE_READY_WINDOW, TAKE_OVER_AFTER_READY, TakeOverError, TakeOverOptions, TakeOverReport};
+pub use handoff::{GIVE_READY_WINDOW, TAKE_OVER_AFTER_READY, TakeOverError, TakeOverOptions, TakeOverReport, peer_pid};
 pub use idle::Stopped;
 pub use launch::{STATUS_FD, Successor, launch, launch_successor};
 pub use runode_protocol::{BuildId, ClientMsg, HandoffRefusal, HostMsg, Placement, SessionId};
 use runode_shared_types::{clipboard::ClipboardAccess, grid::GridSize, settings::TermSettings, shell::IntegrationMode};
+pub use server::{same_user, set_buffers};
 
 /// 新开一个会话。
 #[derive(Clone, Debug)]
@@ -135,11 +136,10 @@ impl Shared {
         self.next_connection.fetch_add(1, Ordering::Relaxed)
     }
 
-    /// 新开一个会话，返回它的标识。`extra_env` 是这一个会话另外设的环境变量，盖过 `Host::set_env` 设的同名变量，但盖不了
-    /// `runode_protocol::ENV_SESSION`。
+    /// 新开一个会话，返回它的标识。
     ///
     /// 交接给新宿主期间不开新会话（交出去的会话已经定了，新开的会跟着这个宿主一起退出）。
-    fn spawn(&self, options: SpawnOptions, extra_env: Vec<(String, String)>) -> Result<SessionId> {
+    fn spawn(&self, options: SpawnOptions) -> Result<SessionId> {
         let id = SessionId::random()?;
         let (settings, generation) = {
             let registry = self.registry();
@@ -149,7 +149,7 @@ impl Shared {
             };
             (settings, registry.theme_generation)
         };
-        let setup = self.setup(id, settings, extra_env);
+        let setup = self.setup(id, settings);
         let clipboard = setup.clipboard;
         // 开伪终端、启动 shell 要几毫秒，不占着锁。
         let handle = session::spawn(setup, options)?;
@@ -174,20 +174,16 @@ impl Shared {
     }
 
     /// 会话 `id` 的设置：主题是 `settings`；启动 shell 时设宿主的环境变量（见 `Host::set_env`），
-    /// 同名的由 `extra_env` 盖过，再加上 `runode_protocol::ENV_SESSION`。
-    fn setup(&self, id: SessionId, settings: TermSettings, extra_env: Vec<(String, String)>) -> session::Setup {
+    /// 再加上 `runode_protocol::ENV_SESSION`。
+    fn setup(&self, id: SessionId, settings: TermSettings) -> session::Setup {
         let mut env = self.env.lock().unwrap_or_else(PoisonError::into_inner).clone();
-        for (key, value) in &extra_env {
-            env.retain(|(k, _)| k != key);
-            env.push((key.clone(), value.into()));
-        }
         env.retain(|(k, _)| k != runode_protocol::ENV_SESSION);
         env.push((runode_protocol::ENV_SESSION.into(), id.to_string().into()));
         let ui = server::UiPort::new(self.me.clone());
         let clipboard = self.registry().clipboard;
         let read_patience = *self.clipboard_patience.lock().unwrap_or_else(PoisonError::into_inner);
         let record_history = self.record_history.clone();
-        session::Setup { id, settings, env, extra_env, record_history, ui, clipboard, read_patience }
+        session::Setup { id, settings, env, record_history, ui, clipboard, read_patience }
     }
 
     /// 改剪贴板的规矩，告诉每个会话；和现在的一样时什么都不做。

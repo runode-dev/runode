@@ -3,7 +3,7 @@
 //! `remote`），这里在主线程上写系统剪贴板；读之前按宿主的意思先问用户，问在显示那个终端的窗口上，
 //! 说清是哪个终端、哪个程序要读。日志里不记剪贴板的内容。
 
-use gpui::{App, ClipboardItem, PromptLevel, WindowHandle};
+use gpui::{App, ClipboardItem, EntityId, PromptLevel, WindowHandle};
 use runode_protocol::{HostMsg, SessionId};
 use runode_shared_types::clipboard::MAX_CLIPBOARD_BYTES;
 
@@ -30,9 +30,9 @@ pub(super) fn read(ticket: UiTicket, id: SessionId, ask: bool, program: Option<S
         reply(clipboard_text(cx));
         return;
     }
-    let target = match find_session(id, cx) {
-        Some((window, _)) => Some(window),
-        None => front_window(cx),
+    let (target, pane) = match find_session(id, cx) {
+        Some((window, pane)) => (Some(window), Some(pane)),
+        None => (front_window(cx), None),
     };
     let Some(window) = target else {
         tracing::info!("no window to ask whether session {id} may read the clipboard");
@@ -41,7 +41,7 @@ pub(super) fn read(ticket: UiTicket, id: SessionId, ask: bool, program: Option<S
     };
     // 标题和程序名都是终端里的程序说了算（标题能用 OSC 设），去掉控制字符、截短再放进询问框，
     // 免得被拿来冒充别的说明或者把按钮挤出去。
-    let terminal = shown(&terminal_title(window, id, cx));
+    let terminal = shown(&terminal_title(window, pane, id, cx));
     let program = program.map(|program| shown(&program));
     let title = rust_i18n::t!("clipboard.read_title");
     let detail = match program.filter(|program| !program.is_empty()) {
@@ -97,16 +97,12 @@ fn shown(name: &str) -> String {
     cut
 }
 
-/// 问的时候怎么称呼这个终端：它所在分屏的标题；不在 `window` 里显示时用会话标识的开头。
-fn terminal_title(window: WindowHandle<WindowView>, id: SessionId, cx: &App) -> String {
-    let title = window.read(cx).ok().and_then(|view| {
-        view.workspaces
-            .iter()
-            .flat_map(|workspace| &workspace.tabs)
-            .flat_map(|tab| tab.panes.values())
-            .map(|(terminal, _)| terminal.read(cx))
-            .find(|terminal| terminal.session_id() == Some(id))
-            .map(|terminal| terminal.title().to_owned())
+/// 问的时候怎么称呼这个终端：`window` 里分屏 `pane` 的标题；没有这个分屏时用会话标识的开头。
+fn terminal_title(window: WindowHandle<WindowView>, pane: Option<EntityId>, id: SessionId, cx: &App) -> String {
+    let title = pane.and_then(|pane| {
+        let view = window.read(cx).ok()?;
+        let (wi, ti) = view.locate(pane)?;
+        Some(view.workspaces[wi].tabs[ti].panes[&pane].0.read(cx).title().to_owned())
     });
     title.unwrap_or_else(|| id.to_string()[..8].to_owned())
 }

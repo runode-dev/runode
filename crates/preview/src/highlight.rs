@@ -190,7 +190,6 @@ pub fn highlight(path: &Path, lines: &[String], cancel: &AtomicBool) -> Option<V
         }
         result.push(spans);
     }
-    result.resize_with(lines.len(), Vec::new);
     Some(result)
 }
 

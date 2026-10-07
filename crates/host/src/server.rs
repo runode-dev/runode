@@ -563,7 +563,7 @@ fn lock_exclusively(path: &Path) -> Result<File> {
 }
 
 /// 连上来的进程是不是和自己同一个用户。
-fn same_user(stream: &UnixStream) -> bool {
+pub fn same_user(stream: &UnixStream) -> bool {
     let (mut uid, mut gid) = (0, 0);
     // SAFETY: 描述符来自 `stream`，两个输出参数指向本地变量。
     let ok = unsafe { libc::getpeereid(stream.as_raw_fd(), &mut uid, &mut gid) } == 0;
@@ -572,7 +572,7 @@ fn same_user(stream: &UnixStream) -> bool {
 }
 
 /// 把 socket 的收发缓冲设成 `SOCKET_BUFFER`；设不了时记日志，照常用。
-fn set_buffers(stream: &UnixStream) {
+pub fn set_buffers(stream: &UnixStream) {
     for option in [libc::SO_SNDBUF, libc::SO_RCVBUF] {
         let size = SOCKET_BUFFER;
         // SAFETY: 描述符来自 `stream`；值指向本地变量，长度是它的大小。
@@ -905,9 +905,9 @@ impl Connection {
                     drop(slot);
                 });
             }
-            ClientMsg::Spawn { req, size, cwd, integration, start, shell, settings, env } => {
+            ClientMsg::Spawn { req, size, cwd, integration, start, shell, settings } => {
                 let options = SpawnOptions { size, cwd, integration, start, shell, settings };
-                match self.shared.spawn(options, env) {
+                match self.shared.spawn(options) {
                     Ok(id) => self.out.control(&HostMsg::Spawned { req, id }),
                     Err(err) => {
                         self.out.control(&HostMsg::Error { req: Some(req), id: None, message: format!("{err:#}") })
@@ -1298,7 +1298,7 @@ mod tests {
 
     /// 开一个线程卡在不返回的 `Subscribe::start` 里、答不了话的会话；丢掉返回的发送端时放开。
     fn stuck_session(host: &Host) -> (SessionId, mpsc::Sender<()>) {
-        let stuck = host.shared.spawn(options("/bin/cat"), Vec::new()).unwrap();
+        let stuck = host.shared.spawn(options("/bin/cat")).unwrap();
         let (release, released) = mpsc::channel::<()>();
         let (entered, stuck_now) = mpsc::channel();
         let start = Box::new(move |_: Screen| {
@@ -1321,7 +1321,7 @@ mod tests {
         let host = Host::new(BuildId("test".into()));
         let (stuck, release) = stuck_session(&host);
         let (mut stream, frames) = greet(&host, ClientKind::Cli);
-        let other = host.shared.spawn(options("/bin/cat"), Vec::new()).unwrap();
+        let other = host.shared.spawn(options("/bin/cat")).unwrap();
         send(&mut stream, &ClientMsg::Attach { id: other, size: None, mode: AttachMode::VtReplay });
         let channel = loop {
             if let HostMsg::Attached { channel, .. } = message(&frames) {
@@ -1415,7 +1415,7 @@ mod tests {
     #[test]
     fn a_panicking_session_tells_its_front_end() {
         let host = Host::new(BuildId("test".into()));
-        let id = host.shared.spawn(options("/bin/cat"), Vec::new()).unwrap();
+        let id = host.shared.spawn(options("/bin/cat")).unwrap();
         let (tx, rx) = mpsc::channel();
         let start = Box::new(move |_: Screen| {
             let sink: EventSink = Box::new(move |event| match event {

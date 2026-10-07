@@ -153,18 +153,13 @@ pub(super) fn titled(title: SharedString, mark: Option<Mark>, id: impl Into<Elem
         .justify_center()
         .items_center()
         .gap(px(5.))
-        .children(mark.map(|mark| agent_mark(mark, id, fg)))
+        .children(mark.map(|mark| styled_agent_mark(mark, id, fg, false)))
         .child(div().min_w_0().truncate().child(title))
 }
 
 /// agent 的状态标记：工作中播放该 agent 自己的工作动画，空闲时是一个空心圆点，等回答是琥珀色
-/// 实心圆点，干完了没看是绿色的对勾。
-pub(super) fn agent_mark(mark: Mark, id: impl Into<ElementId>, fg: Hsla) -> AnyElement {
-    styled_agent_mark(mark, id, fg, false)
-}
-
-/// 同 `agent_mark`；`brand` 时（卡片样式）工作中的转圈放大加粗，等回答画成像素画的问号，都用
-/// 这个 agent 自己的颜色（`brand_color`），没有的转圈沿用文字颜色、问号还是琥珀色。
+/// 实心圆点，干完了没看是绿色的对勾。`brand` 时（卡片样式）工作中的转圈放大加粗，等回答画成
+/// 像素画的问号，都用这个 agent 自己的颜色（`brand_color`），没有的转圈沿用文字颜色、问号还是琥珀色。
 pub(super) fn styled_agent_mark(mark: Mark, id: impl Into<ElementId>, fg: Hsla, brand: bool) -> AnyElement {
     let slot = div().flex_none().w(px(AGENT_MARK_WIDTH)).flex().justify_center().items_center();
     match mark.status {
@@ -217,7 +212,7 @@ fn driven_icon(id: impl Into<ElementId>, fg: Hsla) -> Stateful<Div> {
 /// shell 自己（`zsh`、`fish`），别的程序是它设的标题，没设时是程序名；目录和名字一样时不再写。
 pub(super) fn pane_label(view: &TerminalView) -> (SharedString, Option<SharedString>) {
     let meta = view.meta();
-    let name = if let Some(agent) = meta.agent.filter(|agent| agent.kind != AgentKind::Other) {
+    let name = if let Some(agent) = meta.agent.filter(|agent| agent.kind.is_known()) {
         Some(agent.kind.display_name().to_owned())
     } else if meta.foreground_is_shell {
         meta.foreground.clone()
@@ -297,11 +292,6 @@ pub(super) fn shortcut_hint(select: &dyn Action, last: &dyn Action, is_last: boo
     shortcut_text(select, cx).or_else(|| if is_last { shortcut_text(last, cx) } else { None })
 }
 
-/// 第 `ix` 个标签的快捷键提示。默认是 ⌘1 到 ⌘8 对应前八个，⌘9 对应最后一个。
-fn tab_shortcut(ix: usize, len: usize, cx: &App) -> Option<SharedString> {
-    shortcut_hint(&SelectTab(ix), &SelectLastTab, ix + 1 == len, cx)
-}
-
 impl WindowView {
     pub(super) fn render_tab(
         &self,
@@ -345,7 +335,8 @@ impl WindowView {
                 div().text_size(px(11.)).text_color(fg.opacity(0.35)).children(shortcut).into_any_element()
             }
         };
-        let shortcut = tab_shortcut(ix, workspace.tabs.len(), cx);
+        // 默认是 ⌘1 到 ⌘8 对应前八个标签，⌘9 对应最后一个。
+        let shortcut = shortcut_hint(&SelectTab(ix), &SelectLastTab, ix + 1 == workspace.tabs.len(), cx);
         // 紧凑时只在响铃时占一个圆点的宽度。
         let side_slot = if compact {
             tab.bell.then(|| div().flex_none().child(bell_dot()))

@@ -2,7 +2,7 @@
 //! 拉起的接手旧宿主的新宿主（`runode --host --take-over`）见 `launch_successor`。
 
 use std::{
-    ffi::{CString, c_char},
+    ffi::{CStr, CString, c_char},
     fs::File,
     io,
     os::{
@@ -25,22 +25,7 @@ const POSIX_SPAWN_SETSID: libc::c_int = 0x0400;
 ///
 /// 连上它（每隔几毫秒试一次 socket，撞上它正因空闲退出时重来）是调用方的事。
 pub fn launch(exe: &Path) -> io::Result<u32> {
-    let program = CString::new(exe.as_os_str().as_bytes())?;
-    let host_flag = c"--host";
-    let argv: [*mut c_char; 3] = [program.as_ptr().cast_mut(), host_flag.as_ptr().cast_mut(), ptr::null_mut()];
-    let mut actions = FileActions::new()?;
-    for (fd, flags) in [(0, libc::O_RDONLY), (1, libc::O_WRONLY), (2, libc::O_WRONLY)] {
-        // SAFETY: `actions` 已经初始化；路径是以 NUL 结尾的常量。
-        check(unsafe {
-            libc::posix_spawn_file_actions_addopen(actions.as_mut_ptr(), fd, c"/dev/null".as_ptr(), flags, 0)
-        })?;
-    }
-    let pid = spawn_detached(&program, &argv, &actions)?;
-    let reaped = thread::Builder::new().name("host-reaper".into()).spawn(move || reap(pid));
-    if let Err(err) = reaped {
-        tracing::warn!("cannot reap the host process {pid} when it exits: {err}");
-    }
-    Ok(pid.unsigned_abs())
+    detach(exe, &[c"--host"], None)
 }
 
 /// 新宿主在这个描述符上报告接手的结果，见 `launch_successor`。
@@ -60,19 +45,28 @@ pub struct Successor {
 /// 默认、退出后有线程收尸；另外开一根管道，写端接到新进程的 `STATUS_FD` 上，读端交给调用方
 /// 读结果。这边的写端拉起后马上关掉，新宿主一退出调用方就读到结尾。
 pub fn launch_successor(exe: &Path) -> io::Result<Successor> {
-    let program = CString::new(exe.as_os_str().as_bytes())?;
-    let argv: [*mut c_char; 4] = [
-        program.as_ptr().cast_mut(),
-        c"--host".as_ptr().cast_mut(),
-        c"--take-over".as_ptr().cast_mut(),
-        ptr::null_mut(),
-    ];
     // 两端都设了 close-on-exec：别处拉起的进程不会带走写端，让这边等不到结尾。
-    let (reader, mut writer) = io::pipe()?;
+    let (reader, writer) = io::pipe()?;
+    let mut writer = OwnedFd::from(writer);
     if writer.as_raw_fd() == STATUS_FD {
         // dup2 到自己身上不清 close-on-exec；换一个号（3 占着，复制出来的一定不是 3）。
         writer = writer.try_clone()?;
     }
+    let pid = detach(exe, &[c"--host", c"--take-over"], Some(&writer))?;
+    drop(writer);
+    Ok(Successor { pid, status: File::from(OwnedFd::from(reader)) })
+}
+
+/// 在新的会话里用 `exe extra_args...` 拉起进程，返回 pid：标准输入输出接 `/dev/null`，给了
+/// `status` 时把它接到 `STATUS_FD` 上，此外不继承任何描述符；信号处理恢复默认、信号屏蔽清空，
+/// 环境变量照抄。退出后由这里起的一个线程收尸。
+fn detach(exe: &Path, extra_args: &[&CStr], status: Option<&OwnedFd>) -> io::Result<u32> {
+    let program = CString::new(exe.as_os_str().as_bytes())?;
+    let argv: Vec<*mut c_char> = std::iter::once(program.as_c_str())
+        .chain(extra_args.iter().copied())
+        .map(|arg| arg.as_ptr().cast_mut())
+        .chain([ptr::null_mut()])
+        .collect();
     let mut actions = FileActions::new()?;
     for (fd, flags) in [(0, libc::O_RDONLY), (1, libc::O_WRONLY), (2, libc::O_WRONLY)] {
         // SAFETY: `actions` 已经初始化；路径是以 NUL 结尾的常量。
@@ -80,20 +74,10 @@ pub fn launch_successor(exe: &Path) -> io::Result<Successor> {
             libc::posix_spawn_file_actions_addopen(actions.as_mut_ptr(), fd, c"/dev/null".as_ptr(), flags, 0)
         })?;
     }
-    // SAFETY: `actions` 已经初始化；`writer` 在 posix_spawn 返回前一直开着。
-    check(unsafe { libc::posix_spawn_file_actions_adddup2(actions.as_mut_ptr(), writer.as_raw_fd(), STATUS_FD) })?;
-    let pid = spawn_detached(&program, &argv, &actions)?;
-    drop(writer);
-    let reaped = thread::Builder::new().name("successor-reaper".into()).spawn(move || reap(pid));
-    if let Err(err) = reaped {
-        tracing::warn!("cannot reap the new host process {pid} when it exits: {err}");
+    if let Some(status) = status {
+        // SAFETY: `actions` 已经初始化；`status` 在 posix_spawn 返回前一直开着。
+        check(unsafe { libc::posix_spawn_file_actions_adddup2(actions.as_mut_ptr(), status.as_raw_fd(), STATUS_FD) })?;
     }
-    Ok(Successor { pid: pid.unsigned_abs(), status: File::from(OwnedFd::from(reader)) })
-}
-
-/// 在新的会话里拉起 `program`：只继承 `actions` 里设好的描述符，信号处理恢复默认、信号屏蔽清空，
-/// 环境变量照抄。返回 pid。
-fn spawn_detached(program: &CString, argv: &[*mut c_char], actions: &FileActions) -> io::Result<libc::pid_t> {
     let mut attr = SpawnAttr::new()?;
     let flags = POSIX_SPAWN_SETSID
         | libc::POSIX_SPAWN_CLOEXEC_DEFAULT
@@ -109,7 +93,6 @@ fn spawn_detached(program: &CString, argv: &[*mut c_char], actions: &FileActions
         libc::sigemptyset(&mut none);
         check(libc::posix_spawnattr_setsigmask(attr.as_mut_ptr(), &none))?;
     }
-    debug_assert!(argv.last().is_some_and(|last| last.is_null()));
     let mut pid: libc::pid_t = 0;
     // SAFETY: 路径和参数都是以 NUL 结尾的字符串，参数表以空指针结尾，在调用期间都活着；环境表
     // 是进程自己的 `environ`，posix_spawn 只读它。
@@ -123,7 +106,11 @@ fn spawn_detached(program: &CString, argv: &[*mut c_char], actions: &FileActions
             (*libc::_NSGetEnviron()).cast_const(),
         )
     })?;
-    Ok(pid)
+    let reaped = thread::Builder::new().name("host-reaper".into()).spawn(move || reap(pid));
+    if let Err(err) = reaped {
+        tracing::warn!("cannot reap the host process {pid} when it exits: {err}");
+    }
+    Ok(pid.unsigned_abs())
 }
 
 /// 等子进程退出、收尸。

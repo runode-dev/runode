@@ -81,9 +81,6 @@ pub enum HandoffPart {
         /// 会话开在哪个目录。
         #[serde(default)]
         start_dir: Option<PathBuf>,
-        /// `Spawn` 时另外设的环境变量，见 `ClientMsg::Spawn::env`；还没启动的会话 `Start` 时用。
-        #[serde(default)]
-        env: Vec<(String, String)>,
         /// 会话对外公布的状态。装箱只是为了别让这种消息比另外几种大太多，JSON 里一样。
         #[serde(default)]
         meta: Box<SessionMeta>,

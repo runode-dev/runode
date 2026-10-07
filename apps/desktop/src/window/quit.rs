@@ -25,7 +25,7 @@ use gpui::{AnyWindowHandle, App, Global, PromptLevel, Window};
 use runode_protocol::{ClientMsg, SessionId, SessionInfo};
 use runode_shared_types::agent::AgentKind;
 
-use super::{WindowView, model::Closing, persist};
+use super::{WindowView, model::Closing, persist, remote};
 use crate::{
     host_client::{self, Mode},
     terminal_view::TerminalView,
@@ -230,7 +230,7 @@ pub fn should_close(window: &mut Window, cx: &mut App) -> bool {
 
 /// 开着的终端窗口有几个，设置窗口不算。
 pub fn terminal_windows(cx: &App) -> usize {
-    cx.windows().into_iter().filter(|window| window.downcast::<WindowView>().is_some()).count()
+    remote::windows(cx).len()
 }
 
 /// 确认框弹在当前窗口上；当前没有窗口在前台时弹在第一个窗口上。
@@ -453,13 +453,8 @@ fn hidden_agents(sessions: &[SessionInfo], held: &HashSet<SessionId>) -> Vec<Age
         .iter()
         .filter(|session| !session.exited && !held.contains(&session.id))
         .filter_map(|session| session.meta.agent.map(|agent| agent.kind))
-        .filter(|kind| is_agent(Some(*kind)))
+        .filter(|kind| kind.is_known())
         .collect()
-}
-
-/// 不算 `AgentKind::Other`：那是用 OSC 9;4 报进度的普通程序，不是 agent 会话。
-fn is_agent(kind: Option<AgentKind>) -> bool {
-    kind.is_some_and(|kind| kind != AgentKind::Other)
 }
 
 /// 窗口里一个前台在跑 agent 的终端。
@@ -471,10 +466,7 @@ struct ShownAgent {
 
 /// 各窗口里的终端，对每个终端调 `f`（带上所在 workspace 的名字）。
 fn for_each_view(cx: &App, mut f: impl FnMut(&TerminalView, &str)) {
-    for window in cx.windows() {
-        let Some(view) = window.downcast::<WindowView>().and_then(|window| window.read(cx).ok()) else {
-            continue;
-        };
+    for view in remote::windows(cx).into_iter().filter_map(|window| window.read(cx).ok()) {
         for workspace in &view.workspaces {
             for tab in &workspace.tabs {
                 for (view, _) in tab.panes.values() {
@@ -489,7 +481,7 @@ fn for_each_view(cx: &App, mut f: impl FnMut(&TerminalView, &str)) {
 fn window_agents(cx: &App) -> Vec<ShownAgent> {
     let mut agents = Vec::new();
     for_each_view(cx, |view, workspace| {
-        if let Some(kind) = view.agent().map(|agent| agent.kind).filter(|kind| is_agent(Some(*kind))) {
+        if let Some(kind) = view.agent().map(|agent| agent.kind).filter(|kind| kind.is_known()) {
             agents.push(ShownAgent { kind, workspace: workspace.to_owned() });
         }
     });

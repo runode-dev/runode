@@ -407,8 +407,8 @@ fn a_new_host_takes_every_session_over() {
     let vim = Path::new("/usr/bin/vim")
         .exists()
         .then(|| cli.spawn(&script(&dir, "vim.sh", &format!("exec /usr/bin/vim -u NONE -N -n {}", file.display()))));
-    let later = script(&dir, "later.sh", "echo \"started-$RUNODE_TEST_EXTRA-$RUNODE_SOCKET\"\nexec sleep 1000");
-    let unstarted = cli.spawn_with(&later, false, vec![("RUNODE_TEST_EXTRA".into(), "extra".into())], None);
+    let later = script(&dir, "later.sh", "echo \"started-$RUNODE_SOCKET\"\nexec sleep 1000");
+    let unstarted = cli.spawn_with(&later, false, None);
     let exited = cli.spawn(&script(&dir, "exit.sh", "exit 0"));
 
     let deadline = Instant::now() + common::WAIT;
@@ -467,7 +467,7 @@ fn a_new_host_takes_every_session_over() {
     }
 
     new.send(&ClientMsg::Start { id: unstarted, integration: IntegrationMode::Off });
-    let started = format!("started-extra-{}", socket.display());
+    let started = format!("started-{}", socket.display());
     new.wait_screen(unstarted, Some(20), |text| text.replace('\n', "").contains(&started));
 
     // agent 交接之后过一会儿仍是工作中：交接期间没有输出，不会被判成空闲。

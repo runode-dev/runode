@@ -114,7 +114,7 @@ impl Host {
 /// 连的一方读到的总是调 `listen` 的进程，同样不跟着交接走。所以新宿主认旧宿主时以 `Welcome`
 /// 里自报的为准，见 `take::old_host_pid`；接受连接的一方读到的是连上来的进程，一直准。
 #[cfg(target_os = "macos")]
-fn peer_pid(stream: &UnixStream) -> Option<libc::pid_t> {
+pub fn peer_pid(stream: &UnixStream) -> Option<libc::pid_t> {
     let mut pid: libc::pid_t = 0;
     let mut len = libc::socklen_t::try_from(size_of::<libc::pid_t>()).unwrap_or_default();
     // SAFETY: 描述符来自 `stream`；值指向本地变量，长度是它的大小。
@@ -125,7 +125,7 @@ fn peer_pid(stream: &UnixStream) -> Option<libc::pid_t> {
 }
 
 #[cfg(not(target_os = "macos"))]
-fn peer_pid(stream: &UnixStream) -> Option<libc::pid_t> {
+pub fn peer_pid(stream: &UnixStream) -> Option<libc::pid_t> {
     let mut cred = libc::ucred { pid: 0, uid: 0, gid: 0 };
     let mut len = libc::socklen_t::try_from(size_of::<libc::ucred>()).unwrap_or_default();
     // SAFETY: 描述符来自 `stream`；值指向本地变量，长度是它的大小。

@@ -26,7 +26,7 @@ pub use engine::{Candidate, Edit, Kind, common_prefix, decisive, highlight, rank
 use engine::{Plan, Source};
 use line::Segment;
 pub use line::cells;
-pub use paths::is_executable;
+pub use paths::{is_executable, resolve_path};
 
 /// 光标所在 shell 的情况：它报告的 PATH 和各种名字，以及 runode 记下的命令历史里各命令的
 /// 常用程度。
@@ -64,7 +64,7 @@ impl Request {
     /// 参数上（不是命令名本身）、这条命令有规格时才能，否则为 `None`。
     pub fn new(text: &str, cursor: usize) -> Option<Self> {
         let segment = line::parse(text, cursor);
-        let plan = engine::plan(&segment, cursor, &specs::lookup)?;
+        let plan = engine::plan(&segment, cursor)?;
         Some(Self { text: text.to_owned(), cursor, segment, plan })
     }
 

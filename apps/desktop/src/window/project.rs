@@ -290,15 +290,20 @@ impl WindowView {
             self.refresh_project(cx);
         } else if project.stale {
             self.refresh_if_due(cx);
-        } else if !self.watching() {
-            let wait = FALLBACK_INTERVAL.max(project.scan_cost * POLL_BACKOFF);
-            if project.refreshed_at.is_none_or(|at| at.elapsed() >= wait) {
-                self.refresh_project(cx);
-            }
-        } else if self.git_shown && project.git.as_ref().is_some_and(|git| !git.worktrees.is_empty()) {
-            let wait = WORKTREE_INTERVAL.max(project.scan_cost * POLL_BACKOFF);
-            if project.refreshed_at.is_none_or(|at| at.elapsed() >= wait) {
-                self.refresh_project(cx);
+        } else {
+            // 监听不了目录，或者有其他工作树（它们的工作目录监听不到）时定时重读。
+            let interval = if !self.watching() {
+                Some(FALLBACK_INTERVAL)
+            } else if self.git_shown && project.git.as_ref().is_some_and(|git| !git.worktrees.is_empty()) {
+                Some(WORKTREE_INTERVAL)
+            } else {
+                None
+            };
+            if let Some(interval) = interval {
+                let wait = interval.max(project.scan_cost * POLL_BACKOFF);
+                if project.refreshed_at.is_none_or(|at| at.elapsed() >= wait) {
+                    self.refresh_project(cx);
+                }
             }
         }
     }

@@ -94,14 +94,15 @@ const TOOLBAR_BUTTON_SIZE: f32 = 24.;
 /// 剪切下来等着粘贴的行画得淡一些。
 const CUT_OPACITY: f32 = 0.5;
 
+/// 打进 shell 不用引号也不用转义的常见字符。
+fn is_shell_plain(c: char) -> bool {
+    c.is_alphanumeric() || matches!(c, '/' | '.' | '_' | '-' | '+' | '@' | '%' | ':' | ',' | '=')
+}
+
 /// 打进 shell 的路径：只含常见字符时原样，否则用单引号括起来。开头是 `=` 或 `%` 时也括起来，
 /// zsh 会把 `=foo` 展开成命令的路径。
 fn shell_quote(text: &str) -> String {
-    let plain = !text.is_empty()
-        && !text.starts_with(['=', '%'])
-        && text
-            .chars()
-            .all(|c| c.is_alphanumeric() || matches!(c, '/' | '.' | '_' | '-' | '+' | '@' | '%' | ':' | ',' | '='));
+    let plain = !text.is_empty() && !text.starts_with(['=', '%']) && text.chars().all(is_shell_plain);
     if plain { text.to_owned() } else { format!("'{}'", text.replace('\'', r"'\''")) }
 }
 
@@ -120,8 +121,7 @@ fn is_image(path: &Path) -> bool {
 fn shell_escape(text: &str) -> String {
     let mut escaped = String::with_capacity(text.len());
     for (i, c) in text.chars().enumerate() {
-        let plain = (c.is_alphanumeric() || matches!(c, '/' | '.' | '_' | '-' | '+' | '@' | '%' | ':' | ',' | '='))
-            && !(i == 0 && matches!(c, '=' | '%'));
+        let plain = is_shell_plain(c) && !(i == 0 && matches!(c, '=' | '%'));
         if !plain {
             escaped.push('\\');
         }

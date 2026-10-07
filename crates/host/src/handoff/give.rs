@@ -340,7 +340,6 @@ fn session_part(id: SessionId, exported: &Exported) -> HandoffPart {
         settings,
         shell: exported.shell.clone(),
         start_dir,
-        env: exported.extra_env.clone(),
         meta: Box::new(meta),
         prompt_reported,
         running: running.map(|entry| RunningCommand { cmd: entry.cmd, cwd: entry.cwd, ts: entry.ts }),

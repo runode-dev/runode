@@ -19,7 +19,7 @@ use gpui::{
     App, Context, Div, Global, MouseButton, PromptLevel, SharedString, Stateful, Task, Window, div, prelude::*, px,
 };
 use runode_protocol::{SessionId, SessionInfo};
-use runode_shared_types::{agent::AgentKind, color::Rgb};
+use runode_shared_types::color::Rgb;
 
 use super::{
     AGENT_MARK_WIDTH, WindowView, agents::Mark, cards, divider_color, model::display_dir, quit::held_sessions,
@@ -52,18 +52,13 @@ struct BackgroundSessions {
 
 impl Global for BackgroundSessions {}
 
-/// 恢复完窗口以后开始看有没有后台会话。
-pub fn watch(cx: &mut App) {
-    refresh(cx);
-}
-
 /// 有后台会话：没被用户收起过的侧栏要显示出来，让人看得到它们。
 pub(super) fn any() -> bool {
     ANY.load(Ordering::Relaxed)
 }
 
-/// 马上重问一次宿主。
-fn refresh(cx: &mut App) {
+/// 马上重问一次宿主。恢复完窗口以后由它开始看有没有后台会话。
+pub fn refresh(cx: &mut App) {
     schedule(Duration::ZERO, cx);
 }
 
@@ -159,7 +154,7 @@ fn orphans(live: &[SessionInfo], held: &HashSet<SessionId>) -> Vec<SessionId> {
 
 /// 前台在跑 agent 的会话个数，不算 `AgentKind::Other`（用 OSC 9;4 报进度的普通程序）。
 fn agent_count(sessions: &[SessionInfo]) -> usize {
-    sessions.iter().filter(|session| session.meta.agent.is_some_and(|agent| agent.kind != AgentKind::Other)).count()
+    sessions.iter().filter(|session| session.meta.agent.is_some_and(|agent| agent.kind.is_known())).count()
 }
 
 /// 会话的标题：程序设置的标题，没有时是前台程序名或者目录名。
@@ -345,7 +340,7 @@ fn background_row(ix: usize, session: &SessionInfo, fg: Rgb, bg: Rgb, cx: &mut C
 #[cfg(test)]
 mod tests {
     use runode_shared_types::{
-        agent::{Agent, AgentState},
+        agent::{Agent, AgentKind, AgentState},
         grid::GridSize,
         session::SessionMeta,
     };

@@ -59,15 +59,9 @@ impl Session {
             Ok(palette) => std::array::from_fn(|i| rgb(palette.0[i])),
             Err(err) => {
                 tracing::warn!("failed to read the palette: {err}");
-                [self.peek_colors().0; 256]
+                [self.renderer.borrow().frame.foreground; 256]
             }
         }
-    }
-
-    /// 上一帧的默认前景色和背景色，不触发刷新；画搜索栏这类界面元素时用。
-    pub fn peek_colors(&self) -> (Rgb, Rgb) {
-        let renderer = self.renderer.borrow();
-        (renderer.frame.foreground, renderer.frame.background)
     }
 
     /// 运行中的程序是否正为同步更新冻结屏幕；即使没有新输出，

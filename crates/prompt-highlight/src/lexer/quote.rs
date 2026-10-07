@@ -1,6 +1,6 @@
 //! 词里的引号、`$`（变量、命令替换和算术）、反引号和历史展开，就地记下颜色。
 
-use super::{Lexer, ends_word, is_name_char};
+use super::{Lexer, ends_word, is_name_char, push_literal};
 use crate::Kind;
 
 impl Lexer<'_> {
@@ -22,25 +22,16 @@ impl Lexer<'_> {
                     match self.bump() {
                         Some(next @ ('$' | '`' | '"' | '\\' | '\n')) => {
                             self.span(at..self.pos, Kind::BackOrDollarDoubleQuotedArgument);
-                            if let Some(literal) = literal {
-                                literal.push(next);
-                            }
+                            push_literal(literal, &next.to_string());
                         }
-                        Some(next) => {
-                            if let Some(literal) = literal {
-                                literal.push('\\');
-                                literal.push(next);
-                            }
-                        }
+                        Some(next) => push_literal(literal, &format!("\\{next}")),
                         None => {}
                     }
                 }
                 '$' => {
                     self.dollar();
                     if self.pos == at + 1 {
-                        if let Some(literal) = literal {
-                            literal.push('$');
-                        }
+                        push_literal(literal, "$");
                     } else {
                         if !matches!(self.text[at + 1..].chars().next(), Some('(')) {
                             // 变量在字符串里是转义的颜色。
@@ -57,9 +48,7 @@ impl Lexer<'_> {
                 }
                 _ => {
                     self.pos += c.len_utf8();
-                    if let Some(literal) = literal {
-                        literal.push(c);
-                    }
+                    push_literal(literal, &c.to_string());
                 }
             }
         }

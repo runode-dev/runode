@@ -33,9 +33,9 @@ use runode_protocol::{HandoffRefusal, SessionInfo};
 
 pub use handoff::{HandoffFailure, HandoffStatus, READY_BY};
 use launch::{Choice, Probe};
-// `Attached` 给视图状态机（重新连上、只看状态）用。
-#[allow(unused_imports)]
-pub use link::{Attached, ConnectError, Link, LinkEvent, Screen, SpawnOptions, UiTicket};
+#[cfg(test)]
+pub use link::Attached;
+pub use link::{ConnectError, Link, LinkEvent, Screen, SpawnOptions, UiTicket};
 
 /// 宿主现在怎么跑。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

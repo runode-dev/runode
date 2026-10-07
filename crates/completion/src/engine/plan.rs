@@ -8,15 +8,15 @@ use warp_command_signatures::{Argument, ArgumentType, Opt, Signature};
 use super::{Candidate, Kind, Plan, Source};
 use crate::{
     line::{self, Segment, Word},
-    specs::Spec,
+    specs::{self, Spec},
 };
 
-/// 光标所在的词能不能由 runode 补全，能的话要补什么。`lookup` 按命令名找规格。
+/// 光标所在的词能不能由 runode 补全，能的话要补什么。
 ///
 /// 光标在命令名上（一段命令跳过变量赋值后的第一个词，或者 `sudo` 这类命令后面那个本身是
 /// 命令的参数）时补命令名。在重定向目标上、正在写变量赋值、或者参数所属的命令没有规格时
 /// 为 `None`，这时 Tab 交给 shell。
-pub fn plan(segment: &Segment, cursor: usize, lookup: &dyn Fn(&str) -> Option<std::sync::Arc<Spec>>) -> Option<Plan> {
+pub fn plan(segment: &Segment, cursor: usize) -> Option<Plan> {
     let words = &segment.words;
     let current = &words[segment.current];
     if current.redirect {
@@ -33,7 +33,7 @@ pub fn plan(segment: &Segment, cursor: usize, lookup: &dyn Fn(&str) -> Option<st
     let mut command_at = start;
     loop {
         let name = command_name(&words[command_at].value());
-        let spec = lookup(&name)?;
+        let spec = specs::lookup(&name)?;
         // 光标前的、不是重定向目标的参数。
         let args: Vec<(usize, String)> =
             (command_at + 1..segment.current).filter(|&i| !words[i].redirect).map(|i| (i, words[i].value())).collect();
@@ -312,13 +312,13 @@ fn argument(param: &Argument, from: usize, plan: &mut Plan) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{engine::rank, line::parse, specs};
+    use crate::{engine::rank, line::parse};
 
     fn plan_at(input: &str) -> Option<Plan> {
         let cursor = input.find('^').unwrap();
         let text = input.replacen('^', "", 1);
         let segment = parse(&text, cursor);
-        plan(&segment, cursor, &specs::lookup)
+        plan(&segment, cursor)
     }
 
     /// 排好的候选值。

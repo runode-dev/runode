@@ -13,6 +13,7 @@ use runode_shared_types::agent::{Agent, AgentKind, AgentState};
 use super::{
     NextAgent, WindowView,
     model::{Tab, Workspace},
+    remote,
 };
 use crate::terminal_view::TerminalView;
 use alert::{AgentAlert, Alert};
@@ -187,11 +188,7 @@ pub(crate) fn reveal_notified(tag: &str, cx: &mut App) {
     let Some(pane) = pane_from_tag(tag) else {
         return;
     };
-    let target = cx.windows().into_iter().filter_map(|window| window.downcast::<WindowView>()).find(|window| {
-        window
-            .read(cx)
-            .is_ok_and(|view| view.workspaces.iter().any(|w| w.tabs.iter().any(|t| t.panes.contains_key(&pane))))
-    });
+    let target = remote::windows(cx).into_iter().find(|window| window.read(cx).is_ok_and(|v| v.locate(pane).is_some()));
     if let Some(target) = target {
         reveal(target, pane, cx);
     }

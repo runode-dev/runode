@@ -121,6 +121,11 @@ impl AgentKind {
         Self::Plandex,
     ];
 
+    /// 是认得的 agent，不是 `Other`（用 OSC 9;4 报进度的普通程序）。
+    pub fn is_known(self) -> bool {
+        self != Self::Other
+    }
+
     /// 短名：识别规则文件按它命名（`<短名>.toml`），也是它最常见的命令名。
     pub fn label(self) -> &'static str {
         match self {

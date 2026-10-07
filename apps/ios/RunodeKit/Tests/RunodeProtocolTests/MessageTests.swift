@@ -3,12 +3,21 @@ import Testing
 
 @testable import RunodeProtocol
 
-/// 宿主（Rust）序列化出来的样例：测试资源 `rust-messages`，按名字存着各条消息的 JSON。
+/// 宿主（Rust）序列化出来的样例：`crates/protocol/tests/fixtures/messages.json`，按名字存着各条消息的
+/// JSON，由 `runode_protocol` 的测试 `message_fixture` 生成。
 enum RustSamples {
+    static let url: URL = URL(filePath: #filePath)
+        .deletingLastPathComponent()  // RunodeProtocolTests
+        .deletingLastPathComponent()  // Tests
+        .deletingLastPathComponent()  // RunodeKit
+        .deletingLastPathComponent()  // ios
+        .deletingLastPathComponent()  // apps
+        .deletingLastPathComponent()  // 仓库根
+        .appending(path: "crates/protocol/tests/fixtures/messages.json")
+
     /// 每条样例重新编成的 JSON，按名字。
     static let messages: [String: Data] = {
-        guard let url = Bundle.module.url(forResource: "rust-messages", withExtension: "json", subdirectory: "Fixtures"),
-            let data = try? Data(contentsOf: url),
+        guard let data = try? Data(contentsOf: url),
             let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
             let messages = root["messages"] as? [String: Any]
         else { return [:] }
@@ -96,14 +105,14 @@ func sameJSON(_ a: Data, _ b: Data) throws -> Bool {
             .listProjectTasks(req: 1, dir: "/tmp"),
             .spawn(req: 1, size: size, cwd: nil, integration: .detect, start: true),
             .attach(id: id, size: nil, mode: .vtReplay), .detach(id: id), .resize(id: id, size: size),
-            .focus(id: id, focused: true), .clearScreen(id: id), .kill(id: id), .readScreen(id: id, lines: 3),
+            .focus(id: id, focused: true), .kill(id: id), .readScreen(id: id, lines: 3),
             .sendKeys(req: 1, id: id, keys: ["enter"]), .paste(req: 2, id: id, text: "y"),
             .git(req: 3, id: id, request: .status),
         ]
         func covered(_ message: ClientMsg) -> Bool {
             switch message {
             case .hello, .listSessions, .layout, .open, .openWorkspace, .listDirs, .listProjectTasks, .spawn, .attach,
-                .detach, .resize, .focus, .clearScreen, .kill, .readScreen, .sendKeys, .paste, .git:
+                .detach, .resize, .focus, .kill, .readScreen, .sendKeys, .paste, .git:
                 true
             }
         }
@@ -134,7 +143,7 @@ func sameJSON(_ a: Data, _ b: Data) throws -> Bool {
     }
 
     @Test func welcomeAndIncompatible() throws {
-        #expect(try decode("welcome") == .welcome(protocol: 4, build: "0.1.0+abc", hostPid: 123, snapshotFormat: 1, standalone: true))
+        #expect(try decode("welcome") == .welcome)
         #expect(try decode("incompatible") == .incompatible(protocol: 5, build: "x", reason: "old"))
     }
 
@@ -205,7 +214,7 @@ func sameJSON(_ a: Data, _ b: Data) throws -> Bool {
         #expect(window.workspaces[1].anchor == nil)
     }
 
-    /// 项目命令按来源分组读出来；没有说明的读成空，不认识的来源种类读成 `unknown`，缺的 `truncated` 读成假。
+    /// 项目命令按来源分组读出来；没有说明的读成空。
     @Test func projectTasksAreGroupedBySource() throws {
         guard case .projectTasks(let req, let dir, let sources) = try decode("project_tasks") else {
             Issue.record("not project tasks")
@@ -213,14 +222,14 @@ func sameJSON(_ a: Data, _ b: Data) throws -> Bool {
         }
         #expect(req == 6)
         #expect(dir == "/Users/ethan/dev/app/web")
-        #expect(sources.map(\.kind) == [.makefile, .packageJson, .unknown])
+        #expect(sources.map(\.kind) == [.makefile, .packageJson])
         #expect(
             sources[0].tasks == [
                 ProjectTask(name: "build", command: "make -C .. build", description: "编译全部"),
                 ProjectTask(name: "test", command: "make -C .. test"),
             ])
         #expect(sources[0].file == "/Users/ethan/dev/app/Makefile")
-        #expect(!sources[0].truncated && sources[1].truncated && !sources[2].truncated)
+        #expect(!sources[0].truncated && sources[1].truncated)
         #expect(sources[1].tasks == [ProjectTask(name: "dev", command: "pnpm run dev", description: "vite")])
     }
 
@@ -234,12 +243,7 @@ func sameJSON(_ a: Data, _ b: Data) throws -> Bool {
         #expect(try decode("goodbye") == .goodbye(.error("bye")))
         #expect(try decode("goodbye_handoff") == .goodbye(.handoff))
         #expect(try decode("screen_text") == .screenText(id: id, text: "a\n", truncated: false))
-        guard case .commandFinished(_, let command) = try decode("command_finished") else {
-            Issue.record("not command_finished")
-            return
-        }
-        #expect(command.cmd == "ls")
-        #expect(command.exit == 0)
+        #expect(try decode("command_finished") == .commandFinished(id: id))
     }
 
     @Test func unknownKindsAndValuesAreTolerated() throws {
@@ -248,10 +252,24 @@ func sameJSON(_ a: Data, _ b: Data) throws -> Bool {
         let goodbye = try JSONDecoder().decode(
             HostMsg.self, from: Data(#"{"type":"goodbye","reason":{"kind":"reboot"}}"#.utf8))
         #expect(goodbye == .goodbye(.unknown("reboot")))
+        // 宿主已经不发的原因也读成 `unknown`。
+        let idle = try JSONDecoder().decode(HostMsg.self, from: Data(#"{"type":"goodbye","reason":{"kind":"idle"}}"#.utf8))
+        #expect(idle == .goodbye(.unknown("idle")))
         // 认识的种类多了不认识的字段：忽略。
         let bell = try JSONDecoder().decode(
             HostMsg.self, from: Data(#"{"type":"bell","id":"0123456789abcdef0011223344556677","extra":true}"#.utf8))
         #expect(bell == .bell(id: id))
+        // 不认识的项目命令来源读成 `unknown`，缺的 `truncated` 读成假。
+        let tasks = try JSONDecoder().decode(
+            HostMsg.self,
+            from: Data(
+                #"{"type":"project_tasks","req":1,"dir":"/a","sources":[{"kind":"justfile","file":"/a/justfile","tasks":[]}]}"#
+                    .utf8))
+        if case .projectTasks(_, _, let sources) = tasks {
+            #expect(sources.map(\.kind) == [.unknown] && !sources[0].truncated)
+        } else {
+            Issue.record("not project tasks")
+        }
         // 新的 agent 状态不让整条消息失败。
         let meta = try JSONDecoder().decode(
             HostMsg.self,

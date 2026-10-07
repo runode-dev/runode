@@ -17,14 +17,10 @@ public enum AttachMode: String, Hashable, Sendable, Codable {
 public enum Placement: String, Hashable, Sendable, Codable {
     /// 紧跟在旁边那个终端的标签后面的新标签。
     case tab
-    /// 把旁边那个终端一分为二，新终端在右边。
-    case right
-    /// 把旁边那个终端一分为二，新终端在下边。
-    case down
 }
 
 /// 前端能做什么，缺的项按不能。
-public struct Caps: Hashable, Sendable, Codable {
+public struct Caps: Hashable, Sendable, Encodable {
     public var snapshot: Bool
     public var vtReplay: Bool
 
@@ -37,44 +33,15 @@ public struct Caps: Hashable, Sendable, Codable {
         case snapshot
         case vtReplay = "vt_replay"
     }
-
-    public init(from decoder: any Decoder) throws {
-        let c = try decoder.container(keyedBy: CodingKeys.self)
-        snapshot = try c.decodeIfPresent(Bool.self, forKey: .snapshot) ?? false
-        vtReplay = try c.decodeIfPresent(Bool.self, forKey: .vtReplay) ?? false
-    }
 }
 
-/// 前端的种类。比自己新的一方才有的种类读成 `unknown`。
-public enum ClientKind: Hashable, Sendable, Codable {
-    case desktop, cli, tui, mobile, successor
-    case unknown(String)
-
-    var wireName: String {
-        switch self {
-        case .desktop: "desktop"
-        case .cli: "cli"
-        case .tui: "tui"
-        case .mobile: "mobile"
-        case .successor: "successor"
-        case .unknown(let name): name
-        }
-    }
-
-    public init(from decoder: any Decoder) throws {
-        let text = try decoder.singleValueContainer().decode(String.self)
-        self =
-            [ClientKind.desktop, .cli, .tui, .mobile, .successor].first { $0.wireName == text } ?? .unknown(text)
-    }
-
-    public func encode(to encoder: any Encoder) throws {
-        var container = encoder.singleValueContainer()
-        try container.encode(wireName)
-    }
+/// 前端的种类。手机只会说自己是 `mobile`。
+public enum ClientKind: String, Hashable, Sendable, Encodable {
+    case mobile
 }
 
 /// 前端发给宿主的消息。只列出手机这个前端会发的几种：`Hello`、`ListSessions`、`Layout`、`Open`、
-/// `OpenWorkspace`、`ListDirs`、`Spawn`、`Attach`、`Detach`、`Resize`、`Focus`、`ClearScreen`、`Kill`、
+/// `OpenWorkspace`、`ListDirs`、`Spawn`、`Attach`、`Detach`、`Resize`、`Focus`、`Kill`、
 /// `ReadScreen`、`SendKeys`、`Paste`、`Git`。JSON 的样子和
 /// 宿主的 `ClientMsg` 一致，可缺省的字段也照宿主序列化的样子写出 `null`。宿主对手机连接上的 `Shutdown`、
 /// 交接（`Handoff` 等）、`UiReply`、`SetOptions`、`SetTheme` 只回 `Error`，这里故意不定义它们，手机就
@@ -106,7 +73,6 @@ public enum ClientMsg: Hashable, Sendable, Encodable {
     case resize(id: SessionId, size: GridSize)
     /// 这个会话在前端被看着；`focused` 为真算一次交互，可能轮到这条连接决定尺寸。
     case focus(id: SessionId, focused: Bool)
-    case clearScreen(id: SessionId)
     /// 结束会话。
     case kill(id: SessionId)
     /// 读会话屏幕底部的文字：从最后一个有字的行往上 `lines` 行（含回滚历史），为空时是当前一屏。
@@ -175,7 +141,6 @@ public enum ClientMsg: Hashable, Sendable, Encodable {
             try c.encode(start, forKey: Key("start"))
             try c.encodeNil(forKey: Key("shell"))
             try c.encodeNil(forKey: Key("settings"))
-            try c.encode([[String]](), forKey: Key("env"))
         case let .attach(id, size, mode):
             try c.encode("attach", forKey: Key("type"))
             try c.encode(id, forKey: Key("id"))
@@ -192,9 +157,6 @@ public enum ClientMsg: Hashable, Sendable, Encodable {
             try c.encode("focus", forKey: Key("type"))
             try c.encode(id, forKey: Key("id"))
             try c.encode(focused, forKey: Key("focused"))
-        case let .clearScreen(id):
-            try c.encode("clear_screen", forKey: Key("type"))
-            try c.encode(id, forKey: Key("id"))
         case let .kill(id):
             try c.encode("kill", forKey: Key("type"))
             try c.encode(id, forKey: Key("id"))
@@ -266,20 +228,11 @@ public struct SessionInfo: Hashable, Sendable, Decodable {
     }
 }
 
-/// shell 集成报告运行完的一条命令。
-public struct FinishedCommand: Hashable, Sendable, Decodable {
-    public var cmd: String
-    public var cwd: String?
-    public var exit: Int32?
-    public var ts: UInt64
-}
-
 /// 宿主为什么断开。比自己新的宿主才有的原因读成 `unknown`。
 public enum GoodbyeReason: Hashable, Sendable, Decodable {
     case shutdown
     /// 交接给了新版本的宿主，重新连上就是新宿主。
     case handoff
-    case idle
     case error(String)
     case unknown(String)
 
@@ -291,7 +244,6 @@ public enum GoodbyeReason: Hashable, Sendable, Decodable {
         switch kind {
         case "shutdown": self = .shutdown
         case "handoff": self = .handoff
-        case "idle": self = .idle
         case "error": self = .error(try c.decodeIfPresent(String.self, forKey: .message) ?? "")
         default: self = .unknown(kind)
         }
@@ -300,9 +252,9 @@ public enum GoodbyeReason: Hashable, Sendable, Decodable {
 
 /// 宿主发给前端的消息，和宿主的 `HostMsg` 一一对应。不认识的种类读成 `unknown`（和宿主的
 /// `#[serde(other)]` 一样），认识的种类缺了必填字段时整条解析失败。手机用不上的几种（界面转来的
-/// 请求、交接）只解出编号，内容不读。
+/// 请求、交接、跑完的命令）只解出编号，内容不读；`Welcome` 只认种类。
 public enum HostMsg: Hashable, Sendable, Decodable {
-    case welcome(protocol: UInt32, build: String, hostPid: UInt32, snapshotFormat: UInt16, standalone: Bool)
+    case welcome
     case incompatible(protocol: UInt32, build: String, reason: String)
     case sessionList([SessionInfo])
     case spawned(req: UInt32, id: SessionId)
@@ -311,7 +263,7 @@ public enum HostMsg: Hashable, Sendable, Decodable {
     case resized(id: SessionId, size: GridSize)
     case themeApplied(id: SessionId, settings: TermSettings)
     case meta(id: SessionId, meta: SessionMeta)
-    case commandFinished(id: SessionId, command: FinishedCommand)
+    case commandFinished(id: SessionId)
     case resync(id: SessionId, reason: String)
     case exited(id: SessionId, status: Int32?)
     case bell(id: SessionId)
@@ -375,7 +327,7 @@ public enum HostMsg: Hashable, Sendable, Decodable {
         switch self {
         case .attached(let attached): attached.id
         case .snapshotEnd(let id), .resized(let id, _), .themeApplied(let id, _), .meta(let id, _),
-            .commandFinished(let id, _), .resync(let id, _), .exited(let id, _), .bell(let id),
+            .commandFinished(let id), .resync(let id, _), .exited(let id, _), .bell(let id),
             .screenText(let id, _, _), .sizeOwner(let id, _, _), .spawned(_, let id), .opened(_, let id):
             id
         case .error(_, let id, _): id
@@ -384,11 +336,9 @@ public enum HostMsg: Hashable, Sendable, Decodable {
     }
 
     private enum Keys: String, CodingKey {
-        case type, `protocol`, build, reason, sessions, req, id, channel, size, mode, meta, settings, command
-        case status, text, truncated, ui, message, format, mine, owner, standalone, windows, path, dirs, diff, branches
+        case type, `protocol`, build, reason, sessions, req, id, channel, size, mode, meta, settings
+        case status, text, truncated, ui, message, format, mine, owner, windows, path, dirs, diff, branches
         case dir, sources
-        case hostPid = "host_pid"
-        case snapshotFormat = "snapshot_format"
     }
 
     public init(from decoder: any Decoder) throws {
@@ -396,12 +346,7 @@ public enum HostMsg: Hashable, Sendable, Decodable {
         let type = try c.decode(String.self, forKey: .type)
         switch type {
         case "welcome":
-            self = .welcome(
-                protocol: try c.decode(UInt32.self, forKey: .protocol),
-                build: try c.decode(String.self, forKey: .build),
-                hostPid: try c.decode(UInt32.self, forKey: .hostPid),
-                snapshotFormat: try c.decode(UInt16.self, forKey: .snapshotFormat),
-                standalone: try c.decodeIfPresent(Bool.self, forKey: .standalone) ?? false)
+            self = .welcome
         case "incompatible":
             self = .incompatible(
                 protocol: try c.decode(UInt32.self, forKey: .protocol),
@@ -431,9 +376,7 @@ public enum HostMsg: Hashable, Sendable, Decodable {
         case "meta":
             self = .meta(id: try c.decode(SessionId.self, forKey: .id), meta: try c.decode(SessionMeta.self, forKey: .meta))
         case "command_finished":
-            self = .commandFinished(
-                id: try c.decode(SessionId.self, forKey: .id),
-                command: try c.decode(FinishedCommand.self, forKey: .command))
+            self = .commandFinished(id: try c.decode(SessionId.self, forKey: .id))
         case "resync":
             self = .resync(id: try c.decode(SessionId.self, forKey: .id), reason: try c.decode(String.self, forKey: .reason))
         case "exited":

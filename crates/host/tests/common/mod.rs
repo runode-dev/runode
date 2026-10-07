@@ -220,32 +220,19 @@ impl Peer {
 
     /// 开一个跑 `shell` 的会话（不开 shell 集成），返回它的标识。
     pub fn spawn(&mut self, shell: &str) -> SessionId {
-        self.spawn_with(shell, true, Vec::new(), None)
+        self.spawn_with(shell, true, None)
     }
 
-    pub fn spawn_with(
-        &mut self,
-        shell: &str,
-        start: bool,
-        env: Vec<(String, String)>,
-        cwd: Option<PathBuf>,
-    ) -> SessionId {
-        self.spawn_in(shell, SIZE, start, env, cwd)
+    pub fn spawn_with(&mut self, shell: &str, start: bool, cwd: Option<PathBuf>) -> SessionId {
+        self.spawn_in(shell, SIZE, start, cwd)
     }
 
     /// 开一个按 `size` 跑 `shell` 的会话（不开 shell 集成），`start` 为假时等 `Start`。
     pub fn spawn_sized(&mut self, shell: &str, size: GridSize, start: bool) -> SessionId {
-        self.spawn_in(shell, size, start, Vec::new(), None)
+        self.spawn_in(shell, size, start, None)
     }
 
-    fn spawn_in(
-        &mut self,
-        shell: &str,
-        size: GridSize,
-        start: bool,
-        env: Vec<(String, String)>,
-        cwd: Option<PathBuf>,
-    ) -> SessionId {
+    fn spawn_in(&mut self, shell: &str, size: GridSize, start: bool, cwd: Option<PathBuf>) -> SessionId {
         let req = self.next_req;
         self.next_req += 1;
         self.send(&ClientMsg::Spawn {
@@ -256,7 +243,6 @@ impl Peer {
             start,
             shell: Some(shell.into()),
             settings: None,
-            env,
         });
         match self.reply() {
             HostMsg::Spawned { req: answered, id } if answered == req => id,

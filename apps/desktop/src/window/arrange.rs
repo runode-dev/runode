@@ -14,7 +14,6 @@ use runode_shared_types::{
     pane::{Axis, Node, Rect, SplitId},
 };
 
-use super::persist::format;
 use super::{TITLEBAR_HEIGHT, WindowView, divider_color};
 use crate::ui::hsla;
 
@@ -181,12 +180,9 @@ impl WindowView {
     /// 有终端起不来时开出几个算几个。
     fn arrange(&mut self, arrangement: Arrangement, count: usize, window: &mut Window, cx: &mut Context<Self>) {
         let original = self.tab().focused;
-        // 目录已经被删掉时 shell 起不来，退回 workspace 的目录，再退回家目录。
-        let cwd = self.tab().focused_view().read(cx).cwd();
-        let cwd = format::start_dir(cwd.as_deref(), &self.workspace().dir);
         let mut entries = Vec::new();
         for _ in 0..count {
-            let Some(view) = self.spawn_terminal(cwd.as_deref(), window, cx) else {
+            let Some(view) = self.spawn_beside_focused(window, cx) else {
                 break;
             };
             entries.push(self.pane_entry(view, window, cx));

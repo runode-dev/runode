@@ -86,7 +86,7 @@ impl Element for TerminalElement {
             // 宿主给屏幕时实际尺寸还没请宿主改，等看上了（之后还会布局）再启动。
             if view.start_pending && view.screen.live().is_some() {
                 view.start_pending = false;
-                cx.defer_in(window, |view, _, cx| view.start_now(cx));
+                cx.defer_in(window, |view, _, _| view.start_now());
             }
             view.grid_origin = bounds.origin;
         });

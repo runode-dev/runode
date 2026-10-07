@@ -182,8 +182,6 @@ pub(crate) struct Exported {
     pub(crate) redactor: RedactorState,
     /// `Inbox::Start` 时启动的程序。
     pub(crate) shell: Option<String>,
-    /// 开会话时另外设的环境变量，还没启动的会话在新宿主里启动时用。
-    pub(crate) extra_env: Vec<(String, String)>,
 }
 
 /// 交接过来、已经启动了 shell 的会话，见 `adopt`。
@@ -202,10 +200,8 @@ pub(crate) struct Setup {
     pub(crate) id: SessionId,
     /// VT 一开始套的主题。
     pub(crate) settings: TermSettings,
-    /// 启动 shell 时另外设的全部环境变量（宿主的、这个会话的和 `runode_protocol::ENV_SESSION`）。
+    /// 启动 shell 时另外设的全部环境变量（宿主的和 `runode_protocol::ENV_SESSION`）。
     pub(crate) env: Vec<(String, OsString)>,
-    /// 其中开会话时指定的那些，交接还没启动的会话时带给新宿主。
-    pub(crate) extra_env: Vec<(String, String)>,
     pub(crate) record_history: Arc<AtomicBool>,
     /// 请界面办事（读写剪贴板）的一头。
     pub(crate) ui: UiPort,
@@ -282,7 +278,7 @@ impl Handle {
 /// 开会话：在调用的线程里打开伪终端（`start` 时连 shell 一起启动），错误当场返回；再起会话线程，
 /// 等它把 `HostSession` 建好。
 pub(crate) fn spawn(setup: Setup, options: SpawnOptions) -> Result<Handle> {
-    let Setup { id, settings, env, extra_env, record_history, ui, clipboard, read_patience } = setup;
+    let Setup { id, settings, env, record_history, ui, clipboard, read_patience } = setup;
     let (inbox, rx) = mpsc::channel();
     let credits = Arc::new(Credits::default());
     let sink = pty_sink(&inbox, &credits);
@@ -312,7 +308,6 @@ pub(crate) fn spawn(setup: Setup, options: SpawnOptions) -> Result<Handle> {
             };
             let _ = ready.send(Ok(()));
             let mut runner = Runner::new(id, session, options.shell, settings, credits, record_history);
-            runner.extra_env = extra_env;
             runner.ui = ui;
             runner.set_clipboard(clipboard);
             runner.read_patience = read_patience;
@@ -339,7 +334,7 @@ fn pty_sink(inbox: &mpsc::Sender<Inbox>, credits: &Arc<Credits>) -> pty::PtySink
 /// 停着、从没开过闸的 `Pty` 直接丢掉其实也不结束 shell（见 `Pty::adopt_paused`），明着交回是把
 /// 「不接手了」说清楚、出错时记一笔，不靠丢掉时对停着的 `Pty` 的特殊处理。
 pub(crate) fn adopt(setup: Setup, adopted: Adopted) -> Result<Adopting> {
-    let Setup { id, settings: _, env: _, extra_env, record_history, ui, clipboard, read_patience } = setup;
+    let Setup { id, settings: _, env: _, record_history, ui, clipboard, read_patience } = setup;
     let Adopted { handoff, export, snapshot, replay, redactor, shell } = adopted;
     let (inbox, rx) = mpsc::channel();
     let credits = Arc::new(Credits::default());
@@ -365,7 +360,6 @@ pub(crate) fn adopt(setup: Setup, adopted: Adopted) -> Result<Adopting> {
         let _ = ready.send(Ok(replayed));
         let mut runner = Runner::new(id, session, shell, settings, credits, record_history);
         runner.redactor = ReportRedactor::from_state(redactor);
-        runner.extra_env = extra_env;
         runner.ui = ui;
         runner.set_clipboard(clipboard);
         runner.read_patience = read_patience;
@@ -453,8 +447,6 @@ struct Runner {
     settings: Arc<TermSettings>,
     /// `Inbox::Start` 时启动的程序，见 `SpawnOptions::shell`。
     shell: Option<String>,
-    /// 开会话时另外设的环境变量，交接还没启动的会话时带给新宿主，见 `Setup::extra_env`。
-    extra_env: Vec<(String, String)>,
     credits: Arc<Credits>,
     record_history: Arc<AtomicBool>,
     /// 前端要清屏，等 VT 回到 ground 再清。
@@ -496,7 +488,6 @@ impl Runner {
             redactor: ReportRedactor::new(),
             settings: Arc::new(settings),
             shell,
-            extra_env: Vec::new(),
             credits,
             record_history,
             clear_pending: false,
@@ -777,7 +768,6 @@ impl Runner {
                 replay,
                 redactor: runner.redactor.state(),
                 shell: runner.shell.clone(),
-                extra_env: runner.extra_env.clone(),
             }))
         };
         if !self.session.export().started {

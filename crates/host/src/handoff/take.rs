@@ -367,7 +367,6 @@ fn receive_session(
         settings,
         shell,
         start_dir,
-        env,
         meta,
         prompt_reported,
         running,
@@ -378,7 +377,7 @@ fn receive_session(
     else {
         return Err("the old host sent something other than a session".into());
     };
-    let mut setup = shared.setup(id, settings.clone(), env);
+    let mut setup = shared.setup(id, settings.clone());
     if !started {
         // 宿主的 `ENV_SOCKET` 提交时才设（失败时不留状态），这个会话启动 shell 时先带上。
         let socket = received.host.socket.as_os_str().to_owned();

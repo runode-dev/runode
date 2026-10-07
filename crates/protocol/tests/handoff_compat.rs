@@ -111,7 +111,8 @@ fn goodbye_reasons_are_readable() {
     let cases = [
         (r#"{"kind":"shutdown"}"#, GoodbyeReason::Shutdown),
         (r#"{"kind":"handoff"}"#, GoodbyeReason::Handoff),
-        (r#"{"kind":"idle"}"#, GoodbyeReason::Idle),
+        // 早先的版本定义过 `idle`，宿主从来发不出来，删掉后和以后的新原因一样读成 `Unknown`。
+        (r#"{"kind":"idle"}"#, GoodbyeReason::Unknown),
         (r#"{"kind":"error","message":"boom"}"#, GoodbyeReason::Error { message: "boom".into() }),
         (r#"{"kind":"maintenance","until":1790000000}"#, GoodbyeReason::Unknown),
     ];
@@ -173,6 +174,7 @@ fn host_part_is_readable() {
     assert!(blocks.is_empty());
 }
 
+/// 早先的旧宿主还写 `env`（开会话时另外设的环境变量），现在没有这一项，读时忽略。
 #[test]
 fn session_part_is_readable() {
     let header = format!(
@@ -199,7 +201,6 @@ fn session_part_is_readable() {
         settings: theme,
         shell,
         start_dir,
-        env,
         meta,
         prompt_reported,
         running,
@@ -218,7 +219,6 @@ fn session_part_is_readable() {
     assert_eq!(theme, settings());
     assert_eq!(shell.as_deref(), Some("/bin/zsh"));
     assert_eq!(start_dir, Some("/tmp".into()));
-    assert_eq!(env, vec![("FOO".to_owned(), "bar".to_owned())]);
     assert_eq!((meta.title.as_deref(), meta.foreground.as_deref()), (Some("vim"), Some("vim")));
     assert_eq!(meta.shell_path, Some("/bin".into()));
     assert_eq!(running, Some(RunningCommand { cmd: "vim a.txt".into(), cwd: Some("/tmp".into()), ts: 1_790_000_000 }));

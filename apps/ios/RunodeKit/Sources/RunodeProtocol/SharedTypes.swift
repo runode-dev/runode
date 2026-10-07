@@ -162,6 +162,23 @@ public struct TermSettings: Hashable, Sendable, Codable {
     public var optionAsAlt: OptionAsAlt
     /// 回滚历史最多占多少字节。
     public var scrollbackLimit: UInt64
+    /// 宿主给 shell 集成打开哪些功能；手机不用，只为编解码和宿主一致。
+    public var shellFeatures: ShellFeatures
+
+    /// 宿主 `ShellFeatures` 的线上样子；缺的项按打开读。
+    public struct ShellFeatures: Hashable, Sendable, Codable {
+        /// 提示符上把光标换成竖线。
+        public var cursor: Bool
+
+        public init(cursor: Bool = true) {
+            self.cursor = cursor
+        }
+
+        public init(from decoder: any Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            cursor = try c.decodeIfPresent(Bool.self, forKey: .cursor) ?? true
+        }
+    }
 
     /// 调色板里的一项，JSON 里是 `[下标, [r, g, b]]`。
     public struct PaletteEntry: Hashable, Sendable, Codable {
@@ -213,7 +230,7 @@ public struct TermSettings: Hashable, Sendable, Codable {
         cursorColor: TerminalColor?, cursorText: TerminalColor?, selectionBackground: TerminalColor?,
         selectionForeground: TerminalColor?, searchBackground: TerminalColor, searchForeground: TerminalColor,
         searchSelectedBackground: TerminalColor, searchSelectedForeground: TerminalColor, optionAsAlt: OptionAsAlt,
-        scrollbackLimit: UInt64
+        scrollbackLimit: UInt64, shellFeatures: ShellFeatures = ShellFeatures()
     ) {
         self.background = background
         self.foreground = foreground
@@ -230,6 +247,7 @@ public struct TermSettings: Hashable, Sendable, Codable {
         self.searchSelectedForeground = searchSelectedForeground
         self.optionAsAlt = optionAsAlt
         self.scrollbackLimit = scrollbackLimit
+        self.shellFeatures = shellFeatures
     }
 
     enum CodingKeys: String, CodingKey {
@@ -246,6 +264,7 @@ public struct TermSettings: Hashable, Sendable, Codable {
         case searchSelectedForeground = "search_selected_foreground"
         case optionAsAlt = "option_as_alt"
         case scrollbackLimit = "scrollback_limit"
+        case shellFeatures = "shell_features"
     }
 
     public init(from decoder: any Decoder) throws {
@@ -272,6 +291,7 @@ public struct TermSettings: Hashable, Sendable, Codable {
             ?? fallback.searchSelectedForeground
         optionAsAlt = (try? c.decodeIfPresent(OptionAsAlt.self, forKey: .optionAsAlt)) ?? fallback.optionAsAlt
         scrollbackLimit = try c.decodeIfPresent(UInt64.self, forKey: .scrollbackLimit) ?? fallback.scrollbackLimit
+        shellFeatures = (try? c.decodeIfPresent(ShellFeatures.self, forKey: .shellFeatures)) ?? fallback.shellFeatures
     }
 
     public func encode(to encoder: any Encoder) throws {
@@ -291,6 +311,7 @@ public struct TermSettings: Hashable, Sendable, Codable {
         try c.encode(searchSelectedForeground, forKey: .searchSelectedForeground)
         try c.encode(optionAsAlt, forKey: .optionAsAlt)
         try c.encode(scrollbackLimit, forKey: .scrollbackLimit)
+        try c.encode(shellFeatures, forKey: .shellFeatures)
     }
 }
 

@@ -26,7 +26,7 @@ use std::{
     collections::{HashMap, VecDeque},
     io::{self, BufWriter, Write as _},
     net::Shutdown,
-    os::unix::{io::AsRawFd as _, net::UnixStream},
+    os::unix::net::UnixStream,
     path::PathBuf,
     sync::{
         Arc, Mutex, MutexGuard, OnceLock, PoisonError,
@@ -57,9 +57,6 @@ const SPAWN_TIMEOUT: Duration = Duration::from_secs(5);
 const READ_BUFFER: usize = 256 << 10;
 /// 写的缓冲：帧头和小的载荷攒成一次写；更大的载荷直接写。
 const WRITE_BUFFER: usize = 64 << 10;
-/// socket 的收发缓冲。macOS 上默认只有 8 KiB，刷屏的输出一块就塞满；经 `Host::connect_pair` 拿到的
-/// 一端宿主已经设好，连 socket 的这里自己设。
-const SOCKET_BUFFER: libc::c_int = 4 << 20;
 
 /// 宿主给的一个会话的样子，来自 `HostMsg::Attached`。
 #[derive(Clone, Debug, PartialEq)]
@@ -363,7 +360,7 @@ impl Link {
     }
 
     fn connect_to(&self, stream: UnixStream, standalone_only: bool) -> Result<(), ConnectError> {
-        set_buffers(&stream);
+        runode_host::set_buffers(&stream);
         stream.set_write_timeout(Some(WRITE_TIMEOUT)).map_err(ConnectError::Io)?;
         let welcome = handshake(&stream, &self.inner.build)?;
         if standalone_only && !welcome.standalone {
@@ -418,7 +415,7 @@ impl Link {
     }
 
     /// 断开现在的连接，各个会话收到 `Lost`。
-    #[allow(dead_code)]
+    #[cfg(test)]
     pub fn close(&self) {
         let generation = self.inner.state().generation;
         self.inner.lost(generation);
@@ -478,7 +475,7 @@ impl Link {
         let SpawnOptions { size, cwd, integration, start, shell, settings } = options;
         let req = self.inner.next_req.fetch_add(1, Ordering::Relaxed);
         let reply = self.expect_reply(req)?;
-        let spawn = ClientMsg::Spawn { req, size, cwd, integration, start, shell, settings, env: Vec::new() };
+        let spawn = ClientMsg::Spawn { req, size, cwd, integration, start, shell, settings };
         if let Err(err) = self.inner.control(&spawn) {
             self.inner.state().replies.remove(&req);
             return Err(anyhow!("failed to ask the host for a terminal: {err}"));
@@ -742,26 +739,6 @@ fn frame_error(err: FrameError) -> ConnectError {
         FrameError::Io(err) => ConnectError::Io(err),
         FrameError::Truncated => ConnectError::Closed,
         err => ConnectError::Io(io::Error::other(err.to_string())),
-    }
-}
-
-/// 把 socket 的收发缓冲设成 `SOCKET_BUFFER`；设不了时记日志，照常用。
-fn set_buffers(stream: &UnixStream) {
-    for option in [libc::SO_SNDBUF, libc::SO_RCVBUF] {
-        let size = SOCKET_BUFFER;
-        // SAFETY: 描述符来自 `stream`；值指向本地变量，长度是它的大小。
-        let result = unsafe {
-            libc::setsockopt(
-                stream.as_raw_fd(),
-                libc::SOL_SOCKET,
-                option,
-                (&raw const size).cast(),
-                std::mem::size_of_val(&size) as libc::socklen_t,
-            )
-        };
-        if result != 0 {
-            tracing::debug!("failed to set a socket buffer: {}", io::Error::last_os_error());
-        }
     }
 }
 

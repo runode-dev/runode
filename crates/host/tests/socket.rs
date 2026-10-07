@@ -115,24 +115,22 @@ fn sessions_can_be_spawned_over_the_socket() {
         start: true,
         shell: None,
         settings: None,
-        env: Vec::new(),
     });
     let HostMsg::Spawned { req: 7, id } = peer.reply() else { panic!("expected spawned") };
     peer.attach(id, AttachMode::VtReplay);
     peer.send(&ClientMsg::Kill { id });
 }
 
-/// `start` 为假时只开好伪终端：标题和目录是起始目录的，`Start` 后程序才跑起来。另外设的环境
-/// 变量盖过宿主设的同名变量，但盖不了会话自己的标识。
+/// `start` 为假时只开好伪终端：标题和目录是起始目录的，`Start` 后程序才跑起来，带着宿主设的环境
+/// 变量和会话自己的标识。
 #[test]
 fn sessions_spawned_unstarted_start_on_request() {
     let dir = temp_dir("start");
     let (host, socket) = listen(&dir);
     host.set_env("RUNODE_TEST", "host");
     let mut peer = Peer::hello(&socket, false);
-    let env = vec![("RUNODE_TEST".into(), "spawn".into()), ("RUNODE_SESSION".into(), "forged".into())];
     let shell = script(&dir, "env.sh", "env\nexec /bin/cat");
-    let id = peer.spawn_with(&shell, false, env, Some(dir.clone()));
+    let id = peer.spawn_with(&shell, false, Some(dir.clone()));
     peer.send(&ClientMsg::Attach { id, size: Some(SIZE), mode: AttachMode::VtReplay });
     let HostMsg::Attached { channel, mode, meta, .. } = peer.reply() else { panic!("expected attached") };
     peer.screen(id, channel, mode);
@@ -142,7 +140,7 @@ fn sessions_spawned_unstarted_start_on_request() {
     peer.input(channel, b"go\r");
     let output = [output, peer.wait_for_output(channel, b"go")].concat();
     let output = String::from_utf8_lossy(&output);
-    assert!(output.contains("RUNODE_TEST=spawn") && !output.contains("RUNODE_TEST=host"), "{output}");
+    assert!(output.contains("RUNODE_TEST=host"), "{output}");
     assert!(output.contains(&format!("RUNODE_SESSION={id}")), "{output}");
     // 没有这个会话时回 `Error`。
     peer.send(&ClientMsg::Start { id: SessionId(1), integration: IntegrationMode::Off });
@@ -276,7 +274,7 @@ fn shell_reports_do_not_leave_the_host() {
         &format!("printf '\\033]6973;{TOKEN};cwd=/tm'\nsleep 0.3\nprintf 'p\\007visible\\n'\nexec /bin/cat"),
     );
     let mut pair = Peer::pair(&host);
-    let id = pair.spawn_with(&shell, false, Vec::new(), None);
+    let id = pair.spawn_with(&shell, false, None);
     let (pair_channel, _) = pair.attach(id, AttachMode::Snapshot);
     let mut peer = Peer::hello(&socket, false);
     let (channel, _) = peer.attach(id, AttachMode::VtReplay);
@@ -317,7 +315,7 @@ fn a_snapshot_taken_inside_a_shell_report_has_no_token() {
     // 先连上一个前端看着输出：它收到抹过的报告开头时，宿主那份 VT 已经喂过报告的前半截（先转发
     // 再喂，都在会话线程里，之后的 `Attach` 排在后面）。
     let mut watcher = Peer::hello(&socket, false);
-    let id = watcher.spawn_with(&shell, false, Vec::new(), None);
+    let id = watcher.spawn_with(&shell, false, None);
     let (watched, _) = watcher.attach(id, AttachMode::VtReplay);
     watcher.send(&ClientMsg::Start { id, integration: IntegrationMode::Off });
     watcher.wait_for_output(watched, b"\x1b]6973;");
@@ -565,12 +563,8 @@ fn bells_follow_the_output_that_rang() {
     let dir = temp_dir("bell");
     let (_host, socket) = listen(&dir);
     let mut viewer = Peer::desktop(&socket);
-    let id = viewer.spawn_with(
-        &script(&dir, "bell.sh", "printf '\\033]0;title\\007ding\\007'\nexec /bin/cat"),
-        false,
-        Vec::new(),
-        None,
-    );
+    let id =
+        viewer.spawn_with(&script(&dir, "bell.sh", "printf '\\033]0;title\\007ding\\007'\nexec /bin/cat"), false, None);
     let (channel, _) = viewer.attach(id, AttachMode::Snapshot);
     let mut watcher = Peer::hello(&socket, false);
     watcher.attach(id, AttachMode::MetaOnly);

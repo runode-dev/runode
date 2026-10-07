@@ -31,7 +31,7 @@ pub fn dir_chars(typed: &str) -> usize {
 pub fn list(typed: &str, cwd: &Path, home: Option<&Path>, filter: Filter) -> Vec<Entry> {
     let split = typed.rfind('/').map_or(0, |i| i + 1);
     let (dir, name) = typed.split_at(split);
-    let Some(dir) = resolve(dir, cwd, home) else {
+    let Some(dir) = resolve_path(dir, Some(cwd), home) else {
         return Vec::new();
     };
     let show_hidden = name.starts_with('.');
@@ -70,24 +70,31 @@ pub fn is_executable(path: &Path) -> bool {
     std::fs::metadata(path).is_ok_and(|meta| meta.is_file() && meta.permissions().mode() & 0o111 != 0)
 }
 
-/// 当前词的目录部分对应的实际目录。
-fn resolve(dir: &str, cwd: &Path, home: Option<&Path>) -> Option<PathBuf> {
-    if dir.is_empty() {
-        return Some(cwd.to_owned());
+/// 词里写的路径对应的实际路径：`~` 和 `~/` 开头的从 `home` 算，`~user` 这样别人的主目录不处理，
+/// 绝对路径原样返回，其余从 `cwd` 算；缺了要用的那个目录时是 `None`。
+pub fn resolve_path(path: &str, cwd: Option<&Path>, home: Option<&Path>) -> Option<PathBuf> {
+    match path.strip_prefix('~') {
+        Some("") => home.map(Path::to_owned),
+        Some(rest) => Some(home?.join(rest.strip_prefix('/')?)),
+        None if path.starts_with('/') => Some(path.into()),
+        None => Some(cwd?.join(path)),
     }
-    if let Some(rest) = dir.strip_prefix("~/") {
-        return Some(home?.join(rest));
-    }
-    // `~user/` 这样别人的主目录不处理。
-    if dir.starts_with('~') {
-        return None;
-    }
-    Some(cwd.join(dir))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn resolves_home_absolute_and_relative_paths() {
+        let (cwd, home) = (Some(Path::new("/w")), Some(Path::new("/h")));
+        assert_eq!(resolve_path("~", cwd, home), Some("/h".into()));
+        assert_eq!(resolve_path("~/x", cwd, home), Some("/h/x".into()));
+        assert_eq!(resolve_path("~user/x", cwd, home), None);
+        assert_eq!(resolve_path("/abs", None, None), Some("/abs".into()));
+        assert_eq!(resolve_path("rel", cwd, None), Some("/w/rel".into()));
+        assert_eq!(resolve_path("rel", None, home), None);
+    }
 
     fn scratch() -> tempdir::Dir {
         let dir = tempdir::Dir::new("paths");
