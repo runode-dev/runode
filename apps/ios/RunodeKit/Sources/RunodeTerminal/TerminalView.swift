@@ -555,6 +555,8 @@
             guard abs(velocity) > 200 else { return }
             momentumVelocity = velocity
             let link = CADisplayLink(target: self, selector: #selector(stepMomentum(_:)))
+            // ProMotion 屏上跟系统的滚动视图一样按 120Hz 走（应用开了 CADisableMinimumFrameDurationOnPhone）。
+            link.preferredFrameRateRange = CAFrameRateRange(minimum: 80, maximum: 120, preferred: 120)
             link.add(to: .main, forMode: .common)
             momentumLink = link
         }

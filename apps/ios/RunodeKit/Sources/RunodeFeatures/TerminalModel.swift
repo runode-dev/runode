@@ -100,6 +100,10 @@ public final class TerminalModel {
     @ObservationIgnored private let ownerProbeDelay: Duration
     @ObservationIgnored private let onOpen: @MainActor (SessionId) -> Void
     @ObservationIgnored private let onClose: @MainActor (SessionId) -> Void
+    /// Claude Code 全屏界面的滚轮：按它的加速规则攒着发，见 `ClaudeWheelPacer`。
+    @ObservationIgnored private var claudeWheel = ClaudeWheelPacer()
+    @ObservationIgnored private var claudeWheelAnchor = (column: 0, row: 0)
+    @ObservationIgnored private var claudeWheelRetry: Task<Void, Never>?
 
     /// `onOpen`、`onClose` 告诉会话列表这个会话正被终端页看着（列表就不再给它发只看状态的 `Attach`，
     /// 免得换掉这里的订阅）；关掉时由列表改回只看状态。`ownerProbeDelay` 是 `ownerHint` 为 `unknown`
@@ -183,6 +187,12 @@ public final class TerminalModel {
         case .live, .replaying: break
         default: return
         }
+        if case .wheel(let lines, let column, let row) = input, agent?.kind.label == "claude", terminal.mouseTracking {
+            claudeWheel.add(lines)
+            claudeWheelAnchor = (column, row)
+            sendClaudeWheel()
+            return
+        }
         let bytes: [UInt8] =
             switch input {
             case .key(let key): terminal.encode(key)
@@ -193,6 +203,25 @@ public final class TerminalModel {
             }
         guard !bytes.isEmpty else { return }
         link.sendInput(Data(bytes), channel: channel, generation: generation)
+    }
+
+    /// 发出 `claudeWheel` 现在该发的滚轮事件；剩下的不够下一个事件滚的，过一会儿再来。
+    private func sendClaudeWheel() {
+        claudeWheelRetry?.cancel()
+        claudeWheelRetry = nil
+        guard let terminal, let channel, let generation else { return }
+        let (events, retryAfter) = claudeWheel.take(at: .now)
+        let bytes = terminal.encodeWheel(
+            lines: events, column: claudeWheelAnchor.column, row: claudeWheelAnchor.row)
+        if !bytes.isEmpty {
+            link.sendInput(Data(bytes), channel: channel, generation: generation)
+        }
+        guard let retryAfter else { return }
+        claudeWheelRetry = Task { [weak self] in
+            try? await Task.sleep(for: retryAfter)
+            guard !Task.isCancelled else { return }
+            self?.sendClaudeWheel()
+        }
     }
 
     /// 视图按自己的大小算出来的「适配手机」的网格。正在适配时跟着改（转屏、弹键盘）。
@@ -406,5 +435,67 @@ public final class TerminalModel {
             self.autoFit = true
             self.applySizeMode(wasFitting: wasFitting)
         }
+    }
+}
+
+/// Claude Code 全屏界面滚轮加速的镜像：把「想滚几行」换成「该发几个滚轮事件」，让它滚的行数跟着手指走。
+///
+/// 它（2.1 版）对 runode 这种不算 wheelFlood 的 macOS 终端这样滚：离上一个滚轮事件超过 40 毫秒，这次滚
+/// 1 行；不到 40 毫秒，倍率加 0.3、取整后滚那么多行，最多 6 行。换方向的头一个事件被吞掉；吞掉后 200
+/// 毫秒内又折回原方向，会换成猛得多的另一套加速。手机按一行发一个事件的话，快拖和甩出去的惯性会被放大
+/// 好几倍、一跳好几行，所以这里按同样的规则算每个事件会滚几行，攒够了才发，折回时等过那 200 毫秒。
+///
+/// ponytail: 照抄了 Claude Code 的常量，假定用户没改滚动速度、没关加速；它改了算法这里要跟着改。
+struct ClaudeWheelPacer {
+    /// 还没发出去的行数，负数往上。
+    private var pending = 0
+    /// 它记着的上一个方向（吞掉的换向事件不改它）、上一个事件的时刻和倍率。
+    private var direction = 0
+    private var last: ContinuousClock.Instant?
+    private var multiplier = 1.0
+    /// 换方向的头一个事件刚被吞掉。
+    private var flipPending = false
+
+    mutating func add(_ lines: Int) {
+        pending += lines
+    }
+
+    /// 现在该发的滚轮事件数（负数往上）；剩下的行数不够下一个事件滚的，或者要等过折回的 200 毫秒时，
+    /// 带上过多久再来取。
+    mutating func take(at now: ContinuousClock.Instant) -> (events: Int, retryAfter: Duration?) {
+        var events = 0
+        while pending != 0 {
+            let step = pending.signum()
+            let gap = last.map { now - $0 } ?? .seconds(1)
+            let rows: Int
+            if flipPending {
+                if step == direction, gap <= .milliseconds(200) {
+                    return (events, .milliseconds(210) - gap)
+                }
+                rows = 1
+            } else if direction != 0, step != direction {
+                rows = 0
+            } else {
+                rows = gap > .milliseconds(40) ? 1 : Int(min(multiplier + 0.3, 6))
+            }
+            // 不到 40 毫秒才会一次滚两行以上；等过了 40 毫秒，下一个事件就只滚 1 行。
+            if rows > abs(pending) {
+                return (events, .milliseconds(50) - gap)
+            }
+            if flipPending {
+                flipPending = false
+                direction = step
+                multiplier = 1
+            } else if rows == 0 {
+                flipPending = true
+            } else {
+                multiplier = gap > .milliseconds(40) ? 1 : min(multiplier + 0.3, 6)
+                direction = step
+            }
+            last = now
+            events += step
+            pending -= step * rows
+        }
+        return (events, nil)
     }
 }

@@ -64,6 +64,15 @@
             didSet { if hasKeyboardFocus != oldValue { invalidateCursor() } }
         }
         private var colorCache: [Rgb: CGColor] = [:]
+        /// 要找后备字体排版的多码位字素簇（emoji 序列、组合字符）排好的 CTLine 和宽度，按文字和字体缓存：
+        /// 整屏重画时（全屏 agent 界面每滚一下都是）不再逐字重新排版。颜色从上下文取，不进缓存键。
+        private var lineCache: [LineKey: (line: CTLine, advance: CGFloat)] = [:]
+        /// `plainGlyph` 查过的字形，没有的也记下（`nil`）。
+        private var glyphCache: [LineKey: PlainGlyph?] = [:]
+        private struct LineKey: Hashable {
+            let text: String
+            let font: CTFont
+        }
 
         override init(frame: CGRect) {
             super.init(frame: frame)
@@ -180,18 +189,16 @@
         private func drawText(row: Int, in context: CGContext) {
             let top = CGFloat(row) * font.cellHeight
             let baseline = top + font.ascent
+            drawPlainGlyphs(row: row, baseline: baseline, in: context)
             for (column, cell) in screen.cells[row].enumerated() {
                 guard cell.width != .spacerTail, cell.width != .spacerHead else { continue }
                 let x = CGFloat(column) * font.cellWidth
                 let width = font.cellWidth * (cell.width == .wide ? 2 : 1)
-                let foreground = colors(of: cell).foreground
-                let faint = cell.attributes.contains(.faint)
-                let ink = color(foreground, alpha: faint ? 0.6 : 1)
-                if !cell.text.isEmpty, cell.text != " ", !cell.attributes.contains(.invisible) {
+                let ink = ink(of: cell)
+                let ctFont = font.font(bold: cell.attributes.contains(.bold), italic: cell.attributes.contains(.italic))
+                if hasText(cell), plainGlyph(cell.text, font: ctFont) == nil {
                     let cellRect = CGRect(x: x, y: top, width: width, height: font.cellHeight)
                     if !drawPowerline(cell.text, in: cellRect, color: ink, context: context) {
-                        let ctFont = font.font(
-                            bold: cell.attributes.contains(.bold), italic: cell.attributes.contains(.italic))
                         let iconWidth =
                             cell.width == .narrow && followedByBlank(row: row, column: column) ? width * 2 : width
                         drawGlyphs(
@@ -213,6 +220,86 @@
                         CGRect(x: x, y: top + font.cellHeight / 2, width: width, height: max(1, font.size / 14)))
                 }
             }
+        }
+
+        private func hasText(_ cell: ScreenCell) -> Bool {
+            !cell.text.isEmpty && cell.text != " " && !cell.attributes.contains(.invisible)
+        }
+
+        private func ink(of cell: ScreenCell) -> CGColor {
+            color(colors(of: cell).foreground, alpha: cell.attributes.contains(.faint) ? 0.6 : 1)
+        }
+
+        /// 等宽字体里直接有字形的格子按同字体、同颜色攒成一段，一次 `CTFontDrawGlyphs` 画完，省掉逐格的
+        /// 状态保存、字形查找和排版。全屏的 agent 界面每滚一下都整屏重画，大半时间花在这里。其余的格子
+        /// （制表符、Powerline、私用区图标、多码位的字素簇）由 `drawText` 逐格画。
+        private func drawPlainGlyphs(row: Int, baseline: CGFloat, in context: CGContext) {
+            context.saveGState()
+            defer { context.restoreGState() }
+            context.textMatrix = .identity
+            context.translateBy(x: 0, y: baseline)
+            context.scaleBy(x: 1, y: -1)
+            var run: (font: CTFont, color: CGColor)?
+            var glyphs: [CGGlyph] = []
+            var positions: [CGPoint] = []
+            func flush() {
+                guard let current = run, !glyphs.isEmpty else { return }
+                context.setFillColor(current.color)
+                CTFontDrawGlyphs(current.font, glyphs, positions, glyphs.count, context)
+                glyphs.removeAll(keepingCapacity: true)
+                positions.removeAll(keepingCapacity: true)
+            }
+            for (column, cell) in screen.cells[row].enumerated() {
+                guard cell.width == .narrow || cell.width == .wide, hasText(cell) else { continue }
+                let ctFont = font.font(bold: cell.attributes.contains(.bold), italic: cell.attributes.contains(.italic))
+                guard let plain = plainGlyph(cell.text, font: ctFont) else { continue }
+                let ink = ink(of: cell)
+                if run?.font != plain.font || run?.color != ink {
+                    flush()
+                    run = (plain.font, ink)
+                }
+                var x = CGFloat(column) * font.cellWidth
+                if let advance = plain.centeredAdvance {
+                    x += max(0, (font.cellWidth * (cell.width == .wide ? 2 : 1) - advance) / 2)
+                }
+                glyphs.append(plain.glyph)
+                positions.append(CGPoint(x: x, y: 0))
+            }
+            flush()
+        }
+
+        /// 一个能直接画的字形：等宽字体里的画在格子左边；后备字体里的（中文等）带着宽度，在格子里居中，
+        /// 和 `drawGlyphs` 里 CTLine 的画法一样。
+        private struct PlainGlyph {
+            let font: CTFont
+            let glyph: CGGlyph
+            let centeredAdvance: CGFloat?
+        }
+
+        /// 只有一个码位、又不是自己画的制表符、Powerline 符号和私用区图标时，它在等宽字体或系统后备字体
+        /// 里的字形；否则（组合字符、emoji 序列这些多码位的字素簇）为空，交给 CTLine。
+        private func plainGlyph(_ text: String, font ctFont: CTFont) -> PlainGlyph? {
+            let key = LineKey(text: text, font: ctFont)
+            if let cached = glyphCache[key] { return cached }
+            var plain: PlainGlyph?
+            if let scalar = text.unicodeScalars.first, text.unicodeScalars.count == 1,
+                !BoxDrawing.handles(scalar), !PowerlineGlyph.handles(scalar)
+            {
+                var units = Array(text.utf16)
+                var glyphs = [CGGlyph](repeating: 0, count: units.count)
+                if CTFontGetGlyphsForCharacters(ctFont, &units, &glyphs, units.count), glyphs[0] != 0 {
+                    plain = PlainGlyph(font: ctFont, glyph: glyphs[0], centeredAdvance: nil)
+                } else if !SymbolFont.isPrivateUse(scalar) {
+                    let fallback = CTFontCreateForString(ctFont, text as CFString, CFRange(location: 0, length: units.count))
+                    if CTFontGetGlyphsForCharacters(fallback, &units, &glyphs, units.count), glyphs[0] != 0 {
+                        let advance = CTFontGetAdvancesForGlyphs(fallback, .horizontal, &glyphs, nil, 1)
+                        plain = PlainGlyph(font: fallback, glyph: glyphs[0], centeredAdvance: CGFloat(advance))
+                    }
+                }
+            }
+            if glyphCache.count > 20_000 { glyphCache.removeAll() }
+            glyphCache[key] = plain
+            return plain
         }
 
         /// 制表符和 Powerline 的几何分隔符按格子自己画（见 `BoxDrawing`、`PowerlineGlyph`）；不是这类字符时
@@ -282,16 +369,27 @@
                     return
                 }
             }
+            let (line, advance) = cachedLine(text, font: ctFont)
+            context.setFillColor(color)
+            context.textPosition = CGPoint(x: max(0, (width - advance) / 2), y: 0)
+            CTLineDraw(line, context)
+        }
+
+        private func cachedLine(_ text: String, font ctFont: CTFont) -> (line: CTLine, advance: CGFloat) {
+            let key = LineKey(text: text, font: ctFont)
+            if let cached = lineCache[key] { return cached }
+            // ponytail: 不按冷热淘汰，满了整个清掉；一屏能出现的字有限，真常常清空再换 LRU。
+            if lineCache.count > 20_000 { lineCache.removeAll() }
             let attributed = NSAttributedString(
                 string: text,
                 attributes: [
                     NSAttributedString.Key(kCTFontAttributeName as String): ctFont,
-                    NSAttributedString.Key(kCTForegroundColorAttributeName as String): color,
+                    NSAttributedString.Key(kCTForegroundColorFromContextAttributeName as String): true,
                 ])
             let line = CTLineCreateWithAttributedString(attributed)
-            let advance = CGFloat(CTLineGetTypographicBounds(line, nil, nil, nil))
-            context.textPosition = CGPoint(x: max(0, (width - advance) / 2), y: 0)
-            CTLineDraw(line, context)
+            let entry = (line, CGFloat(CTLineGetTypographicBounds(line, nil, nil, nil)))
+            lineCache[key] = entry
+            return entry
         }
 
         /// 在已经平移到基线、翻转成 y 向上的坐标系里画一个符号字体的字形：按字形的外框缩到 `width` 宽、
