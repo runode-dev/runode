@@ -1,11 +1,13 @@
 #!/bin/bash
 # 发布构建 runode，打包成 Runode.app，再做成可拖进「应用程序」安装的 dmg，和 app 自动更新时下载的
-# zip。产物在 target/release/bundle/ 下。
+# zip。产物在 target/<profile>/bundle/ 下。
 #
 # 用法：bundle-macos.sh [app|dmg]，默认 dmg；app 只打包到 Runode.app 为止。
 #
 # 环境变量：
 #   CARGO          cargo 命令，默认 cargo
+#   BUILD_PROFILE  cargo 的 profile，默认 release；产物在 target/<profile>/bundle/ 下。`make app`
+#                  和 `make install` 用编得快的 local，只给本机用。
 #   SIGN_IDENTITY  codesign 签名身份，默认 -（ad-hoc，只适合本机或自己用）。发布用 Developer ID，
 #                  比如 "Developer ID Application: 名字 (TEAMID)"：app 只在新包和自己出自同一个
 #                  Team ID 时才自己更新，ad-hoc 签名的不更新。
@@ -19,6 +21,7 @@ set -euo pipefail
 
 target=${1:-dmg}
 CARGO=${CARGO:-cargo}
+BUILD_PROFILE=${BUILD_PROFILE:-release}
 SIGN_IDENTITY=${SIGN_IDENTITY:--}
 
 root=$(cd "$(dirname "$0")/.." && pwd)
@@ -43,7 +46,7 @@ fi
 
 # 构建脚本已把 Info.plist 写进 OUT_DIR 并嵌进二进制；从 cargo 的 JSON 消息里取它的位置，
 # 保证 .app 里的信息表和二进制里的完全一致。
-messages=$("$CARGO" build --release --message-format=json-render-diagnostics)
+messages=$("$CARGO" build --profile "$BUILD_PROFILE" --message-format=json-render-diagnostics)
 out_dir=$(jq -r 'select(.reason == "build-script-executed" and (.package_id | test("apps/desktop#"))) | .out_dir' <<<"$messages")
 exe=$(jq -r 'select(.reason == "compiler-artifact" and .target.name == "runode" and .executable != null) | .executable' <<<"$messages")
 plist="$out_dir/Info.plist"
@@ -51,7 +54,7 @@ plist="$out_dir/Info.plist"
 
 version=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$plist")
 arch=$(lipo -archs "$exe" | tr ' ' '-')
-bundle_dir="$root/target/release/bundle"
+bundle_dir="$root/target/$BUILD_PROFILE/bundle"
 app="$bundle_dir/Runode.app"
 dmg="$bundle_dir/Runode-$version-$arch.dmg"
 

@@ -10,9 +10,10 @@
 #   --idle SECS    量空闲 CPU 和唤醒的秒数，默认 5
 #
 # 要量用户实际拿到的样子，给 .app 的路径（`scripts/bundle-macos.sh app` 的产物在
-# target/release/bundle/Runode.app），脚本直接 exec 它 Contents/MacOS 下的可执行文件，HOME 照样
-# 换成临时目录。给裸二进制也能量，但未打包运行时 app 会在启动时自己设 Dock 图标
-# （`about::install_icon`），打包后不做，开窗时间和内存会比 .app 多出这一块。
+# target/release/bundle/Runode.app；`make app` 编的是 local profile，在 target/local/bundle 下，
+# 不是发给用户的那种），脚本直接 exec 它 Contents/MacOS 下的可执行文件，HOME 照样换成临时目录。
+# 给裸二进制也能量，但未打包运行时 app 会在启动时自己设 Dock 图标（`about::install_icon`），
+# 打包后不做，开窗时间和内存会比 .app 多出这一块。
 #
 # 内存：footprint 的 phys_footprint 里有一块 GPU 驱动替进程占着的临时内存，记在「Owned physical
 # footprint (unmapped) (graphics)」这一项（默认窗口约 178 MiB；这一项也含渲染器 GPU 私有的纹理）。

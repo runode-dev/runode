@@ -107,6 +107,16 @@ codegen-units = 1
 # 崩溃报告里也只剩地址；panic 的消息和源码位置不靠符号表，两种都还在。
 strip = "debuginfo"
 
+# 本机装着自己用的发布构建（`make app`、`make install`）。上面的 thin LTO 加 codegen-units=1 在桌面
+# crate 长大后，只改它一行也要重编约 108 秒；这里不开 LTO、并行代码生成、开增量编译，同样的改动
+# 约 11 秒（M5 Max），二进制大约 5 MiB。启动和内存的差别在测量的抖动以内（见上面的实测），发给
+# 用户的 dmg 和自动更新的 zip 仍用 release。
+[profile.local]
+inherits = "release"
+lto = false
+codegen-units = 16
+incremental = true
+
 # 只开现有代码已经满足的规则，防着以后倒退；新加规则时先把代码改干净。
 [workspace.lints.rust]
 unused_lifetimes = "warn"

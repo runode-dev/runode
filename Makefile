@@ -40,12 +40,16 @@ run-ios: ## 调试构建 iOS app，装到模拟器上启动
 run-ios-device: ## 调试构建 iOS app，装到连着的真机上启动
 	IOS_DEVICE="$(IOS_DEVICE)" apps/ios/scripts/run-device.sh
 
-app: ## 发布构建并打包 Runode.app，产物在 target/release/bundle
-	CARGO=$(CARGO) scripts/bundle-macos.sh app
+# 本机自己用的包按 Cargo.toml 里的 local profile 编，不开 LTO，改一点代码后重编快得多；
+# make install APP_PROFILE=release 装和发给用户一样的构建。
+APP_PROFILE ?= local
+
+app: ## 构建并打包 Runode.app（local profile，编得快），产物在 target/local/bundle
+	CARGO=$(CARGO) BUILD_PROFILE=$(APP_PROFILE) scripts/bundle-macos.sh app
 
 install: app ## 打包 Runode.app 并装到 /Applications，覆盖旧版本
 	rm -rf /Applications/Runode.app
-	ditto target/release/bundle/Runode.app /Applications/Runode.app
+	ditto target/$(APP_PROFILE)/bundle/Runode.app /Applications/Runode.app
 
 # 重开 app 时它只在宿主的构建号不同时才换宿主，还要先等 app 退出；用这个一步让新宿主接手会话。
 restart: ## 重启装好的 Runode.app，宿主也换成新装的（make install restart 装好再重启）
