@@ -119,10 +119,6 @@ impl Shared {
         self.peers.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
-    fn send(&self, id: SessionId, message: session::Inbox) {
-        self.deliver(id, message);
-    }
-
     /// 往会话线程发消息；没有这个会话、或者它的线程已经结束时返回 false。
     fn deliver(&self, id: SessionId, message: session::Inbox) -> bool {
         self.registry().sessions.get(&id).is_some_and(|handle| handle.send(message))

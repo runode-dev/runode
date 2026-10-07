@@ -319,7 +319,8 @@ impl Host {
     /// `Host::run_until_idle`）。
     ///
     /// `lock` 是同一目录里的锁文件：拿到它的进程才监听，另一个宿主已经在监听时返回错误。
-    /// 拿到锁以后，`socket` 上已有的文件只能是上次没清掉的，删掉重建。
+    /// 拿到锁以后，`socket` 上已有的文件只能是上次没清掉的，删掉重建。宿主退出时删掉 `socket`
+    /// （交接给新宿主时不删）。这个宿主已经在监听时返回错误。
     pub fn listen(&self, socket: &Path, lock: &Path) -> Result<()> {
         let lock = lock_exclusively(lock)?;
         match std::fs::remove_file(socket) {
@@ -331,21 +332,16 @@ impl Host {
         let listener =
             UnixListener::bind(socket).with_context(|| format!("failed to listen on {}", socket.display()))?;
         std::fs::set_permissions(socket, std::fs::Permissions::from_mode(0o600))?;
-        self.listen_on(listener, lock, socket)
-    }
-
-    /// 在已经开好的 `listener` 上接受别的进程来的前端，同 `Host::listen`。`lock` 是锁住了的锁文件
-    /// （`flock` 锁的是打开的文件，交接时连同描述符一起交过来的仍锁着），丢掉时放开；`socket` 是
-    /// `listener` 的路径，宿主退出时删掉它（交接给新宿主时不删）。已经在监听时返回错误。
-    pub fn listen_on(&self, listener: UnixListener, lock: File, socket: &Path) -> Result<()> {
         self.start_listening(listener, lock, socket, false)?;
         // 之后开的 shell 里的命令行连这个 socket，开发版和装好的版本同时开着时也不会连错。
         self.set_env(runode_protocol::ENV_SOCKET, socket.as_os_str());
         Ok(())
     }
 
-    /// `listen_on`，但不设 shell 的环境变量；`paused` 时接受连接的线程先停着（连接排在 backlog
-    /// 里），等 `ListenControl::resume`。
+    /// 在已经开好的 `listener` 上接受别的进程来的前端，同 `Host::listen`，但不设 shell 的环境变量。
+    /// `lock` 是锁住了的锁文件（`flock` 锁的是打开的文件，交接时连同描述符一起交过来的仍锁着），
+    /// 丢掉时放开；`socket` 是 `listener` 的路径。`paused` 时接受连接的线程先停着（连接排在
+    /// backlog 里），等 `ListenControl::resume`。
     pub(crate) fn start_listening(
         &self,
         listener: UnixListener,
@@ -926,17 +922,19 @@ impl Connection {
             ClientMsg::Attach { id, size, mode } => self.attach(id, size, mode),
             ClientMsg::Detach { id } => {
                 self.forget(id);
-                self.shared.send(id, Inbox::Detach { connection: self.id });
+                self.shared.deliver(id, Inbox::Detach { connection: self.id });
             }
             ClientMsg::Kill { id } => {
                 self.drive(id, DriveAction::Kill);
                 self.forget(id);
                 self.shared.kill(id);
             }
-            ClientMsg::Resize { id, size } => self.shared.send(id, Inbox::Resize { connection: self.id, size }),
+            ClientMsg::Resize { id, size } => {
+                self.shared.deliver(id, Inbox::Resize { connection: self.id, size });
+            }
             ClientMsg::ClearScreen { id } => {
                 self.drive(id, DriveAction::ClearScreen);
-                self.shared.send(id, Inbox::ClearScreen);
+                self.shared.deliver(id, Inbox::ClearScreen);
             }
             ClientMsg::SetTheme { settings } => self.shared.set_theme(settings),
             // 记不记命令历史是用户在 app 里的设置，别的程序不能改。
@@ -950,7 +948,9 @@ impl Connection {
             }
             // 获得焦点算一次交互，可能轮到这条连接决定尺寸；失去焦点只是不在看了，不让出。通知在
             // 界面那边发，宿主不用知道哪个会话被看着。
-            ClientMsg::Focus { id, focused: true } => self.shared.send(id, Inbox::Focus { connection: self.id }),
+            ClientMsg::Focus { id, focused: true } => {
+                self.shared.deliver(id, Inbox::Focus { connection: self.id });
+            }
             ClientMsg::Focus { focused: false, .. } => {}
             ClientMsg::ReadScreen { id, lines, command } => self.read_screen(id, lines, command),
             ClientMsg::SendKeys { req, id, keys } => {
@@ -1194,7 +1194,7 @@ impl Connection {
     /// 连接结束：断开所有连着的会话，它们放开这条连接后写的线程就结束了。
     fn detach_all(&mut self) {
         for (_, id) in self.channels.drain() {
-            self.shared.send(id, Inbox::Detach { connection: self.id });
+            self.shared.deliver(id, Inbox::Detach { connection: self.id });
         }
     }
 

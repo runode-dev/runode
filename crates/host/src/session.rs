@@ -854,15 +854,7 @@ impl Runner {
     /// 交接期间收到的一条消息，见 `hand_over`。
     fn frozen(&mut self, message: Inbox, freeze: &mut Freeze) {
         match message {
-            Inbox::Pty(PtyEvent::Output(data)) => {
-                self.output(&data);
-                self.credits.release(data.len());
-            }
-            Inbox::Pty(PtyEvent::Exited) => {
-                self.exited = true;
-                self.emit(Event::msg(HostMsg::Exited { id: self.id, status: None }));
-            }
-            message @ (Inbox::Info(_) | Inbox::ReadScreen { .. }) => self.handle(message),
+            message @ (Inbox::Pty(_) | Inbox::Info(_) | Inbox::ReadScreen { .. }) => self.handle(message),
             // 断开的连接当场放开（它的 `Outbox` 跟着订阅丢掉）；它让出的尺寸归属会改尺寸，和别的
             // 请求一样存下，回滚时重放。
             Inbox::Detach { connection } => {

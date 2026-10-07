@@ -35,34 +35,7 @@ pub fn launch(exe: &Path) -> io::Result<u32> {
             libc::posix_spawn_file_actions_addopen(actions.as_mut_ptr(), fd, c"/dev/null".as_ptr(), flags, 0)
         })?;
     }
-    let mut attr = SpawnAttr::new()?;
-    let flags = POSIX_SPAWN_SETSID
-        | libc::POSIX_SPAWN_CLOEXEC_DEFAULT
-        | libc::POSIX_SPAWN_SETSIGDEF
-        | libc::POSIX_SPAWN_SETSIGMASK;
-    // SAFETY: `attr` 已经初始化；两个信号集是本地变量，初始化后才交出去。
-    unsafe {
-        check(libc::posix_spawnattr_setflags(attr.as_mut_ptr(), flags as libc::c_short))?;
-        let mut all: libc::sigset_t = std::mem::zeroed();
-        libc::sigfillset(&mut all);
-        check(libc::posix_spawnattr_setsigdefault(attr.as_mut_ptr(), &all))?;
-        let mut none: libc::sigset_t = std::mem::zeroed();
-        libc::sigemptyset(&mut none);
-        check(libc::posix_spawnattr_setsigmask(attr.as_mut_ptr(), &none))?;
-    }
-    let mut pid: libc::pid_t = 0;
-    // SAFETY: 路径和参数都是以 NUL 结尾的字符串，参数表以空指针结尾，在调用期间都活着；环境表
-    // 是进程自己的 `environ`，posix_spawn 只读它。
-    check(unsafe {
-        libc::posix_spawn(
-            &mut pid,
-            program.as_ptr(),
-            actions.as_ptr(),
-            attr.as_ptr(),
-            argv.as_ptr(),
-            (*libc::_NSGetEnviron()).cast_const(),
-        )
-    })?;
+    let pid = spawn_detached(&program, &argv, &actions)?;
     let reaped = thread::Builder::new().name("host-reaper".into()).spawn(move || reap(pid));
     if let Err(err) = reaped {
         tracing::warn!("cannot reap the host process {pid} when it exits: {err}");
@@ -120,7 +93,6 @@ pub fn launch_successor(exe: &Path) -> io::Result<Successor> {
 
 /// 在新的会话里拉起 `program`：只继承 `actions` 里设好的描述符，信号处理恢复默认、信号屏蔽清空，
 /// 环境变量照抄。返回 pid。
-// `launch` 里有同样的一段，没改它，免得动到现在拉起宿主的路径；以后可以让它也用这个。
 fn spawn_detached(program: &CString, argv: &[*mut c_char], actions: &FileActions) -> io::Result<libc::pid_t> {
     let mut attr = SpawnAttr::new()?;
     let flags = POSIX_SPAWN_SETSID

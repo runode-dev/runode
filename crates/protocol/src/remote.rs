@@ -192,10 +192,7 @@ pub struct DeviceId(pub [u8; 16]);
 
 impl fmt::Display for DeviceId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        for byte in self.0 {
-            write!(f, "{byte:02x}")?;
-        }
-        Ok(())
+        write!(f, "{:032x}", u128::from_be_bytes(self.0))
     }
 }
 
@@ -218,11 +215,8 @@ impl FromStr for DeviceId {
         if s.len() != 32 || !s.bytes().all(|b| b.is_ascii_hexdigit()) {
             return Err(InvalidDeviceId);
         }
-        let mut bytes = [0u8; 16];
-        for (i, byte) in bytes.iter_mut().enumerate() {
-            *byte = u8::from_str_radix(&s[2 * i..2 * i + 2], 16).map_err(|_| InvalidDeviceId)?;
-        }
-        Ok(Self(bytes))
+        // 上面查过每一位都是十六进制数字：`from_str_radix` 自己会放过开头的 `+`。
+        u128::from_str_radix(s, 16).map(|n| Self(n.to_be_bytes())).map_err(|_| InvalidDeviceId)
     }
 }
 

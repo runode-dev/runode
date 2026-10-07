@@ -2,10 +2,7 @@
 //! 目录。只列子目录的名字，回 `HostMsg::Dirs`；列一个目录只是读一次目录项，很快，在连接的读线程里
 //! 当场办。
 
-use std::{
-    fs,
-    path::{Path, PathBuf},
-};
+use std::{fs, path::PathBuf};
 
 use runode_protocol::message::MAX_DIRS;
 
@@ -37,20 +34,12 @@ pub(crate) fn list_dirs(path: Option<PathBuf>) -> Result<Listing, String> {
     // 读不了的目录项（读到一半被删了之类）跳过，不让整个目录列不出来。
     let mut dirs: Vec<String> = entries
         .filter_map(Result::ok)
-        .filter(|entry| is_dir(&entry.path(), entry.file_type().ok()))
+        // 符号链接看它指向的东西，指向的东西不在了的不算。
+        .filter(|entry| entry.path().is_dir())
         .filter_map(|entry| entry.file_name().into_string().ok())
         .collect();
     dirs.sort_by(|a, b| a.to_lowercase().cmp(&b.to_lowercase()).then_with(|| a.cmp(b)));
     let truncated = dirs.len() > MAX_DIRS;
     dirs.truncate(MAX_DIRS);
     Ok(Listing { path, dirs, truncated })
-}
-
-/// 目录项是不是目录：符号链接看它指向的东西，指向的东西不在了的不算。
-fn is_dir(path: &Path, file_type: Option<fs::FileType>) -> bool {
-    match file_type {
-        Some(file_type) if file_type.is_symlink() => path.is_dir(),
-        Some(file_type) => file_type.is_dir(),
-        None => false,
-    }
 }

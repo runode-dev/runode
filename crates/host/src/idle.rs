@@ -23,6 +23,12 @@ pub enum Stopped {
 }
 
 impl Host {
+    /// 说明宿主单独一个进程在跑，在 `Host::listen` 之前调：之后连上来的前端在 `Welcome` 里就
+    /// 知道它不是哪个 app 里的宿主，不会把它当成别的 app 的。`run_until_idle` 也会标上。
+    pub fn mark_standalone(&self) {
+        self.shared.peers().standalone = true;
+    }
+
     /// 宿主单独一个进程跑时的主循环：等到该退出时返回，调用方接着退出进程。会话数和连接数都是 0、
     /// 持续 `idle` 后退出；收到 `Shutdown` 时结束所有会话、给所有连接发 `Goodbye` 后退出。
     ///
@@ -32,12 +38,6 @@ impl Host {
     ///
     /// 调用之后的 `Shutdown` 才会让宿主退出，在这之前（以及从不调用、宿主跑在 app 进程里时）
     /// `Shutdown` 只结束所有会话。
-    /// 说明宿主单独一个进程在跑，在 `Host::listen` 之前调：之后连上来的前端在 `Welcome` 里就
-    /// 知道它不是哪个 app 里的宿主，不会把它当成别的 app 的。`run_until_idle` 也会标上。
-    pub fn mark_standalone(&self) {
-        self.shared.peers().standalone = true;
-    }
-
     pub fn run_until_idle(&self, idle: Duration) -> Stopped {
         let shared = &self.shared;
         let tick = (idle / 4).clamp(Duration::from_millis(5), MAX_TICK);

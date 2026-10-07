@@ -60,7 +60,6 @@ fn layout() -> Vec<WindowLayout> {
     }]
 }
 
-/// 经过帧编码、解码再读回来。
 fn project_tasks() -> Vec<TaskSource> {
     vec![
         TaskSource {
@@ -82,6 +81,7 @@ fn project_tasks() -> Vec<TaskSource> {
     ]
 }
 
+/// 经过帧编码、解码再读回来。
 fn through_frame<T: Serialize + serde::de::DeserializeOwned>(message: &T) -> T {
     let frame = Frame::control(message).unwrap();
     let mut stream = Vec::new();

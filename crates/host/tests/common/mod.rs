@@ -188,11 +188,7 @@ impl Peer {
 
     /// 连上会话，返回它的通道和快照（或 VT 重放）的字节。
     pub fn attach(&mut self, id: SessionId, mode: AttachMode) -> (u32, Vec<u8>) {
-        self.attach_sized(id, Some(SIZE), mode)
-    }
-
-    pub fn attach_sized(&mut self, id: SessionId, size: Option<GridSize>, mode: AttachMode) -> (u32, Vec<u8>) {
-        self.send(&ClientMsg::Attach { id, size, mode });
+        self.send(&ClientMsg::Attach { id, size: Some(SIZE), mode });
         let HostMsg::Attached { id: attached, channel, mode: given, .. } = self.reply() else {
             panic!("expected attached");
         };
@@ -234,37 +230,33 @@ impl Peer {
         env: Vec<(String, String)>,
         cwd: Option<PathBuf>,
     ) -> SessionId {
+        self.spawn_in(shell, SIZE, start, env, cwd)
+    }
+
+    /// 开一个按 `size` 跑 `shell` 的会话（不开 shell 集成），`start` 为假时等 `Start`。
+    pub fn spawn_sized(&mut self, shell: &str, size: GridSize, start: bool) -> SessionId {
+        self.spawn_in(shell, size, start, Vec::new(), None)
+    }
+
+    fn spawn_in(
+        &mut self,
+        shell: &str,
+        size: GridSize,
+        start: bool,
+        env: Vec<(String, String)>,
+        cwd: Option<PathBuf>,
+    ) -> SessionId {
         let req = self.next_req;
         self.next_req += 1;
         self.send(&ClientMsg::Spawn {
             req,
-            size: SIZE,
+            size,
             cwd,
             integration: IntegrationMode::Off,
             start,
             shell: Some(shell.into()),
             settings: None,
             env,
-        });
-        match self.reply() {
-            HostMsg::Spawned { req: answered, id } if answered == req => id,
-            other => panic!("expected spawned, got {other:?}"),
-        }
-    }
-
-    /// 开一个按 `size` 跑 `shell` 的会话（不开 shell 集成），`start` 为假时等 `Start`。
-    pub fn spawn_sized(&mut self, shell: &str, size: GridSize, start: bool) -> SessionId {
-        let req = self.next_req;
-        self.next_req += 1;
-        self.send(&ClientMsg::Spawn {
-            req,
-            size,
-            cwd: None,
-            integration: IntegrationMode::Off,
-            start,
-            shell: Some(shell.into()),
-            settings: None,
-            env: Vec::new(),
         });
         match self.reply() {
             HostMsg::Spawned { req: answered, id } if answered == req => id,
