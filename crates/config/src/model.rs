@@ -7,7 +7,7 @@ use runode_shared_types::{
     clipboard::{ClipboardAccess, ClipboardRead, ClipboardWrite},
     color::{Rgb, TerminalColor},
     settings::{CursorStyle, OptionAsAlt, TermSettings},
-    shell::IntegrationMode,
+    shell::{IntegrationMode, ShellFeatures},
 };
 
 use crate::keybind::Action;
@@ -81,6 +81,8 @@ pub struct Config {
     /// 每个终端的回滚历史最多占多少字节。
     pub scrollback_limit: usize,
     pub shell_integration: IntegrationMode,
+    /// 新启动的 shell 的集成开哪些功能。
+    pub shell_integration_features: ShellFeatures,
     /// 在 shell 提示符上输入时，按命令历史在光标后用灰字给出建议；关掉时也不读写命令历史。
     pub command_suggestions: bool,
     /// 按 Tab 时由 runode 弹出补全菜单（命令名，以及有规格的命令的参数）；关掉时 Tab 总是交给 shell。
@@ -150,6 +152,7 @@ impl Default for Config {
             macos_option_as_alt: term.option_as_alt,
             scrollback_limit: term.scrollback_limit,
             shell_integration: IntegrationMode::Detect,
+            shell_integration_features: term.shell_features,
             command_suggestions: true,
             command_completions: true,
             command_highlighting: true,
@@ -207,6 +210,7 @@ impl Config {
             search_selected_foreground: self.search_selected_foreground,
             option_as_alt: self.macos_option_as_alt,
             scrollback_limit: self.scrollback_limit,
+            shell_features: self.shell_integration_features,
         }
     }
 }

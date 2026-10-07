@@ -441,6 +441,7 @@ settings:
     macos_option_as_alt: Use Option as Alt
     scrollback_limit: Scrollback size
     shell_integration: Shell integration
+    shell_integration_features: Prompt cursor
     command_suggestions: Command suggestions
     command_completions: Tab completion menu
     command_highlighting: Command line highlighting
@@ -484,6 +485,7 @@ settings:
     macos_option_as_alt: Option then sends Alt combinations instead of typing special characters.
     scrollback_limit: Bytes of history kept per terminal, at least 2 MiB (2097152), and at most 10,000 lines.
     shell_integration: Detect picks by the shell's program name. Needed for prompt jumps, command history and suggestions.
+    shell_integration_features: "A bar at the prompt, a block in zsh's vi command mode, back to the cursor style while a command runs. Applies to new terminals."
     command_suggestions: Suggests the rest of a command from history in gray; → or End accepts it. Off also stops reading and writing history.
     command_completions: Tab shows a menu of commands, subcommands, options and arguments. Off always passes Tab to the shell.
     command_highlighting: Colors commands, options, strings and paths as you type, unless the shell already does.
@@ -521,6 +523,9 @@ settings:
       zsh: zsh
       bash: bash
       fish: fish
+    shell_integration_features:
+      cursor: Bar
+      no-cursor: Unchanged
     file_tree_preview_click:
       single: Single click
       double: Double click

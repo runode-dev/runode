@@ -42,7 +42,7 @@ use std::{
 use anyhow::{Context as _, Result, anyhow, bail};
 use portable_pty::{Child, CommandBuilder, PtySize, SlavePty, native_pty_system};
 use runode_agent_detect::{ForegroundJob, ForegroundProcess};
-use runode_shared_types::{grid::GridSize, shell::IntegrationMode};
+use runode_shared_types::{grid::GridSize, settings::TermSettings, shell::IntegrationMode};
 
 use crate::shell_integration;
 use notify::Notifier;
@@ -356,6 +356,8 @@ pub struct Pty {
     report_token: Option<String>,
     /// 启动 shell 时另外设的环境变量，见 `set_env`。
     env: Vec<(OsString, OsString)>,
+    /// 启动 shell 时告诉集成脚本开哪些功能，见 `set_shell_features`。
+    shell_features: String,
     /// 最近一次设给 PTY 的尺寸。
     size: Cell<GridSize>,
 }
@@ -466,6 +468,7 @@ impl Pty {
             writer_thread: Some(writer_thread),
             report_token: None,
             env: Vec::new(),
+            shell_features: shell_integration::features(&TermSettings::default()),
             size: Cell::new(size),
         })
     }
@@ -473,6 +476,12 @@ impl Pty {
     /// 启动 shell 时给它设这个环境变量，盖过从 app 继承来的同名变量；已经启动了的不受影响。
     pub fn set_env(&mut self, key: impl Into<OsString>, value: impl Into<OsString>) {
         self.env.push((key.into(), value.into()));
+    }
+
+    /// 启动 shell 时按 `settings` 告诉集成脚本开哪些功能，见 `shell_integration::features`；不调时
+    /// 按默认的设置开。已经启动了的不受影响。
+    pub fn set_shell_features(&mut self, settings: &TermSettings) {
+        self.shell_features = shell_integration::features(settings);
     }
 
     /// 接手 `Pty::release` 交出来的会话：用交来的 master 起读写线程，输出交给 `sink`，交出时没写
@@ -554,6 +563,7 @@ impl Pty {
             report_token,
             // 接手来的 shell 早就启动了，没有要设的环境变量。
             env: Vec::new(),
+            shell_features: String::new(),
             size: Cell::new(size),
         })
     }
@@ -678,7 +688,7 @@ impl Pty {
             shell.map(str::to_owned).or_else(|| std::env::var("SHELL").ok()).unwrap_or_else(|| "/bin/zsh".into());
         let mut cmd = CommandBuilder::new(&shell);
         // 用登录 shell，这样会执行用户的 profile。
-        let report_token = shell_integration::prepare(integration, &shell, &mut cmd);
+        let report_token = shell_integration::prepare(integration, &shell, &self.shell_features, &mut cmd);
         cmd.env("TERM", "xterm-256color");
         cmd.env("COLORTERM", "truecolor");
         cmd.env("TERM_PROGRAM", "runode");

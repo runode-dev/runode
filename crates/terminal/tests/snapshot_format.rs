@@ -16,6 +16,7 @@ use runode_shared_types::{
     color::{Rgb, TerminalColor},
     grid::GridSize,
     settings::{CursorStyle, OptionAsAlt, TermSettings},
+    shell::ShellFeatures,
 };
 use runode_terminal::{
     host_session::{HostSession, snapshot_format},
@@ -42,6 +43,7 @@ fn settings() -> TermSettings {
         search_selected_foreground: TerminalColor::Rgb(Rgb(13, 14, 15)),
         option_as_alt: OptionAsAlt::False,
         scrollback_limit: 4 * 1024 * 1024,
+        shell_features: ShellFeatures { cursor: false },
     }
 }
 

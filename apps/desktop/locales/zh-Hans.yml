@@ -441,6 +441,7 @@ settings:
     macos_option_as_alt: 把 Option 当作 Alt
     scrollback_limit: 回滚历史大小
     shell_integration: Shell 集成
+    shell_integration_features: 提示符光标
     command_suggestions: 命令建议
     command_completions: Tab 补全菜单
     command_highlighting: 命令行高亮
@@ -484,6 +485,7 @@ settings:
     macos_option_as_alt: 打开后按 Option 组合键发的是 Alt 组合，不再输入特殊字符。
     scrollback_limit: 每个终端的回滚历史最多占多少字节，至少 2 MiB（2097152），另外最多 1 万行。
     shell_integration: 自动检测按 shell 的程序名判断。跳提示符、命令历史和建议都靠它。
+    shell_integration_features: 提示符上用竖线，zsh 的 vi 命令模式里用方块，跑命令时恢复成上面的光标形状。对新开的终端生效。
     command_suggestions: 输入时按命令历史用灰字给出后半截，按 → 或 End 接受。关掉时也不读写命令历史。
     command_completions: 按 Tab 弹出命令、子命令、选项和参数的菜单。关掉时 Tab 总是交给 shell。
     command_highlighting: 输入时给命令、选项、字符串和路径上色；shell 自己已经上了色时不管。
@@ -521,6 +523,9 @@ settings:
       zsh: zsh
       bash: bash
       fish: fish
+    shell_integration_features:
+      cursor: 竖线
+      no-cursor: 不改
     file_tree_preview_click:
       single: 单击
       double: 双击

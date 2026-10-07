@@ -128,6 +128,7 @@ impl Page {
                 Row("macos-option-as-alt", Choice(&["false", "true", "left", "right"])),
                 Section("shell"),
                 Row("shell-integration", Choice(&["detect", "none", "zsh", "bash", "fish"])),
+                Row("shell-integration-features", Choice(&["cursor", "no-cursor"])),
                 Row("command-suggestions", Switch),
                 Row("command-completions", Switch),
                 Row("command-highlighting", Switch),

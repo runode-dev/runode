@@ -11,6 +11,9 @@ if [[ -n "${RUNODE_REPORT_TOKEN-}" ]]; then
     'builtin' 'typeset' -g +x _runode_report_token="$RUNODE_REPORT_TOKEN"
 fi
 'builtin' 'unset' 'RUNODE_REPORT_TOKEN'
+# 集成脚本另外开哪些功能也一样读进不导出的变量，见集成脚本里的 cursor。
+'builtin' 'typeset' -g +x _runode_features="${RUNODE_SHELL_FEATURES-}"
+'builtin' 'unset' 'RUNODE_SHELL_FEATURES'
 
 if [[ -n "${RUNODE_ZSH_ZDOTDIR+X}" ]]; then
     'builtin' 'export' ZDOTDIR="$RUNODE_ZSH_ZDOTDIR"

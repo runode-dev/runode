@@ -441,6 +441,7 @@ settings:
     macos_option_as_alt: 把 Option 當作 Alt
     scrollback_limit: 回捲歷史大小
     shell_integration: Shell 整合
+    shell_integration_features: 提示字元游標
     command_suggestions: 指令建議
     command_completions: Tab 補全選單
     command_highlighting: 指令列上色
@@ -484,6 +485,7 @@ settings:
     macos_option_as_alt: 打開後按 Option 組合鍵送出的是 Alt 組合，不再輸入特殊字元。
     scrollback_limit: 每個終端機的回捲歷史最多佔多少位元組，至少 2 MiB（2097152），另外最多 1 萬行。
     shell_integration: 自動偵測依 shell 的程式名判斷。跳提示字元、指令歷史和建議都靠它。
+    shell_integration_features: 提示字元上用直線，zsh 的 vi 命令模式裡用方塊，執行指令時恢復成上面的游標形狀。對新開的終端機生效。
     command_suggestions: 輸入時依指令歷史用灰字給出後半段，按 → 或 End 接受。關掉時也不讀寫指令歷史。
     command_completions: 按 Tab 彈出指令、子指令、選項和參數的選單。關掉時 Tab 總是交給 shell。
     command_highlighting: 輸入時給指令、選項、字串和路徑上色；shell 自己已經上了色時不管。
@@ -521,6 +523,9 @@ settings:
       zsh: zsh
       bash: bash
       fish: fish
+    shell_integration_features:
+      cursor: 直線
+      no-cursor: 不改
     file_tree_preview_click:
       single: 單擊
       double: 雙擊

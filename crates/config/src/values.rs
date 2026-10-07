@@ -91,6 +91,9 @@ impl Config {
                 }
                 .into(),
             ],
+            "shell-integration-features" => {
+                vec![if self.shell_integration_features.cursor { "cursor" } else { "no-cursor" }.into()]
+            }
             "command-suggestions" => bool(self.command_suggestions),
             "command-completions" => bool(self.command_completions),
             "command-highlighting" => bool(self.command_highlighting),
@@ -146,6 +149,7 @@ mod tests {
         let config = load(&["font-family = A\nfont-family = B\nadjust-cell-height = 10%\nwindow-padding-x = 1,2\n\
              cursor-color = cell-foreground\ncursor-style = block_hollow\ncursor-style-blink = false\n\
              cursor-style-blink-timeout = 0\nmacos-option-as-alt = left\nshell-integration = fish\n\
+             shell-integration-features = no-cursor\n\
              agent-notifications-exclude = codex,claude\nagent-done-sound = none\nlanguage = en\n\
              file-tree-preview-click = double\npalette = 3=#010203\nremote-access = true\n\
              clipboard-write = deny\nclipboard-read = allow"]);

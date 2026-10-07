@@ -11,7 +11,7 @@ use runode_shared_types::{
     clipboard::{ClipboardRead, ClipboardWrite},
     color::{Rgb, TerminalColor},
     settings::{CursorStyle, MIN_SCROLLBACK_LIMIT, OptionAsAlt},
-    shell::{IntegrationMode, Shell},
+    shell::{IntegrationMode, Shell, ShellFeatures},
 };
 
 use crate::{
@@ -48,6 +48,7 @@ pub const KEYS: &[&[&str]] = &[
         "macos-option-as-alt",
         "scrollback-limit",
         "shell-integration",
+        "shell-integration-features",
         "command-suggestions",
         "command-completions",
         "command-highlighting",
@@ -260,6 +261,7 @@ impl Config {
                     ),
                 };
             }
+            "shell-integration-features" => self.shell_integration_features = parse_shell_features(value)?,
             "command-suggestions" => {
                 self.command_suggestions = if empty { defaults.command_suggestions } else { parse_bool(value)? };
             }
@@ -392,6 +394,26 @@ fn parse_bool(value: &str) -> Result<bool, String> {
         "false" => Ok(false),
         _ => Err("expected true or false".into()),
     }
+}
+
+/// 照 Ghostty 的写法：逗号隔开的功能名，前面加 `no-` 是关掉，没写到的取默认值；单写 `true` 或
+/// `false` 是全开或全关。Ghostty 有、runode 不做的几项（见 `ShellFeatures`）也认，免得从 Ghostty
+/// 读来的配置报错。
+fn parse_shell_features(value: &str) -> Result<ShellFeatures, String> {
+    let mut features = ShellFeatures::default();
+    if let Ok(on) = parse_bool(value) {
+        features.cursor = on;
+        return Ok(features);
+    }
+    for part in value.split(',').map(str::trim).filter(|part| !part.is_empty()) {
+        let (name, on) = part.strip_prefix("no-").map_or((part, true), |name| (name, false));
+        match name {
+            "cursor" => features.cursor = on,
+            "sudo" | "title" | "ssh-env" | "ssh-terminfo" | "path" => {}
+            _ => return Err(format!("unknown feature {name}, expected cursor or no-cursor")),
+        }
+    }
+    Ok(features)
 }
 
 /// 逗号隔开的 agent 短名（`AgentKind::label`），`other` 是其他报告进度的程序。整行有一个
@@ -568,6 +590,26 @@ unknown-key = whatever
         assert_eq!(load(&["cursor-style-blink = false\n"]).term_settings().cursor_blink, Some(false));
         // Ghostty 那层开了、runode 这层写空：回到默认的不闪烁。
         assert_eq!(load(&["cursor-style-blink = true\n", "cursor-style-blink =\n"]).term_settings().cursor_blink, None);
+    }
+
+    /// 照 Ghostty 的写法：没写到的取默认值，`no-` 关掉，`true`、`false` 全开全关；Ghostty 有、runode
+    /// 不做的几项也认，认不出的整行不算。
+    #[test]
+    fn shell_integration_features_follow_ghostty() {
+        let cursor = |text: &str| load(&[text]).term_settings().shell_features.cursor;
+        assert!(cursor(""));
+        assert!(!cursor("shell-integration-features = no-cursor\n"));
+        assert!(!cursor("shell-integration-features = sudo, no-cursor, ssh-env\n"));
+        assert!(cursor("shell-integration-features = no-title,no-sudo\n"));
+        assert!(!cursor("shell-integration-features = false\n"));
+        assert!(cursor("shell-integration-features = no-cursor\nshell-integration-features = title\n"));
+        assert!(Config::default().apply("shell-integration-features", "cursor,bogus", true).is_err());
+        // 写到 runode 那层的盖过 Ghostty 那层的。
+        assert!(
+            load(&["shell-integration-features = no-cursor\n", "shell-integration-features = cursor\n"])
+                .shell_integration_features
+                .cursor
+        );
     }
 
     #[test]

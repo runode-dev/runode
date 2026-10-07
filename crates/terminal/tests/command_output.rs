@@ -107,7 +107,7 @@ fn output_whose_start_scrolled_away_is_marked_truncated() {
 
 /// 一个真的 shell：在伪终端里加载仓库里的集成脚本（和 `shell_integration::prepare` 注入的是同一份），
 /// 输出喂给宿主会话。环境是干净的，家目录是临时目录，提示符由 `rc` 设，不受跑测试的人自己的
-/// 配置影响。
+/// 配置影响。集成脚本的功能按默认设置开（`cursor:steady`）。
 struct RealShell {
     session: HostSession,
     output: mpsc::Receiver<Vec<u8>>,
@@ -118,6 +118,8 @@ struct RealShell {
     /// 已经出过的提示符。
     prompts: usize,
     name: String,
+    /// shell 到现在为止的全部输出，查集成脚本发的光标序列用。
+    raw: Vec<u8>,
     /// 临时的家目录，用完删掉。
     home: PathBuf,
 }
@@ -161,7 +163,8 @@ impl RealShell {
             &launcher,
             format!(
                 "#!/bin/sh\nexec /usr/bin/env -i HOME='{}' PATH=/usr/bin:/bin TERM=xterm-256color LANG=en_US.UTF-8 \
-                 BASH_SILENCE_DEPRECATION_WARNING=1 RUNODE_REPORT_TOKEN=0123456789abcdef {launch}\n",
+                 BASH_SILENCE_DEPRECATION_WARNING=1 RUNODE_REPORT_TOKEN=0123456789abcdef \
+                 RUNODE_SHELL_FEATURES=cursor:steady {launch}\n",
                 home.display()
             ),
         )
@@ -178,19 +181,29 @@ impl RealShell {
         let pty =
             Pty::spawn(REAL_SIZE, Some(launcher.to_str().unwrap()), Some(&home), IntegrationMode::Off, sink).unwrap();
         let session = HostSession::new(REAL_SIZE, pty, None, &TermSettings::default()).unwrap();
-        let mut real = Self { session, output, prompt, idle, prompts: 0, name: name.into(), home };
+        let mut real = Self { session, output, prompt, idle, prompts: 0, name: name.into(), raw: Vec::new(), home };
         real.wait_for_prompt();
         Some(real)
     }
 
     /// 喂进收到的输出，直到 `done`；超时就失败，带上屏幕上的内容。
     fn wait_until(&mut self, what: &str, done: impl Fn(&HostSession) -> bool) {
+        self.wait_for(what, |shell| done(&shell.session));
+    }
+
+    /// 喂进收到的输出，直到从 `from` 起的输出里有了 `needle`。
+    fn wait_for_bytes(&mut self, what: &str, from: usize, needle: &[u8]) {
+        self.wait_for(what, |shell| rfind(&shell.raw[from..], needle).is_some());
+    }
+
+    fn wait_for(&mut self, what: &str, done: impl Fn(&Self) -> bool) {
         let until = Instant::now() + REAL_WAIT;
-        while !done(&self.session) {
+        while !done(self) {
             let left = until.saturating_duration_since(Instant::now());
             match self.output.recv_timeout(left.min(Duration::from_millis(50))) {
                 Ok(data) => {
                     self.session.feed(&data);
+                    self.raw.extend_from_slice(&data);
                 }
                 Err(mpsc::RecvTimeoutError::Timeout) if !left.is_zero() => {}
                 // 超时，或者 shell 退出了。
@@ -313,5 +326,69 @@ fn real_bash_drops_mouse_reports() {
         .is_ok_and(|status| status.success());
     if new_enough {
         drop_mouse_reports_in(RealShell::start("bash", "bash-mouse", "PS1='[b]\\$ '\n", "[b]$", &["[b]$"]));
+    }
+}
+
+/// 提示符上的不闪的竖线和方块、命令开始前换回配置的样式：DECSCUSR 6、2、0。
+const BAR: &[u8] = b"\x1b[6 q";
+const BLOCK: &[u8] = b"\x1b[2 q";
+const RESET: &[u8] = b"\x1b[0 q";
+
+/// `needle` 在 `haystack` 里最后一次出现的位置。
+fn rfind(haystack: &[u8], needle: &[u8]) -> Option<usize> {
+    haystack.windows(needle.len()).rposition(|window| window == needle)
+}
+
+/// 提示符上光标是竖线，命令开始前换回配置的样式，输出之后的下一个提示符又换成竖线。zsh 在
+/// 提示符画完以后才换光标，所以等到字节来了再看。
+fn cursor_follows_the_prompt(shell: &mut RealShell) {
+    let name = shell.name.clone();
+    shell.wait_for_bytes("the bar at the first prompt", 0, BAR);
+    let start = shell.raw.len();
+    shell.run("echo out");
+    shell.wait_for("the bar at the next prompt", |shell| {
+        let raw = &shell.raw[start..];
+        rfind(raw, b"out\r\n").zip(rfind(raw, BAR)).is_some_and(|(output, bar)| output < bar)
+    });
+    let raw = &shell.raw[start..];
+    let reset = rfind(raw, RESET).unwrap_or_else(|| panic!("{name}: cursor not reset for the command"));
+    assert!(reset < rfind(raw, b"out\r\n").unwrap(), "{name}: {:?}", String::from_utf8_lossy(raw));
+}
+
+/// zsh 的 vi 模式：命令模式里是方块，回到插入模式是竖线；用户自己的 zle-keymap-select 照样被调，
+/// 在换完光标之后（这里它发一个带键位名的标题，从输出里认出它被调过）。
+#[test]
+fn real_zsh_cursor_follows_the_prompt_and_vi_mode() {
+    let rc = "PROMPT='[z]%% '\nbindkey -v\nKEYTIMEOUT=1\n\
+              zle-keymap-select() { print -n $'\\e]2;km-'$KEYMAP$'\\a' }\nzle -N zle-keymap-select\n";
+    let Some(mut shell) = RealShell::start("zsh", "zsh-cursor", rc, "[z]%", &["[z]%"]) else { return };
+    cursor_follows_the_prompt(&mut shell);
+
+    let start = shell.raw.len();
+    shell.session.write(b"\x1b".to_vec());
+    shell.wait_for_bytes("the vicmd keymap", start, b"km-vicmd");
+    let raw = &shell.raw[start..];
+    let block = rfind(raw, BLOCK).expect("no block in vicmd");
+    assert!(block < rfind(raw, b"km-vicmd").unwrap(), "{:?}", String::from_utf8_lossy(raw));
+
+    let start = shell.raw.len();
+    shell.session.write(b"i".to_vec());
+    shell.wait_for_bytes("the main keymap", start, b"km-main");
+    assert!(rfind(&shell.raw[start..], BAR).is_some(), "no bar back in insert mode");
+}
+
+/// bash 4.4 起在 PS0 里换回光标；更老的 bash（macOS 自带的 3.2）没有 PS0，不换光标。
+#[test]
+fn real_bash_cursor_follows_the_prompt() {
+    let has_ps0 = std::process::Command::new("/bin/bash")
+        .args(["-c", "[ \"${BASH_VERSINFO[0]}\" -gt 4 ] || { [ \"${BASH_VERSINFO[0]}\" -eq 4 ] && [ \"${BASH_VERSINFO[1]}\" -ge 4 ]; }"])
+        .status()
+        .is_ok_and(|status| status.success());
+    let Some(mut shell) = RealShell::start("bash", "bash-cursor", "PS1='[b]\\$ '\n", "[b]$", &["[b]$"]) else { return };
+    if has_ps0 {
+        cursor_follows_the_prompt(&mut shell);
+    } else {
+        shell.run("echo out");
+        assert!(rfind(&shell.raw, BAR).is_none() && rfind(&shell.raw, RESET).is_none(), "old bash touched the cursor");
     }
 }

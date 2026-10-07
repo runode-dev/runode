@@ -19,6 +19,12 @@
 # 口令是 runode 启动这个 shell 时随机生成、经环境变量 RUNODE_REPORT_TOKEN 给的。runode 只认
 # 带着这个口令的 6973 报告，屏幕上的别的输出伪造不了。没有口令时不发 6973 报告：比如 exec bash
 # 或者在里面再开一层 bash，新的 shell 拿不到口令，runode 就沿用之前报告的内容。
+#
+# runode 还经 RUNODE_SHELL_FEATURES 告诉集成脚本另外开哪些功能（逗号隔开，和 Ghostty 的
+# GHOSTTY_SHELL_FEATURES 一个写法）：
+#
+#   cursor:blink、cursor:steady  提示符上把光标换成竖线（闪或不闪），跑命令前用 CSI 0 SP q 换回
+#                配置的样式。要在命令开始时换回，所以 bash 4.4 起有 PS0 才做
 
 # 加载用户配置之前就把口令读进不导出的变量，再从环境里删掉：加载配置时启动的程序，以及这个
 # shell 里运行的所有程序都继承不到它。这个文件又被加载一次时环境里已经没有口令，保留已经读到的。
@@ -28,6 +34,12 @@ if [ -n "${RUNODE_REPORT_TOKEN-}" ]; then
     _runode_report_token=$RUNODE_REPORT_TOKEN
 fi
 unset RUNODE_REPORT_TOKEN
+# 另外开哪些功能也一样读进不导出的变量。
+if [ -n "${RUNODE_SHELL_FEATURES+X}" ]; then
+    unset _runode_features
+    _runode_features=$RUNODE_SHELL_FEATURES
+fi
+unset RUNODE_SHELL_FEATURES
 
 if [ -r /etc/profile ]; then
     . /etc/profile
@@ -76,6 +88,14 @@ if [ -z "${_runode_integrated-}" ]; then
         _runode_ps0=1
         _runode_input_mark=B
     fi
+    # cursor 功能开着时写进 PS1 的竖线（5 闪，6 不闪），为空时不管光标。
+    _runode_cursor=
+    if [ -n "$_runode_ps0" ]; then
+        case ,${_runode_features-}, in
+            *,cursor:blink,*) _runode_cursor='\[\033[5 q\]' ;;
+            *,cursor:*) _runode_cursor='\[\033[6 q\]' ;;
+        esac
+    fi
 
     _runode_prompt_command() {
         if [ -n "$_runode_prompted" ]; then
@@ -87,7 +107,7 @@ if [ -z "${_runode_integrated-}" ]; then
             _runode_histnext=${_runode_bang@P}
         fi
         if [ "$PS1" != "$_runode_ps1" ]; then
-            _runode_ps1='\[\033]133;A;cl=line\007\]'"$PS1"'\[\033]133;'$_runode_input_mark'\007\]'
+            _runode_ps1='\[\033]133;A;cl=line\007\]'"$PS1$_runode_cursor"'\[\033]133;'$_runode_input_mark'\007\]'
             PS1=$_runode_ps1
         fi
         if [ "$PS2" != "$_runode_ps2" ]; then
@@ -208,6 +228,8 @@ if [ -z "${_runode_integrated-}" ]; then
             fi
             printf '\033]6973;%s;command=%s\007' "$_runode_report_token" "$_runode_encoded"
         fi
+        # 提示符上换过光标的，在命令开始前换回配置的样式。
+        [ -z "$_runode_cursor" ] || printf '\033[0 q'
         printf '\033]133;C\007'
     }
 
@@ -226,6 +248,7 @@ if [ -z "${_runode_integrated-}" ]; then
             PS0='$(_runode_command_start)'"${PS0-}"
         else
             PS0='\[\033]133;C\007\]'"${PS0-}"
+            [ -z "$_runode_cursor" ] || PS0='\[\033[0 q\]'$PS0
         fi
     fi
 fi

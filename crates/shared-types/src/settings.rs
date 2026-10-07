@@ -1,8 +1,10 @@
 //! 终端状态机用到的设置：默认颜色、光标样式、Option 键的用法和回滚历史的上限。程序自己用转义序列设置的
-//! 颜色和光标形状照旧优先，这些只是默认值，所以可以随时重新应用。
+//! 颜色和光标形状照旧优先，这些只是默认值，所以可以随时重新应用。另带新启动的 shell 的集成开哪些
+//! 功能，只在启动 shell 时用。
 
 use crate::{
     color::{Rgb, TerminalColor},
+    shell::ShellFeatures,
     theme,
 };
 
@@ -67,6 +69,9 @@ pub struct TermSettings {
     pub option_as_alt: OptionAsAlt,
     /// 回滚历史最多占多少字节，见 `DEFAULT_SCROLLBACK_LIMIT`。
     pub scrollback_limit: usize,
+    /// 之后启动的 shell 的集成脚本开哪些功能；已经在跑的 shell 不变。
+    #[serde(default)]
+    pub shell_features: ShellFeatures,
 }
 
 impl Default for TermSettings {
@@ -88,6 +93,7 @@ impl Default for TermSettings {
             search_selected_foreground: TerminalColor::Rgb(theme::SEARCH_FOREGROUND),
             option_as_alt: OptionAsAlt::False,
             scrollback_limit: DEFAULT_SCROLLBACK_LIMIT,
+            shell_features: ShellFeatures::default(),
         }
     }
 }

@@ -11,21 +11,24 @@ use std::{
 };
 
 use portable_pty::CommandBuilder;
-use runode_shared_types::shell::{IntegrationMode, Shell};
+use runode_shared_types::{
+    settings::TermSettings,
+    shell::{IntegrationMode, Shell},
+};
 
 const ZSH_ENV: &str = include_str!("../shell-integration/zsh/.zshenv");
 const ZSH_INTEGRATION: &str = include_str!("../shell-integration/zsh/runode-integration.zsh");
 const BASH_RC: &str = include_str!("../shell-integration/bash/runode.bash");
 const FISH_CONF: &str = include_str!("../shell-integration/fish/runode.fish");
 
-/// 按 `mode` 给启动 `program` 的命令加上集成，并补上登录 shell 的参数。
-/// 集成脚本写不出来或认不出 shell 时照常以登录 shell 启动，不注入。
+/// 按 `mode` 给启动 `program` 的命令加上集成，并补上登录 shell 的参数；集成脚本开哪些功能
+/// 按 `features`（见 `features`）。集成脚本写不出来或认不出 shell 时照常以登录 shell 启动，不注入。
 ///
 /// 注入了集成时返回这个 shell 的报告口令：随机生成，经环境变量 `RUNODE_REPORT_TOKEN` 交给
 /// 集成脚本，脚本读进不导出的变量后马上从环境里删掉，子进程继承不到。shell 报告 PATH 等信息时
 /// 带上它，终端据此认出报告确实来自这个 shell，而不是被打印到屏幕上的别的输出伪造的。没注入
 /// 或者生成不了口令时为 `None`，这时脚本不发报告。
-pub fn prepare(mode: IntegrationMode, program: &str, cmd: &mut CommandBuilder) -> Option<String> {
+pub fn prepare(mode: IntegrationMode, program: &str, features: &str, cmd: &mut CommandBuilder) -> Option<String> {
     let shell = match mode {
         IntegrationMode::Off => None,
         IntegrationMode::Detect => Shell::detect(program),
@@ -83,9 +86,22 @@ pub fn prepare(mode: IntegrationMode, program: &str, cmd: &mut CommandBuilder) -
     if !injected {
         return None;
     }
+    cmd.env("RUNODE_SHELL_FEATURES", features);
     let token = report_token()?;
     cmd.env("RUNODE_REPORT_TOKEN", &token);
     Some(token)
+}
+
+/// 经环境变量 `RUNODE_SHELL_FEATURES` 告诉集成脚本开哪些功能：逗号隔开的功能名，和 Ghostty 的
+/// `GHOSTTY_SHELL_FEATURES` 一个写法。现在只有 `cursor`，带上提示符上的竖线闪不闪：
+/// `cursor:blink` 或 `cursor:steady`，跟配置的 `cursor_blink` 走，没配时不闪。脚本读进不导出的
+/// 变量后马上从环境里删掉，在里面运行的程序继承不到。
+pub(crate) fn features(settings: &TermSettings) -> String {
+    let mut features = Vec::new();
+    if settings.shell_features.cursor {
+        features.push(if settings.cursor_blink == Some(true) { "cursor:blink" } else { "cursor:steady" });
+    }
+    features.join(",")
 }
 
 /// 新的报告口令：128 位随机数，写成 32 个十六进制字符。读不到随机数时为 `None`。
@@ -138,7 +154,18 @@ mod tests {
         assert!(token.bytes().all(|b| b.is_ascii_hexdigit()));
         assert_ne!(report_token().unwrap(), token);
         let mut cmd = CommandBuilder::new("/bin/zsh");
-        assert_eq!(prepare(IntegrationMode::Off, "/bin/zsh", &mut cmd), None);
+        assert_eq!(prepare(IntegrationMode::Off, "/bin/zsh", "cursor:steady", &mut cmd), None);
         assert_eq!(cmd.get_env("RUNODE_REPORT_TOKEN"), None);
+        assert_eq!(cmd.get_env("RUNODE_SHELL_FEATURES"), None);
+    }
+
+    #[test]
+    fn the_prompt_cursor_blinks_only_when_configured() {
+        let mut settings = TermSettings::default();
+        assert_eq!(features(&settings), "cursor:steady");
+        settings.cursor_blink = Some(true);
+        assert_eq!(features(&settings), "cursor:blink");
+        settings.shell_features.cursor = false;
+        assert_eq!(features(&settings), "");
     }
 }

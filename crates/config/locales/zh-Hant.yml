@@ -40,6 +40,7 @@ config:
   macos_option_as_alt: macOS 上把 Option 當作 Alt：true（兩邊都是）、false、left（只有左邊）、right（只有右邊）。
   scrollback_limit: 每個終端的捲動歷史最多佔多少位元組：非負整數，小於 2 MiB（2097152）時按 2 MiB 算。另外最多留 1 萬行，先到哪個上限就按哪個算。改了對已經開著的終端也生效。
   shell_integration: Shell 整合：detect（依 shell 的程式名稱判斷）、none（關閉）、bash、zsh、fish。
+  shell_integration_features: shell 整合另外做的事，寫法同 Ghostty：cursor（預設）在提示字元上把游標換成直線，zsh 的 vi 命令模式裡是方塊，執行指令時恢復成 cursor-style；no-cursor 不改游標。直線閃不閃跟 cursor-style-blink。Ghostty 的 sudo、title、ssh-env、ssh-terminfo、path 也認得，但不起作用。只對之後新開的 shell 生效。
   command_suggestions: 在 shell 提示字元上輸入時，依指令歷史在游標後用灰字給出建議，按 → 或 End 接受，Option+→ 接受一個詞。false 時也不讀寫指令歷史。
   command_highlighting: 在 shell 提示字元上輸入時替指令列上色：指令、關鍵字、選項、字串、變數、存在的路徑各有顏色，找不到的指令標紅，顏色參照 zsh 外掛 fast-syntax-highlighting、取自主題的調色盤。shell 自己已經上了色（裝了高亮外掛）時不管。
   clipboard_write: 終端機裡的程式用 OSC 52 寫入系統剪貼簿時（vim、tmux 和經 ssh 連到遠端的 shell 都這樣複製）：allow 照寫，deny 丟掉。ask 還不支援，當作 deny。

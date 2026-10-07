@@ -16,6 +16,12 @@
 #
 # 标记直接写进 PS1、PS2、RPROMPT，提示符因为改窗口大小等原因重画时会跟着重发。
 #
+# runode 还经 RUNODE_SHELL_FEATURES 告诉集成脚本另外开哪些功能（逗号隔开，和 Ghostty 的
+# GHOSTTY_SHELL_FEATURES 一个写法），.zshenv 读进 _runode_features：
+#
+#   cursor:blink、cursor:steady  提示符上把光标换成竖线（闪或不闪），vi 命令模式和可视模式里是
+#                方块，跑命令前用 CSI 0 SP q 换回配置的样式
+#
 # 口令是 runode 启动这个 shell 时随机生成、经环境变量 RUNODE_REPORT_TOKEN 给的，集成目录里的
 # .zshenv 最先把它读进不导出的 _runode_report_token 并从环境里删掉。runode 只认带着这个口令的
 # 6973 报告，屏幕上的别的输出伪造不了。没有口令时不发 6973 报告：比如 exec zsh 或者在里面再开
@@ -31,6 +37,14 @@
 'builtin' 'typeset' -g _runode_ps1= _runode_ps2= _runode_rps1=
 # 上一次报告给 runode 的 PATH。
 'builtin' 'typeset' -g _runode_path=
+# cursor 功能开着时提示符上竖线的样式：5 闪，6 不闪；为空时不管光标。方块是它减 4。
+'builtin' 'typeset' -g _runode_cursor=
+case ,${_runode_features-}, in
+    (*,cursor:blink,*) _runode_cursor=5 ;;
+    (*,cursor:*) _runode_cursor=6 ;;
+esac
+# 已经把换光标挂到 zle 的钩子上了，见 _runode_hook_zle。
+'builtin' 'typeset' -g _runode_zle_hooked=
 # 上一次报告给 runode 的各种名字，按种类。别名、函数这些在 zsh/parameter 模块提供的数组里。
 'builtin' 'typeset' -gA _runode_names _runode_names_raw
 'builtin' 'zmodload' -i zsh/parameter 2>/dev/null
@@ -71,6 +85,13 @@ _runode_precmd() {
         fi
     fi
     _runode_report_names
+    # 用户配置自己定义的 zle-line-init、zle-keymap-select 要先定义好，所以等 .zshrc 加载完、第一次
+    # 显示提示符时才挂。
+    if [[ -n $_runode_cursor && -z $_runode_zle_hooked ]]; then
+        _runode_zle_hooked=1
+        _runode_hook_zle line-init
+        _runode_hook_zle keymap-select
+    fi
     # 有的插件会在运行时往钩子列表里追加函数，每次都把自己挪回两头。
     if [[ ${precmd_functions[1]} != _runode_save_status || ${precmd_functions[-1]} != _runode_precmd ]]; then
         precmd_functions=(_runode_save_status ${precmd_functions:#_runode_(save_status|precmd)} _runode_precmd)
@@ -134,6 +155,43 @@ _runode_urlencode() {
     done
 }
 
+# 按 zle 当前的键位换光标：vi 命令模式和可视模式里是方块，别的（emacs、vi 插入模式）是竖线。
+_runode_zle_cursor() {
+    case ${KEYMAP-} in
+        (vicmd|visual) 'builtin' 'print' -rn -- $'\e['$(( _runode_cursor - 4 ))' q' ;;
+        (*) 'builtin' 'print' -rn -- $'\e['$_runode_cursor' q' ;;
+    esac
+}
+
+# 挂在 zle-line-init、zle-keymap-select 上的 widget：先换光标，再调用户原来的那个（_runode_hook_zle
+# 改名留下的），它自己也换光标时以它为准。
+_runode_zle_widget() {
+    _runode_zle_cursor
+    'builtin' 'local' orig=._runode_orig_$WIDGET
+    (( ${+widgets[$orig]} )) || 'builtin' 'return' 0
+    'builtin' 'zle' $orig -N${_runode_zle_flags[$WIDGET]-} -- "$@"
+}
+
+# 把换光标挂到 zle 的 $1 钩子（line-init、keymap-select）上，照 Ghostty 的办法：这个钩子已经由
+# add-zle-hook-widget 管着时交给它，排在最后，不然自己包一层会触发 add-zle-hook-widget 的问题；
+# 用户自己定义了这个 widget 时改名留着，由 _runode_zle_widget 调它，名字以点开头，
+# zsh-syntax-highlighting 不会再包它；都没有时直接定义。
+_runode_hook_zle() {
+    'builtin' 'zmodload' -i zsh/zleparameter 2>/dev/null
+    'builtin' 'local' widget=zle-$1
+    if [[ ${widgets[$widget]-} == user:azhw:* ]] && (( ${+functions[add-zle-hook-widget]} )); then
+        add-zle-hook-widget $1 _runode_zle_cursor
+        'builtin' 'return'
+    fi
+    if (( ${+widgets[$widget]} )); then
+        'builtin' 'zle' -A $widget ._runode_orig_$widget
+        # 照 Ghostty：用户定义的不带 -w 调，它看到的 $WIDGET 还是钩子的名字；别的带 -w。
+        [[ ${widgets[$widget]} == user:* ]] && _runode_zle_flags[$widget]= || _runode_zle_flags[$widget]=w
+    fi
+    'builtin' 'zle' -N $widget _runode_zle_widget
+}
+'builtin' 'typeset' -gA _runode_zle_flags
+
 # $1 是用户输入的命令原文，放在带口令的 command 报告里；拿不到时报告的原文为空，终端从屏幕上
 # 读。没有口令时只报告命令开始，runode 不把它记进历史。
 _runode_preexec() {
@@ -142,6 +200,8 @@ _runode_preexec() {
         [[ -z $1 ]] || _runode_urlencode "$1"
         'builtin' 'print' -rn -- $'\e]6973;'"$_runode_report_token;command=$REPLY"$'\a'
     fi
+    # 提示符上换过光标的，在命令开始前换回配置的样式。
+    [[ -z $_runode_cursor ]] || 'builtin' 'print' -rn -- $'\e[0 q'
     'builtin' 'print' -rn -- $'\e]133;C\a'
     _runode_ran=1
 }

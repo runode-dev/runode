@@ -276,12 +276,13 @@ impl HostSession {
         self.pty.started()
     }
 
-    /// 还没启动 shell 时在起始目录下启动它，`shell` 为 `None` 时用用户的 `$SHELL`；已经启动过时
-    /// 什么都不做。
+    /// 还没启动 shell 时在起始目录下启动它，`shell` 为 `None` 时用用户的 `$SHELL`，集成脚本开哪些
+    /// 功能按眼下套着的设置；已经启动过时什么都不做。
     pub fn start(&mut self, shell: Option<&str>, integration: IntegrationMode) -> Result<()> {
         if self.pty.started() {
             return Ok(());
         }
+        self.pty.set_shell_features(&self.settings);
         self.pty.start(shell, self.start_dir.as_deref(), integration)?;
         // 口令在启动 shell 时才生成，这时再交给校验报告的回调。
         *self.effects.report_token.borrow_mut() = self.pty.report_token().map(str::to_owned);

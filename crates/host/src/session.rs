@@ -290,6 +290,7 @@ pub(crate) fn spawn(setup: Setup, options: SpawnOptions) -> Result<Handle> {
     for (key, value) in env {
         pty.set_env(key, value);
     }
+    pty.set_shell_features(&settings);
     if options.start {
         pty.start(options.shell.as_deref(), options.cwd.as_deref(), options.integration)?;
     }
