@@ -24,14 +24,13 @@
                 SettingsView(app: app, settings: app.settings, machines: app.machineList)
                     .appTheme(app.theme)
             }
-            .sheet(item: $app.pairing) { model in
+            .fullScreenCover(item: $app.pairing) { model in
                 PairingView(model: model) { machine in
                     app.pairing = nil
                     if let machine {
                         app.path = [.machine(machine.id)]
                     }
                 }
-                .appTheme(app.theme)
             }
             .onChange(of: scenePhase) { _, phase in
                 app.setActive(phase != .background)
