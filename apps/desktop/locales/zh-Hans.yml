@@ -101,12 +101,15 @@ workspace:
   close_detail: 里面的 %{count} 个终端会一起关闭。
   close_confirm: 关闭
   close_cancel: 取消
-  name: 名称
-  dir: 目录
-  no_dir: 选择目录…
-  name_hint: 留空则用目录名
-  create: 创建
-  cancel: 取消
+  browse: 浏览文件夹
+  browse_hint: 本地项目、Git 仓库或任意文件夹，也可以把文件夹拖到窗口上
+  other: 其他方式
+  clone: 从 URL 克隆
+  clone_hint: 克隆远程 Git 仓库
+  clone_url: 仓库地址，回车后选存放位置
+  clone_to: 克隆到
+  create: 创建新项目
+  create_hint: 从空文件夹开始
   empty: 这个工作区里还没有终端
 close:
   pane_title: 关闭这个终端？

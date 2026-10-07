@@ -62,6 +62,9 @@ icons! {
     pub MAXIMIZE_ICON = "maximize",
     pub MINIMIZE_ICON = "minimize",
     pub CLOSE_ICON = "close",
+    /// 新建工作区对话框里浏览文件夹和从 URL 克隆的图标（创建新项目用 `PLUS_ICON`）。
+    pub FOLDER_OPEN_ICON = "folder-open",
+    pub GLOBE_ICON = "globe",
     /// 卡片样式下标签图标叠里代表 shell 和普通程序的那块：深色底上的提示符。
     pub PROMPT_ICON = "prompt",
     /// 卡片样式下 agent 等你回答时的标记：像素画的问号。

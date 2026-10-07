@@ -103,7 +103,7 @@ fn is_shell_plain(c: char) -> bool {
 
 /// 打进 shell 的路径：只含常见字符时原样，否则用单引号括起来。开头是 `=` 或 `%` 时也括起来，
 /// zsh 会把 `=foo` 展开成命令的路径。
-fn shell_quote(text: &str) -> String {
+pub(super) fn shell_quote(text: &str) -> String {
     let plain = !text.is_empty() && !text.starts_with(['=', '%']) && text.chars().all(is_shell_plain);
     if plain { text.to_owned() } else { format!("'{}'", text.replace('\'', r"'\''")) }
 }

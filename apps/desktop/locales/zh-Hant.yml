@@ -101,12 +101,15 @@ workspace:
   close_detail: 裡面的 %{count} 個終端機會一起關閉。
   close_confirm: 關閉
   close_cancel: 取消
-  name: 名稱
-  dir: 目錄
-  no_dir: 選擇目錄…
-  name_hint: 留空則用目錄名稱
-  create: 建立
-  cancel: 取消
+  browse: 瀏覽檔案夾
+  browse_hint: 本機專案、Git 儲存庫或任意檔案夾，也可以把檔案夾拖到視窗上
+  other: 其他方式
+  clone: 從 URL 複製
+  clone_hint: 複製遠端 Git 儲存庫
+  clone_url: 儲存庫網址，按 Return 後選存放位置
+  clone_to: 複製到
+  create: 建立新專案
+  create_hint: 從空檔案夾開始
   empty: 這個工作區裡還沒有終端機
 close:
   pane_title: 關閉這個終端機？

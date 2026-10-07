@@ -101,12 +101,15 @@ workspace:
   close_detail: Its %{count} terminals will be closed along with it.
   close_confirm: Close
   close_cancel: Cancel
-  name: Name
-  dir: Folder
-  no_dir: Choose a folder…
-  name_hint: Defaults to the folder name
-  create: Create
-  cancel: Cancel
+  browse: Browse Folder
+  browse_hint: A local project, Git repository or any folder; you can also drop one on the window
+  other: Other Ways
+  clone: Clone from URL
+  clone_hint: Clone a remote Git repository
+  clone_url: Repository URL, press Return to choose where
+  clone_to: Clone
+  create: New Project
+  create_hint: Start from an empty folder
   empty: No terminals in this workspace
 close:
   pane_title: Close this terminal?
