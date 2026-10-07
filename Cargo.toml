@@ -38,7 +38,7 @@ bitflags = "2"
 int-enum = "1"
 png = "0.18"
 log = "0.4"
-bindgen = "0.73"
+bindgen = "0.72"
 heck = "0.5"
 pkg-config = "0.3"
 gpui = { package = "gpui-pre", version = "=0.3.8" }
