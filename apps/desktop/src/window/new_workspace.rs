@@ -1,10 +1,11 @@
-//! 新建 workspace 的对话框：选目录、填名字，确定后在当前 workspace 下面建一个。名字空着时按目录取名。
+//! 新建 workspace 的对话框：填名字、选目录（也可以从访达把目录拖到窗口上），确定后在当前 workspace
+//! 下面建一个。名字空着时按目录取名。
 
 use std::path::PathBuf;
 
 use gpui::{
-    Context, Div, Entity, Focusable, FontWeight, Hsla, MouseButton, PathPromptOptions, SharedString, Stateful,
-    Subscription, Window, div, prelude::*, px,
+    Context, Div, Entity, ExternalPaths, Focusable, FontWeight, Hsla, MouseButton, PathPromptOptions, SharedString,
+    Stateful, Subscription, Window, div, prelude::*, px,
 };
 use runode_shared_types::color::Rgb;
 
@@ -67,19 +68,21 @@ impl WindowView {
             let Some(dir) = paths.into_iter().next() else {
                 return;
             };
-            this.update_in(cx, |this, window, cx| {
-                let Some(dialog) = &mut this.new_workspace else {
-                    return;
-                };
-                let placeholder = workspace_name(&dir);
-                dialog.name.update(cx, |name, cx| name.set_placeholder(placeholder, cx));
-                dialog.dir = Some(dir);
-                window.focus(&dialog.name.focus_handle(cx), cx);
-                cx.notify();
-            })
-            .ok();
+            this.update_in(cx, |this, window, cx| this.set_new_workspace_dir(dir, window, cx)).ok();
         })
         .detach();
+    }
+
+    /// 把 `dir` 记进对话框，名字框的提示换成按目录取的名字。
+    fn set_new_workspace_dir(&mut self, dir: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(dialog) = &mut self.new_workspace else {
+            return;
+        };
+        let placeholder = workspace_name(&dir);
+        dialog.name.update(cx, |name, cx| name.set_placeholder(placeholder, cx));
+        dialog.dir = Some(dir);
+        window.focus(&dialog.name.focus_handle(cx), cx);
+        cx.notify();
     }
 
     /// 还没选目录时先去选；选好了就关掉对话框，建 workspace。
@@ -192,11 +195,10 @@ impl WindowView {
                     .font_weight(FontWeight::SEMIBOLD)
                     .child(rust_i18n::t!("workspace.new").into_owned()),
             )
-            // 目录必填、名字默认取自目录，所以目录在前。
-            .child(row(rust_i18n::t!("workspace.dir").into_owned().into()).child(dir))
             .child(row(rust_i18n::t!("workspace.name").into_owned().into()).child(name))
+            .child(row(rust_i18n::t!("workspace.dir").into_owned().into()).child(dir))
             .child(div().pt(px(6.)).flex().justify_end().gap(px(8.)).child(cancel).child(create));
-        // 铺满窗口的底子挡住下面的点击，点到对话框外面就取消。
+        // 铺满窗口的底子挡住下面的点击，点到对话框外面就取消；从访达拖来的目录放在窗口哪里都算选了它。
         Some(
             div()
                 .id("new-workspace-backdrop")
@@ -208,6 +210,12 @@ impl WindowView {
                 .justify_center()
                 .items_start()
                 .bg(Hsla::black().opacity(0.15))
+                .drag_over::<ExternalPaths>(|style, _, _, _| style.bg(Hsla::black().opacity(0.25)))
+                .on_drop(cx.listener(|this, dropped: &ExternalPaths, window, cx| {
+                    if let Some(dir) = dropped.paths().iter().find(|path| path.is_dir()) {
+                        this.set_new_workspace_dir(dir.clone(), window, cx);
+                    }
+                }))
                 .occlude()
                 .on_mouse_down(
                     MouseButton::Left,

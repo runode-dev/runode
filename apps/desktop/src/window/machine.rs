@@ -2,7 +2,7 @@
 //! 笔记本和台式机各一个图标。启动时在后台读一次，读到后重画各窗口；读到之前不显示。
 //!
 //! 有手机经远程访问连着时，机型那一行换成连着几台设备；点这一块弹出所有配对过的设备，连着的标出来，
-//! 点其中一台问过用户后撤销它（`RevokeDevice`），再点这一块关掉菜单。
+//! 点设备右边的叉问过用户后撤销它（`RevokeDevice`），再点这一块关掉菜单。
 //! 设备表和连着哪些设备（监听方写在状态文件里的 `ListenerStatus::connected`）都是数据目录里的文件，
 //! 监听不一定开在这个进程里，所以每隔 `DEVICES_POLL` 读一次。
 
@@ -15,9 +15,12 @@ use gpui::{
 use runode_protocol::remote::DeviceId;
 use runode_shared_types::color::Rgb;
 
-use super::{TITLEBAR_HEIGHT, WindowView, files::text_item};
+use super::{
+    TITLEBAR_HEIGHT, WindowView,
+    files::{MenuButton, text_item},
+};
 use crate::{
-    assets::{DESKTOP_ICON, LAPTOP_ICON},
+    assets::{CLOSE_ICON, DESKTOP_ICON, LAPTOP_ICON},
     ui::hsla,
 };
 
@@ -134,12 +137,14 @@ impl WindowView {
                         vec![Some(text_item(rust_i18n::t!("machine.no_devices").into_owned(), None, None))]
                     } else {
                         let live: SharedString = rust_i18n::t!("machine.live").into_owned().into();
+                        let revoke: SharedString = rust_i18n::t!("machine.revoke").into_owned().into();
                         devices
                             .iter()
                             .map(|device| {
                                 let detail = device.live.then(|| live.clone());
-                                let revoke: Box<dyn Action> = Box::new(RevokeDevice(device.id));
-                                Some(text_item(device.name.to_string(), detail, Some(revoke)))
+                                let button = MenuButton { icon: CLOSE_ICON, tooltip: revoke.clone() };
+                                let action: Box<dyn Action> = Box::new(RevokeDevice(device.id));
+                                Some(text_item(device.name.to_string(), detail, Some((button, action))))
                             })
                             .collect()
                     };

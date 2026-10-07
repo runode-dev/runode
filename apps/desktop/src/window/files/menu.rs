@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 
 use gpui::{
     Action, AnyElement, App, ClipboardItem, Context, FocusHandle, MouseButton, Pixels, Point, SharedString, Window,
-    anchored, deferred, div, prelude::*, px,
+    anchored, deferred, div, prelude::*, px, svg,
 };
 use runode_shared_types::color::Rgb;
 
@@ -17,7 +17,7 @@ use crate::{
     ui::{
         actions::{Copy, Cut, Paste},
         hsla,
-        tooltip::shortcut_text,
+        tooltip::{shortcut_text, tooltip},
     },
     window::WindowView,
 };
@@ -27,27 +27,36 @@ const MENU_MARGIN: f32 = 8.;
 const MENU_WIDTH: f32 = 240.;
 
 /// 菜单里的一项：点了把 `action` 派发给菜单的 `target`，和按快捷键走同一条路；没有 `action` 的
-/// 只是一行字，点不了。
+/// 只是一行字，点不了。有 `button` 时整行点不了，`action` 只挂在右边这个图标按钮上。
 pub(in crate::window) struct MenuItem {
     label: String,
     action: Option<Box<dyn Action>>,
     shortcut: Option<SharedString>,
     enabled: bool,
+    button: Option<MenuButton>,
+}
+
+/// 菜单项右边的图标按钮：图标和悬停时的说明。
+pub(in crate::window) struct MenuButton {
+    pub icon: &'static str,
+    pub tooltip: SharedString,
 }
 
 /// 菜单里的一项，快捷键在这时查，查的是这一刻的键位表。
 pub(in crate::window) fn menu_item(key: &str, action: Box<dyn Action>, enabled: bool, cx: &App) -> MenuItem {
     let shortcut = shortcut_text(action.as_ref(), cx);
-    MenuItem { label: rust_i18n::t!(key).into_owned(), action: Some(action), shortcut, enabled }
+    MenuItem { label: rust_i18n::t!(key).into_owned(), action: Some(action), shortcut, enabled, button: None }
 }
 
-/// 菜单里写好了字的一项，`detail` 淡淡地写在右边快捷键的位置；没有 `action` 时点不了。
+/// 菜单里写好了字的一项，`detail` 淡淡地写在右边快捷键的位置。整行点不了，有 `button` 时点右边的
+/// 图标按钮派发它的动作。
 pub(in crate::window) fn text_item(
     label: String,
     detail: Option<SharedString>,
-    action: Option<Box<dyn Action>>,
+    button: Option<(MenuButton, Box<dyn Action>)>,
 ) -> MenuItem {
-    MenuItem { label, action, shortcut: detail, enabled: true }
+    let (button, action) = button.unzip();
+    MenuItem { label, action, shortcut: detail, enabled: true, button }
 }
 
 /// 打开着的右键菜单：右键按下的位置，打开时就定下的各项（`None` 是分隔线），以及点了以后
@@ -122,6 +131,7 @@ impl WindowView {
         let menu = self.file_menu.as_ref()?;
         let hover_bg = hsla(bg.mix(fg, 0.12));
         let menu_bg = hsla(bg.mix(fg, 0.06));
+        let fg_rgb = fg;
         let fg = hsla(fg);
         let items = menu.items.iter().enumerate().map(|(ix, item)| {
             let Some(item) = item else {
@@ -129,6 +139,20 @@ impl WindowView {
             };
             let action = item.action.as_ref().filter(|_| item.enabled).map(|action| action.boxed_clone());
             let target = menu.target.clone();
+            let dispatch = |action: Box<dyn Action>| {
+                let target = target.clone();
+                cx.listener(move |this: &mut Self, _: &gpui::MouseDownEvent, window, cx| {
+                    cx.stop_propagation();
+                    this.file_menu = None;
+                    window.focus(&target, cx);
+                    window.dispatch_action(action.boxed_clone(), cx);
+                    cx.notify();
+                })
+            };
+            let (row_action, button) = match &item.button {
+                Some(button) => (None, action.map(|action| (button, action))),
+                None => (action, None),
+            };
             div()
                 .id(("file-menu", ix))
                 .flex_none()
@@ -140,17 +164,8 @@ impl WindowView {
                 .items_center()
                 .gap(px(16.))
                 .text_color(if item.enabled { fg } else { fg.opacity(0.35) })
-                .when_some(action, |row, action| {
-                    row.hover(|row| row.bg(hover_bg)).on_mouse_down(
-                        MouseButton::Left,
-                        cx.listener(move |this, _, window, cx| {
-                            cx.stop_propagation();
-                            this.file_menu = None;
-                            window.focus(&target, cx);
-                            window.dispatch_action(action.boxed_clone(), cx);
-                            cx.notify();
-                        }),
-                    )
+                .when_some(row_action, |row, action| {
+                    row.hover(|row| row.bg(hover_bg)).on_mouse_down(MouseButton::Left, dispatch(action))
                 })
                 .child(div().flex_1().min_w_0().truncate().child(item.label.clone()))
                 .children(
@@ -158,6 +173,21 @@ impl WindowView {
                         .clone()
                         .map(|shortcut| div().flex_none().text_color(fg.opacity(0.45)).child(shortcut)),
                 )
+                .children(button.map(|(button, action)| {
+                    div()
+                        .id(("file-menu-button", ix))
+                        .flex_none()
+                        .size(px(18.))
+                        .mr(px(-6.))
+                        .rounded(px(4.))
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .hover(|button| button.bg(hover_bg))
+                        .tooltip(tooltip(button.tooltip.clone(), None, fg_rgb, bg))
+                        .child(svg().path(button.icon).size(px(12.)).text_color(fg.opacity(0.6)))
+                        .on_mouse_down(MouseButton::Left, dispatch(action))
+                }))
                 .into_any_element()
         });
         let list = div()

@@ -689,7 +689,7 @@ impl WindowView {
             self.render_right_handle(divider, right, cx)
         })
         .collect::<Vec<_>>();
-        let machine = self.render_machine(fg, left_inset, cx);
+        let machine = self.render_machine(fg, sidebar_width + left_inset, cx);
         // 标签平分标签条，最窄 `TAB_MIN_WIDTH`，挤不下就让标签条滚动。这里估一个宽度，决定标签
         // 要不要收成紧凑的样子，拖动时的预览也照它画。
         let fixed = sidebar_width

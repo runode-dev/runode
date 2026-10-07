@@ -24,7 +24,7 @@ use runode_config::PreviewClick;
 use runode_shared_types::color::Rgb;
 
 pub(super) use edit::{FileClipboard, FileEdit};
-pub(super) use menu::{FileMenu, MenuItem, menu_item, text_item};
+pub(super) use menu::{FileMenu, MenuButton, MenuItem, menu_item, text_item};
 pub(super) use tasks::is_task_file;
 
 use super::{
