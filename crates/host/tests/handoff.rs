@@ -305,8 +305,25 @@ fn counted(text: &str) -> Vec<u32> {
 }
 
 /// 数完了的计数会话：回滚历史里从 1 到 `count` 一个不少、一个不多。
+///
+/// 计数脚本每行 fork 一次 `sleep`，CI 上测试并行跑时一行要几十毫秒，数几百行超过 `common::WAIT`，
+/// 所以只在一个 `WAIT` 里数不动了才算超时，数得慢不算。
 fn assert_counted(peer: &mut Peer, id: SessionId, count: u32) {
-    let text = peer.wait_screen(id, Some(count + 100), |text| text.lines().any(|line| line == "end"));
+    let mut deadline = Instant::now() + common::WAIT;
+    let mut last = None;
+    let text = loop {
+        let text = peer.screen_text(id, Some(count + 100));
+        if text.lines().any(|line| line == "end") {
+            break text;
+        }
+        let now = counted(&text).last().copied();
+        if now > last {
+            last = now;
+            deadline = Instant::now() + common::WAIT;
+        }
+        assert!(Instant::now() < deadline, "the count of {id} stopped at {last:?}: {text:?}");
+        thread::sleep(Duration::from_millis(20));
+    };
     let numbers = counted(&text);
     let expected: Vec<u32> = (1..=count).collect();
     if numbers != expected {
