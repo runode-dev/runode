@@ -7,7 +7,7 @@
 <p align="center">
   给 AI 编程 agent 准备的 macOS 原生终端
   <br>
-  <a href="https://github.com/runode-dev/runode/releases/latest/download/Runode-arm64.dmg">下载</a>
+  <a href="#安装">下载</a>
   ·
   <a href="#快速上手">快速上手</a>
   ·
@@ -36,9 +36,9 @@ Runode 用 [Ghostty](https://ghostty.org) 的 libghostty-vt 做终端仿真，�
 
 ## 安装
 
-从 [Releases](https://github.com/runode-dev/runode/releases/latest) 下载 dmg，打开后把 Runode 拖进「应用程序」。安装包用 Developer ID 签名并经过 Apple 公证，之后会自动更新。
+下载对应芯片的 dmg：[Apple 芯片](https://github.com/runode-dev/runode/releases/latest/download/Runode-arm64.dmg) · [Intel](https://github.com/runode-dev/runode/releases/latest/download/Runode-x86_64.dmg)。打开后把 Runode 拖进「应用程序」。安装包用 Developer ID 签名并经过 Apple 公证，之后会自动更新。
 
-目前只支持 Apple 芯片的 Mac。iOS app 还没上架，需要[从源码构建](CONTRIBUTING.md)。
+历次版本见 [Releases](https://github.com/runode-dev/runode/releases)。iOS app 还没上架，需要[从源码构建](CONTRIBUTING.md)。
 
 ## 快速上手
 
@@ -68,7 +68,7 @@ Runode 不是 Ghostty 的分支。它把 libghostty-vt 当作终端仿真的库�
 任何在终端里跑的 agent 都能用。其中二十多种能认出状态，包括 Claude Code、Codex、Gemini CLI、Cursor、OpenCode、Amp、GitHub Copilot、Kimi、Qwen Code 等。识别规则可以自己加。
 
 **支持哪些平台？**
-目前只支持 macOS（Apple 芯片），另有 iOS app 做远程访问。
+macOS（Apple 芯片和 Intel 都支持），另有 iOS app 做远程访问。
 
 ## 参与开发
 

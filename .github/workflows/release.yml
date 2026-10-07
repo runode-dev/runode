@@ -1,5 +1,5 @@
-# 推 v* 标签时发版：用 Developer ID 签名、公证，打包 dmg 和自动更新用的 zip，生成版本清单
-# latest.json，一起发成 GitHub Release。app 经 releases/latest/download/latest.json 查新版本
+# 推 v* 标签时发版：在 Apple 芯片和 Intel 的 runner 上各打一份 dmg 和自动更新用的 zip，用 Developer
+# ID 签名、公证，再汇总起来生成版本清单 latest.json，一起发成 GitHub Release。app 经 releases/latest/download/latest.json 查新版本
 # （`runode_update::MANIFEST_URL`），所以 Release 一发出去，开着自动更新的 app 就会去下载。
 #
 # 发版：改 workspace 的 `version`（`[workspace.package]`），提交，打同名的标签（v0.2.0）推上来。
@@ -28,9 +28,16 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  release:
-    # Apple 芯片的 runner：发的是 arm64 的包。
-    runs-on: macos-15
+  build:
+    # 包名里的架构由打包脚本按 `lipo -archs` 取，这里的 arch 只用来给产物和缓存起名。
+    strategy:
+      matrix:
+        include:
+          - runner: macos-15
+            arch: arm64
+          - runner: macos-15-intel
+            arch: x86_64
+    runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v4
       - name: 拉子模块
@@ -43,6 +50,8 @@ jobs:
       - name: 确认有 Metal 编译器
         run: xcrun -f metal || xcodebuild -downloadComponent MetalToolchain
       - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.arch }}
       - name: 核对版本号
         run: |
           version=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[] | select(.name == "runode") | .version')
@@ -77,6 +86,24 @@ jobs:
           NOTARY_KEY_ID: ${{ secrets.NOTARY_KEY_ID }}
           NOTARY_ISSUER: ${{ secrets.NOTARY_ISSUER }}
         run: scripts/bundle-macos.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bundle-${{ matrix.arch }}
+          path: |
+            target/release/bundle/Runode-*.dmg
+            target/release/bundle/Runode-*.zip
+          if-no-files-found: error
+
+  publish:
+    # 两个架构都打好了才发，缺一个就不发。
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: bundle-*
+          path: target/release/bundle
+          merge-multiple: true
       - name: 生成版本清单
         # 格式见 `runode_update::Release`：archives 按架构名给出各个 zip 的下载地址。
         run: |
@@ -107,5 +134,5 @@ jobs:
           for dmg in "$bundle"/Runode-"$version"-*.dmg; do
             cp "$dmg" "$bundle/Runode-${dmg##*/Runode-"$version"-}"
           done
-          gh release create "$GITHUB_REF_NAME" --title "Runode ${GITHUB_REF_NAME#v}" --generate-notes \
+          gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --title "Runode ${GITHUB_REF_NAME#v}" --generate-notes \
             "$bundle"/Runode-*.dmg "$bundle"/Runode-*.zip "$bundle/latest.json"
