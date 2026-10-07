@@ -178,6 +178,12 @@ pub(super) fn paint_frame(
                         attrs.bold |= style.bold;
                         attrs.underline |= style.underline;
                     }
+                    // 按着 ⌘ 悬停的链接加下划线。
+                    if let (Some(link), Ok(y)) = (&view.hovered_link, u16::try_from(y))
+                        && link.contains(x, y)
+                    {
+                        attrs.underline = true;
+                    }
                     if let Some(cursor) = filled_cursor.filter(|c| c.x == x && i32::from(c.y) == y) {
                         fg = cursor.text;
                     }

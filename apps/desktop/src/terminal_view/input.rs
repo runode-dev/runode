@@ -3,14 +3,14 @@
 use std::time::Duration;
 
 use gpui::{
-    Context, KeyDownEvent, Keystroke, Modifiers, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels,
-    Point, ScrollDelta, ScrollWheelEvent, Size, Window,
+    App, Context, KeyDownEvent, Keystroke, Modifiers, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent,
+    Pixels, Point, ScrollDelta, ScrollWheelEvent, Size, Window,
 };
 use runode_shared_types::{
     grid::GridPoint,
     input::{self, Mods, SelectionAdjust},
 };
-use runode_terminal::session::Session;
+use runode_terminal::session::{LinkTarget, Session};
 
 use super::TerminalView;
 use super::keys;
@@ -146,6 +146,14 @@ impl TerminalView {
         let Some(at) = self.grid_point(event.position) else {
             return;
         };
+        // ⌘ 点在链接上：打开它，不选择也不上报（程序开着鼠标上报时也一样，上报本来就不带 ⌘）。
+        if event.button == MouseButton::Left
+            && event.modifiers.platform
+            && let Some(link) = self.screen.shown().and_then(|session| session.link_at(at))
+        {
+            open_link(&link.target, cx);
+            return;
+        }
         // 程序开了鼠标上报时按键归程序，按住 Shift 照常选择。
         if let Some(session) = self.screen.live_mut()
             && session.mouse_tracking()
@@ -190,6 +198,7 @@ impl TerminalView {
             cx.notify();
             return;
         }
+        self.hover_link(inside && event.pressed_button.is_none() && event.modifiers.platform, at, cx);
         // 没按键的移动只报给指针下的终端；按着键的拖动只报给按下时所在的终端。
         let ours = if event.pressed_button.is_some() { self.reporting_press } else { inside };
         if ours
@@ -231,6 +240,35 @@ impl TerminalView {
         }
     }
 
+    /// 按下或松开了修饰键：指针在这个终端里时按 ⌘ 有没有按着重新找指针下的链接。
+    pub(super) fn link_modifiers_changed(
+        &mut self,
+        modifiers: &Modifiers,
+        pointer: Option<Point<Pixels>>,
+        cx: &mut Context<Self>,
+    ) {
+        let at = pointer.and_then(|pointer| self.grid_point(pointer));
+        match at {
+            Some(at) => self.hover_link(modifiers.platform, at, cx),
+            None => self.clear_hovered_link(cx),
+        }
+    }
+
+    /// 按着 ⌘ 悬停时记下指针下的链接，画下划线、指针换成手形；`active` 为假时清掉。
+    fn hover_link(&mut self, active: bool, at: GridPoint, cx: &mut Context<Self>) {
+        let link = if active { self.screen.shown().and_then(|session| session.link_at(at)) } else { None };
+        if link != self.hovered_link {
+            self.hovered_link = link;
+            cx.notify();
+        }
+    }
+
+    fn clear_hovered_link(&mut self, cx: &mut Context<Self>) {
+        if self.hovered_link.take().is_some() {
+            cx.notify();
+        }
+    }
+
     fn finish_selecting(&mut self, at: GridPoint, cx: &mut Context<Self>) {
         self.selecting = false;
         self._autoscroll = None;
@@ -258,6 +296,14 @@ impl TerminalView {
                 }
             }
         }));
+    }
+}
+
+/// 网址交给系统按协议打开，文件和目录用系统默认的程序打开（目录进 Finder）。
+fn open_link(target: &LinkTarget, cx: &App) {
+    match target {
+        LinkTarget::Url(url) => cx.open_url(url),
+        LinkTarget::Path(path) => cx.open_with_system(path),
     }
 }
 

@@ -760,6 +760,7 @@ impl TerminalView {
             crop: None,
             selecting: false,
             reporting_press: false,
+            hovered_link: None,
             click_cell: None,
             cursor_blink_visible: true,
             cursor_blink_since: Instant::now(),

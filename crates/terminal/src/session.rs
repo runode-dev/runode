@@ -11,12 +11,13 @@
 //!
 //! 这里是 `Session` 本身：创建、注册 VT 回调、套用配置、改尺寸和对外公布的状态。其余按职责
 //! 分在子模块里：帧（`render`）、输入（`input`）、光标所在的输入行（`input_line`）、
-//! 鼠标（`pointer`）、视口滚动（`scroll`）、选区（`selection`）、搜索（`search`）、
+//! 鼠标（`pointer`）、指针下能打开的链接（`link`）、视口滚动（`scroll`）、选区（`selection`）、搜索（`search`）、
 //! 快照（`snapshot`），以及和 libghostty 类型之间的转换（`convert`）。
 
 pub(crate) mod convert;
 mod input;
 mod input_line;
+mod link;
 #[cfg(test)]
 mod mirror_tests;
 mod pointer;
@@ -54,6 +55,7 @@ use crate::{
     vt,
 };
 pub use input::Paste;
+pub use link::{Link, LinkSpan, LinkTarget};
 use render::Renderer;
 use selection::Selecting;
 

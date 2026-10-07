@@ -125,6 +125,14 @@ impl Element for TerminalElement {
                 }
             }
         });
+        // 按下、松开 ⌘ 时不用挪指针就画出或去掉链接的下划线。只发给有焦点的终端。
+        window.on_modifiers_changed({
+            let view = self.view.clone();
+            move |event, window, cx| {
+                let pointer = Some(window.mouse_position()).filter(|pointer| bounds.contains(pointer));
+                view.update(cx, |view, cx| view.link_modifiers_changed(&event.modifiers, pointer, cx));
+            }
+        });
         let focused = focus_handle.is_focused(window);
         self.view.update(cx, |view, cx| {
             let metrics = view.metrics(window);

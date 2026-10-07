@@ -41,7 +41,10 @@ use gpui::{
 use runode_config::Config;
 use runode_protocol::SessionId;
 use runode_shared_types::{color::Rgb, frame::Frame, grid::GridSize};
-use runode_terminal::{history, session::Session};
+use runode_terminal::{
+    history,
+    session::{Link, Session},
+};
 
 use crate::{
     host_client::LinkEvent,
@@ -201,6 +204,8 @@ pub struct TerminalView {
     /// 按下的那一下已经上报给了程序。分屏时每个终端都在窗口上监听移动和松开，
     /// 只有按下发生在自己这里的终端才上报对应的拖动和松开。
     reporting_press: bool,
+    /// 按着 ⌘ 悬停时指针下的链接，画下划线、指针显示成手形；⌘ 点击打开它。
+    hovered_link: Option<Link>,
     /// 这次左键按下是一次不带修饰键的单击，按在哪一格；松开时还在这一格就把光标挪过去。
     click_cell: Option<(i32, i32)>,
     /// 闪烁光标当前处于亮的一半周期。
@@ -307,7 +312,9 @@ impl Render for TerminalView {
                     .pb(px(self.config.window_padding_y.1))
                     .on_any_mouse_down(cx.listener(Self::mouse_down))
                     // 程序开了鼠标上报时点击归程序，指针不显示成文本选择的样子。
-                    .cursor(if self.screen.live().is_some_and(Session::mouse_tracking) {
+                    .cursor(if self.hovered_link.is_some() {
+                        CursorStyle::PointingHand
+                    } else if self.screen.live().is_some_and(Session::mouse_tracking) {
                         CursorStyle::Arrow
                     } else {
                         CursorStyle::IBeam
