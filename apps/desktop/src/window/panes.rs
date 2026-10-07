@@ -26,6 +26,7 @@ use super::{
     card, cards,
     files::DraggedFile,
     model::Tab,
+    status_bar,
     titlebar::{icon_toggle, pane_label, styled_agent_mark},
 };
 use crate::{
@@ -575,7 +576,8 @@ impl WindowView {
                     Divider::GitGraph => {
                         // 卡片样式下面板的卡片底下离窗口底边还有一段间距。
                         let spacing = if cards(cx) { CARD_GAP } else { 0. };
-                        let viewport = f32::from(window.viewport_size().height) - spacing;
+                        let viewport =
+                            f32::from(window.viewport_size().height) - spacing - status_bar::STATUS_BAR_HEIGHT;
                         this.resize_git_graph(f32::from(event.position.y), viewport);
                         cx.notify();
                         return;

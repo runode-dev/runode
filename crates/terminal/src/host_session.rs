@@ -288,6 +288,8 @@ impl HostSession {
         self.pty.start(shell, self.start_dir.as_deref(), integration)?;
         // 口令在启动 shell 时才生成，这时再交给校验报告的回调。
         *self.effects.report_token.borrow_mut() = self.pty.report_token().map(str::to_owned);
+        // 有了 shell 的进程号，要对外公布。
+        self.meta_dirty = true;
         Ok(())
     }
 
@@ -539,6 +541,7 @@ impl HostSession {
             prompt_cwd: self.prompt_cwd.clone(),
             foreground: self.foreground.clone(),
             driver: self.driver.clone(),
+            pid: self.shell_pid(),
         }
     }
 

@@ -611,3 +611,25 @@ machine:
   revoke_detail: 它會馬上斷開，要重新配對才能再連上。
   revoke: 撤銷
   cancel: 取消
+status:
+  sleep_title: 防止電腦休眠
+  sleep_on: 開啟
+  sleep_on_detail: 始終防止這台電腦進入睡眠
+  sleep_agent: Agent
+  sleep_agent_detail: 有 agent 在工作時防止電腦進入睡眠
+  sleep_off: 關閉
+  sleep_off_detail: 允許系統正常進入睡眠
+  sleep_active: 生效中
+  sleep_inactive: 未生效
+  resources_title: 資源
+  resources_tooltip: Runode 總共佔用的記憶體 · 終端機數
+  name: 名稱
+  memory: 記憶體
+  no_terminals: 這個視窗裡沒有終端機
+  app: 主程序
+  host: 宿主
+  ports_title: 連接埠
+  ports_summary: "%{ours} 個終端機 · %{external} 個外部"
+  no_ports: 終端機裡沒有程式在監聽連接埠
+  external_ports: 外部連接埠
+  open_port: 在瀏覽器中開啟

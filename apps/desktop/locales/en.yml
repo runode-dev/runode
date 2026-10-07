@@ -611,3 +611,25 @@ machine:
   revoke_detail: It's disconnected right away and has to pair again to connect.
   revoke: Revoke
   cancel: Cancel
+status:
+  sleep_title: Prevent Sleep
+  sleep_on: "On"
+  sleep_on_detail: Always keep this computer awake
+  sleep_agent: Agent
+  sleep_agent_detail: Keep this computer awake while an agent is working
+  sleep_off: "Off"
+  sleep_off_detail: Let the system sleep as usual
+  sleep_active: Active
+  sleep_inactive: Inactive
+  resources_title: Resources
+  resources_tooltip: Memory used by Runode · Terminals
+  name: Name
+  memory: Memory
+  no_terminals: No terminals in this window
+  app: Main Process
+  host: Host
+  ports_title: Ports
+  ports_summary: "%{ours} in terminals · %{external} external"
+  no_ports: No program in a terminal is listening on a port
+  external_ports: External Ports
+  open_port: Open in Browser

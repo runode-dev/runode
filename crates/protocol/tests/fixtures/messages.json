@@ -41,6 +41,7 @@
         "fallback_title": "zsh",
         "foreground": "claude",
         "foreground_is_shell": false,
+        "pid": 4242,
         "prompt_cwd": "/tmp",
         "shell_names": {
           "alias_values": [],
@@ -613,6 +614,7 @@
         "fallback_title": null,
         "foreground": null,
         "foreground_is_shell": false,
+        "pid": null,
         "prompt_cwd": null,
         "shell_names": {
           "alias_values": [],
@@ -777,6 +779,7 @@
             "fallback_title": "zsh",
             "foreground": "claude",
             "foreground_is_shell": false,
+            "pid": 4242,
             "prompt_cwd": "/tmp",
             "shell_names": {
               "alias_values": [],

@@ -51,6 +51,7 @@ fn meta() -> SessionMeta {
         shell_names: ShellNames { aliases: vec!["ll".into()], ..ShellNames::default() }.into(),
         foreground: Some("claude".into()),
         driver: Some(Driver { by: None, action: DriveAction::Paste, at_ms: 1 }),
+        pid: Some(4242),
     }
 }
 

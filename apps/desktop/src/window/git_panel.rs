@@ -38,6 +38,7 @@ use super::{
     files::menu_item,
     model::base_name,
     project::{RENAMED, panel_message, panel_shell},
+    status_bar,
 };
 use crate::{
     assets::{
@@ -373,7 +374,7 @@ impl WindowView {
                     .into_any_element()
             }
         };
-        let room = f32::from(window.viewport_size().height) - TITLEBAR_HEIGHT;
+        let room = f32::from(window.viewport_size().height) - TITLEBAR_HEIGHT - status_bar::STATUS_BAR_HEIGHT;
         let graph = project
             .git
             .as_ref()

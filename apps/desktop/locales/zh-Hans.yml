@@ -611,3 +611,25 @@ machine:
   revoke_detail: 它会马上断开，要重新配对才能再连上。
   revoke: 撤销
   cancel: 取消
+status:
+  sleep_title: 防止电脑休眠
+  sleep_on: 开启
+  sleep_on_detail: 始终防止这台电脑进入睡眠
+  sleep_agent: Agent
+  sleep_agent_detail: 有 agent 在干活时防止电脑进入睡眠
+  sleep_off: 关闭
+  sleep_off_detail: 允许系统正常进入睡眠
+  sleep_active: 生效中
+  sleep_inactive: 未生效
+  resources_title: 资源
+  resources_tooltip: Runode 一共占用的内存 · 终端数
+  name: 名称
+  memory: 内存
+  no_terminals: 这个窗口里没有终端
+  app: 主进程
+  host: 宿主
+  ports_title: 端口
+  ports_summary: "%{ours} 个终端 · %{external} 个外部"
+  no_ports: 终端里没有程序在监听端口
+  external_ports: 外部端口
+  open_port: 在浏览器里打开

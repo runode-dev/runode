@@ -93,6 +93,7 @@ fn main() {
         drop(shell);
         window::watch_background(cx);
         window::load_machine(cx);
+        window::watch_status(cx);
         cx.activate(true);
         host_client::show_notice(cx);
         // 窗口先出来；未打包运行时才需要的图标解码放到最后。

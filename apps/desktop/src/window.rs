@@ -10,8 +10,8 @@
 //! 就地输入框（`inline_edit`），新建 workspace 的对话框（`new_workspace`），开窗口（`open`），存档（`persist`，存档文件的格式在
 //! `persist::format`），侧栏里没在窗口里显示的后台会话（`background`），退出和关窗口时会话怎么办
 //! （`quit`），以及别的进程经宿主请 app 开终端、切到某个终端、问各个终端摆在哪（`remote`、
-//! `layout_report`），一次在当前分屏旁开几个分屏（`arrange`），以及卡片样式下标题栏左边的这台
-//! 机器（`machine`）。
+//! `layout_report`），一次在当前分屏旁开几个分屏（`arrange`），卡片样式下标题栏左边的这台
+//! 机器（`machine`），以及窗口底部的状态栏（`status_bar`）。
 //!
 //! 窗口有两种样子，按配置的 `WindowStyle` 画：卡片样式（`render_cards_body`）和经典样式
 //! （`render_classic_body`）。
@@ -37,6 +37,7 @@ mod project;
 mod quit;
 mod remote;
 mod sidebar;
+mod status_bar;
 mod titlebar;
 
 use std::{cell::RefCell, collections::HashMap, path::PathBuf, rc::Rc, time::Instant};
@@ -67,6 +68,7 @@ pub use quit::{
     terminal_windows,
 };
 pub use remote::serve_requests;
+pub use status_bar::watch as watch_status;
 pub use titlebar::titlebar_options;
 
 use crate::{config::AppConfig, prespawn::Prespawned, terminal_view::TerminalView, ui::hsla};
@@ -277,6 +279,8 @@ pub struct WindowView {
     agent_picker: Option<agent_picker::AgentPicker>,
     /// 开着的排列分屏浮层。
     arrange_picker: Option<arrange::ArrangePicker>,
+    /// 底部状态栏上开着的浮层。
+    status_popover: Option<status_bar::StatusPopover>,
     /// 显示着驱动标记时，到最早的那个该消失的时候（`now_ms` 的毫秒数）重画的计时器，见
     /// `schedule_driver_redraw`。
     driver_redraw: Option<(u64, Task<()>)>,
@@ -385,6 +389,7 @@ impl WindowView {
             empty_focus: cx.focus_handle(),
             agent_picker: None,
             arrange_picker: None,
+            status_popover: None,
             driver_redraw: None,
             next_id: 0,
             layout: Rc::default(),
@@ -483,6 +488,7 @@ impl Render for WindowView {
         let arrange_picker = self.render_arrange_picker(fg, bg, cx);
         let branch_picker = self.render_branch_picker(fg, bg, cx);
         let new_workspace = self.render_new_workspace(fg, bg, cx);
+        let status_bar = self.render_status_bar(fg, bg, cx);
         div()
             .id("window")
             .key_context("Window")
@@ -519,8 +525,10 @@ impl Render for WindowView {
             .relative()
             .size_full()
             .flex()
+            .flex_col()
             .bg(hsla(base))
-            .children(body)
+            .child(div().relative().flex_1().min_h_0().flex().children(body))
+            .child(status_bar)
             .children(drag)
             .children(file_menu)
             .children(agent_picker)

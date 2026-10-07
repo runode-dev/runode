@@ -69,6 +69,11 @@ icons! {
     pub PROMPT_ICON = "prompt",
     /// 卡片样式下 agent 等你回答时的标记：像素画的问号。
     pub PIXEL_QUESTION_ICON = "pixel-question",
+    /// 窗口底部状态栏上的防止休眠、内存、终端数和端口。
+    pub COFFEE_ICON = "coffee",
+    pub MEMORY_ICON = "memory",
+    pub SHELL_ICON = "shell",
+    pub PLUG_ICON = "plug",
 }
 
 fn all_files() -> impl Iterator<Item = &'static (&'static str, &'static [u8])> {

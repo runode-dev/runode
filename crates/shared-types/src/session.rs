@@ -33,6 +33,8 @@ pub struct SessionMeta {
     pub foreground: Option<String>,
     /// 最近一次别的终端里的程序（经命令行）操作这个会话的记录；用户自己在界面里打字后清掉。
     pub driver: Option<Driver>,
+    /// shell 的进程号；还没启动时为 `None`。界面按它把进程和监听的端口归到终端上。
+    pub pid: Option<u32>,
 }
 
 /// 别的终端里的程序操作了这个会话：谁、做了什么、什么时候。

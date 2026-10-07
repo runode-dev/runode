@@ -29,6 +29,7 @@ fn round_trips_through_json() {
             action: DriveAction::Keys,
             at_ms: 7,
         }),
+        pid: Some(4242),
     };
     let json = serde_json::to_string(&meta).unwrap();
     assert!(json.contains(r#""kind":"github_copilot","state":"blocked""#), "{json}");
