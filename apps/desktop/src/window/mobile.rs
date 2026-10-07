@@ -49,7 +49,7 @@ enum Step {
 pub(super) struct MobilePage {
     step: Step,
     pairing: Pairing,
-    focus: FocusHandle,
+    pub(super) focus: FocusHandle,
     /// 装 App 的二维码，有安装链接时才有。
     install_qr: Option<Rc<Qr>>,
     /// 电脑名的输入框，以及它的回车、Esc 和失焦；空着时用系统的电脑名 `system_name`。
@@ -62,12 +62,6 @@ pub(super) struct MobilePage {
     network: Option<IpAddr>,
     /// 网络的下拉列表展开着。
     network_open: bool,
-}
-
-impl MobilePage {
-    pub(super) fn focus(&self) -> &FocusHandle {
-        &self.focus
-    }
 }
 
 impl WindowView {
@@ -455,30 +449,34 @@ impl WindowView {
         left = left
             .child(headline(rust_i18n::t!("mobile.pair_title").into_owned(), 32.))
             .child(lead(rust_i18n::t!("mobile.pair_body").into_owned(), colors));
+        if let Pairing::Failed(err) = &page.pairing {
+            left = left.child(notice(err.clone(), colors));
+        }
+        if remote_on {
+            left = left.child(self.render_machine_name(page, colors, cx)).child(self.render_network(page, colors, cx));
+        }
         let right = div().flex_none().w(px(QR_COLUMN_WIDTH)).flex().flex_col().items_center().gap(px(12.));
         let right = match &page.pairing {
             Pairing::Waiting(waiting) => {
                 let uri = waiting.uri();
-                left = left
-                    .child(self.render_machine_name(page, colors, cx))
-                    .child(self.render_network(page, colors, cx))
-                    .child(
-                        div()
-                            .flex()
-                            .items_center()
-                            .gap(px(10.))
-                            .child(
-                                div()
-                                    .text_color(colors.fg.opacity(0.5))
-                                    .child(rust_i18n::t!("mobile.cant_scan").into_owned()),
-                            )
-                            .child(
-                                link("mobile-copy-code", rust_i18n::t!("mobile.copy_code").into_owned(), colors)
-                                    .on_click(cx.listener(move |_, _: &ClickEvent, _, cx| {
-                                        cx.write_to_clipboard(ClipboardItem::new_string(uri.to_string()))
-                                    })),
+                left = left.child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap(px(10.))
+                        .child(
+                            div()
+                                .text_color(colors.fg.opacity(0.5))
+                                .child(rust_i18n::t!("mobile.cant_scan").into_owned()),
+                        )
+                        .child(
+                            link("mobile-copy-code", rust_i18n::t!("mobile.copy_code").into_owned(), colors).on_click(
+                                cx.listener(move |_, _: &ClickEvent, _, cx| {
+                                    cx.write_to_clipboard(ClipboardItem::new_string(uri.to_string()))
+                                }),
                             ),
-                    );
+                        ),
+                );
                 right.child(qr_code(waiting.qr(), MODULE_SIZE)).child(
                     div()
                         .flex()
@@ -497,20 +495,10 @@ impl WindowView {
                 )
             }
             Pairing::Starting { .. } => {
-                left =
-                    left.child(self.render_machine_name(page, colors, cx)).child(self.render_network(page, colors, cx));
                 right.child(placeholder(rust_i18n::t!("settings.pairing.starting").into_owned(), colors))
             }
             Pairing::Idle | Pairing::Failed(_) => {
-                let error = match &page.pairing {
-                    Pairing::Failed(err) => Some(err.clone()),
-                    _ => None,
-                };
-                left = left.children(error.map(|err| notice(err, colors)));
                 left = if remote_on {
-                    let left = left
-                        .child(self.render_machine_name(page, colors, cx))
-                        .child(self.render_network(page, colors, cx));
                     let label =
                         if matches!(page.pairing, Pairing::Failed(_)) { "mobile.retry" } else { "mobile.generate" };
                     left.child(

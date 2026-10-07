@@ -45,7 +45,7 @@ pub enum Pairing {
         name: String,
         extra: Vec<IpAddr>,
         polls: u32,
-        watch: Task<()>,
+        _poll: Task<()>,
     },
     Waiting(Box<Waiting>),
     Paired {
@@ -131,12 +131,9 @@ impl Pairing {
         // 先丢掉上一个口令，免得新口令写好后旧的那份在丢掉时把文件删了。
         *self = Pairing::Idle;
         let name = cx.global::<AppConfig>().0.remote_access_name.clone().unwrap_or_else(host_name);
-        *self = Pairing::Starting { dirs: Dirs::from_env(), name, extra, polls: 0, watch: Task::ready(()) };
+        // 当场那次就好了的话，`Starting` 连同看它的任务一起换掉。
+        *self = Pairing::Starting { dirs: Dirs::from_env(), name, extra, polls: 0, _poll: watch(slot, cx) };
         self.poll(slot, cx);
-        // 当场就好了的不用再看。
-        if let Pairing::Starting { watch: task, .. } = self {
-            *task = watch(slot, cx);
-        }
         cx.notify();
     }
 

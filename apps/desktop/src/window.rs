@@ -474,7 +474,7 @@ impl Focusable for WindowView {
     /// 开着手机端引导页时是它；否则是有焦点的终端，当前 workspace 里没有终端时是窗口自己的。
     fn focus_handle(&self, cx: &App) -> FocusHandle {
         if let Some(page) = &self.mobile {
-            return page.focus().clone();
+            return page.focus.clone();
         }
         match self.focused_view() {
             Some(view) => view.focus_handle(cx),
