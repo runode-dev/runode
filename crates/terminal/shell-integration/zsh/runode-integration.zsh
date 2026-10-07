@@ -26,10 +26,17 @@
 # .zshenv 最先把它读进不导出的 _runode_report_token 并从环境里删掉。runode 只认带着这个口令的
 # 6973 报告，屏幕上的别的输出伪造不了。没有口令时不发 6973 报告：比如 exec zsh 或者在里面再开
 # 一层 zsh，新的 shell 拿不到口令，runode 就沿用之前报告的内容。
+#
+# runode-reload 用同一个 zsh 程序换掉当前的 shell（exec），重新读用户配置：改了 .zshrc 以后，
+# 在早先启动的终端里用它，新的 shell 照样接上集成、带着同一个口令和同样的功能，目录不变。
+# 直接 exec zsh 会丢掉集成。
 
 [[ -o interactive ]] || 'builtin' 'return' 0
 (( ${+_runode_integrated} )) && 'builtin' 'return' 0
 'builtin' 'typeset' -g _runode_integrated=1
+
+# 这个脚本所在的集成目录，runode-reload 把 ZDOTDIR 指回这里。
+'builtin' 'typeset' -g _runode_dir=${${(%):-%x}:A:h}
 
 # 上一个提示符之后执行过命令，下一次显示提示符前要报告它执行完了。
 'builtin' 'typeset' -g _runode_ran=
@@ -222,6 +229,26 @@ _runode_drop_mouse_report() {
 'builtin' 'bindkey' -M emacs '\e[<' _runode_drop_mouse_report
 'builtin' 'bindkey' -M viins '\e[<' _runode_drop_mouse_report
 'builtin' 'bindkey' -M vicmd '\e[<' _runode_drop_mouse_report
+
+# 换成一个新的 zsh，重新读用户配置，接上集成：ZDOTDIR 指回集成目录，现在的 ZDOTDIR 经
+# RUNODE_ZSH_ZDOTDIR 交给集成目录里的 .zshenv 还原；口令和功能经环境变量交回去，runode 照样认得
+# 新 shell 的报告。换之前把这个 shell 的历史写进文件，再报告这条命令执行完了：exec 之后不会再有
+# 它的 133;D。
+runode-reload() {
+    'builtin' 'emulate' -L zsh
+    # 启动这个 shell 的程序；登录 shell 的 argv[0] 可能带着开头的 -，或者只是个名字。
+    'builtin' 'local' zsh=${ZSH_ARGZERO#-}
+    [[ $zsh == */* ]] || zsh=${commands[$zsh]-}
+    [[ -x $zsh ]] || zsh=${commands[zsh]:-/bin/zsh}
+    'builtin' 'local' -a vars
+    vars=(ZDOTDIR=$_runode_dir RUNODE_SHELL_FEATURES=${_runode_features-})
+    (( ${+ZDOTDIR} )) && vars+=(RUNODE_ZSH_ZDOTDIR=$ZDOTDIR)
+    [[ -z ${_runode_report_token-} ]] || vars+=(RUNODE_REPORT_TOKEN=$_runode_report_token)
+    'builtin' 'fc' -AI 2>/dev/null
+    'builtin' 'print' -rn -- $'\e]133;D;0\a'
+    _runode_ran=
+    'builtin' 'exec' 'env' $vars $zsh -l
+}
 
 'builtin' 'typeset' -ga precmd_functions preexec_functions
 precmd_functions=(_runode_save_status $precmd_functions _runode_precmd)

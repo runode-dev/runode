@@ -60,6 +60,8 @@ actions!(
     [
         PasteSelection,
         ClearScreen,
+        /// 停在提示符上的 shell 换成一个新的，重新读用户配置，见 `Session::reload_shell`。
+        ReloadShell,
         ScrollToTop,
         ScrollToBottom,
         ScrollPageUp,
@@ -282,6 +284,7 @@ impl Render for TerminalView {
             .on_action(cx.listener(Self::copy))
             .on_action(cx.listener(Self::paste_selection))
             .on_action(cx.listener(Self::clear_screen))
+            .on_action(cx.listener(Self::reload_shell))
             .on_action(cx.listener(Self::select_all))
             .on_action(cx.listener(Self::scroll_to_top))
             .on_action(cx.listener(Self::scroll_to_bottom))

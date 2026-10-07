@@ -113,6 +113,7 @@ action:
   paste_from_selection: 貼上選取內容
   select_all: 全選
   clear_screen: 清除螢幕並清掉捲動歷史
+  reload_shell: 把停在提示字元上的 shell 換成一個新的，重新讀 shell 設定，整合照舊
   scroll_to_top: 捲到最上面
   scroll_to_bottom: 捲到最下面
   scroll_page_up: 向上捲一頁

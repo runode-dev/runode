@@ -21,6 +21,10 @@
 # 带着这个口令的 6973 报告，屏幕上的别的输出伪造不了。没有口令时不发 6973 报告：比如 exec fish
 # 或者在里面再开一层 fish，新的 shell 拿不到口令，runode 就沿用之前报告的内容。
 #
+# runode-reload 用同一个 fish 程序换掉当前的 shell（exec），重新读用户配置：改了 config.fish
+# 以后，在早先启动的终端里用它，新的 shell 照样接上集成、带着同一个口令和同样的功能，目录不变。
+# 直接 exec fish 会丢掉集成。
+#
 # runode 把这个文件所在的数据目录加进 XDG_DATA_DIRS，fish 启动时会自动加载
 # vendor_conf.d 里的脚本。先把加进去的那一项去掉，免得在这个 shell 里启动的程序继承它。
 
@@ -39,6 +43,8 @@ if set -q RUNODE_SHELL_FEATURES
 end
 
 if set -q RUNODE_FISH_DATA_DIR
+    # runode-reload 再把它加进去。
+    set -gu __runode_data_dir $RUNODE_FISH_DATA_DIR
     if set -l index (contains --index -- $RUNODE_FISH_DATA_DIR $XDG_DATA_DIRS)
         set -e XDG_DATA_DIRS[$index]
         if test (count $XDG_DATA_DIRS) -eq 0
@@ -88,6 +94,26 @@ if test -n "$cursor"
     function __runode_cursor_reset --on-event fish_preexec
         functions -q fish_vi_cursor_handle; or printf '\e[0 q'
     end
+end
+
+# 换成一个新的 fish，重新读用户配置，接上集成：数据目录照 runode 启动时那样加回 XDG_DATA_DIRS，
+# 口令和功能经环境变量交回去，runode 照样认得新 shell 的报告。换之前把历史写进文件，再报告这条
+# 命令执行完了：exec 之后不会再有它的 133;D。
+function runode-reload --description 'Restart this shell to reload its configuration'
+    set -l fish (status fish-path 2>/dev/null)
+    test -x "$fish"; or set fish fish
+    set -l vars
+    if set -q __runode_data_dir
+        set -l dirs $XDG_DATA_DIRS
+        # XDG_DATA_DIRS 没设时 fish 用这两个默认目录，加了我们的之后要显式带上。
+        set -q dirs[1]; or set dirs /usr/local/share /usr/share
+        set -a vars RUNODE_FISH_DATA_DIR=$__runode_data_dir XDG_DATA_DIRS=(string join : -- $__runode_data_dir $dirs)
+    end
+    test -z "$__runode_report_token"; or set -a vars RUNODE_REPORT_TOKEN=$__runode_report_token
+    set -q __runode_features; and set -a vars RUNODE_SHELL_FEATURES=(string join , -- $__runode_features)
+    history save
+    printf '\e]133;D;0\a'
+    exec env $vars $fish -l
 end
 
 # 每次显示提示符前报告当前目录；PATH 和上次报告的不一样时也报告给 runode。

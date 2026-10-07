@@ -1,4 +1,4 @@
-//! 发给程序的输入：按键、输入法上屏的文字、粘贴、改写正在编辑的输入，以及清屏。
+//! 发给程序的输入：按键、输入法上屏的文字、粘贴、改写正在编辑的输入、重新载入 shell，以及清屏。
 
 use std::time::Instant;
 
@@ -16,6 +16,7 @@ use super::{
     convert::{ghostty_key, ghostty_mods},
     log_err,
 };
+use crate::shell_integration;
 
 impl Session {
     /// 最近一次向程序发输入（按键、文本、粘贴等）的时刻；从没发过时为 `None`。
@@ -78,6 +79,45 @@ impl Session {
         if bytes.is_empty() {
             return true;
         }
+        self.before_input();
+        self.send_input(bytes);
+        true
+    }
+
+    /// 光标停在 shell 提示符上、shell 集成定义了 `runode-reload` 时，清掉正在编辑的输入，
+    /// 输入 ` runode-reload` 并回车：换成一个新的 shell，重新读用户配置。清输入是先按方向键挪到
+    /// 输入末尾，再按输入的字数退格；命令前面加个空格，开了 HIST_IGNORE_SPACE 之类设置的 shell
+    /// 不把它记进历史。读不到提示符上的输入（没有 shell 集成、命令在跑、全屏程序开着）、这个
+    /// shell 的集成没报告过这个函数（比如更早的版本启动的 shell）或编码不出按键时什么也不发，
+    /// 返回 false。
+    pub fn reload_shell(&mut self) -> bool {
+        if !self.meta.shell_names.functions.iter().any(|name| name == shell_integration::RELOAD_FUNCTION) {
+            return false;
+        }
+        let Some(input) = self.prompt_input() else {
+            return false;
+        };
+        let right = input.text[input.cursor..].chars().count();
+        let backspace = input.text.chars().count();
+        let mut bytes = Vec::new();
+        if right > 0 {
+            let Some(arrows) = self.arrow_keys(right as isize) else {
+                return false;
+            };
+            bytes = arrows;
+        }
+        if backspace > 0 {
+            let Some(key) = self.encode_key(key::Key::Backspace) else {
+                return false;
+            };
+            bytes.extend(key.repeat(backspace));
+        }
+        let Some(enter) = self.encode_key(key::Key::Enter) else {
+            return false;
+        };
+        bytes.push(b' ');
+        bytes.extend_from_slice(shell_integration::RELOAD_FUNCTION.as_bytes());
+        bytes.extend(enter);
         self.before_input();
         self.send_input(bytes);
         true

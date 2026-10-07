@@ -34,6 +34,7 @@ menu:
   find_previous: Find Previous
   find_selection: Use Selection for Find
   clear_screen: Clear Screen
+  reload_shell: Reload Shell
   view: View
   increase_font_size: Increase Font Size
   decrease_font_size: Decrease Font Size

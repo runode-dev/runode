@@ -65,6 +65,8 @@ pub enum Action {
     PasteSelection,
     SelectAll,
     ClearScreen,
+    /// 停在提示符上的 shell 换成一个新的，重新读用户配置。
+    ReloadShell,
     ScrollToTop,
     ScrollToBottom,
     ScrollPageUp,
@@ -223,6 +225,7 @@ pub static ACTIONS: &[ActionSpec] = &[
     plain!("paste_from_selection", Action::PasteSelection),
     plain!("select_all", Action::SelectAll),
     plain!("clear_screen", Action::ClearScreen),
+    plain!("reload_shell", Action::ReloadShell),
     plain!("scroll_to_top", Action::ScrollToTop),
     plain!("scroll_to_bottom", Action::ScrollToBottom),
     plain!("scroll_page_up", Action::ScrollPageUp),

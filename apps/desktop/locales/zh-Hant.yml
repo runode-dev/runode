@@ -34,6 +34,7 @@ menu:
   find_previous: 尋找上一個
   find_selection: 使用所選範圍尋找
   clear_screen: 清除螢幕
+  reload_shell: 重新載入 shell
   view: 顯示方式
   increase_font_size: 放大字體
   decrease_font_size: 縮小字體

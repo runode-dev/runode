@@ -25,6 +25,10 @@
 #
 #   cursor:blink、cursor:steady  提示符上把光标换成竖线（闪或不闪），跑命令前用 CSI 0 SP q 换回
 #                配置的样式。要在命令开始时换回，所以 bash 4.4 起有 PS0 才做
+#
+# runode-reload 用同一个 bash 程序换掉当前的 shell（exec），重新读用户配置：改了 .bashrc 等文件
+# 以后，在早先启动的终端里用它，新的 shell 照样接上集成、带着同一个口令和同样的功能，目录不变。
+# 直接 exec bash 会丢掉集成。
 
 # 加载用户配置之前就把口令读进不导出的变量，再从环境里删掉：加载配置时启动的程序，以及这个
 # shell 里运行的所有程序都继承不到它。这个文件又被加载一次时环境里已经没有口令，保留已经读到的。
@@ -54,6 +58,8 @@ unset _runode_file
 
 if [ -z "${_runode_integrated-}" ]; then
     _runode_integrated=1
+    # 这个文件的路径，runode-reload 再用它启动 bash。
+    _runode_rcfile=${BASH_SOURCE[0]}
     # 已经显示过一次提示符：之后每次显示提示符都意味着上一条命令执行完了。
     _runode_prompted=
     # 上一次加好标记的 PS1、PS2：配置把它们换掉之后要重新加。
@@ -241,6 +247,20 @@ if [ -z "${_runode_integrated-}" ]; then
     if [ "${BASH_VERSINFO[0]}" -gt 4 ] || { [ "${BASH_VERSINFO[0]}" -eq 4 ] && [ "${BASH_VERSINFO[1]}" -ge 2 ]; }; then
         bind '"\e[<": skip-csi-sequence' 2>/dev/null
     fi
+
+    # 换成一个新的 bash，重新读用户配置，接上集成：口令和功能经环境变量交回去，runode 照样认得
+    # 新 shell 的报告。换之前把这个 shell 的历史写进文件，再报告这条命令执行完了：exec 之后不会
+    # 再有它的 133;D。
+    runode-reload() {
+        local bash=${BASH:-bash}
+        local -a vars=()
+        [ -z "${_runode_report_token-}" ] || vars+=("RUNODE_REPORT_TOKEN=$_runode_report_token")
+        [ -z "${_runode_features+X}" ] || vars+=("RUNODE_SHELL_FEATURES=$_runode_features")
+        builtin history -a 2>/dev/null
+        printf '\033]133;D;0\007'
+        _runode_prompted=
+        exec env ${vars[@]+"${vars[@]}"} "$bash" --rcfile "$_runode_rcfile"
+    }
 
     # 关了 promptvars 时 PS0 里的命令替换不展开，只发不带报告的标记，runode 不记这些命令。
     if [ -n "$_runode_ps0" ]; then

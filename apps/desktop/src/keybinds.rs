@@ -14,9 +14,9 @@ use crate::{
         Quit, ReloadConfiguration, ShowAll, ToggleFullScreen, Zoom,
     },
     terminal_view::{
-        ClearScreen, DecreaseFontSize, IncreaseFontSize, JumpToPrompt, PasteSelection, ResetFontSize, ScrollPageDown,
-        ScrollPageUp, ScrollToBottom, ScrollToSelection, ScrollToTop, SearchSelection, SendText, StartSearch,
-        WriteScreenFile,
+        ClearScreen, DecreaseFontSize, IncreaseFontSize, JumpToPrompt, PasteSelection, ReloadShell, ResetFontSize,
+        ScrollPageDown, ScrollPageUp, ScrollToBottom, ScrollToSelection, ScrollToTop, SearchSelection, SendText,
+        StartSearch, WriteScreenFile,
     },
     ui::{
         actions::{Copy, Cut, Paste, Redo, SelectAll, Undo},
@@ -102,6 +102,7 @@ fn gpui_action(action: Action) -> (Box<dyn gpui::Action>, Contexts) {
         Action::PasteSelection => (boxed(PasteSelection), TERMINAL),
         Action::SelectAll => (boxed(SelectAll), SELECT_ALL),
         Action::ClearScreen => (boxed(ClearScreen), TERMINAL),
+        Action::ReloadShell => (boxed(ReloadShell), TERMINAL),
         Action::ScrollToTop => (boxed(ScrollToTop), TERMINAL),
         Action::ScrollToBottom => (boxed(ScrollToBottom), TERMINAL),
         Action::ScrollPageUp => (boxed(ScrollPageUp), TERMINAL),

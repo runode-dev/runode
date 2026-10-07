@@ -8,8 +8,8 @@ use runode_terminal::session::{Paste as PasteResult, Session};
 
 use super::{
     ClearScreen, DecreaseFontSize, IncreaseFontSize, JumpToPrompt, MAX_FONT_SIZE, MIN_FONT_SIZE, PasteSelection,
-    ResetFontSize, ScreenFile, ScrollPageDown, ScrollPageUp, ScrollToBottom, ScrollToSelection, ScrollToTop, SendText,
-    TerminalView, WriteScreenFile,
+    ReloadShell, ResetFontSize, ScreenFile, ScrollPageDown, ScrollPageUp, ScrollToBottom, ScrollToSelection,
+    ScrollToTop, SendText, TerminalView, WriteScreenFile,
 };
 use crate::ui::actions::{Copy, Paste, SelectAll};
 
@@ -66,6 +66,14 @@ impl TerminalView {
     pub(super) fn clear_screen(&mut self, _: &ClearScreen, _: &mut Window, cx: &mut Context<Self>) {
         if let Some(session) = self.screen.live_mut() {
             session.clear_screen();
+            cx.notify();
+        }
+    }
+
+    pub(super) fn reload_shell(&mut self, _: &ReloadShell, _: &mut Window, cx: &mut Context<Self>) {
+        if let Some(session) = self.screen.live_mut()
+            && session.reload_shell()
+        {
             cx.notify();
         }
     }

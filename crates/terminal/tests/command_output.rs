@@ -392,3 +392,38 @@ fn real_bash_cursor_follows_the_prompt() {
         assert!(rfind(&shell.raw, BAR).is_none() && rfind(&shell.raw, RESET).is_none(), "old bash touched the cursor");
     }
 }
+
+/// `runode-reload` 换成一个新的 shell：重新读了用户配置，集成照旧，报告带着同一个口令，口令
+/// 不留在环境里。用户配置加载 `extra`，换之前才写进去。
+fn reload_in(shell: Option<RealShell>) {
+    let Some(mut shell) = shell else { return };
+    let name = shell.name.clone();
+    std::fs::write(shell.home.join("extra"), "export RELOADED=yes\n").unwrap();
+    let start = shell.raw.len();
+    shell.run(" runode-reload");
+    shell.wait_for_bytes("a report after the reload", start, b"\x1b]6973;0123456789abcdef;cwd=");
+    shell.run("echo ${RELOADED-no} ${RUNODE_REPORT_TOKEN-gone}");
+    assert_eq!(shell.output(1), "yes gone\n", "{name}");
+}
+
+#[test]
+fn real_zsh_reloads_with_the_integration() {
+    reload_in(RealShell::start(
+        "zsh",
+        "zsh-reload",
+        "PROMPT='[z]%% '\n[[ -r ~/extra ]] && . ~/extra\n",
+        "[z]%",
+        &["[z]%"],
+    ));
+}
+
+#[test]
+fn real_bash_reloads_with_the_integration() {
+    reload_in(RealShell::start(
+        "bash",
+        "bash-reload",
+        "PS1='[b]\\$ '\n[ -r ~/extra ] && . ~/extra\n",
+        "[b]$",
+        &["[b]$"],
+    ));
+}

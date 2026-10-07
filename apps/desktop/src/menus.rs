@@ -8,8 +8,8 @@ use runode_cli::SetupTarget;
 
 use crate::{
     terminal_view::{
-        ClearScreen, DecreaseFontSize, IncreaseFontSize, JumpToPrompt, PasteSelection, ResetFontSize, SearchSelection,
-        StartSearch,
+        ClearScreen, DecreaseFontSize, IncreaseFontSize, JumpToPrompt, PasteSelection, ReloadShell, ResetFontSize,
+        SearchSelection, StartSearch,
     },
     ui::{
         actions::{Copy, Cut, Paste, Redo, SelectAll, Undo},
@@ -138,6 +138,7 @@ pub fn set_menus(cx: &mut App) {
             MenuItem::action(tr("menu.find_selection"), SearchSelection),
             MenuItem::separator(),
             MenuItem::action(tr("menu.clear_screen"), ClearScreen),
+            MenuItem::action(tr("menu.reload_shell"), ReloadShell),
         ]),
         Menu::new(tr("menu.view")).items([
             MenuItem::action(tr("menu.increase_font_size"), IncreaseFontSize),

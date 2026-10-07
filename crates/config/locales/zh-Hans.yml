@@ -113,6 +113,7 @@ action:
   paste_from_selection: 粘贴选区
   select_all: 全选
   clear_screen: 清屏并清掉回滚历史
+  reload_shell: 把停在提示符上的 shell 换成一个新的，重新读 shell 配置，集成照旧
   scroll_to_top: 滚到顶部
   scroll_to_bottom: 滚到底部
   scroll_page_up: 向上翻页

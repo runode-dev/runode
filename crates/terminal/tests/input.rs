@@ -1,8 +1,12 @@
-//! 界面那份会话的输入：多行粘贴要确认（bracketed paste 时不用），清屏经宿主做。
+//! 界面那份会话的输入：多行粘贴要确认（bracketed paste 时不用），清屏经宿主做，重新载入 shell
+//! 先清掉正在编辑的输入。
 
 mod common;
 
-use common::capturing_session;
+use std::sync::Arc;
+
+use common::{PROMPT, capturing_session};
+use runode_shared_types::{session::SessionMeta, shell::ShellNames};
 use runode_terminal::session::{Paste, Request};
 
 #[test]
@@ -38,4 +42,25 @@ fn clear_screen_goes_through_the_host() {
     session.feed(b"\x1b[?1049hvim");
     session.clear_screen();
     assert_eq!(requests.borrow().len(), 1);
+}
+
+#[test]
+fn reload_shell_clears_the_input_first() {
+    let (mut session, requests) = capturing_session();
+    session.feed(PROMPT);
+    session.feed(b"git st\x1b[2D");
+    // 集成还没报告过 runode-reload（比如更早的版本启动的 shell）时不发。
+    assert!(!session.reload_shell());
+    let names = ShellNames { functions: vec!["runode-reload".into()], ..ShellNames::default() };
+    session.apply_meta(SessionMeta { shell_names: Arc::new(names), ..SessionMeta::default() });
+    assert!(session.reload_shell());
+    // 光标后还有两个字：右移两下到末尾，退格六下，再输入命令回车。
+    let expected = [&b"\x1b[C\x1b[C"[..], &b"\x7f".repeat(6), b" runode-reload\r"].concat();
+    assert_eq!(*requests.borrow(), [Request::Input(expected)]);
+
+    // 命令在跑（输出不是提示符）时不发。
+    requests.borrow_mut().clear();
+    session.feed(b"\r\n\x1b]133;C\x07running");
+    assert!(!session.reload_shell());
+    assert!(requests.borrow().is_empty());
 }

@@ -16,6 +16,9 @@ use runode_shared_types::{
     shell::{IntegrationMode, Shell},
 };
 
+/// 集成脚本定义的函数：换成一个新的 shell，重新读用户配置，集成和报告口令照旧。
+pub(crate) const RELOAD_FUNCTION: &str = "runode-reload";
+
 const ZSH_ENV: &str = include_str!("../shell-integration/zsh/.zshenv");
 const ZSH_INTEGRATION: &str = include_str!("../shell-integration/zsh/runode-integration.zsh");
 const BASH_RC: &str = include_str!("../shell-integration/bash/runode.bash");

@@ -124,6 +124,7 @@ action:
   paste_from_selection: Paste the selection
   select_all: Select all
   clear_screen: Clear the screen and the scrollback
+  reload_shell: Restart the shell at the prompt so it reads its configuration again; the shell integration stays
   scroll_to_top: Scroll to the top
   scroll_to_bottom: Scroll to the bottom
   scroll_page_up: Scroll up a page
