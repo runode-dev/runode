@@ -8,7 +8,8 @@
     /// 一台电脑上的会话，按电脑上的 app 里的工作区分节，节头能在那个工作区里新开终端，长按能给工作区
     /// 改名；一个终端都没有的工作区也列出来；不在任何窗口里的会话放在最后的「后台」一节。一个会话一张
     /// 卡片，带 agent 状态和屏幕最后几行的预览，等你回答的带快速回复。点开终端，左滑结束，长按有更多操作
-    /// （含会话目录里 Makefile、package.json 的命令）。右上角能新开终端、新建工作区。
+    /// （含会话目录里 Makefile、package.json 的命令）。有会话等你回答时，列表顶上汇总一张卡片，点一行滚到
+    /// 那个会话。右上角能新开终端、新建工作区。
     struct SessionListView: View {
         @Bindable var model: SessionListModel
         let onOpen: (SessionId) -> Void
@@ -21,12 +22,28 @@
         @State private var renameText = ""
 
         var body: some View {
+            ScrollViewReader { proxy in
+                list(proxy)
+            }
+        }
+
+        private func list(_ proxy: ScrollViewProxy) -> some View {
             List {
                 if !model.linkState.isConnected {
                     Section {
                         ConnectionStatusRow(state: model.linkState, onRetry: model.reconnect)
                             .cardBackground()
                             .plainListRow()
+                    }
+                }
+                let waiting = model.sections.flatMap { section in
+                    section.sessions.filter { SessionGroup.of($0) == .waiting }.map { (section: section, session: $0) }
+                }
+                if !waiting.isEmpty {
+                    Section {
+                        WaitingSummary(items: waiting) { id in
+                            withAnimation { proxy.scrollTo(id, anchor: .top) }
+                        }
                     }
                 }
                 ForEach(model.sections) { section in
@@ -46,7 +63,7 @@
                                 .plainListRow()
                         }
                         ForEach(section.sessions, id: \.id) { session in
-                            row(session, group: SessionGroup.of(session))
+                            row(session, in: section)
                         }
                     }
                 }
@@ -128,9 +145,10 @@
 
         /// 一个会话一张卡片，整张能点开终端。等回答的会话卡片下半截是快速回复，只有上半截能点开。
         @ViewBuilder
-        private func card(_ session: SessionInfo, group: SessionGroup) -> some View {
-            let summary = SessionRow(session: session, preview: model.previews[session.id] ?? [])
-            if group == .waiting {
+        private func card(_ session: SessionInfo, in section: SessionSection) -> some View {
+            let summary = SessionRow(
+                session: session, workspaceDir: section.dir, preview: model.previews[session.id] ?? [])
+            if SessionGroup.of(session) == .waiting {
                 VStack(alignment: .leading, spacing: 10) {
                     Button { onOpen(session.id) } label: { summary.contentShape(Rectangle()) }
                         .buttonStyle(.plain)
@@ -139,6 +157,8 @@
                         .accessibilityLabel("回复「\(Presentation.sessionTitle(session))」")
                 }
                 .cardBackground()
+                // 等回答的卡片描一圈橙边，混在别的卡片里也一眼认得出。
+                .overlay(RoundedRectangle.card.strokeBorder(AgentBadge.tint(for: .waiting).opacity(0.6), lineWidth: 1.5))
             } else {
                 Button { onOpen(session.id) } label: { summary }
                     .buttonStyle(CardButtonStyle())
@@ -154,8 +174,8 @@
             }
         }
 
-        private func row(_ session: SessionInfo, group: SessionGroup) -> some View {
-            card(session, group: group)
+        private func row(_ session: SessionInfo, in section: SessionSection) -> some View {
+            card(session, in: section)
                 .plainListRow()
                 .swipeActions(edge: .trailing) {
                     // 不用 `.destructive`：那样系统当作这一行被删了，先把它动画移走，挂在上面的确认框
@@ -236,6 +256,48 @@
         }
     }
 
+    /// 列表顶上的一张卡片：等你回答的会话一个一行，写着它在哪个工作区。点一行滚到它的卡片，快速回复在那里。
+    private struct WaitingSummary: View {
+        let items: [(section: SessionSection, session: SessionInfo)]
+        let onSelect: (SessionId) -> Void
+        @ScaledMetric(relativeTo: .subheadline) private var iconSize: CGFloat = 18
+
+        var body: some View {
+            VStack(alignment: .leading, spacing: 4) {
+                Label("\(items.count) 个等你回答", systemImage: Presentation.symbol(for: .waiting))
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(AgentBadge.tint(for: .waiting))
+                    .accessibilityAddTraits(.isHeader)
+                ForEach(items, id: \.session.id) { item in
+                    Button { onSelect(item.session.id) } label: {
+                        HStack(spacing: 8) {
+                            SessionIcon(agent: item.session.meta.agent?.kind, size: iconSize)
+                            Text(Presentation.sessionTitle(item.session))
+                                .lineLimit(1)
+                            Spacer(minLength: 8)
+                            Text(Presentation.sectionTitle(item.section))
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                            Image(systemName: "arrow.down")
+                                .font(.footnote.weight(.semibold))
+                                .foregroundStyle(.tertiary)
+                                .accessibilityHidden(true)
+                        }
+                        .font(.subheadline)
+                        .frame(minHeight: 36)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityHint("滚到这个终端的卡片")
+                }
+            }
+            .cardBackground()
+            .overlay(RoundedRectangle.card.strokeBorder(AgentBadge.tint(for: .waiting).opacity(0.6), lineWidth: 1.5))
+            .plainListRow()
+        }
+    }
+
     /// 一节的标题：工作区的名字和目录，右边一个在这个工作区里新开终端的按钮，长按菜单能新开终端、改名；
     /// 后台那一节只有标题。
     private struct WorkspaceHeader: View {
@@ -287,13 +349,22 @@
 
     private struct SessionRow: View {
         let session: SessionInfo
+        /// 所在工作区的目录：会话就在这里时卡片上不再写一遍。
+        let workspaceDir: String?
         let preview: [String]
+        /// 标题前图标的边长，跟着标题的字号缩放。
+        @ScaledMetric(relativeTo: .headline) private var iconSize: CGFloat = 22
 
         var body: some View {
             VStack(alignment: .leading, spacing: 6) {
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    SessionIcon(agent: session.meta.agent?.kind, size: iconSize)
+                        // 图标的中线对着第一行字的中间（标题的大写字母高约为图标边长的 0.54）。
+                        .alignmentGuide(.firstTextBaseline) { $0[VerticalAlignment.center] + iconSize * 0.27 }
+                        .opacity(session.exited ? 0.5 : 1)
                     Text(Presentation.sessionTitle(session))
                         .font(.headline)
+                        .foregroundStyle(session.exited ? .secondary : .primary)
                         .lineLimit(2)
                     if session.exited {
                         Text("已退出")
@@ -305,15 +376,20 @@
                     Spacer(minLength: 8)
                     DisclosureChevron()
                 }
-                if session.meta.agent != nil {
-                    AgentBadge(agent: session.meta.agent)
-                }
-                if let directory = Presentation.directory(session.meta.cwd) {
-                    CompactLabel(text: directory, systemImage: "folder")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                        .truncationMode(.head)
+                // agent 和目录挤在一行，卡片矮一截，一屏多放几张。
+                let directory = Presentation.sessionDirectory(session.meta.cwd, in: workspaceDir)
+                if session.meta.agent != nil || directory != nil {
+                    HStack(spacing: 8) {
+                        AgentBadge(agent: session.meta.agent)
+                            .layoutPriority(1)
+                        if let directory {
+                            CompactLabel(text: directory, systemImage: "folder")
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                                .truncationMode(.head)
+                        }
+                    }
                 }
                 if !preview.isEmpty {
                     ScreenPreview(lines: preview)

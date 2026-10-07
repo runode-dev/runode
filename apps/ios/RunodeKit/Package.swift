@@ -31,7 +31,12 @@ let package = Package(
             // libghostty-vt 里的 simdutf、highway 是 C++ 写的。
             linkerSettings: [.linkedLibrary("c++")]
         ),
-        .target(name: "RunodeFeatures", dependencies: ["RunodeProtocol", "RunodeConnection", "RunodeTerminal"]),
+        .target(
+            name: "RunodeFeatures",
+            dependencies: ["RunodeProtocol", "RunodeConnection", "RunodeTerminal"],
+            // 各家 agent 的 logo：图片是桌面资源里那几个 SVG 的符号链接，出处和许可见桌面那边的 LICENSE。
+            resources: [.process("Resources/AgentLogos.xcassets")]
+        ),
         .testTarget(name: "RunodeProtocolTests", dependencies: ["RunodeProtocol"]),
         .testTarget(name: "RunodeConnectionTests", dependencies: ["RunodeConnection"]),
         .testTarget(name: "RunodeTerminalTests", dependencies: ["RunodeTerminal"]),

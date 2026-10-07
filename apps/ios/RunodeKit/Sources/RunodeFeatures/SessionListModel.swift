@@ -96,8 +96,10 @@ struct PreviewThrottle {
 public final class SessionListModel {
     /// 预览读多少行：读回来以后去掉空行再取最后几行。
     static let previewReadLines: UInt32 = 12
-    /// 预览显示几行。
-    public static let previewLines = 3
+    /// 预览显示几行：两行够看出在干什么，卡片矮一些，一屏多放几张。
+    public static let previewLines = 2
+    /// 等你回答的会话的预览多显示一行，问题和选项才看得全。
+    public static let waitingPreviewLines = 3
     /// `Layout` 的请求编号固定用 0：`HostLink.nextRequestId` 不发 0，回话不会和别的请求混；几次的回话
     /// 都是完整的布局，后到的盖过先到的，也就不用一个个对上。
     static let layoutRequest: UInt32 = 0
@@ -578,16 +580,17 @@ public final class SessionListModel {
         case .screenText(let id, let text, _):
             guard session(id) != nil else { return }
             let read = pendingPreviews.removeValue(forKey: id) ?? .bottomLines(atPrompt: false)
+            let limit = session(id).map(SessionGroup.of) == .waiting ? Self.waitingPreviewLines : Self.previewLines
             switch read {
             case .lastCommand:
-                let lines = Presentation.previewLines(text, limit: Self.previewLines)
+                let lines = Presentation.previewLines(text, limit: limit)
                 if lines.isEmpty {
                     fallBackToBottomLines(id)
                 } else {
                     previews[id] = lines
                 }
             case .bottomLines(let atPrompt):
-                previews[id] = Presentation.previewLines(text, limit: Self.previewLines, atPrompt: atPrompt)
+                previews[id] = Presentation.previewLines(text, limit: limit, atPrompt: atPrompt)
             }
         case .exited(let id, _):
             update(id) { $0.exited = true }

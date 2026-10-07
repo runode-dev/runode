@@ -175,6 +175,10 @@ private func workspace(_ index: UInt32, _ name: String, tabs: [[SessionId]], act
         // 不在列表里的会话的回话不收。
         model.handle(.message(.screenText(id: plain, text: "x", truncated: false)))
         #expect(model.previews[plain] == nil)
+        // 不等回答的会话只留两行。
+        model.handle(.message(.sessionList([info(waiting, .blocked), info(plain, .working)])))
+        model.handle(.message(.screenText(id: plain, text: screen, truncated: false)))
+        #expect(model.previews[plain] == [" ❯ 1. Yes", "   2. No"])
     }
 
     func idleShell() -> SessionInfo {

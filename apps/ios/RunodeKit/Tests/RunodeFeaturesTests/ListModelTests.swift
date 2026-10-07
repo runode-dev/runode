@@ -520,6 +520,38 @@ extension LinkState {
         #expect(Presentation.directory(nil) == nil)
     }
 
+    @Test func agentLogosMatchTheBundledImages() throws {
+        let catalog = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+            .appending(path: "Sources/RunodeFeatures/Resources/AgentLogos.xcassets")
+        let images = Set(
+            try FileManager.default.contentsOfDirectory(atPath: catalog.path)
+                .filter { $0.hasSuffix(".imageset") }.map { String($0.dropLast(".imageset".count)) })
+        let labels = [
+            "pi", "claude", "codex", "gemini", "cursor", "devin", "antigravity", "cline", "mastracode", "open_code",
+            "github_copilot", "kimi", "kiro", "amp", "grok", "hermes", "kilo", "qodercli", "qwen", "goose", "junie",
+            "open_hands", "trae", "code_buddy", "mistral_vibe", "jules", "omp",
+        ]
+        let mapped = Set(labels.compactMap { Presentation.agentLogoAsset(AgentKind($0)) })
+        // `prompt` 是 shell 那块的提示符，不是 agent 的 logo。
+        #expect(mapped == images.subtracting(["prompt"]))
+        // 符号链接指着的 SVG 都在。
+        for image in images {
+            #expect(FileManager.default.fileExists(atPath: catalog.appending(path: "\(image).imageset/\(image).svg").path))
+        }
+        #expect(Presentation.agentLogoAsset(AgentKind("aider")) == nil)
+    }
+
+    @Test func sessionDirectoriesSkipTheWorkspaceDirectory() {
+        let ws = "/Users/ethan/dev/runode"
+        #expect(Presentation.sessionDirectory(ws, in: ws) == nil)
+        #expect(Presentation.sessionDirectory(ws, in: ws + "/") == nil)
+        #expect(Presentation.sessionDirectory(ws + "/apps/ios", in: ws) == "./apps/ios")
+        #expect(Presentation.sessionDirectory("/Users/ethan/dev/runode-old", in: ws) == "~/dev/runode-old")
+        #expect(Presentation.sessionDirectory("/tmp", in: nil) == "/tmp")
+        #expect(Presentation.sessionDirectory(nil, in: ws) == nil)
+    }
+
     @Test func agentStatesReadNaturally() {
         #expect(Presentation.agentStatus(Agent(kind: AgentKind("claude"), state: .working))?.text == "Claude Code · 干活中")
         #expect(Presentation.agentStatus(Agent(kind: AgentKind("codex"), state: .idle))?.text == "Codex · 空闲")

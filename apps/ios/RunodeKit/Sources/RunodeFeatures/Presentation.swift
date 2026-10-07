@@ -29,6 +29,17 @@ public enum Presentation {
         return path
     }
 
+    /// 会话卡片上的目录：和所在工作区的目录一样时不写（节头已经写了），在它下面时写成 `./…`，
+    /// 别处的照 `directory` 写。
+    public static func sessionDirectory(_ cwd: String?, in workspaceDir: String?) -> String? {
+        guard let cwd, !cwd.isEmpty else { return nil }
+        guard let workspaceDir, !workspaceDir.isEmpty else { return directory(cwd) }
+        let base = workspaceDir.hasSuffix("/") ? String(workspaceDir.dropLast()) : workspaceDir
+        if cwd == base || cwd == base + "/" { return nil }
+        if cwd.hasPrefix(base + "/") { return "./" + cwd.dropFirst(base.count + 1) }
+        return directory(cwd)
+    }
+
     public static func gridSize(_ size: GridSize) -> String {
         "\(size.cols)×\(size.rows)"
     }
@@ -171,6 +182,19 @@ public enum Presentation {
         case .fitPhone: "适配手机"
         case .followMachine: "跟随电脑"
         }
+    }
+
+    /// agent 的 logo 在资源里的名字，和桌面上 `agent_logo` 用的是同一批 SVG；没收 logo 的为空。
+    public static func agentLogoAsset(_ kind: AgentKind) -> String? {
+        let assets: [String: String] = [
+            "pi": "pi", "claude": "claude", "codex": "codex", "gemini": "gemini", "cursor": "cursor",
+            "devin": "devin", "antigravity": "antigravity", "cline": "cline", "mastracode": "mastracode",
+            "open_code": "opencode", "github_copilot": "github-copilot", "kimi": "kimi", "kiro": "kiro", "amp": "amp",
+            "grok": "grok", "hermes": "hermes", "kilo": "kilo", "qodercli": "qoder", "qwen": "qwen", "goose": "goose",
+            "junie": "junie", "open_hands": "openhands", "trae": "trae", "code_buddy": "codebuddy",
+            "mistral_vibe": "mistral-vibe", "jules": "jules", "omp": "omp",
+        ]
+        return assets[kind.label]
     }
 
     public static func sessionTitle(_ session: SessionInfo) -> String {

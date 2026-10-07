@@ -285,6 +285,7 @@
     struct AgentBadge: View {
         let agent: Agent?
         var showsState = true
+        @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
         var body: some View {
             if let agent, let status = Presentation.agentStatus(agent) {
@@ -296,7 +297,7 @@
                     }
                 let tint = Self.tint(for: group)
                 HStack(spacing: 4) {
-                    Image(systemName: group == .other ? "moon.zzz.fill" : Presentation.symbol(for: group))
+                    icon(group)
                         .imageScale(.small)
                     Text(showsState ? status.text : agent.kind.displayName)
                         .lineLimit(1)
@@ -311,12 +312,77 @@
             }
         }
 
+        /// 状态图标带着动：干活时齿轮转，空闲时月亮慢慢呼吸，等回答时不动（卡片已经描了橙边）。
+        /// 打开了「减弱动态效果」时都不动。
+        @ViewBuilder
+        private func icon(_ group: SessionGroup) -> some View {
+            switch group {
+            case .working:
+                Image(systemName: Presentation.symbol(for: .working))
+                    .symbolEffect(.rotate.byLayer, isActive: !reduceMotion)
+            case .other:
+                Image(systemName: "moon.zzz.fill")
+                    .symbolEffect(.breathe, isActive: !reduceMotion)
+            case .waiting:
+                Image(systemName: Presentation.symbol(for: .waiting))
+            }
+        }
+
         static func tint(for group: SessionGroup) -> Color {
             switch group {
             case .waiting: .orange
             case .working: .blue
             case .other: .secondary
             }
+        }
+    }
+
+    /// 会话标题前的图标，和桌面卡片样式下标签前的那块一样，边长 `size`：agent 是浅底上的 logo（和桌面
+    /// 用的同一套，有品牌色的按原色画，单色的染成前景色，没收 logo 的写名字的头一个字母）；shell、别的
+    /// 程序和认不出是哪个的 agent（`other`）是深底上的提示符，像个小终端。
+    struct SessionIcon: View {
+        let agent: AgentKind?
+        let size: CGFloat
+        @Environment(\.colorScheme) private var colorScheme
+        @Environment(\.themeColors) private var colors
+
+        var body: some View {
+            let logoTile = colorScheme == .light ? Color.white : colors.secondaryFill
+            Group {
+                if let agent, let asset = Presentation.agentLogoAsset(agent) {
+                    tile(logoTile) {
+                        Image(asset, bundle: .module)
+                            .resizable()
+                            .scaledToFit()
+                            .frame(width: size * 0.66, height: size * 0.66)
+                            .foregroundStyle(.primary.opacity(0.85))
+                    }
+                } else if let agent, agent.label != "other", let initial = agent.displayName.first {
+                    tile(logoTile) {
+                        Text(String(initial))
+                            .font(.system(size: size * 0.55, weight: .bold))
+                            .foregroundStyle(.primary.opacity(0.85))
+                    }
+                } else {
+                    // 和桌面上提示符那块一样的颜色，深浅主题下都不变。
+                    tile(Color(Rgb(hex: 0x232326))) {
+                        Image("prompt", bundle: .module)
+                            .resizable()
+                            .scaledToFit()
+                            .frame(width: size * 0.6, height: size * 0.6)
+                            .foregroundStyle(Color(Rgb(hex: 0xEDEDED)))
+                    }
+                }
+            }
+            .accessibilityHidden(true)
+        }
+
+        private func tile(_ background: Color, @ViewBuilder content: () -> some View) -> some View {
+            let shape = RoundedRectangle(cornerRadius: size * 0.28, style: .continuous)
+            return content()
+                .frame(width: size, height: size)
+                .background(background, in: shape)
+                .overlay(shape.strokeBorder(.primary.opacity(0.15), lineWidth: 1))
         }
     }
 
