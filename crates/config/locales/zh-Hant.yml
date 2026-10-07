@@ -46,6 +46,7 @@ config:
   clipboard_write: 終端機裡的程式用 OSC 52 寫入系統剪貼簿時（vim、tmux 和經 ssh 連到遠端的 shell 都這樣複製）：allow 照寫，deny 丟掉。ask 還不支援，當作 deny。
   clipboard_read: 終端機裡的程式用 OSC 52 讀取剪貼簿時：ask 先跳出對話框說明是哪個終端機、哪個程式要讀，你同意了才給；allow 不問直接給；deny 回給程式一個空的剪貼簿。剪貼簿裡可能有密碼，只對信得過的程式用 allow。
   terminal_host: 終端機工作階段放在單獨的背景程序裡：true、false。true 時結束 Runode 後工作階段照常執行，下次開啟接著用；false 時工作階段跟著 app 一起結束。只在 Runode 啟動時讀取，改了下次啟動才生效。背景還有工作階段時改成 false，下次啟動仍會接回這些工作階段，那次結束時才結束它們。
+  auto_update: 啟動後和之後每隔幾個小時查一次 Runode 的新版本：true、false。true 時有了新版本就在背景下載好，結束 Runode 時裝上；false 時只在 Runode 選單裡點「檢查更新…」時查。只有發布者簽過名的 Runode.app 會自己更新。
   remote_access: 讓手機經區域網路或 Tailscale 連上這台 Mac 的終端機：true、false。用 runode remote pair 為手機配對，runode remote devices 列出配對過的手機，runode remote revoke 撤銷一台。改了幾秒內生效，不必重新啟動 Runode。
   remote_access_port: 遠端存取在所有網路介面上監聽的 TCP 連接埠：1 到 65535。
   command_completions: 在 shell 提示字元上按 Tab 時從選單裡選指令名稱、子指令、選項或參數（參數只限 Runode 認得的指令），沒有可選的時 Tab 照常交給 shell。false 時 Tab 總是交給 shell。

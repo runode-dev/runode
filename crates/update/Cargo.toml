@@ -1,0 +1,24 @@
+[package]
+name = "runode-update"
+description = "Desktop app updates: reads the latest release from GitHub, downloads it, checks its code signature against the running app and swaps the installed Runode.app"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+# 版本清单 latest.json。
+serde.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+
+# 下载用系统的 URL Loading System（NSURLSession）：跟系统的代理设置和证书，不另带 TLS 库；换 .app
+# 用 renamex_np 原子地对调两个目录。
+[target.'cfg(target_os = "macos")'.dependencies]
+libc.workspace = true
+objc2.workspace = true
+block2.workspace = true
+objc2-foundation = { workspace = true, features = ["std", "block2", "NSData", "NSDate", "NSError", "NSString", "NSURL", "NSURLResponse", "NSURLSession"] }
+
+[lints]
+workspace = true

@@ -121,6 +121,22 @@ quit:
   keep_detail: "If you keep them in the background, sessions keep running after Runode quits and come back when it opens again. This also turns on “Keep sessions after quitting” in Settings."
   yield_failed_title: Couldn't keep the sessions in the background
   yield_failed_detail: "%{reason}\n\nQuitting now ends every session."
+update:
+  menu_check: Check for Updates…
+  menu_checking: Checking for Updates…
+  menu_restart: "Restart to Update to Runode %{version}"
+  up_to_date_title: Runode is up to date
+  up_to_date_detail: "You're running the latest version, %{version}."
+  manual_title: "Runode %{version} is available"
+  manual_detail: "This copy of Runode can't update itself (%{reason}). Download the new version from its release page."
+  open_page: Open Download Page
+  later: Later
+  ready_title: "Runode %{version} is ready"
+  ready_detail: "Restart now to update; your sessions keep running in the background and come back in the new version. Or install it later: it's installed when you quit Runode."
+  ready_notification: Restart to update now, or it's installed when you quit Runode.
+  restart: Restart Now
+  failed_title: Couldn't check for updates
+  ok: OK
 host_lost:
   message: Lost the connection to this terminal's session; what you see is the last screen before it dropped.
   reopen: Reopen in This Directory
@@ -449,6 +465,7 @@ settings:
     clipboard_write: Programs can copy
     clipboard_read: Programs can read the clipboard
     terminal_host: Keep sessions after quitting
+    auto_update: Update automatically
     remote_access: Remote access
     remote_access_port: Port
     agent_notifications: Notifications
@@ -493,6 +510,7 @@ settings:
     clipboard_write: Lets programs in the terminal, such as vim, tmux or a shell over ssh, put text on the clipboard.
     clipboard_read: Lets programs in the terminal read the text you copied, passwords included. Ask shows which program wants it first.
     terminal_host: Sessions keep running in a background process after Runode quits and come back when it opens again.
+    auto_update: Check for new versions in the background, download them and install them when Runode quits.
     remote_access: Lets a paired phone reach the terminals over the local network or Tailscale. Pair below, or with runode remote pair.
     remote_access_port: TCP port, 1 to 65535.
     agent_notifications: Notifies you when an agent you are not looking at finishes or needs an answer. Only the packaged Runode.app can notify.

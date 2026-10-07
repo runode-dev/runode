@@ -11,6 +11,9 @@
 //! （`persist::freeze`）：视图会先收到会话结束、一个个关掉分屏，冻结了才不会把存档清空，下次启动
 //! 照原样接回会话或者在原目录新开。
 //!
+//! 重启以更新（`quit_to_update`）也按退出走，只是不看开关：留得下就把会话留下，新版本打开时接回来；
+//! 留不下又有 agent 在跑时照样先问。
+//!
 //! 关掉的窗口不是最后一个时，app 不退出，结束这个窗口里的会话（`WindowView::end_sessions`），不问。
 //!
 //! 弹框之前都先推迟到当前的更新结束：动作和关闭按钮的回调运行时，触发它的窗口正被借出，这时
@@ -42,6 +45,8 @@ pub(super) enum QuitAction {
     CloseAllWindows,
     /// 菜单里的「退出并结束所有会话」。
     QuitAndEndSessions,
+    /// 重启以装上下好的新版本（`crate::update`）。
+    Update,
 }
 
 /// 退出时宿主里的会话怎么办。
@@ -96,7 +101,13 @@ impl Keeping {
 
 /// `action` 让 app 退出时会话怎么办。
 pub(super) fn ending(mode: Mode, keeping: Keeping, action: QuitAction) -> Ending {
-    let keep = keeping.wanted && keeping.possible && action != QuitAction::QuitAndEndSessions;
+    let keep = match action {
+        QuitAction::QuitAndEndSessions => false,
+        QuitAction::Update => keeping.possible,
+        QuitAction::Quit | QuitAction::CloseLastWindow | QuitAction::CloseAllWindows => {
+            keeping.wanted && keeping.possible
+        }
+    };
     match mode {
         Mode::InProcess if keep => Ending::Yield,
         Mode::InProcess => Ending::WithApp,
@@ -156,6 +167,18 @@ pub fn quit_and_end_sessions(cx: &mut App) {
     cx.defer(|cx| {
         let window = front_window(cx);
         run(QuitAction::QuitAndEndSessions, window, cx, |cx| cx.quit());
+    });
+}
+
+/// 退出应用，装上下好的新版本后重新打开（`crate::update::relaunch_on_quit`）。会话留得下就留在后台，
+/// 不看配置项 `terminal-host`；留不下又有 agent 在跑时先确认，取消了就不重启。
+pub fn quit_to_update(cx: &mut App) {
+    cx.defer(|cx| {
+        let window = front_window(cx);
+        run(QuitAction::Update, window, cx, |cx| {
+            crate::update::relaunch_on_quit(cx);
+            cx.quit();
+        });
     });
 }
 
@@ -590,6 +613,18 @@ mod tests {
             assert_eq!(quit_plan(IN_PROCESS, STUCK, action, 0), plan(Ending::WithApp, None, false), "{action:?}");
             assert_eq!(quit_plan(IN_PROCESS, STUCK, action, 1), plan(Ending::WithApp, Some(Prompt::Quit), false));
         }
+    }
+
+    /// 重启以更新不看开关：留得下就留下，不问；留不下时随 app 结束，有 agent 才问，不给留下的选项。
+    #[test]
+    fn updating_keeps_sessions_whenever_it_can() {
+        let action = QuitAction::Update;
+        assert_eq!(quit_plan(STANDALONE, END, action, 2), plan(Ending::Keep, None, false));
+        assert_eq!(quit_plan(STANDALONE, KEEP, action, 2), plan(Ending::Keep, None, false));
+        assert_eq!(quit_plan(IN_PROCESS, END, action, 2), plan(Ending::Yield, None, false));
+        assert_eq!(quit_plan(IN_PROCESS, KEEP, action, 0), plan(Ending::Yield, None, false));
+        assert_eq!(quit_plan(IN_PROCESS, END_STUCK, action, 0), plan(Ending::WithApp, None, false));
+        assert_eq!(quit_plan(IN_PROCESS, STUCK, action, 1), plan(Ending::WithApp, Some(Prompt::Quit), false));
     }
 
     /// 只有退出会把会话留下时菜单里才有「退出并结束所有会话」，跟着开关变。

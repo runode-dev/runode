@@ -89,6 +89,7 @@ impl Page {
             Self::General => &[
                 Row("language", Language),
                 Row("terminal-host", Switch),
+                Row("auto-update", Switch),
                 Section("config_file"),
                 ConfigFileActions,
                 ConfigFiles,

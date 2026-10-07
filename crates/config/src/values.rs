@@ -113,6 +113,7 @@ impl Config {
                 .into(),
             ],
             "terminal-host" => bool(self.terminal_host),
+            "auto-update" => bool(self.auto_update),
             "remote-access" => bool(self.remote_access),
             "remote-access-port" => vec![self.remote_access_port.to_string()],
             "agent-notifications" => bool(self.agent_notifications),

@@ -1,12 +1,18 @@
 #!/bin/bash
-# 发布构建 runode，打包成 Runode.app，再做成可拖进「应用程序」安装的 dmg。
-# 产物在 target/release/bundle/ 下。
+# 发布构建 runode，打包成 Runode.app，再做成可拖进「应用程序」安装的 dmg，和 app 自动更新时下载的
+# zip。产物在 target/release/bundle/ 下。
 #
 # 用法：bundle-macos.sh [app|dmg]，默认 dmg；app 只打包到 Runode.app 为止。
 #
 # 环境变量：
 #   CARGO          cargo 命令，默认 cargo
-#   SIGN_IDENTITY  codesign 签名身份，默认 -（ad-hoc，只适合本机或自己用）
+#   SIGN_IDENTITY  codesign 签名身份，默认 -（ad-hoc，只适合本机或自己用）。发布用 Developer ID，
+#                  比如 "Developer ID Application: 名字 (TEAMID)"：app 只在新包和自己出自同一个
+#                  Team ID 时才自己更新，ad-hoc 签名的不更新。
+#   NOTARY_PROFILE 公证用的 notarytool 钥匙串配置名（xcrun notarytool store-credentials 存的），或者
+#   NOTARY_KEY、NOTARY_KEY_ID、NOTARY_ISSUER
+#                  App Store Connect API 密钥（.p8 文件的路径、密钥 ID、Issuer ID），CI 里用这个。
+#                  两样都没给时不公证；dmg 模式下给了就公证 zip 和 dmg，并把公证票据钉进 .app 和 dmg。
 #
 # 编译应用图标要用 Xcode 自带的 actool，需要装 Xcode。
 set -euo pipefail
@@ -67,11 +73,51 @@ xcrun actool apps/desktop/assets/runode.icon --compile "$app/Contents/Resources"
     --development-region en --target-device mac --platform macosx --minimum-deployment-target 11.0 >&2
 rm -rf "$icon_build"
 
-codesign --force --sign "$SIGN_IDENTITY" --options runtime "$app"
+# 公证要带安全时间戳；ad-hoc 签名没有时间戳可带。
+sign_options=(--force --sign "$SIGN_IDENTITY")
+if [[ "$SIGN_IDENTITY" != - ]]; then
+    sign_options+=(--timestamp)
+fi
+codesign "${sign_options[@]}" --options runtime "$app"
 
 if [[ "$target" == app ]]; then
     echo "$app"
     exit
+fi
+
+# 交给公证服务，等到有结果；没通过时打出公证日志再失败。
+notarize() {
+    local auth
+    if [[ -n "${NOTARY_PROFILE:-}" ]]; then
+        auth=(--keychain-profile "$NOTARY_PROFILE")
+    else
+        auth=(--key "$NOTARY_KEY" --key-id "$NOTARY_KEY_ID" --issuer "$NOTARY_ISSUER")
+    fi
+    local result id status
+    result=$(xcrun notarytool submit "$1" "${auth[@]}" --wait --output-format json)
+    id=$(jq -r .id <<<"$result")
+    status=$(jq -r .status <<<"$result")
+    if [[ "$status" != Accepted ]]; then
+        echo "公证没通过（$status）：$1" >&2
+        xcrun notarytool log "$id" "${auth[@]}" >&2 || true
+        exit 1
+    fi
+}
+notarizing=false
+if [[ -n "${NOTARY_PROFILE:-}" || -n "${NOTARY_KEY:-}" ]]; then
+    notarizing=true
+fi
+
+# 自动更新下载的 zip。ditto 打包时保留符号链接（rn）和扩展属性，解压后签名才对得上。公证要交 zip，
+# 通过后把票据钉进 .app 再重新打包，没联网时 Gatekeeper 也认。
+zip="$bundle_dir/Runode-$version-$arch.zip"
+rm -f "$zip"
+ditto -c -k --keepParent --sequesterRsrc "$app" "$zip"
+if $notarizing; then
+    notarize "$zip"
+    xcrun stapler staple "$app"
+    rm -f "$zip"
+    ditto -c -k --keepParent --sequesterRsrc "$app" "$zip"
 fi
 
 # dmg 里放 .app 和指向 /Applications 的链接，打开后直接拖拽安装。
@@ -81,5 +127,13 @@ ln -s /Applications "$staging/Applications"
 rm -f "$dmg"
 diskutil image create from --volumeName Runode --format UDZO "$staging" "$dmg" >/dev/null
 rm -rf "$staging"
+if [[ "$SIGN_IDENTITY" != - ]]; then
+    codesign "${sign_options[@]}" "$dmg"
+fi
+if $notarizing; then
+    notarize "$dmg"
+    xcrun stapler staple "$dmg"
+fi
 
 echo "$dmg"
+echo "$zip"

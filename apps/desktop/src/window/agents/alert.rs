@@ -76,18 +76,29 @@ fn post(alert: AgentAlert, cx: &mut App) {
         Alert::Blocked => rust_i18n::t!("agent.blocked_title", agent = name),
     };
     let body = rust_i18n::t!("agent.notification_body", workspace = alert.workspace, tab = alert.tab);
-    let notified = cx.default_global::<Notified>();
-    let listen = !std::mem::replace(&mut notified.listening, true);
-    notified.posted.insert(alert.tag.clone());
-    // 第一次发通知时才接收点击：注册回调就会建起通知中心。
-    if listen {
-        cx.on_system_notification_response(|response, cx| crate::window::reveal_notified(&response.tag, cx));
-    }
+    cx.default_global::<Notified>().posted.insert(alert.tag.clone());
+    listen(cx);
     cx.show_system_notification(SystemNotification {
         tag: alert.tag.into(),
         title: title.into_owned().into(),
         body: body.into_owned().into(),
         actions: Vec::new(),
+    });
+}
+
+/// 开始接收通知的点击，发第一条通知之前调；已经在接收时什么都不做。注册回调就会建起通知中心，
+/// 所以第一次发通知时才注册。点的是更新的通知时交给 `update`，别的是 agent 的提醒，跳到那个分屏。
+/// 回调只能有一个，后注册的会顶掉先注册的，所以都经这里。
+pub fn listen(cx: &mut App) {
+    if std::mem::replace(&mut cx.default_global::<Notified>().listening, true) {
+        return;
+    }
+    cx.on_system_notification_response(|response, cx| {
+        if response.tag == crate::update::NOTIFICATION_TAG {
+            crate::update::on_notification(response.action_id.as_deref(), cx);
+        } else {
+            crate::window::reveal_notified(&response.tag, cx);
+        }
     });
 }
 

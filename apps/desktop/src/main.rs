@@ -17,6 +17,7 @@ mod settings;
 mod startup;
 mod terminal_view;
 mod ui;
+mod update;
 mod window;
 
 // 界面文字的翻译，见 `i18n`；某种语言缺了某个键时取英文。
@@ -62,6 +63,7 @@ fn main() {
         startup::mark("app_run");
         config::install(cx);
         startup::mark("config_install");
+        update::install(cx);
         menus::install(cx);
         startup::mark("menus_install");
         window::install(cx);

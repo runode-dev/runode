@@ -5144,6 +5144,7 @@ dependencies = [
  "runode-remote-access",
  "runode-shared-types",
  "runode-terminal",
+ "runode-update",
  "rust-i18n",
  "serde",
  "serde_json",
@@ -5287,6 +5288,19 @@ dependencies = [
  "runode-agent-detect",
  "runode-paths",
  "runode-shared-types",
+ "serde",
+ "serde_json",
+ "tracing",
+]
+
+[[package]]
+name = "runode-update"
+version = "0.1.0"
+dependencies = [
+ "block2 0.6.2",
+ "libc",
+ "objc2 0.6.4",
+ "objc2-foundation 0.3.2",
  "serde",
  "serde_json",
  "tracing",

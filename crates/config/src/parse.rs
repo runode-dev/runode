@@ -55,6 +55,7 @@ pub const KEYS: &[&[&str]] = &[
     ],
     &["clipboard-write", "clipboard-read"],
     &["terminal-host"],
+    &["auto-update"],
     &["remote-access", "remote-access-port"],
     &["agent-notifications", "agent-notifications-exclude", "agent-done-sound", "agent-blocked-sound"],
     &["config-file"],
@@ -293,6 +294,9 @@ impl Config {
             }
             "terminal-host" => {
                 self.terminal_host = if empty { defaults.terminal_host } else { parse_bool(value)? };
+            }
+            "auto-update" => {
+                self.auto_update = if empty { defaults.auto_update } else { parse_bool(value)? };
             }
             "remote-access" => {
                 self.remote_access = if empty { defaults.remote_access } else { parse_bool(value)? };

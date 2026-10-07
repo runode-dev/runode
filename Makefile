@@ -51,7 +51,7 @@ install: app ## 打包 Runode.app 并装到 /Applications，覆盖旧版本
 restart: ## 重启装好的 Runode.app，宿主也换成新装的（make install restart 装好再重启）
 	scripts/restart-macos.sh
 
-dmg: ## 发布构建并打包 Runode.app 与 dmg，产物在 target/release/bundle
+dmg: ## 发布构建并打包 Runode.app、dmg 和自动更新用的 zip，产物在 target/release/bundle
 	CARGO=$(CARGO) scripts/bundle-macos.sh
 
 check: ## 只做类型检查，不生成二进制

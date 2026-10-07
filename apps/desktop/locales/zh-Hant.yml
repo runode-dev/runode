@@ -121,6 +121,22 @@ quit:
   keep_detail: 選「保留在背景」的話，工作階段在結束後照常執行，下次打開接著用，設定裡的「結束後保留工作階段」也會一併打開。
   yield_failed_title: 沒能把工作階段留在背景
   yield_failed_detail: "%{reason}\n\n現在結束，所有工作階段都會一併終止。"
+update:
+  menu_check: 檢查更新…
+  menu_checking: 正在檢查更新…
+  menu_restart: "重新啟動以更新到 Runode %{version}"
+  up_to_date_title: Runode 已是最新版本
+  up_to_date_detail: "現在用的 %{version} 就是最新版本。"
+  manual_title: "Runode %{version} 已發布"
+  manual_detail: "這份 Runode 不能自己更新（%{reason}），請到發布頁下載新版本。"
+  open_page: 打開下載頁
+  later: 稍後
+  ready_title: "Runode %{version} 已經下載好"
+  ready_detail: 現在重新啟動就能更新，工作階段留在背景接著執行，新版本打開後接回來。也可以稍後再裝：結束 Runode 時會自動裝上。
+  ready_notification: 現在重新啟動來更新，或者結束 Runode 時自動裝上。
+  restart: 現在重新啟動
+  failed_title: 檢查更新失敗
+  ok: 好
 host_lost:
   message: 和終端機工作階段的連線中斷了，現在看到的是中斷前的最後一個畫面。
   reopen: 在原目錄重新開啟
@@ -449,6 +465,7 @@ settings:
     clipboard_write: 程式寫剪貼簿
     clipboard_read: 程式讀剪貼簿
     terminal_host: 結束後保留工作階段
+    auto_update: 自動更新
     remote_access: 遠端存取
     remote_access_port: 連接埠
     agent_notifications: 通知
@@ -493,6 +510,7 @@ settings:
     clipboard_write: 終端機裡的程式（vim、tmux、經 ssh 連到遠端的 shell 等）能把文字放進剪貼簿。
     clipboard_read: 終端機裡的程式能讀到你複製過的文字，密碼也在內。選「詢問」時先說明是哪個程式要讀。
     terminal_host: 結束 Runode 後工作階段留在背景程序裡照常執行，下次打開接著用。
+    auto_update: 在背景查新版本、下載好，結束 Runode 時裝上。
     remote_access: 讓配對過的手機經區域網路或 Tailscale 連上這台 Mac 的終端機。在下面配對，或者用 runode remote pair。
     remote_access_port: TCP 連接埠，1 到 65535。
     agent_notifications: agent 在你沒在看的分割畫面裡完成或等你回答時發系統通知。只有打包好的 Runode.app 能發通知。

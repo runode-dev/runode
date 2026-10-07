@@ -51,7 +51,7 @@ use runode_shared_types::{
     pane::{Axis, Direction, SplitId},
 };
 
-pub(crate) use agents::{logo::FILES as AGENT_LOGO_FILES, reveal_notified};
+pub(crate) use agents::{alert::listen as listen_notifications, logo::FILES as AGENT_LOGO_FILES, reveal_notified};
 pub use arrange::ArrangePanes;
 pub use background::watch as watch_background;
 pub use files::{
@@ -62,7 +62,8 @@ pub use machine::load as load_machine;
 pub(crate) use open::{open_window, open_window_with};
 pub use persist::{install, saved_window_options};
 pub use quit::{
-    close_all_windows, close_window, end_sessions_in_menu, quit, quit_and_end_sessions, should_close, terminal_windows,
+    close_all_windows, close_window, end_sessions_in_menu, quit, quit_and_end_sessions, quit_to_update, should_close,
+    terminal_windows,
 };
 pub use remote::serve_requests;
 pub use titlebar::titlebar_options;

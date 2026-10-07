@@ -121,6 +121,22 @@ quit:
   keep_detail: 选「保留在后台」的话，会话在退出后照常运行，下次打开接着用，设置里的「退出后保留会话」也会一并打开。
   yield_failed_title: 没能把会话留在后台
   yield_failed_detail: "%{reason}\n\n现在退出，所有会话都会一起结束。"
+update:
+  menu_check: 检查更新…
+  menu_checking: 正在检查更新…
+  menu_restart: "重启以更新到 Runode %{version}"
+  up_to_date_title: Runode 已是最新版本
+  up_to_date_detail: "现在用的 %{version} 就是最新版本。"
+  manual_title: "Runode %{version} 已发布"
+  manual_detail: "这份 Runode 不能自己更新（%{reason}），请到发布页下载新版本。"
+  open_page: 打开下载页
+  later: 稍后
+  ready_title: "Runode %{version} 已经下载好"
+  ready_detail: 现在重启就能更新，会话留在后台接着跑，新版本打开后接回来。也可以稍后再装：退出 Runode 时会自动装上。
+  ready_notification: 现在重启来更新，或者退出 Runode 时自动装上。
+  restart: 现在重启
+  failed_title: 检查更新失败
+  ok: 好
 host_lost:
   message: 和终端会话的连接断开了，现在看到的是断开前的最后一屏。
   reopen: 在原目录重新打开
@@ -449,6 +465,7 @@ settings:
     clipboard_write: 程序写剪贴板
     clipboard_read: 程序读剪贴板
     terminal_host: 退出后保留会话
+    auto_update: 自动更新
     remote_access: 远程访问
     remote_access_port: 端口
     agent_notifications: 通知
@@ -493,6 +510,7 @@ settings:
     clipboard_write: 终端里的程序（vim、tmux、经 ssh 连到远端的 shell 等）能把文字放进剪贴板。
     clipboard_read: 终端里的程序能读到你复制过的文字，密码也在内。选“询问”时先说明是哪个程序要读。
     terminal_host: 退出 Runode 后会话留在后台进程里照常运行，下次打开接着用。
+    auto_update: 在后台查新版本、下载好，退出 Runode 时装上。
     remote_access: 让配对过的手机经局域网或 Tailscale 连上这台 Mac 的终端。在下面配对，或者用 runode remote pair。
     remote_access_port: TCP 端口，1 到 65535。
     agent_notifications: agent 在你没在看的分屏里干完了或者等你回答时发系统通知。只有打包好的 Runode.app 能发通知。

@@ -26,6 +26,8 @@ actions!(
     runode,
     [
         About,
+        /// 检查更新；新版本下好了时是重启以更新，见 `update::menu_clicked`。
+        CheckForUpdates,
         OpenSettings,
         OpenConfiguration,
         ReloadConfiguration,
@@ -48,6 +50,7 @@ actions!(
 
 pub fn install(cx: &mut App) {
     cx.on_action(|_: &About, _| crate::about::show());
+    cx.on_action(|_: &CheckForUpdates, cx| crate::update::menu_clicked(cx));
     cx.on_action(|_: &OpenSettings, cx| crate::settings::open(cx));
     cx.on_action(|_: &OpenConfiguration, cx| crate::config::open(cx));
     cx.on_action(|_: &ReloadConfiguration, cx| crate::config::reload(cx));
@@ -78,7 +81,7 @@ fn tr(key: &str) -> String {
 }
 
 /// 设置菜单栏。菜单项上的快捷键在这时从键位表里查，换了绑定要重新调用。宿主怎么跑也在这时
-/// 读，决定有没有「退出并结束所有会话」。
+/// 读，决定有没有「退出并结束所有会话」；更新走到哪一步也是，决定「检查更新…」那一项的文字。
 pub fn set_menus(cx: &mut App) {
     let mut quit = vec![MenuItem::action(tr("menu.quit"), Quit)];
     if crate::window::end_sessions_in_menu() {
@@ -89,6 +92,7 @@ pub fn set_menus(cx: &mut App) {
         Menu::new("Runode").items(
             [
                 MenuItem::action(tr("menu.about"), About),
+                MenuItem::action(crate::update::menu_label(cx), CheckForUpdates),
                 MenuItem::separator(),
                 MenuItem::action(tr("menu.settings"), OpenSettings),
                 MenuItem::action(tr("menu.open_config"), OpenConfiguration),
