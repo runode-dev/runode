@@ -397,10 +397,79 @@ impl WindowView {
         }
     }
 
+    /// 关掉标签 `id`；里面还有程序在跑时先问一句（见 `confirm_closing`）。
     pub(super) fn close_tab_by_id(&mut self, id: TabId, window: &mut Window, cx: &mut Context<Self>) {
-        if let Some(ix) = self.workspace().tabs.iter().position(|tab| tab.id == id) {
-            self.close_tab_at(self.active, ix, window, cx);
-        }
+        let Some((wi, ti)) = self.locate_tab(id) else {
+            return;
+        };
+        let running = running_programs(self.workspaces[wi].tabs[ti].panes.values().map(|(view, _)| view), cx);
+        let title = rust_i18n::t!("close.tab_title");
+        self.confirm_closing(&title, None, &running, window, cx, move |this, window, cx| {
+            // 问的时候标签可能已经挪了位置或者自己关掉了。
+            if let Some((wi, ti)) = this.locate_tab(id) {
+                this.close_tab_at(wi, ti, window, cx);
+            }
+        });
+    }
+
+    fn locate_tab(&self, id: TabId) -> Option<(usize, usize)> {
+        self.workspaces
+            .iter()
+            .enumerate()
+            .find_map(|(wi, workspace)| Some((wi, workspace.tabs.iter().position(|tab| tab.id == id)?)))
+    }
+
+    /// 用户要关掉终端 `pane`；它前台还有程序在跑时先问一句（见 `confirm_closing`）。shell 自己退出时
+    /// 不经这里，直接 `close_pane_by_id`。
+    pub(super) fn confirm_close_pane(&mut self, pane: EntityId, window: &mut Window, cx: &mut Context<Self>) {
+        let Some((wi, ti)) = self.locate(pane) else {
+            return;
+        };
+        let running = running_programs(self.workspaces[wi].tabs[ti].panes.get(&pane).map(|(view, _)| view), cx);
+        let title = rust_i18n::t!("close.pane_title");
+        self.confirm_closing(&title, None, &running, window, cx, move |this, window, cx| {
+            this.close_pane_by_id(pane, window, cx);
+        });
+    }
+
+    /// `running` 为空、`detail` 也没有时直接做 `close`；否则弹框，说明是 `detail` 加上哪些程序还在跑，
+    /// 确认了再做。
+    fn confirm_closing(
+        &mut self,
+        title: &str,
+        detail: Option<&str>,
+        running: &[String],
+        window: &mut Window,
+        cx: &mut Context<Self>,
+        close: impl FnOnce(&mut Self, &mut Window, &mut Context<Self>) + 'static,
+    ) {
+        let running = (!running.is_empty()).then(|| {
+            rust_i18n::t!("close.running", programs = running.join(rust_i18n::t!("close.separator").as_ref()))
+                .into_owned()
+        });
+        let detail = match (detail, running) {
+            (None, None) => {
+                close(self, window, cx);
+                return;
+            }
+            (Some(detail), Some(running)) => format!("{detail}\n\n{running}"),
+            (Some(detail), None) => detail.to_owned(),
+            (None, Some(running)) => running,
+        };
+        let answer = window.prompt(
+            gpui::PromptLevel::Warning,
+            title,
+            Some(&detail),
+            &[&*rust_i18n::t!("close.confirm"), &*rust_i18n::t!("close.cancel")],
+            cx,
+        );
+        cx.spawn_in(window, async move |this, cx| {
+            if answer.await.ok() != Some(0) {
+                return;
+            }
+            this.update_in(cx, |this, window, cx| close(this, window, cx)).ok();
+        })
+        .detach();
     }
 
     /// 结束关掉 `closing` 时要结束的会话（见 `sessions_to_end`）。要在把终端从窗口里拿掉之前调。
@@ -472,37 +541,21 @@ impl WindowView {
         self.activate_workspace(active, window, cx);
     }
 
-    /// 关掉第 `ix` 个 workspace；里面不止一个终端时先问一句，免得误点关掉一整个项目。
+    /// 关掉第 `ix` 个 workspace；里面不止一个终端或者还有程序在跑时先问一句，免得误点关掉一整个项目。
     pub(super) fn confirm_close_workspace(&mut self, ix: usize, window: &mut Window, cx: &mut Context<Self>) {
         let workspace = &self.workspaces[ix];
         let count = workspace.pane_count();
-        if count <= 1 {
-            self.close_workspace_at(ix, window, cx);
-            return;
-        }
         let id = workspace.id;
         let title = rust_i18n::t!("workspace.close_title", name = workspace.name);
-        let detail = rust_i18n::t!("workspace.close_detail", count = count);
-        let answer = window.prompt(
-            gpui::PromptLevel::Warning,
-            &title,
-            Some(&detail),
-            &[&*rust_i18n::t!("workspace.close_confirm"), &*rust_i18n::t!("workspace.close_cancel")],
-            cx,
-        );
-        cx.spawn_in(window, async move |this, cx| {
-            if answer.await.ok() != Some(0) {
-                return;
+        let detail = (count > 1).then(|| rust_i18n::t!("workspace.close_detail", count = count));
+        let running =
+            running_programs(workspace.tabs.iter().flat_map(|tab| tab.panes.values().map(|(view, _)| view)), cx);
+        self.confirm_closing(&title, detail.as_deref(), &running, window, cx, move |this, window, cx| {
+            // 问的时候 workspace 可能已经挪了位置或者自己关掉了。
+            if let Some(ix) = this.workspaces.iter().position(|workspace| workspace.id == id) {
+                this.close_workspace_at(ix, window, cx);
             }
-            this.update_in(cx, |this, window, cx| {
-                // 问的时候 workspace 可能已经挪了位置或者自己关掉了。
-                if let Some(ix) = this.workspaces.iter().position(|workspace| workspace.id == id) {
-                    this.close_workspace_at(ix, window, cx);
-                }
-            })
-            .ok();
-        })
-        .detach();
+        });
     }
 
     /// 把拖动的标签挪到第 `to` 个位置，并切到它。
@@ -539,6 +592,19 @@ impl WindowView {
         let cwd = format::start_dir(cwd.as_deref(), &self.workspace().dir);
         self.spawn_terminal(cwd.as_deref(), window, cx)
     }
+}
+
+/// `views` 里前台还在跑的程序（见 `TerminalView::running`），同名的只列一次。
+fn running_programs<'a>(views: impl IntoIterator<Item = &'a Entity<TerminalView>>, cx: &App) -> Vec<String> {
+    let mut names = Vec::new();
+    for view in views {
+        if let Some(name) = view.read(cx).running()
+            && !names.contains(&name)
+        {
+            names.push(name);
+        }
+    }
+    names
 }
 
 /// 用户要关掉的东西，见 `sessions_to_end`。

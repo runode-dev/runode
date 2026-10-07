@@ -98,6 +98,13 @@ workspace:
   close_detail: Its %{count} terminals will be closed along with it.
   close_confirm: Close
   close_cancel: Cancel
+close:
+  pane_title: Close this terminal?
+  tab_title: Close this tab?
+  running: "Still running: %{programs}. Closing ends whatever is running here."
+  confirm: Close
+  cancel: Cancel
+  separator: ", "
 quit:
   title: Quit Runode while agents are still running?
   detail: "%{agents} will be stopped."

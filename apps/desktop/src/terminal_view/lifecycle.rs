@@ -22,7 +22,7 @@ use futures::{StreamExt as _, channel::mpsc::UnboundedReceiver, task::ArcWake};
 use gpui::{App, AppContext as _, Context, Entity, Font, Global, Point, SharedString, Task, Window, font, px};
 use runode_protocol::{AttachMode, ClientMsg, HostMsg, SessionId};
 use runode_shared_types::{
-    agent::Agent,
+    agent::{Agent, AgentKind},
     color::Rgb,
     grid::GridSize,
     session::{Driver, SessionMeta},
@@ -885,6 +885,20 @@ impl TerminalView {
     /// 前台 agent 在标题里报告的状态；不是 agent 在前台时为 `None`。
     pub fn agent(&self) -> Option<Agent> {
         self.screen.meta().agent
+    }
+
+    /// 前台还在跑的程序，关掉终端前据此提醒：agent 时为它的名字，别的命令时为进程名。shell 在等
+    /// 输入、还没启动，会话已经结束或者和宿主断开了时为 `None`。`AgentKind::Other` 是用 OSC 9;4
+    /// 报进度的普通程序，按进程名算。
+    pub fn running(&self) -> Option<String> {
+        if self.ended || self.screen.is_lost() {
+            return None;
+        }
+        let meta = self.screen.meta();
+        if let Some(agent) = meta.agent.filter(|agent| agent.kind != AgentKind::Other) {
+            return Some(agent.kind.display_name().to_owned());
+        }
+        meta.foreground.clone().filter(|_| !meta.foreground_is_shell)
     }
 
     /// 前台 agent 上次换了种类或状态的时刻。

@@ -98,6 +98,13 @@ workspace:
   close_detail: 里面的 %{count} 个终端会一起关闭。
   close_confirm: 关闭
   close_cancel: 取消
+close:
+  pane_title: 关闭这个终端？
+  tab_title: 关闭这个标签页？
+  running: "%{programs} 还在运行，关闭后会随之结束。"
+  confirm: 关闭
+  cancel: 取消
+  separator: "、"
 quit:
   title: 还有 agent 在运行，确定退出 Runode？
   detail: "%{agents} 会随之结束。"

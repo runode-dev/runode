@@ -86,7 +86,8 @@ impl WindowView {
     }
 
     pub(super) fn close_tab(&mut self, _: &CloseTab, window: &mut Window, cx: &mut Context<Self>) {
-        self.close_tab_at(self.active, self.workspace().active, window, cx);
+        let id = self.tab().id;
+        self.close_tab_by_id(id, window, cx);
     }
 
     pub(super) fn next_tab(&mut self, _: &NextTab, window: &mut Window, cx: &mut Context<Self>) {
@@ -135,7 +136,7 @@ impl WindowView {
 
     pub(super) fn close_pane(&mut self, _: &ClosePane, window: &mut Window, cx: &mut Context<Self>) {
         let focused = self.tab().focused;
-        self.close_pane_by_id(focused, window, cx);
+        self.confirm_close_pane(focused, window, cx);
     }
 
     pub(super) fn focus_next_pane(&mut self, _: &FocusNextPane, window: &mut Window, cx: &mut Context<Self>) {

@@ -98,6 +98,13 @@ workspace:
   close_detail: 裡面的 %{count} 個終端機會一起關閉。
   close_confirm: 關閉
   close_cancel: 取消
+close:
+  pane_title: 關閉這個終端機？
+  tab_title: 關閉這個分頁？
+  running: "%{programs} 還在執行，關閉後會隨之結束。"
+  confirm: 關閉
+  cancel: 取消
+  separator: "、"
 quit:
   title: 還有 agent 在執行，確定結束 Runode？
   detail: "%{agents} 會隨之結束。"

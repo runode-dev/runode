@@ -334,7 +334,7 @@ impl WindowView {
                 rust_i18n::t!("tooltip.close_split"),
                 &ClosePane,
                 |this, id, window, cx| {
-                    this.close_pane_by_id(id, window, cx);
+                    this.confirm_close_pane(id, window, cx);
                 },
             ))
             // 不能用 display 切换，见 `render_tab` 里关闭按钮的说明。
