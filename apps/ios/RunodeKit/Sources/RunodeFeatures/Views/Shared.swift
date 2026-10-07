@@ -305,7 +305,7 @@
                     }
                 let tint = Self.tint(for: group)
                 HStack(spacing: 4) {
-                    icon(group)
+                    icon(group, kind: agent.kind)
                         .imageScale(.small)
                     Text(showsState ? status.text : agent.kind.displayName)
                         .lineLimit(1)
@@ -320,14 +320,13 @@
             }
         }
 
-        /// 状态图标带着动：干活时齿轮转，空闲时月亮慢慢呼吸，等回答时不动（卡片已经描了橙边）。
-        /// 打开了「减弱动态效果」时都不动。
+        /// 状态图标带着动：干活时是和桌面一样的这个 agent 自己的转圈，空闲时月亮慢慢呼吸，等回答时不动
+        /// （卡片已经描了橙边）。打开了「减弱动态效果」时都不动。
         @ViewBuilder
-        private func icon(_ group: SessionGroup) -> some View {
+        private func icon(_ group: SessionGroup, kind: AgentKind) -> some View {
             switch group {
             case .working:
-                Image(systemName: Presentation.symbol(for: .working))
-                    .symbolEffect(.rotate.byLayer, isActive: !reduceMotion)
+                AgentSpinner(kind: kind, animates: !reduceMotion)
             case .other:
                 Image(systemName: "moon.zzz.fill")
                     .symbolEffect(.breathe, isActive: !reduceMotion)
@@ -342,6 +341,31 @@
             case .working: .primary
             case .other: .secondary
             }
+        }
+    }
+
+    /// agent 干活时的转圈，帧、快慢和颜色照 `AgentKind.spinner`、`AgentKind.spinnerColor`，和桌面一样。
+    /// 当前帧按绝对时间算，几张卡片上同一种 agent 一起转、步调一致；各帧字宽不一，定宽了文字才不跟着晃。
+    private struct AgentSpinner: View {
+        let kind: AgentKind
+        let animates: Bool
+        @ScaledMetric(relativeTo: .caption) private var width: CGFloat = 12
+
+        var body: some View {
+            let (frames, frameTime) = kind.spinner
+            Group {
+                if animates {
+                    TimelineView(.periodic(from: .now, by: frameTime)) { context in
+                        let tick = Int(context.date.timeIntervalSinceReferenceDate / frameTime)
+                        Text(frames[tick % frames.count])
+                    }
+                } else {
+                    // 不动时挑中间一帧：Claude 的头一帧只是个小点。
+                    Text(frames[frames.count / 2])
+                }
+            }
+            .frame(width: width)
+            .foregroundStyle(kind.spinnerColor.map(Color.init) ?? .primary)
         }
     }
 

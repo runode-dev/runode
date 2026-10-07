@@ -379,6 +379,21 @@ public struct AgentKind: Hashable, Sendable, Codable {
         ]
         return names[label] ?? label
     }
+
+    /// 工作中的转圈各帧和每帧的秒数，和宿主的 `AgentKind::spinner` 一致：跟各 agent 自己界面里的工作
+    /// 动画一样，没有专门动画的用盲文点阵转圈。
+    public var spinner: (frames: [String], frameTime: Double) {
+        switch label {
+        case "claude": (["·", "✢", "✳", "✶", "✻", "✽", "✽", "✻", "✶", "✳", "✢", "·"], 0.12)
+        case "codex": (["•", "◦"], 0.6)
+        default: (["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"], 0.08)
+        }
+    }
+
+    /// 转圈的颜色，和宿主的 `AgentKind::spinner_color` 一致；为空时沿用文字颜色。
+    public var spinnerColor: Rgb? {
+        label == "claude" ? Rgb(0xD7, 0x77, 0x57) : nil
+    }
 }
 
 /// 前台 agent 和它的状态。
