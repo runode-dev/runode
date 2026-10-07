@@ -237,7 +237,7 @@ impl WindowView {
             .status_item("status-resources", StatusPopover::Resources, fg, bg, cx)
             .tooltip(tooltip(rust_i18n::t!("status.resources_tooltip"), None, fg, bg))
             .child(icon(MEMORY_ICON))
-            .child(format_bytes(total.rss))
+            .child(format_bytes(total.memory))
             .child(div().text_color(fg_h.opacity(0.35)).child("·"))
             .child(icon(SHELL_ICON))
             .child(terminals.to_string());
@@ -433,7 +433,7 @@ impl WindowView {
                         .text_color(fg_h.opacity(0.7))
                         .child(format_cpu(usage.cpu)),
                 )
-                .child(div().flex_none().w(px(MEMORY_WIDTH)).text_right().child(format_bytes(usage.rss)))
+                .child(div().flex_none().w(px(MEMORY_WIDTH)).text_right().child(format_bytes(usage.memory)))
         };
         let mut rows: Vec<AnyElement> = Vec::new();
         for workspace in &self.workspaces {
@@ -496,7 +496,7 @@ impl WindowView {
             .child(popover_header(
                 Some(MEMORY_ICON),
                 rust_i18n::t!("status.resources_title").into_owned(),
-                format!("{} · {}", format_cpu(total.cpu), format_bytes(total.rss)),
+                format!("{} · {}", format_cpu(total.cpu), format_bytes(total.memory)),
                 fg_h,
             ))
             .child(columns)

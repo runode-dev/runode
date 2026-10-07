@@ -1,4 +1,4 @@
-//! 状态栏要问系统的事：各个进程的父进程、内存和 CPU（`ps`），有哪些 TCP 端口在监听（`lsof`），
+//! 状态栏要问系统的事：各个进程的父进程和 CPU（`ps`）、内存（`proc_pid_rusage`），有哪些 TCP 端口在监听（`lsof`），
 //! 以及防止电脑休眠（`caffeinate`）。都是 macOS 自带的命令，跑不了时当没有。
 
 use std::{
@@ -6,11 +6,11 @@ use std::{
     process::{Child, Command, Stdio},
 };
 
-/// 一个进程的父进程、常驻内存（字节）和 CPU 占用（百分比，一个核满载是 100）。
+/// 一个进程的父进程、内存（字节，取 phys_footprint）和 CPU 占用（百分比，一个核满载是 100）。
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(super) struct Proc {
     pub ppid: u32,
-    pub rss: u64,
+    pub memory: u64,
     pub cpu: f32,
 }
 
@@ -18,14 +18,14 @@ pub(super) struct Proc {
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub(super) struct Usage {
     pub cpu: f32,
-    pub rss: u64,
+    pub memory: u64,
 }
 
 impl std::ops::Add for Usage {
     type Output = Self;
 
     fn add(self, other: Self) -> Self {
-        Self { cpu: self.cpu + other.cpu, rss: self.rss + other.rss }
+        Self { cpu: self.cpu + other.cpu, memory: self.memory + other.memory }
     }
 }
 
@@ -51,7 +51,7 @@ impl Procs {
 
     /// 只算 `pid` 这一个进程。
     pub(super) fn one(&self, pid: u32) -> Usage {
-        self.procs.get(&pid).map_or(Usage::default(), |proc| Usage { cpu: proc.cpu, rss: proc.rss })
+        self.procs.get(&pid).map_or(Usage::default(), |proc| Usage { cpu: proc.cpu, memory: proc.memory })
     }
 
     /// `pid` 和它所有的子孙进程加起来。
@@ -93,7 +93,30 @@ pub(super) struct Port {
 /// 现在的进程表；`ps` 跑不了时是空的。
 pub(super) fn processes() -> Procs {
     let text = output(Command::new("/bin/ps").args(["-axo", "pid=,ppid=,rss=,%cpu="]));
-    Procs::new(parse_ps(&text))
+    let mut procs = parse_ps(&text);
+    for (&pid, proc) in &mut procs {
+        if let Some(footprint) = phys_footprint(pid) {
+            proc.memory = footprint;
+        }
+    }
+    Procs::new(procs)
+}
+
+/// 进程的 phys_footprint，和活动监视器「内存」一栏同一个口径。`ps` 的 rss 把映射进来的可执行文件、
+/// 共享库这些干净的文件页也算上，单文件打包的大程序（比如 claude）能多出好几倍，几个进程相加时共享页还重复计数。
+/// 读不了（别的用户的进程、刚退出的进程）时为 `None`，调用方退回 rss。
+#[cfg(target_os = "macos")]
+fn phys_footprint(pid: u32) -> Option<u64> {
+    let mut info = std::mem::MaybeUninit::<libc::rusage_info_v2>::zeroed();
+    // SAFETY: 缓冲区是一个 `rusage_info_v2`，按 `RUSAGE_INFO_V2` 内核正好写这么多字节。
+    let status = unsafe { libc::proc_pid_rusage(pid.try_into().ok()?, libc::RUSAGE_INFO_V2, info.as_mut_ptr().cast()) };
+    // SAFETY: 调用成功时内核写满了整个结构体；结构体本身也已清零，全是整数字段，哪个值都合法。
+    (status == 0).then(|| unsafe { info.assume_init() }.ri_phys_footprint)
+}
+
+#[cfg(not(target_os = "macos"))]
+fn phys_footprint(_pid: u32) -> Option<u64> {
+    None
 }
 
 /// 现在在监听的 TCP 端口，按端口号排好、同一个端口只列一次（IPv4 和 IPv6 各监听一次的那种）。
@@ -114,6 +137,7 @@ fn output(command: &mut Command) -> String {
 }
 
 /// `ps -axo pid=,ppid=,rss=,%cpu=` 的输出：每行进程号、父进程号、常驻内存（KB）和 CPU 百分比。
+/// 常驻内存先填进 `memory`，读得到 phys_footprint 时 `processes` 再换掉。
 fn parse_ps(text: &str) -> HashMap<u32, Proc> {
     text.lines()
         .filter_map(|line| {
@@ -123,7 +147,7 @@ fn parse_ps(text: &str) -> HashMap<u32, Proc> {
             let rss = fields.next()?.parse::<u64>().ok()? * 1024;
             // 有的语言环境里小数点是逗号。
             let cpu = fields.next()?.replace(',', ".").parse().ok()?;
-            Some((pid, Proc { ppid, rss, cpu }))
+            Some((pid, Proc { ppid, memory: rss, cpu }))
         })
         .collect()
 }
@@ -184,14 +208,20 @@ mod tests {
         let procs =
             parse_ps("    1     0  12000   0.0\n  200     1   2048  12,5\nbogus line\n  300   200   1024   1.5\n");
         assert_eq!(procs.len(), 3);
-        assert_eq!(procs[&200], Proc { ppid: 1, rss: 2048 * 1024, cpu: 12.5 });
+        assert_eq!(procs[&200], Proc { ppid: 1, memory: 2048 * 1024, cpu: 12.5 });
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn own_footprint_is_readable() {
+        assert!(phys_footprint(std::process::id()).is_some_and(|bytes| bytes > 0));
     }
 
     #[test]
     fn trees_sum_descendants_and_owners_walk_up() {
         let procs = Procs::new(parse_ps("1 0 1 0\n10 1 100 1.0\n11 10 10 2.0\n12 11 1 3.0\n20 1 7 0\n"));
-        assert_eq!(procs.tree(10), Usage { cpu: 6.0, rss: 111 * 1024 });
-        assert_eq!(procs.one(10), Usage { cpu: 1.0, rss: 100 * 1024 });
+        assert_eq!(procs.tree(10), Usage { cpu: 6.0, memory: 111 * 1024 });
+        assert_eq!(procs.one(10), Usage { cpu: 1.0, memory: 100 * 1024 });
         assert_eq!(procs.owner(12, |pid| pid == 10), Some(10));
         assert_eq!(procs.owner(10, |pid| pid == 10), Some(10));
         assert_eq!(procs.owner(20, |pid| pid == 10), None);
