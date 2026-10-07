@@ -7,10 +7,10 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		A10000000000000000000026 /* runode.icon in Resources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000025 /* runode.icon */; };
 		A1000000000000000000001D /* RunodeFeatures in Frameworks */ = {isa = PBXBuildFile; productRef = A1000000000000000000001C /* RunodeFeatures */; };
 		A1000000000000000000001F /* RunodeConnection in Frameworks */ = {isa = PBXBuildFile; productRef = A1000000000000000000001E /* RunodeConnection */; };
 		A10000000000000000000021 /* RunodeProtocol in Frameworks */ = {isa = PBXBuildFile; productRef = A10000000000000000000020 /* RunodeProtocol */; };
+		A10000000000000000000026 /* runode.icon in Resources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000025 /* runode.icon */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -27,8 +27,8 @@
 		A10000000000000000000006 /* Runode.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Runode.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		A10000000000000000000007 /* RunodeTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = RunodeTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		A10000000000000000000022 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
-		A10000000000000000000025 /* runode.icon */ = {isa = PBXFileReference; lastKnownFileType = folder.iconcomposer.icon; name = runode.icon; path = ../desktop/assets/runode.icon; sourceTree = "<group>"; };
 		A10000000000000000000024 /* RunodeKit */ = {isa = PBXFileReference; lastKnownFileType = wrapper; path = RunodeKit; sourceTree = "<group>"; };
+		A10000000000000000000025 /* runode.icon */ = {isa = PBXFileReference; lastKnownFileType = folder.iconcomposer.icon; name = runode.icon; path = ../desktop/assets/runode.icon; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
