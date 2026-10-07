@@ -1,10 +1,10 @@
-//! 新建 workspace 的对话框：填名字、选目录，确定后在当前 workspace 下面建一个。名字空着时按目录取名。
+//! 新建 workspace 的对话框：选目录、填名字，确定后在当前 workspace 下面建一个。名字空着时按目录取名。
 
 use std::path::PathBuf;
 
 use gpui::{
-    Context, Div, Entity, Focusable, Hsla, MouseButton, PathPromptOptions, SharedString, Stateful, Subscription,
-    Window, div, prelude::*, px,
+    Context, Div, Entity, Focusable, FontWeight, Hsla, MouseButton, PathPromptOptions, SharedString, Stateful,
+    Subscription, Window, div, prelude::*, px,
 };
 use runode_shared_types::color::Rgb;
 
@@ -31,7 +31,9 @@ impl WindowView {
             window.focus(&dialog.name.focus_handle(cx), cx);
             return;
         }
-        let name = cx.new(|cx| TextField::editing(String::new(), 0, cx));
+        let name = cx.new(|cx| {
+            TextField::editing(String::new(), 0, cx).with_placeholder(rust_i18n::t!("workspace.name_hint").into_owned())
+        });
         // 名字框原本是搜索框：回车是「下一个」，Esc 是「关闭搜索」，在这里分别是创建和取消。
         let events = cx.subscribe_in(&name, window, |this, _, event: &TextFieldEvent, window, cx| match event {
             TextFieldEvent::Next => this.confirm_new_workspace(window, cx),
@@ -108,23 +110,39 @@ impl WindowView {
                 .gap(px(8.))
                 .child(div().w(px(48.)).flex_none().text_color(fg.opacity(0.6)).child(label))
         };
-        let name = div()
-            .flex_1()
-            .min_w_0()
-            .h(px(24.))
-            .px(px(6.))
-            .flex()
-            .items_center()
-            .rounded(px(4.))
-            .bg(hsla(bg))
-            .border_1()
-            .border_color(fg.opacity(0.3))
-            .child(dialog.name.clone());
-        let dir = match &dialog.dir {
-            Some(dir) => div().text_color(fg).child(display_dir(dir)),
-            None => div().text_color(fg.opacity(0.45)).child(rust_i18n::t!("workspace.no_dir").into_owned()),
+        // 名字框和目录框同一个样子，两行左右对齐。
+        let field = || {
+            div()
+                .flex_1()
+                .min_w_0()
+                .h(px(26.))
+                .px(px(8.))
+                .flex()
+                .items_center()
+                .rounded(px(5.))
+                .bg(hsla(bg))
+                .border_1()
+                .border_color(fg.opacity(0.2))
         };
-        let choose = button("new-workspace-choose", rust_i18n::t!("workspace.choose_dir").into_owned(), fg, hover_bg)
+        let name = field().child(dialog.name.clone());
+        // 目录整格可点，点了弹系统的目录选择框；选好后照样可以点着换一个。
+        let (dir_text, dir_color) = match &dialog.dir {
+            Some(dir) => (display_dir(dir), fg),
+            None => (rust_i18n::t!("workspace.no_dir").into_owned(), fg.opacity(0.45)),
+        };
+        let dir = field()
+            .id("new-workspace-dir")
+            .cursor_pointer()
+            .hover(move |field| field.bg(hover_bg))
+            .child(
+                div()
+                    .min_w_0()
+                    .overflow_hidden()
+                    .whitespace_nowrap()
+                    .text_ellipsis_start()
+                    .text_color(dir_color)
+                    .child(dir_text),
+            )
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(|this, _, window, cx| {
@@ -154,10 +172,10 @@ impl WindowView {
             .id("new-workspace-dialog")
             .w(px(420.))
             .max_w_full()
-            .p(px(14.))
+            .p(px(16.))
             .flex()
             .flex_col()
-            .gap(px(12.))
+            .gap(px(10.))
             .rounded(px(8.))
             .bg(panel_bg)
             .border_1()
@@ -167,16 +185,17 @@ impl WindowView {
             .text_color(fg)
             // 点在对话框里不算点到外面。
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-            .child(rust_i18n::t!("workspace.new").into_owned())
-            .child(row(rust_i18n::t!("workspace.name").into_owned().into()).child(name))
             .child(
-                row(rust_i18n::t!("workspace.dir").into_owned().into())
-                    .child(
-                        div().flex_1().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis_start().child(dir),
-                    )
-                    .child(choose),
+                div()
+                    .pb(px(4.))
+                    .text_size(px(13.))
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .child(rust_i18n::t!("workspace.new").into_owned()),
             )
-            .child(div().flex().justify_end().gap(px(8.)).child(cancel).child(create));
+            // 目录必填、名字默认取自目录，所以目录在前。
+            .child(row(rust_i18n::t!("workspace.dir").into_owned().into()).child(dir))
+            .child(row(rust_i18n::t!("workspace.name").into_owned().into()).child(name))
+            .child(div().pt(px(6.)).flex().justify_end().gap(px(8.)).child(cancel).child(create));
         // 铺满窗口的底子挡住下面的点击，点到对话框外面就取消。
         Some(
             div()

@@ -103,8 +103,8 @@ workspace:
   close_cancel: 取消
   name: 名稱
   dir: 目錄
-  choose_dir: 選擇…
-  no_dir: 還沒選目錄
+  no_dir: 選擇目錄…
+  name_hint: 留空則用目錄名稱
   create: 建立
   cancel: 取消
   empty: 這個工作區裡還沒有終端機

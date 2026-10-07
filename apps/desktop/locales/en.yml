@@ -103,8 +103,8 @@ workspace:
   close_cancel: Cancel
   name: Name
   dir: Folder
-  choose_dir: Choose…
-  no_dir: No folder chosen
+  no_dir: Choose a folder…
+  name_hint: Defaults to the folder name
   create: Create
   cancel: Cancel
   empty: No terminals in this workspace

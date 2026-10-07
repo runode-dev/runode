@@ -103,8 +103,8 @@ workspace:
   close_cancel: 取消
   name: 名称
   dir: 目录
-  choose_dir: 选择…
-  no_dir: 还没选目录
+  no_dir: 选择目录…
+  name_hint: 留空则用目录名
   create: 创建
   cancel: 取消
   empty: 这个工作区里还没有终端
