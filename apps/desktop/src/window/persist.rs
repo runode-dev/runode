@@ -283,8 +283,8 @@ impl WindowView {
     }
 
     /// 按存档建出 workspace、标签和分屏：记着的会话接得上（`format::plan_restore` 留下了）就
-    /// 接上，否则在记下的目录里开一个终端。开不起来的终端跳过，一个终端都没有的标签和
-    /// workspace 也跳过。新开的终端先不启动 shell，切到所在标签时由 `activate` 启动，所以启动
+    /// 接上，否则在记下的目录里开一个终端。开不起来的终端跳过，一个终端都没有的标签也跳过；
+    /// workspace 没有标签也留着，和关掉最后一个标签时一样。新开的终端先不启动 shell，切到所在标签时由 `activate` 启动，所以启动
     /// 时只有窗口里显示的那个标签占进程。`shell` 是启动时在家目录提前拉起的 shell，交给显示的
     /// 标签里从家目录开始的新终端；没用上时还回去，由调用方处理。
     pub(super) fn restore_workspaces(
@@ -330,9 +330,6 @@ impl WindowView {
                     bell: false,
                     done: Default::default(),
                 });
-            }
-            if tabs.is_empty() {
-                continue;
             }
             let name = Some(saved_workspace.name)
                 .filter(|name| !name.trim().is_empty())

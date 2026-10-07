@@ -7,7 +7,7 @@
 //! agent 的状态标记、提醒和跳转（`agents`，系统通知和提示音在 `agents::alert`）、列出所有 agent
 //! 的浮层（`agent_picker`）、标签里的分屏（`panes`）、标题栏和标签（`titlebar`）、侧栏（`sidebar`）、
 //! 右侧的预览栏、Git 面板和文件树（`project`、`preview`、`git_panel`、`files`），侧栏和文件树共用的
-//! 就地输入框（`inline_edit`），开窗口（`open`），存档（`persist`，存档文件的格式在
+//! 就地输入框（`inline_edit`），新建 workspace 的对话框（`new_workspace`），开窗口（`open`），存档（`persist`，存档文件的格式在
 //! `persist::format`），侧栏里没在窗口里显示的后台会话（`background`），退出和关窗口时会话怎么办
 //! （`quit`），以及别的进程经宿主请 app 开终端、切到某个终端、问各个终端摆在哪（`remote`、
 //! `layout_report`），一次在当前分屏旁开几个分屏（`arrange`），以及卡片样式下标题栏左边的这台
@@ -28,6 +28,7 @@ mod inline_edit;
 mod layout_report;
 mod machine;
 mod model;
+mod new_workspace;
 mod open;
 mod panes;
 mod persist;
@@ -89,7 +90,7 @@ actions!(
         FocusPreviousPane,
         EqualizePanes,
         TogglePaneZoom,
-        /// 选一个目录，在里面新建 workspace；已经有这个目录的 workspace 时切过去。
+        /// 填名字、选目录，在里面新建 workspace；已经有这个目录的 workspace 时切过去（填了名字就改成它）。
         NewWorkspace,
         /// 关掉当前 workspace，里面的终端都随之结束。
         CloseWorkspace,
@@ -266,6 +267,10 @@ pub struct WindowView {
     file_edit: Option<files::FileEdit>,
     file_clipboard: Option<files::FileClipboard>,
     renaming: Option<Renaming>,
+    /// 新建 workspace 的对话框。
+    new_workspace: Option<new_workspace::NewWorkspaceDialog>,
+    /// 当前 workspace 里没有标签时窗口的焦点，快捷键（新开标签等）照常派发得到。
+    empty_focus: FocusHandle,
     /// 开着的 agent 列表。
     agent_picker: Option<agent_picker::AgentPicker>,
     /// 开着的排列分屏浮层。
@@ -373,6 +378,8 @@ impl WindowView {
             file_edit: None,
             file_clipboard: None,
             renaming: None,
+            new_workspace: None,
+            empty_focus: cx.focus_handle(),
             agent_picker: None,
             arrange_picker: None,
             driver_redraw: None,
@@ -405,7 +412,7 @@ impl WindowView {
         this
     }
 
-    /// 按存档恢复的窗口；一个终端都没恢复出来时和新窗口一样。
+    /// 按存档恢复的窗口；一个 workspace 都没恢复出来时和新窗口一样。
     pub fn restore(saved: SavedWindow, shell: Option<Prespawned>, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let mut this = Self::empty(window, cx);
         let shell = this.restore_workspaces(saved, shell, window, cx);
@@ -424,19 +431,44 @@ impl WindowView {
         .unwrap_or_else(|err| panic!("failed to start terminal session: {err:#}"));
         self.record_spawn(&view, None);
         let dir = view.read(cx).cwd().or_else(home_dir).unwrap_or_else(|| PathBuf::from("/"));
-        self.insert_workspace(self.workspaces.len(), dir, view, window, cx);
+        self.insert_workspace(self.workspaces.len(), dir, None, view, window, cx);
+    }
+}
+
+impl WindowView {
+    /// 窗口跟着走的前景色和背景色：有焦点的终端当前的配色，没有终端时按配置。
+    fn colors(&self, cx: &mut App) -> (Rgb, Rgb) {
+        match self.focused_view() {
+            Some(view) => view.update(cx, |view, _| view.colors()),
+            None => {
+                let config = &cx.global::<AppConfig>().0;
+                (config.foreground, config.background)
+            }
+        }
+    }
+
+    /// Git 面板和预览栏里代码用的字体，跟着终端；没有终端时取配置里的第一个。
+    fn font_family(&self, cx: &App) -> SharedString {
+        match self.focused_view() {
+            Some(view) => view.read(cx).font_family(),
+            None => cx.global::<AppConfig>().0.font_family.first().cloned().unwrap_or_default().into(),
+        }
     }
 }
 
 impl Focusable for WindowView {
+    /// 有焦点的终端；当前 workspace 里没有终端时是窗口自己的。
     fn focus_handle(&self, cx: &App) -> FocusHandle {
-        self.tab().focused_view().focus_handle(cx)
+        match self.focused_view() {
+            Some(view) => view.focus_handle(cx),
+            None => self.empty_focus.clone(),
+        }
     }
 }
 
 impl Render for WindowView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let (fg, bg) = self.tab().focused_view().update(cx, |view, _| view.colors());
+        let (fg, bg) = self.colors(cx);
         let (base, body) = if cards(cx) {
             (frame_color(fg, bg), self.render_cards_body(fg, bg, window, cx))
         } else {
@@ -447,6 +479,7 @@ impl Render for WindowView {
         let agent_picker = self.render_agent_picker(fg, bg, window, cx);
         let arrange_picker = self.render_arrange_picker(fg, bg, cx);
         let branch_picker = self.render_branch_picker(fg, bg, cx);
+        let new_workspace = self.render_new_workspace(fg, bg, cx);
         div()
             .id("window")
             .key_context("Window")
@@ -490,6 +523,7 @@ impl Render for WindowView {
             .children(agent_picker)
             .children(arrange_picker)
             .children(branch_picker)
+            .children(new_workspace)
     }
 }
 
@@ -502,7 +536,6 @@ impl WindowView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Vec<AnyElement> {
-        let view = self.tab().focused_view().clone();
         let fullscreen = window.is_fullscreen();
         let tab_count = self.workspace().tabs.len();
         let show_tabs = tab_count > 1;
@@ -515,7 +548,7 @@ impl WindowView {
         let sidebar_width = if sidebar.is_some() { self.sidebar_width() } else { 0. };
         let sidebar_handle = sidebar.is_some().then(|| self.render_sidebar_handle(cx));
         let widths = self.right_panel_widths(f32::from(window.viewport_size().width));
-        let font = view.read(cx).font_family();
+        let font = self.font_family(cx);
         let preview_shown = self.preview_shown();
         let preview = self.render_preview_panel(widths.preview, !self.files_shown && !self.git_shown, fg, bg, font, cx);
         let git = self.git_shown.then(|| self.render_git_panel(widths.git, !self.files_shown, fg, bg, window, cx));
@@ -565,9 +598,12 @@ impl WindowView {
             vec![strip, self.render_new_tab_button(fg, bg, cx), spacer, inset]
         } else {
             // 只有一个标签时标题居中画在侧栏和右侧面板之间；两头让出的宽度取大的那个，
-            // 没有侧栏和右侧面板时标题在整个窗口里居中。
-            let view = view.read(cx);
-            let title = SharedString::from(view.title().to_owned());
+            // 没有侧栏和右侧面板时标题在整个窗口里居中。没有标签时标题是 workspace 的名字。
+            let title = match self.focused_view() {
+                Some(view) => SharedString::from(view.read(cx).title().to_owned()),
+                None => self.workspace().name.clone(),
+            };
+            let mark = self.tab().and_then(|tab| tab.mark(cx));
             let fg = hsla(fg);
             let inset = left_inset.max(right_inset);
             vec![
@@ -580,7 +616,7 @@ impl WindowView {
                     .pr(px(inset))
                     .flex()
                     .text_color(fg.opacity(0.55))
-                    .child(titled(title, self.tab().mark(cx), "window-agent", fg).flex_1()),
+                    .child(titled(title, mark, "window-agent", fg).flex_1()),
             ]
         };
         let titlebar = titlebar_shown.then(|| {
@@ -634,7 +670,7 @@ impl WindowView {
         let sidebar_width = if sidebar.is_some() { self.sidebar_width() } else { 0. };
         let sidebar_handle = sidebar.is_some().then(|| self.render_sidebar_handle(cx));
         let widths = self.right_panel_widths(viewport);
-        let font = self.tab().focused_view().read(cx).font_family();
+        let font = self.font_family(cx);
         let preview = self.render_preview_panel(widths.preview, false, fg, bg, font, cx);
         let git = self.git_shown.then(|| self.render_git_panel(widths.git, false, fg, bg, window, cx));
         let files = self.files_shown.then(|| self.render_files_panel(widths.files, fg, bg, cx));
@@ -659,7 +695,7 @@ impl WindowView {
             + NEW_TAB_BUTTON_WIDTH
             + project::PANEL_TOGGLES_INSET
             + widths.total();
-        let tab_width = px(((viewport - fixed) / tab_count as f32).max(TAB_MIN_WIDTH));
+        let tab_width = px(((viewport - fixed) / tab_count.max(1) as f32).max(TAB_MIN_WIDTH));
         let track_bg = hsla(tab_track_colors(fg, bg).0);
         let strip = div()
             .id("tabs")

@@ -160,7 +160,7 @@ impl WindowView {
         let focused = picker.field.focus_handle(cx).is_focused(window);
         drop(picker);
         if focused {
-            window.focus(&self.tab().focused_view().focus_handle(cx), cx);
+            window.focus(&self.focus_handle(cx), cx);
         }
         cx.notify();
     }

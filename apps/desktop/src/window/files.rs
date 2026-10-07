@@ -594,7 +594,7 @@ impl WindowView {
             cx.notify();
             return;
         }
-        window.focus(&self.tab().focused_view().focus_handle(cx), cx);
+        window.focus(&self.focus_handle(cx), cx);
     }
 
     /// 把从文件树或访达拖来的 `paths` 放到终端 `pane` 上：切到那个终端，把路径一个个打进去。
@@ -615,7 +615,9 @@ impl WindowView {
     /// 把 `path` 打进当前终端，在它的目录下时写相对路径，后面带上行号 `line` 和一个空格，
     /// 再把焦点交回终端。图片写绝对路径：Claude Code 只把绝对路径认成图片附件。
     pub(super) fn insert_path(&mut self, path: &Path, line: Option<u32>, window: &mut Window, cx: &mut Context<Self>) {
-        let view = self.tab().focused_view().clone();
+        let Some(view) = self.focused_view().cloned() else {
+            return;
+        };
         let cwd = view.read(cx).cwd();
         let text = if line.is_none() && is_image(path) {
             let absolute = match &cwd {

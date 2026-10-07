@@ -101,6 +101,13 @@ workspace:
   close_detail: 裡面的 %{count} 個終端機會一起關閉。
   close_confirm: 關閉
   close_cancel: 取消
+  name: 名稱
+  dir: 目錄
+  choose_dir: 選擇…
+  no_dir: 還沒選目錄
+  create: 建立
+  cancel: 取消
+  empty: 這個工作區裡還沒有終端機
 close:
   pane_title: 關閉這個終端機？
   tab_title: 關閉這個分頁？

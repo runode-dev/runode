@@ -41,7 +41,7 @@ public enum ClientKind: String, Hashable, Sendable, Encodable {
 }
 
 /// 前端发给宿主的消息。只列出手机这个前端会发的几种：`Hello`、`ListSessions`、`Layout`、`Open`、
-/// `OpenWorkspace`、`ListDirs`、`Spawn`、`Attach`、`Detach`、`Resize`、`Focus`、`Kill`、
+/// `OpenWorkspace`、`RenameWorkspace`、`ListDirs`、`Spawn`、`Attach`、`Detach`、`Resize`、`Focus`、`Kill`、
 /// `ReadScreen`、`SendKeys`、`Paste`、`Git`。JSON 的样子和
 /// 宿主的 `ClientMsg` 一致，可缺省的字段也照宿主序列化的样子写出 `null`。宿主对手机连接上的 `Shutdown`、
 /// 交接（`Handoff` 等）、`UiReply`、`SetOptions`、`SetTheme` 只回 `Error`，这里故意不定义它们，手机就
@@ -57,8 +57,12 @@ public enum ClientMsg: Hashable, Sendable, Encodable {
     /// `focus` 为假时不切过去。
     case open(req: UInt32, placement: Placement, near: SessionId?, cwd: String?, focus: Bool)
     /// 请电脑上的 app 在最前面那个窗口里新建一个目录是 `dir`（绝对路径）的工作区，回 `Opened`，带着它的
-    /// 第一个终端；已经有这个目录的工作区时回那个工作区当前的终端。`focus` 为假时电脑上不切过去。
-    case openWorkspace(req: UInt32, dir: String, focus: Bool)
+    /// 第一个终端；已经有这个目录的工作区时在它里面新开一个标签，回这个新终端。`focus` 为假时电脑上不切
+    /// 过去。`name` 是新工作区在侧栏里的名字，为空时按目录取；已经有这个目录的工作区时不改它的名字。
+    case openWorkspace(req: UInt32, dir: String, focus: Bool, name: String? = nil)
+    /// 把第 `window` 个窗口里的第 `workspace` 个工作区改名为 `name`，序号见 `WindowLayout`、
+    /// `WorkspaceLayout`。宿主转给桌面的界面，办好回 `Done`，办不成回带编号的 `Error`。
+    case renameWorkspace(req: UInt32, window: UInt32, workspace: UInt32, name: String)
     /// 列电脑上一个目录（绝对路径）里的子目录，为空时是家目录，宿主回 `Dirs`，出错时回 `Error`。
     case listDirs(req: UInt32, path: String?)
     /// 列电脑上一个目录（绝对路径）里能跑的项目命令（Makefile 的目标、package.json 的 scripts），宿主回
@@ -119,11 +123,18 @@ public enum ClientMsg: Hashable, Sendable, Encodable {
             try c.encode(near, forKey: Key("near"))
             try c.encode(cwd, forKey: Key("cwd"))
             try c.encode(focus, forKey: Key("focus"))
-        case let .openWorkspace(req, dir, focus):
+        case let .openWorkspace(req, dir, focus, name):
             try c.encode("open_workspace", forKey: Key("type"))
             try c.encode(req, forKey: Key("req"))
             try c.encode(dir, forKey: Key("dir"))
             try c.encode(focus, forKey: Key("focus"))
+            try c.encode(name, forKey: Key("name"))
+        case let .renameWorkspace(req, window, workspace, name):
+            try c.encode("rename_workspace", forKey: Key("type"))
+            try c.encode(req, forKey: Key("req"))
+            try c.encode(window, forKey: Key("window"))
+            try c.encode(workspace, forKey: Key("workspace"))
+            try c.encode(name, forKey: Key("name"))
         case let .listDirs(req, path):
             try c.encode("list_dirs", forKey: Key("type"))
             try c.encode(req, forKey: Key("req"))

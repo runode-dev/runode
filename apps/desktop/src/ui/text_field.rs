@@ -161,6 +161,12 @@ impl TextField {
         self
     }
 
+    /// 换掉空着时画的提示。
+    pub fn set_placeholder(&mut self, text: impl Into<SharedString>, cx: &mut Context<Self>) {
+        self.placeholder = Some(text.into());
+        cx.notify();
+    }
+
     pub fn query(&self) -> &str {
         &self.query
     }

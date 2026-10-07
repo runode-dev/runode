@@ -5,7 +5,7 @@ import RunodeProtocol
 
 /// 新建工作区时在手机上一级级浏览电脑上的目录：每进一个目录发一次 `ListDirs`，宿主回 `Dirs`，出错时回
 /// 带着请求编号的 `Error`。只认最后一次请求的回话，点得快时前面的回话丢掉。选好以后由
-/// `SessionListModel.createWorkspace(at:)` 去建。
+/// `SessionListModel.createWorkspace(at:name:)` 去建。
 @Observable
 @MainActor
 public final class DirectoryPickerModel {

@@ -88,6 +88,7 @@ pub struct JumpToPrompt(pub isize);
 #[action(namespace = runode, no_json)]
 pub struct WriteScreenFile(pub ScreenFile);
 
+pub(crate) use lifecycle::PROVISIONAL_SIZE;
 /// 写好的文件怎么处理：复制路径（`CopyPath`）、把路径粘贴进终端（`PastePath`）或者用系统默认
 /// 程序打开（`Open`）。和快捷键配置里解析出来的是同一个类型，不用再转换。
 pub use runode_config::keybind::ScreenFile;

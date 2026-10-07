@@ -266,7 +266,9 @@ impl WindowView {
         if !window.is_window_active() {
             return;
         }
-        let tab = self.tab_mut();
+        let Some(tab) = self.tab_mut() else {
+            return;
+        };
         let pane = tab.focused;
         if tab.done.remove(&pane) {
             cx.notify();
@@ -341,8 +343,9 @@ impl WindowView {
             return;
         }
         let own = window.window_handle();
-        let focused = self.tab().focused;
-        let at = entries.iter().position(|entry| entry.window.window_id() == own.window_id() && entry.pane == focused);
+        let focused = self.tab().map(|tab| tab.focused);
+        let at =
+            entries.iter().position(|entry| entry.window.window_id() == own.window_id() && Some(entry.pane) == focused);
         let next = &entries[at.map_or(0, |at| (at + 1) % entries.len())];
         reveal(next.window, next.pane, cx);
     }

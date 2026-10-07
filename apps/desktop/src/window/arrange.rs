@@ -127,7 +127,7 @@ impl WindowView {
     /// 关掉排列浮层，焦点还给当前终端。
     fn close_arrange_picker(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.arrange_picker.take().is_some() {
-            window.focus(&self.tab().focused_view().focus_handle(cx), cx);
+            window.focus(&self.focus_handle(cx), cx);
             cx.notify();
         }
     }
@@ -179,7 +179,9 @@ impl WindowView {
     /// 在当前分屏旁边按 `arrangement` 开 `count` 个新终端，都在当前终端的目录里；焦点不动。
     /// 有终端起不来时开出几个算几个。
     fn arrange(&mut self, arrangement: Arrangement, count: usize, window: &mut Window, cx: &mut Context<Self>) {
-        let original = self.tab().focused;
+        let Some(original) = self.tab().map(|tab| tab.focused) else {
+            return;
+        };
         let mut entries = Vec::new();
         for _ in 0..count {
             let Some(view) = self.spawn_beside_focused(window, cx) else {
@@ -193,12 +195,14 @@ impl WindowView {
         let steps = plan(arrangement, entries.len());
         let new: Vec<_> = entries.iter().map(|(id, _)| *id).collect();
         let split_ids: Vec<_> = steps.iter().map(|_| self.next_id()).collect();
-        let tab = self.tab_mut();
+        let Some(tab) = self.tab_mut() else {
+            return;
+        };
         apply(&mut tab.root, original, &new, &split_ids, &steps);
         tab.panes.extend(entries);
         // 放大着时别的分屏都看不见，新开的也看不见。
         tab.zoomed = false;
-        window.focus(&self.tab().focused_view().focus_handle(cx), cx);
+        window.focus(&self.focus_handle(cx), cx);
         self.save(cx);
         cx.notify();
     }

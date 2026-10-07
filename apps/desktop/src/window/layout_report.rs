@@ -9,7 +9,7 @@
 
 use std::{collections::HashMap, path::Path};
 
-use gpui::{App, EntityId, Global};
+use gpui::{App, EntityId, Global, WindowHandle};
 use runode_protocol::{PaneLayout, PaneRect, SessionId, TabLayout, WindowLayout, WorkspaceLayout};
 use runode_shared_types::pane::{Node, Rect};
 
@@ -120,6 +120,21 @@ pub(super) fn track_windows(cx: &mut App) {
         .detach();
     })
     .detach();
+}
+
+/// 布局里第 `index` 个窗口，序号和 `current` 编的一样，从 1 数。
+pub(super) fn window_at(index: u32, cx: &mut App) -> Option<WindowHandle<WindowView>> {
+    let mut windows = Vec::new();
+    for handle in super::remote::windows(cx) {
+        if let Ok(id) = handle.update(cx, |_, _, cx| cx.entity_id()) {
+            windows.push((id, handle));
+        }
+    }
+    let order = cx.try_global::<OpenOrder>();
+    let opened = |id: EntityId| order.and_then(|order| order.opened.get(&id).copied()).unwrap_or(u64::MAX);
+    windows.sort_by_key(|(id, _)| opened(*id));
+    let ix = usize::try_from(index.checked_sub(1)?).ok()?;
+    windows.into_iter().nth(ix).map(|(_, handle)| handle)
 }
 
 /// app 里所有窗口现在的布局。

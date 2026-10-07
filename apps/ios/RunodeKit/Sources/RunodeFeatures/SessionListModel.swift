@@ -37,7 +37,7 @@ public struct SessionSection: Hashable, Sendable, Identifiable {
     public var dir: String?
     /// 开着不止一个窗口时，工作区在第几个窗口。
     public var window: UInt32?
-    /// 工作区里按标签、分屏的先后；后台那一节按宿主给的先后。
+    /// 工作区里按标签、分屏的先后，一个标签都没有的工作区为空；后台那一节按宿主给的先后。
     public var sessions: [SessionInfo]
     /// 在这个工作区里新开终端时挨着的会话，见 `WorkspaceLayout.anchor`；后台那一节为空。
     public var anchor: SessionId?
@@ -87,7 +87,7 @@ struct PreviewThrottle {
 /// 一台电脑的会话列表：连上后 `ListSessions`，给每个会话发只看状态（`MetaOnly`）的 `Attach` 收实时的
 /// 标题、目录和 agent 状态；用 `Layout` 问电脑上的 app 各个会话在哪个工作区，按工作区分节；用
 /// `ReadScreen` 读屏幕底部几行做预览；等回答的会话能直接快速回复（`SendKeys`、`Paste`，不用连上会话）；
-/// 能在某个工作区里新开终端、新建工作区（`DirectoryPickerModel` 选目录）、结束会话。
+/// 能在某个工作区里新开终端、新建工作区（`DirectoryPickerModel` 选目录）、给工作区改名、结束会话。
 ///
 /// 一条连接上一个会话只能有一个订阅，后来的 `Attach` 换掉先前的。所以终端页开着的会话（`screens`）
 /// 列表不再给它发只看状态的 `Attach`，终端页关掉时再改回只看状态。
@@ -140,6 +140,8 @@ public final class SessionListModel {
     @ObservationIgnored private var screens: Set<SessionId> = []
     /// 在等回话的新开终端、新建工作区的请求。
     @ObservationIgnored private var pendingSpawn: PendingSpawn?
+    /// 在等回话的工作区改名的请求编号。
+    @ObservationIgnored private var pendingRenames: Set<UInt32> = []
     /// 对连接的开、停按调用的先后做：后台、前台来回切得快时不会先开后停。
     @ObservationIgnored private var linkControl: Task<Void, Never>?
     @ObservationIgnored private var throttle: PreviewThrottle
@@ -189,7 +191,8 @@ public final class SessionListModel {
     }
 
     /// 按电脑上的工作区分好节的会话：窗口按序号，工作区按侧栏里的先后，最后是不在任何窗口里的会话。
-    /// 没有已知会话的工作区不出现（刚开的会话列表里还没有时，等下一次列表）。
+    /// 一个标签都没有的工作区也出一节（`sessions` 为空），电脑上关掉最后一个标签后工作区还在；有标签
+    /// 但其中没有已知会话的工作区不出现（刚开的会话列表里还没有时，等下一次列表，免得闪一下空节）。
     public var sections: [SessionSection] {
         let byId = Dictionary(sessions.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         var placed: Set<SessionId> = []
@@ -202,7 +205,7 @@ public final class SessionListModel {
                     placed.insert(id)
                     return session
                 }
-                guard !members.isEmpty else { continue }
+                guard !members.isEmpty || workspace.tabs.isEmpty else { continue }
                 sections.append(
                     SessionSection(
                         id: .workspace(window: window.index, index: workspace.index), name: workspace.name,
@@ -305,21 +308,52 @@ public final class SessionListModel {
     }
 
     /// 在电脑上的 app 里新建目录是 `dir` 的工作区（`OpenWorkspace`），开好后调 `onSpawned` 打开它的
-    /// 第一个终端。电脑上不切过去，不打断用户手上的事。app 没开着窗口时没有工作区可建，在 `dir` 里开一个
-    /// 只在后台跑的会话（`Spawn`）。开着窗口时建不成就提示，不退回 `Spawn`：多半是目录有问题，后台会话
-    /// 也开不成。
-    public func createWorkspace(at dir: String) async {
+    /// 第一个终端。`name` 是工作区的名字，去掉首尾空白后为空时按目录取。电脑上不切过去，不打断用户手上
+    /// 的事。app 没开着窗口时没有工作区可建，在 `dir` 里开一个只在后台跑的会话（`Spawn`），名字用不上。
+    /// 开着窗口时建不成就提示，不退回 `Spawn`：多半是目录有问题，后台会话也开不成。
+    public func createWorkspace(at dir: String, name: String? = nil) async {
         directoryPicker = nil
         guard connected, !isSpawning else { return }
         isSpawning = true
         let req = await link.nextRequestId()
         if hasDesktopWindow {
+            let name = name?.trimmingCharacters(in: .whitespacesAndNewlines)
             pendingSpawn = PendingSpawn(req: req, fallback: nil, failure: "建不了工作区")
-            link.send(.openWorkspace(req: req, dir: dir, focus: false))
+            link.send(.openWorkspace(req: req, dir: dir, focus: false, name: name?.isEmpty == false ? name : nil))
         } else {
             pendingSpawn = PendingSpawn(req: req, fallback: nil, failure: "开不了新终端")
             link.send(.spawn(req: req, size: spawnSize, cwd: dir, integration: .detect, start: true))
         }
+    }
+
+    /// 在工作区这一节里新开终端：挨着它的 `anchor` 开新标签（`spawn(near:)`）。一个标签都没有的工作区
+    /// 没有 `anchor`，对它的目录发 `OpenWorkspace`：电脑上的 app 对已有这个目录的工作区在它里面新开标签。
+    public func spawn(in section: SessionSection) async {
+        if let anchor = section.anchor {
+            await spawn(near: anchor)
+            return
+        }
+        guard case .workspace = section.id, let dir = section.dir, connected, !isSpawning else { return }
+        isSpawning = true
+        let req = await link.nextRequestId()
+        pendingSpawn = PendingSpawn(req: req, fallback: nil, failure: "开不了新终端")
+        link.send(.openWorkspace(req: req, dir: dir, focus: false))
+    }
+
+    /// 能在这一节里新开终端：有 `anchor`，或者是知道目录的空工作区。
+    public func canSpawn(in section: SessionSection) -> Bool {
+        guard case .workspace = section.id else { return false }
+        return section.anchor != nil || section.dir != nil
+    }
+
+    /// 把工作区这一节改名为 `name`（`RenameWorkspace`），办好后重新要布局。名字去掉首尾空白后为空时
+    /// 不发；后台那一节不是工作区，没法改名。
+    public func rename(_ section: SessionSection, to name: String) async {
+        let name = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard connected, !name.isEmpty, case .workspace(let window, let index) = section.id else { return }
+        let req = await link.nextRequestId()
+        pendingRenames.insert(req)
+        link.send(.renameWorkspace(req: req, window: window, workspace: index, name: name))
     }
 
     /// 电脑上的 app 开着窗口，能在里面建工作区。
@@ -490,6 +524,7 @@ public final class SessionListModel {
                 pendingProjectTasks = [:]
                 listingDirs = []
                 projectTasksUnsupported = false
+                pendingRenames = []
                 for reply in quickReplies.values {
                     reply.connectionLost()
                 }
@@ -562,6 +597,9 @@ public final class SessionListModel {
             self.windows = windows
         case .projectTasks(let req, _, let sources):
             finishProjectTasks(req, sources: sources)
+        case .done(let req) where pendingRenames.contains(req):
+            pendingRenames.remove(req)
+            refresh()
         case .opened(let req, let id) where req == pendingSpawn?.req,
             .spawned(let req, let id) where req == pendingSpawn?.req:
             let command = pendingSpawn?.command
@@ -589,6 +627,8 @@ public final class SessionListModel {
                     isSpawning = false
                     errorMessage = "\(pending.failure)：\(message)"
                 }
+            } else if let req, pendingRenames.remove(req) != nil {
+                errorMessage = "改不了名：\(message)"
             } else if let req, pendingProjectTasks[req] != nil {
                 finishProjectTasks(req, sources: [])
             } else if req == Self.layoutRequest {
@@ -601,6 +641,10 @@ public final class SessionListModel {
                 pendingSpawn = nil
                 isSpawning = false
                 errorMessage = "\(pending.failure)：电脑上的 runode 版本太旧，先升级它。"
+            } else if req == nil, message == HostMsg.unknownMessage, !pendingRenames.isEmpty {
+                // 电脑上的 runode 太旧，不认识 `RenameWorkspace`。
+                pendingRenames = []
+                errorMessage = "改不了名：电脑上的 runode 版本太旧，先升级它。"
             } else if req == nil, message == HostMsg.unknownMessage, !pendingProjectTasks.isEmpty {
                 // 电脑上的 runode 太旧，不认识 `ListProjectTasks`：不列了，卡片上不出现项目命令。
                 pendingProjectTasks = [:]

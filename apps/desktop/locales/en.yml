@@ -101,6 +101,13 @@ workspace:
   close_detail: Its %{count} terminals will be closed along with it.
   close_confirm: Close
   close_cancel: Cancel
+  name: Name
+  dir: Folder
+  choose_dir: Choose…
+  no_dir: No folder chosen
+  create: Create
+  cancel: Cancel
+  empty: No terminals in this workspace
 close:
   pane_title: Close this terminal?
   tab_title: Close this tab?

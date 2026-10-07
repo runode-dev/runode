@@ -392,7 +392,7 @@ impl WindowView {
         if !self.preview_shown() {
             self.sync_project_watch();
             if self.preview_focus.is_focused(window) {
-                window.focus(&self.tab().focused_view().focus_handle(cx), cx);
+                window.focus(&self.focus_handle(cx), cx);
             }
         } else if self.preview().map(|tab| (tab.path.clone(), tab.diff.clone())) != before {
             self.activate_preview(self.workspace().project.previews.active, cx);

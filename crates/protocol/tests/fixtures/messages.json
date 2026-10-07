@@ -637,6 +637,14 @@
     "open_workspace": {
       "dir": "/Users/ethan/dev/中文",
       "focus": false,
+      "name": null,
+      "req": 8,
+      "type": "open_workspace"
+    },
+    "open_workspace_named": {
+      "dir": "/Users/ethan/dev/中文",
+      "focus": false,
+      "name": "后端",
       "req": 8,
       "type": "open_workspace"
     },
@@ -698,6 +706,13 @@
       "id": "0123456789abcdef0011223344556677",
       "lines": null,
       "type": "read_screen"
+    },
+    "rename_workspace": {
+      "name": "前端",
+      "req": 9,
+      "type": "rename_workspace",
+      "window": 1,
+      "workspace": 2
     },
     "resize": {
       "id": "0123456789abcdef0011223344556677",

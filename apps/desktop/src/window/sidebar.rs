@@ -344,12 +344,27 @@ impl WindowView {
         let name = renaming.edit.text(cx);
         if commit
             && !name.is_empty()
-            && let Some(workspace) = self.workspaces.iter_mut().find(|w| w.id == renaming.id)
+            && let Some(ix) = self.workspaces.iter().position(|w| w.id == renaming.id)
         {
-            workspace.name = name.into();
-            self.save(cx);
+            self.set_workspace_name(ix, name.into(), window, cx);
         }
-        renaming.edit.release_focus(&self.tab().focused_view().focus_handle(cx), window, cx);
+        renaming.edit.release_focus(&self.focus_handle(cx), window, cx);
+        cx.notify();
+    }
+
+    /// 把第 `ix` 个 workspace 改名为 `name`；没有终端时窗口标题用的是它的名字，跟着改。
+    pub(super) fn set_workspace_name(
+        &mut self,
+        ix: usize,
+        name: SharedString,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.workspaces[ix].name = name;
+        if ix == self.active && self.tab().is_none() {
+            window.set_window_title(&self.workspace().name);
+        }
+        self.save(cx);
         cx.notify();
     }
 }

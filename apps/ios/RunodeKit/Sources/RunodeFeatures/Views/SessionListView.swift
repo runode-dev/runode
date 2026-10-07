@@ -5,10 +5,10 @@
     import SwiftUI
     import UIKit
 
-    /// 一台电脑上的会话，按电脑上的 app 里的工作区分节，节头能在那个工作区里新开终端；不在任何窗口里的
-    /// 会话放在最后的「后台」一节。一个会话一张卡片，带 agent 状态和屏幕最后几行的预览，等你回答的带
-    /// 快速回复。点开终端，左滑结束，长按有更多操作（含会话目录里 Makefile、package.json 的命令）。右上角
-    /// 能新开终端、新建工作区。
+    /// 一台电脑上的会话，按电脑上的 app 里的工作区分节，节头能在那个工作区里新开终端，长按能给工作区
+    /// 改名；一个终端都没有的工作区也列出来；不在任何窗口里的会话放在最后的「后台」一节。一个会话一张
+    /// 卡片，带 agent 状态和屏幕最后几行的预览，等你回答的带快速回复。点开终端，左滑结束，长按有更多操作
+    /// （含会话目录里 Makefile、package.json 的命令）。右上角能新开终端、新建工作区。
     struct SessionListView: View {
         @Bindable var model: SessionListModel
         let onOpen: (SessionId) -> Void
@@ -16,6 +16,9 @@
         var onOpenGit: (SessionId) -> Void = { _ in }
         @Environment(\.displayScale) private var displayScale
         @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+        /// 正在改名的工作区和输入框里的名字。
+        @State private var renaming: SessionSection?
+        @State private var renameText = ""
 
         var body: some View {
             List {
@@ -28,8 +31,19 @@
                 }
                 ForEach(model.sections) { section in
                     Section {
-                        WorkspaceHeader(section: section, isSpawning: model.isSpawning) { anchor in
-                            Task { await model.spawn(near: anchor) }
+                        WorkspaceHeader(
+                            section: section, canSpawn: model.canSpawn(in: section), isSpawning: model.isSpawning,
+                            onSpawn: { Task { await model.spawn(in: section) } },
+                            onRename: {
+                                renameText = Presentation.sectionTitle(section)
+                                renaming = section
+                            })
+                        if section.sessions.isEmpty {
+                            Text("没有终端")
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                                .cardBackground()
+                                .plainListRow()
                         }
                         ForEach(section.sessions, id: \.id) { session in
                             row(session, group: SessionGroup.of(session))
@@ -75,8 +89,8 @@
                 if let picker = model.directoryPicker {
                     DirectoryPickerView(
                         picker: picker, hasDesktopWindow: model.hasDesktopWindow, onCancel: model.cancelNewWorkspace
-                    ) { dir in
-                        Task { await model.createWorkspace(at: dir) }
+                    ) { dir, name in
+                        Task { await model.createWorkspace(at: dir, name: name) }
                     }
                 }
             }
@@ -89,6 +103,19 @@
             .onGeometryChange(for: CGSize.self) { $0.size } action: { size in
                 model.spawnSize = TerminalView.gridSize(
                     fitting: size, scale: displayScale, contentSize: UIContentSizeCategory(dynamicTypeSize))
+            }
+            // 按钮里用 `presenting` 带进来的节：对话框关掉时绑定先被清掉，不能再读 `renaming`。
+            .alert(
+                "给工作区改名", isPresented: Binding(get: { renaming != nil }, set: { if !$0 { renaming = nil } }),
+                presenting: renaming
+            ) { section in
+                TextField("名字", text: $renameText)
+                Button("取消", role: .cancel) {}
+                Button("保存") {
+                    let name = renameText
+                    Task { await model.rename(section, to: name) }
+                }
+                .disabled(renameText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
             .alert(
                 "出错了", isPresented: Binding(get: { model.errorMessage != nil }, set: { if !$0 { model.errorMessage = nil } })
@@ -209,11 +236,14 @@
         }
     }
 
-    /// 一节的标题：工作区的名字和目录，右边一个在这个工作区里新开终端的按钮；后台那一节只有标题。
+    /// 一节的标题：工作区的名字和目录，右边一个在这个工作区里新开终端的按钮，长按菜单能新开终端、改名；
+    /// 后台那一节只有标题。
     private struct WorkspaceHeader: View {
         let section: SessionSection
+        let canSpawn: Bool
         let isSpawning: Bool
-        let onSpawn: (SessionId) -> Void
+        let onSpawn: () -> Void
+        let onRename: () -> Void
 
         var body: some View {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
@@ -231,8 +261,8 @@
                     }
                 }
                 Spacer(minLength: 8)
-                if let anchor = section.anchor {
-                    Button("在这里新开终端", systemImage: "plus") { onSpawn(anchor) }
+                if canSpawn {
+                    Button("在这里新开终端", systemImage: "plus", action: onSpawn)
                         .labelStyle(.iconOnly)
                         .font(.body.weight(.semibold))
                         .buttonStyle(.borderless)
@@ -242,6 +272,15 @@
             }
             .padding(.horizontal, 16)
             .padding(.top, 12)
+            .contentShape(Rectangle())
+            .contextMenu {
+                if case .workspace = section.id {
+                    if canSpawn {
+                        Button("在这里新开终端", systemImage: "plus", action: onSpawn).disabled(isSpawning)
+                    }
+                    Button("改名", systemImage: "pencil", action: onRename)
+                }
+            }
             .plainListRow()
         }
     }

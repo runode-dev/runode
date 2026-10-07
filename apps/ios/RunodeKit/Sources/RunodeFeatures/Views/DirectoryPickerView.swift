@@ -3,14 +3,17 @@
     import SwiftUI
 
     /// 新建工作区时选电脑上的目录：从家目录开始，点子目录进去，「上一级」退出来，选好了点「在这里新建」。
-    /// 同一页里换目录，不一层层推进导航栈，退出来也就不用一层层返回。电脑上的 app 没开着窗口时建不了
-    /// 工作区，选好的目录里开的是后台终端，页脚说明这一点。
+    /// 同一页里换目录，不一层层推进导航栈，退出来也就不用一层层返回。能顺手填工作区的名字，空着时按目录
+    /// 取。电脑上的 app 没开着窗口时建不了工作区，选好的目录里开的是后台终端，页脚说明这一点，也不出名字
+    /// 的输入框。
     struct DirectoryPickerView: View {
         @Bindable var picker: DirectoryPickerModel
         let hasDesktopWindow: Bool
         let onCancel: () -> Void
-        let onChoose: (String) -> Void
+        /// 选好的目录和填的名字（可能是空串）。
+        let onChoose: (_ dir: String, _ name: String) -> Void
         @Environment(\.themeColors) private var colors
+        @State private var name = ""
 
         var body: some View {
             NavigationStack {
@@ -30,6 +33,14 @@
                             }
                         }
                         .themedRows()
+                        if hasDesktopWindow {
+                            Section("名字") {
+                                TextField((path as NSString).lastPathComponent, text: $name)
+                                    .autocorrectionDisabled()
+                                    .textInputAutocapitalization(.never)
+                            }
+                            .themedRows()
+                        }
                     }
                     Section {
                         if let parent = picker.parent {
@@ -94,7 +105,7 @@
                     }
                     ToolbarItem(placement: .bottomBar) {
                         Button {
-                            if let path = picker.path { onChoose(path) }
+                            if let path = picker.path { onChoose(path, name) }
                         } label: {
                             Text("在这里新建").frame(maxWidth: .infinity)
                         }

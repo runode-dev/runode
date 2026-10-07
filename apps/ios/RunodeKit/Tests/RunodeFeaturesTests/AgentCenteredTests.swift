@@ -72,7 +72,7 @@ private func workspace(_ index: UInt32, _ name: String, tabs: [[SessionId]], act
                             workspaces: [
                                 workspace(1, "runode", tabs: [[waiting], [plain]], activeTab: 1),
                                 workspace(2, "blog", tabs: [[working]]),
-                                // 列表里还没有的会话不出现，没有会话的工作区也不出现。
+                                // 列表里还没有的会话不出现，有标签但其中没有已知会话的工作区也不出现。
                                 workspace(3, "empty", tabs: [[SessionId("66666666666666666666666666666666")!]]),
                             ])
                     ])))

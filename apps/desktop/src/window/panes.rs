@@ -20,7 +20,7 @@ use runode_shared_types::{
 };
 
 use super::{
-    AGENT_MARK_WIDTH, CARD_GAP, ClosePane, DIVIDER_GRAB_WIDTH, Divider, NewSplitDown, NewSplitRight,
+    AGENT_MARK_WIDTH, CARD_GAP, ClosePane, DIVIDER_GRAB_WIDTH, Divider, NewSplitDown, NewSplitRight, NewTab,
     PANE_HEADER_HEIGHT, TogglePaneZoom, WindowView,
     agents::logo::agent_logo,
     card, cards,
@@ -30,7 +30,10 @@ use super::{
 };
 use crate::{
     assets::{CLOSE_ICON, MAXIMIZE_ICON, MINIMIZE_ICON, SPLIT_DOWN_ICON, SPLIT_RIGHT_ICON, TERMINAL_ICON},
-    ui::{hsla, tooltip::tooltip},
+    ui::{
+        hsla,
+        tooltip::{shortcut_text, tooltip},
+    },
 };
 
 /// 没有焦点的分屏蒙上一层背景色，这是蒙层的不透明度。
@@ -87,23 +90,70 @@ impl Tab {
 }
 
 impl WindowView {
-    /// 当前标签的终端区：分屏树，或者放大着的那一个终端。
+    /// 当前标签的终端区：分屏树，或者放大着的那一个终端；workspace 里没有标签时是空的标签区。
     pub(super) fn render_panes(&mut self, fg: Rgb, bg: Rgb, window: &Window, cx: &mut Context<Self>) -> AnyElement {
         let now = now_ms();
         let badges = self.driver_badges(now, window, cx);
         self.schedule_driver_redraw(now, cx);
-        let tab = self.tab();
+        let Some(tab) = self.tab() else {
+            return self.render_empty_tab(fg, bg, cx);
+        };
         if tab.zoomed || tab.root.is_leaf() {
             return self.render_leaf(tab, tab.focused, &badges, fg, bg, cx);
         }
         self.render_node(tab, &tab.root, &badges, fg, bg, cx)
     }
 
+    /// 没有标签的 workspace 的终端区：一句说明和新建标签的按钮。接着窗口自己的焦点，快捷键照常派发。
+    fn render_empty_tab(&self, fg: Rgb, bg: Rgb, cx: &mut Context<Self>) -> AnyElement {
+        let hover_bg = hsla(bg.mix(fg, 0.06));
+        let fg = hsla(fg);
+        let shortcut = shortcut_text(&NewTab, cx);
+        let button = div()
+            .id("empty-new-tab")
+            .px(px(12.))
+            .py(px(6.))
+            .rounded(px(6.))
+            .border_1()
+            .border_color(fg.opacity(0.15))
+            .flex()
+            .gap(px(8.))
+            .text_color(fg.opacity(0.8))
+            .hover(|button| button.bg(hover_bg).text_color(fg))
+            .child(rust_i18n::t!("menu.new_tab").into_owned())
+            .children(shortcut.map(|shortcut| div().text_color(fg.opacity(0.4)).child(shortcut)))
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(|this, _, window, cx| {
+                    cx.stop_propagation();
+                    this.new_tab(&NewTab, window, cx);
+                }),
+            );
+        let empty = div()
+            .id("empty-tab")
+            .track_focus(&self.empty_focus)
+            .size_full()
+            .flex()
+            .flex_col()
+            .items_center()
+            .justify_center()
+            .gap(px(12.))
+            .text_size(px(13.))
+            .text_color(fg.opacity(0.45))
+            .child(rust_i18n::t!("workspace.empty").into_owned())
+            .child(button);
+        if cards(cx) {
+            card(fg, hsla(bg)).size_full().child(empty).into_any_element()
+        } else {
+            empty.into_any_element()
+        }
+    }
+
     /// 当前标签里各个正被操作的分屏上要显示的驱动标记。
     fn driver_badges(&self, now: u64, window: &Window, cx: &App) -> HashMap<EntityId, SharedString> {
         let locale = rust_i18n::locale();
         let mut badges = HashMap::new();
-        for (pane, (view, _)) in &self.tab().panes {
+        for (pane, (view, _)) in self.tab().into_iter().flat_map(|tab| &tab.panes) {
             let Some(driver) = view.read(cx).driver() else {
                 continue;
             };
@@ -370,8 +420,8 @@ impl WindowView {
 
     /// 在分屏的标题条上点了一下：切到这个分屏。已经是当前分屏时不动，放大着也不还原。
     fn focus_pane_from_header(&mut self, id: EntityId, window: &mut Window, cx: &mut Context<Self>) {
-        if self.tab().focused == id {
-            window.focus(&self.tab().focused_view().focus_handle(cx), cx);
+        if self.tab().is_some_and(|tab| tab.focused == id) {
+            window.focus(&self.focus_handle(cx), cx);
         } else {
             self.focus_pane_in_active_tab(id, window, cx);
         }
@@ -464,7 +514,9 @@ impl WindowView {
                             cx.stop_propagation();
                             if event.click_count >= 2 {
                                 // 双击分隔线让两边一样大。
-                                this.tab_mut().root.set_ratio(id, 0.5);
+                                if let Some(tab) = this.tab_mut() {
+                                    tab.root.set_ratio(id, 0.5);
+                                }
                                 this.save(cx);
                             } else {
                                 this.dragging_divider = Some(Divider::Split(id, axis));
@@ -537,7 +589,9 @@ impl WindowView {
                 } else {
                     (event.position.y - bounds.origin.y) / bounds.size.height
                 };
-                this.tab_mut().root.set_ratio(id, ratio);
+                if let Some(tab) = this.tab_mut() {
+                    tab.root.set_ratio(id, ratio);
+                }
                 cx.notify();
             }))
             .on_mouse_up(

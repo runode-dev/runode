@@ -9,14 +9,17 @@ use std::{
 use gpui::{
     App, Bounds, Context, Entity, EntityId, Focusable, Pixels, ScrollHandle, SharedString, Subscription, Window,
 };
-use runode_shared_types::pane::{Node, SplitId};
+use runode_shared_types::{
+    grid::GridSize,
+    pane::{Node, SplitId},
+};
 
 use super::{
     WindowView,
     persist::{self, format},
     project::Project,
 };
-use crate::terminal_view::{SHOW_WAIT, TerminalEvent, TerminalView};
+use crate::terminal_view::{PROVISIONAL_SIZE, SHOW_WAIT, TerminalEvent, TerminalView};
 
 /// 标签的标识，标签挪动位置后不变。
 pub(super) type TabId = u64;
@@ -94,8 +97,9 @@ pub(super) struct Workspace {
     pub(super) name: SharedString,
     /// 项目目录：新终端取不到当前终端的目录时从这里开始。
     pub(super) dir: PathBuf,
-    /// 至少有一个；最后一个关掉时 workspace 跟着关。
+    /// 可以没有：最后一个关掉后 workspace 留着，显示一个空的标签区，等用户新开。
     pub(super) tabs: Vec<Tab>,
+    /// 当前标签；没有标签时为 0。
     pub(super) active: usize,
     /// 标签条的滚动位置，切换标签时把当前标签滚进视野。
     pub(super) tab_scroll: ScrollHandle,
@@ -104,8 +108,8 @@ pub(super) struct Workspace {
 }
 
 impl Workspace {
-    fn active_tab(&self) -> &Tab {
-        &self.tabs[self.active]
+    fn active_tab(&self) -> Option<&Tab> {
+        self.tabs.get(self.active)
     }
 
     /// 有标签响过铃，还没切过去看。
@@ -132,14 +136,33 @@ impl WindowView {
         &mut self.workspaces[self.active]
     }
 
-    /// 窗口里正显示的标签。
-    pub(super) fn tab(&self) -> &Tab {
+    /// 窗口里正显示的标签；当前 workspace 里没有标签时为空。
+    pub(super) fn tab(&self) -> Option<&Tab> {
         self.workspace().active_tab()
     }
 
-    pub(super) fn tab_mut(&mut self) -> &mut Tab {
+    pub(super) fn tab_mut(&mut self) -> Option<&mut Tab> {
         let workspace = &mut self.workspaces[self.active];
-        &mut workspace.tabs[workspace.active]
+        workspace.tabs.get_mut(workspace.active)
+    }
+
+    /// 窗口里有焦点的终端；当前 workspace 里没有标签时为空。
+    pub(super) fn focused_view(&self) -> Option<&Entity<TerminalView>> {
+        self.tab().map(Tab::focused_view)
+    }
+
+    /// 按某个终端的尺寸启动不显示的新终端：显示着的那个，没有时窗口里随便哪个，窗口里一个终端
+    /// 都没有时用默认尺寸（新终端一显示出来就按实际尺寸改）。
+    pub(super) fn reference_size(&self, cx: &App) -> GridSize {
+        self.focused_view()
+            .or_else(|| {
+                self.workspaces
+                    .iter()
+                    .flat_map(|w| &w.tabs)
+                    .find_map(|tab| tab.panes.values().next())
+                    .map(|(view, _)| view)
+            })
+            .map_or(PROVISIONAL_SIZE, |view| view.read(cx).size())
     }
 
     pub(super) fn pane_entry(
@@ -205,29 +228,35 @@ impl WindowView {
         cx: &mut Context<Self>,
     ) {
         let tab = self.single_pane_tab(view, window, cx);
-        self.workspace_mut().tabs.insert(ix, tab);
+        // 没有标签的 workspace 里 `active` 是 0，调用方按「当前标签右边」给的 1 落在末尾之外。
+        let tabs = &mut self.workspace_mut().tabs;
+        let ix = ix.min(tabs.len());
+        tabs.insert(ix, tab);
         self.activate(ix, window, cx);
     }
 
     /// 在第 `ix` 个位置放一个目录是 `dir` 的新 workspace，`view` 是它的第一个终端，并切过去。
+    /// `name` 为空时按目录取名。
     pub(super) fn insert_workspace(
         &mut self,
         ix: usize,
         dir: PathBuf,
+        name: Option<String>,
         view: Entity<TerminalView>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.add_workspace(ix, dir, view, window, cx);
+        self.add_workspace(ix, dir, name, view, window, cx);
         self.activate_workspace(ix, window, cx);
     }
 
     /// 在第 `ix` 个位置放一个目录是 `dir` 的新 workspace，`view` 是它的第一个终端，不切过去：当前的
-    /// workspace 还是原来那个。
+    /// workspace 还是原来那个。`name` 为空时按目录取名。
     pub(super) fn add_workspace(
         &mut self,
         ix: usize,
         dir: PathBuf,
+        name: Option<String>,
         view: Entity<TerminalView>,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -235,7 +264,7 @@ impl WindowView {
         let tab = self.single_pane_tab(view, window, cx);
         let workspace = Workspace {
             id: self.next_id(),
-            name: workspace_name(&dir).into(),
+            name: name.unwrap_or_else(|| workspace_name(&dir)).into(),
             dir,
             tabs: vec![tab],
             active: 0,
@@ -276,7 +305,7 @@ impl WindowView {
         let shown = self.is_shown(wi, ti);
         match event {
             TerminalEvent::TitleChanged => {
-                if shown && self.tab().focused == id {
+                if shown && self.tab().is_some_and(|tab| tab.focused == id) {
                     self.sync_window_title(window, cx);
                 }
                 self.forget_stale_done(id, wi, ti, cx);
@@ -308,15 +337,17 @@ impl WindowView {
         }
     }
 
-    /// 切到当前 workspace 的第 `ix` 个标签。
+    /// 切到当前 workspace 的第 `ix` 个标签；workspace 里没有标签时显示空的标签区。
     pub(super) fn activate(&mut self, ix: usize, window: &mut Window, cx: &mut Context<Self>) {
         let workspace = self.workspace_mut();
         workspace.active = ix;
-        workspace.tabs[ix].bell = false;
-        workspace.tab_scroll.scroll_to_item(ix);
+        if let Some(tab) = workspace.tabs.get_mut(ix) {
+            tab.bell = false;
+            workspace.tab_scroll.scroll_to_item(ix);
+        }
         self.start_shown(cx);
         self.sync_visibility(window, cx);
-        window.focus(&self.tab().focused_view().focus_handle(cx), cx);
+        window.focus(&self.focus_handle(cx), cx);
         self.sync_window_title(window, cx);
         self.mark_seen(window, cx);
         self.save(cx);
@@ -325,8 +356,11 @@ impl WindowView {
 
     /// 启动显示中的标签里还没启动 shell 的终端（恢复布局时看不见的终端都等到这时）。
     fn start_shown(&mut self, cx: &mut Context<Self>) {
+        let Some(tab) = self.tab() else {
+            return;
+        };
         let unstarted: Vec<_> =
-            self.tab().panes.values().map(|(view, _)| view.clone()).filter(|view| !view.read(cx).started()).collect();
+            tab.panes.values().map(|(view, _)| view.clone()).filter(|view| !view.read(cx).started()).collect();
         for view in unstarted {
             let start = view.read(cx).cwd();
             view.update(cx, |view, cx| view.start(cx));
@@ -369,8 +403,12 @@ impl WindowView {
         self.activate(self.workspaces[ix].active, window, cx);
     }
 
+    /// 窗口标题跟着有焦点的终端；没有终端时用 workspace 的名字。
     fn sync_window_title(&self, window: &mut Window, cx: &App) {
-        window.set_window_title(self.tab().focused_view().read(cx).title());
+        match self.focused_view() {
+            Some(view) => window.set_window_title(view.read(cx).title()),
+            None => window.set_window_title(&self.workspace().name),
+        }
     }
 
     /// 把当前布局交给存档，有变化时稍后写进文件。
@@ -380,17 +418,13 @@ impl WindowView {
     }
 
     /// 关掉第 `wi` 个 workspace 的第 `ti` 个标签；关掉的是它的当前标签时切到右边那个（没有
-    /// 就左边）。workspace 里只剩这一个标签时关掉整个 workspace。
+    /// 就左边）。关掉的是最后一个标签时 workspace 留着，显示空的标签区。
     pub(super) fn close_tab_at(&mut self, wi: usize, ti: usize, window: &mut Window, cx: &mut Context<Self>) {
         self.end_sessions(Closing::Tab { workspace: wi, tab: ti }, cx);
-        if self.workspaces[wi].tabs.len() == 1 {
-            self.close_workspace_at(wi, window, cx);
-            return;
-        }
         let workspace = &mut self.workspaces[wi];
         let tab = workspace.tabs.remove(ti);
         super::agents::dismiss_alerts(tab.panes.keys().copied(), cx);
-        if ti < workspace.active || workspace.active == workspace.tabs.len() {
+        if workspace.active > 0 && (ti < workspace.active || workspace.active == workspace.tabs.len()) {
             workspace.active -= 1;
         }
         let active = workspace.active;
@@ -591,8 +625,9 @@ impl WindowView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Option<Entity<TerminalView>> {
-        // 目录已经被删掉时 shell 起不来，退回 workspace 的目录，再退回家目录。
-        let cwd = self.tab().focused_view().read(cx).cwd();
+        // 目录已经被删掉时 shell 起不来，退回 workspace 的目录，再退回家目录；workspace 里没有终端
+        // 时从它的目录开始。
+        let cwd = self.focused_view().and_then(|view| view.read(cx).cwd());
         let cwd = format::start_dir(cwd.as_deref(), &self.workspace().dir);
         self.spawn_terminal(cwd.as_deref(), window, cx)
     }

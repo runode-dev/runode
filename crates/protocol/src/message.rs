@@ -259,13 +259,19 @@ pub enum ClientMsg {
     },
     /// 在 app 最前面那个窗口里开一个目录是 `dir` 的工作区，宿主转给 app 的界面，回 `Opened`：新工作区
     /// 第一个终端的会话。窗口里已经有这个目录的工作区时不新建，回它当前标签里有焦点的那个分屏的会话。
-    /// `focus` 为假时不切过去，不打断用户手上的事。
+    /// `focus` 为假时不切过去，不打断用户手上的事。`name` 是新工作区在侧栏里的名字，为空时按目录取；
+    /// 已经有这个目录的工作区时不改它的名字。
     OpenWorkspace {
         req: u32,
         dir: PathBuf,
         #[serde(default)]
         focus: bool,
+        #[serde(default)]
+        name: Option<String>,
     },
+    /// 把第 `window` 个窗口里的第 `workspace` 个工作区改名为 `name`，序号和 `HostMsg::Layout` 里的一样，
+    /// 从 1 开始。宿主转给 app 的界面，回 `Done`；没有这个工作区、`name` 去掉首尾空白后为空时回 `Error`。
+    RenameWorkspace { req: u32, window: u32, workspace: u32, name: String },
     /// 列 `dir` 这个目录里能跑的项目命令（Makefile 的目标、package.json 的 scripts），回
     /// `HostMsg::ProjectTasks`，见 `project_tasks` 模块；`dir` 不是绝对路径、不是目录时回 `Error`。
     /// 宿主自己办，不转给界面。
@@ -465,7 +471,7 @@ pub enum HostMsg {
         dir: PathBuf,
         sources: Vec<TaskSource>,
     },
-    /// 宿主转给界面去办的请求（`Open`、`OpenWorkspace`、`Reveal`、`Layout`），只发给登记为界面的
+    /// 宿主转给界面去办的请求（`Open`、`OpenWorkspace`、`RenameWorkspace`、`Reveal`、`Layout`），只发给登记为界面的
     /// 连接（`Hello` 里 `client` 是 `Desktop` 的，有几个时是最近连上的那个）。`request` 原样带着
     /// 发请求一方的 `req`；界面办完了用 `ClientMsg::UiReply` 带着同一个 `ui` 回话。
     ///

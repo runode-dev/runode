@@ -115,7 +115,7 @@ impl WindowView {
 
     /// 右侧面板读哪个目录：当前终端的目录，取不到时是 workspace 的目录。
     fn project_dir(&self, cx: &Context<Self>) -> PathBuf {
-        let cwd = self.tab().focused_view().read(cx).cwd();
+        let cwd = self.focused_view().and_then(|view| view.read(cx).cwd());
         cwd.filter(|cwd| cwd.is_dir()).unwrap_or_else(|| self.workspace().dir.clone())
     }
 
@@ -325,7 +325,7 @@ impl WindowView {
         self.git_shown = !self.git_shown;
         // 收起时焦点还在提交说明框里的话，按键就没处去了，交回终端。
         if !self.git_shown && self.git_focus.contains_focused(window, cx) {
-            window.focus(&self.tab().focused_view().focus_handle(cx), cx);
+            window.focus(&self.focus_handle(cx), cx);
         }
         if !self.git_shown {
             self.close_branch_picker(window, cx);
@@ -340,7 +340,7 @@ impl WindowView {
         self.files_shown = !self.files_shown;
         // 文件树收起时焦点还在里面的话，按键就没处去了，交回终端。
         if !self.files_shown && self.files_focus.contains_focused(window, cx) {
-            window.focus(&self.tab().focused_view().focus_handle(cx), cx);
+            window.focus(&self.focus_handle(cx), cx);
         }
         self.sync_project_watch();
         self.refresh_project(cx);

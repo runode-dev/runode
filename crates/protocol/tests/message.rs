@@ -168,7 +168,8 @@ fn client_messages_round_trip() {
         ClientMsg::Reveal { req: 11, id: ID },
         ClientMsg::ListDirs { req: 12, path: None },
         ClientMsg::ListDirs { req: 13, path: Some("/Users/me/中文".into()) },
-        ClientMsg::OpenWorkspace { req: 14, dir: "/Users/me/dev".into(), focus: true },
+        ClientMsg::OpenWorkspace { req: 14, dir: "/Users/me/dev".into(), focus: true, name: Some("后端".into()) },
+        ClientMsg::RenameWorkspace { req: 16, window: 1, workspace: 2, name: "前端".into() },
         ClientMsg::ListProjectTasks { req: 15, dir: "/Users/me/中文".into() },
         ClientMsg::Handoff { min_format: 1, max_format: 3 },
         ClientMsg::HandoffReady,
@@ -629,9 +630,9 @@ fn directory_and_workspace_messages() {
         serde_json::from_str(r#"{"type":"dirs","req":5,"path":"/Users/me","dirs":["dev","Documents"]}"#).unwrap();
     assert_eq!(short, dirs);
 
-    let open = ClientMsg::OpenWorkspace { req: 8, dir: "/Users/me/dev".into(), focus: false };
+    let open = ClientMsg::OpenWorkspace { req: 8, dir: "/Users/me/dev".into(), focus: false, name: None };
     let json = serde_json::to_string(&open).unwrap();
-    assert_eq!(json, r#"{"type":"open_workspace","req":8,"dir":"/Users/me/dev","focus":false}"#);
+    assert_eq!(json, r#"{"type":"open_workspace","req":8,"dir":"/Users/me/dev","focus":false,"name":null}"#);
     assert_eq!(serde_json::from_str::<ClientMsg>(&json).unwrap(), open);
     assert_eq!(
         serde_json::from_str::<ClientMsg>(r#"{"type":"open_workspace","req":8,"dir":"/Users/me/dev"}"#).unwrap(),
@@ -641,7 +642,7 @@ fn directory_and_workspace_messages() {
     let json = serde_json::to_string(&HostMsg::UiRequest { ui: 2, request: Box::new(open) }).unwrap();
     assert_eq!(
         json,
-        r#"{"type":"ui_request","ui":2,"request":{"type":"open_workspace","req":8,"dir":"/Users/me/dev","focus":false}}"#
+        r#"{"type":"ui_request","ui":2,"request":{"type":"open_workspace","req":8,"dir":"/Users/me/dev","focus":false,"name":null}}"#
     );
 }
 

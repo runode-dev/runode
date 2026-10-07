@@ -47,8 +47,9 @@ use crate::{
 
 /// 配置的字体都不可用时使用的等宽字体，macOS 自带。
 const FALLBACK_FONT_FAMILY: &str = "Menlo";
-/// 视图建好时伪终端的临时尺寸；第一次布局时会按实际大小重设，shell 等到那之后才启动。
-const PROVISIONAL_SIZE: GridSize = GridSize { cols: 80, rows: 24, cell_width_px: 8, cell_height_px: 16 };
+/// 视图建好时伪终端的临时尺寸；第一次布局时会按实际大小重设，shell 等到那之后才启动。窗口里没有
+/// 终端可参照尺寸时，开在看不见的地方的新终端也先按它启动。
+pub(crate) const PROVISIONAL_SIZE: GridSize = GridSize { cols: 80, rows: 24, cell_width_px: 8, cell_height_px: 16 };
 /// 建视图时最多先喂进去这么多已经到达的输出，余下的照常交给读输出的任务：shell 一启动就
 /// 大量输出时，第一帧不能等它们全部处理完。
 const EARLY_OUTPUT_LIMIT: usize = 64 * 1024;

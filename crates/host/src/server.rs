@@ -963,6 +963,7 @@ impl Connection {
             ClientMsg::Paste { req, id, text } => self.deliver_done(req, id, DriveAction::Paste, Inbox::Paste(text)),
             ClientMsg::Open { req, .. }
             | ClientMsg::OpenWorkspace { req, .. }
+            | ClientMsg::RenameWorkspace { req, .. }
             | ClientMsg::Reveal { req, .. }
             | ClientMsg::Layout { req } => {
                 self.to_ui(req, message);

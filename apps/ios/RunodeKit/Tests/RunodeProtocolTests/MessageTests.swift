@@ -41,7 +41,8 @@ func sameJSON(_ a: Data, _ b: Data) throws -> Bool {
     let size = GridSize(cols: 80, rows: 24, cellWidthPx: 16, cellHeightPx: 32)
 
     @Test(arguments: [
-        "hello", "list", "layout_request", "open", "open_workspace", "list_dirs", "list_dirs_home",
+        "hello", "list", "layout_request", "open", "open_workspace", "open_workspace_named", "rename_workspace",
+        "list_dirs", "list_dirs_home",
         "list_project_tasks", "spawn",
         "attach_vt", "attach_meta", "attach_size", "detach", "resize", "focus", "kill",
         "read_screen", "read_screen_command", "send_keys", "paste",
@@ -57,6 +58,9 @@ func sameJSON(_ a: Data, _ b: Data) throws -> Bool {
             case "layout_request": .layout(req: 0)
             case "open": .open(req: 7, placement: .tab, near: nil, cwd: nil, focus: false)
             case "open_workspace": .openWorkspace(req: 8, dir: "/Users/ethan/dev/中文", focus: false)
+            case "open_workspace_named":
+                .openWorkspace(req: 8, dir: "/Users/ethan/dev/中文", focus: false, name: "后端")
+            case "rename_workspace": .renameWorkspace(req: 9, window: 1, workspace: 2, name: "前端")
             case "list_dirs": .listDirs(req: 5, path: "/Users/ethan")
             case "list_dirs_home": .listDirs(req: 5, path: nil)
             case "list_project_tasks": .listProjectTasks(req: 5, dir: "/Users/ethan/dev/中文")
@@ -101,7 +105,8 @@ func sameJSON(_ a: Data, _ b: Data) throws -> Bool {
         let samples: [ClientMsg] = [
             .hello(protocol: 4, build: "b", client: .mobile, caps: Caps(snapshot: false, vtReplay: true), session: nil, device: nil),
             .listSessions, .layout(req: 0), .open(req: 1, placement: .tab, near: id, cwd: "/tmp", focus: false),
-            .openWorkspace(req: 1, dir: "/tmp", focus: false), .listDirs(req: 1, path: nil),
+            .openWorkspace(req: 1, dir: "/tmp", focus: false),
+            .renameWorkspace(req: 1, window: 1, workspace: 1, name: "a"), .listDirs(req: 1, path: nil),
             .listProjectTasks(req: 1, dir: "/tmp"),
             .spawn(req: 1, size: size, cwd: nil, integration: .detect, start: true),
             .attach(id: id, size: nil, mode: .vtReplay), .detach(id: id), .resize(id: id, size: size),
@@ -111,8 +116,8 @@ func sameJSON(_ a: Data, _ b: Data) throws -> Bool {
         ]
         func covered(_ message: ClientMsg) -> Bool {
             switch message {
-            case .hello, .listSessions, .layout, .open, .openWorkspace, .listDirs, .listProjectTasks, .spawn, .attach,
-                .detach, .resize, .focus, .kill, .readScreen, .sendKeys, .paste, .git:
+            case .hello, .listSessions, .layout, .open, .openWorkspace, .renameWorkspace, .listDirs, .listProjectTasks,
+                .spawn, .attach, .detach, .resize, .focus, .kill, .readScreen, .sendKeys, .paste, .git:
                 true
             }
         }

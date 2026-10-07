@@ -426,7 +426,7 @@ fn window_requests_go_to_the_desktop_connection() {
     assert_eq!(forwarded, open);
     assert_eq!(cli.reply(), HostMsg::Opened { req: 4, id: SessionId(9) });
 
-    let open = ClientMsg::OpenWorkspace { req: 7, dir, focus: false };
+    let open = ClientMsg::OpenWorkspace { req: 7, dir, focus: false, name: None };
     cli.send(&open);
     let forwarded = answer_ui(&mut desktop, |_| HostMsg::Opened { req: 7, id: SessionId(10) });
     assert_eq!(forwarded, open);

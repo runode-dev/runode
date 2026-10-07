@@ -101,6 +101,13 @@ workspace:
   close_detail: 里面的 %{count} 个终端会一起关闭。
   close_confirm: 关闭
   close_cancel: 取消
+  name: 名称
+  dir: 目录
+  choose_dir: 选择…
+  no_dir: 还没选目录
+  create: 创建
+  cancel: 取消
+  empty: 这个工作区里还没有终端
 close:
   pane_title: 关闭这个终端？
   tab_title: 关闭这个标签页？

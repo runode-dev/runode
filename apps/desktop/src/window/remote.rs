@@ -1,6 +1,6 @@
 //! 别的进程经宿主请 app 办的事（`runode open`、`runode focus`，命令行问各个终端摆在哪，以及手机
-//! 新建工作区）：在某个终端旁边开新终端，切到某个终端，回答布局（见 `layout_report`），在最前面
-//! 那个窗口里开一个某个目录的 workspace（已经有了就用它）。宿主把请求包成 `HostMsg::UiRequest`
+//! 新建工作区、给工作区改名）：在某个终端旁边开新终端，切到某个终端，回答布局（见 `layout_report`），
+//! 在最前面那个窗口里开一个某个目录的 workspace（已经有了就用它），按布局里的序号给 workspace 改名。宿主把请求包成 `HostMsg::UiRequest`
 //! 经连接转过来（见 `host_client::serve_ui`），这里在主线程上按会话找到它所在的窗口和分屏再办，
 //! 用 `Link::ui_reply` 回话。终端里的程序读写剪贴板也这样转过来，见 `clipboard`。
 
@@ -42,7 +42,7 @@ fn handle(request: ClientMsg, cx: &mut App) -> HostMsg {
     match request {
         ClientMsg::Open { req, placement, near, cwd, focus } => {
             let target = match near {
-                Some(id) => find_session(id, cx),
+                Some(id) => find_session(id, cx).map(|(window, pane)| (window, Some(pane))),
                 None => front_pane(cx),
             };
             let Some((window, pane)) = target else {
@@ -60,22 +60,23 @@ fn handle(request: ClientMsg, cx: &mut App) -> HostMsg {
                 .flatten();
             match opened {
                 Some(id) => {
-                    if focus {
-                        reveal(window, pane_of(window, id, cx).unwrap_or(pane), cx);
+                    if focus && let Some(pane) = pane_of(window, id, cx) {
+                        reveal(window, pane, cx);
                     }
                     HostMsg::Opened { req, id }
                 }
                 None => fail(req, "could not start a terminal".into()),
             }
         }
-        ClientMsg::OpenWorkspace { req, dir, focus } => {
+        ClientMsg::OpenWorkspace { req, dir, focus, name } => {
             let Some(window) = front_window(cx) else {
                 return fail(req, "there is no runode window to open it in".into());
             };
             if !dir.is_absolute() || !dir.is_dir() {
                 return fail(req, format!("{} is not a directory", dir.display()));
             }
-            let opened = window.update(cx, |view, window, cx| view.open_workspace_at(&dir, focus, window, cx));
+            let name = name.map(|name| name.trim().to_owned()).filter(|name| !name.is_empty());
+            let opened = window.update(cx, |view, window, cx| view.open_workspace_at(&dir, name, focus, window, cx));
             match opened {
                 Ok(Ok((pane, id))) => {
                     if focus {
@@ -85,6 +86,26 @@ fn handle(request: ClientMsg, cx: &mut App) -> HostMsg {
                 }
                 Ok(Err(message)) => fail(req, message.into()),
                 Err(_) => fail(req, "the runode window went away".into()),
+            }
+        }
+        ClientMsg::RenameWorkspace { req, window, workspace, name } => {
+            let name = name.trim();
+            if name.is_empty() {
+                return fail(req, "the workspace name is empty".into());
+            }
+            let renamed = layout_report::window_at(window, cx).and_then(|handle| {
+                handle
+                    .update(cx, |view, window, cx| {
+                        let ix = (workspace as usize).checked_sub(1).filter(|ix| *ix < view.workspaces.len())?;
+                        view.set_workspace_name(ix, name.into(), window, cx);
+                        Some(())
+                    })
+                    .ok()
+                    .flatten()
+            });
+            match renamed {
+                Some(()) => HostMsg::Done { req },
+                None => fail(req, format!("there is no workspace {workspace} in window {window}")),
             }
         }
         ClientMsg::Reveal { req, id } => match find_session(id, cx) {
@@ -114,10 +135,10 @@ fn pane_of(window: WindowHandle<WindowView>, id: SessionId, cx: &App) -> Option<
         .find_map(|(pane, (terminal, _))| (terminal.read(cx).session_id() == Some(id)).then_some(*pane))
 }
 
-/// 最前面那个窗口当前的分屏。
-fn front_pane(cx: &App) -> Option<(WindowHandle<WindowView>, EntityId)> {
+/// 最前面那个窗口，以及它当前的分屏；当前 workspace 里没有标签时没有分屏。
+fn front_pane(cx: &App) -> Option<(WindowHandle<WindowView>, Option<EntityId>)> {
     let window = front_window(cx)?;
-    Some((window, window.read(cx).ok()?.tab().focused))
+    Some((window, window.read(cx).ok()?.tab().map(|tab| tab.focused)))
 }
 
 /// 最前面那个窗口。app 不在前台时没有活动窗口，按窗口的前后顺序取最前面的。
@@ -136,16 +157,24 @@ pub(super) fn windows(cx: &App) -> Vec<WindowHandle<WindowView>> {
 impl WindowView {
     /// 在 `beside` 这个分屏旁边开一个新终端，返回它的会话。`cwd` 为空时沿用旁边那个终端的
     /// 目录。不切过去（`focus` 为假）时当前的 workspace、标签和焦点都不动，新终端看不见的话
-    /// 按旁边那个终端的尺寸现在就启动 shell，别的进程马上就能往里打字。
+    /// 按旁边那个终端的尺寸现在就启动 shell，别的进程马上就能往里打字。`beside` 为空时当前
+    /// workspace 里没有标签：新终端不管 `placement`，作为它的第一个标签当场显示出来。
     fn open_beside(
         &mut self,
-        beside: EntityId,
+        beside: Option<EntityId>,
         placement: Placement,
         cwd: Option<PathBuf>,
         focus: bool,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Option<SessionId> {
+        let Some(beside) = beside else {
+            let cwd = format::start_dir(cwd.as_deref(), &self.workspace().dir);
+            let view = self.spawn_terminal(cwd.as_deref(), window, cx)?;
+            let session = view.read(cx).session_id();
+            self.insert_tab(0, view, window, cx);
+            return session;
+        };
         let (wi, ti) = self.locate(beside)?;
         let near = self.workspaces[wi].tabs[ti].panes[&beside].0.clone();
         let cwd = cwd.or_else(|| near.read(cx).cwd());
@@ -184,13 +213,15 @@ impl WindowView {
     }
 
     /// 切到或者新建目录是 `dir` 的 workspace，返回它当前标签里有焦点的分屏和那个分屏的会话。已经有
-    /// 这个目录的 workspace 时不新建（目录按规范化后的比，`dir` 经过符号链接也认得出）；那个分屏还没
-    /// 开会话时在这个 workspace 末尾另开一个标签。没有时在 `dir` 开一个终端，新 workspace 插在当前
-    /// workspace 后面，和菜单里新建的一样。不切过去（`focus` 为假）时当前的 workspace 不动，新终端按
-    /// 当前显示的分屏的尺寸现在就启动 shell，别的进程马上就能往里打字；切过去时由调用方 `reveal` 它。
+    /// 这个目录的 workspace 时不新建（目录按规范化后的比，`dir` 经过符号链接也认得出），名字也不改；
+    /// 那个分屏还没开会话、或者 workspace 里没有标签时在它末尾另开一个标签。没有时在 `dir` 开一个终端，
+    /// 新 workspace 插在当前 workspace 后面，和菜单里新建的一样，`name` 为空时按目录取名。不切过去
+    /// （`focus` 为假）时当前的 workspace 不动，新终端按当前显示的分屏的尺寸现在就启动 shell，别的进程
+    /// 马上就能往里打字；切过去时由调用方 `reveal` 它。
     fn open_workspace_at(
         &mut self,
         dir: &Path,
+        name: Option<String>,
         focus: bool,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -200,15 +231,21 @@ impl WindowView {
         let dir = dir.as_path();
         if let Some(wi) = self.workspaces.iter().position(|workspace| canonical(&workspace.dir) == dir) {
             let workspace = &self.workspaces[wi];
-            let tab = &workspace.tabs[workspace.active];
-            if let Some(session) = tab.focused_view().read(cx).session_id() {
+            if let Some(tab) = workspace.tabs.get(workspace.active)
+                && let Some(session) = tab.focused_view().read(cx).session_id()
+            {
                 return Ok((tab.focused, session));
             }
             // 恢复布局时看不见的终端要等显示出来才开会话，见 `TerminalView::deferred`。
             let view = self.spawn_terminal(Some(dir), window, cx).ok_or("could not start a terminal")?;
             let session = view.read(cx).session_id().ok_or("could not start a terminal")?;
             let pane = view.entity_id();
-            let size = self.tab().focused_view().read(cx).size();
+            if wi == self.active && self.tab().is_none() {
+                // 显示着的空 workspace：新标签当场显示出来。
+                self.insert_tab(0, view, window, cx);
+                return Ok((pane, session));
+            }
+            let size = self.reference_size(cx);
             let tab = self.single_pane_tab(view.clone(), window, cx);
             self.workspaces[wi].tabs.push(tab);
             view.update(cx, |view, cx| view.start_at(size, window, cx));
@@ -223,10 +260,10 @@ impl WindowView {
         let pane = view.entity_id();
         let ix = self.active + 1;
         if focus {
-            self.insert_workspace(ix, dir.to_path_buf(), view, window, cx);
+            self.insert_workspace(ix, dir.to_path_buf(), name, view, window, cx);
         } else {
-            let size = self.tab().focused_view().read(cx).size();
-            self.add_workspace(ix, dir.to_path_buf(), view.clone(), window, cx);
+            let size = self.reference_size(cx);
+            self.add_workspace(ix, dir.to_path_buf(), name, view.clone(), window, cx);
             view.update(cx, |view, cx| view.start_at(size, window, cx));
             // 开在不显示的 workspace 里，到时丢掉界面这份 VT。
             self.sync_visibility(window, cx);

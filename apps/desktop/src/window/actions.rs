@@ -2,46 +2,37 @@
 
 use std::path::PathBuf;
 
-use gpui::{Bounds, Context, EntityId, PathPromptOptions, Pixels, Window};
+use gpui::{Bounds, Context, EntityId, Pixels, Window};
 use runode_shared_types::pane::{self, Axis, Direction, SplitId};
 
 use super::{
     ClosePane, CloseTab, CloseWorkspace, EqualizePanes, FocusNextPane, FocusPane, FocusPreviousPane, NewSplitDown,
-    NewSplitRight, NewTab, NewWorkspace, NextTab, NextWorkspace, PreviousTab, PreviousWorkspace, ResizePane,
-    SelectLastTab, SelectLastWorkspace, SelectTab, SelectWorkspace, TogglePaneZoom, ToggleSidebar, WindowView,
+    NewSplitRight, NewTab, NextTab, NextWorkspace, PreviousTab, PreviousWorkspace, ResizePane, SelectLastTab,
+    SelectLastWorkspace, SelectTab, SelectWorkspace, TogglePaneZoom, ToggleSidebar, WindowView,
 };
 
 /// 键盘调整分屏大小时每次挪动的像素。
 const RESIZE_STEP: f32 = 10.;
 
 impl WindowView {
-    pub(super) fn new_workspace(&mut self, _: &NewWorkspace, window: &mut Window, cx: &mut Context<Self>) {
-        let paths = cx.prompt_for_paths(PathPromptOptions {
-            files: false,
-            directories: true,
-            multiple: false,
-            prompt: Some(rust_i18n::t!("workspace.choose").into_owned().into()),
-        });
-        cx.spawn_in(window, async move |this, cx| {
-            let Ok(Ok(Some(paths))) = paths.await else {
-                return;
-            };
-            let Some(dir) = paths.into_iter().next() else {
-                return;
-            };
-            this.update_in(cx, |this, window, cx| this.open_workspace(dir, window, cx)).ok();
-        })
-        .detach();
-    }
-
-    /// 切到目录是 `dir` 的 workspace，还没有时在当前 workspace 下面新建一个。
-    fn open_workspace(&mut self, dir: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
+    /// 切到目录是 `dir` 的 workspace，给了 `name` 就改成这个名字；还没有时在当前 workspace 下面新建
+    /// 一个，`name` 为空时按目录取名。
+    pub(super) fn open_workspace(
+        &mut self,
+        dir: PathBuf,
+        name: Option<String>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         if let Some(ix) = self.workspaces.iter().position(|workspace| workspace.dir == dir) {
+            if let Some(name) = name {
+                self.set_workspace_name(ix, name.into(), window, cx);
+            }
             self.activate_workspace(ix, window, cx);
             return;
         }
         if let Some(view) = self.spawn_terminal(Some(&dir), window, cx) {
-            self.insert_workspace(self.active + 1, dir, view, window, cx);
+            self.insert_workspace(self.active + 1, dir, name, view, window, cx);
         }
     }
 
@@ -86,19 +77,24 @@ impl WindowView {
     }
 
     pub(super) fn close_tab(&mut self, _: &CloseTab, window: &mut Window, cx: &mut Context<Self>) {
-        let id = self.tab().id;
-        self.close_tab_by_id(id, window, cx);
+        if let Some(id) = self.tab().map(|tab| tab.id) {
+            self.close_tab_by_id(id, window, cx);
+        }
     }
 
     pub(super) fn next_tab(&mut self, _: &NextTab, window: &mut Window, cx: &mut Context<Self>) {
         let workspace = self.workspace();
-        self.activate((workspace.active + 1) % workspace.tabs.len(), window, cx);
+        if !workspace.tabs.is_empty() {
+            self.activate((workspace.active + 1) % workspace.tabs.len(), window, cx);
+        }
     }
 
     pub(super) fn previous_tab(&mut self, _: &PreviousTab, window: &mut Window, cx: &mut Context<Self>) {
         let workspace = self.workspace();
         let len = workspace.tabs.len();
-        self.activate((workspace.active + len - 1) % len, window, cx);
+        if len > 0 {
+            self.activate((workspace.active + len - 1) % len, window, cx);
+        }
     }
 
     pub(super) fn select_tab(&mut self, action: &SelectTab, window: &mut Window, cx: &mut Context<Self>) {
@@ -108,7 +104,9 @@ impl WindowView {
     }
 
     pub(super) fn select_last_tab(&mut self, _: &SelectLastTab, window: &mut Window, cx: &mut Context<Self>) {
-        self.activate(self.workspace().tabs.len() - 1, window, cx);
+        if let Some(last) = self.workspace().tabs.len().checked_sub(1) {
+            self.activate(last, window, cx);
+        }
     }
 
     pub(super) fn new_split_right(&mut self, _: &NewSplitRight, window: &mut Window, cx: &mut Context<Self>) {
@@ -119,14 +117,20 @@ impl WindowView {
         self.split(Axis::Vertical, window, cx);
     }
 
-    /// 把当前终端一分为二，新终端放在右边或下边并获得焦点。
+    /// 把当前终端一分为二，新终端放在右边或下边并获得焦点；workspace 里没有标签时新开一个标签。
     fn split(&mut self, axis: Axis, window: &mut Window, cx: &mut Context<Self>) {
         let Some(view) = self.spawn_beside_focused(window, cx) else {
             return;
         };
+        if self.tab().is_none() {
+            self.insert_tab(0, view, window, cx);
+            return;
+        }
         let split_id = self.next_id();
         let (id, entry) = self.pane_entry(view, window, cx);
-        let tab = self.tab_mut();
+        let Some(tab) = self.tab_mut() else {
+            return;
+        };
         tab.root.split(tab.focused, id, axis, split_id);
         tab.panes.insert(id, entry);
         tab.focused = id;
@@ -135,8 +139,9 @@ impl WindowView {
     }
 
     pub(super) fn close_pane(&mut self, _: &ClosePane, window: &mut Window, cx: &mut Context<Self>) {
-        let focused = self.tab().focused;
-        self.confirm_close_pane(focused, window, cx);
+        if let Some(focused) = self.tab().map(|tab| tab.focused) {
+            self.confirm_close_pane(focused, window, cx);
+        }
     }
 
     pub(super) fn focus_next_pane(&mut self, _: &FocusNextPane, window: &mut Window, cx: &mut Context<Self>) {
@@ -149,7 +154,9 @@ impl WindowView {
 
     /// 按从左到右、从上到下的顺序切到后一个（`step` 为 1）或前一个终端，首尾相接。
     fn focus_adjacent(&mut self, step: isize, window: &mut Window, cx: &mut Context<Self>) {
-        let tab = self.tab();
+        let Some(tab) = self.tab() else {
+            return;
+        };
         let leaves = tab.root.leaves();
         let Some(at) = leaves.iter().position(|id| *id == tab.focused) else {
             return;
@@ -159,7 +166,9 @@ impl WindowView {
     }
 
     pub(super) fn focus_pane(&mut self, action: &FocusPane, window: &mut Window, cx: &mut Context<Self>) {
-        let tab = self.tab();
+        let Some(tab) = self.tab() else {
+            return;
+        };
         let layout = self.layout.borrow();
         let rect = |bounds: &Bounds<Pixels>| pane::Rect {
             x: f32::from(bounds.origin.x),
@@ -185,7 +194,9 @@ impl WindowView {
 
     /// 切到当前标签里的另一个终端；放大着的话先恢复，否则看不到它。
     pub(super) fn focus_pane_in_active_tab(&mut self, pane: EntityId, window: &mut Window, cx: &mut Context<Self>) {
-        let tab = self.tab_mut();
+        let Some(tab) = self.tab_mut() else {
+            return;
+        };
         tab.focused = pane;
         tab.zoomed = false;
         self.activate(self.workspace().active, window, cx);
@@ -201,7 +212,9 @@ impl WindowView {
                 .map(|bounds| f32::from(if horizontal { bounds.size.width } else { bounds.size.height }))
         };
         let workspace = &mut self.workspaces[self.active];
-        let tab = &mut workspace.tabs[workspace.active];
+        let Some(tab) = workspace.tabs.get_mut(workspace.active) else {
+            return;
+        };
         // 放大时其他分屏看不见，调了也看不出效果。
         let resized = !tab.zoomed && tab.root.resize(tab.focused, action.0, RESIZE_STEP, &size_of);
         drop(layout);
@@ -212,13 +225,17 @@ impl WindowView {
     }
 
     pub(super) fn equalize_panes(&mut self, _: &EqualizePanes, _: &mut Window, cx: &mut Context<Self>) {
-        self.tab_mut().root.equalize();
-        self.save(cx);
-        cx.notify();
+        if let Some(tab) = self.tab_mut() {
+            tab.root.equalize();
+            self.save(cx);
+            cx.notify();
+        }
     }
 
     pub(super) fn toggle_pane_zoom(&mut self, _: &TogglePaneZoom, _: &mut Window, cx: &mut Context<Self>) {
-        let tab = self.tab_mut();
+        let Some(tab) = self.tab_mut() else {
+            return;
+        };
         if !tab.root.is_leaf() {
             tab.zoomed = !tab.zoomed;
             self.save(cx);

@@ -147,7 +147,7 @@ import Testing
         await model.createWorkspace(at: "/Users/ethan/dev")
         #expect(model.directoryPicker == nil)
         #expect(model.isSpawning)
-        guard case .openWorkspace(let req, "/Users/ethan/dev", false)? = link.sent.first else {
+        guard case .openWorkspace(let req, "/Users/ethan/dev", false, nil)? = link.sent.first else {
             Issue.record("expected an open_workspace, got \(link.sent)")
             return
         }
@@ -165,7 +165,7 @@ import Testing
         model.handle(.message(.layout(req: 0, windows: [WindowLayout(index: 1, workspaces: [])])))
         link.clearSent()
         await model.createWorkspace(at: "/nope")
-        guard case .openWorkspace(let req, _, _)? = link.sent.first else {
+        guard case .openWorkspace(let req, _, _, _)? = link.sent.first else {
             Issue.record("expected an open_workspace, got \(link.sent)")
             return
         }
@@ -184,6 +184,111 @@ import Testing
         await model.createWorkspace(at: "/Users/ethan")
         model.handle(.message(.error(req: nil, id: nil, message: HostMsg.unknownMessage)))
         #expect(!model.isSpawning)
+        #expect(model.errorMessage?.contains("太旧") == true)
+    }
+
+    /// 新建工作区时填的名字去掉首尾空白后带上；只有空白时当没填。
+    @Test func createWorkspaceCarriesTheName() async {
+        let model = SessionListModel(machine: machineRecord(), link: link)
+        model.handle(.ready(generation: 1))
+        model.handle(.message(.layout(req: 0, windows: [WindowLayout(index: 1, workspaces: [])])))
+        link.clearSent()
+        await model.createWorkspace(at: "/Users/ethan/dev", name: "  后端 ")
+        guard case .openWorkspace(let req, "/Users/ethan/dev", false, "后端")? = link.sent.first else {
+            Issue.record("expected a named open_workspace, got \(link.sent)")
+            return
+        }
+        model.handle(.message(.opened(req: req, id: sessionA)))
+        link.clearSent()
+        await model.createWorkspace(at: "/Users/ethan/dev", name: "  ")
+        guard case .openWorkspace(_, _, _, nil)? = link.sent.first else {
+            Issue.record("expected an unnamed open_workspace, got \(link.sent)")
+            return
+        }
+    }
+
+    /// 电脑上关掉了最后一个标签的工作区还在：列成一个空节。它没有 `anchor`，在里面新开终端是对它的目录
+    /// 发 `OpenWorkspace`。
+    @Test func emptyWorkspacesGetASection() async {
+        let model = SessionListModel(machine: machineRecord(), link: link)
+        model.handle(.ready(generation: 1))
+        model.handle(.message(.sessionList([info(sessionA, title: "a")])))
+        let tab = TabLayout(index: 1, active: true, panes: [PaneLayout(index: 1, id: sessionA, focused: true)])
+        model.handle(
+            .message(
+                .layout(
+                    req: 0,
+                    windows: [
+                        WindowLayout(
+                            index: 1,
+                            workspaces: [
+                                WorkspaceLayout(index: 1, name: "a", dir: "/Users/ethan/a", tabs: [tab]),
+                                WorkspaceLayout(index: 2, name: "空", dir: "/Users/ethan/empty", tabs: []),
+                            ])
+                    ])))
+        let sections = model.sections
+        #expect(sections.map(\.id) == [.workspace(window: 1, index: 1), .workspace(window: 1, index: 2)])
+        let empty = sections[1]
+        #expect(empty.sessions.isEmpty)
+        #expect(empty.anchor == nil)
+        #expect(model.canSpawn(in: empty))
+        link.clearSent()
+        await model.spawn(in: empty)
+        guard case .openWorkspace(let req, "/Users/ethan/empty", false, nil)? = link.sent.first else {
+            Issue.record("expected an open_workspace in the empty workspace, got \(link.sent)")
+            return
+        }
+        var spawned: [SessionId] = []
+        model.onSpawned = { spawned.append($0) }
+        model.handle(.message(.opened(req: req, id: sessionB)))
+        #expect(spawned == [sessionB])
+        // 有 `anchor` 的照旧挨着它开新标签。
+        link.clearSent()
+        await model.spawn(in: sections[0])
+        guard case .open(_, .tab, sessionA?, nil, false)? = link.sent.first else {
+            Issue.record("expected an open beside sessionA, got \(link.sent)")
+            return
+        }
+    }
+
+    /// 给工作区改名：按布局里的序号发 `RenameWorkspace`，办好后重新要布局；名字只有空白时不发。
+    @Test func renamingAWorkspaceRefreshesTheLayout() async {
+        let model = SessionListModel(machine: machineRecord(), link: link)
+        model.handle(.ready(generation: 1))
+        let section = SessionSection(id: .workspace(window: 2, index: 3), sessions: [])
+        link.clearSent()
+        await model.rename(section, to: "   ")
+        await model.rename(SessionSection(id: .background, sessions: []), to: "后台")
+        #expect(link.sent.isEmpty)
+        await model.rename(section, to: " 前端 ")
+        guard case .renameWorkspace(let req, 2, 3, "前端")? = link.sent.first else {
+            Issue.record("expected a rename_workspace, got \(link.sent)")
+            return
+        }
+        link.clearSent()
+        model.handle(.message(.done(req: req &+ 7)))
+        #expect(link.sent.isEmpty)
+        model.handle(.message(.done(req: req)))
+        #expect(link.sent == [.listSessions, .layout(req: 0)])
+        #expect(model.errorMessage == nil)
+    }
+
+    @Test func renameErrorsAreShown() async {
+        let model = SessionListModel(machine: machineRecord(), link: link)
+        model.handle(.ready(generation: 1))
+        let section = SessionSection(id: .workspace(window: 1, index: 9), sessions: [])
+        link.clearSent()
+        await model.rename(section, to: "x")
+        guard case .renameWorkspace(let req, _, _, _)? = link.sent.first else {
+            Issue.record("expected a rename_workspace, got \(link.sent)")
+            return
+        }
+        model.handle(.message(.error(req: req, id: nil, message: "no workspace 9")))
+        #expect(model.errorMessage == "改不了名：no workspace 9")
+        // 旧电脑不认识 `RenameWorkspace`，回不带编号的「unknown message」。
+        model.errorMessage = nil
+        await model.rename(section, to: "y")
+        model.handle(.message(.error(req: nil, id: nil, message: HostMsg.unknownMessage)))
         #expect(model.errorMessage?.contains("太旧") == true)
     }
 
