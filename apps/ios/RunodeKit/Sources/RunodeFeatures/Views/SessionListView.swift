@@ -71,7 +71,8 @@
             .cardList()
             .animation(.default, value: model.sections.map(\.sessions.count))
             .overlay {
-                if model.loaded, model.sessions.isEmpty, model.linkState.isConnected {
+                // 有空工作区时每一节自己写着「没有终端」，整页的空状态只在一节都没有时出。
+                if model.loaded, model.sections.isEmpty, model.linkState.isConnected {
                     ContentUnavailableView {
                         Label("这台电脑上没有终端", systemImage: "terminal")
                     } description: {
