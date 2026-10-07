@@ -293,19 +293,12 @@
     struct AgentBadge: View {
         let agent: Agent?
         var showsState = true
-        @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
         var body: some View {
             if let agent, let status = Presentation.agentStatus(agent) {
-                let group: SessionGroup =
-                    switch status.state {
-                    case .blocked: .waiting
-                    case .working: .working
-                    default: .other
-                    }
-                let tint = Self.tint(for: group)
+                let tint = AgentStateIcon.tint(for: status.state)
                 HStack(spacing: 4) {
-                    icon(group, kind: agent.kind)
+                    AgentStateIcon(agent: agent)
                         .imageScale(.small)
                     Text(showsState ? status.text : agent.kind.displayName)
                         .lineLimit(1)
@@ -320,21 +313,6 @@
             }
         }
 
-        /// 状态图标带着动：干活时是和桌面一样的这个 agent 自己的转圈，空闲时月亮慢慢呼吸，等回答时不动
-        /// （卡片已经描了橙边）。打开了「减弱动态效果」时都不动。
-        @ViewBuilder
-        private func icon(_ group: SessionGroup, kind: AgentKind) -> some View {
-            switch group {
-            case .working:
-                AgentSpinner(kind: kind, animates: !reduceMotion)
-            case .other:
-                Image(systemName: "moon.zzz.fill")
-                    .symbolEffect(.breathe, isActive: !reduceMotion)
-            case .waiting:
-                Image(systemName: Presentation.symbol(for: .waiting))
-            }
-        }
-
         static func tint(for group: SessionGroup) -> Color {
             switch group {
             case .waiting: .orange
@@ -344,12 +322,50 @@
         }
     }
 
+    /// agent 状态的图标，按状态着色，读屏时念出 agent 的名字和状态。状态认不出时什么也不画。
+    /// 带着动：干活时是和桌面一样的这个 agent 自己的转圈，空闲时月亮慢慢呼吸，等回答时不动
+    /// （卡片已经描了橙边）。打开了「减弱动态效果」时都不动。
+    struct AgentStateIcon: View {
+        let agent: Agent?
+        @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+        var body: some View {
+            if let agent, let status = Presentation.agentStatus(agent) {
+                Group {
+                    switch Self.group(for: status.state) {
+                    case .working:
+                        AgentSpinner(kind: agent.kind, animates: !reduceMotion)
+                    case .other:
+                        Image(systemName: "moon.zzz.fill")
+                            .symbolEffect(.breathe, isActive: !reduceMotion)
+                    case .waiting:
+                        Image(systemName: Presentation.symbol(for: .waiting))
+                    }
+                }
+                .foregroundStyle(Self.tint(for: status.state))
+                .accessibilityLabel(status.text)
+            }
+        }
+
+        static func tint(for state: AgentState) -> Color {
+            AgentBadge.tint(for: group(for: state))
+        }
+
+        private static func group(for state: AgentState) -> SessionGroup {
+            switch state {
+            case .blocked: .waiting
+            case .working: .working
+            default: .other
+            }
+        }
+    }
+
     /// agent 干活时的转圈，帧、快慢和颜色照 `AgentKind.spinner`、`AgentKind.spinnerColor`，和桌面一样。
     /// 当前帧按绝对时间算，几张卡片上同一种 agent 一起转、步调一致；各帧字宽不一，定宽了文字才不跟着晃。
     private struct AgentSpinner: View {
         let kind: AgentKind
         let animates: Bool
-        @ScaledMetric(relativeTo: .caption) private var width: CGFloat = 12
+        @ScaledMetric(relativeTo: .subheadline) private var width: CGFloat = 15
 
         var body: some View {
             let (frames, frameTime) = kind.spinner

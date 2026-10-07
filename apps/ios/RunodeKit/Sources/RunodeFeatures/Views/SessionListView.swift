@@ -355,6 +355,8 @@
         let preview: [String]
         /// 标题前图标的边长，跟着标题的字号缩放。
         @ScaledMetric(relativeTo: .headline) private var iconSize: CGFloat = 22
+        /// 状态图标定宽，转圈和月亮宽窄不一，定了宽各张卡片的标题才对齐。
+        @ScaledMetric(relativeTo: .subheadline) private var stateIconWidth: CGFloat = 20
 
         var body: some View {
             VStack(alignment: .leading, spacing: 6) {
@@ -363,6 +365,12 @@
                         // 图标的中线对着第一行字的中间（标题的大写字母高约为图标边长的 0.54）。
                         .alignmentGuide(.firstTextBaseline) { [iconSize] d in d[VerticalAlignment.center] + iconSize * 0.27 }
                         .opacity(session.exited ? 0.5 : 1)
+                    // 没有 agent 时不留这块空，shell 的标题紧挨着前面的图标。
+                    if Presentation.agentStatus(session.meta.agent) != nil {
+                        AgentStateIcon(agent: session.meta.agent)
+                            .font(.subheadline.weight(.semibold))
+                            .frame(width: stateIconWidth)
+                    }
                     Text(Presentation.sessionTitle(session))
                         .font(.headline)
                         .foregroundStyle(session.exited ? .secondary : .primary)
@@ -377,20 +385,12 @@
                     Spacer(minLength: 8)
                     DisclosureChevron()
                 }
-                // agent 和目录挤在一行，卡片矮一截，一屏多放几张。
-                let directory = Presentation.sessionDirectory(session.meta.cwd, in: workspaceDir)
-                if session.meta.agent != nil || directory != nil {
-                    HStack(spacing: 8) {
-                        AgentBadge(agent: session.meta.agent)
-                            .layoutPriority(1)
-                        if let directory {
-                            CompactLabel(text: directory, systemImage: "folder")
-                                .font(.subheadline)
-                                .foregroundStyle(.secondary)
-                                .lineLimit(1)
-                                .truncationMode(.head)
-                        }
-                    }
+                if let directory = Presentation.sessionDirectory(session.meta.cwd, in: workspaceDir) {
+                    CompactLabel(text: directory, systemImage: "folder")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.head)
                 }
                 if !preview.isEmpty {
                     ScreenPreview(lines: preview)
