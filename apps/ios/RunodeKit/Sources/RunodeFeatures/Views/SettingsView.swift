@@ -117,12 +117,6 @@
         private var aboutSection: some View {
             Section {
                 LabeledContent("版本", value: Self.version)
-                Link(destination: URL(string: "https://github.com/ghostty-org/ghostty")!) {
-                    LabeledContent("libghostty-vt", value: "MIT")
-                }
-                Link(destination: URL(string: "https://github.com/ryanoasis/nerd-fonts")!) {
-                    LabeledContent("Symbols Nerd Font", value: "MIT")
-                }
             } header: {
                 Text("关于")
             }

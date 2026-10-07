@@ -26,8 +26,8 @@ let package = Package(
         .target(
             name: "RunodeTerminal",
             dependencies: ["RunodeProtocol", "GhosttyVt"],
-            // Nerd Fonts 的 Symbols Only 字体和它的许可文件。
-            resources: [.copy("Resources/NerdFontsSymbolsOnly")],
+            // Nerd Fonts 的 Symbols Only 字体和它的许可文件；libghostty-vt 的 MIT 许可随 app 分发，界面上不显示。
+            resources: [.copy("Resources/NerdFontsSymbolsOnly"), .copy("Resources/Ghostty")],
             // libghostty-vt 里的 simdutf、highway 是 C++ 写的。
             linkerSettings: [.linkedLibrary("c++")]
         ),
