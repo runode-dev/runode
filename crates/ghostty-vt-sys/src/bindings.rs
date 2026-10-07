@@ -1851,7 +1851,9 @@ pub mod OscCommandType {
     pub const KITTY_DESKTOP_NOTIFICATION: Type = 26;
     #[doc = " An OSC sequence whose number the parser does not implement. Read it\n with the GHOSTTY_OSC_DATA_UNKNOWN_* data types.\n\n Only produced when GHOSTTY_OSC_OPT_UNKNOWN_MAX_BYTES is nonzero.\n Otherwise these sequences are GHOSTTY_OSC_COMMAND_INVALID."]
     pub const UNKNOWN: Type = 27;
-    #[doc = " An OSC sequence whose number the parser does not implement. Read it\n with the GHOSTTY_OSC_DATA_UNKNOWN_* data types.\n\n Only produced when GHOSTTY_OSC_OPT_UNKNOWN_MAX_BYTES is nonzero.\n Otherwise these sequences are GHOSTTY_OSC_COMMAND_INVALID."]
+    #[doc = " A program status report or support query (OSC 7501), which a program\n sends to say what it is doing, such as working or waiting on the user.\n\n The OSC parser only identifies this command. To receive the report's\n contents, use a terminal with GHOSTTY_TERMINAL_OPT_PROGRAM_STATUS\n instead (see GhosttyTerminalProgramStatus)."]
+    pub const PROGRAM_STATUS: Type = 28;
+    #[doc = " A program status report or support query (OSC 7501), which a program\n sends to say what it is doing, such as working or waiting on the user.\n\n The OSC parser only identifies this command. To receive the report's\n contents, use a terminal with GHOSTTY_TERMINAL_OPT_PROGRAM_STATUS\n instead (see GhosttyTerminalProgramStatus)."]
     pub const TYPE_MAX_VALUE: Type = 2147483647;
 }
 pub mod OscTerminator {
@@ -2983,6 +2985,95 @@ pub type TerminalProgressReportFn = ::std::option::Option<
         report: *const TerminalProgressReport,
     ),
 >;
+pub mod ProgramStatusState {
+    #[allow(unused_imports)]
+    use super::*;
+    #[doc = " What a program says it is doing, in a program status report (OSC 7501).\n\n See GhosttyTerminalProgramStatus for an overview of the protocol.\n"]
+    pub type Type = ::std::os::raw::c_int;
+    #[doc = " At rest, waiting for the user's next instruction. For example, an\n interactive tool sitting at its own prompt."]
+    pub const IDLE: Type = 0;
+    #[doc = " Running on its own. The report may include a progress percentage."]
+    pub const WORKING: Type = 1;
+    #[doc = " Finished a piece of work, and the result is ready for the user to\n look at."]
+    pub const DONE: Type = 2;
+    #[doc = " Can't continue until the user does something. `kind` says what the\n program needs and `message` says why. The report may include a\n progress percentage."]
+    pub const BLOCKED: Type = 3;
+    #[doc = " Failed and stopped."]
+    pub const ERROR: Type = 4;
+    #[doc = " Not a real state. Remove the record with this report's id and every\n record beneath it. If the id is empty, remove every record."]
+    pub const CLEAR: Type = 5;
+    #[doc = " Not a real state. Remove the record with this report's id and every\n record beneath it. If the id is empty, remove every record."]
+    pub const MAX_VALUE: Type = 2147483647;
+}
+pub mod ProgramStatusKind {
+    #[allow(unused_imports)]
+    use super::*;
+    #[doc = " What a blocked program needs from the user, in a program status report\n (OSC 7501).\n"]
+    pub type Type = ::std::os::raw::c_int;
+    #[doc = " The program didn't say, or the state isn't\n GHOSTTY_PROGRAM_STATUS_STATE_BLOCKED."]
+    pub const NONE: Type = 0;
+    #[doc = " Approval to do something, such as \"Apply these changes?\"."]
+    pub const PERMISSION: Type = 1;
+    #[doc = " An answer the user has to type."]
+    pub const QUESTION: Type = 2;
+    #[doc = " A login, password, token, or other credential."]
+    pub const AUTH: Type = 3;
+    #[doc = " A login, password, token, or other credential."]
+    pub const MAX_VALUE: Type = 2147483647;
+}
+#[doc = " A program status report (OSC 7501).\n\n The program status protocol lets a program tell the terminal what it is\n doing: idle, working, done, waiting on the user, or failed, and why. It\n is meant for long-running work like builds, deploys, and coding agents,\n where the user is often looking at something else and wants to know when\n the work finishes or needs them. The protocol only describes state. How\n to show it, if at all, is up to your application.\n\n The full specification is at\n https://www.superlogical.com/rex/docs/build/program-status\n\n For example, a program waiting for the user to approve a change sends\n this, where ST is the string terminator (ESC \\ or BEL):\n\n ESC ] 7501 ; state=blocked:kind=permission:app=terraform:msg=QXBwbHk/ ST\n\n The callback then receives a report with:\n\n - `state`: GHOSTTY_PROGRAM_STATUS_STATE_BLOCKED\n - `kind`: GHOSTTY_PROGRAM_STATUS_KIND_PERMISSION\n - `progress`: -1, because the program didn't send one\n - `id`: empty, because this is the root record\n - `app`: \"terraform\"\n - `title`: empty\n - `message`: \"Apply?\", decoded from the base64 in `msg`\n\n Only reports that pass every check in the specification reach the\n callback. Text that the program didn't send is an empty string (len=0),\n never NULL. All strings are only valid during the callback, so copy any\n you want to keep.\n\n This is a sized struct. Later versions may add fields at the end, and\n `size` tells you which fields are present. Every field below has been\n present since this struct was introduced.\n"]
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct TerminalProgramStatus {
+    #[doc = " Size of this struct in bytes."]
+    pub size: usize,
+    #[doc = " What the program is doing."]
+    pub state: ProgramStatusState::Type,
+    #[doc = " What the program needs from the user. Only set for\n GHOSTTY_PROGRAM_STATUS_STATE_BLOCKED. It is\n GHOSTTY_PROGRAM_STATUS_KIND_NONE for other states, when the program\n didn't say, or when it sent a kind this version doesn't know."]
+    pub kind: ProgramStatusKind::Type,
+    #[doc = " How far along the work is, from 0 through 100. Only set for\n GHOSTTY_PROGRAM_STATUS_STATE_WORKING and\n GHOSTTY_PROGRAM_STATUS_STATE_BLOCKED. It is -1 for other states, when\n the program didn't say, or when it sent a value outside that range."]
+    pub progress: i8,
+    #[doc = " Which record this report is about. Empty for the root record.\n\n A program that only reports on itself leaves this empty. A program\n that reports on several things at once gives each its own id, such as\n \"us-east\" and \"eu-west\" for a deploy to two regions. A \"/\" makes one\n record the child of another, so \"build/test\" is a child of \"build\".\n The parent record doesn't have to exist."]
+    pub id: String,
+    #[doc = " A stable name for the program that a machine can match on, such as\n \"cargo\" or \"terraform\"."]
+    pub app: String,
+    #[doc = " A short label for the record, meant for people. Programs that report\n several records use this to tell them apart."]
+    pub title: String,
+    #[doc = " One line of text for people, saying what the record is doing,\n waiting for, or has finished. You may shorten it to fit, but don't\n try to read meaning into it."]
+    pub message: String,
+}
+#[allow(clippy::unnecessary_operation, clippy::identity_op)]
+const _: () = {
+    ["Size of TerminalProgramStatus"][::std::mem::size_of::<TerminalProgramStatus>() - 88usize];
+    ["Alignment of TerminalProgramStatus"][::std::mem::align_of::<TerminalProgramStatus>() - 8usize];
+    ["Offset of field: TerminalProgramStatus::size"][::std::mem::offset_of!(TerminalProgramStatus, size) - 0usize];
+    ["Offset of field: TerminalProgramStatus::state"][::std::mem::offset_of!(TerminalProgramStatus, state) - 8usize];
+    ["Offset of field: TerminalProgramStatus::kind"][::std::mem::offset_of!(TerminalProgramStatus, kind) - 12usize];
+    ["Offset of field: TerminalProgramStatus::progress"]
+        [::std::mem::offset_of!(TerminalProgramStatus, progress) - 16usize];
+    ["Offset of field: TerminalProgramStatus::id"][::std::mem::offset_of!(TerminalProgramStatus, id) - 24usize];
+    ["Offset of field: TerminalProgramStatus::app"][::std::mem::offset_of!(TerminalProgramStatus, app) - 40usize];
+    ["Offset of field: TerminalProgramStatus::title"][::std::mem::offset_of!(TerminalProgramStatus, title) - 56usize];
+    ["Offset of field: TerminalProgramStatus::message"]
+        [::std::mem::offset_of!(TerminalProgramStatus, message) - 72usize];
+};
+impl Default for TerminalProgramStatus {
+    fn default() -> Self {
+        let mut s = ::std::mem::MaybeUninit::<Self>::uninit();
+        unsafe {
+            ::std::ptr::write_bytes(s.as_mut_ptr(), 0, 1);
+            s.assume_init()
+        }
+    }
+}
+#[doc = " Callback function type for program status reports (OSC 7501).\n\n Called synchronously each time the running program sends a valid\n report. See GhosttyTerminalProgramStatus for what a report contains.\n\n The terminal doesn't store reports, so your application keeps them. To\n follow the specification, keep one record per id. A report with an empty\n id is about the root record, the program itself. The records follow\n these rules:\n\n - A report replaces its record completely. A value the report leaves\n   out is gone from the record afterwards. It doesn't keep its old value.\n - A GHOSTTY_PROGRAM_STATUS_STATE_CLEAR report removes the record with\n   its id and every record beneath it, so clearing \"build\" also removes\n   \"build/test\". A clear report with an empty id removes every record.\n - When a new shell prompt starts (GHOSTTY_SEMANTIC_PROMPT_PROMPT_START\n   from the GHOSTTY_TERMINAL_OPT_SEMANTIC_PROMPT callback) or the program\n   running in the terminal exits, remove `working` and `blocked` records.\n   You may remove `idle` records too. Keep `done` and `error` records\n   until the user has seen them, for example until they next focus the\n   terminal.\n - Keep at most 256 records, and allow at least 64. When a new record\n   would go over your limit, remove the one that was updated longest ago.\n\n A full reset (RIS, `ESC c`) removes every record. When that happens,\n the terminal calls this with a GHOSTTY_PROGRAM_STATUS_STATE_CLEAR report\n and an empty id, and then calls the GHOSTTY_TERMINAL_OPT_RESET callback.\n\n `title` and `message` are already decoded and contain no control\n characters, but they are still untrusted text from the program. Don't\n treat them as markup. If you show them outside the terminal, such as in\n a tab or a notification, remove invisible formatting characters like\n text direction overrides, and say which terminal the text came from so\n a program can't pretend to be one running elsewhere.\n\n Example, where `Records`, `records_clear`, and `records_put` stand in for\n your application's own storage:\n\n void on_program_status(GhosttyTerminal terminal,\n                        void* userdata,\n                        const GhosttyTerminalProgramStatus* report) {\n   (void)terminal;\n   Records* records = userdata;\n\n   if (report->state == GHOSTTY_PROGRAM_STATUS_STATE_CLEAR) {\n     // Remove this record and every record beneath it. An empty id\n     // removes every record.\n     records_clear(records, report->id);\n     return;\n   }\n\n   // Replace the whole record. The strings are only valid during this\n   // call, so records_put must copy them.\n   records_put(records, report->id, report->state, report->message);\n }\n\n // Set write_pty too, so programs that check for support get a reply.\n ghostty_terminal_set(terminal, GHOSTTY_TERMINAL_OPT_USERDATA, records);\n ghostty_terminal_set(terminal, GHOSTTY_TERMINAL_OPT_WRITE_PTY,\n                      (const void*)on_write_pty);\n ghostty_terminal_set(terminal, GHOSTTY_TERMINAL_OPT_PROGRAM_STATUS,\n                      (const void*)on_program_status);\n\n               call.\n"]
+pub type TerminalProgramStatusFn = ::std::option::Option<
+    unsafe extern "C" fn(
+        terminal: Terminal,
+        userdata: *mut ::std::os::raw::c_void,
+        report: *const TerminalProgramStatus,
+    ),
+>;
 pub mod SemanticPromptKind {
     #[allow(unused_imports)]
     use super::*;
@@ -3069,7 +3160,7 @@ pub type TerminalSemanticPromptFn = ::std::option::Option<
         event: *const TerminalSemanticPrompt,
     ),
 >;
-#[doc = " Callback function type for reset.\n\n Called when the running program performs a full reset (RIS, `ESC c`).\n A full reset clears the screen and scrollback, returns modes to their\n defaults, and clears the title and working directory. Use this callback\n to reset any state your application keeps about what's running in the\n terminal, such as the current command.\n\n The terminal has already reset itself when this is called. The\n GHOSTTY_TERMINAL_OPT_TITLE_CHANGED and GHOSTTY_TERMINAL_OPT_PWD_CHANGED\n callbacks are not called for the cleared title and working directory,\n so update anything you show for them here. A full reset also removes\n any progress report. If you set GHOSTTY_TERMINAL_OPT_PROGRESS_REPORT,\n that callback is called before this one.\n\n A soft reset (DECSTR, `CSI ! p`) only resets a few modes and doesn't\n call this.\n\n"]
+#[doc = " Callback function type for reset.\n\n Called when the running program performs a full reset (RIS, `ESC c`).\n A full reset clears the screen and scrollback, returns modes to their\n defaults, and clears the title and working directory. Use this callback\n to reset any state your application keeps about what's running in the\n terminal, such as the current command.\n\n The terminal has already reset itself when this is called. The\n GHOSTTY_TERMINAL_OPT_TITLE_CHANGED and GHOSTTY_TERMINAL_OPT_PWD_CHANGED\n callbacks are not called for the cleared title and working directory,\n so update anything you show for them here. A full reset also removes\n any progress report and program status records. If you set\n GHOSTTY_TERMINAL_OPT_PROGRESS_REPORT or\n GHOSTTY_TERMINAL_OPT_PROGRAM_STATUS, those callbacks are called before\n this one.\n\n A soft reset (DECSTR, `CSI ! p`) only resets a few modes and doesn't\n call this.\n\n"]
 pub type TerminalResetFn =
     ::std::option::Option<unsafe extern "C" fn(terminal: Terminal, userdata: *mut ::std::os::raw::c_void)>;
 #[doc = " Callback function type for color scheme queries (CSI ? 996 n).\n\n Called when the terminal receives a color scheme device status report\n query. Return true and fill *out_scheme with the current color scheme,\n or return false to silently ignore the query.\n\n"]
@@ -3228,7 +3319,9 @@ pub mod TerminalOption {
     pub const XT_CHECKSUM_REPORT: Type = 44;
     #[doc = " Set how the DECRQCRA checksum is calculated after a full reset (RIS).\n This also changes the current calculation.\n\n The value holds the same bits as XTCHECKSUM (CSI Ps # y) and xterm's\n checksumExtension resource, which a running program can still use to\n change the calculation until the next reset:\n\n   - 1: don't negate the result\n   - 2: don't add the video attributes of each cell\n   - 4: don't omit blanks\n   - 8: count cells that were never written to as spaces\n   - 16: use full codepoints instead of the DEC 8-bit values\n\n Zero, or passing NULL, is the calculation of a real DEC terminal.\n Values above 31 return GHOSTTY_INVALID_VALUE.\n\n Input type: uint8_t*"]
     pub const XT_CHECKSUM_EXTENSION: Type = 45;
-    #[doc = " Set how the DECRQCRA checksum is calculated after a full reset (RIS).\n This also changes the current calculation.\n\n The value holds the same bits as XTCHECKSUM (CSI Ps # y) and xterm's\n checksumExtension resource, which a running program can still use to\n change the calculation until the next reset:\n\n   - 1: don't negate the result\n   - 2: don't add the video attributes of each cell\n   - 4: don't omit blanks\n   - 8: count cells that were never written to as spaces\n   - 16: use full codepoints instead of the DEC 8-bit values\n\n Zero, or passing NULL, is the calculation of a real DEC terminal.\n Values above 31 return GHOSTTY_INVALID_VALUE.\n\n Input type: uint8_t*"]
+    #[doc = " Callback invoked when the running program sends a program status\n report via OSC 7501. Set to NULL to ignore these reports.\n\n Programs check for support before sending reports by sending\n `OSC 7501 ; ?`. While this callback is set, the terminal answers that\n query through GHOSTTY_TERMINAL_OPT_WRITE_PTY. While it is NULL, the\n query gets no reply, so programs know the protocol isn't supported.\n Set a write_pty callback too, or programs never see the reply.\n\n Input type: GhosttyTerminalProgramStatusFn"]
+    pub const PROGRAM_STATUS: Type = 46;
+    #[doc = " Callback invoked when the running program sends a program status\n report via OSC 7501. Set to NULL to ignore these reports.\n\n Programs check for support before sending reports by sending\n `OSC 7501 ; ?`. While this callback is set, the terminal answers that\n query through GHOSTTY_TERMINAL_OPT_WRITE_PTY. While it is NULL, the\n query gets no reply, so programs know the protocol isn't supported.\n Set a write_pty callback too, or programs never see the reply.\n\n Input type: GhosttyTerminalProgramStatusFn"]
     pub const MAX_VALUE: Type = 2147483647;
 }
 pub mod TerminalData {
