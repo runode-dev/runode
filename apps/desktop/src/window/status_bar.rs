@@ -75,6 +75,8 @@ struct Status {
     ports: Vec<Port>,
     /// 所有窗口里各个终端的 shell 的进程号。
     shells: HashSet<u32>,
+    /// 宿主在 `Welcome` 里报的进程号，见 `host`。
+    host: Option<u32>,
     terminals: usize,
     /// 有 agent 在干活。
     working: bool,
@@ -85,27 +87,18 @@ struct Status {
 impl Global for Status {}
 
 impl Status {
-    /// 宿主的进程号：各个 shell 的父进程，去掉 app 自己（宿主跑在 app 里时就是它）。
-    fn hosts(&self) -> Vec<u32> {
-        let app = std::process::id();
-        let mut hosts: Vec<u32> = self
-            .shells
-            .iter()
-            .filter_map(|&shell| self.procs.get(shell).map(|proc| proc.ppid))
-            .filter(|&ppid| ppid != app)
-            .collect();
-        hosts.sort_unstable();
-        hosts.dedup();
-        hosts
+    /// 单独一个进程跑的宿主的进程号；宿主跑在 app 里时为 `None`。不按 shell 的父进程认：升级接手后
+    /// shell 的父进程（旧宿主）已经退出，父进程成了 1 号进程。
+    fn host(&self) -> Option<u32> {
+        self.host.filter(|&host| host != std::process::id())
     }
 
-    /// runode 一共占的：app 和宿主各自连同子孙进程，宿主是 app 拉起来的时候不重复算。
+    /// runode 一共占的：app、宿主和各个终端的 shell 各自连同子孙进程，已经算在别的里面的不重复算。
+    /// shell 要单独算，因为升级接手后它们不在 app 或宿主的子孙里。
     fn total(&self) -> Usage {
-        let app = std::process::id();
-        self.hosts()
-            .into_iter()
-            .filter(|&host| self.procs.owner(host, |pid| pid == app).is_none())
-            .fold(self.procs.tree(app), |total, host| total + self.procs.tree(host))
+        let roots: HashSet<u32> =
+            std::iter::once(std::process::id()).chain(self.host()).chain(self.shells.iter().copied()).collect();
+        self.procs.forest(&roots)
     }
 
     /// 监听着端口的进程是哪个终端里的：返回那个终端的 shell 的进程号。
@@ -138,7 +131,14 @@ pub fn watch(cx: &mut App) {
         loop {
             let active = cx.update(|cx| cx.active_window().is_some());
             let probed = if active {
-                Some(cx.background_executor().spawn(async { (probe::processes(), probe::listening_ports()) }).await)
+                Some(
+                    cx.background_executor()
+                        .spawn(async {
+                            // 等宿主连好要阻塞，放在后台问。
+                            (probe::processes(), probe::listening_ports(), crate::host_client::link().host_pid())
+                        })
+                        .await,
+                )
             } else {
                 None
             };
@@ -150,7 +150,7 @@ pub fn watch(cx: &mut App) {
 }
 
 /// 收下问到的进程和端口，从各窗口里数终端、看 agent，再决定挡不挡休眠，重画各窗口。
-fn tick(probed: Option<(Procs, Vec<Port>)>, cx: &mut App) {
+fn tick(probed: Option<(Procs, Vec<Port>, Option<u32>)>, cx: &mut App) {
     let windows = remote::windows(cx);
     let (mut shells, mut terminals, mut working) = (HashSet::new(), 0, false);
     for handle in &windows {
@@ -166,9 +166,10 @@ fn tick(probed: Option<(Procs, Vec<Port>)>, cx: &mut App) {
     let status = cx.default_global::<Status>();
     let before = (status.terminals, status.caffeinate.is_some());
     let mut changed = probed.is_some();
-    if let Some((procs, ports)) = probed {
+    if let Some((procs, ports, host)) = probed {
         status.procs = procs;
         status.ports = ports;
+        status.host = host;
     }
     status.shells = shells;
     status.terminals = terminals;
@@ -468,7 +469,7 @@ impl WindowView {
         }
         let app = std::process::id();
         let own: Vec<_> = std::iter::once((rust_i18n::t!("status.app").into_owned(), app))
-            .chain(status.hosts().into_iter().map(|host| (rust_i18n::t!("status.host").into_owned(), host)))
+            .chain(status.host().map(|host| (rust_i18n::t!("status.host").into_owned(), host)))
             .map(|(name, pid)| (SharedString::from(name), procs.one(pid)))
             .collect();
         let own_sum = own.iter().fold(Usage::default(), |sum, (_, usage)| sum + *usage);

@@ -191,6 +191,8 @@ struct State {
     snapshots: bool,
     /// 现在这条连接上的宿主的构建，见 `Link::host_build`。
     host_build: Option<BuildId>,
+    /// 现在这条连接上的宿主的进程号，见 `Link::host_pid`。
+    host_pid: Option<u32>,
 }
 
 /// 一个连着（或正连着）的会话。
@@ -386,6 +388,7 @@ impl Link {
             state.connected = true;
             state.snapshots = snapshots;
             state.host_build = Some(welcome.build);
+            state.host_pid = Some(host_pid);
             *self.inner.writer() =
                 Some(Writer { generation: state.generation, stream: BufWriter::with_capacity(WRITE_BUFFER, stream) });
             state.generation
@@ -429,6 +432,11 @@ impl Link {
     /// 最近一次连上的宿主在 `Welcome` 里报的构建；还没连上过时为 `None`。
     pub fn host_build(&self) -> Option<BuildId> {
         self.inner.state().host_build.clone()
+    }
+
+    /// 最近一次连上的宿主在 `Welcome` 里报的进程号；宿主跑在 app 里时就是 app 自己。
+    pub fn host_pid(&self) -> Option<u32> {
+        self.inner.state().host_pid
     }
 
     /// 发一条控制消息，不等回话；没连着或写不出去时记一笔日志。`SetTheme`、`SetOptions` 记下来，

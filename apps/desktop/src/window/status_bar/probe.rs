@@ -2,7 +2,7 @@
 //! 以及防止电脑休眠（`caffeinate`）。都是 macOS 自带的命令，跑不了时当没有。
 
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     process::{Child, Command, Stdio},
 };
 
@@ -45,10 +45,6 @@ impl Procs {
         Self { procs, children }
     }
 
-    pub(super) fn get(&self, pid: u32) -> Option<&Proc> {
-        self.procs.get(&pid)
-    }
-
     /// 只算 `pid` 这一个进程。
     pub(super) fn one(&self, pid: u32) -> Usage {
         self.procs.get(&pid).map_or(Usage::default(), |proc| Usage { cpu: proc.cpu, memory: proc.memory })
@@ -63,6 +59,17 @@ impl Procs {
             stack.extend(self.children.get(&pid).into_iter().flatten().filter(|&&child| child != pid));
         }
         total
+    }
+
+    /// `roots` 里各个进程连同子孙加起来；一个进程在另一个的子孙里时只算一次。
+    pub(super) fn forest(&self, roots: &HashSet<u32>) -> Usage {
+        roots
+            .iter()
+            .filter(|&&pid| {
+                let parent = self.procs.get(&pid).map(|proc| proc.ppid);
+                parent.and_then(|ppid| self.owner(ppid, |pid| roots.contains(&pid))).is_none()
+            })
+            .fold(Usage::default(), |total, &pid| total + self.tree(pid))
     }
 
     /// 沿父进程往上找，`pid` 自己或者最近的一个让 `is_root` 成立的祖先；找到 1 号进程还没有时为 `None`。
@@ -225,6 +232,8 @@ mod tests {
         assert_eq!(procs.owner(12, |pid| pid == 10), Some(10));
         assert_eq!(procs.owner(10, |pid| pid == 10), Some(10));
         assert_eq!(procs.owner(20, |pid| pid == 10), None);
+        // 11 在 10 下面不重复算；20 的父进程是 1 号进程，单独算上，1 号进程本身不算进来。
+        assert_eq!(procs.forest(&HashSet::from([10, 11, 20])), Usage { cpu: 6.0, memory: 118 * 1024 });
     }
 
     #[test]
