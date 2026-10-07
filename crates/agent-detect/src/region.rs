@@ -21,14 +21,8 @@ pub(crate) enum Region {
     BeforeCurrentPromptMarker,
     /// 有当前提示行时为空，没有时是整段。
     WholeRecentWithoutCurrentPromptMarker,
-    /// 当前提示行之前最近的那个标记行，只有那一行。
-    CurrentPromptBlockMarker,
-    /// 从当前提示行之前最近的标记行开始到末尾。
-    AfterCurrentPromptBlockMarker,
     /// 输入框里面：最后两条横线中靠上那条之后，到下一条横线之前。
     PromptBoxBody,
-    /// 输入框上面的全部内容；没有输入框时是整段。
-    AbovePromptBox,
     /// 输入框上面最后一个不空的行。
     LastNonEmptyAbovePromptBox,
     /// 最后一条横线之后；没有横线时是整段。
@@ -37,8 +31,6 @@ pub(crate) enum Region {
     OscTitle,
     /// 程序最近一次 OSC 9 报告里 `9;` 后面的部分，比如 `4;3`。
     OscProgress,
-    /// 最后 n 行，空行也算。
-    BottomLines(usize),
     /// 从倒数第 n 个不空的行开始到末尾。
     BottomNonEmptyLines(usize),
     /// 从开头到第 n 个不空的行为止。
@@ -57,18 +49,12 @@ impl Region {
             "after_last_prompt_marker" => Self::AfterLastPromptMarker,
             "before_current_prompt_marker" => Self::BeforeCurrentPromptMarker,
             "whole_recent_without_current_prompt_marker" => Self::WholeRecentWithoutCurrentPromptMarker,
-            "current_prompt_block_marker" => Self::CurrentPromptBlockMarker,
-            "after_current_prompt_block_marker" => Self::AfterCurrentPromptBlockMarker,
             "prompt_box_body" => Self::PromptBoxBody,
-            "above_prompt_box" => Self::AbovePromptBox,
             "last_non_empty_above_prompt_box" => Self::LastNonEmptyAbovePromptBox,
             "after_last_horizontal_rule" => Self::AfterLastHorizontalRule,
             "osc_title" => Self::OscTitle,
             "osc_progress" => Self::OscProgress,
             _ => {
-                if let Some(n) = counted(spec, "bottom_lines") {
-                    return n.parse().ok().map(Self::BottomLines);
-                }
                 if let Some(n) = counted(spec, "bottom_non_empty_lines") {
                     return n.parse().ok().map(Self::BottomNonEmptyLines);
                 }
@@ -102,8 +88,6 @@ impl Region {
                 Some(_) => "",
                 None => screen,
             },
-            Self::CurrentPromptBlockMarker => current_block_marker(&lines).map_or("", |i| lines.line(i)),
-            Self::AfterCurrentPromptBlockMarker => current_block_marker(&lines).map_or("", |i| lines.from(i)),
             Self::PromptBoxBody => match prompt_box_top(&lines) {
                 Some(top) => {
                     let end =
@@ -112,7 +96,6 @@ impl Region {
                 }
                 None => "",
             },
-            Self::AbovePromptBox => above_prompt_box(&lines),
             Self::LastNonEmptyAbovePromptBox => {
                 above_prompt_box(&lines).lines().rev().find(|line| !line.trim().is_empty()).unwrap_or("")
             }
@@ -120,7 +103,6 @@ impl Region {
                 Some(i) => lines.from(i + 1),
                 None => screen,
             },
-            Self::BottomLines(n) => lines.from(lines.len().saturating_sub(n)),
             Self::BottomNonEmptyLines(n) => {
                 let start = (0..lines.len()).rev().filter(|&i| !lines.line(i).trim().is_empty()).take(n).last();
                 start.map_or("", |i| lines.from(i))
@@ -206,12 +188,6 @@ fn current_prompt(lines: &Lines<'_>) -> Option<usize> {
     (prompt + 1..lines.len()).all(|i| !is_block_marker(lines.line(i))).then_some(prompt)
 }
 
-/// 当前提示行之前最近的标记行。
-fn current_block_marker(lines: &Lines<'_>) -> Option<usize> {
-    let prompt = current_prompt(lines)?;
-    (0..prompt).rev().find(|&i| is_block_marker(lines.line(i)))
-}
-
 /// 输入框上边那条横线：从下往上数第二条横线。
 fn prompt_box_top(lines: &Lines<'_>) -> Option<usize> {
     (0..lines.len()).rev().filter(|&i| is_horizontal_rule(lines.line(i))).nth(1)
@@ -245,7 +221,6 @@ mod tests {
     #[test]
     fn regions_cut_the_screen_by_its_structure() {
         for (screen, spec, expected) in [
-            ("old\n\nnew\n", "bottom_lines(2)", "\nnew\n"),
             ("a\nb\n\nc\n\n", "bottom_non_empty_lines(2)", "b\n\nc\n\n"),
             ("\n", "bottom_non_empty_lines(2)", ""),
             ("\na\n\nb\nc\n", "top_non_empty_lines(2)", "\na\n\nb\n"),
@@ -254,10 +229,6 @@ mod tests {
             ("before\n› input\nafter\n", "whole_recent_without_current_prompt_marker", ""),
             ("no marker\n", "whole_recent_without_current_prompt_marker", "no marker\n"),
             ("› old\n• new\n", "whole_recent_without_current_prompt_marker", "› old\n• new\n"),
-            ("• old\n■ latest\n› input\n", "current_prompt_block_marker", "■ latest"),
-            ("• old\n■ latest\n› input\n", "after_current_prompt_block_marker", "■ latest\n› input\n"),
-            ("› old\n• new\n", "current_prompt_block_marker", ""),
-            ("above\n\n───\nbody\n───\nfooter\n", "above_prompt_box", "above\n\n"),
             ("above\n\n───\nbody\n───\nfooter\n", "last_non_empty_above_prompt_box", "above"),
             ("above\n───\nbody\n───\nfooter\n", "prompt_box_body", "body\n"),
             ("above\n───\nbody\n", "prompt_box_body", ""),
@@ -282,11 +253,11 @@ mod tests {
         assert_eq!(Region::parse("top_non_empty_lines(20)"), Some(Region::TopNonEmptyLines(20)));
         for bad in [
             "after_last_promt_marker",
-            "bottom_lines(x)",
+            "bottom_non_empty_lines(x)",
             "top_non_empty_lines(0)",
             "top_non_empty_lines(07)",
             "top_non_empty_lines(70000)",
-            "bottom_lines(3",
+            "bottom_non_empty_lines(3",
         ] {
             assert_eq!(Region::parse(bad), None, "{bad}");
         }

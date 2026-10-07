@@ -25,8 +25,3 @@ pub fn split_status(title: &str) -> Option<(Agent, &str)> {
     let kind = if is_pi_title(rest) { AgentKind::Pi } else { kind };
     Some((Agent { kind, state }, rest))
 }
-
-/// 去掉状态前缀后的标题，用来显示；没有前缀时原样返回。
-pub fn display_title(title: &str) -> &str {
-    split_status(title).map_or(title, |(_, rest)| rest)
-}

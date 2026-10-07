@@ -38,14 +38,6 @@ pub const ENGINE_VERSION: u32 = 3;
 /// `top_non_empty_lines` 从第几版格式开始有。
 const TOP_LINES_ENGINE_VERSION: u32 = 3;
 
-/// 防止规则写得太复杂、求值太慢的上限。
-const MAX_RULES: usize = 128;
-const MAX_GATE_DEPTH: usize = 8;
-const MAX_GATES: usize = 512;
-const MAX_MATCHERS_PER_GATE: usize = 32;
-const MAX_MATCHERS: usize = 1024;
-const MAX_MATCHER_CHARS: usize = 512;
-
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct FileSpec {
@@ -196,16 +188,10 @@ impl RuleSet {
         if spec.rules.is_empty() {
             return Err("no rules".into());
         }
-        if spec.rules.len() > MAX_RULES {
-            return Err(format!("{} rules, at most {MAX_RULES}", spec.rules.len()));
-        }
-        let mut budget = Budget::default();
         let mut rules = Vec::with_capacity(spec.rules.len());
         for rule in spec.rules {
             let id = rule.id.clone();
-            rules.push(
-                compile_rule(rule, spec.min_engine_version, &mut budget).map_err(|err| format!("rule {id}: {err}"))?,
-            );
+            rules.push(compile_rule(rule, spec.min_engine_version).map_err(|err| format!("rule {id}: {err}"))?);
         }
         // 稳定排序：优先级一样的保持原来的先后。
         rules.sort_by_key(|rule| std::cmp::Reverse(rule.priority));
@@ -247,13 +233,7 @@ impl RuleSet {
     }
 }
 
-#[derive(Default)]
-struct Budget {
-    gates: usize,
-    matchers: usize,
-}
-
-fn compile_rule(rule: RuleSpec, min_engine: Option<u32>, budget: &mut Budget) -> Result<Rule, String> {
+fn compile_rule(rule: RuleSpec, min_engine: Option<u32>) -> Result<Rule, String> {
     if rule.id.trim().is_empty() {
         return Err("empty rule id".into());
     }
@@ -292,33 +272,14 @@ fn compile_rule(rule: RuleSpec, min_engine: Option<u32>, budget: &mut Budget) ->
         region,
         visible,
         skip: rule.skip_state_update,
-        gate: compile_gate(gate, 0, false, budget)?,
+        gate: compile_gate(gate, false)?,
     })
 }
 
 /// 编译一个条件。直接写在 `not` 里的条件（`negated`）可以只有 `not`，其余的至少要有一个
 /// 正面条件，免得写出什么都能命中的规则。
-fn compile_gate(spec: GateSpec, depth: usize, negated: bool, budget: &mut Budget) -> Result<Gate, String> {
-    if depth > MAX_GATE_DEPTH {
-        return Err(format!("conditions nested deeper than {MAX_GATE_DEPTH}"));
-    }
-    budget.gates += 1;
-    if budget.gates > MAX_GATES {
-        return Err(format!("more than {MAX_GATES} conditions"));
-    }
+fn compile_gate(spec: GateSpec, negated: bool) -> Result<Gate, String> {
     let direct = spec.contains.len() + spec.regex.len() + spec.line_regex.len();
-    if direct > MAX_MATCHERS_PER_GATE {
-        return Err(format!("{direct} matchers in one condition, at most {MAX_MATCHERS_PER_GATE}"));
-    }
-    budget.matchers += direct;
-    if budget.matchers > MAX_MATCHERS {
-        return Err(format!("more than {MAX_MATCHERS} matchers"));
-    }
-    if let Some(long) =
-        spec.contains.iter().chain(&spec.regex).chain(&spec.line_regex).find(|m| m.chars().count() > MAX_MATCHER_CHARS)
-    {
-        return Err(format!("matcher longer than {MAX_MATCHER_CHARS} characters: {long:?}"));
-    }
     let positive = direct > 0 || !spec.all.is_empty() || !spec.any.is_empty();
     if !positive && !(negated && !spec.none.is_empty()) {
         return Err("a condition needs contains, regex, line_regex, all or any".into());
@@ -329,16 +290,16 @@ fn compile_gate(spec: GateSpec, depth: usize, negated: bool, budget: &mut Budget
             .map(|pattern| Regex::new(&pattern).map_err(|err| format!("bad regex {pattern:?}: {err}")))
             .collect()
     };
-    let nested = |gates: Vec<GateSpec>, negated: bool, budget: &mut Budget| -> Result<Vec<Gate>, String> {
-        gates.into_iter().map(|gate| compile_gate(gate, depth + 1, negated, budget)).collect()
+    let nested = |gates: Vec<GateSpec>, negated: bool| -> Result<Vec<Gate>, String> {
+        gates.into_iter().map(|gate| compile_gate(gate, negated)).collect()
     };
     Ok(Gate {
         contains: spec.contains.iter().map(|needle| needle.to_lowercase()).collect(),
         regex: regex(spec.regex)?,
         line_regex: regex(spec.line_regex)?,
-        all: nested(spec.all, false, budget)?,
-        any: nested(spec.any, false, budget)?,
-        none: nested(spec.none, true, budget)?,
+        all: nested(spec.all, false)?,
+        any: nested(spec.any, false)?,
+        none: nested(spec.none, true)?,
     })
 }
 

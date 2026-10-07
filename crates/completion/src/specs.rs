@@ -15,12 +15,7 @@ static INDEX: &[(&str, usize, usize, &str)] = include!(concat!(env!("OUT_DIR"), 
 /// 一个命令的规格。
 pub struct Spec {
     pub signature: Signature,
-    /// 值要写成 `--name=value` 的选项名。
-    pub requires_equals: HashSet<String>,
-    /// 一条命令里可以出现多次的选项名。
-    pub repeatable: HashSet<String>,
-    /// 规格里标为隐藏的选项和子命令名，只在完整输入时才列出来。
-    pub hidden: HashSet<String>,
+    pub flags: Flags,
 }
 
 /// 和别的命令同一个可执行文件的短名字，按它指的那个命令补全：`rn` 是 runode 放在自己旁边的
@@ -88,23 +83,22 @@ fn load(name: &str) -> Option<Spec> {
         }
     };
     // 转成 `Signature` 时这几项会丢掉，先记下来。
-    let mut spec_flags = Flags::default();
-    spec_flags.collect(&command);
+    let mut flags = Flags::default();
+    flags.collect(&command);
     let signatures: Vec<Signature> = command.into();
     let signature = signatures.into_iter().find(|s| s.name == name)?;
-    Some(Spec {
-        signature,
-        requires_equals: spec_flags.requires_equals,
-        repeatable: spec_flags.repeatable,
-        hidden: spec_flags.hidden,
-    })
+    Some(Spec { signature, flags })
 }
 
+/// 规格里转成 `Signature` 时会丢掉的几项。
 #[derive(Default)]
-struct Flags {
-    requires_equals: HashSet<String>,
-    repeatable: HashSet<String>,
-    hidden: HashSet<String>,
+pub struct Flags {
+    /// 值要写成 `--name=value` 的选项名。
+    pub requires_equals: HashSet<String>,
+    /// 一条命令里可以出现多次的选项名。
+    pub repeatable: HashSet<String>,
+    /// 规格里标为隐藏的选项和子命令名，只在完整输入时才列出来。
+    pub hidden: HashSet<String>,
 }
 
 impl Flags {
@@ -177,7 +171,7 @@ mod tests {
                 .iter()
                 .all(|name| subcommands.contains(name))
         );
-        assert!(runode.repeatable.contains("--key"));
+        assert!(runode.flags.repeatable.contains("--key"));
         let generators = dynamic("runode").unwrap().generators();
         assert!(generators.contains_key(&"sessions".into()) && generators.contains_key(&"devices".into()));
     }

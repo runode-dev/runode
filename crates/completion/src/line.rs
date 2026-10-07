@@ -166,11 +166,9 @@ pub fn quote_at(text: &str, start: usize, end: usize) -> Quote {
     let mut chars = text[start..end].chars();
     while let Some(c) = chars.next() {
         match (quote, c) {
-            (Quote::None, '\\') => {
-                chars.next();
-            }
-            // 双引号里的反斜杠转义 `"` 之类；转义了别的字时反斜杠原样留着，也不影响引号。
-            (Quote::Double, '\\') => {
+            // 引号外和双引号里的反斜杠转义下一个字（双引号里是 `"` 之类）；转义了别的字时反斜杠原样留着，
+            // 也不影响引号。
+            (Quote::None | Quote::Double, '\\') => {
                 chars.next();
             }
             (Quote::None, '\'') => quote = Quote::Single,

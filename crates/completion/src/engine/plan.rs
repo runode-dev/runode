@@ -222,7 +222,7 @@ impl<'a> State<'a> {
                 plan.candidates.push(Candidate {
                     description: sub.description.clone(),
                     priority: sub.priority,
-                    hidden: spec.hidden.contains(&sub.name),
+                    hidden: spec.flags.hidden.contains(&sub.name),
                     ..Candidate::new(sub.name.clone(), Kind::Subcommand)
                 });
             }
@@ -242,7 +242,7 @@ impl<'a> State<'a> {
     /// 对得上的那个名字，见 `option_name`。
     fn options(&self, spec: &Spec, plan: &mut Plan) {
         for opt in self.signature.options() {
-            let repeatable = opt.names().any(|n| spec.repeatable.contains(n));
+            let repeatable = opt.names().any(|n| spec.flags.repeatable.contains(n));
             if !repeatable && opt.names().any(|n| self.used.contains(n)) {
                 continue;
             }
@@ -251,14 +251,14 @@ impl<'a> State<'a> {
             let Some(name) = option_name(&names, &plan.typed) else {
                 continue;
             };
-            let equals = spec.requires_equals.contains(name);
+            let equals = spec.flags.requires_equals.contains(name);
             let value = if equals && !name.ends_with('=') { format!("{name}=") } else { name.to_owned() };
             plan.candidates.push(Candidate {
                 label: names.join(", "),
                 finish: !value.ends_with('='),
                 description: opt.description.clone(),
                 priority: opt.priority,
-                hidden: opt.names().any(|n| spec.hidden.contains(n)),
+                hidden: opt.names().any(|n| spec.flags.hidden.contains(n)),
                 ..Candidate::new(value, Kind::Option)
             });
         }
@@ -279,13 +279,11 @@ fn option_name<'a>(names: &[&'a str], typed: &str) -> Option<&'a str> {
     }
 }
 
-/// 参数的各种来源的组，从这里往后数，按规格里列出的顺序；用来区分同一个参数的几个生成器。
-const ARGUMENTS: u32 = 1;
-
-/// 一个参数的候选：固定取值直接给出，文件和生成器记作还要去取的来源。
+/// 一个参数的候选：固定取值直接给出，文件和生成器记作还要去取的来源。生成器的组号是它在规格
+/// 里列出的顺序，用来区分同一个参数的几个生成器。
 fn argument(param: &Argument, from: usize, plan: &mut Plan) {
     for (i, kind) in param.argument_types.iter().enumerate() {
-        let group = ARGUMENTS + i as u32;
+        let group = i as u32;
         match kind {
             ArgumentType::Suggestion(suggestion) => plan.candidates.push(Candidate {
                 label: suggestion.display_name.clone().unwrap_or_else(|| suggestion.exact_string.clone()),

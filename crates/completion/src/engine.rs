@@ -148,8 +148,3 @@ pub fn path(name: String, is_dir: bool, description: Option<String>, from: usize
         ..Candidate::new(value, if is_dir { Kind::Folder } else { Kind::File })
     }
 }
-
-/// 命令名候选：别名、函数、内建命令、关键字或者 PATH 里的可执行文件。
-pub fn command(name: String, kind: Kind) -> Candidate {
-    Candidate::new(name, kind)
-}

@@ -154,34 +154,40 @@ fn effective_name(process: &ForegroundProcess) -> String {
     own.to_owned()
 }
 
+/// node、bun 直接给代码的选项。
+const JS_EVAL_FLAGS: &[&str] = &["-e", "--eval", "-p", "--print"];
+
 /// 运行时或 shell 的参数里跑的那个 agent 的短名。`-e`、`-c` 这类直接给代码的不算。
 fn wrapped_agent(runtime: &str, argv: &[String]) -> Option<String> {
     match lookup_name(basename(runtime)).as_str() {
-        "node" | "bun" => script_agent(argv, &["-e", "--eval", "-p", "--print"], &[]),
+        "node" | "bun" => script_agent(argv, JS_EVAL_FLAGS, &[]),
         "sh" | "bash" | "zsh" | "fish" => script_agent(argv, &["-c"], &[]),
         name if is_python(name) => hermes_installer(argv).or_else(|| script_agent(argv, &["-c"], &["-m"])),
         _ => None,
     }
 }
 
-/// 参数里第一个不是选项的就是要跑的脚本，认它是哪个 agent。遇到 `eval_flags` 或
-/// `module_flags`（直接给代码、跑模块）时不认。
+/// 参数里要跑的脚本是哪个 agent，见 `script_index`。
 fn script_agent(argv: &[String], eval_flags: &[&str], module_flags: &[&str]) -> Option<String> {
-    let mut args = argv.iter().skip(1);
-    while let Some(arg) = args.next() {
+    script_index(argv, eval_flags, module_flags).and_then(|i| agent_from_path(&argv[i]))
+}
+
+/// 参数里第一个不是选项的（或者 `--` 后面那个）就是要跑的脚本，返回它在 `argv` 里的下标。遇到
+/// `eval_flags` 或 `module_flags`（直接给代码、跑模块）时为空。
+fn script_index(argv: &[String], eval_flags: &[&str], module_flags: &[&str]) -> Option<usize> {
+    let mut i = 1;
+    while let Some(arg) = argv.get(i) {
         if arg == "--" {
-            return args.next().and_then(|script| agent_from_path(script));
+            return (i + 1 < argv.len()).then_some(i + 1);
         }
         if flag_matches(arg, eval_flags) || flag_matches(arg, module_flags) {
             return None;
         }
         if arg.starts_with('-') {
-            if option_takes_value(arg) {
-                args.next();
-            }
+            i += if option_takes_value(arg) { 2 } else { 1 };
             continue;
         }
-        return agent_from_path(arg);
+        return Some(i);
     }
     None
 }
@@ -351,21 +357,7 @@ fn letta_entry(argv: &[String]) -> Option<usize> {
     if !matches!(lookup_name(basename(&argv[0])).as_str(), "node" | "bun") {
         return None;
     }
-    let mut i = 1;
-    while let Some(arg) = argv.get(i) {
-        if arg == "--" {
-            return argv.get(i + 1).is_some_and(|arg| is_letta(arg)).then_some(i + 1);
-        }
-        if flag_matches(arg, &["-e", "--eval", "-p", "--print"]) {
-            return None;
-        }
-        if arg.starts_with('-') {
-            i += if option_takes_value(arg) { 2 } else { 1 };
-            continue;
-        }
-        return is_letta(arg).then_some(i);
-    }
-    None
+    script_index(argv, JS_EVAL_FLAGS, &[]).filter(|&i| is_letta(&argv[i]))
 }
 
 /// hermes 的安装程序用 `python -I -c <固定的启动代码>` 启动它。只认这段启动代码原样出现、

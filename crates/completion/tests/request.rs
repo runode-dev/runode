@@ -10,6 +10,13 @@ fn request(input: &str) -> Option<Request> {
     Request::new(&input.replacen('^', "", 1), cursor)
 }
 
+/// `input` 光标处（`^`）排好序的本地候选的值。
+fn names(input: &str) -> Vec<String> {
+    let request = request(input).unwrap();
+    let candidates = request.local_candidates(None, &Shell::default());
+    rank(&candidates, request.typed()).into_iter().map(|i| candidates[i].value.clone()).collect()
+}
+
 #[test]
 fn ls_lists_the_home_directory() {
     let Some(home) = runode_paths::Dirs::from_env().home else {
@@ -89,11 +96,6 @@ fn git_checkout_runs_a_branch_generator() {
 
 #[test]
 fn cargo_and_docker_have_specs() {
-    let names = |input: &str| -> Vec<String> {
-        let request = request(input).unwrap();
-        let candidates = request.local_candidates(None, &Shell::default());
-        rank(&candidates, request.typed()).into_iter().map(|i| candidates[i].value.clone()).collect()
-    };
     assert!(names("cargo b^").contains(&"build".to_owned()));
     assert!(names("docker ru^").contains(&"run".to_owned()));
     assert!(names("npm i^").contains(&"install".to_owned()));
@@ -101,11 +103,6 @@ fn cargo_and_docker_have_specs() {
 
 #[test]
 fn runode_completes_its_own_commands() {
-    let names = |input: &str| -> Vec<String> {
-        let request = request(input).unwrap();
-        let candidates = request.local_candidates(None, &Shell::default());
-        rank(&candidates, request.typed()).into_iter().map(|i| candidates[i].value.clone()).collect()
-    };
     assert_eq!(names("runode re^"), ["read", "remote"]);
     assert_eq!(names("runode remote ^"), ["devices", "pair", "revoke"]);
     assert!(names("runode wait ab12 --for ^").contains(&"done".to_owned()));

@@ -211,19 +211,19 @@ fn command_names(shell: &Shell, candidates: &mut Vec<Candidate>) {
     let names = &shell.names;
     let values: HashMap<&str, &str> = names.alias_values.iter().map(|(n, v)| (n.as_str(), v.as_str())).collect();
     for name in &names.aliases {
-        let mut candidate = engine::command(name.clone(), Kind::Alias);
+        let mut candidate = Candidate::new(name.clone(), Kind::Alias);
         candidate.description = values.get(name.as_str()).map(|value| (*value).to_owned());
         candidates.push(candidate);
     }
     let groups =
         [(&names.functions, Kind::Function), (&names.builtins, Kind::Builtin), (&names.keywords, Kind::Keyword)];
     for (list, kind) in groups {
-        candidates.extend(list.iter().map(|name| engine::command(name.clone(), kind)));
+        candidates.extend(list.iter().map(|name| Candidate::new(name.clone(), kind)));
     }
     let path = shell.path.clone().or_else(|| std::env::var_os("PATH")).unwrap_or_default();
     candidates.extend(commands::executables(&path).into_iter().map(|name| {
         let description = specs::description(&name).map(str::to_owned);
-        Candidate { description, ..engine::command(name, Kind::Command) }
+        Candidate { description, ..Candidate::new(name, Kind::Command) }
     }));
 }
 

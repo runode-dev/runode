@@ -101,21 +101,23 @@ fn list(dir: &Path) -> Vec<String> {
 
 #[cfg(test)]
 mod tests {
+    use std::os::unix::fs::PermissionsExt as _;
+
     use super::*;
+
+    /// 建一个权限是 `mode` 的空文件。
+    fn make(path: &Path, mode: u32) {
+        std::fs::write(path, "").unwrap();
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode)).unwrap();
+    }
 
     #[test]
     fn lists_executables_on_the_path_and_notices_changes() {
-        use std::os::unix::fs::PermissionsExt as _;
         let dir = std::env::temp_dir().join(format!("runode-commands-test-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
-        let make = |name: &str, mode: u32| {
-            let path = dir.join(name);
-            std::fs::write(&path, "").unwrap();
-            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(mode)).unwrap();
-        };
-        make("zz-tool", 0o755);
-        make("notes.txt", 0o644);
+        make(&dir.join("zz-tool"), 0o755);
+        make(&dir.join("notes.txt"), 0o644);
         let path = std::env::join_paths([dir.as_path(), Path::new("/bin")]).unwrap();
         let names = executables(&path);
         assert!(names.contains(&"zz-tool".to_owned()) && names.contains(&"sh".to_owned()));
@@ -123,7 +125,7 @@ mod tests {
         assert!(is_command(&path, "zz-tool") && !is_command(&path, "notes.txt") && !is_command(&path, "zz"));
         // 目录变了就重新列；修改时间的精度可能是秒，等它走过去。
         std::thread::sleep(std::time::Duration::from_millis(1100));
-        make("aa-tool", 0o755);
+        make(&dir.join("aa-tool"), 0o755);
         assert!(executables(&path).contains(&"aa-tool".to_owned()));
         // 同一个目录写成相对路径时不列。
         let cwd = std::env::current_dir().unwrap();
@@ -136,20 +138,15 @@ mod tests {
 
     #[test]
     fn is_command_looks_up_the_name_without_listing() {
-        use std::os::unix::fs::PermissionsExt as _;
         let dir = std::env::temp_dir().join(format!("runode-is-command-test-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         let (first, second) = (dir.join("first"), dir.join("second"));
         for sub in [&first, &second] {
             std::fs::create_dir_all(sub).unwrap();
         }
-        let make = |path: PathBuf, mode: u32| {
-            std::fs::write(&path, "").unwrap();
-            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(mode)).unwrap();
-        };
-        make(second.join("zz-tool"), 0o755);
-        make(second.join("notes.txt"), 0o644);
-        make(second.join(".hidden"), 0o755);
+        make(&second.join("zz-tool"), 0o755);
+        make(&second.join("notes.txt"), 0o644);
+        make(&second.join(".hidden"), 0o755);
         // 能进不能列的目录：列目录拿不到里面的东西，按名字看还看得到。
         std::fs::set_permissions(&second, std::fs::Permissions::from_mode(0o311)).unwrap();
         let path = std::env::join_paths([first.as_path(), second.as_path()]).unwrap();
@@ -169,13 +166,10 @@ mod tests {
 
     #[test]
     fn warm_executables_lists_in_the_background() {
-        use std::os::unix::fs::PermissionsExt as _;
         let dir = std::env::temp_dir().join(format!("runode-warm-commands-test-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
-        let tool = dir.join("zz-warm");
-        std::fs::write(&tool, "").unwrap();
-        std::fs::set_permissions(&tool, std::fs::Permissions::from_mode(0o755)).unwrap();
+        make(&dir.join("zz-warm"), 0o755);
         warm_executables(dir.as_os_str());
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
         let listed = loop {
