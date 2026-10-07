@@ -271,3 +271,22 @@ fn a_resumed_agent_survives_lost_signals_until_the_shell_is_back() {
     assert_eq!(f.poll(10), agent(Codex, Idle));
     assert_eq!(f.tracker.deadline(), Some(f.at(10 + GRACE_MS)));
 }
+
+#[test]
+fn program_status_records_are_kept_per_id() {
+    let mut f = Fixture::new();
+    let t = f.at(0);
+    f.tracker.foreground(Foreground::Program(None), t);
+    // 认不出 `app` 的程序算 `Other`；报告的状态盖过屏幕和输出活动。
+    f.tracker.program_status("build", "cargo", Some(Working), t);
+    f.tracker.program_status("builder", "cargo", Some(Blocked), t);
+    assert_eq!(f.poll(0), agent(Other, Blocked));
+    // 清掉 `build` 不连带同名开头的 `builder`。
+    f.tracker.program_status("build", "", None, f.at(10));
+    assert_eq!(f.poll(10), agent(Other, Blocked));
+    f.tracker.program_status("builder", "", Some(Idle), f.at(20));
+    assert_eq!(f.poll(20), agent(Other, Idle));
+    // 回到 shell 时记录作废。
+    f.tracker.foreground(Foreground::Shell, f.at(30));
+    assert_eq!(f.poll(30), None);
+}

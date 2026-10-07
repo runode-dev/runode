@@ -1,12 +1,14 @@
 //! 把各路信号合成前台 agent 的状态，并去抖。
 //!
 //! 信号有：前台进程认出来的 agent（`Tracker::foreground`）、标题开头的状态字符和 OSC 9;4 进度
-//! （`Tracker::title`、`Tracker::progress`，见 `crate::title`）、屏幕底部的文字和输出活动
-//! （`Tracker::output`）。合成的规则：
+//! （`Tracker::title`、`Tracker::progress`，见 `crate::title`）、程序用 OSC 7501 报告的状态
+//! （`Tracker::program_status`）、屏幕底部的文字和输出活动（`Tracker::output`）。合成的规则：
 //!
-//! - 是哪个 agent：前台进程认出来的优先，其次是标题前缀报告的，只有进度报告时是 pi（标题像
-//!   pi 的）或 `AgentKind::Other`。都没有就不算有 agent。
-//! - 什么状态：先用这种 agent 的识别规则（`RuleBook`）去比屏幕、标题和进度报告的原文；规则
+//! - 是哪个 agent：前台进程认出来的优先，其次是标题前缀报告的，再次是 OSC 7501 报告的 `app`
+//!   认得出的；只有 OSC 7501 或进度报告时是 pi（标题像 pi 的）或 `AgentKind::Other`。都没有
+//!   就不算有 agent。
+//! - 什么状态：程序用 OSC 7501 报告了的，就是它报告的，不比规则、不看输出、也不等确认空闲。
+//!   否则先用这种 agent 的识别规则（`RuleBook`）去比屏幕、标题和进度报告的原文；规则
 //!   说不准时用标题前缀和进度报告里 agent 自己报告的状态；再没有就当它空闲。
 //! - 规则没给出明摆着的状态、只是推测空闲时，持续有输出（不是在回显用户的按键）就算工作中。
 //! - 从工作中变成推测的空闲要多看几次才算数（`IDLE_CONFIRMATIONS` 次，每次隔
@@ -27,6 +29,7 @@ use std::time::{Duration, Instant};
 use runode_shared_types::agent::{Agent, AgentKind, AgentState};
 
 use crate::{
+    agent_from_name,
     book::RuleBook,
     osc::ProgressCapture,
     rules::{Signals, Verdict},
@@ -43,6 +46,8 @@ pub const IDLE_CONFIRMATIONS: u8 = 3;
 pub const IDLE_CAP: Duration = Duration::from_millis(700);
 /// 刚认出 agent 后不看屏幕的时长。
 pub const STARTUP_GRACE: Duration = Duration::from_secs(3);
+/// 最多记这么多条 OSC 7501 记录，再多就丢掉最久没更新的。协议要求至少 64、至多 256 条。
+const MAX_STATUS_RECORDS: usize = 256;
 /// 两段输出隔得比这短就算同一阵输出。
 pub const BURST_GAP: Duration = Duration::from_millis(800);
 /// 一阵输出持续这么久（从用户最后一次输入之后算）才算 agent 在干活。
@@ -69,6 +74,10 @@ pub struct Tracker {
     pi_title: bool,
     /// OSC 9;4 进度：`Some(true)` 进行中，`Some(false)` 已停下但程序还在前台。
     progress: Option<bool>,
+    /// 程序用 OSC 7501 报告的记录：id 和状态，最近更新的在后。done 和 error 记成空闲。
+    statuses: Vec<(String, AgentState)>,
+    /// OSC 7501 报告的 `app` 认得出的 agent，记录清空时一起清掉。
+    status_agent: Option<AgentKind>,
     /// 给规则的标题原文，换了 agent 时清空。
     title_text: String,
     /// 给规则的 OSC 9 原文。
@@ -209,6 +218,37 @@ impl Tracker {
         self.progress = progress;
     }
 
+    /// 程序用 OSC 7501 报告了 id 为 `id` 的记录在做什么，`state` 为 `None` 是清掉这条记录和它
+    /// 下面的全部记录（`id` 为空时清掉所有记录）。`app` 是程序报告的名字，认得出是哪个 agent
+    /// 时按它算。程序退出、回到 shell 时记录随 `foreground` 一起清掉。
+    pub fn program_status(&mut self, id: &str, app: &str, state: Option<AgentState>, now: Instant) {
+        let before = (self.status_state(), self.status_agent);
+        match state {
+            Some(state) => {
+                self.statuses.retain(|(record, _)| record != id);
+                if self.statuses.len() == MAX_STATUS_RECORDS {
+                    self.statuses.remove(0);
+                }
+                self.statuses.push((id.to_owned(), state));
+                if let Some(kind) = agent_from_name(app) {
+                    self.status_agent = Some(kind);
+                }
+            }
+            None => {
+                self.statuses.retain(|(record, _)| {
+                    !(id.is_empty()
+                        || record.strip_prefix(id).is_some_and(|rest| rest.is_empty() || rest.starts_with('/')))
+                });
+                if self.statuses.is_empty() {
+                    self.status_agent = None;
+                }
+            }
+        }
+        if (self.status_state(), self.status_agent) != before {
+            self.urgent = Some(now);
+        }
+    }
+
     /// 前台程序。回到 shell 时 agent 已经退出，它留下的标题和进度不再代表任何状态；换成
     /// 另一个 agent 时也不沿用上一个的。
     pub fn foreground(&mut self, foreground: Foreground, now: Instant) {
@@ -217,6 +257,7 @@ impl Tracker {
                 if self.process.is_some()
                     || self.title_agent.is_some()
                     || self.progress.is_some()
+                    || !self.statuses.is_empty()
                     || self.carried.is_some()
                 {
                     self.urgent = Some(now);
@@ -292,8 +333,20 @@ impl Tracker {
     fn kind(&self) -> Option<AgentKind> {
         self.process
             .or(self.title_agent.map(|agent| agent.kind))
-            .or(self.progress.map(|_| if self.pi_title { AgentKind::Pi } else { AgentKind::Other }))
+            .or(self.status_agent)
+            .or((self.progress.is_some() || !self.statuses.is_empty()).then_some(if self.pi_title {
+                AgentKind::Pi
+            } else {
+                AgentKind::Other
+            }))
             .or(self.carried.map(|agent| agent.kind))
+    }
+
+    /// OSC 7501 记录合起来的状态：有一条在等用户就是等用户，否则有一条在干活就是干活。
+    fn status_state(&self) -> Option<AgentState> {
+        [AgentState::Blocked, AgentState::Working, AgentState::Idle]
+            .into_iter()
+            .find(|state| self.statuses.iter().any(|(_, record)| record == state))
     }
 
     /// agent 在标题和进度里自己报告的状态。
@@ -308,6 +361,8 @@ impl Tracker {
         self.title_agent = None;
         self.pi_title = false;
         self.progress = None;
+        self.statuses.clear();
+        self.status_agent = None;
         self.title_text.clear();
         self.progress_text.clear();
         self.pending_idle = None;
@@ -332,6 +387,11 @@ impl Tracker {
             self.by_activity = false;
             return None;
         };
+        if let Some(state) = self.status_state() {
+            self.pending_idle = None;
+            self.by_activity = false;
+            return Some(Agent { kind, state });
+        }
         let reported = self.reported_state();
         if let Some(from) = self.grace_from {
             if now < from + STARTUP_GRACE {

@@ -2230,6 +2230,59 @@ pub enum ProgressState {
     Pause = ffi::TerminalProgressState::PAUSE,
 }
 
+/// 运行中的程序用 OSC 7501 发来的一条状态报告，由 [`Terminal::on_program_status`] 的回调
+/// 收到。字符串都是借用的，只在回调期间有效；程序没给的是空串。
+#[derive(Debug, Copy, Clone)]
+pub struct ProgramStatus<'t> {
+    ptr: *const ffi::TerminalProgramStatus,
+    _phan: PhantomData<&'t ()>,
+}
+
+impl<'t> ProgramStatus<'t> {
+    unsafe fn from_raw(raw: *const ffi::TerminalProgramStatus) -> Self {
+        Self { ptr: raw, _phan: PhantomData }
+    }
+
+    /// 程序在做什么。
+    pub fn state(self) -> Result<ProgramStatusState> {
+        // SAFETY: 报告在回调期间有效。
+        unsafe { *self.ptr }.state.try_into().map_err(|_| Error::InvalidValue)
+    }
+
+    /// 报告的是哪条记录，空串是程序自己那条；`/` 分出上下级，`build/test` 在 `build` 下面。
+    #[must_use]
+    pub fn id(self) -> &'t str {
+        // SAFETY: 报告在回调期间有效，libghostty 只交来校验过的 UTF-8。
+        unsafe { (*self.ptr).id.to_str() }
+    }
+
+    /// 程序给自己起的、供机器比对的名字，比如 `cargo`。
+    #[must_use]
+    pub fn app(self) -> &'t str {
+        // SAFETY: 同 `id`。
+        unsafe { (*self.ptr).app.to_str() }
+    }
+}
+
+/// OSC 7501 报告里程序在做什么。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, int_enum::IntEnum)]
+#[repr(i32)]
+#[non_exhaustive]
+pub enum ProgramStatusState {
+    /// 停着，等用户下一个指令。
+    Idle = ffi::ProgramStatusState::IDLE,
+    /// 自己在跑。
+    Working = ffi::ProgramStatusState::WORKING,
+    /// 做完了一件事，用户还没看。
+    Done = ffi::ProgramStatusState::DONE,
+    /// 要用户做点什么才能继续。
+    Blocked = ffi::ProgramStatusState::BLOCKED,
+    /// 失败停下了。
+    Error = ffi::ProgramStatusState::ERROR,
+    /// 不是状态：清掉这个 id 的记录和它下面的全部记录，id 为空时清掉所有记录。
+    Clear = ffi::ProgramStatusState::CLEAR,
+}
+
 /// 一次同步的剪贴板读取请求，由 [`Terminal::on_clipboard_read`] 的回调收到。
 ///
 /// 请求及其中的字符串都是借用的，只在回调期间有效。
@@ -3102,6 +3155,22 @@ handlers! {
         to = <'t>ProgressReportFn(ProgressReport<'t>),
     ) |term, func| {
         func(term, unsafe { ProgressReport::from_raw(progress) });
+    }
+
+    /// 运行中的程序用 OSC 7501 报告自己在做什么时调用给定函数。装着这个回调时终端才应答
+    /// 程序探测支持与否的 `OSC 7501 ; ?`，所以要同时装 `on_pty_write`，程序才收得到应答。
+    ///
+    /// 终端不保存报告：每个 id 一条记录、`Clear` 清掉哪些记录，都由调用方按协议管。全屏
+    /// 重置（RIS）时先以空 id 的 `Clear` 报告调这里，再调 [`on_reset`](Self::on_reset)。
+    pub fn on_program_status(
+        &mut self,
+        tag = PROGRAM_STATUS,
+        from = TerminalProgramStatusFn(
+            report: *const ffi::TerminalProgramStatus
+        ),
+        to = <'t>ProgramStatusFn(ProgramStatus<'t>),
+    ) |term, func| {
+        func(term, unsafe { ProgramStatus::from_raw(report) });
     }
 
     /// 运行中的程序请求读取剪贴板时调用给定函数：OSC 52 的 `?` 负载，或

@@ -32,13 +32,14 @@ use anyhow::{Result, anyhow};
 use libghostty_vt::{
     screen::Screen,
     terminal::{
-        ConformanceLevel, DeviceAttributeFeature, DeviceAttributes, DeviceType, PrimaryDeviceAttributes, ProgressState,
-        SecondaryDeviceAttributes, SemanticPrompt, SizeReportSize, Terminal, UnknownSequence,
+        ConformanceLevel, DeviceAttributeFeature, DeviceAttributes, DeviceType, PrimaryDeviceAttributes,
+        ProgramStatusState, ProgressState, SecondaryDeviceAttributes, SemanticPrompt, SizeReportSize, Terminal,
+        UnknownSequence,
     },
 };
 use runode_agent_detect::Tracker;
 use runode_shared_types::{
-    agent::Agent,
+    agent::{Agent, AgentState},
     grid::GridSize,
     session::{DriveAction, Driver, SessionMeta},
     settings::TermSettings,
@@ -776,6 +777,23 @@ fn register_callbacks(
             move |_, report| {
                 let active = matches!(report.state(), Ok(ProgressState::Set | ProgressState::Indeterminate));
                 effects.progress.set(Some(active));
+            }
+        })?
+        // 程序用 OSC 7501 报告自己在做什么；装上回调后终端才应答程序探测支持与否的查询。
+        // 回调不能 panic，借用失败时丢掉这一条。
+        .on_program_status({
+            let effects = effects.clone();
+            move |_, report| {
+                let state = match report.state() {
+                    Ok(ProgramStatusState::Working) => Some(AgentState::Working),
+                    Ok(ProgramStatusState::Blocked) => Some(AgentState::Blocked),
+                    Ok(ProgramStatusState::Clear) => None,
+                    Ok(_) => Some(AgentState::Idle),
+                    Err(_) => return,
+                };
+                if let Ok(mut reports) = effects.program_status.try_borrow_mut() {
+                    reports.push((report.id().to_owned(), report.app().to_owned(), state));
+                }
             }
         })?
         // 命令开始运行的那一刻它还原样留在屏幕上，在这里就读出来，之后的输出可能把它冲掉。

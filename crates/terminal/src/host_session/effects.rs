@@ -7,7 +7,7 @@ use std::{
     time::Instant,
 };
 
-use runode_shared_types::shell::ShellNames;
+use runode_shared_types::{agent::AgentState, shell::ShellNames};
 
 use super::{ClipboardRequest, HostSession};
 use crate::{history, pty};
@@ -22,6 +22,9 @@ pub(super) struct Effects {
     pub(super) reported: StdCell<bool>,
     /// 最近一次 OSC 9;4 进度报告是不是在进行中。
     pub(super) progress: StdCell<Option<bool>>,
+    /// 程序用 OSC 7501 报告的状态：记录的 id、`app`，以及状态（`None` 是清掉记录），按到达的
+    /// 先后，由 `feed` 交给 agent 的 tracker。
+    pub(super) program_status: RefCell<Vec<(String, String, Option<AgentState>)>>,
     /// shell 集成报告的命令步骤，按到达的先后，由 `take_commands` 取走。
     pub(super) prompts: RefCell<Vec<PromptEvent>>,
     /// shell 集成用 `SHELL_REPORT` 报告的 shell 自己的 PATH，对外见 `SessionMeta::shell_path`。
@@ -170,6 +173,9 @@ impl HostSession {
             let pty = &self.pty;
             self.agent_tracker.progress(active, now, || pty.foreground_is_shell());
         }
+        for (id, app, state) in self.effects.program_status.take() {
+            self.agent_tracker.program_status(&id, &app, state, now);
+        }
         let changed = changed | self.poll_agent_at(now);
         self.meta_dirty |= changed;
         changed
@@ -316,6 +322,23 @@ mod tests {
         assert_eq!(session.agent, pi_working);
         // 前台是 shell（这里的 `cat`）时清掉进度，就不再算 agent。
         assert!(session.feed(b"\x1b]9;4;0\x07"));
+        assert_eq!(session.agent, None);
+    }
+
+    #[test]
+    fn program_status_reports_set_the_agent_state() {
+        let mut session = idle_host();
+        assert!(session.feed(b"\x1b]7501;state=working:app=claude\x1b\\"));
+        assert_eq!(session.agent, Some(Agent { kind: AgentKind::Claude, state: AgentState::Working }));
+        // 子记录在等用户，整体就是等用户；清掉 `build` 连带清掉 `build/test`。
+        assert!(session.feed(b"\x1b]7501;state=blocked:id=build/test:kind=permission\x1b\\"));
+        assert_eq!(session.agent, Some(Agent { kind: AgentKind::Claude, state: AgentState::Blocked }));
+        assert!(session.feed(b"\x1b]7501;state=clear:id=build\x1b\\"));
+        assert_eq!(session.agent, Some(Agent { kind: AgentKind::Claude, state: AgentState::Working }));
+        assert!(session.feed(b"\x1b]7501;state=done\x1b\\"));
+        assert_eq!(session.agent, Some(Agent { kind: AgentKind::Claude, state: AgentState::Idle }));
+        // 全屏重置清掉所有记录。
+        assert!(session.feed(b"\x1bc"));
         assert_eq!(session.agent, None);
     }
 
