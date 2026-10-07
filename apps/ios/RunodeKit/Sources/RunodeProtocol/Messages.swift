@@ -94,6 +94,9 @@ public enum ClientMsg: Hashable, Sendable, Encodable {
     case openWorkspace(req: UInt32, dir: String, focus: Bool)
     /// 列电脑上一个目录（绝对路径）里的子目录，为空时是家目录，宿主回 `Dirs`，出错时回 `Error`。
     case listDirs(req: UInt32, path: String?)
+    /// 列电脑上一个目录（绝对路径）里能跑的项目命令（Makefile 的目标、package.json 的 scripts），宿主回
+    /// `ProjectTasks`，出错时回 `Error`。
+    case listProjectTasks(req: UInt32, dir: String)
     /// 新开一个会话；宿主回 `Spawned`，开好的会话要另外 `Attach`。
     case spawn(req: UInt32, size: GridSize, cwd: String?, integration: IntegrationMode, start: Bool)
     /// 连上会话。`size` 为空时不改会话的尺寸，也不算一次交互（见宿主的尺寸归属）。
@@ -159,6 +162,10 @@ public enum ClientMsg: Hashable, Sendable, Encodable {
             try c.encode("list_dirs", forKey: Key("type"))
             try c.encode(req, forKey: Key("req"))
             try c.encode(path, forKey: Key("path"))
+        case let .listProjectTasks(req, dir):
+            try c.encode("list_project_tasks", forKey: Key("type"))
+            try c.encode(req, forKey: Key("req"))
+            try c.encode(dir, forKey: Key("dir"))
         case let .spawn(req, size, cwd, integration, start):
             try c.encode("spawn", forKey: Key("type"))
             try c.encode(req, forKey: Key("req"))
@@ -316,6 +323,9 @@ public enum HostMsg: Hashable, Sendable, Decodable {
     /// 回 `ListDirs`：实际列的目录（规范化后的绝对路径）和它的子目录名，按名字排好；`truncated` 为真时
     /// 子目录太多，只给了前面一部分。
     case dirs(req: UInt32, path: String, dirs: [String], truncated: Bool)
+    /// 回 `ListProjectTasks`：请求里的目录和找到的 Makefile、package.json 里的命令，先 Makefile 后
+    /// package.json，一样都没找到时为空。
+    case projectTasks(req: UInt32, dir: String, sources: [TaskSource])
     /// 回 `Git` 里读状态和改仓库的操作：办完以后仓库的样子；会话的目录不在 git 仓库里时为空。
     case gitStatus(req: UInt32, id: SessionId, status: GitStatus?)
     /// 回 `GitRequest.diff`；这个文件在那一段里已经没有改动时为空。
@@ -376,6 +386,7 @@ public enum HostMsg: Hashable, Sendable, Decodable {
     private enum Keys: String, CodingKey {
         case type, `protocol`, build, reason, sessions, req, id, channel, size, mode, meta, settings, command
         case status, text, truncated, ui, message, format, mine, owner, standalone, windows, path, dirs, diff, branches
+        case dir, sources
         case hostPid = "host_pid"
         case snapshotFormat = "snapshot_format"
     }
@@ -449,6 +460,11 @@ public enum HostMsg: Hashable, Sendable, Decodable {
                 path: try c.decode(String.self, forKey: .path),
                 dirs: try c.decode([String].self, forKey: .dirs),
                 truncated: try c.decodeIfPresent(Bool.self, forKey: .truncated) ?? false)
+        case "project_tasks":
+            self = .projectTasks(
+                req: try c.decode(UInt32.self, forKey: .req),
+                dir: try c.decode(String.self, forKey: .dir),
+                sources: try c.decode([TaskSource].self, forKey: .sources))
         case "git_status":
             self = .gitStatus(
                 req: try c.decode(UInt32.self, forKey: .req),

@@ -14,6 +14,7 @@ pub mod git;
 pub mod handoff;
 pub mod layout;
 pub mod message;
+pub mod project_tasks;
 pub mod remote;
 
 pub use frame::{Frame, FrameError, FrameKind, MAX_PAYLOAD, read_frame, read_frame_limited, write_frame};
@@ -26,6 +27,7 @@ pub use message::{
     AttachMode, BuildId, Caps, ClientKind, ClientMsg, ClipboardContent, FinishedCommand, GoodbyeReason, HandoffRefusal,
     HostMsg, Placement, SessionId, SessionInfo,
 };
+pub use project_tasks::{MAX_PROJECT_TASKS, ProjectTask, TaskSource, TaskSourceKind};
 
 /// 宿主给每个会话的 shell 设的环境变量：这个会话的 `SessionId`。在终端里跑的命令行据此知道
 /// 自己在哪个会话里。

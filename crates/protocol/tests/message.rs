@@ -2,8 +2,8 @@
 
 use runode_protocol::{
     AttachMode, BuildId, Caps, ClientKind, ClientMsg, FinishedCommand, Frame, FrameKind, GoodbyeReason, HandoffRefusal,
-    HostMsg, PaneLayout, PaneRect, Placement, SessionId, SessionInfo, TabLayout, WindowLayout, WorkspaceLayout,
-    message::InvalidSessionId, read_frame, write_frame,
+    HostMsg, PaneLayout, PaneRect, Placement, ProjectTask, SessionId, SessionInfo, TabLayout, TaskSource,
+    TaskSourceKind, WindowLayout, WorkspaceLayout, message::InvalidSessionId, read_frame, write_frame,
 };
 use runode_shared_types::{
     agent::{Agent, AgentKind, AgentState},
@@ -61,6 +61,27 @@ fn layout() -> Vec<WindowLayout> {
 }
 
 /// 经过帧编码、解码再读回来。
+fn project_tasks() -> Vec<TaskSource> {
+    vec![
+        TaskSource {
+            kind: TaskSourceKind::Makefile,
+            file: "/Users/me/dev/Makefile".into(),
+            tasks: vec![ProjectTask {
+                name: "build".into(),
+                command: "make build".into(),
+                description: Some("编译".into()),
+            }],
+            truncated: false,
+        },
+        TaskSource {
+            kind: TaskSourceKind::PackageJson,
+            file: "/Users/me/package.json".into(),
+            tasks: vec![ProjectTask { name: "dev".into(), command: "pnpm run dev".into(), description: None }],
+            truncated: true,
+        },
+    ]
+}
+
 fn through_frame<T: Serialize + serde::de::DeserializeOwned>(message: &T) -> T {
     let frame = Frame::control(message).unwrap();
     let mut stream = Vec::new();
@@ -150,6 +171,7 @@ fn client_messages_round_trip() {
         ClientMsg::ListDirs { req: 12, path: None },
         ClientMsg::ListDirs { req: 13, path: Some("/Users/me/中文".into()) },
         ClientMsg::OpenWorkspace { req: 14, dir: "/Users/me/dev".into(), focus: true },
+        ClientMsg::ListProjectTasks { req: 15, dir: "/Users/me/中文".into() },
         ClientMsg::Handoff { min_format: 1, max_format: 3 },
         ClientMsg::HandoffReady,
         ClientMsg::HandoffAbort { reason: "cannot adopt the pty".into() },
@@ -261,6 +283,8 @@ fn host_messages_round_trip() {
         HostMsg::Done { req: 4 },
         HostMsg::Dirs { req: 5, path: "/Users/me".into(), dirs: vec!["dev".into(), "文档".into()], truncated: false },
         HostMsg::Dirs { req: 6, path: "/".into(), dirs: Vec::new(), truncated: true },
+        HostMsg::ProjectTasks { req: 7, dir: "/Users/me/dev".into(), sources: project_tasks() },
+        HostMsg::ProjectTasks { req: 8, dir: "/".into(), sources: Vec::new() },
         HostMsg::Error { req: Some(3), id: None, message: "no such directory".into() },
         HostMsg::Goodbye { reason: GoodbyeReason::Handoff },
         HostMsg::Goodbye { reason: GoodbyeReason::Error { message: "boom".into() } },
@@ -656,4 +680,42 @@ fn workspace_layouts_carry_their_directory() {
     );
     assert_eq!(json, expected);
     assert_eq!(&serde_json::from_str::<WindowLayout>(&json).unwrap(), window);
+}
+
+/// 列项目命令的消息的 JSON 样子（手机端按这个写），缺了可缺省的字段、不认识的来源种类时的读法。
+#[test]
+fn project_task_messages() {
+    let list = ClientMsg::ListProjectTasks { req: 5, dir: "/Users/me/dev".into() };
+    let json = serde_json::to_string(&list).unwrap();
+    assert_eq!(json, r#"{"type":"list_project_tasks","req":5,"dir":"/Users/me/dev"}"#);
+    assert_eq!(serde_json::from_str::<ClientMsg>(&json).unwrap(), list);
+
+    let tasks = HostMsg::ProjectTasks {
+        req: 5,
+        dir: "/Users/me/dev".into(),
+        sources: vec![TaskSource {
+            kind: TaskSourceKind::PackageJson,
+            file: "/Users/me/dev/package.json".into(),
+            tasks: vec![ProjectTask {
+                name: "dev".into(),
+                command: "npm run dev".into(),
+                description: Some("vite".into()),
+            }],
+            truncated: false,
+        }],
+    };
+    let json = serde_json::to_string(&tasks).unwrap();
+    assert_eq!(
+        json,
+        r#"{"type":"project_tasks","req":5,"dir":"/Users/me/dev","sources":[{"kind":"package_json","file":"/Users/me/dev/package.json","tasks":[{"name":"dev","command":"npm run dev","description":"vite"}],"truncated":false}]}"#
+    );
+    assert_eq!(serde_json::from_str::<HostMsg>(&json).unwrap(), tasks);
+    let short: HostMsg = serde_json::from_str(
+        r#"{"type":"project_tasks","req":5,"dir":"/","sources":[{"kind":"justfile","file":"/justfile","tasks":[{"name":"a","command":"just a"}]}]}"#,
+    )
+    .unwrap();
+    let HostMsg::ProjectTasks { sources, .. } = short else { panic!("expected project tasks") };
+    assert_eq!(sources[0].kind, TaskSourceKind::Unknown);
+    assert_eq!(sources[0].tasks[0].description, None);
+    assert!(!sources[0].truncated);
 }

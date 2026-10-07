@@ -10,8 +10,9 @@
 //!
 //! 读的线程不等会话线程回话：列会话、读屏幕先在读的线程里把请求按先后送到会话线程，再起一个
 //! 短命的线程等回话、交给 `Outbox`，同一条连接上之后的输入照常转发。一条连接上这样在等的请求
-//! 最多 `MAX_WAITING` 个，再多的当场回 `Error`，前端狂发也堆不起线程。开会话和列目录
-//! （`ClientMsg::ListDirs`）还在读的线程里办（开伪终端、启动 shell 要几毫秒，读一次目录项更快）。
+//! 最多 `MAX_WAITING` 个，再多的当场回 `Error`，前端狂发也堆不起线程。开会话、列目录
+//! （`ClientMsg::ListDirs`）和列项目命令（`ClientMsg::ListProjectTasks`）还在读的线程里办（开伪终端、
+//! 启动 shell 要几毫秒，读一次目录项、几个小文件更快）。
 //!
 //! 能连上 socket 就能读写所有终端：socket 放在只有自己能进的目录里（见调用方建目录的方式），
 //! 连上来的进程也要是同一个用户的。
@@ -47,7 +48,7 @@ use runode_terminal::pty;
 use crate::{
     Host, Shared, SpawnOptions, Stopped, browse,
     git::{GitWorker, Job},
-    handoff,
+    handoff, project_tasks,
     session::{Drive, Event, EventSink, Inbox, Screen, Subscribe},
 };
 
@@ -969,6 +970,12 @@ impl Connection {
             ClientMsg::ListDirs { req, path } => match browse::list_dirs(path) {
                 Ok(browse::Listing { path, dirs, truncated }) => {
                     self.out.control(&HostMsg::Dirs { req, path, dirs, truncated });
+                }
+                Err(message) => self.error(Some(req), None, message),
+            },
+            ClientMsg::ListProjectTasks { req, dir } => match project_tasks::list(&dir) {
+                Ok(sources) => {
+                    self.out.control(&HostMsg::ProjectTasks { req, dir, sources });
                 }
                 Err(message) => self.error(Some(req), None, message),
             },

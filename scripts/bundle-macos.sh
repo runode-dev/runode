@@ -18,6 +18,23 @@ SIGN_IDENTITY=${SIGN_IDENTITY:--}
 root=$(cd "$(dirname "$0")/.." && pwd)
 cd "$root"
 
+# 工作区有没提交的改动（含没被忽略的新文件）时，构建号带上改动内容的摘要，见 apps/desktop 的构建
+# 脚本：改了代码没提交就重新打包，新宿主的构建号也和在跑的不同，才接得了手。同样的改动摘要不变，
+# 不会每次打包都重编。
+if [[ -n "$(git status --porcelain)" ]]; then
+  untracked=$(git ls-files --others --exclude-standard)
+  digest=$(
+    {
+      git diff HEAD --binary
+      printf '%s\n' "$untracked"
+      if [[ -n "$untracked" ]]; then git hash-object --stdin-paths <<<"$untracked"; fi
+    } | shasum | cut -c1-7
+  )
+  export RUNODE_BUILD_TAG="dirty.$digest"
+else
+  unset RUNODE_BUILD_TAG
+fi
+
 # 构建脚本已把 Info.plist 写进 OUT_DIR 并嵌进二进制；从 cargo 的 JSON 消息里取它的位置，
 # 保证 .app 里的信息表和二进制里的完全一致。
 messages=$("$CARGO" build --release --message-format=json-render-diagnostics)

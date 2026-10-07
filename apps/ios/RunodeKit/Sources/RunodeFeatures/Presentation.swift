@@ -176,4 +176,31 @@ public enum Presentation {
     public static func sessionTitle(_ session: SessionInfo) -> String {
         session.meta.displayTitle ?? "终端"
     }
+
+    /// 会话卡片菜单里一组项目命令的名字：文件名，不在会话目录里时带上它在哪一级（`Makefile · ../..`）。
+    public static func taskSourceTitle(_ source: TaskSource, cwd: String?) -> String {
+        let file = (source.file as NSString).lastPathComponent
+        let dir = (source.file as NSString).deletingLastPathComponent
+        guard let cwd, cwd != dir, cwd.hasPrefix(dir.hasSuffix("/") ? dir : dir + "/") else { return file }
+        let levels = cwd.dropFirst(dir.count).split(separator: "/").count
+        return "\(file) · \(Array(repeating: "..", count: levels).joined(separator: "/"))"
+    }
+
+    public static func taskSourceSymbol(_ source: TaskSource) -> String {
+        switch source.kind {
+        case .makefile: "hammer"
+        case .packageJson: "shippingbox"
+        case .unknown: "terminal"
+        }
+    }
+
+    /// 会话卡片菜单里项目命令那一节的标题：shell 不在提示符上时说明为什么点不了。
+    public static func projectTasksHeader(_ session: SessionInfo, runnable: Bool) -> String {
+        if runnable { return "运行" }
+        if session.exited { return "运行 · 终端已经结束" }
+        if let foreground = session.meta.foreground, !foreground.isEmpty {
+            return "运行 · 前台在跑 \(foreground)，回到提示符后能用"
+        }
+        return "运行 · 回到 shell 提示符后能用"
+    }
 }

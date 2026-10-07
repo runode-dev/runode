@@ -7,7 +7,8 @@
 
     /// 一台电脑上的会话，按电脑上的 app 里的工作区分节，节头能在那个工作区里新开终端；不在任何窗口里的
     /// 会话放在最后的「后台」一节。一个会话一张卡片，带 agent 状态和屏幕最后几行的预览，等你回答的带
-    /// 快速回复。点开终端，左滑结束，长按有更多操作。右上角能新开终端、新建工作区。
+    /// 快速回复。点开终端，左滑结束，长按有更多操作（含会话目录里 Makefile、package.json 的命令）。右上角
+    /// 能新开终端、新建工作区。
     struct SessionListView: View {
         @Bindable var model: SessionListModel
         let onOpen: (SessionId) -> Void
@@ -63,7 +64,6 @@
                         Button("新建工作区", systemImage: "folder.badge.plus") {
                             model.beginNewWorkspace()
                         }
-                        .disabled(!model.canCreateWorkspace)
                     }
                     .disabled(!model.linkState.isConnected || model.isSpawning)
                 }
@@ -73,7 +73,9 @@
                     get: { model.directoryPicker != nil }, set: { if !$0 { model.cancelNewWorkspace() } })
             ) {
                 if let picker = model.directoryPicker {
-                    DirectoryPickerView(picker: picker, onCancel: model.cancelNewWorkspace) { dir in
+                    DirectoryPickerView(
+                        picker: picker, hasDesktopWindow: model.hasDesktopWindow, onCancel: model.cancelNewWorkspace
+                    ) { dir in
                         Task { await model.createWorkspace(at: dir) }
                     }
                 }
@@ -81,6 +83,7 @@
             .refreshable {
                 model.refresh()
                 model.refreshPreviews()
+                await model.refreshProjectTasks()
             }
             .task { await model.keepRefreshing() }
             .onGeometryChange(for: CGSize.self) { $0.size } action: { size in
@@ -141,6 +144,7 @@
                         Button("Git", systemImage: "arrow.triangle.branch") { onOpenGit(session.id) }
                         Button("复制目录", systemImage: "doc.on.doc") { UIPasteboard.general.string = cwd }
                     }
+                    projectTasksMenu(session)
                     Section(
                         "\(Presentation.gridSize(session.size)) · \(Presentation.sizeOwner(session.sizeOwner))"
                     ) {
@@ -148,6 +152,9 @@
                             model.killTarget = session.id
                         }
                     }
+                }
+                .task(id: session.meta.cwd) {
+                    if let cwd = session.meta.cwd { await model.loadProjectTasks(in: cwd) }
                 }
                 // 挂在卡片上：iOS 26 起确认框是指向所挂视图的气泡，挂在整个列表上会指到屏幕中间。
                 .confirmationDialog(
@@ -157,6 +164,37 @@
                 } message: {
                     Text("「\(Presentation.sessionTitle(session))」里正在跑的程序会收到 SIGHUP 并退出。")
                 }
+        }
+
+        /// 长按菜单里会话目录的项目命令：Makefile、package.json 各一个子菜单，点一条就在这个会话里跑，再
+        /// 打开它的终端看输出。shell 不在提示符上时子菜单点不开，节标题说明原因。
+        @ViewBuilder
+        private func projectTasksMenu(_ session: SessionInfo) -> some View {
+            let sources = model.projectTasks(for: session).filter { !$0.tasks.isEmpty }
+            if !sources.isEmpty {
+                let runnable = model.canRunProjectTask(in: session)
+                Section(Presentation.projectTasksHeader(session, runnable: runnable)) {
+                    ForEach(sources, id: \.file) { source in
+                        Menu {
+                            ForEach(source.tasks, id: \.name) { task in
+                                Button {
+                                    Task {
+                                        if await model.runProjectTask(task, in: session.id) { onOpen(session.id) }
+                                    }
+                                } label: {
+                                    Text(task.name)
+                                    if let description = task.description { Text(description) }
+                                }
+                            }
+                        } label: {
+                            Label(
+                                Presentation.taskSourceTitle(source, cwd: session.meta.cwd),
+                                systemImage: Presentation.taskSourceSymbol(source))
+                        }
+                        .disabled(!runnable)
+                    }
+                }
+            }
         }
 
         /// 这个会话是不是等着确认结束。

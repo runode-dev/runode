@@ -47,7 +47,7 @@ install: app ## 打包 Runode.app 并装到 /Applications，覆盖旧版本
 	rm -rf /Applications/Runode.app
 	ditto target/release/bundle/Runode.app /Applications/Runode.app
 
-# 改了代码没提交时构建号不变，重开 app 不会换掉还在跑的宿主，用这个让新宿主接手会话。
+# 重开 app 时它只在宿主的构建号不同时才换宿主，还要先等 app 退出；用这个一步让新宿主接手会话。
 restart: ## 重启装好的 Runode.app，宿主也换成新装的（make install restart 装好再重启）
 	scripts/restart-macos.sh
 

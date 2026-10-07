@@ -3,9 +3,11 @@
     import SwiftUI
 
     /// 新建工作区时选电脑上的目录：从家目录开始，点子目录进去，「上一级」退出来，选好了点「在这里新建」。
-    /// 同一页里换目录，不一层层推进导航栈，退出来也就不用一层层返回。
+    /// 同一页里换目录，不一层层推进导航栈，退出来也就不用一层层返回。电脑上的 app 没开着窗口时建不了
+    /// 工作区，选好的目录里开的是后台终端，页脚说明这一点。
     struct DirectoryPickerView: View {
         @Bindable var picker: DirectoryPickerModel
+        let hasDesktopWindow: Bool
         let onCancel: () -> Void
         let onChoose: (String) -> Void
         @Environment(\.themeColors) private var colors
@@ -21,7 +23,11 @@
                                 .truncationMode(.head)
                                 .accessibilityLabel("现在在 \(path)")
                         } footer: {
-                            Text("新工作区的第一个终端开在这个目录里。")
+                            if hasDesktopWindow {
+                                Text("新工作区的第一个终端开在这个目录里。")
+                            } else {
+                                Text("电脑上的 runode 没开着窗口，建不了工作区，会在这个目录里开一个后台终端。")
+                            }
                         }
                         .themedRows()
                     }

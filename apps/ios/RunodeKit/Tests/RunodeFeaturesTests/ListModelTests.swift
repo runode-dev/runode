@@ -140,6 +140,7 @@ import Testing
     @Test func createWorkspaceOpensItsFirstTerminal() async {
         let model = SessionListModel(machine: machineRecord(), link: link)
         model.handle(.ready(generation: 1))
+        model.handle(.message(.layout(req: 0, windows: [WindowLayout(index: 1, workspaces: [])])))
         model.beginNewWorkspace()
         #expect(model.directoryPicker != nil)
         link.clearSent()
@@ -161,6 +162,7 @@ import Testing
     @Test func createWorkspaceErrorsAreShown() async {
         let model = SessionListModel(machine: machineRecord(), link: link)
         model.handle(.ready(generation: 1))
+        model.handle(.message(.layout(req: 0, windows: [WindowLayout(index: 1, workspaces: [])])))
         link.clearSent()
         await model.createWorkspace(at: "/nope")
         guard case .openWorkspace(let req, _, _)? = link.sent.first else {
@@ -178,10 +180,33 @@ import Testing
     @Test func anOldComputerCannotCreateWorkspaces() async {
         let model = SessionListModel(machine: machineRecord(), link: link)
         model.handle(.ready(generation: 1))
+        model.handle(.message(.layout(req: 0, windows: [WindowLayout(index: 1, workspaces: [])])))
         await model.createWorkspace(at: "/Users/ethan")
         model.handle(.message(.error(req: nil, id: nil, message: HostMsg.unknownMessage)))
         #expect(!model.isSpawning)
         #expect(model.errorMessage?.contains("太旧") == true)
+    }
+
+    /// 电脑上的 app 没开着窗口时建不了工作区：在选好的目录里开一个后台会话，开好后照样打开它的终端。
+    @Test func createWorkspaceWithoutADesktopWindowSpawnsInTheDirectory() async {
+        let model = SessionListModel(machine: machineRecord(), link: link)
+        model.handle(.ready(generation: 1))
+        #expect(!model.hasDesktopWindow)
+        model.beginNewWorkspace()
+        link.clearSent()
+        await model.createWorkspace(at: "/Users/ethan/dev")
+        #expect(model.directoryPicker == nil)
+        #expect(model.isSpawning)
+        guard case .spawn(let req, let size, "/Users/ethan/dev", .detect, true)? = link.sent.first else {
+            Issue.record("expected a spawn in the directory, got \(link.sent)")
+            return
+        }
+        #expect(size == model.spawnSize)
+        var spawned: [SessionId] = []
+        model.onSpawned = { spawned.append($0) }
+        model.handle(.message(.spawned(req: req, id: sessionA)))
+        #expect(spawned == [sessionA])
+        #expect(!model.isSpawning)
     }
 
     @Test func killRemovesTheSession() {

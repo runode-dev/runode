@@ -596,6 +596,11 @@
    "req": 5,
    "type": "list_dirs"
   },
+  "list_project_tasks": {
+   "dir": "/Users/ethan/dev/中文",
+   "req": 5,
+   "type": "list_project_tasks"
+  },
   "meta": {
    "id": "0123456789abcdef0011223344556677",
    "meta": {
@@ -642,6 +647,47 @@
    "req": 6,
    "text": "继续，用方案 2\n",
    "type": "paste"
+  },
+  "project_tasks": {
+   "dir": "/Users/ethan/dev/app/web",
+   "req": 6,
+   "sources": [
+    {
+     "file": "/Users/ethan/dev/app/Makefile",
+     "kind": "makefile",
+     "tasks": [
+      {
+       "command": "make -C .. build",
+       "description": "编译全部",
+       "name": "build"
+      },
+      {
+       "command": "make -C .. test",
+       "description": null,
+       "name": "test"
+      }
+     ],
+     "truncated": false
+    },
+    {
+     "file": "/Users/ethan/dev/app/web/package.json",
+     "kind": "package_json",
+     "tasks": [
+      {
+       "command": "pnpm run dev",
+       "description": "vite",
+       "name": "dev"
+      }
+     ],
+     "truncated": true
+    },
+    {
+     "file": "/Users/ethan/dev/app/justfile",
+     "kind": "justfile",
+     "tasks": []
+    }
+   ],
+   "type": "project_tasks"
   },
   "read_screen": {
    "command": null,

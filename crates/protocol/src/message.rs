@@ -39,6 +39,7 @@ use serde::{Deserialize, Serialize};
 use crate::{
     git::{GitBranch, GitFileDiff, GitRequest, GitStatus},
     layout::WindowLayout,
+    project_tasks::TaskSource,
 };
 
 /// 一个终端会话的标识：128 位随机数，写成 32 个小写十六进制数字。宿主重启、交接后照旧，
@@ -268,6 +269,10 @@ pub enum ClientMsg {
         #[serde(default)]
         focus: bool,
     },
+    /// 列 `dir` 这个目录里能跑的项目命令（Makefile 的目标、package.json 的 scripts），回
+    /// `HostMsg::ProjectTasks`，见 `project_tasks` 模块；`dir` 不是绝对路径、不是目录时回 `Error`。
+    /// 宿主自己办，不转给界面。
+    ListProjectTasks { req: u32, dir: PathBuf },
     /// 在会话 `id` 的 shell 当前所在的仓库里读写 git，见 `git` 模块。一条连接上的这些请求按到达的
     /// 先后一件一件办，推送、拉取这类要等网络的会排着后面的。办不了时回的 `Error` 只带 `req`、不带
     /// `id`：错是这件请求的（git 的报错、没有这个会话），不是会话出了事。
@@ -455,6 +460,13 @@ pub enum HostMsg {
         dirs: Vec<String>,
         #[serde(default)]
         truncated: bool,
+    },
+    /// 回 `ClientMsg::ListProjectTasks`。`dir` 是请求里的目录；`sources` 先 Makefile 后 package.json，
+    /// 一样都没找到时为空。
+    ProjectTasks {
+        req: u32,
+        dir: PathBuf,
+        sources: Vec<TaskSource>,
     },
     /// 宿主转给界面去办的请求（`Open`、`OpenWorkspace`、`Reveal`、`Layout`），只发给登记为界面的
     /// 连接（`Hello` 里 `client` 是 `Desktop` 的，有几个时是最近连上的那个）。`request` 原样带着

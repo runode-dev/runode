@@ -32,7 +32,8 @@ func sameJSON(_ a: Data, _ b: Data) throws -> Bool {
     let size = GridSize(cols: 80, rows: 24, cellWidthPx: 16, cellHeightPx: 32)
 
     @Test(arguments: [
-        "hello", "list", "layout_request", "open", "open_workspace", "list_dirs", "list_dirs_home", "spawn",
+        "hello", "list", "layout_request", "open", "open_workspace", "list_dirs", "list_dirs_home",
+        "list_project_tasks", "spawn",
         "attach_vt", "attach_meta", "attach_size", "detach", "resize", "focus", "kill",
         "read_screen", "read_screen_command", "send_keys", "paste",
     ])
@@ -49,6 +50,7 @@ func sameJSON(_ a: Data, _ b: Data) throws -> Bool {
             case "open_workspace": .openWorkspace(req: 8, dir: "/Users/ethan/dev/中文", focus: false)
             case "list_dirs": .listDirs(req: 5, path: "/Users/ethan")
             case "list_dirs_home": .listDirs(req: 5, path: nil)
+            case "list_project_tasks": .listProjectTasks(req: 5, dir: "/Users/ethan/dev/中文")
             case "spawn": .spawn(req: 3, size: size, cwd: nil, integration: .detect, start: true)
             case "attach_vt": .attach(id: id, size: nil, mode: .vtReplay)
             case "attach_meta": .attach(id: id, size: nil, mode: .metaOnly)
@@ -91,6 +93,7 @@ func sameJSON(_ a: Data, _ b: Data) throws -> Bool {
             .hello(protocol: 4, build: "b", client: .mobile, caps: Caps(snapshot: false, vtReplay: true), session: nil, device: nil),
             .listSessions, .layout(req: 0), .open(req: 1, placement: .tab, near: id, cwd: "/tmp", focus: false),
             .openWorkspace(req: 1, dir: "/tmp", focus: false), .listDirs(req: 1, path: nil),
+            .listProjectTasks(req: 1, dir: "/tmp"),
             .spawn(req: 1, size: size, cwd: nil, integration: .detect, start: true),
             .attach(id: id, size: nil, mode: .vtReplay), .detach(id: id), .resize(id: id, size: size),
             .focus(id: id, focused: true), .clearScreen(id: id), .kill(id: id), .readScreen(id: id, lines: 3),
@@ -99,8 +102,8 @@ func sameJSON(_ a: Data, _ b: Data) throws -> Bool {
         ]
         func covered(_ message: ClientMsg) -> Bool {
             switch message {
-            case .hello, .listSessions, .layout, .open, .openWorkspace, .listDirs, .spawn, .attach, .detach, .resize,
-                .focus, .clearScreen, .kill, .readScreen, .sendKeys, .paste, .git:
+            case .hello, .listSessions, .layout, .open, .openWorkspace, .listDirs, .listProjectTasks, .spawn, .attach,
+                .detach, .resize, .focus, .clearScreen, .kill, .readScreen, .sendKeys, .paste, .git:
                 true
             }
         }
@@ -200,6 +203,25 @@ func sameJSON(_ a: Data, _ b: Data) throws -> Bool {
         // 开新标签挨着当前标签里有焦点的分屏。
         #expect(runode.anchor == b)
         #expect(window.workspaces[1].anchor == nil)
+    }
+
+    /// 项目命令按来源分组读出来；没有说明的读成空，不认识的来源种类读成 `unknown`，缺的 `truncated` 读成假。
+    @Test func projectTasksAreGroupedBySource() throws {
+        guard case .projectTasks(let req, let dir, let sources) = try decode("project_tasks") else {
+            Issue.record("not project tasks")
+            return
+        }
+        #expect(req == 6)
+        #expect(dir == "/Users/ethan/dev/app/web")
+        #expect(sources.map(\.kind) == [.makefile, .packageJson, .unknown])
+        #expect(
+            sources[0].tasks == [
+                ProjectTask(name: "build", command: "make -C .. build", description: "编译全部"),
+                ProjectTask(name: "test", command: "make -C .. test"),
+            ])
+        #expect(sources[0].file == "/Users/ethan/dev/app/Makefile")
+        #expect(!sources[0].truncated && sources[1].truncated && !sources[2].truncated)
+        #expect(sources[1].tasks == [ProjectTask(name: "dev", command: "pnpm run dev", description: "vite")])
     }
 
     @Test func repliesAndGoodbyes() throws {

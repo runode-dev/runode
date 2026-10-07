@@ -213,6 +213,7 @@ mod tests {
             control("not json"),
             control(r#"{"type":"list_dirs","req":5,"path":null}"#),
             control(r#"{"type":"open_workspace","req":8,"dir":"/Users/me/dev","focus":false}"#),
+            control(r#"{"type":"list_project_tasks","req":9,"dir":"/Users/me/dev"}"#),
         ];
         let refused = [
             control(r#"{"type":"shutdown","kill_sessions":true}"#),

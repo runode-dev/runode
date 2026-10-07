@@ -14,6 +14,8 @@ runode-terminal.workspace = true
 runode-protocol.workspace = true
 runode-shared-types.workspace = true
 anyhow.workspace = true
+# 读 package.json 里的 scripts，按文件里的先后列出来。
+serde_json = { workspace = true, features = ["preserve_order"] }
 # 锁文件（flock）和认连上来的进程是谁（getpeereid）。
 libc.workspace = true
 tracing.workspace = true

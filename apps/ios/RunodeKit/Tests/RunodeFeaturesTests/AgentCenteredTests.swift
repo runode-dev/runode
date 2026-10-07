@@ -87,7 +87,7 @@ private func workspace(_ index: UInt32, _ name: String, tabs: [[SessionId]], act
         #expect(sections[1].sessions.map(\.id) == [working])
         #expect(sections[2].sessions.map(\.id) == [background])
         #expect(sections[2].anchor == nil)
-        #expect(model.canCreateWorkspace)
+        #expect(model.hasDesktopWindow)
     }
 
     /// 开着几个窗口时节上标出第几个窗口。
@@ -105,7 +105,7 @@ private func workspace(_ index: UInt32, _ name: String, tabs: [[SessionId]], act
         #expect(model.sections.map(\.name) == ["a", "b"])
     }
 
-    /// 电脑上没有 app 的界面时宿主回 `Error`：都放进后台，也不能新建工作区。
+    /// 电脑上没有 app 的界面时宿主回 `Error`：都放进后台，新建工作区退回开后台终端。
     @Test func withoutTheAppEverythingIsInTheBackground() {
         let model = model([info(plain, nil), info(working, .working)])
         let window = WindowLayout(index: 1, workspaces: [workspace(1, "a", tabs: [[plain]])])
@@ -113,7 +113,7 @@ private func workspace(_ index: UInt32, _ name: String, tabs: [[SessionId]], act
         model.handle(.message(.error(req: 0, id: nil, message: "there is no runode window")))
         #expect(model.sections.map(\.id) == [.background])
         #expect(model.sections[0].sessions.map(\.id) == [plain, working])
-        #expect(!model.canCreateWorkspace)
+        #expect(!model.hasDesktopWindow)
     }
 }
 
