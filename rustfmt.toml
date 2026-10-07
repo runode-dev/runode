@@ -1,5 +1,5 @@
 # 一行最多 120 列；能放进一行的调用、结构体字面量、链式调用都放一行，不按 rustfmt 默认的
-# 较小宽度提前折行。只管工作区里的 crate，vendor 下的依赖按它们自己的风格，用 `make fmt`
-# 格式化（不带 --all），不会碰到。
+# 较小宽度提前折行。只管工作区里的 crate：vendor 下的依赖按它们自己的风格，`vendor/rustfmt.toml`
+# 关掉了那里的格式化，`cargo fmt --all` 连路径依赖一起格式化时也碰不到。
 max_width = 120
 use_small_heuristics = "Max"

@@ -1,0 +1,2 @@
+# vendor 下是别人的代码，按它们自己的风格；`cargo fmt --all` 会连路径依赖一起格式化，这里整个关掉。
+disable_all_formatting = true
