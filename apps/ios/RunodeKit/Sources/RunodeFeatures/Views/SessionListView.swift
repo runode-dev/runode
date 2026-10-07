@@ -360,7 +360,7 @@
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
                     SessionIcon(agent: session.meta.agent?.kind, size: iconSize)
                         // 图标的中线对着第一行字的中间（标题的大写字母高约为图标边长的 0.54）。
-                        .alignmentGuide(.firstTextBaseline) { $0[VerticalAlignment.center] + iconSize * 0.27 }
+                        .alignmentGuide(.firstTextBaseline) { [iconSize] d in d[VerticalAlignment.center] + iconSize * 0.27 }
                         .opacity(session.exited ? 0.5 : 1)
                     Text(Presentation.sessionTitle(session))
                         .font(.headline)
