@@ -152,9 +152,7 @@ impl Config {
                     self.font_family.push(value.to_owned());
                 }
             }
-            "font-size" => {
-                self.font_size = if empty { defaults.font_size } else { parse_f32(value)? };
-            }
+            "font-size" => self.font_size = or_default(empty, defaults.font_size, || parse_f32(value))?,
             "adjust-cell-height" => {
                 self.adjust_cell_height = if empty {
                     None
@@ -165,10 +163,10 @@ impl Config {
                 };
             }
             "window-padding-x" => {
-                self.window_padding_x = if empty { defaults.window_padding_x } else { parse_pair(value)? };
+                self.window_padding_x = or_default(empty, defaults.window_padding_x, || parse_pair(value))?;
             }
             "window-padding-y" => {
-                self.window_padding_y = if empty { defaults.window_padding_y } else { parse_pair(value)? };
+                self.window_padding_y = or_default(empty, defaults.window_padding_y, || parse_pair(value))?;
             }
             "window-style" => {
                 self.window_style = match value {
@@ -178,10 +176,10 @@ impl Config {
                 };
             }
             "file-tree-font-size" => {
-                self.file_tree_font_size = if empty { defaults.file_tree_font_size } else { parse_positive(value)? };
+                self.file_tree_font_size = or_default(empty, defaults.file_tree_font_size, || parse_positive(value))?;
             }
             "preview-font-size" => {
-                self.preview_font_size = if empty { defaults.preview_font_size } else { parse_positive(value)? };
+                self.preview_font_size = or_default(empty, defaults.preview_font_size, || parse_positive(value))?;
             }
             "file-tree-preview-click" => {
                 self.file_tree_preview_click = match value {
@@ -199,44 +197,36 @@ impl Config {
                     _ => return Err("expected block, bar, underline or block_hollow".into()),
                 };
             }
-            "cursor-style-blink" => {
-                self.cursor_style_blink = if empty { None } else { Some(parse_bool(value)?) };
-            }
+            "cursor-style-blink" => self.cursor_style_blink = or_default(empty, None, || parse_bool(value).map(Some))?,
             "cursor-style-blink-timeout" => {
                 self.cursor_style_blink_timeout =
-                    if empty { defaults.cursor_style_blink_timeout } else { parse_timeout(value)? };
+                    or_default(empty, defaults.cursor_style_blink_timeout, || parse_timeout(value))?;
             }
-            "background" => {
-                self.background = if empty { defaults.background } else { parse_color(value)? };
-            }
-            "foreground" => {
-                self.foreground = if empty { defaults.foreground } else { parse_color(value)? };
-            }
+            "background" => self.background = or_default(empty, defaults.background, || parse_color(value))?,
+            "foreground" => self.foreground = or_default(empty, defaults.foreground, || parse_color(value))?,
             "cursor-color" => {
-                self.cursor_color = if empty { defaults.cursor_color } else { Some(parse_terminal_color(value)?) };
+                self.cursor_color = or_default(empty, defaults.cursor_color, || parse_terminal_color(value).map(Some))?;
             }
-            "cursor-text" => {
-                self.cursor_text = if empty { None } else { Some(parse_terminal_color(value)?) };
-            }
+            "cursor-text" => self.cursor_text = or_default(empty, None, || parse_terminal_color(value).map(Some))?,
             "selection-background" => {
-                self.selection_background = if empty { None } else { Some(parse_terminal_color(value)?) };
+                self.selection_background = or_default(empty, None, || parse_terminal_color(value).map(Some))?;
             }
             "selection-foreground" => {
-                self.selection_foreground = if empty { None } else { Some(parse_terminal_color(value)?) };
+                self.selection_foreground = or_default(empty, None, || parse_terminal_color(value).map(Some))?;
             }
             "search-background" => {
-                self.search_background = if empty { defaults.search_background } else { parse_terminal_color(value)? };
+                self.search_background = or_default(empty, defaults.search_background, || parse_terminal_color(value))?;
             }
             "search-foreground" => {
-                self.search_foreground = if empty { defaults.search_foreground } else { parse_terminal_color(value)? };
+                self.search_foreground = or_default(empty, defaults.search_foreground, || parse_terminal_color(value))?;
             }
             "search-selected-background" => {
                 self.search_selected_background =
-                    if empty { defaults.search_selected_background } else { parse_terminal_color(value)? };
+                    or_default(empty, defaults.search_selected_background, || parse_terminal_color(value))?;
             }
             "search-selected-foreground" => {
                 self.search_selected_foreground =
-                    if empty { defaults.search_selected_foreground } else { parse_terminal_color(value)? };
+                    or_default(empty, defaults.search_selected_foreground, || parse_terminal_color(value))?;
             }
             "palette" => {
                 let (index, color) = value.split_once('=').ok_or("expected N=COLOR")?;
@@ -246,11 +236,9 @@ impl Config {
                 self.palette.push((index, color));
             }
             "scrollback-limit" => {
-                self.scrollback_limit = if empty {
-                    defaults.scrollback_limit
-                } else {
-                    value.parse::<usize>().map_err(|_| "expected a number of bytes")?.max(MIN_SCROLLBACK_LIMIT)
-                };
+                self.scrollback_limit = or_default(empty, defaults.scrollback_limit, || {
+                    Ok(value.parse::<usize>().map_err(|_| "expected a number of bytes")?.max(MIN_SCROLLBACK_LIMIT))
+                })?;
             }
             "shell-integration" => {
                 self.shell_integration = match value {
@@ -264,13 +252,13 @@ impl Config {
             }
             "shell-integration-features" => self.shell_integration_features = parse_shell_features(value)?,
             "command-suggestions" => {
-                self.command_suggestions = if empty { defaults.command_suggestions } else { parse_bool(value)? };
+                self.command_suggestions = or_default(empty, defaults.command_suggestions, || parse_bool(value))?;
             }
             "command-completions" => {
-                self.command_completions = if empty { defaults.command_completions } else { parse_bool(value)? };
+                self.command_completions = or_default(empty, defaults.command_completions, || parse_bool(value))?;
             }
             "command-highlighting" => {
-                self.command_highlighting = if empty { defaults.command_highlighting } else { parse_bool(value)? };
+                self.command_highlighting = or_default(empty, defaults.command_highlighting, || parse_bool(value))?;
             }
             "clipboard-write" => {
                 self.clipboard_write = match value {
@@ -292,24 +280,16 @@ impl Config {
                     _ => return Err("expected ask, allow or deny".into()),
                 };
             }
-            "terminal-host" => {
-                self.terminal_host = if empty { defaults.terminal_host } else { parse_bool(value)? };
-            }
-            "auto-update" => {
-                self.auto_update = if empty { defaults.auto_update } else { parse_bool(value)? };
-            }
-            "remote-access" => {
-                self.remote_access = if empty { defaults.remote_access } else { parse_bool(value)? };
-            }
+            "terminal-host" => self.terminal_host = or_default(empty, defaults.terminal_host, || parse_bool(value))?,
+            "auto-update" => self.auto_update = or_default(empty, defaults.auto_update, || parse_bool(value))?,
+            "remote-access" => self.remote_access = or_default(empty, defaults.remote_access, || parse_bool(value))?,
             "remote-access-port" => {
-                self.remote_access_port = if empty {
-                    defaults.remote_access_port
-                } else {
-                    value.trim().parse().ok().filter(|&port| port > 0).ok_or("expected a port from 1 to 65535")?
-                };
+                self.remote_access_port = or_default(empty, defaults.remote_access_port, || {
+                    Ok(value.trim().parse().ok().filter(|&port| port > 0).ok_or("expected a port from 1 to 65535")?)
+                })?;
             }
             "agent-notifications" => {
-                self.agent_notifications = if empty { defaults.agent_notifications } else { parse_bool(value)? };
+                self.agent_notifications = or_default(empty, defaults.agent_notifications, || parse_bool(value))?;
             }
             "agent-notifications-exclude" => {
                 // 值为空时清空；可以写多行，也可以一行用逗号隔开几个。
@@ -324,10 +304,10 @@ impl Config {
                 }
             }
             "agent-done-sound" => {
-                self.agent_done_sound = if empty { defaults.agent_done_sound } else { parse_sound(value) };
+                self.agent_done_sound = or_default(empty, defaults.agent_done_sound, || Ok(parse_sound(value)))?;
             }
             "agent-blocked-sound" => {
-                self.agent_blocked_sound = if empty { defaults.agent_blocked_sound } else { parse_sound(value) };
+                self.agent_blocked_sound = or_default(empty, defaults.agent_blocked_sound, || Ok(parse_sound(value)))?;
             }
             "macos-option-as-alt" => {
                 self.macos_option_as_alt = match value {
@@ -364,6 +344,11 @@ impl Config {
         }
         Ok(())
     }
+}
+
+/// 值为空时恢复默认的 `default`，不然按 `parse` 解析。
+fn or_default<T>(empty: bool, default: T, parse: impl FnOnce() -> Result<T, String>) -> Result<T, String> {
+    if empty { Ok(default) } else { parse() }
 }
 
 fn parse_f32(value: &str) -> Result<f32, String> {
@@ -496,18 +481,10 @@ fn read_entries(path: &Path, sources: &mut Vec<PathBuf>) -> Vec<Entry> {
 pub(crate) fn parse_entries(text: &str, name: &str) -> Vec<Entry> {
     let mut entries = Vec::new();
     for (n, line) in text.lines().enumerate() {
-        let line = line.trim();
-        if line.is_empty() || line.starts_with('#') {
+        let Some((key, value)) = crate::edit::active(line) else {
             continue;
-        }
-        let (key, value) = line.split_once('=').unwrap_or((line, ""));
-        let value = value.trim();
-        let value = value.strip_prefix('"').and_then(|v| v.strip_suffix('"')).unwrap_or(value);
-        entries.push(Entry {
-            key: key.trim().to_owned(),
-            value: value.to_owned(),
-            origin: format!("{name}:{}", n + 1),
-        });
+        };
+        entries.push(Entry { key: key.to_owned(), value: value.to_owned(), origin: format!("{name}:{}", n + 1) });
     }
     entries
 }

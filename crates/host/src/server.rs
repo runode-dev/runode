@@ -957,7 +957,7 @@ impl Connection {
                 let parsed: Result<Vec<_>, _> = keys.iter().map(|key| parse_keys(key)).collect();
                 match parsed {
                     Ok(keys) => self.deliver_done(req, id, DriveAction::Keys, Inbox::Keys(keys.concat())),
-                    Err(err) => self.error(Some(req), Some(id), err.to_string()),
+                    Err(err) => self.error(Some(req), Some(id), err),
                 }
             }
             ClientMsg::Paste { req, id, text } => self.deliver_done(req, id, DriveAction::Paste, Inbox::Paste(text)),

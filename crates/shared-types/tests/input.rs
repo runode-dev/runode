@@ -67,11 +67,11 @@ fn modifiers_and_names_ignore_case_and_order() {
 #[test]
 fn mistakes_are_explained() {
     for bad in ["", "ctrl-", "ctrl-ctrl-c", "?", "ctrl-?", "f13", "hyper-x", "cmd-c", "ab"] {
-        let err = bad.parse::<KeyChord>().expect_err(bad).to_string();
+        let err = bad.parse::<KeyChord>().expect_err(bad);
         assert!(!err.is_empty(), "{bad}");
     }
-    assert!("ctrl-ctrl-c".parse::<KeyChord>().unwrap_err().to_string().contains("twice"));
-    assert!("f13".parse::<KeyChord>().unwrap_err().to_string().contains("unknown key"));
+    assert!("ctrl-ctrl-c".parse::<KeyChord>().unwrap_err().contains("twice"));
+    assert!("f13".parse::<KeyChord>().unwrap_err().contains("unknown key"));
 }
 
 #[test]

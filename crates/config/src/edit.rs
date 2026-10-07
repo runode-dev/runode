@@ -3,7 +3,7 @@
 
 use std::path::Path;
 
-use crate::{Config, parse::KEYS};
+use crate::{Config, parse::KEYS, template::setting_key};
 
 /// 读进来的一份配置文件，按行编辑后写回。
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -12,8 +12,8 @@ pub struct ConfigFile {
     trailing_newline: bool,
 }
 
-/// 没注释掉的设置行 `key = value` 的键名和值，值的写法和 `Config::load` 读的一样（去掉两边的引号）。
-fn active(line: &str) -> Option<(&str, &str)> {
+/// 没注释掉的设置行 `key = value` 的键名和值（去掉两边的引号），`parse_entries` 读配置时也按它。
+pub(crate) fn active(line: &str) -> Option<(&str, &str)> {
     let line = line.trim();
     if line.is_empty() || line.starts_with('#') {
         return None;
@@ -25,13 +25,7 @@ fn active(line: &str) -> Option<(&str, &str)> {
 
 /// 注释掉的设置行 `# key = value` 的键名；说明行（`##`）和别的行为 `None`。
 fn commented(line: &str) -> Option<&str> {
-    let rest = line.trim().strip_prefix('#')?;
-    if rest.starts_with('#') {
-        return None;
-    }
-    let (key, _) = rest.split_once('=')?;
-    let key = key.trim();
-    (!key.is_empty() && key.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')).then_some(key)
+    line.trim_start().starts_with('#').then(|| setting_key(line)).flatten()
 }
 
 impl ConfigFile {

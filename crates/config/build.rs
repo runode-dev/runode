@@ -2,12 +2,8 @@
 
 use std::{env, fs, path::PathBuf};
 
-fn main() {
-    bundle_themes();
-}
-
 /// 生成按名字排序的 `(名字, 内容)` 表，供 `BUNDLED_THEMES` 使用。
-fn bundle_themes() {
+fn main() {
     let dir = PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").unwrap()).join("themes");
     // 指向目录时，目录里任何文件变动都会触发重新生成。
     println!("cargo:rerun-if-changed={}", dir.display());

@@ -251,19 +251,14 @@ pub fn neighbor<T: Copy>(
     candidates
         .into_iter()
         .filter_map(|(leaf, rect)| {
+            // 左右找时要上下有交叠，上下找时要左右有交叠。
+            let rows_overlap = rect.y < from.bottom() && rect.bottom() > from.y;
+            let columns_overlap = rect.x < from.right() && rect.right() > from.x;
             let (distance, overlaps, offset) = match direction {
-                Direction::Left => {
-                    (from.x - rect.right(), rect.y < from.bottom() && rect.bottom() > from.y, rect.center().1 - cy)
-                }
-                Direction::Right => {
-                    (rect.x - from.right(), rect.y < from.bottom() && rect.bottom() > from.y, rect.center().1 - cy)
-                }
-                Direction::Up => {
-                    (from.y - rect.bottom(), rect.x < from.right() && rect.right() > from.x, rect.center().0 - cx)
-                }
-                Direction::Down => {
-                    (rect.y - from.bottom(), rect.x < from.right() && rect.right() > from.x, rect.center().0 - cx)
-                }
+                Direction::Left => (from.x - rect.right(), rows_overlap, rect.center().1 - cy),
+                Direction::Right => (rect.x - from.right(), rows_overlap, rect.center().1 - cy),
+                Direction::Up => (from.y - rect.bottom(), columns_overlap, rect.center().0 - cx),
+                Direction::Down => (rect.y - from.bottom(), columns_overlap, rect.center().0 - cx),
             };
             (overlaps && distance > -SLACK).then_some((leaf, distance.max(0.), offset.abs()))
         })

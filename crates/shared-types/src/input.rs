@@ -149,18 +149,6 @@ pub struct KeyChord {
     pub mods: Mods,
 }
 
-/// 写法不对的组合键，带着说明。
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct KeyChordError(String);
-
-impl std::fmt::Display for KeyChordError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&self.0)
-    }
-}
-
-impl std::error::Error for KeyChordError {}
-
 /// `down*3` 这种写法最多连按几下，免得一个笔误写出成千上万个按键。
 pub const MAX_KEY_REPEAT: u32 = 1000;
 
@@ -288,7 +276,7 @@ impl Key {
 }
 
 impl std::str::FromStr for KeyChord {
-    type Err = KeyChordError;
+    type Err = String;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let mut mods = Mods::default();
@@ -304,7 +292,7 @@ impl std::str::FromStr for KeyChord {
                 break;
             };
             if std::mem::replace(slot, true) {
-                return Err(KeyChordError(format!("{s:?} names the same modifier twice")));
+                return Err(format!("{s:?} names the same modifier twice"));
             }
             rest = &rest[prefix.len()..];
         }
@@ -316,7 +304,7 @@ impl std::str::FromStr for KeyChord {
             _ => None,
         };
         let key = named.or(single).ok_or_else(|| {
-            KeyChordError(if rest.is_empty() {
+            if rest.is_empty() {
                 "an empty key".into()
             } else {
                 format!(
@@ -324,7 +312,7 @@ impl std::str::FromStr for KeyChord {
                      backspace, delete, insert, space, up, down, left, right, home, end, pageup, pagedown and \
                      f1-f12, after ctrl-, alt- or shift-"
                 )
-            })
+            }
         })?;
         Ok(Self { key, mods })
     }
@@ -349,7 +337,7 @@ impl std::fmt::Display for KeyChord {
 
 /// 一项按键的写法：一个组合键（见 `KeyChord`），后面可以跟 `*N` 表示连按 N 下（`down*3`，
 /// N 从 1 到 `MAX_KEY_REPEAT`）。返回展开后的每一下。
-pub fn parse_keys(spec: &str) -> Result<Vec<KeyChord>, KeyChordError> {
+pub fn parse_keys(spec: &str) -> Result<Vec<KeyChord>, String> {
     // `*` 不是哪个键的名字，最后一个 `*` 后面是次数。
     let (chord, times) = match spec.rsplit_once('*') {
         Some((chord, times)) => {
@@ -357,7 +345,7 @@ pub fn parse_keys(spec: &str) -> Result<Vec<KeyChord>, KeyChordError> {
                 .parse::<u32>()
                 .ok()
                 .filter(|n| (1..=MAX_KEY_REPEAT).contains(n))
-                .ok_or_else(|| KeyChordError(format!("{spec:?}: the count after * is 1 to {MAX_KEY_REPEAT}")))?;
+                .ok_or_else(|| format!("{spec:?}: the count after * is 1 to {MAX_KEY_REPEAT}"))?;
             (chord, times)
         }
         None => (spec, 1),

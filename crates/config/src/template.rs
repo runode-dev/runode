@@ -27,7 +27,7 @@ pub fn create_config_file(path: &Path) -> std::io::Result<()> {
 }
 
 /// 一行设置的键名：`key = value`，或注释掉的 `# key = value`；说明行和别的行为 `None`。
-fn setting_key(line: &str) -> Option<&str> {
+pub(crate) fn setting_key(line: &str) -> Option<&str> {
     let line = line.trim();
     let line = line.strip_prefix('#').unwrap_or(line).trim_start();
     let (key, _) = line.split_once('=')?;
