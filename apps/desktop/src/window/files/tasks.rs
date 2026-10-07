@@ -1,13 +1,13 @@
 //! 文件树底部的项目命令：根目录往上最近的 Makefile 的目标和 package.json 的 scripts，由宿主列出、
-//! 拼好命令行（`ClientMsg::ListProjectTasks`），和手机会话卡片上的是同一份。点一条就开一个新标签，
-//! 在根目录里跑它。
+//! 拼好命令行（`ClientMsg::ListProjectTasks`），和手机会话卡片上的是同一份。按文件分组，分组可以
+//! 收起；双击一条或点它行尾的运行按钮，开一个新标签在根目录里跑它。
 
 use std::path::Path;
 
-use gpui::{Axis, Context, Div, FontWeight, MouseButton, Window, div, img, prelude::*, px, relative, svg};
+use gpui::{Axis, ClickEvent, Context, Div, FontWeight, MouseButton, Window, div, img, prelude::*, px, relative, svg};
 use runode_shared_types::color::Rgb;
 
-use super::{ROW_EXTRA_HEIGHT, TOOLBAR_HEIGHT};
+use super::TOOLBAR_HEIGHT;
 use crate::{
     assets::{CHEVRON_DOWN_ICON, CHEVRON_RIGHT_ICON, PLAY_ICON},
     host_client,
@@ -27,6 +27,9 @@ const TASK_FILES: [&str; 9] = [
     "bun.lockb",
     "package-lock.json",
 ];
+
+/// 命令那一行的悬停分组：悬停在行上时显示行尾的运行按钮。
+const TASK_ROW: &str = "task-row";
 
 pub(in crate::window) fn is_task_file(path: &Path) -> bool {
     path.file_name().is_some_and(|name| TASK_FILES.iter().any(|file| name == *file))
@@ -102,8 +105,9 @@ impl WindowView {
         }
         let collapsed = self.tasks_collapsed;
         let dim = hsla(fg).opacity(0.5);
+        let faint = hsla(fg).opacity(0.4);
         let hover_bg = hsla(bg.mix(fg, 0.06));
-        let row_height = px(font_size + ROW_EXTRA_HEIGHT);
+        let run_hover_bg = hsla(bg.mix(fg, 0.14));
         let header = div()
             .id("tasks-header")
             .flex_none()
@@ -140,47 +144,90 @@ impl WindowView {
                 Ok(rel) => rel.display().to_string(),
                 Err(_) => display_dir(&source.file),
             };
+            let folded = project.tasks_folded.contains(&source.file);
+            let file = source.file.clone();
+            // 分组的标题像文件树里的目录：点一下收起、展开这个文件的命令，行尾是命令条数。
             rows.push(
-                div()
-                    .flex_none()
-                    .h(row_height)
-                    .px(px(4.))
-                    .flex()
-                    .items_center()
-                    .gap(px(6.))
+                Self::file_row_shell(("task-group", group), 0, font_size, fg)
+                    .gap(px(4.))
+                    .cursor_pointer()
+                    .hover(move |row| row.bg(hover_bg))
+                    .child(
+                        svg()
+                            .path(if folded { CHEVRON_RIGHT_ICON } else { CHEVRON_DOWN_ICON })
+                            .flex_none()
+                            .size(px(font_size))
+                            .text_color(dim),
+                    )
                     .child(img(file_icon(&name)).flex_none().size(px(font_size + 2.)))
-                    .child(div().min_w_0().truncate().text_color(dim).child(label))
+                    .child(div().flex_1().min_w_0().truncate().child(label))
+                    .child(div().flex_none().pl(px(6.)).text_color(dim).child(source.tasks.len().to_string()))
+                    .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        let folded = &mut this.workspace_mut().project.tasks_folded;
+                        if !folded.remove(&file) {
+                            folded.insert(file.clone());
+                        }
+                        cx.notify();
+                    }))
                     .into_any_element(),
             );
+            if folded {
+                continue;
+            }
             for (ix, task) in source.tasks.iter().enumerate() {
                 let command = task.command.clone();
                 let description = task.description.clone().filter(|text| *text != task.name);
+                // 单击不跑，免得误点了 `install`、`release` 这类：双击整行，或者点悬停时行尾出来的运行按钮。
+                let run = div()
+                    .id(("task-run", group * 1000 + ix))
+                    .flex_none()
+                    .ml(px(4.))
+                    .p(px(2.))
+                    .rounded(px(4.))
+                    .opacity(0.)
+                    .group_hover(TASK_ROW, |button| button.opacity(1.))
+                    .hover(move |button| button.bg(run_hover_bg))
+                    .tooltip(tooltip(rust_i18n::t!("files.run_task", command = command), None, fg, bg))
+                    .child(svg().path(PLAY_ICON).size(px(font_size)).text_color(hsla(fg).opacity(0.8)))
+                    .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                    .on_click(cx.listener({
+                        let command = command.clone();
+                        move |this, _, window, cx| {
+                            cx.stop_propagation();
+                            this.run_task(command.clone(), window, cx);
+                        }
+                    }));
                 rows.push(
                     Self::file_row_shell(("task", group * 1000 + ix), 1, font_size, fg)
+                        .group(TASK_ROW)
                         .gap(px(6.))
-                        .cursor_pointer()
                         .hover(move |row| row.bg(hover_bg))
-                        .tooltip(tooltip(command.clone(), None, fg, bg))
-                        .child(svg().path(PLAY_ICON).flex_none().size(px(font_size)).text_color(dim))
-                        .child(div().flex_none().max_w(relative(0.7)).truncate().child(task.name.clone()))
-                        .children(
-                            description.map(|text| div().flex_1().min_w_0().truncate().text_color(dim).child(text)),
-                        )
+                        .child(div().flex_none().max_w(relative(0.6)).truncate().child(task.name.clone()))
+                        .child(div().flex_1().min_w_0().truncate().text_color(faint).children(description))
+                        .child(run)
                         // 按下时不往外传，免得文件树把选中的行取消掉。
                         .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-                        .on_click(cx.listener(move |this, _, window, cx| this.run_task(command.clone(), window, cx)))
+                        .on_click(cx.listener(move |this, event: &ClickEvent, window, cx| {
+                            if event.click_count() >= 2 {
+                                this.run_task(command.clone(), window, cx);
+                            }
+                        }))
                         .into_any_element(),
                 );
             }
         }
+        // 外层只有高度上限、没有定高，`flex_1` 分不到空间会被压成零：两层都按内容撑开，超过上限时
+        // 收缩、在里面滚动。
         let body = div()
-            .flex_1()
             .min_h_0()
             .relative()
+            .flex()
+            .flex_col()
             .child(
                 div()
                     .id("tasks")
-                    .size_full()
+                    .min_h_0()
                     .overflow_y_scroll()
                     .track_scroll(&project.tasks_scroll)
                     .px(px(4.))

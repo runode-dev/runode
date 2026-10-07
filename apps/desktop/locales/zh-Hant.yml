@@ -189,6 +189,7 @@ search:
   placeholder: 搜尋
   no_results: 沒有結果
 files:
+  run_task: 執行 %{command}
   tasks: 命令
   new_file: 新增檔案…
   new_folder: 新增檔案夾…
