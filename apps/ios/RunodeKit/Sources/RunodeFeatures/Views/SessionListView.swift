@@ -78,7 +78,7 @@
                         Text("新开一个终端，在手机上就能用。")
                     } actions: {
                         Button("新开会话") { Task { await model.spawn() } }
-                            .buttonStyle(.borderedProminent)
+                            .prominentButtonStyle()
                             .controlSize(.large)
                     }
                 } else if !model.loaded, model.linkState.isConnected {

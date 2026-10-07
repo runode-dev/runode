@@ -109,7 +109,7 @@
                         } label: {
                             Text("在这里新建").frame(maxWidth: .infinity)
                         }
-                        .buttonStyle(.borderedProminent)
+                        .prominentButtonStyle()
                         .disabled(picker.path == nil || picker.isLoading)
                     }
                 }

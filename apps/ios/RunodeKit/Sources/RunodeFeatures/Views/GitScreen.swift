@@ -171,7 +171,7 @@
                     .font(.headline)
                     .frame(maxWidth: .infinity, minHeight: 36)
                 }
-                .buttonStyle(.borderedProminent)
+                .prominentButtonStyle()
                 .disabled(!model.canCommit)
             }
             .cardBackground()

@@ -51,7 +51,8 @@
             ])
 
             stack.addArrangedSubview(button("escape", symbol: true, label: "Esc") { $0.press(.escape) })
-            let control = button("control", symbol: true, label: "Ctrl（粘住）") { $0.controlLatched.toggle() }
+            // 不用 `control` 符号：它照 ⌃ 的样子画在字框的上半截，放在按钮里偏上；`chevron.up` 形状一样、上下居中。
+            let control = button("chevron.up", symbol: true, label: "Ctrl（粘住）") { $0.controlLatched.toggle() }
             controlButton = control
             stack.addArrangedSubview(control)
             stack.addArrangedSubview(button("arrow.right.to.line", symbol: true, label: "Tab") { $0.press(.tab) })
@@ -76,11 +77,12 @@
             highlight(controlButton, latched)
         }
 
-        /// 按下去的样子：粘住的 Ctrl、开着的键盘。
+        /// 按下去的样子（粘住的 Ctrl、开着的键盘）：反色，和 app 里的实心按钮一样黑白为主。不用 `tintColor`：
+        /// 这条栏在键盘的窗口里，接不到 app 设的强调色，会是系统的蓝色。
         private func highlight(_ button: UIButton, _ on: Bool) {
             button.isSelected = on
-            button.configuration?.baseBackgroundColor = on ? .tintColor : .secondarySystemFill
-            button.configuration?.baseForegroundColor = on ? .white : .label
+            button.configuration?.baseBackgroundColor = on ? .label : .secondarySystemFill
+            button.configuration?.baseForegroundColor = on ? .systemBackground : .label
         }
 
         private func button(
@@ -93,9 +95,9 @@
             configuration.contentInsets = NSDirectionalEdgeInsets(top: 4, leading: 10, bottom: 4, trailing: 10)
             if symbol {
                 configuration.image = UIImage(systemName: title)
-                // 比旁边 15 点的字小一号，图标看着才和字一样大。
+                // 比旁边 15 点的字小两号：图标比字显得满，小一号时方向键的实心三角还是太重。
                 configuration.preferredSymbolConfigurationForImage = UIImage.SymbolConfiguration(
-                    pointSize: 13, weight: .medium)
+                    pointSize: 11, weight: .medium)
             } else {
                 var attributed = AttributedString(title)
                 attributed.font = .monospacedSystemFont(ofSize: 15, weight: .medium)

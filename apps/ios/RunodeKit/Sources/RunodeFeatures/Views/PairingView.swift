@@ -55,7 +55,8 @@
                 }
                 .ignoresSafeArea()
             }
-            // 叠在相机画面上，不管 app 是深是浅都按深色画；弹出的面板各自再套一次。
+            // 叠在相机画面上，不管 app 是深是浅都按深色画，强调色用白色；弹出的面板各自再套一次。
+            .tint(.white)
             .preferredColorScheme(.dark)
             .animation(.default, value: model.phase)
             .sheet(isPresented: $showingPaste) {
@@ -123,7 +124,7 @@
                     } label: {
                         Text("完成").frame(maxWidth: .infinity)
                     }
-                    .buttonStyle(.borderedProminent)
+                    .prominentButtonStyle()
                     .controlSize(.large)
                 }
             case .failed(let message):
@@ -219,7 +220,7 @@
                     Spacer()
                     Button("取消") { dismiss() }
                     Button("配对") { submit() }
-                        .buttonStyle(.borderedProminent)
+                        .prominentButtonStyle()
                         .disabled(model.linkText.isEmpty || model.isBusy)
                 }
                 .frame(minHeight: 44)
@@ -229,6 +230,7 @@
             .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height = $0 }
             .presentationDetents([.height(height)])
             .presentationDragIndicator(.visible)
+            .tint(.white)
             .preferredColorScheme(.dark)
             .onAppear { focused = true }
         }

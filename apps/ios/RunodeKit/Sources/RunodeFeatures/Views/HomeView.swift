@@ -86,7 +86,7 @@
                         tint: summary.waiting > 0 ? .orange : .secondary)
                     StatTile(
                         value: summary.working, title: "干活中", systemImage: Presentation.symbol(for: .working),
-                        tint: summary.working > 0 ? .blue : .secondary)
+                        tint: summary.working > 0 ? .primary : .secondary)
                     StatTile(
                         value: summary.sessions, title: "会话", systemImage: "terminal.fill",
                         tint: summary.sessions > 0 ? .primary : .secondary)

@@ -42,7 +42,9 @@
                         Text(Presentation.sizePreference(preference)).tag(preference)
                     }
                 }
+                // 主题的强调色是前景色，开关打开时底和圆钮一样白，看不出开着，开关用系统的绿色。
                 Toggle("字号跟随系统", isOn: followsSystemFont)
+                    .tint(.green)
                 if let size = settings.preferences.fontSize {
                     Stepper(value: fontSize, in: AppPreferences.fontSizes, step: 1) {
                         LabeledContent("字号", value: "\(Int(size)) 点")
@@ -54,6 +56,7 @@
                         .accessibilityLabel("字号预览")
                 }
                 Toggle("响铃时震动", isOn: $settings.preferences.bellHaptics)
+                    .tint(.green)
             } header: {
                 Text("终端")
             } footer: {

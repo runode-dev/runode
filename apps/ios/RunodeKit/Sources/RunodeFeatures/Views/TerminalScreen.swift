@@ -33,7 +33,7 @@
                 .overlay(alignment: .bottomTrailing) {
                     if model.scrolledBack {
                         Button("回到最新", systemImage: "arrow.down.to.line") { model.scrollToBottom() }
-                            .buttonStyle(.borderedProminent)
+                            .prominentButtonStyle()
                             .controlSize(.large)
                             .padding()
                             .transition(.opacity)

@@ -47,11 +47,19 @@
     }
 
     extension View {
-        /// 套用主题：底色放进环境，深色主题用深色模式（字、系统控件、键盘跟着变），浅色主题用浅色模式。
-        /// 放在根视图上，弹出的页面也跟着。
+        /// 套用主题：底色放进环境，深色主题用深色模式（字、系统控件、键盘跟着变），浅色主题用浅色模式；
+        /// 按钮、链接这些强调色用终端的前景色，和桌面一样黑白为主，不用系统的蓝色。放在根视图上，弹出的
+        /// 页面也跟着。
         func appTheme(_ theme: AppTheme) -> some View {
             environment(\.themeColors, ThemeColors(theme))
+                .tint(Color(theme.foreground))
                 .preferredColorScheme(theme.isDark ? .dark : .light)
+        }
+
+        /// 实心的主按钮：底是强调色，字用 `systemBackground`，和首页的「配对电脑」一样。系统的
+        /// `borderedProminent` 字固定是白的，强调色是主题的前景色，深色主题下就成了白底白字。
+        func prominentButtonStyle() -> some View {
+            buttonStyle(.borderedProminent).foregroundStyle(Color(.systemBackground))
         }
     }
 
@@ -331,7 +339,7 @@
         static func tint(for group: SessionGroup) -> Color {
             switch group {
             case .waiting: .orange
-            case .working: .blue
+            case .working: .primary
             case .other: .secondary
             }
         }
