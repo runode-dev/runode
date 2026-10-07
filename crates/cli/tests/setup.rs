@@ -8,7 +8,7 @@ use runode_cli::exit;
 #[test]
 fn claude_gets_a_skill() {
     let fake = FakeHost::start("setupclaude", |_| vec![]);
-    let home = fake.env.home.clone().unwrap();
+    let home = fake.env.dirs.home.clone().unwrap();
     let skill = home.join(".claude/skills/runode/SKILL.md");
     let (code, out, err) = run("setup claude", &fake.env);
     assert_eq!(code, exit::OK, "{err}");
@@ -25,7 +25,7 @@ fn claude_gets_a_skill() {
 #[test]
 fn codex_gets_a_section_in_its_agents_file() {
     let fake = FakeHost::start("setupcodex", |_| vec![]);
-    let home = fake.env.home.clone().unwrap();
+    let home = fake.env.dirs.home.clone().unwrap();
     let agents = home.join(".codex/AGENTS.md");
     std::fs::create_dir_all(agents.parent().unwrap()).unwrap();
     std::fs::write(&agents, "# Mine\n\nAlways run the tests.\n").unwrap();
@@ -46,5 +46,5 @@ fn codex_gets_a_section_in_its_agents_file() {
     let (code, out, _) = run("setup codex --print", &fresh.env);
     assert_eq!(code, exit::OK);
     assert!(out.starts_with("<!-- runode:begin -->"), "{out}");
-    assert!(!fresh.env.home.as_ref().unwrap().join(".codex").exists());
+    assert!(!fresh.env.dirs.home.as_ref().unwrap().join(".codex").exists());
 }

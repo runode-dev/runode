@@ -47,9 +47,8 @@ pub struct Env {
     pub session: Option<String>,
     /// 这次构建的标识，握手时报给宿主。
     pub build: String,
-    /// 家目录：显示目录时缩成 `~`，`setup` 往这里装使用说明。
-    pub home: Option<PathBuf>,
-    /// runode 的各个目录，`remote` 在这里找远程访问的文件。
+    /// runode 的各个目录，`remote` 在这里找远程访问的文件。其中的家目录：显示目录时缩成 `~`，
+    /// `setup` 往这里装使用说明。
     pub dirs: runode_paths::Dirs,
 }
 
@@ -62,7 +61,6 @@ impl Env {
             socket: var(runode_protocol::ENV_SOCKET).map(PathBuf::from).or_else(|| dirs.host_socket_file()),
             session: var(runode_protocol::ENV_SESSION).map(|value| value.to_string_lossy().into_owned()),
             build: build.into(),
-            home: dirs.home.clone(),
             dirs,
         }
     }

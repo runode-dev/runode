@@ -46,11 +46,6 @@ impl Installation {
         Ok(Self { app, team })
     }
 
-    /// 在跑的这份 .app。
-    pub fn app(&self) -> &Path {
-        &self.app
-    }
-
     /// 把 `release` 下载到暂存目录、解压、核对签名和版本号，成了等着 `Staged::install`。会阻塞到
     /// 下完，最多 `ARCHIVE_TIMEOUT`。没成时删掉暂存目录。
     pub fn stage(&self, release: &Release) -> Result<Staged, Error> {
@@ -111,11 +106,6 @@ pub struct Staged {
 impl Staged {
     pub fn version(&self) -> &str {
         &self.version
-    }
-
-    /// 装上后新版本在哪：就是现在装着的那个 .app 的位置。
-    pub fn app(&self) -> &Path {
-        &self.target
     }
 
     /// 再核对一次签名和版本号，和装着的 .app 对调，再删掉换下来的旧版本。在跑的进程照常跑完，下次

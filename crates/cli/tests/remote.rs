@@ -26,12 +26,7 @@ impl Root {
     }
 
     fn dirs(&self) -> Dirs {
-        Dirs {
-            home: Some(self.0.clone()),
-            config: Some(self.0.clone()),
-            data: Some(self.0.join("runode")),
-            cache: Some(self.0.join("runode/cache")),
-        }
+        Dirs::from_vars(|_| Some(self.0.clone().into()))
     }
 
     fn env(&self) -> Env {

@@ -206,7 +206,7 @@ impl World {
         };
         let layout = if layout { connection.layout()? } else { None };
         let own = env.session.as_deref().and_then(|own| own.parse().ok());
-        Ok(Self { sessions, layout, own, home: env.home.clone() })
+        Ok(Self { sessions, layout, own, home: env.dirs.home.clone() })
     }
 
     /// 按写法找正好一个会话。

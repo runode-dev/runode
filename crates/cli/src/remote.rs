@@ -14,7 +14,9 @@ use anyhow::{Context as _, anyhow, bail};
 use qrcode::{Color, EcLevel, QrCode};
 use runode_config::ConfigFile;
 use runode_protocol::remote::PAIRING_TTL;
-use runode_remote_access::{Device, PairingProgress, PairingTicket, list_devices, listener_status, revoke_device};
+use runode_remote_access::{
+    Device, PairingProgress, PairingTicket, list_devices, listener_status, now_unix, revoke_device,
+};
 
 use crate::Env;
 
@@ -228,10 +230,6 @@ fn ago(now: u64, then: u64) -> String {
     }
 }
 
-fn now_unix() -> u64 {
-    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |since| since.as_secs())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -255,12 +253,7 @@ mod tests {
     fn env_in(name: &str) -> (Env, std::path::PathBuf) {
         let root = std::env::temp_dir().join(format!("rnb-{}-{name}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
-        let dirs = runode_paths::Dirs {
-            home: Some(root.clone()),
-            config: Some(root.clone()),
-            data: Some(root.join("runode")),
-            cache: Some(root.join("runode/cache")),
-        };
+        let dirs = runode_paths::Dirs::from_vars(|_| Some(root.clone().into()));
         (Env { dirs, ..Env::default() }, root)
     }
 

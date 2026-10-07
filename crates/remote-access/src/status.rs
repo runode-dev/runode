@@ -16,8 +16,6 @@ use crate::files::{no_home, read_json};
 /// 开着的监听方的状态。
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ListenerStatus {
-    /// 监听方所在的进程：桌面 app，或者单独跑的宿主（`runode --host`）。
-    pub pid: u32,
     pub port: u16,
     /// 证书指纹，见 `runode_protocol::remote::FINGERPRINT_LEN`。
     pub fingerprint: Bytes,

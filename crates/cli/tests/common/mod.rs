@@ -33,7 +33,7 @@ pub enum Received {
 pub struct FakeHost {
     pub env: Env,
     pub received: mpsc::Receiver<Received>,
-    /// 临时目录，`env.home` 指向它下面的 `home`。
+    /// 临时目录，`env.dirs.home` 指向它下面的 `home`。
     pub dir: std::path::PathBuf,
 }
 
@@ -57,7 +57,8 @@ impl FakeHost {
         });
         let home = dir.join("home");
         std::fs::create_dir_all(&home).unwrap();
-        let env = Env { socket: Some(socket), build: "test".into(), home: Some(home), ..Env::default() };
+        let dirs = runode_paths::Dirs { home: Some(home), ..runode_paths::Dirs::default() };
+        let env = Env { socket: Some(socket), build: "test".into(), dirs, ..Env::default() };
         Self { env, received, dir }
     }
 

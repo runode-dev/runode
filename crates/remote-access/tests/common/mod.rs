@@ -55,12 +55,7 @@ impl Harness {
         let root = std::env::temp_dir().join(format!("rra-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(&root).unwrap();
-        let dirs = Dirs {
-            home: Some(root.clone()),
-            config: Some(root.clone()),
-            data: Some(root.join("runode")),
-            cache: Some(root.join("runode/cache")),
-        };
+        let dirs = Dirs::from_vars(|_| Some(root.clone().into()));
         let (tx, hosts) = mpsc::channel();
         let tx = Mutex::new(tx);
         let connect = Arc::new(move || -> io::Result<UnixStream> {
@@ -123,7 +118,7 @@ impl Harness {
     }
 }
 
-fn options(dirs: &Dirs, connect: runode_remote_access::Connect) -> Options {
+pub fn options(dirs: &Dirs, connect: runode_remote_access::Connect) -> Options {
     Options {
         dirs: dirs.clone(),
         port: 0,

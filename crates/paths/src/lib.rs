@@ -42,7 +42,7 @@ impl Dirs {
     }
 
     /// 按 `var` 给出的环境变量算出各个目录，空值当作没设。
-    fn from_vars(var: impl Fn(&str) -> Option<OsString>) -> Self {
+    pub fn from_vars(var: impl Fn(&str) -> Option<OsString>) -> Self {
         let var = |key: &str| var(key).filter(|v| !v.is_empty()).map(PathBuf::from);
         let home = var("HOME");
         let config = var("XDG_CONFIG_HOME").or_else(|| home.as_ref().map(|home| home.join(".config")));
@@ -59,7 +59,8 @@ impl Dirs {
     /// 宿主进程和各个界面之间的 Unix socket，在 `runtime_dir` 里。路径太长、放不进
     /// `sun_path` 时为 `None`。
     pub fn host_socket_file(&self) -> Option<PathBuf> {
-        socket_path(self.runtime_dir()?.join(format!("{HOST_NAME}.sock")))
+        let path = self.runtime_dir()?.join(format!("{HOST_NAME}.sock"));
+        (path.as_os_str().len() < SUN_PATH_LEN).then_some(path)
     }
 
     /// 保证只有一个宿主进程的锁文件，和 socket 放在一起。
@@ -227,11 +228,6 @@ fn create_private_dir(dir: Option<PathBuf>) -> std::io::Result<PathBuf> {
     }
     std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700))?;
     Ok(dir)
-}
-
-/// 放得进 `sun_path` 的 socket 路径原样返回，放不进时为 `None`。
-fn socket_path(path: PathBuf) -> Option<PathBuf> {
-    (path.as_os_str().len() < SUN_PATH_LEN).then_some(path)
 }
 
 #[cfg(test)]

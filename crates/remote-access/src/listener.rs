@@ -173,12 +173,7 @@ impl Listener {
         let port = addrs.first().map_or(port, SocketAddr::port);
         let host_name = host_name.unwrap_or_else(addrs::host_name);
         let fp = encode_base64url(&fingerprint);
-        let status = ListenerStatus {
-            pid: std::process::id(),
-            port,
-            fingerprint: Bytes(fingerprint.to_vec()),
-            host_name: host_name.clone(),
-        };
+        let status = ListenerStatus { port, fingerprint: Bytes(fingerprint.to_vec()), host_name: host_name.clone() };
         write_json(&dirs.remote_access_status_file().ok_or_else(no_home)?, &status)?;
         let shared = Arc::new(Shared {
             dirs,

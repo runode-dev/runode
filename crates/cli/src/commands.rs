@@ -207,7 +207,8 @@ pub(crate) fn run(command: Command, env: &Env, out: &mut dyn Write, err: &mut dy
             if print {
                 out.write_all(crate::setup::text(target).as_bytes())?;
             } else {
-                let home = env.home.as_deref().ok_or_else(|| anyhow!("cannot tell where your home directory is"))?;
+                let home =
+                    env.dirs.home.as_deref().ok_or_else(|| anyhow!("cannot tell where your home directory is"))?;
                 let path = crate::setup(target, home)?;
                 writeln!(out, "installed {}", path.display())?;
             }

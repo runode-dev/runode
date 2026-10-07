@@ -15,7 +15,7 @@ use gpui::{
 use qrcode::{Color, EcLevel, QrCode};
 use runode_paths::Dirs;
 use runode_protocol::remote::PAIRING_TTL;
-use runode_remote_access::{PairingProgress, PairingTicket, listener_status};
+use runode_remote_access::{PairingProgress, PairingTicket, listener_status, now_unix};
 
 use super::{
     SettingsView,
@@ -92,10 +92,6 @@ impl Qr {
             (x > start).then_some((start, x - start))
         })
     }
-}
-
-fn now_unix() -> u64 {
-    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |since| since.as_secs())
 }
 
 /// 剩下的时间，写成「分:秒」。

@@ -292,14 +292,10 @@ fn the_certificate_stays_the_same_across_restarts() {
     }
     assert_eq!(mode(&harness.dirs.remote_access_dir().unwrap()), 0o700);
     // 同一时刻只有一个监听方。
-    let second = runode_remote_access::Listener::start(runode_remote_access::Options {
-        dirs: harness.dirs.clone(),
-        port: 0,
-        bind: runode_remote_access::Bind::Loopback,
-        host_name: None,
-        advertise: false,
-        connect: std::sync::Arc::new(|| Err(std::io::Error::other("unused"))),
-    });
+    let second = runode_remote_access::Listener::start(options(
+        &harness.dirs,
+        std::sync::Arc::new(|| Err(std::io::Error::other("unused"))),
+    ));
     assert_eq!(second.err().map(|err| err.kind()), Some(std::io::ErrorKind::AddrInUse));
     // 停了再开，证书不变，配对过的手机照样认得。
     let before = harness.fingerprint;
