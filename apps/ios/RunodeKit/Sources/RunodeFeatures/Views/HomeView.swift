@@ -163,7 +163,7 @@
         private var resumeSection: some View {
             if let resume = app.resume {
                 Section {
-                    ListSectionHeader(title: "继续")
+                    ListSectionHeader(title: "上次打开")
                     Button(action: app.resumeRecent) {
                         ResumeCard(item: resume)
                     }

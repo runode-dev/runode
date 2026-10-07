@@ -34,7 +34,7 @@
                 makeLink: { record -> any HostLink in record.id == offlineMachine.id ? DemoOfflineLink() : DemoLink() },
                 deviceName: "演示 iPhone",
                 // 上次打开的终端记在单独的一份设置里，和正式的分开；先带 `shell` 启动一次，再不带参数启动，
-                // 首页就有「继续」。
+                // 首页就有「上次打开」。
                 recents: DefaultsStore("recentTerminal", defaults: UserDefaults(suiteName: "demo") ?? .standard))
         }
 

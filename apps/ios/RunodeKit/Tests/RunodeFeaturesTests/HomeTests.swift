@@ -89,14 +89,14 @@ private struct TwoMachines {
         #expect(machines.app.resume?.session == plain)
         machines.app.resumeRecent()
         #expect(machines.app.path == [.machine(machines.first.id), .terminal(machine: machines.first.id, session: plain)])
-        // 会话结束了，「继续」就不出现。
+        // 会话结束了，「上次打开」就不出现。
         machines.app.path = []
         let list = try #require(machines.app.sessionList(for: machines.first.id))
         list.handle(.message(.sessionList([info(waiting, .blocked)])))
         #expect(machines.app.resume == nil)
     }
 
-    /// 还没连上时「继续」用记下的标题；连上后列表里没有这个会话（结束了）就不显示。
+    /// 还没连上时「上次打开」用记下的标题；连上后列表里没有这个会话（结束了）就不显示。
     @Test func resumeShowsTheSavedTitleBeforeConnecting() async throws {
         let machines = await TwoMachines(savedTitle: "上次的")
         #expect(machines.app.resume?.title == "上次的")

@@ -2,7 +2,7 @@ import Foundation
 import RunodeConnection
 import RunodeProtocol
 
-/// 上次打开的终端：首页「继续」那一块，点一下回到它。标题和目录是打开时的样子，连上以后以会话列表
+/// 上次打开的终端：首页「上次打开」那一块，点一下回到它。标题和目录是打开时的样子，连上以后以会话列表
 /// 里实时的为准。
 public struct RecentTerminal: Hashable, Sendable, Codable {
     public var machine: UUID
@@ -26,7 +26,7 @@ public struct HomeSummary: Hashable, Sendable {
     public var sessions = 0
 }
 
-/// 首页「继续」那一块要显示的东西。
+/// 首页「上次打开」那一块要显示的东西。
 public struct ResumeItem: Hashable, Sendable {
     public var machine: MachineRecord
     public var session: SessionId

@@ -72,7 +72,7 @@ public final class AppModel {
     public var pairsAfterSettings = false
     public let machineList: MachineListModel
     public let settings: SettingsModel
-    /// 上次打开的终端，首页的「继续」用它。
+    /// 上次打开的终端，首页的「上次打开」用它。
     public private(set) var recent: RecentTerminal?
     /// 上次用的主题，电脑还没连上时用它。
     private var savedTheme: AppTheme?
@@ -209,7 +209,7 @@ public final class AppModel {
         }
     }
 
-    /// 导航栈变了：退出去的终端页、Git 页关掉，新打开的终端记作「继续」。会话列表的连接不跟导航栈走。
+    /// 导航栈变了：退出去的终端页、Git 页关掉，新打开的终端记作「上次打开」。会话列表的连接不跟导航栈走。
     private func pathChanged() {
         let live = Set(path)
         for (route, model) in terminals where !live.contains(route) {
