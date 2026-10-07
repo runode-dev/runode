@@ -23,6 +23,8 @@ pub(crate) fn register(_name: &str, _port: u16, _txt: &[(&str, &str)]) -> io::Re
 }
 
 /// DNS-SD 的 TXT 记录：每项一个字节的长度再跟内容，一项最长 255 字节。
+// 只有 macOS 用得上，别的系统上只给测试用。
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub(crate) fn txt_record(items: &[(&str, &str)]) -> Vec<u8> {
     let mut record = Vec::new();
     for (key, value) in items {
@@ -35,6 +37,8 @@ pub(crate) fn txt_record(items: &[(&str, &str)]) -> Vec<u8> {
 }
 
 /// DNS 的一个标签最长 63 字节，实例名超过时在字符边界上截短。
+// 只有 macOS 用得上，别的系统上只给测试用。
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub(crate) fn instance_name(name: &str) -> &str {
     let mut end = name.len().min(63);
     while !name.is_char_boundary(end) {

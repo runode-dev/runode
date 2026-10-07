@@ -223,7 +223,15 @@ fn launched_as_host(args: &[Vec<u8>]) -> bool {
     args.iter().skip(1).any(|arg| arg == b"--host")
 }
 
+/// 进程 `pid` 的启动参数（含程序名），读 `/proc/<pid>/cmdline`：各个参数以 NUL 结尾接在一起。
+#[cfg(target_os = "linux")]
+fn process_args(pid: libc::pid_t) -> io::Result<Vec<Vec<u8>>> {
+    let data = std::fs::read(format!("/proc/{pid}/cmdline"))?;
+    Ok(data.split(|&byte| byte == 0).filter(|arg| !arg.is_empty()).map(<[u8]>::to_vec).collect())
+}
+
 /// 进程 `pid` 的启动参数（含程序名），用 `sysctl(KERN_PROCARGS2)` 读，见 `parse_procargs`。
+#[cfg(not(target_os = "linux"))]
 fn process_args(pid: libc::pid_t) -> io::Result<Vec<Vec<u8>>> {
     let mut max: libc::c_int = 0;
     let mut size = std::mem::size_of::<libc::c_int>();
@@ -252,6 +260,7 @@ fn process_args(pid: libc::pid_t) -> io::Result<Vec<Vec<u8>>> {
 /// 解 `KERN_PROCARGS2` 的结果：本机字节序的 `int argc`，可执行文件的路径（以 NUL 结尾，后面可能
 /// 补几个 NUL 对齐），接着 `argc` 个以 NUL 结尾的参数（第一个是程序名），再往后是环境变量，不要。
 /// 格式不对时为 `None`。
+#[cfg_attr(target_os = "linux", allow(dead_code))]
 fn parse_procargs(data: &[u8]) -> Option<Vec<Vec<u8>>> {
     let argc = usize::try_from(i32::from_ne_bytes(data.get(..4)?.try_into().ok()?)).ok()?;
     let rest = &data[4..];

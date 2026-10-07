@@ -564,11 +564,27 @@ fn lock_exclusively(path: &Path) -> Result<File> {
 
 /// 连上来的进程是不是和自己同一个用户。
 pub fn same_user(stream: &UnixStream) -> bool {
+    // SAFETY: 没有参数，总是成功。
+    peer_uid(stream) == Some(unsafe { libc::geteuid() })
+}
+
+#[cfg(not(target_os = "linux"))]
+fn peer_uid(stream: &UnixStream) -> Option<libc::uid_t> {
     let (mut uid, mut gid) = (0, 0);
     // SAFETY: 描述符来自 `stream`，两个输出参数指向本地变量。
-    let ok = unsafe { libc::getpeereid(stream.as_raw_fd(), &mut uid, &mut gid) } == 0;
-    // SAFETY: 没有参数，总是成功。
-    ok && uid == unsafe { libc::geteuid() }
+    (unsafe { libc::getpeereid(stream.as_raw_fd(), &mut uid, &mut gid) } == 0).then_some(uid)
+}
+
+#[cfg(target_os = "linux")]
+fn peer_uid(stream: &UnixStream) -> Option<libc::uid_t> {
+    // SAFETY: `ucred` 是纯数据，全零合法。
+    let mut cred: libc::ucred = unsafe { std::mem::zeroed() };
+    let mut len = std::mem::size_of::<libc::ucred>() as libc::socklen_t;
+    // SAFETY: 描述符来自 `stream`；输出参数指向本地变量，长度如实给出。
+    let ok = unsafe {
+        libc::getsockopt(stream.as_raw_fd(), libc::SOL_SOCKET, libc::SO_PEERCRED, (&raw mut cred).cast(), &mut len)
+    } == 0;
+    ok.then_some(cred.uid)
 }
 
 /// 把 socket 的收发缓冲设成 `SOCKET_BUFFER`；设不了时记日志，照常用。

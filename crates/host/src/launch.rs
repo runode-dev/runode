@@ -15,7 +15,33 @@ use std::{
 
 /// `sys/spawn.h` 的 `POSIX_SPAWN_SETSID`：子进程自己开一个新的会话（`setsid`），不在拉起它的
 /// app 的会话和进程组里，app 所在的终端关掉、app 的进程组收到信号都不波及它。`libc` 里没有。
+#[cfg(target_os = "macos")]
 const POSIX_SPAWN_SETSID: libc::c_int = 0x0400;
+#[cfg(not(target_os = "macos"))]
+const POSIX_SPAWN_SETSID: libc::c_int = 0x80;
+
+/// 除了显式接上的，子进程不继承任何描述符。只有 macOS 有这个标志；别的系统上靠各处打开描述符时
+/// 都设了 close-on-exec（Rust 标准库默认如此）。
+#[cfg(target_os = "macos")]
+const CLOEXEC_DEFAULT: libc::c_int = libc::POSIX_SPAWN_CLOEXEC_DEFAULT;
+#[cfg(not(target_os = "macos"))]
+const CLOEXEC_DEFAULT: libc::c_int = 0;
+
+/// 进程自己的环境变量表。
+#[cfg(target_os = "macos")]
+fn environ() -> *const *mut c_char {
+    // SAFETY: `_NSGetEnviron` 总是返回指向进程环境表指针的有效指针。
+    unsafe { (*libc::_NSGetEnviron()).cast_const() }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn environ() -> *const *mut c_char {
+    unsafe extern "C" {
+        static environ: *const *mut c_char;
+    }
+    // SAFETY: libc 导出的进程环境表，只读它的值。
+    unsafe { environ }
+}
 
 /// 用 `exe --host` 拉起宿主进程，返回它的 pid，不等它连上 socket。
 ///
@@ -79,10 +105,7 @@ fn detach(exe: &Path, extra_args: &[&CStr], status: Option<&OwnedFd>) -> io::Res
         check(unsafe { libc::posix_spawn_file_actions_adddup2(actions.as_mut_ptr(), status.as_raw_fd(), STATUS_FD) })?;
     }
     let mut attr = SpawnAttr::new()?;
-    let flags = POSIX_SPAWN_SETSID
-        | libc::POSIX_SPAWN_CLOEXEC_DEFAULT
-        | libc::POSIX_SPAWN_SETSIGDEF
-        | libc::POSIX_SPAWN_SETSIGMASK;
+    let flags = POSIX_SPAWN_SETSID | CLOEXEC_DEFAULT | libc::POSIX_SPAWN_SETSIGDEF | libc::POSIX_SPAWN_SETSIGMASK;
     // SAFETY: `attr` 已经初始化；两个信号集是本地变量，初始化后才交出去。
     unsafe {
         check(libc::posix_spawnattr_setflags(attr.as_mut_ptr(), flags as libc::c_short))?;
@@ -97,14 +120,7 @@ fn detach(exe: &Path, extra_args: &[&CStr], status: Option<&OwnedFd>) -> io::Res
     // SAFETY: 路径和参数都是以 NUL 结尾的字符串，参数表以空指针结尾，在调用期间都活着；环境表
     // 是进程自己的 `environ`，posix_spawn 只读它。
     check(unsafe {
-        libc::posix_spawn(
-            &mut pid,
-            program.as_ptr(),
-            actions.as_ptr(),
-            attr.as_ptr(),
-            argv.as_ptr(),
-            (*libc::_NSGetEnviron()).cast_const(),
-        )
+        libc::posix_spawn(&mut pid, program.as_ptr(), actions.as_ptr(), attr.as_ptr(), argv.as_ptr(), environ())
     })?;
     let reaped = thread::Builder::new().name("host-reaper".into()).spawn(move || reap(pid));
     if let Err(err) = reaped {
@@ -135,7 +151,8 @@ struct FileActions(libc::posix_spawn_file_actions_t);
 
 impl FileActions {
     fn new() -> io::Result<Self> {
-        let mut actions: libc::posix_spawn_file_actions_t = ptr::null_mut();
+        // SAFETY: 不论是指针（macOS）还是结构体（Linux），全零都是合法的待初始化值。
+        let mut actions: libc::posix_spawn_file_actions_t = unsafe { std::mem::zeroed() };
         // SAFETY: 输出参数指向本地变量。
         check(unsafe { libc::posix_spawn_file_actions_init(&mut actions) })?;
         Ok(Self(actions))
@@ -162,7 +179,8 @@ struct SpawnAttr(libc::posix_spawnattr_t);
 
 impl SpawnAttr {
     fn new() -> io::Result<Self> {
-        let mut attr: libc::posix_spawnattr_t = ptr::null_mut();
+        // SAFETY: 同 `FileActions::new`。
+        let mut attr: libc::posix_spawnattr_t = unsafe { std::mem::zeroed() };
         // SAFETY: 输出参数指向本地变量。
         check(unsafe { libc::posix_spawnattr_init(&mut attr) })?;
         Ok(Self(attr))

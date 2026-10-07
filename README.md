@@ -36,7 +36,13 @@ Runode 用 [Ghostty](https://ghostty.org) 的 libghostty-vt 做终端仿真，�
 
 ## 安装
 
-下载对应芯片的 dmg：[Apple 芯片](https://github.com/runode-dev/runode/releases/latest/download/Runode-arm64.dmg) · [Intel](https://github.com/runode-dev/runode/releases/latest/download/Runode-x86_64.dmg)。打开后把 Runode 拖进「应用程序」。安装包用 Developer ID 签名并经过 Apple 公证，之后会自动更新。
+在终端里运行：
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/runode-dev/runode/main/scripts/install.sh | sh
+```
+
+它会把 Runode.app 装进「应用程序」，并把 `runode` 命令行链接到 `~/.local/bin`。也可以手动下载对应芯片的 dmg：[Apple 芯片](https://github.com/runode-dev/runode/releases/latest/download/Runode-arm64.dmg) · [Intel](https://github.com/runode-dev/runode/releases/latest/download/Runode-x86_64.dmg)。打开后把 Runode 拖进「应用程序」。安装包用 Developer ID 签名并经过 Apple 公证，之后会自动更新。
 
 历次版本见 [Releases](https://github.com/runode-dev/runode/releases)。iOS app 还没上架，需要[从源码构建](CONTRIBUTING.md)。
 
@@ -68,7 +74,7 @@ Runode 不是 Ghostty 的分支。它把 libghostty-vt 当作终端仿真的库�
 任何在终端里跑的 agent 都能用。其中二十多种能认出状态，包括 Claude Code、Codex、Gemini CLI、Cursor、OpenCode、Amp、GitHub Copilot、Kimi、Qwen Code 等。识别规则可以自己加。
 
 **支持哪些平台？**
-macOS（Apple 芯片和 Intel 都支持），另有 iOS app 做远程访问。
+macOS（Apple 芯片和 Intel 都支持），另有 iOS app 做远程访问。Linux（x86_64 和 aarch64）上能用安装脚本装命令行和终端宿主，没有桌面界面，用手机经远程访问连上来。
 
 ## 参与开发
 

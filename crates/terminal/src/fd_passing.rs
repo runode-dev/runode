@@ -167,6 +167,9 @@ fn recv_exact(stream: &UnixStream, buf: &mut [u8], fds: &mut Vec<OwnedFd>) -> io
 }
 
 /// 收一次，返回收到的字节数（0 是对面关了），随之来的描述符放进 `fds`。
+// `msg_controllen`、`cmsg_len` 和 `CMSG_LEN` 的类型各平台不一样（macOS 上是 u32，Linux 上是 usize），
+// 转换在 Linux 上是多余的。
+#[cfg_attr(target_os = "linux", allow(clippy::useless_conversion))]
 fn recv_some(stream: &UnixStream, buf: &mut [u8], fds: &mut Vec<OwnedFd>) -> io::Result<usize> {
     let (mut control, control_len) = control_buffer(RECV_FDS);
     let mut iov = libc::iovec { iov_base: buf.as_mut_ptr().cast(), iov_len: buf.len() };

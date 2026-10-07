@@ -217,6 +217,8 @@ fn machine_block(machine: &Machine, detail: SharedString, fg: Rgb) -> Div {
 }
 
 /// 机型的名字，去掉括号里的尺寸和芯片：「MacBook Pro (16-inch, M5 Max)」是「MacBook Pro」。
+// 只有 macOS 用得上，别的系统上只给测试用。
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 fn short_model(product: &str) -> &str {
     product.split(" (").next().unwrap_or(product).trim()
 }
