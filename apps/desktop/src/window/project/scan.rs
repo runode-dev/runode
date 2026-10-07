@@ -1,7 +1,6 @@
 //! 在后台读一次项目：git 状态和文件树要显示的目录内容，以及按 git 状态给路径找标记。
 
 use std::{
-    borrow::Cow,
     collections::{HashMap, HashSet},
     fs,
     path::{Path, PathBuf},
@@ -96,15 +95,10 @@ pub(super) struct Scan {
     pub(super) cost: Duration,
 }
 
-/// 读一遍项目；`options` 说读不读其他工作树（Git 面板没开时不读）。
-pub(super) fn scan(
-    dir: PathBuf,
-    expanded: Vec<PathBuf>,
-    mut untracked: git::UntrackedCache,
-    options: git::ReadOptions,
-) -> Scan {
+/// 读一遍项目；`worktrees` 说读不读其他工作树（Git 面板没开时不读）。
+pub(super) fn scan(dir: PathBuf, expanded: Vec<PathBuf>, mut untracked: git::UntrackedCache, worktrees: bool) -> Scan {
     let started = Instant::now();
-    let git = git::snapshot_repos(&dir, &mut untracked, options);
+    let git = git::snapshot_repos(&dir, &mut untracked, worktrees);
     let root = git.as_ref().map_or_else(|| dir.clone(), |git| git.main.root.clone());
     let dirs = std::iter::once(root.clone()).chain(expanded.into_iter().filter(|path| path.starts_with(&root)));
     let listings = list_dirs(dirs.collect(), &Decorator::new(git.as_ref()));
@@ -144,25 +138,15 @@ fn dir_status(current: Option<FileStatus>, status: FileStatus) -> FileStatus {
 /// 按 git 状态给文件树里的路径找标记。子模块和嵌套仓库里的文件按它们自己那个仓库的状态。
 pub(super) struct Decorator<'a> {
     git: Option<&'a git::Repos>,
-    /// 各个仓库里有改动的文件，相对主仓库根。主仓库的直接借它的路径，子仓库的要拼上前缀。
-    statuses: HashMap<Cow<'a, Path>, FileStatus>,
+    /// 主仓库和子仓库里有改动的文件，相对主仓库根，见 `Repos::statuses`。
+    statuses: HashMap<PathBuf, FileStatus>,
     /// 含有改动文件的目录，相对主仓库根，值是归总后的状态。
     changed_dirs: HashMap<PathBuf, FileStatus>,
 }
 
 impl<'a> Decorator<'a> {
     pub(super) fn new(git: Option<&'a git::Repos>) -> Self {
-        let mut statuses = HashMap::new();
-        for repo in git.iter().flat_map(|git| git.iter()) {
-            for (path, &status) in &repo.statuses {
-                let path = if repo.prefix.as_os_str().is_empty() {
-                    Cow::Borrowed(path.as_path())
-                } else {
-                    Cow::Owned(repo.prefix.join(path))
-                };
-                statuses.insert(path, status);
-            }
-        }
+        let statuses: HashMap<_, _> = git.iter().flat_map(|git| git.statuses()).collect();
         let mut changed_dirs: HashMap<PathBuf, FileStatus> = HashMap::new();
         for (path, &status) in &statuses {
             for dir in path.ancestors().skip(1).filter(|dir| !dir.as_os_str().is_empty()) {

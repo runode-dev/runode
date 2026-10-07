@@ -19,7 +19,7 @@ fn creates_and_switches_branches() {
     let repo = TestRepo::new("branches");
     repo.commit_file("a.txt", "one\n", "init");
     let handle = common::read(&repo).repo();
-    handle.create_branch("feat").unwrap();
+    handle.create_branch("feat", None).unwrap();
     assert_eq!(repo.git(&["branch", "--show-current"]), "feat");
     repo.commit_file("b.txt", "b\n", "on feat");
 
@@ -34,7 +34,7 @@ fn creates_and_switches_branches() {
     let main = branches.iter().find(|branch| branch.name == "main").unwrap();
     handle.checkout(main).unwrap();
     assert_eq!(repo.git(&["branch", "--show-current"]), "main");
-    assert!(handle.create_branch("feat").is_err());
+    assert!(handle.create_branch("feat", None).is_err());
 }
 
 #[test]

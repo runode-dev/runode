@@ -1,10 +1,9 @@
 //! 按块暂存、撤回和丢弃：从文件的改动里只挑一块交给 `git apply`。
 
-use std::{ffi::OsStr, path::Path};
+use std::{ffi::OsString, path::Path};
 
 use crate::{
-    FileDiff, FileStatus, GitError, Hunk, LineKind, Repo, Result, ops::run, parse::expand_tabs,
-    snapshot::MAX_DIFF_BYTES,
+    FileDiff, FileStatus, GitError, Hunk, LineKind, Repo, Result, ops::run, parse::expand_tabs, snapshot::diff_args,
 };
 
 /// 对一块改动做什么。
@@ -94,16 +93,10 @@ impl Repo {
         let target = file.hunks.get(hunk).ok_or_else(|| GitError::new("没有这一块改动"))?;
         let (dir, rel) = self.locate(&file.path)?;
         // 和 `diff` 读 `FileDiff` 时的参数一样，块才切得一样。
-        let threshold = format!("core.bigFileThreshold={MAX_DIFF_BYTES}");
-        let mut args: Vec<&OsStr> = ["--literal-pathspecs", "-c", &threshold, "diff", "--no-color", "--no-ext-diff"]
-            .into_iter()
-            .chain(["--no-textconv", "--src-prefix=a/", "--dst-prefix=b/", "--ignore-submodules=dirty"])
-            .map(OsStr::new)
-            .collect();
-        if action == HunkAction::Unstage {
-            args.extend([OsStr::new("--cached"), OsStr::new("HEAD")]);
-        }
-        args.extend([OsStr::new("--"), rel.as_os_str()]);
+        let cached: &[&str] = if action == HunkAction::Unstage { &["--cached", "HEAD"] } else { &[] };
+        let args = std::iter::once(OsString::from("--literal-pathspecs"))
+            .chain(diff_args(cached).into_iter().map(OsString::from))
+            .chain([OsString::from("--"), rel.into_os_string()]);
         let output = run(&dir, args, None)?;
         let raw = split_raw(&output);
         let chosen = raw

@@ -143,12 +143,6 @@ fn find_syntax<'a>(set: &'a SyntaxSet, path: &Path, first_line: &str) -> Option<
         .filter(|syntax| syntax.name != "Plain Text")
 }
 
-/// 认出的语言名，认不出时为空。
-pub fn syntax_name(path: &Path, first_line: &str) -> Option<&'static str> {
-    let (set, _) = assets();
-    find_syntax(set, path, first_line).map(|syntax| syntax.name.as_str())
-}
-
 /// 逐行高亮 `lines`，返回和 `lines` 一样多的行，每行里非默认样式的若干段。认不出语言或者
 /// `cancel` 被置上时为空。长于 `MAX_LINE_BYTES` 的行和高亮出错的行没有分段，从下一行起
 /// 按文件开头的状态重新高亮，所以长行后面的行照样有颜色，只是跨行的结构（比如多行注释）

@@ -19,7 +19,7 @@ pub use graph::{Commit, CommitRef, GraphLine, GraphRow, Half, History, RefKind, 
 pub use info::{Operation, RepoInfo, Stash};
 pub use ops::{CommitOptions, GitError, Repo, Result};
 pub use patch::{HunkAction, hunk_actionable};
-pub use repos::{ReadOptions, RepoKind, Repos, snapshot_repos};
+pub use repos::{RepoKind, Repos, snapshot_repos};
 pub use snapshot::{FileDiff, FileStatus, Hunk, Line, LineKind, Section, Snapshot, UntrackedCache, snapshot};
 pub use view::{DiffRow, DiffSide, DiffView, merge_rows};
 

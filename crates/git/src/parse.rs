@@ -103,9 +103,8 @@ pub(crate) fn parse_diff(text: &str) -> Vec<FileDiff> {
                 }
             }
         }
-        if let Some(range) = line.strip_prefix("@@ ") {
-            let (o, n) = parse_hunk_range(range);
-            (old, new) = (o, n);
+        if line.starts_with("@@ ") {
+            (old, new) = crate::view::first_lines(line).unwrap_or_default();
             in_hunk = true;
             hunk_kept = file.added + file.removed < MAX_FILE_LINES;
             if hunk_kept {
@@ -153,20 +152,6 @@ pub(crate) fn parse_diff(text: &str) -> Vec<FileDiff> {
         }
     }
     files
-}
-
-/// `-a,b +c,d @@ ...` 里的起始行号 `a` 和 `c`。
-fn parse_hunk_range(range: &str) -> (u32, u32) {
-    let mut parts = range.split(' ');
-    let start = |part: Option<&str>, sign: char| {
-        part.and_then(|part| part.strip_prefix(sign))
-            .and_then(|part| part.split(',').next())
-            .and_then(|start| start.parse().ok())
-            .unwrap_or(0)
-    };
-    let old = start(parts.next(), '-');
-    let new = start(parts.next(), '+');
-    (old, new)
 }
 
 /// `diff --git a/路径 b/路径` 里的路径。只在新旧路径相同时可靠，改名时由后面的

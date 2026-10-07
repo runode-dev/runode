@@ -60,7 +60,7 @@ fn range(part: &str) -> Option<(u32, u32)> {
 
 /// 块头 `@@ -a,b +c,d @@` 里旧文件和新文件的第一行：行数为 0 的那边（只有加或只有删）块头
 /// 写的是块前面那一行，块从它的下一行开始。
-fn first_lines(header: &str) -> Option<(u32, u32)> {
+pub(crate) fn first_lines(header: &str) -> Option<(u32, u32)> {
     let mut parts = header.strip_prefix("@@ ")?.split(' ');
     let (old, old_count) = range(parts.next()?)?;
     let (new, new_count) = range(parts.next()?)?;
@@ -134,16 +134,13 @@ impl Repo {
                 .map(|tree| String::from_utf8_lossy(&tree).trim().to_owned())
         };
         let base = match side {
-            DiffSide::Worktree => None,
-            DiffSide::Index => Some(match git(&self.root, &["rev-parse", "--verify", "--quiet", "HEAD"]) {
-                Some(_) => "HEAD".to_owned(),
-                None => empty_tree().unwrap_or_default(),
-            }),
             DiffSide::Commit { parent, .. } => parent.clone().or_else(empty_tree),
+            _ => None,
         };
         let mut args: Vec<&str> = match (side, &base) {
             (DiffSide::Worktree, _) => vec!["-2"],
-            (DiffSide::Index, Some(base)) => vec!["--cached", base],
+            // 还没有提交时 `--cached` 自己和空树比。
+            (DiffSide::Index, _) => vec!["--cached"],
             (DiffSide::Commit { id, .. }, Some(base)) => vec![base, id],
             _ => return Ok(None),
         };

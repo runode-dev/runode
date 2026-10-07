@@ -3,7 +3,7 @@
 
 use std::{collections::HashSet, fs, path::Path};
 
-use crate::{FileDiff, GitError, Repo, Result, git, ops::run, parse::parse_diff, snapshot::MAX_DIFF_BYTES};
+use crate::{FileDiff, GitError, Repo, Result, git, ops::run, parse::parse_diff, snapshot::diff_args};
 
 /// 历史里的一个提交。
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -288,21 +288,7 @@ impl Repo {
                 String::from_utf8_lossy(&tree).trim().to_owned()
             }
         };
-        let threshold = format!("core.bigFileThreshold={MAX_DIFF_BYTES}");
-        let args = [
-            "-c",
-            &threshold,
-            "diff",
-            "-M",
-            "--no-color",
-            "--no-ext-diff",
-            "--no-textconv",
-            "--src-prefix=a/",
-            "--dst-prefix=b/",
-            &base,
-            &commit.id,
-            "--",
-        ];
+        let args = diff_args(&[&base, &commit.id, "--"]);
         Ok(parse_diff(&String::from_utf8_lossy(&run(&self.root, args, None)?)))
     }
 
@@ -312,14 +298,6 @@ impl Repo {
             return Err(GitError::new(format!("不是提交号：{id}")));
         }
         run(&self.root, ["switch", "--detach", id], None).map(drop)
-    }
-
-    /// 从提交 `start` 新建分支 `name` 并切过去。
-    pub fn create_branch_at(&self, name: &str, start: &str) -> Result {
-        if start.starts_with('-') {
-            return Err(GitError::new(format!("不是提交号：{start}")));
-        }
-        run(&self.root, ["switch", "-c", name, start], None).map(drop)
     }
 }
 

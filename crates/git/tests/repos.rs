@@ -64,7 +64,6 @@ fn reads_submodules_and_nested_repositories_separately() {
             ("top.txt".into(), FileStatus::Modified),
         ]
     );
-    assert_eq!(repos.position(&repo.path().join("tools/inner")), Some(2));
     assert_eq!(repos.get(1).map(|sub| sub.kind), Some(RepoKind::Submodule));
 
     // 子模块里提交以后提交号变了，主仓库里那一条照常列出来，暂存它就记下新的提交号。
@@ -213,7 +212,7 @@ fn reads_other_worktrees() {
     assert_eq!(repos.get(1).map(|wt| wt.kind), Some(RepoKind::Worktree));
 
     // 从链接工作树里读：主仓库是它，主工作树成了其他工作树之一。
-    let from_feat = runode_git::snapshot_repos(&feat.0, &mut Default::default(), Default::default()).unwrap();
+    let from_feat = runode_git::snapshot_repos(&feat.0, &mut Default::default(), true).unwrap();
     assert_eq!(real(&from_feat.main.root), real(&feat.0));
     assert!(from_feat.worktrees.iter().any(|wt| real(&wt.root) == real(repo.path())));
     assert_eq!(from_feat.worktrees.len(), 2);
@@ -222,8 +221,7 @@ fn reads_other_worktrees() {
     assert!(!primary.is_linked_worktree());
 
     // 不要其他工作树时不读。
-    let options = runode_git::ReadOptions { worktrees: false };
-    let local = runode_git::snapshot_repos(repo.path(), &mut Default::default(), options).unwrap();
+    let local = runode_git::snapshot_repos(repo.path(), &mut Default::default(), false).unwrap();
     assert!(local.worktrees.is_empty());
 
     // 目录被删掉的工作树 git 记作 prunable，跳过。

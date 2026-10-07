@@ -80,11 +80,6 @@ impl Repos {
         1 + self.subs.len() + self.worktrees.len()
     }
 
-    /// 根目录是 `root` 的仓库在 `iter` 里的位置。
-    pub fn position(&self, root: &Path) -> Option<usize> {
-        self.iter().position(|repo| repo.root == root)
-    }
-
     /// `rel` 相对主仓库根，落在哪个仓库里：最深的那个，以及相对它的根的路径。
     pub fn locate<'a>(&'a self, rel: &'a Path) -> (&'a Snapshot, &'a Path) {
         // 外层的排在前面，倒着找到的第一个就是最深的。
@@ -186,25 +181,12 @@ impl Repo {
     }
 }
 
-/// `snapshot_repos` 读哪些。
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct ReadOptions {
-    /// 也读同一个仓库的其他工作树。它们只在 Git 面板里显示，面板没开时不必读。子模块和嵌套仓库
-    /// 总是读：文件树和预览的标记要用。
-    pub worktrees: bool,
-}
-
-impl Default for ReadOptions {
-    fn default() -> Self {
-        Self { worktrees: true }
-    }
-}
-
-/// 读 `dir` 所在的仓库、它里面的子模块和嵌套仓库，以及（`options` 要的话）同一个仓库的其他
-/// 工作树；`dir` 不在 git 仓库里或者没装 git 时为空。`dir` 在某个链接工作树里时主仓库就是那个
+/// 读 `dir` 所在的仓库、它里面的子模块和嵌套仓库，以及（`worktrees` 时）同一个仓库的其他
+/// 工作树：它们只在 Git 面板里显示，面板没开时不必读；子模块和嵌套仓库总是读，文件树和预览的
+/// 标记要用。`dir` 不在 git 仓库里或者没装 git 时为空。`dir` 在某个链接工作树里时主仓库就是那个
 /// 工作树，主工作树算作其他工作树之一。读不了的子仓库跳过。没变过的未跟踪文件从 `cache` 里取，
 /// 读完后 `cache` 只留这次还在的。
-pub fn snapshot_repos(dir: &Path, cache: &mut UntrackedCache, options: ReadOptions) -> Option<Repos> {
+pub fn snapshot_repos(dir: &Path, cache: &mut UntrackedCache, worktrees: bool) -> Option<Repos> {
     let (root, git_dir) = find_repo(dir)?;
     let mut seen = UntrackedCache::default();
     let found = read_repo(root, git_dir, PathBuf::new(), RepoKind::Main, cache, &mut seen)?;
@@ -225,7 +207,7 @@ pub fn snapshot_repos(dir: &Path, cache: &mut UntrackedCache, options: ReadOptio
         level = next;
     }
     // 别的工作树里的子模块不再往下找。
-    let worktrees: Vec<_> = if options.worktrees { other_worktrees(&main.root, &visited) } else { Vec::new() }
+    let worktrees: Vec<_> = if worktrees { other_worktrees(&main.root, &visited) } else { Vec::new() }
         .into_iter()
         .map(|root| (root.clone(), root, RepoKind::Worktree))
         .collect();

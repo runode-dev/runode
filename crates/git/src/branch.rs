@@ -103,9 +103,12 @@ impl Repo {
         run(&self.root, ["switch", "-c", local, "--track", &branch.name], None).map(drop)
     }
 
-    /// 从当前提交新建分支 `name` 并切过去。
-    pub fn create_branch(&self, name: &str) -> Result {
-        run(&self.root, ["switch", "-c", name], None).map(drop)
+    /// 从提交 `start`（为空时是当前提交）新建分支 `name` 并切过去。
+    pub fn create_branch(&self, name: &str, start: Option<&str>) -> Result {
+        if let Some(start) = start.filter(|start| start.starts_with('-')) {
+            return Err(GitError::new(format!("不是提交号：{start}")));
+        }
+        run(&self.root, ["switch", "-c", name].into_iter().chain(start), None).map(drop)
     }
 }
 

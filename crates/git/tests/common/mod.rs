@@ -145,7 +145,7 @@ pub fn read(repo: &TestRepo) -> Snapshot {
 
 /// 主仓库连同子仓库一起读。
 pub fn read_all(repo: &TestRepo) -> Repos {
-    snapshot_repos(repo.path(), &mut UntrackedCache::default(), Default::default()).unwrap()
+    snapshot_repos(repo.path(), &mut UntrackedCache::default(), true).unwrap()
 }
 
 /// 改动的文件路径，按路径排。

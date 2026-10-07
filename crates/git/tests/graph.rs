@@ -186,7 +186,7 @@ fn reads_history_refs_and_changes() {
     let head = detached.commits.iter().find(|commit| commit.id == second_id).unwrap();
     assert_eq!(head.refs[0].kind, RefKind::Head);
     assert!(repo.try_git(&["symbolic-ref", "-q", "HEAD"]).is_none());
-    handle.create_branch_at("fix", &commits["init"].id).unwrap();
+    handle.create_branch("fix", Some(&commits["init"].id)).unwrap();
     assert_eq!(repo.git(&["branch", "--show-current"]), "fix");
     assert_eq!(repo.git(&["rev-parse", "HEAD"]), commits["init"].id);
     assert!(handle.checkout_detached("--orphan").is_err());

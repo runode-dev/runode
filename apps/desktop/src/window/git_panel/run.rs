@@ -492,10 +492,7 @@ impl WindowView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let op = move |repo: &git::Repo| match &start {
-            Some(start) => repo.create_branch_at(&name, start),
-            None => repo.create_branch(&name),
-        };
+        let op = move |repo: &git::Repo| repo.create_branch(&name, start.as_deref());
         self.run_git(root, Busy::Checkout, window, cx, op, |_, (), _, _| {});
     }
 }

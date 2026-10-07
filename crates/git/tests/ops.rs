@@ -42,6 +42,10 @@ fn unstages_before_the_first_commit() {
     let handle = read(&repo).repo();
     handle.stage(&paths(&["a.txt", "b.txt"])).unwrap();
     assert_eq!(repo.status(), ["A  a.txt", "A  b.txt"]);
+    // 还没有 HEAD 时暂存段和空树比，暂存了的新文件也在里面。
+    assert_eq!(common::paths_of(&read(&repo).staged), ["a.txt", "b.txt"]);
+    let staged = handle.file_view("a.txt".as_ref(), None, &runode_git::DiffSide::Index).unwrap().unwrap();
+    assert_eq!(staged.new_lines, ["one"]);
     // 暂存后又改过，暂存区和工作区、HEAD 都不一样也能撤回。
     repo.write("a.txt", "two\n");
     handle.unstage(&paths(&["a.txt"])).unwrap();
@@ -135,12 +139,12 @@ fn discards_inside_nested_repositories() {
 fn commits_and_amends() {
     let repo = TestRepo::new("ops-commit");
     let handle = read(&repo).repo();
-    assert_eq!(handle.last_commit_message(), None);
+    assert_eq!(repo.try_git(&["log", "-1", "--format=%B"]), None);
     repo.write("a.txt", "one\n");
     handle.stage(&paths(&["a.txt"])).unwrap();
     let message = "first\n\nwith a body, \"quotes\" and\n-dashes";
     handle.commit(message, CommitOptions::default()).unwrap();
-    assert_eq!(handle.last_commit_message().as_deref(), Some(message));
+    assert_eq!(repo.git(&["log", "-1", "--format=%B"]), message);
 
     // 没有暂存的改动时报 git 的错。
     let error = handle.commit("nothing", CommitOptions::default()).unwrap_err();
@@ -153,10 +157,10 @@ fn commits_and_amends() {
     handle.commit("", CommitOptions { amend: true, ..Default::default() }).unwrap();
     assert_eq!(repo.git(&["rev-list", "--count", "HEAD"]), "1");
     assert_eq!(repo.git(&["ls-files"]), "a.txt\nb.txt");
-    assert_eq!(handle.last_commit_message().as_deref(), Some(message));
+    assert_eq!(repo.git(&["log", "-1", "--format=%B"]), message);
 
     handle.commit("renamed", CommitOptions { amend: true, ..Default::default() }).unwrap();
-    assert_eq!(handle.last_commit_message().as_deref(), Some("renamed"));
+    assert_eq!(repo.git(&["log", "-1", "--format=%B"]), "renamed");
     assert_eq!(repo.git(&["rev-list", "--count", "HEAD"]), "1");
 
     // 先全部暂存再提交，含未跟踪的文件。

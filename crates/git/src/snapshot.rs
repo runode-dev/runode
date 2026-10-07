@@ -179,14 +179,21 @@ pub fn snapshot(dir: &Path, cache: &mut UntrackedCache) -> Option<Snapshot> {
     Some(found.snapshot)
 }
 
-/// `repo` 里的 `git diff`，再加上 `args`。前缀写明，免得用户配置了 `diff.noprefix` 之类
-/// 改掉 `a/`、`b/`。子模块只在记着的提交号变了时算改动，里面改了文件不算：那些改动在子模块
-/// 自己的那份里，在这里既暂存不了也丢不掉。
-pub(crate) fn diff(repo: &Path, args: &[&str]) -> Vec<FileDiff> {
+/// 读 `FileDiff` 用的 `git diff` 命令行（不含 `git`），再加上 `extra`。前缀写明，免得用户配置了
+/// `diff.noprefix` 之类改掉 `a/`、`b/`。子模块只在记着的提交号变了时算改动，里面改了文件不算：
+/// 那些改动在子模块自己的那份里，在这里既暂存不了也丢不掉。
+pub(crate) fn diff_args(extra: &[&str]) -> Vec<String> {
     let threshold = format!("core.bigFileThreshold={MAX_DIFF_BYTES}");
-    let mut full = vec!["-c", &threshold, "diff", "-M", "--no-color", "--no-ext-diff", "--no-textconv"];
-    full.extend(["--src-prefix=a/", "--dst-prefix=b/", "--ignore-submodules=dirty"]);
-    full.extend(args);
+    let mut args = vec!["-c", &threshold, "diff", "-M", "--no-color", "--no-ext-diff", "--no-textconv"];
+    args.extend(["--src-prefix=a/", "--dst-prefix=b/", "--ignore-submodules=dirty"]);
+    args.extend(extra);
+    args.into_iter().map(str::to_owned).collect()
+}
+
+/// `repo` 里的 `git diff`，参数见 `diff_args`。
+pub(crate) fn diff(repo: &Path, args: &[&str]) -> Vec<FileDiff> {
+    let full = diff_args(args);
+    let full: Vec<&str> = full.iter().map(String::as_str).collect();
     let mut files = parse_diff(&String::from_utf8_lossy(&git(repo, &full).unwrap_or_default()));
     // 超过大小上限的文本文件也被报成二进制：工作区里的文件超过上限、开头又没有 NUL 字节的
     // 认回来，提示改动太多。暂存段也按工作区里的文件认，暂存后又改过的可能认错，只影响提示。
@@ -250,16 +257,10 @@ pub(crate) fn read_repo(
             )
         });
         let staged = scope.spawn(|| {
-            // 还没有提交时和空树比，暂存了的新文件也算进来。短哈希顺带给 `RepoInfo::head`。
+            // 还没有提交时 `--cached` 自己和空树比，暂存了的新文件也算进来。短哈希给 `RepoInfo::head`。
             let head = git(repo, &["rev-parse", "--verify", "--quiet", "--short", "HEAD"])
                 .map(|head| String::from_utf8_lossy(&head).trim().to_owned());
-            let base = match head {
-                Some(_) => "HEAD".to_owned(),
-                None => {
-                    String::from_utf8_lossy(&git(repo, &["hash-object", "-t", "tree", "/dev/null"])?).trim().to_owned()
-                }
-            };
-            Some((diff(repo, &["--cached", &base]), head))
+            (diff(repo, &["--cached"]), head)
         });
         let extra = scope.spawn(|| info::read_extra(repo));
         let submodules = scope.spawn(|| repos::submodules(repo));
@@ -273,7 +274,7 @@ pub(crate) fn read_repo(
     });
     let status = status?;
     let (mut statuses, ignored) = parse_status(&status);
-    let (mut staged, head) = staged?;
+    let (mut staged, head) = staged;
     let info = info::read(&status, head, &git_dir, extra);
     let mut untracked: Vec<_> =
         statuses.iter().filter(|(_, status)| **status == FileStatus::Untracked).map(|(path, _)| path.clone()).collect();

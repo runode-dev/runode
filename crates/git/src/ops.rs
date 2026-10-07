@@ -122,13 +122,7 @@ fn has_head(dir: &Path) -> bool {
 
 /// 依次做每一件事，都做一遍，返回第一个错误。
 fn first_error(results: impl IntoIterator<Item = Result>) -> Result {
-    let mut first = Ok(());
-    for result in results {
-        if first.is_ok() {
-            first = result;
-        }
-    }
-    first
+    results.into_iter().fold(Ok(()), Result::and)
 }
 
 impl Repo {
@@ -278,13 +272,6 @@ impl Repo {
         }
         args.extend(["-F", "-"]);
         run(&self.root, args, Some(message.as_bytes())).map(drop)
-    }
-
-    /// 最近一次提交的完整说明，给 amend 时填进输入框；还没有提交时为空。
-    pub fn last_commit_message(&self) -> Option<String> {
-        let message = git(&self.root, &["log", "-1", "--format=%B", "HEAD"])?;
-        let message = String::from_utf8_lossy(&message).trim_end().to_owned();
-        (!message.is_empty()).then_some(message)
     }
 
     /// 撤销最近一次提交，改动留在暂存区里；返回被撤销的提交的完整说明，好填回
