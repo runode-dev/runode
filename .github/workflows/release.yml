@@ -1,8 +1,19 @@
-# 推 v* 标签时发版：在 Apple 芯片和 Intel 的 runner 上各打一份 dmg 和自动更新用的 zip，用 Developer
-# ID 签名、公证，再汇总起来生成版本清单 latest.json，一起发成 GitHub Release。app 经 releases/latest/download/latest.json 查新版本
-# （`runode_update::MANIFEST_URL`），所以 Release 一发出去，开着自动更新的 app 就会去下载。
+# 发版。两种发法，后面走的路一样：
 #
-# 发版：改 workspace 的 `version`（`[workspace.package]`），提交，打同名的标签（v0.2.0）推上来。
+#   - 在 Actions 页面手动运行（workflow_dispatch），填版本号或者留空让补丁号加一：在 main 上改好
+#     workspace 的 `version`（`[workspace.package]`）和 Cargo.lock，提交，打标签（v0.2.0），推上去；
+#   - 自己改版本号、提交、打同名标签推上来（push 标签）。标签只认 main 上的提交。
+#
+# 之后：对这个标签跑一遍 CI（ci.yml）；在 Apple 芯片和 Intel 的 runner 上各打一份 dmg 和自动更新用的
+# zip，用 Developer ID 签名、公证；在 x86_64 和 aarch64 的 Linux 上各打一份只有可执行文件的 tar.gz
+# （没有桌面界面，用命令行和 `runode --host`）；汇总起来生成版本清单 latest.json 和校验和 SHA256SUMS，
+# 先发成草稿、文件都传齐了再公开；最后在 macOS 和 Linux 上各用 scripts/install.sh 装一遍这个版本，
+# 确认装得上、跑得起来。
+#
+# app 经 releases/latest/download/latest.json 查新版本（`runode_update::MANIFEST_URL`），
+# scripts/install.sh 也从 releases/latest/download/ 下载，所以 Release 一公开，开着自动更新的 app
+# 就会去下载，新装的也是这个版本。版本号只能是 x.y.z：Info.plist 的 CFBundleShortVersionString 和
+# app 比较版本（`runode_update` 的 `version_parts`）都只认数字。
 #
 # 要在仓库的 Secrets 里配：
 #   MACOS_CERTIFICATE           Developer ID Application 证书连私钥导出的 .p12，base64 编码
@@ -11,15 +22,24 @@
 #   NOTARY_KEY_P8               App Store Connect API 密钥（.p8 文件的内容），权限要能公证
 #   NOTARY_KEY_ID               这把密钥的 ID
 #   NOTARY_ISSUER               App Store Connect 的 Issuer ID
+#
+# 手动运行时用 GITHUB_TOKEN 推提交和标签：main 开了分支保护的话，要在保护规则里允许 GitHub Actions
+# 推送。GITHUB_TOKEN 推的标签不会再触发这个工作流，所以不会发两遍。
 name: Release
 
 on:
   push:
     tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 要发的版本号，比如 0.2.0；留空时补丁号加一
+        type: string
+        required: false
 
-# 同一个标签只发一次，不取消正在跑的。
+# 同一时间只发一个版本，不取消正在跑的：发到一半取消会留下推了标签却没有 Release 的局面。
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: release
 
 permissions:
   contents: write
@@ -28,7 +48,87 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  build:
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.version.outputs.tag }}
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # 要看标签在不在 main 上，手动发版时还要在 main 上提交。
+          fetch-depth: 0
+          ref: ${{ github.event_name == 'workflow_dispatch' && 'main' || github.ref }}
+      - name: 定版本号
+        id: version
+        env:
+          WANTED: ${{ inputs.version }}
+        run: |
+          current=$(sed -n '/^\[workspace.package\]/,/^\[/s/^version = "\(.*\)"/\1/p' Cargo.toml)
+          if [[ "$GITHUB_EVENT_NAME" == workflow_dispatch ]]; then
+            if [[ -n "$WANTED" ]]; then
+              version=${WANTED#v}
+            else
+              IFS=. read -r major minor patch <<<"$current"
+              version="$major.$minor.$((patch + 1))"
+            fi
+          else
+            version=${GITHUB_REF_NAME#v}
+          fi
+          if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "版本号 $version 不是 x.y.z" >&2
+            exit 1
+          fi
+          if [[ "$GITHUB_EVENT_NAME" == workflow_dispatch ]]; then
+            if git rev-parse -q --verify "refs/tags/v$version" >/dev/null; then
+              echo "标签 v$version 已经有了" >&2
+              exit 1
+            fi
+            # 新版本要比现在的大，app 才会更新过去。
+            if [[ "$(printf '%s\n%s\n' "$current" "$version" | sort -V | tail -1)" != "$version" || "$current" == "$version" ]]; then
+              echo "版本号 $version 不比现在的 $current 大" >&2
+              exit 1
+            fi
+          else
+            if [[ "$current" != "$version" ]]; then
+              echo "标签 $GITHUB_REF_NAME 和 Cargo.toml 里的版本 $current 对不上" >&2
+              exit 1
+            fi
+            if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+              echo "标签 $GITHUB_REF_NAME 指的提交不在 main 上" >&2
+              exit 1
+            fi
+          fi
+          echo "version=$version" >>"$GITHUB_OUTPUT"
+          echo "tag=v$version" >>"$GITHUB_OUTPUT"
+      - name: 装 Rust 工具链、拉子模块
+        # 更新 Cargo.lock 要读到所有 workspace 的包，有的依赖在子模块里（vendor/command-signatures）。
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          rustup toolchain install --profile minimal
+          make submodules
+      - name: 改版本号、提交、打标签、推上去
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          sed -i '/^\[workspace.package\]/,/^\[/s/^version = ".*"/version = "'"$VERSION"'"/' Cargo.toml
+          # 只更新 Cargo.lock 里 workspace 自己的包的版本，不动依赖。
+          cargo update --workspace
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -am "chore: 发布 v$VERSION"
+          git tag "v$VERSION"
+          git push --atomic origin main "v$VERSION"
+
+  ci:
+    needs: prepare
+    uses: ./.github/workflows/ci.yml
+    with:
+      ref: ${{ needs.prepare.outputs.tag }}
+
+  build-macos:
+    needs: [prepare, ci]
     # 包名里的架构由打包脚本按 `lipo -archs` 取，这里的 arch 只用来给产物和缓存起名。
     strategy:
       matrix:
@@ -40,6 +140,8 @@ jobs:
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.tag }}
       - name: 拉子模块
         run: make submodules
       - uses: mlugg/setup-zig@v2
@@ -52,13 +154,6 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           key: ${{ matrix.arch }}
-      - name: 核对版本号
-        run: |
-          version=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[] | select(.name == "runode") | .version')
-          if [[ "v$version" != "$GITHUB_REF_NAME" ]]; then
-            echo "标签 $GITHUB_REF_NAME 和 Cargo.toml 里的版本 $version 对不上" >&2
-            exit 1
-          fi
       - name: 导入签名证书
         env:
           MACOS_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE }}
@@ -86,18 +181,72 @@ jobs:
           NOTARY_KEY_ID: ${{ secrets.NOTARY_KEY_ID }}
           NOTARY_ISSUER: ${{ secrets.NOTARY_ISSUER }}
         run: scripts/bundle-macos.sh
+      - name: 删掉签名用的钥匙串和密钥
+        if: always()
+        run: |
+          security delete-keychain "$RUNNER_TEMP/signing.keychain-db" || true
+          rm -f "$RUNNER_TEMP/notary.p8"
       - uses: actions/upload-artifact@v4
         with:
-          name: bundle-${{ matrix.arch }}
+          name: bundle-macos-${{ matrix.arch }}
           path: |
             target/release/bundle/Runode-*.dmg
             target/release/bundle/Runode-*.zip
           if-no-files-found: error
 
+  build-linux:
+    needs: [prepare, ci]
+    # 在较老的 Ubuntu 上编，glibc 版本低，新一些的发行版都能跑。GPUI 在 Linux 上的图形库都是运行时
+    # 才 dlopen 的，可执行文件只依赖 libc，没有图形界面的服务器上也能跑命令行和宿主。
+    strategy:
+      matrix:
+        include:
+          - runner: ubuntu-22.04
+            arch: x86_64
+          - runner: ubuntu-22.04-arm
+            arch: aarch64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.tag }}
+      - name: 拉子模块
+        run: make submodules
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: 0.16.0
+      - name: 装 Rust 工具链
+        run: rustup toolchain install
+      - name: 装 GPUI 编译要的库
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev libx11-xcb-dev \
+            libxcb1-dev libfontconfig-dev libfreetype-dev libvulkan-dev libssl-dev libasound2-dev libzstd-dev
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: linux-${{ matrix.arch }}
+      - name: 构建、打包
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          cargo build --release -p runode
+          bundle=target/release/bundle
+          mkdir -p "$bundle"
+          tar -czf "$bundle/runode-$VERSION-linux-${{ matrix.arch }}.tar.gz" -C target/release runode
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bundle-linux-${{ matrix.arch }}
+          path: target/release/bundle/runode-*.tar.gz
+          if-no-files-found: error
+
   publish:
-    # 两个架构都打好了才发，缺一个就不发。
-    needs: build
+    # 各平台各架构都打好了才发，缺一个就不发。
+    needs: [prepare, build-macos, build-linux]
     runs-on: ubuntu-latest
+    env:
+      TAG: ${{ needs.prepare.outputs.tag }}
+      VERSION: ${{ needs.prepare.outputs.version }}
+      GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/download-artifact@v4
         with:
@@ -107,32 +256,65 @@ jobs:
       - name: 生成版本清单
         # 格式见 `runode_update::Release`：archives 按架构名给出各个 zip 的下载地址。
         run: |
-          version=${GITHUB_REF_NAME#v}
           bundle=target/release/bundle
-          base="https://github.com/$GITHUB_REPOSITORY/releases/download/$GITHUB_REF_NAME"
+          base="https://github.com/$GITHUB_REPOSITORY/releases/download/$TAG"
           archives='{}'
-          for zip in "$bundle"/Runode-"$version"-*.zip; do
+          for zip in "$bundle"/Runode-"$VERSION"-*.zip; do
             name=$(basename "$zip")
-            arch=${name#Runode-"$version"-}
+            arch=${name#Runode-"$VERSION"-}
             arch=${arch%.zip}
             archives=$(jq --arg arch "$arch" --arg url "$base/$name" '. + {($arch): $url}' <<<"$archives")
           done
           jq -n \
-            --arg version "$version" \
-            --arg page "https://github.com/$GITHUB_REPOSITORY/releases/tag/$GITHUB_REF_NAME" \
+            --arg version "$VERSION" \
+            --arg page "https://github.com/$GITHUB_REPOSITORY/releases/tag/$TAG" \
             --argjson archives "$archives" \
             '{version: $version, page: $page, archives: $archives}' >"$bundle/latest.json"
           cat "$bundle/latest.json"
-      - name: 发布
-        env:
-          GH_TOKEN: ${{ github.token }}
-        # 每个 dmg 另传一份不带版本号的（Runode-arm64.dmg），README 的下载链接经
-        # releases/latest/download/ 总能拿到最新版；下面的 Runode-*.dmg 两份都会匹配上。
+      - name: 不带版本号的副本和校验和
+        # 每个 dmg 和 Linux 的 tar.gz 另传一份不带版本号的（Runode-arm64.dmg、runode-linux-x86_64.tar.gz），
+        # README 的下载链接和 scripts/install.sh 经 releases/latest/download/ 总能拿到最新版。
+        # SHA256SUMS 列出所有文件（副本也在内），scripts/install.sh 下载后按它核对。
+        run: |
+          cd target/release/bundle
+          for dmg in Runode-"$VERSION"-*.dmg; do
+            cp "$dmg" "Runode-${dmg#Runode-"$VERSION"-}"
+          done
+          for tarball in runode-"$VERSION"-*.tar.gz; do
+            cp "$tarball" "runode-${tarball#runode-"$VERSION"-}"
+          done
+          sha256sum Runode-*.dmg Runode-*.zip runode-*.tar.gz latest.json >SHA256SUMS
+          cat SHA256SUMS
+      - name: 发成草稿，传齐了再公开
+        # 先建草稿再公开：传到一半时 releases/latest 还指着上一个版本，app 和安装脚本不会拿到缺文件的版本。
         run: |
           bundle=target/release/bundle
-          version=${GITHUB_REF_NAME#v}
-          for dmg in "$bundle"/Runode-"$version"-*.dmg; do
-            cp "$dmg" "$bundle/Runode-${dmg##*/Runode-"$version"-}"
-          done
-          gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --title "Runode ${GITHUB_REF_NAME#v}" --generate-notes \
-            "$bundle"/Runode-*.dmg "$bundle"/Runode-*.zip "$bundle/latest.json"
+          gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --verify-tag --draft --title "Runode $VERSION" \
+            --generate-notes \
+            "$bundle"/Runode-*.dmg "$bundle"/Runode-*.zip "$bundle"/runode-*.tar.gz "$bundle/latest.json" \
+            "$bundle/SHA256SUMS"
+          gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft=false --latest
+
+  verify:
+    # 用户照 README 装会走的路：用这个版本的安装脚本装上，命令行报的版本号要对得上。
+    needs: [prepare, publish]
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [macos-15, ubuntu-22.04, ubuntu-22.04-arm]
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.tag }}
+      - name: 安装
+        env:
+          RUNODE_VERSION: ${{ needs.prepare.outputs.version }}
+        run: sh scripts/install.sh
+      - name: 核对版本号
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          reported=$("$HOME/.local/bin/runode" --version)
+          echo "$reported"
+          [[ "$reported" == "runode $VERSION."* ]] || { echo "装上的不是 $VERSION" >&2; exit 1; }

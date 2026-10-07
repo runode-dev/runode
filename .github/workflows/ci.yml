@@ -1,6 +1,6 @@
 # 每次推到 main 和每个 PR：检查格式和 crate 分层（cargo-deny），再类型检查、跑测试、跑 clippy。
 # libghostty-vt 从 vendor/ghostty 用 zig 编译，GPUI 要用 Xcode 的 Metal 编译器编着色器，
-# 所以在 macOS 上跑。
+# 所以在 macOS 上跑。发版时 release.yml 也调它（workflow_call），对要发的那个标签再查一遍。
 name: CI
 
 on:
@@ -8,9 +8,16 @@ on:
     branches: [main]
   pull_request:
   workflow_dispatch:
+  workflow_call:
+    inputs:
+      ref:
+        description: 要检查的提交、分支或标签
+        type: string
+        required: true
 
+# 组名不能用 github.workflow：被 release.yml 调用时它是调用方的名字，和调用方自己的组撞上会互相等。
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ci-${{ inputs.ref || github.ref }}
   cancel-in-progress: true
 
 env:
@@ -21,6 +28,8 @@ jobs:
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
       - name: 拉子模块
         run: make submodules
       # vendor/ghostty 的 build.zig.zon 要求的 zig 版本（minimum_zig_version）。
@@ -49,3 +58,29 @@ jobs:
         run: make test
       - name: clippy
         run: make clippy CLIPPY_ARGS="-- -D warnings"
+
+  # 发版时 Linux 也要编出 runode（命令行和宿主），平时就在 Linux 上类型检查一遍，免得到打标签时才发现
+  # 编不过。
+  check-linux:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+      - name: 拉子模块
+        run: make submodules
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: 0.16.0
+      - name: 装 Rust 工具链
+        run: |
+          rustup toolchain install
+          rustup component add clippy
+      - name: 装 GPUI 编译要的库
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev libx11-xcb-dev \
+            libxcb1-dev libfontconfig-dev libfreetype-dev libvulkan-dev libssl-dev libasound2-dev libzstd-dev
+      - uses: Swatinem/rust-cache@v2
+      - name: clippy
+        run: cargo clippy -p runode -- -D warnings
