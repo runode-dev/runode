@@ -5,7 +5,7 @@
 //! 才能按运行中程序的要求，选择传统编码、modifyOtherKeys 或 Kitty 编码。
 
 use gpui::Keystroke;
-use runode_shared_types::input::{Key, KeyInput, Mods};
+use runode_shared_types::input::{Key, KeyChord, KeyInput, Mods};
 
 /// 终端完全不该收到的按键返回 `None`：Command 键留给应用自己的快捷键。
 pub fn translate(keystroke: &Keystroke) -> Option<KeyInput> {
@@ -58,107 +58,53 @@ fn right_option_down() -> bool {
     false
 }
 
-/// GPUI 键名对应的按键及其未按 Shift 时的字符。
-/// 美式布局下需要 Shift 的符号，映射回产生它的那个键。
+/// GPUI 键名对应的按键及其未按 Shift 时的字符：键名按 `KeyChord` 的写法认，不打字的键的字符是
+/// `'\0'`。美式布局下需要 Shift 的符号，映射回产生它的那个键。
 fn key_code(name: &str) -> Option<(Key, char)> {
-    let key = match name {
+    // 回车和 Tab 交给编码器的是它们打出的控制字符。
+    match name {
         "enter" => return Some((Key::Enter, '\r')),
         "tab" => return Some((Key::Tab, '\t')),
-        "space" => return Some((Key::Space, ' ')),
-        "backspace" => Key::Backspace,
-        "escape" => Key::Escape,
-        "delete" => Key::Delete,
-        "insert" => Key::Insert,
-        "home" => Key::Home,
-        "end" => Key::End,
-        "pageup" => Key::PageUp,
-        "pagedown" => Key::PageDown,
-        "up" => Key::ArrowUp,
-        "down" => Key::ArrowDown,
-        "left" => Key::ArrowLeft,
-        "right" => Key::ArrowRight,
-        "f1" => Key::F1,
-        "f2" => Key::F2,
-        "f3" => Key::F3,
-        "f4" => Key::F4,
-        "f5" => Key::F5,
-        "f6" => Key::F6,
-        "f7" => Key::F7,
-        "f8" => Key::F8,
-        "f9" => Key::F9,
-        "f10" => Key::F10,
-        "f11" => Key::F11,
-        "f12" => Key::F12,
-        _ => {
-            let mut chars = name.chars();
-            let (Some(c), None) = (chars.next(), chars.next()) else {
-                return None;
-            };
-            return printable(c);
-        }
+        _ => {}
+    }
+    if let Some(key) = plain_key(name) {
+        return Some((key, key.unshifted_char().unwrap_or('\0')));
+    }
+    let mut chars = name.chars();
+    let (Some(c), None) = (chars.next(), chars.next()) else {
+        return None;
     };
-    Some((key, '\0'))
+    let base = match c {
+        ')' => '0',
+        '!' => '1',
+        '@' => '2',
+        '#' => '3',
+        '$' => '4',
+        '%' => '5',
+        '^' => '6',
+        '&' => '7',
+        '*' => '8',
+        '(' => '9',
+        '_' => '-',
+        '+' => '=',
+        '{' => '[',
+        '}' => ']',
+        '|' => '\\',
+        ':' => ';',
+        '"' => '\'',
+        '<' => ',',
+        '>' => '.',
+        '?' => '/',
+        '~' => '`',
+        other => other,
+    };
+    // 非美式布局的键：没有键码，但编码器仍会发送它的文本。
+    Some(plain_key(base.encode_utf8(&mut [0; 4])).map_or((Key::Unidentified, c), |key| (key, base)))
 }
 
-fn printable(c: char) -> Option<(Key, char)> {
-    let lower = c.to_ascii_lowercase();
-    let key = match lower {
-        'a'..='z' => {
-            const LETTERS: [Key; 26] = [
-                Key::A,
-                Key::B,
-                Key::C,
-                Key::D,
-                Key::E,
-                Key::F,
-                Key::G,
-                Key::H,
-                Key::I,
-                Key::J,
-                Key::K,
-                Key::L,
-                Key::M,
-                Key::N,
-                Key::O,
-                Key::P,
-                Key::Q,
-                Key::R,
-                Key::S,
-                Key::T,
-                Key::U,
-                Key::V,
-                Key::W,
-                Key::X,
-                Key::Y,
-                Key::Z,
-            ];
-            return Some((LETTERS[(lower as u8 - b'a') as usize], lower));
-        }
-        '0' | ')' => (Key::Digit0, '0'),
-        '1' | '!' => (Key::Digit1, '1'),
-        '2' | '@' => (Key::Digit2, '2'),
-        '3' | '#' => (Key::Digit3, '3'),
-        '4' | '$' => (Key::Digit4, '4'),
-        '5' | '%' => (Key::Digit5, '5'),
-        '6' | '^' => (Key::Digit6, '6'),
-        '7' | '&' => (Key::Digit7, '7'),
-        '8' | '*' => (Key::Digit8, '8'),
-        '9' | '(' => (Key::Digit9, '9'),
-        '-' | '_' => (Key::Minus, '-'),
-        '=' | '+' => (Key::Equal, '='),
-        '[' | '{' => (Key::BracketLeft, '['),
-        ']' | '}' => (Key::BracketRight, ']'),
-        '\\' | '|' => (Key::Backslash, '\\'),
-        ';' | ':' => (Key::Semicolon, ';'),
-        '\'' | '"' => (Key::Quote, '\''),
-        ',' | '<' => (Key::Comma, ','),
-        '.' | '>' => (Key::Period, '.'),
-        '/' | '?' => (Key::Slash, '/'),
-        '`' | '~' => (Key::Backquote, '`'),
-        // 非美式布局的键：没有键码，但编码器仍会发送它的文本。
-        other => (Key::Unidentified, other),
-    };
-    Some(key)
+/// 不带修饰键的键名对应的键。
+fn plain_key(name: &str) -> Option<Key> {
+    name.parse::<KeyChord>().ok().filter(|chord| chord.mods == Mods::default()).map(|chord| chord.key)
 }
 
 #[cfg(test)]
@@ -197,5 +143,17 @@ mod tests {
         let input = translate(&stroke("up", None, Modifiers::none())).unwrap();
         assert_eq!(input.key, Key::ArrowUp);
         assert_eq!(input.text, None);
+    }
+
+    #[test]
+    fn key_names_map_to_us_keys() {
+        assert_eq!(key_code("escape"), Some((Key::Escape, '\0')));
+        assert_eq!(key_code("space"), Some((Key::Space, ' ')));
+        assert_eq!(key_code("enter"), Some((Key::Enter, '\r')));
+        assert_eq!(key_code("A"), Some((Key::A, 'a')));
+        assert_eq!(key_code(")"), Some((Key::Digit0, '0')));
+        assert_eq!(key_code("\""), Some((Key::Quote, '\'')));
+        assert_eq!(key_code("é"), Some((Key::Unidentified, 'é')));
+        assert_eq!(key_code("ctrl-a"), None);
     }
 }

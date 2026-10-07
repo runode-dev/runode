@@ -1,9 +1,10 @@
 //! 多行文字输入框：Git 面板写提交说明用。
 //!
 //! 写法照单行输入框 `TextField`：自己管文字编辑（光标、选区、鼠标点选拖选、输入法组字、
-//! 撤销重做），自己排版绘制以便按位置换算字符。多出来的是按宽度软换行、换行符硬换行、上下按
-//! 视觉行移动，以及高度随行数在上下限之间伸缩、超过上限时竖着滚动。字号、颜色、字体继承父元素
-//! 的文本样式；边框、内边距和底色由调用方包在外面画，这里只画文字、选区、光标和提示文字。
+//! 撤销重做），自己排版绘制以便按位置换算字符；撤销记录 `History`、按字符和按词移动、UTF-16
+//! 换算和它共用。多出来的是按宽度软换行、换行符硬换行、上下按视觉行移动，以及高度随行数在上下限
+//! 之间伸缩、超过上限时竖着滚动。字号、颜色、字体继承父元素的文本样式；边框、内边距和底色由调用方
+//! 包在外面画，这里只画文字、选区、光标和提示文字。
 //!
 //! 按视觉行换算光标位置和选区的纯函数在 `rows`，排版绘制的元素在 `element`。
 
@@ -13,11 +14,15 @@ mod rows;
 use std::ops::Range;
 
 use gpui::{
-    App, Bounds, ClipboardItem, Context, EntityInputHandler, EventEmitter, FocusHandle, Focusable, KeyDownEvent,
-    MouseButton, MouseDownEvent, Pixels, Point, Render, ScrollWheelEvent, SharedString, TextRun, TextStyle,
-    UTF16Selection, UnderlineStyle, Window, actions, div, point, prelude::*, px,
+    App, Bounds, Context, EntityInputHandler, EventEmitter, FocusHandle, Focusable, KeyDownEvent, MouseButton,
+    MouseDownEvent, Pixels, Point, Render, ScrollWheelEvent, SharedString, TextRun, TextStyle, UTF16Selection,
+    UnderlineStyle, Window, actions, div, point, prelude::*, px,
 };
 
+use super::text_field::{
+    EditKind, History, Snapshot, copy_selection, next_char, next_word, offset_to_utf16, previous_char, previous_word,
+    range_from_utf16, range_to_utf16,
+};
 use crate::ui::actions::{Copy, Cut, Paste, Redo, SelectAll, Undo};
 use element::TextAreaText;
 use rows::{Row, caret_x, index_at_point, plain_rows, row_at, row_end, row_start, rows_from_lines, vertical, x_in_row};
@@ -31,8 +36,6 @@ actions!(
 );
 
 const CARET_WIDTH: Pixels = px(1.5);
-/// 撤销最多能退回的步数。
-const UNDO_LIMIT: usize = 100;
 /// 选区跨过换行符时行尾多涂这么宽，看得出换行也选上了。
 const NEWLINE_WIDTH: Pixels = px(5.);
 /// 提示文字往右让开光标的距离。
@@ -68,11 +71,7 @@ pub struct TextArea {
     max_lines: usize,
     /// 按住鼠标拖选中；双击、三击后拖动按词、按行扩展。
     drag: Option<Drag>,
-    /// 撤销、重做用的编辑前状态。
-    undo: Vec<Snapshot>,
-    redo: Vec<Snapshot>,
-    /// 上一次编辑的类型，连续打字或连续删除合成一步撤销；挪光标后清空。
-    last_edit: Option<EditKind>,
+    history: History,
     /// 文字每改一次加一，用来判断 `rows` 是不是按当前文字排的。
     version: u64,
     /// 排好的视觉行和排它时的 `version`。按键、鼠标、输入法换算位置都靠它；两帧之间文字改过
@@ -102,18 +101,6 @@ enum Drag {
     Line(Range<usize>),
 }
 
-#[derive(Clone, Copy, PartialEq)]
-enum EditKind {
-    Insert,
-    Delete,
-}
-
-struct Snapshot {
-    text: String,
-    selected: Range<usize>,
-    reversed: bool,
-}
-
 impl EventEmitter<TextAreaEvent> for TextArea {}
 
 impl TextArea {
@@ -131,9 +118,7 @@ impl TextArea {
             min_lines: 1,
             max_lines: 10,
             drag: None,
-            undo: Vec::new(),
-            redo: Vec::new(),
-            last_edit: None,
+            history: History::default(),
             version: 0,
             rows: Vec::new(),
             rows_version: None,
@@ -208,7 +193,7 @@ impl TextArea {
 
     /// 光标或选区挪过之后：断开撤销的合并，忘掉上下移动的横坐标，下一帧让光标露出来。
     fn moved(&mut self, cx: &mut Context<Self>) {
-        self.last_edit = None;
+        self.history.break_merge();
         self.goal_x = None;
         self.autoscroll = true;
         cx.notify();
@@ -233,16 +218,10 @@ impl TextArea {
         Snapshot { text: self.content.clone(), selected: self.selected.clone(), reversed: self.reversed }
     }
 
-    /// 编辑前记下当前状态供撤销；`kind` 和上一次相同时并进上一步，`None` 总是单独一步。
+    /// 编辑前记下当前状态供撤销，见 `History::record`。
     fn record(&mut self, kind: Option<EditKind>) {
-        if kind.is_none() || kind != self.last_edit {
-            self.undo.push(self.snapshot());
-            if self.undo.len() > UNDO_LIMIT {
-                self.undo.remove(0);
-            }
-        }
-        self.last_edit = kind;
-        self.redo.clear();
+        let now = || Snapshot { text: self.content.clone(), selected: self.selected.clone(), reversed: self.reversed };
+        self.history.record(kind, now);
     }
 
     fn restore(&mut self, snapshot: Snapshot, cx: &mut Context<Self>) {
@@ -252,7 +231,6 @@ impl TextArea {
         self.upstream = false;
         self.goal_x = None;
         self.marked = None;
-        self.last_edit = None;
         self.sync(cx);
     }
 
@@ -261,8 +239,7 @@ impl TextArea {
         if self.marked.is_some() {
             return;
         }
-        if let Some(snapshot) = self.undo.pop() {
-            self.redo.push(self.snapshot());
+        if let Some(snapshot) = self.history.undo(self.snapshot()) {
             self.restore(snapshot, cx);
         }
     }
@@ -271,8 +248,7 @@ impl TextArea {
         if self.marked.is_some() {
             return;
         }
-        if let Some(snapshot) = self.redo.pop() {
-            self.undo.push(self.snapshot());
+        if let Some(snapshot) = self.history.redo(self.snapshot()) {
             self.restore(snapshot, cx);
         }
     }
@@ -520,9 +496,7 @@ impl TextArea {
     }
 
     fn copy(&mut self, _: &Copy, _: &mut Window, cx: &mut Context<Self>) {
-        if !self.selected.is_empty() {
-            cx.write_to_clipboard(ClipboardItem::new_string(self.content[self.selected.clone()].to_owned()));
-        }
+        copy_selection(&self.content, &self.selected, cx);
     }
 
     fn cut(&mut self, _: &Cut, window: &mut Window, cx: &mut Context<Self>) {
@@ -532,29 +506,6 @@ impl TextArea {
         self.copy(&Copy, window, cx);
         self.record(None);
         self.replace(self.selected.clone(), "", cx);
-    }
-
-    fn offset_from_utf16(&self, utf16: usize) -> usize {
-        let mut count = 0;
-        for (i, c) in self.content.char_indices() {
-            if count >= utf16 {
-                return i;
-            }
-            count += c.len_utf16();
-        }
-        self.content.len()
-    }
-
-    fn offset_to_utf16(&self, offset: usize) -> usize {
-        self.content[..offset].encode_utf16().count()
-    }
-
-    fn range_from_utf16(&self, range: &Range<usize>) -> Range<usize> {
-        self.offset_from_utf16(range.start)..self.offset_from_utf16(range.end)
-    }
-
-    fn range_to_utf16(&self, range: &Range<usize>) -> Range<usize> {
-        self.offset_to_utf16(range.start)..self.offset_to_utf16(range.end)
     }
 }
 
@@ -593,17 +544,17 @@ impl EntityInputHandler for TextArea {
         _: &mut Window,
         _: &mut Context<Self>,
     ) -> Option<String> {
-        let range = self.range_from_utf16(&range);
-        actual_range.replace(self.range_to_utf16(&range));
+        let range = range_from_utf16(&self.content, &range);
+        actual_range.replace(range_to_utf16(&self.content, &range));
         Some(self.content[range].to_owned())
     }
 
     fn selected_text_range(&mut self, _: bool, _: &mut Window, _: &mut Context<Self>) -> Option<UTF16Selection> {
-        Some(UTF16Selection { range: self.range_to_utf16(&self.selected), reversed: self.reversed })
+        Some(UTF16Selection { range: range_to_utf16(&self.content, &self.selected), reversed: self.reversed })
     }
 
     fn marked_text_range(&self, _: &mut Window, _: &mut Context<Self>) -> Option<Range<usize>> {
-        self.marked.as_ref().map(|range| self.range_to_utf16(range))
+        self.marked.as_ref().map(|range| range_to_utf16(&self.content, range))
     }
 
     fn unmark_text(&mut self, _: &mut Window, cx: &mut Context<Self>) {
@@ -618,8 +569,10 @@ impl EntityInputHandler for TextArea {
         _: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let range =
-            range.map(|range| self.range_from_utf16(&range)).or(self.marked.clone()).unwrap_or(self.selected.clone());
+        let range = range
+            .map(|range| range_from_utf16(&self.content, &range))
+            .or(self.marked.clone())
+            .unwrap_or(self.selected.clone());
         // 回车由 `key_down` 插入换行，制表符不插入；输入法上屏的文字里真有换行时照样保留。
         let typed = text;
         let text: String = normalize_newlines(typed).chars().filter(|&c| c == '\n' || !c.is_control()).collect();
@@ -642,8 +595,10 @@ impl EntityInputHandler for TextArea {
         _: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let range =
-            range.map(|range| self.range_from_utf16(&range)).or(self.marked.clone()).unwrap_or(self.selected.clone());
+        let range = range
+            .map(|range| range_from_utf16(&self.content, &range))
+            .or(self.marked.clone())
+            .unwrap_or(self.selected.clone());
         if self.marked.is_none() {
             self.record(Some(EditKind::Insert));
         }
@@ -652,17 +607,8 @@ impl EntityInputHandler for TextArea {
         // 输入法给的选区相对于组字开头，按 UTF-16 计。
         self.selected = match selected {
             Some(selected) => {
-                let offset = |utf16: usize| {
-                    let mut count = 0;
-                    text.char_indices()
-                        .find(|(_, c)| {
-                            let hit = count >= utf16;
-                            count += c.len_utf16();
-                            hit
-                        })
-                        .map_or(text.len(), |(i, _)| i)
-                };
-                range.start + offset(selected.start)..range.start + offset(selected.end)
+                let selected = range_from_utf16(text, &selected);
+                range.start + selected.start..range.start + selected.end
             }
             None => range.start + text.len()..range.start + text.len(),
         };
@@ -681,7 +627,7 @@ impl EntityInputHandler for TextArea {
     ) -> Option<Bounds<Pixels>> {
         self.ensure_rows(window);
         let line_height = self.metrics.as_ref()?.line_height;
-        let range = self.range_from_utf16(&range);
+        let range = range_from_utf16(&self.content, &range);
         let ix = row_at(&self.rows, range.start, false);
         let row = self.rows.get(ix)?;
         // 跨行的范围只框住开头那一行，够输入法摆候选窗了。
@@ -699,43 +645,8 @@ impl EntityInputHandler for TextArea {
     ) -> Option<usize> {
         self.metrics.as_ref()?;
         let (index, _) = self.index_for_point(point, window);
-        Some(self.offset_to_utf16(index))
+        Some(offset_to_utf16(&self.content, index))
     }
-}
-
-fn previous_char(text: &str, offset: usize) -> usize {
-    text[..offset].char_indices().next_back().map_or(0, |(i, _)| i)
-}
-
-fn next_char(text: &str, offset: usize) -> usize {
-    text[offset..].chars().next().map_or(text.len(), |c| offset + c.len_utf8())
-}
-
-fn is_word_char(c: char) -> bool {
-    c.is_alphanumeric() || c == '_'
-}
-
-/// 往左到上一个词的开头：先跳过非词字符（包括换行），再跳过词字符。
-fn previous_word(text: &str, offset: usize) -> usize {
-    let mut chars = text[..offset].char_indices().rev().peekable();
-    while chars.next_if(|(_, c)| !is_word_char(*c)).is_some() {}
-    let mut start = chars.peek().map_or(0, |(i, _)| *i);
-    for (i, c) in chars {
-        if !is_word_char(c) {
-            break;
-        }
-        start = i;
-    }
-    start
-}
-
-/// 往右到下一个词的末尾：先跳过非词字符（包括换行），再跳过词字符。
-fn next_word(text: &str, offset: usize) -> usize {
-    let rest = &text[offset..];
-    let mut chars = rest.char_indices().peekable();
-    while chars.next_if(|(_, c)| !is_word_char(*c)).is_some() {}
-    while chars.next_if(|(_, c)| is_word_char(*c)).is_some() {}
-    offset + chars.peek().map_or(rest.len(), |(i, _)| *i)
 }
 
 /// `offset` 所在那段硬换行的范围，不含换行符。
@@ -751,17 +662,11 @@ fn line_range_at(text: &str, offset: usize) -> Range<usize> {
     line.start..if line.end < text.len() { line.end + 1 } else { line.end }
 }
 
-/// 双击选中的范围：点在词上选整个词，否则选连续的同类字符；不越过换行。
+/// 双击选中的范围：和单行输入框一样，只是不越过换行。
 fn word_range_at(text: &str, offset: usize) -> Range<usize> {
     let line = hard_line_at(text, offset);
-    let (text, offset) = (&text[line.clone()], offset - line.start);
-    let Some(c) = text[offset..].chars().next().or_else(|| text[..offset].chars().next_back()) else {
-        return line.start + offset..line.start + offset;
-    };
-    let same = |x: char| is_word_char(x) == is_word_char(c) && (is_word_char(c) || x == c);
-    let start = text[..offset].char_indices().rev().take_while(|(_, x)| same(*x)).last().map_or(offset, |(i, _)| i);
-    let end = text[offset..].char_indices().find(|(_, x)| !same(*x)).map_or(text.len(), |(i, _)| offset + i);
-    line.start + start..line.start + end
+    let word = super::text_field::word_range_at(&text[line.clone()], offset - line.start);
+    line.start + word.start..line.start + word.end
 }
 
 /// 换行统一成 `\n`：`\r\n` 和单独的 `\r` 都换掉。

@@ -5,20 +5,27 @@
 //! 文件先按整个文件名认，认不出再按扩展名，都不分大小写：`Cargo.lock` 这类名字的扩展名
 //! 会把它认成别的类型，整名要排在前面。目录只按名字认，认不出的用普通文件夹。
 
-/// 列出所有图标：给每个图标一个资源路径常量，并把它们连同文件内容收进 `FILES`，
-/// 路径和文件名只写一遍，免得两边对不上。
+/// 列出一组编进二进制的图标：给每个图标一个资源路径常量（`$dir` 加名字），并把它们连同文件内容
+/// 收进 `FILES`，路径和文件名只写一遍，免得两边对不上。`$src` 是从调用它的文件到同一目录的相对
+/// 路径；`$vis` 是 `FILES` 的可见性，每个常量前面可以带文档和自己的可见性。这里的类型图标和
+/// `crate::assets` 里界面上的图标都用它。
 macro_rules! icons {
-    ($($konst:ident = $name:literal,)*) => {
-        $(const $konst: &str = concat!("icons/types/", $name, ".svg");)*
+    (
+        $vis:vis FILES, $dir:literal, $src:literal;
+        $($(#[$meta:meta])* $konst_vis:vis $konst:ident = $name:literal,)*
+    ) => {
+        $($(#[$meta])* $konst_vis const $konst: &str = concat!($dir, $name, ".svg");)*
 
-        /// 所有类型图标的资源路径和内容，`Assets` 按路径从这里取。
-        pub const FILES: &[(&str, &[u8])] = &[
-            $(($konst, include_bytes!(concat!("../../assets/icons/types/", $name, ".svg"))),)*
+        /// 这一组图标的资源路径和内容，`Assets` 按路径从这里取。
+        $vis const FILES: &[(&str, &[u8])] = &[
+            $(($konst, include_bytes!(concat!($src, $name, ".svg"))),)*
         ];
     };
 }
+pub(crate) use icons;
 
 icons! {
+    pub FILES, "icons/types/", "../../assets/icons/types/";
     FOLDER = "folder",
     FOLDER_OPEN = "folder-open",
     FOLDER_SRC = "folder-src",

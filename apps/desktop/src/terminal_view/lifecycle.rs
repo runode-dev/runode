@@ -148,7 +148,6 @@ impl TerminalView {
             start: false,
             shell: None,
             settings: None,
-            env: Vec::new(),
         })?;
         let (screen, rx) = connect(id, &config.term_settings())?;
         Ok(cx.new(|cx| Self::new(Some(id), screen, false, rx, window, cx)))
@@ -184,7 +183,6 @@ impl TerminalView {
             start,
             shell: None,
             settings: None,
-            env: Vec::new(),
         });
         match spawned {
             Ok(id) => {
@@ -202,7 +200,7 @@ impl TerminalView {
 
     /// 用宿主里已有的会话 `id` 建视图（存档恢复、接上后台会话）。`cwd` 是调用方记着的目录，宿主
     /// 还没报告目录时当作它的目录。`visible` 为假时视图只看状态（`AttachMode::MetaOnly`），等
-    /// `set_visible` 再看屏幕。会话已经启动过，不再 `start`。连不上时返回错误，不结束会话。
+    /// `request_visible` 再看屏幕。会话已经启动过，不再 `start`。连不上时返回错误，不结束会话。
     pub fn reattach(
         id: SessionId,
         cwd: Option<&Path>,
@@ -424,20 +422,10 @@ impl TerminalView {
     }
 
     /// 视图在不在窗口里显示（窗口当前 workspace 当前标签里的分屏，被放大的分屏挡住的也算）。
-    /// 离开显示 `HIDE_GRACE` 后只看状态、丢掉界面这份 VT；回到显示时已经丢了的话按视图的尺寸
-    /// 重新要一份屏幕，最多等 `SHOW_WAIT`，等不到先画背景，到了再补上。窗口里一次调度好几个终端的
-    /// 用 `request_visible` 加 `wait_for_screen`。
-    // 窗口的调度（`WindowView::sync_visibility`）分两步做；只显示一个终端的调用方用它。
-    #[allow(dead_code)]
-    pub fn set_visible(&mut self, visible: bool, window: &mut Window, cx: &mut Context<Self>) {
-        if self.request_visible(visible, cx) {
-            self.wait_for_screen(Instant::now() + SHOW_WAIT, window, cx);
-        }
-    }
-
-    /// `set_visible` 的前一半：记下显示与否，回到显示时要是已经丢了界面这份 VT，发出要屏幕的
-    /// `Attach` 并返回 true，接着用 `wait_for_screen` 等。一次显示好几个终端时先都发出去再一起等
-    /// （见 `WindowView::sync_visibility`），不必一个等完再要下一个。
+    /// 离开显示 `HIDE_GRACE` 后只看状态、丢掉界面这份 VT；回到显示时要是已经丢了，按视图的尺寸
+    /// 发出要屏幕的 `Attach` 并返回 true，接着用 `wait_for_screen` 等（最多 `SHOW_WAIT`，等不到先画
+    /// 背景，到了再补上）。一次显示好几个终端时先都发出去再一起等（见 `WindowView::sync_visibility`），
+    /// 不必一个等完再要下一个。
     pub fn request_visible(&mut self, visible: bool, cx: &mut Context<Self>) -> bool {
         let attach = self.screen.set_visible(visible, Instant::now());
         if visible {
@@ -462,7 +450,7 @@ impl TerminalView {
         false
     }
 
-    /// 视图显示着，见 `set_visible`。
+    /// 视图显示着，见 `request_visible`。
     pub fn visible(&self) -> bool {
         self.screen.visible()
     }
@@ -622,7 +610,6 @@ impl TerminalView {
             start: true,
             shell: None,
             settings: None,
-            env: Vec::new(),
         })?;
         let (mut screen, rx) = connect(id, &self.config.term_settings())?;
         if let Some(old) = self.id.replace(id) {

@@ -312,14 +312,9 @@ impl SettingsView {
 
     fn write_unchecked(&mut self, key: &str, values: &[String], cx: &mut Context<Self>) -> Result<(), String> {
         let path = runode_config::config_path().ok_or_else(|| rust_i18n::t!("settings.no_home").into_owned())?;
-        let failed = |err: std::io::Error| rust_i18n::t!("settings.write_failed", err = err.to_string()).into_owned();
-        // 重新读一遍，别盖掉在编辑器里刚改的。
-        let mut file = ConfigFile::read(&path).map_err(failed)?;
-        file.set(key, values);
-        file.write(&path).map_err(failed)?;
-        self.file = file;
+        self.file = crate::config::write_values(&path, key, values, cx)
+            .map_err(|err| rust_i18n::t!("settings.write_failed", err = err.to_string()).into_owned())?;
         self.errors.remove(key);
-        crate::config::reload(cx);
         Ok(())
     }
 

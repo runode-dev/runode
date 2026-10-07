@@ -95,7 +95,7 @@ pub fn listen(cx: &mut App) {
     }
     cx.on_system_notification_response(|response, cx| {
         if response.tag == crate::update::NOTIFICATION_TAG {
-            crate::update::on_notification(cx);
+            crate::update::offer_restart(cx);
         } else {
             crate::window::reveal_notified(&response.tag, cx);
         }

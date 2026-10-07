@@ -4,6 +4,9 @@
 //! Shift+回车、Esc 作为 `TextFieldEvent` 交给调用方；输入框外面的东西（搜索的匹配数、上下切换
 //! 按钮、候选列表）由调用方画。回车、Shift+回车、Esc 绑定的是 `SearchNext`、`SearchPrevious`、
 //! `EndSearch`，终端没开搜索栏时这几个动作也由终端自己响应。
+//!
+//! 多行输入框 `TextArea` 和它共用的编辑内核也在这里：撤销记录 `History`、按字符和按词移动、
+//! 字节偏移和输入法用的 UTF-16 偏移之间的换算。
 
 use std::ops::Range;
 
@@ -47,11 +50,7 @@ pub struct TextField {
     query: String,
     /// 按住鼠标拖选中；双击后拖动按词扩展。
     drag: Option<Drag>,
-    /// 撤销、重做用的编辑前状态。
-    undo: Vec<Snapshot>,
-    redo: Vec<Snapshot>,
-    /// 上一次编辑的类型，连续打字或连续删除合成一步撤销；挪光标后清空。
-    last_edit: Option<EditKind>,
+    history: History,
     /// 空着时画的提示，默认是「搜索」；拿来就地改名时不画。
     placeholder: Option<SharedString>,
     /// 上一帧排好的文字、输入框位置和横向滚动量，鼠标点选、输入法摆候选窗都靠它们换算。
@@ -66,16 +65,63 @@ enum Drag {
     Word(Range<usize>),
 }
 
+/// 编辑的类型，连续同类的编辑合成一步撤销。
 #[derive(Clone, Copy, PartialEq)]
-enum EditKind {
+pub(super) enum EditKind {
     Insert,
     Delete,
 }
 
-struct Snapshot {
-    text: String,
-    selected: Range<usize>,
-    reversed: bool,
+/// 撤销、重做时恢复的状态。
+pub(super) struct Snapshot {
+    pub(super) text: String,
+    pub(super) selected: Range<usize>,
+    pub(super) reversed: bool,
+}
+
+/// 撤销、重做用的编辑前状态。
+#[derive(Default)]
+pub(super) struct History {
+    undo: Vec<Snapshot>,
+    redo: Vec<Snapshot>,
+    /// 上一次编辑的类型，连续打字或连续删除合成一步撤销；挪光标后清空。
+    last_edit: Option<EditKind>,
+}
+
+impl History {
+    /// 编辑前记下当前状态 `now` 供撤销；`kind` 和上一次相同时并进上一步（不调 `now`），`None`
+    /// 总是单独一步。
+    pub(super) fn record(&mut self, kind: Option<EditKind>, now: impl FnOnce() -> Snapshot) {
+        if kind.is_none() || kind != self.last_edit {
+            self.undo.push(now());
+            if self.undo.len() > UNDO_LIMIT {
+                self.undo.remove(0);
+            }
+        }
+        self.last_edit = kind;
+        self.redo.clear();
+    }
+
+    /// 挪过光标或选区：下一次编辑不再并进上一步。
+    pub(super) fn break_merge(&mut self) {
+        self.last_edit = None;
+    }
+
+    /// 退回一步：`now` 进重做栈，返回要恢复的状态；没有可退的时什么都不做。
+    pub(super) fn undo(&mut self, now: Snapshot) -> Option<Snapshot> {
+        let snapshot = self.undo.pop()?;
+        self.redo.push(now);
+        self.last_edit = None;
+        Some(snapshot)
+    }
+
+    /// 重做一步：`now` 进撤销栈，返回要恢复的状态；没有可重做的时什么都不做。
+    pub(super) fn redo(&mut self, now: Snapshot) -> Option<Snapshot> {
+        let snapshot = self.redo.pop()?;
+        self.undo.push(now);
+        self.last_edit = None;
+        Some(snapshot)
+    }
 }
 
 impl EventEmitter<TextFieldEvent> for TextField {}
@@ -91,9 +137,7 @@ impl TextField {
             marked: None,
             query,
             drag: None,
-            undo: Vec::new(),
-            redo: Vec::new(),
-            last_edit: None,
+            history: History::default(),
             placeholder: Some(rust_i18n::t!("search.placeholder").into_owned().into()),
             layout: None,
             bounds: None,
@@ -139,7 +183,7 @@ impl TextField {
     fn move_to(&mut self, offset: usize, cx: &mut Context<Self>) {
         self.selected = offset..offset;
         self.reversed = false;
-        self.last_edit = None;
+        self.history.break_merge();
         cx.notify();
     }
 
@@ -148,7 +192,7 @@ impl TextField {
         let anchor = if self.reversed { self.selected.end } else { self.selected.start };
         self.reversed = offset < anchor;
         self.selected = offset.min(anchor)..offset.max(anchor);
-        self.last_edit = None;
+        self.history.break_merge();
         cx.notify();
     }
 
@@ -158,7 +202,7 @@ impl TextField {
         match &self.drag {
             Some(Drag::Char) => self.select_to(index, cx),
             Some(Drag::Word(anchor)) => {
-                let word = self.word_range_at(index);
+                let word = word_range_at(&self.text, index);
                 self.reversed = word.start < anchor.start;
                 self.selected = word.start.min(anchor.start)..word.end.max(anchor.end);
                 cx.notify();
@@ -171,16 +215,10 @@ impl TextField {
         Snapshot { text: self.text.clone(), selected: self.selected.clone(), reversed: self.reversed }
     }
 
-    /// 编辑前记下当前状态供撤销；`kind` 和上一次相同时并进上一步，`None` 总是单独一步。
+    /// 编辑前记下当前状态供撤销，见 `History::record`。
     fn record(&mut self, kind: Option<EditKind>) {
-        if kind.is_none() || kind != self.last_edit {
-            self.undo.push(self.snapshot());
-            if self.undo.len() > UNDO_LIMIT {
-                self.undo.remove(0);
-            }
-        }
-        self.last_edit = kind;
-        self.redo.clear();
+        let now = || Snapshot { text: self.text.clone(), selected: self.selected.clone(), reversed: self.reversed };
+        self.history.record(kind, now);
     }
 
     fn restore(&mut self, snapshot: Snapshot, cx: &mut Context<Self>) {
@@ -188,7 +226,6 @@ impl TextField {
         self.selected = snapshot.selected;
         self.reversed = snapshot.reversed;
         self.marked = None;
-        self.last_edit = None;
         self.sync_query(cx);
     }
 
@@ -197,8 +234,7 @@ impl TextField {
         if self.marked.is_some() {
             return;
         }
-        if let Some(snapshot) = self.undo.pop() {
-            self.redo.push(self.snapshot());
+        if let Some(snapshot) = self.history.undo(self.snapshot()) {
             self.restore(snapshot, cx);
         }
     }
@@ -207,8 +243,7 @@ impl TextField {
         if self.marked.is_some() {
             return;
         }
-        if let Some(snapshot) = self.redo.pop() {
-            self.undo.push(self.snapshot());
+        if let Some(snapshot) = self.history.redo(self.snapshot()) {
             self.restore(snapshot, cx);
         }
     }
@@ -236,50 +271,6 @@ impl TextField {
         cx.notify();
     }
 
-    fn previous_char(&self, offset: usize) -> usize {
-        self.text[..offset].char_indices().next_back().map_or(0, |(i, _)| i)
-    }
-
-    fn next_char(&self, offset: usize) -> usize {
-        self.text[offset..].chars().next().map_or(self.text.len(), |c| offset + c.len_utf8())
-    }
-
-    /// 往左到上一个词的开头：先跳过非词字符，再跳过词字符。
-    fn previous_word(&self, offset: usize) -> usize {
-        let mut chars = self.text[..offset].char_indices().rev().peekable();
-        while chars.next_if(|(_, c)| !is_word_char(*c)).is_some() {}
-        let mut start = chars.peek().map_or(0, |(i, _)| *i);
-        for (i, c) in chars {
-            if !is_word_char(c) {
-                break;
-            }
-            start = i;
-        }
-        start
-    }
-
-    /// 往右到下一个词的末尾：先跳过非词字符，再跳过词字符。
-    fn next_word(&self, offset: usize) -> usize {
-        let rest = &self.text[offset..];
-        let mut chars = rest.char_indices().peekable();
-        while chars.next_if(|(_, c)| !is_word_char(*c)).is_some() {}
-        while chars.next_if(|(_, c)| is_word_char(*c)).is_some() {}
-        offset + chars.peek().map_or(rest.len(), |(i, _)| *i)
-    }
-
-    /// 双击选中的范围：点在词上选整个词，否则选连续的同类字符。
-    fn word_range_at(&self, offset: usize) -> Range<usize> {
-        let Some(c) = self.text[offset..].chars().next().or_else(|| self.text[..offset].chars().next_back()) else {
-            return offset..offset;
-        };
-        let same = |x: char| is_word_char(x) == is_word_char(c) && (is_word_char(c) || x == c);
-        let start =
-            self.text[..offset].char_indices().rev().take_while(|(_, x)| same(*x)).last().map_or(offset, |(i, _)| i);
-        let end =
-            self.text[offset..].char_indices().find(|(_, x)| !same(*x)).map_or(self.text.len(), |(i, _)| offset + i);
-        start..end
-    }
-
     fn index_for_x(&self, x: Pixels) -> usize {
         let (Some(layout), Some(bounds)) = (&self.layout, self.bounds) else {
             return self.text.len();
@@ -296,13 +287,13 @@ impl TextField {
         let cursor = self.cursor();
         let target = match event.keystroke.key.as_str() {
             "left" if mods.platform => 0,
-            "left" if mods.alt => self.previous_word(cursor),
+            "left" if mods.alt => previous_word(&self.text, cursor),
             "left" if !mods.shift && !self.selected.is_empty() => self.selected.start,
-            "left" => self.previous_char(cursor),
+            "left" => previous_char(&self.text, cursor),
             "right" if mods.platform => self.text.len(),
-            "right" if mods.alt => self.next_word(cursor),
+            "right" if mods.alt => next_word(&self.text, cursor),
             "right" if !mods.shift && !self.selected.is_empty() => self.selected.end,
-            "right" => self.next_char(cursor),
+            "right" => next_char(&self.text, cursor),
             "up" | "home" => 0,
             "down" | "end" => self.text.len(),
             "backspace" | "delete" => {
@@ -310,13 +301,13 @@ impl TextField {
                 let range = if !self.selected.is_empty() {
                     self.selected.clone()
                 } else if forward {
-                    cursor..if mods.alt { self.next_word(cursor) } else { self.next_char(cursor) }
+                    cursor..if mods.alt { next_word(&self.text, cursor) } else { next_char(&self.text, cursor) }
                 } else if mods.platform {
                     0..cursor
                 } else if mods.alt {
-                    self.previous_word(cursor)..cursor
+                    previous_word(&self.text, cursor)..cursor
                 } else {
-                    self.previous_char(cursor)..cursor
+                    previous_char(&self.text, cursor)..cursor
                 };
                 if !range.is_empty() {
                     self.record(Some(EditKind::Delete));
@@ -344,10 +335,10 @@ impl TextField {
         let index = self.index_for_x(event.position.x);
         self.drag = match event.click_count {
             2 => {
-                let word = self.word_range_at(index);
+                let word = word_range_at(&self.text, index);
                 self.selected = word.clone();
                 self.reversed = false;
-                self.last_edit = None;
+                self.history.break_merge();
                 cx.notify();
                 Some(Drag::Word(word))
             }
@@ -379,14 +370,12 @@ impl TextField {
     fn select_all(&mut self, _: &SelectAll, _: &mut Window, cx: &mut Context<Self>) {
         self.selected = 0..self.text.len();
         self.reversed = false;
-        self.last_edit = None;
+        self.history.break_merge();
         cx.notify();
     }
 
     fn copy(&mut self, _: &Copy, _: &mut Window, cx: &mut Context<Self>) {
-        if !self.selected.is_empty() {
-            cx.write_to_clipboard(ClipboardItem::new_string(self.text[self.selected.clone()].to_owned()));
-        }
+        copy_selection(&self.text, &self.selected, cx);
     }
 
     fn cut(&mut self, _: &Cut, window: &mut Window, cx: &mut Context<Self>) {
@@ -397,33 +386,83 @@ impl TextField {
         self.record(None);
         self.replace(self.selected.clone(), "", cx);
     }
+}
 
-    fn offset_from_utf16(&self, utf16: usize) -> usize {
-        let mut count = 0;
-        for (i, c) in self.text.char_indices() {
-            if count >= utf16 {
-                return i;
-            }
-            count += c.len_utf16();
-        }
-        self.text.len()
-    }
+pub(super) fn previous_char(text: &str, offset: usize) -> usize {
+    text[..offset].char_indices().next_back().map_or(0, |(i, _)| i)
+}
 
-    fn offset_to_utf16(&self, offset: usize) -> usize {
-        self.text[..offset].encode_utf16().count()
-    }
-
-    fn range_from_utf16(&self, range: &Range<usize>) -> Range<usize> {
-        self.offset_from_utf16(range.start)..self.offset_from_utf16(range.end)
-    }
-
-    fn range_to_utf16(&self, range: &Range<usize>) -> Range<usize> {
-        self.offset_to_utf16(range.start)..self.offset_to_utf16(range.end)
-    }
+pub(super) fn next_char(text: &str, offset: usize) -> usize {
+    text[offset..].chars().next().map_or(text.len(), |c| offset + c.len_utf8())
 }
 
 fn is_word_char(c: char) -> bool {
     c.is_alphanumeric() || c == '_'
+}
+
+/// 往左到上一个词的开头：先跳过非词字符（包括换行），再跳过词字符。
+pub(super) fn previous_word(text: &str, offset: usize) -> usize {
+    let mut chars = text[..offset].char_indices().rev().peekable();
+    while chars.next_if(|(_, c)| !is_word_char(*c)).is_some() {}
+    let mut start = chars.peek().map_or(0, |(i, _)| *i);
+    for (i, c) in chars {
+        if !is_word_char(c) {
+            break;
+        }
+        start = i;
+    }
+    start
+}
+
+/// 往右到下一个词的末尾：先跳过非词字符（包括换行），再跳过词字符。
+pub(super) fn next_word(text: &str, offset: usize) -> usize {
+    let rest = &text[offset..];
+    let mut chars = rest.char_indices().peekable();
+    while chars.next_if(|(_, c)| !is_word_char(*c)).is_some() {}
+    while chars.next_if(|(_, c)| is_word_char(*c)).is_some() {}
+    offset + chars.peek().map_or(rest.len(), |(i, _)| *i)
+}
+
+/// 双击选中的范围：点在词上选整个词，否则选连续的同类字符。
+pub(super) fn word_range_at(text: &str, offset: usize) -> Range<usize> {
+    let Some(c) = text[offset..].chars().next().or_else(|| text[..offset].chars().next_back()) else {
+        return offset..offset;
+    };
+    let same = |x: char| is_word_char(x) == is_word_char(c) && (is_word_char(c) || x == c);
+    let start = text[..offset].char_indices().rev().take_while(|(_, x)| same(*x)).last().map_or(offset, |(i, _)| i);
+    let end = text[offset..].char_indices().find(|(_, x)| !same(*x)).map_or(text.len(), |(i, _)| offset + i);
+    start..end
+}
+
+/// 选中了文字时把它复制到剪贴板。
+pub(super) fn copy_selection(text: &str, selected: &Range<usize>, cx: &mut App) {
+    if !selected.is_empty() {
+        cx.write_to_clipboard(ClipboardItem::new_string(text[selected.clone()].to_owned()));
+    }
+}
+
+/// 输入法按 UTF-16 计的偏移换成 `text` 里的字节偏移；超出末尾的算末尾。
+pub(super) fn offset_from_utf16(text: &str, utf16: usize) -> usize {
+    let mut count = 0;
+    for (i, c) in text.char_indices() {
+        if count >= utf16 {
+            return i;
+        }
+        count += c.len_utf16();
+    }
+    text.len()
+}
+
+pub(super) fn offset_to_utf16(text: &str, offset: usize) -> usize {
+    text[..offset].encode_utf16().count()
+}
+
+pub(super) fn range_from_utf16(text: &str, range: &Range<usize>) -> Range<usize> {
+    offset_from_utf16(text, range.start)..offset_from_utf16(text, range.end)
+}
+
+pub(super) fn range_to_utf16(text: &str, range: &Range<usize>) -> Range<usize> {
+    offset_to_utf16(text, range.start)..offset_to_utf16(text, range.end)
 }
 
 impl Focusable for TextField {
@@ -464,17 +503,17 @@ impl EntityInputHandler for TextField {
         _: &mut Window,
         _: &mut Context<Self>,
     ) -> Option<String> {
-        let range = self.range_from_utf16(&range);
-        actual_range.replace(self.range_to_utf16(&range));
+        let range = range_from_utf16(&self.text, &range);
+        actual_range.replace(range_to_utf16(&self.text, &range));
         Some(self.text[range].to_owned())
     }
 
     fn selected_text_range(&mut self, _: bool, _: &mut Window, _: &mut Context<Self>) -> Option<UTF16Selection> {
-        Some(UTF16Selection { range: self.range_to_utf16(&self.selected), reversed: self.reversed })
+        Some(UTF16Selection { range: range_to_utf16(&self.text, &self.selected), reversed: self.reversed })
     }
 
     fn marked_text_range(&self, _: &mut Window, _: &mut Context<Self>) -> Option<Range<usize>> {
-        self.marked.as_ref().map(|range| self.range_to_utf16(range))
+        self.marked.as_ref().map(|range| range_to_utf16(&self.text, range))
     }
 
     fn unmark_text(&mut self, _: &mut Window, cx: &mut Context<Self>) {
@@ -489,8 +528,10 @@ impl EntityInputHandler for TextField {
         _: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let range =
-            range.map(|range| self.range_from_utf16(&range)).or(self.marked.clone()).unwrap_or(self.selected.clone());
+        let range = range
+            .map(|range| range_from_utf16(&self.text, &range))
+            .or(self.marked.clone())
+            .unwrap_or(self.selected.clone());
         // 回车、制表符等由按键绑定处理，不进文字。
         let text: String = text.chars().filter(|c| !c.is_control()).collect();
         if text.is_empty() && range.is_empty() && self.marked.is_none() {
@@ -511,8 +552,10 @@ impl EntityInputHandler for TextField {
         _: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let range =
-            range.map(|range| self.range_from_utf16(&range)).or(self.marked.clone()).unwrap_or(self.selected.clone());
+        let range = range
+            .map(|range| range_from_utf16(&self.text, &range))
+            .or(self.marked.clone())
+            .unwrap_or(self.selected.clone());
         if self.marked.is_none() {
             self.record(Some(EditKind::Insert));
         }
@@ -521,17 +564,8 @@ impl EntityInputHandler for TextField {
         // 输入法给的选区相对于组字开头，按 UTF-16 计。
         self.selected = match selected {
             Some(selected) => {
-                let offset = |utf16: usize| {
-                    let mut count = 0;
-                    text.char_indices()
-                        .find(|(_, c)| {
-                            let hit = count >= utf16;
-                            count += c.len_utf16();
-                            hit
-                        })
-                        .map_or(text.len(), |(i, _)| i)
-                };
-                range.start + offset(selected.start)..range.start + offset(selected.end)
+                let selected = range_from_utf16(text, &selected);
+                range.start + selected.start..range.start + selected.end
             }
             None => range.start + text.len()..range.start + text.len(),
         };
@@ -547,7 +581,7 @@ impl EntityInputHandler for TextField {
         _: &mut Context<Self>,
     ) -> Option<Bounds<Pixels>> {
         let layout = self.layout.as_ref()?;
-        let range = self.range_from_utf16(&range);
+        let range = range_from_utf16(&self.text, &range);
         let x = |index| bounds.left() + layout.x_for_index(index) - self.scroll_x;
         Some(Bounds::from_corners(point(x(range.start), bounds.top()), point(x(range.end), bounds.bottom())))
     }
@@ -560,7 +594,7 @@ impl EntityInputHandler for TextField {
     ) -> Option<usize> {
         let bounds = self.bounds?;
         let index = self.layout.as_ref()?.index_for_x(point.x - bounds.left() + self.scroll_x)?;
-        Some(self.offset_to_utf16(index))
+        Some(offset_to_utf16(&self.text, index))
     }
 }
 
@@ -746,5 +780,33 @@ impl Element for TextFieldText {
             field.bounds = Some(bounds);
             field.scroll_x = scroll_x;
         });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn at(text: &str) -> impl FnOnce() -> Snapshot {
+        let text = text.to_owned();
+        move || Snapshot { selected: text.len()..text.len(), text, reversed: false }
+    }
+
+    #[test]
+    fn same_kind_edits_merge_until_the_caret_moves() {
+        let mut history = History::default();
+        history.record(Some(EditKind::Insert), at(""));
+        history.record(Some(EditKind::Insert), at("a"));
+        history.record(Some(EditKind::Delete), at("ab"));
+        history.break_merge();
+        history.record(Some(EditKind::Delete), at("a"));
+        history.record(None, at(""));
+        history.record(None, at("x"));
+        let undone: Vec<_> = std::iter::from_fn(|| history.undo(at("now")()).map(|s| s.text)).collect();
+        assert_eq!(undone, ["x", "", "a", "ab", ""]);
+        assert_eq!(history.redo(at("")()).map(|s| s.text).as_deref(), Some("now"));
+        // 撤销过后再打字从新的一步开始，重做的记录清掉。
+        history.record(Some(EditKind::Insert), at("q"));
+        assert!(history.redo(at("")()).is_none());
     }
 }

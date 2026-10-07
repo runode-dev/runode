@@ -2,13 +2,14 @@
 //! 换到对应的主题，以及用文本编辑器打开配置文件。在界面里改设置见 `settings`。配置的读取和解析见 `runode_config`。
 
 use std::{
-    path::PathBuf,
+    io,
+    path::{Path, PathBuf},
     sync::Arc,
     time::{Duration, SystemTime},
 };
 
 use gpui::{App, Global, WindowAppearance};
-use runode_config::Config;
+use runode_config::{Config, ConfigFile};
 
 /// 当前生效的配置。视图通过 `observe_global` 在重载后重新应用。
 pub struct AppConfig(pub Arc<Config>);
@@ -72,15 +73,21 @@ fn apply(cx: &mut App, config: Config) {
     cx.set_global(AppConfig(Arc::new(config)));
 }
 
-/// 把 runode 配置文件里 `key` 的值换成 `value` 并重载配置，文件里别的行原样留着。先重新读一遍
-/// 文件，别盖掉在编辑器里刚改的。
+/// 把 runode 配置文件里 `key` 的值换成 `value` 并重载配置，见 `write_values`。
 pub fn set(key: &str, value: &str, cx: &mut App) -> anyhow::Result<()> {
     let path = runode_config::config_path().ok_or_else(|| anyhow::anyhow!("no home directory"))?;
-    let mut file = runode_config::ConfigFile::read(&path)?;
-    file.set(key, &[value.to_owned()]);
-    file.write(&path)?;
-    reload(cx);
+    write_values(&path, key, &[value.to_owned()], cx)?;
     Ok(())
+}
+
+/// 把配置文件 `path` 里 `key` 的值换成 `values`（为空就是删掉）并重载配置，文件里别的行原样留着，
+/// 返回写好的文件。先重新读一遍文件，别盖掉在编辑器里刚改的。
+pub fn write_values(path: &Path, key: &str, values: &[String], cx: &mut App) -> io::Result<ConfigFile> {
+    let mut file = ConfigFile::read(path)?;
+    file.set(key, values);
+    file.write(path)?;
+    reload(cx);
+    Ok(file)
 }
 
 /// 系统深浅色变了就重载，让 `theme = light:A,dark:B` 换到对应的主题。每个窗口都会

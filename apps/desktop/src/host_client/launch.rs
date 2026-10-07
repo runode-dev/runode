@@ -107,11 +107,9 @@ pub fn probe(socket: &Path, build: &BuildId) -> Probe {
 
 /// 探一次；连不上 socket 时是 `Absent`，握手或列会话没成时返回错误，由调用方再试。
 fn probe_once(socket: &Path, build: &BuildId) -> io::Result<Probe> {
-    let Ok(mut stream) = UnixStream::connect(socket) else {
+    let Ok(mut stream) = connect_cli(socket) else {
         return Ok(Probe::Absent);
     };
-    stream.set_read_timeout(Some(CONNECT_TIMEOUT))?;
-    stream.set_write_timeout(Some(CONNECT_TIMEOUT))?;
     send(&mut stream, &hello(build, ClientKind::Cli))?;
     let build = match receive(&mut stream)? {
         HostMsg::Welcome { standalone: true, build, .. } => build,
@@ -131,9 +129,7 @@ fn probe_once(socket: &Path, build: &BuildId) -> io::Result<Probe> {
 /// 让 `socket` 上在跑的宿主结束所有会话后退出，等它断开，最多 `CONNECT_TIMEOUT`。宿主跑在另一个
 /// app 里时不碰它，返回错误。
 pub fn retire(socket: &Path, build: &BuildId) -> io::Result<()> {
-    let mut stream = UnixStream::connect(socket)?;
-    stream.set_read_timeout(Some(CONNECT_TIMEOUT))?;
-    stream.set_write_timeout(Some(CONNECT_TIMEOUT))?;
+    let mut stream = connect_cli(socket)?;
     send(&mut stream, &hello(build, ClientKind::Cli))?;
     match receive(&mut stream)? {
         HostMsg::Welcome { standalone: true, .. } => {}
@@ -142,6 +138,19 @@ pub fn retire(socket: &Path, build: &BuildId) -> io::Result<()> {
         }
         _ => return Err(io::Error::other("the host did not say welcome")),
     }
+    shut_down(stream)
+}
+
+/// 连上 `socket` 上的宿主，读写都最多等 `CONNECT_TIMEOUT`；招呼由调用方打。
+fn connect_cli(socket: &Path) -> io::Result<UnixStream> {
+    let stream = UnixStream::connect(socket)?;
+    stream.set_read_timeout(Some(CONNECT_TIMEOUT))?;
+    stream.set_write_timeout(Some(CONNECT_TIMEOUT))?;
+    Ok(stream)
+}
+
+/// 已经打过招呼的连接上让宿主结束所有会话后退出，读到它断开为止。
+fn shut_down(mut stream: UnixStream) -> io::Result<()> {
     send(&mut stream, &ClientMsg::Shutdown { kill_sessions: true })?;
     // 宿主发完 `Goodbye` 就断开；读到断开为止。
     while read_frame(&mut stream).map_err(|err| io::Error::other(err.to_string()))?.is_some() {}
@@ -161,9 +170,7 @@ pub enum Ended {
 /// 用户要结束交接没成的旧宿主（连同它的会话）：说得通协议的同 `retire`；协议对不上的（`Probe`
 /// 是 `Incompatible`）没法让它自己退出，同 `terminate`。跑在另一个 app 里的不碰，返回错误。
 pub fn end_old_host(socket: &Path, build: &BuildId) -> io::Result<Ended> {
-    let mut stream = UnixStream::connect(socket)?;
-    stream.set_read_timeout(Some(CONNECT_TIMEOUT))?;
-    stream.set_write_timeout(Some(CONNECT_TIMEOUT))?;
+    let mut stream = connect_cli(socket)?;
     send(&mut stream, &hello(build, ClientKind::Cli))?;
     match receive(&mut stream)? {
         HostMsg::Welcome { standalone: true, .. } => {}
@@ -176,8 +183,7 @@ pub fn end_old_host(socket: &Path, build: &BuildId) -> io::Result<Ended> {
         }
         _ => return Err(io::Error::other("the host did not say welcome")),
     }
-    send(&mut stream, &ClientMsg::Shutdown { kill_sessions: true })?;
-    while read_frame(&mut stream).map_err(|err| io::Error::other(err.to_string()))?.is_some() {}
+    shut_down(stream)?;
     Ok(Ended::Ended)
 }
 
@@ -268,9 +274,7 @@ fn parse_procargs(data: &[u8]) -> Option<Vec<Vec<u8>>> {
 /// `Welcome` 里有宿主自报的 `host_pid` 时以它为准，和对端对不上时记一笔；协议 3 及以前的
 /// `Incompatible` 不带 pid，用对端的。不回话的不猜，返回错误。
 fn host_pid(socket: &Path) -> io::Result<libc::pid_t> {
-    let mut stream = UnixStream::connect(socket)?;
-    stream.set_read_timeout(Some(CONNECT_TIMEOUT))?;
-    stream.set_write_timeout(Some(CONNECT_TIMEOUT))?;
+    let mut stream = connect_cli(socket)?;
     send(&mut stream, &hello(&super::build(), ClientKind::Cli))?;
     let reported = match receive(&mut stream)? {
         HostMsg::Welcome { host_pid, .. } => libc::pid_t::try_from(host_pid).ok().filter(|pid| *pid > 0),
@@ -552,7 +556,6 @@ mod tests {
                     start: false,
                     shell: Some("/bin/cat".into()),
                     settings: None,
-                    env: Vec::new(),
                 })
                 .unwrap();
             let probed = probe(&socket, &build());

@@ -62,8 +62,9 @@ pub(super) fn snapshot(inner: &Inner, channel: u32, data: &[u8]) {
     }
 }
 
-/// 收的一方不要了：忘掉这个会话。视图丢掉时自己发 `Detach` 或 `Kill`，这里不发。
-fn drop_route(state: &mut State, id: SessionId) {
+/// 忘掉这个会话的登记，之后它的帧丢掉：收的一方不要了时在这里（视图丢掉时自己发 `Detach` 或
+/// `Kill`，这里不发），发了 `Detach`、`Kill` 时在 `Link::forget`。
+pub(super) fn drop_route(state: &mut State, id: SessionId) {
     if let Some(route) = state.sessions.remove(&id)
         && let Some(channel) = route.channel
     {

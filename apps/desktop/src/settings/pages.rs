@@ -11,7 +11,7 @@ use super::{
     },
     picker::{PickItem, PickTarget, ThemeSlot},
 };
-use crate::ui::hsla;
+use crate::{i18n::tr, ui::hsla};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum Page {
@@ -176,10 +176,6 @@ impl Page {
             })
             .collect()
     }
-}
-
-fn tr(key: &str) -> String {
-    rust_i18n::t!(key).into_owned()
 }
 
 /// 翻译里键名用下划线。

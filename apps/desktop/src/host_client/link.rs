@@ -109,8 +109,6 @@ pub struct SpawnOptions {
     pub shell: Option<String>,
     /// 宿主还没收到过 `SetTheme` 时这个会话一开始套的主题。
     pub settings: Option<TermSettings>,
-    /// 启动 shell 时另外设的环境变量。
-    pub env: Vec<(String, String)>,
 }
 
 /// 连宿主没连成的原因。
@@ -477,10 +475,10 @@ impl Link {
     /// 新开一个会话，等宿主回话（最多 `SPAWN_TIMEOUT`），返回它的标识。开好的会话不会自动连上，
     /// 接着 `attach`。
     pub fn spawn(&self, options: SpawnOptions) -> Result<SessionId> {
-        let SpawnOptions { size, cwd, integration, start, shell, settings, env } = options;
+        let SpawnOptions { size, cwd, integration, start, shell, settings } = options;
         let req = self.inner.next_req.fetch_add(1, Ordering::Relaxed);
         let reply = self.expect_reply(req)?;
-        let spawn = ClientMsg::Spawn { req, size, cwd, integration, start, shell, settings, env };
+        let spawn = ClientMsg::Spawn { req, size, cwd, integration, start, shell, settings, env: Vec::new() };
         if let Err(err) = self.inner.control(&spawn) {
             self.inner.state().replies.remove(&req);
             return Err(anyhow!("failed to ask the host for a terminal: {err}"));
@@ -501,7 +499,6 @@ impl Link {
     /// 连上会话，返回收它的事件的一端，第一件是 `LinkEvent::Screen`（连不上时是带着它的
     /// `LinkEvent::Msg(HostMsg::Error)`）。这个会话原来连着的话，原来那一端不再收到事件。
     /// `size` 是视图的尺寸，宿主按它改会话的尺寸；为 `None` 时不改。
-    #[allow(dead_code)]
     pub fn attach(&self, id: SessionId, size: Option<GridSize>, mode: AttachMode) -> UnboundedReceiver<LinkEvent> {
         let (events, rx) = unbounded();
         self.start_attach(id, size, mode, Some(Route::new(events)));
@@ -593,12 +590,7 @@ impl Link {
 
     /// 忘掉这个会话的登记，之后它的帧丢掉。
     fn forget(&self, id: SessionId) {
-        let mut state = self.inner.state();
-        if let Some(route) = state.sessions.remove(&id)
-            && let Some(channel) = route.channel
-        {
-            state.channels.remove(&channel);
-        }
+        reader::drop_route(&mut self.inner.state(), id);
     }
 
     /// 宿主里所有的会话，最多等 `timeout`。

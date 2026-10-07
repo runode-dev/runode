@@ -138,7 +138,8 @@ pub enum TerminalEvent {
     Exited,
 }
 
-/// 收宿主发来的事件的一端。读事件的任务和回到显示时主线程上的等待（见 `set_visible`）轮流用它。
+/// 收宿主发来的事件的一端。读事件的任务和回到显示时主线程上的等待（见 `request_visible`、
+/// `wait_for_screen`）轮流用它。
 type Events = Rc<RefCell<UnboundedReceiver<LinkEvent>>>;
 
 pub struct TerminalView {

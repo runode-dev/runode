@@ -248,8 +248,6 @@ pub fn serve_ui() -> Option<UnboundedReceiver<(UiTicket, ClientMsg)>> {
 /// 和宿主的连接断了以后重新连上：跑在 app 里时重开一对 socket；单独一个进程时重连它的 socket，
 /// 没有就重新拉起（`terminal-host` 已经关了、只是接回上次的会话时，改成跑在 app 里）。重连期间
 /// 最多卡住调用的线程约 2 秒。已经连着时什么都不做。之前的会话要重新 `attach`。
-// 宿主断开后「在原目录重开」用上它之前先放着。
-#[allow(dead_code)]
 pub fn reconnect() -> Result<()> {
     let link = link();
     if link.connected() {
@@ -577,16 +575,12 @@ fn listen_in_app(host: &Host) {
     let dirs = runode_paths::Dirs::from_env();
     let deadline = Instant::now() + LISTEN_RETRY;
     loop {
-        let result = dirs.create_runtime_dir().map_err(anyhow::Error::from).and_then(|_| {
-            let socket = dirs.host_socket_file().ok_or_else(|| anyhow!("the socket path is too long"))?;
-            let lock = dirs.host_lock_file().ok_or_else(|| anyhow!("no place for the host lock"))?;
-            host.listen(&socket, &lock)?;
-            LISTENING.store(true, Ordering::Relaxed);
-            tracing::info!("host listening on {}", socket.display());
-            Ok(())
-        });
-        match result {
-            Ok(()) => return,
+        match listen(host, &dirs) {
+            Ok(socket) => {
+                LISTENING.store(true, Ordering::Relaxed);
+                tracing::info!("host listening on {}", socket.display());
+                return;
+            }
             Err(err) if Instant::now() >= deadline => {
                 tracing::warn!("the host is not listening for other processes: {err:#}");
                 return;
@@ -594,6 +588,16 @@ fn listen_in_app(host: &Host) {
             Err(_) => thread::sleep(Duration::from_millis(20)),
         }
     }
+}
+
+/// 建好 runode 自己的 `run/` 目录，拿着宿主的锁在宿主的 socket 上开监听，返回 socket 的路径。跑在
+/// app 里的宿主（`listen_in_app`）和单独跑的宿主（`host_process::run`）都这样开。
+pub fn listen(host: &Host, dirs: &runode_paths::Dirs) -> Result<PathBuf> {
+    dirs.create_runtime_dir()?;
+    let socket = dirs.host_socket_file().ok_or_else(|| anyhow!("the socket path is too long"))?;
+    let lock = dirs.host_lock_file().ok_or_else(|| anyhow!("no place for the host lock"))?;
+    host.listen(&socket, &lock)?;
+    Ok(socket)
 }
 
 /// 有要告诉用户的宿主的事（见 `Notice`）时，在最前面的窗口上弹框说一声；交接没成时弹框问用户

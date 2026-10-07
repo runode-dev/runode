@@ -97,19 +97,10 @@ pub fn menu_label(cx: &App) -> String {
 /// 菜单里点了那一项：下好了就重启以更新，否则马上查一次、弹框说结果；正在查时等它查完再说。
 pub fn menu_clicked(cx: &mut App) {
     if matches!(cx.global::<Updater>().phase, Phase::Ready(_)) {
-        restart(cx);
+        crate::window::quit_to_update(cx);
     } else {
         check(true, cx);
     }
-}
-
-/// 点了「下好了」的通知：弹框问要不要现在重启。
-pub fn on_notification(cx: &mut App) {
-    offer_restart(cx);
-}
-
-fn restart(cx: &mut App) {
-    crate::window::quit_to_update(cx);
 }
 
 /// 在后台查一次，没在查、也还没下好时才查；`manual` 时把结果弹框告诉用户。
@@ -198,15 +189,15 @@ fn finish(found: Result<Found, Error>, cx: &mut App) {
     crate::menus::set_menus(cx);
 }
 
-/// 弹框说新版本下好了，问现在重启还是退出时再装。
-fn offer_restart(cx: &mut App) {
+/// 弹框说新版本下好了，问现在重启还是退出时再装；点了「下好了」的通知时也是它。
+pub fn offer_restart(cx: &mut App) {
     let Phase::Ready(staged) = &cx.global::<Updater>().phase else { return };
     let title = rust_i18n::t!("update.ready_title", version = staged.version());
     let detail = rust_i18n::t!("update.ready_detail");
     let answers = [&*rust_i18n::t!("update.restart"), &*rust_i18n::t!("update.later")];
     prompt(PromptLevel::Info, &title, &detail, &answers, cx, |answer, cx| {
         if answer == 0 {
-            restart(cx);
+            crate::window::quit_to_update(cx);
         }
     });
 }

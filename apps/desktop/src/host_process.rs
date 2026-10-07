@@ -30,17 +30,13 @@ pub fn run() -> i32 {
     let dirs = runode_paths::Dirs::from_env();
     init_logging(&dirs);
     let host = prepare(&dirs);
-    let listened = dirs.create_runtime_dir().map_err(anyhow::Error::from).and_then(|_| {
-        let socket = dirs.host_socket_file().ok_or_else(|| anyhow::anyhow!("the socket path is too long"))?;
-        let lock = dirs.host_lock_file().ok_or_else(|| anyhow::anyhow!("no place for the host lock"))?;
-        host.listen(&socket, &lock)?;
-        tracing::info!("host {} listening on {}", std::process::id(), socket.display());
-        Ok(())
-    });
-    if let Err(err) = listened {
-        // 多半是另一个宿主已经在跑（两个 app 同时拉起时由锁决出一个）。
-        tracing::info!("the host does not start: {err:#}");
-        return 1;
+    match crate::host_client::listen(&host, &dirs) {
+        Ok(socket) => tracing::info!("host {} listening on {}", std::process::id(), socket.display()),
+        Err(err) => {
+            // 多半是另一个宿主已经在跑（两个 app 同时拉起时由锁决出一个）。
+            tracing::info!("the host does not start: {err:#}");
+            return 1;
+        }
     }
     let remote = crate::remote_access::follow_config(&host);
     let stopped = host.run_until_idle(IDLE_EXIT);

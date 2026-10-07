@@ -66,7 +66,6 @@ fn spawn(config: &Config) -> Option<Prespawned> {
         shell: None,
         // 宿主还没从主线程拿到配置时先用这里读的；主线程的配置到了、主题不一样时再换。
         settings: Some(config.term_settings()),
-        env: Vec::new(),
     });
     match spawned {
         Ok(id) => Some(Prespawned { size, id: Some(id) }),

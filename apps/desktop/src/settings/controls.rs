@@ -53,14 +53,11 @@ impl Colors {
     }
 }
 
-type Handler = Box<dyn Fn(&mut SettingsView, &mut Window, &mut Context<SettingsView>) + 'static>;
-
 /// 点击时调 `f`。
 pub(super) fn on_click(
     cx: &mut Context<SettingsView>,
     f: impl Fn(&mut SettingsView, &mut Window, &mut Context<SettingsView>) + 'static,
 ) -> impl Fn(&ClickEvent, &mut Window, &mut gpui::App) + 'static {
-    let f: Handler = Box::new(f);
     cx.listener(move |this, _: &ClickEvent, window, cx| f(this, window, cx))
 }
 

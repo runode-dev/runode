@@ -46,7 +46,6 @@ fn spawn(link: &Link, shell: String) -> SessionId {
         start: true,
         shell: Some(shell),
         settings: None,
-        env: Vec::new(),
     })
     .unwrap()
 }
@@ -503,7 +502,6 @@ fn every_session_hears_when_the_host_goes_away() {
             start: true,
             shell: None,
             settings: None,
-            env: Vec::new(),
         })
         .is_err()
     );
@@ -648,7 +646,6 @@ mod bench {
             start: true,
             shell: Some(shell),
             settings: None,
-            env: Vec::new(),
         })
         .unwrap()
     }

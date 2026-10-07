@@ -176,11 +176,10 @@ pub(super) fn reopen_plan(id: SessionId, alive: Option<&HashSet<SessionId>>) -> 
 }
 
 impl<S: Vt> ScreenState<S> {
-    /// 已经拿到宿主给的屏幕、建好了界面这份 VT：正看着。
-    pub(super) fn new_live(mut session: S, channel: u32, meta: SessionMeta, size: GridSize) -> Self {
-        session.apply_meta(meta.clone());
+    /// 各构造函数共用的起点：显示着，没在连、没量过尺寸，`meta` 不是宿主给的。
+    fn base(screen: Screen<S>, meta: SessionMeta, size: GridSize) -> Self {
         Self {
-            screen: Screen::Live { session, channel },
+            screen,
             meta,
             last_size: size,
             sized: false,
@@ -188,28 +187,28 @@ impl<S: Vt> ScreenState<S> {
             attaching: None,
             visible: true,
             hidden_since: None,
-            meta_known: true,
+            meta_known: false,
             reconnecting: false,
             size_owner: None,
         }
+    }
+
+    /// 已经拿到宿主给的屏幕、建好了界面这份 VT：正看着。
+    pub(super) fn new_live(mut session: S, channel: u32, meta: SessionMeta, size: GridSize) -> Self {
+        session.apply_meta(meta.clone());
+        Self { meta_known: true, ..Self::base(Screen::Live { session, channel }, meta, size) }
     }
 
     /// 发出了 `mode` 的 `Attach`、还没等到屏幕：要屏幕时是 `Attaching`（视图显示着），只看状态时是
     /// `Hidden`（视图不显示）。
     pub(super) fn new_attaching(mode: AttachMode, size: GridSize, now: Instant) -> Self {
         let meta_only = mode == AttachMode::MetaOnly;
+        let screen = if meta_only { Screen::Hidden } else { Screen::Attaching { since: now, keep: None } };
         Self {
-            screen: if meta_only { Screen::Hidden } else { Screen::Attaching { since: now, keep: None } },
-            meta: SessionMeta::default(),
-            last_size: size,
-            sized: false,
-            exited: false,
             attaching: Some(mode),
             visible: !meta_only,
             hidden_since: meta_only.then_some(now),
-            meta_known: false,
-            reconnecting: false,
-            size_owner: None,
+            ..Self::base(screen, SessionMeta::default(), size)
         }
     }
 
@@ -217,19 +216,7 @@ impl<S: Vt> ScreenState<S> {
     /// 没有界面这份 VT，状态是视图自己按起始目录给的 `meta`。开了会话以后照常连：回到显示时
     /// `set_visible` 给出要屏幕的 `Attach`；没显示就要启动时只看状态。宿主给了状态再换掉 `meta`。
     pub(super) fn new_unopened(meta: SessionMeta, size: GridSize, now: Instant) -> Self {
-        Self {
-            screen: Screen::Hidden,
-            meta,
-            last_size: size,
-            sized: false,
-            exited: false,
-            attaching: None,
-            visible: false,
-            hidden_since: Some(now),
-            meta_known: false,
-            reconnecting: false,
-            size_owner: None,
-        }
+        Self { visible: false, hidden_since: Some(now), ..Self::base(Screen::Hidden, meta, size) }
     }
 
     #[cfg(test)]

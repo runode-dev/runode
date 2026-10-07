@@ -7,6 +7,7 @@ use gpui::{App, Menu, MenuItem, OsAction, PromptLevel, SystemMenuType, actions};
 use runode_cli::SetupTarget;
 
 use crate::{
+    i18n::tr,
     terminal_view::{
         ClearScreen, DecreaseFontSize, IncreaseFontSize, JumpToPrompt, PasteSelection, ReloadShell, ResetFontSize,
         SearchSelection, StartSearch,
@@ -74,10 +75,6 @@ pub fn install(cx: &mut App) {
 
     // 装快捷键时会顺带设置菜单。
     crate::keybinds::install(cx);
-}
-
-fn tr(key: &str) -> String {
-    rust_i18n::t!(key).into_owned()
 }
 
 /// 设置菜单栏。菜单项上的快捷键在这时从键位表里查，换了绑定要重新调用。宿主怎么跑也在这时

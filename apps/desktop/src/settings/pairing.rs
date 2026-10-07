@@ -80,17 +80,14 @@ impl Qr {
     /// 第 `y` 行里连着的深色模块，(起点, 长度)；连成一段画，相邻模块之间不会露出细缝。
     fn runs(&self, y: usize) -> impl Iterator<Item = (usize, usize)> + '_ {
         let line = &self.dark[y * self.width..(y + 1) * self.width];
-        let mut x = 0;
-        std::iter::from_fn(move || {
-            while x < line.len() && !line[x] {
-                x += 1;
-            }
-            let start = x;
-            while x < line.len() && line[x] {
-                x += 1;
-            }
-            (x > start).then_some((start, x - start))
-        })
+        line.chunk_by(|a, b| a == b)
+            .scan(0, |x, run| {
+                let start = *x;
+                *x += run.len();
+                Some((start, run))
+            })
+            .filter(|(_, run)| run[0])
+            .map(|(start, run)| (start, run.len()))
     }
 }
 
