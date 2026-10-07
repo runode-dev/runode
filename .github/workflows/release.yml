@@ -99,7 +99,13 @@ jobs:
       - name: 发布
         env:
           GH_TOKEN: ${{ github.token }}
+        # 每个 dmg 另传一份不带版本号的（Runode-arm64.dmg），README 的下载链接经
+        # releases/latest/download/ 总能拿到最新版；下面的 Runode-*.dmg 两份都会匹配上。
         run: |
           bundle=target/release/bundle
+          version=${GITHUB_REF_NAME#v}
+          for dmg in "$bundle"/Runode-"$version"-*.dmg; do
+            cp "$dmg" "$bundle/Runode-${dmg##*/Runode-"$version"-}"
+          done
           gh release create "$GITHUB_REF_NAME" --title "Runode ${GITHUB_REF_NAME#v}" --generate-notes \
             "$bundle"/Runode-*.dmg "$bundle"/Runode-*.zip "$bundle/latest.json"
