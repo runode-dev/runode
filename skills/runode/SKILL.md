@@ -48,9 +48,13 @@ an open runode window; ids, titles, agents and directories always work.
 If there is no terminal to use, open one; it prints the new id:
 
 ```sh
+id=$(runode open)                                    # a new tab after yours
 id=$(runode open --right --cwd ~/src/app)            # split your pane
 id=$(runode open --down -- npm run dev)              # and run a command in it
 ```
+
+`--near SESSION` opens next to another terminal instead of yours; the new one
+starts in that terminal's directory unless you give `--cwd`.
 
 `open` leaves the user's focus where it is unless you pass `--focus`.
 
@@ -105,9 +109,11 @@ runode send right ':wq' --enter                # ...then save and quit
 runode send right --paste "$(cat snippet.py)"  # paste instead of typing
 ```
 
-Keys are `ctrl-`, `alt-` or `shift-` plus a letter, digit or one of
-`` - = [ ] \ ; ' , . / ` ``, or a name: `esc tab enter backspace delete insert
-space up down left right home end pageup pagedown f1`..`f12`; `'down*3'` repeats (quote it: the shell would expand the `*`).
+A key is a letter, digit or one of `` - = [ ] \ ; ' , . / ` ``, or a name:
+`esc tab enter backspace delete insert space up down left right home end pageup
+pagedown f1`..`f12`. Put `ctrl-`, `alt-` or `shift-` in front, stacked if need
+be (`shift-tab`, `ctrl-alt-x`); `'down*3'` repeats (quote it: the shell would
+expand the `*`).
 They are encoded for whatever the program has switched on (application cursor
 keys, the kitty keyboard protocol), as if the user pressed them.
 
