@@ -123,7 +123,6 @@ quit:
   yield_failed_detail: "%{reason}\n\n現在結束，所有工作階段都會一併終止。"
 update:
   menu_check: 檢查更新…
-  menu_checking: 正在檢查更新…
   menu_restart: "重新啟動以更新到 Runode %{version}"
   up_to_date_title: Runode 已是最新版本
   up_to_date_detail: "現在用的 %{version} 就是最新版本。"

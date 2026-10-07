@@ -170,15 +170,12 @@ pub fn quit_and_end_sessions(cx: &mut App) {
     });
 }
 
-/// 退出应用，装上下好的新版本后重新打开（`crate::update::relaunch_on_quit`）。会话留得下就留在后台，
+/// 退出应用，装上下好的新版本后重新打开（GPUI 的 `restart`，装上见 `crate::update`）。会话留得下就留在后台，
 /// 不看配置项 `terminal-host`；留不下又有 agent 在跑时先确认，取消了就不重启。
 pub fn quit_to_update(cx: &mut App) {
     cx.defer(|cx| {
         let window = front_window(cx);
-        run(QuitAction::Update, window, cx, |cx| {
-            crate::update::relaunch_on_quit(cx);
-            cx.quit();
-        });
+        run(QuitAction::Update, window, cx, |cx| cx.restart());
     });
 }
 

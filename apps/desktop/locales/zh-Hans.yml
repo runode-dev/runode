@@ -123,7 +123,6 @@ quit:
   yield_failed_detail: "%{reason}\n\n现在退出，所有会话都会一起结束。"
 update:
   menu_check: 检查更新…
-  menu_checking: 正在检查更新…
   menu_restart: "重启以更新到 Runode %{version}"
   up_to_date_title: Runode 已是最新版本
   up_to_date_detail: "现在用的 %{version} 就是最新版本。"

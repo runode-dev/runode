@@ -7,7 +7,7 @@
 //! 和在跑的这份出自同一个 Team ID、是同一个 bundle id（`codesign --verify -R`），这就认定了是同一个
 //! 发布者的构建，不另做签名。下好时核对一次，退出时装上前再核对一次。
 //! 自己打包的（ad-hoc 签名）、没打包成 .app 的和放在写不了的位置（dmg 里、被系统隔离转移到只读
-//! 目录）的都不更新，见 `Unsupported`。
+//! 目录）的都不更新，见 `Installation::current`。
 //!
 //! 下载经 NSURLSession，跟着系统的代理设置和证书。app 自己下载的文件不带隔离属性，换上去以后
 //! Gatekeeper 也不会再拦一次。
@@ -15,7 +15,7 @@
 mod fetch;
 mod install;
 
-use std::{cmp::Ordering, collections::BTreeMap, fmt, path::PathBuf, time::Duration};
+use std::{cmp::Ordering, collections::BTreeMap, fmt, time::Duration};
 
 use serde::Deserialize;
 
@@ -30,42 +30,37 @@ pub const BUNDLE_ID: &str = "dev.runode.app";
 /// 取清单最多等这么久。
 const MANIFEST_TIMEOUT: Duration = Duration::from_secs(30);
 
-/// 一个发布的版本。
-#[derive(Clone, Debug, PartialEq, Eq)]
+/// 一个发布的版本，就是 `latest.json` 的格式。
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
 pub struct Release {
     /// 版本号，比如 `0.2.0`，和新包的 `CFBundleShortVersionString` 一样。
     pub version: String,
     /// Release 的网页：更新说明、手动下载。
     pub page: String,
-    /// 这台 Mac 的架构的更新包（zip）；清单里没有时为空，只能手动下载。
-    pub archive: Option<String>,
-}
-
-/// `latest.json` 的格式：`archives` 按 `lipo -archs` 的架构名（`arm64`、`x86_64`）给出各个 zip。
-#[derive(Deserialize)]
-struct Manifest {
-    version: String,
-    page: String,
+    /// 各架构的更新包（zip），按 `lipo -archs` 的架构名（`arm64`、`x86_64`）。
     #[serde(default)]
-    archives: BTreeMap<String, String>,
+    pub archives: BTreeMap<String, String>,
 }
 
 impl Release {
-    /// 读清单，取 `arch`（见 `arch`）的更新包。版本号不是用点隔开的数字时算读不懂。
-    pub fn parse(json: &[u8], arch: &str) -> Result<Self, Error> {
-        let manifest: Manifest = serde_json::from_slice(json).map_err(|err| Error::Manifest(err.to_string()))?;
-        if version_parts(&manifest.version).is_none() {
-            return Err(Error::Manifest(format!("{:?} is not a version number", manifest.version)));
+    /// 读清单。版本号不是用点隔开的数字时算读不懂。
+    pub fn parse(json: &[u8]) -> Result<Self, Error> {
+        let release: Self = serde_json::from_slice(json).map_err(|err| Error::Manifest(err.to_string()))?;
+        if version_parts(&release.version).is_none() {
+            return Err(Error::Manifest(format!("{:?} is not a version number", release.version)));
         }
-        let archive = manifest.archives.get(arch).cloned();
-        Ok(Self { version: manifest.version, page: manifest.page, archive })
+        Ok(release)
+    }
+
+    /// 这台 Mac 的架构（见 `arch`）的更新包；没有时只能手动下载。
+    pub fn archive(&self) -> Option<&str> {
+        self.archives.get(arch()).map(String::as_str)
     }
 }
 
 /// 取最新版本的清单。会阻塞到取到或者出错，最多 `MANIFEST_TIMEOUT`。
 pub fn latest() -> Result<Release, Error> {
-    let body = fetch::get(MANIFEST_URL, MANIFEST_TIMEOUT)?;
-    Release::parse(&body, arch())
+    Release::parse(&fetch::get(MANIFEST_URL, MANIFEST_TIMEOUT)?)
 }
 
 /// 这台 Mac 的架构，按清单（`lipo -archs`）的叫法。
@@ -89,27 +84,6 @@ pub fn is_newer(candidate: &str, current: &str) -> bool {
 
 fn version_parts(version: &str) -> Option<Vec<u64>> {
     version.split('.').map(|part| part.parse().ok()).collect()
-}
-
-/// 这份 app 为什么不自己更新。
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum Unsupported {
-    /// 不是从 .app 里跑的（比如 `cargo run`）。
-    NotBundled,
-    /// .app 没有 Developer ID 签名（自己打包的）。
-    Unsigned,
-    /// .app 或者它所在的目录写不了：在 dmg 里、被系统隔离转移到只读目录，或者没有权限。
-    ReadOnly(PathBuf),
-}
-
-impl fmt::Display for Unsupported {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::NotBundled => write!(f, "not running from an app bundle"),
-            Self::Unsigned => write!(f, "the app is not signed with a Developer ID"),
-            Self::ReadOnly(path) => write!(f, "{} is not writable", path.display()),
-        }
-    }
 }
 
 /// 查、下载或者核对更新时出的错。

@@ -12,7 +12,7 @@ use std::{
     time::Duration,
 };
 
-use crate::{BUNDLE_ID, Error, Release, Unsupported};
+use crate::{BUNDLE_ID, Error, Release};
 
 /// 下载更新包最多等这么久。
 const ARCHIVE_TIMEOUT: Duration = Duration::from_secs(15 * 60);
@@ -27,18 +27,20 @@ pub struct Installation {
 }
 
 impl Installation {
-    /// 在跑的这份 app，能自己更新时。
-    pub fn current() -> Result<Self, Unsupported> {
-        let exe = std::env::current_exe().map_err(|_| Unsupported::NotBundled)?;
-        let app = bundle_of(&exe).ok_or(Unsupported::NotBundled)?;
+    /// 在跑的这份 app，能自己更新时；不能时说为什么：不是从 .app 里跑的（比如 `cargo run`），.app
+    /// 没有 Developer ID 签名（自己打包的），或者 .app、它所在的目录写不了（在 dmg 里、被系统隔离
+    /// 转移到只读目录，或者没有权限）。
+    pub fn current() -> Result<Self, String> {
+        let exe = std::env::current_exe().map_err(|err| err.to_string())?;
+        let app = bundle_of(&exe).ok_or("not running from an app bundle")?;
         // 自己也要是 Developer ID 签的：开发证书签的（同一个 Team 也算）不更新，免得被同样签名的包换掉。
         let team = team_of(&app)
             .filter(|team| run(&mut satisfies(&app, &requirement(team))).is_ok())
-            .ok_or(Unsupported::Unsigned)?;
+            .ok_or("the app is not signed with a Developer ID")?;
         // 对调要在所在的目录里建删条目；.app 换到别的目录下时它自己的 `..` 也要改，所以两个都要写得了。
         for dir in [app.parent().unwrap_or(Path::new("/")), &app] {
             if !writable(dir) {
-                return Err(Unsupported::ReadOnly(dir.to_owned()));
+                return Err(format!("{} is not writable", dir.display()));
             }
         }
         Ok(Self { app, team })
@@ -49,20 +51,10 @@ impl Installation {
         &self.app
     }
 
-    /// 删掉上次留下的暂存目录：下好了却没装上（app 没正常退出、对调失败）。没有时什么都不做。
-    pub fn clean(&self) {
-        let dir = self.staging_dir();
-        if dir.exists()
-            && let Err(err) = fs::remove_dir_all(&dir)
-        {
-            tracing::warn!("failed to remove {}: {err}", dir.display());
-        }
-    }
-
     /// 把 `release` 下载到暂存目录、解压、核对签名和版本号，成了等着 `Staged::install`。会阻塞到
     /// 下完，最多 `ARCHIVE_TIMEOUT`。没成时删掉暂存目录。
     pub fn stage(&self, release: &Release) -> Result<Staged, Error> {
-        let url = release.archive.as_deref().ok_or(Error::NoArchive)?;
+        let url = release.archive().ok_or(Error::NoArchive)?;
         let dir = self.staging_dir();
         let staged = self.stage_into(&dir, url, &release.version);
         if staged.is_err() {
@@ -72,6 +64,7 @@ impl Installation {
     }
 
     fn stage_into(&self, dir: &Path, url: &str, version: &str) -> Result<Staged, Error> {
+        // 上次下好却没装上（app 没正常退出、对调失败）留下的先删掉。
         if dir.exists() {
             fs::remove_dir_all(dir).map_err(|err| io(dir, err))?;
         }
