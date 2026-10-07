@@ -63,6 +63,10 @@
                         model: model, preferences: app.settings.preferences,
                         onOpenGit: { app.openGit(machine: machine, session: session) },
                         sessions: app.sessionList(for: machine))
+                    // 从终端页开新终端时 `openTerminal` 把栈顶原地换成新会话，同一位置同一类型的页面
+                    // SwiftUI 会接着用，嵌着的终端视图不重建、仍挂在旧会话上，新会话没地方画。按会话
+                    // 区分身份，换会话就换一整页。
+                    .id(route)
                 } else {
                     ContentUnavailableView("找不到这个终端", systemImage: "terminal")
                 }
