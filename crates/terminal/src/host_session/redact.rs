@@ -1,35 +1,16 @@
 //! 抹掉 PTY 输出里 shell 集成报告的内容，见 `ReportRedactor`。
 
-use super::effects::SHELL_REPORT;
-
 const ESC: u8 = 0x1b;
 const BEL: u8 = 0x07;
 /// 取消正在进行的序列的两个 C0 控制字符。
 const CAN: u8 = 0x18;
 const SUB: u8 = 0x1a;
 
-/// 报告开头的 `ESC ] 6973;` 有几个字节。
-const PREFIX_LEN: usize = 2 + SHELL_REPORT.len();
-
-/// 报告开头的第 `i` 个字节。
-const fn prefix_byte(i: usize) -> u8 {
-    match i {
-        0 => ESC,
-        1 => b']',
-        _ => SHELL_REPORT[i - 2],
-    }
-}
-
 /// 报告的开头 `ESC ] 6973;`：抹过的报告只剩它和结束序列。
-pub(super) const REPORT_START: [u8; PREFIX_LEN] = {
-    let mut start = [0; PREFIX_LEN];
-    let mut i = 0;
-    while i < PREFIX_LEN {
-        start[i] = prefix_byte(i);
-        i += 1;
-    }
-    start
-};
+pub(super) const REPORT_START: [u8; 7] = *b"\x1b]6973;";
+
+/// 报告开头的 `ESC ] 6973;` 有几个字节。
+const PREFIX_LEN: usize = REPORT_START.len();
 
 /// 把 PTY 输出转给别的进程前，抹掉 shell 集成报告（`ESC ] 6973;<口令>;<字段>=<值> BEL`）
 /// 的内容：报告带着这个 shell 的口令，口令不能出宿主。
@@ -118,7 +99,7 @@ impl ReportRedactor {
                     i += 1;
                     continue;
                 }
-            } else if byte == prefix_byte(self.matched) {
+            } else if byte == REPORT_START[self.matched] {
                 self.matched += 1;
                 if self.matched == PREFIX_LEN {
                     self.matched = 0;

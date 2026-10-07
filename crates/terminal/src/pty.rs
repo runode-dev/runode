@@ -736,18 +736,6 @@ impl Pty {
         }
     }
 
-    /// 程序没设置标题时显示的名字：前台是 shell 自己时为 `shell_dir` 给出的目录的名字（家目录为 `~`），
-    /// 前台在跑别的程序时为该程序的进程名。取不到时为 `None`。
-    pub fn foreground_title(&self, shell_dir: impl FnOnce() -> Option<PathBuf>) -> Option<String> {
-        let (leader, is_shell) = self.foreground()?;
-        if is_shell { shell_dir().map(|cwd| dir_label(&cwd)) } else { process_name(leader) }
-    }
-
-    /// 前台程序的进程名（不带路径）；前台是 shell 自己时是 shell 的名字。取不到时为 `None`。
-    pub fn foreground_name(&self) -> Option<String> {
-        process_name(self.foreground()?.0)
-    }
-
     /// shell 自己当前所在的目录（不管前台在跑什么）。
     pub fn shell_cwd(&self) -> Option<PathBuf> {
         process_cwd(self.shell_pid()?)

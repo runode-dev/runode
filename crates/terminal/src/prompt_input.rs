@@ -61,6 +61,20 @@ impl Slot {
     }
 }
 
+/// 活动区第 `y` 行连同软换行接在一起的上下几行，从哪一行到哪一行（都含）；`rows` 是活动区的行数。
+pub(crate) fn wrapped_rows(terminal: &Terminal<'_, '_>, y: u32, rows: u32) -> Result<(u32, u32)> {
+    let row = |y: u32| terminal.grid_ref(Point::Active(PointCoordinate { x: 0, y }))?.row();
+    let mut top = y;
+    while top > 0 && row(top)?.is_wrap_continuation()? {
+        top -= 1;
+    }
+    let mut bottom = y;
+    while bottom + 1 < rows && row(bottom)?.is_wrapped()? {
+        bottom += 1;
+    }
+    Ok((top, bottom))
+}
+
 /// 光标正停在 shell 提示符上时，读出提示符后面的输入。备用屏幕上、光标不在提示符上，
 /// 或者光标所在的这条输入里找不到 shell 集成标出的提示符时为 `None`。
 ///
@@ -72,15 +86,7 @@ pub fn read(terminal: &Terminal<'_, '_>) -> Result<Option<PromptInput>> {
     let cols = terminal.cols()?;
     let rows = u32::from(terminal.rows()?);
     let (cursor_x, cursor_y) = (terminal.cursor_x()?, u32::from(terminal.cursor_y()?));
-    let row = |y: u32| terminal.grid_ref(Point::Active(PointCoordinate { x: 0, y }))?.row();
-    let mut top = cursor_y;
-    while top > 0 && row(top)?.is_wrap_continuation()? {
-        top -= 1;
-    }
-    let mut bottom = cursor_y;
-    while bottom + 1 < rows && row(bottom)?.is_wrapped()? {
-        bottom += 1;
-    }
+    let (top, bottom) = wrapped_rows(terminal, cursor_y, rows)?;
 
     // 各行的单元格按顺序连成一串，各自记下是不是提示符、在哪一格、有没有样式。
     let mut slots = Vec::with_capacity((bottom - top + 1) as usize * usize::from(cols));

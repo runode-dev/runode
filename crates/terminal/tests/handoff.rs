@@ -318,7 +318,7 @@ fn a_host_session_resumes_reading() {
 fn input_the_program_has_not_read_is_handed_over() {
     let (mut old, mut old_output) = shell();
     old.writer.write(b"stty raw -echo; sleep 2; head -c 70000 | wc -c; stty sane\n");
-    eventually("sleep in the foreground", || old.foreground_title(|| None).as_deref() == Some("sleep"));
+    eventually("sleep in the foreground", || !old.foreground_is_shell());
     old.writer.send(vec![b'x'; 70000]);
     // 让写线程写满终端的输入队列、卡住。
     thread::sleep(Duration::from_millis(300));

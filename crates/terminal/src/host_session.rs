@@ -151,7 +151,8 @@ pub struct HostSession {
     agent_tracker: Tracker,
     /// 上次认前台进程组的结果，见 `detect::ForegroundProbe`。
     foreground_probe: detect::ForegroundProbe,
-    /// 程序没设置标题时用的名字，见 `Pty::foreground_title`；由 `refresh_foreground` 更新。
+    /// 程序没设置标题时用的名字：前台是 shell 自己时为它所在目录的名字，否则为前台程序的进程名；
+    /// 由 `refresh_foreground` 更新。
     fallback_title: Option<String>,
     /// shell 当前所在的目录，由 `refresh_foreground` 更新；还没启动时是起始目录。
     cwd: Option<PathBuf>,
@@ -743,20 +744,13 @@ fn register_callbacks(
         .on_device_attributes({
             let effects = effects.clone();
             move |_| {
-                let features: &[DeviceAttributeFeature] = if effects.clipboard_writes.get() {
-                    &[
-                        DeviceAttributeFeature::COLUMNS_132,
-                        DeviceAttributeFeature::SELECTIVE_ERASE,
-                        DeviceAttributeFeature::ANSI_COLOR,
-                        DeviceAttributeFeature::CLIPBOARD,
-                    ]
-                } else {
-                    &[
-                        DeviceAttributeFeature::COLUMNS_132,
-                        DeviceAttributeFeature::SELECTIVE_ERASE,
-                        DeviceAttributeFeature::ANSI_COLOR,
-                    ]
-                };
+                let all = [
+                    DeviceAttributeFeature::COLUMNS_132,
+                    DeviceAttributeFeature::SELECTIVE_ERASE,
+                    DeviceAttributeFeature::ANSI_COLOR,
+                    DeviceAttributeFeature::CLIPBOARD,
+                ];
+                let features = &all[..3 + usize::from(effects.clipboard_writes.get())];
                 Some(DeviceAttributes {
                     primary: PrimaryDeviceAttributes::new(ConformanceLevel::VT220, features),
                     secondary: SecondaryDeviceAttributes {

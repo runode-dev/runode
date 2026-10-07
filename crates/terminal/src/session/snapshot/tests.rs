@@ -480,8 +480,7 @@ fn differential(seed: u64, scale: usize) {
             let new_terminal = || {
                 let mut terminal = vt::new_terminal(size(sample.cols, sample.rows)).unwrap();
                 if sample.scrollback_bytes.is_some() {
-                    let options = vt::CommonOptions { scrollback_bytes: sample.scrollback_bytes };
-                    vt::configure_common(&mut terminal, options).unwrap();
+                    vt::configure_common(&mut terminal, sample.scrollback_bytes).unwrap();
                 }
                 terminal
             };
@@ -517,7 +516,7 @@ fn differential(seed: u64, scale: usize) {
 #[test]
 fn decoding_keeps_a_full_scrollback() {
     let mut source = vt::new_terminal(size(LONG_SCROLLBACK_COLS, 50)).unwrap();
-    vt::configure_common(&mut source, vt::CommonOptions { scrollback_bytes: LONG_SCROLLBACK_BYTES }).unwrap();
+    vt::configure_common(&mut source, LONG_SCROLLBACK_BYTES).unwrap();
     for i in 0..1500 {
         source.vt_write(format!("\x1b[38;5;{}mline {i} with some text after it\x1b[0m\r\n", i % 256).as_bytes());
     }
@@ -533,7 +532,7 @@ fn decoding_keeps_a_full_scrollback() {
 fn decoding_keeps_the_scrollback_limits() {
     let mut source = vt::new_terminal(size(20, 4)).unwrap();
     assert_eq!(source.scrollback_max_bytes().unwrap(), Some(runode_shared_types::settings::DEFAULT_SCROLLBACK_LIMIT));
-    vt::configure_common(&mut source, vt::CommonOptions { scrollback_bytes: Some(3_000_000) }).unwrap();
+    vt::configure_common(&mut source, Some(3_000_000)).unwrap();
     let decoded = round_trip(&source).unwrap();
     assert_eq!(decoded.scrollback_max_bytes().unwrap(), Some(3_000_000));
     assert_eq!(decoded.scrollback_max_lines().unwrap(), Some(vt::SCROLLBACK_LINES));
@@ -777,7 +776,7 @@ fn scrollback_pruning_diverges_after_a_snapshot() {
     let cut = data.len() / 10;
     let new_terminal = || {
         let mut terminal = vt::new_terminal(size(LONG_SCROLLBACK_COLS, 6)).unwrap();
-        vt::configure_common(&mut terminal, vt::CommonOptions { scrollback_bytes: LONG_SCROLLBACK_BYTES }).unwrap();
+        vt::configure_common(&mut terminal, LONG_SCROLLBACK_BYTES).unwrap();
         terminal
     };
     let mut expected = new_terminal();

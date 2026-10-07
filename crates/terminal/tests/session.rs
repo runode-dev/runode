@@ -22,7 +22,6 @@ fn meta_from_the_host_sets_the_title_and_agent() {
     let (mut session, _) = capturing_session();
     let agent = Some(Agent { kind: AgentKind::Claude, state: AgentState::Working });
     assert!(session.apply_meta(SessionMeta { title: Some("修 bug".into()), agent, ..SessionMeta::default() }));
-    assert_eq!((session.title.as_deref(), session.agent), (Some("修 bug"), agent));
     // 别的字段变了不算标题变化。
     assert!(!session.apply_meta(SessionMeta {
         title: Some("修 bug".into()),

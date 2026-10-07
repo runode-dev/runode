@@ -59,7 +59,7 @@ pub(super) struct Effects {
 /// 会被补全拿去跑命令，所以只认带着本 shell 口令的报告。口令只留在 shell 自己的变量里，子进程的
 /// 环境里没有，在 shell 里运行的程序打印不出它。只看是否处在提示符状态挡不住伪造：输出里可以先
 /// 伪造一个 OSC 133;D。
-pub(super) const SHELL_REPORT: &[u8] = b"6973;";
+pub(super) const SHELL_REPORT: &[u8] = super::redact::REPORT_START.split_at(2).1;
 
 impl Effects {
     /// 记下 shell 集成的一条报告 `<口令>;<字段>=<百分号编码的值>`。口令不对、缺口令或者
@@ -235,8 +235,8 @@ impl HostSession {
             self.foreground.clone_from(&name);
             self.meta_dirty = true;
         }
-        // 同 `Pty::foreground_title`。shell 在前台时不读它此刻的目录：插件管理器在提示符出来后延迟
-        // 加载插件，会临时切进插件目录。
+        // 前台是 shell 自己时用它所在目录的名字（家目录为 `~`），在跑别的程序时用那个程序的进程名。
+        // shell 在前台时不读它此刻的目录：插件管理器在提示符出来后延迟加载插件，会临时切进插件目录。
         let title = match foreground {
             Some((_, true)) => self.prompt_cwd().map(|cwd| pty::dir_label(&cwd)),
             Some((_, false)) => name,

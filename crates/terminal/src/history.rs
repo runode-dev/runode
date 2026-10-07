@@ -255,18 +255,14 @@ pub fn worth_recording(cmd: &str) -> bool {
     !cmd.trim().is_empty() && !cmd.starts_with(char::is_whitespace)
 }
 
-struct Shared {
-    history: Mutex<History>,
-}
-
-fn shared_state() -> &'static Shared {
-    static SHARED: OnceLock<Shared> = OnceLock::new();
+fn shared_state() -> &'static Mutex<History> {
+    static SHARED: OnceLock<Mutex<History>> = OnceLock::new();
     SHARED.get_or_init(|| {
         let spawned = std::thread::Builder::new().name("history".into()).spawn(load_background);
         if let Err(err) = spawned {
             tracing::warn!("failed to start the history thread: {err}");
         }
-        Shared { history: Mutex::new(History::loading()) }
+        Mutex::new(History::loading())
     })
 }
 
@@ -277,7 +273,7 @@ pub fn load_in_background() {
 
 /// 全进程共用的命令历史；第一次调用时开始在后台读历史文件。
 pub fn shared() -> MutexGuard<'static, History> {
-    shared_state().history.lock().unwrap_or_else(PoisonError::into_inner)
+    shared_state().lock().unwrap_or_else(PoisonError::into_inner)
 }
 
 /// 界面看到一条运行过的命令（宿主已经 `record` 过）：加进共用的历史，不写文件。

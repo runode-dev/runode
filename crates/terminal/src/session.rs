@@ -42,7 +42,6 @@ use libghostty_vt::{
 };
 
 use runode_shared_types::{
-    agent::Agent,
     frame::Frame,
     grid::{GridPoint, GridSize},
     session::SessionMeta,
@@ -96,19 +95,12 @@ pub struct Session {
     bell: Rc<StdCell<bool>>,
     /// 待写出的已编码输入，各次按键复用这块缓冲。
     scratch: Vec<u8>,
-    /// 程序设置的标题；agent 的状态前缀已拆到 `agent` 里。来自宿主，见 `apply_meta`。
-    pub title: Option<String>,
-    /// 前台 agent 和它的状态；不是 agent 在前台时为 `None`。来自宿主，见 `apply_meta`。
-    pub agent: Option<Agent>,
-    /// 程序没设置标题时用的名字：前台程序名，或者 shell 所在目录的名字。来自宿主，见 `apply_meta`。
-    pub fallback_title: Option<String>,
     /// 宿主最近一次公布的状态。
     meta: SessionMeta,
     /// 打开搜索栏期间的搜索；关掉就丢弃。
     search: Option<Search<'static>>,
     /// 平滑滚动不足一行的部分，0 到 1 之间：画面整体往下错开这么多行，见 `scroll_smoothly`。
     scroll_offset: f32,
-    pub exited: bool,
     option_as_alt: OptionAsAlt,
     /// 最近一次向程序发输入的时刻，见 `last_input`。
     input_at: Option<Instant>,
@@ -171,13 +163,9 @@ impl Session {
             requested_size: size,
             bell,
             scratch: Vec::with_capacity(64),
-            title: None,
-            agent: None,
-            fallback_title: None,
             meta: SessionMeta::default(),
             search: None,
             scroll_offset: 0.,
-            exited: false,
             option_as_alt: OptionAsAlt::False,
             input_at: None,
             echo_pending: None,
@@ -227,11 +215,9 @@ impl Session {
 
     /// 写入宿主公布的状态，返回标题、`fallback_title` 或 agent 是否变了。
     pub fn apply_meta(&mut self, meta: SessionMeta) -> bool {
-        let changed =
-            meta.title != self.title || meta.fallback_title != self.fallback_title || meta.agent != self.agent;
-        self.title.clone_from(&meta.title);
-        self.fallback_title.clone_from(&meta.fallback_title);
-        self.agent = meta.agent;
+        let changed = meta.title != self.meta.title
+            || meta.fallback_title != self.meta.fallback_title
+            || meta.agent != self.meta.agent;
         self.meta = meta;
         changed
     }

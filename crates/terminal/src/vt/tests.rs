@@ -198,13 +198,13 @@ fn a_c1_control_ending_a_string_still_encodes() {
 #[test]
 fn without_tracking_only_a_grounded_terminal_encodes() {
     let mut terminal = Terminal::new(20, 4).unwrap();
-    configure_common(&mut terminal, CommonOptions::default()).unwrap();
+    configure_common(&mut terminal, Some(DEFAULT_SCROLLBACK_LIMIT)).unwrap();
     terminal.vt_write(b"done");
     assert!(encode_snapshot(&terminal).is_ok());
     terminal.vt_write(b"\x1b[3");
     assert!(matches!(encode_snapshot(&terminal), Err(SnapshotError::Unfinished)));
     // 开始记录时已经停在序列中间，这条序列还是编不出来；它结束后就好了。
-    track_continuation(&mut terminal).unwrap();
+    terminal.set_continuation_max_bytes(CONTINUATION_MAX_BYTES).unwrap();
     assert!(matches!(encode_snapshot(&terminal), Err(SnapshotError::Unfinished)));
     terminal.vt_write(b"1m\x1b[3");
     assert!(encode_snapshot(&terminal).is_ok());

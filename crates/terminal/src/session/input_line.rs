@@ -9,6 +9,7 @@ use libghostty_vt::{
 use runode_shared_types::{frame::Cell, grid::GridPoint};
 
 use super::{Session, log_err};
+use crate::prompt_input::wrapped_rows;
 
 /// 光标所在的输入行，各单元格按行连成一串，下标从这一行第一格算起。
 struct InputLine {
@@ -124,15 +125,7 @@ impl Session {
         }
         let rows = u32::from(self.size.get().rows);
         let cursor = (self.terminal.cursor_x()?, u32::from(self.terminal.cursor_y()?));
-        let row = |y: u32| self.terminal.grid_ref(Point::Active(PointCoordinate { x: 0, y })).and_then(|r| r.row());
-        let mut top = cursor.1;
-        while top > 0 && row(top)?.is_wrap_continuation()? {
-            top -= 1;
-        }
-        let mut bottom = cursor.1;
-        while bottom + 1 < rows && row(bottom)?.is_wrapped()? {
-            bottom += 1;
-        }
+        let (top, bottom) = wrapped_rows(&self.terminal, cursor.1, rows)?;
         let cols = self.size.get().cols;
         let mut prompt_end = None;
         for y in top..=bottom {
