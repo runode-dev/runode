@@ -245,6 +245,8 @@ impl WindowView {
                 .flex_col()
                 .border_t_1()
                 .border_color(divider_color(hsla(fg)))
+                // 面板本身不给字色，没写颜色的字（命令名、分组名）跟文件树里的普通文件一样深浅。
+                .text_color(hsla(fg).opacity(0.85))
                 .child(header)
                 .when(!collapsed, |section| section.child(body)),
         )
