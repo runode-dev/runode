@@ -65,6 +65,9 @@ pub struct SavedWindow {
     pub git_graph_collapsed: bool,
     #[serde(default)]
     pub git_graph_height: Option<f32>,
+    /// 文件树底部的项目命令收起来了。
+    #[serde(default)]
+    pub tasks_collapsed: bool,
 }
 
 /// 窗口的位置和大小，相对于它所在的屏幕；放大和全屏时是还原后的位置和大小。
@@ -305,6 +308,7 @@ mod tests {
             git_tree: true,
             git_graph_collapsed: true,
             git_graph_height: Some(260.),
+            tasks_collapsed: false,
         }])
     }
 

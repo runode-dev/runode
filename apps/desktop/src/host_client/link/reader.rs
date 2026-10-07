@@ -87,6 +87,11 @@ pub(super) fn dispatch(inner: &Inner, message: HostMsg) {
                 let _ = inner.control(&ClientMsg::Kill { id });
             }
         },
+        HostMsg::ProjectTasks { req, dir, sources } => {
+            if let Some(reply) = state.replies.remove(&req) {
+                let _ = reply.send(HostMsg::ProjectTasks { req, dir, sources });
+            }
+        }
         HostMsg::SessionList { sessions } => {
             // 等的一方超时走了，它的位置还排在队里：跳过这些，交给下一个还在等的。回话按先后
             // 到，交出去的可能是前一个请求的，那也只早一点。

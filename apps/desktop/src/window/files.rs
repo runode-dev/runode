@@ -3,11 +3,12 @@
 //!
 //! 点过文件树后它拿到焦点，方向键移动选中的行，各种快捷键作用在选中的那一项上。右键菜单在
 //! `menu`；就地新建、改名，删除、剪切复制粘贴和拖动挪位置在 `edit`，它们落到文件系统上的
-//! 操作在 `ops`。
+//! 操作在 `ops`。底部列着能跑的项目命令，在 `tasks`。
 
 mod edit;
 mod menu;
 mod ops;
+mod tasks;
 
 use std::{
     borrow::Cow,
@@ -24,6 +25,7 @@ use runode_shared_types::color::Rgb;
 
 pub(super) use edit::{FileClipboard, FileEdit};
 pub(super) use menu::{FileMenu, MenuItem, menu_item, text_item};
+pub(super) use tasks::is_task_file;
 
 use super::{
     WindowView,
@@ -333,6 +335,7 @@ impl WindowView {
             .child(header)
             .child(toolbar)
             .child(list)
+            .children(self.render_tasks(font_size, fg, bg, cx))
     }
 
     /// 文件树的行。行高、箭头和图标跟着字号 `font_size` 一起缩放。新建时输入框插在

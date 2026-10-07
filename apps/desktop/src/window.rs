@@ -259,6 +259,8 @@ pub struct WindowView {
     preview_focus: FocusHandle,
     /// 文件树里显示被 git 忽略的文件。
     show_ignored: bool,
+    /// 文件树底部的项目命令收起来了；整个窗口一个设置。
+    tasks_collapsed: bool,
     /// 文件树的焦点：点了文件树后方向键在里面移动选中的行。
     files_focus: FocusHandle,
     /// 文件树或预览标签的右键菜单，文件树里正在新建或改名的输入框，以及剪切或复制下来等着粘贴的
@@ -373,6 +375,7 @@ impl WindowView {
             preview_width: None,
             preview_focus: cx.focus_handle(),
             show_ignored: false,
+            tasks_collapsed: false,
             files_focus: cx.focus_handle(),
             file_menu: None,
             file_edit: None,

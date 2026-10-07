@@ -6,8 +6,9 @@ use std::{
     time::{Duration, Instant},
 };
 
-use gpui::{ScrollStrategy, SharedString, UniformListScrollHandle};
+use gpui::{ScrollHandle, ScrollStrategy, SharedString, UniformListScrollHandle};
 use runode_git as git;
+use runode_protocol::TaskSource;
 
 use super::{
     MAX_COMPACT,
@@ -59,6 +60,12 @@ pub(in crate::window) struct Project {
     /// 上次开始读的时刻，以及读了多久，据此决定下次隔多久。
     pub(super) refreshed_at: Option<Instant>,
     pub(super) scan_cost: Duration,
+    /// 文件树底部列的项目命令（Makefile 的目标、package.json 的 scripts）和给哪个目录列的；还没列过时
+    /// 为空。后台正在列时不再发起；Makefile、package.json 这类文件变了时标成要重列。
+    pub tasks: Option<(PathBuf, Vec<TaskSource>)>,
+    pub tasks_listing: bool,
+    pub tasks_stale: bool,
+    pub tasks_scroll: ScrollHandle,
     /// 交给后台读的时候拿走，读完放回来。
     pub(super) untracked: git::UntrackedCache,
 }

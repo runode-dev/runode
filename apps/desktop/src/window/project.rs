@@ -175,6 +175,10 @@ impl WindowView {
         if !self.watching() || !paths.iter().any(|path| watch.affects(path, project)) {
             return;
         }
+        // 项目命令从这几个文件里来，它们变了就重列，等这次重读完了一起列。
+        if paths.iter().any(|path| super::files::is_task_file(path)) {
+            self.workspace_mut().project.tasks_stale = true;
+        }
         self.workspace_mut().project.stale = true;
         if active {
             self.refresh_if_due(cx);
@@ -232,6 +236,7 @@ impl WindowView {
                 if this.workspace().id == id {
                     this.sync_project_watch();
                     this.reload_stale_diff(cx);
+                    this.list_tasks(cx);
                     this.refresh_if_due(cx);
                 }
             })

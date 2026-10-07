@@ -57,6 +57,8 @@ const EARLY_OUTPUT_LIMIT: usize = 64 * 1024;
 const MAX_OUTPUT_BATCH: usize = 1024 * 1024;
 /// 连上会话时最多等这么久宿主给的第一份屏幕。
 const ATTACH_TIMEOUT: Duration = Duration::from_secs(5);
+/// `run_command` 最多等 shell 出提示符这么久。
+const PROMPT_TIMEOUT: Duration = Duration::from_secs(3);
 
 /// 和宿主断开后有个终端点了「在原目录重开」、重新连上了宿主：第几次重连，以及那时宿主里还活着
 /// 的会话。断开着的视图见了，会话还在的就重新连上，见 `TerminalView::host_reconnected`。
@@ -311,6 +313,28 @@ impl TerminalView {
         let mut build = |screen: Screen| build_session(screen.attached.id, screen, &settings);
         let changes = self.screen.apply(events, &mut build, Instant::now());
         self.apply_changes(changes, window, cx);
+        self.flush_pending_command(false);
+    }
+
+    /// 等 shell 出了提示符（有 shell 集成时 `SessionMeta::prompt_cwd` 有了）把 `command` 打进去回车；
+    /// 等了 `PROMPT_TIMEOUT` 还没等到时照样打，和 `runode open -- 命令` 一样。
+    pub fn run_command(&mut self, command: String, cx: &mut Context<Self>) {
+        self.pending_command = Some(command);
+        cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(PROMPT_TIMEOUT).await;
+            this.update(cx, |view, _| view.flush_pending_command(true)).ok();
+        })
+        .detach();
+    }
+
+    fn flush_pending_command(&mut self, force: bool) {
+        if self.pending_command.is_none() || !(force || self.screen.meta().prompt_cwd.is_some()) {
+            return;
+        }
+        let (Some(id), Some(command)) = (self.id, self.pending_command.take()) else {
+            return;
+        };
+        host_client::link().input(id, format!("{command}\r").as_bytes());
     }
 
     fn apply_changes(&mut self, changes: Changes, window: &mut Window, cx: &mut Context<Self>) {
@@ -756,6 +780,7 @@ impl TerminalView {
             cursor_blink_stopped: false,
             adopted_size: None,
             start_pending: false,
+            pending_command: None,
             search_field: None,
             _reader: Task::ready(()),
             agent_changed_at: Instant::now(),

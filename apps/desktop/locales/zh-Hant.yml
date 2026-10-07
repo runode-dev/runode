@@ -189,6 +189,7 @@ search:
   placeholder: 搜尋
   no_results: 沒有結果
 files:
+  tasks: 命令
   new_file: 新增檔案…
   new_folder: 新增檔案夾…
   collapse_all: 全部收合

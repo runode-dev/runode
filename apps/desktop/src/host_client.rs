@@ -29,7 +29,7 @@ use futures::channel::mpsc::UnboundedReceiver;
 use gpui::{App, PromptLevel};
 use runode_config::Config;
 use runode_host::{BuildId, ClientMsg, Host};
-use runode_protocol::{HandoffRefusal, SessionInfo};
+use runode_protocol::{HandoffRefusal, SessionInfo, TaskSource};
 
 pub use handoff::{HandoffFailure, HandoffStatus, READY_BY};
 use launch::{Choice, Probe};
@@ -285,6 +285,11 @@ pub fn reconnect() -> Result<()> {
 /// 宿主里所有的会话。
 pub fn list_sessions() -> Result<Vec<SessionInfo>> {
     link().list_sessions(LIST_TIMEOUT)
+}
+
+/// 宿主在 `dir` 里列出的项目命令，见 `ClientMsg::ListProjectTasks`。会等宿主回话，别在主线程上调。
+pub fn list_project_tasks(dir: PathBuf) -> Result<Vec<TaskSource>> {
+    link().list_project_tasks(dir, LIST_TIMEOUT)
 }
 
 /// 宿主的 socket 放在哪；建不了 `run/` 目录或者路径太长时为 `None`。

@@ -41,7 +41,7 @@ use anyhow::{Result, anyhow};
 use futures::channel::mpsc::{UnboundedReceiver, UnboundedSender, unbounded};
 use runode_protocol::{
     AttachMode, BuildId, Caps, ClientKind, ClientMsg, Frame, FrameError, FrameKind, HostMsg, PROTOCOL_VERSION,
-    SessionId, SessionInfo, read_frame, write_frame,
+    SessionId, SessionInfo, TaskSource, read_frame, write_frame,
 };
 use runode_shared_types::{
     clipboard::ClipboardAccess, grid::GridSize, session::SessionMeta, settings::TermSettings, shell::IntegrationMode,
@@ -605,6 +605,27 @@ impl Link {
             mpsc::RecvTimeoutError::Timeout => anyhow!("the host did not list its sessions in time"),
             mpsc::RecvTimeoutError::Disconnected => anyhow!("lost the connection to the host"),
         })
+    }
+
+    /// 宿主在 `dir` 里列出的项目命令（Makefile 的目标、package.json 的 scripts），最多等 `timeout`。
+    pub fn list_project_tasks(&self, dir: PathBuf, timeout: Duration) -> Result<Vec<TaskSource>> {
+        let req = self.inner.next_req.fetch_add(1, Ordering::Relaxed);
+        let reply = self.expect_reply(req)?;
+        if let Err(err) = self.inner.control(&ClientMsg::ListProjectTasks { req, dir }) {
+            self.inner.state().replies.remove(&req);
+            return Err(anyhow!("failed to ask the host: {err}"));
+        }
+        let answer = reply.recv_timeout(timeout);
+        if answer.is_err() {
+            self.inner.state().replies.remove(&req);
+        }
+        match answer {
+            Ok(HostMsg::ProjectTasks { sources, .. }) => Ok(sources),
+            Ok(HostMsg::Error { message, .. }) => Err(anyhow!(message)),
+            Ok(other) => Err(anyhow!("unexpected answer from the host: {other:?}")),
+            Err(mpsc::RecvTimeoutError::Timeout) => Err(anyhow!("the host did not list the tasks in time")),
+            Err(mpsc::RecvTimeoutError::Disconnected) => Err(anyhow!("lost the connection to the host")),
+        }
     }
 
     /// 等宿主读完之前发的所有消息，最多等 `timeout`：发一个 `ListSessions` 等它回话，宿主按先后

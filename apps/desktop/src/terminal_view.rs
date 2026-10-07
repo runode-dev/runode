@@ -226,6 +226,8 @@ pub struct TerminalView {
     /// 第一个提示符仍按旧尺寸画：zsh 的 PROMPT_SP 按旧列数补空格，终端比那窄时折行，
     /// 反白的 `%` 就留在了提示符上面一行。
     start_pending: bool,
+    /// 等 shell 出了提示符再打进去的命令，见 `run_command`。
+    pending_command: Option<String>,
     /// 打开着的搜索栏输入框，以及对它事件的订阅。
     search_field: Option<(Entity<TextField>, Subscription)>,
     /// 收宿主发来的输出和状态的任务，见 `read_events`。
