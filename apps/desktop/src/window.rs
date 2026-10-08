@@ -529,7 +529,7 @@ impl Render for WindowView {
             .on_action(cx.listener(Self::select_last_workspace))
             .on_action(cx.listener(Self::toggle_sidebar))
             .on_action(cx.listener(Self::toggle_git))
-            // 侧栏按着切换 workspace 的修饰键时才显示快捷键提示，按下、松开都要重画。挂在根上：修饰键的事件
+            // 侧栏按着切换 workspace 的修饰键或 ⌘ 时才显示快捷键提示，按下、松开都要重画。挂在根上：修饰键的事件
             // 只沿焦点所在的路径传，侧栏不在这条路上。
             .on_modifiers_changed(cx.listener(|_, _, _, cx| cx.notify()))
             .on_action(cx.listener(Self::toggle_files))

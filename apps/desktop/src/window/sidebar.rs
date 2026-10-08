@@ -246,13 +246,14 @@ impl WindowView {
             Some(renaming) => renaming.edit.render(px(RENAME_FIELD_HEIGHT), rgb_fg, bg).into_any_element(),
             None => div().truncate().child(workspace.name.clone()).into_any_element(),
         };
-        // 右侧：响铃标记优先，其次快捷键提示，提示只在按着它的修饰键时显示，平时不和名字抢眼；悬停时换成
-        // 关闭按钮。
+        // 右侧：响铃标记优先，其次快捷键提示，提示只在按着它的修饰键或者单按 ⌘ 时显示，平时不和名字抢眼；
+        // 悬停时换成关闭按钮。按 ⌘ 是找快捷键时最先按的键，也让它看得到。
         let is_last = ix + 1 == self.workspaces.len();
         let hint = if workspace.bell() {
             div().size(px(6.)).rounded_full().bg(fg.opacity(0.8)).into_any_element()
         } else {
-            let held = shortcut_modifiers(&SelectWorkspace(ix), &SelectLastWorkspace, is_last, cx) == Some(modifiers);
+            let held = modifiers == Modifiers::command()
+                || shortcut_modifiers(&SelectWorkspace(ix), &SelectLastWorkspace, is_last, cx) == Some(modifiers);
             div()
                 .text_size(px(11.))
                 .text_color(fg.opacity(0.5))
