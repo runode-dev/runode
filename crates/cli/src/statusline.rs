@@ -81,11 +81,22 @@ fn run_chained(command: &str, input: &str) -> Result<Vec<u8>> {
     Ok(output.stdout)
 }
 
-/// 把 `home` 下 Claude Code 的 `statusLine` 换成用 `exe` 跑的 `runode statusline`，原来的命令存进
-/// `chain`，返回改的 settings 文件。可以重复执行：原来那条已经是 runode 的时只更新可执行文件的路径，
-/// 存着的原命令不动。settings 里别的内容不动。
-pub fn setup_statusline(home: &Path, chain: &Path, exe: &Path) -> Result<PathBuf> {
-    let path = home.join(".claude/settings.json");
+/// `setup_statusline` 改的 settings 文件。
+pub fn statusline_settings_path(home: &Path) -> PathBuf {
+    home.join(".claude/settings.json")
+}
+
+/// 把家目录下 Claude Code 的 `statusLine` 换成用 `exe` 跑的 `runode statusline`，原来的命令存进
+/// `Dirs::claude_statusline_file`，返回改的 settings 文件。可以重复执行：原来那条已经是 runode 的时
+/// 只更新可执行文件的路径，存着的原命令不动。settings 里别的内容不动。
+pub fn setup_statusline(dirs: &runode_paths::Dirs, exe: &Path) -> Result<PathBuf> {
+    let home = dirs.home.as_deref().ok_or_else(|| anyhow!("cannot tell where your home directory is"))?;
+    let chain = dirs.claude_statusline_file().ok_or_else(|| anyhow!("cannot tell where runode keeps its data"))?;
+    if let Some(dir) = chain.parent() {
+        std::fs::create_dir_all(dir).with_context(|| format!("failed to create {}", dir.display()))?;
+    }
+    let chain = chain.as_path();
+    let path = statusline_settings_path(home);
     let mut settings = match std::fs::read_to_string(&path) {
         Ok(text) => serde_json::from_str::<Value>(&text).with_context(|| format!("cannot parse {}", path.display()))?,
         Err(err) if err.kind() == io::ErrorKind::NotFound => Value::Object(Map::new()),

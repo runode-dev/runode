@@ -486,6 +486,13 @@ setup:
   done_detail: "已寫入：\n%{paths}\n\n之後新開的 Claude Code、Codex 工作階段會讀到。"
   failed_title: 未能裝好 agent 整合
   ok: 好
+statusline:
+  menu: 在 Runode 裡顯示 Claude Code 用量…
+  confirm_title: 在分割畫面底下顯示 Claude Code 的模型和用量？
+  confirm_detail: "會把 Claude Code 的狀態列命令換成 runode statusline：它把模型、上下文、快取、輸出和花費報給 Runode，再接著執行原來的狀態列命令，原來的顯示不受影響。會改這個檔案：\n%{paths}"
+  done_title: 裝好了狀態列
+  done_detail: "改好了：\n%{paths}\n\n之後新開的 Claude Code 工作階段會報用量。"
+  failed_title: 沒能裝好狀態列
 settings:
   title: 設定
   language_name: 繁體中文

@@ -486,6 +486,13 @@ setup:
   done_detail: "写好了：\n%{paths}\n\n之后新开的 Claude Code、Codex 会话会读到。"
   failed_title: 没能装好 agent 集成
   ok: 好
+statusline:
+  menu: 在 Runode 里显示 Claude Code 用量…
+  confirm_title: 在分屏底下显示 Claude Code 的模型和用量？
+  confirm_detail: "会把 Claude Code 的状态栏命令换成 runode statusline：它把模型、上下文、缓存、输出和花费报给 Runode，再接着跑原来的状态栏命令，原来的显示不受影响。会改这个文件：\n%{paths}"
+  done_title: 装好了状态栏
+  done_detail: "改好了：\n%{paths}\n\n之后新开的 Claude Code 会话会报用量。"
+  failed_title: 没能装好状态栏
 settings:
   title: 设置
   language_name: 简体中文
