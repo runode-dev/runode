@@ -3,7 +3,11 @@ mod common;
 use std::{path::PathBuf, sync::atomic::AtomicBool};
 
 use common::TestRepo;
-use runode_git::{GrepMatch, grep, list_files};
+use runode_git::{GrepMatch, GrepQuery, grep, list_files};
+
+fn literal(pattern: &str, ignore_case: bool) -> GrepQuery<'_> {
+    GrepQuery { pattern, ignore_case, ..GrepQuery::default() }
+}
 
 #[test]
 fn lists_tracked_and_untracked_files_but_not_ignored_ones() {
@@ -25,13 +29,19 @@ fn greps_literal_text_and_stops_at_the_limit() {
     repo.write("build/b.txt", "hello\n");
     let hit = |path: &str, line, text: &str| GrepMatch { path: path.into(), line, text: text.into() };
     // 括号按字面找，不当正则；被忽略的目录不找；CRLF 行尾的 `\r` 去掉。
-    assert_eq!(grep(repo.path(), "(world)", false, 10, &AtomicBool::new(false)), [hit("a.txt", 1, "Hello (world)")]);
-    assert_eq!(grep(repo.path(), "hello", false, 10, &AtomicBool::new(false)), [hit("a.txt", 3, "hello again")]);
-    assert_eq!(grep(repo.path(), "hello", true, 10, &AtomicBool::new(false)).len(), 2);
-    assert_eq!(grep(repo.path(), "hello", true, 1, &AtomicBool::new(false)).len(), 1);
-    assert!(grep(repo.path(), "", true, 10, &AtomicBool::new(false)).is_empty());
+    assert_eq!(
+        grep(repo.path(), &literal("(world)", false), 10, &AtomicBool::new(false)),
+        [hit("a.txt", 1, "Hello (world)")]
+    );
+    assert_eq!(
+        grep(repo.path(), &literal("hello", false), 10, &AtomicBool::new(false)),
+        [hit("a.txt", 3, "hello again")]
+    );
+    assert_eq!(grep(repo.path(), &literal("hello", true), 10, &AtomicBool::new(false)).len(), 2);
+    assert_eq!(grep(repo.path(), &literal("hello", true), 1, &AtomicBool::new(false)).len(), 1);
+    assert!(grep(repo.path(), &literal("", true), 10, &AtomicBool::new(false)).is_empty());
     // 取消了的立刻返回。
-    assert!(grep(repo.path(), "hello", true, 10, &AtomicBool::new(true)).len() <= 2);
+    assert!(grep(repo.path(), &literal("hello", true), 10, &AtomicBool::new(true)).len() <= 2);
 }
 
 #[test]
@@ -39,5 +49,27 @@ fn greps_a_directory_outside_any_repo() {
     let repo = TestRepo::new("search-plain");
     repo.write("note.md", "needle\n");
     std::fs::remove_dir_all(repo.path().join(".git")).unwrap();
-    assert_eq!(grep(repo.path(), "needle", false, 10, &AtomicBool::new(false)).len(), 1);
+    assert_eq!(grep(repo.path(), &literal("needle", false), 10, &AtomicBool::new(false)).len(), 1);
+}
+
+#[test]
+fn greps_whole_words_regexes_and_pathspecs() {
+    let repo = TestRepo::new("search-options");
+    repo.write("src/a.ts", "foo foobar\nfoo1\n");
+    repo.write("dist/b.min.js", "foo\n");
+    let never = AtomicBool::new(false);
+    let lines = |query: &GrepQuery| -> Vec<_> {
+        grep(repo.path(), query, 10, &never)
+            .into_iter()
+            .map(|hit| format!("{}:{}", hit.path.display(), hit.line))
+            .collect()
+    };
+    let word = GrepQuery { pattern: "foo", whole_word: true, ..GrepQuery::default() };
+    assert_eq!(lines(&word), ["dist/b.min.js:1", "src/a.ts:1"]);
+    let regex = GrepQuery { pattern: "foo[0-9]", regex: true, ..GrepQuery::default() };
+    assert_eq!(lines(&regex), ["src/a.ts:2"]);
+    let specs = [":(glob)**/*.ts".to_owned()];
+    assert_eq!(lines(&GrepQuery { pathspecs: &specs, ..word }), ["src/a.ts:1"]);
+    let specs = [":(exclude,glob)**/*.min.js".to_owned()];
+    assert_eq!(lines(&GrepQuery { pathspecs: &specs, ..word }), ["src/a.ts:1"]);
 }

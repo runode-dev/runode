@@ -243,6 +243,18 @@ files:
   search_empty: 沒有找到
   view_as_tree: 以樹狀檢視
   view_as_list: 以清單檢視
+  match_case: 大小寫須相符
+  whole_word: 全字拼寫須相符
+  use_regex: 使用規則運算式
+  clear_search: 清除
+  include: 要包含的檔案
+  include_placeholder: 要包含的檔案（例如 *.ts、src/**）
+  exclude: 要排除的檔案
+  exclude_placeholder: 要排除的檔案（例如 *.min.js、dist/**）
+  search_summary: "%{count} 個結果，在 %{files} 個檔案中"
+  search_files: "%{files} 個檔案"
+  search_truncated: "（只列出前 %{limit} 個）"
+  bad_regex: 規則運算式寫得不對
 tooltip:
   show_sidebar: 顯示側欄
   hide_sidebar: 隱藏側欄

@@ -243,6 +243,18 @@ files:
   search_empty: 没有找到
   view_as_tree: 以树形式查看
   view_as_list: 以列表形式查看
+  match_case: 区分大小写
+  whole_word: 全字匹配
+  use_regex: 使用正则表达式
+  clear_search: 清除
+  include: 要包含的文件
+  include_placeholder: 要包含的文件（例如 *.ts、src/**）
+  exclude: 要排除的文件
+  exclude_placeholder: 要排除的文件（例如 *.min.js、dist/**）
+  search_summary: "%{count} 个结果，在 %{files} 个文件中"
+  search_files: "%{files} 个文件"
+  search_truncated: "（只列出前 %{limit} 个）"
+  bad_regex: 正则表达式写得不对
 tooltip:
   show_sidebar: 显示侧栏
   hide_sidebar: 隐藏侧栏

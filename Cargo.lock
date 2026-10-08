@@ -5129,6 +5129,7 @@ dependencies = [
  "objc2-foundation 0.3.2",
  "objc2-user-notifications",
  "qrcode",
+ "regex",
  "runode-cli",
  "runode-completion",
  "runode-config",

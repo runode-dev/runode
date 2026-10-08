@@ -243,6 +243,18 @@ files:
   search_empty: No results
   view_as_tree: View as Tree
   view_as_list: View as List
+  match_case: Match Case
+  whole_word: Match Whole Word
+  use_regex: Use Regular Expression
+  clear_search: Clear
+  include: Files to include
+  include_placeholder: "e.g. *.ts, src/**"
+  exclude: Files to exclude
+  exclude_placeholder: "e.g. *.min.js, dist/**"
+  search_summary: "%{count} results in %{files} files"
+  search_files: "%{files} files"
+  search_truncated: " (showing the first %{limit})"
+  bad_regex: Invalid regular expression
 tooltip:
   show_sidebar: Show Sidebar
   hide_sidebar: Hide Sidebar

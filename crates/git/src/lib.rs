@@ -21,7 +21,7 @@ pub use info::{Operation, RepoInfo, Stash};
 pub use ops::{CommitOptions, GitError, Repo, Result};
 pub use patch::{HunkAction, hunk_actionable};
 pub use repos::{RepoKind, Repos, snapshot_repos};
-pub use search::{GrepMatch, grep, list_files};
+pub use search::{GrepMatch, GrepQuery, grep, list_files};
 pub use snapshot::{FileDiff, FileStatus, Hunk, Line, LineKind, Section, Snapshot, UntrackedCache, snapshot};
 pub use view::{DiffRow, DiffSide, DiffView, merge_rows};
 
