@@ -1,7 +1,8 @@
-//! 「生成提交信息」对话框：选 agent、写 CLI 参数和提示词模板，按「生成」用这些写一次；按「保存默认值」
-//! 存成这个仓库自己的预设或所有仓库的默认值，之后说明框里的 ✨ 按钮直接按它写。打开时填好存着的预设。
+//! 「生成提交信息」对话框：选 agent、写 CLI 参数和提示词模板，下面照着写的实时列出实际要跑的整条命令。
+//! 按「生成」用这些写一次；按「保存」存成这个仓库自己的预设或所有仓库的默认值，之后说明框里的 ✨ 按钮
+//! 直接按它写。打开时填好存着的预设。
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use gpui::{
     Action, ClickEvent, Context, Div, Entity, Focusable, FontWeight, Hsla, KeyDownEvent, MouseButton, MouseDownEvent,
@@ -12,19 +13,21 @@ use runode_shared_types::color::Rgb;
 use super::{
     DEFAULT_TEMPLATE, Recipe, VARIABLES,
     agents::{AGENTS, AgentSpec, CUSTOM_AGENT, agent},
-    save_recipe, saved_recipe,
+    command_preview, save_recipe, saved_recipe, variable_preview,
 };
 use crate::{
-    assets::{CHEVRON_DOWN_ICON, TERMINAL_ICON},
+    assets::{CHEVRON_DOWN_ICON, CLOSE_ICON, SPARKLE_ICON, TERMINAL_ICON},
     ui::{
         hsla,
         text_area::{TextArea, TextAreaEvent},
         text_field::{TextField, TextFieldEvent},
+        tooltip::tooltip,
     },
     window::{
         TITLEBAR_HEIGHT, WindowView,
         agents::logo::{agent_logo, colored_logo, logo_path},
         files::check_item,
+        project::RENAMED,
     },
 };
 
@@ -86,17 +89,19 @@ impl WindowView {
             |this: &mut Self, event: &TextFieldEvent, window: &mut Window, cx: &mut Context<Self>| match event {
                 TextFieldEvent::Next => this.generate_from_dialog(window, cx),
                 TextFieldEvent::Dismiss => this.close_commit_message_dialog(window, cx),
-                TextFieldEvent::Changed(_) | TextFieldEvent::Previous => {}
+                // 改了参数，下面「将运行」的命令跟着变。
+                TextFieldEvent::Changed(_) => cx.notify(),
+                TextFieldEvent::Previous => {}
             };
         let on_args =
             cx.subscribe_in(&args, window, move |this, _, event, window, cx| on_field(this, event, window, cx));
         let on_command =
             cx.subscribe_in(&command, window, move |this, _, event, window, cx| on_field(this, event, window, cx));
-        let on_template = cx.subscribe_in(&template, window, |this, _, event: &TextAreaEvent, window, cx| {
-            if let TextAreaEvent::Submit = event {
-                this.generate_from_dialog(window, cx);
-            }
-        });
+        let on_template =
+            cx.subscribe_in(&template, window, |this, _, event: &TextAreaEvent, window, cx| match event {
+                TextAreaEvent::Submit => this.generate_from_dialog(window, cx),
+                TextAreaEvent::Changed => {}
+            });
         let agent = (recipe.agent != CUSTOM_AGENT).then(|| agent(&recipe.agent).unwrap_or(&AGENTS[0]));
         window.focus(&if agent.is_some() { &args } else { &command }.focus_handle(cx), cx);
         self.commit_message_dialog = Some(CommitMessageDialog {
@@ -131,11 +136,15 @@ impl WindowView {
         }
     }
 
-    /// 按对话框里填的写一次，不存；对话框关掉。
+    /// 按对话框里填的写一次，不存；对话框关掉。没有要提交的改动或者仓库正忙时什么也不做，原因写在
+    /// 生成按钮的悬停提示里。
     fn generate_from_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(dialog) = &self.commit_message_dialog else {
             return;
         };
+        if self.commit_message_blocker(&dialog.root).is_some() {
+            return;
+        }
         let (root, recipe) = (dialog.root.clone(), Self::dialog_recipe(dialog, cx));
         self.close_commit_message_dialog(window, cx);
         self.write_commit_message(&root, recipe, window, cx);
@@ -216,6 +225,19 @@ impl WindowView {
         }
     }
 
+    /// 现在能不能生成：不能时是原因的翻译键（没有要提交的改动，或者仓库正忙）。
+    fn commit_message_blocker(&self, root: &Path) -> Option<&'static str> {
+        let project = &self.workspace().project;
+        let repo = project.git.as_ref().and_then(|git| git.iter().find(|repo| repo.root == root));
+        if repo.is_none_or(|repo| repo.is_clean()) {
+            Some("git.ai_message.nothing")
+        } else if project.git_panel.busy(root).is_some() {
+            Some("git.ai_message.busy")
+        } else {
+            None
+        }
+    }
+
     pub(in crate::window) fn render_commit_message_dialog(
         &self,
         fg: Rgb,
@@ -223,26 +245,65 @@ impl WindowView {
         cx: &mut Context<Self>,
     ) -> Option<Stateful<Div>> {
         let dialog = self.commit_message_dialog.as_ref()?;
+        let (fg_rgb, bg_rgb) = (fg, bg);
         let panel_bg = hsla(bg.mix(fg, 0.03));
-        let hover_bg = hsla(bg.mix(fg, 0.06));
-        let primary_bg = hsla(bg.mix(fg, 0.16));
-        let primary_hover_bg = hsla(bg.mix(fg, 0.22));
+        let field_bg = hsla(bg);
+        let hover_bg = hsla(bg.mix(fg, 0.08));
+        let selected_bg = hsla(bg.mix(fg, 0.16));
         let fg = hsla(fg);
         let border = fg.opacity(0.12);
-        let label = |key: &str| div().text_color(fg.opacity(0.7)).child(rust_i18n::t!(key).into_owned());
-        let boxed = || div().px(px(8.)).rounded(px(6.)).bg(hsla(bg)).border_1().border_color(fg.opacity(0.2));
-        let button = |id: &'static str, label: String, bg: Hsla, hover: Hsla| {
+        let accent = hsla(RENAMED);
+        let mono = self.font_family(cx);
+        let section = |key: &str| {
             div()
-                .id(id)
-                .flex_none()
-                .px(px(12.))
-                .py(px(5.))
-                .rounded(px(6.))
-                .bg(bg)
-                .hover(move |button| button.bg(hover))
-                .cursor_pointer()
-                .child(label)
+                .text_size(px(11.))
+                .font_weight(FontWeight::SEMIBOLD)
+                .text_color(fg.opacity(0.6))
+                .child(rust_i18n::t!(key).into_owned())
         };
+        let note = |text: String| div().text_size(px(11.)).text_color(fg.opacity(0.5)).child(text);
+        let field_box = || {
+            div()
+                .px(px(8.))
+                .rounded(px(6.))
+                .bg(field_bg)
+                .border_1()
+                .border_color(fg.opacity(0.2))
+                .font_family(mono.clone())
+        };
+
+        let close = div()
+            .id("commit-message-close")
+            .flex_none()
+            .size(px(24.))
+            .rounded(px(6.))
+            .flex()
+            .items_center()
+            .justify_center()
+            .cursor_pointer()
+            .hover(move |close| close.bg(hover_bg))
+            .child(svg().path(CLOSE_ICON).size(px(12.)).text_color(fg.opacity(0.6)))
+            .on_click(cx.listener(|this, _: &ClickEvent, window, cx| this.close_commit_message_dialog(window, cx)));
+        let header = div()
+            .flex()
+            .items_start()
+            .gap(px(8.))
+            .child(
+                div()
+                    .flex_1()
+                    .flex()
+                    .flex_col()
+                    .gap(px(4.))
+                    .child(
+                        div()
+                            .text_size(px(15.))
+                            .font_weight(FontWeight::BOLD)
+                            .child(rust_i18n::t!("git.ai_message.title").into_owned()),
+                    )
+                    .child(note(rust_i18n::t!("git.ai_message.subtitle").into_owned())),
+            )
+            .child(close);
+
         let (logo, name) = match dialog.agent {
             Some(spec) => {
                 let logo = spec.kind.and_then(|kind| agent_logo(kind, px(14.), fg));
@@ -253,13 +314,18 @@ impl WindowView {
                 rust_i18n::t!("git.ai_message.custom").into_owned(),
             ),
         };
-        let agent_button = boxed()
+        let agent_button = div()
             .id("commit-message-agent")
             .flex_none()
             .h(px(28.))
+            .px(px(8.))
             .flex()
             .items_center()
             .gap(px(6.))
+            .rounded(px(6.))
+            .bg(field_bg)
+            .border_1()
+            .border_color(fg.opacity(0.2))
             .cursor_pointer()
             .hover(move |button| button.bg(hover_bg))
             .children(logo)
@@ -272,24 +338,102 @@ impl WindowView {
                     this.open_commit_agent_menu(event, cx);
                 }),
             );
+
+        // CLI 参数（自己定义的命令时是整条命令），下面是照现在填的实际要跑的整条命令。
+        let (input_label, input, hint) = match dialog.agent {
+            Some(_) => ("git.ai_message.args", &dialog.args, None),
+            None => (
+                "git.ai_message.command",
+                &dialog.command,
+                Some(note(rust_i18n::t!("git.ai_message.command_hint").into_owned())),
+            ),
+        };
+        let preview = match command_preview(&Self::dialog_recipe(dialog, cx)) {
+            Ok((line, stdin)) => {
+                let how = if stdin { "git.ai_message.via_stdin" } else { "git.ai_message.via_argv" };
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap(px(4.))
+                    .child(
+                        div()
+                            .px(px(8.))
+                            .py(px(6.))
+                            .rounded(px(6.))
+                            .bg(hsla(bg_rgb.mix(fg_rgb, 0.06)))
+                            .font_family(mono.clone())
+                            .text_size(px(11.))
+                            .text_color(fg.opacity(0.85))
+                            .child(format!("$ {line}")),
+                    )
+                    .child(note(rust_i18n::t!(how).into_owned()))
+            }
+            Err(err) => div().text_size(px(11.)).text_color(gpui::red()).child(err),
+        };
+        let command_section = div()
+            .flex()
+            .flex_col()
+            .gap(px(6.))
+            .child(section(input_label))
+            .child(field_box().h(px(28.)).flex().items_center().child(input.clone()))
+            .children(hint)
+            .child(section("git.ai_message.will_run"))
+            .child(preview);
+
+        // 点变量插到模板的光标处；鼠标停在上面时说明它是什么、展开后什么样。
         let variables = div()
             .flex()
             .flex_wrap()
-            .gap(px(8.))
+            .items_center()
+            .gap(px(4.))
             .text_size(px(11.))
-            .text_color(fg.opacity(0.55))
-            .child(rust_i18n::t!("git.ai_message.variables").into_owned())
-            .children(VARIABLES.iter().map(|var| div().text_color(fg.opacity(0.8)).child(*var)));
-        // 只存到这个仓库还是存成所有仓库的默认值：两段按钮，选中的那段底色亮一些。
+            .child(
+                div()
+                    .mr(px(2.))
+                    .text_color(fg.opacity(0.5))
+                    .child(rust_i18n::t!("git.ai_message.variables").into_owned()),
+            )
+            .children(VARIABLES.iter().map(|&name| {
+                div()
+                    .id(name)
+                    .px(px(6.))
+                    .py(px(1.))
+                    .rounded(px(4.))
+                    .bg(hsla(bg_rgb.mix(fg_rgb, 0.06)))
+                    .font_family(mono.clone())
+                    .text_color(fg.opacity(0.85))
+                    .cursor_pointer()
+                    .hover(move |chip| chip.bg(selected_bg))
+                    .tooltip(tooltip(variable_preview(name), None, fg_rgb, bg_rgb))
+                    .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
+                        if let Some(dialog) = &this.commit_message_dialog {
+                            let template = dialog.template.clone();
+                            template.update(cx, |area, cx| area.insert(&format!("{{{name}}}"), cx));
+                            window.focus(&template.focus_handle(cx), cx);
+                        }
+                    }))
+                    .child(format!("{{{name}}}"))
+            }));
+        let template_section = div()
+            .flex()
+            .flex_col()
+            .gap(px(6.))
+            .child(section("git.ai_message.template"))
+            .child(field_box().py(px(6.)).child(dialog.template.clone()))
+            .child(variables);
+
+        // 底栏左边存成预设：存到哪（两段按钮）和保存按钮；右边是生成。
         let scope = |id: &'static str, repo_only: bool, key: &str| {
             div()
                 .id(id)
-                .px(px(10.))
-                .py(px(3.))
+                .px(px(8.))
+                .py(px(2.))
                 .rounded(px(4.))
                 .cursor_pointer()
-                .when(dialog.repo_only == repo_only, |pill| pill.bg(primary_bg))
-                .when(dialog.repo_only != repo_only, |pill| pill.hover(move |pill| pill.bg(hover_bg)))
+                .when(dialog.repo_only == repo_only, |pill| pill.bg(selected_bg))
+                .when(dialog.repo_only != repo_only, |pill| {
+                    pill.text_color(fg.opacity(0.6)).hover(move |pill| pill.bg(hover_bg))
+                })
                 .child(rust_i18n::t!(key).into_owned())
                 .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
                     if let Some(dialog) = &mut this.commit_message_dialog {
@@ -299,33 +443,91 @@ impl WindowView {
                     }
                 }))
         };
-        let status = dialog.status.as_ref().map(|status| match status {
-            Status::Saved => {
-                div().text_color(fg.opacity(0.6)).child(rust_i18n::t!("git.ai_message.saved").into_owned())
-            }
-            Status::Failed(err) => div().text_color(gpui::red()).child(err.clone()),
-        });
-        let save = button("commit-message-save", rust_i18n::t!("git.ai_message.save").into_owned(), panel_bg, hover_bg)
+        let save = div()
+            .id("commit-message-save")
+            .flex_none()
+            .px(px(10.))
+            .py(px(4.))
+            .rounded(px(6.))
             .border_1()
-            .border_color(border)
+            .border_color(fg.opacity(0.2))
+            .cursor_pointer()
+            .hover(move |button| button.bg(hover_bg))
             .when(dialog.saving, |button| button.opacity(0.5))
+            .child(rust_i18n::t!("git.ai_message.save").into_owned())
             .on_click(cx.listener(|this, _: &ClickEvent, window, cx| this.save_dialog_recipe(window, cx)));
-        let generate = button(
-            "commit-message-generate",
-            rust_i18n::t!("git.ai_message.generate").into_owned(),
-            primary_bg,
-            primary_hover_bg,
-        )
-        .on_click(cx.listener(|this, _: &ClickEvent, window, cx| this.generate_from_dialog(window, cx)));
+        let status = match &dialog.status {
+            Some(Status::Saved) => Some(note(rust_i18n::t!("git.ai_message.saved").into_owned())),
+            Some(Status::Failed(err)) => Some(div().text_size(px(11.)).text_color(gpui::red()).child(err.clone())),
+            None => None,
+        };
+        let blocker = self.commit_message_blocker(&dialog.root);
+        let on_accent = gpui::white();
+        let generate = div()
+            .id("commit-message-generate")
+            .flex_none()
+            .px(px(12.))
+            .py(px(5.))
+            .flex()
+            .items_center()
+            .gap(px(6.))
+            .rounded(px(6.))
+            .bg(accent)
+            .text_color(on_accent)
+            .child(svg().path(SPARKLE_ICON).size(px(13.)).text_color(on_accent))
+            .child(rust_i18n::t!("git.ai_message.generate").into_owned())
+            .child(div().text_color(on_accent.opacity(0.6)).child("⌘↩"))
+            .map(|button| match blocker {
+                Some(reason) => button.opacity(0.5).tooltip(tooltip(rust_i18n::t!(reason), None, fg_rgb, bg_rgb)),
+                None => button
+                    .cursor_pointer()
+                    .hover(move |button| button.bg(accent.opacity(0.85)))
+                    .on_click(cx.listener(|this, _: &ClickEvent, window, cx| this.generate_from_dialog(window, cx))),
+            });
+        let footer = div()
+            .pt(px(12.))
+            .border_t_1()
+            .border_color(border)
+            .flex()
+            .flex_col()
+            .gap(px(8.))
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(px(8.))
+                    .child(
+                        div()
+                            .flex_none()
+                            .text_color(fg.opacity(0.6))
+                            .child(rust_i18n::t!("git.ai_message.scope").into_owned()),
+                    )
+                    .child(
+                        div()
+                            .flex()
+                            .flex_none()
+                            .p(px(2.))
+                            .gap(px(2.))
+                            .rounded(px(6.))
+                            .bg(field_bg)
+                            .child(scope("commit-message-repo", true, "git.ai_message.scope_repo"))
+                            .child(scope("commit-message-all", false, "git.ai_message.scope_all")),
+                    )
+                    .child(save)
+                    .child(div().flex_1())
+                    .child(generate),
+            )
+            .children(status);
+
         let panel = div()
             .id("commit-message-dialog")
             .on_key_down(cx.listener(Self::commit_message_dialog_key))
-            .w(px(520.))
+            .w(px(560.))
             .max_w_full()
             .p(px(20.))
             .flex()
             .flex_col()
-            .gap(px(12.))
+            .gap(px(16.))
             .rounded(px(12.))
             .bg(panel_bg)
             .border_1()
@@ -335,88 +537,30 @@ impl WindowView {
             .text_color(fg)
             // 点在对话框里不算点到外面。
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-            .child(
-                div()
-                    .flex()
-                    .flex_col()
-                    .gap(px(4.))
-                    .child(
-                        div()
-                            .text_size(px(16.))
-                            .font_weight(FontWeight::BOLD)
-                            .child(rust_i18n::t!("git.ai_message.title").into_owned()),
-                    )
-                    .child(
-                        div().text_color(fg.opacity(0.55)).child(rust_i18n::t!("git.ai_message.subtitle").into_owned()),
-                    ),
-            )
+            .child(header)
             .child(
                 div()
                     .flex()
                     .flex_col()
                     .gap(px(6.))
-                    .child(label("git.ai_message.agent"))
+                    .child(section("git.ai_message.agent"))
                     .child(div().flex().child(agent_button)),
             )
-            .child(div().flex().flex_col().gap(px(6.)).map(|column| {
-                match dialog.agent {
-                    Some(_) => column
-                        .child(label("git.ai_message.args"))
-                        .child(boxed().h(px(28.)).flex().items_center().child(dialog.args.clone())),
-                    None => column
-                        .child(label("git.ai_message.command"))
-                        .child(boxed().h(px(28.)).flex().items_center().child(dialog.command.clone()))
-                        .child(
-                            div()
-                                .text_size(px(11.))
-                                .text_color(fg.opacity(0.55))
-                                .child(rust_i18n::t!("git.ai_message.command_hint").into_owned()),
-                        ),
-                }
-            }))
-            .child(
-                div()
-                    .flex()
-                    .flex_col()
-                    .gap(px(6.))
-                    .child(label("git.ai_message.template"))
-                    .child(boxed().py(px(6.)).child(dialog.template.clone()))
-                    .child(variables),
-            )
-            .child(
-                div().flex().items_center().gap(px(8.)).child(label("git.ai_message.scope")).child(
-                    div()
-                        .flex()
-                        .p(px(2.))
-                        .gap(px(2.))
-                        .rounded(px(6.))
-                        .bg(hsla(bg))
-                        .child(scope("commit-message-repo", true, "git.ai_message.scope_repo"))
-                        .child(scope("commit-message-all", false, "git.ai_message.scope_all")),
-                ),
-            )
-            .child(
-                div()
-                    .pt(px(4.))
-                    .flex()
-                    .items_center()
-                    .gap(px(8.))
-                    .child(div().flex_1().min_w_0().children(status))
-                    .child(save)
-                    .child(generate),
-            );
+            .child(command_section)
+            .child(template_section)
+            .child(footer);
         // 铺满窗口的底子挡住下面的点击，点到对话框外面就取消。
         Some(
             div()
                 .id("commit-message-backdrop")
                 .absolute()
                 .size_full()
-                .pt(px(TITLEBAR_HEIGHT + 48.))
+                .pt(px(TITLEBAR_HEIGHT + 32.))
                 .px(px(16.))
                 .flex()
                 .justify_center()
                 .items_start()
-                .bg(Hsla::black().opacity(0.15))
+                .bg(Hsla::black().opacity(0.25))
                 .occlude()
                 .on_mouse_down(
                     MouseButton::Left,

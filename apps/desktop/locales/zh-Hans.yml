@@ -298,16 +298,26 @@ git:
     args: CLI 参数
     template: 提示词模板
     variables: "{} 变量"
-    scope: 保存预设
-    scope_repo: 仅保存到此存储库
-    scope_all: 保存为所有存储库的默认值
-    save: 保存默认值
+    scope: 保存到
+    scope_repo: 此存储库
+    scope_all: 所有存储库
+    save: 保存
     saved: 已保存。
     generate: 生成
     custom: 自定义命令
     command: 命令
     command_hint: "参数里的 {prompt} 换成提示词；没写 {prompt} 时提示词经标准输入给。在仓库目录里直接跑，不经 shell。"
     empty_command: 自定义命令是空的。
+    var:
+      basePrompt: "runode 内置的提示词：照着最近几条提交说明的写法写，带上分支、改动的文件和改动。示例："
+      branch: "当前分支名。示例："
+      stagedFiles: "要提交的文件，一行一个，前面是状态字母：有暂存的改动时是暂存的，没有时是全部改动。示例："
+      stagedPatch: "要提交的改动，太大时截短。示例："
+    will_run: 将运行
+    via_stdin: 提示词经标准输入传入。
+    via_argv: 提示词放在 <prompt> 处。
+    nothing: 没有要提交的改动。
+    busy: 仓库正在忙。
     unknown_agent: "不认识的智能体：%{agent}"
     unclosed_quote: CLI 参数里的引号没有配对。
     missing: "找不到 %{binary} 命令。请先安装，或者确认它在 shell 的 PATH 里。"

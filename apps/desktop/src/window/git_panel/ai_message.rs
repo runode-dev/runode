@@ -43,8 +43,25 @@ const TIMEOUT: Duration = Duration::from_secs(180);
 
 /// 默认的提示词模板：就是内置的提示词。
 pub(in crate::window) const DEFAULT_TEMPLATE: &str = "{basePrompt}";
-/// 模板里能用的变量，对话框里列给用户看。
-pub(in crate::window) const VARIABLES: &[&str] = &["{basePrompt}", "{branch}", "{stagedFiles}", "{stagedPatch}"];
+/// 模板里能用的变量（不带花括号），对话框里列给用户看。
+pub(in crate::window) const VARIABLES: &[&str] = &["basePrompt", "branch", "stagedFiles", "stagedPatch"];
+
+/// 对话框里鼠标停在变量 `name` 上时的说明：它是什么，下面是按一份示例改动展开后的样子。
+pub(in crate::window) fn variable_preview(name: &str) -> String {
+    let context = PromptContext {
+        staged: true,
+        branch: "feature/example".to_owned(),
+        files: "M src/example.rs\nA src/example/new.rs".to_owned(),
+    };
+    let patch = "diff --git a/src/example.rs b/src/example.rs\n+fn example() {}";
+    let example = match name {
+        "basePrompt" => base_prompt(&context, &["feat: add an example".to_owned()], patch),
+        "branch" => context.branch,
+        "stagedFiles" => context.files,
+        _ => patch.to_owned(),
+    };
+    format!("{}\n\n{example}", rust_i18n::t!(format!("git.ai_message.var.{name}")))
+}
 
 /// 写提交说明的一份预设。
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -191,17 +208,7 @@ fn generate(
     path: Option<OsString>,
 ) -> Result<String, String> {
     // 先看命令写得对不对，再去读改动。
-    let (agent, binary, words) = if recipe.agent == agents::CUSTOM_AGENT {
-        let mut words = split_args(&recipe.command)?;
-        if words.is_empty() {
-            return Err(rust_i18n::t!("git.ai_message.empty_command").into_owned());
-        }
-        (None, words.remove(0), words)
-    } else {
-        let agent = agents::agent(&recipe.agent)
-            .ok_or_else(|| rust_i18n::t!("git.ai_message.unknown_agent", agent = recipe.agent).into_owned())?;
-        (Some(agent), agent.binary.to_owned(), split_args(&recipe.args)?)
-    };
+    let command = Invocation::of(recipe)?;
     let patch = limit(repo.pending_diff(context.staged).map_err(|err| err.message)?, MAX_PATCH_BYTES);
     let recent = repo.recent_messages(EXAMPLES).map_err(|err| err.message)?;
     let base = base_prompt(context, &recent, &patch);
@@ -209,12 +216,9 @@ fn generate(
         &recipe.template,
         &[("basePrompt", &base), ("branch", &context.branch), ("stagedFiles", &context.files), ("stagedPatch", &patch)],
     );
-    let (args, stdin) = match agent {
-        Some(agent) => agent.command_line(words, &prompt),
-        None => agents::with_prompt(words, &prompt),
-    };
-    let stdout = run(&binary, &args, stdin, &repo.root, path)?;
-    let text = match agent.map_or(Output::Text, |agent| agent.output) {
+    let (args, stdin) = command.args(&prompt);
+    let stdout = run(&command.binary, &args, stdin, &repo.root, path)?;
+    let text = match command.agent.map_or(Output::Text, |agent| agent.output) {
         Output::Text => stdout,
         Output::OpenCodeEvents => opencode_text(&stdout)?,
     };
@@ -223,6 +227,55 @@ fn generate(
         return Err(rust_i18n::t!("git.ai_message.empty").into_owned());
     }
     Ok(message)
+}
+
+/// 按预设要跑的命令：哪家 agent（自己定义的命令为空）、程序和用户写的参数。
+struct Invocation {
+    agent: Option<&'static agents::AgentSpec>,
+    binary: String,
+    words: Vec<String>,
+}
+
+impl Invocation {
+    fn of(recipe: &Recipe) -> Result<Self, String> {
+        if recipe.agent == agents::CUSTOM_AGENT {
+            let mut words = split_args(&recipe.command)?;
+            if words.is_empty() {
+                return Err(rust_i18n::t!("git.ai_message.empty_command").into_owned());
+            }
+            let binary = words.remove(0);
+            return Ok(Self { agent: None, binary, words });
+        }
+        let agent = agents::agent(&recipe.agent)
+            .ok_or_else(|| rust_i18n::t!("git.ai_message.unknown_agent", agent = recipe.agent).into_owned())?;
+        Ok(Self { agent: Some(agent), binary: agent.binary.to_owned(), words: split_args(&recipe.args)? })
+    }
+
+    /// 完整的参数和要经标准输入给的提示词，见 `agents::with_prompt`。
+    fn args(&self, prompt: &str) -> (Vec<String>, Option<String>) {
+        match self.agent {
+            Some(agent) => agent.command_line(self.words.clone(), prompt),
+            None => agents::with_prompt(self.words.clone(), prompt),
+        }
+    }
+}
+
+/// 对话框里给用户看的、按 `recipe` 实际要跑的整条命令，按 shell 的写法加好引号，提示词的位置写成
+/// `<prompt>`；第二项说提示词是不是经标准输入给。命令写得不对时是原因。
+pub(in crate::window) fn command_preview(recipe: &Recipe) -> Result<(String, bool), String> {
+    let command = Invocation::of(recipe)?;
+    let (args, stdin) = command.args("<prompt>");
+    let line = std::iter::once(&command.binary).chain(&args).map(|word| shell_quote(word)).collect::<Vec<_>>();
+    Ok((line.join(" "), stdin.is_some()))
+}
+
+/// 照 shell 的写法给 `word` 加引号：只有安全的字符时原样，否则整个放进单引号。
+fn shell_quote(word: &str) -> String {
+    let safe = |ch: char| ch.is_ascii_alphanumeric() || "-_./:=@%+,".contains(ch);
+    if !word.is_empty() && word.chars().all(safe) {
+        return word.to_owned();
+    }
+    format!("'{}'", word.replace('\'', r"'\''"))
 }
 
 /// 内置的提示词：照着最近几条提交说明的写法写，给它分支、改动的文件和改动。
@@ -441,6 +494,16 @@ mod tests {
         assert_eq!(render_template("{{branch}}", &vars), "{main}");
     }
 
+    /// 每个变量都有说明（缺了时 `t!` 原样返回键名），`basePrompt` 的示例里带着示例改动。
+    #[test]
+    fn previews_every_variable() {
+        for name in VARIABLES {
+            let preview = variable_preview(name);
+            assert!(!preview.starts_with("git.ai_message.var."), "{preview}");
+        }
+        assert!(variable_preview("basePrompt").contains("+fn example() {}"));
+    }
+
     #[test]
     fn splits_args_like_a_shell() {
         assert_eq!(split_args("  --model sonnet ").unwrap(), ["--model", "sonnet"]);
@@ -487,6 +550,21 @@ mod tests {
         let muse = agents::agent("muse").unwrap();
         let (args, _) = muse.command_line(vec!["--model".into(), "m".into()], "P");
         assert_eq!(&args[args.len() - 4..], ["--model", "m", "--", "P"]);
+    }
+
+    #[test]
+    fn previews_the_whole_command() {
+        let recipe = Recipe { args: "--model 'my model'".into(), ..Recipe::default() };
+        let (line, stdin) = command_preview(&recipe).unwrap();
+        assert_eq!(
+            line,
+            "claude -p --output-format text --permission-mode plan --no-session-persistence --model 'my model'"
+        );
+        assert!(stdin);
+        let recipe = Recipe { agent: "custom".into(), command: "tool --ask {prompt} it's".into(), ..Recipe::default() };
+        assert!(command_preview(&recipe).is_err());
+        let recipe = Recipe { agent: "custom".into(), command: "tool --ask={prompt}".into(), ..Recipe::default() };
+        assert_eq!(command_preview(&recipe).unwrap(), ("tool '--ask=<prompt>'".to_owned(), false));
     }
 
     /// 提示词经标准输入给，比管道的缓冲大也不卡；失败时报标准错误。

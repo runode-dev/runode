@@ -298,16 +298,26 @@ git:
     args: CLI arguments
     template: Prompt template
     variables: "{} Variables"
-    scope: Save preset
-    scope_repo: This repository only
-    scope_all: Default for all repositories
-    save: Save Default
+    scope: Save to
+    scope_repo: This repository
+    scope_all: All repositories
+    save: Save
     saved: Saved.
     generate: Generate
     custom: Custom Command
     command: Command
     command_hint: "{prompt} in the arguments is replaced with the prompt; without it the prompt goes to standard input. Runs in the repository without a shell."
     empty_command: The custom command is empty.
+    var:
+      basePrompt: "runode's built-in prompt: match the style of the recent commit messages, with the branch, changed files and patch below. Example:"
+      branch: "The current branch name. Example:"
+      stagedFiles: "Files to commit, one per line with the status letter: staged files when anything is staged, otherwise every change. Example:"
+      stagedPatch: "The patch to commit, cut down when it's too large. Example:"
+    will_run: Will run
+    via_stdin: The prompt is passed on standard input.
+    via_argv: The prompt goes where <prompt> is.
+    nothing: Nothing to commit.
+    busy: The repository is busy.
     unknown_agent: "Unknown agent: %{agent}"
     unclosed_quote: Unclosed quote in CLI arguments.
     missing: "Couldn't find the %{binary} command. Install it, or make sure it's on the PATH of your shell."

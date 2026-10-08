@@ -298,16 +298,26 @@ git:
     args: CLI 參數
     template: 提示詞範本
     variables: "{} 變數"
-    scope: 儲存預設
-    scope_repo: 僅儲存到此存放庫
-    scope_all: 儲存為所有存放庫的預設值
-    save: 儲存預設值
+    scope: 儲存到
+    scope_repo: 此存放庫
+    scope_all: 所有存放庫
+    save: 儲存
     saved: 已儲存。
     generate: 產生
     custom: 自訂指令
     command: 指令
     command_hint: "參數裡的 {prompt} 換成提示詞；沒寫 {prompt} 時提示詞經標準輸入傳入。在存放庫目錄裡直接執行，不經 shell。"
     empty_command: 自訂指令是空的。
+    var:
+      basePrompt: "runode 內建的提示詞：照著最近幾條提交說明的寫法寫，帶上分支、變更的檔案和變更內容。範例："
+      branch: "目前的分支名稱。範例："
+      stagedFiles: "要提交的檔案，一行一個，前面是狀態字母：有暫存的變更時是暫存的，沒有時是全部變更。範例："
+      stagedPatch: "要提交的變更內容，太大時截短。範例："
+    will_run: 將執行
+    via_stdin: 提示詞經標準輸入傳入。
+    via_argv: 提示詞放在 <prompt> 處。
+    nothing: 沒有要提交的變更。
+    busy: 存放庫正在忙。
     unknown_agent: "不認識的智慧體：%{agent}"
     unclosed_quote: CLI 參數裡的引號沒有配對。
     missing: "找不到 %{binary} 指令。請先安裝，或確認它在 shell 的 PATH 裡。"

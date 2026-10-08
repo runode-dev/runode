@@ -149,6 +149,12 @@ impl TextArea {
         }
     }
 
+    /// 在光标处插入 `text`（有选区时换掉选区，可撤销），光标停在它后面。
+    pub fn insert(&mut self, text: &str, cx: &mut Context<Self>) {
+        self.record(None);
+        self.replace(self.selected.clone(), &normalize_newlines(text), cx);
+    }
+
     /// 空着时画的提示文字，颜色调淡。
     pub fn set_placeholder(&mut self, text: SharedString, cx: &mut Context<Self>) {
         self.placeholder = text;
