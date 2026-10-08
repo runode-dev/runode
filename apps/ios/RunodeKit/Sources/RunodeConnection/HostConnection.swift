@@ -244,7 +244,7 @@ public actor HostConnection: HostLink {
                     switch try JSONDecoder().decode(HostMsg.self, from: payload) {
                     case .welcome: return reader.decoder
                     case .incompatible(_, _, let reason): throw LinkFailure.incompatible(reason)
-                    case .goodbye(let reason): throw LinkFailure.closed(String(localized: "宿主断开了连接（\(reason)）"))
+                    case .goodbye(let reason): throw LinkFailure.closed(String(localized: "宿主断开了连接（\(String(describing: reason))）"))
                     default: continue
                     }
                 }
