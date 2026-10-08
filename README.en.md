@@ -29,7 +29,7 @@ Runode uses [Ghostty](https://ghostty.org)'s libghostty-vt for terminal emulatio
 - **Scriptable**: the built-in `runode` CLI lists, reads and drives every terminal. Agents use it to run commands in a neighbouring pane, wait for them, read the output, or direct another agent.
 - **Persistent sessions**: with `terminal-host` on, sessions live in a separate host process and survive quitting, relaunching and upgrading the app.
 - **Remote from your phone**: the iOS app pairs with your Mac over the local network through a TLS 1.3 connection. From your phone you can watch terminals, answer agents, run project tasks and commit to git.
-- **Project panels**: a file tree, syntax-highlighted file previews, and a VS Code style Git panel that can stage hunks, commit, switch branches, and pull or push.
+- **Project panels**: a file tree, syntax-highlighted file previews, and a Git panel that can stage hunks, commit, switch branches, and pull or push.
 - **A smarter prompt**: Tab completion with descriptions, live syntax highlighting of what you type, and inline suggestions from your history.
 - **Ghostty compatible**: reads your existing Ghostty config and themes.
 - **Native**: written in Rust, not Electron. The UI comes in English, Simplified Chinese and Traditional Chinese, and the app updates itself.

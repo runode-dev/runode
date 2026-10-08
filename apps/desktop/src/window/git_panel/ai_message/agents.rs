@@ -1,6 +1,5 @@
-//! 能写提交说明的 agent，以及各自不进交互、只打印结果的调用方式。参数照 Orca
-//! （stablyai/orca 的 `COMMIT_MESSAGE_AGENT_SPECS`）：都关掉工具或者只读，不留会话记录。模型不在这里
-//! 选，要换模型时在对话框的 CLI 参数里写，比如 `--model sonnet`。
+//! 能写提交说明的 agent，以及各自不进交互、只打印结果的调用方式。这些调用都关掉工具或者只读，
+//! 不留会话记录。模型不在这里选，要换模型时在对话框的 CLI 参数里写，比如 `--model sonnet`。
 
 use runode_shared_types::agent::AgentKind;
 
@@ -19,7 +18,7 @@ pub(super) enum Output {
 }
 
 pub(in crate::window) struct AgentSpec {
-    /// 存进预设的名字，和 Orca 的一样。
+    /// 存进预设的名字。
     pub id: &'static str,
     pub label: &'static str,
     /// 画哪个 agent 的 logo；runode 不认识的 agent 为空，画 `logo`。
