@@ -272,6 +272,8 @@ pub struct WindowView {
     show_ignored: bool,
     /// 文件树的焦点：点了文件树后方向键在里面移动选中的行。
     files_focus: FocusHandle,
+    /// 文件树上面的搜索框和搜到的结果；整个窗口一个，换了 workspace 时按新的根目录重搜。
+    file_search: files::FileSearch,
     /// 文件树或预览标签的右键菜单，文件树里正在新建或改名的输入框，以及剪切或复制下来等着粘贴的
     /// 文件。
     file_menu: Option<files::FileMenu>,
@@ -390,6 +392,7 @@ impl WindowView {
             preview_focus: cx.focus_handle(),
             show_ignored: false,
             files_focus: cx.focus_handle(),
+            file_search: files::FileSearch::new(window, cx),
             file_menu: None,
             file_edit: None,
             file_clipboard: None,

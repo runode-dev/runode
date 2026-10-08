@@ -3,11 +3,12 @@
 //!
 //! 点过文件树后它拿到焦点，方向键移动选中的行，各种快捷键作用在选中的那一项上。右键菜单在
 //! `menu`；就地新建、改名，删除、剪切复制粘贴和拖动挪位置在 `edit`，它们落到文件系统上的
-//! 操作在 `ops`。
+//! 操作在 `ops`。上面的搜索框在 `search`。
 
 mod edit;
 mod menu;
 mod ops;
+mod search;
 
 use std::{
     borrow::Cow,
@@ -24,6 +25,7 @@ use runode_shared_types::color::Rgb;
 
 pub(super) use edit::{FileClipboard, FileEdit};
 pub(super) use menu::{FileMenu, MenuButton, MenuItem, check_item, labeled_item, menu_item, text_item};
+pub(super) use search::FileSearch;
 
 use super::{
     WindowView,
@@ -260,6 +262,59 @@ impl WindowView {
                 div().flex().gap(px(4.)).child(new_file).child(new_folder).child(collapse_all).child(ignored_toggle),
             );
         let font_size = cx.global::<AppConfig>().0.file_tree_font_size;
+        let search_box = self.render_file_search_box(fg, bg, cx);
+        let content = match self.render_file_search_results(font_size, fg, bg, cx) {
+            Some(results) => results,
+            None => self.render_file_tree(font_size, fg, bg, cx).into_any_element(),
+        };
+        // 搜索框不在文件树的按键上下文里：文件树绑的方向键、删除这些不能抢输入框的键。
+        let tree = div()
+            .flex_1()
+            .min_h_0()
+            .flex()
+            .flex_col()
+            // 新建或改名时输入框在文件树里面，方向键这些归输入框。
+            .key_context(if self.file_edit.is_some() { "FileTree editing" } else { "FileTree" })
+            .track_focus(&self.files_focus)
+            .on_action(cx.listener(Self::select_previous_file))
+            .on_action(cx.listener(Self::select_next_file))
+            .on_action(cx.listener(Self::select_first_file))
+            .on_action(cx.listener(Self::select_last_file))
+            .on_action(cx.listener(Self::collapse_selected_file))
+            .on_action(cx.listener(Self::expand_selected_file))
+            .on_action(cx.listener(Self::open_selected_file))
+            .on_action(cx.listener(Self::collapse_all_files))
+            .on_action(cx.listener(Self::focus_terminal))
+            .on_action(cx.listener(Self::new_file))
+            .on_action(cx.listener(Self::new_folder))
+            .on_action(cx.listener(Self::rename_file))
+            .on_action(cx.listener(Self::delete_file))
+            .on_action(cx.listener(Self::reveal_in_finder))
+            .on_action(cx.listener(Self::insert_file_path))
+            .on_action(cx.listener(Self::open_in_terminal))
+            .on_action(cx.listener(Self::copy_path))
+            .on_action(cx.listener(Self::copy_relative_path))
+            .on_action(cx.listener(|this, _: &Copy, _, cx| this.copy_file(false, cx)))
+            .on_action(cx.listener(|this, _: &Cut, _, cx| this.copy_file(true, cx)))
+            .on_action(cx.listener(|this, _: &Paste, window, cx| this.paste_file(window, cx)))
+            // 拖到空白处：挪到根目录。
+            .on_drop(cx.listener(|this, dragged: &DraggedFile, window, cx| {
+                let root = this.files_root();
+                this.drop_file(&dragged.path, root, window, cx);
+            }))
+            .child(content);
+        panel_shell("files-panel", width, fg, bg, cx)
+            .bg(hsla(bg.mix(fg, 0.03)))
+            .text_size(px(font_size))
+            .child(self.render_panel_tabs(fg, bg, cx))
+            .child(header)
+            .child(search_box)
+            .child(tree)
+    }
+
+    /// 文件树的行列表和滚动条。
+    fn render_file_tree(&self, font_size: f32, fg: Rgb, bg: Rgb, cx: &mut Context<Self>) -> Div {
+        let workspace = self.workspace();
         let new_entry = self.new_entry_row();
         let count = workspace.project.file_rows.len() + usize::from(new_entry.is_some());
         let list = uniform_list(
@@ -291,47 +346,12 @@ impl WindowView {
             }),
         );
         let scroll = workspace.project.files_scroll.0.borrow().base_handle.clone();
-        let list = div().flex_1().min_h_0().relative().child(list).child(scrollbar(
+        div().flex_1().min_h_0().relative().child(list).child(scrollbar(
             "files-scroll",
             scroll,
             Axis::Vertical,
             hsla(fg),
-        ));
-        panel_shell("files-panel", width, fg, bg, cx)
-            // 新建或改名时输入框在文件树里面，方向键这些归输入框。
-            .key_context(if self.file_edit.is_some() { "FileTree editing" } else { "FileTree" })
-            .track_focus(&self.files_focus)
-            .on_action(cx.listener(Self::select_previous_file))
-            .on_action(cx.listener(Self::select_next_file))
-            .on_action(cx.listener(Self::select_first_file))
-            .on_action(cx.listener(Self::select_last_file))
-            .on_action(cx.listener(Self::collapse_selected_file))
-            .on_action(cx.listener(Self::expand_selected_file))
-            .on_action(cx.listener(Self::open_selected_file))
-            .on_action(cx.listener(Self::collapse_all_files))
-            .on_action(cx.listener(Self::focus_terminal))
-            .on_action(cx.listener(Self::new_file))
-            .on_action(cx.listener(Self::new_folder))
-            .on_action(cx.listener(Self::rename_file))
-            .on_action(cx.listener(Self::delete_file))
-            .on_action(cx.listener(Self::reveal_in_finder))
-            .on_action(cx.listener(Self::insert_file_path))
-            .on_action(cx.listener(Self::open_in_terminal))
-            .on_action(cx.listener(Self::copy_path))
-            .on_action(cx.listener(Self::copy_relative_path))
-            .on_action(cx.listener(|this, _: &Copy, _, cx| this.copy_file(false, cx)))
-            .on_action(cx.listener(|this, _: &Cut, _, cx| this.copy_file(true, cx)))
-            .on_action(cx.listener(|this, _: &Paste, window, cx| this.paste_file(window, cx)))
-            // 拖到空白处：挪到根目录。
-            .on_drop(cx.listener(|this, dragged: &DraggedFile, window, cx| {
-                let root = this.files_root();
-                this.drop_file(&dragged.path, root, window, cx);
-            }))
-            .bg(hsla(bg.mix(fg, 0.03)))
-            .text_size(px(font_size))
-            .child(self.render_panel_tabs(fg, bg, cx))
-            .child(header)
-            .child(list)
+        ))
     }
 
     /// 文件树的行。行高、箭头和图标跟着字号 `font_size` 一起缩放。新建时输入框插在

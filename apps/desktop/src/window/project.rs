@@ -249,6 +249,7 @@ impl WindowView {
                     this.sync_project_watch();
                     this.reload_stale_diff(cx);
                     this.list_tasks(cx);
+                    this.refresh_file_search(cx);
                     this.refresh_if_due(cx);
                 }
             })

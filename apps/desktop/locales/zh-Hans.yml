@@ -232,6 +232,10 @@ files:
   invalid_name: “%{name}”不能用作名字。
   unsupported: 这个系统上不支持移到废纸篓。
   ok: 好
+  search_placeholder: 查找文件
+  search_name: 名称
+  search_content: 内容
+  search_empty: 没有找到
 tooltip:
   show_sidebar: 显示侧栏
   hide_sidebar: 隐藏侧栏

@@ -232,6 +232,10 @@ files:
   invalid_name: "“%{name}” isn't a valid name."
   unsupported: Moving to the Trash isn't supported on this system.
   ok: OK
+  search_placeholder: Find files
+  search_name: Name
+  search_content: Content
+  search_empty: No results
 tooltip:
   show_sidebar: Show Sidebar
   hide_sidebar: Hide Sidebar

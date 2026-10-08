@@ -232,6 +232,10 @@ files:
   invalid_name: 「%{name}」不能用作名稱。
   unsupported: 這個系統上不支援丟到垃圾桶。
   ok: 好
+  search_placeholder: 尋找檔案
+  search_name: 名稱
+  search_content: 內容
+  search_empty: 沒有找到
 tooltip:
   show_sidebar: 顯示側欄
   hide_sidebar: 隱藏側欄

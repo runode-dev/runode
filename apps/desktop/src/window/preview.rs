@@ -28,8 +28,8 @@ use std::{
 
 use gpui::{
     App, ClipboardItem, Context, Div, Focusable as _, Image, ImageSource, MouseButton, MouseMoveEvent, RenderImage,
-    SMOOTH_SVG_SCALE_FACTOR, ScrollHandle, SharedString, Stateful, SvgRenderer, UniformListScrollHandle, Window, div,
-    linear_color_stop, linear_gradient, prelude::*, px,
+    SMOOTH_SVG_SCALE_FACTOR, ScrollHandle, ScrollStrategy, SharedString, Stateful, SvgRenderer,
+    UniformListScrollHandle, Window, div, linear_color_stop, linear_gradient, prelude::*, px,
 };
 use runode_git::{self as git, FileStatus, Section};
 use runode_preview::{Content, ImageFormat, Span};
@@ -319,6 +319,15 @@ impl WindowView {
     /// 时重读一次。文件树跟着定位到它。
     pub(super) fn open_preview(&mut self, path: &Path, pin: bool, cx: &mut Context<Self>) {
         self.open_tab(path, None, pin, cx);
+    }
+
+    /// 和 `open_preview` 一样打开 `path`，再选中第 `line` 行（从 0 数）、滚到中间。
+    pub(super) fn open_preview_at(&mut self, path: &Path, line: usize, pin: bool, cx: &mut Context<Self>) {
+        self.open_preview(path, pin, cx);
+        if let Some(preview) = self.preview_mut().filter(|preview| preview.path == path) {
+            preview.selection = Some((line, line));
+            preview.scroll.scroll_to_item(line, ScrollStrategy::Center);
+        }
     }
 
     /// 打开 `path` 的普通标签（`diff` 为空）或 diff 标签。
