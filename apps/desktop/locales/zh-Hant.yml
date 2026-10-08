@@ -231,7 +231,8 @@ tooltip:
   hide_git: 隱藏 Git
   show_files: 顯示檔案
   hide_files: 隱藏檔案
-  hide_panel: 收起面板
+  show_panel: 顯示面板
+  hide_panel: 隱藏面板
   show_ignored: 顯示被 git 忽略的檔案
   hide_ignored: 隱藏被 git 忽略的檔案
   close_preview: 關閉預覽

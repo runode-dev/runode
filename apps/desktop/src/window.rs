@@ -77,7 +77,7 @@ pub use remote::serve_requests;
 pub use status_bar::watch as watch_status;
 pub use titlebar::titlebar_options;
 
-use crate::{assets::PANEL_RIGHT_ICON, config::AppConfig, prespawn::Prespawned, terminal_view::TerminalView, ui::hsla};
+use crate::{config::AppConfig, prespawn::Prespawned, terminal_view::TerminalView, ui::hsla};
 use model::{PaneLayout, Workspace, WorkspaceId, home_dir};
 use persist::format::SavedWindow;
 use titlebar::titled;
@@ -251,6 +251,8 @@ pub struct WindowView {
     sidebar_scroll: ScrollHandle,
     /// 右侧面板显示的是文件树还是 Git，收着时为空；拖动过宽度时是那个宽度，没拖过时用默认宽度。
     panel: Option<project::SidePanel>,
+    /// 右侧面板上次显示的那一页，标题栏的开关按钮打开它。
+    last_panel: project::SidePanel,
     panel_width: Option<f32>,
     /// Git 面板里改动的文件以树形式查看，否则是列表；整个窗口一个设置。
     git_tree: bool,
@@ -376,6 +378,7 @@ impl WindowView {
             sidebar_width: None,
             sidebar_scroll: ScrollHandle::new(),
             panel: None,
+            last_panel: project::SidePanel::Files,
             panel_width: None,
             git_tree: false,
             git_graph_collapsed: false,
@@ -595,11 +598,11 @@ impl WindowView {
             self.panel.is_some().then(|| self.render_right_handle(Divider::Panel, widths.panel, cx)),
         ];
         let titlebar_shown = !fullscreen || show_tabs;
-        // 右侧面板收着时它的开关按钮落在标题栏右端：只开着预览栏时落在预览栏顶上，什么都没开时
-        // 标题栏给它们让位；全屏又只有一个标签时没有地方放，不画。面板展开时按钮是面板顶上的标签。
+        // 右侧面板的开关按钮：右侧都收着时落在标题栏右端，标题栏给它让位；打开着时落在
+        // 面板顶上。全屏又只有一个标签、右侧也都收着时没有地方放，不画。
         let right_inset = if titlebar_shown && !self.project_visible() { project::PANEL_TOGGLES_INSET } else { 0. };
-        let panel_toggles = (self.panel.is_none() && (titlebar_shown || preview_shown)).then(|| {
-            self.render_panel_toggles(PANEL_RIGHT_ICON, fg, bg, cx)
+        let panel_toggles = (titlebar_shown || self.project_visible()).then(|| {
+            self.render_panel_toggle(fg, bg, cx)
                 .absolute()
                 .top(px((TITLEBAR_HEIGHT - project::TOGGLE_HEIGHT) / 2.))
                 .right(px(project::TOGGLE_MARGIN))
@@ -754,10 +757,7 @@ impl WindowView {
             .children(machine.map(|machine| machine.mr(px(12.))))
             .child(strip)
             .child(self.render_new_tab_button_card(fg, frame, cx))
-            // 右侧面板展开时开关按钮是面板顶上的标签。
-            .when(self.panel.is_none(), |titlebar| {
-                titlebar.child(self.render_panel_toggles(PANEL_RIGHT_ICON, fg, frame, cx))
-            });
+            .child(self.render_panel_toggle(fg, frame, cx));
         let content = div()
             .flex_1()
             .min_h_0()

@@ -60,13 +60,13 @@ const PREVIEW_WIDTH: f32 = 480.;
 const PREVIEW_MIN_WIDTH: f32 = 240.;
 /// 右侧面板再宽也给终端区留这么宽。
 const MAIN_MIN_WIDTH: f32 = 240.;
-/// 开关按钮的尺寸和间距：面板收着时在标题栏右上角，展开时是面板顶上的标签。
+/// 标题栏右上角开关按钮和右侧面板顶上标签的尺寸和间距。
 const TOGGLE_WIDTH: f32 = 28.;
 pub(super) const TOGGLE_HEIGHT: f32 = 24.;
 const TOGGLE_GAP: f32 = 4.;
 pub(super) const TOGGLE_MARGIN: f32 = 10.;
 /// 右侧面板都收着时标题栏右边给开关按钮让出的宽度。
-pub(super) const PANEL_TOGGLES_INSET: f32 = TOGGLE_WIDTH * 2. + TOGGLE_GAP + TOGGLE_MARGIN + 6.;
+pub(super) const PANEL_TOGGLES_INSET: f32 = TOGGLE_WIDTH + TOGGLE_MARGIN + 6.;
 
 /// 改动和文件状态的颜色，深浅背景上都看得清。
 pub(super) const ADDED: Rgb = Rgb(0x57, 0xAB, 0x5A);
@@ -258,7 +258,7 @@ impl WindowView {
     }
 
     /// 面板都收着时不读整份状态，只在终端换了目录、或离上次问过 `REPO_PROBE_INTERVAL` 之后
-    /// 问一下当前目录在不在 git 仓库里，标题栏据此决定显不显示 Git 按钮。
+    /// 问一下当前目录在不在 git 仓库里，展开时据此决定显不显示 Git 标签。
     fn probe_repo(&mut self, cx: &mut Context<Self>) {
         let dir = self.project_dir(cx);
         let workspace = &mut self.workspaces[self.active];
@@ -355,6 +355,9 @@ impl WindowView {
     fn set_panel(&mut self, panel: Option<SidePanel>, window: &mut Window, cx: &mut Context<Self>) {
         let (git_was_shown, files_were_shown) = (self.git_shown(), self.files_shown());
         self.panel = panel;
+        if let Some(panel) = panel {
+            self.last_panel = panel;
+        }
         // 收起或切走时焦点还在提交说明框或文件树里的话，按键就没处去了，交回终端。
         if git_was_shown && !self.git_shown() {
             if self.git_focus.contains_focused(window, cx) {
@@ -452,7 +455,7 @@ impl WindowView {
             )
     }
 
-    /// 当前目录问过或读过了且不在 git 仓库里时藏起 Git 按钮；面板开着时仍留着，不然没处关它。
+    /// 当前目录问过或读过了且不在 git 仓库里时藏起 Git 标签；正显示着 Git 时仍留着。
     fn git_button_visible(&self) -> bool {
         self.git_shown() || self.workspace().project.in_repo != Some(false)
     }
@@ -472,73 +475,50 @@ impl WindowView {
         width + CARD_GAP * shown + CARD_GAP / 2.
     }
 
-    /// 切到 Git 面板和文件树的两个按钮，显示着的那个底色亮一些，再点一下收起右侧面板。面板收着时
-    /// 在标题栏右上角，位置由调用方接着写；展开时是面板顶上的标签（`render_panel_tabs`）。
-    /// `files_icon` 是文件树那个按钮的图标。
-    pub(super) fn render_panel_toggles(
-        &self,
-        files_icon: &'static str,
-        fg: Rgb,
-        bg: Rgb,
-        cx: &mut Context<Self>,
-    ) -> Div {
-        type Toggle = fn(&mut WindowView, &mut Window, &mut Context<WindowView>);
-        let button = |id: &'static str, icon: &'static str, shown: bool, cx: &mut Context<Self>| {
-            let (show, hide, action, toggle): (_, _, &dyn Action, Toggle) = match id {
-                "toggle-git" => (
-                    rust_i18n::t!("tooltip.show_git"),
-                    rust_i18n::t!("tooltip.hide_git"),
-                    &ToggleGit,
-                    |this, window, cx| this.toggle_git(&ToggleGit, window, cx),
-                ),
-                _ => (
-                    rust_i18n::t!("tooltip.show_files"),
-                    rust_i18n::t!("tooltip.hide_files"),
-                    &ToggleFiles,
-                    |this, window, cx| this.toggle_files(&ToggleFiles, window, cx),
-                ),
-            };
-            let tooltip = tooltip(if shown { hide } else { show }, Some(action), fg, bg);
-            icon_toggle(id, icon, 16., shown, fg, bg)
-                .w(px(TOGGLE_WIDTH))
-                .h(px(TOGGLE_HEIGHT))
-                .tooltip(tooltip)
-                .on_mouse_down(
-                    MouseButton::Left,
-                    cx.listener(move |this, _, window, cx| {
-                        cx.stop_propagation();
-                        toggle(this, window, cx);
-                    }),
-                )
-        };
-        div()
-            .flex_none()
-            .flex()
-            .gap(px(TOGGLE_GAP))
-            .when(self.git_button_visible(), |toggles| {
-                toggles.child(button("toggle-git", GIT_ICON, self.git_shown(), cx))
-            })
-            .child(button("toggle-files", files_icon, self.files_shown(), cx))
-    }
-
-    /// 右侧面板顶上那排切换文件树和 Git 的标签，最右边是收起按钮。
-    pub(super) fn render_panel_tabs(&self, fg: Rgb, bg: Rgb, cx: &mut Context<Self>) -> Div {
-        let collapse = icon_toggle("collapse-panel", PANEL_RIGHT_ICON, 16., false, fg, bg)
+    /// 标题栏右上角开关右侧面板的按钮，展开时底色亮一些，打开的是上次显示的那一页。位置由调用方
+    /// 接着写。
+    pub(super) fn render_panel_toggle(&self, fg: Rgb, bg: Rgb, cx: &mut Context<Self>) -> Stateful<Div> {
+        let shown = self.panel.is_some();
+        let text = if shown { rust_i18n::t!("tooltip.hide_panel") } else { rust_i18n::t!("tooltip.show_panel") };
+        icon_toggle("toggle-panel", PANEL_RIGHT_ICON, 16., shown, fg, bg)
             .w(px(TOGGLE_WIDTH))
             .h(px(TOGGLE_HEIGHT))
-            .tooltip(tooltip(rust_i18n::t!("tooltip.hide_panel"), None, fg, bg))
+            .tooltip(tooltip(text, None, fg, bg))
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(|this, _, window, cx| {
                     cx.stop_propagation();
-                    this.set_panel(None, window, cx);
+                    let panel = if this.panel.is_some() { None } else { Some(this.last_panel) };
+                    this.set_panel(panel, window, cx);
                 }),
-            );
+            )
+    }
+
+    /// 右侧面板顶上那排切换文件树和 Git 的标签，显示着的那个底色亮一些。经典样式下标题栏右上角的
+    /// 开关按钮盖在这一条的右端。
+    pub(super) fn render_panel_tabs(&self, fg: Rgb, bg: Rgb, cx: &mut Context<Self>) -> Div {
+        let tab = |page: SidePanel, cx: &mut Context<Self>| {
+            let (id, icon, text, action): (_, _, _, &dyn Action) = match page {
+                SidePanel::Files => ("tab-files", FILES_ICON, rust_i18n::t!("tooltip.show_files"), &ToggleFiles),
+                SidePanel::Git => ("tab-git", GIT_ICON, rust_i18n::t!("tooltip.show_git"), &ToggleGit),
+            };
+            icon_toggle(id, icon, 16., self.panel == Some(page), fg, bg)
+                .w(px(TOGGLE_WIDTH))
+                .h(px(TOGGLE_HEIGHT))
+                .tooltip(tooltip(text, Some(action), fg, bg))
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(move |this, _, window, cx| {
+                        cx.stop_propagation();
+                        this.set_panel(Some(page), window, cx);
+                    }),
+                )
+        };
         self.panel_header(fg, cx)
             .px(px(6.))
-            .child(self.render_panel_toggles(FILES_ICON, fg, bg, cx))
-            .child(div().flex_1())
-            .child(collapse)
+            .gap(px(TOGGLE_GAP))
+            .child(tab(SidePanel::Files, cx))
+            .when(self.git_button_visible(), |tabs| tabs.child(tab(SidePanel::Git, cx)))
     }
 
     /// 预览栏和右侧面板顶上的一条。经典样式下和标题栏等高，能拖动窗口、双击缩放；卡片样式下是

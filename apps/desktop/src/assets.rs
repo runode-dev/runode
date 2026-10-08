@@ -15,8 +15,7 @@ icons! {
     FILES, "icons/", "../assets/icons/";
     /// 侧栏开关的图标。
     pub SIDEBAR_ICON = "sidebar",
-    /// Git 面板和文件树开关的图标；文件树的开关在标题栏上画成右侧栏，在右侧面板顶上的标签里画成
-    /// 叠着的文件，右侧栏图标在那里是收起按钮。
+    /// 右侧面板顶上 Git 和文件树标签的图标，以及标题栏右上角开关右侧面板的图标。
     pub GIT_ICON = "git",
     pub FILES_ICON = "files",
     pub PANEL_RIGHT_ICON = "panel-right",
