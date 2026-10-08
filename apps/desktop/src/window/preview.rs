@@ -38,7 +38,11 @@ use runode_shared_types::color::Rgb;
 pub(in crate::window) use diff::DiffTarget;
 pub(in crate::window) use tabs::PreviewTabs;
 
-use super::{WindowView, model::base_name, project::panel_shell};
+use super::{
+    WindowView,
+    model::base_name,
+    project::{PANEL_TOGGLES_INSET, panel_shell},
+};
 use crate::{
     config::AppConfig,
     ui::{
@@ -582,7 +586,7 @@ impl WindowView {
         // 预览栏在最右边时，空白至少留出右上角面板开关的宽度，标签不钻到开关底下。
         let filler = div()
             .flex_1()
-            .min_w(px(if rightmost { self.panel_toggles_inset() } else { 0. }))
+            .min_w(px(if rightmost { PANEL_TOGGLES_INSET } else { 0. }))
             .h_full()
             .relative()
             .child(tab_underline(fg));

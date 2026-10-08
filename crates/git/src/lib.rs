@@ -54,6 +54,11 @@ pub(crate) fn find_repo(dir: &Path) -> Option<(PathBuf, PathBuf)> {
     Some((root, git_dir))
 }
 
+/// `dir` 所在仓库的根目录，按 `dir` 的写法；不在仓库里时为空。
+pub fn repo_root(dir: &Path) -> Option<PathBuf> {
+    find_repo(dir).map(|(root, _)| root)
+}
+
 /// `dir` 在不在 git 仓库里；比读整份状态便宜，只问一次 git。
 pub fn in_repo(dir: &Path) -> bool {
     find_repo(dir).is_some()

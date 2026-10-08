@@ -1,4 +1,5 @@
-//! 列一个目录里能跑的项目命令（`ClientMsg::ListProjectTasks`）：往上找最近的 Makefile 和 package.json，
+//! 列一个目录里能跑的项目命令（`ClientMsg::ListProjectTasks`）：往上找最近的 `.runode/tasks.json`、Makefile 和
+//! package.json，
 //! 拼好在这个目录里能直接跑的命令行；列不了时回 `Error`，连接照旧。
 
 mod common;
@@ -60,6 +61,41 @@ fn nearest_makefile_and_package_json_are_listed() {
         ],
     };
     assert_eq!(reply, expected);
+}
+
+/// 自己加的命令排在最前，按文件里的先后；在上级目录里的在子 shell 里 cd 过去跑，值不是字符串的跳过。
+#[test]
+fn custom_tasks_come_first() {
+    let dir = temp_dir("taskscustom");
+    let (_host, socket) = listen(&dir);
+    let root = dir.join("repo");
+    let src = root.join("src");
+    fs::create_dir_all(root.join(".runode")).unwrap();
+    fs::create_dir_all(&src).unwrap();
+    fs::write(
+        root.join(".runode").join("tasks.json"),
+        r#"{"tasks":{"serve":"cargo run -- serve","lint":"cargo clippy","n":1}}"#,
+    )
+    .unwrap();
+    fs::write(root.join("Makefile"), "test:\n\tcargo test\n").unwrap();
+
+    let mut peer = Peer::hello(&socket, false);
+    match list(&mut peer, 3, src) {
+        HostMsg::ProjectTasks { req: 3, sources, .. } => {
+            assert_eq!(sources.len(), 2);
+            assert_eq!(sources[0].kind, TaskSourceKind::Custom);
+            assert_eq!(sources[0].file, root.join(".runode").join("tasks.json"));
+            assert_eq!(
+                sources[0].tasks,
+                [
+                    task("serve", "(cd .. && cargo run -- serve)", Some("cargo run -- serve")),
+                    task("lint", "(cd .. && cargo clippy)", Some("cargo clippy")),
+                ]
+            );
+            assert_eq!(sources[1].kind, TaskSourceKind::Makefile);
+        }
+        other => panic!("unexpected reply: {other:?}"),
+    }
 }
 
 /// `packageManager` 字段比锁文件说了算；名字里有空格的加引号。

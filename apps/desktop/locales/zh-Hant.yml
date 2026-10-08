@@ -197,6 +197,16 @@ paste:
 search:
   placeholder: 搜尋
   no_results: 沒有結果
+tasks:
+  add: "新增命令…"
+  add_title: "新增命令"
+  name: "名稱"
+  name_placeholder: "例如 dev，留空時用命令本身"
+  command: "命令"
+  command_placeholder: "例如 cargo run -- serve"
+  add_hint: "儲存在專案的 %{file} 裡，在專案目錄裡執行，手機上也能用；要刪改直接改這個檔案。"
+  cancel: "取消"
+  save: "新增"
 files:
   new_file: 新增檔案…
   new_folder: 新增檔案夾…

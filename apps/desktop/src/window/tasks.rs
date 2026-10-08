@@ -1,14 +1,19 @@
-//! 标题栏右上角的项目命令：终端目录往上最近的 Makefile 的目标和 package.json 的 scripts，由宿主列出、
-//! 拼好命令行（`ClientMsg::ListProjectTasks`），和手机会话卡片上的是同一份。右侧面板开关左边的按钮
-//! 弹出按文件分组的菜单，点一条开一个新标签在列命令的目录里跑它；一条命令都没有时不显示按钮。
+//! 标题栏右上角的项目命令：终端目录往上最近的自己加的命令、Makefile 的目标和 package.json 的 scripts，
+//! 由宿主列出、拼好命令行（`ClientMsg::ListProjectTasks`），和手机会话卡片上的是同一份。右侧面板开关
+//! 左边的按钮弹出按文件分组的菜单，点一条开一个新标签在列命令的目录里跑它；菜单最后一项添加自己的
+//! 命令，对话框在 `add`。
+
+mod add;
 
 use std::path::Path;
 
 use gpui::{Action, Context, Div, Focusable, MouseButton, SharedString, Stateful, Window, prelude::*, px};
 use runode_shared_types::color::Rgb;
 
+pub(super) use add::AddTaskDialog;
+
 use super::{
-    files::labeled_item,
+    files::{labeled_item, menu_item},
     model::display_dir,
     project::{TOGGLE_HEIGHT, TOGGLE_WIDTH},
     titlebar::icon_toggle,
@@ -16,7 +21,8 @@ use super::{
 use crate::{assets::PLAY_ICON, host_client, ui::tooltip::tooltip, window::WindowView};
 
 /// 宿主从这些文件里读项目命令（锁文件决定用哪个包管理器），它们变了就重列。
-const TASK_FILES: [&str; 9] = [
+const TASK_FILES: [&str; 10] = [
+    "tasks.json",
     "GNUmakefile",
     "makefile",
     "Makefile",
@@ -34,6 +40,11 @@ const TASK_FILES: [&str; 9] = [
 pub(super) struct RunTask {
     command: String,
 }
+
+/// 命令菜单最后一项：打开添加命令的对话框。
+#[derive(Clone, PartialEq, Action)]
+#[action(namespace = runode, no_json)]
+pub(super) struct AddTask;
 
 pub(in crate::window) fn is_task_file(path: &Path) -> bool {
     path.file_name().is_some_and(|name| TASK_FILES.iter().any(|file| name == *file))
@@ -81,12 +92,6 @@ impl WindowView {
         .detach();
     }
 
-    /// 有能跑的命令，标题栏上显示命令按钮。
-    pub(super) fn has_tasks(&self) -> bool {
-        let tasks = &self.workspace().project.tasks;
-        tasks.as_ref().is_some_and(|(_, sources)| sources.iter().any(|source| !source.tasks.is_empty()))
-    }
-
     /// 命令菜单里点了一条：在当前标签右边开一个新标签，在列命令的目录里跑它。
     pub(super) fn run_task(&mut self, action: &RunTask, window: &mut Window, cx: &mut Context<Self>) {
         let Some((dir, _)) = &self.workspace().project.tasks else {
@@ -102,7 +107,13 @@ impl WindowView {
     }
 
     /// 标题栏右上角、面板开关左边的命令按钮，菜单挂在它下面，开着时底色亮一些。
-    pub(super) fn render_tasks_button(&self, fg: Rgb, bg: Rgb, cx: &mut Context<Self>) -> Stateful<Div> {
+    pub(super) fn render_tasks_button(
+        &self,
+        fg: Rgb,
+        bg: Rgb,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> Stateful<Div> {
         icon_toggle("tasks", PLAY_ICON, 16., self.dropdown_open(), fg, bg)
             .w(px(TOGGLE_WIDTH))
             .h(px(TOGGLE_HEIGHT))
@@ -122,17 +133,20 @@ impl WindowView {
                     this.open_tasks_menu(cx);
                 }),
             )
-            .children(self.render_dropdown(fg, bg, cx))
+            .children(self.render_dropdown(fg, bg, window, cx))
     }
 
     /// 在命令按钮下面弹出命令菜单：每个文件一段，段首灰着写文件，在列命令的目录里的写相对路径，
-    /// 在上层目录里的写 `~/…`；命令名后面淡淡地写它的说明。
+    /// 在上层目录里的写 `~/…`；命令名后面淡淡地写它的说明。最后是添加命令。
     fn open_tasks_menu(&mut self, cx: &mut Context<Self>) {
-        let Some((dir, sources)) = &self.workspace().project.tasks else {
-            return;
-        };
         let mut items = Vec::new();
-        for source in sources.iter().filter(|source| !source.tasks.is_empty()) {
+        let listed = self.workspace().project.tasks.as_ref();
+        for (dir, source) in
+            listed.into_iter().flat_map(|(dir, sources)| sources.iter().map(move |source| (dir, source)))
+        {
+            if source.tasks.is_empty() {
+                continue;
+            }
             if !items.is_empty() {
                 items.push(None);
             }
@@ -147,6 +161,10 @@ impl WindowView {
                 Some(labeled_item(task.name.clone(), description.map(SharedString::from), Some(Box::new(action))))
             }));
         }
+        if !items.is_empty() {
+            items.push(None);
+        }
+        items.push(Some(menu_item("tasks.add", Box::new(AddTask), true, cx)));
         let target = self.focus_handle(cx);
         self.open_dropdown(items, target, cx);
         // shortcut: 面板收着时不监听目录，Makefile、package.json 改了要到下次打开菜单才看得到；要即时的话

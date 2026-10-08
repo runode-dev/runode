@@ -1,9 +1,11 @@
 import Foundation
 
-/// 一个目录里能跑的项目命令：Makefile 的目标、package.json 的 scripts，回 `ListProjectTasks`。和宿主的
+/// 一个目录里能跑的项目命令：自己加的命令（`.runode/tasks.json`）、Makefile 的目标、package.json 的 scripts，
+/// 回 `ListProjectTasks`。和宿主的
 /// `TaskSource` 等一一对应。完整的命令行由宿主拼好，手机原样打进 shell。
 public struct TaskSource: Hashable, Sendable, Decodable {
     public enum Kind: String, Hashable, Sendable {
+        case custom
         case makefile
         case packageJson = "package_json"
         /// 新的电脑上多出来的种类。

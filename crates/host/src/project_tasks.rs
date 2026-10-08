@@ -1,6 +1,6 @@
 //! 列一个目录里能跑的项目命令（`ClientMsg::ListProjectTasks`）：手机在会话卡片上列出来，点一下就在
-//! 那个会话里跑。从目录往上找最近的 Makefile 和最近的 package.json，读出目标和 scripts，拼好在这个
-//! 目录里能直接跑的命令行，回 `HostMsg::ProjectTasks`。只读几个小文件，在连接的读线程里当场办。
+//! 那个会话里跑。从目录往上找最近的 `.runode/tasks.json`、Makefile 和 package.json，读出自己加的命令、
+//! 目标和 scripts，拼好在这个目录里能直接跑的命令行，回 `HostMsg::ProjectTasks`。只读几个小文件，在连接的读线程里当场办。
 
 use std::{
     fs,
@@ -8,7 +8,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use runode_protocol::{MAX_PROJECT_TASKS, ProjectTask, TaskSource, TaskSourceKind};
+use runode_protocol::{CUSTOM_TASKS_FILE, MAX_PROJECT_TASKS, ProjectTask, TaskSource, TaskSourceKind};
 
 /// make 按这个顺序找默认的 makefile。
 const MAKEFILE_NAMES: [&str; 3] = ["GNUmakefile", "makefile", "Makefile"];
@@ -24,7 +24,7 @@ const LOCKFILES: [(&str, &str); 5] = [
 ];
 const PACKAGE_MANAGERS: [&str; 4] = ["npm", "pnpm", "yarn", "bun"];
 
-/// 列出 `dir` 里能跑的命令，先 Makefile 后 package.json。办不了时返回给前端看的原因。
+/// 列出 `dir` 里能跑的命令，依次是自己加的、Makefile 和 package.json。办不了时返回给前端看的原因。
 pub(crate) fn list(dir: &Path) -> Result<Vec<TaskSource>, String> {
     if !dir.is_absolute() {
         return Err(format!("{} is not an absolute path", dir.display()));
@@ -35,6 +35,31 @@ pub(crate) fn list(dir: &Path) -> Result<Vec<TaskSource>, String> {
     let home = runode_paths::Dirs::from_env().home;
     let ancestors = search_path(dir, home.as_deref());
     let mut sources = Vec::new();
+    let custom = ancestors.iter().map(|at| at.join(CUSTOM_TASKS_FILE)).find(|file| file.is_file());
+    if let Some(file) = custom
+        && let Some(text) = read_small(&file)
+        && let Ok(json) = serde_json::from_str::<serde_json::Value>(&text)
+    {
+        // 在 `.runode` 的上一级跑；那是 `dir` 的上级时在子 shell 里 cd 过去，不改会话所在的目录。
+        let at = file.parent().and_then(Path::parent).unwrap_or(dir);
+        let rel = relative(dir, at);
+        let entries = json.get("tasks").and_then(serde_json::Value::as_object);
+        let entries: Vec<_> = entries.into_iter().flatten().filter_map(|(k, v)| Some((k, v.as_str()?))).collect();
+        let truncated = entries.len() > MAX_PROJECT_TASKS;
+        let tasks = entries
+            .into_iter()
+            .take(MAX_PROJECT_TASKS)
+            .map(|(name, line)| ProjectTask {
+                command: match &rel {
+                    None => line.to_owned(),
+                    Some(rel) => format!("(cd {} && {line})", quote(rel)),
+                },
+                name: name.clone(),
+                description: Some(line.to_owned()),
+            })
+            .collect();
+        sources.push(TaskSource { kind: TaskSourceKind::Custom, file, tasks, truncated });
+    }
     let makefile = ancestors.iter().find_map(|at| named_file(at, &MAKEFILE_NAMES));
     if let Some(file) = makefile
         && let Some(text) = read_small(&file)

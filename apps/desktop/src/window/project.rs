@@ -65,6 +65,8 @@ pub(super) const TOGGLE_WIDTH: f32 = 28.;
 pub(super) const TOGGLE_HEIGHT: f32 = 24.;
 const TOGGLE_GAP: f32 = 4.;
 pub(super) const TOGGLE_MARGIN: f32 = 10.;
+/// 右侧面板都收着时标题栏右边给右上角的命令按钮和面板开关让出的宽度。
+pub(super) const PANEL_TOGGLES_INSET: f32 = TOGGLE_WIDTH * 2. + TOGGLE_GAP + TOGGLE_MARGIN + 6.;
 
 /// 改动和文件状态的颜色，深浅背景上都看得清。
 pub(super) const ADDED: Rgb = Rgb(0x57, 0xAB, 0x5A);
@@ -474,15 +476,9 @@ impl WindowView {
         width + CARD_GAP * shown + CARD_GAP / 2.
     }
 
-    /// 右侧面板都收着时标题栏右边给右上角那几个按钮让出的宽度；有项目命令时多一个命令按钮。
-    pub(super) fn panel_toggles_inset(&self) -> f32 {
-        let tasks = if self.has_tasks() { TOGGLE_WIDTH + TOGGLE_GAP } else { 0. };
-        TOGGLE_WIDTH + TOGGLE_MARGIN + 6. + tasks
-    }
-
-    /// 标题栏右上角的按钮：有项目命令时先是命令按钮，然后是开关右侧面板的按钮，展开时底色亮一些，
-    /// 打开的是上次显示的那一页。位置由调用方接着写。
-    pub(super) fn render_panel_toggles(&self, fg: Rgb, bg: Rgb, cx: &mut Context<Self>) -> Div {
+    /// 标题栏右上角的按钮：先是项目命令按钮，然后是开关右侧面板的按钮，展开时底色亮一些，打开的是
+    /// 上次显示的那一页。位置由调用方接着写。
+    pub(super) fn render_panel_toggles(&self, fg: Rgb, bg: Rgb, window: &Window, cx: &mut Context<Self>) -> Div {
         let shown = self.panel.is_some();
         let text = if shown { rust_i18n::t!("tooltip.hide_panel") } else { rust_i18n::t!("tooltip.show_panel") };
         let toggle = icon_toggle("toggle-panel", PANEL_RIGHT_ICON, 16., shown, fg, bg)
@@ -502,7 +498,7 @@ impl WindowView {
             .flex()
             .items_center()
             .gap(px(TOGGLE_GAP))
-            .when(self.has_tasks(), |toggles| toggles.child(self.render_tasks_button(fg, bg, cx)))
+            .child(self.render_tasks_button(fg, bg, window, cx))
             .child(toggle)
     }
 

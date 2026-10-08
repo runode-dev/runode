@@ -280,6 +280,8 @@ pub struct WindowView {
     renaming: Option<Renaming>,
     /// 新建 workspace 的对话框。
     new_workspace: Option<new_workspace::NewWorkspaceDialog>,
+    /// 添加项目命令的对话框。
+    add_task: Option<tasks::AddTaskDialog>,
     /// 开着的手机端引导页，盖住标签和分屏。
     mobile: Option<mobile::MobilePage>,
     /// 当前 workspace 里没有标签时窗口的焦点，快捷键（新开标签等）照常派发得到。
@@ -393,6 +395,7 @@ impl WindowView {
             file_clipboard: None,
             renaming: None,
             new_workspace: None,
+            add_task: None,
             mobile: None,
             empty_focus: cx.focus_handle(),
             agent_picker: None,
@@ -496,11 +499,12 @@ impl Render for WindowView {
             (bg, self.render_classic_body(fg, bg, window, cx))
         };
         let drag = self.dragging_divider.map(|divider| self.render_divider_drag(divider, cx));
-        let file_menu = self.render_file_menu(fg, bg, cx);
+        let file_menu = self.render_file_menu(fg, bg, window, cx);
         let agent_picker = self.render_agent_picker(fg, bg, window, cx);
         let arrange_picker = self.render_arrange_picker(fg, bg, cx);
         let branch_picker = self.render_branch_picker(fg, bg, cx);
         let new_workspace = self.render_new_workspace(fg, bg, cx);
+        let add_task = self.render_add_task(fg, bg, cx);
         let status_bar = status_bar::shown(cx).then(|| self.render_status_bar(fg, bg, cx));
         div()
             .id("window")
@@ -532,6 +536,7 @@ impl Render for WindowView {
             .on_action(cx.listener(Self::toggle_git))
             .on_action(cx.listener(Self::toggle_status_item))
             .on_action(cx.listener(Self::run_task))
+            .on_action(cx.listener(Self::add_task))
             .on_action(cx.listener(Self::toggle_status_bar))
             // 侧栏按着切换 workspace 的修饰键或 ⌘ 时才显示快捷键提示，按下、松开都要重画。挂在根上：修饰键的事件
             // 只沿焦点所在的路径传，侧栏不在这条路上。
@@ -557,6 +562,7 @@ impl Render for WindowView {
             .children(arrange_picker)
             .children(branch_picker)
             .children(new_workspace)
+            .children(add_task)
     }
 }
 
@@ -599,9 +605,9 @@ impl WindowView {
         let titlebar_shown = !fullscreen || show_tabs;
         // 右侧面板的开关按钮：右侧都收着时落在标题栏右端，标题栏给它让位；打开着时落在
         // 面板顶上。全屏又只有一个标签、右侧也都收着时没有地方放，不画。
-        let right_inset = if titlebar_shown && !self.project_visible() { self.panel_toggles_inset() } else { 0. };
+        let right_inset = if titlebar_shown && !self.project_visible() { project::PANEL_TOGGLES_INSET } else { 0. };
         let panel_toggles = (titlebar_shown || self.project_visible()).then(|| {
-            self.render_panel_toggles(fg, bg, cx)
+            self.render_panel_toggles(fg, bg, window, cx)
                 .absolute()
                 .top(px((TITLEBAR_HEIGHT - project::TOGGLE_HEIGHT) / 2.))
                 .right(px(project::TOGGLE_MARGIN))
@@ -725,7 +731,7 @@ impl WindowView {
             + left_inset
             + machine.as_ref().map_or(0., |_| machine::MACHINE_MAX_WIDTH + 12.)
             + NEW_TAB_BUTTON_WIDTH
-            + self.panel_toggles_inset()
+            + project::PANEL_TOGGLES_INSET
             + widths.total();
         let tab_width = px(((viewport - fixed) / tab_count.max(1) as f32).max(TAB_MIN_WIDTH));
         let track_bg = hsla(tab_track_colors(fg, bg).0);
@@ -756,7 +762,7 @@ impl WindowView {
             .children(machine.map(|machine| machine.mr(px(12.))))
             .child(strip)
             .child(self.render_new_tab_button_card(fg, frame, cx))
-            .child(self.render_panel_toggles(fg, frame, cx));
+            .child(self.render_panel_toggles(fg, frame, window, cx));
         let content = div()
             .flex_1()
             .min_h_0()

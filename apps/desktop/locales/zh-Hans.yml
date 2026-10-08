@@ -197,6 +197,16 @@ paste:
 search:
   placeholder: 搜索
   no_results: 无结果
+tasks:
+  add: "添加命令…"
+  add_title: "添加命令"
+  name: "名字"
+  name_placeholder: "比如 dev，空着时用命令本身"
+  command: "命令"
+  command_placeholder: "比如 cargo run -- serve"
+  add_hint: "保存在项目的 %{file} 里，在项目目录里跑，手机上也能用；要删改直接改这个文件。"
+  cancel: "取消"
+  save: "添加"
 files:
   new_file: 新建文件…
   new_folder: 新建文件夹…

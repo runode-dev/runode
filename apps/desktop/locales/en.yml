@@ -197,6 +197,16 @@ paste:
 search:
   placeholder: Search
   no_results: No results
+tasks:
+  add: "Add Task…"
+  add_title: "Add Task"
+  name: "Name"
+  name_placeholder: "e.g. dev; defaults to the command"
+  command: "Command"
+  command_placeholder: "e.g. cargo run -- serve"
+  add_hint: "Saved in the project's %{file} and run in the project directory, also on your phone. Edit that file to change or remove tasks."
+  cancel: "Cancel"
+  save: "Add"
 files:
   new_file: New File…
   new_folder: New Folder…

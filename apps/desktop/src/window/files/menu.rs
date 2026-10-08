@@ -20,7 +20,7 @@ use crate::{
         hsla,
         tooltip::{shortcut_text, tooltip},
     },
-    window::WindowView,
+    window::{TITLEBAR_HEIGHT, WindowView},
 };
 
 /// 菜单离窗口边缘至少留这么宽。
@@ -28,7 +28,7 @@ const MENU_MARGIN: f32 = 8.;
 /// 按钮下面弹出的菜单离按钮这么远。
 const DROPDOWN_GAP: f32 = 4.;
 const MENU_WIDTH: f32 = 240.;
-/// 项多了在菜单里滚动。
+/// 菜单最高这么高，窗口矮时不超出窗口，项多了在菜单里滚动。
 const MENU_MAX_HEIGHT: f32 = 480.;
 
 /// 菜单里的一项：点了把 `action` 派发给菜单的 `target`，和按快捷键走同一条路；没有 `action` 的
@@ -188,9 +188,16 @@ impl WindowView {
     }
 
     /// 右键菜单，盖在窗口最上层，左上角对着右键按下的位置。
-    pub(in crate::window) fn render_file_menu(&self, fg: Rgb, bg: Rgb, cx: &mut Context<Self>) -> Option<AnyElement> {
+    pub(in crate::window) fn render_file_menu(
+        &self,
+        fg: Rgb,
+        bg: Rgb,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
         let position = self.file_menu.as_ref()?.position?;
-        let list = self.render_menu_list(fg, bg, cx)?;
+        let max_height = f32::from(window.viewport_size().height) - MENU_MARGIN * 2.;
+        let list = self.render_menu_list(max_height, fg, bg, cx)?;
         Some(
             deferred(anchored().position(position).snap_to_window_with_margin(px(MENU_MARGIN)).child(list))
                 .with_priority(1)
@@ -199,12 +206,19 @@ impl WindowView {
     }
 
     /// 挂在按钮下面的菜单，按钮把它作为子元素：右上角对着按钮的右下角，往下让出一点；放不下时
-    /// 贴着窗口边挪进来。
-    pub(in crate::window) fn render_dropdown(&self, fg: Rgb, bg: Rgb, cx: &mut Context<Self>) -> Option<Div> {
+    /// 贴着窗口边挪进来。按钮在标题栏里，菜单最高到窗口底边。
+    pub(in crate::window) fn render_dropdown(
+        &self,
+        fg: Rgb,
+        bg: Rgb,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> Option<Div> {
         if !self.dropdown_open() {
             return None;
         }
-        let list = self.render_menu_list(fg, bg, cx)?;
+        let max_height = f32::from(window.viewport_size().height) - TITLEBAR_HEIGHT - DROPDOWN_GAP - MENU_MARGIN;
+        let list = self.render_menu_list(max_height, fg, bg, cx)?;
         Some(
             div().absolute().bottom_0().right_0().child(
                 deferred(
@@ -219,8 +233,8 @@ impl WindowView {
         )
     }
 
-    /// 菜单本身；点到菜单外面就关掉。
-    fn render_menu_list(&self, fg: Rgb, bg: Rgb, cx: &mut Context<Self>) -> Option<Stateful<Div>> {
+    /// 菜单本身，最高 `max_height`；点到菜单外面就关掉。
+    fn render_menu_list(&self, max_height: f32, fg: Rgb, bg: Rgb, cx: &mut Context<Self>) -> Option<Stateful<Div>> {
         let menu = self.file_menu.as_ref()?;
         let hover_bg = hsla(bg.mix(fg, 0.12));
         let menu_bg = hsla(bg.mix(fg, 0.06));
@@ -305,7 +319,7 @@ impl WindowView {
         let list = div()
             .id("file-menu")
             .w(px(MENU_WIDTH))
-            .max_h(px(MENU_MAX_HEIGHT))
+            .max_h(px(max_height.min(MENU_MAX_HEIGHT)))
             .overflow_y_scroll()
             .py(px(4.))
             .flex()
