@@ -117,12 +117,18 @@
         "name": "agent",
         "suggestions": [
           { "name": "claude", "description": "Install a skill in ~/.claude/skills/runode" },
-          { "name": "codex", "description": "Add a section to ~/.codex/AGENTS.md" }
+          { "name": "codex", "description": "Install a skill in ~/.agents/skills/runode" },
+          { "name": "statusline", "description": "Show Claude Code's model, context and cost under its pane" }
         ]
       },
       "options": [
         { "name": "--print", "description": "Show the instructions instead of installing them" }
       ]
+    },
+    {
+      "name": "statusline",
+      "description": "What Claude Code runs for its status line",
+      "hidden": true
     },
     {
       "name": "remote",

@@ -641,4 +641,60 @@ mod tests {
         assert!(parse("read sideways").unwrap_err().contains("sideways"));
         assert!(parse("read tab:x").unwrap_err().contains("tab:x"));
     }
+
+    /// 用法说明里的每条命令（连同 `setup claude|codex` 这样写死的词）在补全的命令规格里都有，
+    /// 规格里不隐藏的子命令也都写进了用法说明：两边各改各的时，漏了的那边会让这里失败。
+    #[test]
+    fn help_and_completion_spec_list_the_same_commands() {
+        let spec: serde_json::Value = serde_json::from_str(include_str!("../../completion/specs/runode.json")).unwrap();
+        let names = |value: &serde_json::Value| -> Vec<String> {
+            match value {
+                serde_json::Value::String(name) => vec![name.clone()],
+                serde_json::Value::Array(names) => names.iter().filter_map(|n| n.as_str().map(str::to_owned)).collect(),
+                _ => Vec::new(),
+            }
+        };
+        let subcommands = |node: &serde_json::Value| node["subcommands"].as_array().cloned().unwrap_or_default();
+        // 一层里能接的词：子命令名和参数的固定候选。
+        let words = |node: &serde_json::Value| -> Vec<String> {
+            let mut words: Vec<String> = subcommands(node).iter().flat_map(|sub| names(&sub["name"])).collect();
+            let args = match &node["args"] {
+                serde_json::Value::Array(args) => args.clone(),
+                serde_json::Value::Null => Vec::new(),
+                arg => vec![arg.clone()],
+            };
+            for suggestion in args.iter().flat_map(|arg| arg["suggestions"].as_array().cloned().unwrap_or_default()) {
+                words.extend(names(if suggestion.is_string() { &suggestion } else { &suggestion["name"] }));
+            }
+            words
+        };
+
+        let commands = HELP.split_once("\ncommands:\n").unwrap().1.split_once("\n\n").unwrap().0;
+        let mut documented = Vec::new();
+        for line in commands.lines().filter(|line| line.starts_with("  ") && !line.starts_with("   ")) {
+            let mut node = spec.clone();
+            // 用法和说明之间隔着好几个空格，说明里的词不算。
+            let usage = line.trim_start().split("  ").next().unwrap();
+            let path: Vec<&str> = usage
+                .split_whitespace()
+                .take_while(|word| word.chars().all(|c| c.is_ascii_lowercase() || c == '|'))
+                .collect();
+            documented.push(path[0].to_owned());
+            for word in &path {
+                for alternative in word.split('|') {
+                    assert!(words(&node).iter().any(|w| w == alternative), "`{line}`: the spec lacks {alternative}");
+                }
+                if let Some(sub) =
+                    subcommands(&node).into_iter().find(|sub| names(&sub["name"]).iter().any(|n| n == word))
+                {
+                    node = sub;
+                }
+            }
+        }
+        for sub in subcommands(&spec).iter().filter(|sub| sub["hidden"] != true) {
+            for name in names(&sub["name"]) {
+                assert!(documented.contains(&name), "the help lacks {name}");
+            }
+        }
+    }
 }
