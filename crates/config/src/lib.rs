@@ -20,7 +20,7 @@ mod values;
 rust_i18n::i18n!("locales", fallback = "en");
 
 pub use edit::{ConfigFile, check_value};
-pub use model::{CellHeight, Config, Keybind, PreviewClick, WindowStyle};
+pub use model::{CellHeight, Config, Keybind, PreviewClick, StatusItem, WindowStyle};
 pub use parse::{KEYS, config_path};
 pub use template::create_config_file;
 pub use theme::theme_names;

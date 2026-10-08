@@ -34,6 +34,10 @@ pub(in crate::window) struct MenuItem {
     shortcut: Option<SharedString>,
     enabled: bool,
     button: Option<MenuButton>,
+    /// 画在字前面的图标。
+    icon: Option<&'static str>,
+    /// 勾选项：`Some` 时左边留一列，`true` 时打勾。
+    checked: Option<bool>,
 }
 
 /// 菜单项右边的图标按钮：图标和悬停时的说明。
@@ -45,7 +49,33 @@ pub(in crate::window) struct MenuButton {
 /// 菜单里的一项，快捷键在这时查，查的是这一刻的键位表。
 pub(in crate::window) fn menu_item(key: &str, action: Box<dyn Action>, enabled: bool, cx: &App) -> MenuItem {
     let shortcut = shortcut_text(action.as_ref(), cx);
-    MenuItem { label: rust_i18n::t!(key).into_owned(), action: Some(action), shortcut, enabled, button: None }
+    MenuItem {
+        label: rust_i18n::t!(key).into_owned(),
+        action: Some(action),
+        shortcut,
+        enabled,
+        button: None,
+        icon: None,
+        checked: None,
+    }
+}
+
+/// 可以勾选的一项，字前面画 `icon`；点了派发 `action`，打不打勾由派发后的状态决定，下次打开菜单时再查。
+pub(in crate::window) fn check_item(
+    label: String,
+    icon: &'static str,
+    checked: bool,
+    action: Box<dyn Action>,
+) -> MenuItem {
+    MenuItem {
+        label,
+        action: Some(action),
+        shortcut: None,
+        enabled: true,
+        button: None,
+        icon: Some(icon),
+        checked: Some(checked),
+    }
 }
 
 /// 菜单里写好了字的一项，`detail` 淡淡地写在右边快捷键的位置。整行点不了，有 `button` 时点右边的
@@ -56,7 +86,7 @@ pub(in crate::window) fn text_item(
     button: Option<(MenuButton, Box<dyn Action>)>,
 ) -> MenuItem {
     let (button, action) = button.unzip();
-    MenuItem { label, action, shortcut: detail, enabled: true, button }
+    MenuItem { label, action, shortcut: detail, enabled: true, button, icon: None, checked: None }
 }
 
 /// 打开着的右键菜单：右键按下的位置，打开时就定下的各项（`None` 是分隔线），以及点了以后
@@ -133,6 +163,8 @@ impl WindowView {
         let menu_bg = hsla(bg.mix(fg, 0.06));
         let fg_rgb = fg;
         let fg = hsla(fg);
+        // 有勾选项时每一行左边都留出打勾的那一列，字对齐。
+        let check_column = menu.items.iter().flatten().any(|item| item.checked.is_some());
         let items = menu.items.iter().enumerate().map(|(ix, item)| {
             let Some(item) = item else {
                 return div().flex_none().h(px(1.)).mx(px(6.)).my(px(4.)).bg(fg.opacity(0.12)).into_any_element();
@@ -167,6 +199,15 @@ impl WindowView {
                 .when_some(row_action, |row, action| {
                     row.hover(|row| row.bg(hover_bg)).on_mouse_down(MouseButton::Left, dispatch(action))
                 })
+                .when(check_column, |row| {
+                    row.child(
+                        div().flex_none().w(px(10.)).mr(px(-8.)).children(item.checked.filter(|c| *c).map(|_| "✓")),
+                    )
+                })
+                .children(
+                    item.icon
+                        .map(|icon| svg().flex_none().path(icon).size(px(13.)).mr(px(-8.)).text_color(fg.opacity(0.7))),
+                )
                 .child(div().flex_1().min_w_0().truncate().child(item.label.clone()))
                 .children(
                     item.shortcut

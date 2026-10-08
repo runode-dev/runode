@@ -452,6 +452,7 @@ settings:
     window_padding_x: 左右内边距
     window_padding_y: 上下内边距
     window_style: 样式
+    status_bar_hidden: 状态栏上隐藏
     file_tree_font_size: 文件树字号
     file_tree_preview_click: 在预览栏打开文件
     preview_font_size: 预览栏字号
@@ -506,6 +507,7 @@ settings:
     window_padding_x: 单位是点。一个数表示两边相同，或者写成 左,右。
     window_padding_y: 单位是点。一个数表示上下相同，或者写成 上,下。
     window_style: 卡片：每个分屏和右侧面板各是一张圆角卡片；经典：终端铺满窗口。
+    status_bar_hidden: sleep、resources 或 ports，用逗号隔开。也可以在状态栏上右键勾选。
     file_tree_font_size: 单位是点。
     file_tree_preview_click: 单击开成临时标签，打开别的文件时被换掉；双击固定下来。
     preview_font_size: 单位是点。

@@ -452,6 +452,7 @@ settings:
     window_padding_x: Horizontal padding
     window_padding_y: Vertical padding
     window_style: Style
+    status_bar_hidden: Hidden in the status bar
     file_tree_font_size: File tree font size
     file_tree_preview_click: Open files in the preview with
     preview_font_size: Preview font size
@@ -506,6 +507,7 @@ settings:
     window_padding_x: Left and right, in points. One number for both sides, or left,right.
     window_padding_y: Top and bottom, in points. One number for both, or top,bottom.
     window_style: Cards puts each split and side panel on its own rounded card; classic lets the terminal fill the window.
+    status_bar_hidden: "sleep, resources or ports, separated by commas. You can also right-click the status bar."
     file_tree_font_size: In points.
     file_tree_preview_click: A single click opens a temporary tab that the next file replaces; a double click keeps it.
     preview_font_size: In points.

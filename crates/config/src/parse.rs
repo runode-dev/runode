@@ -15,7 +15,7 @@ use runode_shared_types::{
 };
 
 use crate::{
-    CellHeight, Config, PreviewClick, WindowStyle, color,
+    CellHeight, Config, PreviewClick, StatusItem, WindowStyle, color,
     theme::{Theme, find_theme, pick_theme},
 };
 
@@ -25,7 +25,15 @@ use crate::{
 /// 在应用各层之前就已处理，列在这里是为了写进模板。
 pub const KEYS: &[&[&str]] = &[
     &["language"],
-    &["font-family", "font-size", "adjust-cell-height", "window-padding-x", "window-padding-y", "window-style"],
+    &[
+        "font-family",
+        "font-size",
+        "adjust-cell-height",
+        "window-padding-x",
+        "window-padding-y",
+        "window-style",
+        "status-bar-hidden",
+    ],
     &["file-tree-font-size", "file-tree-preview-click", "preview-font-size"],
     &[
         "theme",
@@ -182,6 +190,18 @@ impl Config {
                     "classic" => WindowStyle::Classic,
                     _ => return Err("expected cards or classic".into()),
                 };
+            }
+            "status-bar-hidden" => {
+                // 和 `agent-notifications-exclude` 一样：逗号隔开、可以写多行，值为空时清空。
+                if empty {
+                    self.status_bar_hidden.clear();
+                } else {
+                    for item in parse_status_items(value)? {
+                        if !self.status_bar_hidden.contains(&item) {
+                            self.status_bar_hidden.push(item);
+                        }
+                    }
+                }
             }
             "file-tree-font-size" => {
                 self.file_tree_font_size = or_default(empty, defaults.file_tree_font_size, || parse_positive(value))?;
@@ -460,6 +480,17 @@ fn parse_agents(value: &str) -> Result<Vec<AgentKind>, String> {
                 .chain([AgentKind::Other])
                 .find(|kind| kind.label() == name)
                 .ok_or_else(|| format!("unknown agent: {name}"))
+        })
+        .collect()
+}
+
+fn parse_status_items(value: &str) -> Result<Vec<StatusItem>, String> {
+    value
+        .split(',')
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+        .map(|name| {
+            StatusItem::ALL.into_iter().find(|item| item.name() == name).ok_or_else(|| format!("unknown item: {name}"))
         })
         .collect()
 }
@@ -797,6 +828,20 @@ unknown-key = whatever
         assert_eq!(load(&["window-style = classic\nwindow-style ="]).window_style, WindowStyle::Cards);
         // 认不出的值跳过，保留前面的值。
         assert_eq!(load(&["window-style = classic\nwindow-style = glass"]).window_style, WindowStyle::Classic);
+    }
+
+    #[test]
+    fn status_bar_items_can_be_hidden() {
+        assert!(Config::default().status_bar_hidden.is_empty());
+        let config = load(&["status-bar-hidden = ports, sleep\nstatus-bar-hidden = sleep"]);
+        assert_eq!(config.status_bar_hidden, [StatusItem::Ports, StatusItem::Sleep]);
+        assert_eq!(config.values("status-bar-hidden"), ["ports", "sleep"]);
+        // 有一个认不出的名字时整行跳过；空值清空。
+        assert_eq!(
+            load(&["status-bar-hidden = ports\nstatus-bar-hidden = nope"]).status_bar_hidden,
+            [StatusItem::Ports]
+        );
+        assert!(load(&["status-bar-hidden = ports\nstatus-bar-hidden ="]).status_bar_hidden.is_empty());
     }
 
     #[test]

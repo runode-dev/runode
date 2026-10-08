@@ -7,8 +7,8 @@
 //!   「外部端口」里。
 //!
 //! 数据全 app 一份（`Status`），每 `POLL_INTERVAL` 更新一次：有窗口在前台时现问 `ps` 和 `lsof`，
-//! 都在后台时只看 agent 在不在干活，好决定挡不挡休眠。终端靠 `SessionMeta::pid`（shell 的进程号）
-//! 认领它的子孙进程和这些进程监听的端口。
+//! 状态栏上藏起来的几块用不着的不问；都在后台时只看 agent 在不在干活，好决定挡不挡休眠。终端靠
+//! `SessionMeta::pid`（shell 的进程号）认领它的子孙进程和这些进程监听的端口。
 
 mod probe;
 
@@ -18,17 +18,19 @@ use std::{
 };
 
 use gpui::{
-    Anchor, AnyElement, App, Context, Div, FontWeight, Global, Hsla, MouseButton, SharedString, Stateful, anchored,
-    deferred, div, point, prelude::*, px, svg,
+    Action, Anchor, AnyElement, App, Context, Div, Focusable, FontWeight, Global, Hsla, MouseButton, MouseDownEvent,
+    Pixels, Point, SharedString, Stateful, Window, anchored, deferred, div, point, prelude::*, px, svg,
 };
+use runode_config::StatusItem;
 use runode_shared_types::{
     agent::{AgentKind, AgentState},
     color::Rgb,
 };
 
-use super::{WindowView, cards, divider_color, remote};
+use super::{WindowView, cards, divider_color, files::check_item, remote};
 use crate::{
     assets::{CHEVRON_DOWN_ICON, CHEVRON_RIGHT_ICON, COFFEE_ICON, MEMORY_ICON, PLUG_ICON, SHELL_ICON},
+    config::AppConfig,
     ui::{hsla, tooltip::tooltip},
 };
 use probe::{Caffeinate, Port, Procs, Usage};
@@ -44,6 +46,23 @@ const CPU_WIDTH: f32 = 56.;
 const MEMORY_WIDTH: f32 = 84.;
 /// 生效中的绿点。
 const ACTIVE_DOT: Rgb = Rgb(0x34, 0xc7, 0x59);
+
+/// 状态栏右键菜单里的一项：显示或隐藏 `item`，记在配置的 `status-bar-hidden` 里。
+#[derive(Clone, PartialEq, Action)]
+#[action(namespace = runode, no_json)]
+pub(super) struct ToggleStatusItem {
+    item: StatusItem,
+}
+
+/// 状态栏上一块的图标和名字，右键菜单里用。
+fn item_icon_and_title(item: StatusItem) -> (&'static str, String) {
+    let (icon, key) = match item {
+        StatusItem::Sleep => (COFFEE_ICON, "status.sleep_title"),
+        StatusItem::Resources => (MEMORY_ICON, "status.resources_title"),
+        StatusItem::Ports => (PLUG_ICON, "status.ports_title"),
+    };
+    (icon, rust_i18n::t!(key).into_owned())
+}
 
 /// 什么时候防止电脑休眠。不存档，每次启动都是关闭。
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -129,13 +148,21 @@ pub fn watch(cx: &mut App) {
     cx.default_global::<Status>();
     cx.spawn(async move |cx| {
         loop {
-            let active = cx.update(|cx| cx.active_window().is_some());
-            let probed = if active {
+            // 状态栏上藏起来的几块不问：内存和端口都要进程树（端口靠它认是哪个终端的），端口还要 `lsof`；
+            // 只剩防止休眠时什么都不问，agent 在不在干活从各窗口里看。
+            let (active, procs, ports) = cx.update(|cx| {
+                let hidden = &cx.global::<AppConfig>().0.status_bar_hidden;
+                let ports = !hidden.contains(&StatusItem::Ports);
+                let procs = ports || !hidden.contains(&StatusItem::Resources);
+                (cx.active_window().is_some(), procs, ports)
+            });
+            let probed = if active && procs {
                 Some(
                     cx.background_executor()
-                        .spawn(async {
+                        .spawn(async move {
                             // 等宿主连好要阻塞，放在后台问。
-                            (probe::processes(), probe::listening_ports(), crate::host_client::link().host_pid())
+                            let ports = if ports { probe::listening_ports() } else { Vec::new() };
+                            (probe::processes(), ports, crate::host_client::link().host_pid())
                         })
                         .await,
                 )
@@ -246,6 +273,8 @@ impl WindowView {
             .status_item("status-ports", StatusPopover::Ports { external: false }, fg, bg, cx)
             .child(icon(PLUG_ICON))
             .child(ours.to_string());
+        let hidden = &cx.global::<AppConfig>().0.status_bar_hidden;
+        let shown = |item| !hidden.contains(&item);
         div()
             .flex_none()
             .h(px(STATUS_BAR_HEIGHT))
@@ -257,9 +286,51 @@ impl WindowView {
             .text_size(px(11.))
             .text_color(fg_h.opacity(0.7))
             .when(!cards(cx), |bar| bar.border_t_1().border_color(divider_color(fg_h)))
-            .child(sleep_item)
-            .child(resources_item)
-            .child(ports_item)
+            // 右键选显示哪几块；全藏起来时这一条还在，照样能右键找回来。
+            .on_mouse_down(
+                MouseButton::Right,
+                cx.listener(|this, event: &MouseDownEvent, _, cx| {
+                    cx.stop_propagation();
+                    this.open_status_menu(event.position, cx);
+                }),
+            )
+            .when(shown(StatusItem::Sleep), |bar| bar.child(sleep_item))
+            .when(shown(StatusItem::Resources), |bar| bar.child(resources_item))
+            .when(shown(StatusItem::Ports), |bar| bar.child(ports_item))
+    }
+
+    /// 在 `position` 弹出状态栏的右键菜单，勾着的是显示着的几块。
+    fn open_status_menu(&mut self, position: Point<Pixels>, cx: &mut Context<Self>) {
+        let hidden = cx.global::<AppConfig>().0.status_bar_hidden.clone();
+        let items = StatusItem::ALL
+            .into_iter()
+            .map(|item| {
+                let (icon, title) = item_icon_and_title(item);
+                Some(check_item(title, icon, !hidden.contains(&item), Box::new(ToggleStatusItem { item })))
+            })
+            .collect();
+        let target = self.focus_handle(cx);
+        self.open_menu(position, items, target, cx);
+    }
+
+    /// 显示或隐藏状态栏上的一块：改写配置文件的 `status-bar-hidden`，所有窗口跟着重载的配置一起变。
+    pub(super) fn toggle_status_item(&mut self, action: &ToggleStatusItem, _: &mut Window, cx: &mut Context<Self>) {
+        let mut hidden = cx.global::<AppConfig>().0.status_bar_hidden.clone();
+        match hidden.iter().position(|item| *item == action.item) {
+            Some(ix) => {
+                hidden.remove(ix);
+            }
+            None => hidden.push(action.item),
+        }
+        let values: Vec<String> = if hidden.is_empty() {
+            Vec::new()
+        } else {
+            vec![hidden.iter().map(|item| item.name()).collect::<Vec<_>>().join(", ")]
+        };
+        let Some(path) = runode_config::config_path() else { return };
+        if let Err(err) = crate::config::write_values(&path, "status-bar-hidden", &values, cx) {
+            tracing::warn!("could not write status-bar-hidden: {err}");
+        }
     }
 
     /// 状态栏上的一块：点了弹出 `popover`，再点一下关掉；开着时把浮层挂在它上面。

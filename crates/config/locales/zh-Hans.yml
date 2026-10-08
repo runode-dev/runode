@@ -16,6 +16,7 @@ config:
   window_padding_x: 左右内边距：一个数表示两边相同，或者写成 左,右，单位是点。
   window_padding_y: 上下内边距：一个数表示两边相同，或者写成 上,下，单位是点。
   window_style: 窗口的样子：cards（卡片，默认）或 classic（经典）。cards 时每个分屏和右侧面板各是一张带标题条的圆角卡片，衬在深一档的外框上，标题栏显示这台 Mac 的名字和胶囊样式的标签；classic 时终端铺满窗口，分屏之间一条细线。
+  status_bar_hidden: 窗口底部状态栏上不显示的几块：sleep（防止休眠）、resources（内存和终端数）、ports（端口），用逗号隔开，可以写多行，值为空时全都显示。也可以在状态栏上右键勾选。
   file_tree_font_size: 右侧文件树的字号：正数，单位是点。
   file_tree_preview_click: 文件树里怎样在预览栏打开文件：single（单击，默认）或 double（双击）。single 时单击开成临时标签，再打开别的文件时被换掉，双击固定下来；double 时双击开成固定标签。
   preview_font_size: 预览栏的字号：正数，单位是点。

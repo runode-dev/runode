@@ -17,6 +17,7 @@ config:
   window_padding_x: "Left and right padding: one number for both sides, or left,right, in points."
   window_padding_y: "Top and bottom padding: one number for both sides, or top,bottom, in points."
   window_style: "Window style: cards (default) or classic. With cards, each split and side panel is a rounded card with a title bar on a slightly darker frame, and the title bar shows this Mac's name and pill-shaped tabs. With classic, the terminal fills the window and splits are divided by thin lines."
+  status_bar_hidden: "Parts of the status bar at the bottom of the window to hide: sleep (prevent sleep), resources (memory and terminals), ports; separated by commas, can be repeated, empty shows them all. Right-click the status bar to pick them."
   file_tree_font_size: "File tree font size: a positive number, in points."
   file_tree_preview_click: "How to open a file from the file tree in the preview pane: single (default) or double. With single, a click opens a temporary tab that the next opened file replaces, and a double-click keeps it open. With double, a double-click opens a tab that stays."
   preview_font_size: "Preview pane font size: a positive number, in points."

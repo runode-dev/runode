@@ -34,6 +34,30 @@ pub enum WindowStyle {
     Classic,
 }
 
+/// 窗口底部状态栏上的一块，`status-bar-hidden` 里写它的名字（`name`）。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum StatusItem {
+    /// 防止休眠。
+    Sleep,
+    /// runode 占的内存和终端数。
+    Resources,
+    /// 终端里的程序在监听的端口。
+    Ports,
+}
+
+impl StatusItem {
+    /// 按状态栏上从左到右的顺序。
+    pub const ALL: [Self; 3] = [Self::Sleep, Self::Resources, Self::Ports];
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Sleep => "sleep",
+            Self::Resources => "resources",
+            Self::Ports => "ports",
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct Config {
     /// 依次尝试的字体族，第一个能解析的生效。
@@ -45,6 +69,8 @@ pub struct Config {
     /// (上, 下)
     pub window_padding_y: (f32, f32),
     pub window_style: WindowStyle,
+    /// 状态栏上不显示的几块。
+    pub status_bar_hidden: Vec<StatusItem>,
     /// 右侧文件树的字号。
     pub file_tree_font_size: f32,
     pub file_tree_preview_click: PreviewClick,
@@ -150,6 +176,7 @@ impl Default for Config {
             window_padding_x: (2., 2.),
             window_padding_y: (0., 6.),
             window_style: WindowStyle::Cards,
+            status_bar_hidden: Vec::new(),
             file_tree_font_size: 13.,
             file_tree_preview_click: PreviewClick::Single,
             preview_font_size: 13.,
