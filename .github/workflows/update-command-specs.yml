@@ -19,7 +19,7 @@ jobs:
       BRANCH: update-command-specs
       GH_TOKEN: ${{ github.token }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: main
       - name: 挪子模块指针
