@@ -198,8 +198,6 @@ search:
   placeholder: Search
   no_results: No results
 files:
-  run_task: Run %{command}
-  tasks: Tasks
   new_file: New File…
   new_folder: New Folder…
   collapse_all: Collapse Folders
@@ -233,6 +231,7 @@ tooltip:
   hide_files: Hide Files
   show_panel: Show Panel
   hide_panel: Hide Panel
+  tasks: Tasks
   show_ignored: Show Files Ignored by Git
   hide_ignored: Hide Files Ignored by Git
   close_preview: Close Preview

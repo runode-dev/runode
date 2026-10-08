@@ -279,7 +279,6 @@ impl WindowView {
             git_tree: self.git_tree,
             git_graph_collapsed: self.git_graph_collapsed,
             git_graph_height: self.git_graph_height,
-            tasks_collapsed: self.tasks_collapsed,
         }
     }
 
@@ -360,7 +359,6 @@ impl WindowView {
             self.git_tree = saved.git_tree;
             self.git_graph_collapsed = saved.git_graph_collapsed;
             self.git_graph_height = saved.git_graph_height;
-            self.tasks_collapsed = saved.tasks_collapsed;
             self.activate_workspace(active, window, cx);
         }
         shell

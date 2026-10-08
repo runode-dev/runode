@@ -61,12 +61,10 @@ const PREVIEW_MIN_WIDTH: f32 = 240.;
 /// 右侧面板再宽也给终端区留这么宽。
 const MAIN_MIN_WIDTH: f32 = 240.;
 /// 标题栏右上角开关按钮和右侧面板顶上标签的尺寸和间距。
-const TOGGLE_WIDTH: f32 = 28.;
+pub(super) const TOGGLE_WIDTH: f32 = 28.;
 pub(super) const TOGGLE_HEIGHT: f32 = 24.;
 const TOGGLE_GAP: f32 = 4.;
 pub(super) const TOGGLE_MARGIN: f32 = 10.;
-/// 右侧面板都收着时标题栏右边给开关按钮让出的宽度。
-pub(super) const PANEL_TOGGLES_INSET: f32 = TOGGLE_WIDTH + TOGGLE_MARGIN + 6.;
 
 /// 改动和文件状态的颜色，深浅背景上都看得清。
 pub(super) const ADDED: Rgb = Rgb(0x57, 0xAB, 0x5A);
@@ -126,7 +124,7 @@ impl WindowView {
     }
 
     /// 右侧面板读哪个目录：当前终端的目录，取不到时是 workspace 的目录。
-    fn project_dir(&self, cx: &Context<Self>) -> PathBuf {
+    pub(super) fn project_dir(&self, cx: &Context<Self>) -> PathBuf {
         let cwd = self.focused_view().and_then(|view| view.read(cx).cwd());
         cwd.filter(|cwd| cwd.is_dir()).unwrap_or_else(|| self.workspace().dir.clone())
     }
@@ -187,8 +185,8 @@ impl WindowView {
         if !self.watching() || !paths.iter().any(|path| watch.affects(path, project)) {
             return;
         }
-        // 项目命令从这几个文件里来，它们变了就重列，等这次重读完了一起列。
-        if paths.iter().any(|path| super::files::is_task_file(path)) {
+        // 项目命令从这几个文件里来，它们变了就重列。
+        if paths.iter().any(|path| super::tasks::is_task_file(path)) {
             self.workspace_mut().project.tasks_stale = true;
         }
         self.workspace_mut().project.stale = true;
@@ -297,6 +295,7 @@ impl WindowView {
     /// 定时检查：终端换了目录时重读；有没读的改动时按 `refresh_if_due` 重读；监听不了时
     /// 退回定时重读，离上次开始读至少隔 `FALLBACK_INTERVAL`，上次读得慢时按耗时拉长。
     pub(super) fn poll_project(&mut self, cx: &mut Context<Self>) {
+        self.list_tasks(cx);
         if !self.project_visible() {
             self.probe_repo(cx);
             return;
@@ -475,12 +474,18 @@ impl WindowView {
         width + CARD_GAP * shown + CARD_GAP / 2.
     }
 
-    /// 标题栏右上角开关右侧面板的按钮，展开时底色亮一些，打开的是上次显示的那一页。位置由调用方
-    /// 接着写。
-    pub(super) fn render_panel_toggle(&self, fg: Rgb, bg: Rgb, cx: &mut Context<Self>) -> Stateful<Div> {
+    /// 右侧面板都收着时标题栏右边给右上角那几个按钮让出的宽度；有项目命令时多一个命令按钮。
+    pub(super) fn panel_toggles_inset(&self) -> f32 {
+        let tasks = if self.has_tasks() { TOGGLE_WIDTH + TOGGLE_GAP } else { 0. };
+        TOGGLE_WIDTH + TOGGLE_MARGIN + 6. + tasks
+    }
+
+    /// 标题栏右上角的按钮：有项目命令时先是命令按钮，然后是开关右侧面板的按钮，展开时底色亮一些，
+    /// 打开的是上次显示的那一页。位置由调用方接着写。
+    pub(super) fn render_panel_toggles(&self, fg: Rgb, bg: Rgb, cx: &mut Context<Self>) -> Div {
         let shown = self.panel.is_some();
         let text = if shown { rust_i18n::t!("tooltip.hide_panel") } else { rust_i18n::t!("tooltip.show_panel") };
-        icon_toggle("toggle-panel", PANEL_RIGHT_ICON, 16., shown, fg, bg)
+        let toggle = icon_toggle("toggle-panel", PANEL_RIGHT_ICON, 16., shown, fg, bg)
             .w(px(TOGGLE_WIDTH))
             .h(px(TOGGLE_HEIGHT))
             .tooltip(tooltip(text, None, fg, bg))
@@ -491,7 +496,14 @@ impl WindowView {
                     let panel = if this.panel.is_some() { None } else { Some(this.last_panel) };
                     this.set_panel(panel, window, cx);
                 }),
-            )
+            );
+        div()
+            .flex_none()
+            .flex()
+            .items_center()
+            .gap(px(TOGGLE_GAP))
+            .when(self.has_tasks(), |toggles| toggles.child(self.render_tasks_button(fg, bg, cx)))
+            .child(toggle)
     }
 
     /// 右侧面板顶上那排切换文件树和 Git 的标签，显示着的那个底色亮一些。经典样式下标题栏右上角的

@@ -29,7 +29,7 @@ icons! {
     pub NEW_FILE_ICON = "new-file",
     pub NEW_FOLDER_ICON = "new-folder",
     pub COLLAPSE_ALL_ICON = "collapse-all",
-    /// 文件树底部项目命令前面的运行图标。
+    /// 标题栏右上角项目命令按钮的运行图标。
     pub PLAY_ICON = "play",
     /// Git 面板里的按钮：分支、暂存、取消暂存、放弃改动、提交、刷新、更多、同步、打开文件，以及储藏的
     /// 应用、弹出和删除。

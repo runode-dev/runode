@@ -1,11 +1,12 @@
 //! 右键菜单，以及文件树里只在菜单和快捷键里用的几个操作：在访达里显示、在新标签页里开终端、
-//! 复制路径。文件树的菜单作用在选中的那一项上，点在空白处时作用在根目录上；预览标签也用这个菜单。
+//! 复制路径。文件树的菜单作用在选中的那一项上，点在空白处时作用在根目录上；预览标签、Git 面板、
+//! 状态栏和标题栏的命令按钮也用这个菜单。
 
 use std::path::{Path, PathBuf};
 
 use gpui::{
-    Action, AnyElement, App, ClipboardItem, Context, FocusHandle, MouseButton, Pixels, Point, SharedString, Window,
-    anchored, deferred, div, prelude::*, px, svg,
+    Action, Anchor, AnyElement, App, ClipboardItem, Context, Div, FocusHandle, MouseButton, Pixels, Point,
+    SharedString, Stateful, Window, anchored, deferred, div, point, prelude::*, px, relative, svg,
 };
 use runode_shared_types::color::Rgb;
 
@@ -24,7 +25,11 @@ use crate::{
 
 /// 菜单离窗口边缘至少留这么宽。
 const MENU_MARGIN: f32 = 8.;
+/// 按钮下面弹出的菜单离按钮这么远。
+const DROPDOWN_GAP: f32 = 4.;
 const MENU_WIDTH: f32 = 240.;
+/// 项多了在菜单里滚动。
+const MENU_MAX_HEIGHT: f32 = 480.;
 
 /// 菜单里的一项：点了把 `action` 派发给菜单的 `target`，和按快捷键走同一条路；没有 `action` 的
 /// 只是一行字，点不了。有 `button` 时整行点不了，`action` 只挂在右边这个图标按钮上。
@@ -89,10 +94,20 @@ pub(in crate::window) fn text_item(
     MenuItem { label, action, shortcut: detail, enabled: true, button, icon: None, checked: None }
 }
 
+/// 写好了字、点整行派发 `action` 的一项，`detail` 淡淡地写在右边快捷键的位置；没有 `action` 的
+/// 灰着，当小标题用。
+pub(in crate::window) fn labeled_item(
+    label: String,
+    detail: Option<SharedString>,
+    action: Option<Box<dyn Action>>,
+) -> MenuItem {
+    MenuItem { label, enabled: action.is_some(), action, shortcut: detail, button: None, icon: None, checked: None }
+}
+
 /// 打开着的右键菜单：右键按下的位置，打开时就定下的各项（`None` 是分隔线），以及点了以后
-/// 先把焦点交给谁、再派发动作。
+/// 先把焦点交给谁、再派发动作。没有位置的是按钮下面弹出的菜单，由按钮自己画。
 pub(in crate::window) struct FileMenu {
-    position: Point<Pixels>,
+    position: Option<Point<Pixels>>,
     items: Vec<Option<MenuItem>>,
     target: FocusHandle,
 }
@@ -106,13 +121,29 @@ impl WindowView {
         target: FocusHandle,
         cx: &mut Context<Self>,
     ) {
-        self.file_menu = Some(FileMenu { position, items, target });
+        self.file_menu = Some(FileMenu { position: Some(position), items, target });
+        cx.notify();
+    }
+
+    /// 弹出挂在按钮下面的菜单，按钮用 `render_dropdown` 把它画在自己下面。
+    pub(in crate::window) fn open_dropdown(
+        &mut self,
+        items: Vec<Option<MenuItem>>,
+        target: FocusHandle,
+        cx: &mut Context<Self>,
+    ) {
+        self.file_menu = Some(FileMenu { position: None, items, target });
         cx.notify();
     }
 
     /// 在 `position` 弹出的菜单开着。
     pub(in crate::window) fn menu_open_at(&self, position: Point<Pixels>) -> bool {
-        self.file_menu.as_ref().is_some_and(|menu| menu.position == position)
+        self.file_menu.as_ref().is_some_and(|menu| menu.position == Some(position))
+    }
+
+    /// 挂在按钮下面的菜单开着。
+    pub(in crate::window) fn dropdown_open(&self) -> bool {
+        self.file_menu.as_ref().is_some_and(|menu| menu.position.is_none())
     }
 
     /// 在 `position` 弹出文件树的右键菜单，作用在当前选中的那一项上：选中文件、选中目录和点在
@@ -156,8 +187,40 @@ impl WindowView {
         self.open_menu(position, items, target, cx);
     }
 
-    /// 右键菜单，盖在窗口最上层；点到菜单外面就关掉。
+    /// 右键菜单，盖在窗口最上层，左上角对着右键按下的位置。
     pub(in crate::window) fn render_file_menu(&self, fg: Rgb, bg: Rgb, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let position = self.file_menu.as_ref()?.position?;
+        let list = self.render_menu_list(fg, bg, cx)?;
+        Some(
+            deferred(anchored().position(position).snap_to_window_with_margin(px(MENU_MARGIN)).child(list))
+                .with_priority(1)
+                .into_any_element(),
+        )
+    }
+
+    /// 挂在按钮下面的菜单，按钮把它作为子元素：右上角对着按钮的右下角，往下让出一点；放不下时
+    /// 贴着窗口边挪进来。
+    pub(in crate::window) fn render_dropdown(&self, fg: Rgb, bg: Rgb, cx: &mut Context<Self>) -> Option<Div> {
+        if !self.dropdown_open() {
+            return None;
+        }
+        let list = self.render_menu_list(fg, bg, cx)?;
+        Some(
+            div().absolute().bottom_0().right_0().child(
+                deferred(
+                    anchored()
+                        .anchor(Anchor::TopRight)
+                        .offset(point(px(0.), px(DROPDOWN_GAP)))
+                        .snap_to_window_with_margin(px(MENU_MARGIN))
+                        .child(list),
+                )
+                .with_priority(1),
+            ),
+        )
+    }
+
+    /// 菜单本身；点到菜单外面就关掉。
+    fn render_menu_list(&self, fg: Rgb, bg: Rgb, cx: &mut Context<Self>) -> Option<Stateful<Div>> {
         let menu = self.file_menu.as_ref()?;
         let hover_bg = hsla(bg.mix(fg, 0.12));
         let menu_bg = hsla(bg.mix(fg, 0.06));
@@ -212,7 +275,15 @@ impl WindowView {
                 .children(
                     item.shortcut
                         .clone()
-                        .map(|shortcut| div().flex_none().text_color(fg.opacity(0.45)).child(shortcut)),
+                        // 命令的说明可能很长，最多占一行的六成，多了截断。
+                        .map(|shortcut| {
+                            div()
+                                .flex_none()
+                                .max_w(relative(0.6))
+                                .truncate()
+                                .text_color(fg.opacity(0.45))
+                                .child(shortcut)
+                        }),
                 )
                 .children(button.map(|(button, action)| {
                     div()
@@ -234,6 +305,8 @@ impl WindowView {
         let list = div()
             .id("file-menu")
             .w(px(MENU_WIDTH))
+            .max_h(px(MENU_MAX_HEIGHT))
+            .overflow_y_scroll()
             .py(px(4.))
             .flex()
             .flex_col()
@@ -249,11 +322,7 @@ impl WindowView {
                 this.file_menu = None;
                 cx.notify();
             }));
-        Some(
-            deferred(anchored().position(menu.position).snap_to_window_with_margin(px(MENU_MARGIN)).child(list))
-                .with_priority(1)
-                .into_any_element(),
-        )
+        Some(list)
     }
 
     /// 选中的那一项，没选中时是根目录。

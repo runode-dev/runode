@@ -39,6 +39,7 @@ mod quit;
 mod remote;
 mod sidebar;
 mod status_bar;
+mod tasks;
 mod titlebar;
 
 use std::{cell::RefCell, collections::HashMap, path::PathBuf, rc::Rc, time::Instant};
@@ -269,8 +270,6 @@ pub struct WindowView {
     preview_focus: FocusHandle,
     /// 文件树里显示被 git 忽略的文件。
     show_ignored: bool,
-    /// 文件树底部的项目命令收起来了；整个窗口一个设置。
-    tasks_collapsed: bool,
     /// 文件树的焦点：点了文件树后方向键在里面移动选中的行。
     files_focus: FocusHandle,
     /// 文件树或预览标签的右键菜单，文件树里正在新建或改名的输入框，以及剪切或复制下来等着粘贴的
@@ -388,7 +387,6 @@ impl WindowView {
             preview_width: None,
             preview_focus: cx.focus_handle(),
             show_ignored: false,
-            tasks_collapsed: false,
             files_focus: cx.focus_handle(),
             file_menu: None,
             file_edit: None,
@@ -533,6 +531,7 @@ impl Render for WindowView {
             .on_action(cx.listener(Self::toggle_sidebar))
             .on_action(cx.listener(Self::toggle_git))
             .on_action(cx.listener(Self::toggle_status_item))
+            .on_action(cx.listener(Self::run_task))
             .on_action(cx.listener(Self::toggle_status_bar))
             // 侧栏按着切换 workspace 的修饰键或 ⌘ 时才显示快捷键提示，按下、松开都要重画。挂在根上：修饰键的事件
             // 只沿焦点所在的路径传，侧栏不在这条路上。
@@ -600,9 +599,9 @@ impl WindowView {
         let titlebar_shown = !fullscreen || show_tabs;
         // 右侧面板的开关按钮：右侧都收着时落在标题栏右端，标题栏给它让位；打开着时落在
         // 面板顶上。全屏又只有一个标签、右侧也都收着时没有地方放，不画。
-        let right_inset = if titlebar_shown && !self.project_visible() { project::PANEL_TOGGLES_INSET } else { 0. };
+        let right_inset = if titlebar_shown && !self.project_visible() { self.panel_toggles_inset() } else { 0. };
         let panel_toggles = (titlebar_shown || self.project_visible()).then(|| {
-            self.render_panel_toggle(fg, bg, cx)
+            self.render_panel_toggles(fg, bg, cx)
                 .absolute()
                 .top(px((TITLEBAR_HEIGHT - project::TOGGLE_HEIGHT) / 2.))
                 .right(px(project::TOGGLE_MARGIN))
@@ -726,7 +725,7 @@ impl WindowView {
             + left_inset
             + machine.as_ref().map_or(0., |_| machine::MACHINE_MAX_WIDTH + 12.)
             + NEW_TAB_BUTTON_WIDTH
-            + project::PANEL_TOGGLES_INSET
+            + self.panel_toggles_inset()
             + widths.total();
         let tab_width = px(((viewport - fixed) / tab_count.max(1) as f32).max(TAB_MIN_WIDTH));
         let track_bg = hsla(tab_track_colors(fg, bg).0);
@@ -757,7 +756,7 @@ impl WindowView {
             .children(machine.map(|machine| machine.mr(px(12.))))
             .child(strip)
             .child(self.render_new_tab_button_card(fg, frame, cx))
-            .child(self.render_panel_toggle(fg, frame, cx));
+            .child(self.render_panel_toggles(fg, frame, cx));
         let content = div()
             .flex_1()
             .min_h_0()

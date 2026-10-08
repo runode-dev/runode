@@ -198,8 +198,6 @@ search:
   placeholder: 搜尋
   no_results: 沒有結果
 files:
-  run_task: 執行 %{command}
-  tasks: 命令
   new_file: 新增檔案…
   new_folder: 新增檔案夾…
   collapse_all: 全部收合
@@ -233,6 +231,7 @@ tooltip:
   hide_files: 隱藏檔案
   show_panel: 顯示面板
   hide_panel: 隱藏面板
+  tasks: 命令
   show_ignored: 顯示被 git 忽略的檔案
   hide_ignored: 隱藏被 git 忽略的檔案
   close_preview: 關閉預覽

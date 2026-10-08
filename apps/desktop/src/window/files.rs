@@ -3,12 +3,11 @@
 //!
 //! 点过文件树后它拿到焦点，方向键移动选中的行，各种快捷键作用在选中的那一项上。右键菜单在
 //! `menu`；就地新建、改名，删除、剪切复制粘贴和拖动挪位置在 `edit`，它们落到文件系统上的
-//! 操作在 `ops`。底部列着能跑的项目命令，在 `tasks`。
+//! 操作在 `ops`。
 
 mod edit;
 mod menu;
 mod ops;
-mod tasks;
 
 use std::{
     borrow::Cow,
@@ -24,8 +23,7 @@ use runode_config::PreviewClick;
 use runode_shared_types::color::Rgb;
 
 pub(super) use edit::{FileClipboard, FileEdit};
-pub(super) use menu::{FileMenu, MenuButton, MenuItem, check_item, menu_item, text_item};
-pub(super) use tasks::is_task_file;
+pub(super) use menu::{FileMenu, MenuButton, MenuItem, check_item, labeled_item, menu_item, text_item};
 
 use super::{
     WindowView,
@@ -89,8 +87,6 @@ const ROW_EXTRA_HEIGHT: f32 = 10.;
 const INDENT: f32 = 12.;
 /// 行的左边距。
 const ROW_PADDING: f32 = 4.;
-/// 底部项目命令标题条的高度。
-const TOOLBAR_HEIGHT: f32 = 32.;
 /// 标题那一行上按钮的边长。
 const TOOLBAR_BUTTON_SIZE: f32 = 24.;
 /// 剪切下来等着粘贴的行画得淡一些。
@@ -336,7 +332,6 @@ impl WindowView {
             .child(self.render_panel_tabs(fg, bg, cx))
             .child(header)
             .child(list)
-            .children(self.render_tasks(font_size, fg, bg, cx))
     }
 
     /// 文件树的行。行高、箭头和图标跟着字号 `font_size` 一起缩放。新建时输入框插在
