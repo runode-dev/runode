@@ -26,13 +26,18 @@ use runode_shared_types::color::Rgb;
 
 use super::{
     BODY_PADDING, Loaded, MAX_COLUMNS, Note, ROW_EXTRA_HEIGHT,
-    body::{ansi_palette, highlight_style},
+    body::{TEXT_RIGHT_PADDING, WRAP_SLACK, ansi_palette, highlight_style, shown_text},
     right_fade,
+    wrap::{WrapCache, segment},
 };
 use crate::{
     assets::{ARROW_DOWN_ICON, ARROW_UP_ICON, DISCARD_ICON, MINUS_ICON, PLUS_ICON},
     config::AppConfig,
-    ui::{hsla, scrollbar::scrollbar, tooltip::tooltip},
+    ui::{
+        hsla,
+        scrollbar::{row_markers, scrollbar},
+        tooltip::tooltip,
+    },
     window::{
         WindowView, divider_color,
         git_panel::Busy,
@@ -42,6 +47,8 @@ use crate::{
 
 /// 顶上那一条的高度。
 const TOOLBAR_HEIGHT: f32 = 26.;
+/// 行号后面正负号那一栏的宽度。
+const SIGN_WIDTH: f32 = 14.;
 
 /// 预览栏里看哪个文件的哪种 diff。
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -68,6 +75,8 @@ pub(super) struct DiffContent {
     headers: Vec<usize>,
     /// 最长的一行在 `view.rows` 里的位置，列表按它的宽度横向滚动。
     widest: usize,
+    /// 自动换行时折好的各段。
+    wrap: WrapCache,
 }
 
 impl DiffContent {
@@ -102,6 +111,7 @@ impl DiffContent {
             removed_spans: None,
             headers,
             widest,
+            wrap: WrapCache::default(),
         }
     }
 }
@@ -200,7 +210,7 @@ impl WindowView {
                             let mut content = DiffContent::new(view);
                             (content.new_spans, content.removed_spans) = (old_new, old_removed);
                             if first && let Some(&header) = content.headers.first() {
-                                preview.scroll.scroll_to_item(header, ScrollStrategy::Top);
+                                preview.reveal.set(Some((header, ScrollStrategy::Top)));
                             }
                             Loaded::Diff(content)
                         }
@@ -247,9 +257,11 @@ impl WindowView {
     }
 
     /// diff 标签的正文：顶上一条写着加减了多少行、能跳到上一处和下一处改动，下面是各行。
+    #[allow(clippy::too_many_arguments)]
     pub(super) fn render_diff_body(
         &self,
         content: &DiffContent,
+        width: f32,
         font: SharedString,
         font_size: f32,
         fg: Rgb,
@@ -264,21 +276,49 @@ impl WindowView {
         // 行号两栏按位数定宽，等宽字体一个数字大约 0.6 个字号宽。
         let number = (lines.max(1).to_string().len() as f32 * font_size * 0.62 + 10.).ceil();
         let row_height = font_size + ROW_EXTRA_HEIGHT;
+        // 换行时文字能占的宽度：除去左边框、两栏行号、正负号和右边留的空。块头不折。
+        let wrapped = self.preview_wrap.then(|| {
+            let text_width = width - 1. - 2. * number - SIGN_WIDTH - TEXT_RIGHT_PADDING - WRAP_SLACK;
+            let text = |ix: usize| match view.rows.get(ix)? {
+                DiffRow::Header(_) => None,
+                row => Some(shown_text(row_text(view, row, &content.removed, content.removed_at[ix]))),
+            };
+            content.wrap.get(text_width, font_size, &font, view.rows.len(), text, cx)
+        });
+        preview.apply_reveal(wrapped.as_deref());
+        let rows = wrapped.as_ref().map_or(view.rows.len(), |wrapped| wrapped.rows.len());
         let list = uniform_list(
             "preview-diff",
-            view.rows.len(),
+            rows,
             cx.processor(move |this, range: Range<usize>, _, cx| {
                 this.render_diff_rows(range, row_height, number, fg, bg, cx)
             }),
         )
-        .with_width_from_item(Some(content.widest))
-        .with_horizontal_sizing_behavior(ListHorizontalSizingBehavior::Unconstrained)
+        .when(wrapped.is_none(), |list| {
+            list.with_width_from_item(Some(content.widest))
+                .with_horizontal_sizing_behavior(ListHorizontalSizingBehavior::Unconstrained)
+        })
         .track_scroll(&preview.scroll)
         .size_full()
         .py(px(BODY_PADDING))
         .font_family(font);
         let handle = preview.scroll.0.borrow().base_handle.clone();
         let fade = right_fade(&handle, bg);
+        let markers = row_markers(
+            rows,
+            view.rows.iter().enumerate().filter_map(|(ix, row)| {
+                let color = match *row {
+                    DiffRow::Hunk { hunk, line } => match view.file.hunks[hunk].lines[line].kind {
+                        LineKind::Added => ADDED,
+                        LineKind::Removed => REMOVED,
+                        LineKind::Context => return None,
+                    },
+                    _ => return None,
+                };
+                let rows = wrapped.as_ref().map_or(ix..ix + 1, |wrapped| wrapped.span(ix));
+                Some((rows, hsla(color)))
+            }),
+        );
         let jump = |id: &'static str, icon: &'static str, key: &'static str, forward: bool| {
             div()
                 .id(id)
@@ -327,7 +367,9 @@ impl WindowView {
                     .relative()
                     .child(list)
                     .children(fade)
-                    .child(scrollbar("preview-diff-scroll-y", handle.clone(), Axis::Vertical, hsla(fg)))
+                    .child(
+                        scrollbar("preview-diff-scroll-y", handle.clone(), Axis::Vertical, hsla(fg)).markers(markers),
+                    )
                     .child(scrollbar("preview-diff-scroll-x", handle, Axis::Horizontal, hsla(fg))),
             )
             .into_any_element()
@@ -343,13 +385,13 @@ impl WindowView {
         };
         let offset = -f32::from(preview.scroll.0.borrow().base_handle.offset().y) - BODY_PADDING;
         let top = (offset.max(0.) / row_height).round() as usize;
-        let target = if forward {
-            content.headers.iter().find(|&&ix| ix > top)
-        } else {
-            content.headers.iter().rev().find(|&&ix| ix < top)
-        };
-        if let Some(&ix) = target {
-            preview.scroll.scroll_to_item(ix, ScrollStrategy::Top);
+        // 换行时块头在列表里的位置是它折出来的第一段。
+        let wrapped = self.preview_wrap.then(|| content.wrap.current()).flatten();
+        let at = |header: usize| wrapped.as_ref().map_or(header, |wrapped| wrapped.span(header).start);
+        let mut headers = content.headers.iter().map(|&header| at(header));
+        let target = if forward { headers.find(|&row| row > top) } else { headers.rev().find(|&row| row < top) };
+        if let Some(row) = target {
+            preview.scroll.scroll_to_item(row, ScrollStrategy::Top);
             cx.notify();
         }
     }
@@ -426,9 +468,21 @@ impl WindowView {
         let dim = hsla(fg).opacity(0.4);
         let worktree = target.side == DiffSide::Worktree;
         let full = preview.path.clone();
-        range
-            .filter_map(|ix| view.rows.get(ix).map(|row| (ix, *row)))
-            .map(|(ix, row)| {
+        // 换行时一项是折出来的一段：列表里的第几项、diff 的哪一行、这一行的哪一段、是不是第一段。
+        let wrapped = self.preview_wrap.then(|| content.wrap.current()).flatten();
+        let items: Vec<(usize, usize, Option<Range<usize>>, bool)> = match &wrapped {
+            Some(wrapped) => range
+                .filter_map(|item| {
+                    let (ix, piece) = wrapped.rows.get(item)?;
+                    Some((item, *ix, Some(piece.clone()), wrapped.starts_item(item)))
+                })
+                .collect(),
+            None => range.map(|ix| (ix, ix, None, true)).collect(),
+        };
+        items
+            .into_iter()
+            .filter_map(|(item, ix, piece, first)| view.rows.get(ix).map(|row| (item, ix, *row, piece, first)))
+            .map(|(item, ix, row, piece, first)| {
                 let base = div().flex_none().h(px(row_height)).w_full().flex().items_center().whitespace_nowrap();
                 if let DiffRow::Header(hunk) = row {
                     return self.render_diff_header(ix, hunk, actionable, target, base, fg, bg, cx);
@@ -462,6 +516,10 @@ impl WindowView {
                 if shown.cut {
                     text.push('…');
                 }
+                let (text, runs) = match &piece {
+                    Some(piece) => segment(&text, &runs, piece),
+                    None => (text, runs),
+                };
                 let (sign, tint) = match kind {
                     LineKind::Added => ("+", Some(bg.mix(ADDED, 0.16))),
                     LineKind::Removed => ("-", Some(bg.mix(REMOVED, 0.16))),
@@ -479,15 +537,17 @@ impl WindowView {
                 };
                 let jump = (worktree && kind != LineKind::Removed).then_some(new).flatten();
                 let full = full.clone();
-                base.id(("preview-diff-line", ix))
+                // 折出来的后几段不写行号和正负号。
+                let (old, new_number, sign) = if first { (old, new, sign) } else { (None, None, "") };
+                base.id(("preview-diff-line", item))
                     .when_some(tint, |row, tint| row.bg(hsla(tint)))
                     .child(number_cell(old))
-                    .child(number_cell(new))
-                    .child(div().flex_none().w(px(14.)).text_color(dim).child(sign))
+                    .child(number_cell(new_number))
+                    .child(div().flex_none().w(px(SIGN_WIDTH)).text_color(dim).child(sign))
                     .child(
                         div()
                             .flex_none()
-                            .pr(px(12.))
+                            .pr(px(TEXT_RIGHT_PADDING))
                             .text_color(hsla(fg))
                             .child(StyledText::new(text).with_highlights(runs)),
                     )

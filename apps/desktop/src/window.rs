@@ -46,9 +46,9 @@ use std::{cell::RefCell, collections::HashMap, path::PathBuf, rc::Rc, time::Inst
 
 use futures::StreamExt as _;
 use gpui::{
-    Action, AnyElement, App, BoxShadow, Context, EntityId, ExternalPaths, FocusHandle, Focusable, Hsla, MouseButton,
-    MouseDownEvent, Render, ScrollHandle, SharedString, Subscription, Task, Window, WindowBounds, actions, div, point,
-    prelude::*, px,
+    Action, AnyElement, App, BoxShadow, Context, Div, EntityId, ExternalPaths, FocusHandle, Focusable, Hsla,
+    MouseButton, MouseDownEvent, Render, ScrollHandle, SharedString, Stateful, Subscription, Task, Window,
+    WindowBounds, actions, div, point, prelude::*, px,
 };
 use runode_config::WindowStyle;
 use runode_shared_types::{
@@ -270,6 +270,8 @@ pub struct WindowView {
     preview_width: Option<f32>,
     /// 预览栏的焦点：点了预览的文字后 cmd+c 复制选中的行。
     preview_focus: FocusHandle,
+    /// 预览的文本和 diff 按栏宽自动换行。
+    preview_wrap: bool,
     /// 文件树里显示被 git 忽略的文件。
     show_ignored: bool,
     /// 文件树里显示名字以 `.` 开头的文件。
@@ -396,6 +398,7 @@ impl WindowView {
             branch_picker: None,
             preview_width: None,
             preview_focus: cx.focus_handle(),
+            preview_wrap: false,
             show_ignored: false,
             show_dotfiles: true,
             files_focus: cx.focus_handle(),
@@ -584,6 +587,11 @@ impl Render for WindowView {
     }
 }
 
+/// 放大的预览栏：盖满终端区，挡住下面终端的鼠标事件；终端不改尺寸，还原后原样露出来。
+fn cover_panes(preview: Stateful<Div>) -> Stateful<Div> {
+    preview.absolute().top_0().left_0().size_full().occlude()
+}
+
 impl WindowView {
     /// 从访达拖来的文件夹各开一个 workspace，已经开着的就切过去；文件不算。
     fn open_dropped_dirs(&mut self, dropped: &ExternalPaths, window: &mut Window, cx: &mut Context<Self>) {
@@ -613,18 +621,25 @@ impl WindowView {
         let sidebar_handle = sidebar.is_some().then(|| self.render_sidebar_handle(cx));
         let widths = self.right_panel_widths(f32::from(window.viewport_size().width));
         let font = self.font_family(cx);
-        let preview_shown = self.preview_shown();
-        let preview = self.render_preview_panel(widths.preview, self.panel.is_none(), fg, bg, font, cx);
+        let preview_column = self.preview_in_column();
+        // 放大的预览栏盖在终端区上，宽度是终端区的宽度。
+        let (preview, maximized_preview) = if self.preview_maximized() {
+            let width = f32::from(window.viewport_size().width) - sidebar_width - widths.panel;
+            (None, self.render_preview_panel(width, false, fg, bg, font, cx).map(cover_panes))
+        } else {
+            (self.render_preview_panel(widths.preview, self.panel.is_none(), fg, bg, font, cx), None)
+        };
         let panel = self.render_side_panel(widths.panel, fg, bg, window, cx);
         let right_handles = [
-            preview_shown.then(|| self.render_right_handle(Divider::Preview, widths.preview + widths.panel, cx)),
+            preview_column.then(|| self.render_right_handle(Divider::Preview, widths.preview + widths.panel, cx)),
             self.panel.is_some().then(|| self.render_right_handle(Divider::Panel, widths.panel, cx)),
         ];
         let titlebar_shown = !fullscreen || show_tabs;
         // 右侧面板的开关按钮：右侧都收着时落在标题栏右端，标题栏给它让位；打开着时落在
-        // 面板顶上。全屏又只有一个标签、右侧也都收着时没有地方放，不画。
-        let right_inset = if titlebar_shown && !self.project_visible() { project::PANEL_TOGGLES_INSET } else { 0. };
-        let panel_toggles = (titlebar_shown || self.project_visible()).then(|| {
+        // 面板顶上。全屏又只有一个标签、右侧也都收着时没有地方放，不画。放大的预览栏不在右侧。
+        let right_column = self.panel.is_some() || preview_column;
+        let right_inset = if titlebar_shown && !right_column { project::PANEL_TOGGLES_INSET } else { 0. };
+        let panel_toggles = (titlebar_shown || right_column).then(|| {
             self.render_panel_toggles(fg, bg, window, cx)
                 .absolute()
                 .top(px((TITLEBAR_HEIGHT - project::TOGGLE_HEIGHT) / 2.))
@@ -702,7 +717,7 @@ impl WindowView {
             .flex()
             .flex_col()
             .children(titlebar)
-            .child(div().relative().flex_1().min_h_0().child(panes));
+            .child(div().relative().flex_1().min_h_0().child(panes).children(maximized_preview));
         let mut body: Vec<AnyElement> = Vec::new();
         body.extend(sidebar.map(IntoElement::into_any_element));
         body.push(main.into_any_element());
@@ -731,10 +746,17 @@ impl WindowView {
         let sidebar_handle = sidebar.is_some().then(|| self.render_sidebar_handle(cx));
         let widths = self.right_panel_widths(viewport);
         let font = self.font_family(cx);
-        let preview = self.render_preview_panel(widths.preview, false, fg, bg, font, cx);
+        // 放大的预览栏盖在终端区上，宽度是终端区的宽度：除去侧栏、两边的空隙和右侧面板。
+        let (preview, maximized_preview) = if self.preview_maximized() {
+            let panel = if self.panel.is_some() { widths.panel + CARD_GAP } else { 0. };
+            let width = viewport - sidebar_width - 2. * CARD_GAP - panel;
+            (None, self.render_preview_panel(width, false, fg, bg, font, cx).map(cover_panes))
+        } else {
+            (self.render_preview_panel(widths.preview, false, fg, bg, font, cx), None)
+        };
         let panel = self.render_side_panel(widths.panel, fg, bg, window, cx);
         let right_handles =
-            [self.preview_shown().then_some(Divider::Preview), self.panel.is_some().then_some(Divider::Panel)]
+            [self.preview_in_column().then_some(Divider::Preview), self.panel.is_some().then_some(Divider::Panel)]
                 .into_iter()
                 .flatten()
                 .map(|divider| {
@@ -789,7 +811,7 @@ impl WindowView {
             .pl(px(CARD_GAP))
             .pr(px(CARD_GAP))
             .pb(px(CARD_GAP))
-            .child(div().relative().flex_1().min_w_0().h_full().child(panes))
+            .child(div().relative().flex_1().min_w_0().h_full().child(panes).children(maximized_preview))
             .children(preview)
             .children(panel);
         let main = div().flex_1().min_w_0().h_full().flex().flex_col().child(titlebar).child(content);

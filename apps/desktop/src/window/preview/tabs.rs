@@ -15,7 +15,7 @@ use crate::{
     assets::DIFF_ICON,
     ui::{file_icons::file_icon, hsla, tooltip::tooltip},
     window::{
-        ClosePane, CloseTab, TITLEBAR_HEIGHT, WindowView, divider_color,
+        ClosePane, CloseTab, TITLEBAR_HEIGHT, TogglePaneZoom, WindowView, divider_color,
         files::menu_item,
         model::base_name,
         project::{RENAMED, status_color},
@@ -56,6 +56,8 @@ pub(in crate::window) struct PreviewTabs {
     pub active: usize,
     /// 标签条的横向滚动位置。
     pub scroll: ScrollHandle,
+    /// 预览栏放大到盖住终端区；标签都关掉时还原。
+    pub maximized: bool,
 }
 
 impl PreviewTabs {
@@ -101,6 +103,7 @@ impl PreviewTabs {
         }
         self.tabs = kept;
         self.active = kept_before_active.min(self.tabs.len().saturating_sub(1));
+        self.maximized &= !self.tabs.is_empty();
         closed
     }
 
@@ -153,6 +156,11 @@ impl WindowView {
     /// 预览栏里没有分屏，关分屏的键（cmd+w）也只关当前的预览标签，不连带关掉终端。
     pub(super) fn close_preview_pane(&mut self, _: &ClosePane, window: &mut Window, cx: &mut Context<Self>) {
         self.close_active_preview(window, cx);
+    }
+
+    /// 预览栏里放大分屏的键放大的是预览栏。
+    pub(super) fn zoom_preview(&mut self, _: &TogglePaneZoom, window: &mut Window, cx: &mut Context<Self>) {
+        self.toggle_preview_maximized(window, cx);
     }
 
     fn close_active_preview(&mut self, window: &mut Window, cx: &mut Context<Self>) {

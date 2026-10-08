@@ -54,6 +54,9 @@ pub struct SavedWindow {
     /// 预览栏拖动过的宽度；预览的是哪个文件、开没开着都不存。
     #[serde(default)]
     pub preview_width: Option<f32>,
+    /// 预览的文本和 diff 自动换行；默认不换。
+    #[serde(default)]
+    pub preview_wrap: bool,
     /// 文件树里显示被 git 忽略的文件。
     #[serde(default)]
     pub show_ignored: bool,
@@ -330,6 +333,7 @@ mod tests {
             files: false,
             panel_width: Some(200.),
             preview_width: Some(420.),
+            preview_wrap: true,
             show_ignored: true,
             hide_dotfiles: true,
             git_tree: true,

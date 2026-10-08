@@ -10,10 +10,15 @@ use gpui::{
 };
 use runode_shared_types::{color::Rgb, theme};
 
-use super::{BODY_PADDING, Loaded, MAX_COLUMNS, Note, Preview, ROW_EXTRA_HEIGHT, marks::Mark, right_fade};
+use super::{
+    BODY_PADDING, Loaded, MAX_COLUMNS, Note, Preview, ROW_EXTRA_HEIGHT, marks::Mark, right_fade, wrap::segment,
+};
 use crate::{
     config::AppConfig,
-    ui::{hsla, scrollbar::scrollbar},
+    ui::{
+        hsla,
+        scrollbar::{row_markers, scrollbar},
+    },
     window::{
         WindowView,
         project::{ADDED, MODIFIED, REMOVED, RENAMED, panel_message},
@@ -23,6 +28,10 @@ use crate::{
 /// 改动标记的宽度；只删了行的地方在下一行顶上画一小段，这么高。
 const MARK_WIDTH: f32 = 3.;
 const REMOVED_MARK_HEIGHT: f32 = 5.;
+/// 文字右边留的空，竖的滚动条盖在这里。
+pub(super) const TEXT_RIGHT_PADDING: f32 = 12.;
+/// 换行时算出来的宽度再让一点，免得估的边框、内边距差了一两个像素时最后一个字被截掉。
+pub(super) const WRAP_SLACK: f32 = 4.;
 /// 图片底下棋盘格的两种颜色和格子边长。
 const CHECKER_LIGHT: Rgb = Rgb(0xFF, 0xFF, 0xFF);
 const CHECKER_DARK: Rgb = Rgb(0xE4, 0xE4, 0xE4);
@@ -37,6 +46,16 @@ pub(super) fn ansi_palette(cx: &App) -> [Rgb; 16] {
         }
     }
     colors
+}
+
+/// 一行显示出来的文字：制表符展开，太长的截断后带省略号。换行按它折。
+pub(super) fn shown_text(line: &str) -> String {
+    let shown = runode_preview::display_line(line, &[], MAX_COLUMNS);
+    let mut text = shown.text;
+    if shown.cut {
+        text.push('…');
+    }
+    text
 }
 
 pub(super) fn highlight_style(style: runode_preview::Style, fg: Rgb, palette: &[Rgb; 16]) -> HighlightStyle {
@@ -112,34 +131,67 @@ impl WindowView {
                     )
                     .into_any_element()
             }
-            Some(Loaded::Diff(content)) => self.render_diff_body(content, font, font_size, fg, bg, cx),
-            Some(Loaded::Text { lines, truncated, widest, .. }) => {
+            Some(Loaded::Diff(content)) => self.render_diff_body(content, width, font, font_size, fg, bg, cx),
+            Some(Loaded::Text { lines, truncated, widest, wrap, .. }) => {
                 let count = lines.len() + usize::from(*truncated);
                 let digits = lines.len().to_string().len();
                 // 行号一栏按位数定宽，等宽字体一个数字大约 0.6 个字号宽。
                 let gutter = (digits as f32 * font_size * 0.62 + 16.).ceil();
+                // 换行时文字能占的宽度：除去左边框、改动标记、行号和右边留的空。
+                let wrapped = self.preview_wrap.then(|| {
+                    let text_width = width - 1. - MARK_WIDTH - gutter - TEXT_RIGHT_PADDING - WRAP_SLACK;
+                    wrap.get(text_width, font_size, &font, count, |ix| lines.get(ix).map(|line| shown_text(line)), cx)
+                });
+                preview.apply_reveal(wrapped.as_deref());
+                let rows = wrapped.as_ref().map_or(count, |wrapped| wrapped.rows.len());
                 let list = uniform_list(
                     "preview",
-                    count,
+                    rows,
                     cx.processor(move |this, range: Range<usize>, _, cx| {
                         this.render_preview_rows(range, font_size, gutter, fg, bg, cx)
                     }),
                 )
-                .with_width_from_item(Some(*widest))
-                .with_horizontal_sizing_behavior(ListHorizontalSizingBehavior::Unconstrained)
+                .when(wrapped.is_none(), |list| {
+                    list.with_width_from_item(Some(*widest))
+                        .with_horizontal_sizing_behavior(ListHorizontalSizingBehavior::Unconstrained)
+                })
                 .track_scroll(&preview.scroll)
                 .size_full()
                 .py(px(BODY_PADDING))
                 .font_family(font);
                 let handle = preview.scroll.0.borrow().base_handle.clone();
                 let fade = right_fade(&handle, bg);
+                let mut changes: Vec<_> = preview
+                    .marks
+                    .iter()
+                    .map(|(&number, &mark)| {
+                        let line = (number as usize).saturating_sub(1).min(count.saturating_sub(1));
+                        let rows = match &wrapped {
+                            // 上面删了行的标在那一行的第一段上，加的、改的标满整行。
+                            Some(wrapped) if mark == Mark::Removed => {
+                                let start = wrapped.span(line).start;
+                                start..start + 1
+                            }
+                            Some(wrapped) => wrapped.span(line),
+                            None => line..line + 1,
+                        };
+                        let color = match mark {
+                            Mark::Added => ADDED,
+                            Mark::Modified => MODIFIED,
+                            Mark::Removed => REMOVED,
+                        };
+                        (rows, hsla(color))
+                    })
+                    .collect();
+                changes.sort_by_key(|(rows, _)| rows.start);
+                let markers = row_markers(rows, changes);
                 div()
                     .flex_1()
                     .min_h_0()
                     .relative()
                     .child(list)
                     .children(fade)
-                    .child(scrollbar("preview-scroll-y", handle.clone(), Axis::Vertical, hsla(fg)))
+                    .child(scrollbar("preview-scroll-y", handle.clone(), Axis::Vertical, hsla(fg)).markers(markers))
                     .child(scrollbar("preview-scroll-x", handle, Axis::Horizontal, hsla(fg)))
                     .into_any_element()
             }
@@ -159,7 +211,7 @@ impl WindowView {
         let Some(preview) = self.preview() else {
             return Vec::new();
         };
-        let Some(Loaded::Text { lines, highlights, .. }) = &preview.content else {
+        let Some(Loaded::Text { lines, highlights, wrap, .. }) = &preview.content else {
             return Vec::new();
         };
         let marks = &preview.marks;
@@ -169,8 +221,20 @@ impl WindowView {
         let dim = hsla(fg).opacity(0.4);
         let last = lines.len();
         let row_height = font_size + ROW_EXTRA_HEIGHT;
-        range
-            .map(|ix| {
+        // 换行时一项是折出来的一段：列表里的第几项、哪一行、这一行的哪一段、是不是第一段。
+        let wrapped = self.preview_wrap.then(|| wrap.current()).flatten();
+        let items: Vec<(usize, usize, Option<Range<usize>>, bool)> = match &wrapped {
+            Some(wrapped) => range
+                .filter_map(|row| {
+                    let (ix, piece) = wrapped.rows.get(row)?;
+                    Some((row, *ix, Some(piece.clone()), wrapped.starts_item(row)))
+                })
+                .collect(),
+            None => range.map(|ix| (ix, ix, None, true)).collect(),
+        };
+        items
+            .into_iter()
+            .map(|(item, ix, piece, first)| {
                 let row = div().flex_none().h(px(row_height)).w_full().flex().items_center().whitespace_nowrap();
                 let Some(line) = lines.get(ix) else {
                     // 截断了的文件末尾多一行说明。
@@ -188,6 +252,8 @@ impl WindowView {
                         .then(|| marks.get(&(number + 1)).copied().filter(|m| *m == Mark::Removed))
                         .flatten()
                 });
+                // 折出来的后几段接着画加的、改的标记；上面删了行的只画在第一段顶上。
+                let mark = mark.filter(|mark| first || *mark != Mark::Removed);
                 let marker =
                     div().flex_none().w(px(MARK_WIDTH)).h_full().flex().flex_col().children(mark.map(|mark| {
                         let (color, height) = match mark {
@@ -208,7 +274,11 @@ impl WindowView {
                 if shown.cut {
                     content.push('…');
                 }
-                row.id(("preview-line", ix))
+                let (content, runs) = match &piece {
+                    Some(piece) => segment(&content, &runs, piece),
+                    None => (content, runs),
+                };
+                row.id(("preview-line", item))
                     .when(selected.contains(&ix), |row| row.bg(selected_bg))
                     .child(marker)
                     .child(
@@ -219,12 +289,12 @@ impl WindowView {
                             .flex()
                             .justify_end()
                             .text_color(dim)
-                            .child(number.to_string()),
+                            .when(first, |cell| cell.child(number.to_string())),
                     )
                     .child(
                         div()
                             .flex_none()
-                            .pr(px(12.))
+                            .pr(px(TEXT_RIGHT_PADDING))
                             .text_color(hsla(fg))
                             .child(StyledText::new(content).with_highlights(runs)),
                     )

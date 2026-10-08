@@ -3,8 +3,11 @@
 //!
 //! 放在滚动区域的父元素里、排在滚动区域后面，父元素和滚动区域一样大。位置和长度在画的时候
 //! 现读 `ScrollHandle`，滚动区域这一帧刚算好的偏移量不会晚一帧。
+//!
+//! 竖的滚动条可以带改动标记（`markers`）：按在全文里的位置画在轨道上，内容能滚时一直画着，
+//! 不等鼠标进来，滚的时候看得出哪里改了。
 
-use std::{cell::Cell, rc::Rc};
+use std::{cell::Cell, ops::Range, rc::Rc};
 
 use gpui::{
     App, Axis, Bounds, CursorStyle, DispatchPhase, Edges, Element, ElementId, GlobalElementId, Hitbox, HitboxBehavior,
@@ -17,10 +20,28 @@ const TRACK_WIDTH: f32 = 10.;
 const THUMB_WIDTH: f32 = 6.;
 /// 内容再长，滑块也不短于这么长。
 const MIN_THUMB_LENGTH: f32 = 24.;
+/// 改动标记再短也画这么长，只改了一行也看得见。
+const MIN_MARKER_LENGTH: f32 = 2.;
 
 /// `handle` 所在的滚动区域在 `axis` 方向上的滚动条，颜色是 `color` 调淡。
 pub fn scrollbar(id: impl Into<ElementId>, handle: ScrollHandle, axis: Axis, color: Hsla) -> Scrollbar {
-    Scrollbar { id: id.into(), handle, axis, color }
+    Scrollbar { id: id.into(), handle, axis, color, markers: Vec::new() }
+}
+
+/// 轨道上的一段改动标记：占全文的哪一段（0 到 1）和颜色。
+pub type Marker = (Range<f32>, Hsla);
+
+/// 共 `rows` 行、`changes` 从上往下给出改了的几行和颜色时的改动标记，挨着的同色几段并成一段。
+pub fn row_markers(rows: usize, changes: impl IntoIterator<Item = (Range<usize>, Hsla)>) -> Vec<Marker> {
+    let mut runs: Vec<(Range<usize>, Hsla)> = Vec::new();
+    for (range, color) in changes {
+        match runs.last_mut() {
+            Some((run, last)) if run.end == range.start && *last == color => run.end = range.end,
+            _ => runs.push((range, color)),
+        }
+    }
+    let rows = rows.max(1) as f32;
+    runs.into_iter().map(|(run, color)| (run.start as f32 / rows..run.end as f32 / rows, color)).collect()
 }
 
 pub struct Scrollbar {
@@ -28,6 +49,7 @@ pub struct Scrollbar {
     handle: ScrollHandle,
     axis: Axis,
     color: Hsla,
+    markers: Vec<Marker>,
 }
 
 /// 跨帧留着的状态。
@@ -60,6 +82,12 @@ fn thumb(viewport: f32, max: f32, scrolled: f32, track: f32) -> Option<(f32, f32
 }
 
 impl Scrollbar {
+    /// 轨道上画的改动标记，只有竖的滚动条画。
+    pub fn markers(mut self, markers: Vec<Marker>) -> Self {
+        self.markers = markers;
+        self
+    }
+
     fn along(&self, point: gpui::Point<Pixels>) -> Pixels {
         match self.axis {
             Axis::Vertical => point.y,
@@ -242,10 +270,17 @@ impl Element for Scrollbar {
             }
         });
 
+        let track = self.track(bounds);
+        if self.axis == Axis::Vertical {
+            for (range, color) in &self.markers {
+                let len = (geometry.track_len * (range.end - range.start)).max(px(MIN_MARKER_LENGTH));
+                let start = geometry.track_start + geometry.track_len * range.start;
+                window.paint_quad(fill(Bounds::new(point(track.left(), start), size(track.size.width, len)), *color));
+            }
+        }
         if !shown {
             return;
         }
-        let track = self.track(bounds);
         let inset = px((TRACK_WIDTH - THUMB_WIDTH) / 2.);
         let thumb = match self.axis {
             Axis::Vertical => Bounds::new(
@@ -276,5 +311,12 @@ mod tests {
         // 内容很长时滑块不短于最小长度；滚过头时停在两端。
         assert_eq!(thumb(100., 100_000., 200_000., 100.), Some((100. - MIN_THUMB_LENGTH, MIN_THUMB_LENGTH)));
         assert_eq!(thumb(100., 0., 0., 100.), None);
+    }
+
+    #[test]
+    fn adjacent_rows_of_one_color_merge_into_one_marker() {
+        let (green, red) = (gpui::green(), gpui::red());
+        let markers = row_markers(10, [(1..2, green), (2..3, green), (3..4, red), (5..6, red)]);
+        assert_eq!(markers, vec![(0.1..0.3, green), (0.3..0.4, red), (0.5..0.6, red)]);
     }
 }

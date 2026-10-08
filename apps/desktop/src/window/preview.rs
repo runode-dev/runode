@@ -7,14 +7,20 @@
 //! 从 Git 面板点开的是 diff 标签，和同一个文件的普通标签分开，见 `diff`。
 //!
 //! 读文件、判断类型和高亮在 `runode_preview`，这里只管状态、后台任务和画：标签条在 `tabs`，正文的
-//! 行和图片在 `body`，行号旁的改动标记在 `marks`。
+//! 行和图片在 `body`，行号旁的改动标记在 `marks`，自动换行在 `wrap`。
+//!
+//! 标签条右边能打开自动换行（整个窗口一份，进存档）、把预览栏放大到盖住终端区（每个 workspace
+//! 各自的，不进存档）。
 
 mod body;
 mod diff;
 mod marks;
 mod tabs;
+mod wrap;
 
 use std::{
+    borrow::Cow,
+    cell::Cell,
     collections::HashMap,
     fs,
     ops::Range,
@@ -27,8 +33,8 @@ use std::{
 };
 
 use gpui::{
-    App, ClipboardItem, Context, Div, Focusable as _, Image, ImageSource, MouseButton, MouseMoveEvent, RenderImage,
-    SMOOTH_SVG_SCALE_FACTOR, ScrollHandle, ScrollStrategy, SharedString, Stateful, SvgRenderer,
+    Action, App, ClipboardItem, Context, Div, Focusable as _, Image, ImageSource, MouseButton, MouseMoveEvent,
+    RenderImage, SMOOTH_SVG_SCALE_FACTOR, ScrollHandle, ScrollStrategy, SharedString, Stateful, SvgRenderer,
     UniformListScrollHandle, Window, div, linear_color_stop, linear_gradient, prelude::*, px,
 };
 use runode_git::{self as git, FileStatus, Section};
@@ -39,15 +45,18 @@ pub(in crate::window) use diff::DiffTarget;
 pub(in crate::window) use tabs::PreviewTabs;
 
 use super::{
-    WindowView,
+    TogglePaneZoom, WindowView,
     model::base_name,
     project::{PANEL_TOGGLES_INSET, panel_shell},
+    titlebar::icon_toggle,
 };
 use crate::{
+    assets::{MAXIMIZE_ICON, MINIMIZE_ICON, WRAP_ICON},
     config::AppConfig,
     ui::{
         actions::{Copy, SelectAll},
         hsla,
+        tooltip::tooltip,
     },
 };
 use marks::{Mark, line_marks};
@@ -89,6 +98,9 @@ pub(in crate::window) struct Preview {
     cancel: Arc<AtomicBool>,
     /// 行号旁的改动标记，由 `refresh_marks` 在 git 状态变了或重读了文件时重算，不每帧算。
     marks: HashMap<u32, Mark>,
+    /// 要滚到的条目（文本的行或 diff 的行）和滚到哪儿。等画的时候再滚：内容可能还没读完，
+    /// 换行时条目在第几行也要那时才知道。
+    reveal: Cell<Option<(usize, ScrollStrategy)>>,
 }
 
 enum Loaded {
@@ -101,6 +113,8 @@ enum Loaded {
         highlights: Option<Arc<Vec<Vec<Span>>>>,
         /// 最长的一行，列表按它的宽度横向滚动。
         widest: usize,
+        /// 自动换行时折好的各段。
+        wrap: wrap::WrapCache,
     },
     Image(Arc<Image>),
     /// SVG 在后台画好的位图，太小的已经放大过。
@@ -140,6 +154,7 @@ impl Preview {
             scroll: UniformListScrollHandle::new(),
             cancel: Arc::new(AtomicBool::new(false)),
             marks: HashMap::new(),
+            reveal: Cell::new(None),
         }
     }
 
@@ -197,6 +212,14 @@ impl Preview {
         match &self.content {
             Some(Loaded::Text { lines, .. }) => Some(lines),
             _ => None,
+        }
+    }
+
+    /// 画的时候滚到等着的条目；换行时 `wrapped` 把条目换成它的第一段。
+    fn apply_reveal(&self, wrapped: Option<&wrap::Wrapped>) {
+        if let Some((item, strategy)) = self.reveal.take() {
+            let row = wrapped.map_or(item, |wrapped| wrapped.span(item).start);
+            self.scroll.scroll_to_item(row, strategy);
         }
     }
 
@@ -283,7 +306,13 @@ fn loaded(content: Content, svg: &SvgRenderer) -> Loaded {
     match content {
         Content::Text(text) => {
             let widest = widest_line(&text.lines);
-            Loaded::Text { lines: Arc::new(text.lines), truncated: text.truncated, highlights: None, widest }
+            Loaded::Text {
+                lines: Arc::new(text.lines),
+                truncated: text.truncated,
+                highlights: None,
+                widest,
+                wrap: wrap::WrapCache::default(),
+            }
         }
         Content::Image { format: ImageFormat::Svg, bytes } => match render_svg(svg, &bytes) {
             Ok(image) => Loaded::Svg(image),
@@ -315,6 +344,37 @@ impl WindowView {
         !self.workspace().project.previews.tabs.is_empty()
     }
 
+    /// 预览栏放大着，盖在终端区上。
+    pub(super) fn preview_maximized(&self) -> bool {
+        self.preview_shown() && self.workspace().project.previews.maximized
+    }
+
+    /// 预览栏在终端区右边占一栏：开着又没放大。
+    pub(super) fn preview_in_column(&self) -> bool {
+        self.preview_shown() && !self.workspace().project.previews.maximized
+    }
+
+    /// 把预览栏放大到盖住终端区，或者还原。放大时焦点交给预览栏，键盘不再落到被盖住的终端里。
+    pub(super) fn toggle_preview_maximized(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let previews = &mut self.workspace_mut().project.previews;
+        previews.maximized = !previews.maximized;
+        if previews.maximized {
+            window.focus(&self.preview_focus, cx);
+        }
+        cx.notify();
+    }
+
+    /// 切换自动换行。换行时列表不能横着滚，横向滚过的先滚回左边，不然文字一直错开着。
+    fn toggle_preview_wrap(&mut self, cx: &mut Context<Self>) {
+        self.preview_wrap = !self.preview_wrap;
+        for preview in self.workspaces.iter().flat_map(|workspace| &workspace.project.previews.tabs) {
+            let handle = preview.scroll.0.borrow().base_handle.clone();
+            handle.set_offset(gpui::point(px(0.), handle.offset().y));
+        }
+        self.save(cx);
+        cx.notify();
+    }
+
     /// 在预览栏里打开 `path` 并切到它的标签：`pin` 时开成固定标签，否则开成临时标签；已经开着
     /// 时重读一次。文件树跟着定位到它。
     pub(super) fn open_preview(&mut self, path: &Path, pin: bool, cx: &mut Context<Self>) {
@@ -326,7 +386,7 @@ impl WindowView {
         self.open_preview(path, pin, cx);
         if let Some(preview) = self.preview_mut().filter(|preview| preview.path == path) {
             preview.selection = Some((line, line));
-            preview.scroll.scroll_to_item(line, ScrollStrategy::Center);
+            preview.reveal.set(Some((line, ScrollStrategy::Center)));
         }
     }
 
@@ -592,13 +652,55 @@ impl WindowView {
             .track_scroll(&previews.scroll)
             .children((0..previews.tabs.len()).map(|ix| self.render_preview_tab(ix, fg, bg, cx)).collect::<Vec<_>>());
         // 标签下面那条分隔线由各个标签和后面的空白各画一段，当前标签底下空着，和正文连在一起。
-        // 预览栏在最右边时，空白至少留出右上角面板开关的宽度，标签不钻到开关底下。
+        let maximized = previews.maximized;
+        let button =
+            |id: &'static str, icon: &'static str, on: bool, text: Cow<'static, str>, action: Option<&dyn Action>| {
+                icon_toggle(id, icon, 13., on, fg, bg).flex_none().size(px(22.)).tooltip(tooltip(text, action, fg, bg))
+            };
+        let buttons = div()
+            .flex_none()
+            .flex()
+            .items_center()
+            .gap(px(2.))
+            .child(
+                button("preview-wrap", WRAP_ICON, self.preview_wrap, rust_i18n::t!("preview.wrap"), None)
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(|this, _, _, cx| {
+                            cx.stop_propagation();
+                            this.toggle_preview_wrap(cx);
+                        }),
+                    ),
+            )
+            .child(
+                button(
+                    "preview-maximize",
+                    if maximized { MINIMIZE_ICON } else { MAXIMIZE_ICON },
+                    false,
+                    if maximized { rust_i18n::t!("preview.restore") } else { rust_i18n::t!("preview.maximize") },
+                    Some(&TogglePaneZoom),
+                )
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(|this, _, window, cx| {
+                        cx.stop_propagation();
+                        this.toggle_preview_maximized(window, cx);
+                    }),
+                ),
+            );
+        // 按钮靠右；预览栏在最右边时再让出右上角面板开关的宽度，标签和按钮不钻到开关底下。
         let filler = div()
             .flex_1()
-            .min_w(px(if rightmost { PANEL_TOGGLES_INSET } else { 0. }))
+            .min_w_0()
             .h_full()
             .relative()
-            .child(tab_underline(fg));
+            .flex()
+            .items_center()
+            .justify_end()
+            .pl(px(4.))
+            .pr(px(if rightmost { PANEL_TOGGLES_INSET } else { 6. }))
+            .child(tab_underline(fg))
+            .child(buttons);
         let header = self.panel_header(fg, cx).border_b_0().px_0().gap_0().child(strip).child(filler);
         let body = self.render_preview_body(preview, width, font, fg, bg, cx);
         Some(
@@ -614,6 +716,7 @@ impl WindowView {
                 .on_action(cx.listener(Self::close_previews_to_right))
                 .on_action(cx.listener(Self::close_all_previews))
                 .on_action(cx.listener(Self::keep_preview_open))
+                .on_action(cx.listener(Self::zoom_preview))
                 .bg(hsla(bg))
                 .text_size(px(font_size))
                 .child(header)

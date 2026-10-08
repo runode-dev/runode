@@ -53,6 +53,8 @@ icons! {
     pub DIFF_ICON = "diff",
     pub ARROW_UP_ICON = "arrow-up",
     pub ARROW_DOWN_ICON = "arrow-down",
+    /// 预览栏标签条右边的自动换行开关。
+    pub WRAP_ICON = "wrap",
     /// 卡片样式下标题栏左边这台机器的图标：笔记本或者台式机。
     pub LAPTOP_ICON = "laptop",
     pub DESKTOP_ICON = "desktop",

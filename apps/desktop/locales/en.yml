@@ -182,6 +182,9 @@ preview:
   close_right: Close to the Right
   close_all: Close All
   keep_open: Keep Open
+  wrap: Word Wrap
+  maximize: Maximize Preview
+  restore: Restore Preview
   diff:
     worktree_tab: "%{name} (Working Tree)"
     staged_tab: "%{name} (Staged)"

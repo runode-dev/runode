@@ -182,6 +182,9 @@ preview:
   close_right: 关闭右侧
   close_all: 全部关闭
   keep_open: 保持打开
+  wrap: 自动换行
+  maximize: 放大预览
+  restore: 还原预览
   diff:
     worktree_tab: "%{name}（工作区）"
     staged_tab: "%{name}（已暂存）"

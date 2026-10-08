@@ -407,7 +407,8 @@ impl WindowView {
     pub(super) fn right_panel_widths(&self, viewport: f32) -> PanelWidths {
         let sidebar = if self.sidebar_visible() { self.sidebar_width() } else { 0. };
         let room = viewport - sidebar - MAIN_MIN_WIDTH;
-        let preview_shown = self.preview_shown();
+        // 放大的预览栏盖在终端区上，不占右侧的宽度。
+        let preview_shown = self.preview_in_column();
         let panel_shown = self.panel.is_some();
         let panel = if panel_shown { self.panel_width.unwrap_or(PANEL_WIDTH) } else { 0. };
         let preview = if preview_shown { self.preview_width.unwrap_or(PREVIEW_WIDTH) } else { 0. };

@@ -275,6 +275,7 @@ impl WindowView {
             files: self.files_shown(),
             panel_width: self.panel_width,
             preview_width: self.preview_width,
+            preview_wrap: self.preview_wrap,
             show_ignored: self.show_ignored,
             hide_dotfiles: !self.show_dotfiles,
             git_tree: self.git_tree,
@@ -361,6 +362,7 @@ impl WindowView {
             self.panel = if saved.files { Some(SidePanel::Files) } else { saved.git.then_some(SidePanel::Git) };
             self.panel_width = saved.panel_width;
             self.preview_width = saved.preview_width;
+            self.preview_wrap = saved.preview_wrap;
             self.show_ignored = saved.show_ignored;
             self.show_dotfiles = !saved.hide_dotfiles;
             self.git_tree = saved.git_tree;
