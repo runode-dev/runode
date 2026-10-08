@@ -274,6 +274,36 @@ impl Repo {
         run(&self.root, args, Some(message.as_bytes())).map(drop)
     }
 
+    /// 提交要带上的改动，写提交说明时给 AI 看：`staged` 时是暂存区相对上一个提交的差异；否则是
+    /// 工作区的全部改动（提交时会先全部暂存），未跟踪的文件只在末尾列出文件名。
+    pub fn pending_diff(&self, staged: bool) -> Result<String> {
+        let diff = if staged {
+            run(&self.root, ["diff", "--cached"], None)?
+        } else if has_head(&self.root) {
+            run(&self.root, ["diff", "HEAD"], None)?
+        } else {
+            run(&self.root, ["diff"], None)?
+        };
+        let mut text = String::from_utf8_lossy(&diff).into_owned();
+        if !staged {
+            let untracked = run(&self.root, ["ls-files", "--others", "--exclude-standard"], None)?;
+            for path in String::from_utf8_lossy(&untracked).lines() {
+                text.push_str(&format!("untracked: {path}\n"));
+            }
+        }
+        Ok(text)
+    }
+
+    /// 最近 `limit` 个提交的完整说明，新的在前；还没有提交时为空。
+    pub fn recent_messages(&self, limit: usize) -> Result<Vec<String>> {
+        if !has_head(&self.root) {
+            return Ok(Vec::new());
+        }
+        let log = run(&self.root, ["log".to_owned(), format!("-{limit}"), "--format=%B%x00".to_owned()], None)?;
+        let log = String::from_utf8_lossy(&log);
+        Ok(log.split('\0').map(str::trim).filter(|message| !message.is_empty()).map(str::to_owned).collect())
+    }
+
     /// 撤销最近一次提交，改动留在暂存区里；返回被撤销的提交的完整说明，好填回
     /// 输入框。只有一个提交时删掉分支，仓库回到还没有提交的样子。
     pub fn undo_last_commit(&self) -> Result<String> {

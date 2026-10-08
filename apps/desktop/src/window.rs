@@ -288,6 +288,8 @@ pub struct WindowView {
     new_workspace: Option<new_workspace::NewWorkspaceDialog>,
     /// 添加项目命令的对话框。
     add_task: Option<tasks::AddTaskDialog>,
+    /// Git 面板里 AI 写提交说明的对话框。
+    commit_message_dialog: Option<git_panel::CommitMessageDialog>,
     /// 开着的手机端引导页，盖住标签和分屏。
     mobile: Option<mobile::MobilePage>,
     /// 当前 workspace 里没有标签时窗口的焦点，快捷键（新开标签等）照常派发得到。
@@ -404,6 +406,7 @@ impl WindowView {
             renaming: None,
             new_workspace: None,
             add_task: None,
+            commit_message_dialog: None,
             mobile: None,
             empty_focus: cx.focus_handle(),
             agent_picker: None,
@@ -514,6 +517,7 @@ impl Render for WindowView {
         let branch_picker = self.render_branch_picker(fg, bg, cx);
         let new_workspace = self.render_new_workspace(fg, bg, cx);
         let add_task = self.render_add_task(fg, bg, cx);
+        let commit_message_dialog = self.render_commit_message_dialog(fg, bg, cx);
         let status_bar = status_bar::shown(cx).then(|| self.render_status_bar(fg, bg, cx));
         div()
             .id("window")
@@ -576,6 +580,7 @@ impl Render for WindowView {
             .children(branch_picker)
             .children(new_workspace)
             .children(add_task)
+            .children(commit_message_dialog)
     }
 }
 

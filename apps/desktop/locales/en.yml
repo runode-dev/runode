@@ -289,10 +289,31 @@ git:
   ok: OK
   cancel: Cancel
   failed: The Git operation didn't complete
+  ai_message:
+    menu: Generate Commit Message…
+    button: Generate commit message with AI
+    title: Generate Commit Message
+    subtitle: Choose the agent and prompt template for this run.
+    agent: Agent
+    args: CLI arguments
+    template: Prompt template
+    variables: "{} Variables"
+    scope: Save preset
+    scope_repo: This repository only
+    scope_all: Default for all repositories
+    save: Save Default
+    saved: Saved.
+    generate: Generate
+    unknown_agent: "Unknown agent: %{agent}"
+    unclosed_quote: Unclosed quote in CLI arguments.
+    missing: "Couldn't find the %{binary} command. Install it, or make sure it's on the PATH of your shell."
+    timeout: "%{binary} took too long and was stopped."
+    empty: The agent returned an empty commit message.
   busy:
     stage: Staging…
     discard: Discarding changes…
     commit: Committing…
+    message: Writing commit message…
     checkout: Switching branch…
     fetch: Fetching…
     pull: Pulling…

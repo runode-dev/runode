@@ -136,6 +136,26 @@ fn discards_inside_nested_repositories() {
 }
 
 #[test]
+fn reads_pending_diff_and_recent_messages() {
+    let repo = TestRepo::new("ops-pending");
+    let handle = read(&repo).repo();
+    assert_eq!(handle.recent_messages(5).unwrap(), Vec::<String>::new());
+    repo.commit_file("a.txt", "one\n", "first\n\nbody");
+    repo.commit_file("a.txt", "two\n", "second");
+    assert_eq!(handle.recent_messages(5).unwrap(), ["second", "first\n\nbody"]);
+    assert_eq!(handle.recent_messages(1).unwrap(), ["second"]);
+
+    repo.write("a.txt", "three\n");
+    repo.write("new.txt", "n\n");
+    assert_eq!(handle.pending_diff(true).unwrap(), "");
+    let all = handle.pending_diff(false).unwrap();
+    assert!(all.contains("-two\n+three\n") && all.ends_with("untracked: new.txt\n"), "{all}");
+    handle.stage(&paths(&["a.txt"])).unwrap();
+    let staged = handle.pending_diff(true).unwrap();
+    assert!(staged.contains("+three\n") && !staged.contains("new.txt"), "{staged}");
+}
+
+#[test]
 fn commits_and_amends() {
     let repo = TestRepo::new("ops-commit");
     let handle = read(&repo).repo();

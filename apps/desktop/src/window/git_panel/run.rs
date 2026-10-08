@@ -503,7 +503,7 @@ pub(super) enum StashOp {
 }
 
 /// git 报的错：只有一个按钮，不用等回答。
-fn show_git_error(err: &git::GitError, window: &mut Window, cx: &mut Context<WindowView>) {
+pub(super) fn show_git_error(err: &git::GitError, window: &mut Window, cx: &mut Context<WindowView>) {
     let mut detail: String = err.message.chars().take(MAX_ERROR_CHARS).collect();
     if detail.len() < err.message.len() {
         detail.push('…');

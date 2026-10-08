@@ -12,6 +12,7 @@
 //! 排成行的状态在 `rows`，列表的各行在 `list`，在后台跑 git 在 `run`，切换和新建分支的浮层在
 //! `branch_picker`。git 命令本身由 `runode_git::Repo` 去跑。
 
+mod ai_message;
 mod branch_picker;
 mod graph;
 mod list;
@@ -45,8 +46,8 @@ use super::{
 };
 use crate::{
     assets::{
-        BRANCH_ICON, CHECK_ICON, CHEVRON_DOWN_ICON, GIT_ICON, MORE_ICON, REFRESH_ICON, SYNC_ICON, VIEW_LIST_ICON,
-        VIEW_TREE_ICON,
+        BRANCH_ICON, CHECK_ICON, CHEVRON_DOWN_ICON, GIT_ICON, MORE_ICON, REFRESH_ICON, SPARKLE_ICON, SYNC_ICON,
+        VIEW_LIST_ICON, VIEW_TREE_ICON,
     },
     ui::{
         hsla,
@@ -56,6 +57,7 @@ use crate::{
 };
 use rows::{GitRow, GitSection};
 
+pub(super) use ai_message::CommitMessageDialog;
 pub(super) use branch_picker::BranchPicker;
 pub(super) use rows::{Busy, GitPanel};
 
@@ -68,6 +70,8 @@ actions!(
         GitCommitAmend,
         GitCommitAndPush,
         GitCommitAndSync,
+        /// 打开 AI 写提交说明的对话框，选 agent 和提示词。
+        GitGenerateCommitMessage,
         /// 撤销上次提交，改动留在暂存区。
         GitUndoLastCommit,
         GitRefresh,
@@ -155,6 +159,12 @@ impl WindowView {
             .on_action(cx.listener(Self::git_dir_action))
             .on_action(cx.listener(Self::git_worktree_action))
             .on_action(cx.listener(Self::git_commit_action))
+            .on_action(cx.listener(Self::select_commit_agent))
+            .on_action(cx.listener(|this, _: &GitGenerateCommitMessage, window, cx| {
+                if let Some(root) = this.git_target(window, cx) {
+                    this.open_commit_message_dialog(root, window, cx);
+                }
+            }))
             .on_action(cx.listener(Self::git_commit))
             .on_action(cx.listener(Self::git_commit_amend))
             .on_action(cx.listener(Self::git_commit_and_push))
@@ -687,11 +697,42 @@ impl WindowView {
         let enabled = !busy && (primary != PrimaryAction::Commit || (dirty && has_message));
         let accent = hsla(RENAMED);
         let box_border = if focused { accent } else { fg_hsla.opacity(0.15) };
+        // 说明框右上角让 AI 写说明的按钮：有改动、仓库没在忙时才能点，写的时候说明框底下的提交按钮
+        // 写着在生成。
+        let can_write = dirty && !busy;
+        let sparkle = div()
+            .id(("git-commit-sparkle", ri))
+            .absolute()
+            .top(px(3.))
+            .right(px(3.))
+            .size(px(20.))
+            .rounded(px(4.))
+            .flex()
+            .items_center()
+            .justify_center()
+            .tooltip(tooltip(rust_i18n::t!("git.ai_message.button"), None, fg, bg))
+            .child(svg().path(SPARKLE_ICON).size(px(14.)).text_color(fg_hsla.opacity(if can_write {
+                0.75
+            } else {
+                0.3
+            })))
+            .when(can_write, |sparkle| {
+                let root = root.clone();
+                sparkle.hover(|sparkle| sparkle.bg(fg_hsla.opacity(0.08))).on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(move |this, _, window, cx| {
+                        cx.stop_propagation();
+                        this.generate_commit_message(&root, window, cx);
+                    }),
+                )
+            });
         let commit_box = div()
             .id(("git-commit-box", ri))
+            .relative()
             .flex_none()
             .w_full()
-            .px(px(6.))
+            .pl(px(6.))
+            .pr(px(26.))
             .py(px(4.))
             .rounded(px(4.))
             .border_1()
@@ -703,7 +744,8 @@ impl WindowView {
                 let area = area.clone();
                 move |_, window, cx| window.focus(&area.focus_handle(cx), cx)
             })
-            .child(area);
+            .child(area)
+            .child(sparkle);
         let main = div()
             .id(("git-commit", ri))
             .flex_1()
@@ -780,6 +822,8 @@ impl WindowView {
             item("git.commit_amend", Box::new(GitCommitAmend)),
             item("git.commit_and_push", Box::new(GitCommitAndPush)),
             item("git.commit_and_sync", Box::new(GitCommitAndSync)),
+            None,
+            item("git.ai_message.menu", Box::new(GitGenerateCommitMessage)),
             None,
             item("git.undo_last_commit", Box::new(GitUndoLastCommit)),
         ];

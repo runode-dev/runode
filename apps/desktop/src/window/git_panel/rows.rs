@@ -171,6 +171,8 @@ pub(in crate::window) enum Busy {
     Stage,
     Discard,
     Commit,
+    /// AI 在写提交说明。
+    Message,
     Checkout,
     Fetch,
     Pull,
@@ -191,6 +193,7 @@ impl Busy {
             Self::Stage => rust_i18n::t!("git.busy.stage"),
             Self::Discard => rust_i18n::t!("git.busy.discard"),
             Self::Commit => rust_i18n::t!("git.busy.commit"),
+            Self::Message => rust_i18n::t!("git.busy.message"),
             Self::Checkout => rust_i18n::t!("git.busy.checkout"),
             Self::Fetch => rust_i18n::t!("git.busy.fetch"),
             Self::Pull => rust_i18n::t!("git.busy.pull"),

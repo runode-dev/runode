@@ -136,6 +136,14 @@ pub(in crate::window) fn accent(kind: AgentKind) -> Option<u32> {
     Some(brand_color(kind).unwrap_or(0x6B7280))
 }
 
+/// `kind` 的 logo 文件，菜单项前面染成前景色画；没收 logo 的为 `None`。
+pub(in crate::window) fn logo_path(kind: AgentKind) -> Option<&'static str> {
+    match logo_of(kind)? {
+        Logo::Colored(path) | Logo::Mono(path) => Some(path),
+        Logo::Initial(_) => None,
+    }
+}
+
 /// `kind` 的 logo，边长 `size`；单色的和首字母都染成 `fg`。认不出是哪个的 agent 为 `None`。
 pub(in crate::window) fn agent_logo(kind: AgentKind, size: Pixels, fg: Hsla) -> Option<AnyElement> {
     Some(match logo_of(kind)? {

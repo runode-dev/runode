@@ -26,6 +26,8 @@ icons! {
     pub FILTER_ICON = "filter",
     /// 文件树「更多」菜单里用 VS Code 打开的图标。
     pub CODE_ICON = "code",
+    /// Git 面板提交说明框里让 AI 写说明的按钮。
+    pub SPARKLE_ICON = "sparkle",
     /// 标题栏右上角项目命令按钮的运行图标。
     pub PLAY_ICON = "play",
     /// Git 面板里的按钮：分支、暂存、取消暂存、放弃改动、提交、刷新、更多、同步、打开文件，以及储藏的
