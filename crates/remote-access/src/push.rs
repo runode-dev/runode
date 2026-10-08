@@ -51,8 +51,9 @@ use crate::{
 
 /// 隔多久要一次会话列表、看一眼设备表。
 const POLL_INTERVAL: Duration = Duration::from_secs(2);
-/// 读屏幕时要最后这么多行，从里面挑有字的几行。
-const SCREEN_LINES: u32 = 12;
+/// 读屏幕时要最后这么多行，从里面挑有字的几行：选项和按键提示不要，窄屏下它们折成好几行也还够读到
+/// 上面的问题和命令。
+const SCREEN_LINES: u32 = 30;
 /// 连上宿主后最多等这么久的 `Welcome`。
 const HELLO_TIMEOUT: Duration = Duration::from_secs(5);
 

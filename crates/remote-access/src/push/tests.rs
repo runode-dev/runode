@@ -360,7 +360,7 @@ impl FakeHost {
                 }
                 ClientMsg::ListSessions => HostMsg::SessionList { sessions: self.sessions.lock().unwrap().clone() },
                 ClientMsg::ReadScreen { id, lines, .. } => {
-                    assert_eq!(lines, Some(12));
+                    assert_eq!(lines, Some(30));
                     HostMsg::ScreenText { id, text: "Do you want to proceed?\n❯ 1. Yes\n".into(), truncated: false }
                 }
                 other => panic!("the pusher sent {other:?}"),
@@ -419,7 +419,7 @@ fn the_pusher_follows_the_host() {
     host.set(AgentState::Blocked);
     let requests = scratch.wait_for(2);
     let start = body(&requests[1]);
-    assert_eq!(start["content"]["lines"], serde_json::json!(["Do you want to proceed?", "❯ 1. Yes"]));
+    assert_eq!(start["content"]["lines"], serde_json::json!(["Do you want to proceed?"]));
     assert_eq!(start["attributes"]["session"], SESSION.to_string());
 
     host.set(AgentState::Working);

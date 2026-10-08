@@ -60,6 +60,14 @@ fn claude() {
         ),
         "blocked"
     );
+    // 窄屏下 Claude 自己把底部的提示折成两行，提问框照样认得出。
+    assert_eq!(
+        screen(
+            Claude,
+            "────────\n ☐ 午饭\n\n午饭吃什么？\n\n❯ 1. 面条\n  2. 米饭\n────────\n  3. Chat about this\n\nEnter to select · ↑/↓ to navigate · Esc to\ncancel\n"
+        ),
+        "blocked"
+    );
     // 正在看历史记录，看不出当前状态。
     assert_eq!(screen(Claude, "● earlier\n\n  Showing detailed transcript · ctrl+o to toggle\n"), "hold");
     // 光标上一行的提示词里提到「do you want to」，但输入框在：不算等用户。

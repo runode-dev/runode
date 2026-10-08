@@ -132,15 +132,53 @@ impl ActivityContent {
     }
 }
 
-/// 屏幕文字的最后 `limit` 行：去掉行尾空白，跳过空行和只有空白、制表符（U+2500–U+257F，分隔线和
-/// 边框）的行。和手机端 `Presentation.previewLines`（`atPrompt` 为假时）一样。
+/// 等回答时卡片上的几行：agent 问的问题和它上面的内容（比如要执行的命令），不要选项和按键提示。
+/// 屏幕上有编号的选项（「❯ 1. Yes」「2. No」这类，连同缩进到选项文字下面的续行）时去掉它们，最后一个
+/// 选项下面的（「Esc to cancel · Tab to amend」这类）也不要；没有选项时就是屏幕最底下的几行。去掉
+/// 行尾空白，跳过空行和只有空白、制表符（U+2500–U+257F，分隔线和边框）的行，取最后 `limit` 行。
 pub fn preview_lines(text: &str, limit: usize) -> Vec<String> {
-    let meaningful: Vec<&str> = text
+    let mut kept: Vec<&str> = Vec::new();
+    // 正在看的选项的文字从第几列起：缩进到这一列或更深的行是它的续行。
+    let mut option: Option<usize> = None;
+    // 最后一个选项出现时 `kept` 有多长：之后的都是选项下面的提示。
+    let mut before_footer = None;
+    let meaningful = text
         .split('\n')
         .map(str::trim_end)
-        .filter(|line| line.chars().any(|c| !c.is_whitespace() && !('\u{2500}'..='\u{257f}').contains(&c)))
-        .collect();
-    meaningful[meaningful.len().saturating_sub(limit)..].iter().map(|&line| line.to_owned()).collect()
+        .filter(|line| line.chars().any(|c| !c.is_whitespace() && !('\u{2500}'..='\u{257f}').contains(&c)));
+    for line in meaningful {
+        if let Some(column) = option_column(line) {
+            option = Some(column);
+            before_footer = Some(kept.len());
+        } else if option.is_some_and(|column| indent(line) >= column) {
+        } else {
+            option = None;
+            kept.push(line);
+        }
+    }
+    kept.truncate(before_footer.unwrap_or(kept.len()));
+    kept[kept.len().saturating_sub(limit)..].iter().map(|&line| line.to_owned()).collect()
+}
+
+/// `line` 是编号选项（可以带「❯」这类选中标记，编号一两位，后面跟「.」或「)」和空格）时，选项文字
+/// 从第几列（按字符数）起。
+fn option_column(line: &str) -> Option<usize> {
+    let rest = line.trim_start();
+    let rest = rest.strip_prefix(['❯', '›', '>', '▶', '→']).map_or(rest, str::trim_start);
+    let digits = rest.len() - rest.trim_start_matches(|c: char| c.is_ascii_digit()).len();
+    if !(1..=2).contains(&digits) {
+        return None;
+    }
+    let after = rest[digits..].strip_prefix(['.', ')'])?;
+    if !after.starts_with(' ') {
+        return None;
+    }
+    Some(line.chars().count() - after.trim_start().chars().count())
+}
+
+/// 行首空白有几个字符。
+fn indent(line: &str) -> usize {
+    line.chars().take_while(|c| c.is_whitespace()).count()
 }
 
 /// Live Activity 推送的种类（APNs 的 `event`）。

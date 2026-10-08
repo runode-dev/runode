@@ -269,7 +269,7 @@ mod tests {
         assert_eq!(rounds.observe(&[blocked(A)], secs(t, 14)), []);
         assert_eq!(
             rounds.screen(A, Some("Do you want to proceed?\n❯ 1. Yes\n  2. No\n"), secs(t, 14)),
-            [Action::Start(A, content(A, &["Do you want to proceed?", "❯ 1. Yes", "  2. No"]))]
+            [Action::Start(A, content(A, &["Do you want to proceed?"]))]
         );
         // 刷新最多十秒一次：之前不读屏幕。
         assert_eq!(rounds.observe(&[blocked(A)], secs(t, 16)), []);
@@ -279,12 +279,9 @@ mod tests {
         assert_eq!(rounds.observe(&[blocked(A)], secs(t, 26)), [Action::ReadScreen(A)]);
         assert_eq!(
             rounds.screen(A, Some("Allow edits?\n❯ 1. Yes"), secs(t, 26)),
-            [Action::Update(A, content(A, &["Allow edits?", "❯ 1. Yes"]))]
+            [Action::Update(A, content(A, &["Allow edits?"]))]
         );
-        assert_eq!(
-            rounds.observe(&[working(A)], secs(t, 28)),
-            [Action::End(A, content(A, &["Allow edits?", "❯ 1. Yes"]))]
-        );
+        assert_eq!(rounds.observe(&[working(A)], secs(t, 28)), [Action::End(A, content(A, &["Allow edits?"]))]);
         assert!(!rounds.any_open());
         // 再等回答是新的一个回合，又从宽限期算起。
         assert_eq!(rounds.observe(&[blocked(A)], secs(t, 30)), []);

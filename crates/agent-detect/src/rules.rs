@@ -19,7 +19,8 @@
 //! not = [{ contains = ["esc to cancel"] }]
 //! ```
 //!
-//! 一条规则的条件全部满足才算命中：`contains` 里每个词都出现（不分大小写），`regex` 每个都
+//! 一条规则的条件全部满足才算命中：`contains` 里每个词都出现（不分大小写，换行和连续的空白
+//! 都当成一个空格：窄屏下 agent 自己把一句提示折成两行时也认得出），`regex` 每个都
 //! 匹配整段，`line_regex` 每个都至少匹配其中一行，`all` 里的子条件全满足，`any` 里的至少一个
 //! 满足，`not` 里的一个都不满足。子条件的写法和规则本身一样，可以再嵌套。
 //!
@@ -207,14 +208,14 @@ impl RuleSet {
 
     /// 按 `signals` 求值。
     pub fn evaluate<'r>(&'r self, signals: Signals<'_>) -> Verdict<'r> {
-        // 每块区域只转一次小写，供 `contains` 用；同一块区域多条规则共用。
+        // 每块区域只转一次小写、压一次空白，供 `contains` 用；同一块区域多条规则共用。
         let mut lowered: Vec<(Region, String)> = Vec::new();
         for rule in &self.rules {
             let text = rule.region.slice(signals.screen, signals.title, signals.progress);
             let lower = match lowered.iter().position(|(region, _)| *region == rule.region) {
                 Some(i) => &lowered[i].1,
                 None => {
-                    lowered.push((rule.region, text.to_lowercase()));
+                    lowered.push((rule.region, fold(text)));
                     &lowered[lowered.len() - 1].1
                 }
             };
@@ -294,13 +295,18 @@ fn compile_gate(spec: GateSpec, negated: bool) -> Result<Gate, String> {
         gates.into_iter().map(|gate| compile_gate(gate, negated)).collect()
     };
     Ok(Gate {
-        contains: spec.contains.iter().map(|needle| needle.to_lowercase()).collect(),
+        contains: spec.contains.iter().map(|needle| fold(needle)).collect(),
         regex: regex(spec.regex)?,
         line_regex: regex(spec.line_regex)?,
         all: nested(spec.all, false)?,
         any: nested(spec.any, false)?,
         none: nested(spec.none, true)?,
     })
+}
+
+/// `contains` 比对用的写法：转小写，换行和连续的空白压成一个空格。
+fn fold(text: &str) -> String {
+    text.to_lowercase().split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
 impl Gate {

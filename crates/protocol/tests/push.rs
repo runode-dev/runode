@@ -60,8 +60,10 @@ fn screen() -> &'static str {
      2. No, and tell Claude what to do differently (esc)\n\n\t \n"
 }
 
+/// 样例里的几行和手机端的测试共用，不随 `preview_lines` 的取法变。
 fn content() -> ActivityContent {
-    ActivityContent::new(&meta(), &preview_lines(screen(), BLOCKED_LINES))
+    let lines = ["Do you want to proceed?", "❯ 1. Yes", "  2. No, and tell Claude what to do differently (esc)"];
+    ActivityContent::new(&meta(), &lines.map(String::from))
 }
 
 fn ended() -> ActivityContent {
@@ -126,15 +128,22 @@ fn unknown_environments_are_read_as_unknown() {
 
 /// 和手机端 `Presentation.previewLines` 一样：去掉行尾空白，跳过空行、只有空白和制表符的行，取最后几行。
 #[test]
-fn preview_lines_keep_the_last_meaningful_lines() {
-    assert_eq!(
-        preview_lines(screen(), 3),
-        ["Do you want to proceed?", "❯ 1. Yes", "  2. No, and tell Claude what to do differently (esc)"]
-    );
-    assert_eq!(preview_lines(screen(), 10)[0], "│ Bash     │");
+fn preview_lines_keep_the_question_without_options_and_hints() {
+    assert_eq!(preview_lines(screen(), 3), ["│ Bash     │", "Do you want to proceed?"]);
+    assert_eq!(preview_lines(screen(), 1), ["Do you want to proceed?"]);
     assert_eq!(preview_lines(screen(), 0), Vec::<String>::new());
     assert_eq!(preview_lines("", 3), Vec::<String>::new());
-    assert_eq!(preview_lines("a\n─┼─\n\u{3000}\nb", 3), ["a", "b"]);
+    // 窄屏下 Claude 的权限确认：选项折到下一行的续行和底下的按键提示都不要。
+    let narrow = " Bash command\n╌╌╌╌\n touch hello.txt\n╌╌╌╌\n Do you want to proceed?\n ❯ 1. Yes\n   2. Yes, and \
+                  always allow access to\n      /private/tmp/e2e from this project\n   3. No\n\n Esc to cancel · Tab to \
+                  amend\n";
+    assert_eq!(preview_lines(narrow, 3), [" Bash command", " touch hello.txt", " Do you want to proceed?"]);
+    // 提问：选项下面的说明、分隔线下的选项和折成两行的提示都不要。
+    let question = " ☐ 午饭\n\n午饭吃什么？\n\n❯ 1. 面条\n     吃面条\n  2. 米饭\n     吃米饭\n────\n  3. Chat about \
+                    this\n\nEnter to select · Esc to\ncancel\n";
+    assert_eq!(preview_lines(question, 3), [" ☐ 午饭", "午饭吃什么？"]);
+    // 没有选项时是最底下的几行。
+    assert_eq!(preview_lines("a\n─┼─\n\u{3000}\nb\nContinue? (y/n)", 2), ["b", "Continue? (y/n)"]);
 }
 
 /// 标题依次用程序设置的、前台程序名或目录名，空的跳过，都没有时是「终端」；各项截到上限。
