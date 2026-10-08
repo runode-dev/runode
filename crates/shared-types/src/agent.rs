@@ -77,6 +77,8 @@ pub struct AgentUsage {
     pub cache_read_tokens: Option<u64>,
     /// 上一次请求写进提示词缓存的 token。
     pub cache_write_tokens: Option<u64>,
+    /// 上一次请求输出的 token。
+    pub output_tokens: Option<u64>,
     /// 上下文窗口有多大。
     pub context_window: Option<u64>,
     /// 这次会话累计的花费，百万分之一美元。

@@ -465,6 +465,7 @@ driver:
     unknown: 操作
 usage:
   cache: "快取讀 %{read}，寫 %{write}"
+  output: "輸出 %{tokens}"
 layout:
   menu: 排列分割畫面…
   title: 排列分割畫面

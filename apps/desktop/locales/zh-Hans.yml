@@ -465,6 +465,7 @@ driver:
     unknown: 操作
 usage:
   cache: "缓存读 %{read}，写 %{write}"
+  output: "输出 %{tokens}"
 layout:
   menu: 排列分屏…
   title: 排列分屏

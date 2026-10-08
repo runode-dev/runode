@@ -56,6 +56,7 @@ pub(crate) fn usage(json: &Value) -> AgentUsage {
         context_tokens: context,
         cache_read_tokens: int("/context_window/current_usage/cache_read_input_tokens"),
         cache_write_tokens: int("/context_window/current_usage/cache_creation_input_tokens"),
+        output_tokens: int("/context_window/current_usage/output_tokens"),
         context_window: int("/context_window/context_window_size"),
         cost_micro_usd: float("/cost/total_cost_usd").map(|usd| (usd * 1e6).round() as u64),
         five_hour_percent: float("/rate_limits/five_hour/used_percentage")
@@ -161,6 +162,7 @@ mod tests {
                 context_tokens: Some(15500),
                 cache_read_tokens: Some(2000),
                 cache_write_tokens: Some(5000),
+                output_tokens: Some(1200),
                 context_window: Some(200000),
                 cost_micro_usd: Some(12340),
                 five_hour_percent: Some(24),

@@ -465,6 +465,7 @@ driver:
     unknown: action
 usage:
   cache: "cache read %{read}, write %{write}"
+  output: "output %{tokens}"
 layout:
   menu: Arrange Splits…
   title: Arrange Splits
