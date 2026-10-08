@@ -2,7 +2,8 @@
 #
 #   - 在 Actions 页面手动运行（workflow_dispatch），填版本号或者留空让补丁号加一：在 main 上改好
 #     workspace 的 `version`（`[workspace.package]`）和 Cargo.lock，提交，打标签（v0.2.0），推上去；
-#   - 自己改版本号、提交、打同名标签推上来（push 标签）。标签只认 main 上的提交。
+#   - 自己改版本号、提交、打同名标签推上来（push 标签），一般用 scripts/release.sh：它还写好中英双语的
+#     更新说明 docs/releases/vX.Y.Z.md 一起提交。标签只认 main 上的提交。
 #
 # 之后：对这个标签跑一遍 CI（ci.yml）；在 Apple 芯片和 Intel 的 runner 上各打一份 dmg 和自动更新用的
 # zip，用 Developer ID 签名、公证；在 x86_64 和 aarch64 的 Linux 上各打一份只有可执行文件的 tar.gz
@@ -248,6 +249,10 @@ jobs:
       VERSION: ${{ needs.prepare.outputs.version }}
       GH_TOKEN: ${{ github.token }}
     steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.tag }}
+          sparse-checkout: docs/releases
       - uses: actions/download-artifact@v4
         with:
           pattern: bundle-*
@@ -287,10 +292,13 @@ jobs:
           cat SHA256SUMS
       - name: 发成草稿，传齐了再公开
         # 先建草稿再公开：传到一半时 releases/latest 还指着上一个版本，app 和安装脚本不会拿到缺文件的版本。
+        # 更新说明用 scripts/release.sh 写的 docs/releases/$TAG.md，没有时让 GitHub 按 PR 生成。
         run: |
           bundle=target/release/bundle
+          notes=(--generate-notes)
+          [[ -f "docs/releases/$TAG.md" ]] && notes=(--notes-file "docs/releases/$TAG.md")
           gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --verify-tag --draft --title "Runode $VERSION" \
-            --generate-notes \
+            "${notes[@]}" \
             "$bundle"/Runode-*.dmg "$bundle"/Runode-*.zip "$bundle"/runode-*.tar.gz "$bundle/latest.json" \
             "$bundle/SHA256SUMS"
           gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft=false --latest
