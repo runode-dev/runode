@@ -403,6 +403,7 @@ impl WindowView {
     pub(super) fn activate_workspace(&mut self, ix: usize, window: &mut Window, cx: &mut Context<Self>) {
         self.active = ix;
         self.sidebar_scroll.scroll_to_item(ix);
+        self.follow_workspace_in_file_search(self.workspaces[ix].id, cx);
         self.refresh_project(cx);
         // 目录监听只跟着当前 workspace，切走期间这个 workspace 预览的文件可能变过。
         self.refresh_preview_if_changed(cx);

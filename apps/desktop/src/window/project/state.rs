@@ -59,6 +59,8 @@ pub(in crate::window) struct Project {
     /// Git 面板排成的行、展开收起和提交说明。
     pub git_panel: super::super::git_panel::GitPanel,
     pub file_rows: Vec<FileRow>,
+    /// 文件栏的搜索词：搜索框整个窗口一个，切走时把框里的词存在这里，切回来时放回去。
+    pub file_query: String,
     pub files_scroll: UniformListScrollHandle,
     /// 后台正在读，读完之前不再发起。
     pub(super) refreshing: bool,

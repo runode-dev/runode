@@ -37,6 +37,7 @@ use crate::{
     },
     window::{
         git_panel::{TreeItem, file_tree},
+        model::WorkspaceId,
         persist::format::SavedSearchOptions as ContentOptions,
         project::panel_message,
     },
@@ -160,6 +161,8 @@ pub(in crate::window) struct FileSearch {
     pending: Option<(SearchKey, Arc<AtomicBool>)>,
     selected: Option<usize>,
     scroll: UniformListScrollHandle,
+    /// 框里的搜索词是哪个 workspace 的。
+    workspace: Option<WorkspaceId>,
     _events: [Subscription; 3],
 }
 
@@ -218,6 +221,7 @@ impl FileSearch {
             pending: None,
             selected: None,
             scroll: UniformListScrollHandle::new(),
+            workspace: None,
             _events: [events, include_events, exclude_events],
         }
     }
@@ -437,6 +441,20 @@ impl WindowView {
             cancel.store(true, Ordering::Relaxed);
         }
         self.file_search.searched = None;
+        self.sync_file_search(cx);
+    }
+
+    /// 切到了 workspace `id`：框里的词存回原来那个 workspace（它还在的话），换上这个 workspace 的词。
+    pub(in crate::window) fn follow_workspace_in_file_search(&mut self, id: WorkspaceId, cx: &mut Context<Self>) {
+        let Some(old) = self.file_search.workspace.replace(id).filter(|&old| old != id) else {
+            return;
+        };
+        let query = self.file_search.field.read(cx).query().to_owned();
+        if let Some(workspace) = self.workspaces.iter_mut().find(|workspace| workspace.id == old) {
+            workspace.project.file_query = query;
+        }
+        let query = self.workspace().project.file_query.clone();
+        self.file_search.field.update(cx, |field, cx| field.set_query(query, cx));
         self.sync_file_search(cx);
     }
 
