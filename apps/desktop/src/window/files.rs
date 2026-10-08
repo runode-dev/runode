@@ -35,7 +35,7 @@ use super::{
 use crate::{
     assets::{
         CHEVRON_DOWN_ICON, CHEVRON_RIGHT_ICON, COLLAPSE_ALL_ICON, EYE_ICON, EYE_OFF_ICON, NEW_FILE_ICON,
-        NEW_FOLDER_ICON,
+        NEW_FOLDER_ICON, VIEW_LIST_ICON, VIEW_TREE_ICON,
     },
     config::AppConfig,
     ui::{
@@ -240,8 +240,17 @@ impl WindowView {
         };
         let ignored_toggle =
             button("toggle-ignored", icon, show_ignored, text, None, |this, _, cx| this.toggle_show_ignored(cx), cx);
-        // 标题那一行：目录名后面是没提交的改动一共加减了多少行，右边是新建、全部收起和显示忽略
-        // 文件的按钮。
+        // 搜索结果排成树还是列表，只在显示着搜索结果时有。
+        let view_toggle = self.searching(cx).then(|| {
+            let (icon, text) = if self.file_search.tree {
+                (VIEW_LIST_ICON, rust_i18n::t!("files.view_as_list"))
+            } else {
+                (VIEW_TREE_ICON, rust_i18n::t!("files.view_as_tree"))
+            };
+            button("search-view", icon, false, text, None, |this, _, cx| this.toggle_search_tree(cx), cx)
+        });
+        // 标题那一行：目录名后面是没提交的改动一共加减了多少行，右边是搜索结果的排法、新建、
+        // 全部收起和显示忽略文件的按钮。
         let dirty = workspace.project.git.as_ref().filter(|git| !git.is_clean());
         let header = panel_title()
             .gap(px(6.))
@@ -259,7 +268,14 @@ impl WindowView {
             })
             .child(div().flex_1())
             .child(
-                div().flex().gap(px(4.)).child(new_file).child(new_folder).child(collapse_all).child(ignored_toggle),
+                div()
+                    .flex()
+                    .gap(px(4.))
+                    .children(view_toggle)
+                    .child(new_file)
+                    .child(new_folder)
+                    .child(collapse_all)
+                    .child(ignored_toggle),
             );
         let font_size = cx.global::<AppConfig>().0.file_tree_font_size;
         let search_box = self.render_file_search_box(fg, bg, cx);

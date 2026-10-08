@@ -28,7 +28,7 @@ use runode_shared_types::color::Rgb;
 
 use super::WindowView;
 use crate::{
-    assets::{CHEVRON_DOWN_ICON, CHEVRON_RIGHT_ICON, CLOSE_ICON, FILTER_ICON, VIEW_LIST_ICON, VIEW_TREE_ICON},
+    assets::{CHEVRON_DOWN_ICON, CHEVRON_RIGHT_ICON, CLOSE_ICON, FILTER_ICON},
     ui::{
         file_icons::{file_icon, folder_icon},
         hsla,
@@ -39,7 +39,6 @@ use crate::{
         git_panel::{TreeItem, file_tree},
         persist::format::SavedSearchOptions as ContentOptions,
         project::panel_message,
-        titlebar::icon_toggle,
     },
 };
 
@@ -365,7 +364,7 @@ fn run_search(key: &SearchKey, cancel: &AtomicBool) -> Option<Vec<Found>> {
 
 impl WindowView {
     /// 正在搜：搜索词不为空。新建、改名的输入框在文件树里，那时照样显示文件树。
-    fn searching(&self, cx: &gpui::App) -> bool {
+    pub(super) fn searching(&self, cx: &gpui::App) -> bool {
         self.file_edit.is_none() && !self.file_search.field.read(cx).query().trim().is_empty()
     }
 
@@ -441,7 +440,7 @@ impl WindowView {
         self.sync_file_search(cx);
     }
 
-    fn toggle_search_tree(&mut self, cx: &mut Context<Self>) {
+    pub(super) fn toggle_search_tree(&mut self, cx: &mut Context<Self>) {
         let tree = !self.file_search.tree;
         self.file_search.set_tree(tree);
         self.save(cx);
@@ -584,17 +583,6 @@ impl WindowView {
                 SearchMode::Content,
                 cx,
             ));
-        let (icon, text) = if search.tree {
-            (VIEW_LIST_ICON, rust_i18n::t!("files.view_as_list"))
-        } else {
-            (VIEW_TREE_ICON, rust_i18n::t!("files.view_as_tree"))
-        };
-        let view_toggle = icon_toggle("search-view", icon, 14., false, fg, bg)
-            .flex_none()
-            .size(px(26.))
-            .tooltip(tooltip(text, None, fg, bg))
-            .on_click(cx.listener(|this, _, _, cx| this.toggle_search_tree(cx)));
-        let controls = div().flex().gap(px(6.)).child(segments.flex_1()).child(view_toggle);
         let labeled = |label: &str, field: &Entity<TextField>| {
             div()
                 .flex()
@@ -621,7 +609,7 @@ impl WindowView {
             .flex_col()
             .gap(px(6.))
             .child(field)
-            .child(controls)
+            .child(segments)
             .children(filters)
     }
 
