@@ -26,8 +26,8 @@
             scroll.addSubview(stack)
             let keyboard =
                 resting
-                ? button("keyboard", symbol: true, label: "打开键盘") { $0.showKeyboard() }
-                : button("keyboard", symbol: true, label: "收起键盘") { $0.resignFirstResponder() }
+                ? button("keyboard", symbol: true, label: String(localized: "打开键盘")) { $0.showKeyboard() }
+                : button("keyboard", symbol: true, label: String(localized: "收起键盘")) { $0.resignFirstResponder() }
             if !resting { highlight(keyboard, true) }
             keyboard.translatesAutoresizingMaskIntoConstraints = false
             addSubview(keyboard)
@@ -52,19 +52,19 @@
 
             stack.addArrangedSubview(button("escape", symbol: true, label: "Esc") { $0.press(.escape) })
             // 不用 `control` 符号：它照 ⌃ 的样子画在字框的上半截，放在按钮里偏上；`chevron.up` 形状一样、上下居中。
-            let control = button("chevron.up", symbol: true, label: "Ctrl（粘住）") { $0.controlLatched.toggle() }
+            let control = button("chevron.up", symbol: true, label: String(localized: "Ctrl（粘住）")) { $0.controlLatched.toggle() }
             controlButton = control
             stack.addArrangedSubview(control)
             stack.addArrangedSubview(button("arrow.right.to.line", symbol: true, label: "Tab") { $0.press(.tab) })
-            stack.addArrangedSubview(button("return", symbol: true, label: "回车") { $0.press(.enter) })
-            stack.addArrangedSubview(button("arrowtriangle.left.fill", symbol: true, label: "左") { $0.press(.left) })
-            stack.addArrangedSubview(button("arrowtriangle.down.fill", symbol: true, label: "下") { $0.press(.down) })
-            stack.addArrangedSubview(button("arrowtriangle.up.fill", symbol: true, label: "上") { $0.press(.up) })
-            stack.addArrangedSubview(button("arrowtriangle.right.fill", symbol: true, label: "右") { $0.press(.right) })
+            stack.addArrangedSubview(button("return", symbol: true, label: String(localized: "回车")) { $0.press(.enter) })
+            stack.addArrangedSubview(button("arrowtriangle.left.fill", symbol: true, label: String(localized: "左")) { $0.press(.left) })
+            stack.addArrangedSubview(button("arrowtriangle.down.fill", symbol: true, label: String(localized: "下")) { $0.press(.down) })
+            stack.addArrangedSubview(button("arrowtriangle.up.fill", symbol: true, label: String(localized: "上")) { $0.press(.up) })
+            stack.addArrangedSubview(button("arrowtriangle.right.fill", symbol: true, label: String(localized: "右")) { $0.press(.right) })
             for symbol in ["|", "~", "/", "-", "_", "`"] {
                 stack.addArrangedSubview(button(symbol, label: symbol) { $0.typeText(symbol) })
             }
-            stack.addArrangedSubview(button("doc.on.clipboard", symbol: true, label: "粘贴") { $0.paste(nil) })
+            stack.addArrangedSubview(button("doc.on.clipboard", symbol: true, label: String(localized: "粘贴")) { $0.paste(nil) })
         }
 
         @available(*, unavailable)

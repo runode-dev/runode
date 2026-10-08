@@ -161,16 +161,16 @@ public final class TLSChannel: FrameTransport {
 
     public func exporter() throws -> Data {
         guard let metadata = connection.metadata(definition: NWProtocolTLS.definition) as? NWProtocolTLS.Metadata
-        else { throw LinkFailure.protocolViolation("拿不到 TLS 的状态") }
+        else { throw LinkFailure.protocolViolation(String(localized: "拿不到 TLS 的状态")) }
         let label = GateSignature.exporterLabel
         let secret = label.withCString { pointer in
             sec_protocol_metadata_create_secret(
                 metadata.securityProtocolMetadata, label.utf8.count, pointer, GateSignature.exporterLength)
         }
-        guard let secret else { throw LinkFailure.protocolViolation("导不出 TLS exporter") }
+        guard let secret else { throw LinkFailure.protocolViolation(String(localized: "导不出 TLS exporter")) }
         let bytes = Data(secret as DispatchData)
         guard bytes.count == GateSignature.exporterLength else {
-            throw LinkFailure.protocolViolation("TLS exporter 长度不对")
+            throw LinkFailure.protocolViolation(String(localized: "TLS exporter 长度不对"))
         }
         return bytes
     }

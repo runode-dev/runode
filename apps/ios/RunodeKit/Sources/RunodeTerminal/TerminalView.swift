@@ -144,8 +144,8 @@
             touchDown.delegate = self
             scrollView.addGestureRecognizer(touchDown)
             isAccessibilityElement = true
-            accessibilityLabel = "终端"
-            accessibilityHint = "轻点两下打开键盘"
+            accessibilityLabel = String(localized: "终端")
+            accessibilityHint = String(localized: "轻点两下打开键盘")
             accessibilityTraits = [.allowsDirectInteraction, .updatesFrequently]
             setFont(TerminalFont(size: Self.fontSizes(for: traitCollection, override: fontSizeOverride).base))
             registerForTraitChanges([UITraitPreferredContentSizeCategory.self]) { (view: TerminalView, _) in

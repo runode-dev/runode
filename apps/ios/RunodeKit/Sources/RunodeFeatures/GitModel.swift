@@ -297,18 +297,18 @@ public final class GitModel {
         case .status:
             isRefreshing = false
             loaded = true
-            errorMessage = "读不了仓库的状态：\(message)"
+            errorMessage = String(localized: "读不了仓库的状态：\(message)")
         case .action(let action):
             running = nil
-            errorMessage = "\(Presentation.gitAction(action))没成功：\(message)"
+            errorMessage = String(localized: "\(Presentation.gitAction(action))没成功：\(message)")
             // 失败的操作可能做了一半（拉取合出了冲突）：重读状态。
             Task { await refresh() }
         case .diff:
             isLoadingDiff = false
-            errorMessage = "读不了这个文件的改动：\(message)"
+            errorMessage = String(localized: "读不了这个文件的改动：\(message)")
         case .branches:
             isLoadingBranches = false
-            errorMessage = "读不了分支：\(message)"
+            errorMessage = String(localized: "读不了分支：\(message)")
         }
     }
 
@@ -318,7 +318,7 @@ public final class GitModel {
         pending.removeAll()
         if running != nil {
             running = nil
-            errorMessage = "连接断了，操作可能没办完，重新连上后看看状态"
+            errorMessage = String(localized: "连接断了，操作可能没办完，重新连上后看看状态")
         }
         isRefreshing = false
         isLoadingDiff = false

@@ -69,24 +69,24 @@ public enum LinkFailure: Error, Hashable, Sendable, LocalizedError {
         switch self {
         case .rejected(let reason):
             switch reason {
-            case .unknownDevice: "这台电脑不认识这部手机了：配对可能已在电脑上撤销，请删除后重新配对"
-            case .badSignature: "签名校验失败，请删除这台电脑后重新配对"
-            case .pairingInvalid: "配对口令不对、已过期或已经用过，请在电脑上重新生成二维码"
-            case .rateLimited: "尝试太频繁，电脑暂时拒绝了连接，稍后自动重试"
-            case .disabled: "电脑上没有打开远程访问"
-            case .unknown(let kind): "电脑拒绝了连接（\(kind)）"
+            case .unknownDevice: String(localized: "这台电脑不认识这部手机了：配对可能已在电脑上撤销，请删除后重新配对")
+            case .badSignature: String(localized: "签名校验失败，请删除这台电脑后重新配对")
+            case .pairingInvalid: String(localized: "配对口令不对、已过期或已经用过，请在电脑上重新生成二维码")
+            case .rateLimited: String(localized: "尝试太频繁，电脑暂时拒绝了连接，稍后自动重试")
+            case .disabled: String(localized: "电脑上没有打开远程访问")
+            case .unknown(let kind): String(localized: "电脑拒绝了连接（\(kind)）")
             }
-        case .gateVersion(let version): "电脑上的 Runode 使用了更新的连接方式（版本 \(version)），请升级这个 app"
-        case .incompatible(let reason): "电脑上的 Runode 和这个 app 版本不兼容：\(reason)"
-        case .missingKey: "找不到这台电脑的设备密钥，请删除后重新配对"
-        case .fingerprintMismatch: "对方的证书指纹和配对时的不一样，可能连到了别的设备"
-        case .timeout: "连接超时"
-        case .noAddress: "没有可以尝试的地址"
-        case .invitationExpired: "二维码已经过期，请在电脑上重新生成"
-        case .protocolViolation(let detail): "电脑的回应不符合协议：\(detail)"
-        case .connectionFailed(let detail): "连接失败：\(detail)"
-        case .closed(let detail): "连接断开：\(detail)"
-        case .keychain(let detail): "Keychain 出错：\(detail)"
+        case .gateVersion(let version): String(localized: "电脑上的 Runode 使用了更新的连接方式（版本 \(version)），请升级这个 app")
+        case .incompatible(let reason): String(localized: "电脑上的 Runode 和这个 app 版本不兼容：\(reason)")
+        case .missingKey: String(localized: "找不到这台电脑的设备密钥，请删除后重新配对")
+        case .fingerprintMismatch: String(localized: "对方的证书指纹和配对时的不一样，可能连到了别的设备")
+        case .timeout: String(localized: "连接超时")
+        case .noAddress: String(localized: "没有可以尝试的地址")
+        case .invitationExpired: String(localized: "二维码已经过期，请在电脑上重新生成")
+        case .protocolViolation(let detail): String(localized: "电脑的回应不符合协议：\(detail)")
+        case .connectionFailed(let detail): String(localized: "连接失败：\(detail)")
+        case .closed(let detail): String(localized: "连接断开：\(detail)")
+        case .keychain(let detail): String(localized: "Keychain 出错：\(detail)")
         }
     }
 }

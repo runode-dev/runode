@@ -69,9 +69,9 @@
 
             private func report(_ reason: DataScannerViewController.ScanningUnavailable) {
                 switch reason {
-                case .cameraRestricted: parent.onUnavailable("没有相机权限，可以在设置里打开，或者粘贴配对链接")
-                case .unsupported: parent.onUnavailable("这台设备没有可用的摄像头，请粘贴配对链接")
-                @unknown default: parent.onUnavailable("相机不支持识别二维码，请粘贴配对链接")
+                case .cameraRestricted: parent.onUnavailable(String(localized: "没有相机权限，可以在设置里打开，或者粘贴配对链接"))
+                case .unsupported: parent.onUnavailable(String(localized: "这台设备没有可用的摄像头，请粘贴配对链接"))
+                @unknown default: parent.onUnavailable(String(localized: "相机不支持识别二维码，请粘贴配对链接"))
                 }
             }
         }

@@ -9,9 +9,9 @@ public enum Presentation {
         guard let agent else { return nil }
         let state: String
         switch agent.state {
-        case .working: state = "干活中"
-        case .idle: state = "空闲"
-        case .blocked: state = "等你回答"
+        case .working: state = String(localized: "干活中")
+        case .idle: state = String(localized: "空闲")
+        case .blocked: state = String(localized: "等你回答")
         case .unknown: return nil
         }
         return ("\(agent.kind.displayName) · \(state)", agent.state)
@@ -46,40 +46,40 @@ public enum Presentation {
 
     /// 会话列表里尺寸由谁控制。
     public static func sizeOwner(_ owner: String?) -> String {
-        guard let owner, !owner.isEmpty else { return "尺寸无人控制" }
-        return "尺寸跟随 \(owner)"
+        guard let owner, !owner.isEmpty else { return String(localized: "尺寸无人控制") }
+        return String(localized: "尺寸跟随 \(owner)")
     }
 
     /// 终端页里尺寸由谁控制。
     public static func sizeOwnership(_ ownership: SizeOwnership) -> String {
         switch ownership {
-        case .unknown: "尺寸跟随电脑"
-        case .mine: "尺寸跟随本机"
-        case .other(let name?): "尺寸跟随 \(name)"
-        case .other(nil): "尺寸跟随其他设备"
+        case .unknown: String(localized: "尺寸跟随电脑")
+        case .mine: String(localized: "尺寸跟随本机")
+        case .other(let name?): String(localized: "尺寸跟随 \(name)")
+        case .other(nil): String(localized: "尺寸跟随其他设备")
         }
     }
 
     public static func linkState(_ state: LinkState) -> String {
         switch state {
-        case .idle: "未连接"
-        case .connecting: "正在连接…"
-        case .connected(let hostName, _): "已连接 \(hostName)"
-        case .waiting(let reason, _): "\(reason)，稍后自动重连"
-        case .failed(let failure): failure.errorDescription ?? "连接失败"
+        case .idle: String(localized: "未连接")
+        case .connecting: String(localized: "正在连接…")
+        case .connected(let hostName, _): String(localized: "已连接 \(hostName)")
+        case .waiting(let reason, _): String(localized: "\(reason)，稍后自动重连")
+        case .failed(let failure): failure.errorDescription ?? String(localized: "连接失败")
         }
     }
 
     /// 标题下面一行短的连接状态：重连时带倒计时。
     public static func linkStatus(_ state: LinkState, now: Date = .now) -> String {
         switch state {
-        case .idle: return "未连接"
-        case .connecting: return "连接中…"
-        case .connected: return "已连接"
+        case .idle: return String(localized: "未连接")
+        case .connecting: return String(localized: "连接中…")
+        case .connected: return String(localized: "已连接")
         case .waiting(_, let retryAt):
             let seconds = Int(retryAt.timeIntervalSince(now).rounded(.up))
-            return seconds > 0 ? "已断开，\(seconds) 秒后重连" : "已断开，正在重连"
-        case .failed: return "连接失败"
+            return seconds > 0 ? String(localized: "已断开，\(seconds) 秒后重连") : String(localized: "已断开，正在重连")
+        case .failed: return String(localized: "连接失败")
         }
     }
 
@@ -89,14 +89,14 @@ public enum Presentation {
         -> String
     {
         guard state.isConnected else { return linkStatus(state, now: now) }
-        guard loaded else { return "已连接" }
+        guard loaded else { return String(localized: "已连接") }
         let live = sessions.filter { !$0.exited }
-        guard !live.isEmpty else { return "没有终端" }
-        var parts = ["\(live.count) 个会话"]
+        guard !live.isEmpty else { return String(localized: "没有终端") }
+        var parts = [String(localized: "\(live.count) 个会话")]
         let waiting = live.filter { SessionGroup.of($0) == .waiting }.count
         let working = live.filter { SessionGroup.of($0) == .working }.count
-        if waiting > 0 { parts.append("\(waiting) 个等你回答") }
-        if working > 0 { parts.append("\(working) 个在干活") }
+        if waiting > 0 { parts.append(String(localized: "\(waiting) 个等你回答")) }
+        if working > 0 { parts.append(String(localized: "\(working) 个在干活")) }
         return parts.joined(separator: " · ")
     }
 
@@ -134,11 +134,11 @@ public enum Presentation {
     /// 会话列表里一节的标题：工作区的名字，没有名字时是目录的最后一段；不在任何窗口里的是「后台」。
     public static func sectionTitle(_ section: SessionSection) -> String {
         switch section.id {
-        case .background: return "后台"
+        case .background: return String(localized: "后台")
         case .workspace(_, let index):
             if let name = section.name, !name.isEmpty { return name }
             if let dir = section.dir, !dir.isEmpty { return (dir as NSString).lastPathComponent }
-            return "工作区 \(index)"
+            return String(localized: "工作区 \(index)")
         }
     }
 
@@ -153,9 +153,9 @@ public enum Presentation {
     public static func sectionDetail(_ section: SessionSection) -> String? {
         switch section.id {
         case .background:
-            return "电脑上没有窗口在显示这些终端"
+            return String(localized: "电脑上没有窗口在显示这些终端")
         case .workspace:
-            let parts = [section.window.map { "窗口 \($0)" }, directory(section.dir)].compactMap { $0 }
+            let parts = [section.window.map { String(localized: "窗口 \($0)") }, directory(section.dir)].compactMap { $0 }
             return parts.isEmpty ? nil : parts.joined(separator: " · ")
         }
     }
@@ -168,8 +168,8 @@ public enum Presentation {
         var parts: [String] = []
         if let status = agentStatus(agent) { parts.append(status.text) }
         switch phase {
-        case .exited: parts.append("shell 已退出")
-        case .gone: parts.append("会话已结束")
+        case .exited: parts.append(String(localized: "shell 已退出"))
+        case .gone: parts.append(String(localized: "会话已结束"))
         default:
             if parts.isEmpty || !link.isConnected { parts.append(linkStatus(link, now: now)) }
         }
@@ -178,9 +178,9 @@ public enum Presentation {
 
     public static func sizePreference(_ preference: SizePreference) -> String {
         switch preference {
-        case .automatic: "自动"
-        case .fitPhone: "适配手机"
-        case .followMachine: "跟随电脑"
+        case .automatic: String(localized: "自动")
+        case .fitPhone: String(localized: "适配手机")
+        case .followMachine: String(localized: "跟随电脑")
         }
     }
 
@@ -198,15 +198,15 @@ public enum Presentation {
     }
 
     public static func sessionTitle(_ session: SessionInfo) -> String {
-        session.meta.displayTitle ?? "终端"
+        session.meta.displayTitle ?? String(localized: "终端")
     }
 
     /// 会话卡片菜单里一组项目命令的名字：文件名，不在会话目录里时带上它在哪一级（`Makefile · ../..`）。
     /// 自己加的命令按这个项目的和通用的分。
     public static func taskSourceTitle(_ source: TaskSource, cwd: String?) -> String {
         switch source.kind {
-        case .custom: return "我的命令"
-        case .global: return "通用命令"
+        case .custom: return String(localized: "我的命令")
+        case .global: return String(localized: "通用命令")
         default: break
         }
         let file = (source.file as NSString).lastPathComponent
@@ -228,11 +228,11 @@ public enum Presentation {
 
     /// 菜单里项目命令那一节的标题：终端结束了时说明为什么点不了，前台在跑别的程序时说明命令会在新终端里跑。
     public static func projectTasksHeader(_ session: SessionInfo) -> String {
-        if session.exited { return "运行 · 终端已经结束" }
-        if session.meta.foregroundIsShell { return "运行" }
+        if session.exited { return String(localized: "运行 · 终端已经结束") }
+        if session.meta.foregroundIsShell { return String(localized: "运行") }
         if let foreground = session.meta.foreground, !foreground.isEmpty {
-            return "运行 · 前台在跑 \(foreground)，在新终端里跑"
+            return String(localized: "运行 · 前台在跑 \(foreground)，在新终端里跑")
         }
-        return "运行 · 在新终端里跑"
+        return String(localized: "运行 · 在新终端里跑")
     }
 }

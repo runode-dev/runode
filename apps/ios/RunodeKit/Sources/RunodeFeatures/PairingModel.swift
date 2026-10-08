@@ -65,11 +65,11 @@ public final class PairingModel {
         do {
             invitation = try PairingInvitation.parse(text)
         } catch {
-            phase = .failed(error.errorDescription ?? "这不是 Runode 的配对链接")
+            phase = .failed(error.errorDescription ?? String(localized: "这不是 Runode 的配对链接"))
             return
         }
         guard !invitation.isExpired(at: now()) else {
-            phase = .failed(LinkFailure.invitationExpired.errorDescription ?? "二维码已经过期")
+            phase = .failed(LinkFailure.invitationExpired.errorDescription ?? String(localized: "二维码已经过期"))
             return
         }
         phase = .pairing(hostName: invitation.hostName)
@@ -78,9 +78,9 @@ public final class PairingModel {
             await onPaired(machine)
             phase = .paired(machine)
         } catch let failure as LinkFailure {
-            phase = .failed(failure.errorDescription ?? "配对失败")
+            phase = .failed(failure.errorDescription ?? String(localized: "配对失败"))
         } catch {
-            phase = .failed("配对失败：\(error.localizedDescription)")
+            phase = .failed(String(localized: "配对失败：\(error.localizedDescription)"))
         }
     }
 }

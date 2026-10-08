@@ -119,11 +119,11 @@ private struct WaitingIcon: View {
 private enum AgentActivityText {
     /// 「Claude Code 在等你回答」；电脑没报 agent 时只说「在等你回答」。
     static func headline(_ agent: String) -> String {
-        agent.isEmpty ? "在等你回答" : "\(agent) 在等你回答"
+        agent.isEmpty ? String(localized: "在等你回答") : String(localized: "\(agent) 在等你回答")
     }
 
     /// agent 名字的头一个词；没有时是「等回答」。
     static func shortAgent(_ agent: String) -> String {
-        agent.split(separator: " ").first.map(String.init) ?? "等回答"
+        agent.split(separator: " ").first.map(String.init) ?? String(localized: "等回答")
     }
 }

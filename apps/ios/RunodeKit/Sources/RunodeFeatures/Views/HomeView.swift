@@ -82,13 +82,13 @@
             return Section {
                 HStack(spacing: 10) {
                     StatTile(
-                        value: summary.waiting, title: "等你回答", systemImage: Presentation.symbol(for: .waiting),
+                        value: summary.waiting, title: String(localized: "等你回答"), systemImage: Presentation.symbol(for: .waiting),
                         tint: summary.waiting > 0 ? .orange : .secondary)
                     StatTile(
-                        value: summary.working, title: "干活中", systemImage: Presentation.symbol(for: .working),
+                        value: summary.working, title: String(localized: "干活中"), systemImage: Presentation.symbol(for: .working),
                         tint: summary.working > 0 ? .primary : .secondary)
                     StatTile(
-                        value: summary.sessions, title: "会话", systemImage: "terminal.fill",
+                        value: summary.sessions, title: String(localized: "会话"), systemImage: "terminal.fill",
                         tint: summary.sessions > 0 ? .primary : .secondary)
                 }
                 .padding(.top, 8)
@@ -101,7 +101,7 @@
             let waiting = app.waitingSessions
             if !waiting.isEmpty {
                 Section {
-                    ListSectionHeader(title: "等你回答")
+                    ListSectionHeader(title: String(localized: "等你回答"))
                     ForEach(waiting) { item in
                         WaitingCard(item: item, showsMachine: machines.machines.count > 1) {
                             app.openTerminal(machine: item.list.machine.id, session: item.session.id)
@@ -115,7 +115,7 @@
 
         private var machineSection: some View {
             Section {
-                ListSectionHeader(title: "电脑")
+                ListSectionHeader(title: String(localized: "电脑"))
                 ForEach(machines.machines) { machine in
                     Button {
                         app.path = [.machine(machine.id)]
@@ -163,7 +163,7 @@
         private var resumeSection: some View {
             if let resume = app.resume {
                 Section {
-                    ListSectionHeader(title: "上次打开")
+                    ListSectionHeader(title: String(localized: "上次打开"))
                     Button(action: app.resumeRecent) {
                         ResumeCard(item: resume)
                     }
@@ -176,12 +176,12 @@
         private var actionSection: some View {
             let spawnable = app.spawnableLists
             return Section {
-                ListSectionHeader(title: "快捷操作")
+                ListSectionHeader(title: String(localized: "快捷操作"))
                 HStack(spacing: 10) {
-                    ActionTile(title: "配对电脑", systemImage: "qrcode.viewfinder", busy: false) {
+                    ActionTile(title: String(localized: "配对电脑"), systemImage: "qrcode.viewfinder", busy: false) {
                         app.startPairing()
                     }
-                    ActionTile(title: "新开会话", systemImage: "plus", busy: spawnable.contains(where: \.isSpawning)) {
+                    ActionTile(title: String(localized: "新开会话"), systemImage: "plus", busy: spawnable.contains(where: \.isSpawning)) {
                         if spawnable.count == 1, let list = spawnable.first {
                             spawn(on: list)
                         } else {
@@ -278,11 +278,11 @@
                     .padding(.bottom, 10)
                     .accessibilityAddTraits(.isHeader)
                 OnboardingStep(
-                    number: 1, title: "运行配对命令",
+                    number: 1, title: String(localized: "运行配对命令"),
                     detail: "在电脑的终端里运行 `runode\u{00A0}remote\u{00A0}pair`，屏幕上会出现一个二维码。")
                 Divider().padding(.leading, 40)
                 OnboardingStep(
-                    number: 2, title: "扫码",
+                    number: 2, title: String(localized: "扫码"),
                     detail: "点上面的按钮打开扫码，对准电脑屏幕上的二维码。配好后电脑就出现在这里。")
             }
             .padding(.horizontal, 24)

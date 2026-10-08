@@ -169,8 +169,8 @@
         /// 标题下面一行连接状态：连着时带地址。
         private var linkSubtitle: String {
             switch model.linkState {
-            case .connected(_, let address?): "已连接 · \(Presentation.displayAddress(address))"
-            case .waiting: "已断开，正在重连"
+            case .connected(_, let address?): String(localized: "已连接 · \(Presentation.displayAddress(address))")
+            case .waiting: String(localized: "已断开，正在重连")
             default: Presentation.linkStatus(model.linkState)
             }
         }

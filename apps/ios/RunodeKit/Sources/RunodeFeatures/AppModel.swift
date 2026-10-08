@@ -221,7 +221,7 @@ public final class AppModel {
             case nil: .unknown
             }
         let model = TerminalModel(
-            sessionId: session, title: info?.meta.displayTitle ?? "终端", agent: info?.meta.agent,
+            sessionId: session, title: info?.meta.displayTitle ?? String(localized: "终端"), agent: info?.meta.agent,
             link: list.link, ownerHint: hint, sizePreference: settings.preferences.defaultSize,
             onOpen: { [weak list] id in list?.screenOpened(id) },
             onClose: { [weak list] id in list?.screenClosed(id) })
@@ -341,7 +341,7 @@ public final class AppModel {
         let previous = recent?.machine == machine && recent?.session == session ? recent : nil
         let entry = RecentTerminal(
             machine: machine, session: session,
-            title: info.map(Presentation.sessionTitle) ?? previous?.title ?? "终端",
+            title: info.map(Presentation.sessionTitle) ?? previous?.title ?? String(localized: "终端"),
             directory: info?.meta.cwd ?? previous?.directory)
         guard entry != recent else { return }
         recent = entry

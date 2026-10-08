@@ -19,12 +19,12 @@ extension Presentation {
     /// 文件状态给 VoiceOver 读的名字。
     public static func gitStatusName(_ status: GitFileStatus) -> String {
         switch status {
-        case .modified: "已修改"
-        case .added: "新增"
-        case .deleted: "已删除"
-        case .renamed: "改名"
-        case .untracked: "未跟踪"
-        case .conflicted: "有冲突"
+        case .modified: String(localized: "已修改")
+        case .added: String(localized: "新增")
+        case .deleted: String(localized: "已删除")
+        case .renamed: String(localized: "git.status.renamed", defaultValue: "改名")
+        case .untracked: String(localized: "未跟踪")
+        case .conflicted: String(localized: "有冲突")
         case .unknown(let text): text
         }
     }
@@ -38,19 +38,19 @@ extension Presentation {
     /// 分支那一行：分支名，分离头指针时写短哈希，还没有提交时写「还没有提交」。
     public static func gitBranch(_ status: GitStatus) -> String {
         if let branch = status.branch { return branch }
-        if let head = status.head { return "分离于 \(head)" }
-        return "还没有提交"
+        if let head = status.head { return String(localized: "分离于 \(head)") }
+        return String(localized: "还没有提交")
     }
 
     /// 和上游差几个提交：`origin/main · ↑2 ↓1`、`origin/main · 已同步`；没有上游时说明能不能推。
     public static func gitUpstream(_ status: GitStatus) -> String {
         guard let upstream = status.upstream else {
-            return status.hasRemote ? "还没有上游，推送时会设好" : "没有配置远端"
+            return status.hasRemote ? String(localized: "还没有上游，推送时会设好") : String(localized: "没有配置远端")
         }
         var counts: [String] = []
         if status.ahead > 0 { counts.append("↑\(status.ahead)") }
         if status.behind > 0 { counts.append("↓\(status.behind)") }
-        return "\(upstream) · \(counts.isEmpty ? "已同步" : counts.joined(separator: " "))"
+        return "\(upstream) · \(counts.isEmpty ? String(localized: "已同步") : counts.joined(separator: " "))"
     }
 
     /// 做到一半的操作的提醒；没有时为空。
@@ -58,33 +58,43 @@ extension Presentation {
         let name: String
         switch operation {
         case nil: return nil
-        case .merge: name = "合并"
-        case .rebase: name = "变基"
-        case .cherryPick: name = "拣选"
-        case .revert: name = "撤销提交"
+        case .merge: name = String(localized: "合并")
+        case .rebase: name = String(localized: "变基")
+        case .cherryPick: name = String(localized: "拣选")
+        case .revert: name = String(localized: "撤销提交")
         case .unknown(let text): name = text
         }
-        return "\(name)做到一半，解决冲突后在电脑上继续或放弃"
+        return String(localized: "\(name)做到一半，解决冲突后在电脑上继续或放弃")
     }
 
     /// 改仓库的操作的名字。
     public static func gitAction(_ action: GitModel.Action) -> String {
         switch action {
-        case .stage: "暂存"
-        case .unstage: "取消暂存"
-        case .discard: "丢弃改动"
-        case .commit: "提交"
-        case .fetch: "获取"
-        case .pull: "拉取"
-        case .push: "推送"
-        case .sync: "同步"
-        case .checkout: "切换分支"
+        case .stage: String(localized: "暂存")
+        case .unstage: String(localized: "取消暂存")
+        case .discard: String(localized: "丢弃改动")
+        case .commit: String(localized: "提交")
+        case .fetch: String(localized: "获取")
+        case .pull: String(localized: "拉取")
+        case .push: String(localized: "推送")
+        case .sync: String(localized: "同步")
+        case .checkout: String(localized: "切换分支")
         }
     }
 
-    /// 正在办的操作，转圈旁边的字。
+    /// 正在办的操作，转圈旁边的字。每个动作单写一句，别的语言里「正在」没法和动作名拼起来。
     public static func gitRunning(_ action: GitModel.Action) -> String {
-        "正在\(gitAction(action))…"
+        switch action {
+        case .stage: String(localized: "正在暂存…")
+        case .unstage: String(localized: "正在取消暂存…")
+        case .discard: String(localized: "正在丢弃改动…")
+        case .commit: String(localized: "正在提交…")
+        case .fetch: String(localized: "正在获取…")
+        case .pull: String(localized: "正在拉取…")
+        case .push: String(localized: "正在推送…")
+        case .sync: String(localized: "正在同步…")
+        case .checkout: String(localized: "正在切换分支…")
+        }
     }
 }
 

@@ -20,10 +20,10 @@ public struct QuickKey: Hashable, Sendable, Identifiable {
         QuickKey(label: "3", key: "3", accessibilityLabel: "3"),
         QuickKey(label: "y", key: "y", accessibilityLabel: "y"),
         QuickKey(label: "n", key: "n", accessibilityLabel: "n"),
-        QuickKey(label: "⏎", key: "enter", accessibilityLabel: "回车", symbol: "return"),
+        QuickKey(label: "⏎", key: "enter", accessibilityLabel: String(localized: "回车"), symbol: "return"),
         QuickKey(label: "Esc", key: "esc", accessibilityLabel: "Esc", symbol: "escape"),
-        QuickKey(label: "↑", key: "up", accessibilityLabel: "上", symbol: "arrowtriangle.up.fill"),
-        QuickKey(label: "↓", key: "down", accessibilityLabel: "下", symbol: "arrowtriangle.down.fill"),
+        QuickKey(label: "↑", key: "up", accessibilityLabel: String(localized: "上"), symbol: "arrowtriangle.up.fill"),
+        QuickKey(label: "↓", key: "down", accessibilityLabel: String(localized: "下"), symbol: "arrowtriangle.down.fill"),
     ]
 }
 
@@ -95,7 +95,7 @@ public final class QuickReplyModel {
         case .error(let req?, _, let message) where pending.contains(req):
             pending.remove(req)
             batchFailed = true
-            errorMessage = "没发出去：\(message)"
+            errorMessage = String(localized: "没发出去：\(message)")
         default:
             return false
         }
@@ -117,6 +117,6 @@ public final class QuickReplyModel {
         pending.removeAll()
         isSending = false
         failedCount += 1
-        errorMessage = "连接断了，回复可能没送到"
+        errorMessage = String(localized: "连接断了，回复可能没送到")
     }
 }

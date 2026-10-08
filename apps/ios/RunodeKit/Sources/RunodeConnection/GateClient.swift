@@ -32,7 +32,7 @@ struct FrameReader {
             }
             guard let chunk = try await transport.receive() else {
                 try decoder.finish()
-                throw LinkFailure.closed("电脑关闭了连接")
+                throw LinkFailure.closed(String(localized: "电脑关闭了连接"))
             }
             decoder.append(chunk)
         }
@@ -42,7 +42,7 @@ struct FrameReader {
     mutating func nextControl() async throws -> Data {
         let frame = try await next()
         guard frame.kind == .control, frame.channel == 0 else {
-            throw LinkFailure.protocolViolation("还没登录就收到了类型 \(frame.kind.rawValue) 的帧")
+            throw LinkFailure.protocolViolation(String(localized: "还没登录就收到了类型 \(frame.kind.rawValue) 的帧"))
         }
         return frame.payload
     }
@@ -60,11 +60,11 @@ public enum GateClient {
             var reader = FrameReader(transport: transport, decoder: FrameDecoder(maxPayload: Frame.gateMaxPayload))
             let challenge = try JSONDecoder().decode(GateMessage.self, from: try await reader.nextControl())
             guard case let .challenge(version, nonce, hostName) = challenge else {
-                throw LinkFailure.protocolViolation("第一条消息不是 remote_challenge")
+                throw LinkFailure.protocolViolation(String(localized: "第一条消息不是 remote_challenge"))
             }
             guard version == gateVersion else { throw LinkFailure.gateVersion(version) }
             guard nonce.count == GateSignature.nonceLength else {
-                throw LinkFailure.protocolViolation("nonce 长度不对")
+                throw LinkFailure.protocolViolation(String(localized: "nonce 长度不对"))
             }
             let exporter = try transport.exporter()
             let reply: GateMessage
@@ -88,7 +88,7 @@ public enum GateClient {
             case .rejected(let reason):
                 throw LinkFailure.rejected(reason)
             default:
-                throw LinkFailure.protocolViolation("门禁的回应不对")
+                throw LinkFailure.protocolViolation(String(localized: "门禁的回应不对"))
             }
         }
     }

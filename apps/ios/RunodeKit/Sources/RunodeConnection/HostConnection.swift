@@ -244,7 +244,7 @@ public actor HostConnection: HostLink {
                     switch try JSONDecoder().decode(HostMsg.self, from: payload) {
                     case .welcome: return reader.decoder
                     case .incompatible(_, _, let reason): throw LinkFailure.incompatible(reason)
-                    case .goodbye(let reason): throw LinkFailure.closed("宿主断开了连接（\(reason)）")
+                    case .goodbye(let reason): throw LinkFailure.closed(String(localized: "宿主断开了连接（\(reason)）"))
                     default: continue
                     }
                 }
@@ -278,16 +278,16 @@ public actor HostConnection: HostLink {
                 decoder.append(chunk)
             }
         } catch let error as FrameError {
-            return "收到的数据格式不对（\(error)）"
+            return String(localized: "收到的数据格式不对（\(String(describing: error))）")
         } catch {
-            if Task.isCancelled { return "已断开" }
+            if Task.isCancelled { return String(localized: "已断开") }
             return (error as? LinkFailure)?.errorDescription ?? error.localizedDescription
         }
         switch goodbye {
-        case .handoff?: return "电脑上的 Runode 升级了，正在重新连接"
-        case .shutdown?: return "电脑上的 Runode 退出了"
-        case .error(let message)?: return "电脑断开了连接：\(message)"
-        default: return "电脑关闭了连接"
+        case .handoff?: return String(localized: "电脑上的 Runode 升级了，正在重新连接")
+        case .shutdown?: return String(localized: "电脑上的 Runode 退出了")
+        case .error(let message)?: return String(localized: "电脑断开了连接：\(message)")
+        default: return String(localized: "电脑关闭了连接")
         }
     }
 

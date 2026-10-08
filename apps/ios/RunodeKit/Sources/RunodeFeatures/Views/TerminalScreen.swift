@@ -166,17 +166,17 @@
             case .disconnected:
                 let state = model.linkState
                 return { now in
-                    if case .failed(let failure) = state { return failure.errorDescription ?? "连接失败" }
+                    if case .failed(let failure) = state { return failure.errorDescription ?? String(localized: "连接失败") }
                     return Presentation.linkStatus(state, now: now)
                 }
             case .exited(let status?):
-                return { _ in "shell 已退出（退出码 \(status)）" }
+                return { _ in String(localized: "shell 已退出（退出码 \(status)）") }
             case .exited(nil):
-                return { _ in "shell 已退出" }
+                return { _ in String(localized: "shell 已退出") }
             case .gone(let message):
-                return { _ in "这个终端已经不在了：\(message)" }
+                return { _ in String(localized: "这个终端已经不在了：\(message)") }
             case .connecting:
-                return { _ in "正在连接…" }
+                return { _ in String(localized: "正在连接…") }
             default:
                 return nil
             }
@@ -221,7 +221,7 @@
 
         private var awaitingPrompt: String {
             let name = model.agent?.kind.displayName ?? "Agent"
-            return "\(name) 在等你回答"
+            return String(localized: "\(name) 在等你回答")
         }
     }
 

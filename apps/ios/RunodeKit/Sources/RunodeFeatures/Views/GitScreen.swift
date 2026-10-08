@@ -90,8 +90,8 @@
 
         private var discardTitle: String {
             discarding.count == 1
-                ? "丢弃 \(Presentation.gitPathParts(discarding[0].path).name) 的改动？"
-                : "丢弃 \(discarding.count) 个文件的改动？"
+                ? String(localized: "丢弃 \(Presentation.gitPathParts(discarding[0].path).name) 的改动？")
+                : String(localized: "丢弃 \(discarding.count) 个文件的改动？")
         }
 
         private var subtitle: String? {
@@ -149,13 +149,13 @@
                 }
                 if status.hasRemote {
                     HStack(spacing: 8) {
-                        remoteButton("拉取", systemImage: "arrow.down", action: .pull, badge: status.behind) {
+                        remoteButton(String(localized: "拉取"), systemImage: "arrow.down", action: .pull, badge: status.behind) {
                             await model.pull()
                         }
-                        remoteButton("推送", systemImage: "arrow.up", action: .push, badge: status.ahead) {
+                        remoteButton(String(localized: "推送"), systemImage: "arrow.up", action: .push, badge: status.ahead) {
                             await model.push()
                         }
-                        remoteButton("同步", systemImage: "arrow.triangle.2.circlepath", action: .sync, badge: 0) {
+                        remoteButton(String(localized: "同步"), systemImage: "arrow.triangle.2.circlepath", action: .sync, badge: 0) {
                             await model.sync()
                         }
                     }
@@ -215,11 +215,11 @@
         }
 
         private var commitTitle: String {
-            guard let status = model.status else { return "提交" }
+            guard let status = model.status else { return String(localized: "提交") }
             if model.commitsEverything {
-                return "提交全部 \(status.unstaged.count) 个改动"
+                return String(localized: "提交全部 \(status.unstaged.count) 个改动")
             }
-            return "提交 \(status.staged.count) 个已暂存的文件"
+            return String(localized: "提交 \(status.staged.count) 个已暂存的文件")
         }
 
         // MARK: 文件
@@ -228,7 +228,7 @@
         private func files(_ files: [GitFile], staged: Bool) -> some View {
             if !files.isEmpty {
                 HStack {
-                    ListSectionHeader(title: staged ? "已暂存 \(files.count)" : "改动 \(files.count)")
+                    ListSectionHeader(title: staged ? String(localized: "已暂存 \(files.count)") : String(localized: "改动 \(files.count)"))
                     Spacer()
                     Button(staged ? "全部取消暂存" : "全部暂存") {
                         Task {
@@ -624,9 +624,9 @@
 
         private var accessibilityKind: String {
             switch line.kind {
-            case .added: "新增"
-            case .removed: "删除"
-            default: "未改"
+            case .added: String(localized: "新增")
+            case .removed: String(localized: "git.line.removed", defaultValue: "删除")
+            default: String(localized: "未改")
             }
         }
     }
@@ -639,8 +639,8 @@
         var body: some View {
             NavigationStack {
                 List {
-                    section("本地分支", model.branches.filter { !$0.remote })
-                    section("远端分支", model.branches.filter(\.remote))
+                    section(String(localized: "本地分支"), model.branches.filter { !$0.remote })
+                    section(String(localized: "远端分支"), model.branches.filter(\.remote))
                 }
                 .themedForm()
                 .overlay {

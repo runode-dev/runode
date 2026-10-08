@@ -306,7 +306,7 @@ public final class SessionListModel {
         isSpawning = true
         let req = await link.nextRequestId()
         let fallback = await link.nextRequestId()
-        pendingSpawn = PendingSpawn(req: req, fallback: fallback, failure: "开不了新终端")
+        pendingSpawn = PendingSpawn(req: req, fallback: fallback, failure: String(localized: "开不了新终端"))
         link.send(.open(req: req, placement: .tab, near: near, cwd: nil, focus: false))
     }
 
@@ -333,10 +333,10 @@ public final class SessionListModel {
         let req = await link.nextRequestId()
         if hasDesktopWindow {
             let name = name?.trimmingCharacters(in: .whitespacesAndNewlines)
-            pendingSpawn = PendingSpawn(req: req, fallback: nil, failure: "建不了工作区")
+            pendingSpawn = PendingSpawn(req: req, fallback: nil, failure: String(localized: "建不了工作区"))
             link.send(.openWorkspace(req: req, dir: dir, focus: false, name: name?.isEmpty == false ? name : nil))
         } else {
-            pendingSpawn = PendingSpawn(req: req, fallback: nil, failure: "开不了新终端")
+            pendingSpawn = PendingSpawn(req: req, fallback: nil, failure: String(localized: "开不了新终端"))
             link.send(.spawn(req: req, size: spawnSize, cwd: dir, integration: .detect, start: true))
         }
     }
@@ -351,7 +351,7 @@ public final class SessionListModel {
         guard case .workspace = section.id, let dir = section.dir, connected, !isSpawning else { return }
         isSpawning = true
         let req = await link.nextRequestId()
-        pendingSpawn = PendingSpawn(req: req, fallback: nil, failure: "开不了新终端")
+        pendingSpawn = PendingSpawn(req: req, fallback: nil, failure: String(localized: "开不了新终端"))
         link.send(.openWorkspace(req: req, dir: dir, focus: false))
     }
 
@@ -447,7 +447,7 @@ public final class SessionListModel {
         let enter = await link.nextRequestId()
         let cwd = session.meta.cwd
         pendingSpawn = PendingSpawn(
-            req: req, fallback: fallback, failure: "开不了新终端", cwd: cwd,
+            req: req, fallback: fallback, failure: String(localized: "开不了新终端"), cwd: cwd,
             command: (task.command, paste, enter))
         link.send(.open(req: req, placement: .tab, near: id, cwd: cwd, focus: false))
         return false
@@ -613,7 +613,7 @@ public final class SessionListModel {
         case .exited(let id, _):
             update(id) { $0.exited = true }
         case .sizeOwner(let id, let mine, let owner):
-            update(id) { $0.sizeOwner = mine ? "本机" : owner }
+            update(id) { $0.sizeOwner = mine ? String(localized: "本机") : owner }
         case .layout(Self.layoutRequest, let windows):
             self.windows = windows
         case .projectTasks(let req, _, let sources):
@@ -649,7 +649,7 @@ public final class SessionListModel {
                     errorMessage = "\(pending.failure)：\(message)"
                 }
             } else if let req, pendingRenames.remove(req) != nil {
-                errorMessage = "改不了名：\(message)"
+                errorMessage = String(localized: "改不了名：\(message)")
             } else if let req, pendingProjectTasks[req] != nil {
                 finishProjectTasks(req, sources: [])
             } else if req == Self.layoutRequest {
@@ -661,11 +661,11 @@ public final class SessionListModel {
                 // 电脑上的 runode 太旧，不认识 `OpenWorkspace`，回的 `Error` 不带编号。
                 pendingSpawn = nil
                 isSpawning = false
-                errorMessage = "\(pending.failure)：电脑上的 runode 版本太旧，先升级它。"
+                errorMessage = String(localized: "\(pending.failure)：电脑上的 runode 版本太旧，先升级它。")
             } else if req == nil, message == HostMsg.unknownMessage, !pendingRenames.isEmpty {
                 // 电脑上的 runode 太旧，不认识 `RenameWorkspace`。
                 pendingRenames = []
-                errorMessage = "改不了名：电脑上的 runode 版本太旧，先升级它。"
+                errorMessage = String(localized: "改不了名：电脑上的 runode 版本太旧，先升级它。")
             } else if req == nil, message == HostMsg.unknownMessage, !pendingProjectTasks.isEmpty {
                 // 电脑上的 runode 太旧，不认识 `ListProjectTasks`：不列了，卡片上不出现项目命令。
                 pendingProjectTasks = [:]

@@ -1,0 +1,54 @@
+{
+  "sourceLanguage" : "zh-Hans",
+  "strings" : {
+    "NSCameraUsageDescription" : {
+      "comment" : "相机权限的说明，配对时扫码用。",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Scan the pairing QR code shown by Runode on your Mac."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "扫电脑上 Runode 显示的配对二维码。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "掃描電腦上 Runode 顯示的配對 QR 碼。"
+          }
+        }
+      }
+    },
+    "NSLocalNetworkUsageDescription" : {
+      "comment" : "本地网络权限的说明。",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Find and connect to Runode on your Mac over the local network."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在局域网里找到并连接你电脑上的 Runode。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在區域網路中找到並連線到你電腦上的 Runode。"
+          }
+        }
+      }
+    }
+  },
+  "version" : "1.0"
+}

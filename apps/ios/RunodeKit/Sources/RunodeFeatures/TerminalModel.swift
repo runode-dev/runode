@@ -353,9 +353,9 @@ public final class TerminalModel {
             case .waiting(let reason, _):
                 lostConnection(reason)
             case .failed(let failure):
-                lostConnection(failure.errorDescription ?? "连接失败")
+                lostConnection(failure.errorDescription ?? String(localized: "连接失败"))
             case .connecting, .idle:
-                if generation != nil { lostConnection("正在重新连接") }
+                if generation != nil { lostConnection(String(localized: "正在重新连接")) }
             }
         case .ready(let generation):
             self.generation = generation
@@ -398,7 +398,7 @@ public final class TerminalModel {
             do {
                 terminal = try VTerminal(size: attached.size, settings: settings)
             } catch {
-                errorMessage = "建不了终端：\(error)"
+                errorMessage = String(localized: "建不了终端：\(String(describing: error))")
                 return
             }
             channel = attached.channel

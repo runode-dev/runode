@@ -91,7 +91,7 @@ public final class DirectoryPickerModel {
             // 电脑上的 runode 太旧，不认识 `ListDirs`，回的 `Error` 不带编号。
             pending = nil
             isLoading = false
-            errorMessage = "电脑上的 runode 版本太旧，不能浏览目录，先升级它。"
+            errorMessage = String(localized: "电脑上的 runode 版本太旧，不能浏览目录，先升级它。")
             return true
         default:
             return false

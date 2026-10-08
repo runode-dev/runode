@@ -48,7 +48,7 @@ public final class MachineListModel {
             }
             try await store.upsert(machine)
         } catch {
-            errorMessage = "存不下这台电脑：\(error.localizedDescription)"
+            errorMessage = String(localized: "存不下这台电脑：\(error.localizedDescription)")
         }
         await load()
     }
@@ -71,7 +71,7 @@ public final class MachineListModel {
         do {
             try await store.upsert(machine)
         } catch {
-            errorMessage = "改不了名字：\(error.localizedDescription)"
+            errorMessage = String(localized: "改不了名字：\(error.localizedDescription)")
         }
         await load()
     }
@@ -82,7 +82,7 @@ public final class MachineListModel {
             try keyStore.deleteKey(for: id)
             try await store.remove(id: id)
         } catch {
-            errorMessage = "删不掉这台电脑：\(error.localizedDescription)"
+            errorMessage = String(localized: "删不掉这台电脑：\(error.localizedDescription)")
         }
         await load()
     }

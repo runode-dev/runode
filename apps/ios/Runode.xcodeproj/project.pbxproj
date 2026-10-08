@@ -232,10 +232,12 @@
 				};
 			};
 			buildConfigurationList = A10000000000000000000012 /* Build configuration list for PBXProject "Runode" */;
-			developmentRegion = "zh-Hans";
+			developmentRegion = en;
 			hasScannedForEncodings = 0;
 			knownRegions = (
+				en,
 				"zh-Hans",
+				"zh-Hant",
 				Base,
 			);
 			mainGroup = A10000000000000000000002;
