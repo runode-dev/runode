@@ -81,7 +81,10 @@ mod tests {
         let section = format!("{BEGIN}\nold text\n{END}\n");
         assert_eq!(remove_section("# My rules\nbe nice\n"), None);
         assert_eq!(remove_section(&section).as_deref(), Some(""));
-        assert_eq!(remove_section(&format!("# My rules\nbe nice\n\n{section}")).as_deref(), Some("# My rules\nbe nice\n"));
+        assert_eq!(
+            remove_section(&format!("# My rules\nbe nice\n\n{section}")).as_deref(),
+            Some("# My rules\nbe nice\n")
+        );
         // 用户在那一段后面接着写的内容留着。
         assert_eq!(
             remove_section(&format!("# Mine\n\n{section}more rules\n")).as_deref(),
