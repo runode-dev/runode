@@ -21,13 +21,12 @@ use crate::{
         hsla,
         text_area::{TextArea, TextAreaEvent},
         text_field::{TextField, TextFieldEvent},
-        tooltip::tooltip,
+        tooltip::{code_tooltip, tooltip},
     },
     window::{
         TITLEBAR_HEIGHT, WindowView,
         agents::logo::{agent_logo, colored_logo, logo_path},
         files::check_item,
-        project::RENAMED,
     },
 };
 
@@ -252,7 +251,8 @@ impl WindowView {
         let selected_bg = hsla(bg.mix(fg, 0.16));
         let fg = hsla(fg);
         let border = fg.opacity(0.12);
-        let accent = hsla(RENAMED);
+        // 主按钮反着来：前景色做底、背景色写字，深浅主题下都最醒目。
+        let (accent, accent_hover) = (hsla(bg_rgb.mix(fg_rgb, 0.88)), hsla(bg_rgb.mix(fg_rgb, 0.75)));
         let mono = self.font_family(cx);
         let section = |key: &str| {
             div()
@@ -404,7 +404,7 @@ impl WindowView {
                     .text_color(fg.opacity(0.85))
                     .cursor_pointer()
                     .hover(move |chip| chip.bg(selected_bg))
-                    .tooltip(tooltip(variable_preview(name), None, fg_rgb, bg_rgb))
+                    .tooltip(code_tooltip(variable_preview(name), mono.clone(), fg_rgb, bg_rgb))
                     .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
                         if let Some(dialog) = &this.commit_message_dialog {
                             let template = dialog.template.clone();
@@ -462,7 +462,7 @@ impl WindowView {
             None => None,
         };
         let blocker = self.commit_message_blocker(&dialog.root);
-        let on_accent = gpui::white();
+        let on_accent = hsla(bg_rgb);
         let generate = div()
             .id("commit-message-generate")
             .flex_none()
@@ -481,7 +481,7 @@ impl WindowView {
                 Some(reason) => button.opacity(0.5).tooltip(tooltip(rust_i18n::t!(reason), None, fg_rgb, bg_rgb)),
                 None => button
                     .cursor_pointer()
-                    .hover(move |button| button.bg(accent.opacity(0.85)))
+                    .hover(move |button| button.bg(accent_hover))
                     .on_click(cx.listener(|this, _: &ClickEvent, window, cx| this.generate_from_dialog(window, cx))),
             });
         let footer = div()

@@ -703,22 +703,24 @@ impl WindowView {
         let sparkle = div()
             .id(("git-commit-sparkle", ri))
             .absolute()
-            .top(px(3.))
-            .right(px(3.))
-            .size(px(20.))
+            .top(px(2.))
+            .right(px(2.))
+            .size(px(24.))
             .rounded(px(4.))
             .flex()
             .items_center()
             .justify_center()
+            // 说明框整块是文字光标，按钮上换回箭头，能点时是手指。
+            .cursor_default()
             .tooltip(tooltip(rust_i18n::t!("git.ai_message.button"), None, fg, bg))
-            .child(svg().path(SPARKLE_ICON).size(px(14.)).text_color(fg_hsla.opacity(if can_write {
+            .child(svg().path(SPARKLE_ICON).size(px(18.)).text_color(fg_hsla.opacity(if can_write {
                 0.75
             } else {
                 0.3
             })))
             .when(can_write, |sparkle| {
                 let root = root.clone();
-                sparkle.hover(|sparkle| sparkle.bg(fg_hsla.opacity(0.08))).on_mouse_down(
+                sparkle.cursor_pointer().hover(|sparkle| sparkle.bg(fg_hsla.opacity(0.08))).on_mouse_down(
                     MouseButton::Left,
                     cx.listener(move |this, _, window, cx| {
                         cx.stop_propagation();
@@ -732,7 +734,7 @@ impl WindowView {
             .flex_none()
             .w_full()
             .pl(px(6.))
-            .pr(px(26.))
+            .pr(px(30.))
             .py(px(4.))
             .rounded(px(4.))
             .border_1()
