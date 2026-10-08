@@ -335,7 +335,9 @@ pub static DEFAULTS: &[&str] = &[
     "ctrl+cmd+[=previous_workspace",
     "alt+digit=goto_workspace",
     "cmd+b=toggle_sidebar",
-    "ctrl+shift+g=toggle_git",
+    // 占了 macOS 惯用的「查找上一个」：终端里的绑定比窗口的优先，两个都留着时按下去永远是搜索。
+    // 搜索框里 Shift+回车照样跳到上一个。
+    "cmd+shift+g=toggle_git",
     "cmd+shift+e=toggle_files",
     "cmd+shift+a=goto_agent",
     "cmd+alt+a=next_agent",
@@ -362,7 +364,6 @@ pub static DEFAULTS: &[&str] = &[
     "cmd+f=start_search",
     "cmd+e=search_selection",
     "cmd+g=navigate_search:next",
-    "cmd+shift+g=navigate_search:previous",
     "cmd+shift+f=end_search",
     "ctrl+shift+cmd+j=write_screen_file:copy",
     "cmd+shift+j=write_screen_file:paste",
