@@ -29,13 +29,13 @@ pub(super) use search::FileSearch;
 
 use super::{
     WindowView,
-    project::{Decoration, Project, added_label, panel_shell, panel_title, removed_label, status_color},
+    project::{Decoration, Project, TreeFilter, added_label, panel_shell, panel_title, removed_label, status_color},
     titlebar::{drag_chip, icon_toggle},
 };
 use crate::{
     assets::{
-        CHEVRON_DOWN_ICON, CHEVRON_RIGHT_ICON, COLLAPSE_ALL_ICON, EYE_ICON, EYE_OFF_ICON, NEW_FILE_ICON,
-        NEW_FOLDER_ICON, VIEW_LIST_ICON, VIEW_TREE_ICON,
+        CHEVRON_DOWN_ICON, CHEVRON_RIGHT_ICON, CODE_ICON, FOLDER_OPEN_ICON, MORE_ICON, REFRESH_ICON, VIEW_LIST_ICON,
+        VIEW_TREE_ICON,
     },
     config::AppConfig,
     ui::{
@@ -78,6 +78,12 @@ actions!(
         CopyRelativePath,
         /// 收起文件树里所有展开的目录。
         CollapseAllFiles,
+        /// 文件树里显示、隐藏名字以 `.` 开头的文件和被 git 忽略的文件。
+        ToggleShowDotfiles,
+        ToggleShowIgnored,
+        /// 用 VS Code 打开文件树的根目录，在访达里打开它。
+        OpenRootInVsCode,
+        OpenRootInFinder,
         /// 焦点从文件树交回终端。
         FocusTerminal
     ]
@@ -130,6 +136,16 @@ fn shell_escape(text: &str) -> String {
     escaped
 }
 
+/// 用 VS Code 打开 `dir`，按 bundle id 找它，不管装在哪里。没装时只记一条日志。
+fn open_in_vscode(dir: PathBuf) {
+    std::thread::spawn(move || {
+        let status = std::process::Command::new("open").args(["-b", "com.microsoft.VSCode"]).arg(&dir).status();
+        if !status.is_ok_and(|status| status.success()) {
+            tracing::warn!("failed to open {} in VS Code", dir.display());
+        }
+    });
+}
+
 /// 从文件树拖出来的一项：放到终端上把路径打进去，放到文件树的目录上挪进那个目录。
 #[derive(Clone)]
 pub(super) struct DraggedFile {
@@ -152,6 +168,32 @@ impl WindowView {
     pub(super) fn files_root(&self) -> PathBuf {
         let workspace = self.workspace();
         workspace.project.root.clone().unwrap_or_else(|| workspace.dir.clone())
+    }
+
+    /// 文件树显示哪些文件。
+    pub(super) fn tree_filter(&self) -> TreeFilter {
+        TreeFilter { ignored: self.show_ignored, dotfiles: self.show_dotfiles }
+    }
+
+    /// 标题行「更多」按钮的菜单：新建、全部收起，显示哪些文件，用别的程序打开根目录。
+    fn open_files_more_menu(&mut self, position: gpui::Point<Pixels>, cx: &mut Context<Self>) {
+        let item = |key: &str, action: Box<dyn Action>| Some(menu_item(key, action, true, cx));
+        let check = |key: &str, checked: bool, action: Box<dyn Action>| {
+            Some(check_item(rust_i18n::t!(key).into_owned(), None, checked, action))
+        };
+        let items = vec![
+            item("files.new_file", Box::new(NewFile)),
+            item("files.new_folder", Box::new(NewFolder)),
+            item("files.collapse_all", Box::new(CollapseAllFiles)),
+            None,
+            check("files.show_dotfiles", self.show_dotfiles, Box::new(ToggleShowDotfiles)),
+            check("files.show_ignored", self.show_ignored, Box::new(ToggleShowIgnored)),
+            None,
+            item("files.open_in_vscode", Box::new(OpenRootInVsCode)).map(|item| item.with_icon(CODE_ICON)),
+            item("files.open_in_finder", Box::new(OpenRootInFinder)).map(|item| item.with_icon(FOLDER_OPEN_ICON)),
+        ];
+        let target = self.files_focus.clone();
+        self.open_menu(position, items, target, cx);
     }
 
     /// 选中的那一项和它是不是目录；没选中时为空。
@@ -183,74 +225,47 @@ impl WindowView {
             }
             _ => workspace.name.clone(),
         };
-        let show_ignored = self.show_ignored;
-        // 工具栏上的图标按钮。按下时不往外传：外层的文件树按下时会把焦点抢回去，新建时刚交给
+        // 标题行上的图标按钮。按下时不往外传：外层的文件树按下时会把焦点抢回去，新建时刚交给
         // 输入框的焦点就丢了。
-        type Handler = fn(&mut WindowView, &mut Window, &mut Context<WindowView>);
-        let button = |id,
-                      icon,
-                      on,
-                      text: Cow<'static, str>,
-                      action: Option<&dyn Action>,
-                      handler: Handler,
-                      cx: &mut Context<Self>| {
-            icon_toggle(id, icon, 14., on, fg, bg)
+        let button = |id, icon, text: Cow<'static, str>| {
+            icon_toggle(id, icon, 14., false, fg, bg)
                 .flex_none()
                 .size(px(TOOLBAR_BUTTON_SIZE))
-                .tooltip(tooltip(text, action, fg, bg))
-                .on_mouse_down(
-                    MouseButton::Left,
-                    cx.listener(move |this, _, window, cx| {
-                        cx.stop_propagation();
-                        handler(this, window, cx);
-                    }),
-                )
+                .tooltip(tooltip(text, None, fg, bg))
         };
-        let new_file = button(
-            "new-file",
-            NEW_FILE_ICON,
-            false,
-            rust_i18n::t!("files.new_file"),
-            Some(&NewFile),
-            |this, window, cx| this.new_file(&NewFile, window, cx),
-            cx,
-        );
-        let new_folder = button(
-            "new-folder",
-            NEW_FOLDER_ICON,
-            false,
-            rust_i18n::t!("files.new_folder"),
-            Some(&NewFolder),
-            |this, window, cx| this.new_folder(&NewFolder, window, cx),
-            cx,
-        );
-        let collapse_all = button(
-            "collapse-all",
-            COLLAPSE_ALL_ICON,
-            false,
-            rust_i18n::t!("files.collapse_all"),
-            Some(&CollapseAllFiles),
-            |this, window, cx| this.collapse_all_files(&CollapseAllFiles, window, cx),
-            cx,
-        );
-        let (icon, text) = if show_ignored {
-            (EYE_ICON, rust_i18n::t!("tooltip.hide_ignored"))
+        // 搜索结果排成树还是列表；没在搜时淡着、点了没反应。
+        let searching = self.searching(cx);
+        let (icon, text) = if self.file_search.tree {
+            (VIEW_LIST_ICON, rust_i18n::t!("files.view_as_list"))
         } else {
-            (EYE_OFF_ICON, rust_i18n::t!("tooltip.show_ignored"))
+            (VIEW_TREE_ICON, rust_i18n::t!("files.view_as_tree"))
         };
-        let ignored_toggle =
-            button("toggle-ignored", icon, show_ignored, text, None, |this, _, cx| this.toggle_show_ignored(cx), cx);
-        // 搜索结果排成树还是列表，只在显示着搜索结果时有。
-        let view_toggle = self.searching(cx).then(|| {
-            let (icon, text) = if self.file_search.tree {
-                (VIEW_LIST_ICON, rust_i18n::t!("files.view_as_list"))
-            } else {
-                (VIEW_TREE_ICON, rust_i18n::t!("files.view_as_tree"))
-            };
-            button("search-view", icon, false, text, None, |this, _, cx| this.toggle_search_tree(cx), cx)
-        });
-        // 标题那一行：目录名后面是没提交的改动一共加减了多少行，右边是搜索结果的排法、新建、
-        // 全部收起和显示忽略文件的按钮。
+        let view_toggle =
+            button("search-view", icon, text).when(!searching, |button| button.opacity(0.4)).on_mouse_down(
+                MouseButton::Left,
+                cx.listener(|this, _, _, cx| {
+                    cx.stop_propagation();
+                    if this.searching(cx) {
+                        this.toggle_search_tree(cx);
+                    }
+                }),
+            );
+        let refresh = button("files-refresh", REFRESH_ICON, rust_i18n::t!("files.refresh")).on_mouse_down(
+            MouseButton::Left,
+            cx.listener(|this, _, _, cx| {
+                cx.stop_propagation();
+                this.refresh_project(cx);
+            }),
+        );
+        let more = button("files-more", MORE_ICON, rust_i18n::t!("files.more")).on_mouse_down(
+            MouseButton::Left,
+            cx.listener(|this, event: &MouseDownEvent, _, cx| {
+                cx.stop_propagation();
+                this.open_files_more_menu(event.position, cx);
+            }),
+        );
+        // 标题那一行：目录名后面是没提交的改动一共加减了多少行，右边是搜索结果的排法、刷新和
+        // 「更多」菜单。
         let dirty = workspace.project.git.as_ref().filter(|git| !git.is_clean());
         let header = panel_title()
             .gap(px(6.))
@@ -267,16 +282,7 @@ impl WindowView {
                 )
             })
             .child(div().flex_1())
-            .child(
-                div()
-                    .flex()
-                    .gap(px(4.))
-                    .children(view_toggle)
-                    .child(new_file)
-                    .child(new_folder)
-                    .child(collapse_all)
-                    .child(ignored_toggle),
-            );
+            .child(div().flex().gap(px(4.)).child(view_toggle).child(refresh).child(more));
         let font_size = cx.global::<AppConfig>().0.file_tree_font_size;
         let search_box = self.render_file_search_box(fg, bg, cx);
         let content = match self.render_file_search_results(font_size, fg, bg, cx) {
@@ -300,6 +306,10 @@ impl WindowView {
             .on_action(cx.listener(Self::expand_selected_file))
             .on_action(cx.listener(Self::open_selected_file))
             .on_action(cx.listener(Self::collapse_all_files))
+            .on_action(cx.listener(|this, _: &ToggleShowDotfiles, _, cx| this.toggle_show_dotfiles(cx)))
+            .on_action(cx.listener(|this, _: &ToggleShowIgnored, _, cx| this.toggle_show_ignored(cx)))
+            .on_action(cx.listener(|this, _: &OpenRootInVsCode, _, _| open_in_vscode(this.files_root())))
+            .on_action(cx.listener(|this, _: &OpenRootInFinder, _, cx| cx.open_with_system(&this.files_root())))
             .on_action(cx.listener(Self::focus_terminal))
             .on_action(cx.listener(Self::new_file))
             .on_action(cx.listener(Self::new_folder))
@@ -541,7 +551,7 @@ impl WindowView {
     fn click_file(&mut self, path: &Path, is_dir: bool, clicks: usize, cx: &mut Context<Self>) {
         self.workspace_mut().project.selected = Some(path.to_path_buf());
         if is_dir {
-            self.with_tree(|project, root, show_ignored| project.toggle_dir(path, root, show_ignored));
+            self.with_tree(|project, root, filter| project.toggle_dir(path, root, filter));
             cx.notify();
             return;
         }
@@ -555,15 +565,19 @@ impl WindowView {
     }
 
     /// 拿文件树的根目录和是否显示被忽略的文件，对 `Project` 做 `f`。
-    pub(super) fn with_tree<R>(&mut self, f: impl FnOnce(&mut Project, &Path, bool) -> R) -> R {
-        let (root, show_ignored) = (self.files_root(), self.show_ignored);
-        f(&mut self.workspace_mut().project, &root, show_ignored)
+    pub(super) fn with_tree<R>(&mut self, f: impl FnOnce(&mut Project, &Path, TreeFilter) -> R) -> R {
+        let (root, filter) = (self.files_root(), self.tree_filter());
+        f(&mut self.workspace_mut().project, &root, filter)
     }
 
     /// 键盘移动选中的行：`f` 返回新选中的位置，滚到那里，关掉右键菜单。
-    fn move_selection(&mut self, f: impl FnOnce(&mut Project, &Path, bool) -> Option<usize>, cx: &mut Context<Self>) {
-        self.with_tree(|project, root, show_ignored| {
-            if let Some(ix) = f(project, root, show_ignored) {
+    fn move_selection(
+        &mut self,
+        f: impl FnOnce(&mut Project, &Path, TreeFilter) -> Option<usize>,
+        cx: &mut Context<Self>,
+    ) {
+        self.with_tree(|project, root, filter| {
+            if let Some(ix) = f(project, root, filter) {
                 project.files_scroll.scroll_to_item(ix, ScrollStrategy::Nearest);
             }
         });
@@ -601,8 +615,8 @@ impl WindowView {
         };
         if is_dir {
             self.move_selection(
-                |project, root, show_ignored| {
-                    project.toggle_dir(&path, root, show_ignored);
+                |project, root, filter| {
+                    project.toggle_dir(&path, root, filter);
                     None
                 },
                 cx,
@@ -616,8 +630,8 @@ impl WindowView {
 
     fn collapse_all_files(&mut self, _: &CollapseAllFiles, _: &mut Window, cx: &mut Context<Self>) {
         self.move_selection(
-            |project, root, show_ignored| {
-                project.collapse_all(root, show_ignored);
+            |project, root, filter| {
+                project.collapse_all(root, filter);
                 None
             },
             cx,

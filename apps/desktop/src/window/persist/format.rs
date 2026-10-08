@@ -57,6 +57,9 @@ pub struct SavedWindow {
     /// 文件树里显示被 git 忽略的文件。
     #[serde(default)]
     pub show_ignored: bool,
+    /// 文件树里不显示名字以 `.` 开头的文件；默认显示。
+    #[serde(default)]
+    pub hide_dotfiles: bool,
     /// Git 面板里改动的文件以树形式查看；默认是列表。
     #[serde(default)]
     pub git_tree: bool,
@@ -319,6 +322,7 @@ mod tests {
             panel_width: Some(200.),
             preview_width: Some(420.),
             show_ignored: true,
+            hide_dotfiles: true,
             git_tree: true,
             file_search_tree: true,
             file_search_options: SavedSearchOptions {
