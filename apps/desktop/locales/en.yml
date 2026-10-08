@@ -261,12 +261,6 @@ files:
   search_files: "%{files} files"
   search_truncated: " (showing the first %{limit})"
   bad_regex: Invalid regular expression
-  refresh: Refresh
-  more: More
-  show_dotfiles: Show Dotfiles
-  show_ignored: Show Git-Ignored Files
-  open_in_vscode: Open in VS Code
-  open_in_finder: Open in Finder
 tooltip:
   show_sidebar: Show Sidebar
   hide_sidebar: Hide Sidebar
@@ -277,6 +271,8 @@ tooltip:
   show_panel: Show Panel
   hide_panel: Hide Panel
   tasks: Tasks
+  show_ignored: Show Files Ignored by Git
+  hide_ignored: Hide Files Ignored by Git
   close_preview: Close Preview
   close_search: Close Search
   close_split: Close Split

@@ -45,6 +45,8 @@ pub(in crate::window) struct MenuItem {
     checked: Option<bool>,
     /// 点了菜单不关、焦点不动：分组标题这类改了菜单本身的项。
     keep_open: bool,
+    /// 鼠标停在这一行上时显示的完整说明，行里的字截断了也看得全。
+    tooltip: Option<SharedString>,
 }
 
 /// 菜单项右边的图标按钮：图标和悬停时的说明；`keep_open` 时按了菜单不关、焦点不动；选中这一行时按
@@ -57,13 +59,13 @@ pub(in crate::window) struct MenuButton {
 }
 
 impl MenuItem {
-    /// 右边再加一个图标按钮，按了派发 `action`。
-    /// 字前面画 `icon`。
-    pub(in crate::window) fn with_icon(mut self, icon: &'static str) -> Self {
-        self.icon = Some(icon);
+    /// 鼠标停在这一行上时显示 `text`。
+    pub(in crate::window) fn with_tooltip(mut self, text: impl Into<SharedString>) -> Self {
+        self.tooltip = Some(text.into());
         self
     }
 
+    /// 右边再加一个图标按钮，按了派发 `action`。
     pub(in crate::window) fn with_button(mut self, button: MenuButton, action: Box<dyn Action>) -> Self {
         self.buttons.push((button, action));
         self
@@ -82,13 +84,14 @@ pub(in crate::window) fn menu_item(key: &str, action: Box<dyn Action>, enabled: 
         icon: None,
         checked: None,
         keep_open: false,
+        tooltip: None,
     }
 }
 
-/// 可以勾选的一项，有 `icon` 时字前面画它；点了派发 `action`，打不打勾由派发后的状态决定，下次打开菜单时再查。
+/// 可以勾选的一项，字前面画 `icon`；点了派发 `action`，打不打勾由派发后的状态决定，下次打开菜单时再查。
 pub(in crate::window) fn check_item(
     label: String,
-    icon: Option<&'static str>,
+    icon: &'static str,
     checked: bool,
     action: Box<dyn Action>,
 ) -> MenuItem {
@@ -98,9 +101,10 @@ pub(in crate::window) fn check_item(
         shortcut: None,
         enabled: true,
         buttons: Vec::new(),
-        icon,
+        icon: Some(icon),
         checked: Some(checked),
         keep_open: false,
+        tooltip: None,
     }
 }
 
@@ -120,6 +124,7 @@ pub(in crate::window) fn text_item(
         icon: None,
         checked: None,
         keep_open: false,
+        tooltip: None,
     }
 }
 
@@ -139,6 +144,7 @@ pub(in crate::window) fn labeled_item(
         icon: None,
         checked: None,
         keep_open: false,
+        tooltip: None,
     }
 }
 
@@ -159,6 +165,7 @@ pub(in crate::window) fn group_item(
         icon: Some(if folded { CHEVRON_RIGHT_ICON } else { CHEVRON_DOWN_ICON }),
         checked: None,
         keep_open: true,
+        tooltip: None,
     }
 }
 
@@ -479,6 +486,7 @@ impl WindowView {
                 .gap(px(16.))
                 .text_color(if item.enabled { fg } else { fg.opacity(0.35) })
                 .when(highlighted, |row| row.bg(hover_bg))
+                .when_some(item.tooltip.clone(), |row, text| row.tooltip(tooltip(text, None, fg_rgb, bg)))
                 .when(row_action, |row| {
                     row.on_hover(cx.listener(move |this, hovered: &bool, _, cx| {
                         if let Some(menu) = this.file_menu.as_mut().filter(|_| *hovered) {

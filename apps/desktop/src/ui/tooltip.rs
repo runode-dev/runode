@@ -5,6 +5,9 @@ use runode_shared_types::color::Rgb;
 
 use crate::ui::hsla;
 
+/// 说明再长也不比这宽，多了折行。
+const TOOLTIP_MAX_WIDTH: f32 = 420.;
+
 /// `action` 在键位表里的快捷键。后加的绑定优先，取最后一个，快捷键改了也跟着变。
 pub fn shortcut_text(action: &dyn Action, cx: &App) -> Option<SharedString> {
     let keymap = cx.key_bindings();
@@ -49,6 +52,7 @@ impl Render for Tooltip {
             .border_1()
             .border_color(hsla(self.fg).opacity(0.15))
             .bg(hsla(self.bg.mix(self.fg, 0.08)))
+            .max_w(px(TOOLTIP_MAX_WIDTH))
             .text_size(px(12.))
             .text_color(hsla(self.fg))
             .child(self.text.clone())

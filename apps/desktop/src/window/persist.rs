@@ -276,7 +276,6 @@ impl WindowView {
             panel_width: self.panel_width,
             preview_width: self.preview_width,
             show_ignored: self.show_ignored,
-            hide_dotfiles: !self.show_dotfiles,
             git_tree: self.git_tree,
             file_search_tree: self.file_search.tree,
             file_search_options: self.file_search.options(cx),
@@ -359,7 +358,6 @@ impl WindowView {
             self.panel_width = saved.panel_width;
             self.preview_width = saved.preview_width;
             self.show_ignored = saved.show_ignored;
-            self.show_dotfiles = !saved.hide_dotfiles;
             self.git_tree = saved.git_tree;
             self.file_search.set_tree(saved.file_search_tree);
             self.file_search.set_options(saved.file_search_options, cx);

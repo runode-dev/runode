@@ -261,12 +261,6 @@ files:
   search_files: "%{files} 個檔案"
   search_truncated: "（只列出前 %{limit} 個）"
   bad_regex: 規則運算式寫得不對
-  refresh: 重新整理
-  more: 更多
-  show_dotfiles: 顯示點檔案
-  show_ignored: 顯示 Git 忽略的檔案
-  open_in_vscode: 用 VS Code 開啟
-  open_in_finder: 在 Finder 中開啟
 tooltip:
   show_sidebar: 顯示側欄
   hide_sidebar: 隱藏側欄
@@ -277,6 +271,8 @@ tooltip:
   show_panel: 顯示面板
   hide_panel: 隱藏面板
   tasks: 命令
+  show_ignored: 顯示被 git 忽略的檔案
+  hide_ignored: 隱藏被 git 忽略的檔案
   close_preview: 關閉預覽
   close_search: 關閉搜尋
   close_split: 關閉分割畫面

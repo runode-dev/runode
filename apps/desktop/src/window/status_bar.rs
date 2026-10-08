@@ -320,7 +320,7 @@ impl WindowView {
             .into_iter()
             .map(|item| {
                 let (icon, title) = item_icon_and_title(item);
-                Some(check_item(title, Some(icon), !hidden.contains(&item), Box::new(ToggleStatusItem { item })))
+                Some(check_item(title, icon, !hidden.contains(&item), Box::new(ToggleStatusItem { item })))
             })
             .chain([None, Some(menu_item("status.hide_bar", Box::new(ToggleStatusBar), true, cx))])
             .collect();

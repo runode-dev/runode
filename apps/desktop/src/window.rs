@@ -272,8 +272,6 @@ pub struct WindowView {
     preview_focus: FocusHandle,
     /// 文件树里显示被 git 忽略的文件。
     show_ignored: bool,
-    /// 文件树里显示名字以 `.` 开头的文件。
-    show_dotfiles: bool,
     /// 文件树的焦点：点了文件树后方向键在里面移动选中的行。
     files_focus: FocusHandle,
     /// 文件树上面的搜索框和搜到的结果；整个窗口一个，换了 workspace 时按新的根目录重搜。
@@ -395,7 +393,6 @@ impl WindowView {
             preview_width: None,
             preview_focus: cx.focus_handle(),
             show_ignored: false,
-            show_dotfiles: true,
             files_focus: cx.focus_handle(),
             file_search: files::FileSearch::new(window, cx),
             file_menu: None,

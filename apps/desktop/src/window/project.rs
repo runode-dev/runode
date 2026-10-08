@@ -33,7 +33,7 @@ use crate::{
 use scan::scan;
 
 pub(super) use scan::Decoration;
-pub(super) use state::{Project, TreeFilter, follow_move};
+pub(super) use state::{Project, follow_move};
 pub(super) use watch::ProjectWatch;
 
 /// 显示右侧面板时隔这么久看一次终端换没换目录。
@@ -235,14 +235,14 @@ impl WindowView {
         cx.spawn(async move |this, cx| {
             let scan = job.await;
             this.update(cx, |this, cx| {
-                let filter = this.tree_filter();
+                let show_ignored = this.show_ignored;
                 // 读的时候 workspace 可能已经关掉了。
                 let Some(workspace) = this.workspaces.iter_mut().find(|workspace| workspace.id == id) else {
                     return;
                 };
                 workspace.project.refreshing = false;
                 workspace.project.scan_cost = scan.cost;
-                if workspace.apply_scan(scan, filter) {
+                if workspace.apply_scan(scan, show_ignored) {
                     cx.notify();
                 }
                 if this.workspace().id == id {
@@ -327,23 +327,13 @@ impl WindowView {
         }
     }
 
-    /// 切换文件树里是否显示被 git 忽略的文件、名字以 `.` 开头的文件。
+    /// 切换文件树里是否显示被 git 忽略的文件。
     pub(super) fn toggle_show_ignored(&mut self, cx: &mut Context<Self>) {
         self.show_ignored = !self.show_ignored;
-        self.rebuild_all_file_rows(cx);
-    }
-
-    pub(super) fn toggle_show_dotfiles(&mut self, cx: &mut Context<Self>) {
-        self.show_dotfiles = !self.show_dotfiles;
-        self.rebuild_all_file_rows(cx);
-    }
-
-    /// 文件树显示哪些变了：所有 workspace 的文件树重排，存进窗口存档。
-    fn rebuild_all_file_rows(&mut self, cx: &mut Context<Self>) {
-        let filter = self.tree_filter();
+        let show_ignored = self.show_ignored;
         for workspace in &mut self.workspaces {
             if let Some(root) = workspace.project.root.clone() {
-                workspace.project.rebuild_file_rows(&root, filter);
+                workspace.project.rebuild_file_rows(&root, show_ignored);
             }
         }
         self.save(cx);

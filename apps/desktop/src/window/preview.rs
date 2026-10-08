@@ -356,7 +356,7 @@ impl WindowView {
 
     /// 文件树跟着展开到预览的文件，选中它、滚到能看见。
     fn reveal_in_tree(&mut self, path: &Path) {
-        self.with_tree(|project, root, filter| project.reveal_file(path, root, filter));
+        self.with_tree(|project, root, show_ignored| project.reveal_file(path, root, show_ignored));
     }
 
     /// 切到第 `ix` 个预览标签：文件树跟着定位到它，还没读过或者磁盘上变过就读。

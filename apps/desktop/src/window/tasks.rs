@@ -273,7 +273,13 @@ impl WindowView {
             items.extend(source.tasks.iter().map(|task| {
                 let description = task.description.clone().filter(|text| *text != task.name);
                 let action = RunTask { command: task.command.clone() };
-                let item = labeled_item(task.name.clone(), description.map(SharedString::from), Some(Box::new(action)));
+                // 说明和命令行在行里会截断，鼠标停上去看完整的。
+                let full = match &description {
+                    Some(text) => format!("{text}\n{}", task.command),
+                    None => task.command.clone(),
+                };
+                let item = labeled_item(task.name.clone(), description.map(SharedString::from), Some(Box::new(action)))
+                    .with_tooltip(full);
                 if !custom {
                     return Some(item);
                 }

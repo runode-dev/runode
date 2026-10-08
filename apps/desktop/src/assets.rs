@@ -22,10 +22,15 @@ icons! {
     /// Git 面板和文件树里展开、收起的箭头。
     pub CHEVRON_RIGHT_ICON = "chevron-right",
     pub CHEVRON_DOWN_ICON = "chevron-down",
+    /// 文件树标题栏上显示、隐藏被 git 忽略的文件的开关。
+    pub EYE_ICON = "eye",
+    pub EYE_OFF_ICON = "eye-off",
+    /// 文件树标题栏上新建文件、新建文件夹和全部收起的按钮。
+    pub NEW_FILE_ICON = "new-file",
+    pub NEW_FOLDER_ICON = "new-folder",
+    pub COLLAPSE_ALL_ICON = "collapse-all",
     /// 文件树搜索框前面的图标。
     pub FILTER_ICON = "filter",
-    /// 文件树「更多」菜单里用 VS Code 打开的图标。
-    pub CODE_ICON = "code",
     /// 标题栏右上角项目命令按钮的运行图标。
     pub PLAY_ICON = "play",
     /// Git 面板里的按钮：分支、暂存、取消暂存、放弃改动、提交、刷新、更多、同步、打开文件，以及储藏的
