@@ -146,7 +146,7 @@ impl WindowView {
                             .iter()
                             .map(|device| {
                                 let detail = device.live.then(|| live.clone());
-                                let button = MenuButton { icon: CLOSE_ICON, tooltip: revoke.clone() };
+                                let button = MenuButton { icon: CLOSE_ICON, tooltip: revoke.clone(), keep_open: false };
                                 let action: Box<dyn Action> = Box::new(RevokeDevice(device.id));
                                 Some(text_item(device.name.to_string(), detail, Some((button, action))))
                             })

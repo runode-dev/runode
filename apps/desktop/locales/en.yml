@@ -200,6 +200,7 @@ search:
   no_results: No results
 tasks:
   add: "Add Task…"
+  delete: "Delete Task (Cmd+Backspace)"
   add_title: "Add Task"
   name: "Name"
   name_placeholder: "e.g. dev; defaults to the command"

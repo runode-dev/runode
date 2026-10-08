@@ -1,25 +1,31 @@
 //! 标题栏右上角的项目命令：终端目录往上最近的自己加的命令、Makefile 的目标和 package.json 的 scripts，
 //! 由宿主列出、拼好命令行（`ClientMsg::ListProjectTasks`），和手机会话卡片上的是同一份。右侧面板开关
 //! 左边的按钮弹出按文件分组的菜单，点一条开一个新标签在列命令的目录里跑它；菜单最上面一项添加自己的
-//! 命令，对话框在 `add`。
+//! 命令，自己加的命令行尾有删除按钮，添加的对话框和改写命令文件在 `custom`。
 
-mod add;
+mod custom;
 
 use std::path::{Path, PathBuf};
 
 use gpui::{Action, App, Context, Div, Focusable, MouseButton, SharedString, Stateful, Window, prelude::*, px};
+use runode_protocol::TaskSourceKind;
 use runode_shared_types::color::Rgb;
 
-pub(super) use add::AddTaskDialog;
+pub(super) use custom::AddTaskDialog;
 
 use super::{
     ToggleTasks,
-    files::{MenuItem, group_item, labeled_item, menu_item},
+    files::{MenuButton, MenuItem, group_item, labeled_item, menu_item},
     model::display_dir,
     project::{TOGGLE_HEIGHT, TOGGLE_WIDTH},
     titlebar::icon_toggle,
 };
-use crate::{assets::PLAY_ICON, host_client, ui::tooltip::tooltip, window::WindowView};
+use crate::{
+    assets::{PLAY_ICON, TRASH_ICON},
+    host_client,
+    ui::tooltip::tooltip,
+    window::WindowView,
+};
 
 /// 宿主从这些文件里读项目命令（锁文件决定用哪个包管理器），它们变了就重列。
 const TASK_FILES: [&str; 10] = [
@@ -47,6 +53,14 @@ pub(super) struct RunTask {
 #[action(namespace = runode, no_json)]
 pub(super) struct ToggleTaskGroup {
     file: PathBuf,
+}
+
+/// 自己加的命令行尾的删除按钮：从 `file` 里删掉 `name`。
+#[derive(Clone, PartialEq, Action)]
+#[action(namespace = runode, no_json)]
+pub(super) struct DeleteTask {
+    file: PathBuf,
+    name: String,
 }
 
 /// 命令菜单最上面一项：打开添加命令的对话框。
@@ -175,9 +189,39 @@ impl WindowView {
         self.replace_menu_items(items, cx);
     }
 
+    /// 命令菜单里自己加的命令行尾按了删除：先从菜单里拿掉，菜单开着不关，再在后台改文件，改完重列；
+    /// 改不了时记日志，重列后它又回来。
+    pub(super) fn delete_task(&mut self, action: &DeleteTask, _: &mut Window, cx: &mut Context<Self>) {
+        let project = &mut self.workspace_mut().project;
+        let sources = project.tasks.iter_mut().flat_map(|(_, sources)| sources.iter_mut());
+        for source in sources.filter(|source| source.file == action.file) {
+            source.tasks.retain(|task| task.name != action.name);
+        }
+        let items = self.tasks_menu_items(cx);
+        self.replace_menu_items(items, cx);
+        let id = self.workspace().id;
+        let DeleteTask { file, name } = action.clone();
+        let job = cx.background_spawn(async move { custom::write_task(&file, &name, None) });
+        cx.spawn(async move |this, cx| {
+            if let Err(err) = job.await {
+                tracing::warn!("could not delete the task: {err}");
+            }
+            this.update(cx, |this, cx| {
+                if let Some(workspace) = this.workspaces.iter_mut().find(|workspace| workspace.id == id) {
+                    workspace.project.tasks_stale = true;
+                }
+                if this.workspace().id == id {
+                    this.list_tasks(cx);
+                }
+            })
+            .ok();
+        })
+        .detach();
+    }
+
     /// 命令菜单的各项：最上面是添加命令，下面每个文件一组。组的标题是文件，在列命令的目录里的写相对
     /// 路径，在上层目录里的写 `~/…`，后面是命令条数，点了收起或展开，收起的组只留标题；命令名后面
-    /// 淡淡地写它的说明。
+    /// 淡淡地写它的说明，自己加的命令选中时行尾有删除按钮。
     fn tasks_menu_items(&self, cx: &App) -> Vec<Option<MenuItem>> {
         let mut items = vec![Some(menu_item("tasks.add", Box::new(AddTask), true, cx))];
         let project = &self.workspace().project;
@@ -200,10 +244,18 @@ impl WindowView {
             if folded {
                 continue;
             }
+            let custom = source.kind == TaskSourceKind::Custom;
             items.extend(source.tasks.iter().map(|task| {
                 let description = task.description.clone().filter(|text| *text != task.name);
                 let action = RunTask { command: task.command.clone() };
-                Some(labeled_item(task.name.clone(), description.map(SharedString::from), Some(Box::new(action))))
+                let item = labeled_item(task.name.clone(), description.map(SharedString::from), Some(Box::new(action)));
+                if !custom {
+                    return Some(item);
+                }
+                let delete = DeleteTask { file: source.file.clone(), name: task.name.clone() };
+                let button =
+                    MenuButton { icon: TRASH_ICON, tooltip: rust_i18n::t!("tasks.delete").into(), keep_open: true };
+                Some(item.with_button(button, Box::new(delete)))
             }));
         }
         items

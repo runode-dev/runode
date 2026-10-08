@@ -1,6 +1,7 @@
-//! 添加自己的命令的对话框：填名字和命令行，写进项目目录下的 `CUSTOM_TASKS_FILE`。已经有这个文件时
-//! 写进列出来的那一个，没有时建在终端目录所在仓库的根目录，不在仓库里时建在终端目录。同名的命令
-//! 换成新的命令行。文件和 Makefile 一样由宿主列出来，手机上也看得到；删改直接改文件。
+//! 自己加的命令：添加的对话框，以及改写项目目录下的 `CUSTOM_TASKS_FILE`。添加时填名字和命令行，
+//! 已经有这个文件时写进列出来的那一个，没有时建在终端目录所在仓库的根目录，不在仓库里时建在终端
+//! 目录；同名的命令换成新的命令行。命令菜单里这些命令行尾的删除按钮从文件里删掉它。文件和 Makefile
+//! 一样由宿主列出来，手机上也看得到；改命令行直接改文件。
 
 use std::{
     fs, io,
@@ -114,7 +115,7 @@ impl WindowView {
         dialog.saving = true;
         let job = cx.background_spawn(async move {
             let file = listed.unwrap_or_else(|| runode_git::repo_root(&dir).unwrap_or(dir).join(CUSTOM_TASKS_FILE));
-            write_task(&file, &name, &command)
+            write_task(&file, &name, Some(&command))
         });
         cx.spawn_in(window, async move |this, cx| {
             let saved = job.await;
@@ -230,11 +231,12 @@ impl WindowView {
     }
 }
 
-/// 把 `name` 的命令行 `command` 写进 `file`，文件和它的目录不在时建出来。读不懂原来的内容时不写，
-/// 免得把手写的文件冲掉。
-fn write_task(file: &Path, name: &str, command: &str) -> Result<(), String> {
+/// 把 `name` 的命令行 `command` 写进 `file`，文件和它的目录不在时建出来；`command` 为空时从文件里
+/// 删掉 `name`。读不懂原来的内容时不写，免得把手写的文件冲掉。
+pub(super) fn write_task(file: &Path, name: &str, command: Option<&str>) -> Result<(), String> {
     let text = match fs::read_to_string(file) {
         Ok(text) => Some(text),
+        Err(err) if err.kind() == io::ErrorKind::NotFound && command.is_none() => return Ok(()),
         Err(err) if err.kind() == io::ErrorKind::NotFound => None,
         Err(err) => return Err(format!("{}: {err}", file.display())),
     };
@@ -243,8 +245,9 @@ fn write_task(file: &Path, name: &str, command: &str) -> Result<(), String> {
     fs::create_dir_all(&dir).and_then(|()| fs::write(file, updated)).map_err(|err| format!("{}: {err}", file.display()))
 }
 
-/// 在命令文件的内容 `text`（没有文件时为空）的 `tasks` 里加上或换掉 `name`，别的内容原样留着。
-fn with_task(text: Option<&str>, name: &str, command: &str) -> Result<String, String> {
+/// 在命令文件的内容 `text`（没有文件时为空）的 `tasks` 里加上或换掉 `name`，`command` 为空时删掉它，
+/// 别的内容和先后原样留着。
+fn with_task(text: Option<&str>, name: &str, command: Option<&str>) -> Result<String, String> {
     let mut json = match text.filter(|text| !text.trim().is_empty()) {
         Some(text) => serde_json::from_str(text).map_err(|err| err.to_string())?,
         None => Value::Object(Map::new()),
@@ -256,7 +259,10 @@ fn with_task(text: Option<&str>, name: &str, command: &str) -> Result<String, St
         .or_insert_with(|| Value::Object(Map::new()))
         .as_object_mut()
         .ok_or("`tasks` is not a JSON object")?;
-    tasks.insert(name.to_owned(), Value::String(command.to_owned()));
+    match command {
+        Some(command) => tasks.insert(name.to_owned(), Value::String(command.to_owned())),
+        None => tasks.shift_remove(name),
+    };
     let mut text = serde_json::to_string_pretty(&json).map_err(|err| err.to_string())?;
     text.push('\n');
     Ok(text)
@@ -269,14 +275,22 @@ mod tests {
     #[test]
     fn adds_to_new_and_existing_files() {
         assert_eq!(
-            with_task(None, "dev", "cargo run").unwrap(),
+            with_task(None, "dev", Some("cargo run")).unwrap(),
             "{\n  \"tasks\": {\n    \"dev\": \"cargo run\"\n  }\n}\n"
         );
         let existing = r#"{"note": 1, "tasks": {"dev": "old", "lint": "cargo clippy"}}"#;
         let updated: serde_json::Value =
-            serde_json::from_str(&with_task(Some(existing), "dev", "cargo run").unwrap()).unwrap();
+            serde_json::from_str(&with_task(Some(existing), "dev", Some("cargo run")).unwrap()).unwrap();
         assert_eq!(updated, serde_json::json!({"note": 1, "tasks": {"dev": "cargo run", "lint": "cargo clippy"}}));
-        assert!(with_task(Some("[1]"), "dev", "x").is_err());
-        assert!(with_task(Some("{oops"), "dev", "x").is_err());
+        assert!(with_task(Some("[1]"), "dev", Some("x")).is_err());
+        assert!(with_task(Some("{oops"), "dev", Some("x")).is_err());
+    }
+
+    /// 删掉一条，其余的先后不变。
+    #[test]
+    fn removes_a_task_keeping_the_order() {
+        let existing = r#"{"tasks": {"a": "1", "b": "2", "c": "3"}}"#;
+        let updated = with_task(Some(existing), "a", None).unwrap();
+        assert_eq!(updated, "{\n  \"tasks\": {\n    \"b\": \"2\",\n    \"c\": \"3\"\n  }\n}\n");
     }
 }

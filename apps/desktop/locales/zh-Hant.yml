@@ -200,6 +200,7 @@ search:
   no_results: 沒有結果
 tasks:
   add: "新增命令…"
+  delete: "刪除命令（Cmd+Backspace）"
   add_title: "新增命令"
   name: "名稱"
   name_placeholder: "例如 dev，留空時用命令本身"

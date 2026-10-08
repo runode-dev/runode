@@ -31,13 +31,14 @@ const DROPDOWN_GAP: f32 = 4.;
 const MENU_WIDTH: f32 = 240.;
 
 /// 菜单里的一项：点了把 `action` 派发给菜单的 `target`，和按快捷键走同一条路；没有 `action` 的
-/// 只是一行字，点不了。有 `button` 时整行点不了，`action` 只挂在右边这个图标按钮上。
+/// 只是一行字，点不了。`button` 是右边的图标按钮和它派发的动作：整行点不了时一直显示，整行能点时
+/// 只在选中这一行时显示，Cmd+Backspace 也按它。
 pub(in crate::window) struct MenuItem {
     label: String,
     action: Option<Box<dyn Action>>,
     shortcut: Option<SharedString>,
     enabled: bool,
-    button: Option<MenuButton>,
+    button: Option<(MenuButton, Box<dyn Action>)>,
     /// 画在字前面的图标。
     icon: Option<&'static str>,
     /// 勾选项：`Some` 时左边留一列，`true` 时打勾。
@@ -46,10 +47,19 @@ pub(in crate::window) struct MenuItem {
     keep_open: bool,
 }
 
-/// 菜单项右边的图标按钮：图标和悬停时的说明。
+/// 菜单项右边的图标按钮：图标和悬停时的说明；`keep_open` 时按了菜单不关、焦点不动。
 pub(in crate::window) struct MenuButton {
     pub icon: &'static str,
     pub tooltip: SharedString,
+    pub keep_open: bool,
+}
+
+impl MenuItem {
+    /// 右边加一个图标按钮，按了派发 `action`。
+    pub(in crate::window) fn with_button(mut self, button: MenuButton, action: Box<dyn Action>) -> Self {
+        self.button = Some((button, action));
+        self
+    }
 }
 
 /// 菜单里的一项，快捷键在这时查，查的是这一刻的键位表。
@@ -93,8 +103,16 @@ pub(in crate::window) fn text_item(
     detail: Option<SharedString>,
     button: Option<(MenuButton, Box<dyn Action>)>,
 ) -> MenuItem {
-    let (button, action) = button.unzip();
-    MenuItem { label, action, shortcut: detail, enabled: true, button, icon: None, checked: None, keep_open: false }
+    MenuItem {
+        label,
+        action: None,
+        shortcut: detail,
+        enabled: true,
+        button,
+        icon: None,
+        checked: None,
+        keep_open: false,
+    }
 }
 
 /// 写好了字、点整行派发 `action` 的一项，`detail` 淡淡地写在右边快捷键的位置；没有 `action` 的
@@ -161,7 +179,7 @@ impl FileMenu {
 
     /// 第 `ix` 项能选：整行点了有动作。
     fn selectable(&self, ix: usize) -> bool {
-        self.items[ix].as_ref().is_some_and(|item| item.enabled && item.action.is_some() && item.button.is_none())
+        self.items[ix].as_ref().is_some_and(|item| item.enabled && item.action.is_some())
     }
 
     /// 选中往下（`down`）或往上数的下一个能选的项，到头了绕回来。
@@ -233,11 +251,15 @@ impl WindowView {
     }
 
     /// 关掉菜单，焦点给 `target`，再派发 `action`：和按快捷键走同一条路。
-    /// 换掉开着的菜单的各项，选中的位置不变。
+    /// 换掉开着的菜单的各项，选中的位置尽量不变。
     pub(in crate::window) fn replace_menu_items(&mut self, items: Vec<Option<MenuItem>>, cx: &mut Context<Self>) {
         if let Some(menu) = &mut self.file_menu {
-            menu.highlighted = menu.highlighted.filter(|&ix| ix < items.len());
             menu.items = items;
+            // 选中的那一项没了（删掉了一条）时，选中它后面能选的那一项。
+            if let Some(ix) = menu.highlighted.filter(|&ix| ix >= menu.items.len() || !menu.selectable(ix)) {
+                menu.highlighted = Some(ix.min(menu.items.len().saturating_sub(1)));
+                menu.move_highlight(true);
+            }
             cx.notify();
         }
     }
@@ -262,6 +284,20 @@ impl WindowView {
         }
     }
 
+    /// 按第 `ix` 项右边的按钮。
+    fn press_menu_button(&mut self, ix: usize, window: &mut Window, cx: &mut Context<Self>) {
+        let button = self.file_menu.as_ref().and_then(|menu| menu.items[ix].as_ref()?.button.as_ref());
+        let Some((keep_open, action)) = button.map(|(button, action)| (button.keep_open, action.boxed_clone())) else {
+            return;
+        };
+        if keep_open {
+            window.dispatch_action(action, cx);
+            cx.notify();
+        } else {
+            self.run_menu_action(action.as_ref(), window, cx);
+        }
+    }
+
     fn run_menu_action(&mut self, action: &dyn Action, window: &mut Window, cx: &mut Context<Self>) {
         let Some(menu) = self.file_menu.take() else {
             return;
@@ -275,7 +311,15 @@ impl WindowView {
         let Some(menu) = &mut self.file_menu else {
             return;
         };
-        if event.keystroke.modifiers.modified() {
+        let modifiers = event.keystroke.modifiers;
+        if event.keystroke.key == "backspace" && modifiers.platform && !modifiers.shift && !modifiers.alt {
+            if let Some(ix) = menu.highlighted {
+                self.press_menu_button(ix, window, cx);
+            }
+            cx.stop_propagation();
+            return;
+        }
+        if modifiers.modified() {
             return;
         }
         match event.keystroke.key.as_str() {
@@ -395,6 +439,8 @@ impl WindowView {
     fn render_menu_list(&self, max_height: f32, fg: Rgb, bg: Rgb, cx: &mut Context<Self>) -> Option<Stateful<Div>> {
         let menu = self.file_menu.as_ref()?;
         let hover_bg = hsla(bg.mix(fg, 0.12));
+        // 选中的行底色已经是 `hover_bg`，行里按钮悬停时再深一些。
+        let button_hover_bg = hsla(bg.mix(fg, 0.22));
         let menu_bg = hsla(bg.mix(fg, 0.06));
         let fg_rgb = fg;
         let fg = hsla(fg);
@@ -404,17 +450,10 @@ impl WindowView {
             let Some(item) = item else {
                 return div().flex_none().h(px(1.)).mx(px(6.)).my(px(4.)).bg(fg.opacity(0.12)).into_any_element();
             };
-            let action = item.action.as_ref().filter(|_| item.enabled).map(|action| action.boxed_clone());
-            let dispatch = |action: Box<dyn Action>| {
-                cx.listener(move |this: &mut Self, _: &gpui::MouseDownEvent, window, cx| {
-                    cx.stop_propagation();
-                    this.run_menu_action(action.as_ref(), window, cx);
-                })
-            };
-            let (row_action, button) = match &item.button {
-                Some(button) => (None, action.map(|action| (button, action))),
-                None => (action, None),
-            };
+            let row_action = item.enabled && item.action.is_some();
+            let highlighted = menu.highlighted == Some(ix);
+            // 整行能点的只在选中时露出按钮，不然每行行尾都摆一个。
+            let button = item.button.as_ref().filter(|_| item.enabled && (!row_action || highlighted));
             div()
                 .id(("file-menu", ix))
                 .flex_none()
@@ -426,8 +465,8 @@ impl WindowView {
                 .items_center()
                 .gap(px(16.))
                 .text_color(if item.enabled { fg } else { fg.opacity(0.35) })
-                .when(menu.highlighted == Some(ix), |row| row.bg(hover_bg))
-                .when(row_action.is_some(), |row| {
+                .when(highlighted, |row| row.bg(hover_bg))
+                .when(row_action, |row| {
                     row.on_hover(cx.listener(move |this, hovered: &bool, _, cx| {
                         if let Some(menu) = this.file_menu.as_mut().filter(|_| *hovered) {
                             menu.highlighted = Some(ix);
@@ -465,7 +504,7 @@ impl WindowView {
                                 .child(shortcut)
                         }),
                 )
-                .children(button.map(|(button, action)| {
+                .children(button.map(|(button, _)| {
                     div()
                         .id(("file-menu-button", ix))
                         .flex_none()
@@ -475,10 +514,16 @@ impl WindowView {
                         .flex()
                         .items_center()
                         .justify_center()
-                        .hover(|button| button.bg(hover_bg))
+                        .hover(|button| button.bg(button_hover_bg))
                         .tooltip(tooltip(button.tooltip.clone(), None, fg_rgb, bg))
                         .child(svg().path(button.icon).size(px(12.)).text_color(fg.opacity(0.6)))
-                        .on_mouse_down(MouseButton::Left, dispatch(action))
+                        .on_mouse_down(
+                            MouseButton::Left,
+                            cx.listener(move |this, _, window, cx| {
+                                cx.stop_propagation();
+                                this.press_menu_button(ix, window, cx);
+                            }),
+                        )
                 }))
                 .into_any_element()
         });
