@@ -92,8 +92,8 @@ commands:
                               the front; SESSION defaults to your own
   setup claude|codex [--print]
                               teach the agent to use runode: installs a skill
-                              in ~/.claude/skills/runode, or a section in
-                              ~/.codex/AGENTS.md; --print shows it instead
+                              in ~/.claude/skills/runode or
+                              ~/.agents/skills/runode; --print shows it instead
   remote pair [--addr ADDR]...
                               pair a phone for remote access: shows a QR code
                               and its link, valid for 5 minutes, and waits for

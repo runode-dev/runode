@@ -1,6 +1,7 @@
-//! 教 agent 用 runode：把使用说明装到 agent 读得到的地方。Claude Code 读
-//! `~/.claude/skills/<名字>/SKILL.md` 这样的 skill；Codex 读 `~/.codex/AGENTS.md`，说明放在一对
-//! `<!-- runode:begin -->`、`<!-- runode:end -->` 之间，再装一次只换掉这一段，文件里别的内容不动。
+//! 教 agent 用 runode：把使用说明装成 agent 按需加载的 skill。Claude Code 读
+//! `~/.claude/skills/<名字>/SKILL.md`，Codex 读 `~/.agents/skills/<名字>/SKILL.md`，两边是同一份文件。
+//! 早先给 Codex 装在 `~/.codex/AGENTS.md` 的 `<!-- runode:begin -->`、`<!-- runode:end -->` 之间，
+//! 再装时把这一段删掉，文件里别的内容不动。
 
 use std::{
     io,
@@ -16,74 +17,54 @@ pub enum SetupTarget {
     Codex,
 }
 
-/// 使用说明，开头是 skill 的元数据（名字和什么时候用）。
-const SKILL: &str = include_str!("../../../skills/runode/SKILL.md");
+/// 使用说明，开头是 skill 的元数据（名字和什么时候用）；两个 agent 装的都是它。
+pub(crate) const SKILL: &str = include_str!("../../../skills/runode/SKILL.md");
 const BEGIN: &str = "<!-- runode:begin -->";
 const END: &str = "<!-- runode:end -->";
-
-/// 装给 `target` 的内容：Claude Code 是整份 skill，Codex 是去掉元数据、用标记包起来的一段。
-pub(crate) fn text(target: SetupTarget) -> String {
-    match target {
-        SetupTarget::Claude => SKILL.into(),
-        SetupTarget::Codex => format!("{BEGIN}\n{}{END}\n", body()),
-    }
-}
-
-/// skill 去掉开头 `---` 之间的元数据。
-fn body() -> &'static str {
-    SKILL
-        .strip_prefix("---\n")
-        .and_then(|rest| rest.split_once("\n---\n"))
-        .map_or(SKILL, |(_, body)| body.trim_start_matches('\n'))
-}
 
 /// `setup` 往 `home` 下哪个文件装给 `target` 的使用说明。
 pub fn setup_path(target: SetupTarget, home: &Path) -> PathBuf {
     match target {
         SetupTarget::Claude => home.join(".claude/skills/runode/SKILL.md"),
-        SetupTarget::Codex => home.join(".codex/AGENTS.md"),
+        SetupTarget::Codex => home.join(".agents/skills/runode/SKILL.md"),
     }
 }
 
-/// 把使用说明装到 `home` 下 `target` 读的地方（见 `setup_path`），返回写的文件。可以重复执行：
-/// skill 整个换掉，AGENTS.md 只换掉标记之间的那段，没有时加在末尾。
+/// 把使用说明装到 `home` 下 `target` 读的地方（见 `setup_path`），返回写的文件。可以重复执行，
+/// 每次整个换掉；给 Codex 装时顺带删掉早先写进 `~/.codex/AGENTS.md` 的那段。
 pub fn setup(target: SetupTarget, home: &Path) -> Result<PathBuf> {
     let path = setup_path(target, home);
-    let contents = match target {
-        SetupTarget::Claude => text(target),
-        SetupTarget::Codex => {
-            let existing = match std::fs::read_to_string(&path) {
-                Ok(existing) => existing,
-                Err(err) if err.kind() == io::ErrorKind::NotFound => String::new(),
-                Err(err) => return Err(err).with_context(|| format!("failed to read {}", path.display())),
-            };
-            merge(&existing, &text(target))
-        }
-    };
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir).with_context(|| format!("failed to create {}", dir.display()))?;
     }
-    std::fs::write(&path, contents).with_context(|| format!("failed to write {}", path.display()))?;
+    std::fs::write(&path, SKILL).with_context(|| format!("failed to write {}", path.display()))?;
+    if target == SetupTarget::Codex {
+        let agents = home.join(".codex/AGENTS.md");
+        match std::fs::read_to_string(&agents) {
+            Ok(existing) => {
+                if let Some(rest) = remove_section(&existing) {
+                    std::fs::write(&agents, rest).with_context(|| format!("failed to write {}", agents.display()))?;
+                }
+            }
+            Err(err) if err.kind() == io::ErrorKind::NotFound => {}
+            Err(err) => return Err(err).with_context(|| format!("failed to read {}", agents.display())),
+        }
+    }
     Ok(path)
 }
 
-/// 把用标记包着的 `section` 放进 `existing`：已经有一段时原地换掉，没有时空一行加在末尾。
-fn merge(existing: &str, section: &str) -> String {
-    if let Some(start) = existing.find(BEGIN)
-        && let Some(end) = existing[start..].find(END).map(|end| start + end + END.len())
-    {
-        let rest = existing[end..].strip_prefix('\n').unwrap_or(&existing[end..]);
-        return format!("{}{section}{rest}", &existing[..start]);
+/// 删掉 `existing` 里用标记包着的那段，连同它前面用来隔开的空行；没有这一段时返回 `None`。
+fn remove_section(existing: &str) -> Option<String> {
+    let start = existing.find(BEGIN)?;
+    let end = start + existing[start..].find(END)? + END.len();
+    let rest = existing[end..].strip_prefix('\n').unwrap_or(&existing[end..]);
+    let before = &existing[..start];
+    let before = if rest.is_empty() { before.trim_end_matches('\n') } else { before };
+    let mut out = format!("{before}{rest}");
+    if !out.is_empty() && !out.ends_with('\n') {
+        out.push('\n');
     }
-    let mut merged = existing.to_owned();
-    if !merged.is_empty() {
-        if !merged.ends_with('\n') {
-            merged.push('\n');
-        }
-        merged.push('\n');
-    }
-    merged.push_str(section);
-    merged
+    Some(out)
 }
 
 #[cfg(test)]
@@ -93,21 +74,18 @@ mod tests {
     #[test]
     fn the_skill_has_a_name_and_a_description() {
         assert!(SKILL.starts_with("---\nname: runode\ndescription: "));
-        assert!(body().starts_with("# "), "{}", &body()[..40]);
     }
 
     #[test]
-    fn the_section_replaces_itself() {
-        let section = text(SetupTarget::Codex);
-        assert!(section.starts_with(BEGIN) && section.ends_with(&format!("{END}\n")));
-        assert_eq!(merge("", &section), section);
-        let mine = "# My rules\nbe nice";
-        let once = merge(mine, &section);
-        assert_eq!(once, format!("{mine}\n\n{section}"));
-        assert_eq!(merge(&once, &section), once);
+    fn the_old_section_is_removed() {
+        let section = format!("{BEGIN}\nold text\n{END}\n");
+        assert_eq!(remove_section("# My rules\nbe nice\n"), None);
+        assert_eq!(remove_section(&section).as_deref(), Some(""));
+        assert_eq!(remove_section(&format!("# My rules\nbe nice\n\n{section}")).as_deref(), Some("# My rules\nbe nice\n"));
         // 用户在那一段后面接着写的内容留着。
-        let edited = format!("{once}more rules\n");
-        let old = format!("{mine}\n\n{BEGIN}\nold text\n{END}\nmore rules\n");
-        assert_eq!(merge(&old, &section), edited);
+        assert_eq!(
+            remove_section(&format!("# Mine\n\n{section}more rules\n")).as_deref(),
+            Some("# Mine\n\nmore rules\n")
+        );
     }
 }

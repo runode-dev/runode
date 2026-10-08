@@ -23,28 +23,23 @@ fn claude_gets_a_skill() {
 }
 
 #[test]
-fn codex_gets_a_section_in_its_agents_file() {
+fn codex_gets_a_skill_and_loses_the_old_section() {
     let fake = FakeHost::start("setupcodex", |_| vec![]);
     let home = fake.env.dirs.home.clone().unwrap();
+    let skill = home.join(".agents/skills/runode/SKILL.md");
     let agents = home.join(".codex/AGENTS.md");
     std::fs::create_dir_all(agents.parent().unwrap()).unwrap();
-    std::fs::write(&agents, "# Mine\n\nAlways run the tests.\n").unwrap();
-    let (code, _, err) = run("setup codex", &fake.env);
+    std::fs::write(&agents, "# Mine\n\nAlways run the tests.\n\n<!-- runode:begin -->\nold\n<!-- runode:end -->\n")
+        .unwrap();
+    let (code, out, err) = run("setup codex", &fake.env);
     assert_eq!(code, exit::OK, "{err}");
-    let once = std::fs::read_to_string(&agents).unwrap();
-    assert!(once.starts_with("# Mine\n\nAlways run the tests.\n\n<!-- runode:begin -->\n"), "{once}");
-    assert!(once.ends_with("<!-- runode:end -->\n"), "{once}");
-    // skill 的元数据不进 AGENTS.md。
-    assert!(!once.contains("name: runode"), "{once}");
-    assert_eq!(run("setup codex", &fake.env).0, exit::OK);
-    let twice = std::fs::read_to_string(&agents).unwrap();
-    assert_eq!(twice, once);
-    assert_eq!(twice.matches("<!-- runode:begin -->").count(), 1);
+    assert_eq!(out, format!("installed {}\n", skill.display()));
+    assert!(std::fs::read_to_string(&skill).unwrap().starts_with("---\nname: runode\n"));
+    // 早先装进 AGENTS.md 的那段删掉，别的内容留着。
+    assert_eq!(std::fs::read_to_string(&agents).unwrap(), "# Mine\n\nAlways run the tests.\n");
 
-    // --print 不写文件。
-    let fresh = FakeHost::start("setupprint", |_| vec![]);
-    let (code, out, _) = run("setup codex --print", &fresh.env);
-    assert_eq!(code, exit::OK);
-    assert!(out.starts_with("<!-- runode:begin -->"), "{out}");
+    // 没有 AGENTS.md 时不去建它。
+    let fresh = FakeHost::start("setupfresh", |_| vec![]);
+    assert_eq!(run("setup codex", &fresh.env).0, exit::OK);
     assert!(!fresh.env.dirs.home.as_ref().unwrap().join(".codex").exists());
 }
