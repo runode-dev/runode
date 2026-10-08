@@ -58,6 +58,12 @@ pub(in crate::window) struct MenuButton {
 
 impl MenuItem {
     /// 右边再加一个图标按钮，按了派发 `action`。
+    /// 字前面画 `icon`。
+    pub(in crate::window) fn with_icon(mut self, icon: &'static str) -> Self {
+        self.icon = Some(icon);
+        self
+    }
+
     pub(in crate::window) fn with_button(mut self, button: MenuButton, action: Box<dyn Action>) -> Self {
         self.buttons.push((button, action));
         self
@@ -79,10 +85,10 @@ pub(in crate::window) fn menu_item(key: &str, action: Box<dyn Action>, enabled: 
     }
 }
 
-/// 可以勾选的一项，字前面画 `icon`；点了派发 `action`，打不打勾由派发后的状态决定，下次打开菜单时再查。
+/// 可以勾选的一项，有 `icon` 时字前面画它；点了派发 `action`，打不打勾由派发后的状态决定，下次打开菜单时再查。
 pub(in crate::window) fn check_item(
     label: String,
-    icon: &'static str,
+    icon: Option<&'static str>,
     checked: bool,
     action: Box<dyn Action>,
 ) -> MenuItem {
@@ -92,7 +98,7 @@ pub(in crate::window) fn check_item(
         shortcut: None,
         enabled: true,
         buttons: Vec::new(),
-        icon: Some(icon),
+        icon,
         checked: Some(checked),
         keep_open: false,
     }

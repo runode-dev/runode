@@ -120,9 +120,9 @@ impl WindowView {
         self.file_menu = None;
         let (text, select) = match &target {
             EditTarget::New { dir, .. } => {
-                self.with_tree(|project, root, show_ignored| {
+                self.with_tree(|project, root, filter| {
                     if dir != root && !project.expanded_dirs.contains(dir) {
-                        project.toggle_dir(dir, root, show_ignored);
+                        project.toggle_dir(dir, root, filter);
                     }
                 });
                 (String::new(), 0)
@@ -193,9 +193,9 @@ impl WindowView {
 
     /// 当场重读 `dirs`，再选中 `path`、滚到它。
     fn relist_and_reveal(&mut self, dirs: Vec<PathBuf>, path: &Path, cx: &mut Context<Self>) {
-        self.with_tree(|project, root, show_ignored| {
-            project.relist(dirs, root, show_ignored);
-            project.reveal_file(path, root, show_ignored);
+        self.with_tree(|project, root, filter| {
+            project.relist(dirs, root, filter);
+            project.reveal_file(path, root, filter);
         });
         cx.notify();
     }
@@ -255,11 +255,11 @@ impl WindowView {
         if self.file_clipboard.as_ref().is_some_and(|clip| clip.path.starts_with(path)) {
             self.file_clipboard = None;
         }
-        self.with_tree(|project, root, show_ignored| {
+        self.with_tree(|project, root, filter| {
             let ix = project.selected_row();
             project.removed(path);
             project.selected = None;
-            project.relist(path.parent().map(Path::to_path_buf).into_iter().collect(), root, show_ignored);
+            project.relist(path.parent().map(Path::to_path_buf).into_iter().collect(), root, filter);
             let last = project.file_rows.len().checked_sub(1);
             if let Some(ix) = ix.zip(last).and_then(|(ix, last)| project.select_row(ix.min(last))) {
                 project.files_scroll.scroll_to_item(ix, ScrollStrategy::Nearest);
