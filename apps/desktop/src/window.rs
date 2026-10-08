@@ -77,7 +77,7 @@ pub use remote::serve_requests;
 pub use status_bar::watch as watch_status;
 pub use titlebar::titlebar_options;
 
-use crate::{config::AppConfig, prespawn::Prespawned, terminal_view::TerminalView, ui::hsla};
+use crate::{assets::PANEL_RIGHT_ICON, config::AppConfig, prespawn::Prespawned, terminal_view::TerminalView, ui::hsla};
 use model::{PaneLayout, Workspace, WorkspaceId, home_dir};
 use persist::format::SavedWindow;
 use titlebar::titled;
@@ -225,10 +225,9 @@ enum Divider {
     Split(SplitId, Axis),
     /// 侧栏右边的分隔线，拖动改变侧栏宽度。
     Sidebar,
-    /// 预览栏、Git 面板和文件树左边的分隔线，拖动改变它们的宽度。
+    /// 预览栏和右侧面板左边的分隔线，拖动改变它们的宽度。
     Preview,
-    Git,
-    Files,
+    Panel,
     /// Git 面板底部图表上沿的分隔线，拖动改变图表的高度。
     GitGraph,
 }
@@ -250,12 +249,9 @@ pub struct WindowView {
     sidebar_width: Option<f32>,
     /// 侧栏里 workspace 列表的滚动位置。
     sidebar_scroll: ScrollHandle,
-    /// 右侧的文件树是否显示；拖动过宽度时是那个宽度，没拖过时用默认宽度。
-    files_shown: bool,
-    files_width: Option<f32>,
-    /// Git 面板是否显示，拖动过宽度时是那个宽度。
-    git_shown: bool,
-    git_width: Option<f32>,
+    /// 右侧面板显示的是文件树还是 Git，收着时为空；拖动过宽度时是那个宽度，没拖过时用默认宽度。
+    panel: Option<project::SidePanel>,
+    panel_width: Option<f32>,
     /// Git 面板里改动的文件以树形式查看，否则是列表；整个窗口一个设置。
     git_tree: bool,
     /// Git 面板底部的图表收起来了；拖动过高度时是那个高度。整个窗口一个设置。
@@ -379,10 +375,8 @@ impl WindowView {
             sidebar_shown: None,
             sidebar_width: None,
             sidebar_scroll: ScrollHandle::new(),
-            files_shown: false,
-            files_width: None,
-            git_shown: false,
-            git_width: None,
+            panel: None,
+            panel_width: None,
             git_tree: false,
             git_graph_collapsed: false,
             git_graph_height: None,
@@ -594,21 +588,18 @@ impl WindowView {
         let widths = self.right_panel_widths(f32::from(window.viewport_size().width));
         let font = self.font_family(cx);
         let preview_shown = self.preview_shown();
-        let preview = self.render_preview_panel(widths.preview, !self.files_shown && !self.git_shown, fg, bg, font, cx);
-        let git = self.git_shown.then(|| self.render_git_panel(widths.git, !self.files_shown, fg, bg, window, cx));
-        let files = self.files_shown.then(|| self.render_files_panel(widths.files, fg, bg, cx));
+        let preview = self.render_preview_panel(widths.preview, self.panel.is_none(), fg, bg, font, cx);
+        let panel = self.render_side_panel(widths.panel, fg, bg, window, cx);
         let right_handles = [
-            preview_shown
-                .then(|| self.render_right_handle(Divider::Preview, widths.preview + widths.git + widths.files, cx)),
-            self.git_shown.then(|| self.render_right_handle(Divider::Git, widths.git + widths.files, cx)),
-            self.files_shown.then(|| self.render_right_handle(Divider::Files, widths.files, cx)),
+            preview_shown.then(|| self.render_right_handle(Divider::Preview, widths.preview + widths.panel, cx)),
+            self.panel.is_some().then(|| self.render_right_handle(Divider::Panel, widths.panel, cx)),
         ];
         let titlebar_shown = !fullscreen || show_tabs;
-        // 右侧面板的开关按钮：面板都收着时落在标题栏右端，标题栏给它们让位；打开着时落在
-        // 面板顶上。全屏又只有一个标签、面板也都收着时没有地方放，不画。
+        // 右侧面板收着时它的开关按钮落在标题栏右端：只开着预览栏时落在预览栏顶上，什么都没开时
+        // 标题栏给它们让位；全屏又只有一个标签时没有地方放，不画。面板展开时按钮是面板顶上的标签。
         let right_inset = if titlebar_shown && !self.project_visible() { project::PANEL_TOGGLES_INSET } else { 0. };
-        let panel_toggles = (titlebar_shown || self.project_visible()).then(|| {
-            self.render_panel_toggles(fg, bg, cx)
+        let panel_toggles = (self.panel.is_none() && (titlebar_shown || preview_shown)).then(|| {
+            self.render_panel_toggles(PANEL_RIGHT_ICON, fg, bg, cx)
                 .absolute()
                 .top(px((TITLEBAR_HEIGHT - project::TOGGLE_HEIGHT) / 2.))
                 .right(px(project::TOGGLE_MARGIN))
@@ -690,8 +681,7 @@ impl WindowView {
         body.extend(sidebar.map(IntoElement::into_any_element));
         body.push(main.into_any_element());
         body.extend(preview.map(IntoElement::into_any_element));
-        body.extend(git.map(IntoElement::into_any_element));
-        body.extend(files.map(IntoElement::into_any_element));
+        body.extend(panel.map(IntoElement::into_any_element));
         body.extend(sidebar_handle.map(IntoElement::into_any_element));
         body.extend(right_handles.into_iter().flatten().map(IntoElement::into_any_element));
         body.extend(sidebar_toggle.map(IntoElement::into_any_element));
@@ -716,20 +706,16 @@ impl WindowView {
         let widths = self.right_panel_widths(viewport);
         let font = self.font_family(cx);
         let preview = self.render_preview_panel(widths.preview, false, fg, bg, font, cx);
-        let git = self.git_shown.then(|| self.render_git_panel(widths.git, false, fg, bg, window, cx));
-        let files = self.files_shown.then(|| self.render_files_panel(widths.files, fg, bg, cx));
-        let right_handles = [
-            self.preview_shown().then_some(Divider::Preview),
-            self.git_shown.then_some(Divider::Git),
-            self.files_shown.then_some(Divider::Files),
-        ]
-        .into_iter()
-        .flatten()
-        .map(|divider| {
-            let right = self.right_divider_offset(divider, widths, true);
-            self.render_right_handle(divider, right, cx)
-        })
-        .collect::<Vec<_>>();
+        let panel = self.render_side_panel(widths.panel, fg, bg, window, cx);
+        let right_handles =
+            [self.preview_shown().then_some(Divider::Preview), self.panel.is_some().then_some(Divider::Panel)]
+                .into_iter()
+                .flatten()
+                .map(|divider| {
+                    let right = self.right_divider_offset(divider, widths, true);
+                    self.render_right_handle(divider, right, cx)
+                })
+                .collect::<Vec<_>>();
         let machine = self.render_machine(fg, sidebar_width + left_inset, cx);
         // 标签平分标签条，最窄 `TAB_MIN_WIDTH`，挤不下就让标签条滚动。这里估一个宽度，决定标签
         // 要不要收成紧凑的样子，拖动时的预览也照它画。
@@ -768,7 +754,10 @@ impl WindowView {
             .children(machine.map(|machine| machine.mr(px(12.))))
             .child(strip)
             .child(self.render_new_tab_button_card(fg, frame, cx))
-            .child(self.render_panel_toggles(fg, frame, cx));
+            // 右侧面板展开时开关按钮是面板顶上的标签。
+            .when(self.panel.is_none(), |titlebar| {
+                titlebar.child(self.render_panel_toggles(PANEL_RIGHT_ICON, fg, frame, cx))
+            });
         let content = div()
             .flex_1()
             .min_h_0()
@@ -779,8 +768,7 @@ impl WindowView {
             .pb(px(CARD_GAP))
             .child(div().relative().flex_1().min_w_0().h_full().child(panes))
             .children(preview)
-            .children(git)
-            .children(files);
+            .children(panel);
         let main = div().flex_1().min_w_0().h_full().flex().flex_col().child(titlebar).child(content);
         let mut body: Vec<AnyElement> = Vec::new();
         body.extend(sidebar.map(IntoElement::into_any_element));

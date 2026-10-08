@@ -21,6 +21,7 @@ use runode_shared_types::pane::{Node, Split};
 use super::{
     WindowView,
     model::{Tab, Workspace, home_dir, workspace_name},
+    project::SidePanel,
 };
 use crate::{
     host_client::{self, Mode},
@@ -270,10 +271,9 @@ impl WindowView {
             active: self.active,
             sidebar: self.sidebar_shown,
             sidebar_width: self.sidebar_width,
-            git: self.git_shown,
-            git_width: self.git_width,
-            files: self.files_shown,
-            files_width: self.files_width,
+            git: self.git_shown(),
+            files: self.files_shown(),
+            panel_width: self.panel_width,
             preview_width: self.preview_width,
             show_ignored: self.show_ignored,
             git_tree: self.git_tree,
@@ -352,10 +352,9 @@ impl WindowView {
         if !self.workspaces.is_empty() {
             self.sidebar_shown = saved.sidebar;
             self.sidebar_width = saved.sidebar_width;
-            self.git_shown = saved.git;
-            self.git_width = saved.git_width;
-            self.files_shown = saved.files;
-            self.files_width = saved.files_width;
+            // 文件树和 Git 面板还是两栏时存的窗口可能两个都开着，留下文件树。
+            self.panel = if saved.files { Some(SidePanel::Files) } else { saved.git.then_some(SidePanel::Git) };
+            self.panel_width = saved.panel_width;
             self.preview_width = saved.preview_width;
             self.show_ignored = saved.show_ignored;
             self.git_tree = saved.git_tree;

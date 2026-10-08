@@ -37,7 +37,7 @@ use super::{
     TITLEBAR_HEIGHT, WindowView, divider_color,
     files::menu_item,
     model::base_name,
-    project::{RENAMED, panel_message, panel_shell},
+    project::{RENAMED, panel_message, panel_shell, panel_title},
     status_bar,
 };
 use crate::{
@@ -234,7 +234,6 @@ impl WindowView {
     pub(super) fn render_git_panel(
         &mut self,
         width: f32,
-        rightmost: bool,
         fg: Rgb,
         bg: Rgb,
         window: &mut Window,
@@ -293,8 +292,7 @@ impl WindowView {
         let main_root = project.git.as_ref().map(|git| git.main.root.clone());
         // 多个仓库时各块的忙碌状态写在块头上。
         let busy = main_root.as_deref().filter(|_| !multi).and_then(|root| panel.busy(root));
-        let header = self
-            .panel_header(rightmost, fg, cx)
+        let header = panel_title()
             .child(div().flex_none().text_color(hsla(fg)).child(rust_i18n::t!("git.title").into_owned()))
             .child(div().flex_1().min_w_0().truncate().text_color(dim).children(busy.map(Busy::label)))
             .when_some(main_root, |header, root| {
@@ -384,6 +382,7 @@ impl WindowView {
             .track_focus(&self.git_focus)
             .bg(hsla(bg))
             .text_size(px(12.))
+            .child(self.render_panel_tabs(fg, bg, cx))
             .child(header)
             .child(body)
             .children(graph)

@@ -42,15 +42,15 @@ pub struct SavedWindow {
     /// 用户拖动过侧栏宽度时是那个宽度；没拖过时为空，用默认宽度。
     #[serde(default)]
     pub sidebar_width: Option<f32>,
-    /// 右侧的 Git 面板和文件树是否显示，以及拖动过的宽度；没拖过时为空，用默认宽度。
+    /// 右侧面板显示的是 Git 面板还是文件树，至多一个为真；收着时都为假。
     #[serde(default)]
     pub git: bool,
     #[serde(default)]
-    pub git_width: Option<f32>,
-    #[serde(default)]
     pub files: bool,
-    #[serde(default)]
-    pub files_width: Option<f32>,
+    /// 右侧面板拖动过的宽度；没拖过时为空，用默认宽度。文件树和 Git 面板还是两栏时存的是
+    /// 文件树的宽度。
+    #[serde(default, alias = "files_width")]
+    pub panel_width: Option<f32>,
     /// 预览栏拖动过的宽度；预览的是哪个文件、开没开着都不存。
     #[serde(default)]
     pub preview_width: Option<f32>,
@@ -300,9 +300,8 @@ mod tests {
             sidebar: None,
             sidebar_width: Some(240.),
             git: true,
-            git_width: Some(320.),
             files: false,
-            files_width: Some(200.),
+            panel_width: Some(200.),
             preview_width: Some(420.),
             show_ignored: true,
             git_tree: true,
@@ -319,6 +318,16 @@ mod tests {
         assert_ne!(old, text);
         let state: State = serde_json::from_str(&old).unwrap();
         assert!(!state.windows[0].git_tree);
+    }
+
+    #[test]
+    fn reads_windows_saved_with_separate_git_and_files_widths() {
+        let text = serde_json::to_string(&state()).unwrap();
+        let old = text.replace(r#""panel_width":200.0"#, r#""git_width":320.0,"files_width":200.0"#);
+        assert_ne!(old, text);
+        // 以前两栏各存一个宽度，右侧面板沿用文件树的。
+        let state: State = serde_json::from_str(&old).unwrap();
+        assert_eq!(state.windows[0].panel_width, Some(200.));
     }
 
     #[test]

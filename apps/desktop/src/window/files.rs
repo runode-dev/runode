@@ -29,7 +29,7 @@ pub(super) use tasks::is_task_file;
 
 use super::{
     WindowView,
-    project::{Decoration, Project, added_label, panel_shell, removed_label, status_color},
+    project::{Decoration, Project, added_label, panel_shell, panel_title, removed_label, status_color},
     titlebar::{drag_chip, icon_toggle},
 };
 use crate::{
@@ -242,8 +242,7 @@ impl WindowView {
         };
         let ignored_toggle =
             button("toggle-ignored", icon, show_ignored, text, None, |this, _, cx| this.toggle_show_ignored(cx), cx);
-        let header =
-            self.panel_header(true, fg, cx).child(div().flex_1().min_w_0().truncate().text_color(hsla(fg)).child(name));
+        let header = panel_title().child(div().flex_1().min_w_0().truncate().text_color(hsla(fg)).child(name));
         // 标题下面一行：左边是没提交的改动一共加减了多少行，右边是新建、全部收起和显示忽略
         // 文件的按钮。
         let dirty = workspace.project.git.as_ref().filter(|git| !git.is_clean());
@@ -332,6 +331,7 @@ impl WindowView {
             }))
             .bg(hsla(bg.mix(fg, 0.03)))
             .text_size(px(font_size))
+            .child(self.render_panel_tabs(fg, bg, cx))
             .child(header)
             .child(toolbar)
             .child(list)

@@ -559,7 +559,7 @@ impl WindowView {
                         cx.notify();
                         return;
                     }
-                    Divider::Preview | Divider::Git | Divider::Files => {
+                    Divider::Preview | Divider::Panel => {
                         let viewport = f32::from(window.viewport_size().width);
                         // 卡片样式下分隔线和窗口右边之间还有卡片的间距，按经典样式算宽度前先扣掉。
                         let widths = this.right_panel_widths(viewport);

@@ -1,6 +1,6 @@
 //! 右侧各栏共用的项目状态：当前终端所在仓库的 git 改动和文件树。面板显示时监听仓库目录，
-//! 有文件变了才在后台重读，监听不了时定时重读。Git 面板和文件树的开关，右侧各栏的宽度、
-//! 分隔线，以及标题栏右上角的开关按钮也在这里。
+//! 有文件变了才在后台重读，监听不了时定时重读。文件树和 Git 面板合在右侧面板里，顶上一排
+//! 标签切换；面板的开关，右侧各栏的宽度、分隔线，以及开关按钮也在这里。
 //!
 //! 读目录和 git 状态、给路径找标记在 `scan`，文件树排成行的状态在 `state`，监听目录
 //! 在 `watch`；这三处不碰界面。
@@ -16,8 +16,8 @@ use std::{
 };
 
 use gpui::{
-    Action, App, Context, CursorStyle, Div, Focusable, MouseButton, MouseDownEvent, Stateful, Window, div, prelude::*,
-    px,
+    Action, AnyElement, App, Context, CursorStyle, Div, Focusable, MouseButton, MouseDownEvent, Stateful, Window, div,
+    prelude::*, px,
 };
 use runode_git::FileStatus;
 use runode_shared_types::color::Rgb;
@@ -27,7 +27,7 @@ use super::{
     card, cards, divider_color, drag_window, titlebar::icon_toggle,
 };
 use crate::{
-    assets::{FILES_ICON, GIT_ICON},
+    assets::{FILES_ICON, GIT_ICON, PANEL_RIGHT_ICON},
     ui::{hsla, tooltip::tooltip},
 };
 use scan::scan;
@@ -54,15 +54,13 @@ const WATCH_BACKOFF: u32 = 3;
 /// 只有一个子目录的目录最多连着并这么多层，防着指回上层的符号链接绕圈。
 const MAX_COMPACT: usize = 16;
 /// 右侧各栏的默认宽度，以及拖动的下限。
-const GIT_WIDTH: f32 = 300.;
-const GIT_MIN_WIDTH: f32 = 220.;
-const FILES_WIDTH: f32 = 240.;
-const FILES_MIN_WIDTH: f32 = 160.;
+const PANEL_WIDTH: f32 = 280.;
+const PANEL_MIN_WIDTH: f32 = 220.;
 const PREVIEW_WIDTH: f32 = 480.;
 const PREVIEW_MIN_WIDTH: f32 = 240.;
 /// 右侧面板再宽也给终端区留这么宽。
 const MAIN_MIN_WIDTH: f32 = 240.;
-/// 标题栏右上角开关按钮的尺寸和间距。
+/// 开关按钮的尺寸和间距：面板收着时在标题栏右上角，展开时是面板顶上的标签。
 const TOGGLE_WIDTH: f32 = 28.;
 pub(super) const TOGGLE_HEIGHT: f32 = 24.;
 const TOGGLE_GAP: f32 = 4.;
@@ -94,23 +92,37 @@ pub(super) fn status_color(status: FileStatus) -> Rgb {
     }
 }
 
-/// 右侧各栏实际画多宽，收着的为零。从左到右是预览栏、Git 面板、文件树。
+/// 右侧面板显示的那一页。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum SidePanel {
+    Files,
+    Git,
+}
+
+/// 右侧各栏实际画多宽，收着的为零。从左到右是预览栏、右侧面板。
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub(super) struct PanelWidths {
     pub preview: f32,
-    pub git: f32,
-    pub files: f32,
+    pub panel: f32,
 }
 
 impl PanelWidths {
     pub fn total(self) -> f32 {
-        self.preview + self.git + self.files
+        self.preview + self.panel
     }
 }
 
 impl WindowView {
     pub(super) fn project_visible(&self) -> bool {
-        self.git_shown || self.files_shown || self.preview_shown()
+        self.panel.is_some() || self.preview_shown()
+    }
+
+    pub(super) fn files_shown(&self) -> bool {
+        self.panel == Some(SidePanel::Files)
+    }
+
+    pub(super) fn git_shown(&self) -> bool {
+        self.panel == Some(SidePanel::Git)
     }
 
     /// 右侧面板读哪个目录：当前终端的目录，取不到时是 workspace 的目录。
@@ -165,7 +177,7 @@ impl WindowView {
             self.load_preview(cx);
         }
         // 分支、tag 变了时图表重读；工作区里的文件变了不重读。
-        if self.git_shown {
+        if self.git_shown() {
             self.graph_refs_changed(&paths, cx);
         }
         let Some(watch) = &self.project_watch else {
@@ -218,7 +230,7 @@ impl WindowView {
         let expanded = project.expanded_dirs.iter().cloned().collect();
         let untracked = std::mem::take(&mut project.untracked);
         // 其他工作树只在 Git 面板里显示，面板没开时不读；打开面板时 `toggle_git` 会重读一次。
-        let worktrees = self.git_shown;
+        let worktrees = self.git_shown();
         let job = cx.background_spawn(async move { scan(dir, expanded, untracked, worktrees) });
         cx.spawn(async move |this, cx| {
             let scan = job.await;
@@ -299,7 +311,7 @@ impl WindowView {
             // 监听不了目录，或者有其他工作树（它们的工作目录监听不到）时定时重读。
             let interval = if !self.watching() {
                 Some(FALLBACK_INTERVAL)
-            } else if self.git_shown && project.git.as_ref().is_some_and(|git| !git.worktrees.is_empty()) {
+            } else if self.git_shown() && project.git.as_ref().is_some_and(|git| !git.worktrees.is_empty()) {
                 Some(WORKTREE_INTERVAL)
             } else {
                 None
@@ -327,24 +339,30 @@ impl WindowView {
     }
 
     pub(super) fn toggle_git(&mut self, _: &ToggleGit, window: &mut Window, cx: &mut Context<Self>) {
-        self.git_shown = !self.git_shown;
-        // 收起时焦点还在提交说明框里的话，按键就没处去了，交回终端。
-        if !self.git_shown && self.git_focus.contains_focused(window, cx) {
-            window.focus(&self.focus_handle(cx), cx);
-        }
-        if !self.git_shown {
-            self.close_branch_picker(window, cx);
-        }
-        self.sync_project_watch();
-        self.refresh_project(cx);
-        self.save(cx);
-        cx.notify();
+        self.toggle_panel(SidePanel::Git, window, cx);
     }
 
     pub(super) fn toggle_files(&mut self, _: &ToggleFiles, window: &mut Window, cx: &mut Context<Self>) {
-        self.files_shown = !self.files_shown;
-        // 文件树收起时焦点还在里面的话，按键就没处去了，交回终端。
-        if !self.files_shown && self.files_focus.contains_focused(window, cx) {
+        self.toggle_panel(SidePanel::Files, window, cx);
+    }
+
+    /// 右侧面板切到 `page` 这一页，已经在这一页时收起。
+    fn toggle_panel(&mut self, page: SidePanel, window: &mut Window, cx: &mut Context<Self>) {
+        self.set_panel((self.panel != Some(page)).then_some(page), window, cx);
+    }
+
+    /// 右侧面板切到 `panel` 这一页，为空时收起。
+    fn set_panel(&mut self, panel: Option<SidePanel>, window: &mut Window, cx: &mut Context<Self>) {
+        let (git_was_shown, files_were_shown) = (self.git_shown(), self.files_shown());
+        self.panel = panel;
+        // 收起或切走时焦点还在提交说明框或文件树里的话，按键就没处去了，交回终端。
+        if git_was_shown && !self.git_shown() {
+            if self.git_focus.contains_focused(window, cx) {
+                window.focus(&self.focus_handle(cx), cx);
+            }
+            self.close_branch_picker(window, cx);
+        }
+        if files_were_shown && !self.files_shown() && self.files_focus.contains_focused(window, cx) {
             window.focus(&self.focus_handle(cx), cx);
         }
         self.sync_project_watch();
@@ -353,38 +371,48 @@ impl WindowView {
         cx.notify();
     }
 
-    /// 右侧各栏实际画多宽，收着的为零。窗口窄时依次压预览栏、Git 面板，最后压文件树，
-    /// 尽量给终端区留出 `MAIN_MIN_WIDTH`，但不窄于各自的下限。
+    /// 右侧面板显示着的那一页，收着时为空。
+    pub(super) fn render_side_panel(
+        &mut self,
+        width: f32,
+        fg: Rgb,
+        bg: Rgb,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        match self.panel? {
+            SidePanel::Files => Some(self.render_files_panel(width, fg, bg, cx).into_any_element()),
+            SidePanel::Git => Some(self.render_git_panel(width, fg, bg, window, cx).into_any_element()),
+        }
+    }
+
+    /// 右侧各栏实际画多宽，收着的为零。窗口窄时先压预览栏，再压右侧面板，尽量给终端区留出
+    /// `MAIN_MIN_WIDTH`，但不窄于各自的下限。
     pub(super) fn right_panel_widths(&self, viewport: f32) -> PanelWidths {
         let sidebar = if self.sidebar_visible() { self.sidebar_width() } else { 0. };
         let room = viewport - sidebar - MAIN_MIN_WIDTH;
         let preview_shown = self.preview_shown();
-        let files = if self.files_shown { self.files_width.unwrap_or(FILES_WIDTH) } else { 0. };
-        let git = if self.git_shown { self.git_width.unwrap_or(GIT_WIDTH) } else { 0. };
+        let panel_shown = self.panel.is_some();
+        let panel = if panel_shown { self.panel_width.unwrap_or(PANEL_WIDTH) } else { 0. };
         let preview = if preview_shown { self.preview_width.unwrap_or(PREVIEW_WIDTH) } else { 0. };
-        let preview = if preview_shown { preview.min(room - files - git).max(PREVIEW_MIN_WIDTH) } else { 0. };
-        let git = if self.git_shown { git.min(room - files - preview).max(GIT_MIN_WIDTH) } else { 0. };
-        let files = if self.files_shown { files.min(room - preview - git).max(FILES_MIN_WIDTH) } else { 0. };
-        PanelWidths { preview, git, files }
+        let preview = if preview_shown { preview.min(room - panel).max(PREVIEW_MIN_WIDTH) } else { 0. };
+        let panel = if panel_shown { panel.min(room - preview).max(PANEL_MIN_WIDTH) } else { 0. };
+        PanelWidths { preview, panel }
     }
 
     /// 拖动右侧面板左边的分隔线，左边跟到窗口里的横坐标 `x`。
     pub(super) fn resize_right_panel(&mut self, divider: Divider, x: f32, viewport: f32) {
         let sidebar = if self.sidebar_visible() { self.sidebar_width() } else { 0. };
         let room = viewport - sidebar - MAIN_MIN_WIDTH;
-        let PanelWidths { preview, git, files } = self.right_panel_widths(viewport);
+        let PanelWidths { preview, panel } = self.right_panel_widths(viewport);
         match divider {
             Divider::Preview => {
-                let width = (viewport - git - files - x).min(room - git - files).max(PREVIEW_MIN_WIDTH);
+                let width = (viewport - panel - x).min(room - panel).max(PREVIEW_MIN_WIDTH);
                 self.preview_width = Some(width);
             }
-            Divider::Git => {
-                let width = (viewport - files - x).min(room - preview - files).max(GIT_MIN_WIDTH);
-                self.git_width = Some(width);
-            }
-            Divider::Files => {
-                let width = (viewport - x).min(room - preview - git).max(FILES_MIN_WIDTH);
-                self.files_width = Some(width);
+            Divider::Panel => {
+                let width = (viewport - x).min(room - preview).max(PANEL_MIN_WIDTH);
+                self.panel_width = Some(width);
             }
             Divider::Split(..) | Divider::Sidebar | Divider::GitGraph => {}
         }
@@ -394,8 +422,7 @@ impl WindowView {
     pub(super) fn render_right_handle(&self, divider: Divider, right: f32, cx: &mut Context<Self>) -> Stateful<Div> {
         let id = match divider {
             Divider::Preview => "preview-divider",
-            Divider::Git => "git-divider",
-            _ => "files-divider",
+            _ => "panel-divider",
         };
         div()
             .id(id)
@@ -414,8 +441,7 @@ impl WindowView {
                         // 双击恢复默认宽度。
                         match divider {
                             Divider::Preview => this.preview_width = None,
-                            Divider::Git => this.git_width = None,
-                            _ => this.files_width = None,
+                            _ => this.panel_width = None,
                         }
                         this.save(cx);
                     } else {
@@ -428,18 +454,15 @@ impl WindowView {
 
     /// 当前目录问过或读过了且不在 git 仓库里时藏起 Git 按钮；面板开着时仍留着，不然没处关它。
     fn git_button_visible(&self) -> bool {
-        self.git_shown || self.workspace().project.in_repo != Some(false)
+        self.git_shown() || self.workspace().project.in_repo != Some(false)
     }
 
     /// 右侧面板左边的分隔线离窗口右边多远：经典样式下是它和右边各栏的宽度；卡片样式下还要加上
     /// 卡片到窗口右边的间距、右边各张卡片之间的间距，分隔线落在两张卡片中间。
     pub(super) fn right_divider_offset(&self, divider: Divider, widths: PanelWidths, cards: bool) -> f32 {
         let panels = match divider {
-            Divider::Preview => {
-                [(widths.preview, true), (widths.git, self.git_shown), (widths.files, self.files_shown)]
-            }
-            Divider::Git => [(0., false), (widths.git, true), (widths.files, self.files_shown)],
-            _ => [(0., false), (0., false), (widths.files, true)],
+            Divider::Preview => [(widths.preview, true), (widths.panel, self.panel.is_some())],
+            _ => [(0., false), (widths.panel, true)],
         };
         let width: f32 = panels.iter().map(|(width, _)| width).sum();
         if !cards {
@@ -449,8 +472,16 @@ impl WindowView {
         width + CARD_GAP * shown + CARD_GAP / 2.
     }
 
-    /// 标题栏右上角开关 Git 面板和文件树的两个按钮，打开着的底色亮一些。位置由调用方接着写。
-    pub(super) fn render_panel_toggles(&self, fg: Rgb, bg: Rgb, cx: &mut Context<Self>) -> Div {
+    /// 切到 Git 面板和文件树的两个按钮，显示着的那个底色亮一些，再点一下收起右侧面板。面板收着时
+    /// 在标题栏右上角，位置由调用方接着写；展开时是面板顶上的标签（`render_panel_tabs`）。
+    /// `files_icon` 是文件树那个按钮的图标。
+    pub(super) fn render_panel_toggles(
+        &self,
+        files_icon: &'static str,
+        fg: Rgb,
+        bg: Rgb,
+        cx: &mut Context<Self>,
+    ) -> Div {
         type Toggle = fn(&mut WindowView, &mut Window, &mut Context<WindowView>);
         let button = |id: &'static str, icon: &'static str, shown: bool, cx: &mut Context<Self>| {
             let (show, hide, action, toggle): (_, _, &dyn Action, Toggle) = match id {
@@ -485,14 +516,34 @@ impl WindowView {
             .flex()
             .gap(px(TOGGLE_GAP))
             .when(self.git_button_visible(), |toggles| {
-                toggles.child(button("toggle-git", GIT_ICON, self.git_shown, cx))
+                toggles.child(button("toggle-git", GIT_ICON, self.git_shown(), cx))
             })
-            .child(button("toggle-files", FILES_ICON, self.files_shown, cx))
+            .child(button("toggle-files", files_icon, self.files_shown(), cx))
     }
 
-    /// 右侧面板顶上的一条。经典样式下和标题栏等高，能拖动窗口、双击缩放，最右边的面板给开关按钮
-    /// 让位；卡片样式下是卡片的标题条，和分屏的一样高。
-    pub(super) fn panel_header(&self, rightmost: bool, fg: Rgb, cx: &App) -> Div {
+    /// 右侧面板顶上那排切换文件树和 Git 的标签，最右边是收起按钮。
+    pub(super) fn render_panel_tabs(&self, fg: Rgb, bg: Rgb, cx: &mut Context<Self>) -> Div {
+        let collapse = icon_toggle("collapse-panel", PANEL_RIGHT_ICON, 16., false, fg, bg)
+            .w(px(TOGGLE_WIDTH))
+            .h(px(TOGGLE_HEIGHT))
+            .tooltip(tooltip(rust_i18n::t!("tooltip.hide_panel"), None, fg, bg))
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(|this, _, window, cx| {
+                    cx.stop_propagation();
+                    this.set_panel(None, window, cx);
+                }),
+            );
+        self.panel_header(fg, cx)
+            .px(px(6.))
+            .child(self.render_panel_toggles(FILES_ICON, fg, bg, cx))
+            .child(div().flex_1())
+            .child(collapse)
+    }
+
+    /// 预览栏和右侧面板顶上的一条。经典样式下和标题栏等高，能拖动窗口、双击缩放；卡片样式下是
+    /// 卡片的标题条，和分屏的一样高。
+    pub(super) fn panel_header(&self, fg: Rgb, cx: &App) -> Div {
         let header = div()
             .flex_none()
             .px(px(10.))
@@ -504,11 +555,13 @@ impl WindowView {
         if cards(cx) {
             return header.h(px(PANE_HEADER_HEIGHT));
         }
-        header
-            .h(px(TITLEBAR_HEIGHT))
-            .when(rightmost, |header| header.pr(px(PANEL_TOGGLES_INSET)))
-            .on_mouse_down(MouseButton::Left, drag_window)
+        header.h(px(TITLEBAR_HEIGHT)).on_mouse_down(MouseButton::Left, drag_window)
     }
+}
+
+/// 右侧面板标签下面那一行：这一页的标题和按钮。
+pub(super) fn panel_title() -> Div {
+    div().flex_none().h(px(PANE_HEADER_HEIGHT)).px(px(10.)).flex().items_center().gap(px(8.))
 }
 
 /// 面板里居中的一句说明，比如不在仓库里、没有改动、预览不了。

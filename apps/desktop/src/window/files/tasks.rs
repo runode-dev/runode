@@ -38,7 +38,7 @@ pub(in crate::window) fn is_task_file(path: &Path) -> bool {
 impl WindowView {
     /// 文件树显示着、根目录换了或者命令文件变了时，在后台请宿主重列项目命令。
     pub(in crate::window) fn list_tasks(&mut self, cx: &mut Context<Self>) {
-        if !self.files_shown {
+        if !self.files_shown() {
             return;
         }
         let workspace = &mut self.workspaces[self.active];

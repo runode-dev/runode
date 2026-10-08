@@ -231,6 +231,7 @@ tooltip:
   hide_git: Hide Git
   show_files: Show Files
   hide_files: Hide Files
+  hide_panel: Hide Panel
   show_ignored: Show Files Ignored by Git
   hide_ignored: Hide Files Ignored by Git
   close_preview: Close Preview
