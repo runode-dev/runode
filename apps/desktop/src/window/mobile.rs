@@ -18,6 +18,7 @@ use runode_shared_types::color::Rgb;
 use super::{
     CARD_GAP, TITLEBAR_HEIGHT, WindowView, card, cards, drag_window, frame_color,
     machine::{Paired, RevokeDevice, devices},
+    sidebar::ROW_ICON_SIZE,
 };
 use crate::{
     assets::{CHEVRON_DOWN_ICON, PHONE_ICON, REFRESH_ICON, TRASH_ICON},
@@ -224,11 +225,14 @@ impl WindowView {
                     row.text_color(fg.opacity(0.7)).hover(|row| row.bg(hover_bg).text_color(fg))
                 }
             })
-            .child(svg().flex_none().path(PHONE_ICON).size(px(14.)).text_color(fg.opacity(if active {
-                0.9
-            } else {
-                0.6
-            })))
+            .child(
+                div()
+                    .flex_none()
+                    .w(px(ROW_ICON_SIZE))
+                    .flex()
+                    .justify_center()
+                    .child(svg().path(PHONE_ICON).size(px(14.)).text_color(fg.opacity(if active { 0.9 } else { 0.6 }))),
+            )
             .child(div().min_w_0().truncate().child(rust_i18n::t!("mobile.entry").into_owned()))
             .on_mouse_down(
                 MouseButton::Left,

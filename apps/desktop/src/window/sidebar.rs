@@ -10,9 +10,9 @@ use gpui::{
 use runode_shared_types::color::Rgb;
 
 use super::{
-    AGENT_MARK_WIDTH, CARD_GAP, DIVIDER_GRAB_WIDTH, Divider, NewWorkspace, RenameWorkspace, Renaming,
-    SelectLastWorkspace, SelectWorkspace, TAB_CLOSE_SIZE, TITLEBAR_HEIGHT, TRAFFIC_LIGHTS_WIDTH, ToggleSidebar,
-    WindowView, background, cards, divider_color, drag_window,
+    CARD_GAP, DIVIDER_GRAB_WIDTH, Divider, NewWorkspace, RenameWorkspace, Renaming, SelectLastWorkspace,
+    SelectWorkspace, TAB_CLOSE_SIZE, TITLEBAR_HEIGHT, TRAFFIC_LIGHTS_WIDTH, ToggleSidebar, WindowView, background,
+    cards, divider_color, drag_window,
     inline_edit::InlineEdit,
     model::{WorkspaceId, display_dir},
     titlebar::{close_button, drag_chip, drop_marker, icon_toggle, shortcut_hint, styled_agent_mark},
@@ -35,8 +35,9 @@ const SIDEBAR_TOGGLE_HEIGHT: f32 = 24.;
 pub(super) const SIDEBAR_TOGGLE_INSET: f32 = TRAFFIC_LIGHTS_WIDTH + SIDEBAR_TOGGLE_WIDTH + 8.;
 /// 每个 workspace 一行：名字和目录各占一行。
 const ROW_HEIGHT: f32 = 40.;
-/// 名字前的 GitHub 头像或 git 图标。
-const REPO_ICON_SIZE: f32 = 16.;
+/// 侧栏每行名字前的图标那一格：workspace 的 GitHub 头像或 git 图标，手机端入口和新建按钮的图标也占这么宽，
+/// 几处的文字才对齐。
+pub(super) const ROW_ICON_SIZE: f32 = 16.;
 /// 改名输入框的高度。
 const RENAME_FIELD_HEIGHT: f32 = 18.;
 
@@ -246,13 +247,12 @@ impl WindowView {
         // 名字前是 GitHub 头像，不在 GitHub 上的仓库画 git 图标；agent 的标记跟在名字后面。
         let repo = &workspace.repo;
         // 靠上对着名字那一行，不在两行中间。
-        let icon = div().flex_none().w(px(REPO_ICON_SIZE)).mt(px(3.)).map(|slot| {
-            match (&repo.avatar, repo.branch.is_some()) {
-                (Some(avatar), _) => slot.child(img(avatar.clone()).size(px(REPO_ICON_SIZE)).rounded(px(3.))),
-                (None, true) => slot.child(svg().path(GIT_ICON).size(px(REPO_ICON_SIZE)).text_color(fg.opacity(0.6))),
+        let icon =
+            div().flex_none().w(px(ROW_ICON_SIZE)).mt(px(3.)).map(|slot| match (&repo.avatar, repo.branch.is_some()) {
+                (Some(avatar), _) => slot.child(img(avatar.clone()).size(px(ROW_ICON_SIZE)).rounded(px(3.))),
+                (None, true) => slot.child(svg().path(GIT_ICON).size(px(ROW_ICON_SIZE)).text_color(fg.opacity(0.6))),
                 (None, false) => slot,
-            }
-        });
+            });
         let mark = workspace.mark(cx).map(|mark| styled_agent_mark(mark, ("workspace-agent", ix), fg, cards(cx)));
         let name: AnyElement = match renaming {
             Some(renaming) => renaming.edit.render(px(RENAME_FIELD_HEIGHT), rgb_fg, bg).into_any_element(),
@@ -408,7 +408,7 @@ impl WindowView {
             .gap(px(6.))
             .text_color(fg.opacity(0.55))
             .hover(|button| button.bg(hover_bg).text_color(fg))
-            .child(div().flex_none().w(px(AGENT_MARK_WIDTH)).flex().justify_center().text_size(px(14.)).child("+"))
+            .child(div().flex_none().w(px(ROW_ICON_SIZE)).flex().justify_center().text_size(px(14.)).child("+"))
             .child(div().min_w_0().truncate().child(rust_i18n::t!("workspace.new").into_owned()))
             .tooltip(tooltip)
             .on_mouse_down(
