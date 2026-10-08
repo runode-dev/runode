@@ -36,8 +36,7 @@
                 app.setActive(phase != .background)
             }
             .onOpenURL { url in
-                guard url.scheme?.lowercased() == "runode" else { return }
-                app.startPairing(link: url.absoluteString)
+                app.open(url: url)
             }
             // 终端页以外的界面跟电脑上终端的主题走；终端页自己按它那个会话的主题上色。弹出的页面各自
             // 再套一次，深浅模式才跟着变。

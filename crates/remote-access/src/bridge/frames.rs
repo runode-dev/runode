@@ -1,9 +1,10 @@
 //! 桥接时两个方向上的帧边界。字节照旧一块一块地搬，这里只跟着帧头数位置：
 //!
 //! - 手机 → 宿主（`FromPhone`）：控制帧整帧攒齐、解出 `ClientMsg`，手机连接不能做的（见
-//!   `refusal`）不转给宿主，改给手机回一条 `HostMsg::Error`；别的帧（输入等）不解析，边到边转。
+//!   `refusal`）不转给宿主，改给手机回一条 `HostMsg::Error`；这边自己办的（见 `LocalRequests`）也不转，
+//!   回这边办完的回话；别的帧（输入等）不解析，边到边转。
 //! - 宿主 → 手机（`ToPhone`）：只数帧头里的长度，知道现在是不是正好在两帧之间，回给手机的
-//!   `Error` 只在那里插进去，不会把宿主的帧拆开。
+//!   回话只在那里插进去，不会把宿主的帧拆开。
 
 use runode_protocol::{
     ClientMsg, FrameKind, HostMsg, MAX_PAYLOAD,
@@ -13,6 +14,12 @@ use runode_protocol::{
 
 /// 攒控制帧时一开始最多先要这么多内存，再多的随到达的字节长，不照对面声明的长度一上来就分配。
 const HOLD_RESERVE: usize = 64 << 10;
+
+/// 手机连接上由这边自己办、不转给宿主的请求。
+pub(crate) trait LocalRequests {
+    /// 这边办了 `message` 时返回给手机的回话；不归这边办的返回 `None`，照常转给宿主。
+    fn handle(&mut self, message: &ClientMsg) -> Option<HostMsg>;
+}
 
 /// 手机发来的明文按帧过一遍，见模块文档。
 #[derive(Default)]
@@ -27,13 +34,14 @@ pub(crate) struct FromPhone {
 }
 
 impl FromPhone {
-    /// 过一段明文：要转给宿主的追加到 `to_host`，挡下的控制消息给手机的回话（编好的帧）追加到
-    /// `refusals`。帧头声明的载荷超过 `MAX_PAYLOAD` 时报错，连接上的数据已经对不齐了。
+    /// 过一段明文：要转给宿主的追加到 `to_host`；挡下的和交给 `local` 办了的控制消息，给手机的回话
+    /// （编好的帧）追加到 `replies`。帧头声明的载荷超过 `MAX_PAYLOAD` 时报错，连接上的数据已经对不齐了。
     pub(crate) fn feed(
         &mut self,
         mut bytes: &[u8],
         to_host: &mut Vec<u8>,
-        refusals: &mut Vec<u8>,
+        replies: &mut Vec<u8>,
+        local: &mut dyn LocalRequests,
     ) -> Result<(), FrameError> {
         while !bytes.is_empty() {
             if self.left == 0 && self.held.is_none() {
@@ -55,7 +63,7 @@ impl FromPhone {
                     held.extend_from_slice(&self.header);
                     self.held = Some(held);
                     if len == 0 {
-                        self.decide(to_host, refusals);
+                        self.decide(to_host, replies, local);
                     }
                 } else {
                     to_host.extend_from_slice(&self.header);
@@ -70,29 +78,33 @@ impl FromPhone {
             self.left -= take as u32;
             bytes = &bytes[take..];
             if self.left == 0 && self.held.is_some() {
-                self.decide(to_host, refusals);
+                self.decide(to_host, replies, local);
             }
         }
         Ok(())
     }
 
-    /// 攒齐了一个控制帧：手机连接不能做的挡下、回一条 `Error`，别的原样转给宿主（解不出来的也转，
-    /// 由宿主照常回话）。
-    fn decide(&mut self, to_host: &mut Vec<u8>, refusals: &mut Vec<u8>) {
+    /// 攒齐了一个控制帧：手机连接不能做的挡下、回一条 `Error`，`local` 办的回它的回话，别的原样转给
+    /// 宿主（解不出来的也转，由宿主照常回话）。
+    fn decide(&mut self, to_host: &mut Vec<u8>, replies: &mut Vec<u8>, local: &mut dyn LocalRequests) {
         let Some(frame) = self.held.take() else { return };
-        let refused = serde_json::from_slice::<ClientMsg>(&frame[HEADER_LEN..]).ok().as_ref().and_then(refusal);
-        let Some(what) = refused else {
+        let reply = serde_json::from_slice::<ClientMsg>(&frame[HEADER_LEN..]).ok().and_then(|message| {
+            if let Some(what) = refusal(&message) {
+                tracing::info!("refused a remote device's request to {what}");
+                return Some(HostMsg::Error { req: None, id: None, message: format!("a remote device cannot {what}") });
+            }
+            local.handle(&message)
+        });
+        let Some(reply) = reply else {
             to_host.extend_from_slice(&frame);
             return;
         };
-        tracing::info!("refused a remote device's request to {what}");
-        let error = HostMsg::Error { req: None, id: None, message: format!("a remote device cannot {what}") };
-        match serde_json::to_vec(&error) {
+        match serde_json::to_vec(&reply) {
             Ok(payload) => {
                 // 写进 `Vec` 不会出错，载荷也远小于上限。
-                let _ = write_frame(refusals, FrameKind::Control, 0, &payload);
+                let _ = write_frame(replies, FrameKind::Control, 0, &payload);
             }
-            Err(err) => tracing::warn!("cannot encode a refusal: {err}"),
+            Err(err) => tracing::warn!("cannot encode a reply to a remote device: {err}"),
         }
     }
 }
@@ -192,14 +204,35 @@ mod tests {
         out
     }
 
-    /// 一段流按 `split` 字节一块喂进去，结果和一次喂完一样。
-    fn feed_in_pieces(stream: &[u8], split: usize) -> (Vec<u8>, Vec<u8>) {
-        let mut phone = FromPhone::default();
-        let (mut to_host, mut refusals) = (Vec::new(), Vec::new());
-        for piece in stream.chunks(split) {
-            phone.feed(piece, &mut to_host, &mut refusals).unwrap();
+    /// 什么都不自己办。
+    struct Nothing;
+
+    impl LocalRequests for Nothing {
+        fn handle(&mut self, _message: &ClientMsg) -> Option<HostMsg> {
+            None
         }
-        (to_host, refusals)
+    }
+
+    /// 自己办 `Layout`，回 `Done`。
+    struct Layouts;
+
+    impl LocalRequests for Layouts {
+        fn handle(&mut self, message: &ClientMsg) -> Option<HostMsg> {
+            match message {
+                ClientMsg::Layout { req } => Some(HostMsg::Done { req: *req }),
+                _ => None,
+            }
+        }
+    }
+
+    /// 一段流按 `split` 字节一块喂进去，结果和一次喂完一样。
+    fn feed_in_pieces(stream: &[u8], split: usize, local: &mut dyn LocalRequests) -> (Vec<u8>, Vec<u8>) {
+        let mut phone = FromPhone::default();
+        let (mut to_host, mut replies) = (Vec::new(), Vec::new());
+        for piece in stream.chunks(split) {
+            phone.feed(piece, &mut to_host, &mut replies, local).unwrap();
+        }
+        (to_host, replies)
     }
 
     #[test]
@@ -230,9 +263,9 @@ mod tests {
             stream.extend_from_slice(refused);
         }
         for split in [1, 2, 5, 9, 10, 64, stream.len()] {
-            let (to_host, refusals) = feed_in_pieces(&stream, split);
+            let (to_host, replies) = feed_in_pieces(&stream, split, &mut Nothing);
             assert_eq!(to_host, allowed.concat(), "split {split}");
-            let errors = frames(&refusals);
+            let errors = frames(&replies);
             assert_eq!(errors.len(), refused.len(), "split {split}");
             for error in errors {
                 match error.message::<HostMsg>().unwrap() {
@@ -245,13 +278,37 @@ mod tests {
         }
     }
 
+    /// 交给本地办的请求不转给宿主，回话和挡下请求的 `Error` 按请求的先后排。
+    #[test]
+    fn local_requests_are_answered_in_order() {
+        let stream = [
+            control(r#"{"type":"layout","req":1}"#),
+            control(r#"{"type":"list_sessions"}"#),
+            control(r#"{"type":"shutdown","kill_sessions":false}"#),
+            control(r#"{"type":"layout","req":2}"#),
+        ]
+        .concat();
+        for split in [1, 7, stream.len()] {
+            let (to_host, replies) = feed_in_pieces(&stream, split, &mut Layouts);
+            assert_eq!(to_host, control(r#"{"type":"list_sessions"}"#), "split {split}");
+            let replies: Vec<HostMsg> = frames(&replies).iter().map(|frame| frame.message().unwrap()).collect();
+            assert!(
+                matches!(
+                    replies.as_slice(),
+                    [HostMsg::Done { req: 1 }, HostMsg::Error { req: None, .. }, HostMsg::Done { req: 2 }]
+                ),
+                "split {split}: {replies:?}"
+            );
+        }
+    }
+
     #[test]
     fn a_frame_over_the_limit_is_an_error() {
         let mut header = [0u8; HEADER_LEN];
         header[..4].copy_from_slice(&(MAX_PAYLOAD + 1).to_le_bytes());
         header[4] = FrameKind::Input as u8;
         let mut phone = FromPhone::default();
-        assert!(phone.feed(&header, &mut Vec::new(), &mut Vec::new()).is_err());
+        assert!(phone.feed(&header, &mut Vec::new(), &mut Vec::new(), &mut Nothing).is_err());
     }
 
     #[test]

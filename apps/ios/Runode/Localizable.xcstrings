@@ -1,0 +1,30 @@
+{
+  "sourceLanguage" : "zh-Hans",
+  "strings" : {
+    "agent.blocked.body" : {
+      "comment" : "电脑经推送起 agent 等回答的 Live Activity 时提醒的正文（APNs 的 loc-key），参数依次是会话标题和电脑名。",
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@ · %2$@"
+          }
+        }
+      }
+    },
+    "agent.blocked.title" : {
+      "comment" : "电脑经推送起 agent 等回答的 Live Activity 时提醒的标题（APNs 的 loc-key），参数是 agent 的名字。",
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 在等你回答"
+          }
+        }
+      }
+    }
+  },
+  "version" : "1.0"
+}

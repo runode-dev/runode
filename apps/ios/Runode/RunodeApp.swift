@@ -16,7 +16,7 @@ struct RunodeApp: App {
 }
 
 /// 把真的依赖组装起来：Keychain 里的设备私钥、Application Support 里的电脑列表、Bonjour 发现、
-/// 每台电脑一条 `HostConnection`，以及灵动岛上的 Live Activity 和进后台后多要的运行时间。
+/// 每台电脑一条 `HostConnection`，以及登记推送用的 Live Activity 系统接口和 Info.plist 里的 APNs 环境。
 @MainActor
 enum AppComposition {
     static func dependencies() -> AppDependencies {
@@ -41,8 +41,9 @@ enum AppComposition {
             },
             deviceName: systemName, recents: DefaultsStore("recentTerminal"), preferences: preferences,
             themes: DefaultsStore("theme"))
-        dependencies.agentActivity = SystemAgentActivity()
-        dependencies.backgroundTime = SystemBackgroundTime()
+        dependencies.liveActivities = SystemLiveActivities()
+        dependencies.pushIdentity = PushIdentity(
+            info: Bundle.main.infoDictionary ?? [:], bundle: Bundle.main.bundleIdentifier)
         return dependencies
     }
 

@@ -90,7 +90,7 @@ impl Dirs {
     }
 
     /// 远程访问的东西：服务端证书和私钥、配对过的设备表、监听方的锁和状态、命令行交给监听方的
-    /// 配对口令，即 `data` 下的 `remote-access`。只有自己能进，见 `create_remote_access_dir`。
+    /// 配对口令、推送用着的广播频道，即 `data` 下的 `remote-access`。只有自己能进，见 `create_remote_access_dir`。
     /// 调试构建和发布构建共用：两者只有一个能占着端口，手机配对一次两边都认。
     pub fn remote_access_dir(&self) -> Option<PathBuf> {
         self.data_file("remote-access")
@@ -135,6 +135,11 @@ impl Dirs {
     /// 监听方开好后写的状态（端口、证书指纹、主机名），命令行拼配对 URI 时读。
     pub fn remote_access_status_file(&self) -> Option<PathBuf> {
         self.remote_access_file("listener.json")
+    }
+
+    /// 推送 Live Activity 时正用着的广播频道（JSON）：监听方重启后据此接着用或收起。
+    pub fn remote_access_push_channels_file(&self) -> Option<PathBuf> {
+        self.remote_access_file("push-channels.json")
     }
 
     /// 用户自己的配色主题目录，按名字找主题时最先找这里。
@@ -265,6 +270,7 @@ mod tests {
             (dirs.remote_access_pairing_file(), "pairing.json"),
             (dirs.remote_access_lock_file(), "listener.lock"),
             (dirs.remote_access_status_file(), "listener.json"),
+            (dirs.remote_access_push_channels_file(), "push-channels.json"),
         ] {
             assert_eq!(file, Some(dir.join(name)));
         }

@@ -40,7 +40,21 @@ import Testing
         #expect(decoded.defaultSize == .automatic)
         #expect(decoded.bellHaptics)
         #expect(decoded.deviceName == nil)
-        #expect(decoded.showsAgentActivity)
+        #expect(decoded.alertsBlockedAgents)
+    }
+
+    /// 以前叫 `showsAgentActivity` 的开关：关过的照旧关着，新键在时以新键为准；写回去只有新键。
+    @Test func theOldActivitySwitchCarriesOver() throws {
+        let off = try JSONDecoder().decode(AppPreferences.self, from: Data(#"{"showsAgentActivity":false}"#.utf8))
+        #expect(!off.alertsBlockedAgents)
+        let on = try JSONDecoder().decode(AppPreferences.self, from: Data(#"{"showsAgentActivity":true}"#.utf8))
+        #expect(on.alertsBlockedAgents)
+        let both = try JSONDecoder().decode(
+            AppPreferences.self, from: Data(#"{"showsAgentActivity":false,"alertsBlockedAgents":true}"#.utf8))
+        #expect(both.alertsBlockedAgents)
+        let written = try JSONSerialization.jsonObject(with: JSONEncoder().encode(off)) as? [String: Any]
+        #expect(written?["alertsBlockedAgents"] as? Bool == false)
+        #expect(written?["showsAgentActivity"] == nil)
     }
 
     @Test func newTerminalsStartWithTheDefaultSize() async throws {

@@ -11,8 +11,8 @@ public struct AppPreferences: Hashable, Sendable, Codable {
     public var bellHaptics = true
     /// 报给电脑的设备名；为空时用系统给的名字。
     public var deviceName: String?
-    /// 在灵动岛和锁屏上显示各台电脑上 agent 的状态（Live Activity）。
-    public var showsAgentActivity = true
+    /// agent 停下来等回答时，由电脑经推送在灵动岛和锁屏上提醒（Live Activity）。关掉时向各台电脑注销推送。
+    public var alertsBlockedAgents = true
 
     public init() {}
 
@@ -26,12 +26,21 @@ public struct AppPreferences: Hashable, Sendable, Codable {
         fontSize = try container.decodeIfPresent(Double.self, forKey: .fontSize)
         bellHaptics = try container.decodeIfPresent(Bool.self, forKey: .bellHaptics) ?? true
         deviceName = try container.decodeIfPresent(String.self, forKey: .deviceName)
-        showsAgentActivity = try container.decodeIfPresent(Bool.self, forKey: .showsAgentActivity) ?? true
+        // 以前的版本在 App 里自己显示 agent 状态，开关叫 `showsAgentActivity`：关过的照旧关着。
+        let legacy = try decoder.container(keyedBy: LegacyKeys.self)
+        alertsBlockedAgents =
+            try container.decodeIfPresent(Bool.self, forKey: .alertsBlockedAgents)
+            ?? legacy.decodeIfPresent(Bool.self, forKey: .showsAgentActivity) ?? true
+    }
+
+    /// 旧存档里还有、现在不再写的键。
+    private enum LegacyKeys: String, CodingKey {
+        case showsAgentActivity
     }
 }
 
-/// 设置页的视图模型：改了马上存；设备名变了告诉 `AppModel`，由它转给各台电脑的连接；灵动岛的开关
-/// 变了也告诉它，由它开关 Live Activity。
+/// 设置页的视图模型：改了马上存；设备名变了告诉 `AppModel`，由它转给各台电脑的连接；等回答提醒的开关
+/// 变了也告诉它，由它向各台电脑登记或注销推送。
 @Observable
 @MainActor
 public final class SettingsModel {
@@ -42,8 +51,8 @@ public final class SettingsModel {
             if preferences.deviceName != oldValue.deviceName {
                 deviceNameDidChange(deviceName)
             }
-            if preferences.showsAgentActivity != oldValue.showsAgentActivity {
-                agentActivityDidChange(preferences.showsAgentActivity)
+            if preferences.alertsBlockedAgents != oldValue.alertsBlockedAgents {
+                alertsDidChange(preferences.alertsBlockedAgents)
             }
         }
     }
@@ -52,7 +61,7 @@ public final class SettingsModel {
     public let systemDeviceName: String
     @ObservationIgnored private let store: DefaultsStore<AppPreferences>
     @ObservationIgnored var deviceNameDidChange: @MainActor (String) -> Void = { _ in }
-    @ObservationIgnored var agentActivityDidChange: @MainActor (Bool) -> Void = { _ in }
+    @ObservationIgnored var alertsDidChange: @MainActor (Bool) -> Void = { _ in }
 
     public init(store: DefaultsStore<AppPreferences>, systemDeviceName: String) {
         self.store = store

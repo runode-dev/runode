@@ -6,13 +6,15 @@
 //! 无限攒在内存里。
 //!
 //! 手机发来的控制帧要过一道筛：管宿主本身的请求（让宿主退出、升级交接这些，见 `frames::refusal`）
-//! 不转给宿主，改在发往手机的方向、两帧之间插一条 `HostMsg::Error`，连接照旧。
+//! 不转给宿主，改在发往手机的方向、两帧之间插一条 `HostMsg::Error`，连接照旧。登记推送的请求也不转给
+//! 宿主，由 `push` 按这台设备办了，同样在两帧之间插回话。
 //!
 //! 收尾：宿主那边说完了（读到结尾，或者写给它时它已经关了），先把它最后发的、还在内核里没读的都读
 //! 出来送到手机，再发 close_notify；手机说了 close_notify，把它最后发的写给宿主后关掉写宿主的一边，
 //! 等宿主自己关。手机的 TCP 断了时没什么可送的，直接结束。
 
 mod frames;
+pub(crate) mod push;
 
 use std::{
     io::{self, Read as _, Write as _},
@@ -23,7 +25,7 @@ use std::{
 
 use rustls::ServerConnection;
 
-use self::frames::{FromPhone, ToPhone};
+use self::frames::{FromPhone, LocalRequests, ToPhone};
 
 /// 手机发来、还没写给宿主的明文最多攒这么多。
 const TO_HOST_LIMIT: usize = 1 << 20;
@@ -35,8 +37,14 @@ const CHUNK: usize = 64 << 10;
 const POLL_TICK_MS: libc::c_int = 1000;
 
 /// 搬到两边都说完，或者 `cut` 被置上（撤销了设备、关了远程访问；置上的一方同时会 `shutdown` 手机的
-/// 连接，这边马上醒）。返回时两个连接都还开着，由调用方关。
-pub(crate) fn bridge(conn: &mut ServerConnection, phone: &TcpStream, host: &UnixStream, cut: &AtomicBool) {
+/// 连接，这边马上醒）。手机发来的请求里由这边办的交给 `local`。返回时两个连接都还开着，由调用方关。
+pub(crate) fn bridge(
+    conn: &mut ServerConnection,
+    phone: &TcpStream,
+    host: &UnixStream,
+    cut: &AtomicBool,
+    local: &mut dyn LocalRequests,
+) {
     if let Err(err) = phone.set_nonblocking(true).and_then(|()| host.set_nonblocking(true)) {
         tracing::warn!("cannot bridge a remote connection: {err}");
         return;
@@ -51,12 +59,12 @@ pub(crate) fn bridge(conn: &mut ServerConnection, phone: &TcpStream, host: &Unix
         from_host: Vec::new(),
         from_host_at: 0,
         to_phone: ToPhone::default(),
-        refusals: Vec::new(),
-        refusals_at: 0,
+        replies: Vec::new(),
+        replies_at: 0,
         host_done: false,
         said_bye: false,
     };
-    if let Err(err) = bridge.run(conn, phone, host, cut) {
+    if let Err(err) = bridge.run(conn, phone, host, cut, local) {
         tracing::debug!("remote connection bridge ended: {err}");
     }
 }
@@ -75,11 +83,11 @@ struct Bridge {
     /// 宿主发来、rustls 还没收下的明文，从 `from_host_at` 起。
     from_host: Vec<u8>,
     from_host_at: usize,
-    /// 交给 rustls 的宿主的字节走到哪一帧了，`refusals` 只在两帧之间插。
+    /// 交给 rustls 的宿主的字节走到哪一帧了，`replies` 只在两帧之间插。
     to_phone: ToPhone,
-    /// 挡下手机的请求后要回给它的帧，从 `refusals_at` 起；`refusals_at` 大于 0 时正插到一半。
-    refusals: Vec<u8>,
-    refusals_at: usize,
+    /// 挡下或者自己办了手机的请求后要回给它的帧，从 `replies_at` 起；`replies_at` 大于 0 时正插到一半。
+    replies: Vec<u8>,
+    replies_at: usize,
     /// 宿主说完了：读到了结尾或者读出错。
     host_done: bool,
     /// 发过 close_notify 了。
@@ -93,9 +101,10 @@ impl Bridge {
         phone: &TcpStream,
         host: &UnixStream,
         cut: &AtomicBool,
+        local: &mut dyn LocalRequests,
     ) -> io::Result<()> {
         while !cut.load(Ordering::Relaxed) {
-            self.phone_to_host(conn, host)?;
+            self.phone_to_host(conn, host, local)?;
             self.host_to_phone(conn)?;
             while conn.wants_write() {
                 match conn.write_tls(&mut &*phone) {
@@ -116,13 +125,18 @@ impl Bridge {
     }
 
     /// 手机 → 宿主：rustls 里解好的明文拿出来过筛（门禁之后手机可能已经接着发了几帧），写给宿主。
-    fn phone_to_host(&mut self, conn: &mut ServerConnection, host: &UnixStream) -> io::Result<()> {
+    fn phone_to_host(
+        &mut self,
+        conn: &mut ServerConnection,
+        host: &UnixStream,
+        local: &mut dyn LocalRequests,
+    ) -> io::Result<()> {
         while !self.phone_done && self.to_host.len() < TO_HOST_LIMIT {
             match conn.reader().read(&mut self.buf) {
                 Ok(0) => self.phone_done = true,
                 Ok(n) => {
                     self.from_phone
-                        .feed(&self.buf[..n], &mut self.to_host, &mut self.refusals)
+                        .feed(&self.buf[..n], &mut self.to_host, &mut self.replies, local)
                         .map_err(io::Error::other)?;
                     if !self.host_writable {
                         self.to_host.clear();
@@ -154,17 +168,17 @@ impl Bridge {
         Ok(())
     }
 
-    /// 宿主 → 手机：宿主的字节和挡下请求的回话交给 rustls，回话只插在两帧之间；宿主说完、都交出去
+    /// 宿主 → 手机：宿主的字节和这边给手机的回话交给 rustls，回话只插在两帧之间；宿主说完、都交出去
     /// 了就发 close_notify。
     fn host_to_phone(&mut self, conn: &mut ServerConnection) -> io::Result<()> {
         loop {
-            let injecting = self.refusals_at > 0;
-            if self.refusals_at < self.refusals.len() && (injecting || self.to_phone.at_boundary()) {
-                let n = conn.writer().write(&self.refusals[self.refusals_at..])?;
-                self.refusals_at += n;
-                if self.refusals_at == self.refusals.len() {
-                    self.refusals.clear();
-                    self.refusals_at = 0;
+            let injecting = self.replies_at > 0;
+            if self.replies_at < self.replies.len() && (injecting || self.to_phone.at_boundary()) {
+                let n = conn.writer().write(&self.replies[self.replies_at..])?;
+                self.replies_at += n;
+                if self.replies_at == self.replies.len() {
+                    self.replies.clear();
+                    self.replies_at = 0;
                 }
                 if n == 0 {
                     break;
@@ -177,7 +191,7 @@ impl Bridge {
             let pending = &self.from_host[self.from_host_at..];
             // 有回话等着插时只交到这一帧（或者帧头）的结尾，下一轮在两帧之间插。
             let len =
-                if self.refusals.is_empty() { pending.len() } else { self.to_phone.to_next_stop().min(pending.len()) };
+                if self.replies.is_empty() { pending.len() } else { self.to_phone.to_next_stop().min(pending.len()) };
             let n = conn.writer().write(&pending[..len])?;
             self.to_phone.advance(&pending[..n]);
             self.from_host_at += n;
@@ -188,7 +202,7 @@ impl Bridge {
         if self.from_host_at == self.from_host.len() {
             self.from_host.clear();
             self.from_host_at = 0;
-            if self.host_done && self.refusals.is_empty() && !self.said_bye {
+            if self.host_done && self.replies.is_empty() && !self.said_bye {
                 conn.send_close_notify();
                 self.said_bye = true;
             }

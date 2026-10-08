@@ -5,7 +5,9 @@
 //! `Listener` 是开着的监听：IPv4 和 IPv6 各一个 TCP 监听，一个线程接连接，每条连接一个线程。连接
 //! 先做 TLS 1.3（rustls，ring 后端，证书是第一次开时生成的自签证书，见 `identity`），再过门禁
 //! （`gate`：登录验签、配对验口令），通过后检查第一帧是手机的 `Hello`，然后经调用方给的
-//! `Connect` 要一条到宿主的新连接，在两边之间搬字节（`bridge`）。这里不依赖宿主：调用方是建宿主
+//! `Connect` 要一条到宿主的新连接，在两边之间搬字节（`bridge`）。手机登记推送的请求不转给宿主，
+//! 由这边按过了门禁的设备记进设备表（`push_registrations` 读出来）；agent 等回答时照登记推 Live
+//! Activity 的也在这里（`push`，设置由 `Service::set_push` 给）。这里不依赖宿主：调用方是建宿主
 //! 的那个进程（桌面 app 里的宿主，或者 `runode --host`），`Connect` 通常就是 `Host::connect_pair`。
 //!
 //! 监听跟着宿主活，开关和端口跟着配置变，`Service` 管这件事：给它想要的端口（`None` 是关），它在
@@ -28,15 +30,17 @@ mod identity;
 mod limit;
 mod listener;
 mod pairing;
+mod push;
 mod service;
 mod status;
 
 use std::{io, os::unix::net::UnixStream, sync::Arc};
 
 pub use addrs::{host_name, local_addresses, local_interfaces};
-pub use devices::{Device, list_devices, revoke_device};
+pub use devices::{Device, PushRegistration, list_devices, push_registrations, revoke_device};
 pub use listener::{Bind, Listener, Options};
 pub use pairing::{PairingProgress, PairingTicket, pairing_pending};
+pub use push::{ApnsKey, PushSettings};
 pub use service::Service;
 pub use status::{ListenerStatus, listener_status};
 

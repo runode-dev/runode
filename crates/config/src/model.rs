@@ -106,6 +106,20 @@ pub struct Config {
     pub remote_access_port: u16,
     /// 配对过的手机上显示的这台电脑的名字；`None` 时用系统设置里的电脑名。
     pub remote_access_name: Option<String>,
+    /// agent 等回答时推 Live Activity 到配对过、登记了推送的手机上。
+    pub remote_access_push: bool,
+    /// 推送带屏幕上的问题和选项；关着时只有标题和 agent。
+    pub remote_access_push_text: bool,
+    /// agent 等回答过了这么久还在等才推。
+    pub remote_access_push_delay: Duration,
+    /// 直连 APNs 用的 .p8 密钥文件，`~/` 开头时从家目录算；和下面三项都配了才直连，推给 bundle id
+    /// 是 `apns_bundle_id` 的 App。
+    pub apns_key_file: Option<String>,
+    pub apns_key_id: Option<String>,
+    pub apns_team_id: Option<String>,
+    pub apns_bundle_id: Option<String>,
+    /// 推官方 App 时经过的中转服务的基址。
+    pub push_relay_url: String,
     /// 界面语言，是 locales 里的某个语言标签；`None` 表示跟随系统。
     pub language: Option<String>,
     /// agent 等用户回答或者干完了、用户又没在看那个分屏时，发系统通知。
@@ -169,6 +183,15 @@ impl Default for Config {
             // 和 `runode_protocol::remote::DEFAULT_PORT` 一样；config 不依赖 protocol，桌面的测试对着两边。
             remote_access_port: 7866,
             remote_access_name: None,
+            remote_access_push: true,
+            remote_access_push_text: true,
+            remote_access_push_delay: Duration::from_secs(10),
+            apns_key_file: None,
+            apns_key_id: None,
+            apns_team_id: None,
+            apns_bundle_id: None,
+            // 和 `runode_protocol::push::RELAY_URL` 一样；config 不依赖 protocol，桌面的测试对着两边。
+            push_relay_url: "https://push.runode.dev".into(),
             language: None,
             agent_notifications: true,
             agent_notifications_exclude: Vec::new(),

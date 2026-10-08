@@ -708,6 +708,24 @@
       ],
       "type": "project_tasks"
     },
+    "push_register": {
+      "bundle": "cn.barey.runode",
+      "env": "production",
+      "machine": "6F9619FF-8B86-D011-B42D-00C04FC964FF",
+      "machine_name": "Ethan 的 MacBook Pro",
+      "req": 10,
+      "token": "80f0c8b3a4e2d1c0ffeeddccbbaa99887766554433221100aabbccddeeff0011",
+      "type": "push_register"
+    },
+    "push_unregister": {
+      "bundle": "cn.barey.runode",
+      "env": "development",
+      "machine": "6F9619FF-8B86-D011-B42D-00C04FC964FF",
+      "machine_name": "Ethan 的 MacBook Pro",
+      "req": 11,
+      "token": null,
+      "type": "push_register"
+    },
     "read_screen": {
       "command": null,
       "id": "0123456789abcdef0011223344556677",

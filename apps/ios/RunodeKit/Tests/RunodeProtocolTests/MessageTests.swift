@@ -46,6 +46,7 @@ func sameJSON(_ a: Data, _ b: Data) throws -> Bool {
         "list_project_tasks", "spawn",
         "attach_vt", "attach_meta", "attach_size", "detach", "resize", "focus", "kill",
         "read_screen", "read_screen_command", "send_keys", "paste",
+        "push_register", "push_unregister",
     ])
     func matchesTheHost(_ name: String) throws {
         let message: ClientMsg =
@@ -76,6 +77,15 @@ func sameJSON(_ a: Data, _ b: Data) throws -> Bool {
             case "read_screen_command": .readScreen(id: id, lines: nil, command: 1)
             case "send_keys": .sendKeys(req: 5, id: id, keys: ["1", "enter", "esc", "up"])
             case "paste": .paste(req: 6, id: id, text: "继续，用方案 2\n")
+            case "push_register":
+                .pushRegister(
+                    req: 10, token: "80f0c8b3a4e2d1c0ffeeddccbbaa99887766554433221100aabbccddeeff0011",
+                    env: .production, bundle: "cn.barey.runode", machine: "6F9619FF-8B86-D011-B42D-00C04FC964FF",
+                    machineName: "Ethan 的 MacBook Pro")
+            case "push_unregister":
+                .pushRegister(
+                    req: 11, token: nil, env: .development, bundle: "cn.barey.runode",
+                    machine: "6F9619FF-8B86-D011-B42D-00C04FC964FF", machineName: "Ethan 的 MacBook Pro")
             default: .listSessions
             }
         #expect(try sameJSON(JSONEncoder().encode(message), RustSamples.data(name)))
@@ -113,11 +123,12 @@ func sameJSON(_ a: Data, _ b: Data) throws -> Bool {
             .focus(id: id, focused: true), .kill(id: id), .readScreen(id: id, lines: 3),
             .sendKeys(req: 1, id: id, keys: ["enter"]), .paste(req: 2, id: id, text: "y"),
             .git(req: 3, id: id, request: .status),
+            .pushRegister(req: 4, token: "00", env: .production, bundle: "b", machine: "m", machineName: "n"),
         ]
         func covered(_ message: ClientMsg) -> Bool {
             switch message {
             case .hello, .listSessions, .layout, .open, .openWorkspace, .renameWorkspace, .listDirs, .listProjectTasks,
-                .spawn, .attach, .detach, .resize, .focus, .kill, .readScreen, .sendKeys, .paste, .git:
+                .spawn, .attach, .detach, .resize, .focus, .kill, .readScreen, .sendKeys, .paste, .git, .pushRegister:
                 true
             }
         }

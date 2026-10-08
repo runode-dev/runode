@@ -3,227 +3,127 @@ import RunodeActivity
 import SwiftUI
 import WidgetKit
 
-/// 灵动岛和锁屏上的 agent 状态：内容由 App 的 `AgentActivityModel` 送来。只用 SF Symbols 和颜色，不引用
-/// App 里各家 agent 的 logo（那些资源在 RunodeFeatures 里，扩展不链接它）。点一下打开 App，系统默认就是
-/// 这样，不带深链接。
+/// 灵动岛和锁屏上「agent 在等你回答」的提醒，一个会话一张：电脑经推送起、更新和收起，App 不送内容。
+/// 只用 SF Symbols 和颜色，不引用 App 里各家 agent 的 logo（那些资源在 RunodeFeatures 里，扩展不链接它）。
+/// 点一下按深链接打开那个会话的终端页。电脑太久没推新内容（`isStale`）时变灰，不再当成还在等。
 struct AgentActivityWidget: Widget {
     var body: some WidgetConfiguration {
         ActivityConfiguration(for: AgentActivityAttributes.self) { context in
-            LockScreenView(content: context.state, paused: context.state.paused || context.isStale)
+            LockScreenView(attributes: context.attributes, state: context.state, stale: context.isStale)
+                .widgetURL(context.attributes.link?.url)
         } dynamicIsland: { context in
-            let content = context.state
-            let paused = content.paused || context.isStale
+            let state = context.state
+            let stale = context.isStale
             return DynamicIsland {
                 DynamicIslandExpandedRegion(.leading) {
-                    StatusIcon(state: content.overall, worker: content.leadingWorker, paused: paused)
+                    WaitingIcon(stale: stale)
                         .font(.title2)
                         .padding(.leading, 4)
                 }
-                DynamicIslandExpandedRegion(.trailing) {
-                    Group {
-                        if let since = runningSince(content, paused: paused) {
-                            ElapsedTime(since: since)
-                                .foregroundStyle(AgentActivityStyle.color(.working))
-                        } else {
-                            Text("Runode")
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                    .font(.caption)
-                    .padding(.trailing, 4)
-                }
                 DynamicIslandExpandedRegion(.center) {
-                    Text(AgentActivityText.summary(content))
-                        .font(.subheadline.weight(.semibold))
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.8)
+                    Heading(attributes: context.attributes, state: state, stale: stale)
                 }
                 DynamicIslandExpandedRegion(.bottom) {
-                    VStack(alignment: .leading, spacing: 4) {
-                        // 灵动岛展开后高度有限，暂停时少列一条，给提示留地方。
-                        ForEach(content.entries.prefix(paused ? 3 : 4)) { entry in
-                            EntryRow(entry: entry)
-                        }
-                        if paused {
-                            PausedLine()
-                        }
-                    }
-                    .padding(.horizontal, 4)
+                    ScreenLines(lines: state.lines)
+                        .padding(.horizontal, 4)
                 }
             } compactLeading: {
-                StatusIcon(state: content.overall, worker: content.leadingWorker, paused: paused)
+                WaitingIcon(stale: stale)
             } compactTrailing: {
-                // 在干活时是系统自己走的计时（Live Activity 里循环动画不播，只有计时会动），其余时候是个数。
-                Group {
-                    if let since = runningSince(content, paused: paused) {
-                        ElapsedTime(since: since)
-                    } else {
-                        Text("\(content.headline)")
-                    }
-                }
-                .font(.body.monospacedDigit().weight(.semibold))
-                .foregroundStyle(paused ? .gray : AgentActivityStyle.color(content.overall))
-                .accessibilityLabel(AgentActivityText.summary(content))
+                // 紧凑态右边很窄，只放 agent 名字的头一个词（「Claude」）。
+                Text(AgentActivityText.shortAgent(state.agent))
+                    .font(.caption.weight(.semibold))
+                    .lineLimit(1)
+                    .frame(maxWidth: 56)
+                    .foregroundStyle(stale ? .gray : .orange)
+                    .accessibilityLabel(AgentActivityText.headline(state.agent))
             } minimal: {
-                StatusIcon(state: content.overall, worker: content.leadingWorker, paused: paused)
+                WaitingIcon(stale: stale)
             }
-            .keylineTint(paused ? .gray : AgentActivityStyle.color(content.overall))
+            .keylineTint(stale ? .gray : .orange)
+            .widgetURL(context.attributes.link?.url)
         }
     }
 }
 
-/// 锁屏上的样子：和灵动岛展开后差不多，多一行标题。
+/// 锁屏上的样子：和灵动岛展开后一样，图标在左边。
 private struct LockScreenView: View {
-    let content: AgentActivityContent
-    let paused: Bool
+    let attributes: AgentActivityAttributes
+    let state: AgentActivityAttributes.ContentState
+    let stale: Bool
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 8) {
-                StatusIcon(state: content.overall, worker: content.leadingWorker, paused: paused)
-                    .font(.title3)
-                Text(AgentActivityText.summary(content))
-                    .font(.subheadline.weight(.semibold))
-                    .lineLimit(1)
-                Spacer(minLength: 4)
-                if let since = runningSince(content, paused: paused) {
-                    ElapsedTime(since: since)
-                        .font(.caption.monospacedDigit())
-                        .foregroundStyle(AgentActivityStyle.color(.working))
-                } else {
-                    Text("Runode")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .top, spacing: 10) {
+                WaitingIcon(stale: stale)
+                    .font(.title2)
+                Heading(attributes: attributes, state: state, stale: stale)
             }
-            ForEach(content.entries) { entry in
-                EntryRow(entry: entry)
-            }
-            if paused {
-                PausedLine()
-            }
+            ScreenLines(lines: state.lines)
         }
         .padding(14)
     }
 }
 
-/// 一个会话：状态图标、会话标题，右边是 agent 和电脑。
-private struct EntryRow: View {
-    let entry: AgentActivityContent.Entry
+/// agent 名字（「Claude Code 在等你回答」）和「标题 · 电脑名」。
+private struct Heading: View {
+    let attributes: AgentActivityAttributes
+    let state: AgentActivityAttributes.ContentState
+    let stale: Bool
 
     var body: some View {
-        HStack(spacing: 6) {
-            StatusIcon(state: entry.state, worker: entry)
-                .frame(width: 16)
-            Text(entry.title)
-                .lineLimit(1)
-            Spacer(minLength: 4)
-            Text("\(entry.agent) · \(entry.machine)")
-                .lineLimit(1)
+        VStack(alignment: .leading, spacing: 2) {
+            Text(AgentActivityText.headline(state.agent))
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(stale ? .secondary : .primary)
+            Text("\(state.title) · \(attributes.machineName)")
+                .font(.caption)
                 .foregroundStyle(.secondary)
         }
-        .font(.caption)
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(
-            "\(entry.title)，\(entry.agent) \(AgentActivityText.state(entry.state))，在 \(entry.machine) 上")
+        .lineLimit(1)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
-/// 连接停了时的那行提示。
-private struct PausedLine: View {
-    var body: some View {
-        Label("连接已暂停，打开 Runode 刷新", systemImage: "arrow.clockwise")
-            .font(.caption2)
-            .foregroundStyle(.secondary)
-    }
-}
-
-/// 整体在干活、连接没停时，从什么时候开始算计时；不该显示计时时为空。
-private func runningSince(_ content: AgentActivityContent, paused: Bool) -> Date? {
-    guard !paused, content.overall == .working else { return nil }
-    return content.workingSince
-}
-
-/// 往上走的计时（「1:23」），由系统每秒刷新，不用 App 推更新。计时文字会按最长的样子占宽度，限住它。
-private struct ElapsedTime: View {
-    let since: Date
+/// 屏幕底部的问题和选项：等宽小字，每行一行，放不下就截断。
+private struct ScreenLines: View {
+    let lines: [String]
 
     var body: some View {
-        Text(timerInterval: since...Date.distantFuture, countsDown: false)
-            .multilineTextAlignment(.trailing)
-            .lineLimit(1)
-            .minimumScaleFactor(0.6)
-            .frame(maxWidth: 56, alignment: .trailing)
-    }
-}
-
-/// 整体或一个会话的状态图标：在干活时是那个 agent 自己转圈里的一帧（`worker` 带着，和 App 里一样），
-/// 没带时是青色的齿轮；等回答是醒目的橙色，空闲的是灰色。连接停了或者内容过时了（`paused`）一律是灰色的
-/// 暂停，不再让人以为 agent 还在干活。
-private struct StatusIcon: View {
-    let state: AgentActivityState
-    var worker: AgentActivityContent.Entry?
-    var paused = false
-
-    var body: some View {
-        Group {
-            if paused {
-                Image(systemName: "pause.circle.fill")
-                    .foregroundStyle(.gray)
-            } else if state == .working, let spinner = worker?.spinner {
-                Text(spinner)
-                    .fontWeight(.bold)
-                    .foregroundStyle(worker?.spinnerColor.map(Color.init(hex:)) ?? .primary)
-            } else {
-                Image(systemName: AgentActivityStyle.symbol(state))
-                    .foregroundStyle(AgentActivityStyle.color(state))
+        if !lines.isEmpty {
+            VStack(alignment: .leading, spacing: 1) {
+                ForEach(Array(lines.enumerated()), id: \.offset) { _, line in
+                    Text(line)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                }
             }
+            .font(.caption2.monospaced())
+            .foregroundStyle(.secondary)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .accessibilityLabel(paused ? "连接已暂停" : AgentActivityText.state(state))
     }
 }
 
-extension Color {
-    /// 0xRRGGBB。
-    fileprivate init(hex: UInt32) {
-        self.init(
-            red: Double(hex >> 16 & 0xFF) / 255, green: Double(hex >> 8 & 0xFF) / 255, blue: Double(hex & 0xFF) / 255)
-    }
-}
+/// 等回答的图标：醒目的橙色；过时了是灰色。
+private struct WaitingIcon: View {
+    let stale: Bool
 
-private enum AgentActivityStyle {
-    static func symbol(_ state: AgentActivityState) -> String {
-        switch state {
-        case .blocked: "exclamationmark.bubble.fill"
-        case .working: "gearshape.2.fill"
-        case .idle: "checkmark.circle.fill"
-        }
-    }
-
-    static func color(_ state: AgentActivityState) -> Color {
-        switch state {
-        case .blocked: .orange
-        case .working: .cyan
-        case .idle: .gray
-        }
+    var body: some View {
+        Image(systemName: "exclamationmark.bubble.fill")
+            .foregroundStyle(stale ? .gray : .orange)
+            .accessibilityLabel(stale ? "提醒已过时" : "等你回答")
     }
 }
 
 private enum AgentActivityText {
-    static func state(_ state: AgentActivityState) -> String {
-        switch state {
-        case .blocked: "等你回答"
-        case .working: "干活中"
-        case .idle: "空闲"
-        }
+    /// 「Claude Code 在等你回答」；电脑没报 agent 时只说「在等你回答」。
+    static func headline(_ agent: String) -> String {
+        agent.isEmpty ? "在等你回答" : "\(agent) 在等你回答"
     }
 
-    /// 「2 个等你回答 · 1 个在干活」：只写不是零的。
-    static func summary(_ content: AgentActivityContent) -> String {
-        var parts: [String] = []
-        if content.blocked > 0 { parts.append("\(content.blocked) 个等你回答") }
-        if content.working > 0 { parts.append("\(content.working) 个在干活") }
-        if content.idle > 0 { parts.append("\(content.idle) 个空闲") }
-        return parts.isEmpty ? "没有 agent" : parts.joined(separator: " · ")
+    /// agent 名字的头一个词；没有时是「等回答」。
+    static func shortAgent(_ agent: String) -> String {
+        agent.split(separator: " ").first.map(String.init) ?? "等回答"
     }
 }

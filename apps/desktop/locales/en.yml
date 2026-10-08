@@ -435,6 +435,8 @@ settings:
     scrollback: Scrollback
     clipboard: Clipboard
     pairing: Pair a Phone
+    push: Live Activities
+    push_key: Your Own Phone App
   theme:
     none: No Theme
     single: One Theme
@@ -482,6 +484,14 @@ settings:
     remote_access: Remote access
     remote_access_port: Port
     remote_access_name: "Computer name"
+    remote_access_push: Show waiting agents on the phone
+    remote_access_push_text: Include the question
+    remote_access_push_delay: Wait before notifying
+    apns_key_file: APNs key file
+    apns_key_id: Key ID
+    apns_team_id: Team ID
+    apns_bundle_id: App bundle ID
+    push_relay_url: Push relay
     agent_notifications: Notifications
     agent_notifications_exclude: Agents without alerts
     agent_done_sound: Sound when an agent finishes
@@ -528,6 +538,14 @@ settings:
     remote_access: Lets a paired phone reach the terminals over the local network or Tailscale. Pair below, or with runode remote pair.
     remote_access_port: TCP port, 1 to 65535.
     remote_access_name: "The name paired phones show. When empty, the system computer name. Connected phones drop briefly when it changes."
+    remote_access_push: When an agent waits for your answer, paired phones show it in the Dynamic Island and on the Lock Screen, even with the app closed.
+    remote_access_push_text: Sends the question and choices from the bottom of the screen. Off sends only the title and the agent.
+    remote_access_push_delay: Seconds the agent has to keep waiting first, so answering at the computer doesn't buzz the phone. 0 notifies right away.
+    apns_key_file: Only for a phone app you build and sign yourself. The .p8 key from your Apple developer account; ~/ is your home folder.
+    apns_key_id: The 10-character ID of that key, also in its file name AuthKey_ID.p8.
+    apns_team_id: Your 10-character Apple developer team ID.
+    apns_bundle_id: The bundle ID of your build of the phone app.
+    push_relay_url: The service that sends pushes for the official phone app.
     agent_notifications: Notifies you when an agent you are not looking at finishes or needs an answer. Only the packaged Runode.app can notify.
     agent_notifications_exclude: These agents get neither notifications nor sounds; their status marks still show.
     agent_done_sound: A system sound.

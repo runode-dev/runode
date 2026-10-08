@@ -5281,6 +5281,7 @@ dependencies = [
  "ring",
  "runode-paths",
  "runode-protocol",
+ "runode-shared-types",
  "rustls",
  "serde",
  "serde_json",

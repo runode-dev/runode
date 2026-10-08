@@ -17,6 +17,8 @@
 	</array>
 	<key>NSSupportsLiveActivities</key>
 	<true/>
+	<key>RunodeAPSEnvironment</key>
+	<string>$(RUNODE_APS_ENVIRONMENT)</string>
 	<key>NSBonjourServices</key>
 	<array>
 		<string>_runode._tcp</string>

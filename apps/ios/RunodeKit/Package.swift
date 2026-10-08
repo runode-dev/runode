@@ -3,7 +3,7 @@
 //   RunodeProtocol（帧、消息、门禁，纯 Foundation）
 //   ← RunodeConnection（TLS、门禁流程、配对、Keychain、Bonjour、重连）
 //   RunodeTerminal（libghostty-vt 的封装和终端 UIView，只依赖 RunodeProtocol 里的数据类型）
-//   RunodeActivity（灵动岛和锁屏上 Live Activity 的数据，只依赖 Foundation 和 ActivityKit，App 和小组件扩展共用）
+//   RunodeActivity（灵动岛和锁屏上 Live Activity 的数据和点开它的深链接，只依赖 Foundation 和 ActivityKit，App 和小组件扩展共用）
 //   ← RunodeFeatures（视图模型和 SwiftUI 视图，依赖以上四个）
 // 小组件扩展只依赖 RunodeActivity，不能依赖 RunodeFeatures：那会把 libghostty-vt 也带进扩展。
 // 也给 macOS 声明了平台：没有界面的部分（以及视图模型）能直接在 Mac 上 `swift test`，UIKit 的部分

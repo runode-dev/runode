@@ -13,6 +13,7 @@ use runode_protocol::{
         GitBranch, GitFile, GitFileDiff, GitFileStatus, GitHunk, GitLine, GitLineKind, GitOperation, GitRequest,
         GitStatus,
     },
+    push::ApnsEnv,
 };
 use runode_shared_types::{
     agent::{Agent, AgentKind, AgentState},
@@ -201,6 +202,28 @@ fn samples() -> BTreeMap<&'static str, Value> {
             ClientMsg::SendKeys { req: 5, id: ID, keys: ["1", "enter", "esc", "up"].map(String::from).to_vec() },
         ),
         ("paste", ClientMsg::Paste { req: 6, id: ID, text: "继续，用方案 2\n".into() }),
+        (
+            "push_register",
+            ClientMsg::PushRegister {
+                req: 10,
+                token: Some("80f0c8b3a4e2d1c0ffeeddccbbaa99887766554433221100aabbccddeeff0011".into()),
+                env: ApnsEnv::Production,
+                bundle: "cn.barey.runode".into(),
+                machine: "6F9619FF-8B86-D011-B42D-00C04FC964FF".into(),
+                machine_name: "Ethan 的 MacBook Pro".into(),
+            },
+        ),
+        (
+            "push_unregister",
+            ClientMsg::PushRegister {
+                req: 11,
+                token: None,
+                env: ApnsEnv::Development,
+                bundle: "cn.barey.runode".into(),
+                machine: "6F9619FF-8B86-D011-B42D-00C04FC964FF".into(),
+                machine_name: "Ethan 的 MacBook Pro".into(),
+            },
+        ),
     ];
 
     let host = [

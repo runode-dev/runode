@@ -9,6 +9,8 @@ publish.workspace = true
 [dependencies]
 runode-paths.workspace = true
 runode-protocol.workspace = true
+# 推送时看会话的 agent 是不是在等回答（`SessionMeta`、`AgentState`）。
+runode-shared-types.workspace = true
 anyhow.workspace = true
 # 枚举本机地址（getifaddrs）、poll、IPv6 监听设 IPV6_V6ONLY。
 libc.workspace = true

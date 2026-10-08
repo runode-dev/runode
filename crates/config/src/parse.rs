@@ -56,7 +56,15 @@ pub const KEYS: &[&[&str]] = &[
     &["clipboard-write", "clipboard-read"],
     &["terminal-host"],
     &["auto-update"],
-    &["remote-access", "remote-access-port", "remote-access-name"],
+    &[
+        "remote-access",
+        "remote-access-port",
+        "remote-access-name",
+        "remote-access-push",
+        "remote-access-push-text",
+        "remote-access-push-delay",
+    ],
+    &["apns-key-file", "apns-key-id", "apns-team-id", "apns-bundle-id", "push-relay-url"],
     &["agent-notifications", "agent-notifications-exclude", "agent-done-sound", "agent-blocked-sound"],
     &["config-file"],
     &["keybind"],
@@ -291,6 +299,32 @@ impl Config {
             "remote-access-name" => {
                 self.remote_access_name = Some(value.trim().to_owned()).filter(|name| !name.is_empty());
             }
+            "remote-access-push" => {
+                self.remote_access_push = or_default(empty, defaults.remote_access_push, || parse_bool(value))?;
+            }
+            "remote-access-push-text" => {
+                self.remote_access_push_text =
+                    or_default(empty, defaults.remote_access_push_text, || parse_bool(value))?;
+            }
+            "remote-access-push-delay" => {
+                self.remote_access_push_delay = or_default(empty, defaults.remote_access_push_delay, || {
+                    let seconds: u64 = value.trim().parse().map_err(|_| "expected a whole number of seconds")?;
+                    Ok(Duration::from_secs(seconds))
+                })?;
+            }
+            "apns-key-file" => self.apns_key_file = text(value),
+            "apns-key-id" => self.apns_key_id = text(value),
+            "apns-team-id" => self.apns_team_id = text(value),
+            "apns-bundle-id" => self.apns_bundle_id = text(value),
+            "push-relay-url" => {
+                self.push_relay_url = or_default(empty, defaults.push_relay_url, || {
+                    let url = value.trim();
+                    if url.strip_prefix("https://").is_none_or(str::is_empty) {
+                        return Err("expected an https:// URL".into());
+                    }
+                    Ok(url.trim_end_matches('/').to_owned())
+                })?;
+            }
             "agent-notifications" => {
                 self.agent_notifications = or_default(empty, defaults.agent_notifications, || parse_bool(value))?;
             }
@@ -378,6 +412,11 @@ fn parse_pair(value: &str) -> Result<(f32, f32), String> {
         Some((a, b)) => Ok((parse_f32(a)?, parse_f32(b)?)),
         None => parse_f32(value).map(|v| (v, v)),
     }
+}
+
+/// 去掉首尾空白的文字，空的为 `None`。
+fn text(value: &str) -> Option<String> {
+    Some(value.trim().to_owned()).filter(|text| !text.is_empty())
 }
 
 fn parse_bool(value: &str) -> Result<bool, String> {
@@ -657,6 +696,42 @@ unknown-key = whatever
         assert_eq!(load(&["preview-font-size = 12.5"]).preview_font_size, 12.5);
         assert_eq!(load(&["preview-font-size = 15\npreview-font-size = 0"]).preview_font_size, 15.);
         assert_eq!(load(&["preview-font-size = 15\npreview-font-size ="]).preview_font_size, 13.);
+    }
+
+    #[test]
+    fn push_is_on_by_default_and_direct_needs_a_key() {
+        let d = Config::default();
+        assert_eq!(
+            (d.remote_access_push, d.remote_access_push_text, d.remote_access_push_delay),
+            (true, true, Duration::from_secs(10))
+        );
+        assert_eq!((d.apns_key_file.as_deref(), d.push_relay_url.as_str()), (None, "https://push.runode.dev"));
+        let config = load(&[
+            "remote-access-push = false\nremote-access-push-text = false\nremote-access-push-delay = 30\n\
+             apns-key-file =  ~/keys/AuthKey_X.p8 \napns-key-id = X\napns-team-id = T\napns-bundle-id = cn.example.app\n\
+             push-relay-url = https://relay.example/",
+        ]);
+        assert_eq!(
+            (config.remote_access_push, config.remote_access_push_text, config.remote_access_push_delay),
+            (false, false, Duration::from_secs(30))
+        );
+        assert_eq!(config.apns_key_file.as_deref(), Some("~/keys/AuthKey_X.p8"));
+        assert_eq!(
+            (config.apns_key_id.as_deref(), config.apns_team_id.as_deref(), config.apns_bundle_id.as_deref()),
+            (Some("X"), Some("T"), Some("cn.example.app"))
+        );
+        assert_eq!(config.push_relay_url, "https://relay.example");
+        // 不是 https 的、秒数写错的保留前面的值；值为空回到默认。
+        for bad in ["http://relay.example", "relay.example", "https://"] {
+            let config = load(&[&format!("push-relay-url = https://a.example\npush-relay-url = {bad}")]);
+            assert_eq!(config.push_relay_url, "https://a.example", "{bad}");
+        }
+        assert_eq!(load(&["push-relay-url = https://a.example\npush-relay-url ="]).push_relay_url, d.push_relay_url);
+        for bad in ["-1", "2.5", "soon"] {
+            let config = load(&[&format!("remote-access-push-delay = 5\nremote-access-push-delay = {bad}")]);
+            assert_eq!(config.remote_access_push_delay, Duration::from_secs(5), "{bad}");
+        }
+        assert_eq!(load(&["apns-key-id = X\napns-key-id ="]).apns_key_id, None);
     }
 
     #[test]

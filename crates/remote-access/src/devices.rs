@@ -1,11 +1,18 @@
 //! 配对过的设备表：`remote_access_devices_file` 里的 JSON（0600），每台设备的标识、名字、公钥、
 //! 配对和最近一次登录的时刻。监听方配对时加、登录时更新 `last_seen`，命令行撤销时删；改的一方都
 //! 先拿 `remote_access_devices_lock_file` 的锁，读的一方不用（文件整个换掉写，读不到一半的）。
+//!
+//! 同一个文件里还有手机登记的推送（`PushRegistration`，见 `runode_protocol::push`），按设备一条，和
+//! `Device` 分开放：`runode remote list --json` 把 `Device` 整个打印出来，token 不该跟着出去。撤销设备时
+//! 一起删。旧版本读得了带着它的表（不认识的字段忽略），但它改表时会把它丢掉，手机下次连上时重新登记。
 
 use std::{fs::OpenOptions, io, os::unix::fs::OpenOptionsExt as _, path::PathBuf};
 
 use runode_paths::Dirs;
-use runode_protocol::remote::{Bytes, DeviceId};
+use runode_protocol::{
+    push::ApnsEnv,
+    remote::{Bytes, DeviceId},
+};
 use serde::{Deserialize, Serialize};
 
 use crate::files::{no_home, read_json, write_json};
@@ -27,10 +34,29 @@ pub struct Device {
     pub last_seen: u64,
 }
 
+/// 一台设备登记的推送，见 `runode_protocol::ClientMsg::PushRegister`。
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PushRegistration {
+    pub device_id: DeviceId,
+    /// push-to-start token，十六进制。
+    pub token: String,
+    pub env: ApnsEnv,
+    /// App 的 bundle id。
+    pub bundle: String,
+    /// 手机给这台电脑编的 UUID，推送时原样带回。
+    pub machine: String,
+    /// 手机上显示的这台电脑的名字。
+    pub machine_name: String,
+    /// 最近一次登记的时刻，Unix 秒。
+    pub updated_at: u64,
+}
+
 #[derive(Default, Serialize, Deserialize)]
 struct Table {
     version: u32,
     devices: Vec<Device>,
+    #[serde(default)]
+    push: Vec<PushRegistration>,
 }
 
 /// 所有配对过的设备，按配对的先后。
@@ -38,12 +64,66 @@ pub fn list_devices(dirs: &Dirs) -> io::Result<Vec<Device>> {
     Ok(read(dirs)?.devices)
 }
 
-/// 撤销设备 `id`：从表里删掉，它连着的连接几秒内断开。表里没有它时返回 false。
+/// 撤销设备 `id`：从表里删掉，连同它登记的推送，它连着的连接几秒内断开。表里没有它时返回 false。
 pub fn revoke_device(dirs: &Dirs, id: DeviceId) -> io::Result<bool> {
+    let mut revoked = false;
     update(dirs, |table| {
-        let before = table.devices.len();
+        let before = (table.devices.len(), table.push.len());
         table.devices.retain(|device| device.device_id != id);
-        table.devices.len() != before
+        table.push.retain(|push| push.device_id != id);
+        revoked = table.devices.len() != before.0;
+        (table.devices.len(), table.push.len()) != before
+    })?;
+    Ok(revoked)
+}
+
+/// 各台设备登记的推送，按登记的先后。
+pub fn push_registrations(dirs: &Dirs) -> io::Result<Vec<PushRegistration>> {
+    Ok(read(dirs)?.push)
+}
+
+/// 记下（或者换掉）设备 `registration.device_id` 登记的推送。表里没有这台设备（刚被撤销）时不记，
+/// 返回 false。
+pub(crate) fn set_push(dirs: &Dirs, registration: PushRegistration) -> io::Result<bool> {
+    update(dirs, |table| {
+        if !table.devices.iter().any(|device| device.device_id == registration.device_id) {
+            return false;
+        }
+        table.push.retain(|push| push.device_id != registration.device_id);
+        table.push.push(registration);
+        true
+    })
+}
+
+/// 删掉设备 `id` 登记的推送。本来就没有时返回 false。
+pub(crate) fn clear_push(dirs: &Dirs, id: DeviceId) -> io::Result<bool> {
+    update(dirs, |table| {
+        let before = table.push.len();
+        table.push.retain(|push| push.device_id != id);
+        table.push.len() != before
+    })
+}
+
+/// 设备 `id` 登记的 push-to-start token 还是 `token` 时，把它的环境改成 `env`：推送时发现登记的环境
+/// 不对、换一个推成了。登记已经换了（手机又登记过）时不动，返回 false。
+pub(crate) fn set_push_env(dirs: &Dirs, id: DeviceId, token: &str, env: ApnsEnv) -> io::Result<bool> {
+    update(dirs, |table| {
+        let Some(push) = table.push.iter_mut().find(|push| push.device_id == id && push.token == token) else {
+            return false;
+        };
+        let changed = push.env != env;
+        push.env = env;
+        changed
+    })
+}
+
+/// 设备 `id` 登记的 push-to-start token 还是 `token` 时删掉这条登记：两个环境的 APNs 都不认它。登记
+/// 已经换了时不动，返回 false。
+pub(crate) fn drop_push_token(dirs: &Dirs, id: DeviceId, token: &str) -> io::Result<bool> {
+    update(dirs, |table| {
+        let before = table.push.len();
+        table.push.retain(|push| push.device_id != id || push.token != token);
+        table.push.len() != before
     })
 }
 

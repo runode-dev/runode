@@ -40,9 +40,16 @@ public enum ClientKind: String, Hashable, Sendable, Encodable {
     case mobile
 }
 
+/// 推送 token 所属的 APNs 环境，见宿主的 `push::ApnsEnv`：App Store、TestFlight 装的是 `production`，
+/// Xcode 直接装的是 `development`。
+public enum ApnsEnv: String, Hashable, Sendable, Encodable {
+    case production
+    case development
+}
+
 /// 前端发给宿主的消息。只列出手机这个前端会发的几种：`Hello`、`ListSessions`、`Layout`、`Open`、
 /// `OpenWorkspace`、`RenameWorkspace`、`ListDirs`、`Spawn`、`Attach`、`Detach`、`Resize`、`Focus`、`Kill`、
-/// `ReadScreen`、`SendKeys`、`Paste`、`Git`。JSON 的样子和
+/// `ReadScreen`、`SendKeys`、`Paste`、`Git`、`PushRegister`。JSON 的样子和
 /// 宿主的 `ClientMsg` 一致，可缺省的字段也照宿主序列化的样子写出 `null`。宿主对手机连接上的 `Shutdown`、
 /// 交接（`Handoff` 等）、`UiReply`、`SetOptions`、`SetTheme` 只回 `Error`，这里故意不定义它们，手机就
 /// 发不出去。
@@ -91,6 +98,11 @@ public enum ClientMsg: Hashable, Sendable, Encodable {
     /// 在会话 shell 当前所在的仓库里读写 git，回 `GitStatus`、`GitDiff` 或 `GitBranches`；办不了时回
     /// 只带 `req`、不带会话 `id` 的 `Error`。一条连接上的这些请求宿主按先后一件一件办。
     case git(req: UInt32, id: SessionId, request: GitRequest)
+    /// 登记这台电脑推送 Live Activity 用的 push-to-start token（`token` 为空时注销），回 `Done`，办不了时回
+    /// 带编号的 `Error`。`bundle` 是 App 的 bundle id，`machine` 是给这台电脑编的 UUID、`machineName` 是显示
+    /// 的电脑名，推送时原样带回。由电脑上的远程访问记进配对设备表，不到宿主。
+    case pushRegister(
+        req: UInt32, token: String?, env: ApnsEnv, bundle: String, machine: String, machineName: String)
 
     private struct Key: CodingKey {
         var stringValue: String
@@ -191,6 +203,14 @@ public enum ClientMsg: Hashable, Sendable, Encodable {
             try c.encode(req, forKey: Key("req"))
             try c.encode(id, forKey: Key("id"))
             try c.encode(request, forKey: Key("request"))
+        case let .pushRegister(req, token, env, bundle, machine, machineName):
+            try c.encode("push_register", forKey: Key("type"))
+            try c.encode(req, forKey: Key("req"))
+            try c.encode(token, forKey: Key("token"))
+            try c.encode(env, forKey: Key("env"))
+            try c.encode(bundle, forKey: Key("bundle"))
+            try c.encode(machine, forKey: Key("machine"))
+            try c.encode(machineName, forKey: Key("machine_name"))
         }
     }
 }

@@ -50,6 +50,14 @@ config:
   remote_access: 让手机经局域网或 Tailscale 连上这台 Mac 的终端：true、false。用 runode remote pair 给手机配对，runode remote devices 列出配对过的手机，runode remote revoke 撤销一台。改了几秒内生效，不用重启 Runode。
   remote_access_port: 远程访问在所有网卡上监听的 TCP 端口：1 到 65535。
   remote_access_name: 配对过的手机上显示的这台电脑的名字，留空时用「系统设置 › 通用 › 共享」里的电脑名。改了几秒内生效，连着的手机会断开一下再自己连上。
+  remote_access_push: agent 等你回答时，在配对过的手机上用实时活动（灵动岛和锁屏）显示出来，手机上的 Runode 没开着也行：true、false。手机连上时自己登记；官方 App 的推送经推送中转发，自己编译签名的 App 要配下面的 apns-* 几项。
+  remote_access_push_text: 实时活动里带上屏幕底部的问题和选项：true、false。false 时只发标题和 agent。
+  remote_access_push_delay: agent 等回答过了这么多秒还在等才推到手机上，在电脑前很快答了的不打扰手机：整数，0 是马上推。
+  apns_key_file: 自己签名的 App 不经中转、直接推给 Apple：Apple 开发者账号里下载的 .p8 密钥文件，~/ 表示家目录。和 apns-key-id、apns-team-id、apns-bundle-id 都配了才用。
+  apns_key_id: 这把密钥的 ID（10 个字符，也在文件名 AuthKey_<ID>.p8 里）。
+  apns_team_id: Apple 开发者账号的 Team ID（10 个字符）。
+  apns_bundle_id: 自己编译的手机 App 的 bundle ID；这个 App 的登记用上面的密钥推。
+  push_relay_url: 给官方手机 App 发推送的中转服务：https:// 开头的网址。
   command_completions: 在 shell 提示符上按 Tab 时从菜单里选命令名、子命令、选项或参数（参数只限 Runode 认识的命令），没有可选的时 Tab 照常交给 shell。false 时 Tab 总是交给 shell。
   agent_notifications: agent 在你没在看的分屏里等你回答或者干完了时，发系统通知：true、false。只有打包好的 Runode.app 能发通知。
   agent_notifications_exclude: |-

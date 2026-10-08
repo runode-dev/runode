@@ -120,6 +120,9 @@ public final class SessionListModel {
     public private(set) var loaded = false {
         didSet { onSessionsChanged() }
     }
+    /// 这次连上以后收到过列表：`sessions` 是电脑上现在的样子。断开后、重连上还没收到新列表时为假，
+    /// 那时 `sessions` 还是断开前的。
+    @ObservationIgnored private(set) var listCurrent = false
     /// 这台电脑上终端的主题：只看状态的 `Attach` 回话里带着，终端页开着时它收到的 `ThemeApplied`
     /// 也经同一条连接到这里。没收到过时为空。
     public private(set) var theme: AppTheme?
@@ -140,8 +143,10 @@ public final class SessionListModel {
     @ObservationIgnored public var onSpawned: @MainActor (SessionId) -> Void = { _ in }
     /// `theme` 变了，`AppModel` 据此记下 App 现在用的主题。
     @ObservationIgnored var onThemeChanged: @MainActor () -> Void = {}
-    /// 会话、连接状态变了，`AppModel` 据此更新灵动岛上的 agent 状态。
+    /// 会话、连接状态变了，`AppModel` 据此收起灵动岛上已经答完的提醒。
     @ObservationIgnored var onSessionsChanged: @MainActor () -> Void = {}
+    /// 连接的事件（帧以外的），在列表自己处理之前转给 `AppModel`，由它交给 `PushRegistration`。
+    @ObservationIgnored var onLinkEvent: @MainActor (HostEvent) -> Void = { _ in }
     @ObservationIgnored private var task: Task<Void, Never>?
     @ObservationIgnored private var connected = false
     /// 这次连接上已经发过只看状态的 `Attach` 的会话。
@@ -523,8 +528,11 @@ public final class SessionListModel {
     // MARK: 事件
 
     func handle(_ event: HostEvent) {
+        // 帧不转：`AppModel` 用不上，又来得最勤。
+        if case .frame = event {} else { onLinkEvent(event) }
         switch event {
         case .state(let state):
+            if !state.isConnected { listCurrent = false }
             linkState = state
             if !state.isConnected {
                 connected = false
@@ -542,6 +550,7 @@ public final class SessionListModel {
             }
         case .ready:
             connected = true
+            listCurrent = false
             watching = []
             refresh()
         case .message(let message):
@@ -564,6 +573,7 @@ public final class SessionListModel {
         switch message {
         case .sessionList(let list):
             let known = Set(sessions.map(\.id))
+            listCurrent = true
             sessions = list
             loaded = true
             let present = Set(list.map(\.id))

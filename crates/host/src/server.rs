@@ -1017,6 +1017,10 @@ impl Connection {
             | ClientMsg::HandoffDone => {
                 self.error(None, None, "only a successor host can take the sessions over".into());
             }
+            // 推送只有手机经远程访问登记，由监听方按过了门禁的那台设备记下，不到宿主这里。
+            ClientMsg::PushRegister { req, .. } => {
+                self.error(Some(req), None, "only a remote device registers for push through remote access".into());
+            }
             ClientMsg::Unknown => self.error(None, None, "unknown message".into()),
         }
     }

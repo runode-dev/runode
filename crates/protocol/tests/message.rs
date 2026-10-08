@@ -3,7 +3,7 @@
 use runode_protocol::{
     AttachMode, BuildId, Caps, ClientKind, ClientMsg, FinishedCommand, Frame, FrameKind, GoodbyeReason, HandoffRefusal,
     HostMsg, PaneLayout, PaneRect, Placement, ProjectTask, SessionId, SessionInfo, TabLayout, TaskSource,
-    TaskSourceKind, WindowLayout, WorkspaceLayout, message::InvalidSessionId, read_frame, write_frame,
+    TaskSourceKind, WindowLayout, WorkspaceLayout, message::InvalidSessionId, push::ApnsEnv, read_frame, write_frame,
 };
 use runode_shared_types::{
     agent::{Agent, AgentKind, AgentState},
@@ -176,6 +176,22 @@ fn client_messages_round_trip() {
         ClientMsg::HandoffAbort { reason: "cannot adopt the pty".into() },
         ClientMsg::HandoffDone,
         ClientMsg::Shutdown { kill_sessions: true },
+        ClientMsg::PushRegister {
+            req: 17,
+            token: Some("80f0c8b3a4e2d1c0".into()),
+            env: ApnsEnv::Development,
+            bundle: "cn.barey.runode".into(),
+            machine: "6F9619FF-8B86-D011-B42D-00C04FC964FF".into(),
+            machine_name: "Ethan 的 MacBook Pro".into(),
+        },
+        ClientMsg::PushRegister {
+            req: 18,
+            token: None,
+            env: ApnsEnv::Production,
+            bundle: "cn.barey.runode".into(),
+            machine: "m".into(),
+            machine_name: String::new(),
+        },
     ];
     for message in messages {
         assert_eq!(through_frame(&message), message);

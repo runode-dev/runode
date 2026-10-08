@@ -2,8 +2,8 @@
     import RunodeConnection
     import SwiftUI
 
-    /// 设置页：终端的默认尺寸方式、字号、响铃震动，灵动岛上的 agent 状态，配对过的电脑，报给电脑的设备名，
-    /// 以及版本和开源许可。开关、选择器要系统的行样式，所以用分组的 `Form`，不用首页那种自己画的卡片列表。改了马上
+    /// 设置页：终端的默认尺寸方式、字号、响铃震动，agent 等回答时的灵动岛提醒，配对过的电脑，报给电脑的
+    /// 设备名，以及版本和开源许可。开关、选择器要系统的行样式，所以用分组的 `Form`，不用首页那种自己画的卡片列表。改了马上
     /// 生效、马上存（见 `SettingsModel`）。
     struct SettingsView: View {
         let app: AppModel
@@ -15,7 +15,7 @@
             NavigationStack {
                 Form {
                     terminalSection
-                    agentActivitySection
+                    alertSection
                     machineSection
                     deviceSection
                     aboutSection
@@ -83,16 +83,46 @@
 
         // MARK: 灵动岛
 
-        private var agentActivitySection: some View {
+        private var alertSection: some View {
             Section {
-                Toggle("在灵动岛显示 agent 状态", isOn: $settings.preferences.showsAgentActivity)
+                Toggle("agent 问你问题时在灵动岛提醒", isOn: $settings.preferences.alertsBlockedAgents)
                     .tint(.green)
+                if settings.preferences.alertsBlockedAgents {
+                    if !app.push.systemAllowed {
+                        Button {
+                            if let url = URL(string: UIApplication.openSettingsURLString) {
+                                UIApplication.shared.open(url)
+                            }
+                        } label: {
+                            Label("系统设置里关掉了 Runode 的实时活动，打开后才能提醒", systemImage: "exclamationmark.triangle")
+                                .foregroundStyle(.orange)
+                        }
+                    }
+                    ForEach(machines.machines) { machine in
+                        if let problem = Self.pushProblem(app.push.statuses[machine.id]) {
+                            LabeledContent(machine.name) {
+                                Text(problem)
+                                    .font(.footnote)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                }
             } header: {
                 Text("灵动岛")
             } footer: {
-                Text("有 agent 的时候，在灵动岛和锁屏上显示各台电脑上有几个在干活、几个在等你回答。离开 Runode 一会儿后连接会断开，那时显示的是断开前的样子，打开 Runode 才会刷新。")
+                Text("agent 停下来等你回答时，电脑会经 Apple 的推送服务在灵动岛和锁屏上提醒你，Runode 不用开着；屏幕上的问题文字也会经推送服务转达。")
             }
             .themedRows()
+        }
+
+        /// 一台电脑上登记推送没办成的原因；办成了、还没结果时为空。
+        static func pushProblem(_ status: PushRegistration.Status?) -> String? {
+            switch status {
+            case .unsupported: "电脑上的 runode 不支持推送，升级后才能提醒"
+            case .failed(let reason): "登记推送失败：\(reason)"
+            case .registered, nil: nil
+            }
         }
 
         // MARK: 电脑

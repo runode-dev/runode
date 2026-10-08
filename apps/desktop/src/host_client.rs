@@ -236,6 +236,7 @@ pub fn configure(config: &Config) {
     }
     if let Some(service) = remote.as_ref() {
         service.set(port, config.remote_access_name.clone());
+        service.set_push(crate::remote_access::push_settings(config));
     }
 }
 

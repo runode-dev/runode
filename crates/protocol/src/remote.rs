@@ -44,7 +44,9 @@
 //!    本身、或者只有本机的 app 才该做的请求——`ClientMsg::Shutdown`、交接用的 `Handoff`、
 //!    `HandoffReady`、`HandoffAbort`、`HandoffDone`，以及 `UiReply`、`SetOptions`、`SetTheme`——不转给
 //!    宿主，宿主在发往客户端的方向、两帧之间回一条 `HostMsg::Error`（这几种都不带 `req` 和会话，
-//!    `Error` 也就不带），连接照旧。关单个会话（`Kill`）、开会话、输入、改尺寸这些照常。
+//!    `Error` 也就不带），连接照旧。关单个会话（`Kill`）、开会话、输入、改尺寸这些照常。登记推送的
+//!    `ClientMsg::PushRegister`（见 `push`）也不转给宿主，由监听方按这台设备记下，
+//!    同样在两帧之间回 `HostMsg::Done`（办不了时回带 `req` 的 `Error`）。
 //!
 //! # 配对
 //!

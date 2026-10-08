@@ -435,6 +435,8 @@ settings:
     scrollback: 回滚历史
     clipboard: 剪贴板
     pairing: 配对手机
+    push: 实时活动
+    push_key: 自己编译的手机 App
   theme:
     none: 不用主题
     single: 一个主题
@@ -482,6 +484,14 @@ settings:
     remote_access: 远程访问
     remote_access_port: 端口
     remote_access_name: "电脑名"
+    remote_access_push: 在手机上显示等回答的 agent
+    remote_access_push_text: 带上问题
+    remote_access_push_delay: 等多久再推
+    apns_key_file: APNs 密钥文件
+    apns_key_id: 密钥 ID
+    apns_team_id: Team ID
+    apns_bundle_id: App 的 bundle ID
+    push_relay_url: 推送中转
     agent_notifications: 通知
     agent_notifications_exclude: 不提醒的 agent
     agent_done_sound: agent 干完时的提示音
@@ -528,6 +538,14 @@ settings:
     remote_access: 让配对过的手机经局域网或 Tailscale 连上这台 Mac 的终端。在下面配对，或者用 runode remote pair。
     remote_access_port: TCP 端口，1 到 65535。
     remote_access_name: "配对过的手机上显示的名字，留空时用系统的电脑名。改了以后连着的手机会断开一下再连上。"
+    remote_access_push: agent 等你回答时，配对过的手机在灵动岛和锁屏上显示出来，App 没开着也行。
+    remote_access_push_text: 带上屏幕底部的问题和选项；关掉时只发标题和 agent。
+    remote_access_push_delay: agent 要先等这么多秒，在电脑前很快答了的不打扰手机。0 是马上推。
+    apns_key_file: 只有自己编译签名的手机 App 才用。Apple 开发者账号里下载的 .p8 密钥，~/ 是家目录。
+    apns_key_id: 这把密钥的 10 位 ID，也在文件名 AuthKey_ID.p8 里。
+    apns_team_id: Apple 开发者账号的 10 位 Team ID。
+    apns_bundle_id: 自己编译的手机 App 的 bundle ID。
+    push_relay_url: 给官方手机 App 发推送的服务。
     agent_notifications: agent 在你没在看的分屏里干完了或者等你回答时发系统通知。只有打包好的 Runode.app 能发通知。
     agent_notifications_exclude: 选中的 agent 不发通知也不出提示音，状态标记照常显示。
     agent_done_sound: 系统自带的声音。

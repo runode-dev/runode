@@ -22,7 +22,7 @@ use runode_protocol::{
 use rustls::{ServerConnection, StreamOwned};
 
 use crate::{
-    bridge::bridge,
+    bridge::{bridge, push::PushRequests},
     devices::{self, Device},
     files::random,
     listener::Shared,
@@ -122,7 +122,8 @@ fn run(shared: &Shared, id: u64, tcp: &TcpStream, peer: IpAddr, cut: &AtomicBool
     drop(sock);
     tcp.set_read_timeout(None)?;
     tcp.set_write_timeout(None)?;
-    bridge(&mut conn, tcp, &host, cut);
+    let mut push = PushRequests { dirs: &shared.dirs, device: device_id };
+    bridge(&mut conn, tcp, &host, cut, &mut push);
     let _ = host.shutdown(Shutdown::Both);
     tracing::info!("remote device {device_id} disconnected");
     Ok(())
