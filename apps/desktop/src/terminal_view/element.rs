@@ -1,9 +1,8 @@
 //! 终端网格的 GPUI 元素：布局时按单元格尺寸调整终端大小、启动 shell，绘制时挂上输入和鼠标事件再画一帧。
 
 use gpui::{
-    App, Bounds, ContentMask, DispatchPhase, ElementId, ElementInputHandler, GlobalElementId, LayoutId, MouseMoveEvent,
-    MouseUpEvent, Pixels, Size, Style, Window, fill, linear_color_stop, linear_gradient, point, prelude::*, px,
-    relative, size,
+    App, Bounds, ContentMask, DispatchPhase, ElementId, GlobalElementId, LayoutId, MouseMoveEvent, MouseUpEvent,
+    Pixels, Size, Style, Window, fill, linear_color_stop, linear_gradient, point, prelude::*, px, relative, size,
 };
 use runode_shared_types::{color::Rgb, grid::GridSize};
 use runode_terminal::session::Session;
@@ -106,7 +105,7 @@ impl Element for TerminalElement {
         static FIRST_PAINT: startup::Once = startup::Once::new();
         FIRST_PAINT.mark_when("first_paint", || true);
         let focus_handle = self.view.read(cx).focus_handle.clone();
-        window.handle_input(&focus_handle, ElementInputHandler::new(bounds, self.view.clone()), cx);
+        window.handle_input(&focus_handle, crate::ui::input_handler::ElementInput::new(bounds, self.view.clone()), cx);
         // 移动和松开挂在窗口上：拖到网格外甚至窗口外时也要收到。
         window.on_mouse_event({
             let view = self.view.clone();

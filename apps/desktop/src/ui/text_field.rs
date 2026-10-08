@@ -11,11 +11,10 @@
 use std::ops::Range;
 
 use gpui::{
-    App, Bounds, ClipboardItem, Context, DispatchPhase, Element, ElementId, ElementInputHandler, Entity,
-    EntityInputHandler, EventEmitter, FocusHandle, Focusable, GlobalElementId, KeyDownEvent, LayoutId, MouseButton,
-    MouseDownEvent, MouseMoveEvent, MouseUpEvent, PaintQuad, Pixels, Point, Render, ShapedLine, SharedString, Style,
-    TextAlign, TextRun, UTF16Selection, UnderlineStyle, Window, actions, div, fill, point, prelude::*, px, relative,
-    size,
+    App, Bounds, ClipboardItem, Context, DispatchPhase, Element, ElementId, Entity, EntityInputHandler, EventEmitter,
+    FocusHandle, Focusable, GlobalElementId, KeyDownEvent, LayoutId, MouseButton, MouseDownEvent, MouseMoveEvent,
+    MouseUpEvent, PaintQuad, Pixels, Point, Render, ShapedLine, SharedString, Style, TextAlign, TextRun,
+    UTF16Selection, UnderlineStyle, Window, actions, div, fill, point, prelude::*, px, relative, size,
 };
 
 use crate::ui::actions::{Copy, Cut, Paste, Redo, SelectAll, Undo};
@@ -740,7 +739,7 @@ impl Element for TextFieldText {
         let focus_handle = field.focus_handle.clone();
         let focused = focus_handle.is_focused(window);
         let dragging = field.drag.is_some();
-        window.handle_input(&focus_handle, ElementInputHandler::new(bounds, self.field.clone()), cx);
+        window.handle_input(&focus_handle, crate::ui::input_handler::ElementInput::new(bounds, self.field.clone()), cx);
 
         let line_height = window.line_height();
         if focused && let Some(selection) = layout.selection.take() {
