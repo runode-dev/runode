@@ -1,7 +1,7 @@
 //! runode 读写的目录和文件的位置，统一从环境变量算出来。
 //!
 //! runode 自己的东西在所有系统上都放在同一个根目录：`~/.runode`，不跟着 `XDG_CONFIG_HOME` 走。
-//! 配置文件和要留着的数据（窗口布局的存档、命令历史）直接放在根目录，
+//! 配置文件和要留着的数据（窗口布局的存档、命令历史、自己加的项目命令）直接放在根目录，
 //! 随时能重新生成的缓存（shell 集成脚本、首个终端的尺寸、宿主进程的日志）放在根目录的
 //! `cache/` 里，宿主进程的 socket 和锁放在根目录的 `run/` 里，远程访问的证书、设备表和配对口令放在
 //! 根目录的 `remote-access/` 里。
@@ -150,6 +150,11 @@ impl Dirs {
     /// 窗口布局的存档。
     pub fn windows_file(&self) -> Option<PathBuf> {
         self.data_file("windows.json")
+    }
+
+    /// 用户自己加的项目命令：通用的，和按项目目录分开的，见 `runode_protocol::TaskSourceKind`。
+    pub fn tasks_file(&self) -> Option<PathBuf> {
+        self.data_file("tasks.json")
     }
 
     /// runode 自己记的命令历史。

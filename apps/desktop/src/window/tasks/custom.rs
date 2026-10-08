@@ -1,7 +1,9 @@
-//! 自己加的命令：添加和编辑的对话框，以及改写项目目录下的 `CUSTOM_TASKS_FILE`。添加时填名字和
-//! 命令行，已经有这个文件时写进列出来的那一个，没有时建在终端目录所在仓库的根目录，不在仓库里时建在
-//! 终端目录；同名的命令换成新的命令行。命令菜单里这些命令行尾的编辑按钮用同一个对话框改名字和命令行，
-//! 改完留在原来的位置；删除按钮从文件里删掉它。文件和 Makefile 一样由宿主列出来，手机上也看得到。
+//! 自己加的命令：添加和编辑的对话框，以及改写 runode 根目录的 `tasks.json`（`Dirs::tasks_file`）。
+//! 一条命令要么只用于一个项目（`projects` 下按项目目录分，在项目目录里跑），要么通用（`global`，在
+//! 终端当前目录里跑），对话框里选。添加到本项目时，项目目录取终端目录所在仓库的根目录，不在仓库里时取
+//! 终端目录；同一份里同名的换成新的命令行。命令菜单里这些命令行尾的编辑按钮用同一个对话框改，改完留在
+//! 原来的位置；删除按钮从文件里删掉它。文件由宿主列出来（`TaskSourceKind::Custom`、`Global`），手机上
+//! 也看得到。
 
 use std::{
     fs, io,
@@ -12,7 +14,7 @@ use gpui::{
     ClickEvent, Context, Div, Entity, Focusable, FontWeight, Hsla, KeyDownEvent, MouseButton, Stateful, Subscription,
     Window, div, prelude::*, px,
 };
-use runode_protocol::{CUSTOM_TASKS_FILE, TaskSourceKind};
+use runode_paths::Dirs;
 use runode_shared_types::color::Rgb;
 use serde_json::{Map, Value};
 
@@ -26,8 +28,10 @@ use crate::{
 };
 
 pub(in crate::window) struct AddTaskDialog {
-    /// 编辑时是改哪个文件里的哪一条；添加时为空。
-    editing: Option<(PathBuf, String)>,
+    /// 编辑时是改哪一份（项目目录，通用的为空）里的哪一条；添加时为空。
+    editing: Option<(Option<PathBuf>, String)>,
+    /// 选的是通用的。
+    global: bool,
     name: Entity<TextField>,
     command: Entity<TextField>,
     /// 上次写文件失败的原因。
@@ -38,7 +42,7 @@ pub(in crate::window) struct AddTaskDialog {
 }
 
 impl WindowView {
-    /// 打开添加命令的对话框，焦点给名字；已经开着时只给焦点。
+    /// 打开添加命令的对话框，默认加到本项目，焦点给名字；已经开着时只给焦点。
     pub(in crate::window) fn add_task(&mut self, _: &AddTask, window: &mut Window, cx: &mut Context<Self>) {
         if self.add_task.is_none() {
             self.open_task_dialog(None, String::new(), String::new(), window, cx);
@@ -46,17 +50,17 @@ impl WindowView {
         self.focus_add_task_field(false, window, cx);
     }
 
-    /// 打开编辑 `file` 里 `name` 这条命令的对话框，填好原来的名字和命令行，名字全选着。
+    /// 打开编辑 `project`（通用的为空）里 `name` 这条命令的对话框，填好原来的名字和命令行，名字全选着。
     pub(in crate::window) fn edit_task(&mut self, action: &EditTask, window: &mut Window, cx: &mut Context<Self>) {
-        let EditTask { file, name, command } = action.clone();
-        self.open_task_dialog(Some((file, name.clone())), name, command, window, cx);
+        let EditTask { project, name, command } = action.clone();
+        self.open_task_dialog(Some((project, name.clone())), name, command, window, cx);
         self.focus_add_task_field(false, window, cx);
     }
 
     /// 换上一个新的对话框，两个输入框里先填好 `name` 和 `command`。
     fn open_task_dialog(
         &mut self,
-        editing: Option<(PathBuf, String)>,
+        editing: Option<(Option<PathBuf>, String)>,
         name: String,
         command: String,
         window: &mut Window,
@@ -82,8 +86,10 @@ impl WindowView {
                     TextFieldEvent::Dismiss => this.close_add_task(window, cx),
                     TextFieldEvent::Changed(_) | TextFieldEvent::Previous => {}
                 });
+            let global = editing.as_ref().is_some_and(|(project, _)| project.is_none());
             self.add_task = Some(AddTaskDialog {
                 editing,
+                global,
                 name,
                 command,
                 error: None,
@@ -123,13 +129,10 @@ impl WindowView {
     }
 
     /// 在后台把填好的命令写进文件，写好了关掉对话框、重列命令；写不了时把原因写在对话框里。名字
-    /// 空着时用命令行当名字。编辑时换掉原来那一条，名字改了也留在原来的位置。
+    /// 空着时用命令行当名字。编辑时换掉原来那一条，同一份里改了名字也留在原来的位置；换到另一份时
+    /// 加在那一份的最后。
     fn save_task(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let dir = self.project_dir(cx);
-        let listed = self.workspace().project.tasks.as_ref().and_then(|(listed, sources)| {
-            let source = sources.iter().find(|source| source.kind == TaskSourceKind::Custom)?;
-            (*listed == dir).then(|| source.file.clone())
-        });
         let Some(dialog) = &mut self.add_task else {
             return;
         };
@@ -143,13 +146,17 @@ impl WindowView {
         let name = dialog.name.read(cx).query().trim().to_owned();
         let name = if name.is_empty() { command.clone() } else { name };
         dialog.saving = true;
-        let editing = dialog.editing.clone();
+        let (editing, global) = (dialog.editing.clone(), dialog.global);
         let job = cx.background_spawn(async move {
-            let (file, old) = editing.unwrap_or_else(|| {
-                let file = listed.unwrap_or_else(|| runode_git::repo_root(&dir).unwrap_or(dir).join(CUSTOM_TASKS_FILE));
-                (file, name.clone())
-            });
-            write_task(&file, &old, Some((&name, &command)))
+            let file = Dirs::from_env().tasks_file().ok_or("no home directory")?;
+            // 编辑本项目的命令时还是那个项目；加到本项目时现查终端目录在哪个仓库里。
+            let project = match &editing {
+                _ if global => None,
+                Some((Some(project), _)) => Some(project.clone()),
+                _ => Some(runode_git::repo_root(&dir).unwrap_or(dir)),
+            };
+            let (old_project, old_name) = editing.unwrap_or_else(|| (project.clone(), name.clone()));
+            write_task(&file, (old_project.as_deref(), &old_name), Some((project.as_deref(), &name, &command)))
         });
         cx.spawn_in(window, async move |this, cx| {
             let saved = job.await;
@@ -208,6 +215,29 @@ impl WindowView {
                 .cursor_pointer()
                 .child(label)
         };
+        // 本项目还是所有目录：两段按钮，选中的那段底色亮一些。
+        let scope = |id: &'static str, global: bool, label: String| {
+            div()
+                .id(id)
+                .px(px(10.))
+                .py(px(3.))
+                .rounded(px(4.))
+                .cursor_pointer()
+                .when(dialog.global == global, |pill| pill.bg(primary_bg))
+                .when(dialog.global != global, |pill| pill.hover(move |pill| pill.bg(hover_bg)))
+                .child(label)
+                .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
+                    if let Some(dialog) = &mut this.add_task {
+                        dialog.global = global;
+                        cx.notify();
+                    }
+                }))
+        };
+        let hint = if dialog.global {
+            rust_i18n::t!("tasks.hint_global", file = TASKS_FILE_HINT)
+        } else {
+            rust_i18n::t!("tasks.hint_project", file = TASKS_FILE_HINT)
+        };
         let cancel = button("add-task-cancel", rust_i18n::t!("tasks.cancel").into_owned(), panel_bg, hover_bg)
             .on_click(cx.listener(|this, _: &ClickEvent, window, cx| this.close_add_task(window, cx)));
         let (title, save) = match dialog.editing {
@@ -240,9 +270,22 @@ impl WindowView {
             .child(field(rust_i18n::t!("tasks.command").into_owned(), &dialog.command))
             .child(
                 div()
-                    .text_color(fg.opacity(0.55))
-                    .child(rust_i18n::t!("tasks.add_hint", file = CUSTOM_TASKS_FILE).into_owned()),
+                    .flex()
+                    .items_center()
+                    .gap(px(8.))
+                    .child(div().text_color(fg.opacity(0.7)).child(rust_i18n::t!("tasks.scope").into_owned()))
+                    .child(
+                        div()
+                            .flex()
+                            .p(px(2.))
+                            .gap(px(2.))
+                            .rounded(px(6.))
+                            .bg(hsla(bg))
+                            .child(scope("add-task-project", false, rust_i18n::t!("tasks.scope_project").into_owned()))
+                            .child(scope("add-task-global", true, rust_i18n::t!("tasks.scope_global").into_owned())),
+                    ),
             )
+            .child(div().text_color(fg.opacity(0.55)).child(hint.into_owned()))
             .children(dialog.error.clone().map(|error| div().text_color(gpui::red()).child(error)))
             .child(div().pt(px(4.)).flex().justify_end().gap(px(8.)).child(cancel).child(save));
         // 铺满窗口的底子挡住下面的点击，点到对话框外面就取消。
@@ -264,9 +307,16 @@ impl WindowView {
     }
 }
 
-/// 把 `file` 里的 `old` 换成 `new`（名字和命令行），文件和它的目录不在时建出来；`new` 为空时删掉
-/// `old`。读不懂原来的内容时不写，免得把手写的文件冲掉。
-pub(super) fn write_task(file: &Path, old: &str, new: Option<(&str, &str)>) -> Result<(), String> {
+/// 对话框里告诉用户命令存在哪。
+const TASKS_FILE_HINT: &str = "~/.runode/tasks.json";
+
+/// 把 `file` 里的 `old`（项目目录，通用的为空；名字）换成 `new`（项目目录；名字和命令行），文件和它的
+/// 目录不在时建出来；`new` 为空时删掉 `old`。读不懂原来的内容时不写，免得把手写的文件冲掉。
+pub(super) fn write_task(
+    file: &Path,
+    old: (Option<&Path>, &str),
+    new: Option<(Option<&Path>, &str, &str)>,
+) -> Result<(), String> {
     let text = match fs::read_to_string(file) {
         Ok(text) => Some(text),
         Err(err) if err.kind() == io::ErrorKind::NotFound && new.is_none() => return Ok(()),
@@ -278,26 +328,62 @@ pub(super) fn write_task(file: &Path, old: &str, new: Option<(&str, &str)>) -> R
     fs::create_dir_all(&dir).and_then(|()| fs::write(file, updated)).map_err(|err| format!("{}: {err}", file.display()))
 }
 
-/// 在命令文件的内容 `text`（没有文件时为空）的 `tasks` 里把 `old` 换成 `new`，就在 `old` 原来的
-/// 位置；没有 `old` 时加在最后，`new` 为空时删掉 `old`。`new` 的名字别处已经有了时，那一条让位给它。
-/// 别的内容和先后原样留着。
-fn with_task(text: Option<&str>, old: &str, new: Option<(&str, &str)>) -> Result<String, String> {
+/// 在命令文件的内容 `text`（没有文件时为空）里把 `old` 换成 `new`。同一份里就在 `old` 原来的位置换，
+/// 换到另一份时从原来那份删掉、加在新那份的最后；`new` 为空时只删掉 `old`。新名字在那一份里别处已经
+/// 有了时，那一条让位。删空了的项目和通用那份一起拿掉，别的内容和先后原样留着。
+fn with_task(
+    text: Option<&str>,
+    old: (Option<&Path>, &str),
+    new: Option<(Option<&Path>, &str, &str)>,
+) -> Result<String, String> {
     let mut json = match text.filter(|text| !text.trim().is_empty()) {
         Some(text) => serde_json::from_str(text).map_err(|err| err.to_string())?,
         None => Value::Object(Map::new()),
     };
-    let tasks = json
-        .as_object_mut()
-        .ok_or("not a JSON object")?
-        .entry("tasks")
-        .or_insert_with(|| Value::Object(Map::new()))
-        .as_object_mut()
-        .ok_or("`tasks` is not a JSON object")?;
+    let root = json.as_object_mut().ok_or("not a JSON object")?;
+    let same = new.is_some_and(|(project, ..)| project == old.0);
+    replace(scope_tasks(root, old.0)?, Some(old.1), new.filter(|_| same).map(|(_, name, command)| (name, command)));
+    if let Some((project, name, command)) = new.filter(|_| !same) {
+        replace(scope_tasks(root, project)?, None, Some((name, command)));
+    }
+    if let Some(projects) = root.get_mut("projects").and_then(Value::as_object_mut) {
+        projects.retain(|_, tasks| tasks.as_object().is_none_or(|tasks| !tasks.is_empty()));
+    }
+    root.retain(|key, value| {
+        !(matches!(key.as_str(), "global" | "projects") && value.as_object().is_some_and(Map::is_empty))
+    });
+    let mut text = serde_json::to_string_pretty(&json).map_err(|err| err.to_string())?;
+    text.push('\n');
+    Ok(text)
+}
+
+/// `project` 那一份（为空时是通用的）的命令表，没有时建出来。
+fn scope_tasks<'a>(
+    root: &'a mut Map<String, Value>,
+    project: Option<&Path>,
+) -> Result<&'a mut Map<String, Value>, String> {
+    let object = || Value::Object(Map::new());
+    let tasks = match project {
+        None => root.entry("global").or_insert_with(object),
+        Some(project) => root
+            .entry("projects")
+            .or_insert_with(object)
+            .as_object_mut()
+            .ok_or("`projects` is not a JSON object")?
+            .entry(project.to_string_lossy())
+            .or_insert_with(object),
+    };
+    tasks.as_object_mut().ok_or_else(|| "a task list is not a JSON object".to_owned())
+}
+
+/// 在命令表里把 `old` 换成 `new`，就在 `old` 的位置；没有 `old` 时 `new` 加在最后，`new` 为空时删掉
+/// `old`。`new` 的名字别处已经有了时，那一条让位。
+fn replace(tasks: &mut Map<String, Value>, old: Option<&str>, new: Option<(&str, &str)>) {
     let entry = |(name, command): (&str, &str)| (name.to_owned(), Value::String(command.to_owned()));
     let mut placed = false;
     let mut rebuilt = Map::new();
     for (key, value) in std::mem::take(tasks) {
-        if key == old {
+        if Some(key.as_str()) == old {
             rebuilt.extend(new.map(entry));
             placed = true;
         } else if new.is_none_or(|(name, _)| key != name) {
@@ -308,44 +394,61 @@ fn with_task(text: Option<&str>, old: &str, new: Option<(&str, &str)>) -> Result
         rebuilt.extend(new.map(entry));
     }
     *tasks = rebuilt;
-    let mut text = serde_json::to_string_pretty(&json).map_err(|err| err.to_string())?;
-    text.push('\n');
-    Ok(text)
 }
 
 #[cfg(test)]
 mod tests {
+    use std::path::Path;
+
     use super::with_task;
+
+    fn pretty(json: serde_json::Value) -> String {
+        serde_json::to_string_pretty(&json).unwrap() + "\n"
+    }
 
     #[test]
     fn adds_to_new_and_existing_files() {
+        let app = Some(Path::new("/w/app"));
         assert_eq!(
-            with_task(None, "dev", Some(("dev", "cargo run"))).unwrap(),
-            "{\n  \"tasks\": {\n    \"dev\": \"cargo run\"\n  }\n}\n"
+            with_task(None, (app, "dev"), Some((app, "dev", "cargo run"))).unwrap(),
+            pretty(serde_json::json!({"projects": {"/w/app": {"dev": "cargo run"}}}))
         );
-        let existing = r#"{"note": 1, "tasks": {"dev": "old", "lint": "cargo clippy"}}"#;
-        let updated: serde_json::Value =
-            serde_json::from_str(&with_task(Some(existing), "dev", Some(("dev", "cargo run"))).unwrap()).unwrap();
-        assert_eq!(updated, serde_json::json!({"note": 1, "tasks": {"dev": "cargo run", "lint": "cargo clippy"}}));
-        assert!(with_task(Some("[1]"), "dev", Some(("dev", "x"))).is_err());
-        assert!(with_task(Some("{oops"), "dev", Some(("dev", "x"))).is_err());
+        let existing = r#"{"note": 1, "global": {"dev": "old", "lint": "cargo clippy"}}"#;
+        let updated = with_task(Some(existing), (None, "dev"), Some((None, "dev", "cargo run"))).unwrap();
+        assert_eq!(
+            updated,
+            pretty(serde_json::json!({"note": 1, "global": {"dev": "cargo run", "lint": "cargo clippy"}}))
+        );
+        assert!(with_task(Some("[1]"), (None, "dev"), Some((None, "dev", "x"))).is_err());
+        assert!(with_task(Some("{oops"), (None, "dev"), Some((None, "dev", "x"))).is_err());
     }
 
-    /// 删掉一条，其余的先后不变。
+    /// 删掉一条，其余的先后不变；删空了的那份一起拿掉。
     #[test]
     fn removes_a_task_keeping_the_order() {
-        let existing = r#"{"tasks": {"a": "1", "b": "2", "c": "3"}}"#;
-        let updated = with_task(Some(existing), "a", None).unwrap();
-        assert_eq!(updated, "{\n  \"tasks\": {\n    \"b\": \"2\",\n    \"c\": \"3\"\n  }\n}\n");
+        let existing = r#"{"global": {"a": "1", "b": "2", "c": "3"}, "projects": {"/w": {"x": "1"}}}"#;
+        let updated = with_task(Some(existing), (None, "a"), None).unwrap();
+        assert_eq!(
+            updated,
+            pretty(serde_json::json!({"global": {"b": "2", "c": "3"}, "projects": {"/w": {"x": "1"}}}))
+        );
+        let updated = with_task(Some(existing), (Some(Path::new("/w")), "x"), None).unwrap();
+        assert_eq!(updated, pretty(serde_json::json!({"global": {"a": "1", "b": "2", "c": "3"}})));
     }
 
-    /// 改名留在原来的位置；新名字别处已经有了时，那一条让位。
+    /// 同一份里改名留在原来的位置，新名字别处已经有了时那一条让位；换到另一份时加在最后。
     #[test]
-    fn renames_in_place() {
-        let existing = r#"{"tasks": {"a": "1", "b": "2", "c": "3"}}"#;
-        let updated = with_task(Some(existing), "b", Some(("z", "9"))).unwrap();
-        assert_eq!(updated, "{\n  \"tasks\": {\n    \"a\": \"1\",\n    \"z\": \"9\",\n    \"c\": \"3\"\n  }\n}\n");
-        let updated = with_task(Some(existing), "c", Some(("a", "9"))).unwrap();
-        assert_eq!(updated, "{\n  \"tasks\": {\n    \"b\": \"2\",\n    \"a\": \"9\"\n  }\n}\n");
+    fn renames_in_place_and_moves_between_scopes() {
+        let existing = r#"{"global": {"a": "1", "b": "2", "c": "3"}}"#;
+        let updated = with_task(Some(existing), (None, "b"), Some((None, "z", "9"))).unwrap();
+        assert_eq!(updated, pretty(serde_json::json!({"global": {"a": "1", "z": "9", "c": "3"}})));
+        let updated = with_task(Some(existing), (None, "c"), Some((None, "a", "9"))).unwrap();
+        assert_eq!(updated, pretty(serde_json::json!({"global": {"b": "2", "a": "9"}})));
+        let app = Some(Path::new("/w/app"));
+        let updated = with_task(Some(existing), (None, "b"), Some((app, "b", "2"))).unwrap();
+        assert_eq!(
+            updated,
+            pretty(serde_json::json!({"global": {"a": "1", "c": "3"}, "projects": {"/w/app": {"b": "2"}}}))
+        );
     }
 }

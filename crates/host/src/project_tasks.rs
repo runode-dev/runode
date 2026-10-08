@@ -1,6 +1,7 @@
 //! 列一个目录里能跑的项目命令（`ClientMsg::ListProjectTasks`）：手机在会话卡片上列出来，点一下就在
-//! 那个会话里跑。从目录往上找最近的 `.runode/tasks.json`、Makefile 和 package.json，读出自己加的命令、
-//! 目标和 scripts，拼好在这个目录里能直接跑的命令行，回 `HostMsg::ProjectTasks`。只读几个小文件，在连接的读线程里当场办。
+//! 那个会话里跑。先是 runode 根目录的 `tasks.json` 里自己加的、这个目录所在项目的和通用的命令，再从
+//! 目录往上找最近的 Makefile 和 package.json，读出目标和 scripts，拼好在这个目录里能直接跑的命令行，
+//! 回 `HostMsg::ProjectTasks`。只读几个小文件，在连接的读线程里当场办。
 
 use std::{
     fs,
@@ -8,7 +9,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use runode_protocol::{CUSTOM_TASKS_FILE, MAX_PROJECT_TASKS, ProjectTask, TaskSource, TaskSourceKind};
+use runode_protocol::{MAX_PROJECT_TASKS, ProjectTask, TaskSource, TaskSourceKind};
 
 /// make 按这个顺序找默认的 makefile。
 const MAKEFILE_NAMES: [&str; 3] = ["GNUmakefile", "makefile", "Makefile"];
@@ -24,7 +25,7 @@ const LOCKFILES: [(&str, &str); 5] = [
 ];
 const PACKAGE_MANAGERS: [&str; 4] = ["npm", "pnpm", "yarn", "bun"];
 
-/// 列出 `dir` 里能跑的命令，依次是自己加的、Makefile 和 package.json。办不了时返回给前端看的原因。
+/// 列出 `dir` 里能跑的命令，依次是自己加的这个项目的、通用的、Makefile 和 package.json。办不了时返回给前端看的原因。
 pub(crate) fn list(dir: &Path) -> Result<Vec<TaskSource>, String> {
     if !dir.is_absolute() {
         return Err(format!("{} is not an absolute path", dir.display()));
@@ -32,34 +33,14 @@ pub(crate) fn list(dir: &Path) -> Result<Vec<TaskSource>, String> {
     if !dir.is_dir() {
         return Err(format!("{} is not a directory", dir.display()));
     }
-    let home = runode_paths::Dirs::from_env().home;
-    let ancestors = search_path(dir, home.as_deref());
     let mut sources = Vec::new();
-    let custom = ancestors.iter().map(|at| at.join(CUSTOM_TASKS_FILE)).find(|file| file.is_file());
-    if let Some(file) = custom
+    let dirs = runode_paths::Dirs::from_env();
+    if let Some(file) = dirs.tasks_file()
         && let Some(text) = read_small(&file)
-        && let Ok(json) = serde_json::from_str::<serde_json::Value>(&text)
     {
-        // 在 `.runode` 的上一级跑；那是 `dir` 的上级时在子 shell 里 cd 过去，不改会话所在的目录。
-        let at = file.parent().and_then(Path::parent).unwrap_or(dir);
-        let rel = relative(dir, at);
-        let entries = json.get("tasks").and_then(serde_json::Value::as_object);
-        let entries: Vec<_> = entries.into_iter().flatten().filter_map(|(k, v)| Some((k, v.as_str()?))).collect();
-        let truncated = entries.len() > MAX_PROJECT_TASKS;
-        let tasks = entries
-            .into_iter()
-            .take(MAX_PROJECT_TASKS)
-            .map(|(name, line)| ProjectTask {
-                command: match &rel {
-                    None => line.to_owned(),
-                    Some(rel) => format!("(cd {} && {line})", quote(rel)),
-                },
-                name: name.clone(),
-                description: Some(line.to_owned()),
-            })
-            .collect();
-        sources.push(TaskSource { kind: TaskSourceKind::Custom, file, tasks, truncated });
+        sources.extend(custom_sources(&text, &file, dir));
     }
+    let ancestors = search_path(dir, dirs.home.as_deref());
     let makefile = ancestors.iter().find_map(|at| named_file(at, &MAKEFILE_NAMES));
     if let Some(file) = makefile
         && let Some(text) = read_small(&file)
@@ -76,7 +57,7 @@ pub(crate) fn list(dir: &Path) -> Result<Vec<TaskSource>, String> {
             .take(MAX_PROJECT_TASKS)
             .map(|(name, description)| ProjectTask { command: format!("{prefix} {}", quote(&name)), name, description })
             .collect();
-        sources.push(TaskSource { kind: TaskSourceKind::Makefile, file, tasks, truncated });
+        sources.push(TaskSource { kind: TaskSourceKind::Makefile, file, project: None, tasks, truncated });
     }
     let package = ancestors.iter().find_map(|at| named_file(at, &["package.json"]));
     if let Some(file) = package
@@ -97,9 +78,50 @@ pub(crate) fn list(dir: &Path) -> Result<Vec<TaskSource>, String> {
                 description: Some(body.to_owned()),
             })
             .collect();
-        sources.push(TaskSource { kind: TaskSourceKind::PackageJson, file, tasks, truncated });
+        sources.push(TaskSource { kind: TaskSourceKind::PackageJson, file, project: None, tasks, truncated });
     }
     Ok(sources)
+}
+
+/// 自己加的命令文件 `file`（内容是 `text`）里给 `dir` 的两份：`dir` 所在项目的（`projects` 里是 `dir`
+/// 自己或上级的、最深的那个，在项目目录里跑，那是 `dir` 的上级时在子 shell 里 cd 过去，不改会话所在的
+/// 目录），和通用的（在 `dir` 里跑）。没有命令的那份不给；读不懂的文件当作没有。
+fn custom_sources(text: &str, file: &Path, dir: &Path) -> Vec<TaskSource> {
+    let Ok(json) = serde_json::from_str::<serde_json::Value>(text) else {
+        return Vec::new();
+    };
+    let source = |kind, project: Option<PathBuf>, entries: Option<&serde_json::Map<String, serde_json::Value>>| {
+        let rel = project.as_deref().and_then(|at| relative(dir, at));
+        let entries: Vec<_> = entries.into_iter().flatten().filter_map(|(k, v)| Some((k, v.as_str()?))).collect();
+        let truncated = entries.len() > MAX_PROJECT_TASKS;
+        let tasks: Vec<_> = entries
+            .into_iter()
+            .take(MAX_PROJECT_TASKS)
+            .map(|(name, line)| ProjectTask {
+                command: match &rel {
+                    None => line.to_owned(),
+                    Some(rel) => format!("(cd {} && {line})", quote(rel)),
+                },
+                name: name.clone(),
+                description: Some(line.to_owned()),
+            })
+            .collect();
+        (!tasks.is_empty()).then(|| TaskSource { kind, file: file.to_path_buf(), project, tasks, truncated })
+    };
+    let projects = json.get("projects").and_then(serde_json::Value::as_object);
+    let project = projects
+        .into_iter()
+        .flatten()
+        .filter(|(at, _)| dir.starts_with(at))
+        .max_by_key(|(at, _)| Path::new(at).components().count());
+    let global = json.get("global").and_then(serde_json::Value::as_object);
+    [
+        project.and_then(|(at, tasks)| source(TaskSourceKind::Custom, Some(PathBuf::from(at)), tasks.as_object())),
+        source(TaskSourceKind::Global, None, global),
+    ]
+    .into_iter()
+    .flatten()
+    .collect()
 }
 
 /// 往上找的目录：从 `dir` 起，到家目录为止（`dir` 在家目录里时），否则到根目录。
@@ -195,6 +217,53 @@ fn quote(word: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// 取最深的那个项目，在项目目录里跑；通用的在请求的目录里跑；值不是字符串的跳过，没有命令的那份不给。
+    #[test]
+    fn custom_sources_pick_the_deepest_project() {
+        let text = r#"{
+            "global": {"up": "git pull"},
+            "projects": {
+                "/w": {"outer": "x"},
+                "/w/app": {"serve": "cargo run -- serve", "lint": "cargo clippy", "n": 1},
+                "/w/other": {"no": "y"}
+            }
+        }"#;
+        let file = Path::new("/h/.runode/tasks.json");
+        let task = |name: &str, command: &str, line: &str| ProjectTask {
+            name: name.into(),
+            command: command.into(),
+            description: Some(line.into()),
+        };
+        let sources = custom_sources(text, file, Path::new("/w/app/src"));
+        assert_eq!(
+            sources,
+            [
+                TaskSource {
+                    kind: TaskSourceKind::Custom,
+                    file: file.into(),
+                    project: Some("/w/app".into()),
+                    tasks: vec![
+                        task("serve", "(cd .. && cargo run -- serve)", "cargo run -- serve"),
+                        task("lint", "(cd .. && cargo clippy)", "cargo clippy"),
+                    ],
+                    truncated: false,
+                },
+                TaskSource {
+                    kind: TaskSourceKind::Global,
+                    file: file.into(),
+                    project: None,
+                    tasks: vec![task("up", "git pull", "git pull")],
+                    truncated: false,
+                },
+            ]
+        );
+        assert_eq!(custom_sources(r#"{"projects": {"/w/app": {}}}"#, file, Path::new("/w/app")), []);
+        assert_eq!(custom_sources("{oops", file, Path::new("/w")), []);
+        // `/w/application` 不在 `/w/app` 里。
+        let sources = custom_sources(text, file, Path::new("/w/application"));
+        assert_eq!(sources[0].project.as_deref(), Some(Path::new("/w")));
+    }
 
     #[test]
     fn makefile_targets_skip_variables_specials_and_patterns() {

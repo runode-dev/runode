@@ -65,6 +65,7 @@ fn project_tasks() -> Vec<TaskSource> {
         TaskSource {
             kind: TaskSourceKind::Makefile,
             file: "/Users/me/dev/Makefile".into(),
+            project: None,
             tasks: vec![ProjectTask {
                 name: "build".into(),
                 command: "make build".into(),
@@ -75,6 +76,7 @@ fn project_tasks() -> Vec<TaskSource> {
         TaskSource {
             kind: TaskSourceKind::PackageJson,
             file: "/Users/me/package.json".into(),
+            project: None,
             tasks: vec![ProjectTask { name: "dev".into(), command: "pnpm run dev".into(), description: None }],
             truncated: true,
         },
@@ -717,6 +719,7 @@ fn project_task_messages() {
         sources: vec![TaskSource {
             kind: TaskSourceKind::PackageJson,
             file: "/Users/me/dev/package.json".into(),
+            project: None,
             tasks: vec![ProjectTask {
                 name: "dev".into(),
                 command: "npm run dev".into(),

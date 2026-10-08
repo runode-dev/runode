@@ -202,14 +202,15 @@ public enum Presentation {
     }
 
     /// 会话卡片菜单里一组项目命令的名字：文件名，不在会话目录里时带上它在哪一级（`Makefile · ../..`）。
-    /// 自己加的命令在项目目录的 `.runode/tasks.json` 里，按项目目录算。
+    /// 自己加的命令按这个项目的和通用的分。
     public static func taskSourceTitle(_ source: TaskSource, cwd: String?) -> String {
-        var file = (source.file as NSString).lastPathComponent
-        var dir = (source.file as NSString).deletingLastPathComponent
-        if source.kind == .custom {
-            file = ".runode/\(file)"
-            dir = (dir as NSString).deletingLastPathComponent
+        switch source.kind {
+        case .custom: return "我的命令"
+        case .global: return "通用命令"
+        default: break
         }
+        let file = (source.file as NSString).lastPathComponent
+        let dir = (source.file as NSString).deletingLastPathComponent
         guard let cwd, cwd != dir, cwd.hasPrefix(dir.hasSuffix("/") ? dir : dir + "/") else { return file }
         let levels = cwd.dropFirst(dir.count).split(separator: "/").count
         return "\(file) · \(Array(repeating: "..", count: levels).joined(separator: "/"))"
@@ -218,6 +219,7 @@ public enum Presentation {
     public static func taskSourceSymbol(_ source: TaskSource) -> String {
         switch source.kind {
         case .custom: "star"
+        case .global: "globe"
         case .makefile: "hammer"
         case .packageJson: "shippingbox"
         case .unknown: "terminal"

@@ -200,6 +200,13 @@ search:
   no_results: No results
 tasks:
   add: "Add Task…"
+  scope: "Use in"
+  scope_project: "This Project"
+  scope_global: "All Directories"
+  hint_project: "Listed only in the terminal's project (its git repository root) and run there. Saved in %{file}, also on your phone."
+  hint_global: "Listed in every directory and run in the terminal's current directory. Saved in %{file}, also on your phone."
+  group_project: "My Tasks"
+  group_global: "Global Tasks"
   edit: "Edit Task (Cmd+E)"
   edit_title: "Edit Task"
   update: "Save"
@@ -209,7 +216,6 @@ tasks:
   name_placeholder: "e.g. dev; defaults to the command"
   command: "Command"
   command_placeholder: "e.g. cargo run -- serve"
-  add_hint: "Saved in the project's %{file} and run in the project directory, also on your phone. Edit that file to change or remove tasks."
   cancel: "Cancel"
   save: "Add"
 files:

@@ -1,6 +1,6 @@
-//! 标题栏右上角的项目命令：终端目录往上最近的自己加的命令、Makefile 的目标和 package.json 的 scripts，
-//! 由宿主列出、拼好命令行（`ClientMsg::ListProjectTasks`），和手机会话卡片上的是同一份。右侧面板开关
-//! 左边的按钮弹出按文件分组的菜单，点一条开一个新标签在列命令的目录里跑它；菜单最上面一项添加自己的
+//! 标题栏右上角的项目命令：自己加的这个项目的和通用的命令、终端目录往上最近的 Makefile 的目标和
+//! package.json 的 scripts，由宿主列出、拼好命令行（`ClientMsg::ListProjectTasks`），和手机会话卡片上的
+//! 是同一份。右侧面板开关左边的按钮弹出分组的菜单，点一条开一个新标签在列命令的目录里跑它；菜单最上面一项添加自己的
 //! 命令，自己加的命令行尾有编辑和删除按钮，添加、编辑的对话框和改写命令文件在 `custom`。
 
 mod custom;
@@ -8,7 +8,8 @@ mod custom;
 use std::path::{Path, PathBuf};
 
 use gpui::{Action, App, Context, Div, Focusable, MouseButton, SharedString, Stateful, Window, prelude::*, px};
-use runode_protocol::TaskSourceKind;
+use runode_paths::Dirs;
+use runode_protocol::{TaskSource, TaskSourceKind};
 use runode_shared_types::color::Rgb;
 
 pub(super) use custom::AddTaskDialog;
@@ -28,8 +29,7 @@ use crate::{
 };
 
 /// 宿主从这些文件里读项目命令（锁文件决定用哪个包管理器），它们变了就重列。
-const TASK_FILES: [&str; 10] = [
-    "tasks.json",
+const TASK_FILES: [&str; 9] = [
     "GNUmakefile",
     "makefile",
     "Makefile",
@@ -48,28 +48,39 @@ pub(super) struct RunTask {
     command: String,
 }
 
-/// 命令菜单里分组的标题：收起或展开 `file` 里列出的命令。
+/// 命令菜单里分组的标题：收起或展开一组，`key` 见 `group_key`。
 #[derive(Clone, PartialEq, Action)]
 #[action(namespace = runode, no_json)]
 pub(super) struct ToggleTaskGroup {
-    file: PathBuf,
+    key: PathBuf,
 }
 
-/// 自己加的命令行尾的删除按钮：从 `file` 里删掉 `name`。
+/// 自己加的命令行尾的删除按钮：删掉 `project`（通用的为空）那一份里的 `name`。
 #[derive(Clone, PartialEq, Action)]
 #[action(namespace = runode, no_json)]
 pub(super) struct DeleteTask {
-    file: PathBuf,
+    project: Option<PathBuf>,
     name: String,
 }
 
-/// 自己加的命令行尾的编辑按钮：打开对话框改 `file` 里的 `name`，原来的命令行是 `command`。
+/// 自己加的命令行尾的编辑按钮：打开对话框改 `project`（通用的为空）那一份里的 `name`，原来的命令行
+/// 是 `command`。
 #[derive(Clone, PartialEq, Action)]
 #[action(namespace = runode, no_json)]
 pub(super) struct EditTask {
-    file: PathBuf,
+    project: Option<PathBuf>,
     name: String,
     command: String,
+}
+
+/// 记一组收没收起用的键：自己加的命令按项目目录，通用的和各个文件按文件，几份不会撞上。
+fn group_key(source: &TaskSource) -> PathBuf {
+    source.project.clone().unwrap_or_else(|| source.file.clone())
+}
+
+/// 这一组是自己加的命令（本项目的或通用的）。
+fn is_custom(source: &TaskSource) -> bool {
+    matches!(source.kind, TaskSourceKind::Custom | TaskSourceKind::Global)
 }
 
 /// 命令菜单最上面一项：打开添加命令的对话框。
@@ -191,8 +202,8 @@ impl WindowView {
     /// 命令菜单里点了分组的标题：收起或展开这一组，菜单开着不关。
     pub(super) fn toggle_task_group(&mut self, action: &ToggleTaskGroup, _: &mut Window, cx: &mut Context<Self>) {
         let folded = &mut self.workspace_mut().project.tasks_folded;
-        if !folded.remove(&action.file) {
-            folded.insert(action.file.clone());
+        if !folded.remove(&action.key) {
+            folded.insert(action.key.clone());
         }
         let items = self.tasks_menu_items(cx);
         self.replace_menu_items(items, cx);
@@ -203,14 +214,17 @@ impl WindowView {
     pub(super) fn delete_task(&mut self, action: &DeleteTask, _: &mut Window, cx: &mut Context<Self>) {
         let project = &mut self.workspace_mut().project;
         let sources = project.tasks.iter_mut().flat_map(|(_, sources)| sources.iter_mut());
-        for source in sources.filter(|source| source.file == action.file) {
+        for source in sources.filter(|source| is_custom(source) && source.project == action.project) {
             source.tasks.retain(|task| task.name != action.name);
         }
         let items = self.tasks_menu_items(cx);
         self.replace_menu_items(items, cx);
         let id = self.workspace().id;
-        let DeleteTask { file, name } = action.clone();
-        let job = cx.background_spawn(async move { custom::write_task(&file, &name, None) });
+        let DeleteTask { project, name } = action.clone();
+        let job = cx.background_spawn(async move {
+            let file = Dirs::from_env().tasks_file().ok_or("no home directory")?;
+            custom::write_task(&file, (project.as_deref(), &name), None)
+        });
         cx.spawn(async move |this, cx| {
             if let Err(err) = job.await {
                 tracing::warn!("could not delete the task: {err}");
@@ -228,8 +242,8 @@ impl WindowView {
         .detach();
     }
 
-    /// 命令菜单的各项：最上面是添加命令，下面每个文件一组。组的标题是文件，在列命令的目录里的写相对
-    /// 路径，在上层目录里的写 `~/…`，后面是命令条数，点了收起或展开，收起的组只留标题；命令名后面
+    /// 命令菜单的各项：最上面是添加命令，下面每份一组。自己加的两份标题是「我的命令」「通用命令」，
+    /// 别的是文件，在列命令的目录里的写相对路径，在上层目录里的写 `~/…`；标题后面是命令条数，点了收起或展开，收起的组只留标题；命令名后面
     /// 淡淡地写它的说明，自己加的命令选中时行尾有编辑和删除按钮。
     fn tasks_menu_items(&self, cx: &App) -> Vec<Option<MenuItem>> {
         let mut items = vec![Some(menu_item("tasks.add", Box::new(AddTask), true, cx))];
@@ -242,18 +256,20 @@ impl WindowView {
                 continue;
             }
             items.push(None);
-            let label = match source.file.strip_prefix(dir) {
-                Ok(rel) => rel.display().to_string(),
-                Err(_) => display_dir(&source.file),
+            let label = match (source.kind, source.file.strip_prefix(dir)) {
+                (TaskSourceKind::Custom, _) => rust_i18n::t!("tasks.group_project").into_owned(),
+                (TaskSourceKind::Global, _) => rust_i18n::t!("tasks.group_global").into_owned(),
+                (_, Ok(rel)) => rel.display().to_string(),
+                (_, Err(_)) => display_dir(&source.file),
             };
-            let folded = project.tasks_folded.contains(&source.file);
+            let folded = project.tasks_folded.contains(&group_key(source));
             let count = Some(source.tasks.len().to_string().into());
-            let toggle = ToggleTaskGroup { file: source.file.clone() };
+            let toggle = ToggleTaskGroup { key: group_key(source) };
             items.push(Some(group_item(label, count, folded, Box::new(toggle))));
             if folded {
                 continue;
             }
-            let custom = source.kind == TaskSourceKind::Custom;
+            let custom = is_custom(source);
             items.extend(source.tasks.iter().map(|task| {
                 let description = task.description.clone().filter(|text| *text != task.name);
                 let action = RunTask { command: task.command.clone() };
@@ -263,11 +279,11 @@ impl WindowView {
                 }
                 // 自己加的命令的说明就是写在文件里的命令行。
                 let edit = EditTask {
-                    file: source.file.clone(),
+                    project: source.project.clone(),
                     name: task.name.clone(),
                     command: task.description.clone().unwrap_or_default(),
                 };
-                let delete = DeleteTask { file: source.file.clone(), name: task.name.clone() };
+                let delete = DeleteTask { project: source.project.clone(), name: task.name.clone() };
                 let edit_button = MenuButton {
                     icon: PENCIL_ICON,
                     tooltip: rust_i18n::t!("tasks.edit").into(),

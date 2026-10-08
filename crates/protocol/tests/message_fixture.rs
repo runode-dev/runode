@@ -123,12 +123,14 @@ fn project_tasks() -> Vec<TaskSource> {
         TaskSource {
             kind: TaskSourceKind::Makefile,
             file: "/Users/ethan/dev/app/Makefile".into(),
+            project: None,
             tasks: vec![task("build", "make -C .. build", Some("编译全部")), task("test", "make -C .. test", None)],
             truncated: false,
         },
         TaskSource {
             kind: TaskSourceKind::PackageJson,
             file: "/Users/ethan/dev/app/web/package.json".into(),
+            project: None,
             tasks: vec![task("dev", "pnpm run dev", Some("vite"))],
             truncated: true,
         },

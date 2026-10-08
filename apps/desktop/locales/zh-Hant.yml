@@ -200,6 +200,13 @@ search:
   no_results: 沒有結果
 tasks:
   add: "新增命令…"
+  scope: "用於"
+  scope_project: "本專案"
+  scope_global: "所有目錄"
+  hint_project: "只在終端機所在的專案（git 儲存庫根目錄）裡列出，在專案目錄裡執行。儲存在 %{file}，手機上也能用。"
+  hint_global: "在所有目錄裡都列出，在終端機目前目錄裡執行。儲存在 %{file}，手機上也能用。"
+  group_project: "我的命令"
+  group_global: "通用命令"
   edit: "編輯命令（Cmd+E）"
   edit_title: "編輯命令"
   update: "儲存"
@@ -209,7 +216,6 @@ tasks:
   name_placeholder: "例如 dev，留空時用命令本身"
   command: "命令"
   command_placeholder: "例如 cargo run -- serve"
-  add_hint: "儲存在專案的 %{file} 裡，在專案目錄裡執行，手機上也能用；要刪改直接改這個檔案。"
   cancel: "取消"
   save: "新增"
 files:

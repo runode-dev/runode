@@ -1,5 +1,4 @@
-//! 列一个目录里能跑的项目命令（`ClientMsg::ListProjectTasks`）：往上找最近的 `.runode/tasks.json`、Makefile 和
-//! package.json，
+//! 列一个目录里能跑的项目命令（`ClientMsg::ListProjectTasks`）：往上找最近的 Makefile 和 package.json，
 //! 拼好在这个目录里能直接跑的命令行；列不了时回 `Error`，连接照旧。
 
 mod common;
@@ -10,9 +9,14 @@ use common::{Peer, listen, temp_dir};
 use runode_host::{ClientMsg, HostMsg};
 use runode_protocol::{ProjectTask, TaskSource, TaskSourceKind};
 
+/// 列 `dir` 的命令。开发机上 runode 根目录里自己加的通用命令也会列出来，和这里的测试无关，去掉。
 fn list(peer: &mut Peer, req: u32, dir: PathBuf) -> HostMsg {
     peer.send(&ClientMsg::ListProjectTasks { req, dir });
-    peer.reply()
+    let mut reply = peer.reply();
+    if let HostMsg::ProjectTasks { sources, .. } = &mut reply {
+        sources.retain(|source| !matches!(source.kind, TaskSourceKind::Custom | TaskSourceKind::Global));
+    }
+    reply
 }
 
 fn task(name: &str, command: &str, description: Option<&str>) -> ProjectTask {
@@ -43,6 +47,7 @@ fn nearest_makefile_and_package_json_are_listed() {
             TaskSource {
                 kind: TaskSourceKind::Makefile,
                 file: root.join("Makefile"),
+                project: None,
                 tasks: vec![
                     task("build", "make -C ../.. build", Some("编译全部")),
                     task("test", "make -C ../.. test", None),
@@ -52,6 +57,7 @@ fn nearest_makefile_and_package_json_are_listed() {
             TaskSource {
                 kind: TaskSourceKind::PackageJson,
                 file: root.join("web").join("package.json"),
+                project: None,
                 tasks: vec![
                     task("dev", "pnpm run dev", Some("vite")),
                     task("build:prod", "pnpm run build:prod", Some("vite build")),
@@ -61,41 +67,6 @@ fn nearest_makefile_and_package_json_are_listed() {
         ],
     };
     assert_eq!(reply, expected);
-}
-
-/// 自己加的命令排在最前，按文件里的先后；在上级目录里的在子 shell 里 cd 过去跑，值不是字符串的跳过。
-#[test]
-fn custom_tasks_come_first() {
-    let dir = temp_dir("taskscustom");
-    let (_host, socket) = listen(&dir);
-    let root = dir.join("repo");
-    let src = root.join("src");
-    fs::create_dir_all(root.join(".runode")).unwrap();
-    fs::create_dir_all(&src).unwrap();
-    fs::write(
-        root.join(".runode").join("tasks.json"),
-        r#"{"tasks":{"serve":"cargo run -- serve","lint":"cargo clippy","n":1}}"#,
-    )
-    .unwrap();
-    fs::write(root.join("Makefile"), "test:\n\tcargo test\n").unwrap();
-
-    let mut peer = Peer::hello(&socket, false);
-    match list(&mut peer, 3, src) {
-        HostMsg::ProjectTasks { req: 3, sources, .. } => {
-            assert_eq!(sources.len(), 2);
-            assert_eq!(sources[0].kind, TaskSourceKind::Custom);
-            assert_eq!(sources[0].file, root.join(".runode").join("tasks.json"));
-            assert_eq!(
-                sources[0].tasks,
-                [
-                    task("serve", "(cd .. && cargo run -- serve)", Some("cargo run -- serve")),
-                    task("lint", "(cd .. && cargo clippy)", Some("cargo clippy")),
-                ]
-            );
-            assert_eq!(sources[1].kind, TaskSourceKind::Makefile);
-        }
-        other => panic!("unexpected reply: {other:?}"),
-    }
 }
 
 /// `packageManager` 字段比锁文件说了算；名字里有空格的加引号。

@@ -150,8 +150,9 @@ import Testing
         #expect(Presentation.taskSourceTitle(make, cwd: "/Users/ethan/dev/app/web/src") == "Makefile · ../..")
         #expect(Presentation.taskSourceTitle(make, cwd: "/Users/ethan/dev/application") == "Makefile")
         #expect(Presentation.taskSourceTitle(make, cwd: nil) == "Makefile")
-        let custom = TaskSource(kind: .custom, file: "/Users/ethan/dev/app/.runode/tasks.json", tasks: [])
-        #expect(Presentation.taskSourceTitle(custom, cwd: dir) == ".runode/tasks.json")
-        #expect(Presentation.taskSourceTitle(custom, cwd: "/Users/ethan/dev/app/web") == ".runode/tasks.json · ..")
+        let custom = TaskSource(kind: .custom, file: "/Users/ethan/.runode/tasks.json", tasks: [])
+        #expect(Presentation.taskSourceTitle(custom, cwd: "/Users/ethan/dev/app/web") == "我的命令")
+        let global = TaskSource(kind: .global, file: "/Users/ethan/.runode/tasks.json", tasks: [])
+        #expect(Presentation.taskSourceTitle(global, cwd: dir) == "通用命令")
     }
 }
