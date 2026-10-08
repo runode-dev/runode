@@ -132,8 +132,11 @@ quit:
   end_title: 结束所有会话并退出 Runode？
   end_detail: 还有 %{count} 个 agent 在运行。所有终端会话都会一起结束，包括没在窗口里显示的后台会话。
   end_confirm: 结束并退出
-  keep: 保留在后台并退出
-  keep_detail: 选「保留在后台」的话，会话在退出后照常运行，下次打开接着用，设置里的「退出后保留会话」也会一并打开。
+  keep_title: 退出前，要把还在运行的 agent 留在后台吗？
+  keep_running: "%{agents} 还在运行。"
+  keep_running_count: 还有 %{count} 个 agent 在运行。
+  keep: 留在后台并退出
+  keep_detail: 留在后台的话，退出后它们照常运行，下次打开 Runode 接着用。以后退出也都这样，可以在设置里关掉「退出后保留会话」。
   yield_failed_title: 没能把会话留在后台
   yield_failed_detail: "%{reason}\n\n现在退出，所有会话都会一起结束。"
 update:

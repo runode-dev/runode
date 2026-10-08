@@ -132,8 +132,11 @@ quit:
   end_title: 終止所有工作階段並結束 Runode？
   end_detail: 還有 %{count} 個 agent 在執行。所有終端機工作階段都會一併終止，包括沒在視窗裡顯示的背景工作階段。
   end_confirm: 終止並結束
-  keep: 保留在背景並結束
-  keep_detail: 選「保留在背景」的話，工作階段在結束後照常執行，下次打開接著用，設定裡的「結束後保留工作階段」也會一併打開。
+  keep_title: 結束前，要把還在執行的 agent 留在背景嗎？
+  keep_running: "%{agents} 還在執行。"
+  keep_running_count: 還有 %{count} 個 agent 在執行。
+  keep: 留在背景並結束
+  keep_detail: 留在背景的話，結束後它們照常執行，下次打開 Runode 接著用。以後結束也都這樣，可以在設定裡關掉「結束後保留工作階段」。
   yield_failed_title: 沒能把工作階段留在背景
   yield_failed_detail: "%{reason}\n\n現在結束，所有工作階段都會一併終止。"
 update:

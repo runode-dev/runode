@@ -6,7 +6,7 @@
 //! 不再看它们，跑在 app 里时先把会话交给单独一个进程的宿主（`host_client::yield_sessions`）；要连
 //! 会话一起结束用「退出并结束所有会话」。开关关着时退出结束所有会话：跑在 app 里的随 app 结束，
 //! 单独跑的（上次留下的）让它连会话一起退出。只有会结束会话、又有 agent 在跑时才弹框确认，免得
-//! 一按 cmd+q 把正在干活或者攒着上下文的会话一起结束掉；留得下会话时框里默认的按钮是「保留在后台
+//! 一按 cmd+q 把正在干活或者攒着上下文的会话一起结束掉；留得下会话时框里默认的按钮是「留在后台
 //! 并退出」，选了它顺带打开开关。让宿主连会话一起退出、把会话交出去之前先冻结存档
 //! （`persist::freeze`）：视图会先收到会话结束、一个个关掉分屏，冻结了才不会把存档清空，下次启动
 //! 照原样接回会话或者在原目录新开。
@@ -80,7 +80,7 @@ pub(super) struct Plan {
     pub(super) ending: Ending,
     /// 先弹框确认，确认了才退出；`None` 时直接退出。
     pub(super) prompt: Option<Prompt>,
-    /// 框里有「保留在后台并退出」（默认的按钮）：开关关着、会话本来要结束，但留得下。
+    /// 框里有「留在后台并退出」（默认的按钮）：开关关着、会话本来要结束，但留得下。
     pub(super) offer_keep: bool,
 }
 
@@ -301,7 +301,7 @@ fn run(action: QuitAction, window: Option<AnyWindowHandle>, cx: &mut App, then: 
     .detach();
 }
 
-/// 在退出确认框里选了「保留在后台并退出」：打开配置项 `terminal-host`，以后退出都留下会话。写不了
+/// 在退出确认框里选了「留在后台并退出」：打开配置项 `terminal-host`，以后退出都留下会话。写不了
 /// 配置文件时只记一笔，这次照样留下。
 fn keep_from_now_on(cx: &mut App) {
     if let Err(err) = crate::config::set("terminal-host", "true", cx) {
@@ -355,7 +355,7 @@ fn shutdown_host() {
 struct PromptText {
     title: String,
     detail: String,
-    /// 「保留在后台并退出」，有时是默认的（第一个）按钮。
+    /// 「留在后台并退出」，有时是默认的（第一个）按钮。
     keep: Option<String>,
     /// 结束会话、退出的按钮。
     confirm: String,
@@ -364,21 +364,34 @@ struct PromptText {
 /// 确认框里选了什么，取消不算。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Answer {
-    /// 「保留在后台并退出」。
+    /// 「留在后台并退出」。
     Keep,
     /// 结束会话、退出；没问就退出时也是它。
     End,
 }
 
 /// `names` 是 `Prompt::Quit` 要列出的 agent，`count` 是别的几种给出的个数。`offer_keep` 时多一个
-/// 「保留在后台并退出」，说明里补一句选了它会怎样，结束的按钮写明会结束会话。
+/// 「留在后台并退出」，标题改成问要不要留下（几个按钮都退出，只是会话去向不同），说明里只说谁还在
+/// 跑、选了留下会怎样，不再说会随之结束，结束的按钮写明会结束会话。
 fn prompt_text(prompt: Prompt, names: &[String], count: usize, offer_keep: bool) -> PromptText {
     let t = |key: &str| rust_i18n::t!(key).into_owned();
-    let mut text = match prompt {
+    let agents = names.join(rust_i18n::t!("quit.separator").as_ref());
+    if offer_keep {
+        let running = match prompt {
+            Prompt::Quit => rust_i18n::t!("quit.keep_running", agents = agents),
+            Prompt::QuitEndingAll | Prompt::EndAll => rust_i18n::t!("quit.keep_running_count", count = count),
+        };
+        return PromptText {
+            title: t("quit.keep_title"),
+            detail: format!("{running}\n\n{}", t("quit.keep_detail")),
+            keep: Some(t("quit.keep")),
+            confirm: t("quit.end_confirm"),
+        };
+    }
+    match prompt {
         Prompt::Quit => PromptText {
             title: t("quit.title"),
-            detail: rust_i18n::t!("quit.detail", agents = names.join(rust_i18n::t!("quit.separator").as_ref()))
-                .into_owned(),
+            detail: rust_i18n::t!("quit.detail", agents = agents).into_owned(),
             keep: None,
             confirm: t("quit.confirm"),
         },
@@ -394,13 +407,7 @@ fn prompt_text(prompt: Prompt, names: &[String], count: usize, offer_keep: bool)
             keep: None,
             confirm: t("quit.end_confirm"),
         },
-    };
-    if offer_keep {
-        text.detail = format!("{}\n\n{}", text.detail, t("quit.keep_detail"));
-        text.keep = Some(t("quit.keep"));
-        text.confirm = t("quit.end_confirm");
     }
-    text
 }
 
 /// 没有要问的（`text` 为空）或者没有窗口能弹框时直接做 `then`（`Answer::End`）；否则在 `window`
@@ -419,7 +426,7 @@ fn confirm(
         return;
     };
     let cancel = rust_i18n::t!("quit.cancel");
-    // 有「保留在后台并退出」时它在第一个，是默认的按钮。
+    // 有「留在后台并退出」时它在第一个，是默认的按钮。
     let answers: Vec<(&str, Option<Answer>)> = text
         .keep
         .as_deref()
@@ -626,7 +633,8 @@ mod tests {
         assert!(!offers_end_sessions(IN_PROCESS, STUCK));
     }
 
-    /// 给留下的选项时它是第一个按钮，结束的按钮写明会结束会话，说明里补一句。
+    /// 给留下的选项时它是第一个按钮，标题改成问要不要留下，说明里照样列出 agent 但不说会随之结束，
+    /// 结束的按钮写明会结束会话。
     #[test]
     fn the_keep_button_comes_first_when_offered() {
         let names = ["Claude".to_owned()];
@@ -634,8 +642,9 @@ mod tests {
         let plain = prompt_text(Prompt::Quit, &names, 1, false);
         assert!(offered.keep.is_some());
         assert!(plain.keep.is_none());
+        assert_ne!(offered.title, plain.title);
         assert_ne!(offered.confirm, plain.confirm);
-        assert!(offered.detail.starts_with(&plain.detail) && offered.detail.len() > plain.detail.len());
+        assert!(offered.detail.contains("Claude") && !offered.detail.contains(&plain.detail));
     }
 
     #[test]

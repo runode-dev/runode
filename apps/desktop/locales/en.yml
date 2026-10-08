@@ -132,8 +132,11 @@ quit:
   end_title: End all sessions and quit Runode?
   end_detail: "Agents still running: %{count}. They will be stopped along with every terminal session, including background sessions that aren't shown in any window."
   end_confirm: End and Quit
+  keep_title: Keep running agents in the background before quitting?
+  keep_running: "Still running: %{agents}."
+  keep_running_count: "Agents still running: %{count}."
   keep: Keep in Background and Quit
-  keep_detail: "If you keep them in the background, sessions keep running after Runode quits and come back when it opens again. This also turns on “Keep sessions after quitting” in Settings."
+  keep_detail: "If you keep them, they go on running after Runode quits and come back when it opens again. Later quits will do the same; you can turn off “Keep sessions after quitting” in Settings."
   yield_failed_title: Couldn't keep the sessions in the background
   yield_failed_detail: "%{reason}\n\nQuitting now ends every session."
 update:
