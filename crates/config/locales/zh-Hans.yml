@@ -121,6 +121,7 @@ action:
   toggle_status_bar: 显示或隐藏窗口底部的状态栏
   toggle_git: 显示或隐藏右侧的 Git 面板：暂存、提交、切换分支、同步和储藏
   toggle_files: 显示或隐藏右侧的文件树，双击文件把路径打进终端
+  toggle_tasks: 打开或关掉标题栏上的项目命令菜单，上下键选、回车运行
   goto_agent: 列出所有窗口里的 agent，选一个跳过去
   next_agent: 跳到下一个要处理的 agent：先是等你回答的，再是干完了还没看的
   copy_to_clipboard: 复制

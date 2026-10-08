@@ -126,11 +126,10 @@ impl WindowView {
         let block = machine_block(machine, detail, fg)
             .id("machine")
             // 菜单开着时在捕获阶段就关掉、不再往下传：菜单自己的「点到外面就关」和下面再打开的都不跑。
-            .capture_any_mouse_down(cx.listener(move |this, _, _, cx| {
+            .capture_any_mouse_down(cx.listener(move |this, _, window, cx| {
                 if this.menu_open_at(position) {
                     cx.stop_propagation();
-                    this.file_menu = None;
-                    cx.notify();
+                    this.close_menu(window, cx);
                 }
             }))
             .on_mouse_down(

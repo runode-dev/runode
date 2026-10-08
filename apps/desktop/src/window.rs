@@ -114,6 +114,8 @@ actions!(
         ToggleGit,
         /// 显示或隐藏右侧的文件树。
         ToggleFiles,
+        /// 打开或关掉标题栏上的项目命令菜单。
+        ToggleTasks,
         /// 打开或关掉列出所有窗口里 agent 的浮层。
         GotoAgent,
         /// 跳到下一个要处理的 agent：先等回答的，再干完了没看的。
@@ -493,6 +495,7 @@ impl Focusable for WindowView {
 
 impl Render for WindowView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        self.focus_menu(window, cx);
         let (fg, bg) = self.colors(cx);
         let (base, body) = if self.mobile.is_some() {
             (if cards(cx) { frame_color(fg, bg) } else { bg }, self.render_mobile_body(fg, bg, window, cx))
@@ -540,6 +543,7 @@ impl Render for WindowView {
             .on_action(cx.listener(Self::toggle_status_item))
             .on_action(cx.listener(Self::run_task))
             .on_action(cx.listener(Self::add_task))
+            .on_action(cx.listener(Self::toggle_tasks))
             .on_action(cx.listener(Self::toggle_status_bar))
             // 侧栏按着切换 workspace 的修饰键或 ⌘ 时才显示快捷键提示，按下、松开都要重画。挂在根上：修饰键的事件
             // 只沿焦点所在的路径传，侧栏不在这条路上。

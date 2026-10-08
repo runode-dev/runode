@@ -45,6 +45,7 @@ menu:
   toggle_status_bar: 顯示或隱藏狀態列
   toggle_git: 顯示或隱藏 Git
   toggle_files: 顯示或隱藏檔案
+  toggle_tasks: 專案命令…
   toggle_full_screen: 切換全螢幕
   window: 視窗
   minimize: 縮到最小

@@ -5,8 +5,8 @@
 use std::path::{Path, PathBuf};
 
 use gpui::{
-    Action, Anchor, AnyElement, App, ClipboardItem, Context, Div, FocusHandle, MouseButton, Pixels, Point,
-    SharedString, Stateful, Window, anchored, deferred, div, point, prelude::*, px, relative, svg,
+    Action, Anchor, AnyElement, App, ClipboardItem, Context, Div, FocusHandle, KeyDownEvent, MouseButton, Pixels,
+    Point, ScrollHandle, SharedString, Stateful, Window, anchored, deferred, div, point, prelude::*, px, relative, svg,
 };
 use runode_shared_types::color::Rgb;
 
@@ -106,10 +106,48 @@ pub(in crate::window) fn labeled_item(
 
 /// 打开着的右键菜单：右键按下的位置，打开时就定下的各项（`None` 是分隔线），以及点了以后
 /// 先把焦点交给谁、再派发动作。没有位置的是按钮下面弹出的菜单，由按钮自己画。
+///
+/// 菜单开着时焦点在它自己身上，上下键选、回车派发、Esc 关掉；不这样的话上下键和回车先被
+/// 文件树这类地方绑定的动作拿走。
 pub(in crate::window) struct FileMenu {
     position: Option<Point<Pixels>>,
     items: Vec<Option<MenuItem>>,
     target: FocusHandle,
+    focus: FocusHandle,
+    /// 刚打开，下次画窗口时把焦点给菜单：打开菜单的地方大多拿不到 `Window`。
+    focus_pending: bool,
+    /// 选中的那一项，鼠标悬停和上下键都改它。
+    highlighted: Option<usize>,
+    scroll: ScrollHandle,
+}
+
+impl FileMenu {
+    fn new(position: Option<Point<Pixels>>, items: Vec<Option<MenuItem>>, target: FocusHandle, cx: &mut App) -> Self {
+        let focus = cx.focus_handle();
+        Self { position, items, target, focus, focus_pending: true, highlighted: None, scroll: ScrollHandle::new() }
+    }
+
+    /// 第 `ix` 项能选：整行点了有动作。
+    fn selectable(&self, ix: usize) -> bool {
+        self.items[ix].as_ref().is_some_and(|item| item.enabled && item.action.is_some() && item.button.is_none())
+    }
+
+    /// 选中往下（`down`）或往上数的下一个能选的项，到头了绕回来。
+    fn move_highlight(&mut self, down: bool) {
+        let n = self.items.len();
+        let next = (1..=n)
+            .map(|step| match (self.highlighted, down) {
+                (Some(ix), true) => (ix + step) % n,
+                (Some(ix), false) => (ix + n - step) % n,
+                (None, true) => step - 1,
+                (None, false) => n - step,
+            })
+            .find(|&ix| self.selectable(ix));
+        if let Some(ix) = next {
+            self.highlighted = Some(ix);
+            self.scroll.scroll_to_item(ix);
+        }
+    }
 }
 
 impl WindowView {
@@ -121,19 +159,78 @@ impl WindowView {
         target: FocusHandle,
         cx: &mut Context<Self>,
     ) {
-        self.file_menu = Some(FileMenu { position: Some(position), items, target });
+        self.file_menu = Some(FileMenu::new(Some(position), items, target, cx));
         cx.notify();
     }
 
-    /// 弹出挂在按钮下面的菜单，按钮用 `render_dropdown` 把它画在自己下面。
+    /// 弹出挂在按钮下面的菜单，按钮用 `render_dropdown` 把它画在自己下面。从键盘打开的
+    /// （`from_keyboard`）先选中第一项，回车就能用。
     pub(in crate::window) fn open_dropdown(
         &mut self,
         items: Vec<Option<MenuItem>>,
         target: FocusHandle,
+        from_keyboard: bool,
         cx: &mut Context<Self>,
     ) {
-        self.file_menu = Some(FileMenu { position: None, items, target });
+        let mut menu = FileMenu::new(None, items, target, cx);
+        if from_keyboard {
+            menu.move_highlight(true);
+        }
+        self.file_menu = Some(menu);
         cx.notify();
+    }
+
+    /// 刚打开的菜单拿到焦点。每次画窗口时调。
+    pub(in crate::window) fn focus_menu(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(menu) = &mut self.file_menu
+            && std::mem::take(&mut menu.focus_pending)
+        {
+            window.focus(&menu.focus, cx);
+        }
+    }
+
+    /// 关掉菜单；焦点还在菜单上时还给打开它之前的地方。
+    pub(in crate::window) fn close_menu(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(menu) = self.file_menu.take() {
+            if menu.focus.is_focused(window) {
+                window.focus(&menu.target, cx);
+            }
+            cx.notify();
+        }
+    }
+
+    /// 关掉菜单，焦点给 `target`，再派发 `action`：和按快捷键走同一条路。
+    fn run_menu_action(&mut self, action: &dyn Action, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(menu) = self.file_menu.take() else {
+            return;
+        };
+        window.focus(&menu.target, cx);
+        window.dispatch_action(action.boxed_clone(), cx);
+        cx.notify();
+    }
+
+    fn menu_key(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(menu) = &mut self.file_menu else {
+            return;
+        };
+        if event.keystroke.modifiers.modified() {
+            return;
+        }
+        match event.keystroke.key.as_str() {
+            "up" | "down" => {
+                menu.move_highlight(event.keystroke.key == "down");
+                cx.notify();
+            }
+            "enter" => {
+                let action = menu.highlighted.and_then(|ix| menu.items[ix].as_ref()?.action.as_ref());
+                if let Some(action) = action.map(|action| action.boxed_clone()) {
+                    self.run_menu_action(action.as_ref(), window, cx);
+                }
+            }
+            "escape" => self.close_menu(window, cx),
+            _ => return,
+        }
+        cx.stop_propagation();
     }
 
     /// 在 `position` 弹出的菜单开着。
@@ -247,15 +344,10 @@ impl WindowView {
                 return div().flex_none().h(px(1.)).mx(px(6.)).my(px(4.)).bg(fg.opacity(0.12)).into_any_element();
             };
             let action = item.action.as_ref().filter(|_| item.enabled).map(|action| action.boxed_clone());
-            let target = menu.target.clone();
             let dispatch = |action: Box<dyn Action>| {
-                let target = target.clone();
                 cx.listener(move |this: &mut Self, _: &gpui::MouseDownEvent, window, cx| {
                     cx.stop_propagation();
-                    this.file_menu = None;
-                    window.focus(&target, cx);
-                    window.dispatch_action(action.boxed_clone(), cx);
-                    cx.notify();
+                    this.run_menu_action(action.as_ref(), window, cx);
                 })
             };
             let (row_action, button) = match &item.button {
@@ -273,8 +365,15 @@ impl WindowView {
                 .items_center()
                 .gap(px(16.))
                 .text_color(if item.enabled { fg } else { fg.opacity(0.35) })
+                .when(menu.highlighted == Some(ix), |row| row.bg(hover_bg))
                 .when_some(row_action, |row, action| {
-                    row.hover(|row| row.bg(hover_bg)).on_mouse_down(MouseButton::Left, dispatch(action))
+                    row.on_hover(cx.listener(move |this, hovered: &bool, _, cx| {
+                        if let Some(menu) = this.file_menu.as_mut().filter(|_| *hovered) {
+                            menu.highlighted = Some(ix);
+                            cx.notify();
+                        }
+                    }))
+                    .on_mouse_down(MouseButton::Left, dispatch(action))
                 })
                 .when(check_column, |row| {
                     row.child(
@@ -318,6 +417,9 @@ impl WindowView {
         });
         let list = div()
             .id("file-menu")
+            .track_focus(&menu.focus)
+            .on_key_down(cx.listener(Self::menu_key))
+            .track_scroll(&menu.scroll)
             .w(px(MENU_WIDTH))
             .max_h(px(max_height.min(MENU_MAX_HEIGHT)))
             .overflow_y_scroll()
@@ -332,10 +434,7 @@ impl WindowView {
             .text_size(px(12.))
             .occlude()
             .children(items)
-            .on_mouse_down_out(cx.listener(|this, _, _, cx| {
-                this.file_menu = None;
-                cx.notify();
-            }));
+            .on_mouse_down_out(cx.listener(|this, _, window, cx| this.close_menu(window, cx)));
         Some(list)
     }
 

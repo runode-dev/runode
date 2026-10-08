@@ -45,6 +45,7 @@ menu:
   toggle_status_bar: Show or Hide Status Bar
   toggle_git: Show or Hide Git
   toggle_files: Show or Hide Files
+  toggle_tasks: Tasks…
   toggle_full_screen: Toggle Full Screen
   window: Window
   minimize: Minimize

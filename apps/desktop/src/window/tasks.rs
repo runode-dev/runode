@@ -13,6 +13,7 @@ use runode_shared_types::color::Rgb;
 pub(super) use add::AddTaskDialog;
 
 use super::{
+    ToggleTasks,
     files::{labeled_item, menu_item},
     model::display_dir,
     project::{TOGGLE_HEIGHT, TOGGLE_WIDTH},
@@ -106,6 +107,15 @@ impl WindowView {
         self.insert_tab(self.workspace().active + 1, view, window, cx);
     }
 
+    /// 按快捷键打开命令菜单、选中第一条；开着时关掉。
+    pub(super) fn toggle_tasks(&mut self, _: &ToggleTasks, window: &mut Window, cx: &mut Context<Self>) {
+        if self.dropdown_open() {
+            self.close_menu(window, cx);
+        } else {
+            self.open_tasks_menu(true, cx);
+        }
+    }
+
     /// 标题栏右上角、面板开关左边的命令按钮，菜单挂在它下面，开着时底色亮一些。
     pub(super) fn render_tasks_button(
         &self,
@@ -117,20 +127,19 @@ impl WindowView {
         icon_toggle("tasks", PLAY_ICON, 16., self.dropdown_open(), fg, bg)
             .w(px(TOGGLE_WIDTH))
             .h(px(TOGGLE_HEIGHT))
-            .tooltip(tooltip(rust_i18n::t!("tooltip.tasks"), None, fg, bg))
+            .tooltip(tooltip(rust_i18n::t!("tooltip.tasks"), Some(&ToggleTasks), fg, bg))
             // 菜单开着时在捕获阶段就关掉、不再往下传：菜单自己的「点到外面就关」和下面再打开的都不跑。
-            .capture_any_mouse_down(cx.listener(|this, _, _, cx| {
+            .capture_any_mouse_down(cx.listener(|this, _, window, cx| {
                 if this.dropdown_open() {
                     cx.stop_propagation();
-                    this.file_menu = None;
-                    cx.notify();
+                    this.close_menu(window, cx);
                 }
             }))
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(|this, _, _, cx| {
                     cx.stop_propagation();
-                    this.open_tasks_menu(cx);
+                    this.open_tasks_menu(false, cx);
                 }),
             )
             .children(self.render_dropdown(fg, bg, window, cx))
@@ -138,7 +147,7 @@ impl WindowView {
 
     /// 在命令按钮下面弹出命令菜单：每个文件一段，段首灰着写文件，在列命令的目录里的写相对路径，
     /// 在上层目录里的写 `~/…`；命令名后面淡淡地写它的说明。最后是添加命令。
-    fn open_tasks_menu(&mut self, cx: &mut Context<Self>) {
+    fn open_tasks_menu(&mut self, from_keyboard: bool, cx: &mut Context<Self>) {
         let mut items = Vec::new();
         let listed = self.workspace().project.tasks.as_ref();
         for (dir, source) in
@@ -166,7 +175,7 @@ impl WindowView {
         }
         items.push(Some(menu_item("tasks.add", Box::new(AddTask), true, cx)));
         let target = self.focus_handle(cx);
-        self.open_dropdown(items, target, cx);
+        self.open_dropdown(items, target, from_keyboard, cx);
         // shortcut: 面板收着时不监听目录，Makefile、package.json 改了要到下次打开菜单才看得到；要即时的话
         // 面板收着时也监听这几个文件。
         self.workspace_mut().project.tasks_stale = true;

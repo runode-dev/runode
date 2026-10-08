@@ -57,6 +57,8 @@ pub enum Action {
     ToggleStatusBar,
     ToggleGit,
     ToggleFiles,
+    /// 打开或关掉标题栏上的项目命令菜单。
+    ToggleTasks,
     /// 列出所有窗口里的 agent，选一个跳过去。
     GotoAgent,
     /// 不弹列表，直接跳到下一个要处理的 agent：先等回答的，再干完了没看的。
@@ -220,6 +222,7 @@ pub static ACTIONS: &[ActionSpec] = &[
     plain!("toggle_status_bar", Action::ToggleStatusBar),
     plain!("toggle_git", Action::ToggleGit),
     plain!("toggle_files", Action::ToggleFiles),
+    plain!("toggle_tasks", Action::ToggleTasks),
     plain!("goto_agent", Action::GotoAgent),
     plain!("next_agent", Action::NextAgent),
     plain!("copy_to_clipboard", Action::Copy),
@@ -341,6 +344,7 @@ pub static DEFAULTS: &[&str] = &[
     // 搜索框里 Shift+回车照样跳到上一个。
     "cmd+shift+g=toggle_git",
     "cmd+shift+e=toggle_files",
+    "cmd+shift+r=toggle_tasks",
     "cmd+shift+a=goto_agent",
     "cmd+alt+a=next_agent",
     "cmd+c=copy_to_clipboard",
