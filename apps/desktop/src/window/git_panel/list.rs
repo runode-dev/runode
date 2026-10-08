@@ -138,18 +138,17 @@ impl WindowView {
             .hover(|row| row.bg(hsla(bg.mix(fg, 0.06))))
     }
 
-    /// 行尾的按钮，平时藏着；根目录是 `root` 的仓库有操作在跑时按不动。
+    /// 行尾的按钮，平时藏着、不占宽，名字能排满整行；根目录是 `root` 的仓库有操作在跑时按不动。
     fn row_buttons(&self, root: &Path, buttons: Vec<RowButton>, fg: Rgb, bg: Rgb, cx: &mut Context<Self>) -> Div {
         let enabled = self.workspace().project.git_panel.busy(root).is_none();
         let hover_bg = hsla(bg.mix(fg, 0.14));
         let icon_color = hsla(fg).opacity(if enabled { 0.75 } else { 0.3 });
         div()
             .flex_none()
-            .flex()
+            .hidden()
             .items_center()
             .gap(px(2.))
-            .invisible()
-            .group_hover(ROW_GROUP, |buttons| buttons.visible())
+            .group_hover(ROW_GROUP, |buttons| buttons.flex())
             .children(buttons.into_iter().enumerate().map(|(bi, button)| {
                 let handler = button.handler;
                 div()
