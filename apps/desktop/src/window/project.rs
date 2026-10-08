@@ -299,6 +299,7 @@ impl WindowView {
     /// 退回定时重读，离上次开始读至少隔 `FALLBACK_INTERVAL`，上次读得慢时按耗时拉长。
     pub(super) fn poll_project(&mut self, cx: &mut Context<Self>) {
         self.list_tasks(cx);
+        self.refresh_repo_badges(cx);
         if !self.project_visible() {
             self.probe_repo(cx);
             return;

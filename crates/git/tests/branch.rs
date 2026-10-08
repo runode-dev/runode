@@ -3,7 +3,7 @@
 mod common;
 
 use common::TestRepo;
-use runode_git::valid_branch_name;
+use runode_git::{current_branch, origin_url, valid_branch_name};
 
 #[test]
 fn checks_branch_names() {
@@ -12,6 +12,21 @@ fn checks_branch_names() {
     for name in ["", "a b", "-x", "x..y", "@{-1}", "HEAD", "x.lock", "a~1", "x/"] {
         assert!(!valid_branch_name(name), "{name}");
     }
+}
+
+#[test]
+fn reads_current_branch_and_origin() {
+    let repo = TestRepo::new("current-branch");
+    // 还没有提交时也认得出分支。
+    assert_eq!(current_branch(repo.path()).as_deref(), Some("main"));
+    repo.commit_file("a.txt", "one\n", "init");
+    let sha = repo.git(&["rev-parse", "--short", "HEAD"]);
+    repo.git(&["checkout", "-q", "--detach"]);
+    assert_eq!(current_branch(repo.path()), Some(sha));
+    assert_eq!(origin_url(repo.path()), None);
+    repo.git(&["remote", "add", "origin", "git@github.com:runode-dev/runode.git"]);
+    assert_eq!(origin_url(repo.path()).as_deref(), Some("git@github.com:runode-dev/runode.git"));
+    assert_eq!(current_branch(&repo.path().join("..")), None);
 }
 
 #[test]

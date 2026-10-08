@@ -1,9 +1,11 @@
 //! 窗口左侧的 workspace 列表：切换、拖动排序、改名、关闭和新建；顶上是手机端入口（`mobile`），下面是
-//! 后台会话（`background`）。
+//! 后台会话（`background`）。每行名字前是 GitHub 头像或 git 图标，下面是当前分支（`repo`）。
+
+mod repo;
 
 use gpui::{
     Action, AnyElement, App, Axis, Context, CursorStyle, Div, ExternalPaths, Focusable, Hsla, Modifiers, MouseButton,
-    MouseDownEvent, Render, SharedString, Stateful, TextAlign, Window, canvas, div, prelude::*, px, svg,
+    MouseDownEvent, Render, SharedString, Stateful, TextAlign, Window, canvas, div, img, prelude::*, px, relative, svg,
 };
 use runode_shared_types::color::Rgb;
 
@@ -16,9 +18,10 @@ use super::{
     titlebar::{close_button, drag_chip, drop_marker, icon_toggle, shortcut_hint, styled_agent_mark},
 };
 use crate::{
-    assets::{GIT_ICON, SIDEBAR_ICON},
+    assets::{BRANCH_ICON, GIT_ICON, SIDEBAR_ICON},
     ui::{hsla, tooltip::tooltip},
 };
+pub(super) use repo::RepoBadge;
 
 /// 侧栏的默认宽度，比红绿灯宽得多，红绿灯落在侧栏顶上。
 const SIDEBAR_WIDTH: f32 = 200.;
@@ -238,11 +241,13 @@ impl WindowView {
         let fg = hsla(fg);
         let group = SharedString::from(format!("workspace-{ix}"));
         let renaming = self.renaming.as_ref().filter(|renaming| renaming.id == id);
-        // 名字前是 git 图标，agent 的标记跟在名字后面。
-        let icon = div()
-            .flex_none()
-            .w(px(AGENT_MARK_WIDTH))
-            .when(workspace.in_repo, |slot| slot.child(svg().path(GIT_ICON).size(px(12.)).text_color(fg.opacity(0.6))));
+        // 名字前是 GitHub 头像，不在 GitHub 上的仓库画 git 图标；agent 的标记跟在名字后面。
+        let repo = &workspace.repo;
+        let icon = div().flex_none().w(px(AGENT_MARK_WIDTH)).map(|slot| match (&repo.avatar, repo.branch.is_some()) {
+            (Some(avatar), _) => slot.child(img(avatar.clone()).size(px(AGENT_MARK_WIDTH)).rounded(px(3.))),
+            (None, true) => slot.child(svg().path(GIT_ICON).size(px(AGENT_MARK_WIDTH)).text_color(fg.opacity(0.6))),
+            (None, false) => slot,
+        });
         let mark = workspace.mark(cx).map(|mark| styled_agent_mark(mark, ("workspace-agent", ix), fg, cards(cx)));
         let name: AnyElement = match renaming {
             Some(renaming) => renaming.edit.render(px(RENAME_FIELD_HEIGHT), rgb_fg, bg).into_any_element(),
@@ -272,6 +277,29 @@ impl WindowView {
         };
         // 目录和名字一样（比如家目录的 `~`）时不再写一遍。
         let dir = Some(display_dir(&workspace.dir)).filter(|dir| *dir != *workspace.name);
+        // 第二行先写分支再写目录，分支名长时最多占一半多，目录还留着结尾。
+        let branch = repo.branch.clone().map(|branch| {
+            div()
+                .flex_none()
+                .max_w(relative(0.6))
+                .flex()
+                .items_center()
+                .gap(px(3.))
+                .text_color(fg.opacity(0.6))
+                .child(svg().flex_none().path(BRANCH_ICON).size(px(10.)).text_color(fg.opacity(0.6)))
+                .child(div().min_w_0().truncate().child(branch))
+        });
+        let details = (branch.is_some() || dir.is_some()).then(|| {
+            div()
+                .flex()
+                .items_center()
+                .gap(px(6.))
+                .text_size(px(11.))
+                .text_color(fg.opacity(0.45))
+                .children(branch)
+                // 路径长时留下结尾：最后几级目录最能区分。
+                .children(dir.map(|dir| div().flex_1().min_w_0().child(path_line(dir))))
+        });
         let dragged =
             DraggedWorkspace { id, ix, name: workspace.name.clone(), width: self.sidebar_width(), fg, bg: active_bg };
         div()
@@ -317,19 +345,7 @@ impl WindowView {
                 this.move_workspace(dragged.id, ix, window, cx);
             }))
             .child(icon)
-            .child(
-                div()
-                    .flex_1()
-                    .min_w_0()
-                    .flex()
-                    .flex_col()
-                    .gap(px(1.))
-                    .child(name)
-                    // 路径长时留下结尾：最后几级目录最能区分。
-                    .children(
-                        dir.map(|dir| div().text_size(px(11.)).text_color(fg.opacity(0.45)).child(path_line(dir))),
-                    ),
-            )
+            .child(div().flex_1().min_w_0().flex().flex_col().gap(px(1.)).child(name).children(details))
             .child(
                 div()
                     .flex_none()

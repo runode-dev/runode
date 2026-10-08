@@ -66,6 +66,19 @@ pub fn in_repo(dir: &Path) -> bool {
     find_repo(dir).is_some()
 }
 
+/// `dir` 所在仓库当前的分支，还没有提交的新分支也算；HEAD 分离时是提交的短哈希，不在仓库里时为空。
+pub fn current_branch(dir: &Path) -> Option<String> {
+    let out =
+        git(dir, &["symbolic-ref", "--short", "-q", "HEAD"]).or_else(|| git(dir, &["rev-parse", "--short", "HEAD"]))?;
+    Some(String::from_utf8_lossy(&out).trim().to_owned()).filter(|name| !name.is_empty())
+}
+
+/// `dir` 所在仓库 `origin` 远端的地址；没有这个远端时为空。
+pub fn origin_url(dir: &Path) -> Option<String> {
+    let out = git(dir, &["remote", "get-url", "origin"])?;
+    Some(String::from_utf8_lossy(&out).trim().to_owned()).filter(|url| !url.is_empty())
+}
+
 /// git 给的仓库根解析过符号链接；按 `dir` 的写法换回来，界面拿 `dir` 下的路径和它比前缀
 /// 才对得上。`dir` 本身不在仓库根下面（仓库内部的符号链接）时保持原样。
 fn local_root(dir: &Path, root: PathBuf) -> PathBuf {

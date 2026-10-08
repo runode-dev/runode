@@ -183,6 +183,11 @@ impl Dirs {
         self.cache_file("first-terminal-size")
     }
 
+    /// 侧栏里 GitHub 仓库的 owner 头像，按 owner 的名字存一份。
+    pub fn github_avatar_file(&self, owner: &str) -> Option<PathBuf> {
+        self.cache_file(&format!("github-avatars/{owner}.png"))
+    }
+
     /// Ghostty 配置文件的位置，按 Ghostty 的加载顺序：XDG 目录的旧名与新名，macOS 上再加
     /// Application Support 的旧名与新名。
     pub fn ghostty_config_files(&self) -> Vec<PathBuf> {

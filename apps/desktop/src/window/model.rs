@@ -18,6 +18,7 @@ use super::{
     WindowView,
     persist::{self, format},
     project::Project,
+    sidebar::RepoBadge,
 };
 use crate::terminal_view::{PROVISIONAL_SIZE, SHOW_WAIT, TerminalEvent, TerminalView};
 
@@ -97,8 +98,8 @@ pub(super) struct Workspace {
     pub(super) name: SharedString,
     /// 项目目录：新终端取不到当前终端的目录时从这里开始。
     pub(super) dir: PathBuf,
-    /// 项目目录在 git 仓库里，侧栏在名字前画 git 图标。
-    pub(super) in_repo: bool,
+    /// 侧栏这一行上的当前分支和 GitHub 头像。
+    pub(super) repo: RepoBadge,
     /// 可以没有：最后一个关掉后 workspace 留着，显示一个空的标签区，等用户新开。
     pub(super) tabs: Vec<Tab>,
     /// 当前标签；没有标签时为 0。
@@ -107,12 +108,6 @@ pub(super) struct Workspace {
     pub(super) tab_scroll: ScrollHandle,
     /// Git 面板和文件树显示的内容。
     pub(super) project: Project,
-}
-
-/// 只看目录自己和上级有没有 `.git`，不起 git 进程，开窗口时恢复一串 workspace 也不卡。
-/// shortcut: 只在建 workspace 时看一次，之后才 `git init` 的要重开窗口才显示图标；要跟着变时改用 `Project::in_repo`。
-pub(super) fn dir_in_repo(dir: &Path) -> bool {
-    dir.ancestors().any(|dir| dir.join(".git").exists())
 }
 
 impl Workspace {
@@ -273,7 +268,7 @@ impl WindowView {
         let workspace = Workspace {
             id: self.next_id(),
             name: name.unwrap_or_else(|| workspace_name(&dir)).into(),
-            in_repo: dir_in_repo(&dir),
+            repo: RepoBadge::default(),
             dir,
             tabs: vec![tab],
             active: 0,
