@@ -89,9 +89,9 @@ const ROW_EXTRA_HEIGHT: f32 = 10.;
 const INDENT: f32 = 12.;
 /// 行的左边距。
 const ROW_PADDING: f32 = 4.;
-/// 标题下面那行工具栏的高度。
+/// 底部项目命令标题条的高度。
 const TOOLBAR_HEIGHT: f32 = 32.;
-/// 工具栏按钮的边长。
+/// 标题那一行上按钮的边长。
 const TOOLBAR_BUTTON_SIZE: f32 = 24.;
 /// 剪切下来等着粘贴的行画得淡一些。
 const CUT_OPACITY: f32 = 0.5;
@@ -242,20 +242,22 @@ impl WindowView {
         };
         let ignored_toggle =
             button("toggle-ignored", icon, show_ignored, text, None, |this, _, cx| this.toggle_show_ignored(cx), cx);
-        let header = panel_title().child(div().flex_1().min_w_0().truncate().text_color(hsla(fg)).child(name));
-        // 标题下面一行：左边是没提交的改动一共加减了多少行，右边是新建、全部收起和显示忽略
+        // 标题那一行：目录名后面是没提交的改动一共加减了多少行，右边是新建、全部收起和显示忽略
         // 文件的按钮。
         let dirty = workspace.project.git.as_ref().filter(|git| !git.is_clean());
-        let toolbar = div()
-            .flex_none()
-            .h(px(TOOLBAR_HEIGHT))
-            .px(px(10.))
-            .flex()
-            .items_center()
+        let header = panel_title()
             .gap(px(6.))
-            .text_size(px(12.))
-            .when_some(dirty, |toolbar, git| {
-                toolbar.child(added_label(git.added())).child(removed_label(git.removed()))
+            .child(div().flex_initial().min_w_0().truncate().text_color(hsla(fg)).child(name))
+            .when_some(dirty, |header, git| {
+                header.child(
+                    div()
+                        .flex_none()
+                        .flex()
+                        .gap(px(6.))
+                        .text_size(px(12.))
+                        .child(added_label(git.added()))
+                        .child(removed_label(git.removed())),
+                )
             })
             .child(div().flex_1())
             .child(
@@ -333,7 +335,6 @@ impl WindowView {
             .text_size(px(font_size))
             .child(self.render_panel_tabs(fg, bg, cx))
             .child(header)
-            .child(toolbar)
             .child(list)
             .children(self.render_tasks(font_size, fg, bg, cx))
     }
