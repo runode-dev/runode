@@ -351,8 +351,7 @@ impl WindowView {
     /// 显示或隐藏整条状态栏：改写配置文件的 `status-bar`，所有窗口跟着重载的配置一起变。
     pub(super) fn toggle_status_bar(&mut self, _: &ToggleStatusBar, _: &mut Window, cx: &mut Context<Self>) {
         let value = if shown(cx) { "false" } else { "true" };
-        let Some(path) = runode_config::config_path() else { return };
-        if let Err(err) = crate::config::write_values(&path, "status-bar", &[value.to_owned()], cx) {
+        if let Err(err) = crate::config::set("status-bar", value, cx) {
             tracing::warn!("could not write status-bar: {err}");
         }
     }
