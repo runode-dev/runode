@@ -30,7 +30,13 @@ use crate::{
         hsla,
         tooltip::tooltip,
     },
-    window::{WindowView, files::menu_item, model::base_name, preview::DiffTarget, project::status_color},
+    window::{
+        WindowView,
+        files::menu_item,
+        model::base_name,
+        preview::DiffTarget,
+        project::{added_label, removed_label, status_color},
+    },
 };
 
 /// 每一行的高度：段标题、文件、提交都一样高，列表才能只画看得见的部分。
@@ -315,6 +321,8 @@ impl WindowView {
             )
             .child(div().flex_1().min_w_0().truncate().text_size(px(11.)).text_color(dim).child(dir))
             .children(self.row_buttons(ix, &root, buttons, fg, bg, cx))
+            .when(file.added > 0, |row| row.child(added_label(file.added)))
+            .when(file.removed > 0, |row| row.child(removed_label(file.removed)))
             .child(status_letter(file.status))
             .on_mouse_down(
                 MouseButton::Left,
