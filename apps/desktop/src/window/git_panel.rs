@@ -40,7 +40,7 @@ use super::{
     TITLEBAR_HEIGHT, WindowView, divider_color,
     files::menu_item,
     model::base_name,
-    project::{RENAMED, panel_message, panel_shell, panel_title},
+    project::{RENAMED, added_label, panel_message, panel_shell, panel_title, removed_label},
     status_bar,
 };
 use crate::{
@@ -545,7 +545,7 @@ impl WindowView {
             )
     }
 
-    /// 第 `ri` 个仓库的当前分支（点了切换分支）和右边的同步按钮：有上游时写着落后、领先几个
+    /// 第 `ri` 个仓库的当前分支（点了切换分支）、没提交的改动加减了多少行，和右边的同步按钮：有上游时写着落后、领先几个
     /// 提交，没有上游时是发布分支。
     fn render_branch_bar(&self, ri: usize, repo: &git::Snapshot, fg: Rgb, bg: Rgb, cx: &mut Context<Self>) -> Div {
         let info = &repo.info;
@@ -577,6 +577,17 @@ impl WindowView {
             })
             .child(svg().flex_none().path(BRANCH_ICON).size(px(14.)).text_color(fg_hsla.opacity(0.75)))
             .child(div().min_w_0().truncate().child(name));
+        // 没提交的改动一共加减了多少行，为 0 的那边不画。
+        let (added, removed) = (repo.added(), repo.removed());
+        let changes = (added > 0 || removed > 0).then(|| {
+            div()
+                .flex_none()
+                .flex()
+                .gap(px(6.))
+                .text_size(px(12.))
+                .when(added > 0, |changes| changes.child(added_label(added)))
+                .when(removed > 0, |changes| changes.child(removed_label(removed)))
+        });
         let sync = if info.upstream.is_some() {
             let counts = format!("{}↓ {}↑", info.behind, info.ahead);
             let text = rust_i18n::t!("git.sync_tooltip", upstream = info.upstream.clone().unwrap_or_default());
@@ -624,6 +635,7 @@ impl WindowView {
             .gap(px(4.))
             .text_color(fg_hsla)
             .child(branch)
+            .children(changes)
             .child(div().flex_1())
             .children(sync)
     }

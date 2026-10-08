@@ -102,15 +102,6 @@ impl Repos {
         self.local().flat_map(|repo| repo.statuses.iter().map(|(path, status)| (repo.prefix.join(path), *status)))
     }
 
-    /// 主仓库和子仓库加了多少行、删了多少行，其他工作树不算。
-    pub fn added(&self) -> usize {
-        self.local().map(Snapshot::added).sum()
-    }
-
-    pub fn removed(&self) -> usize {
-        self.local().map(Snapshot::removed).sum()
-    }
-
     /// 主仓库和子仓库都没有改动，其他工作树不算。
     pub fn is_clean(&self) -> bool {
         self.local().all(Snapshot::is_clean)

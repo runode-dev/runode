@@ -29,7 +29,7 @@ pub(super) use search::FileSearch;
 
 use super::{
     WindowView,
-    project::{Decoration, Project, TreeFilter, added_label, panel_shell, panel_title, removed_label, status_color},
+    project::{Decoration, Project, TreeFilter, panel_shell, panel_title, status_color},
     titlebar::{drag_chip, icon_toggle},
 };
 use crate::{
@@ -264,23 +264,10 @@ impl WindowView {
                 this.open_files_more_menu(event.position, cx);
             }),
         );
-        // 标题那一行：目录名后面是没提交的改动一共加减了多少行，右边是搜索结果的排法、刷新和
-        // 「更多」菜单。
-        let dirty = workspace.project.git.as_ref().filter(|git| !git.is_clean());
+        // 标题那一行：目录名，右边是搜索结果的排法、刷新和「更多」菜单。
         let header = panel_title()
             .gap(px(6.))
             .child(div().flex_initial().min_w_0().truncate().text_color(hsla(fg)).child(name))
-            .when_some(dirty, |header, git| {
-                header.child(
-                    div()
-                        .flex_none()
-                        .flex()
-                        .gap(px(6.))
-                        .text_size(px(12.))
-                        .child(added_label(git.added()))
-                        .child(removed_label(git.removed())),
-                )
-            })
             .child(div().flex_1())
             .child(div().flex().gap(px(4.)).child(view_toggle).child(refresh).child(more));
         let font_size = cx.global::<AppConfig>().0.file_tree_font_size;

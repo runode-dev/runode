@@ -123,7 +123,7 @@ fn reads_submodules_of_submodules() {
     assert_eq!(paths_of(&repos.subs[1].unstaged), ["deep.txt"]);
     assert!(repos.subs[0].is_clean() && repos.main.is_clean());
     assert!(!repos.is_clean());
-    assert_eq!((repos.added(), repos.removed()), (1, 1));
+    assert_eq!((repos.subs[1].added(), repos.subs[1].removed()), (1, 1));
 }
 
 #[test]
