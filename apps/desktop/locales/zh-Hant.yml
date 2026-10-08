@@ -64,6 +64,8 @@ agent:
   done_title: "%{agent} 做完了"
   blocked_title: "%{agent} 在等你回答"
   notification_body: "%{workspace} · %{tab}"
+  test_title: "Runode 的通知能用了"
+  test_body: "agent 做完或等你回答時會這樣提醒你。"
   status:
     blocked: 等你回答
     done: 做完了
@@ -406,6 +408,9 @@ settings:
   default: 預設
   follow_system: 跟隨系統
   no_sound: 無
+  notifications_denied: "系統設定裡沒有允許 Runode 發通知，通知不會跳出來。"
+  open_notification_settings: 打開通知設定
+  test_notification: 發送測試通知
   no_matches: 沒有符合的
   fallback_font: 備用字體 %{n}
   add_fallback_font: 加入備用字體…

@@ -54,6 +54,9 @@ objc2.workspace = true
 objc2-foundation = { workspace = true, features = ["std", "NSArray", "NSData", "NSError", "NSFileManager", "NSLocale", "NSString", "NSURL"] }
 # agent 要人处理时的提示音用 NSSound 按名字播放系统声音。
 objc2-app-kit = { workspace = true, features = ["std", "NSApplication", "NSResponder", "NSImage", "NSMenu", "NSMenuItem", "NSEvent", "NSSound"] }
+# 问系统设置里有没有允许发通知，设置窗口在被拒时提示。
+objc2-user-notifications = { workspace = true, features = ["std", "block2", "UNUserNotificationCenter", "UNNotificationSettings"] }
+block2.workspace = true
 
 [lints]
 workspace = true

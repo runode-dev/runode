@@ -64,6 +64,8 @@ agent:
   done_title: "%{agent} has finished"
   blocked_title: "%{agent} is waiting for your answer"
   notification_body: "%{workspace} · %{tab}"
+  test_title: "Runode notifications work"
+  test_body: "This is how you are alerted when an agent finishes or needs an answer."
   status:
     blocked: Waiting for you
     done: Finished
@@ -406,6 +408,9 @@ settings:
   default: Default
   follow_system: Follow system
   no_sound: None
+  notifications_denied: "System Settings doesn't allow Runode to send notifications, so none will appear."
+  open_notification_settings: Open Notification Settings
+  test_notification: Send Test Notification
   no_matches: No matches
   fallback_font: Fallback font %{n}
   add_fallback_font: Add Fallback Font…

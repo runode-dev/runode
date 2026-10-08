@@ -68,7 +68,8 @@ two-face = { version = "0.5.2", default-features = false, features = ["syntect-f
 objc2 = "0.6"
 objc2-foundation = { version = "0.3", default-features = false }
 objc2-app-kit = { version = "0.3", default-features = false }
-# 给 Objective-C 的方法传回调（NSURLSession 的完成回调）。
+objc2-user-notifications = { version = "0.3", default-features = false }
+# 给 Objective-C 的方法传回调（NSURLSession 的完成回调、问通知授权的回调）。
 block2 = "0.6"
 # 远程访问：TLS 1.3 用 rustls，密码学后端用 ring（不用默认的 aws-lc-rs，免得再编一份 C 的密码库），
 # 只开 TLS 1.3；自签证书用 rcgen 生成，也走 ring。三者只许 runode-remote-access 直接依赖，见 deny.toml。

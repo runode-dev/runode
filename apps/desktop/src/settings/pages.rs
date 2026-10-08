@@ -319,13 +319,29 @@ impl SettingsView {
         cx: &mut Context<Self>,
     ) -> Div {
         let current = self.config.values(key);
-        let error = self.errors.get(key).cloned();
+        let mut error = self.errors.get(key).cloned();
         let control = match control {
             Control::Switch => {
                 let on = current.first().is_some_and(|value| value == "true");
-                switch(id("switch", key), on, colors)
-                    .on_click(on_click(cx, move |this, _, cx| this.write_or_report(key, vec![(!on).to_string()], cx)))
-                    .into_any_element()
+                let switch = switch(id("switch", key), on, colors)
+                    .on_click(on_click(cx, move |this, _, cx| this.write_or_report(key, vec![(!on).to_string()], cx)));
+                let notify = key == "agent-notifications" && on;
+                // 开着通知、系统设置里却拒绝了：通知发不出来，提示去系统设置里打开。
+                let denied = notify && crate::window::notifications_denied(cx);
+                if denied {
+                    error.get_or_insert_with(|| rust_i18n::t!("settings.notifications_denied").into_owned());
+                }
+                let open = denied.then(|| {
+                    button("open-notification-settings", rust_i18n::t!("settings.open_notification_settings"), colors)
+                        .on_click(|_, _, cx| {
+                            cx.open_url("x-apple.systempreferences:com.apple.Notifications-Settings.extension")
+                        })
+                });
+                let test = notify.then(|| {
+                    button("test-notification", rust_i18n::t!("settings.test_notification"), colors)
+                        .on_click(|_, _, cx| crate::window::test_notification(cx))
+                });
+                div().flex().items_center().gap(px(8.)).children(open).children(test).child(switch).into_any_element()
             }
             Control::Choice(values) => {
                 let options = values.iter().map(|value| (value.to_string(), choice_label(key, value))).collect();

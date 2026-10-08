@@ -55,7 +55,11 @@ use runode_shared_types::{
     pane::{Axis, Direction, SplitId},
 };
 
-pub(crate) use agents::{alert::listen as listen_notifications, logo::FILES as AGENT_LOGO_FILES, reveal_notified};
+pub(crate) use agents::{
+    alert::{listen as listen_notifications, notifications_denied, test as test_notification},
+    logo::FILES as AGENT_LOGO_FILES,
+    reveal_notified,
+};
 pub use arrange::ArrangePanes;
 pub use background::refresh as watch_background;
 pub use files::{

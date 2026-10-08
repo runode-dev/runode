@@ -32,11 +32,16 @@ pub struct AgentAlert {
     pub tab: String,
 }
 
-/// 发过的通知，以及是否已经开始接收点击。
+/// 发过的通知，是否已经开始接收点击，以及系统设置里是否拒绝了 Runode 发通知（拒绝时通知照发但不会
+/// 弹出来）、是不是正在问。
 #[derive(Default)]
 struct Notified {
     listening: bool,
     posted: HashSet<String>,
+    #[cfg(target_os = "macos")]
+    denied: bool,
+    #[cfg(target_os = "macos")]
+    asking: bool,
 }
 
 impl Global for Notified {}
@@ -56,6 +61,22 @@ pub fn alert(alert: AgentAlert, cx: &mut App) {
     }
     if config.agent_notifications && notifications_available() {
         post(alert, cx);
+    }
+}
+
+/// 设置窗口里的「发送测试通知」：播放「干完了」的提示音，在 .app 里发一条测试通知。第一次发时
+/// 系统会弹出授权框。点它时标识认不出分屏，什么都不做。
+pub fn test(cx: &mut App) {
+    if let Some(sound) = &cx.global::<AppConfig>().0.agent_done_sound {
+        crate::ui::sound::play(sound);
+    }
+    if notifications_available() {
+        cx.show_system_notification(SystemNotification {
+            tag: "runode-test".into(),
+            title: rust_i18n::t!("agent.test_title").into_owned().into(),
+            body: rust_i18n::t!("agent.test_body").into_owned().into(),
+            actions: Vec::new(),
+        });
     }
 }
 
@@ -105,6 +126,52 @@ pub fn listen(cx: &mut App) {
 #[cfg(target_os = "macos")]
 fn notifications_available() -> bool {
     crate::about::in_app_bundle()
+}
+
+/// 系统设置里拒绝了 Runode 发通知。返回上次问到的结果（没问过、不在 .app 里时算没拒绝），同时在
+/// 后台再问一次，结果变了就重画各窗口：用户在系统设置里改完回来，设置窗口跟着变。一旦拒绝过，
+/// 系统不再弹授权框，只能去系统设置里打开。
+#[cfg(target_os = "macos")]
+pub fn notifications_denied(cx: &mut App) -> bool {
+    use std::ptr::NonNull;
+
+    use block2::RcBlock;
+    use futures::StreamExt as _;
+    use objc2_user_notifications::{UNAuthorizationStatus, UNNotificationSettings, UNUserNotificationCenter};
+
+    if !notifications_available() {
+        return false;
+    }
+    let notified = cx.default_global::<Notified>();
+    let denied = notified.denied;
+    if std::mem::replace(&mut notified.asking, true) {
+        return denied;
+    }
+    let (tx, mut rx) = futures::channel::mpsc::unbounded();
+    let completion = RcBlock::new(move |settings: NonNull<UNNotificationSettings>| {
+        // SAFETY: 回调期间 settings 是有效的对象。
+        let status = unsafe { settings.as_ref() }.authorizationStatus();
+        tx.unbounded_send(status == UNAuthorizationStatus::Denied).ok();
+    });
+    UNUserNotificationCenter::currentNotificationCenter().getNotificationSettingsWithCompletionHandler(&completion);
+    cx.spawn(async move |cx| {
+        let now = rx.next().await;
+        cx.update(|cx| {
+            let notified = cx.global_mut::<Notified>();
+            notified.asking = false;
+            if let Some(now) = now.filter(|now| *now != notified.denied) {
+                notified.denied = now;
+                cx.refresh_windows();
+            }
+        })
+    })
+    .detach();
+    denied
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn notifications_denied(_: &mut App) -> bool {
+    false
 }
 
 #[cfg(not(target_os = "macos"))]
