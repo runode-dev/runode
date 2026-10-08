@@ -129,7 +129,7 @@ install_linux() {
     mv -f "$lib_dir/runode.new" "$lib_dir/runode"
 
     link_cli "$lib_dir/runode"
-    say "已装好 $bin_dir/runode。Linux 版没有桌面界面，用手机连上来：在 ~/.config/runode/config.conf 里写上"
+    say "已装好 $bin_dir/runode。Linux 版没有桌面界面，用手机连上来：在 ~/.runode/config.conf 里写上"
     say "remote-access = true，后台跑起 runode --host，再用 runode remote pair 和手机配对。"
 }
 

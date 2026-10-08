@@ -63,7 +63,7 @@ runode read right --command                    # read back that command's output
 runode remote pair                             # show a QR code to pair your phone
 ```
 
-Run `runode help` for the full reference. The config file lives at `~/.config/runode/config.conf`.
+Run `runode help` for the full reference. The config file lives at `~/.runode/config.conf`.
 
 ## FAQ
 

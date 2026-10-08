@@ -1,7 +1,7 @@
 //! runode 读写的目录和文件的位置，统一从环境变量算出来。
 //!
-//! runode 自己的东西在所有系统上都放在同一个根目录：`$XDG_CONFIG_HOME/runode`，没设时
-//! `~/.config/runode`。配置文件和要留着的数据（窗口布局的存档、命令历史）直接放在根目录，
+//! runode 自己的东西在所有系统上都放在同一个根目录：`~/.runode`，不跟着 `XDG_CONFIG_HOME` 走。
+//! 配置文件和要留着的数据（窗口布局的存档、命令历史）直接放在根目录，
 //! 随时能重新生成的缓存（shell 集成脚本、首个终端的尺寸、宿主进程的日志）放在根目录的
 //! `cache/` 里，宿主进程的 socket 和锁放在根目录的 `run/` 里，远程访问的证书、设备表和配对口令放在
 //! 根目录的 `remote-access/` 里。
@@ -26,9 +26,9 @@ const SUN_PATH_LEN: usize = 104;
 pub struct Dirs {
     /// 家目录，即 `HOME`。
     pub home: Option<PathBuf>,
-    /// 用户配置的根目录：`$XDG_CONFIG_HOME`，没设时 `~/.config`。Ghostty 的配置也在这下面。
+    /// 用户配置的根目录：`$XDG_CONFIG_HOME`，没设时 `~/.config`。Ghostty 的配置在这下面。
     pub config: Option<PathBuf>,
-    /// runode 自己的根目录，即 `config` 下的 `runode`。配置文件和要留着的数据放在这里。
+    /// runode 自己的根目录，即家目录下的 `.runode`。配置文件和要留着的数据放在这里。
     pub data: Option<PathBuf>,
     /// 可以重新生成的缓存，即 `data` 下的 `cache`。shell 会执行这里的集成脚本，所以放在
     /// 用户自己的目录里，而不是可能多人共用的临时目录。
@@ -46,7 +46,7 @@ impl Dirs {
         let var = |key: &str| var(key).filter(|v| !v.is_empty()).map(PathBuf::from);
         let home = var("HOME");
         let config = var("XDG_CONFIG_HOME").or_else(|| home.as_ref().map(|home| home.join(".config")));
-        let data = config.as_ref().map(|config| config.join("runode"));
+        let data = home.as_ref().map(|home| home.join(".runode"));
         let cache = data.as_ref().map(|data| data.join("cache"));
         Self { home, config, data, cache }
     }
@@ -245,22 +245,22 @@ mod tests {
     }
 
     #[test]
-    fn everything_lives_under_the_config_home() {
+    fn everything_lives_under_dot_runode() {
         let dirs = dirs(&[("HOME", "/home/me")]);
-        assert_eq!(dirs.config_file(), Some("/home/me/.config/runode/config.conf".into()));
-        assert_eq!(dirs.windows_file(), Some("/home/me/.config/runode/windows.json".into()));
-        assert_eq!(dirs.history_file(), Some("/home/me/.config/runode/history.jsonl".into()));
-        assert_eq!(dirs.themes_dir(), Some("/home/me/.config/runode/themes".into()));
-        assert_eq!(dirs.agent_detection_dir(), Some("/home/me/.config/runode/agent-detection".into()));
-        assert_eq!(dirs.shell_integration_dir(), Some("/home/me/.config/runode/cache/shell-integration".into()));
-        assert_eq!(dirs.prespawn_size_file(), Some("/home/me/.config/runode/cache/first-terminal-size".into()));
+        assert_eq!(dirs.config_file(), Some("/home/me/.runode/config.conf".into()));
+        assert_eq!(dirs.windows_file(), Some("/home/me/.runode/windows.json".into()));
+        assert_eq!(dirs.history_file(), Some("/home/me/.runode/history.jsonl".into()));
+        assert_eq!(dirs.themes_dir(), Some("/home/me/.runode/themes".into()));
+        assert_eq!(dirs.agent_detection_dir(), Some("/home/me/.runode/agent-detection".into()));
+        assert_eq!(dirs.shell_integration_dir(), Some("/home/me/.runode/cache/shell-integration".into()));
+        assert_eq!(dirs.prespawn_size_file(), Some("/home/me/.runode/cache/first-terminal-size".into()));
         assert_eq!(dirs.ghostty_themes_dir(), Some("/home/me/.config/ghostty/themes".into()));
     }
 
     #[test]
     fn remote_access_files_share_one_directory() {
         let dirs = dirs(&[("HOME", "/home/me")]);
-        let dir = PathBuf::from("/home/me/.config/runode/remote-access");
+        let dir = PathBuf::from("/home/me/.runode/remote-access");
         assert_eq!(dirs.remote_access_dir(), Some(dir.clone()));
         for (file, name) in [
             (dirs.remote_access_cert_file(), "cert.der"),
@@ -280,23 +280,23 @@ mod tests {
     #[test]
     fn host_files_live_in_the_runtime_dir() {
         let dirs = dirs(&[("HOME", "/home/me")]);
-        assert_eq!(dirs.runtime_dir(), Some("/home/me/.config/runode/run".into()));
-        assert_eq!(dirs.host_socket_file(), Some(format!("/home/me/.config/runode/run/{HOST_NAME}.sock").into()));
-        assert_eq!(dirs.host_lock_file(), Some(format!("/home/me/.config/runode/run/{HOST_NAME}.lock").into()));
-        assert_eq!(dirs.host_log_file(), Some(format!("/home/me/.config/runode/cache/{HOST_NAME}.log").into()));
+        assert_eq!(dirs.runtime_dir(), Some("/home/me/.runode/run".into()));
+        assert_eq!(dirs.host_socket_file(), Some(format!("/home/me/.runode/run/{HOST_NAME}.sock").into()));
+        assert_eq!(dirs.host_lock_file(), Some(format!("/home/me/.runode/run/{HOST_NAME}.lock").into()));
+        assert_eq!(dirs.host_log_file(), Some(format!("/home/me/.runode/cache/{HOST_NAME}.log").into()));
         assert_eq!(Dirs::default().host_socket_file(), None);
     }
 
     #[test]
     fn socket_paths_must_fit_in_sun_path() {
-        // 根目录下的 `/runode/run/host-dev.sock` 共 25 字节（release 构建的 `host.sock` 短 4
-        // 字节），根目录拼上它正好 103 字节；再长就放不下了。
+        // 家目录下的 `/.runode/run/host-dev.sock` 共 26 字节（release 构建的 `host.sock` 短 4
+        // 字节），家目录拼上它正好 103 字节；再长就放不下了。
         let fits =
-            format!("/{}", "x".repeat(SUN_PATH_LEN - 2 - "/runode/run/".len() - HOST_NAME.len() - ".sock".len()));
-        let socket = dirs(&[("HOME", "/h"), ("XDG_CONFIG_HOME", &fits)]).host_socket_file().unwrap();
+            format!("/{}", "x".repeat(SUN_PATH_LEN - 2 - "/.runode/run/".len() - HOST_NAME.len() - ".sock".len()));
+        let socket = dirs(&[("HOME", &fits)]).host_socket_file().unwrap();
         assert_eq!(socket.as_os_str().len(), SUN_PATH_LEN - 1);
         let too_long = format!("{fits}x");
-        let dirs = dirs(&[("HOME", "/h"), ("XDG_CONFIG_HOME", &too_long)]);
+        let dirs = dirs(&[("HOME", &too_long)]);
         assert_eq!(dirs.host_socket_file(), None);
         // 锁文件和日志不受这个限制。
         assert!(dirs.host_lock_file().is_some());
@@ -310,9 +310,9 @@ mod tests {
 
         let root = std::env::temp_dir().join(format!("runode-paths-test-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
-        let dirs = dirs(&[("HOME", "/h"), ("XDG_CONFIG_HOME", root.to_str().unwrap())]);
+        let dirs = dirs(&[("HOME", root.to_str().unwrap())]);
         let dir = dirs.create_runtime_dir().unwrap();
-        assert_eq!(dir, root.join("runode/run"));
+        assert_eq!(dir, root.join(".runode/run"));
         let mode = |dir: &Path| std::fs::metadata(dir).unwrap().permissions().mode() & 0o777;
         assert_eq!(mode(&dir), 0o700);
         // 已经存在、权限被放宽了的目录也收回来。
@@ -331,9 +331,9 @@ mod tests {
     }
 
     #[test]
-    fn xdg_config_home_moves_the_root() {
+    fn xdg_config_home_moves_only_ghostty() {
         let dirs = dirs(&[("HOME", "/home/me"), ("XDG_CONFIG_HOME", "/xdg")]);
-        assert_eq!(dirs.config_file(), Some("/xdg/runode/config.conf".into()));
+        assert_eq!(dirs.config_file(), Some("/home/me/.runode/config.conf".into()));
         assert_eq!(
             dirs.ghostty_config_files()[..2],
             [PathBuf::from("/xdg/ghostty/config"), "/xdg/ghostty/config.ghostty".into()]

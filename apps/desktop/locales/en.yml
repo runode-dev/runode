@@ -420,7 +420,7 @@ settings:
   other_agents: Other programs
   config_file: Location
   config_file_hint: "Settings here are written to %{path}; other lines in the file are kept. Values set in the Ghostty configuration also apply unless overridden here."
-  config_file_placeholder: Path of a file to include, such as ~/.config/runode/colors.conf
+  config_file_placeholder: Path of a file to include, such as ~/.runode/colors.conf
   open_config: Open in Editor
   reload_config: Reload
   page:

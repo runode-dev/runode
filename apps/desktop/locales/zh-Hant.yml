@@ -420,7 +420,7 @@ settings:
   other_agents: 其他程式
   config_file: 位置
   config_file_hint: "這裡的設定寫進 %{path}，檔案裡別的行原樣保留。Ghostty 設定裡寫的值也生效，這裡設了的以這裡為準。"
-  config_file_placeholder: 要引入的檔案路徑，例如 ~/.config/runode/colors.conf
+  config_file_placeholder: 要引入的檔案路徑，例如 ~/.runode/colors.conf
   open_config: 在編輯器裡打開
   reload_config: 重新載入
   page:

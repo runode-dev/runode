@@ -103,7 +103,7 @@ stop_app() {
     done
     if [[ -n $home ]]; then
         # shellcheck disable=SC2207
-        all+=($(lsof -t "$home"/.config/runode/run/*.lock 2>/dev/null || true))
+        all+=($(lsof -t "$home"/.runode/run/*.lock 2>/dev/null || true))
     fi
     kill -TERM "${all[@]}" 2>/dev/null || true
     for _ in $(seq 20); do
@@ -175,8 +175,8 @@ fi
 for ((round = 1; round <= rounds; round++)); do
     say "第 $round/$rounds 轮……"
     home=$(mktemp -d "${TMPDIR:-/tmp}/runode-perf-home.XXXXXX")
-    mkdir -p "$home/.config/runode"
-    socket="$home/.config/runode/run/host.sock"
+    mkdir -p "$home/.runode"
+    socket="$home/.runode/run/host.sock"
     if ((round == 1 && ${#socket} >= 104)); then
         echo "perf.sh: 临时目录太长，宿主的 socket 路径超过 104 字节，app 会不开 socket；可设短一点的 TMPDIR" >&2
     fi
@@ -186,7 +186,7 @@ for ((round = 1; round <= rounds; round++)); do
     echo "$window_ms" >"$raw/$round.first.window"
     wait_content "$raw/$round.first.log" 5
     for _ in $(seq 50); do
-        [[ -f $home/.config/runode/cache/first-terminal-size ]] && break
+        [[ -f $home/.runode/cache/first-terminal-size ]] && break
         sleep_s 0.1
     done
     stop_app "$pid"

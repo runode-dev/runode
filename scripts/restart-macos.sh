@@ -18,7 +18,7 @@ set -euo pipefail
 
 app=${RUNODE_APP:-/Applications/Runode.app}
 bin="$app/Contents/MacOS/runode"
-data="${XDG_CONFIG_HOME:-$HOME/.config}/runode"
+data="$HOME/.runode"
 # 发布构建的宿主用 host.sock、host.log，调试构建的是 host-dev.*，见 runode_paths 的 HOST_NAME。
 socket="$data/run/host.sock"
 host_log="$data/cache/host.log"

@@ -604,7 +604,7 @@ mod bench {
         (Where::InApp(host), link)
     }
 
-    /// 拉起 `runode --host`，socket 放在临时的配置目录里，经 socket 连上。
+    /// 拉起 `runode --host`，家目录换成临时目录、socket 放在它的 `.runode` 里，经 socket 连上。
     fn process(name: &str) -> (Where, Link) {
         let exe = std::env::current_exe().unwrap();
         let runode = exe.parent().unwrap().parent().unwrap().join("runode");
@@ -612,12 +612,8 @@ mod bench {
         let config = PathBuf::from(format!("/tmp/rnb-{}-{name}", std::process::id()));
         let _ = std::fs::remove_dir_all(&config);
         std::fs::create_dir_all(&config).unwrap();
-        let child = Command::new(&runode).arg("--host").env("XDG_CONFIG_HOME", &config).spawn().unwrap();
-        let dirs = runode_paths::Dirs {
-            config: Some(config.clone()),
-            data: Some(config.join("runode")),
-            ..Default::default()
-        };
+        let child = Command::new(&runode).arg("--host").env("HOME", &config).spawn().unwrap();
+        let dirs = runode_paths::Dirs { data: Some(config.join(".runode")), ..Default::default() };
         let socket = dirs.host_socket_file().unwrap();
         let deadline = Instant::now() + WAIT;
         // 单独一个进程的宿主和 app 的构建一样，不然给不了快照。
