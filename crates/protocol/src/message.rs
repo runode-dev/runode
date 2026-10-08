@@ -32,7 +32,8 @@
 use std::{fmt, path::PathBuf, str::FromStr};
 
 use runode_shared_types::{
-    clipboard::ClipboardAccess, grid::GridSize, session::SessionMeta, settings::TermSettings, shell::IntegrationMode,
+    agent::AgentUsage, clipboard::ClipboardAccess, grid::GridSize, session::SessionMeta, settings::TermSettings,
+    shell::IntegrationMode,
 };
 use serde::{Deserialize, Serialize};
 
@@ -231,6 +232,9 @@ pub enum ClientMsg {
     SendKeys { req: u32, id: SessionId, keys: Vec<String> },
     /// 往会话里粘贴一段文字，程序开着括号粘贴模式（mode 2004）时套上括号，回 `Done`。
     Paste { req: u32, id: SessionId, text: String },
+    /// 会话 `id` 前台的 agent 报告了自己的模型和用量（`runode statusline`），宿主记进
+    /// `SessionMeta::agent_usage`，回 `Done`。不算操作会话，不改 `SessionMeta::driver`。
+    AgentUsage { req: u32, id: SessionId, usage: AgentUsage },
     /// 要 app 里各个终端摆在哪，宿主转给界面，回 `HostMsg::Layout`。
     Layout { req: u32 },
     /// 界面办完了宿主转来的 `HostMsg::UiRequest`：`ui` 是那条请求的编号，`reply` 原样转给发请求

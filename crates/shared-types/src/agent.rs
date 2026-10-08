@@ -64,6 +64,23 @@ pub struct Agent {
     pub state: AgentState,
 }
 
+/// agent 自己报告的模型和用量，目前只有 Claude Code 经它的 statusLine 命令（`runode statusline`）报。
+/// 报告里缺的项为 `None`。
+#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
+pub struct AgentUsage {
+    /// 模型的显示名，比如 `Opus`。
+    pub model: Option<String>,
+    /// 上一次请求占了多少上下文（输入加上缓存读写的 token）。
+    pub context_tokens: Option<u64>,
+    /// 上下文窗口有多大。
+    pub context_window: Option<u64>,
+    /// 这次会话累计的花费，百万分之一美元。
+    pub cost_micro_usd: Option<u64>,
+    /// 五小时用量限额用掉的百分比。
+    pub five_hour_percent: Option<u8>,
+}
+
 impl Agent {
     pub fn is_working(self) -> bool {
         self.state == AgentState::Working

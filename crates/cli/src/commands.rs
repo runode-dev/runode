@@ -213,6 +213,17 @@ pub(crate) fn run(command: Command, env: &Env, out: &mut dyn Write, err: &mut dy
                 writeln!(out, "installed {}", path.display())?;
             }
         }
+        Command::SetupStatusline => {
+            let home = env.dirs.home.as_deref().ok_or_else(|| anyhow!("cannot tell where your home directory is"))?;
+            let chain =
+                env.dirs.claude_statusline_file().ok_or_else(|| anyhow!("cannot tell where runode keeps its data"))?;
+            if let Some(dir) = chain.parent() {
+                std::fs::create_dir_all(dir)?;
+            }
+            let path = crate::statusline::setup_statusline(home, &chain, &std::env::current_exe()?)?;
+            writeln!(out, "installed the status line in {}", path.display())?;
+        }
+        Command::Statusline => crate::statusline::run(env, out)?,
         Command::RemotePair { addrs } => crate::remote::pair(env, &addrs, out, &mut crate::remote::read_answer)?,
         Command::RemoteDevices { json } => crate::remote::devices(env, json, out)?,
         Command::RemoteRevoke { device } => crate::remote::revoke(env, &device, out)?,

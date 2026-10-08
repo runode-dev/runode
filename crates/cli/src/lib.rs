@@ -1,4 +1,4 @@
-//! 命令行前端：`runode list`、`read`、`send`、`wait`、`open`、`kill`、`focus`、`setup` 和 `remote`。
+//! 命令行前端：`runode list`、`read`、`send`、`wait`、`open`、`kill`、`focus`、`setup`、`statusline` 和 `remote`。
 //! 经宿主的 Unix socket 按 `runode_protocol` 说话，不碰终端仿真和界面；`remote`（给手机配对远程
 //! 访问、列出和撤销配对过的设备）不经宿主，读写 `runode_remote_access` 管的文件。
 //!
@@ -7,7 +7,7 @@
 //! 哪个会话里（`runode_protocol::ENV_SESSION`），所以 agent 能在自己的终端里调度别的终端。
 //!
 //! 命令的解析在 `args`，连宿主和收发消息在 `client`，按写法找会话在 `select`，各个命令在
-//! `commands`，给 agent 装使用说明在 `setup`，远程访问在 `remote`。
+//! `commands`，给 agent 装使用说明在 `setup`，Claude Code 的状态栏在 `statusline`，远程访问在 `remote`。
 
 mod args;
 mod client;
@@ -15,6 +15,7 @@ mod commands;
 mod remote;
 mod select;
 mod setup;
+mod statusline;
 
 use std::{ffi::OsString, io::Write, path::PathBuf};
 

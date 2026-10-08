@@ -1,5 +1,5 @@
-//! 标签里的终端区：分屏树、分隔线、拖动分隔线时的遮罩，以及别的终端里的程序（经命令行）正在
-//! 操作某个分屏时右上角的驱动标记。
+//! 标签里的终端区：分屏树、分隔线、拖动分隔线时的遮罩，别的终端里的程序（经命令行）正在
+//! 操作某个分屏时右上角的驱动标记，以及卡片样式下 agent 报了用量时分屏底下的一行。
 
 use std::{
     borrow::Cow,
@@ -14,6 +14,7 @@ use gpui::{
 };
 use runode_protocol::SessionId;
 use runode_shared_types::{
+    agent::AgentUsage,
     color::Rgb,
     pane::{Axis, Node},
     session::{DriveAction, Driver},
@@ -277,6 +278,10 @@ impl WindowView {
         // 定位撑满标题条下面的部分：百分比的高度在这里会按整张卡片算，比剩下的高出一个标题条。
         let group = SharedString::from(format!("pane-{}", id.as_u64()));
         let inset = px(4.);
+        let usage = {
+            let terminal = tab.panes[&id].0.read(cx);
+            terminal.agent().and(terminal.meta().agent_usage.as_ref()).map(usage_text)
+        };
         card(hsla(fg), hsla(bg))
             .group(group.clone())
             .size_full()
@@ -290,6 +295,16 @@ impl WindowView {
                     .min_h_0()
                     .child(terminal.absolute().top_0().left(inset).right(inset).bottom(inset)),
             )
+            .children(usage.filter(|text| !text.is_empty()).map(|text| {
+                div()
+                    .flex_none()
+                    .px(px(10.))
+                    .pb(px(4.))
+                    .text_size(px(11.))
+                    .text_color(hsla(fg).opacity(0.55))
+                    .truncate()
+                    .child(text)
+            }))
             .into_any_element()
     }
 
@@ -607,6 +622,35 @@ impl WindowView {
     }
 }
 
+/// 分屏底下那一行：模型、上下文占用、花费和五小时限额，缺的项不写。
+fn usage_text(usage: &AgentUsage) -> String {
+    let mut parts = Vec::new();
+    parts.extend(usage.model.clone());
+    match (usage.context_tokens, usage.context_window) {
+        (Some(used), Some(window)) if window > 0 => {
+            parts.push(format!("{} / {} ({}%)", tokens(used), tokens(window), used * 100 / window));
+        }
+        (Some(used), _) => parts.push(tokens(used)),
+        _ => {}
+    }
+    parts.extend(usage.cost_micro_usd.map(|micro| format!("${:.2}", micro as f64 / 1e6)));
+    parts.extend(usage.five_hour_percent.map(|percent| format!("5h {percent}%")));
+    parts.join("  ·  ")
+}
+
+/// token 数的简写：`850`、`48.6K`、`156K`、`1M`。
+fn tokens(n: u64) -> String {
+    let short = |value: f64, unit: &str| {
+        let text = if value < 100. { format!("{value:.1}") } else { format!("{value:.0}") };
+        format!("{}{unit}", text.trim_end_matches(".0"))
+    };
+    match n {
+        0..1_000 => n.to_string(),
+        1_000..1_000_000 => short(n as f64 / 1e3, "K"),
+        _ => short(n as f64 / 1e6, "M"),
+    }
+}
+
 /// 分屏右上角的驱动标记。没有鼠标处理，点击照样落到下面的终端上。
 fn driver_badge(text: SharedString, fg: Rgb, bg: Rgb) -> Div {
     let panel = hsla(bg.mix(fg, 0.12));
@@ -630,6 +674,23 @@ fn driver_badge(text: SharedString, fg: Rgb, bg: Rgb) -> Div {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn usage_reads_short() {
+        assert_eq!(tokens(850), "850");
+        assert_eq!(tokens(48_600), "48.6K");
+        assert_eq!(tokens(200_000), "200K");
+        assert_eq!(tokens(1_000_000), "1M");
+        let usage = AgentUsage {
+            model: Some("Opus".into()),
+            context_tokens: Some(48_600),
+            context_window: Some(1_000_000),
+            cost_micro_usd: Some(1_234_000),
+            five_hour_percent: Some(23),
+        };
+        assert_eq!(usage_text(&usage), "Opus  ·  48.6K / 1M (4%)  ·  $1.23  ·  5h 23%");
+        assert_eq!(usage_text(&AgentUsage::default()), "");
+    }
 
     #[test]
     fn the_badge_goes_away_ten_seconds_after_the_drive() {

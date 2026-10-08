@@ -43,3 +43,33 @@ fn codex_gets_a_skill_and_loses_the_old_section() {
     assert_eq!(run("setup codex", &fresh.env).0, exit::OK);
     assert!(!fresh.env.dirs.home.as_ref().unwrap().join(".codex").exists());
 }
+
+#[test]
+fn statusline_takes_over_and_keeps_the_previous_command() {
+    let fake = FakeHost::start("setupstatus", |_| vec![]);
+    let home = fake.env.dirs.home.clone().unwrap();
+    let mut env = fake.env;
+    env.dirs.data = Some(home.join(".runode"));
+    let settings = home.join(".claude/settings.json");
+    let chain = home.join(".runode/claude-statusline");
+    std::fs::create_dir_all(settings.parent().unwrap()).unwrap();
+    std::fs::write(&settings, r#"{"model":"opus","statusLine":{"type":"command","command":"echo mine","padding":1}}"#)
+        .unwrap();
+
+    let (code, out, err) = run("setup statusline", &env);
+    assert_eq!(code, exit::OK, "{err}");
+    assert_eq!(out, format!("installed the status line in {}\n", settings.display()));
+    // 原来的命令存起来，别的设置和 statusLine 里别的项留着，键的先后不变。
+    assert_eq!(std::fs::read_to_string(&chain).unwrap(), "echo mine");
+    let installed: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&settings).unwrap()).unwrap();
+    assert_eq!(installed["model"], "opus");
+    assert_eq!(installed["statusLine"]["padding"], 1);
+    let command = installed["statusLine"]["command"].as_str().unwrap();
+    assert!(command.starts_with("\"${RUNODE_BIN:-") && command.ends_with("\" statusline"), "{command}");
+    let text = std::fs::read_to_string(&settings).unwrap();
+    assert!(text.find("model") < text.find("statusLine"), "{text}");
+
+    // 再装一次：已经是 runode 的了，存着的原命令不动。
+    assert_eq!(run("setup statusline", &env).0, exit::OK);
+    assert_eq!(std::fs::read_to_string(&chain).unwrap(), "echo mine");
+}

@@ -40,6 +40,7 @@ use std::{
 use anyhow::{Context as _, Result, anyhow};
 use runode_protocol::{AttachMode, FinishedCommand, HostMsg, SessionId, SessionInfo};
 use runode_shared_types::{
+    agent::AgentUsage,
     clipboard::ClipboardAccess,
     grid::GridSize,
     input::KeyChord,
@@ -134,6 +135,8 @@ pub(crate) enum Inbox {
     Keys(Vec<KeyChord>),
     /// 按宿主 VT 当前的模式把这段文字当粘贴写给程序，见 `HostSession::encode_paste`。
     Paste(String),
+    /// 前台 agent 报告的模型和用量，见 `HostSession::set_agent_usage`。
+    AgentUsage(AgentUsage),
     /// 谁最近在操作这个会话，见 `SessionMeta::driver`：`Some` 是别的终端里的程序经 socket 做了
     /// 一件事，排在那件事前面；`None` 是用户在界面里打了字，清掉记录。
     Driven(Option<Drive>),
@@ -696,6 +699,7 @@ impl Runner {
                 self.session.drive(by.map(|by| by.to_string()), action, at_ms);
             }
             Inbox::Driven(None) => self.session.clear_driver(),
+            Inbox::AgentUsage(usage) => self.session.set_agent_usage(usage),
             Inbox::Open(pending) => {
                 if !pending.is_empty() {
                     self.session.write(pending);

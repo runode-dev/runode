@@ -94,6 +94,12 @@ commands:
                               teach the agent to use runode: installs a skill
                               in ~/.claude/skills/runode or
                               ~/.agents/skills/runode; --print shows it instead
+  setup statusline            show Claude Code's model, context and cost under
+                              its runode pane: points statusLine in
+                              ~/.claude/settings.json at `runode statusline`,
+                              which still runs the command that was there
+  statusline                  what Claude Code runs for its status line: reads
+                              its JSON on stdin and tells the app
   remote pair [--addr ADDR]...
                               pair a phone for remote access: shows a QR code
                               and its link, valid for 5 minutes, and waits for
@@ -160,6 +166,10 @@ pub(crate) enum Command {
         target: SetupTarget,
         print: bool,
     },
+    /// 把 Claude Code 的状态栏换成 `Statusline`。
+    SetupStatusline,
+    /// Claude Code 的状态栏命令，见 `statusline` 模块。
+    Statusline,
     /// 给手机配对远程访问。`addrs` 是除了本机地址以外另外放进配对 URI 的地址，排在前面。
     RemotePair {
         addrs: Vec<IpAddr>,
@@ -335,10 +345,15 @@ pub(crate) fn parse(args: &[String]) -> Result<Command, String> {
             let target = match words.first().map(String::as_str) {
                 Some("claude") => SetupTarget::Claude,
                 Some("codex") => SetupTarget::Codex,
-                Some(other) => return Err(format!("setup knows claude and codex, not {other}")),
-                None => return Err("setup needs claude or codex".into()),
+                Some("statusline") => return Ok(Command::SetupStatusline),
+                Some(other) => return Err(format!("setup knows claude, codex and statusline, not {other}")),
+                None => return Err("setup needs claude, codex or statusline".into()),
             };
             Command::Setup { target, print: std::mem::take(&mut flags.print) }
+        }
+        "statusline" => {
+            no_more(words, 0, name)?;
+            Command::Statusline
         }
         "remote" => {
             let (what, words) = words.split_first().ok_or("remote needs pair, devices or revoke")?;
@@ -560,7 +575,9 @@ mod tests {
     fn setup_targets() {
         assert_eq!(parse("setup claude"), Ok(Command::Setup { target: SetupTarget::Claude, print: false }));
         assert_eq!(parse("setup codex --print"), Ok(Command::Setup { target: SetupTarget::Codex, print: true }));
-        assert!(parse("setup").unwrap_err().contains("claude or codex"));
+        assert_eq!(parse("setup statusline"), Ok(Command::SetupStatusline));
+        assert_eq!(parse("statusline"), Ok(Command::Statusline));
+        assert!(parse("setup").unwrap_err().contains("codex or statusline"));
         assert!(parse("setup vim").unwrap_err().contains("not vim"));
     }
 

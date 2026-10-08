@@ -32,6 +32,7 @@
           "kind": "claude",
           "state": "blocked"
         },
+        "agent_usage": null,
         "cwd": "/Users/ethan/中文",
         "driver": {
           "action": "paste",
@@ -620,6 +621,7 @@
       "id": "0123456789abcdef0011223344556677",
       "meta": {
         "agent": null,
+        "agent_usage": null,
         "cwd": null,
         "driver": null,
         "fallback_title": null,
@@ -799,6 +801,7 @@
               "kind": "claude",
               "state": "blocked"
             },
+            "agent_usage": null,
             "cwd": "/Users/ethan/中文",
             "driver": {
               "action": "paste",
