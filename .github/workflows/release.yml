@@ -16,6 +16,11 @@
 # 就会去下载，新装的也是这个版本。版本号只能是 x.y.z：Info.plist 的 CFBundleShortVersionString 和
 # app 比较版本（`runode_update` 的 `version_parts`）都只认数字。
 #
+# beta 版用同样的 x.y.z 版本号，说明文件 docs/releases/vX.Y.Z.md 第一行是 `<!-- prerelease -->`
+# （scripts/release.sh --beta 写上）时发成预发布、不标 latest：releases/latest 还指着上一个正式版，
+# 自动更新和不带版本号的安装都拿不到它，要装 beta 的用 RUNODE_VERSION 指定版本。测好了转正：
+# `gh release edit vX.Y.Z --prerelease=false --latest --title "Runode X.Y.Z"`，不用重新构建。
+#
 # 要在仓库的 Secrets 里配：
 #   MACOS_CERTIFICATE           Developer ID Application 证书连私钥导出的 .p12，base64 编码
 #   MACOS_CERTIFICATE_PASSWORD  导出 .p12 时设的密码
@@ -292,16 +297,26 @@ jobs:
           cat SHA256SUMS
       - name: 发成草稿，传齐了再公开
         # 先建草稿再公开：传到一半时 releases/latest 还指着上一个版本，app 和安装脚本不会拿到缺文件的版本。
-        # 更新说明用 scripts/release.sh 写的 docs/releases/$TAG.md，没有时让 GitHub 按 PR 生成。
+        # 更新说明用 scripts/release.sh 写的 docs/releases/$TAG.md，没有时让 GitHub 按 PR 生成；
+        # 说明第一行是 `<!-- prerelease -->` 时发成 beta（见开头）。
         run: |
           bundle=target/release/bundle
+          file="docs/releases/$TAG.md"
           notes=(--generate-notes)
-          [[ -f "docs/releases/$TAG.md" ]] && notes=(--notes-file "docs/releases/$TAG.md")
-          gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --verify-tag --draft --title "Runode $VERSION" \
+          kind=(--title "Runode $VERSION")
+          latest=--latest
+          if [[ -f "$file" ]]; then
+            notes=(--notes-file "$file")
+            if [[ "$(head -1 "$file")" == "<!-- prerelease -->" ]]; then
+              kind=(--title "Runode $VERSION Beta" --prerelease)
+              latest=--latest=false
+            fi
+          fi
+          gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --verify-tag --draft "${kind[@]}" \
             "${notes[@]}" \
             "$bundle"/Runode-*.dmg "$bundle"/Runode-*.zip "$bundle"/runode-*.tar.gz "$bundle/latest.json" \
             "$bundle/SHA256SUMS"
-          gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft=false --latest
+          gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft=false "$latest"
 
   verify:
     # 用户照 README 装会走的路：用这个版本的安装脚本装上，命令行报的版本号要对得上。

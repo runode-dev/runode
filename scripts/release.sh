@@ -8,10 +8,20 @@
 # 命令时让它翻译，没有时留 TODO。草稿在编辑器（$EDITOR，默认 vi）里打开，改好保存退出；里面还有
 # TODO 时不往下走。
 #
-# 用法：release.sh [版本号]，版本号是 x.y.z，不给时补丁号加一。
+# 带 --beta 时发成 beta：说明第一行写上 `<!-- prerelease -->`，release.yml 见到它就发成预发布、不标
+# latest，自动更新拿不到；测好了转正，连标题里的 Beta 一起去掉：
+# `gh release edit vX.Y.Z --prerelease=false --latest --title "Runode X.Y.Z"`。
+#
+# 用法：release.sh [--beta] [版本号]，版本号是 x.y.z，不给时补丁号加一。
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
+
+beta=
+if [[ "${1:-}" == --beta ]]; then
+  beta=1
+  shift
+fi
 
 current=$(sed -n '/^\[workspace.package\]/,/^\[/s/^version = "\(.*\)"/\1/p' Cargo.toml)
 if [[ -n "${1:-}" ]]; then
@@ -64,9 +74,13 @@ fi
 ${EDITOR:-vi} "$notes"
 ! grep -q TODO "$notes" || die "$notes 里还有 TODO，改好后重新运行（草稿留着）"
 grep -q '^## 中文' "$notes" && grep -q '^## English' "$notes" || die "$notes 要有「## 中文」和「## English」两段"
+# 标记跟着这次的 --beta 走：草稿可能是上次按另一种发法留下的。
+marker='<!-- prerelease -->'
+body=$(grep -vxF "$marker" "$notes")
+if [[ -n "$beta" ]]; then printf '%s\n%s\n' "$marker" "$body"; else printf '%s\n' "$body"; fi >"$notes"
 
 cat "$notes"
-read -rp "发布 ${tag}？[y/N] " answer
+read -rp "发布 ${tag}${beta:+ beta}？[y/N] " answer
 [[ "$answer" == [yY] ]] || die "没发，草稿留在 $notes"
 
 sed -i.bak '/^\[workspace.package\]/,/^\[/s/^version = ".*"/version = "'"$version"'"/' Cargo.toml
@@ -74,7 +88,7 @@ rm Cargo.toml.bak
 # 只更新 Cargo.lock 里 workspace 自己的包的版本，不动依赖。
 cargo update --workspace
 git add Cargo.toml Cargo.lock "$notes"
-git commit -m "chore: 发布 $tag"
+git commit -m "chore: 发布 $tag${beta:+ beta}"
 git tag "$tag"
 git push --atomic origin main "$tag"
 echo "已推送 ${tag}，release.yml 接着构建和发布：gh run watch" >&2
