@@ -21,7 +21,7 @@ use runode_shared_types::pane::{Node, Split};
 use super::{
     WindowView,
     model::{Tab, Workspace, home_dir, workspace_name},
-    project::SidePanel,
+    project::{Project, SidePanel},
 };
 use crate::{
     host_client::{self, Mode},
@@ -340,6 +340,8 @@ impl WindowView {
             if wi <= saved.active {
                 active = self.workspaces.len();
             }
+            let mut project = Project::default();
+            project.tasks_last = saved_workspace.last_task;
             let id = self.next_id();
             self.workspaces.push(Workspace {
                 id,
@@ -349,7 +351,7 @@ impl WindowView {
                 active: active_tab,
                 tabs,
                 tab_scroll: gpui::ScrollHandle::new(),
-                project: Default::default(),
+                project,
             });
         }
         if !self.workspaces.is_empty() {
@@ -454,6 +456,7 @@ impl WindowView {
             dir: workspace.dir.clone(),
             tabs: workspace.tabs.iter().map(|tab| self.save_tab(tab, cx)).collect(),
             active: workspace.active,
+            last_task: workspace.project.tasks_last.clone(),
         }
     }
 

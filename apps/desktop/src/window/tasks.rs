@@ -144,6 +144,7 @@ impl WindowView {
             return;
         };
         let command = action.command.clone();
+        self.workspace_mut().project.tasks_last = Some(command.clone());
         view.update(cx, |view, cx| view.run_command(command, cx));
         self.insert_tab(self.workspace().active + 1, view, window, cx);
     }
@@ -186,13 +187,14 @@ impl WindowView {
             .children(self.render_dropdown(fg, bg, window, cx))
     }
 
-    /// 在命令按钮下面弹出命令菜单，各项见 `tasks_menu_items`。从键盘打开时选中第一组里的第一条命令，
-    /// 那一组收着时往下找，一条都没有时选中添加命令。
+    /// 在命令按钮下面弹出命令菜单，各项见 `tasks_menu_items`。上次跑的命令还在菜单里时选中它；不然从键盘
+    /// 打开时选中第一组里的第一条命令，那一组收着时往下找，一条都没有时选中添加命令。
     fn open_tasks_menu(&mut self, from_keyboard: bool, cx: &mut Context<Self>) {
-        let items = self.tasks_menu_items(cx);
+        let (items, last) = self.tasks_menu_items(cx);
         let target = self.focus_handle(cx);
-        // 第 2 项是第一组的标题，前面是添加命令和分隔线。
-        self.open_dropdown(items, target, from_keyboard.then_some(2), cx);
+        // `open_dropdown` 选中给的那一项之后能选的第一项；第 2 项是第一组的标题，前面是添加命令和分隔线。
+        let select_after = last.map(|ix| ix - 1).or(from_keyboard.then_some(2));
+        self.open_dropdown(items, target, select_after, cx);
         // shortcut: 面板收着时不监听目录，Makefile、package.json 改了要到下次打开菜单才看得到；要即时的话
         // 面板收着时也监听这几个文件。
         self.workspace_mut().project.tasks_stale = true;
@@ -205,7 +207,7 @@ impl WindowView {
         if !folded.remove(&action.key) {
             folded.insert(action.key.clone());
         }
-        let items = self.tasks_menu_items(cx);
+        let (items, _) = self.tasks_menu_items(cx);
         self.replace_menu_items(items, cx);
     }
 
@@ -217,7 +219,7 @@ impl WindowView {
         for source in sources.filter(|source| is_custom(source) && source.project == action.project) {
             source.tasks.retain(|task| task.name != action.name);
         }
-        let items = self.tasks_menu_items(cx);
+        let (items, _) = self.tasks_menu_items(cx);
         self.replace_menu_items(items, cx);
         let id = self.workspace().id;
         let DeleteTask { project, name } = action.clone();
@@ -244,9 +246,11 @@ impl WindowView {
 
     /// 命令菜单的各项：最上面是添加命令，下面每份一组。自己加的两份标题是「我的命令」「通用命令」，
     /// 别的是文件，在列命令的目录里的写相对路径，在上层目录里的写 `~/…`；标题后面是命令条数，点了收起或展开，收起的组只留标题；命令名后面
-    /// 淡淡地写它的说明，自己加的命令选中时行尾有编辑和删除按钮。
-    fn tasks_menu_items(&self, cx: &App) -> Vec<Option<MenuItem>> {
+    /// 淡淡地写它的说明，自己加的命令选中时行尾有编辑和删除按钮。另外给出上次跑的命令在第几项，它所在的组
+    /// 收着或者它没了时为空。
+    fn tasks_menu_items(&self, cx: &App) -> (Vec<Option<MenuItem>>, Option<usize>) {
         let mut items = vec![Some(menu_item("tasks.add", Box::new(AddTask), true, cx))];
+        let mut last = None;
         let project = &self.workspace().project;
         let listed = project.tasks.as_ref();
         for (dir, source) in
@@ -270,6 +274,11 @@ impl WindowView {
                 continue;
             }
             let custom = is_custom(source);
+            if let Some(ix) = source.tasks.iter().position(|task| project.tasks_last.as_ref() == Some(&task.command))
+                && last.is_none()
+            {
+                last = Some(items.len() + ix);
+            }
             items.extend(source.tasks.iter().map(|task| {
                 let description = task.description.clone().filter(|text| *text != task.name);
                 let action = RunTask { command: task.command.clone() };
@@ -305,7 +314,7 @@ impl WindowView {
                 Some(item.with_button(edit_button, Box::new(edit)).with_button(delete_button, Box::new(delete)))
             }));
         }
-        items
+        (items, last)
     }
 }
 

@@ -74,6 +74,8 @@ pub(in crate::window) struct Project {
     pub tasks_stale: bool,
     /// 命令菜单里收起来的分组，按列出命令的文件记。
     pub tasks_folded: HashSet<PathBuf>,
+    /// 命令菜单里上次跑的命令行，再打开菜单时选中它，回车就再跑一次；记在窗口存档里，重启后还在。
+    pub tasks_last: Option<String>,
     /// 交给后台读的时候拿走，读完放回来。
     pub(super) untracked: git::UntrackedCache,
 }

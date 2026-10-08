@@ -116,6 +116,9 @@ pub struct SavedWorkspace {
     pub tabs: Vec<SavedTab>,
     /// 当前的标签。
     pub active: usize,
+    /// 标题栏命令菜单里上次跑的命令行（`Project::tasks_last`）。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_task: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -313,7 +316,13 @@ mod tests {
                 width: 960.,
                 height: 620.,
             },
-            workspaces: vec![SavedWorkspace { name: "tmp".into(), dir: "/tmp".into(), tabs: vec![tab], active: 0 }],
+            workspaces: vec![SavedWorkspace {
+                name: "tmp".into(),
+                dir: "/tmp".into(),
+                tabs: vec![tab],
+                active: 0,
+                last_task: None,
+            }],
             active: 0,
             sidebar: None,
             sidebar_width: Some(240.),
