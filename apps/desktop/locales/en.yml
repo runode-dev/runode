@@ -42,6 +42,7 @@ menu:
   previous_prompt: Jump to Previous Prompt
   next_prompt: Jump to Next Prompt
   toggle_sidebar: Show or Hide Sidebar
+  toggle_status_bar: Show or Hide Status Bar
   toggle_git: Show or Hide Git
   toggle_files: Show or Hide Files
   toggle_full_screen: Toggle Full Screen
@@ -452,6 +453,7 @@ settings:
     window_padding_x: Horizontal padding
     window_padding_y: Vertical padding
     window_style: Style
+    status_bar: Status bar
     status_bar_hidden: Hidden in the status bar
     file_tree_font_size: File tree font size
     file_tree_preview_click: Open files in the preview with
@@ -507,6 +509,7 @@ settings:
     window_padding_x: Left and right, in points. One number for both sides, or left,right.
     window_padding_y: Top and bottom, in points. One number for both, or top,bottom.
     window_style: Cards puts each split and side panel on its own rounded card; classic lets the terminal fill the window.
+    status_bar: Shows sleep prevention, memory and ports at the bottom of the window.
     status_bar_hidden: "sleep, resources or ports, separated by commas. You can also right-click the status bar."
     file_tree_font_size: In points.
     file_tree_preview_click: A single click opens a temporary tab that the next file replaces; a double click keeps it.
@@ -657,6 +660,7 @@ status:
   sleep_off_detail: Let the system sleep as usual
   sleep_active: Active
   sleep_inactive: Inactive
+  hide_bar: Hide Status Bar
   resources_title: Resources
   resources_tooltip: Memory used by Runode · Terminals
   name: Name

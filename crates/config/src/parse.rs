@@ -32,6 +32,7 @@ pub const KEYS: &[&[&str]] = &[
         "window-padding-x",
         "window-padding-y",
         "window-style",
+        "status-bar",
         "status-bar-hidden",
     ],
     &["file-tree-font-size", "file-tree-preview-click", "preview-font-size"],
@@ -191,6 +192,7 @@ impl Config {
                     _ => return Err("expected cards or classic".into()),
                 };
             }
+            "status-bar" => self.status_bar = or_default(empty, defaults.status_bar, || parse_bool(value))?,
             "status-bar-hidden" => {
                 // 和 `agent-notifications-exclude` 一样：逗号隔开、可以写多行，值为空时清空。
                 if empty {

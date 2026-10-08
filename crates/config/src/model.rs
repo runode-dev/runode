@@ -69,6 +69,8 @@ pub struct Config {
     /// (上, 下)
     pub window_padding_y: (f32, f32),
     pub window_style: WindowStyle,
+    /// 窗口底部的状态栏显示不显示。
+    pub status_bar: bool,
     /// 状态栏上不显示的几块。
     pub status_bar_hidden: Vec<StatusItem>,
     /// 右侧文件树的字号。
@@ -176,6 +178,7 @@ impl Default for Config {
             window_padding_x: (2., 2.),
             window_padding_y: (0., 6.),
             window_style: WindowStyle::Cards,
+            status_bar: true,
             status_bar_hidden: Vec::new(),
             file_tree_font_size: 13.,
             file_tree_preview_click: PreviewClick::Single,

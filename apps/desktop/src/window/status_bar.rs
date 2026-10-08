@@ -27,7 +27,11 @@ use runode_shared_types::{
     color::Rgb,
 };
 
-use super::{WindowView, cards, divider_color, files::check_item, remote};
+use super::{
+    ToggleStatusBar, WindowView, cards, divider_color,
+    files::{check_item, menu_item},
+    remote,
+};
 use crate::{
     assets::{CHEVRON_DOWN_ICON, CHEVRON_RIGHT_ICON, COFFEE_ICON, MEMORY_ICON, PLUG_ICON, SHELL_ICON},
     config::AppConfig,
@@ -44,6 +48,16 @@ const POPOVER_GAP: f32 = 6.;
 /// 资源浮层里 CPU 和内存两列的宽度。
 const CPU_WIDTH: f32 = 56.;
 const MEMORY_WIDTH: f32 = 84.;
+/// 状态栏显示着没有，看配置的 `status-bar`。
+pub(super) fn shown(cx: &App) -> bool {
+    cx.global::<AppConfig>().0.status_bar
+}
+
+/// 状态栏这时占的高度，藏起来时是 0。
+pub(super) fn height(cx: &App) -> f32 {
+    if shown(cx) { STATUS_BAR_HEIGHT } else { 0. }
+}
+
 /// 生效中的绿点。
 const ACTIVE_DOT: Rgb = Rgb(0x34, 0xc7, 0x59);
 
@@ -286,7 +300,7 @@ impl WindowView {
             .text_size(px(11.))
             .text_color(fg_h.opacity(0.7))
             .when(!cards(cx), |bar| bar.border_t_1().border_color(divider_color(fg_h)))
-            // 右键选显示哪几块；全藏起来时这一条还在，照样能右键找回来。
+            // 右键选显示哪几块，或者藏起整条；几块全藏起来时这一条还在，照样能右键找回来。
             .on_mouse_down(
                 MouseButton::Right,
                 cx.listener(|this, event: &MouseDownEvent, _, cx| {
@@ -308,6 +322,7 @@ impl WindowView {
                 let (icon, title) = item_icon_and_title(item);
                 Some(check_item(title, icon, !hidden.contains(&item), Box::new(ToggleStatusItem { item })))
             })
+            .chain([None, Some(menu_item("status.hide_bar", Box::new(ToggleStatusBar), true, cx))])
             .collect();
         let target = self.focus_handle(cx);
         self.open_menu(position, items, target, cx);
@@ -330,6 +345,15 @@ impl WindowView {
         let Some(path) = runode_config::config_path() else { return };
         if let Err(err) = crate::config::write_values(&path, "status-bar-hidden", &values, cx) {
             tracing::warn!("could not write status-bar-hidden: {err}");
+        }
+    }
+
+    /// 显示或隐藏整条状态栏：改写配置文件的 `status-bar`，所有窗口跟着重载的配置一起变。
+    pub(super) fn toggle_status_bar(&mut self, _: &ToggleStatusBar, _: &mut Window, cx: &mut Context<Self>) {
+        let value = if shown(cx) { "false" } else { "true" };
+        let Some(path) = runode_config::config_path() else { return };
+        if let Err(err) = crate::config::write_values(&path, "status-bar", &[value.to_owned()], cx) {
+            tracing::warn!("could not write status-bar: {err}");
         }
     }
 

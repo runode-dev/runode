@@ -103,6 +103,8 @@ actions!(
         PreviousWorkspace,
         SelectLastWorkspace,
         ToggleSidebar,
+        /// 显示或隐藏窗口底部的状态栏，记在配置的 `status-bar` 里。
+        ToggleStatusBar,
         /// 显示或隐藏右侧的 Git 面板。
         ToggleGit,
         /// 显示或隐藏右侧的文件树。
@@ -500,7 +502,7 @@ impl Render for WindowView {
         let arrange_picker = self.render_arrange_picker(fg, bg, cx);
         let branch_picker = self.render_branch_picker(fg, bg, cx);
         let new_workspace = self.render_new_workspace(fg, bg, cx);
-        let status_bar = self.render_status_bar(fg, bg, cx);
+        let status_bar = status_bar::shown(cx).then(|| self.render_status_bar(fg, bg, cx));
         div()
             .id("window")
             .key_context("Window")
@@ -530,6 +532,7 @@ impl Render for WindowView {
             .on_action(cx.listener(Self::toggle_sidebar))
             .on_action(cx.listener(Self::toggle_git))
             .on_action(cx.listener(Self::toggle_status_item))
+            .on_action(cx.listener(Self::toggle_status_bar))
             // 侧栏按着切换 workspace 的修饰键或 ⌘ 时才显示快捷键提示，按下、松开都要重画。挂在根上：修饰键的事件
             // 只沿焦点所在的路径传，侧栏不在这条路上。
             .on_modifiers_changed(cx.listener(|_, _, _, cx| cx.notify()))
@@ -547,7 +550,7 @@ impl Render for WindowView {
             .flex_col()
             .bg(hsla(base))
             .child(div().relative().flex_1().min_h_0().flex().children(body))
-            .child(status_bar)
+            .children(status_bar)
             .children(drag)
             .children(file_menu)
             .children(agent_picker)

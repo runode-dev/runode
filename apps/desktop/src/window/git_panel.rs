@@ -374,7 +374,7 @@ impl WindowView {
                     .into_any_element()
             }
         };
-        let room = f32::from(window.viewport_size().height) - TITLEBAR_HEIGHT - status_bar::STATUS_BAR_HEIGHT;
+        let room = f32::from(window.viewport_size().height) - TITLEBAR_HEIGHT - status_bar::height(cx);
         let graph = project
             .git
             .as_ref()

@@ -20,6 +20,7 @@ use crate::{
         ArrangePanes, ClosePane, CloseTab, CloseWorkspace, EqualizePanes, FocusNextPane, FocusPreviousPane, GotoAgent,
         NewSplitDown, NewSplitRight, NewTab, NewWorkspace, NextAgent, NextTab, NextWorkspace, PreviousTab,
         PreviousWorkspace, RenameWorkspace, ShowMobile, ToggleFiles, ToggleGit, TogglePaneZoom, ToggleSidebar,
+        ToggleStatusBar,
     },
 };
 
@@ -151,6 +152,7 @@ pub fn set_menus(cx: &mut App) {
             MenuItem::action(tr("menu.next_prompt"), JumpToPrompt(1)),
             MenuItem::separator(),
             MenuItem::action(tr("menu.toggle_sidebar"), ToggleSidebar),
+            MenuItem::action(tr("menu.toggle_status_bar"), ToggleStatusBar),
             MenuItem::action(tr("menu.toggle_git"), ToggleGit),
             MenuItem::action(tr("menu.toggle_files"), ToggleFiles),
             MenuItem::action(tr("menu.toggle_full_screen"), ToggleFullScreen),

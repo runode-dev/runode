@@ -104,6 +104,7 @@ impl Page {
                 Row("window-style", Choice(&["cards", "classic"])),
                 Row("window-padding-x", Text(80.)),
                 Row("window-padding-y", Text(80.)),
+                Row("status-bar", Switch),
                 Row("status-bar-hidden", Text(200.)),
             ],
             Self::Colors => &[

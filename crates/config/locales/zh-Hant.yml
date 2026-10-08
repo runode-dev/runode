@@ -16,6 +16,7 @@ config:
   window_padding_x: 左右內距：一個數表示兩邊相同，或寫成 左,右，單位是點。
   window_padding_y: 上下內距：一個數表示兩邊相同，或寫成 上,下，單位是點。
   window_style: 視窗的樣子：cards（卡片，預設）或 classic（經典）。cards 時每個分割畫面和右側面板各是一張帶標題列的圓角卡片，襯在深一階的外框上，標題列顯示這台 Mac 的名稱和膠囊樣式的分頁；classic 時終端機鋪滿視窗，分割畫面之間一條細線。
+  status_bar: 顯示視窗底部的狀態列：true（預設）或 false。也可以從「顯示方式」選單或狀態列的右鍵選單切換。
   status_bar_hidden: 視窗底部狀態列上不顯示的幾塊：sleep（防止睡眠）、resources（記憶體和終端機數）、ports（連接埠），用逗號隔開，可以寫多行，值為空時全都顯示。也可以在狀態列上按右鍵勾選。
   file_tree_font_size: 右側檔案樹的字級：正數，單位是點。
   file_tree_preview_click: 檔案樹裡怎樣在預覽欄開啟檔案：single（按一下，預設）或 double（按兩下）。single 時按一下開成暫時分頁，再開啟別的檔案時會被換掉，按兩下則固定下來；double 時按兩下開成固定分頁。
@@ -117,6 +118,7 @@ action:
   last_workspace: 最後一個工作區
   goto_workspace: 第 N 個工作區，從 1 數
   toggle_sidebar: 顯示或隱藏工作區側欄
+  toggle_status_bar: 顯示或隱藏視窗底部的狀態列
   toggle_git: 顯示或隱藏右側的 Git 面板：暫存、提交、切換分支、同步和儲藏
   toggle_files: 顯示或隱藏右側的檔案樹，按兩下檔案把路徑打進終端機
   goto_agent: 列出所有視窗裡的 agent，選一個跳過去

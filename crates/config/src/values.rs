@@ -29,6 +29,7 @@ impl Config {
             },
             "window-padding-x" => vec![pair(self.window_padding_x)],
             "window-padding-y" => vec![pair(self.window_padding_y)],
+            "status-bar" => bool(self.status_bar),
             "status-bar-hidden" => self.status_bar_hidden.iter().map(|item| item.name().to_owned()).collect(),
             "window-style" => vec![
                 match self.window_style {

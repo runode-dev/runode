@@ -42,6 +42,7 @@ menu:
   previous_prompt: 跳到上一個提示符號
   next_prompt: 跳到下一個提示符號
   toggle_sidebar: 顯示或隱藏側欄
+  toggle_status_bar: 顯示或隱藏狀態列
   toggle_git: 顯示或隱藏 Git
   toggle_files: 顯示或隱藏檔案
   toggle_full_screen: 切換全螢幕
@@ -452,6 +453,7 @@ settings:
     window_padding_x: 左右內距
     window_padding_y: 上下內距
     window_style: 樣式
+    status_bar: 狀態列
     status_bar_hidden: 狀態列上隱藏
     file_tree_font_size: 檔案樹字級
     file_tree_preview_click: 在預覽欄打開檔案
@@ -507,6 +509,7 @@ settings:
     window_padding_x: 單位是點。一個數表示兩邊相同，或寫成 左,右。
     window_padding_y: 單位是點。一個數表示上下相同，或寫成 上,下。
     window_style: 卡片：每個分割畫面和右側面板各是一張圓角卡片；經典：終端機鋪滿視窗。
+    status_bar: 視窗底部顯示防止睡眠、記憶體和連接埠。
     status_bar_hidden: sleep、resources 或 ports，用逗號隔開。也可以在狀態列上按右鍵勾選。
     file_tree_font_size: 單位是點。
     file_tree_preview_click: 單擊開成暫時分頁，打開別的檔案時被換掉；雙擊固定下來。
@@ -657,6 +660,7 @@ status:
   sleep_off_detail: 允許系統正常進入睡眠
   sleep_active: 生效中
   sleep_inactive: 未生效
+  hide_bar: 隱藏狀態列
   resources_title: 資源
   resources_tooltip: Runode 總共佔用的記憶體 · 終端機數
   name: 名稱

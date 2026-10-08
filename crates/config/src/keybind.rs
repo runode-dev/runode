@@ -54,6 +54,7 @@ pub enum Action {
     /// 第几个工作区，从 0 数。
     GotoWorkspace(usize),
     ToggleSidebar,
+    ToggleStatusBar,
     ToggleGit,
     ToggleFiles,
     /// 列出所有窗口里的 agent，选一个跳过去。
@@ -216,6 +217,7 @@ pub static ACTIONS: &[ActionSpec] = &[
         },
     },
     plain!("toggle_sidebar", Action::ToggleSidebar),
+    plain!("toggle_status_bar", Action::ToggleStatusBar),
     plain!("toggle_git", Action::ToggleGit),
     plain!("toggle_files", Action::ToggleFiles),
     plain!("goto_agent", Action::GotoAgent),

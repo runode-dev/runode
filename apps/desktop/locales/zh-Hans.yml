@@ -42,6 +42,7 @@ menu:
   previous_prompt: 跳到上一个提示符
   next_prompt: 跳到下一个提示符
   toggle_sidebar: 显示或隐藏侧栏
+  toggle_status_bar: 显示或隐藏状态栏
   toggle_git: 显示或隐藏 Git
   toggle_files: 显示或隐藏文件
   toggle_full_screen: 切换全屏
@@ -452,6 +453,7 @@ settings:
     window_padding_x: 左右内边距
     window_padding_y: 上下内边距
     window_style: 样式
+    status_bar: 状态栏
     status_bar_hidden: 状态栏上隐藏
     file_tree_font_size: 文件树字号
     file_tree_preview_click: 在预览栏打开文件
@@ -507,6 +509,7 @@ settings:
     window_padding_x: 单位是点。一个数表示两边相同，或者写成 左,右。
     window_padding_y: 单位是点。一个数表示上下相同，或者写成 上,下。
     window_style: 卡片：每个分屏和右侧面板各是一张圆角卡片；经典：终端铺满窗口。
+    status_bar: 窗口底部显示防止休眠、内存和端口。
     status_bar_hidden: sleep、resources 或 ports，用逗号隔开。也可以在状态栏上右键勾选。
     file_tree_font_size: 单位是点。
     file_tree_preview_click: 单击开成临时标签，打开别的文件时被换掉；双击固定下来。
@@ -657,6 +660,7 @@ status:
   sleep_off_detail: 允许系统正常进入睡眠
   sleep_active: 生效中
   sleep_inactive: 未生效
+  hide_bar: 隐藏状态栏
   resources_title: 资源
   resources_tooltip: Runode 一共占用的内存 · 终端数
   name: 名称
