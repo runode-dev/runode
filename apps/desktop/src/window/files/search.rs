@@ -37,6 +37,7 @@ use crate::{
     },
     window::{
         git_panel::{TreeItem, file_tree},
+        persist::format::SavedSearchOptions as ContentOptions,
         project::panel_message,
         titlebar::icon_toggle,
     },
@@ -128,17 +129,6 @@ fn layout_rows(found: &[Found], tree: bool, collapsed: &HashSet<PathBuf>) -> Vec
     rows
 }
 
-/// 按内容找时的选项；按名称找时不用，一律是默认值。
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-struct ContentOptions {
-    match_case: bool,
-    whole_word: bool,
-    regex: bool,
-    /// 要包含、要排除的文件：逗号隔开的 glob。
-    include: String,
-    exclude: String,
-}
-
 /// 一次搜索：在哪个根目录、按什么词、哪种方式和选项。
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct SearchKey {
@@ -205,6 +195,7 @@ impl FileSearch {
             let events = cx.subscribe(&field, |this, _, event: &TextFieldEvent, cx| {
                 if let TextFieldEvent::Changed(_) = event {
                     this.sync_file_search(cx);
+                    this.save(cx);
                 }
             });
             (field, events)
@@ -383,13 +374,7 @@ impl WindowView {
         let search = &self.file_search;
         let options = match search.mode {
             SearchMode::Name => ContentOptions::default(),
-            SearchMode::Content => ContentOptions {
-                match_case: search.match_case,
-                whole_word: search.whole_word,
-                regex: search.regex,
-                include: search.include.read(cx).query().to_owned(),
-                exclude: search.exclude.read(cx).query().to_owned(),
-            },
+            SearchMode::Content => search.options(cx),
         };
         let query = search.field.read(cx).query().trim().to_owned();
         let key = SearchKey { root: self.files_root(), query, mode: search.mode, options };
@@ -541,6 +526,7 @@ impl WindowView {
                 move |this, _, _, cx| {
                     flip(&mut this.file_search);
                     this.sync_file_search(cx);
+                    this.save(cx);
                 },
             ))
         };
@@ -821,6 +807,26 @@ impl WindowView {
 }
 
 impl FileSearch {
+    /// 按内容找时的选项，存进窗口存档。
+    pub(in crate::window) fn options(&self, cx: &gpui::App) -> ContentOptions {
+        ContentOptions {
+            match_case: self.match_case,
+            whole_word: self.whole_word,
+            regex: self.regex,
+            include: self.include.read(cx).query().to_owned(),
+            exclude: self.exclude.read(cx).query().to_owned(),
+        }
+    }
+
+    /// 恢复窗口时换上存档里的选项；这时还没有搜索词，不用重搜。
+    pub(in crate::window) fn set_options(&mut self, options: ContentOptions, cx: &mut gpui::App) {
+        self.match_case = options.match_case;
+        self.whole_word = options.whole_word;
+        self.regex = options.regex;
+        self.include.update(cx, |field, cx| field.set_query(options.include, cx));
+        self.exclude.update(cx, |field, cx| field.set_query(options.exclude, cx));
+    }
+
     pub(in crate::window) fn set_tree(&mut self, tree: bool) {
         self.tree = tree;
         self.selected = None;

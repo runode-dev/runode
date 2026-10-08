@@ -63,11 +63,26 @@ pub struct SavedWindow {
     /// 文件树的搜索结果以树形式查看；默认是列表。
     #[serde(default)]
     pub file_search_tree: bool,
+    /// 文件树按内容搜索时的开关和要包含、要排除的文件。
+    #[serde(default)]
+    pub file_search_options: SavedSearchOptions,
     /// Git 面板底部的图表收起来了，以及拖动过的高度；没拖过时为空，用默认高度。
     #[serde(default)]
     pub git_graph_collapsed: bool,
     #[serde(default)]
     pub git_graph_height: Option<f32>,
+}
+
+/// 文件树按内容搜索时的选项：区分大小写、全字匹配、用正则，以及要包含、要排除的文件（逗号
+/// 隔开的 glob）。搜索时也拿它比较两次搜索的条件一不一样。
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct SavedSearchOptions {
+    pub match_case: bool,
+    pub whole_word: bool,
+    pub regex: bool,
+    pub include: String,
+    pub exclude: String,
 }
 
 /// 窗口的位置和大小，相对于它所在的屏幕；放大和全屏时是还原后的位置和大小。
@@ -306,6 +321,13 @@ mod tests {
             show_ignored: true,
             git_tree: true,
             file_search_tree: true,
+            file_search_options: SavedSearchOptions {
+                match_case: true,
+                whole_word: false,
+                regex: true,
+                include: "*.ts".into(),
+                exclude: String::new(),
+            },
             git_graph_collapsed: true,
             git_graph_height: Some(260.),
         }])
@@ -314,11 +336,14 @@ mod tests {
     #[test]
     fn reads_windows_saved_before_the_tree_view_settings() {
         let text = serde_json::to_string(&state()).unwrap();
-        let old = text.replace(r#","git_tree":true"#, "").replace(r#","file_search_tree":true"#, "");
+        let options = r#","file_search_options":{"match_case":true,"whole_word":false,"regex":true,"include":"*.ts","exclude":""}"#;
+        let old =
+            text.replace(r#","git_tree":true"#, "").replace(r#","file_search_tree":true"#, "").replace(options, "");
         assert_ne!(old, text);
         let state: State = serde_json::from_str(&old).unwrap();
         assert!(!state.windows[0].git_tree);
         assert!(!state.windows[0].file_search_tree);
+        assert_eq!(state.windows[0].file_search_options, SavedSearchOptions::default());
     }
 
     #[test]

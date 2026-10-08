@@ -278,6 +278,7 @@ impl WindowView {
             show_ignored: self.show_ignored,
             git_tree: self.git_tree,
             file_search_tree: self.file_search.tree,
+            file_search_options: self.file_search.options(cx),
             git_graph_collapsed: self.git_graph_collapsed,
             git_graph_height: self.git_graph_height,
         }
@@ -359,6 +360,7 @@ impl WindowView {
             self.show_ignored = saved.show_ignored;
             self.git_tree = saved.git_tree;
             self.file_search.set_tree(saved.file_search_tree);
+            self.file_search.set_options(saved.file_search_options, cx);
             self.git_graph_collapsed = saved.git_graph_collapsed;
             self.git_graph_height = saved.git_graph_height;
             self.activate_workspace(active, window, cx);
