@@ -1,7 +1,7 @@
 //! 标题栏右上角的项目命令：终端目录往上最近的自己加的命令、Makefile 的目标和 package.json 的 scripts，
 //! 由宿主列出、拼好命令行（`ClientMsg::ListProjectTasks`），和手机会话卡片上的是同一份。右侧面板开关
 //! 左边的按钮弹出按文件分组的菜单，点一条开一个新标签在列命令的目录里跑它；菜单最上面一项添加自己的
-//! 命令，自己加的命令行尾有删除按钮，添加的对话框和改写命令文件在 `custom`。
+//! 命令，自己加的命令行尾有编辑和删除按钮，添加、编辑的对话框和改写命令文件在 `custom`。
 
 mod custom;
 
@@ -21,7 +21,7 @@ use super::{
     titlebar::icon_toggle,
 };
 use crate::{
-    assets::{PLAY_ICON, TRASH_ICON},
+    assets::{PENCIL_ICON, PLAY_ICON, TRASH_ICON},
     host_client,
     ui::tooltip::tooltip,
     window::WindowView,
@@ -61,6 +61,15 @@ pub(super) struct ToggleTaskGroup {
 pub(super) struct DeleteTask {
     file: PathBuf,
     name: String,
+}
+
+/// 自己加的命令行尾的编辑按钮：打开对话框改 `file` 里的 `name`，原来的命令行是 `command`。
+#[derive(Clone, PartialEq, Action)]
+#[action(namespace = runode, no_json)]
+pub(super) struct EditTask {
+    file: PathBuf,
+    name: String,
+    command: String,
 }
 
 /// 命令菜单最上面一项：打开添加命令的对话框。
@@ -221,7 +230,7 @@ impl WindowView {
 
     /// 命令菜单的各项：最上面是添加命令，下面每个文件一组。组的标题是文件，在列命令的目录里的写相对
     /// 路径，在上层目录里的写 `~/…`，后面是命令条数，点了收起或展开，收起的组只留标题；命令名后面
-    /// 淡淡地写它的说明，自己加的命令选中时行尾有删除按钮。
+    /// 淡淡地写它的说明，自己加的命令选中时行尾有编辑和删除按钮。
     fn tasks_menu_items(&self, cx: &App) -> Vec<Option<MenuItem>> {
         let mut items = vec![Some(menu_item("tasks.add", Box::new(AddTask), true, cx))];
         let project = &self.workspace().project;
@@ -252,10 +261,26 @@ impl WindowView {
                 if !custom {
                     return Some(item);
                 }
+                // 自己加的命令的说明就是写在文件里的命令行。
+                let edit = EditTask {
+                    file: source.file.clone(),
+                    name: task.name.clone(),
+                    command: task.description.clone().unwrap_or_default(),
+                };
                 let delete = DeleteTask { file: source.file.clone(), name: task.name.clone() };
-                let button =
-                    MenuButton { icon: TRASH_ICON, tooltip: rust_i18n::t!("tasks.delete").into(), keep_open: true };
-                Some(item.with_button(button, Box::new(delete)))
+                let edit_button = MenuButton {
+                    icon: PENCIL_ICON,
+                    tooltip: rust_i18n::t!("tasks.edit").into(),
+                    keep_open: false,
+                    cmd_key: Some("e"),
+                };
+                let delete_button = MenuButton {
+                    icon: TRASH_ICON,
+                    tooltip: rust_i18n::t!("tasks.delete").into(),
+                    keep_open: true,
+                    cmd_key: Some("backspace"),
+                };
+                Some(item.with_button(edit_button, Box::new(edit)).with_button(delete_button, Box::new(delete)))
             }));
         }
         items

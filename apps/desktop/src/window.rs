@@ -546,6 +546,7 @@ impl Render for WindowView {
             .on_action(cx.listener(Self::toggle_tasks))
             .on_action(cx.listener(Self::toggle_task_group))
             .on_action(cx.listener(Self::delete_task))
+            .on_action(cx.listener(Self::edit_task))
             .on_action(cx.listener(Self::toggle_status_bar))
             // 侧栏按着切换 workspace 的修饰键或 ⌘ 时才显示快捷键提示，按下、松开都要重画。挂在根上：修饰键的事件
             // 只沿焦点所在的路径传，侧栏不在这条路上。

@@ -47,6 +47,8 @@ icons! {
     pub STASH_APPLY_ICON = "stash-apply",
     pub STASH_POP_ICON = "stash-pop",
     pub TRASH_ICON = "trash",
+    /// 项目命令菜单里编辑自己加的命令的按钮。
+    pub PENCIL_ICON = "pencil",
     /// Git 面板标题栏上切换改动的文件以树形式还是列表形式查看的按钮，画的是切过去以后的样子。
     pub VIEW_TREE_ICON = "view-tree",
     pub VIEW_LIST_ICON = "view-list",

@@ -31,14 +31,14 @@ const DROPDOWN_GAP: f32 = 4.;
 const MENU_WIDTH: f32 = 240.;
 
 /// 菜单里的一项：点了把 `action` 派发给菜单的 `target`，和按快捷键走同一条路；没有 `action` 的
-/// 只是一行字，点不了。`button` 是右边的图标按钮和它派发的动作：整行点不了时一直显示，整行能点时
-/// 只在选中这一行时显示，Cmd+Backspace 也按它。
+/// 只是一行字，点不了。`buttons` 是右边的图标按钮和它们派发的动作：整行点不了时一直显示，整行能点
+/// 时只在选中这一行时显示。
 pub(in crate::window) struct MenuItem {
     label: String,
     action: Option<Box<dyn Action>>,
     shortcut: Option<SharedString>,
     enabled: bool,
-    button: Option<(MenuButton, Box<dyn Action>)>,
+    buttons: Vec<(MenuButton, Box<dyn Action>)>,
     /// 画在字前面的图标。
     icon: Option<&'static str>,
     /// 勾选项：`Some` 时左边留一列，`true` 时打勾。
@@ -47,17 +47,19 @@ pub(in crate::window) struct MenuItem {
     keep_open: bool,
 }
 
-/// 菜单项右边的图标按钮：图标和悬停时的说明；`keep_open` 时按了菜单不关、焦点不动。
+/// 菜单项右边的图标按钮：图标和悬停时的说明；`keep_open` 时按了菜单不关、焦点不动；选中这一行时按
+/// Cmd 加 `cmd_key` 也按它。
 pub(in crate::window) struct MenuButton {
     pub icon: &'static str,
     pub tooltip: SharedString,
     pub keep_open: bool,
+    pub cmd_key: Option<&'static str>,
 }
 
 impl MenuItem {
-    /// 右边加一个图标按钮，按了派发 `action`。
+    /// 右边再加一个图标按钮，按了派发 `action`。
     pub(in crate::window) fn with_button(mut self, button: MenuButton, action: Box<dyn Action>) -> Self {
-        self.button = Some((button, action));
+        self.buttons.push((button, action));
         self
     }
 }
@@ -70,7 +72,7 @@ pub(in crate::window) fn menu_item(key: &str, action: Box<dyn Action>, enabled: 
         action: Some(action),
         shortcut,
         enabled,
-        button: None,
+        buttons: Vec::new(),
         icon: None,
         checked: None,
         keep_open: false,
@@ -89,7 +91,7 @@ pub(in crate::window) fn check_item(
         action: Some(action),
         shortcut: None,
         enabled: true,
-        button: None,
+        buttons: Vec::new(),
         icon: Some(icon),
         checked: Some(checked),
         keep_open: false,
@@ -108,7 +110,7 @@ pub(in crate::window) fn text_item(
         action: None,
         shortcut: detail,
         enabled: true,
-        button,
+        buttons: button.into_iter().collect(),
         icon: None,
         checked: None,
         keep_open: false,
@@ -127,7 +129,7 @@ pub(in crate::window) fn labeled_item(
         enabled: action.is_some(),
         action,
         shortcut: detail,
-        button: None,
+        buttons: Vec::new(),
         icon: None,
         checked: None,
         keep_open: false,
@@ -147,7 +149,7 @@ pub(in crate::window) fn group_item(
         action: Some(action),
         shortcut: detail,
         enabled: true,
-        button: None,
+        buttons: Vec::new(),
         icon: Some(if folded { CHEVRON_RIGHT_ICON } else { CHEVRON_DOWN_ICON }),
         checked: None,
         keep_open: true,
@@ -284,9 +286,9 @@ impl WindowView {
         }
     }
 
-    /// 按第 `ix` 项右边的按钮。
-    fn press_menu_button(&mut self, ix: usize, window: &mut Window, cx: &mut Context<Self>) {
-        let button = self.file_menu.as_ref().and_then(|menu| menu.items[ix].as_ref()?.button.as_ref());
+    /// 按第 `ix` 项右边的第 `button` 个按钮。
+    fn press_menu_button(&mut self, ix: usize, button: usize, window: &mut Window, cx: &mut Context<Self>) {
+        let button = self.file_menu.as_ref().and_then(|menu| menu.items[ix].as_ref()?.buttons.get(button));
         let Some((keep_open, action)) = button.map(|(button, action)| (button.keep_open, action.boxed_clone())) else {
             return;
         };
@@ -312,11 +314,16 @@ impl WindowView {
             return;
         };
         let modifiers = event.keystroke.modifiers;
-        if event.keystroke.key == "backspace" && modifiers.platform && !modifiers.shift && !modifiers.alt {
-            if let Some(ix) = menu.highlighted {
-                self.press_menu_button(ix, window, cx);
+        if modifiers.platform && !modifiers.shift && !modifiers.alt && !modifiers.control {
+            let key = event.keystroke.key.as_str();
+            let pressed = menu.highlighted.and_then(|ix| {
+                let buttons = &menu.items[ix].as_ref()?.buttons;
+                Some((ix, buttons.iter().position(|(button, _)| button.cmd_key == Some(key))?))
+            });
+            if let Some((ix, button)) = pressed {
+                cx.stop_propagation();
+                self.press_menu_button(ix, button, window, cx);
             }
-            cx.stop_propagation();
             return;
         }
         if modifiers.modified() {
@@ -453,7 +460,7 @@ impl WindowView {
             let row_action = item.enabled && item.action.is_some();
             let highlighted = menu.highlighted == Some(ix);
             // 整行能点的只在选中时露出按钮，不然每行行尾都摆一个。
-            let button = item.button.as_ref().filter(|_| item.enabled && (!row_action || highlighted));
+            let buttons = (item.enabled && (!row_action || highlighted)).then_some(&item.buttons);
             div()
                 .id(("file-menu", ix))
                 .flex_none()
@@ -504,26 +511,29 @@ impl WindowView {
                                 .child(shortcut)
                         }),
                 )
-                .children(button.map(|(button, _)| {
-                    div()
-                        .id(("file-menu-button", ix))
-                        .flex_none()
-                        .size(px(18.))
-                        .mr(px(-6.))
-                        .rounded(px(4.))
-                        .flex()
-                        .items_center()
-                        .justify_center()
-                        .hover(|button| button.bg(button_hover_bg))
-                        .tooltip(tooltip(button.tooltip.clone(), None, fg_rgb, bg))
-                        .child(svg().path(button.icon).size(px(12.)).text_color(fg.opacity(0.6)))
-                        .on_mouse_down(
-                            MouseButton::Left,
-                            cx.listener(move |this, _, window, cx| {
-                                cx.stop_propagation();
-                                this.press_menu_button(ix, window, cx);
-                            }),
-                        )
+                .children(buttons.filter(|buttons| !buttons.is_empty()).map(|buttons| {
+                    div().flex_none().mr(px(-6.)).flex().gap(px(2.)).children(buttons.iter().enumerate().map(
+                        |(b, (button, _))| {
+                            div()
+                                .id(("file-menu-button", ix * 4 + b))
+                                .flex_none()
+                                .size(px(18.))
+                                .rounded(px(4.))
+                                .flex()
+                                .items_center()
+                                .justify_center()
+                                .hover(|button| button.bg(button_hover_bg))
+                                .tooltip(tooltip(button.tooltip.clone(), None, fg_rgb, bg))
+                                .child(svg().path(button.icon).size(px(12.)).text_color(fg.opacity(0.6)))
+                                .on_mouse_down(
+                                    MouseButton::Left,
+                                    cx.listener(move |this, _, window, cx| {
+                                        cx.stop_propagation();
+                                        this.press_menu_button(ix, b, window, cx);
+                                    }),
+                                )
+                        },
+                    ))
                 }))
                 .into_any_element()
         });

@@ -200,6 +200,9 @@ search:
   no_results: No results
 tasks:
   add: "Add Task…"
+  edit: "Edit Task (Cmd+E)"
+  edit_title: "Edit Task"
+  update: "Save"
   delete: "Delete Task (Cmd+Backspace)"
   add_title: "Add Task"
   name: "Name"

@@ -200,6 +200,9 @@ search:
   no_results: 无结果
 tasks:
   add: "添加命令…"
+  edit: "编辑命令（Cmd+E）"
+  edit_title: "编辑命令"
+  update: "保存"
   delete: "删除命令（Cmd+Backspace）"
   add_title: "添加命令"
   name: "名字"
