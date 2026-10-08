@@ -128,7 +128,13 @@ staging=$(mktemp -d)
 cp -R "$app" "$staging/"
 ln -s /Applications "$staging/Applications"
 rm -f "$dmg"
-diskutil image create from --volumeName Runode --format UDZO "$staging" "$dmg" >/dev/null
+# diskutil image 的 --volumeName 新系统才有，CI 的 macOS 15 runner 上没有，那里退回 hdiutil；新系统上
+# hdiutil 已经标成弃用。
+if diskutil image create from --help 2>&1 | grep -q -- --volumeName; then
+    diskutil image create from --volumeName Runode --format UDZO "$staging" "$dmg" >/dev/null
+else
+    hdiutil create -volname Runode -srcfolder "$staging" -format UDZO "$dmg" >/dev/null
+fi
 rm -rf "$staging"
 if [[ "$SIGN_IDENTITY" != - ]]; then
     codesign "${sign_options[@]}" "$dmg"
