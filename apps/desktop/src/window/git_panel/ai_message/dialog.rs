@@ -78,7 +78,7 @@ impl WindowView {
             cx.new(|cx| TextField::editing(text.to_owned(), text.len(), cx).with_placeholder(placeholder))
         };
         let args = field(&recipe.args, "--model sonnet", cx);
-        let command = field(&recipe.command, "my-agent --print {prompt}", cx);
+        let command = field(&recipe.command, "MODEL=small my-agent --print {prompt}", cx);
         let template = cx.new(|cx| {
             let mut area = TextArea::new(cx);
             area.set_line_limits(6, 12, cx);

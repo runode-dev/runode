@@ -306,7 +306,7 @@ git:
     generate: 產生
     custom: 自訂指令
     command: 指令
-    command_hint: "參數裡的 {prompt} 換成提示詞；沒寫 {prompt} 時提示詞經標準輸入傳入。在存放庫目錄裡直接執行，不經 shell。"
+    command_hint: "開頭可以寫 NAME=value 設定環境變數。參數裡的 {prompt} 換成提示詞；沒寫 {prompt} 時提示詞經標準輸入傳入。在存放庫目錄裡直接執行，不經 shell。"
     empty_command: 自訂指令是空的。
     var:
       basePrompt: "runode 內建的提示詞：照著最近幾條提交說明的寫法寫，帶上分支、變更的檔案和變更內容。範例："

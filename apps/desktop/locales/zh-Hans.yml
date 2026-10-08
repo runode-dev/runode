@@ -306,7 +306,7 @@ git:
     generate: 生成
     custom: 自定义命令
     command: 命令
-    command_hint: "参数里的 {prompt} 换成提示词；没写 {prompt} 时提示词经标准输入给。在仓库目录里直接跑，不经 shell。"
+    command_hint: "开头可以写 NAME=value 设环境变量。参数里的 {prompt} 换成提示词；没写 {prompt} 时提示词经标准输入给。在仓库目录里直接跑，不经 shell。"
     empty_command: 自定义命令是空的。
     var:
       basePrompt: "runode 内置的提示词：照着最近几条提交说明的写法写，带上分支、改动的文件和改动。示例："

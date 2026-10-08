@@ -74,8 +74,8 @@ pub(in crate::window) struct Recipe {
     pub args: String,
     #[serde(default = "default_template")]
     pub template: String,
-    /// 自己定义的命令：按 shell 的规矩分词，第一个词是程序，参数里的 `{prompt}` 换成提示词；没有
-    /// `{prompt}` 时提示词经标准输入给。和选哪个 agent 分开存，换来换去不丢。
+    /// 自己定义的命令：按 shell 的规矩分词，开头的 `NAME=value` 是环境变量，接着是程序，参数里的
+    /// `{prompt}` 换成提示词；没有 `{prompt}` 时提示词经标准输入给。和选哪个 agent 分开存，换来换去不丢。
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub command: String,
 }
@@ -217,7 +217,7 @@ fn generate(
         &[("basePrompt", &base), ("branch", &context.branch), ("stagedFiles", &context.files), ("stagedPatch", &patch)],
     );
     let (args, stdin) = command.args(&prompt);
-    let stdout = run(&command.binary, &args, stdin, &repo.root, path)?;
+    let stdout = run(&command.binary, &args, stdin, &repo.root, path, &command.env)?;
     let text = match command.agent.map_or(Output::Text, |agent| agent.output) {
         Output::Text => stdout,
         Output::OpenCodeEvents => opencode_text(&stdout)?,
@@ -232,6 +232,8 @@ fn generate(
 /// 按预设要跑的命令：哪家 agent（自己定义的命令为空）、程序和用户写的参数。
 struct Invocation {
     agent: Option<&'static agents::AgentSpec>,
+    /// 自己定义的命令开头 `NAME=value` 写的环境变量，跑的时候加上，盖过同名的。
+    env: Vec<(String, String)>,
     binary: String,
     words: Vec<String>,
 }
@@ -239,16 +241,18 @@ struct Invocation {
 impl Invocation {
     fn of(recipe: &Recipe) -> Result<Self, String> {
         if recipe.agent == agents::CUSTOM_AGENT {
-            let mut words = split_args(&recipe.command)?;
-            if words.is_empty() {
-                return Err(rust_i18n::t!("git.ai_message.empty_command").into_owned());
+            let mut words = split_args(&recipe.command)?.into_iter().peekable();
+            let mut env = Vec::new();
+            while let Some(assignment) = words.next_if(|word| env_assignment(word).is_some()) {
+                env.extend(env_assignment(&assignment));
             }
-            let binary = words.remove(0);
-            return Ok(Self { agent: None, binary, words });
+            let binary = words.next().ok_or_else(|| rust_i18n::t!("git.ai_message.empty_command").into_owned())?;
+            return Ok(Self { agent: None, env, binary, words: words.collect() });
         }
         let agent = agents::agent(&recipe.agent)
             .ok_or_else(|| rust_i18n::t!("git.ai_message.unknown_agent", agent = recipe.agent).into_owned())?;
-        Ok(Self { agent: Some(agent), binary: agent.binary.to_owned(), words: split_args(&recipe.args)? })
+        let words = split_args(&recipe.args)?;
+        Ok(Self { agent: Some(agent), env: Vec::new(), binary: agent.binary.to_owned(), words })
     }
 
     /// 完整的参数和要经标准输入给的提示词，见 `agents::with_prompt`。
@@ -260,12 +264,23 @@ impl Invocation {
     }
 }
 
+/// `word` 是 shell 里命令前面的 `NAME=value` 时，拆成名字和值。
+fn env_assignment(word: &str) -> Option<(String, String)> {
+    let (name, value) = word.split_once('=')?;
+    let mut chars = name.chars();
+    let valid = chars.next().is_some_and(|ch| ch.is_ascii_alphabetic() || ch == '_')
+        && chars.all(|ch| ch.is_ascii_alphanumeric() || ch == '_');
+    valid.then(|| (name.to_owned(), value.to_owned()))
+}
+
 /// 对话框里给用户看的、按 `recipe` 实际要跑的整条命令，按 shell 的写法加好引号，提示词的位置写成
 /// `<prompt>`；第二项说提示词是不是经标准输入给。命令写得不对时是原因。
 pub(in crate::window) fn command_preview(recipe: &Recipe) -> Result<(String, bool), String> {
     let command = Invocation::of(recipe)?;
     let (args, stdin) = command.args("<prompt>");
-    let line = std::iter::once(&command.binary).chain(&args).map(|word| shell_quote(word)).collect::<Vec<_>>();
+    let env = command.env.iter().map(|(name, value)| format!("{name}={}", shell_quote(value)));
+    let words = std::iter::once(&command.binary).chain(&args).map(|word| shell_quote(word));
+    let line = env.chain(words).collect::<Vec<_>>();
     Ok((line.join(" "), stdin.is_some()))
 }
 
@@ -381,13 +396,15 @@ fn limit(mut text: String, max: usize) -> String {
     text
 }
 
-/// 在 `dir` 里跑 `binary`，`stdin` 不为空时从标准输入交给它，返回标准输出。
+/// 在 `dir` 里跑 `binary`，`stdin` 不为空时从标准输入交给它，返回标准输出。`env` 加在 `PATH`
+/// 之后，用户自己写了 `PATH=` 时用他的。
 fn run(
     binary: &str,
     args: &[String],
     stdin: Option<String>,
     dir: &Path,
     path: Option<OsString>,
+    env: &[(String, String)],
 ) -> Result<String, String> {
     let mut command = Command::new(binary);
     command
@@ -399,6 +416,7 @@ fn run(
     if let Some(path) = path {
         command.env("PATH", path);
     }
+    command.envs(env.iter().map(|(name, value)| (name, value)));
     let mut child = command.spawn().map_err(|err| match err.kind() {
         ErrorKind::NotFound => rust_i18n::t!("git.ai_message.missing", binary = binary).into_owned(),
         _ => format!("{binary}: {err}"),
@@ -565,6 +583,17 @@ mod tests {
         assert!(command_preview(&recipe).is_err());
         let recipe = Recipe { agent: "custom".into(), command: "tool --ask={prompt}".into(), ..Recipe::default() };
         assert_eq!(command_preview(&recipe).unwrap(), ("tool '--ask=<prompt>'".to_owned(), false));
+        // 开头的 `NAME=value` 是环境变量，后面的 `=` 照旧是参数。
+        let command = "A=1 _B='x y' tool C=2";
+        let recipe = Recipe { agent: "custom".into(), command: command.into(), ..Recipe::default() };
+        assert_eq!(command_preview(&recipe).unwrap().0, "A=1 _B='x y' tool C=2");
+        let invocation = Invocation::of(&recipe).unwrap();
+        assert_eq!(invocation.env, [("A".to_owned(), "1".to_owned()), ("_B".to_owned(), "x y".to_owned())]);
+        assert_eq!((invocation.binary.as_str(), invocation.words.as_slice()), ("tool", &["C=2".to_owned()][..]));
+        let recipe = Recipe { agent: "custom".into(), command: "A=1".into(), ..Recipe::default() };
+        assert!(command_preview(&recipe).is_err());
+        let recipe = Recipe { agent: "custom".into(), command: "1A=x ./tool".into(), ..Recipe::default() };
+        assert_eq!(Invocation::of(&recipe).unwrap().binary, "1A=x");
     }
 
     /// 提示词经标准输入给，比管道的缓冲大也不卡；失败时报标准错误。
@@ -572,11 +601,15 @@ mod tests {
     fn runs_a_command_with_the_prompt_on_stdin() {
         let dir = std::env::temp_dir();
         let prompt = "x".repeat(200_000);
-        let out = run("sh", &["-c".into(), "wc -c".into()], Some(prompt), &dir, None).unwrap();
+        let out = run("sh", &["-c".into(), "wc -c".into()], Some(prompt), &dir, None, &[]).unwrap();
         assert_eq!(out.trim(), "200000");
-        let err = run("sh", &["-c".into(), "echo boom >&2; exit 3".into()], None, &dir, None).unwrap_err();
+        let err = run("sh", &["-c".into(), "echo boom >&2; exit 3".into()], None, &dir, None, &[]).unwrap_err();
         assert_eq!(err, "sh: boom");
-        assert!(run("runode-no-such-agent", &[], None, &dir, None).unwrap_err().contains("runode-no-such-agent"));
+        let missing = run("runode-no-such-agent", &[], None, &dir, None, &[]).unwrap_err();
+        assert!(missing.contains("runode-no-such-agent"));
+        let env = [("RUNODE_TEST_VAR".to_owned(), "a b".to_owned())];
+        let out = run("sh", &["-c".into(), "echo \"$RUNODE_TEST_VAR\"".into()], None, &dir, None, &env).unwrap();
+        assert_eq!(out, "a b\n");
     }
 
     #[test]

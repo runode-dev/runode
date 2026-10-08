@@ -306,7 +306,7 @@ git:
     generate: Generate
     custom: Custom Command
     command: Command
-    command_hint: "{prompt} in the arguments is replaced with the prompt; without it the prompt goes to standard input. Runs in the repository without a shell."
+    command_hint: "Start with NAME=value to set environment variables. {prompt} in the arguments is replaced with the prompt; without it the prompt goes to standard input. Runs in the repository without a shell."
     empty_command: The custom command is empty.
     var:
       basePrompt: "runode's built-in prompt: match the style of the recent commit messages, with the branch, changed files and patch below. Example:"
