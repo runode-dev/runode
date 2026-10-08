@@ -237,6 +237,8 @@ files:
   search_name: 名稱
   search_content: 內容
   search_empty: 沒有找到
+  view_as_tree: 以樹狀檢視
+  view_as_list: 以清單檢視
 tooltip:
   show_sidebar: 顯示側欄
   hide_sidebar: 隱藏側欄

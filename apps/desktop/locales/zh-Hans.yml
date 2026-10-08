@@ -237,6 +237,8 @@ files:
   search_name: 名称
   search_content: 内容
   search_empty: 没有找到
+  view_as_tree: 以树形式查看
+  view_as_list: 以列表形式查看
 tooltip:
   show_sidebar: 显示侧栏
   hide_sidebar: 隐藏侧栏

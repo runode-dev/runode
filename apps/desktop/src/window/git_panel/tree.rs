@@ -1,4 +1,4 @@
-//! Git 面板以树形式查看时，把一段改动的文件按目录分层排成行：目录在前、文件在后，各自按名字
+//! Git 面板和文件树的搜索结果以树形式查看时，把一组文件按目录分层排成行：目录在前、文件在后，各自按名字
 //! 排（不分大小写）；只有一个子目录、没有文件的目录和子目录并成一行，名字写成 `a/b/c`，和
 //! VSCode 的 compact folders 一样。只管数据，不碰界面。
 
@@ -10,7 +10,7 @@ use std::{
 /// 排成树以后的一行。
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(in crate::window) enum TreeItem {
-    /// 目录：`path` 是相对仓库根的路径，并成一行的是链条最深的那个；`name` 是显示的名字。
+    /// 目录：`path` 是相对根目录的路径，并成一行的是链条最深的那个；`name` 是显示的名字。
     Dir { path: PathBuf, name: String, depth: usize, expanded: bool },
     /// 文件：`index` 是调用方给的下标。
     File { index: usize, depth: usize },
@@ -37,7 +37,7 @@ impl Node {
     }
 }
 
-/// 把 `files`（下标和相对仓库根的路径）排成树。`expanded` 说某个目录（并成一行的按链条最深的
+/// 把 `files`（下标和相对根目录的路径）排成树。`expanded` 说某个目录（并成一行的按链条最深的
 /// 那个）展开着没有，收起的目录下面的不排。
 pub(in crate::window) fn file_tree(files: &[(usize, &Path)], expanded: impl Fn(&Path) -> bool) -> Vec<TreeItem> {
     let mut root = Node::default();

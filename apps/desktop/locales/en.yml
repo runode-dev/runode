@@ -237,6 +237,8 @@ files:
   search_name: Name
   search_content: Content
   search_empty: No results
+  view_as_tree: View as Tree
+  view_as_list: View as List
 tooltip:
   show_sidebar: Show Sidebar
   hide_sidebar: Hide Sidebar
