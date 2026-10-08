@@ -35,6 +35,8 @@ const SIDEBAR_TOGGLE_HEIGHT: f32 = 24.;
 pub(super) const SIDEBAR_TOGGLE_INSET: f32 = TRAFFIC_LIGHTS_WIDTH + SIDEBAR_TOGGLE_WIDTH + 8.;
 /// 每个 workspace 一行：名字和目录各占一行。
 const ROW_HEIGHT: f32 = 40.;
+/// 名字前的 GitHub 头像或 git 图标。
+const REPO_ICON_SIZE: f32 = 16.;
 /// 改名输入框的高度。
 const RENAME_FIELD_HEIGHT: f32 = 18.;
 
@@ -243,10 +245,13 @@ impl WindowView {
         let renaming = self.renaming.as_ref().filter(|renaming| renaming.id == id);
         // 名字前是 GitHub 头像，不在 GitHub 上的仓库画 git 图标；agent 的标记跟在名字后面。
         let repo = &workspace.repo;
-        let icon = div().flex_none().w(px(AGENT_MARK_WIDTH)).map(|slot| match (&repo.avatar, repo.branch.is_some()) {
-            (Some(avatar), _) => slot.child(img(avatar.clone()).size(px(AGENT_MARK_WIDTH)).rounded(px(3.))),
-            (None, true) => slot.child(svg().path(GIT_ICON).size(px(AGENT_MARK_WIDTH)).text_color(fg.opacity(0.6))),
-            (None, false) => slot,
+        // 靠上对着名字那一行，不在两行中间。
+        let icon = div().flex_none().w(px(REPO_ICON_SIZE)).mt(px(3.)).map(|slot| {
+            match (&repo.avatar, repo.branch.is_some()) {
+                (Some(avatar), _) => slot.child(img(avatar.clone()).size(px(REPO_ICON_SIZE)).rounded(px(3.))),
+                (None, true) => slot.child(svg().path(GIT_ICON).size(px(REPO_ICON_SIZE)).text_color(fg.opacity(0.6))),
+                (None, false) => slot,
+            }
         });
         let mark = workspace.mark(cx).map(|mark| styled_agent_mark(mark, ("workspace-agent", ix), fg, cards(cx)));
         let name: AnyElement = match renaming {
@@ -344,8 +349,18 @@ impl WindowView {
             .on_drop(cx.listener(move |this, dragged: &DraggedWorkspace, window, cx| {
                 this.move_workspace(dragged.id, ix, window, cx);
             }))
-            .child(icon)
-            .child(div().flex_1().min_w_0().flex().flex_col().gap(px(1.)).child(name).children(details))
+            // 名字一行和目录一行同高，图标按固定的上边距靠上排，不随字体的行高跳。
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .flex()
+                    .items_start()
+                    .gap(px(6.))
+                    .line_height(px(PATH_LINE_HEIGHT))
+                    .child(icon)
+                    .child(div().flex_1().min_w_0().flex().flex_col().gap(px(1.)).child(name).children(details)),
+            )
             .child(
                 div()
                     .flex_none()
