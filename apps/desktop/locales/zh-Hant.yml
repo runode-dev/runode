@@ -304,6 +304,10 @@ git:
     save: 儲存預設值
     saved: 已儲存。
     generate: 產生
+    custom: 自訂指令
+    command: 指令
+    command_hint: "參數裡的 {prompt} 換成提示詞；沒寫 {prompt} 時提示詞經標準輸入傳入。在存放庫目錄裡直接執行，不經 shell。"
+    empty_command: 自訂指令是空的。
     unknown_agent: "不認識的智慧體：%{agent}"
     unclosed_quote: CLI 參數裡的引號沒有配對。
     missing: "找不到 %{binary} 指令。請先安裝，或確認它在 shell 的 PATH 裡。"

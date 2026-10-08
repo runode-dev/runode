@@ -49,6 +49,8 @@ logos! {
     MISTRAL_VIBE = "mistral-vibe",
     JULES = "jules",
     OMP = "omp",
+    MUSE = "muse",
+    DEEPSEEK = "deepseek",
 }
 
 /// 一个 logo 怎么画：按原色，染成前景色，还是没有 logo、写名字的头一个字母。
@@ -88,10 +90,10 @@ fn logo_of(kind: AgentKind) -> Option<Logo> {
         AgentKind::MistralVibe => Colored(MISTRAL_VIBE),
         AgentKind::Jules => Mono(JULES),
         AgentKind::Omp => Mono(OMP),
+        AgentKind::Muse => Colored(MUSE),
         AgentKind::Droid
         | AgentKind::Letta
         | AgentKind::Maki
-        | AgentKind::Muse
         | AgentKind::Aider
         | AgentKind::Crush
         | AgentKind::Auggie
@@ -125,6 +127,7 @@ pub(in crate::window) fn brand_color(kind: AgentKind) -> Option<u32> {
         AgentKind::MistralVibe => 0xFA500F,
         AgentKind::Jules => 0x715CD7,
         AgentKind::Omp => 0xF97316,
+        AgentKind::Muse => 0x0081FB,
         _ => return None,
     })
 }
@@ -134,6 +137,15 @@ pub(in crate::window) fn brand_color(kind: AgentKind) -> Option<u32> {
 pub(in crate::window) fn accent(kind: AgentKind) -> Option<u32> {
     logo_of(kind)?;
     Some(brand_color(kind).unwrap_or(0x6B7280))
+}
+
+/// 不在 `AgentKind` 里的 DeepSeek Harness 的 logo，按原色画：runode 认不出终端里跑的是它，只在 Git
+/// 面板写提交说明的 agent 菜单里用。
+pub(in crate::window) const DEEPSEEK_LOGO: &str = DEEPSEEK;
+
+/// 按原色画 `path` 这个 logo，边长 `size`。
+pub(in crate::window) fn colored_logo(path: &'static str, size: Pixels) -> AnyElement {
+    img(path).flex_none().size(size).into_any_element()
 }
 
 /// `kind` 的 logo 文件，菜单项前面染成前景色画；没收 logo 的为 `None`。
@@ -147,7 +159,7 @@ pub(in crate::window) fn logo_path(kind: AgentKind) -> Option<&'static str> {
 /// `kind` 的 logo，边长 `size`；单色的和首字母都染成 `fg`。认不出是哪个的 agent 为 `None`。
 pub(in crate::window) fn agent_logo(kind: AgentKind, size: Pixels, fg: Hsla) -> Option<AnyElement> {
     Some(match logo_of(kind)? {
-        Logo::Colored(path) => img(path).flex_none().size(size).into_any_element(),
+        Logo::Colored(path) => colored_logo(path, size),
         Logo::Mono(path) => svg().path(path).flex_none().size(size).text_color(fg).into_any_element(),
         Logo::Initial(initial) => div()
             .flex_none()
@@ -184,7 +196,8 @@ mod tests {
                 None => panic!("{kind:?} has neither a logo nor an initial"),
             }
         }
-        assert_eq!(files, FILES.len());
+        // 不对应哪个 `AgentKind` 的 logo 另外数。
+        assert_eq!(files + [DEEPSEEK_LOGO].len(), FILES.len());
         assert!(logo_of(AgentKind::Other).is_none());
     }
 }

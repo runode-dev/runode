@@ -304,6 +304,10 @@ git:
     save: 保存默认值
     saved: 已保存。
     generate: 生成
+    custom: 自定义命令
+    command: 命令
+    command_hint: "参数里的 {prompt} 换成提示词；没写 {prompt} 时提示词经标准输入给。在仓库目录里直接跑，不经 shell。"
+    empty_command: 自定义命令是空的。
     unknown_agent: "不认识的智能体：%{agent}"
     unclosed_quote: CLI 参数里的引号没有配对。
     missing: "找不到 %{binary} 命令。请先安装，或者确认它在 shell 的 PATH 里。"

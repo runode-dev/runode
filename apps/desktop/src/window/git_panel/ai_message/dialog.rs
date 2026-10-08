@@ -11,11 +11,11 @@ use runode_shared_types::color::Rgb;
 
 use super::{
     DEFAULT_TEMPLATE, Recipe, VARIABLES,
-    agents::{AGENTS, AgentSpec, agent},
+    agents::{AGENTS, AgentSpec, CUSTOM_AGENT, agent},
     save_recipe, saved_recipe,
 };
 use crate::{
-    assets::CHEVRON_DOWN_ICON,
+    assets::{CHEVRON_DOWN_ICON, TERMINAL_ICON},
     ui::{
         hsla,
         text_area::{TextArea, TextAreaEvent},
@@ -23,16 +23,16 @@ use crate::{
     },
     window::{
         TITLEBAR_HEIGHT, WindowView,
-        agents::logo::{agent_logo, logo_path},
+        agents::logo::{agent_logo, colored_logo, logo_path},
         files::check_item,
     },
 };
 
-/// 对话框里 agent 菜单的一项：换成 `AGENTS` 里第 `index` 个。
+/// 对话框里 agent 菜单的一项：换成 `AGENTS` 里第 `index` 个，为空时换成自己定义的命令。
 #[derive(Clone, PartialEq, Action)]
 #[action(namespace = runode, no_json)]
 pub(in crate::window) struct SelectCommitAgent {
-    index: usize,
+    index: Option<usize>,
 }
 
 /// 保存以后在按钮旁边写的话。
@@ -44,19 +44,21 @@ enum Status {
 pub(in crate::window) struct CommitMessageDialog {
     /// 给哪个仓库写。
     root: PathBuf,
-    agent: &'static AgentSpec,
+    /// 选的 agent；为空时跑自己定义的命令。
+    agent: Option<&'static AgentSpec>,
     args: Entity<TextField>,
+    command: Entity<TextField>,
     template: Entity<TextArea>,
     /// 存成这个仓库自己的；否则存成所有仓库的默认值。
     repo_only: bool,
     status: Option<Status>,
     /// 正在后台写文件，写完之前不再写。
     saving: bool,
-    _events: [Subscription; 2],
+    _events: [Subscription; 3],
 }
 
 impl WindowView {
-    /// 打开给根目录是 `root` 的仓库写提交说明的对话框，填好它存着的预设，焦点给 CLI 参数。
+    /// 打开给根目录是 `root` 的仓库写提交说明的对话框，填好它存着的预设，焦点给 CLI 参数或者命令。
     pub(in crate::window) fn open_commit_message_dialog(
         &mut self,
         root: PathBuf,
@@ -69,36 +71,44 @@ impl WindowView {
         };
         let repo_only = saved.as_ref().is_some_and(|(_, own)| *own);
         let recipe = saved.map(|(recipe, _)| recipe).unwrap_or_default();
-        let args = cx.new(|cx| {
-            let end = recipe.args.len();
-            TextField::editing(recipe.args.clone(), end, cx).with_placeholder("--model sonnet")
-        });
+        let field = |text: &str, placeholder: &'static str, cx: &mut Context<Self>| {
+            cx.new(|cx| TextField::editing(text.to_owned(), text.len(), cx).with_placeholder(placeholder))
+        };
+        let args = field(&recipe.args, "--model sonnet", cx);
+        let command = field(&recipe.command, "my-agent --print {prompt}", cx);
         let template = cx.new(|cx| {
             let mut area = TextArea::new(cx);
             area.set_line_limits(6, 12, cx);
             area.set_text(recipe.template.clone(), cx);
             area
         });
-        let on_args = cx.subscribe_in(&args, window, |this, _, event: &TextFieldEvent, window, cx| match event {
-            TextFieldEvent::Next => this.generate_from_dialog(window, cx),
-            TextFieldEvent::Dismiss => this.close_commit_message_dialog(window, cx),
-            TextFieldEvent::Changed(_) | TextFieldEvent::Previous => {}
-        });
+        let on_field =
+            |this: &mut Self, event: &TextFieldEvent, window: &mut Window, cx: &mut Context<Self>| match event {
+                TextFieldEvent::Next => this.generate_from_dialog(window, cx),
+                TextFieldEvent::Dismiss => this.close_commit_message_dialog(window, cx),
+                TextFieldEvent::Changed(_) | TextFieldEvent::Previous => {}
+            };
+        let on_args =
+            cx.subscribe_in(&args, window, move |this, _, event, window, cx| on_field(this, event, window, cx));
+        let on_command =
+            cx.subscribe_in(&command, window, move |this, _, event, window, cx| on_field(this, event, window, cx));
         let on_template = cx.subscribe_in(&template, window, |this, _, event: &TextAreaEvent, window, cx| {
             if let TextAreaEvent::Submit = event {
                 this.generate_from_dialog(window, cx);
             }
         });
-        window.focus(&args.focus_handle(cx), cx);
+        let agent = (recipe.agent != CUSTOM_AGENT).then(|| agent(&recipe.agent).unwrap_or(&AGENTS[0]));
+        window.focus(&if agent.is_some() { &args } else { &command }.focus_handle(cx), cx);
         self.commit_message_dialog = Some(CommitMessageDialog {
             root,
-            agent: agent(&recipe.agent).unwrap_or(&AGENTS[0]),
+            agent,
             args,
+            command,
             template,
             repo_only,
             status,
             saving: false,
-            _events: [on_args, on_template],
+            _events: [on_args, on_command, on_template],
         });
         cx.notify();
     }
@@ -114,9 +124,10 @@ impl WindowView {
     fn dialog_recipe(dialog: &CommitMessageDialog, cx: &Context<Self>) -> Recipe {
         let template = dialog.template.read(cx).text().trim().to_owned();
         Recipe {
-            agent: dialog.agent.id.to_owned(),
+            agent: dialog.agent.map_or(CUSTOM_AGENT, |agent| agent.id).to_owned(),
             args: dialog.args.read(cx).query().trim().to_owned(),
             template: if template.is_empty() { DEFAULT_TEMPLATE.to_owned() } else { template },
+            command: dialog.command.read(cx).query().trim().to_owned(),
         }
     }
 
@@ -159,34 +170,41 @@ impl WindowView {
         .detach();
     }
 
-    /// agent 菜单里选了一个。
+    /// agent 菜单里选了一个，焦点给它下面要填的框：CLI 参数或者命令。
     pub(in crate::window) fn select_commit_agent(
         &mut self,
         action: &SelectCommitAgent,
-        _: &mut Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if let (Some(dialog), Some(spec)) = (&mut self.commit_message_dialog, AGENTS.get(action.index)) {
-            dialog.agent = spec;
-            dialog.status = None;
-            cx.notify();
-        }
+        let Some(dialog) = &mut self.commit_message_dialog else {
+            return;
+        };
+        dialog.agent = action.index.and_then(|index| AGENTS.get(index));
+        dialog.status = None;
+        let field = if dialog.agent.is_some() { &dialog.args } else { &dialog.command };
+        window.focus(&field.focus_handle(cx), cx);
+        cx.notify();
     }
 
-    /// 在点的位置弹出 agent 菜单，选着的那个打勾。
+    /// 在点的位置弹出 agent 菜单，选着的那个打勾；最后是自己定义的命令。
     fn open_commit_agent_menu(&mut self, event: &MouseDownEvent, cx: &mut Context<Self>) {
         let Some(dialog) = &self.commit_message_dialog else {
             return;
         };
-        let items = AGENTS
+        let mut items: Vec<_> = AGENTS
             .iter()
             .enumerate()
             .map(|(index, spec)| {
-                let icon = spec.kind.and_then(logo_path);
-                let checked = spec.id == dialog.agent.id;
-                Some(check_item(spec.label.to_owned(), icon, checked, Box::new(SelectCommitAgent { index })))
+                let icon = spec.kind.and_then(logo_path).or(spec.logo);
+                let checked = dialog.agent.is_some_and(|agent| agent.id == spec.id);
+                let action = Box::new(SelectCommitAgent { index: Some(index) });
+                Some(check_item(spec.label.to_owned(), icon, checked, action))
             })
             .collect();
+        let custom = rust_i18n::t!("git.ai_message.custom").into_owned();
+        let action = Box::new(SelectCommitAgent { index: None });
+        items.extend([None, Some(check_item(custom, Some(TERMINAL_ICON), dialog.agent.is_none(), action))]);
         let target = self.focus_handle(cx);
         self.open_menu(event.position, items, target, cx);
     }
@@ -225,7 +243,16 @@ impl WindowView {
                 .cursor_pointer()
                 .child(label)
         };
-        let spec = dialog.agent;
+        let (logo, name) = match dialog.agent {
+            Some(spec) => {
+                let logo = spec.kind.and_then(|kind| agent_logo(kind, px(14.), fg));
+                (logo.or_else(|| spec.logo.map(|path| colored_logo(path, px(14.)))), spec.label.to_owned())
+            }
+            None => (
+                Some(svg().path(TERMINAL_ICON).flex_none().size(px(14.)).text_color(fg).into_any_element()),
+                rust_i18n::t!("git.ai_message.custom").into_owned(),
+            ),
+        };
         let agent_button = boxed()
             .id("commit-message-agent")
             .flex_none()
@@ -235,8 +262,8 @@ impl WindowView {
             .gap(px(6.))
             .cursor_pointer()
             .hover(move |button| button.bg(hover_bg))
-            .children(spec.kind.and_then(|kind| agent_logo(kind, px(14.), fg)))
-            .child(spec.label)
+            .children(logo)
+            .child(name)
             .child(svg().path(CHEVRON_DOWN_ICON).size(px(12.)).text_color(fg.opacity(0.6)))
             .on_mouse_down(
                 MouseButton::Left,
@@ -331,14 +358,22 @@ impl WindowView {
                     .child(label("git.ai_message.agent"))
                     .child(div().flex().child(agent_button)),
             )
-            .child(
-                div()
-                    .flex()
-                    .flex_col()
-                    .gap(px(6.))
-                    .child(label("git.ai_message.args"))
-                    .child(boxed().h(px(28.)).flex().items_center().child(dialog.args.clone())),
-            )
+            .child(div().flex().flex_col().gap(px(6.)).map(|column| {
+                match dialog.agent {
+                    Some(_) => column
+                        .child(label("git.ai_message.args"))
+                        .child(boxed().h(px(28.)).flex().items_center().child(dialog.args.clone())),
+                    None => column
+                        .child(label("git.ai_message.command"))
+                        .child(boxed().h(px(28.)).flex().items_center().child(dialog.command.clone()))
+                        .child(
+                            div()
+                                .text_size(px(11.))
+                                .text_color(fg.opacity(0.55))
+                                .child(rust_i18n::t!("git.ai_message.command_hint").into_owned()),
+                        ),
+                }
+            }))
             .child(
                 div()
                     .flex()

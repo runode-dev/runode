@@ -304,6 +304,10 @@ git:
     save: Save Default
     saved: Saved.
     generate: Generate
+    custom: Custom Command
+    command: Command
+    command_hint: "{prompt} in the arguments is replaced with the prompt; without it the prompt goes to standard input. Runs in the repository without a shell."
+    empty_command: The custom command is empty.
     unknown_agent: "Unknown agent: %{agent}"
     unclosed_quote: Unclosed quote in CLI arguments.
     missing: "Couldn't find the %{binary} command. Install it, or make sure it's on the PATH of your shell."

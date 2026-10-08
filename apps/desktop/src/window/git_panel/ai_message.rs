@@ -4,7 +4,8 @@
 //! 用哪个 agent、加什么 CLI 参数、提示词模板是一份预设（`Recipe`），存在 runode 根目录的
 //! `commit-message.json`（`Dirs::commit_message_file`）：所有仓库的默认值，和按仓库根目录分开的。
 //! 说明框里的 ✨ 按钮按这个仓库的预设直接写，还没存过预设时打开对话框；对话框（`dialog`）里能临时
-//! 换着试，也能存成预设。各家 agent 的调用方式见 `agents`。
+//! 换着试，也能存成预设。各家 agent 的调用方式见 `agents`；不在其中的，用户可以自己写一条命令
+//! （`Recipe::command`）。
 
 mod agents;
 mod dialog;
@@ -49,13 +50,17 @@ pub(in crate::window) const VARIABLES: &[&str] = &["{basePrompt}", "{branch}", "
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(in crate::window) struct Recipe {
-    /// `agents::AGENTS` 里的 `id`。
+    /// `agents::AGENTS` 里的 `id`，或者 `agents::CUSTOM_AGENT`。
     pub agent: String,
     /// 加在 agent 自己的参数后面，按 shell 的规矩分词，不展开变量。
     #[serde(default)]
     pub args: String,
     #[serde(default = "default_template")]
     pub template: String,
+    /// 自己定义的命令：按 shell 的规矩分词，第一个词是程序，参数里的 `{prompt}` 换成提示词；没有
+    /// `{prompt}` 时提示词经标准输入给。和选哪个 agent 分开存，换来换去不丢。
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub command: String,
 }
 
 fn default_template() -> String {
@@ -64,7 +69,12 @@ fn default_template() -> String {
 
 impl Default for Recipe {
     fn default() -> Self {
-        Self { agent: agents::DEFAULT_AGENT.to_owned(), args: String::new(), template: default_template() }
+        Self {
+            agent: agents::DEFAULT_AGENT.to_owned(),
+            args: String::new(),
+            template: default_template(),
+            command: String::new(),
+        }
     }
 }
 
@@ -180,9 +190,18 @@ fn generate(
     context: &PromptContext,
     path: Option<OsString>,
 ) -> Result<String, String> {
-    let agent = agents::agent(&recipe.agent)
-        .ok_or_else(|| rust_i18n::t!("git.ai_message.unknown_agent", agent = recipe.agent).into_owned())?;
-    let user_args = split_args(&recipe.args)?;
+    // 先看命令写得对不对，再去读改动。
+    let (agent, binary, words) = if recipe.agent == agents::CUSTOM_AGENT {
+        let mut words = split_args(&recipe.command)?;
+        if words.is_empty() {
+            return Err(rust_i18n::t!("git.ai_message.empty_command").into_owned());
+        }
+        (None, words.remove(0), words)
+    } else {
+        let agent = agents::agent(&recipe.agent)
+            .ok_or_else(|| rust_i18n::t!("git.ai_message.unknown_agent", agent = recipe.agent).into_owned())?;
+        (Some(agent), agent.binary.to_owned(), split_args(&recipe.args)?)
+    };
     let patch = limit(repo.pending_diff(context.staged).map_err(|err| err.message)?, MAX_PATCH_BYTES);
     let recent = repo.recent_messages(EXAMPLES).map_err(|err| err.message)?;
     let base = base_prompt(context, &recent, &patch);
@@ -190,11 +209,14 @@ fn generate(
         &recipe.template,
         &[("basePrompt", &base), ("branch", &context.branch), ("stagedFiles", &context.files), ("stagedPatch", &patch)],
     );
-    let (args, stdin) = agent.command_line(user_args, &prompt);
-    let output = run(agent.binary, &args, stdin, &repo.root, path)?;
-    let text = match agent.output {
-        Output::Text => output,
-        Output::OpenCodeEvents => opencode_text(&output)?,
+    let (args, stdin) = match agent {
+        Some(agent) => agent.command_line(words, &prompt),
+        None => agents::with_prompt(words, &prompt),
+    };
+    let stdout = run(&binary, &args, stdin, &repo.root, path)?;
+    let text = match agent.map_or(Output::Text, |agent| agent.output) {
+        Output::Text => stdout,
+        Output::OpenCodeEvents => opencode_text(&stdout)?,
     };
     let message = clean(&text);
     if message.is_empty() {
@@ -460,9 +482,23 @@ mod tests {
         let (args, stdin) = agy.command_line(vec![], "-P");
         assert_eq!(args, ["--sandbox", "--print=-P"]);
         assert_eq!(stdin, None);
+        let (args, stdin) = agents::with_prompt(vec!["--ask".into(), "x{prompt}".into()], "P");
+        assert_eq!((args, stdin), (vec!["--ask".to_owned(), "xP".to_owned()], None));
         let muse = agents::agent("muse").unwrap();
         let (args, _) = muse.command_line(vec!["--model".into(), "m".into()], "P");
         assert_eq!(&args[args.len() - 4..], ["--model", "m", "--", "P"]);
+    }
+
+    /// 提示词经标准输入给，比管道的缓冲大也不卡；失败时报标准错误。
+    #[test]
+    fn runs_a_command_with_the_prompt_on_stdin() {
+        let dir = std::env::temp_dir();
+        let prompt = "x".repeat(200_000);
+        let out = run("sh", &["-c".into(), "wc -c".into()], Some(prompt), &dir, None).unwrap();
+        assert_eq!(out.trim(), "200000");
+        let err = run("sh", &["-c".into(), "echo boom >&2; exit 3".into()], None, &dir, None).unwrap_err();
+        assert_eq!(err, "sh: boom");
+        assert!(run("runode-no-such-agent", &[], None, &dir, None).unwrap_err().contains("runode-no-such-agent"));
     }
 
     #[test]
