@@ -1,6 +1,0 @@
-{
-  "enabledPlugins": {
-    "rust-analyzer-lsp@anthropic-plugin-directory": true,
-    "swift-lsp-anthropics@anthropic-plugin-directory": true
-  }
-}
