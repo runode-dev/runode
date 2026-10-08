@@ -2,8 +2,8 @@
 //! 后台会话（`background`）。
 
 use gpui::{
-    AnyElement, Axis, Context, CursorStyle, Div, ExternalPaths, Focusable, Hsla, MouseButton, MouseDownEvent, Render,
-    SharedString, Stateful, Window, div, prelude::*, px,
+    Action, AnyElement, App, Axis, Context, CursorStyle, Div, ExternalPaths, Focusable, Hsla, Modifiers, MouseButton,
+    MouseDownEvent, Render, SharedString, Stateful, TextAlign, Window, canvas, div, prelude::*, px,
 };
 use runode_shared_types::color::Rgb;
 
@@ -34,6 +34,62 @@ pub(super) const SIDEBAR_TOGGLE_INSET: f32 = TRAFFIC_LIGHTS_WIDTH + SIDEBAR_TOGG
 const ROW_HEIGHT: f32 = 40.;
 /// 改名输入框的高度。
 const RENAME_FIELD_HEIGHT: f32 = 18.;
+
+/// 快捷键要按着的修饰键，查法和 `shortcut_hint` 一样：先找 `select` 的绑定，`is_last` 时再找 `last` 的，
+/// 都取最后一个绑定的第一键。
+fn shortcut_modifiers(select: &dyn Action, last: &dyn Action, is_last: bool, cx: &App) -> Option<Modifiers> {
+    let keymap = cx.key_bindings();
+    let keymap = keymap.borrow();
+    let modifiers = |action: &dyn Action| {
+        keymap.bindings_for_action(action).next_back()?.keystrokes().first().map(|k| *k.modifiers())
+    };
+    modifiers(select).or_else(|| if is_last { modifiers(last) } else { None })
+}
+
+/// 目录那一行的行高。
+const PATH_LINE_HEIGHT: f32 = 16.;
+
+/// 一行路径，按排好版后的宽度用 `fit_path` 截短再画；字体、字号、颜色跟着外面的文字样式。GPUI 只会按字
+/// 截断，量文字要等知道宽度，所以画在 canvas 上。
+fn path_line(path: String) -> impl IntoElement {
+    canvas(
+        move |bounds, window, _| {
+            let style = window.text_style();
+            let font_size = style.font_size.to_pixels(window.rem_size());
+            let shape = |text: &str| {
+                let text = SharedString::from(text.to_owned());
+                let run = style.to_run(text.len());
+                window.text_system().shape_line(text, font_size, &[run], None)
+            };
+            shape(&fit_path(&path, |text| shape(text).width <= bounds.size.width))
+        },
+        |bounds, line, window, cx| {
+            line.paint(bounds.origin, bounds.size.height, TextAlign::Left, None, window, cx).ok();
+        },
+    )
+    .w_full()
+    .h(px(PATH_LINE_HEIGHT))
+}
+
+/// 路径放不下时整级整级地从开头删，前面写 `…`：`…/barey.cn/runode`；最后一级也放不下时再从它的开头按字删。
+fn fit_path(path: &str, fits: impl Fn(&str) -> bool) -> String {
+    if fits(path) {
+        return path.to_owned();
+    }
+    let mut tail = path;
+    for (i, _) in path.match_indices('/').filter(|&(i, _)| i > 0) {
+        tail = &path[i..];
+        let candidate = format!("…{tail}");
+        if fits(&candidate) {
+            return candidate;
+        }
+    }
+    tail.char_indices()
+        .skip(1)
+        .map(|(i, _)| format!("…{}", &tail[i..]))
+        .find(|candidate| fits(candidate))
+        .unwrap_or_else(|| "…".to_owned())
+}
 
 /// 拖动中的 workspace：拖动时跟着鼠标画出来，放到另一行上时按 `id` 挪位置。
 #[derive(Clone)]
@@ -123,8 +179,10 @@ impl WindowView {
             )
     }
 
-    pub(super) fn render_sidebar(&self, fg: Rgb, bg: Rgb, fullscreen: bool, cx: &mut Context<Self>) -> Stateful<Div> {
-        let rows: Vec<_> = (0..self.workspaces.len()).map(|ix| self.render_row(ix, fg, bg, cx)).collect();
+    pub(super) fn render_sidebar(&self, fg: Rgb, bg: Rgb, window: &Window, cx: &mut Context<Self>) -> Stateful<Div> {
+        let fullscreen = window.is_fullscreen();
+        let modifiers = window.modifiers();
+        let rows: Vec<_> = (0..self.workspaces.len()).map(|ix| self.render_row(ix, fg, bg, modifiers, cx)).collect();
         let drop_bg = hsla(bg.mix(fg, 0.08));
         div()
             .id("sidebar")
@@ -149,6 +207,8 @@ impl WindowView {
                     .on_mouse_down(MouseButton::Left, drag_window),
             )
             .child(self.render_mobile_entry(fg, bg, cx))
+            // 手机端入口不是 workspace，和下面的列表用一条线隔开。
+            .child(div().flex_none().mx(px(14.)).mb(px(6.)).h(px(1.)).bg(divider_color(hsla(fg))))
             .child(
                 div()
                     .id("workspace-list")
@@ -166,7 +226,7 @@ impl WindowView {
             .child(self.render_new_workspace_button(fg, bg, cx))
     }
 
-    fn render_row(&self, ix: usize, fg: Rgb, bg: Rgb, cx: &mut Context<Self>) -> Stateful<Div> {
+    fn render_row(&self, ix: usize, fg: Rgb, bg: Rgb, modifiers: Modifiers, cx: &mut Context<Self>) -> Stateful<Div> {
         let workspace = &self.workspaces[ix];
         let id = workspace.id;
         // 开着手机端引导页时高亮的是入口。
@@ -186,19 +246,19 @@ impl WindowView {
             Some(renaming) => renaming.edit.render(px(RENAME_FIELD_HEIGHT), rgb_fg, bg).into_any_element(),
             None => div().truncate().child(workspace.name.clone()).into_any_element(),
         };
-        // 右侧：响铃标记优先，其次快捷键提示；悬停时换成关闭按钮。
+        // 右侧：响铃标记优先，其次快捷键提示，提示只在按着它的修饰键时显示，平时不和名字抢眼；悬停时换成
+        // 关闭按钮。
+        let is_last = ix + 1 == self.workspaces.len();
         let hint = if workspace.bell() {
             div().size(px(6.)).rounded_full().bg(fg.opacity(0.8)).into_any_element()
         } else {
+            let held = shortcut_modifiers(&SelectWorkspace(ix), &SelectLastWorkspace, is_last, cx) == Some(modifiers);
             div()
                 .text_size(px(11.))
-                .text_color(fg.opacity(0.35))
-                .children(shortcut_hint(
-                    &SelectWorkspace(ix),
-                    &SelectLastWorkspace,
-                    ix + 1 == self.workspaces.len(),
-                    cx,
-                ))
+                .text_color(fg.opacity(0.5))
+                // 不按时只是看不见、位置照留，按下时名字一栏不变窄，截断的地方不跳。
+                .when(!held, |hint| hint.invisible())
+                .children(shortcut_hint(&SelectWorkspace(ix), &SelectLastWorkspace, is_last, cx))
                 .into_any_element()
         };
         // 目录和名字一样（比如家目录的 `~`）时不再写一遍。
@@ -257,15 +317,9 @@ impl WindowView {
                     .gap(px(1.))
                     .child(name)
                     // 路径长时留下结尾：最后几级目录最能区分。
-                    .children(dir.map(|dir| {
-                        div()
-                            .text_size(px(11.))
-                            .text_color(fg.opacity(0.45))
-                            .overflow_hidden()
-                            .whitespace_nowrap()
-                            .text_ellipsis_start()
-                            .child(dir)
-                    })),
+                    .children(
+                        dir.map(|dir| div().text_size(px(11.)).text_color(fg.opacity(0.45)).child(path_line(dir))),
+                    ),
             )
             .child(
                 div()
@@ -374,5 +428,25 @@ impl WindowView {
         }
         self.save(cx);
         cx.notify();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::fit_path;
+
+    #[test]
+    fn fit_path_drops_whole_directories_first() {
+        let fit = |path, width| fit_path(path, |text| text.chars().count() <= width);
+        let path = "/Volumes/dev/barey.cn/runode";
+        assert_eq!(fit(path, 40), path);
+        // 放得下几级就留几级，不截在一级目录的中间。
+        assert_eq!(fit(path, 26), "…/dev/barey.cn/runode");
+        assert_eq!(fit(path, 20), "…/barey.cn/runode");
+        assert_eq!(fit(path, 10), "…/runode");
+        assert_eq!(fit("~/src/app", 7), "…/app");
+        // 最后一级也放不下时才按字截。
+        assert_eq!(fit(path, 5), "…node");
+        assert_eq!(fit(path, 0), "…");
     }
 }

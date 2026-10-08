@@ -529,6 +529,9 @@ impl Render for WindowView {
             .on_action(cx.listener(Self::select_last_workspace))
             .on_action(cx.listener(Self::toggle_sidebar))
             .on_action(cx.listener(Self::toggle_git))
+            // 侧栏按着切换 workspace 的修饰键时才显示快捷键提示，按下、松开都要重画。挂在根上：修饰键的事件
+            // 只沿焦点所在的路径传，侧栏不在这条路上。
+            .on_modifiers_changed(cx.listener(|_, _, _, cx| cx.notify()))
             .on_action(cx.listener(Self::toggle_files))
             .on_action(cx.listener(Self::goto_agent))
             .on_action(cx.listener(Self::next_agent))
@@ -573,7 +576,7 @@ impl WindowView {
         let tab_count = self.workspace().tabs.len();
         let show_tabs = tab_count > 1;
         let panes = self.render_panes(fg, bg, window, cx);
-        let sidebar = self.sidebar_visible().then(|| self.render_sidebar(fg, bg, fullscreen, cx));
+        let sidebar = self.sidebar_visible().then(|| self.render_sidebar(fg, bg, window, cx));
         // 标题栏透明后内容铺到红绿灯下面，顶部这条要能拖动窗口、双击缩放。红绿灯和侧栏开关
         // 落在侧栏上或者全屏时没有红绿灯，标题栏不用让位；全屏又只有一个标签时不留这一条。
         let left_inset = if fullscreen || sidebar.is_some() { 0. } else { sidebar::SIDEBAR_TOGGLE_INSET };
@@ -697,7 +700,7 @@ impl WindowView {
         let viewport = f32::from(window.viewport_size().width);
         let tab_count = self.workspace().tabs.len();
         let panes = self.render_panes(fg, bg, window, cx);
-        let sidebar = self.sidebar_visible().then(|| self.render_sidebar(fg, bg, fullscreen, cx));
+        let sidebar = self.sidebar_visible().then(|| self.render_sidebar(fg, bg, window, cx));
         let left_inset = if fullscreen || sidebar.is_some() { CARD_GAP } else { sidebar::SIDEBAR_TOGGLE_INSET };
         let sidebar_toggle = (!fullscreen).then(|| self.render_sidebar_toggle(fg, frame, cx));
         let sidebar_width = if sidebar.is_some() { self.sidebar_width() } else { 0. };

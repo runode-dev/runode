@@ -249,7 +249,7 @@ impl WindowView {
     ) -> Vec<AnyElement> {
         let fullscreen = window.is_fullscreen();
         let cards = cards(cx);
-        let sidebar = self.sidebar_visible().then(|| self.render_sidebar(fg, bg, fullscreen, cx));
+        let sidebar = self.sidebar_visible().then(|| self.render_sidebar(fg, bg, window, cx));
         let handle = sidebar.is_some().then(|| self.render_sidebar_handle(cx));
         let toggle =
             (!fullscreen).then(|| self.render_sidebar_toggle(fg, if cards { frame_color(fg, bg) } else { bg }, cx));
