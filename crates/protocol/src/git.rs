@@ -28,6 +28,11 @@ pub enum GitRequest {
     Unstage {
         paths: Vec<PathBuf>,
     },
+    /// 丢掉这些文件还没暂存的改动：未跟踪的从磁盘上删掉，其余的恢复成暂存区里的样子；已经暂存的
+    /// 不受影响。只认未暂存段里确实有的文件，别的路径不碰。
+    Discard {
+        paths: Vec<PathBuf>,
+    },
     StageAll,
     UnstageAll,
     /// 提交暂存的改动；`stage_all` 时先暂存所有改动。

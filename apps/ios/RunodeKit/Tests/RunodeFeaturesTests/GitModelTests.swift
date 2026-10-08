@@ -82,6 +82,16 @@ import Testing
         _ = try lastGit(.unstage(paths: ["new.rs", "old.rs"]))
     }
 
+    /// 丢弃按路径请宿主办，占着 `running`。
+    @Test func discards() async throws {
+        let model = try await connectedModel(status(unstaged: [changed]))
+        await model.discard([changed])
+        let req = try lastGit(.discard(paths: ["src/a.rs"]))
+        #expect(model.running == .discard)
+        model.handle(.gitStatus(req: req, id: sessionA, status: status()))
+        #expect(model.running == nil && model.isClean)
+    }
+
     /// 没有暂存的改动时提交全部；提交成了才清空说明，没成时留着、报错并重读状态。
     @Test func commits() async throws {
         let model = try await connectedModel(status(unstaged: [changed]))
@@ -202,5 +212,46 @@ import Testing
         #expect(!model.handle(.error(req: 999, id: nil, message: "x")))
         #expect(model.errorMessage == nil)
         #expect(model.status != nil)
+    }
+}
+
+@Suite struct GitFileTreeTests {
+    private func files(_ paths: [String]) -> [GitFile] {
+        paths.map { GitFile(path: $0, status: .modified) }
+    }
+
+    private func shape(_ items: [GitTreeItem]) -> [String] {
+        items.map {
+            switch $0 {
+            case .directory(_, let name, let depth, let expanded, let files):
+                "\(depth) \(name)/ \(files.count)\(expanded ? "" : " +")"
+            case .file(let file, let depth): "\(depth) \(file.path)"
+            }
+        }
+    }
+
+    @Test func groupsFilesByDirectory() {
+        let tree = Presentation.gitFileTree(
+            files(["src/main.rs", "README.md", "src/a/b.rs", "Cargo.toml", "src/A.rs", "docs/x.md"]), collapsed: [])
+        // 目录在前、文件在后，各自按名字排，不分大小写；只有一个文件的目录不并。
+        #expect(
+            shape(tree) == [
+                "0 docs/ 1", "1 docs/x.md", "0 src/ 3", "1 a/ 1", "2 src/a/b.rs", "1 src/A.rs", "1 src/main.rs",
+                "0 Cargo.toml", "0 README.md",
+            ])
+    }
+
+    @Test func compactsSingleChildDirectoriesAndCollapses() {
+        let changed = files(["crates/desktop/src/a.rs", "crates/desktop/src/b/c.rs", "crates/desktop/src/b/d.rs"])
+        #expect(
+            shape(Presentation.gitFileTree(changed, collapsed: [])) == [
+                "0 crates/desktop/src/ 3", "1 b/ 2", "2 crates/desktop/src/b/c.rs", "2 crates/desktop/src/b/d.rs",
+                "1 crates/desktop/src/a.rs",
+            ])
+        // 收起按并成一行后最深的那个目录认，下面的不排。
+        #expect(
+            shape(Presentation.gitFileTree(changed, collapsed: ["crates/desktop/src"])) == [
+                "0 crates/desktop/src/ 3 +"
+            ])
     }
 }

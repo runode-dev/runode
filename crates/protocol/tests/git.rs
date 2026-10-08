@@ -31,6 +31,10 @@ fn requests() {
         json!({"type": "git", "req": 3, "id": ID_TEXT, "request": {"op": "unstage", "paths": ["b.rs", "a.rs"]}}),
     );
     same(
+        &git(6, GitRequest::Discard { paths: vec!["a.rs".into()] }),
+        json!({"type": "git", "req": 6, "id": ID_TEXT, "request": {"op": "discard", "paths": ["a.rs"]}}),
+    );
+    same(
         &git(4, GitRequest::Commit { message: "修好了".into(), stage_all: true }),
         json!({"type": "git", "req": 4, "id": ID_TEXT, "request": {"op": "commit", "message": "修好了", "stage_all": true}}),
     );

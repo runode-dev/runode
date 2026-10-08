@@ -9,6 +9,7 @@ import Testing
 
     @Test(arguments: [
         "git_status_request", "git_diff_request", "git_unstage_request", "git_commit_request", "git_checkout_request",
+        "git_discard_request",
     ])
     func requestsMatchTheHost(_ name: String) throws {
         let request: GitRequest =
@@ -18,6 +19,7 @@ import Testing
             case "git_unstage_request": .unstage(paths: ["b.rs", "a.rs"])
             case "git_commit_request": .commit(message: "修好了", stageAll: true)
             case "git_checkout_request": .checkout(branch: "origin/feat", remote: true)
+            case "git_discard_request": .discard(paths: ["a.rs"])
             default: throw CancellationError()
             }
         let req: UInt32 =
@@ -26,6 +28,7 @@ import Testing
             case "git_diff_request": 2
             case "git_unstage_request": 3
             case "git_commit_request": 4
+            case "git_discard_request": 6
             default: 5
             }
         let encoded = try JSONEncoder().encode(ClientMsg.git(req: req, id: id, request: request))

@@ -410,6 +410,17 @@
       },
       "type": "git"
     },
+    "git_discard_request": {
+      "id": "0123456789abcdef0011223344556677",
+      "req": 6,
+      "request": {
+        "op": "discard",
+        "paths": [
+          "a.rs"
+        ]
+      },
+      "type": "git"
+    },
     "git_status": {
       "id": "0123456789abcdef0011223344556677",
       "req": 1,

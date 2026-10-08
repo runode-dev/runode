@@ -213,6 +213,7 @@
             case .status, .fetch: break
             case .stage(let paths): move(paths, toStaged: true)
             case .unstage(let paths): move(paths, toStaged: false)
+            case .discard(let paths): repo.withLock { $0.unstaged.removeAll { paths.contains($0.path) } }
             case .stageAll: move(repo.withLock { $0.unstaged.map(\.path) }, toStaged: true)
             case .unstageAll: move(repo.withLock { $0.staged.map(\.path) }, toStaged: false)
             case .commit(_, let stageAll):

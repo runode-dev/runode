@@ -9,6 +9,8 @@ public enum GitRequest: Hashable, Sendable, Encodable {
     case stage(paths: [String])
     /// 暂存了的改名要连同旧路径一起给。
     case unstage(paths: [String])
+    /// 丢掉这些文件还没暂存的改动，未跟踪的从电脑上删掉。宿主只认未暂存段里确实有的文件。
+    case discard(paths: [String])
     case stageAll
     case unstageAll
     /// `stageAll` 时先暂存所有改动再提交。
@@ -40,6 +42,9 @@ public enum GitRequest: Hashable, Sendable, Encodable {
             try c.encode(paths, forKey: .paths)
         case let .unstage(paths):
             try c.encode("unstage", forKey: .op)
+            try c.encode(paths, forKey: .paths)
+        case let .discard(paths):
+            try c.encode("discard", forKey: .op)
             try c.encode(paths, forKey: .paths)
         case .stageAll: try c.encode("stage_all", forKey: .op)
         case .unstageAll: try c.encode("unstage_all", forKey: .op)

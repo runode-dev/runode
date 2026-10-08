@@ -93,6 +93,14 @@ fn run(
         }
         GitRequest::Stage { paths } => done(repo()?.stage(&paths))?,
         GitRequest::Unstage { paths } => done(repo()?.unstage(&paths))?,
+        GitRequest::Discard { paths } => {
+            let repo = repo()?;
+            // 路径是前端给的：只丢快照里未暂存段确实有的文件，`discard` 还要按状态分开删和恢复。
+            let files: Vec<_> = runode_git::snapshot(dir, cache)
+                .map(|snapshot| snapshot.unstaged.into_iter().filter(|file| paths.contains(&file.path)).collect())
+                .unwrap_or_default();
+            done(repo.discard(&files))?;
+        }
         GitRequest::StageAll => done(repo()?.stage_all())?,
         GitRequest::UnstageAll => done(repo()?.unstage_all())?,
         GitRequest::Commit { message, stage_all } => {
@@ -270,6 +278,21 @@ mod tests {
         let status =
             status_of(run_ok(&dir, GitRequest::Commit { message: "second".into(), stage_all: true }, &mut cache));
         assert!(status.unstaged.is_empty());
+
+        // 丢弃：改了的恢复，未跟踪的删掉；不在改动里的路径不碰。
+        std::fs::write(dir.join("a.txt"), "three\n").unwrap();
+        std::fs::write(dir.join("b.txt"), "new\n").unwrap();
+        std::fs::write(dir.join(".gitignore"), "c.txt\n").unwrap();
+        std::fs::write(dir.join("c.txt"), "ignored\n").unwrap();
+        let discard = GitRequest::Discard { paths: vec!["a.txt".into(), "b.txt".into(), "c.txt".into()] };
+        let status = status_of(run_ok(&dir, discard, &mut cache));
+        assert_eq!(std::fs::read_to_string(dir.join("a.txt")).unwrap(), "two\n");
+        assert!(!dir.join("b.txt").exists() && dir.join("c.txt").exists());
+        assert_eq!(
+            status.unstaged.iter().map(|file| file.path.as_path()).collect::<Vec<_>>(),
+            [Path::new(".gitignore")]
+        );
+        std::fs::remove_file(dir.join(".gitignore")).unwrap();
 
         git(&dir, &["branch", "side"]);
         let HostMsg::GitBranches { branches, .. } = run_ok(&dir, GitRequest::Branches, &mut cache) else {

@@ -26,7 +26,7 @@ public struct GitDiffTarget: Hashable, Sendable {
 public final class GitModel {
     /// 改仓库的操作，`running` 用它说正在办哪件。
     public enum Action: Hashable, Sendable {
-        case stage, unstage, commit, fetch, pull, push, sync, checkout
+        case stage, unstage, discard, commit, fetch, pull, push, sync, checkout
     }
 
     public let sessionId: SessionId
@@ -146,12 +146,26 @@ public final class GitModel {
     }
 
     public func stage(_ file: GitFile) async {
-        await perform(.stage, .stage(paths: [file.path]))
+        await stage([file])
+    }
+
+    /// 暂存几个文件，以树形式查看时对整个目录用。
+    public func stage(_ files: [GitFile]) async {
+        await perform(.stage, .stage(paths: files.map(\.path)))
+    }
+
+    public func unstage(_ file: GitFile) async {
+        await unstage([file])
     }
 
     /// 撤回暂存；改名连同旧路径一起撤回，不然只撤回新路径那一半。
-    public func unstage(_ file: GitFile) async {
-        await perform(.unstage, .unstage(paths: [file.path] + (file.oldPath.map { [$0] } ?? [])))
+    public func unstage(_ files: [GitFile]) async {
+        await perform(.unstage, .unstage(paths: files.flatMap { [$0.path] + ($0.oldPath.map { [$0] } ?? []) }))
+    }
+
+    /// 丢掉未暂存段里这些文件的改动，找不回来；视图先请用户确认。
+    public func discard(_ files: [GitFile]) async {
+        await perform(.discard, .discard(paths: files.map(\.path)))
     }
 
     public func stageAll() async {

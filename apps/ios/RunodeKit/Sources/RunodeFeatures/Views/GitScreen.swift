@@ -4,10 +4,20 @@
     import SwiftUI
 
     /// 一个会话所在仓库的 Git 页：最上面是分支和拉取、推送、同步，接着是提交说明，再往下是已暂存和
-    /// 改动两组文件。点文件看 diff，文件右边的按钮（或者左滑）暂存、取消暂存，点分支名切分支。
+    /// 改动两组文件，每组并成一张卡片、行间画分隔线。点文件看 diff，文件右边的按钮（或者左滑、长按的
+    /// 菜单）暂存、取消暂存，左滑和长按菜单里还能丢弃未暂存的改动（先确认），点分支名切分支。文件能按目录排成树（右上角的按钮切换），点目录收起、展开，
+    /// 目录右边的按钮暂存、取消暂存它下面的所有文件。用哪种形式、哪些目录收着都记在 `UserDefaults` 里。
+    ///
+    /// 列表的行间距是 0，一组文件的行才能连成一张卡片；单独的卡片在下面自己留 `cardSpacing` 的空。
     struct GitScreen: View {
         @Bindable var model: GitModel
+        @AppStorage("gitFileTree") private var asTree = false
+        /// 收起的目录，按仓库根和段分开记，键见 `collapsedKey`。
+        // ponytail: 改动没了的目录也一直记着，攒多了再在读到状态时清掉不在改动里的。
+        @AppStorage("gitCollapsedDirectories") private var collapsedData = Data()
         @State private var diffTarget: GitDiffTarget?
+        /// 等用户确认丢弃改动的文件。
+        @State private var discarding: [GitFile] = []
         @State private var showingBranches = false
         @FocusState private var editingMessage: Bool
         @Environment(\.themeColors) private var colors
@@ -17,10 +27,12 @@
                 if !model.linkState.isConnected {
                     ConnectionStatusRow(state: model.linkState, onRetry: model.reconnect)
                         .cardBackground()
+                        .padding(.bottom, Self.cardSpacing)
                         .plainListRow()
                 }
                 if let status = model.status {
                     branchCard(status)
+                        .padding(.bottom, Self.cardSpacing)
                         .plainListRow()
                     if model.isClean {
                         Label("没有改动，工作区是干净的", systemImage: "checkmark.circle")
@@ -29,16 +41,24 @@
                             .plainListRow()
                     } else {
                         commitCard
+                            .padding(.bottom, Self.cardSpacing)
                             .plainListRow()
                         files(status.staged, staged: true)
                         files(status.unstaged, staged: false)
                     }
                 }
             }
+            .listRowSpacing(0)
             .cardList()
             .overlay { placeholder }
             .leadingNavigationTitle(model.repositoryName ?? "Git", subtitle: subtitle)
             .toolbar {
+                if model.status != nil, !model.isClean {
+                    ToolbarItem(placement: .primaryAction) {
+                        Button(asTree ? "以列表形式查看" : "以树形式查看",
+                               systemImage: asTree ? "list.bullet" : "list.bullet.indent") { asTree.toggle() }
+                    }
+                }
                 ToolbarItem(placement: .primaryAction) { moreMenu }
             }
             .refreshable { await model.refreshAndWait() }
@@ -48,6 +68,17 @@
             .sheet(isPresented: $showingBranches) {
                 GitBranchSheet(model: model)
             }
+            .confirmationDialog(
+                discardTitle, isPresented: Binding(get: { !discarding.isEmpty }, set: { if !$0 { discarding = [] } }),
+                titleVisibility: .visible
+            ) {
+                Button("丢弃改动", role: .destructive) {
+                    let files = discarding
+                    Task { await model.discard(files) }
+                }
+            } message: {
+                Text("未跟踪的文件会从电脑上删掉，丢掉的改动找不回来。已暂存的改动不受影响。")
+            }
             .alert(
                 "出错了", isPresented: Binding(get: { model.errorMessage != nil }, set: { if !$0 { model.errorMessage = nil } })
             ) {
@@ -55,6 +86,12 @@
             } message: {
                 Text(model.errorMessage ?? "")
             }
+        }
+
+        private var discardTitle: String {
+            discarding.count == 1
+                ? "丢弃 \(Presentation.gitPathParts(discarding[0].path).name) 的改动？"
+                : "丢弃 \(discarding.count) 个文件的改动？"
         }
 
         private var subtitle: String? {
@@ -204,47 +241,149 @@
                     .padding(.top, 12)
                     .disabled(model.running != nil || !model.isReady)
                 }
+                .padding(.bottom, 8)
                 .plainListRow()
-                ForEach(files, id: \.path) { file in
-                    fileRow(file, staged: staged)
+                let items =
+                    asTree
+                    ? Presentation.gitFileTree(files, collapsed: collapsed[collapsedKey(staged)] ?? [])
+                    : files.map { GitTreeItem.file($0, depth: 0) }
+                ForEach(Array(items.enumerated()), id: \.element) { index, item in
+                    Group {
+                        switch item {
+                        case .directory(let path, let name, let depth, let expanded, let files):
+                            directoryRow(path, name: name, depth: depth, expanded: expanded, files: files, staged: staged)
+                        case .file(let file, let depth):
+                            fileRow(file, staged: staged, depth: depth)
+                        }
+                    }
+                    .modifier(GroupedCardRow(isFirst: index == 0, isLast: index == items.count - 1))
+                    .plainListRow()
                 }
             }
         }
 
-        private func fileRow(_ file: GitFile, staged: Bool) -> some View {
+        /// 列表形式下文件名下面写目录；树形式按层缩进，只写文件名。
+        private func fileRow(_ file: GitFile, staged: Bool, depth: Int) -> some View {
             HStack(spacing: 10) {
                 Button {
                     diffTarget = GitDiffTarget(path: file.path, staged: staged)
                 } label: {
-                    GitFileLabel(file: file)
+                    GitFileLabel(file: file, showsDirectory: !asTree)
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 .accessibilityHint("查看改动")
-                Button {
-                    Task {
-                        if staged { await model.unstage(file) } else { await model.stage(file) }
-                    }
-                } label: {
-                    Image(systemName: staged ? "minus.circle" : "plus.circle")
-                        .font(.title3)
-                        .frame(minWidth: 44, minHeight: 44)
-                }
-                .buttonStyle(.borderless)
-                .disabled(model.running != nil || !model.isReady)
-                .accessibilityLabel(staged ? "取消暂存" : "暂存")
+                stageButton([file], staged: staged)
             }
-            .cardBackground()
-            .plainListRow()
+            .padding(.leading, indent(depth))
             .swipeActions(edge: .trailing) {
-                if staged {
-                    Button("取消暂存", systemImage: "minus.circle") { Task { await model.unstage(file) } }
-                        .tint(.orange)
-                } else {
-                    Button("暂存", systemImage: "plus.circle") { Task { await model.stage(file) } }
-                        .tint(.green)
-                }
+                stageSwipe([file], staged: staged)
+                if !staged { discardButton([file]) }
             }
+            .contextMenu {
+                Button("查看改动", systemImage: "doc.text.magnifyingglass") {
+                    diffTarget = GitDiffTarget(path: file.path, staged: staged)
+                }
+                stageSwipe([file], staged: staged)
+                copyPathButton(file.path)
+                if !staged { discardButton([file], role: .destructive) }
+            }
+        }
+
+        private func directoryRow(
+            _ path: String, name: String, depth: Int, expanded: Bool, files: [GitFile], staged: Bool
+        ) -> some View {
+            HStack(spacing: 10) {
+                Button {
+                    collapsed[collapsedKey(staged), default: []].formSymmetricDifference([path])
+                } label: {
+                    HStack(spacing: 10) {
+                        Image(systemName: "chevron.right")
+                            .font(.footnote.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                            .rotationEffect(.degrees(expanded ? 90 : 0))
+                            .frame(width: 22)
+                        Image(systemName: "folder")
+                            .foregroundStyle(.secondary)
+                        Text(name)
+                            .lineLimit(1)
+                            .truncationMode(.head)
+                        Spacer(minLength: 6)
+                        Text("\(files.count)")
+                            .font(.caption.monospacedDigit())
+                            .foregroundStyle(.secondary)
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel("目录 \(path)，\(files.count) 个文件")
+                .accessibilityValue(expanded ? "已展开" : "已收起")
+                .accessibilityHint(expanded ? "收起" : "展开")
+                stageButton(files, staged: staged)
+            }
+            .padding(.leading, indent(depth))
+            .swipeActions(edge: .trailing) {
+                stageSwipe(files, staged: staged)
+                if !staged { discardButton(files) }
+            }
+            .contextMenu {
+                stageSwipe(files, staged: staged)
+                copyPathButton(path)
+                if !staged { discardButton(files, role: .destructive) }
+            }
+        }
+
+        private func copyPathButton(_ path: String) -> some View {
+            Button("拷贝路径", systemImage: "doc.on.doc") { UIPasteboard.general.string = path }
+        }
+
+        private func indent(_ depth: Int) -> CGFloat { CGFloat(depth) * 16 }
+
+        /// 列表的行间距是 0，单独的卡片在下面留这么多空，和别的卡片列表（`cardList`）一样。
+        private static let cardSpacing: CGFloat = 10
+
+        private var collapsed: [String: Set<String>] {
+            get { (try? JSONDecoder().decode([String: Set<String>].self, from: collapsedData)) ?? [:] }
+            nonmutating set { collapsedData = (try? JSONEncoder().encode(newValue)) ?? Data() }
+        }
+
+        private func collapsedKey(_ staged: Bool) -> String {
+            "\(model.status?.root ?? "")\n\(staged ? "staged" : "unstaged")"
+        }
+
+        private func stageButton(_ files: [GitFile], staged: Bool) -> some View {
+            Button {
+                Task {
+                    if staged { await model.unstage(files) } else { await model.stage(files) }
+                }
+            } label: {
+                Image(systemName: staged ? "minus.circle" : "plus.circle")
+                    .font(.title3)
+                    .frame(minWidth: 44, minHeight: 44)
+            }
+            .buttonStyle(.borderless)
+            .disabled(model.running != nil || !model.isReady)
+            .accessibilityLabel(staged ? "取消暂存" : "暂存")
+        }
+
+        /// 左滑和长按菜单里的暂存、取消暂存；未暂存的还有丢弃，排在暂存后面，滑到底只会暂存。
+        @ViewBuilder
+        private func stageSwipe(_ files: [GitFile], staged: Bool) -> some View {
+            if staged {
+                Button("取消暂存", systemImage: "minus.circle") { Task { await model.unstage(files) } }
+                    .tint(.orange)
+            } else {
+                Button("暂存", systemImage: "plus.circle") { Task { await model.stage(files) } }
+                    .tint(.green)
+            }
+        }
+
+        /// 丢弃先弹确认。左滑里不给 `destructive`，那样系统会当成删掉了这一行；长按菜单里给，标成红的。
+        private func discardButton(_ files: [GitFile], role: ButtonRole? = nil) -> some View {
+            Button("丢弃改动", systemImage: "arrow.uturn.backward", role: role) { discarding = files }
+                .tint(.red)
+                .disabled(model.running != nil || !model.isReady)
         }
 
         private var moreMenu: some View {
@@ -270,9 +409,35 @@
         }
     }
 
-    /// 一个改动的文件：状态字母、文件名、所在目录、增删的行数。
+    /// 并成一张卡片的一组行里的一行：第一行圆上面的角、最后一行圆下面的角，不是最后一行的底下画分隔线。
+    private struct GroupedCardRow: ViewModifier {
+        let isFirst: Bool
+        let isLast: Bool
+        @Environment(\.themeColors) private var colors
+
+        func body(content: Content) -> some View {
+            let top = isFirst ? CornerRadius.card : 0
+            let bottom = isLast ? CornerRadius.card : 0
+            let shape = UnevenRoundedRectangle(
+                topLeadingRadius: top, bottomLeadingRadius: bottom, bottomTrailingRadius: bottom,
+                topTrailingRadius: top, style: .continuous)
+            content
+                .padding(.leading, 16)
+                .padding(.trailing, 6)
+                .padding(.vertical, 4)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(colors.card, in: shape)
+                .overlay(alignment: .bottom) {
+                    if !isLast { Divider().padding(.leading, 48) }
+                }
+                .contentShape(.contextMenuPreview, shape)
+        }
+    }
+
+    /// 一个改动的文件：状态字母、文件名、所在目录（树形式下不写）、增删的行数。
     struct GitFileLabel: View {
         let file: GitFile
+        var showsDirectory = true
 
         var body: some View {
             let parts = Presentation.gitPathParts(file.path)
@@ -287,7 +452,7 @@
                         .font(.body)
                         .lineLimit(1)
                         .truncationMode(.middle)
-                    if let directory = parts.directory {
+                    if showsDirectory, let directory = parts.directory {
                         Text(directory)
                             .font(.caption)
                             .foregroundStyle(.secondary)

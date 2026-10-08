@@ -350,6 +350,7 @@ fn samples() -> BTreeMap<&'static str, Value> {
         ("git_status_request", git(1, GitRequest::Status)),
         ("git_diff_request", git(2, GitRequest::Diff { path: "src/a.rs".into(), staged: true })),
         ("git_unstage_request", git(3, GitRequest::Unstage { paths: vec!["b.rs".into(), "a.rs".into()] })),
+        ("git_discard_request", git(6, GitRequest::Discard { paths: vec!["a.rs".into()] })),
         ("git_commit_request", git(4, GitRequest::Commit { message: "修好了".into(), stage_all: true })),
         ("git_checkout_request", git(5, GitRequest::Checkout { branch: "origin/feat".into(), remote: true })),
         ("settings_default", json(TermSettings::default())),
