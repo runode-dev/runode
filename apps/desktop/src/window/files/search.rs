@@ -131,8 +131,8 @@ type SearchKey = (PathBuf, String, SearchMode);
 pub(in crate::window) struct FileSearch {
     field: Entity<TextField>,
     mode: SearchMode,
-    /// 排成树还是列表，整个窗口一个设置；树形式时收起的目录。
-    tree: bool,
+    /// 排成树还是列表，整个窗口一个设置，存进窗口存档；树形式时收起的目录。
+    pub(in crate::window) tree: bool,
     collapsed: HashSet<PathBuf>,
     found: Vec<Found>,
     /// `found` 按 `tree` 和 `collapsed` 排成的行。
@@ -363,10 +363,9 @@ impl WindowView {
     }
 
     fn toggle_search_tree(&mut self, cx: &mut Context<Self>) {
-        let search = &mut self.file_search;
-        search.tree = !search.tree;
-        search.selected = None;
-        search.relayout();
+        let tree = !self.file_search.tree;
+        self.file_search.set_tree(tree);
+        self.save(cx);
         cx.notify();
     }
 
@@ -615,6 +614,12 @@ impl WindowView {
 }
 
 impl FileSearch {
+    pub(in crate::window) fn set_tree(&mut self, tree: bool) {
+        self.tree = tree;
+        self.selected = None;
+        self.relayout();
+    }
+
     /// 搜到了新结果、换了排法或者收起展开了目录，重排 `rows`。
     fn relayout(&mut self) {
         self.rows = layout_rows(&self.found, self.tree, &self.collapsed);

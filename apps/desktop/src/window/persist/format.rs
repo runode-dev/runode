@@ -60,6 +60,9 @@ pub struct SavedWindow {
     /// Git 面板里改动的文件以树形式查看；默认是列表。
     #[serde(default)]
     pub git_tree: bool,
+    /// 文件树的搜索结果以树形式查看；默认是列表。
+    #[serde(default)]
+    pub file_search_tree: bool,
     /// Git 面板底部的图表收起来了，以及拖动过的高度；没拖过时为空，用默认高度。
     #[serde(default)]
     pub git_graph_collapsed: bool,
@@ -302,18 +305,20 @@ mod tests {
             preview_width: Some(420.),
             show_ignored: true,
             git_tree: true,
+            file_search_tree: true,
             git_graph_collapsed: true,
             git_graph_height: Some(260.),
         }])
     }
 
     #[test]
-    fn reads_windows_saved_before_the_git_tree_setting() {
+    fn reads_windows_saved_before_the_tree_view_settings() {
         let text = serde_json::to_string(&state()).unwrap();
-        let old = text.replace(r#","git_tree":true"#, "");
+        let old = text.replace(r#","git_tree":true"#, "").replace(r#","file_search_tree":true"#, "");
         assert_ne!(old, text);
         let state: State = serde_json::from_str(&old).unwrap();
         assert!(!state.windows[0].git_tree);
+        assert!(!state.windows[0].file_search_tree);
     }
 
     #[test]
