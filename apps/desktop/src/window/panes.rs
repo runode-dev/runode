@@ -273,7 +273,8 @@ impl WindowView {
             }));
         let usage = {
             let terminal = tab.panes[&id].0.read(cx);
-            terminal.agent().and(terminal.meta().agent_usage.as_ref()).map(usage_text)
+            let locale = rust_i18n::locale();
+            terminal.agent().and(terminal.meta().agent_usage.as_ref()).map(|usage| usage_text(usage, &locale))
         };
         let usage = usage.filter(|text| !text.is_empty()).map(|text| usage_line(text, fg));
         if !cards {
@@ -642,8 +643,8 @@ fn usage_line(text: String, fg: Rgb) -> Div {
         .child(text)
 }
 
-/// 分屏底下那一行：模型、上下文占用、花费和五小时限额，缺的项不写。
-fn usage_text(usage: &AgentUsage) -> String {
+/// 分屏底下那一行：模型、上下文占用、缓存读写、花费和五小时限额，缺的项不写。
+fn usage_text(usage: &AgentUsage, locale: &str) -> String {
     let mut parts = Vec::new();
     parts.extend(usage.model.clone());
     match (usage.context_tokens, usage.context_window) {
@@ -652,6 +653,10 @@ fn usage_text(usage: &AgentUsage) -> String {
         }
         (Some(used), _) => parts.push(tokens(used)),
         _ => {}
+    }
+    if let (Some(read), Some(write)) = (usage.cache_read_tokens, usage.cache_write_tokens) {
+        let (read, write) = (tokens(read), tokens(write));
+        parts.push(rust_i18n::t!("usage.cache", locale = locale, read = read, write = write).into_owned());
     }
     parts.extend(usage.cost_micro_usd.map(|micro| format!("${:.2}", micro as f64 / 1e6)));
     parts.extend(usage.five_hour_percent.map(|percent| format!("5h {percent}%")));
@@ -704,12 +709,17 @@ mod tests {
         let usage = AgentUsage {
             model: Some("Opus".into()),
             context_tokens: Some(48_600),
+            cache_read_tokens: Some(27_200),
+            cache_write_tokens: Some(21_400),
             context_window: Some(1_000_000),
             cost_micro_usd: Some(1_234_000),
             five_hour_percent: Some(23),
         };
-        assert_eq!(usage_text(&usage), "Opus  ·  48.6K / 1M (4%)  ·  $1.23  ·  5h 23%");
-        assert_eq!(usage_text(&AgentUsage::default()), "");
+        assert_eq!(
+            usage_text(&usage, "en"),
+            "Opus  ·  48.6K / 1M (4%)  ·  cache read 27.2K, write 21.4K  ·  $1.23  ·  5h 23%"
+        );
+        assert_eq!(usage_text(&AgentUsage::default(), "en"), "");
     }
 
     #[test]

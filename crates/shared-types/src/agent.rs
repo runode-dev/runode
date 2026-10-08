@@ -73,6 +73,10 @@ pub struct AgentUsage {
     pub model: Option<String>,
     /// 上一次请求占了多少上下文（输入加上缓存读写的 token）。
     pub context_tokens: Option<u64>,
+    /// 上一次请求从提示词缓存里读的 token。
+    pub cache_read_tokens: Option<u64>,
+    /// 上一次请求写进提示词缓存的 token。
+    pub cache_write_tokens: Option<u64>,
     /// 上下文窗口有多大。
     pub context_window: Option<u64>,
     /// 这次会话累计的花费，百万分之一美元。

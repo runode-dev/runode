@@ -463,6 +463,8 @@ driver:
     clear_screen: clear screen
     kill: kill
     unknown: action
+usage:
+  cache: "cache read %{read}, write %{write}"
 layout:
   menu: Arrange Splits…
   title: Arrange Splits

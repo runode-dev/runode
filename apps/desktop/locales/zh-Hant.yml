@@ -463,6 +463,8 @@ driver:
     clear_screen: 清除螢幕
     kill: 結束
     unknown: 操作
+usage:
+  cache: "快取讀 %{read}，寫 %{write}"
 layout:
   menu: 排列分割畫面…
   title: 排列分割畫面
