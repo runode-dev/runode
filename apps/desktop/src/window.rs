@@ -45,8 +45,9 @@ use std::{cell::RefCell, collections::HashMap, path::PathBuf, rc::Rc, time::Inst
 
 use futures::StreamExt as _;
 use gpui::{
-    Action, AnyElement, App, BoxShadow, Context, EntityId, FocusHandle, Focusable, Hsla, MouseButton, MouseDownEvent,
-    Render, ScrollHandle, SharedString, Subscription, Task, Window, WindowBounds, actions, div, point, prelude::*, px,
+    Action, AnyElement, App, BoxShadow, Context, EntityId, ExternalPaths, FocusHandle, Focusable, Hsla, MouseButton,
+    MouseDownEvent, Render, ScrollHandle, SharedString, Subscription, Task, Window, WindowBounds, actions, div, point,
+    prelude::*, px,
 };
 use runode_config::WindowStyle;
 use runode_shared_types::{
@@ -534,6 +535,8 @@ impl Render for WindowView {
             .on_action(cx.listener(Self::show_mobile))
             .on_action(cx.listener(Self::arrange_panes))
             .map(|window| Self::bind_git_actions(window, cx))
+            // 终端和新建对话框没接住的拖放落到这里：侧栏收着时拖到标题栏、空 workspace 上也能开。
+            .on_drop(cx.listener(Self::open_dropped_dirs))
             .relative()
             .size_full()
             .flex()
@@ -551,6 +554,13 @@ impl Render for WindowView {
 }
 
 impl WindowView {
+    /// 从访达拖来的文件夹各开一个 workspace，已经开着的就切过去；文件不算。
+    fn open_dropped_dirs(&mut self, dropped: &ExternalPaths, window: &mut Window, cx: &mut Context<Self>) {
+        for dir in dropped.paths().iter().filter(|path| path.is_dir()) {
+            self.open_workspace(dir.clone(), None, window, cx);
+        }
+    }
+
     /// 经典样式：终端铺满窗口，侧栏、标题栏和右侧面板之间一条细线；只有一个标签时标题栏只写标题。
     fn render_classic_body(
         &mut self,

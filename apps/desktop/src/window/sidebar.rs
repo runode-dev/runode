@@ -2,8 +2,8 @@
 //! 后台会话（`background`）。
 
 use gpui::{
-    AnyElement, Axis, Context, CursorStyle, Div, Focusable, Hsla, MouseButton, MouseDownEvent, Render, SharedString,
-    Stateful, Window, div, prelude::*, px,
+    AnyElement, Axis, Context, CursorStyle, Div, ExternalPaths, Focusable, Hsla, MouseButton, MouseDownEvent, Render,
+    SharedString, Stateful, Window, div, prelude::*, px,
 };
 use runode_shared_types::color::Rgb;
 
@@ -125,6 +125,7 @@ impl WindowView {
 
     pub(super) fn render_sidebar(&self, fg: Rgb, bg: Rgb, fullscreen: bool, cx: &mut Context<Self>) -> Stateful<Div> {
         let rows: Vec<_> = (0..self.workspaces.len()).map(|ix| self.render_row(ix, fg, bg, cx)).collect();
+        let drop_bg = hsla(bg.mix(fg, 0.08));
         div()
             .id("sidebar")
             .flex_none()
@@ -136,6 +137,8 @@ impl WindowView {
             .when(!cards(cx), |sidebar| {
                 sidebar.bg(hsla(bg.mix(fg, 0.03))).border_r_1().border_color(divider_color(hsla(fg)))
             })
+            // 从访达拖来的东西悬在侧栏上时提示放下能开 workspace；放下由窗口根上的 `open_dropped_dirs` 办。
+            .drag_over::<ExternalPaths>(move |style, _, _, _| style.bg(drop_bg))
             .text_size(px(12.))
             // 顶上这条放红绿灯，和标题栏一样能拖动窗口、双击缩放，比标题栏多留一点，第一行
             // 不贴着红绿灯；全屏时没有红绿灯。
