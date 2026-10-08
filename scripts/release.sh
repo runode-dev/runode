@@ -30,7 +30,8 @@ die() { echo "$*" >&2; exit 1; }
 [[ "$current" != "$version" && "$(printf '%s\n%s\n' "$current" "$version" | sort -V | tail -1)" == "$version" ]] \
   || die "版本号 $version 不比现在的 $current 大"
 [[ "$(git branch --show-current)" == main ]] || die "要在 main 上发版"
-[[ -z "$(git status --porcelain)" ]] || die "工作区有没提交的改动"
+# 上次没发完留下的草稿不算改动。
+[[ -z "$(git status --porcelain -- ":(exclude)$notes")" ]] || die "工作区有没提交的改动"
 git fetch -q --tags origin main
 [[ "$(git rev-parse HEAD)" == "$(git rev-parse origin/main)" ]] || die "本地 main 和 origin/main 不一致，先同步"
 ! git rev-parse -q --verify "refs/tags/$tag" >/dev/null || die "标签 $tag 已经有了"
@@ -65,7 +66,7 @@ ${EDITOR:-vi} "$notes"
 grep -q '^## 中文' "$notes" && grep -q '^## English' "$notes" || die "$notes 要有「## 中文」和「## English」两段"
 
 cat "$notes"
-read -rp "发布 $tag？[y/N] " answer
+read -rp "发布 ${tag}？[y/N] " answer
 [[ "$answer" == [yY] ]] || die "没发，草稿留在 $notes"
 
 sed -i.bak '/^\[workspace.package\]/,/^\[/s/^version = ".*"/version = "'"$version"'"/' Cargo.toml
@@ -76,4 +77,4 @@ git add Cargo.toml Cargo.lock "$notes"
 git commit -m "chore: 发布 $tag"
 git tag "$tag"
 git push --atomic origin main "$tag"
-echo "已推送 $tag，release.yml 接着构建和发布：gh run watch" >&2
+echo "已推送 ${tag}，release.yml 接着构建和发布：gh run watch" >&2
