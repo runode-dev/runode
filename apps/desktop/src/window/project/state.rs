@@ -65,6 +65,8 @@ pub(in crate::window) struct Project {
     pub tasks: Option<(PathBuf, Vec<TaskSource>)>,
     pub tasks_listing: bool,
     pub tasks_stale: bool,
+    /// 命令菜单里收起来的分组，按列出命令的文件记。
+    pub tasks_folded: HashSet<PathBuf>,
     /// 交给后台读的时候拿走，读完放回来。
     pub(super) untracked: git::UntrackedCache,
 }

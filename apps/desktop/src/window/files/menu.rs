@@ -15,6 +15,7 @@ use super::{
     RenameFile, RevealInFinder,
 };
 use crate::{
+    assets::{CHEVRON_DOWN_ICON, CHEVRON_RIGHT_ICON},
     ui::{
         actions::{Copy, Cut, Paste},
         hsla,
@@ -28,8 +29,6 @@ const MENU_MARGIN: f32 = 8.;
 /// 按钮下面弹出的菜单离按钮这么远。
 const DROPDOWN_GAP: f32 = 4.;
 const MENU_WIDTH: f32 = 240.;
-/// 菜单最高这么高，窗口矮时不超出窗口，项多了在菜单里滚动。
-const MENU_MAX_HEIGHT: f32 = 480.;
 
 /// 菜单里的一项：点了把 `action` 派发给菜单的 `target`，和按快捷键走同一条路；没有 `action` 的
 /// 只是一行字，点不了。有 `button` 时整行点不了，`action` 只挂在右边这个图标按钮上。
@@ -43,6 +42,8 @@ pub(in crate::window) struct MenuItem {
     icon: Option<&'static str>,
     /// 勾选项：`Some` 时左边留一列，`true` 时打勾。
     checked: Option<bool>,
+    /// 点了菜单不关、焦点不动：分组标题这类改了菜单本身的项。
+    keep_open: bool,
 }
 
 /// 菜单项右边的图标按钮：图标和悬停时的说明。
@@ -62,6 +63,7 @@ pub(in crate::window) fn menu_item(key: &str, action: Box<dyn Action>, enabled: 
         button: None,
         icon: None,
         checked: None,
+        keep_open: false,
     }
 }
 
@@ -80,6 +82,7 @@ pub(in crate::window) fn check_item(
         button: None,
         icon: Some(icon),
         checked: Some(checked),
+        keep_open: false,
     }
 }
 
@@ -91,7 +94,7 @@ pub(in crate::window) fn text_item(
     button: Option<(MenuButton, Box<dyn Action>)>,
 ) -> MenuItem {
     let (button, action) = button.unzip();
-    MenuItem { label, action, shortcut: detail, enabled: true, button, icon: None, checked: None }
+    MenuItem { label, action, shortcut: detail, enabled: true, button, icon: None, checked: None, keep_open: false }
 }
 
 /// 写好了字、点整行派发 `action` 的一项，`detail` 淡淡地写在右边快捷键的位置；没有 `action` 的
@@ -101,7 +104,36 @@ pub(in crate::window) fn labeled_item(
     detail: Option<SharedString>,
     action: Option<Box<dyn Action>>,
 ) -> MenuItem {
-    MenuItem { label, enabled: action.is_some(), action, shortcut: detail, button: None, icon: None, checked: None }
+    MenuItem {
+        label,
+        enabled: action.is_some(),
+        action,
+        shortcut: detail,
+        button: None,
+        icon: None,
+        checked: None,
+        keep_open: false,
+    }
+}
+
+/// 可以收起的一组的标题，前面画展开或收起（`folded`）的箭头，`detail` 写在右边。点了派发 `action`，
+/// 菜单不关，由动作的处理方用 `replace_menu_items` 换上收起或展开后的各项。
+pub(in crate::window) fn group_item(
+    label: String,
+    detail: Option<SharedString>,
+    folded: bool,
+    action: Box<dyn Action>,
+) -> MenuItem {
+    MenuItem {
+        label,
+        action: Some(action),
+        shortcut: detail,
+        enabled: true,
+        button: None,
+        icon: Some(if folded { CHEVRON_RIGHT_ICON } else { CHEVRON_DOWN_ICON }),
+        checked: None,
+        keep_open: true,
+    }
 }
 
 /// 打开着的右键菜单：右键按下的位置，打开时就定下的各项（`None` 是分隔线），以及点了以后
@@ -163,17 +195,18 @@ impl WindowView {
         cx.notify();
     }
 
-    /// 弹出挂在按钮下面的菜单，按钮用 `render_dropdown` 把它画在自己下面。从键盘打开的
-    /// （`from_keyboard`）先选中第一项，回车就能用。
+    /// 弹出挂在按钮下面的菜单，按钮用 `render_dropdown` 把它画在自己下面。给了 `select_after` 时
+    /// 先选中它后面第一个能选的项（后面没有就绕回来），从键盘打开时回车就能用。
     pub(in crate::window) fn open_dropdown(
         &mut self,
         items: Vec<Option<MenuItem>>,
         target: FocusHandle,
-        from_keyboard: bool,
+        select_after: Option<usize>,
         cx: &mut Context<Self>,
     ) {
         let mut menu = FileMenu::new(None, items, target, cx);
-        if from_keyboard {
+        if let Some(ix) = select_after {
+            menu.highlighted = Some(ix);
             menu.move_highlight(true);
         }
         self.file_menu = Some(menu);
@@ -200,6 +233,35 @@ impl WindowView {
     }
 
     /// 关掉菜单，焦点给 `target`，再派发 `action`：和按快捷键走同一条路。
+    /// 换掉开着的菜单的各项，选中的位置不变。
+    pub(in crate::window) fn replace_menu_items(&mut self, items: Vec<Option<MenuItem>>, cx: &mut Context<Self>) {
+        if let Some(menu) = &mut self.file_menu {
+            menu.highlighted = menu.highlighted.filter(|&ix| ix < items.len());
+            menu.items = items;
+            cx.notify();
+        }
+    }
+
+    /// 点了或回车第 `ix` 项：`keep_open` 的直接派发，菜单和焦点都不动；别的先关掉菜单。
+    fn activate_menu_item(&mut self, ix: usize, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(menu) = &mut self.file_menu else {
+            return;
+        };
+        menu.highlighted = Some(ix);
+        let item = menu.items[ix].as_ref().filter(|item| item.enabled);
+        let Some((action, keep_open)) =
+            item.and_then(|item| Some((item.action.as_ref()?.boxed_clone(), item.keep_open)))
+        else {
+            return;
+        };
+        if keep_open {
+            window.dispatch_action(action, cx);
+            cx.notify();
+        } else {
+            self.run_menu_action(action.as_ref(), window, cx);
+        }
+    }
+
     fn run_menu_action(&mut self, action: &dyn Action, window: &mut Window, cx: &mut Context<Self>) {
         let Some(menu) = self.file_menu.take() else {
             return;
@@ -222,9 +284,8 @@ impl WindowView {
                 cx.notify();
             }
             "enter" => {
-                let action = menu.highlighted.and_then(|ix| menu.items[ix].as_ref()?.action.as_ref());
-                if let Some(action) = action.map(|action| action.boxed_clone()) {
-                    self.run_menu_action(action.as_ref(), window, cx);
+                if let Some(ix) = menu.highlighted {
+                    self.activate_menu_item(ix, window, cx);
                 }
             }
             "escape" => self.close_menu(window, cx),
@@ -330,7 +391,7 @@ impl WindowView {
         )
     }
 
-    /// 菜单本身，最高 `max_height`；点到菜单外面就关掉。
+    /// 菜单本身，最高 `max_height`，超出窗口时才在里面滚动；点到菜单外面就关掉。
     fn render_menu_list(&self, max_height: f32, fg: Rgb, bg: Rgb, cx: &mut Context<Self>) -> Option<Stateful<Div>> {
         let menu = self.file_menu.as_ref()?;
         let hover_bg = hsla(bg.mix(fg, 0.12));
@@ -366,14 +427,20 @@ impl WindowView {
                 .gap(px(16.))
                 .text_color(if item.enabled { fg } else { fg.opacity(0.35) })
                 .when(menu.highlighted == Some(ix), |row| row.bg(hover_bg))
-                .when_some(row_action, |row, action| {
+                .when(row_action.is_some(), |row| {
                     row.on_hover(cx.listener(move |this, hovered: &bool, _, cx| {
                         if let Some(menu) = this.file_menu.as_mut().filter(|_| *hovered) {
                             menu.highlighted = Some(ix);
                             cx.notify();
                         }
                     }))
-                    .on_mouse_down(MouseButton::Left, dispatch(action))
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(move |this, _, window, cx| {
+                            cx.stop_propagation();
+                            this.activate_menu_item(ix, window, cx);
+                        }),
+                    )
                 })
                 .when(check_column, |row| {
                     row.child(
@@ -421,7 +488,7 @@ impl WindowView {
             .on_key_down(cx.listener(Self::menu_key))
             .track_scroll(&menu.scroll)
             .w(px(MENU_WIDTH))
-            .max_h(px(max_height.min(MENU_MAX_HEIGHT)))
+            .max_h(px(max_height))
             .overflow_y_scroll()
             .py(px(4.))
             .flex()
