@@ -309,7 +309,7 @@ impl WindowView {
             .border_color(hsla(fg).opacity(0.12))
             .bg(hsla(bg.mix(fg, 0.06)))
             .child(svg().path(FILTER_ICON).flex_none().size(px(14.)).text_color(hsla(fg).opacity(0.5)))
-            .child(div().flex_1().min_w_0().h_full().child(self.file_search.field.clone()));
+            .child(div().flex_1().min_w_0().h_full().text_color(hsla(fg)).child(self.file_search.field.clone()));
         let mode = self.file_search.mode;
         let segment = |id, label: SharedString, value: SearchMode, cx: &mut Context<Self>| {
             let on = mode == value;
