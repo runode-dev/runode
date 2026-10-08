@@ -291,6 +291,8 @@ pub(in crate::window) struct GitPanel {
     pub active: Option<PathBuf>,
     /// 面板上次画多宽，图表的行据此决定放不放得下日期和引用标签。
     pub width: f32,
+    /// 鼠标所在的那一行在 `rows` 里的下标，行尾的按钮只画在这一行。
+    pub hovered: Option<usize>,
 }
 
 impl Default for GitPanel {
@@ -312,6 +314,7 @@ impl Default for GitPanel {
             repos: HashMap::new(),
             active: None,
             width: 0.,
+            hovered: None,
         }
     }
 }

@@ -9,7 +9,8 @@ use std::{
 };
 
 use gpui::{
-    AnyElement, Context, Div, ElementId, MouseButton, MouseDownEvent, Stateful, Window, div, img, prelude::*, px, svg,
+    AnyElement, App, Context, Div, ElementId, MouseButton, MouseDownEvent, Stateful, Window, div, img, prelude::*, px,
+    svg,
 };
 use runode_git::{self as git, DiffSide, FileStatus, Section};
 use runode_shared_types::color::Rgb;
@@ -36,9 +37,6 @@ use crate::{
 pub(super) const ROW_HEIGHT: f32 = 22.;
 /// 文件比段标题往右缩进的宽度，树形式里每深一层再缩进这么多。
 const INDENT: f32 = 12.;
-/// 鼠标移到行上才露出按钮，各行共用这个组名，按钮找的是离它最近的那一行。
-const ROW_GROUP: &str = "git-row";
-
 type Handler = Box<dyn Fn(&mut WindowView, &mut Window, &mut Context<WindowView>)>;
 
 /// 行尾的一个图标按钮：图标、提示文字和按下时做的事。
@@ -124,7 +122,6 @@ impl WindowView {
     pub(super) fn git_row(&self, id: impl Into<ElementId>, pl: f32, fg: Rgb, bg: Rgb) -> Stateful<Div> {
         div()
             .id(id)
-            .group(ROW_GROUP)
             .flex_none()
             .h(px(ROW_HEIGHT))
             .w_full()
@@ -138,18 +135,41 @@ impl WindowView {
             .hover(|row| row.bg(hsla(bg.mix(fg, 0.06))))
     }
 
-    /// 行尾的按钮，平时藏着、不占宽，名字能排满整行；根目录是 `root` 的仓库有操作在跑时按不动。
-    fn row_buttons(&self, root: &Path, buttons: Vec<RowButton>, fg: Rgb, bg: Rgb, cx: &mut Context<Self>) -> Div {
-        let enabled = self.workspace().project.git_panel.busy(root).is_none();
+    /// 鼠标进出第 `ix` 行时记到 `GitPanel::hovered`，好让按钮只画在那一行。
+    fn track_row_hover(&self, ix: usize, cx: &mut Context<Self>) -> impl Fn(&bool, &mut Window, &mut App) + 'static {
+        cx.listener(move |this, hovered: &bool, _, cx| {
+            let panel = &mut this.workspace_mut().project.git_panel;
+            if *hovered {
+                panel.hovered = Some(ix);
+            } else if panel.hovered == Some(ix) {
+                panel.hovered = None;
+            }
+            cx.notify();
+        })
+    }
+
+    /// 第 `ix` 行行尾的按钮，鼠标不在这行时不画、不占宽，名字能排满整行；根目录是 `root` 的
+    /// 仓库有操作在跑时按不动。不用 `hidden` 加 `group_hover` 露出来：gpui 在 prepaint 时还不知道
+    /// 这一帧行被悬停，会跳过藏着的按钮，paint 时却要画它们，就 panic 了。
+    #[allow(clippy::too_many_arguments)]
+    fn row_buttons(
+        &self,
+        ix: usize,
+        root: &Path,
+        buttons: Vec<RowButton>,
+        fg: Rgb,
+        bg: Rgb,
+        cx: &mut Context<Self>,
+    ) -> Option<Div> {
+        let panel = &self.workspace().project.git_panel;
+        if panel.hovered != Some(ix) {
+            return None;
+        }
+        let enabled = panel.busy(root).is_none();
         let hover_bg = hsla(bg.mix(fg, 0.14));
         let icon_color = hsla(fg).opacity(if enabled { 0.75 } else { 0.3 });
-        div()
-            .flex_none()
-            .hidden()
-            .items_center()
-            .gap(px(2.))
-            .group_hover(ROW_GROUP, |buttons| buttons.flex())
-            .children(buttons.into_iter().enumerate().map(|(bi, button)| {
+        let buttons = div().flex_none().flex().items_center().gap(px(2.)).children(
+            buttons.into_iter().enumerate().map(|(bi, button)| {
                 let handler = button.handler;
                 div()
                     .id(("git-row-button", bi))
@@ -170,7 +190,9 @@ impl WindowView {
                             }),
                         )
                     })
-            }))
+            }),
+        );
+        Some(buttons)
     }
 
     fn render_git_section(
@@ -208,6 +230,7 @@ impl WindowView {
             GitSection::Stashes => Vec::new(),
         };
         self.git_row(("git-section", ix), 0., fg, bg)
+            .on_hover(self.track_row_hover(ix, cx))
             .child(chevron(panel.section_expanded(&root, section), fg))
             .child(
                 div()
@@ -218,7 +241,7 @@ impl WindowView {
                     .font_weight(gpui::FontWeight::SEMIBOLD)
                     .child(label.into_owned()),
             )
-            .child(self.row_buttons(&root, buttons, fg, bg, cx))
+            .children(self.row_buttons(ix, &root, buttons, fg, bg, cx))
             .child(count_badge(count, fg, bg))
             .on_mouse_down(
                 MouseButton::Left,
@@ -278,6 +301,7 @@ impl WindowView {
         let side = if section == Section::Staged { DiffSide::Index } else { DiffSide::Worktree };
         let target = DiffTarget { root: root.clone(), rel: path.clone(), old_rel: file.old_path.clone(), side };
         self.git_row(("git-file", ix), INDENT * (depth + 1.), fg, bg)
+            .on_hover(self.track_row_hover(ix, cx))
             // 树形式里目录行有箭头，文件行空出同样宽，名字才对得齐。
             .when(panel.tree, |row| row.child(div().flex_none().w(px(12.))))
             .child(img(file_icon(&name)).flex_none().size(px(14.)))
@@ -290,7 +314,7 @@ impl WindowView {
                     .child(name),
             )
             .child(div().flex_1().min_w_0().truncate().text_size(px(11.)).text_color(dim).child(dir))
-            .child(self.row_buttons(&root, buttons, fg, bg, cx))
+            .children(self.row_buttons(ix, &root, buttons, fg, bg, cx))
             .child(status_letter(file.status))
             .on_mouse_down(
                 MouseButton::Left,
@@ -342,10 +366,11 @@ impl WindowView {
         let last = base_name(&path);
         let menu = action(DirOp::Stage);
         self.git_row(("git-dir", ix), INDENT * (depth + 1.), fg, bg)
+            .on_hover(self.track_row_hover(ix, cx))
             .child(chevron(dir.expanded, fg))
             .child(img(folder_icon(&last, dir.expanded)).flex_none().size(px(14.)))
             .child(div().flex_1().min_w_0().truncate().child(dir.name.clone()))
-            .child(self.row_buttons(&root, buttons, fg, bg, cx))
+            .children(self.row_buttons(ix, &root, buttons, fg, bg, cx))
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |this, _, _, cx| {
@@ -438,9 +463,10 @@ impl WindowView {
             stash_button(TRASH_ICON, "git.stash_drop", StashOp::Drop),
         ];
         self.git_row(("git-stash", ix), INDENT, fg, bg)
+            .on_hover(self.track_row_hover(ix, cx))
             .child(div().flex_none().text_size(px(11.)).text_color(hsla(fg).opacity(0.5)).child(format!("#{index}")))
             .child(div().flex_1().min_w_0().truncate().child(stash.message.clone()))
-            .child(self.row_buttons(&root, buttons, fg, bg, cx))
+            .children(self.row_buttons(ix, &root, buttons, fg, bg, cx))
             .into_any_element()
     }
 }
