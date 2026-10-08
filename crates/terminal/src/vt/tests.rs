@@ -264,6 +264,22 @@ fn replay_keeps_modes_title_palette_and_keyboard() {
     assert_eq!(format_replay(&b).unwrap(), format_replay(&a).unwrap());
 }
 
+/// origin mode 下 CUP 从滚动区域的左上角算起，重放写的光标位置也得照这样算，不然光标会往下偏
+/// 滚动区域上边距那么多行。
+#[test]
+fn replay_keeps_the_cursor_inside_the_region_in_origin_mode() {
+    let mut a = new_terminal(size(20, 10)).unwrap();
+    a.vt_write(b"\x1b[3;8r\x1b[?6h\x1b[2;5H");
+    assert_eq!((a.cursor_x().unwrap(), a.cursor_y().unwrap()), (4, 3));
+    let mut b = replayed(&a);
+    assert!(b.mode(Mode::ORIGIN).unwrap());
+    assert_eq!((b.cursor_x().unwrap(), b.cursor_y().unwrap()), (4, 3));
+    // 两边接着按区域内的坐标挪光标、写字，落在同一个地方。
+    a.vt_write(b"X\x1b[1;1HY");
+    b.vt_write(b"X\x1b[1;1HY");
+    assert_eq!(screen_lines(&a, 0, 9).unwrap(), screen_lines(&b, 0, 9).unwrap());
+}
+
 /// 重放丢掉的东西。快照都带着；版本对不上、只能重放时，界面上会看到这些差别。哪天这里的
 /// 断言不成立了，说明格式化能带上它了，改注释和测试。
 #[test]
