@@ -3,7 +3,7 @@
 
 use gpui::{
     Action, AnyElement, App, Axis, Context, CursorStyle, Div, ExternalPaths, Focusable, Hsla, Modifiers, MouseButton,
-    MouseDownEvent, Render, SharedString, Stateful, TextAlign, Window, canvas, div, prelude::*, px,
+    MouseDownEvent, Render, SharedString, Stateful, TextAlign, Window, canvas, div, prelude::*, px, svg,
 };
 use runode_shared_types::color::Rgb;
 
@@ -16,7 +16,7 @@ use super::{
     titlebar::{close_button, drag_chip, drop_marker, icon_toggle, shortcut_hint, styled_agent_mark},
 };
 use crate::{
-    assets::SIDEBAR_ICON,
+    assets::{GIT_ICON, SIDEBAR_ICON},
     ui::{hsla, tooltip::tooltip},
 };
 
@@ -238,13 +238,21 @@ impl WindowView {
         let fg = hsla(fg);
         let group = SharedString::from(format!("workspace-{ix}"));
         let renaming = self.renaming.as_ref().filter(|renaming| renaming.id == id);
-        let mark = match workspace.mark(cx) {
-            Some(mark) => styled_agent_mark(mark, ("workspace-agent", ix), fg, cards(cx)),
-            None => div().flex_none().w(px(AGENT_MARK_WIDTH)).into_any_element(),
-        };
+        // 名字前是 git 图标，agent 的标记跟在名字后面。
+        let icon = div()
+            .flex_none()
+            .w(px(AGENT_MARK_WIDTH))
+            .when(workspace.in_repo, |slot| slot.child(svg().path(GIT_ICON).size(px(12.)).text_color(fg.opacity(0.6))));
+        let mark = workspace.mark(cx).map(|mark| styled_agent_mark(mark, ("workspace-agent", ix), fg, cards(cx)));
         let name: AnyElement = match renaming {
             Some(renaming) => renaming.edit.render(px(RENAME_FIELD_HEIGHT), rgb_fg, bg).into_any_element(),
-            None => div().truncate().child(workspace.name.clone()).into_any_element(),
+            None => div()
+                .flex()
+                .items_center()
+                .gap(px(4.))
+                .child(div().min_w_0().truncate().child(workspace.name.clone()))
+                .children(mark)
+                .into_any_element(),
         };
         // 右侧：响铃标记优先，其次快捷键提示，提示只在按着它的修饰键或者单按 ⌘ 时显示，平时不和名字抢眼；
         // 悬停时换成关闭按钮。按 ⌘ 是找快捷键时最先按的键，也让它看得到。
@@ -308,7 +316,7 @@ impl WindowView {
             .on_drop(cx.listener(move |this, dragged: &DraggedWorkspace, window, cx| {
                 this.move_workspace(dragged.id, ix, window, cx);
             }))
-            .child(mark)
+            .child(icon)
             .child(
                 div()
                     .flex_1()

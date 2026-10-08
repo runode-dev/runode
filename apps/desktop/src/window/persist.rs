@@ -20,7 +20,7 @@ use runode_shared_types::pane::{Node, Split};
 
 use super::{
     WindowView,
-    model::{Tab, Workspace, home_dir, workspace_name},
+    model::{Tab, Workspace, dir_in_repo, home_dir, workspace_name},
     project::SidePanel,
 };
 use crate::{
@@ -344,6 +344,7 @@ impl WindowView {
             self.workspaces.push(Workspace {
                 id,
                 name: name.into(),
+                in_repo: dir_in_repo(&saved_workspace.dir),
                 dir: saved_workspace.dir,
                 active: active_tab,
                 tabs,
