@@ -13,6 +13,8 @@ fn literal(pattern: &str, ignore_case: bool) -> GrepQuery<'_> {
 fn lists_tracked_and_untracked_files_but_not_ignored_ones() {
     let repo = TestRepo::new("search-list");
     repo.commit_file(".gitignore", "build/\n", "init");
+    repo.commit_file("gone.txt", "x", "add");
+    std::fs::remove_file(repo.path().join("gone.txt")).unwrap();
     repo.write("src/main.rs", "fn main() {}\n");
     repo.write("build/out.o", "x");
     let mut files = list_files(repo.path()).unwrap();

@@ -290,12 +290,13 @@ fn matcher(query: &str, options: &ContentOptions) -> Result<Regex, regex::Error>
 /// 不以 `**/` 或 `./` 开头的在任何一层都算（`*.ts` 是 `**/*.ts`），写的是目录时也算它里面的文件。
 fn pathspecs(include: &str, exclude: &str) -> Vec<String> {
     let specs = |text: &str, magic: &'static str| {
-        let globs = text.split(',').map(str::trim).filter(|glob| !glob.is_empty());
+        let globs = split_commas(text).into_iter().map(str::trim).filter(|glob| !glob.is_empty());
         globs
+            .flat_map(expand_braces)
             .flat_map(move |glob| {
                 let glob = match glob.strip_prefix("./") {
                     Some(rel) => rel.to_owned(),
-                    None if glob.starts_with("**/") => glob.to_owned(),
+                    None if glob.starts_with("**/") => glob.clone(),
                     None => format!("**/{glob}"),
                 };
                 let glob = glob.trim_end_matches('/');
@@ -304,6 +305,49 @@ fn pathspecs(include: &str, exclude: &str) -> Vec<String> {
             .collect::<Vec<_>>()
     };
     [specs(include, "glob"), specs(exclude, "exclude,glob")].concat()
+}
+
+/// 按花括号外面的逗号拆开。
+fn split_commas(text: &str) -> Vec<&str> {
+    let (mut parts, mut depth, mut start) = (Vec::new(), 0usize, 0);
+    for (at, c) in text.char_indices() {
+        match c {
+            '{' => depth += 1,
+            '}' => depth = depth.saturating_sub(1),
+            ',' if depth == 0 => {
+                parts.push(&text[start..at]);
+                start = at + 1;
+            }
+            _ => {}
+        }
+    }
+    parts.push(&text[start..]);
+    parts
+}
+
+/// `*.{ts,tsx}` 展开成 `*.ts`、`*.tsx`（git 的 glob 不认花括号），可以嵌套、有好几组；没配对的花括号原样留着。
+fn expand_braces(glob: &str) -> Vec<String> {
+    let Some(open) = glob.find('{') else {
+        return vec![glob.to_owned()];
+    };
+    let mut depth = 0;
+    let close = glob[open..].char_indices().find_map(|(at, c)| {
+        match c {
+            '{' => depth += 1,
+            '}' if depth == 1 => return Some(open + at),
+            '}' => depth -= 1,
+            _ => {}
+        }
+        None
+    });
+    let Some(close) = close else {
+        return vec![glob.to_owned()];
+    };
+    let (head, tail) = (&glob[..open], &glob[close + 1..]);
+    split_commas(&glob[open + 1..close])
+        .into_iter()
+        .flat_map(|alt| expand_braces(&format!("{head}{alt}{tail}")))
+        .collect()
 }
 
 /// 内容结果里显示的一行：去掉开头的缩进，命中处太靠后时把前面截掉，太长时截短；返回显示的
@@ -374,6 +418,11 @@ impl WindowView {
 
     /// 根目录、搜索词或方式和上次搜的不一样时在后台重搜，停下还在跑的上一次。
     fn sync_file_search(&mut self, cx: &mut Context<Self>) {
+        self.search_files(false, cx);
+    }
+
+    /// 同 `sync_file_search`；`force` 时条件没变也重搜（文件树重读过），新结果到之前旧结果照旧显示。
+    fn search_files(&mut self, force: bool, cx: &mut Context<Self>) {
         let search = &self.file_search;
         let options = match search.mode {
             SearchMode::Name => ContentOptions::default(),
@@ -384,7 +433,7 @@ impl WindowView {
         let search = &mut self.file_search;
         cx.notify();
         let current = search.pending.as_ref().map(|(key, _)| key).or(search.searched.as_ref());
-        if current == Some(&key) {
+        if !force && current == Some(&key) {
             return;
         }
         if let Some((_, cancel)) = search.pending.take() {
@@ -414,11 +463,8 @@ impl WindowView {
                 }
                 let search = &mut this.file_search;
                 search.pending = None;
-                // 只是重读后重搜（词、方式和选项都没变）时留着选中的行和滚动位置。
-                let same = search
-                    .searched
-                    .as_ref()
-                    .is_some_and(|old| (&old.query, old.mode, &old.options) == (&key.query, key.mode, &key.options));
+                // 只是重读后重搜（同一个根目录，词、方式和选项都没变）时留着选中的行和滚动位置。
+                let same = search.searched.as_ref() == Some(&key);
                 if !same {
                     search.selected = None;
                     search.collapsed.clear();
@@ -437,11 +483,7 @@ impl WindowView {
 
     /// 文件树重读过，文件可能变了：有搜索词时重搜。
     pub(in crate::window) fn refresh_file_search(&mut self, cx: &mut Context<Self>) {
-        if let Some((_, cancel)) = self.file_search.pending.take() {
-            cancel.store(true, Ordering::Relaxed);
-        }
-        self.file_search.searched = None;
-        self.sync_file_search(cx);
+        self.search_files(true, cx);
     }
 
     /// 切到了 workspace `id`：框里的词存回原来那个 workspace（它还在的话），换上这个 workspace 的词。
@@ -939,5 +981,25 @@ mod option_tests {
             ]
         );
         assert!(pathspecs(" , ", "").is_empty());
+    }
+
+    #[test]
+    fn braces_in_globs_expand_into_separate_pathspecs() {
+        assert_eq!(
+            pathspecs("*.{ts,tsx}, src/{a,b{c,d}}.rs", ""),
+            [
+                ":(glob)**/*.ts",
+                ":(glob)**/*.ts/**",
+                ":(glob)**/*.tsx",
+                ":(glob)**/*.tsx/**",
+                ":(glob)**/src/a.rs",
+                ":(glob)**/src/a.rs/**",
+                ":(glob)**/src/bc.rs",
+                ":(glob)**/src/bc.rs/**",
+                ":(glob)**/src/bd.rs",
+                ":(glob)**/src/bd.rs/**",
+            ]
+        );
+        assert_eq!(pathspecs("a{b", ""), [":(glob)**/a{b", ":(glob)**/a{b/**"]);
     }
 }
