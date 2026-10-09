@@ -419,6 +419,10 @@ impl WindowView {
     /// 和 `open_preview` 一样打开 `path`，再选中第 `line` 行（从 0 数）、滚到中间。
     pub(super) fn open_preview_at(&mut self, path: &Path, line: usize, pin: bool, cx: &mut Context<Self>) {
         self.open_preview(path, pin, cx);
+        // 排版视图不按行定位，显示着排版的 Markdown 先切到源码，选中的那一行才看得到。
+        if self.preview().is_some_and(|preview| preview.path == path && self.markdown_shown(preview)) {
+            self.toggle_preview_source(cx);
+        }
         if let Some(preview) = self.preview_mut().filter(|preview| preview.path == path) {
             preview.selection = Some((line, line));
             preview.reveal.set(Some((line, ScrollStrategy::Center)));

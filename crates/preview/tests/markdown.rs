@@ -280,6 +280,38 @@ fn readme_html_header_is_centered() {
     );
 }
 
+/// HTML 标题里的 logo 单独成块，`<br>` 后面的文字照样是标题，首行不空。
+#[test]
+fn image_in_html_heading_becomes_its_own_block() {
+    assert_eq!(
+        parse("<h1 align=\"center\"><img src=\"logo.png\" width=\"100\"><br>Name</h1>\n"),
+        vec![
+            Block::Centered(vec![images(&[Image { width: Some(100), ..image("logo.png", "") }])]),
+            Block::Centered(vec![Block::Heading { level: 1, inlines: vec![plain("Name")], id: "name".into() }]),
+        ]
+    );
+    // 图片前面已有的文字先收成一个标题。
+    assert_eq!(
+        parse("<h2>Intro <img src=\"a.png\"> More</h2>\n"),
+        vec![
+            Block::Heading { level: 2, inlines: vec![plain("Intro")], id: "intro".into() },
+            images(&[image("a.png", "")]),
+            Block::Heading { level: 2, inlines: vec![plain("More")], id: "more".into() },
+        ]
+    );
+}
+
+/// 段落末尾的 `<br>` 后面没有文字，不留换行；中间连着的 `<br><br>` 照样是两个换行。
+#[test]
+fn trailing_br_in_html_paragraph_is_dropped() {
+    let bold = InlineStyle { bold: true, ..InlineStyle::default() };
+    assert_eq!(
+        parse("<p align=\"center\"><b>Name</b><br></p>\n"),
+        vec![Block::Centered(vec![Block::Paragraph(vec![styled("Name", bold)])])]
+    );
+    assert_eq!(parse("<p>a<br><br>b<br><br></p>\n"), vec![para("a\n\nb")]);
+}
+
 #[test]
 fn centered_div_spans_markdown_between_html_blocks() {
     let blocks = parse("<div align=\"center\">\n\n# Title\n\ntext\n\n</div>\n\nafter\n");

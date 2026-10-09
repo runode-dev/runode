@@ -184,7 +184,9 @@ fn first_public(addresses: impl IntoIterator<Item = IpAddr>) -> Option<IpAddr> {
 
 /// 要下载的地址：网址里写的主机和它解析出来的地址都不是本机或局域网时，给出主机、端口和该连的地址。
 fn public_address(url: &str) -> Option<(String, u16, IpAddr)> {
-    if is_local_host(url) {
+    // curl 把 `\` 当成用户名里的字符，`is_local_host` 和 `host_and_port` 却在它这里断开主机，
+    // `http://example.com\@127.0.0.1/` 就会查一个主机、连另一个；空白和控制字符也一样不收。
+    if url.chars().any(|c| c == '\\' || c.is_whitespace() || c.is_control()) || is_local_host(url) {
         return None;
     }
     let (host, port) = host_and_port(url)?;
@@ -249,9 +251,15 @@ fn fetch_once(url: &str) -> Option<Hop> {
         IpAddr::V4(ip) => ip.to_string(),
         IpAddr::V6(ip) => format!("[{ip}]"),
     };
-    let mut child = Command::new("curl")
-        .args(["-sf", "--proto", "=http,https"])
-        .args(["--resolve", &format!("{host}:{port}:{ip}")])
+    let mut command = Command::new("curl");
+    // `-q` 得是第一个参数，不读用户的 ~/.curlrc（里面的代理、跟重定向等会绕开这里的检查）；`-g` 不展开
+    // 网址里的 `{}`、`[]`，一个网址只请求一次。
+    command.args(["-q", "-g", "-sf", "--proto", "=http,https"]);
+    // 主机本身是 IP 时 curl 不解析，`--resolve` 也写不对 IPv6 的主机，用不着它。
+    if host.parse::<IpAddr>().is_err() && loose_ipv4(&host).is_none() {
+        command.args(["--resolve", &format!("{host}:{port}:{ip}")]);
+    }
+    let mut child = command
         .args(["--max-time", TIMEOUT_SECS])
         .args(["--max-filesize", &MAX_IMAGE_BYTES.to_string()])
         // 正文写到标准输出；状态码、内容类型和重定向的目标各一行写到标准错误。
@@ -362,6 +370,19 @@ mod tests {
         }
         for public in ["100.63.255.255", "100.128.0.1", "2606:4700::1111"] {
             assert!(!is_local_ip(ip(public)), "{public}");
+        }
+    }
+
+    /// curl 把 `\\` 当成用户名里的字符，按它断开主机会看错主机，这类网址直接不下。
+    #[test]
+    fn urls_with_backslash_or_whitespace_are_refused() {
+        for url in [
+            "http://example.com\\@127.0.0.1:8080/a.png",
+            "http://example.com/a b.png",
+            "http://example.com/a\n.png",
+            "http://example.com/a\u{7f}.png",
+        ] {
+            assert_eq!(public_address(url), None, "{url}");
         }
     }
 

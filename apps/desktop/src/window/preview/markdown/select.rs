@@ -91,7 +91,12 @@ pub(super) fn copy_text(doc: &Doc, start: MdPos, end: MdPos) -> String {
                 out.push(if text_ix % columns == 0 { '\n' } else { '\t' });
             }
             let range = selected_range(start, end, (ix, text_ix), text.len()).unwrap_or(0..0);
-            out.push_str(&text[range]);
+            match &row.leaf {
+                // 整个代码块选上时复制原文，和复制按钮一样，制表符和截掉的长行都在。shortcut: 只选了一部分
+                // 时位置按显示的样子算，照显示的复制；要换算回原文时再按行对上 `display_line` 的展开。
+                Leaf::Code { source, .. } if range == (0..text.len()) => out.push_str(source),
+                _ => out.push_str(&text[range]),
+            }
         }
         prev = Some(ix);
     }
@@ -163,6 +168,14 @@ mod tests {
         assert_eq!(copy_text(&quote, pos(0, 0, 0), pos(1, 0, 0)), "> a");
         // 停在同一块的开头之后照常带上那一点。
         assert_eq!(copy_text(&paragraphs, pos(0, 0, 0), pos(1, 0, 1)), "a\n\nb");
+    }
+
+    /// 代码块整块选上时复制原文：制表符不换成空格。
+    #[test]
+    fn whole_code_blocks_copy_their_source() {
+        let doc = doc("```\na\tb\n```\n");
+        let (start, end) = select_all(&doc).unwrap();
+        assert_eq!(copy_text(&doc, start, end), "a\tb");
     }
 
     #[test]

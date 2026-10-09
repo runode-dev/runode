@@ -148,7 +148,8 @@ pub fn is_markdown(path: &Path) -> bool {
 /// 界面摊平和释放块树都按层数递归，几万层的 `> ` 不设限会把栈撑爆。
 const MAX_NESTING: usize = 64;
 
-/// 裸网址最长认这么多字节，一长串没有空白的文字里每个候选网址都只往后看这么多，整体是线性的。
+/// 裸网址最长认这么多字节，一长串没有空白的文字里每个候选网址都只往后看这么多。最坏的时候是文字长度
+/// 乘上这个数，不是线性的：1MB 的 `*www.` 重复串要扫一秒左右，只是不会像不设限那样随长度平方增长。
 const MAX_AUTOLINK: usize = 2048;
 
 /// 主循环和找裸网址时每处理这么多个事件、候选看一次 `cancel`。
@@ -746,13 +747,30 @@ impl Builder<'_> {
                 self.image_run = false;
                 if self.open.is_some() {
                     self.trim_end();
-                    self.push_text("\n", false);
+                    // 前面还没有文字时（比如紧跟在标题里的 logo 后面）不换行，不然首行是空的。
+                    if !self.inlines.is_empty() {
+                        self.push_text("\n", false);
+                    }
                 }
             }
             "img" if self.image.is_none() => {
                 if let Some(src) = attr("src") {
                     let (width, height) = (html_pixels(attr("width")), html_pixels(attr("height")));
-                    self.push_image(src.to_owned(), attr("alt").unwrap_or_default().to_owned(), width, height);
+                    let alt = attr("alt").unwrap_or_default().to_owned();
+                    // HTML 开的标题里的图片（README 顶上标题里的 logo）像段落里那样单独成块：前面的文字先收成
+                    // 标题，图片推出去，标题接着收后面的文字。
+                    if block && let Some(Open::Heading(level)) = self.open {
+                        self.trim_end();
+                        if self.inlines.is_empty() {
+                            self.open = None;
+                        } else {
+                            self.close_inlines();
+                        }
+                        self.push_image(src.to_owned(), alt, width, height);
+                        self.open = Some(Open::Heading(level));
+                    } else {
+                        self.push_image(src.to_owned(), alt, width, height);
+                    }
                 }
             }
             "a" => {
@@ -762,11 +780,7 @@ impl Builder<'_> {
                 }
                 self.html_links.push(href.is_some());
             }
-            "b" | "strong" => self.bold += 1,
-            "i" | "em" => self.italic += 1,
-            "s" | "del" | "strike" => self.strike += 1,
-            "code" | "tt" => self.html_code += 1,
-            "kbd" => self.kbd += 1,
+            _ if let Some(count) = self.style_count(&name) => *count += 1,
             _ if !block => {}
             "hr" => {
                 self.close_html_inlines();
@@ -798,11 +812,7 @@ impl Builder<'_> {
                     self.links.pop();
                 }
             }
-            "b" | "strong" => self.bold = self.bold.saturating_sub(1),
-            "i" | "em" => self.italic = self.italic.saturating_sub(1),
-            "s" | "del" | "strike" => self.strike = self.strike.saturating_sub(1),
-            "code" | "tt" => self.html_code = self.html_code.saturating_sub(1),
-            "kbd" => self.kbd = self.kbd.saturating_sub(1),
+            _ if let Some(count) = self.style_count(name) => *count = count.saturating_sub(1),
             _ if !block => {}
             _ if html_heading(name).is_some() || HTML_BLOCKS.contains(&name) => {
                 // 先收起段落、标题，块还算在居中的标签里。
@@ -816,10 +826,32 @@ impl Builder<'_> {
         }
     }
 
-    /// HTML 的块边界：收起正在收的段落、标题，末尾的空白不要。
+    /// 行内样式的 HTML 标签（`<b>`、`<em>`、`<code>` 这类）记着套了几层的那个计数；别的标签为空。
+    fn style_count(&mut self, name: &str) -> Option<&mut u32> {
+        Some(match name {
+            "b" | "strong" => &mut self.bold,
+            "i" | "em" => &mut self.italic,
+            "s" | "del" | "strike" => &mut self.strike,
+            "code" | "tt" => &mut self.html_code,
+            "kbd" => &mut self.kbd,
+            _ => return None,
+        })
+    }
+
+    /// HTML 的块边界：收起正在收的段落、标题，末尾的空白和块末尾 `<br>` 留下的换行不要。
     fn close_html_inlines(&mut self) {
         if matches!(self.open, Some(Open::Paragraph { .. } | Open::Heading(_))) {
-            self.trim_end();
+            while let Some(last) = self.inlines.last_mut() {
+                last.text.truncate(last.text.trim_end_matches([' ', '\n']).len());
+                if !last.text.is_empty() {
+                    break;
+                }
+                self.inlines.pop();
+            }
+            // 只放了图片的标题，图片已经单独成块，不再留一个空标题。
+            if self.inlines.is_empty() && matches!(self.open, Some(Open::Heading(_))) {
+                self.open = None;
+            }
             self.close_inlines();
         }
     }
