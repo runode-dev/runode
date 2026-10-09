@@ -64,7 +64,7 @@ body:
     id: acceptance
     attributes:
       label: Done when
-      description: Checkable conditions, one per line.
+      description: Checkable conditions, one per line. Say where a new test goes - a `tests/` file if it only uses the crate's public API, a `#[cfg(test)]` module in `src` if it tests private code.
       placeholder: |
         - [ ] The repro above no longer fails
         - [ ] A test covers it
