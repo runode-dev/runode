@@ -171,3 +171,17 @@ fn a_pure_rename_reads_the_whole_file() {
     assert!(view.file.hunks.is_empty());
     assert_eq!(render(&view), ["1/1 a", "2/2 b"]);
 }
+
+/// 未跟踪的大文件和已跟踪的一样不读进来，只标成截断。
+#[test]
+fn a_large_untracked_file_is_truncated_without_reading_it() {
+    let repo = TestRepo::new("view-large-untracked");
+    repo.commit_file("a.txt", "a\n", "init");
+    // 只有一行，按行数不会截断，只能按大小认出来。
+    repo.write("big.txt", &format!("{}\n", "x".repeat(2 * 1024 * 1024)));
+    let handle = read(&repo).repo();
+    let view = handle.file_view(Path::new("big.txt"), None, &DiffSide::Worktree).unwrap().unwrap();
+    assert_eq!(view.file.status, FileStatus::Untracked);
+    assert!(view.file.truncated);
+    assert!(view.file.hunks.is_empty() && view.new_lines.is_empty());
+}

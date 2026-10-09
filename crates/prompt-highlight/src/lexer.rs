@@ -152,8 +152,9 @@ impl Lexer<'_> {
         let mut redirect: Option<bool> = None;
         loop {
             while let Some(c) = self.peek() {
-                if c == ' ' || c == '\t' {
-                    self.pos += 1;
+                // 和 `ends_word` 认同一套空白，不然全角空格这类字既不跳过、又让词一开头就结束。
+                if c != '\n' && c.is_whitespace() {
+                    self.pos += c.len_utf8();
                 } else if c == '\\' && self.peek_at(1) == Some('\n') {
                     self.pos += 2;
                 } else {
@@ -425,7 +426,7 @@ impl Lexer<'_> {
         self.span(start..self.pos, Kind::AssignArrayBracket);
         loop {
             while self.peek().is_some_and(char::is_whitespace) {
-                self.pos += 1;
+                self.bump();
             }
             match self.peek() {
                 None => return,
@@ -521,6 +522,10 @@ impl Lexer<'_> {
                     push_literal(&mut literal, &c.to_string());
                 }
             }
+        }
+        // 一个字都没吃进时也吃掉一个字，调用方的循环才不会原地打转。
+        if self.pos == start {
+            self.bump();
         }
         let raw = &self.text[start..self.pos];
         if raw == "[[" || raw == "]]" || raw == "[" || raw == "]" {

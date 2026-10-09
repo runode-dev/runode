@@ -36,7 +36,7 @@ pub fn highlight(label: &str, value: &str, query: &str) -> Vec<usize> {
 
 /// `query` 和候选名 `name` 匹配到哪一档：完全一样 0，前缀 1，按顺序含有这些字 2，不匹配
 /// `None`。不区分大小写。
-fn tier(name: &str, query: &str) -> Option<u8> {
+pub(crate) fn tier(name: &str, query: &str) -> Option<u8> {
     if query.is_empty() {
         return Some(1);
     }

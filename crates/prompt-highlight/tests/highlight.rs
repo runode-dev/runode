@@ -264,6 +264,54 @@ fn unfinished_input_does_not_panic() {
     }
 }
 
+/// 在另一个线程里给每行上色，限时做完；分析停不下来时测试失败，而不是一直挂着。
+fn highlights_in_time(texts: Vec<String>) {
+    let (done, finished) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let scratch = Scratch::new();
+        let shell = scratch.shell();
+        for text in &texts {
+            let spans = highlight(text, &shell, Some(scratch.path()));
+            assert!(spans.iter().all(|span| !span.range.is_empty() && span.range.end <= text.len()), "{text:?}");
+        }
+        done.send(()).unwrap();
+    });
+    finished.recv_timeout(std::time::Duration::from_secs(5)).expect("highlighting did not finish");
+}
+
+#[test]
+fn unusual_whitespace_separates_words() {
+    let texts = ["echo\u{3000}hi", "echo\u{a0}hi", "a\rb", "a\u{b}b", "a\u{c}b", "echo \u{2028} hi"];
+    highlights_in_time(texts.iter().map(|&text| text.to_owned()).collect());
+    check("ls\u{3000}-la", &[("ls", Kind::Command), ("-la", Kind::SingleHyphenOption)]);
+}
+
+#[test]
+fn any_input_terminates() {
+    const ALPHABET: &[char] = &[
+        'a', '1', '-', '=', ' ', '\t', '\n', '\r', '\u{b}', '\u{c}', '\u{a0}', '\u{3000}', '\u{2028}', '\u{85}', '\0',
+        '\u{1b}', '\u{7f}', ';', '&', '|', '<', '>', '(', ')', '{', '}', '[', ']', '\\', '\'', '"', '`', '$', '!', '#',
+        '*', '?', '~', '/', '中',
+    ];
+    // 固定种子的线性同余，结果可复现。
+    let mut seed: u64 = 0x2545_f491_4f6c_dd1d;
+    let mut next = || {
+        seed = seed.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1_442_695_040_888_963_407);
+        (seed >> 33) as usize
+    };
+    let mut texts: Vec<String> = ALPHABET
+        .iter()
+        .flat_map(|c| {
+            [c.to_string(), format!("echo {c}x"), format!("a=({c})"), format!("echo `{c}`"), format!("$({c}")]
+        })
+        .collect();
+    for _ in 0..2000 {
+        let len = next() % 12;
+        texts.push((0..len).map(|_| ALPHABET[next() % ALPHABET.len()]).collect());
+    }
+    highlights_in_time(texts);
+}
+
 #[test]
 fn styles_follow_the_default_theme() {
     let style = Kind::UnknownToken.style();

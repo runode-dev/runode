@@ -12,6 +12,7 @@ use warp_command_signatures::{FilterTemplateSuggestion, GeneratorName, Priority,
 
 pub use edit::{Edit, edit};
 pub use plan::plan;
+pub(crate) use rank::tier;
 pub use rank::{common_prefix, decisive, highlight, rank};
 
 /// 候选属于哪一类，菜单里按它分组标出、着色。

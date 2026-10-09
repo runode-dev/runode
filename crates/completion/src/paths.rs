@@ -27,7 +27,8 @@ pub fn dir_chars(typed: &str) -> usize {
 }
 
 /// 列出 `typed` 的目录部分指向的目录：相对路径从 `cwd` 算，`~` 开头的从 `home` 算。
-/// 按 `filter` 挑选。隐藏文件只在要补的文件名以 `.` 开头时列出。按名字排序，不区分大小写。
+/// 按 `filter` 挑选，只留名字按顺序含有要补的文件名里那些字的（和 `rank` 的模糊匹配一样，
+/// 不区分大小写）。隐藏文件只在要补的文件名以 `.` 开头时列出。按名字排序，不区分大小写。
 pub fn list(typed: &str, cwd: &Path, home: Option<&Path>, filter: Filter) -> Vec<Entry> {
     let split = typed.rfind('/').map_or(0, |i| i + 1);
     let (dir, name) = typed.split_at(split);
@@ -40,12 +41,15 @@ pub fn list(typed: &str, cwd: &Path, home: Option<&Path>, filter: Filter) -> Vec
     };
     let mut entries: Vec<Entry> = read
         .filter_map(Result::ok)
+        // 先按名字筛掉 `rank` 不会列出的项再数上限，大目录里能对上的才不会因为排在后面被漏掉。
+        .filter(|entry| {
+            entry.file_name().to_str().is_some_and(|entry_name| {
+                (show_hidden || !entry_name.starts_with('.')) && crate::engine::tier(entry_name, name).is_some()
+            })
+        })
         .take(MAX_ENTRIES)
         .filter_map(|entry| {
             let name = entry.file_name().into_string().ok()?;
-            if name.starts_with('.') && !show_hidden {
-                return None;
-            }
             // 指向目录的符号链接也算目录。
             let is_dir = match entry.file_type() {
                 Ok(kind) if kind.is_symlink() => entry.path().is_dir(),
@@ -116,11 +120,15 @@ mod tests {
                 .collect()
         };
         assert_eq!(names("", false), [("Cargo.toml".into(), false), ("src".into(), true)]);
-        assert_eq!(names("Ca", false), [("Cargo.toml".into(), false), ("src".into(), true)]);
-        assert_eq!(names("src/m", false), [("main.rs".into(), false), ("nested".into(), true)]);
+        assert_eq!(names("Ca", false), [("Cargo.toml".into(), false)]);
+        assert_eq!(names("src/m", false), [("main.rs".into(), false)]);
+        assert_eq!(names("src/", false), [("main.rs".into(), false), ("nested".into(), true)]);
+        // 按顺序含有这些字就算，`rank` 没有前缀匹配的候选时会列出它们。
+        assert_eq!(names("sc", false), [("src".into(), true)]);
         assert_eq!(names("", true), [("src".into(), true)]);
         // 以 `.` 开头时才列隐藏文件。
-        assert_eq!(names(".", false).len(), 4);
+        let hidden: Vec<String> = names(".", false).into_iter().map(|(name, _)| name).collect();
+        assert_eq!(hidden, [".env", ".git", "Cargo.toml"]);
         assert!(names("missing/", false).is_empty());
         assert_eq!(dir_chars("src/m"), 4);
         assert_eq!(dir_chars("m"), 0);
@@ -135,6 +143,19 @@ mod tests {
         std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
         let names: Vec<String> = list("", dir.path(), None, Filter::Executables).into_iter().map(|e| e.name).collect();
         assert_eq!(names, ["run.sh", "src"]);
+    }
+
+    /// 目录里的项超过上限时，能对上名字的不因为排在后面被漏掉。
+    #[test]
+    fn finds_matches_in_directories_over_the_limit() {
+        let dir = tempdir::Dir::new("paths-large");
+        for i in 0..MAX_ENTRIES + 100 {
+            std::fs::write(dir.path().join(format!("f{i:05}")), "").unwrap();
+        }
+        std::fs::write(dir.path().join("target.txt"), "").unwrap();
+        let names: Vec<String> = list("targ", dir.path(), None, Filter::All).into_iter().map(|e| e.name).collect();
+        assert_eq!(names, ["target.txt"]);
+        assert_eq!(list("", dir.path(), None, Filter::All).len(), MAX_ENTRIES);
     }
 
     #[test]

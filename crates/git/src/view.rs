@@ -148,7 +148,10 @@ impl Repo {
         args.extend(specs.iter().map(String::as_str));
         let mut file = diff(&self.root, &args).into_iter().find(|file| file.path == path);
         if file.is_none() && *side == DiffSide::Worktree && self.untracked(path) {
-            file = Some(read_untracked(&self.root.join(path), path.to_path_buf(), true));
+            let full = self.root.join(path);
+            // 和已跟踪的文件一样，超过 `MAX_DIFF_BYTES` 的不读进内存，标成截断。
+            let small = fs::metadata(&full).is_ok_and(|meta| meta.len() <= MAX_DIFF_BYTES);
+            file = Some(read_untracked(&full, path.to_path_buf(), small));
         }
         let Some(file) = file else {
             return Ok(None);
