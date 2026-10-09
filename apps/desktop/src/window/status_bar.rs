@@ -313,6 +313,9 @@ impl WindowView {
             .child(ours.to_string());
         let update = crate::update::status_label(cx).map(|label| {
             div()
+                .id("status-update")
+                .role(Role::Status)
+                .aria_label(label.clone())
                 .flex_none()
                 .px(px(6.))
                 .flex()
