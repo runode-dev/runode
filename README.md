@@ -5,81 +5,81 @@
 <h1 align="center">Runode</h1>
 
 <p align="center">
-  给 AI 编程 agent 准备的 macOS 原生终端
+  A native macOS terminal built for AI coding agents
   <br>
-  <a href="#安装">下载</a>
+  <a href="#install">Download</a>
   ·
-  <a href="#快速上手">快速上手</a>
+  <a href="#quick-start">Quick start</a>
   ·
-  <a href="CONTRIBUTING.md">参与开发</a>
+  <a href="CONTRIBUTING.md">Contributing</a>
   ·
-  <a href="README.en.md">English</a>
+  <a href="README.zh-CN.md">简体中文</a>
 </p>
 
-## 简介
+## About
 
-同时开几个 Claude Code、Codex，最累的是来回切终端，看哪个干完了、哪个在等你回答。Runode 不用配置任何 hook，自己就能认出每个终端里跑的是哪个 agent、处在什么状态，需要你的时候提醒你。agent 也能反过来操作旁边的终端，自己跑测试、读输出。出门在外，可以在手机上接着看。
+Running several Claude Code and Codex sessions at once means constantly switching terminals to see which one finished and which one is waiting for you. Runode recognizes the agent in every terminal and tracks its state with no hooks to configure, and lets you know when one needs you. Agents can drive the terminals next to them too, running tests and reading the output themselves. When you're away from your desk, pick up where you left off on your phone.
 
-Runode 用 [Ghostty](https://ghostty.org) 的 libghostty-vt 做终端仿真，用 [GPUI](https://www.gpui.rs) 绘制界面，全程 GPU 渲染。
+Runode uses [Ghostty](https://ghostty.org)'s libghostty-vt for terminal emulation and [GPUI](https://www.gpui.rs) for a fully GPU-rendered UI.
 
-## 特性
+## Features
 
-- **认得出 agent**：认出 Claude Code、Codex、Gemini CLI、Cursor、OpenCode、Amp 等二十多种 agent，在标签和侧栏上标出它在工作、在等你，还是干完了你还没看。
-- **提醒与跳转**：你没在看时发通知、出提示音；`⌘⇧A` 列出所有窗口里的 agent，`⌘⌥A` 直接跳到下一个需要你的。
-- **可编程**：自带 `runode` 命令行，能列出、读取、操作每个终端。agent 能用它在旁边的窗格跑命令、等结果、读输出，或者指挥另一个 agent。
-- **会话常驻**：打开 `terminal-host` 后，会话由独立的宿主进程持有，退出、重开、升级 app 都不断。
-- **手机远程**：iOS app 在局域网里和电脑配对，连接用 TLS 1.3 加密。在手机上能看终端、回复 agent、跑项目命令、提交 git。
-- **项目面板**：文件树、带语法高亮的文件预览，加上 Git 面板，能按块暂存、提交、切分支、推拉。
-- **更顺手的命令行**：按 Tab 弹出带说明的补全，提示符上的输入实时高亮，按历史给出灰字建议。
-- **兼容 Ghostty**：直接读你现有的 Ghostty 配置和主题。
-- **原生**：Rust 写成，不是 Electron。界面有简体中文、繁体中文和英文，支持自动更新。
+- **Agent-aware**: recognizes 20+ agents, including Claude Code, Codex, Gemini CLI, Cursor, OpenCode and Amp, and marks each tab and sidebar entry as working, waiting for you, or done but unread.
+- **Notifications and jumping**: notifies you and plays a sound when you're not looking. `⌘⇧A` lists the agents in every window, and `⌘⌥A` jumps straight to the next one that needs you.
+- **Scriptable**: the built-in `runode` CLI lists, reads and drives every terminal. Agents use it to run commands in a neighbouring pane, wait for them, read the output, or direct another agent.
+- **Persistent sessions**: with `terminal-host` on, sessions live in a separate host process and survive quitting, relaunching and upgrading the app.
+- **Remote from your phone**: the iOS app pairs with your Mac over the local network through a TLS 1.3 connection. From your phone you can watch terminals, answer agents, run project tasks and commit to git.
+- **Project panels**: a file tree, syntax-highlighted file previews, and a Git panel that can stage hunks, commit, switch branches, and pull or push.
+- **A smarter prompt**: Tab completion with descriptions, live syntax highlighting of what you type, and inline suggestions from your history.
+- **Ghostty compatible**: reads your existing Ghostty config and themes.
+- **Native**: written in Rust, not Electron. The UI comes in English, Simplified Chinese and Traditional Chinese, and the app updates itself.
 
-## 安装
+## Install
 
-在终端里运行：
+Run this in a terminal:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/runode-dev/runode/main/scripts/install.sh | sh
 ```
 
-它会把 Runode.app 装进「应用程序」，并把 `runode` 命令行链接到 PATH 上能写的 bin 目录（`~/.local/bin`、`~/bin`、`/opt/homebrew/bin`、`/usr/local/bin` 里第一个，都不行就用 `~/.local/bin`）。也可以手动下载对应芯片的 dmg：[Apple 芯片](https://github.com/runode-dev/runode/releases/latest/download/Runode-arm64.dmg) · [Intel](https://github.com/runode-dev/runode/releases/latest/download/Runode-x86_64.dmg)。打开后把 Runode 拖进「应用程序」。安装包用 Developer ID 签名并经过 Apple 公证，之后会自动更新。
+It installs Runode.app into Applications and links the `runode` command line into the first writable bin directory on your PATH (`~/.local/bin`, `~/bin`, `/opt/homebrew/bin`, `/usr/local/bin`; falls back to `~/.local/bin`). You can also download the dmg for your Mac yourself: [Apple silicon](https://github.com/runode-dev/runode/releases/latest/download/Runode-arm64.dmg) · [Intel](https://github.com/runode-dev/runode/releases/latest/download/Runode-x86_64.dmg). Open it and drag Runode into Applications. It is signed with a Developer ID, notarized by Apple, and keeps itself up to date.
 
-历次版本见 [Releases](https://github.com/runode-dev/runode/releases)。iOS app 还没上架，需要[从源码构建](CONTRIBUTING.md)。
+Every version is on [Releases](https://github.com/runode-dev/runode/releases). The iOS app isn't on the App Store yet; [build it from source](CONTRIBUTING.md).
 
-## 快速上手
+## Quick start
 
-在 Runode 的终端里，把 runode 的用法教给你的 agent：
-
-```sh
-runode setup claude    # 或 runode setup codex
-```
-
-之后 agent 会在需要时自己操作旁边的终端。你也可以亲手用：
+Inside a Runode terminal, teach your agent how to use runode:
 
 ```sh
-runode list                                    # 列出所有终端和里面的 agent
-runode send right 'cargo test' --enter --wait  # 在右边的窗格跑测试，等它结束
-runode read right --command                    # 读回这条命令的输出
-runode remote pair                             # 显示二维码，和手机配对
+runode setup claude    # or: runode setup codex
 ```
 
-完整用法见 `runode help`。配置文件在 `~/.runode/config.conf`。
+From then on the agent drives neighbouring terminals when it needs to. You can use it by hand as well:
 
-## 常见问题
+```sh
+runode list                                    # list every terminal and the agent in it
+runode send right 'cargo test' --enter --wait  # run tests in the pane to the right and wait
+runode read right --command                    # read back that command's output
+runode remote pair                             # show a QR code to pair your phone
+```
 
-**和 Ghostty 是什么关系？**
-Runode 不是 Ghostty 的分支。它把 libghostty-vt 当作终端仿真的库来用，界面、分屏、agent 识别都是自己做的。
+Run `runode help` for the full reference. The config file lives at `~/.runode/config.conf`.
 
-**支持哪些 agent？**
-任何在终端里跑的 agent 都能用。其中二十多种能认出状态，包括 Claude Code、Codex、Gemini CLI、Cursor、OpenCode、Amp、GitHub Copilot、Kimi、Qwen Code 等。识别规则可以自己加。
+## FAQ
 
-**支持哪些平台？**
-macOS（Apple 芯片和 Intel 都支持），另有 iOS app 做远程访问。Linux（x86_64 和 aarch64）上能用安装脚本装命令行和终端宿主，没有桌面界面，用手机经远程访问连上来。
+**How does Runode relate to Ghostty?**
+Runode is not a fork of Ghostty. It uses libghostty-vt as a terminal emulation library; the UI, splits and agent detection are its own.
 
-## 参与开发
+**Which agents does it work with?**
+Any agent that runs in a terminal. More than 20 have their state recognized, including Claude Code, Codex, Gemini CLI, Cursor, OpenCode, Amp, GitHub Copilot, Kimi and Qwen Code, and you can add your own detection rules.
 
-欢迎提 issue 和 PR。构建方法见 [CONTRIBUTING.md](CONTRIBUTING.md)，代码结构和约定见 [AGENTS.md](AGENTS.md)。
+**Which platforms are supported?**
+macOS on both Apple silicon and Intel, plus an iOS app for remote access. On Linux (x86_64 and aarch64) the install script sets up the command line and the terminal host without a desktop UI; connect to it from your phone over remote access.
 
-## 许可
+## Contributing
+
+Issues and PRs are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for building and [AGENTS.md](AGENTS.md) for the code layout and conventions.
+
+## License
 
 [Apache-2.0](LICENSE)
