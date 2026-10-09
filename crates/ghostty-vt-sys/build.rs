@@ -90,7 +90,8 @@ fn main() {
     println!("cargo:rerun-if-env-changed=HOST");
     println!("cargo:rerun-if-env-changed=DEBUG");
     println!("cargo:rerun-if-env-changed=OPT_LEVEL");
-    println!("cargo:rerun-if-changed=crates/libghostty-vt-sys/build.rs");
+    // 路径相对包目录；写成不存在的文件时 cargo 每次都会重跑脚本，整个 libghostty-vt 跟着重编。
+    println!("cargo:rerun-if-changed=build.rs");
 
     // An explicit source override should stay authoritative even when the
     // pkg-config feature is enabled, so local Ghostty checkouts remain easy to
@@ -122,6 +123,10 @@ fn build_vendored(link_mode: LinkMode, target: &str) {
         Ok(dir) => {
             let p = PathBuf::from(dir);
             assert!(p.join("build.zig").exists(), "GHOSTTY_SOURCE_DIR does not contain build.zig: {}", p.display());
+            // 只听参与构建的源码，不听整个目录：zig 会往里写 .zig-cache 和 zig-pkg，听了又会次次重跑。
+            for input in ["build.zig", "build.zig.zon", "src", "pkg", "include", "vendor"] {
+                println!("cargo:rerun-if-changed={}", p.join(input).display());
+            }
             p
         }
         Err(_) => fetch_ghostty(&out_dir),
