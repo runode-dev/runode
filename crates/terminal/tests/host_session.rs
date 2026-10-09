@@ -8,12 +8,23 @@ use std::{
 };
 
 use common::idle_host;
+use runode_shared_types::grid::GridSize;
 
 #[test]
 fn terminal_queries_are_answered_by_the_host() {
     let mut session = idle_host();
     session.feed(b"\x1b[c\x1b[5n\x1b[6n\x1b[>q");
     assert!(session.replies() >= 4, "{}", session.replies());
+}
+
+/// shell 集成标了 `redraw=1` 的提示符，改尺寸时整个清掉，shell 收到 SIGWINCH 后重画。折成两行的
+/// 第一行也要清：留着的话它的前半截就重复留在新提示符上面。
+#[test]
+fn resizing_clears_a_redrawable_prompt_even_when_it_wraps() {
+    let mut session = idle_host();
+    session.feed(b"out\r\n\x1b]133;A;cl=line;redraw=1\x07PROMPT-LINE-123\r\n$ \x1b]133;B\x07");
+    session.resize(GridSize { cols: 10, ..session.size() });
+    assert_eq!(session.screen_text(Some(10)).unwrap().trim_end(), "out");
 }
 
 #[test]

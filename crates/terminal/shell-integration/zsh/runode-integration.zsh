@@ -1,6 +1,8 @@
 # runode 的 zsh 集成：用 OSC 133 标出提示符、用户输入和命令输出的边界。
 #
 #   133;A  提示符开始       133;B  提示符结束、用户输入开始
+#          带 redraw=1：改尺寸时 zsh 会整个重画多行提示符，终端先把旧的清掉，不然旧提示符折行后
+#          留在上面（libghostty-vt 默认不清）
 #   133;C  命令开始执行     133;D  命令执行完（带退出码）
 #   133;P;k=r  右侧提示符开始，画完后用 133;B 回到用户输入
 #   6973;<口令>;cwd=…  runode 私有：shell 的当前目录（百分号编码），每次显示提示符前都发；
@@ -68,7 +70,7 @@ _runode_precmd() {
         _runode_ran=
     fi
     if [[ $PS1 != "$_runode_ps1" ]]; then
-        _runode_ps1=$'%{\e]133;A;cl=line\a%}'"$PS1"$'%{\e]133;B\a%}'
+        _runode_ps1=$'%{\e]133;A;cl=line;redraw=1\a%}'"$PS1"$'%{\e]133;B\a%}'
         PS1=$_runode_ps1
     fi
     if [[ $PS2 != "$_runode_ps2" ]]; then

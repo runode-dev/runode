@@ -3,6 +3,7 @@
 # 用户输入和命令输出的边界。
 #
 #   133;A  提示符开始       133;B  提示符结束、用户输入开始
+#          带 redraw=last：改尺寸时 readline 只重画提示符的最后一行，终端只清那一行
 #   133;C  命令开始执行     133;D  命令执行完（带退出码）
 #   133;I  提示符结束、用户输入开始，输入到这一行的换行为止：bash 4.4 以下没有 133;C，用它
 #          代替 133;B
@@ -113,7 +114,7 @@ if [ -z "${_runode_integrated-}" ]; then
             _runode_histnext=${_runode_bang@P}
         fi
         if [ "$PS1" != "$_runode_ps1" ]; then
-            _runode_ps1='\[\033]133;A;cl=line\007\]'"$PS1$_runode_cursor"'\[\033]133;'$_runode_input_mark'\007\]'
+            _runode_ps1='\[\033]133;A;cl=line;redraw=last\007\]'"$PS1$_runode_cursor"'\[\033]133;'$_runode_input_mark'\007\]'
             PS1=$_runode_ps1
         fi
         if [ "$PS2" != "$_runode_ps2" ]; then

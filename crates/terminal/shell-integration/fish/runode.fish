@@ -1,6 +1,7 @@
 # runode 的 fish 集成：用 OSC 133 标出提示符、用户输入和命令输出的边界。
 #
 #   133;A  提示符开始       133;B  提示符结束、用户输入开始
+#          带 redraw=1：改尺寸时 fish 会整个重画提示符，终端先把旧的清掉（libghostty-vt 默认不清）
 #   133;C  命令开始执行     133;D  命令执行完（带退出码）
 #   133;P;k=r  右侧提示符开始，画完后用 133;B 回到用户输入
 #   6973;<口令>;cwd=…  runode 私有：shell 的当前目录（百分号编码），每次显示提示符前都发
@@ -74,7 +75,7 @@ function __runode_wrap_prompt --on-event fish_prompt
     functions -q fish_prompt; or return
     functions -c fish_prompt __runode_original_prompt
     function fish_prompt
-        printf '\e]133;A;cl=line\a'
+        printf '\e]133;A;cl=line;redraw=1\a'
         __runode_original_prompt
         printf '\e]133;B\a'
     end
