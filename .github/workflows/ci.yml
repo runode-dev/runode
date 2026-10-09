@@ -3,10 +3,36 @@
 # 所以在 macOS 上跑。发版时 release.yml 也调它（workflow_call），对要发的那个标签再查一遍。
 name: CI
 
+# 只改文档、iOS/Android 端、发版和 issue 模板这类 Rust 编译和测试用不到的文件时不跑。skills/ 被编进 cli，
+# 所以不在忽略之列。
 on:
   push:
     branches: [main]
+    paths-ignore:
+      - "docs/**"
+      - "apps/ios/**"
+      - "apps/android/**"
+      - "scripts/release.sh"
+      - "scripts/install.sh"
+      - "scripts/perf*"
+      - ".github/ISSUE_TEMPLATE/**"
+      - ".github/workflows/release.yml"
+      - ".github/workflows/update-command-specs.yml"
+      - "*.md"
+      - "LICENSE"
   pull_request:
+    paths-ignore:
+      - "docs/**"
+      - "apps/ios/**"
+      - "apps/android/**"
+      - "scripts/release.sh"
+      - "scripts/install.sh"
+      - "scripts/perf*"
+      - ".github/ISSUE_TEMPLATE/**"
+      - ".github/workflows/release.yml"
+      - ".github/workflows/update-command-specs.yml"
+      - "*.md"
+      - "LICENSE"
   workflow_dispatch:
   workflow_call:
     inputs:
