@@ -134,6 +134,9 @@ impl Element for TerminalElement {
         });
         let focused = focus_handle.is_focused(window);
         self.view.update(cx, |view, cx| {
+            // 补全菜单画在哪几行画的时候才定，报给辅助工具的列表按它放（`render_completion_a11y`），
+            // 变了就再画一帧，不然要等下次有输出才跟上。
+            let shown = window.is_a11y_active().then(|| view.completion_shown());
             let metrics = view.metrics(window);
             view.refresh_input();
             // 绘制时要同时用到帧和 `&mut view`（字形缓存），所以先把帧取出来，画完再放回。没有界面
@@ -171,6 +174,9 @@ impl Element for TerminalElement {
             FIRST_CONTENT.mark_when("first_content", || frame.cells.iter().any(|cell| !cell.text.trim().is_empty()));
             if let Some(session) = view.screen.shown_mut() {
                 session.restore_frame(frame);
+            }
+            if shown.is_some_and(|shown| shown != view.completion_shown()) {
+                cx.notify();
             }
         });
     }

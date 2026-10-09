@@ -5,7 +5,10 @@ mod paint;
 
 use std::{ffi::OsString, path::PathBuf, time::Instant};
 
-use gpui::{Context, Keystroke, MouseDownEvent, ScrollWheelEvent, Task};
+use gpui::{
+    AccessibleAction, AnyElement, Context, Keystroke, MouseDownEvent, Role, ScrollWheelEvent, Task, anchored, div,
+    point, prelude::*, px,
+};
 
 use runode_completion::{
     self as completion, Candidate, GeneratorJob, GeneratorResults, Kind, Request, Shell, generators,
@@ -417,14 +420,79 @@ impl TerminalView {
         let Some((row, shown)) = self.completion_row(event.position) else {
             return false;
         };
-        if let Some(item) = shown.item_at(row)
-            && let Some(menu) = self.completion.take()
+        if let Some(item) = shown.item_at(row) {
+            self.accept_completion_item(item, cx);
+        }
+        cx.notify();
+        true
+    }
+
+    /// 菜单上次画在网格里的位置。
+    pub(super) fn completion_shown(&self) -> Option<paint::Shown> {
+        self.completion.as_ref()?.shown.clone()
+    }
+
+    /// 接受 `items` 里的第 `item` 项，关掉菜单。
+    fn accept_completion_item(&mut self, item: usize, cx: &mut Context<Self>) {
+        if let Some(menu) = self.completion.take()
             && let Some(&index) = menu.items.get(item)
         {
             self.accept_candidate(menu.candidates[index].clone(), menu.before_word, cx);
         }
-        cx.notify();
-        true
+    }
+
+    /// 报给辅助工具的补全菜单：菜单画在网格上，没有对应的元素，这里另放一个不画东西的列表，按上次
+    /// 画的位置盖在那几行上，看得到的每项一个选项。选中的那项是活动子项，焦点留在终端上时辅助工具
+    /// 也跟着读它；按下选项和点它一样接受。
+    pub(super) fn render_completion_a11y(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let menu = self.completion.as_ref()?;
+        let shown = menu.shown.as_ref()?;
+        let metrics = self.metrics?;
+        let cols = self.screen.live()?.size().cols;
+        let (cw, ch) = (metrics.cell.width, metrics.cell.height);
+        let rows = shown.rows();
+        let (list_row, visible) = shown.visible();
+        let view = cx.entity().downgrade();
+        let options = visible.map(|item| {
+            let candidate = &menu.candidates[menu.items[item]];
+            let view = view.clone();
+            div()
+                .id(("completion-item", item))
+                .role(Role::ListBoxOption)
+                .aria_label(candidate.label.clone())
+                .when_some(candidate.description.clone(), |option, description| option.aria_description(description))
+                .aria_selected(item == menu.selected)
+                .when(item == menu.selected, |option| option.aria_active_descendant())
+                .h(ch)
+                .on_a11y_action(AccessibleAction::Click, move |_, _, cx| {
+                    view.update(cx, |view, cx| {
+                        view.accept_completion_item(item, cx);
+                        cx.notify();
+                    })
+                    .ok();
+                })
+        });
+        let status = if menu.loading() {
+            Some(rust_i18n::t!("completion.loading"))
+        } else if menu.items.is_empty() {
+            Some(rust_i18n::t!("completion.no_matches"))
+        } else {
+            None
+        };
+        let list = div()
+            .id("completion-menu")
+            .role(Role::ListBox)
+            .aria_label(rust_i18n::t!("completion.menu").into_owned())
+            .when_some(status, |list, status| list.aria_description(status.into_owned()))
+            .w(cw * f32::from(cols))
+            .h(ch * rows.len() as f32)
+            // 上面计数和分组那几行不是选项。
+            .pt(ch * (list_row - rows.start) as f32)
+            .flex()
+            .flex_col()
+            .children(options);
+        let origin = self.grid_origin + point(px(0.), ch * rows.start as f32);
+        Some(anchored().position(origin).child(list).into_any_element())
     }
 
     /// 在菜单上滚动滚轮：上下移动选中项。返回是不是滚在菜单上。

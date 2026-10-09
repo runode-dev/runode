@@ -66,6 +66,11 @@ impl Shown {
         self.top_row..self.list_row + self.list_rows as i32
     }
 
+    /// 候选从哪一行开始，以及看得到的是 `items` 里的哪几项。
+    pub(in crate::terminal_view) fn visible(&self) -> (i32, Range<usize>) {
+        (self.list_row, self.first_item..(self.first_item + self.list_rows).min(self.items))
+    }
+
     /// 第 `row` 行画的是第几项；不是候选行时为 `None`。
     pub(in crate::terminal_view) fn item_at(&self, row: i32) -> Option<usize> {
         let offset = usize::try_from(row - self.list_row).ok().filter(|&offset| offset < self.list_rows)?;

@@ -462,6 +462,8 @@ git:
 completion:
   loading: Loading…
   no_matches: No matches
+  menu: Completions
+  suggestion: "Suggestion: %{text}"
   group:
     command: external command
     alias: alias

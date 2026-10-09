@@ -462,6 +462,8 @@ git:
 completion:
   loading: 載入中…
   no_matches: 沒有符合項目
+  menu: 指令補全
+  suggestion: "建議：%{text}"
   group:
     command: 外部指令
     alias: 別名

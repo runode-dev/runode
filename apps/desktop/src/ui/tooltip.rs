@@ -1,6 +1,6 @@
 //! 悬停提示：鼠标在按钮或标题上停一会儿弹出的一小块文字，有快捷键时跟在说明后面。
 
-use gpui::{Action, AnyView, App, Context, IntoElement, Render, SharedString, Window, div, prelude::*, px};
+use gpui::{Action, AnyView, App, Context, IntoElement, Render, Role, SharedString, Window, div, prelude::*, px};
 use runode_shared_types::color::Rgb;
 
 use crate::ui::hsla;
@@ -61,6 +61,9 @@ struct Tooltip {
 impl Render for Tooltip {
     fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
         div()
+            .id("tooltip")
+            .role(Role::Tooltip)
+            .aria_label(self.text.clone())
             .px(px(8.))
             .py(px(4.))
             .flex()

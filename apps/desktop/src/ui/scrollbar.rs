@@ -8,13 +8,16 @@
 //!
 //! 竖的滚动条可以带改动标记（`markers`）：按在全文里的位置画在轨道上，内容能滚时一直画着，
 //! 不等鼠标进来，滚的时候看得出哪里改了。
+//!
+//! 内容能滚时报给辅助工具：方向和滚到了哪里（0 到 1），位置只占轨道那一条，不盖住内容。
 
 use std::{cell::Cell, ops::Range, rc::Rc};
 
 use gpui::{
-    App, Axis, Bounds, CursorStyle, DispatchPhase, Edges, Element, ElementId, GlobalElementId, Hitbox, HitboxBehavior,
-    Hsla, InspectorElementId, IntoElement, LayoutId, ListState, MouseButton, MouseDownEvent, MouseMoveEvent,
-    MouseUpEvent, Pixels, Position, ScrollHandle, Size, Style, Window, fill, point, px, relative, size,
+    A11ySubtreeBuilder, App, Axis, Bounds, CursorStyle, DispatchPhase, Edges, Element, ElementId, GlobalElementId,
+    Hitbox, HitboxBehavior, Hsla, InspectorElementId, IntoElement, LayoutId, ListState, MouseButton, MouseDownEvent,
+    MouseMoveEvent, MouseUpEvent, Orientation, Pixels, Position, Role, ScrollHandle, Size, Style, Window, accesskit,
+    fill, point, px, relative, size,
 };
 
 /// 轨道的宽度，也是能按住的宽度；滑块画在轨道中间，这么粗。
@@ -27,12 +30,12 @@ const MIN_MARKER_LENGTH: f32 = 2.;
 
 /// `handle` 所在的滚动区域在 `axis` 方向上的滚动条，颜色是 `color` 调淡。
 pub fn scrollbar(id: impl Into<ElementId>, handle: ScrollHandle, axis: Axis, color: Hsla) -> Scrollbar {
-    Scrollbar { id: id.into(), handle: Handle::Scroll(handle), axis, color, markers: Vec::new() }
+    Scrollbar { id: id.into(), handle: Handle::Scroll(handle), axis, color, markers: Vec::new(), scale: 1. }
 }
 
 /// `gpui::list` 的竖滚动条，样子和用法同 `scrollbar`。
 pub fn list_scrollbar(id: impl Into<ElementId>, list: ListState, color: Hsla) -> Scrollbar {
-    Scrollbar { id: id.into(), handle: Handle::List(list), axis: Axis::Vertical, color, markers: Vec::new() }
+    Scrollbar { id: id.into(), handle: Handle::List(list), axis: Axis::Vertical, color, markers: Vec::new(), scale: 1. }
 }
 
 /// 滚动条管的是哪种滚动区域。
@@ -111,6 +114,8 @@ pub struct Scrollbar {
     axis: Axis,
     color: Hsla,
     markers: Vec<Marker>,
+    /// 窗口的缩放，`prepaint` 时记下；报给辅助工具的位置按物理像素算。
+    scale: f32,
 }
 
 /// 跨帧留着的状态。
@@ -201,6 +206,35 @@ impl Element for Scrollbar {
         None
     }
 
+    fn a11y_role(&self) -> Option<Role> {
+        (self.handle.extent(self.axis).1 >= px(1.)).then_some(Role::ScrollBar)
+    }
+
+    fn write_a11y_info(&self, node: &mut accesskit::Node) {
+        let (_, max, scrolled) = self.handle.extent(self.axis);
+        node.set_orientation(match self.axis {
+            Axis::Vertical => Orientation::Vertical,
+            Axis::Horizontal => Orientation::Horizontal,
+        });
+        node.set_min_numeric_value(0.);
+        node.set_max_numeric_value(1.);
+        node.set_numeric_value(f64::from((scrolled / max).clamp(0., 1.)));
+    }
+
+    /// 元素和整个滚动区域一样大，报给辅助工具的位置换成轨道那一条，不然点内容时命中的是滚动条。
+    fn a11y_synthetic_children(&mut self, hitbox: &mut Option<Hitbox>, builder: &mut A11ySubtreeBuilder) {
+        if let Some(track) = hitbox.as_ref().map(|hitbox| hitbox.bounds) {
+            let scale = f64::from(self.scale);
+            let (origin, end) = (track.origin, track.bottom_right());
+            builder.parent_node().set_bounds(accesskit::Rect {
+                x0: f64::from(origin.x) * scale,
+                y0: f64::from(origin.y) * scale,
+                x1: f64::from(end.x) * scale,
+                y1: f64::from(end.y) * scale,
+            });
+        }
+    }
+
     fn request_layout(
         &mut self,
         _: Option<&GlobalElementId>,
@@ -226,6 +260,7 @@ impl Element for Scrollbar {
         window: &mut Window,
         _: &mut App,
     ) -> Option<Hitbox> {
+        self.scale = window.scale_factor();
         // 轨道上的点击和悬停归滚动条，滚轮照常交给下面的滚动区域。
         self.geometry(bounds).map(|_| window.insert_hitbox(self.track(bounds), HitboxBehavior::BlockMouseExceptScroll))
     }

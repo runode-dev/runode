@@ -36,7 +36,7 @@ use std::{
 use futures::channel::mpsc::UnboundedReceiver;
 use gpui::{
     Action, App, Bounds, Context, CursorStyle, Entity, EventEmitter, FocusHandle, Focusable, Font, Pixels, Point,
-    Render, ShapedLine, Subscription, Task, Window, actions, div, prelude::*, px, rgb,
+    Render, Role, ShapedLine, SharedString, Subscription, Task, Window, actions, div, prelude::*, px, rgb,
 };
 use runode_config::Config;
 use runode_protocol::SessionId;
@@ -48,7 +48,7 @@ use runode_terminal::{
 
 use crate::{
     host_client::LinkEvent,
-    ui::{hsla, text_field::TextField},
+    ui::{a11y::Press, hsla, text_field::TextField},
 };
 use completion_menu::{CompletionMenu, PendingKey};
 use crop::Crop;
@@ -271,14 +271,26 @@ impl Focusable for TerminalView {
 }
 
 impl Render for TerminalView {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let (foreground, background) = self.colors();
         self.check_completion();
+        // 屏幕上的字只有辅助工具在读时才拼。
+        let a11y = window.is_a11y_active();
+        let screen_text = a11y.then(|| self.screen.shown_mut().map(|session| screen_lines(&session.frame())));
+        let suggestion = a11y
+            .then(|| self.visible_suggestion().map(|s| rust_i18n::t!("completion.suggestion", text = s.rest)))
+            .flatten();
+        let completion_list = a11y.then(|| self.render_completion_a11y(cx)).flatten();
         // 搜索栏和终端是兄弟节点，不在 `Terminal` 按键上下文里：在搜索栏里打字时，
         // ⌘← 之类映射给程序的快捷键不能生效。
         let search_bar = self.search_field.as_ref().map(|(field, _)| self.render_search_bar(field, cx));
         let terminal = div()
             .id("terminal")
+            // 报给辅助工具：名字是标题，值是这一屏的字，灰字建议放在说明里。
+            .role(Role::Terminal)
+            .aria_label(SharedString::from(self.title().to_owned()))
+            .when_some(screen_text.flatten(), |terminal, text| terminal.aria_value(text))
+            .when_some(suggestion, |terminal, suggestion| terminal.aria_description(suggestion.into_owned()))
             // 搜索栏开着时多一个 `searching` 标记，只在这时才让 Esc 关搜索而不发给程序。
             .key_context(if self.search_field.is_some() { "Terminal searching" } else { "Terminal" })
             .track_focus(&self.focus_handle)
@@ -327,7 +339,8 @@ impl Render for TerminalView {
                         CursorStyle::IBeam
                     })
                     .child(TerminalElement { view: cx.entity() }),
-            );
+            )
+            .children(completion_list);
         let lost = self.screen.is_lost().then(|| self.render_lost_bar(foreground, background, cx));
         let size_owner = self.render_size_owner(foreground, background, cx);
         div()
@@ -375,9 +388,13 @@ impl TerminalView {
             None => rust_i18n::t!("size_owner.controlled_elsewhere"),
         };
         let fg = hsla(foreground);
+        let take_over = rust_i18n::t!("size_owner.take_over").into_owned();
         Some(
             div()
                 .id("size-owner")
+                .role(Role::Button)
+                .aria_label(message.clone().into_owned())
+                .aria_description(take_over.clone())
                 .absolute()
                 .bottom(px(6.))
                 .right(px(8.))
@@ -396,19 +413,23 @@ impl TerminalView {
                 .cursor(CursorStyle::PointingHand)
                 .hover(|label| label.text_color(fg))
                 .child(message.into_owned())
-                .child(div().text_color(fg.opacity(0.5)).child(rust_i18n::t!("size_owner.take_over").into_owned()))
-                .on_click(cx.listener(|view, _, window, cx| {
+                .child(div().text_color(fg.opacity(0.5)).child(take_over))
+                .on_press(cx, |view, window, cx| {
                     window.focus(&view.focus_handle, cx);
                     view.report_focus(true);
-                })),
+                }),
         )
     }
 
     /// 和宿主断开后盖在底部的提示：画面停在最后一屏，以及「在原目录重开」。
     fn render_lost_bar(&self, foreground: Rgb, background: Rgb, cx: &mut Context<Self>) -> gpui::Stateful<gpui::Div> {
         let fg = hsla(foreground);
+        let message = rust_i18n::t!("host_lost.message").into_owned();
+        let reopen = rust_i18n::t!("host_lost.reopen").into_owned();
         div()
             .id("host-lost")
+            .role(Role::Alert)
+            .aria_label(message.clone())
             .absolute()
             .bottom(px(8.))
             .left(px(8.))
@@ -427,18 +448,61 @@ impl TerminalView {
             .text_size(px(12.))
             .text_color(fg)
             .cursor(CursorStyle::Arrow)
-            .child(div().flex_1().min_w_0().child(rust_i18n::t!("host_lost.message").into_owned()))
+            .child(div().flex_1().min_w_0().child(message))
             .child(
                 div()
                     .id("host-lost-reopen")
+                    .role(Role::Button)
+                    .aria_label(reopen.clone())
                     .flex_none()
                     .px(px(8.))
                     .py(px(2.))
                     .rounded(px(4.))
                     .bg(fg.opacity(0.1))
                     .hover(|button| button.bg(fg.opacity(0.2)))
-                    .child(rust_i18n::t!("host_lost.reopen").into_owned())
-                    .on_click(cx.listener(|view, _, window, cx| view.reopen(window, cx))),
+                    .child(reopen)
+                    .on_press(cx, |view, window, cx| view.reopen(window, cx)),
             )
+    }
+}
+
+/// 视口里这一屏的字，每行一行：宽字符的后半格跳过，空白格当空格，行尾空白和最后的空行去掉。
+fn screen_lines(frame: &Frame) -> String {
+    let mut text = String::new();
+    for y in 0..frame.rows {
+        let start = text.len();
+        for cell in frame.row(y).iter().filter(|cell| !cell.spacer) {
+            text.push_str(if cell.text.is_empty() { " " } else { &cell.text });
+        }
+        text.truncate(start + text[start..].trim_end().len());
+        text.push('\n');
+    }
+    text.truncate(text.trim_end().len());
+    text
+}
+
+#[cfg(test)]
+mod tests {
+    use runode_shared_types::frame::Cell;
+
+    use super::*;
+
+    #[test]
+    fn screen_lines_skip_spacers_and_trailing_blanks() {
+        let cell = |text: &str, spacer: bool| Cell { text: text.into(), spacer, ..Cell::default() };
+        let cells = vec![
+            cell("a", false),
+            cell("", false),
+            cell("中", false),
+            cell("", true),
+            cell("", false),
+            cell("", false),
+            cell("", false),
+            cell("", false),
+            cell("", false),
+            cell("", false),
+        ];
+        let frame = Frame { cols: 5, rows: 2, cells, ..Frame::default() };
+        assert_eq!(screen_lines(&frame), "a 中");
     }
 }

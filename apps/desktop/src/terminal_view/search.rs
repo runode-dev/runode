@@ -1,10 +1,13 @@
 //! 终端里的搜索：打开和关闭搜索栏、转发它的事件、切换匹配，以及画右上角的搜索栏。
 
-use gpui::{AppContext as _, Context, CursorStyle, Entity, Focusable, Window, actions, div, prelude::*, px};
+use gpui::{
+    AppContext as _, Context, CursorStyle, Entity, Focusable, Role, SharedString, Window, actions, div, prelude::*, px,
+};
 use runode_terminal::session::Session;
 
 use super::TerminalView;
 use crate::ui::{
+    a11y::Press,
     hsla,
     text_field::{EndSearch, SearchNext, SearchPrevious, TextField, TextFieldEvent},
     tooltip::tooltip,
@@ -38,7 +41,8 @@ impl TerminalView {
         let field = match &self.search_field {
             Some((field, _)) => field.clone(),
             None => {
-                let field = cx.new(|cx| TextField::new(String::new(), cx));
+                let field =
+                    cx.new(|cx| TextField::new(String::new(), cx).with_label(rust_i18n::t!("search.placeholder")));
                 let events = cx.subscribe_in(&field, window, Self::handle_search_event);
                 self.search_field = Some((field.clone(), events));
                 field
@@ -121,9 +125,12 @@ impl TerminalView {
             Some((None, total)) if total > 0 => format!("-/{total}"),
             _ => String::new(),
         };
-        let button = |id: &'static str, label: &'static str| {
+        // `label` 是画出来的符号，`name` 是报给辅助工具的名字，和悬停提示一样。
+        let button = |id: &'static str, label: &'static str, name: &SharedString| {
             div()
                 .id(id)
+                .role(Role::Button)
+                .aria_label(name.clone())
                 .flex_none()
                 .size(px(20.))
                 .rounded(px(4.))
@@ -134,8 +141,13 @@ impl TerminalView {
                 .hover(|button| button.bg(fg.opacity(0.15)).text_color(fg))
                 .child(label)
         };
+        let name = |key: &str| SharedString::from(rust_i18n::t!(key).into_owned());
+        let (previous, next, close) =
+            (name("menu.find_previous"), name("menu.find_next"), name("tooltip.close_search"));
         div()
             .id("search-bar")
+            .role(Role::Search)
+            .aria_label(rust_i18n::t!("search.placeholder").into_owned())
             .absolute()
             .top(px(8.))
             .right(px(16.))
@@ -166,33 +178,43 @@ impl TerminalView {
                     .cursor(CursorStyle::IBeam)
                     .child(field.clone()),
             )
-            .child(div().flex_none().min_w(px(36.)).text_right().text_color(fg.opacity(0.6)).child(status))
+            // 匹配进度报成状态，辅助工具读得到「3/12」「无结果」。
             .child(
-                button("search-previous", "↑")
-                    .tooltip(tooltip(rust_i18n::t!("menu.find_previous"), Some(&SearchPrevious), frame.0, frame.1))
-                    .on_click(cx.listener(|view, _, _, cx| {
+                div()
+                    .id("search-status")
+                    .role(Role::Status)
+                    .aria_label(status.clone())
+                    .flex_none()
+                    .min_w(px(36.))
+                    .text_right()
+                    .text_color(fg.opacity(0.6))
+                    .child(status),
+            )
+            .child(
+                button("search-previous", "↑", &previous)
+                    .tooltip(tooltip(previous, Some(&SearchPrevious), frame.0, frame.1))
+                    .on_press(cx, |view, _, cx| {
                         if let Some(session) = view.screen.shown_mut() {
                             session.search_step(true);
                         }
                         cx.notify();
-                    })),
+                    }),
             )
             .child(
-                button("search-next", "↓")
-                    .tooltip(tooltip(rust_i18n::t!("menu.find_next"), Some(&SearchNext), frame.0, frame.1))
-                    .on_click(cx.listener(|view, _, _, cx| {
+                button("search-next", "↓", &next).tooltip(tooltip(next, Some(&SearchNext), frame.0, frame.1)).on_press(
+                    cx,
+                    |view, _, cx| {
                         if let Some(session) = view.screen.shown_mut() {
                             session.search_step(false);
                         }
                         cx.notify();
-                    })),
+                    },
+                ),
             )
             .child(
-                button("search-close", "×")
-                    .tooltip(tooltip(rust_i18n::t!("tooltip.close_search"), Some(&EndSearch), frame.0, frame.1))
-                    .on_click(cx.listener(|view, _, window, cx| {
-                        view.close_search(window, cx);
-                    })),
+                button("search-close", "×", &close)
+                    .tooltip(tooltip(close, Some(&EndSearch), frame.0, frame.1))
+                    .on_press(cx, |view, window, cx| view.close_search(window, cx)),
             )
     }
 }
