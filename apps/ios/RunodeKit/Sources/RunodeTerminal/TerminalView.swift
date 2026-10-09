@@ -273,7 +273,7 @@
                 grid.setNeedsDisplay()
                 return
             }
-            // 程序在同步输出：留着上一帧，一会儿再看（最多冻结一秒，见 `VTerminal.isRenderHeld`）。
+            // 程序在同步输出、改尺寸后还在重画：留着上一帧，一会儿再看（见 `VTerminal.isRenderHeld`）。
             if terminal.isRenderHeld {
                 Task { @MainActor [weak self] in
                     try? await Task.sleep(for: .milliseconds(50))

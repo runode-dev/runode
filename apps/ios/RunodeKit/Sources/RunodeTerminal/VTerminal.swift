@@ -27,6 +27,9 @@ public final class VTerminal {
     private let graphemeBuffer: UnsafeMutablePointer<UInt8>
     private static let graphemeCapacity = 64
     private let hold = RenderHold()
+    /// 最近一次改尺寸、最近一次喂字节的时刻，见 `isRenderHeld`。
+    private var resizedAt = ContinuousClock.now - .seconds(10)
+    private var fedAt = ContinuousClock.now - .seconds(10)
     /// 平滑滚动时视口之外再往回看的零点几行：画的时候整屏往下错开这么多，露出视口上面那一行的
     /// 一部分。和桌面 `Session` 的 `scroll_offset` 一样，取值在 [0, 1)，视口在历史最顶上时为 0。
     private var scrollFraction: Double = 0
@@ -96,6 +99,7 @@ public final class VTerminal {
     /// 把宿主转来的字节（VT 重放或 PTY 输出）喂给 VT。
     public func feed(_ bytes: some Collection<UInt8>) {
         guard !bytes.isEmpty else { return }
+        fedAt = .now
         if let done = bytes.withContiguousStorageIfAvailable({ buffer in
             ghostty_terminal_vt_write(handle, buffer.baseAddress, buffer.count)
         }) {
@@ -109,6 +113,7 @@ public final class VTerminal {
     public func resize(_ newSize: GridSize) {
         guard newSize.cols > 0, newSize.rows > 0, newSize != size else { return }
         size = newSize
+        resizedAt = .now
         scrollFraction = 0
         ghostty_terminal_resize(
             handle, newSize.cols, newSize.rows, UInt32(newSize.cellWidthPx), UInt32(newSize.cellHeightPx))
@@ -183,10 +188,14 @@ public final class VTerminal {
         ghostty_terminal_set(handle, GHOSTTY_TERMINAL_OPT_RENDER_HOLD, unsafeBitCast(callback, to: UnsafeRawPointer.self))
     }
 
-    /// 程序要求先别刷新屏幕（同步输出），且还没超过一秒。超时后不再遵守，免得程序出错时画面卡死。
+    /// 先别刷新屏幕：程序要求的（同步输出），且还没超过一秒，超时后不再遵守，免得程序出错时画面卡死；
+    /// 或者刚改过尺寸，程序还没重画完。shell 集成说了会自己重画提示符（OSC 133 的 `redraw=1`）时，
+    /// libghostty 改尺寸就先把提示符擦掉，等 shell 收到 SIGWINCH 画回来，这要经宿主转一趟才到。改尺寸后
+    /// 300 毫秒内，等到改完以后的输出、并且停了 50 毫秒再画，不画出提示符擦掉了还没画回来的那一帧。
     public var isRenderHeld: Bool {
-        guard let since = hold.since else { return false }
-        return ContinuousClock.now - since < .seconds(1)
+        let now = ContinuousClock.now
+        if let since = hold.since, now - since < .seconds(1) { return true }
+        return now - resizedAt < .milliseconds(300) && (fedAt < resizedAt || now - fedAt < .milliseconds(50))
     }
 
     // MARK: 模式和状态

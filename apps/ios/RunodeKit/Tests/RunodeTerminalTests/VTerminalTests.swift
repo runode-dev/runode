@@ -81,6 +81,23 @@ import Testing
         #expect(frame.rows == 8)
     }
 
+    @Test func resizeHoldsRenderingUntilTheRedrawSettles() async throws {
+        let vt = try terminal()
+        vt.feed(Array("$ ".utf8))
+        #expect(!vt.isRenderHeld)
+        vt.resize(GridSize(cols: 30, rows: 8, cellWidthPx: 8, cellHeightPx: 16))
+        // 程序的重画还没到。
+        #expect(vt.isRenderHeld)
+        vt.feed(Array("\r$ ".utf8))
+        #expect(vt.isRenderHeld)
+        try await Task.sleep(for: .milliseconds(80))
+        #expect(!vt.isRenderHeld)
+        // 程序不重画时最多等 300 毫秒。
+        vt.resize(size)
+        try await Task.sleep(for: .milliseconds(350))
+        #expect(!vt.isRenderHeld)
+    }
+
     @Test func themeChangesDefaultColors() throws {
         let vt = try terminal()
         var settings = TermSettings.default
