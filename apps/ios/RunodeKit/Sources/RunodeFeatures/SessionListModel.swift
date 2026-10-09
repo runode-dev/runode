@@ -453,7 +453,8 @@ public final class SessionListModel {
     /// 跑一条会话 `id` 目录里列出的项目命令，在 `project`（来源的 `TaskSource.project`，为空时是会话
     /// 目录）里跑。shell 停在提示符上、要跑的目录就是会话目录时像快速回复一样在这个会话里粘贴再回车，
     /// 返回真；前台在跑别的程序（agent、vim……）时打进去会落进那个程序，要跑的目录不是会话目录时打进去
-    /// 会跑错地方，这两种都改在它旁边开一个那个目录的新终端跑，开好后调 `onSpawned` 打开新终端，返回假。
+    /// 会跑错地方，这两种都改在电脑上把它分屏、右边开一个那个目录的新终端跑，开好后调 `onSpawned` 打开新终端，
+    /// 返回假。
     @discardableResult
     public func runProjectTask(_ task: ProjectTask, at project: String? = nil, in id: SessionId) async -> Bool {
         guard let session = session(id), canRunProjectTask(in: session) else { return false }
@@ -474,7 +475,7 @@ public final class SessionListModel {
         pendingSpawn = PendingSpawn(
             req: req, fallback: fallback, failure: String(localized: "开不了新终端"), cwd: cwd,
             command: (task.command, paste, enter))
-        link.send(.open(req: req, placement: .tab, near: id, cwd: cwd, focus: false))
+        link.send(.open(req: req, placement: .right, near: id, cwd: cwd, focus: false))
         return false
     }
 

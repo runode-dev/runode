@@ -198,6 +198,8 @@ impl WindowView {
                 let tab = &mut self.workspaces[wi].tabs[ti];
                 tab.root.split(beside, id, axis, split_id);
                 tab.panes.insert(id, entry);
+                // 放大着时新分屏看不见。
+                tab.zoomed = false;
             }
         }
         if !focus {

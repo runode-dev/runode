@@ -99,7 +99,7 @@ import Testing
         link.clearSent()
 
         #expect(!(await model.runProjectTask(task, at: "/Users/ethan/dev", in: sessionA)))
-        guard case .open(let req, .tab, sessionA, "/Users/ethan/dev", false)? = link.sent.first, link.sent.count == 1
+        guard case .open(let req, .right, sessionA, "/Users/ethan/dev", false)? = link.sent.first, link.sent.count == 1
         else {
             Issue.record("expected an open in the project directory, got \(link.sent)")
             return
@@ -125,7 +125,7 @@ import Testing
         #expect(link.sent.isEmpty)
 
         #expect(!(await model.runProjectTask(make.tasks[0], in: sessionA)))
-        guard case .open(let req, .tab, sessionA, dir, false)? = link.sent.first, link.sent.count == 1 else {
+        guard case .open(let req, .right, sessionA, dir, false)? = link.sent.first, link.sent.count == 1 else {
             Issue.record("expected an open beside the session, got \(link.sent)")
             return
         }

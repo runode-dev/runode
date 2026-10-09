@@ -17,6 +17,8 @@ public enum AttachMode: String, Hashable, Sendable, Codable {
 public enum Placement: String, Hashable, Sendable, Codable {
     /// 紧跟在旁边那个终端的标签后面的新标签。
     case tab
+    /// 把旁边那个终端一分为二，新终端在右边。
+    case right
 }
 
 /// 前端能做什么，缺的项按不能。
