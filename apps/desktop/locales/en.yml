@@ -2,7 +2,6 @@ _version: 1
 menu:
   about: About Runode
   settings: Settings…
-  open_config: Open Configuration File
   reload_config: Reload Configuration
   services: Services
   hide: Hide Runode
@@ -792,7 +791,6 @@ status:
   open_port: Open in Browser
 mobile:
   entry: "Mobile"
-  menu: "Mobile…"
   eyebrow: "RUNODE MOBILE"
   intro_title: "Your workspaces, in your pocket."
   intro_body: "See what your agents are doing on your iPhone, answer their questions, and pick up any terminal where you left off. The phone connects straight to this Mac over the local network or Tailscale, with no server in between."
