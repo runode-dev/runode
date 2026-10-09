@@ -15,14 +15,21 @@ pub(super) struct SettingsPage {
 }
 
 /// 菜单里的「设置…」：在最前面的窗口里打开设置页；一个窗口都没有时先开一个。
+///
+/// 按 ⌘, 或点菜单时，GPUI 正在那个窗口里派发这个动作，窗口被借走了，这时 `update` 它会失败；
+/// 等这一轮派发结束再打开。
 pub(crate) fn show_settings(cx: &mut App) {
-    if super::remote::windows(cx).is_empty() {
-        super::open_window(cx, None);
-    }
-    let Some(handle) = super::remote::front_window(cx) else { return };
-    let _ = handle.update(cx, |view, window, cx| {
-        window.activate_window();
-        view.open_settings(window, cx);
+    cx.defer(|cx| {
+        if super::remote::windows(cx).is_empty() {
+            super::open_window(cx, None);
+        }
+        let Some(handle) = super::remote::front_window(cx) else { return };
+        if let Err(err) = handle.update(cx, |view, window, cx| {
+            window.activate_window();
+            view.open_settings(window, cx);
+        }) {
+            tracing::warn!("failed to open the settings page: {err:#}");
+        }
     });
 }
 
