@@ -1,6 +1,6 @@
 ---
 name: runode
-description: Drive other terminals in the runode app - list them, type commands or send control keys into them, wait for a command or another agent to finish, and read their output. Use it when you run inside a runode terminal (RUNODE_SESSION is set) and want to run something in a neighbouring pane, watch a dev server or test run there, or coordinate with another agent.
+description: Drive other terminals in the runode app - open panes and tabs, list them, type commands or send control keys into them, wait for a command or another agent to finish, and read their output. Use it whenever you run inside a runode terminal (RUNODE_SESSION is set) and the task involves another terminal - running tests, a build or a dev server in a pane next to yours, checking what a neighbouring pane printed, handing work to another agent (Codex, Claude...) and collecting its answer - even if the user only says "the pane on the right", "the other terminal" or "run it on the side" and never names runode.
 ---
 
 # Driving other runode terminals
@@ -9,7 +9,7 @@ runode is a terminal app with panes, tabs, workspaces and windows. When you run
 inside one of its terminals, the `runode` command can see and operate every
 other terminal in the app. `RUNODE_SESSION` holds the id of your own terminal
 and `RUNODE_SOCKET` tells `runode` where the app is; if `runode` is not on your
-PATH, use `"$RUNODE_BIN"`.
+PATH, use `"$RUNODE_BIN"`. `rn` is a short name for it.
 
 Run `runode help` for the full reference. The essentials follow.
 
@@ -56,7 +56,9 @@ id=$(runode open --down -- npm run dev)              # and run a command in it
 `--near SESSION` opens next to another terminal instead of yours; the new one
 starts in that terminal's directory unless you give `--cwd`.
 
-`open` leaves the user's focus where it is unless you pass `--focus`.
+`open` leaves the user's focus where it is unless you pass `--focus`. To show
+the user a terminal later, `runode focus SESSION` brings its pane and window to
+the front.
 
 ## Run a command and wait for it
 
@@ -81,7 +83,13 @@ runode wait right --for command --timeout 600     # next command finishes: exit 
 runode wait right --for text 'Listening on' --new # a new line matches the regex
 runode wait right --for quiet 3                   # screen unchanged for 3s
 runode wait agent:codex --for done                # the agent worked, then stopped
+runode wait agent:codex                           # the agent is not working now
 ```
+
+Without `--for`, `wait` waits for `stopped`: the agent is idle, asking a
+question, or gone. `--for working`, `idle` or `blocked` wait for that state.
+`--for text` looks at the whole screen; `--lines N` widens it to the last N
+lines, scrollback included.
 
 `--timeout SECS` gives up with status 124. Status 3 means the terminal exited.
 `--for command` needs shell integration; without it use `--for quiet` or
