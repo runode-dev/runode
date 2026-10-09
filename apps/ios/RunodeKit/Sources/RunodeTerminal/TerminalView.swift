@@ -384,11 +384,14 @@
             gridContainer.clipsToBounds = shift != 0
         }
 
-        /// 网格比屏幕窄时左右居中；比屏幕矮时贴着底边（靠近键盘和底栏，新输出在那里），上面空着的地方
-        /// 露出视图的背景，也就是终端的背景色。
+        /// 网格比屏幕窄时左右居中；比屏幕矮出整行时贴着底边（靠近键盘和底栏，新输出在那里），上面空着的
+        /// 地方露出视图的背景，也就是终端的背景色。不足一行的零头（行数是按视图高度向下取整的）留在底下，
+        /// 不在网格上面空出半行。
         private func centerContent(stickToBottom: Bool = false) {
             let horizontal = max(0, (scrollView.bounds.width - scrollView.contentSize.width) / 2)
-            let slack = scrollView.bounds.height - scrollView.contentSize.height
+            let rowHeight = grid.font.cellHeight * scrollView.zoomScale
+            var slack = scrollView.bounds.height - scrollView.contentSize.height
+            if rowHeight > 0 { slack = (slack / rowHeight).rounded(.down) * rowHeight }
             let top = max(0, slack, topObstruction)
             let inset = UIEdgeInsets(top: top, left: horizontal, bottom: 0, right: 0)
             if scrollView.contentInset != inset {
