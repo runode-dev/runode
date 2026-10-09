@@ -1,5 +1,5 @@
 //! agent 的状态标记和提醒：在 agent 自己的状态之外记下「干完了、用户还没看」（done），按
-//! 等回答、done、工作中、空闲的优先级汇总到标签、标题栏和侧栏；用户没在看时发通知、出提示音；
+//! 等回答、工作中、done、空闲的优先级汇总到标签、标题栏和侧栏；用户没在看时发通知、出提示音；
 //! 列出所有窗口里的 agent，以及跳到某个 agent 的分屏。各家 agent 的 logo 在 `logo`。
 
 pub(super) mod alert;
@@ -18,7 +18,7 @@ use super::{
 use crate::terminal_view::TerminalView;
 use alert::{AgentAlert, Alert};
 
-/// 标记上显示的状态，按优先级从高到低排列，汇总时取最靠前的。
+/// 标记上显示的状态，按要用户处理的急迫程度从高到低排列，agent 列表按这个顺序排。
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub(super) enum Status {
     /// 等用户回答。
@@ -78,9 +78,15 @@ impl Mark {
     }
 }
 
-/// 汇总几个标记：取优先级最高的，同级的取先出现的，几种 agent 同时在时标记不会来回跳。
+/// 汇总几个标记：等回答优先，其次是工作中，还有 agent 在跑时不显示成干完了；同级的取先出现的，
+/// 几种 agent 同时在时标记不会来回跳。
 pub(super) fn summarize(marks: impl IntoIterator<Item = Mark>) -> Option<Mark> {
-    marks.into_iter().min_by_key(|mark| mark.status)
+    marks.into_iter().min_by_key(|mark| match mark.status {
+        Status::Blocked => 0,
+        Status::Working => 1,
+        Status::Done => 2,
+        Status::Idle => 3,
+    })
 }
 
 /// 分屏的通知标识，点通知时凭它找回分屏。实体的编号只在一次运行里唯一，所以带上进程号：
@@ -373,12 +379,13 @@ mod tests {
     }
 
     #[test]
-    fn summary_takes_the_most_urgent_and_the_first_among_equals() {
+    fn summary_prefers_blocked_then_working_and_the_first_among_equals() {
         let idle = mark(AgentKind::Pi, Status::Idle);
         let working = mark(AgentKind::Codex, Status::Working);
         let done = mark(AgentKind::Claude, Status::Done);
         let blocked = mark(AgentKind::Gemini, Status::Blocked);
-        assert_eq!(summarize([idle, working, done]), Some(done));
+        assert_eq!(summarize([idle, working, done]), Some(working));
+        assert_eq!(summarize([idle, done]), Some(done));
         assert_eq!(summarize([done, blocked, working]), Some(blocked));
         assert_eq!(summarize([idle, working]), Some(working));
         let other_working = mark(AgentKind::Claude, Status::Working);
