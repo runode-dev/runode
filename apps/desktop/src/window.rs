@@ -635,9 +635,11 @@ impl WindowView {
         let panes = self.render_panes(fg, bg, window, cx);
         let sidebar = self.sidebar_visible().then(|| self.render_sidebar(fg, bg, window, cx));
         // 标题栏透明后内容铺到红绿灯下面，顶部这条要能拖动窗口、双击缩放。红绿灯和侧栏开关
-        // 落在侧栏上或者全屏时没有红绿灯，标题栏不用让位；全屏又只有一个标签时不留这一条。
-        let left_inset = if fullscreen || sidebar.is_some() { 0. } else { sidebar::SIDEBAR_TOGGLE_INSET };
-        let sidebar_toggle = (!fullscreen).then(|| self.render_sidebar_toggle(fg, bg, cx));
+        // 落在侧栏上时标题栏不用让位；全屏又只有一个标签时不留这一条，侧栏也收着时开关没有地方放，不画。
+        let titlebar_shown = !fullscreen || show_tabs;
+        let left_inset = if sidebar.is_some() { 0. } else { sidebar::sidebar_toggle_inset(fullscreen) };
+        let sidebar_toggle =
+            (titlebar_shown || sidebar.is_some()).then(|| self.render_sidebar_toggle(fullscreen, fg, bg, cx));
         let sidebar_width = if sidebar.is_some() { self.sidebar_width() } else { 0. };
         let sidebar_handle = sidebar.is_some().then(|| self.render_sidebar_handle(cx));
         let widths = self.right_panel_widths(f32::from(window.viewport_size().width));
@@ -655,7 +657,6 @@ impl WindowView {
             preview_column.then(|| self.render_right_handle(Divider::Preview, widths.preview + widths.panel, cx)),
             self.panel.is_some().then(|| self.render_right_handle(Divider::Panel, widths.panel, cx)),
         ];
-        let titlebar_shown = !fullscreen || show_tabs;
         // 右侧面板的开关按钮：右侧都收着时落在标题栏右端，标题栏给它让位；打开着时落在
         // 面板顶上。全屏又只有一个标签、右侧也都收着时没有地方放，不画。放大的预览栏不在右侧。
         let right_column = self.panel.is_some() || preview_column;
@@ -761,8 +762,8 @@ impl WindowView {
         let tab_count = self.workspace().tabs.len();
         let panes = self.render_panes(fg, bg, window, cx);
         let sidebar = self.sidebar_visible().then(|| self.render_sidebar(fg, bg, window, cx));
-        let left_inset = if fullscreen || sidebar.is_some() { CARD_GAP } else { sidebar::SIDEBAR_TOGGLE_INSET };
-        let sidebar_toggle = (!fullscreen).then(|| self.render_sidebar_toggle(fg, frame, cx));
+        let left_inset = if sidebar.is_some() { CARD_GAP } else { sidebar::sidebar_toggle_inset(fullscreen) };
+        let sidebar_toggle = self.render_sidebar_toggle(fullscreen, fg, frame, cx);
         let sidebar_width = if sidebar.is_some() { self.sidebar_width() } else { 0. };
         let sidebar_handle = sidebar.is_some().then(|| self.render_sidebar_handle(cx));
         let widths = self.right_panel_widths(viewport);
@@ -834,7 +835,7 @@ impl WindowView {
         body.push(main.into_any_element());
         body.extend(sidebar_handle.map(IntoElement::into_any_element));
         body.extend(right_handles.into_iter().map(IntoElement::into_any_element));
-        body.extend(sidebar_toggle.map(IntoElement::into_any_element));
+        body.push(sidebar_toggle.into_any_element());
         body
     }
 }

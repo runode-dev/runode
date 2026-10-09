@@ -31,8 +31,14 @@ const SIDEBAR_MAX_WIDTH: f32 = 480.;
 /// 红绿灯右边收起、展开侧栏的按钮。
 const SIDEBAR_TOGGLE_WIDTH: f32 = 28.;
 const SIDEBAR_TOGGLE_HEIGHT: f32 = 24.;
-/// 侧栏收着时标题栏左边让出的宽度：红绿灯和开关按钮，再空一点才到标签，图标离两边差不多远。
-pub(super) const SIDEBAR_TOGGLE_INSET: f32 = TRAFFIC_LIGHTS_WIDTH + SIDEBAR_TOGGLE_WIDTH + 8.;
+/// 开关按钮离窗口左边多远：紧挨着红绿灯；全屏时没有红绿灯，只留一点边。
+fn sidebar_toggle_left(fullscreen: bool) -> f32 {
+    if fullscreen { 8. } else { TRAFFIC_LIGHTS_WIDTH }
+}
+/// 侧栏收着时标题栏左边让出的宽度：红绿灯（全屏时没有）和开关按钮，再空一点才到标签，图标离两边差不多远。
+pub(super) fn sidebar_toggle_inset(fullscreen: bool) -> f32 {
+    sidebar_toggle_left(fullscreen) + SIDEBAR_TOGGLE_WIDTH + 8.
+}
 /// 每个 workspace 一行：名字和目录各占一行。
 const ROW_HEIGHT: f32 = 40.;
 /// 侧栏每行名字前的图标那一格：workspace 的 GitHub 头像或 git 图标，手机端入口和新建按钮的图标也占这么宽，
@@ -162,7 +168,13 @@ impl WindowView {
     }
 
     /// 红绿灯右边收起、展开侧栏的按钮，侧栏收着时也在原处，不随侧栏跳动。
-    pub(super) fn render_sidebar_toggle(&self, fg: Rgb, bg: Rgb, cx: &mut Context<Self>) -> Stateful<Div> {
+    pub(super) fn render_sidebar_toggle(
+        &self,
+        fullscreen: bool,
+        fg: Rgb,
+        bg: Rgb,
+        cx: &mut Context<Self>,
+    ) -> Stateful<Div> {
         let text = if self.sidebar_visible() {
             rust_i18n::t!("tooltip.hide_sidebar")
         } else {
@@ -171,7 +183,7 @@ impl WindowView {
         let tooltip = tooltip(text, Some(&ToggleSidebar), fg, bg);
         icon_toggle("sidebar-toggle", SIDEBAR_ICON, 16., false, fg, bg)
             .absolute()
-            .left(px(TRAFFIC_LIGHTS_WIDTH))
+            .left(px(sidebar_toggle_left(fullscreen)))
             .top(px((TITLEBAR_HEIGHT - SIDEBAR_TOGGLE_HEIGHT) / 2.))
             .w(px(SIDEBAR_TOGGLE_WIDTH))
             .h(px(SIDEBAR_TOGGLE_HEIGHT))
@@ -186,7 +198,6 @@ impl WindowView {
     }
 
     pub(super) fn render_sidebar(&self, fg: Rgb, bg: Rgb, window: &Window, cx: &mut Context<Self>) -> Stateful<Div> {
-        let fullscreen = window.is_fullscreen();
         let modifiers = window.modifiers();
         let rows: Vec<_> = (0..self.workspaces.len()).map(|ix| self.render_row(ix, fg, bg, modifiers, cx)).collect();
         let drop_bg = hsla(bg.mix(fg, 0.08));
@@ -204,14 +215,9 @@ impl WindowView {
             // 从访达拖来的东西悬在侧栏上时提示放下能开 workspace；放下由窗口根上的 `open_dropped_dirs` 办。
             .drag_over::<ExternalPaths>(move |style, _, _, _| style.bg(drop_bg))
             .text_size(px(12.))
-            // 顶上这条放红绿灯，和标题栏一样能拖动窗口、双击缩放，比标题栏多留一点，第一行
-            // 不贴着红绿灯；全屏时没有红绿灯。
-            .child(
-                div()
-                    .flex_none()
-                    .h(px(if fullscreen { 6. } else { TITLEBAR_HEIGHT + 6. }))
-                    .on_mouse_down(MouseButton::Left, drag_window),
-            )
+            // 顶上这条放红绿灯（全屏时没有）和侧栏开关，和标题栏一样能拖动窗口、双击缩放，比标题栏
+            // 多留一点，第一行不贴着开关。
+            .child(div().flex_none().h(px(TITLEBAR_HEIGHT + 6.)).on_mouse_down(MouseButton::Left, drag_window))
             .child(self.render_mobile_entry(fg, bg, cx))
             // 手机端入口不是 workspace，和下面的列表用一条线隔开。
             .child(div().flex_none().mx(px(14.)).mb(px(6.)).h(px(1.)).bg(divider_color(hsla(fg))))

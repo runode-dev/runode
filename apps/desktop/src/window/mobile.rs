@@ -269,8 +269,7 @@ impl WindowView {
         let cards = cards(cx);
         let sidebar = self.sidebar_visible().then(|| self.render_sidebar(fg, bg, window, cx));
         let handle = sidebar.is_some().then(|| self.render_sidebar_handle(cx));
-        let toggle =
-            (!fullscreen).then(|| self.render_sidebar_toggle(fg, if cards { frame_color(fg, bg) } else { bg }, cx));
+        let toggle = self.render_sidebar_toggle(fullscreen, fg, if cards { frame_color(fg, bg) } else { bg }, cx);
         let page = self.render_mobile_page(fg, bg, cx);
         let main = div()
             .flex_1()
@@ -297,7 +296,7 @@ impl WindowView {
         }
         body.push(main.into_any_element());
         body.extend(handle.map(IntoElement::into_any_element));
-        body.extend(toggle.map(IntoElement::into_any_element));
+        body.push(toggle.into_any_element());
         body
     }
 
