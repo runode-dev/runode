@@ -154,7 +154,15 @@
         }
       ]
     },
-    { "name": "help", "description": "Show the help" },
+    {
+      "name": "help",
+      "description": "Show the help",
+      "args": {
+        "name": "topic",
+        "isOptional": true,
+        "suggestions": ["list", "read", "send", "wait", "open", "kill", "focus", "setup", "remote", "session"]
+      }
+    },
     { "name": "version", "description": "Show the version" }
   ],
   "options": [

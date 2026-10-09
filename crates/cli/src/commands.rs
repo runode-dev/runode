@@ -18,8 +18,9 @@ use runode_shared_types::{
 
 use crate::{
     Env,
-    args::{self, Command, Text, Until},
+    args::{Command, Text, Until},
     client::{Connection, is_upgrading, kind},
+    help,
     select::{Place, Selector, World, place_name},
 };
 
@@ -69,7 +70,7 @@ impl<E: Into<anyhow::Error>> From<E> for Failure {
 
 pub(crate) fn run(command: Command, env: &Env, out: &mut dyn Write, err: &mut dyn Write) -> Result<(), Failure> {
     match command {
-        Command::Help => out.write_all(args::HELP.as_bytes())?,
+        Command::Help(topic) => out.write_all(help::text(topic).as_bytes())?,
         Command::Version => writeln!(out, "runode {}", env.build)?,
         Command::List { json } => {
             let connection = Connection::open(env)?;

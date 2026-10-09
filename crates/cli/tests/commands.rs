@@ -53,7 +53,15 @@ fn help_and_version_need_no_app() {
     let env = Env { build: "1.2.3".into(), ..Env::default() };
     let (code, out, _) = run("help", &env);
     assert_eq!(code, exit::OK);
-    assert!(out.contains("usage: runode"));
+    assert!(out.contains("Usage: runode [COMMAND]"));
+    // 每条命令各有一页，`--help` 跟在命令后面和 `help COMMAND` 打印同一页。
+    let (code, page, _) = run("help send", &env);
+    assert_eq!(code, exit::OK);
+    assert!(page.contains("Usage: runode send SESSION"));
+    assert_eq!(run("send --help", &env).1, page);
+    let (code, _, err) = run("help frobnicate", &env);
+    assert_eq!(code, exit::USAGE);
+    assert!(err.contains("no help for frobnicate"), "{err}");
     assert_eq!(run("--version", &env).1, "runode 1.2.3\n");
     let (code, _, err) = run("frobnicate", &env);
     assert_eq!(code, exit::USAGE);

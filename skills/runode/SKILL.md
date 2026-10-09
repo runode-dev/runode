@@ -11,7 +11,8 @@ other terminal in the app. `RUNODE_SESSION` holds the id of your own terminal
 and `RUNODE_SOCKET` tells `runode` where the app is; if `runode` is not on your
 PATH, use `"$RUNODE_BIN"`. `rn` is a short name for it.
 
-Run `runode help` for the full reference. The essentials follow.
+Run `runode help` for the commands and `runode help COMMAND` (for example
+`runode help send`) for the full reference of one. The essentials follow.
 
 ## Find a terminal
 

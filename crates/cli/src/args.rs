@@ -5,120 +5,13 @@ use std::{net::IpAddr, path::PathBuf, time::Duration};
 use runode_protocol::Placement;
 use runode_shared_types::input::parse_keys;
 
-use crate::{SetupTarget, select::Selector};
-
-/// 用法说明，`runode help` 打印它。改了命令或选项，`runode-completion` 里 runode 自己的命令规格
-/// 也要跟着改，按 Tab 才补得出来。
-pub(crate) const HELP: &str = "\
-usage: runode [COMMAND]
-
-rn is a short name for runode: `rn list` is `runode list`.
-Without a command, runode opens its window. Commands talk to the running runode
-app; inside a runode terminal they find it through RUNODE_SOCKET, and
-RUNODE_SESSION names the terminal they run in.
-
-SESSION picks one terminal; it must match exactly one, else runode lists the
-candidates. It is one of
-  ID            a session id or any unique prefix of it, as `runode list` shows
-  self, .       your own terminal
-  left, right, up, down
-                the pane next to yours in that direction
-  next, prev    the next or previous pane in your tab, wrapping around
-  pane:N        pane N of your tab (of the front window's tab outside runode)
-  tab:N, tab:N.M
-                the focused pane of tab N in your workspace, or its pane M
-  win:W/..., ws:K/...
-                look in window W or workspace K instead: win:2, win:2/tab:1.2,
-                ws:3/pane:1
-  title:TEXT    the title contains TEXT, ignoring case
-  agent:KIND[:STATE]
-                runs that agent (claude, codex, ...), in that state
-  cwd:DIR       works in DIR; a bare name matches the last part of the path
-Windows, workspaces, tabs and panes count from 1 in the order the app shows
-them. The positional forms need a runode window.
-
-commands:
-  list [--json]               list the terminal sessions: * marks your own, REL
-                              where they sit next to yours, FG the program in
-                              front, VIEW shown, hidden (another tab) or bg (in
-                              no window)
-  read [SESSION] [--lines N] [--command [N]]
-                              print the text on the screen; --lines: N lines
-                              from the bottom, scrollback included; --command:
-                              the output of the Nth last command (default 1),
-                              which needs shell integration. SESSION defaults
-                              to your own
-  send SESSION [TEXT...] [--paste] [--key KEY]... [--enter] [--wait]
-       [--timeout SECS]       type TEXT (words joined by spaces; - reads stdin)
-                              into the session, or paste it with --paste; then
-                              press each KEY; then Enter with --enter. A KEY is
-                              ctrl-c, alt-b, shift-tab, esc, enter, tab, up,
-                              pageup, f5 and the like; 'down*3' (quoted for
-                              the shell) presses it three times. --wait then
-                              waits: for the agent like --for done if one runs
-                              there (failing if it shows no activity within
-                              10 seconds), for the command like --for command if
-                              Enter ran one at a shell prompt with shell
-                              integration, else until the screen is quiet for
-                              2 seconds; it says which on stderr
-  wait SESSION [--for UNTIL] [--timeout SECS]
-                              wait until UNTIL, one of
-                                stopped  the agent is not working: idle, asking
-                                         you, or no agent (default)
-                                done     the agent worked, then stopped
-                                working, idle, blocked
-                                         the agent is in that state
-                                command  the next command at the shell prompt
-                                         finished; prints exit N and fails with
-                                         status 4 if N is not 0
-                                text REGEX [--lines N] [--new]
-                                         a line on the screen (or in the last N
-                                         lines) matches REGEX; --new skips the
-                                         lines already there; prints the line
-                                quiet SECS
-                                         the screen did not change for SECS
-                              agent states print the state they reached. If
-                              runode is upgraded meanwhile, the wait goes on
-                              (except --for command, which fails)
-  open [--tab|--right|--down] [--near SESSION] [--cwd DIR] [--focus]
-       [-- COMMAND...]        open a terminal in the app: a new tab after the
-                              one SESSION is in (default), or split SESSION's
-                              pane to the right or down. SESSION defaults to
-                              your own, else the front window's pane; DIR to
-                              SESSION's directory. Without --focus the app
-                              stays where it is. COMMAND is typed into the new
-                              shell. Prints the new session's id
-  kill SESSION                end the session and close its pane
-  focus [SESSION]             show the session's pane and bring its window to
-                              the front; SESSION defaults to your own
-  setup claude|codex [--print]
-                              teach the agent to use runode: installs a skill
-                              in ~/.claude/skills/runode or
-                              ~/.agents/skills/runode; --print shows it instead
-  remote pair [--addr ADDR]...
-                              pair a phone for remote access: shows a QR code
-                              and its link, valid for 5 minutes, and waits for
-                              the phone; --addr also offers ADDR (say
-                              127.0.0.1 for a simulator on this Mac). Sets
-                              remote-access = true in the config if it is off
-                              (runode must be running to pick it up); once
-                              paired, offers to set terminal-host = true so
-                              remote access keeps running after you quit runode
-  remote devices [--json]     list the paired phones
-  remote revoke DEVICE        unpair a phone (an id or a unique prefix of it,
-                              as `runode remote devices` shows); it is
-                              disconnected within seconds
-  help                        show this help
-  version                     show the version
-
-exit status: 0 done, 1 failed, 2 bad arguments, 3 the session exited,
-4 the command waited for failed, 124 timed out.
-";
+use crate::{SetupTarget, help, select::Selector};
 
 /// 一条命令。
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum Command {
-    Help,
+    /// 打印说明：没给话题是总览，给了是 `help::PAGES` 里那一页。
+    Help(Option<&'static str>),
     Version,
     List {
         json: bool,
@@ -263,18 +156,24 @@ pub(crate) fn parse(args: &[String]) -> Result<Command, String> {
             _ => words.push(arg.clone()),
         }
     }
+    let topic = |word: Option<&String>| {
+        word.map(|word| help::topic(word).ok_or_else(|| format!("no help for {word}"))).transpose()
+    };
     if flags.help {
-        return Ok(Command::Help);
+        return Ok(Command::Help(topic(words.first())?));
     }
     if flags.version {
         return Ok(Command::Version);
     }
     let Some((name, words)) = words.split_first() else {
-        return Ok(Command::Help);
+        return Ok(Command::Help(None));
     };
     let session = |word: Option<&String>| word.map(|word| Selector::parse(word)).transpose();
     let command = match name.as_str() {
-        "help" => Command::Help,
+        "help" => {
+            no_more(words, 1, name)?;
+            Command::Help(topic(words.first())?)
+        }
         "version" => Command::Version,
         "list" => {
             no_more(words, 0, name)?;
@@ -485,7 +384,13 @@ mod tests {
 
     #[test]
     fn commands_and_their_options() {
-        assert_eq!(parse(""), Ok(Command::Help));
+        assert_eq!(parse(""), Ok(Command::Help(None)));
+        assert_eq!(parse("help"), Ok(Command::Help(None)));
+        assert_eq!(parse("help wait"), Ok(Command::Help(Some("wait"))));
+        assert_eq!(parse("send ab12 --help"), Ok(Command::Help(Some("send"))));
+        assert_eq!(parse("-h remote pair"), Ok(Command::Help(Some("remote"))));
+        assert!(parse("help frob").unwrap_err().contains("no help for frob"));
+        assert!(parse("help wait send").unwrap_err().contains("does not take send"));
         assert_eq!(parse("list --json"), Ok(Command::List { json: true }));
         assert_eq!(
             parse("--lines 5 read ab12"),
@@ -627,8 +532,9 @@ mod tests {
         assert!(parse("read tab:x").unwrap_err().contains("tab:x"));
     }
 
-    /// 用法说明里的每条命令（连同 `setup claude|codex` 这样写死的词）在补全的命令规格里都有，
-    /// 规格里不隐藏的子命令也都写进了用法说明：两边各改各的时，漏了的那边会让这里失败。
+    /// 总览里的每条命令、各页 `Usage:` 块里的每条命令（连同 `setup claude|codex` 这样写死的词）
+    /// 在补全的命令规格里都有，规格里不隐藏的子命令也都写进了总览：两边各改各的时，漏了的那边会让
+    /// 这里失败。
     #[test]
     fn help_and_completion_spec_list_the_same_commands() {
         let spec: serde_json::Value = serde_json::from_str(include_str!("../../completion/specs/runode.json")).unwrap();
@@ -654,20 +560,29 @@ mod tests {
             words
         };
 
-        let commands = HELP.split_once("\ncommands:\n").unwrap().1.split_once("\n\n").unwrap().0;
+        // 每条命令的用法：总览 `Commands:` 里一行一条，各页 `Usage:` 块里每行一条。
+        let overview = help::OVERVIEW.split_once("\nCommands:\n").unwrap().1.split_once("\n\n").unwrap().0;
+        let mut usages: Vec<&str> = overview.lines().map(|line| line.split("  ").nth(1).unwrap()).collect();
+        for (_, page) in help::PAGES {
+            let block =
+                page.lines().skip_while(|line| !line.starts_with("Usage: ")).take_while(|line| !line.is_empty());
+            // 折行的续行缩进更深，不以 `runode` 开头。
+            usages.extend(block.filter_map(|line| {
+                line.strip_prefix("Usage: runode ").or_else(|| line.strip_prefix("       runode "))
+            }));
+        }
         let mut documented = Vec::new();
-        for line in commands.lines().filter(|line| line.starts_with("  ") && !line.starts_with("   ")) {
+        for usage in usages {
             let mut node = spec.clone();
-            // 用法和说明之间隔着好几个空格，说明里的词不算。
-            let usage = line.trim_start().split("  ").next().unwrap();
             let path: Vec<&str> = usage
                 .split_whitespace()
                 .take_while(|word| word.chars().all(|c| c.is_ascii_lowercase() || c == '|'))
                 .collect();
+            assert!(!path.is_empty(), "`{usage}` names no command");
             documented.push(path[0].to_owned());
             for word in &path {
                 for alternative in word.split('|') {
-                    assert!(words(&node).iter().any(|w| w == alternative), "`{line}`: the spec lacks {alternative}");
+                    assert!(words(&node).iter().any(|w| w == alternative), "`{usage}`: the spec lacks {alternative}");
                 }
                 if let Some(sub) =
                     subcommands(&node).into_iter().find(|sub| names(&sub["name"]).iter().any(|n| n == word))

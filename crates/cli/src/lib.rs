@@ -7,11 +7,12 @@
 //! 哪个会话里（`runode_protocol::ENV_SESSION`），所以 agent 能在自己的终端里调度别的终端。
 //!
 //! 命令的解析在 `args`，连宿主和收发消息在 `client`，按写法找会话在 `select`，各个命令在
-//! `commands`，给 agent 装使用说明在 `setup`，远程访问在 `remote`。
+//! `commands`，用法说明在 `help`，给 agent 装使用说明在 `setup`，远程访问在 `remote`。
 
 mod args;
 mod client;
 mod commands;
+mod help;
 mod remote;
 mod select;
 mod setup;
