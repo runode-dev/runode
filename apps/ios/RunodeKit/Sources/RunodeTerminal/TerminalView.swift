@@ -386,11 +386,12 @@
 
         /// 网格比屏幕窄时左右居中；比屏幕矮出整行时贴着底边（靠近键盘和底栏，新输出在那里），上面空着的
         /// 地方露出视图的背景，也就是终端的背景色。不足一行的零头（行数是按视图高度向下取整的）留在底下，
-        /// 不在网格上面空出半行。
+        /// 不在网格上面空出半行。适配手机时网格马上会改成正好铺满视图，多出的整行只是在等宿主改尺寸（底栏换
+        /// 成键盘、收起键盘时视图变高），贴着顶边放：贴底边的话网格先往下跳一行，改完尺寸又跳回来。
         private func centerContent(stickToBottom: Bool = false) {
             let horizontal = max(0, (scrollView.bounds.width - scrollView.contentSize.width) / 2)
             let rowHeight = grid.font.cellHeight * scrollView.zoomScale
-            var slack = scrollView.bounds.height - scrollView.contentSize.height
+            var slack = fitsPhone ? 0 : scrollView.bounds.height - scrollView.contentSize.height
             if rowHeight > 0 { slack = (slack / rowHeight).rounded(.down) * rowHeight }
             let top = max(0, slack, topObstruction)
             let inset = UIEdgeInsets(top: top, left: horizontal, bottom: 0, right: 0)
