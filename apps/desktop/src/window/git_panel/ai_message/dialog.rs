@@ -5,12 +5,13 @@
 use std::path::{Path, PathBuf};
 
 use gpui::{
-    Action, ClickEvent, Context, Div, Entity, Focusable, FontWeight, Hsla, KeyDownEvent, MouseButton, MouseDownEvent,
+    Action, Context, Div, Entity, Focusable, FontWeight, Hsla, KeyDownEvent, MouseButton, Pixels, Point, Role,
     Stateful, Subscription, Window, div, prelude::*, px, svg,
 };
 use runode_shared_types::color::Rgb;
 
 use super::{
+    super::PressDown,
     DEFAULT_TEMPLATE, Recipe, VARIABLES,
     agents::{AGENTS, AgentSpec, CUSTOM_AGENT, agent},
     command_preview, save_recipe, saved_recipe, variable_preview,
@@ -18,6 +19,7 @@ use super::{
 use crate::{
     assets::{CHEVRON_DOWN_ICON, CLOSE_ICON, SPARKLE_ICON, TERMINAL_ICON},
     ui::{
+        a11y::Press,
         hsla,
         text_area::{TextArea, TextAreaEvent},
         text_field::{TextField, TextFieldEvent},
@@ -73,14 +75,18 @@ impl WindowView {
         };
         let repo_only = saved.as_ref().is_some_and(|(_, own)| *own);
         let recipe = saved.map(|(recipe, _)| recipe).unwrap_or_default();
-        let field = |text: &str, placeholder: &'static str, cx: &mut Context<Self>| {
-            cx.new(|cx| TextField::editing(text.to_owned(), text.len(), cx).with_placeholder(placeholder))
+        let field = |text: &str, placeholder: &'static str, label: &str, cx: &mut Context<Self>| {
+            let label = rust_i18n::t!(label).into_owned();
+            cx.new(|cx| {
+                TextField::editing(text.to_owned(), text.len(), cx).with_placeholder(placeholder).with_label(label)
+            })
         };
-        let args = field(&recipe.args, "--model sonnet", cx);
-        let command = field(&recipe.command, "MODEL=small my-agent --print {prompt}", cx);
+        let args = field(&recipe.args, "--model sonnet", "git.ai_message.args", cx);
+        let command = field(&recipe.command, "MODEL=small my-agent --print {prompt}", "git.ai_message.command", cx);
         let template = cx.new(|cx| {
             let mut area = TextArea::new(cx);
             area.set_line_limits(6, 12, cx);
+            area.set_label(rust_i18n::t!("git.ai_message.template"), cx);
             area.set_text(recipe.template.clone(), cx);
             area
         });
@@ -195,8 +201,8 @@ impl WindowView {
         cx.notify();
     }
 
-    /// 在点的位置弹出 agent 菜单，选着的那个打勾；最后是自己定义的命令。
-    fn open_commit_agent_menu(&mut self, event: &MouseDownEvent, cx: &mut Context<Self>) {
+    /// 在 `position` 弹出 agent 菜单，选着的那个打勾；最后是自己定义的命令。
+    fn open_commit_agent_menu(&mut self, position: Point<Pixels>, cx: &mut Context<Self>) {
         let Some(dialog) = &self.commit_message_dialog else {
             return;
         };
@@ -214,7 +220,7 @@ impl WindowView {
         let action = Box::new(SelectCommitAgent { index: None });
         items.extend([None, Some(check_item(custom, Some(TERMINAL_ICON), dialog.agent.is_none(), action))]);
         let target = self.focus_handle(cx);
-        self.open_menu(event.position, items, target, cx);
+        self.open_menu(position, items, target, cx);
     }
 
     fn commit_message_dialog_key(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
@@ -274,6 +280,8 @@ impl WindowView {
 
         let close = div()
             .id("commit-message-close")
+            .role(Role::Button)
+            .aria_label(rust_i18n::t!("git.ai_message.close").into_owned())
             .flex_none()
             .size(px(24.))
             .rounded(px(6.))
@@ -283,7 +291,7 @@ impl WindowView {
             .cursor_pointer()
             .hover(move |close| close.bg(hover_bg))
             .child(svg().path(CLOSE_ICON).size(px(12.)).text_color(fg.opacity(0.6)))
-            .on_click(cx.listener(|this, _: &ClickEvent, window, cx| this.close_commit_message_dialog(window, cx)));
+            .on_press(cx, |this, window, cx| this.close_commit_message_dialog(window, cx));
         let header = div()
             .flex()
             .items_start()
@@ -296,6 +304,9 @@ impl WindowView {
                     .gap(px(4.))
                     .child(
                         div()
+                            .id("commit-message-title")
+                            .role(Role::Heading)
+                            .aria_label(rust_i18n::t!("git.ai_message.title").into_owned())
                             .text_size(px(15.))
                             .font_weight(FontWeight::BOLD)
                             .child(rust_i18n::t!("git.ai_message.title").into_owned()),
@@ -316,6 +327,9 @@ impl WindowView {
         };
         let agent_button = div()
             .id("commit-message-agent")
+            .role(Role::ComboBox)
+            .aria_label(rust_i18n::t!("git.ai_message.agent").into_owned())
+            .aria_value(name.clone())
             .flex_none()
             .h(px(28.))
             .px(px(8.))
@@ -331,13 +345,7 @@ impl WindowView {
             .children(logo)
             .child(name)
             .child(svg().path(CHEVRON_DOWN_ICON).size(px(12.)).text_color(fg.opacity(0.6)))
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(|this, event: &MouseDownEvent, _, cx| {
-                    cx.stop_propagation();
-                    this.open_commit_agent_menu(event, cx);
-                }),
-            );
+            .on_press_down(cx, |this, window, cx| this.open_commit_agent_menu(window.mouse_position(), cx));
 
         // CLI 参数（自己定义的命令时是整条命令），下面是照现在填的实际要跑的整条命令。
         let (input_label, input, hint) = match dialog.agent {
@@ -357,6 +365,9 @@ impl WindowView {
                     .gap(px(4.))
                     .child(
                         div()
+                            .id("commit-message-preview")
+                            .role(Role::Label)
+                            .aria_label(format!("$ {line}"))
                             .px(px(8.))
                             .py(px(6.))
                             .rounded(px(6.))
@@ -367,8 +378,16 @@ impl WindowView {
                             .child(format!("$ {line}")),
                     )
                     .child(note(rust_i18n::t!(how).into_owned()))
+                    .into_any_element()
             }
-            Err(err) => div().text_size(px(11.)).text_color(gpui::red()).child(err),
+            Err(err) => div()
+                .id("commit-message-preview")
+                .role(Role::Label)
+                .aria_label(err.clone())
+                .text_size(px(11.))
+                .text_color(gpui::red())
+                .child(err)
+                .into_any_element(),
         };
         let command_section = div()
             .flex()
@@ -396,6 +415,8 @@ impl WindowView {
             .children(VARIABLES.iter().map(|&name| {
                 div()
                     .id(name)
+                    .role(Role::Button)
+                    .aria_label(format!("{{{name}}}"))
                     .px(px(6.))
                     .py(px(1.))
                     .rounded(px(4.))
@@ -405,13 +426,13 @@ impl WindowView {
                     .cursor_pointer()
                     .hover(move |chip| chip.bg(selected_bg))
                     .tooltip(code_tooltip(variable_preview(name), mono.clone(), fg_rgb, bg_rgb))
-                    .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
+                    .on_press(cx, move |this, window, cx| {
                         if let Some(dialog) = &this.commit_message_dialog {
                             let template = dialog.template.clone();
                             template.update(cx, |area, cx| area.insert(&format!("{{{name}}}"), cx));
                             window.focus(&template.focus_handle(cx), cx);
                         }
-                    }))
+                    })
                     .child(format!("{{{name}}}"))
             }));
         let template_section = div()
@@ -423,9 +444,12 @@ impl WindowView {
             .child(variables);
 
         // 底栏左边存成预设：存到哪（两段按钮）和保存按钮；右边是生成。
-        let scope = |id: &'static str, repo_only: bool, key: &str| {
+        let scope = |id: &'static str, repo_only: bool, key: &str, cx: &mut Context<Self>| {
             div()
                 .id(id)
+                .role(Role::RadioButton)
+                .aria_label(rust_i18n::t!(key).into_owned())
+                .aria_toggled((dialog.repo_only == repo_only).into())
                 .px(px(8.))
                 .py(px(2.))
                 .rounded(px(4.))
@@ -435,16 +459,18 @@ impl WindowView {
                     pill.text_color(fg.opacity(0.6)).hover(move |pill| pill.bg(hover_bg))
                 })
                 .child(rust_i18n::t!(key).into_owned())
-                .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
+                .on_press(cx, move |this, _, cx| {
                     if let Some(dialog) = &mut this.commit_message_dialog {
                         dialog.repo_only = repo_only;
                         dialog.status = None;
                         cx.notify();
                     }
-                }))
+                })
         };
         let save = div()
             .id("commit-message-save")
+            .role(Role::Button)
+            .aria_label(rust_i18n::t!("git.ai_message.save").into_owned())
             .flex_none()
             .px(px(10.))
             .py(px(4.))
@@ -455,16 +481,27 @@ impl WindowView {
             .hover(move |button| button.bg(hover_bg))
             .when(dialog.saving, |button| button.opacity(0.5))
             .child(rust_i18n::t!("git.ai_message.save").into_owned())
-            .on_click(cx.listener(|this, _: &ClickEvent, window, cx| this.save_dialog_recipe(window, cx)));
+            .on_press(cx, |this, window, cx| this.save_dialog_recipe(window, cx));
         let status = match &dialog.status {
-            Some(Status::Saved) => Some(note(rust_i18n::t!("git.ai_message.saved").into_owned())),
-            Some(Status::Failed(err)) => Some(div().text_size(px(11.)).text_color(gpui::red()).child(err.clone())),
+            Some(Status::Saved) => Some((rust_i18n::t!("git.ai_message.saved").into_owned(), fg.opacity(0.5))),
+            Some(Status::Failed(err)) => Some((err.clone(), gpui::red())),
             None => None,
-        };
+        }
+        .map(|(text, color)| {
+            div()
+                .id("commit-message-status")
+                .role(Role::Status)
+                .aria_label(text.clone())
+                .text_size(px(11.))
+                .text_color(color)
+                .child(text)
+        });
         let blocker = self.commit_message_blocker(&dialog.root);
         let on_accent = hsla(bg_rgb);
         let generate = div()
             .id("commit-message-generate")
+            .role(Role::Button)
+            .aria_label(rust_i18n::t!("git.ai_message.generate").into_owned())
             .flex_none()
             .px(px(12.))
             .py(px(5.))
@@ -478,11 +515,14 @@ impl WindowView {
             .child(rust_i18n::t!("git.ai_message.generate").into_owned())
             .child(div().text_color(on_accent.opacity(0.6)).child("⌘↩"))
             .map(|button| match blocker {
-                Some(reason) => button.opacity(0.5).tooltip(tooltip(rust_i18n::t!(reason), None, fg_rgb, bg_rgb)),
+                Some(reason) => button
+                    .opacity(0.5)
+                    .aria_description(rust_i18n::t!(reason).into_owned())
+                    .tooltip(tooltip(rust_i18n::t!(reason), None, fg_rgb, bg_rgb)),
                 None => button
                     .cursor_pointer()
                     .hover(move |button| button.bg(accent_hover))
-                    .on_click(cx.listener(|this, _: &ClickEvent, window, cx| this.generate_from_dialog(window, cx))),
+                    .on_press(cx, |this, window, cx| this.generate_from_dialog(window, cx)),
             });
         let footer = div()
             .pt(px(12.))
@@ -504,14 +544,17 @@ impl WindowView {
                     )
                     .child(
                         div()
+                            .id("commit-message-scope")
+                            .role(Role::RadioGroup)
+                            .aria_label(rust_i18n::t!("git.ai_message.scope").into_owned())
                             .flex()
                             .flex_none()
                             .p(px(2.))
                             .gap(px(2.))
                             .rounded(px(6.))
                             .bg(field_bg)
-                            .child(scope("commit-message-repo", true, "git.ai_message.scope_repo"))
-                            .child(scope("commit-message-all", false, "git.ai_message.scope_all")),
+                            .child(scope("commit-message-repo", true, "git.ai_message.scope_repo", cx))
+                            .child(scope("commit-message-all", false, "git.ai_message.scope_all", cx)),
                     )
                     .child(save)
                     .child(div().flex_1())
@@ -521,6 +564,9 @@ impl WindowView {
 
         let panel = div()
             .id("commit-message-dialog")
+            .role(Role::Dialog)
+            .aria_label(rust_i18n::t!("git.ai_message.title").into_owned())
+            .aria_description(rust_i18n::t!("git.ai_message.subtitle").into_owned())
             .on_key_down(cx.listener(Self::commit_message_dialog_key))
             .w(px(560.))
             .max_w_full()

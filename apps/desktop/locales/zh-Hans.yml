@@ -321,10 +321,12 @@ git:
   ok: 好
   cancel: 取消
   failed: Git 操作没有完成
+  more: 更多操作
   ai_message:
     menu: 生成提交信息…
     button: 用 AI 生成提交说明
     title: 生成提交信息
+    close: 关闭
     subtitle: 为此运行选择智能体和提示词模板。
     agent: 智能体
     args: CLI 参数
@@ -381,6 +383,7 @@ git:
   commit_and_push: 提交并推送
   commit_and_sync: 提交并同步
   undo_last_commit: 撤销上次提交
+  commit_more: 更多提交方式
   sync_changes: "同步更改 %{behind}↓ %{ahead}↑"
   publish_branch: 发布分支
   publish: 发布

@@ -27,12 +27,14 @@ pub(super) use tree::{TreeItem, file_tree};
 use std::{
     ops::Range,
     path::{Path, PathBuf},
+    rc::Rc,
     time::Duration,
 };
 
 use gpui::{
-    Action, Animation, AnimationExt, AnyElement, Context, Div, ElementId, Focusable, Hsla, MouseButton, MouseDownEvent,
-    Stateful, Transformation, Window, actions, div, list, percentage, prelude::*, px, svg, uniform_list,
+    AccessibleAction, Action, Animation, AnimationExt, AnyElement, Context, Div, ElementId, Focusable, Hsla,
+    MouseButton, MouseDownEvent, Role, Stateful, Transformation, Window, actions, div, list, percentage, prelude::*,
+    px, svg, uniform_list,
 };
 use runode_git::{self as git, Operation, RepoKind, Section};
 use runode_shared_types::color::Rgb;
@@ -281,6 +283,7 @@ impl WindowView {
             .map(|repo| repo.root.clone());
         let panel = &mut project.git_panel;
         panel.width = width;
+        panel.a11y = window.is_a11y_active();
         let mut lost_focus = false;
         // 图表显示的仓库的块收着时也留着，读到的历史才在。
         panel.repos.retain(|root, repo| {
@@ -307,9 +310,27 @@ impl WindowView {
         let main_root = project.git.as_ref().map(|git| git.main.root.clone());
         // 多个仓库时各块的忙碌状态写在块头上。
         let busy = main_root.as_deref().filter(|_| !multi).and_then(|root| panel.busy(root));
+        let title = rust_i18n::t!("git.title").into_owned();
         let header = panel_title()
-            .child(div().flex_none().text_color(hsla(fg)).child(rust_i18n::t!("git.title").into_owned()))
-            .child(div().flex_1().min_w_0().truncate().text_color(dim).children(busy.map(Busy::label)))
+            .child(
+                div()
+                    .id("git-title")
+                    .role(Role::Heading)
+                    .aria_label(title.clone())
+                    .flex_none()
+                    .text_color(hsla(fg))
+                    .child(title.clone()),
+            )
+            .child(
+                div()
+                    .id("git-busy")
+                    .flex_1()
+                    .min_w_0()
+                    .truncate()
+                    .text_color(dim)
+                    .when_some(busy, |status, busy| status.role(Role::Status).aria_label(busy.label()))
+                    .children(busy.map(Busy::label)),
+            )
             .when_some(main_root, |header, root| {
                 let (icon, text) = if self.git_tree {
                     (VIEW_LIST_ICON, rust_i18n::t!("git.view_as_list"))
@@ -324,7 +345,7 @@ impl WindowView {
                         fg,
                         bg,
                         cx,
-                        |this, _, window, cx| this.git_toggle_tree_view(&GitToggleTreeView, window, cx),
+                        |this, window, cx| this.git_toggle_tree_view(&GitToggleTreeView, window, cx),
                     ))
                     .child(self.header_button(
                         "git-refresh",
@@ -333,28 +354,26 @@ impl WindowView {
                         fg,
                         bg,
                         cx,
-                        |this, _, window, cx| {
+                        |this, window, cx| {
                             this.git_refresh(&GitRefresh, window, cx);
                         },
                     ))
                     .when(!multi, |header| {
-                        header.child(self.header_button(
-                            "git-more",
-                            MORE_ICON,
-                            None,
-                            fg,
-                            bg,
-                            cx,
-                            move |this, event, _, cx| {
-                                this.open_git_menu(&root, event.position, cx);
-                            },
-                        ))
+                        header.child(
+                            self.header_button("git-more", MORE_ICON, None, fg, bg, cx, move |this, window, cx| {
+                                this.open_git_menu(&root, window.mouse_position(), cx);
+                            })
+                            .aria_label(rust_i18n::t!("git.more").into_owned()),
+                        )
                     })
             });
         let body: AnyElement = match &project.git {
             _ if project.root.is_none() => div().flex_1().into_any_element(),
             None => panel_message(rust_i18n::t!("panel.not_repo").into_owned(), fg).into_any_element(),
             Some(_) if multi => div()
+                .id("git-repos")
+                .role(Role::Tree)
+                .aria_label(title)
                 .flex_1()
                 .min_h_0()
                 .relative()
@@ -372,14 +391,26 @@ impl WindowView {
                 let list: AnyElement = if panel.rows.is_empty() {
                     panel_message(rust_i18n::t!("panel.no_changes").into_owned(), fg).into_any_element()
                 } else {
-                    uniform_list(
-                        "git-rows",
-                        panel.rows.len(),
-                        cx.processor(move |this, range: Range<usize>, _, cx| this.render_git_rows(range, fg, bg, cx)),
-                    )
-                    .track_scroll(&panel.scroll)
-                    .flex_1()
-                    .into_any_element()
+                    div()
+                        .id("git-changes")
+                        .role(Role::Tree)
+                        .aria_label(title)
+                        .flex_1()
+                        .min_h_0()
+                        .flex()
+                        .flex_col()
+                        .child(
+                            uniform_list(
+                                "git-rows",
+                                panel.rows.len(),
+                                cx.processor(move |this, range: Range<usize>, _, cx| {
+                                    this.render_git_rows(range, fg, bg, cx)
+                                }),
+                            )
+                            .track_scroll(&panel.scroll)
+                            .flex_1(),
+                        )
+                        .into_any_element()
                 };
                 div()
                     .flex_1()
@@ -387,7 +418,7 @@ impl WindowView {
                     .flex()
                     .flex_col()
                     .child(self.render_branch_bar(0, git, fg, bg, cx))
-                    .children(git.info.operation.map(|operation| operation_banner(operation, fg)))
+                    .children(git.info.operation.map(|operation| operation_banner(0, operation, fg)))
                     .child(self.render_commit_area(0, git, fg, bg, window, cx))
                     .child(list)
                     .into_any_element()
@@ -470,6 +501,8 @@ impl WindowView {
         let root = repo.root.clone();
         let more = div()
             .id(("git-repo-more", ri))
+            .role(Role::Button)
+            .aria_label(rust_i18n::t!("git.more").into_owned())
             .flex_none()
             .size(px(20.))
             .rounded(px(3.))
@@ -478,15 +511,23 @@ impl WindowView {
             .justify_center()
             .hover(|button| button.bg(hsla(bg.mix(fg, 0.14))))
             .child(svg().path(MORE_ICON).size(px(14.)).text_color(fg_hsla.opacity(0.75)))
-            .on_mouse_down(MouseButton::Left, {
+            .on_press_down(cx, {
                 let root = root.clone();
-                cx.listener(move |this, event: &MouseDownEvent, _, cx| {
-                    cx.stop_propagation();
-                    this.open_git_menu(&root, event.position, cx);
-                })
+                move |this, window, cx| this.open_git_menu(&root, window.mouse_position(), cx)
             });
+        // 块头整行报成可以展开收起的一项：名字是仓库名，说明里是种类、分支或正在跑的操作，和改了
+        // 几个文件。
+        let mut description = format!("{kind} · {detail}");
+        if changed > 0 {
+            description.push_str(&format!(" · {changed}"));
+        }
         let title = div()
             .id(("git-repo", ri))
+            .role(Role::TreeItem)
+            .aria_level(1)
+            .aria_expanded(expanded)
+            .aria_label(name.clone())
+            .aria_description(description)
             .flex_none()
             .h(px(list::ROW_HEIGHT + 4.))
             .w_full()
@@ -505,19 +546,17 @@ impl WindowView {
             .child(div().flex_1().min_w_0().truncate().text_size(px(11.)).text_color(dim).child(detail))
             .child(more)
             .when(changed > 0, |title| title.child(list::count_badge(changed, fg, bg)))
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(move |this, _, window, cx| {
-                    cx.stop_propagation();
-                    // 收起时焦点还在这块的说明框里的话，按键就没处去了，交给面板。
-                    if this.commit_box(&root).is_some_and(|area| area.focus_handle(cx).is_focused(window)) {
-                        window.focus(&this.git_focus, cx);
-                    }
-                    let project = &mut this.workspace_mut().project;
-                    project.git_panel.toggle_repo(&root, expanded, project.git.as_ref());
-                    cx.notify();
-                }),
-            )
+            .on_press_down(cx, move |this, window, cx| {
+                // 收起时焦点还在这块的说明框里的话，按键就没处去了，交给面板。
+                if this.commit_box(&root).is_some_and(|area| area.focus_handle(cx).is_focused(window)) {
+                    window.focus(&this.git_focus, cx);
+                }
+                // 辅助工具按下时不经过 `render_git_item` 的鼠标捕获，这里补记是哪一块。
+                this.set_git_active(&root);
+                let project = &mut this.workspace_mut().project;
+                project.git_panel.toggle_repo(&root, expanded, project.git.as_ref());
+                cx.notify();
+            })
             .when(worktree, |title| {
                 let root = repo.root.clone();
                 title.on_mouse_down(
@@ -532,13 +571,13 @@ impl WindowView {
         div().w_full().flex().flex_col().child(title).when(expanded, |block| {
             block
                 .child(self.render_branch_bar(ri, repo, fg, bg, cx))
-                .children(repo.info.operation.map(|operation| operation_banner(operation, fg)))
+                .children(repo.info.operation.map(|operation| operation_banner(ri, operation, fg)))
                 .child(self.render_commit_area(ri, repo, fg, bg, window, cx))
         })
     }
 
     /// 标题栏上的图标按钮；按下时不往外传，免得标题栏把它当成拖动窗口。弹出菜单的按钮不带提示，
-    /// 不然提示会盖住菜单的第一项。
+    /// 不然提示会盖住菜单的第一项，报给辅助工具的名字由调用方另给。
     #[allow(clippy::too_many_arguments)]
     fn header_button(
         &self,
@@ -548,19 +587,14 @@ impl WindowView {
         fg: Rgb,
         bg: Rgb,
         cx: &mut Context<Self>,
-        handler: impl Fn(&mut Self, &MouseDownEvent, &mut Window, &mut Context<Self>) + 'static,
+        handler: impl Fn(&mut Self, &mut Window, &mut Context<Self>) + 'static,
     ) -> Stateful<Div> {
         super::titlebar::icon_toggle(id, icon, 14., false, fg, bg)
+            .role(Role::Button)
             .flex_none()
             .size(px(HEADER_BUTTON_SIZE))
-            .when_some(text, |button, text| button.tooltip(tooltip(text, None, fg, bg)))
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(move |this, event: &MouseDownEvent, window, cx| {
-                    cx.stop_propagation();
-                    handler(this, event, window, cx);
-                }),
-            )
+            .when_some(text, |button, text| button.aria_label(text.clone()).tooltip(tooltip(text, None, fg, bg)))
+            .on_press_down(cx, handler)
     }
 
     /// 第 `ri` 个仓库的当前分支（点了切换分支）、没提交的改动加减了多少行，和右边的同步按钮：有上游时写着落后、领先几个
@@ -576,6 +610,9 @@ impl WindowView {
         let root = repo.root.clone();
         let branch = div()
             .id(("git-branch", ri))
+            .role(Role::ComboBox)
+            .aria_label(rust_i18n::t!("git.checkout").into_owned())
+            .aria_value(name.clone())
             .flex_initial()
             .min_w_0()
             .h(px(22.))
@@ -586,19 +623,24 @@ impl WindowView {
             .gap(px(6.))
             .hover(|branch| branch.bg(hover_bg))
             .tooltip(tooltip(rust_i18n::t!("git.checkout"), Some(&GitCheckout), fg, bg))
-            .on_mouse_down(MouseButton::Left, {
+            .on_press_down(cx, {
                 let root = root.clone();
-                cx.listener(move |this, _, window, cx| {
-                    cx.stop_propagation();
-                    this.open_branch_picker(&root, false, None, window, cx);
-                })
+                move |this, window, cx| this.open_branch_picker(&root, false, None, window, cx)
             })
             .child(svg().flex_none().path(BRANCH_ICON).size(px(14.)).text_color(fg_hsla.opacity(0.75)))
             .child(div().min_w_0().truncate().child(name));
         // 没提交的改动一共加减了多少行，为 0 的那边不画。
         let (added, removed) = (repo.added(), repo.removed());
         let changes = (added > 0 || removed > 0).then(|| {
+            let label = [(added > 0).then(|| format!("+{added}")), (removed > 0).then(|| format!("−{removed}"))]
+                .into_iter()
+                .flatten()
+                .collect::<Vec<_>>()
+                .join(" ");
             div()
+                .id(("git-line-changes", ri))
+                .role(Role::Label)
+                .aria_label(label)
                 .flex_none()
                 .flex()
                 .gap(px(6.))
@@ -606,23 +648,25 @@ impl WindowView {
                 .when(added > 0, |changes| changes.child(added_label(added)))
                 .when(removed > 0, |changes| changes.child(removed_label(removed)))
         });
+        // 按钮上只有箭头和数字，报给辅助工具的名字用写全了的「同步更改」。
         let sync = if info.upstream.is_some() {
             let counts = format!("{}↓ {}↑", info.behind, info.ahead);
             let text = rust_i18n::t!("git.sync_tooltip", upstream = info.upstream.clone().unwrap_or_default());
-            Some((counts, text, PrimaryAction::Sync))
+            let name = rust_i18n::t!("git.sync_changes", behind = info.behind, ahead = info.ahead).into_owned();
+            Some((counts, name, text, PrimaryAction::Sync))
         } else if info.has_remote && info.branch.is_some() && info.head.is_some() {
-            Some((
-                rust_i18n::t!("git.publish").into_owned(),
-                rust_i18n::t!("git.publish_tooltip"),
-                PrimaryAction::Publish,
-            ))
+            let label = rust_i18n::t!("git.publish").into_owned();
+            Some((label.clone(), label, rust_i18n::t!("git.publish_tooltip"), PrimaryAction::Publish))
         } else {
             None
         };
-        let sync = sync.map(|(label, text, action)| {
+        let sync = sync.map(|(label, name, text, action)| {
             let root = root.clone();
             div()
                 .id(("git-sync", ri))
+                .role(Role::Button)
+                .aria_label(name)
+                .aria_description(text.clone().into_owned())
                 .flex_none()
                 .h(px(22.))
                 .px(px(6.))
@@ -635,13 +679,8 @@ impl WindowView {
                 .child(sync_icon(("git-sync-icon", ri), spinning, 13., fg_hsla.opacity(if busy { 0.35 } else { 0.75 })))
                 .child(label)
                 .when(!busy, |sync| {
-                    sync.hover(|sync| sync.bg(hover_bg)).on_mouse_down(
-                        MouseButton::Left,
-                        cx.listener(move |this, _, window, cx| {
-                            cx.stop_propagation();
-                            this.run_primary(&root, action, window, cx);
-                        }),
-                    )
+                    sync.hover(|sync| sync.bg(hover_bg))
+                        .on_press_down(cx, move |this, window, cx| this.run_primary(&root, action, window, cx))
                 })
         });
         div()
@@ -710,6 +749,8 @@ impl WindowView {
         let can_write = dirty && !busy;
         let sparkle = div()
             .id(("git-commit-sparkle", ri))
+            .role(Role::Button)
+            .aria_label(rust_i18n::t!("git.ai_message.button").into_owned())
             .absolute()
             .top(px(2.))
             .right(px(2.))
@@ -728,13 +769,10 @@ impl WindowView {
             })))
             .when(can_write, |sparkle| {
                 let root = root.clone();
-                sparkle.cursor_pointer().hover(|sparkle| sparkle.bg(fg_hsla.opacity(0.08))).on_mouse_down(
-                    MouseButton::Left,
-                    cx.listener(move |this, _, window, cx| {
-                        cx.stop_propagation();
-                        this.generate_commit_message(&root, window, cx);
-                    }),
-                )
+                sparkle
+                    .cursor_pointer()
+                    .hover(|sparkle| sparkle.bg(fg_hsla.opacity(0.08)))
+                    .on_press_down(cx, move |this, window, cx| this.generate_commit_message(&root, window, cx))
             });
         let commit_box = div()
             .id(("git-commit-box", ri))
@@ -758,6 +796,8 @@ impl WindowView {
             .child(sparkle);
         let main = div()
             .id(("git-commit", ri))
+            .role(Role::Button)
+            .aria_label(label.clone())
             .flex_1()
             .min_w_0()
             .h_full()
@@ -772,16 +812,13 @@ impl WindowView {
             .child(div().min_w_0().truncate().child(label))
             .when(enabled, |main| {
                 let root = root.clone();
-                main.hover(|main| main.bg(accent.opacity(0.85))).on_mouse_down(
-                    MouseButton::Left,
-                    cx.listener(move |this, _, window, cx| {
-                        cx.stop_propagation();
-                        this.run_primary(&root, primary, window, cx);
-                    }),
-                )
+                main.hover(|main| main.bg(accent.opacity(0.85)))
+                    .on_press_down(cx, move |this, window, cx| this.run_primary(&root, primary, window, cx))
             });
         let more = div()
             .id(("git-commit-more", ri))
+            .role(Role::Button)
+            .aria_label(rust_i18n::t!("git.commit_more").into_owned())
             .flex_none()
             .w(px(COMMIT_BUTTON_HEIGHT))
             .h_full()
@@ -794,13 +831,9 @@ impl WindowView {
             .bg(accent)
             .child(svg().path(CHEVRON_DOWN_ICON).size(px(12.)).text_color(on_accent))
             .when(!busy, |more| {
-                more.hover(|more| more.bg(accent.opacity(0.85))).on_mouse_down(
-                    MouseButton::Left,
-                    cx.listener(move |this, event: &MouseDownEvent, _, cx| {
-                        cx.stop_propagation();
-                        this.open_commit_menu(&root, event.position, cx);
-                    }),
-                )
+                more.hover(|more| more.bg(accent.opacity(0.85))).on_press_down(cx, move |this, window, cx| {
+                    this.open_commit_menu(&root, window.mouse_position(), cx)
+                })
             });
         div()
             .flex_none()
@@ -893,6 +926,35 @@ impl WindowView {
     }
 }
 
+/// 鼠标左键按下（不往外传）或辅助工具按下时调 `f`。
+///
+/// 面板里的按钮和行按下就办、不等松开，`crate::ui::a11y::Press` 管的是点击；只登记鼠标按下的元素
+/// 辅助工具按不了，这里另外登记按下动作，直接调同一个 `f`，行滚出可见区域也按得到。要弹菜单的
+/// 按钮在 `f` 里取 `Window::mouse_position`：鼠标按下时它就是按下的位置。
+trait PressDown: StatefulInteractiveElement + Sized {
+    fn on_press_down<T: 'static>(
+        self,
+        cx: &mut Context<T>,
+        f: impl Fn(&mut T, &mut Window, &mut Context<T>) + 'static,
+    ) -> Self {
+        let f = Rc::new(f);
+        let press = f.clone();
+        let view = cx.entity().downgrade();
+        self.on_mouse_down(
+            MouseButton::Left,
+            cx.listener(move |this, _, window, cx| {
+                cx.stop_propagation();
+                f(this, window, cx);
+            }),
+        )
+        .on_a11y_action(AccessibleAction::Click, move |_, window, cx| {
+            view.update(cx, |this, cx| press(this, window, cx)).ok();
+        })
+    }
+}
+
+impl<E: StatefulInteractiveElement> PressDown for E {}
+
 /// 同步图标；`spinning` 时一直转圈，表示还在连远端。
 fn sync_icon(id: impl Into<ElementId>, spinning: bool, size: f32, color: Hsla) -> AnyElement {
     let icon = svg().flex_none().path(SYNC_ICON).size(px(size)).text_color(color);
@@ -923,8 +985,8 @@ fn branch_name(info: &git::RepoInfo) -> String {
     }
 }
 
-/// 合并、变基这些进行到一半时的提示条。
-fn operation_banner(operation: Operation, fg: Rgb) -> Div {
+/// 第 `ri` 个仓库合并、变基这些进行到一半时的提示条。
+fn operation_banner(ri: usize, operation: Operation, fg: Rgb) -> Stateful<Div> {
     let text = match operation {
         Operation::Merge => rust_i18n::t!("git.operation.merge"),
         Operation::Rebase => rust_i18n::t!("git.operation.rebase"),
@@ -932,6 +994,9 @@ fn operation_banner(operation: Operation, fg: Rgb) -> Div {
         Operation::Revert => rust_i18n::t!("git.operation.revert"),
     };
     div()
+        .id(("git-operation", ri))
+        .role(Role::Status)
+        .aria_label(text.clone().into_owned())
         .flex_none()
         .mx(px(10.))
         .mb(px(6.))

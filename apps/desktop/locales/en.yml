@@ -321,10 +321,12 @@ git:
   ok: OK
   cancel: Cancel
   failed: The Git operation didn't complete
+  more: More Actions
   ai_message:
     menu: Generate Commit Message…
     button: Generate commit message with AI
     title: Generate Commit Message
+    close: Close
     subtitle: Choose the agent and prompt template for this run.
     agent: Agent
     args: CLI arguments
@@ -381,6 +383,7 @@ git:
   commit_and_push: Commit & Push
   commit_and_sync: Commit & Sync
   undo_last_commit: Undo Last Commit
+  commit_more: More Commit Actions
   sync_changes: "Sync Changes %{behind}↓ %{ahead}↑"
   publish_branch: Publish Branch
   publish: Publish

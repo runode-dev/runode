@@ -296,6 +296,8 @@ pub(in crate::window) struct GitPanel {
     pub width: f32,
     /// 鼠标所在的那一行在 `rows` 里的下标，行尾的按钮只画在这一行。
     pub hovered: Option<usize>,
+    /// 这一帧辅助工具在读（`Window::is_a11y_active`）：行尾的按钮每行都画，辅助工具才找得到。
+    pub a11y: bool,
 }
 
 impl Default for GitPanel {
@@ -318,6 +320,7 @@ impl Default for GitPanel {
             active: None,
             width: 0.,
             hovered: None,
+            a11y: false,
         }
     }
 }

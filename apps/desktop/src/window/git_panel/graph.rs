@@ -14,15 +14,16 @@ use std::{
 };
 
 use gpui::{
-    Action, AnyElement, BorderStyle, Bounds, ClipboardItem, ContentMask, Context, CursorStyle, Div, Hsla, MouseButton,
-    MouseDownEvent, PathBuilder, Pixels, PromptLevel, Window, canvas, div, fill, img, point, prelude::*, px, quad, svg,
-    uniform_list,
+    AccessibleAction, Action, AnyElement, BorderStyle, Bounds, ClipboardItem, ContentMask, Context, CursorStyle, Div,
+    Hsla, MouseButton, MouseDownEvent, PathBuilder, Pixels, PromptLevel, Role, Window, canvas, div, fill, img, point,
+    prelude::*, px, quad, svg, uniform_list,
 };
 use runode_git::{self as git, Commit, DiffSide, GraphRow, Half, RefKind};
 use runode_shared_types::color::Rgb;
 
 use super::{
-    list::{ROW_HEIGHT, chevron, status_letter},
+    PressDown,
+    list::{ROW_HEIGHT, a11y_open_diff, chevron, file_description, status_letter},
     repo_name,
     rows::{Busy, CommitChanges, CommitNote, GRAPH_PAGE, Graph, GraphNote},
 };
@@ -134,8 +135,13 @@ impl WindowView {
         let repo = git.get(panel.graph_repo(git));
         let name = repo.filter(|_| git.count() > 1).map(repo_name);
         let root = repo.map(|repo| repo.root.clone());
+        let title = rust_i18n::t!("git.section.graph").into_owned();
         let header = div()
             .id("git-graph-header")
+            .role(Role::Button)
+            .aria_label(title.clone())
+            .aria_expanded(open)
+            .when_some(name.clone(), |header, name| header.aria_description(name))
             .flex_none()
             .h(px(ROW_HEIGHT + 4.))
             .w_full()
@@ -148,13 +154,7 @@ impl WindowView {
             .text_color(fg_hsla)
             .hover(|header| header.bg(hsla(bg.mix(fg, 0.06))))
             .child(chevron(open, fg))
-            .child(
-                div()
-                    .flex_none()
-                    .text_size(px(11.))
-                    .font_weight(gpui::FontWeight::SEMIBOLD)
-                    .child(rust_i18n::t!("git.section.graph").into_owned()),
-            )
+            .child(div().flex_none().text_size(px(11.)).font_weight(gpui::FontWeight::SEMIBOLD).child(title.clone()))
             .child(
                 div().flex_1().min_w_0().truncate().text_size(px(11.)).text_color(fg_hsla.opacity(0.5)).children(name),
             )
@@ -166,29 +166,27 @@ impl WindowView {
                     fg,
                     bg,
                     cx,
-                    move |this, _, _, cx| this.refresh_graph(&root, cx),
+                    move |this, _, cx| this.refresh_graph(&root, cx),
                 ))
             })
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(|this, _, _, cx| {
-                    cx.stop_propagation();
-                    this.git_graph_collapsed = !this.git_graph_collapsed;
-                    this.save(cx);
-                    cx.notify();
-                }),
-            );
+            .on_press_down(cx, |this, _, cx| {
+                this.git_graph_collapsed = !this.git_graph_collapsed;
+                this.save(cx);
+                cx.notify();
+            });
         let pane = div().relative().flex_none().w_full().flex().flex_col().child(header);
         if !open {
             return pane;
         }
-        let list = uniform_list(
-            "git-graph-rows",
-            panel.graph_rows.len(),
-            cx.processor(move |this, range: Range<usize>, _, cx| this.render_graph_rows(range, fg, bg, cx)),
-        )
-        .track_scroll(&panel.graph_scroll)
-        .flex_1();
+        let list = div().id("git-graph").role(Role::Tree).aria_label(title).flex_1().min_h_0().flex().flex_col().child(
+            uniform_list(
+                "git-graph-rows",
+                panel.graph_rows.len(),
+                cx.processor(move |this, range: Range<usize>, _, cx| this.render_graph_rows(range, fg, bg, cx)),
+            )
+            .track_scroll(&panel.graph_scroll)
+            .flex_1(),
+        );
         let handle = div()
             .id("git-graph-divider")
             .absolute()
@@ -452,16 +450,23 @@ impl WindowView {
         let (lane, width) = lane_geometry(graph.lanes);
         let dim = hsla(fg).opacity(0.5);
         let head = commit.refs.iter().any(|r| matches!(r.kind, RefKind::Head | RefKind::CurrentBranch));
-        let mut tip = format!("{}\n{} · {} · {}", commit.subject, commit.author, commit.date, commit.short_id());
+        let mut detail = format!("{} · {} · {}", commit.author, commit.date, commit.short_id());
         if !commit.refs.is_empty() {
             let names: Vec<_> = commit.refs.iter().map(|r| r.name.as_str()).collect();
-            tip.push_str(&format!("\n{}", names.join(", ")));
+            detail.push_str(&format!("\n{}", names.join(", ")));
         }
+        let tip = format!("{}\n{detail}", commit.subject);
+        let expanded = graph.expanded.contains(&commit.id);
         let root = repo.root.clone();
         let id = commit.id.clone();
         let fit = fit_commit_row(self.workspace().project.git_panel.width, width, commit);
         let labels = ref_labels(commit, fit.labels, fg, bg);
         self.git_row(("git-commit", ix), 0., fg, bg)
+            .role(Role::TreeItem)
+            .aria_level(1)
+            .aria_expanded(expanded)
+            .aria_label(commit.subject.clone())
+            .aria_description(detail)
             .tooltip(tooltip(tip, None, fg, bg))
             .child(lanes_canvas(row.clone(), lane, width, commit.parents.len() > 1, head, bg))
             .children(labels)
@@ -484,16 +489,10 @@ impl WindowView {
                         .child(short_date(&commit.date)),
                 )
             })
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener({
-                    let root = root.clone();
-                    move |this, _, _, cx| {
-                        cx.stop_propagation();
-                        this.toggle_commit(&root, ci, cx);
-                    }
-                }),
-            )
+            .on_press_down(cx, {
+                let root = root.clone();
+                move |this, _, cx| this.toggle_commit(&root, ci, cx)
+            })
             .on_mouse_down(
                 MouseButton::Right,
                 cx.listener(move |this, event: &MouseDownEvent, _, cx| {
@@ -537,7 +536,12 @@ impl WindowView {
         let side = DiffSide::Commit { id: commit.id.clone(), parent: commit.parents.first().cloned() };
         let target =
             DiffTarget { root: repo.root.clone(), rel: file.path.clone(), old_rel: file.old_path.clone(), side };
+        let open = target.clone();
         self.git_row(("git-commit-file", ix), 0., fg, bg)
+            .role(Role::TreeItem)
+            .aria_level(depth as usize + 2)
+            .aria_label(name.clone())
+            .aria_description(file_description(file, &dir))
             .relative()
             .children(self.lanes_below(&repo.root, ci))
             .pl(px(8. + width + INDENT * (depth + 1.)))
@@ -555,6 +559,7 @@ impl WindowView {
                     this.click_diff(target.clone(), event.click_count, cx);
                 }),
             )
+            .on_a11y_action(AccessibleAction::Click, a11y_open_diff(open, cx))
             .into_any_element()
     }
 
@@ -576,21 +581,21 @@ impl WindowView {
         let width = self.graph(&dir.root).map_or(0., |graph| lane_geometry(graph.lanes).1);
         let last = base_name(&dir.path);
         self.git_row(("git-commit-dir", ix), 0., fg, bg)
+            .role(Role::TreeItem)
+            .aria_level(depth as usize + 2)
+            .aria_expanded(dir.expanded)
+            .aria_label(dir.name.clone())
             .relative()
             .children(self.lanes_below(&dir.root, ci))
             .pl(px(8. + width + INDENT * (depth + 1.)))
             .child(chevron(dir.expanded, fg))
             .child(img(folder_icon(&last, dir.expanded)).flex_none().size(px(14.)))
             .child(div().flex_1().min_w_0().truncate().child(dir.name.clone()))
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(move |this, _, _, cx| {
-                    cx.stop_propagation();
-                    let project = &mut this.workspace_mut().project;
-                    project.git_panel.toggle_dir(di, project.git.as_ref());
-                    cx.notify();
-                }),
-            )
+            .on_press_down(cx, move |this, _, cx| {
+                let project = &mut this.workspace_mut().project;
+                project.git_panel.toggle_dir(di, project.git.as_ref());
+                cx.notify();
+            })
             .into_any_element()
     }
 
@@ -616,7 +621,11 @@ impl WindowView {
         let last = graph
             .and_then(|graph| graph.history.as_ref()?.as_ref().ok()?.rows.last())
             .map(|row| (row, lane_geometry(graph.map_or(0, |graph| graph.lanes))));
-        let row = self.git_row(("git-graph-note", ix), 0., fg, bg);
+        // 「加载更多」报成按钮，其余是一句说明。
+        let row = self
+            .git_row(("git-graph-note", ix), 0., fg, bg)
+            .role(if note == GraphNote::More { Role::Button } else { Role::Label })
+            .aria_label(text.clone().into_owned());
         let Some((last, (lane, width))) = last else {
             return row
                 .pl(px(8. + INDENT))
@@ -648,13 +657,7 @@ impl WindowView {
         )
         .group(GRAPH_MORE_GROUP)
         .cursor_pointer()
-        .on_mouse_down(
-            MouseButton::Left,
-            cx.listener(move |this, _, _, cx| {
-                cx.stop_propagation();
-                this.load_more_commits(&root, cx);
-            }),
-        )
+        .on_press_down(cx, move |this, _, cx| this.load_more_commits(&root, cx))
         .into_any_element()
     }
 
@@ -675,6 +678,8 @@ impl WindowView {
         };
         let width = self.graph(&repo.root).map_or(0., |graph| lane_geometry(graph.lanes).1);
         self.git_row(("git-commit-note", ix), 0., fg, bg)
+            .role(Role::Label)
+            .aria_label(text.clone().into_owned())
             .relative()
             .children(self.lanes_below(&repo.root, ci))
             .pl(px(8. + width + INDENT))

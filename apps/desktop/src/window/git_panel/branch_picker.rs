@@ -5,8 +5,8 @@
 use std::path::{Path, PathBuf};
 
 use gpui::{
-    Context, Div, Entity, Focusable, KeyDownEvent, MouseButton, ScrollHandle, SharedString, Subscription, Window, div,
-    prelude::*, px, svg,
+    AccessibleAction, Context, Div, Entity, Focusable, KeyDownEvent, MouseButton, Role, ScrollHandle, SharedString,
+    Subscription, Window, div, prelude::*, px, svg,
 };
 use runode_git::{self as git, Branch};
 use runode_shared_types::color::Rgb;
@@ -50,6 +50,11 @@ pub(in crate::window) struct BranchPicker {
 enum PickerRow<'a> {
     Create(String),
     Branch(&'a Branch),
+}
+
+/// 报给辅助工具的名字，浮层和输入框都用它：只新建分支时是新建分支，否则是切换分支。
+fn picker_title(create_only: bool) -> String {
+    if create_only { rust_i18n::t!("git.create_branch") } else { rust_i18n::t!("git.checkout") }.into_owned()
 }
 
 impl BranchPicker {
@@ -97,7 +102,11 @@ impl WindowView {
             None if create_only => rust_i18n::t!("git.picker.new_branch"),
             None => rust_i18n::t!("git.picker.placeholder"),
         };
-        let field = cx.new(|cx| TextField::new(String::new(), cx).with_placeholder(placeholder.into_owned()));
+        let field = cx.new(|cx| {
+            TextField::new(String::new(), cx)
+                .with_placeholder(placeholder.into_owned())
+                .with_label(picker_title(create_only))
+        });
         // 输入框原本是搜索框：回车是「下一个」，Esc 是「关闭搜索」，在这里分别是确定和关掉。
         let events = cx.subscribe_in(&field, window, |this, _, event: &TextFieldEvent, window, cx| match event {
             TextFieldEvent::Changed(query) => {
@@ -223,12 +232,20 @@ impl WindowView {
                 _ if picker.create_only => rust_i18n::t!("git.picker.type_name"),
                 _ => rust_i18n::t!("git.picker.no_matches"),
             };
-            div().px(px(10.)).py(px(10.)).text_color(dim).child(text.into_owned())
+            div()
+                .id("branch-empty")
+                .role(Role::Label)
+                .aria_label(text.clone().into_owned())
+                .px(px(10.))
+                .py(px(10.))
+                .text_color(dim)
+                .child(text.into_owned())
         });
         let items: Vec<_> = rows
             .into_iter()
             .enumerate()
             .map(|(ix, row)| {
+                let current = matches!(row, PickerRow::Branch(branch) if branch.current);
                 let (icon, name, detail): (_, SharedString, SharedString) = match &row {
                     PickerRow::Create(name) => (
                         PLUS_ICON,
@@ -253,8 +270,15 @@ impl WindowView {
                         )
                     }
                 };
+                let view = cx.entity().downgrade();
                 div()
                     .id(("branch-row", ix))
+                    .role(Role::ListBoxOption)
+                    .aria_label(name.clone())
+                    .aria_description(detail.clone())
+                    .aria_selected(ix == selected)
+                    // 当前分支前面打着勾。
+                    .when(current, |item| item.aria_toggled(true.into()))
                     .flex_none()
                     .h(px(ROW_HEIGHT))
                     .px(px(8.))
@@ -275,15 +299,32 @@ impl WindowView {
                             this.confirm_branch_picker(window, cx);
                         }),
                     )
+                    // 列表滚动着，滚出去的行辅助工具也要按得到，不靠合成的鼠标点击。
+                    .on_a11y_action(AccessibleAction::Click, move |_, window, cx| {
+                        view.update(cx, |this, cx| {
+                            if let Some(picker) = &mut this.branch_picker {
+                                picker.selected = ix;
+                            }
+                            this.confirm_branch_picker(window, cx);
+                        })
+                        .ok();
+                    })
                     .child(svg().flex_none().path(icon).size(px(14.)).text_color(fg.opacity(0.7)))
                     .child(div().flex_none().max_w(px(PICKER_WIDTH * 0.5)).truncate().text_color(fg).child(name))
                     .child(div().flex_1().min_w_0().truncate().text_size(px(11.)).text_color(dim).child(detail))
             })
             .collect();
-        let panel =
-            div().id("branch-picker").w(px(PICKER_WIDTH)).capture_key_down(cx.listener(Self::branch_picker_key));
+        let title = picker_title(picker.create_only);
+        let panel = div()
+            .id("branch-picker")
+            .role(Role::Dialog)
+            .aria_label(title.clone())
+            .w(px(PICKER_WIDTH))
+            .capture_key_down(cx.listener(Self::branch_picker_key));
         let list = div()
             .id("branch-list")
+            .role(Role::ListBox)
+            .aria_label(title)
             .max_h(px(ROW_HEIGHT * VISIBLE_ROWS + 8.))
             .track_scroll(&picker.scroll)
             .children(items)

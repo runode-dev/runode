@@ -9,14 +9,14 @@ use std::{
 };
 
 use gpui::{
-    AnyElement, App, Context, Div, ElementId, MouseButton, MouseDownEvent, Stateful, Window, div, img, prelude::*, px,
-    svg,
+    AccessibleAction, AnyElement, App, Context, Div, ElementId, MouseButton, MouseDownEvent, Role, Stateful, Window,
+    accesskit::ActionData, div, img, prelude::*, px, svg,
 };
 use runode_git::{self as git, DiffSide, FileStatus, Section};
 use runode_shared_types::color::Rgb;
 
 use super::{
-    DirOp, FileOp, GitDirAction, GitFileAction,
+    DirOp, FileOp, GitDirAction, GitFileAction, PressDown,
     rows::{DirOwner, GitPanel, GitRow, GitSection, section_of},
     run::StashOp,
 };
@@ -106,6 +106,9 @@ impl WindowView {
                 None => div().into_any_element(),
             },
             GitRow::Clean(_) => div()
+                .id(("git-clean", ix))
+                .role(Role::Label)
+                .aria_label(rust_i18n::t!("panel.no_changes").into_owned())
                 .flex_none()
                 .h(px(ROW_HEIGHT))
                 .w_full()
@@ -154,9 +157,16 @@ impl WindowView {
         })
     }
 
-    /// 第 `ix` 行行尾的按钮，鼠标不在这行时不画、不占宽，名字能排满整行；根目录是 `root` 的
-    /// 仓库有操作在跑时按不动。不用 `hidden` 加 `group_hover` 露出来：gpui 在 prepaint 时还不知道
-    /// 这一帧行被悬停，会跳过藏着的按钮，paint 时却要画它们，就 panic 了。
+    /// 报给辅助工具的层级：段标题是第一层，多个仓库时在块头下面再深一层；段里的行比段标题深一层，
+    /// 以树形式查看时再加上它在树里的深度 `depth`。
+    pub(super) fn tree_level(&self, section: bool, depth: usize) -> usize {
+        let multi = self.workspace().project.git.as_ref().is_some_and(|git| git.count() > 1);
+        1 + usize::from(multi) + if section { 0 } else { 1 + depth }
+    }
+
+    /// 第 `ix` 行行尾的按钮，鼠标不在这行时不画、不占宽，名字能排满整行；辅助工具在读时每行都画。
+    /// 根目录是 `root` 的仓库有操作在跑时按不动。不用 `hidden` 加 `group_hover` 露出来：gpui 在
+    /// prepaint 时还不知道这一帧行被悬停，会跳过藏着的按钮，paint 时却要画它们，就 panic 了。
     #[allow(clippy::too_many_arguments)]
     fn row_buttons(
         &self,
@@ -168,7 +178,7 @@ impl WindowView {
         cx: &mut Context<Self>,
     ) -> Option<Div> {
         let panel = &self.workspace().project.git_panel;
-        if panel.hovered != Some(ix) {
+        if panel.hovered != Some(ix) && !panel.a11y {
             return None;
         }
         let enabled = panel.busy(root).is_none();
@@ -179,6 +189,8 @@ impl WindowView {
                 let handler = button.handler;
                 div()
                     .id(("git-row-button", bi))
+                    .role(Role::Button)
+                    .aria_label(button.text.clone())
                     .flex_none()
                     .size(px(20.))
                     .rounded(px(3.))
@@ -187,15 +199,7 @@ impl WindowView {
                     .justify_center()
                     .tooltip(tooltip(button.text, None, fg, bg))
                     .child(svg().path(button.icon).size(px(14.)).text_color(icon_color))
-                    .when(enabled, |button| {
-                        button.hover(|button| button.bg(hover_bg)).on_mouse_down(
-                            MouseButton::Left,
-                            cx.listener(move |this, _, window, cx| {
-                                cx.stop_propagation();
-                                handler(this, window, cx);
-                            }),
-                        )
-                    })
+                    .when(enabled, |button| button.hover(|button| button.bg(hover_bg)).on_press_down(cx, handler))
             }),
         );
         Some(buttons)
@@ -235,9 +239,14 @@ impl WindowView {
             }
             GitSection::Stashes => Vec::new(),
         };
+        let expanded = panel.section_expanded(&root, section);
         self.git_row(("git-section", ix), 0., fg, bg)
+            .role(Role::TreeItem)
+            .aria_level(self.tree_level(true, 0))
+            .aria_expanded(expanded)
+            .aria_label(format!("{label} ({count})"))
             .on_hover(self.track_row_hover(ix, cx))
-            .child(chevron(panel.section_expanded(&root, section), fg))
+            .child(chevron(expanded, fg))
             .child(
                 div()
                     .flex_1()
@@ -249,15 +258,11 @@ impl WindowView {
             )
             .children(self.row_buttons(ix, &root, buttons, fg, bg, cx))
             .child(count_badge(count, fg, bg))
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(move |this, _, _, cx| {
-                    cx.stop_propagation();
-                    let project = &mut this.workspace_mut().project;
-                    project.git_panel.toggle_section(&root, section, project.git.as_ref());
-                    cx.notify();
-                }),
-            )
+            .on_press_down(cx, move |this, _, cx| {
+                let project = &mut this.workspace_mut().project;
+                project.git_panel.toggle_section(&root, section, project.git.as_ref());
+                cx.notify();
+            })
             .into_any_element()
     }
 
@@ -306,7 +311,12 @@ impl WindowView {
         let deleted = file.status == FileStatus::Deleted;
         let side = if section == Section::Staged { DiffSide::Index } else { DiffSide::Worktree };
         let target = DiffTarget { root: root.clone(), rel: path.clone(), old_rel: file.old_path.clone(), side };
+        let open = target.clone();
         self.git_row(("git-file", ix), INDENT * (depth + 1.), fg, bg)
+            .role(Role::TreeItem)
+            .aria_level(self.tree_level(false, depth as usize))
+            .aria_label(name.clone())
+            .aria_description(file_description(file, &dir))
             .on_hover(self.track_row_hover(ix, cx))
             // 树形式里目录行有箭头，文件行空出同样宽，名字才对得齐。
             .when(panel.tree, |row| row.child(div().flex_none().w(px(12.))))
@@ -331,6 +341,7 @@ impl WindowView {
                     this.click_diff(target.clone(), event.click_count, cx);
                 }),
             )
+            .on_a11y_action(AccessibleAction::Click, a11y_open_diff(open, cx))
             .on_mouse_down(
                 MouseButton::Right,
                 cx.listener(move |this, event: &MouseDownEvent, _, cx| {
@@ -374,20 +385,20 @@ impl WindowView {
         let last = base_name(&path);
         let menu = action(DirOp::Stage);
         self.git_row(("git-dir", ix), INDENT * (depth + 1.), fg, bg)
+            .role(Role::TreeItem)
+            .aria_level(self.tree_level(false, depth as usize))
+            .aria_expanded(dir.expanded)
+            .aria_label(dir.name.clone())
             .on_hover(self.track_row_hover(ix, cx))
             .child(chevron(dir.expanded, fg))
             .child(img(folder_icon(&last, dir.expanded)).flex_none().size(px(14.)))
             .child(div().flex_1().min_w_0().truncate().child(dir.name.clone()))
             .children(self.row_buttons(ix, &root, buttons, fg, bg, cx))
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(move |this, _, _, cx| {
-                    cx.stop_propagation();
-                    let project = &mut this.workspace_mut().project;
-                    project.git_panel.toggle_dir(di, project.git.as_ref());
-                    cx.notify();
-                }),
-            )
+            .on_press_down(cx, move |this, _, cx| {
+                let project = &mut this.workspace_mut().project;
+                project.git_panel.toggle_dir(di, project.git.as_ref());
+                cx.notify();
+            })
             .on_mouse_down(
                 MouseButton::Right,
                 cx.listener(move |this, event: &MouseDownEvent, _, cx| {
@@ -471,12 +482,43 @@ impl WindowView {
             stash_button(TRASH_ICON, "git.stash_drop", StashOp::Drop),
         ];
         self.git_row(("git-stash", ix), INDENT, fg, bg)
+            .role(Role::TreeItem)
+            .aria_level(self.tree_level(false, 0))
+            .aria_label(format!("#{index} {}", stash.message))
             .on_hover(self.track_row_hover(ix, cx))
             .child(div().flex_none().text_size(px(11.)).text_color(hsla(fg).opacity(0.5)).child(format!("#{index}")))
             .child(div().flex_1().min_w_0().truncate().child(stash.message.clone()))
             .children(self.row_buttons(ix, &root, buttons, fg, bg, cx))
             .into_any_element()
     }
+}
+
+/// 辅助工具按下文件行时打开它的 diff。按两下的打开法：预览设成双击才打开时单击什么也不做，而辅助
+/// 工具按下总该打开它。
+pub(super) fn a11y_open_diff(
+    target: DiffTarget,
+    cx: &mut Context<WindowView>,
+) -> impl FnMut(Option<&ActionData>, &mut Window, &mut App) + 'static {
+    let view = cx.entity().downgrade();
+    move |_, _, cx| {
+        view.update(cx, |this, cx| this.click_diff(target.clone(), 2, cx)).ok();
+    }
+}
+
+/// 报给辅助工具的文件行说明：状态字母、所在目录（`dir`，树形式时为空）和加减了多少行，界面上
+/// 这些是分开的几块字。
+pub(super) fn file_description(file: &git::FileDiff, dir: &str) -> String {
+    let mut parts = vec![file.status.letter().to_owned()];
+    if !dir.is_empty() {
+        parts.push(dir.to_owned());
+    }
+    if file.added > 0 {
+        parts.push(format!("+{}", file.added));
+    }
+    if file.removed > 0 {
+        parts.push(format!("−{}", file.removed));
+    }
+    parts.join(" · ")
 }
 
 /// 段标题和块头上的个数，圆角的小底子。
