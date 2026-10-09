@@ -1,8 +1,12 @@
 //! 自动更新：在后台查 GitHub 上的新版本、下载好，退出时换上，见 `runode_update`。
 //!
-//! 配置项 `auto-update` 开着时，启动后过 `FIRST_CHECK` 查一次，之后每隔 `CHECK_INTERVAL` 再查；
-//! 这份 app 不能自己更新时（自己打包的、不在 .app 里、放在写不了的位置）不查。菜单里的「检查
-//! 更新…」随时查，结果弹框告诉用户；有新版本却不能自己更新时，给一个打开下载页的按钮。
+//! 配置项 `auto-update` 开着时，启动后过 `FIRST_CHECK` 查一次，之后每隔 `CHECK_INTERVAL` 再查，
+//! 查到新版本直接在后台下载；这份 app 不能自己更新时（自己打包的、不在 .app 里、放在写不了的位置）
+//! 不查。菜单里的「检查更新…」随时查，结果弹框告诉用户：有新版本时问要不要下载更新，选了才下；
+//! 有新版本却不能自己更新时，给一个打开下载页的按钮。
+//!
+//! 查和下载期间菜单里那一项显示「正在检查更新…」和「正在下载 Runode X… 42%」，进度由下载线程写进
+//! `Progress`，前台每隔 `PROGRESS_REFRESH` 看一眼、百分比变了才重画菜单。
 //!
 //! 下好以后菜单里那一项换成「重启以更新到 Runode X」，后台查到的还发一条系统通知，点了弹框问要不要
 //! 重启。不重启也行：app 退出时装上（`on_app_quit`），下次打开就是新版本。重启
@@ -10,7 +14,13 @@
 //! 装上新版本，GPUI 的 `restart` 等 app 退出后把它重新打开。新版本打开时发现宿主是旧的构建，照
 //! 升级的规矩让新宿主接手会话，见 `host_client`。
 
-use std::time::Duration;
+use std::{
+    sync::{
+        Arc,
+        atomic::{AtomicU64, Ordering},
+    },
+    time::Duration,
+};
 
 use gpui::{App, Global, PromptLevel, SystemNotification};
 use runode_update::{Error, Installation, Release, Staged};
@@ -21,6 +31,8 @@ use crate::config::AppConfig;
 const FIRST_CHECK: Duration = Duration::from_secs(30);
 /// 之后每隔这么久查一次。
 const CHECK_INTERVAL: Duration = Duration::from_secs(6 * 60 * 60);
+/// 下载时多久看一次进度。
+const PROGRESS_REFRESH: Duration = Duration::from_millis(250);
 /// 「下好了」的通知的标识。
 pub const NOTIFICATION_TAG: &str = "runode-update";
 /// 这份 app 的版本。
@@ -31,10 +43,27 @@ const VERSION: &str = env!("CARGO_PKG_VERSION");
 enum Phase {
     #[default]
     Idle,
-    /// 正在查或者下载；`manual` 是用户在菜单里点的，有结果时弹框说。
-    Busy { manual: bool },
+    /// 正在查有没有新版本；`manual` 是用户在菜单里点的，有结果时弹框说。
+    Checking { manual: bool },
+    /// 正在下载 `version`；`manual` 是用户选了下载的，下好了弹框说。
+    Downloading { version: String, progress: Arc<Progress>, manual: bool },
     /// 下好了，等着装上。
     Ready(Staged),
+}
+
+/// 下载的进度，下载线程写、前台读。
+#[derive(Default)]
+struct Progress {
+    received: AtomicU64,
+    /// 服务器没说总大小时是 0。
+    total: AtomicU64,
+}
+
+impl Progress {
+    fn percent(&self) -> Option<u64> {
+        let total = self.total.load(Ordering::Relaxed);
+        (total > 0).then(|| (self.received.load(Ordering::Relaxed) * 100 / total).min(100))
+    }
 }
 
 #[derive(Default)]
@@ -48,8 +77,8 @@ impl Global for Updater {}
 enum Found {
     /// 没有更新的版本；带着最新的版本号。
     UpToDate(String),
-    /// 新版本下好了。
-    Staged(Staged),
+    /// 有新版本，这份 app 也能自己装：等着下载。
+    Available { release: Release, installation: Installation },
     /// 有新版本，但这份 app 不能自己装：只能去下载页。
     Manual { release: Release, reason: String },
 }
@@ -90,6 +119,12 @@ pub fn install(cx: &mut App) {
 pub fn menu_label(cx: &App) -> String {
     match cx.try_global::<Updater>().map(|updater| &updater.phase) {
         Some(Phase::Ready(staged)) => rust_i18n::t!("update.menu_restart", version = staged.version()).into_owned(),
+        Some(Phase::Checking { .. }) => rust_i18n::t!("update.menu_checking").into_owned(),
+        Some(Phase::Downloading { version, progress, .. }) => match progress.percent() {
+            Some(percent) => rust_i18n::t!("update.menu_downloading", version = version, percent = percent),
+            None => rust_i18n::t!("update.menu_downloading_unknown", version = version),
+        }
+        .into_owned(),
         _ => rust_i18n::t!("update.menu_check").into_owned(),
     }
 }
@@ -103,7 +138,7 @@ pub fn menu_clicked(cx: &mut App) {
     }
 }
 
-/// 在后台查一次，没在查、也还没下好时才查；`manual` 时把结果弹框告诉用户。
+/// 在后台查一次，没在查、没在下载、也还没下好时才查；`manual` 时把结果弹框告诉用户。
 fn check(manual: bool, cx: &mut App) {
     let updater = cx.global_mut::<Updater>();
     match &mut updater.phase {
@@ -113,21 +148,22 @@ fn check(manual: bool, cx: &mut App) {
             }
             return;
         }
-        Phase::Busy { manual: asked } => {
+        Phase::Checking { manual: asked } | Phase::Downloading { manual: asked, .. } => {
             *asked |= manual;
             return;
         }
-        Phase::Idle => updater.phase = Phase::Busy { manual },
+        Phase::Idle => updater.phase = Phase::Checking { manual },
     }
+    crate::menus::set_menus(cx);
     let found = cx.background_executor().spawn(async { look() });
     cx.spawn(async move |cx| {
         let found = found.await;
-        cx.update(|cx| finish(found, cx));
+        cx.update(|cx| finish_check(found, cx));
     })
     .detach();
 }
 
-/// 查最新的版本，比这份新就下载、核对好。阻塞到下完。
+/// 查最新的版本，比这份新就看这份能不能自己装。
 fn look() -> Result<Found, Error> {
     let release = runode_update::latest()?;
     if !runode_update::is_newer(&release.version, VERSION) {
@@ -138,24 +174,27 @@ fn look() -> Result<Found, Error> {
         Ok(installation) => installation,
         Err(reason) => return Ok(Found::Manual { release, reason }),
     };
-    match installation.stage(&release) {
-        Ok(staged) => Ok(Found::Staged(staged)),
-        Err(Error::NoArchive) => Ok(Found::Manual { reason: Error::NoArchive.to_string(), release }),
-        Err(err) => Err(err),
+    if release.archive().is_none() {
+        return Ok(Found::Manual { reason: Error::NoArchive.to_string(), release });
     }
+    Ok(Found::Available { release, installation })
 }
 
-fn finish(found: Result<Found, Error>, cx: &mut App) {
-    let manual = matches!(cx.global::<Updater>().phase, Phase::Busy { manual: true });
+fn finish_check(found: Result<Found, Error>, cx: &mut App) {
+    let manual = matches!(cx.global::<Updater>().phase, Phase::Checking { manual: true });
     cx.global_mut::<Updater>().phase = Phase::Idle;
     match found {
-        Ok(Found::Staged(staged)) => {
-            cx.global_mut::<Updater>().phase = Phase::Ready(staged);
-            if manual {
-                offer_restart(cx);
-            } else {
-                post_ready(cx);
-            }
+        // 后台查到的直接下；手动查的先问，选了才下。
+        Ok(Found::Available { release, installation }) if !manual => download(release, installation, false, cx),
+        Ok(Found::Available { release, installation }) => {
+            let title = rust_i18n::t!("update.available_title", version = release.version);
+            let detail = rust_i18n::t!("update.available_detail", current = VERSION);
+            let answers = [&*rust_i18n::t!("update.download"), &*rust_i18n::t!("update.later")];
+            prompt(PromptLevel::Info, &title, &detail, &answers, cx, move |answer, cx| {
+                if answer == 0 {
+                    download(release, installation, true, cx);
+                }
+            });
         }
         Ok(Found::UpToDate(latest)) => {
             tracing::info!("Runode is up to date: {VERSION}, the latest is {latest}");
@@ -182,6 +221,67 @@ fn finish(found: Result<Found, Error>, cx: &mut App) {
             tracing::warn!("failed to check for updates: {err}");
             if manual {
                 let title = rust_i18n::t!("update.failed_title");
+                prompt(PromptLevel::Warning, &title, &err.to_string(), &[&rust_i18n::t!("update.ok")], cx, |_, _| {});
+            }
+        }
+    }
+    crate::menus::set_menus(cx);
+}
+
+/// 在后台下载 `release`、核对好，菜单里显示进度；`manual` 时下好了弹框说，否则发通知。
+fn download(release: Release, installation: Installation, manual: bool, cx: &mut App) {
+    let progress = Arc::new(Progress::default());
+    cx.global_mut::<Updater>().phase =
+        Phase::Downloading { version: release.version.clone(), progress: progress.clone(), manual };
+    crate::menus::set_menus(cx);
+    let staged = cx.background_executor().spawn(async move {
+        installation.stage(&release, &|received, total| {
+            progress.received.store(received, Ordering::Relaxed);
+            progress.total.store(total, Ordering::Relaxed);
+        })
+    });
+    cx.spawn(async move |cx| {
+        let staged = staged.await;
+        cx.update(|cx| finish_download(staged, cx));
+    })
+    .detach();
+    cx.spawn(async move |cx| {
+        let mut shown = None;
+        loop {
+            cx.background_executor().timer(PROGRESS_REFRESH).await;
+            let downloading = cx.update(|cx| {
+                let Phase::Downloading { progress, .. } = &cx.global::<Updater>().phase else { return false };
+                let percent = progress.percent();
+                if percent != shown {
+                    shown = percent;
+                    crate::menus::set_menus(cx);
+                }
+                true
+            });
+            if !downloading {
+                break;
+            }
+        }
+    })
+    .detach();
+}
+
+fn finish_download(staged: Result<Staged, Error>, cx: &mut App) {
+    let manual = matches!(cx.global::<Updater>().phase, Phase::Downloading { manual: true, .. });
+    cx.global_mut::<Updater>().phase = Phase::Idle;
+    match staged {
+        Ok(staged) => {
+            cx.global_mut::<Updater>().phase = Phase::Ready(staged);
+            if manual {
+                offer_restart(cx);
+            } else {
+                post_ready(cx);
+            }
+        }
+        Err(err) => {
+            tracing::warn!("failed to download the update: {err}");
+            if manual {
+                let title = rust_i18n::t!("update.download_failed_title");
                 prompt(PromptLevel::Warning, &title, &err.to_string(), &[&rust_i18n::t!("update.ok")], cx, |_, _| {});
             }
         }

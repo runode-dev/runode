@@ -47,25 +47,26 @@ impl Installation {
     }
 
     /// 把 `release` 下载到暂存目录、解压、核对签名和版本号，成了等着 `Staged::install`。会阻塞到
-    /// 下完，最多 `ARCHIVE_TIMEOUT`。没成时删掉暂存目录。
-    pub fn stage(&self, release: &Release) -> Result<Staged, Error> {
+    /// 下完，最多 `ARCHIVE_TIMEOUT`。没成时删掉暂存目录。下载时在这个线程上不断调
+    /// `progress(已收到的字节, 总字节)`，总字节未知时是 0。
+    pub fn stage(&self, release: &Release, progress: &dyn Fn(u64, u64)) -> Result<Staged, Error> {
         let url = release.archive().ok_or(Error::NoArchive)?;
         let dir = self.staging_dir();
-        let staged = self.stage_into(&dir, url, &release.version);
+        let staged = self.stage_into(&dir, url, &release.version, progress);
         if staged.is_err() {
             let _ = fs::remove_dir_all(&dir);
         }
         staged
     }
 
-    fn stage_into(&self, dir: &Path, url: &str, version: &str) -> Result<Staged, Error> {
+    fn stage_into(&self, dir: &Path, url: &str, version: &str, progress: &dyn Fn(u64, u64)) -> Result<Staged, Error> {
         // 上次下好却没装上（app 没正常退出、对调失败）留下的先删掉。
         if dir.exists() {
             fs::remove_dir_all(dir).map_err(|err| io(dir, err))?;
         }
         fs::create_dir(dir).map_err(|err| io(dir, err))?;
         let zip = dir.join("update.zip");
-        let body = crate::fetch::get(url, ARCHIVE_TIMEOUT)?;
+        let body = crate::fetch::get(url, ARCHIVE_TIMEOUT, progress)?;
         fs::write(&zip, body).map_err(|err| io(&zip, err))?;
         // ditto 解压时保留符号链接（.app 里的 rn）和扩展属性，签名才对得上。
         run(Command::new("/usr/bin/ditto").arg("-x").arg("-k").arg(&zip).arg(dir))?;

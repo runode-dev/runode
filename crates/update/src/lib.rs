@@ -60,7 +60,7 @@ impl Release {
 
 /// 取最新版本的清单。会阻塞到取到或者出错，最多 `MANIFEST_TIMEOUT`。
 pub fn latest() -> Result<Release, Error> {
-    Release::parse(&fetch::get(MANIFEST_URL, MANIFEST_TIMEOUT)?)
+    Release::parse(&fetch::get(MANIFEST_URL, MANIFEST_TIMEOUT, &|_, _| {})?)
 }
 
 /// 这台 Mac 的架构，按清单（`lipo -archs`）的叫法。

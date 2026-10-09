@@ -8,9 +8,14 @@ use crate::Error;
 #[cfg(target_os = "macos")]
 const IDLE_TIMEOUT: f64 = 30.0;
 
-/// 取 `url` 的内容，阻塞到取完或者出错，最多 `timeout`。HTTP 状态不是 2xx 时算出错。
+/// 下载时多久报一次进度。
 #[cfg(target_os = "macos")]
-pub(crate) fn get(url: &str, timeout: Duration) -> Result<Vec<u8>, Error> {
+const PROGRESS_INTERVAL: Duration = Duration::from_millis(250);
+
+/// 取 `url` 的内容，阻塞到取完或者出错，最多 `timeout`。HTTP 状态不是 2xx 时算出错。下载期间每隔
+/// `PROGRESS_INTERVAL` 调一次 `progress(已收到的字节, 总字节)`，服务器没说总大小时总字节是 0。
+#[cfg(target_os = "macos")]
+pub(crate) fn get(url: &str, timeout: Duration, progress: &dyn Fn(u64, u64)) -> Result<Vec<u8>, Error> {
     use std::sync::mpsc;
 
     use block2::RcBlock;
@@ -42,12 +47,21 @@ pub(crate) fn get(url: &str, timeout: Duration) -> Result<Vec<u8>, Error> {
     // SAFETY: 回调的签名和 NSURLSession 要的一致，它只在别的线程上被调一次。
     let task = unsafe { session.dataTaskWithURL_completionHandler(&target, &handler) };
     task.resume();
-    let outcome = result.recv().unwrap_or_else(|_| Err(Error::Network("the request was dropped".into())));
+    let outcome = loop {
+        match result.recv_timeout(PROGRESS_INTERVAL) {
+            Ok(outcome) => break outcome,
+            Err(mpsc::RecvTimeoutError::Timeout) => {
+                let (received, expected) = (task.countOfBytesReceived(), task.countOfBytesExpectedToReceive());
+                progress(received.max(0) as u64, expected.max(0) as u64);
+            }
+            Err(mpsc::RecvTimeoutError::Disconnected) => break Err(Error::Network("the request was dropped".into())),
+        }
+    };
     session.finishTasksAndInvalidate();
     outcome
 }
 
 #[cfg(not(target_os = "macos"))]
-pub(crate) fn get(_url: &str, _timeout: Duration) -> Result<Vec<u8>, Error> {
+pub(crate) fn get(_url: &str, _timeout: Duration, _progress: &dyn Fn(u64, u64)) -> Result<Vec<u8>, Error> {
     Err(Error::Network("downloading updates is only supported on macOS".into()))
 }

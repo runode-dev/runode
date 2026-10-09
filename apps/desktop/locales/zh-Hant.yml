@@ -142,6 +142,9 @@ quit:
   yield_failed_detail: "%{reason}\n\n現在結束，所有工作階段都會一併終止。"
 update:
   menu_check: 檢查更新…
+  menu_checking: 正在檢查更新…
+  menu_downloading: "正在下載 Runode %{version}… %{percent}%"
+  menu_downloading_unknown: "正在下載 Runode %{version}…"
   menu_restart: "重新啟動以更新到 Runode %{version}"
   up_to_date_title: Runode 已是最新版本
   up_to_date_detail: "現在用的 %{version} 就是最新版本。"
@@ -149,11 +152,15 @@ update:
   manual_detail: "這份 Runode 不能自己更新（%{reason}），請到發布頁下載新版本。"
   open_page: 打開下載頁
   later: 稍後
+  available_title: "Runode %{version} 已發布"
+  available_detail: "現在用的是 %{current}。要現在下載並更新嗎？下載進度顯示在「Runode」選單裡。"
+  download: 下載並更新
   ready_title: "Runode %{version} 已經下載好"
   ready_detail: 現在重新啟動就能更新，工作階段留在背景接著執行，新版本打開後接回來。也可以稍後再裝：結束 Runode 時會自動裝上。
   ready_notification: 現在重新啟動來更新，或者結束 Runode 時自動裝上。
   restart: 現在重新啟動
   failed_title: 檢查更新失敗
+  download_failed_title: 下載更新失敗
   ok: 好
 host_lost:
   message: 和終端機工作階段的連線中斷了，現在看到的是中斷前的最後一個畫面。

@@ -142,6 +142,9 @@ quit:
   yield_failed_detail: "%{reason}\n\nQuitting now ends every session."
 update:
   menu_check: Check for Updates…
+  menu_checking: Checking for Updates…
+  menu_downloading: "Downloading Runode %{version}… %{percent}%"
+  menu_downloading_unknown: "Downloading Runode %{version}…"
   menu_restart: "Restart to Update to Runode %{version}"
   up_to_date_title: Runode is up to date
   up_to_date_detail: "You're running the latest version, %{version}."
@@ -149,11 +152,15 @@ update:
   manual_detail: "This copy of Runode can't update itself (%{reason}). Download the new version from its release page."
   open_page: Open Download Page
   later: Later
+  available_title: "Runode %{version} is available"
+  available_detail: "You're running %{current}. Download and update now? Progress shows in the Runode menu."
+  download: Download and Update
   ready_title: "Runode %{version} is ready"
   ready_detail: "Restart now to update; your sessions keep running in the background and come back in the new version. Or install it later: it's installed when you quit Runode."
   ready_notification: Restart to update now, or it's installed when you quit Runode.
   restart: Restart Now
   failed_title: Couldn't check for updates
+  download_failed_title: Couldn't download the update
   ok: OK
 host_lost:
   message: Lost the connection to this terminal's session; what you see is the last screen before it dropped.

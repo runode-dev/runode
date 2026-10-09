@@ -142,6 +142,9 @@ quit:
   yield_failed_detail: "%{reason}\n\n现在退出，所有会话都会一起结束。"
 update:
   menu_check: 检查更新…
+  menu_checking: 正在检查更新…
+  menu_downloading: "正在下载 Runode %{version}… %{percent}%"
+  menu_downloading_unknown: "正在下载 Runode %{version}…"
   menu_restart: "重启以更新到 Runode %{version}"
   up_to_date_title: Runode 已是最新版本
   up_to_date_detail: "现在用的 %{version} 就是最新版本。"
@@ -149,11 +152,15 @@ update:
   manual_detail: "这份 Runode 不能自己更新（%{reason}），请到发布页下载新版本。"
   open_page: 打开下载页
   later: 稍后
+  available_title: "Runode %{version} 已发布"
+  available_detail: "现在用的是 %{current}。要现在下载并更新吗？下载进度显示在「Runode」菜单里。"
+  download: 下载并更新
   ready_title: "Runode %{version} 已经下载好"
   ready_detail: 现在重启就能更新，会话留在后台接着跑，新版本打开后接回来。也可以稍后再装：退出 Runode 时会自动装上。
   ready_notification: 现在重启来更新，或者退出 Runode 时自动装上。
   restart: 现在重启
   failed_title: 检查更新失败
+  download_failed_title: 下载更新失败
   ok: 好
 host_lost:
   message: 和终端会话的连接断开了，现在看到的是断开前的最后一屏。
