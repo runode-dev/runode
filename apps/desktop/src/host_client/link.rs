@@ -19,6 +19,10 @@
 //! VT 重放。
 //!
 //! 换主题和改选项（`SetTheme`、`SetOptions`）记着最近一次的，重连后补发。
+//!
+//! 等回话的请求（`spawn`、`attach_now`、`list_sessions`、`list_project_tasks`）超时了，这条连接按断开
+//! 处理（`Inner::timed_out`）：宿主按先后处理同一条连接上的消息，一个请求等不到回话，说明它卡住了，
+//! socket 却没断，不断开的话之后每个请求都要在主线程上等满超时。断开后请求立刻失败，等重连。
 
 mod reader;
 
@@ -305,6 +309,12 @@ impl Inner {
         state.channels.clear();
     }
 
+    /// 第 `generation` 条连接上的请求等回话超时了：宿主卡住了，按断开处理，见模块说明。
+    fn timed_out(&self, generation: u64) {
+        tracing::warn!("the host did not answer in time, dropping the connection to it");
+        self.lost(generation);
+    }
+
     /// 连接 `generation` 断了：每个会话收到 `Lost`，等回话的都放弃。已经换了新连接时什么都不做。
     fn lost(&self, generation: u64) {
         let mut state = self.state();
@@ -482,7 +492,7 @@ impl Link {
     pub fn spawn(&self, options: SpawnOptions) -> Result<SessionId> {
         let SpawnOptions { size, cwd, integration, start, shell, settings } = options;
         let req = self.inner.next_req.fetch_add(1, Ordering::Relaxed);
-        let reply = self.expect_reply(req)?;
+        let (reply, generation) = self.expect_reply(req)?;
         let spawn = ClientMsg::Spawn { req, size, cwd, integration, start, shell, settings };
         if let Err(err) = self.inner.control(&spawn) {
             self.inner.state().replies.remove(&req);
@@ -493,8 +503,7 @@ impl Link {
             Ok(HostMsg::Error { message, .. }) => Err(anyhow!(message)),
             Ok(other) => Err(anyhow!("unexpected answer from the host: {other:?}")),
             Err(mpsc::RecvTimeoutError::Timeout) => {
-                // 之后才到的 `Spawned` 没人等，读线程见了就结束那个会话。
-                self.inner.state().replies.remove(&req);
+                self.inner.timed_out(generation);
                 Err(anyhow!("the host did not answer in time"))
             }
             Err(mpsc::RecvTimeoutError::Disconnected) => Err(anyhow!("lost the connection to the host")),
@@ -528,6 +537,8 @@ impl Link {
         let (first, screen) = mpsc::channel();
         let mut route = Route::new(events);
         route.first_screen = Some(first);
+        // 发 `Attach` 之前取：取晚了可能已经换上新连接，超时时断错了。
+        let generation = self.inner.state().generation;
         if !self.start_attach(id, size, mode, Some(route)) {
             return Err(anyhow!("not connected to the host"));
         }
@@ -538,7 +549,7 @@ impl Link {
                 Err(anyhow!(message))
             }
             Err(mpsc::RecvTimeoutError::Timeout) => {
-                self.detach(id);
+                self.inner.timed_out(generation);
                 Err(anyhow!("the host did not send session {id} in time"))
             }
             Err(mpsc::RecvTimeoutError::Disconnected) => Err(anyhow!("lost the connection to the host")),
@@ -600,32 +611,46 @@ impl Link {
 
     /// 宿主里所有的会话，最多等 `timeout`。
     pub fn list_sessions(&self, timeout: Duration) -> Result<Vec<SessionInfo>> {
+        self.ask_sessions(timeout).map_err(|err| match err {
+            mpsc::RecvTimeoutError::Timeout => anyhow!("the host did not list its sessions in time"),
+            mpsc::RecvTimeoutError::Disconnected => anyhow!("not connected to the host"),
+        })
+    }
+
+    /// 发 `ListSessions` 等回话，最多等 `timeout`。没连着、发不出去、等的时候断了都是 `Disconnected`；
+    /// 超时时这条连接按断开处理（`Inner::timed_out`）。
+    fn ask_sessions(&self, timeout: Duration) -> Result<Vec<SessionInfo>, mpsc::RecvTimeoutError> {
         let (tx, rx) = mpsc::channel();
-        {
+        let generation = {
             let mut state = self.inner.state();
             if !state.connected {
-                return Err(anyhow!("not connected to the host"));
+                return Err(mpsc::RecvTimeoutError::Disconnected);
             }
             state.lists.push_back(tx);
+            state.generation
+        };
+        if let Err(err) = self.inner.control(&ClientMsg::ListSessions) {
+            tracing::debug!("failed to ask the host for its sessions: {err}");
+            return Err(mpsc::RecvTimeoutError::Disconnected);
         }
-        self.inner.control(&ClientMsg::ListSessions).map_err(|err| anyhow!("failed to ask the host: {err}"))?;
-        rx.recv_timeout(timeout).map_err(|err| match err {
-            mpsc::RecvTimeoutError::Timeout => anyhow!("the host did not list its sessions in time"),
-            mpsc::RecvTimeoutError::Disconnected => anyhow!("lost the connection to the host"),
-        })
+        let answer = rx.recv_timeout(timeout);
+        if matches!(answer, Err(mpsc::RecvTimeoutError::Timeout)) {
+            self.inner.timed_out(generation);
+        }
+        answer
     }
 
     /// 宿主在 `dir` 里列出的项目命令（Makefile 的目标、package.json 的 scripts），最多等 `timeout`。
     pub fn list_project_tasks(&self, dir: PathBuf, timeout: Duration) -> Result<Vec<TaskSource>> {
         let req = self.inner.next_req.fetch_add(1, Ordering::Relaxed);
-        let reply = self.expect_reply(req)?;
+        let (reply, generation) = self.expect_reply(req)?;
         if let Err(err) = self.inner.control(&ClientMsg::ListProjectTasks { req, dir }) {
             self.inner.state().replies.remove(&req);
             return Err(anyhow!("failed to ask the host: {err}"));
         }
         let answer = reply.recv_timeout(timeout);
-        if answer.is_err() {
-            self.inner.state().replies.remove(&req);
+        if matches!(answer, Err(mpsc::RecvTimeoutError::Timeout)) {
+            self.inner.timed_out(generation);
         }
         match answer {
             Ok(HostMsg::ProjectTasks { sources, .. }) => Ok(sources),
@@ -638,11 +663,13 @@ impl Link {
 
     /// 等宿主读完之前发的所有消息，最多等 `timeout`：发一个 `ListSessions` 等它回话，宿主按先后
     /// 处理同一条连接上的消息。宿主读完后断开（比如收到 `Shutdown` 后发了 `Goodbye`）也算。
-    /// 超时返回 false。
+    /// 超时返回 false，这条连接随之按断开处理，见 `ask_sessions`。
     pub fn flush(&self, timeout: Duration) -> bool {
-        match self.list_sessions(timeout) {
+        match self.ask_sessions(timeout) {
             Ok(_) => true,
-            Err(_) => !self.connected(),
+            // 超时后连接也断开了（`Inner::timed_out`），这时不能算读完。
+            Err(mpsc::RecvTimeoutError::Timeout) => false,
+            Err(mpsc::RecvTimeoutError::Disconnected) => !self.connected(),
         }
     }
 
@@ -664,14 +691,15 @@ impl Link {
         self.inner.ui_requests.lock().unwrap_or_else(PoisonError::into_inner).take()
     }
 
-    fn expect_reply(&self, req: u32) -> Result<mpsc::Receiver<HostMsg>> {
+    /// 登记等 `req` 的回话，返回收回话的一端和请求发在第几条连接上。
+    fn expect_reply(&self, req: u32) -> Result<(mpsc::Receiver<HostMsg>, u64)> {
         let (tx, rx) = mpsc::channel();
         let mut state = self.inner.state();
         if !state.connected {
             return Err(anyhow!("not connected to the host"));
         }
         state.replies.insert(req, tx);
-        Ok(rx)
+        Ok((rx, state.generation))
     }
 }
 

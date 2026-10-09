@@ -17,14 +17,14 @@ use super::{
         logo::{accent, agent_logo, brand_color},
     },
     divider_color,
-    model::{Tab, TabId, display_dir},
+    model::{Tab, TabId},
     panes::now_ms,
 };
 use crate::{
     assets::{PIXEL_QUESTION_ICON, PLUS_ICON, PROMPT_ICON},
     terminal_view::{DEFAULT_TITLE, TerminalView},
     ui::{
-        hsla,
+        display_dir, hsla,
         tooltip::{shortcut_text, tooltip},
     },
 };

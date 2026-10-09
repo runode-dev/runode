@@ -13,11 +13,10 @@ use super::{
     GotoAgent, TITLEBAR_HEIGHT, WindowView,
     agents::{AgentEntry, matches_query, reveal},
     cards, divider_color,
-    model::display_dir,
     titlebar::styled_agent_mark,
 };
 use crate::ui::{
-    hsla,
+    display_dir, hsla,
     text_field::{TextField, TextFieldEvent},
 };
 

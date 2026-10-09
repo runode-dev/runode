@@ -3,8 +3,14 @@
 
 use std::{
     collections::{HashMap, HashSet},
+    io::Read as _,
     process::{Child, Command, Stdio},
+    thread,
+    time::{Duration, Instant},
 };
+
+/// `ps`、`lsof` 最多跑这么久，超时当这次没数据：卡住一次不能让状态栏的轮询（连同防休眠）停下。
+const PROBE_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// 一个进程的父进程、内存（字节，取 phys_footprint）和 CPU 占用（百分比，一个核满载是 100）。
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -99,7 +105,7 @@ pub(super) struct Port {
 
 /// 现在的进程表；`ps` 跑不了时是空的。
 pub(super) fn processes() -> Procs {
-    let text = output(Command::new("/bin/ps").args(["-axo", "pid=,ppid=,rss=,%cpu="]));
+    let text = output(Command::new("/bin/ps").args(["-axo", "pid=,ppid=,rss=,%cpu="]), PROBE_TIMEOUT);
     let mut procs = parse_ps(&text);
     for (&pid, proc) in &mut procs {
         if let Some(footprint) = phys_footprint(pid) {
@@ -128,19 +134,49 @@ fn phys_footprint(_pid: u32) -> Option<u64> {
 
 /// 现在在监听的 TCP 端口，按端口号排好、同一个端口只列一次（IPv4 和 IPv6 各监听一次的那种）。
 pub(super) fn listening_ports() -> Vec<Port> {
-    let text = output(Command::new("/usr/sbin/lsof").args(["-nP", "-iTCP", "-sTCP:LISTEN", "-Fpcn"]));
+    let text = output(Command::new("/usr/sbin/lsof").args(["-nP", "-iTCP", "-sTCP:LISTEN", "-Fpcn"]), PROBE_TIMEOUT);
     parse_lsof(&text)
 }
 
-/// 跑命令拿标准输出；跑不了时是空字符串。`lsof` 有进程读不了时退出码不是 0，输出照样能用。
-fn output(command: &mut Command) -> String {
-    match command.stdin(Stdio::null()).stderr(Stdio::null()).output() {
-        Ok(output) => String::from_utf8_lossy(&output.stdout).into_owned(),
+/// 跑命令拿标准输出；跑不了、`timeout` 内没跑完（这时结束它）时是空字符串。`lsof` 有进程读不了时
+/// 退出码不是 0，输出照样能用。
+fn output(command: &mut Command, timeout: Duration) -> String {
+    let spawned = command.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::null()).spawn();
+    let mut child = match spawned {
+        Ok(child) => child,
         Err(err) => {
             tracing::debug!("cannot run {command:?}: {err}");
-            String::new()
+            return String::new();
+        }
+    };
+    // 输出放在别的线程里读：一边等它退出一边不读的话，输出多过管道的缓冲时它会卡在写上。
+    let mut stdout = child.stdout.take();
+    let reader = thread::spawn(move || {
+        let mut data = Vec::new();
+        if let Some(stdout) = &mut stdout {
+            let _ = stdout.read_to_end(&mut data);
+        }
+        data
+    });
+    let deadline = Instant::now() + timeout;
+    loop {
+        match child.try_wait() {
+            Ok(Some(_)) => break,
+            Ok(None) if Instant::now() < deadline => thread::sleep(Duration::from_millis(10)),
+            waited => {
+                if let Err(err) = waited {
+                    tracing::debug!("cannot wait for {command:?}: {err}");
+                } else {
+                    tracing::warn!("{command:?} did not finish in {timeout:?}, killing it");
+                }
+                // 结束后管道关上，读的线程随之退出。
+                let _ = child.kill();
+                let _ = child.wait();
+                return String::new();
+            }
         }
     }
+    reader.join().map(|data| String::from_utf8_lossy(&data).into_owned()).unwrap_or_default()
 }
 
 /// `ps -axo pid=,ppid=,rss=,%cpu=` 的输出：每行进程号、父进程号、常驻内存（KB）和 CPU 百分比。
@@ -234,6 +270,14 @@ mod tests {
         assert_eq!(procs.owner(20, |pid| pid == 10), None);
         // 11 在 10 下面不重复算；20 的父进程是 1 号进程，单独算上，1 号进程本身不算进来。
         assert_eq!(procs.forest(&HashSet::from([10, 11, 20])), Usage { cpu: 6.0, memory: 118 * 1024 });
+    }
+
+    #[test]
+    fn a_command_that_hangs_is_killed_and_gives_nothing() {
+        let started = Instant::now();
+        assert_eq!(output(Command::new("/bin/sleep").arg("30"), Duration::from_millis(200)), "");
+        assert!(started.elapsed() < Duration::from_secs(5), "{:?}", started.elapsed());
+        assert_eq!(output(Command::new("/bin/echo").arg("hi"), PROBE_TIMEOUT), "hi\n");
     }
 
     #[test]

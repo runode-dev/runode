@@ -14,12 +14,12 @@ use super::{
     SelectWorkspace, TAB_CLOSE_SIZE, TITLEBAR_HEIGHT, TRAFFIC_LIGHTS_WIDTH, ToggleSidebar, WindowView, background,
     cards, divider_color, drag_window,
     inline_edit::InlineEdit,
-    model::{WorkspaceId, display_dir},
+    model::WorkspaceId,
     titlebar::{close_button, drag_chip, drop_marker, icon_toggle, shortcut_hint, styled_agent_mark},
 };
 use crate::{
     assets::{BRANCH_ICON, GIT_ICON, SIDEBAR_ICON},
-    ui::{hsla, tooltip::tooltip},
+    ui::{display_dir, hsla, tooltip::tooltip},
 };
 pub(super) use repo::RepoBadge;
 

@@ -18,6 +18,11 @@
 //!
 //! 弹框之前都先推迟到当前的更新结束：动作和关闭按钮的回调运行时，触发它的窗口正被借出，这时
 //! 既读不到它里面的 agent，也没法在它上面弹框。
+//!
+//! 从 Dock 退出、注销、关机这类系统发起的退出不经过上面这些：GPUI 没接 `applicationShouldTerminate`，
+//! 拦不下也弹不了框，只在 `applicationWillTerminate` 里调 `on_app_quit` 的观察者。`install` 装的观察者
+//! 在这次退出没经过 `run` 时按退出（`QuitAction::Quit`）做不用问的那部分（`unprompted`），有 agent
+//! 在跑也不问。
 
 use std::{collections::HashSet, time::Duration};
 
@@ -154,6 +159,52 @@ fn prompting(cx: &App) -> bool {
     cx.try_global::<Prompting>().is_some_and(|prompting| prompting.0)
 }
 
+/// 这次退出经过了 `run`，会话怎么办已经办了：系统发起的退出的收尾（`install`）不再做一遍。
+#[derive(Default)]
+struct Settled(bool);
+
+impl Global for Settled {}
+
+/// 装上系统发起的退出（从 Dock 退出、注销、关机）的收尾，见模块说明。要在打开窗口之前调用。
+pub(super) fn install(cx: &mut App) {
+    cx.on_app_quit(|cx| {
+        if !cx.try_global::<Settled>().is_some_and(|settled| settled.0) {
+            end_unprompted(cx);
+        }
+        async {}
+    })
+    .detach();
+}
+
+/// 没经过 `run` 的退出：同步做 `unprompted` 定下的那部分。
+fn end_unprompted(cx: &mut App) {
+    let Some(ending) = unprompted(host_client::mode(), Keeping::now()) else {
+        return;
+    };
+    tracing::info!("quitting without going through the quit menu: {ending:?}");
+    // 同 `run`：会话交出去或者结束之前定下存档。
+    persist::freeze(cx);
+    match ending {
+        Ending::Yield => {
+            if let Err(reason) = host_client::yield_sessions() {
+                tracing::warn!("failed to keep the sessions in the background: {reason}");
+            }
+        }
+        Ending::ShutdownHost => shutdown_host(),
+        Ending::Keep | Ending::WithApp => {}
+    }
+}
+
+/// 弹不了框的退出里要做的事：按退出（`QuitAction::Quit`）的决策，会话要留下、宿主跑在 app 里时交出去
+/// （`Ending::Yield`），不留、宿主单独跑时让它连会话一起退出（`Ending::ShutdownHost`）；会话本来就留在
+/// 单独跑的宿主里、或者随 app 结束时什么都不用做，为 `None`。
+fn unprompted(mode: Mode, keeping: Keeping) -> Option<Ending> {
+    match ending(mode, keeping, QuitAction::Quit) {
+        ending @ (Ending::Yield | Ending::ShutdownHost) => Some(ending),
+        Ending::Keep | Ending::WithApp => None,
+    }
+}
+
 /// 退出应用，会话怎么办见 `quit_plan`。
 pub fn quit(cx: &mut App) {
     cx.defer(|cx| {
@@ -244,6 +295,11 @@ fn run(action: QuitAction, window: Option<AnyWindowHandle>, cx: &mut App, then: 
     if prompting(cx) {
         return;
     }
+    // 走到 `then` 时会话怎么办已经办了，接着的退出不用 `install` 的收尾再办。
+    let then = move |cx: &mut App| {
+        cx.set_global(Settled(true));
+        then(cx);
+    };
     let mode = host_client::mode();
     let keeping = Keeping::now();
     match ending(mode, keeping, action) {
@@ -621,6 +677,17 @@ mod tests {
         assert_eq!(quit_plan(IN_PROCESS, KEEP, action, 0), plan(Ending::Yield, None, false));
         assert_eq!(quit_plan(IN_PROCESS, END_STUCK, action, 0), plan(Ending::WithApp, None, false));
         assert_eq!(quit_plan(IN_PROCESS, STUCK, action, 1), plan(Ending::WithApp, Some(Prompt::Quit), false));
+    }
+
+    /// 系统发起的退出弹不了框：要交出去的照样交出去，单独跑的宿主不留会话时照样让它退出，有没有 agent
+    /// 都一样；会话留在单独跑的宿主里、随 app 结束时什么都不做。
+    #[test]
+    fn a_system_quit_does_what_needs_no_prompt() {
+        assert_eq!(unprompted(IN_PROCESS, KEEP), Some(Ending::Yield));
+        assert_eq!(unprompted(STANDALONE, END), Some(Ending::ShutdownHost));
+        assert_eq!(unprompted(STANDALONE, KEEP), None);
+        assert_eq!(unprompted(IN_PROCESS, END), None);
+        assert_eq!(unprompted(IN_PROCESS, STUCK), None);
     }
 
     /// 只有退出会把会话留下时菜单里才有「退出并结束所有会话」，跟着开关变。

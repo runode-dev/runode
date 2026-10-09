@@ -70,7 +70,7 @@ pub use files::{
 };
 pub(crate) use mobile::show_pairing;
 pub(crate) use open::{open_window, open_window_with};
-pub use persist::{install, saved_window_options};
+pub use persist::saved_window_options;
 pub use quit::{
     close_all_windows, close_window, end_sessions_in_menu, quit, quit_and_end_sessions, quit_to_update, should_close,
     terminal_windows,
@@ -166,6 +166,12 @@ const TAB_MAX_WIDTH: f32 = 200.;
 const AGENT_MARK_WIDTH: f32 = 12.;
 /// 分隔线两侧可以按住拖动的宽度。
 const DIVIDER_GRAB_WIDTH: f32 = 6.;
+
+/// 装上存档（`persist::install`）和系统发起的退出的收尾（`quit::install`）。要在打开窗口之前调用。
+pub fn install(cx: &mut App) {
+    persist::install(cx);
+    quit::install(cx);
+}
 
 /// 面板之间、标题下面和标签之间这些分隔线的颜色：前景色调淡，各处一样深。
 fn divider_color(fg: gpui::Hsla) -> gpui::Hsla {

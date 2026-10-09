@@ -105,8 +105,9 @@ fn watch(service: &Weak<Service>, host: &Host, dirs: &runode_paths::Dirs, mut co
         let stamp = crate::config::watch_stamp(&config);
         if stamp != seen {
             config = Config::load(true);
-            // 重读可能引入新的文件（比如换了主题），按新配置重新记录。
-            seen = crate::config::watch_stamp(&config);
+            // 重读可能引入新的文件（比如换了主题），按新配置重新记录；读之前就盯着的用读之前取的
+            // 时间，读的时候有人写进来下一轮照样重读。
+            seen = crate::config::seen_after(&stamp, &config);
             service.set(wanted_port(&config), config.remote_access_name.clone());
             service.set_push(push_settings(&config));
         }

@@ -1,6 +1,7 @@
 //! 读线程（`host-link-reader`）：读宿主发来的帧，按会话分发成 `LinkEvent`。输出帧按通道找到会话，
 //! 快照帧拼好到 `SnapshotEnd` 作为一份 `Screen` 交出去，带 `req` 的回话交给等着的调用方，
-//! `UiRequest` 交给界面；连接断开或者宿主说 `Goodbye` 时退出。
+//! `UiRequest` 交给界面；连接断开或者宿主说 `Goodbye` 时退出。每帧都带着读线程自己那条连接的代数，
+//! 连接已经换过时丢掉：换上新连接后旧连接上已经读进来的帧不能按新连接的通道、请求号和会话处理。
 
 use std::{io::BufReader, os::unix::net::UnixStream, sync::mpsc};
 
@@ -21,8 +22,8 @@ pub(super) fn read_loop(inner: &Inner, generation: u64, stream: UnixStream) {
             }
         };
         match frame.kind {
-            FrameKind::Output => output(inner, frame.channel, frame.payload),
-            FrameKind::Snapshot => snapshot(inner, frame.channel, &frame.payload),
+            FrameKind::Output => output(inner, generation, frame.channel, frame.payload),
+            FrameKind::Snapshot => snapshot(inner, generation, frame.channel, &frame.payload),
             FrameKind::Control => match frame.message::<HostMsg>() {
                 Ok(HostMsg::Goodbye { reason }) => {
                     tracing::info!("the host said goodbye: {reason:?}");
@@ -31,7 +32,7 @@ pub(super) fn read_loop(inner: &Inner, generation: u64, stream: UnixStream) {
                     }
                     return;
                 }
-                Ok(message) => dispatch(inner, message),
+                Ok(message) => dispatch(inner, generation, message),
                 Err(err) => tracing::debug!("unreadable message from the host: {err}"),
             },
             FrameKind::Input => tracing::debug!("the host sent an input frame"),
@@ -39,9 +40,13 @@ pub(super) fn read_loop(inner: &Inner, generation: u64, stream: UnixStream) {
     }
 }
 
-/// 一块输出：交给这个通道的会话；通道不认识（旧的订阅、已经不看了）时丢掉。
-pub(super) fn output(inner: &Inner, channel: u32, data: Vec<u8>) {
+/// 第 `generation` 条连接上的一块输出：交给这个通道的会话；通道不认识（旧的订阅、已经不看了）或者
+/// 连接已经换过时丢掉。
+pub(super) fn output(inner: &Inner, generation: u64, channel: u32, data: Vec<u8>) {
     let mut state = inner.state();
+    if state.generation != generation {
+        return;
+    }
     let Some(&id) = state.channels.get(&channel) else { return };
     let alive = match state.sessions.get_mut(&id) {
         Some(route) if route.attaching == 0 && route.assembling.is_none() => route.deliver(LinkEvent::Output(data)),
@@ -52,8 +57,11 @@ pub(super) fn output(inner: &Inner, channel: u32, data: Vec<u8>) {
     }
 }
 
-pub(super) fn snapshot(inner: &Inner, channel: u32, data: &[u8]) {
+pub(super) fn snapshot(inner: &Inner, generation: u64, channel: u32, data: &[u8]) {
     let mut state = inner.state();
+    if state.generation != generation {
+        return;
+    }
     let Some(&id) = state.channels.get(&channel) else { return };
     if let Some(route) = state.sessions.get_mut(&id)
         && let Some((_, assembled)) = &mut route.assembling
@@ -72,9 +80,14 @@ pub(super) fn drop_route(state: &mut State, id: SessionId) {
     }
 }
 
-/// 一条控制消息：回话交给等着的调用方，会话的消息交给那个会话。
-pub(super) fn dispatch(inner: &Inner, message: HostMsg) {
+/// 第 `generation` 条连接上的一条控制消息：回话交给等着的调用方，会话的消息交给那个会话；连接已经
+/// 换过时丢掉。
+pub(super) fn dispatch(inner: &Inner, generation: u64, message: HostMsg) {
     let mut state = inner.state();
+    if state.generation != generation {
+        tracing::debug!("dropped a message from an earlier host connection: {message:?}");
+        return;
+    }
     match message {
         HostMsg::Spawned { req, id } => match state.replies.remove(&req) {
             Some(reply) => {
@@ -104,7 +117,7 @@ pub(super) fn dispatch(inner: &Inner, message: HostMsg) {
             }
         }
         HostMsg::UiRequest { ui, request } => {
-            let ticket = UiTicket::new(ui, state.generation);
+            let ticket = UiTicket::new(ui, generation);
             drop(state);
             if inner.ui.unbounded_send((ticket, *request)).is_err() {
                 let reply = HostMsg::Error { req: None, id: None, message: "the runode app is quitting".into() };

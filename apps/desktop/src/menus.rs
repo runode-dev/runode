@@ -14,6 +14,7 @@ use crate::{
     },
     ui::{
         actions::{Copy, Cut, Paste, Redo, SelectAll, Undo},
+        display_dir,
         text_field::{SearchNext, SearchPrevious},
     },
     window::{
@@ -236,7 +237,7 @@ fn install_agent_integration(cx: &mut App) {
     let Some(window) = cx.active_window().or_else(|| cx.windows().into_iter().next()) else {
         return;
     };
-    let paths = setup_paths(SETUP_TARGETS.iter().map(|target| runode_cli::setup_path(*target, &home)), &home);
+    let paths = setup_paths(SETUP_TARGETS.iter().map(|target| runode_cli::setup_path(*target, &home)));
     let title = rust_i18n::t!("setup.confirm_title");
     let detail = rust_i18n::t!("setup.confirm_detail", paths = paths);
     let answers = [&*rust_i18n::t!("setup.install"), &*rust_i18n::t!("setup.cancel")];
@@ -255,7 +256,7 @@ fn install_agent_integration(cx: &mut App) {
             Ok(paths) => (
                 PromptLevel::Info,
                 rust_i18n::t!("setup.done_title"),
-                rust_i18n::t!("setup.done_detail", paths = setup_paths(paths, &home)),
+                rust_i18n::t!("setup.done_detail", paths = setup_paths(paths)),
             ),
             Err(err) => {
                 tracing::error!("failed to install the agent integration: {err:#}");
@@ -272,16 +273,9 @@ fn install_agent_integration(cx: &mut App) {
     .detach();
 }
 
-/// 提示框里一行一个文件，`home` 底下的写成 `~/…`。
-fn setup_paths(paths: impl IntoIterator<Item = std::path::PathBuf>, home: &std::path::Path) -> String {
-    paths
-        .into_iter()
-        .map(|path| match path.strip_prefix(home) {
-            Ok(rest) => format!("~/{}", rest.display()),
-            Err(_) => path.display().to_string(),
-        })
-        .collect::<Vec<_>>()
-        .join("\n")
+/// 提示框里一行一个文件，家目录底下的写成 `~/…`。
+fn setup_paths(paths: impl IntoIterator<Item = std::path::PathBuf>) -> String {
+    paths.into_iter().map(|path| display_dir(&path)).collect::<Vec<_>>().join("\n")
 }
 
 fn with_active_window(cx: &mut App, f: impl FnOnce(&mut gpui::Window)) {

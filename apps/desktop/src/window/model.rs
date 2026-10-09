@@ -75,19 +75,6 @@ pub(super) fn base_name(path: &Path) -> String {
     path.file_name().map_or_else(|| path.display().to_string(), |name| name.to_string_lossy().into_owned())
 }
 
-/// 侧栏里显示的目录，家目录写成 `~`。
-pub(super) fn display_dir(dir: &Path) -> String {
-    if let Some(home) = home_dir()
-        && let Ok(rest) = dir.strip_prefix(&home)
-    {
-        if rest.as_os_str().is_empty() {
-            return "~".into();
-        }
-        return format!("~/{}", rest.display());
-    }
-    dir.display().to_string()
-}
-
 /// workspace 的标识，挪动位置后不变。
 pub(super) type WorkspaceId = u64;
 

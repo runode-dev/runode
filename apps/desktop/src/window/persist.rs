@@ -10,7 +10,7 @@
 
 pub(super) mod format;
 
-use std::{collections::HashMap, io, path::Path, time::Duration};
+use std::{collections::HashMap, path::Path, time::Duration};
 
 use gpui::{
     App, Bounds, Context, EntityId, Global, Task, WeakEntity, Window, WindowBounds, WindowOptions, point, px, size,
@@ -71,7 +71,7 @@ impl Saver {
 }
 
 /// 装上存档，退出时把各窗口最新的布局写一次。要在打开窗口之前调用。
-pub fn install(cx: &mut App) {
+pub(super) fn install(cx: &mut App) {
     cx.set_global(Saver::default());
     cx.on_app_quit(|cx| {
         freeze(cx);
@@ -105,20 +105,11 @@ pub(super) fn thaw(cx: &mut App) {
 }
 
 /// 上次存下的各个窗口，以及恢复时打开它们用的窗口选项（位置、大小、所在屏幕）。没有存档或
-/// 读不了时为空；文件坏了时挪到一边，从默认布局开始。终端记的会话按宿主里还活着的会话定下
-/// 接不接（`format::plan_restore`）；宿主里已经退出又没人连着的、存档记着却一直没启动的会话
+/// 读不了时为空；读不了时文件挪到一边（`format::load`），从默认布局开始。终端记的会话按宿主里
+/// 还活着的会话定下接不接（`format::plan_restore`）；宿主里已经退出又没人连着的、存档记着却一直没启动的会话
 /// 这时结束掉（没有存档也照样做）。
 pub fn saved_window_options(cx: &App) -> Vec<(SavedWindow, WindowOptions)> {
-    let windows = match format::load() {
-        Ok(state) => state.map(|state| state.windows).unwrap_or_default(),
-        Err(err) => {
-            tracing::warn!("failed to read the saved window layout, starting fresh: {err}");
-            if matches!(err.kind(), io::ErrorKind::InvalidData | io::ErrorKind::UnexpectedEof) {
-                format::set_aside();
-            }
-            Vec::new()
-        }
-    };
+    let windows = format::load().map(|state| state.windows).unwrap_or_default();
     let windows: Vec<_> = windows.into_iter().filter(|window| !window.workspaces.is_empty()).collect();
     let live = live_sessions();
     let plan = format::plan_restore(windows, &live);

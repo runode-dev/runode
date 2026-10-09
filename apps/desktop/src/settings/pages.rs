@@ -11,7 +11,10 @@ use super::{
     },
     picker::{PickItem, PickTarget, ThemeSlot},
 };
-use crate::{i18n::tr, ui::hsla};
+use crate::{
+    i18n::tr,
+    ui::{display_dir, hsla},
+};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum Page {
@@ -669,15 +672,7 @@ impl SettingsView {
     }
 
     fn render_config_file_actions(&mut self, colors: Colors, cx: &mut Context<Self>) -> Div {
-        let path = runode_config::config_path().map(|path| {
-            match runode_paths::Dirs::from_env()
-                .home
-                .and_then(|home| path.strip_prefix(home).ok().map(|rest| rest.to_owned()))
-            {
-                Some(rest) => format!("~/{}", rest.display()),
-                None => path.display().to_string(),
-            }
-        });
+        let path = runode_config::config_path().map(|path| display_dir(&path));
         let open = button("open-config", rust_i18n::t!("settings.open_config").into_owned(), colors)
             .on_click(on_click(cx, |_, _, cx| crate::config::open(cx)));
         let reload = button("reload-config", rust_i18n::t!("settings.reload_config").into_owned(), colors)

@@ -22,13 +22,12 @@ use runode_protocol::{SessionId, SessionInfo};
 use runode_shared_types::color::Rgb;
 
 use super::{
-    AGENT_MARK_WIDTH, WindowView, agents::Mark, cards, divider_color, model::display_dir, quit::held_sessions,
-    titlebar::styled_agent_mark,
+    AGENT_MARK_WIDTH, WindowView, agents::Mark, cards, divider_color, quit::held_sessions, titlebar::styled_agent_mark,
 };
 use crate::{
     host_client::{self, Mode},
     terminal_view::{DEFAULT_TITLE, TerminalView},
-    ui::hsla,
+    ui::{display_dir, hsla},
 };
 
 /// 列表不空时隔这么久重问一次宿主。

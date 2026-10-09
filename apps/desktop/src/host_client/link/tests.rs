@@ -258,16 +258,17 @@ fn frames_between_attach_and_attached_are_dropped() {
         state.sessions.insert(id, route);
         state.channels.insert(1, id);
     }
-    output(&link.inner, 1, b"live".to_vec());
+    output(&link.inner, 0, 1, b"live".to_vec());
     assert!(matches!(rx.try_recv(), Ok(LinkEvent::Output(data)) if data == b"live"));
     // 重新连上：这之后、新的 `Attached` 之前，旧订阅的输出和标记都不要。
     assert!(link.reattach(id, None, AttachMode::Snapshot));
-    output(&link.inner, 1, b"stale".to_vec());
-    dispatch(&link.inner, HostMsg::Resized { id, size: SIZE });
-    dispatch(&link.inner, HostMsg::Meta { id, meta: SessionMeta::default() });
+    output(&link.inner, 0, 1, b"stale".to_vec());
+    dispatch(&link.inner, 0, HostMsg::Resized { id, size: SIZE });
+    dispatch(&link.inner, 0, HostMsg::Meta { id, meta: SessionMeta::default() });
     assert!(rx.try_recv().is_err(), "nothing reaches the view while attaching");
     dispatch(
         &link.inner,
+        0,
         HostMsg::Attached {
             id,
             channel: 2,
@@ -277,18 +278,18 @@ fn frames_between_attach_and_attached_are_dropped() {
             settings: None,
         },
     );
-    snapshot(&link.inner, 2, b"snap");
-    snapshot(&link.inner, 2, b"shot");
-    output(&link.inner, 1, b"old channel".to_vec());
-    dispatch(&link.inner, HostMsg::SnapshotEnd { id });
+    snapshot(&link.inner, 0, 2, b"snap");
+    snapshot(&link.inner, 0, 2, b"shot");
+    output(&link.inner, 0, 1, b"old channel".to_vec());
+    dispatch(&link.inner, 0, HostMsg::SnapshotEnd { id });
     let LinkEvent::Screen(screen) = rx.try_recv().unwrap() else { panic!("expected the screen") };
     assert_eq!(screen.data, b"snapshot");
     assert_eq!(screen.attached.channel, 2);
-    output(&link.inner, 2, b"new".to_vec());
+    output(&link.inner, 0, 2, b"new".to_vec());
     assert!(matches!(rx.try_recv(), Ok(LinkEvent::Output(data)) if data == b"new"));
-    dispatch(&link.inner, HostMsg::Bell { id });
+    dispatch(&link.inner, 0, HostMsg::Bell { id });
     assert!(matches!(rx.try_recv(), Ok(LinkEvent::Msg(HostMsg::Bell { .. }))));
-    dispatch(&link.inner, HostMsg::SizeOwner { id, mine: false, owner: Some("studio".into()) });
+    dispatch(&link.inner, 0, HostMsg::SizeOwner { id, mine: false, owner: Some("studio".into()) });
     assert!(matches!(rx.try_recv(), Ok(LinkEvent::Msg(HostMsg::SizeOwner { mine: false, .. }))));
 }
 
@@ -307,10 +308,10 @@ fn two_attaches_in_a_row_wait_for_the_second_attached() {
         meta: SessionMeta::default(),
         settings: None,
     };
-    dispatch(&link.inner, attached(1));
-    dispatch(&link.inner, HostMsg::Meta { id, meta: SessionMeta::default() });
+    dispatch(&link.inner, 0, attached(1));
+    dispatch(&link.inner, 0, HostMsg::Meta { id, meta: SessionMeta::default() });
     assert!(rx.try_recv().is_err());
-    dispatch(&link.inner, attached(2));
+    dispatch(&link.inner, 0, attached(2));
     let LinkEvent::Screen(screen) = rx.try_recv().unwrap() else { panic!("expected the screen") };
     assert_eq!(screen.attached.channel, 2);
 }
@@ -329,6 +330,26 @@ fn attached_link(id: SessionId) -> (Link, UnboundedReceiver<LinkEvent>) {
     (link, rx)
 }
 
+/// 连接换过以后，旧连接的读线程已经读进来的帧一律丢掉，不按新连接的通道和会话处理；宿主转来的
+/// 请求的回执记的是收到它的那条连接。
+#[test]
+fn frames_from_an_earlier_connection_are_dropped() {
+    let id = SessionId(1);
+    let (link, mut rx) = attached_link(id);
+    let mut requests = link.ui_requests().unwrap();
+    link.inner.state().generation = 1;
+    output(&link.inner, 0, 1, b"stale".to_vec());
+    dispatch(&link.inner, 0, HostMsg::Bell { id });
+    dispatch(&link.inner, 0, HostMsg::UiRequest { ui: 4, request: Box::new(ClientMsg::Layout { req: 1 }) });
+    assert!(rx.try_recv().is_err());
+    assert!(requests.try_recv().is_err());
+    output(&link.inner, 1, 1, b"fresh".to_vec());
+    assert!(matches!(rx.try_recv(), Ok(LinkEvent::Output(data)) if data == b"fresh"));
+    dispatch(&link.inner, 1, HostMsg::UiRequest { ui: 5, request: Box::new(ClientMsg::Layout { req: 2 }) });
+    let (ticket, _) = requests.try_recv().unwrap();
+    assert_eq!(ticket, UiTicket::new(5, 1));
+}
+
 /// 重新连上时撞上会话被结束（比如 `runode kill`）：旧订阅的 `Exited` 先到、新的 `Attach` 因为
 /// 会话没了回 `Error`。视图先收到 `Error`，再收到留下的 `Exited`，能关掉。
 #[test]
@@ -336,10 +357,10 @@ fn an_exit_while_reattaching_reaches_the_view() {
     let id = SessionId(1);
     let (link, mut rx) = attached_link(id);
     assert!(link.reattach(id, None, AttachMode::Snapshot));
-    dispatch(&link.inner, HostMsg::Meta { id, meta: SessionMeta::default() });
-    dispatch(&link.inner, HostMsg::Exited { id, status: None });
+    dispatch(&link.inner, 0, HostMsg::Meta { id, meta: SessionMeta::default() });
+    dispatch(&link.inner, 0, HostMsg::Exited { id, status: None });
     assert!(rx.try_recv().is_err(), "nothing reaches the view while attaching");
-    dispatch(&link.inner, HostMsg::Error { req: None, id: Some(id), message: format!("no session {id}") });
+    dispatch(&link.inner, 0, HostMsg::Error { req: None, id: Some(id), message: format!("no session {id}") });
     assert!(matches!(rx.try_recv(), Ok(LinkEvent::Msg(HostMsg::Error { id: Some(got), .. })) if got == id));
     assert!(matches!(rx.try_recv(), Ok(LinkEvent::Msg(HostMsg::Exited { id: got, .. })) if got == id));
     assert!(rx.try_recv().is_err());
@@ -352,7 +373,7 @@ fn an_exit_while_attaching_follows_the_new_screen() {
     let id = SessionId(1);
     let (link, mut rx) = attached_link(id);
     assert!(link.reattach(id, None, AttachMode::Snapshot));
-    dispatch(&link.inner, HostMsg::Exited { id, status: None });
+    dispatch(&link.inner, 0, HostMsg::Exited { id, status: None });
     let attached = |channel, mode| HostMsg::Attached {
         id,
         channel,
@@ -361,21 +382,21 @@ fn an_exit_while_attaching_follows_the_new_screen() {
         meta: SessionMeta::default(),
         settings: None,
     };
-    dispatch(&link.inner, attached(2, AttachMode::Snapshot));
-    snapshot(&link.inner, 2, b"snap");
+    dispatch(&link.inner, 0, attached(2, AttachMode::Snapshot));
+    snapshot(&link.inner, 0, 2, b"snap");
     assert!(rx.try_recv().is_err(), "the exit waits for the screen");
-    dispatch(&link.inner, HostMsg::SnapshotEnd { id });
+    dispatch(&link.inner, 0, HostMsg::SnapshotEnd { id });
     assert!(matches!(rx.try_recv(), Ok(LinkEvent::Screen(screen)) if screen.data == b"snap"));
     assert!(matches!(rx.try_recv(), Ok(LinkEvent::Msg(HostMsg::Exited { .. }))));
 
     assert!(link.reattach(id, None, AttachMode::MetaOnly));
-    dispatch(&link.inner, HostMsg::Exited { id, status: None });
-    dispatch(&link.inner, attached(3, AttachMode::MetaOnly));
+    dispatch(&link.inner, 0, HostMsg::Exited { id, status: None });
+    dispatch(&link.inner, 0, attached(3, AttachMode::MetaOnly));
     assert!(matches!(rx.try_recv(), Ok(LinkEvent::Screen(_))));
     assert!(matches!(rx.try_recv(), Ok(LinkEvent::Msg(HostMsg::Exited { .. }))));
 
     assert!(link.reattach(id, None, AttachMode::MetaOnly));
-    dispatch(&link.inner, HostMsg::Exited { id, status: None });
+    dispatch(&link.inner, 0, HostMsg::Exited { id, status: None });
     link.close();
     assert!(matches!(rx.try_recv(), Ok(LinkEvent::Msg(HostMsg::Exited { .. }))));
     assert!(matches!(rx.try_recv(), Ok(LinkEvent::Lost)));
@@ -506,6 +527,29 @@ fn every_session_hears_when_the_host_goes_away() {
         .is_err()
     );
     assert!(matches!(next(&mut link.attach(SessionId(3), None, AttachMode::Snapshot)), LinkEvent::Lost));
+}
+
+/// 宿主卡住了、socket 却没断：一个请求等不到回话，这条连接就按断开处理，会话收到 `Lost`，之后的
+/// 请求立刻失败，不再每次等满超时。
+#[test]
+fn a_request_that_times_out_drops_the_connection() {
+    let (stuck, stuck_rx) = mpsc::channel::<()>();
+    let link = fake_host(move |mut stream| {
+        wait_for_attach(&mut stream);
+        // 读着不回，直到测试结束。
+        let _ = stuck_rx.recv();
+        drop(stream);
+    });
+    let mut rx = link.attach(SessionId(1), None, AttachMode::Snapshot);
+    let wait = Duration::from_millis(100);
+    assert!(link.list_sessions(wait).is_err());
+    assert!(!link.connected());
+    assert!(matches!(next(&mut rx), LinkEvent::Lost));
+    let started = Instant::now();
+    assert!(link.list_sessions(WAIT).is_err());
+    assert!(link.attach_now(SessionId(1), None, AttachMode::Snapshot, WAIT).is_err());
+    assert!(started.elapsed() < Duration::from_secs(1), "{:?}", started.elapsed());
+    drop(stuck);
 }
 
 #[test]

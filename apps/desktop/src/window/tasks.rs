@@ -19,7 +19,6 @@ pub(super) use custom::AddTaskDialog;
 use super::{
     ToggleTasks,
     files::{MenuButton, MenuItem, group_item, labeled_item, menu_item},
-    model::display_dir,
     project::{TOGGLE_HEIGHT, TOGGLE_WIDTH},
     titlebar::icon_toggle,
 };
@@ -27,7 +26,7 @@ use crate::{
     assets::{PENCIL_ICON, PLAY_ICON, TRASH_ICON},
     config::AppConfig,
     host_client,
-    ui::tooltip::tooltip,
+    ui::{display_dir, tooltip::tooltip},
     window::WindowView,
 };
 

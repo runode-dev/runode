@@ -6,7 +6,8 @@
 
 use std::{
     collections::HashSet,
-    fs, io,
+    fs,
+    io::{self, Write as _},
     path::{Path, PathBuf},
 };
 
@@ -14,7 +15,7 @@ use runode_protocol::{SessionId, SessionInfo};
 use runode_shared_types::pane::Axis;
 use serde::{Deserialize, Serialize};
 
-/// 格式改得不兼容时加一；读到别的版本当作没有存档。
+/// 格式改得不兼容时加一；读到别的版本时存档挪到一边（`load`），从默认布局开始。
 const VERSION: u32 = 1;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -239,42 +240,69 @@ pub fn start_dir(cwd: Option<&Path>, workspace_dir: &Path) -> Option<PathBuf> {
     cwd.filter(|cwd| cwd.is_dir()).or_else(|| Some(workspace_dir).filter(|dir| dir.is_dir())).map(Path::to_path_buf)
 }
 
-/// 读存档。没有存档或者是别的版本时为 `Ok(None)`，读不了或内容坏了时报错。
-pub fn load() -> io::Result<Option<State>> {
-    let Some(path) = path() else {
-        return Ok(None);
-    };
-    let text = match fs::read_to_string(&path) {
+/// 读存档，没有存档时为 `None`。读不了、内容坏了或者是别的版本时也为 `None`，并把原文件挪到一边
+/// （`set_aside`）：之后布局一变就要写存档，不挪开就会被默认布局盖掉。
+pub fn load() -> Option<State> {
+    load_at(&path()?)
+}
+
+fn load_at(path: &Path) -> Option<State> {
+    match read(path) {
+        Ok(state) => state,
+        Err(err) => {
+            tracing::warn!("failed to read the saved window layout, setting it aside and starting fresh: {err}");
+            set_aside(path);
+            None
+        }
+    }
+}
+
+/// 读 `path` 上的存档：不存在时为 `Ok(None)`，读不了、内容坏了或者是别的版本时报错。
+fn read(path: &Path) -> io::Result<Option<State>> {
+    let text = match fs::read_to_string(path) {
         Ok(text) => text,
         Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(None),
         Err(err) => return Err(err),
     };
-    // 先只看版本：别的版本的格式可能对不上，不该当成坏文件。
+    // 先只看版本：别的版本的格式可能对不上，按格式解会报得莫名其妙。
     #[derive(Deserialize)]
     struct Version {
         version: u32,
     }
-    if serde_json::from_str::<Version>(&text)?.version != VERSION {
-        return Ok(None);
+    let version = serde_json::from_str::<Version>(&text)?.version;
+    if version != VERSION {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("saved in format {version}, this build reads format {VERSION}"),
+        ));
     }
     Ok(Some(serde_json::from_str(&text)?))
 }
 
-/// 写存档：先写到旁边的临时文件再改名，写到一半退出也不会留下半个文件。
+/// 写存档，见 `write_at`。
 pub fn write(state: &State) -> io::Result<()> {
     let path = path().ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "no home directory"))?;
+    write_at(&path, state)
+}
+
+/// 把存档写到 `path`：先写到旁边的临时文件、落盘再改名，写到一半退出或者断电也不会留下半个文件。
+/// 临时文件名带上进程号，同时开着的两个 app 一起写时不会截断对方写了一半的。
+fn write_at(path: &Path, state: &State) -> io::Result<()> {
     if let Some(dir) = path.parent() {
         fs::create_dir_all(dir)?;
     }
-    let tmp = path.with_extension("json.tmp");
-    fs::write(&tmp, serde_json::to_vec_pretty(state)?)?;
-    fs::rename(&tmp, &path)
+    let tmp = path.with_extension(format!("json.{}.tmp", std::process::id()));
+    let mut file = fs::File::create(&tmp)?;
+    file.write_all(&serde_json::to_vec_pretty(state)?)?;
+    file.sync_all()?;
+    fs::rename(&tmp, path)
 }
 
-/// 内容坏了的存档挪到一边，下次写的时候不覆盖它，留着排查。
-pub fn set_aside() {
-    if let Some(path) = path() {
-        let _ = fs::rename(&path, path.with_extension("json.bad"));
+/// 读不了的存档挪到一边，之后写的时候不覆盖它，留着排查或者换回能读它的版本。
+fn set_aside(path: &Path) {
+    let bad = path.with_extension("json.bad");
+    if let Err(err) = fs::rename(path, &bad) {
+        tracing::warn!("failed to move the saved window layout aside to {}: {err}", bad.display());
     }
 }
 
@@ -382,6 +410,44 @@ mod tests {
         let state: State = serde_json::from_str(&old).unwrap();
         assert!(!state.windows[0].git_graph_collapsed);
         assert_eq!(state.windows[0].git_graph_height, None);
+    }
+
+    /// 每个测试一个空的临时目录。
+    fn temp_dir(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("runode-persist-{}-{name}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn a_saved_file_reads_back() {
+        let path = temp_dir("round-trip").join("windows.json");
+        assert_eq!(load_at(&path), None, "no file yet");
+        write_at(&path, &state()).unwrap();
+        assert_eq!(load_at(&path), Some(state()));
+        // 临时文件改名换上了，没留下。
+        let left: Vec<_> =
+            fs::read_dir(path.parent().unwrap()).unwrap().map(|entry| entry.unwrap().file_name()).collect();
+        assert_eq!(left, ["windows.json"]);
+    }
+
+    /// 截断了的、别的版本的存档都读不了：挪到一边留着，原处空出来，之后写存档不会盖掉它。
+    #[test]
+    fn unreadable_files_are_set_aside() {
+        let text = serde_json::to_string(&state()).unwrap();
+        let other_version = text.replacen(&format!(r#""version":{VERSION}"#), r#""version":99"#, 1);
+        assert_ne!(other_version, text);
+        for (name, saved) in [("truncated", &text[..text.len() / 2]), ("version", other_version.as_str())] {
+            let path = temp_dir(name).join("windows.json");
+            fs::write(&path, saved).unwrap();
+            assert!(read(&path).is_err(), "{name}");
+            assert_eq!(load_at(&path), None, "{name}");
+            assert!(!path.exists(), "{name}");
+            assert_eq!(fs::read_to_string(path.with_extension("json.bad")).unwrap(), saved, "{name}");
+            write_at(&path, &state()).unwrap();
+            assert_eq!(fs::read_to_string(path.with_extension("json.bad")).unwrap(), saved, "{name}");
+        }
     }
 
     #[test]
