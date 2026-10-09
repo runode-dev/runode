@@ -242,6 +242,9 @@ files:
   copy_path: 复制路径
   copy_relative_path: 复制相对路径
   add_to_gitignore: 添加到 .gitignore
+  untrack_title: “%{name}”已经被 git 跟踪，不再跟踪它？
+  untrack_detail: 只写进 .gitignore 不会生效。不再跟踪会把它从暂存区拿掉，文件留在磁盘上，下次提交时从仓库里删掉。
+  untrack_confirm: 不再跟踪并忽略
   rename: 重命名…
   delete: 移到废纸篓
   delete_title: 把“%{name}”移到废纸篓？

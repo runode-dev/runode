@@ -242,6 +242,9 @@ files:
   copy_path: Copy Path
   copy_relative_path: Copy Relative Path
   add_to_gitignore: Add to .gitignore
+  untrack_title: "“%{name}” is tracked by git. Stop tracking it?"
+  untrack_detail: Adding a tracked file to .gitignore has no effect. If you stop tracking it, it leaves the index but stays on disk, and the next commit deletes it from the repository.
+  untrack_confirm: Stop Tracking and Ignore
   rename: Rename…
   delete: Move to Trash
   delete_title: "Move “%{name}” to the Trash?"

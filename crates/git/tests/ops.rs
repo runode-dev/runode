@@ -1,8 +1,11 @@
-//! `Repo` 的写操作：暂存、撤回暂存、丢弃、提交、撤销提交、同步远端和 stash，含嵌套的仓库。
+//! `Repo` 的写操作：暂存、撤回暂存、丢弃、提交、撤销提交、不再跟踪、同步远端和 stash，含嵌套的仓库。
 
 mod common;
 
-use std::{fs, path::PathBuf};
+use std::{
+    fs,
+    path::{Path, PathBuf},
+};
 
 use common::{TestRepo, read, read_all};
 use runode_git::{CommitOptions, Section};
@@ -32,6 +35,20 @@ fn stages_and_unstages_files() {
 
     assert!(handle.stage(&paths(&["../outside.txt"])).is_err());
     assert!(handle.stage(&paths(&["missing.txt"])).is_err());
+}
+
+#[test]
+fn untracks_files_and_keeps_them_on_disk() {
+    let repo = TestRepo::new("ops-untrack");
+    repo.commit_file("dir/a.txt", "a\n", "init");
+    repo.write("new.txt", "n\n");
+    let handle = read(&repo).repo();
+    assert!(handle.is_tracked(Path::new("dir/a.txt")) && handle.is_tracked(Path::new("dir")));
+    assert!(!handle.is_tracked(Path::new("new.txt")));
+    handle.untrack(&paths(&["dir"])).unwrap();
+    assert!(!handle.is_tracked(Path::new("dir")));
+    assert_eq!(repo.status(), ["D  dir/a.txt", "?? dir/a.txt", "?? new.txt"]);
+    assert_eq!(repo.read("dir/a.txt"), "a\n");
 }
 
 #[test]

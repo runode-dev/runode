@@ -194,6 +194,19 @@ impl Repo {
         }))
     }
 
+    /// git 跟踪着 `path`（相对 `root`）；是目录时看它下面有没有跟踪着的文件。
+    pub fn is_tracked(&self, path: &Path) -> bool {
+        let spec = format!(":(literal){}", path.display());
+        git(&self.root, &["ls-files", "--", &spec]).is_some_and(|out| !out.is_empty())
+    }
+
+    /// 不再跟踪这些文件或目录：从暂存区拿掉，工作区里的留着，下次提交时从仓库里删掉。暂存区里有和
+    /// HEAD、工作区都不一样的内容时 git 拒绝（不加 `-f`），免得丢掉只在暂存区里的改动。
+    pub fn untrack(&self, paths: &[PathBuf]) -> Result {
+        let groups = self.group(paths.iter().map(PathBuf::as_path))?;
+        first_error(groups.iter().map(|(dir, rels)| Self::run_paths(dir, &["rm", "--cached", "-r", "-q"], rels)))
+    }
+
     /// 丢掉工作区里还没暂存的改动，`files` 来自未暂存段。未跟踪的文件从磁盘上删掉（只删
     /// 文件不删目录，删完把因此变空的上层目录也删掉）；`git add -N` 记下的新文件同样删掉并
     /// 移出暂存区；其余的按暂存区里的样子恢复。已经暂存的改动不受影响；冲突的文件暂存区

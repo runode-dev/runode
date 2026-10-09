@@ -4,6 +4,7 @@
 use std::path::{Path, PathBuf};
 
 use gpui::{AnyElement, Context, PromptLevel, ScrollStrategy, Window, div, img, prelude::*, px};
+use runode_git::Repo;
 use runode_shared_types::color::Rgb;
 
 use super::{
@@ -271,7 +272,7 @@ impl WindowView {
 
     /// 选中项所在的仓库（子仓库里的算子仓库）的根目录、相对它的路径和是不是目录；不在仓库里、
     /// 已经被忽略、或者选中的就是仓库根目录时为空。
-    pub(super) fn gitignore_target(&self) -> Option<(PathBuf, PathBuf, bool)> {
+    pub(super) fn gitignore_target(&self) -> Option<(Repo, PathBuf, bool)> {
         let (path, is_dir) = self.selected_entry()?;
         let git = self.workspace().project.git.as_ref()?;
         let rel = path.strip_prefix(&git.main.root).ok()?;
@@ -279,19 +280,54 @@ impl WindowView {
             return None;
         }
         let (repo, rel) = git.locate(rel);
-        (!rel.as_os_str().is_empty()).then(|| (repo.root.clone(), rel.to_path_buf(), is_dir))
+        (!rel.as_os_str().is_empty()).then(|| (repo.repo(), rel.to_path_buf(), is_dir))
     }
 
-    /// 写进 `.gitignore` 后当场重读，选中的那一项马上标成被忽略。
+    /// 写进 `.gitignore` 后当场重读，选中的那一项马上标成被忽略。git 跟踪着的写进去也不生效，先问要不要
+    /// 不再跟踪它（文件留在磁盘上）。
     pub(super) fn add_to_gitignore(&mut self, _: &AddToGitignore, window: &mut Window, cx: &mut Context<Self>) {
         self.file_menu = None;
-        let Some((root, rel, is_dir)) = self.gitignore_target() else {
+        let Some((repo, rel, is_dir)) = self.gitignore_target() else {
             return;
         };
-        match ops::add_to_gitignore(&root, &rel, is_dir) {
-            Ok(()) => self.refresh_project(cx),
-            Err(err) => self.show_file_error(error_text(&err, ".gitignore"), window, cx),
-        }
+        let tracked = cx.background_spawn({
+            let (repo, rel) = (repo.clone(), rel.clone());
+            async move { repo.is_tracked(&rel) }
+        });
+        cx.spawn_in(window, async move |this, cx| {
+            let untrack = tracked.await;
+            if untrack {
+                let Ok(answer) = this.update_in(cx, |_, window, cx| {
+                    window.prompt(
+                        PromptLevel::Warning,
+                        &rust_i18n::t!("files.untrack_title", name = base_name(&rel)),
+                        Some(&rust_i18n::t!("files.untrack_detail")),
+                        &[&*rust_i18n::t!("files.untrack_confirm"), &*rust_i18n::t!("files.cancel")],
+                        cx,
+                    )
+                }) else {
+                    return;
+                };
+                if answer.await.ok() != Some(0) {
+                    return;
+                }
+            }
+            let result = cx
+                .background_spawn(async move {
+                    ops::add_to_gitignore(&repo.root, &rel, is_dir)?;
+                    if untrack {
+                        repo.untrack(&[rel]).map_err(|err| OpError::Io(std::io::Error::other(err.message)))?;
+                    }
+                    Ok(())
+                })
+                .await;
+            this.update_in(cx, |this, window, cx| match result {
+                Ok(()) => this.refresh_project(cx),
+                Err(err) => this.show_file_error(error_text(&err, ".gitignore"), window, cx),
+            })
+            .ok();
+        })
+        .detach();
     }
 
     /// 剪切（`cut`）或复制选中的那一项，等着粘贴。
