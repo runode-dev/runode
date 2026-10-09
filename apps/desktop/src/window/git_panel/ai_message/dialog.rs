@@ -19,7 +19,7 @@ use super::{
 use crate::{
     assets::{CHEVRON_DOWN_ICON, CLOSE_ICON, SPARKLE_ICON, TERMINAL_ICON},
     ui::{
-        a11y::Press,
+        a11y::{Disable, Press},
         hsla,
         text_area::{TextArea, TextAreaEvent},
         text_field::{TextField, TextFieldEvent},
@@ -517,6 +517,7 @@ impl WindowView {
             .map(|button| match blocker {
                 Some(reason) => button
                     .opacity(0.5)
+                    .aria_disabled(true)
                     .aria_description(rust_i18n::t!(reason).into_owned())
                     .tooltip(tooltip(rust_i18n::t!(reason), None, fg_rgb, bg_rgb)),
                 None => button

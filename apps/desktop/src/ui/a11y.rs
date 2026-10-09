@@ -58,3 +58,15 @@ pub trait PressDown: StatefulInteractiveElement + Sized {
 }
 
 impl<E: StatefulInteractiveElement> PressDown for E {}
+
+/// 报给辅助工具「不可用」：灰着、按了不办的按钮和菜单项。
+///
+/// GPUI 没有直接设它的写法，借合成子节点的回调改这个元素自己的节点；所以同一个元素不能再另用
+/// `a11y_synthetic_children`。
+pub trait Disable: StatefulInteractiveElement + Sized {
+    fn aria_disabled(self, disabled: bool) -> Self {
+        if disabled { self.a11y_synthetic_children(|builder| builder.parent_node().set_disabled()) } else { self }
+    }
+}
+
+impl<E: StatefulInteractiveElement> Disable for E {}

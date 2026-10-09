@@ -44,7 +44,7 @@ use super::{
     project::{RENAMED, added_label, panel_message, panel_shell, panel_title, removed_label},
     status_bar,
 };
-use crate::ui::a11y::PressDown;
+use crate::ui::a11y::{Disable, PressDown};
 use crate::{
     assets::{
         BRANCH_ICON, CHECK_ICON, CHEVRON_DOWN_ICON, GIT_ICON, MORE_ICON, REFRESH_ICON, SPARKLE_ICON, SYNC_ICON,
@@ -797,6 +797,7 @@ impl WindowView {
             .id(("git-commit", ri))
             .role(Role::Button)
             .aria_label(label.clone())
+            .aria_disabled(!enabled)
             .flex_1()
             .min_w_0()
             .h_full()

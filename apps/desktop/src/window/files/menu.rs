@@ -15,6 +15,7 @@ use super::{
     AddToGitignore, CopyPath, CopyRelativePath, DeleteFile, InsertFilePath, NewFile, NewFolder, OpenInTerminal,
     OpenSelectedFile, RenameFile, RevealInFinder,
 };
+use crate::ui::a11y::Disable;
 use crate::{
     assets::{CHEVRON_DOWN_ICON, CHEVRON_RIGHT_ICON},
     ui::{
@@ -471,13 +472,14 @@ impl WindowView {
             let view = cx.entity().downgrade();
             div()
                 .id(("file-menu", ix))
-                // 没有动作的一行是小标题。GPUI 报不了「不可用」，灰着的项照样报成菜单项，按了没反应。
+                // 没有动作的一行是小标题；灰着的项报成不可用。
                 .map(|row| match item.checked {
                     _ if item.action.is_none() => row.role(Role::Label),
                     Some(checked) => row.role(Role::MenuItemCheckBox).aria_toggled(checked.into()),
                     None => row.role(Role::MenuItem),
                 })
                 .aria_label(item.label.clone())
+                .aria_disabled(item.action.is_some() && !item.enabled)
                 .when_some(item.shortcut.clone(), |row, shortcut| row.aria_description(shortcut))
                 // 菜单拿着焦点，选中的那一项报成辅助工具眼里的焦点。
                 .when(highlighted, |row| row.aria_active_descendant())

@@ -100,9 +100,9 @@ impl WindowView {
             return self.render_empty_tab(fg, bg, cx);
         };
         if tab.zoomed || tab.root.is_leaf() {
-            return self.render_leaf(tab, tab.focused, &badges, fg, bg, cx);
+            return self.render_leaf(tab, tab.focused, &badges, fg, bg, window, cx);
         }
-        self.render_node(tab, &tab.root, &badges, fg, bg, cx)
+        self.render_node(tab, &tab.root, &badges, fg, bg, window, cx)
     }
 
     /// 没有标签的 workspace 的终端区：一句说明和新建标签的按钮。接着窗口自己的焦点，快捷键照常派发。
@@ -232,6 +232,7 @@ impl WindowView {
         self.driver_redraw = Some((due, task));
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn render_leaf(
         &self,
         tab: &Tab,
@@ -239,6 +240,7 @@ impl WindowView {
         badges: &HashMap<EntityId, SharedString>,
         fg: Rgb,
         bg: Rgb,
+        window: &Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let view = tab.panes[&id].0.clone();
@@ -259,8 +261,15 @@ impl WindowView {
             .relative()
             .when(!cards, |terminal| terminal.size_full())
             // 终端自己没变时复用上一帧画好的内容：标题栏和侧栏的转圈每一下都会重画整个窗口，
-            // 不缓存的话每一下都要把所有终端格子重新排一遍。
-            .child(view.cached(StyleRefinement::default().size_full()))
+            // 不缓存的话每一下都要把所有终端格子重新排一遍。辅助工具在读时不缓存：GPUI 复用缓存时
+            // 不重新报无障碍节点，没重画的那几帧里整个终端（屏幕文字、补全列表）会从树里消失。
+            .map(|terminal| {
+                if window.is_a11y_active() {
+                    terminal.child(view.clone())
+                } else {
+                    terminal.child(view.clone().cached(StyleRefinement::default().size_full()))
+                }
+            })
             .child(
                 canvas(
                     move |bounds, _, _| {
@@ -434,6 +443,7 @@ impl WindowView {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn render_node(
         &self,
         tab: &Tab,
@@ -441,16 +451,17 @@ impl WindowView {
         badges: &HashMap<EntityId, SharedString>,
         fg: Rgb,
         bg: Rgb,
+        window: &Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let split = match node {
-            Node::Leaf(id) => return self.render_leaf(tab, *id, badges, fg, bg, cx),
+            Node::Leaf(id) => return self.render_leaf(tab, *id, badges, fg, bg, window, cx),
             Node::Split(split) => split,
         };
         let (id, axis, ratio) = (split.id, split.axis, split.ratio);
         let horizontal = axis == Axis::Horizontal;
-        let first = self.render_node(tab, &split.first, badges, fg, bg, cx);
-        let second = self.render_node(tab, &split.second, badges, fg, bg, cx);
+        let first = self.render_node(tab, &split.first, badges, fg, bg, window, cx);
+        let second = self.render_node(tab, &split.second, badges, fg, bg, window, cx);
         // 卡片样式下两张卡片之间空出 `CARD_GAP`，空隙本身就是分隔线；经典样式下是一像素的线。
         let cards = cards(cx);
         let line = if cards { hsla(fg).opacity(0.) } else { hsla(fg).opacity(0.15) };
