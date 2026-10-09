@@ -265,22 +265,34 @@ fn the_host_hanging_up_closes_the_phone_connection() {
 #[test]
 fn too_many_failures_from_one_address_are_rate_limited() {
     let harness = Harness::start("limit");
-    let key = Key::generate();
-    for _ in 0..10 {
+    let device_id = harness.pair(&Key::generate());
+    // 签名和口令不对的都算。
+    let ticket = harness.ticket();
+    for attempt in 0..10 {
         let mut phone = harness.phone();
-        let auth = phone.auth_message(DeviceId([1; 16]), &key);
-        assert_eq!(phone.ask(&auth), rejected(RejectReason::UnknownDevice));
+        let (message, reason) = if attempt % 2 == 0 {
+            (phone.auth_message(device_id, &Key::generate()), RejectReason::BadSignature)
+        } else {
+            (phone.pair_message(&[7; 32], "猜口令", &Key::generate()), RejectReason::PairingInvalid)
+        };
+        assert_eq!(phone.ask(&message), rejected(reason), "{attempt}");
     }
     // 之后连握手都不做就关掉，口令对的配对也进不来。
-    let ticket = harness.ticket();
     assert!(Phone::connect(harness.addr, harness.fingerprint).is_err());
     assert_eq!(ticket.poll().unwrap(), PairingProgress::Waiting);
 }
 
+/// 只开 TCP 就关、门禁消息读不出、设备没登记（撤销后手机自动重试）都不算失败：同一网段里谁都能替别人
+/// 攒满额度，撤销后马上重新配对也不该被挡住。
 #[test]
-fn unreadable_gate_messages_count_as_failures() {
+fn only_wrong_signatures_and_codes_count_as_failures() {
     let harness = Harness::start("garbage");
-    for attempt in 0..10 {
+    for _ in 0..12 {
+        drop(std::net::TcpStream::connect(harness.addr).unwrap());
+        // 等这条的线程收尾，免得占着门禁的名额。
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    for attempt in 0..12 {
         let mut phone = harness.phone();
         if attempt % 2 == 0 {
             phone.send_control(br#"{"type":"remote_whatever"}"#);
@@ -289,7 +301,12 @@ fn unreadable_gate_messages_count_as_failures() {
         }
         assert!(phone.closed(), "{attempt}");
     }
-    assert!(Phone::connect(harness.addr, harness.fingerprint).is_err());
+    for _ in 0..12 {
+        let mut phone = harness.phone();
+        let auth = phone.auth_message(DeviceId([1; 16]), &Key::generate());
+        assert_eq!(phone.ask(&auth), rejected(RejectReason::UnknownDevice));
+    }
+    harness.pair(&Key::generate());
 }
 
 #[test]
@@ -299,7 +316,7 @@ fn one_source_cannot_fill_the_gate() {
     let idle: Vec<_> = (0..4).map(|_| std::net::TcpStream::connect(harness.addr).unwrap()).collect();
     assert!(Phone::connect(harness.addr, harness.fingerprint).is_err());
     drop(idle);
-    // 放开以后又连得上（那几条读到结尾、各算失败一次，还不到限速）。
+    // 放开以后又连得上（那几条读到结尾，不算失败）。
     let start = std::time::Instant::now();
     while Phone::connect(harness.addr, harness.fingerprint).is_err() {
         assert!(start.elapsed() < PATIENCE, "still refused after the idle connections closed");
@@ -381,6 +398,43 @@ fn a_device_keeps_at_most_eight_connections() {
     write_frame(&mut &host, FrameKind::Control, 0, &serde_json::to_vec(&done).unwrap()).unwrap();
     assert_eq!(second.read_host_msg(), done);
     drop(newest);
+}
+
+/// 停掉的监听的连接线程晚收尾时不重写状态文件，不然重开的监听写好的新端口会被换回旧的。
+#[test]
+fn a_stopped_listener_does_not_bring_its_status_back() {
+    use std::{
+        os::unix::net::UnixStream,
+        sync::{Arc, Mutex, mpsc},
+    };
+
+    let mut harness = Harness::start("stopped");
+    let key = Key::generate();
+    let device_id = harness.pair(&key);
+    // 换一个要宿主连接时停住、等测试放行的监听，那条连接的线程就晚于重开的监听收尾。
+    let (entered_tx, entered) = mpsc::channel();
+    let (release, release_rx) = mpsc::channel::<()>();
+    let (entered_tx, release_rx) = (Mutex::new(entered_tx), Mutex::new(release_rx));
+    let connect = Arc::new(move || {
+        entered_tx.lock().unwrap().send(()).unwrap();
+        let _ = release_rx.lock().unwrap().recv();
+        Ok(UnixStream::pair()?.0)
+    });
+    harness.listener = None;
+    let listener = runode_remote_access::Listener::start(options(&harness.dirs, connect)).unwrap();
+    harness.addr = listener.local_addrs()[0];
+    harness.listener = Some(listener);
+    let mut phone = harness.phone();
+    let auth = phone.auth_message(device_id, &key);
+    assert_eq!(phone.ask(&auth), Some(GateHostMsg::RemoteAccepted { device_id }));
+    phone.send_control(&Phone::hello("mobile"));
+    entered.recv_timeout(PATIENCE).unwrap();
+    harness.restart();
+    release.send(()).unwrap();
+    assert!(phone.closed());
+    std::thread::sleep(Duration::from_millis(300));
+    let status = runode_remote_access::listener_status(&harness.dirs).unwrap().unwrap();
+    assert_eq!((status.port, status.connected), (harness.addr.port(), Vec::new()));
 }
 
 #[test]

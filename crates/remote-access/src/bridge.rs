@@ -29,6 +29,9 @@ use self::frames::{FromPhone, LocalRequests, ToPhone};
 
 /// 手机发来、还没写给宿主的明文最多攒这么多。
 const TO_HOST_LIMIT: usize = 1 << 20;
+/// 挡下或者自己办了手机的请求后、还没交给 rustls 的回话最多攒这么多，再多就先不读手机：只发不读的
+/// 手机不能让回话无限攒着。一次读进来的那块里的回话会超出一点，有界。
+const REPLIES_LIMIT: usize = 64 << 10;
 /// rustls 里还没写给手机的密文最多攒这么多（`ServerConnection::set_buffer_limit`）。
 const TO_PHONE_LIMIT: usize = 1 << 20;
 /// 一次从 socket 读这么多。
@@ -131,7 +134,7 @@ impl Bridge {
         host: &UnixStream,
         local: &mut dyn LocalRequests,
     ) -> io::Result<()> {
-        while !self.phone_done && self.to_host.len() < TO_HOST_LIMIT {
+        while self.wants_phone() {
             match conn.reader().read(&mut self.buf) {
                 Ok(0) => self.phone_done = true,
                 Ok(n) => {
@@ -210,9 +213,14 @@ impl Bridge {
         Ok(())
     }
 
+    /// 还要读手机发来的：它没说完，要转给宿主的和要回给它的都没积压到上限。
+    fn wants_phone(&self) -> bool {
+        !self.phone_done && self.to_host.len() < TO_HOST_LIMIT && self.replies.len() < REPLIES_LIMIT
+    }
+
     /// 等两边能读能写，读到的交给下一轮。手机的 TCP 断了时返回 false。
     fn wait_and_read(&mut self, conn: &mut ServerConnection, phone: &TcpStream, host: &UnixStream) -> io::Result<bool> {
-        let read_phone = !self.phone_done && self.to_host.len() < TO_HOST_LIMIT;
+        let read_phone = self.wants_phone();
         let read_host = !self.host_done && self.from_host.is_empty();
         let write_host = self.host_writable && !self.to_host.is_empty();
         let mut fds = [

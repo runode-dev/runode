@@ -6,14 +6,18 @@ use std::{
     io::{self, Write as _},
     os::unix::fs::{OpenOptionsExt as _, PermissionsExt as _},
     path::{Path, PathBuf},
+    sync::atomic::{AtomicU64, Ordering},
 };
 
 use ring::rand::{SecureRandom as _, SystemRandom};
 
+/// `write_private` 的临时文件名里的序号：同一个进程里几个线程同时写同一个文件时各用各的临时文件。
+static NEXT_TEMP: AtomicU64 = AtomicU64::new(0);
+
 /// 把 `bytes` 整个换进 `path`，权限 0600。
 pub(crate) fn write_private(path: &Path, bytes: &[u8]) -> io::Result<()> {
     let mut temp = path.as_os_str().to_owned();
-    temp.push(format!(".{}.tmp", std::process::id()));
+    temp.push(format!(".{}.{}.tmp", std::process::id(), NEXT_TEMP.fetch_add(1, Ordering::Relaxed)));
     let temp = PathBuf::from(temp);
     let written = (|| {
         let mut file = OpenOptions::new().write(true).create(true).truncate(true).mode(0o600).open(&temp)?;
@@ -62,4 +66,32 @@ pub(crate) fn random<const N: usize>() -> io::Result<[u8; N]> {
 /// 路径没有时的错误：没有家目录（`runode_paths::Dirs` 的字段为 `None`）。
 pub(crate) fn no_home() -> io::Error {
     io::Error::new(io::ErrorKind::NotFound, "no home directory to keep remote access files in")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn threads_writing_the_same_file_do_not_trip_each_other() {
+        let root = std::env::temp_dir().join(format!("rra-files-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        let path = root.join("shared.json");
+        let contents: Vec<Vec<u8>> = (0..8u8).map(|n| vec![b'a' + n; 1000 * (usize::from(n) + 1)]).collect();
+        std::thread::scope(|scope| {
+            for bytes in &contents {
+                let path = &path;
+                scope.spawn(move || {
+                    for _ in 0..50 {
+                        write_private(path, bytes).unwrap();
+                    }
+                });
+            }
+        });
+        assert!(contents.contains(&std::fs::read(&path).unwrap()));
+        // 临时文件都换上去了，没有剩下的。
+        assert_eq!(std::fs::read_dir(&root).unwrap().count(), 1);
+        let _ = std::fs::remove_dir_all(&root);
+    }
 }

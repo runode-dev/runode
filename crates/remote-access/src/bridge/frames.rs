@@ -14,6 +14,9 @@ use runode_protocol::{
 
 /// 攒控制帧时一开始最多先要这么多内存，再多的随到达的字节长，不照对面声明的长度一上来就分配。
 const HOLD_RESERVE: usize = 64 << 10;
+/// 手机发来的控制帧载荷最多这么大，超了断开：控制帧要整帧攒在内存里，不能照 `MAX_PAYLOAD` 放。
+/// 控制消息里最长的是粘贴的文字（`ClientMsg::Paste`），手机上粘贴的一般到不了这么长。
+const MAX_CONTROL_PAYLOAD: u32 = 1 << 20;
 
 /// 手机连接上由这边自己办、不转给宿主的请求。
 pub(crate) trait LocalRequests {
@@ -35,7 +38,8 @@ pub(crate) struct FromPhone {
 
 impl FromPhone {
     /// 过一段明文：要转给宿主的追加到 `to_host`；挡下的和交给 `local` 办了的控制消息，给手机的回话
-    /// （编好的帧）追加到 `replies`。帧头声明的载荷超过 `MAX_PAYLOAD` 时报错，连接上的数据已经对不齐了。
+    /// （编好的帧）追加到 `replies`。帧头声明的载荷超过 `MAX_PAYLOAD`（控制帧是 `MAX_CONTROL_PAYLOAD`）
+    /// 时报错，连接上的数据已经对不齐了。
     pub(crate) fn feed(
         &mut self,
         mut bytes: &[u8],
@@ -54,11 +58,12 @@ impl FromPhone {
                 }
                 self.have = 0;
                 let len = u32::from_le_bytes([self.header[0], self.header[1], self.header[2], self.header[3]]);
-                if len > MAX_PAYLOAD {
+                let control = self.header[4] == FrameKind::Control as u8;
+                if len > if control { MAX_CONTROL_PAYLOAD } else { MAX_PAYLOAD } {
                     return Err(FrameError::TooLong(u64::from(len)));
                 }
                 self.left = len;
-                if self.header[4] == FrameKind::Control as u8 {
+                if control {
                     let mut held = Vec::with_capacity(HEADER_LEN + (len as usize).min(HOLD_RESERVE));
                     held.extend_from_slice(&self.header);
                     self.held = Some(held);
@@ -309,6 +314,23 @@ mod tests {
         header[4] = FrameKind::Input as u8;
         let mut phone = FromPhone::default();
         assert!(phone.feed(&header, &mut Vec::new(), &mut Vec::new(), &mut Nothing).is_err());
+    }
+
+    #[test]
+    fn a_control_frame_over_its_own_limit_is_an_error() {
+        let header = |kind: FrameKind| {
+            let mut header = [0u8; HEADER_LEN];
+            header[..4].copy_from_slice(&(MAX_CONTROL_PAYLOAD + 1).to_le_bytes());
+            header[4] = kind as u8;
+            header
+        };
+        let mut phone = FromPhone::default();
+        assert!(phone.feed(&header(FrameKind::Control), &mut Vec::new(), &mut Vec::new(), &mut Nothing).is_err());
+        // 同样长的输入帧照常边到边转。
+        let mut phone = FromPhone::default();
+        let mut to_host = Vec::new();
+        phone.feed(&header(FrameKind::Input), &mut to_host, &mut Vec::new(), &mut Nothing).unwrap();
+        assert_eq!(to_host.len(), HEADER_LEN);
     }
 
     #[test]

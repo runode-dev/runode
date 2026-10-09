@@ -1,6 +1,9 @@
 //! 限速：同一个地址门禁失败太多次，之后一段时间里它来的连接一律不让进，挡住对着签名和口令硬试的。
 //! IPv6 在单个地址的上限之外，还给它所在的 /64 前缀记一个合计的上限：换个地址不该换出新的额度，
 //! 但局域网里一段 /64 通常是所有设备共用的，所以合计的上限比单个地址高，一台设备锁不住其余的。
+//! 最近过过门禁的地址（`RateLimiter::succeeded`）不看前缀的合计：同一段里别人换着地址打满前缀，
+//! 挡不住已经连过的手机。只有签名、口令不对才算失败（见 `gate`），只开 TCP 再关、设备没登记这些
+//! 不算，不然谁都能替别人攒满额度。
 
 use std::{
     collections::{HashMap, VecDeque},
@@ -16,6 +19,8 @@ pub(crate) const MAX_FAILURES_PER_PREFIX: usize = 50;
 pub(crate) const WINDOW: Duration = Duration::from_secs(60);
 /// 最多记着这么多个计数。满了时先清掉已经过了 `WINDOW` 的，还是满的就挤掉最久没失败的那个。
 const MAX_COUNTERS: usize = 1024;
+/// 最多记着这么多个过过门禁的地址，满了挤掉最久没过的那个。
+const MAX_TRUSTED: usize = 64;
 
 /// 一个计数记的是什么：一个地址，或者（第二项为 `true`）一个 IPv6 的 /64 前缀。
 type Key = (IpAddr, bool);
@@ -23,12 +28,15 @@ type Key = (IpAddr, bool);
 #[derive(Default)]
 pub(crate) struct RateLimiter {
     failures: HashMap<Key, VecDeque<Instant>>,
+    /// 过过门禁的地址和最近一次过的时刻。
+    trusted: HashMap<IpAddr, Instant>,
 }
 
 impl RateLimiter {
-    /// `ip` 现在是不是被挡住了。
+    /// `ip` 现在是不是被挡住了。过过门禁的地址只看它自己的计数。
     pub(crate) fn limited(&mut self, ip: IpAddr, now: Instant) -> bool {
-        counters(ip).into_iter().any(|(key, max)| {
+        let trusted = self.trusted(ip);
+        counters(ip).into_iter().filter(|((_, prefix), _)| !(trusted && *prefix)).any(|(key, max)| {
             self.failures.get_mut(&key).is_some_and(|times| {
                 forget_old(times, now);
                 times.len() >= max
@@ -41,6 +49,23 @@ impl RateLimiter {
         for (key, max) in counters(ip) {
             self.record(key, max, now);
         }
+    }
+
+    /// `ip` 过了门禁。
+    pub(crate) fn succeeded(&mut self, ip: IpAddr, now: Instant) {
+        let ip = ip.to_canonical();
+        if !self.trusted.contains_key(&ip)
+            && self.trusted.len() >= MAX_TRUSTED
+            && let Some(oldest) = self.trusted.iter().min_by_key(|&(_, at)| *at).map(|(&ip, _)| ip)
+        {
+            self.trusted.remove(&oldest);
+        }
+        self.trusted.insert(ip, now);
+    }
+
+    /// `ip` 过过门禁。
+    pub(crate) fn trusted(&self, ip: IpAddr) -> bool {
+        self.trusted.contains_key(&ip.to_canonical())
     }
 
     fn record(&mut self, key: Key, max: usize, now: Instant) {
@@ -138,6 +163,36 @@ mod tests {
         }
         assert!(limiter.limited("192.0.2.1".parse().unwrap(), now));
         assert!(!limiter.limited("::ffff:192.0.2.2".parse().unwrap(), now));
+    }
+
+    #[test]
+    fn an_address_that_got_in_before_is_not_locked_out_by_its_slash_64() {
+        let mut limiter = RateLimiter::default();
+        let now = Instant::now();
+        let phone: IpAddr = "2001:db8:1:2::abcd".parse().unwrap();
+        limiter.succeeded(phone, now);
+        for i in 0..MAX_FAILURES_PER_PREFIX {
+            limiter.failed(format!("2001:db8:1:2::{:x}", i + 1).parse().unwrap(), now);
+        }
+        assert!(limiter.limited("2001:db8:1:2:ffff::9".parse().unwrap(), now));
+        assert!(!limiter.limited(phone, now));
+        // 它自己的计数照样算。
+        for _ in 0..MAX_FAILURES {
+            limiter.failed(phone, now);
+        }
+        assert!(limiter.limited(phone, now));
+    }
+
+    #[test]
+    fn the_trusted_table_stays_bounded() {
+        let mut limiter = RateLimiter::default();
+        let start = Instant::now();
+        for i in 0..=MAX_TRUSTED as u32 {
+            limiter.succeeded(IpAddr::V4((0x0a00_0000 + i).into()), start + Duration::from_millis(u64::from(i)));
+        }
+        assert_eq!(limiter.trusted.len(), MAX_TRUSTED);
+        assert!(!limiter.trusted(IpAddr::V4(0x0a00_0000.into())));
+        assert!(limiter.trusted(IpAddr::V4((0x0a00_0000 + MAX_TRUSTED as u32).into())));
     }
 
     #[test]

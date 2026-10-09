@@ -27,7 +27,7 @@ use crate::{
 struct PairingFile {
     /// 这次配对的编号（随机，不是秘密）：命令行据此认出文件还是不是自己写的那份。
     ticket: String,
-    /// 口令；配好了或者作废了以后抹掉。
+    /// 口令；配好了以后抹掉。
     #[serde(default)]
     secret: Option<Bytes>,
     /// 过期的时刻，Unix 秒。
@@ -45,7 +45,6 @@ struct PairingFile {
 enum State {
     Pending,
     Paired,
-    Invalidated,
 }
 
 /// `runode remote pair` 生成的一次配对。丢掉时删掉口令文件（文件已经换了主人时不动）。
@@ -64,8 +63,6 @@ pub enum PairingProgress {
     Waiting,
     /// 配好了。
     Paired { device_id: DeviceId, name: String },
-    /// 口令不能再用了，也没有配好的设备可报。
-    Invalidated,
     /// 过期了，没有设备来配对。
     Expired,
     /// 口令文件被删了，或者换成了另一次配对的（又跑了一次 `runode remote pair`）。
@@ -126,18 +123,19 @@ impl PairingTicket {
         })
     }
 
-    /// 看一眼口令文件，配对进行到哪了。
+    /// 看一眼口令文件，配对进行到哪了。文件说配好了却没写是哪台设备时报 `InvalidData`。
     pub fn poll(&self) -> io::Result<PairingProgress> {
         let file: Option<PairingFile> = read_json(&self.path)?;
         let Some(file) = file.filter(|file| file.ticket == self.ticket) else {
             return Ok(PairingProgress::Replaced);
         };
         Ok(match file.state {
-            State::Paired => match file.device_id {
-                Some(device_id) => PairingProgress::Paired { device_id, name: file.device_name.unwrap_or_default() },
-                None => PairingProgress::Invalidated,
-            },
-            State::Invalidated => PairingProgress::Invalidated,
+            State::Paired => {
+                let device_id = file.device_id.ok_or_else(|| {
+                    io::Error::new(io::ErrorKind::InvalidData, "the pairing code was used but names no device")
+                })?;
+                PairingProgress::Paired { device_id, name: file.device_name.unwrap_or_default() }
+            }
             State::Pending if now_unix() >= self.expires_at => PairingProgress::Expired,
             State::Pending => PairingProgress::Waiting,
         })
@@ -170,7 +168,7 @@ pub(crate) struct Desk {
 }
 
 impl Desk {
-    /// 设备拿 `secret` 来配对：口令对上了（没过期、没用过、没作废）才调 `verify` 验签、拿到要登记
+    /// 设备拿 `secret` 来配对：口令对上了（没过期、没用过）才调 `verify` 验签、拿到要登记
     /// 的设备，登记好后把口令文件改成配好了。
     pub(crate) fn redeem(
         &mut self,
@@ -229,24 +227,28 @@ mod tests {
         std::fs::create_dir_all(&root).unwrap();
         let dirs = Dirs::from_vars(|_| Some(root.clone().into()));
         let ticket = PairingTicket::begin(&dirs, Duration::from_secs(60)).unwrap();
-        // 占住 `write_private` 的临时文件名，口令文件就改不了；设备表的临时文件名不同，照常写。
-        let mut temp = dirs.remote_access_pairing_file().unwrap().into_os_string();
-        temp.push(format!(".{}.tmp", std::process::id()));
-        std::fs::create_dir(&temp).unwrap();
-        let device = |n: u8| {
-            move || {
-                Ok(Device {
-                    device_id: DeviceId([n; 16]),
-                    name: format!("phone {n}"),
-                    public_key: Bytes(vec![4; 65]),
-                    paired_at: 0,
-                    last_seen: 0,
-                })
-            }
+        let path = dirs.remote_access_pairing_file().unwrap();
+        let pending = std::fs::read(&path).unwrap();
+        let device = |n: u8| Device {
+            device_id: DeviceId([n; 16]),
+            name: format!("phone {n}"),
+            public_key: Bytes(vec![4; 65]),
+            paired_at: 0,
+            last_seen: 0,
         };
         let mut desk = Desk::default();
-        assert!(desk.redeem(&dirs, &ticket.secret(), device(1)).is_ok());
-        assert_eq!(desk.redeem(&dirs, &ticket.secret(), device(2)).err(), Some(RejectReason::PairingInvalid));
+        // 读过口令文件以后把它换成一个不空的目录，记成配好了的那次写换不上去；设备表照常写。
+        let first = desk.redeem(&dirs, &ticket.secret(), || {
+            std::fs::remove_file(&path).unwrap();
+            std::fs::create_dir(&path).unwrap();
+            std::fs::write(path.join("in-the-way"), b"").unwrap();
+            Ok(device(1))
+        });
+        assert!(first.is_ok());
+        // 文件还是等配对的那份。
+        std::fs::remove_dir_all(&path).unwrap();
+        std::fs::write(&path, &pending).unwrap();
+        assert_eq!(desk.redeem(&dirs, &ticket.secret(), || Ok(device(2))).err(), Some(RejectReason::PairingInvalid));
         assert_eq!(devices::list_devices(&dirs).unwrap().len(), 1);
         drop(ticket);
         let _ = std::fs::remove_dir_all(&root);

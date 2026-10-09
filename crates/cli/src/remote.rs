@@ -64,9 +64,6 @@ pub(crate) fn pair(
                 writeln!(out, "Paired with {name} ({device_id}).")?;
                 return offer_background(env, out, answer);
             }
-            PairingProgress::Invalidated => {
-                bail!("the pairing code no longer works; run `runode remote pair` again")
-            }
             PairingProgress::Expired => bail!("the pairing code expired before a phone used it"),
             PairingProgress::Replaced => bail!("another `runode remote pair` replaced this pairing code"),
         }

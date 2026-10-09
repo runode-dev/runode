@@ -196,9 +196,6 @@ impl Pairing {
                         }
                     }
                     Ok(PairingProgress::Paired { name, .. }) => Pairing::Paired { name },
-                    Ok(PairingProgress::Invalidated) => {
-                        Pairing::Failed(rust_i18n::t!("settings.pairing.invalidated").into_owned())
-                    }
                     Ok(PairingProgress::Expired) => {
                         Pairing::Failed(rust_i18n::t!("settings.pairing.expired").into_owned())
                     }

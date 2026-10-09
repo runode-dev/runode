@@ -720,7 +720,6 @@ settings:
     background: 結束 Runode 時遠端存取跟著停，手機就連不上了。打開後結束時工作階段和遠端存取留在背景。
     not_listening: 遠端存取沒在監聽。剛打開的話等幾秒再試；一直這樣的話，連接埠可能被占用了，宿主的日誌裡有原因。
     stopped: 等手機時遠端存取停了。
-    invalidated: 口令已經作廢，再配對一次。
     expired: 口令過期了，手機沒來配對。
     replaced: 另一處（比如 runode remote pair）開始了新的配對，這個口令作廢了。
     too_long: 配對連結太長，畫不成 QR 碼。

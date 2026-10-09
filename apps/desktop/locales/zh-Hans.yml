@@ -720,7 +720,6 @@ settings:
     background: 退出 Runode 时远程访问跟着停，手机就连不上了。打开后退出时会话和远程访问留在后台。
     not_listening: 远程访问没在监听。刚打开的话等几秒再试；一直这样的话，端口可能被占了，宿主的日志里有原因。
     stopped: 等手机时远程访问停了。
-    invalidated: 口令已经作废，再配对一次。
     expired: 口令过期了，手机没来配对。
     replaced: 另一处（比如 runode remote pair）开始了新的配对，这个口令作废了。
     too_long: 配对链接太长，画不成二维码。

@@ -36,6 +36,10 @@ const MAX_GATING: usize = 32;
 const MAX_GATING_PER_SOURCE: usize = 4;
 /// 同一个 IPv6 /64 前缀（见 `limit::prefix`）里所有地址合起来还没过门禁的连接最多这么多：换着地址
 /// 连的也占不满 `MAX_GATING`，但比单个地址宽，局域网里共用一段 /64 的设备不会互相挤掉。
+///
+/// 局域网里一台主机有好几段前缀（链路本地、全局、IPv4）时仍能凑满 `MAX_GATING`，所以过过门禁的地址
+/// （`RateLimiter::trusted`）这两个名额都不看，只受 `MAX_GATING_PER_SOURCE` 和 `MAX_CONNECTIONS` 管：
+/// 连过的手机不会被别人占满的门禁挡在外面。
 const MAX_GATING_PER_PREFIX: usize = 16;
 /// 连接（含已经接到宿主上的）最多这么多。
 const MAX_CONNECTIONS: usize = 64;
@@ -153,8 +157,12 @@ impl Shared {
         }
     }
 
-    /// 把正连着的设备写进状态文件，见 `ListenerStatus::connected`。写不了只记日志。
+    /// 把正连着的设备写进状态文件，见 `ListenerStatus::connected`。写不了只记日志。已经停了的不写：
+    /// 它的连接线程晚收尾时会把删掉的、或者重开的监听写好的状态文件换回旧的。
     fn publish(&self, connections: &HashMap<u64, Live>) {
+        if self.stopping.load(Ordering::Relaxed) {
+            return;
+        }
         let mut live: Vec<(u64, DeviceId)> =
             connections.iter().filter_map(|(&id, live)| Some((id, live.device?))).collect();
         live.sort_unstable_by_key(|&(id, _)| id);
@@ -450,14 +458,9 @@ fn accept_ready(shared: &Arc<Shared>, listener: &TcpListener) {
 
 /// 登记一条从 `ip` 来的新连接，返回它的编号和断开它的开关；连接太多时返回 `None`。
 fn register(shared: &Shared, tcp: &TcpStream, ip: IpAddr) -> Option<(u64, Arc<AtomicBool>)> {
+    let trusted = shared.limiter().trusted(ip);
     let mut connections = shared.connections();
-    let prefix = limit::prefix(ip);
-    let gating = || connections.values().filter(|live| live.device.is_none());
-    if gating().count() >= MAX_GATING
-        || gating().filter(|live| live.ip == ip).count() >= MAX_GATING_PER_SOURCE
-        || gating().filter(|live| limit::prefix(live.ip) == prefix).count() >= MAX_GATING_PER_PREFIX
-        || connections.len() >= MAX_CONNECTIONS
-    {
+    if !room_for(&connections, ip, trusted) {
         return None;
     }
     let tcp = tcp.try_clone().ok()?;
@@ -465,4 +468,42 @@ fn register(shared: &Shared, tcp: &TcpStream, ip: IpAddr) -> Option<(u64, Arc<At
     let cut = Arc::new(AtomicBool::new(false));
     connections.insert(id, Live { tcp, device: None, ip, cut: cut.clone() });
     Some((id, cut))
+}
+
+/// 已经有 `connections` 时还能不能再收一条从 `ip` 来的连接；`trusted` 是 `ip` 过过门禁，见
+/// `MAX_GATING_PER_PREFIX`。
+fn room_for(connections: &HashMap<u64, Live>, ip: IpAddr, trusted: bool) -> bool {
+    let prefix = limit::prefix(ip);
+    let gating = || connections.values().filter(|live| live.device.is_none());
+    let crowded = gating().count() >= MAX_GATING
+        || gating().filter(|live| limit::prefix(live.ip) == prefix).count() >= MAX_GATING_PER_PREFIX;
+    (trusted || !crowded)
+        && gating().filter(|live| live.ip == ip).count() < MAX_GATING_PER_SOURCE
+        && connections.len() < MAX_CONNECTIONS
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rotating_addresses_cannot_shut_out_an_address_that_got_in_before() {
+        let server = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+        let tcp = TcpStream::connect(server.local_addr().unwrap()).unwrap();
+        let live = |ip: IpAddr| Live { tcp: tcp.try_clone().unwrap(), device: None, ip, cut: Arc::default() };
+        // 同一台主机换着几段前缀里的地址占满门禁的名额。
+        let mut connections = HashMap::new();
+        for i in 0..MAX_GATING {
+            let ip = if i % 2 == 0 { format!("2001:db8::{i:x}") } else { format!("fe80::{i:x}") };
+            connections.insert(i as u64, live(ip.parse().unwrap()));
+        }
+        let phone: IpAddr = "2001:db8::abcd".parse().unwrap();
+        assert!(!room_for(&connections, phone, false));
+        assert!(room_for(&connections, phone, true));
+        // 单个地址的名额照样管。
+        for i in 0..MAX_GATING_PER_SOURCE {
+            connections.insert(1000 + i as u64, live(phone));
+        }
+        assert!(!room_for(&connections, phone, true));
+    }
 }

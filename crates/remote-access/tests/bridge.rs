@@ -4,6 +4,11 @@ mod common;
 
 use std::{
     io::Write as _,
+    net::Shutdown,
+    sync::{
+        Arc,
+        atomic::{AtomicBool, AtomicUsize, Ordering},
+    },
     thread,
     time::{Duration, Instant},
 };
@@ -133,4 +138,47 @@ fn the_phone_closing_lets_the_host_finish() {
     let _ = write_frame(&mut &host, FrameKind::Control, 0, &control(&bye));
     drop(host);
     assert!(phone.closed());
+}
+
+/// 手机只发被挡下的请求、从不读回话：攒着的回话到了上限就先不读手机，手机那边很快写不进去，而不是
+/// 让回话在内存里一直涨。
+#[test]
+fn a_phone_that_never_reads_cannot_pile_up_replies() {
+    const TOTAL: usize = 64 << 20;
+    let harness = Harness::start("replies");
+    let key = Key::generate();
+    let device_id = harness.pair(&key);
+    let (mut phone, _host) = harness.bridged(device_id, &key);
+    let tcp = phone.tls.sock.try_clone().unwrap();
+    let mut batch = Vec::new();
+    for _ in 0..1000 {
+        write_frame(&mut batch, FrameKind::Control, 0, br#"{"type":"handoff_ready"}"#).unwrap();
+    }
+    let written = Arc::new(AtomicUsize::new(0));
+    let finished = Arc::new(AtomicBool::new(false));
+    let writer = {
+        let (written, finished) = (written.clone(), finished.clone());
+        thread::spawn(move || {
+            while written.load(Ordering::Relaxed) < TOTAL {
+                if phone.tls.write_all(&batch).and_then(|()| phone.tls.flush()).is_err() {
+                    return;
+                }
+                written.fetch_add(batch.len(), Ordering::Relaxed);
+            }
+            finished.store(true, Ordering::Relaxed);
+        })
+    };
+    // 等手机写不动了（半秒没进展）或者写完了。
+    let mut last = 0;
+    loop {
+        thread::sleep(Duration::from_millis(500));
+        let now = written.load(Ordering::Relaxed);
+        if now == last || finished.load(Ordering::Relaxed) {
+            break;
+        }
+        last = now;
+    }
+    assert!(!finished.load(Ordering::Relaxed), "the bridge kept reading {TOTAL} bytes of requests");
+    let _ = tcp.shutdown(Shutdown::Both);
+    writer.join().unwrap();
 }

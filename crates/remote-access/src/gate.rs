@@ -52,9 +52,9 @@ fn run(shared: &Shared, id: u64, tcp: &TcpStream, peer: IpAddr, cut: &AtomicBool
     }
     let conn = ServerConnection::new(shared.tls.clone()).map_err(io::Error::other)?;
     let mut tls = StreamOwned::new(conn, Deadline { tcp: tcp.try_clone()?, until: Instant::now() + GATE_TIMEOUT });
-    // 握手没完成、超时、门禁消息读不出或不认得也算失败一次，不然占着门禁慢慢拖的不会被限速。
-    let (nonce, exporter, message) =
-        challenge(shared, &mut tls).inspect_err(|_| shared.limiter().failed(peer, Instant::now()))?;
+    // 握手没完成、超时、门禁消息读不出不算失败：谁都能替同一网段的别人只开 TCP 再关、攒满额度。
+    // 占着门禁慢慢拖的由 `GATE_TIMEOUT` 和监听方的名额挡。
+    let (nonce, exporter, message) = challenge(shared, &mut tls)?;
     let verdict = if shared.stopping.load(Ordering::Relaxed) || cut.load(Ordering::Relaxed) {
         Err(RejectReason::Disabled)
     } else if shared.limiter().limited(peer, Instant::now()) {
@@ -73,9 +73,14 @@ fn run(shared: &Shared, id: u64, tcp: &TcpStream, peer: IpAddr, cut: &AtomicBool
         }
     };
     let device_id = match verdict {
-        Ok(device_id) => device_id,
+        Ok(device_id) => {
+            shared.limiter().succeeded(peer, Instant::now());
+            device_id
+        }
         Err(reason) => {
-            if !matches!(reason, RejectReason::RateLimited | RejectReason::Disabled) {
+            // 只有硬试签名、口令的算失败；设备没登记（撤销后手机自动重试）不算，不然撤销后马上重新
+            // 配对也会被挡住。
+            if matches!(reason, RejectReason::BadSignature | RejectReason::PairingInvalid) {
                 shared.limiter().failed(peer, Instant::now());
             }
             tracing::info!("refused a remote connection from {peer}: {reason:?}");
