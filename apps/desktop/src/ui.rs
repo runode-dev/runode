@@ -2,11 +2,12 @@
 //! （`text_area`）、滚动条（`scrollbar`）、悬停提示（`tooltip`）、系统声音（`sound`）、按文件类型区分的图标（`file_icons`）、
 //! 让 Option 组合键先走快捷键的输入处理（`input_handler`）、
 //! 复制粘贴这类共用的编辑动作（`actions`），把调色板的颜色换成 GPUI 颜色的 `hsla`，以及把家目录写成
-//! `~` 显示路径的 `display_dir`。
+//! `~` 显示路径的 `display_dir`，以及让辅助工具认得界面的共用写法（`a11y`）。
 //!
 //! 依赖只能从功能模块指向这里：`ui` 不依赖 `terminal_view`、`window`、`host_client` 这些具体
 //! 功能的模块，它们要的东西由调用方经参数或事件交过来。
 
+pub mod a11y;
 pub mod actions;
 pub mod file_icons;
 pub mod input_handler;

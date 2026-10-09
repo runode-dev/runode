@@ -1,13 +1,13 @@
 //! 设置页的各页：每页有哪些项、各用什么控件，以及主题、字体、调色板这些不止一个控件的项。
 
-use gpui::{AnyElement, Context, Div, ElementId, SharedString, Window, div, prelude::*, px};
+use gpui::{AnyElement, Context, Div, ElementId, Role, SharedString, Window, div, prelude::*, px};
 use runode_config::StatusItem;
 use runode_shared_types::agent::AgentKind;
 
 use super::{
     Commit, SettingsView,
     controls::{
-        Cards, Colors, button, chip, dropdown, icon_button, input_box, on_click, reset_button, row, segmented, swatch,
+        Cards, Colors, Press, button, chip, dropdown, icon_button, input_box, reset_button, row, segmented, swatch,
         switch,
     },
     picker::{PickItem, PickTarget},
@@ -252,6 +252,10 @@ pub(super) fn language_name(locale: &str) -> String {
 impl SettingsView {
     pub(super) fn render_page(&mut self, colors: Colors, window: &mut Window, cx: &mut Context<Self>) -> Div {
         let title = div()
+            .id("settings-title")
+            .role(Role::Heading)
+            .aria_level(1)
+            .aria_label(self.page.title())
             .pt(px(8.))
             .pb(px(12.))
             .text_size(px(22.))
@@ -315,8 +319,8 @@ impl SettingsView {
         let control = match control {
             Control::Switch => {
                 let on = current.first().is_some_and(|value| value == "true");
-                let switch = switch(id("switch", key), on, colors)
-                    .on_click(on_click(cx, move |this, _, cx| this.write_or_report(key, vec![(!on).to_string()], cx)));
+                let switch = switch(id("switch", key), key_title(key), on, colors)
+                    .on_press(cx, move |this, _, cx| this.write_or_report(key, vec![(!on).to_string()], cx));
                 let notify = key == "agent-notifications" && on;
                 // 开着通知、系统设置里却拒绝了：通知发不出来，提示去系统设置里打开。
                 let denied = notify && crate::window::notifications_denied(cx);
@@ -338,7 +342,7 @@ impl SettingsView {
             Control::Choice(values) => {
                 let options = values.iter().map(|value| (value.to_string(), choice_label(key, value))).collect();
                 let selected = current.first().map_or("", String::as_str);
-                segmented(key, options, Some(selected), colors, cx, move |this, value, _, cx| {
+                segmented(key, key_title(key), options, Some(selected), colors, cx, move |this, value, _, cx| {
                     let values = if value.is_empty() { Vec::new() } else { vec![value.to_owned()] };
                     this.write_or_report(key, values, cx);
                 })
@@ -364,8 +368,8 @@ impl SettingsView {
                     Some(locale) => language_name(locale),
                     None => rust_i18n::t!("settings.follow_system").into_owned(),
                 };
-                dropdown(id("dropdown", key), None, label, 180., colors)
-                    .on_click(on_click(cx, move |this, window, cx| this.open_language_picker(window, cx)))
+                dropdown(id("dropdown", key), key_title(key), None, label, 180., colors)
+                    .on_press(cx, move |this, window, cx| this.open_language_picker(window, cx))
                     .into_any_element()
             }
             Control::Sound => {
@@ -373,8 +377,8 @@ impl SettingsView {
                     None | Some("none") => rust_i18n::t!("settings.no_sound").into_owned(),
                     Some(name) => name.to_owned(),
                 };
-                dropdown(id("dropdown", key), None, label, 180., colors)
-                    .on_click(on_click(cx, move |this, window, cx| this.open_sound_picker(key, window, cx)))
+                dropdown(id("dropdown", key), key_title(key), None, label, 180., colors)
+                    .on_press(cx, move |this, window, cx| this.open_sound_picker(key, window, cx))
                     .into_any_element()
             }
         };
@@ -416,25 +420,22 @@ impl SettingsView {
                 (rust_i18n::t!("settings.fallback_font", n = ix).into_owned(), None, None, None)
             };
             let current = name.clone();
-            let picker = dropdown(("font", ix), None, name, 240., colors)
-                .on_click(on_click(cx, move |this, window, cx| {
-                    this.open_font_picker(ix, Some(current.clone()), window, cx)
-                }));
-            let remove = (count > 1).then(|| {
-                icon_button(("remove-font", ix), "icons/minus.svg", colors).on_click(on_click(
-                    cx,
-                    move |this, _, cx| {
-                        let mut fonts = this.config.font_family.clone();
-                        fonts.remove(ix);
-                        this.write_or_report("font-family", fonts, cx);
-                    },
-                ))
-            });
+            let picker = dropdown(("font", ix), title.clone(), None, name, 240., colors)
+                .on_press(cx, move |this, window, cx| this.open_font_picker(ix, Some(current.clone()), window, cx));
+            let remove =
+                (count > 1).then(|| {
+                    icon_button(("remove-font", ix), "icons/minus.svg", rust_i18n::t!("settings.remove"), colors)
+                        .on_press(cx, move |this, _, cx| {
+                            let mut fonts = this.config.font_family.clone();
+                            fonts.remove(ix);
+                            this.write_or_report("font-family", fonts, cx);
+                        })
+                });
             let control = div().flex().items_center().gap(px(4.)).children(remove).child(picker);
             out = out.child(row(title, hint, control, reset, error, colors));
         }
         let add = button("add-font", rust_i18n::t!("settings.add_fallback_font").into_owned(), colors)
-            .on_click(on_click(cx, move |this, window, cx| this.open_font_picker(count, None, window, cx)));
+            .on_press(cx, move |this, window, cx| this.open_font_picker(count, None, window, cx));
         out.child(div().py(px(10.)).flex().child(add))
     }
 
@@ -495,7 +496,7 @@ impl SettingsView {
             .map(|(ix, item)| {
                 let on = hidden.contains(&item);
                 let (icon, title) = crate::window::status_item_icon_and_title(item);
-                chip(("status-hidden", ix), Some(icon), title, on, colors).on_click(on_click(cx, move |this, _, cx| {
+                chip(("status-hidden", ix), Some(icon), title, on, colors).on_press(cx, move |this, _, cx| {
                     let mut hidden = this.config.status_bar_hidden.clone();
                     if on {
                         hidden.retain(|other| *other != item);
@@ -505,7 +506,7 @@ impl SettingsView {
                     let names: Vec<_> = hidden.iter().map(|item| item.name()).collect();
                     let values = if names.is_empty() { Vec::new() } else { vec![names.join(", ")] };
                     this.write_or_report(KEY, values, cx);
-                }))
+                })
             })
             .collect();
         let reset = self.reset(KEY, colors, cx);
@@ -528,7 +529,7 @@ impl SettingsView {
                     AgentKind::Other => rust_i18n::t!("settings.other_agents").into_owned(),
                     kind => kind.display_name().to_owned(),
                 };
-                chip(("exclude", ix), None, name, on, colors).on_click(on_click(cx, move |this, _, cx| {
+                chip(("exclude", ix), None, name, on, colors).on_press(cx, move |this, _, cx| {
                     let mut values = this.config.values(KEY);
                     if on {
                         values.retain(|name| name != label);
@@ -536,7 +537,7 @@ impl SettingsView {
                         values.push(label.to_owned());
                     }
                     this.write_or_report(KEY, values, cx);
-                }))
+                })
             })
             .collect();
         let reset = self.reset(KEY, colors, cx);
@@ -562,14 +563,12 @@ impl SettingsView {
             let input = self.field(&id, Commit::Item(KEY, ix), Some(placeholder.into()), window, cx);
             let error = self.errors.get(&id).cloned();
             let remove = (ix < files.len()).then(|| {
-                icon_button(("remove-config-file", ix), "icons/minus.svg", colors).on_click(on_click(
-                    cx,
-                    move |this, _, cx| {
+                icon_button(("remove-config-file", ix), "icons/minus.svg", rust_i18n::t!("settings.remove"), colors)
+                    .on_press(cx, move |this, _, cx| {
                         let mut files = this.file.values(KEY);
                         files.remove(ix);
                         this.write_or_report(KEY, files, cx);
-                    },
-                ))
+                    })
             });
             out = out.child(
                 div()
@@ -595,9 +594,9 @@ impl SettingsView {
     fn render_config_file_actions(&mut self, colors: Colors, cx: &mut Context<Self>) -> Div {
         let path = runode_config::config_path().map(|path| display_dir(&path));
         let open = button("open-config", rust_i18n::t!("settings.open_config").into_owned(), colors)
-            .on_click(on_click(cx, |_, _, cx| crate::config::open(cx)));
+            .on_press(cx, |_, _, cx| crate::config::open(cx));
         let reload = button("reload-config", rust_i18n::t!("settings.reload_config").into_owned(), colors)
-            .on_click(on_click(cx, |_, _, cx| crate::config::reload(cx)));
+            .on_press(cx, |_, _, cx| crate::config::reload(cx));
         let hint = rust_i18n::t!("settings.config_file_hint", path = path.unwrap_or_default()).into_owned();
         row(
             rust_i18n::t!("settings.config_file").into_owned(),

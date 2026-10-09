@@ -2,13 +2,14 @@
 //! 终端的前景和背景，和终端窗口的界面一个色调。
 
 use gpui::{
-    AnyElement, App, ClickEvent, Context, Div, ElementId, Entity, Focusable, Hsla, SharedString, Stateful, Window, div,
+    AnyElement, App, Context, Div, ElementId, Entity, Focusable, Hsla, Role, SharedString, Stateful, Window, div,
     prelude::*, px, svg,
 };
 use runode_config::Config;
 use runode_shared_types::color::Rgb;
 
 use super::SettingsView;
+pub(super) use crate::ui::a11y::Press;
 use crate::ui::{hsla, text_field::TextField};
 
 /// 控件的高度。
@@ -54,14 +55,6 @@ impl Colors {
             error: hsla(ansi(1, Rgb(0xe0, 0x50, 0x50))),
         }
     }
-}
-
-/// 点击时调 `f`。
-pub(super) fn on_click(
-    cx: &mut Context<SettingsView>,
-    f: impl Fn(&mut SettingsView, &mut Window, &mut Context<SettingsView>) + 'static,
-) -> impl Fn(&ClickEvent, &mut Window, &mut gpui::App) + 'static {
-    cx.listener(move |this, _: &ClickEvent, window, cx| f(this, window, cx))
 }
 
 /// 一页里的小标题。
@@ -159,20 +152,24 @@ pub(super) fn reset_button(
     cx: &mut Context<SettingsView>,
     f: impl Fn(&mut SettingsView, &mut Window, &mut Context<SettingsView>) + 'static,
 ) -> AnyElement {
-    icon_button(id, "icons/refresh.svg", colors)
-        .tooltip(crate::ui::tooltip::tooltip(
-            rust_i18n::t!("settings.reset").into_owned(),
-            None,
-            colors.fg_rgb,
-            colors.bg_rgb,
-        ))
-        .on_click(on_click(cx, f))
+    let label = rust_i18n::t!("settings.reset").into_owned();
+    icon_button(id, "icons/refresh.svg", label.clone(), colors)
+        .tooltip(crate::ui::tooltip::tooltip(label, None, colors.fg_rgb, colors.bg_rgb))
+        .on_press(cx, f)
         .into_any_element()
 }
 
-pub(super) fn icon_button(id: impl Into<ElementId>, icon: &'static str, colors: Colors) -> Stateful<Div> {
+/// 只有图标的按钮；`label` 不显示，报给辅助工具。
+pub(super) fn icon_button(
+    id: impl Into<ElementId>,
+    icon: &'static str,
+    label: impl Into<SharedString>,
+    colors: Colors,
+) -> Stateful<Div> {
     div()
         .id(id)
+        .role(Role::Button)
+        .aria_label(label)
         .size(px(20.))
         .flex()
         .items_center()
@@ -182,10 +179,18 @@ pub(super) fn icon_button(id: impl Into<ElementId>, icon: &'static str, colors: 
         .child(svg().path(icon).size(px(12.)).text_color(colors.fg.opacity(0.6)))
 }
 
-/// 开关。
-pub(super) fn switch(id: impl Into<ElementId>, on: bool, colors: Colors) -> Stateful<Div> {
+/// 开关；`label` 是它管的那一项的名字，报给辅助工具。
+pub(super) fn switch(
+    id: impl Into<ElementId>,
+    label: impl Into<SharedString>,
+    on: bool,
+    colors: Colors,
+) -> Stateful<Div> {
     div()
         .id(id)
+        .role(Role::Switch)
+        .aria_label(label)
+        .aria_toggled(on.into())
         .w(px(34.))
         .h(px(20.))
         .flex_none()
@@ -197,16 +202,20 @@ pub(super) fn switch(id: impl Into<ElementId>, on: bool, colors: Colors) -> Stat
         .child(div().size(px(16.)).rounded_full().bg(gpui::white()).shadow_sm())
 }
 
-/// 分段选项：几个挨在一起的按钮，选中的那个高亮。`options` 是 (值, 显示的文字)。
+/// 分段选项：几个挨在一起的按钮，选中的那个高亮。`options` 是 (值, 显示的文字)，`label` 是这一组的名字。
 pub(super) fn segmented(
     id: &'static str,
+    label: impl Into<SharedString>,
     options: Vec<(String, SharedString)>,
     selected: Option<&str>,
     colors: Colors,
     cx: &mut Context<SettingsView>,
     pick: impl Fn(&mut SettingsView, &str, &mut Window, &mut Context<SettingsView>) + Clone + 'static,
-) -> Div {
+) -> Stateful<Div> {
     div()
+        .id(id)
+        .role(Role::RadioGroup)
+        .aria_label(label)
         .flex()
         .h(px(CONTROL_HEIGHT))
         .p(px(2.))
@@ -220,6 +229,9 @@ pub(super) fn segmented(
             let pick = pick.clone();
             div()
                 .id((id, ix))
+                .role(Role::RadioButton)
+                .aria_label(label.clone())
+                .aria_toggled(on.into())
                 .px(px(10.))
                 .flex()
                 .items_center()
@@ -232,15 +244,18 @@ pub(super) fn segmented(
                         item.text_color(colors.fg.opacity(0.7)).hover(|item| item.bg(colors.hover))
                     }
                 })
-                .on_click(on_click(cx, move |this, window, cx| pick(this, &value, window, cx)))
+                .on_press(cx, move |this, window, cx| pick(this, &value, window, cx))
                 .child(label)
         }))
 }
 
 /// 普通按钮。
 pub(super) fn button(id: impl Into<ElementId>, label: impl Into<SharedString>, colors: Colors) -> Stateful<Div> {
+    let label = label.into();
     div()
         .id(id)
+        .role(Role::Button)
+        .aria_label(label.clone())
         .h(px(CONTROL_HEIGHT))
         .px(px(12.))
         .flex()
@@ -251,20 +266,25 @@ pub(super) fn button(id: impl Into<ElementId>, label: impl Into<SharedString>, c
         .border_color(colors.border)
         .text_size(px(12.))
         .hover(|button| button.bg(colors.hover))
-        .child(label.into())
+        .child(label)
 }
 
 /// 点开一个列表从里面挑的按钮：显示当前选的，`leading` 放在它左边（比如主题的色块），右边一个
 /// 下拉箭头。
 pub(super) fn dropdown(
     id: impl Into<ElementId>,
+    name: impl Into<SharedString>,
     leading: Option<AnyElement>,
     label: impl Into<SharedString>,
     width: f32,
     colors: Colors,
 ) -> Stateful<Div> {
+    let label = label.into();
     div()
         .id(id)
+        .role(Role::ComboBox)
+        .aria_label(name)
+        .aria_value(label.clone())
         .w(px(width))
         .h(px(CONTROL_HEIGHT))
         .pl(px(10.))
@@ -279,7 +299,7 @@ pub(super) fn dropdown(
         .text_size(px(12.))
         .hover(|button| button.bg(colors.hover))
         .children(leading)
-        .child(div().flex_1().min_w_0().truncate().child(label.into()))
+        .child(div().flex_1().min_w_0().truncate().child(label))
         .child(svg().flex_none().path("icons/chevron-down.svg").size(px(12.)).text_color(colors.fg.opacity(0.6)))
 }
 
@@ -324,8 +344,12 @@ pub(super) fn chip(
     on: bool,
     colors: Colors,
 ) -> Stateful<Div> {
+    let label = label.into();
     div()
         .id(id)
+        .role(Role::CheckBox)
+        .aria_label(label.clone())
+        .aria_toggled(on.into())
         .h(px(24.))
         .px(px(8.))
         .flex()
@@ -339,7 +363,7 @@ pub(super) fn chip(
         .hover(|chip| chip.bg(colors.hover))
         .children(on.then(|| svg().path("icons/check.svg").size(px(11.)).text_color(colors.accent)))
         .children(icon.map(|icon| svg().path(icon).size(px(12.)).text_color(colors.fg.opacity(0.7))))
-        .child(label.into())
+        .child(label)
 }
 
 /// 色块；`color` 为 `None` 时画一条斜线，表示没设、跟随别的颜色。

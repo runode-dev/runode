@@ -1,0 +1,31 @@
+//! 让辅助工具（VoiceOver、CUA 这类读 AX 树的自动化工具）认得界面：GPUI 只把同时有 `id` 和 `role`
+//! 的元素报出去，名字用 `aria_label`，状态用 `aria_toggled`、`aria_selected`、`aria_value` 这些。
+//! 这里放几处界面共用的写法。
+
+use std::rc::Rc;
+
+use gpui::{AccessibleAction, ClickEvent, Context, StatefulInteractiveElement, Window};
+
+/// 点击或辅助工具按下时调 `f`。
+///
+/// GPUI 默认把辅助工具的按下换成在元素中心合成一次鼠标点击，元素滚出了可见区域、或者被别的东西
+/// 盖住时就点不到，什么也不报；这里另外登记按下动作，直接调同一个 `f`。
+pub trait Press: StatefulInteractiveElement + Sized {
+    fn on_press<T: 'static>(
+        self,
+        cx: &mut Context<T>,
+        f: impl Fn(&mut T, &mut Window, &mut Context<T>) + 'static,
+    ) -> Self {
+        let f = Rc::new(f);
+        let press = f.clone();
+        let view = cx.entity().downgrade();
+        self.on_click(cx.listener(move |this, _: &ClickEvent, window, cx| f(this, window, cx))).on_a11y_action(
+            AccessibleAction::Click,
+            move |_, window, cx| {
+                view.update(cx, |this, cx| press(this, window, cx)).ok();
+            },
+        )
+    }
+}
+
+impl<E: StatefulInteractiveElement> Press for E {}

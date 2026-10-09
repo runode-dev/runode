@@ -4,8 +4,8 @@
 use std::ops::Range;
 
 use gpui::{
-    AnyElement, Context, Entity, Focusable, KeyDownEvent, MouseButton, ScrollStrategy, SharedString, Subscription,
-    UniformListScrollHandle, Window, div, prelude::*, px, uniform_list,
+    AnyElement, Context, Entity, Focusable, KeyDownEvent, MouseButton, Role, ScrollStrategy, SharedString,
+    Subscription, UniformListScrollHandle, Window, div, prelude::*, px, uniform_list,
 };
 
 use super::{SettingsView, controls::Colors};
@@ -200,6 +200,9 @@ impl SettingsView {
                 Some(
                     div()
                         .id(("pick", row))
+                        .role(Role::ListBoxOption)
+                        .aria_label(item.label.clone())
+                        .aria_selected(row == picker.highlighted)
                         .w_full()
                         .h(px(ROW_HEIGHT))
                         .px(px(8.))
@@ -214,13 +217,8 @@ impl SettingsView {
                                 el.hover(|el| el.bg(colors.hover))
                             }
                         })
-                        .on_mouse_down(
-                            MouseButton::Left,
-                            cx.listener(move |this, _, window, cx| {
-                                cx.stop_propagation();
-                                this.pick(ix, window, cx);
-                            }),
-                        )
+                        // 用 on_click 而不是按下就选：辅助工具点它时走的也是这个。
+                        .on_click(cx.listener(move |this, _, window, cx| this.pick(ix, window, cx)))
                         .child(
                             div().w(px(12.)).flex_none().text_color(colors.accent).children(
                                 current.then(|| {
@@ -258,6 +256,8 @@ impl SettingsView {
         });
         let panel = div()
             .id("picker")
+            .role(Role::Dialog)
+            .aria_label(picker.title.clone())
             .w(px(PICKER_WIDTH))
             .flex()
             .flex_col()

@@ -507,6 +507,7 @@ setup:
   ok: 好
 settings:
   back: 返回
+  remove: 删除
   language_name: 简体中文
   invalid: "这个值不对：%{err}"
   no_home: 找不到主目录，没地方放配置文件

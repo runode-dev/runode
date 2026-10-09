@@ -21,7 +21,8 @@ use std::{collections::HashMap, sync::Arc, time::Duration};
 
 use gpui::{
     App, AppContext as _, Context, Entity, EventEmitter, FocusHandle, Focusable, KeyDownEvent, MouseButton,
-    MouseDownEvent, Render, ScrollHandle, SharedString, Subscription, Task, Window, div, point, prelude::*, px, svg,
+    MouseDownEvent, Render, Role, ScrollHandle, SharedString, Subscription, Task, Window, div, point, prelude::*, px,
+    svg,
 };
 use runode_config::{Config, ConfigFile};
 
@@ -302,6 +303,7 @@ impl SettingsView {
         let item = |id: &'static str, icon: &'static str, label: String, selected: bool| {
             div()
                 .id(id)
+                .aria_label(label.clone())
                 .h(px(34.))
                 .px(px(10.))
                 .flex()
@@ -320,6 +322,7 @@ impl SettingsView {
                 .child(label)
         };
         let back = item("settings-back", ARROW_LEFT_ICON, rust_i18n::t!("settings.back").into_owned(), false)
+            .role(Role::Button)
             .mb(px(8.))
             .on_click(cx.listener(|_, _, _, cx| cx.emit(Close)));
         div()
@@ -333,12 +336,16 @@ impl SettingsView {
             .border_color(colors.border)
             .id("settings-nav")
             .child(titlebar_strip())
-            .child(div().flex().flex_col().gap(px(2.)).px(px(10.)).child(back).children(Page::ALL.into_iter().map(
-                |page| {
-                    item(page.id(), page.icon(), page.title(), page == self.page)
-                        .on_click(cx.listener(move |this, _, window, cx| this.select_page(page, window, cx)))
-                },
-            )))
+            .child(div().flex().flex_col().gap(px(2.)).px(px(10.)).child(back).child(
+                div().id("settings-pages").role(Role::TabList).flex().flex_col().gap(px(2.)).children(
+                    Page::ALL.into_iter().map(|page| {
+                        item(page.id(), page.icon(), page.title(), page == self.page)
+                            .role(Role::Tab)
+                            .aria_selected(page == self.page)
+                            .on_click(cx.listener(move |this, _, window, cx| this.select_page(page, window, cx)))
+                    }),
+                ),
+            ))
     }
 
     /// Esc：焦点在页面本身（不在输入框、挑选浮层里，也没在录快捷键）时收起。

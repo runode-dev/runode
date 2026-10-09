@@ -2,13 +2,13 @@
 //! 是选主题的下拉，左边的色块是那个主题的背景、前景和强调色。预览和色块按主题文件里的颜色画
 //! （`runode_config::theme_config`），读过的主题记在 `SettingsView::theme_looks` 里。
 
-use gpui::{AnyElement, Context, Div, FontWeight, Window, div, prelude::*, px, svg};
+use gpui::{AnyElement, Context, Div, FontWeight, Role, Window, div, prelude::*, px, svg};
 use runode_config::Config;
 use runode_shared_types::color::Rgb;
 
 use super::{
     SettingsView,
-    controls::{Colors, dropdown, on_click, row},
+    controls::{Colors, Press, dropdown, row},
     picker::{PickItem, PickTarget, ThemeSlot},
 };
 use crate::{
@@ -163,8 +163,12 @@ impl SettingsView {
                 .map(|(ix, (mode, icon, looks))| {
                     let on = mode == theme.mode();
                     let tint = if on { colors.accent } else { colors.fg.opacity(0.75) };
+                    let label = tr(&format!("settings.theme.{mode}"));
                     div()
                         .id(("theme-mode", ix))
+                        .role(Role::RadioButton)
+                        .aria_label(label.clone())
+                        .aria_toggled(on.into())
                         .flex_1()
                         .min_w_0()
                         .flex()
@@ -189,16 +193,24 @@ impl SettingsView {
                                 .text_color(tint)
                                 .when(on, |label| label.font_weight(FontWeight::MEDIUM))
                                 .child(svg().path(icon).size(px(14.)).text_color(tint))
-                                .child(tr(&format!("settings.theme.{mode}"))),
+                                .child(label),
                         )
-                        .on_click(on_click(cx, move |this, window, cx| this.pick_theme_mode(mode, window, cx)))
+                        .on_press(cx, move |this, window, cx| this.pick_theme_mode(mode, window, cx))
                 });
         let note = |text: String, color| div().pt(px(10.)).pl(px(4.)).text_size(px(12.)).text_color(color).child(text);
         div()
             .flex()
             .flex_col()
             .pb(px(12.))
-            .child(div().flex().gap(px(12.)).children(tiles))
+            .child(
+                div()
+                    .id("theme-modes")
+                    .role(Role::RadioGroup)
+                    .aria_label(tr("settings.section.color_scheme"))
+                    .flex()
+                    .gap(px(12.))
+                    .children(tiles),
+            )
             .child(note(tr("settings.hint.theme"), colors.fg.opacity(0.55)))
             .children(self.errors.get("theme").cloned().map(|err| note(err, colors.error)))
     }
@@ -220,11 +232,12 @@ impl SettingsView {
                 };
                 let chips = self.theme_look(&name).map(|look| chips(look, colors).into_any_element());
                 let current = name.clone();
-                let picker = dropdown(element, chips, name, 240., colors)
-                    .on_click(on_click(cx, move |this, window, cx| {
+                let title = rust_i18n::t!(title).into_owned();
+                let picker = dropdown(element, title.clone(), chips, name, 240., colors)
+                    .on_press(cx, move |this, window, cx| {
                         this.open_theme_picker(slot, Some(current.clone()), window, cx)
-                    }));
-                row(rust_i18n::t!(title).into_owned(), None, picker, None, None, colors).into_any_element()
+                    });
+                row(title, None, picker, None, None, colors).into_any_element()
             })
             .collect()
     }

@@ -507,6 +507,7 @@ setup:
   ok: OK
 settings:
   back: Back
+  remove: Remove
   language_name: English
   invalid: "Not a valid value: %{err}"
   no_home: There is no home directory to keep the configuration file in

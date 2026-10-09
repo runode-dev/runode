@@ -7,7 +7,7 @@ use runode_autostart::Kind;
 
 use super::{
     SettingsView,
-    controls::{Colors, on_click, row, switch},
+    controls::{Colors, Press, row, switch},
 };
 
 impl SettingsView {
@@ -16,10 +16,11 @@ impl SettingsView {
         let mut rows = gpui::div().flex().flex_col();
         for kind in [Kind::App, Kind::Host].into_iter().filter(|kind| kind.supported()) {
             let on = runode_autostart::is_installed(kind, &dirs);
-            let switch = switch(format!("autostart-{}", kind.name()), on, colors)
-                .on_click(on_click(cx, move |this, _, cx| this.toggle_autostart(kind, cx)));
+            let title = rust_i18n::t!(format!("settings.autostart.{}.title", kind.name())).into_owned();
+            let switch = switch(format!("autostart-{}", kind.name()), title.clone(), on, colors)
+                .on_press(cx, move |this, _, cx| this.toggle_autostart(kind, cx));
             rows = rows.child(row(
-                rust_i18n::t!(format!("settings.autostart.{}.title", kind.name())).into_owned(),
+                title,
                 Some(rust_i18n::t!(format!("settings.autostart.{}.hint", kind.name())).into_owned().into()),
                 switch,
                 None,
