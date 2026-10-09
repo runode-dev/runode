@@ -83,13 +83,41 @@ fn devices_are_listed_and_revoked_by_prefix() {
 }
 
 #[test]
-fn pairing_needs_remote_access_to_be_on() {
+fn pairing_turns_remote_access_on_in_the_config_and_waits_for_the_listener() {
     let root = Root::new("off");
-    let (code, out, err) = run("remote pair", &root.env());
+    let env = root.env();
+    let pairing = thread::spawn(move || run("remote pair --addr 127.0.0.1", &env));
+    // 命令改好配置后在等；监听方（这里是测试）读到配置起来，命令接着出二维码。
+    let config = root.dirs().config_file().unwrap();
+    for _ in 0..100 {
+        if config.exists() {
+            break;
+        }
+        thread::sleep(Duration::from_millis(20));
+    }
+    assert_eq!(std::fs::read_to_string(&config).unwrap(), "remote-access = true\n");
+    let _listener = Listener::start(Options {
+        dirs: root.dirs(),
+        port: 0,
+        bind: Bind::Loopback,
+        host_name: Some("测试的 Mac".into()),
+        advertise: false,
+        connect: Arc::new(|| Err(std::io::Error::other("no host in this test"))),
+    })
+    .unwrap();
+    let file = root.dirs().remote_access_pairing_file().unwrap();
+    for _ in 0..100 {
+        if file.exists() {
+            break;
+        }
+        thread::sleep(Duration::from_millis(20));
+    }
+    let _replacement = PairingTicket::begin(&root.dirs(), PAIRING_TTL).unwrap();
+    let (code, out, err) = pairing.join().unwrap();
     assert_eq!(code, exit::FAILED);
-    assert!(out.is_empty(), "{out}");
-    assert!(err.contains("remote-access = true"), "{err}");
-    assert!(!root.dirs().remote_access_pairing_file().unwrap().exists());
+    assert!(err.contains("replaced"), "{err}");
+    assert!(out.starts_with("Remote access was off: set `remote-access = true` in "), "{out}");
+    assert!(out.contains('▀'), "{out}");
 }
 
 #[test]

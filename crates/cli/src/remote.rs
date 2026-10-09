@@ -1,13 +1,13 @@
 //! `runode remote …`：给手机配对远程访问（`pair`）、列出（`devices`）和撤销（`revoke`）配对过的设备。
 //! 不经宿主，读写 `runode_remote_access` 管的文件：监听方（宿主所在的进程）开着时才能配对，列和
-//! 撤销不用它开着。配对成了以后，`terminal-host` 还没开时问一句要不要开，免得退出 app 后远程访问
+//! 撤销不用它开着。配置里还没开 `remote-access` 时，`pair` 替用户写上再等监听方起来。配对成了以后，`terminal-host` 还没开时问一句要不要开，免得退出 app 后远程访问
 //! 跟着停掉、手机连不上。
 
 use std::{
     io::{BufRead as _, IsTerminal as _, Write},
     net::IpAddr,
     thread,
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use anyhow::{Context as _, anyhow, bail};
@@ -15,7 +15,7 @@ use qrcode::{Color, EcLevel, QrCode};
 use runode_config::ConfigFile;
 use runode_protocol::remote::PAIRING_TTL;
 use runode_remote_access::{
-    Device, PairingProgress, PairingTicket, list_devices, listener_status, now_unix, revoke_device,
+    Device, ListenerStatus, PairingProgress, PairingTicket, list_devices, listener_status, now_unix, revoke_device,
 };
 
 use crate::Env;
@@ -28,16 +28,22 @@ const STATUS_EVERY: u32 = 8;
 const QUIET_ZONE: usize = 2;
 /// 退出 app 后宿主留在后台的配置项，见 `offer_background`。
 const BACKGROUND_KEY: &str = "terminal-host";
+/// 开远程访问的配置项，见 `turn_on`。
+const REMOTE_KEY: &str = "remote-access";
+/// `turn_on` 写完配置后等监听方起来的最长时间：app 和单独跑的宿主每秒看一眼配置文件。
+pub(crate) const LISTENER_WAIT: Duration = Duration::from_secs(10);
 
-/// `answer` 读用户对「要不要在后台跑」的回答，见 `offer_background`。
+/// `answer` 读用户对「要不要在后台跑」的回答，见 `offer_background`；`listener_wait` 是 `turn_on` 等监听方的时间。
 pub(crate) fn pair(
     env: &Env,
     extra: &[IpAddr],
     out: &mut dyn Write,
     answer: &mut dyn FnMut() -> Option<String>,
+    listener_wait: Duration,
 ) -> anyhow::Result<()> {
-    let Some(status) = listener_status(&env.dirs).context("cannot tell whether remote access is on")? else {
-        return Err(not_listening(env));
+    let status = match listener_status(&env.dirs).context("cannot tell whether remote access is on")? {
+        Some(status) => status,
+        None => turn_on(env, out, listener_wait)?,
     };
     let ticket = PairingTicket::begin(&env.dirs, PAIRING_TTL).context("cannot write the pairing code")?;
     let uri = ticket.uri(&status, extra)?.to_string();
@@ -182,6 +188,37 @@ fn offer_background(env: &Env, out: &mut dyn Write, answer: &mut dyn FnMut() -> 
     Ok(())
 }
 
+/// 没有监听方时：配置里还没开 `REMOTE_KEY` 就替用户写上，说明改了什么，再等监听方（运行中的 app
+/// 或 `runode --host`）读到配置起来，免得配对前还得自己改配置。已经开着（只是 runode 没在跑）、
+/// 写不了配置或者等到 `wait` 还没起来时报错。
+fn turn_on(env: &Env, out: &mut dyn Write, wait: Duration) -> anyhow::Result<ListenerStatus> {
+    let Some(path) = env.dirs.config_file() else {
+        return Err(not_listening(env));
+    };
+    let shown = path.display();
+    let mut file = ConfigFile::read(&path).with_context(|| format!("cannot read {shown}"))?;
+    if file.values(REMOTE_KEY).last().is_some_and(|value| value == "true") {
+        return Err(not_listening(env));
+    }
+    file.set(REMOTE_KEY, &["true".to_owned()]);
+    file.write(&path).with_context(|| format!("cannot write {shown}; set `{REMOTE_KEY} = true` there yourself"))?;
+    writeln!(out, "Remote access was off: set `{REMOTE_KEY} = true` in {shown}.")?;
+    out.flush()?;
+    let deadline = Instant::now() + wait;
+    loop {
+        if let Some(status) = listener_status(&env.dirs).context("cannot tell whether remote access is on")? {
+            return Ok(status);
+        }
+        if Instant::now() >= deadline {
+            bail!(
+                "remote access is on in {shown} now, but runode is not running to pick it up. Open runode (or start \
+                 `runode --host`), then run `runode remote pair` again"
+            )
+        }
+        thread::sleep(POLL_INTERVAL);
+    }
+}
+
 /// 远程访问没开时的说明。
 fn not_listening(env: &Env) -> anyhow::Error {
     let config =
@@ -293,6 +330,29 @@ mod tests {
         let out = offer(&env, Some("yes\n"));
         assert!(out.contains("running in the background"), "{out}");
         assert_eq!(background_values(&env), ["true"]);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    fn pair_off(env: &Env, wait: Duration) -> (anyhow::Result<()>, String) {
+        let mut out = Vec::new();
+        let result = pair(env, &[], &mut out, &mut || None, wait);
+        (result, String::from_utf8(out).unwrap())
+    }
+
+    #[test]
+    fn pairing_writes_remote_access_into_the_config_and_gives_up_without_a_listener() {
+        let (env, root) = env_in("turn-on");
+        let path = env.dirs.config_file().unwrap();
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, "font-size = 14\nremote-access = false\n").unwrap();
+        let (result, out) = pair_off(&env, Duration::from_millis(100));
+        assert!(result.unwrap_err().to_string().contains("not running to pick it up"));
+        assert!(out.starts_with("Remote access was off: set `remote-access = true` in "), "{out}");
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "font-size = 14\nremote-access = true\n");
+        // 已经开着只是 runode 没在跑：不再改配置、不输出。
+        let (result, out) = pair_off(&env, Duration::from_millis(100));
+        assert!(result.unwrap_err().to_string().contains("remote access is not running"));
+        assert_eq!(out, "");
         let _ = std::fs::remove_dir_all(root);
     }
 

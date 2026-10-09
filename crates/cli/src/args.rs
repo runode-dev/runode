@@ -99,10 +99,11 @@ commands:
                               pair a phone for remote access: shows a QR code
                               and its link, valid for 5 minutes, and waits for
                               the phone; --addr also offers ADDR (say
-                              127.0.0.1 for a simulator on this Mac). Needs
-                              remote-access = true in the config; once paired,
-                              offers to set terminal-host = true so remote
-                              access keeps running after you quit runode
+                              127.0.0.1 for a simulator on this Mac). Sets
+                              remote-access = true in the config if it is off
+                              (runode must be running to pick it up); once
+                              paired, offers to set terminal-host = true so
+                              remote access keeps running after you quit runode
   remote devices [--json]     list the paired phones
   remote revoke DEVICE        unpair a phone (an id or a unique prefix of it,
                               as `runode remote devices` shows); it is
