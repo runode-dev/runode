@@ -117,18 +117,12 @@
         "name": "agent",
         "suggestions": [
           { "name": "claude", "description": "Install a skill in ~/.claude/skills/runode" },
-          { "name": "codex", "description": "Install a skill in ~/.agents/skills/runode" },
-          { "name": "usage", "description": "Show the model, context and cost of Claude Code, Codex, Gemini CLI and pi under their pane" }
+          { "name": "codex", "description": "Install a skill in ~/.agents/skills/runode" }
         ]
       },
       "options": [
         { "name": "--print", "description": "Show the instructions instead of installing them" }
       ]
-    },
-    {
-      "name": "usage-hook",
-      "description": "What the agents run to report their usage",
-      "hidden": true
     },
     {
       "name": "remote",

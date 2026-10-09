@@ -1,5 +1,5 @@
-//! 标签里的终端区：分屏树、分隔线、拖动分隔线时的遮罩，别的终端里的程序（经命令行）正在
-//! 操作某个分屏时右上角的驱动标记，以及 agent 报了用量时分屏底下的一行。
+//! 标签里的终端区：分屏树、分隔线、拖动分隔线时的遮罩，以及别的终端里的程序（经命令行）正在
+//! 操作某个分屏时右上角的驱动标记。
 
 use std::{
     borrow::Cow,
@@ -14,7 +14,6 @@ use gpui::{
 };
 use runode_protocol::SessionId;
 use runode_shared_types::{
-    agent::AgentUsage,
     color::Rgb,
     pane::{Axis, Node},
     session::{DriveAction, Driver},
@@ -271,30 +270,8 @@ impl WindowView {
             .on_drop(cx.listener(move |this, dropped: &ExternalPaths, window, cx| {
                 this.drop_paths_on_pane(id, dropped.paths(), window, cx);
             }));
-        let usage = {
-            let terminal = tab.panes[&id].0.read(cx);
-            let locale = rust_i18n::locale();
-            terminal.agent().and(terminal.meta().agent_usage.as_ref()).map(|usage| usage_text(usage, &locale))
-        };
-        let usage = usage.filter(|text| !text.is_empty()).map(|text| usage_line(text, fg));
         if !cards {
-            let Some(usage) = usage else {
-                return terminal.into_any_element();
-            };
-            // 终端用四边定位撑满用量那一行上面的部分，道理同下面卡片里的终端。
-            return div()
-                .size_full()
-                .flex()
-                .flex_col()
-                .child(
-                    div()
-                        .relative()
-                        .flex_1()
-                        .min_h_0()
-                        .child(terminal.absolute().top_0().left_0().right_0().bottom_0()),
-                )
-                .child(usage.pt(px(4.)))
-                .into_any_element();
+            return terminal.into_any_element();
         }
         // 卡片：上面是标题条，下面是终端。终端四周留一点，它的方角落在卡片的圆角里面。终端用四边
         // 定位撑满标题条下面的部分：百分比的高度在这里会按整张卡片算，比剩下的高出一个标题条。
@@ -313,7 +290,6 @@ impl WindowView {
                     .min_h_0()
                     .child(terminal.absolute().top_0().left(inset).right(inset).bottom(inset)),
             )
-            .children(usage)
             .into_any_element()
     }
 
@@ -631,54 +607,6 @@ impl WindowView {
     }
 }
 
-/// 分屏底下显示用量的那一行。
-fn usage_line(text: String, fg: Rgb) -> Div {
-    div()
-        .flex_none()
-        .px(px(10.))
-        .pb(px(4.))
-        .text_size(px(11.))
-        .text_color(hsla(fg).opacity(0.55))
-        .truncate()
-        .child(text)
-}
-
-/// 分屏底下那一行：模型、上下文占用、缓存读写、输出、花费和五小时限额，缺的项不写。
-fn usage_text(usage: &AgentUsage, locale: &str) -> String {
-    let mut parts = Vec::new();
-    parts.extend(usage.model.clone());
-    match (usage.context_tokens, usage.context_window) {
-        (Some(used), Some(window)) if window > 0 => {
-            parts.push(format!("{} / {} ({}%)", tokens(used), tokens(window), used * 100 / window));
-        }
-        (Some(used), _) => parts.push(tokens(used)),
-        _ => {}
-    }
-    if let (Some(read), Some(write)) = (usage.cache_read_tokens, usage.cache_write_tokens) {
-        let (read, write) = (tokens(read), tokens(write));
-        parts.push(rust_i18n::t!("usage.cache", locale = locale, read = read, write = write).into_owned());
-    }
-    if let Some(output) = usage.output_tokens {
-        parts.push(rust_i18n::t!("usage.output", locale = locale, tokens = tokens(output)).into_owned());
-    }
-    parts.extend(usage.cost_micro_usd.map(|micro| format!("${:.2}", micro as f64 / 1e6)));
-    parts.extend(usage.five_hour_percent.map(|percent| format!("5h {percent}%")));
-    parts.join("  ·  ")
-}
-
-/// token 数的简写：`850`、`48.6K`、`156K`、`1M`。
-fn tokens(n: u64) -> String {
-    let short = |value: f64, unit: &str| {
-        let text = if value < 100. { format!("{value:.1}") } else { format!("{value:.0}") };
-        format!("{}{unit}", text.trim_end_matches(".0"))
-    };
-    match n {
-        0..1_000 => n.to_string(),
-        1_000..1_000_000 => short(n as f64 / 1e3, "K"),
-        _ => short(n as f64 / 1e6, "M"),
-    }
-}
-
 /// 分屏右上角的驱动标记。没有鼠标处理，点击照样落到下面的终端上。
 fn driver_badge(text: SharedString, fg: Rgb, bg: Rgb) -> Div {
     let panel = hsla(bg.mix(fg, 0.12));
@@ -702,29 +630,6 @@ fn driver_badge(text: SharedString, fg: Rgb, bg: Rgb) -> Div {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn usage_reads_short() {
-        assert_eq!(tokens(850), "850");
-        assert_eq!(tokens(48_600), "48.6K");
-        assert_eq!(tokens(200_000), "200K");
-        assert_eq!(tokens(1_000_000), "1M");
-        let usage = AgentUsage {
-            model: Some("Opus".into()),
-            context_tokens: Some(48_600),
-            cache_read_tokens: Some(27_200),
-            cache_write_tokens: Some(21_400),
-            output_tokens: Some(834),
-            context_window: Some(1_000_000),
-            cost_micro_usd: Some(1_234_000),
-            five_hour_percent: Some(23),
-        };
-        assert_eq!(
-            usage_text(&usage, "en"),
-            "Opus  ·  48.6K / 1M (4%)  ·  cache read 27.2K, write 21.4K  ·  output 834  ·  $1.23  ·  5h 23%"
-        );
-        assert_eq!(usage_text(&AgentUsage::default(), "en"), "");
-    }
 
     #[test]
     fn the_badge_goes_away_ten_seconds_after_the_drive() {

@@ -977,13 +977,6 @@ impl Connection {
                 }
             }
             ClientMsg::Paste { req, id, text } => self.deliver_done(req, id, DriveAction::Paste, Inbox::Paste(text)),
-            ClientMsg::AgentUsage { req, id, usage } => {
-                if self.shared.deliver(id, Inbox::AgentUsage(usage)) {
-                    self.out.control(&HostMsg::Done { req });
-                } else {
-                    self.error(Some(req), Some(id), format!("no session {id}"));
-                }
-            }
             ClientMsg::Open { req, .. }
             | ClientMsg::OpenWorkspace { req, .. }
             | ClientMsg::RenameWorkspace { req, .. }

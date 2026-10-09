@@ -61,10 +61,6 @@ impl HostSession {
         }
         if changed {
             self.agent = self.agent_tracker.agent();
-            // 上一个 agent 报的用量不留给下一个。
-            if self.agent.is_none() {
-                self.agent_usage = None;
-            }
             tracing::debug!(agent = ?self.agent, "foreground agent changed");
         }
         changed

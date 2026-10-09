@@ -39,7 +39,7 @@ use libghostty_vt::{
 };
 use runode_agent_detect::Tracker;
 use runode_shared_types::{
-    agent::{Agent, AgentState, AgentUsage},
+    agent::{Agent, AgentState},
     grid::GridSize,
     session::{DriveAction, Driver, SessionMeta},
     settings::TermSettings,
@@ -163,8 +163,6 @@ pub struct HostSession {
     foreground: Option<String>,
     /// 最近一次别的终端里的程序操作这个会话的记录，见 `drive`。
     driver: Option<Driver>,
-    /// 前台 agent 自己报告的用量，见 `set_agent_usage`。
-    agent_usage: Option<AgentUsage>,
     /// 还没启动 shell 时它要从哪个目录开始，见 `new`。
     start_dir: Option<PathBuf>,
     /// shell 最近一次等着输入时所在的目录，记命令时当作命令运行的目录。
@@ -263,7 +261,6 @@ impl HostSession {
             foreground_is_shell: false,
             foreground: None,
             driver: None,
-            agent_usage: None,
             start_dir: None,
             prompt_cwd: None,
             prompt_reported: false,
@@ -423,7 +420,6 @@ impl HostSession {
         self.foreground_is_shell = meta.foreground_is_shell;
         self.foreground.clone_from(&meta.foreground);
         self.driver.clone_from(&meta.driver);
-        self.agent_usage.clone_from(&meta.agent_usage);
         // agent 识别：先喂眼下拿得到的信号（VT 里的标题、前台进程），再接着交出时的状态。显示的
         // 标题仍用交出时的。
         let now = Instant::now();
@@ -538,7 +534,6 @@ impl HostSession {
             title: self.title.clone(),
             fallback_title: self.fallback_title.clone(),
             agent: self.agent,
-            agent_usage: self.agent_usage.clone(),
             cwd: self.cwd.clone(),
             foreground_is_shell: self.foreground_is_shell,
             shell_path: self.effects.shell_path.borrow().clone(),
@@ -563,14 +558,6 @@ impl HostSession {
         }
         self.driver = Some(Driver { by, action, at_ms });
         self.meta_dirty = true;
-    }
-
-    /// 前台 agent 报告了自己的模型和用量，对外见 `SessionMeta::agent_usage`；agent 退出时清掉。
-    pub fn set_agent_usage(&mut self, usage: AgentUsage) {
-        if self.agent_usage.as_ref() != Some(&usage) {
-            self.agent_usage = Some(usage);
-            self.meta_dirty = true;
-        }
     }
 
     /// 用户自己在界面里操作了：清掉 `drive` 的记录。

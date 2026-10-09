@@ -168,12 +168,6 @@ impl Dirs {
         self.data_file("commit-message.json")
     }
 
-    /// `runode setup usage` 换下来的 Claude Code 原来的 statusLine 命令，报完用量后接着跑它，状态栏
-    /// 照旧显示它的输出；原来没有时不存在。
-    pub fn claude_statusline_file(&self) -> Option<PathBuf> {
-        self.data_file("claude-statusline")
-    }
-
     /// runode 自己记的命令历史。
     pub fn history_file(&self) -> Option<PathBuf> {
         self.data_file("history.jsonl")

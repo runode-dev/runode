@@ -4,10 +4,7 @@
 
 use std::{ffi::OsString, path::PathBuf, sync::Arc};
 
-use crate::{
-    agent::{Agent, AgentUsage},
-    shell::ShellNames,
-};
+use crate::{agent::Agent, shell::ShellNames};
 
 /// 一个终端会话对外公布的状态。缺的字段按默认值读，以后加字段时旧的一方照样能读。
 #[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -19,8 +16,6 @@ pub struct SessionMeta {
     pub fallback_title: Option<String>,
     /// 前台 agent 和它的状态；不是 agent 在前台时为 `None`。
     pub agent: Option<Agent>,
-    /// 前台 agent 自己报告的模型和用量；没报过、agent 退出后为 `None`。
-    pub agent_usage: Option<AgentUsage>,
     /// shell 当前所在的目录。
     pub cwd: Option<PathBuf>,
     /// shell 最近一次等着输入时所在的目录，命令历史的建议按它挑在这个目录里用过的命令；还没

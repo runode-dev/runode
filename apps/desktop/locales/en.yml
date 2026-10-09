@@ -463,16 +463,6 @@ driver:
     clear_screen: clear screen
     kill: kill
     unknown: action
-usage:
-  cache: "cache read %{read}, write %{write}"
-  output: "output %{tokens}"
-  setup:
-    menu: Show Agent Usage in Runode…
-    confirm_title: Show the agents' model and usage under their pane?
-    confirm_detail: "In a Runode terminal the agents will run `runode usage-hook`: Claude Code as its status line (the command you had there still runs and shows), Codex and Gemini CLI as a hook, pi from an extension. They then report the model, context, cache, output and cost to Runode. These files will be changed:\n%{paths}"
-    done_title: Usage reporting installed
-    done_detail: "Changed:\n%{paths}\n\nAgent sessions started from now on report their usage. Codex asks you to trust the new hooks first."
-    failed_title: Could not install usage reporting
 layout:
   menu: Arrange Splits…
   title: Arrange Splits

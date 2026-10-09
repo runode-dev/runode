@@ -463,16 +463,6 @@ driver:
     clear_screen: 清屏
     kill: 结束
     unknown: 操作
-usage:
-  cache: "缓存读 %{read}，写 %{write}"
-  output: "输出 %{tokens}"
-  setup:
-    menu: 在 Runode 里显示 agent 用量…
-    confirm_title: 在分屏底下显示 agent 的模型和用量？
-    confirm_detail: "在 Runode 的终端里，agent 会调 runode usage-hook：Claude Code 当作状态栏命令（原来的命令照样接着跑、照样显示），Codex 和 Gemini CLI 当作钩子，pi 经一个扩展。之后它们会把模型、上下文、缓存、输出和花费报给 Runode。会改这些文件：\n%{paths}"
-    done_title: 装好了用量报告
-    done_detail: "改好了：\n%{paths}\n\n之后新开的 agent 会话会报用量。Codex 会先请你信任新加的钩子。"
-    failed_title: 没能装好用量报告
 layout:
   menu: 排列分屏…
   title: 排列分屏

@@ -47,8 +47,6 @@ actions!(
         ToggleFullScreen,
         /// 给 Claude Code 和 Codex 装上 runode 命令行的使用说明（`runode setup`），先确认一句。
         InstallAgentIntegration,
-        /// 让装着的 agent 把模型和用量报给 runode（`runode setup usage`），先确认一句。
-        InstallAgentUsage,
     ]
 );
 
@@ -75,7 +73,6 @@ pub fn install(cx: &mut App) {
     cx.on_action(|_: &ToggleFullScreen, cx| with_active_window(cx, |w| w.toggle_fullscreen()));
     // 从菜单派发时窗口正在处理这个动作，这时在它上面弹不了框，等这一轮更新结束再弹。
     cx.on_action(|_: &InstallAgentIntegration, cx| cx.defer(install_agent_integration));
-    cx.on_action(|_: &InstallAgentUsage, cx| cx.defer(install_agent_usage));
 
     // 装快捷键时会顺带设置菜单。
     crate::keybinds::install(cx);
@@ -100,7 +97,6 @@ pub fn set_menus(cx: &mut App) {
                 MenuItem::action(tr("menu.open_config"), OpenConfiguration),
                 MenuItem::action(tr("menu.reload_config"), ReloadConfiguration),
                 MenuItem::action(tr("setup.menu"), InstallAgentIntegration),
-                MenuItem::action(tr("usage.setup.menu"), InstallAgentUsage),
                 MenuItem::separator(),
                 MenuItem::os_submenu(tr("menu.services"), SystemMenuType::Services),
                 MenuItem::separator(),
@@ -231,47 +227,18 @@ fn fix_key_equivalents(menu: &objc2_app_kit::NSMenu) {
 /// 装给哪些 agent。
 const SETUP_TARGETS: [SetupTarget; 2] = [SetupTarget::Claude, SetupTarget::Codex];
 
+/// 问一句要不要装，列出会写的文件；装好后说装到了哪里，失败时说原因。
 fn install_agent_integration(cx: &mut App) {
     let Some(home) = runode_paths::Dirs::from_env().home else {
         tracing::warn!("cannot install the agent integration: no home directory");
         return;
     };
-    let paths = SETUP_TARGETS.iter().map(|target| runode_cli::setup_path(*target, &home)).collect();
-    install_with_prompt(cx, "setup", home, paths, |home| {
-        SETUP_TARGETS.iter().map(|target| runode_cli::setup(*target, home)).collect()
-    });
-}
-
-fn install_agent_usage(cx: &mut App) {
-    let dirs = runode_paths::Dirs::from_env();
-    let Some(home) = dirs.home.clone() else {
-        tracing::warn!("cannot install usage reporting: no home directory");
-        return;
-    };
-    let paths = runode_cli::usage_paths(&home);
-    install_with_prompt(cx, "usage.setup", home, paths, move |_| runode_cli::setup_usage(&dirs));
-}
-
-/// 问一句要不要装，列出会写的文件；装好后说装到了哪里，失败时说原因。`section` 是文案在语言文件里
-/// 的那一段（`confirm_title`、`confirm_detail`、`done_title`、`done_detail`、`failed_title`），按钮的
-/// 文案共用 `setup` 段的。
-fn install_with_prompt(
-    cx: &mut App,
-    section: &'static str,
-    home: std::path::PathBuf,
-    paths: Vec<std::path::PathBuf>,
-    install: impl FnOnce(&std::path::Path) -> anyhow::Result<Vec<std::path::PathBuf>> + 'static,
-) {
     let Some(window) = cx.active_window().or_else(|| cx.windows().into_iter().next()) else {
         return;
     };
-    let t = move |key: &str| tr(&format!("{section}.{key}"));
-    let with_paths = move |key: &str, paths: String| {
-        let key = format!("{section}.{key}");
-        rust_i18n::t!(&key, paths = paths).into_owned()
-    };
-    let title = t("confirm_title");
-    let detail = with_paths("confirm_detail", setup_paths(paths, &home));
+    let paths = setup_paths(SETUP_TARGETS.iter().map(|target| runode_cli::setup_path(*target, &home)), &home);
+    let title = rust_i18n::t!("setup.confirm_title");
+    let detail = rust_i18n::t!("setup.confirm_detail", paths = paths);
     let answers = [&*rust_i18n::t!("setup.install"), &*rust_i18n::t!("setup.cancel")];
     let Ok(answer) =
         window.update(cx, |_, window, cx| window.prompt(PromptLevel::Info, &title, Some(&detail), &answers, cx))
@@ -282,11 +249,17 @@ fn install_with_prompt(
         if answer.await.ok() != Some(0) {
             return;
         }
-        let (level, title, detail) = match install(&home) {
-            Ok(paths) => (PromptLevel::Info, t("done_title"), with_paths("done_detail", setup_paths(paths, &home))),
+        let installed: anyhow::Result<Vec<_>> =
+            SETUP_TARGETS.iter().map(|target| runode_cli::setup(*target, &home)).collect();
+        let (level, title, detail) = match installed {
+            Ok(paths) => (
+                PromptLevel::Info,
+                rust_i18n::t!("setup.done_title"),
+                rust_i18n::t!("setup.done_detail", paths = setup_paths(paths, &home)),
+            ),
             Err(err) => {
-                tracing::error!("failed to install {section}: {err:#}");
-                (PromptLevel::Critical, t("failed_title"), format!("{err:#}"))
+                tracing::error!("failed to install the agent integration: {err:#}");
+                (PromptLevel::Critical, rust_i18n::t!("setup.failed_title"), format!("{err:#}").into())
             }
         };
         let answer = window.update(cx, |_, window, cx| {

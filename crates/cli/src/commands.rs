@@ -213,12 +213,6 @@ pub(crate) fn run(command: Command, env: &Env, out: &mut dyn Write, err: &mut dy
                 writeln!(out, "installed {}", path.display())?;
             }
         }
-        Command::SetupUsage => {
-            for path in crate::setup_usage(&env.dirs)? {
-                writeln!(out, "installed usage reporting in {}", path.display())?;
-            }
-        }
-        Command::UsageHook { agent } => crate::usage::run(agent, env, out)?,
         Command::RemotePair { addrs } => crate::remote::pair(env, &addrs, out, &mut crate::remote::read_answer)?,
         Command::RemoteDevices { json } => crate::remote::devices(env, json, out)?,
         Command::RemoteRevoke { device } => crate::remote::revoke(env, &device, out)?,
