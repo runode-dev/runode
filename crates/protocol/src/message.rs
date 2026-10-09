@@ -235,8 +235,7 @@ pub enum ClientMsg {
     /// 收到 `HostMsg::LayoutChanged`。
     Layout { req: u32 },
     /// 界面里的布局变了（开关窗口、工作区、标签、分屏，换了焦点、调了分屏大小）。只有桌面的界面发，
-    /// 不用回；宿主转成 `HostMsg::LayoutChanged` 告诉问过布局的连接。旧的宿主读成 `Unknown`，回
-    /// `Error`。
+    /// 不用回；宿主转成 `HostMsg::LayoutChanged` 告诉问过布局的连接。
     LayoutChanged,
     /// 界面办完了宿主转来的 `HostMsg::UiRequest`：`ui` 是那条请求的编号，`reply` 原样转给发请求
     /// 的一方。只有桌面的界面发。

@@ -308,13 +308,7 @@ import Testing
         #expect(model.panes(sharingTabWith: sessionA).map(\.id) == [sessionA, sessionB])
         // 电脑推来布局变了：马上重新要布局。
         link.clearSent()
-        #expect(!model.pushesLayout)
         model.handle(.message(.layoutChanged))
-        #expect(link.sent == [.layout(req: 0)])
-        #expect(model.pushesLayout)
-        // 电脑上关掉分屏会结束会话：一收到 `Exited` 就重新要布局。
-        link.clearSent()
-        model.handle(.message(.exited(id: sessionB, status: 0)))
         #expect(link.sent == [.layout(req: 0)])
         let alone = TabLayout(index: 1, active: true, panes: [PaneLayout(index: 1, id: sessionA, focused: true)])
         model.handle(

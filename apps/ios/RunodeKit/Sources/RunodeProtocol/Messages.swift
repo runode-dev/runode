@@ -303,8 +303,7 @@ public enum HostMsg: Hashable, Sendable, Decodable {
     case screenText(id: SessionId, text: String, truncated: Bool)
     /// 回 `Layout`。
     case layout(req: UInt32, windows: [WindowLayout])
-    /// 电脑上 app 的布局变了，想知道新的布局再发 `Layout`。只发给这条连接上问过 `Layout` 的；旧的
-    /// 电脑不发。
+    /// 电脑上 app 的布局变了，想知道新的布局再发 `Layout`。只发给这条连接上问过 `Layout` 的。
     case layoutChanged
     /// 回 `ListDirs`：实际列的目录（规范化后的绝对路径）和它的子目录名，按名字排好；`truncated` 为真时
     /// 子目录太多，只给了前面一部分。

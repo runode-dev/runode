@@ -129,8 +129,6 @@ public final class SessionListModel {
     public private(set) var loaded = false {
         didSet { onSessionsChanged() }
     }
-    /// 这次连上以后电脑推过 `LayoutChanged`：它会在布局变了时说，终端页不用勤着问。
-    @ObservationIgnored private(set) var pushesLayout = false
     /// 这次连上以后收到过列表：`sessions` 是电脑上现在的样子。断开后、重连上还没收到新列表时为假，
     /// 那时 `sessions` 还是断开前的。
     @ObservationIgnored private(set) var listCurrent = false
@@ -434,7 +432,7 @@ public final class SessionListModel {
         return panes.count > 1 ? panes : []
     }
 
-    /// 只重新要一次布局：终端页开着时分屏会在电脑上增减，列表自己的刷新那时不一定在跑。
+    /// 只重新要一次布局：电脑推来 `LayoutChanged`、终端页打开时要，列表自己的刷新那时不一定在跑。
     public func refreshLayout() {
         guard connected else { return }
         link.send(.layout(req: Self.layoutRequest))
@@ -580,7 +578,6 @@ public final class SessionListModel {
         case .ready:
             connected = true
             listCurrent = false
-            pushesLayout = false
             watching = []
             refresh()
         case .message(let message):
@@ -642,8 +639,6 @@ public final class SessionListModel {
             }
         case .exited(let id, _):
             update(id) { $0.exited = true }
-            // 电脑上关分屏、关标签都会结束会话：马上要布局，不等下一轮刷新，终端页的分屏标签跟着变。
-            refreshLayout()
         case .sizeOwner(let id, let mine, let owner):
             update(id) { $0.sizeOwner = mine ? String(localized: "本机") : owner }
         case .layout(Self.layoutRequest, let windows):
@@ -655,7 +650,6 @@ public final class SessionListModel {
                 link.send(.listSessions)
             }
         case .layoutChanged:
-            pushesLayout = true
             refreshLayout()
         case .projectTasks(let req, _, let sources):
             finishProjectTasks(req, sources: sources)

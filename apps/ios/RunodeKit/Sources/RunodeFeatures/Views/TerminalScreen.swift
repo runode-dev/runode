@@ -64,14 +64,8 @@
                     ToolbarItem(placement: .primaryAction) { sizeMenu }
                     ToolbarItem(placement: .primaryAction) { moreMenu }
                 }
-                .task {
-                    // 电脑在布局变了时推 `LayoutChanged`，列表收到就重新要布局；这里隔一会儿再问一次兜底。
-                    // 旧的电脑不推，没收到过推送时问得勤一些。
-                    while !Task.isCancelled {
-                        sessions?.refreshLayout()
-                        try? await Task.sleep(for: sessions?.pushesLayout == true ? .seconds(15) : .seconds(2))
-                    }
-                }
+                // 之后电脑在布局变了时推 `LayoutChanged`，列表收到就重新要。
+                .task { sessions?.refreshLayout() }
                 .task(id: model.phase == .connecting) {
                     connectingLong = false
                     guard model.phase == .connecting else { return }
