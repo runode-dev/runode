@@ -17,8 +17,10 @@ use std::{
     ffi::OsString,
     fs, io,
     io::{ErrorKind, Write},
+    os::unix::process::CommandExt,
     path::{Path, PathBuf},
     process::{Command, Stdio},
+    sync::mpsc,
     thread,
     time::{Duration, Instant},
 };
@@ -217,7 +219,7 @@ fn generate(
         &[("basePrompt", &base), ("branch", &context.branch), ("stagedFiles", &context.files), ("stagedPatch", &patch)],
     );
     let (args, stdin) = command.args(&prompt);
-    let stdout = run(&command.binary, &args, stdin, &repo.root, path, &command.env)?;
+    let stdout = run(&command.binary, &args, stdin, &repo.root, path, &command.env, TIMEOUT)?;
     let text = match command.agent.map_or(Output::Text, |agent| agent.output) {
         Output::Text => stdout,
         Output::OpenCodeEvents => opencode_text(&stdout)?,
@@ -396,8 +398,8 @@ fn limit(mut text: String, max: usize) -> String {
     text
 }
 
-/// 在 `dir` 里跑 `binary`，`stdin` 不为空时从标准输入交给它，返回标准输出。`env` 加在 `PATH`
-/// 之后，用户自己写了 `PATH=` 时用他的。
+/// 在 `dir` 里跑 `binary`，`stdin` 不为空时从标准输入交给它，返回标准输出；过了 `timeout` 杀掉。
+/// `env` 加在 `PATH` 之后，用户自己写了 `PATH=` 时用他的。
 fn run(
     binary: &str,
     args: &[String],
@@ -405,6 +407,7 @@ fn run(
     dir: &Path,
     path: Option<OsString>,
     env: &[(String, String)],
+    timeout: Duration,
 ) -> Result<String, String> {
     let mut command = Command::new(binary);
     command
@@ -412,7 +415,9 @@ fn run(
         .current_dir(dir)
         .stdin(if stdin.is_some() { Stdio::piped() } else { Stdio::null() })
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
+        .stderr(Stdio::piped())
+        // 自成一个进程组：包装脚本拉起的真 agent、后台的 helper 都在组里，到时限时一起杀掉。
+        .process_group(0);
     if let Some(path) = path {
         command.env("PATH", path);
     }
@@ -426,21 +431,34 @@ fn run(
         thread::spawn(move || pipe.write_all(stdin.as_bytes()));
     }
     // 输出可能比管道的缓冲大，也另起线程读，不然 agent 写满了管道停下来，这边又在等它退出。
-    let stdout = child.stdout.take().map(|pipe| thread::spawn(move || read_all(pipe)));
-    let stderr = child.stderr.take().map(|pipe| thread::spawn(move || read_all(pipe)));
-    let deadline = Instant::now() + TIMEOUT;
+    let stdout = child.stdout.take().map(read_all_in_background);
+    let stderr = child.stderr.take().map(read_all_in_background);
+    let group = child.id() as libc::pid_t;
+    let kill_group = || unsafe { libc::killpg(group, libc::SIGKILL) };
+    let deadline = Instant::now() + timeout;
     let status = loop {
         if let Some(status) = child.try_wait().map_err(|err| err.to_string())? {
             break status;
         }
         if Instant::now() > deadline {
-            child.kill().ok();
+            kill_group();
             child.wait().ok();
             return Err(rust_i18n::t!("git.ai_message.timeout", binary = binary).into_owned());
         }
         thread::sleep(Duration::from_millis(100));
     };
-    let joined = |reader: Option<thread::JoinHandle<String>>| reader.and_then(|reader| reader.join().ok());
+    // agent 退了，组里还有进程拿着输出管道时读不到头：等到时限，再杀掉整组读完剩下的。
+    let joined = |reader: Option<mpsc::Receiver<String>>| {
+        let reader = reader?;
+        let left = deadline.saturating_duration_since(Instant::now());
+        reader
+            .recv_timeout(left)
+            .or_else(|_| {
+                kill_group();
+                reader.recv()
+            })
+            .ok()
+    };
     let (stdout, stderr) = (joined(stdout).unwrap_or_default(), joined(stderr).unwrap_or_default());
     if !status.success() {
         let detail = [stderr.trim(), stdout.trim()].into_iter().find(|text| !text.is_empty());
@@ -449,10 +467,14 @@ fn run(
     Ok(stdout)
 }
 
-fn read_all(mut pipe: impl io::Read) -> String {
-    let mut bytes = Vec::new();
-    pipe.read_to_end(&mut bytes).ok();
-    String::from_utf8_lossy(&bytes).into_owned()
+fn read_all_in_background(mut pipe: impl io::Read + Send + 'static) -> mpsc::Receiver<String> {
+    let (sender, receiver) = mpsc::channel();
+    thread::spawn(move || {
+        let mut bytes = Vec::new();
+        pipe.read_to_end(&mut bytes).ok();
+        sender.send(String::from_utf8_lossy(&bytes).into_owned()).ok();
+    });
+    receiver
 }
 
 /// OpenCode `--format json` 的输出里最后一步的文字；出错的事件报它的错。
@@ -601,15 +623,30 @@ mod tests {
     fn runs_a_command_with_the_prompt_on_stdin() {
         let dir = std::env::temp_dir();
         let prompt = "x".repeat(200_000);
-        let out = run("sh", &["-c".into(), "wc -c".into()], Some(prompt), &dir, None, &[]).unwrap();
+        let out = run("sh", &["-c".into(), "wc -c".into()], Some(prompt), &dir, None, &[], TIMEOUT).unwrap();
         assert_eq!(out.trim(), "200000");
-        let err = run("sh", &["-c".into(), "echo boom >&2; exit 3".into()], None, &dir, None, &[]).unwrap_err();
+        let err =
+            run("sh", &["-c".into(), "echo boom >&2; exit 3".into()], None, &dir, None, &[], TIMEOUT).unwrap_err();
         assert_eq!(err, "sh: boom");
-        let missing = run("runode-no-such-agent", &[], None, &dir, None, &[]).unwrap_err();
+        let missing = run("runode-no-such-agent", &[], None, &dir, None, &[], TIMEOUT).unwrap_err();
         assert!(missing.contains("runode-no-such-agent"));
         let env = [("RUNODE_TEST_VAR".to_owned(), "a b".to_owned())];
-        let out = run("sh", &["-c".into(), "echo \"$RUNODE_TEST_VAR\"".into()], None, &dir, None, &env).unwrap();
+        let out =
+            run("sh", &["-c".into(), "echo \"$RUNODE_TEST_VAR\"".into()], None, &dir, None, &env, TIMEOUT).unwrap();
         assert_eq!(out, "a b\n");
+    }
+
+    /// 到时限连 agent 拉起的子进程一起杀掉；agent 自己退了、后台子进程还拿着输出管道时，到时限也不再等。
+    #[test]
+    fn kills_the_whole_process_group_at_the_deadline() {
+        let dir = std::env::temp_dir();
+        let timeout = Duration::from_secs(1);
+        let started = Instant::now();
+        let out = run("sh", &["-c".into(), "sleep 30 & echo hi".into()], None, &dir, None, &[], timeout).unwrap();
+        assert_eq!(out, "hi\n");
+        let err = run("sh", &["-c".into(), "sleep 30 & wait".into()], None, &dir, None, &[], timeout).unwrap_err();
+        assert!(err.contains("sh"));
+        assert!(started.elapsed() < Duration::from_secs(10));
     }
 
     #[test]
