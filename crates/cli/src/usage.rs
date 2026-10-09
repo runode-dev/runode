@@ -66,7 +66,7 @@ pub(crate) fn run(agent: Agent, env: &Env, out: &mut dyn std::io::Write) -> Resu
 
 /// 给家目录下装着的 agent（有 `~/.claude` 的 Claude Code、有 `~/.codex` 的 Codex、有 `~/.gemini` 的
 /// Gemini CLI、有 `~/.pi` 的 pi）接上用量，返回改的文件。可以重复执行，见各自的 `install`。一个都没装
-/// 时出错，什么都不写。
+/// 时出错，什么都不写。一个没装成时接着装别的，最后出错，错误里列出没装成的原因和已经改了的文件。
 pub fn setup_usage(dirs: &runode_paths::Dirs) -> Result<Vec<PathBuf>> {
     let home = dirs.home.as_deref().ok_or_else(|| anyhow!("cannot tell where your home directory is"))?;
     let installed = |dir: &str| home.join(dir).is_dir();
@@ -74,20 +74,35 @@ pub fn setup_usage(dirs: &runode_paths::Dirs) -> Result<Vec<PathBuf>> {
         bail!("found none of Claude Code (~/.claude), Codex (~/.codex), Gemini CLI (~/.gemini) and pi (~/.pi)");
     }
     let mut changed = Vec::new();
+    let mut failed = Vec::new();
+    let mut record = |result: Result<PathBuf>| match result {
+        Ok(path) => changed.push(path),
+        Err(err) => failed.push(format!("{err:#}")),
+    };
     if installed(".claude") {
-        let chain = dirs.claude_statusline_file().ok_or_else(|| anyhow!("cannot tell where runode keeps its data"))?;
-        changed.push(claude::install(home, &chain)?);
+        record(
+            dirs.claude_statusline_file()
+                .ok_or_else(|| anyhow!("cannot tell where runode keeps its data"))
+                .and_then(|chain| claude::install(home, &chain)),
+        );
     }
     if installed(".codex") {
-        changed.push(codex::install(home)?);
+        record(codex::install(home));
     }
     if installed(".gemini") {
-        changed.push(gemini::install(home)?);
+        record(gemini::install(home));
     }
     if installed(".pi") {
-        changed.push(pi::install(home)?);
+        record(pi::install(home));
     }
-    Ok(changed)
+    if failed.is_empty() {
+        return Ok(changed);
+    }
+    let mut message = failed.join("\n");
+    for path in &changed {
+        message.push_str(&format!("\ninstalled usage reporting in {}", path.display()));
+    }
+    bail!(message)
 }
 
 /// `setup_usage` 会改的文件，按家目录下现在装着哪些 agent。

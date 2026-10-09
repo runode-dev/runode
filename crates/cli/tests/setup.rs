@@ -160,3 +160,22 @@ fn usage_needs_an_agent() {
     assert_eq!(code, exit::FAILED);
     assert!(err.contains("found none of"), "{err}");
 }
+
+#[test]
+fn usage_keeps_going_past_an_agent_it_cannot_set_up() {
+    let fake = FakeHost::start("setuppartial", |_| vec![]);
+    let home = fake.env.dirs.home.clone().unwrap();
+    let gemini = home.join(".gemini/settings.json");
+    let pi = home.join(".pi/agent/extensions/runode-usage.ts");
+    std::fs::create_dir_all(gemini.parent().unwrap()).unwrap();
+    std::fs::create_dir_all(home.join(".pi")).unwrap();
+    // Gemini CLI 的设置文件可以写注释，这里读不了。
+    std::fs::write(&gemini, "// mine\n{}").unwrap();
+
+    let (code, _, err) = run("setup usage", &fake.env);
+    assert_eq!(code, exit::FAILED);
+    assert!(err.contains("cannot parse"), "{err}");
+    assert!(err.contains(&format!("installed usage reporting in {}", pi.display())), "{err}");
+    assert!(pi.exists());
+    assert_eq!(std::fs::read_to_string(&gemini).unwrap(), "// mine\n{}");
+}
