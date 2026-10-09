@@ -238,6 +238,11 @@ tasks:
   command_placeholder: "e.g. cargo run -- serve"
   cancel: "Cancel"
   save: "Add"
+  shortcut: "Shortcut"
+  shortcut_none: "Click to record a shortcut"
+  shortcut_press: "Press a shortcut, Esc to cancel"
+  shortcut_clear: "Clear"
+  shortcut_taken: "“%{what}” uses this key now; saving makes it run this task instead."
 files:
   new_file: New File…
   new_folder: New Folder…

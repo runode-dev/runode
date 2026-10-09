@@ -80,6 +80,8 @@ fn actions_carry_their_parameters() {
     assert_eq!(parse_action(r"text:\x01"), Ok(Action::SendText("\x01".into())));
     assert_eq!(parse_action("esc:b"), Ok(Action::SendText("\x1bb".into())));
     assert_eq!(parse_action("csi:A"), Ok(Action::SendText("\x1b[A".into())));
+    assert_eq!(parse_action("run_task:npm: dev"), Ok(Action::RunTask("npm: dev".into())));
+    assert!(parse_action("run_task").is_err());
     assert_eq!(parse_action("write_screen_file:open"), Ok(Action::WriteScreenFile(ScreenFile::Open)));
     assert_eq!(parse_action("increase_font_size:1"), Ok(Action::IncreaseFontSize));
 }

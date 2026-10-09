@@ -80,6 +80,7 @@ pub use remote::serve_requests;
 pub(crate) use settings_page::show_settings;
 pub(crate) use status_bar::item_icon_and_title as status_item_icon_and_title;
 pub use status_bar::watch as watch_status;
+pub use tasks::RunNamedTask;
 pub use titlebar::titlebar_options;
 
 use crate::{config::AppConfig, prespawn::Prespawned, terminal_view::TerminalView, ui::hsla};
@@ -593,6 +594,7 @@ impl Render for WindowView {
             .on_action(Self::act(cx, Self::toggle_git))
             .on_action(Self::act(cx, Self::toggle_status_item))
             .on_action(Self::act(cx, Self::run_task))
+            .on_action(Self::act(cx, Self::run_named_task))
             .on_action(Self::act(cx, Self::add_task))
             .on_action(Self::act(cx, Self::toggle_tasks))
             .on_action(Self::act(cx, Self::toggle_task_group))

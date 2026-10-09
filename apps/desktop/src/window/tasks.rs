@@ -51,6 +51,11 @@ pub(super) struct RunTask {
     dir: Option<PathBuf>,
 }
 
+/// 快捷键 `run_task:名字`：跑命令菜单里叫这个名字的命令。
+#[derive(Clone, PartialEq, Action)]
+#[action(namespace = runode, no_json)]
+pub struct RunNamedTask(pub String);
+
 /// 命令菜单里分组的标题：收起或展开一组，`key` 见 `group_key`。
 #[derive(Clone, PartialEq, Action)]
 #[action(namespace = runode, no_json)]
@@ -140,10 +145,10 @@ impl WindowView {
     /// 命令菜单里点了一条：按配置项 `task-placement` 在当前标签里分出一个终端或者在它右边开一个新标签，
     /// 在列命令的目录里跑它。
     pub(super) fn run_task(&mut self, action: &RunTask, window: &mut Window, cx: &mut Context<Self>) {
-        let Some((dir, _)) = &self.workspace().project.tasks else {
+        let listed = self.workspace().project.tasks.as_ref().map(|(dir, _)| dir.clone());
+        let Some(dir) = action.dir.clone().or(listed) else {
             return;
         };
-        let dir = action.dir.clone().unwrap_or_else(|| dir.clone());
         let Some(view) = self.spawn_terminal(Some(&dir), window, cx) else {
             return;
         };
@@ -155,6 +160,35 @@ impl WindowView {
             TaskPlacement::Down => self.split_with(view, Axis::Vertical, window, cx),
             TaskPlacement::Tab => self.insert_tab(self.workspace().active + 1, view, window, cx),
         }
+    }
+
+    /// 按了绑着 `run_task:名字` 的快捷键：现请宿主列一遍终端目录的命令（菜单没打开过时还没列），按菜单里
+    /// 的顺序找第一条叫这个名字的，像在菜单里点它一样跑；没有时记日志。
+    pub(super) fn run_named_task(&mut self, action: &RunNamedTask, window: &mut Window, cx: &mut Context<Self>) {
+        let root = self.project_dir(cx);
+        let name = action.0.clone();
+        let job = cx.background_spawn({
+            let root = root.clone();
+            async move { host_client::list_project_tasks(root) }
+        });
+        cx.spawn_in(window, async move |this, cx| {
+            let sources = match job.await {
+                Ok(sources) => sources,
+                Err(err) => return tracing::warn!("failed to list the tasks in {}: {err:#}", root.display()),
+            };
+            let found = sources.iter().find_map(|source| {
+                let task = source.tasks.iter().find(|task| task.name == name)?;
+                Some(RunTask {
+                    command: task.command.clone(),
+                    dir: Some(source.project.clone().unwrap_or(root.clone())),
+                })
+            });
+            let Some(task) = found else {
+                return tracing::warn!("no task named {name:?} in {}", root.display());
+            };
+            this.update_in(cx, |this, window, cx| this.run_task(&task, window, cx)).ok();
+        })
+        .detach();
     }
 
     /// 按快捷键打开命令菜单、选中第一条；开着时关掉。
@@ -229,6 +263,10 @@ impl WindowView {
         }
         let (items, _) = self.tasks_menu_items(cx);
         self.replace_menu_items(items, cx);
+        // 快捷键按名字找命令，删了命令就一起去掉，同名的别的命令也就不再有这个键。
+        if let Err(err) = custom::write_task_keybind(&action.name, None, cx) {
+            tracing::warn!("could not remove the task shortcut: {err}");
+        }
         let id = self.workspace().id;
         let DeleteTask { project, name } = action.clone();
         let job = cx.background_spawn(async move {

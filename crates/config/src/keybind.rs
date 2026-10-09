@@ -59,6 +59,8 @@ pub enum Action {
     ToggleFiles,
     /// 打开或关掉标题栏上的项目命令菜单。
     ToggleTasks,
+    /// 跑项目命令菜单里叫这个名字的命令，和在菜单里点它一样。
+    RunTask(String),
     /// 列出所有窗口里的 agent，选一个跳过去。
     GotoAgent,
     /// 不弹列表，直接跳到下一个要处理的 agent：先等回答的，再干完了没看的。
@@ -223,6 +225,11 @@ pub static ACTIONS: &[ActionSpec] = &[
     plain!("toggle_git", Action::ToggleGit),
     plain!("toggle_files", Action::ToggleFiles),
     plain!("toggle_tasks", Action::ToggleTasks),
+    ActionSpec {
+        name: "run_task",
+        param: Some("NAME"),
+        parse: |param| Ok(Action::RunTask(required(param)?.to_owned())),
+    },
     plain!("goto_agent", Action::GotoAgent),
     plain!("next_agent", Action::NextAgent),
     plain!("copy_to_clipboard", Action::Copy),
