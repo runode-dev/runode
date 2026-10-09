@@ -77,8 +77,8 @@ pub fn names() -> impl Iterator<Item = &'static str> {
 
 /// `dir` 里用户给 `name` 写的规格；没有这个文件、读不了或解析不了时为 `None`，用内置的。
 fn user_spec(dir: &Path, name: &str) -> Option<Arc<Spec>> {
-    /// 按命令名记下解析好的规格和当时文件的修改时间。
-    type Cache = HashMap<String, (SystemTime, Arc<Spec>)>;
+    /// 按命令名记下解析的结果和当时文件的修改时间；解析不了的也记下，文件没改就不再读、不再报。
+    type Cache = HashMap<String, (SystemTime, Option<Arc<Spec>>)>;
     static CACHE: OnceLock<Mutex<Cache>> = OnceLock::new();
     let path = dir.join(format!("{name}.json"));
     let modified = std::fs::metadata(&path).and_then(|meta| meta.modified()).ok()?;
@@ -86,18 +86,17 @@ fn user_spec(dir: &Path, name: &str) -> Option<Arc<Spec>> {
     if let Some((at, spec)) = cache.lock().unwrap_or_else(PoisonError::into_inner).get(name)
         && *at == modified
     {
-        return Some(spec.clone());
+        return spec.clone();
     }
-    let json = match std::fs::read(&path) {
-        Ok(json) => json,
+    let spec = match std::fs::read(&path) {
+        Ok(json) => parse(name, &json).map(Arc::new),
         Err(err) => {
             tracing::warn!("failed to read {}: {err}", path.display());
-            return None;
+            None
         }
     };
-    let spec = Arc::new(parse(name, &json)?);
     cache.lock().unwrap_or_else(PoisonError::into_inner).insert(name.to_owned(), (modified, spec.clone()));
-    Some(spec)
+    spec
 }
 
 fn load(name: &str) -> Option<Spec> {
