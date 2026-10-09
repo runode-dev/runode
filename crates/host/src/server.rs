@@ -1186,11 +1186,12 @@ impl Connection {
         }
     }
 
-    /// 这条连接要对会话做 `action`，先告诉会话谁在操作它（见 `SessionMeta::driver`）：桌面的
-    /// 界面上是用户自己，清掉记录（会话没被标过时 `Handle::send` 直接丢掉，不进收件箱）；别的
-    /// 前端记下来。只有会改会话的操作才调。
+    /// 这条连接要对会话做 `action`，先告诉会话谁在操作它（见 `SessionMeta::driver`）：桌面、
+    /// 手机、TUI 的界面上是用户自己（手机上的滚动和点按也发输入帧），清掉记录（会话没被标过时
+    /// `Handle::send` 直接丢掉，不进收件箱）；别的前端记下来。只有会改会话的操作才调。
     fn drive(&self, id: SessionId, action: DriveAction) {
-        let drive = (self.kind != ClientKind::Desktop).then_some(Drive { by: self.by, action });
+        let by_user = matches!(self.kind, ClientKind::Desktop | ClientKind::Mobile | ClientKind::Tui);
+        let drive = (!by_user).then_some(Drive { by: self.by, action });
         self.shared.deliver(id, Inbox::Driven(drive));
     }
 

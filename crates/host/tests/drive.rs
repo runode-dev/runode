@@ -124,7 +124,7 @@ fn wait_for_meta(peer: &Peer, id: SessionId, wanted: impl Fn(&SessionMeta) -> bo
 }
 
 /// 命令行（不是桌面的连接）发来的输入、按键记成谁在操作；桌面的连接（socket 上的，和进程内
-/// 一对 socket 的）发来输入时清掉。
+/// 一对 socket 的）和手机发来输入时清掉。
 #[test]
 fn drivers_are_recorded_and_cleared_by_the_desktop() {
     let dir = temp_dir("driven");
@@ -150,6 +150,14 @@ fn drivers_are_recorded_and_cleared_by_the_desktop() {
     let mut paired = Peer::pair(&host);
     let (pair_channel, _) = paired.attach(id, AttachMode::VtReplay);
     paired.input(pair_channel, b"y");
+    wait_for_meta(&agent, id, |meta| meta.driver.is_none());
+
+    // 手机上的滚动和点按也是输入帧，是用户自己在操作，不能记成别的程序。
+    agent.send(&ClientMsg::SendKeys { req: 2, id, keys: vec!["right".into()] });
+    wait_for_meta(&agent, id, |meta| meta.driver.is_some());
+    let mut phone = Peer::connect(&socket).greet_from(ClientKind::Mobile, false, None);
+    let (phone_channel, _) = phone.attach(id, AttachMode::VtReplay);
+    phone.input(phone_channel, b"z");
     wait_for_meta(&agent, id, |meta| meta.driver.is_none());
     agent.send(&ClientMsg::Kill { id });
 }
