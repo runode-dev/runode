@@ -1,0 +1,47 @@
+<!doctype html>
+<!-- GitHub 仓库的社交预览图（Settings → Social preview），1280×640。从仓库根目录起一个静态服务器打开本页（/.github/social-preview.html），按 1280×640 截图，替换 social-preview.png 后再上传。 --><html><head><meta charset="utf-8"><style>
+*{margin:0;box-sizing:border-box}
+html,body{width:1280px;height:640px;overflow:hidden}
+body{background:radial-gradient(900px 600px at 85% 20%,#12322a 0%,transparent 60%),radial-gradient(700px 500px at 0% 100%,#141a24 0%,transparent 60%),#08090a;color:#f2f5f4;font-family:-apple-system,"SF Pro Display","PingFang SC",sans-serif;display:flex;align-items:center;padding:0 80px;gap:56px}
+.l{flex:1}
+.brand{display:flex;align-items:center;gap:20px}
+.brand img{width:104px;height:104px;margin:-10px}
+h1{font-size:76px;font-weight:700;letter-spacing:-2px}
+.en{font-size:34px;font-weight:600;line-height:1.25;margin-top:30px;letter-spacing:-.3px}
+.en b{color:#66f4bf;font-weight:600}
+.cn{font-size:26px;color:#a7b3b0;margin-top:14px}
+.tags{display:flex;gap:10px;margin-top:34px;flex-wrap:wrap}
+.tags span{font-size:19px;color:#cfd8d6;border:1px solid #2a3331;background:#111615;border-radius:999px;padding:6px 14px}
+.url{margin-top:30px;font:500 20px ui-monospace,"SF Mono",monospace;color:#6f7d7a}
+.win{width:500px;border-radius:16px;background:#111314;border:1px solid #2a2e2f;box-shadow:0 30px 80px rgba(0,0,0,.6),0 0 0 1px rgba(255,255,255,.03) inset;overflow:hidden}
+.bar{height:40px;display:flex;align-items:center;gap:8px;padding:0 16px;border-bottom:1px solid #222627}
+.bar i{width:12px;height:12px;border-radius:50%;display:block}
+.row{display:flex;align-items:center;gap:14px;padding:16px 20px;border-bottom:1px solid #1c2021}
+.row img{width:30px;height:30px}
+.row .n{flex:1}
+.row .t{font-size:19px;font-weight:600}
+.row .s{font:15px ui-monospace,"SF Mono",monospace;color:#7d8987;margin-top:3px}
+.st{font-size:15px;font-weight:600;padding:5px 11px;border-radius:999px;display:flex;align-items:center;gap:7px}
+.st:before{content:"";width:8px;height:8px;border-radius:50%;background:currentColor}
+.wait{color:#ffc35c;background:rgba(255,195,92,.12)}
+.work{color:#66f4bf;background:rgba(102,244,191,.1)}
+.done{color:#7fb2ff;background:rgba(127,178,255,.12)}
+.term{padding:16px 20px 20px;font:17px/1.6 ui-monospace,"SF Mono",monospace;color:#c9d2d0}
+.term .p{color:#66f4bf}.term .c{display:inline-block;width:10px;height:20px;background:#66f4bf;vertical-align:-3px}
+.codex{filter:invert(1)}
+</style></head><body>
+<div class="l">
+ <div class="brand"><img src="../apps/desktop/assets/icon.svg"><h1>Runode</h1></div>
+ <div class="en">The native macOS terminal<br>built for <b>AI coding agents</b></div>
+ <div class="cn">给 AI 编程 agent 准备的 macOS 原生终端</div>
+ <div class="tags"><span>Agent status &amp; alerts</span><span>Scriptable CLI</span><span>iOS remote</span><span>Rust · Ghostty · GPUI</span></div>
+ <div class="url">github.com/runode-dev/runode</div>
+</div>
+<div class="win">
+ <div class="bar"><i style="background:#ff5f57"></i><i style="background:#febc2e"></i><i style="background:#28c840"></i></div>
+ <div class="row"><img src="../apps/desktop/assets/icons/agents/claude.svg"><div class="n"><div class="t">Claude Code</div><div class="s">~/runode · host</div></div><div class="st wait">Waiting for you</div></div>
+ <div class="row"><img class="codex" src="../apps/desktop/assets/icons/agents/codex.svg"><div class="n"><div class="t">Codex</div><div class="s">~/runode · cli</div></div><div class="st work">Working</div></div>
+ <div class="row"><img src="../apps/desktop/assets/icons/agents/gemini.svg"><div class="n"><div class="t">Gemini CLI</div><div class="s">~/site · docs</div></div><div class="st done">Done</div></div>
+ <div class="term"><span class="p">❯</span> runode send right 'cargo test' --wait<br><span class="p">❯</span> <span class="c"></span></div>
+</div>
+</body></html>
