@@ -110,7 +110,8 @@ pub fn install(kind: Kind, dirs: &Dirs, exe: &Path) -> io::Result<PathBuf> {
             let enable = || -> io::Result<()> {
                 let mut result = systemctl(&["daemon-reload"]);
                 for _ in 0..MANAGER_TRIES {
-                    if result.is_ok() {
+                    // 没有 systemctl（不是 systemd 的系统）时等也没用。
+                    if result.as_ref().map_or_else(|err| err.kind() == io::ErrorKind::NotFound, |()| true) {
                         break;
                     }
                     std::thread::sleep(MANAGER_RETRY);
@@ -122,6 +123,9 @@ pub fn install(kind: Kind, dirs: &Dirs, exe: &Path) -> io::Result<PathBuf> {
                 systemctl(&["start", SYSTEMD_UNIT])
             };
             enable().map_err(|err| {
+                if err.kind() == io::ErrorKind::NotFound {
+                    return err;
+                }
                 io::Error::other(format!(
                     "{err}. If no one is logged in as this user, run `loginctl enable-linger $USER` and try again"
                 ))

@@ -32,8 +32,11 @@ use crate::{
 
 /// 还没过门禁的连接最多这么多，再来的直接关掉。
 const MAX_GATING: usize = 32;
-/// 同一个来源（见 `limit::source`）还没过门禁的连接最多这么多，一个来源占不满 `MAX_GATING`。
+/// 同一个地址还没过门禁的连接最多这么多，一个地址占不满 `MAX_GATING`。
 const MAX_GATING_PER_SOURCE: usize = 4;
+/// 同一个 IPv6 /64 前缀（见 `limit::prefix`）里所有地址合起来还没过门禁的连接最多这么多：换着地址
+/// 连的也占不满 `MAX_GATING`，但比单个地址宽，局域网里共用一段 /64 的设备不会互相挤掉。
+const MAX_GATING_PER_PREFIX: usize = 16;
 /// 连接（含已经接到宿主上的）最多这么多。
 const MAX_CONNECTIONS: usize = 64;
 /// 同一台设备最多同时连着这么多条，见 `Shared::attach_device`。
@@ -102,8 +105,8 @@ struct Live {
     tcp: TcpStream,
     /// 过了门禁的设备；还在门禁阶段时为 `None`。
     device: Option<DeviceId>,
-    /// 从哪来，见 `limit::source`。
-    source: IpAddr,
+    /// 从哪个地址来。
+    ip: IpAddr,
     cut: Arc<AtomicBool>,
 }
 
@@ -448,10 +451,11 @@ fn accept_ready(shared: &Arc<Shared>, listener: &TcpListener) {
 /// 登记一条从 `ip` 来的新连接，返回它的编号和断开它的开关；连接太多时返回 `None`。
 fn register(shared: &Shared, tcp: &TcpStream, ip: IpAddr) -> Option<(u64, Arc<AtomicBool>)> {
     let mut connections = shared.connections();
-    let source = limit::source(ip);
+    let prefix = limit::prefix(ip);
     let gating = || connections.values().filter(|live| live.device.is_none());
     if gating().count() >= MAX_GATING
-        || gating().filter(|live| live.source == source).count() >= MAX_GATING_PER_SOURCE
+        || gating().filter(|live| live.ip == ip).count() >= MAX_GATING_PER_SOURCE
+        || gating().filter(|live| limit::prefix(live.ip) == prefix).count() >= MAX_GATING_PER_PREFIX
         || connections.len() >= MAX_CONNECTIONS
     {
         return None;
@@ -459,6 +463,6 @@ fn register(shared: &Shared, tcp: &TcpStream, ip: IpAddr) -> Option<(u64, Arc<At
     let tcp = tcp.try_clone().ok()?;
     let id = shared.next_id.fetch_add(1, Ordering::Relaxed);
     let cut = Arc::new(AtomicBool::new(false));
-    connections.insert(id, Live { tcp, device: None, source, cut: cut.clone() });
+    connections.insert(id, Live { tcp, device: None, ip, cut: cut.clone() });
     Some((id, cut))
 }
