@@ -161,7 +161,8 @@ impl Connection {
                 | HostMsg::ThemeApplied { .. }
                 | HostMsg::SnapshotEnd { .. }
                 | HostMsg::Resync { .. } => self.pending.borrow_mut().push_back(message),
-                HostMsg::UiRequest { .. } | HostMsg::Unknown => {}
+                // 问过 `Layout` 以后 app 的布局一变就来一条 `LayoutChanged`，不是回话。
+                HostMsg::UiRequest { .. } | HostMsg::LayoutChanged | HostMsg::Unknown => {}
                 HostMsg::Error { message, .. } => return Ok(Err(message)),
                 HostMsg::Goodbye { reason } => return Err(goodbye(&reason)),
                 message => return Ok(Ok(message)),

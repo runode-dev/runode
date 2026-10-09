@@ -127,6 +127,15 @@ public final class AppModel {
         }
     }
 
+    /// 终端页上切到电脑上同一个标签里的另一个分屏：换掉栈顶的终端页，返回时照旧回到列表，不在栈里
+    /// 越压越深。软键盘开着的话新终端接着把它弹出来。
+    public func switchTerminal(machine: UUID, to session: SessionId) {
+        guard let last = path.last, case .terminal(machine, let current) = last, current != session else { return }
+        let keyboard = terminals[last]?.keyboardVisible ?? false
+        path[path.count - 1] = .terminal(machine: machine, session: session)
+        if keyboard { terminal(machine: machine, session: session)?.showsKeyboardOnAppear = true }
+    }
+
     /// 打开一个会话所在仓库的 Git 页，压在当前页上面：从终端页打开时返回回到终端，从会话列表打开时
     /// 回到列表；别的电脑上的页面先换成这台电脑的会话列表。
     public func openGit(machine: UUID, session: SessionId) {

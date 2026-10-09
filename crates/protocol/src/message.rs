@@ -231,8 +231,13 @@ pub enum ClientMsg {
     SendKeys { req: u32, id: SessionId, keys: Vec<String> },
     /// 往会话里粘贴一段文字，程序开着括号粘贴模式（mode 2004）时套上括号，回 `Done`。
     Paste { req: u32, id: SessionId, text: String },
-    /// 要 app 里各个终端摆在哪，宿主转给界面，回 `HostMsg::Layout`。
+    /// 要 app 里各个终端摆在哪，宿主转给界面，回 `HostMsg::Layout`。问过的连接之后在布局变了时
+    /// 收到 `HostMsg::LayoutChanged`。
     Layout { req: u32 },
+    /// 界面里的布局变了（开关窗口、工作区、标签、分屏，换了焦点、调了分屏大小）。只有桌面的界面发，
+    /// 不用回；宿主转成 `HostMsg::LayoutChanged` 告诉问过布局的连接。旧的宿主读成 `Unknown`，回
+    /// `Error`。
+    LayoutChanged,
     /// 界面办完了宿主转来的 `HostMsg::UiRequest`：`ui` 是那条请求的编号，`reply` 原样转给发请求
     /// 的一方。只有桌面的界面发。
     UiReply { ui: u64, reply: Box<HostMsg> },
@@ -468,6 +473,9 @@ pub enum HostMsg {
         req: u32,
         windows: Vec<WindowLayout>,
     },
+    /// 电脑上 app 的布局变了（见 `ClientMsg::LayoutChanged`），想知道新的布局再发 `ClientMsg::Layout`。
+    /// 只发给这条连接上问过 `Layout` 的，不用回。
+    LayoutChanged,
     /// 回 `ClientMsg::ListDirs`。`path` 是实际列的目录：规范化后的绝对路径，请求里没给时是家目录。
     /// `dirs` 只有子目录的名字（跟着符号链接看是不是目录，含隐藏目录，不是 UTF-8 的名字跳过），按名字
     /// 不分大小写排好，最多 `MAX_DIRS` 个；多出来的不给，`truncated` 为真。

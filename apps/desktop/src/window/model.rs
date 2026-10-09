@@ -424,6 +424,7 @@ impl WindowView {
     pub(super) fn save(&self, cx: &mut Context<Self>) {
         let snapshot = self.snapshot(cx);
         persist::update(cx.weak_entity(), snapshot, cx);
+        super::layout_report::changed(cx);
     }
 
     /// 关掉第 `wi` 个 workspace 的第 `ti` 个标签；关掉的是它的当前标签时切到右边那个（没有

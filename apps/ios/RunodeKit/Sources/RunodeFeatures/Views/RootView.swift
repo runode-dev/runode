@@ -60,6 +60,12 @@
                     TerminalScreen(
                         model: model, preferences: app.settings.preferences,
                         onOpenGit: { app.openGit(machine: machine, session: session) },
+                        onSelectPane: { id in
+                            // 同一个标签里的分屏是平级的，原地换掉不播翻页动画。
+                            var transaction = Transaction()
+                            transaction.disablesAnimations = true
+                            withTransaction(transaction) { app.switchTerminal(machine: machine, to: id) }
+                        },
                         sessions: app.sessionList(for: machine))
                     // 从终端页开新终端时 `openTerminal` 把栈顶原地换成新会话，同一位置同一类型的页面
                     // SwiftUI 会接着用，嵌着的终端视图不重建、仍挂在旧会话上，新会话没地方画。按会话

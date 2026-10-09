@@ -7,19 +7,23 @@
     /// 终端页：整页铺终端的背景色，导航栏是和终端协调的半透明深色（浅色主题时是浅色），标题下面一行
     /// agent 和连接的状态。断线时终端上方叠一条带「重试」的横幅；agent 等回答时底部出现快速回复栏；
     /// 软键盘没弹出时底部常驻一条按键栏（Esc、Ctrl、方向键……最后一个键打开软键盘），弹出后由键盘上方的
-    /// 辅助栏接手。
+    /// 辅助栏接手。电脑上这个终端所在的标签分了屏时，导航栏下面一排标签切换各个分屏。
     struct TerminalScreen: View {
         @Bindable var model: TerminalModel
         /// 设置里的字号和响铃震动。
         let preferences: AppPreferences
         /// 打开这个会话所在仓库的 Git 页。
         var onOpenGit: () -> Void = {}
+        /// 切到同一个标签里的另一个分屏。
+        var onSelectPane: (SessionId) -> Void = { _ in }
         /// 这台电脑的会话列表，「⋯」菜单里的项目命令从它取、经它跑。
         var sessions: SessionListModel?
         /// 断线横幅占的高度，终端视图据此在顶上让出地方，横幅不挡内容。
         @State private var bannerHeight: CGFloat = 0
         /// 嵌着的终端视图，底部的按键栏按了发给它。
         @State private var terminalView: TerminalView?
+        /// 连了一会儿还没连上：这时才出「正在连接…」横幅，切分屏、回到前台时一闪而过的连接不出。
+        @State private var connectingLong = false
 
         private var background: Color { Color(model.background) }
         private var scheme: ColorScheme { model.background.isDark ? .dark : .light }
@@ -27,7 +31,13 @@
         var body: some View {
             TerminalViewRepresentable(
                 model: model, preferences: preferences, topObstruction: bannerMessage == nil ? 0 : bannerHeight,
-                onMake: { view in terminalView = view })
+                onMake: { view in
+                    terminalView = view
+                    if model.showsKeyboardOnAppear {
+                        model.showsKeyboardOnAppear = false
+                        model.showKeyboard()
+                    }
+                })
                 .ignoresSafeArea(.container, edges: .horizontal)
                 .overlay(alignment: .top) { banner }
                 .overlay(alignment: .bottomTrailing) {
@@ -39,6 +49,7 @@
                             .transition(.opacity)
                     }
                 }
+                .safeAreaInset(edge: .top, spacing: 0) { paneTabs }
                 .safeAreaInset(edge: .bottom, spacing: 0) { bottomBars }
                 .background(background.ignoresSafeArea())
                 .animation(.easeOut(duration: 0.2), value: model.isAwaitingAnswer)
@@ -53,9 +64,34 @@
                     ToolbarItem(placement: .primaryAction) { sizeMenu }
                     ToolbarItem(placement: .primaryAction) { moreMenu }
                 }
+                .task {
+                    // 电脑在布局变了时推 `LayoutChanged`，列表收到就重新要布局；这里隔一会儿再问一次兜底。
+                    // 旧的电脑不推，没收到过推送时问得勤一些。
+                    while !Task.isCancelled {
+                        sessions?.refreshLayout()
+                        try? await Task.sleep(for: sessions?.pushesLayout == true ? .seconds(15) : .seconds(2))
+                    }
+                }
+                .task(id: model.phase == .connecting) {
+                    connectingLong = false
+                    guard model.phase == .connecting else { return }
+                    try? await Task.sleep(for: .milliseconds(600))
+                    if !Task.isCancelled { connectingLong = true }
+                }
                 .task(id: session?.meta.cwd) {
                     if let cwd = session?.meta.cwd { await sessions?.loadProjectTasks(in: cwd) }
                 }
+        }
+
+        /// 电脑上同一个标签里分了屏时的分屏标签；没分屏时不出现。
+        @ViewBuilder
+        private var paneTabs: some View {
+            if let panes = sessions?.panes(sharingTabWith: model.sessionId), !panes.isEmpty {
+                PaneTabBar(panes: panes, current: model.sessionId, onSelect: onSelectPane)
+                    .background(background.opacity(0.92))
+                    .overlay(alignment: .bottom) { Divider() }
+                    .environment(\.colorScheme, scheme)
+            }
         }
 
         private var titleView: some View {
@@ -175,7 +211,7 @@
                 return { _ in String(localized: "shell 已退出") }
             case .gone(let message):
                 return { _ in String(localized: "这个终端已经不在了：\(message)") }
-            case .connecting:
+            case .connecting where connectingLong:
                 return { _ in String(localized: "正在连接…") }
             default:
                 return nil
@@ -222,6 +258,63 @@
         private var awaitingPrompt: String {
             let name = model.agent?.kind.displayName ?? "Agent"
             return String(localized: "\(name) 在等你回答")
+        }
+    }
+
+    /// 终端页顶上的一排分屏标签，一个分屏一个：小图画出它在电脑上那个标签里的位置，带 agent 的状态，
+    /// 别的分屏在等回答时描一圈橙边。点了切过去；当前的那个滚到中间。
+    private struct PaneTabBar: View {
+        let panes: [SplitPane]
+        let current: SessionId
+        let onSelect: (SessionId) -> Void
+
+        var body: some View {
+            ScrollViewReader { proxy in
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 6) {
+                        ForEach(panes) { pane in
+                            tab(pane).id(pane.id)
+                        }
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 4)
+                }
+                .onAppear { proxy.scrollTo(current, anchor: .center) }
+            }
+        }
+
+        private func tab(_ pane: SplitPane) -> some View {
+            let selected = pane.id == current
+            let waiting = !selected && SessionGroup.of(pane.session) == .waiting
+            return Button {
+                guard !selected else { return }
+                UISelectionFeedbackGenerator().selectionChanged()
+                onSelect(pane.id)
+            } label: {
+                HStack(spacing: 6) {
+                    PaneGlyph(rect: pane.rect)
+                    if Presentation.agentStatus(pane.session.meta.agent) != nil {
+                        AgentStateIcon(agent: pane.session.meta.agent)
+                            .imageScale(.small)
+                    }
+                    Text(Presentation.sessionTitle(pane.session))
+                        .lineLimit(1)
+                }
+                .font(.subheadline.weight(selected ? .semibold : .regular))
+                .foregroundStyle(selected ? .primary : .secondary)
+                .opacity(pane.session.exited ? 0.5 : 1)
+                .padding(.horizontal, 12)
+                .frame(maxWidth: 220, minHeight: 36)
+                .background(selected ? AnyShapeStyle(.quaternary) : AnyShapeStyle(.clear), in: .capsule)
+                .overlay {
+                    if waiting { Capsule().strokeBorder(AgentBadge.tint(for: .waiting), lineWidth: 1.5) }
+                }
+                .contentShape(.capsule)
+            }
+            .buttonStyle(.plain)
+            .accessibilityElement(children: .combine)
+            .accessibilityAddTraits(selected ? .isSelected : [])
+            .accessibilityHint(selected ? "" : String(localized: "切到这个分屏"))
         }
     }
 

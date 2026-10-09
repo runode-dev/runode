@@ -281,6 +281,47 @@ import Testing
         }
     }
 
+    /// 同一个标签里分了屏的会话互为兄弟；独自一个标签、不在窗口里的没有。
+    @Test func panesSharingATabListEachOther() {
+        let model = SessionListModel(machine: machineRecord(), link: link)
+        model.handle(.ready(generation: 1))
+        model.handle(.message(.sessionList([info(sessionA, title: "a"), info(sessionB, title: "b")])))
+        #expect(model.panes(sharingTabWith: sessionA).isEmpty)
+        let split = TabLayout(
+            index: 1, active: true,
+            panes: [
+                PaneLayout(index: 1, id: sessionA, rect: PaneRect(x: 0, y: 0, width: 500, height: 1000), focused: true),
+                PaneLayout(index: 2, id: sessionB, rect: PaneRect(x: 500, y: 0, width: 500, height: 1000)),
+            ])
+        model.handle(
+            .message(.layout(req: 0, windows: [WindowLayout(index: 1, workspaces: [WorkspaceLayout(index: 1, tabs: [split])])])))
+        #expect(model.panes(sharingTabWith: sessionB).map(\.id) == [sessionA, sessionB])
+        #expect(model.panes(sharingTabWith: sessionB).last?.rect?.x == 500)
+        // 电脑上刚分出来、列表里还没有的会话：先不列，补要一次列表，列表到了再列。
+        model.handle(.message(.sessionList([info(sessionA, title: "a")])))
+        link.clearSent()
+        model.handle(
+            .message(.layout(req: 0, windows: [WindowLayout(index: 1, workspaces: [WorkspaceLayout(index: 1, tabs: [split])])])))
+        #expect(model.panes(sharingTabWith: sessionA).isEmpty)
+        #expect(link.sent.contains(.listSessions))
+        model.handle(.message(.sessionList([info(sessionA, title: "a"), info(sessionB, title: "b")])))
+        #expect(model.panes(sharingTabWith: sessionA).map(\.id) == [sessionA, sessionB])
+        // 电脑推来布局变了：马上重新要布局。
+        link.clearSent()
+        #expect(!model.pushesLayout)
+        model.handle(.message(.layoutChanged))
+        #expect(link.sent == [.layout(req: 0)])
+        #expect(model.pushesLayout)
+        // 电脑上关掉分屏会结束会话：一收到 `Exited` 就重新要布局。
+        link.clearSent()
+        model.handle(.message(.exited(id: sessionB, status: 0)))
+        #expect(link.sent == [.layout(req: 0)])
+        let alone = TabLayout(index: 1, active: true, panes: [PaneLayout(index: 1, id: sessionA, focused: true)])
+        model.handle(
+            .message(.layout(req: 0, windows: [WindowLayout(index: 1, workspaces: [WorkspaceLayout(index: 1, tabs: [alone])])])))
+        #expect(model.panes(sharingTabWith: sessionA).isEmpty)
+    }
+
     /// 给工作区改名：按布局里的序号发 `RenameWorkspace`，办好后重新要布局；名字只有空白时不发。
     @Test func renamingAWorkspaceRefreshesTheLayout() async {
         let model = SessionListModel(machine: machineRecord(), link: link)
@@ -505,6 +546,30 @@ extension LinkState {
         // 删掉这台电脑才断开。
         await app.machineList.delete(machine.id)
         #expect(await eventually { link.stops == 1 })
+    }
+
+    /// 切到同一个标签里的另一个分屏：原地换掉栈顶，旧终端关掉；软键盘开着的话新终端接着弹出来。
+    @Test func switchingPanesReplacesTheTerminalPage() async throws {
+        let store = MemoryMachineStore()
+        let machine = machineRecord()
+        await store.upsert(machine)
+        let link = FakeLink()
+        let app = AppModel(
+            dependencies: AppDependencies(
+                store: store, keyStore: MemoryDeviceKeyStore(),
+                pairing: FakePairing { _ in machine }, makeLink: { _ in link }, deviceName: "测试 iPhone"))
+        await app.machineList.load()
+        app.path = [.machine(machine.id), .terminal(machine: machine.id, session: sessionA)]
+        let first = try #require(app.terminal(machine: machine.id, session: sessionA))
+        first.setKeyboardVisible(true)
+        app.switchTerminal(machine: machine.id, to: sessionB)
+        #expect(app.path == [.machine(machine.id), .terminal(machine: machine.id, session: sessionB)])
+        #expect(app.terminal(machine: machine.id, session: sessionA) !== first)
+        #expect(app.terminal(machine: machine.id, session: sessionB)?.showsKeyboardOnAppear == true)
+        // 不在终端页上时不动。
+        app.path = [.machine(machine.id)]
+        app.switchTerminal(machine: machine.id, to: sessionA)
+        #expect(app.path == [.machine(machine.id)])
     }
 
     @Test func backgroundDisconnectsAndForegroundReconnects() async throws {

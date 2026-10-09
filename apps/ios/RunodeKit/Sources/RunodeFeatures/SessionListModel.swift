@@ -43,6 +43,15 @@ public struct SessionSection: Hashable, Sendable, Identifiable {
     public var anchor: SessionId?
 }
 
+/// 电脑上一个分了屏的标签里的一个分屏。
+public struct SplitPane: Hashable, Sendable, Identifiable {
+    public var session: SessionInfo
+    /// 在标签里的位置，电脑没报时为空。
+    public var rect: PaneRect?
+
+    public var id: SessionId { session.id }
+}
+
 /// 每个会话最多多久读一次屏幕做预览。
 struct PreviewThrottle {
     enum Decision: Equatable {
@@ -120,6 +129,8 @@ public final class SessionListModel {
     public private(set) var loaded = false {
         didSet { onSessionsChanged() }
     }
+    /// 这次连上以后电脑推过 `LayoutChanged`：它会在布局变了时说，终端页不用勤着问。
+    @ObservationIgnored private(set) var pushesLayout = false
     /// 这次连上以后收到过列表：`sessions` 是电脑上现在的样子。断开后、重连上还没收到新列表时为假，
     /// 那时 `sessions` 还是断开前的。
     @ObservationIgnored private(set) var listCurrent = false
@@ -414,6 +425,21 @@ public final class SessionListModel {
         sessions.first { $0.id == id }
     }
 
+    /// 电脑上和 `id` 在同一个标签里的分屏（含它自己），按分屏的先后；它在标签里是独自一个、或不在任何
+    /// 窗口里时为空。
+    public func panes(sharingTabWith id: SessionId) -> [SplitPane] {
+        let tabs = windows.flatMap(\.workspaces).flatMap(\.tabs)
+        guard let tab = tabs.first(where: { $0.panes.contains { $0.id == id } }) else { return [] }
+        let panes = tab.panes.compactMap { pane in session(pane.id).map { SplitPane(session: $0, rect: pane.rect) } }
+        return panes.count > 1 ? panes : []
+    }
+
+    /// 只重新要一次布局：终端页开着时分屏会在电脑上增减，列表自己的刷新那时不一定在跑。
+    public func refreshLayout() {
+        guard connected else { return }
+        link.send(.layout(req: Self.layoutRequest))
+    }
+
     // MARK: 项目命令
 
     /// 这个会话目录里能跑的项目命令，还没列过或者目录不知道时为空。
@@ -554,6 +580,7 @@ public final class SessionListModel {
         case .ready:
             connected = true
             listCurrent = false
+            pushesLayout = false
             watching = []
             refresh()
         case .message(let message):
@@ -615,10 +642,21 @@ public final class SessionListModel {
             }
         case .exited(let id, _):
             update(id) { $0.exited = true }
+            // 电脑上关分屏、关标签都会结束会话：马上要布局，不等下一轮刷新，终端页的分屏标签跟着变。
+            refreshLayout()
         case .sizeOwner(let id, let mine, let owner):
             update(id) { $0.sizeOwner = mine ? String(localized: "本机") : owner }
         case .layout(Self.layoutRequest, let windows):
             self.windows = windows
+            // 布局里有还不认识的会话（电脑上刚分屏、开标签）：终端页开着时列表自己的刷新停着，这里补要一次。
+            let known = Set(sessions.map(\.id))
+            let placed = windows.flatMap(\.workspaces).flatMap(\.sessions)
+            if connected, placed.contains(where: { !known.contains($0) }) {
+                link.send(.listSessions)
+            }
+        case .layoutChanged:
+            pushesLayout = true
+            refreshLayout()
         case .projectTasks(let req, _, let sources):
             finishProjectTasks(req, sources: sources)
         case .done(let req) where pendingRenames.contains(req):

@@ -594,6 +594,9 @@
         }
       ]
     },
+    "layout_changed": {
+      "type": "layout_changed"
+    },
     "layout_request": {
       "req": 0,
       "type": "layout"

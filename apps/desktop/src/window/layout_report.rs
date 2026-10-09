@@ -6,11 +6,14 @@
 //! 整个标签区域 0..`PaneRect::EXTENT` 归一化，由分屏树按比例算出，不看实际画出来的像素，所以
 //! 后台标签也有。放大着的分屏照常按没放大时的布局给：放大只是暂时把别的分屏挡住，命令行按
 //! 左右上下找相邻分屏时要的是分屏之间的位置关系，放大时也不变。
+//!
+//! 布局变了时（`changed`）发 `ClientMsg::LayoutChanged` 告诉宿主，宿主转告问过布局的连接，手机据此
+//! 马上重新要布局，不用轮询。
 
-use std::{collections::HashMap, path::Path};
+use std::{collections::HashMap, path::Path, time::Duration};
 
-use gpui::{App, EntityId, Global, WindowHandle};
-use runode_protocol::{PaneLayout, PaneRect, SessionId, TabLayout, WindowLayout, WorkspaceLayout};
+use gpui::{App, EntityId, Global, Task, WindowHandle};
+use runode_protocol::{ClientMsg, PaneLayout, PaneRect, SessionId, TabLayout, WindowLayout, WorkspaceLayout};
 use runode_shared_types::pane::{Node, Rect};
 
 use super::WindowView;
@@ -135,6 +138,41 @@ pub(super) fn window_at(index: u32, cx: &mut App) -> Option<WindowHandle<WindowV
     windows.sort_by_key(|(id, _)| opened(*id));
     let ix = usize::try_from(index.checked_sub(1)?).ok()?;
     windows.into_iter().nth(ix).map(|(_, handle)| handle)
+}
+
+/// 布局可能变了以后等这么久再比：拖分隔线、连着开几个分屏时攒成一次。
+const REPORT_DELAY: Duration = Duration::from_millis(100);
+
+/// 上次告诉宿主时的布局，和等着比较的任务。
+#[derive(Default)]
+struct Reported {
+    layout: Option<Vec<WindowLayout>>,
+    pending: Option<Task<()>>,
+}
+
+impl Global for Reported {}
+
+/// 布局可能变了（窗口存档要更新、窗口关掉）：稍等一下，和上次告诉宿主的不同时发 `LayoutChanged`。
+pub(super) fn changed(cx: &mut App) {
+    if cx.default_global::<Reported>().pending.is_some() {
+        return;
+    }
+    let task = cx.spawn(async |cx| {
+        cx.background_executor().timer(REPORT_DELAY).await;
+        cx.update(report_change);
+    });
+    cx.global_mut::<Reported>().pending = Some(task);
+}
+
+fn report_change(cx: &mut App) {
+    let layout = current(cx);
+    let reported = cx.global_mut::<Reported>();
+    reported.pending = None;
+    if reported.layout.as_ref() == Some(&layout) {
+        return;
+    }
+    reported.layout = Some(layout);
+    crate::host_client::link().send(ClientMsg::LayoutChanged);
 }
 
 /// app 里所有窗口现在的布局。

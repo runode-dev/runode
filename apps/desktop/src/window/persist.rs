@@ -224,6 +224,7 @@ pub(super) fn track(cx: &mut Context<WindowView>) {
 /// 启动恢复。还有别的窗口开着时是单独关掉了它，里面的会话随之结束，从存档里拿掉。所有
 /// workspace 都关掉了的窗口不留。
 fn closed(view: &mut WindowView, window: WeakEntity<WindowView>, cx: &mut App) {
+    super::layout_report::changed(cx);
     let id = window.entity_id();
     // 设置窗口不算，只剩它时也是关掉了最后一个终端窗口。
     match on_close(cx.global::<Saver>().frozen, super::terminal_windows(cx) == 0, view.emptied) {

@@ -143,6 +143,8 @@ impl Peers {
 
 struct Peer {
     out: Option<Outbox>,
+    /// 问过 `Layout`：界面说布局变了时告诉它，见 `HostMsg::LayoutChanged`。
+    watches_layout: bool,
 }
 
 /// 转给界面、还没回话的一条请求。
@@ -394,7 +396,7 @@ fn register(shared: &Shared) -> Option<u64> {
         return None;
     }
     let id = shared.next_connection();
-    peers.connections.insert(id, Peer { out: None });
+    peers.connections.insert(id, Peer { out: None, watches_layout: false });
     peers.activity_at = Instant::now();
     Some(id)
 }
@@ -980,9 +982,26 @@ impl Connection {
             ClientMsg::Open { req, .. }
             | ClientMsg::OpenWorkspace { req, .. }
             | ClientMsg::RenameWorkspace { req, .. }
-            | ClientMsg::Reveal { req, .. }
-            | ClientMsg::Layout { req } => {
+            | ClientMsg::Reveal { req, .. } => {
                 self.to_ui(req, message);
+            }
+            ClientMsg::Layout { req } => {
+                if let Some(peer) = self.shared.peers().connections.get_mut(&self.id) {
+                    peer.watches_layout = true;
+                }
+                self.to_ui(req, message);
+            }
+            ClientMsg::LayoutChanged => {
+                if self.kind == ClientKind::Desktop {
+                    let peers = self.shared.peers();
+                    for peer in peers.connections.values().filter(|peer| peer.watches_layout) {
+                        if let Some(out) = &peer.out {
+                            out.control(&HostMsg::LayoutChanged);
+                        }
+                    }
+                } else {
+                    self.error(None, None, "only the runode app reports its layout".into());
+                }
             }
             ClientMsg::ListDirs { req, path } => match browse::list_dirs(path) {
                 Ok(browse::Listing { path, dirs, truncated }) => {
@@ -1428,6 +1447,30 @@ mod tests {
             thread::sleep(Duration::from_millis(5));
         }
         send(&mut desktop, &ClientMsg::UiReply { ui, reply: Box::new(HostMsg::Done { req: 1 }) });
+        send(&mut desktop, &ClientMsg::ListSessions);
+        assert!(matches!(message(&desktop_frames), HostMsg::SessionList { .. }));
+    }
+
+    /// 界面说布局变了：只告诉问过 `Layout` 的连接；不是界面的连接不能这么说。
+    #[test]
+    fn layout_changes_reach_connections_that_asked_for_the_layout() {
+        let host = Host::new(BuildId("test".into()));
+        let (mut desktop, desktop_frames) = greet(&host, ClientKind::Desktop);
+        let (mut mobile, mobile_frames) = greet(&host, ClientKind::Mobile);
+        let (mut cli, cli_frames) = greet(&host, ClientKind::Cli);
+        send(&mut mobile, &ClientMsg::Layout { req: 0 });
+        let HostMsg::UiRequest { ui, .. } = message(&desktop_frames) else { panic!("expected a ui request") };
+        send(&mut desktop, &ClientMsg::UiReply { ui, reply: Box::new(HostMsg::Layout { req: 0, windows: vec![] }) });
+        assert!(matches!(message(&mobile_frames), HostMsg::Layout { .. }));
+
+        send(&mut desktop, &ClientMsg::LayoutChanged);
+        assert_eq!(message(&mobile_frames), HostMsg::LayoutChanged);
+        // 没问过布局的连接收不到：它下一条收到的是自己请求的回话。
+        send(&mut cli, &ClientMsg::ListSessions);
+        assert!(matches!(message(&cli_frames), HostMsg::SessionList { .. }));
+
+        send(&mut mobile, &ClientMsg::LayoutChanged);
+        assert!(matches!(message(&mobile_frames), HostMsg::Error { .. }));
         send(&mut desktop, &ClientMsg::ListSessions);
         assert!(matches!(message(&desktop_frames), HostMsg::SessionList { .. }));
     }

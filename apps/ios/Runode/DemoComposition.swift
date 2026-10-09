@@ -163,6 +163,21 @@
                             .init(
                                 id: id, channel: 0, size: size(of: session), mode: .metaOnly, meta: session.meta,
                                 settings: Self.theme))))
+            case .layout(let req):
+                // 一个工作区：第一个标签左右分屏放两个 agent，第二个标签是普通 shell。
+                let split = TabLayout(
+                    index: 1, active: true,
+                    panes: [
+                        PaneLayout(
+                            index: 1, id: Self.claude.id, rect: PaneRect(x: 0, y: 0, width: 500, height: 1000),
+                            focused: true),
+                        PaneLayout(index: 2, id: Self.codex.id, rect: PaneRect(x: 500, y: 0, width: 500, height: 1000)),
+                    ])
+                let shell = TabLayout(
+                    index: 2, panes: [PaneLayout(index: 1, id: Self.shell.id, rect: PaneRect(x: 0, y: 0, width: 1000, height: 1000))])
+                let workspace = WorkspaceLayout(
+                    index: 1, name: "runode", dir: "/Users/ethan/dev/runode", active: true, tabs: [split, shell])
+                emit(.message(.layout(req: req, windows: [WindowLayout(index: 1, front: true, workspaces: [workspace])])))
             case .resize(let id, let size):
                 guard Self.sessions.first(where: { $0.id == id })?.sizeOwner == nil else { return }
                 sizes.withLock { $0[id] = size }

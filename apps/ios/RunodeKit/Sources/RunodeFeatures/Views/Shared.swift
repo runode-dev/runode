@@ -664,4 +664,29 @@
             .accessibilityElement(children: .contain)
         }
     }
+
+    /// 分屏在电脑上那个标签里的位置：一个小框，这个分屏占的那块填满。电脑没报位置时只画框。
+    struct PaneGlyph: View {
+        let rect: PaneRect?
+        @ScaledMetric(relativeTo: .subheadline) private var width: CGFloat = 18
+
+        var body: some View {
+            Canvas { context, size in
+                let frame = CGRect(origin: .zero, size: size).insetBy(dx: 0.75, dy: 0.75)
+                context.stroke(Path(roundedRect: frame, cornerRadius: 2.5), with: .foreground, lineWidth: 1.5)
+                guard let rect else { return }
+                let extent = CGFloat(PaneRect.extent)
+                let pane = CGRect(
+                    x: frame.minX + frame.width * CGFloat(rect.x) / extent,
+                    y: frame.minY + frame.height * CGFloat(rect.y) / extent,
+                    width: frame.width * CGFloat(rect.width) / extent,
+                    height: frame.height * CGFloat(rect.height) / extent)
+                // 分屏之间留一道缝，切得再细也至少剩一点。
+                let inset = pane.insetBy(dx: min(1.5, pane.width / 3), dy: min(1.5, pane.height / 3))
+                context.fill(Path(roundedRect: inset, cornerRadius: 1), with: .foreground)
+            }
+            .frame(width: width, height: width * 0.75)
+            .accessibilityHidden(true)
+        }
+    }
 #endif

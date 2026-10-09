@@ -357,6 +357,7 @@ fn samples() -> BTreeMap<&'static str, Value> {
         ),
         ("screen_text", HostMsg::ScreenText { id: ID, text: "a\n".into(), truncated: false }),
         ("layout", HostMsg::Layout { req: 0, windows: layout() }),
+        ("layout_changed", HostMsg::LayoutChanged),
         (
             "dirs",
             HostMsg::Dirs {

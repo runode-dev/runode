@@ -84,6 +84,8 @@ public final class TerminalModel {
     public var errorMessage: String?
     /// 在等用户确认结束会话。
     public var isConfirmingKill = false
+    /// 终端页出现时弹出软键盘：从开着键盘的分屏切过来时接着打字。
+    @ObservationIgnored public var showsKeyboardOnAppear = false
     /// 底部的快速回复：agent 停下来等回答时出现。
     public let quickReply: QuickReplyModel
 
