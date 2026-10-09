@@ -16,8 +16,9 @@ use runode_remote_access::{host_name, local_interfaces};
 use runode_shared_types::color::Rgb;
 
 use super::{
-    CARD_GAP, TITLEBAR_HEIGHT, WindowView, card, cards, drag_window, frame_color,
+    CARD_GAP, TITLEBAR_HEIGHT, WindowView, card, cards,
     devices::{Paired, devices},
+    drag_window, frame_color,
     sidebar::ROW_ICON_SIZE,
 };
 use crate::{

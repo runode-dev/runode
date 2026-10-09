@@ -765,11 +765,7 @@ impl WindowView {
                 .collect::<Vec<_>>();
         // 标签平分标签条，最窄 `TAB_MIN_WIDTH`，挤不下就让标签条滚动。这里估一个宽度，决定标签
         // 要不要收成紧凑的样子，拖动时的预览也照它画。
-        let fixed = sidebar_width
-            + left_inset
-            + NEW_TAB_BUTTON_WIDTH
-            + project::PANEL_TOGGLES_INSET
-            + widths.total();
+        let fixed = sidebar_width + left_inset + NEW_TAB_BUTTON_WIDTH + project::PANEL_TOGGLES_INSET + widths.total();
         let tab_width = px(((viewport - fixed) / tab_count.max(1) as f32).max(TAB_MIN_WIDTH));
         let track_bg = hsla(tab_track_colors(fg, bg).0);
         let strip = div()
