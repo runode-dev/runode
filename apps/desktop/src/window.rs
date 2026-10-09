@@ -68,6 +68,7 @@ pub use files::{
     CollapseSelectedFile, CopyPath, CopyRelativePath, DeleteFile, ExpandSelectedFile, FocusTerminal, OpenSelectedFile,
     RenameFile, RevealInFinder, SelectFirstFile, SelectLastFile, SelectNextFile, SelectPreviousFile,
 };
+pub(crate) use mobile::show_pairing;
 pub(crate) use open::{open_window, open_window_with};
 pub use persist::{install, saved_window_options};
 pub use quit::{

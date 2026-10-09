@@ -686,13 +686,7 @@ settings:
   pairing:
     title: 配對手機
     hint: 用手機上的 Runode 掃碼配對。配好的手機在遠端存取打開時能連上這台 Mac。
-    "off": 先打開上面的遠端存取，再來配對。
     start: 配對…
-    again: 再配一台
-    cancel: 取消
-    copy: 拷貝連結
-    waiting: "用手機上的 Runode 掃這個 QR 碼，或者把連結傳到手機上打開。%{time} 內有效，等手機連上來。"
-    paired: "已和 %{name} 配對。"
     background: 結束 Runode 時遠端存取跟著停，手機就連不上了。打開後結束時工作階段和遠端存取留在背景。
     not_listening: 遠端存取沒在監聽。剛打開的話等幾秒再試；一直這樣的話，連接埠可能被占用了，宿主的日誌裡有原因。
     stopped: 等手機時遠端存取停了。

@@ -66,6 +66,19 @@ pub(super) struct MobilePage {
     network_open: bool,
 }
 
+/// 设置里的「配对…」：在最前面的窗口里打开引导页、直接到配对这一步；一个窗口都没有时先开一个。
+pub(crate) fn show_pairing(cx: &mut App) {
+    if super::remote::windows(cx).is_empty() {
+        super::open_window(cx, None);
+    }
+    let Some(handle) = super::remote::front_window(cx) else { return };
+    let _ = handle.update(cx, |view, window, cx| {
+        window.activate_window();
+        view.show_mobile(&super::ShowMobile, window, cx);
+        view.go_mobile(Step::Pair, cx);
+    });
+}
+
 impl WindowView {
     /// 打开手机端引导页；已经开着时把焦点给它。
     pub(super) fn show_mobile(&mut self, _: &super::ShowMobile, window: &mut Window, cx: &mut Context<Self>) {
@@ -428,7 +441,7 @@ impl WindowView {
                     link("mobile-again", rust_i18n::t!("mobile.again").into_owned(), colors)
                         .on_click(cx.listener(|this, _: &ClickEvent, _, cx| this.start_mobile_pairing(cx))),
                 );
-            // 宿主跑在 app 里时退出 app 远程访问跟着停，和设置里一样提醒一句。
+            // 宿主跑在 app 里时退出 app 远程访问跟着停，提醒一句。
             let background = (!background_on).then(|| {
                 notice(rust_i18n::t!("settings.pairing.background").into_owned(), colors).child(
                     div().pt(px(10.)).child(

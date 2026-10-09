@@ -686,13 +686,7 @@ settings:
   pairing:
     title: Pair a phone
     hint: Scan a code with Runode on your phone. A paired phone can reach this Mac while remote access is on.
-    "off": Turn on remote access above, then pair.
     start: Pair…
-    again: Pair Another
-    cancel: Cancel
-    copy: Copy Link
-    waiting: "Scan this code with Runode on your phone, or open the link on the phone. It works for %{time}; waiting for the phone."
-    paired: "Paired with %{name}."
     background: Remote access stops when Runode quits, and the phone can no longer connect. With this on, sessions and remote access keep running in the background.
     not_listening: Remote access is not listening. If you just turned it on, try again in a few seconds; otherwise the port may be taken, and the host's log says why.
     stopped: Remote access stopped while waiting for the phone.

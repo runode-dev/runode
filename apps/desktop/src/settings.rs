@@ -99,8 +99,6 @@ pub struct SettingsView {
     errors: HashMap<String, String>,
     picker: Option<Picker>,
     keybinds: keybinds::State,
-    /// 配对手机进行到哪了；换页时留着，关窗口时随窗口丢掉，口令随之作废。
-    pairing: crate::remote_access::pairing::Pairing,
     scroll: ScrollHandle,
     _observe: Subscription,
 }
@@ -119,7 +117,6 @@ impl SettingsView {
             errors: HashMap::new(),
             picker: None,
             keybinds: keybinds::State::default(),
-            pairing: crate::remote_access::pairing::Pairing::default(),
             scroll: ScrollHandle::new(),
             _observe: observe,
         }
