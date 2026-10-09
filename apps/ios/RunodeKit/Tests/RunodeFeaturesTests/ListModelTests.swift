@@ -73,6 +73,36 @@ import Testing
         #expect(!model.isSpawning)
     }
 
+    /// 等 `Opened` 时断了（断线等重连、进后台回来先是 `idle`）：回话不会来了，重连后还能再开。
+    @Test(arguments: [LinkState.waiting(reason: "断了", retryAt: .now), .idle])
+    func disconnectingWhileSpawningLetsYouSpawnAgain(_ lost: LinkState) async throws {
+        let model = SessionListModel(machine: machineRecord(), link: link)
+        model.handle(.ready(generation: 1))
+        await model.spawn()
+        guard case .open(let oldReq, _, _, _, _)? = link.sent.last else {
+            Issue.record("expected an open, got \(link.sent)")
+            return
+        }
+        model.handle(.state(lost))
+        #expect(!model.isSpawning)
+        var spawned: [SessionId] = []
+        model.onSpawned = { spawned.append($0) }
+        model.handle(.message(.opened(req: oldReq, id: sessionB)))
+        #expect(spawned.isEmpty)
+
+        model.handle(.ready(generation: 2))
+        link.clearSent()
+        await model.spawn()
+        #expect(model.isSpawning)
+        guard case .open(let req, _, _, _, _)? = link.sent.last else {
+            Issue.record("expected an open, got \(link.sent)")
+            return
+        }
+        model.handle(.message(.opened(req: req, id: sessionA)))
+        #expect(spawned == [sessionA])
+        #expect(!model.isSpawning)
+    }
+
     /// 电脑上的 app 没开着窗口时退回自己开一个后台会话。
     @Test func spawnFallsBackWithoutADesktopWindow() async {
         let model = SessionListModel(machine: machineRecord(), link: link)

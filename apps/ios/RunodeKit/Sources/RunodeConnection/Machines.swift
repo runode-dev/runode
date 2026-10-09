@@ -48,6 +48,8 @@ public protocol MachineStore: Sendable {
     func all() async -> [MachineRecord]
     /// 加一台，或者按 `id` 换掉已有的。
     func upsert(_ machine: MachineRecord) async throws
+    /// 只改存着的那条的 `lastAddress`，别的字段（用户改过的名字）照旧；这条已经删了时什么也不做。
+    func updateLastAddress(id: UUID, _ address: String) async throws
     func remove(id: UUID) async throws
 }
 
@@ -64,6 +66,11 @@ public actor MemoryMachineStore: MachineStore {
     public func upsert(_ machine: MachineRecord) {
         machines.removeAll { $0.id == machine.id }
         machines.append(machine)
+    }
+
+    public func updateLastAddress(id: UUID, _ address: String) {
+        guard let index = machines.firstIndex(where: { $0.id == id }) else { return }
+        machines[index].lastAddress = address
     }
 
     public func remove(id: UUID) { machines.removeAll { $0.id == id } }
@@ -97,6 +104,13 @@ public actor FileMachineStore: MachineStore {
         } else {
             machines.append(machine)
         }
+        try write(machines)
+    }
+
+    public func updateLastAddress(id: UUID, _ address: String) throws {
+        var machines = all()
+        guard let index = machines.firstIndex(where: { $0.id == id }) else { return }
+        machines[index].lastAddress = address
         try write(machines)
     }
 

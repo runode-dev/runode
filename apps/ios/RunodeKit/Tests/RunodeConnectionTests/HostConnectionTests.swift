@@ -43,6 +43,10 @@ import Testing
     }
 
     @Test func connectsSaysHelloAndForwardsMessages() async throws {
+        // 连接开着时用户改了名字：记地址不能把名字改回去。
+        var renamed = machine
+        renamed.name = "改过名"
+        await store.upsert(renamed)
         let transport = FakeTransport()
         supply.add(transport)
         let link = connection()
@@ -79,6 +83,7 @@ import Testing
         #expect(sawBell)
         // 记下实际连上的地址。
         #expect(await store.all().first?.lastAddress == "192.168.1.20")
+        #expect(await store.all().first?.name == "改过名")
         await link.stop()
     }
 
@@ -223,5 +228,33 @@ import Testing
         try await store.remove(id: machine.id)
         #expect(await FileMachineStore(url: url).all().isEmpty)
         try? FileManager.default.removeItem(at: url.deletingLastPathComponent())
+    }
+
+    @Test func updatingTheAddressKeepsTheNewName() async throws {
+        let url = FileManager.default.temporaryDirectory.appending(path: "runode-test-\(UUID().uuidString)/machines.json")
+        defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+        let store = FileMachineStore(url: url)
+        var machine = MachineRecord.sample()
+        try await store.upsert(machine)
+        machine.name = "改过名"
+        try await store.upsert(machine)
+        try await store.updateLastAddress(id: machine.id, "fd7a::1")
+        machine.lastAddress = "fd7a::1"
+        #expect(await FileMachineStore(url: url).all() == [machine])
+    }
+
+    @Test func updatingTheAddressOfADeletedMachineWritesNothing() async throws {
+        let url = FileManager.default.temporaryDirectory.appending(path: "runode-test-\(UUID().uuidString)/machines.json")
+        defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+        let store = FileMachineStore(url: url)
+        let machine = MachineRecord.sample()
+        try await store.upsert(machine)
+        try await store.remove(id: machine.id)
+        try await store.updateLastAddress(id: machine.id, "fd7a::1")
+        #expect(await FileMachineStore(url: url).all().isEmpty)
+
+        let memory = MemoryMachineStore()
+        await memory.updateLastAddress(id: machine.id, "fd7a::1")
+        #expect(await memory.all().isEmpty)
     }
 }

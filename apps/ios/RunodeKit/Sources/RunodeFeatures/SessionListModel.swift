@@ -547,7 +547,9 @@ public final class SessionListModel {
                 for reply in quickReplies.values {
                     reply.connectionLost()
                 }
-                if case .failed = state { isSpawning = false }
+                // 回话随这条连接一起丢了，等下去按钮会一直灰着。
+                pendingSpawn = nil
+                isSpawning = false
             }
         case .ready:
             connected = true

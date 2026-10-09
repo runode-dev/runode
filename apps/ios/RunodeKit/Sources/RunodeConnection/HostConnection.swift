@@ -251,7 +251,8 @@ public actor HostConnection: HostLink {
             }
             if let address = transport.remoteAddress, address != machine.lastAddress {
                 machine.lastAddress = address
-                try? await machines.upsert(machine)
+                // 只改地址：`machine` 是开连接时拷的，整条写回会盖掉之后改的名字、写回已删的记录。
+                try? await machines.updateLastAddress(id: machine.id, address)
             }
             return Session(transport: transport, decoder: decoder, hostName: outcome.hostName)
         } catch {
