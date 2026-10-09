@@ -118,7 +118,7 @@
         "suggestions": [
           { "name": "claude", "description": "Install a skill in ~/.claude/skills/runode" },
           { "name": "codex", "description": "Install a skill in ~/.agents/skills/runode" },
-          { "name": "statusline", "description": "Show Claude Code's model, context and cost under its pane" }
+          { "name": "usage", "description": "Show the model, context and cost of Claude Code, Codex, Gemini CLI and pi under their pane" }
         ]
       },
       "options": [
@@ -126,8 +126,8 @@
       ]
     },
     {
-      "name": "statusline",
-      "description": "What Claude Code runs for its status line",
+      "name": "usage-hook",
+      "description": "What the agents run to report their usage",
       "hidden": true
     },
     {

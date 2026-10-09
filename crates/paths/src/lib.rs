@@ -168,8 +168,8 @@ impl Dirs {
         self.data_file("commit-message.json")
     }
 
-    /// `runode setup statusline` 换下来的 Claude Code 原来的 statusLine 命令，`runode statusline`
-    /// 报完用量后接着跑它，状态栏照旧显示它的输出；原来没有时不存在。
+    /// `runode setup usage` 换下来的 Claude Code 原来的 statusLine 命令，报完用量后接着跑它，状态栏
+    /// 照旧显示它的输出；原来没有时不存在。
     pub fn claude_statusline_file(&self) -> Option<PathBuf> {
         self.data_file("claude-statusline")
     }

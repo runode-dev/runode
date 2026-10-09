@@ -5,7 +5,7 @@ use std::{net::IpAddr, path::PathBuf, time::Duration};
 use runode_protocol::Placement;
 use runode_shared_types::input::parse_keys;
 
-use crate::{SetupTarget, select::Selector};
+use crate::{SetupTarget, select::Selector, usage::Agent};
 
 /// 用法说明，`runode help` 打印它。改了命令或选项，`runode-completion` 里 runode 自己的命令规格
 /// 也要跟着改，按 Tab 才补得出来。
@@ -94,12 +94,14 @@ commands:
                               teach the agent to use runode: installs a skill
                               in ~/.claude/skills/runode or
                               ~/.agents/skills/runode; --print shows it instead
-  setup statusline            show Claude Code's model, context and cost under
-                              its runode pane: points statusLine in
-                              ~/.claude/settings.json at `runode statusline`,
-                              which still runs the command that was there
-  statusline                  what Claude Code runs for its status line: reads
-                              its JSON on stdin and tells the app
+  setup usage                 show the model, context, cache, output and cost
+                              of Claude Code, Codex, Gemini CLI and pi under
+                              their pane: has them run `runode usage-hook` from
+                              a runode terminal, as Claude Code's statusLine
+                              (~/.claude/settings.json; the command that was
+                              there still runs), hooks in ~/.codex/hooks.json
+                              (Codex asks you to trust them first) and
+                              ~/.gemini/settings.json, and a pi extension
   remote pair [--addr ADDR]...
                               pair a phone for remote access: shows a QR code
                               and its link, valid for 5 minutes, and waits for
@@ -166,10 +168,12 @@ pub(crate) enum Command {
         target: SetupTarget,
         print: bool,
     },
-    /// 把 Claude Code 的状态栏换成 `Statusline`。
-    SetupStatusline,
-    /// Claude Code 的状态栏命令，见 `statusline` 模块。
-    Statusline,
+    /// 给装着的 agent 接上用量报告，见 `usage` 模块。
+    SetupUsage,
+    /// agent 报用量时 `usage` 的脚本交过来，见 `usage` 模块。
+    UsageHook {
+        agent: Agent,
+    },
     /// 给手机配对远程访问。`addrs` 是除了本机地址以外另外放进配对 URI 的地址，排在前面。
     RemotePair {
         addrs: Vec<IpAddr>,
@@ -345,15 +349,16 @@ pub(crate) fn parse(args: &[String]) -> Result<Command, String> {
             let target = match words.first().map(String::as_str) {
                 Some("claude") => SetupTarget::Claude,
                 Some("codex") => SetupTarget::Codex,
-                Some("statusline") => return Ok(Command::SetupStatusline),
-                Some(other) => return Err(format!("setup knows claude, codex and statusline, not {other}")),
-                None => return Err("setup needs claude, codex or statusline".into()),
+                Some("usage") => return Ok(Command::SetupUsage),
+                Some(other) => return Err(format!("setup knows claude, codex and usage, not {other}")),
+                None => return Err("setup needs claude, codex or usage".into()),
             };
             Command::Setup { target, print: std::mem::take(&mut flags.print) }
         }
-        "statusline" => {
-            no_more(words, 0, name)?;
-            Command::Statusline
+        "usage-hook" => {
+            no_more(words, 1, name)?;
+            let word = words.first().ok_or("usage-hook needs an agent")?;
+            Command::UsageHook { agent: Agent::parse(word).ok_or_else(|| format!("usage-hook does not know {word}"))? }
         }
         "remote" => {
             let (what, words) = words.split_first().ok_or("remote needs pair, devices or revoke")?;
@@ -575,9 +580,10 @@ mod tests {
     fn setup_targets() {
         assert_eq!(parse("setup claude"), Ok(Command::Setup { target: SetupTarget::Claude, print: false }));
         assert_eq!(parse("setup codex --print"), Ok(Command::Setup { target: SetupTarget::Codex, print: true }));
-        assert_eq!(parse("setup statusline"), Ok(Command::SetupStatusline));
-        assert_eq!(parse("statusline"), Ok(Command::Statusline));
-        assert!(parse("setup").unwrap_err().contains("codex or statusline"));
+        assert_eq!(parse("setup usage"), Ok(Command::SetupUsage));
+        assert_eq!(parse("usage-hook codex"), Ok(Command::UsageHook { agent: Agent::Codex }));
+        assert!(parse("usage-hook vim").unwrap_err().contains("does not know vim"));
+        assert!(parse("setup").unwrap_err().contains("codex or usage"));
         assert!(parse("setup vim").unwrap_err().contains("not vim"));
     }
 

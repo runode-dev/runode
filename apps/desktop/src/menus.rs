@@ -47,8 +47,8 @@ actions!(
         ToggleFullScreen,
         /// 给 Claude Code 和 Codex 装上 runode 命令行的使用说明（`runode setup`），先确认一句。
         InstallAgentIntegration,
-        /// 让 Claude Code 把模型和用量报给 runode（`runode setup statusline`），先确认一句。
-        InstallClaudeStatusline,
+        /// 让装着的 agent 把模型和用量报给 runode（`runode setup usage`），先确认一句。
+        InstallAgentUsage,
     ]
 );
 
@@ -75,7 +75,7 @@ pub fn install(cx: &mut App) {
     cx.on_action(|_: &ToggleFullScreen, cx| with_active_window(cx, |w| w.toggle_fullscreen()));
     // 从菜单派发时窗口正在处理这个动作，这时在它上面弹不了框，等这一轮更新结束再弹。
     cx.on_action(|_: &InstallAgentIntegration, cx| cx.defer(install_agent_integration));
-    cx.on_action(|_: &InstallClaudeStatusline, cx| cx.defer(install_claude_statusline));
+    cx.on_action(|_: &InstallAgentUsage, cx| cx.defer(install_agent_usage));
 
     // 装快捷键时会顺带设置菜单。
     crate::keybinds::install(cx);
@@ -100,7 +100,7 @@ pub fn set_menus(cx: &mut App) {
                 MenuItem::action(tr("menu.open_config"), OpenConfiguration),
                 MenuItem::action(tr("menu.reload_config"), ReloadConfiguration),
                 MenuItem::action(tr("setup.menu"), InstallAgentIntegration),
-                MenuItem::action(tr("statusline.menu"), InstallClaudeStatusline),
+                MenuItem::action(tr("usage.setup.menu"), InstallAgentUsage),
                 MenuItem::separator(),
                 MenuItem::os_submenu(tr("menu.services"), SystemMenuType::Services),
                 MenuItem::separator(),
@@ -242,16 +242,14 @@ fn install_agent_integration(cx: &mut App) {
     });
 }
 
-fn install_claude_statusline(cx: &mut App) {
+fn install_agent_usage(cx: &mut App) {
     let dirs = runode_paths::Dirs::from_env();
     let Some(home) = dirs.home.clone() else {
-        tracing::warn!("cannot install the status line: no home directory");
+        tracing::warn!("cannot install usage reporting: no home directory");
         return;
     };
-    let paths = vec![runode_cli::statusline_settings_path(&home)];
-    install_with_prompt(cx, "statusline", home, paths, move |_| {
-        Ok(vec![runode_cli::setup_statusline(&dirs, &std::env::current_exe()?)?])
-    });
+    let paths = runode_cli::usage_paths(&home);
+    install_with_prompt(cx, "usage.setup", home, paths, move |_| runode_cli::setup_usage(&dirs));
 }
 
 /// 问一句要不要装，列出会写的文件；装好后说装到了哪里，失败时说原因。`section` 是文案在语言文件里

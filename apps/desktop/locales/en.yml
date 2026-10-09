@@ -466,6 +466,13 @@ driver:
 usage:
   cache: "cache read %{read}, write %{write}"
   output: "output %{tokens}"
+  setup:
+    menu: Show Agent Usage in Runode…
+    confirm_title: Show the agents' model and usage under their pane?
+    confirm_detail: "In a Runode terminal the agents will run `runode usage-hook`: Claude Code as its status line (the command you had there still runs and shows), Codex and Gemini CLI as a hook, pi from an extension. They then report the model, context, cache, output and cost to Runode. These files will be changed:\n%{paths}"
+    done_title: Usage reporting installed
+    done_detail: "Changed:\n%{paths}\n\nAgent sessions started from now on report their usage. Codex asks you to trust the new hooks first."
+    failed_title: Could not install usage reporting
 layout:
   menu: Arrange Splits…
   title: Arrange Splits
@@ -486,13 +493,6 @@ setup:
   done_detail: "Written:\n%{paths}\n\nNew Claude Code and Codex sessions will pick them up."
   failed_title: Could not install the agent integration
   ok: OK
-statusline:
-  menu: Show Claude Code Usage in Runode…
-  confirm_title: Show Claude Code's model and usage under its pane?
-  confirm_detail: "Runode points Claude Code's status line at `runode statusline`, which reports the model, context, cache, output and cost to Runode and then runs the status line command you had before, so its output still shows. This file will be changed:\n%{paths}"
-  done_title: Status line installed
-  done_detail: "Changed:\n%{paths}\n\nClaude Code sessions started from now on report their usage."
-  failed_title: Could not install the status line
 settings:
   title: Settings
   language_name: English
