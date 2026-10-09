@@ -174,11 +174,14 @@ impl TerminalView {
     }
 }
 
-/// 屏幕内容写到临时目录下一个新文件里，返回它的路径。
+/// 屏幕内容写到临时目录下一个新文件里，返回它的路径。顺手删掉以前写的、放了超过
+/// `SCREEN_FILE_TTL` 的，免得回滚历史一直堆在临时目录里。
 fn write_screen_file(text: &str) -> std::io::Result<std::path::PathBuf> {
     let dir = std::env::temp_dir().join("runode");
     std::fs::create_dir_all(&dir)?;
-    let stamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis();
+    let now = std::time::SystemTime::now();
+    remove_old_screen_files(&dir, now);
+    let stamp = now.duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis();
     let path = dir.join(format!("screen-{}-{stamp}.txt", std::process::id()));
     // 屏幕上可能有密钥之类的内容，只让自己读写。
     let mut options = std::fs::OpenOptions::new();
@@ -187,4 +190,55 @@ fn write_screen_file(text: &str) -> std::io::Result<std::path::PathBuf> {
     std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
     std::io::Write::write_all(&mut options.open(&path)?, text.as_bytes())?;
     Ok(path)
+}
+
+/// 屏幕文件留多久：路径可能刚粘给了 agent，要给它留够读的时间。
+const SCREEN_FILE_TTL: std::time::Duration = std::time::Duration::from_secs(24 * 60 * 60);
+
+/// 删掉 `dir` 里修改时间早于 `now` 减 `SCREEN_FILE_TTL` 的 `screen-*.txt`；删不掉的跳过。
+fn remove_old_screen_files(dir: &std::path::Path, now: std::time::SystemTime) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        if !(name.starts_with("screen-") && name.ends_with(".txt")) {
+            continue;
+        }
+        let old = entry
+            .metadata()
+            .and_then(|meta| meta.modified())
+            .is_ok_and(|modified| now.duration_since(modified).is_ok_and(|age| age > SCREEN_FILE_TTL));
+        if old {
+            let _ = std::fs::remove_file(entry.path());
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::{Duration, SystemTime};
+
+    use super::*;
+
+    #[test]
+    fn only_screen_files_older_than_a_day_are_removed() {
+        let dir = std::env::temp_dir().join(format!("runode-screen-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let now = SystemTime::now();
+        let touch = |name: &str, age: Duration| {
+            let file = std::fs::File::create(dir.join(name)).unwrap();
+            file.set_modified(now - age).unwrap();
+        };
+        touch("screen-1-1.txt", SCREEN_FILE_TTL + Duration::from_secs(60));
+        touch("screen-2-2.txt", Duration::from_secs(60));
+        touch("notes.txt", SCREEN_FILE_TTL * 2);
+        remove_old_screen_files(&dir, now);
+        let mut left: Vec<_> =
+            std::fs::read_dir(&dir).unwrap().map(|entry| entry.unwrap().file_name().into_string().unwrap()).collect();
+        left.sort();
+        std::fs::remove_dir_all(&dir).unwrap();
+        assert_eq!(left, ["notes.txt", "screen-2-2.txt"]);
+    }
 }

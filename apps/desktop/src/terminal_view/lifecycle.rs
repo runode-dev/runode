@@ -562,6 +562,9 @@ impl TerminalView {
             tracing::warn!("failed to reconnect to the host: {err:#}");
             return;
         }
+        // 重连可能把宿主从单独的进程换到了 app 里，远程访问的监听要跟着在 app 里开起来。
+        let config = cx.global::<AppConfig>().0.clone();
+        host_client::configure(&config);
         let alive: Option<HashSet<SessionId>> = match host_client::list_sessions() {
             Ok(sessions) => {
                 Some(sessions.into_iter().filter(|session| !session.exited).map(|session| session.id).collect())

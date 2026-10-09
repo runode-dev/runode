@@ -456,16 +456,37 @@ impl WindowView {
         this
     }
 
-    /// 在家目录开一个终端，放进新的 workspace。
+    /// 在家目录开一个终端，放进新的 workspace。终端开不起来（比如连不上宿主）时放一个没有标签的
+    /// workspace，和关掉最后一个标签时一样等用户新开，不让整个 app 崩掉。
     fn push_default_workspace(&mut self, shell: Option<Prespawned>, window: &mut Window, cx: &mut Context<Self>) {
-        let view = match shell {
+        let started = match shell {
             Some(shell) => TerminalView::adopt(shell, window, cx),
             None => TerminalView::spawn(None, window, cx),
+        };
+        let ix = self.workspaces.len();
+        match started {
+            Ok(view) => {
+                self.record_spawn(&view, None);
+                let dir = view.read(cx).cwd().or_else(home_dir).unwrap_or_else(|| PathBuf::from("/"));
+                self.insert_workspace(ix, dir, None, view, window, cx);
+            }
+            Err(err) => {
+                tracing::error!("failed to start terminal session: {err:#}");
+                let dir = home_dir().unwrap_or_else(|| PathBuf::from("/"));
+                let id = self.next_id();
+                self.workspaces.push(Workspace {
+                    id,
+                    name: model::workspace_name(&dir).into(),
+                    repo: Default::default(),
+                    dir,
+                    tabs: Vec::new(),
+                    active: 0,
+                    tab_scroll: ScrollHandle::new(),
+                    project: Default::default(),
+                });
+                self.activate_workspace(ix, window, cx);
+            }
         }
-        .unwrap_or_else(|err| panic!("failed to start terminal session: {err:#}"));
-        self.record_spawn(&view, None);
-        let dir = view.read(cx).cwd().or_else(home_dir).unwrap_or_else(|| PathBuf::from("/"));
-        self.insert_workspace(self.workspaces.len(), dir, None, view, window, cx);
     }
 }
 
