@@ -9,8 +9,8 @@
 use std::{net::IpAddr, rc::Rc};
 
 use gpui::{
-    AnyElement, App, ClickEvent, ClipboardItem, Context, Div, Entity, FocusHandle, Focusable, FontWeight, Hsla,
-    KeyDownEvent, MouseButton, SharedString, Stateful, Subscription, Window, div, prelude::*, px, svg,
+    AccessibleAction, AnyElement, App, ClipboardItem, Context, Div, Entity, FocusHandle, Focusable, FontWeight, Hsla,
+    KeyDownEvent, MouseButton, Role, SharedString, Stateful, Subscription, Window, div, prelude::*, px, svg,
 };
 use runode_remote_access::{host_name, local_interfaces};
 use runode_shared_types::color::Rgb;
@@ -26,6 +26,7 @@ use crate::{
     config::AppConfig,
     remote_access::pairing::{BACKGROUND_KEY, Pairing, Qr, qr_code},
     ui::{
+        a11y::Press,
         hsla,
         text_field::{TextField, TextFieldEvent},
     },
@@ -86,7 +87,11 @@ impl WindowView {
         if self.mobile.is_none() {
             let system_name = host_name();
             let saved = cx.global::<AppConfig>().0.remote_access_name.clone().unwrap_or_default();
-            let name = cx.new(|cx| TextField::new(saved, cx).with_placeholder(system_name.clone()));
+            let name = cx.new(|cx| {
+                TextField::new(saved, cx)
+                    .with_placeholder(system_name.clone())
+                    .with_label(rust_i18n::t!("mobile.name_label").into_owned())
+            });
             let events =
                 cx.subscribe_in(&name, window, |this, field, event: &TextFieldEvent, window, cx| match event {
                     TextFieldEvent::Next => this.focus_mobile(window, cx),
@@ -222,8 +227,12 @@ impl WindowView {
         let active_bg = hsla(bg.mix(fg, 0.10));
         let hover_bg = hsla(bg.mix(fg, 0.06));
         let fg = hsla(fg);
+        let label = rust_i18n::t!("mobile.entry").into_owned();
+        let view = cx.entity().downgrade();
         div()
             .id("mobile-entry")
+            .role(Role::Button)
+            .aria_label(label.clone())
             .flex_none()
             .h(px(30.))
             .mx(px(6.))
@@ -248,7 +257,7 @@ impl WindowView {
                     .justify_center()
                     .child(svg().path(PHONE_ICON).size(px(14.)).text_color(fg.opacity(if active { 0.9 } else { 0.6 }))),
             )
-            .child(div().min_w_0().truncate().child(rust_i18n::t!("mobile.entry").into_owned()))
+            .child(div().min_w_0().truncate().child(label))
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(|this, _, window, cx| {
@@ -256,6 +265,10 @@ impl WindowView {
                     this.show_mobile(&super::ShowMobile, window, cx);
                 }),
             )
+            // 按下鼠标就开，没有 on_click，辅助工具的按下另外登记。
+            .on_a11y_action(AccessibleAction::Click, move |_, window, cx| {
+                view.update(cx, |this, cx| this.show_mobile(&super::ShowMobile, window, cx)).ok();
+            })
     }
 
     /// 引导页开着时窗口的内容：侧栏（收着时没有），右边整块是引导页，顶上留一条拖动窗口、放红绿灯。
@@ -311,6 +324,8 @@ impl WindowView {
         };
         div()
             .id("mobile-page")
+            .role(Role::Group)
+            .aria_label(rust_i18n::t!("mobile.entry").into_owned())
             .track_focus(&page.focus)
             .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
                 if event.keystroke.key == "escape" && !event.keystroke.modifiers.modified() {
@@ -331,14 +346,18 @@ impl WindowView {
 
     fn render_intro(&self, colors: Colors, cx: &mut Context<Self>) -> Div {
         let first = if IOS_APP_URL.is_some() { Step::Install } else { Step::Pair };
+        let eyebrow_text = rust_i18n::t!("mobile.eyebrow").into_owned();
         let eyebrow = div()
+            .id("mobile-eyebrow")
+            .role(Role::Label)
+            .aria_label(eyebrow_text.clone())
             .flex()
             .items_center()
             .gap(px(8.))
             .text_size(px(12.))
             .text_color(colors.fg.opacity(0.5))
             .child(svg().path(PHONE_ICON).size(px(14.)).text_color(colors.fg.opacity(0.5)))
-            .child(rust_i18n::t!("mobile.eyebrow").into_owned());
+            .child(eyebrow_text);
         let paired = devices(cx).to_vec();
         if !paired.is_empty() {
             let rows: Vec<_> =
@@ -346,7 +365,7 @@ impl WindowView {
             let another = pill("mobile-pair-another", rust_i18n::t!("mobile.pair_another").into_owned(), false, colors)
                 .gap(px(8.))
                 .child(svg().path(PHONE_ICON).size(px(14.)).text_color(colors.fg.opacity(0.8)))
-                .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| this.go_mobile(first, cx)));
+                .on_press(cx, move |this, _, cx| this.go_mobile(first, cx));
             return div()
                 .max_w(px(640.))
                 .flex()
@@ -355,7 +374,17 @@ impl WindowView {
                 .child(eyebrow)
                 .child(headline(rust_i18n::t!("mobile.paired_intro_title").into_owned(), 40.))
                 .child(lead(rust_i18n::t!("mobile.paired_intro_body").into_owned(), colors))
-                .child(div().pt(px(12.)).flex().flex_col().gap(px(8.)).children(rows))
+                .child(
+                    div()
+                        .id("mobile-devices")
+                        .role(Role::List)
+                        .aria_label(rust_i18n::t!("mobile.devices").into_owned())
+                        .pt(px(12.))
+                        .flex()
+                        .flex_col()
+                        .gap(px(8.))
+                        .children(rows),
+                )
                 .child(div().pt(px(24.)).flex().child(another));
         }
         div()
@@ -369,7 +398,7 @@ impl WindowView {
             .child(
                 div().pt(px(12.)).child(
                     pill("mobile-start", format!("{}  →", rust_i18n::t!("mobile.start")), true, colors)
-                        .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| this.go_mobile(first, cx))),
+                        .on_press(cx, move |this, _, cx| this.go_mobile(first, cx)),
                 ),
             )
     }
@@ -392,26 +421,27 @@ impl WindowView {
                     .gap(px(16.))
                     .child(
                         pill("mobile-open-app", rust_i18n::t!("mobile.open_link").into_owned(), false, colors)
-                            .on_click(cx.listener(move |_, _: &ClickEvent, _, cx| cx.open_url(url))),
+                            .on_press(cx, move |_, _, cx| cx.open_url(url)),
                     )
-                    .child(link("mobile-copy-app", rust_i18n::t!("mobile.copy_link").into_owned(), colors).on_click(
-                        cx.listener(move |_, _: &ClickEvent, _, cx| {
-                            cx.write_to_clipboard(ClipboardItem::new_string(url.to_owned()))
-                        }),
-                    )),
+                    .child(
+                        link("mobile-copy-app", rust_i18n::t!("mobile.copy_link").into_owned(), colors)
+                            .on_press(cx, move |_, _, cx| {
+                                cx.write_to_clipboard(ClipboardItem::new_string(url.to_owned()))
+                            }),
+                    ),
             );
-        let right = div()
-            .flex_none()
-            .w(px(QR_COLUMN_WIDTH))
-            .flex()
-            .justify_center()
-            .children(page.install_qr.clone().map(|qr| qr_code(qr, MODULE_SIZE)));
+        let right = div().flex_none().w(px(QR_COLUMN_WIDTH)).flex().justify_center().children(
+            page.install_qr.clone().map(|qr| {
+                qr_image("mobile-install-qr", rust_i18n::t!("mobile.install_qr").into_owned(), url.to_owned())
+                    .child(qr_code(qr, MODULE_SIZE))
+            }),
+        );
         let footer = footer(
             link("mobile-back", format!("←  {}", rust_i18n::t!("mobile.back")), colors)
-                .on_click(cx.listener(|this, _: &ClickEvent, _, cx| this.go_mobile(Step::Intro, cx))),
+                .on_press(cx, |this, _, cx| this.go_mobile(Step::Intro, cx)),
             Some(
                 pill("mobile-next", format!("{}  →", rust_i18n::t!("mobile.next")), true, colors)
-                    .on_click(cx.listener(|this, _: &ClickEvent, _, cx| this.go_mobile(Step::Pair, cx))),
+                    .on_press(cx, |this, _, cx| this.go_mobile(Step::Pair, cx)),
             ),
         );
         columns(left, right).child(footer)
@@ -422,7 +452,7 @@ impl WindowView {
         let (remote_on, background_on) = (config.remote_access, config.terminal_host);
         let back_to = if IOS_APP_URL.is_some() { Step::Install } else { Step::Intro };
         let back = link("mobile-back", format!("←  {}", rust_i18n::t!("mobile.back")), colors)
-            .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| this.go_mobile(back_to, cx)));
+            .on_press(cx, move |this, _, cx| this.go_mobile(back_to, cx));
         let mut left = div().flex_1().min_w_0().flex().flex_col().gap(px(18.));
         if IOS_APP_URL.is_some() {
             left = left.child(step_line(2, colors));
@@ -435,23 +465,24 @@ impl WindowView {
                 .gap(px(16.))
                 .child(
                     pill("mobile-done", rust_i18n::t!("mobile.done").into_owned(), true, colors)
-                        .on_click(cx.listener(|this, _: &ClickEvent, window, cx| this.close_mobile(window, cx))),
+                        .on_press(cx, |this, window, cx| this.close_mobile(window, cx)),
                 )
                 .child(
                     link("mobile-again", rust_i18n::t!("mobile.again").into_owned(), colors)
-                        .on_click(cx.listener(|this, _: &ClickEvent, _, cx| this.start_mobile_pairing(cx))),
+                        .on_press(cx, |this, _, cx| this.start_mobile_pairing(cx)),
                 );
             // 宿主跑在 app 里时退出 app 远程访问跟着停，提醒一句。
             let background = (!background_on).then(|| {
-                notice(rust_i18n::t!("settings.pairing.background").into_owned(), colors).child(
+                notice("mobile-background", rust_i18n::t!("settings.pairing.background").into_owned(), colors).child(
                     div().pt(px(10.)).child(
-                        pill("mobile-keep", rust_i18n::t!("mobile.keep").into_owned(), false, colors).on_click(
+                        pill("mobile-keep", rust_i18n::t!("mobile.keep").into_owned(), false, colors).on_press(
+                            cx,
                             // 配置重载后窗口跟着重画，这一块就收起来了。
-                            cx.listener(|_, _: &ClickEvent, _, cx| {
+                            |_, _, cx| {
                                 if let Err(err) = crate::config::set(BACKGROUND_KEY, "true", cx) {
                                     tracing::warn!("could not turn on {BACKGROUND_KEY}: {err:#}");
                                 }
-                            }),
+                            },
                         ),
                     ),
                 )
@@ -468,7 +499,7 @@ impl WindowView {
             .child(headline(rust_i18n::t!("mobile.pair_title").into_owned(), 32.))
             .child(lead(rust_i18n::t!("mobile.pair_body").into_owned(), colors));
         if let Pairing::Failed(err) = &page.pairing {
-            left = left.child(notice(err.clone(), colors));
+            left = left.child(notice("mobile-error", err.clone(), colors));
         }
         if remote_on {
             left = left.child(self.render_machine_name(page, colors, cx)).child(self.render_network(page, colors, cx));
@@ -482,33 +513,36 @@ impl WindowView {
                         .flex()
                         .items_center()
                         .gap(px(10.))
-                        .child(
-                            div()
-                                .text_color(colors.fg.opacity(0.5))
-                                .child(rust_i18n::t!("mobile.cant_scan").into_owned()),
-                        )
-                        .child(
-                            link("mobile-copy-code", rust_i18n::t!("mobile.copy_code").into_owned(), colors).on_click(
-                                cx.listener(move |_, _: &ClickEvent, _, cx| {
+                        .child(text_label(
+                            "mobile-cant-scan",
+                            rust_i18n::t!("mobile.cant_scan").into_owned(),
+                            colors.fg.opacity(0.5),
+                        ))
+                        .child({
+                            let uri = uri.clone();
+                            link("mobile-copy-code", rust_i18n::t!("mobile.copy_code").into_owned(), colors)
+                                .on_press(cx, move |_, _, cx| {
                                     cx.write_to_clipboard(ClipboardItem::new_string(uri.to_string()))
-                                }),
-                            ),
-                        ),
+                                })
+                        }),
                 );
-                right.child(qr_code(waiting.qr(), MODULE_SIZE)).child(
+                // 二维码里就是配对链接，写进说明里，读屏和自动化工具不用扫码也拿得到。
+                let qr = qr_image("mobile-pair-qr", rust_i18n::t!("mobile.pair_qr").into_owned(), uri.to_string())
+                    .child(qr_code(waiting.qr(), MODULE_SIZE));
+                right.child(qr).child(
                     div()
                         .flex()
                         .items_center()
                         .gap(px(10.))
                         .text_size(px(12.))
-                        .child(
-                            div()
-                                .text_color(colors.fg.opacity(0.5))
-                                .child(rust_i18n::t!("mobile.expires", time = waiting.remaining()).into_owned()),
-                        )
+                        .child(text_label(
+                            "mobile-expires",
+                            rust_i18n::t!("mobile.expires", time = waiting.remaining()).into_owned(),
+                            colors.fg.opacity(0.5),
+                        ))
                         .child(
                             link("mobile-regenerate", rust_i18n::t!("mobile.regenerate").into_owned(), colors)
-                                .on_click(cx.listener(|this, _: &ClickEvent, _, cx| this.start_mobile_pairing(cx))),
+                                .on_press(cx, |this, _, cx| this.start_mobile_pairing(cx)),
                         ),
                 )
             }
@@ -522,14 +556,14 @@ impl WindowView {
                     left.child(
                         div().child(
                             pill("mobile-generate", rust_i18n::t!(label).into_owned(), true, colors)
-                                .on_click(cx.listener(|this, _: &ClickEvent, _, cx| this.start_mobile_pairing(cx))),
+                                .on_press(cx, |this, _, cx| this.start_mobile_pairing(cx)),
                         ),
                     )
                 } else {
-                    left.child(notice(rust_i18n::t!("mobile.off").into_owned(), colors)).child(
+                    left.child(notice("mobile-off", rust_i18n::t!("mobile.off").into_owned(), colors)).child(
                         div().child(
                             pill("mobile-turn-on", rust_i18n::t!("mobile.turn_on").into_owned(), true, colors)
-                                .on_click(cx.listener(|this, _: &ClickEvent, _, cx| this.turn_on_remote_access(cx))),
+                                .on_press(cx, |this, _, cx| this.turn_on_remote_access(cx)),
                         ),
                     )
                 };
@@ -541,10 +575,11 @@ impl WindowView {
     }
 
     /// 电脑名：输入框，空着时浮着系统的电脑名，下面说手机上会看到什么。
-    fn render_machine_name(&self, page: &MobilePage, colors: Colors, cx: &App) -> Div {
+    fn render_machine_name(&self, page: &MobilePage, colors: Colors, cx: &App) -> Stateful<Div> {
         let saved = cx.global::<AppConfig>().0.remote_access_name.clone();
         let shown = saved.map_or_else(|| page.system_name.clone(), SharedString::from);
         labeled(
+            "mobile-name",
             rust_i18n::t!("mobile.name_label").into_owned(),
             input_box(colors).child(page.name.clone()),
             rust_i18n::t!("mobile.name_hint", name = shown).into_owned(),
@@ -553,7 +588,7 @@ impl WindowView {
     }
 
     /// 网络：展开、收起的下拉框，旁边是重读网卡的按钮；展开时选项列在下面。
-    fn render_network(&self, page: &MobilePage, colors: Colors, cx: &mut Context<Self>) -> Div {
+    fn render_network(&self, page: &MobilePage, colors: Colors, cx: &mut Context<Self>) -> Stateful<Div> {
         let label = |network: Option<IpAddr>| -> SharedString {
             match network.and_then(|addr| page.interfaces.iter().find(|(_, seen)| *seen == addr)) {
                 Some((name, addr)) => network_label(name, *addr).into(),
@@ -562,6 +597,10 @@ impl WindowView {
         };
         let select = input_box(colors)
             .id("mobile-network")
+            .role(Role::ComboBox)
+            .aria_label(rust_i18n::t!("mobile.network_label").into_owned())
+            .aria_value(label(page.network))
+            .aria_expanded(page.network_open)
             .flex_1()
             .min_w_0()
             .flex()
@@ -571,14 +610,16 @@ impl WindowView {
             .hover(|select| select.bg(colors.hover))
             .child(div().min_w_0().truncate().child(label(page.network)))
             .child(svg().flex_none().path(CHEVRON_DOWN_ICON).size(px(14.)).text_color(colors.fg.opacity(0.5)))
-            .on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
+            .on_press(cx, |this, _, cx| {
                 if let Some(page) = &mut this.mobile {
                     page.network_open = !page.network_open;
                 }
                 cx.notify();
-            }));
+            });
         let refresh = div()
             .id("mobile-network-refresh")
+            .role(Role::Button)
+            .aria_label(rust_i18n::t!("mobile.refresh_networks").into_owned())
             .flex_none()
             .size(px(36.))
             .rounded(px(8.))
@@ -590,14 +631,17 @@ impl WindowView {
             .cursor_pointer()
             .hover(|button| button.bg(colors.hover))
             .child(svg().path(REFRESH_ICON).size(px(14.)).text_color(colors.fg.opacity(0.7)))
-            .on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
+            .on_press(cx, |this, _, cx| {
                 this.refresh_interfaces();
                 this.restart_mobile_pairing(cx);
                 cx.notify();
-            }));
+            });
         let options = page.network_open.then(|| {
             let choices = std::iter::once(None).chain(page.interfaces.iter().map(|(_, addr)| Some(*addr)));
             div()
+                .id("mobile-network-options")
+                .role(Role::ListBox)
+                .aria_label(rust_i18n::t!("mobile.network_label").into_owned())
                 .flex()
                 .flex_col()
                 .p(px(4.))
@@ -607,8 +651,12 @@ impl WindowView {
                 .border_color(colors.fg.opacity(0.12))
                 .children(choices.enumerate().map(|(ix, network)| {
                     let chosen = network == page.network;
+                    let text = label(network);
                     div()
                         .id(("mobile-network-option", ix))
+                        .role(Role::ListBoxOption)
+                        .aria_label(text.clone())
+                        .aria_selected(chosen)
                         .px(px(10.))
                         .py(px(7.))
                         .rounded(px(6.))
@@ -616,11 +664,12 @@ impl WindowView {
                         .cursor_pointer()
                         .when(chosen, |option| option.bg(colors.hover))
                         .hover(|option| option.bg(colors.hover))
-                        .child(label(network))
-                        .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| this.pick_network(network, cx)))
+                        .child(text)
+                        .on_press(cx, move |this, _, cx| this.pick_network(network, cx))
                 }))
         });
         labeled(
+            "mobile-network-field",
             rust_i18n::t!("mobile.network_label").into_owned(),
             div()
                 .flex()
@@ -640,6 +689,8 @@ fn device_row(ix: usize, device: &Paired, colors: Colors, cx: &mut Context<Windo
     let (year, month, day) = local_date(device.paired_at);
     let date = rust_i18n::t!("mobile.date", y = year, m = month, d = day);
     let paired_on = rust_i18n::t!("mobile.paired_on", date = date).into_owned();
+    let summary =
+        if device.live { format!("{} · {paired_on}", rust_i18n::t!("machine.live")) } else { paired_on.clone() };
     let status = div().flex().items_center().gap(px(6.)).text_size(px(12.)).text_color(colors.fg.opacity(0.5));
     let status = if device.live {
         status
@@ -652,6 +703,9 @@ fn device_row(ix: usize, device: &Paired, colors: Colors, cx: &mut Context<Windo
     };
     div()
         .id(("mobile-device", ix))
+        .role(Role::ListItem)
+        .aria_label(device.name.clone())
+        .aria_description(summary)
         .flex()
         .items_center()
         .gap(px(14.))
@@ -684,6 +738,8 @@ fn device_row(ix: usize, device: &Paired, colors: Colors, cx: &mut Context<Windo
         .child(
             div()
                 .id(("mobile-device-revoke", ix))
+                .role(Role::Button)
+                .aria_label(rust_i18n::t!("machine.revoke").into_owned())
                 .flex_none()
                 .size(px(30.))
                 .rounded(px(6.))
@@ -693,9 +749,7 @@ fn device_row(ix: usize, device: &Paired, colors: Colors, cx: &mut Context<Windo
                 .cursor_pointer()
                 .hover(|button| button.bg(colors.hover))
                 .child(svg().path(TRASH_ICON).size(px(15.)).text_color(colors.fg.opacity(0.6)))
-                .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
-                    this.revoke_device(id, window, cx);
-                })),
+                .on_press(cx, move |this, window, cx| this.revoke_device(id, window, cx)),
         )
 }
 
@@ -747,17 +801,41 @@ fn footer(back: Stateful<Div>, next: Option<Stateful<Div>>) -> Div {
     div().flex().items_center().justify_between().child(back).children(next)
 }
 
-fn headline(text: String, size: f32) -> Div {
-    div().text_size(px(size)).line_height(px(size * 1.2)).font_weight(FontWeight::BOLD).child(text)
+/// 一页的大标题；每页只有一个，id 写死。
+fn headline(text: String, size: f32) -> Stateful<Div> {
+    div()
+        .id("mobile-headline")
+        .role(Role::Heading)
+        .aria_level(1)
+        .aria_label(text.clone())
+        .text_size(px(size))
+        .line_height(px(size * 1.2))
+        .font_weight(FontWeight::BOLD)
+        .child(text)
 }
 
-fn lead(text: String, colors: Colors) -> Div {
-    div().text_size(px(15.)).line_height(px(24.)).text_color(colors.fg.opacity(0.6)).child(text)
+/// 大标题下面的一段说明；每页只有一段，id 写死。
+fn lead(text: String, colors: Colors) -> Stateful<Div> {
+    text_label("mobile-lead", text, colors.fg.opacity(0.6)).text_size(px(15.)).line_height(px(24.))
+}
+
+/// 一句报给辅助工具的文字：GPUI 不报文字本身，名字要另外写。
+fn text_label(id: &'static str, text: String, color: Hsla) -> Stateful<Div> {
+    div().id(id).role(Role::Label).aria_label(text.clone()).text_color(color).child(text)
+}
+
+/// 二维码的外框，作为一张图报给辅助工具，`content` 是码里的链接。
+fn qr_image(id: &'static str, label: String, content: String) -> Stateful<Div> {
+    div().id(id).flex_none().role(Role::Image).aria_label(label).aria_description(content)
 }
 
 /// 「第 n 步（共 2 步）」，前面一个圈着数字的小圆。只有装 App 和配对两步都在时才画。
-fn step_line(n: u32, colors: Colors) -> Div {
+fn step_line(n: u32, colors: Colors) -> Stateful<Div> {
+    let text = rust_i18n::t!("mobile.step", n = n, total = 2).into_owned();
     div()
+        .id("mobile-step")
+        .role(Role::Label)
+        .aria_label(text.clone())
         .flex()
         .items_center()
         .gap(px(10.))
@@ -775,18 +853,20 @@ fn step_line(n: u32, colors: Colors) -> Div {
                 .text_color(colors.fg)
                 .child(n.to_string()),
         )
-        .child(rust_i18n::t!("mobile.step", n = n, total = 2).into_owned())
+        .child(text)
 }
 
-/// 一项设置：小标题，内容，下面一行说明。
-fn labeled(label: String, content: impl IntoElement, hint: String, colors: Colors) -> Div {
+/// 一项设置：小标题，内容，下面一行说明。小标题不报给辅助工具，内容的控件自己以它为名；`id` 让
+/// 两项的说明分得开。
+fn labeled(id: &'static str, label: String, content: impl IntoElement, hint: String, colors: Colors) -> Stateful<Div> {
     div()
+        .id(id)
         .flex()
         .flex_col()
         .gap(px(6.))
         .child(div().text_size(px(12.)).font_weight(FontWeight::SEMIBOLD).child(label))
         .child(content)
-        .child(div().text_size(px(12.)).line_height(px(18.)).text_color(colors.fg.opacity(0.5)).child(hint))
+        .child(text_label("hint", hint, colors.fg.opacity(0.5)).text_size(px(12.)).line_height(px(18.)))
 }
 
 /// 输入框和下拉框的外框。
@@ -804,8 +884,11 @@ fn input_box(colors: Colors) -> Div {
 }
 
 /// 一块浅底的提示文字。
-fn notice(text: String, colors: Colors) -> Div {
+fn notice(id: &'static str, text: String, colors: Colors) -> Stateful<Div> {
     div()
+        .id(id)
+        .role(Role::Label)
+        .aria_label(text.clone())
         .p(px(14.))
         .rounded(px(10.))
         .bg(colors.panel)
@@ -818,8 +901,10 @@ fn notice(text: String, colors: Colors) -> Div {
 }
 
 /// 还没有二维码时右边那块占位，和二维码差不多大。
-fn placeholder(text: String, colors: Colors) -> Div {
+fn placeholder(text: String, colors: Colors) -> Stateful<Div> {
     div()
+        .id("mobile-qr-placeholder")
+        .when(!text.is_empty(), |placeholder| placeholder.role(Role::Label).aria_label(text.clone()))
         .size(px(240.))
         .rounded(px(12.))
         .bg(colors.panel)
@@ -839,8 +924,11 @@ fn placeholder(text: String, colors: Colors) -> Div {
 
 /// 胶囊按钮；`primary` 的实心、字用背景色，其余的描边。
 fn pill(id: &'static str, label: impl Into<SharedString>, primary: bool, colors: Colors) -> Stateful<Div> {
+    let label = label.into();
     div()
         .id(id)
+        .role(Role::Button)
+        .aria_label(spoken(&label))
         .h(px(36.))
         .px(px(20.))
         .rounded_full()
@@ -857,19 +945,27 @@ fn pill(id: &'static str, label: impl Into<SharedString>, primary: bool, colors:
                 button.border_1().border_color(colors.fg.opacity(0.18)).hover(|button| button.bg(colors.hover))
             }
         })
-        .child(label.into())
+        .child(label)
 }
 
 /// 带下划线的文字按钮。
 fn link(id: &'static str, label: impl Into<SharedString>, colors: Colors) -> Stateful<Div> {
+    let label = label.into();
     div()
         .id(id)
+        .role(Role::Button)
+        .aria_label(spoken(&label))
         .text_size(px(13.))
         .text_color(colors.fg.opacity(0.75))
         .underline()
         .cursor_pointer()
         .hover(|link| link.text_color(colors.fg))
-        .child(label.into())
+        .child(label)
+}
+
+/// 按钮报给辅助工具的名字：去掉画在文字两边的箭头。
+fn spoken(label: &str) -> SharedString {
+    label.trim_matches(|c: char| c == '←' || c == '→' || c.is_whitespace()).to_owned().into()
 }
 
 #[cfg(test)]

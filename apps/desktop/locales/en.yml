@@ -116,6 +116,8 @@ workspace:
   clone_to: Clone
   create: New Project
   create_hint: Start from an empty folder
+  close: Close
+  edit_name: Name
   empty: No terminals in this workspace
   list: Workspaces
   bell: Bell rang
@@ -826,6 +828,10 @@ mobile:
   network_label: "Network"
   network_auto: "Automatic (try every address in system order)"
   network_hint: "The phone tries this address first, then the others. It needs to be on the same Wi-Fi as this Mac, or both on Tailscale."
+  refresh_networks: "Refresh Networks"
+  pair_qr: "Pairing QR Code"
+  install_qr: "Install QR Code"
+  devices: "Paired Devices"
   cant_scan: "Can't scan?"
   copy_code: "Copy Pairing Link"
   expires: "Expires in %{time}"

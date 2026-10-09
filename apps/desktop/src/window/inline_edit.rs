@@ -22,7 +22,9 @@ impl InlineEdit {
     /// 打开输入框并把焦点给它，`text` 的前 `select` 个字节选中，直接打字就替换掉。结束时调
     /// `finish`；文字变了时重画窗口，旁边跟着文字变的东西（比如文件图标）也跟着变。
     pub fn new(text: String, select: usize, finish: Finish, window: &mut Window, cx: &mut Context<WindowView>) -> Self {
-        let field = cx.new(|cx| TextField::editing(text, select, cx));
+        // 改 workspace 名、新建和改名文件都是在填一个名字，报给辅助工具的名字就叫「名字」。
+        let label = rust_i18n::t!("workspace.edit_name").into_owned();
+        let field = cx.new(|cx| TextField::editing(text, select, cx).with_label(label));
         // 输入框原本是搜索框：回车是「下一个」，Esc 是「关闭搜索」，在这里分别是确定和取消。
         let events = cx.subscribe_in(&field, window, move |this, _, event: &TextFieldEvent, window, cx| match event {
             TextFieldEvent::Next => finish(this, true, window, cx),

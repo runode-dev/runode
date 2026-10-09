@@ -16,8 +16,8 @@ use std::{
 };
 
 use gpui::{
-    Action, AnyElement, App, Context, CursorStyle, Div, Focusable, MouseButton, MouseDownEvent, Stateful, Window, div,
-    prelude::*, px,
+    AccessibleAction, Action, AnyElement, App, Context, CursorStyle, Div, Focusable, MouseButton, MouseDownEvent, Role,
+    Stateful, Window, div, prelude::*, px,
 };
 use runode_git::FileStatus;
 use runode_shared_types::color::Rgb;
@@ -494,7 +494,11 @@ impl WindowView {
     pub(super) fn render_panel_toggles(&self, fg: Rgb, bg: Rgb, window: &Window, cx: &mut Context<Self>) -> Div {
         let shown = self.panel.is_some();
         let text = if shown { rust_i18n::t!("tooltip.hide_panel") } else { rust_i18n::t!("tooltip.show_panel") };
+        let view = cx.entity().downgrade();
         let toggle = icon_toggle("toggle-panel", PANEL_RIGHT_ICON, 16., shown, fg, bg)
+            .role(Role::Button)
+            .aria_label(text.clone().into_owned())
+            .aria_expanded(shown)
             .w(px(TOGGLE_WIDTH))
             .h(px(TOGGLE_HEIGHT))
             .tooltip(tooltip(text, None, fg, bg))
@@ -505,7 +509,15 @@ impl WindowView {
                     let panel = if this.panel.is_some() { None } else { Some(this.last_panel) };
                     this.set_panel(panel, window, cx);
                 }),
-            );
+            )
+            // 按下鼠标就办，没有 on_click，辅助工具的按下另外登记。
+            .on_a11y_action(AccessibleAction::Click, move |_, window, cx| {
+                view.update(cx, |this, cx| {
+                    let panel = if this.panel.is_some() { None } else { Some(this.last_panel) };
+                    this.set_panel(panel, window, cx);
+                })
+                .ok();
+            });
         div()
             .flex_none()
             .flex()
@@ -517,13 +529,17 @@ impl WindowView {
 
     /// 右侧面板顶上那排切换文件树和 Git 的标签，显示着的那个底色亮一些。经典样式下标题栏右上角的
     /// 开关按钮盖在这一条的右端。
-    pub(super) fn render_panel_tabs(&self, fg: Rgb, bg: Rgb, cx: &mut Context<Self>) -> Div {
+    pub(super) fn render_panel_tabs(&self, fg: Rgb, bg: Rgb, cx: &mut Context<Self>) -> Stateful<Div> {
         let tab = |page: SidePanel, cx: &mut Context<Self>| {
             let (id, icon, text, action): (_, _, _, &dyn Action) = match page {
                 SidePanel::Files => ("tab-files", FILES_ICON, rust_i18n::t!("tooltip.show_files"), &ToggleFiles),
                 SidePanel::Git => ("tab-git", GIT_ICON, rust_i18n::t!("tooltip.show_git"), &ToggleGit),
             };
+            let view = cx.entity().downgrade();
             icon_toggle(id, icon, 16., self.panel == Some(page), fg, bg)
+                .role(Role::Tab)
+                .aria_label(text.clone().into_owned())
+                .aria_selected(self.panel == Some(page))
                 .w(px(TOGGLE_WIDTH))
                 .h(px(TOGGLE_HEIGHT))
                 .tooltip(tooltip(text, Some(action), fg, bg))
@@ -534,8 +550,13 @@ impl WindowView {
                         this.set_panel(Some(page), window, cx);
                     }),
                 )
+                .on_a11y_action(AccessibleAction::Click, move |_, window, cx| {
+                    view.update(cx, |this, cx| this.set_panel(Some(page), window, cx)).ok();
+                })
         };
         self.panel_header(fg, cx)
+            .id("panel-tabs")
+            .role(Role::TabList)
             .px(px(6.))
             .gap(px(TOGGLE_GAP))
             .child(tab(SidePanel::Files, cx))
@@ -565,9 +586,19 @@ pub(super) fn panel_title() -> Div {
     div().flex_none().h(px(PANE_HEADER_HEIGHT)).px(px(10.)).flex().items_center().gap(px(8.))
 }
 
-/// 面板里居中的一句说明，比如不在仓库里、没有改动、预览不了。
-pub(super) fn panel_message(text: String, fg: Rgb) -> Div {
-    div().flex_1().flex().items_center().justify_center().px(px(16.)).text_color(hsla(fg).opacity(0.5)).child(text)
+/// 面板里居中的一句说明，比如不在仓库里、没有改动、预览不了；也报给辅助工具。
+pub(super) fn panel_message(text: String, fg: Rgb) -> Stateful<Div> {
+    div()
+        .id("panel-message")
+        .role(Role::Label)
+        .aria_label(text.clone())
+        .flex_1()
+        .flex()
+        .items_center()
+        .justify_center()
+        .px(px(16.))
+        .text_color(hsla(fg).opacity(0.5))
+        .child(text)
 }
 
 /// 右侧面板的外框：定宽、占满高度、竖着排。经典样式下左边一条分隔线，卡片样式下是一张卡片。

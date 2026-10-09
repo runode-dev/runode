@@ -8,7 +8,10 @@ mod custom;
 
 use std::path::{Path, PathBuf};
 
-use gpui::{Action, App, Context, Div, Focusable, MouseButton, SharedString, Stateful, Window, prelude::*, px};
+use gpui::{
+    AccessibleAction, Action, App, Context, Div, Focusable, MouseButton, Role, SharedString, Stateful, Window,
+    prelude::*, px,
+};
 use runode_config::TaskPlacement;
 use runode_paths::Dirs;
 use runode_protocol::{TaskSource, TaskSourceKind};
@@ -174,7 +177,11 @@ impl WindowView {
         window: &Window,
         cx: &mut Context<Self>,
     ) -> Stateful<Div> {
+        let view = cx.entity().downgrade();
         icon_toggle("tasks", PLAY_ICON, 16., self.dropdown_open(), fg, bg)
+            .role(Role::Button)
+            .aria_label(rust_i18n::t!("tooltip.tasks").into_owned())
+            .aria_expanded(self.dropdown_open())
             .w(px(TOGGLE_WIDTH))
             .h(px(TOGGLE_HEIGHT))
             .tooltip(tooltip(rust_i18n::t!("tooltip.tasks"), Some(&ToggleTasks), fg, bg))
@@ -192,6 +199,10 @@ impl WindowView {
                     this.open_tasks_menu(false, cx);
                 }),
             )
+            // 按下鼠标就开，没有 on_click，辅助工具的按下另外登记：和快捷键一样开关菜单、开时选中第一条。
+            .on_a11y_action(AccessibleAction::Click, move |_, window, cx| {
+                view.update(cx, |this, cx| this.toggle_tasks(&ToggleTasks, window, cx)).ok();
+            })
             .children(self.render_dropdown(fg, bg, window, cx))
     }
 
