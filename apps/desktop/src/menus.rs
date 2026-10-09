@@ -54,7 +54,7 @@ actions!(
 pub fn install(cx: &mut App) {
     cx.on_action(|_: &About, _| crate::about::show());
     cx.on_action(|_: &CheckForUpdates, cx| crate::update::menu_clicked(cx));
-    cx.on_action(|_: &OpenSettings, cx| crate::settings::open(cx));
+    cx.on_action(|_: &OpenSettings, cx| crate::window::show_settings(cx));
     cx.on_action(|_: &OpenConfiguration, cx| crate::config::open(cx));
     cx.on_action(|_: &ReloadConfiguration, cx| crate::config::reload(cx));
     cx.on_action(|_: &Quit, cx| crate::window::quit(cx));

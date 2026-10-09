@@ -15,7 +15,7 @@ use runode_config::{
 
 use super::{
     SettingsView,
-    controls::{CONTROL_HEIGHT, Colors, button, icon_button, on_click, row, section, switch},
+    controls::{CONTROL_HEIGHT, Cards, Colors, button, icon_button, on_click, row, switch},
 };
 
 const KEY: &str = "keybind";
@@ -388,14 +388,18 @@ impl SettingsView {
             }
             report(this, &values, cx);
         }));
-        let mut out = div().flex().flex_col().child(row(
-            rust_i18n::t!("settings.keybind.use_defaults").into_owned(),
-            Some(rust_i18n::t!("settings.keybind.use_defaults_hint").into_owned().into()),
-            defaults,
-            None,
-            self.errors.get(KEY).cloned(),
-            colors,
-        ));
+        let mut out = Cards::new(div().flex().flex_col(), colors);
+        out.push(
+            row(
+                rust_i18n::t!("settings.keybind.use_defaults").into_owned(),
+                Some(rust_i18n::t!("settings.keybind.use_defaults_hint").into_owned().into()),
+                defaults,
+                None,
+                self.errors.get(KEY).cloned(),
+                colors,
+            )
+            .into_any_element(),
+        );
 
         let (rows, bad) = self.keybind_rows();
         for (ix, line) in bad {
@@ -410,14 +414,10 @@ impl SettingsView {
                     report(this, &values, cx);
                 },
             ));
-            out = out.child(row(
-                line,
-                None,
-                remove,
-                None,
-                Some(rust_i18n::t!("settings.invalid", err = err).into()),
-                colors,
-            ));
+            out.push(
+                row(line, None, remove, None, Some(rust_i18n::t!("settings.invalid", err = err).into()), colors)
+                    .into_any_element(),
+            );
         }
 
         let group_start = |name: &str| keybind::ACTIONS.iter().position(|spec| spec.name == name).unwrap_or(0);
@@ -431,14 +431,14 @@ impl SettingsView {
                 continue;
             }
             let title = format!("settings.keybind.group.{group}");
-            out = out.child(section(rust_i18n::t!(&title).into_owned(), colors));
+            out.section(rust_i18n::t!(&title).into_owned());
             for (ix, row) in group_rows {
-                out = out.child(self.render_keybind_row(ix, row, colors, cx));
+                out.push(self.render_keybind_row(ix, row, colors, cx).into_any_element());
             }
             if custom {
                 let open = button("keybind-open-config", rust_i18n::t!("settings.open_config").into_owned(), colors)
                     .on_click(on_click(cx, |_, _, cx| crate::config::open(cx)));
-                out = out.child(
+                out.push(
                     div()
                         .py(px(8.))
                         .flex()
@@ -451,11 +451,12 @@ impl SettingsView {
                                 .text_color(colors.fg.opacity(0.55))
                                 .child(rust_i18n::t!("settings.keybind.custom_hint").into_owned()),
                         )
-                        .child(open),
+                        .child(open)
+                        .into_any_element(),
                 );
             }
         }
-        out
+        out.finish()
     }
 
     fn render_keybind_row(&mut self, ix: usize, row: &Row, colors: Colors, cx: &mut Context<Self>) -> Div {

@@ -77,6 +77,12 @@ icons! {
     pub PLUG_ICON = "plug",
     /// 侧栏顶上手机端入口和引导页的图标。
     pub PHONE_ICON = "phone",
+    /// 设置页侧栏顶上的返回，以及各页的图标（终端、文件、agent、远程访问几页借用上面的）。
+    pub ARROW_LEFT_ICON = "arrow-left",
+    pub SETTINGS_ICON = "settings",
+    pub SLIDERS_ICON = "sliders",
+    pub PALETTE_ICON = "palette",
+    pub KEYBOARD_ICON = "keyboard",
 }
 
 fn all_files() -> impl Iterator<Item = &'static (&'static str, &'static [u8])> {

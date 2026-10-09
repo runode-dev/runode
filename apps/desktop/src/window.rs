@@ -9,7 +9,7 @@
 //! 右侧的预览栏、Git 面板和文件树（`project`、`preview`、`git_panel`、`files`），侧栏和文件树共用的
 //! 就地输入框（`inline_edit`），新建 workspace 的对话框（`new_workspace`），开窗口（`open`），存档（`persist`，存档文件的格式在
 //! `persist::format`），侧栏里没在窗口里显示的后台会话（`background`），退出和关窗口时会话怎么办
-//! （`quit`），侧栏顶上手机端入口打开的引导页（`mobile`），以及别的进程经宿主请 app 开终端、切到某个终端、问各个终端摆在哪（`remote`、
+//! （`quit`），侧栏顶上手机端入口打开的引导页（`mobile`），铺满窗口的设置页（`settings_page`），以及别的进程经宿主请 app 开终端、切到某个终端、问各个终端摆在哪（`remote`、
 //! `layout_report`），一次在当前分屏旁开几个分屏（`arrange`），经远程访问配对过的设备
 //! （`devices`），以及窗口底部的状态栏（`status_bar`）。
 //!
@@ -37,6 +37,7 @@ mod preview;
 mod project;
 mod quit;
 mod remote;
+mod settings_page;
 mod sidebar;
 mod status_bar;
 mod tasks;
@@ -76,6 +77,7 @@ pub use quit::{
     terminal_windows,
 };
 pub use remote::serve_requests;
+pub(crate) use settings_page::show_settings;
 pub use status_bar::watch as watch_status;
 pub use titlebar::titlebar_options;
 
@@ -148,7 +150,7 @@ pub struct ResizePane(pub Direction);
 
 /// 透明标题栏的高度：终端内容从它下面开始，这一条用来拖动窗口，多个标签时也画在这里；
 /// 显示侧栏时红绿灯落在侧栏顶上。
-const TITLEBAR_HEIGHT: f32 = 36.;
+pub(crate) const TITLEBAR_HEIGHT: f32 = 36.;
 /// 红绿灯按钮的直径。
 const TRAFFIC_LIGHT_SIZE: f32 = 14.;
 /// 红绿灯按钮的位置，竖直方向在标题栏里居中，和标签文字对齐；以及标题栏左侧给它们留出的宽度。
@@ -301,6 +303,8 @@ pub struct WindowView {
     commit_message_dialog: Option<git_panel::CommitMessageDialog>,
     /// 开着的手机端引导页，盖住标签和分屏。
     mobile: Option<mobile::MobilePage>,
+    /// 开着的设置页，盖住整个窗口。
+    settings: Option<settings_page::SettingsPage>,
     /// 当前 workspace 里没有标签时窗口的焦点，快捷键（新开标签等）照常派发得到。
     empty_focus: FocusHandle,
     /// 开着的 agent 列表。
@@ -418,6 +422,7 @@ impl WindowView {
             add_task: None,
             commit_message_dialog: None,
             mobile: None,
+            settings: None,
             empty_focus: cx.focus_handle(),
             agent_picker: None,
             arrange_picker: None,
@@ -518,8 +523,11 @@ impl WindowView {
 }
 
 impl Focusable for WindowView {
-    /// 开着手机端引导页时是它；否则是有焦点的终端，当前 workspace 里没有终端时是窗口自己的。
+    /// 开着设置页、手机端引导页时是它；否则是有焦点的终端，当前 workspace 里没有终端时是窗口自己的。
     fn focus_handle(&self, cx: &App) -> FocusHandle {
+        if let Some(page) = &self.settings {
+            return page.view.focus_handle(cx);
+        }
         if let Some(page) = &self.mobile {
             return page.focus.clone();
         }
@@ -534,7 +542,9 @@ impl Render for WindowView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.focus_menu(window, cx);
         let (fg, bg) = self.colors(cx);
-        let (base, body) = if self.mobile.is_some() {
+        let (base, body) = if let Some(page) = &self.settings {
+            (bg, vec![page.view.clone().into_any_element()])
+        } else if self.mobile.is_some() {
             (if cards(cx) { frame_color(fg, bg) } else { bg }, self.render_mobile_body(fg, bg, window, cx))
         } else if cards(cx) {
             (frame_color(fg, bg), self.render_cards_body(fg, bg, window, cx))
@@ -549,50 +559,50 @@ impl Render for WindowView {
         let new_workspace = self.render_new_workspace(fg, bg, cx);
         let add_task = self.render_add_task(fg, bg, cx);
         let commit_message_dialog = self.render_commit_message_dialog(fg, bg, cx);
-        let status_bar = status_bar::shown(cx).then(|| self.render_status_bar(fg, bg, cx));
+        let status_bar = (self.settings.is_none() && status_bar::shown(cx)).then(|| self.render_status_bar(fg, bg, cx));
         div()
             .id("window")
             .key_context("Window")
-            .on_action(cx.listener(Self::new_tab))
-            .on_action(cx.listener(Self::close_tab))
-            .on_action(cx.listener(Self::next_tab))
-            .on_action(cx.listener(Self::previous_tab))
-            .on_action(cx.listener(Self::select_tab))
-            .on_action(cx.listener(Self::select_last_tab))
-            .on_action(cx.listener(Self::new_split_right))
-            .on_action(cx.listener(Self::new_split_down))
-            .on_action(cx.listener(Self::close_pane))
-            .on_action(cx.listener(Self::focus_next_pane))
-            .on_action(cx.listener(Self::focus_previous_pane))
-            .on_action(cx.listener(Self::focus_pane))
-            .on_action(cx.listener(Self::resize_pane))
-            .on_action(cx.listener(Self::equalize_panes))
-            .on_action(cx.listener(Self::toggle_pane_zoom))
-            .on_action(cx.listener(Self::new_workspace))
-            .on_action(cx.listener(Self::close_workspace))
-            .on_action(cx.listener(Self::rename_workspace))
-            .on_action(cx.listener(Self::next_workspace))
-            .on_action(cx.listener(Self::previous_workspace))
-            .on_action(cx.listener(Self::select_workspace))
-            .on_action(cx.listener(Self::select_last_workspace))
-            .on_action(cx.listener(Self::toggle_sidebar))
-            .on_action(cx.listener(Self::toggle_git))
-            .on_action(cx.listener(Self::toggle_status_item))
-            .on_action(cx.listener(Self::run_task))
-            .on_action(cx.listener(Self::add_task))
-            .on_action(cx.listener(Self::toggle_tasks))
-            .on_action(cx.listener(Self::toggle_task_group))
-            .on_action(cx.listener(Self::delete_task))
-            .on_action(cx.listener(Self::edit_task))
-            .on_action(cx.listener(Self::toggle_status_bar))
+            .on_action(Self::act(cx, Self::new_tab))
+            .on_action(Self::act(cx, Self::close_tab))
+            .on_action(Self::act(cx, Self::next_tab))
+            .on_action(Self::act(cx, Self::previous_tab))
+            .on_action(Self::act(cx, Self::select_tab))
+            .on_action(Self::act(cx, Self::select_last_tab))
+            .on_action(Self::act(cx, Self::new_split_right))
+            .on_action(Self::act(cx, Self::new_split_down))
+            .on_action(Self::act(cx, Self::close_pane))
+            .on_action(Self::act(cx, Self::focus_next_pane))
+            .on_action(Self::act(cx, Self::focus_previous_pane))
+            .on_action(Self::act(cx, Self::focus_pane))
+            .on_action(Self::act(cx, Self::resize_pane))
+            .on_action(Self::act(cx, Self::equalize_panes))
+            .on_action(Self::act(cx, Self::toggle_pane_zoom))
+            .on_action(Self::act(cx, Self::new_workspace))
+            .on_action(Self::act(cx, Self::close_workspace))
+            .on_action(Self::act(cx, Self::rename_workspace))
+            .on_action(Self::act(cx, Self::next_workspace))
+            .on_action(Self::act(cx, Self::previous_workspace))
+            .on_action(Self::act(cx, Self::select_workspace))
+            .on_action(Self::act(cx, Self::select_last_workspace))
+            .on_action(Self::act(cx, Self::toggle_sidebar))
+            .on_action(Self::act(cx, Self::toggle_git))
+            .on_action(Self::act(cx, Self::toggle_status_item))
+            .on_action(Self::act(cx, Self::run_task))
+            .on_action(Self::act(cx, Self::add_task))
+            .on_action(Self::act(cx, Self::toggle_tasks))
+            .on_action(Self::act(cx, Self::toggle_task_group))
+            .on_action(Self::act(cx, Self::delete_task))
+            .on_action(Self::act(cx, Self::edit_task))
+            .on_action(Self::act(cx, Self::toggle_status_bar))
             // 侧栏按着切换 workspace 的修饰键或 ⌘ 时才显示快捷键提示，按下、松开都要重画。挂在根上：修饰键的事件
             // 只沿焦点所在的路径传，侧栏不在这条路上。
             .on_modifiers_changed(cx.listener(|_, _, _, cx| cx.notify()))
-            .on_action(cx.listener(Self::toggle_files))
-            .on_action(cx.listener(Self::goto_agent))
-            .on_action(cx.listener(Self::next_agent))
-            .on_action(cx.listener(Self::show_mobile))
-            .on_action(cx.listener(Self::arrange_panes))
+            .on_action(Self::act(cx, Self::toggle_files))
+            .on_action(Self::act(cx, Self::goto_agent))
+            .on_action(Self::act(cx, Self::next_agent))
+            .on_action(Self::act(cx, Self::show_mobile))
+            .on_action(Self::act(cx, Self::arrange_panes))
             .map(|window| Self::bind_git_actions(window, cx))
             // 终端和新建对话框没接住的拖放落到这里：侧栏收着时拖到标题栏、空 workspace 上也能开。
             .on_drop(cx.listener(Self::open_dropped_dirs))

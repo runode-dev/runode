@@ -186,9 +186,9 @@ fn bind(cx: &mut App) {
     }
     let mut bindings = Vec::new();
     for (keys, action) in keybind::resolve(&keybinds) {
-        // 设置窗口里没有分屏，关分屏的键关掉设置窗口。
+        // 设置页里没有分屏，关分屏的键收起设置页。
         if action == Action::CloseSurface {
-            bindings.extend(load(&keys, Box::new(CloseWindow), Some("Settings")));
+            bindings.extend(load(&keys, Box::new(crate::settings::CloseSettings), Some("Settings")));
         }
         let (action, contexts) = gpui_action(action);
         for context in contexts {

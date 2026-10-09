@@ -1,12 +1,13 @@
-//! 设置窗口：配置文件里的每一项做成开关、选项、输入框或列表，改了就写回 runode 自己的配置文件
-//! （`runode_config::ConfigFile`，文件里别的行原样留着），再重载配置让各个窗口跟着变。
+//! 设置页：配置文件里的每一项做成开关、选项、输入框或列表，改了就写回 runode 自己的配置文件
+//! （`runode_config::ConfigFile`，文件里别的行原样留着），再重载配置让各个窗口跟着变。铺在终端窗口
+//! 里（`window::show_settings`），盖住侧栏和终端；点左上的返回或按 Esc 发 `Close`，回到终端。
 //!
 //! 显示的是合起来生效的值：Ghostty 的配置、主题和 runode 的配置文件叠在一起之后的结果。runode 的
 //! 配置文件里写了的项旁边有恢复按钮，点了删掉那几行，回到 Ghostty、主题或内置的值。输入框停手
 //! 一会儿、按回车或者失去焦点时写回，写之前按读配置时的规矩检查，不对就不写、在那一项下面说原因。
 //!
 //! 哪一页有哪些项在 `pages`，开关、选项这些控件在 `controls`，从长列表里挑一项的浮层在 `picker`，
-//! 快捷键那一页在 `keybinds`，远程访问那一页的配对手机在 `pairing`。窗口同时只开一个，再打开时切到已经开着的那个。
+//! 快捷键那一页在 `keybinds`，远程访问那一页的配对手机在 `pairing`。
 
 mod autostart;
 mod controls;
@@ -18,13 +19,13 @@ mod picker;
 use std::{collections::HashMap, sync::Arc, time::Duration};
 
 use gpui::{
-    App, AppContext as _, Bounds, Context, Entity, FocusHandle, Focusable, Global, MouseButton, MouseDownEvent, Render,
-    ScrollHandle, SharedString, Subscription, Task, TitlebarOptions, Window, WindowBounds, WindowHandle, WindowOptions,
-    div, point, prelude::*, px, size,
+    App, AppContext as _, Context, Entity, EventEmitter, FocusHandle, Focusable, KeyDownEvent, MouseButton,
+    MouseDownEvent, Render, ScrollHandle, SharedString, Subscription, Task, Window, div, point, prelude::*, px, svg,
 };
 use runode_config::{Config, ConfigFile};
 
 use crate::{
+    assets::ARROW_LEFT_ICON,
     config::AppConfig,
     ui::text_field::{TextField, TextFieldEvent},
 };
@@ -32,42 +33,16 @@ use controls::Colors;
 use pages::Page;
 use picker::Picker;
 
-/// 窗口左边页面列表的宽度。
-const NAV_WIDTH: f32 = 188.;
-/// 顶上留给红绿灯、可以拖动窗口的那一条的高度。
-const TITLEBAR_HEIGHT: f32 = 40.;
+/// 左边页面列表的宽度。
+const NAV_WIDTH: f32 = 220.;
 /// 输入框停手这么久之后写回。
 const COMMIT_DELAY: Duration = Duration::from_millis(700);
 
-/// 开着的设置窗口。
-struct SettingsWindow(WindowHandle<SettingsView>);
+/// 点了返回、按了 Esc 或关分屏的键：窗口收起设置页。
+pub struct Close;
 
-impl Global for SettingsWindow {}
-
-/// 打开设置窗口；已经开着时切到它。
-pub fn open(cx: &mut App) {
-    if let Some(handle) = cx.try_global::<SettingsWindow>().map(|window| window.0)
-        && handle.update(cx, |_, window, _| window.activate_window()).is_ok()
-    {
-        return;
-    }
-    let bounds = Bounds::centered(None, size(px(860.), px(620.)), cx);
-    let options = WindowOptions {
-        window_bounds: Some(WindowBounds::Windowed(bounds)),
-        window_min_size: Some(size(px(640.), px(420.))),
-        titlebar: Some(TitlebarOptions {
-            title: Some(rust_i18n::t!("settings.title").into_owned().into()),
-            appears_transparent: true,
-            traffic_light_position: Some(point(px(14.), px((TITLEBAR_HEIGHT - 14.) / 2.))),
-        }),
-        app_owns_titlebar_drag: true,
-        ..Default::default()
-    };
-    match cx.open_window(options, |window, cx| cx.new(|cx| SettingsView::new(window, cx))) {
-        Ok(handle) => cx.set_global(SettingsWindow(handle)),
-        Err(err) => tracing::error!("failed to open the settings window: {err:#}"),
-    }
-}
+// 关分屏的键在设置页里收起设置页，见 `keybinds::bind`。
+gpui::actions!(runode, [CloseSettings]);
 
 /// 输入框里的文字改的是什么。
 #[derive(Clone, Debug, PartialEq)]
@@ -104,13 +79,13 @@ pub struct SettingsView {
     _observe: Subscription,
 }
 
+impl EventEmitter<Close> for SettingsView {}
+
 impl SettingsView {
-    fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
+    pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         let observe = cx.observe_global_in::<AppConfig>(window, |this, window, cx| this.config_changed(window, cx));
-        let focus_handle = cx.focus_handle();
-        window.focus(&focus_handle, cx);
         Self {
-            focus_handle,
+            focus_handle: cx.focus_handle(),
             page: Page::General,
             config: cx.global::<AppConfig>().0.clone(),
             file: read_file(),
@@ -127,7 +102,6 @@ impl SettingsView {
     fn config_changed(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.config = cx.global::<AppConfig>().0.clone();
         self.file = read_file();
-        window.set_window_title(&rust_i18n::t!("settings.title"));
         for field in self.fields.values() {
             if field.input.focus_handle(cx).is_focused(window) {
                 continue;
@@ -229,8 +203,8 @@ impl SettingsView {
         }
     }
 
-    /// 换页、关窗口前把还没写回的输入框写回。
-    fn commit_all(&mut self, cx: &mut Context<Self>) {
+    /// 换页、收起前把还没写回的输入框写回。
+    pub fn commit_all(&mut self, cx: &mut Context<Self>) {
         let pending: Vec<String> =
             self.fields.iter().filter(|(_, field)| field.pending.is_some()).map(|(id, _)| id.clone()).collect();
         for id in pending {
@@ -321,6 +295,29 @@ impl SettingsView {
     }
 
     fn render_nav(&self, colors: Colors, cx: &mut Context<Self>) -> gpui::Stateful<gpui::Div> {
+        let item = |id: &'static str, icon: &'static str, label: String, selected: bool| {
+            div()
+                .id(id)
+                .h(px(34.))
+                .px(px(10.))
+                .flex()
+                .items_center()
+                .gap(px(10.))
+                .rounded(px(8.))
+                .text_size(px(14.))
+                .map(|item| {
+                    if selected {
+                        item.bg(colors.selected).text_color(colors.fg)
+                    } else {
+                        item.text_color(colors.fg.opacity(0.75)).hover(|item| item.bg(colors.hover))
+                    }
+                })
+                .child(svg().flex_none().path(icon).size(px(16.)).text_color(colors.fg.opacity(0.7)))
+                .child(label)
+        };
+        let back = item("settings-back", ARROW_LEFT_ICON, rust_i18n::t!("settings.back").into_owned(), false)
+            .mb(px(8.))
+            .on_click(cx.listener(|_, _, _, cx| cx.emit(Close)));
         div()
             .flex_none()
             .w(px(NAV_WIDTH))
@@ -332,32 +329,30 @@ impl SettingsView {
             .border_color(colors.border)
             .id("settings-nav")
             .child(titlebar_strip())
-            .child(div().flex().flex_col().gap(px(2.)).px(px(10.)).children(Page::ALL.into_iter().map(|page| {
-                let selected = page == self.page;
-                div()
-                    .id(page.id())
-                    .h(px(30.))
-                    .px(px(10.))
-                    .flex()
-                    .items_center()
-                    .rounded(px(6.))
-                    .text_size(px(13.))
-                    .map(|item| {
-                        if selected {
-                            item.bg(colors.selected).text_color(colors.fg)
-                        } else {
-                            item.text_color(colors.fg.opacity(0.75)).hover(|item| item.bg(colors.hover))
-                        }
-                    })
-                    .on_click(cx.listener(move |this, _, window, cx| this.select_page(page, window, cx)))
-                    .child(page.title())
-            })))
+            .child(div().flex().flex_col().gap(px(2.)).px(px(10.)).child(back).children(Page::ALL.into_iter().map(
+                |page| {
+                    item(page.id(), page.icon(), page.title(), page == self.page)
+                        .on_click(cx.listener(move |this, _, window, cx| this.select_page(page, window, cx)))
+                },
+            )))
+    }
+
+    /// Esc：焦点在页面本身（不在输入框、挑选浮层里，也没在录快捷键）时收起。
+    fn key_down(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
+        if event.keystroke.key == "escape"
+            && !event.keystroke.modifiers.modified()
+            && self.focus_handle.is_focused(window)
+            && self.picker.is_none()
+        {
+            cx.stop_propagation();
+            cx.emit(Close);
+        }
     }
 }
 
-/// 顶上那一条：按住拖动窗口，双击缩放。
+/// 顶上那一条：放红绿灯，按住拖动窗口，双击缩放。
 fn titlebar_strip() -> gpui::Div {
-    div().flex_none().h(px(TITLEBAR_HEIGHT)).w_full().on_mouse_down(
+    div().flex_none().h(px(crate::window::TITLEBAR_HEIGHT)).w_full().on_mouse_down(
         MouseButton::Left,
         |event: &MouseDownEvent, window: &mut Window, _: &mut App| {
             if event.click_count >= 2 {
@@ -400,6 +395,8 @@ impl Render for SettingsView {
         div()
             .key_context("Settings")
             .track_focus(&self.focus_handle)
+            .on_key_down(cx.listener(Self::key_down))
+            .on_action(cx.listener(|_, _: &CloseSettings, _, cx| cx.emit(Close)))
             .size_full()
             .relative()
             .flex()
@@ -415,7 +412,7 @@ impl Render for SettingsView {
                         .min_h_0()
                         .overflow_y_scroll()
                         .track_scroll(&self.scroll)
-                        .child(div().px(px(28.)).pb(px(28.)).max_w(px(720.)).child(content)),
+                        .child(div().mx_auto().w_full().max_w(px(760.)).px(px(32.)).pb(px(32.)).child(content)),
                 ),
             )
             .children(picker)

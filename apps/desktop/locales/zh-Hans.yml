@@ -498,7 +498,7 @@ setup:
   failed_title: 没能装好 agent 集成
   ok: 好
 settings:
-  title: 设置
+  back: 返回
   language_name: 简体中文
   invalid: "这个值不对：%{err}"
   no_home: 找不到主目录，没地方放配置文件

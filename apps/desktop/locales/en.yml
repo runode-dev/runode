@@ -498,7 +498,7 @@ setup:
   failed_title: Could not install the agent integration
   ok: OK
 settings:
-  title: Settings
+  back: Back
   language_name: English
   invalid: "Not a valid value: %{err}"
   no_home: There is no home directory to keep the configuration file in

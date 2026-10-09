@@ -249,7 +249,7 @@ pub fn close_window(window: AnyWindowHandle, cx: &mut App) {
         let remove = move |cx: &mut App| {
             window.update(cx, |_, window, _| window.remove_window()).ok();
         };
-        // 设置窗口这类不是终端窗口的，直接关。
+        // 不是终端窗口的，直接关。
         let Some(view) = window.downcast::<WindowView>() else {
             remove(cx);
             return;

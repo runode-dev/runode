@@ -1,4 +1,4 @@
-//! 设置窗口的各页：每页有哪些项、各用什么控件，以及主题、字体、调色板这些不止一个控件的项。
+//! 设置页的各页：每页有哪些项、各用什么控件，以及主题、字体、调色板这些不止一个控件的项。
 
 use gpui::{AnyElement, Context, Div, ElementId, SharedString, Window, div, prelude::*, px, svg};
 use runode_shared_types::agent::AgentKind;
@@ -6,8 +6,7 @@ use runode_shared_types::agent::AgentKind;
 use super::{
     Commit, SettingsView,
     controls::{
-        Colors, button, dropdown, icon_button, input_box, on_click, reset_button, row, section, segmented, swatch,
-        switch,
+        Cards, Colors, button, dropdown, icon_button, input_box, on_click, reset_button, row, segmented, swatch, switch,
     },
     picker::{PickItem, PickTarget, ThemeSlot},
 };
@@ -85,6 +84,23 @@ impl Page {
 
     pub fn title(self) -> String {
         tr(&format!("settings.page.{}", self.id()))
+    }
+
+    pub fn icon(self) -> &'static str {
+        use crate::assets::{
+            FILES_ICON, KEYBOARD_ICON, PALETTE_ICON, PHONE_ICON, SETTINGS_ICON, SLIDERS_ICON, SPARKLE_ICON,
+            TERMINAL_ICON,
+        };
+        match self {
+            Self::General => SETTINGS_ICON,
+            Self::Appearance => SLIDERS_ICON,
+            Self::Colors => PALETTE_ICON,
+            Self::Terminal => TERMINAL_ICON,
+            Self::Files => FILES_ICON,
+            Self::Agents => SPARKLE_ICON,
+            Self::Remote => PHONE_ICON,
+            Self::Keybinds => KEYBOARD_ICON,
+        }
     }
 
     fn items(self) -> &'static [Item] {
@@ -284,18 +300,23 @@ impl ThemeChoice {
 impl SettingsView {
     pub(super) fn render_page(&mut self, colors: Colors, window: &mut Window, cx: &mut Context<Self>) -> Div {
         let title = div()
-            .pt(px(4.))
-            .pb(px(8.))
-            .text_size(px(20.))
+            .pt(px(8.))
+            .pb(px(12.))
+            .text_size(px(22.))
             .font_weight(gpui::FontWeight::SEMIBOLD)
             .child(self.page.title());
-        let mut page = div().flex().flex_col().child(title);
+        let page = div().flex().flex_col().child(title);
         if self.page == Page::Keybinds {
             return page.child(self.render_keybinds(colors, window, cx));
         }
+        // 小标题把一页分成几组，每组收进一张卡片。
+        let mut cards = Cards::new(page, colors);
         for item in self.page.items() {
             let element = match *item {
-                Item::Section(name) => section(tr(&format!("settings.section.{name}")), colors).into_any_element(),
+                Item::Section(name) => {
+                    cards.section(tr(&format!("settings.section.{name}")));
+                    continue;
+                }
                 Item::Row(key, control) => self.render_row(key, control, colors, window, cx).into_any_element(),
                 Item::Theme => self.render_theme(colors, cx).into_any_element(),
                 Item::FontFamily => self.render_font_family(colors, cx).into_any_element(),
@@ -306,9 +327,9 @@ impl SettingsView {
                 Item::Pairing => self.render_pairing(colors, cx).into_any_element(),
                 Item::Autostart => self.render_autostart(colors, cx).into_any_element(),
             };
-            page = page.child(element);
+            cards.push(element);
         }
-        page
+        cards.finish()
     }
 
     /// runode 的配置文件里写了 `key`、写的又不是默认值时的恢复按钮：写的正是默认值时删掉它也没有变化，

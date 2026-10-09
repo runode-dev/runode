@@ -82,6 +82,7 @@ pub(crate) fn show_pairing(cx: &mut App) {
 impl WindowView {
     /// 打开手机端引导页；已经开着时把焦点给它。
     pub(super) fn show_mobile(&mut self, _: &super::ShowMobile, window: &mut Window, cx: &mut Context<Self>) {
+        self.drop_settings(cx);
         if self.mobile.is_none() {
             let system_name = host_name();
             let saved = cx.global::<AppConfig>().0.remote_access_name.clone().unwrap_or_default();

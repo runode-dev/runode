@@ -1,4 +1,4 @@
-//! 设置窗口里的控件：一行设置的排版，开关、分段选项、按钮、下拉按钮、输入框和色块。颜色取自
+//! 设置页里的控件：一行设置的排版，开关、分段选项、按钮、下拉按钮、输入框和色块。颜色取自
 //! 终端的前景和背景，和终端窗口的界面一个色调。
 
 use gpui::{
@@ -23,6 +23,8 @@ pub(super) struct Colors {
     pub bg: Hsla,
     /// 侧栏和浮层的底色。
     pub panel: Hsla,
+    /// 一组设置那张卡片的底色。
+    pub card: Hsla,
     pub hover: Hsla,
     pub selected: Hsla,
     /// 输入框和按钮的底色。
@@ -43,6 +45,7 @@ impl Colors {
             fg: hsla(fg),
             bg: hsla(bg),
             panel: hsla(bg.mix(fg, 0.035)),
+            card: hsla(bg.mix(fg, 0.045)),
             hover: hsla(bg.mix(fg, 0.07)),
             selected: hsla(bg.mix(fg, 0.12)),
             control: hsla(bg.mix(fg, 0.06)),
@@ -64,12 +67,59 @@ pub(super) fn on_click(
 /// 一页里的小标题。
 pub(super) fn section(title: impl Into<SharedString>, colors: Colors) -> Div {
     div()
-        .pt(px(22.))
-        .pb(px(6.))
-        .text_size(px(11.))
+        .pt(px(18.))
+        .pb(px(8.))
+        .pl(px(4.))
+        .text_size(px(12.))
         .font_weight(gpui::FontWeight::SEMIBOLD)
         .text_color(colors.fg.opacity(0.55))
         .child(title.into())
+}
+
+/// 把一页的各项按小标题分组，每组收进一张圆角卡片。
+pub(super) struct Cards {
+    page: Div,
+    items: Vec<AnyElement>,
+    colors: Colors,
+}
+
+impl Cards {
+    pub fn new(page: Div, colors: Colors) -> Self {
+        Self { page, items: Vec::new(), colors }
+    }
+
+    /// 结束上一组，另起一组，上面是小标题 `title`。
+    pub fn section(&mut self, title: impl Into<SharedString>) {
+        self.flush();
+        self.page = std::mem::replace(&mut self.page, div()).child(section(title, self.colors));
+    }
+
+    pub fn push(&mut self, item: AnyElement) {
+        self.items.push(item);
+    }
+
+    pub fn finish(mut self) -> Div {
+        self.flush();
+        self.page
+    }
+
+    fn flush(&mut self) {
+        if self.items.is_empty() {
+            return;
+        }
+        let items = std::mem::take(&mut self.items);
+        // 每行底下都有分隔线，内容往下多出一像素让卡片裁掉最后一行的那条。
+        let card = div()
+            .mb(px(8.))
+            .px(px(16.))
+            .rounded(px(10.))
+            .bg(self.colors.card)
+            .border_1()
+            .border_color(self.colors.border.opacity(0.5))
+            .overflow_hidden()
+            .child(div().mb(px(-1.)).flex().flex_col().children(items));
+        self.page = std::mem::replace(&mut self.page, div()).child(card);
+    }
 }
 
 /// 一行设置：左边是名字和说明，右边是控件；`reset` 是 runode 的配置文件里写了这一项时的恢复按钮，
@@ -83,7 +133,7 @@ pub(super) fn row(
     colors: Colors,
 ) -> Div {
     div()
-        .py(px(10.))
+        .py(px(12.))
         .flex()
         .items_center()
         .gap(px(16.))
@@ -95,9 +145,9 @@ pub(super) fn row(
                 .min_w_0()
                 .flex()
                 .flex_col()
-                .gap(px(2.))
-                .child(div().child(title.into()))
-                .children(hint.map(|hint| div().text_size(px(11.5)).text_color(colors.fg.opacity(0.55)).child(hint)))
+                .gap(px(3.))
+                .child(div().text_size(px(13.5)).font_weight(gpui::FontWeight::MEDIUM).child(title.into()))
+                .children(hint.map(|hint| div().text_size(px(12.)).text_color(colors.fg.opacity(0.55)).child(hint)))
                 .children(error.map(|err| div().text_size(px(11.5)).text_color(colors.error).child(err))),
         )
         .child(div().flex_none().flex().items_center().gap(px(6.)).child(control).child(

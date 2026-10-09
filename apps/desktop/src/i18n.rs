@@ -6,7 +6,7 @@
 use runode_config::i18n::{FALLBACK, resolve};
 pub use runode_config::i18n::{current, set};
 
-/// 当前语言里 `key` 的翻译，菜单和设置窗口用。
+/// 当前语言里 `key` 的翻译，菜单和设置页用。
 pub fn tr(key: &str) -> String {
     rust_i18n::t!(key).into_owned()
 }

@@ -56,7 +56,7 @@ pub fn install(cx: &mut App) {
 pub(crate) type Stamps = Vec<(PathBuf, Option<SystemTime>)>;
 
 /// 上次加载配置时各配置文件的修改时间，读之前取的（见 `seen_after`）。每次加载后按新配置重新记录：
-/// 重载可能引入新的文件（比如换了主题），设置窗口写回后也会自己重载，这样监视的那一轮不会因为这些
+/// 重载可能引入新的文件（比如换了主题），设置页写回后也会自己重载，这样监视的那一轮不会因为这些
 /// 再重载一次。
 struct Seen(Stamps);
 

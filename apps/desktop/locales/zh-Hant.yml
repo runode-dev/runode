@@ -498,7 +498,7 @@ setup:
   failed_title: 未能裝好 agent 整合
   ok: 好
 settings:
-  title: 設定
+  back: 返回
   language_name: 繁體中文
   invalid: "這個值不對：%{err}"
   no_home: 找不到主目錄，沒地方放設定檔

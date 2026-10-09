@@ -69,7 +69,7 @@ fn main() {
         window::install(cx);
         startup::mark("workspace_install");
         window::serve_requests(cx);
-        // 终端窗口都关了就退出，只剩设置窗口也一样。
+        // 终端窗口都关了就退出。
         cx.on_window_closed(|cx, _| {
             if window::terminal_windows(cx) == 0 {
                 cx.quit();

@@ -10,7 +10,7 @@ use super::{
 
 impl SettingsView {
     pub(super) fn render_pairing(&mut self, colors: Colors, cx: &mut Context<Self>) -> Div {
-        // 等这一轮更新结束再切窗口，不在设置窗口处理点击的当中去改别的窗口。
+        // 等这一轮更新结束再打开引导页，不在设置页处理点击的当中去改窗口。
         let pair = button("pair", rust_i18n::t!("settings.pairing.start").into_owned(), colors)
             .on_click(on_click(cx, |_, _, cx| cx.defer(crate::window::show_pairing)));
         let title = rust_i18n::t!("settings.pairing.title").into_owned();
