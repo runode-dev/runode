@@ -636,7 +636,7 @@ settings:
     remote_access_push: agent 等你回答时，配对过的手机在灵动岛和锁屏上显示出来，App 没开着也行。
     remote_access_push_text: 带上屏幕底部的问题和选项；关掉时只发标题和 agent。
     remote_access_push_delay: agent 要先等这么多秒，在电脑前很快答了的不打扰手机。0 是马上推。
-    apns_key_file: 只有自己编译签名的手机 App 才用。Apple 开发者账号里下载的 .p8 密钥，~/ 是家目录。
+    apns_key_file: 给自己编译签名的手机 App 直连 APNs 推送时才要填，用官方 App 不用管。填 Apple 开发者账号里下载的 .p8 文件的路径，~ 表示 $HOME。
     apns_key_id: 这把密钥的 10 位 ID，也在文件名 AuthKey_ID.p8 里。
     apns_team_id: Apple 开发者账号的 10 位 Team ID。
     apns_bundle_id: 自己编译的手机 App 的 bundle ID。

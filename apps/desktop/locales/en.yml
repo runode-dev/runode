@@ -636,7 +636,7 @@ settings:
     remote_access_push: When an agent waits for your answer, paired phones show it in the Dynamic Island and on the Lock Screen, even with the app closed.
     remote_access_push_text: Sends the question and choices from the bottom of the screen. Off sends only the title and the agent.
     remote_access_push_delay: Seconds the agent has to keep waiting first, so answering at the computer doesn't buzz the phone. 0 notifies right away.
-    apns_key_file: Only for a phone app you build and sign yourself. The .p8 key from your Apple developer account; ~/ is your home folder.
+    apns_key_file: Only needed to push straight to APNs for a phone app you build and sign yourself; leave it empty for the official app. Path to the .p8 key file from your Apple developer account; ~ stands for $HOME.
     apns_key_id: The 10-character ID of that key, also in its file name AuthKey_ID.p8.
     apns_team_id: Your 10-character Apple developer team ID.
     apns_bundle_id: The bundle ID of your build of the phone app.
