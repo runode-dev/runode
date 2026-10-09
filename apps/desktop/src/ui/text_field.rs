@@ -11,11 +11,14 @@
 use std::ops::Range;
 
 use gpui::{
-    App, Bounds, ClipboardItem, Context, DispatchPhase, Element, ElementId, Entity, EntityInputHandler, EventEmitter,
-    FocusHandle, Focusable, GlobalElementId, KeyDownEvent, LayoutId, MouseButton, MouseDownEvent, MouseMoveEvent,
-    MouseUpEvent, PaintQuad, Pixels, Point, Render, ShapedLine, SharedString, Style, TextAlign, TextRun,
-    UTF16Selection, UnderlineStyle, Window, actions, div, fill, point, prelude::*, px, relative, size,
+    AccessibleAction, App, Bounds, ClipboardItem, Context, DispatchPhase, Element, ElementId, Entity,
+    EntityInputHandler, EventEmitter, FocusHandle, Focusable, GlobalElementId, KeyDownEvent, LayoutId, MouseButton,
+    MouseDownEvent, MouseMoveEvent, MouseUpEvent, PaintQuad, Pixels, Point, Render, Role, ShapedLine, SharedString,
+    Style, TextAlign, TextRun, UTF16Selection, UnderlineStyle, Window, actions, div, fill, point, prelude::*, px,
+    relative, size,
 };
+
+use gpui::accesskit::ActionData;
 
 use crate::ui::actions::{Copy, Cut, Paste, Redo, SelectAll, Undo};
 
@@ -52,6 +55,8 @@ pub struct TextField {
     history: History,
     /// 空着时画的提示，默认是「搜索」；拿来就地改名时不画。
     placeholder: Option<SharedString>,
+    /// 报给辅助工具的名字，比如设置项的标题；界面上不画。
+    label: Option<SharedString>,
     /// 上一帧排好的文字、输入框位置和横向滚动量，鼠标点选、输入法摆候选窗都靠它们换算。
     layout: Option<ShapedLine>,
     bounds: Option<Bounds<Pixels>>,
@@ -138,6 +143,7 @@ impl TextField {
             drag: None,
             history: History::default(),
             placeholder: Some(rust_i18n::t!("search.placeholder").into_owned().into()),
+            label: None,
             layout: None,
             bounds: None,
             scroll_x: px(0.),
@@ -160,8 +166,24 @@ impl TextField {
         self
     }
 
+    /// 报给辅助工具的名字换成 `label`。
+    pub fn with_label(mut self, label: impl Into<SharedString>) -> Self {
+        self.label = Some(label.into());
+        self
+    }
+
     pub fn query(&self) -> &str {
         &self.query
+    }
+
+    /// 辅助工具直接写入的文字：换掉全部（可撤销），光标放到末尾，和打字一样发 `Changed`。
+    fn set_value(&mut self, value: String, cx: &mut Context<Self>) {
+        self.record(None);
+        self.selected = value.len()..value.len();
+        self.reversed = false;
+        self.marked = None;
+        self.text = value;
+        self.sync_query(cx);
     }
 
     /// 换掉整个搜索词，光标放到末尾；不发 `Changed`，调用方自己去搜。
@@ -472,7 +494,19 @@ impl Focusable for TextField {
 
 impl Render for TextField {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let field = cx.entity().downgrade();
         div()
+            .id("text-field")
+            .role(Role::TextInput)
+            .when_some(self.label.clone(), |el, label| el.aria_label(label))
+            .when_some(self.placeholder.clone(), |el, placeholder| el.aria_placeholder(placeholder))
+            .aria_value(SharedString::from(self.query.clone()))
+            .on_a11y_action(AccessibleAction::SetValue, move |data, _, cx| {
+                if let Some(ActionData::Value(value)) = data {
+                    let value = value.to_string();
+                    field.update(cx, |field, cx| field.set_value(value, cx)).ok();
+                }
+            })
             .key_context("TextField")
             .track_focus(&self.focus_handle)
             .on_key_down(cx.listener(Self::key_down))

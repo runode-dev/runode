@@ -366,6 +366,7 @@ git:
     unstaged: Changes
     stashes: Stashes
     graph: Graph
+  message_label: Commit message
   message_placeholder: Message (⌘↩ to commit)
   message_placeholder_branch: "Message (⌘↩ to commit on “%{branch}”)"
   commit: Commit

@@ -172,8 +172,12 @@ impl SettingsView {
             return field.input.clone();
         }
         let text = self.field_text(&commit);
+        let label = match &commit {
+            Commit::Value(key) | Commit::Item(key, _) => pages::key_title(key),
+            Commit::Palette(ix) => format!("{} {ix}", pages::key_title("palette")),
+        };
         let input = cx.new(|cx| {
-            let input = TextField::editing(text, 0, cx);
+            let input = TextField::editing(text, 0, cx).with_label(label);
             match placeholder {
                 Some(placeholder) => input.with_placeholder(placeholder),
                 None => input,

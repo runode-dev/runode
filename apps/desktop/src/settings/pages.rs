@@ -225,7 +225,7 @@ fn tr_key(key: &str) -> String {
     key.replace('-', "_")
 }
 
-fn key_title(key: &str) -> String {
+pub(super) fn key_title(key: &str) -> String {
     tr(&format!("settings.key.{}", tr_key(key)))
 }
 

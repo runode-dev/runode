@@ -14,10 +14,12 @@ mod rows;
 use std::ops::Range;
 
 use gpui::{
-    App, Bounds, Context, EntityInputHandler, EventEmitter, FocusHandle, Focusable, KeyDownEvent, MouseButton,
-    MouseDownEvent, Pixels, Point, Render, ScrollWheelEvent, SharedString, TextRun, TextStyle, UTF16Selection,
-    UnderlineStyle, Window, actions, div, point, prelude::*, px,
+    AccessibleAction, App, Bounds, Context, EntityInputHandler, EventEmitter, FocusHandle, Focusable, KeyDownEvent,
+    MouseButton, MouseDownEvent, Pixels, Point, Render, Role, ScrollWheelEvent, SharedString, TextRun, TextStyle,
+    UTF16Selection, UnderlineStyle, Window, actions, div, point, prelude::*, px,
 };
+
+use gpui::accesskit::ActionData;
 
 use super::text_field::{
     EditKind, History, Snapshot, copy_selection, next_char, next_word, offset_to_utf16, previous_char, previous_word,
@@ -66,6 +68,8 @@ pub struct TextArea {
     committed: String,
     /// 空着时画的提示文字。
     placeholder: SharedString,
+    /// 报给辅助工具的名字；界面上不画。
+    label: Option<SharedString>,
     /// 高度在这么多行之间伸缩。
     min_lines: usize,
     max_lines: usize,
@@ -115,6 +119,7 @@ impl TextArea {
             marked: None,
             committed: String::new(),
             placeholder: SharedString::default(),
+            label: None,
             min_lines: 1,
             max_lines: 10,
             drag: None,
@@ -158,6 +163,12 @@ impl TextArea {
     /// 空着时画的提示文字，颜色调淡。
     pub fn set_placeholder(&mut self, text: SharedString, cx: &mut Context<Self>) {
         self.placeholder = text;
+        cx.notify();
+    }
+
+    /// 报给辅助工具的名字换成 `label`。
+    pub fn set_label(&mut self, label: impl Into<SharedString>, cx: &mut Context<Self>) {
+        self.label = Some(label.into());
         cx.notify();
     }
 
@@ -523,7 +534,20 @@ impl Focusable for TextArea {
 
 impl Render for TextArea {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let area = cx.entity().downgrade();
         div()
+            .id("text-area")
+            .role(Role::MultilineTextInput)
+            .when_some(self.label.clone(), |el, label| el.aria_label(label))
+            .when(!self.placeholder.is_empty(), |el| el.aria_placeholder(self.placeholder.clone()))
+            .aria_value(SharedString::from(self.committed.clone()))
+            // 辅助工具直接写入的文字和 `set_text` 一样：可撤销，发 `Changed`。
+            .on_a11y_action(AccessibleAction::SetValue, move |data, _, cx| {
+                if let Some(ActionData::Value(value)) = data {
+                    let value = value.to_string();
+                    area.update(cx, |area, cx| area.set_text(value, cx)).ok();
+                }
+            })
             .key_context("TextArea")
             .track_focus(&self.focus_handle)
             .on_key_down(cx.listener(Self::key_down))

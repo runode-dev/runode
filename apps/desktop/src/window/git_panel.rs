@@ -195,6 +195,7 @@ impl WindowView {
             let area = cx.new(|cx| {
                 let mut area = TextArea::new(cx);
                 area.set_line_limits(COMMIT_BOX_LINES.0, COMMIT_BOX_LINES.1, cx);
+                area.set_label(rust_i18n::t!("git.message_label"), cx);
                 area
             });
             let target = root.to_path_buf();

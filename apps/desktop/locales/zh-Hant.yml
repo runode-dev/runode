@@ -366,6 +366,7 @@ git:
     unstaged: 變更
     stashes: 儲藏
     graph: 圖表
+  message_label: 提交說明
   message_placeholder: 提交說明（⌘↩ 提交）
   message_placeholder_branch: 提交說明（⌘↩ 提交到「%{branch}」）
   commit: 提交
