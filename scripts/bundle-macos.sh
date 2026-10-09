@@ -8,9 +8,11 @@
 #   CARGO          cargo 命令，默认 cargo
 #   BUILD_PROFILE  cargo 的 profile，默认 release；产物在 target/<profile>/bundle/ 下。`make app`
 #                  和 `make install` 用编得快的 local，只给本机用。
-#   SIGN_IDENTITY  codesign 签名身份，默认 -（ad-hoc，只适合本机或自己用）。发布用 Developer ID，
-#                  比如 "Developer ID Application: 名字 (TEAMID)"：app 只在新包和自己出自同一个
-#                  Team ID 时才自己更新，ad-hoc 签名的不更新。
+#   SIGN_IDENTITY  codesign 签名身份，比如 "Developer ID Application: 名字 (TEAMID)"。没给时用钥匙串里
+#                  第一个有效的 Developer ID Application 证书，没有这种证书时退回 -（ad-hoc）。
+#                  ad-hoc 签名的系统按 cdhash 认，每次重新打包都是另一个 app，隐私与安全里给过的
+#                  权限就不算了；app 也只在新包和自己出自同一个 Team ID 时才自己更新，ad-hoc 签名的
+#                  不更新。要强制 ad-hoc 就给 -。
 #   NOTARY_PROFILE 公证用的 notarytool 钥匙串配置名（xcrun notarytool store-credentials 存的），或者
 #   NOTARY_KEY、NOTARY_KEY_ID、NOTARY_ISSUER
 #                  App Store Connect API 密钥（.p8 文件的路径、密钥 ID、Issuer ID），CI 里用这个。
@@ -22,7 +24,12 @@ set -euo pipefail
 target=${1:-dmg}
 CARGO=${CARGO:-cargo}
 BUILD_PROFILE=${BUILD_PROFILE:-release}
-SIGN_IDENTITY=${SIGN_IDENTITY:--}
+if [[ -z "${SIGN_IDENTITY:-}" ]]; then
+  # 用证书的 SHA-1 指纹而不是名字：续签后新旧两张证书同名时，按名字签 codesign 会说有歧义。
+  SIGN_IDENTITY=$(security find-identity -v -p codesigning |
+    awk '/"Developer ID Application: / { print $2; exit }')
+  SIGN_IDENTITY=${SIGN_IDENTITY:--}
+fi
 
 root=$(cd "$(dirname "$0")/.." && pwd)
 cd "$root"
