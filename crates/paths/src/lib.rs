@@ -256,6 +256,42 @@ fn create_private_dir(dir: Option<PathBuf>) -> std::io::Result<PathBuf> {
     Ok(dir)
 }
 
+/// 把 `contents` 整个换进用户的文件 `path`（配置文件、`~/.codex/AGENTS.md` 这类用户手写过的）：先写到
+/// 同一目录的临时文件再改名换上，写到一半崩溃或磁盘满时原文件原样还在，不会被截成空的。`path` 是
+/// 符号链接时换的是它最终指向的文件，链接留着，dotfiles 管理器靠它；原文件的权限照旧。目录要已经有了。
+pub fn replace_file(path: &Path, contents: &[u8]) -> std::io::Result<()> {
+    use std::{
+        io::Write as _,
+        sync::atomic::{AtomicU64, Ordering},
+    };
+    static NEXT: AtomicU64 = AtomicU64::new(0);
+
+    // 不用 canonicalize：链接悬空（指向的文件还没有）时它报错，这里照样顺着链接写到它指向的地方。
+    // 40 是 Linux 和 macOS 解析链接的层数上限。
+    let mut target = path.to_owned();
+    for _ in 0..40 {
+        let Ok(link) = std::fs::read_link(&target) else { break };
+        target = target.parent().map_or_else(|| link.clone(), |dir| dir.join(&link));
+    }
+    let name = target.file_name().unwrap_or_default().to_string_lossy();
+    let temp =
+        target.with_file_name(format!(".{name}.{}.{}.tmp", std::process::id(), NEXT.fetch_add(1, Ordering::Relaxed)));
+    // 建不出临时文件时直接返回，不去删同名的那个：它不是这里建的。
+    let mut file = std::fs::OpenOptions::new().write(true).create_new(true).open(&temp)?;
+    let written = (|| {
+        if let Ok(meta) = std::fs::metadata(&target) {
+            file.set_permissions(meta.permissions())?;
+        }
+        file.write_all(contents)?;
+        file.sync_all()?;
+        std::fs::rename(&temp, &target)
+    })();
+    if written.is_err() {
+        let _ = std::fs::remove_file(&temp);
+    }
+    written
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

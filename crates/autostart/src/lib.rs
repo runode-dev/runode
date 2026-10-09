@@ -215,8 +215,8 @@ fn plist(label: &str, args: &[&str], restart_on_crash: bool) -> String {
 
 /// systemd 用户服务。`on-abnormal` 只在被信号杀掉、超时时重启，返回非零（比如抢不到宿主锁）不算。
 fn unit(exe: &Path) -> String {
-    // ExecStart 里的 % 是说明符，`"` 和 `\` 要转义。
-    let exe = exe.to_string_lossy().replace('\\', "\\\\").replace('"', "\\\"").replace('%', "%%");
+    // ExecStart 里的 % 是说明符，$ 会被当成环境变量替换，`"` 和 `\` 要转义。
+    let exe = exe.to_string_lossy().replace('\\', "\\\\").replace('"', "\\\"").replace('%', "%%").replace('$', "$$");
     format!(
         "[Unit]\nDescription=runode terminal host\n\n[Service]\nExecStart=\"{exe}\" --host\nRestart=on-abnormal\n\n\
          [Install]\nWantedBy=default.target\n"
@@ -272,6 +272,8 @@ mod tests {
     fn the_unit_quotes_the_path() {
         let unit = unit(Path::new("/home/a b/%u/runode"));
         assert!(unit.contains("ExecStart=\"/home/a b/%%u/runode\" --host\n"), "{unit}");
+        let unit = super::unit(Path::new("/opt/$HOME/run\"o\\de"));
+        assert!(unit.contains("ExecStart=\"/opt/$$HOME/run\\\"o\\\\de\" --host\n"), "{unit}");
         assert!(unit.contains("WantedBy=default.target"));
         assert!(unit.contains("\nRestart=on-abnormal\n"), "{unit}");
     }

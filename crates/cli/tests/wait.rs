@@ -93,6 +93,15 @@ fn wait_for_text_reads_the_screen_until_a_line_matches() {
     assert_eq!(reads, 3);
 }
 
+/// 大到算截止时间会溢出的超时当作不设，不 panic。
+#[test]
+fn a_huge_timeout_means_no_timeout() {
+    let fake = host("huge", at_prompt(), vec![], vec!["error: boom\n"]);
+    let (code, out, err) = run("wait 5e55 --for text ^error --timeout 1.8e19", &fake.env);
+    assert_eq!(code, exit::OK, "{err}");
+    assert_eq!(out, "error: boom\n");
+}
+
 #[test]
 fn wait_for_new_text_skips_what_is_already_there() {
     let screens = vec!["error: old\n", "error: old\nok\n", "error: old\nok\nerror: new\n"];

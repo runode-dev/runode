@@ -20,7 +20,7 @@ pub fn create_config_file(path: &Path) -> std::io::Result<()> {
         Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => {
             let text = std::fs::read_to_string(path)?;
             let filled = fill_missing_keys(&text, &locale);
-            if filled != text { std::fs::write(path, filled) } else { Ok(()) }
+            if filled != text { runode_paths::replace_file(path, filled.as_bytes()) } else { Ok(()) }
         }
         Err(err) => Err(err),
     }

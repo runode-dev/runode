@@ -4,7 +4,7 @@
 
 | 目录 | 职责 | 可以依赖 |
 | --- | --- | --- |
-| `paths` | 配置、数据和缓存放在哪：`Dirs::from_env()` 和每个文件的路径（含远程访问推送用着的广播频道） | 只有 std |
+| `paths` | 配置、数据和缓存放在哪：`Dirs::from_env()` 和每个文件的路径（含远程访问推送用着的广播频道），以及覆盖写用户手写过的文件（配置文件、`~/.codex/AGENTS.md`）的 `replace_file`：先写临时文件再改名换上，顺着符号链接写 | 只有 std |
 | `shared-types` | 各端共用的纯数据：终端帧、网格、分屏布局、agent 状态、会话对外公布的状态、终端设置、读写剪贴板的规矩（`clipboard-write`、`clipboard-read` 的取值和一次读写的上限）、输入事件 | std、serde |
 | `protocol` | 宿主进程和各个前端之间的消息：帧格式、控制消息、会话标识，请宿主在会话所在的仓库里读写 git 的消息（`git`），一个目录里能跑的 Makefile 目标和 package.json scripts（`project_tasks`），agent 等回答时推给手机的 Live Activity 的格式（`push`：attributes、content-state、APNs payload 和中转请求体），以及手机经网络连上来时的门禁（`remote`：门禁消息、签名的字节串、base64url、配对 URI，是远程访问线上格式的正式定义） | shared-types、serde、serde_json |
 | `git` | 用 git 命令行读仓库的状态、逐行改动、分支、stash 和提交图，也做暂存（含按块暂存）、丢弃、提交、切换分支、stash 和与远端同步这些操作 | 只有 std |

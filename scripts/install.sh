@@ -17,6 +17,9 @@
 set -eu
 
 repo=runode-dev/runode
+# macOS 版的 bundle id 和签名证书的 Team ID，装之前核对签名用。
+bundle_id=dev.runode.app
+team_id=5VRL2M2A3V
 
 # 命令行默认装进已经在 PATH 上、又能写的 bin 目录，装完直接能敲 runode。
 default_bin_dir() {
@@ -97,6 +100,13 @@ install_macos() {
     # ditto 解压才保留符号链接和扩展属性，签名对得上。
     ditto -x -k "$tmp/Runode.zip" "$tmp"
     [ -d "$tmp/Runode.app" ] || fail "安装包里没有 Runode.app"
+    # SHA256SUMS 和 zip 出自同一个发布，整个发布被换掉时挡不住，所以再核对签名：要求和自动更新的
+    # `requirement` 一样，是 Runode 的 Team 用 Developer ID Application 证书签的 dev.runode.app。
+    /usr/bin/codesign --verify --deep --strict -R "=anchor apple generic and identifier \"$bundle_id\" \
+and certificate 1[field.1.2.840.113635.100.6.2.6] exists \
+and certificate leaf[field.1.2.840.113635.100.6.1.13] exists \
+and certificate leaf[subject.OU] = \"$team_id\"" "$tmp/Runode.app" ||
+        fail "Runode.app 的签名对不上，不是 Runode 发布的包，不装"
 
     app_dir=${RUNODE_APP_DIR:-/Applications}
     if ! { [ -d "$app_dir" ] && [ -w "$app_dir" ]; }; then
@@ -107,13 +117,30 @@ install_macos() {
     if pgrep -xq runode 2>/dev/null; then
         say "提示：Runode 正在运行，装好后重开一次才换成新版本。"
     fi
-    # 先挪开旧的再放新的：直接覆盖会把新旧两份文件混在一起。
-    rm -rf "$app_dir/Runode.app.old"
-    [ -e "$app_dir/Runode.app" ] && mv "$app_dir/Runode.app" "$app_dir/Runode.app.old"
-    mv "$tmp/Runode.app" "$app_dir/Runode.app"
-    rm -rf "$app_dir/Runode.app.old"
+    # 直接覆盖会把新旧两份文件混在一起，所以整个换。新包先挪进目标目录里的临时名：跨卷时这一步是
+    # 拷贝，慢也可能失败，失败时旧的还没动；之后在同一个目录里改名对调，新的换不上就把旧的挪回去。
+    app=$app_dir/Runode.app
+    new=$app_dir/.Runode.app.new.$$
+    old=$app_dir/.Runode.app.old.$$
+    rm -rf "$new" "$old"
+    mv "$tmp/Runode.app" "$new" || {
+        rm -rf "$new"
+        fail "不能把 Runode.app 放进 $app_dir"
+    }
+    if [ -e "$app" ] && ! mv "$app" "$old"; then
+        rm -rf "$new"
+        fail "挪不开旧的 $app"
+    fi
+    if ! mv "$new" "$app"; then
+        rm -rf "$new"
+        if [ -e "$old" ] && ! mv "$old" "$app"; then
+            fail "换不上新的 Runode.app，旧的也没能放回原处，在 $old，把它改名回 $app 即可"
+        fi
+        fail "换不上新的 Runode.app，旧的还在原处"
+    fi
+    rm -rf "$old"
 
-    link_cli "$app_dir/Runode.app/Contents/MacOS/runode"
+    link_cli "$app/Contents/MacOS/runode"
     say "已装好 $app_dir/Runode.app，命令行在 $bin_dir/runode。打开 Runode：open -a Runode"
 }
 

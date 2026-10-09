@@ -37,13 +37,15 @@ pub fn setup(target: SetupTarget, home: &Path) -> Result<PathBuf> {
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir).with_context(|| format!("failed to create {}", dir.display()))?;
     }
-    std::fs::write(&path, SKILL).with_context(|| format!("failed to write {}", path.display()))?;
+    runode_paths::replace_file(&path, SKILL.as_bytes())
+        .with_context(|| format!("failed to write {}", path.display()))?;
     if target == SetupTarget::Codex {
         let agents = home.join(".codex/AGENTS.md");
         match std::fs::read_to_string(&agents) {
             Ok(existing) => {
                 if let Some(rest) = remove_section(&existing) {
-                    std::fs::write(&agents, rest).with_context(|| format!("failed to write {}", agents.display()))?;
+                    runode_paths::replace_file(&agents, rest.as_bytes())
+                        .with_context(|| format!("failed to write {}", agents.display()))?;
                 }
             }
             Err(err) if err.kind() == io::ErrorKind::NotFound => {}

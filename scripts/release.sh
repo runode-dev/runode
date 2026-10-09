@@ -88,7 +88,18 @@ rm Cargo.toml.bak
 # 只更新 Cargo.lock 里 workspace 自己的包的版本，不动依赖。
 cargo update --workspace
 git add Cargo.toml Cargo.lock "$notes"
+base=$(git rev-parse HEAD)
 git commit -m "chore: 发布 $tag${beta:+ beta}"
 git tag "$tag"
-git push --atomic origin main "$tag"
+if ! git push --atomic origin main "$tag"; then
+  # 推不上时撤掉这次的标签和提交、改回版本号，修好后直接重跑；更新说明留着当草稿。只在 HEAD 的上一个
+  # 确实是发版前的提交时撤，撤的也只有这里改过的文件。
+  git tag -d "$tag" >/dev/null
+  if [[ "$(git rev-parse HEAD^)" == "$base" ]]; then
+    git reset -q "$base"
+    git checkout -- Cargo.toml Cargo.lock
+    die "推送失败，已撤掉标签 $tag 和发版提交，草稿留在 $notes；修好后重新运行"
+  fi
+  die "推送失败，已删掉标签 $tag；HEAD 不是刚才的发版提交，没有撤提交，自己看一下 git log"
+fi
 echo "已推送 ${tag}，release.yml 接着构建和发布：gh run watch" >&2

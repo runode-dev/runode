@@ -46,7 +46,7 @@ impl ConfigFile {
         if let Some(dir) = path.parent() {
             std::fs::create_dir_all(dir)?;
         }
-        std::fs::write(path, self.text())
+        runode_paths::replace_file(path, self.text().as_bytes())
     }
 
     pub fn text(&self) -> String {

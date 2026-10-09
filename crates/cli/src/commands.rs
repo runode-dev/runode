@@ -444,7 +444,8 @@ fn wait_until(
     stall: Option<Duration>,
     out: &mut dyn Write,
 ) -> Result<(), Failure> {
-    let deadline = timeout.map(|timeout| Instant::now() + timeout);
+    // 大到加上去就溢出的超时（`--timeout 1.8e19`）当作不设。
+    let deadline = timeout.and_then(|timeout| Instant::now().checked_add(timeout));
     let id = watch.id;
     if watch.connection.exited(id) {
         return Err(Failure::Exited);
