@@ -233,12 +233,12 @@
             if !sources.isEmpty {
                 let runnable = model.canRunProjectTask(in: session)
                 Section(Presentation.projectTasksHeader(session)) {
-                    ForEach(sources, id: \.file) { source in
+                    ForEach(sources, id: \.self) { source in
                         Menu {
                             ForEach(source.tasks, id: \.name) { task in
                                 Button {
                                     Task {
-                                        if await model.runProjectTask(task, in: session.id) { onRun() }
+                                        if await model.runProjectTask(task, at: source.project, in: session.id) { onRun() }
                                     }
                                 } label: {
                                     Text(task.name)

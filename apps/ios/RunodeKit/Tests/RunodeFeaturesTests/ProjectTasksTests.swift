@@ -90,6 +90,29 @@ import Testing
         }
     }
 
+    /// 项目的命令要在项目目录里跑：会话在项目的子目录里时，即使停在提示符上也在旁边开一个项目目录的
+    /// 新终端跑，命令行原样粘贴；会话就在项目目录里时照旧在这个会话里跑。
+    @Test func projectTasksRunInTheProjectDirectory() async {
+        let model = model([info(sessionA)])
+        let task = ProjectTask(name: "lint", command: "cargo clippy # slow", description: "cargo clippy # slow")
+        #expect(await model.runProjectTask(task, at: dir, in: sessionA))
+        link.clearSent()
+
+        #expect(!(await model.runProjectTask(task, at: "/Users/ethan/dev", in: sessionA)))
+        guard case .open(let req, .tab, sessionA, "/Users/ethan/dev", false)? = link.sent.first, link.sent.count == 1
+        else {
+            Issue.record("expected an open in the project directory, got \(link.sent)")
+            return
+        }
+        link.clearSent()
+        model.handle(.message(.opened(req: req, id: sessionC)))
+        let typed = link.sent.drop { if case .paste = $0 { false } else { true } }
+        guard case .paste(_, sessionC, "cargo clippy # slow")? = typed.first else {
+            Issue.record("expected the command pasted as written, got \(link.sent)")
+            return
+        }
+    }
+
     /// 前台在跑别的程序（agent、vim）时在旁边开一个同目录的新终端跑，开好后打开它；终端结束了时不发。
     @Test func aBusySessionRunsTasksInANewTerminal() async {
         let busy = info(sessionA, atPrompt: false, foreground: "claude")

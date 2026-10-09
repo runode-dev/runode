@@ -84,24 +84,21 @@ pub(crate) fn list(dir: &Path) -> Result<Vec<TaskSource>, String> {
 }
 
 /// 自己加的命令文件 `file`（内容是 `text`）里给 `dir` 的两份：`dir` 所在项目的（`projects` 里是 `dir`
-/// 自己或上级的、最深的那个，在项目目录里跑，那是 `dir` 的上级时在子 shell 里 cd 过去，不改会话所在的
-/// 目录），和通用的（在 `dir` 里跑）。没有命令的那份不给；读不懂的文件当作没有。
+/// 自己或上级的、最深的那个，在 `TaskSource::project` 里跑），和通用的（在 `dir` 里跑）。命令行原样
+/// 给，不包 `(cd .. && …)`：fish 里括号是命令替换，行尾的 `#` 注释也会吃掉右括号；换目录由前端在
+/// 项目目录里开终端办。没有命令的那份不给；读不懂的文件当作没有。
 fn custom_sources(text: &str, file: &Path, dir: &Path) -> Vec<TaskSource> {
     let Ok(json) = serde_json::from_str::<serde_json::Value>(text) else {
         return Vec::new();
     };
     let source = |kind, project: Option<PathBuf>, entries: Option<&serde_json::Map<String, serde_json::Value>>| {
-        let rel = project.as_deref().and_then(|at| relative(dir, at));
         let entries: Vec<_> = entries.into_iter().flatten().filter_map(|(k, v)| Some((k, v.as_str()?))).collect();
         let truncated = entries.len() > MAX_PROJECT_TASKS;
         let tasks: Vec<_> = entries
             .into_iter()
             .take(MAX_PROJECT_TASKS)
             .map(|(name, line)| ProjectTask {
-                command: match &rel {
-                    None => line.to_owned(),
-                    Some(rel) => format!("(cd {} && {line})", quote(rel)),
-                },
+                command: line.to_owned(),
                 name: name.clone(),
                 description: Some(line.to_owned()),
             })
@@ -225,7 +222,7 @@ mod tests {
             "global": {"up": "git pull"},
             "projects": {
                 "/w": {"outer": "x"},
-                "/w/app": {"serve": "cargo run -- serve", "lint": "cargo clippy", "n": 1},
+                "/w/app": {"serve": "cargo run -- serve", "lint": "cargo clippy # slow", "n": 1},
                 "/w/other": {"no": "y"}
             }
         }"#;
@@ -244,8 +241,8 @@ mod tests {
                     file: file.into(),
                     project: Some("/w/app".into()),
                     tasks: vec![
-                        task("serve", "(cd .. && cargo run -- serve)", "cargo run -- serve"),
-                        task("lint", "(cd .. && cargo clippy)", "cargo clippy"),
+                        task("serve", "cargo run -- serve", "cargo run -- serve"),
+                        task("lint", "cargo clippy # slow", "cargo clippy # slow"),
                     ],
                     truncated: false,
                 },

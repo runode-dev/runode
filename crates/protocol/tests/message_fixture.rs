@@ -121,6 +121,13 @@ fn project_tasks() -> Vec<TaskSource> {
     };
     vec![
         TaskSource {
+            kind: TaskSourceKind::Custom,
+            file: "/Users/ethan/.runode/tasks.json".into(),
+            project: Some("/Users/ethan/dev/app".into()),
+            tasks: vec![task("lint", "cargo clippy # slow", Some("cargo clippy # slow"))],
+            truncated: false,
+        },
+        TaskSource {
             kind: TaskSourceKind::Makefile,
             file: "/Users/ethan/dev/app/Makefile".into(),
             project: None,

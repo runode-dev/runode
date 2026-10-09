@@ -677,6 +677,19 @@
       "req": 6,
       "sources": [
         {
+          "file": "/Users/ethan/.runode/tasks.json",
+          "kind": "custom",
+          "project": "/Users/ethan/dev/app",
+          "tasks": [
+            {
+              "command": "cargo clippy # slow",
+              "description": "cargo clippy # slow",
+              "name": "lint"
+            }
+          ],
+          "truncated": false
+        },
+        {
           "file": "/Users/ethan/dev/app/Makefile",
           "kind": "makefile",
           "tasks": [

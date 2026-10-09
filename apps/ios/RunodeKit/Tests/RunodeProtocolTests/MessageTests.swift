@@ -232,13 +232,17 @@ func sameJSON(_ a: Data, _ b: Data) throws -> Bool {
 
     /// 项目命令按来源分组读出来；没有说明的读成空。
     @Test func projectTasksAreGroupedBySource() throws {
-        guard case .projectTasks(let req, let dir, let sources) = try decode("project_tasks") else {
+        guard case .projectTasks(let req, let dir, var sources) = try decode("project_tasks") else {
             Issue.record("not project tasks")
             return
         }
         #expect(req == 6)
         #expect(dir == "/Users/ethan/dev/app/web")
-        #expect(sources.map(\.kind) == [.makefile, .packageJson])
+        #expect(sources.map(\.kind) == [.custom, .makefile, .packageJson])
+        let custom = sources.removeFirst()
+        #expect(custom.project == "/Users/ethan/dev/app")
+        #expect(custom.tasks == [ProjectTask(name: "lint", command: "cargo clippy # slow", description: "cargo clippy # slow")])
+        #expect(sources[0].project == nil)
         #expect(
             sources[0].tasks == [
                 ProjectTask(name: "build", command: "make -C .. build", description: "编译全部"),

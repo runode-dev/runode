@@ -5,7 +5,7 @@
 //! `{"global": {"名字": "命令行", …}, "projects": {"/项目/目录": {"名字": "命令行", …}, …}}`。宿主列出
 //! 请求的目录所在的那个项目（`projects` 里是它自己或上级的、最深的那个）的命令和通用的命令，再从请求的
 //! 目录往上找最近的 Makefile 和最近的 package.json（各找各的）；每一份是一个 `TaskSource`。每条命令的完整命令行由宿主拼好（`make -C ..`、按锁文件挑 `pnpm`、`yarn` 这类），
-//! 前端原样打进 shell 就行，不用懂各种构建工具。
+//! 前端在 `TaskSource::project`（为空时是请求的目录）里原样打进 shell 就行，不用懂各种构建工具。
 
 use std::path::PathBuf;
 
@@ -20,7 +20,8 @@ pub struct TaskSource {
     pub kind: TaskSourceKind,
     /// 文件的绝对路径。
     pub file: PathBuf,
-    /// `Custom` 的命令是给哪个项目目录的，也是它们跑的目录；别的种类为空。
+    /// `Custom` 的命令是给哪个项目目录的，也是它们跑的目录（不是请求的目录时，前端在这里开终端跑）；
+    /// 别的种类为空，在请求的目录里跑。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub project: Option<PathBuf>,
     /// 按文件里的先后，最多 `MAX_PROJECT_TASKS` 条。
@@ -51,7 +52,8 @@ pub enum TaskSourceKind {
 pub struct ProjectTask {
     /// 目标名或 script 名。
     pub name: String,
-    /// 在请求的目录里打进 shell 就能跑的完整命令行，名字里有 shell 的特殊字符时已经加了引号。
+    /// 在 `TaskSource::project`（为空时是请求的目录）里打进 shell 就能跑的完整命令行，名字里有 shell 的
+    /// 特殊字符时已经加了引号。
     pub command: String,
     /// 说明：Makefile 目标那一行 `##` 后面的话，package.json 和自己加的命令里是写下的命令本身。
     #[serde(default)]

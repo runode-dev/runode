@@ -41,11 +41,12 @@ const TASK_FILES: [&str; 9] = [
     "package-lock.json",
 ];
 
-/// 命令菜单里的一条：开一个新标签跑 `command`。
+/// 命令菜单里的一条：开一个新标签跑 `command`，在 `dir`（为空时是列命令的目录）里。
 #[derive(Clone, PartialEq, Action)]
 #[action(namespace = runode, no_json)]
 pub(super) struct RunTask {
     command: String,
+    dir: Option<PathBuf>,
 }
 
 /// 命令菜单里分组的标题：收起或展开一组，`key` 见 `group_key`。
@@ -139,7 +140,7 @@ impl WindowView {
         let Some((dir, _)) = &self.workspace().project.tasks else {
             return;
         };
-        let dir = dir.clone();
+        let dir = action.dir.clone().unwrap_or_else(|| dir.clone());
         let Some(view) = self.spawn_terminal(Some(&dir), window, cx) else {
             return;
         };
@@ -281,7 +282,7 @@ impl WindowView {
             }
             items.extend(source.tasks.iter().map(|task| {
                 let description = task.description.clone().filter(|text| *text != task.name);
-                let action = RunTask { command: task.command.clone() };
+                let action = RunTask { command: task.command.clone(), dir: source.project.clone() };
                 // 说明和命令行在行里会截断，鼠标停上去看完整的。
                 let full = match &description {
                     Some(text) => format!("{text}\n{}", task.command),
