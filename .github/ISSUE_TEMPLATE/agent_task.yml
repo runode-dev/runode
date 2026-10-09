@@ -1,0 +1,83 @@
+name: Agent-ready task
+description: A bug or change written so a coding agent can pick it up and fix it without asking questions
+labels: [agent-ready]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        An agent will read this issue and work from it alone, so be concrete.
+        It follows `AGENTS.md` for crate layering and conventions; don't repeat those here.
+  - type: input
+    id: summary
+    attributes:
+      label: One-line summary
+      placeholder: "`runode wait` returns early when the agent is idle for under a second"
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Where it lives
+      description: The crate or app you think owns the problem. Pick the closest one if unsure.
+      multiple: true
+      options:
+        - apps/desktop
+        - apps/ios
+        - crates/cli
+        - crates/host
+        - crates/terminal
+        - crates/agent-detect
+        - crates/remote-access
+        - crates/protocol
+        - crates/config
+        - crates/completion
+        - crates/prompt-highlight
+        - crates/git
+        - crates/preview
+        - crates/update
+        - crates/autostart
+        - Other / not sure
+    validations:
+      required: true
+  - type: textarea
+    id: current
+    attributes:
+      label: Current behavior
+      description: What happens now, with exact error text or output if there is any.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: How to reproduce / verify
+      description: Commands the agent can run to see the problem and to confirm the fix (a `cargo test -p runode-… <name>` line, a `runode …` command, or exact UI steps).
+      render: shell
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Done when
+      description: Checkable conditions, one per line.
+      placeholder: |
+        - [ ] The repro above no longer fails
+        - [ ] A test covers it
+        - [ ] CLI help, completion spec and skill updated if a command changed
+    validations:
+      required: true
+  - type: textarea
+    id: pointers
+    attributes:
+      label: Pointers
+      description: Functions, types or constants you suspect (identifiers, not file paths), related issues or commits.
+  - type: textarea
+    id: constraints
+    attributes:
+      label: Out of scope / constraints
+      description: What the agent must not touch or change (wire format, public API, other crates).
