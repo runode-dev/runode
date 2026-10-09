@@ -16,8 +16,8 @@ use std::{
 };
 
 use gpui::{
-    AnyElement, Axis, Context, Image, ListHorizontalSizingBehavior, MouseButton, MouseDownEvent, PromptLevel, ScrollStrategy,
-    SharedString, StyledText, Window, div, prelude::*, px, svg, uniform_list,
+    AnyElement, Axis, Context, Image, ListHorizontalSizingBehavior, MouseButton, MouseDownEvent, PromptLevel,
+    ScrollStrategy, SharedString, StyledText, Window, div, prelude::*, px, svg, uniform_list,
 };
 use runode_config::PreviewClick;
 use runode_git::{self as git, DiffRow, DiffSide, DiffView, FileStatus, HunkAction, LineKind, hunk_actionable};
@@ -25,9 +25,9 @@ use runode_preview::Span;
 use runode_shared_types::color::Rgb;
 
 use super::{
-    BODY_PADDING, Loaded, MAX_COLUMNS, Note, ROW_EXTRA_HEIGHT, gpui_format,
+    BODY_PADDING, Loaded, MAX_COLUMNS, Note, ROW_EXTRA_HEIGHT,
     body::{TEXT_RIGHT_PADDING, WRAP_SLACK, ansi_palette, highlight_style, shown_text},
-    right_fade,
+    gpui_format, right_fade,
     wrap::{WrapCache, segment},
 };
 use crate::{

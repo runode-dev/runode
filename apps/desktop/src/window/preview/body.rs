@@ -372,7 +372,6 @@ impl WindowView {
     }
 }
 
-/// 图片底下的棋盘格：透明的地方看得出来，深色背景上黑色的线条也看得清。
 /// 图片对比里两栏之间、标题和图片之间的空隙。
 const IMAGE_GAP: f32 = 12.;
 /// 图片对比里「改之前」「改之后」那一行的高度。
@@ -389,6 +388,7 @@ fn stack_images(width: f32, height: f32, sizes: &[(f32, f32)]) -> bool {
     fit(width, half(height)) > fit(half(width), height)
 }
 
+/// 图片底下的棋盘格：透明的地方看得出来，深色背景上黑色的线条也看得清。
 fn checkerboard() -> impl IntoElement {
     canvas(
         |_, _, _| {},

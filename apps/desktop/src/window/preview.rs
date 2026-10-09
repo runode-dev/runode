@@ -120,7 +120,10 @@ enum Loaded {
     /// SVG 在后台画好的位图，太小的已经放大过。
     Svg(Arc<RenderImage>),
     /// diff 标签里改动的图片：改之前和改之后，新加的没有旧图，删掉的没有新图。
-    ImageDiff { old: Option<Arc<Image>>, new: Option<Arc<Image>> },
+    ImageDiff {
+        old: Option<Arc<Image>>,
+        new: Option<Arc<Image>>,
+    },
     /// diff 标签读到的整篇 diff。
     Diff(diff::DiffContent),
     Note(Note),
