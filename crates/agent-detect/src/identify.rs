@@ -3,6 +3,9 @@
 //! 只看进程名不够：很多 agent 是 node、bun 或 python 脚本，进程名是 `node`，要看参数里跑的
 //! 是哪个脚本；有的用 `process.title` 改了 argv[0]；装在 npm 包里的要认包里入口文件的路径。
 //! 一组前台进程里先看组长，组长认不出再从整组里挑最可信的一个。
+//!
+//! `AMBIGUOUS_NAMES` 里的名字容易和别的程序撞名（`kilo` 编辑器、自己编的 `./amp`、`node cn.js`），
+//! 光名字对上不算，还要进程装在 agent 常见的安装位置，见 `installed`。
 
 use runode_shared_types::agent::AgentKind;
 
@@ -12,6 +15,8 @@ pub struct ForegroundProcess {
     pub pid: u32,
     /// 内核记的进程名。
     pub name: String,
+    /// 启动时执行的文件路径（execve 收到的那个，可能是符号链接），读不到时为 `None`。
+    pub exe: Option<String>,
     /// argv[0] 的文件名，去掉了登录 shell 的「-」前缀；程序运行中改了它（比如 node 的
     /// `process.title`）时是改过的。读不到时为 `None`。
     pub argv0: Option<String>,
@@ -29,20 +34,24 @@ pub struct ForegroundJob {
 
 /// 认出前台进程组里跑的是哪个 agent，认不出时为 `None`。
 pub fn identify_job(job: &ForegroundJob) -> Option<AgentKind> {
-    let usable =
-        |process: &ForegroundProcess, kind: AgentKind| kind != AgentKind::Letta || letta_is_interactive(process);
-    if let Some(leader) = job.processes.iter().find(|process| process.pid == job.leader)
-        && let Some(kind) = agent_from_name(&effective_name(leader))
-        && usable(leader, kind)
-    {
-        return Some(kind);
+    let usable = |process: &ForegroundProcess, name: &str, kind: AgentKind| {
+        (kind != AgentKind::Letta || letta_is_interactive(process))
+            && (!AMBIGUOUS_NAMES.contains(&lookup_name(basename(name)).as_str()) || installed(process))
+    };
+    if let Some(leader) = job.processes.iter().find(|process| process.pid == job.leader) {
+        let name = effective_name(leader);
+        if let Some(kind) = agent_from_name(&name)
+            && usable(leader, &name, kind)
+        {
+            return Some(kind);
+        }
     }
     // 组长认不出时在整组里挑：从参数里认出来的最可信，其次是进程名本身就是 agent 的，最后是
     // 一个通用的运行时或 shell 恰好叫这个名字。一样可信的取先出现的。
     let mut best: Option<(u8, AgentKind)> = None;
     for process in &job.processes {
         let name = effective_name(process);
-        let Some(kind) = agent_from_name(&name).filter(|&kind| usable(process, kind)) else {
+        let Some(kind) = agent_from_name(&name).filter(|&kind| usable(process, &name, kind)) else {
             continue;
         };
         let score = if !name.eq_ignore_ascii_case(&process.name) {
@@ -57,6 +66,39 @@ pub fn identify_job(job: &ForegroundJob) -> Option<AgentKind> {
         }
     }
     best.map(|(_, kind)| kind)
+}
+
+/// 容易和别的程序撞名的 agent 名字（查表用的名字，见 `lookup_name`）。前台进程按这些名字认出来时
+/// 还要 `installed` 成立才算 agent；别名里带 agent 字样的（`kilo-code`、`trae-cli`）不在这里。
+const AMBIGUOUS_NAMES: &[&str] = &["kilo", "cn", "amp", "pi", "vibe", "muse", "jules", "goose", "crush", "trae"];
+
+/// 进程是不是装在 agent 常见的安装位置（`install_location`）：运行时或 shell 跑脚本时看脚本，
+/// 运行时自己装在哪不算；否则看可执行文件和 argv[0]。node、bun 用 `process.title` 把 argv[0]
+/// 改成了别的名字的也算，agent 的 npm 包常这样做。
+fn installed(process: &ForegroundProcess) -> bool {
+    let argv = process.argv.as_deref().unwrap_or_default();
+    if let Some(script) = argv.first().and_then(|runtime| script_path(runtime, argv)) {
+        return install_location(script);
+    }
+    let retitled = matches!(lookup_name(&process.name).as_str(), "node" | "bun")
+        && process.argv0.as_deref().is_some_and(|argv0| !argv0.eq_ignore_ascii_case(&process.name));
+    retitled || process.exe.as_deref().into_iter().chain(argv.first().map(String::as_str)).any(install_location)
+}
+
+/// 路径（原样或顺着符号链接找到的真正文件）在包管理器装程序的地方：npm、pnpm、bun 的
+/// `node_modules`，pipx、uv 和各家安装脚本用的 `~/.local/bin`，Homebrew 的 `Cellar`。只有名字、
+/// 没有目录的不算。
+fn install_location(path: &str) -> bool {
+    let path = std::path::Path::new(path.trim_matches(['"', '\'']));
+    if path.components().count() < 2 {
+        return false;
+    }
+    let known = |path: &std::path::Path| {
+        let parts: Vec<&str> = path.iter().filter_map(|part| part.to_str()).collect();
+        parts.iter().any(|part| matches!(*part, "node_modules" | "Cellar"))
+            || parts.windows(2).any(|pair| pair == [".local", "bin"])
+    };
+    known(path) || std::fs::canonicalize(path).is_ok_and(|real| known(&real))
 }
 
 /// 按名字认 agent：命令名、路径或别名都行，不分大小写，`.exe`、`.js` 这类后缀不算。
@@ -159,17 +201,23 @@ const JS_EVAL_FLAGS: &[&str] = &["-e", "--eval", "-p", "--print"];
 
 /// 运行时或 shell 的参数里跑的那个 agent 的短名。`-e`、`-c` 这类直接给代码的不算。
 fn wrapped_agent(runtime: &str, argv: &[String]) -> Option<String> {
-    match lookup_name(basename(runtime)).as_str() {
-        "node" | "bun" => script_agent(argv, JS_EVAL_FLAGS, &[]),
-        "sh" | "bash" | "zsh" | "fish" => script_agent(argv, &["-c"], &[]),
-        name if is_python(name) => hermes_installer(argv).or_else(|| script_agent(argv, &["-c"], &["-m"])),
-        _ => None,
+    if is_python(&lookup_name(basename(runtime)))
+        && let Some(hermes) = hermes_installer(argv)
+    {
+        return Some(hermes);
     }
+    script_path(runtime, argv).and_then(agent_from_path)
 }
 
-/// 参数里要跑的脚本是哪个 agent，见 `script_index`。
-fn script_agent(argv: &[String], eval_flags: &[&str], module_flags: &[&str]) -> Option<String> {
-    script_index(argv, eval_flags, module_flags).and_then(|i| agent_from_path(&argv[i]))
+/// 运行时或 shell 的参数里要跑的脚本，见 `script_index`。
+fn script_path<'a>(runtime: &str, argv: &'a [String]) -> Option<&'a str> {
+    let i = match lookup_name(basename(runtime)).as_str() {
+        "node" | "bun" => script_index(argv, JS_EVAL_FLAGS, &[]),
+        "sh" | "bash" | "zsh" | "fish" => script_index(argv, &["-c"], &[]),
+        name if is_python(name) => script_index(argv, &["-c"], &["-m"]),
+        _ => None,
+    }?;
+    Some(&argv[i])
 }
 
 /// 参数里第一个不是选项的（或者 `--` 后面那个）就是要跑的脚本，返回它在 `argv` 里的下标。遇到
@@ -417,6 +465,7 @@ mod tests {
         ForegroundProcess {
             pid,
             name: name.into(),
+            exe: None,
             argv0: None,
             argv: Some(argv.iter().map(|arg| (*arg).to_owned()).collect()),
         }

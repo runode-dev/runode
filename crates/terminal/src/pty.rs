@@ -793,10 +793,11 @@ pub(crate) fn process_group(leader: libc::pid_t) -> Option<ForegroundJob> {
     let processes: Vec<ForegroundProcess> = group_members(leader)
         .into_iter()
         .filter_map(|pid| {
-            let argv = process_argv(pid);
+            let (exe, argv) = process_args(pid).unzip();
             Some(ForegroundProcess {
                 pid: u32::try_from(pid).ok()?,
                 name: process_name(pid)?,
+                exe: exe.filter(|exe| !exe.is_empty()),
                 argv0: argv.as_ref().and_then(|argv| argv.first()).and_then(|first| {
                     let name = first.rsplit('/').next().unwrap_or(first);
                     let name = name.strip_prefix('-').unwrap_or(name);
@@ -878,11 +879,11 @@ fn group_members(leader: libc::pid_t) -> Vec<libc::pid_t> {
     vec![leader]
 }
 
-/// 进程的全部参数，用 `sysctl(KERN_PROCARGS2)` 读：开头是参数个数，接着是可执行文件路径和
-/// 补齐用的 NUL，然后是各个参数，每个以 NUL 结尾。程序运行中改了 argv[0]（比如 node 的
-/// `process.title`）时读到的是改过的。
+/// 进程启动时的可执行文件路径和全部参数，用 `sysctl(KERN_PROCARGS2)` 读：开头是参数个数，接着是
+/// 可执行文件路径和补齐用的 NUL，然后是各个参数，每个以 NUL 结尾。程序运行中改了 argv[0]（比如
+/// node 的 `process.title`）时读到的是改过的。
 #[cfg(target_os = "macos")]
-fn process_argv(pid: libc::pid_t) -> Option<Vec<String>> {
+fn process_args(pid: libc::pid_t) -> Option<(String, Vec<String>)> {
     let mut mib = [libc::CTL_KERN, libc::KERN_PROCARGS2, pid];
     let mut size: libc::size_t = 0;
     let ok = unsafe { libc::sysctl(mib.as_mut_ptr(), 3, std::ptr::null_mut(), &mut size, std::ptr::null_mut(), 0) };
@@ -901,7 +902,8 @@ fn process_argv(pid: libc::pid_t) -> Option<Vec<String>> {
     let start = exec_end + rest[exec_end..].iter().position(|&b| b != 0)?;
     let argv: Vec<String> =
         rest[start..].split(|&b| b == 0).take(argc).map(|arg| String::from_utf8_lossy(arg).into_owned()).collect();
-    (!argv.is_empty()).then_some(argv)
+    let exe = String::from_utf8_lossy(&rest[..exec_end]).into_owned();
+    (!argv.is_empty()).then_some((exe, argv))
 }
 
 #[cfg(not(target_os = "macos"))]
@@ -910,7 +912,7 @@ fn group_members(leader: libc::pid_t) -> Vec<libc::pid_t> {
 }
 
 #[cfg(not(target_os = "macos"))]
-fn process_argv(_pid: libc::pid_t) -> Option<Vec<String>> {
+fn process_args(_pid: libc::pid_t) -> Option<(String, Vec<String>)> {
     None
 }
 

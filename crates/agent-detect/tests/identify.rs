@@ -9,6 +9,7 @@ fn process(pid: u32, name: &str, argv: &[&str]) -> ForegroundProcess {
     ForegroundProcess {
         pid,
         name: name.into(),
+        exe: None,
         argv0: None,
         argv: Some(argv.iter().map(|arg| (*arg).to_owned()).collect()),
     }
@@ -105,7 +106,7 @@ fn scripts_run_by_node_bun_python_and_shells() {
     assert_eq!(alone("node", &["node", "/usr/local/lib/node_modules/cline/bin/cline"]), Some(Cline));
     assert_eq!(alone("node", &["node", "--require", "x.js", "/opt/bin/gemini"]), Some(Gemini));
     assert_eq!(alone("node", &["node", "--", "/opt/bin/gemini"]), Some(Gemini));
-    assert_eq!(alone("bash", &["bash", "/home/user/bin/pi"]), Some(Pi));
+    assert_eq!(alone("bash", &["bash", "/home/user/.local/bin/pi"]), Some(Pi));
     assert_eq!(alone("python3.12", &["python3.12", "/home/user/.local/bin/hermes"]), Some(Hermes));
     assert_eq!(
         alone("bun", &["bun", "/home/u/.bun/install/global/node_modules/@oh-my-pi/pi-coding-agent/dist/cli.js"]),
@@ -176,5 +177,53 @@ fn symlinked_launchers_resolve_to_the_real_file() {
     let link = dir.join("launcher");
     std::os::unix::fs::symlink(&real, &link).unwrap();
     assert_eq!(alone("launcher", &[link.to_str().unwrap()]), Some(Cursor));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+fn at(exe: &str, argv: &[&str]) -> Option<AgentKind> {
+    let mut process = process(123, basename(exe), argv);
+    process.exe = Some(exe.into());
+    identify_job(&job(vec![process]))
+}
+
+fn basename(path: &str) -> &str {
+    path.rsplit('/').next().unwrap()
+}
+
+#[test]
+fn ambiguous_names_need_an_install_location() {
+    // 同名的编辑器、自己编的程序、随手写的脚本都不算。
+    assert_eq!(at("/usr/local/bin/kilo", &["kilo", "notes.txt"]), None);
+    assert_eq!(alone("kilo", &["kilo", "notes.txt"]), None);
+    assert_eq!(at("/home/user/src/amp/target/debug/amp", &["./amp"]), None);
+    assert_eq!(at("/opt/homebrew/bin/node", &["node", "cn.js"]), None);
+    assert_eq!(alone("bash", &["bash", "/home/user/bin/pi"]), None);
+    // 从 npm 全局目录、~/.local/bin、Homebrew 装的照样认。
+    assert_eq!(at("/usr/local/lib/node_modules/@kilocode/cli-darwin-arm64/bin/kilo", &["kilo"]), Some(Kilo));
+    assert_eq!(alone("node", &["node", "/usr/local/lib/node_modules/@sourcegraph/amp/bin/amp"]), Some(Amp));
+    assert_eq!(at("/home/user/.local/bin/goose", &["goose"]), Some(Goose));
+    assert_eq!(at("/opt/homebrew/Cellar/crush/0.7.0/bin/crush", &["crush"]), Some(Crush));
+    assert_eq!(alone("python3", &["python3", "/home/user/.local/bin/vibe"]), Some(MistralVibe));
+    // 带 agent 字样的别名和不撞名的 agent 不受影响。
+    assert_eq!(at("/home/user/bin/trae-cli", &["trae-cli"]), Some(Trae));
+    assert_eq!(at("/home/user/src/claude", &["claude"]), Some(Claude));
+}
+
+#[cfg(unix)]
+#[test]
+fn npm_bin_links_count_as_installed() {
+    // npm 全局的 bin 目录里是指向 node_modules 的符号链接，顺着链接找到安装位置。
+    let dir = std::env::temp_dir().join(format!("runode-agent-installed-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let package = dir.join("lib/node_modules/@sourcegraph/amp/dist");
+    std::fs::create_dir_all(&package).unwrap();
+    std::fs::create_dir_all(dir.join("bin")).unwrap();
+    std::fs::write(package.join("main.js"), "").unwrap();
+    let link = dir.join("bin/amp");
+    std::os::unix::fs::symlink(package.join("main.js"), &link).unwrap();
+    assert_eq!(alone("node", &["node", link.to_str().unwrap()]), Some(Amp));
+    let mine = dir.join("bin/kilo");
+    std::fs::write(&mine, "").unwrap();
+    assert_eq!(alone("node", &["node", mine.to_str().unwrap()]), None);
     let _ = std::fs::remove_dir_all(&dir);
 }

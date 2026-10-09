@@ -128,6 +128,13 @@ fn install_dir() -> Result<&'static Path, String> {
 fn install() -> io::Result<PathBuf> {
     let dir =
         runode_paths::Dirs::from_env().shell_integration_dir().ok_or_else(|| io::Error::other("no home directory"))?;
+    install_into(&dir)?;
+    Ok(dir)
+}
+
+/// 把脚本写进 `dir`，和二进制里一样的不重写。升级交接时旧宿主可能正好在起新 shell，所以整个换上
+/// （`runode_paths::replace_file`），不原地覆盖：shell 读到的要么是旧脚本，要么是新脚本，不会是写了一半的。
+fn install_into(dir: &Path) -> io::Result<()> {
     for (path, contents) in [
         ("zsh/.zshenv", ZSH_ENV),
         ("zsh/runode-integration.zsh", ZSH_INTEGRATION),
@@ -141,9 +148,9 @@ fn install() -> io::Result<PathBuf> {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
         }
-        std::fs::write(&path, contents)?;
+        runode_paths::replace_file(&path, contents.as_bytes())?;
     }
-    Ok(dir)
+    Ok(())
 }
 
 #[cfg(test)]
@@ -160,6 +167,29 @@ mod tests {
         assert_eq!(prepare(IntegrationMode::Off, "/bin/zsh", "cursor:steady", &mut cmd), None);
         assert_eq!(cmd.get_env("RUNODE_REPORT_TOKEN"), None);
         assert_eq!(cmd.get_env("RUNODE_SHELL_FEATURES"), None);
+    }
+
+    #[test]
+    fn scripts_are_replaced_whole_not_rewritten_in_place() {
+        let dir = std::env::temp_dir().join(format!("runode-shell-integration-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let zshenv = dir.join("zsh/.zshenv");
+        std::fs::create_dir_all(zshenv.parent().unwrap()).unwrap();
+        std::fs::write(&zshenv, "old").unwrap();
+        // 硬链接和原文件共用一个 inode：原地覆盖时它也跟着变，整个换上时它还是旧的那份。
+        let reader = dir.join("reader");
+        std::fs::hard_link(&zshenv, &reader).unwrap();
+        install_into(&dir).unwrap();
+        assert_eq!(std::fs::read_to_string(&zshenv).unwrap(), ZSH_ENV);
+        assert_eq!(std::fs::read_to_string(&reader).unwrap(), "old");
+        assert_eq!(std::fs::read_to_string(dir.join("bash/runode.bash")).unwrap(), BASH_RC);
+        let leftovers: Vec<_> = std::fs::read_dir(dir.join("zsh"))
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name())
+            .filter(|name| name.to_string_lossy().ends_with(".tmp"))
+            .collect();
+        assert!(leftovers.is_empty(), "{leftovers:?}");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
