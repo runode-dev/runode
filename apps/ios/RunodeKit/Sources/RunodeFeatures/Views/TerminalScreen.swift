@@ -47,7 +47,6 @@
                 .safeAreaInset(edge: .bottom, spacing: 0) { bottomBars }
                 .background(background.ignoresSafeArea())
                 .animation(.easeOut(duration: 0.2), value: model.isAwaitingAnswer)
-                .animation(.easeOut(duration: 0.2), value: model.keyboardVisible)
                 .navigationTitle(model.title)
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbarBackground(background.opacity(0.92), for: .navigationBar)
@@ -232,11 +231,11 @@
                         .padding(.vertical, 10)
                         .transition(.move(edge: .bottom).combined(with: .opacity))
                 }
-                // 软键盘弹出时键盘上方有一样的辅助栏，这条就收起来。尺寸跟随谁看导航栏右边的图标。
+                // 软键盘弹出时键盘上方有一样的辅助栏，这条就收起来。尺寸跟随谁看导航栏右边的图标。不加动画：
+                // 和键盘让出的地方在同一次布局里换好，终端只改一次大小；渐隐的话动画的每一帧都让宿主改一次尺寸。
                 if !model.keyboardVisible, let terminalView {
                     RestingKeyBar(terminalView: terminalView)
                         .frame(height: 44)
-                        .transition(.opacity)
                 }
             }
             .background(.bar)

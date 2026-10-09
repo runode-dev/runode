@@ -57,6 +57,14 @@
         private var lastUserScroll = ContinuousClock.now - .seconds(10)
         /// 按手机屏幕决定尺寸（网格铺满视图、不缩放）；为假时跟随电脑，按可读字号缩放。
         private var fitsPhone = false
+        /// 软键盘正在弹出或收起；停稳了为空。这时键盘、辅助栏和底部的按键栏先后让位，视图的高度一下变好
+        /// 几次，等停稳了再报「适配手机」的尺寸，宿主只改一次。
+        private var keyboardMotion: KeyboardMotion?
+        private var keyboardSettle: Task<Void, Never>?
+
+        private enum KeyboardMotion {
+            case opening, closing
+        }
 
         /// 视图顶上被叠着的东西（断线横幅）挡住的高度。网格上方的空白不够时，在滚动区顶上让出这段，
         /// 网格停在底部、被挡的几行往上拖就看得到；不改网格的尺寸，免得断线、重连时让宿主多改两次尺寸。
@@ -151,6 +159,41 @@
             registerForTraitChanges([UITraitPreferredContentSizeCategory.self]) { (view: TerminalView, _) in
                 view.contentSizeDidChange()
             }
+            let center = NotificationCenter.default
+            center.addObserver(
+                self, selector: #selector(keyboardWillShow), name: UIResponder.keyboardWillShowNotification, object: nil)
+            center.addObserver(
+                self, selector: #selector(keyboardWillHide), name: UIResponder.keyboardWillHideNotification, object: nil)
+            for name in [UIResponder.keyboardDidShowNotification, UIResponder.keyboardDidHideNotification] {
+                center.addObserver(self, selector: #selector(keyboardDidMove), name: name, object: nil)
+            }
+        }
+
+        @objc private func keyboardWillShow() {
+            keyboardWillMove(.opening)
+        }
+
+        @objc private func keyboardWillHide() {
+            keyboardWillMove(.closing)
+        }
+
+        /// 键盘要动了。自己开关键盘时在拿、交焦点之前就先调一次：SwiftUI 比这里先收到键盘的通知，先改了
+        /// 视图的大小。
+        private func keyboardWillMove(_ motion: KeyboardMotion) {
+            keyboardMotion = motion
+            keyboardSettle?.cancel()
+            // 等不到键盘停稳的通知时（拿焦点没拿成之类）一秒后照常报。
+            keyboardSettle = Task { @MainActor [weak self] in
+                try? await Task.sleep(for: .seconds(1))
+                if !Task.isCancelled { self?.keyboardDidMove() }
+            }
+        }
+
+        /// 键盘停稳了：下一次布局按停稳后的大小报尺寸（收起键盘后底部的地方要等这时才全让出来）。
+        @objc private func keyboardDidMove() {
+            keyboardSettle?.cancel()
+            keyboardMotion = nil
+            setNeedsLayout()
         }
 
         /// 动态字体或设置里的字号改了：换字号，重新排网格、算「适配手机」的尺寸。
@@ -281,11 +324,12 @@
 
         public override func layoutSubviews() {
             super.layoutSubviews()
-            if scrollView.frame != bounds {
+            let resized = scrollView.frame != bounds
+            if resized {
                 scrollView.frame = bounds
                 applyDefaultZoom()
             }
-            centerContent()
+            centerContent(stickToBottom: resized)
             reportFitSize()
         }
 
@@ -386,12 +430,15 @@
 
         /// 网格比屏幕窄时左右居中；比屏幕矮出整行时贴着底边（靠近键盘和底栏，新输出在那里），上面空着的
         /// 地方露出视图的背景，也就是终端的背景色。不足一行的零头（行数是按视图高度向下取整的）留在底下，
-        /// 不在网格上面空出半行。适配手机时网格马上会改成正好铺满视图，多出的整行只是在等宿主改尺寸（底栏换
-        /// 成键盘、收起键盘时视图变高），贴着顶边放：贴底边的话网格先往下跳一行，改完尺寸又跳回来。
+        /// 不在网格上面空出半行。适配手机时网格马上会改成正好铺满视图，多出的整行只是在等宿主改尺寸（收起
+        /// 键盘时视图变高）：上面有回滚历史时，宿主改完尺寸把历史拉下来补在上面，照样贴底边，网格跟着键盘往下
+        /// 滑；没有历史时新的行加在底下，贴着顶边放，免得网格先往下跳、改完尺寸又跳回来。弹出键盘时底部的
+        /// 按键栏比键盘先让开，视图先变高一下，也贴着顶边，网格不先往下沉再跟着键盘上来。
         private func centerContent(stickToBottom: Bool = false) {
             let horizontal = max(0, (scrollView.bounds.width - scrollView.contentSize.width) / 2)
             let rowHeight = grid.font.cellHeight * scrollView.zoomScale
-            var slack = fitsPhone ? 0 : scrollView.bounds.height - scrollView.contentSize.height
+            let waitsForRows = fitsPhone && (grid.screen.above.isEmpty || keyboardMotion == .opening)
+            var slack = waitsForRows ? 0 : scrollView.bounds.height - scrollView.contentSize.height
             if rowHeight > 0 { slack = (slack / rowHeight).rounded(.down) * rowHeight }
             let top = max(0, slack, topObstruction)
             let inset = UIEdgeInsets(top: top, left: horizontal, bottom: 0, right: 0)
@@ -442,7 +489,7 @@
         }
 
         private func reportFitSize() {
-            guard bounds.width > 0, bounds.height > 0 else { return }
+            guard bounds.width > 0, bounds.height > 0, keyboardMotion == nil else { return }
             let size = fitSize
             guard size != lastFitSize else { return }
             lastFitSize = size
@@ -595,6 +642,7 @@
 
         @discardableResult
         public override func becomeFirstResponder() -> Bool {
+            if !isFirstResponder { keyboardWillMove(.opening) }
             let became = super.becomeFirstResponder()
             grid.hasKeyboardFocus = isFirstResponder
             delegate?.terminalView(self, keyboardVisible: isFirstResponder)
@@ -603,6 +651,7 @@
 
         @discardableResult
         public override func resignFirstResponder() -> Bool {
+            if isFirstResponder { keyboardWillMove(.closing) }
             let resigned = super.resignFirstResponder()
             grid.hasKeyboardFocus = isFirstResponder
             delegate?.terminalView(self, keyboardVisible: isFirstResponder)
