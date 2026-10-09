@@ -2,6 +2,7 @@
 //! 检查、清场、让会话停下来交出状态（`Inbox::Prepare`）、发出、等新宿主回话，然后提交或者回滚。
 
 use std::{
+    collections::HashMap,
     fs::File,
     io::{self, BufReader},
     ops::RangeInclusive,
@@ -19,13 +20,14 @@ use runode_protocol::{
     BuildId, ClientMsg, FrameError, FrameKind, GoodbyeReason, HANDOFF_FORMAT, HandoffPart, HandoffRefusal, HostMsg,
     ReportToken, RunningCommand, SessionId, encode_part, read_frame,
 };
-use runode_terminal::{fd_passing, host_session::SessionExport};
+use runode_shared_types::shell::IntegrationMode;
+use runode_terminal::{fd_passing, host_session::SessionExport, pty::PtyHandoff};
 
-use super::{kill_peer, ms};
+use super::{kill_peer, ms, peer_pid, running};
 use crate::{
-    Shared, Stopped,
+    Shared, SpawnOptions, Stopped,
     server::{ListenControl, Outbox},
-    session::{Exported, Handle, Inbox, Prepared},
+    session::{self, Adopted, Exported, Handle, Inbox, Prepared},
 };
 
 /// 各个会话停下来交出状态最多等这么久；它们并行地停，每个最多花一秒多编快照。
@@ -69,7 +71,7 @@ pub(crate) fn give(
     tracing::info!("handing {} sessions over to a new host", ids.len());
 
     // 各个会话并行地停下来、交出状态。
-    let Ready { mut handed, gone } = match prepare(&giving.handles) {
+    let Ready { handed, gone } = match prepare(&giving.handles) {
         Ok(ready) => ready,
         Err(reason) => {
             out.control(&HostMsg::HandoffRefused { reason: HandoffRefusal::Unknown });
@@ -89,13 +91,15 @@ pub(crate) fn give(
         return;
     }
     let stream = *reader.get_ref();
+    // 接受连接的一方读到的对端进程号一直准，见 `peer_pid`；提交后它没确认时要靠它确认它不在了。
+    let successor = peer_pid(stream);
     // 发出会话和等 `HandoffReady` 合起来最多 `deadline`：新宿主卡住不读时发送也会卡住，到期时
     // 看门狗杀掉它、断开连接，发送随之失败。
     let deadline = *shared.handoff_deadline.lock().unwrap_or_else(PoisonError::into_inner);
     let until = Instant::now() + deadline;
     let sent = match Watchdog::arm(stream, until) {
         Ok(watchdog) => {
-            let sent = send_parts(shared, stream, &giving, handed.iter_mut());
+            let sent = send_parts(shared, stream, &giving, handed.iter());
             if watchdog.disarm() {
                 Err(io::Error::new(io::ErrorKind::TimedOut, format!("the new host took more than {deadline:?}")))
             } else {
@@ -108,8 +112,10 @@ pub(crate) fn give(
         giving.roll_back(shared, started, &format!("failed to send the sessions: {err}"));
         return;
     }
-    // 复制的 master 都发出去了，这边的关掉。
-    let handed: Vec<SessionId> = handed.into_iter().map(|(id, _)| id).collect();
+    // 复制的 master 都发出去了，这边的那份留到新宿主确认接手（`HandoffDone`）：提交时会话交出自己
+    // 那份，新宿主这时死掉的话只剩它握着 PTY，见 `reclaim`。
+    let kept = handed;
+    let handed: Vec<SessionId> = kept.iter().map(|(id, _)| *id).collect();
     let sent_at = Instant::now();
 
     match wait_for_ready(stream, reader, until) {
@@ -151,10 +157,15 @@ pub(crate) fn give(
             stream.set_write_timeout(Some(DONE_TIMEOUT))?;
             fd_passing::send_with_fds(stream, &data, &[])
         });
+    let commit_sent = sent.is_ok();
     if let Err(err) = sent {
         tracing::error!("failed to send the commit to the new host: {err}");
     }
     let done = wait_for_done(stream, reader);
+    if !done && reclaim(shared, kept, pending, successor, commit_sent) {
+        giving.roll_back(shared, started, "the new host did not confirm taking the sessions over; took them back");
+        return;
+    }
     {
         let mut peers = shared.peers();
         peers.stop = Some(Stopped::Handoff);
@@ -174,7 +185,7 @@ pub(crate) fn give(
         ms(sent_at - prepared_at),
         ms(ready_at - sent_at),
         ms(ready_at.elapsed()),
-        if done { "" } else { "; the new host did not confirm" },
+        if done { "" } else { "; the new host did not confirm and could not be stopped" },
     );
 }
 
@@ -280,12 +291,12 @@ fn prepare(handles: &[(SessionId, Handle)]) -> Result<Ready, String> {
     Ok(ready)
 }
 
-/// 发 `HandoffPart::Host` 和各个会话的 `HandoffPart::Session`。
+/// 发 `HandoffPart::Host` 和各个会话的 `HandoffPart::Session`。交出的东西都留着，见 `reclaim`。
 fn send_parts<'a>(
     shared: &Shared,
     stream: &UnixStream,
     giving: &Giving,
-    handed: impl ExactSizeIterator<Item = &'a mut (SessionId, Box<Exported>)>,
+    handed: impl ExactSizeIterator<Item = &'a (SessionId, Box<Exported>)>,
 ) -> io::Result<()> {
     let (theme, clipboard) = {
         let registry = shared.registry();
@@ -303,11 +314,9 @@ fn send_parts<'a>(
     };
     send_part(stream, &host, &[], &[giving.listener.as_fd(), giving.lock.as_fd()])?;
     for (id, exported) in handed {
-        let snapshot = exported.snapshot.take().unwrap_or_default();
-        let replay = std::mem::take(&mut exported.replay);
-        let master = exported.master.take();
-        let fds: Vec<BorrowedFd<'_>> = master.iter().map(|fd| fd.as_fd()).collect();
-        send_part(stream, &session_part(*id, exported), &[&snapshot, &replay], &fds)?;
+        let snapshot = exported.snapshot.as_deref().unwrap_or_default();
+        let fds: Vec<BorrowedFd<'_>> = exported.master.iter().map(|fd| fd.as_fd()).collect();
+        send_part(stream, &session_part(*id, exported), &[snapshot, &exported.replay], &fds)?;
     }
     Ok(())
 }
@@ -437,7 +446,8 @@ fn release(handles: &[(SessionId, Handle)], handed: &[SessionId]) -> Vec<(Sessio
     pending
 }
 
-/// 提交后等新宿主回 `HandoffDone`，它断开也算；最多等 `DONE_TIMEOUT`。等到了返回 true。
+/// 提交后等新宿主回 `HandoffDone`，最多等 `DONE_TIMEOUT`。等到了返回 true；没回就断开（新宿主
+/// 总是先回 `HandoffDone` 再断开，见 `Host::take_over`）、超时或者说了别的都是 false。
 fn wait_for_done(stream: &UnixStream, reader: &mut BufReader<&UnixStream>) -> bool {
     if stream.set_read_timeout(Some(DONE_TIMEOUT)).is_err() {
         return false;
@@ -446,7 +456,88 @@ fn wait_for_done(stream: &UnixStream, reader: &mut BufReader<&UnixStream>) -> bo
         Ok(Some(frame)) if frame.kind == FrameKind::Control => {
             matches!(frame.message::<ClientMsg>(), Ok(ClientMsg::HandoffDone))
         }
-        Ok(None) => true,
-        Ok(Some(_)) | Err(_) => false,
+        Ok(_) | Err(_) => false,
     }
+}
+
+/// 提交以后新宿主没确认接手（见 `wait_for_done`）：多半是它死了，或者没收到 `Commit`、自己放弃了，
+/// 这时 PTY 只剩这边留着的那份 master（`kept`）。先杀掉它（`successor`）、等它不在了，再用留着的
+/// master 和交出去的状态把会话接回来，和新宿主接手一样（`session::adopt`），返回 true。认不出、
+/// 杀不掉新宿主时不接回、返回 false：两个宿主一起读写同一个 PTY 比丢掉更糟。
+///
+/// 接回的屏幕停在交出时，之后的输出还在 PTY 里；新宿主打开闸门后读走的那些丢了。没写进 PTY 的
+/// 输入（`pending`）只在 `Commit` 没发出去（`commit_sent` 为假）时写回：发出去了的话新宿主可能
+/// 已经写了，再写一遍就重了。
+fn reclaim(
+    shared: &Shared,
+    kept: Vec<(SessionId, Box<Exported>)>,
+    pending: Vec<(SessionId, Vec<u8>)>,
+    successor: Option<libc::pid_t>,
+    commit_sent: bool,
+) -> bool {
+    // SAFETY: 没有参数，总是成功。
+    let own = unsafe { libc::getpid() };
+    let Some(pid) = successor.filter(|pid| *pid > 1 && *pid != own) else {
+        tracing::error!("the new host did not confirm the handoff and cannot be told apart; leaving the sessions");
+        return false;
+    };
+    // SAFETY: 只发信号。
+    if running(pid) && unsafe { libc::kill(pid, libc::SIGKILL) } != 0 {
+        tracing::warn!("failed to kill the new host {pid}: {}", io::Error::last_os_error());
+    }
+    let until = Instant::now() + super::take::EXIT_GRACE;
+    while running(pid) {
+        if Instant::now() >= until {
+            tracing::error!(
+                "the new host {pid} did not confirm the handoff and is still running; leaving the sessions"
+            );
+            return false;
+        }
+        thread::sleep(Duration::from_millis(10));
+    }
+    let mut pending: HashMap<SessionId, Vec<u8>> = if commit_sent {
+        if !pending.is_empty() {
+            tracing::warn!("dropped input the new host may already have written to {} sessions", pending.len());
+        }
+        HashMap::new()
+    } else {
+        pending.into_iter().collect()
+    };
+    for (id, exported) in kept {
+        match take_back(shared, id, *exported) {
+            Ok(handle) => {
+                shared.registry().sessions.insert(id, handle.clone());
+                handle.send(Inbox::Open(pending.remove(&id).unwrap_or_default()));
+            }
+            Err(err) => tracing::error!("cannot take session {id} back: {err:#}"),
+        }
+    }
+    true
+}
+
+/// 用交出去的状态和留着的 master 把会话 `id` 重新建起来，PTY 停在闸门上，等 `Inbox::Open`。还没
+/// 启动 shell 的没有 PTY，和新宿主一样重开一个等 `Inbox::Start`。
+fn take_back(shared: &Shared, id: SessionId, exported: Exported) -> anyhow::Result<Handle> {
+    let Exported { export, master, pid, snapshot, replay, redactor, shell } = exported;
+    let setup = shared.setup(id, export.settings.clone());
+    let (Some(master), Some(pid)) = (master, pid) else {
+        let options = SpawnOptions {
+            size: export.size,
+            cwd: export.start_dir,
+            integration: IntegrationMode::Off,
+            start: false,
+            shell,
+            settings: None,
+        };
+        return session::spawn(setup, options);
+    };
+    let handoff = PtyHandoff {
+        master,
+        pid,
+        size: export.size,
+        report_token: export.report_token.clone(),
+        pending_input: Vec::new(),
+    };
+    let adopted = Adopted { handoff, export, snapshot, replay, redactor, shell };
+    Ok(session::adopt(setup, adopted)?.finish()?.0)
 }

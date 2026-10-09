@@ -11,12 +11,15 @@
 //! 读的线程不等会话线程回话：列会话、读屏幕先在读的线程里把请求按先后送到会话线程，再起一个
 //! 短命的线程等回话、交给 `Outbox`，同一条连接上之后的输入照常转发。一条连接上这样在等的请求
 //! 最多 `MAX_WAITING` 个，再多的当场回 `Error`，前端狂发也堆不起线程；git 请求另算一份名额，
-//! 联网的 git 操作卡住时列会话、读屏幕照常。开会话、列目录
-//! （`ClientMsg::ListDirs`）和列项目命令（`ClientMsg::ListProjectTasks`）还在读的线程里办（开伪终端、
-//! 启动 shell 要几毫秒，读一次目录项、几个小文件更快）。
+//! 联网的 git 操作卡住时列会话、读屏幕照常。列目录（`ClientMsg::ListDirs`）和列项目命令
+//! （`ClientMsg::ListProjectTasks`）也另起线程办、另算一份名额：断掉的网络挂载上 stat 会一直卡住，
+//! 卡住的只是那个线程。积压过了上限的连接，列会话、读屏幕、连上会话和 git 请求都当场回 `Error`，
+//! 不再往积压上加回话。开会话还在读的线程里办（开伪终端、启动 shell 要几毫秒）。
 //!
 //! 能连上 socket 就能读写所有终端：socket 放在只有自己能进的目录里（见调用方建目录的方式），
-//! 连上来的进程也要是同一个用户的。
+//! 连上来的进程也要是同一个用户的。`Hello` 里的 `ClientKind` 是前端自报的，宿主不核实：终端里的
+//! 程序都拿得到 `RUNODE_SOCKET`，自称 `Desktop` 就能登记为界面、改宿主的选项。按种类拦的那些请求
+//! 只防误用（比如命令行误发），不防同一个用户的恶意程序，那本来也挡不住。
 
 use std::{
     collections::HashMap,
@@ -59,7 +62,8 @@ const SNAPSHOT_CHUNK: usize = 1 << 20;
 const OUTBOX_LIMIT: usize = 32 << 20;
 /// 等会话线程回话（列会话、读屏幕）的最长时间。
 pub(crate) const REPLY_TIMEOUT: Duration = Duration::from_secs(5);
-/// 一条连接上最多同时有这么多列会话、读屏幕的请求在等回话，读写 git 的请求另有这么多，见 `Waiting`。
+/// 一条连接上最多同时有这么多列会话、读屏幕的请求在等回话，读写 git 的请求、列目录和列项目命令的
+/// 请求各另有这么多，见 `Waiting`。
 const MAX_WAITING: usize = 16;
 /// 前端给的终端行列数最多这么大，再大的开会话、连上、改尺寸都回 `Error`：几万见方的网格会让
 /// 会话线程卡住、内存涨到 GB 级。
@@ -76,7 +80,8 @@ const WRITE_BUFFER: usize = 256 << 10;
 pub(crate) struct Peers {
     /// 连着的连接，按编号；`out` 在连接的写线程起好之前为 `None`。
     connections: HashMap<u64, Peer>,
-    /// 说自己是 `ClientKind::Desktop` 的连接，按 `Hello` 的先后；最后一个是现在的界面。
+    /// 说自己是 `ClientKind::Desktop` 的连接，按 `Hello` 的先后；最后一个是现在的界面。种类是自报的，
+    /// 见模块文档。
     desktops: Vec<u64>,
     /// 转给界面、还没回话的请求，按 `HostMsg::UiRequest::ui`。
     pending: HashMap<u64, Pending>,
@@ -657,6 +662,7 @@ fn serve(shared: &Arc<Shared>, id: u64, stream: UnixStream, check_peer: bool) {
         next_channel: 1,
         waiting: Waiting::default(),
         git_waiting: Waiting::default(),
+        files_waiting: Waiting::default(),
         git: None,
     };
     connection.run(&mut BufReader::new(&stream));
@@ -805,6 +811,8 @@ struct Connection {
     waiting: Waiting,
     /// 在排队或在办的 git 请求，和 `waiting` 分开算：推送、拉取卡在网络上时不占列会话、读屏幕的名额。
     git_waiting: Waiting,
+    /// 在另起的线程里读文件系统的请求（列目录、列项目命令），也和 `waiting` 分开算，见 `read_files`。
+    files_waiting: Waiting,
     /// 办 git 请求的工作线程，第一次要时才起。
     git: Option<GitWorker>,
 }
@@ -919,6 +927,10 @@ impl Connection {
         match message {
             ClientMsg::Hello { .. } => self.error(None, None, "already said hello".into()),
             ClientMsg::ListSessions => {
+                if self.out.backed_up() {
+                    self.error(None, None, BACKED_UP.into());
+                    return;
+                }
                 let Some(slot) = self.waiting.enter() else {
                     self.error(None, None, "too many requests are waiting for an answer".into());
                     return;
@@ -970,7 +982,8 @@ impl Connection {
                 self.shared.deliver(id, Inbox::ClearScreen);
             }
             ClientMsg::SetTheme { settings } => self.shared.set_theme(settings),
-            // 记不记命令历史是用户在 app 里的设置，别的程序不能改。
+            // 记不记命令历史是用户在 app 里的设置，只认说自己是界面的连接。种类是自报的，这只防
+            // 命令行之类误发，不防同一个用户的程序冒充界面，见模块文档。
             ClientMsg::SetOptions { record_history, clipboard } => {
                 if self.kind == ClientKind::Desktop {
                     self.shared.record_history.store(record_history, Ordering::Relaxed);
@@ -1018,18 +1031,14 @@ impl Connection {
                     self.error(None, None, "only the runode app reports its layout".into());
                 }
             }
-            ClientMsg::ListDirs { req, path } => match browse::list_dirs(path) {
-                Ok(browse::Listing { path, dirs, truncated }) => {
-                    self.out.control(&HostMsg::Dirs { req, path, dirs, truncated });
-                }
-                Err(message) => self.error(Some(req), None, message),
-            },
-            ClientMsg::ListProjectTasks { req, dir } => match project_tasks::list(&dir) {
-                Ok(sources) => {
-                    self.out.control(&HostMsg::ProjectTasks { req, dir, sources });
-                }
-                Err(message) => self.error(Some(req), None, message),
-            },
+            ClientMsg::ListDirs { req, path } => self.read_files(req, "host-list-dirs", move || {
+                let browse::Listing { path, dirs, truncated } = browse::list_dirs(path)?;
+                Ok(HostMsg::Dirs { req, path, dirs, truncated })
+            }),
+            ClientMsg::ListProjectTasks { req, dir } => self.read_files(req, "host-list-project-tasks", move || {
+                let sources = project_tasks::list(&dir)?;
+                Ok(HostMsg::ProjectTasks { req, dir, sources })
+            }),
             ClientMsg::Git { req, id, request } => self.git(req, id, request),
             ClientMsg::UiReply { ui, reply } => self.ui_reply(ui, *reply),
             // 读写剪贴板是宿主替会话里的程序请界面办的，前端不能直接要。
@@ -1202,9 +1211,29 @@ impl Connection {
         });
     }
 
+    /// 另起线程办一件要读文件系统的请求（列目录、列项目命令），占 `files_waiting` 的一个名额：
+    /// 断掉的网络挂载上 stat、读目录会一直卡住，卡住的不能是读线程。`answer` 的 `Err` 回成带着
+    /// `req` 的 `Error`。
+    fn read_files(&self, req: u32, name: &str, answer: impl FnOnce() -> Result<HostMsg, String> + Send + 'static) {
+        let Some(slot) = self.files_waiting.enter() else {
+            self.error(Some(req), None, "too many requests are waiting for an answer".into());
+            return;
+        };
+        let out = self.out.clone();
+        answer_later(name, move || {
+            let message = answer().unwrap_or_else(|message| HostMsg::Error { req: Some(req), id: None, message });
+            out.control(&message);
+            drop(slot);
+        });
+    }
+
     /// 在会话 `id` 所在的仓库里办 git 请求：向会话线程要它的目录，连同请求交给这条连接的 git
     /// 工作线程，见 `git` 模块。
     fn git(&mut self, req: u32, id: SessionId, request: GitRequest) {
+        if self.out.backed_up() {
+            self.error(Some(req), None, BACKED_UP.into());
+            return;
+        }
         let Some(slot) = self.git_waiting.enter() else {
             self.error(Some(req), None, "too many requests are waiting for an answer".into());
             return;
@@ -1275,7 +1304,8 @@ impl Connection {
     }
 }
 
-/// 前端读得太慢、`Outbox` 积压过了上限时，连上会话、读屏幕不再往里排快照和回话，回这句。
+/// 前端读得太慢、`Outbox` 积压过了上限时，连上会话、读屏幕、列会话和 git 请求不再往里排快照和
+/// 回话，回这句。
 const BACKED_UP: &str = "the connection is backed up; read what the host already sent first";
 
 /// 前端给的尺寸行列都不超过 `MAX_GRID` 时为 `Ok`。
@@ -1308,299 +1338,4 @@ fn session_sink(id: SessionId, channel: u32, meta_only: bool, out: Outbox) -> Ev
 }
 
 #[cfg(test)]
-mod tests {
-    use runode_protocol::{BuildId, Caps};
-    use runode_shared_types::shell::IntegrationMode;
-
-    use super::*;
-
-    const SIZE: GridSize = GridSize { cols: 20, rows: 4, cell_width_px: 8, cell_height_px: 16 };
-    const WAIT: Duration = Duration::from_secs(10);
-
-    fn send(stream: &mut UnixStream, message: &ClientMsg) {
-        let frame = Frame::control(message).unwrap();
-        write_frame(stream, frame.kind, 0, &frame.payload).unwrap();
-    }
-
-    /// 后台线程把读到的帧交过来，测试按超时等。
-    fn frames(stream: &UnixStream) -> mpsc::Receiver<Frame> {
-        let mut reader = stream.try_clone().unwrap();
-        let (tx, rx) = mpsc::channel();
-        thread::spawn(move || {
-            while let Ok(Some(frame)) = read_frame(&mut reader) {
-                if tx.send(frame).is_err() {
-                    break;
-                }
-            }
-        });
-        rx
-    }
-
-    fn message(frames: &mpsc::Receiver<Frame>) -> HostMsg {
-        loop {
-            let frame = frames.recv_timeout(WAIT).expect("timed out");
-            if frame.kind == FrameKind::Control {
-                return frame.message().unwrap();
-            }
-        }
-    }
-
-    fn options(shell: &str) -> SpawnOptions {
-        SpawnOptions {
-            size: SIZE,
-            cwd: None,
-            integration: IntegrationMode::Off,
-            start: true,
-            shell: Some(shell.into()),
-            settings: None,
-        }
-    }
-
-    /// 经 `Host::connect_pair` 连上、按 `client` 握手，返回连接和读到的帧。
-    fn greet(host: &Host, client: ClientKind) -> (UnixStream, mpsc::Receiver<Frame>) {
-        let mut stream = host.connect_pair().unwrap();
-        let frames = frames(&stream);
-        send(
-            &mut stream,
-            &ClientMsg::Hello {
-                protocol: PROTOCOL_VERSION,
-                build: BuildId("test".into()),
-                client,
-                caps: Caps::default(),
-                session: None,
-                device: None,
-            },
-        );
-        assert!(matches!(message(&frames), HostMsg::Welcome { .. }));
-        (stream, frames)
-    }
-
-    /// 开一个线程卡在不返回的 `Subscribe::start` 里、答不了话的会话；丢掉返回的发送端时放开。
-    fn stuck_session(host: &Host) -> (SessionId, mpsc::Sender<()>) {
-        let stuck = host.shared.spawn(options("/bin/cat")).unwrap();
-        let (release, released) = mpsc::channel::<()>();
-        let (entered, stuck_now) = mpsc::channel();
-        let start = Box::new(move |_: Screen| {
-            let _ = entered.send(());
-            // 卡住会话线程，直到测试放开（丢掉发送的一端）。
-            let _ = released.recv();
-            None
-        });
-        let subscribe =
-            Subscribe { connection: 0, size: None, mode: AttachMode::MetaOnly, start, desktop: false, device: None };
-        assert!(host.shared.deliver(stuck, Inbox::Subscribe(subscribe)));
-        stuck_now.recv_timeout(WAIT).unwrap();
-        (stuck, release)
-    }
-
-    /// 列会话、读屏幕要等会话线程回话，等的时候同一条连接上的输入照常转发：这里有个会话的线程
-    /// 卡在一个不返回的 `Subscribe::start` 里，答不了话。
-    #[test]
-    fn waiting_for_answers_does_not_hold_up_input() {
-        let host = Host::new(BuildId("test".into()));
-        let (stuck, release) = stuck_session(&host);
-        let (mut stream, frames) = greet(&host, ClientKind::Cli);
-        let other = host.shared.spawn(options("/bin/cat")).unwrap();
-        send(&mut stream, &ClientMsg::Attach { id: other, size: None, mode: AttachMode::VtReplay });
-        let channel = loop {
-            if let HostMsg::Attached { channel, .. } = message(&frames) {
-                break channel;
-            }
-        };
-        send(&mut stream, &ClientMsg::ListSessions);
-        send(&mut stream, &ClientMsg::ReadScreen { id: stuck, lines: None, command: None });
-        write_frame(&mut stream, FrameKind::Input, channel, b"through\r").unwrap();
-        let mut output = Vec::new();
-        while !output.windows(7).any(|w| w == b"through") {
-            let frame = frames.recv_timeout(WAIT).expect("timed out");
-            match frame.kind {
-                FrameKind::Output if frame.channel == channel => output.extend_from_slice(&frame.payload),
-                FrameKind::Control => assert!(
-                    !matches!(frame.message().unwrap(), HostMsg::SessionList { .. } | HostMsg::ScreenText { .. }),
-                    "answered while a session was stuck"
-                ),
-                _ => {}
-            }
-        }
-        drop(release);
-        let mut answers = Vec::new();
-        while answers.len() < 2 {
-            match message(&frames) {
-                HostMsg::SessionList { sessions } => {
-                    assert_eq!(sessions.len(), 2);
-                    answers.push("list");
-                }
-                HostMsg::ScreenText { id, .. } => {
-                    assert_eq!(id, stuck);
-                    answers.push("read");
-                }
-                _ => {}
-            }
-        }
-        host.shared.kill_all();
-    }
-
-    /// 一条连接上在等回话的请求有上限：超出的当场回 `Error`，回完话的名额放开，之后的请求照常。
-    #[test]
-    fn too_many_waiting_requests_are_refused() {
-        let host = Host::new(BuildId("test".into()));
-        let (stuck, release) = stuck_session(&host);
-        let (mut stream, frames) = greet(&host, ClientKind::Cli);
-        for _ in 0..=MAX_WAITING {
-            send(&mut stream, &ClientMsg::ReadScreen { id: stuck, lines: None, command: None });
-        }
-        match message(&frames) {
-            HostMsg::Error { id: Some(id), message, .. } => {
-                assert_eq!(id, stuck);
-                assert!(message.contains("too many"), "{message}");
-            }
-            other => panic!("expected the extra request to be refused: {other:?}"),
-        }
-        drop(release);
-        let mut answered = 0;
-        while answered < MAX_WAITING {
-            match message(&frames) {
-                HostMsg::ScreenText { id, .. } if id == stuck => answered += 1,
-                other => panic!("unexpected {other:?}"),
-            }
-        }
-        send(&mut stream, &ClientMsg::ListSessions);
-        assert!(matches!(message(&frames), HostMsg::SessionList { .. }));
-        host.shared.kill_all();
-    }
-
-    /// git 请求的名额和列会话、读屏幕的分开算：排满了卡住的 git 请求，同一条连接上照样能读屏幕；
-    /// git 请求自己超出上限的当场回 `Error`。
-    #[test]
-    fn stuck_git_requests_do_not_take_the_other_slots() {
-        let host = Host::new(BuildId("test".into()));
-        let (stuck, release) = stuck_session(&host);
-        let other = host.shared.spawn(options("/bin/cat")).unwrap();
-        let (mut stream, frames) = greet(&host, ClientKind::Cli);
-        // 会话答不了它的目录，git 工作线程卡在第一件上，后面的排着，名额都占着。
-        for req in 0..=MAX_WAITING as u32 {
-            send(&mut stream, &ClientMsg::Git { req, id: stuck, request: GitRequest::Status });
-        }
-        match message(&frames) {
-            HostMsg::Error { req: Some(req), message, .. } => {
-                assert_eq!(req, MAX_WAITING as u32);
-                assert!(message.contains("too many"), "{message}");
-            }
-            other => panic!("expected the extra git request to be refused: {other:?}"),
-        }
-        send(&mut stream, &ClientMsg::ReadScreen { id: other, lines: None, command: None });
-        assert!(matches!(message(&frames), HostMsg::ScreenText { id, .. } if id == other));
-        drop(release);
-        host.shared.kill_all();
-    }
-
-    /// 前端不读、积压过了上限时，连上会话和读屏幕直接回 `Error`，不再往积压上加快照和回话。
-    #[test]
-    fn a_backed_up_connection_gets_no_more_snapshots_or_screens() {
-        let host = Host::new(BuildId("test".into()));
-        let id = host.shared.spawn(options("/bin/cat")).unwrap();
-        let (mut stream, frames) = greet(&host, ClientKind::Cli);
-        // 假装积压过了上限：写的线程写出去时只减它真写的那些，假的这份一直在。
-        let out = host.shared.peers().connections.values().find_map(|peer| peer.out.clone()).unwrap();
-        out.queued.fetch_add(OUTBOX_LIMIT + 1, Ordering::Relaxed);
-        send(&mut stream, &ClientMsg::Attach { id, size: None, mode: AttachMode::VtReplay });
-        send(&mut stream, &ClientMsg::ReadScreen { id, lines: None, command: None });
-        for _ in 0..2 {
-            match message(&frames) {
-                HostMsg::Error { id: Some(errored), message, .. } => {
-                    assert_eq!(errored, id);
-                    assert!(message.contains("backed up"), "{message}");
-                }
-                other => panic!("expected the request to be refused: {other:?}"),
-            }
-        }
-        out.queued.fetch_sub(OUTBOX_LIMIT + 1, Ordering::Relaxed);
-        send(&mut stream, &ClientMsg::ReadScreen { id, lines: None, command: None });
-        assert!(matches!(message(&frames), HostMsg::ScreenText { .. }));
-        host.shared.kill_all();
-    }
-
-    /// 发请求的连接断开后，它转给界面、界面还没回话的请求跟着撤掉；界面之后再回话也只是丢掉。
-    #[test]
-    fn requests_from_a_closed_connection_are_forgotten() {
-        let host = Host::new(BuildId("test".into()));
-        let (mut desktop, desktop_frames) = greet(&host, ClientKind::Desktop);
-        let (mut cli, _cli_frames) = greet(&host, ClientKind::Cli);
-        send(&mut cli, &ClientMsg::Reveal { req: 1, id: SessionId(9) });
-        let HostMsg::UiRequest { ui, .. } = message(&desktop_frames) else { panic!("expected a ui request") };
-        assert_eq!(host.shared.peers().pending.len(), 1);
-        cli.shutdown(Shutdown::Both).unwrap();
-        let deadline = Instant::now() + WAIT;
-        while !host.shared.peers().pending.is_empty() {
-            assert!(Instant::now() < deadline, "the request outlived its connection");
-            thread::sleep(Duration::from_millis(5));
-        }
-        send(&mut desktop, &ClientMsg::UiReply { ui, reply: Box::new(HostMsg::Done { req: 1 }) });
-        send(&mut desktop, &ClientMsg::ListSessions);
-        assert!(matches!(message(&desktop_frames), HostMsg::SessionList { .. }));
-    }
-
-    /// 界面说布局变了：只告诉问过 `Layout` 的连接；不是界面的连接不能这么说。
-    #[test]
-    fn layout_changes_reach_connections_that_asked_for_the_layout() {
-        let host = Host::new(BuildId("test".into()));
-        let (mut desktop, desktop_frames) = greet(&host, ClientKind::Desktop);
-        let (mut mobile, mobile_frames) = greet(&host, ClientKind::Mobile);
-        let (mut cli, cli_frames) = greet(&host, ClientKind::Cli);
-        send(&mut mobile, &ClientMsg::Layout { req: 0 });
-        let HostMsg::UiRequest { ui, .. } = message(&desktop_frames) else { panic!("expected a ui request") };
-        send(&mut desktop, &ClientMsg::UiReply { ui, reply: Box::new(HostMsg::Layout { req: 0, windows: vec![] }) });
-        assert!(matches!(message(&mobile_frames), HostMsg::Layout { .. }));
-
-        send(&mut desktop, &ClientMsg::LayoutChanged);
-        assert_eq!(message(&mobile_frames), HostMsg::LayoutChanged);
-        // 没问过布局的连接收不到：它下一条收到的是自己请求的回话。
-        send(&mut cli, &ClientMsg::ListSessions);
-        assert!(matches!(message(&cli_frames), HostMsg::SessionList { .. }));
-
-        send(&mut mobile, &ClientMsg::LayoutChanged);
-        assert!(matches!(message(&mobile_frames), HostMsg::Error { .. }));
-        send(&mut desktop, &ClientMsg::ListSessions);
-        assert!(matches!(message(&desktop_frames), HostMsg::SessionList { .. }));
-    }
-
-    /// 处理消息时 panic 的会话（这里是连着的前端的 `EventSink` 一收到输出就 panic）：前端先收到
-    /// 带着会话标识的 `Error`，再收到 `Exited`，会话线程随后结束。
-    #[test]
-    fn a_panicking_session_tells_its_front_end() {
-        let host = Host::new(BuildId("test".into()));
-        let id = host.shared.spawn(options("/bin/cat")).unwrap();
-        let (tx, rx) = mpsc::channel();
-        let start = Box::new(move |_: Screen| {
-            let sink: EventSink = Box::new(move |event| match event {
-                Event::Output(_) => panic!("the sink cannot take output"),
-                Event::Msg(message) => tx.send(*message).is_ok(),
-            });
-            Some(sink)
-        });
-        let subscribe =
-            Subscribe { connection: 0, size: None, mode: AttachMode::VtReplay, start, desktop: false, device: None };
-        assert!(host.shared.deliver(id, Inbox::Subscribe(subscribe)));
-        assert!(host.shared.deliver(id, Inbox::Input { connection: 0, data: b"boom\r".to_vec() }));
-        let next = || loop {
-            match rx.recv_timeout(WAIT).expect("timed out") {
-                HostMsg::Meta { .. } | HostMsg::Resized { .. } | HostMsg::SizeOwner { .. } => {}
-                message => return message,
-            }
-        };
-        match next() {
-            HostMsg::Error { req: None, id: Some(errored), message } => {
-                assert_eq!(errored, id);
-                assert!(message.contains("crashed"), "{message}");
-            }
-            other => panic!("expected an error first: {other:?}"),
-        }
-        assert!(matches!(next(), HostMsg::Exited { id: exited, .. } if exited == id));
-        let deadline = Instant::now() + WAIT;
-        while host.shared.deliver(id, Inbox::ClearScreen) {
-            assert!(Instant::now() < deadline, "the session thread kept running");
-            thread::sleep(Duration::from_millis(5));
-        }
-        host.shared.kill_all();
-    }
-}
+mod tests;

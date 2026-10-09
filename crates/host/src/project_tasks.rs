@@ -1,7 +1,8 @@
 //! 列一个目录里能跑的项目命令（`ClientMsg::ListProjectTasks`）：手机在会话卡片上列出来，点一下就在
 //! 那个会话里跑。先是 runode 根目录的 `tasks.json` 里自己加的、这个目录所在项目的和通用的命令，再从
 //! 目录往上找最近的 Makefile 和 package.json，读出目标和 scripts，拼好在这个目录里能直接跑的命令行，
-//! 回 `HostMsg::ProjectTasks`。只读几个小文件，在连接的读线程里当场办。
+//! 回 `HostMsg::ProjectTasks`。只读几个小文件，但在断掉的网络挂载上也会一直卡住，所以连接另起
+//! 线程来调，见 `Connection::read_files`。
 
 use std::{
     fs,
@@ -67,7 +68,12 @@ pub(crate) fn list(dir: &Path) -> Result<Vec<TaskSource>, String> {
         let at = file.parent().unwrap_or(dir);
         let manager = package_manager(&json, &ancestors[ancestors.iter().position(|p| p == at).unwrap_or(0)..]);
         let scripts = json.get("scripts").and_then(serde_json::Value::as_object);
-        let scripts: Vec<_> = scripts.into_iter().flatten().filter_map(|(k, v)| Some((k, v.as_str()?))).collect();
+        let scripts: Vec<_> = scripts
+            .into_iter()
+            .flatten()
+            .filter(|(k, _)| quotable(k))
+            .filter_map(|(k, v)| Some((k, v.as_str()?)))
+            .collect();
         let truncated = scripts.len() > MAX_PROJECT_TASKS;
         let tasks = scripts
             .into_iter()
@@ -159,7 +165,8 @@ fn read_small(file: &Path) -> Option<String> {
 }
 
 /// Makefile 里显式写出来的目标和它那一行 `##` 后面的说明，按先后、去重。不算以 `.` 开头的特殊目标
-/// （`.PHONY` 等）、模式规则（`%`）、带变量的（`$`）和像文件路径的（`/`），也不算变量赋值。
+/// （`.PHONY` 等）、模式规则（`%`）、带变量的（`$`）、像文件路径的（`/`）和 `quotable` 不收的，也不算
+/// 变量赋值。
 fn makefile_targets(text: &str) -> Vec<(String, Option<String>)> {
     let mut targets: Vec<(String, Option<String>)> = Vec::new();
     let mut continued = false;
@@ -179,7 +186,11 @@ fn makefile_targets(text: &str) -> Vec<(String, Option<String>)> {
             continue;
         }
         for name in names.split_whitespace() {
-            if name.starts_with('.') || name.contains(['%', '/']) || targets.iter().any(|(seen, _)| seen == name) {
+            if name.starts_with('.')
+                || name.contains(['%', '/'])
+                || !quotable(name)
+                || targets.iter().any(|(seen, _)| seen == name)
+            {
                 continue;
             }
             targets.push((name.to_owned(), description.map(str::to_owned)));
@@ -201,7 +212,15 @@ fn package_manager(json: &serde_json::Value, dirs: &[PathBuf]) -> &'static str {
         .unwrap_or("npm")
 }
 
-/// 名字里只有不用转义的字符时原样用，否则加单引号。
+/// 能用 `quote` 拼进命令行的任务名：以 `-` 开头的会被 make、包管理器当成选项；fish 的单引号里
+/// `\\` 和 `\'` 是转义，含 `\` 的加了单引号在 fish 里也不对；控制字符（换行等）会把一条命令拆开。
+/// 这些任务不列出来。
+fn quotable(name: &str) -> bool {
+    !name.starts_with('-') && !name.contains(|c: char| c == '\\' || c.is_control())
+}
+
+/// 名字里只有不用转义的字符时原样用，否则加单引号。只给 `quotable` 的名字用：单引号里的 `\` 在 fish
+/// 里不是原样的。
 fn quote(word: &str) -> String {
     let plain = |c: char| c.is_ascii_alphanumeric() || "-_.:/@+=,%^".contains(c);
     if !word.is_empty() && word.chars().all(plain) {
@@ -262,10 +281,15 @@ mod tests {
         assert_eq!(sources[0].project.as_deref(), Some(Path::new("/w")));
     }
 
+    /// 变量赋值、特殊目标、模式规则、带变量的不列；以 `-` 开头的（`make -x` 会当成选项）、含 `\` 和
+    /// 控制字符的也不列。
     #[test]
     fn makefile_targets_skip_variables_specials_and_patterns() {
         let text = "\
 .PHONY: build test
+-x: build
+a\\b: build
+bell\x07: build
 VERSION := 1.0
 CC ?= cc:x
 export PATH:=/bin

@@ -108,7 +108,7 @@ impl<'de> Deserialize<'de> for SessionId {
 #[serde(transparent)]
 pub struct BuildId(pub String);
 
-/// 前端的种类。
+/// 前端的种类，`Hello` 里自报，宿主不核实：宿主按它拦的请求只防误用，不防同一个用户冒充的程序。
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ClientKind {

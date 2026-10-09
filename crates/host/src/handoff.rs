@@ -9,9 +9,11 @@
 //! - 在那之前旧宿主的 PTY 原样留着（交出去的是复制的一份 master），新宿主接手的 PTY 停在闸门上
 //!   （`Pty::adopt_paused`），一个字节都不读不写；任何一方出错、超时，新宿主放弃
 //!   （`HandoffAbort` 或者断开），旧宿主回滚，接着读、重放冻结期间存下的请求，什么都不丢。
-//! - 提交时旧宿主交出 PTY（`Pty::release`，不结束 shell）和没写出去的输入，从此不再碰这些会话；
-//!   新宿主写进没写出去的输入、打开闸门、开始接受连接，回 `HandoffDone`。旧宿主随后退出
-//!   （`Stopped::Handoff`），不删 socket 文件。
+//! - 提交时旧宿主的会话交出 PTY（`Pty::release`，不结束 shell）和没写出去的输入，不再读写；
+//!   新宿主写进没写出去的输入、打开闸门、开始接受连接，回 `HandoffDone`。旧宿主手里还留着交出去
+//!   的那份 master 的复制，收到 `HandoffDone` 才关掉，随后退出（`Stopped::Handoff`），不删 socket
+//!   文件。新宿主没回 `HandoffDone`（提交后死了，或者没收到 `Commit` 放弃了）时，只剩旧宿主握着
+//!   PTY：它杀掉新宿主、等它不在了，用留着的 master 把会话接回来，接着服务（`give` 的 `reclaim`）。
 
 mod give;
 mod take;

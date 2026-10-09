@@ -48,7 +48,8 @@ const TAG: &str = "RUNODE_HANDOFF_TAG";
 const SNAPSHOT_FORMAT: &str = "RUNODE_HANDOFF_SNAPSHOT_FORMAT";
 /// 新宿主的构建，没设时是 `NEW_BUILD`。连续交接时每一棒要是不同的构建：同一个构建的不交接。
 const SUCCESSOR_BUILD: &str = "RUNODE_HANDOFF_BUILD";
-/// 假的新宿主收下所有会话后怎么办：`die` 退出，`hang` 一直不回话，`abort` 回 `HandoffAbort`。
+/// 假的新宿主收下所有会话后怎么办：`die` 退出，`hang` 一直不回话，`abort` 回 `HandoffAbort`，
+/// `die-after-commit` 回 `HandoffReady`、收到 `Commit` 后不回 `HandoffDone` 就退出。
 const FAKE: &str = "RUNODE_HANDOFF_FAKE";
 
 const OLD_BUILD: &str = "old-build";
@@ -120,6 +121,12 @@ fn role_fake_successor() {
             thread::sleep(Duration::from_secs(3600));
         },
         "abort" => send(&stream, &ClientMsg::HandoffAbort { reason: "testing".into() }),
+        "die-after-commit" => {
+            send(&stream, &ClientMsg::HandoffReady);
+            let (data, _) = fd_passing::recv_with_fds(&stream).unwrap();
+            assert!(matches!(decode_part(&data).unwrap().0, HandoffPart::Commit { .. }));
+            std::process::exit(0);
+        }
         other => panic!("unknown fake {other}"),
     }
 }
@@ -557,6 +564,31 @@ fn a_successor_that_dies_before_it_is_ready_changes_nothing() {
     let mut again = Peer::hello(&socket, false);
     assert_counted(&mut again, id, count);
     // 再交接一次照样成。
+    drop(again);
+    let (_successor, result) = take_over(&dir, &[]);
+    assert_eq!(result, "ok 1");
+    let (mut new, _) = hello_build(&socket);
+    new.wait_screen(id, Some(10), |text| text.contains("end"));
+}
+
+/// 新宿主收到 `Commit` 后没回 `HandoffDone` 就死了，收下的 master 也早关了：旧宿主用自己留着的那份
+/// 把会话接回来，shell 没收到 SIGHUP，数数的程序一行不丢一行不重地数完，之后照样能交接。
+#[test]
+fn a_successor_that_dies_after_the_commit_gives_the_sessions_back() {
+    let dir = temp_dir("diescommit");
+    let (_old, socket) = old_here(&dir);
+    let mut cli = Peer::hello(&socket, false);
+    let count = 200;
+    let id = cli.spawn(&counter(&dir, "count.sh", count, 1, "0.01", 0));
+    wait_counted(&mut cli, id, 10);
+
+    let mut fake = Role::start("fake", &dir, &[(FAKE, "die-after-commit")]);
+    assert_eq!(wait_file(&dir.join("fake.received")), "1");
+    assert!(fake.wait().success());
+    assert_handoff_goodbye(&cli);
+
+    let mut again = Peer::hello(&socket, false);
+    assert_counted(&mut again, id, count);
     drop(again);
     let (_successor, result) = take_over(&dir, &[]);
     assert_eq!(result, "ok 1");

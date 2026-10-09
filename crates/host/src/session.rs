@@ -170,7 +170,8 @@ pub(crate) enum Prepared {
 /// 会话交给新宿主的东西，见 `runode_protocol::HandoffPart::Session`。
 pub(crate) struct Exported {
     pub(crate) export: SessionExport,
-    /// 复制的一份 PTY master，自己这份照常留着直到提交；还没启动 shell 时为空。
+    /// 复制的一份 PTY master，自己这份照常留着直到提交；还没启动 shell 时为空。交出方发出去以后
+    /// 还留着它，直到新宿主确认接手。
     pub(crate) master: Option<OwnedFd>,
     /// shell 的进程号；还没启动时为空。
     pub(crate) pid: Option<u32>,
