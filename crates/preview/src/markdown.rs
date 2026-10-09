@@ -1,10 +1,16 @@
 //! Markdown 解析成不碰界面的块结构：标题、段落、列表、引用、代码块、表格、分割线、图片，段落里是
 //! 带样式的行内片段。照 GitHub 的写法支持 GFM 的表格、删除线、任务列表、裸网址自动成链接、提示块
-//! （`> [!NOTE]` 这类）和脚注；标题按 GitHub 的规则算出锚点。HTML 块和行内 HTML 不解释，原文当
-//! 普通文字，只认 `<kbd>`。代码块按标的语言高亮，颜色和 `highlight` 一样是调色板语义的。
+//! （`> [!NOTE]` 这类）和脚注；标题按 GitHub 的规则算出锚点。代码块按标的语言高亮，颜色和
+//! `highlight` 一样是调色板语义的。
 //!
-//! 图片在段落里单独成块（段落从图片处断开），界面才好按栏宽画；标题和表格单元格里的图片只留替代
-//! 文字。
+//! HTML 只认 README 里常用的那些（见 `html`）：`<img>`（带 `width`、`height`）、`<h1>` 到 `<h6>`、
+//! `<p>`、`<div>` 这类块、`<a href>`、`<br>`、`<hr>`、`<b>`、`<i>`、`<s>`、`<code>`、`<kbd>`，
+//! `align="center"` 和 `<center>` 包着的块收进 `Block::Centered`；别的标签丢掉、里面的文字照留，
+//! 注释不显示。和 GitHub 一样，`<div align="center">` 和 `</div>` 可以分在两个 HTML 块里，中间夹着
+//! Markdown。
+//!
+//! 图片在段落里单独成块（段落从图片处断开），界面才好按栏宽画；同一段里只隔着空格、换行的几张图片
+//! （一排徽章）收在同一块里，界面并排画、放不下时折行。标题和表格单元格里的图片只留替代文字。
 //!
 //! 脚注和 GitHub 一样按第一次引用的先后编号，引用处是上标数字的链接（`#fn-标签`），定义集中在文末
 //! 的 `Block::Footnotes` 里，各条末尾带一个指回引用处（`#fnref-标签`）的返回箭头。
@@ -20,6 +26,8 @@ use std::{
 use pulldown_cmark::{Alignment, BlockQuoteKind, CodeBlockKind, Event, Options, Parser, Tag, TagEnd};
 
 use crate::highlight::{Span, highlight_code};
+
+mod html;
 
 /// 一段同样样式、同一个链接的文字。
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -95,12 +103,23 @@ pub enum Block {
         rows: Vec<Vec<Vec<Inline>>>,
     },
     Rule,
-    Image {
-        url: String,
-        alt: String,
-    },
+    /// 并排的一张或几张图片。
+    Images(Vec<Image>),
+    /// HTML 里 `align="center"` 或 `<center>` 包着的块，居中排。
+    Centered(Vec<Block>),
     /// 文末的脚注定义，按编号排好；只有被引用过的才在。
     Footnotes(Vec<Footnote>),
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Image {
+    pub url: String,
+    pub alt: String,
+    /// HTML `<img>` 上写的像素数，Markdown 的图片没有。
+    pub width: Option<u32>,
+    pub height: Option<u32>,
+    /// 图片在链接里时是链接的地址（徽章大多这样），点图片打开它。
+    pub link: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -134,6 +153,46 @@ const MAX_AUTOLINK: usize = 2048;
 
 /// 主循环和找裸网址时每处理这么多个事件、候选看一次 `cancel`。
 const CANCEL_EVERY: usize = 1024;
+
+/// HTML 里当成块的标签：开、闭都把正在收的段落收起来。
+const HTML_BLOCKS: [&str; 26] = [
+    "p",
+    "div",
+    "center",
+    "details",
+    "summary",
+    "section",
+    "article",
+    "header",
+    "footer",
+    "nav",
+    "aside",
+    "figure",
+    "figcaption",
+    "blockquote",
+    "pre",
+    "ul",
+    "ol",
+    "li",
+    "dl",
+    "dt",
+    "dd",
+    "table",
+    "thead",
+    "tbody",
+    "tr",
+    "td",
+];
+
+/// `<h1>` 到 `<h6>` 的级别。
+fn html_heading(name: &str) -> Option<u8> {
+    name.strip_prefix('h')?.parse().ok().filter(|level| (1..=6).contains(level))
+}
+
+/// `<img>` 的 `width`、`height`：像素数，带不带 `px` 都行；百分比这类不认。
+fn html_pixels(value: Option<&str>) -> Option<u32> {
+    value?.trim().trim_end_matches("px").parse().ok().filter(|&pixels| pixels > 0)
+}
 
 /// 解析 `text`。`cancel` 被置上时停下、返回空。
 pub fn parse_markdown(text: &str, cancel: &AtomicBool) -> Option<Vec<Block>> {
@@ -324,6 +383,16 @@ enum Frame {
     Footnote(String, Vec<Block>),
 }
 
+/// 还没闭上的 HTML 块级标签。
+struct HtmlOpen {
+    name: String,
+    /// 带 `align="center"` 或者是 `<center>`。
+    center: bool,
+    /// 开的时候 `Builder::stack` 有几层；只有直接放在这一层里的块收进 `Block::Centered`，更里面的跟着
+    /// 外层一起居中。
+    depth: usize,
+}
+
 /// 正在收行内片段的那个块。
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Open {
@@ -358,7 +427,15 @@ struct Builder<'a> {
     italic: u32,
     strike: u32,
     kbd: u32,
+    /// HTML 的 `<code>`。
+    html_code: u32,
     links: Vec<String>,
+    /// 没闭上的 HTML `<a>` 各自往 `links` 里压了地址没有（`<a name>` 这类没有 `href` 的不压）。
+    html_links: Vec<bool>,
+    /// 没闭上的 HTML 块级标签，最多 `MAX_NESTING` 个，再多的不记。
+    html_open: Vec<HtmlOpen>,
+    /// 最近收的块是 `Block::Images`，之后只来过空格：再来的图片并进那一块。
+    image_run: bool,
     /// 在图片里：地址和收到的替代文字。
     image: Option<(String, String)>,
     /// 在代码块里：语言和收到的代码。
@@ -392,16 +469,9 @@ impl Builder<'_> {
             Event::Code(text) => self.push_text(&text, true),
             Event::Html(text) => match &mut self.html {
                 Some(html) => html.push_str(&text),
-                None => self.push_text(&text, false),
+                None => self.html(&text, true),
             },
-            Event::InlineHtml(text) => {
-                let tag = text.trim().to_ascii_lowercase();
-                match tag.as_str() {
-                    "<kbd>" => self.kbd += 1,
-                    "</kbd>" => self.kbd = self.kbd.saturating_sub(1),
-                    _ => self.push_text(&text, false),
-                }
-            }
+            Event::InlineHtml(text) => self.html(&text, false),
             Event::FootnoteReference(label) => {
                 let label = label.to_lowercase();
                 let number = match self.footnote_refs.iter().position(|known| *known == label) {
@@ -547,8 +617,9 @@ impl Builder<'_> {
             }
             TagEnd::HtmlBlock => {
                 if let Some(html) = self.html.take() {
-                    let text = html.trim_end_matches('\n').to_owned();
-                    self.push_block(Block::Paragraph(vec![Inline { text, ..Inline::default() }]));
+                    self.html(&html, true);
+                    // 块里没闭上的段落、标题到这里为止。
+                    self.close_html_inlines();
                 }
             }
             TagEnd::List(_) => {
@@ -594,31 +665,186 @@ impl Builder<'_> {
                 self.links.pop();
             }
             TagEnd::Image => {
-                let Some((url, alt)) = self.image.take() else {
-                    return;
-                };
-                match self.open {
-                    // 段落从图片处断开：前面的文字收成一段，图片单独成块，后面的文字另起一段。
-                    Some(Open::Paragraph { implicit }) => {
-                        self.close_inlines();
-                        self.push_block(Block::Image { url, alt });
-                        self.open = Some(Open::Paragraph { implicit });
-                    }
-                    _ => self.push_text(&alt, false),
+                if let Some((url, alt)) = self.image.take() {
+                    self.push_image(url, alt, None, None);
                 }
             }
             _ => {}
         }
     }
 
+    /// 图片单独成块。段落从图片处断开：前面的文字收成一段，后面的文字另起一段；紧跟在上一张图片后面
+    /// （只隔着空白）的并进那一块。在标题、表格里只留替代文字。
+    fn push_image(&mut self, url: String, alt: String, width: Option<u32>, height: Option<u32>) {
+        let paragraph = match self.open {
+            Some(Open::Paragraph { implicit }) => Some(implicit),
+            None => None,
+            _ => return self.push_text(&alt, false),
+        };
+        let image = Image { url, alt, width, height, link: self.links.last().cloned() };
+        if self.image_run
+            && let Some(images) = self.last_images()
+        {
+            images.push(image);
+            self.inlines.clear();
+            return;
+        }
+        if let Some(implicit) = paragraph {
+            self.close_inlines();
+            self.push_block(Block::Images(vec![image]));
+            self.open = Some(Open::Paragraph { implicit });
+        } else {
+            self.push_block(Block::Images(vec![image]));
+        }
+        self.image_run = true;
+    }
+
+    /// 当前这层里最后一块是图片（居中的也算）时，它的图片。
+    fn last_images(&mut self) -> Option<&mut Vec<Image>> {
+        let blocks = match self.stack.last_mut() {
+            Some(Frame::Quote(_, blocks) | Frame::Item(ListItem { blocks, .. }) | Frame::Footnote(_, blocks)) => blocks,
+            Some(Frame::List { .. }) | None => &mut self.root,
+        };
+        match blocks.last_mut()? {
+            Block::Images(images) => Some(images),
+            Block::Centered(inner) => match inner.last_mut()? {
+                Block::Images(images) => Some(images),
+                _ => None,
+            },
+            _ => None,
+        }
+    }
+
+    /// 解释一段 HTML。`block` 是 HTML 块：文字里的空白折成一个空格、块开头和换行后的空白不要，认
+    /// 段落、标题这类块级标签；否则是段落里的行内 HTML，只认行内的标签。
+    fn html(&mut self, html: &str, block: bool) {
+        for token in html::tokens(html) {
+            match token {
+                html::Token::Text(text) if block => {
+                    let text = html::decode_entities(&html::collapse_whitespace(text));
+                    let at_start = self.open.is_none()
+                        || self
+                            .inlines
+                            .last()
+                            .is_none_or(|last| last.text.ends_with(|ch: char| ch.is_ascii_whitespace()));
+                    let text = if at_start { text.trim_start_matches(' ') } else { &text };
+                    if !text.is_empty() {
+                        self.push_text(text, false);
+                    }
+                }
+                html::Token::Text(text) => self.push_text(&html::decode_entities(text), false),
+                html::Token::Open { name, attrs } => self.html_open(name, &attrs, block),
+                html::Token::Close(name) => self.html_close(&name, block),
+            }
+        }
+    }
+
+    fn html_open(&mut self, name: String, attrs: &[(String, String)], block: bool) {
+        let attr = |key| html::attr(attrs, key);
+        match name.as_str() {
+            "br" => {
+                self.image_run = false;
+                if self.open.is_some() {
+                    self.trim_end();
+                    self.push_text("\n", false);
+                }
+            }
+            "img" if self.image.is_none() => {
+                if let Some(src) = attr("src") {
+                    let (width, height) = (html_pixels(attr("width")), html_pixels(attr("height")));
+                    self.push_image(src.to_owned(), attr("alt").unwrap_or_default().to_owned(), width, height);
+                }
+            }
+            "a" => {
+                let href = attr("href");
+                if let Some(href) = href {
+                    self.links.push(href.to_owned());
+                }
+                self.html_links.push(href.is_some());
+            }
+            "b" | "strong" => self.bold += 1,
+            "i" | "em" => self.italic += 1,
+            "s" | "del" | "strike" => self.strike += 1,
+            "code" | "tt" => self.html_code += 1,
+            "kbd" => self.kbd += 1,
+            _ if !block => {}
+            "hr" => {
+                self.close_html_inlines();
+                self.push_block(Block::Rule);
+            }
+            _ => {
+                let heading = html_heading(&name);
+                if heading.is_none() && !HTML_BLOCKS.contains(&name.as_str()) {
+                    return;
+                }
+                self.close_html_inlines();
+                self.image_run = false;
+                let center =
+                    name == "center" || attr("align").is_some_and(|align| align.eq_ignore_ascii_case("center"));
+                if self.html_open.len() < MAX_NESTING {
+                    self.html_open.push(HtmlOpen { name, center, depth: self.stack.len() });
+                }
+                if let Some(level) = heading {
+                    self.open_inlines(Open::Heading(level));
+                }
+            }
+        }
+    }
+
+    fn html_close(&mut self, name: &str, block: bool) {
+        match name {
+            "a" => {
+                if self.html_links.pop() == Some(true) {
+                    self.links.pop();
+                }
+            }
+            "b" | "strong" => self.bold = self.bold.saturating_sub(1),
+            "i" | "em" => self.italic = self.italic.saturating_sub(1),
+            "s" | "del" | "strike" => self.strike = self.strike.saturating_sub(1),
+            "code" | "tt" => self.html_code = self.html_code.saturating_sub(1),
+            "kbd" => self.kbd = self.kbd.saturating_sub(1),
+            _ if !block => {}
+            _ if html_heading(name).is_some() || HTML_BLOCKS.contains(&name) => {
+                // 先收起段落、标题，块还算在居中的标签里。
+                self.close_html_inlines();
+                self.image_run = false;
+                if let Some(ix) = self.html_open.iter().rposition(|open| open.name == name) {
+                    self.html_open.truncate(ix);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// HTML 的块边界：收起正在收的段落、标题，末尾的空白不要。
+    fn close_html_inlines(&mut self) {
+        if matches!(self.open, Some(Open::Paragraph { .. } | Open::Heading(_))) {
+            self.trim_end();
+            self.close_inlines();
+        }
+    }
+
+    /// 去掉已收文字末尾的空格（HTML 里块结束处和 `<br>` 前的空格不显示）。
+    fn trim_end(&mut self) {
+        while let Some(last) = self.inlines.last_mut() {
+            last.text.truncate(last.text.trim_end_matches(' ').len());
+            if !last.text.is_empty() {
+                break;
+            }
+            self.inlines.pop();
+        }
+    }
+
     fn open_inlines(&mut self, open: Open) {
         self.flush_implicit();
+        self.image_run = false;
         self.open = Some(open);
         self.inlines.clear();
     }
 
     /// 收起正在收的段落或标题；只有空白的段落（比如两张图片之间的换行）不要。
     fn close_inlines(&mut self) {
+        self.image_run = false;
         let inlines = self.autolink();
         match self.open.take() {
             Some(Open::Heading(level)) => {
@@ -654,7 +880,7 @@ impl Builder<'_> {
             bold: self.bold > 0,
             italic: self.italic > 0,
             strike: self.strike > 0,
-            code,
+            code: code || self.html_code > 0,
             kbd: self.kbd > 0,
             footnote: false,
         };
@@ -665,6 +891,10 @@ impl Builder<'_> {
         if let Some((_, alt)) = &mut self.image {
             alt.push_str(text);
             return;
+        }
+        // 图片之间只隔着空格、软换行（已换成空格）时还算一排。
+        if text.contains(|ch| ch != ' ') {
+            self.image_run = false;
         }
         if self.open.is_none() {
             self.open = Some(Open::Paragraph { implicit: true });
@@ -677,6 +907,13 @@ impl Builder<'_> {
     }
 
     fn push_block(&mut self, block: Block) {
+        self.image_run = false;
+        let depth = self.stack.len();
+        let block = if self.html_open.iter().any(|open| open.center && open.depth == depth) {
+            Block::Centered(vec![block])
+        } else {
+            block
+        };
         match self.stack.last_mut() {
             Some(Frame::Quote(_, blocks) | Frame::Item(ListItem { blocks, .. }) | Frame::Footnote(_, blocks)) => {
                 blocks.push(block)

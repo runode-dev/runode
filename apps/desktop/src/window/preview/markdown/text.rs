@@ -1,18 +1,26 @@
 //! 排版视图里一段能选中的文字（`MdText`）：包着 `StyledText`，画字之前先在底下画行内代码和按键的
 //! 圆角底色、选中部分的高亮；排好版以后把自己的文本布局登记到视图的表里，鼠标按下、拖动时据此
-//! 换算出点在哪段文字的第几个字节（`hit`）。
+//! 换算出点在哪段文字的第几个字节（`hit`）。居中排的文字每个折行往右挪的那段，画底色和命中测试
+//! 都自己补上：GPUI 画的时候按对齐挪，量位置的接口却不管对齐。
 
 use std::{cell::RefCell, ops::Range, rc::Rc};
 
 use gpui::{
     App, Bounds, Element, ElementId, GlobalElementId, Hsla, InspectorElementId, IntoElement, LayoutId, Pixels,
-    StyledText, TextLayout, Window, fill, point, px, quad, size,
+    StyledText, TextAlign, TextLayout, Window, WrappedLineLayout, fill, point, px, quad, size,
 };
 
 use super::select::{MdPos, TextKey};
 
 /// 这一帧画出来的各段文字和它们的布局，鼠标事件据此找点在哪段文字上。每帧画之前清空。
-pub(in crate::window::preview) type Texts = Rc<RefCell<Vec<(TextKey, TextLayout)>>>;
+pub(in crate::window::preview) type Texts = Rc<RefCell<Vec<Placed>>>;
+
+/// 画出来的一段文字：是哪段、排好的布局、是不是居中排的。
+pub(in crate::window::preview) struct Placed {
+    key: TextKey,
+    layout: TextLayout,
+    centered: bool,
+}
 
 /// 一段文字底下要垫的圆角框：行内代码只有底色，按键另带边框。
 pub(super) struct TextBox {
@@ -87,7 +95,8 @@ impl Element for MdText {
     ) {
         self.text.prepaint(id, inspector_id, bounds, state, window, cx);
         // 到这里布局才有位置，登记之后命中测试才能用。
-        self.texts.borrow_mut().push((self.key, self.text.layout().clone()));
+        let centered = matches!(window.text_style().text_align, TextAlign::Center);
+        self.texts.borrow_mut().push(Placed { key: self.key, layout: self.text.layout().clone(), centered });
     }
 
     fn paint(
@@ -101,6 +110,7 @@ impl Element for MdText {
         cx: &mut App,
     ) {
         let layout = self.text.layout().clone();
+        let centered = matches!(window.text_style().text_align, TextAlign::Center);
         let font_size = window.text_style().font_size.to_pixels(window.rem_size());
         let line_height = layout.line_height();
         // 框比字高一点，在行里上下居中；左右各多出 0.25 个字宽，不挤开旁边的字。
@@ -108,7 +118,7 @@ impl Element for MdText {
         let inset_y = (line_height - box_height) / 2.;
         let pad_x = font_size * 0.25;
         for text_box in &self.boxes {
-            for rect in range_rects(&layout, text_box.range.clone()) {
+            for rect in range_rects(&layout, centered, text_box.range.clone()) {
                 let rect = Bounds::new(
                     point(rect.left() - pad_x, rect.top() + inset_y),
                     size(rect.size.width + pad_x * 2., box_height),
@@ -119,7 +129,7 @@ impl Element for MdText {
             }
         }
         if let Some((range, color)) = &self.selected {
-            for rect in range_rects(&layout, range.clone()) {
+            for rect in range_rects(&layout, centered, range.clone()) {
                 window.paint_quad(fill(rect, *color));
             }
         }
@@ -128,7 +138,7 @@ impl Element for MdText {
 }
 
 /// `layout` 里 `range` 那段字占的各个矩形，自动换行折成几行时每行一个。
-fn range_rects(layout: &TextLayout, range: Range<usize>) -> Vec<Bounds<Pixels>> {
+fn range_rects(layout: &TextLayout, centered: bool, range: Range<usize>) -> Vec<Bounds<Pixels>> {
     let mut rects = Vec::new();
     if range.is_empty() {
         return rects;
@@ -149,6 +159,7 @@ fn range_rects(layout: &TextLayout, range: Range<usize>) -> Vec<Bounds<Pixels>> 
             .iter()
             .map(|boundary| unwrapped.runs[boundary.run_ix].glyphs[boundary.glyph_ix].index)
             .collect();
+        let shifts = row_shifts(&line, bounds.size.width, centered);
         let mut visual_start = 0;
         for (row, visual_end) in breaks.iter().copied().chain([line.len()]).enumerate() {
             let start = range.start.saturating_sub(line_start).max(visual_start);
@@ -163,7 +174,7 @@ fn range_rects(layout: &TextLayout, range: Range<usize>) -> Vec<Bounds<Pixels>> 
                     x1 += line_height / 4.;
                 }
                 let y = top + line_height * row as f32;
-                rects.push(Bounds::new(point(bounds.left() + x0, y), size(x1 - x0, line_height)));
+                rects.push(Bounds::new(point(bounds.left() + shifts[row] + x0, y), size(x1 - x0, line_height)));
             }
             visual_start = visual_end;
         }
@@ -173,43 +184,82 @@ fn range_rects(layout: &TextLayout, range: Range<usize>) -> Vec<Bounds<Pixels>> 
     rects
 }
 
+/// 逻辑行 `line` 自动换行折成的各行往右挪了多少：居中排时和 GPUI 画的时候一样，是栏宽 `width` 减去
+/// 这一折行的宽再除以二；靠左排的都是 0。
+fn row_shifts(line: &WrappedLineLayout, width: Pixels, centered: bool) -> Vec<Pixels> {
+    let unwrapped = &line.unwrapped_layout;
+    let mut start = px(0.);
+    line.wrap_boundaries
+        .iter()
+        .map(|boundary| unwrapped.runs[boundary.run_ix].glyphs[boundary.glyph_ix].position.x)
+        .chain([unwrapped.width])
+        .map(|end| {
+            let shift = if centered { (width - (end - start)) / 2. } else { px(0.) };
+            start = end;
+            shift
+        })
+        .collect()
+}
+
+/// 把 `position` 换回不挪的排版里的位置：减去它那一折行往右挪的量。
+fn unshift(placed: &Placed, position: gpui::Point<Pixels>) -> gpui::Point<Pixels> {
+    if !placed.centered {
+        return position;
+    }
+    let layout = &placed.layout;
+    let bounds = layout.bounds();
+    let line_height = layout.line_height();
+    let mut bottom = bounds.top();
+    let mut last = px(0.);
+    for line in layout.line_layouts() {
+        for shift in row_shifts(&line, bounds.size.width, true) {
+            bottom += line_height;
+            last = shift;
+            if position.y < bottom {
+                return point(position.x - shift, position.y);
+            }
+        }
+    }
+    point(position.x - last, position.y)
+}
+
 /// 鼠标在 `position` 时落在哪段文字的哪个位置：正好在某段文字上就是那里；和几段文字同一高度时取
 /// 横向最近的那段；在文字之间的空白里取下面那段的开头，再往下没有文字了取最后一段的末尾。
-pub(super) fn hit(texts: &[(TextKey, TextLayout)], position: gpui::Point<Pixels>) -> Option<MdPos> {
-    let at = |key: TextKey, layout: &TextLayout, position| {
-        let offset = layout.index_for_position(position).unwrap_or_else(|offset| offset);
-        MdPos { row: key.0, text: key.1, offset: offset.min(layout.len()) }
+pub(super) fn hit(texts: &[Placed], position: gpui::Point<Pixels>) -> Option<MdPos> {
+    let at = |placed: &Placed, position| {
+        let layout = &placed.layout;
+        let offset = layout.index_for_position(unshift(placed, position)).unwrap_or_else(|offset| offset);
+        MdPos { row: placed.key.0, text: placed.key.1, offset: offset.min(layout.len()) }
     };
-    if let Some((key, layout)) = texts.iter().find(|(_, layout)| layout.bounds().contains(&position)) {
-        return Some(at(*key, layout, position));
+    if let Some(placed) = texts.iter().find(|placed| placed.layout.bounds().contains(&position)) {
+        return Some(at(placed, position));
     }
     let level = texts
         .iter()
-        .filter(|(_, layout)| (layout.bounds().top()..layout.bounds().bottom()).contains(&position.y))
-        .min_by(|(_, a), (_, b)| distance_x(a, position.x).total_cmp(&distance_x(b, position.x)));
-    if let Some((key, layout)) = level {
-        let bounds = layout.bounds();
+        .filter(|placed| (placed.layout.bounds().top()..placed.layout.bounds().bottom()).contains(&position.y))
+        .min_by(|a, b| distance_x(&a.layout, position.x).total_cmp(&distance_x(&b.layout, position.x)));
+    if let Some(placed) = level {
+        let bounds = placed.layout.bounds();
         let clamped = point(position.x.clamp(bounds.left(), bounds.right() - px(1.)), position.y);
-        return Some(at(*key, layout, clamped));
+        return Some(at(placed, clamped));
     }
-    if let Some((key, _)) =
-        texts.iter().filter(|(_, layout)| layout.bounds().top() > position.y).min_by_key(|(key, _)| *key)
+    if let Some(placed) =
+        texts.iter().filter(|placed| placed.layout.bounds().top() > position.y).min_by_key(|placed| placed.key)
     {
-        return Some(MdPos { row: key.0, text: key.1, offset: 0 });
+        return Some(MdPos { row: placed.key.0, text: placed.key.1, offset: 0 });
     }
-    texts.iter().max_by_key(|(key, _)| *key).map(|(key, layout)| MdPos {
-        row: key.0,
-        text: key.1,
-        offset: layout.len(),
+    texts.iter().max_by_key(|placed| placed.key).map(|placed| MdPos {
+        row: placed.key.0,
+        text: placed.key.1,
+        offset: placed.layout.len(),
     })
 }
 
 /// 这一帧画着的文字里，正好在 `position` 底下的那个字的位置；不在任何字上时为空。点链接、悬停用。
-pub(super) fn exact_hit(texts: &[(TextKey, TextLayout)], position: gpui::Point<Pixels>) -> Option<(TextKey, usize)> {
-    texts
-        .iter()
-        .find(|(_, layout)| layout.bounds().contains(&position))
-        .and_then(|(key, layout)| layout.index_for_position(position).ok().map(|offset| (*key, offset)))
+pub(super) fn exact_hit(texts: &[Placed], position: gpui::Point<Pixels>) -> Option<(TextKey, usize)> {
+    texts.iter().find(|placed| placed.layout.bounds().contains(&position)).and_then(|placed| {
+        placed.layout.index_for_position(unshift(placed, position)).ok().map(|offset| (placed.key, offset))
+    })
 }
 
 fn distance_x(layout: &TextLayout, x: Pixels) -> f32 {

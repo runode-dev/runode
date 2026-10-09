@@ -1,10 +1,10 @@
-//! Markdown 解析的公开接口：每种块、嵌套列表、任务列表、表格对齐、图片断开段落、HTML 原样留着，
-//! 以及照 GitHub 的提示块、脚注、裸网址链接、标题锚点和 `<kbd>`。
+//! Markdown 解析的公开接口：每种块、嵌套列表、任务列表、表格对齐、图片断开段落、README 里常用的
+//! HTML，以及照 GitHub 的提示块、脚注、裸网址链接、标题锚点和 `<kbd>`。
 
 use std::{path::Path, sync::atomic::AtomicBool};
 
 use runode_preview::{
-    Alert, Align, Block, Color, Footnote, Inline, InlineStyle, ListItem, is_markdown, parse_markdown,
+    Alert, Align, Block, Color, Footnote, Image, Inline, InlineStyle, ListItem, is_markdown, parse_markdown,
 };
 
 fn parse(text: &str) -> Vec<Block> {
@@ -21,6 +21,18 @@ fn styled(text: &str, style: InlineStyle) -> Inline {
 
 fn para(text: &str) -> Block {
     Block::Paragraph(vec![plain(text)])
+}
+
+fn image(url: &str, alt: &str) -> Image {
+    Image { url: url.to_owned(), alt: alt.to_owned(), width: None, height: None, link: None }
+}
+
+fn images(images: &[Image]) -> Block {
+    Block::Images(images.to_vec())
+}
+
+fn link(text: &str, url: &str) -> Inline {
+    Inline { text: text.to_owned(), style: InlineStyle::default(), link: Some(url.to_owned()) }
 }
 
 fn item(blocks: Vec<Block>) -> ListItem {
@@ -207,11 +219,30 @@ fn images_split_paragraphs() {
         blocks,
         vec![
             para("before "),
-            Block::Image { url: "img/a.png".into(), alt: "logo".into() },
+            images(&[image("img/a.png", "logo")]),
             para(" after"),
-            Block::Image { url: "a.png".into(), alt: "one".into() },
-            Block::Image { url: "https://x.dev/b.svg".into(), alt: "two".into() },
+            images(&[image("a.png", "one"), image("https://x.dev/b.svg", "two")]),
         ]
+    );
+}
+
+#[test]
+fn badges_in_a_row_share_one_block_and_keep_their_links() {
+    let badge = |url: &str, link: &str| Image { link: Some(link.to_owned()), ..image(url, "b") };
+    assert_eq!(
+        parse("[![b](a.svg)](https://a) [![b](b.svg)](https://b)\n![b](c.svg)\n\n![b](d.svg) text ![b](e.svg)\n"),
+        vec![
+            images(&[badge("a.svg", "https://a"), badge("b.svg", "https://b"), image("c.svg", "b")]),
+            images(&[image("d.svg", "b")]),
+            para(" text "),
+            images(&[image("e.svg", "b")]),
+        ]
+    );
+    // HTML 里换行隔开的照样并排；`<br>` 和另起一个 `<p>` 隔开的各成一排。
+    let blocks = parse("<p>\n<img src=\"a\">\n<img src=\"b\"><br>\n<img src=\"c\">\n</p>\n<p><img src=\"d\"></p>\n");
+    assert_eq!(
+        blocks,
+        vec![images(&[image("a", ""), image("b", "")]), images(&[image("c", "")]), images(&[image("d", "")]),]
     );
 }
 
@@ -226,9 +257,72 @@ fn images_in_headings_and_cells_leave_their_alt_text() {
 }
 
 #[test]
-fn html_is_kept_as_text() {
-    let blocks = parse("<div align=\"center\">\n  <b>hi</b>\n</div>\n\na <b>K</b> b\n");
-    assert_eq!(blocks, vec![para("<div align=\"center\">\n  <b>hi</b>\n</div>"), para("a <b>K</b> b")]);
+fn readme_html_header_is_centered() {
+    let blocks = parse(concat!(
+        "<p align=\"center\">\n  <img src=\"icon.png\" alt=\"Logo\" width=\"128\">\n</p>\n\n",
+        "<h1 align=\"center\">Runode</h1>\n\n",
+        "<p align=\"center\">\n  A terminal\n  <br>\n  <a href=\"#install\">Download</a>\n  &middot;\n",
+        "  <a href=\"README.zh-CN.md\">简体中文</a>\n</p>\n\n## Install\n",
+    ));
+    assert_eq!(
+        blocks,
+        vec![
+            Block::Centered(vec![images(&[Image { width: Some(128), ..image("icon.png", "Logo") }])]),
+            Block::Centered(vec![Block::Heading { level: 1, inlines: vec![plain("Runode")], id: "runode".into() }]),
+            Block::Centered(vec![Block::Paragraph(vec![
+                plain("A terminal\n"),
+                link("Download", "#install"),
+                plain(" · "),
+                link("简体中文", "README.zh-CN.md"),
+            ])]),
+            Block::Heading { level: 2, inlines: vec![plain("Install")], id: "install".into() },
+        ]
+    );
+}
+
+#[test]
+fn centered_div_spans_markdown_between_html_blocks() {
+    let blocks = parse("<div align=\"center\">\n\n# Title\n\ntext\n\n</div>\n\nafter\n");
+    assert_eq!(
+        blocks,
+        vec![
+            Block::Centered(vec![Block::Heading { level: 1, inlines: vec![plain("Title")], id: "title".into() }]),
+            Block::Centered(vec![para("text")]),
+            para("after"),
+        ]
+    );
+}
+
+#[test]
+fn inline_html_tags_style_text_and_comments_vanish() {
+    let bold = InlineStyle { bold: true, ..InlineStyle::default() };
+    let code = InlineStyle { code: true, ..InlineStyle::default() };
+    assert_eq!(
+        parse("<!-- badges -->\n\na<br>b <b>c</b> <code>d</code> <a href=\"u\">e</a><!-- x --> <span>f</span>\n"),
+        vec![Block::Paragraph(vec![
+            plain("a\nb "),
+            styled("c", bold),
+            plain(" "),
+            styled("d", code),
+            plain(" "),
+            link("e", "u"),
+            plain(" f"),
+        ])]
+    );
+}
+
+#[test]
+fn unknown_html_keeps_its_text_and_broken_tags_stay_text() {
+    assert_eq!(parse("<div>\n<foo bar=1>hi &amp; bye</foo>\n</div>\n"), vec![para("hi & bye")]);
+    assert_eq!(parse("<div>\na < b <c title=\"x\n</div>\n"), vec![para("a < b <c title=\"x </div>")]);
+}
+
+#[test]
+fn html_without_closing_quotes_parses_in_linear_time() {
+    let text = format!("<div>\n{}\n</div>\n", "<a title=\"x <a <b ".repeat(20_000));
+    let started = std::time::Instant::now();
+    parse(&text);
+    assert!(started.elapsed() < std::time::Duration::from_secs(1), "took {:?}", started.elapsed());
 }
 
 #[test]

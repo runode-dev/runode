@@ -36,7 +36,7 @@ use gpui::{
     Point, RenderImage, SMOOTH_SVG_SCALE_FACTOR, SharedString, StrikethroughStyle, StyledText, SvgRenderer,
     UnderlineStyle, Window, canvas, div, img, list, prelude::*, px, relative, svg,
 };
-use runode_preview::{Alert, Align, Block, Content, Inline, InlineStyle, Span};
+use runode_preview::{Alert, Align, Block, Content, Image as MdImage, Inline, InlineStyle, Span};
 use runode_shared_types::color::Rgb;
 pub(super) use select::MdPos;
 use select::TextKey;
@@ -138,6 +138,8 @@ pub(super) struct Row {
     pub leaf: Leaf,
     /// 文末的脚注：字小一号、用弱化色。
     pub footnote: bool,
+    /// 在 HTML 居中的块里：文字逐行居中，图片摆在中间。
+    pub center: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -174,15 +176,23 @@ pub(super) enum Leaf {
     },
     /// 分割线；在脚注前面时是一条细线。
     Rule,
-    Image {
-        /// 替代文字；没写时是地址。
-        alt: String,
-        url: String,
-        /// 读出来的本地图片；读不了的、不是图片的为空，只显示替代文字。网络图片也为空，下好的在
-        /// `View::remote` 里。
-        picture: Option<Picture>,
-        remote: bool,
-    },
+    /// 并排的一张或几张图片，放不下时折行。
+    Images(Vec<RowImage>),
+}
+
+pub(super) struct RowImage {
+    /// 替代文字；没写时是地址。
+    pub alt: String,
+    pub url: String,
+    /// HTML `<img>` 上写的宽和高（像素）；只写了一边的另一边按比例算。
+    pub width: Option<u32>,
+    pub height: Option<u32>,
+    /// 图片外面那层链接的地址，点图片打开它。
+    pub link: Option<String>,
+    /// 读出来的本地图片；读不了的、不是图片的为空，只显示替代文字。网络图片也为空，下好的在
+    /// `View::remote` 里。
+    pub picture: Option<Picture>,
+    pub remote: bool,
 }
 
 impl Leaf {
@@ -195,7 +205,7 @@ impl Leaf {
             Leaf::Table { head, rows, .. } => {
                 head.iter().chain(rows.iter().flatten()).map(|cell| cell.text.as_ref()).collect()
             }
-            Leaf::Rule | Leaf::Image { .. } => Vec::new(),
+            Leaf::Rule | Leaf::Images(_) => Vec::new(),
         }
     }
 
@@ -288,18 +298,24 @@ impl Doc {
             picture: &picture,
             pictures: HashMap::new(),
             footnote: false,
+            center: 0,
             ids: 0,
         };
         flat.blocks(blocks, &mut Vec::new());
         Self { rows: flat.rows, anchors: flat.anchors }
     }
 
-    /// 本地图片读出来的图，同一张图在几行里出现时只算一次。
-    fn pictures(&self) -> impl Iterator<Item = &Picture> {
-        self.rows.iter().filter_map(|row| match &row.leaf {
-            Leaf::Image { picture: Some(picture), .. } => Some(picture),
-            _ => None,
+    /// 各行的图片。
+    fn images(&self) -> impl Iterator<Item = &RowImage> {
+        self.rows.iter().flat_map(|row| match &row.leaf {
+            Leaf::Images(images) => images.as_slice(),
+            _ => &[],
         })
+    }
+
+    /// 本地图片读出来的图，同一张图出现几次就有几个。
+    fn pictures(&self) -> impl Iterator<Item = &Picture> {
+        self.images().filter_map(|image| image.picture.as_ref())
     }
 
     /// 关掉时放掉本地图片的解码结果。
@@ -325,12 +341,9 @@ impl Doc {
     /// 文档里的网络图片地址，不重复，最多 `MAX_REMOTE_IMAGES` 个。
     fn remote_urls(&self) -> Vec<String> {
         let mut seen = HashSet::new();
-        self.rows
-            .iter()
-            .filter_map(|row| match &row.leaf {
-                Leaf::Image { url, remote: true, .. } => Some(url),
-                _ => None,
-            })
+        self.images()
+            .filter(|image| image.remote)
+            .map(|image| &image.url)
             .filter(|url| seen.insert(url.as_str()))
             .take(MAX_REMOTE_IMAGES)
             .cloned()
@@ -361,6 +374,8 @@ struct Flatten<'a> {
     pictures: HashMap<PathBuf, Option<Picture>>,
     /// 正在摊平文末的脚注。
     footnote: bool,
+    /// 套在几层 HTML 居中的块里。
+    center: usize,
     /// 给引用和列表发编号。
     ids: usize,
 }
@@ -396,6 +411,12 @@ impl Flatten<'_> {
                     }
                     continue;
                 }
+                Block::Centered(blocks) => {
+                    self.center += 1;
+                    self.blocks(blocks, nest);
+                    self.center -= 1;
+                    continue;
+                }
                 Block::Footnotes(notes) => {
                     self.footnote = true;
                     self.push(nest, Leaf::Rule);
@@ -423,11 +444,17 @@ impl Flatten<'_> {
                     rows: rows.iter().map(|row| row.iter().map(|cell| self.rich(cell)).collect()).collect(),
                 },
                 Block::Rule => Leaf::Rule,
-                Block::Image { url, alt } => {
-                    let remote = is_remote(&url);
-                    let picture = if remote { None } else { self.local_picture(&url) };
-                    Leaf::Image { alt: if alt.is_empty() { url.clone() } else { alt }, url, picture, remote }
-                }
+                Block::Images(images) => Leaf::Images(
+                    images
+                        .into_iter()
+                        .map(|MdImage { url, alt, width, height, link }| {
+                            let remote = is_remote(&url);
+                            let picture = if remote { None } else { self.local_picture(&url) };
+                            let alt = if alt.is_empty() { url.clone() } else { alt };
+                            RowImage { alt, url, width, height, link, picture, remote }
+                        })
+                        .collect(),
+                ),
             };
             self.push(nest, leaf);
         }
@@ -470,7 +497,7 @@ impl Flatten<'_> {
     }
 
     fn push(&mut self, nest: &mut [Nest], leaf: Leaf) {
-        self.rows.push(Row { nest: nest.to_vec(), leaf, footnote: self.footnote });
+        self.rows.push(Row { nest: nest.to_vec(), leaf, footnote: self.footnote, center: self.center > 0 });
         // 列表项的记号只画在它的第一行。
         for level in nest.iter_mut() {
             if let Nest::Item { marker, .. } = level {
@@ -1120,37 +1147,31 @@ impl WindowView {
             }
             Leaf::Rule if row.footnote => div().h(px(1.)).bg(colors.border).into_any_element(),
             Leaf::Rule => div().h(px(em * 0.25)).bg(colors.border).into_any_element(),
-            Leaf::Image { alt, url, picture, remote } => {
-                let picture = if *remote { view.remote.get(url).cloned().flatten() } else { picture.clone() };
+            Leaf::Images(images) => {
                 let room = width - 1. - 2. * PADDING_X - nested_width;
-                let size = picture.as_ref().and_then(|picture| match picture {
-                    Picture::Bitmap(image) => image.clone().use_render_image(window, cx).map(|image| {
-                        let size = image.size(0);
-                        (size.width.0 as f32, size.height.0 as f32)
-                    }),
-                    Picture::Svg(image) => {
-                        let size = image.size(0);
-                        Some((
-                            size.width.0 as f32 / SMOOTH_SVG_SCALE_FACTOR,
-                            size.height.0 as f32 / SMOOTH_SVG_SCALE_FACTOR,
-                        ))
+                let images = images.iter().enumerate().map(|(image_ix, image)| {
+                    let shown = self.render_markdown_image(image, room, line_height, colors, view, window, cx);
+                    match &image.link {
+                        Some(link) => {
+                            let link = link.clone();
+                            div()
+                                .id(("md-image", image_ix))
+                                .cursor_pointer()
+                                .on_click(cx.listener(move |this, _, _, cx| this.open_markdown_link(&link, cx)))
+                                .child(shown)
+                                .into_any_element()
+                        }
+                        None => shown,
                     }
                 });
-                match (picture, size) {
-                    // 按栏宽等比缩小，不放大。
-                    (Some(picture), Some((w, h))) if w > 0. && h > 0. => {
-                        let fit = (room.max(1.) / w).min(1.);
-                        let source = match picture {
-                            Picture::Bitmap(image) => ImageSource::Image(image),
-                            Picture::Svg(image) => ImageSource::Render(image),
-                        };
-                        img(source).w(px(w * fit)).h(px(h * fit)).into_any_element()
-                    }
-                    // 还在解码的图片先空着，解好了列表重画时再量高度。
-                    (Some(Picture::Bitmap(_)), None) => div().h(px(line_height)).into_any_element(),
-                    // 网络图片下载中、下不了的，和读不了的本地图片一样显示替代文字。
-                    _ => div().italic().text_color(colors.muted).child(format!("[{alt}]")).into_any_element(),
-                }
+                div()
+                    .flex()
+                    .flex_wrap()
+                    .items_end()
+                    .gap(px(em * 0.25))
+                    .when(row.center, |images| images.justify_center())
+                    .children(images)
+                    .into_any_element()
             }
         };
         element
@@ -1161,9 +1182,55 @@ impl WindowView {
                     .pt(px(gap))
                     .mr(px(em * quotes as f32))
                     .when(muted, |content| content.text_color(colors.muted))
+                    .when(row.center, |content| content.text_center())
                     .child(content),
             )
             .into_any_element()
+    }
+
+    /// 一张图片：按栏宽 `room` 等比缩小，不放大；还没有图的显示替代文字。
+    #[allow(clippy::too_many_arguments)]
+    fn render_markdown_image(
+        &self,
+        image: &RowImage,
+        room: f32,
+        line_height: f32,
+        colors: Colors,
+        view: &View,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let picture = if image.remote { view.remote.get(&image.url).cloned().flatten() } else { image.picture.clone() };
+        let size = picture.as_ref().and_then(|picture| match picture {
+            Picture::Bitmap(bitmap) => bitmap.clone().use_render_image(window, cx).map(|bitmap| {
+                let size = bitmap.size(0);
+                (size.width.0 as f32, size.height.0 as f32)
+            }),
+            Picture::Svg(svg) => {
+                let size = svg.size(0);
+                Some((size.width.0 as f32 / SMOOTH_SVG_SCALE_FACTOR, size.height.0 as f32 / SMOOTH_SVG_SCALE_FACTOR))
+            }
+        });
+        match (picture, size) {
+            (Some(picture), Some((w, h))) if w > 0. && h > 0. => {
+                let (w, h) = match (image.width.map(|w| w as f32), image.height.map(|h| h as f32)) {
+                    (Some(want_w), Some(want_h)) => (want_w, want_h),
+                    (Some(want_w), None) => (want_w, h * want_w / w),
+                    (None, Some(want_h)) => (w * want_h / h, want_h),
+                    (None, None) => (w, h),
+                };
+                let fit = (room.max(1.) / w).min(1.);
+                let source = match picture {
+                    Picture::Bitmap(bitmap) => ImageSource::Image(bitmap),
+                    Picture::Svg(svg) => ImageSource::Render(svg),
+                };
+                img(source).w(px(w * fit)).h(px(h * fit)).into_any_element()
+            }
+            // 还在解码的图片先空着，解好了列表重画时再量高度。
+            (Some(Picture::Bitmap(_)), None) => div().h(px(line_height)).into_any_element(),
+            // 网络图片下载中、下不了的，和读不了的本地图片一样显示替代文字。
+            _ => div().italic().text_color(colors.muted).child(format!("[{}]", image.alt)).into_any_element(),
+        }
     }
 
     /// 在排版视图里按下鼠标：单击把光标放在那里（按着 Shift 时把选区延到那里），双击选词，三击选

@@ -8,7 +8,7 @@
 | `shared-types` | 各端共用的纯数据：终端帧、网格、分屏布局、agent 状态、会话对外公布的状态、终端设置、读写剪贴板的规矩（`clipboard-write`、`clipboard-read` 的取值和一次读写的上限）、输入事件 | std、serde |
 | `protocol` | 宿主进程和各个前端之间的消息：帧格式、控制消息、会话标识，请宿主在会话所在的仓库里读写 git 的消息（`git`），一个目录里能跑的 Makefile 目标和 package.json scripts（`project_tasks`），agent 等回答时推给手机的 Live Activity 的格式（`push`：attributes、content-state、APNs payload 和中转请求体），以及手机经网络连上来时的门禁（`remote`：门禁消息、签名的字节串、base64url、配对 URI，是远程访问线上格式的正式定义） | shared-types、serde、serde_json |
 | `git` | 用 git 命令行读仓库的状态、逐行改动、分支、stash 和提交图，也做暂存（含按块暂存）、丢弃、提交、切换分支、stash 和与远端同步这些操作 | 只有 std |
-| `preview` | 文件预览不碰界面的部分：读文件、判断是文本、图片还是二进制，语法高亮出调色板语义的颜色，把 Markdown 解析成块结构（标题、段落、列表、引用、代码块、表格、图片等，照 GitHub 认提示块、脚注、裸网址链接，给标题算锚点） | std、syntect、two-face、pulldown-cmark |
+| `preview` | 文件预览不碰界面的部分：读文件、判断是文本、图片还是二进制，语法高亮出调色板语义的颜色，把 Markdown 解析成块结构（标题、段落、列表、引用、代码块、表格、图片等，照 GitHub 认提示块、脚注、裸网址链接和 README 里常用的 HTML（图片、标题、链接、居中），给标题算锚点） | std、syntect、two-face、pulldown-cmark |
 | `agent-detect` | 认出终端前台在跑哪个 AI 编程 agent，判断它在干活、空闲还是等用户回答：按前台进程识别、识别规则的格式和求值（内置规则编进二进制）、状态去抖 | shared-types、serde、regex、toml |
 | `ghostty-vt-sys` | libghostty-vt 的 C 接口绑定（bindgen 生成后提交在仓库里，`gen-bindings` 重新生成），构建脚本用 zig 从 `vendor/ghostty` 编译出库；源自 libghostty-rs，许可 MIT 或 Apache-2.0，库名沿用 `libghostty_vt_sys` | 只有 std |
 | `ghostty-vt` | libghostty-vt 的安全封装：终端状态机、渲染状态、选区、搜索、按键和鼠标编码；源自 libghostty-rs，库名和依赖名沿用 `libghostty_vt`（`libghostty-vt`），代码里照旧 `use libghostty_vt` | ghostty-vt-sys、bitflags、int-enum |

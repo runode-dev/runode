@@ -151,11 +151,10 @@ fn tables_and_images_become_rows() {
     assert_eq!(head[1].text.as_ref(), "b");
     assert_eq!(rows[0][0].text.as_ref(), "1");
     assert_eq!(doc.rows[0].leaf.texts(), ["a", "b", "1", "2"]);
-    assert!(matches!(&doc.rows[1].leaf, Leaf::Image { alt, picture: Some(_), remote: false, .. } if alt == "logo"));
+    let Leaf::Images(images) = &doc.rows[1].leaf else { panic!() };
+    assert!(matches!(&images[0], RowImage { alt, picture: Some(_), remote: false, .. } if alt == "logo"));
     // 网络图片不经本地读图，等后台下载；没有替代文字时显示地址。
-    assert!(
-        matches!(&doc.rows[2].leaf, Leaf::Image { alt, picture: None, remote: true, .. } if alt == "https://x/y.png")
-    );
+    assert!(matches!(&images[1], RowImage { alt, picture: None, remote: true, .. } if alt == "https://x/y.png"));
     assert_eq!(doc.remote_urls(), ["https://x/y.png"]);
 }
 
@@ -209,7 +208,7 @@ fn local_images_are_read_once_per_file_and_capped() {
     let many: String = (0..MAX_LOCAL_IMAGES + 10).map(|ix| format!("![{ix}](img{ix}.png)\n\n")).collect();
     let doc = Doc::new(parse(&many), Path::new("/repo"), read);
     assert_eq!(reads.get(), MAX_LOCAL_IMAGES);
-    let rows: Vec<bool> = doc.rows.iter().map(|row| matches!(row.leaf, Leaf::Image { picture: Some(_), .. })).collect();
+    let rows: Vec<bool> = doc.images().map(|image| image.picture.is_some()).collect();
     assert!(rows[..MAX_LOCAL_IMAGES].iter().all(|&shown| shown));
     assert!(rows[MAX_LOCAL_IMAGES..].iter().all(|&shown| !shown), "超出的只显示替代文字");
 }
