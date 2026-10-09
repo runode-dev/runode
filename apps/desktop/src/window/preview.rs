@@ -35,9 +35,9 @@ use std::{
 };
 
 use gpui::{
-    AccessibleAction, Action, App, ClipboardItem, Context, Div, Focusable as _, Image, ImageSource, MouseButton,
-    MouseMoveEvent, RenderImage, Role, SMOOTH_SVG_SCALE_FACTOR, ScrollHandle, ScrollStrategy, SharedString, Stateful,
-    SvgRenderer, UniformListScrollHandle, Window, div, linear_color_stop, linear_gradient, prelude::*, px,
+    Action, App, ClipboardItem, Context, Div, Focusable as _, Image, ImageSource, MouseButton, MouseMoveEvent,
+    RenderImage, Role, SMOOTH_SVG_SCALE_FACTOR, ScrollHandle, ScrollStrategy, SharedString, Stateful, SvgRenderer,
+    UniformListScrollHandle, Window, div, linear_color_stop, linear_gradient, prelude::*, px,
 };
 use runode_git::{self as git, FileStatus, Section};
 use runode_preview::{Content, ImageFormat, Span};
@@ -52,6 +52,7 @@ use super::{
     project::{PANEL_TOGGLES_INSET, panel_shell},
     titlebar::icon_toggle,
 };
+use crate::ui::a11y::A11yPress;
 use crate::{
     assets::{CODE_ICON, MAXIMIZE_ICON, MINIMIZE_ICON, WRAP_ICON},
     config::AppConfig,
@@ -755,12 +756,7 @@ impl WindowView {
                     .tooltip(tooltip(text, action, fg, bg))
             };
         // 这几个按钮只有按下的处理，辅助工具按不到，另外登记按下时做的事。
-        let press = |f: fn(&mut Self, &mut Window, &mut Context<Self>), cx: &mut Context<Self>| {
-            let view = cx.entity().downgrade();
-            move |_: Option<&gpui::accesskit::ActionData>, window: &mut Window, cx: &mut App| {
-                view.update(cx, |this, cx| f(this, window, cx)).ok();
-            }
-        };
+        let view = cx.entity().downgrade();
         let is_markdown = preview.diff.is_none() && runode_preview::is_markdown(&preview.path);
         let typeset = self.markdown_shown(preview);
         let buttons = div()
@@ -783,10 +779,7 @@ impl WindowView {
                                 this.toggle_preview_source(cx);
                             }),
                         )
-                        .on_a11y_action(
-                            AccessibleAction::Click,
-                            press(|this, _, cx| this.toggle_preview_source(cx), cx),
-                        ),
+                        .on_a11y_press(view.clone(), |this, _, cx| this.toggle_preview_source(cx)),
                 )
             })
             // 排版视图的正文总是按栏宽换行（代码块横着滚），自动换行的开关只在源码视图里有。
@@ -801,7 +794,7 @@ impl WindowView {
                                 this.toggle_preview_wrap(cx);
                             }),
                         )
-                        .on_a11y_action(AccessibleAction::Click, press(|this, _, cx| this.toggle_preview_wrap(cx), cx)),
+                        .on_a11y_press(view.clone(), |this, _, cx| this.toggle_preview_wrap(cx)),
                 )
             })
             .child(
@@ -819,7 +812,7 @@ impl WindowView {
                         this.toggle_preview_maximized(window, cx);
                     }),
                 )
-                .on_a11y_action(AccessibleAction::Click, press(Self::toggle_preview_maximized, cx)),
+                .on_a11y_press(view, Self::toggle_preview_maximized),
             );
         // 按钮靠右；预览栏在最右边时再让出右上角面板开关的宽度，标签和按钮不钻到开关底下。
         let filler = div()

@@ -16,8 +16,8 @@ use std::{
 };
 
 use gpui::{
-    AccessibleAction, AnyElement, Axis, Context, Image, ListHorizontalSizingBehavior, MouseButton, MouseDownEvent,
-    PromptLevel, Role, ScrollStrategy, SharedString, StyledText, Window, div, prelude::*, px, svg, uniform_list,
+    AnyElement, Axis, Context, Image, ListHorizontalSizingBehavior, MouseButton, MouseDownEvent, PromptLevel, Role,
+    ScrollStrategy, SharedString, StyledText, Window, div, prelude::*, px, svg, uniform_list,
 };
 use runode_config::PreviewClick;
 use runode_git::{self as git, DiffRow, DiffSide, DiffView, FileStatus, HunkAction, LineKind, hunk_actionable};
@@ -30,6 +30,7 @@ use super::{
     gpui_format, right_fade,
     wrap::{WrapCache, segment},
 };
+use crate::ui::a11y::A11yPress;
 use crate::{
     assets::{ARROW_DOWN_ICON, ARROW_UP_ICON, DISCARD_ICON, MINUS_ICON, PLUS_ICON},
     config::AppConfig,
@@ -344,9 +345,7 @@ impl WindowView {
                 .id(id)
                 .role(Role::Button)
                 .aria_label(rust_i18n::t!(key).into_owned())
-                .on_a11y_action(AccessibleAction::Click, move |_, _, cx| {
-                    view.update(cx, |this, cx| this.jump_to_change(forward, row_height, cx)).ok();
-                })
+                .on_a11y_press(view, move |this, _, cx| this.jump_to_change(forward, row_height, cx))
                 .flex_none()
                 .size(px(20.))
                 .rounded(px(3.))
@@ -648,9 +647,7 @@ impl WindowView {
                     .id(("preview-diff-hunk-button", ix * 4 + bi))
                     .role(Role::Button)
                     .aria_label(rust_i18n::t!(key).into_owned())
-                    .on_a11y_action(AccessibleAction::Click, move |_, window, cx| {
-                        view.update(cx, |this, cx| this.diff_hunk_action(hunk, action, window, cx)).ok();
-                    })
+                    .on_a11y_press(view, move |this, window, cx| this.diff_hunk_action(hunk, action, window, cx))
                     .flex_none()
                     .px(px(6.))
                     .h(px(18.))

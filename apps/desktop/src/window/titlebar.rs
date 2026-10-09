@@ -3,9 +3,9 @@
 use std::cmp::Ordering;
 
 use gpui::{
-    AccessibleAction, Action, Animation, AnimationExt, AnyElement, App, Axis, BoxShadow, Context, Div, ElementId, Hsla,
-    MouseButton, MouseDownEvent, Pixels, Render, Role, SharedString, Stateful, StyleRefinement, TitlebarOptions,
-    Window, div, linear_color_stop, linear_gradient, point, prelude::*, px, svg,
+    Action, Animation, AnimationExt, AnyElement, App, Axis, BoxShadow, Context, Div, ElementId, Hsla, MouseButton,
+    MouseDownEvent, Pixels, Render, Role, SharedString, Stateful, StyleRefinement, TitlebarOptions, Window, div,
+    linear_color_stop, linear_gradient, point, prelude::*, px, svg,
 };
 use runode_shared_types::{agent::AgentKind, color::Rgb};
 
@@ -20,6 +20,7 @@ use super::{
     model::{Tab, TabId},
     panes::now_ms,
 };
+use crate::ui::a11y::A11yPress;
 use crate::{
     assets::{PIXEL_QUESTION_ICON, PLUS_ICON, PROMPT_ICON},
     terminal_view::{DEFAULT_TITLE, TerminalView},
@@ -426,9 +427,7 @@ impl WindowView {
                 }),
             )
             // 按下要看双击，用不了 `PressDown`；辅助工具按下时就是单击切过去。
-            .on_a11y_action(AccessibleAction::Click, move |_, window, cx| {
-                view.update(cx, |this, cx| this.activate(ix, window, cx)).ok();
-            })
+            .on_a11y_press(view, move |this, window, cx| this.activate(ix, window, cx))
             .on_mouse_down(
                 MouseButton::Middle,
                 cx.listener(move |this, _, window, cx| {

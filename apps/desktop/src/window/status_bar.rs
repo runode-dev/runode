@@ -36,6 +36,7 @@ use super::{
     git_panel::sync_icon,
     remote,
 };
+use crate::ui::a11y::A11yPress;
 use crate::{
     assets::{CHEVRON_DOWN_ICON, CHEVRON_RIGHT_ICON, COFFEE_ICON, MEMORY_ICON, PLUG_ICON, SHELL_ICON},
     config::AppConfig,
@@ -480,13 +481,10 @@ impl WindowView {
                 }),
             )
             // 鼠标的开、关分在捕获和冒泡两段，辅助工具按下时这里一起办：开着就关，关着就开。
-            .on_a11y_action(AccessibleAction::Click, move |_, _, cx| {
-                view.update(cx, |this, cx| {
-                    let open = this.status_popover.is_some_and(|open| open.same_kind(popover));
-                    this.status_popover = (!open).then_some(popover);
-                    cx.notify();
-                })
-                .ok();
+            .on_a11y_press(view, move |this, _, cx| {
+                let open = this.status_popover.is_some_and(|open| open.same_kind(popover));
+                this.status_popover = (!open).then_some(popover);
+                cx.notify();
             })
             .children(content)
     }
@@ -758,12 +756,9 @@ impl WindowView {
                 }),
             )
             // `status` 借着 `cx`，用不了 `PressDown`。
-            .on_a11y_action(AccessibleAction::Click, move |_, _, cx| {
-                view.update(cx, |this, cx| {
-                    this.status_popover = Some(StatusPopover::Ports { external: !external_open });
-                    cx.notify();
-                })
-                .ok();
+            .on_a11y_press(view, move |this, _, cx| {
+                this.status_popover = Some(StatusPopover::Ports { external: !external_open });
+                cx.notify();
             });
         let external_rows =
             external.iter().filter(|_| external_open).map(|(port, _)| port_row("external-port", port, None));

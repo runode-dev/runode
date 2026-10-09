@@ -4,9 +4,9 @@
 mod repo;
 
 use gpui::{
-    AccessibleAction, Action, AnyElement, App, Axis, Context, CursorStyle, Div, ExternalPaths, Focusable, Hsla,
-    Modifiers, MouseButton, MouseDownEvent, Orientation, Render, Role, SharedString, Stateful, TextAlign, Window,
-    canvas, div, img, prelude::*, px, relative, svg,
+    Action, AnyElement, App, Axis, Context, CursorStyle, Div, ExternalPaths, Focusable, Hsla, Modifiers, MouseButton,
+    MouseDownEvent, Orientation, Render, Role, SharedString, Stateful, TextAlign, Window, canvas, div, img, prelude::*,
+    px, relative, svg,
 };
 use runode_shared_types::color::Rgb;
 
@@ -18,6 +18,7 @@ use super::{
     model::WorkspaceId,
     titlebar::{close_button, drag_chip, drop_marker, icon_toggle, shortcut_hint, styled_agent_mark},
 };
+use crate::ui::a11y::A11yPress;
 use crate::{
     assets::{BRANCH_ICON, GIT_ICON, SIDEBAR_ICON},
     ui::{display_dir, hsla, tooltip::tooltip},
@@ -366,9 +367,7 @@ impl WindowView {
                 }),
             )
             // 按下要看双击，用不了 `PressDown`；辅助工具按下时就是单击切过去，改名走菜单里的「重命名」。
-            .on_a11y_action(AccessibleAction::Click, move |_, window, cx| {
-                view.update(cx, |this, cx| this.activate_workspace(ix, window, cx)).ok();
-            })
+            .on_a11y_press(view, move |this, window, cx| this.activate_workspace(ix, window, cx))
             // 改名时在输入框里拖选文字，不能把整行拖走。
             .when(renaming.is_none(), |row| row.on_drag(dragged, |dragged, _, _, cx| cx.new(|_| dragged.clone())))
             .drag_over::<DraggedWorkspace>(move |style, dragged, _, _| {

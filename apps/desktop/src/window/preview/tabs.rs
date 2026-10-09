@@ -4,12 +4,13 @@
 use std::path::Path;
 
 use gpui::{
-    AccessibleAction, Action, Axis, Context, Div, Hsla, MouseButton, MouseDownEvent, Pixels, Point, Render, Role,
-    ScrollHandle, SharedString, Stateful, Window, actions, div, img, prelude::*, px, svg,
+    Action, Axis, Context, Div, Hsla, MouseButton, MouseDownEvent, Pixels, Point, Render, Role, ScrollHandle,
+    SharedString, Stateful, Window, actions, div, img, prelude::*, px, svg,
 };
 use runode_shared_types::color::Rgb;
 
 use super::{DiffTarget, Preview};
+use crate::ui::a11y::A11yPress;
 use crate::window::project::follow_move;
 use crate::{
     assets::DIFF_ICON,
@@ -226,19 +227,6 @@ impl WindowView {
         let path_tooltip = tooltip(path.clone(), None, fg, bg);
         // 标签和关闭按钮只有按下的处理，辅助工具按不到，另外登记：按标签切过去，按关闭按钮关掉。
         let view = cx.entity().downgrade();
-        let press_tab = {
-            let view = view.clone();
-            move |_: Option<&gpui::accesskit::ActionData>, window: &mut Window, cx: &mut gpui::App| {
-                view.update(cx, |this, cx| {
-                    window.focus(&this.preview_focus, cx);
-                    this.activate_preview(ix, cx);
-                })
-                .ok();
-            }
-        };
-        let press_close = move |_: Option<&gpui::accesskit::ActionData>, window: &mut Window, cx: &mut gpui::App| {
-            view.update(cx, |this, cx| this.retain_previews(|i, _| i != ix, window, cx)).ok();
-        };
         let fg = hsla(fg);
         let color = tab.status.map_or(fg, |status| hsla(status_color(status)));
         let group = SharedString::from(format!("preview-tab-{ix}"));
@@ -254,7 +242,10 @@ impl WindowView {
             .aria_label(name.clone())
             .aria_description(path)
             .aria_selected(active)
-            .on_a11y_action(AccessibleAction::Click, press_tab)
+            .on_a11y_press(view.clone(), move |this, window, cx| {
+                window.focus(&this.preview_focus, cx);
+                this.activate_preview(ix, cx);
+            })
             .group(group.clone())
             .flex_none()
             .max_w(px(TAB_MAX_WIDTH))
@@ -290,7 +281,7 @@ impl WindowView {
                 close_button(("preview-tab-close", ix), fg)
                     .role(Role::Button)
                     .aria_label(close_label)
-                    .on_a11y_action(AccessibleAction::Click, press_close)
+                    .on_a11y_press(view, move |this, window, cx| this.retain_previews(|i, _| i != ix, window, cx))
                     .flex_none()
                     .when(!active, |close| close.invisible().group_hover(group, |close| close.visible()))
                     .tooltip(close_tooltip)

@@ -19,15 +19,15 @@ use std::{
 };
 
 use gpui::{
-    AccessibleAction, AnyElement, ClickEvent, Context, Div, Entity, Focusable as _, HighlightStyle, Role,
-    ScrollStrategy, SharedString, StyledText, Subscription, UniformListScrollHandle, Window, div, img, prelude::*, px,
-    svg, uniform_list,
+    AnyElement, ClickEvent, Context, Div, Entity, Focusable as _, HighlightStyle, Role, ScrollStrategy, SharedString,
+    StyledText, Subscription, UniformListScrollHandle, Window, div, img, prelude::*, px, svg, uniform_list,
 };
 use regex::{Regex, RegexBuilder};
 use runode_git::GrepQuery;
 use runode_shared_types::color::Rgb;
 
 use super::WindowView;
+use crate::ui::a11y::A11yPress;
 use crate::{
     assets::{CHEVRON_DOWN_ICON, CHEVRON_RIGHT_ICON, CLOSE_ICON, FILTER_ICON},
     ui::{
@@ -880,9 +880,7 @@ impl WindowView {
             .aria_selected(selected)
             .when_some(expanded_state, |item, expanded| item.aria_expanded(expanded))
             // 点击要看点了几下，辅助工具按下另外登记，和单击一样。
-            .on_a11y_action(AccessibleAction::Click, move |_, _, cx| {
-                view.update(cx, |this, cx| this.open_search_row(ix, false, cx)).ok();
-            })
+            .on_a11y_press(view, move |this, _, cx| this.open_search_row(ix, false, cx))
             .map(|item| {
                 if selected {
                     item.bg(hsla(bg.mix(fg, 0.12)))

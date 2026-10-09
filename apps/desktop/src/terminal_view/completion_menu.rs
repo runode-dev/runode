@@ -6,8 +6,7 @@ mod paint;
 use std::{ffi::OsString, path::PathBuf, time::Instant};
 
 use gpui::{
-    AccessibleAction, AnyElement, Context, Keystroke, MouseDownEvent, Role, ScrollWheelEvent, Task, anchored, div,
-    point, prelude::*, px,
+    AnyElement, Context, Keystroke, MouseDownEvent, Role, ScrollWheelEvent, Task, anchored, div, point, prelude::*, px,
 };
 
 use runode_completion::{
@@ -19,6 +18,7 @@ use super::{
     ECHO_WAIT, TerminalView,
     input::{take_whole_lines, wheel_lines},
 };
+use crate::ui::a11y::A11yPress;
 
 /// 开着的补全菜单。
 pub(super) struct CompletionMenu {
@@ -123,7 +123,13 @@ impl CompletionMenu {
     }
 
     fn selected_candidate(&self) -> Option<&Candidate> {
-        self.items.get(self.selected).map(|&i| &self.candidates[i])
+        self.candidate(self.selected)
+    }
+
+    /// `items` 里的第 `item` 项。按上次画的 `shown` 取时可能已经没有了：候选重算变少以后，下一次画之前
+    /// `shown` 还是旧的。
+    fn candidate(&self, item: usize) -> Option<&Candidate> {
+        self.items.get(item).and_then(|&i| self.candidates.get(i))
     }
 }
 
@@ -453,24 +459,24 @@ impl TerminalView {
         let rows = shown.rows();
         let (list_row, visible) = shown.visible();
         let view = cx.entity().downgrade();
-        let options = visible.map(|item| {
-            let candidate = &menu.candidates[menu.items[item]];
-            let view = view.clone();
-            div()
-                .id(("completion-item", item))
-                .role(Role::ListBoxOption)
-                .aria_label(candidate.label.clone())
-                .when_some(candidate.description.clone(), |option, description| option.aria_description(description))
-                .aria_selected(item == menu.selected)
-                .when(item == menu.selected, |option| option.aria_active_descendant())
-                .h(ch)
-                .on_a11y_action(AccessibleAction::Click, move |_, _, cx| {
-                    view.update(cx, |view, cx| {
+        let options = visible.filter_map(|item| {
+            let candidate = menu.candidate(item)?;
+            Some(
+                div()
+                    .id(("completion-item", item))
+                    .role(Role::ListBoxOption)
+                    .aria_label(candidate.label.clone())
+                    .when_some(candidate.description.clone(), |option, description| {
+                        option.aria_description(description)
+                    })
+                    .aria_selected(item == menu.selected)
+                    .when(item == menu.selected, |option| option.aria_active_descendant())
+                    .h(ch)
+                    .on_a11y_press(view.clone(), move |view, _, cx| {
                         view.accept_completion_item(item, cx);
                         cx.notify();
-                    })
-                    .ok();
-                })
+                    }),
+            )
         });
         let status = if menu.loading() {
             Some(rust_i18n::t!("completion.loading"))

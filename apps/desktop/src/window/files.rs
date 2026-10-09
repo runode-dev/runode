@@ -33,6 +33,7 @@ use super::{
     project::{Decoration, Project, TreeFilter, panel_shell, panel_title, status_color},
     titlebar::{drag_chip, icon_toggle},
 };
+use crate::ui::a11y::A11yPress;
 use crate::{
     assets::{
         CHEVRON_DOWN_ICON, CHEVRON_RIGHT_ICON, CODE_ICON, FOLDER_OPEN_ICON, MORE_ICON, REFRESH_ICON, VIEW_LIST_ICON,
@@ -239,12 +240,7 @@ impl WindowView {
                 .tooltip(tooltip(text, None, fg, bg))
         };
         // 这几个按钮只有按下的处理，辅助工具按不到，另外登记按下时做的事。
-        let press = |f: fn(&mut Self, &mut Window, &mut Context<Self>), cx: &mut Context<Self>| {
-            let view = cx.entity().downgrade();
-            move |_: Option<&gpui::accesskit::ActionData>, window: &mut Window, cx: &mut gpui::App| {
-                view.update(cx, |this, cx| f(this, window, cx)).ok();
-            }
-        };
+        let view = cx.entity().downgrade();
         // 搜索结果排成树还是列表；没在搜时淡着、点了没反应。
         let searching = self.searching(cx);
         let (icon, text) = if self.file_search.tree {
@@ -263,17 +259,11 @@ impl WindowView {
                     }
                 }),
             )
-            .on_a11y_action(
-                AccessibleAction::Click,
-                press(
-                    |this, _, cx| {
-                        if this.searching(cx) {
-                            this.toggle_search_tree(cx);
-                        }
-                    },
-                    cx,
-                ),
-            );
+            .on_a11y_press(view.clone(), |this, _, cx| {
+                if this.searching(cx) {
+                    this.toggle_search_tree(cx);
+                }
+            });
         let refresh = button("files-refresh", REFRESH_ICON, rust_i18n::t!("files.refresh"))
             .on_mouse_down(
                 MouseButton::Left,
@@ -282,7 +272,7 @@ impl WindowView {
                     this.refresh_project(cx);
                 }),
             )
-            .on_a11y_action(AccessibleAction::Click, press(|this, _, cx| this.refresh_project(cx), cx));
+            .on_a11y_press(view.clone(), |this, _, cx| this.refresh_project(cx));
         let more = button("files-more", MORE_ICON, rust_i18n::t!("files.more"))
             .on_mouse_down(
                 MouseButton::Left,
@@ -292,10 +282,7 @@ impl WindowView {
                 }),
             )
             // 辅助工具按下时没有鼠标事件，菜单弹在鼠标所在的地方，贴着窗口边挪进来。
-            .on_a11y_action(
-                AccessibleAction::Click,
-                press(|this, window, cx| this.open_files_more_menu(window.mouse_position(), cx), cx),
-            );
+            .on_a11y_press(view, |this, window, cx| this.open_files_more_menu(window.mouse_position(), cx));
         // 标题那一行：目录名，右边是搜索结果的排法、刷新和「更多」菜单。
         let header = panel_title()
             .gap(px(6.))
@@ -510,10 +497,10 @@ impl WindowView {
         let drop_dir =
             if is_dir { path.clone() } else { path.parent().map_or_else(|| self.files_root(), Path::to_path_buf) };
         let expanded = row.expanded;
-        // 辅助工具按下和单击一样；目录还能直接展开、收起。
+        // 辅助工具按下时打开文件、展开或收起目录；目录还能直接展开、收起。
         let a11y = |want: Option<bool>, cx: &mut Context<Self>| {
             let (view, path) = (cx.entity().downgrade(), path.clone());
-            move |_: Option<&gpui::accesskit::ActionData>, _: &mut Window, cx: &mut gpui::App| {
+            move |_: Option<&gpui::accesskit::ActionData>, window: &mut Window, cx: &mut gpui::App| {
                 view.update(cx, |this, cx| match want {
                     // 和点击一样，正在改名的那一行不动。
                     _ if this.renaming(&path).is_some() => {}
@@ -523,7 +510,12 @@ impl WindowView {
                         this.with_tree(|project, root, filter| project.toggle_dir(&path, root, filter));
                         cx.notify();
                     }
-                    None => this.click_file(&path, is_dir, 1, cx),
+                    // 和点击一样把焦点交给文件树。按两下的打开法：预览设成双击才打开时单击什么也不做，而辅助
+                    // 工具按下总该打开文件；目录不看按了几下，照样展开、收起。
+                    None => {
+                        window.focus(&this.files_focus, cx);
+                        this.click_file(&path, is_dir, 2, cx);
+                    }
                 })
                 .ok();
             }

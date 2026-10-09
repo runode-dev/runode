@@ -16,8 +16,8 @@ use std::{
 };
 
 use gpui::{
-    AccessibleAction, Action, AnyElement, App, Context, CursorStyle, Div, Focusable, MouseButton, MouseDownEvent, Role,
-    Stateful, Window, div, prelude::*, px,
+    Action, AnyElement, App, Context, CursorStyle, Div, Focusable, MouseButton, MouseDownEvent, Role, Stateful, Window,
+    div, prelude::*, px,
 };
 use runode_git::FileStatus;
 use runode_shared_types::color::Rgb;
@@ -26,6 +26,7 @@ use super::{
     CARD_GAP, DIVIDER_GRAB_WIDTH, Divider, PANE_HEADER_HEIGHT, TITLEBAR_HEIGHT, ToggleFiles, ToggleGit, WindowView,
     card, cards, divider_color, drag_window, titlebar::icon_toggle,
 };
+use crate::ui::a11y::A11yPress;
 use crate::{
     assets::{FILES_ICON, GIT_ICON, PANEL_RIGHT_ICON},
     ui::{hsla, tooltip::tooltip},
@@ -511,12 +512,9 @@ impl WindowView {
                 }),
             )
             // 按下鼠标就办，没有 on_click，辅助工具的按下另外登记。
-            .on_a11y_action(AccessibleAction::Click, move |_, window, cx| {
-                view.update(cx, |this, cx| {
-                    let panel = if this.panel.is_some() { None } else { Some(this.last_panel) };
-                    this.set_panel(panel, window, cx);
-                })
-                .ok();
+            .on_a11y_press(view, move |this, window, cx| {
+                let panel = if this.panel.is_some() { None } else { Some(this.last_panel) };
+                this.set_panel(panel, window, cx);
             });
         div()
             .flex_none()
@@ -550,9 +548,7 @@ impl WindowView {
                         this.set_panel(Some(page), window, cx);
                     }),
                 )
-                .on_a11y_action(AccessibleAction::Click, move |_, window, cx| {
-                    view.update(cx, |this, cx| this.set_panel(Some(page), window, cx)).ok();
-                })
+                .on_a11y_press(view, move |this, window, cx| this.set_panel(Some(page), window, cx))
         };
         self.panel_header(fg, cx)
             .id("panel-tabs")

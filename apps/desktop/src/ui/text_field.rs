@@ -176,8 +176,10 @@ impl TextField {
         &self.query
     }
 
-    /// 辅助工具直接写入的文字：换掉全部（可撤销），光标放到末尾，和打字一样发 `Changed`。
+    /// 辅助工具直接写入的文字：换掉全部（可撤销），光标放到末尾，和打字一样发 `Changed`。换行这些控制
+    /// 字符和打字时一样滤掉，不然写进配置会多出一行。
     fn set_value(&mut self, value: String, cx: &mut Context<Self>) {
+        let value = without_controls(&value);
         self.record(None);
         self.selected = value.len()..value.len();
         self.reversed = false;
@@ -566,7 +568,7 @@ impl EntityInputHandler for TextField {
             .or(self.marked.clone())
             .unwrap_or(self.selected.clone());
         // 回车、制表符等由按键绑定处理，不进文字。
-        let text: String = text.chars().filter(|c| !c.is_control()).collect();
+        let text = without_controls(text);
         if text.is_empty() && range.is_empty() && self.marked.is_none() {
             return;
         }
@@ -816,9 +818,19 @@ impl Element for TextFieldText {
     }
 }
 
+/// 去掉回车、换行、制表符这些控制字符：输入框只有一行，写进去的文字不带它们。
+fn without_controls(text: &str) -> String {
+    text.chars().filter(|c| !c.is_control()).collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn written_text_drops_control_characters() {
+        assert_eq!(without_controls("a\nb\r\tc\u{7f}中"), "abc中");
+    }
 
     fn at(text: &str) -> impl FnOnce() -> Snapshot {
         let text = text.to_owned();

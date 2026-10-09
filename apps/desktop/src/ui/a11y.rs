@@ -5,7 +5,8 @@
 use std::rc::Rc;
 
 use gpui::{
-    AccessibleAction, ClickEvent, Context, MouseButton, MouseDownEvent, Role, StatefulInteractiveElement, Window,
+    AccessibleAction, ClickEvent, Context, MouseButton, MouseDownEvent, Role, StatefulInteractiveElement, WeakEntity,
+    Window,
 };
 
 /// 点击或辅助工具按下时调 `f`。
@@ -21,12 +22,8 @@ pub trait Press: StatefulInteractiveElement + Sized {
         let f = Rc::new(f);
         let press = f.clone();
         let view = cx.entity().downgrade();
-        self.on_click(cx.listener(move |this, _: &ClickEvent, window, cx| f(this, window, cx))).on_a11y_action(
-            AccessibleAction::Click,
-            move |_, window, cx| {
-                view.update(cx, |this, cx| press(this, window, cx)).ok();
-            },
-        )
+        self.on_click(cx.listener(move |this, _: &ClickEvent, window, cx| f(this, window, cx)))
+            .on_a11y_press(view, move |this, window, cx| press(this, window, cx))
     }
 }
 
@@ -53,13 +50,29 @@ pub trait PressDown: StatefulInteractiveElement + Sized {
                 f(this, window, cx);
             }),
         )
-        .on_a11y_action(AccessibleAction::Click, move |_, window, cx| {
-            view.update(cx, |this, cx| press(this, window, cx)).ok();
-        })
+        .on_a11y_press(view, move |this, window, cx| press(this, window, cx))
     }
 }
 
 impl<E: StatefulInteractiveElement> PressDown for E {}
+
+/// 辅助工具按下时调 `f`，`view` 已经没了时什么也不做。
+///
+/// 给 `Press`、`PressDown` 套不上的元素另外登记按下动作：鼠标的处理要看点了几下、分在捕获和冒泡两段，
+/// 或者 `cx` 正被借着。
+pub trait A11yPress: StatefulInteractiveElement + Sized {
+    fn on_a11y_press<T: 'static>(
+        self,
+        view: WeakEntity<T>,
+        f: impl Fn(&mut T, &mut Window, &mut Context<T>) + 'static,
+    ) -> Self {
+        self.on_a11y_action(AccessibleAction::Click, move |_, window, cx| {
+            view.update(cx, |this, cx| f(this, window, cx)).ok();
+        })
+    }
+}
+
+impl<E: StatefulInteractiveElement> A11yPress for E {}
 
 /// 报给辅助工具「不可用」：灰着、按了不办的按钮和菜单项。
 ///

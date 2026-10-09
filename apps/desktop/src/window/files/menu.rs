@@ -5,9 +5,9 @@
 use std::path::{Path, PathBuf};
 
 use gpui::{
-    AccessibleAction, Action, Anchor, AnyElement, App, ClipboardItem, Context, Div, FocusHandle, KeyDownEvent,
-    MouseButton, Pixels, Point, Role, ScrollHandle, SharedString, Stateful, Window, anchored, deferred, div, point,
-    prelude::*, px, relative, svg,
+    Action, Anchor, AnyElement, App, ClipboardItem, Context, Div, FocusHandle, KeyDownEvent, MouseButton, Pixels,
+    Point, Role, ScrollHandle, SharedString, Stateful, Window, anchored, deferred, div, point, prelude::*, px,
+    relative, svg,
 };
 use runode_shared_types::color::Rgb;
 
@@ -15,6 +15,7 @@ use super::{
     AddToGitignore, CopyPath, CopyRelativePath, DeleteFile, InsertFilePath, NewFile, NewFolder, OpenInTerminal,
     OpenSelectedFile, RenameFile, RevealInFinder,
 };
+use crate::ui::a11y::A11yPress;
 use crate::ui::a11y::Disable;
 use crate::{
     assets::{CHEVRON_DOWN_ICON, CHEVRON_RIGHT_ICON},
@@ -509,9 +510,7 @@ impl WindowView {
                         }),
                     )
                     // 只有按下的处理时辅助工具按不到，另外登记。
-                    .on_a11y_action(AccessibleAction::Click, move |_, window, cx| {
-                        view.update(cx, |this, cx| this.activate_menu_item(ix, window, cx)).ok();
-                    })
+                    .on_a11y_press(view, move |this, window, cx| this.activate_menu_item(ix, window, cx))
                 })
                 .when(check_column, |row| {
                     row.child(
@@ -560,9 +559,7 @@ impl WindowView {
                                         this.press_menu_button(ix, b, window, cx);
                                     }),
                                 )
-                                .on_a11y_action(AccessibleAction::Click, move |_, window, cx| {
-                                    view.update(cx, |this, cx| this.press_menu_button(ix, b, window, cx)).ok();
-                                })
+                                .on_a11y_press(view, move |this, window, cx| this.press_menu_button(ix, b, window, cx))
                         },
                     ))
                 }))

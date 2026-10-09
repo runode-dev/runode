@@ -8,10 +8,7 @@ mod custom;
 
 use std::path::{Path, PathBuf};
 
-use gpui::{
-    AccessibleAction, Action, App, Context, Div, Focusable, MouseButton, Role, SharedString, Stateful, Window,
-    prelude::*, px,
-};
+use gpui::{Action, App, Context, Div, Focusable, MouseButton, Role, SharedString, Stateful, Window, prelude::*, px};
 use runode_config::TaskPlacement;
 use runode_paths::Dirs;
 use runode_protocol::{TaskSource, TaskSourceKind};
@@ -25,6 +22,7 @@ use super::{
     project::{TOGGLE_HEIGHT, TOGGLE_WIDTH},
     titlebar::icon_toggle,
 };
+use crate::ui::a11y::A11yPress;
 use crate::{
     assets::{PENCIL_ICON, PLAY_ICON, TRASH_ICON},
     config::AppConfig,
@@ -234,9 +232,7 @@ impl WindowView {
                 }),
             )
             // 按下鼠标就开，没有 on_click，辅助工具的按下另外登记：和快捷键一样开关菜单、开时选中第一条。
-            .on_a11y_action(AccessibleAction::Click, move |_, window, cx| {
-                view.update(cx, |this, cx| this.toggle_tasks(&ToggleTasks, window, cx)).ok();
-            })
+            .on_a11y_press(view, move |this, window, cx| this.toggle_tasks(&ToggleTasks, window, cx))
             .children(self.render_dropdown(fg, bg, window, cx))
     }
 

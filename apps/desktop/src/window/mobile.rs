@@ -9,8 +9,8 @@
 use std::{net::IpAddr, rc::Rc};
 
 use gpui::{
-    AccessibleAction, AnyElement, App, ClipboardItem, Context, Div, Entity, FocusHandle, Focusable, FontWeight, Hsla,
-    KeyDownEvent, MouseButton, Role, SharedString, Stateful, Subscription, Window, div, prelude::*, px, svg,
+    AnyElement, App, ClipboardItem, Context, Div, Entity, FocusHandle, Focusable, FontWeight, Hsla, KeyDownEvent,
+    MouseButton, Role, SharedString, Stateful, Subscription, Window, div, prelude::*, px, svg,
 };
 use runode_remote_access::{host_name, local_interfaces};
 use runode_shared_types::color::Rgb;
@@ -21,6 +21,7 @@ use super::{
     drag_window, frame_color,
     sidebar::ROW_ICON_SIZE,
 };
+use crate::ui::a11y::A11yPress;
 use crate::{
     assets::{CHEVRON_DOWN_ICON, PHONE_ICON, REFRESH_ICON, TRASH_ICON},
     config::AppConfig,
@@ -266,9 +267,7 @@ impl WindowView {
                 }),
             )
             // 按下鼠标就开，没有 on_click，辅助工具的按下另外登记。
-            .on_a11y_action(AccessibleAction::Click, move |_, window, cx| {
-                view.update(cx, |this, cx| this.show_mobile(window, cx)).ok();
-            })
+            .on_a11y_press(view, move |this, window, cx| this.show_mobile(window, cx))
     }
 
     /// 引导页开着时窗口的内容：侧栏（收着时没有），右边整块是引导页，顶上留一条拖动窗口、放红绿灯。

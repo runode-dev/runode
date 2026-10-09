@@ -5,8 +5,8 @@
 use std::path::{Path, PathBuf};
 
 use gpui::{
-    AccessibleAction, Context, Div, Entity, Focusable, KeyDownEvent, MouseButton, Role, ScrollHandle, SharedString,
-    Subscription, Window, div, prelude::*, px, svg,
+    Context, Div, Entity, Focusable, KeyDownEvent, MouseButton, Role, ScrollHandle, SharedString, Subscription, Window,
+    div, prelude::*, px, svg,
 };
 use runode_git::{self as git, Branch};
 use runode_shared_types::color::Rgb;
@@ -15,6 +15,7 @@ use super::super::{
     WindowView,
     agent_picker::{nav_delta, picker_panel},
 };
+use crate::ui::a11y::A11yPress;
 use crate::{
     assets::{BRANCH_ICON, CHECK_ICON, PLUS_ICON},
     ui::{
@@ -300,14 +301,11 @@ impl WindowView {
                         }),
                     )
                     // 列表滚动着，滚出去的行辅助工具也要按得到，不靠合成的鼠标点击。
-                    .on_a11y_action(AccessibleAction::Click, move |_, window, cx| {
-                        view.update(cx, |this, cx| {
-                            if let Some(picker) = &mut this.branch_picker {
-                                picker.selected = ix;
-                            }
-                            this.confirm_branch_picker(window, cx);
-                        })
-                        .ok();
+                    .on_a11y_press(view, move |this, window, cx| {
+                        if let Some(picker) = &mut this.branch_picker {
+                            picker.selected = ix;
+                        }
+                        this.confirm_branch_picker(window, cx);
                     })
                     .child(svg().flex_none().path(icon).size(px(14.)).text_color(fg.opacity(0.7)))
                     .child(div().flex_none().max_w(px(PICKER_WIDTH * 0.5)).truncate().text_color(fg).child(name))

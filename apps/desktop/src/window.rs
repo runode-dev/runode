@@ -567,6 +567,7 @@ impl Render for WindowView {
         // 这几个浮层挡住了后面的界面，开着时后面的不报给辅助工具。
         let modal = agent_picker.is_some()
             || arrange_picker.is_some()
+            || branch_picker.is_some()
             || new_workspace.is_some()
             || add_task.is_some()
             || commit_message_dialog.is_some();
@@ -653,6 +654,12 @@ impl Render for WindowView {
 /// 放大的预览栏：盖满终端区，挡住下面终端的鼠标事件；终端不改尺寸，还原后原样露出来。
 fn cover_panes(preview: Stateful<Div>) -> Stateful<Div> {
     preview.absolute().top_0().left_0().size_full().occlude()
+}
+
+/// 终端区的各个分屏；被放大的预览栏盖住（`covered`）时不报给辅助工具，不然辅助工具照样读得到、按得到
+/// 底下的终端。
+fn covered_panes(panes: AnyElement, covered: bool) -> Stateful<Div> {
+    div().id("panes").size_full().aria_hidden(covered).child(panes)
 }
 
 impl WindowView {
@@ -781,6 +788,7 @@ impl WindowView {
                 }))
                 .children(tabs)
         });
+        let panes = covered_panes(panes, maximized_preview.is_some());
         let main = div()
             .flex_1()
             .min_w_0()
@@ -873,6 +881,7 @@ impl WindowView {
             // 标签条只占标签本身的宽度，新建标签按钮紧跟在后面，剩下的空白留给拖动窗口。
             .child(div().flex_1().h_full())
             .child(self.render_panel_toggles(fg, frame, window, cx));
+        let panes = covered_panes(panes, maximized_preview.is_some());
         let content = div()
             .flex_1()
             .min_h_0()

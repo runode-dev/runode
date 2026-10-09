@@ -499,4 +499,36 @@ mod tests {
         assert_eq!(shown.item_at(7), None);
         assert_eq!(shown.item_at(9), None);
     }
+
+    #[test]
+    fn shown_items_past_a_shrunk_list_are_skipped() {
+        let candidates = |n: usize| (0..n).map(|i| Candidate::new(format!("c{i}"), Kind::Value)).collect::<Vec<_>>();
+        let mut menu = super::super::CompletionMenu {
+            before_word: String::new(),
+            cells_before_cursor: 0,
+            cwd: None,
+            shell: completion::Shell { path: None, names: Default::default(), usage: Default::default() },
+            typed: String::new(),
+            local: candidates(10),
+            generated: Vec::new(),
+            candidates: Vec::new(),
+            items: Vec::new(),
+            total: 0,
+            groups: Vec::new(),
+            selected: 0,
+            top: 0,
+            scroll_remainder: 0.,
+            shown: None,
+            moved: false,
+            fresh: true,
+        };
+        menu.rebuild();
+        assert_eq!(menu.items.len(), 10);
+        menu.shown = Some(Shown { top_row: 0, list_row: 1, list_rows: 10, first_item: 0, items: 10 });
+        // 候选重算后只剩两项，还没重画：`shown` 仍是十项时的。
+        menu.local = candidates(2);
+        menu.rebuild();
+        let (_, visible) = menu.shown.as_ref().unwrap().visible();
+        assert_eq!(visible.filter_map(|item| menu.candidate(item)).count(), 2);
+    }
 }
