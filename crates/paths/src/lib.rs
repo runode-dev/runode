@@ -147,6 +147,11 @@ impl Dirs {
         self.data_file("themes")
     }
 
+    /// 用户自己的命令补全规格，`<命令名>.json` 盖过内置的同名规格。
+    pub fn completions_dir(&self) -> Option<PathBuf> {
+        self.data_file("completions")
+    }
+
     /// 窗口布局的存档。
     pub fn windows_file(&self) -> Option<PathBuf> {
         self.data_file("windows.json")
@@ -274,6 +279,7 @@ mod tests {
         assert_eq!(dirs.history_file(), Some("/home/me/.runode/history.jsonl".into()));
         assert_eq!(dirs.themes_dir(), Some("/home/me/.runode/themes".into()));
         assert_eq!(dirs.agent_detection_dir(), Some("/home/me/.runode/agent-detection".into()));
+        assert_eq!(dirs.completions_dir(), Some("/home/me/.runode/completions".into()));
         assert_eq!(dirs.shell_integration_dir(), Some("/home/me/.runode/cache/shell-integration".into()));
         assert_eq!(dirs.prespawn_size_file(), Some("/home/me/.runode/cache/first-terminal-size".into()));
         assert_eq!(dirs.ghostty_themes_dir(), Some("/home/me/.config/ghostty/themes".into()));
