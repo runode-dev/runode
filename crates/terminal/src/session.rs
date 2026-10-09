@@ -89,8 +89,9 @@ pub struct Session {
     sender: Sender,
     /// VT 现在的尺寸，见 `apply_resized`。
     size: StdCell<GridSize>,
-    /// 最近一次要宿主改成的尺寸，见 `resize`。
-    requested_size: GridSize,
+    /// 最近一次要宿主改成的尺寸，见 `resize`。还没请求过时为空：头一次一定发出去，哪怕和 VT 现在的
+    /// 一样，宿主要据此知道这个前端要什么尺寸，见 `HostMsg::SizeOwner`。
+    requested_size: Option<GridSize>,
     /// 程序响过铃，由 `take_bell` 取走。
     bell: Rc<StdCell<bool>>,
     /// 待写出的已编码输入，各次按键复用这块缓冲。
@@ -160,7 +161,7 @@ impl Session {
             selecting: Selecting::new()?,
             sender,
             size: StdCell::new(size),
-            requested_size: size,
+            requested_size: None,
             bell,
             scratch: Vec::with_capacity(64),
             meta: SessionMeta::default(),
@@ -261,10 +262,10 @@ impl Session {
     /// `apply_resized` 再改，两份 VT 在同一个字节位置折行。和上次请求的一样或者行列为 0 时
     /// 什么都不做。
     pub fn resize(&mut self, size: GridSize) {
-        if self.requested_size == size || size.cols == 0 || size.rows == 0 {
+        if self.requested_size == Some(size) || size.cols == 0 || size.rows == 0 {
             return;
         }
-        self.requested_size = size;
+        self.requested_size = Some(size);
         (self.sender)(Request::Resize(size));
     }
 
@@ -340,6 +341,17 @@ mod tests {
         session.apply_resized(size);
         assert_eq!(session.size(), size);
         assert_eq!(session.terminal.cols().unwrap(), 30);
+    }
+
+    /// 头一次请求和 VT 现在的尺寸一样也发出去：存档恢复的视图不带尺寸连上，宿主要靠它才知道这个前端
+    /// 要什么尺寸，不然别的前端接管尺寸后这边点了也接不回来。
+    #[test]
+    fn the_first_resize_is_sent_even_at_the_current_size() {
+        let (mut session, requests) = capturing_session();
+        let size = session.size();
+        session.resize(size);
+        session.resize(size);
+        assert_eq!(*requests.borrow(), [Request::Resize(size)]);
     }
 
     /// 端到端：真实 shell 经过 PTY，宿主那份 VT 和界面这份同时喂同样的输出，按键从界面经宿主
