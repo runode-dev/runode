@@ -275,6 +275,9 @@ files:
   search_placeholder: Find files
   search_name: Name
   search_content: Content
+  search_mode: Search By
+  search_results: Search Results
+  tree: Files
   search_empty: No results
   view_as_tree: View as Tree
   view_as_list: View as List

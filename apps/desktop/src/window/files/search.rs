@@ -19,8 +19,9 @@ use std::{
 };
 
 use gpui::{
-    AnyElement, ClickEvent, Context, Div, Entity, Focusable as _, HighlightStyle, ScrollStrategy, SharedString,
-    StyledText, Subscription, UniformListScrollHandle, Window, div, img, prelude::*, px, svg, uniform_list,
+    AccessibleAction, AnyElement, ClickEvent, Context, Div, Entity, Focusable as _, HighlightStyle, Role,
+    ScrollStrategy, SharedString, StyledText, Subscription, UniformListScrollHandle, Window, div, img, prelude::*, px,
+    svg, uniform_list,
 };
 use regex::{Regex, RegexBuilder};
 use runode_git::GrepQuery;
@@ -30,6 +31,7 @@ use super::WindowView;
 use crate::{
     assets::{CHEVRON_DOWN_ICON, CHEVRON_RIGHT_ICON, CLOSE_ICON, FILTER_ICON},
     ui::{
+        a11y::Press,
         file_icons::{file_icon, folder_icon},
         hsla,
         text_field::{TextField, TextFieldEvent},
@@ -169,7 +171,8 @@ pub(in crate::window) struct FileSearch {
 impl FileSearch {
     pub(in crate::window) fn new(window: &mut Window, cx: &mut Context<WindowView>) -> Self {
         let placeholder = rust_i18n::t!("files.search_placeholder").into_owned();
-        let field = cx.new(|cx| TextField::new(String::new(), cx).with_placeholder(placeholder));
+        let field = cx
+            .new(|cx| TextField::new(String::new(), cx).with_label(placeholder.clone()).with_placeholder(placeholder));
         let events = cx.subscribe_in(&field, window, |this, field, event: &TextFieldEvent, window, cx| match event {
             TextFieldEvent::Changed(_) => this.sync_file_search(cx),
             // 没选中时打开第一个文件，跳过树形式开头的目录。
@@ -191,9 +194,9 @@ impl FileSearch {
                 }
             }
         });
-        let filter = |placeholder: &str, cx: &mut Context<WindowView>| {
-            let placeholder = rust_i18n::t!(placeholder).into_owned();
-            let field = cx.new(|cx| TextField::new(String::new(), cx).with_placeholder(placeholder));
+        let filter = |label: &str, placeholder: &str, cx: &mut Context<WindowView>| {
+            let (label, placeholder) = (rust_i18n::t!(label).into_owned(), rust_i18n::t!(placeholder).into_owned());
+            let field = cx.new(|cx| TextField::new(String::new(), cx).with_label(label).with_placeholder(placeholder));
             let events = cx.subscribe(&field, |this, _, event: &TextFieldEvent, cx| {
                 if let TextFieldEvent::Changed(_) = event {
                     this.sync_file_search(cx);
@@ -202,8 +205,8 @@ impl FileSearch {
             });
             (field, events)
         };
-        let (include, include_events) = filter("files.include_placeholder", cx);
-        let (exclude, exclude_events) = filter("files.exclude_placeholder", cx);
+        let (include, include_events) = filter("files.include", "files.include_placeholder", cx);
+        let (exclude, exclude_events) = filter("files.exclude", "files.exclude_placeholder", cx);
         Self {
             field,
             mode: SearchMode::Name,
@@ -561,6 +564,7 @@ impl WindowView {
         let small_button = |id: &'static str, tip: String, on: bool| {
             div()
                 .id(id)
+                .aria_label(tip.clone())
                 .flex_none()
                 .h(px(20.))
                 .min_w(px(20.))
@@ -581,22 +585,25 @@ impl WindowView {
         };
         type Flip = fn(&mut FileSearch);
         let option = |id, label: &'static str, tip: &str, on: bool, flip: Flip, cx: &mut Context<Self>| {
-            small_button(id, rust_i18n::t!(tip).into_owned(), on).child(label).on_click(cx.listener(
-                move |this, _, _, cx| {
+            small_button(id, rust_i18n::t!(tip).into_owned(), on)
+                .role(Role::CheckBox)
+                .aria_toggled(on.into())
+                .child(label)
+                .on_press(cx, move |this, _, cx| {
                     flip(&mut this.file_search);
                     this.sync_file_search(cx);
                     this.save(cx);
-                },
-            ))
+                })
         };
         let has_query = !search.field.read(cx).query().is_empty();
         let clear = has_query.then(|| {
             small_button("search-clear", rust_i18n::t!("files.clear_search").into_owned(), false)
+                .role(Role::Button)
                 .child(svg().path(CLOSE_ICON).size(px(12.)).text_color(hsla(fg).opacity(0.6)))
-                .on_click(cx.listener(|this, _, _, cx| {
+                .on_press(cx, |this, _, cx| {
                     this.file_search.field.update(cx, |field, cx| field.set_query(String::new(), cx));
                     this.sync_file_search(cx);
-                }))
+                })
         });
         let options = content.then(|| {
             [
@@ -613,6 +620,9 @@ impl WindowView {
             let on = mode == value;
             div()
                 .id(id)
+                .role(Role::RadioButton)
+                .aria_label(label.clone())
+                .aria_toggled(on.into())
                 .flex_1()
                 .h_full()
                 .flex()
@@ -628,9 +638,12 @@ impl WindowView {
                     }
                 })
                 .child(label)
-                .on_click(cx.listener(move |this, _, _, cx| this.set_search_mode(value, cx)))
+                .on_press(cx, move |this, _, cx| this.set_search_mode(value, cx))
         };
         let segments = div()
+            .id("search-mode")
+            .role(Role::RadioGroup)
+            .aria_label(rust_i18n::t!("files.search_mode").into_owned())
             .h(px(26.))
             .p(px(2.))
             .flex()
@@ -725,7 +738,15 @@ impl WindowView {
         .track_scroll(&search.scroll)
         .size_full()
         .p(px(4.));
-        let summary = div().flex_none().px(px(10.)).pb(px(4.)).text_size(px(12.)).text_color(hsla(fg).opacity(0.5));
+        let summary = div()
+            .id("file-search-summary")
+            .role(Role::Label)
+            .aria_label(summary_text.clone())
+            .flex_none()
+            .px(px(10.))
+            .pb(px(4.))
+            .text_size(px(12.))
+            .text_color(hsla(fg).opacity(0.5));
         Some(
             div()
                 .flex_1()
@@ -733,7 +754,16 @@ impl WindowView {
                 .flex()
                 .flex_col()
                 .child(summary.child(summary_text))
-                .child(div().flex_1().min_h_0().child(list))
+                // 列表形式时命中的行也缩进在文件下面，统一报成树；只画看得见的行，辅助工具也只读到这些行。
+                .child(
+                    div()
+                        .id("file-search-results")
+                        .role(Role::Tree)
+                        .aria_label(rust_i18n::t!("files.search_results").into_owned())
+                        .flex_1()
+                        .min_h_0()
+                        .child(list),
+                )
                 .into_any_element(),
         )
     }
@@ -760,8 +790,11 @@ impl WindowView {
             });
             div().flex_none().w(px(font_size)).flex().items_center().children(icon)
         };
-        let (depth, tip, content) = match row {
+        // 报给辅助工具的名字：目录和文件是名字，命中的行是行号和那一行。
+        let mut expanded_state = None;
+        let (depth, tip, content, label): (_, _, _, SharedString) = match row {
             SearchRow::Dir { path, name, depth, expanded } => {
+                expanded_state = Some(*expanded);
                 let last = path.file_name().map(|name| name.to_string_lossy()).unwrap_or_default();
                 let content = div()
                     .flex_1()
@@ -772,7 +805,7 @@ impl WindowView {
                     .child(chevron(Some(*expanded)))
                     .child(img(folder_icon(&last, *expanded)).flex_none().size(px(font_size + 2.)))
                     .child(div().min_w_0().truncate().text_color(hsla(fg).opacity(0.85)).child(name.clone()));
-                (*depth, path.display().to_string(), content)
+                (*depth, path.display().to_string(), content, name.clone())
             }
             SearchRow::File { file, depth } => {
                 let found = &search.found[*file];
@@ -804,7 +837,7 @@ impl WindowView {
                             .when(!search.tree, |item| item.child(found.dir.clone())),
                     )
                     .when(hits > 0, |item| item.child(div().flex_none().text_color(dim).child(hits.to_string())));
-                (*depth, found.path.display().to_string(), content)
+                (*depth, found.path.display().to_string(), content, found.name.clone())
             }
             SearchRow::Line { file, line, depth } => {
                 let found = &search.found[*file];
@@ -833,11 +866,23 @@ impl WindowView {
                             .child(line.line.to_string()),
                     )
                     .child(div().flex_1().min_w_0().truncate().text_color(hsla(fg).opacity(0.7)).child(text));
-                (*depth, format!("{}:{}", found.path.display(), line.line), content)
+                let label = format!("{}: {}", line.line, line.text).into();
+                (*depth, format!("{}:{}", found.path.display(), line.line), content, label)
             }
         };
         let selected = search.selected == Some(ix);
+        let view = cx.entity().downgrade();
         Self::file_row_shell(("file-search", ix), depth, font_size, fg)
+            .role(Role::TreeItem)
+            .aria_label(label)
+            .aria_description(tip.clone())
+            .aria_level(depth + 1)
+            .aria_selected(selected)
+            .when_some(expanded_state, |item, expanded| item.aria_expanded(expanded))
+            // 点击要看点了几下，辅助工具按下另外登记，和单击一样。
+            .on_a11y_action(AccessibleAction::Click, move |_, _, cx| {
+                view.update(cx, |this, cx| this.open_search_row(ix, false, cx)).ok();
+            })
             .map(|item| {
                 if selected {
                     item.bg(hsla(bg.mix(fg, 0.12)))

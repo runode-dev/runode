@@ -16,8 +16,8 @@ use std::{
 };
 
 use gpui::{
-    AnyElement, Axis, Context, Image, ListHorizontalSizingBehavior, MouseButton, MouseDownEvent, PromptLevel,
-    ScrollStrategy, SharedString, StyledText, Window, div, prelude::*, px, svg, uniform_list,
+    AccessibleAction, AnyElement, Axis, Context, Image, ListHorizontalSizingBehavior, MouseButton, MouseDownEvent,
+    PromptLevel, Role, ScrollStrategy, SharedString, StyledText, Window, div, prelude::*, px, svg, uniform_list,
 };
 use runode_config::PreviewClick;
 use runode_git::{self as git, DiffRow, DiffSide, DiffView, FileStatus, HunkAction, LineKind, hunk_actionable};
@@ -338,8 +338,15 @@ impl WindowView {
             }),
         );
         let jump = |id: &'static str, icon: &'static str, key: &'static str, forward: bool| {
+            // 只有按下的处理，辅助工具按不到，另外登记。
+            let view = cx.entity().downgrade();
             div()
                 .id(id)
+                .role(Role::Button)
+                .aria_label(rust_i18n::t!(key).into_owned())
+                .on_a11y_action(AccessibleAction::Click, move |_, _, cx| {
+                    view.update(cx, |this, cx| this.jump_to_change(forward, row_height, cx)).ok();
+                })
                 .flex_none()
                 .size(px(20.))
                 .rounded(px(3.))
@@ -358,6 +365,8 @@ impl WindowView {
                 )
         };
         let toolbar = div()
+            .id("diff-toolbar")
+            .role(Role::Toolbar)
             .flex_none()
             .h(px(TOOLBAR_HEIGHT))
             .px(px(10.))
@@ -367,8 +376,18 @@ impl WindowView {
             .text_size(px(12.))
             .border_b_1()
             .border_color(divider_color(hsla(fg)))
-            .child(added_label(view.file.added))
-            .child(removed_label(view.file.removed))
+            .child(
+                added_label(view.file.added)
+                    .id("diff-added")
+                    .role(Role::Label)
+                    .aria_label(format!("+{}", view.file.added)),
+            )
+            .child(
+                removed_label(view.file.removed)
+                    .id("diff-removed")
+                    .role(Role::Label)
+                    .aria_label(format!("-{}", view.file.removed)),
+            )
             .child(div().flex_1())
             .child(jump("diff-previous", ARROW_UP_ICON, "preview.diff.previous_change", false))
             .child(jump("diff-next", ARROW_DOWN_ICON, "preview.diff.next_change", true));
@@ -558,7 +577,11 @@ impl WindowView {
                 let full = full.clone();
                 // 折出来的后几段不写行号和正负号。
                 let (old, new_number, sign) = if first { (old, new, sign) } else { (None, None, "") };
+                // 每行报成一段文字，前面带着正负号；辅助工具读得到看得见的这些行。
+                let label = if sign.trim().is_empty() { text.clone() } else { format!("{sign} {text}") };
                 base.id(("preview-diff-line", item))
+                    .role(Role::Label)
+                    .aria_label(label)
                     .when_some(tint, |row, tint| row.bg(hsla(tint)))
                     .child(number_cell(old))
                     .child(number_cell(new_number))
@@ -612,13 +635,22 @@ impl WindowView {
         };
         let fg_hsla = hsla(fg);
         row.id(("preview-diff-header", ix))
+            .role(Role::Group)
+            .aria_label(header.clone())
             .px(px(8.))
             .gap(px(6.))
             .bg(hsla(bg.mix(fg, 0.05)))
             .child(div().flex_1().min_w_0().truncate().text_color(fg_hsla.opacity(0.5)).child(header))
             .children(buttons.into_iter().enumerate().map(|(bi, (icon, key, action))| {
+                // 只有按下的处理，辅助工具按不到，另外登记。
+                let view = cx.entity().downgrade();
                 div()
                     .id(("preview-diff-hunk-button", ix * 4 + bi))
+                    .role(Role::Button)
+                    .aria_label(rust_i18n::t!(key).into_owned())
+                    .on_a11y_action(AccessibleAction::Click, move |_, window, cx| {
+                        view.update(cx, |this, cx| this.diff_hunk_action(hunk, action, window, cx)).ok();
+                    })
                     .flex_none()
                     .px(px(6.))
                     .h(px(18.))

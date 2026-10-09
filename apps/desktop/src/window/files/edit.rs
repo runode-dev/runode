@@ -3,7 +3,7 @@
 
 use std::path::{Path, PathBuf};
 
-use gpui::{AnyElement, Context, PromptLevel, ScrollStrategy, Window, div, img, prelude::*, px};
+use gpui::{AnyElement, Context, PromptLevel, Role, ScrollStrategy, Window, div, img, prelude::*, px};
 use runode_git::Repo;
 use runode_shared_types::color::Rgb;
 
@@ -97,7 +97,12 @@ impl WindowView {
         };
         let name = edit.field.read(cx).query();
         let icon = if *is_dir { folder_icon(name, false) } else { file_icon(name) };
+        // 输入框报不了自己的名字（`InlineEdit` 建的 `TextField` 没有），这一行替它说是在新建什么。
+        let label = if *is_dir { rust_i18n::t!("files.new_folder") } else { rust_i18n::t!("files.new_file") };
         Self::file_row_shell("new-file-entry", depth, font_size, fg)
+            .role(Role::TreeItem)
+            .aria_label(label.into_owned())
+            .aria_level(depth + 1)
             // 点在输入框里不要传到文件树，免得清掉选中。
             .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| cx.stop_propagation())
             .child(

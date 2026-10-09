@@ -35,9 +35,9 @@ use std::{
 };
 
 use gpui::{
-    Action, App, ClipboardItem, Context, Div, Focusable as _, Image, ImageSource, MouseButton, MouseMoveEvent,
-    RenderImage, SMOOTH_SVG_SCALE_FACTOR, ScrollHandle, ScrollStrategy, SharedString, Stateful, SvgRenderer,
-    UniformListScrollHandle, Window, div, linear_color_stop, linear_gradient, prelude::*, px,
+    AccessibleAction, Action, App, ClipboardItem, Context, Div, Focusable as _, Image, ImageSource, MouseButton,
+    MouseMoveEvent, RenderImage, Role, SMOOTH_SVG_SCALE_FACTOR, ScrollHandle, ScrollStrategy, SharedString, Stateful,
+    SvgRenderer, UniformListScrollHandle, Window, div, linear_color_stop, linear_gradient, prelude::*, px,
 };
 use runode_git::{self as git, FileStatus, Section};
 use runode_preview::{Content, ImageFormat, Span};
@@ -731,6 +731,7 @@ impl WindowView {
         // 标签条后面的空白处和标题栏一样能拖动窗口。
         let strip = div()
             .id("preview-tabs")
+            .role(Role::TabList)
             .flex_initial()
             .min_w_0()
             .h_full()
@@ -742,8 +743,20 @@ impl WindowView {
         let maximized = previews.maximized;
         let button =
             |id: &'static str, icon: &'static str, on: bool, text: Cow<'static, str>, action: Option<&dyn Action>| {
-                icon_toggle(id, icon, 13., on, fg, bg).flex_none().size(px(22.)).tooltip(tooltip(text, action, fg, bg))
+                icon_toggle(id, icon, 13., on, fg, bg)
+                    .role(Role::Button)
+                    .aria_label(SharedString::from(text.clone()))
+                    .flex_none()
+                    .size(px(22.))
+                    .tooltip(tooltip(text, action, fg, bg))
             };
+        // 这几个按钮只有按下的处理，辅助工具按不到，另外登记按下时做的事。
+        let press = |f: fn(&mut Self, &mut Window, &mut Context<Self>), cx: &mut Context<Self>| {
+            let view = cx.entity().downgrade();
+            move |_: Option<&gpui::accesskit::ActionData>, window: &mut Window, cx: &mut App| {
+                view.update(cx, |this, cx| f(this, window, cx)).ok();
+            }
+        };
         let is_markdown = preview.diff.is_none() && runode_preview::is_markdown(&preview.path);
         let typeset = self.markdown_shown(preview);
         let buttons = div()
@@ -754,25 +767,37 @@ impl WindowView {
             .when(is_markdown, |buttons| {
                 let text =
                     if typeset { rust_i18n::t!("preview.show_source") } else { rust_i18n::t!("preview.show_rendered") };
-                buttons.child(button("preview-source", CODE_ICON, !typeset, text, None).on_mouse_down(
-                    MouseButton::Left,
-                    cx.listener(|this, _, _, cx| {
-                        cx.stop_propagation();
-                        this.toggle_preview_source(cx);
-                    }),
-                ))
+                // 悬停提示说按了会怎样，跟着状态换；报给辅助工具的名字不换，开着表示正显示源码。
+                buttons.child(
+                    button("preview-source", CODE_ICON, !typeset, text, None)
+                        .aria_label(rust_i18n::t!("preview.show_source").into_owned())
+                        .aria_toggled((!typeset).into())
+                        .on_mouse_down(
+                            MouseButton::Left,
+                            cx.listener(|this, _, _, cx| {
+                                cx.stop_propagation();
+                                this.toggle_preview_source(cx);
+                            }),
+                        )
+                        .on_a11y_action(
+                            AccessibleAction::Click,
+                            press(|this, _, cx| this.toggle_preview_source(cx), cx),
+                        ),
+                )
             })
             // 排版视图的正文总是按栏宽换行（代码块横着滚），自动换行的开关只在源码视图里有。
             .when(!typeset, |buttons| {
                 buttons.child(
                     button("preview-wrap", WRAP_ICON, self.preview_wrap, rust_i18n::t!("preview.wrap"), None)
+                        .aria_toggled(self.preview_wrap.into())
                         .on_mouse_down(
                             MouseButton::Left,
                             cx.listener(|this, _, _, cx| {
                                 cx.stop_propagation();
                                 this.toggle_preview_wrap(cx);
                             }),
-                        ),
+                        )
+                        .on_a11y_action(AccessibleAction::Click, press(|this, _, cx| this.toggle_preview_wrap(cx), cx)),
                 )
             })
             .child(
@@ -789,7 +814,8 @@ impl WindowView {
                         cx.stop_propagation();
                         this.toggle_preview_maximized(window, cx);
                     }),
-                ),
+                )
+                .on_a11y_action(AccessibleAction::Click, press(Self::toggle_preview_maximized, cx)),
             );
         // 按钮靠右；预览栏在最右边时再让出右上角面板开关的宽度，标签和按钮不钻到开关底下。
         let filler = div()
@@ -805,7 +831,16 @@ impl WindowView {
             .child(tab_underline(fg))
             .child(buttons);
         let header = self.panel_header(fg, cx).border_b_0().px_0().gap_0().child(strip).child(filler);
-        let body = self.render_preview_body(preview, width, font, fg, bg, window, cx);
+        // 正文整个报成一篇文档，以标签上的名字为名。
+        let body = div()
+            .id("preview-body")
+            .role(Role::Document)
+            .aria_label(preview.name())
+            .flex_1()
+            .min_h_0()
+            .flex()
+            .flex_col()
+            .child(self.render_preview_body(preview, width, font, fg, bg, window, cx));
         Some(
             panel_shell("preview-panel", width, fg, bg, cx)
                 .key_context("Preview")
