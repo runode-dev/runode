@@ -2,7 +2,6 @@ _version: 1
 menu:
   about: 關於 Runode
   settings: 設定…
-  open_config: 打開設定檔
   reload_config: 重新載入設定
   services: 服務
   hide: 隱藏 Runode
@@ -809,7 +808,6 @@ status:
   open_port: 在瀏覽器中開啟
 mobile:
   entry: "手機端"
-  menu: "手機端…"
   eyebrow: "RUNODE 手機端"
   intro_title: "工作區隨身帶著。"
   intro_body: "在 iPhone 上看 agent 在做什麼、回答它們的提問，打開任何一個終端機接著工作。手機經區域網路或 Tailscale 直接連到這台 Mac，不經過別的伺服器。"

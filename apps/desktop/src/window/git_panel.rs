@@ -926,7 +926,7 @@ impl WindowView {
 }
 
 /// 同步图标；`spinning` 时一直转圈，表示还在连远端。
-fn sync_icon(id: impl Into<ElementId>, spinning: bool, size: f32, color: Hsla) -> AnyElement {
+pub(super) fn sync_icon(id: impl Into<ElementId>, spinning: bool, size: f32, color: Hsla) -> AnyElement {
     let icon = svg().flex_none().path(SYNC_ICON).size(px(size)).text_color(color);
     if !spinning {
         return icon.into_any_element();

@@ -6,7 +6,8 @@
 //! 有新版本却不能自己更新时，给一个打开下载页的按钮。
 //!
 //! 查和下载期间菜单里那一项显示「正在检查更新…」和「正在下载 Runode X… 42%」，进度由下载线程写进
-//! `Progress`，前台每隔 `PROGRESS_REFRESH` 看一眼、百分比变了才重画菜单。
+//! `Progress`，前台每隔 `PROGRESS_REFRESH` 看一眼、百分比变了才重画菜单。用户点的那一次，查和下载
+//! 期间窗口底部的状态栏上也转着圈显示同样的文字（`status_label`）。
 //!
 //! 下好以后菜单里那一项换成「重启以更新到 Runode X」，后台查到的还发一条系统通知，点了弹框问要不要
 //! 重启。不重启也行：app 退出时装上（`on_app_quit`），下次打开就是新版本。重启
@@ -163,16 +164,44 @@ pub fn install(cx: &mut App) {
 
 /// 菜单里那一项的文字，跟着更新走到哪一步变。
 pub fn menu_label(cx: &App) -> String {
-    match cx.try_global::<Updater>().map(|updater| &updater.phase) {
-        Some(Phase::Ready(staged)) => rust_i18n::t!("update.menu_restart", version = staged.version()).into_owned(),
-        Some(Phase::Checking { .. }) => rust_i18n::t!("update.menu_checking").into_owned(),
-        Some(Phase::Downloading { version, progress, .. }) => match progress.percent() {
+    let phase = cx.try_global::<Updater>().map(|updater| &updater.phase);
+    match phase {
+        Some(Phase::Ready(staged)) => {
+            Some(rust_i18n::t!("update.menu_restart", version = staged.version()).into_owned())
+        }
+        Some(phase) => busy_label(phase),
+        None => None,
+    }
+    .unwrap_or_else(|| rust_i18n::t!("update.menu_check").into_owned())
+}
+
+/// 用户点了「检查更新…」以后、查完或下好之前，状态栏上显示的文字（和菜单里那一项一样）；
+/// 后台定时查的不显示。
+pub fn status_label(cx: &App) -> Option<String> {
+    let phase = &cx.try_global::<Updater>()?.phase;
+    match phase {
+        Phase::Checking { manual: true } | Phase::Downloading { manual: true, .. } => busy_label(phase),
+        _ => None,
+    }
+}
+
+/// 正在查、正在下载时的文字，别的时候是 `None`。
+fn busy_label(phase: &Phase) -> Option<String> {
+    let label = match phase {
+        Phase::Checking { .. } => rust_i18n::t!("update.menu_checking"),
+        Phase::Downloading { version, progress, .. } => match progress.percent() {
             Some(percent) => rust_i18n::t!("update.menu_downloading", version = version, percent = percent),
             None => rust_i18n::t!("update.menu_downloading_unknown", version = version),
-        }
-        .into_owned(),
-        _ => rust_i18n::t!("update.menu_check").into_owned(),
-    }
+        },
+        _ => return None,
+    };
+    Some(label.into_owned())
+}
+
+/// 更新走到下一步、下载的进度变了：重画菜单和各窗口的状态栏。
+fn changed(cx: &mut App) {
+    crate::menus::set_menus(cx);
+    cx.refresh_windows();
 }
 
 /// 菜单里点了那一项：下好了就重启以更新，否则马上查一次、弹框说结果；正在查时等它查完再说。
@@ -191,7 +220,7 @@ fn check(manual: bool, cx: &mut App) {
         Start::OfferRestart => return offer_restart(cx),
         Start::Nothing => return,
     }
-    crate::menus::set_menus(cx);
+    changed(cx);
     let found = cx.background_executor().spawn(async { look() });
     cx.spawn(async move |cx| {
         let found = found.await;
@@ -261,7 +290,7 @@ fn finish_check(found: Result<Found, Error>, cx: &mut App) {
             }
         }
     }
-    crate::menus::set_menus(cx);
+    changed(cx);
 }
 
 /// 在后台下载 `release`、核对好，菜单里显示进度；`manual` 时下好了弹框说，否则发通知。
@@ -269,7 +298,7 @@ fn download(release: Release, installation: Installation, manual: bool, cx: &mut
     let progress = Arc::new(Progress::default());
     cx.global_mut::<Updater>().phase =
         Phase::Downloading { version: release.version.clone(), progress: progress.clone(), manual };
-    crate::menus::set_menus(cx);
+    changed(cx);
     let staged = cx.background_executor().spawn(async move {
         installation.stage(&release, &|received, total| {
             progress.received.store(received, Ordering::Relaxed);
@@ -290,7 +319,7 @@ fn download(release: Release, installation: Installation, manual: bool, cx: &mut
                 let percent = progress.percent();
                 if percent != shown {
                     shown = percent;
-                    crate::menus::set_menus(cx);
+                    changed(cx);
                 }
                 true
             });
@@ -321,7 +350,7 @@ fn finish_download(staged: Result<Staged, Error>, cx: &mut App) {
             }
         }
     }
-    crate::menus::set_menus(cx);
+    changed(cx);
 }
 
 /// 弹框说新版本下好了，问现在重启还是退出时再装；点了「下好了」的通知时也是它。

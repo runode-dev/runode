@@ -20,8 +20,8 @@ use crate::{
     window::{
         ArrangePanes, ClosePane, CloseTab, CloseWorkspace, EqualizePanes, FocusNextPane, FocusPreviousPane, GotoAgent,
         NewSplitDown, NewSplitRight, NewTab, NewWorkspace, NextAgent, NextTab, NextWorkspace, PreviousTab,
-        PreviousWorkspace, RenameWorkspace, ShowMobile, ToggleFiles, ToggleGit, TogglePaneZoom, ToggleSidebar,
-        ToggleStatusBar, ToggleTasks,
+        PreviousWorkspace, RenameWorkspace, ToggleFiles, ToggleGit, TogglePaneZoom, ToggleSidebar, ToggleStatusBar,
+        ToggleTasks,
     },
 };
 
@@ -94,8 +94,6 @@ pub fn set_menus(cx: &mut App) {
                 MenuItem::action(crate::update::menu_label(cx), CheckForUpdates),
                 MenuItem::separator(),
                 MenuItem::action(tr("menu.settings"), OpenSettings),
-                MenuItem::action(tr("mobile.menu"), ShowMobile),
-                MenuItem::action(tr("menu.open_config"), OpenConfiguration),
                 MenuItem::action(tr("menu.reload_config"), ReloadConfiguration),
                 MenuItem::action(tr("setup.menu"), InstallAgentIntegration),
                 MenuItem::separator(),
