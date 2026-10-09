@@ -8,7 +8,7 @@ use super::{
     controls::{
         Cards, Colors, button, dropdown, icon_button, input_box, on_click, reset_button, row, segmented, swatch, switch,
     },
-    picker::{PickItem, PickTarget, ThemeSlot},
+    picker::{PickItem, PickTarget},
 };
 use crate::{
     i18n::tr,
@@ -248,55 +248,6 @@ pub(super) fn language_name(locale: &str) -> String {
     rust_i18n::t!("settings.language_name", locale = locale).into_owned()
 }
 
-/// `theme` 的值拆开：不用主题、一个主题，或者浅色、深色外观各一个。
-#[derive(Debug, PartialEq)]
-pub(super) enum ThemeChoice {
-    None,
-    Single(String),
-    Pair { light: String, dark: String },
-}
-
-impl ThemeChoice {
-    pub fn parse(value: Option<&str>) -> Self {
-        let Some(value) = value.map(str::trim).filter(|value| !value.is_empty()) else {
-            return Self::None;
-        };
-        let side = |want: &str| {
-            value.split(',').map(str::trim).find_map(|part| part.strip_prefix(want)).map(|name| name.trim().to_owned())
-        };
-        match (side("light:"), side("dark:")) {
-            (None, None) => Self::Single(value.to_owned()),
-            (light, dark) => {
-                let light = light.or_else(|| dark.clone()).unwrap_or_default();
-                let dark = dark.unwrap_or_else(|| light.clone());
-                Self::Pair { light, dark }
-            }
-        }
-    }
-
-    pub fn value(&self) -> Option<String> {
-        match self {
-            Self::None => None,
-            Self::Single(name) => Some(name.clone()),
-            Self::Pair { light, dark } => Some(format!("light:{light},dark:{dark}")),
-        }
-    }
-
-    /// 选了 `slot` 用 `name` 之后的样子。
-    pub fn with(&self, slot: ThemeSlot, name: String) -> Self {
-        let (light, dark) = match self {
-            Self::None => (name.clone(), name.clone()),
-            Self::Single(current) => (current.clone(), current.clone()),
-            Self::Pair { light, dark } => (light.clone(), dark.clone()),
-        };
-        match slot {
-            ThemeSlot::Single => Self::Single(name),
-            ThemeSlot::Light => Self::Pair { light: name, dark },
-            ThemeSlot::Dark => Self::Pair { light, dark: name },
-        }
-    }
-}
-
 impl SettingsView {
     pub(super) fn render_page(&mut self, colors: Colors, window: &mut Window, cx: &mut Context<Self>) -> Div {
         let title = div()
@@ -318,7 +269,15 @@ impl SettingsView {
                     continue;
                 }
                 Item::Row(key, control) => self.render_row(key, control, colors, window, cx).into_any_element(),
-                Item::Theme => self.render_theme(colors, cx).into_any_element(),
+                // 预览卡不进卡片，选主题的下拉自成一组。
+                Item::Theme => {
+                    cards.section(tr("settings.section.color_scheme"));
+                    cards.raw(self.render_theme_modes(colors, cx).into_any_element());
+                    for row in self.render_theme_rows(colors, cx) {
+                        cards.push(row);
+                    }
+                    continue;
+                }
                 Item::FontFamily => self.render_font_family(colors, cx).into_any_element(),
                 Item::Palette => self.render_palette(colors, window, cx).into_any_element(),
                 Item::AgentExclude => self.render_agent_exclude(colors, cx).into_any_element(),
@@ -403,7 +362,7 @@ impl SettingsView {
                     Some(locale) => language_name(locale),
                     None => rust_i18n::t!("settings.follow_system").into_owned(),
                 };
-                dropdown(id("dropdown", key), label, 180., colors)
+                dropdown(id("dropdown", key), None, label, 180., colors)
                     .on_click(on_click(cx, move |this, window, cx| this.open_language_picker(window, cx)))
                     .into_any_element()
             }
@@ -412,7 +371,7 @@ impl SettingsView {
                     None | Some("none") => rust_i18n::t!("settings.no_sound").into_owned(),
                     Some(name) => name.to_owned(),
                 };
-                dropdown(id("dropdown", key), label, 180., colors)
+                dropdown(id("dropdown", key), None, label, 180., colors)
                     .on_click(on_click(cx, move |this, window, cx| this.open_sound_picker(key, window, cx)))
                     .into_any_element()
             }
@@ -439,83 +398,6 @@ impl SettingsView {
         self.open_picker(key_title(key), items, current, PickTarget::Value(key), window, cx);
     }
 
-    fn open_theme_picker(
-        &mut self,
-        slot: ThemeSlot,
-        current: Option<String>,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        let items = runode_config::theme_names().into_iter().map(|name| PickItem::new(name.clone(), name)).collect();
-        let title = rust_i18n::t!(match slot {
-            ThemeSlot::Single => "settings.key.theme",
-            ThemeSlot::Light => "settings.theme.light",
-            ThemeSlot::Dark => "settings.theme.dark",
-        })
-        .into_owned();
-        self.open_picker(title, items, current, PickTarget::Theme(slot), window, cx);
-    }
-
-    /// 选好了主题。
-    pub(super) fn set_theme(&mut self, slot: ThemeSlot, name: String, cx: &mut Context<Self>) {
-        let theme = ThemeChoice::parse(self.config.theme.as_deref()).with(slot, name);
-        self.write_or_report("theme", theme.value().into_iter().collect(), cx);
-    }
-
-    fn render_theme(&mut self, colors: Colors, cx: &mut Context<Self>) -> Div {
-        let theme = ThemeChoice::parse(self.config.theme.as_deref());
-        let mode = match theme {
-            ThemeChoice::None => "none",
-            ThemeChoice::Single(_) => "single",
-            ThemeChoice::Pair { .. } => "pair",
-        };
-        let options = ["none", "single", "pair"]
-            .into_iter()
-            .map(|value| (value.to_owned(), tr(&format!("settings.theme.{value}")).into()))
-            .collect();
-        let modes = segmented("theme-mode", options, Some(mode), colors, cx, |this, value, window, cx| {
-            let theme = ThemeChoice::parse(this.config.theme.as_deref());
-            match (value, theme) {
-                ("none", _) => this.write_or_report("theme", Vec::new(), cx),
-                ("single", ThemeChoice::Pair { dark, .. }) => this.write_or_report("theme", vec![dark], cx),
-                ("single", ThemeChoice::None) => this.open_theme_picker(ThemeSlot::Single, None, window, cx),
-                ("pair", ThemeChoice::Single(name)) => {
-                    this.write_or_report("theme", vec![format!("light:{name},dark:{name}")], cx)
-                }
-                ("pair", ThemeChoice::None) => this.open_theme_picker(ThemeSlot::Dark, None, window, cx),
-                _ => {}
-            }
-        });
-        let reset = self.reset("theme", colors, cx);
-        let error = self.errors.get("theme").cloned();
-        let mut out = div().flex().flex_col().child(row(
-            key_title("theme"),
-            Some(key_hint("theme")),
-            modes,
-            reset,
-            error,
-            colors,
-        ));
-        let slots = match theme {
-            ThemeChoice::None => Vec::new(),
-            ThemeChoice::Single(name) => vec![(ThemeSlot::Single, name)],
-            ThemeChoice::Pair { light, dark } => vec![(ThemeSlot::Light, light), (ThemeSlot::Dark, dark)],
-        };
-        for (slot, name) in slots {
-            let (title, element) = match slot {
-                ThemeSlot::Single => ("settings.theme.name", "theme-single"),
-                ThemeSlot::Light => ("settings.theme.light", "theme-light"),
-                ThemeSlot::Dark => ("settings.theme.dark", "theme-dark"),
-            };
-            let current = name.clone();
-            let picker = dropdown(element, name, 240., colors).on_click(on_click(cx, move |this, window, cx| {
-                this.open_theme_picker(slot, Some(current.clone()), window, cx)
-            }));
-            out = out.child(row(rust_i18n::t!(title).into_owned(), None, picker, None, None, colors));
-        }
-        out
-    }
-
     fn render_font_family(&mut self, colors: Colors, cx: &mut Context<Self>) -> Div {
         let fonts = self.config.font_family.clone();
         let count = fonts.len();
@@ -532,9 +414,10 @@ impl SettingsView {
                 (rust_i18n::t!("settings.fallback_font", n = ix).into_owned(), None, None, None)
             };
             let current = name.clone();
-            let picker = dropdown(("font", ix), name, 240., colors).on_click(on_click(cx, move |this, window, cx| {
-                this.open_font_picker(ix, Some(current.clone()), window, cx)
-            }));
+            let picker = dropdown(("font", ix), None, name, 240., colors)
+                .on_click(on_click(cx, move |this, window, cx| {
+                    this.open_font_picker(ix, Some(current.clone()), window, cx)
+                }));
             let remove = (count > 1).then(|| {
                 icon_button(("remove-font", ix), "icons/minus.svg", colors).on_click(on_click(
                     cx,
@@ -545,8 +428,7 @@ impl SettingsView {
                     },
                 ))
             });
-            let control =
-                div().flex().items_center().gap(px(4.)).child(picker).child(div().w(px(20.)).children(remove));
+            let control = div().flex().items_center().gap(px(4.)).children(remove).child(picker);
             out = out.child(row(title, hint, control, reset, error, colors));
         }
         let add = button("add-font", rust_i18n::t!("settings.add_fallback_font").into_owned(), colors)
@@ -764,22 +646,5 @@ mod tests {
                 }
             }
         }
-    }
-
-    #[test]
-    fn theme_value_splits_and_joins() {
-        assert_eq!(ThemeChoice::parse(None), ThemeChoice::None);
-        assert_eq!(ThemeChoice::parse(Some("Dracula")), ThemeChoice::Single("Dracula".into()));
-        let pair = ThemeChoice::parse(Some("light:Day, dark:Night"));
-        assert_eq!(pair, ThemeChoice::Pair { light: "Day".into(), dark: "Night".into() });
-        assert_eq!(pair.value().as_deref(), Some("light:Day,dark:Night"));
-        assert_eq!(pair.with(ThemeSlot::Light, "Dawn".into()).value().as_deref(), Some("light:Dawn,dark:Night"));
-        assert_eq!(
-            ThemeChoice::Single("A".into()).with(ThemeSlot::Dark, "B".into()).value().as_deref(),
-            Some("light:A,dark:B")
-        );
-        assert_eq!(ThemeChoice::None.with(ThemeSlot::Single, "C".into()).value().as_deref(), Some("C"));
-        // 只写了一边的，另一边用同一个。
-        assert_eq!(ThemeChoice::parse(Some("dark:X")), ThemeChoice::Pair { light: "X".into(), dark: "X".into() });
     }
 }

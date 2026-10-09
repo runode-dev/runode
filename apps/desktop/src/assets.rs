@@ -83,6 +83,9 @@ icons! {
     pub SLIDERS_ICON = "sliders",
     pub PALETTE_ICON = "palette",
     pub KEYBOARD_ICON = "keyboard",
+    /// 外观页配色的三张预览卡：跟着系统换、一个主题、不用主题；`BAN_ICON` 也是快捷键页去掉一个绑定的按钮。
+    pub MONITOR_ICON = "monitor",
+    pub BAN_ICON = "ban",
 }
 
 fn all_files() -> impl Iterator<Item = &'static (&'static str, &'static [u8])> {

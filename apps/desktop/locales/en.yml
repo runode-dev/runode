@@ -529,6 +529,7 @@ settings:
     remote: Remote Access
     keybinds: Keyboard Shortcuts
   section:
+    color_scheme: Color Scheme
     config_file: Configuration File
     font: Font
     window: Window

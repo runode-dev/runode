@@ -529,6 +529,7 @@ settings:
     remote: 远程访问
     keybinds: 快捷键
   section:
+    color_scheme: 配色
     config_file: 配置文件
     font: 字体
     window: 窗口

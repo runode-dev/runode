@@ -66,14 +66,7 @@ pub(super) fn on_click(
 
 /// 一页里的小标题。
 pub(super) fn section(title: impl Into<SharedString>, colors: Colors) -> Div {
-    div()
-        .pt(px(18.))
-        .pb(px(8.))
-        .pl(px(4.))
-        .text_size(px(12.))
-        .font_weight(gpui::FontWeight::SEMIBOLD)
-        .text_color(colors.fg.opacity(0.55))
-        .child(title.into())
+    div().pt(px(20.)).pb(px(10.)).pl(px(4.)).text_size(px(14.)).text_color(colors.fg.opacity(0.6)).child(title.into())
 }
 
 /// 把一页的各项按小标题分组，每组收进一张圆角卡片。
@@ -90,8 +83,13 @@ impl Cards {
 
     /// 结束上一组，另起一组，上面是小标题 `title`。
     pub fn section(&mut self, title: impl Into<SharedString>) {
+        self.raw(section(title, self.colors).into_any_element());
+    }
+
+    /// 结束上一组，`element` 不进卡片，直接放在页面上。
+    pub fn raw(&mut self, element: AnyElement) {
         self.flush();
-        self.page = std::mem::replace(&mut self.page, div()).child(section(title, self.colors));
+        self.page = std::mem::replace(&mut self.page, div()).child(element);
     }
 
     pub fn push(&mut self, item: AnyElement) {
@@ -150,10 +148,8 @@ pub(super) fn row(
                 .children(hint.map(|hint| div().text_size(px(12.)).text_color(colors.fg.opacity(0.55)).child(hint)))
                 .children(error.map(|err| div().text_size(px(11.5)).text_color(colors.error).child(err))),
         )
-        .child(div().flex_none().flex().items_center().gap(px(6.)).child(control).child(
-            // 恢复按钮占的位置一直留着，有没有它控件都对齐。
-            div().w(px(20.)).flex().justify_center().children(reset),
-        ))
+        // 控件贴着右边，恢复按钮有的时候放在它左边。
+        .child(div().flex_none().flex().items_center().gap(px(6.)).children(reset).child(control))
 }
 
 /// 恢复按钮：删掉 runode 配置文件里写的这一项。
@@ -258,9 +254,11 @@ pub(super) fn button(id: impl Into<ElementId>, label: impl Into<SharedString>, c
         .child(label.into())
 }
 
-/// 点开一个列表从里面挑的按钮：显示当前选的，右边一个下拉箭头。
+/// 点开一个列表从里面挑的按钮：显示当前选的，`leading` 放在它左边（比如主题的色块），右边一个
+/// 下拉箭头。
 pub(super) fn dropdown(
     id: impl Into<ElementId>,
+    leading: Option<AnyElement>,
     label: impl Into<SharedString>,
     width: f32,
     colors: Colors,
@@ -280,6 +278,7 @@ pub(super) fn dropdown(
         .border_color(colors.border)
         .text_size(px(12.))
         .hover(|button| button.bg(colors.hover))
+        .children(leading)
         .child(div().flex_1().min_w_0().truncate().child(label.into()))
         .child(svg().flex_none().path("icons/chevron-down.svg").size(px(12.)).text_color(colors.fg.opacity(0.6)))
 }

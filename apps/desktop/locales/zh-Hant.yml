@@ -529,6 +529,7 @@ settings:
     remote: 遠端存取
     keybinds: 快速鍵
   section:
+    color_scheme: 配色
     config_file: 設定檔
     font: 字體
     window: 視窗

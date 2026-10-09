@@ -573,6 +573,17 @@ pub(crate) fn parse_entries(text: &str, name: &str) -> Vec<Entry> {
     entries
 }
 
+/// 只套上主题 `name` 的配置，设置页画主题的色块和预览用；找不到这个主题时为 `None`。
+pub fn theme_config(name: &str) -> Option<Config> {
+    let entries = match find_theme(name)? {
+        Theme::File(path) => read_entries(&path, &mut Vec::new()),
+        Theme::Bundled(text) => parse_entries(text, name),
+    };
+    let mut config = Config::default();
+    config.apply_layer(&entries);
+    Some(config)
+}
+
 /// runode 自己的配置文件；没有家目录时为 `None`。
 pub fn config_path() -> Option<PathBuf> {
     runode_paths::Dirs::from_env().config_file()

@@ -7,7 +7,7 @@
 //! 一会儿、按回车或者失去焦点时写回，写之前按读配置时的规矩检查，不对就不写、在那一项下面说原因。
 //!
 //! 哪一页有哪些项在 `pages`，开关、选项这些控件在 `controls`，从长列表里挑一项的浮层在 `picker`，
-//! 快捷键那一页在 `keybinds`，远程访问那一页的配对手机在 `pairing`。
+//! 快捷键那一页在 `keybinds`，远程访问那一页的配对手机在 `pairing`，外观页的配色在 `theme`。
 
 mod autostart;
 mod controls;
@@ -15,6 +15,7 @@ mod keybinds;
 mod pages;
 mod pairing;
 mod picker;
+mod theme;
 
 use std::{collections::HashMap, sync::Arc, time::Duration};
 
@@ -75,6 +76,8 @@ pub struct SettingsView {
     errors: HashMap<String, String>,
     picker: Option<Picker>,
     keybinds: keybinds::State,
+    /// 读过的主题的颜色，按主题名；找不到的主题记为 `None`，不再去找。
+    theme_looks: HashMap<String, Option<theme::Look>>,
     scroll: ScrollHandle,
     _observe: Subscription,
 }
@@ -93,6 +96,7 @@ impl SettingsView {
             errors: HashMap::new(),
             picker: None,
             keybinds: keybinds::State::default(),
+            theme_looks: HashMap::new(),
             scroll: ScrollHandle::new(),
             _observe: observe,
         }
