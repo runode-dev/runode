@@ -4,7 +4,7 @@
 
 use std::rc::Rc;
 
-use gpui::{AccessibleAction, ClickEvent, Context, StatefulInteractiveElement, Window};
+use gpui::{AccessibleAction, ClickEvent, Context, MouseButton, MouseDownEvent, StatefulInteractiveElement, Window};
 
 /// 点击或辅助工具按下时调 `f`。
 ///
@@ -29,3 +29,32 @@ pub trait Press: StatefulInteractiveElement + Sized {
 }
 
 impl<E: StatefulInteractiveElement> Press for E {}
+
+/// 按下鼠标左键或辅助工具按下时调 `f`，按下的事件不再往外传。
+///
+/// 给按下鼠标就办、不等松开的按钮用，比如标题栏上要拦住外面按下就拖窗口的按钮；只挂 `on_mouse_down`
+/// 的元素辅助工具按不到，这里同样另外登记按下动作。要弹菜单的按钮在 `f` 里取 `Window::mouse_position`：
+/// 鼠标按下时它就是按下的位置，辅助工具按下时是鼠标当前所在的位置。
+pub trait PressDown: StatefulInteractiveElement + Sized {
+    fn on_press_down<T: 'static>(
+        self,
+        cx: &mut Context<T>,
+        f: impl Fn(&mut T, &mut Window, &mut Context<T>) + 'static,
+    ) -> Self {
+        let f = Rc::new(f);
+        let press = f.clone();
+        let view = cx.entity().downgrade();
+        self.on_mouse_down(
+            MouseButton::Left,
+            cx.listener(move |this, _: &MouseDownEvent, window, cx| {
+                cx.stop_propagation();
+                f(this, window, cx);
+            }),
+        )
+        .on_a11y_action(AccessibleAction::Click, move |_, window, cx| {
+            view.update(cx, |this, cx| press(this, window, cx)).ok();
+        })
+    }
+}
+
+impl<E: StatefulInteractiveElement> PressDown for E {}

@@ -82,6 +82,7 @@ pub(crate) use status_bar::item_icon_and_title as status_item_icon_and_title;
 pub use status_bar::watch as watch_status;
 pub use titlebar::titlebar_options;
 
+use crate::ui::a11y::PressDown;
 use crate::{config::AppConfig, prespawn::Prespawned, terminal_view::TerminalView, ui::hsla};
 use model::{PaneLayout, Workspace, WorkspaceId, home_dir};
 use persist::format::SavedWindow;
@@ -230,35 +231,6 @@ fn drag_window(event: &MouseDownEvent, window: &mut Window, _: &mut App) {
         window.start_window_move();
     }
 }
-
-/// 按下鼠标左键或辅助工具按下时调 `f`，按下的事件不再往外传。
-///
-/// 标题栏、侧栏和状态栏上的按钮按下鼠标就办，还要拦住外面按下就拖窗口的标题栏，用不了
-/// `Press::on_press` 的 `on_click`；只挂 `on_mouse_down` 的元素辅助工具按不到，这里另外登记按下动作，
-/// 直接调同一个 `f`，元素滚出可见区域也按得到。
-trait PressDown: StatefulInteractiveElement + Sized {
-    fn on_press_down<T: 'static>(
-        self,
-        cx: &mut Context<T>,
-        f: impl Fn(&mut T, &mut Window, &mut Context<T>) + 'static,
-    ) -> Self {
-        let f = Rc::new(f);
-        let press = f.clone();
-        let view = cx.entity().downgrade();
-        self.on_mouse_down(
-            MouseButton::Left,
-            cx.listener(move |this, _: &MouseDownEvent, window, cx| {
-                cx.stop_propagation();
-                f(this, window, cx);
-            }),
-        )
-        .on_a11y_action(gpui::AccessibleAction::Click, move |_, window, cx| {
-            view.update(cx, |this, cx| press(this, window, cx)).ok();
-        })
-    }
-}
-
-impl<E: StatefulInteractiveElement> PressDown for E {}
 
 /// 正在用鼠标拖动的分隔线。
 #[derive(Clone, Copy)]

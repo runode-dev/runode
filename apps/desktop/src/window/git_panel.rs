@@ -27,14 +27,12 @@ pub(super) use tree::{TreeItem, file_tree};
 use std::{
     ops::Range,
     path::{Path, PathBuf},
-    rc::Rc,
     time::Duration,
 };
 
 use gpui::{
-    AccessibleAction, Action, Animation, AnimationExt, AnyElement, Context, Div, ElementId, Focusable, Hsla,
-    MouseButton, MouseDownEvent, Role, Stateful, Transformation, Window, actions, div, list, percentage, prelude::*,
-    px, svg, uniform_list,
+    Action, Animation, AnimationExt, AnyElement, Context, Div, ElementId, Focusable, Hsla, MouseButton, MouseDownEvent,
+    Role, Stateful, Transformation, Window, actions, div, list, percentage, prelude::*, px, svg, uniform_list,
 };
 use runode_git::{self as git, Operation, RepoKind, Section};
 use runode_shared_types::color::Rgb;
@@ -46,6 +44,7 @@ use super::{
     project::{RENAMED, added_label, panel_message, panel_shell, panel_title, removed_label},
     status_bar,
 };
+use crate::ui::a11y::PressDown;
 use crate::{
     assets::{
         BRANCH_ICON, CHECK_ICON, CHEVRON_DOWN_ICON, GIT_ICON, MORE_ICON, REFRESH_ICON, SPARKLE_ICON, SYNC_ICON,
@@ -925,35 +924,6 @@ impl WindowView {
         cx.notify();
     }
 }
-
-/// 鼠标左键按下（不往外传）或辅助工具按下时调 `f`。
-///
-/// 面板里的按钮和行按下就办、不等松开，`crate::ui::a11y::Press` 管的是点击；只登记鼠标按下的元素
-/// 辅助工具按不了，这里另外登记按下动作，直接调同一个 `f`，行滚出可见区域也按得到。要弹菜单的
-/// 按钮在 `f` 里取 `Window::mouse_position`：鼠标按下时它就是按下的位置。
-trait PressDown: StatefulInteractiveElement + Sized {
-    fn on_press_down<T: 'static>(
-        self,
-        cx: &mut Context<T>,
-        f: impl Fn(&mut T, &mut Window, &mut Context<T>) + 'static,
-    ) -> Self {
-        let f = Rc::new(f);
-        let press = f.clone();
-        let view = cx.entity().downgrade();
-        self.on_mouse_down(
-            MouseButton::Left,
-            cx.listener(move |this, _, window, cx| {
-                cx.stop_propagation();
-                f(this, window, cx);
-            }),
-        )
-        .on_a11y_action(AccessibleAction::Click, move |_, window, cx| {
-            view.update(cx, |this, cx| press(this, window, cx)).ok();
-        })
-    }
-}
-
-impl<E: StatefulInteractiveElement> PressDown for E {}
 
 /// 同步图标；`spinning` 时一直转圈，表示还在连远端。
 fn sync_icon(id: impl Into<ElementId>, spinning: bool, size: f32, color: Hsla) -> AnyElement {
