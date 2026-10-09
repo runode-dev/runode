@@ -1,6 +1,6 @@
 //! 标题栏：窗口的标题栏设置、标签和新建标签按钮、拖动中的标签，以及标题、agent 状态标记和快捷键提示。
 
-use std::{cmp::Ordering, path::Path};
+use std::cmp::Ordering;
 
 use gpui::{
     Action, Animation, AnimationExt, AnyElement, App, Axis, BoxShadow, Context, Div, ElementId, Hsla, MouseButton,
@@ -209,20 +209,13 @@ fn driven_icon(id: impl Into<ElementId>, fg: Hsla) -> Stateful<Div> {
 
 /// 卡片样式下标签和分屏标题条上写的：名字和所在目录。前台是认得的 agent 时名字是它设的标题
 /// （Claude Code 写的是在做的事），标题只是目录名或没设时是 agent 的名字（`Codex`、`Claude Code`），
-/// 是谁已经由前面的 logo 标出；标题末尾「 | 」接着的项目名（codex 默认这样设）也不要，目录里已经
-/// 有了。shell 在前台时名字是 shell 自己（`zsh`、`fish`），别的程序是它设的标题，没设时是程序名；
-/// 目录和名字一样时不再写。
+/// 是谁已经由前面的 logo 标出。shell 在前台时名字是 shell 自己（`zsh`、`fish`），别的程序是它设的
+/// 标题，没设时是程序名；目录和名字一样时不再写。
 pub(super) fn pane_label(view: &TerminalView) -> (SharedString, Option<SharedString>) {
     let meta = view.meta();
     let name = if let Some(agent) = meta.agent.filter(|agent| agent.kind.is_known()) {
-        let cwd = view.cwd();
-        let dir_name = cwd.as_deref().and_then(Path::file_name).map(|name| name.to_string_lossy());
-        let title = meta
-            .title
-            .as_deref()
-            .map(|title| without_project(title, cwd.as_deref()))
-            .filter(|title| dir_name.as_deref() != Some(*title))
-            .map(str::to_owned);
+        let dir_name = view.cwd().and_then(|dir| dir.file_name().map(|name| name.to_string_lossy().into_owned()));
+        let title = meta.title.clone().filter(|title| dir_name.as_ref() != Some(title));
         title.or_else(|| Some(agent.kind.display_name().to_owned()))
     } else if meta.foreground_is_shell {
         meta.foreground.clone()
@@ -232,15 +225,6 @@ pub(super) fn pane_label(view: &TerminalView) -> (SharedString, Option<SharedStr
     .unwrap_or_else(|| view.title().to_owned());
     let dir = view.cwd().map(|dir| display_dir(&dir)).filter(|dir| *dir != name);
     (name.into(), dir.map(Into::into))
-}
-
-/// 去掉标题末尾「 | 」接着的项目名：项目名是 `cwd` 或它上面某一级目录的名字时（codex 用仓库根目录
-/// 的名字）才去掉，标题只有项目名时原样返回。
-fn without_project<'a>(title: &'a str, cwd: Option<&Path>) -> &'a str {
-    match title.rsplit_once(" | ") {
-        Some((head, project)) if cwd.is_some_and(|dir| dir.iter().any(|part| part == project)) => head,
-        _ => title,
-    }
 }
 
 /// 标签图标叠里一块的边长、圆角，以及后面那几块往右错开多少。
@@ -592,23 +576,5 @@ impl WindowView {
                     this.new_tab(&NewTab, window, cx);
                 }),
             )
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use std::path::Path;
-
-    use super::without_project;
-
-    #[test]
-    fn the_trailing_project_name_is_dropped_only_when_it_is_in_the_path() {
-        let cwd = Some(Path::new("/Volumes/dev/barey.cn/runode/crates"));
-        assert_eq!(without_project("回应问候 | runode", cwd), "回应问候");
-        assert_eq!(without_project("回应问候 | crates", cwd), "回应问候");
-        assert_eq!(without_project("a | b | runode", cwd), "a | b");
-        assert_eq!(without_project("回应问候 | other", cwd), "回应问候 | other");
-        assert_eq!(without_project("回应问候 | runode", None), "回应问候 | runode");
-        assert_eq!(without_project("runode", cwd), "runode");
     }
 }
