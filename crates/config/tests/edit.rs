@@ -62,6 +62,7 @@ fn new_keys_go_below_their_commented_default() {
 fn checks_values_like_the_loader() {
     assert!(check_value("font-size", "15").is_ok());
     assert!(check_value("font-size", "big").is_err());
+    assert!(check_value("font-size", "0").is_err());
     assert!(check_value("remote-access-port", "70000").is_err());
     assert!(check_value("keybind", "cmd+t=new_tab").is_ok());
     assert!(check_value("keybind", "cmd+t=nope").is_err());

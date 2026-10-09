@@ -169,7 +169,7 @@ impl Config {
                     self.font_family.push(value.to_owned());
                 }
             }
-            "font-size" => self.font_size = or_default(empty, defaults.font_size, || parse_f32(value))?,
+            "font-size" => self.font_size = or_default(empty, defaults.font_size, || parse_positive(value))?,
             "adjust-cell-height" => {
                 self.adjust_cell_height = if empty {
                     None
@@ -712,6 +712,15 @@ unknown-key = whatever
         let config = load(&["font-size = 20\nfont-size =\ncursor-style = triangle"]);
         assert_eq!(config.font_size, Config::default().font_size);
         assert_eq!(config.cursor_style, CursorStyle::Block);
+    }
+
+    #[test]
+    fn font_size_takes_positive_numbers() {
+        let default = Config::default().font_size;
+        // 0、负数和 NaN 跳过，保留默认值。
+        assert_eq!(load(&["font-size = 0"]).font_size, default);
+        assert_eq!(load(&["font-size = -3"]).font_size, default);
+        assert_eq!(load(&["font-size = nan"]).font_size, default);
     }
 
     #[test]
