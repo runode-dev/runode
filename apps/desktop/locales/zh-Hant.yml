@@ -743,8 +743,6 @@ clipboard:
   allow: 允許
   deny: 不允許
 machine:
-  connected: "已連接 %{count} 台裝置"
-  no_devices: 還沒有配對過的裝置
   live: 已連接
   revoke_title: "撤銷「%{device}」？"
   revoke_detail: 它會馬上斷開，要重新配對才能再連上。

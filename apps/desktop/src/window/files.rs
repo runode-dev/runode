@@ -24,7 +24,7 @@ use runode_config::PreviewClick;
 use runode_shared_types::color::Rgb;
 
 pub(super) use edit::{FileClipboard, FileEdit};
-pub(super) use menu::{FileMenu, MenuButton, MenuItem, check_item, group_item, labeled_item, menu_item, text_item};
+pub(super) use menu::{FileMenu, MenuButton, MenuItem, check_item, group_item, labeled_item, menu_item};
 pub(super) use search::FileSearch;
 
 use super::{

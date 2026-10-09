@@ -743,8 +743,6 @@ clipboard:
   allow: Allow
   deny: Don’t Allow
 machine:
-  connected: "%{count} device(s) connected"
-  no_devices: No paired devices
   live: Connected
   revoke_title: "Revoke “%{device}”?"
   revoke_detail: It's disconnected right away and has to pair again to connect.

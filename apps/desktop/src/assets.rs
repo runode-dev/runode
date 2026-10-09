@@ -55,9 +55,6 @@ icons! {
     pub ARROW_DOWN_ICON = "arrow-down",
     /// 预览栏标签条右边的自动换行开关。
     pub WRAP_ICON = "wrap",
-    /// 卡片样式下标题栏左边这台机器的图标：笔记本或者台式机。
-    pub LAPTOP_ICON = "laptop",
-    pub DESKTOP_ICON = "desktop",
     /// 卡片样式下分屏标题条上的图标：前台不是 agent 时的终端图标，以及右边向右、向下分屏，放大、
     /// 还原和关闭分屏的按钮。
     pub TERMINAL_ICON = "terminal",

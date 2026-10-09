@@ -114,26 +114,6 @@ pub(in crate::window) fn check_item(
     }
 }
 
-/// 菜单里写好了字的一项，`detail` 淡淡地写在右边快捷键的位置。整行点不了，有 `button` 时点右边的
-/// 图标按钮派发它的动作。
-pub(in crate::window) fn text_item(
-    label: String,
-    detail: Option<SharedString>,
-    button: Option<(MenuButton, Box<dyn Action>)>,
-) -> MenuItem {
-    MenuItem {
-        label,
-        action: None,
-        shortcut: detail,
-        enabled: true,
-        buttons: button.into_iter().collect(),
-        icon: None,
-        checked: None,
-        keep_open: false,
-        tooltip: None,
-    }
-}
-
 /// 写好了字、点整行派发 `action` 的一项，`detail` 淡淡地写在右边快捷键的位置；没有 `action` 的
 /// 灰着，当小标题用。
 pub(in crate::window) fn labeled_item(
@@ -362,11 +342,6 @@ impl WindowView {
             _ => return,
         }
         cx.stop_propagation();
-    }
-
-    /// 在 `position` 弹出的菜单开着。
-    pub(in crate::window) fn menu_open_at(&self, position: Point<Pixels>) -> bool {
-        self.file_menu.as_ref().is_some_and(|menu| menu.position == Some(position))
     }
 
     /// 挂在按钮下面的菜单开着。

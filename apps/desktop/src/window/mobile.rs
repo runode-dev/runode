@@ -1,5 +1,5 @@
 //! 侧栏顶上的「手机端」：窗口主区域换成一页引导，先介绍手机端能做什么，再装 App（有安装链接时），
-//! 最后扫码配对这台 Mac（`remote_access::pairing`）。已经配过手机时第一页换成配对过的设备（`machine`
+//! 最后扫码配对这台 Mac（`remote_access::pairing`）。已经配过手机时第一页换成配对过的设备（`devices`
 //! 读的那份），连着的标出来，能撤销，也能再配一台。远程访问没开时在这一页就能打开。切到任何一个
 //! 标签或 workspace（`activate`）、按 Esc 就收起，还在等的口令随之丢掉。
 //!
@@ -17,7 +17,7 @@ use runode_shared_types::color::Rgb;
 
 use super::{
     CARD_GAP, TITLEBAR_HEIGHT, WindowView, card, cards, drag_window, frame_color,
-    machine::{Paired, RevokeDevice, devices},
+    devices::{Paired, devices},
     sidebar::ROW_ICON_SIZE,
 };
 use crate::{
@@ -680,7 +680,7 @@ fn device_row(ix: usize, device: &Paired, colors: Colors, cx: &mut Context<Windo
                 .hover(|button| button.bg(colors.hover))
                 .child(svg().path(TRASH_ICON).size(px(15.)).text_color(colors.fg.opacity(0.6)))
                 .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
-                    this.revoke_device(&RevokeDevice(id), window, cx);
+                    this.revoke_device(id, window, cx);
                 })),
         )
 }

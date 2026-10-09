@@ -10,8 +10,8 @@
 //! 就地输入框（`inline_edit`），新建 workspace 的对话框（`new_workspace`），开窗口（`open`），存档（`persist`，存档文件的格式在
 //! `persist::format`），侧栏里没在窗口里显示的后台会话（`background`），退出和关窗口时会话怎么办
 //! （`quit`），侧栏顶上手机端入口打开的引导页（`mobile`），以及别的进程经宿主请 app 开终端、切到某个终端、问各个终端摆在哪（`remote`、
-//! `layout_report`），一次在当前分屏旁开几个分屏（`arrange`），卡片样式下标题栏左边的这台
-//! 机器（`machine`），以及窗口底部的状态栏（`status_bar`）。
+//! `layout_report`），一次在当前分屏旁开几个分屏（`arrange`），经远程访问配对过的设备
+//! （`devices`），以及窗口底部的状态栏（`status_bar`）。
 //!
 //! 窗口有两种样子，按配置的 `WindowStyle` 画：卡片样式（`render_cards_body`）和经典样式
 //! （`render_classic_body`）。
@@ -22,11 +22,11 @@ mod agents;
 mod arrange;
 mod background;
 mod clipboard;
+mod devices;
 mod files;
 mod git_panel;
 mod inline_edit;
 mod layout_report;
-mod machine;
 mod mobile;
 mod model;
 mod new_workspace;
@@ -63,11 +63,11 @@ pub(crate) use agents::{
 };
 pub use arrange::ArrangePanes;
 pub use background::refresh as watch_background;
+pub use devices::watch as watch_devices;
 pub use files::{
     CollapseSelectedFile, CopyPath, CopyRelativePath, DeleteFile, ExpandSelectedFile, FocusTerminal, OpenSelectedFile,
     RenameFile, RevealInFinder, SelectFirstFile, SelectLastFile, SelectNextFile, SelectPreviousFile,
 };
-pub use machine::load as load_machine;
 pub(crate) use open::{open_window, open_window_with};
 pub use persist::{install, saved_window_options};
 pub use quit::{
@@ -526,7 +526,6 @@ impl Render for WindowView {
             .id("window")
             .key_context("Window")
             .on_action(cx.listener(Self::new_tab))
-            .on_action(cx.listener(Self::revoke_device))
             .on_action(cx.listener(Self::close_tab))
             .on_action(cx.listener(Self::next_tab))
             .on_action(cx.listener(Self::previous_tab))
@@ -764,12 +763,10 @@ impl WindowView {
                     self.render_right_handle(divider, right, cx)
                 })
                 .collect::<Vec<_>>();
-        let machine = self.render_machine(fg, sidebar_width + left_inset, cx);
         // 标签平分标签条，最窄 `TAB_MIN_WIDTH`，挤不下就让标签条滚动。这里估一个宽度，决定标签
         // 要不要收成紧凑的样子，拖动时的预览也照它画。
         let fixed = sidebar_width
             + left_inset
-            + machine.as_ref().map_or(0., |_| machine::MACHINE_MAX_WIDTH + 12.)
             + NEW_TAB_BUTTON_WIDTH
             + project::PANEL_TOGGLES_INSET
             + widths.total();
@@ -799,7 +796,6 @@ impl WindowView {
             .text_size(px(12.))
             .on_mouse_down(MouseButton::Left, drag_window)
             .child(div().flex_none().w(px(left_inset)))
-            .children(machine.map(|machine| machine.mr(px(12.))))
             .child(strip)
             .child(self.render_new_tab_button_card(fg, frame, cx))
             .child(self.render_panel_toggles(fg, frame, window, cx));
