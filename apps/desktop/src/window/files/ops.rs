@@ -135,6 +135,41 @@ fn copy_all(src: &Path, dest: &Path) -> io::Result<()> {
     Ok(())
 }
 
+/// 把仓库里的 `rel`（相对仓库根 `root`）写进根目录的 `.gitignore`：只匹配这一个路径，开头的 `/`
+/// 钉在根目录上，目录结尾加 `/`，`*?[\` 和结尾的空格转义。已经有同样的一行时不再写。
+pub(super) fn add_to_gitignore(root: &Path, rel: &Path, is_dir: bool) -> Result {
+    let mut pattern = String::from("/");
+    for (ix, part) in rel.components().enumerate() {
+        if ix > 0 {
+            pattern.push('/');
+        }
+        for c in part.as_os_str().to_string_lossy().chars() {
+            if matches!(c, '*' | '?' | '[' | '\\') {
+                pattern.push('\\');
+            }
+            pattern.push(c);
+        }
+    }
+    if pattern.ends_with(' ') {
+        pattern.insert(pattern.len() - 1, '\\');
+    }
+    if is_dir {
+        pattern.push('/');
+    }
+    let path = root.join(".gitignore");
+    let existing = match fs::read_to_string(&path) {
+        Err(err) if err.kind() == io::ErrorKind::NotFound => String::new(),
+        read => read?,
+    };
+    if existing.lines().any(|line| line == pattern) {
+        return Ok(());
+    }
+    let sep = if existing.is_empty() || existing.ends_with('\n') { "" } else { "\n" };
+    let mut file = fs::OpenOptions::new().append(true).create(true).open(path)?;
+    io::Write::write_all(&mut file, format!("{sep}{pattern}\n").as_bytes())?;
+    Ok(())
+}
+
 /// 把 `path` 移到废纸篓，在访达里能放回原处。
 #[cfg(target_os = "macos")]
 pub(super) fn trash(path: &Path) -> Result {
@@ -221,6 +256,18 @@ mod tests {
         assert_eq!(moved, dir.join("src"));
         assert!(moved.join("inner").is_dir());
         assert!(!src.exists());
+    }
+
+    #[test]
+    fn appends_to_gitignore_once() {
+        let tmp = TempDir::new("gitignore");
+        let file = tmp.0.join(".gitignore");
+        fs::write(&file, "target").unwrap();
+        add_to_gitignore(&tmp.0, Path::new("a/b*.log"), false).unwrap();
+        add_to_gitignore(&tmp.0, Path::new("dist"), true).unwrap();
+        add_to_gitignore(&tmp.0, Path::new("dist"), true).unwrap();
+        add_to_gitignore(&tmp.0, Path::new("x "), false).unwrap();
+        assert_eq!(fs::read_to_string(&file).unwrap(), "target\n/a/b\\*.log\n/dist/\n/x\\ \n");
     }
 
     #[test]

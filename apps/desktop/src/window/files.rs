@@ -69,6 +69,8 @@ actions!(
         RenameFile,
         /// 把选中的文件或目录移到废纸篓。
         DeleteFile,
+        /// 把选中的文件或目录写进它所在仓库根目录的 `.gitignore`。
+        AddToGitignore,
         /// 在访达里显示选中的文件或目录。
         RevealInFinder,
         /// 开一个新标签页，终端的目录是选中的目录或文件所在的目录。
@@ -302,6 +304,7 @@ impl WindowView {
             .on_action(cx.listener(Self::new_folder))
             .on_action(cx.listener(Self::rename_file))
             .on_action(cx.listener(Self::delete_file))
+            .on_action(cx.listener(Self::add_to_gitignore))
             .on_action(cx.listener(Self::reveal_in_finder))
             .on_action(cx.listener(Self::insert_file_path))
             .on_action(cx.listener(Self::open_in_terminal))

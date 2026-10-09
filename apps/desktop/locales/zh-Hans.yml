@@ -241,6 +241,7 @@ files:
   insert_path: 把路径打进终端
   copy_path: 复制路径
   copy_relative_path: 复制相对路径
+  add_to_gitignore: 添加到 .gitignore
   rename: 重命名…
   delete: 移到废纸篓
   delete_title: 把“%{name}”移到废纸篓？

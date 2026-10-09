@@ -7,7 +7,7 @@ use gpui::{AnyElement, Context, PromptLevel, ScrollStrategy, Window, div, img, p
 use runode_shared_types::color::Rgb;
 
 use super::{
-    DeleteFile, NewFile, NewFolder, RenameFile,
+    AddToGitignore, DeleteFile, NewFile, NewFolder, RenameFile,
     ops::{self, OpError},
 };
 use crate::{
@@ -267,6 +267,31 @@ impl WindowView {
         });
         window.focus(&self.files_focus, cx);
         cx.notify();
+    }
+
+    /// 选中项所在的仓库（子仓库里的算子仓库）的根目录、相对它的路径和是不是目录；不在仓库里、
+    /// 已经被忽略、或者选中的就是仓库根目录时为空。
+    pub(super) fn gitignore_target(&self) -> Option<(PathBuf, PathBuf, bool)> {
+        let (path, is_dir) = self.selected_entry()?;
+        let git = self.workspace().project.git.as_ref()?;
+        let rel = path.strip_prefix(&git.main.root).ok()?;
+        if git.is_ignored(rel) {
+            return None;
+        }
+        let (repo, rel) = git.locate(rel);
+        (!rel.as_os_str().is_empty()).then(|| (repo.root.clone(), rel.to_path_buf(), is_dir))
+    }
+
+    /// 写进 `.gitignore` 后当场重读，选中的那一项马上标成被忽略。
+    pub(super) fn add_to_gitignore(&mut self, _: &AddToGitignore, window: &mut Window, cx: &mut Context<Self>) {
+        self.file_menu = None;
+        let Some((root, rel, is_dir)) = self.gitignore_target() else {
+            return;
+        };
+        match ops::add_to_gitignore(&root, &rel, is_dir) {
+            Ok(()) => self.refresh_project(cx),
+            Err(err) => self.show_file_error(error_text(&err, ".gitignore"), window, cx),
+        }
     }
 
     /// 剪切（`cut`）或复制选中的那一项，等着粘贴。

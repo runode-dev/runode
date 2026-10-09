@@ -11,8 +11,8 @@ use gpui::{
 use runode_shared_types::color::Rgb;
 
 use super::{
-    CopyPath, CopyRelativePath, DeleteFile, InsertFilePath, NewFile, NewFolder, OpenInTerminal, OpenSelectedFile,
-    RenameFile, RevealInFinder,
+    AddToGitignore, CopyPath, CopyRelativePath, DeleteFile, InsertFilePath, NewFile, NewFolder, OpenInTerminal,
+    OpenSelectedFile, RenameFile, RevealInFinder,
 };
 use crate::{
     assets::{CHEVRON_DOWN_ICON, CHEVRON_RIGHT_ICON},
@@ -379,6 +379,9 @@ impl WindowView {
             item("files.copy_path", Box::new(CopyPath)),
             item("files.copy_relative_path", Box::new(CopyRelativePath)),
         ]);
+        if self.gitignore_target().is_some() {
+            items.extend([None, item("files.add_to_gitignore", Box::new(AddToGitignore))]);
+        }
         if selected.is_some() {
             items.extend([
                 None,

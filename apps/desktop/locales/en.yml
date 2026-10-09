@@ -241,6 +241,7 @@ files:
   insert_path: Insert Path into Terminal
   copy_path: Copy Path
   copy_relative_path: Copy Relative Path
+  add_to_gitignore: Add to .gitignore
   rename: Rename…
   delete: Move to Trash
   delete_title: "Move “%{name}” to the Trash?"
