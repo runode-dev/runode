@@ -38,9 +38,9 @@ pub const NOTIFICATION_TAG: &str = "runode-update";
 /// 这份 app 的版本。
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
-/// 更新走到哪一步了。
+/// 更新走到哪一步了。`S` 是下好的新版本，测试里换成别的，好不经下载走状态转移。
 #[derive(Default)]
-enum Phase {
+enum Phase<S = Staged> {
     #[default]
     Idle,
     /// 正在查有没有新版本；`manual` 是用户在菜单里点的，有结果时弹框说。
@@ -48,7 +48,53 @@ enum Phase {
     /// 正在下载 `version`；`manual` 是用户选了下载的，下好了弹框说。
     Downloading { version: String, progress: Arc<Progress>, manual: bool },
     /// 下好了，等着装上。
-    Ready(Staged),
+    Ready(S),
+}
+
+/// 要查一次时接着做什么，见 `Phase::start_check`。
+#[derive(Debug, PartialEq, Eq)]
+enum Start {
+    /// 在后台查。
+    Check,
+    /// 已经下好了，用户点的：问要不要重启。
+    OfferRestart,
+    /// 什么都不做。
+    Nothing,
+}
+
+impl<S> Phase<S> {
+    /// 要查一次（`manual` 是用户点的）：空闲时转到 `Checking`、去查；正在查或下载时不再查，只记下
+    /// 用户点过、有结果时弹框说；已经下好了时不再查，用户点的就问要不要重启。
+    fn start_check(&mut self, manual: bool) -> Start {
+        match self {
+            Self::Ready(_) if manual => Start::OfferRestart,
+            Self::Ready(_) => Start::Nothing,
+            Self::Checking { manual: asked } | Self::Downloading { manual: asked, .. } => {
+                *asked |= manual;
+                Start::Nothing
+            }
+            Self::Idle => {
+                *self = Self::Checking { manual };
+                Start::Check
+            }
+        }
+    }
+
+    /// 查完或者下载完了：回到空闲，返回是不是用户点的（要弹框说结果）。下载失败就停在空闲，等下一轮
+    /// 定时（`CHECK_INTERVAL`）再查、再下。
+    fn finish(&mut self) -> bool {
+        let manual = matches!(self, Self::Checking { manual: true } | Self::Downloading { manual: true, .. });
+        *self = Self::Idle;
+        manual
+    }
+
+    /// 退出时：下好了的交出来去装上，回到空闲。
+    fn take_ready(&mut self) -> Option<S> {
+        match std::mem::take(self) {
+            Self::Ready(staged) => Some(staged),
+            _ => None,
+        }
+    }
 }
 
 /// 下载的进度，下载线程写、前台读。
@@ -140,19 +186,10 @@ pub fn menu_clicked(cx: &mut App) {
 
 /// 在后台查一次，没在查、没在下载、也还没下好时才查；`manual` 时把结果弹框告诉用户。
 fn check(manual: bool, cx: &mut App) {
-    let updater = cx.global_mut::<Updater>();
-    match &mut updater.phase {
-        Phase::Ready(_) => {
-            if manual {
-                offer_restart(cx);
-            }
-            return;
-        }
-        Phase::Checking { manual: asked } | Phase::Downloading { manual: asked, .. } => {
-            *asked |= manual;
-            return;
-        }
-        Phase::Idle => updater.phase = Phase::Checking { manual },
+    match cx.global_mut::<Updater>().phase.start_check(manual) {
+        Start::Check => {}
+        Start::OfferRestart => return offer_restart(cx),
+        Start::Nothing => return,
     }
     crate::menus::set_menus(cx);
     let found = cx.background_executor().spawn(async { look() });
@@ -181,8 +218,7 @@ fn look() -> Result<Found, Error> {
 }
 
 fn finish_check(found: Result<Found, Error>, cx: &mut App) {
-    let manual = matches!(cx.global::<Updater>().phase, Phase::Checking { manual: true });
-    cx.global_mut::<Updater>().phase = Phase::Idle;
+    let manual = cx.global_mut::<Updater>().phase.finish();
     match found {
         // 后台查到的直接下；手动查的先问，选了才下。
         Ok(Found::Available { release, installation }) if !manual => download(release, installation, false, cx),
@@ -267,8 +303,7 @@ fn download(release: Release, installation: Installation, manual: bool, cx: &mut
 }
 
 fn finish_download(staged: Result<Staged, Error>, cx: &mut App) {
-    let manual = matches!(cx.global::<Updater>().phase, Phase::Downloading { manual: true, .. });
-    cx.global_mut::<Updater>().phase = Phase::Idle;
+    let manual = cx.global_mut::<Updater>().phase.finish();
     match staged {
         Ok(staged) => {
             cx.global_mut::<Updater>().phase = Phase::Ready(staged);
@@ -345,7 +380,7 @@ fn prompt(
 
 /// app 退出时：下好了就装上。重启以更新时，GPUI 的 `restart` 随后把装上的新版本打开。
 fn on_quit(cx: &mut App) {
-    let Phase::Ready(staged) = std::mem::take(&mut cx.global_mut::<Updater>().phase) else { return };
+    let Some(staged) = cx.global_mut::<Updater>().phase.take_ready() else { return };
     cx.dismiss_system_notification(NOTIFICATION_TAG);
     if let Err(err) = staged.install() {
         tracing::error!("failed to install the update: {err}");
@@ -354,6 +389,67 @@ fn on_quit(cx: &mut App) {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
+    /// 下好的新版本，测试里用版本号代替。
+    type TestPhase = Phase<&'static str>;
+
+    fn downloading(manual: bool) -> TestPhase {
+        Phase::Downloading { version: "2.0.0".into(), progress: Arc::default(), manual }
+    }
+
+    /// 定时查到新版本：空闲时去查，查完回到空闲、不弹框，接着下载；下好了等着装上。
+    #[test]
+    fn a_background_check_downloads_and_waits_to_install() {
+        let mut phase = TestPhase::default();
+        assert_eq!(phase.start_check(false), Start::Check);
+        assert!(matches!(phase, Phase::Checking { manual: false }));
+        assert!(!phase.finish());
+        assert!(matches!(phase, Phase::Idle));
+        phase = downloading(false);
+        assert!(!phase.finish());
+        phase = Phase::Ready("2.0.0");
+        // 下好了以后定时的不再查，用户点的问要不要重启。
+        assert_eq!(phase.start_check(false), Start::Nothing);
+        assert_eq!(phase.start_check(true), Start::OfferRestart);
+        assert!(matches!(phase, Phase::Ready("2.0.0")));
+    }
+
+    /// 正在查或下载时用户点了：不再查一次，记下来，有结果时弹框说。
+    #[test]
+    fn a_click_while_busy_asks_for_the_result() {
+        let mut phase = TestPhase::Checking { manual: false };
+        assert_eq!(phase.start_check(true), Start::Nothing);
+        assert!(phase.finish());
+        let mut phase = downloading(false);
+        assert_eq!(phase.start_check(true), Start::Nothing);
+        assert!(phase.finish());
+        // 定时的那一轮撞上用户点的，不把它改回不弹框。
+        let mut phase = TestPhase::Checking { manual: true };
+        assert_eq!(phase.start_check(false), Start::Nothing);
+        assert!(phase.finish());
+    }
+
+    /// 下载失败后回到空闲，下一轮定时（每隔 `CHECK_INTERVAL`，6 小时）照常再查。
+    #[test]
+    fn a_failed_download_is_retried_on_the_next_check() {
+        assert_eq!(CHECK_INTERVAL, Duration::from_secs(6 * 60 * 60));
+        let mut phase = downloading(false);
+        assert!(!phase.finish());
+        assert!(matches!(phase, Phase::Idle));
+        assert_eq!(phase.start_check(false), Start::Check);
+    }
+
+    /// 退出时下好了就交出来装上，只交一次；没下好时什么都不装。
+    #[test]
+    fn quitting_installs_only_what_is_ready() {
+        let mut phase = TestPhase::Ready("2.0.0");
+        assert_eq!(phase.take_ready(), Some("2.0.0"));
+        assert_eq!(phase.take_ready(), None);
+        assert_eq!(downloading(false).take_ready(), None);
+        assert_eq!(TestPhase::Checking { manual: true }.take_ready(), None);
+    }
+
     /// 更新包的签名要求里的 bundle id 和这个 app 的一样，不然新版本一律被拒、只在日志里看得到。
     #[test]
     fn the_update_checks_this_apps_bundle_id() {

@@ -20,9 +20,12 @@
 //!
 //! 换主题和改选项（`SetTheme`、`SetOptions`）记着最近一次的，重连后补发。
 //!
-//! 等回话的请求（`spawn`、`attach_now`、`list_sessions`、`list_project_tasks`）超时了，这条连接按断开
-//! 处理（`Inner::timed_out`）：宿主按先后处理同一条连接上的消息，一个请求等不到回话，说明它卡住了，
+//! 等回话的请求（`attach_now`、`list_sessions`、`list_project_tasks`）超时了，这条连接按断开处理
+//! （`Inner::timed_out`）：宿主按先后处理同一条连接上的消息，一个请求等不到回话，说明它卡住了，
 //! socket 却没断，不断开的话之后每个请求都要在主线程上等满超时。断开后请求立刻失败，等重连。
+//! `spawn` 例外，超时了连接照旧：宿主多半只是开会话慢，开好后回的 `Spawned` 没人等，读线程见了就
+//! 结束那个会话；断开的话这个回话读不到，会话留在宿主里没人看得见。宿主的会话列表里没有能对上
+//! 请求的东西，重连后认不出哪个会话是它开的，只能这样。真卡住时，下一个别的请求超时照样断开。
 
 mod reader;
 
@@ -490,20 +493,34 @@ impl Link {
     /// 新开一个会话，等宿主回话（最多 `SPAWN_TIMEOUT`），返回它的标识。开好的会话不会自动连上，
     /// 接着 `attach`。
     pub fn spawn(&self, options: SpawnOptions) -> Result<SessionId> {
+        self.spawn_within(options, SPAWN_TIMEOUT)
+    }
+
+    /// 同 `spawn`，最多等 `timeout`。
+    fn spawn_within(&self, options: SpawnOptions, timeout: Duration) -> Result<SessionId> {
         let SpawnOptions { size, cwd, integration, start, shell, settings } = options;
         let req = self.inner.next_req.fetch_add(1, Ordering::Relaxed);
-        let (reply, generation) = self.expect_reply(req)?;
+        let (reply, _) = self.expect_reply(req)?;
         let spawn = ClientMsg::Spawn { req, size, cwd, integration, start, shell, settings };
         if let Err(err) = self.inner.control(&spawn) {
             self.inner.state().replies.remove(&req);
             return Err(anyhow!("failed to ask the host for a terminal: {err}"));
         }
-        match reply.recv_timeout(SPAWN_TIMEOUT) {
+        let answer = match reply.recv_timeout(timeout) {
+            // 不断开，见模块说明：撤掉登记，之后才到的 `Spawned` 没人等，读线程见了就结束那个会话。
+            Err(mpsc::RecvTimeoutError::Timeout) => {
+                self.inner.state().replies.remove(&req);
+                // 超时和撤掉之间正好到了的照常用。
+                reply.try_recv().map_err(|_| mpsc::RecvTimeoutError::Timeout)
+            }
+            answer => answer,
+        };
+        match answer {
             Ok(HostMsg::Spawned { id, .. }) => Ok(id),
             Ok(HostMsg::Error { message, .. }) => Err(anyhow!(message)),
             Ok(other) => Err(anyhow!("unexpected answer from the host: {other:?}")),
             Err(mpsc::RecvTimeoutError::Timeout) => {
-                self.inner.timed_out(generation);
+                tracing::warn!("the host did not open a terminal in time");
                 Err(anyhow!("the host did not answer in time"))
             }
             Err(mpsc::RecvTimeoutError::Disconnected) => Err(anyhow!("lost the connection to the host")),

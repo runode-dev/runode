@@ -23,11 +23,11 @@ const WATCH_INTERVAL: Duration = Duration::from_secs(1);
 /// `host_client::take_config`），拿它对得上系统外观时直接用，不再读。
 pub fn install(cx: &mut App) {
     let dark = system_is_dark(cx);
-    let loaded = crate::host_client::take_config().filter(|config| config.fits_appearance(dark));
+    let loaded = crate::host_client::take_config().filter(|(config, _)| config.fits_appearance(dark));
     match loaded {
-        Some(mut config) => {
+        Some((mut config, before)) => {
             config.dark = dark;
-            let seen = watch_stamp(&config);
+            let seen = seen_after(&before, &config);
             apply(cx, config, seen);
         }
         None => reload(cx),
@@ -52,24 +52,31 @@ pub fn install(cx: &mut App) {
     .detach();
 }
 
+/// 各配置文件和看到的修改时间（不存在时为 `None`），见 `watch_stamp`。
+pub(crate) type Stamps = Vec<(PathBuf, Option<SystemTime>)>;
+
 /// 上次加载配置时各配置文件的修改时间，读之前取的（见 `seen_after`）。每次加载后按新配置重新记录：
 /// 重载可能引入新的文件（比如换了主题），设置窗口写回后也会自己重载，这样监视的那一轮不会因为这些
 /// 再重载一次。
-struct Seen(Vec<(PathBuf, Option<SystemTime>)>);
+struct Seen(Stamps);
 
 impl Global for Seen {}
 
 /// 重新读取全部配置文件并广播给各视图。
 pub fn reload(cx: &mut App) {
     let dark = system_is_dark(cx);
-    let before = cx.try_global::<AppConfig>().map(|config| watch_stamp(&config.0)).unwrap_or_default();
+    let before = match cx.try_global::<AppConfig>() {
+        Some(config) => watch_stamp(&config.0),
+        // 第一次读时还没有配置，按默认配置要盯的文件取。
+        None => watch_stamp(&Config::default()),
+    };
     let config = Config::load(dark);
     let seen = seen_after(&before, &config);
     apply(cx, config, seen);
 }
 
 /// 让 `config` 生效并广播给各视图，`seen` 记作读它时各配置文件的修改时间。
-fn apply(cx: &mut App, config: Config, seen: Vec<(PathBuf, Option<SystemTime>)>) {
+fn apply(cx: &mut App, config: Config, seen: Stamps) {
     // 先换语言再广播，观察配置的菜单和视图重画时就是新语言。
     crate::i18n::set(&config.language.clone().unwrap_or_else(crate::i18n::system));
     // 宿主先换主题，视图等它在各个会话的输出流里标出位置后再跟着换。
@@ -108,17 +115,14 @@ fn system_is_dark(cx: &App) -> bool {
 }
 
 /// 所有可能的配置文件的修改时间。还不存在的文件也算在内，新建配置文件同样会触发重载。
-pub(crate) fn watch_stamp(config: &Config) -> Vec<(PathBuf, Option<SystemTime>)> {
+pub(crate) fn watch_stamp(config: &Config) -> Stamps {
     seen_after(&[], config)
 }
 
 /// 读出 `config` 之后，按它要盯的文件记下看过的修改时间：读之前（按读之前的配置）取过的用那时的
 /// `before`，读的时候正好有人写进来，下一轮照样看得出变了；新配置才盯上的文件（比如换了主题）只能
 /// 现在取。
-pub(crate) fn seen_after(
-    before: &[(PathBuf, Option<SystemTime>)],
-    config: &Config,
-) -> Vec<(PathBuf, Option<SystemTime>)> {
+pub(crate) fn seen_after(before: &[(PathBuf, Option<SystemTime>)], config: &Config) -> Stamps {
     config
         .watch_paths()
         .into_iter()

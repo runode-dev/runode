@@ -78,8 +78,8 @@ static LISTENING: AtomicBool = AtomicBool::new(false);
 static KEEP_SESSIONS: AtomicBool = AtomicBool::new(false);
 /// 跑在 app 里的宿主的远程访问，第一次要开时才建，见 `configure`。
 static REMOTE: Mutex<Option<runode_remote_access::Service>> = Mutex::new(None);
-/// `start` 的后台线程读到的配置，见 `take_config`。
-static LOADED_CONFIG: Mutex<Option<Config>> = Mutex::new(None);
+/// `start` 的后台线程读到的配置，和读之前取的配置文件的修改时间，见 `take_config`。
+static LOADED_CONFIG: Mutex<Option<(Config, crate::config::Stamps)>> = Mutex::new(None);
 /// 要在界面上告诉用户的事（比如旧版本的宿主还活着），见 `take_notice`。
 static NOTICE: Mutex<Option<Notice>> = Mutex::new(None);
 
@@ -125,10 +125,11 @@ pub fn start(then: impl FnOnce(&Config) + Send + 'static) {
         let ready = MarkReady;
         // 还不知道系统外观，先按深色读；主线程拿到时外观不一样、主题又跟着外观走就重读，见
         // `Config::fits_appearance`。配置有问题时在这里报告。
+        let before = crate::config::watch_stamp(&Config::default());
         let config = Config::load(true);
         KEEP_SESSIONS.store(config.terminal_host, Ordering::Relaxed);
         establish(config.terminal_host);
-        *LOADED_CONFIG.lock().unwrap_or_else(PoisonError::into_inner) = Some(config.clone());
+        *LOADED_CONFIG.lock().unwrap_or_else(PoisonError::into_inner) = Some((config.clone(), before));
         drop(ready);
         then(&config);
     });
@@ -149,9 +150,9 @@ impl Drop for MarkReady {
     }
 }
 
-/// `start` 的后台线程读到的配置，只给一次；`start` 还没连好时等它，没读（后台线程没起来）时为
-/// `None`。
-pub fn take_config() -> Option<Config> {
+/// `start` 的后台线程读到的配置，和读之前按默认配置要盯的文件取的修改时间（交给
+/// `config::seen_after`），只给一次；`start` 还没连好时等它，没读（后台线程没起来）时为 `None`。
+pub fn take_config() -> Option<(Config, crate::config::Stamps)> {
     link();
     LOADED_CONFIG.lock().unwrap_or_else(PoisonError::into_inner).take()
 }

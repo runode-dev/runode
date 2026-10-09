@@ -159,16 +159,22 @@ fn prompting(cx: &App) -> bool {
     cx.try_global::<Prompting>().is_some_and(|prompting| prompting.0)
 }
 
-/// 这次退出经过了 `run`，会话怎么办已经办了：系统发起的退出的收尾（`install`）不再做一遍。
+/// 这次退出经过了 `run`，会话怎么办已经办了：系统发起的退出的收尾（`install`）不再做一遍。经过了
+/// `run` 却没退成（重启以更新拉不起新进程）时复位，见 `quit_to_update`。
 #[derive(Default)]
 struct Settled(bool);
 
 impl Global for Settled {}
 
+/// 系统发起的退出要不要做 `install` 的收尾：这次退出没经过 `run`，或者经过了却没退成、已经复位。
+fn needs_ending(settled: Option<&Settled>) -> bool {
+    !settled.is_some_and(|settled| settled.0)
+}
+
 /// 装上系统发起的退出（从 Dock 退出、注销、关机）的收尾，见模块说明。要在打开窗口之前调用。
 pub(super) fn install(cx: &mut App) {
     cx.on_app_quit(|cx| {
-        if !cx.try_global::<Settled>().is_some_and(|settled| settled.0) {
+        if needs_ending(cx.try_global::<Settled>()) {
             end_unprompted(cx);
         }
         async {}
@@ -226,7 +232,13 @@ pub fn quit_and_end_sessions(cx: &mut App) {
 pub fn quit_to_update(cx: &mut App) {
     cx.defer(|cx| {
         let window = front_window(cx);
-        run(QuitAction::Update, window, cx, |cx| cx.restart());
+        run(QuitAction::Update, window, cx, |cx| {
+            cx.restart();
+            // GPUI 拉不起重启的脚本时只记日志、不退出。拉起了的话退出已经排进主线程的队列（macOS 上
+            // 按先后办），这个任务排在它后面、轮不到；轮到了就是没退成，复位 `Settled`，之后从 Dock
+            // 退出照常收尾。
+            cx.spawn(async |cx| cx.update(|cx| cx.set_global(Settled(false)))).detach();
+        });
     });
 }
 
@@ -603,6 +615,14 @@ mod tests {
 
     fn plan(ending: Ending, prompt: Option<Prompt>, offer_keep: bool) -> Plan {
         Plan { ending, prompt, offer_keep }
+    }
+
+    /// 系统发起的退出只在没经过 `run`（或者经过了却没退成、已复位）时收尾。
+    #[test]
+    fn a_system_quit_ends_sessions_unless_already_settled() {
+        assert!(needs_ending(None));
+        assert!(!needs_ending(Some(&Settled(true))));
+        assert!(needs_ending(Some(&Settled(false))));
     }
 
     /// 开关开着、宿主单独跑：退出、关最后一个窗口、关所有窗口都把会话留在宿主里，不问。

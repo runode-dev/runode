@@ -552,6 +552,42 @@ fn a_request_that_times_out_drops_the_connection() {
     drop(stuck);
 }
 
+/// 开会话超时了连接照旧：宿主之后才回的 `Spawned` 没人等，读线程结束那个会话，不让它留在宿主里。
+#[test]
+fn a_terminal_spawned_after_the_caller_gave_up_is_ended() {
+    let (gave_up, gave_up_rx) = mpsc::channel::<()>();
+    let (killed, killed_rx) = mpsc::channel();
+    let link = fake_host(move |mut stream| {
+        let req = loop {
+            let frame = read_frame(&mut stream).unwrap().unwrap();
+            if let Ok(ClientMsg::Spawn { req, .. }) = frame.message::<ClientMsg>() {
+                break req;
+            }
+        };
+        gave_up_rx.recv().unwrap();
+        let frame = Frame::control(&HostMsg::Spawned { req, id: SessionId(7) }).unwrap();
+        write_frame(&mut stream, frame.kind, 0, &frame.payload).unwrap();
+        while let Ok(Some(frame)) = read_frame(&mut stream) {
+            if let Ok(ClientMsg::Kill { id }) = frame.message::<ClientMsg>() {
+                let _ = killed.send(id);
+                return;
+            }
+        }
+    });
+    let options = SpawnOptions {
+        size: SIZE,
+        cwd: None,
+        integration: IntegrationMode::Off,
+        start: true,
+        shell: None,
+        settings: None,
+    };
+    assert!(link.spawn_within(options, Duration::from_millis(100)).is_err());
+    assert!(link.connected());
+    gave_up.send(()).unwrap();
+    assert_eq!(killed_rx.recv_timeout(WAIT).unwrap(), SessionId(7));
+}
+
 #[test]
 fn a_shutdown_goodbye_ends_every_session() {
     let link = fake_host(|mut stream| {
