@@ -8,3 +8,4 @@
 /apps/ios/RunodeKit/.build/
 /apps/ios/RunodeKit/.swiftpm/
 xcuserdata/
+/.playwright-cli/
