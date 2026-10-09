@@ -15,14 +15,13 @@ use std::{
 };
 
 use anyhow::Result;
-use gpui::{
-    App, Context, Div, Global, MouseButton, PromptLevel, SharedString, Stateful, Task, Window, div, prelude::*, px,
-};
+use gpui::{App, Context, Div, Global, PromptLevel, Role, SharedString, Stateful, Task, Window, div, prelude::*, px};
 use runode_protocol::{SessionId, SessionInfo};
 use runode_shared_types::color::Rgb;
 
 use super::{
-    AGENT_MARK_WIDTH, WindowView, agents::Mark, cards, divider_color, quit::held_sessions, titlebar::styled_agent_mark,
+    AGENT_MARK_WIDTH, PressDown, WindowView, agents::Mark, cards, divider_color, quit::held_sessions,
+    titlebar::styled_agent_mark,
 };
 use crate::{
     host_client::{self, Mode},
@@ -234,6 +233,8 @@ impl WindowView {
             .child(
                 div()
                     .id("background-end-all")
+                    .role(Role::Button)
+                    .aria_label(rust_i18n::t!("background.end_all"))
                     .flex_none()
                     .px(px(6.))
                     .py(px(2.))
@@ -241,17 +242,13 @@ impl WindowView {
                     .text_color(fg.opacity(0.55))
                     .hover(|button| button.bg(hover_bg).text_color(fg))
                     .child(rust_i18n::t!("background.end_all").into_owned())
-                    .on_mouse_down(
-                        MouseButton::Left,
-                        cx.listener(|this, _, window, cx| {
-                            cx.stop_propagation();
-                            this.end_background(window, cx);
-                        }),
-                    ),
+                    .on_press_down(cx, |this, window, cx| this.end_background(window, cx)),
             );
         Some(
             div()
                 .id("background-sessions")
+                .role(Role::Group)
+                .aria_label(rust_i18n::t!("background.title"))
                 .flex_none()
                 .max_h(px(GROUP_MAX_HEIGHT))
                 .overflow_y_scroll()
@@ -288,11 +285,9 @@ fn background_row(ix: usize, session: &SessionInfo, fg: Rgb, bg: Rgb, cx: &mut C
         Some(agent) => styled_agent_mark(Mark::new(agent, false), ("background-agent", ix), fg, cards(cx)),
         None => div().flex_none().w(px(AGENT_MARK_WIDTH)).into_any_element(),
     };
-    let agent = session.meta.agent.map(|agent| {
-        let status = Mark::new(agent, false).status.label();
-        format!("{} · {status}", agent.kind.display_name())
-    });
+    let agent = session.meta.agent.map(|agent| Mark::new(agent, false).describe());
     let dir = session.meta.cwd.as_deref().map(display_dir);
+    let description = [agent.clone(), dir.clone()].into_iter().flatten().collect::<Vec<_>>().join(" · ");
     let detail = (agent.is_some() || dir.is_some()).then(|| {
         div()
             .flex()
@@ -306,6 +301,9 @@ fn background_row(ix: usize, session: &SessionInfo, fg: Rgb, bg: Rgb, cx: &mut C
     });
     div()
         .id(("background-session", ix))
+        .role(Role::Button)
+        .aria_label(title(session))
+        .when(!description.is_empty(), |row| row.aria_description(description))
         .flex_none()
         .h(px(ROW_HEIGHT))
         .px(px(8.))
@@ -316,13 +314,7 @@ fn background_row(ix: usize, session: &SessionInfo, fg: Rgb, bg: Rgb, cx: &mut C
         .text_size(px(12.))
         .text_color(fg.opacity(0.7))
         .hover(|row| row.bg(hover_bg).text_color(fg))
-        .on_mouse_down(
-            MouseButton::Left,
-            cx.listener(move |this, _, window, cx| {
-                cx.stop_propagation();
-                this.open_background(id, window, cx);
-            }),
-        )
+        .on_press_down(cx, move |this, window, cx| this.open_background(id, window, cx))
         .child(mark)
         .child(
             div()

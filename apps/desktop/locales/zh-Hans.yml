@@ -75,6 +75,8 @@ agent:
   picker:
     none: 没有在运行的 agent
     no_matches: 没有匹配的 agent
+    title: agent 列表
+    filter: 筛选 agent
 host:
   incompatible_title: 旧版本 Runode 的终端宿主还在运行
   incompatible_detail: 这次终端跑在 app 里，runode list 这类命令行连不上它们。退出另一个 Runode 或者结束它的宿主进程后，重新打开 Runode。（%{reason}）
@@ -115,6 +117,8 @@ workspace:
   create: 创建新项目
   create_hint: 从空文件夹开始
   empty: 这个工作区里还没有终端
+  list: 工作区
+  bell: 响过铃
 close:
   pane_title: 关闭这个终端？
   tab_title: 关闭这个标签页？
@@ -782,6 +786,7 @@ status:
   sleep_active: 生效中
   sleep_inactive: 未生效
   hide_bar: 隐藏状态栏
+  bar: 状态栏
   resources_title: 资源
   resources_tooltip: Runode 一共占用的内存 · 终端数
   name: 名称

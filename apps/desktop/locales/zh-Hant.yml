@@ -75,6 +75,8 @@ agent:
   picker:
     none: 沒有在執行的 agent
     no_matches: 沒有相符的 agent
+    title: agent 列表
+    filter: 篩選 agent
 host:
   incompatible_title: 舊版 Runode 的終端機宿主還在執行
   incompatible_detail: 這次終端機跑在 app 裡，runode list 這類指令列連不上它們。結束另一個 Runode 或者它的宿主程序後，重新開啟 Runode。（%{reason}）
@@ -115,6 +117,8 @@ workspace:
   create: 建立新專案
   create_hint: 從空檔案夾開始
   empty: 這個工作區裡還沒有終端機
+  list: 工作區
+  bell: 響過鈴
 close:
   pane_title: 關閉這個終端機？
   tab_title: 關閉這個分頁？
@@ -782,6 +786,7 @@ status:
   sleep_active: 生效中
   sleep_inactive: 未生效
   hide_bar: 隱藏狀態列
+  bar: 狀態列
   resources_title: 資源
   resources_tooltip: Runode 總共佔用的記憶體 · 終端機數
   name: 名稱

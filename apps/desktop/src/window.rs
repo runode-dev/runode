@@ -48,7 +48,7 @@ use std::{cell::RefCell, collections::HashMap, path::PathBuf, rc::Rc, time::Inst
 use futures::StreamExt as _;
 use gpui::{
     Action, AnyElement, App, BoxShadow, Context, Div, EntityId, ExternalPaths, FocusHandle, Focusable, Hsla,
-    MouseButton, MouseDownEvent, Render, ScrollHandle, SharedString, Stateful, Subscription, Task, Window,
+    MouseButton, MouseDownEvent, Render, Role, ScrollHandle, SharedString, Stateful, Subscription, Task, Window,
     WindowBounds, actions, div, point, prelude::*, px,
 };
 use runode_config::WindowStyle;
@@ -230,6 +230,35 @@ fn drag_window(event: &MouseDownEvent, window: &mut Window, _: &mut App) {
         window.start_window_move();
     }
 }
+
+/// 按下鼠标左键或辅助工具按下时调 `f`，按下的事件不再往外传。
+///
+/// 标题栏、侧栏和状态栏上的按钮按下鼠标就办，还要拦住外面按下就拖窗口的标题栏，用不了
+/// `Press::on_press` 的 `on_click`；只挂 `on_mouse_down` 的元素辅助工具按不到，这里另外登记按下动作，
+/// 直接调同一个 `f`，元素滚出可见区域也按得到。
+trait PressDown: StatefulInteractiveElement + Sized {
+    fn on_press_down<T: 'static>(
+        self,
+        cx: &mut Context<T>,
+        f: impl Fn(&mut T, &mut Window, &mut Context<T>) + 'static,
+    ) -> Self {
+        let f = Rc::new(f);
+        let press = f.clone();
+        let view = cx.entity().downgrade();
+        self.on_mouse_down(
+            MouseButton::Left,
+            cx.listener(move |this, _: &MouseDownEvent, window, cx| {
+                cx.stop_propagation();
+                f(this, window, cx);
+            }),
+        )
+        .on_a11y_action(gpui::AccessibleAction::Click, move |_, window, cx| {
+            view.update(cx, |this, cx| press(this, window, cx)).ok();
+        })
+    }
+}
+
+impl<E: StatefulInteractiveElement> PressDown for E {}
 
 /// 正在用鼠标拖动的分隔线。
 #[derive(Clone, Copy)]
@@ -697,6 +726,7 @@ impl WindowView {
             // 标签条只占标签本身的宽度，新建标签按钮紧跟在后面，剩下的空白留给拖动窗口。
             let strip = div()
                 .id("tabs")
+                .role(Role::TabList)
                 .flex_initial()
                 .min_w_0()
                 .h_full()
@@ -727,6 +757,9 @@ impl WindowView {
             vec![
                 div()
                     .id("window-title")
+                    .role(Role::Heading)
+                    .aria_label(title.clone())
+                    .when_some(mark, |el, mark| el.aria_description(mark.describe()))
                     .flex_1()
                     .min_w_0()
                     .h_full()
@@ -813,6 +846,7 @@ impl WindowView {
         let track_bg = hsla(tab_track_colors(fg, bg).0);
         let strip = div()
             .id("tabs")
+            .role(Role::TabList)
             .flex_1()
             .min_w_0()
             .h(px(TAB_TRACK_HEIGHT))

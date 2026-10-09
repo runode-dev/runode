@@ -18,8 +18,9 @@ use std::{
 };
 
 use gpui::{
-    Action, Anchor, AnyElement, App, Context, Div, Focusable, FontWeight, Global, Hsla, MouseButton, MouseDownEvent,
-    Pixels, Point, SharedString, Stateful, Window, anchored, deferred, div, point, prelude::*, px, svg,
+    AccessibleAction, Action, Anchor, AnyElement, App, Context, Div, Focusable, FontWeight, Global, Hsla, MouseButton,
+    MouseDownEvent, Pixels, Point, Role, SharedString, Stateful, Window, anchored, deferred, div, point, prelude::*,
+    px, svg,
 };
 use runode_config::StatusItem;
 use runode_shared_types::{
@@ -28,7 +29,7 @@ use runode_shared_types::{
 };
 
 use super::{
-    ToggleStatusBar, WindowView, cards, divider_color,
+    PressDown, ToggleStatusBar, WindowView, cards, divider_color,
     files::{check_item, menu_item},
     remote,
 };
@@ -99,6 +100,16 @@ pub(super) enum StatusPopover {
 impl StatusPopover {
     fn same_kind(self, other: Self) -> bool {
         std::mem::discriminant(&self) == std::mem::discriminant(&other)
+    }
+
+    /// 弹出它的那一块的标题。
+    fn title(self) -> String {
+        let item = match self {
+            Self::Sleep => StatusItem::Sleep,
+            Self::Resources => StatusItem::Resources,
+            Self::Ports { .. } => StatusItem::Ports,
+        };
+        item_icon_and_title(item).1
     }
 }
 
@@ -252,7 +263,7 @@ impl WindowView {
     }
 
     /// 窗口底部的状态栏。
-    pub(super) fn render_status_bar(&self, fg: Rgb, bg: Rgb, cx: &mut Context<Self>) -> Div {
+    pub(super) fn render_status_bar(&self, fg: Rgb, bg: Rgb, cx: &mut Context<Self>) -> Stateful<Div> {
         let fg_h = hsla(fg);
         let (sleep, effective, total, terminals, ours) = match cx.try_global::<Status>() {
             Some(status) => (
@@ -270,14 +281,23 @@ impl WindowView {
         } else {
             fg_h.opacity(0.3)
         });
+        // 状态栏上每块报成一个按钮，名字是这一块的标题，上面写的数放进说明：按钮的值辅助工具多半不念。
+        let sleep_state =
+            if effective { rust_i18n::t!("status.sleep_active") } else { rust_i18n::t!("status.sleep_inactive") };
         let sleep_item = self
             .status_item("status-sleep", StatusPopover::Sleep, fg, bg, cx)
+            .aria_description(format!("{} · {sleep_state}", sleep_label(sleep)))
             .child(icon(COFFEE_ICON))
             .child(sleep_label(sleep))
             .child(dot);
         let resources_item = self
             .status_item("status-resources", StatusPopover::Resources, fg, bg, cx)
             .tooltip(tooltip(rust_i18n::t!("status.resources_tooltip"), None, fg, bg))
+            .aria_description(format!(
+                "{}: {} · {terminals}",
+                rust_i18n::t!("status.resources_tooltip"),
+                format_bytes(total.memory)
+            ))
             .child(icon(MEMORY_ICON))
             .child(format_bytes(total.memory))
             .child(div().text_color(fg_h.opacity(0.35)).child("·"))
@@ -285,11 +305,15 @@ impl WindowView {
             .child(terminals.to_string());
         let ports_item = self
             .status_item("status-ports", StatusPopover::Ports { external: false }, fg, bg, cx)
+            .aria_description(ours.to_string())
             .child(icon(PLUG_ICON))
             .child(ours.to_string());
         let hidden = &cx.global::<AppConfig>().0.status_bar_hidden;
         let shown = |item| !hidden.contains(&item);
         div()
+            .id("status-bar")
+            .role(Role::Toolbar)
+            .aria_label(rust_i18n::t!("status.bar"))
             .flex_none()
             .h(px(STATUS_BAR_HEIGHT))
             .px(px(6.))
@@ -373,6 +397,7 @@ impl WindowView {
         });
         let popover_bg = hsla(bg.mix(fg, 0.04));
         let border = hsla(fg).opacity(0.15);
+        let title = popover.title();
         // 浮层的左下角对着这一块的左上角，往上让出一点；放不下时贴着窗口边挪进来。
         let content = content.map(|content| {
             div().absolute().top_0().left_0().child(
@@ -384,6 +409,8 @@ impl WindowView {
                         .child(
                             div()
                                 .id("status-popover")
+                                .role(Role::Dialog)
+                                .aria_label(title.clone())
                                 .rounded(px(8.))
                                 .border_1()
                                 .border_color(border)
@@ -402,8 +429,12 @@ impl WindowView {
                 .with_priority(1),
             )
         });
+        let view = cx.entity().downgrade();
         div()
             .id(id)
+            .role(Role::Button)
+            .aria_label(title)
+            .aria_expanded(open.is_some())
             .relative()
             .flex_none()
             .h(px(STATUS_BAR_HEIGHT - 6.))
@@ -431,6 +462,15 @@ impl WindowView {
                     cx.notify();
                 }),
             )
+            // 鼠标的开、关分在捕获和冒泡两段，辅助工具按下时这里一起办：开着就关，关着就开。
+            .on_a11y_action(AccessibleAction::Click, move |_, _, cx| {
+                view.update(cx, |this, cx| {
+                    let open = this.status_popover.is_some_and(|open| open.same_kind(popover));
+                    this.status_popover = (!open).then_some(popover);
+                    cx.notify();
+                })
+                .ok();
+            })
             .children(content)
     }
 
@@ -452,6 +492,10 @@ impl WindowView {
             let selected = mode == current;
             div()
                 .id(("sleep-mode", ix))
+                .role(Role::RadioButton)
+                .aria_label(sleep_label(mode))
+                .aria_description(rust_i18n::t!(detail))
+                .aria_toggled(selected.into())
                 .mx(px(6.))
                 .px(px(8.))
                 .py(px(6.))
@@ -482,14 +526,10 @@ impl WindowView {
                                 .child(rust_i18n::t!(detail).into_owned()),
                         ),
                 )
-                .on_mouse_down(
-                    MouseButton::Left,
-                    cx.listener(move |this, _, _, cx| {
-                        cx.stop_propagation();
-                        this.status_popover = None;
-                        set_sleep(mode, cx);
-                    }),
-                )
+                .on_press_down(cx, move |this, _, cx| {
+                    this.status_popover = None;
+                    set_sleep(mode, cx);
+                })
         });
         div()
             .w(px(300.))
@@ -503,7 +543,15 @@ impl WindowView {
                 fg_h,
             ))
             .child(div().h(px(6.)))
-            .children(options)
+            .child(
+                div()
+                    .id("sleep-modes")
+                    .role(Role::RadioGroup)
+                    .aria_label(rust_i18n::t!("status.sleep_title"))
+                    .flex()
+                    .flex_col()
+                    .children(options),
+            )
             .into_any_element()
     }
 
@@ -512,8 +560,14 @@ impl WindowView {
         let Some(status) = cx.try_global::<Status>() else { return div().into_any_element() };
         let procs = &status.procs;
         let total = status.total();
+        // 各行没有别的标识，按画出来的先后编号。
+        let next_row = std::cell::Cell::new(0_usize);
         let row = |name: SharedString, usage: Usage, indent: bool, strong: bool| {
+            let n = next_row.replace(next_row.get() + 1);
             div()
+                .id(("resource-row", n))
+                .role(Role::Label)
+                .aria_label(format!("{name} · CPU {} · {}", format_cpu(usage.cpu), format_bytes(usage.memory)))
                 .h(px(26.))
                 .px(px(12.))
                 .flex()
@@ -550,16 +604,7 @@ impl WindowView {
             rows.extend(terminals.into_iter().map(|(title, usage)| row(title, usage, true, false).into_any_element()));
         }
         if rows.is_empty() {
-            rows.push(
-                div()
-                    .h(px(40.))
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .text_color(fg_h.opacity(0.5))
-                    .child(rust_i18n::t!("status.no_terminals").into_owned())
-                    .into_any_element(),
-            );
+            rows.push(empty_note(rust_i18n::t!("status.no_terminals").into_owned(), fg_h).into_any_element());
         }
         let app = std::process::id();
         let own: Vec<_> = std::iter::once((rust_i18n::t!("status.app").into_owned(), app))
@@ -614,10 +659,24 @@ impl WindowView {
         let (ours, external): (Vec<_>, Vec<_>) =
             status.ports.iter().map(|port| (port, status.port_owner(port))).partition(|(_, owner)| owner.is_some());
         let hover_bg = hsla(bg.mix(fg, 0.10));
+        let view = cx.entity().downgrade();
         let port_row = |id: &'static str, port: &Port, workspace: Option<SharedString>| {
             let url = format!("http://localhost:{}", port.port);
+            let open = url.clone();
+            let label = [
+                Some(format!(":{}", port.port)),
+                Some(port.command.clone()),
+                workspace.as_ref().map(ToString::to_string),
+            ]
+            .into_iter()
+            .flatten()
+            .collect::<Vec<_>>()
+            .join(" · ");
             div()
                 .id((id, usize::from(port.port)))
+                .role(Role::Link)
+                .aria_label(label)
+                .aria_description(rust_i18n::t!("status.open_port"))
                 .h(px(26.))
                 .mx(px(6.))
                 .px(px(8.))
@@ -639,6 +698,7 @@ impl WindowView {
                     cx.stop_propagation();
                     cx.open_url(&url);
                 })
+                .on_a11y_action(AccessibleAction::Click, move |_, _, cx| cx.open_url(&open))
         };
         let mut body: Vec<AnyElement> = ours
             .iter()
@@ -647,19 +707,14 @@ impl WindowView {
             })
             .collect();
         if body.is_empty() {
-            body.push(
-                div()
-                    .h(px(40.))
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .text_color(fg_h.opacity(0.5))
-                    .child(rust_i18n::t!("status.no_ports").into_owned())
-                    .into_any_element(),
-            );
+            body.push(empty_note(rust_i18n::t!("status.no_ports").into_owned(), fg_h).into_any_element());
         }
         let external_header = div()
             .id("external-ports")
+            .role(Role::Button)
+            .aria_label(rust_i18n::t!("status.external_ports"))
+            .aria_description(external.len().to_string())
+            .aria_expanded(external_open)
             .h(px(28.))
             .mx(px(6.))
             .px(px(6.))
@@ -684,7 +739,15 @@ impl WindowView {
                     this.status_popover = Some(StatusPopover::Ports { external: !external_open });
                     cx.notify();
                 }),
-            );
+            )
+            // `status` 借着 `cx`，用不了 `PressDown`。
+            .on_a11y_action(AccessibleAction::Click, move |_, _, cx| {
+                view.update(cx, |this, cx| {
+                    this.status_popover = Some(StatusPopover::Ports { external: !external_open });
+                    cx.notify();
+                })
+                .ok();
+            });
         let external_rows =
             external.iter().filter(|_| external_open).map(|(port, _)| port_row("external-port", port, None));
         div()
@@ -721,9 +784,27 @@ fn sleep_label(mode: SleepMode) -> String {
     rust_i18n::t!(key).into_owned()
 }
 
-/// 浮层顶上的一行：图标和标题在左，`detail` 淡淡地写在右边，下面一条分隔线。
-fn popover_header(icon: Option<&'static str>, title: String, detail: String, fg: Hsla) -> Div {
+/// 浮层里没有内容时居中的一句说明。
+fn empty_note(text: String, fg: Hsla) -> Stateful<Div> {
     div()
+        .id("empty-note")
+        .role(Role::Label)
+        .aria_label(text.clone())
+        .h(px(40.))
+        .flex()
+        .items_center()
+        .justify_center()
+        .text_color(fg.opacity(0.5))
+        .child(text)
+}
+
+/// 浮层顶上的一行：图标和标题在左，`detail` 淡淡地写在右边，下面一条分隔线。
+fn popover_header(icon: Option<&'static str>, title: String, detail: String, fg: Hsla) -> Stateful<Div> {
+    div()
+        .id("popover-header")
+        .role(Role::Heading)
+        .aria_label(title.clone())
+        .aria_description(detail.clone())
         .h(px(36.))
         .px(px(12.))
         .flex()
