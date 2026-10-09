@@ -76,6 +76,11 @@ impl Mark {
         };
         Self { kind: agent.kind, status }
     }
+
+    /// 报给辅助工具的说法：agent 的名字和状态，标记本身只是图形。
+    pub(super) fn describe(self) -> String {
+        format!("{} · {}", self.kind.display_name(), self.status.label())
+    }
 }
 
 /// 汇总几个标记：等回答优先，其次是工作中，还有 agent 在跑时不显示成干完了；同级的取先出现的，

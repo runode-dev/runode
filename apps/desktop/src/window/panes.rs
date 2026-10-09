@@ -9,7 +9,7 @@ use std::{
 
 use gpui::{
     Action, AnyElement, App, Context, CursorStyle, Div, EntityId, ExternalPaths, Focusable, FontWeight, MouseButton,
-    MouseDownEvent, MouseMoveEvent, SharedString, Stateful, StyleRefinement, Window, canvas, div, prelude::*, px,
+    MouseDownEvent, MouseMoveEvent, Role, SharedString, Stateful, StyleRefinement, Window, canvas, div, prelude::*, px,
     relative, svg,
 };
 use runode_protocol::SessionId;
@@ -21,7 +21,7 @@ use runode_shared_types::{
 
 use super::{
     AGENT_MARK_WIDTH, CARD_GAP, ClosePane, DIVIDER_GRAB_WIDTH, Divider, NewSplitDown, NewSplitRight, NewTab,
-    PANE_HEADER_HEIGHT, TogglePaneZoom, WindowView,
+    PANE_HEADER_HEIGHT, PressDown, TogglePaneZoom, WindowView,
     agents::logo::agent_logo,
     card, cards,
     files::DraggedFile,
@@ -112,6 +112,8 @@ impl WindowView {
         let shortcut = shortcut_text(&NewTab, cx);
         let button = div()
             .id("empty-new-tab")
+            .role(Role::Button)
+            .aria_label(rust_i18n::t!("menu.new_tab"))
             .px(px(12.))
             .py(px(6.))
             .rounded(px(6.))
@@ -123,13 +125,7 @@ impl WindowView {
             .hover(|button| button.bg(hover_bg).text_color(fg))
             .child(rust_i18n::t!("menu.new_tab").into_owned())
             .children(shortcut.map(|shortcut| div().text_color(fg.opacity(0.4)).child(shortcut)))
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(|this, _, window, cx| {
-                    cx.stop_propagation();
-                    this.new_tab(&NewTab, window, cx);
-                }),
-            );
+            .on_press_down(cx, |this, window, cx| this.new_tab(&NewTab, window, cx));
         let empty = div()
             .id("empty-tab")
             .track_focus(&self.empty_focus)
@@ -141,7 +137,13 @@ impl WindowView {
             .gap(px(12.))
             .text_size(px(13.))
             .text_color(fg.opacity(0.45))
-            .child(rust_i18n::t!("workspace.empty").into_owned())
+            .child(
+                div()
+                    .id("empty-tab-hint")
+                    .role(Role::Label)
+                    .aria_label(rust_i18n::t!("workspace.empty"))
+                    .child(rust_i18n::t!("workspace.empty").into_owned()),
+            )
             .child(button);
         if cards(cx) {
             card(fg, hsla(bg)).size_full().child(empty).into_any_element()
@@ -242,8 +244,17 @@ impl WindowView {
         let view = tab.panes[&id].0.clone();
         let dimmed = !tab.zoomed && !tab.root.is_leaf() && id != tab.focused;
         let layout = self.layout.clone();
-        let badge = badges.get(&id).map(|text| driver_badge(text.clone(), fg, bg));
+        let badge = badges.get(&id).map(|text| driver_badge(("driver-badge", id), text.clone(), fg, bg));
         let cards = cards(cx);
+        // 每个分屏报成一组，名字是标题条上写的；分了屏时标出哪个是当前分屏。
+        let (name, dir) = pane_label(view.read(cx));
+        let (split, focused) = (!tab.zoomed && !tab.root.is_leaf(), id == tab.focused);
+        let pane_group = move |el: Stateful<Div>| {
+            el.role(Role::Group)
+                .aria_label(name)
+                .when_some(dir, |el, dir| el.aria_description(dir))
+                .when(split, |el| el.aria_selected(focused))
+        };
         let terminal = div()
             .relative()
             .when(!cards, |terminal| terminal.size_full())
@@ -271,13 +282,13 @@ impl WindowView {
                 this.drop_paths_on_pane(id, dropped.paths(), window, cx);
             }));
         if !cards {
-            return terminal.into_any_element();
+            return pane_group(terminal.id(("pane", id))).into_any_element();
         }
         // 卡片：上面是标题条，下面是终端。终端四周留一点，它的方角落在卡片的圆角里面。终端用四边
         // 定位撑满标题条下面的部分：百分比的高度在这里会按整张卡片算，比剩下的高出一个标题条。
         let group = SharedString::from(format!("pane-{}", id.as_u64()));
         let inset = px(4.);
-        card(hsla(fg), hsla(bg))
+        pane_group(card(hsla(fg), hsla(bg)).id(("pane", id)))
             .group(group.clone())
             .size_full()
             .flex()
@@ -329,19 +340,14 @@ impl WindowView {
                 .into_any_element(),
         };
         type Handler = fn(&mut WindowView, EntityId, &mut Window, &mut Context<WindowView>);
-        let button =
+        let mut button =
             |key: &'static str, icon: &'static str, text: Cow<'static, str>, action: &dyn Action, handler: Handler| {
                 icon_toggle(key, icon, 13., false, fg, bg)
+                    .aria_label(text.clone())
                     .flex_none()
                     .size(px(22.))
                     .tooltip(tooltip(text, Some(action), fg, bg))
-                    .on_mouse_down(
-                        MouseButton::Left,
-                        cx.listener(move |this, _, window, cx| {
-                            cx.stop_propagation();
-                            handler(this, id, window, cx);
-                        }),
-                    )
+                    .on_press_down(cx, move |this, window, cx| handler(this, id, window, cx))
             };
         let (zoom_icon, zoom_text) = if tab.zoomed {
             (MINIMIZE_ICON, rust_i18n::t!("tooltip.restore_split"))
@@ -608,10 +614,13 @@ impl WindowView {
 }
 
 /// 分屏右上角的驱动标记。没有鼠标处理，点击照样落到下面的终端上。
-fn driver_badge(text: SharedString, fg: Rgb, bg: Rgb) -> Div {
+fn driver_badge(id: impl Into<gpui::ElementId>, text: SharedString, fg: Rgb, bg: Rgb) -> Stateful<Div> {
     let panel = hsla(bg.mix(fg, 0.12));
     let fg = hsla(fg);
     div()
+        .id(id)
+        .role(Role::Status)
+        .aria_label(text.clone())
         .absolute()
         .top(px(6.))
         .right(px(10.))

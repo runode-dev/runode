@@ -4,13 +4,13 @@
 use std::collections::HashMap;
 
 use gpui::{
-    Context, Div, Entity, EntityId, Focusable, Hsla, KeyDownEvent, MouseButton, ScrollHandle, SharedString, Stateful,
+    Context, Div, Entity, EntityId, Focusable, Hsla, KeyDownEvent, Role, ScrollHandle, SharedString, Stateful,
     Subscription, Window, div, prelude::*, px,
 };
 use runode_shared_types::color::Rgb;
 
 use super::{
-    GotoAgent, TITLEBAR_HEIGHT, WindowView,
+    GotoAgent, PressDown, TITLEBAR_HEIGHT, WindowView,
     agents::{AgentEntry, matches_query, reveal},
     cards, divider_color,
     titlebar::styled_agent_mark,
@@ -47,7 +47,7 @@ impl WindowView {
             self.close_agent_picker(window, cx);
             return;
         }
-        let field = cx.new(|cx| TextField::new(String::new(), cx));
+        let field = cx.new(|cx| TextField::new(String::new(), cx).with_label(rust_i18n::t!("agent.picker.filter")));
         // 输入框原本是搜索框：回车是「下一个」，Esc 是「关闭搜索」，在这里分别是跳过去和关掉。
         let events = cx.subscribe_in(&field, window, |this, _, event: &TextFieldEvent, window, cx| match event {
             TextFieldEvent::Changed(_) => {
@@ -176,7 +176,14 @@ impl WindowView {
             } else {
                 rust_i18n::t!("agent.picker.no_matches")
             };
-            div().px(px(10.)).py(px(10.)).text_color(fg.opacity(0.5)).child(text.into_owned())
+            div()
+                .id("agent-empty")
+                .role(Role::Label)
+                .aria_label(text.clone())
+                .px(px(10.))
+                .py(px(10.))
+                .text_color(fg.opacity(0.5))
+                .child(text.into_owned())
         });
         let rows: Vec<_> = rows
             .into_iter()
@@ -186,6 +193,10 @@ impl WindowView {
                 let place = SharedString::from(format!("{} · {}", entry.workspace_name, entry.tab_title));
                 div()
                     .id(("agent-row", ix))
+                    .role(Role::ListBoxOption)
+                    .aria_label(format!("{} · {place}", entry.kind_name()))
+                    .aria_description(format!("{} · {dir}", entry.mark.status.label()))
+                    .aria_selected(ix == selected)
                     .flex_none()
                     .h(px(ROW_HEIGHT))
                     .px(px(8.))
@@ -194,14 +205,10 @@ impl WindowView {
                     .items_center()
                     .gap(px(8.))
                     .map(|row| if ix == selected { row.bg(selected_bg) } else { row.hover(|row| row.bg(hover_bg)) })
-                    .on_mouse_down(
-                        MouseButton::Left,
-                        cx.listener(move |this, _, window, cx| {
-                            cx.stop_propagation();
-                            this.close_agent_picker(window, cx);
-                            reveal(target, pane, cx);
-                        }),
-                    )
+                    .on_press_down(cx, move |this, window, cx| {
+                        this.close_agent_picker(window, cx);
+                        reveal(target, pane, cx);
+                    })
                     .child(styled_agent_mark(entry.mark, ("picker-agent", ix), fg, cards(cx)))
                     .child(
                         div()
@@ -238,9 +245,16 @@ impl WindowView {
                     )
             })
             .collect();
-        let panel = div().id("agent-picker").w(px(PICKER_WIDTH)).capture_key_down(cx.listener(Self::agent_picker_key));
+        let panel = div()
+            .id("agent-picker")
+            .role(Role::Dialog)
+            .aria_label(rust_i18n::t!("agent.picker.title"))
+            .w(px(PICKER_WIDTH))
+            .capture_key_down(cx.listener(Self::agent_picker_key));
         let list = div()
             .id("agent-list")
+            .role(Role::ListBox)
+            .aria_label(rust_i18n::t!("agent.picker.title"))
             .max_h(px(ROW_HEIGHT * VISIBLE_ROWS + 8.))
             .track_scroll(&picker.scroll)
             .children(rows)

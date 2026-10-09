@@ -6,15 +6,15 @@
 //! 方向、数字键或上下键改个数、回车打开、Esc 关掉，也可以用鼠标点。
 
 use gpui::{
-    Context, Div, FocusHandle, Focusable, Hsla, KeyDownEvent, MouseButton, SharedString, Stateful, Subscription,
-    Window, actions, div, prelude::*, px, relative,
+    Context, Div, FocusHandle, Focusable, Hsla, KeyDownEvent, Role, SharedString, Stateful, Subscription, Window,
+    actions, div, prelude::*, px, relative,
 };
 use runode_shared_types::{
     color::Rgb,
     pane::{Axis, Node, Rect, SplitId},
 };
 
-use super::{TITLEBAR_HEIGHT, WindowView, divider_color};
+use super::{PressDown, TITLEBAR_HEIGHT, WindowView, divider_color};
 use crate::ui::hsla;
 
 actions!(
@@ -218,6 +218,9 @@ impl WindowView {
         let choice = |id: (&'static str, usize), label: SharedString, selected: bool| -> Stateful<Div> {
             div()
                 .id(id)
+                .role(Role::RadioButton)
+                .aria_label(label.clone())
+                .aria_toggled(selected.into())
                 .px(px(10.))
                 .py(px(4.))
                 .rounded(px(5.))
@@ -226,32 +229,39 @@ impl WindowView {
                 .map(|button| if selected { button.bg(selected_bg) } else { button.hover(|b| b.bg(hover_bg)) })
                 .child(label)
         };
-        let directions = Arrangement::ALL.iter().enumerate().map(|(ix, &arrangement)| {
-            choice(("arrange-direction", ix), arrangement.label(), arrangement == picker.arrangement).on_mouse_down(
-                MouseButton::Left,
-                cx.listener(move |this, _, _, cx| {
-                    cx.stop_propagation();
-                    if let Some(picker) = &mut this.arrange_picker {
-                        picker.arrangement = arrangement;
-                    }
-                    cx.notify();
-                }),
-            )
-        });
-        let counts = (1..=MAX_COUNT).map(|count| {
-            choice(("arrange-count", count), count.to_string().into(), count == picker.count).on_mouse_down(
-                MouseButton::Left,
-                cx.listener(move |this, _, _, cx| {
-                    cx.stop_propagation();
-                    if let Some(picker) = &mut this.arrange_picker {
-                        picker.count = count;
-                    }
-                    cx.notify();
-                }),
-            )
-        });
-        let row = |label: SharedString| {
+        let directions =
+            Arrangement::ALL
+                .iter()
+                .enumerate()
+                .map(|(ix, &arrangement)| {
+                    choice(("arrange-direction", ix), arrangement.label(), arrangement == picker.arrangement)
+                        .on_press_down(cx, move |this, _, cx| {
+                            if let Some(picker) = &mut this.arrange_picker {
+                                picker.arrangement = arrangement;
+                            }
+                            cx.notify();
+                        })
+                })
+                .collect::<Vec<_>>();
+        let counts = (1..=MAX_COUNT)
+            .map(|count| {
+                choice(("arrange-count", count), count.to_string().into(), count == picker.count).on_press_down(
+                    cx,
+                    move |this, _, cx| {
+                        if let Some(picker) = &mut this.arrange_picker {
+                            picker.count = count;
+                        }
+                        cx.notify();
+                    },
+                )
+            })
+            .collect::<Vec<_>>();
+        // 方向和个数各是一组单选。
+        let row = |id: &'static str, label: SharedString| {
             div()
+                .id(id)
+                .role(Role::RadioGroup)
+                .aria_label(label.clone())
                 .flex()
                 .items_center()
                 .gap(px(6.))
@@ -259,21 +269,19 @@ impl WindowView {
         };
         let open = div()
             .id("arrange-open")
+            .role(Role::Button)
+            .aria_label(rust_i18n::t!("layout.open"))
             .px(px(14.))
             .py(px(5.))
             .rounded(px(5.))
             .bg(selected_bg)
             .hover(|button| button.bg(open_hover_bg))
             .child(rust_i18n::t!("layout.open").into_owned())
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(|this, _, window, cx| {
-                    cx.stop_propagation();
-                    this.confirm_arrange(window, cx);
-                }),
-            );
+            .on_press_down(cx, |this, window, cx| this.confirm_arrange(window, cx));
         let panel = div()
             .id("arrange-picker")
+            .role(Role::Dialog)
+            .aria_label(rust_i18n::t!("layout.title"))
             .track_focus(&picker.focus)
             .on_key_down(cx.listener(Self::arrange_key))
             .w(px(380.))
@@ -291,8 +299,10 @@ impl WindowView {
             .text_size(px(12.))
             .text_color(fg)
             .child(div().text_color(fg).child(rust_i18n::t!("layout.title").into_owned()))
-            .child(row(rust_i18n::t!("layout.direction").into_owned().into()).children(directions))
-            .child(row(rust_i18n::t!("layout.count").into_owned().into()).children(counts))
+            .child(
+                row("arrange-directions", rust_i18n::t!("layout.direction").into_owned().into()).children(directions),
+            )
+            .child(row("arrange-counts", rust_i18n::t!("layout.count").into_owned().into()).children(counts))
             .child(
                 div()
                     .flex()

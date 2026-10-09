@@ -4,13 +4,14 @@
 mod repo;
 
 use gpui::{
-    Action, AnyElement, App, Axis, Context, CursorStyle, Div, ExternalPaths, Focusable, Hsla, Modifiers, MouseButton,
-    MouseDownEvent, Render, SharedString, Stateful, TextAlign, Window, canvas, div, img, prelude::*, px, relative, svg,
+    AccessibleAction, Action, AnyElement, App, Axis, Context, CursorStyle, Div, ExternalPaths, Focusable, Hsla,
+    Modifiers, MouseButton, MouseDownEvent, Orientation, Render, Role, SharedString, Stateful, TextAlign, Window,
+    canvas, div, img, prelude::*, px, relative, svg,
 };
 use runode_shared_types::color::Rgb;
 
 use super::{
-    CARD_GAP, DIVIDER_GRAB_WIDTH, Divider, NewWorkspace, RenameWorkspace, Renaming, SelectLastWorkspace,
+    CARD_GAP, DIVIDER_GRAB_WIDTH, Divider, NewWorkspace, PressDown, RenameWorkspace, Renaming, SelectLastWorkspace,
     SelectWorkspace, TAB_CLOSE_SIZE, TITLEBAR_HEIGHT, TRAFFIC_LIGHTS_WIDTH, ToggleSidebar, WindowView, background,
     cards, divider_color, drag_window,
     inline_edit::InlineEdit,
@@ -180,21 +181,17 @@ impl WindowView {
         } else {
             rust_i18n::t!("tooltip.show_sidebar")
         };
-        let tooltip = tooltip(text, Some(&ToggleSidebar), fg, bg);
+        let tooltip = tooltip(text.clone(), Some(&ToggleSidebar), fg, bg);
         icon_toggle("sidebar-toggle", SIDEBAR_ICON, 16., false, fg, bg)
+            .aria_label(text)
+            .aria_toggled(self.sidebar_visible().into())
             .absolute()
             .left(px(sidebar_toggle_left(fullscreen)))
             .top(px((TITLEBAR_HEIGHT - SIDEBAR_TOGGLE_HEIGHT) / 2.))
             .w(px(SIDEBAR_TOGGLE_WIDTH))
             .h(px(SIDEBAR_TOGGLE_HEIGHT))
             .tooltip(tooltip)
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(|this, _, window, cx| {
-                    cx.stop_propagation();
-                    this.toggle_sidebar(&ToggleSidebar, window, cx);
-                }),
-            )
+            .on_press_down(cx, |this, window, cx| this.toggle_sidebar(&ToggleSidebar, window, cx))
     }
 
     pub(super) fn render_sidebar(&self, fg: Rgb, bg: Rgb, window: &Window, cx: &mut Context<Self>) -> Stateful<Div> {
@@ -224,6 +221,9 @@ impl WindowView {
             .child(
                 div()
                     .id("workspace-list")
+                    .role(Role::TabList)
+                    .aria_label(rust_i18n::t!("workspace.list"))
+                    .aria_orientation(Orientation::Vertical)
                     .flex_1()
                     .min_h_0()
                     .overflow_y_scroll()
@@ -245,7 +245,8 @@ impl WindowView {
         let active = ix == self.active && self.mobile.is_none();
         let active_bg = hsla(bg.mix(fg, 0.10));
         let hover_bg = hsla(bg.mix(fg, 0.06));
-        let close_tooltip = tooltip(rust_i18n::t!("menu.close_workspace"), None, fg, bg);
+        let close_label = rust_i18n::t!("menu.close_workspace");
+        let close_tooltip = tooltip(close_label.clone(), None, fg, bg);
         let rgb_fg = fg;
         let fg = hsla(fg);
         let group = SharedString::from(format!("workspace-{ix}"));
@@ -259,7 +260,19 @@ impl WindowView {
                 (None, true) => slot.child(svg().path(GIT_ICON).size(px(ROW_ICON_SIZE)).text_color(fg.opacity(0.6))),
                 (None, false) => slot,
             });
-        let mark = workspace.mark(cx).map(|mark| styled_agent_mark(mark, ("workspace-agent", ix), fg, cards(cx)));
+        let mark = workspace.mark(cx);
+        // 名字之外报给辅助工具的：分支、目录，以及只画成图形的 agent 状态和响铃。
+        let a11y_description = [
+            repo.branch.as_ref().map(ToString::to_string),
+            Some(display_dir(&workspace.dir)).filter(|dir| *dir != *workspace.name),
+            mark.map(|mark| mark.describe()),
+            workspace.bell().then(|| rust_i18n::t!("workspace.bell").into_owned()),
+        ]
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>()
+        .join(" · ");
+        let mark = mark.map(|mark| styled_agent_mark(mark, ("workspace-agent", ix), fg, cards(cx)));
         let name: AnyElement = match renaming {
             Some(renaming) => renaming.edit.render(px(RENAME_FIELD_HEIGHT), rgb_fg, bg).into_any_element(),
             None => div()
@@ -313,10 +326,15 @@ impl WindowView {
         });
         let dragged =
             DraggedWorkspace { id, ix, name: workspace.name.clone(), width: self.sidebar_width(), fg, bg: active_bg };
+        let view = cx.entity().downgrade();
         div()
             // 改名时换一个 id：双击那次按下被 GPUI 记作待拖动，改名期间不挂 `on_drag`，松开时也就没人清它，
             // 换了 id 旧的元素状态连同这次按下一起丢掉，改完名不会一动鼠标就拖起整行。
             .id(if renaming.is_some() { ("workspace-renaming", ix) } else { ("workspace", ix) })
+            .role(Role::Tab)
+            .aria_label(workspace.name.clone())
+            .aria_selected(active)
+            .when(!a11y_description.is_empty(), |row| row.aria_description(a11y_description))
             .group(group.clone())
             .flex_none()
             .h(px(ROW_HEIGHT))
@@ -347,6 +365,10 @@ impl WindowView {
                     }
                 }),
             )
+            // 按下要看双击，用不了 `PressDown`；辅助工具按下时就是单击切过去，改名走菜单里的「重命名」。
+            .on_a11y_action(AccessibleAction::Click, move |_, window, cx| {
+                view.update(cx, |this, cx| this.activate_workspace(ix, window, cx)).ok();
+            })
             // 改名时在输入框里拖选文字，不能把整行拖走。
             .when(renaming.is_none(), |row| row.on_drag(dragged, |dragged, _, _, cx| cx.new(|_| dragged.clone())))
             .drag_over::<DraggedWorkspace>(move |style, dragged, _, _| {
@@ -384,16 +406,13 @@ impl WindowView {
                             .top(px((ROW_HEIGHT - TAB_CLOSE_SIZE) / 2.))
                             .invisible()
                             .group_hover(group, |close| close.visible())
+                            .aria_label(close_label)
                             .tooltip(close_tooltip)
-                            .on_mouse_down(
-                                MouseButton::Left,
-                                cx.listener(move |this, _, window, cx| {
-                                    cx.stop_propagation();
-                                    if let Some(ix) = this.workspaces.iter().position(|w| w.id == id) {
-                                        this.confirm_close_workspace(ix, window, cx);
-                                    }
-                                }),
-                            ),
+                            .on_press_down(cx, move |this, window, cx| {
+                                if let Some(ix) = this.workspaces.iter().position(|w| w.id == id) {
+                                    this.confirm_close_workspace(ix, window, cx);
+                                }
+                            }),
                     ),
             )
     }
@@ -404,6 +423,8 @@ impl WindowView {
         let fg = hsla(fg);
         div()
             .id("new-workspace")
+            .role(Role::Button)
+            .aria_label(rust_i18n::t!("workspace.new"))
             .flex_none()
             .h(px(32.))
             .m(px(6.))
@@ -417,13 +438,7 @@ impl WindowView {
             .child(div().flex_none().w(px(ROW_ICON_SIZE)).flex().justify_center().text_size(px(14.)).child("+"))
             .child(div().min_w_0().truncate().child(rust_i18n::t!("workspace.new").into_owned()))
             .tooltip(tooltip)
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(|this, _, window, cx| {
-                    cx.stop_propagation();
-                    this.new_workspace(&NewWorkspace, window, cx);
-                }),
-            )
+            .on_press_down(cx, |this, window, cx| this.new_workspace(&NewWorkspace, window, cx))
     }
 
     pub(super) fn rename_workspace(&mut self, _: &RenameWorkspace, window: &mut Window, cx: &mut Context<Self>) {

@@ -3,14 +3,14 @@
 use std::cmp::Ordering;
 
 use gpui::{
-    Action, Animation, AnimationExt, AnyElement, App, Axis, BoxShadow, Context, Div, ElementId, Hsla, MouseButton,
-    MouseDownEvent, Pixels, Render, SharedString, Stateful, StyleRefinement, TitlebarOptions, Window, div,
-    linear_color_stop, linear_gradient, point, prelude::*, px, svg,
+    AccessibleAction, Action, Animation, AnimationExt, AnyElement, App, Axis, BoxShadow, Context, Div, ElementId, Hsla,
+    MouseButton, MouseDownEvent, Pixels, Render, Role, SharedString, Stateful, StyleRefinement, TitlebarOptions,
+    Window, div, linear_color_stop, linear_gradient, point, prelude::*, px, svg,
 };
 use runode_shared_types::{agent::AgentKind, color::Rgb};
 
 use super::{
-    AGENT_MARK_WIDTH, NEW_TAB_BUTTON_WIDTH, NewTab, SelectLastTab, SelectTab, TAB_CLOSE_SIZE, TAB_MIN_WIDTH,
+    AGENT_MARK_WIDTH, NEW_TAB_BUTTON_WIDTH, NewTab, PressDown, SelectLastTab, SelectTab, TAB_CLOSE_SIZE, TAB_MIN_WIDTH,
     TAB_TRACK_HEIGHT, TITLEBAR_HEIGHT, TRAFFIC_LIGHTS_ORIGIN, WindowView,
     agents::{
         Mark, Status,
@@ -99,10 +99,12 @@ pub(super) fn drag_chip(width: Pixels, height: Pixels, label: SharedString, fg: 
         .child(div().min_w_0().truncate().child(label))
 }
 
-/// 标签和侧栏 workspace 行上的关闭按钮；什么时候显示、放在哪、点了做什么由调用方接着写。
+/// 标签和侧栏 workspace 行上的关闭按钮；什么时候显示、放在哪、点了做什么由调用方接着写，报给辅助工具的
+/// 名字（`aria_label`）也是。
 pub(super) fn close_button(id: impl Into<ElementId>, fg: Hsla) -> Stateful<Div> {
     div()
         .id(id)
+        .role(Role::Button)
         .size(px(TAB_CLOSE_SIZE))
         .rounded(px(3.))
         .flex()
@@ -115,7 +117,8 @@ pub(super) fn close_button(id: impl Into<ElementId>, fg: Hsla) -> Stateful<Div> 
 }
 
 /// 标题栏和面板上带图标的开关按钮，图标边长 `icon_size`；悬停时底色和图标变亮，`shown` 时
-/// 底色一直亮着，图标也亮一些。位置、尺寸、提示和点击由调用方接着写。
+/// 底色一直亮着，图标也亮一些。位置、尺寸、提示和点击由调用方接着写，报给辅助工具的名字
+/// （`aria_label`，通常是提示的文字）和开关状态也是。
 pub(super) fn icon_toggle(
     id: &'static str,
     icon: &'static str,
@@ -129,6 +132,7 @@ pub(super) fn icon_toggle(
     let fg = hsla(fg);
     div()
         .id(id)
+        .role(Role::Button)
         .group(id)
         .rounded(px(4.))
         .flex()
@@ -204,7 +208,15 @@ pub(super) fn styled_agent_mark(mark: Mark, id: impl Into<ElementId>, fg: Hsla, 
 
 /// 标签上的小图标：这个标签里有分屏正被别的终端里的程序操作着（分屏右上角有驱动标记）。
 fn driven_icon(id: impl Into<ElementId>, fg: Hsla) -> Stateful<Div> {
-    div().id(id).flex_none().text_size(px(15.)).line_height(px(15.)).text_color(fg.opacity(0.8)).child("⌨")
+    div()
+        .id(id)
+        .role(Role::Image)
+        .aria_label(rust_i18n::t!("driver.tab"))
+        .flex_none()
+        .text_size(px(15.))
+        .line_height(px(15.))
+        .text_color(fg.opacity(0.8))
+        .child("⌨")
 }
 
 /// 卡片样式下标签和分屏标题条上写的：名字和所在目录。前台是认得的 agent 时名字是它设的标题
@@ -321,7 +333,19 @@ impl WindowView {
         };
         let icons = cards.then(|| tab_icons(tab, fg, bg, cx));
         let label = cards.then(|| pane_label(tab.focused_view().read(cx)));
-        let close_tooltip = tooltip(rust_i18n::t!("menu.close_tab"), None, fg, bg);
+        // 报给辅助工具的名字是标签上写的标题，agent 的状态和响铃这些只画成图形的写进说明。
+        let a11y_label = label.as_ref().map_or_else(|| title.clone(), |(name, _)| name.clone());
+        let a11y_description = [
+            label.as_ref().and_then(|(_, dir)| dir.as_ref().map(ToString::to_string)),
+            mark.map(Mark::describe),
+            tab.bell.then(|| rust_i18n::t!("workspace.bell").into_owned()),
+        ]
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>()
+        .join(" · ");
+        let close_label = rust_i18n::t!("menu.close_tab");
+        let close_tooltip = tooltip(close_label.clone(), None, fg, bg);
         let driven_tooltip = tab.driven(now_ms(), cx).then(|| tooltip(rust_i18n::t!("driver.tab"), None, fg, bg));
         let fg = hsla(fg);
         let group = SharedString::from(format!("tab-{ix}"));
@@ -354,8 +378,13 @@ impl WindowView {
                     .child(side_content(shortcut.clone())),
             )
         };
+        let view = cx.entity().downgrade();
         div()
             .id(("tab", ix))
+            .role(Role::Tab)
+            .aria_label(a11y_label)
+            .aria_selected(active)
+            .when(!a11y_description.is_empty(), |tab| tab.aria_description(a11y_description))
             .group(group.clone())
             .map(|tab| {
                 if cards {
@@ -397,6 +426,10 @@ impl WindowView {
                     }
                 }),
             )
+            // 按下要看双击，用不了 `PressDown`；辅助工具按下时就是单击切过去。
+            .on_a11y_action(AccessibleAction::Click, move |_, window, cx| {
+                view.update(cx, |this, cx| this.activate(ix, window, cx)).ok();
+            })
             .on_mouse_down(
                 MouseButton::Middle,
                 cx.listener(move |this, _, window, cx| {
@@ -457,14 +490,11 @@ impl WindowView {
                     .children(driven_tooltip.map(|driven| driven_icon(("tab-driven", ix), fg).tooltip(driven)))
                     .children(mark.map(|mark| styled_agent_mark(mark, ("tab-agent", ix), fg, true)))
                     .map(|el| {
-                        let close =
-                            close_button(("tab-close", ix), fg).flex_none().tooltip(close_tooltip).on_mouse_down(
-                                MouseButton::Left,
-                                cx.listener(move |this, _, window, cx| {
-                                    cx.stop_propagation();
-                                    this.close_tab_by_id(id, window, cx);
-                                }),
-                            );
+                        let close = close_button(("tab-close", ix), fg)
+                            .flex_none()
+                            .aria_label(close_label.clone())
+                            .tooltip(close_tooltip)
+                            .on_press_down(cx, move |this, window, cx| this.close_tab_by_id(id, window, cx));
                         if compact {
                             // 平时宽度为零，悬停时才撑开；不能用 display 切换，见下面经典样式的说明。
                             el.children(tab.bell.then(|| div().flex_none().child(bell_dot()))).child(
@@ -516,14 +546,9 @@ impl WindowView {
                                     close.invisible().group_hover(group, |close| close.visible())
                                 }
                             })
+                            .aria_label(close_label)
                             .tooltip(close_tooltip)
-                            .on_mouse_down(
-                                MouseButton::Left,
-                                cx.listener(move |this, _, window, cx| {
-                                    cx.stop_propagation();
-                                    this.close_tab_by_id(id, window, cx);
-                                }),
-                            ),
+                            .on_press_down(cx, move |this, window, cx| this.close_tab_by_id(id, window, cx)),
                     )
                     .child(titled(title, mark, ("tab-agent", ix), fg).flex_1())
                     .children(driven_tooltip.map(|driven| driven_icon(("tab-driven", ix), fg).tooltip(driven)))
@@ -540,14 +565,9 @@ impl WindowView {
             .mr(px(6.))
             .w(px(NEW_TAB_BUTTON_WIDTH - 8.))
             .h(px(TAB_TRACK_HEIGHT - 4.))
+            .aria_label(rust_i18n::t!("menu.new_tab"))
             .tooltip(tooltip)
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(|this, _, window, cx| {
-                    cx.stop_propagation();
-                    this.new_tab(&NewTab, window, cx);
-                }),
-            )
+            .on_press_down(cx, |this, window, cx| this.new_tab(&NewTab, window, cx))
     }
 
     pub(super) fn render_new_tab_button(&self, fg: Rgb, bg: Rgb, cx: &mut Context<Self>) -> Stateful<Div> {
@@ -556,6 +576,8 @@ impl WindowView {
         let fg = hsla(fg);
         div()
             .id("new-tab")
+            .role(Role::Button)
+            .aria_label(rust_i18n::t!("menu.new_tab"))
             .flex_none()
             .w(px(NEW_TAB_BUTTON_WIDTH))
             .h_full()
@@ -569,12 +591,6 @@ impl WindowView {
             .hover(|button| button.bg(hover_bg).text_color(fg))
             .child("+")
             .tooltip(tooltip)
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(|this, _, window, cx| {
-                    cx.stop_propagation();
-                    this.new_tab(&NewTab, window, cx);
-                }),
-            )
+            .on_press_down(cx, |this, window, cx| this.new_tab(&NewTab, window, cx))
     }
 }
