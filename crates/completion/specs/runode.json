@@ -155,12 +155,29 @@
       ]
     },
     {
+      "name": "service",
+      "description": "Start runode at login",
+      "subcommands": [
+        {
+          "name": "install",
+          "description": "Install the login service (the host by default)",
+          "args": { "name": "kind", "isOptional": true, "suggestions": ["host", "app"] }
+        },
+        {
+          "name": "uninstall",
+          "description": "Remove the login service",
+          "args": { "name": "kind", "isOptional": true, "suggestions": ["host", "app"] }
+        },
+        { "name": "status", "description": "Show which login services are installed" }
+      ]
+    },
+    {
       "name": "help",
       "description": "Show the help",
       "args": {
         "name": "topic",
         "isOptional": true,
-        "suggestions": ["list", "read", "send", "wait", "open", "kill", "focus", "setup", "remote", "session"]
+        "suggestions": ["list", "read", "send", "wait", "open", "kill", "focus", "setup", "remote", "service", "session"]
       }
     },
     { "name": "version", "description": "Show the version" }

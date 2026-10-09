@@ -532,6 +532,7 @@ settings:
     shell: Shell
     scrollback: 回捲歷史
     clipboard: 剪貼簿
+    login: 登入時啟動
     pairing: 配對手機
     push: 即時動態
     push_key: 自己編譯的手機 App
@@ -690,6 +691,14 @@ settings:
       allow: 允許
       ask: 詢問
       deny: 拒絕
+  autostart:
+    app:
+      title: 登入時打開 Runode
+      hint: 登入這台 Mac 時自動打開 Runode 視窗。
+    host:
+      title: 登入時在背景啟動宿主
+      hint: 不開視窗，只在背景啟動終端宿主。遠端存取打開、又有配對過的手機時它一直留著，不用開著 Runode 手機也連得上。
+    failed: "沒能修改登入時啟動的設定：%{err}"
   pairing:
     title: 配對手機
     hint: 用手機上的 Runode 掃碼配對。配好的手機在遠端存取打開時能連上這台 Mac。

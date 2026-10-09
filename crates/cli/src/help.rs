@@ -10,9 +10,9 @@ Drive the terminals of the running runode app from the command line.
 Usage: runode [COMMAND]
 
 Without a command, runode opens its window. `rn` is a short name for runode:
-`rn list` is `runode list`. Commands talk to the running runode app; inside a
-runode terminal they find it through RUNODE_SOCKET, and RUNODE_SESSION names
-the terminal they run in.
+`rn list` is `runode list`. Except setup, remote and service, commands talk to
+the running runode app; inside a runode terminal they find it through
+RUNODE_SOCKET, and RUNODE_SESSION names the terminal they run in.
 
 Commands:
   list     List the terminal sessions
@@ -24,6 +24,7 @@ Commands:
   focus    Show a session's pane and bring its window to the front
   setup    Teach an agent to use runode
   remote   Pair phones for remote access and manage them
+  service  Start runode at login
   help     Show this help, or the help of a command
   version  Show the version
 
@@ -49,6 +50,7 @@ pub(crate) const PAGES: &[(&str, &str)] = &[
     ("focus", FOCUS),
     ("setup", SETUP),
     ("remote", REMOTE),
+    ("service", SERVICE),
     ("session", SESSION),
 ];
 
@@ -233,6 +235,30 @@ Options:
                    (say 127.0.0.1 for a simulator on this Mac)
       --json       With `devices`: print JSON instead of a table
   -h, --help       Show this help
+";
+
+const SERVICE: &str = "\
+Start runode at login: a launchd LaunchAgent on macOS, a systemd user service
+on Linux. Installing a service you already have replaces it.
+
+Usage: runode service install [host|app]
+       runode service uninstall [host|app]
+       runode service status
+
+Commands:
+  install    Install the login service and, for the host, start it now
+  uninstall  Stop and remove the login service
+  status     Show which login services are installed
+
+Arguments:
+  host  The terminal host without a window (`runode --host`), the default.
+        It keeps running in the background while remote-access = true and a
+        phone is paired, so the phone can connect without the app open;
+        otherwise it exits when idle
+  app   The Runode app, opened at the next login (macOS only)
+
+Options:
+  -h, --help  Show this help
 ";
 
 const SESSION: &str = "\

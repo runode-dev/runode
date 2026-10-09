@@ -39,6 +39,8 @@ enum Item {
     ConfigFiles,
     ConfigFileActions,
     Pairing,
+    /// 登录时自启的两项（宿主、app），装没装看服务文件，不是配置里的键。
+    Autostart,
 }
 
 #[derive(Clone, Copy)]
@@ -90,6 +92,8 @@ impl Page {
                 Row("language", Language),
                 Row("terminal-host", Switch),
                 Row("auto-update", Switch),
+                Section("login"),
+                Autostart,
                 Section("config_file"),
                 ConfigFileActions,
                 ConfigFiles,
@@ -188,7 +192,7 @@ impl Page {
                 Item::Palette => Some("palette"),
                 Item::AgentExclude => Some("agent-notifications-exclude"),
                 Item::ConfigFiles => Some("config-file"),
-                Item::Section(_) | Item::ConfigFileActions | Item::Pairing => None,
+                Item::Section(_) | Item::ConfigFileActions | Item::Pairing | Item::Autostart => None,
             })
             .collect()
     }
@@ -295,6 +299,7 @@ impl SettingsView {
                 Item::ConfigFiles => self.render_config_files(colors, window, cx).into_any_element(),
                 Item::ConfigFileActions => self.render_config_file_actions(colors, cx).into_any_element(),
                 Item::Pairing => self.render_pairing(colors, cx).into_any_element(),
+                Item::Autostart => self.render_autostart(colors, cx).into_any_element(),
             };
             page = page.child(element);
         }

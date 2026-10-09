@@ -532,6 +532,7 @@ settings:
     shell: Shell
     scrollback: Scrollback
     clipboard: Clipboard
+    login: Start at Login
     pairing: Pair a Phone
     push: Live Activities
     push_key: Your Own Phone App
@@ -690,6 +691,14 @@ settings:
       allow: Allow
       ask: Ask
       deny: Deny
+  autostart:
+    app:
+      title: Open Runode at login
+      hint: Opens the Runode window when you log in to this Mac.
+    host:
+      title: Run the host in the background at login
+      hint: Starts the terminal host without a window. It stays in the background while remote access is on and a phone is paired, so the phone can connect without Runode open.
+    failed: "Could not change the login setting: %{err}"
   pairing:
     title: Pair a phone
     hint: Scan a code with Runode on your phone. A paired phone can reach this Mac while remote access is on.

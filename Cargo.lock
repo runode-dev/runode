@@ -5130,6 +5130,7 @@ dependencies = [
  "objc2-user-notifications",
  "qrcode",
  "regex",
+ "runode-autostart",
  "runode-cli",
  "runode-completion",
  "runode-config",
@@ -5161,12 +5162,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "runode-autostart"
+version = "0.1.3"
+dependencies = [
+ "runode-paths",
+]
+
+[[package]]
 name = "runode-cli"
 version = "0.1.3"
 dependencies = [
  "anyhow",
  "qrcode",
  "regex",
+ "runode-autostart",
  "runode-config",
  "runode-paths",
  "runode-protocol",

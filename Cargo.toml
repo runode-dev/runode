@@ -29,6 +29,7 @@ runode-preview = { path = "crates/preview" }
 runode-agent-detect = { path = "crates/agent-detect" }
 runode-remote-access = { path = "crates/remote-access" }
 runode-update = { path = "crates/update" }
+runode-autostart = { path = "crates/autostart" }
 # libghostty-vt 的 Rust 绑定，源自 libghostty-rs（MIT 或 Apache-2.0）。依赖名沿用 libghostty-vt，
 # 包名加 runode- 前缀，免得和 crates.io 上原项目的同名 crate 撞名。
 libghostty-vt = { package = "runode-ghostty-vt", path = "crates/ghostty-vt" }

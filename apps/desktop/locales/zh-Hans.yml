@@ -532,6 +532,7 @@ settings:
     shell: Shell
     scrollback: 回滚历史
     clipboard: 剪贴板
+    login: 登录时启动
     pairing: 配对手机
     push: 实时活动
     push_key: 自己编译的手机 App
@@ -690,6 +691,14 @@ settings:
       allow: 允许
       ask: 询问
       deny: 拒绝
+  autostart:
+    app:
+      title: 登录时打开 Runode
+      hint: 登录这台 Mac 时自动打开 Runode 窗口。
+    host:
+      title: 登录时在后台启动宿主
+      hint: 不开窗口，只在后台启动终端宿主。远程访问打开、又有配对过的手机时它一直留着，不用开着 Runode 手机也连得上。
+    failed: "没能修改登录时启动的设置：%{err}"
   pairing:
     title: 配对手机
     hint: 用手机上的 Runode 扫码配对。配好的手机在远程访问打开时能连上这台 Mac。

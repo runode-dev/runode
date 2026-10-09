@@ -222,6 +222,9 @@ pub(crate) fn run(command: Command, env: &Env, out: &mut dyn Write, err: &mut dy
         }
         Command::RemoteDevices { json } => crate::remote::devices(env, json, out)?,
         Command::RemoteRevoke { device } => crate::remote::revoke(env, &device, out)?,
+        Command::ServiceInstall { kind } => crate::service::install(env, kind, out)?,
+        Command::ServiceUninstall { kind } => crate::service::uninstall(env, kind, out)?,
+        Command::ServiceStatus => crate::service::status(env, out)?,
     }
     Ok(())
 }

@@ -15,6 +15,7 @@ mod commands;
 mod help;
 mod remote;
 mod select;
+mod service;
 mod setup;
 
 use std::{ffi::OsString, io::Write, path::PathBuf};

@@ -28,6 +28,7 @@ runode-preview.workspace = true
 runode-remote-access.workspace = true
 # 自动更新：查新版本、下载、核对签名、退出时换上 .app。
 runode-update.workspace = true
+runode-autostart.workspace = true
 # 设置窗口里配对手机时画二维码。
 qrcode.workspace = true
 gpui.workspace = true

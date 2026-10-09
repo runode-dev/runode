@@ -2,6 +2,7 @@
 
 use std::{net::IpAddr, path::PathBuf, time::Duration};
 
+use runode_autostart::Kind;
 use runode_protocol::Placement;
 use runode_shared_types::input::parse_keys;
 
@@ -66,6 +67,14 @@ pub(crate) enum Command {
     RemoteRevoke {
         device: String,
     },
+    /// 装上登录时自启。
+    ServiceInstall {
+        kind: Kind,
+    },
+    ServiceUninstall {
+        kind: Kind,
+    },
+    ServiceStatus,
 }
 
 /// `send` 要打的字。
@@ -257,6 +266,27 @@ pub(crate) fn parse(args: &[String]) -> Result<Command, String> {
                     Command::RemoteRevoke { device: words.first().ok_or("remote revoke needs a DEVICE")?.clone() }
                 }
                 other => return Err(format!("remote knows pair, devices and revoke, not {other}")),
+            }
+        }
+        "service" => {
+            let (what, words) = words.split_first().ok_or("service needs install, uninstall or status")?;
+            // 不写拉起什么时是宿主。
+            let kind = |words: &[String], name: &str| -> Result<Kind, String> {
+                no_more(words, 1, name)?;
+                match words.first().map(String::as_str) {
+                    None | Some("host") => Ok(Kind::Host),
+                    Some("app") => Ok(Kind::App),
+                    Some(other) => Err(format!("{name} knows host and app, not {other}")),
+                }
+            };
+            match what.as_str() {
+                "install" => Command::ServiceInstall { kind: kind(words, "service install")? },
+                "uninstall" => Command::ServiceUninstall { kind: kind(words, "service uninstall")? },
+                "status" => {
+                    no_more(words, 0, "service status")?;
+                    Command::ServiceStatus
+                }
+                other => return Err(format!("service knows install, uninstall and status, not {other}")),
             }
         }
         other => return Err(format!("unknown command {other}")),
@@ -509,6 +539,13 @@ mod tests {
         );
         assert_eq!(parse("remote devices --json"), Ok(Command::RemoteDevices { json: true }));
         assert_eq!(parse("remote revoke 0a1b"), Ok(Command::RemoteRevoke { device: "0a1b".into() }));
+        assert_eq!(parse("service install"), Ok(Command::ServiceInstall { kind: Kind::Host }));
+        assert_eq!(parse("service install app"), Ok(Command::ServiceInstall { kind: Kind::App }));
+        assert_eq!(parse("service uninstall host"), Ok(Command::ServiceUninstall { kind: Kind::Host }));
+        assert_eq!(parse("service status"), Ok(Command::ServiceStatus));
+        assert!(parse("service install both").unwrap_err().contains("host and app"));
+        assert!(parse("service status app").unwrap_err().contains("does not take"));
+        assert!(parse("service").is_err());
         assert!(parse("remote").unwrap_err().contains("pair, devices or revoke"));
         assert!(parse("remote frob").unwrap_err().contains("not frob"));
         assert!(parse("remote revoke").unwrap_err().contains("DEVICE"));
