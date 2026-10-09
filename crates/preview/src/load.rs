@@ -72,11 +72,18 @@ pub fn load(path: &Path) -> Content {
     if let Some(format) = image_format(path) {
         return match fs::metadata(path) {
             Err(err) => Content::Unreadable(err.to_string()),
+            // 设备文件、管道的大小是 0，读起来却没有尽头（指向 /dev/zero 的 logo.png），只读普通文件。
+            Ok(meta) if !meta.is_file() => Content::Unreadable("not a regular file".to_owned()),
             Ok(meta) if meta.len() > MAX_IMAGE_BYTES => Content::TooLarge,
-            Ok(_) => match fs::read(path) {
-                Ok(bytes) => Content::Image { format, bytes },
-                Err(err) => Content::Unreadable(err.to_string()),
-            },
+            Ok(_) => {
+                // 看过大小后文件还可能变大，读的时候照样设上限，多读一个字节看超没超。
+                let mut bytes = Vec::new();
+                match File::open(path).and_then(|file| file.take(MAX_IMAGE_BYTES + 1).read_to_end(&mut bytes)) {
+                    Err(err) => Content::Unreadable(err.to_string()),
+                    Ok(_) if bytes.len() as u64 > MAX_IMAGE_BYTES => Content::TooLarge,
+                    Ok(_) => Content::Image { format, bytes },
+                }
+            }
         };
     }
     let mut bytes = Vec::new();

@@ -148,8 +148,18 @@ fn find_syntax<'a>(set: &'a SyntaxSet, path: &Path, first_line: &str) -> Option<
 /// 按文件开头的状态重新高亮，所以长行后面的行照样有颜色，只是跨行的结构（比如多行注释）
 /// 可能断开。
 pub fn highlight(path: &Path, lines: &[String], cancel: &AtomicBool) -> Option<Vec<Vec<Span>>> {
+    let syntax = find_syntax(&assets().0, path, lines.first().map_or("", String::as_str))?;
+    highlight_with(syntax, lines, cancel)
+}
+
+/// 和 `highlight` 一样逐行高亮，语言按 Markdown 代码块标的名字（`rust`、`js` 这类语言名或扩展名）找。
+pub(crate) fn highlight_code(lang: &str, lines: &[String], cancel: &AtomicBool) -> Option<Vec<Vec<Span>>> {
+    let syntax = assets().0.find_syntax_by_token(lang).filter(|syntax| syntax.name != "Plain Text")?;
+    highlight_with(syntax, lines, cancel)
+}
+
+fn highlight_with(syntax: &SyntaxReference, lines: &[String], cancel: &AtomicBool) -> Option<Vec<Vec<Span>>> {
     let (set, theme) = assets();
-    let syntax = find_syntax(set, path, lines.first().map_or("", String::as_str))?;
     let mut highlighter = HighlightLines::new(syntax, theme);
     let mut result = Vec::with_capacity(lines.len());
     let mut buffer = String::new();

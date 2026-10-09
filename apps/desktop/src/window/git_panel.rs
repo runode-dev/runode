@@ -51,6 +51,7 @@ use crate::{
     },
     ui::{
         hsla,
+        scrollbar::list_scrollbar,
         text_area::{TextArea, TextAreaEvent},
         tooltip::tooltip,
     },
@@ -352,13 +353,19 @@ impl WindowView {
         let body: AnyElement = match &project.git {
             _ if project.root.is_none() => div().flex_1().into_any_element(),
             None => panel_message(rust_i18n::t!("panel.not_repo").into_owned(), fg).into_any_element(),
-            Some(_) if multi => list(
-                panel.list.clone(),
-                cx.processor(move |this, ix: usize, window, cx| this.render_git_item(ix, fg, bg, window, cx)),
-            )
-            .flex_1()
-            .min_h_0()
-            .into_any_element(),
+            Some(_) if multi => div()
+                .flex_1()
+                .min_h_0()
+                .relative()
+                .child(
+                    list(
+                        panel.list.clone(),
+                        cx.processor(move |this, ix: usize, window, cx| this.render_git_item(ix, fg, bg, window, cx)),
+                    )
+                    .size_full(),
+                )
+                .child(list_scrollbar("git-items-scroll", panel.list.clone(), hsla(fg)))
+                .into_any_element(),
             Some(git) => {
                 let git = &git.main;
                 let list: AnyElement = if panel.rows.is_empty() {

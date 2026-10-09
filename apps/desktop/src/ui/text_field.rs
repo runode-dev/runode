@@ -423,7 +423,7 @@ pub(super) fn next_word(text: &str, offset: usize) -> usize {
 }
 
 /// 双击选中的范围：点在词上选整个词，否则选连续的同类字符。
-pub(super) fn word_range_at(text: &str, offset: usize) -> Range<usize> {
+pub(crate) fn word_range_at(text: &str, offset: usize) -> Range<usize> {
     let Some(c) = text[offset..].chars().next().or_else(|| text[..offset].chars().next_back()) else {
         return offset..offset;
     };

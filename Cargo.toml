@@ -65,6 +65,9 @@ toml = "1"
 # 语法定义取自 two-face（MIT 或 Apache-2.0），它的正则后端特性要和这里一致。
 syntect = { version = "5.3", default-features = false, features = ["parsing", "regex-fancy"] }
 two-face = { version = "0.5.2", default-features = false, features = ["syntect-fancy"] }
+# 文件预览里 Markdown 的解析（MIT），开 GFM 的表格、删除线和任务列表。不要默认特性：命令行参数
+# 解析和输出 HTML 都用不上。
+pulldown-cmark = { version = "0.13.4", default-features = false }
 # AppKit 和 Foundation 的绑定，只在 macOS 上用。不要默认特性，各 crate 按用到的类型自己开。
 objc2 = "0.6"
 objc2-foundation = { version = "0.3", default-features = false }

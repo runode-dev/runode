@@ -190,6 +190,14 @@ preview:
   close_all: 全部關閉
   keep_open: 保持開啟
   wrap: 自動換行
+  show_source: 顯示原始碼
+  show_rendered: 顯示排版
+  alert:
+    note: 備註
+    tip: 提示
+    important: 重要
+    warning: 警告
+    caution: 注意
   maximize: 放大預覽
   restore: 還原預覽
   diff:

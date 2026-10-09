@@ -2,18 +2,20 @@
 //! 斜体，再打开别的文件时被换掉；双击文件或标签把它固定下来。标签能拖动换位置，中键关掉，右键
 //! 有关闭其他、关闭右侧这些。文本用终端的字体，带行号和相对 HEAD 的改动标记，能按行选中复制，
 //! 语法高亮在后台做完再换上；图片按栏宽等比缩小；二进制、读不了、太大的文件只给一句说明。
-//! 文件在磁盘上变了就重读，没显示的标签等切过去时再看要不要重读。
+//! 文件在磁盘上变了就重读，没显示的标签等切过去时再看要不要重读。Markdown 文件默认显示排版后的
+//! 样子，在后台解析，见 `markdown`。
 //!
 //! 从 Git 面板点开的是 diff 标签，和同一个文件的普通标签分开，见 `diff`。
 //!
 //! 读文件、判断类型和高亮在 `runode_preview`，这里只管状态、后台任务和画：标签条在 `tabs`，正文的
-//! 行和图片在 `body`，行号旁的改动标记在 `marks`，自动换行在 `wrap`。
+//! 行和图片在 `body`，行号旁的改动标记在 `marks`，自动换行在 `wrap`，Markdown 的排版视图在 `markdown`。
 //!
-//! 标签条右边能打开自动换行（整个窗口一份，进存档）、把预览栏放大到盖住终端区（每个 workspace
-//! 各自的，不进存档）。
+//! 标签条右边能打开自动换行、Markdown 文件在排版和源码之间切（这两个整个窗口一份，进存档），以及
+//! 把预览栏放大到盖住终端区（每个 workspace 各自的，不进存档）。
 
 mod body;
 mod diff;
+mod markdown;
 mod marks;
 mod tabs;
 mod wrap;
@@ -51,7 +53,7 @@ use super::{
     titlebar::icon_toggle,
 };
 use crate::{
-    assets::{MAXIMIZE_ICON, MINIMIZE_ICON, WRAP_ICON},
+    assets::{CODE_ICON, MAXIMIZE_ICON, MINIMIZE_ICON, WRAP_ICON},
     config::AppConfig,
     ui::{
         actions::{Copy, SelectAll},
@@ -93,6 +95,8 @@ pub(in crate::window) struct Preview {
     /// 按着鼠标在拖选。
     selecting: bool,
     pub scroll: UniformListScrollHandle,
+    /// Markdown 排版视图的滚动位置、选区和下好的网络图片；重读时留着。
+    markdown_view: markdown::View,
     /// 每读一次换一个新的，旧的置位让后台高亮停下。后台任务拿着读的那次的这一个，读完时
     /// 和这里的不是同一个（`Arc::ptr_eq`）就说明已经换了文件或又读了一次，丢掉结果。
     cancel: Arc<AtomicBool>,
@@ -115,6 +119,8 @@ enum Loaded {
         widest: usize,
         /// 自动换行时折好的各段。
         wrap: wrap::WrapCache,
+        /// Markdown 文件在后台解析、摊平好的排版视图，解析完之前为空；重读时和高亮一样先留着上一次的。
+        markdown: Option<Arc<markdown::Doc>>,
     },
     Image(Arc<Image>),
     /// SVG 在后台画好的位图，太小的已经放大过。
@@ -157,6 +163,7 @@ impl Preview {
             selection: None,
             selecting: false,
             scroll: UniformListScrollHandle::new(),
+            markdown_view: markdown::View::new(),
             cancel: Arc::new(AtomicBool::new(false)),
             marks: HashMap::new(),
             reveal: Cell::new(None),
@@ -235,10 +242,20 @@ impl Preview {
 
     /// 换下或关掉预览时调用：显示过的图片解码结果留在 GPUI 的全局缓存里，不清掉就一直占着内存。
     fn release_image(&self, cx: &mut App) {
-        match &self.content {
-            Some(Loaded::Image(image)) => ImageSource::Image(image.clone()).remove_asset(cx),
-            Some(Loaded::Svg(image)) => cx.drop_image(image.clone(), None),
-            Some(Loaded::ImageDiff { old, new }) => {
+        if let Some(content) = &self.content {
+            content.release(cx);
+        }
+    }
+}
+
+impl Loaded {
+    /// 放掉这份内容里图片的解码结果，见 `Preview::release_image`。
+    fn release(&self, cx: &mut App) {
+        match self {
+            Loaded::Image(image) => ImageSource::Image(image.clone()).remove_asset(cx),
+            Loaded::Svg(image) => cx.drop_image(image.clone(), None),
+            Loaded::Text { markdown: Some(doc), .. } => doc.release(cx),
+            Loaded::ImageDiff { old, new } => {
                 for image in old.iter().chain(new) {
                     ImageSource::Image(image.clone()).remove_asset(cx);
                 }
@@ -322,6 +339,7 @@ fn loaded(content: Content, svg: &SvgRenderer) -> Loaded {
                 highlights: None,
                 widest,
                 wrap: wrap::WrapCache::default(),
+                markdown: None,
             }
         }
         Content::Image { format: ImageFormat::Svg, bytes } => match render_svg(svg, &bytes) {
@@ -381,6 +399,13 @@ impl WindowView {
             let handle = preview.scroll.0.borrow().base_handle.clone();
             handle.set_offset(gpui::point(px(0.), handle.offset().y));
         }
+        self.save(cx);
+        cx.notify();
+    }
+
+    /// Markdown 文件在排版和源码之间切。
+    fn toggle_preview_source(&mut self, cx: &mut Context<Self>) {
+        self.preview_source = !self.preview_source;
         self.save(cx);
         cx.notify();
     }
@@ -514,9 +539,11 @@ impl WindowView {
         preview.cancel = Arc::new(AtomicBool::new(false));
         let cancel = preview.cancel.clone();
         let path = preview.path.clone();
+        let is_markdown = runode_preview::is_markdown(&path);
         let svg = cx.svg_renderer();
         let job = cx.background_spawn({
             let path = path.clone();
+            let svg = svg.clone();
             async move {
                 let stamp = file_stamp(&path);
                 (loaded(runode_preview::load(&path), &svg), stamp)
@@ -528,14 +555,20 @@ impl WindowView {
                 .update(cx, |this, cx| {
                     let (preview, git) = this.preview_for(id, &cancel)?;
                     preview.stamp = stamp;
-                    preview.release_image(cx);
-                    let old_highlights = match preview.content.take() {
-                        Some(Loaded::Text { highlights, .. }) => highlights,
-                        _ => None,
+                    // 排版视图的旧文档在新文档解析完之前还显示着，它的图片等换上新文档时再按用没用到放。
+                    let (old_highlights, old_markdown) = match preview.content.take() {
+                        Some(Loaded::Text { highlights, markdown, .. }) => (highlights, markdown),
+                        old => {
+                            if let Some(old) = old {
+                                old.release(cx);
+                            }
+                            (None, None)
+                        }
                     };
                     let lines = match &mut content {
-                        Loaded::Text { lines, highlights, .. } => {
+                        Loaded::Text { lines, highlights, markdown, .. } => {
                             *highlights = old_highlights;
+                            *markdown = old_markdown;
                             if let Some((anchor, head)) = &mut preview.selection {
                                 let last = lines.len().saturating_sub(1);
                                 *anchor = (*anchor).min(last);
@@ -544,6 +577,9 @@ impl WindowView {
                             Some(lines.clone())
                         }
                         _ => {
+                            if let Some(old) = old_markdown {
+                                old.release(cx);
+                            }
                             preview.selection = None;
                             None
                         }
@@ -558,6 +594,34 @@ impl WindowView {
             let Some(lines) = lines else {
                 return;
             };
+            if is_markdown {
+                let doc = cx
+                    .background_spawn({
+                        let (cancel, lines, path) = (cancel.clone(), lines.clone(), path.clone());
+                        async move {
+                            let blocks = runode_preview::parse_markdown(&lines.join("\n"), &cancel)?;
+                            let dir = path.parent().unwrap_or(Path::new("/"));
+                            Some(markdown::Doc::new(blocks, dir, |path| markdown::picture(path, &svg)))
+                        }
+                    })
+                    .await;
+                this.update(cx, |this, cx| {
+                    if let Some(doc) = doc
+                        && let Some((preview, _)) = this.preview_for(id, &cancel)
+                        && let Some(Loaded::Text { markdown: slot, .. }) = &mut preview.content
+                    {
+                        let font_size = cx.global::<AppConfig>().0.preview_font_size;
+                        preview.markdown_view.replace_doc(slot.as_deref(), &doc, font_size);
+                        let doc = Arc::new(doc);
+                        if let Some(old) = slot.replace(doc.clone()) {
+                            old.release_unused(&doc, cx);
+                        }
+                        this.load_remote_images(id, &cancel, cx);
+                        cx.notify();
+                    }
+                })
+                .ok();
+            }
             let highlights = cx
                 .background_spawn({
                     let cancel = cancel.clone();
@@ -594,6 +658,13 @@ impl WindowView {
         let Some(preview) = self.preview() else {
             return;
         };
+        // 排版视图复制选中的文字；什么也没选时不复制，不会复制到看不见的源码。
+        if self.markdown_shown(preview) {
+            if let Some(text) = self.markdown_selected_text(preview) {
+                cx.write_to_clipboard(ClipboardItem::new_string(text));
+            }
+            return;
+        }
         if let (Some(lines), Some(range)) = (preview.lines(), preview.selected_lines()) {
             let text = lines.get(range).unwrap_or_default().join("\n");
             cx.write_to_clipboard(ClipboardItem::new_string(text));
@@ -601,6 +672,10 @@ impl WindowView {
     }
 
     fn select_all_preview(&mut self, _: &SelectAll, _: &mut Window, cx: &mut Context<Self>) {
+        if self.preview().is_some_and(|preview| self.markdown_shown(preview)) {
+            self.select_all_markdown(cx);
+            return;
+        }
         if let Some(preview) = self.preview_mut()
             && let Some(count) = preview.lines().map(<[String]>::len)
         {
@@ -669,21 +744,37 @@ impl WindowView {
             |id: &'static str, icon: &'static str, on: bool, text: Cow<'static, str>, action: Option<&dyn Action>| {
                 icon_toggle(id, icon, 13., on, fg, bg).flex_none().size(px(22.)).tooltip(tooltip(text, action, fg, bg))
             };
+        let is_markdown = preview.diff.is_none() && runode_preview::is_markdown(&preview.path);
+        let typeset = self.markdown_shown(preview);
         let buttons = div()
             .flex_none()
             .flex()
             .items_center()
             .gap(px(2.))
-            .child(
-                button("preview-wrap", WRAP_ICON, self.preview_wrap, rust_i18n::t!("preview.wrap"), None)
-                    .on_mouse_down(
-                        MouseButton::Left,
-                        cx.listener(|this, _, _, cx| {
-                            cx.stop_propagation();
-                            this.toggle_preview_wrap(cx);
-                        }),
-                    ),
-            )
+            .when(is_markdown, |buttons| {
+                let text =
+                    if typeset { rust_i18n::t!("preview.show_source") } else { rust_i18n::t!("preview.show_rendered") };
+                buttons.child(button("preview-source", CODE_ICON, !typeset, text, None).on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(|this, _, _, cx| {
+                        cx.stop_propagation();
+                        this.toggle_preview_source(cx);
+                    }),
+                ))
+            })
+            // 排版视图的正文总是按栏宽换行（代码块横着滚），自动换行的开关只在源码视图里有。
+            .when(!typeset, |buttons| {
+                buttons.child(
+                    button("preview-wrap", WRAP_ICON, self.preview_wrap, rust_i18n::t!("preview.wrap"), None)
+                        .on_mouse_down(
+                            MouseButton::Left,
+                            cx.listener(|this, _, _, cx| {
+                                cx.stop_propagation();
+                                this.toggle_preview_wrap(cx);
+                            }),
+                        ),
+                )
+            })
             .child(
                 button(
                     "preview-maximize",

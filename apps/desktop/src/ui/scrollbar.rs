@@ -2,7 +2,9 @@
 //! 点在滑块外面的轨道上，滑块中间跳到那里再接着拖。
 //!
 //! 放在滚动区域的父元素里、排在滚动区域后面，父元素和滚动区域一样大。位置和长度在画的时候
-//! 现读 `ScrollHandle`，滚动区域这一帧刚算好的偏移量不会晚一帧。
+//! 现读 `ScrollHandle`（`gpui::list` 的是 `ListState`，见 `list_scrollbar`），滚动区域这一帧刚算好的
+//! 偏移量不会晚一帧。`gpui::list` 没画过的项按估的高度算，滑块的长短会随着滚动慢慢变准；拖着滑块时
+//! 列表的总高度先定住，滑块不会跑开。
 //!
 //! 竖的滚动条可以带改动标记（`markers`）：按在全文里的位置画在轨道上，内容能滚时一直画着，
 //! 不等鼠标进来，滚的时候看得出哪里改了。
@@ -11,8 +13,8 @@ use std::{cell::Cell, ops::Range, rc::Rc};
 
 use gpui::{
     App, Axis, Bounds, CursorStyle, DispatchPhase, Edges, Element, ElementId, GlobalElementId, Hitbox, HitboxBehavior,
-    Hsla, InspectorElementId, IntoElement, LayoutId, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels,
-    Position, ScrollHandle, Size, Style, Window, fill, point, px, relative, size,
+    Hsla, InspectorElementId, IntoElement, LayoutId, ListState, MouseButton, MouseDownEvent, MouseMoveEvent,
+    MouseUpEvent, Pixels, Position, ScrollHandle, Size, Style, Window, fill, point, px, relative, size,
 };
 
 /// 轨道的宽度，也是能按住的宽度；滑块画在轨道中间，这么粗。
@@ -25,7 +27,66 @@ const MIN_MARKER_LENGTH: f32 = 2.;
 
 /// `handle` 所在的滚动区域在 `axis` 方向上的滚动条，颜色是 `color` 调淡。
 pub fn scrollbar(id: impl Into<ElementId>, handle: ScrollHandle, axis: Axis, color: Hsla) -> Scrollbar {
-    Scrollbar { id: id.into(), handle, axis, color, markers: Vec::new() }
+    Scrollbar { id: id.into(), handle: Handle::Scroll(handle), axis, color, markers: Vec::new() }
+}
+
+/// `gpui::list` 的竖滚动条，样子和用法同 `scrollbar`。
+pub fn list_scrollbar(id: impl Into<ElementId>, list: ListState, color: Hsla) -> Scrollbar {
+    Scrollbar { id: id.into(), handle: Handle::List(list), axis: Axis::Vertical, color, markers: Vec::new() }
+}
+
+/// 滚动条管的是哪种滚动区域。
+#[derive(Clone)]
+enum Handle {
+    Scroll(ScrollHandle),
+    List(ListState),
+}
+
+impl Handle {
+    /// 沿 `axis` 的可见长度、最多能滚多远、已经滚了多远。
+    fn extent(&self, axis: Axis) -> (Pixels, Pixels, Pixels) {
+        let along = |point: gpui::Point<Pixels>| match axis {
+            Axis::Vertical => point.y,
+            Axis::Horizontal => point.x,
+        };
+        let (bounds, max, offset) = match self {
+            Handle::Scroll(handle) => (handle.bounds(), handle.max_offset(), handle.offset()),
+            Handle::List(list) => {
+                (list.viewport_bounds(), list.max_offset_for_scrollbar(), list.scroll_px_offset_for_scrollbar())
+            }
+        };
+        let viewport = match axis {
+            Axis::Vertical => bounds.size.height,
+            Axis::Horizontal => bounds.size.width,
+        };
+        (viewport, along(max), -along(offset))
+    }
+
+    /// 沿 `axis` 滚到离开头 `scrolled` 处。
+    fn set(&self, axis: Axis, scrolled: Pixels) {
+        match self {
+            Handle::Scroll(handle) => {
+                let mut offset = handle.offset();
+                match axis {
+                    Axis::Vertical => offset.y = -scrolled,
+                    Axis::Horizontal => offset.x = -scrolled,
+                }
+                handle.set_offset(offset);
+            }
+            Handle::List(list) => list.set_offset_from_scrollbar(point(px(0.), -scrolled)),
+        }
+    }
+
+    /// 开始、结束拖滑块；列表在拖着时定住总高度。
+    fn drag(&self, dragging: bool) {
+        if let Handle::List(list) = self {
+            if dragging {
+                list.scrollbar_drag_started();
+            } else {
+                list.scrollbar_drag_ended();
+            }
+        }
+    }
 }
 
 /// 轨道上的一段改动标记：占全文的哪一段（0 到 1）和颜色。
@@ -46,7 +107,7 @@ pub fn row_markers(rows: usize, changes: impl IntoIterator<Item = (Range<usize>,
 
 pub struct Scrollbar {
     id: ElementId,
-    handle: ScrollHandle,
+    handle: Handle,
     axis: Axis,
     color: Hsla,
     markers: Vec<Marker>,
@@ -88,20 +149,8 @@ impl Scrollbar {
         self
     }
 
-    fn along(&self, point: gpui::Point<Pixels>) -> Pixels {
-        match self.axis {
-            Axis::Vertical => point.y,
-            Axis::Horizontal => point.x,
-        }
-    }
-
     fn geometry(&self, bounds: Bounds<Pixels>) -> Option<Geometry> {
-        let viewport = match self.axis {
-            Axis::Vertical => self.handle.bounds().size.height,
-            Axis::Horizontal => self.handle.bounds().size.width,
-        };
-        let max = self.along(self.handle.max_offset());
-        let scrolled = -self.along(self.handle.offset());
+        let (viewport, max, scrolled) = self.handle.extent(self.axis);
         let (track_start, track_len) = match self.axis {
             Axis::Vertical => (bounds.top(), bounds.size.height),
             Axis::Horizontal => (bounds.left(), bounds.size.width),
@@ -125,15 +174,10 @@ impl Scrollbar {
     }
 
     /// 把滑块起点挪到离轨道起点 `thumb_start` 处，滚动区域跟着滚。
-    fn scroll_to(handle: &ScrollHandle, axis: Axis, geometry: Geometry, thumb_start: Pixels) {
+    fn scroll_to(handle: &Handle, axis: Axis, geometry: Geometry, thumb_start: Pixels) {
         let room = geometry.track_len - geometry.thumb_len;
         let ratio = if room > px(0.) { (thumb_start / room).clamp(0., 1.) } else { 0. };
-        let mut offset = handle.offset();
-        match axis {
-            Axis::Vertical => offset.y = -geometry.max * ratio,
-            Axis::Horizontal => offset.x = -geometry.max * ratio,
-        }
-        handle.set_offset(offset);
+        handle.set(axis, geometry.max * ratio);
     }
 }
 
@@ -219,6 +263,7 @@ impl Element for Scrollbar {
                 if let (Some(grab), Some(geometry)) = (state.grab.get(), geometry) {
                     if event.pressed_button != Some(MouseButton::Left) {
                         state.grab.set(None);
+                        handle.drag(false);
                     } else {
                         let along = match axis {
                             Axis::Vertical => event.position.y,
@@ -234,9 +279,10 @@ impl Element for Scrollbar {
             }
         });
         window.on_mouse_event({
-            let state = state.clone();
+            let (state, handle) = (state.clone(), self.handle.clone());
             move |event: &MouseUpEvent, phase, window, _| {
                 if phase == DispatchPhase::Bubble && event.button == MouseButton::Left && state.grab.take().is_some() {
+                    handle.drag(false);
                     window.refresh();
                 }
             }
@@ -265,6 +311,7 @@ impl Element for Scrollbar {
                     grab
                 };
                 state.grab.set(Some(grab));
+                handle.drag(true);
                 cx.stop_propagation();
                 window.refresh();
             }

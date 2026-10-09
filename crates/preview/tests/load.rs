@@ -56,3 +56,16 @@ fn truncates_large_files() {
     assert!(matches!(load(&dir.join("missing.txt")), Content::Unreadable(_)));
     fs::remove_dir_all(&dir).ok();
 }
+
+/// 指向 /dev/zero 的图片：大小是 0 却读不完，不能一直读下去。
+#[cfg(unix)]
+#[test]
+fn image_symlink_to_a_device_is_not_read() {
+    let dir = std::env::temp_dir().join(format!("runode-preview-dev-{}", std::process::id()));
+    fs::create_dir_all(&dir).unwrap();
+    let logo = dir.join("logo.png");
+    fs::remove_file(&logo).ok();
+    std::os::unix::fs::symlink("/dev/zero", &logo).unwrap();
+    assert!(matches!(load(&logo), Content::Unreadable(_)));
+    fs::remove_dir_all(&dir).ok();
+}

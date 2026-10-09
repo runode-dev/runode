@@ -55,6 +55,12 @@ icons! {
     pub ARROW_DOWN_ICON = "arrow-down",
     /// 预览栏标签条右边的自动换行开关。
     pub WRAP_ICON = "wrap",
+    /// Markdown 排版视图里 GitHub 提示块（`> [!NOTE]` 这类）标题前的图标。
+    pub ALERT_NOTE_ICON = "alert-note",
+    pub ALERT_TIP_ICON = "alert-tip",
+    pub ALERT_IMPORTANT_ICON = "alert-important",
+    pub ALERT_WARNING_ICON = "alert-warning",
+    pub ALERT_CAUTION_ICON = "alert-caution",
     /// 卡片样式下分屏标题条上的图标：前台不是 agent 时的终端图标，以及右边向右、向下分屏，放大、
     /// 还原和关闭分屏的按钮。
     pub TERMINAL_ICON = "terminal",

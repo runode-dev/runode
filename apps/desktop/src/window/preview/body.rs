@@ -183,6 +183,9 @@ impl WindowView {
                     .into_any_element()
             }
             Some(Loaded::Diff(content)) => self.render_diff_body(content, width, font, font_size, fg, bg, cx),
+            Some(Loaded::Text { .. }) if self.markdown_shown(preview) => {
+                self.render_markdown(preview, width, font, fg, bg, cx)
+            }
             Some(Loaded::Text { lines, truncated, widest, wrap, .. }) => {
                 let count = lines.len() + usize::from(*truncated);
                 let digits = lines.len().to_string().len();

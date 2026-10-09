@@ -281,6 +281,8 @@ pub struct WindowView {
     preview_focus: FocusHandle,
     /// 预览的文本和 diff 按栏宽自动换行。
     preview_wrap: bool,
+    /// Markdown 文件显示源码而不是排版后的样子。
+    preview_source: bool,
     /// 文件树里显示被 git 忽略的文件。
     show_ignored: bool,
     /// 文件树里显示名字以 `.` 开头的文件。
@@ -410,6 +412,7 @@ impl WindowView {
             preview_width: None,
             preview_focus: cx.focus_handle(),
             preview_wrap: false,
+            preview_source: false,
             show_ignored: false,
             show_dotfiles: true,
             files_focus: cx.focus_handle(),

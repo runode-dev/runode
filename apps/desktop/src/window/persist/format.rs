@@ -58,6 +58,9 @@ pub struct SavedWindow {
     /// 预览的文本和 diff 自动换行；默认不换。
     #[serde(default)]
     pub preview_wrap: bool,
+    /// Markdown 文件显示源码；默认（含加这一项之前存的）显示排版后的样子。
+    #[serde(default)]
+    pub preview_source: bool,
     /// 文件树里显示被 git 忽略的文件。
     #[serde(default)]
     pub show_ignored: bool,
@@ -362,6 +365,7 @@ mod tests {
             panel_width: Some(200.),
             preview_width: Some(420.),
             preview_wrap: true,
+            preview_source: true,
             show_ignored: true,
             hide_dotfiles: true,
             git_tree: true,
@@ -399,6 +403,17 @@ mod tests {
         // 以前两栏各存一个宽度，右侧面板沿用文件树的。
         let state: State = serde_json::from_str(&old).unwrap();
         assert_eq!(state.windows[0].panel_width, Some(200.));
+    }
+
+    #[test]
+    fn reads_windows_saved_before_the_markdown_toggle() {
+        let text = serde_json::to_string(&state()).unwrap();
+        let old = text.replace(r#","preview_source":true"#, "");
+        assert_ne!(old, text);
+        // 以前存的窗口 Markdown 显示排版后的样子。
+        let state: State = serde_json::from_str(&old).unwrap();
+        assert!(!state.windows[0].preview_source);
+        assert!(state.windows[0].preview_wrap);
     }
 
     #[test]

@@ -190,6 +190,14 @@ preview:
   close_all: Close All
   keep_open: Keep Open
   wrap: Word Wrap
+  show_source: Show Source
+  show_rendered: Show Formatted
+  alert:
+    note: Note
+    tip: Tip
+    important: Important
+    warning: Warning
+    caution: Caution
   maximize: Maximize Preview
   restore: Restore Preview
   diff:
