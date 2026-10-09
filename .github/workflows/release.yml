@@ -333,7 +333,7 @@ jobs:
       - name: 安装
         env:
           RUNODE_VERSION: ${{ needs.prepare.outputs.version }}
-        run: sh scripts/install.sh
+        run: RUNODE_BIN_DIR="$HOME/.local/bin" sh scripts/install.sh
       - name: 核对版本号
         env:
           VERSION: ${{ needs.prepare.outputs.version }}

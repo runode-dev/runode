@@ -42,7 +42,7 @@ Run this in a terminal:
 curl -fsSL https://raw.githubusercontent.com/runode-dev/runode/main/scripts/install.sh | sh
 ```
 
-It installs Runode.app into Applications and links the `runode` command line into `~/.local/bin`. You can also download the dmg for your Mac yourself: [Apple silicon](https://github.com/runode-dev/runode/releases/latest/download/Runode-arm64.dmg) · [Intel](https://github.com/runode-dev/runode/releases/latest/download/Runode-x86_64.dmg). Open it and drag Runode into Applications. It is signed with a Developer ID, notarized by Apple, and keeps itself up to date.
+It installs Runode.app into Applications and links the `runode` command line into the first writable bin directory on your PATH (`~/.local/bin`, `~/bin`, `/opt/homebrew/bin`, `/usr/local/bin`; falls back to `~/.local/bin`). You can also download the dmg for your Mac yourself: [Apple silicon](https://github.com/runode-dev/runode/releases/latest/download/Runode-arm64.dmg) · [Intel](https://github.com/runode-dev/runode/releases/latest/download/Runode-x86_64.dmg). Open it and drag Runode into Applications. It is signed with a Developer ID, notarized by Apple, and keeps itself up to date.
 
 Every version is on [Releases](https://github.com/runode-dev/runode/releases). The iOS app isn't on the App Store yet; [build it from source](CONTRIBUTING.md).
 

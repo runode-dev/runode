@@ -42,7 +42,7 @@ Runode 用 [Ghostty](https://ghostty.org) 的 libghostty-vt 做终端仿真，�
 curl -fsSL https://raw.githubusercontent.com/runode-dev/runode/main/scripts/install.sh | sh
 ```
 
-它会把 Runode.app 装进「应用程序」，并把 `runode` 命令行链接到 `~/.local/bin`。也可以手动下载对应芯片的 dmg：[Apple 芯片](https://github.com/runode-dev/runode/releases/latest/download/Runode-arm64.dmg) · [Intel](https://github.com/runode-dev/runode/releases/latest/download/Runode-x86_64.dmg)。打开后把 Runode 拖进「应用程序」。安装包用 Developer ID 签名并经过 Apple 公证，之后会自动更新。
+它会把 Runode.app 装进「应用程序」，并把 `runode` 命令行链接到 PATH 上能写的 bin 目录（`~/.local/bin`、`~/bin`、`/opt/homebrew/bin`、`/usr/local/bin` 里第一个，都不行就用 `~/.local/bin`）。也可以手动下载对应芯片的 dmg：[Apple 芯片](https://github.com/runode-dev/runode/releases/latest/download/Runode-arm64.dmg) · [Intel](https://github.com/runode-dev/runode/releases/latest/download/Runode-x86_64.dmg)。打开后把 Runode 拖进「应用程序」。安装包用 Developer ID 签名并经过 Apple 公证，之后会自动更新。
 
 历次版本见 [Releases](https://github.com/runode-dev/runode/releases)。iOS app 还没上架，需要[从源码构建](CONTRIBUTING.md)。
 

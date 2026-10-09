@@ -10,13 +10,24 @@
 #
 # 环境变量：
 #   RUNODE_VERSION      装哪个版本，比如 0.3.0；不给时装最新版。
-#   RUNODE_BIN_DIR      命令行装到哪；默认 ~/.local/bin。
+#   RUNODE_BIN_DIR      命令行装到哪；默认挑 PATH 上第一个能写的 ~/.local/bin、~/bin、/opt/homebrew/bin、/usr/local/bin，
+#                       都不行时用 ~/.local/bin 并提醒加进 PATH。
 #   RUNODE_APP_DIR      （macOS）Runode.app 装到哪；默认 /Applications。
 #   RUNODE_LIB_DIR      （Linux）可执行文件放在哪，bin 目录里只放指向它的链接；默认 ~/.local/lib/runode。
 set -eu
 
 repo=runode-dev/runode
-bin_dir=${RUNODE_BIN_DIR:-$HOME/.local/bin}
+
+# 命令行默认装进已经在 PATH 上、又能写的 bin 目录，装完直接能敲 runode。
+default_bin_dir() {
+    for d in "$HOME/.local/bin" "$HOME/bin" /opt/homebrew/bin /usr/local/bin; do
+        case ":$PATH:" in
+            *":$d:"*) if [ -d "$d" ] && [ -w "$d" ]; then printf '%s' "$d"; return; fi ;;
+        esac
+    done
+    printf '%s' "$HOME/.local/bin"
+}
+bin_dir=${RUNODE_BIN_DIR:-$(default_bin_dir)}
 
 say() { printf '%s\n' "$*"; }
 fail() {
