@@ -158,9 +158,7 @@ impl Repo {
         };
         let content = match side {
             _ if file.binary || file.truncated || file.status == FileStatus::Deleted => None,
-            DiffSide::Worktree => fs::read(self.root.join(path)).ok(),
-            DiffSide::Index => git(&self.root, &["cat-file", "blob", &format!(":{}", path.display())]),
-            DiffSide::Commit { id, .. } => git(&self.root, &["cat-file", "blob", &format!("{id}:{}", path.display())]),
+            _ => self.new_bytes(path, side),
         };
         let mut new_lines = content.as_deref().and_then(split_lines).unwrap_or_default();
         let rows = match merge_rows(&file, &new_lines) {
@@ -171,6 +169,28 @@ impl Repo {
             }
         };
         Ok(Some(DiffView { file, new_lines, rows }))
+    }
+
+    /// `path` 在 `side` 这一边改完以后的全部字节：工作区的文件、暂存区或提交里的 blob。
+    /// 读不到（比如删掉了）时为空。
+    pub fn new_bytes(&self, path: &Path, side: &DiffSide) -> Option<Vec<u8>> {
+        match side {
+            DiffSide::Worktree => fs::read(self.root.join(path)).ok(),
+            DiffSide::Index => git(&self.root, &["cat-file", "blob", &format!(":{}", path.display())]),
+            DiffSide::Commit { id, .. } => git(&self.root, &["cat-file", "blob", &format!("{id}:{}", path.display())]),
+        }
+    }
+
+    /// `path` 在 `side` 这一边改之前的全部字节：工作区比的是暂存区，暂存区比的是 HEAD，提交比的是
+    /// 父提交；改了名的按原来的路径 `old_path` 找。新加的文件读不到，为空。
+    pub fn old_bytes(&self, path: &Path, old_path: Option<&Path>, side: &DiffSide) -> Option<Vec<u8>> {
+        let path = old_path.unwrap_or(path).display();
+        let spec = match side {
+            DiffSide::Worktree => format!(":{path}"),
+            DiffSide::Index => format!("HEAD:{path}"),
+            DiffSide::Commit { parent, .. } => format!("{}:{path}", parent.as_ref()?),
+        };
+        git(&self.root, &["cat-file", "blob", &spec])
     }
 
     /// `path` 在工作区里、git 没跟踪它。

@@ -105,6 +105,36 @@ impl WindowView {
                 .items_start()
                 .child(img(image.clone()).max_w_full().max_h_full())
                 .into_any_element(),
+            Some(Loaded::ImageDiff { old, new }) => {
+                // 左边改之前、右边改之后，各占一半宽，图片按半栏等比缩小；没有的那边写一句。
+                let side = |label: String, color: Rgb, image: &Option<std::sync::Arc<gpui::Image>>| {
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .flex()
+                        .flex_col()
+                        .items_center()
+                        .gap(px(8.))
+                        .child(div().text_color(hsla(color)).child(label))
+                        .child(match image {
+                            Some(image) => img(image.clone()).max_w_full().max_h_full().into_any_element(),
+                            None => div()
+                                .text_color(hsla(fg).opacity(0.5))
+                                .child(rust_i18n::t!("preview.diff.image_missing").into_owned())
+                                .into_any_element(),
+                        })
+                };
+                div()
+                    .flex_1()
+                    .min_h_0()
+                    .p(px(12.))
+                    .flex()
+                    .items_start()
+                    .gap(px(12.))
+                    .child(side(rust_i18n::t!("preview.diff.image_before").into_owned(), REMOVED, old))
+                    .child(side(rust_i18n::t!("preview.diff.image_after").into_owned(), ADDED, new))
+                    .into_any_element()
+            }
             Some(Loaded::Svg(image)) => {
                 // 宽了就按预览栏的宽度等比缩小；高了能上下滚。
                 let size = image.size(0);

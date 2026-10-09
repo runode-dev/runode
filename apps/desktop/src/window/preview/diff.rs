@@ -16,7 +16,7 @@ use std::{
 };
 
 use gpui::{
-    AnyElement, Axis, Context, ListHorizontalSizingBehavior, MouseButton, MouseDownEvent, PromptLevel, ScrollStrategy,
+    AnyElement, Axis, Context, Image, ListHorizontalSizingBehavior, MouseButton, MouseDownEvent, PromptLevel, ScrollStrategy,
     SharedString, StyledText, Window, div, prelude::*, px, svg, uniform_list,
 };
 use runode_config::PreviewClick;
@@ -25,7 +25,7 @@ use runode_preview::Span;
 use runode_shared_types::color::Rgb;
 
 use super::{
-    BODY_PADDING, Loaded, MAX_COLUMNS, Note, ROW_EXTRA_HEIGHT,
+    BODY_PADDING, Loaded, MAX_COLUMNS, Note, ROW_EXTRA_HEIGHT, gpui_format,
     body::{TEXT_RIGHT_PADDING, WRAP_SLACK, ansi_palette, highlight_style, shown_text},
     right_fade,
     wrap::{WrapCache, segment},
@@ -180,10 +180,25 @@ impl WindowView {
         let cancel = preview.cancel.clone();
         let path = preview.path.clone();
         let job = cx.background_spawn(async move {
-            repo.and_then(|repo| repo.file_view(&target.rel, target.old_rel.as_deref(), &target.side).ok().flatten())
+            let repo = repo?;
+            let view = repo.file_view(&target.rel, target.old_rel.as_deref(), &target.side).ok().flatten()?;
+            // 二进制的图片把改之前和改之后的两张并排显示；新加的没有旧图，删掉的没有新图。
+            let image = runode_preview::image_format(&target.rel).filter(|_| view.file.binary).map(|format| {
+                let old = repo.old_bytes(&target.rel, target.old_rel.as_deref(), &target.side);
+                let new = repo.new_bytes(&target.rel, &target.side);
+                let large = |bytes: &Option<Vec<u8>>| {
+                    bytes.as_ref().is_some_and(|bytes| bytes.len() as u64 > runode_preview::MAX_IMAGE_BYTES)
+                };
+                if large(&old) || large(&new) {
+                    return Loaded::Note(Note::TooLarge);
+                }
+                let image = |bytes: Vec<u8>| Arc::new(Image::from_bytes(gpui_format(format), bytes));
+                Loaded::ImageDiff { old: old.map(image), new: new.map(image) }
+            });
+            Some((view, image))
         });
         cx.spawn(async move |this, cx| {
-            let view = job.await;
+            let (view, image) = job.await.unzip();
             let texts = this
                 .update(cx, |this, cx| {
                     let (preview, git) = this.preview_for(id, &cancel)?;
@@ -193,6 +208,7 @@ impl WindowView {
                     {
                         return None;
                     }
+                    preview.release_image(cx);
                     let first = !matches!(preview.content, Some(Loaded::Diff(_)));
                     let (old_new, old_removed) = match preview.content.take() {
                         Some(Loaded::Diff(old)) => (old.new_spans, old.removed_spans),
@@ -200,6 +216,7 @@ impl WindowView {
                     };
                     let content = match view {
                         None => Loaded::Note(Note::NoChanges),
+                        Some(_) if let Some(Some(image)) = image => image,
                         Some(view) if view.file.binary => Loaded::Note(Note::Binary),
                         Some(view) if view.file.truncated => Loaded::Note(Note::DiffTooLarge),
                         // 没有块又没读到全文（空文件只改了权限这类）才说内容没变；只改了名的读得到全文，照常显示。

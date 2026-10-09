@@ -200,6 +200,9 @@ preview:
     next_change: Next Change
     discard_hunk_title: Discard this change?
     too_large: Too many changes to show
+    image_before: Before
+    image_after: After
+    image_missing: No file
 paste:
   title: The pasted text may run commands
   detail: It contains line breaks or terminal control sequences, so it may run as a command right after pasting.

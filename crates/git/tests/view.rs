@@ -185,3 +185,37 @@ fn a_large_untracked_file_is_truncated_without_reading_it() {
     assert!(view.file.truncated);
     assert!(view.file.hunks.is_empty() && view.new_lines.is_empty());
 }
+
+#[test]
+fn reads_both_sides_of_a_change() {
+    let repo = TestRepo::new("both-sides");
+    repo.commit_file("a.bin", "v1", "one");
+    let handle = read(&repo).repo();
+    let path = Path::new("a.bin");
+    let bytes = |text: &str| Some(text.as_bytes().to_vec());
+
+    // 工作区：改之前是暂存区那份，改之后是磁盘上的。
+    repo.write("a.bin", "v2");
+    assert_eq!(handle.old_bytes(path, None, &DiffSide::Worktree), bytes("v1"));
+    assert_eq!(handle.new_bytes(path, &DiffSide::Worktree), bytes("v2"));
+
+    // 暂存区：改之前是 HEAD 那份。
+    repo.git(&["add", "a.bin"]);
+    assert_eq!(handle.old_bytes(path, None, &DiffSide::Index), bytes("v1"));
+    assert_eq!(handle.new_bytes(path, &DiffSide::Index), bytes("v2"));
+
+    // 提交：改之前是父提交那份；第一个提交没有父提交，没有旧的。
+    repo.git(&["commit", "-q", "-m", "two"]);
+    let ids = repo.git(&["rev-list", "HEAD"]);
+    let ids: Vec<_> = ids.lines().collect();
+    let commit = DiffSide::Commit { id: ids[0].into(), parent: Some(ids[1].into()) };
+    assert_eq!(handle.old_bytes(path, None, &commit), bytes("v1"));
+    assert_eq!(handle.new_bytes(path, &commit), bytes("v2"));
+    assert_eq!(handle.old_bytes(path, None, &DiffSide::Commit { id: ids[1].into(), parent: None }), None);
+
+    // 改了名的按原来的路径找旧的；未跟踪的没有旧的。
+    repo.git(&["mv", "a.bin", "b.bin"]);
+    assert_eq!(handle.old_bytes(Path::new("b.bin"), Some(path), &DiffSide::Index), bytes("v2"));
+    repo.write("new.bin", "n");
+    assert_eq!(handle.old_bytes(Path::new("new.bin"), None, &DiffSide::Worktree), None);
+}

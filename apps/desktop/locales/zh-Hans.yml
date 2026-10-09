@@ -200,6 +200,9 @@ preview:
     next_change: 下一处改动
     discard_hunk_title: 丢掉这一块改动？
     too_large: 改动太多，不显示
+    image_before: 改之前
+    image_after: 改之后
+    image_missing: 没有这个文件
 paste:
   title: 粘贴的内容可能会直接执行命令
   detail: 内容含有换行或终端控制序列，粘贴后可能被当作命令立即运行。

@@ -200,6 +200,9 @@ preview:
     next_change: 下一處改動
     discard_hunk_title: 捨棄這一塊改動？
     too_large: 改動太多，不顯示
+    image_before: 改之前
+    image_after: 改之後
+    image_missing: 沒有這個檔案
 paste:
   title: 貼上的內容可能會直接執行指令
   detail: 內容含有換行或終端機控制序列，貼上後可能被當作指令立即執行。
