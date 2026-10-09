@@ -4,12 +4,19 @@
     import UIKit
 
     /// 配对页：相机铺满整屏，顶上写电脑上要做的几步，中间是取景框；扫不了码（模拟器、没给权限）时
-    /// 从底下的按钮拉出面板粘贴链接。配好后底下显示结果，点「完成」进到这台电脑。
+    /// 从底下的按钮拉出面板粘贴链接。配好后底下显示结果，点「完成」进到这台电脑。从别处打开的配对链接
+    /// 已经填在输入框里，一进来就拉出面板，用户看过要连的电脑再点「配对」。
     struct PairingView: View {
         @Bindable var model: PairingModel
         /// 关掉配对页；配对成功时带着那台电脑。
         let onFinish: (MachineRecord?) -> Void
-        @State private var showingPaste = false
+        @State private var showingPaste: Bool
+
+        init(model: PairingModel, onFinish: @escaping (MachineRecord?) -> Void) {
+            self.model = model
+            self.onFinish = onFinish
+            _showingPaste = State(initialValue: !model.linkText.isEmpty)
+        }
 
         var body: some View {
             VStack(alignment: .leading, spacing: 0) {
@@ -183,7 +190,8 @@
         }
     }
 
-    /// 从底下拉出的面板：粘贴电脑终端里二维码下面那行链接。
+    /// 从底下拉出的面板：粘贴电脑终端里二维码下面那行链接。链接认得出时列出要连的电脑名和地址，用户确认
+    /// 是自己的电脑后点「配对」；粘贴进来也不直接配。
     private struct PasteLinkSheet: View {
         @Bindable var model: PairingModel
         @Environment(\.dismiss) private var dismiss
@@ -207,13 +215,25 @@
                     .focused($focused)
                     .padding(12)
                     .background(Color(.tertiarySystemFill), in: .inner)
+                if let invitation = model.invitation {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Label(invitation.hostName, systemImage: "desktopcomputer")
+                            .font(.subheadline.weight(.semibold))
+                        Text(verbatim: invitation.addresses.map { address in
+                            address.contains(":") ? "[\(address)]:\(invitation.port)" : "\(address):\(invitation.port)"
+                        }.joined(separator: ", "))
+                            .font(.footnote.monospaced())
+                            .foregroundStyle(.secondary)
+                        Text("确认这是你自己的电脑再配对。")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
+                    .accessibilityElement(children: .combine)
+                }
                 HStack(spacing: 12) {
                     PasteButton(payloadType: String.self) { strings in
                         guard let link = strings.first else { return }
-                        Task { @MainActor in
-                            model.linkText = link
-                            submit()
-                        }
+                        Task { @MainActor in model.linkText = link }
                     }
                     .labelStyle(.iconOnly)
                     .buttonBorderShape(.capsule)

@@ -363,9 +363,17 @@ private let secondToken = Data([0x01, 0x02])
         #expect(app.pairing == nil)
     }
 
-    @Test func pairingLinksOpenPairing() async throws {
+    /// 配对链接只填进配对页，不自动配：任何网页、短信都能发这种链接。
+    @Test func pairingLinksOpenPairingWithoutPairing() async throws {
         let app = await app()
-        app.open(url: try #require(URL(string: "runode://pair?v=1&name=MacBook")))
-        #expect(app.pairing != nil)
+        let fp = Base64URL.encode(Data(repeating: 1, count: 32))
+        let secret = Base64URL.encode(Data(repeating: 2, count: 32))
+        let text = "runode://pair?v=1&name=evil&fp=\(fp)&secret=\(secret)&port=7866&addr=203.0.113.9&exp=4000000000"
+        app.open(url: try #require(URL(string: text)))
+        let pairing = try #require(app.pairing)
+        #expect(pairing.linkText == text)
+        #expect(pairing.invitation?.hostName == "evil")
+        try await Task.sleep(for: .milliseconds(20))
+        #expect(pairing.phase == .idle)
     }
 }

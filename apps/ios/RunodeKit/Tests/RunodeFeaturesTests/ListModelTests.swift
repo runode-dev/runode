@@ -507,6 +507,19 @@ extension LinkState {
         #expect(paired.count == 1)
     }
 
+    /// 配对前给用户看的电脑名和地址从输入框里的链接解析出来；不是配对链接时没有。
+    @Test func theInvitationIsShownBeforePairing() {
+        let model = PairingModel(pairing: FakePairing { _ in machineRecord() }, deviceName: "x", onPaired: { _ in })
+        #expect(model.invitation == nil)
+        model.linkText = link()
+        #expect(model.invitation?.hostName == "homelab")
+        #expect(model.invitation?.addresses == ["192.168.1.20"])
+        #expect(model.invitation?.port == 7866)
+        #expect(model.phase == .idle)
+        model.linkText = "https://example.com"
+        #expect(model.invitation == nil)
+    }
+
     @Test func badAndExpiredLinksFailWithoutPairing() async {
         let model = PairingModel(
             pairing: FakePairing { _ in
@@ -764,6 +777,35 @@ extension LinkState {
         #expect(picker.path == "/Users/ethan")
         await picker.retry()
         #expect(link.sent.last.map { if case .listDirs(_, path) = $0 { true } else { false } } == true)
+        #expect(picker.errorMessage == nil)
+    }
+
+    /// 连接断了：在等的回话不会来了，不再转圈、报出错；断着时不发请求，重新连上后能重试。
+    @Test func losingTheConnectionStopsTheSpinner() async {
+        let model = SessionListModel(machine: machineRecord(), link: link)
+        model.handle(.ready(generation: 1))
+        model.beginNewWorkspace()
+        let picker = try! #require(model.directoryPicker)
+        await picker.load(nil)
+        #expect(picker.isLoading)
+        model.handle(.state(.waiting(reason: "断了", retryAt: .now)))
+        #expect(!picker.isLoading)
+        #expect(picker.errorMessage == "未连接")
+        // 先前那次请求晚到的回话不认。
+        guard case .listDirs(let req, nil)? = link.sent.last else {
+            Issue.record("expected list_dirs for home, got \(link.sent)")
+            return
+        }
+        #expect(!picker.handle(.dirs(req: req, path: "/Users/ethan", dirs: [], truncated: false)))
+        link.clearSent()
+        await picker.retry()
+        #expect(link.sent.isEmpty)
+        #expect(!picker.isLoading)
+        #expect(picker.errorMessage == "未连接")
+        model.handle(.ready(generation: 2))
+        await picker.retry()
+        #expect(link.sent.last.map { if case .listDirs(_, nil) = $0 { true } else { false } } == true)
+        #expect(picker.isLoading)
         #expect(picker.errorMessage == nil)
     }
 

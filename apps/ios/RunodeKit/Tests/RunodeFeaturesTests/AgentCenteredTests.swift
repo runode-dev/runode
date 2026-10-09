@@ -255,9 +255,7 @@ private func workspace(_ index: UInt32, _ name: String, tabs: [[SessionId]], act
             Issue.record("expected send_keys enter, got \(link.sent)")
             return
         }
-        #expect(reply.isSending)
         #expect(reply.handle(.done(req: req)))
-        #expect(!reply.isSending)
         #expect(reply.deliveredCount == 1)
         // 别人的回话不收。
         #expect(!reply.handle(.done(req: req + 100)))
@@ -299,6 +297,43 @@ private func workspace(_ index: UInt32, _ name: String, tabs: [[SessionId]], act
         #expect(reply.errorMessage == nil)
         reply.connectionLost()
         #expect(reply.failedCount == 2)
+    }
+
+    /// 断着时不发：按失败报出来，草稿留着；列表重新连上后照常发。
+    @Test func nothingIsSentWhileDisconnected() async {
+        let model = SessionListModel(machine: machineRecord(), link: link)
+        let reply = model.quickReply(for: waiting)
+        #expect(!reply.isConnected)
+        reply.draft = "用方案 2"
+        await reply.sendDraft()
+        await reply.press(QuickKey.standard[0])
+        #expect(link.sent.isEmpty)
+        #expect(reply.draft == "用方案 2")
+        #expect(reply.failedCount == 2)
+        #expect(reply.errorMessage == "未连接")
+        model.handle(.ready(generation: 1))
+        #expect(reply.isConnected)
+        link.clearSent()
+        await reply.sendDraft()
+        #expect(reply.draft.isEmpty)
+        #expect(link.sent.contains { if case .paste(_, waiting, "用方案 2") = $0 { true } else { false } })
+        #expect(reply.errorMessage == nil)
+        model.handle(.state(.waiting(reason: "断了", retryAt: .now)))
+        #expect(!reply.isConnected)
+    }
+
+    /// 终端页底部的快速回复跟着终端页的连接：连上（`ready`）之前、断开以后都不发。
+    @Test func terminalRepliesFollowTheTerminalsConnection() async {
+        let terminal = TerminalModel(sessionId: waiting, title: "claude", link: link, onClose: { _ in })
+        #expect(!terminal.quickReply.isConnected)
+        terminal.handle(.ready(generation: 1))
+        #expect(terminal.quickReply.isConnected)
+        terminal.handle(.state(.waiting(reason: "断了", retryAt: .now)))
+        #expect(!terminal.quickReply.isConnected)
+        link.clearSent()
+        await terminal.quickReply.press(QuickKey.standard[0])
+        #expect(link.sent.isEmpty)
+        #expect(terminal.quickReply.failedCount == 1)
     }
 
     /// 列表上的快速回复：不用连上会话，送到后刷新这个会话的预览。

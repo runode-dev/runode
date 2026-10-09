@@ -88,8 +88,13 @@ public final class TLSChannel: FrameTransport {
             }, queue)
         let tcp = NWProtocolTCP.Options()
         tcp.noDelay = true
+        // 手机静默消失（锁屏后被挂起、切网）时一分钟左右发现，和电脑那边的 keepalive 一致：空闲的连接靠
+        // keepalive（15 + 10 × 4 秒），有数据没送到的靠重传超时。
         tcp.enableKeepalive = true
         tcp.keepaliveIdle = 15
+        tcp.keepaliveInterval = 10
+        tcp.keepaliveCount = 4
+        tcp.connectionDropTime = 60
         let connection = NWConnection(to: target.endpoint, using: NWParameters(tls: tls, tcp: tcp))
         let channel = TLSChannel(connection: connection, queue: queue)
         let once = OnceFlag()
@@ -125,6 +130,11 @@ public final class TLSChannel: FrameTransport {
             }
         } onCancel: {
             connection.cancel()
+        }
+        // 路径不可用（Wi-Fi 断了、换了网）时连接不会自己报错，卡着的 `receive` 等不到结尾：关掉它，让主循环
+        // 进入重连。握手时不装，免得把还在试的连接当成被取消。
+        connection.viabilityUpdateHandler = { viable in
+            if !viable { connection.cancel() }
         }
         return channel
     }

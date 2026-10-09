@@ -404,7 +404,7 @@ public final class SessionListModel {
     /// 这个会话的快速回复，第一次要时建好。送到以后刷新它的预览。
     public func quickReply(for id: SessionId) -> QuickReplyModel {
         if let existing = quickReplies[id] { return existing }
-        let model = QuickReplyModel(sessionId: id, link: link) { [weak self] id in
+        let model = QuickReplyModel(sessionId: id, link: link, connected: connected) { [weak self] id in
             self?.requestPreview(id)
         }
         quickReplies[id] = model
@@ -579,12 +579,17 @@ public final class SessionListModel {
                 for reply in quickReplies.values {
                     reply.connectionLost()
                 }
+                directoryPicker?.connectionLost()
                 // 回话随这条连接一起丢了，等下去按钮会一直灰着。
                 pendingSpawn = nil
                 isSpawning = false
             }
         case .ready:
             connected = true
+            for reply in quickReplies.values {
+                reply.isConnected = true
+            }
+            directoryPicker?.isConnected = true
             listCurrent = false
             watching = []
             refresh()

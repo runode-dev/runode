@@ -334,7 +334,7 @@ import Testing
         }
         model.handle(.message(.done(req: req)))
         #expect(model.quickReply.deliveredCount == 1)
-        #expect(model.errorMessage == nil)
+        #expect(model.phase == .live)
         model.handle(.message(.meta(id: sessionA, meta: SessionMeta(agent: Agent(kind: AgentKind("claude"), state: .working)))))
         #expect(!model.isAwaitingAnswer)
     }
@@ -362,6 +362,24 @@ import Testing
         // 重新连上时照样再问一次，但不回到「连接中」，印章不闪。
         other.handle(.ready(generation: 2))
         #expect(other.phase == .gone("no session"))
+    }
+
+    /// 等 `Attached` 时，只有宿主说没有这个会话才算结束：同一条连接上会话列表读预览出错时，宿主回的也是
+    /// 不带编号、带着这个会话的 `Error`。
+    @Test func onlyNoSessionErrorsEndTheSession() {
+        let model = model()
+        model.handle(.ready(generation: 1))
+        model.handle(.message(.error(req: nil, id: sessionA, message: "session \(sessionA) did not answer")))
+        model.handle(.message(.error(req: nil, id: sessionA, message: "failed to read the screen: busy")))
+        model.handle(.message(.error(req: nil, id: sessionA, message: "too many requests are waiting for an answer")))
+        #expect(model.phase == .connecting)
+        #expect(!model.isEnded)
+        // 重放来了照常接上。
+        model.handle(attached(channel: 5))
+        #expect(model.phase == .replaying)
+        // 连上以后的 `no session` 是读预览之类的回话，订阅还在，也不算。
+        model.handle(.message(.error(req: nil, id: sessionA, message: "no session \(sessionA)")))
+        #expect(model.phase == .replaying)
     }
 
     @Test func openingSubscribesAndClosingHandsBack() async {

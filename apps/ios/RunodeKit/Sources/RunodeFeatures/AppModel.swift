@@ -215,7 +215,8 @@ public final class AppModel {
         openTerminal(machine: link.machine, session: session)
     }
 
-    /// 打开配对页；`link` 是从别处（比如系统打开的 `runode://pair` 链接）带来的配对链接。
+    /// 打开配对页；`link` 是从别处（比如系统打开的 `runode://pair` 链接）带来的配对链接，只填进输入框，
+    /// 由用户看过要配的电脑后点「配对」：任何网页、短信都能发这种链接，自动配对会让手机连上别人的主机。
     public func startPairing(link: String? = nil) {
         let model = PairingModel(pairing: dependencies.pairing, deviceName: settings.deviceName) {
             [weak self] machine in
@@ -225,9 +226,6 @@ public final class AppModel {
             model.linkText = link
         }
         pairing = model
-        if link != nil {
-            Task { await model.submitLink() }
-        }
     }
 
     public func sessionList(for machineId: UUID) -> SessionListModel? {

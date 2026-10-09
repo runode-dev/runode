@@ -526,8 +526,11 @@
                         .font(.subheadline.weight(.semibold))
                         .foregroundStyle(.orange)
                 }
-                keys
-                draftField
+                Group {
+                    keys
+                    draftField
+                }
+                .disabled(!model.isConnected)
                 if let error = model.errorMessage {
                     Label(error, systemImage: "exclamationmark.triangle.fill")
                         .font(.footnote)

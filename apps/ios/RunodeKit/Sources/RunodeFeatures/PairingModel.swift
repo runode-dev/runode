@@ -35,6 +35,11 @@ public final class PairingModel {
         self.onPaired = onPaired
     }
 
+    /// 输入框里的链接解析出来的邀请，配对前给用户看要连的电脑；不是配对链接时为空。
+    public var invitation: PairingInvitation? {
+        try? PairingInvitation.parse(linkText)
+    }
+
     public var isBusy: Bool {
         if case .pairing = phase { return true }
         return false

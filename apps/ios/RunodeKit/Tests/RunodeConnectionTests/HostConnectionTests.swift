@@ -1,6 +1,7 @@
 import CryptoKit
 import Foundation
 import RunodeProtocol
+import Synchronization
 import Testing
 
 @testable import RunodeConnection
@@ -154,6 +155,33 @@ import Testing
         #expect(await waitReady(&events) != nil)
         #expect(supply.requestedTargets == ["192.168.1.20", "192.168.1.20"])
         await link.stop()
+    }
+
+    /// 握手中途 `stop`（App 退到后台）：卡在门禁上读的那一步也要停下，回到 `idle`，不一直停在「连接中」。
+    @Test func stoppingDuringTheHandshakeGivesUp() async throws {
+        let transport = FakeTransport()
+        supply.add(transport)
+        let link = connection()
+        let events = await link.events()
+        let states = Mutex<[LinkState]>([])
+        let watcher = Task {
+            for await event in events {
+                if case .state(let state) = event { states.withLock { $0.append(state) } }
+            }
+        }
+        defer { watcher.cancel() }
+        await link.start()
+        // 宿主一直不发 challenge：连接开好以后停。
+        while supply.requestedTargets.isEmpty {
+            try await Task.sleep(for: .milliseconds(5))
+        }
+        await link.stop()
+        // 门禁的超时是 10 秒，两秒内回到 `idle` 说明是取消让它停下的。
+        func stopped() -> Bool { states.withLock { $0.drop { $0 != .connecting }.contains(.idle) } }
+        for _ in 0..<200 where !stopped() {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(stopped())
     }
 
     @Test func onlyRateLimitsAreRetried() {

@@ -101,8 +101,7 @@ public actor HostConnection: HostLink {
     }
 
     /// 要连接。上次是不能重试的失败（比如 `unknown_device`：电脑上撤销了这台设备）时不自动再连：
-    /// 电脑把这类失败也计入限速，App 每回前台就试一次很快会变成 `rate_limited`。要用户点「重试」
-    /// （`reconnectNow`）才再试。
+    /// 再试也一样，其中签名不对、口令作废电脑还会计入限速。要用户点「重试」（`reconnectNow`）才再试。
     public func start() {
         if case .failed = state { return }
         wanted = true
@@ -233,6 +232,16 @@ public actor HostConnection: HostLink {
 
     private func handshake(with target: TransportTarget, key: StoredDeviceKey) async throws -> Session {
         let transport = try await open(target, machine.fingerprint)
+        // 握手中途 `stop`：超时任务跟着取消、不会关连接，卡着的读不响应取消，这里关掉连接让它报错。
+        return try await withTaskCancellationHandler {
+            try await admit(over: transport, key: key)
+        } onCancel: {
+            transport.close()
+        }
+    }
+
+    /// 在开好的连接上走门禁、`Hello` 和 `Welcome`。
+    private func admit(over transport: any FrameTransport, key: StoredDeviceKey) async throws -> Session {
         do {
             let outcome = try await GateClient.run(
                 over: transport, credential: .auth(deviceId: machine.deviceId, key: key))

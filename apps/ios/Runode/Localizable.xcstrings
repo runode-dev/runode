@@ -5653,6 +5653,29 @@
         }
       }
     },
+    "确认这是你自己的电脑再配对。" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Make sure this is your own computer before pairing."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "确认这是你自己的电脑再配对。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "確認這是你自己的電腦再配對。"
+          }
+        }
+      }
+    },
     "空闲" : {
       "extractionState" : "manual",
       "localizations" : {

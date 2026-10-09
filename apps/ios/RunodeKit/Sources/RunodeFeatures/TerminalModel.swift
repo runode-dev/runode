@@ -81,7 +81,6 @@ public final class TerminalModel {
     public private(set) var keyboardVisible = false
     /// 终端的背景色，导航栏、空白区跟着它。
     public private(set) var background = TermSettings.default.background
-    public var errorMessage: String?
     /// 在等用户确认结束会话。
     public var isConfirmingKill = false
     /// 底部的快速回复：agent 停下来等回答时出现。
@@ -136,7 +135,7 @@ public final class TerminalModel {
         self.autoFit = ownerHint == .none
         self.onOpen = onOpen
         self.onClose = onClose
-        self.quickReply = QuickReplyModel(sessionId: sessionId, link: link)
+        self.quickReply = QuickReplyModel(sessionId: sessionId, link: link, connected: false)
     }
 
     /// 现在按手机屏幕决定尺寸。
@@ -375,6 +374,7 @@ public final class TerminalModel {
             }
         case .ready(let generation):
             self.generation = generation
+            quickReply.isConnected = true
             guard everAttached else { return attach() }
             // 不改视图的显示方式：宿主报了 owner 或者等不到时 `applySizeMode` 再定。
             if sizePreference == .automatic {
@@ -414,7 +414,9 @@ public final class TerminalModel {
             do {
                 terminal = try VTerminal(size: attached.size, settings: settings)
             } catch {
-                errorMessage = String(localized: "建不了终端：\(String(describing: error))")
+                // 没有 VT 就画不出、也打不了字：按结束了处理，页面盖上印章、写出原因，不停在「连接中」。
+                awaitingAttach = false
+                phase = .gone(String(localized: "建不了终端：\(String(describing: error))"))
                 return
             }
             channel = attached.channel
@@ -462,13 +464,11 @@ public final class TerminalModel {
                 autoFit = mine
                 applySizeMode(wasFitting: wasFitting)
             }
-        case .error(_, _, let message):
-            if awaitingAttach {
-                awaitingAttach = false
-                phase = .gone(message)
-            } else {
-                errorMessage = message
-            }
+        case .error(_, _, let message) where awaitingAttach && message.hasPrefix("no session"):
+            // 宿主说没有这个会话。同一条连接上会话列表读预览出错（读屏幕超时之类）也回不带编号、带着
+            // 会话的 `Error`，那些不算会话结束。
+            awaitingAttach = false
+            phase = .gone(message)
         default:
             break
         }

@@ -17,6 +17,8 @@ public final class DirectoryPickerModel {
     public private(set) var truncated = false
     public private(set) var isLoading = false
     public private(set) var errorMessage: String?
+    /// 连着电脑。会话列表在连接断开、连上时改它；只在连着时建选择器，所以一开始为真。
+    public internal(set) var isConnected = true
     /// 显示以 `.` 开头的目录。
     public var showsHidden = false
 
@@ -43,9 +45,13 @@ public final class DirectoryPickerModel {
 
     /// 列一个目录，`path` 为空时是家目录。
     public func load(_ path: String?) async {
+        requested = path
+        guard isConnected else {
+            errorMessage = String(localized: "未连接")
+            return
+        }
         let req = await link.nextRequestId()
         pending = req
-        requested = path
         isLoading = true
         errorMessage = nil
         link.send(.listDirs(req: req, path: path))
@@ -70,6 +76,15 @@ public final class DirectoryPickerModel {
     /// 上次没列成：再列一次同一个目录。
     public func retry() async {
         await load(requested)
+    }
+
+    /// 连接断了：在等的回话不会来了，不再转圈，报出错，重新连上后可以重试。
+    func connectionLost() {
+        isConnected = false
+        guard pending != nil else { return }
+        pending = nil
+        isLoading = false
+        errorMessage = String(localized: "未连接")
     }
 
     /// 是给自己的回话时处理掉并返回真。

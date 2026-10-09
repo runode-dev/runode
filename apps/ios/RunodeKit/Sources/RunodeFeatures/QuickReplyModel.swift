@@ -29,15 +29,15 @@ public struct QuickKey: Hashable, Sendable, Identifiable {
 
 /// 一个会话的快速回复：按键经 `send_keys`、文字经 `paste` 加 `send_keys ["enter"]` 发给宿主，不用
 /// 连上会话（宿主按它那份 VT 当前的模式编码）。宿主回 `Done` 算送到，回带着请求编号的 `Error` 算
-/// 失败。会话列表上等回答的每一行、终端页底部各有一个。
+/// 失败。会话列表上等回答的每一行、终端页底部各有一个，连接断开、连上由它们告诉这里。
 @Observable
 @MainActor
 public final class QuickReplyModel {
     public let sessionId: SessionId
     /// 文本框里的字。
     public var draft = ""
-    /// 还有请求没回话。
-    public private(set) var isSending = false
+    /// 连着电脑：断开时视图禁用回复栏，按键和发送也不发。
+    public internal(set) var isConnected: Bool
     /// 每送到一批加一，视图据此轻震一下。
     public private(set) var deliveredCount = 0
     /// 每失败一批加一，视图据此震一下失败的样子。
@@ -50,9 +50,13 @@ public final class QuickReplyModel {
     @ObservationIgnored private let onDelivered: @MainActor (SessionId) -> Void
 
     /// `onDelivered` 在一批请求都送到后调，比如刷新这个会话的预览。
-    public init(sessionId: SessionId, link: any HostLink, onDelivered: @escaping @MainActor (SessionId) -> Void = { _ in }) {
+    public init(
+        sessionId: SessionId, link: any HostLink, connected: Bool = true,
+        onDelivered: @escaping @MainActor (SessionId) -> Void = { _ in }
+    ) {
         self.sessionId = sessionId
         self.link = link
+        self.isConnected = connected
         self.onDelivered = onDelivered
     }
 
@@ -62,6 +66,7 @@ public final class QuickReplyModel {
 
     /// 按一个键。
     public func press(_ key: QuickKey) async {
+        guard ensureConnected() else { return }
         let req = await link.nextRequestId()
         begin([req])
         link.send(.sendKeys(req: req, id: sessionId, keys: [key.key]))
@@ -70,7 +75,7 @@ public final class QuickReplyModel {
     /// 把文本框里的字粘贴进去再按回车。
     public func sendDraft() async {
         let text = draft
-        guard canSendDraft else { return }
+        guard canSendDraft, ensureConnected() else { return }
         draft = ""
         let paste = await link.nextRequestId()
         let enter = await link.nextRequestId()
@@ -79,10 +84,17 @@ public final class QuickReplyModel {
         link.send(.sendKeys(req: enter, id: sessionId, keys: ["enter"]))
     }
 
+    /// 断着时 `HostConnection` 会把消息丢掉：不发，按失败报出来，草稿留着。
+    private func ensureConnected() -> Bool {
+        guard !isConnected else { return true }
+        failedCount += 1
+        errorMessage = String(localized: "未连接")
+        return false
+    }
+
     private func begin(_ requests: [UInt32]) {
         if pending.isEmpty { batchFailed = false }
         pending.formUnion(requests)
-        isSending = true
         errorMessage = nil
     }
 
@@ -100,7 +112,6 @@ public final class QuickReplyModel {
             return false
         }
         if pending.isEmpty {
-            isSending = false
             if batchFailed {
                 failedCount += 1
             } else {
@@ -113,9 +124,9 @@ public final class QuickReplyModel {
 
     /// 连接断了：还没回话的请求不会再有回音，算失败。
     public func connectionLost() {
+        isConnected = false
         guard !pending.isEmpty else { return }
         pending.removeAll()
-        isSending = false
         failedCount += 1
         errorMessage = String(localized: "连接断了，回复可能没送到")
     }
