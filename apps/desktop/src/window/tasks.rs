@@ -164,7 +164,7 @@ impl WindowView {
     }
 
     /// 按了绑着 `run_task:名字` 的快捷键：现请宿主列一遍终端目录的命令（菜单没打开过时还没列），按菜单里
-    /// 的顺序找第一条叫这个名字的，像在菜单里点它一样跑；没有时记日志。
+    /// 的顺序找第一条叫这个名字的，像在菜单里点它一样跑；没有或者列不出来时响一声、记日志。
     pub(super) fn run_named_task(&mut self, action: &RunNamedTask, window: &mut Window, cx: &mut Context<Self>) {
         let root = self.project_dir(cx);
         let name = action.0.clone();
@@ -173,21 +173,27 @@ impl WindowView {
             async move { host_client::list_project_tasks(root) }
         });
         cx.spawn_in(window, async move |this, cx| {
-            let sources = match job.await {
-                Ok(sources) => sources,
-                Err(err) => return tracing::warn!("failed to list the tasks in {}: {err:#}", root.display()),
+            let found = match job.await {
+                Ok(sources) => sources.iter().find_map(|source| {
+                    let task = source.tasks.iter().find(|task| task.name == name)?;
+                    Some(RunTask {
+                        command: task.command.clone(),
+                        dir: Some(source.project.clone().unwrap_or(root.clone())),
+                    })
+                }),
+                Err(err) => {
+                    tracing::warn!("failed to list the tasks in {}: {err:#}", root.display());
+                    None
+                }
             };
-            let found = sources.iter().find_map(|source| {
-                let task = source.tasks.iter().find(|task| task.name == name)?;
-                Some(RunTask {
-                    command: task.command.clone(),
-                    dir: Some(source.project.clone().unwrap_or(root.clone())),
-                })
-            });
-            let Some(task) = found else {
-                return tracing::warn!("no task named {name:?} in {}", root.display());
-            };
-            this.update_in(cx, |this, window, cx| this.run_task(&task, window, cx)).ok();
+            this.update_in(cx, |this, window, cx| match found {
+                Some(task) => this.run_task(&task, window, cx),
+                None => {
+                    tracing::warn!("no task named {name:?} in {}", root.display());
+                    window.play_system_bell();
+                }
+            })
+            .ok();
         })
         .detach();
     }
@@ -261,7 +267,7 @@ impl WindowView {
     }
 
     /// 命令菜单里自己加的命令行尾按了删除：先从菜单里拿掉，菜单开着不关，再在后台改文件，改完重列；
-    /// 改不了时记日志，重列后它又回来。
+    /// 改不了时记日志，重列后它又回来。改好了再去掉绑在它名字上的快捷键，别的份里还有同名命令时留着。
     pub(super) fn delete_task(&mut self, action: &DeleteTask, _: &mut Window, cx: &mut Context<Self>) {
         let project = &mut self.workspace_mut().project;
         let sources = project.tasks.iter_mut().flat_map(|(_, sources)| sources.iter_mut());
@@ -270,21 +276,30 @@ impl WindowView {
         }
         let (items, _) = self.tasks_menu_items(cx);
         self.replace_menu_items(items, cx);
-        // 快捷键按名字找命令，删了命令就一起去掉，同名的别的命令也就不再有这个键。
-        if let Err(err) = custom::write_task_keybind(&action.name, None, cx) {
-            tracing::warn!("could not remove the task shortcut: {err}");
-        }
         let id = self.workspace().id;
         let DeleteTask { project, name } = action.clone();
-        let job = cx.background_spawn(async move {
-            let file = Dirs::from_env().tasks_file().ok_or("no home directory")?;
-            custom::write_task(&file, (project.as_deref(), &name), None)
+        let job = cx.background_spawn({
+            let name = name.clone();
+            async move {
+                let file = Dirs::from_env().tasks_file().ok_or("no home directory")?;
+                custom::write_task(&file, (project.as_deref(), &name), None)?;
+                Ok::<_, String>(custom::task_named_elsewhere(&file, &name, project.as_deref()))
+            }
         });
         cx.spawn(async move |this, cx| {
-            if let Err(err) = job.await {
-                tracing::warn!("could not delete the task: {err}");
-            }
+            let deleted = job.await;
             this.update(cx, |this, cx| {
+                // 快捷键按名字找命令，删了命令就一起去掉；别的份里还有同名的命令时它还在用，留着。
+                match deleted {
+                    Ok(false) => {
+                        let change = custom::TaskKeybind::Rebind { old: Some(name), new: None };
+                        if let Err(err) = custom::write_task_keybind(&change, cx) {
+                            tracing::warn!("could not remove the task shortcut: {err}");
+                        }
+                    }
+                    Ok(true) => {}
+                    Err(err) => tracing::warn!("could not delete the task: {err}"),
+                }
                 if let Some(workspace) = this.workspaces.iter_mut().find(|workspace| workspace.id == id) {
                     workspace.project.tasks_stale = true;
                 }

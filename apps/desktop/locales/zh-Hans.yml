@@ -249,6 +249,7 @@ tasks:
   shortcut_press: "按下快捷键，Esc 取消"
   shortcut_clear: "清除"
   shortcut_taken: "「%{what}」现在用着这个键，保存后改成跑这条命令。"
+  shortcut_not_applied: "命令存好了，快捷键没改成：配置里还有别的 keybind 行盖着它，可能在 config-file 引入的文件里，要到配置里改那一行。"
 files:
   new_file: 新建文件…
   new_folder: 新建文件夹…

@@ -249,6 +249,7 @@ tasks:
   shortcut_press: "Press a shortcut, Esc to cancel"
   shortcut_clear: "Clear"
   shortcut_taken: "“%{what}” uses this key now; saving makes it run this task instead."
+  shortcut_not_applied: "The task was saved, but its shortcut did not change: another keybind line, maybe in a file included with config-file, still overrides it. Edit that line in the config."
 files:
   new_file: New File…
   new_folder: New Folder…

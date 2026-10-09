@@ -3,8 +3,8 @@
 //! 终端当前目录里跑），对话框里选。添加到本项目时，项目目录取终端目录所在仓库的根目录，不在仓库里时取
 //! 终端目录；同一份里同名的换成新的命令行。命令菜单里这些命令行尾的编辑按钮用同一个对话框改，改完留在
 //! 原来的位置；删除按钮从文件里删掉它。对话框里还能录一个快捷键，存成配置里的 `keybind = 触发键=run_task:名字`；
-//! 快捷键按名字找命令，改名、删除时一起改掉、删掉。文件由宿主列出来（`TaskSourceKind::Custom`、`Global`），手机上
-//! 也看得到。
+//! 快捷键按名字找命令，改名、删除时一起改掉、删掉，别的份里还有同名命令时留着原来的。文件由宿主列出来
+//! （`TaskSourceKind::Custom`、`Global`），手机上也看得到。
 
 use std::{
     fs, io,
@@ -44,6 +44,8 @@ pub(in crate::window) struct AddTaskDialog {
     command: Entity<TextField>,
     /// 快捷键，配置文件的写法（`alt+cmd+r`）；为空时不绑。编辑时先填上现在绑着的。
     shortcut: Option<String>,
+    /// 打开时填上的快捷键：保存时没改过它就不动它绑着的那几行。
+    initial_shortcut: Option<String>,
     /// 正在录快捷键：拦下这个窗口里按的键，不让它生效。
     recording: Option<Subscription>,
     /// 上次写文件失败的原因。
@@ -105,6 +107,7 @@ impl WindowView {
                 global,
                 name,
                 command,
+                initial_shortcut: shortcut.clone(),
                 shortcut,
                 recording: None,
                 error: None,
@@ -182,7 +185,8 @@ impl WindowView {
 
     /// 在后台把填好的命令写进文件，写好了关掉对话框、重列命令；写不了时把原因写在对话框里。名字
     /// 空着时用命令行当名字。编辑时换掉原来那一条，同一份里改了名字也留在原来的位置；换到另一份时
-    /// 加在那一份的最后。
+    /// 加在那一份的最后。快捷键改不成（比如绑在 `config-file` 引入的文件里）时命令照样存好，对话框
+    /// 留着、写上原因，再保存就是编辑存好的那一条。
     fn save_task(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let dir = self.project_dir(cx);
         let Some(dialog) = &mut self.add_task else {
@@ -200,10 +204,19 @@ impl WindowView {
         dialog.saving = true;
         dialog.recording = None;
         let (editing, global) = (dialog.editing.clone(), dialog.global);
-        // 编辑时换掉原名字上的快捷键；新加的没录快捷键时不碰配置，同名的别的命令绑着的键留着。
+        // 快捷键没改过时只跟着改名，原来的几行各留各的键；改了时换掉原名字上的；新加的没录快捷键时
+        // 不碰配置，同名的别的命令绑着的键留着。
+        let unchanged = dialog.shortcut == dialog.initial_shortcut;
         let keybind = match (&editing, &dialog.shortcut) {
-            (Some((_, old)), shortcut) => Some((old.clone(), shortcut.clone())),
-            (None, Some(shortcut)) => Some((name.clone(), Some(shortcut.clone()))),
+            (Some((_, old)), _) if unchanged && *old == name => None,
+            (Some((_, old)), _) if unchanged => Some(TaskKeybind::Rename { old: old.clone(), new: name.clone() }),
+            (Some((_, old)), shortcut) => Some(TaskKeybind::Rebind {
+                old: Some(old.clone()),
+                new: shortcut.clone().map(|trigger| (trigger, name.clone())),
+            }),
+            (None, Some(shortcut)) => {
+                Some(TaskKeybind::Rebind { old: None, new: Some((shortcut.clone(), name.clone())) })
+            }
             (None, None) => None,
         };
         let new_name = name.clone();
@@ -216,22 +229,32 @@ impl WindowView {
                 _ => Some(runode_git::repo_root(&dir).unwrap_or(dir)),
             };
             let (old_project, old_name) = editing.unwrap_or_else(|| (project.clone(), name.clone()));
-            write_task(&file, (old_project.as_deref(), &old_name), Some((project.as_deref(), &name, &command)))
+            write_task(&file, (old_project.as_deref(), &old_name), Some((project.as_deref(), &name, &command)))?;
+            // 原名字在别的份里还有命令时，它绑着的键是那条命令也在用的。
+            let elsewhere = task_named_elsewhere(&file, &old_name, project.as_deref());
+            Ok((project, elsewhere))
         });
         cx.spawn_in(window, async move |this, cx| {
             let saved = job.await;
             this.update_in(cx, |this, window, cx| {
                 match saved {
-                    Ok(()) => {
-                        if let Some((old, shortcut)) = &keybind {
-                            let new = shortcut.as_deref().map(|trigger| (trigger, new_name.as_str()));
-                            if let Err(err) = write_task_keybind(old, new, cx) {
-                                tracing::warn!("could not save the task shortcut: {err}");
-                            }
-                        }
-                        this.close_add_task(window, cx);
+                    Ok((project, elsewhere)) => {
+                        let keybind = if elsewhere { keybind.and_then(TaskKeybind::keep_old) } else { keybind };
+                        let bound = keybind.map_or(Ok(()), |keybind| write_task_keybind(&keybind, cx));
                         this.workspace_mut().project.tasks_stale = true;
                         this.list_tasks(cx);
+                        match bound {
+                            Ok(()) => this.close_add_task(window, cx),
+                            Err(err) => {
+                                let shortcut = task_shortcut(&new_name, cx);
+                                if let Some(dialog) = &mut this.add_task {
+                                    dialog.editing = Some((project, new_name));
+                                    dialog.initial_shortcut = shortcut;
+                                    dialog.saving = false;
+                                    dialog.error = Some(err);
+                                }
+                            }
+                        }
                     }
                     Err(err) => {
                         if let Some(dialog) = &mut this.add_task {
@@ -496,8 +519,7 @@ fn task_shortcut(name: &str, cx: &App) -> Option<String> {
         .and_then(|(keys, _)| keybind::format_trigger(&keys))
 }
 
-/// `trigger` 现在绑着别的动作时，那个动作的说明；没绑、绑的就是跑 `own` 这条命令，或者认不出是哪个
-/// 动作时为空。
+/// `trigger` 现在绑着别的动作时，那个动作的说明；没绑或者绑的就是跑 `own` 这条命令时为空。
 fn shortcut_taken_by(trigger: &str, own: &str, cx: &App) -> Option<String> {
     let keys = keybind::parse_trigger(trigger).ok()?;
     let (_, action) =
@@ -505,53 +527,150 @@ fn shortcut_taken_by(trigger: &str, own: &str, cx: &App) -> Option<String> {
     if let Action::RunTask(name) = &action {
         return (name != own).then(|| format!("run_task:{name}"));
     }
-    // 动作名从默认绑定里找，自己在配置里绑的别的动作不提示。
-    let bind = Keybind::Bind { keys, action };
-    let line = keybind::DEFAULTS.iter().find(|line| keybind::parse(line).is_ok_and(|binds| binds.contains(&bind)))?;
-    let (_, usage) = line.split_once('=')?;
-    Some(keybind::describe(usage.split(':').next()?))
+    Some(action_name(&keys, &action))
 }
 
-/// 把配置里绑在 `run_task:old` 上的键去掉，`new`（触发键，名字）有时绑上 `触发键=run_task:名字`，没变时
-/// 不写。
-pub(super) fn write_task_keybind(old: &str, new: Option<(&str, &str)>, cx: &mut App) -> Result<(), String> {
+/// `keys` 上绑的 `action` 的说明：动作名先从默认绑定里找，带数字参数的（`goto_tab:3`）这样才认得出；
+/// 自己在配置里绑的再按动作表里不带参数或者参数可选值的写法认；都认不出时写动作本身。
+fn action_name(keys: &str, action: &Action) -> String {
+    let bind = Keybind::Bind { keys: keys.to_owned(), action: action.clone() };
+    let default = keybind::DEFAULTS
+        .iter()
+        .find(|line| keybind::parse(line).is_ok_and(|binds| binds.contains(&bind)))
+        .and_then(|line| line.split_once('='))
+        .and_then(|(_, usage)| usage.split(':').next());
+    let listed = || {
+        let spec = keybind::ACTIONS.iter().find(|spec| {
+            let params = spec.param.into_iter().flat_map(|params| params.split('|'));
+            let mut usages = std::iter::once(spec.name.to_owned()).chain(params.map(|p| format!("{}:{p}", spec.name)));
+            usages.any(|usage| keybind::parse_action(&usage).as_ref() == Ok(action))
+        });
+        spec.map(|spec| spec.name)
+    };
+    default.or_else(listed).map_or_else(|| format!("{action:?}"), keybind::describe)
+}
+
+/// 保存或删除命令时快捷键怎么跟着改，见 `with_task_keybind`。
+#[derive(Debug)]
+pub(super) enum TaskKeybind {
+    /// 去掉绑在 `run_task:old` 上的行（`old` 为空时不去），`new`（触发键，名字）有时在最后绑上
+    /// `触发键=run_task:名字`。
+    Rebind { old: Option<String>, new: Option<(String, String)> },
+    /// 改了名字、没改快捷键：每行的 `run_task:old` 换成 `run_task:new`，触发键各自留着。
+    Rename { old: String, new: String },
+}
+
+impl TaskKeybind {
+    /// 原名字在别的份里还有命令在用时：它绑着的行都留着，只绑上新录的键；没有新键时不用改。
+    fn keep_old(self) -> Option<Self> {
+        match self {
+            Self::Rebind { new: Some(new), .. } => Some(Self::Rebind { old: None, new: Some(new) }),
+            Self::Rebind { new: None, .. } | Self::Rename { .. } => None,
+        }
+    }
+}
+
+/// 按 `change` 改配置里的 `keybind`，没变时不写；写完（配置随之重载）再按合并了 `config-file` 引入的
+/// 文件的配置核对一遍，没改成时返回原因：只改得了主配置文件，绑在引入的文件里的行改不到。
+pub(super) fn write_task_keybind(change: &TaskKeybind, cx: &mut App) -> Result<(), String> {
     let path = runode_config::config_path().ok_or("no home directory")?;
     let values = ConfigFile::read(&path).map_err(|err| format!("{}: {err}", path.display()))?.values("keybind");
-    let updated = with_task_keybind(&values, old, new);
+    let renamed: Vec<String> = match change {
+        TaskKeybind::Rename { old, .. } => bound_keys(&cx.global::<AppConfig>().0.keybinds, old),
+        TaskKeybind::Rebind { .. } => Vec::new(),
+    };
+    let updated = with_task_keybind(&values, change);
     if updated != values {
         crate::config::write_values(&path, "keybind", &updated, cx)
             .map_err(|err| format!("{}: {err}", path.display()))?;
     }
-    Ok(())
+    let applied = keybind_applied(&cx.global::<AppConfig>().0.keybinds, change, &renamed);
+    applied.then_some(()).ok_or_else(|| rust_i18n::t!("tasks.shortcut_not_applied").into_owned())
 }
 
-/// 在 `keybind` 的几行 `values` 里去掉绑在 `run_task:old` 上的，以及 `new` 的触发键上原来绑的（盖掉了也
-/// 不生效，留着只会让人糊涂；解绑的行留着），再加上 `new` 那一行；这一行原来就有时留在原处。
-fn with_task_keybind(values: &[String], old: &str, new: Option<(&str, &str)>) -> Vec<String> {
-    let old = Action::RunTask(old.to_owned());
-    let line = new.map(|(trigger, name)| format!("{trigger}=run_task:{name}"));
-    let new_keys = new.and_then(|(trigger, _)| keybind::parse_trigger(trigger).ok());
-    let mut kept = false;
-    let mut out = Vec::new();
-    for value in values {
-        if !kept && line.as_ref() == Some(value) {
-            kept = true;
-            out.push(value.clone());
-            continue;
+/// 叠上默认绑定后绑在 `run_task:name` 上的触发键，GPUI 的写法。
+fn bound_keys(keybinds: &[Keybind], name: &str) -> Vec<String> {
+    let wanted = Action::RunTask(name.to_owned());
+    keybind::resolve(keybinds).into_iter().filter(|(_, action)| *action == wanted).map(|(keys, _)| keys).collect()
+}
+
+/// 配置里的 `keybinds` 是不是已经照 `change` 改好了。`renamed` 是改名前绑在原名字上的触发键。
+fn keybind_applied(keybinds: &[Keybind], change: &TaskKeybind, renamed: &[String]) -> bool {
+    let table = keybind::resolve(keybinds);
+    let runs = |keys: &str, name: &str| table.iter().any(|(k, a)| k == keys && *a == Action::RunTask(name.to_owned()));
+    match change {
+        TaskKeybind::Rebind { old, new } => {
+            let new_keys = new.as_ref().map(|(trigger, name)| (keybind::parse_trigger(trigger), name));
+            let new_ok = match &new_keys {
+                Some((Ok(keys), name)) => runs(keys, name),
+                Some((Err(_), _)) => false,
+                None => true,
+            };
+            // 原名字上只剩新绑的那个键（名字没改时）。
+            let old_gone = old.as_ref().is_none_or(|old| {
+                bound_keys(keybinds, old)
+                    .iter()
+                    .all(|keys| matches!(&new_keys, Some((Ok(new_keys), name)) if new_keys == keys && *name == old))
+            });
+            new_ok && old_gone
         }
-        let stale = keybind::parse(value).is_ok_and(|binds| {
-            binds.iter().any(|bind| {
-                matches!(bind, Keybind::Bind { keys, action } if *action == old || Some(keys) == new_keys.as_ref())
+        TaskKeybind::Rename { old, new } => {
+            old == new || (bound_keys(keybinds, old).is_empty() && renamed.iter().all(|keys| runs(keys, new)))
+        }
+    }
+}
+
+/// 在 `keybind` 的几行 `values` 里按 `change` 改。`Rebind` 去掉绑在 `run_task:old` 上的行（解绑的行和
+/// 别的动作占着新键的行都留着，新行加在最后，叠起来时后写的赢，键照样归这条命令），再在最后加上新键
+/// 那一行，原来就有一模一样的一行时先去掉它；`Rename` 把整行都是 `run_task:old` 的换成新名字，触发键
+/// 照原样写。
+fn with_task_keybind(values: &[String], change: &TaskKeybind) -> Vec<String> {
+    let binds_only = |value: &str, name: &str| {
+        let wanted = Action::RunTask(name.to_owned());
+        keybind::parse(value).is_ok_and(|binds| {
+            !binds.is_empty()
+                && binds.iter().all(|bind| matches!(bind, Keybind::Bind { action, .. } if *action == wanted))
+        })
+    };
+    match change {
+        TaskKeybind::Rebind { old, new } => {
+            let line = new.as_ref().map(|(trigger, name)| format!("{trigger}=run_task:{name}"));
+            let mut out: Vec<String> = values
+                .iter()
+                .filter(|value| line.as_ref() != Some(*value) && old.as_ref().is_none_or(|old| !binds_only(value, old)))
+                .cloned()
+                .collect();
+            out.extend(line);
+            out
+        }
+        TaskKeybind::Rename { old, new } => values
+            .iter()
+            .map(|value| match value.split_once('=') {
+                Some((trigger, _)) if binds_only(value, old) => format!("{}=run_task:{new}", trigger.trim()),
+                _ => value.clone(),
             })
-        });
-        if !stale {
-            out.push(value.clone());
-        }
+            .collect(),
     }
-    if !kept {
-        out.extend(line);
+}
+
+/// 命令文件 `file` 里除了 `except` 那一份（项目目录，通用的为空）以外，别的份里有没有叫 `name` 的
+/// 命令。快捷键按名字找命令，有时它的快捷键别的命令也在用。读不懂文件时当作有，免得删掉别处在用的键。
+pub(super) fn task_named_elsewhere(file: &Path, name: &str, except: Option<&Path>) -> bool {
+    match fs::read_to_string(file) {
+        Ok(text) => named_elsewhere(&text, name, except),
+        Err(err) => err.kind() != io::ErrorKind::NotFound,
     }
-    out
+}
+
+/// `task_named_elsewhere` 按文件内容 `text` 判断。
+fn named_elsewhere(text: &str, name: &str, except: Option<&Path>) -> bool {
+    let Ok(json) = serde_json::from_str::<Value>(text) else {
+        return !text.trim().is_empty();
+    };
+    let global = json.get("global").filter(|_| except.is_some());
+    let projects = json.get("projects").and_then(Value::as_object).into_iter().flatten();
+    let projects = projects.filter(|(dir, _)| except != Some(Path::new(dir.as_str()))).map(|(_, tasks)| tasks);
+    global.into_iter().chain(projects).any(|tasks| tasks.get(name).is_some())
 }
 
 /// 对话框里告诉用户命令存在哪。
@@ -647,7 +766,12 @@ fn replace(tasks: &mut Map<String, Value>, old: Option<&str>, new: Option<(&str,
 mod tests {
     use std::path::Path;
 
-    use super::{with_task, with_task_keybind};
+    use runode_config::{
+        Keybind,
+        keybind::{self, Action},
+    };
+
+    use super::{TaskKeybind, action_name, keybind_applied, named_elsewhere, with_task, with_task_keybind};
 
     fn pretty(json: serde_json::Value) -> String {
         serde_json::to_string_pretty(&json).unwrap() + "\n"
@@ -670,18 +794,88 @@ mod tests {
         assert!(with_task(Some("{oops"), (None, "dev"), Some((None, "dev", "x"))).is_err());
     }
 
-    /// 改名、换键时去掉原来那行和占着新键的那行，解绑和别的行原样留着；没变时一行不动。
+    fn lines(values: &[&str]) -> Vec<String> {
+        values.iter().map(|value| (*value).to_owned()).collect()
+    }
+
+    fn rebind(old: Option<&str>, new: Option<(&str, &str)>) -> TaskKeybind {
+        TaskKeybind::Rebind { old: old.map(String::from), new: new.map(|(t, n)| (t.to_owned(), n.to_owned())) }
+    }
+
+    fn binds(values: &[String]) -> Vec<Keybind> {
+        values.iter().flat_map(|value| keybind::parse(value).unwrap()).collect()
+    }
+
+    /// 换键时只去掉原名字的行，新行加在最后；占着新键的别的动作（包括一行顶九条的 `digit`）和解绑的行
+    /// 都留着，叠起来时新行在后面，键照样归这条命令。
     #[test]
-    fn rewrites_task_keybinds() {
-        let values: Vec<String> = ["cmd+alt+r=run_task:dev", "cmd+t=unbind", "cmd+t=new_window", "cmd+1=run_task:lint"]
-            .map(String::from)
-            .into();
+    fn rebinding_keeps_other_actions_on_the_key() {
+        let values = lines(&[
+            "cmd+alt+r=run_task:dev",
+            "cmd+t=unbind",
+            "cmd+shift+r=new_split:right",
+            "cmd+digit=goto_workspace",
+            "cmd+2=run_task:lint",
+        ]);
+        let updated = with_task_keybind(&values, &rebind(Some("dev"), Some(("cmd+shift+r", "serve"))));
+        assert_eq!(updated, [&values[1..], &lines(&["cmd+shift+r=run_task:serve"])].concat());
+        let updated = with_task_keybind(&values, &rebind(Some("dev"), Some(("cmd+1", "dev"))));
+        assert_eq!(updated, [&values[1..], &lines(&["cmd+1=run_task:dev"])].concat());
+        let table = keybind::resolve(&binds(&updated));
+        let action = |keys: &str| table.iter().find(|(k, _)| k == keys).map(|(_, a)| a.clone());
+        assert_eq!(action("cmd-1"), Some(Action::RunTask("dev".into())));
+        assert_eq!(action("cmd-3"), Some(Action::GotoWorkspace(2)));
+        assert_eq!(action("shift-cmd-r"), Some(Action::NewSplitRight));
+        // 一模一样的行挪到最后；删除只去掉它自己的行。
+        assert_eq!(with_task_keybind(&values, &rebind(None, Some(("cmd+2", "lint")))), values);
+        assert_eq!(with_task_keybind(&values, &rebind(Some("lint"), None)), values[..4]);
+    }
+
+    /// 只改名字时每行换成新名字，各自的触发键留着。
+    #[test]
+    fn renaming_keeps_every_key() {
+        let values = lines(&["cmd+1=run_task:dev", "cmd+t=new_tab", "cmd+2 = run_task:dev", "cmd+3=run_task:devx"]);
+        let rename = TaskKeybind::Rename { old: "dev".into(), new: "serve".into() };
         assert_eq!(
-            with_task_keybind(&values, "dev", Some(("cmd+t", "serve"))),
-            ["cmd+t=unbind", "cmd+1=run_task:lint", "cmd+t=run_task:serve"]
+            with_task_keybind(&values, &rename),
+            ["cmd+1=run_task:serve", "cmd+t=new_tab", "cmd+2=run_task:serve", "cmd+3=run_task:devx"]
         );
-        assert_eq!(with_task_keybind(&values, "dev", Some(("cmd+alt+r", "dev"))), values);
-        assert_eq!(with_task_keybind(&values, "lint", None), values[..3]);
+    }
+
+    /// 写完核对：绑在引入的文件里、主文件改不到的行让核对不过。
+    #[test]
+    fn checks_the_merged_keybinds() {
+        let check = |values: &[&str], change: &TaskKeybind, before: &[String]| {
+            keybind_applied(&binds(&lines(values)), change, before)
+        };
+        let rename = TaskKeybind::Rename { old: "dev".into(), new: "serve".into() };
+        let before = lines(&["cmd-1", "cmd-2"]);
+        assert!(check(&["cmd+1=run_task:serve", "cmd+2=run_task:serve"], &rename, &before));
+        assert!(!check(&["cmd+1=run_task:serve", "cmd+2=run_task:dev"], &rename, &before));
+        let change = rebind(Some("dev"), Some(("cmd+3", "dev")));
+        assert!(check(&["cmd+3=run_task:dev"], &change, &[]));
+        assert!(!check(&["cmd+3=run_task:dev", "cmd+1=run_task:dev"], &change, &[]));
+        assert!(!check(&["cmd+3=run_task:dev", "cmd+3=new_tab"], &change, &[]));
+        assert!(check(&["cmd+1=run_task:lint"], &rebind(Some("dev"), None), &[]));
+    }
+
+    /// 自己绑的动作按动作表认出来，认不出时写动作本身。
+    #[test]
+    fn names_actions_the_user_bound() {
+        assert_eq!(action_name("shift-cmd-r", &Action::NewSplitRight), keybind::describe("new_split"));
+        assert_eq!(action_name("cmd-9", &Action::GotoTab(4)), "GotoTab(4)");
+    }
+
+    /// 只看别的份；读不懂的内容当作有。
+    #[test]
+    fn finds_tasks_named_elsewhere() {
+        let text = r#"{"global": {"lint": "x"}, "projects": {"/a": {"dev": "1"}, "/b": {"dev": "2"}}}"#;
+        assert!(named_elsewhere(text, "dev", Some(Path::new("/b"))));
+        assert!(!named_elsewhere(r#"{"projects": {"/b": {"dev": "2"}}}"#, "dev", Some(Path::new("/b"))));
+        assert!(named_elsewhere(text, "lint", Some(Path::new("/a"))));
+        assert!(!named_elsewhere(text, "lint", None));
+        assert!(named_elsewhere("{oops", "dev", None));
+        assert!(!named_elsewhere("", "dev", None));
     }
 
     /// 删掉一条，其余的先后不变；删空了的那份一起拿掉。

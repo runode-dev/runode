@@ -331,6 +331,12 @@ impl WindowView {
     /// 切到当前 workspace 的第 `ix` 个标签；workspace 里没有标签时显示空的标签区。开着的手机端引导页
     /// 随之收起。
     pub(super) fn activate(&mut self, ix: usize, window: &mut Window, cx: &mut Context<Self>) {
+        self.show_tab(ix, true, window, cx);
+    }
+
+    /// 同 `activate`，只是 `reveal_now` 为假时标签条等下一帧按新排好的位置把标签滚进来：刚切过来的 workspace
+    /// 上次画出时的布局可能已经过时（开了侧栏、缩了窗口），按它算的偏移不准。
+    fn show_tab(&mut self, ix: usize, reveal_now: bool, window: &mut Window, cx: &mut Context<Self>) {
         self.mobile = None;
         let workspace = self.workspace_mut();
         workspace.active = ix;
@@ -338,7 +344,11 @@ impl WindowView {
         workspace.project.previews.maximized = false;
         if let Some(tab) = workspace.tabs.get_mut(ix) {
             tab.bell = false;
-            reveal_tab(&workspace.tab_scroll, ix, workspace.tabs.len());
+            if reveal_now {
+                reveal_tab(&workspace.tab_scroll, ix, workspace.tabs.len());
+            } else {
+                workspace.tab_scroll.scroll_to_item(ix);
+            }
         }
         self.start_shown(cx);
         self.sync_visibility(window, cx);
@@ -390,13 +400,14 @@ impl WindowView {
 
     /// 切到第 `ix` 个 workspace，显示它切走之前的那个标签。
     pub(super) fn activate_workspace(&mut self, ix: usize, window: &mut Window, cx: &mut Context<Self>) {
+        let shown = self.active == ix;
         self.active = ix;
         self.sidebar_scroll.scroll_to_item(ix);
         self.follow_workspace_in_file_search(self.workspaces[ix].id, cx);
         self.refresh_project(cx);
         // 目录监听只跟着当前 workspace，切走期间这个 workspace 预览的文件可能变过。
         self.refresh_preview_if_changed(cx);
-        self.activate(self.workspaces[ix].active, window, cx);
+        self.show_tab(self.workspaces[ix].active, shown, window, cx);
     }
 
     /// 窗口标题跟着有焦点的终端；没有终端时用 workspace 的名字。
