@@ -124,7 +124,12 @@ pub fn install(kind: Kind, dirs: &Dirs, exe: &Path) -> io::Result<PathBuf> {
             };
             enable().map_err(|err| {
                 if err.kind() == io::ErrorKind::NotFound {
-                    return err;
+                    // 不留下服务文件，免得 `is_installed` 说装好了。
+                    let _ = std::fs::remove_file(&path);
+                    return io::Error::new(
+                        io::ErrorKind::NotFound,
+                        "systemctl was not found; starting at login needs systemd",
+                    );
                 }
                 io::Error::other(format!(
                     "{err}. If no one is logged in as this user, run `loginctl enable-linger $USER` and try again"
