@@ -3,7 +3,9 @@
 use std::io::Write;
 
 use anyhow::{Context as _, bail};
-use runode_autostart::{Kind, install as write_service, is_installed, service_file, uninstall as remove_service};
+use runode_autostart::{
+    Kind, install as write_service, is_installed, service_file, starts_at_boot, uninstall as remove_service,
+};
 
 use crate::Env;
 
@@ -21,9 +23,13 @@ pub(crate) fn install(env: &Env, kind: Kind, out: &mut dyn Write) -> anyhow::Res
             "The host stays in the background only while remote-access = true and a phone is paired; otherwise it \
              exits when idle."
         )?;
-        // systemd 的用户服务只在有人登录时才起；要开机就起（比如没人登录的服务器）得开 linger。
+        // systemd 的用户服务只在有人登录时才起，`install` 试着开了 linger；没开成（多半没有权限）时告诉用户怎么办。
         if !cfg!(target_os = "macos") {
-            writeln!(out, "It starts when you log in. To start it at boot, run `loginctl enable-linger $USER`.")?;
+            if starts_at_boot() {
+                writeln!(out, "It also starts at boot, before anyone logs in (systemd linger is on).")?;
+            } else {
+                writeln!(out, "It starts when you log in. To start it at boot, run `loginctl enable-linger $USER`.")?;
+            }
         }
     }
     Ok(())

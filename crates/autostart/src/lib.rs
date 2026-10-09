@@ -97,12 +97,43 @@ pub fn install(kind: Kind, dirs: &Dirs, exe: &Path) -> io::Result<PathBuf> {
             launchctl(&["bootstrap", &launchd_domain()?, &path.to_string_lossy()])?;
         }
         (Kind::Host, false) => {
-            systemctl(&["daemon-reload"])?;
-            systemctl(&["enable", "--now", SYSTEMD_UNIT])?;
+            // 用户服务默认只在有人登录时才起；开 linger 才能开机就起，没有登录会话时也得先开它，
+            // systemd 才会给这个用户起一个服务管理器。没有权限就算了，调用方用 `starts_at_boot` 看结果。
+            let _ = run("loginctl", &["enable-linger"]);
+            // 刚开 linger 时服务管理器还在起来，头几次连不上它的总线，隔一会儿再试。
+            let enable = || -> io::Result<()> {
+                let mut result = systemctl(&["daemon-reload"]);
+                for _ in 0..MANAGER_TRIES {
+                    if result.is_ok() {
+                        break;
+                    }
+                    std::thread::sleep(MANAGER_RETRY);
+                    result = systemctl(&["daemon-reload"]);
+                }
+                result?;
+                systemctl(&["enable", "--now", SYSTEMD_UNIT])
+            };
+            enable().map_err(|err| {
+                io::Error::other(format!(
+                    "{err}. If no one is logged in as this user, run `loginctl enable-linger $USER` and try again"
+                ))
+            })?;
         }
         (Kind::App, _) => {}
     }
     Ok(path)
+}
+
+/// Linux 上这个用户开着 linger，即宿主不用等人登录、开机就起（`install` 会试着开）。卸载时不关它：
+/// 别的用户服务可能也靠它。
+pub fn starts_at_boot() -> bool {
+    let Ok(user) = std::env::var("USER") else {
+        return false;
+    };
+    Command::new("loginctl")
+        .args(["show-user", &user, "--property=Linger", "--value"])
+        .output()
+        .is_ok_and(|output| String::from_utf8_lossy(&output.stdout).trim() == "yes")
 }
 
 /// 去掉 `kind` 的登录自启：停掉并删掉服务文件。原来就没装时返回 `false`。
@@ -125,6 +156,9 @@ pub fn uninstall(kind: Kind, dirs: &Dirs) -> io::Result<bool> {
 }
 
 const SYSTEMD_UNIT: &str = "runode-host.service";
+/// 刚开 linger 后等 systemd 起用户服务管理器：最多试这么多次、每次隔这么久。
+const MANAGER_TRIES: u32 = 10;
+const MANAGER_RETRY: std::time::Duration = std::time::Duration::from_millis(500);
 
 fn unsupported(kind: Kind) -> io::Error {
     io::Error::new(
