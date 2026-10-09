@@ -21,6 +21,7 @@ config:
   file_tree_font_size: 右侧文件树的字号：正数，单位是点。
   file_tree_preview_click: 文件树里怎样在预览栏打开文件：single（单击，默认）或 double（双击）。single 时单击开成临时标签，再打开别的文件时被换掉，双击固定下来；double 时双击开成固定标签。
   preview_font_size: 预览栏的字号：正数，单位是点。
+  task_placement: 标题栏命令菜单里点了一条命令时在哪跑它：right（默认）、down 或 tab。right、down 在当前标签里把当前终端分开，新终端放在右边或下边；tab 在当前标签右边开一个新标签。
   theme: |-
     主题：文件末尾列出的主题名，或者主题文件的绝对路径；还可以按系统外观分开写，
     比如 light:Catppuccin Latte,dark:Catppuccin Mocha。主题会先生效，下面写出的颜色再覆盖它。

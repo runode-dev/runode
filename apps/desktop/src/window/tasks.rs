@@ -1,6 +1,7 @@
 //! 标题栏右上角的项目命令：自己加的这个项目的和通用的命令、终端目录往上最近的 Makefile 的目标和
 //! package.json 的 scripts，由宿主列出、拼好命令行（`ClientMsg::ListProjectTasks`），和手机会话卡片上的
-//! 是同一份。右侧面板开关左边的按钮弹出分组的菜单，点一条开一个新标签在列命令的目录里跑它；菜单最上面一项添加自己的
+//! 是同一份。右侧面板开关左边的按钮弹出分组的菜单，点一条在当前标签里分出一个终端（或按配置开新标签）、
+//! 在列命令的目录里跑它；菜单最上面一项添加自己的
 //! 命令，自己加的命令行尾有编辑和删除按钮，添加、编辑的对话框和改写命令文件在 `custom`。
 
 mod custom;
@@ -8,9 +9,10 @@ mod custom;
 use std::path::{Path, PathBuf};
 
 use gpui::{Action, App, Context, Div, Focusable, MouseButton, SharedString, Stateful, Window, prelude::*, px};
+use runode_config::TaskPlacement;
 use runode_paths::Dirs;
 use runode_protocol::{TaskSource, TaskSourceKind};
-use runode_shared_types::color::Rgb;
+use runode_shared_types::{color::Rgb, pane::Axis};
 
 pub(super) use custom::AddTaskDialog;
 
@@ -23,6 +25,7 @@ use super::{
 };
 use crate::{
     assets::{PENCIL_ICON, PLAY_ICON, TRASH_ICON},
+    config::AppConfig,
     host_client,
     ui::tooltip::tooltip,
     window::WindowView,
@@ -41,7 +44,7 @@ const TASK_FILES: [&str; 9] = [
     "package-lock.json",
 ];
 
-/// 命令菜单里的一条：开一个新标签跑 `command`，在 `dir`（为空时是列命令的目录）里。
+/// 命令菜单里的一条：开一个新终端跑 `command`，在 `dir`（为空时是列命令的目录）里。
 #[derive(Clone, PartialEq, Action)]
 #[action(namespace = runode, no_json)]
 pub(super) struct RunTask {
@@ -135,7 +138,8 @@ impl WindowView {
         .detach();
     }
 
-    /// 命令菜单里点了一条：在当前标签右边开一个新标签，在列命令的目录里跑它。
+    /// 命令菜单里点了一条：按配置项 `task-placement` 在当前标签里分出一个终端或者在它右边开一个新标签，
+    /// 在列命令的目录里跑它。
     pub(super) fn run_task(&mut self, action: &RunTask, window: &mut Window, cx: &mut Context<Self>) {
         let Some((dir, _)) = &self.workspace().project.tasks else {
             return;
@@ -147,7 +151,11 @@ impl WindowView {
         let command = action.command.clone();
         self.workspace_mut().project.tasks_last = Some(command.clone());
         view.update(cx, |view, cx| view.run_command(command, cx));
-        self.insert_tab(self.workspace().active + 1, view, window, cx);
+        match cx.global::<AppConfig>().0.task_placement {
+            TaskPlacement::Right => self.split_with(view, Axis::Horizontal, window, cx),
+            TaskPlacement::Down => self.split_with(view, Axis::Vertical, window, cx),
+            TaskPlacement::Tab => self.insert_tab(self.workspace().active + 1, view, window, cx),
+        }
     }
 
     /// 按快捷键打开命令菜单、选中第一条；开着时关掉。

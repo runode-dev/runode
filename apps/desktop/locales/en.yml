@@ -539,6 +539,7 @@ settings:
     shell: Shell
     scrollback: Scrollback
     clipboard: Clipboard
+    tasks: Tasks
     login: Start at Login
     pairing: Pair a Phone
     push: Live Activities
@@ -563,6 +564,7 @@ settings:
     file_tree_font_size: File tree font size
     file_tree_preview_click: Open files in the preview with
     preview_font_size: Preview font size
+    task_placement: Run tasks in
     theme: Theme
     background: Background
     foreground: Foreground
@@ -619,6 +621,7 @@ settings:
     file_tree_font_size: In points.
     file_tree_preview_click: A single click opens a temporary tab that the next file replaces; a double click keeps it.
     preview_font_size: In points.
+    task_placement: Where a task picked from the title bar's task menu runs.
     theme: Colors below override the theme. With Light & Dark the theme follows the system appearance.
     background: "A color such as #1e1e2e, or a color name."
     foreground: The color of text.
@@ -691,6 +694,10 @@ settings:
     file_tree_preview_click:
       single: Single click
       double: Double click
+    task_placement:
+      right: Split right
+      down: Split down
+      tab: New tab
     clipboard_write:
       allow: Allow
       deny: Deny

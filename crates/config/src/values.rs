@@ -8,7 +8,7 @@ use runode_shared_types::{
     shell::{IntegrationMode, Shell},
 };
 
-use crate::{CellHeight, Config, PreviewClick, WindowStyle};
+use crate::{CellHeight, Config, PreviewClick, TaskPlacement, WindowStyle};
 
 impl Config {
     /// `key` 在这份配置里的值，按配置文件的写法每项一行，写回配置文件再读进来得到同样的值；
@@ -47,6 +47,14 @@ impl Config {
                 .into(),
             ],
             "preview-font-size" => vec![self.preview_font_size.to_string()],
+            "task-placement" => vec![
+                match self.task_placement {
+                    TaskPlacement::Right => "right",
+                    TaskPlacement::Down => "down",
+                    TaskPlacement::Tab => "tab",
+                }
+                .into(),
+            ],
             "theme" => self.theme.iter().cloned().collect(),
             "background" => vec![hex(self.background)],
             "foreground" => vec![hex(self.foreground)],

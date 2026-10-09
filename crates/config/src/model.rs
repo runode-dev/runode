@@ -25,6 +25,17 @@ pub enum PreviewClick {
     Double,
 }
 
+/// 标题栏命令菜单里点了一条项目命令时，在哪开跑它的新终端。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TaskPlacement {
+    /// 当前标签里，分在当前终端右边。
+    Right,
+    /// 当前标签里，分在当前终端下边。
+    Down,
+    /// 当前标签右边的新标签。
+    Tab,
+}
+
 /// 窗口的样子：卡片是每个分屏、右侧面板各是一张圆角卡片，衬在比终端深一档的外框上，分屏顶上有
 /// 标题条，标签是胶囊；经典是终端铺满窗口，分屏之间一条细线，标签是
 /// 平铺的格子。
@@ -78,6 +89,7 @@ pub struct Config {
     pub file_tree_preview_click: PreviewClick,
     /// 预览栏的字号。
     pub preview_font_size: f32,
+    pub task_placement: TaskPlacement,
     /// 配置里写的 `theme`，原样保留（可能是 `light:A,dark:B`）；没写时为 `None`。
     pub theme: Option<String>,
     pub cursor_style: CursorStyle,
@@ -183,6 +195,7 @@ impl Default for Config {
             file_tree_font_size: 13.,
             file_tree_preview_click: PreviewClick::Single,
             preview_font_size: 13.,
+            task_placement: TaskPlacement::Right,
             theme: None,
             cursor_style: term.cursor_style,
             cursor_style_blink: term.cursor_blink,

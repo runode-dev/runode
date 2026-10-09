@@ -539,6 +539,7 @@ settings:
     shell: Shell
     scrollback: 回捲歷史
     clipboard: 剪貼簿
+    tasks: 專案命令
     login: 登入時啟動
     pairing: 配對手機
     push: 即時動態
@@ -563,6 +564,7 @@ settings:
     file_tree_font_size: 檔案樹字級
     file_tree_preview_click: 在預覽欄打開檔案
     preview_font_size: 預覽欄字級
+    task_placement: 執行專案命令
     theme: 主題
     background: 背景
     foreground: 前景
@@ -619,6 +621,7 @@ settings:
     file_tree_font_size: 單位是點。
     file_tree_preview_click: 單擊開成暫時分頁，打開別的檔案時被換掉；雙擊固定下來。
     preview_font_size: 單位是點。
+    task_placement: 標題列命令選單裡點了一條命令時，在哪開終端執行它。
     theme: 下面寫了的顏色會蓋過主題。選「淺色深色分開」時跟著系統外觀換。
     background: "顏色，例如 #1e1e2e，或顏色名稱。"
     foreground: 文字的顏色。
@@ -691,6 +694,10 @@ settings:
     file_tree_preview_click:
       single: 單擊
       double: 雙擊
+    task_placement:
+      right: 右邊分割
+      down: 下方分割
+      tab: 新分頁
     clipboard_write:
       allow: 允許
       deny: 拒絕

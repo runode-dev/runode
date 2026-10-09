@@ -22,6 +22,7 @@ config:
   file_tree_font_size: "File tree font size: a positive number, in points."
   file_tree_preview_click: "How to open a file from the file tree in the preview pane: single (default) or double. With single, a click opens a temporary tab that the next opened file replaces, and a double-click keeps it open. With double, a double-click opens a tab that stays."
   preview_font_size: "Preview pane font size: a positive number, in points."
+  task_placement: "Where the title bar's task menu runs a task: right (default), down or tab. right and down split the current terminal in the current tab and put the new one to its right or below; tab opens a new tab to the right of the current one."
   theme: |-
     Theme: a theme name listed at the end of this file, or the absolute path of a theme file. It can also
     follow the system appearance, e.g. light:Catppuccin Latte,dark:Catppuccin Mocha. The theme applies first,

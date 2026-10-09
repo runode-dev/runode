@@ -144,6 +144,8 @@ impl Page {
                 Section("clipboard"),
                 Row("clipboard-write", Choice(&["allow", "deny"])),
                 Row("clipboard-read", Choice(&["ask", "allow", "deny"])),
+                Section("tasks"),
+                Row("task-placement", Choice(&["right", "down", "tab"])),
             ],
             Self::Files => &[
                 Row("file-tree-font-size", Text(80.)),

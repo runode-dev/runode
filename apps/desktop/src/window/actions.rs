@@ -2,7 +2,7 @@
 
 use std::path::PathBuf;
 
-use gpui::{Bounds, Context, EntityId, Pixels, Window};
+use gpui::{Bounds, Context, Entity, EntityId, Pixels, Window};
 use runode_shared_types::pane::{self, Axis, Direction, SplitId};
 
 use super::{
@@ -10,6 +10,7 @@ use super::{
     NewSplitRight, NewTab, NextTab, NextWorkspace, PreviousTab, PreviousWorkspace, ResizePane, SelectLastTab,
     SelectLastWorkspace, SelectTab, SelectWorkspace, TogglePaneZoom, ToggleSidebar, WindowView,
 };
+use crate::terminal_view::TerminalView;
 
 /// 键盘调整分屏大小时每次挪动的像素。
 const RESIZE_STEP: f32 = 10.;
@@ -117,11 +118,20 @@ impl WindowView {
         self.split(Axis::Vertical, window, cx);
     }
 
-    /// 把当前终端一分为二，新终端放在右边或下边并获得焦点；workspace 里没有标签时新开一个标签。
     fn split(&mut self, axis: Axis, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(view) = self.spawn_beside_focused(window, cx) else {
-            return;
-        };
+        if let Some(view) = self.spawn_beside_focused(window, cx) {
+            self.split_with(view, axis, window, cx);
+        }
+    }
+
+    /// 把当前终端一分为二，`view` 放在右边或下边并获得焦点；workspace 里没有标签时新开一个标签。
+    pub(super) fn split_with(
+        &mut self,
+        view: Entity<TerminalView>,
+        axis: Axis,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         if self.tab().is_none() {
             self.insert_tab(0, view, window, cx);
             return;

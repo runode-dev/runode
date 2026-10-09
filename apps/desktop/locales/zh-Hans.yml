@@ -539,6 +539,7 @@ settings:
     shell: Shell
     scrollback: 回滚历史
     clipboard: 剪贴板
+    tasks: 项目命令
     login: 登录时启动
     pairing: 配对手机
     push: 实时活动
@@ -563,6 +564,7 @@ settings:
     file_tree_font_size: 文件树字号
     file_tree_preview_click: 在预览栏打开文件
     preview_font_size: 预览栏字号
+    task_placement: 跑项目命令
     theme: 主题
     background: 背景
     foreground: 前景
@@ -619,6 +621,7 @@ settings:
     file_tree_font_size: 单位是点。
     file_tree_preview_click: 单击开成临时标签，打开别的文件时被换掉；双击固定下来。
     preview_font_size: 单位是点。
+    task_placement: 标题栏命令菜单里点了一条命令时，在哪开终端跑它。
     theme: 下面写了的颜色会盖过主题。选「浅色深色分开」时跟着系统外观换。
     background: "颜色，比如 #1e1e2e，或者颜色名。"
     foreground: 文字的颜色。
@@ -691,6 +694,10 @@ settings:
     file_tree_preview_click:
       single: 单击
       double: 双击
+    task_placement:
+      right: 右边分屏
+      down: 下边分屏
+      tab: 新标签
     clipboard_write:
       allow: 允许
       deny: 拒绝

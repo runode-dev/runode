@@ -15,7 +15,7 @@ use runode_shared_types::{
 };
 
 use crate::{
-    CellHeight, Config, PreviewClick, StatusItem, WindowStyle, color,
+    CellHeight, Config, PreviewClick, StatusItem, TaskPlacement, WindowStyle, color,
     theme::{Theme, find_theme, pick_theme},
 };
 
@@ -36,6 +36,7 @@ pub const KEYS: &[&[&str]] = &[
         "status-bar-hidden",
     ],
     &["file-tree-font-size", "file-tree-preview-click", "preview-font-size"],
+    &["task-placement"],
     &[
         "theme",
         "background",
@@ -216,6 +217,14 @@ impl Config {
                     "" | "single" => PreviewClick::Single,
                     "double" => PreviewClick::Double,
                     _ => return Err("expected single or double".into()),
+                };
+            }
+            "task-placement" => {
+                self.task_placement = match value {
+                    "" | "right" => TaskPlacement::Right,
+                    "down" => TaskPlacement::Down,
+                    "tab" => TaskPlacement::Tab,
+                    _ => return Err("expected right, down or tab".into()),
                 };
             }
             "cursor-style" => {
@@ -815,6 +824,14 @@ unknown-key = whatever
         // 写之前问用户还没做，写成 ask 的按 deny 办。
         assert_eq!(load(&["clipboard-write = ask"]).clipboard_write, ClipboardWrite::Deny);
         assert!(Config::default().apply("clipboard-write", "ask", true).is_err());
+    }
+
+    #[test]
+    fn task_placement_defaults_to_right() {
+        assert_eq!(Config::default().task_placement, TaskPlacement::Right);
+        assert_eq!(load(&["task-placement = tab"]).task_placement, TaskPlacement::Tab);
+        assert_eq!(load(&["task-placement = down"]).task_placement, TaskPlacement::Down);
+        assert_eq!(load(&["task-placement = tab\ntask-placement = left"]).task_placement, TaskPlacement::Tab);
     }
 
     #[test]
