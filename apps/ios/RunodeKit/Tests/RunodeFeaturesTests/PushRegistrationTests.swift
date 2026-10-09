@@ -273,6 +273,40 @@ private let secondToken = Data([0x01, 0x02])
         #expect(preferences.load()?.alertsBlockedAgents == false)
     }
 
+    /// 删掉连着的电脑：先注销推送，电脑回了话才断开、删掉记录，免得电脑以后还往这部手机推它的提醒。
+    @Test func deletingAConnectedMachineUnregistersFirst() async throws {
+        let app = await app()
+        system.give(token: Data([0xab]))
+        #expect(await eventually { app.push.token == "ab" })
+        let list = try #require(app.sessionList(for: machine.id))
+        connect(list)
+        #expect(await eventually { link.registrations.count == 1 })
+        let deleting = Task { await app.machineList.delete(machine.id) }
+        #expect(await eventually { link.registrations.count == 2 })
+        #expect(link.registrations.last?.token == nil)
+        #expect(link.registrations.last?.machine == machine.id.uuidString)
+        try await Task.sleep(for: .milliseconds(20))
+        // 还在等回话：没断开，记录也还在。
+        #expect(link.stops == 0)
+        #expect(app.machineList.machine(machine.id) != nil)
+        let req = try #require(link.registrations.last?.req)
+        list.handle(.message(.done(req: req)))
+        await deleting.value
+        #expect(app.machineList.machines.isEmpty)
+        #expect(await eventually { link.stops == 1 })
+        #expect(app.push.statuses[machine.id] == nil)
+    }
+
+    /// 没连着的电脑删掉时不发注销，也不等。
+    @Test func deletingADisconnectedMachineDoesNotWait() async throws {
+        let app = await app()
+        system.give(token: Data([0xab]))
+        #expect(await eventually { app.push.token == "ab" })
+        await app.machineList.delete(machine.id)
+        #expect(app.machineList.machines.isEmpty)
+        #expect(link.registrations.isEmpty)
+    }
+
     /// 进后台断开时不再等回话（不然到时候会被当成不支持），回前台连上时再登记。
     @Test func backgroundStopsWaitingAndForegroundRegistersAgain() async throws {
         let app = await app()

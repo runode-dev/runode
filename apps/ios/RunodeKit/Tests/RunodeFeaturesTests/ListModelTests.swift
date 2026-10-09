@@ -206,15 +206,31 @@ import Testing
         #expect(!model.isSpawning)
     }
 
-    /// 旧电脑不认识 `OpenWorkspace`，回不带编号的「unknown message」：提示升级，不一直转圈。
-    @Test func anOldComputerCannotCreateWorkspaces() async {
+    /// 等 `OpenWorkspace` 时来了不带编号的「unknown message」（旧版电脑不认识同一条连接上的
+    /// `ListProjectTasks`）：不是给新建工作区的，照样等着，随后的 `Opened` 仍然打开新终端；项目命令那边认下它。
+    @Test func unnumberedErrorsAreNotTakenForTheWorkspaceReply() async {
         let model = SessionListModel(machine: machineRecord(), link: link)
         model.handle(.ready(generation: 1))
         model.handle(.message(.layout(req: 0, windows: [WindowLayout(index: 1, workspaces: [])])))
+        await model.loadProjectTasks(in: "/tmp")
+        link.clearSent()
         await model.createWorkspace(at: "/Users/ethan")
+        guard case .openWorkspace(let req, _, _, _)? = link.sent.first else {
+            Issue.record("expected an open_workspace, got \(link.sent)")
+            return
+        }
+        var spawned: [SessionId] = []
+        model.onSpawned = { spawned.append($0) }
         model.handle(.message(.error(req: nil, id: nil, message: HostMsg.unknownMessage)))
+        #expect(model.isSpawning)
+        #expect(model.errorMessage == nil)
+        // 没开成的项目命令不再要。
+        link.clearSent()
+        await model.loadProjectTasks(in: "/var")
+        #expect(link.sent.isEmpty)
+        model.handle(.message(.opened(req: req, id: sessionB)))
+        #expect(spawned == [sessionB])
         #expect(!model.isSpawning)
-        #expect(model.errorMessage?.contains("太旧") == true)
     }
 
     /// 新建工作区时填的名字去掉首尾空白后带上；只有空白时当没填。
@@ -807,6 +823,21 @@ extension LinkState {
         #expect(link.sent.last.map { if case .listDirs(_, nil) = $0 { true } else { false } } == true)
         #expect(picker.isLoading)
         #expect(picker.errorMessage == nil)
+    }
+
+    /// 不带编号的「unknown message」是旧版电脑不认识别的请求回的，不当成列目录的回话，接着等。
+    @Test func unnumberedErrorsAreNotClaimed() async {
+        let picker = DirectoryPickerModel(link: link)
+        await picker.load(nil)
+        guard case .listDirs(let req, nil)? = link.sent.last else {
+            Issue.record("expected list_dirs for home, got \(link.sent)")
+            return
+        }
+        #expect(!picker.handle(.error(req: nil, id: nil, message: HostMsg.unknownMessage)))
+        #expect(picker.isLoading)
+        #expect(picker.errorMessage == nil)
+        #expect(picker.handle(.dirs(req: req, path: "/Users/ethan", dirs: ["dev"], truncated: false)))
+        #expect(picker.path == "/Users/ethan")
     }
 
     @Test func theRootHasNoParent() async {

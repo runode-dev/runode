@@ -162,7 +162,8 @@ public final class SessionListModel {
     @ObservationIgnored private var watching: Set<SessionId> = []
     /// 终端页开着的会话。
     @ObservationIgnored private var screens: Set<SessionId> = []
-    /// 在等回话的新开终端、新建工作区的请求。
+    /// 在等回话的新开终端、新建工作区的请求。宿主对 `Open`、`OpenWorkspace`、`Spawn` 出错一定回带编号的
+    /// `Error`，不带编号的「unknown message」是给别的请求（比如旧版电脑不认识的 `ListProjectTasks`）的，不认领。
     @ObservationIgnored private var pendingSpawn: PendingSpawn?
     /// 在等回话的工作区改名的请求编号。
     @ObservationIgnored private var pendingRenames: Set<UInt32> = []
@@ -703,13 +704,6 @@ public final class SessionListModel {
             } else if req == Self.layoutRequest {
                 // 电脑上没有 app 的界面连着宿主：所有会话都在后台。
                 windows = []
-            } else if req == nil, message == HostMsg.unknownMessage, let pending = pendingSpawn,
-                pending.fallback == nil
-            {
-                // 电脑上的 runode 太旧，不认识 `OpenWorkspace`，回的 `Error` 不带编号。
-                pendingSpawn = nil
-                isSpawning = false
-                errorMessage = String(localized: "\(pending.failure)：电脑上的 runode 版本太旧，先升级它。")
             } else if req == nil, message == HostMsg.unknownMessage, !pendingRenames.isEmpty {
                 // 电脑上的 runode 太旧，不认识 `RenameWorkspace`。
                 pendingRenames = []

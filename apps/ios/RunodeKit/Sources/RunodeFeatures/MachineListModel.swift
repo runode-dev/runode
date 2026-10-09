@@ -18,8 +18,8 @@ public final class MachineListModel {
 
     @ObservationIgnored private let store: any MachineStore
     @ObservationIgnored private let keyStore: any DeviceKeyStore
-    /// 删掉一台电脑之前先断开它的连接、退出它的页面。
-    @ObservationIgnored public var willDelete: @MainActor (UUID) -> Void = { _ in }
+    /// 删掉一台电脑之前先注销推送、断开它的连接、退出它的页面。
+    @ObservationIgnored public var willDelete: @MainActor (UUID) async -> Void = { _ in }
     /// 每次重新读完列表（配对、改名、删除之后都会读）以后调，`AppModel` 据此给每台电脑建好连接。
     @ObservationIgnored public var didLoad: @MainActor () -> Void = {}
 
@@ -42,7 +42,7 @@ public final class MachineListModel {
     public func add(_ machine: MachineRecord) async {
         do {
             for old in machines where old.fingerprint == machine.fingerprint && old.id != machine.id {
-                willDelete(old.id)
+                await willDelete(old.id)
                 try? keyStore.deleteKey(for: old.id)
                 try await store.remove(id: old.id)
             }
@@ -77,7 +77,7 @@ public final class MachineListModel {
     }
 
     public func delete(_ id: UUID) async {
-        willDelete(id)
+        await willDelete(id)
         do {
             try keyStore.deleteKey(for: id)
             try await store.remove(id: id)

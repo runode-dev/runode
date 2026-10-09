@@ -29,7 +29,7 @@
                     }
                 }
                 .navigationDestination(for: UUID.self) { id in
-                    MachineSettingsView(machines: machines, id: id)
+                    MachineSettingsView(app: app, machines: machines, id: id)
                 }
             }
         }
@@ -230,6 +230,7 @@
 
     /// 一台电脑的详情：改名、看配对信息、删除。
     private struct MachineSettingsView: View {
+        let app: AppModel
         @Bindable var machines: MachineListModel
         let id: UUID
         @State private var name = ""
@@ -296,6 +297,11 @@
                                     await machines.delete(id)
                                     dismiss()
                                 }
+                            }
+                        } message: {
+                            // 连着时删除前会先注销推送（`PushRegistration.unregister`）；没连着就注销不了。
+                            if app.sessionList(for: id)?.linkState.isConnected != true {
+                                Text("现在没连着这台电脑，它上面的 agent 等回答时可能还会推送到这部手机，可以在那台电脑上运行 `runode remote revoke \(machine.deviceId.prefix(8))` 撤销配对。")
                             }
                         }
                 } footer: {

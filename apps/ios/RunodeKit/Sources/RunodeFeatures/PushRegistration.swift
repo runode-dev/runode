@@ -155,6 +155,15 @@ public final class PushRegistration {
         register(machine.id)
     }
 
+    /// 这台电脑要删掉了：连着的话先注销，等电脑回话（最多 `timeout`）再返回，免得删掉以后电脑上的 agent
+    /// 等回答时还往这部手机推它的提醒，点开又找不到这台电脑。没连着时马上返回。
+    func unregister(_ id: UUID, timeout: Duration) async {
+        guard peers[id] != nil else { return }
+        register(id, unregistering: true, timeout: timeout)
+        // 回话到了（`handle`）、断开了（`disconnected`）或者超时，等回话的任务都会结束。
+        await pending[id]?.task.value
+    }
+
     /// 这台电脑删掉了：连它的结果一起忘掉。
     func forget(_ id: UUID) {
         disconnected(id)
@@ -186,11 +195,12 @@ public final class PushRegistration {
         }
     }
 
-    /// 对这台电脑登记（关着提醒时注销）。打开着提醒却还没拿到 token 时先不发，拿到了再发。
-    private func register(_ id: UUID) {
+    /// 对这台电脑登记（关着提醒或者 `unregistering` 时注销）。打开着提醒却还没拿到 token 时先不发，拿到了再发。
+    /// `timeout` 为空时等 `replyTimeout`。
+    private func register(_ id: UUID, unregistering: Bool = false, timeout: Duration? = nil) {
         guard let peer = peers[id], let identity, system != nil else { return }
         let token: String?
-        if enabled {
+        if enabled && !unregistering {
             guard let current = self.token else { return }
             token = current
         } else {
@@ -199,7 +209,7 @@ public final class PushRegistration {
         pending.removeValue(forKey: id)?.task.cancel()
         attempts += 1
         let attempt = attempts
-        let timeout = replyTimeout
+        let timeout = timeout ?? replyTimeout
         let task = Task { [weak self] in
             let req = await peer.link.nextRequestId()
             guard let self, self.pending[id]?.attempt == attempt else { return }

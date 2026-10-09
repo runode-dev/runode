@@ -115,7 +115,7 @@ public final class AppModel {
             enabled: settings.preferences.alertsBlockedAgents)
         recent = dependencies.recents.load()
         savedTheme = dependencies.themes.load()
-        machineList.willDelete = { [weak self] id in self?.forget(machine: id) }
+        machineList.willDelete = { [weak self] id in await self?.forget(machine: id) }
         machineList.didLoad = { [weak self] in self?.syncConnections() }
         settings.deviceNameDidChange = { [weak self] name in self?.deviceNameChanged(name) }
         settings.alertsDidChange = { [weak self] enabled in self?.push.enabled = enabled }
@@ -407,10 +407,11 @@ public final class AppModel {
         }
     }
 
-    /// 要删掉的电脑：先退出它的页面、断开连接。
-    private func forget(machine id: UUID) {
-        push.forget(id)
+    /// 要删掉的电脑：先退出它的页面；连着的话注销推送，等电脑回话（最多两秒）再断开连接。
+    private func forget(machine id: UUID) async {
         path.removeAll { $0.machine == id }
+        await push.unregister(id, timeout: .seconds(2))
+        push.forget(id)
         sessionLists[id]?.stop()
         sessionLists[id] = nil
     }

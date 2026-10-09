@@ -87,7 +87,8 @@ public final class DirectoryPickerModel {
         errorMessage = String(localized: "未连接")
     }
 
-    /// 是给自己的回话时处理掉并返回真。
+    /// 是给自己的回话时处理掉并返回真。不认领不带编号的 `Error`：宿主对 `ListDirs` 出错一定回带编号的，
+    /// 不带编号的「unknown message」是旧版电脑不认识同一条连接上别的请求（比如 `ListProjectTasks`）回的。
     func handle(_ message: HostMsg) -> Bool {
         switch message {
         case .dirs(let req, let path, let dirs, let truncated) where req == pending:
@@ -101,12 +102,6 @@ public final class DirectoryPickerModel {
             pending = nil
             isLoading = false
             errorMessage = message
-            return true
-        case .error(nil, _, HostMsg.unknownMessage) where pending != nil:
-            // 电脑上的 runode 太旧，不认识 `ListDirs`，回的 `Error` 不带编号。
-            pending = nil
-            isLoading = false
-            errorMessage = String(localized: "电脑上的 runode 版本太旧，不能浏览目录，先升级它。")
             return true
         default:
             return false

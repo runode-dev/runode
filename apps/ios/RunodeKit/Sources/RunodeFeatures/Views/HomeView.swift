@@ -146,7 +146,12 @@
                     ) {
                         Button("删除", role: .destructive) { Task { await machines.delete(machine.id) } }
                     } message: {
-                        Text("会删掉这部手机上为它保存的设备密钥，以后要重新扫码配对。电脑上的配对记录请在那台电脑上撤销。")
+                        // 连着时删除前会先注销推送（`PushRegistration.unregister`）；没连着就注销不了。
+                        if app.sessionList(for: machine.id)?.linkState.isConnected == true {
+                            Text("会删掉这部手机上为它保存的设备密钥，以后要重新扫码配对。电脑上的配对记录请在那台电脑上撤销。")
+                        } else {
+                            Text("会删掉这部手机上为它保存的设备密钥，以后要重新扫码配对。现在没连着这台电脑，它上面的 agent 等回答时可能还会推送到这部手机，可以在那台电脑上运行 `runode remote revoke \(machine.deviceId.prefix(8))` 撤销配对。")
+                        }
                     }
                 }
             }

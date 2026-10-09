@@ -185,29 +185,6 @@
         }
       }
     },
-    "%@：电脑上的 runode 版本太旧，先升级它。" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%@: runode on your Mac is too old. Update it first."
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%@：电脑上的 runode 版本太旧，先升级它。"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%@：電腦上的 runode 版本太舊，請先升級。"
-          }
-        }
-      }
-    },
     "%lld" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -1175,6 +1152,29 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "以樹狀檢視"
+          }
+        }
+      }
+    },
+    "会删掉这部手机上为它保存的设备密钥，以后要重新扫码配对。现在没连着这台电脑，它上面的 agent 等回答时可能还会推送到这部手机，可以在那台电脑上运行 `runode remote revoke %@` 撤销配对。" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This deletes the device key saved on this phone for it, so you'll need to scan a code to pair again. This phone isn't connected to the Mac right now, so agents there may still send notifications here when they're waiting for an answer. Run `runode remote revoke %@` on that Mac to revoke the pairing."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "会删掉这部手机上为它保存的设备密钥，以后要重新扫码配对。现在没连着这台电脑，它上面的 agent 等回答时可能还会推送到这部手机，可以在那台电脑上运行 `runode remote revoke %@` 撤销配对。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "會刪掉這部手機上為它儲存的裝置金鑰，之後要重新掃碼配對。現在沒連著這台電腦，它上面的 agent 等回答時可能還會推送到這部手機，可以在那台電腦上執行 `runode remote revoke %@` 撤銷配對。"
           }
         }
       }
@@ -5171,6 +5171,29 @@
         }
       }
     },
+    "现在没连着这台电脑，它上面的 agent 等回答时可能还会推送到这部手机，可以在那台电脑上运行 `runode remote revoke %@` 撤销配对。" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This phone isn't connected to the Mac right now, so agents there may still send notifications here when they're waiting for an answer. Run `runode remote revoke %@` on that Mac to revoke the pairing."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "现在没连着这台电脑，它上面的 agent 等回答时可能还会推送到这部手机，可以在那台电脑上运行 `runode remote revoke %@` 撤销配对。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "現在沒連著這台電腦，它上面的 agent 等回答時可能還會推送到這部手機，可以在那台電腦上執行 `runode remote revoke %@` 撤銷配對。"
+          }
+        }
+      }
+    },
     "电脑" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -5420,29 +5443,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "電腦上的 runode 沒開著視窗，無法建立工作區，會在這個目錄裡開一個背景終端機。"
-          }
-        }
-      }
-    },
-    "电脑上的 runode 版本太旧，不能浏览目录，先升级它。" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "runode on your Mac is too old to browse folders. Update it first."
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "电脑上的 runode 版本太旧，不能浏览目录，先升级它。"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "電腦上的 runode 版本太舊，無法瀏覽目錄，請先升級。"
           }
         }
       }
