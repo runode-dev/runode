@@ -74,11 +74,14 @@ fn role_old() {
 }
 
 /// 新宿主：接手 socket 上的旧宿主，结果写进 `<tag>.result`（`ok <会话数> <退成重放的会话>` 或者
-/// `err <错误>`），成功的话之前先把自己开着的描述符个数写进 `<tag>.fds`，然后照常跑到交接出去
-/// 或者空闲，原因写进 `<tag>.stopped`。
+/// `err <错误>`），成功的话之前先把接手后比起动时多开着的描述符个数写进 `<tag>.fds`，然后照常跑到
+/// 交接出去或者空闲，原因写进 `<tag>.stopped`。
 #[test]
 fn role_successor() {
     let Some(dir) = role("successor") else { return };
+    // `Role::start` 用标准库拉起角色进程，不像 `launch_successor` 那样只留指定的描述符：同一个测试
+    // 进程里别的测试刚收下、还没来得及设 close-on-exec 的描述符会被带过来，所以只数接手多出来的。
+    let inherited = open_fds();
     let tag = std::env::var(TAG).unwrap_or_else(|_| "successor".into());
     log_to(&dir.join(format!("{tag}.log")));
     let build = std::env::var(SUCCESSOR_BUILD).unwrap_or_else(|_| NEW_BUILD.into());
@@ -90,7 +93,7 @@ fn role_successor() {
         Ok(report) => {
             // 交接用的连接、管道这些稍后才关完。
             thread::sleep(Duration::from_millis(200));
-            std::fs::write(dir.join(format!("{tag}.fds")), open_fds().to_string()).unwrap();
+            std::fs::write(dir.join(format!("{tag}.fds")), (open_fds() - inherited).to_string()).unwrap();
             let replayed: Vec<String> = report.replayed.iter().map(ToString::to_string).collect();
             format!("ok {} {}", report.sessions, replayed.join(","))
         }
