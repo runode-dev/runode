@@ -358,6 +358,10 @@ import Testing
         other.handle(.ready(generation: 1))
         other.handle(.message(.error(req: nil, id: sessionB, message: "no session")))
         #expect(other.phase == .gone("no session"))
+        #expect(other.isEnded)
+        // 重新连上时照样再问一次，但不回到「连接中」，印章不闪。
+        other.handle(.ready(generation: 2))
+        #expect(other.phase == .gone("no session"))
     }
 
     @Test func openingSubscribesAndClosingHandsBack() async {

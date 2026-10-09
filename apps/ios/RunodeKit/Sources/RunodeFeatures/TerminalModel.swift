@@ -158,6 +158,14 @@ public final class TerminalModel {
         return false
     }
 
+    /// 会话结束了（shell 退出，或者宿主那边已经没有它）：不能再往里打字。
+    public var isEnded: Bool {
+        switch phase {
+        case .exited, .gone: true
+        default: false
+        }
+    }
+
     /// 开始看这个会话：订阅连接的事件，连上了就 `Attach`。连接本身的开、停归会话列表管。
     public func open() {
         guard task == nil else { return }
@@ -346,7 +354,8 @@ public final class TerminalModel {
         case .resync: break
         case .reconnect, nil: requestedFit = size
         }
-        if case .exited = phase {} else { phase = .connecting }
+        // 结束了的会话重连时不回到「连接中」，印章不闪、按键不复活。
+        if !isEnded { phase = .connecting }
         link.send(.attach(id: sessionId, size: size, mode: .vtReplay))
     }
 

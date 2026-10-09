@@ -34,6 +34,8 @@
                 onMake: { view in terminalView = view })
                 .ignoresSafeArea(.container, edges: .horizontal)
                 .overlay(alignment: .top) { banner }
+                // 印章的出现要由外层驱动；动画只挂在这层 ZStack 上，不让终端跟着按键栏收起播改尺寸的动画。
+                .overlay { ZStack { endedStamp }.animation(.spring(duration: 0.3), value: model.isEnded) }
                 .overlay(alignment: .bottomTrailing) {
                     if model.scrolledBack {
                         Button("回到最新", systemImage: "arrow.down.to.line") { model.scrollToBottom() }
@@ -125,20 +127,29 @@
             } label: {
                 Image(systemName: model.fitsPhone ? "iphone" : "laptopcomputer")
             }
+            // 会话结束了，尺寸改不了了。
+            .disabled(model.isEnded)
             .accessibilityLabel("终端尺寸：\(Presentation.sizePreference(model.fitsPhone ? .fitPhone : .followMachine))")
             .accessibilityHint("在适配手机和跟随电脑之间切换")
         }
 
         private var moreMenu: some View {
             Menu {
-                Button("键盘", systemImage: "keyboard") { model.showKeyboard() }
+                if !model.isEnded {
+                    Button("键盘", systemImage: "keyboard") { model.showKeyboard() }
+                }
                 Button("回到最新", systemImage: "arrow.down.to.line") { model.scrollToBottom() }
-                Button("Git", systemImage: "arrow.triangle.branch") { onOpenGit() }
-                if let sessions, let session {
+                // 会话结束了宿主那边就没有它了，Git 请求只会回「no session」。
+                if !model.isEnded {
+                    Button("Git", systemImage: "arrow.triangle.branch") { onOpenGit() }
+                }
+                if let sessions, let session, !model.isEnded {
                     ProjectTasksSection(model: sessions, session: session) { model.scrollToBottom() }
                 }
-                Button("结束会话", systemImage: "xmark.circle", role: .destructive) {
-                    model.isConfirmingKill = true
+                if !model.isEnded {
+                    Button("结束会话", systemImage: "xmark.circle", role: .destructive) {
+                        model.isConfirmingKill = true
+                    }
                 }
             } label: {
                 Image(systemName: "ellipsis")
@@ -183,6 +194,41 @@
             }
         }
 
+        /// 会话结束了时斜盖在终端上的印章：大字「已结束」，下面一行小字说怎么结束的。点不到它，终端照样能滚动、
+        /// 选字。
+        @ViewBuilder
+        private var endedStamp: some View {
+            if let detail = endedDetail {
+                VStack(spacing: 4) {
+                    Text("已结束")
+                        .font(.largeTitle.weight(.heavy))
+                    Text(detail)
+                        .font(.footnote.weight(.semibold))
+                        .multilineTextAlignment(.center)
+                        .lineLimit(2)
+                }
+                .foregroundStyle(.red.opacity(0.75))
+                .padding(.horizontal, 20)
+                .padding(.vertical, 12)
+                .overlay { RoundedRectangle(cornerRadius: 10).strokeBorder(.red.opacity(0.75), lineWidth: 3) }
+                .frame(maxWidth: 280)
+                .rotationEffect(.degrees(-12))
+                .allowsHitTesting(false)
+                .accessibilityElement(children: .combine)
+                .transition(.scale(scale: 1.4).combined(with: .opacity))
+            }
+        }
+
+        /// 印章下面的小字；会话没结束时为空。
+        private var endedDetail: String? {
+            switch model.phase {
+            case .exited(let status?): String(localized: "shell 已退出（退出码 \(status)）")
+            case .exited(nil): String(localized: "shell 已退出")
+            case .gone(let message): String(localized: "这个终端已经不在了：\(message)")
+            default: nil
+            }
+        }
+
         /// 横幅上的文字；不用横幅时为空。
         private var bannerMessage: ((Date) -> String)? {
             switch model.phase {
@@ -192,12 +238,6 @@
                     if case .failed(let failure) = state { return failure.errorDescription ?? String(localized: "连接失败") }
                     return Presentation.linkStatus(state, now: now)
                 }
-            case .exited(let status?):
-                return { _ in String(localized: "shell 已退出（退出码 \(status)）") }
-            case .exited(nil):
-                return { _ in String(localized: "shell 已退出") }
-            case .gone(let message):
-                return { _ in String(localized: "这个终端已经不在了：\(message)") }
             case .connecting where connectingLong:
                 return { _ in String(localized: "正在连接…") }
             default:
@@ -233,7 +273,7 @@
                 }
                 // 软键盘弹出时键盘上方有一样的辅助栏，这条就收起来。尺寸跟随谁看导航栏右边的图标。不加动画：
                 // 和键盘让出的地方在同一次布局里换好，终端只改一次大小；渐隐的话动画的每一帧都让宿主改一次尺寸。
-                if !model.keyboardVisible, let terminalView {
+                if !model.keyboardVisible, !model.isEnded, let terminalView {
                     RestingKeyBar(terminalView: terminalView)
                         .frame(height: 44)
                 }
@@ -354,6 +394,7 @@
             view.topObstruction = topObstruction
             view.fontSizeOverride = preferences.fontSize.map { CGFloat($0) }
             view.bellHaptics = preferences.bellHaptics
+            view.acceptsInput = !model.isEnded
         }
 
         @MainActor

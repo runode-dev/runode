@@ -86,6 +86,11 @@
         /// 程序响铃时震一下。
         public var bellHaptics = true
 
+        /// 能打字：会话结束了时为假，点终端不弹键盘，开着的键盘收起来。
+        public var acceptsInput = true {
+            didSet { if !acceptsInput, isFirstResponder { resignFirstResponder() } }
+        }
+
         /// 默认字号（13 点）和可读的最小字号（9 点），都按动态字体放大缩小；用户定了字号时默认字号用它，
         /// 可读的最小字号不超过它。
         static func fontSizes(for traits: UITraitCollection, override: CGFloat? = nil) -> (
@@ -506,6 +511,7 @@
 
         /// 唤起键盘，把光标露出来。
         public func showKeyboard() {
+            guard acceptsInput else { return }
             if !isFirstResponder {
                 becomeFirstResponder()
             }
@@ -636,7 +642,7 @@
 
         // MARK: 焦点
 
-        public override var canBecomeFirstResponder: Bool { true }
+        public override var canBecomeFirstResponder: Bool { acceptsInput }
 
         public override var inputAccessoryView: UIView? { accessoryBar }
 
