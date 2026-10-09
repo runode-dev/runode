@@ -82,6 +82,19 @@ link_cli() {
     esac
 }
 
+# install_macos 对调 Runode.app 时的退出处理，见那里。
+restore_app() {
+    rm -rf "$new"
+    if [ ! -e "$app" ] && [ -e "$old" ]; then
+        if mv "$old" "$app"; then
+            say "已把旧的 Runode.app 放回 $app"
+        else
+            printf '旧的 Runode.app 没能放回原处，在 %s，把它改名回 %s 即可\n' "$old" "$app" >&2
+        fi
+    fi
+    rm -rf "$tmp"
+}
+
 install_macos() {
     # Rosetta 下 uname -m 也报 x86_64，按硬件判断，Apple 芯片一律装 arm64。
     if [ "$(sysctl -n hw.optional.arm64 2>/dev/null || echo 0)" = 1 ]; then arch=arm64; else arch=x86_64; fi
@@ -118,26 +131,24 @@ and certificate leaf[subject.OU] = \"$team_id\"" "$tmp/Runode.app" ||
         say "提示：Runode 正在运行，装好后重开一次才换成新版本。"
     fi
     # 直接覆盖会把新旧两份文件混在一起，所以整个换。新包先挪进目标目录里的临时名：跨卷时这一步是
-    # 拷贝，慢也可能失败，失败时旧的还没动；之后在同一个目录里改名对调，新的换不上就把旧的挪回去。
+    # 拷贝，慢也可能失败，失败时旧的还没动；之后在同一个目录里改名对调。
     app=$app_dir/Runode.app
     new=$app_dir/.Runode.app.new.$$
     old=$app_dir/.Runode.app.old.$$
+    # 以前的脚本换不上新的时把旧的留在 Runode.app.old，不知道用户还要不要，只提醒不删。
+    if [ ! -e "$app" ] && [ -e "$app_dir/Runode.app.old" ]; then
+        say "提示：$app_dir/Runode.app.old 是以前的安装脚本没装完留下的旧版 Runode，确认不要了可以删掉。"
+    fi
     rm -rf "$new" "$old"
-    mv "$tmp/Runode.app" "$new" || {
-        rm -rf "$new"
-        fail "不能把 Runode.app 放进 $app_dir"
-    }
-    if [ -e "$app" ] && ! mv "$app" "$old"; then
-        rm -rf "$new"
-        fail "挪不开旧的 $app"
-    fi
-    if ! mv "$new" "$app"; then
-        rm -rf "$new"
-        if [ -e "$old" ] && ! mv "$old" "$app"; then
-            fail "换不上新的 Runode.app，旧的也没能放回原处，在 $old，把它改名回 $app 即可"
-        fi
-        fail "换不上新的 Runode.app，旧的还在原处"
-    fi
+    # 对调期间失败、被 Ctrl-C 或 kill 打断时：删掉没换上的新包，旧的已经挪开、新的还没换上就把旧的挪回去。
+    trap restore_app EXIT
+    trap 'exit 130' INT
+    trap 'exit 143' TERM
+    mv "$tmp/Runode.app" "$new" || fail "不能把 Runode.app 放进 $app_dir"
+    if [ -e "$app" ]; then mv "$app" "$old" || fail "挪不开旧的 $app"; fi
+    mv "$new" "$app" || fail "换不上新的 Runode.app"
+    trap 'rm -rf "$tmp"' EXIT
+    trap - INT TERM
     rm -rf "$old"
 
     link_cli "$app/Contents/MacOS/runode"

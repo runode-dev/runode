@@ -187,3 +187,38 @@ fn update(dirs: &Dirs, change: impl FnOnce(&mut Table) -> bool) -> io::Result<bo
     }
     Ok(changed)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 几个线程同时各加一台设备：`update` 拿着锁读改写，谁加的都不会被别人写回去的旧表盖掉。
+    #[test]
+    fn devices_added_at_the_same_time_are_all_kept() {
+        let root = std::env::temp_dir().join(format!("rra-devices-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        let dirs = Dirs::from_vars(|_| Some(root.clone().into()));
+        let barrier = std::sync::Barrier::new(16);
+        std::thread::scope(|scope| {
+            for n in 0..16u8 {
+                let (dirs, barrier) = (&dirs, &barrier);
+                scope.spawn(move || {
+                    let device = Device {
+                        device_id: DeviceId([n; 16]),
+                        name: format!("phone {n}"),
+                        public_key: Bytes(vec![4; 65]),
+                        paired_at: 0,
+                        last_seen: 0,
+                    };
+                    barrier.wait();
+                    add(dirs, device).unwrap();
+                });
+            }
+        });
+        let mut ids: Vec<u8> = list_devices(&dirs).unwrap().iter().map(|device| device.device_id.0[0]).collect();
+        ids.sort_unstable();
+        assert_eq!(ids, (0..16).collect::<Vec<_>>());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+}

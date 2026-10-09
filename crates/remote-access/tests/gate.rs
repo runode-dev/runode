@@ -359,6 +359,47 @@ fn the_certificate_stays_the_same_across_restarts() {
     assert_eq!(runode_remote_access::listener_status(&harness.dirs).unwrap(), None);
 }
 
+/// 只剩证书或只剩私钥（上次写到一半）时重新生成一份，两个文件都换新，配对过的手机要重新配对。
+#[test]
+fn half_a_certificate_is_regenerated() {
+    let mut harness = Harness::start("half-cert");
+    let cert = harness.dirs.remote_access_cert_file().unwrap();
+    let key = harness.dirs.remote_access_key_file().unwrap();
+    for lost in [&key, &cert] {
+        let before = harness.fingerprint;
+        let kept = if lost == &key { &cert } else { &key };
+        let kept_before = std::fs::read(kept).unwrap();
+        harness.listener = None;
+        std::fs::remove_file(lost).unwrap();
+        harness.fingerprint = harness.restart();
+        assert_ne!(harness.fingerprint, before, "{} lost", lost.display());
+        assert!(lost.exists());
+        assert_ne!(std::fs::read(kept).unwrap(), kept_before);
+        harness.phone();
+    }
+}
+
+/// 证书或私钥的内容坏了时开不了监听，报错，文件原样留着，不悄悄换一份让配对过的手机全都失配。
+#[test]
+fn a_corrupt_certificate_stops_the_listener_without_replacing_it() {
+    let mut harness = Harness::start("bad-cert");
+    harness.listener = None;
+    let cert = harness.dirs.remote_access_cert_file().unwrap();
+    let key = harness.dirs.remote_access_key_file().unwrap();
+    for broken in [&cert, &key] {
+        let good = std::fs::read(broken).unwrap();
+        std::fs::write(broken, b"not DER").unwrap();
+        let started = runode_remote_access::Listener::start(options(
+            &harness.dirs,
+            std::sync::Arc::new(|| Err(std::io::Error::other("unused"))),
+        ));
+        assert!(started.is_err(), "{} is corrupt", broken.display());
+        assert_eq!(std::fs::read(broken).unwrap(), b"not DER");
+        std::fs::write(broken, good).unwrap();
+    }
+    assert_eq!(harness.restart(), harness.fingerprint);
+}
+
 fn mode(path: &Path) -> u32 {
     use std::os::unix::fs::PermissionsExt as _;
     std::fs::metadata(path).unwrap().permissions().mode() & 0o777

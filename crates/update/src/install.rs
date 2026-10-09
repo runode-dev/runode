@@ -60,7 +60,7 @@ impl Installation {
     }
 
     fn stage_into(&self, dir: &Path, url: &str, version: &str, progress: &dyn Fn(u64, u64)) -> Result<Staged, Error> {
-        // 上次下好却没装上（app 没正常退出、对调失败）留下的先删掉。
+        // 上次下好却没装上（app 没正常退出）留下的先删掉。
         if dir.exists() {
             fs::remove_dir_all(dir).map_err(|err| io(dir, err))?;
         }
@@ -71,7 +71,8 @@ impl Installation {
         // ditto 解压时保留符号链接（.app 里的 rn）和扩展属性，签名才对得上。
         run(Command::new("/usr/bin/ditto").arg("-x").arg("-k").arg(&zip).arg(dir))?;
         fs::remove_file(&zip).map_err(|err| io(&zip, err))?;
-        let new_app = only_app_in(dir)?;
+        let name = self.app.file_name().unwrap_or(OsStr::new("Runode.app"));
+        let new_app = only_app_in(dir, name)?;
         verify(&new_app, &self.team, version)?;
         tracing::info!("staged Runode {version} at {}", new_app.display());
         Ok(Staged {
@@ -111,13 +112,21 @@ impl Staged {
 
     /// 再核对一次签名和版本号，和装着的 .app 对调，再删掉换下来的旧版本。在跑的进程照常跑完，下次
     /// 启动的是新版本。从下好到退出可能隔了几个小时，暂存目录又是用户写得了的，所以装上前再核对。
+    /// 没装上（签名不对、对调失败）时装着的那份不动，暂存目录照样删掉，下次重新下载。
     pub fn install(self) -> Result<(), Error> {
-        verify(&self.new_app, &self.team, &self.version)?;
-        swap(&self.new_app, &self.target).map_err(|err| io(&self.target, err))?;
-        tracing::info!("installed Runode {} at {}", self.version, self.target.display());
+        self.install_checked(verify)
+    }
+
+    /// `install` 的实现。`verify` 由测试换掉：测试里签不出 Developer ID 签名，走不到对调。
+    fn install_checked(self, verify: fn(&Path, &str, &str) -> Result<(), Error>) -> Result<(), Error> {
+        let installed = verify(&self.new_app, &self.team, &self.version)
+            .and_then(|()| swap(&self.new_app, &self.target).map_err(|err| io(&self.target, err)));
+        // 装上了时暂存目录里是换下来的旧版本，没装上时是用不上的新包；对调是原子的，失败时什么都没换。
         if let Err(err) = fs::remove_dir_all(&self.dir) {
-            tracing::warn!("failed to remove the old version in {}: {err}", self.dir.display());
+            tracing::warn!("failed to remove {}: {err}", self.dir.display());
         }
+        installed?;
+        tracing::info!("installed Runode {} at {}", self.version, self.target.display());
         Ok(())
     }
 }
@@ -181,16 +190,24 @@ fn parse_team(info: &str) -> Option<String> {
         .map(str::to_owned)
 }
 
-/// `dir` 里唯一的一个 .app。
-fn only_app_in(dir: &Path) -> Result<PathBuf, Error> {
+/// `dir` 里唯一的一个 .app，名字要是 `name`（装着的那份的文件名），而且是真的目录：ditto 解压时保留
+/// 符号链接，包里放一个指向装着的那份的链接时，codesign 核对的是装着的那份，对调后再把它删掉。
+fn only_app_in(dir: &Path, name: &OsStr) -> Result<PathBuf, Error> {
     let entries = fs::read_dir(dir).map_err(|err| io(dir, err))?;
     let mut apps = entries
         .filter_map(Result::ok)
         .map(|entry| entry.path())
         .filter(|path| path.extension() == Some(OsStr::new("app")));
     match (apps.next(), apps.next()) {
-        (Some(app), None) => Ok(app),
-        _ => Err(Error::Rejected("the update should hold exactly one app".into())),
+        (Some(app), None)
+            if app.file_name() == Some(name) && fs::symlink_metadata(&app).is_ok_and(|meta| meta.is_dir()) =>
+        {
+            Ok(app)
+        }
+        _ => Err(Error::Rejected(format!(
+            "the update should hold exactly one app, a directory named {}",
+            name.display()
+        ))),
     }
 }
 
@@ -311,6 +328,7 @@ mod tests {
         let staged = Staged { dir, new_app, target: target.clone(), team: TEAM.into(), version: "0.2.0".into() };
         assert!(matches!(staged.install(), Err(Error::Rejected(_))));
         assert_eq!(fs::read_to_string(target.join("version")).unwrap(), "old");
+        assert!(!scratch.0.join(".Runode.app.update").exists());
     }
 
     /// ad-hoc 签名的包不是 Developer ID 签的，版本号对得上也不收。
@@ -368,12 +386,58 @@ mod tests {
     #[test]
     fn the_update_must_hold_exactly_one_app() {
         let scratch = Scratch::new("only");
-        assert!(only_app_in(&scratch.0).is_err());
+        let name = OsStr::new("Runode.app");
+        assert!(only_app_in(&scratch.0, name).is_err());
         fs::create_dir(scratch.0.join("Runode.app")).unwrap();
         fs::create_dir(scratch.0.join("__MACOSX")).unwrap();
-        assert_eq!(only_app_in(&scratch.0).unwrap(), scratch.0.join("Runode.app"));
+        assert_eq!(only_app_in(&scratch.0, name).unwrap(), scratch.0.join("Runode.app"));
         fs::create_dir(scratch.0.join("Other.app")).unwrap();
-        assert!(only_app_in(&scratch.0).is_err());
+        assert!(matches!(only_app_in(&scratch.0, name), Err(Error::Rejected(_))));
+    }
+
+    /// 包里的 .app 要和装着的那份同名。
+    #[test]
+    fn the_update_must_be_named_like_the_installed_app() {
+        let scratch = Scratch::new("named");
+        fs::create_dir(scratch.0.join("Other.app")).unwrap();
+        assert!(matches!(only_app_in(&scratch.0, OsStr::new("Runode.app")), Err(Error::Rejected(_))));
+    }
+
+    /// 包里的 .app 是指向装着的那份的符号链接时不收：不然核对的是装着的那份，对调后它被删掉。
+    #[test]
+    fn a_symlinked_app_in_the_update_is_rejected() {
+        let scratch = Scratch::new("symlink");
+        let installed = scratch.0.join("Runode.app");
+        fs::create_dir(&installed).unwrap();
+        let dir = scratch.0.join(".Runode.app.update");
+        fs::create_dir(&dir).unwrap();
+        std::os::unix::fs::symlink(&installed, dir.join("Runode.app")).unwrap();
+        assert!(matches!(only_app_in(&dir, OsStr::new("Runode.app")), Err(Error::Rejected(_))));
+    }
+
+    /// 对调失败（装着的那份所在的目录写不了）时装着的那份原样不动，暂存目录删掉。
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn a_failed_swap_leaves_the_installed_app_alone() {
+        use std::os::unix::fs::PermissionsExt as _;
+
+        let scratch = Scratch::new("swap-fails");
+        let apps = scratch.0.join("Applications");
+        let target = apps.join("Runode.app");
+        fs::create_dir_all(&target).unwrap();
+        fs::write(target.join("version"), "old").unwrap();
+        let dir = scratch.0.join(".Runode.app.update");
+        let new_app = dir.join("Runode.app");
+        fs::create_dir_all(&new_app).unwrap();
+        fs::write(new_app.join("version"), "new").unwrap();
+        fs::set_permissions(&apps, fs::Permissions::from_mode(0o555)).unwrap();
+        let staged =
+            Staged { dir: dir.clone(), new_app, target: target.clone(), team: TEAM.into(), version: "0.2.0".into() };
+        let installed = staged.install_checked(|_, _, _| Ok(()));
+        fs::set_permissions(&apps, fs::Permissions::from_mode(0o755)).unwrap();
+        assert!(matches!(installed, Err(Error::Io(_))), "{installed:?}");
+        assert_eq!(fs::read_to_string(target.join("version")).unwrap(), "old");
+        assert!(!dir.exists());
     }
 
     /// 没签名的目录读不出 Team ID。
