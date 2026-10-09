@@ -17,8 +17,9 @@ use std::{
 };
 
 use gpui::{
-    Action, AnyElement, Axis, ClickEvent, Context, Div, Focusable, Hsla, MouseButton, MouseDownEvent, Pixels, Render,
-    ScrollStrategy, SharedString, Stateful, Window, actions, div, img, prelude::*, px, svg, uniform_list,
+    AccessibleAction, Action, AnyElement, Axis, ClickEvent, Context, Div, Focusable, Hsla, MouseButton, MouseDownEvent,
+    Pixels, Render, Role, ScrollStrategy, SharedString, Stateful, Window, actions, div, img, prelude::*, px, svg,
+    uniform_list,
 };
 use runode_config::PreviewClick;
 use runode_shared_types::color::Rgb;
@@ -231,9 +232,18 @@ impl WindowView {
         // 输入框的焦点就丢了。
         let button = |id, icon, text: Cow<'static, str>| {
             icon_toggle(id, icon, 14., false, fg, bg)
+                .role(Role::Button)
+                .aria_label(SharedString::from(text.clone()))
                 .flex_none()
                 .size(px(TOOLBAR_BUTTON_SIZE))
                 .tooltip(tooltip(text, None, fg, bg))
+        };
+        // 这几个按钮只有按下的处理，辅助工具按不到，另外登记按下时做的事。
+        let press = |f: fn(&mut Self, &mut Window, &mut Context<Self>), cx: &mut Context<Self>| {
+            let view = cx.entity().downgrade();
+            move |_: Option<&gpui::accesskit::ActionData>, window: &mut Window, cx: &mut gpui::App| {
+                view.update(cx, |this, cx| f(this, window, cx)).ok();
+            }
         };
         // 搜索结果排成树还是列表；没在搜时淡着、点了没反应。
         let searching = self.searching(cx);
@@ -242,8 +252,9 @@ impl WindowView {
         } else {
             (VIEW_TREE_ICON, rust_i18n::t!("files.view_as_tree"))
         };
-        let view_toggle =
-            button("search-view", icon, text).when(!searching, |button| button.opacity(0.4)).on_mouse_down(
+        let view_toggle = button("search-view", icon, text)
+            .when(!searching, |button| button.opacity(0.4))
+            .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(|this, _, _, cx| {
                     cx.stop_propagation();
@@ -251,21 +262,40 @@ impl WindowView {
                         this.toggle_search_tree(cx);
                     }
                 }),
+            )
+            .on_a11y_action(
+                AccessibleAction::Click,
+                press(
+                    |this, _, cx| {
+                        if this.searching(cx) {
+                            this.toggle_search_tree(cx);
+                        }
+                    },
+                    cx,
+                ),
             );
-        let refresh = button("files-refresh", REFRESH_ICON, rust_i18n::t!("files.refresh")).on_mouse_down(
-            MouseButton::Left,
-            cx.listener(|this, _, _, cx| {
-                cx.stop_propagation();
-                this.refresh_project(cx);
-            }),
-        );
-        let more = button("files-more", MORE_ICON, rust_i18n::t!("files.more")).on_mouse_down(
-            MouseButton::Left,
-            cx.listener(|this, event: &MouseDownEvent, _, cx| {
-                cx.stop_propagation();
-                this.open_files_more_menu(event.position, cx);
-            }),
-        );
+        let refresh = button("files-refresh", REFRESH_ICON, rust_i18n::t!("files.refresh"))
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(|this, _, _, cx| {
+                    cx.stop_propagation();
+                    this.refresh_project(cx);
+                }),
+            )
+            .on_a11y_action(AccessibleAction::Click, press(|this, _, cx| this.refresh_project(cx), cx));
+        let more = button("files-more", MORE_ICON, rust_i18n::t!("files.more"))
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(|this, event: &MouseDownEvent, _, cx| {
+                    cx.stop_propagation();
+                    this.open_files_more_menu(event.position, cx);
+                }),
+            )
+            // 辅助工具按下时没有鼠标事件，菜单弹在鼠标所在的地方，贴着窗口边挪进来。
+            .on_a11y_action(
+                AccessibleAction::Click,
+                press(|this, window, cx| this.open_files_more_menu(window.mouse_position(), cx), cx),
+            );
         // 标题那一行：目录名，右边是搜索结果的排法、刷新和「更多」菜单。
         let header = panel_title()
             .gap(px(6.))
@@ -329,7 +359,7 @@ impl WindowView {
     }
 
     /// 文件树的行列表和滚动条。
-    fn render_file_tree(&self, font_size: f32, fg: Rgb, bg: Rgb, cx: &mut Context<Self>) -> Div {
+    fn render_file_tree(&self, font_size: f32, fg: Rgb, bg: Rgb, cx: &mut Context<Self>) -> Stateful<Div> {
         let workspace = self.workspace();
         let new_entry = self.new_entry_row();
         let count = workspace.project.file_rows.len() + usize::from(new_entry.is_some());
@@ -362,12 +392,16 @@ impl WindowView {
             }),
         );
         let scroll = workspace.project.files_scroll.0.borrow().base_handle.clone();
-        div().flex_1().min_h_0().relative().child(list).child(scrollbar(
-            "files-scroll",
-            scroll,
-            Axis::Vertical,
-            hsla(fg),
-        ))
+        // 列表只画看得见的行，辅助工具也只读到这些行。
+        div()
+            .id("file-tree")
+            .role(Role::Tree)
+            .aria_label(rust_i18n::t!("files.tree").into_owned())
+            .flex_1()
+            .min_h_0()
+            .relative()
+            .child(list)
+            .child(scrollbar("files-scroll", scroll, Axis::Vertical, hsla(fg)))
     }
 
     /// 文件树的行。行高、箭头和图标跟着字号 `font_size` 一起缩放。新建时输入框插在
@@ -454,6 +488,7 @@ impl WindowView {
             Decoration::ContainsChanges(_) => Some("•"),
             Decoration::None | Decoration::Ignored => None,
         };
+        let status = badge;
         let badge = badge.map(|text| div().flex_none().pl(px(6.)).text_color(color).child(text));
         let renaming = self.renaming(&row.path);
         let name: AnyElement = match renaming {
@@ -474,8 +509,38 @@ impl WindowView {
         // 放到目录上挪进这个目录，放到文件上挪进文件所在的目录。
         let drop_dir =
             if is_dir { path.clone() } else { path.parent().map_or_else(|| self.files_root(), Path::to_path_buf) };
+        let expanded = row.expanded;
+        // 辅助工具按下和单击一样；目录还能直接展开、收起。
+        let a11y = |want: Option<bool>, cx: &mut Context<Self>| {
+            let (view, path) = (cx.entity().downgrade(), path.clone());
+            move |_: Option<&gpui::accesskit::ActionData>, _: &mut Window, cx: &mut gpui::App| {
+                view.update(cx, |this, cx| match want {
+                    // 和点击一样，正在改名的那一行不动。
+                    _ if this.renaming(&path).is_some() => {}
+                    Some(want) if want == expanded => {}
+                    Some(_) => {
+                        this.workspace_mut().project.selected = Some(path.clone());
+                        this.with_tree(|project, root, filter| project.toggle_dir(&path, root, filter));
+                        cx.notify();
+                    }
+                    None => this.click_file(&path, is_dir, 1, cx),
+                })
+                .ok();
+            }
+        };
         Some(
             Self::file_row_shell(("file", ix), row.depth, font_size, fg)
+                .role(Role::TreeItem)
+                .aria_label(row.name.clone())
+                .aria_level(row.depth + 1)
+                .aria_selected(selected)
+                .when_some(status, |item, status| item.aria_description(status))
+                .when(is_dir, |item| {
+                    item.aria_expanded(expanded)
+                        .on_a11y_action(AccessibleAction::Expand, a11y(Some(true), cx))
+                        .on_a11y_action(AccessibleAction::Collapse, a11y(Some(false), cx))
+                })
+                .on_a11y_action(AccessibleAction::Click, a11y(None, cx))
                 .when(row.decoration == Decoration::Ignored, |item| item.opacity(0.45))
                 .when(cut, |item| item.opacity(CUT_OPACITY))
                 .map(|item| if selected { item.bg(selected_bg) } else { item.hover(|item| item.bg(hover_bg)) })

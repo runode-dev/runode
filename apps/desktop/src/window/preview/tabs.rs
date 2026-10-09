@@ -4,8 +4,8 @@
 use std::path::Path;
 
 use gpui::{
-    Action, Axis, Context, Div, Hsla, MouseButton, MouseDownEvent, Pixels, Point, Render, ScrollHandle, SharedString,
-    Stateful, Window, actions, div, img, prelude::*, px, svg,
+    AccessibleAction, Action, Axis, Context, Div, Hsla, MouseButton, MouseDownEvent, Pixels, Point, Render, Role,
+    ScrollHandle, SharedString, Stateful, Window, actions, div, img, prelude::*, px, svg,
 };
 use runode_shared_types::color::Rgb;
 
@@ -219,8 +219,26 @@ impl WindowView {
         let active_bg = hsla(bg.mix(fg, 0.08));
         let hover_bg = hsla(bg.mix(fg, 0.04));
         let underline = tab_underline(fg);
-        let close_tooltip = tooltip(rust_i18n::t!("tooltip.close_preview"), None, fg, bg);
-        let path_tooltip = tooltip(SharedString::from(tab.path.display().to_string()), None, fg, bg);
+        let close_text = rust_i18n::t!("tooltip.close_preview");
+        let close_label = SharedString::from(close_text.clone());
+        let close_tooltip = tooltip(close_text, None, fg, bg);
+        let path = SharedString::from(tab.path.display().to_string());
+        let path_tooltip = tooltip(path.clone(), None, fg, bg);
+        // 标签和关闭按钮只有按下的处理，辅助工具按不到，另外登记：按标签切过去，按关闭按钮关掉。
+        let view = cx.entity().downgrade();
+        let press_tab = {
+            let view = view.clone();
+            move |_: Option<&gpui::accesskit::ActionData>, window: &mut Window, cx: &mut gpui::App| {
+                view.update(cx, |this, cx| {
+                    window.focus(&this.preview_focus, cx);
+                    this.activate_preview(ix, cx);
+                })
+                .ok();
+            }
+        };
+        let press_close = move |_: Option<&gpui::accesskit::ActionData>, window: &mut Window, cx: &mut gpui::App| {
+            view.update(cx, |this, cx| this.retain_previews(|i, _| i != ix, window, cx)).ok();
+        };
         let fg = hsla(fg);
         let color = tab.status.map_or(fg, |status| hsla(status_color(status)));
         let group = SharedString::from(format!("preview-tab-{ix}"));
@@ -232,6 +250,11 @@ impl WindowView {
         };
         div()
             .id(("preview-tab", ix))
+            .role(Role::Tab)
+            .aria_label(name.clone())
+            .aria_description(path)
+            .aria_selected(active)
+            .on_a11y_action(AccessibleAction::Click, press_tab)
             .group(group.clone())
             .flex_none()
             .max_w(px(TAB_MAX_WIDTH))
@@ -265,6 +288,9 @@ impl WindowView {
             )
             .child(
                 close_button(("preview-tab-close", ix), fg)
+                    .role(Role::Button)
+                    .aria_label(close_label)
+                    .on_a11y_action(AccessibleAction::Click, press_close)
                     .flex_none()
                     .when(!active, |close| close.invisible().group_hover(group, |close| close.visible()))
                     .tooltip(close_tooltip)

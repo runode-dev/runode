@@ -271,6 +271,9 @@ files:
   search_placeholder: 查找文件
   search_name: 名称
   search_content: 内容
+  search_mode: 搜索方式
+  search_results: 搜索结果
+  tree: 文件
   search_empty: 没有找到
   view_as_tree: 以树形式查看
   view_as_list: 以列表形式查看

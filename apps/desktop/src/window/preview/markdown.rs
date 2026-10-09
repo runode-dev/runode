@@ -31,10 +31,10 @@ use std::{
 };
 
 use gpui::{
-    AnyElement, App, ClipboardItem, Context, CursorStyle, DispatchPhase, FontStyle, FontWeight, HighlightStyle, Hsla,
-    Image, ImageSource, ListOffset, ListState, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels,
-    Point, RenderImage, SMOOTH_SVG_SCALE_FACTOR, SharedString, StrikethroughStyle, StyledText, SvgRenderer,
-    UnderlineStyle, Window, canvas, div, img, list, prelude::*, px, relative, svg,
+    AccessibleAction, AnyElement, App, ClipboardItem, Context, CursorStyle, DispatchPhase, FontStyle, FontWeight,
+    HighlightStyle, Hsla, Image, ImageSource, ListOffset, ListState, MouseButton, MouseDownEvent, MouseMoveEvent,
+    MouseUpEvent, Pixels, Point, RenderImage, Role, SMOOTH_SVG_SCALE_FACTOR, SharedString, StrikethroughStyle,
+    StyledText, SvgRenderer, UnderlineStyle, WeakEntity, Window, canvas, div, img, list, prelude::*, px, relative, svg,
 };
 use runode_preview::{Alert, Align, Block, Content, Image as MdImage, Inline, InlineStyle, Span};
 use runode_shared_types::color::Rgb;
@@ -48,7 +48,7 @@ use crate::{
         ALERT_CAUTION_ICON, ALERT_IMPORTANT_ICON, ALERT_NOTE_ICON, ALERT_TIP_ICON, ALERT_WARNING_ICON, CHECK_ICON,
     },
     config::AppConfig,
-    ui::{hsla, scrollbar::list_scrollbar},
+    ui::{a11y::Press, hsla, scrollbar::list_scrollbar},
     window::{WindowView, project::RENAMED},
 };
 
@@ -853,6 +853,28 @@ impl Paint {
     }
 }
 
+/// `rich` 里的链接报给辅助工具：链接画在文字里，不是单独的元素，这里每个链接另放一个不占地方的
+/// 节点，以链接的文字为名，按下时和点击一样打开它。
+fn link_nodes(rich: &Rich, view: &WeakEntity<WindowView>) -> Vec<AnyElement> {
+    rich.links
+        .iter()
+        .enumerate()
+        .map(|(ix, (range, url))| {
+            let (view, url) = (view.clone(), url.clone());
+            div()
+                .id(("md-link", ix))
+                .absolute()
+                .role(Role::Link)
+                .aria_label(rich.text.get(range.clone()).unwrap_or_default().to_owned())
+                .aria_description(url.clone())
+                .on_a11y_action(AccessibleAction::Click, move |_, _, cx| {
+                    view.update(cx, |this, cx| this.open_markdown_link(&url, cx)).ok();
+                })
+                .into_any_element()
+        })
+        .collect()
+}
+
 impl WindowView {
     /// 预览栏现在是不是 Markdown 的排版视图：普通标签、Markdown 文件、没切到源码。
     pub(super) fn markdown_shown(&self, preview: &Preview) -> bool {
@@ -985,6 +1007,22 @@ impl WindowView {
             .pb(px(bottom))
             .text_size(px(size))
             .line_height(px(line_height));
+        let weak = cx.entity().downgrade();
+        let mut links = Vec::new();
+        // 这一行报给辅助工具的样子：标题、段落、提示块标题和代码块报成整段文字；表格、图片在下面各自报。
+        element = match &row.leaf {
+            Leaf::Heading(level, rich) => {
+                links = link_nodes(rich, &weak);
+                element.role(Role::Heading).aria_level(usize::from(*level)).aria_label(rich.text.clone())
+            }
+            Leaf::Paragraph(rich) => {
+                links = link_nodes(rich, &weak);
+                element.role(Role::Paragraph).aria_label(rich.text.clone())
+            }
+            Leaf::AlertTitle(_, title) => element.role(Role::Label).aria_label(title.clone()),
+            Leaf::Code { source, .. } => element.role(Role::Code).aria_label(source.clone()),
+            Leaf::Table { .. } | Leaf::Rule | Leaf::Images(_) => element,
+        };
         let mut nested_width = 0.;
         let mut quotes = 0;
         let mut depth = 0;
@@ -1062,6 +1100,7 @@ impl WindowView {
                     spans.iter().map(|span| (span.range.clone(), highlight_style(span.style, fg, &palette))).collect();
                 let styled = StyledText::new(code.clone()).with_highlights(runs);
                 let source = source.clone();
+                let copied = source.clone();
                 div()
                     .group("md-code")
                     .relative()
@@ -1086,6 +1125,12 @@ impl WindowView {
                     .child(
                         div()
                             .id("md-copy")
+                            .role(Role::Button)
+                            .aria_label(crate::i18n::tr("menu.copy"))
+                            // 只有按下的处理，辅助工具按不到，另外登记；按钮悬停时才露出来，辅助工具照样按得到。
+                            .on_a11y_action(AccessibleAction::Click, move |_, _, cx| {
+                                cx.write_to_clipboard(ClipboardItem::new_string(copied.to_string()));
+                            })
                             .absolute()
                             .top(px(8.))
                             .right(px(8.))
@@ -1118,6 +1163,12 @@ impl WindowView {
                         // 表头算第 0 行；表体的偶数行（第 2、4……行）垫底色。
                         let border = if row_ix == 0 { 2. } else { 1. };
                         div()
+                            .id(("md-cell", columns * row_ix + column))
+                            .role(if row_ix == 0 { Role::ColumnHeader } else { Role::Cell })
+                            .aria_label(cell.text.clone())
+                            .aria_row_index(row_ix)
+                            .aria_column_index(column)
+                            .children(link_nodes(cell, &weak))
                             .h(px(line_height + 12. + border))
                             .px(px(13.))
                             .flex()
@@ -1138,6 +1189,9 @@ impl WindowView {
                 }));
                 div()
                     .id(("md-table", ix))
+                    .role(Role::Table)
+                    .aria_row_count(rows.len() + 1)
+                    .aria_column_count(columns)
                     .w_full()
                     .flex()
                     .overflow_x_scroll()
@@ -1151,17 +1205,19 @@ impl WindowView {
                 let room = width - 1. - 2. * PADDING_X - nested_width;
                 let images = images.iter().enumerate().map(|(image_ix, image)| {
                     let shown = self.render_markdown_image(image, room, line_height, colors, view, window, cx);
+                    // 以替代文字为名报给辅助工具；外面套着链接的报成链接。
+                    let item = div().id(("md-image", image_ix)).aria_label(image.alt.clone());
                     match &image.link {
                         Some(link) => {
                             let link = link.clone();
-                            div()
-                                .id(("md-image", image_ix))
+                            item.role(Role::Link)
+                                .aria_description(link.clone())
                                 .cursor_pointer()
-                                .on_click(cx.listener(move |this, _, _, cx| this.open_markdown_link(&link, cx)))
+                                .on_press(cx, move |this, _, cx| this.open_markdown_link(&link, cx))
                                 .child(shown)
                                 .into_any_element()
                         }
-                        None => shown,
+                        None => item.role(Role::Image).child(shown).into_any_element(),
                     }
                 });
                 div()
@@ -1183,7 +1239,8 @@ impl WindowView {
                     .mr(px(em * quotes as f32))
                     .when(muted, |content| content.text_color(colors.muted))
                     .when(row.center, |content| content.text_center())
-                    .child(content),
+                    .child(content)
+                    .children(links),
             )
             .into_any_element()
     }

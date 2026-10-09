@@ -5,8 +5,8 @@ use std::ops::Range;
 
 use gpui::{
     AnyElement, App, Axis, Bounds, Context, FontStyle, FontWeight, HighlightStyle, ImageSource,
-    ListHorizontalSizingBehavior, MouseButton, MouseDownEvent, MouseMoveEvent, SMOOTH_SVG_SCALE_FACTOR, SharedString,
-    StyledText, Window, canvas, div, fill, img, point, prelude::*, px, size, uniform_list,
+    ListHorizontalSizingBehavior, MouseButton, MouseDownEvent, MouseMoveEvent, Role, SMOOTH_SVG_SCALE_FACTOR,
+    SharedString, StyledText, Window, canvas, div, fill, img, point, prelude::*, px, size, uniform_list,
 };
 use runode_shared_types::{color::Rgb, theme};
 
@@ -97,9 +97,12 @@ impl WindowView {
                     Note::NoContent => rust_i18n::t!("panel.no_content").into_owned(),
                     Note::DiffTooLarge => rust_i18n::t!("preview.diff.too_large").into_owned(),
                 };
-                panel_message(text, fg).into_any_element()
+                panel_message(text.clone(), fg).id("preview-note").role(Role::Label).aria_label(text).into_any_element()
             }
             Some(Loaded::Image(image)) => div()
+                .id("preview-image")
+                .role(Role::Image)
+                .aria_label(preview.name())
                 .flex_1()
                 .min_h_0()
                 .p(px(12.))
@@ -127,6 +130,9 @@ impl WindowView {
                 let stacked = stack_images(width - 24., height - 24., &sizes);
                 let side = |label: String, color: Rgb, image: &Option<std::sync::Arc<gpui::Image>>| {
                     div()
+                        .id(SharedString::from(label.clone()))
+                        .role(Role::Image)
+                        .aria_label(label.clone())
                         .flex_1()
                         .min_w_0()
                         .min_h_0()
@@ -164,6 +170,8 @@ impl WindowView {
                 let fit = ((width - 24.) / w).min(1.);
                 div()
                     .id("preview-svg")
+                    .role(Role::Image)
+                    .aria_label(preview.name())
                     .flex_1()
                     .min_h_0()
                     .overflow_y_scroll()
@@ -292,11 +300,15 @@ impl WindowView {
                 let row = div().flex_none().h(px(row_height)).w_full().flex().items_center().whitespace_nowrap();
                 let Some(line) = lines.get(ix) else {
                     // 截断了的文件末尾多一行说明。
+                    let note = rust_i18n::t!("preview.truncated", count = last).into_owned();
                     return row
+                        .id(("preview-line", item))
+                        .role(Role::Label)
+                        .aria_label(note.clone())
                         .pl(px(gutter + MARK_WIDTH + 8.))
                         .italic()
                         .text_color(dim)
-                        .child(rust_i18n::t!("preview.truncated", count = last).into_owned())
+                        .child(note)
                         .into_any_element();
                 };
                 let number = u32::try_from(ix + 1).unwrap_or(u32::MAX);
@@ -332,7 +344,11 @@ impl WindowView {
                     Some(piece) => segment(&content, &runs, piece),
                     None => (content, runs),
                 };
+                // 每行报成一段文字，辅助工具读得到看得见的这些行；按行选中的也报出来。
                 row.id(("preview-line", item))
+                    .role(Role::Label)
+                    .aria_label(content.clone())
+                    .aria_selected(selected.contains(&ix))
                     .when(selected.contains(&ix), |row| row.bg(selected_bg))
                     .child(marker)
                     .child(

@@ -5,8 +5,9 @@
 use std::path::{Path, PathBuf};
 
 use gpui::{
-    Action, Anchor, AnyElement, App, ClipboardItem, Context, Div, FocusHandle, KeyDownEvent, MouseButton, Pixels,
-    Point, ScrollHandle, SharedString, Stateful, Window, anchored, deferred, div, point, prelude::*, px, relative, svg,
+    AccessibleAction, Action, Anchor, AnyElement, App, ClipboardItem, Context, Div, FocusHandle, KeyDownEvent,
+    MouseButton, Pixels, Point, Role, ScrollHandle, SharedString, Stateful, Window, anchored, deferred, div, point,
+    prelude::*, px, relative, svg,
 };
 use runode_shared_types::color::Rgb;
 
@@ -403,7 +404,7 @@ impl WindowView {
     ) -> Option<AnyElement> {
         let position = self.file_menu.as_ref()?.position?;
         let max_height = f32::from(window.viewport_size().height) - MENU_MARGIN * 2.;
-        let list = self.render_menu_list(max_height, fg, bg, cx)?;
+        let list = self.render_menu_list(max_height, fg, bg, window, cx)?;
         Some(
             deferred(anchored().position(position).snap_to_window_with_margin(px(MENU_MARGIN)).child(list))
                 .with_priority(1)
@@ -424,7 +425,7 @@ impl WindowView {
             return None;
         }
         let max_height = f32::from(window.viewport_size().height) - TITLEBAR_HEIGHT - DROPDOWN_GAP - MENU_MARGIN;
-        let list = self.render_menu_list(max_height, fg, bg, cx)?;
+        let list = self.render_menu_list(max_height, fg, bg, window, cx)?;
         Some(
             div().absolute().bottom_0().right_0().child(
                 deferred(
@@ -440,8 +441,17 @@ impl WindowView {
     }
 
     /// 菜单本身，最高 `max_height`，超出窗口时才在里面滚动；点到菜单外面就关掉。
-    fn render_menu_list(&self, max_height: f32, fg: Rgb, bg: Rgb, cx: &mut Context<Self>) -> Option<Stateful<Div>> {
+    fn render_menu_list(
+        &self,
+        max_height: f32,
+        fg: Rgb,
+        bg: Rgb,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> Option<Stateful<Div>> {
         let menu = self.file_menu.as_ref()?;
+        // 辅助工具悬停不了，行里的按钮在它读着时一直露出来，不然按不到。
+        let a11y = window.is_a11y_active();
         let hover_bg = hsla(bg.mix(fg, 0.12));
         // 选中的行底色已经是 `hover_bg`，行里按钮悬停时再深一些。
         let button_hover_bg = hsla(bg.mix(fg, 0.22));
@@ -457,9 +467,20 @@ impl WindowView {
             let row_action = item.enabled && item.action.is_some();
             let highlighted = menu.highlighted == Some(ix);
             // 整行能点的只在选中时露出按钮，不然每行行尾都摆一个。
-            let buttons = (item.enabled && (!row_action || highlighted)).then_some(&item.buttons);
+            let buttons = (item.enabled && (!row_action || highlighted || a11y)).then_some(&item.buttons);
+            let view = cx.entity().downgrade();
             div()
                 .id(("file-menu", ix))
+                // 没有动作的一行是小标题。GPUI 报不了「不可用」，灰着的项照样报成菜单项，按了没反应。
+                .map(|row| match item.checked {
+                    _ if item.action.is_none() => row.role(Role::Label),
+                    Some(checked) => row.role(Role::MenuItemCheckBox).aria_toggled(checked.into()),
+                    None => row.role(Role::MenuItem),
+                })
+                .aria_label(item.label.clone())
+                .when_some(item.shortcut.clone(), |row, shortcut| row.aria_description(shortcut))
+                // 菜单拿着焦点，选中的那一项报成辅助工具眼里的焦点。
+                .when(highlighted, |row| row.aria_active_descendant())
                 .flex_none()
                 .h(px(24.))
                 .px(px(10.))
@@ -485,6 +506,10 @@ impl WindowView {
                             this.activate_menu_item(ix, window, cx);
                         }),
                     )
+                    // 只有按下的处理时辅助工具按不到，另外登记。
+                    .on_a11y_action(AccessibleAction::Click, move |_, window, cx| {
+                        view.update(cx, |this, cx| this.activate_menu_item(ix, window, cx)).ok();
+                    })
                 })
                 .when(check_column, |row| {
                     row.child(
@@ -512,8 +537,11 @@ impl WindowView {
                 .children(buttons.filter(|buttons| !buttons.is_empty()).map(|buttons| {
                     div().flex_none().mr(px(-6.)).flex().gap(px(2.)).children(buttons.iter().enumerate().map(
                         |(b, (button, _))| {
+                            let view = cx.entity().downgrade();
                             div()
                                 .id(("file-menu-button", ix * 4 + b))
+                                .role(Role::Button)
+                                .aria_label(button.tooltip.clone())
                                 .flex_none()
                                 .size(px(18.))
                                 .rounded(px(4.))
@@ -530,6 +558,9 @@ impl WindowView {
                                         this.press_menu_button(ix, b, window, cx);
                                     }),
                                 )
+                                .on_a11y_action(AccessibleAction::Click, move |_, window, cx| {
+                                    view.update(cx, |this, cx| this.press_menu_button(ix, b, window, cx)).ok();
+                                })
                         },
                     ))
                 }))
@@ -537,6 +568,7 @@ impl WindowView {
         });
         let list = div()
             .id("file-menu")
+            .role(Role::Menu)
             .track_focus(&menu.focus)
             .on_key_down(cx.listener(Self::menu_key))
             .track_scroll(&menu.scroll)
