@@ -182,6 +182,11 @@ public final class TerminalModel {
         display?.terminalDidReset(nil, settings: settings)
     }
 
+    /// 画终端的一方改接到别的会话上了：以后不再往它上面画，不然这个会话晚到的回话会把它换回来。
+    public func detachDisplay(_ display: any TerminalDisplay) {
+        if self.display === display { self.display = nil }
+    }
+
     /// 接上画终端的一方；已经有 VT 时马上画出来。
     public func attachDisplay(_ display: any TerminalDisplay) {
         self.display = display

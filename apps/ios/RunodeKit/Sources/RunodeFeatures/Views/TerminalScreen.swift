@@ -342,6 +342,7 @@
             // 切分屏、从终端页开新终端时这一页接着用，终端视图也不换，改接到新会话上：换一个视图的话
             // 键盘焦点跟着旧视图走掉，软键盘先收起再弹出来。
             if context.coordinator.model !== model {
+                context.coordinator.model.detachDisplay(view)
                 context.coordinator.model = model
                 model.attachDisplay(view)
                 // 正在更新视图时不能改模型的状态，下一轮再告诉它。

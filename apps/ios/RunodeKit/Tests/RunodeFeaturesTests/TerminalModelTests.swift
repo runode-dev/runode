@@ -35,6 +35,18 @@ import Testing
         return model
     }
 
+    /// 终端视图改接到别的会话后，原来那个会话晚到的 `Attached` 不再把视图换回去。
+    @Test func aDetachedModelNoLongerDrawsOnTheView() {
+        let old = model()
+        let new = TerminalModel(sessionId: sessionB, title: "zsh", link: link, onClose: { _ in })
+        old.detachDisplay(display)
+        new.attachDisplay(display)
+        old.handle(.ready(generation: 1))
+        old.handle(attached(channel: 5))
+        #expect(old.terminal != nil)
+        #expect(display.terminal == nil)
+    }
+
     @Test func attachesWithoutTakingTheSize() {
         let model = model()
         model.handle(.ready(generation: 1))
