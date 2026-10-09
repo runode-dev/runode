@@ -102,7 +102,7 @@
             } label: {
                 Image(systemName: model.fitsPhone ? "iphone" : "laptopcomputer")
             }
-            .accessibilityLabel("终端尺寸：\(model.fitsPhone ? "适配手机" : "跟随电脑")")
+            .accessibilityLabel("终端尺寸：\(Presentation.sizePreference(model.fitsPhone ? .fitPhone : .followMachine))")
             .accessibilityHint("在适配手机和跟随电脑之间切换")
         }
 

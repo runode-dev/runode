@@ -312,6 +312,29 @@
         }
       }
     },
+    "%lld 点" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld pt"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld 点"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld 點"
+          }
+        }
+      }
+    },
     "+%u" : {
       "extractionState" : "manual",
       "localizations" : {

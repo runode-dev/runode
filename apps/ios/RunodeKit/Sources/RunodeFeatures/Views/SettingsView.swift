@@ -48,7 +48,7 @@
                     .tint(.green)
                 if let size = settings.preferences.fontSize {
                     Stepper(value: fontSize, in: AppPreferences.fontSizes, step: 1) {
-                        LabeledContent("字号", value: "\(Int(size)) 点")
+                        LabeledContent("字号", value: String(localized: "\(Int(size)) 点"))
                     }
                     Text("ls -la ~/projects")
                         .font(.system(size: size, design: .monospaced))
