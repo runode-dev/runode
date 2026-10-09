@@ -35,7 +35,7 @@ use pages::Page;
 use picker::Picker;
 
 /// 左边页面列表的宽度。
-const NAV_WIDTH: f32 = 220.;
+const NAV_WIDTH: f32 = 200.;
 /// 输入框停手这么久之后写回。
 const COMMIT_DELAY: Duration = Duration::from_millis(700);
 

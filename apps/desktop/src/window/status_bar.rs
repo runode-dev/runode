@@ -68,8 +68,8 @@ pub(super) struct ToggleStatusItem {
     item: StatusItem,
 }
 
-/// 状态栏上一块的图标和名字，右键菜单里用。
-fn item_icon_and_title(item: StatusItem) -> (&'static str, String) {
+/// 状态栏上一块的图标和名字，右键菜单和设置页里用。
+pub(crate) fn item_icon_and_title(item: StatusItem) -> (&'static str, String) {
     let (icon, key) = match item {
         StatusItem::Sleep => (COFFEE_ICON, "status.sleep_title"),
         StatusItem::Resources => (MEMORY_ICON, "status.resources_title"),

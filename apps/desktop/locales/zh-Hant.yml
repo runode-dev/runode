@@ -541,8 +541,6 @@ settings:
     config_file: 設定檔
     font: 字體
     window: 視窗
-    colors: 顏色
-    palette: 調色盤
     cursor: 游標
     keyboard: 鍵盤
     shell: Shell
@@ -550,7 +548,6 @@ settings:
     clipboard: 剪貼簿
     tasks: 專案命令
     login: 登入時啟動
-    pairing: 配對手機
     push: 即時動態
     push_key: 自己編譯的手機 App
   theme:
@@ -626,7 +623,7 @@ settings:
     window_padding_y: 單位是點。一個數表示上下相同，或寫成 上,下。
     window_style: 卡片：每個分割畫面和右側面板各是一張圓角卡片；經典：終端機鋪滿視窗。
     status_bar: 視窗底部顯示防止睡眠、記憶體和連接埠。
-    status_bar_hidden: sleep、resources 或 ports，用逗號隔開。也可以在狀態列上按右鍵勾選。
+    status_bar_hidden: 選中的幾塊不在狀態列上顯示。也可以在狀態列上按右鍵勾選。
     file_tree_font_size: 單位是點。
     file_tree_preview_click: 單擊開成暫時分頁，打開別的檔案時被換掉；雙擊固定下來。
     preview_font_size: 單位是點。

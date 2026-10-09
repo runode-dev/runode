@@ -541,8 +541,6 @@ settings:
     config_file: Configuration File
     font: Font
     window: Window
-    colors: Colors
-    palette: Palette
     cursor: Cursor
     keyboard: Keyboard
     shell: Shell
@@ -550,7 +548,6 @@ settings:
     clipboard: Clipboard
     tasks: Tasks
     login: Start at Login
-    pairing: Pair a Phone
     push: Live Activities
     push_key: Your Own Phone App
   theme:
@@ -626,7 +623,7 @@ settings:
     window_padding_y: Top and bottom, in points. One number for both, or top,bottom.
     window_style: Cards puts each split and side panel on its own rounded card; classic lets the terminal fill the window.
     status_bar: Shows sleep prevention, memory and ports at the bottom of the window.
-    status_bar_hidden: "sleep, resources or ports, separated by commas. You can also right-click the status bar."
+    status_bar_hidden: "The parts left out of the status bar. You can also right-click the status bar."
     file_tree_font_size: In points.
     file_tree_preview_click: A single click opens a temporary tab that the next file replaces; a double click keeps it.
     preview_font_size: In points.

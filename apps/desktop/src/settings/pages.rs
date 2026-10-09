@@ -1,12 +1,14 @@
 //! 设置页的各页：每页有哪些项、各用什么控件，以及主题、字体、调色板这些不止一个控件的项。
 
-use gpui::{AnyElement, Context, Div, ElementId, SharedString, Window, div, prelude::*, px, svg};
+use gpui::{AnyElement, Context, Div, ElementId, SharedString, Window, div, prelude::*, px};
+use runode_config::StatusItem;
 use runode_shared_types::agent::AgentKind;
 
 use super::{
     Commit, SettingsView,
     controls::{
-        Cards, Colors, button, dropdown, icon_button, input_box, on_click, reset_button, row, segmented, swatch, switch,
+        Cards, Colors, button, chip, dropdown, icon_button, input_box, on_click, reset_button, row, segmented, swatch,
+        switch,
     },
     picker::{PickItem, PickTarget},
 };
@@ -37,6 +39,7 @@ enum Item {
     Theme,
     FontFamily,
     Palette,
+    StatusBarHidden,
     AgentExclude,
     ConfigFiles,
     ConfigFileActions,
@@ -128,10 +131,9 @@ impl Page {
                 Row("window-padding-x", Text(80.)),
                 Row("window-padding-y", Text(80.)),
                 Row("status-bar", Switch),
-                Row("status-bar-hidden", Text(200.)),
+                StatusBarHidden,
             ],
             Self::Colors => &[
-                Section("colors"),
                 Row("background", Color),
                 Row("foreground", Color),
                 Row("cursor-color", Color),
@@ -142,7 +144,6 @@ impl Page {
                 Row("search-foreground", Color),
                 Row("search-selected-background", Color),
                 Row("search-selected-foreground", Color),
-                Section("palette"),
                 Palette,
             ],
             Self::Terminal => &[
@@ -181,7 +182,6 @@ impl Page {
                 Row("remote-access", Switch),
                 Row("remote-access-port", Text(80.)),
                 Row("remote-access-name", Text(200.)),
-                Section("pairing"),
                 Pairing,
                 Section("push"),
                 Row("remote-access-push", Switch),
@@ -211,6 +211,7 @@ impl Page {
                 Item::Theme => Some("theme"),
                 Item::FontFamily => Some("font-family"),
                 Item::Palette => Some("palette"),
+                Item::StatusBarHidden => Some("status-bar-hidden"),
                 Item::AgentExclude => Some("agent-notifications-exclude"),
                 Item::ConfigFiles => Some("config-file"),
                 Item::Section(_) | Item::ConfigFileActions | Item::Pairing | Item::Autostart => None,
@@ -280,6 +281,7 @@ impl SettingsView {
                 }
                 Item::FontFamily => self.render_font_family(colors, cx).into_any_element(),
                 Item::Palette => self.render_palette(colors, window, cx).into_any_element(),
+                Item::StatusBarHidden => self.render_status_bar_hidden(colors, cx).into_any_element(),
                 Item::AgentExclude => self.render_agent_exclude(colors, cx).into_any_element(),
                 Item::ConfigFiles => self.render_config_files(colors, window, cx).into_any_element(),
                 Item::ConfigFileActions => self.render_config_file_actions(colors, cx).into_any_element(),
@@ -344,7 +346,7 @@ impl SettingsView {
             }
             Control::Text(width) => {
                 let input = self.field(key, Commit::Value(key), Some(key_placeholder(key)), window, cx);
-                input_box(input, width, self.errors.contains_key(key), colors).into_any_element()
+                input_box(input, Some(width), self.errors.contains_key(key), colors, window, cx).into_any_element()
             }
             Control::Color => {
                 let color = current.first().and_then(|value| runode_config::color::parse(value)).map(hsla);
@@ -354,7 +356,7 @@ impl SettingsView {
                     .items_center()
                     .gap(px(8.))
                     .child(swatch(color, 20., colors))
-                    .child(input_box(input, 130., self.errors.contains_key(key), colors))
+                    .child(input_box(input, Some(130.), self.errors.contains_key(key), colors, window, cx))
                     .into_any_element()
             }
             Control::Language => {
@@ -471,7 +473,7 @@ impl SettingsView {
                                     .child(ix.to_string()),
                             )
                             .child(swatch(color, 18., colors))
-                            .child(input_box(input, 92., error.is_some(), colors)),
+                            .child(input_box(input, Some(92.), error.is_some(), colors, window, cx)),
                     )
                     .children(error.map(|err| div().text_size(px(11.)).text_color(colors.error).child(err)))
             })
@@ -481,6 +483,35 @@ impl SettingsView {
             .flex_col()
             .child(header)
             .child(div().py(px(10.)).grid().grid_cols(4).gap_x(px(12.)).gap_y(px(8.)).children(cells))
+    }
+
+    /// 状态栏上不显示的几块，一块一个标签；写回时和状态栏的右键菜单一样写成一行，逗号隔开。
+    fn render_status_bar_hidden(&mut self, colors: Colors, cx: &mut Context<Self>) -> Div {
+        const KEY: &str = "status-bar-hidden";
+        let hidden = self.config.status_bar_hidden.clone();
+        let chips: Vec<_> = StatusItem::ALL
+            .into_iter()
+            .enumerate()
+            .map(|(ix, item)| {
+                let on = hidden.contains(&item);
+                let (icon, title) = crate::window::status_item_icon_and_title(item);
+                chip(("status-hidden", ix), Some(icon), title, on, colors).on_click(on_click(cx, move |this, _, cx| {
+                    let mut hidden = this.config.status_bar_hidden.clone();
+                    if on {
+                        hidden.retain(|other| *other != item);
+                    } else {
+                        hidden.push(item);
+                    }
+                    let names: Vec<_> = hidden.iter().map(|item| item.name()).collect();
+                    let values = if names.is_empty() { Vec::new() } else { vec![names.join(", ")] };
+                    this.write_or_report(KEY, values, cx);
+                }))
+            })
+            .collect();
+        let reset = self.reset(KEY, colors, cx);
+        let error = self.errors.get(KEY).cloned();
+        let control = div().flex().gap(px(6.)).children(chips);
+        row(key_title(KEY), Some(key_hint(KEY)), control, reset, error, colors)
     }
 
     fn render_agent_exclude(&mut self, colors: Colors, cx: &mut Context<Self>) -> Div {
@@ -497,30 +528,15 @@ impl SettingsView {
                     AgentKind::Other => rust_i18n::t!("settings.other_agents").into_owned(),
                     kind => kind.display_name().to_owned(),
                 };
-                div()
-                    .id(("exclude", ix))
-                    .h(px(24.))
-                    .px(px(8.))
-                    .flex()
-                    .items_center()
-                    .gap(px(5.))
-                    .rounded(px(6.))
-                    .border_1()
-                    .border_color(if on { colors.accent } else { colors.border })
-                    .text_size(px(12.))
-                    .when(on, |chip| chip.bg(colors.accent.opacity(0.15)))
-                    .hover(|chip| chip.bg(colors.hover))
-                    .children(on.then(|| svg().path("icons/check.svg").size(px(11.)).text_color(colors.accent)))
-                    .child(name)
-                    .on_click(on_click(cx, move |this, _, cx| {
-                        let mut values = this.config.values(KEY);
-                        if on {
-                            values.retain(|name| name != label);
-                        } else {
-                            values.push(label.to_owned());
-                        }
-                        this.write_or_report(KEY, values, cx);
-                    }))
+                chip(("exclude", ix), None, name, on, colors).on_click(on_click(cx, move |this, _, cx| {
+                    let mut values = this.config.values(KEY);
+                    if on {
+                        values.retain(|name| name != label);
+                    } else {
+                        values.push(label.to_owned());
+                    }
+                    this.write_or_report(KEY, values, cx);
+                }))
             })
             .collect();
         let reset = self.reset(KEY, colors, cx);
@@ -539,7 +555,8 @@ impl SettingsView {
         let mut out =
             div().flex().flex_col().child(row(key_title(KEY), Some(key_hint(KEY)), div(), reset, None, colors));
         // 末尾总留一个空的，在里面打字就是加一行。
-        for ix in 0..=files.len() {
+        let last = files.len();
+        for ix in 0..=last {
             let id = format!("{KEY}:{ix}");
             let placeholder = rust_i18n::t!("settings.config_file_placeholder").into_owned();
             let input = self.field(&id, Commit::Item(KEY, ix), Some(placeholder.into()), window, cx);
@@ -556,7 +573,8 @@ impl SettingsView {
             });
             out = out.child(
                 div()
-                    .py(px(4.))
+                    .pt(px(4.))
+                    .pb(px(if ix == last { 12. } else { 4. }))
                     .flex()
                     .flex_col()
                     .gap(px(2.))
@@ -565,7 +583,7 @@ impl SettingsView {
                             .flex()
                             .items_center()
                             .gap(px(6.))
-                            .child(input_box(input, 420., error.is_some(), colors))
+                            .child(input_box(input, None, error.is_some(), colors, window, cx))
                             .child(div().w(px(20.)).children(remove)),
                     )
                     .children(error.map(|err| div().text_size(px(11.5)).text_color(colors.error).child(err))),

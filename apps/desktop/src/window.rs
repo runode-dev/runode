@@ -78,6 +78,7 @@ pub use quit::{
 };
 pub use remote::serve_requests;
 pub(crate) use settings_page::show_settings;
+pub(crate) use status_bar::item_icon_and_title as status_item_icon_and_title;
 pub use status_bar::watch as watch_status;
 pub use titlebar::titlebar_options;
 

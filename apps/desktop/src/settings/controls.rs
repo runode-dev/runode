@@ -2,8 +2,8 @@
 //! 终端的前景和背景，和终端窗口的界面一个色调。
 
 use gpui::{
-    AnyElement, ClickEvent, Context, Div, ElementId, Entity, Hsla, SharedString, Stateful, Window, div, prelude::*, px,
-    svg,
+    AnyElement, App, ClickEvent, Context, Div, ElementId, Entity, Focusable, Hsla, SharedString, Stateful, Window, div,
+    prelude::*, px, svg,
 };
 use runode_config::Config;
 use runode_shared_types::color::Rgb;
@@ -283,10 +283,27 @@ pub(super) fn dropdown(
         .child(svg().flex_none().path("icons/chevron-down.svg").size(px(12.)).text_color(colors.fg.opacity(0.6)))
 }
 
-/// 输入框的外框。
-pub(super) fn input_box(input: Entity<TextField>, width: f32, error: bool, colors: Colors) -> Div {
+/// 输入框的外框；`width` 为 `None` 时占满剩下的宽度。正在输入时描强调色，出错时描错误色。
+pub(super) fn input_box(
+    input: Entity<TextField>,
+    width: Option<f32>,
+    error: bool,
+    colors: Colors,
+    window: &Window,
+    cx: &App,
+) -> Div {
+    let border = if error {
+        colors.error
+    } else if input.focus_handle(cx).is_focused(window) {
+        colors.accent
+    } else {
+        colors.border
+    };
     div()
-        .w(px(width))
+        .map(|field| match width {
+            Some(width) => field.w(px(width)),
+            None => field.flex_1().min_w_0(),
+        })
         .h(px(CONTROL_HEIGHT))
         .px(px(8.))
         .flex()
@@ -294,9 +311,35 @@ pub(super) fn input_box(input: Entity<TextField>, width: f32, error: bool, color
         .rounded(px(6.))
         .bg(colors.control)
         .border_1()
-        .border_color(if error { colors.error } else { colors.border })
+        .border_color(border)
         .text_size(px(12.))
         .child(div().flex_1().min_w_0().h_full().child(input))
+}
+
+/// 可以选上、取消的小标签，选上的描强调色、打个勾。
+pub(super) fn chip(
+    id: impl Into<ElementId>,
+    icon: Option<&'static str>,
+    label: impl Into<SharedString>,
+    on: bool,
+    colors: Colors,
+) -> Stateful<Div> {
+    div()
+        .id(id)
+        .h(px(24.))
+        .px(px(8.))
+        .flex()
+        .items_center()
+        .gap(px(5.))
+        .rounded(px(6.))
+        .border_1()
+        .border_color(if on { colors.accent } else { colors.border })
+        .text_size(px(12.))
+        .when(on, |chip| chip.bg(colors.accent.opacity(0.15)))
+        .hover(|chip| chip.bg(colors.hover))
+        .children(on.then(|| svg().path("icons/check.svg").size(px(11.)).text_color(colors.accent)))
+        .children(icon.map(|icon| svg().path(icon).size(px(12.)).text_color(colors.fg.opacity(0.7))))
+        .child(label.into())
 }
 
 /// 色块；`color` 为 `None` 时画一条斜线，表示没设、跟随别的颜色。
