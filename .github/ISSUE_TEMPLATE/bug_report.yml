@@ -1,0 +1,52 @@
+name: Bug report
+description: Something doesn't work, crashes, or behaves incorrectly
+labels: [bug]
+body:
+  - type: dropdown
+    id: component
+    attributes:
+      label: Which part is affected
+      options:
+        - Desktop app (terminal, windows, settings)
+        - Command line (runode list / send / wait, etc.)
+        - Terminal host (runode --host)
+        - Remote access / iOS app
+        - Auto update
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you saw, and how it differs from what you expected.
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. ...
+        2. ...
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Runode version
+      description: Shown in the "About Runode" panel, or run `runode --version`.
+    validations:
+      required: true
+  - type: input
+    id: env
+    attributes:
+      label: System and shell
+      placeholder: macOS 15.5 / Apple Silicon / zsh
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs, screenshots or screen recordings
+      description: Paste them here if you have any. Don't include passwords, tokens or other secrets.

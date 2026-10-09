@@ -1,0 +1,21 @@
+name: Feature request
+description: Suggest a new feature or an improvement
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem are you trying to solve
+      description: Start with the situation and the pain point, e.g. "with three agents running, I can't tell which one is waiting for my answer".
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: What you'd like to see
+      description: How you imagine it working. Leave empty if you have no idea yet.
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Current workarounds
+      description: How you get around it today, or which other approaches you considered.
