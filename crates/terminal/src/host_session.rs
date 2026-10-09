@@ -623,7 +623,7 @@ impl HostSession {
 
     /// 用 VT 序列重画当前状态，快照格式对不上时兜底，见 `vt::format_replay`。
     pub fn vt_replay(&self) -> Result<Vec<u8>> {
-        Ok(vt::format_replay(&self.terminal)?)
+        Ok(vt::format_replay(&self.terminal, self.settings.cursor_style)?)
     }
 
     /// 给别的进程的快照，之后给它的输出是经 `redactor` 抹过的。和 `snapshot` 不同的只在输出流

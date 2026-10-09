@@ -128,7 +128,7 @@ fn snapshot_round_trips_the_screen() {
     assert_eq!(b.title().unwrap(), "标题");
     assert_eq!((b.cols().unwrap(), b.rows().unwrap()), (20, 4));
     assert_eq!((b.cursor_x().unwrap(), b.cursor_y().unwrap()), (6, 1));
-    assert_eq!(format_replay(&a).unwrap(), format_replay(&b).unwrap());
+    assert_eq!(format_replay(&a, Default::default()).unwrap(), format_replay(&b, Default::default()).unwrap());
     // 解出来的 VT 设好了共同的选项，也接着记录没写完的序列，能再编快照。
     assert_eq!(b.scrollback_max_lines().unwrap(), Some(SCROLLBACK_LINES));
     assert_eq!(b.continuation_max_bytes().unwrap(), CONTINUATION_MAX_BYTES);
@@ -154,7 +154,11 @@ fn an_unfinished_sequence_resumes_after_decoding() {
         assert!(!split.is_vt_ground().unwrap());
         let mut resumed = decode_snapshot(&encode_snapshot(&split).unwrap()).unwrap();
         resumed.vt_write(tail);
-        assert_eq!(format_replay(&resumed).unwrap(), format_replay(&whole).unwrap(), "{head:?} | {tail:?}");
+        assert_eq!(
+            format_replay(&resumed, Default::default()).unwrap(),
+            format_replay(&whole, Default::default()).unwrap(),
+            "{head:?} | {tail:?}"
+        );
     }
 }
 
@@ -167,7 +171,10 @@ fn a_sequence_longer_than_the_limit_waits_until_it_ends() {
     // 这条序列一结束就又能编了。
     terminal.vt_write(b"\x07done");
     let decoded = decode_snapshot(&encode_snapshot(&terminal).unwrap()).unwrap();
-    assert_eq!(format_replay(&decoded).unwrap(), format_replay(&terminal).unwrap());
+    assert_eq!(
+        format_replay(&decoded, Default::default()).unwrap(),
+        format_replay(&terminal, Default::default()).unwrap()
+    );
 }
 
 /// 字符串序列（SOS、PM、APC）里的 8 位 C1 字节会结束它、开始一条新序列（0x90 DCS、0x9B CSI、
@@ -190,7 +197,11 @@ fn a_c1_control_ending_a_string_still_encodes() {
         let mut resumed = decode_snapshot(&encode_snapshot(&split).unwrap()).unwrap();
         assert!(!resumed.is_vt_ground().unwrap(), "{head:?}");
         resumed.vt_write(tail);
-        assert_eq!(format_replay(&resumed).unwrap(), format_replay(&whole).unwrap(), "{head:?}");
+        assert_eq!(
+            format_replay(&resumed, Default::default()).unwrap(),
+            format_replay(&whole, Default::default()).unwrap(),
+            "{head:?}"
+        );
         assert_eq!(resumed.title().unwrap(), whole.title().unwrap(), "{head:?}");
     }
 }
@@ -223,9 +234,9 @@ fn damaged_snapshots_are_rejected() {
 }
 
 /// 重放后的 VT 按同样的字节往下走。
-fn replayed(terminal: &Terminal<'_, '_>) -> Terminal<'static, 'static> {
+fn replayed(terminal: &Terminal<'static, '_>) -> Terminal<'static, 'static> {
     let mut replayed = new_terminal(size(terminal.cols().unwrap(), terminal.rows().unwrap())).unwrap();
-    replayed.vt_write(&format_replay(terminal).unwrap());
+    replayed.vt_write(&format_replay(terminal, Default::default()).unwrap());
     replayed
 }
 
@@ -261,7 +272,22 @@ fn replay_keeps_modes_title_palette_and_keyboard() {
     assert_eq!(b.pwd().unwrap(), "file:///tmp/x");
     assert_eq!(b.color_palette().unwrap().0[1], a.color_palette().unwrap().0[1]);
     assert_eq!(b.kitty_keyboard_flags().unwrap(), a.kitty_keyboard_flags().unwrap());
-    assert_eq!(format_replay(&b).unwrap(), format_replay(&a).unwrap());
+    assert_eq!(format_replay(&b, Default::default()).unwrap(), format_replay(&a, Default::default()).unwrap());
+}
+
+/// 程序用 DECSCUSR 设的光标形状和闪烁跟着重放过去；和配置的默认形状一样时不写，重放出的 VT
+/// 照旧跟着配置走。
+#[test]
+fn replay_keeps_the_cursor_shape_the_program_set() {
+    let shape =
+        |t: &Terminal<'static, '_>| RenderState::new().unwrap().update(t).unwrap().cursor_visual_style().unwrap();
+    let mut a = new_terminal(size(20, 4)).unwrap();
+    a.vt_write(b"\x1b[6 q");
+    let b = replayed(&a);
+    assert_eq!(shape(&b), CursorVisualStyle::Bar);
+    assert!(!b.mode(Mode::CURSOR_BLINKING).unwrap());
+    let bytes = format_replay(&a, settings::CursorStyle::Bar).unwrap();
+    assert!(!String::from_utf8_lossy(&bytes).contains(" q"));
 }
 
 /// origin mode 下 CUP 从滚动区域的左上角算起，重放写的光标位置也得照这样算，不然光标会往下偏
@@ -348,7 +374,7 @@ fn snapshot_costs() {
         let scrollbar = terminal.scrollbar().unwrap();
         let (encode, bytes) = timed(5, || encode_snapshot(&terminal).unwrap());
         let (decode, _) = timed(5, || decode_snapshot(&bytes).unwrap());
-        let replay_bytes = format_replay(&terminal).unwrap();
+        let replay_bytes = format_replay(&terminal, Default::default()).unwrap();
         eprintln!(
             "snapshot {name} 200x50, {} rows in total ({} KiB fed): encode {:.1} ms, decode {:.1} ms, {} KiB; vt replay {} KiB",
             scrollbar.total,

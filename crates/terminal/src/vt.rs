@@ -11,6 +11,7 @@ use libghostty_vt::{
     Terminal,
     error::{Error, Result},
     fmt::{Format, Formatter, FormatterOptions},
+    render::{CursorVisualStyle, RenderState},
     screen::{CellSemanticContent, RowSemanticPrompt, Screen},
     selection::Selection,
     snapshot::Decoder,
@@ -19,7 +20,7 @@ use libghostty_vt::{
 use runode_shared_types::{
     color::TerminalColor,
     grid::GridSize,
-    settings::{DEFAULT_SCROLLBACK_LIMIT, TermSettings},
+    settings::{self, DEFAULT_SCROLLBACK_LIMIT, TermSettings},
 };
 
 use crate::session::convert::{ghostty_cursor_style, ghostty_rgb};
@@ -202,12 +203,30 @@ pub(crate) fn decode_snapshot(bytes: &[u8]) -> std::result::Result<Terminal<'sta
 /// 大致复原。快照的格式对不上（两边不是同一个构建）时用它兜底。
 ///
 /// 输出的是活动屏幕（备用屏幕上就只有备用屏幕，没有主屏幕和回滚历史）的内容，加上调色板、
-/// 模式、滚动区域、制表位、目录（OSC 7）、键盘模式、光标位置和样式、超链接、保护模式、
-/// Kitty 键盘协议和字符集；格式化本身不带标题，这里在末尾补一条 OSC 2。重放丢掉的东西
-/// 见测试 `replay_loses_what_the_formatter_cannot_express`。
-pub(crate) fn format_replay(terminal: &Terminal<'_, '_>) -> Result<Vec<u8>> {
+/// 模式、滚动区域、制表位、目录（OSC 7）、键盘模式、光标位置和 SGR 样式、超链接、保护模式、
+/// Kitty 键盘协议和字符集；格式化本身不带标题和光标形状，这里在末尾补一条 OSC 2，光标形状和
+/// 配置的默认形状 `default_cursor` 不一样（程序用 DECSCUSR 设过，比如 shell 集成在提示符上换成
+/// 竖线）时补一条 DECSCUSR。重放丢掉的东西见测试 `replay_loses_what_the_formatter_cannot_express`。
+pub(crate) fn format_replay(
+    terminal: &Terminal<'static, '_>,
+    default_cursor: settings::CursorStyle,
+) -> Result<Vec<u8>> {
     let mut out = Vec::new();
     Formatter::new(terminal, replay_options())?.format_into(&mut out)?;
+    let shape = RenderState::new()?.update(terminal)?.cursor_visual_style()?;
+    let decscusr = match shape {
+        CursorVisualStyle::Block => Some((1, settings::CursorStyle::Block)),
+        CursorVisualStyle::Underline => Some((3, settings::CursorStyle::Underline)),
+        CursorVisualStyle::Bar => Some((5, settings::CursorStyle::Bar)),
+        _ => None,
+    };
+    if let Some((n, style)) = decscusr
+        && style != default_cursor
+    {
+        // 奇数闪、偶数不闪，按格式化已经写出的模式 12 选，不改闪烁。
+        let steady = u8::from(!terminal.mode(Mode::CURSOR_BLINKING)?);
+        out.extend_from_slice(format!("\x1b[{} q", n + steady).as_bytes());
+    }
     let title = terminal.title()?;
     if !title.is_empty() {
         // 标题本来就是从 OSC 里解出来的，不该有控制字符；万一有，去掉，免得提前结束这条 OSC。

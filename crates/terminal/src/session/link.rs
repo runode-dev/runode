@@ -48,6 +48,7 @@ impl Link {
 }
 
 /// 逻辑行（软换行接起来的几行）里的一格。宽字符只记前一格，宽度为 2。
+#[derive(Clone)]
 struct LineCell {
     x: u16,
     y: u16,
@@ -67,28 +68,62 @@ impl Session {
             return None;
         }
         let (x, y) = (at.x as u16, at.y as u16);
-        let cells = log_err("read link line", logical_line(&self.terminal, y, size.rows))?;
-        let index = cells.iter().position(|cell| cell.y == y && (cell.x..cell.x + cell.width).contains(&x))?;
-        if let Some(uri) = &cells[index].uri {
+        let line = log_err("read link line", logical_line(&self.terminal, y, size.rows))?;
+        let index = line.iter().position(|cell| cell.y == y && (cell.x..cell.x + cell.width).contains(&x))?;
+        if let Some(uri) = &line[index].uri {
             let same = |cell: &LineCell| cell.uri.as_ref() == Some(uri);
-            let first = cells[..index].iter().rposition(|cell| !same(cell)).map_or(0, |i| i + 1);
-            let last = cells[index..].iter().position(|cell| !same(cell)).map_or(cells.len(), |i| index + i);
-            return Some(Link { target: LinkTarget::Url(uri.clone()), spans: spans(&cells[first..last]) });
+            let first = line[..index].iter().rposition(|cell| !same(cell)).map_or(0, |i| i + 1);
+            let last = line[index..].iter().position(|cell| !same(cell)).map_or(line.len(), |i| index + i);
+            return Some(Link { target: LinkTarget::Url(uri.clone()), spans: spans(&line[first..last]) });
         }
-        let mut chars = Vec::new();
-        let mut owners = Vec::new();
-        for (i, cell) in cells.iter().enumerate() {
-            for c in cell.text.chars() {
-                chars.push(c);
-                owners.push(i);
-            }
-        }
-        let pointer = owners.iter().position(|&owner| owner == index)?;
         let cwd = self.cwd();
         let home = runode_paths::Dirs::from_env().home;
-        let (range, target) = find(&chars, pointer, |text| resolve_path(text, cwd.as_deref(), home.as_deref()))?;
-        Some(Link { target, spans: spans(&cells[owners[range.start]..=owners[range.end - 1]]) })
+        let find_in = |cells: &[LineCell]| {
+            let index = cells.iter().position(|cell| cell.y == y && (cell.x..cell.x + cell.width).contains(&x))?;
+            let mut chars = Vec::new();
+            let mut owners = Vec::new();
+            for (i, cell) in cells.iter().enumerate() {
+                for c in cell.text.chars() {
+                    chars.push(c);
+                    owners.push(i);
+                }
+            }
+            let pointer = owners.iter().position(|&owner| owner == index)?;
+            let (range, target) =
+                find(&chars, pointer, |text| resolve_path(text, cwd.as_deref(), home.as_deref()))?;
+            Some(Link { target, spans: spans(&cells[owners[range.start]..=owners[range.end - 1]]) })
+        };
+        // 接上硬换行的续行后认不出（比如本来就到行尾为止的路径接上了下一行的字）时，只在这一行里找。
+        let joined = log_err("read hard-wrapped lines", join_hard_wraps(&self.terminal, &line, size.rows)).flatten();
+        joined.as_deref().and_then(find_in).or_else(|| find_in(&line))
     }
+}
+
+/// Claude Code 这类程序自己按宽度折行：一行写满到最后一列，下一行先空几格缩进再接着写，中间是硬换行，
+/// 终端不知道它们是一行。`line` 的头尾这样接着上下的逻辑行时，把它们接上并去掉续行开头的缩进；
+/// 没有可接的时为 `None`。
+fn join_hard_wraps(terminal: &Terminal<'_, '_>, line: &[LineCell], rows: u16) -> Result<Option<Vec<LineCell>>> {
+    // 逻辑行的每一列都在 `cells` 里，最后一格就在最后一列。
+    let ends_in_link = |cells: &[LineCell]| cells.last().is_some_and(|cell| cell.text.chars().all(link_char));
+    let indent = |cells: &[LineCell]| cells.iter().take_while(|cell| cell.text == " ").count();
+    let continues = |cells: &[LineCell]| cells.get(indent(cells)).is_some_and(|cell| cell.text.chars().all(link_char));
+    let mut cells = line.to_vec();
+    while cells[0].y > 0 && continues(&cells) {
+        let above = logical_line(terminal, cells[0].y - 1, rows)?;
+        if !ends_in_link(&above) {
+            break;
+        }
+        cells.drain(..indent(&cells));
+        cells.splice(0..0, above);
+    }
+    while let Some(next) = cells.last().map(|cell| cell.y + 1).filter(|&next| next < rows && ends_in_link(&cells)) {
+        let below = logical_line(terminal, next, rows)?;
+        if !continues(&below) {
+            break;
+        }
+        cells.extend(below.into_iter().skip(indent(&below)));
+    }
+    Ok((cells.len() != line.len()).then_some(cells))
 }
 
 /// 读出视口第 `y` 行所在的逻辑行：往上找到软换行的开头，往下接到不再软换行的那一行，只在视口里找。
