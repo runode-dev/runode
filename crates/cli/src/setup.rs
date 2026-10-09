@@ -74,6 +74,9 @@ mod tests {
     #[test]
     fn the_skill_has_a_name_and_a_description() {
         assert!(SKILL.starts_with("---\nname: runode\ndescription: "));
+        // Codex 和 skill 规范都不认超过 1024 个字符的描述，整个 skill 不会被加载。
+        let description = SKILL.lines().nth(2).unwrap().trim_start_matches("description: ");
+        assert!(description.chars().count() <= 1024, "{}", description.chars().count());
     }
 
     #[test]

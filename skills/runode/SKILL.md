@@ -1,6 +1,6 @@
 ---
 name: runode
-description: Drive other terminals in the runode app - open panes and tabs, list them, type commands or send control keys into them, wait for a command or another agent to finish, and read their output. Use it whenever you run inside a runode terminal (RUNODE_SESSION is set) and the task involves another terminal - running tests, a build or a dev server in a pane next to yours, checking what a neighbouring pane printed, handing work to another agent (Codex, Claude...) and collecting its answer - even if the user only says "the pane on the right", "the other terminal" or "run it on the side" and never names runode.
+description: Drive other terminals in the runode app - open panes and tabs, list them, type commands or send control keys into them, wait for a command or another agent to finish, and read their output. Use it whenever you run inside a runode terminal (RUNODE_SESSION is set) and the task involves another terminal or another coding agent - tests, a build or a dev server in a pane next to yours, what a neighbouring pane printed, work handed to other agents. In particular use it whenever the user names agent CLIs to bring in (claude, codex, pi, gemini, opencode...), in any language - "use claude and pi to review this", "let codex fix it", a cross-review, a red team / blue team review, a second opinion. Start each named agent in a pane of its own and talk to it through runode instead of imitating it with your own subagents, even if it is the same agent as you. Also use it when the user only says "the pane on the right", "the other terminal" or "run it on the side" and never names runode.
 ---
 
 # Driving other runode terminals
@@ -157,6 +157,45 @@ runode wait "$id" --for idle --timeout 60
 runode send "$id" 'Review the diff in src/parser.rs and list bugs' --enter --wait --timeout 1800
 runode read "$id" --lines 80
 ```
+
+## Work with several agents
+
+When the user names agents ("use claude and pi", "ask codex too"), they mean
+those programs running in runode terminals the user can watch, not subagents
+of yours, even if one of them is the same agent as you. Start each one, give
+it its task, and coordinate them yourself. A red team / blue team review, for
+example: one agent attacks the change and lists problems, the other answers
+each one (fix, or explain why it is not a problem), and you go back and forth
+until they agree, then fix or let one of them fix.
+
+```sh
+red=$(runode open --right -- claude)
+blue=$(runode open --near "$red" --down -- pi)
+runode wait "$red" --for idle --timeout 60
+runode wait "$blue" --for idle --timeout 60
+
+# Ask for the report in a file: the screen holds only what fits on it.
+runode send "$red" --paste 'Red team: review the uncommitted diff as an attacker.
+Find bugs, security holes and broken edge cases. Write them to /tmp/red.md.' \
+  --enter --wait --timeout 1800 &
+runode send "$blue" --paste 'Blue team: read the uncommitted diff and note how
+it could break. Wait for a list of findings from me.' --enter --wait --timeout 1800 &
+wait
+
+runode send "$blue" --paste "Answer each finding in /tmp/red.md: fix it, or
+say why it is not a problem. Write your answers to /tmp/blue.md." \
+  --enter --wait --timeout 1800
+```
+
+- Wait for an agent to be `idle` before the first prompt. If it is `blocked`
+  right away (a trust or login question), `runode read` it and answer, or ask
+  the user.
+- Run the `send ... --wait` of agents working in parallel in the background
+  (`&`, then `wait`), so neither waits for the other.
+- Long or multi-line prompts go with `--paste`; give file paths rather than
+  pasting large content.
+- Leave the agents' panes open when you are done: the user may want to read
+  them or keep talking to them.
 
 ## Be careful
 
