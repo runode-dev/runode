@@ -243,3 +243,57 @@ enum BoxDrawing {
         return arc.copy(strokingWithWidth: light, lineCap: .butt, lineJoin: .round, miterLimit: 1)
     }
 }
+
+/// 块元素（U+2580–U+259F：半块、八分之几的块、整块、阴影 `░▒▓`、象限块），和桌面一样不用字体按格子
+/// 自己画：块正好铺满格子，阴影用前景色加 1/4、1/2、3/4 的不透明度铺满，不画字体里的点阵，相邻格子
+/// 接起来没有花纹和缝。
+enum BlockElement {
+    /// 象限块 U+2596–U+259F 的组成：1 左上、2 右上、4 左下、8 右下。
+    private static let quadrants: [UInt8] = [4, 8, 1, 13, 9, 7, 11, 2, 6, 14]
+
+    static func handles(_ scalar: Unicode.Scalar) -> Bool {
+        (0x2580...0x259F).contains(scalar.value)
+    }
+
+    /// `scalar` 在 `rect` 这个格子里要填的形状和填色的不透明度；不是这里画的字符返回 `nil`。边按 `scale`
+    /// （设备像素和点的比例）对齐。
+    static func shape(for scalar: Unicode.Scalar, in rect: CGRect, scale: CGFloat) -> (path: CGPath, alpha: CGFloat)? {
+        let snap = { (value: CGFloat) -> CGFloat in (value * scale).rounded() / scale }
+        /// 格子里按比例取的一块，x、y 都在 0...1。
+        func part(_ x0: CGFloat, _ x1: CGFloat, _ y0: CGFloat, _ y1: CGFloat) -> CGRect {
+            let left = snap(rect.minX + rect.width * x0)
+            let right = snap(rect.minX + rect.width * x1)
+            let top = snap(rect.minY + rect.height * y0)
+            let bottom = snap(rect.minY + rect.height * y1)
+            return CGRect(x: left, y: top, width: right - left, height: bottom - top)
+        }
+        let value = scalar.value
+        var alpha: CGFloat = 1
+        let rects: [CGRect]
+        switch value {
+        case 0x2580: rects = [part(0, 1, 0, 0.5)]
+        // ▁▂▃▄▅▆▇█：下方 1/8 到整格。
+        case 0x2581...0x2588: rects = [part(0, 1, 1 - CGFloat(value - 0x2580) / 8, 1)]
+        // ▉▊▋▌▍▎▏：左侧 7/8 到 1/8。
+        case 0x2589...0x258F: rects = [part(0, CGFloat(0x2590 - value) / 8, 0, 1)]
+        case 0x2590: rects = [part(0.5, 1, 0, 1)]
+        case 0x2591...0x2593:
+            rects = [part(0, 1, 0, 1)]
+            alpha = CGFloat(value - 0x2590) / 4
+        case 0x2594: rects = [part(0, 1, 0, 0.125)]
+        case 0x2595: rects = [part(0.875, 1, 0, 1)]
+        case 0x2596...0x259F:
+            let mask = quadrants[Int(value - 0x2596)]
+            rects = (0..<4).filter { mask >> $0 & 1 != 0 }.map { index in
+                let x = CGFloat(index % 2) / 2
+                let y = CGFloat(index / 2) / 2
+                return part(x, x + 0.5, y, y + 0.5)
+            }
+        default:
+            return nil
+        }
+        let path = CGMutablePath()
+        path.addRects(rects)
+        return (path, alpha)
+    }
+}

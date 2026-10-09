@@ -283,7 +283,7 @@
             if let cached = glyphCache[key] { return cached }
             var plain: PlainGlyph?
             if let scalar = text.unicodeScalars.first, text.unicodeScalars.count == 1,
-                !BoxDrawing.handles(scalar), !PowerlineGlyph.handles(scalar)
+                !BoxDrawing.handles(scalar), !BlockElement.handles(scalar), !PowerlineGlyph.handles(scalar)
             {
                 var units = Array(text.utf16)
                 var glyphs = [CGGlyph](repeating: 0, count: units.count)
@@ -305,9 +305,8 @@
             return plain
         }
 
-        /// 制表符和 Powerline 的几何分隔符按格子自己画（见 `BoxDrawing`、`PowerlineGlyph`）；不是这类字符时
-        /// 返回 false。形状左右各
-        /// 多画半个像素，盖住和相邻格子背景之间因为格子宽度不是整像素而露出的缝。
+        /// 制表符、块元素和 Powerline 的几何分隔符按格子自己画（见 `BoxDrawing`、`BlockElement`、
+        /// `PowerlineGlyph`）；不是这类字符时返回 false。Powerline 的形状左右各多画半个像素，盖住和相邻格子背景之间因为格子宽度不是整像素而露出的缝。
         private func drawPowerline(_ text: String, in rect: CGRect, color: CGColor, context: CGContext) -> Bool {
             guard let scalar = text.unicodeScalars.first, text.unicodeScalars.count == 1 else { return false }
             if BoxDrawing.handles(scalar) {
@@ -318,6 +317,14 @@
                 defer { context.restoreGState() }
                 context.addPath(path)
                 context.setFillColor(color)
+                context.fillPath()
+                return true
+            }
+            if let (path, alpha) = BlockElement.shape(for: scalar, in: rect, scale: max(contentScaleFactor, 1)) {
+                context.saveGState()
+                defer { context.restoreGState() }
+                context.addPath(path)
+                context.setFillColor(color.copy(alpha: color.alpha * alpha) ?? color)
                 context.fillPath()
                 return true
             }

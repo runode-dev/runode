@@ -133,4 +133,21 @@ import Testing
         #expect(TextPresentation.apply(to: "❗ #1 *") == "❗ #1 *")
         #expect(TextPresentation.apply(to: "✔\u{FE0F}") == "✔\u{FE0F}")
     }
+
+    /// 阴影块铺满格子、按深浅取不透明度；半块和象限块按像素对齐地占格子的一部分。
+    @Test func blockElementsFillTheirShareOfTheCell() throws {
+        let rect = CGRect(x: 7.8, y: 16, width: 7.8, height: 16)
+        for (value, alpha) in [(0x2591, 0.25), (0x2592, 0.5), (0x2593, 0.75)] as [(UInt32, CGFloat)] {
+            let shade = try #require(BlockElement.shape(for: Unicode.Scalar(value)!, in: rect, scale: 2))
+            #expect(shade.alpha == alpha)
+            #expect(shade.path.boundingBoxOfPath == CGRect(x: 8, y: 16, width: 7.5, height: 16))
+        }
+        let lower = try #require(BlockElement.shape(for: "\u{2584}", in: rect, scale: 2))
+        #expect(lower.path.boundingBoxOfPath == CGRect(x: 8, y: 24, width: 7.5, height: 8))
+        // ▚：左上和右下。
+        let quadrant = try #require(BlockElement.shape(for: "\u{259A}", in: rect, scale: 2)).path
+        #expect(quadrant.contains(CGPoint(x: 9, y: 17)) && quadrant.contains(CGPoint(x: 15, y: 31)))
+        #expect(!quadrant.contains(CGPoint(x: 15, y: 17)) && !quadrant.contains(CGPoint(x: 9, y: 31)))
+        #expect(BlockElement.shape(for: "\u{25A0}", in: rect, scale: 2) == nil)
+    }
 }
