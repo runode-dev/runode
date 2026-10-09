@@ -542,7 +542,7 @@ extension LinkState {
         #expect(await eventually { link.stops == 1 })
     }
 
-    /// 切到同一个标签里的另一个分屏：原地换掉栈顶，旧终端关掉；软键盘开着的话新终端接着弹出来。
+    /// 切到同一个标签里的另一个分屏：导航栈不动，栈顶的终端页改显示新会话，旧终端关掉。
     @Test func switchingPanesReplacesTheTerminalPage() async throws {
         let store = MemoryMachineStore()
         let machine = machineRecord()
@@ -557,9 +557,12 @@ extension LinkState {
         let first = try #require(app.terminal(machine: machine.id, session: sessionA))
         first.setKeyboardVisible(true)
         app.switchTerminal(machine: machine.id, to: sessionB)
-        #expect(app.path == [.machine(machine.id), .terminal(machine: machine.id, session: sessionB)])
+        #expect(app.path == [.machine(machine.id), .terminal(machine: machine.id, session: sessionA)])
+        #expect(app.shownSession(machine: machine.id, session: sessionA) == sessionB)
         #expect(app.terminal(machine: machine.id, session: sessionA) !== first)
-        #expect(app.terminal(machine: machine.id, session: sessionB)?.showsKeyboardOnAppear == true)
+        #expect(app.terminal(machine: machine.id, session: sessionB)?.keyboardVisible == true)
+        app.switchTerminal(machine: machine.id, to: sessionA)
+        #expect(app.shownSession(machine: machine.id, session: sessionA) == sessionA)
         // 不在终端页上时不动。
         app.path = [.machine(machine.id)]
         app.switchTerminal(machine: machine.id, to: sessionA)

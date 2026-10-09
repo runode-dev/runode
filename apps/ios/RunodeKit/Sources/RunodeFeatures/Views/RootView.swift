@@ -55,22 +55,19 @@
                 } else {
                     ContentUnavailableView("找不到这台电脑", systemImage: "desktopcomputer.trianglebadge.exclamationmark")
                 }
-            case .terminal(let machine, let session):
+            case .terminal(let machine, let entry):
+                let session = app.shownSession(machine: machine, session: entry)
                 if let model = app.terminal(machine: machine, session: session) {
                     TerminalScreen(
                         model: model, preferences: app.settings.preferences,
                         onOpenGit: { app.openGit(machine: machine, session: session) },
                         onSelectPane: { id in
-                            // 同一个标签里的分屏是平级的，原地换掉不播翻页动画。
+                            // 同一个标签里的分屏是平级的，原地换掉，底栏这些不跟着播动画。
                             var transaction = Transaction()
                             transaction.disablesAnimations = true
                             withTransaction(transaction) { app.switchTerminal(machine: machine, to: id) }
                         },
                         sessions: app.sessionList(for: machine))
-                    // 从终端页开新终端时 `openTerminal` 把栈顶原地换成新会话，同一位置同一类型的页面
-                    // SwiftUI 会接着用，嵌着的终端视图不重建、仍挂在旧会话上，新会话没地方画。按会话
-                    // 区分身份，换会话就换一整页。
-                    .id(route)
                 } else {
                     ContentUnavailableView("找不到这个终端", systemImage: "terminal")
                 }

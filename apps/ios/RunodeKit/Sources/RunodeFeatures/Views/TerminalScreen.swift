@@ -31,13 +31,7 @@
         var body: some View {
             TerminalViewRepresentable(
                 model: model, preferences: preferences, topObstruction: bannerMessage == nil ? 0 : bannerHeight,
-                onMake: { view in
-                    terminalView = view
-                    if model.showsKeyboardOnAppear {
-                        model.showsKeyboardOnAppear = false
-                        model.showKeyboard()
-                    }
-                })
+                onMake: { view in terminalView = view })
                 .ignoresSafeArea(.container, edges: .horizontal)
                 .overlay(alignment: .top) { banner }
                 .overlay(alignment: .bottomTrailing) {
@@ -346,6 +340,17 @@
         }
 
         func updateUIView(_ view: TerminalView, context: Context) {
+            // 切分屏、从终端页开新终端时这一页接着用，终端视图也不换，改接到新会话上：换一个视图的话
+            // 键盘焦点跟着旧视图走掉，软键盘先收起再弹出来。
+            if context.coordinator.model !== model {
+                context.coordinator.model = model
+                model.attachDisplay(view)
+                // 正在更新视图时不能改模型的状态，下一轮再告诉它。
+                Task { @MainActor in
+                    model.setKeyboardVisible(view.isFirstResponder)
+                    if view.bounds.width > 0 { model.updateFitSize(view.fitSize) }
+                }
+            }
             view.topObstruction = topObstruction
             view.fontSizeOverride = preferences.fontSize.map { CGFloat($0) }
             view.bellHaptics = preferences.bellHaptics
@@ -353,7 +358,7 @@
 
         @MainActor
         final class Coordinator: TerminalViewDelegate {
-            let model: TerminalModel
+            var model: TerminalModel
 
             init(model: TerminalModel) {
                 self.model = model

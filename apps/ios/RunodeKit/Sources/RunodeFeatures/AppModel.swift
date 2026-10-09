@@ -94,6 +94,9 @@ public final class AppModel {
     @ObservationIgnored private var sessionLists: [UUID: SessionListModel] = [:]
     @ObservationIgnored private var terminals: [Route: TerminalModel] = [:]
     @ObservationIgnored private var gits: [Route: GitModel] = [:]
+    /// 终端页上切过去的分屏：键是栈里的终端页，值是它现在显示的会话。切分屏不改导航栈：栈顶的值一变，
+    /// SwiftUI 会把这一页工具栏上的按钮整组重建，右上角闪一下。
+    private var panes: [Route: SessionId] = [:]
     @ObservationIgnored private var active = true
     /// 系统交来、要等电脑列表读进来才能打开的会话链接（冷启动时）。
     @ObservationIgnored private var pendingLink: SessionLink?
@@ -120,6 +123,8 @@ public final class AppModel {
     /// 会话列表一起换上，返回时先回到列表。
     public func openTerminal(machine: UUID, session: SessionId) {
         let route = Route.terminal(machine: machine, session: session)
+        // 栈顶已经是这个终端页、只是切到了别的分屏时，回到它本身。
+        panes[route] = nil
         if path.last == .machine(machine) {
             path.append(route)
         } else {
@@ -127,13 +132,27 @@ public final class AppModel {
         }
     }
 
-    /// 终端页上切到电脑上同一个标签里的另一个分屏：换掉栈顶的终端页，返回时照旧回到列表，不在栈里
-    /// 越压越深。软键盘开着的话新终端接着把它弹出来。
+    /// 终端页上切到电脑上同一个标签里的另一个分屏：栈顶的终端页原地改显示这个会话，导航栈不动，返回时
+    /// 照旧回到列表。旧终端关掉；终端视图接着用，键盘开着就还开着。
     public func switchTerminal(machine: UUID, to session: SessionId) {
-        guard let last = path.last, case .terminal(machine, let current) = last, current != session else { return }
-        let keyboard = terminals[last]?.keyboardVisible ?? false
-        path[path.count - 1] = .terminal(machine: machine, session: session)
-        if keyboard { terminal(machine: machine, session: session)?.showsKeyboardOnAppear = true }
+        guard let last = path.last, case .terminal(machine, let entry) = last else { return }
+        let current = shown(last)
+        guard current != .terminal(machine: machine, session: session) else { return }
+        let keyboard = terminals[current]?.keyboardVisible ?? false
+        panes[last] = session == entry ? nil : session
+        pathChanged()
+        // 先记上，底部的按键栏这一帧就不出来。
+        terminal(machine: machine, session: session)?.setKeyboardVisible(keyboard)
+    }
+
+    /// 栈里这个终端页现在显示的会话：切过分屏的是切到的那个。
+    public func shownSession(machine: UUID, session: SessionId) -> SessionId {
+        panes[.terminal(machine: machine, session: session)] ?? session
+    }
+
+    private func shown(_ route: Route) -> Route {
+        guard case .terminal(let machine, let session) = route else { return route }
+        return .terminal(machine: machine, session: shownSession(machine: machine, session: session))
     }
 
     /// 打开一个会话所在仓库的 Git 页，压在当前页上面：从终端页打开时返回回到终端，从会话列表打开时
@@ -231,7 +250,7 @@ public final class AppModel {
             }
         let model = TerminalModel(
             sessionId: session, title: info?.meta.displayTitle ?? String(localized: "终端"), agent: info?.meta.agent,
-            link: list.link, ownerHint: hint, sizePreference: settings.preferences.defaultSize,
+            link: list.link, linkState: list.linkState, ownerHint: hint, sizePreference: settings.preferences.defaultSize,
             onOpen: { [weak list] id in list?.screenOpened(id) },
             onClose: { [weak list] id in list?.screenClosed(id) })
         terminals[route] = model
@@ -308,9 +327,11 @@ public final class AppModel {
         }
     }
 
-    /// 导航栈变了：退出去的终端页、Git 页关掉，新打开的终端记作「上次打开」。会话列表的连接不跟导航栈走。
+    /// 导航栈变了或切了分屏：退出去的终端页、Git 页关掉，新打开的终端记作「上次打开」。会话列表的连接
+    /// 不跟导航栈走。
     private func pathChanged() {
-        let live = Set(path)
+        panes = panes.filter { path.contains($0.key) }
+        let live = Set(path.map(shown))
         for (route, model) in terminals where !live.contains(route) {
             model.close()
             terminals[route] = nil
@@ -319,7 +340,7 @@ public final class AppModel {
             model.close()
             gits[route] = nil
         }
-        if case .terminal(let machine, let session)? = path.last {
+        if case .terminal(let machine, let session)? = path.last.map(shown) {
             remember(machine: machine, session: session)
         }
     }

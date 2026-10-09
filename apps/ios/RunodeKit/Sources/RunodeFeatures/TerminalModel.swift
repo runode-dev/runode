@@ -84,8 +84,6 @@ public final class TerminalModel {
     public var errorMessage: String?
     /// 在等用户确认结束会话。
     public var isConfirmingKill = false
-    /// 终端页出现时弹出软键盘：从开着键盘的分屏切过来时接着打字。
-    @ObservationIgnored public var showsKeyboardOnAppear = false
     /// 底部的快速回复：agent 停下来等回答时出现。
     public let quickReply: QuickReplyModel
 
@@ -118,9 +116,10 @@ public final class TerminalModel {
 
     /// `onOpen`、`onClose` 告诉会话列表这个会话正被终端页看着（列表就不再给它发只看状态的 `Attach`，
     /// 免得换掉这里的订阅）；关掉时由列表改回只看状态。`ownerProbeDelay` 是 `ownerHint` 为 `unknown`
-    /// 时，重放完以后等宿主报 `SizeOwner` 的时间，等不到就当作没有 owner。
+    /// 时，重放完以后等宿主报 `SizeOwner` 的时间，等不到就当作没有 owner。`linkState` 是这台电脑的连接
+    /// 现在的状态，订阅到第一个事件之前标题下面就照它显示，切分屏时不先闪一下「未连接」。
     public init(
-        sessionId: SessionId, title: String, agent: Agent? = nil, link: any HostLink,
+        sessionId: SessionId, title: String, agent: Agent? = nil, link: any HostLink, linkState: LinkState = .idle,
         ownerHint: SizeOwnerHint = .unknown, sizePreference: SizePreference = .automatic,
         ownerProbeDelay: Duration = .milliseconds(400),
         onOpen: @escaping @MainActor (SessionId) -> Void = { _ in },
@@ -130,6 +129,7 @@ public final class TerminalModel {
         self.title = title
         self.agent = agent
         self.link = link
+        self.linkState = linkState
         self.ownerHint = ownerHint
         self.sizePreference = sizePreference
         self.ownerProbeDelay = ownerProbeDelay
