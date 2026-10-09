@@ -262,6 +262,7 @@ import Testing
         #expect(empty.sessions.isEmpty)
         #expect(empty.anchor == nil)
         #expect(model.canSpawn(in: empty))
+        #expect(model.spawnChoices == sections)
         link.clearSent()
         await model.spawn(in: empty)
         guard case .openWorkspace(let req, "/Users/ethan/empty", false, nil)? = link.sent.first else {
@@ -279,6 +280,24 @@ import Testing
             Issue.record("expected an open beside sessionA, got \(link.sent)")
             return
         }
+    }
+
+    /// 只有一个工作区时新开终端不用挑；后台那一节不算工作区。
+    @Test func oneWorkspaceOffersNoChoice() {
+        let model = SessionListModel(machine: machineRecord(), link: link)
+        model.handle(.ready(generation: 1))
+        model.handle(.message(.sessionList([info(sessionA, title: "a"), info(sessionB, title: "b")])))
+        let tab = TabLayout(index: 1, active: true, panes: [PaneLayout(index: 1, id: sessionA, focused: true)])
+        model.handle(
+            .message(
+                .layout(
+                    req: 0,
+                    windows: [
+                        WindowLayout(
+                            index: 1, workspaces: [WorkspaceLayout(index: 1, name: "a", dir: "/Users/ethan/a", tabs: [tab])])
+                    ])))
+        #expect(model.sections.map(\.id) == [.workspace(window: 1, index: 1), .background])
+        #expect(model.spawnChoices.isEmpty)
     }
 
     /// 同一个标签里分了屏的会话互为兄弟；独自一个标签、不在窗口里的没有。

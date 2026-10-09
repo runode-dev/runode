@@ -14,7 +14,7 @@
         @Environment(\.displayScale) private var displayScale
         @Environment(\.dynamicTypeSize) private var dynamicTypeSize
         @Environment(\.themeColors) private var colors
-        @State private var choosingSpawnMachine = false
+        @State private var choosingSpawnTarget = false
         /// 首页的大小，和终端页差不多；新开会话按它和设置里的字号算网格尺寸。
         @State private var pageSize: CGSize?
 
@@ -182,18 +182,20 @@
                         app.startPairing()
                     }
                     ActionTile(title: String(localized: "新开会话"), systemImage: "plus", busy: spawnable.contains(where: \.isSpawning)) {
-                        if spawnable.count == 1, let list = spawnable.first {
-                            spawn(on: list)
+                        let targets = spawnTargets
+                        if targets.count == 1, let target = targets.first {
+                            spawn(at: target)
                         } else {
-                            choosingSpawnMachine = true
+                            choosingSpawnTarget = true
                         }
                     }
                     .disabled(spawnable.isEmpty)
                     .confirmationDialog(
-                        "在哪台电脑上新开终端？", isPresented: $choosingSpawnMachine, titleVisibility: .visible
+                        spawnTargets.contains { $0.section != nil } ? Text("在哪里新开终端？") : Text("在哪台电脑上新开终端？"),
+                        isPresented: $choosingSpawnTarget, titleVisibility: .visible
                     ) {
-                        ForEach(app.spawnableLists, id: \.machine.id) { list in
-                            Button(list.machine.name) { spawn(on: list) }
+                        ForEach(spawnTargets) { target in
+                            Button(target.title) { spawn(at: target) }
                         }
                     }
                 }
@@ -202,13 +204,48 @@
             }
         }
 
-        private func spawn(on list: SessionListModel) {
+        /// 新开会话能开在哪：有 `spawnChoices` 的电脑一个工作区一项，让用户挑；别的电脑一台一项，开在电脑上
+        /// 当前的工作区里。连着的电脑不止一台时每项带上电脑的名字，电脑开着几个窗口时带上窗口，同名的
+        /// 工作区才分得清。
+        private struct SpawnTarget: Identifiable {
+            let id: String
+            let title: String
+            let list: SessionListModel
+            let section: SessionSection?
+        }
+
+        private var spawnTargets: [SpawnTarget] {
+            let lists = app.spawnableLists
+            return lists.flatMap { list -> [SpawnTarget] in
+                let machine = list.machine.name
+                let choices = list.spawnChoices
+                guard !choices.isEmpty else {
+                    return [SpawnTarget(id: "\(list.machine.id)", title: machine, list: list, section: nil)]
+                }
+                return choices.map { section in
+                    var name = Presentation.sectionTitle(section)
+                    if let window = section.window { name += " · " + String(localized: "窗口 \(window)") }
+                    return SpawnTarget(
+                        id: "\(list.machine.id)/\(section.id)", title: lists.count > 1 ? "\(machine) · \(name)" : name,
+                        list: list, section: section)
+                }
+            }
+        }
+
+        private func spawn(at target: SpawnTarget) {
+            let list = target.list
             if let pageSize {
                 list.spawnSize = TerminalView.gridSize(
                     fitting: pageSize, scale: displayScale, contentSize: UIContentSizeCategory(dynamicTypeSize),
                     fontSize: app.settings.preferences.fontSize.map { CGFloat($0) })
             }
-            Task { await list.spawn() }
+            Task {
+                if let section = target.section {
+                    await list.spawn(in: section)
+                } else {
+                    await list.spawn()
+                }
+            }
         }
 
         // MARK: 出错

@@ -9,7 +9,7 @@
     /// 改名；一个终端都没有的工作区也列出来；不在任何窗口里的会话放在最后的「后台」一节。一个会话一张
     /// 卡片，带 agent 状态和屏幕最后几行的预览，等你回答的带快速回复。点开终端，左滑结束，长按有更多操作
     /// （含会话目录里 Makefile、package.json 的命令）。有会话等你回答时，列表顶上汇总一张卡片，点一行滚到
-    /// 那个会话。右上角能新开终端、新建工作区。
+    /// 那个会话。右上角能新开终端（工作区不止一个时先选开在哪个）、新建工作区。
     struct SessionListView: View {
         @Bindable var model: SessionListModel
         let onOpen: (SessionId) -> Void
@@ -90,8 +90,22 @@
             .toolbar {
                 ToolbarItem(placement: .primaryAction) {
                     Menu("新建", systemImage: "plus") {
-                        Button("新开终端", systemImage: "terminal") {
-                            Task { await model.spawn() }
+                        let choices = model.spawnChoices
+                        if !choices.isEmpty {
+                            Menu("新开终端", systemImage: "terminal") {
+                                ForEach(choices) { section in
+                                    Button {
+                                        Task { await model.spawn(in: section) }
+                                    } label: {
+                                        Text(Presentation.sectionTitle(section))
+                                        if let detail = Presentation.sectionDetail(section) { Text(detail) }
+                                    }
+                                }
+                            }
+                        } else {
+                            Button("新开终端", systemImage: "terminal") {
+                                Task { await model.spawn() }
+                            }
                         }
                         Button("新建工作区", systemImage: "folder.badge.plus") {
                             model.beginNewWorkspace()

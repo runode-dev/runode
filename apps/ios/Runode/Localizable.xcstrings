@@ -2076,6 +2076,29 @@
         }
       }
     },
+    "在哪里新开终端？" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Where to open a new terminal?"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在哪里新开终端？"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在哪裡新開終端機？"
+          }
+        }
+      }
+    },
     "在电脑的终端里运行 `runode remote pair`" : {
       "extractionState" : "manual",
       "localizations" : {

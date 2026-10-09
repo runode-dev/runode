@@ -370,6 +370,13 @@ public final class SessionListModel {
         return section.anchor != nil || section.dir != nil
     }
 
+    /// 新开终端时让用户挑的工作区：能新开终端的工作区不止一个时是它们，否则为空，直接开在电脑上当前的
+    /// 工作区里（`spawn()`）。
+    public var spawnChoices: [SessionSection] {
+        let workspaces = sections.filter(canSpawn(in:))
+        return workspaces.count > 1 ? workspaces : []
+    }
+
     /// 把工作区这一节改名为 `name`（`RenameWorkspace`），办好后重新要布局。名字去掉首尾空白后为空时
     /// 不发；后台那一节不是工作区，没法改名。
     public func rename(_ section: SessionSection, to name: String) async {
