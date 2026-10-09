@@ -163,6 +163,17 @@ fn send_wait_picks_what_to_wait_for() {
     }
 }
 
+/// 发给 agent 的输入没让它干活（回车没提交上）时，`send --wait` 过一会儿就失败，不等到 `--timeout`。
+#[test]
+fn send_wait_gives_up_when_the_agent_never_starts() {
+    let fake = host("stall", meta("claude", Some((AgentKind::Claude, AgentState::Idle))), vec![], vec!["$\n"]);
+    let started = Instant::now();
+    let (code, _, err) = run("send 5e55 go --enter --wait --timeout 60", &fake.env);
+    assert_eq!(code, exit::FAILED, "{err}");
+    assert!(err.contains("no activity"), "{err}");
+    assert!(started.elapsed() < Duration::from_secs(30));
+}
+
 #[test]
 fn send_types_or_pastes_then_presses_keys_then_enter() {
     let fake = host("keys", meta("vim", None), vec![], vec![""]);

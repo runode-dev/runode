@@ -34,6 +34,9 @@ const KILL_TIMEOUT: Duration = Duration::from_secs(5);
 const POLL_INTERVAL: Duration = Duration::from_millis(100);
 /// `send --wait` 既没有 agent、也等不了命令时，屏幕这么久不变就算完。
 const SEND_QUIET: Duration = Duration::from_secs(2);
+/// `send --wait` 发给 agent 以后，这么久还没看到它干活或提问就不再等：回车可能没提交上，
+/// 一直等到 `--timeout` 只会白等。
+const SEND_STALL: Duration = Duration::from_secs(10);
 /// 宿主升级（`client::Upgrading`）时，`wait` 最多花这么久重新连上新宿主，见 `Watch::recover`。
 const RECONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 /// 重连之间隔这么久。
@@ -132,7 +135,7 @@ pub(crate) fn run(command: Command, env: &Env, out: &mut dyn Write, err: &mut dy
             if wait {
                 let (until, waiting) = send_wait(&meta, enter || presses_enter(&keys));
                 writeln!(err, "runode: waiting {waiting}")?;
-                wait_until(&mut Watch { env, connection, id }, &meta, &until, timeout, out)
+                wait_until(&mut Watch { env, connection, id }, &meta, &until, timeout, Some(SEND_STALL), out)
                     .map_err(|failure| after_sending(failure, UPGRADED_WHILE_WAITING))?;
             }
         }
@@ -143,7 +146,7 @@ pub(crate) fn run(command: Command, env: &Env, out: &mut dyn Write, err: &mut dy
                 return Err(Failure::Exited);
             }
             let (_, meta) = attach(&connection, info.id)?;
-            wait_until(&mut Watch { env, connection, id: info.id }, &meta, &until, timeout, out)?;
+            wait_until(&mut Watch { env, connection, id: info.id }, &meta, &until, timeout, None, out)?;
         }
         Command::Open { placement, near, cwd, focus, command } => {
             let connection = Connection::open(env)?;
@@ -426,11 +429,13 @@ impl Watch<'_> {
 
 /// 等到 `until`，到了就打印结果。`meta` 是连上时的状态。宿主升级时重新连上接着等（见
 /// `Watch::recover`），等命令运行完（`Until::Command`）除外：新宿主不会重报交接时正在跑的命令。
+/// 等 agent 时给了 `stall`，这么久里 agent 既没干活也没提问就失败，见 `wait_for_agent`。
 fn wait_until(
     watch: &mut Watch<'_>,
     meta: &SessionMeta,
     until: &Until,
     timeout: Option<Duration>,
+    stall: Option<Duration>,
     out: &mut dyn Write,
 ) -> Result<(), Failure> {
     let deadline = timeout.map(|timeout| Instant::now() + timeout);
@@ -505,7 +510,7 @@ fn wait_until(
                 }
             }
         }
-        agent => wait_for_agent(watch, meta.agent, agent, deadline, out),
+        agent => wait_for_agent(watch, meta.agent, agent, deadline, stall, out),
     }
 }
 
@@ -581,18 +586,24 @@ fn wait_for_command(
     }
 }
 
-/// 等 agent 到 `until` 说的状态，到了就打印它现在的状态。`agent` 是连上时的样子。
+/// 等 agent 到 `until` 说的状态，到了就打印它现在的状态。`agent` 是连上时的样子。给了 `stall`
+/// 时，这么久里 agent 一直没干活也没提问就失败，不等到 `deadline`。
 fn wait_for_agent(
     watch: &mut Watch<'_>,
     mut agent: Option<Agent>,
     until: &Until,
     deadline: Option<Instant>,
+    stall: Option<Duration>,
     out: &mut dyn Write,
 ) -> Result<(), Failure> {
     let mut worked = false;
+    let mut stall_at = stall.map(|stall| Instant::now() + stall);
     loop {
         let state = agent.map(|agent| agent.state);
         worked |= state == Some(AgentState::Working);
+        if matches!(state, Some(AgentState::Working | AgentState::Blocked)) {
+            stall_at = None;
+        }
         let reached = match until {
             Until::Done => worked && state != Some(AgentState::Working),
             Until::Working => state == Some(AgentState::Working),
@@ -605,7 +616,8 @@ fn wait_for_agent(
             return Ok(());
         }
         let id = watch.id;
-        let next = match watch.connection.next(deadline) {
+        let stalls = stall_at.filter(|at| deadline.is_none_or(|deadline| *at < deadline));
+        let next = match watch.connection.next(stalls.or(deadline)) {
             Ok(next) => next,
             Err(err) => {
                 agent = watch.recover(err.into(), deadline)?.agent;
@@ -613,6 +625,14 @@ fn wait_for_agent(
             }
         };
         match next {
+            None if stalls.is_some() => {
+                return Err(anyhow!(
+                    "the agent showed no activity within {}s of the input: it may not have been submitted, or it \
+                     finished without working; check with `runode read` before sending it again",
+                    stall.unwrap_or_default().as_secs()
+                )
+                .into());
+            }
             None => return Err(Failure::Timeout),
             Some(HostMsg::Meta { id: changed, meta }) if changed == id => agent = meta.agent,
             Some(HostMsg::Exited { id: exited, .. }) if exited == id => return Err(Failure::Exited),

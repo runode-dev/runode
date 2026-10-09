@@ -54,7 +54,9 @@ id=$(runode open --down -- npm run dev)              # and run a command in it
 ```
 
 `--near SESSION` opens next to another terminal instead of yours; the new one
-starts in that terminal's directory unless you give `--cwd`.
+starts in that terminal's directory unless you give `--cwd`. Split a wide pane
+`--right` and a narrow or tall one `--down`, and avoid splitting the same way
+again and again until the panes are too thin to read.
 
 `open` leaves the user's focus where it is unless you pass `--focus`. To show
 the user a terminal later, `runode focus SESSION` brings its pane and window to
@@ -70,7 +72,13 @@ runode send right 'cargo test' --enter --wait
 result. It picks how to wait and says so on stderr: for a shell prompt with
 shell integration it waits for the command to finish, prints `exit N` and fails
 with status 4 if N is not 0; for an agent it waits until the agent has worked
-and stopped; otherwise until the screen has been quiet for 2 seconds.
+and stopped, and fails if the agent shows no activity within 10 seconds (Enter
+may not have submitted the prompt, or it was a command that finishes at once);
+otherwise until the screen has been quiet for 2 seconds.
+
+When a wait fails or times out, the input may still have been delivered:
+`runode read` the terminal before deciding what to send, and never send the
+same prompt again blindly.
 
 `--wait` is the reliable way to wait for something you just sent. A separate
 `runode wait` only sees what happens after it starts: `--for command` waits for
@@ -166,7 +174,9 @@ of yours, even if one of them is the same agent as you. Start each one, give
 it its task, and coordinate them yourself. A red team / blue team review, for
 example: one agent attacks the change and lists problems, the other answers
 each one (fix, or explain why it is not a problem), and you go back and forth
-until they agree, then fix or let one of them fix.
+until they agree, then fix or let one of them fix. The blue team needs the red
+team's list to start, so give it its task only once the list is there; a
+"read ahead and wait for me" prompt only makes it look stuck while you wait.
 
 ```sh
 red=$(runode open --right -- claude)
@@ -177,21 +187,19 @@ runode wait "$blue" --for idle --timeout 60
 # Ask for the report in a file: the screen holds only what fits on it.
 runode send "$red" --paste 'Red team: review the uncommitted diff as an attacker.
 Find bugs, security holes and broken edge cases. Write them to /tmp/red.md.' \
-  --enter --wait --timeout 1800 &
-runode send "$blue" --paste 'Blue team: read the uncommitted diff and note how
-it could break. Wait for a list of findings from me.' --enter --wait --timeout 1800 &
-wait
+  --enter --wait --timeout 1800
 
-runode send "$blue" --paste "Answer each finding in /tmp/red.md: fix it, or
-say why it is not a problem. Write your answers to /tmp/blue.md." \
+runode send "$blue" --paste "Blue team: answer each finding in /tmp/red.md: fix
+it, or say why it is not a problem. Write your answers to /tmp/blue.md." \
   --enter --wait --timeout 1800
 ```
 
 - Wait for an agent to be `idle` before the first prompt. If it is `blocked`
   right away (a trust or login question), `runode read` it and answer, or ask
   the user.
-- Run the `send ... --wait` of agents working in parallel in the background
-  (`&`, then `wait`), so neither waits for the other.
+- When agents really work at the same time (say each reviews half the
+  change), run their `send ... --wait` in the background (`&`, then `wait`)
+  so neither waits for the other.
 - Long or multi-line prompts go with `--paste`; give file paths rather than
   pasting large content.
 - Leave the agents' panes open when you are done: the user may want to read
