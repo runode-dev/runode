@@ -6,6 +6,8 @@
 //! - 端口：终端里跑的程序在监听几个 TCP 端口；浮层里列出来，点了在浏览器里打开，别的程序监听的收在
 //!   「外部端口」里。
 //!
+//! 用户点了「检查更新…」以后，查和下载期间最左边还有一块转着圈的「正在检查更新…」，见 `update::status_label`。
+//!
 //! 数据全 app 一份（`Status`），每 `POLL_INTERVAL` 更新一次：有窗口在前台时现问 `ps` 和 `lsof`，
 //! 状态栏上藏起来的几块用不着的不问；都在后台时只看 agent 在不在干活，好决定挡不挡休眠。终端靠
 //! `SessionMeta::pid`（shell 的进程号）认领它的子孙进程和这些进程监听的端口。
@@ -30,6 +32,7 @@ use runode_shared_types::{
 use super::{
     ToggleStatusBar, WindowView, cards, divider_color,
     files::{check_item, menu_item},
+    git_panel::sync_icon,
     remote,
 };
 use crate::{
@@ -287,6 +290,16 @@ impl WindowView {
             .status_item("status-ports", StatusPopover::Ports { external: false }, fg, bg, cx)
             .child(icon(PLUG_ICON))
             .child(ours.to_string());
+        let update = crate::update::status_label(cx).map(|label| {
+            div()
+                .flex_none()
+                .px(px(6.))
+                .flex()
+                .items_center()
+                .gap(px(5.))
+                .child(sync_icon("status-update-spinner", true, 13., fg_h.opacity(0.6)))
+                .child(label)
+        });
         let hidden = &cx.global::<AppConfig>().0.status_bar_hidden;
         let shown = |item| !hidden.contains(&item);
         div()
@@ -308,6 +321,7 @@ impl WindowView {
                     this.open_status_menu(event.position, cx);
                 }),
             )
+            .children(update)
             .when(shown(StatusItem::Sleep), |bar| bar.child(sleep_item))
             .when(shown(StatusItem::Resources), |bar| bar.child(resources_item))
             .when(shown(StatusItem::Ports), |bar| bar.child(ports_item))
