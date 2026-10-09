@@ -195,8 +195,10 @@ if [ -z "${_runode_integrated-}" ]; then
         _runode_report keywords $(compgen -k)
     }
 
-    # 先记下退出码，再跑用户原有的 PROMPT_COMMAND，最后加标记。
-    PROMPT_COMMAND="_runode_last_status=\$?;${PROMPT_COMMAND:+$PROMPT_COMMAND;}_runode_prompt_command"
+    # 先记下退出码，再跑用户原有的 PROMPT_COMMAND，最后加标记。用换行连接：用户的值以 `;`、`&`
+    # 结尾或只有空白时，拼上 `;` 会成语法错误。
+    # shortcut: bash 5.1 起数组形式的 PROMPT_COMMAND 只包了下标 0，后面的元素在标记之后跑；有人报问题再按数组处理。
+    PROMPT_COMMAND="_runode_last_status=\$?"$'\n'"${PROMPT_COMMAND:+$PROMPT_COMMAND$'\n'}_runode_prompt_command"
     # 把 $1 按字节做百分号编码，结果放在 _runode_encoded 里：分号、换行、ESC、BEL 和
     # 非 ASCII 字节都不会打断转义序列。
     _runode_urlencode() {

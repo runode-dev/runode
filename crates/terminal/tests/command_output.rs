@@ -282,6 +282,18 @@ fn real_bash_commands_are_read() {
     read_commands_from(RealShell::start("bash", "bash", "PS1='[b]\\$ '\n", "[b]$", &["[b]$"]));
 }
 
+/// 用户的 PROMPT_COMMAND 以 `;` 结尾时照样跑，集成也不出语法错误、照常标出提示符和退出码。
+#[test]
+fn real_bash_keeps_a_prompt_command_ending_in_a_semicolon() {
+    let rc = "PS1='[b]\\$ '\nPROMPT_COMMAND='ran=yes;'\n";
+    let Some(mut shell) = RealShell::start("bash", "bash-prompt-command", rc, "[b]$", &["[b]$"]) else { return };
+    shell.run("false");
+    shell.wait_for_bytes("the exit status of false", 0, b"\x1b]133;D;1\x07");
+    shell.run("echo $ran");
+    assert_eq!(shell.output(1), "yes\n");
+    assert!(rfind(&shell.raw, b"syntax error").is_none(), "{}", shell.screen());
+}
+
 #[test]
 fn real_bash_commands_are_read_under_a_two_line_prompt() {
     read_commands_from(RealShell::start("bash", "bash-two-line", "PS1='\\W\\n[b]\\$ '\n", "[b]$", &["[b]$"]));

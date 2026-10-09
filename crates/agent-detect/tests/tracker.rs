@@ -290,3 +290,15 @@ fn program_status_records_are_kept_per_id() {
     f.tracker.foreground(Foreground::Shell, f.at(30));
     assert_eq!(f.poll(30), None);
 }
+
+#[test]
+fn program_status_does_not_keep_an_expired_startup_grace_due() {
+    let mut f = Fixture::new();
+    f.tracker.foreground(Foreground::Program(Some(Pi)), f.at(0));
+    f.tracker.program_status("a", "pi", Some(Working), f.at(0));
+    assert_eq!(f.poll(0), agent(Pi, Working));
+    let after = f.at(GRACE_MS + 10);
+    assert_eq!(f.poll(GRACE_MS + 10), agent(Pi, Working));
+    // 宽限期过了，下次求值的时刻不能停在过去，否则宿主的等待超时恒为 0、空转。
+    assert!(f.tracker.deadline().is_none_or(|at| at >= after));
+}

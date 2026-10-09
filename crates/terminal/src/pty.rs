@@ -32,7 +32,7 @@ use std::{
     path::{Path, PathBuf},
     sync::{
         Arc, Condvar, Mutex, PoisonError,
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicUsize, Ordering},
         mpsc,
     },
     thread::{self, JoinHandle},
@@ -48,6 +48,9 @@ use crate::shell_integration;
 use notify::Notifier;
 use reader::Reader;
 
+/// 写队列里还没写出的字节超过这么多时丢掉终端查询的回复：程序不读输入时，不断发查询的输出
+/// 会让回复无限地堆在队列里。
+const MAX_QUEUED_FOR_REPLY: usize = 1 << 20;
 /// 写线程写不进去（程序不读输入）时，隔这么久看一眼是不是要交接了。
 const WRITER_STUCK_POLL: Duration = Duration::from_millis(50);
 /// `raise_fd_limit` 最多把描述符的软上限提到这么高：macOS 的 `OPEN_MAX`，`setrlimit` 不接受
@@ -72,9 +75,9 @@ enum WriterMsg {
     Finish(mpsc::Sender<Vec<u8>>),
 }
 
-/// 往 PTY 写的一端：只把数据排进写队列，不等它写出去。
+/// 往 PTY 写的一端：只把数据排进写队列，不等它写出去。第二项是队列里还没写出的字节数。
 #[derive(Clone)]
-pub struct PtyWriter(mpsc::Sender<WriterMsg>);
+pub struct PtyWriter(mpsc::Sender<WriterMsg>, Arc<AtomicUsize>);
 
 /// 闸门的状态，见 `Gate`。
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -136,10 +139,26 @@ impl PtyWriter {
 
     /// 同 `write`，数据已经在自己的缓冲里时不必再复制一份。
     pub fn send(&self, data: Vec<u8>) {
+        if data.is_empty() {
+            return;
+        }
+        let len = data.len();
+        self.1.fetch_add(len, Ordering::Relaxed);
         // 写线程已经结束（PTY 出错、关了或者交出去了）时没有可写的地方，丢掉。
-        if !data.is_empty() && self.0.send(WriterMsg::Data(data)).is_err() {
+        if self.0.send(WriterMsg::Data(data)).is_err() {
+            self.1.fetch_sub(len, Ordering::Relaxed);
             tracing::debug!("pty writer is gone, input dropped");
         }
+    }
+
+    /// 同 `write`，用来写终端查询的回复：队列里积压超过 `MAX_QUEUED_FOR_REPLY` 时丢掉。用户的
+    /// 按键和粘贴不受这个限制。
+    pub fn reply(&self, data: &[u8]) {
+        if self.1.load(Ordering::Relaxed) > MAX_QUEUED_FOR_REPLY {
+            tracing::debug!("pty write queue is full, terminal query reply dropped");
+            return;
+        }
+        self.write(data);
     }
 
     /// 起写线程，把排进队列的数据按顺序写进 `master`。所有发送端都没了、写出错或者收到
@@ -147,11 +166,13 @@ impl PtyWriter {
     /// 输入等 `WriterMsg::Finish` 原样交回去。
     fn start(master: Arc<OwnedFd>, gate: Option<Arc<Gate>>) -> Result<(Self, WriterThread)> {
         let (tx, rx) = mpsc::channel::<WriterMsg>();
+        let queued = Arc::new(AtomicUsize::new(0));
         let stop = Arc::new(AtomicBool::new(false));
         let handle = thread::Builder::new()
             .name("pty-writer".into())
             .spawn({
                 let stop = stop.clone();
+                let queued = queued.clone();
                 move || {
                     if let Some(gate) = gate
                         && !gate.wait()
@@ -159,11 +180,11 @@ impl PtyWriter {
                         hand_back(&rx, Vec::new());
                         return;
                     }
-                    write_loop(&master, &rx, &stop);
+                    write_loop(&master, &rx, &stop, &queued);
                 }
             })
             .context("failed to start pty writer thread")?;
-        Ok((Self(tx), WriterThread { stop, handle }))
+        Ok((Self(tx, queued), WriterThread { stop, handle }))
     }
 
     /// 交接时叫停写线程并等它结束，返回没写出去的输入：程序不读输入、写不进去的那些，和排在
@@ -182,21 +203,25 @@ impl PtyWriter {
     }
 }
 
-fn write_loop(master: &OwnedFd, rx: &mpsc::Receiver<WriterMsg>, stop: &AtomicBool) {
+fn write_loop(master: &OwnedFd, rx: &mpsc::Receiver<WriterMsg>, stop: &AtomicBool, queued: &AtomicUsize) {
     set_current_thread_interactive();
     while let Ok(message) = rx.recv() {
         match message {
-            WriterMsg::Data(data) => match write_all(master, &data, stop) {
-                Written::All => {}
-                Written::Stopped(at) => {
-                    hand_back(rx, data[at..].to_vec());
-                    return;
+            WriterMsg::Data(data) => {
+                let written = write_all(master, &data, stop);
+                queued.fetch_sub(data.len(), Ordering::Relaxed);
+                match written {
+                    Written::All => {}
+                    Written::Stopped(at) => {
+                        hand_back(rx, data[at..].to_vec());
+                        return;
+                    }
+                    Written::Failed(err) => {
+                        tracing::warn!("pty write failed: {err}");
+                        return;
+                    }
                 }
-                Written::Failed(err) => {
-                    tracing::warn!("pty write failed: {err}");
-                    return;
-                }
-            },
+            }
             WriterMsg::Finish(done) => {
                 let _ = done.send(Vec::new());
                 return;
@@ -952,6 +977,27 @@ mod tests {
         pty.resize(GridSize { cols: 100, rows: 40, ..size });
         let got = winsize(master.as_fd());
         assert_eq!((got.ws_col, got.ws_row, got.ws_xpixel, got.ws_ypixel), (100, 40, 800, 640));
+    }
+
+    /// 写不出去时查询的回复积压到上限就丢掉，用户的输入照样排进去。
+    #[test]
+    fn replies_stop_queueing_past_the_limit() {
+        let size = GridSize { cols: 20, rows: 4, cell_width_px: 8, cell_height_px: 16 };
+        let pty = Pty::open(size, Box::new(|_| true)).unwrap();
+        let gate = Gate::closed();
+        let (writer, thread) = PtyWriter::start(pty.master.clone().unwrap(), Some(gate.clone())).unwrap();
+        let reply = b"\x1b[?62c";
+        for _ in 0..2 * MAX_QUEUED_FOR_REPLY / reply.len() {
+            writer.reply(reply);
+        }
+        let queued = writer.1.load(Ordering::Relaxed);
+        assert!(queued <= MAX_QUEUED_FOR_REPLY + reply.len(), "{queued}");
+        writer.write(b"typed");
+        assert_eq!(writer.1.load(Ordering::Relaxed), queued + 5);
+
+        gate.set(GateState::Abandoned);
+        drop(writer);
+        thread.handle.join().unwrap();
     }
 
     #[test]

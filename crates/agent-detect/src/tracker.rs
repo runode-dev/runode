@@ -387,6 +387,10 @@ impl Tracker {
             self.by_activity = false;
             return None;
         };
+        // 宽限期过了就清掉，哪怕下面按 OSC 7501 提前返回：否则 `deadline` 一直给出过去的时刻。
+        if self.grace_from.is_some_and(|from| now >= from + STARTUP_GRACE) {
+            self.grace_from = None;
+        }
         if let Some(state) = self.status_state() {
             self.pending_idle = None;
             self.by_activity = false;

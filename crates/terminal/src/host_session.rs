@@ -728,7 +728,7 @@ fn register_callbacks(
             move |_, data| {
                 replies.set(replies.get() + 1);
                 tracing::trace!(target: "runode::host::reply", bytes = data.len(), "answered a terminal query");
-                reply.write(data);
+                reply.reply(data);
             }
         })?
         .on_size({
