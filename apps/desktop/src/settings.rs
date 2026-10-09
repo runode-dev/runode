@@ -12,6 +12,7 @@
 mod autostart;
 mod controls;
 mod keybinds;
+pub(crate) use keybinds::caps as keybind_caps;
 mod pages;
 mod pairing;
 mod picker;

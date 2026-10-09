@@ -244,6 +244,11 @@ tasks:
   command_placeholder: "比如 cargo run -- serve"
   cancel: "取消"
   save: "添加"
+  shortcut: "快捷键"
+  shortcut_none: "点一下录快捷键"
+  shortcut_press: "按下快捷键，Esc 取消"
+  shortcut_clear: "清除"
+  shortcut_taken: "「%{what}」现在用着这个键，保存后改成跑这条命令。"
 files:
   new_file: 新建文件…
   new_folder: 新建文件夹…

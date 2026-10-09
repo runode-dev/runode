@@ -155,7 +155,7 @@ fn row_key(spec: &ActionSpec, usage: &str, digits: bool) -> Option<RowKey> {
 }
 
 /// 触发键一个键一个键帽，连按的几个键各一组；`digit` 显示成 1…9，认不出的原样一个键帽。
-fn caps(trigger: &str) -> Vec<Vec<String>> {
+pub(crate) fn caps(trigger: &str) -> Vec<Vec<String>> {
     let Ok(keys) = keybind::parse_trigger(trigger) else {
         return vec![vec![trigger.to_owned()]];
     };
@@ -653,7 +653,7 @@ mod tests {
     /// 每个动作都有行可放，默认绑定都落在某一行上，`goto_tab` 一行管 1 到 9。
     #[test]
     fn rows_cover_actions_and_defaults() {
-        for spec in keybind::ACTIONS.iter().filter(|spec| !matches!(spec.name, "text" | "esc" | "csi")) {
+        for spec in keybind::ACTIONS.iter().filter(|spec| !matches!(spec.name, "text" | "esc" | "csi" | "run_task")) {
             let usages = base_usages(spec);
             assert!(!usages.is_empty(), "{}", spec.name);
             for usage in usages {
