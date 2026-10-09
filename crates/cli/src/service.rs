@@ -21,6 +21,10 @@ pub(crate) fn install(env: &Env, kind: Kind, out: &mut dyn Write) -> anyhow::Res
             "The host stays in the background only while remote-access = true and a phone is paired; otherwise it \
              exits when idle."
         )?;
+        // systemd 的用户服务只在有人登录时才起；要开机就起（比如没人登录的服务器）得开 linger。
+        if !cfg!(target_os = "macos") {
+            writeln!(out, "It starts when you log in. To start it at boot, run `loginctl enable-linger $USER`.")?;
+        }
     }
     Ok(())
 }
