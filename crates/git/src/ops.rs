@@ -3,12 +3,19 @@
 use std::{
     ffi::OsStr,
     fmt, fs,
-    io::Write,
+    io::{Read, Write},
+    os::unix::process::CommandExt,
     path::{Component, Path, PathBuf},
-    process::{Command, Stdio},
+    process::{Child, Command, ExitStatus, Stdio},
+    thread::{self, JoinHandle},
+    time::{Duration, Instant},
 };
 
-use crate::{FileDiff, FileStatus, find_repo, git};
+use crate::{FileDiff, FileStatus, find_repo, git, git_command};
+
+/// 一条写仓库的 git 命令最多跑这么久，到时杀掉：推送、拉取要联网，给得长些；等的是 ssh 问口令、
+/// 确认主机指纹或者 gpg 等着输密码这种永远等不来的输入时，不让后台线程一直挂着。
+const RUN_TIMEOUT: Duration = Duration::from_secs(120);
 
 /// 能在后台线程里用的仓库句柄，写操作都挂在它上面；由 `Snapshot::repo` 取得。git 命令
 /// 可能要跑好几秒（推送、拉取），界面线程别直接调。子模块和嵌套的仓库各用各的句柄。
@@ -52,48 +59,114 @@ pub struct CommitOptions {
 }
 
 /// 跑一条会写仓库的 git 命令，返回标准输出。和只读的 `git` 不同：不设 `GIT_OPTIONAL_LOCKS`，
-/// 要拿的锁照常拿；`GIT_TERMINAL_PROMPT=0` 让要密码的远端直接报错，不卡着等输入；`input`
-/// 给了就写进标准输入，否则标准输入是空的。失败时的错误是 git 的标准错误，没有就用标准输出。
+/// 要拿的锁照常拿；`GIT_TERMINAL_PROMPT=0` 让要密码的远端直接报错，不卡着等输入，ssh 同样不问
+/// （见 `batch_ssh`）；`input` 给了就写进标准输入，否则标准输入是空的。超过 `RUN_TIMEOUT` 杀掉，
+/// 报超时。失败时的错误是 git 的标准错误，没有就用标准输出。
 pub(crate) fn run<S: AsRef<OsStr>>(
     dir: &Path,
     args: impl IntoIterator<Item = S>,
     input: Option<&[u8]>,
 ) -> Result<Vec<u8>> {
-    let mut command = Command::new("git");
+    run_for(dir, args, input, RUN_TIMEOUT)
+}
+
+/// 同 `run`，最多跑 `timeout`。
+fn run_for<S: AsRef<OsStr>>(
+    dir: &Path,
+    args: impl IntoIterator<Item = S>,
+    input: Option<&[u8]>,
+    timeout: Duration,
+) -> Result<Vec<u8>> {
+    let mut command = git_command(dir);
     command
-        .arg("-C")
-        .arg(dir)
-        // 路径里的中文等非 ASCII 字符原样输出，不转成八进制转义。
-        .args(["-c", "core.quotePath=false"])
         .args(args)
         .env("GIT_TERMINAL_PROMPT", "0")
         // 新版 git 不再给「hint:」那些建议；本地化后的提示不以「hint:」开头，滤不掉。
         .env("GIT_ADVICE", "0")
         .stdin(if input.is_some() { Stdio::piped() } else { Stdio::null() })
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
+        .stderr(Stdio::piped())
+        // 自成一个进程组，超时时连同 git 拉起的 ssh、gpg 一起杀掉，它们拿着输出的管道。
+        .process_group(0);
+    batch_ssh(&mut command, dir);
     let mut child = command.spawn().map_err(|err| GitError::new(format!("没能运行 git：{err}")))?;
-    let stdin = child.stdin.take();
-    // 一边写输入一边读输出，输入输出都大时谁也不会等着谁。
-    let output = std::thread::scope(|scope| {
-        if let (Some(mut stdin), Some(input)) = (stdin, input) {
-            scope.spawn(move || {
-                // git 不读完就退出时写会失败，以它的退出状态为准。
-                let _ = stdin.write_all(input);
-            });
-        }
-        child.wait_with_output()
-    })
-    .map_err(|err| GitError::new(format!("没能运行 git：{err}")))?;
-    if output.status.success() {
-        return Ok(output.stdout);
+    // 一边写输入一边读输出，输入输出都大时谁也不会等着谁。不用作用域线程：超时杀掉以后，脱离了
+    // 进程组的子孙进程可能还拿着管道，读的线程就留在那里，不等它们。
+    if let (Some(mut stdin), Some(input)) = (child.stdin.take(), input) {
+        let input = input.to_vec();
+        thread::spawn(move || {
+            // git 不读完就退出时写会失败，以它的退出状态为准。
+            let _ = stdin.write_all(&input);
+        });
     }
-    let stderr = String::from_utf8_lossy(&output.stderr);
+    let stdout = read_all(child.stdout.take());
+    let stderr = read_all(child.stderr.take());
+    let deadline = Instant::now() + timeout;
+    let status = loop {
+        match child.try_wait() {
+            Ok(Some(status)) if stdout.is_finished() && stderr.is_finished() => break status,
+            Ok(_) if Instant::now() < deadline => thread::sleep(Duration::from_millis(10)),
+            Ok(_) => {
+                kill_group(&mut child);
+                return Err(GitError::new(format!("git 超过 {} 秒没跑完，停下了", timeout.as_secs())));
+            }
+            Err(err) => {
+                kill_group(&mut child);
+                return Err(GitError::new(format!("没能运行 git：{err}")));
+            }
+        }
+    };
+    let stdout = stdout.join().unwrap_or_default();
+    let stderr = stderr.join().unwrap_or_default();
+    output_result(status, stdout, &stderr)
+}
+
+/// 在另一个线程里读完 `pipe`。
+fn read_all(pipe: Option<impl Read + Send + 'static>) -> JoinHandle<Vec<u8>> {
+    thread::spawn(move || {
+        let mut out = Vec::new();
+        if let Some(mut pipe) = pipe {
+            let _ = pipe.read_to_end(&mut out);
+        }
+        out
+    })
+}
+
+/// 没设 `GIT_SSH_COMMAND`、`GIT_SSH` 和 `core.sshCommand` 时让 ssh 用 `BatchMode`：要输口令、
+/// 确认主机指纹时直接失败，不在开着 runode 的终端上等输入。设了的是用户自己的选择，不改：
+/// `GIT_SSH_COMMAND` 压过 `core.sshCommand` 和 `GIT_SSH`，这里要是设了就把用户的盖掉了。
+fn batch_ssh(command: &mut Command, dir: &Path) {
+    let set = |name| std::env::var_os(name).is_some_and(|value| !value.is_empty());
+    if set("GIT_SSH_COMMAND") || set("GIT_SSH") || git(dir, &["config", "--get", "core.sshCommand"]).is_some() {
+        return;
+    }
+    command.env("GIT_SSH_COMMAND", "ssh -o BatchMode=yes");
+}
+
+/// 杀掉 `run_for` 拉起的 git 所在的整个进程组，再收掉 git。
+fn kill_group(child: &mut Child) {
+    // 进程组号就是 git 的进程号（`process_group(0)`）；std 里没有给进程组发信号的接口，借 `kill`。
+    let _ = Command::new("kill")
+        .args(["-KILL", "--", &format!("-{}", child.id())])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status();
+    let _ = child.kill();
+    let _ = child.wait();
+}
+
+/// git 退出以后，成功时是标准输出，失败时把标准错误（没有就用标准输出）整理成错误。
+fn output_result(status: ExitStatus, stdout: Vec<u8>, stderr: &[u8]) -> Result<Vec<u8>> {
+    if status.success() {
+        return Ok(stdout);
+    }
+    let stderr = String::from_utf8_lossy(stderr);
     let message: Vec<_> = stderr.lines().filter(|line| !line.starts_with("hint:")).collect();
     let message = message.join("\n").trim().to_owned();
-    let message = if message.is_empty() { String::from_utf8_lossy(&output.stdout).trim().to_owned() } else { message };
+    let message = if message.is_empty() { String::from_utf8_lossy(&stdout).trim().to_owned() } else { message };
     if message.is_empty() {
-        return Err(GitError::new(format!("git 失败了（{}）", output.status)));
+        return Err(GitError::new(format!("git 失败了（{status}）")));
     }
     Err(GitError::new(message))
 }
@@ -399,5 +472,72 @@ impl Repo {
 
     fn stash_command(&self, command: &str, index: usize) -> Result {
         run(&self.root, ["stash", command, &format!("stash@{{{index}}}")], None).map(drop)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::os::unix::fs::PermissionsExt;
+
+    use super::*;
+
+    fn temp_repo(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("runode-git-{name}-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        assert!(git(&dir, &["init", "-q"]).is_some());
+        dir
+    }
+
+    #[test]
+    fn kills_git_that_runs_past_the_timeout() {
+        let dir = temp_repo("timeout");
+        // pre-commit 钩子一直不退出，像 ssh、gpg 等着输入那样；它把进程号记下来，好看它也被杀掉了。
+        let pid_file = dir.join("hook.pid");
+        let hooks = dir.join(".git/test-hooks");
+        fs::create_dir_all(&hooks).unwrap();
+        let hook = hooks.join("pre-commit");
+        fs::write(&hook, format!("#!/bin/sh\necho $$ > '{}'\nexec sleep 30\n", pid_file.display())).unwrap();
+        fs::set_permissions(&hook, fs::Permissions::from_mode(0o755)).unwrap();
+        assert!(git(&dir, &["config", "core.hooksPath", &hooks.to_string_lossy()]).is_some());
+        let started = Instant::now();
+        let args = ["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "x"];
+        let err = run_for(&dir, args, None, Duration::from_secs(1)).unwrap_err();
+        assert!(started.elapsed() < Duration::from_secs(10), "{:?}", started.elapsed());
+        assert!(err.message.contains("超过"), "{}", err.message);
+        // 钩子在 git 的进程组里，跟着一起杀掉；死了以后要等被收掉，`kill -0` 才找不到它。
+        let pid = fs::read_to_string(&pid_file).unwrap().trim().to_owned();
+        let alive = || Command::new("kill").args(["-0", &pid]).stderr(Stdio::null()).status().unwrap().success();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while alive() && Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(50));
+        }
+        assert!(!alive(), "钩子 {pid} 还活着");
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn keeps_the_users_ssh_command() {
+        let dir = temp_repo("ssh");
+        let env = |command: &Command| {
+            command
+                .get_envs()
+                .find(|(name, _)| *name == "GIT_SSH_COMMAND")
+                .and_then(|(_, value)| value.map(OsStr::to_owned))
+        };
+        let user_set = std::env::var_os("GIT_SSH_COMMAND").is_some()
+            || std::env::var_os("GIT_SSH").is_some()
+            || git(&dir, &["config", "--get", "core.sshCommand"]).is_some();
+        let mut command = Command::new("git");
+        batch_ssh(&mut command, &dir);
+        if !user_set {
+            assert_eq!(env(&command), Some("ssh -o BatchMode=yes".into()));
+        }
+        // 仓库里配了 `core.sshCommand` 时不设，不然它被环境变量盖掉。
+        assert!(git(&dir, &["config", "core.sshCommand", "ssh -i key"]).is_some());
+        let mut command = Command::new("git");
+        batch_ssh(&mut command, &dir);
+        assert_eq!(env(&command), None);
+        fs::remove_dir_all(&dir).unwrap();
     }
 }

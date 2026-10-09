@@ -7,7 +7,7 @@ use std::{fs, path::Path};
 use crate::{
     FileDiff, FileStatus, LineKind, Repo, Result, git,
     parse::expand_tabs,
-    snapshot::{MAX_DIFF_BYTES, diff, read_untracked},
+    snapshot::{MAX_DIFF_BYTES, diff, read_untracked, worktree_bytes},
 };
 
 /// 新的那一边超过这么多行时不读全文，只显示各块。
@@ -150,7 +150,7 @@ impl Repo {
         if file.is_none() && *side == DiffSide::Worktree && self.untracked(path) {
             let full = self.root.join(path);
             // 和已跟踪的文件一样，超过 `MAX_DIFF_BYTES` 的不读进内存，标成截断。
-            let small = fs::metadata(&full).is_ok_and(|meta| meta.len() <= MAX_DIFF_BYTES);
+            let small = fs::symlink_metadata(&full).is_ok_and(|meta| meta.len() <= MAX_DIFF_BYTES);
             file = Some(read_untracked(&full, path.to_path_buf(), small));
         }
         let Some(file) = file else {
@@ -172,10 +172,10 @@ impl Repo {
     }
 
     /// `path` 在 `side` 这一边改完以后的全部字节：工作区的文件、暂存区或提交里的 blob。
-    /// 读不到（比如删掉了）时为空。
+    /// 读不到（比如删掉了）时为空。符号链接和 git 一样是它指向的路径。
     pub fn new_bytes(&self, path: &Path, side: &DiffSide) -> Option<Vec<u8>> {
         match side {
-            DiffSide::Worktree => fs::read(self.root.join(path)).ok(),
+            DiffSide::Worktree => worktree_bytes(&self.root.join(path)),
             DiffSide::Index => git(&self.root, &["cat-file", "blob", &format!(":{}", path.display())]),
             DiffSide::Commit { id, .. } => git(&self.root, &["cat-file", "blob", &format!("{id}:{}", path.display())]),
         }
@@ -193,9 +193,10 @@ impl Repo {
         git(&self.root, &["cat-file", "blob", &spec])
     }
 
-    /// `path` 在工作区里、git 没跟踪它。
+    /// `path` 在工作区里、不是目录（符号链接看它自己）、git 没跟踪它。
     fn untracked(&self, path: &Path) -> bool {
         let spec = format!(":(literal){}", path.display());
-        self.root.join(path).is_file() && git(&self.root, &["ls-files", "--error-unmatch", "--", &spec]).is_none()
+        fs::symlink_metadata(self.root.join(path)).is_ok_and(|meta| !meta.is_dir())
+            && git(&self.root, &["ls-files", "--error-unmatch", "--", &spec]).is_none()
     }
 }

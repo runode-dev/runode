@@ -2,10 +2,10 @@
 
 use std::{
     ffi::OsStr,
-    io::{BufRead, BufReader},
+    io::{BufRead, BufReader, Read},
     os::unix::ffi::OsStrExt,
     path::{Path, PathBuf},
-    process::{Command, Stdio},
+    process::Stdio,
     sync::{
         Mutex,
         atomic::{AtomicBool, Ordering},
@@ -14,7 +14,11 @@ use std::{
     time::Duration,
 };
 
-use crate::{git, in_repo};
+use crate::{git, git_command, in_repo};
+
+/// `git grep` 输出的一行（含路径和行号）最多读这么多字节，多出的丢掉：压缩过的 js 一行就有几 MB，
+/// 结果里只显示命中处附近的一小段。
+const MAX_GREP_LINE_BYTES: u64 = 64 * 1024;
 
 /// 按内容找到的一行。
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -56,17 +60,14 @@ pub fn grep(root: &Path, query: &GrepQuery, limit: usize, cancel: &AtomicBool) -
         return Vec::new();
     }
     let scope = if in_repo(root) { "--untracked" } else { "--no-index" };
-    let child = Command::new("git")
-        .arg("-C")
-        .arg(root)
-        .args(["-c", "core.quotePath=false", "grep", "-z", "-n", "-I", "--no-color", "--exclude-standard"])
+    let child = git_command(root)
+        .args(["grep", "-z", "-n", "-I", "--no-color", "--exclude-standard"])
         .arg(scope)
         .arg(if query.regex { "-E" } else { "-F" })
         .args(query.ignore_case.then_some("-i"))
         .args(query.whole_word.then_some("-w"))
         .args(["-e", query.pattern, "--"])
         .args(query.pathspecs)
-        .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
         .env("GIT_OPTIONAL_LOCKS", "0")
@@ -89,10 +90,8 @@ pub fn grep(root: &Path, query: &GrepQuery, limit: usize, cancel: &AtomicBool) -
                 thread::sleep(Duration::from_millis(50));
             }
         });
-        for line in stdout.into_iter().flat_map(|stdout| BufReader::new(stdout).split(b'\n')) {
-            let Ok(line) = line else {
-                break;
-            };
+        let mut stdout = stdout.map(BufReader::new);
+        while let Some(line) = stdout.as_mut().and_then(read_line) {
             // `-z` 时每行是「路径 NUL 行号 NUL 内容」。
             let mut parts = line.splitn(3, |&b| b == 0);
             let (Some(path), Some(number), Some(text)) = (parts.next(), parts.next(), parts.next()) else {
@@ -119,4 +118,36 @@ pub fn grep(root: &Path, query: &GrepQuery, limit: usize, cancel: &AtomicBool) -
         let _ = child.wait();
     }
     matches
+}
+
+/// 读一行，不含结尾的换行；超过 `MAX_GREP_LINE_BYTES` 的部分读掉、丢掉，不留在内存里。读到头或者
+/// 出错时为空。
+fn read_line(reader: &mut impl BufRead) -> Option<Vec<u8>> {
+    let mut line = Vec::new();
+    reader.by_ref().take(MAX_GREP_LINE_BYTES).read_until(b'\n', &mut line).ok()?;
+    if line.is_empty() {
+        return None;
+    }
+    if line.last() == Some(&b'\n') {
+        line.pop();
+        return Some(line);
+    }
+    // 截断了：跳过这一行余下的部分。
+    loop {
+        let buf = reader.fill_buf().ok()?;
+        if buf.is_empty() {
+            break;
+        }
+        match buf.iter().position(|&b| b == b'\n') {
+            Some(end) => {
+                reader.consume(end + 1);
+                break;
+            }
+            None => {
+                let len = buf.len();
+                reader.consume(len);
+            }
+        }
+    }
+    Some(line)
 }

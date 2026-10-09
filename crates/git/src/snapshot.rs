@@ -4,6 +4,7 @@
 use std::{
     collections::{HashMap, HashSet},
     fs,
+    os::unix::ffi::OsStringExt,
     path::{Path, PathBuf},
     time::SystemTime,
 };
@@ -337,7 +338,7 @@ pub(crate) fn read_repo(
 }
 
 /// 未跟踪的文件当作整个新增；`read` 为假或者文件太大时不读内容。大小和修改时间都没变时
-/// 用 `cache` 里上次读的，读过的记进 `seen`。
+/// 用 `cache` 里上次读的，读过的记进 `seen`。符号链接看它自己，不看它指向的。
 fn untracked_diff(
     root: &Path,
     path: PathBuf,
@@ -346,7 +347,7 @@ fn untracked_diff(
     seen: &mut UntrackedCache,
 ) -> FileDiff {
     let full = root.join(&path);
-    let meta = fs::metadata(&full).ok();
+    let meta = fs::symlink_metadata(&full).ok();
     let stamp = meta.as_ref().and_then(|meta| Some((meta.len(), meta.modified().ok()?)));
     if let Some((len, modified)) = stamp
         && read
@@ -377,7 +378,7 @@ pub(crate) fn read_untracked(full: &Path, path: PathBuf, read: bool) -> FileDiff
         truncated: false,
         gitlink: false,
     };
-    let content = read.then(|| fs::read(full).ok()).flatten();
+    let content = read.then(|| worktree_bytes(full)).flatten();
     let Some(content) = content else {
         file.truncated = true;
         return file;
@@ -402,6 +403,19 @@ pub(crate) fn read_untracked(full: &Path, path: PathBuf, read: bool) -> FileDiff
         });
     }
     file
+}
+
+/// 工作区里一个文件的内容，按 git 的规矩：符号链接是它指向的路径，不跟过去读（指向 `/dev/zero` 的
+/// 会把内存读光，指向命名管道的会一直等着）；管道、设备这些不是普通文件的读不到，为空。
+pub(crate) fn worktree_bytes(full: &Path) -> Option<Vec<u8>> {
+    let meta = fs::symlink_metadata(full).ok()?;
+    if meta.file_type().is_symlink() {
+        return fs::read_link(full).ok().map(|target| target.into_os_string().into_vec());
+    }
+    if !meta.is_file() {
+        return None;
+    }
+    fs::read(full).ok()
 }
 
 #[cfg(test)]

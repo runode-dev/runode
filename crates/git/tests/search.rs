@@ -75,3 +75,14 @@ fn greps_whole_words_regexes_and_pathspecs() {
     let specs = [":(exclude,glob)**/*.min.js".to_owned()];
     assert_eq!(lines(&GrepQuery { pathspecs: &specs, ..word }), ["src/a.ts:1"]);
 }
+
+#[test]
+fn caps_very_long_lines() {
+    let repo = TestRepo::new("search-long");
+    // 压缩过的 js 那样一行很长；读的时候截短，后面的行照常对得上。
+    repo.write("app.min.js", &format!("needle{}\nneedle short\n", "x".repeat(1024 * 1024)));
+    let hits = grep(repo.path(), &literal("needle", false), 10, &AtomicBool::new(false));
+    assert_eq!(hits.len(), 2);
+    assert!(hits[0].text.starts_with("needlexxx") && hits[0].text.len() <= 64 * 1024, "{}", hits[0].text.len());
+    assert_eq!((hits[1].line, hits[1].text.as_str()), (2, "needle short"));
+}

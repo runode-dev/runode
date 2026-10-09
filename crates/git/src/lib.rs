@@ -31,18 +31,18 @@ use std::{
     process::{Command, Stdio},
 };
 
+/// 在 `dir` 里跑 git 的命令，各处共用的开头都在这里：标准输入是空的，路径里的中文等非 ASCII
+/// 字符原样输出、不转成八进制转义，关掉 `core.fsmonitor`：仓库自己的配置能把它设成任意命令，
+/// 读状态时 git 就会执行它，进一个别人给的目录不能因此跑了里面的脚本。命令行上的 `-c` 压过
+/// 仓库的配置。
+pub(crate) fn git_command(dir: &Path) -> Command {
+    let mut command = Command::new("git");
+    command.arg("-C").arg(dir).args(["-c", "core.quotePath=false", "-c", "core.fsmonitor=false"]).stdin(Stdio::null());
+    command
+}
+
 pub(crate) fn git(dir: &Path, args: &[&str]) -> Option<Vec<u8>> {
-    let output = Command::new("git")
-        .arg("-C")
-        .arg(dir)
-        // 路径里的中文等非 ASCII 字符原样输出，不转成八进制转义。
-        .args(["-c", "core.quotePath=false"])
-        .args(args)
-        .stdin(Stdio::null())
-        .stderr(Stdio::null())
-        .env("GIT_OPTIONAL_LOCKS", "0")
-        .output()
-        .ok()?;
+    let output = git_command(dir).args(args).stderr(Stdio::null()).env("GIT_OPTIONAL_LOCKS", "0").output().ok()?;
     output.status.success().then_some(output.stdout)
 }
 
