@@ -347,6 +347,8 @@ impl WindowView {
         self.mobile = None;
         let workspace = self.workspace_mut();
         workspace.active = ix;
+        // 焦点要交给终端，盖着终端的放大预览栏还原。
+        workspace.project.previews.maximized = false;
         if let Some(tab) = workspace.tabs.get_mut(ix) {
             tab.bell = false;
             workspace.tab_scroll.scroll_to_item(ix);
