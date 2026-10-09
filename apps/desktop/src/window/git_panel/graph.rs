@@ -423,6 +423,15 @@ impl WindowView {
         self.workspace().project.git_panel.repos.get(root).map(|repo| &repo.graph)
     }
 
+    /// 展开的提交下面那几行左边的线：第 `ci` 个提交往下走的 lane 接着画实线穿过去，下面的提交才
+    /// 连得上。叠在行的左边，不占地方，行里的内容照旧缩进。
+    fn lanes_below(&self, root: &Path, ci: usize) -> Option<impl IntoElement> {
+        let graph = self.graph(root)?;
+        let row = graph.history.as_ref()?.as_ref().ok()?.rows.get(ci)?;
+        let (lane, width) = lane_geometry(graph.lanes);
+        Some(div().absolute().left(px(8.)).top_0().h_full().child(lanes_tail(row, lane, width, false)))
+    }
+
     /// 图表里的一个提交：左边的线和点，引用标签，说明首行，行尾多久以前。
     pub(super) fn render_commit(
         &self,
@@ -529,6 +538,8 @@ impl WindowView {
         let target =
             DiffTarget { root: repo.root.clone(), rel: file.path.clone(), old_rel: file.old_path.clone(), side };
         self.git_row(("git-commit-file", ix), 0., fg, bg)
+            .relative()
+            .children(self.lanes_below(&repo.root, ci))
             .pl(px(8. + width + INDENT * (depth + 1.)))
             .when(tree, |row| row.child(div().flex_none().w(px(12.))))
             .child(img(file_icon(&name)).flex_none().size(px(14.)))
@@ -552,6 +563,7 @@ impl WindowView {
         &self,
         ix: usize,
         di: usize,
+        ci: usize,
         fg: Rgb,
         bg: Rgb,
         cx: &mut Context<Self>,
@@ -564,6 +576,8 @@ impl WindowView {
         let width = self.graph(&dir.root).map_or(0., |graph| lane_geometry(graph.lanes).1);
         let last = base_name(&dir.path);
         self.git_row(("git-commit-dir", ix), 0., fg, bg)
+            .relative()
+            .children(self.lanes_below(&dir.root, ci))
             .pl(px(8. + width + INDENT * (depth + 1.)))
             .child(chevron(dir.expanded, fg))
             .child(img(folder_icon(&last, dir.expanded)).flex_none().size(px(14.)))
@@ -611,7 +625,7 @@ impl WindowView {
                 .child(text.into_owned())
                 .into_any_element();
         };
-        let row = row.child(lanes_tail(last, lane, width));
+        let row = row.child(lanes_tail(last, lane, width, true));
         if note != GraphNote::More {
             return row.italic().text_color(hsla(fg).opacity(0.45)).child(text.into_owned()).into_any_element();
         }
@@ -649,6 +663,7 @@ impl WindowView {
         &self,
         ix: usize,
         repo: &git::Snapshot,
+        ci: usize,
         note: CommitNote,
         fg: Rgb,
         bg: Rgb,
@@ -660,6 +675,8 @@ impl WindowView {
         };
         let width = self.graph(&repo.root).map_or(0., |graph| lane_geometry(graph.lanes).1);
         self.git_row(("git-commit-note", ix), 0., fg, bg)
+            .relative()
+            .children(self.lanes_below(&repo.root, ci))
             .pl(px(8. + width + INDENT))
             .italic()
             .text_color(hsla(fg).opacity(0.45))
@@ -752,8 +769,9 @@ fn ref_labels(commit: &Commit, shown: usize, fg: Rgb, bg: Rgb) -> Vec<gpui::Div>
     labels
 }
 
-/// 接在最后一个提交下面的那一行的线：那一行底下还往下走的 lane 画成淡色的虚线，表示后面还有。
-fn lanes_tail(last: &GraphRow, lane: f32, width: f32) -> impl IntoElement {
+/// 提交 `last` 下面不是提交的那一行的线：`last` 底下还往下走的 lane 竖着穿过去。`dashed` 时画成
+/// 淡色的虚线，接在最后一个提交下面表示后面还有；否则是实线，接到下面的提交。
+fn lanes_tail(last: &GraphRow, lane: f32, width: f32, dashed: bool) -> impl IntoElement {
     let mut lanes: Vec<_> = last
         .lines
         .iter()
@@ -771,6 +789,11 @@ fn lanes_tail(last: &GraphRow, lane: f32, width: f32) -> impl IntoElement {
             window.with_content_mask(Some(ContentMask { bounds }), |window| {
                 for &(column, color) in &lanes {
                     let x = left + lane * (column as f32 + 0.5) - 0.75;
+                    if !dashed {
+                        let line = Bounds::new(point(px(x), px(top)), gpui::size(px(1.5), px(height)));
+                        window.paint_quad(fill(line, hsla(color)));
+                        continue;
+                    }
                     let mut y = top;
                     while y < top + height {
                         let dash = Bounds::new(point(px(x), px(y)), gpui::size(px(1.5), px(3.)));

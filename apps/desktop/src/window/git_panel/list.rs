@@ -102,7 +102,7 @@ impl WindowView {
             GitRow::Stash(_, si) => self.render_git_stash(ix, si, repo, fg, bg, cx),
             GitRow::Dir(_, di) => match self.workspace().project.git_panel.dirs.get(di).map(|dir| dir.owner) {
                 Some(DirOwner::Section(section)) => self.render_git_dir(ix, di, section, fg, bg, cx),
-                Some(DirOwner::Commit(_)) => self.render_commit_dir(ix, di, fg, bg, cx),
+                Some(DirOwner::Commit(ci)) => self.render_commit_dir(ix, di, ci, fg, bg, cx),
                 None => div().into_any_element(),
             },
             GitRow::Clean(_) => div()
@@ -118,7 +118,7 @@ impl WindowView {
                 .into_any_element(),
             GitRow::Commit(_, ci) => self.render_commit(ix, repo, ci, fg, bg, cx),
             GitRow::CommitFile(_, ci, fi) => self.render_commit_file(ix, repo, ci, fi, fg, bg, cx),
-            GitRow::CommitNote(_, _, note) => self.render_commit_note(ix, repo, note, fg, bg),
+            GitRow::CommitNote(_, ci, note) => self.render_commit_note(ix, repo, ci, note, fg, bg),
             GitRow::GraphNote(_, note) => self.render_graph_note(ix, repo, note, fg, bg, cx),
         }
     }
