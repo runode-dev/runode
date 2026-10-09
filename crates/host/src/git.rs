@@ -26,7 +26,7 @@ pub(crate) struct Job {
     /// 会话回的 `SessionInfo`，从里面取 shell 当前的目录。
     pub(crate) info: mpsc::Receiver<SessionInfo>,
     pub(crate) out: Outbox,
-    /// 回完话才放开，一条连接上排着的请求不超过 `Waiting` 的上限。
+    /// 回完话才放开，一条连接上排着的请求不超过 `Waiting` 的上限（和列会话、读屏幕的名额分开算）。
     pub(crate) slot: WaitSlot,
 }
 

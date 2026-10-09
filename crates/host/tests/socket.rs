@@ -1,5 +1,6 @@
 //! 经 Unix socket 连上宿主的黑盒测试：握手、开会话、连上、发输入、读屏幕、列会话，同一时间
-//! 只有一个宿主能监听；转给界面的请求、响铃、`claimed`，以及单独一个进程跑时的退出。
+//! 只有一个宿主能监听；转给界面的请求、响铃、`claimed`，单独一个进程跑时的退出，以及认对端是不是
+//! 同一个用户。
 
 mod common;
 
@@ -738,4 +739,15 @@ fn ui_errors_without_req_get_the_request_s() {
     cli.send(&ClientMsg::Reveal { req: 12, id: SessionId(9) });
     answer_ui(&mut desktop, |_| HostMsg::Error { req: None, id: None, message: "unknown request".into() });
     assert_eq!(cli.reply(), HostMsg::Error { req: Some(12), id: None, message: "unknown request".into() });
+}
+
+/// `same_user`：同一个进程两端的 socket 是同一个用户；拿不到对端凭据（描述符根本不是 socket）时
+/// 当成别人，不放行。换个 uid 连上来要 root，测不了。
+#[test]
+fn same_user_needs_the_peer_credentials() {
+    let (ours, _theirs) = std::os::unix::net::UnixStream::pair().unwrap();
+    assert!(runode_host::same_user(&ours));
+    let (pipe, _writer) = std::io::pipe().unwrap();
+    let not_a_socket = std::os::unix::net::UnixStream::from(std::os::fd::OwnedFd::from(pipe));
+    assert!(!runode_host::same_user(&not_a_socket));
 }

@@ -22,8 +22,11 @@ use serde::{Deserialize, Serialize};
 pub const LIMIT: usize = 10_000;
 /// 每条命令最多记住它在这么多个目录里用过，多出来的丢掉最久没用的。
 const DIRS_PER_COMMAND: usize = 16;
-/// runode 自己的历史文件超过这么多行时，写历史的线程开始写之前先只留最近的 `LIMIT` 行重写一遍。
+/// runode 自己的历史文件超过这么多行时，写历史的线程（开始写之前和之后每隔 `COMPACT_EVERY` 条）
+/// 只留最近的 `LIMIT` 行重写一遍。
 const FILE_COMPACT_LINES: usize = 2 * LIMIT;
+/// 写历史的线程每追加这么多条命令再检查一次要不要压缩，不只在起线程时检查。
+const COMPACT_EVERY: usize = 1000;
 
 /// 一条命令记录，也是 runode 历史文件里的一行。
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -326,17 +329,26 @@ fn load_background() {
 
 /// 写历史的线程：历史文件太长时先压缩，再把陆续记下的命令追加进去。
 fn write_background(rx: mpsc::Receiver<Entry>) {
-    let Some(path) = own_history_path() else {
-        return;
-    };
-    match compact_own_history(&path) {
+    if let Some(path) = own_history_path() {
+        write_entries(&path, rx);
+    }
+}
+
+/// 先按需压缩 `path`，再把收到的命令陆续追加进去；宿主一跑几周，每追加 `COMPACT_EVERY` 条再看
+/// 一次要不要压缩。
+fn write_entries(path: &Path, rx: mpsc::Receiver<Entry>) {
+    let compact = || match compact_own_history(path) {
         Ok(()) => {}
         Err(err) if err.kind() == io::ErrorKind::NotFound => {}
         Err(err) => tracing::warn!("failed to compact {}: {err}", path.display()),
-    }
-    for entry in rx {
-        if let Err(err) = append(&path, &entry) {
+    };
+    compact();
+    for (count, entry) in (1..).zip(rx) {
+        if let Err(err) = append(path, &entry) {
             tracing::warn!("failed to write {}: {err}", path.display());
+        }
+        if count % COMPACT_EVERY == 0 {
+            compact();
         }
     }
 }
@@ -345,9 +357,11 @@ fn own_history_path() -> Option<PathBuf> {
     runode_paths::Dirs::from_env().history_file()
 }
 
-/// 读 runode 自己的历史文件，坏掉的行跳过。只读，不改文件。
+/// 读 runode 自己的历史文件，坏掉的行跳过。只读，不改文件。不是 UTF-8 的字节换成替换字符，
+/// 只坏那一行，不让整个文件读不出来。
 fn read_own_history(path: &Path) -> io::Result<Vec<Entry>> {
-    let text = fs::read_to_string(path)?;
+    let bytes = fs::read(path)?;
+    let text = String::from_utf8_lossy(&bytes);
     let lines: Vec<&str> = text.lines().filter(|line| !line.trim().is_empty()).collect();
     Ok(parse_own(&lines))
 }
@@ -355,7 +369,8 @@ fn read_own_history(path: &Path) -> io::Result<Vec<Entry>> {
 /// runode 自己的历史文件行数超过 `FILE_COMPACT_LINES` 时，只留最近的 `LIMIT` 行重写一遍。先写
 /// 临时文件再换过去，同时在读的一方读到的总是完整的旧文件或新文件。
 fn compact_own_history(path: &Path) -> io::Result<()> {
-    let text = fs::read_to_string(path)?;
+    let bytes = fs::read(path)?;
+    let text = String::from_utf8_lossy(&bytes);
     let lines: Vec<&str> = text.lines().filter(|line| !line.trim().is_empty()).collect();
     if lines.len() <= FILE_COMPACT_LINES {
         return Ok(());
@@ -658,6 +673,51 @@ mod tests {
         assert_eq!(mode, 0o600);
         assert_eq!(compacted, 0o600);
         assert_eq!(kept, LIMIT);
+    }
+
+    fn temp_history(name: &str) -> (PathBuf, PathBuf) {
+        let dir = std::env::temp_dir().join(format!("runode-history-{name}-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("history.jsonl");
+        (dir, path)
+    }
+
+    /// 文件里混进不是 UTF-8 的字节：只丢那一行，别的照样读出来，压缩也照样做。
+    #[test]
+    fn invalid_utf8_only_spoils_its_own_line() {
+        let (dir, path) = temp_history("utf8");
+        let mut bytes = b"{\"cmd\":\"make\"}\n\xff\xfe broken\n{\"cmd\":\"ls\"}\n".to_vec();
+        fs::write(&path, &bytes).unwrap();
+        let read = read_own_history(&path).unwrap();
+        for i in 0..FILE_COMPACT_LINES {
+            bytes.extend_from_slice(format!("{{\"cmd\":\"c{i}\"}}\n").as_bytes());
+        }
+        fs::write(&path, &bytes).unwrap();
+        let compacted = compact_own_history(&path);
+        let kept = read_own_history(&path).unwrap();
+        fs::remove_dir_all(&dir).unwrap();
+        assert_eq!(read, [entry("make", None), entry("ls", None)]);
+        compacted.unwrap();
+        assert_eq!(kept.len(), LIMIT);
+        assert_eq!(kept.last(), Some(&entry(&format!("c{}", FILE_COMPACT_LINES - 1), None)));
+    }
+
+    /// 写历史的线程不只在起来时压缩：一直开着时文件越过上限，追加到 `COMPACT_EVERY` 条就压缩。
+    #[test]
+    fn the_writer_compacts_while_it_runs() {
+        let (dir, path) = temp_history("writer");
+        let lines: String = (0..FILE_COMPACT_LINES).map(|i| format!("{{\"cmd\":\"c{i}\"}}\n")).collect();
+        fs::write(&path, lines).unwrap();
+        let (tx, rx) = mpsc::channel();
+        for i in 0..COMPACT_EVERY {
+            tx.send(entry(&format!("new {i}"), None)).unwrap();
+        }
+        drop(tx);
+        write_entries(&path, rx);
+        let kept = read_own_history(&path).unwrap();
+        fs::remove_dir_all(&dir).unwrap();
+        assert_eq!(kept.len(), LIMIT);
+        assert_eq!(kept.last(), Some(&entry(&format!("new {}", COMPACT_EVERY - 1), None)));
     }
 
     #[test]

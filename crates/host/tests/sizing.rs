@@ -7,7 +7,7 @@ use std::time::{Duration, Instant};
 use common::{BUILD, Peer, WAIT, host, script, temp_dir};
 use runode_host::{ClientMsg, Host, HostMsg, SessionId};
 use runode_protocol::{AttachMode, BuildId, Caps, ClientKind, FrameKind, PROTOCOL_VERSION, SessionInfo};
-use runode_shared_types::grid::GridSize;
+use runode_shared_types::{grid::GridSize, shell::IntegrationMode};
 
 const SIZE_A: GridSize = GridSize { cols: 30, rows: 6, cell_width_px: 8, cell_height_px: 16 };
 const SIZE_B: GridSize = GridSize { cols: 40, rows: 8, cell_width_px: 8, cell_height_px: 16 };
@@ -459,5 +459,42 @@ fn the_owner_leaving_skips_viewers_without_a_size() {
     assert_eq!((info_now.size, info_now.size_owner), (SIZE_B, None));
     assert!(owners(&seen).is_empty(), "{seen:?}");
     assert!(resized(&seen).is_empty(), "{seen:?}");
+    a.send(&ClientMsg::Kill { id });
+}
+
+/// 前端给的行列数太大（几万见方会卡死会话线程）时，开会话、带尺寸连上、改尺寸都回 `Error`，
+/// 会话的尺寸不变；正好到上限的照常。
+#[test]
+fn oversized_grids_are_refused() {
+    let host = host();
+    let mut a = desktop(&host, "alpha");
+    let huge = GridSize { cols: 60_000, rows: 60_000, ..SIZE_A };
+    let tall = GridSize { rows: 2001, ..SIZE_A };
+    let widest = GridSize { cols: 2000, ..SIZE_A };
+
+    a.send(&ClientMsg::Spawn {
+        req: 7,
+        size: huge,
+        cwd: None,
+        integration: IntegrationMode::Off,
+        start: true,
+        shell: Some("/bin/cat".into()),
+        settings: None,
+    });
+    assert!(matches!(a.reply(), HostMsg::Error { req: Some(7), .. }));
+
+    let id = cat(&mut a);
+    a.send(&ClientMsg::Attach { id, size: Some(tall), mode: AttachMode::VtReplay });
+    assert!(matches!(a.reply(), HostMsg::Error { id: Some(errored), .. } if errored == id));
+    attach_view(&mut a, id, Some(SIZE_A));
+    a.send(&ClientMsg::Resize { id, size: huge });
+    assert!(matches!(a.reply(), HostMsg::Error { id: Some(errored), .. } if errored == id));
+    let (info_now, seen) = info(&mut a, id);
+    assert_eq!(info_now.size, SIZE_A);
+    assert!(resized(&seen).is_empty(), "{seen:?}");
+
+    a.send(&ClientMsg::Resize { id, size: widest });
+    let seen = until(&a, |message| matches!(message, HostMsg::Resized { .. }));
+    assert_eq!(resized(&seen), [widest]);
     a.send(&ClientMsg::Kill { id });
 }

@@ -10,7 +10,8 @@
 //!
 //! 读的线程不等会话线程回话：列会话、读屏幕先在读的线程里把请求按先后送到会话线程，再起一个
 //! 短命的线程等回话、交给 `Outbox`，同一条连接上之后的输入照常转发。一条连接上这样在等的请求
-//! 最多 `MAX_WAITING` 个，再多的当场回 `Error`，前端狂发也堆不起线程。开会话、列目录
+//! 最多 `MAX_WAITING` 个，再多的当场回 `Error`，前端狂发也堆不起线程；git 请求另算一份名额，
+//! 联网的 git 操作卡住时列会话、读屏幕照常。开会话、列目录
 //! （`ClientMsg::ListDirs`）和列项目命令（`ClientMsg::ListProjectTasks`）还在读的线程里办（开伪终端、
 //! 启动 shell 要几毫秒，读一次目录项、几个小文件更快）。
 //!
@@ -58,8 +59,11 @@ const SNAPSHOT_CHUNK: usize = 1 << 20;
 const OUTBOX_LIMIT: usize = 32 << 20;
 /// 等会话线程回话（列会话、读屏幕）的最长时间。
 pub(crate) const REPLY_TIMEOUT: Duration = Duration::from_secs(5);
-/// 一条连接上最多同时有这么多列会话、读屏幕、读写 git 的请求在等回话，见 `Waiting`。
+/// 一条连接上最多同时有这么多列会话、读屏幕的请求在等回话，读写 git 的请求另有这么多，见 `Waiting`。
 const MAX_WAITING: usize = 16;
+/// 前端给的终端行列数最多这么大，再大的开会话、连上、改尺寸都回 `Error`：几万见方的网格会让
+/// 会话线程卡住、内存涨到 GB 级。
+const MAX_GRID: u16 = 2000;
 /// 接受连接出错（比如文件描述符用完了）后等一会儿再接，免得空转。
 const ACCEPT_BACKOFF: Duration = Duration::from_millis(100);
 /// 每条连接 socket 的收发缓冲。macOS 上默认只有 8 KiB，刷屏的输出一块就塞满，读写两边来回
@@ -652,6 +656,7 @@ fn serve(shared: &Arc<Shared>, id: u64, stream: UnixStream, check_peer: bool) {
         channels: HashMap::new(),
         next_channel: 1,
         waiting: Waiting::default(),
+        git_waiting: Waiting::default(),
         git: None,
     };
     connection.run(&mut BufReader::new(&stream));
@@ -796,8 +801,10 @@ struct Connection {
     /// 连着的会话，按通道。
     channels: HashMap<u32, SessionId>,
     next_channel: u32,
-    /// 在等回话的列会话、读屏幕、读写 git 的请求。
+    /// 在等回话的列会话、读屏幕的请求。
     waiting: Waiting,
+    /// 在排队或在办的 git 请求，和 `waiting` 分开算：推送、拉取卡在网络上时不占列会话、读屏幕的名额。
+    git_waiting: Waiting,
     /// 办 git 请求的工作线程，第一次要时才起。
     git: Option<GitWorker>,
 }
@@ -924,6 +931,10 @@ impl Connection {
                 });
             }
             ClientMsg::Spawn { req, size, cwd, integration, start, shell, settings } => {
+                if let Err(message) = check_size(size) {
+                    self.error(Some(req), None, message);
+                    return;
+                }
                 let options = SpawnOptions { size, cwd, integration, start, shell, settings };
                 match self.shared.spawn(options) {
                     Ok(id) => self.out.control(&HostMsg::Spawned { req, id }),
@@ -948,6 +959,10 @@ impl Connection {
                 self.shared.kill(id);
             }
             ClientMsg::Resize { id, size } => {
+                if let Err(message) = check_size(size) {
+                    self.error(None, Some(id), message);
+                    return;
+                }
                 self.shared.deliver(id, Inbox::Resize { connection: self.id, size });
             }
             ClientMsg::ClearScreen { id } => {
@@ -1106,6 +1121,14 @@ impl Connection {
     /// `Subscribe` 时换掉旧的订阅，尺寸归属的状态（见 `Runner::subscribe`）留着；旧通道的帧都在
     /// 新的 `Attached` 之前，新通道的帧都在它之后。
     fn attach(&mut self, id: SessionId, size: Option<GridSize>, mode: AttachMode) {
+        if let Err(message) = size.map_or(Ok(()), check_size) {
+            self.error(None, Some(id), message);
+            return;
+        }
+        if self.out.backed_up() {
+            self.error(None, Some(id), BACKED_UP.into());
+            return;
+        }
         self.forget(id);
         let mode = match mode {
             AttachMode::Snapshot if !self.snapshots => AttachMode::VtReplay,
@@ -1148,6 +1171,10 @@ impl Connection {
     /// 读屏幕，`command` 给了时读倒数第几条命令的输出：请求在这里送到会话线程（排在这条连接
     /// 之前送去的输入后面），回话另起线程等。
     fn read_screen(&self, id: SessionId, lines: Option<u32>, command: Option<u32>) {
+        if self.out.backed_up() {
+            self.error(None, Some(id), BACKED_UP.into());
+            return;
+        }
         let Some(slot) = self.waiting.enter() else {
             self.error(None, Some(id), "too many requests are waiting for an answer".into());
             return;
@@ -1178,7 +1205,7 @@ impl Connection {
     /// 在会话 `id` 所在的仓库里办 git 请求：向会话线程要它的目录，连同请求交给这条连接的 git
     /// 工作线程，见 `git` 模块。
     fn git(&mut self, req: u32, id: SessionId, request: GitRequest) {
-        let Some(slot) = self.waiting.enter() else {
+        let Some(slot) = self.git_waiting.enter() else {
             self.error(Some(req), None, "too many requests are waiting for an answer".into());
             return;
         };
@@ -1246,6 +1273,17 @@ impl Connection {
     fn goodbye(&self, message: &str) {
         self.out.control(&HostMsg::Goodbye { reason: GoodbyeReason::Error { message: message.into() } });
     }
+}
+
+/// 前端读得太慢、`Outbox` 积压过了上限时，连上会话、读屏幕不再往里排快照和回话，回这句。
+const BACKED_UP: &str = "the connection is backed up; read what the host already sent first";
+
+/// 前端给的尺寸行列都不超过 `MAX_GRID` 时为 `Ok`。
+fn check_size(size: GridSize) -> Result<(), String> {
+    if size.cols > MAX_GRID || size.rows > MAX_GRID {
+        return Err(format!("{}x{} is larger than {MAX_GRID}x{MAX_GRID}", size.cols, size.rows));
+    }
+    Ok(())
 }
 
 /// 一个会话往这条连接发事件的 `EventSink`。`MetaOnly` 的前端没有 VT，只要状态（含 `Bell`），
@@ -1428,6 +1466,57 @@ mod tests {
         }
         send(&mut stream, &ClientMsg::ListSessions);
         assert!(matches!(message(&frames), HostMsg::SessionList { .. }));
+        host.shared.kill_all();
+    }
+
+    /// git 请求的名额和列会话、读屏幕的分开算：排满了卡住的 git 请求，同一条连接上照样能读屏幕；
+    /// git 请求自己超出上限的当场回 `Error`。
+    #[test]
+    fn stuck_git_requests_do_not_take_the_other_slots() {
+        let host = Host::new(BuildId("test".into()));
+        let (stuck, release) = stuck_session(&host);
+        let other = host.shared.spawn(options("/bin/cat")).unwrap();
+        let (mut stream, frames) = greet(&host, ClientKind::Cli);
+        // 会话答不了它的目录，git 工作线程卡在第一件上，后面的排着，名额都占着。
+        for req in 0..=MAX_WAITING as u32 {
+            send(&mut stream, &ClientMsg::Git { req, id: stuck, request: GitRequest::Status });
+        }
+        match message(&frames) {
+            HostMsg::Error { req: Some(req), message, .. } => {
+                assert_eq!(req, MAX_WAITING as u32);
+                assert!(message.contains("too many"), "{message}");
+            }
+            other => panic!("expected the extra git request to be refused: {other:?}"),
+        }
+        send(&mut stream, &ClientMsg::ReadScreen { id: other, lines: None, command: None });
+        assert!(matches!(message(&frames), HostMsg::ScreenText { id, .. } if id == other));
+        drop(release);
+        host.shared.kill_all();
+    }
+
+    /// 前端不读、积压过了上限时，连上会话和读屏幕直接回 `Error`，不再往积压上加快照和回话。
+    #[test]
+    fn a_backed_up_connection_gets_no_more_snapshots_or_screens() {
+        let host = Host::new(BuildId("test".into()));
+        let id = host.shared.spawn(options("/bin/cat")).unwrap();
+        let (mut stream, frames) = greet(&host, ClientKind::Cli);
+        // 假装积压过了上限：写的线程写出去时只减它真写的那些，假的这份一直在。
+        let out = host.shared.peers().connections.values().find_map(|peer| peer.out.clone()).unwrap();
+        out.queued.fetch_add(OUTBOX_LIMIT + 1, Ordering::Relaxed);
+        send(&mut stream, &ClientMsg::Attach { id, size: None, mode: AttachMode::VtReplay });
+        send(&mut stream, &ClientMsg::ReadScreen { id, lines: None, command: None });
+        for _ in 0..2 {
+            match message(&frames) {
+                HostMsg::Error { id: Some(errored), message, .. } => {
+                    assert_eq!(errored, id);
+                    assert!(message.contains("backed up"), "{message}");
+                }
+                other => panic!("expected the request to be refused: {other:?}"),
+            }
+        }
+        out.queued.fetch_sub(OUTBOX_LIMIT + 1, Ordering::Relaxed);
+        send(&mut stream, &ClientMsg::ReadScreen { id, lines: None, command: None });
+        assert!(matches!(message(&frames), HostMsg::ScreenText { .. }));
         host.shared.kill_all();
     }
 
