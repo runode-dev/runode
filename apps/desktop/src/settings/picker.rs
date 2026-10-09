@@ -88,7 +88,8 @@ impl SettingsView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let field = cx.new(|cx| TextField::new(String::new(), cx));
+        let title = title.into();
+        let field = cx.new(|cx| TextField::new(String::new(), cx).with_label(title.clone()));
         let subscription = cx.subscribe_in(&field, window, |this, _, event: &TextFieldEvent, window, cx| match event {
             TextFieldEvent::Changed(_) => {
                 if let Some(picker) = &mut this.picker {
@@ -106,7 +107,7 @@ impl SettingsView {
         scroll.scroll_to_item(highlighted.unwrap_or(0), ScrollStrategy::Center);
         window.focus(&field.focus_handle(cx), cx);
         self.picker = Some(Picker {
-            title: title.into(),
+            title,
             items,
             current,
             target,

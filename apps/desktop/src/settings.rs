@@ -30,7 +30,10 @@ use runode_config::{Config, ConfigFile};
 use crate::{
     assets::ARROW_LEFT_ICON,
     config::AppConfig,
-    ui::text_field::{TextField, TextFieldEvent},
+    ui::{
+        a11y::Hide,
+        text_field::{TextField, TextFieldEvent},
+    },
 };
 use controls::Colors;
 use pages::Page;
@@ -408,6 +411,8 @@ impl Render for SettingsView {
         let nav = self.render_nav(colors, cx);
         let content = self.render_page(colors, window, cx);
         let picker = self.render_picker(colors, cx);
+        // 挑选浮层挡住了后面的页面，开着时后面的不报给辅助工具。
+        let modal = picker.is_some();
         div()
             .key_context("Settings")
             .track_focus(&self.focus_handle)
@@ -419,11 +424,12 @@ impl Render for SettingsView {
             .bg(colors.bg)
             .text_color(colors.fg)
             .text_size(px(13.))
-            .child(nav)
+            .child(nav.aria_hidden(modal))
             .child(
                 div().flex_1().min_w_0().h_full().flex().flex_col().child(titlebar_strip()).child(
                     div()
                         .id("settings-page")
+                        .aria_hidden(modal)
                         .flex_1()
                         .min_h_0()
                         .overflow_y_scroll()

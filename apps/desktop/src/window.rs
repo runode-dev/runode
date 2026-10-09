@@ -83,7 +83,7 @@ pub use status_bar::watch as watch_status;
 pub use tasks::RunNamedTask;
 pub use titlebar::titlebar_options;
 
-use crate::ui::a11y::PressDown;
+use crate::ui::a11y::{Hide, PressDown};
 use crate::{config::AppConfig, prespawn::Prespawned, terminal_view::TerminalView, ui::hsla};
 use model::{PaneLayout, Workspace, WorkspaceId, home_dir};
 use persist::format::SavedWindow;
@@ -566,6 +566,12 @@ impl Render for WindowView {
         let add_task = self.render_add_task(fg, bg, cx);
         let commit_message_dialog = self.render_commit_message_dialog(fg, bg, cx);
         let status_bar = (self.settings.is_none() && status_bar::shown(cx)).then(|| self.render_status_bar(fg, bg, cx));
+        // 这几个浮层挡住了后面的界面，开着时后面的不报给辅助工具。
+        let modal = agent_picker.is_some()
+            || arrange_picker.is_some()
+            || new_workspace.is_some()
+            || add_task.is_some()
+            || commit_message_dialog.is_some();
         div()
             .id("window")
             .key_context("Window")
@@ -618,8 +624,17 @@ impl Render for WindowView {
             .flex()
             .flex_col()
             .bg(hsla(base))
-            .child(div().relative().flex_1().min_h_0().flex().children(body))
-            .children(status_bar)
+            .child(
+                div()
+                    .id("window-content")
+                    .aria_hidden(modal)
+                    .flex_1()
+                    .min_h_0()
+                    .flex()
+                    .flex_col()
+                    .child(div().relative().flex_1().min_h_0().flex().children(body))
+                    .children(status_bar),
+            )
             .children(drag)
             .children(file_menu)
             .children(agent_picker)
