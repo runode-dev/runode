@@ -47,7 +47,7 @@ pub use status::{ListenerStatus, listener_status};
 /// 要一条到宿主的新连接，见 `Listener`。返回的连接还没说过话，第一帧由这边转发手机的 `Hello`。
 pub type Connect = Arc<dyn Fn() -> io::Result<UnixStream> + Send + Sync>;
 
-/// 现在的 Unix 秒。设备表、配对口令的时间都按它记，命令行和设置窗口算「多久以前」「还剩多久」也用它。
+/// 现在的 Unix 秒。设备表、配对口令的时间都按它记，命令行和设置页算「多久以前」「还剩多久」也用它。
 pub fn now_unix() -> u64 {
     std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |since| since.as_secs())
 }

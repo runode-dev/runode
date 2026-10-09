@@ -1,7 +1,7 @@
 //! 登录时自启：macOS 写 launchd 的 LaunchAgent（`~/Library/LaunchAgents`），Linux 写 systemd 的
 //! 用户服务（`$XDG_CONFIG_HOME/systemd/user`）。能拉起两样东西（`Kind`）：无界面的宿主
 //! （`runode --host`，手机远程访问靠它在后台等着）和桌面 app（只有 macOS 有）。
-//! 有没有装就看服务文件在不在，不另存状态；命令行（`runode service`）和设置窗口用的是同一套。
+//! 有没有装就看服务文件在不在，不另存状态；命令行（`runode service`）和设置页用的是同一套。
 
 use std::{
     fmt::Write as _,

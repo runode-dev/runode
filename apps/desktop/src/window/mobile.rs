@@ -75,14 +75,14 @@ pub(crate) fn show_pairing(cx: &mut App) {
     let Some(handle) = super::remote::front_window(cx) else { return };
     let _ = handle.update(cx, |view, window, cx| {
         window.activate_window();
-        view.show_mobile(&super::ShowMobile, window, cx);
+        view.show_mobile(window, cx);
         view.go_mobile(Step::Pair, cx);
     });
 }
 
 impl WindowView {
     /// 打开手机端引导页；已经开着时把焦点给它。
-    pub(super) fn show_mobile(&mut self, _: &super::ShowMobile, window: &mut Window, cx: &mut Context<Self>) {
+    pub(super) fn show_mobile(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.drop_settings(cx);
         if self.mobile.is_none() {
             let system_name = host_name();
@@ -262,12 +262,12 @@ impl WindowView {
                 MouseButton::Left,
                 cx.listener(|this, _, window, cx| {
                     cx.stop_propagation();
-                    this.show_mobile(&super::ShowMobile, window, cx);
+                    this.show_mobile(window, cx);
                 }),
             )
             // 按下鼠标就开，没有 on_click，辅助工具的按下另外登记。
             .on_a11y_action(AccessibleAction::Click, move |_, window, cx| {
-                view.update(cx, |this, cx| this.show_mobile(&super::ShowMobile, window, cx)).ok();
+                view.update(cx, |this, cx| this.show_mobile(window, cx)).ok();
             })
     }
 

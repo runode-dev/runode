@@ -206,9 +206,14 @@ pub(crate) fn reveal_notified(tag: &str, cx: &mut App) {
 }
 
 impl WindowView {
-    /// 用户正看着这个分屏：窗口在前台，它所在的标签正显示着，焦点在它上面。
+    /// 用户正看着这个分屏：窗口在前台，它所在的标签正显示着，焦点在它上面，也没被设置页或手机端
+    /// 引导页盖住。
     fn is_watching_pane(&self, pane: EntityId, wi: usize, ti: usize, window: &Window) -> bool {
-        window.is_window_active() && self.is_shown(wi, ti) && self.workspaces[wi].tabs[ti].focused == pane
+        window.is_window_active()
+            && self.is_shown(wi, ti)
+            && self.workspaces[wi].tabs[ti].focused == pane
+            && self.settings.is_none()
+            && self.mobile.is_none()
     }
 
     /// 前台 agent 从工作中停了下来。停在空闲、用户又没在看时记为 done 并提醒；否则（用户看着、
@@ -329,12 +334,13 @@ impl WindowView {
         entries
     }
 
-    /// 切到这个窗口里的这个分屏所在的 workspace 和标签，并聚焦它；agent 列表开着时关掉。
+    /// 切到这个窗口里的这个分屏所在的 workspace 和标签，并聚焦它；agent 列表和设置页开着时关掉。
     pub(super) fn show_pane(&mut self, pane: EntityId, window: &mut Window, cx: &mut Context<Self>) {
         let Some((wi, ti)) = self.locate(pane) else {
             return;
         };
         self.agent_picker = None;
+        self.drop_settings(cx);
         let workspace = &mut self.workspaces[wi];
         let tab = &mut workspace.tabs[ti];
         if tab.focused != pane {

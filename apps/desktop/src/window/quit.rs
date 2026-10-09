@@ -291,7 +291,7 @@ pub fn should_close(window: &mut Window, cx: &mut App) -> bool {
     false
 }
 
-/// 开着的终端窗口有几个，设置窗口不算。
+/// 开着的终端窗口有几个。
 pub fn terminal_windows(cx: &App) -> usize {
     remote::windows(cx).len()
 }

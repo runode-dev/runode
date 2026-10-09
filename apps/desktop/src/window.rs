@@ -125,9 +125,7 @@ actions!(
         /// 打开或关掉列出所有窗口里 agent 的浮层。
         GotoAgent,
         /// 跳到下一个要处理的 agent：先等回答的，再干完了没看的。
-        NextAgent,
-        /// 在窗口主区域打开手机端引导页：介绍、装 App、扫码配对。
-        ShowMobile
+        NextAgent
     ]
 );
 
@@ -583,7 +581,14 @@ impl Render for WindowView {
             .on_action(Self::act(cx, Self::select_last_tab))
             .on_action(Self::act(cx, Self::new_split_right))
             .on_action(Self::act(cx, Self::new_split_down))
-            .on_action(Self::act(cx, Self::close_pane))
+            // 设置页开着时关分屏的动作（菜单里的「关闭」）只收起设置页，不关它盖着的分屏。
+            .on_action(cx.listener(|this, action, window, cx| {
+                if this.settings.is_some() {
+                    this.close_settings(window, cx);
+                } else {
+                    this.close_pane(action, window, cx);
+                }
+            }))
             .on_action(Self::act(cx, Self::focus_next_pane))
             .on_action(Self::act(cx, Self::focus_previous_pane))
             .on_action(Self::act(cx, Self::focus_pane))
@@ -614,7 +619,6 @@ impl Render for WindowView {
             .on_action(Self::act(cx, Self::toggle_files))
             .on_action(Self::act(cx, Self::goto_agent))
             .on_action(Self::act(cx, Self::next_agent))
-            .on_action(Self::act(cx, Self::show_mobile))
             .on_action(Self::act(cx, Self::arrange_panes))
             .map(|window| Self::bind_git_actions(window, cx))
             // 终端和新建对话框没接住的拖放落到这里：侧栏收着时拖到标题栏、空 workspace 上也能开。
@@ -654,6 +658,9 @@ fn cover_panes(preview: Stateful<Div>) -> Stateful<Div> {
 impl WindowView {
     /// 从访达拖来的文件夹各开一个 workspace，已经开着的就切过去；文件不算。
     fn open_dropped_dirs(&mut self, dropped: &ExternalPaths, window: &mut Window, cx: &mut Context<Self>) {
+        if dropped.paths().iter().any(|path| path.is_dir()) {
+            self.close_settings(window, cx);
+        }
         for dir in dropped.paths().iter().filter(|path| path.is_dir()) {
             self.open_workspace(dir.clone(), None, window, cx);
         }
