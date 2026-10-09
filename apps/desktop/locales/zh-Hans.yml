@@ -114,6 +114,8 @@ workspace:
   clone_to: 克隆到
   create: 创建新项目
   create_hint: 从空文件夹开始
+  close: 关闭
+  edit_name: 名字
   empty: 这个工作区里还没有终端
 close:
   pane_title: 关闭这个终端？
@@ -813,6 +815,10 @@ mobile:
   network_label: "网络"
   network_auto: "自动（按系统顺序试全部地址）"
   network_hint: "手机先试这个地址，连不上再试别的。要和这台 Mac 连着同一个 Wi-Fi，或者都连着 Tailscale。"
+  refresh_networks: "重新读取网络"
+  pair_qr: "配对二维码"
+  install_qr: "安装二维码"
+  devices: "配对过的设备"
   cant_scan: "扫不了？"
   copy_code: "复制配对链接"
   expires: "%{time} 后过期"

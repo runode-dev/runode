@@ -11,8 +11,8 @@ use std::{
 };
 
 use gpui::{
-    ClickEvent, Context, Div, Entity, Focusable, FontWeight, Hsla, KeyDownEvent, MouseButton, Stateful, Subscription,
-    Window, div, prelude::*, px,
+    Context, Div, Entity, Focusable, FontWeight, Hsla, KeyDownEvent, MouseButton, Role, Stateful, Subscription, Window,
+    div, prelude::*, px,
 };
 use runode_paths::Dirs;
 use runode_shared_types::color::Rgb;
@@ -21,6 +21,7 @@ use serde_json::{Map, Value};
 use super::{AddTask, EditTask};
 use crate::{
     ui::{
+        a11y::Press,
         hsla,
         text_field::{TextField, TextFieldEvent},
     },
@@ -67,13 +68,13 @@ impl WindowView {
         cx: &mut Context<Self>,
     ) {
         {
-            let field = |key: &str, text: String, cx: &mut Context<Self>| {
-                let placeholder = rust_i18n::t!(key).into_owned();
+            let field = |label: &str, placeholder: &str, text: String, cx: &mut Context<Self>| {
+                let (label, placeholder) = (rust_i18n::t!(label).into_owned(), rust_i18n::t!(placeholder).into_owned());
                 let select = text.len();
-                cx.new(|cx| TextField::editing(text, select, cx).with_placeholder(placeholder))
+                cx.new(|cx| TextField::editing(text, select, cx).with_placeholder(placeholder).with_label(label))
             };
-            let name = field("tasks.name_placeholder", name, cx);
-            let command = field("tasks.command_placeholder", command, cx);
+            let name = field("tasks.name", "tasks.name_placeholder", name, cx);
+            let command = field("tasks.command", "tasks.command_placeholder", command, cx);
             // 名字里回车跳到命令，命令里回车添加；Esc 关掉对话框。
             let on_name = cx.subscribe_in(&name, window, |this, _, event: &TextFieldEvent, window, cx| match event {
                 TextFieldEvent::Next => this.focus_add_task_field(true, window, cx),
@@ -206,6 +207,8 @@ impl WindowView {
         let button = |id: &'static str, label: String, bg: Hsla, hover: Hsla| {
             div()
                 .id(id)
+                .role(Role::Button)
+                .aria_label(label.clone())
                 .flex_none()
                 .px(px(12.))
                 .py(px(5.))
@@ -216,9 +219,12 @@ impl WindowView {
                 .child(label)
         };
         // 本项目还是所有目录：两段按钮，选中的那段底色亮一些。
-        let scope = |id: &'static str, global: bool, label: String| {
+        let scope = |id: &'static str, global: bool, label: String, cx: &mut Context<Self>| {
             div()
                 .id(id)
+                .role(Role::RadioButton)
+                .aria_label(label.clone())
+                .aria_toggled((dialog.global == global).into())
                 .px(px(10.))
                 .py(px(3.))
                 .rounded(px(4.))
@@ -226,12 +232,12 @@ impl WindowView {
                 .when(dialog.global == global, |pill| pill.bg(primary_bg))
                 .when(dialog.global != global, |pill| pill.hover(move |pill| pill.bg(hover_bg)))
                 .child(label)
-                .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
+                .on_press(cx, move |this, _, cx| {
                     if let Some(dialog) = &mut this.add_task {
                         dialog.global = global;
                         cx.notify();
                     }
-                }))
+                })
         };
         let hint = if dialog.global {
             rust_i18n::t!("tasks.hint_global", file = TASKS_FILE_HINT)
@@ -239,16 +245,20 @@ impl WindowView {
             rust_i18n::t!("tasks.hint_project", file = TASKS_FILE_HINT)
         };
         let cancel = button("add-task-cancel", rust_i18n::t!("tasks.cancel").into_owned(), panel_bg, hover_bg)
-            .on_click(cx.listener(|this, _: &ClickEvent, window, cx| this.close_add_task(window, cx)));
+            .on_press(cx, |this, window, cx| this.close_add_task(window, cx));
         let (title, save) = match dialog.editing {
             Some(_) => (rust_i18n::t!("tasks.edit_title"), rust_i18n::t!("tasks.update")),
             None => (rust_i18n::t!("tasks.add_title"), rust_i18n::t!("tasks.save")),
         };
         let save = button("add-task-save", save.into_owned(), primary_bg, primary_hover_bg)
             .when(dialog.saving, |button| button.opacity(0.5))
-            .on_click(cx.listener(|this, _: &ClickEvent, window, cx| this.save_task(window, cx)));
+            .on_press(cx, |this, window, cx| this.save_task(window, cx));
+        let (title, scope_label, hint) =
+            (title.into_owned(), rust_i18n::t!("tasks.scope").into_owned(), hint.into_owned());
         let panel = div()
             .id("add-task-dialog")
+            .role(Role::Dialog)
+            .aria_label(title.clone())
             .on_key_down(cx.listener(Self::add_task_key))
             .w(px(420.))
             .max_w_full()
@@ -265,7 +275,16 @@ impl WindowView {
             .text_color(fg)
             // 点在对话框里不算点到外面。
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-            .child(div().text_size(px(16.)).font_weight(FontWeight::BOLD).child(title.into_owned()))
+            .child(
+                div()
+                    .id("add-task-title")
+                    .role(Role::Heading)
+                    .aria_level(1)
+                    .aria_label(title.clone())
+                    .text_size(px(16.))
+                    .font_weight(FontWeight::BOLD)
+                    .child(title),
+            )
             .child(field(rust_i18n::t!("tasks.name").into_owned(), &dialog.name))
             .child(field(rust_i18n::t!("tasks.command").into_owned(), &dialog.command))
             .child(
@@ -273,20 +292,47 @@ impl WindowView {
                     .flex()
                     .items_center()
                     .gap(px(8.))
-                    .child(div().text_color(fg.opacity(0.7)).child(rust_i18n::t!("tasks.scope").into_owned()))
+                    .child(div().text_color(fg.opacity(0.7)).child(scope_label.clone()))
                     .child(
                         div()
+                            .id("add-task-scope")
+                            .role(Role::RadioGroup)
+                            .aria_label(scope_label)
                             .flex()
                             .p(px(2.))
                             .gap(px(2.))
                             .rounded(px(6.))
                             .bg(hsla(bg))
-                            .child(scope("add-task-project", false, rust_i18n::t!("tasks.scope_project").into_owned()))
-                            .child(scope("add-task-global", true, rust_i18n::t!("tasks.scope_global").into_owned())),
+                            .child(scope(
+                                "add-task-project",
+                                false,
+                                rust_i18n::t!("tasks.scope_project").into_owned(),
+                                cx,
+                            ))
+                            .child(scope(
+                                "add-task-global",
+                                true,
+                                rust_i18n::t!("tasks.scope_global").into_owned(),
+                                cx,
+                            )),
                     ),
             )
-            .child(div().text_color(fg.opacity(0.55)).child(hint.into_owned()))
-            .children(dialog.error.clone().map(|error| div().text_color(gpui::red()).child(error)))
+            .child(
+                div()
+                    .id("add-task-hint")
+                    .role(Role::Label)
+                    .aria_label(hint.clone())
+                    .text_color(fg.opacity(0.55))
+                    .child(hint),
+            )
+            .children(dialog.error.clone().map(|error| {
+                div()
+                    .id("add-task-error")
+                    .role(Role::Label)
+                    .aria_label(error.clone())
+                    .text_color(gpui::red())
+                    .child(error)
+            }))
             .child(div().pt(px(4.)).flex().justify_end().gap(px(8.)).child(cancel).child(save));
         // 铺满窗口的底子挡住下面的点击，点到对话框外面就取消。
         Some(

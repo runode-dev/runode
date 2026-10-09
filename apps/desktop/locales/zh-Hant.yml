@@ -114,6 +114,8 @@ workspace:
   clone_to: 複製到
   create: 建立新專案
   create_hint: 從空檔案夾開始
+  close: 關閉
+  edit_name: 名稱
   empty: 這個工作區裡還沒有終端機
 close:
   pane_title: 關閉這個終端機？
@@ -813,6 +815,10 @@ mobile:
   network_label: "網路"
   network_auto: "自動（依系統順序試全部位址）"
   network_hint: "手機先試這個位址，連不上再試別的。要和這台 Mac 連著同一個 Wi-Fi，或者都連著 Tailscale。"
+  refresh_networks: "重新讀取網路"
+  pair_qr: "配對 QR 碼"
+  install_qr: "安裝 QR 碼"
+  devices: "配對過的裝置"
   cant_scan: "掃不了？"
   copy_code: "拷貝配對連結"
   expires: "%{time} 後過期"

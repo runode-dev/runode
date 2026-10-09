@@ -6,8 +6,8 @@
 use std::path::PathBuf;
 
 use gpui::{
-    ClickEvent, Context, Div, Entity, ExternalPaths, FocusHandle, Focusable, FontWeight, Hsla, KeyDownEvent,
-    MouseButton, PathPromptOptions, SharedString, Stateful, Subscription, Window, div, prelude::*, px, svg,
+    Context, Div, Entity, ExternalPaths, FocusHandle, Focusable, FontWeight, Hsla, KeyDownEvent, MouseButton,
+    PathPromptOptions, Role, SharedString, Stateful, Subscription, Window, div, prelude::*, px, svg,
 };
 use runode_shared_types::color::Rgb;
 
@@ -15,6 +15,7 @@ use super::{NewWorkspace, TITLEBAR_HEIGHT, WindowView, files::shell_quote, model
 use crate::{
     assets::{CLOSE_ICON, FOLDER_OPEN_ICON, GLOBE_ICON, PLUS_ICON},
     ui::{
+        a11y::Press,
         hsla,
         text_field::{TextField, TextFieldEvent},
     },
@@ -87,6 +88,7 @@ impl WindowView {
             let url = cx.new(|cx| {
                 TextField::editing(String::new(), 0, cx)
                     .with_placeholder(rust_i18n::t!("workspace.clone_url").into_owned())
+                    .with_label(rust_i18n::t!("workspace.clone").into_owned())
             });
             // 回车是克隆，Esc 是关掉整个对话框。
             let events = cx.subscribe_in(&url, window, |this, _, event: &TextFieldEvent, window, cx| match event {
@@ -163,6 +165,9 @@ impl WindowView {
         let option = |id: &'static str, icon: &'static str, title: SharedString, hint: SharedString| {
             div()
                 .id(id)
+                .role(Role::Button)
+                .aria_label(title.clone())
+                .aria_description(hint.clone())
                 .flex()
                 .items_center()
                 .gap(px(14.))
@@ -188,14 +193,15 @@ impl WindowView {
             rust_i18n::t!("workspace.browse").into_owned().into(),
             rust_i18n::t!("workspace.browse_hint").into_owned().into(),
         )
-        .on_click(cx.listener(|this, _: &ClickEvent, window, cx| this.browse_new_workspace(window, cx)));
+        .on_press(cx, |this, window, cx| this.browse_new_workspace(window, cx));
         let clone = option(
             "new-workspace-clone",
             GLOBE_ICON,
             rust_i18n::t!("workspace.clone").into_owned().into(),
             rust_i18n::t!("workspace.clone_hint").into_owned().into(),
         )
-        .on_click(cx.listener(|this, _: &ClickEvent, window, cx| this.show_clone_url(window, cx)));
+        .aria_expanded(dialog.url.is_some())
+        .on_press(cx, |this, window, cx| this.show_clone_url(window, cx));
         // 地址框缩进到和标题对齐，右边是克隆按钮。
         let clone_url = dialog.url.as_ref().map(|(url, _)| {
             div()
@@ -222,6 +228,8 @@ impl WindowView {
                 .child(
                     div()
                         .id("new-workspace-clone-go")
+                        .role(Role::Button)
+                        .aria_label(rust_i18n::t!("workspace.clone_to").into_owned())
                         .flex_none()
                         .px(px(12.))
                         .py(px(5.))
@@ -230,7 +238,7 @@ impl WindowView {
                         .hover(move |button| button.bg(primary_hover_bg))
                         .cursor_pointer()
                         .child(rust_i18n::t!("workspace.clone_to").into_owned())
-                        .on_click(cx.listener(|this, _: &ClickEvent, window, cx| this.clone_new_workspace(window, cx))),
+                        .on_press(cx, |this, window, cx| this.clone_new_workspace(window, cx)),
                 )
         });
         let create = option(
@@ -239,18 +247,24 @@ impl WindowView {
             rust_i18n::t!("workspace.create").into_owned().into(),
             rust_i18n::t!("workspace.create_hint").into_owned().into(),
         )
-        .on_click(cx.listener(|this, _: &ClickEvent, window, cx| this.new_workspace_dir(None, None, window, cx)));
+        .on_press(cx, |this, window, cx| this.new_workspace_dir(None, None, window, cx));
         let close = div()
             .id("new-workspace-close")
+            .role(Role::Button)
+            .aria_label(rust_i18n::t!("workspace.close").into_owned())
             .flex_none()
             .p(px(4.))
             .rounded(px(6.))
             .cursor_pointer()
             .hover(move |button| button.bg(hover_bg))
             .child(svg().path(CLOSE_ICON).size(px(16.)).text_color(fg.opacity(0.7)))
-            .on_click(cx.listener(|this, _: &ClickEvent, window, cx| this.close_new_workspace(window, cx)));
+            .on_press(cx, |this, window, cx| this.close_new_workspace(window, cx));
+        let title = rust_i18n::t!("workspace.new").into_owned();
+        let other = rust_i18n::t!("workspace.other").into_owned();
         let panel = div()
             .id("new-workspace-dialog")
+            .role(Role::Dialog)
+            .aria_label(title.clone())
             .track_focus(&dialog.focus)
             .on_key_down(cx.listener(Self::new_workspace_key))
             .w(px(480.))
@@ -276,14 +290,27 @@ impl WindowView {
                     .justify_between()
                     .child(
                         div()
+                            .id("new-workspace-title")
+                            .role(Role::Heading)
+                            .aria_level(1)
+                            .aria_label(title.clone())
                             .text_size(px(18.))
                             .font_weight(FontWeight::BOLD)
-                            .child(rust_i18n::t!("workspace.new").into_owned()),
+                            .child(title),
                     )
                     .child(close),
             )
             .child(card().child(browse))
-            .child(div().pt(px(4.)).text_color(fg.opacity(0.6)).child(rust_i18n::t!("workspace.other").into_owned()))
+            .child(
+                div()
+                    .id("new-workspace-other")
+                    .role(Role::Heading)
+                    .aria_level(2)
+                    .aria_label(other.clone())
+                    .pt(px(4.))
+                    .text_color(fg.opacity(0.6))
+                    .child(other),
+            )
             .child(
                 card().child(div().child(clone).children(clone_url)).child(div().h(px(1.)).bg(border)).child(create),
             );
