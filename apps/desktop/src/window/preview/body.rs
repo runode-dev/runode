@@ -6,7 +6,7 @@ use std::ops::Range;
 use gpui::{
     AnyElement, App, Axis, Bounds, Context, FontStyle, FontWeight, HighlightStyle, ImageSource,
     ListHorizontalSizingBehavior, MouseButton, MouseDownEvent, MouseMoveEvent, SMOOTH_SVG_SCALE_FACTOR, SharedString,
-    StyledText, canvas, div, fill, img, point, prelude::*, px, size, uniform_list,
+    StyledText, Window, canvas, div, fill, img, point, prelude::*, px, size, uniform_list,
 };
 use runode_shared_types::{color::Rgb, theme};
 
@@ -20,8 +20,9 @@ use crate::{
         scrollbar::{row_markers, scrollbar},
     },
     window::{
-        WindowView,
+        PANE_HEADER_HEIGHT, TITLEBAR_HEIGHT, WindowView,
         project::{ADDED, MODIFIED, REMOVED, RENAMED, panel_message},
+        status_bar,
     },
 };
 
@@ -73,6 +74,7 @@ pub(super) fn highlight_style(style: runode_preview::Style, fg: Rgb, palette: &[
 
 impl WindowView {
     /// 预览栏的正文：说明、图片、SVG、diff 或者文本的行，按读到的内容画；字号按配置的预览字号。
+    #[allow(clippy::too_many_arguments)]
     pub(super) fn render_preview_body(
         &self,
         preview: &Preview,
@@ -80,6 +82,7 @@ impl WindowView {
         font: SharedString,
         fg: Rgb,
         bg: Rgb,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let font_size = cx.global::<AppConfig>().0.preview_font_size;
@@ -106,31 +109,49 @@ impl WindowView {
                 .child(img(image.clone()).max_w_full().max_h_full())
                 .into_any_element(),
             Some(Loaded::ImageDiff { old, new }) => {
-                // 左边改之前、右边改之后，各占一半宽，图片按半栏等比缩小；没有的那边写一句。
+                // 改之前在左、改之后在右；栏太窄、图片并排缩得比上下排还小时改成上下排。
+                // 没有的那边写一句；图片还没解码出来时尺寸未知，先按左右排。
+                let sizes: Vec<_> = [old, new]
+                    .into_iter()
+                    .flatten()
+                    .filter_map(|image| image.clone().use_render_image(window, cx))
+                    .map(|image| {
+                        let size = image.size(0);
+                        (size.width.0 as f32, size.height.0 as f32)
+                    })
+                    .collect();
+                let height = f32::from(window.viewport_size().height)
+                    - TITLEBAR_HEIGHT
+                    - PANE_HEADER_HEIGHT
+                    - status_bar::height(cx);
+                let stacked = stack_images(width - 24., height - 24., &sizes);
                 let side = |label: String, color: Rgb, image: &Option<std::sync::Arc<gpui::Image>>| {
                     div()
                         .flex_1()
                         .min_w_0()
+                        .min_h_0()
                         .flex()
                         .flex_col()
                         .items_center()
-                        .gap(px(8.))
-                        .child(div().text_color(hsla(color)).child(label))
+                        .gap(px(IMAGE_GAP))
+                        .child(div().h(px(IMAGE_LABEL_HEIGHT)).text_color(hsla(color)).child(label))
                         .child(match image {
-                            Some(image) => img(image.clone()).max_w_full().max_h_full().into_any_element(),
+                            Some(image) => div()
+                                .flex_1()
+                                .min_h_0()
+                                .w_full()
+                                .flex()
+                                .justify_center()
+                                .child(img(image.clone()).max_w_full().max_h_full())
+                                .into_any_element(),
                             None => div()
                                 .text_color(hsla(fg).opacity(0.5))
                                 .child(rust_i18n::t!("preview.diff.image_missing").into_owned())
                                 .into_any_element(),
                         })
                 };
-                div()
-                    .flex_1()
-                    .min_h_0()
-                    .p(px(12.))
-                    .flex()
-                    .items_start()
-                    .gap(px(12.))
+                let body = div().flex_1().min_h_0().p(px(12.)).flex().gap(px(IMAGE_GAP));
+                if stacked { body.flex_col() } else { body.items_start() }
                     .child(side(rust_i18n::t!("preview.diff.image_before").into_owned(), REMOVED, old))
                     .child(side(rust_i18n::t!("preview.diff.image_after").into_owned(), ADDED, new))
                     .into_any_element()
@@ -352,6 +373,22 @@ impl WindowView {
 }
 
 /// 图片底下的棋盘格：透明的地方看得出来，深色背景上黑色的线条也看得清。
+/// 图片对比里两栏之间、标题和图片之间的空隙。
+const IMAGE_GAP: f32 = 12.;
+/// 图片对比里「改之前」「改之后」那一行的高度。
+const IMAGE_LABEL_HEIGHT: f32 = 20.;
+
+/// 宽 `width`、高 `height` 的地方放下 `sizes` 这几张图（原始像素尺寸，只缩不放）：上下排时缩得
+/// 比左右排少就上下排。缩得最小的那张说了算。
+fn stack_images(width: f32, height: f32, sizes: &[(f32, f32)]) -> bool {
+    let fit = |w: f32, h: f32| {
+        let h = h - IMAGE_LABEL_HEIGHT - IMAGE_GAP;
+        sizes.iter().map(|&(iw, ih)| (w / iw).min(h / ih).min(1.)).fold(1., f32::min)
+    };
+    let half = |side: f32| (side - IMAGE_GAP) / 2.;
+    fit(width, half(height)) > fit(half(width), height)
+}
+
 fn checkerboard() -> impl IntoElement {
     canvas(
         |_, _, _| {},
@@ -371,4 +408,21 @@ fn checkerboard() -> impl IntoElement {
     )
     .absolute()
     .size_full()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::stack_images;
+
+    #[test]
+    fn stacks_wide_images_in_a_narrow_tall_column() {
+        // 横图放在窄高的栏里，上下排每张能宽一倍。
+        assert!(stack_images(480., 900., &[(1280., 640.), (1280., 640.)]));
+        // 竖图放在宽矮的地方，左右排。
+        assert!(!stack_images(1600., 800., &[(1170., 2532.), (1170., 2532.)]));
+        // 两边都放得下原大小时不用换，左右排。
+        assert!(!stack_images(1600., 900., &[(100., 100.)]));
+        // 还不知道尺寸时左右排。
+        assert!(!stack_images(480., 900., &[]));
+    }
 }

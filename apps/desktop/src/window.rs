@@ -646,9 +646,9 @@ impl WindowView {
         // 放大的预览栏盖在终端区上，宽度是终端区的宽度。
         let (preview, maximized_preview) = if self.preview_maximized() {
             let width = f32::from(window.viewport_size().width) - sidebar_width - widths.panel;
-            (None, self.render_preview_panel(width, false, fg, bg, font, cx).map(cover_panes))
+            (None, self.render_preview_panel(width, false, fg, bg, font, window, cx).map(cover_panes))
         } else {
-            (self.render_preview_panel(widths.preview, self.panel.is_none(), fg, bg, font, cx), None)
+            (self.render_preview_panel(widths.preview, self.panel.is_none(), fg, bg, font, window, cx), None)
         };
         let panel = self.render_side_panel(widths.panel, fg, bg, window, cx);
         let right_handles = [
@@ -771,9 +771,9 @@ impl WindowView {
         let (preview, maximized_preview) = if self.preview_maximized() {
             let panel = if self.panel.is_some() { widths.panel + CARD_GAP } else { 0. };
             let width = viewport - sidebar_width - 2. * CARD_GAP - panel;
-            (None, self.render_preview_panel(width, false, fg, bg, font, cx).map(cover_panes))
+            (None, self.render_preview_panel(width, false, fg, bg, font, window, cx).map(cover_panes))
         } else {
-            (self.render_preview_panel(widths.preview, false, fg, bg, font, cx), None)
+            (self.render_preview_panel(widths.preview, false, fg, bg, font, window, cx), None)
         };
         let panel = self.render_side_panel(widths.panel, fg, bg, window, cx);
         let right_handles =

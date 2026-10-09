@@ -636,6 +636,7 @@ impl WindowView {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub(super) fn render_preview_panel(
         &self,
         width: f32,
@@ -643,6 +644,7 @@ impl WindowView {
         fg: Rgb,
         bg: Rgb,
         font: SharedString,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Option<Stateful<Div>> {
         let preview = self.preview()?;
@@ -709,7 +711,7 @@ impl WindowView {
             .child(tab_underline(fg))
             .child(buttons);
         let header = self.panel_header(fg, cx).border_b_0().px_0().gap_0().child(strip).child(filler);
-        let body = self.render_preview_body(preview, width, font, fg, bg, cx);
+        let body = self.render_preview_body(preview, width, font, fg, bg, window, cx);
         Some(
             panel_shell("preview-panel", width, fg, bg, cx)
                 .key_context("Preview")
