@@ -82,6 +82,9 @@ xcrun actool apps/desktop/assets/runode.icon --compile "$app/Contents/Resources"
     --app-icon runode --include-all-app-icons --enable-on-demand-resources NO \
     --development-region en --target-device mac --platform macosx --minimum-deployment-target 11.0 >&2
 rm -rf "$icon_build"
+# 旧版 Xcode 的 actool 不认 .icon，不报错也不出文件，包里就没有图标；这里拦住。
+[[ -f "$app/Contents/Resources/Assets.car" && -f "$app/Contents/Resources/runode.icns" ]] \
+    || { echo "actool 没生成图标（要 Xcode 26 以上）：$(xcodebuild -version | head -1)" >&2; exit 1; }
 
 # 公证要带安全时间戳；ad-hoc 签名没有时间戳可带。
 sign_options=(--force --sign "$SIGN_IDENTITY")
