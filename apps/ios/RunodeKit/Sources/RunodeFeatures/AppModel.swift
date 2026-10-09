@@ -97,6 +97,8 @@ public final class AppModel {
     /// 终端页上切过去的分屏：键是栈里的终端页，值是它现在显示的会话。切分屏不改导航栈：栈顶的值一变，
     /// SwiftUI 会把这一页工具栏上的按钮整组重建，右上角闪一下。
     private var panes: [Route: SessionId] = [:]
+    /// 终端页上显示过的会话，最近的在最后；分屏结束时按它切回上次看的那个。
+    @ObservationIgnored private var shownHistory: [SessionId] = []
     @ObservationIgnored private var active = true
     /// 系统交来、要等电脑列表读进来才能打开的会话链接（冷启动时）。
     @ObservationIgnored private var pendingLink: SessionLink?
@@ -143,6 +145,15 @@ public final class AppModel {
         pathChanged()
         // 先记上，底部的按键栏这一帧就不出来。
         terminal(machine: machine, session: session)?.setKeyboardVisible(keyboard)
+    }
+
+    /// 终端页上显示的分屏 `session` 结束了：切回 `tabMates`（它所在标签里的分屏，结束前最后一次知道的）
+    /// 里上次看过、还没结束的那个，都没看过时切到第一个还没结束的；一个都没有时留在这页，盖着印章。
+    public func leaveEndedPane(machine: UUID, session: SessionId, tabMates: [SessionId]) {
+        guard let list = sessionList(for: machine) else { return }
+        let alive = tabMates.filter { $0 != session && list.session($0).map { !$0.exited } == true }
+        guard let target = shownHistory.last(where: alive.contains) ?? alive.first else { return }
+        switchTerminal(machine: machine, to: target)
     }
 
     /// 栈里这个终端页现在显示的会话：切过分屏的是切到的那个。
@@ -342,6 +353,9 @@ public final class AppModel {
         }
         if case .terminal(let machine, let session)? = path.last.map(shown) {
             remember(machine: machine, session: session)
+            shownHistory.removeAll { $0 == session }
+            shownHistory.append(session)
+            if shownHistory.count > 32 { shownHistory.removeFirst() }
         }
     }
 

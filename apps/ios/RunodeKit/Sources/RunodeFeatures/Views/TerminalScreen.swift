@@ -16,6 +16,8 @@
         var onOpenGit: () -> Void = {}
         /// 切到同一个标签里的另一个分屏。
         var onSelectPane: (SessionId) -> Void = { _ in }
+        /// 显示的分屏结束了，带着它所在标签里的分屏：切回别的分屏。
+        var onPaneEnded: ([SessionId]) -> Void = { _ in }
         /// 这台电脑的会话列表，「⋯」菜单里的项目命令从它取、经它跑。
         var sessions: SessionListModel?
         /// 断线横幅占的高度，终端视图据此在顶上让出地方，横幅不挡内容。
@@ -24,6 +26,9 @@
         @State private var terminalView: TerminalView?
         /// 连了一会儿还没连上：这时才出「正在连接…」横幅，切分屏、回到前台时一闪而过的连接不出。
         @State private var connectingLong = false
+        /// 最后一次知道的、这个会话所在标签里的分屏。会话结束后电脑关掉它的分屏，布局里就找不到它了，
+        /// 所以先记着；换到别的标签的会话后，不含它的旧值不算数。
+        @State private var tabMates: [SessionId] = []
 
         private var background: Color { Color(model.background) }
         private var scheme: ColorScheme { model.background.isDark ? .dark : .light }
@@ -70,6 +75,16 @@
                 .task(id: session?.meta.cwd) {
                     if let cwd = session?.meta.cwd { await sessions?.loadProjectTasks(in: cwd) }
                 }
+                .onChange(of: paneIds, initial: true) { _, ids in
+                    if !ids.isEmpty { tabMates = ids }
+                }
+                .onChange(of: model.isEnded) { _, ended in
+                    if ended, tabMates.contains(model.sessionId) { onPaneEnded(tabMates) }
+                }
+        }
+
+        private var paneIds: [SessionId] {
+            sessions?.panes(sharingTabWith: model.sessionId).map(\.id) ?? []
         }
 
         /// 电脑上同一个标签里分了屏时的分屏标签；没分屏时不出现。

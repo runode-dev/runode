@@ -542,6 +542,37 @@ extension LinkState {
         #expect(await eventually { link.stops == 1 })
     }
 
+    /// 显示的分屏结束了：切回同一个标签里上次看过、还没结束的分屏；看过的都结束了时切到第一个还没结束的。
+    @Test func anEndedPaneReturnsToTheLastSeenPaneOfItsTab() async throws {
+        let store = MemoryMachineStore()
+        let machine = machineRecord()
+        await store.upsert(machine)
+        let link = FakeLink()
+        let app = AppModel(
+            dependencies: AppDependencies(
+                store: store, keyStore: MemoryDeviceKeyStore(),
+                pairing: FakePairing { _ in machine }, makeLink: { _ in link }, deviceName: "测试 iPhone"))
+        await app.machineList.load()
+        let list = try #require(app.sessionList(for: machine.id))
+        func info(_ id: SessionId, exited: Bool = false) -> SessionInfo {
+            SessionInfo(id: id, size: smallGrid, meta: SessionMeta(title: "zsh"), exited: exited)
+        }
+        list.handle(.ready(generation: 1))
+        list.handle(.message(.sessionList([info(sessionA), info(sessionB), info(sessionC)])))
+        app.path = [.machine(machine.id), .terminal(machine: machine.id, session: sessionA)]
+        // 在 A 上跑项目命令，开出来的 C 换掉了这一页。
+        app.openTerminal(machine: machine.id, session: sessionC)
+        app.leaveEndedPane(machine: machine.id, session: sessionC, tabMates: [sessionB, sessionA, sessionC])
+        #expect(app.shownSession(machine: machine.id, session: sessionC) == sessionA)
+
+        list.handle(.message(.sessionList([info(sessionA, exited: true), info(sessionB), info(sessionC)])))
+        app.leaveEndedPane(machine: machine.id, session: sessionA, tabMates: [sessionB, sessionA, sessionC])
+        #expect(app.shownSession(machine: machine.id, session: sessionC) == sessionC)
+        // 标签里只剩它自己时不动。
+        app.leaveEndedPane(machine: machine.id, session: sessionC, tabMates: [sessionC])
+        #expect(app.shownSession(machine: machine.id, session: sessionC) == sessionC)
+    }
+
     /// 切到同一个标签里的另一个分屏：导航栈不动，栈顶的终端页改显示新会话，旧终端关掉。
     @Test func switchingPanesReplacesTheTerminalPage() async throws {
         let store = MemoryMachineStore()

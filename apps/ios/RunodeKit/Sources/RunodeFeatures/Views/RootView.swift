@@ -67,6 +67,13 @@
                             transaction.disablesAnimations = true
                             withTransaction(transaction) { app.switchTerminal(machine: machine, to: id) }
                         },
+                        onPaneEnded: { mates in
+                            var transaction = Transaction()
+                            transaction.disablesAnimations = true
+                            withTransaction(transaction) {
+                                app.leaveEndedPane(machine: machine, session: session, tabMates: mates)
+                            }
+                        },
                         sessions: app.sessionList(for: machine))
                 } else {
                     ContentUnavailableView("找不到这个终端", systemImage: "terminal")
