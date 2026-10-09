@@ -60,8 +60,8 @@ struct LineCell {
 
 impl Session {
     /// 视口里 `at` 这一格上的链接：程序用 OSC 8 标了超链接的就是它；没标的在这一行（连同软换行接着的
-    /// 上下几行）的文字里找指针所在的网址或路径。路径只认存在的，相对路径按 shell 当前所在的目录解析，
-    /// 不知道目录时只认绝对路径和 `~/` 开头的。
+    /// 上下几行，以及 `join_hard_wraps` 认出的硬换行续行）的文字里找指针所在的网址或路径。路径只认存在的，
+    /// 相对路径按 shell 当前所在的目录解析，不知道目录时只认绝对路径和 `~/` 开头的。
     pub fn link_at(&self, at: GridPoint) -> Option<Link> {
         let size = self.size.get();
         if at.x < 0. || at.y < 0. || at.x >= f32::from(size.cols) || at.y >= f32::from(size.rows) {
@@ -89,8 +89,7 @@ impl Session {
                 }
             }
             let pointer = owners.iter().position(|&owner| owner == index)?;
-            let (range, target) =
-                find(&chars, pointer, |text| resolve_path(text, cwd.as_deref(), home.as_deref()))?;
+            let (range, target) = find(&chars, pointer, |text| resolve_path(text, cwd.as_deref(), home.as_deref()))?;
             Some(Link { target, spans: spans(&cells[owners[range.start]..=owners[range.end - 1]]) })
         };
         // 接上硬换行的续行后认不出（比如本来就到行尾为止的路径接上了下一行的字）时，只在这一行里找。
@@ -108,6 +107,7 @@ fn join_hard_wraps(terminal: &Terminal<'_, '_>, line: &[LineCell], rows: u16) ->
     let indent = |cells: &[LineCell]| cells.iter().take_while(|cell| cell.text == " ").count();
     let continues = |cells: &[LineCell]| cells.get(indent(cells)).is_some_and(|cell| cell.text.chars().all(link_char));
     let mut cells = line.to_vec();
+    let mut joined = false;
     while cells[0].y > 0 && continues(&cells) {
         let above = logical_line(terminal, cells[0].y - 1, rows)?;
         if !ends_in_link(&above) {
@@ -115,15 +115,18 @@ fn join_hard_wraps(terminal: &Terminal<'_, '_>, line: &[LineCell], rows: u16) ->
         }
         cells.drain(..indent(&cells));
         cells.splice(0..0, above);
+        joined = true;
     }
     while let Some(next) = cells.last().map(|cell| cell.y + 1).filter(|&next| next < rows && ends_in_link(&cells)) {
         let below = logical_line(terminal, next, rows)?;
         if !continues(&below) {
             break;
         }
-        cells.extend(below.into_iter().skip(indent(&below)));
+        let skip = indent(&below);
+        cells.extend(below.into_iter().skip(skip));
+        joined = true;
     }
-    Ok((cells.len() != line.len()).then_some(cells))
+    Ok(joined.then_some(cells))
 }
 
 /// 读出视口第 `y` 行所在的逻辑行：往上找到软换行的开头，往下接到不再软换行的那一行，只在视口里找。
