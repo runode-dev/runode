@@ -44,11 +44,12 @@ download_base() {
     fi
 }
 
+# 第三个参数给了就显示下载进度（装包用），清单这类小文件不显示。
 fetch() {
     if command -v curl >/dev/null 2>&1; then
-        curl -fsSL --retry 3 -o "$2" "$1"
+        if [ -n "${3:-}" ]; then curl -fL# --retry 3 -o "$2" "$1"; else curl -fsSL --retry 3 -o "$2" "$1"; fi
     elif command -v wget >/dev/null 2>&1; then
-        wget -q -O "$2" "$1"
+        if [ -n "${3:-}" ]; then wget -O "$2" "$1"; else wget -q -O "$2" "$1"; fi
     else
         fail "需要 curl 或 wget"
     fi
@@ -91,7 +92,7 @@ install_macos() {
     [ -n "$url" ] || fail "版本清单里没有 $arch 的安装包"
 
     say "正在下载 $url"
-    fetch "$url" "$tmp/Runode.zip"
+    fetch "$url" "$tmp/Runode.zip" progress
     verify "$tmp/Runode.zip" "${url##*/}"
     # ditto 解压才保留符号链接和扩展属性，签名对得上。
     ditto -x -k "$tmp/Runode.zip" "$tmp"
@@ -127,7 +128,7 @@ install_linux() {
 
     url="$(download_base)/runode-linux-$arch.tar.gz"
     say "正在下载 $url"
-    fetch "$url" "$tmp/runode.tar.gz"
+    fetch "$url" "$tmp/runode.tar.gz" progress
     verify "$tmp/runode.tar.gz" "runode-linux-${arch}.tar.gz"
     tar -xzf "$tmp/runode.tar.gz" -C "$tmp"
     [ -f "$tmp/runode" ] || fail "安装包里没有 runode"
