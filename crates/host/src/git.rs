@@ -127,6 +127,11 @@ fn run(
     Ok(HostMsg::GitStatus { req, id, status: runode_git::snapshot(dir, cache).map(|snapshot| status(&snapshot)) })
 }
 
+/// 回给前端的 `GitStatus` 里每段最多列这么多个文件（按路径排在前面的）。仓库里有几十万个没忽略的文件
+/// 时整份状态会超过帧的上限 `MAX_PAYLOAD`，写不出去整条连接就断了，重连再要还是断。线上格式里没有
+/// 「列不全」的标记，前端只看到前面这些。
+const MAX_STATUS_FILES: usize = 5000;
+
 fn status(snapshot: &runode_git::Snapshot) -> GitStatus {
     let info = &snapshot.info;
     GitStatus {
@@ -143,8 +148,8 @@ fn status(snapshot: &runode_git::Snapshot) -> GitStatus {
             Operation::CherryPick => GitOperation::CherryPick,
             Operation::Revert => GitOperation::Revert,
         }),
-        staged: snapshot.staged.iter().map(file).collect(),
-        unstaged: snapshot.unstaged.iter().map(file).collect(),
+        staged: snapshot.staged.iter().take(MAX_STATUS_FILES).map(file).collect(),
+        unstaged: snapshot.unstaged.iter().take(MAX_STATUS_FILES).map(file).collect(),
     }
 }
 
@@ -304,6 +309,38 @@ mod tests {
         assert_eq!(status.branch.as_deref(), Some("side"));
 
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// 改动的文件太多时每段只列前 `MAX_STATUS_FILES` 个，回话不会超过帧的上限。
+    #[test]
+    fn caps_the_files_in_a_status() {
+        let files: Vec<FileDiff> = (0..MAX_STATUS_FILES + 10)
+            .map(|n| FileDiff {
+                path: format!("f{n:06}").into(),
+                old_path: None,
+                status: FileStatus::Untracked,
+                added: 0,
+                removed: 0,
+                hunks: Vec::new(),
+                binary: false,
+                truncated: true,
+                gitlink: false,
+            })
+            .collect();
+        let snapshot = runode_git::Snapshot {
+            root: "/repo".into(),
+            git_dir: "/repo/.git".into(),
+            prefix: PathBuf::new(),
+            kind: runode_git::RepoKind::Main,
+            staged: files.clone(),
+            unstaged: files,
+            statuses: Default::default(),
+            ignored: Default::default(),
+            info: Default::default(),
+        };
+        let status = status(&snapshot);
+        assert_eq!((status.staged.len(), status.unstaged.len()), (MAX_STATUS_FILES, MAX_STATUS_FILES));
+        assert_eq!(status.unstaged[0].path, Path::new("f000000"));
     }
 
     /// 不在仓库里：读状态回空，改仓库的操作报错；git 自己的失败把它的报错原样带回去。

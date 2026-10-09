@@ -182,10 +182,21 @@ pub fn snapshot(dir: &Path, cache: &mut UntrackedCache) -> Option<Snapshot> {
 
 /// 读 `FileDiff` 用的 `git diff` 命令行（不含 `git`），再加上 `extra`。前缀写明，免得用户配置了
 /// `diff.noprefix` 之类改掉 `a/`、`b/`。子模块只在记着的提交号变了时算改动，里面改了文件不算：
-/// 那些改动在子模块自己的那份里，在这里既暂存不了也丢不掉。
+/// 那些改动在子模块自己的那份里，在这里既暂存不了也丢不掉。路径里非 ASCII 的字节按八进制转义：
+/// 输出要当文本读，原样给的不是 UTF-8 的文件名会被换成 U+FFFD，转义了才能由 `unquote` 还原成原来的字节。
 pub(crate) fn diff_args(extra: &[&str]) -> Vec<String> {
     let threshold = format!("core.bigFileThreshold={MAX_DIFF_BYTES}");
-    let mut args = vec!["-c", &threshold, "diff", "-M", "--no-color", "--no-ext-diff", "--no-textconv"];
+    let mut args = vec![
+        "-c",
+        &threshold,
+        "-c",
+        "core.quotePath=true",
+        "diff",
+        "-M",
+        "--no-color",
+        "--no-ext-diff",
+        "--no-textconv",
+    ];
     args.extend(["--src-prefix=a/", "--dst-prefix=b/", "--ignore-submodules=dirty"]);
     args.extend(extra);
     args.into_iter().map(str::to_owned).collect()

@@ -6,7 +6,7 @@ mod common;
 use std::path::Path;
 
 use common::{TestRepo, read};
-use runode_git::{DiffRow, DiffSide, FileDiff, FileStatus, Hunk, Line, LineKind, merge_rows};
+use runode_git::{DiffRow, DiffSide, FileDiff, FileStatus, Hunk, Line, LineKind, ReadOptions, TooLarge, merge_rows};
 
 fn line(kind: LineKind, old: Option<u32>, new: Option<u32>, text: &str) -> Line {
     Line { kind, old, new, text: text.into() }
@@ -193,16 +193,17 @@ fn reads_both_sides_of_a_change() {
     let handle = read(&repo).repo();
     let path = Path::new("a.bin");
     let bytes = |text: &str| Some(text.as_bytes().to_vec());
+    let any = ReadOptions { max_bytes: u64::MAX };
 
     // 工作区：改之前是暂存区那份，改之后是磁盘上的。
     repo.write("a.bin", "v2");
     assert_eq!(handle.old_bytes(path, None, &DiffSide::Worktree), bytes("v1"));
-    assert_eq!(handle.new_bytes(path, &DiffSide::Worktree), bytes("v2"));
+    assert_eq!(handle.new_bytes(path, &DiffSide::Worktree, any), Ok(bytes("v2")));
 
     // 暂存区：改之前是 HEAD 那份。
     repo.git(&["add", "a.bin"]);
     assert_eq!(handle.old_bytes(path, None, &DiffSide::Index), bytes("v1"));
-    assert_eq!(handle.new_bytes(path, &DiffSide::Index), bytes("v2"));
+    assert_eq!(handle.new_bytes(path, &DiffSide::Index, any), Ok(bytes("v2")));
 
     // 提交：改之前是父提交那份；第一个提交没有父提交，没有旧的。
     repo.git(&["commit", "-q", "-m", "two"]);
@@ -210,7 +211,7 @@ fn reads_both_sides_of_a_change() {
     let ids: Vec<_> = ids.lines().collect();
     let commit = DiffSide::Commit { id: ids[0].into(), parent: Some(ids[1].into()) };
     assert_eq!(handle.old_bytes(path, None, &commit), bytes("v1"));
-    assert_eq!(handle.new_bytes(path, &commit), bytes("v2"));
+    assert_eq!(handle.new_bytes(path, &commit, any), Ok(bytes("v2")));
     assert_eq!(handle.old_bytes(path, None, &DiffSide::Commit { id: ids[1].into(), parent: None }), None);
 
     // 改了名的按原来的路径找旧的；未跟踪的没有旧的。
@@ -218,4 +219,18 @@ fn reads_both_sides_of_a_change() {
     assert_eq!(handle.old_bytes(Path::new("b.bin"), Some(path), &DiffSide::Index), bytes("v2"));
     repo.write("new.bin", "n");
     assert_eq!(handle.old_bytes(Path::new("new.bin"), None, &DiffSide::Worktree), None);
+}
+
+#[test]
+fn does_not_read_sides_over_the_size_limit() {
+    let repo = TestRepo::new("bytes-limit");
+    repo.commit_file("a.bin", "small", "one");
+    repo.write("a.bin", "four");
+    let handle = read(&repo).repo();
+    let path = Path::new("a.bin");
+    let max = |max_bytes| ReadOptions { max_bytes };
+    assert_eq!(handle.new_bytes(path, &DiffSide::Worktree, max(4)), Ok(Some(b"four".to_vec())));
+    assert_eq!(handle.new_bytes(path, &DiffSide::Worktree, max(3)), Err(TooLarge));
+    // 暂存区里的 blob 同样按上限。
+    assert_eq!(handle.new_bytes(path, &DiffSide::Index, max(4)), Err(TooLarge));
 }

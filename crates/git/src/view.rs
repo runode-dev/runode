@@ -32,6 +32,17 @@ pub enum DiffRow {
     Context { old: u32, new: u32 },
 }
 
+/// `Repo::new_bytes` 的选项。
+#[derive(Clone, Copy, Debug)]
+pub struct ReadOptions {
+    /// 内容比这么多字节大时不要，为 `TooLarge`。
+    pub max_bytes: u64,
+}
+
+/// 内容比 `ReadOptions::max_bytes` 大，没给。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct TooLarge;
+
 /// 一个文件的整篇 diff。
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DiffView {
@@ -158,7 +169,7 @@ impl Repo {
         };
         let content = match side {
             _ if file.binary || file.truncated || file.status == FileStatus::Deleted => None,
-            _ => self.new_bytes(path, side),
+            _ => self.new_bytes(path, side, ReadOptions { max_bytes: MAX_DIFF_BYTES }).ok().flatten(),
         };
         let mut new_lines = content.as_deref().and_then(split_lines).unwrap_or_default();
         let rows = match merge_rows(&file, &new_lines) {
@@ -172,12 +183,28 @@ impl Repo {
     }
 
     /// `path` 在 `side` 这一边改完以后的全部字节：工作区的文件、暂存区或提交里的 blob。
-    /// 读不到（比如删掉了）时为空。符号链接和 git 一样是它指向的路径。
-    pub fn new_bytes(&self, path: &Path, side: &DiffSide) -> Option<Vec<u8>> {
-        match side {
-            DiffSide::Worktree => worktree_bytes(&self.root.join(path)),
+    /// 读不到（比如删掉了）时为空。符号链接和 git 一样是它指向的路径。比 `options.max_bytes` 大时
+    /// 是 `TooLarge`：工作区的文件先看大小，大的不读进内存；暂存区和提交里的 blob 由 git 读出来再比。
+    pub fn new_bytes(
+        &self,
+        path: &Path,
+        side: &DiffSide,
+        options: ReadOptions,
+    ) -> std::result::Result<Option<Vec<u8>>, TooLarge> {
+        let bytes = match side {
+            DiffSide::Worktree => {
+                let full = self.root.join(path);
+                if fs::symlink_metadata(&full).is_ok_and(|meta| meta.len() > options.max_bytes) {
+                    return Err(TooLarge);
+                }
+                worktree_bytes(&full)
+            }
             DiffSide::Index => git(&self.root, &["cat-file", "blob", &format!(":{}", path.display())]),
             DiffSide::Commit { id, .. } => git(&self.root, &["cat-file", "blob", &format!("{id}:{}", path.display())]),
+        };
+        match bytes {
+            Some(bytes) if bytes.len() as u64 > options.max_bytes => Err(TooLarge),
+            bytes => Ok(bytes),
         }
     }
 

@@ -1,8 +1,8 @@
 //! 分支：列出本地和远端分支，切换、新建分支。只对句柄所指的那个仓库。
 
-use std::process::{Command, Stdio};
+use std::{path::Path, process::Stdio};
 
-use crate::{GitError, Repo, Result, git, ops::run};
+use crate::{GitError, Repo, Result, git, git_command, ops::run};
 
 /// 分支列表里的一项。
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -20,15 +20,15 @@ pub struct Branch {
     pub date: String,
 }
 
-/// `name` 能不能用作新分支的名字，按 `git check-ref-format --branch` 的规矩。
+/// `name` 能不能用作新分支的名字，按 `git check-ref-format --branch` 的规矩。不看哪个仓库，在根目录里跑：
+/// 不读进程当前目录所在仓库的配置，当前目录被删掉了也照常判断。
 pub fn valid_branch_name(name: &str) -> bool {
     // `@{-1}` 这类写法 git 会当成「上一个分支」去解析，`HEAD` 新版 git 也不让用。
     if name.is_empty() || name.starts_with('-') || name.contains("@{") || name == "HEAD" {
         return false;
     }
-    Command::new("git")
+    git_command(Path::new("/"))
         .args(["check-ref-format", "--branch", name])
-        .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .status()

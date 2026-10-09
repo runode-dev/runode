@@ -184,12 +184,13 @@ impl WindowView {
             let view = repo.file_view(&target.rel, target.old_rel.as_deref(), &target.side).ok().flatten()?;
             // 二进制的图片把改之前和改之后的两张并排显示；新加的没有旧图，删掉的没有新图。
             let image = runode_preview::image_format(&target.rel).filter(|_| view.file.binary).map(|format| {
-                let old = repo.old_bytes(&target.rel, target.old_rel.as_deref(), &target.side);
-                let new = repo.new_bytes(&target.rel, &target.side);
-                let large = |bytes: &Option<Vec<u8>>| {
-                    bytes.as_ref().is_some_and(|bytes| bytes.len() as u64 > runode_preview::MAX_IMAGE_BYTES)
+                let max_bytes = runode_preview::MAX_IMAGE_BYTES;
+                // 新的那边太大时不读进内存。
+                let Ok(new) = repo.new_bytes(&target.rel, &target.side, git::ReadOptions { max_bytes }) else {
+                    return Loaded::Note(Note::TooLarge);
                 };
-                if large(&old) || large(&new) {
+                let old = repo.old_bytes(&target.rel, target.old_rel.as_deref(), &target.side);
+                if old.as_ref().is_some_and(|bytes| bytes.len() as u64 > max_bytes) {
                     return Loaded::Note(Note::TooLarge);
                 }
                 let image = |bytes: Vec<u8>| Arc::new(Image::from_bytes(gpui_format(format), bytes));

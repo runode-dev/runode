@@ -1,12 +1,17 @@
 //! 快照的公开查询：被忽略的目录连带它里面的路径；读快照时不跟着未跟踪的符号链接去读，也不
-//! 执行仓库配置里的 `core.fsmonitor`。
+//! 执行仓库配置里的 `core.fsmonitor` 和 filter；不是 UTF-8 的文件名原样留着。
 
 mod common;
 
 use std::{
     collections::{HashMap, HashSet},
-    os::unix::fs::{PermissionsExt, symlink},
-    path::Path,
+    ffi::{OsStr, OsString},
+    fs,
+    os::unix::{
+        ffi::OsStrExt,
+        fs::{PermissionsExt, symlink},
+    },
+    path::{Path, PathBuf},
     process::Command,
     sync::mpsc,
     thread,
@@ -84,4 +89,40 @@ fn does_not_run_the_repository_fsmonitor() {
     // 对照：不关掉时 git status 会执行它，上面的断言才有意义。
     repo.git(&["status"]);
     assert!(marker.exists());
+}
+
+#[test]
+fn keeps_file_names_that_are_not_utf8() {
+    let repo = TestRepo::new("snapshot-latin1");
+    let name = OsStr::from_bytes(b"caf\xe9.txt");
+    // macOS 的文件系统不让建这样的文件，只把它记进暂存区再提交，工作区里就是删掉了它。
+    repo.write("seed", "x\n");
+    let blob = repo.git(&["hash-object", "-w", "seed"]);
+    fs::remove_file(repo.path().join("seed")).unwrap();
+    let mut cacheinfo = OsString::from(format!("100644,{blob},"));
+    cacheinfo.push(name);
+    let status = Command::new("git")
+        .arg("-C")
+        .arg(repo.path())
+        .args(["update-index", "--add", "--cacheinfo"])
+        .arg(&cacheinfo)
+        .status()
+        .unwrap();
+    assert!(status.success());
+    repo.git(&["commit", "-q", "-m", "init"]);
+
+    let path = PathBuf::from(name);
+    let snapshot = read(&repo);
+    assert_eq!(snapshot.statuses.get(&path), Some(&FileStatus::Deleted));
+    assert_eq!(snapshot.unstaged.iter().map(|file| &file.path).collect::<Vec<_>>(), [&path]);
+    snapshot.repo().stage(std::slice::from_ref(&path)).unwrap();
+    assert_eq!(read(&repo).staged.iter().map(|file| &file.path).collect::<Vec<_>>(), [&path]);
+
+    // 文件系统让建时（Linux）再试未跟踪的。
+    if fs::write(repo.path().join(name), "y\n").is_ok() {
+        let snapshot = read(&repo);
+        assert_eq!(snapshot.statuses.get(&path), Some(&FileStatus::Untracked));
+        snapshot.repo().stage(std::slice::from_ref(&path)).unwrap();
+        assert_eq!(read(&repo).statuses.get(&path), Some(&FileStatus::Added));
+    }
 }

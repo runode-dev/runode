@@ -1,7 +1,12 @@
 //! 解析 git 命令行的输出：`git status --porcelain=v1 -z` 列的文件状态、`git diff` 的统一格式，
 //! 以及 git 给特殊路径加的引号。
 
-use std::{collections::HashMap, path::PathBuf};
+use std::{
+    collections::HashMap,
+    ffi::{OsStr, OsString},
+    os::unix::ffi::{OsStrExt, OsStringExt},
+    path::{Path, PathBuf},
+};
 
 use crate::{FileDiff, FileStatus, Hunk, Line, LineKind, snapshot::MAX_FILE_LINES};
 
@@ -16,7 +21,8 @@ pub(crate) fn parse_status(output: &[u8]) -> (HashMap<PathBuf, FileStatus>, Vec<
             continue;
         }
         let (x, y) = (field[0], field[1]);
-        let path = PathBuf::from(String::from_utf8_lossy(&field[3..]).trim_end_matches('/'));
+        // 按原来的字节，不是 UTF-8 的文件名也原样留着，暂存、丢弃时才找得到它。
+        let path = PathBuf::from(OsStr::from_bytes(field[3..].strip_suffix(b"/").unwrap_or(&field[3..])));
         // 改名和复制后面跟着原来的路径，单独占一项。
         if matches!(x, b'R' | b'C') || matches!(y, b'R' | b'C') {
             fields.next();
@@ -86,19 +92,19 @@ pub(crate) fn parse_diff(text: &str) -> Vec<FileDiff> {
                 file.status = FileStatus::Deleted;
             } else if let Some(from) = line.strip_prefix("rename from ") {
                 file.status = FileStatus::Renamed;
-                file.old_path = Some(unquote(from).into());
+                file.old_path = Some(unquote(from));
             } else if let Some(to) = line.strip_prefix("rename to ") {
-                file.path = unquote(to).into();
+                file.path = unquote(to);
             } else if line.starts_with("Binary files ") {
                 file.binary = true;
             } else if let Some(to) = line.strip_prefix("+++ ") {
                 // 路径里有空格时 git 在行尾补一个制表符。
-                if let Some(path) = unquote(to.trim_end_matches('\t')).strip_prefix("b/") {
+                if let Ok(path) = unquote(to.trim_end_matches('\t')).strip_prefix("b") {
                     file.path = path.into();
                 }
             } else if let Some(from) = line.strip_prefix("--- ") {
                 // 删掉的文件新路径是 /dev/null，用旧路径。
-                if let Some(path) = unquote(from.trim_end_matches('\t')).strip_prefix("a/") {
+                if let Ok(path) = unquote(from.trim_end_matches('\t')).strip_prefix("a") {
                     file.path = path.into();
                 }
             }
@@ -159,7 +165,7 @@ pub(crate) fn parse_diff(text: &str) -> Vec<FileDiff> {
 fn header_path(header: &str) -> Option<PathBuf> {
     if let Some(rest) = header.strip_prefix('"') {
         let end = rest.find("\" ")? + 2;
-        return unquote(&header[..end]).strip_prefix("a/").map(PathBuf::from);
+        return unquote(&header[..end]).strip_prefix("a").ok().map(Path::to_path_buf);
     }
     // 两个路径一样长：`a/P b/P` 共 2P+5 个字节。
     let len = header.len().checked_sub(5)? / 2;
@@ -167,10 +173,10 @@ fn header_path(header: &str) -> Option<PathBuf> {
     (a == b).then(|| PathBuf::from(a))
 }
 
-/// 去掉 git 给特殊路径加的双引号和 C 风格转义。
-fn unquote(text: &str) -> String {
+/// 去掉 git 给特殊路径加的双引号和 C 风格转义，按转义前的字节还原成路径。
+fn unquote(text: &str) -> PathBuf {
     let Some(inner) = text.strip_prefix('"').and_then(|text| text.strip_suffix('"')) else {
-        return text.to_owned();
+        return PathBuf::from(text);
     };
     let mut bytes = Vec::with_capacity(inner.len());
     let mut chars = inner.bytes().peekable();
@@ -195,7 +201,7 @@ fn unquote(text: &str) -> String {
             None => bytes.push(b'\\'),
         }
     }
-    String::from_utf8_lossy(&bytes).into_owned()
+    PathBuf::from(OsString::from_vec(bytes))
 }
 
 pub(crate) fn expand_tabs(text: &str) -> String {
@@ -289,13 +295,21 @@ Binary files /dev/null and b/logo.png differ
         assert!(!statuses.contains_key(Path::new("a.rs")));
         assert_eq!(statuses.len(), 5);
         assert_eq!(ignored, vec![PathBuf::from("target")]);
+
+        // 两个不同的非 UTF-8 名字各占一个键，不都变成 U+FFFD。
+        let (statuses, _) = parse_status(b"?? caf\xe9\0?? caf\xe8\0");
+        assert_eq!(statuses.len(), 2);
+        assert!(statuses.contains_key(Path::new(OsStr::from_bytes(b"caf\xe9"))));
     }
 
     #[test]
     fn unquotes_paths() {
-        assert_eq!(unquote("\"a\\\"b\\tc\""), "a\"b\tc");
-        assert_eq!(unquote("\"\\346\\226\\207.txt\""), "文.txt");
-        assert_eq!(unquote("plain"), "plain");
+        assert_eq!(unquote("\"a\\\"b\\tc\""), Path::new("a\"b\tc"));
+        assert_eq!(unquote("\"\\346\\226\\207.txt\""), Path::new("文.txt"));
+        // 不是 UTF-8 的字节原样还原，不换成 U+FFFD。
+        assert_eq!(unquote("\"caf\\351.txt\"").as_os_str().as_bytes(), b"caf\xe9.txt");
+        assert_eq!(header_path("\"a/\\351\" \"b/\\351\"").unwrap().as_os_str().as_bytes(), b"\xe9");
+        assert_eq!(unquote("plain"), Path::new("plain"));
         assert_eq!(header_path("a/x y.txt b/x y.txt"), Some(PathBuf::from("x y.txt")));
         assert_eq!(header_path("\"a/q\\\"x\" \"b/q\\\"x\""), Some(PathBuf::from("q\"x")));
     }
