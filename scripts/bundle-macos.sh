@@ -17,8 +17,6 @@
 #   NOTARY_KEY、NOTARY_KEY_ID、NOTARY_ISSUER
 #                  App Store Connect API 密钥（.p8 文件的路径、密钥 ID、Issuer ID），CI 里用这个。
 #                  两样都没给时不公证；dmg 模式下给了就公证 zip 和 dmg，并把公证票据钉进 .app 和 dmg。
-#
-# 编译应用图标要用 Xcode 自带的 actool，需要装 Xcode。
 set -euo pipefail
 
 target=${1:-dmg}
@@ -72,19 +70,10 @@ cp "$exe" "$app/Contents/MacOS/runode"
 ln -s runode "$app/Contents/MacOS/rn"
 cp "$plist" "$app/Contents/Info.plist"
 
-# 应用图标用 Icon Composer 的 .icon 文档，由 Xcode 的 actool 编译成 Assets.car，系统按
-# 统一的圆角方形裁剪，跟着切换深色和染色；形状不合规的旧式 icns 在 macOS 26 起会被套进
-# 灰框缩小显示。actool 同时生成给旧系统用的 runode.icns。
-icon_build=$(mktemp -d)
-xcrun actool apps/desktop/assets/runode.icon --compile "$app/Contents/Resources" \
-    --output-format human-readable-text --errors \
-    --output-partial-info-plist "$icon_build/partial.plist" \
-    --app-icon runode --include-all-app-icons --enable-on-demand-resources NO \
-    --development-region en --target-device mac --platform macosx --minimum-deployment-target 11.0 >&2
-rm -rf "$icon_build"
-# 旧版 Xcode 的 actool 不认 .icon，不报错也不出文件，包里就没有图标；这里拦住。
-[[ -f "$app/Contents/Resources/Assets.car" && -f "$app/Contents/Resources/runode.icns" ]] \
-    || { echo "actool 没生成图标（要 Xcode 26 以上）：$(xcodebuild -version | head -1)" >&2; exit 1; }
+# 应用图标是 Icon Composer 的 .icon 编出来的 Assets.car，系统按统一的圆角方形裁剪，跟着切换深色
+# 和染色；形状不合规的旧式 icns 在 macOS 26 起会被套进灰框缩小显示。runode.icns 给旧系统用。
+# 两个文件是提交进仓库的产物，用 scripts/compile-icon.sh 生成。
+cp apps/desktop/assets/compiled/Assets.car apps/desktop/assets/compiled/runode.icns "$app/Contents/Resources/"
 
 # 公证要带安全时间戳；ad-hoc 签名没有时间戳可带。
 sign_options=(--force --sign "$SIGN_IDENTITY")
