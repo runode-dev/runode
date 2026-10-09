@@ -408,7 +408,8 @@ impl WindowView {
         let mut headers = content.headers.iter().map(|&header| at(header));
         let target = if forward { headers.find(|&row| row > top) } else { headers.rev().find(|&row| row < top) };
         if let Some(row) = target {
-            preview.scroll.scroll_to_item(row, ScrollStrategy::Top);
+            // 非 strict 的 Top 在块头已经露在视口里时不滚，按钮就像没反应。
+            preview.scroll.scroll_to_item_strict(row, ScrollStrategy::Top);
             cx.notify();
         }
     }
