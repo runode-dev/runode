@@ -52,21 +52,9 @@ fn run(shared: &Shared, id: u64, tcp: &TcpStream, peer: IpAddr, cut: &AtomicBool
     }
     let conn = ServerConnection::new(shared.tls.clone()).map_err(io::Error::other)?;
     let mut tls = StreamOwned::new(conn, Deadline { tcp: tcp.try_clone()?, until: Instant::now() + GATE_TIMEOUT });
-    while tls.conn.is_handshaking() {
-        tls.conn.complete_io(&mut tls.sock)?;
-    }
-    let nonce = random::<NONCE_LEN>()?;
-    let exporter =
-        tls.conn.export_keying_material([0u8; EXPORTER_LEN], EXPORTER_LABEL, None).map_err(io::Error::other)?;
-    send(
-        &mut tls,
-        &GateHostMsg::RemoteChallenge {
-            version: GATE_VERSION,
-            nonce: Bytes(nonce.to_vec()),
-            host_name: shared.host_name.clone(),
-        },
-    )?;
-    let message: GateClientMsg = read_control(&mut tls)?;
+    // 握手没完成、超时、门禁消息读不出或不认得也算失败一次，不然占着门禁慢慢拖的不会被限速。
+    let (nonce, exporter, message) =
+        challenge(shared, &mut tls).inspect_err(|_| shared.limiter().failed(peer, Instant::now()))?;
     let verdict = if shared.stopping.load(Ordering::Relaxed) || cut.load(Ordering::Relaxed) {
         Err(RejectReason::Disabled)
     } else if shared.limiter().limited(peer, Instant::now()) {
@@ -80,6 +68,7 @@ fn run(shared: &Shared, id: u64, tcp: &TcpStream, peer: IpAddr, cut: &AtomicBool
                 let signed = signed_bytes(&nonce, &exporter, Purpose::Pair);
                 pair(shared, &secret, &device_name, public_key, &signature, &signed)
             }
+            // `challenge` 已经拒掉了。
             GateClientMsg::Unknown => return Err(io::Error::other("an unknown gate message")),
         }
     };
@@ -127,6 +116,31 @@ fn run(shared: &Shared, id: u64, tcp: &TcpStream, peer: IpAddr, cut: &AtomicBool
     let _ = host.shutdown(Shutdown::Both);
     tracing::info!("remote device {device_id} disconnected");
     Ok(())
+}
+
+/// 握手、发 `RemoteChallenge`、读手机的门禁消息，返回 nonce、TLS exporter 和那条消息。
+fn challenge(
+    shared: &Shared,
+    tls: &mut StreamOwned<ServerConnection, Deadline>,
+) -> io::Result<([u8; NONCE_LEN], [u8; EXPORTER_LEN], GateClientMsg)> {
+    while tls.conn.is_handshaking() {
+        tls.conn.complete_io(&mut tls.sock)?;
+    }
+    let nonce = random::<NONCE_LEN>()?;
+    let exporter =
+        tls.conn.export_keying_material([0u8; EXPORTER_LEN], EXPORTER_LABEL, None).map_err(io::Error::other)?;
+    send(
+        tls,
+        &GateHostMsg::RemoteChallenge {
+            version: GATE_VERSION,
+            nonce: Bytes(nonce.to_vec()),
+            host_name: shared.host_name.clone(),
+        },
+    )?;
+    match read_control(tls)? {
+        GateClientMsg::Unknown => Err(io::Error::other("an unknown gate message")),
+        message => Ok((nonce, exporter, message)),
+    }
 }
 
 /// 已经配对过的设备登录：设备表里有它、签名用它的公钥验得过。

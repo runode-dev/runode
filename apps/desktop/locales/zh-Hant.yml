@@ -697,7 +697,7 @@ settings:
       hint: 登入這台 Mac 時自動打開 Runode 視窗。
     host:
       title: 登入時在背景啟動宿主
-      hint: 不開視窗，只在背景啟動終端宿主。遠端存取打開、又有配對過的手機時它一直留著，不用開著 Runode 手機也連得上。
+      hint: 不開視窗，只在背景啟動終端宿主。遠端存取打開、又有配對過的手機時它一直留著，不用開著 Runode 手機也連得上。關掉開關不會停下正在跑的宿主，它託管的會話不受影響。
     failed: "沒能修改登入時啟動的設定：%{err}"
   pairing:
     title: 配對手機
@@ -706,7 +706,7 @@ settings:
     background: 結束 Runode 時遠端存取跟著停，手機就連不上了。打開後結束時工作階段和遠端存取留在背景。
     not_listening: 遠端存取沒在監聽。剛打開的話等幾秒再試；一直這樣的話，連接埠可能被占用了，宿主的日誌裡有原因。
     stopped: 等手機時遠端存取停了。
-    invalidated: 口令輸錯太多次，已經作廢，再配對一次。
+    invalidated: 口令已經作廢，再配對一次。
     expired: 口令過期了，手機沒來配對。
     replaced: 另一處（比如 runode remote pair）開始了新的配對，這個口令作廢了。
     too_long: 配對連結太長，畫不成 QR 碼。

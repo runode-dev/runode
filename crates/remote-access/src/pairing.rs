@@ -1,7 +1,8 @@
 //! 配对口令怎么从命令行交到监听方手里：`runode remote pair` 生成口令，写进
 //! `remote_access_pairing_file`（0600），画成二维码，然后等；监听方每次有设备来配对时读这个文件，
-//! 口令对上了就登记设备，把文件改成「配好了」（口令随即从文件里抹掉），错了就记一次，连续错
-//! `PAIRING_MAX_FAILURES` 次改成「作废了」。命令行看到结果、或者口令过期后删掉文件。
+//! 口令对上了就登记设备，把文件改成「配好了」（口令随即从文件里抹掉）。口令错了不作废它：口令是
+//! 256 位的随机数猜不中，作废只会让局域网里谁都能搅掉别人的配对；硬试的由按来源的限速挡住。
+//! 命令行看到结果、或者口令过期后删掉文件。
 //!
 //! 同一时刻只有一个口令：再跑一次 `runode remote pair` 换掉前一个，前一个看到文件换了主人就不等了。
 //! 用文件而不是经宿主转交，是因为监听方和宿主在同一个进程里，宿主却不依赖远程访问；命令行和
@@ -10,7 +11,7 @@
 use std::{io, net::IpAddr, path::PathBuf, time::Duration};
 
 use runode_paths::Dirs;
-use runode_protocol::remote::{Bytes, DeviceId, PAIRING_MAX_FAILURES, PairingUri, RejectReason, SECRET_LEN};
+use runode_protocol::remote::{Bytes, DeviceId, PairingUri, RejectReason, SECRET_LEN};
 use serde::{Deserialize, Serialize};
 
 use crate::{
@@ -63,7 +64,7 @@ pub enum PairingProgress {
     Waiting,
     /// 配好了。
     Paired { device_id: DeviceId, name: String },
-    /// 口令连续错了 `PAIRING_MAX_FAILURES` 次，作废了。
+    /// 口令不能再用了，也没有配好的设备可报。
     Invalidated,
     /// 过期了，没有设备来配对。
     Expired,
@@ -159,18 +160,18 @@ impl Drop for PairingTicket {
     }
 }
 
-/// 监听方收配对口令的柜台：记着现在这份口令错了几次。调用方把它放在锁里，同一时刻只办一个配对，
-/// 两台设备拿着同一个口令也只有一台配得上。
+/// 监听方收配对口令的柜台。调用方把它放在锁里，同一时刻只办一个配对，两台设备拿着同一个口令也只有
+/// 一台配得上。
 #[derive(Default)]
 pub(crate) struct Desk {
-    /// 在数哪一次配对（`PairingFile::ticket`）的错误次数。
-    ticket: Option<String>,
-    failures: u32,
+    /// 用掉了、却没能在口令文件里记成配好了的那次配对（`PairingFile::ticket`）：文件还写着等配对，
+    /// 靠这个不让它再配一台。
+    spent: Option<String>,
 }
 
 impl Desk {
     /// 设备拿 `secret` 来配对：口令对上了（没过期、没用过、没作废）才调 `verify` 验签、拿到要登记
-    /// 的设备，登记好后把口令文件改成配好了。口令不对、`verify` 不过都算错一次。
+    /// 的设备，登记好后把口令文件改成配好了。
     pub(crate) fn redeem(
         &mut self,
         dirs: &Dirs,
@@ -189,24 +190,13 @@ impl Desk {
         let Some(expected) = file.secret.clone().filter(|_| file.state == State::Pending) else {
             return Err(RejectReason::PairingInvalid);
         };
-        if now_unix() >= file.expires_at {
+        if now_unix() >= file.expires_at || self.spent.as_deref() == Some(file.ticket.as_str()) {
             return Err(RejectReason::PairingInvalid);
-        }
-        if self.ticket.as_deref() != Some(file.ticket.as_str()) {
-            self.ticket = Some(file.ticket.clone());
-            self.failures = 0;
         }
         if !same_secret(&expected.0, secret) {
-            self.failed(&path, file);
             return Err(RejectReason::PairingInvalid);
         }
-        let device = match verify() {
-            Ok(device) => device,
-            Err(reason) => {
-                self.failed(&path, file);
-                return Err(reason);
-            }
-        };
+        let device = verify()?;
         if let Err(err) = devices::add(dirs, device.clone()) {
             tracing::warn!("cannot record the paired device: {err}");
             return Err(RejectReason::PairingInvalid);
@@ -217,27 +207,48 @@ impl Desk {
         file.device_name = Some(device.name.clone());
         if let Err(err) = write_json(&path, &file) {
             tracing::warn!("cannot mark the pairing code as used: {err}");
+            self.spent = Some(file.ticket);
         }
-        self.ticket = None;
         Ok(device)
-    }
-
-    /// 这份口令又错了一次，满 `PAIRING_MAX_FAILURES` 次就作废。
-    fn failed(&mut self, path: &std::path::Path, mut file: PairingFile) {
-        self.failures += 1;
-        tracing::info!("wrong pairing attempt {} of {PAIRING_MAX_FAILURES}", self.failures);
-        if self.failures < PAIRING_MAX_FAILURES {
-            return;
-        }
-        file.secret = None;
-        file.state = State::Invalidated;
-        if let Err(err) = write_json(path, &file) {
-            tracing::warn!("cannot invalidate the pairing code: {err}");
-        }
     }
 }
 
 /// 比较两个口令，花的时间和哪里不同无关。
 fn same_secret(expected: &[u8], given: &[u8]) -> bool {
     expected.len() == given.len() && expected.iter().zip(given).fold(0u8, |diff, (a, b)| diff | (a ^ b)) == 0
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_code_cannot_pair_twice_when_marking_it_used_fails() {
+        let root = std::env::temp_dir().join(format!("rra-spent-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        let dirs = Dirs::from_vars(|_| Some(root.clone().into()));
+        let ticket = PairingTicket::begin(&dirs, Duration::from_secs(60)).unwrap();
+        // 占住 `write_private` 的临时文件名，口令文件就改不了；设备表的临时文件名不同，照常写。
+        let mut temp = dirs.remote_access_pairing_file().unwrap().into_os_string();
+        temp.push(format!(".{}.tmp", std::process::id()));
+        std::fs::create_dir(&temp).unwrap();
+        let device = |n: u8| {
+            move || {
+                Ok(Device {
+                    device_id: DeviceId([n; 16]),
+                    name: format!("phone {n}"),
+                    public_key: Bytes(vec![4; 65]),
+                    paired_at: 0,
+                    last_seen: 0,
+                })
+            }
+        };
+        let mut desk = Desk::default();
+        assert!(desk.redeem(&dirs, &ticket.secret(), device(1)).is_ok());
+        assert_eq!(desk.redeem(&dirs, &ticket.secret(), device(2)).err(), Some(RejectReason::PairingInvalid));
+        assert_eq!(devices::list_devices(&dirs).unwrap().len(), 1);
+        drop(ticket);
+        let _ = std::fs::remove_dir_all(&root);
+    }
 }

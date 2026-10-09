@@ -50,9 +50,9 @@
 //!
 //! # 配对
 //!
-//! 配对口令是 `SECRET_LEN` 字节的随机数，一次性，`PAIRING_TTL` 内有效，连续
-//! `PAIRING_MAX_FAILURES` 次口令错误后作废。配对成功后宿主给设备分配 `DeviceId`，记进设备表；
-//! 撤销就是从表里删掉，这台设备连着的连接几秒内断开。二维码里是一个 `PairingUri`。
+//! 配对口令是 `SECRET_LEN` 字节的随机数，一次性，`PAIRING_TTL` 内有效。口令错了不作废它（猜不中，
+//! 作废只会让别人能搅掉配对），硬试的由按来源的限速挡住。配对成功后宿主给设备分配 `DeviceId`，
+//! 记进设备表；撤销就是从表里删掉，这台设备连着的连接几秒内断开。二维码里是一个 `PairingUri`。
 //!
 //! # 发现
 //!
@@ -97,8 +97,6 @@ pub const GATE_TIMEOUT: Duration = Duration::from_secs(10);
 pub const GATE_MAX_PAYLOAD: u32 = 16 << 10;
 /// 配对口令多久后过期。
 pub const PAIRING_TTL: Duration = Duration::from_secs(5 * 60);
-/// 配对口令连续错几次后作废。
-pub const PAIRING_MAX_FAILURES: u32 = 5;
 /// Bonjour 公布的服务类型。
 pub const BONJOUR_SERVICE: &str = "_runode._tcp";
 /// 配对 URI 的开头，见 `PairingUri`。

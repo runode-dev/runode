@@ -75,7 +75,7 @@ fn a_phone_pairs_then_logs_in_and_talks_to_the_host() {
 }
 
 #[test]
-fn wrong_secrets_are_refused_and_five_of_them_burn_the_code() {
+fn wrong_secrets_are_refused_but_do_not_burn_the_code() {
     let harness = Harness::start("wrong");
     let ticket = harness.ticket();
     let key = Key::generate();
@@ -87,11 +87,12 @@ fn wrong_secrets_are_refused_and_five_of_them_burn_the_code() {
         assert_eq!(phone.ask(&pair), rejected(RejectReason::PairingInvalid), "{attempt}");
         assert!(phone.closed());
     }
-    assert_eq!(ticket.poll().unwrap(), PairingProgress::Invalidated);
+    // 局域网里别人乱试搅不掉正在进行的配对。
+    assert_eq!(ticket.poll().unwrap(), PairingProgress::Waiting);
     let mut phone = harness.phone();
-    let pair = phone.pair_message(&ticket.secret(), "来晚了", &key);
-    assert_eq!(phone.ask(&pair), rejected(RejectReason::PairingInvalid));
-    assert!(list_devices(&harness.dirs).unwrap().is_empty());
+    let pair = phone.pair_message(&ticket.secret(), "口令对的", &key);
+    assert!(matches!(phone.ask(&pair), Some(GateHostMsg::RemoteAccepted { .. })));
+    assert_eq!(list_devices(&harness.dirs).unwrap().len(), 1);
 }
 
 #[test]
@@ -135,15 +136,18 @@ fn unknown_devices_and_bad_signatures_are_refused() {
 
     let device_id = harness.pair(&key);
     // 别的私钥签的。
+    drop(phone);
     let mut phone = harness.phone();
     let auth = phone.auth_message(device_id, &Key::generate());
     assert_eq!(phone.ask(&auth), rejected(RejectReason::BadSignature));
     // 用途不对：配对的签名拿来登录。
+    drop(phone);
     let mut phone = harness.phone();
     let signature = Bytes(key.sign(&phone.signed(Purpose::Pair)));
     assert_eq!(phone.ask(&GateClientMsg::RemoteAuth { device_id, signature }), rejected(RejectReason::BadSignature));
     // 配对时口令对、签名不对：拒绝，口令还能用。
     let ticket = harness.ticket();
+    drop(phone);
     let mut phone = harness.phone();
     let GateClientMsg::RemotePair { secret, device_name, public_key, .. } =
         phone.pair_message(&ticket.secret(), "签错了", &key)
@@ -157,6 +161,7 @@ fn unknown_devices_and_bad_signatures_are_refused() {
         signature: Bytes(Key::generate().sign(&phone.signed(Purpose::Pair))),
     };
     assert_eq!(phone.ask(&forged), rejected(RejectReason::BadSignature));
+    drop(phone);
     let mut phone = harness.phone();
     let pair = phone.pair_message(&ticket.secret(), "这次对了", &Key::generate());
     assert!(matches!(phone.ask(&pair), Some(GateHostMsg::RemoteAccepted { .. })));
@@ -266,12 +271,40 @@ fn too_many_failures_from_one_address_are_rate_limited() {
         let auth = phone.auth_message(DeviceId([1; 16]), &key);
         assert_eq!(phone.ask(&auth), rejected(RejectReason::UnknownDevice));
     }
-    // 之后连口令对的配对也先被挡住。
+    // 之后连握手都不做就关掉，口令对的配对也进不来。
     let ticket = harness.ticket();
-    let mut phone = harness.phone();
-    let pair = phone.pair_message(&ticket.secret(), "被挡住", &key);
-    assert_eq!(phone.ask(&pair), rejected(RejectReason::RateLimited));
+    assert!(Phone::connect(harness.addr, harness.fingerprint).is_err());
     assert_eq!(ticket.poll().unwrap(), PairingProgress::Waiting);
+}
+
+#[test]
+fn unreadable_gate_messages_count_as_failures() {
+    let harness = Harness::start("garbage");
+    for attempt in 0..10 {
+        let mut phone = harness.phone();
+        if attempt % 2 == 0 {
+            phone.send_control(br#"{"type":"remote_whatever"}"#);
+        } else {
+            phone.send_control(b"not json");
+        }
+        assert!(phone.closed(), "{attempt}");
+    }
+    assert!(Phone::connect(harness.addr, harness.fingerprint).is_err());
+}
+
+#[test]
+fn one_source_cannot_fill_the_gate() {
+    let harness = Harness::start("gating");
+    // 只连上 TCP、不握手的连接占着门禁。
+    let idle: Vec<_> = (0..4).map(|_| std::net::TcpStream::connect(harness.addr).unwrap()).collect();
+    assert!(Phone::connect(harness.addr, harness.fingerprint).is_err());
+    drop(idle);
+    // 放开以后又连得上（那几条读到结尾、各算失败一次，还不到限速）。
+    let start = std::time::Instant::now();
+    while Phone::connect(harness.addr, harness.fingerprint).is_err() {
+        assert!(start.elapsed() < PATIENCE, "still refused after the idle connections closed");
+        std::thread::sleep(Duration::from_millis(20));
+    }
 }
 
 #[test]

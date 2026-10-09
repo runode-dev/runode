@@ -25,13 +25,15 @@ use crate::{
     Connect, addrs, bonjour, devices,
     files::{no_home, write_json},
     gate, identity,
-    limit::RateLimiter,
+    limit::{self, RateLimiter},
     pairing::Desk,
     status::{ListenerStatus, lock_listener},
 };
 
 /// 还没过门禁的连接最多这么多，再来的直接关掉。
 const MAX_GATING: usize = 32;
+/// 同一个来源（见 `limit::source`）还没过门禁的连接最多这么多，一个来源占不满 `MAX_GATING`。
+const MAX_GATING_PER_SOURCE: usize = 4;
 /// 连接（含已经接到宿主上的）最多这么多。
 const MAX_CONNECTIONS: usize = 64;
 /// 同一台设备最多同时连着这么多条，见 `Shared::attach_device`。
@@ -100,6 +102,8 @@ struct Live {
     tcp: TcpStream,
     /// 过了门禁的设备；还在门禁阶段时为 `None`。
     device: Option<DeviceId>,
+    /// 从哪来，见 `limit::source`。
+    source: IpAddr,
     cut: Arc<AtomicBool>,
 }
 
@@ -416,11 +420,16 @@ fn accept_ready(shared: &Arc<Shared>, listener: &TcpListener) {
             IpAddr::V6(v6) => v6.to_canonical(),
             ip => ip,
         };
+        // 被限速的来源不握手、不占线程，直接关掉。
+        if shared.limiter().limited(ip, Instant::now()) {
+            tracing::debug!("dropping a remote connection from rate limited {ip}");
+            continue;
+        }
         if let Err(err) = tcp.set_nonblocking(false) {
             tracing::warn!("failed to set up a remote connection: {err}");
             continue;
         }
-        let Some((id, cut)) = register(shared, &tcp) else {
+        let Some((id, cut)) = register(shared, &tcp, ip) else {
             tracing::warn!("too many remote connections, dropping one from {ip}");
             continue;
         };
@@ -436,16 +445,20 @@ fn accept_ready(shared: &Arc<Shared>, listener: &TcpListener) {
     }
 }
 
-/// 登记一条新连接，返回它的编号和断开它的开关；连接太多时返回 `None`。
-fn register(shared: &Shared, tcp: &TcpStream) -> Option<(u64, Arc<AtomicBool>)> {
+/// 登记一条从 `ip` 来的新连接，返回它的编号和断开它的开关；连接太多时返回 `None`。
+fn register(shared: &Shared, tcp: &TcpStream, ip: IpAddr) -> Option<(u64, Arc<AtomicBool>)> {
     let mut connections = shared.connections();
-    let gating = connections.values().filter(|live| live.device.is_none()).count();
-    if gating >= MAX_GATING || connections.len() >= MAX_CONNECTIONS {
+    let source = limit::source(ip);
+    let gating = || connections.values().filter(|live| live.device.is_none());
+    if gating().count() >= MAX_GATING
+        || gating().filter(|live| live.source == source).count() >= MAX_GATING_PER_SOURCE
+        || connections.len() >= MAX_CONNECTIONS
+    {
         return None;
     }
     let tcp = tcp.try_clone().ok()?;
     let id = shared.next_id.fetch_add(1, Ordering::Relaxed);
     let cut = Arc::new(AtomicBool::new(false));
-    connections.insert(id, Live { tcp, device: None, cut: cut.clone() });
+    connections.insert(id, Live { tcp, device: None, source, cut: cut.clone() });
     Some((id, cut))
 }

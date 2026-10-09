@@ -697,7 +697,7 @@ settings:
       hint: Opens the Runode window when you log in to this Mac.
     host:
       title: Run the host in the background at login
-      hint: Starts the terminal host without a window. It stays in the background while remote access is on and a phone is paired, so the phone can connect without Runode open.
+      hint: Starts the terminal host without a window. It stays in the background while remote access is on and a phone is paired, so the phone can connect without Runode open. Turning this off does not stop a host that is already running, so its sessions stay open.
     failed: "Could not change the login setting: %{err}"
   pairing:
     title: Pair a phone
@@ -706,7 +706,7 @@ settings:
     background: Remote access stops when Runode quits, and the phone can no longer connect. With this on, sessions and remote access keep running in the background.
     not_listening: Remote access is not listening. If you just turned it on, try again in a few seconds; otherwise the port may be taken, and the host's log says why.
     stopped: Remote access stopped while waiting for the phone.
-    invalidated: The code was entered wrongly too many times and no longer works. Pair again.
+    invalidated: The code no longer works. Pair again.
     expired: The code expired before a phone used it.
     replaced: Another pairing (such as runode remote pair) replaced this code.
     too_long: The pairing link is too long to draw as a code.

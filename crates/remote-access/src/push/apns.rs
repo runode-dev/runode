@@ -146,8 +146,9 @@ pub(crate) fn request(
 }
 
 fn direct_request(env: ApnsEnv, call: &Call<'_>, key: &mut DirectKey, now: u64) -> Result<Request, String> {
-    let sandbox = if env == ApnsEnv::Production { "" } else { ".sandbox" };
-    let manage = format!("https://api-manage-broadcast{sandbox}.push.apple.com:2195/1/apps/{}/channels", key.bundle);
+    // 频道管理的端口：沙盒 2195，生产 2196。
+    let (sandbox, port) = if env == ApnsEnv::Production { ("", 2196) } else { (".sandbox", 2195) };
+    let manage = format!("https://api-manage-broadcast{sandbox}.push.apple.com:{port}/1/apps/{}/channels", key.bundle);
     let mut headers = vec![("authorization", format!("bearer {}", key.jwt()?))];
     let too_big = || "the push does not fit in an APNs payload".to_owned();
     let (method, url, body) = match *call {
@@ -369,7 +370,7 @@ mod tests {
 
         let delete = request(prod, &Call::DeleteChannel { channel: CHANNEL }, Some(&mut key), "", 5).unwrap();
         assert_eq!(delete.method, "DELETE");
-        assert_eq!(delete.url, "https://api-manage-broadcast.push.apple.com:2195/1/apps/dev.runode.mobile/channels");
+        assert_eq!(delete.url, "https://api-manage-broadcast.push.apple.com:2196/1/apps/dev.runode.mobile/channels");
         assert!(delete.headers.contains(&("apns-channel-id", CHANNEL.into())));
         assert_eq!(delete.body, None);
 
