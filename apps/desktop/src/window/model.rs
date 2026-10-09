@@ -338,7 +338,7 @@ impl WindowView {
         workspace.project.previews.maximized = false;
         if let Some(tab) = workspace.tabs.get_mut(ix) {
             tab.bell = false;
-            workspace.tab_scroll.scroll_to_item(ix);
+            reveal_tab(&workspace.tab_scroll, ix, workspace.tabs.len());
         }
         self.start_shown(cx);
         self.sync_visibility(window, cx);
@@ -678,6 +678,38 @@ pub(super) fn sessions_to_end<T: Copy + PartialEq>(layout: &[Vec<Vec<T>>], closi
     }
 }
 
+/// 把第 `ix` 个标签滚进标签条，连同两边各一个邻居一起露出来：点挤在边上的标签，标签条顺势往那边
+/// 挪一格，看得到后面还有什么。按上一帧排好的位置算；标签数对不上（刚开、刚关）时退回只露出它自己。
+fn reveal_tab(scroll: &ScrollHandle, ix: usize, tab_count: usize) {
+    let item = |ix: usize| scroll.bounds_for_item(ix).map(|b| (f32::from(b.left()), f32::from(b.right())));
+    let (Some(tab), true) = (item(ix), scroll.children_count() == tab_count) else {
+        scroll.scroll_to_item(ix);
+        return;
+    };
+    let view = scroll.bounds();
+    let before = ix.checked_sub(1).and_then(item).unwrap_or(tab);
+    let after = item(ix + 1).unwrap_or(tab);
+    let offset = scroll.offset();
+    let x = reveal_offset(
+        f32::from(offset.x),
+        (f32::from(view.left()), f32::from(view.right())),
+        tab,
+        (before.0, after.1),
+        f32::from(scroll.max_offset().x),
+    );
+    scroll.set_offset(gpui::point(gpui::px(x), offset.y));
+}
+
+/// 横向滚动的偏移（向右滚为负）：先让 `span`（标签连同邻居）落进 `view`，放不下时保证 `tab`
+/// 本身完整可见，最后限制在 `[-max, 0]` 里。坐标都是没滚动时的位置。
+fn reveal_offset(x: f32, view: (f32, f32), tab: (f32, f32), span: (f32, f32), max: f32) -> f32 {
+    let fit = |x: f32, (left, right): (f32, f32)| {
+        let x = if right + x > view.1 { view.1 - right } else { x };
+        if left + x < view.0 { view.0 - left } else { x }
+    };
+    fit(fit(x, span), tab).clamp(-max.max(0.), 0.)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -732,5 +764,30 @@ mod tests {
         assert_eq!(workspace_name(&base.join("repo")), "repo");
         assert_eq!(workspace_name(&base.join("plain")), "plain");
         std::fs::remove_dir_all(&base).unwrap();
+    }
+
+    // 视口 [0, 300]，标签宽 100，第 n 个在 [100n, 100n + 100]，内容共 10 个标签。
+    fn tab(n: f32) -> (f32, f32) {
+        (100. * n, 100. * n + 100.)
+    }
+
+    #[test]
+    fn reveal_offset_shows_both_neighbours() {
+        let max = 700.;
+        // 点最右边露出来的第 2 个，往左滚一格露出第 3 个。
+        assert_eq!(reveal_offset(0., (0., 300.), tab(2.), (tab(1.).0, tab(3.).1), max), -100.);
+        // 滚到第 3 到 5 个时点最左边的第 3 个，往右滚一格露出第 2 个。
+        assert_eq!(reveal_offset(-300., (0., 300.), tab(3.), (tab(2.).0, tab(4.).1), max), -200.);
+        // 中间的标签邻居都看得到，不动。
+        assert_eq!(reveal_offset(-300., (0., 300.), tab(4.), (tab(3.).0, tab(5.).1), max), -300.);
+        // 两头的标签没有更外面的邻居，不越界。
+        assert_eq!(reveal_offset(-300., (0., 300.), tab(0.), (tab(0.).0, tab(1.).1), max), 0.);
+        assert_eq!(reveal_offset(0., (0., 300.), tab(9.), (tab(8.).0, tab(9.).1), max), -700.);
+    }
+
+    #[test]
+    fn reveal_offset_prefers_the_tab_when_neighbours_do_not_fit() {
+        // 视口只放得下两个，邻居连同标签放不下时保证标签本身完整可见。
+        assert_eq!(reveal_offset(0., (0., 200.), tab(3.), (tab(2.).0, tab(4.).1), 700.), -200.);
     }
 }

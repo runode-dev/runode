@@ -10,7 +10,7 @@ use gpui::{
 use runode_shared_types::{agent::AgentKind, color::Rgb};
 
 use super::{
-    AGENT_MARK_WIDTH, NEW_TAB_BUTTON_WIDTH, NewTab, PressDown, SelectLastTab, SelectTab, TAB_CLOSE_SIZE, TAB_MIN_WIDTH,
+    AGENT_MARK_WIDTH, NEW_TAB_BUTTON_WIDTH, NewTab, PressDown, SelectLastTab, SelectTab, TAB_CLOSE_SIZE,
     TAB_TRACK_HEIGHT, TITLEBAR_HEIGHT, TRAFFIC_LIGHTS_ORIGIN, WindowView,
     agents::{
         Mark, Status,
@@ -388,8 +388,7 @@ impl WindowView {
             .group(group.clone())
             .map(|tab| {
                 if cards {
-                    // 标签平分标签条，挤不下时停在最窄，标签条滚动。
-                    tab.relative().flex_1().min_w(px(TAB_MIN_WIDTH)).h_full().rounded(px(TAB_TRACK_HEIGHT / 2. - 6.))
+                    tab.relative().flex_none().w(width).h_full().rounded(px(TAB_TRACK_HEIGHT / 2. - 6.))
                 } else {
                     tab.flex_none().w(width).h_full().when(ix > 0, |tab| tab.border_l_1().border_color(divider))
                 }

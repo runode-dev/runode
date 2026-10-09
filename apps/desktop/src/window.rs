@@ -828,15 +828,18 @@ impl WindowView {
                     self.render_right_handle(divider, right, cx)
                 })
                 .collect::<Vec<_>>();
-        // 标签平分标签条，最窄 `TAB_MIN_WIDTH`，挤不下就让标签条滚动。这里估一个宽度，决定标签
-        // 要不要收成紧凑的样子，拖动时的预览也照它画。
-        let fixed = sidebar_width + left_inset + NEW_TAB_BUTTON_WIDTH + project::PANEL_TOGGLES_INSET + widths.total();
-        let tab_width = px(((viewport - fixed) / tab_count.max(1) as f32).max(TAB_MIN_WIDTH));
+        // 标签平分标题栏除去两头的宽度（右侧面板在标题栏下面，不占它的宽度），连同标签条的内边距和
+        // 标签间的空隙一起扣掉，限制在 `TAB_MIN_WIDTH` 到 `TAB_MAX_WIDTH` 之间，挤不下就让标签条
+        // 滚动；拖动时的预览也照这个宽度画。
+        let fixed = sidebar_width + left_inset + NEW_TAB_BUTTON_WIDTH + project::PANEL_TOGGLES_INSET;
+        let tab_count_f = tab_count.max(1) as f32;
+        let tab_width =
+            px(((viewport - fixed - 2. * (tab_count_f + 1.)) / tab_count_f).clamp(TAB_MIN_WIDTH, TAB_MAX_WIDTH));
         let track_bg = hsla(tab_track_colors(fg, bg).0);
         let strip = div()
             .id("tabs")
             .role(Role::TabList)
-            .flex_1()
+            .flex_initial()
             .min_w_0()
             .h(px(TAB_TRACK_HEIGHT))
             .p(px(2.))
@@ -860,6 +863,8 @@ impl WindowView {
             .child(div().flex_none().w(px(left_inset)))
             .child(strip)
             .child(self.render_new_tab_button_card(fg, frame, cx))
+            // 标签条只占标签本身的宽度，新建标签按钮紧跟在后面，剩下的空白留给拖动窗口。
+            .child(div().flex_1().h_full())
             .child(self.render_panel_toggles(fg, frame, window, cx));
         let content = div()
             .flex_1()
