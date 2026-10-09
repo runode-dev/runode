@@ -165,7 +165,7 @@
         },
         {
           "name": "uninstall",
-          "description": "Remove the login service",
+          "description": "Remove the login service (a running host keeps running)",
           "args": { "name": "kind", "isOptional": true, "suggestions": ["host", "app"] }
         },
         { "name": "status", "description": "Show which login services are installed" }

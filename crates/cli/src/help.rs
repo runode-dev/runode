@@ -239,15 +239,18 @@ Options:
 
 const SERVICE: &str = "\
 Start runode at login: a launchd LaunchAgent on macOS, a systemd user service
-on Linux. Installing a service you already have replaces it.
+on Linux. Installing a service you already have replaces its file. Neither
+install nor uninstall stops a host that is already running, so its sessions
+stay open.
 
 Usage: runode service install [host|app]
        runode service uninstall [host|app]
        runode service status
 
 Commands:
-  install    Install the login service and, for the host, start it now
-  uninstall  Stop and remove the login service
+  install    Install the login service and, for the host, start it now if it
+             is not running
+  uninstall  Remove the login service; a running host keeps running
   status     Show which login services are installed
 
 Arguments:

@@ -67,10 +67,11 @@ pub fn is_installed(kind: Kind, dirs: &Dirs) -> bool {
 }
 
 /// 装上 `kind` 的登录自启，返回写的服务文件。`exe` 是 runode 可执行文件；`Kind::App` 时它得在
-/// `Runode.app` 里。可以重复装，每次整个换掉。
+/// `Runode.app` 里。可以重复装，每次整个换掉服务文件。
 ///
 /// 宿主马上就起（不用等下次登录），而且崩了会被拉起来；app 只写文件，下次登录才开，免得在设置里
-/// 点一下开关就把窗口翻到前面。
+/// 点一下开关就把窗口翻到前面。宿主已经在服务管理器里跑着时不重启它：它托管着会话，一重启会话就丢了，
+/// 新的服务文件等它下次起来时才用上。
 pub fn install(kind: Kind, dirs: &Dirs, exe: &Path) -> io::Result<PathBuf> {
     let path = service_file(kind, dirs).ok_or_else(|| unsupported(kind))?;
     let content = match (kind, cfg!(target_os = "macos")) {
@@ -92,9 +93,14 @@ pub fn install(kind: Kind, dirs: &Dirs, exe: &Path) -> io::Result<PathBuf> {
     std::fs::write(&path, content)?;
     match (kind, cfg!(target_os = "macos")) {
         (Kind::Host, true) => {
-            // 已经加载过时 bootstrap 会报错，先卸掉旧的。
-            let _ = launchctl(&["bootout", &launchd_target(kind)?]);
-            launchctl(&["bootstrap", &launchd_domain()?, &path.to_string_lossy()])?;
+            // 已经加载过时 bootstrap 会报错；也不先 bootout，那会把托管着会话的宿主停掉。不带 `-k` 的
+            // kickstart 只在它没在跑时拉起来；它已经在跑时可能报错，不碍事。
+            let target = launchd_target(kind)?;
+            if launchctl(&["print", &target]).is_ok() {
+                let _ = launchctl(&["kickstart", &target]);
+            } else {
+                launchctl(&["bootstrap", &launchd_domain()?, &path.to_string_lossy()])?;
+            }
         }
         (Kind::Host, false) => {
             // 用户服务默认只在有人登录时才起；开 linger 才能开机就起，没有登录会话时也得先开它，
@@ -111,7 +117,9 @@ pub fn install(kind: Kind, dirs: &Dirs, exe: &Path) -> io::Result<PathBuf> {
                     result = systemctl(&["daemon-reload"]);
                 }
                 result?;
-                systemctl(&["enable", "--now", SYSTEMD_UNIT])
+                // 不用 `enable --now`、`restart`：`start` 对跑着的服务什么也不做，不会打断它托管的会话。
+                systemctl(&["enable", SYSTEMD_UNIT])?;
+                systemctl(&["start", SYSTEMD_UNIT])
             };
             enable().map_err(|err| {
                 io::Error::other(format!(
@@ -136,17 +144,17 @@ pub fn starts_at_boot() -> bool {
         .is_ok_and(|output| String::from_utf8_lossy(&output.stdout).trim() == "yes")
 }
 
-/// 去掉 `kind` 的登录自启：停掉并删掉服务文件。原来就没装时返回 `false`。
+/// 去掉 `kind` 的登录自启：删掉服务文件、取消开机启用。原来就没装时返回 `false`。
+///
+/// 正在跑的宿主不停：它托管着会话，停了会话就丢了；它空闲时自己会退出，或者跟着这次登录结束。
 pub fn uninstall(kind: Kind, dirs: &Dirs) -> io::Result<bool> {
     let path = service_file(kind, dirs).ok_or_else(|| unsupported(kind))?;
     if !path.exists() {
         return Ok(false);
     }
-    if cfg!(target_os = "macos") {
-        // 没加载过（app 那种只写了文件的）时会报错，不碍事。
-        let _ = launchctl(&["bootout", &launchd_target(kind)?]);
-    } else {
-        let _ = systemctl(&["disable", "--now", SYSTEMD_UNIT]);
+    // macOS 上删掉文件就够了，下次登录 launchd 不再加载它；不 bootout，那会停掉正在跑的宿主。
+    if !cfg!(target_os = "macos") {
+        let _ = systemctl(&["disable", SYSTEMD_UNIT]);
     }
     std::fs::remove_file(&path)?;
     if !cfg!(target_os = "macos") {
@@ -175,8 +183,8 @@ fn app_bundle(exe: &Path) -> Option<&Path> {
     exe.ancestors().find(|dir| dir.extension().is_some_and(|ext| ext == "app"))
 }
 
-/// launchd 的 LaunchAgent。`restart_on_crash` 时只在异常退出后重启：宿主空闲了自己退出是正常的，
-/// 不能一退出就拉回来。
+/// launchd 的 LaunchAgent。`restart_on_crash` 时只在崩溃（被信号杀掉）后重启：宿主空闲了自己退出、
+/// 抢不到宿主锁（已经有一个宿主在跑）时返回非零，都不能拉回来，不然 launchd 会每十秒重启一次。
 fn plist(label: &str, args: &[&str], restart_on_crash: bool) -> String {
     let mut out = String::from(
         "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n\
@@ -190,18 +198,18 @@ fn plist(label: &str, args: &[&str], restart_on_crash: bool) -> String {
     }
     out.push_str("\t</array>\n\t<key>RunAtLoad</key>\n\t<true/>\n");
     if restart_on_crash {
-        out.push_str("\t<key>KeepAlive</key>\n\t<dict>\n\t\t<key>SuccessfulExit</key>\n\t\t<false/>\n\t</dict>\n");
+        out.push_str("\t<key>KeepAlive</key>\n\t<dict>\n\t\t<key>Crashed</key>\n\t\t<true/>\n\t</dict>\n");
     }
     out.push_str("</dict>\n</plist>\n");
     out
 }
 
-/// systemd 用户服务。
+/// systemd 用户服务。`on-abnormal` 只在被信号杀掉、超时时重启，返回非零（比如抢不到宿主锁）不算。
 fn unit(exe: &Path) -> String {
     // ExecStart 里的 % 是说明符，`"` 和 `\` 要转义。
     let exe = exe.to_string_lossy().replace('\\', "\\\\").replace('"', "\\\"").replace('%', "%%");
     format!(
-        "[Unit]\nDescription=runode terminal host\n\n[Service]\nExecStart=\"{exe}\" --host\nRestart=on-failure\n\n\
+        "[Unit]\nDescription=runode terminal host\n\n[Service]\nExecStart=\"{exe}\" --host\nRestart=on-abnormal\n\n\
          [Install]\nWantedBy=default.target\n"
     )
 }
@@ -245,7 +253,8 @@ mod tests {
     fn the_plist_escapes_paths_and_restarts_only_after_a_crash() {
         let host = plist("dev.runode.host-login", &["/Apps/R&D/runode", "--host"], true);
         assert!(host.contains("<string>/Apps/R&amp;D/runode</string>"), "{host}");
-        assert!(host.contains("<key>SuccessfulExit</key>\n\t\t<false/>"), "{host}");
+        assert!(host.contains("<key>KeepAlive</key>\n\t<dict>\n\t\t<key>Crashed</key>\n\t\t<true/>"), "{host}");
+        assert!(!host.contains("SuccessfulExit"), "{host}");
         let app = plist("dev.runode.app-login", &["/usr/bin/open", "-a", "/Applications/Runode.app"], false);
         assert!(app.contains("<key>RunAtLoad</key>") && !app.contains("KeepAlive"), "{app}");
     }
@@ -255,6 +264,7 @@ mod tests {
         let unit = unit(Path::new("/home/a b/%u/runode"));
         assert!(unit.contains("ExecStart=\"/home/a b/%%u/runode\" --host\n"), "{unit}");
         assert!(unit.contains("WantedBy=default.target"));
+        assert!(unit.contains("\nRestart=on-abnormal\n"), "{unit}");
     }
 
     #[test]
