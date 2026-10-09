@@ -220,13 +220,25 @@ fn find(
     if !range.contains(&pointer) {
         return None;
     }
-    let text: String = chars[range.clone()].iter().collect();
-    let path = resolve(strip_location(&text))
-        // git diff 的 `a/`、`b/` 前缀。
-        .or_else(|| {
-            text.strip_prefix("a/").or_else(|| text.strip_prefix("b/")).and_then(|rest| resolve(strip_location(rest)))
-        })?;
-    Some((range, LinkTarget::Path(path)))
+    let resolve_in = |range: Range<usize>| {
+        let text: String = chars[range].iter().collect();
+        resolve(strip_location(&text))
+            // git diff 的 `a/`、`b/` 前缀。
+            .or_else(|| {
+                text.strip_prefix("a/")
+                    .or_else(|| text.strip_prefix("b/"))
+                    .and_then(|rest| resolve(strip_location(rest)))
+            })
+    };
+    if let Some(path) = resolve_in(range.clone()) {
+        return Some((range, LinkTarget::Path(path)));
+    }
+    // `S=路径`、`--out=路径` 这样前面粘着变量名或选项的，从等号后面算。
+    range.start += chars[range.clone()].iter().position(|&c| c == '=')? + 1;
+    if !range.contains(&pointer) {
+        return None;
+    }
+    resolve_in(range.clone()).map(|path| (range, LinkTarget::Path(path)))
 }
 
 /// 能出现在网址和路径里的字。中日韩这类宽字符不算，免得把紧挨着路径的中文也吞进去。
@@ -349,6 +361,17 @@ mod tests {
         );
         assert_eq!(found("改了`a.rs`和b.rs文件", "b.rs", &["b.rs"]), Some(("b.rs".into(), path("b.rs"))));
         assert_eq!(found("\"./x/y\"", "x", &["./x/y"]), Some(("./x/y".into(), path("./x/y"))));
+    }
+
+    #[test]
+    fn a_path_starts_after_an_assignment() {
+        let line = "$ S=/tmp/x/scratchpad; cat";
+        assert_eq!(
+            found(line, "x/", &["/tmp/x/scratchpad"]),
+            Some(("/tmp/x/scratchpad".into(), path("/tmp/x/scratchpad")))
+        );
+        assert_eq!(found(line, "S=", &["/tmp/x/scratchpad"]), None);
+        assert_eq!(found("--out=a.rs", "a.rs", &["a.rs"]), Some(("a.rs".into(), path("a.rs"))));
     }
 
     #[test]
