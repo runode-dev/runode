@@ -147,6 +147,7 @@ impl SettingsView {
         self.errors.clear();
         self.picker = None;
         self.keybinds.stop_recording();
+        self.decision.stop_polling();
         self.scroll.set_offset(point(px(0.), px(0.)));
         if page == Page::Decision {
             self.refresh_decision(cx);

@@ -801,6 +801,21 @@ settings:
     default_none: 不設定
     not_in_infer: 不在 runode-infer 裡
     chat_unsupported: 這個版本的 runode-infer 還不能執行大模型，升級後再來。
+    keep_alive: 閒置多久卸載
+    keep_alive_hint: 載入的模型這麼多分鐘沒有請求就卸載，騰出記憶體；常駐的不卸載。
+    keep_alive_label: 閒置多久卸載（分鐘）
+    keep_alive_invalid: 填整數分鐘。
+    minutes: 分鐘
+    load: 載入
+    load_label: "載入 %{model}"
+    loading_model: 載入中…
+    unload: 卸載
+    unload_label: "卸載 %{model}"
+    pin: 常駐
+    pin_label: "常駐 %{model}"
+    state_loading: 載入中
+    state_pinned: 已載入 · 常駐
+    state_expires: "已載入 · %{minutes} 分鐘後卸載"
   pairing:
     title: 配對手機
     hint: 用手機上的 Runode 掃碼配對。配好的手機在遠端存取打開時能連上這台 Mac。

@@ -801,6 +801,21 @@ settings:
     default_none: 不设
     not_in_infer: 不在 runode-infer 里
     chat_unsupported: 这个版本的 runode-infer 还不能跑大模型，升级后再来。
+    keep_alive: 空闲多久卸载
+    keep_alive_hint: 加载着的模型这么多分钟没有请求就卸载，腾出内存；常驻的不卸载。
+    keep_alive_label: 空闲多久卸载（分钟）
+    keep_alive_invalid: 填整数分钟。
+    minutes: 分钟
+    load: 加载
+    load_label: "加载 %{model}"
+    loading_model: 加载中…
+    unload: 卸载
+    unload_label: "卸载 %{model}"
+    pin: 常驻
+    pin_label: "常驻 %{model}"
+    state_loading: 加载中
+    state_pinned: 已加载 · 常驻
+    state_expires: "已加载 · %{minutes} 分钟后卸载"
   pairing:
     title: 配对手机
     hint: 用手机上的 Runode 扫码配对。配好的手机在远程访问打开时能连上这台 Mac。
