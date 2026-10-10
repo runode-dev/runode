@@ -242,7 +242,8 @@ impl WindowView {
         }
     }
 
-    /// 切到模拟器页时列一遍设备；切走或收起时停掉画面。
+    /// 切到模拟器页时列一遍设备；切走或收起时停掉画面，放掉最后一帧：一帧是整块屏幕大小的位图，
+    /// 内存里和图集里各占一份，Pro Max 上各约 15 MB，切回来时重连会推新的。
     pub(super) fn simulator_panel_changed(&mut self, cx: &mut Context<Self>) {
         if self.simulator_shown() {
             if self.simulator.devices.is_none() {
@@ -252,6 +253,9 @@ impl WindowView {
             }
         } else {
             self.simulator.stream = None;
+            if let Some(frame) = self.simulator.frame.take() {
+                cx.drop_image(frame, None);
+            }
         }
     }
 

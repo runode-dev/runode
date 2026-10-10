@@ -108,6 +108,8 @@ pub(super) struct Changes {
     pub(super) replaced: bool,
     /// 标题（含 `fallback_title`）或 agent 变了。
     pub(super) title_changed: bool,
+    /// 宿主公布的会话状态有变化（目录、前台程序等，含标题和 agent）。
+    pub(super) meta_changed: bool,
     /// 前台 agent 换了种类或状态。
     pub(super) agent_changed: bool,
     /// 前台 agent 从工作中停了下来，要通知外层 `AgentFinished`。
@@ -558,6 +560,9 @@ impl<S: Vt> ScreenState<S> {
         }
         if before != after {
             changes.agent_changed = true;
+        }
+        if meta != self.meta {
+            changes.meta_changed = true;
         }
         if notify {
             changes.agent_finished |= agent_finished(before, after);

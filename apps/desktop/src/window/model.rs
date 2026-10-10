@@ -302,6 +302,8 @@ impl WindowView {
                 self.forget_stale_done(id, wi, ti, cx);
                 cx.notify();
             }
+            // 侧栏、标签和状态栏是缓存的视图（见 `Slot`），只在窗口通知时重画，不跟着终端的输出。
+            TerminalEvent::MetaChanged => cx.notify(),
             TerminalEvent::Focused => {
                 let tab = &mut self.workspaces[wi].tabs[ti];
                 if tab.focused != id {

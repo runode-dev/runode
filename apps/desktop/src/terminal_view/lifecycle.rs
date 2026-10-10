@@ -355,6 +355,9 @@ impl TerminalView {
         if changes.title_changed {
             cx.emit(TerminalEvent::TitleChanged);
         }
+        if changes.meta_changed {
+            cx.emit(TerminalEvent::MetaChanged);
+        }
         if changes.agent_changed {
             self.agent_changed_at = Instant::now();
         }

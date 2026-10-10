@@ -332,6 +332,7 @@ impl WindowView {
             .role(Role::Toolbar)
             .aria_label(rust_i18n::t!("status.bar"))
             .flex_none()
+            .w_full()
             .h(px(STATUS_BAR_HEIGHT))
             .px(px(6.))
             .flex()

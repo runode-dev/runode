@@ -1,11 +1,11 @@
 //! 标题栏：窗口的标题栏设置、标签和新建标签按钮、拖动中的标签，以及标题、agent 状态标记和快捷键提示。
 
-use std::cmp::Ordering;
+use std::{cmp::Ordering, time::Duration};
 
 use gpui::{
-    Action, Animation, AnimationExt, AnyElement, App, Axis, BoxShadow, Context, Div, ElementId, Hsla, MouseButton,
-    MouseDownEvent, Pixels, Render, Role, SharedString, Stateful, StyleRefinement, TitlebarOptions, Window, div,
-    linear_color_stop, linear_gradient, point, prelude::*, px, svg,
+    Action, Animation, AnimationExt, AnyElement, App, Axis, BoxShadow, Context, Div, ElementId, Entity, Hsla,
+    MouseButton, MouseDownEvent, Pixels, Render, Role, SharedString, Stateful, StyleRefinement, TitlebarOptions,
+    Window, div, linear_color_stop, linear_gradient, point, prelude::*, px, svg,
 };
 use runode_shared_types::{agent::AgentKind, color::Rgb};
 
@@ -171,20 +171,11 @@ pub(super) fn styled_agent_mark(mark: Mark, id: impl Into<ElementId>, fg: Hsla, 
         // 所有转圈的标记共用同一个时钟，同一种 agent 的几个标签一起转时步调一致。
         Status::Working => {
             let (frames, frame_time) = mark.kind.spinner();
-            let period = frame_time * frames.len() as u32;
             // 卡片样式下转圈放大一号、加粗，用这个 agent 自己的颜色，几个点、圈的字符也看得出在动。
             let color = mark.kind.spinner_color().or_else(|| brand.then(|| brand_color(mark.kind)).flatten());
             slot.when_some(color, |slot, color| slot.text_color(gpui::rgb(color)))
                 .when(brand, |slot| slot.text_size(px(15.)).font_weight(gpui::FontWeight::BOLD))
-                .with_animation(
-                    id,
-                    // 每格只重画一次：转圈每动一下都要重画整个窗口，并不便宜。
-                    Animation::new(period).repeat_synced().with_max_fps(1. / frame_time.as_secs_f32()),
-                    move |slot, delta| {
-                        let frame = (delta * frames.len() as f32) as usize;
-                        slot.child(frames[frame.min(frames.len() - 1)])
-                    },
-                )
+                .child(AgentSpinner { id: id.into(), frames, frame_time })
                 .into_any_element()
         }
         Status::Idle => {
@@ -204,6 +195,56 @@ pub(super) fn styled_agent_mark(mark: Mark, id: impl Into<ElementId>, fg: Hsla, 
         }
         // 干完了还没看：绿色对勾，和等回答的圆点形状也不同，不靠颜色也分得开。
         Status::Done => slot.text_size(px(11.)).text_color(gpui::rgb(AGENT_DONE_COLOR)).child("✓").into_any_element(),
+    }
+}
+
+/// 工作中的转圈，单独是一个视图：动画每动一格只通知它自己，GPUI 重画它和它外面的几层，但不当成
+/// `WindowView` 的状态变了，缓存的侧栏、标签栏和右侧面板（见 `Slot`）不跟着重画。
+struct Spinner {
+    frames: &'static [&'static str],
+    frame_time: Duration,
+}
+
+impl Render for Spinner {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        let (frames, frame_time) = (self.frames, self.frame_time);
+        let period = frame_time * frames.len() as u32;
+        div().with_animation(
+            "spinner",
+            // 每格只重画一次。
+            Animation::new(period).repeat_synced().with_max_fps(1. / frame_time.as_secs_f32()),
+            move |spinner, delta| {
+                let frame = (delta * frames.len() as f32) as usize;
+                spinner.child(frames[frame.min(frames.len() - 1)])
+            },
+        )
+    }
+}
+
+/// 在 `id` 处画 `Spinner`，连续几帧都画着时沿用同一个（存在元素状态里）。不用 `use_keyed_state`：
+/// 它把状态的通知转给外层视图，转圈每动一格又成了外层的状态变了。
+#[derive(IntoElement)]
+struct AgentSpinner {
+    id: ElementId,
+    frames: &'static [&'static str],
+    frame_time: Duration,
+}
+
+impl RenderOnce for AgentSpinner {
+    fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
+        let Self { id, frames, frame_time } = self;
+        let spinner = window.with_global_id(id, |id, window| {
+            window.with_element_state(id, |state: Option<Entity<Spinner>>, _| {
+                let spinner = state.unwrap_or_else(|| cx.new(|_| Spinner { frames, frame_time }));
+                (spinner.clone(), spinner)
+            })
+        });
+        // 同一个位置上 agent 换了种类时换成它的转圈。
+        spinner.update(cx, |spinner, _| {
+            spinner.frames = frames;
+            spinner.frame_time = frame_time;
+        });
+        spinner
     }
 }
 

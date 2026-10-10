@@ -126,6 +126,8 @@ type GlyphCache = [HashMap<String, Rc<ShapedLine>>; 4];
 pub enum TerminalEvent {
     /// 运行中的程序改了标题（OSC 0/2）。
     TitleChanged,
+    /// 宿主公布的会话状态变了：目录、前台程序，也包括标题和 agent。终端的输出不算。
+    MetaChanged,
     /// 焦点进入了这个终端（包括它的搜索栏）。
     Focused,
     /// 程序响铃（BEL）。
