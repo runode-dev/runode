@@ -62,8 +62,8 @@ pub struct History {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct GraphRow {
     pub column: usize,
-    /// 点的颜色，是第几种颜色（从 0 数，界面按自己的调色板轮换）。
-    pub color: usize,
+    /// 点的颜色。
+    pub color: LaneColor,
     /// 这一行用到几条 lane，含空着的。
     pub width: usize,
     pub lines: Vec<GraphLine>,
@@ -76,7 +76,18 @@ pub struct GraphLine {
     pub half: Half,
     pub from: usize,
     pub to: usize,
-    pub color: usize,
+    pub color: LaneColor,
+}
+
+/// 线和点的颜色。照 VSCode：HEAD 往下那条 lane 在遇到它推上去的地方（第一个带远端分支的提交）
+/// 之前是 `Current`，还没推的提交一眼看得出；从那里往下是 `Remote`。HEAD 本身就在远端分支上时
+/// 整条都是 `Current`。别的 lane 是 `Other`，第几种颜色（从 0 数，界面按自己的调色板轮换，
+/// 不和前两种撞色）。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LaneColor {
+    Current,
+    Remote,
+    Other(usize),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -88,7 +99,7 @@ pub enum Half {
 /// 往下走的一条 lane：等着哪个提交出现，画什么颜色。
 struct Lane {
     commit: String,
-    color: usize,
+    color: LaneColor,
 }
 
 /// 第一个空着的 lane，没有就在最右边加一条。
@@ -107,13 +118,20 @@ fn free_lane(lanes: &mut Vec<Option<Lane>>) -> usize {
 ///   已经有 lane 等着时（别的分支先走到了它）不另占，下半段斜着连过去。
 /// - 和这个提交无关的 lane 上下两段都是竖线。lane 空出来以后留在原处，不往左挪，下一个新分支
 ///   先用它；最右边空着的去掉。
+/// - 颜色见 `LaneColor`：HEAD 的点和它往下那条换成 `Current`。HEAD 还没推上去（从带远端分支的
+///   提交走不到它）时，那条上第一个推上去了的提交（带远端分支，或是从带远端分支的提交走得到）
+///   换成 `Remote`，上半段进来的线还是原来的颜色。
 pub fn graph_layout(commits: &[Commit]) -> Vec<GraphRow> {
     let mut lanes: Vec<Option<Lane>> = Vec::new();
     let mut next_color = 0;
     let mut new_color = || {
         next_color += 1;
-        next_color - 1
+        LaneColor::Other(next_color - 1)
     };
+    // HEAD 那条 lane 还没走到推上去的地方。
+    let mut unpushed = false;
+    // 从带远端分支的提交往下走得到的提交，都已经推上去了。子提交总在父提交前面，一遍就记全。
+    let mut pushed: HashSet<&str> = HashSet::new();
     let mut rows = Vec::with_capacity(commits.len());
     for commit in commits {
         let mut lines = Vec::new();
@@ -123,10 +141,22 @@ pub fn graph_layout(commits: &[Commit]) -> Vec<GraphRow> {
             .filter(|(_, lane)| lane.as_ref().is_some_and(|lane| lane.commit == commit.id))
             .map(|(ix, _)| ix)
             .collect();
-        let (column, color) = match waiting.first() {
-            Some(&ix) => (ix, lanes[ix].as_ref().map_or(0, |lane| lane.color)),
+        let (column, mut color) = match waiting.first() {
+            Some(&ix) => (ix, lanes[ix].as_ref().map_or(LaneColor::Other(0), |lane| lane.color)),
             None => (free_lane(&mut lanes), new_color()),
         };
+        let remote = commit.refs.iter().any(|r| r.kind == RefKind::Remote);
+        let is_pushed = remote || pushed.contains(commit.id.as_str());
+        if is_pushed {
+            pushed.extend(commit.parents.iter().map(String::as_str));
+        }
+        if commit.refs.iter().any(|r| matches!(r.kind, RefKind::Head | RefKind::CurrentBranch)) {
+            color = LaneColor::Current;
+            unpushed = !is_pushed;
+        } else if unpushed && is_pushed && color == LaneColor::Current {
+            color = LaneColor::Remote;
+            unpushed = false;
+        }
         for (ix, lane) in lanes.iter().enumerate() {
             if let Some(lane) = lane {
                 let to = if lane.commit == commit.id { column } else { ix };

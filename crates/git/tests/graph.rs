@@ -6,7 +6,7 @@ mod common;
 use std::collections::HashMap;
 
 use common::{TestRepo, paths_of, read};
-use runode_git::{Commit, FileStatus, GraphLine, Half, RefKind, graph_layout, refs_changed};
+use runode_git::{Commit, CommitRef, FileStatus, GraphLine, Half, LaneColor, RefKind, graph_layout, refs_changed};
 
 fn commit(id: &str, parents: &[&str]) -> Commit {
     Commit {
@@ -19,17 +19,94 @@ fn commit(id: &str, parents: &[&str]) -> Commit {
     }
 }
 
+/// 没有引用指着时颜色都是轮换的那几种，下面按第几种写。
 fn top(from: usize, to: usize, color: usize) -> GraphLine {
-    GraphLine { half: Half::Top, from, to, color }
+    GraphLine { half: Half::Top, from, to, color: LaneColor::Other(color) }
 }
 
 fn bottom(from: usize, to: usize, color: usize) -> GraphLine {
-    GraphLine { half: Half::Bottom, from, to, color }
+    GraphLine { half: Half::Bottom, from, to, color: LaneColor::Other(color) }
 }
 
 /// 每行的点所在的列、颜色、宽度和线段。
 fn layout(commits: &[Commit]) -> Vec<(usize, usize, usize, Vec<GraphLine>)> {
-    graph_layout(commits).into_iter().map(|row| (row.column, row.color, row.width, row.lines)).collect()
+    graph_layout(commits)
+        .into_iter()
+        .map(|row| {
+            let LaneColor::Other(color) = row.color else { panic!("没有引用时不该有 {:?}", row.color) };
+            (row.column, color, row.width, row.lines)
+        })
+        .collect()
+}
+
+fn with_refs(mut commit: Commit, refs: &[(&str, RefKind)]) -> Commit {
+    commit.refs = refs.iter().map(|&(name, kind)| CommitRef { name: name.into(), kind }).collect();
+    commit
+}
+
+/// 每行点的颜色，和往下那半段竖线的颜色。
+fn dot_and_below(commits: &[Commit]) -> Vec<(LaneColor, Option<LaneColor>)> {
+    graph_layout(commits)
+        .into_iter()
+        .map(|row| {
+            let below = row.lines.iter().find(|line| line.half == Half::Bottom && line.from == row.column);
+            (row.color, below.map(|line| line.color))
+        })
+        .collect()
+}
+
+#[test]
+fn colors_what_head_has_not_pushed_yet() {
+    use LaneColor::{Current, Other, Remote};
+    let head = ("main", RefKind::CurrentBranch);
+    let upstream = ("origin/main", RefKind::Remote);
+    // 领先一个提交：HEAD 这段是 Current，从 origin/main 那个提交往下是 Remote。
+    let ahead =
+        [with_refs(commit("c", &["b"]), &[head]), with_refs(commit("b", &["a"]), &[upstream]), commit("a", &[])];
+    assert_eq!(dot_and_below(&ahead), [(Current, Some(Current)), (Remote, Some(Remote)), (Remote, None)]);
+    // origin/main 那一行上半段进来的线还是 Current。
+    assert_eq!(graph_layout(&ahead)[1].lines[0], GraphLine { half: Half::Top, from: 0, to: 0, color: Current });
+
+    // 推上去了：整条都是 Current，下面再有别的远端分支也不换。
+    let synced = [
+        with_refs(commit("c", &["b"]), &[head, upstream]),
+        with_refs(commit("b", &["a"]), &[("origin/old", RefKind::Remote)]),
+        commit("a", &[]),
+    ];
+    assert_eq!(dot_and_below(&synced), [(Current, Some(Current)), (Current, Some(Current)), (Current, None)]);
+
+    // 落后：origin/main 在 HEAD 上面，HEAD 已经推上去了，下面再有别的远端分支也不换。
+    let behind = [
+        with_refs(commit("d", &["c"]), &[upstream]),
+        with_refs(commit("c", &["b"]), &[head]),
+        with_refs(commit("b", &["a"]), &[("origin/old", RefKind::Remote)]),
+        commit("a", &[]),
+    ];
+    let colors = dot_and_below(&behind);
+    assert_eq!(colors[1..], [(Current, Some(Current)), (Current, Some(Current)), (Current, None)]);
+
+    // 合并了远端：共同祖先 b 没有远端分支，但 origin/main 的 d 走得到它，也算推上去的。
+    let merged = [
+        with_refs(commit("m", &["c", "d"]), &[head]),
+        commit("c", &["b"]),
+        with_refs(commit("d", &["b"]), &[upstream]),
+        commit("b", &[]),
+    ];
+    let colors = dot_and_below(&merged);
+    assert_eq!(colors[1], (Current, Some(Current)));
+    assert_eq!(colors[3].0, Remote);
+
+    // 别的分支在前面时用轮换的颜色，不会是 Current 或 Remote；分离的 HEAD 也算 HEAD。
+    let other = [
+        with_refs(commit("x", &["b"]), &[("feat", RefKind::Branch)]),
+        with_refs(commit("c", &["b"]), &[("HEAD", RefKind::Head)]),
+        with_refs(commit("b", &[]), &[upstream]),
+    ];
+    let colors = dot_and_below(&other);
+    assert_eq!(colors[0], (Other(0), Some(Other(0))));
+    assert_eq!(colors[1].0, Current);
+    // c 斜着并进 feat 先占着的那条，b 落在那条上，不换成 Remote。
+    assert_eq!(colors[2].0, Other(0));
 }
 
 #[test]

@@ -18,7 +18,7 @@ use gpui::{
     Hsla, MouseButton, MouseDownEvent, PathBuilder, Pixels, PromptLevel, Role, Window, canvas, div, fill, img, point,
     prelude::*, px, quad, svg, uniform_list,
 };
-use runode_git::{self as git, Commit, DiffSide, GraphRow, Half, RefKind};
+use runode_git::{self as git, Commit, DiffSide, GraphRow, Half, LaneColor, RefKind};
 use runode_shared_types::color::Rgb;
 
 use super::{
@@ -43,9 +43,20 @@ use crate::{
     },
 };
 
-/// lane 轮换的颜色：面板里改动用的那几种，再加紫、青、橙，深浅底色上都看得清。
-const LANE_COLORS: [Rgb; 7] =
-    [RENAMED, ADDED, MODIFIED, Rgb(0xB0, 0x83, 0xF0), Rgb(0x39, 0xB8, 0xC6), REMOVED, Rgb(0xE0, 0x8A, 0x3C)];
+/// HEAD 往下那条 lane 用蓝色，和 HEAD 的标签同色；HEAD 还没推上去时，从推上去的地方往下换成紫色，
+/// 远端分支的标签也描这个色。
+const CURRENT_LANE: Rgb = RENAMED;
+const REMOTE_LANE: Rgb = Rgb(0xB0, 0x83, 0xF0);
+/// 别的 lane 轮换的颜色：面板里改动用的另几种，再加青、橙，深浅底色上都看得清，不和上面两种撞色。
+const LANE_COLORS: [Rgb; 5] = [ADDED, MODIFIED, Rgb(0x39, 0xB8, 0xC6), REMOVED, Rgb(0xE0, 0x8A, 0x3C)];
+
+fn lane_color(color: LaneColor) -> Rgb {
+    match color {
+        LaneColor::Current => CURRENT_LANE,
+        LaneColor::Remote => REMOTE_LANE,
+        LaneColor::Other(index) => LANE_COLORS[index % LANE_COLORS.len()],
+    }
+}
 /// 一条 lane 的宽度。lane 多时压窄，整个图不超过 `MAX_GRAPH_WIDTH`，最窄 `MIN_LANE_WIDTH`；
 /// 再多的 lane 画到图的右边界为止，截掉。
 const LANE_WIDTH: f32 = 10.;
@@ -728,7 +739,7 @@ fn short_date(date: &str) -> String {
 }
 
 /// 指向提交的引用的前 `shown` 个小标签：HEAD 所在的分支（或分离的 HEAD）实心突出，本地分支描边，
-/// 远端分支淡一些，tag 带黄色；太长的截断。其余的合成「+N」。
+/// 远端分支淡一些、描 lane 推上去那段的紫色，tag 带黄色；太长的截断。其余的合成「+N」。
 fn ref_labels(commit: &Commit, shown: usize, fg: Rgb, bg: Rgb) -> Vec<gpui::Div> {
     let fg_hsla = hsla(fg);
     let mut labels: Vec<_> = commit
@@ -754,7 +765,7 @@ fn ref_labels(commit: &Commit, shown: usize, fg: Rgb, bg: Rgb) -> Vec<gpui::Div>
                     .text_color(gpui::white())
                     .font_weight(gpui::FontWeight::SEMIBOLD),
                 RefKind::Branch => label.border_color(fg_hsla.opacity(0.35)).text_color(fg_hsla),
-                RefKind::Remote => label.border_color(fg_hsla.opacity(0.2)).text_color(fg_hsla.opacity(0.6)),
+                RefKind::Remote => label.border_color(hsla(REMOTE_LANE).opacity(0.6)).text_color(fg_hsla.opacity(0.7)),
                 RefKind::Tag => {
                     label.bg(hsla(bg.mix(MODIFIED, 0.18))).border_color(hsla(MODIFIED).opacity(0.5)).text_color(fg_hsla)
                 }
@@ -781,7 +792,7 @@ fn lanes_tail(last: &GraphRow, lane: f32, width: f32, dashed: bool) -> impl Into
         .lines
         .iter()
         .filter(|line| line.half == Half::Bottom)
-        .map(|line| (line.to, LANE_COLORS[line.color % LANE_COLORS.len()]))
+        .map(|line| (line.to, lane_color(line.color)))
         .collect();
     lanes.sort_by_key(|&(column, _)| column);
     lanes.dedup_by_key(|&mut (column, _)| column);
@@ -817,7 +828,7 @@ fn lanes_tail(last: &GraphRow, lane: f32, width: f32, dashed: bool) -> impl Into
 /// 一行的线和点。线：上半段从行顶连到点的高度，下半段从点的高度连到行底，换列的用曲线连。点：
 /// 合并提交是空心的，HEAD 大一圈。超出图宽的 lane 截掉，点贴在右边界上。
 fn lanes_canvas(row: GraphRow, lane: f32, width: f32, merge: bool, head: bool, bg: Rgb) -> impl IntoElement {
-    let color = |index: usize| hsla(LANE_COLORS[index % LANE_COLORS.len()]);
+    let color = |color: LaneColor| hsla(lane_color(color));
     let bg = hsla(bg);
     canvas(
         |_, _, _| {},

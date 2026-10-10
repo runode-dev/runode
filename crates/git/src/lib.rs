@@ -16,7 +16,9 @@ mod snapshot;
 mod view;
 
 pub use branch::{Branch, valid_branch_name};
-pub use graph::{Commit, CommitRef, GraphLine, GraphRow, Half, History, RefKind, graph_layout, refs_changed};
+pub use graph::{
+    Commit, CommitRef, GraphLine, GraphRow, Half, History, LaneColor, RefKind, graph_layout, refs_changed,
+};
 pub use info::{Operation, RepoInfo, Stash};
 pub use ops::{CommitOptions, GitError, Repo, Result};
 pub use patch::{HunkAction, hunk_actionable};
