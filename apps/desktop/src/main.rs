@@ -65,6 +65,7 @@ fn main() {
         startup::mark("config_install");
         update::install(cx);
         menus::install(cx);
+        menus::refresh_agent_integration(cx);
         startup::mark("menus_install");
         window::install(cx);
         startup::mark("workspace_install");

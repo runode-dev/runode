@@ -20,7 +20,7 @@ mod setup;
 
 use std::{ffi::OsString, io::Write, path::PathBuf};
 
-pub use setup::{SetupTarget, setup, setup_paths};
+pub use setup::{SKILLS_URL, SetupTarget, bundled_skills, fetch_skills, refresh, setup, setup_paths};
 
 /// 桌面 app 给 shell 设的环境变量：runode 可执行文件的路径，没把它放进 PATH 时也能调用命令行。
 pub const ENV_BIN: &str = "RUNODE_BIN";
@@ -52,6 +52,8 @@ pub struct Env {
     /// runode 的各个目录，`remote` 在这里找远程访问的文件。其中的家目录：显示目录时缩成 `~`，
     /// `setup` 往这里装使用说明。
     pub dirs: runode_paths::Dirs,
+    /// `setup` 从哪里下最新的 skill（见 `SKILLS_URL`）；为 `None` 时不下，用编进这一版的。
+    pub skills_url: Option<String>,
 }
 
 impl Env {
@@ -64,6 +66,7 @@ impl Env {
             session: var(runode_protocol::ENV_SESSION).map(|value| value.to_string_lossy().into_owned()),
             build: build.into(),
             dirs,
+            skills_url: Some(crate::SKILLS_URL.to_owned()),
         }
     }
 }

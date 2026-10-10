@@ -227,6 +227,28 @@ fn fix_key_equivalents(menu: &objc2_app_kit::NSMenu) {
 /// 装给哪些 agent。
 const SETUP_TARGETS: [SetupTarget; 2] = [SetupTarget::Claude, SetupTarget::Codex];
 
+/// 装过 agent 集成的，把装着的使用说明换成 GitHub 上最新的：skill 更新了不用再从菜单装一遍。
+/// 下不到时不动装着的。
+pub fn refresh_agent_integration(cx: &App) {
+    let Some(home) = runode_paths::Dirs::from_env().home else {
+        return;
+    };
+    cx.background_executor()
+        .spawn(async move {
+            let Some(skills) = runode_cli::fetch_skills(runode_cli::SKILLS_URL) else {
+                return;
+            };
+            for target in SETUP_TARGETS {
+                match runode_cli::refresh(target, &home, &skills) {
+                    Ok(true) => tracing::info!("refreshed the agent integration for {target:?}"),
+                    Ok(false) => {}
+                    Err(err) => tracing::warn!("failed to refresh the agent integration: {err:#}"),
+                }
+            }
+        })
+        .detach();
+}
+
 /// 问一句要不要装，列出会写的文件；装好后说装到了哪里，失败时说原因。
 fn install_agent_integration(cx: &mut App) {
     let Some(home) = runode_paths::Dirs::from_env().home else {
@@ -249,8 +271,15 @@ fn install_agent_integration(cx: &mut App) {
         if answer.await.ok() != Some(0) {
             return;
         }
-        let installed: anyhow::Result<Vec<_>> =
-            SETUP_TARGETS.iter().map(|target| runode_cli::setup(*target, &home)).collect();
+        // 下最新的 skill 要联网，放到后台，别卡住界面。
+        let installed: anyhow::Result<Vec<_>> = cx
+            .background_executor()
+            .spawn(async move {
+                let skills =
+                    runode_cli::fetch_skills(runode_cli::SKILLS_URL).unwrap_or_else(runode_cli::bundled_skills);
+                SETUP_TARGETS.iter().map(|target| runode_cli::setup(*target, &home, &skills)).collect()
+            })
+            .await;
         let installed = installed.map(|paths| paths.into_iter().flatten());
         let (level, title, detail) = match installed {
             Ok(paths) => (

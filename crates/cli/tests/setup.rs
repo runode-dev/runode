@@ -3,7 +3,7 @@
 mod common;
 
 use common::*;
-use runode_cli::exit;
+use runode_cli::{SetupTarget, exit};
 
 #[test]
 fn claude_gets_a_skill() {
@@ -46,4 +46,28 @@ fn codex_gets_a_skill_and_loses_the_old_section() {
     let fresh = FakeHost::start("setupfresh", |_| vec![]);
     assert_eq!(run("setup codex", &fresh.env).0, exit::OK);
     assert!(!fresh.env.dirs.home.as_ref().unwrap().join(".codex").exists());
+}
+
+#[test]
+fn refresh_rewrites_only_installed_skills() {
+    let fake = FakeHost::start("setuprefresh", |_| vec![]);
+    let home = fake.env.dirs.home.as_deref().unwrap();
+    let skills = runode_cli::bundled_skills();
+    // 没装过的不装。
+    assert!(!runode_cli::refresh(SetupTarget::Claude, home, &skills).unwrap());
+    assert!(!home.join(".claude").exists());
+
+    // 装过的：旧了、缺了一份都重装成这一版的；一样时不动。
+    runode_cli::setup(SetupTarget::Claude, home, &skills).unwrap();
+    let [skill, simulator] = <[_; 2]>::try_from(runode_cli::setup_paths(SetupTarget::Claude, home)).unwrap();
+    let current = std::fs::read_to_string(&skill).unwrap();
+    assert!(!runode_cli::refresh(SetupTarget::Claude, home, &skills).unwrap());
+    std::fs::write(&skill, "old").unwrap();
+    std::fs::remove_file(&simulator).unwrap();
+    assert!(runode_cli::refresh(SetupTarget::Claude, home, &skills).unwrap());
+    assert_eq!(std::fs::read_to_string(&skill).unwrap(), current);
+    assert!(simulator.exists());
+    // 只装了 Claude 的，Codex 那边照样不碰。
+    assert!(!runode_cli::refresh(SetupTarget::Codex, home, &skills).unwrap());
+    assert!(!home.join(".agents").exists());
 }
