@@ -368,7 +368,12 @@ impl WindowView {
             Ok::<_, String>((screen, StreamProcess(Some(child)), frames))
         });
         self.simulator.loading = Some(cx.spawn(async move |this, cx| {
-            let (screen, process, mut frames) = match job.await {
+            let started = job.await;
+            // 连着的时候页收起来了：不推画面也不报错，丢掉的进程跟着结束；下次展开时会重新连。
+            if !this.update(cx, |this, _| this.simulator_shown()).unwrap_or(false) {
+                return;
+            }
+            let (screen, process, mut frames) = match started {
                 Ok(started) => started,
                 Err(err) => {
                     this.update(cx, |this, cx| {
@@ -417,13 +422,8 @@ impl WindowView {
                 }
             });
             this.update(cx, |this, cx| {
-                let stream = Stream { _process: process, _frames: pump, elements: None };
-                // 连着的时候页收起来了：不推画面，丢掉的 `Stream` 顺带结束 mobilecli。
-                if !this.simulator_shown() {
-                    return;
-                }
                 this.simulator.screen = Some(screen);
-                this.simulator.stream = Some(stream);
+                this.simulator.stream = Some(Stream { _process: process, _frames: pump, elements: None });
                 cx.notify();
             })
             .ok();

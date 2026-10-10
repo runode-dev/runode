@@ -365,6 +365,16 @@ struct Slots {
     status_bar: Entity<Slot>,
 }
 
+impl Slots {
+    /// 叫每一块都重画。按字段拆开，加了新的一块时这里编不过，不会漏掉。
+    fn notify_all(self, cx: &mut App) {
+        let Self { sidebar, titlebar, preview, panel, status_bar } = self;
+        for slot in [sidebar, titlebar, preview, panel, status_bar] {
+            slot.update(cx, |_, cx| cx.notify());
+        }
+    }
+}
+
 impl WindowView {
     fn empty(window: &mut Window, cx: &mut Context<Self>) -> Self {
         let bounds_watch = cx.observe_window_bounds(window, |this, window, cx| {
@@ -570,11 +580,7 @@ impl WindowView {
             return;
         }
         if let Some(slots) = self.slots.clone() {
-            cx.defer(move |cx| {
-                for slot in [slots.sidebar, slots.titlebar, slots.preview, slots.panel, slots.status_bar] {
-                    slot.update(cx, |_, cx| cx.notify());
-                }
-            });
+            cx.defer(move |cx| slots.notify_all(cx));
         }
     }
 
