@@ -47,7 +47,8 @@ enum Item {
     Pairing,
     /// 登录时自启的两项（宿主、app），装没装看服务文件，不是配置里的键。
     Autostart,
-    /// 决策模型那一页的全部内容，经 runode-infer 读写，不是配置里的键。
+    /// 模型那一页的全部内容，大多经 runode-infer 读写；只有两个默认模型（`chat-model`、
+    /// `decision-model`）是配置里的键。
     Decision,
 }
 
@@ -223,6 +224,8 @@ impl Page {
                 Item::ConfigFiles => Some("config-file"),
                 Item::Section(_) | Item::ConfigFileActions | Item::Pairing | Item::Autostart | Item::Decision => None,
             })
+            // 模型页的两个默认模型不是 `Item::Row`，画在 `render_decision` 里。
+            .chain(if self == Self::Decision { &["chat-model", "decision-model"][..] } else { &[] }.iter().copied())
             .collect()
     }
 }
@@ -236,7 +239,7 @@ pub(super) fn key_title(key: &str) -> String {
     tr(&format!("settings.key.{}", tr_key(key)))
 }
 
-fn key_hint(key: &str) -> SharedString {
+pub(super) fn key_hint(key: &str) -> SharedString {
     tr(&format!("settings.hint.{}", tr_key(key))).into()
 }
 
@@ -311,7 +314,7 @@ impl SettingsView {
 
     /// runode 的配置文件里写了 `key`、写的又不是默认值时的恢复按钮：写的正是默认值时删掉它也没有变化，
     /// 比如开关拨回默认的那一边。
-    fn reset(&self, key: &'static str, colors: Colors, cx: &mut Context<Self>) -> Option<AnyElement> {
+    pub(super) fn reset(&self, key: &'static str, colors: Colors, cx: &mut Context<Self>) -> Option<AnyElement> {
         let changed = self.file.has(key) && self.file.values(key) != runode_config::Config::default().values(key);
         changed.then(|| {
             reset_button(id("reset", key), colors, cx, move |this, _, cx| this.write_or_report(key, Vec::new(), cx))

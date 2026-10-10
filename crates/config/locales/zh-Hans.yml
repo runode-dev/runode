@@ -68,6 +68,8 @@ config:
     可用的短名：%{agents}。
   agent_done_sound: agent 在你没在看的分屏里干完了时的提示音：macOS 的系统声音名（Basso、Blow、Bottle、Frog、Funk、Glass、Hero、Morse、Ping、Pop、Purr、Sosumi、Submarine、Tink），none 表示不出声。
   agent_blocked_sound: agent 在你没在看的分屏里等你回答时的提示音：同上。
+  chat_model: 大模型的默认模型：runode-infer 里的模型名（比如 gemma-4-e4b:gguf-q4_0），空着就是还没选。在设置的模型页里挑，也可以手写。
+  decision_model: 决策模型的默认模型：runode-infer 里的模型名，本机的（比如 clef-flash:gguf-q4_k_m）或托管的（比如 cf/clef-flash），空着就是还没选。
   config_file: |-
     引入别的配置文件：文件路径，相对路径从这个文件所在目录算，~/ 表示主目录；
     路径前加 ? 表示文件可以不存在。可以写多行。

@@ -76,6 +76,7 @@ pub const KEYS: &[&[&str]] = &[
     ],
     &["apns-key-file", "apns-key-id", "apns-team-id", "apns-bundle-id", "push-relay-url"],
     &["agent-notifications", "agent-notifications-exclude", "agent-done-sound", "agent-blocked-sound"],
+    &["chat-model", "decision-model"],
     &["config-file"],
     &["keybind"],
 ];
@@ -346,6 +347,8 @@ impl Config {
             "apns-key-file" => self.apns_key_file = text(value),
             "apns-key-id" => self.apns_key_id = text(value),
             "apns-team-id" => self.apns_team_id = text(value),
+            "chat-model" => self.chat_model = text(value),
+            "decision-model" => self.decision_model = text(value),
             "apns-bundle-id" => self.apns_bundle_id = text(value),
             "push-relay-url" => {
                 self.push_relay_url = or_default(empty, defaults.push_relay_url, || {

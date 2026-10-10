@@ -563,7 +563,7 @@ settings:
     terminal: Terminal
     files: Files & Preview
     agents: Agents
-    decision: Decision Models
+    decision: Models
     remote: Remote Access
     keybinds: Keyboard Shortcuts
   section:
@@ -645,6 +645,8 @@ settings:
     agent_notifications_exclude: Agents without alerts
     agent_done_sound: Sound when an agent finishes
     agent_blocked_sound: Sound when an agent needs you
+    chat_model: Default chat model
+    decision_model: Default decision model
     config_file: Included files
     keybind: Keyboard shortcuts
   hint:
@@ -702,6 +704,8 @@ settings:
     agent_notifications_exclude: These agents get neither notifications nor sounds; their status marks still show.
     agent_done_sound: A system sound.
     agent_blocked_sound: A system sound.
+    chat_model: A chat model from runode-infer; None means not picked yet.
+    decision_model: A decision model from runode-infer, local or hosted; None means not picked yet.
     config_file: Other configuration files to read after this one. Relative paths start from this file's folder; a leading ? means the file may be missing.
     keybind: Your shortcuts are added on top of the defaults.
   choice:
@@ -754,7 +758,7 @@ settings:
     failed: "Could not change the login setting: %{err}"
   decision:
     service: runode-infer
-    service_hint: Answers typed questions (yes or no, pick one, give a score) for programs on this Mac, with TypeSafe Jev, Cloudflare Clef or a model that runs here. It is a separate download; Runode only manages it.
+    service_hint: Runs models on this Mac for other programs. Chat models write replies (the OpenAI chat format); decision models answer typed questions (yes or no, pick one, give a score), here or with TypeSafe Jev and Cloudflare Clef. It is a separate download; Runode only manages it.
     loading: Checking runode-infer…
     missing: runode-infer is not installed. Install it, then come back to this page.
     download: Open Download Page
@@ -789,6 +793,14 @@ settings:
     pull_stopped: The download stopped before it finished; download again to continue.
     cannot_run: can't run on this Mac
     more_models: Other GGUF decision models can be downloaded in a terminal with runode-infer pull hf.co/<org>/<repo>:<quant>.
+    more_chat_models: Other GGUF chat models can be downloaded in a terminal with runode-infer pull hf.co/<org>/<repo>:<quant>.
+    kind: Model type
+    kind_chat: Chat Models
+    kind_decision: Decision Models
+    default_model: Default model
+    default_none: None
+    not_in_infer: not in runode-infer
+    chat_unsupported: This version of runode-infer can't run chat models yet. Update it, then come back.
   pairing:
     title: Pair a phone
     hint: Scan a code with Runode on your phone. A paired phone can reach this Mac while remote access is on.

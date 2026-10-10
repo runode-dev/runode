@@ -76,6 +76,8 @@ config:
     can be repeated; empty clears the list. Names: %{agents}.
   agent_done_sound: "Sound when an agent finishes in a split you are not looking at: a macOS system sound name (Basso, Blow, Bottle, Frog, Funk, Glass, Hero, Morse, Ping, Pop, Purr, Sosumi, Submarine, Tink), or none."
   agent_blocked_sound: "Sound when an agent waits for your answer in a split you are not looking at: same as above."
+  chat_model: "Default chat model: a model name from runode-infer (for example gemma-4-e4b:gguf-q4_0); empty means none picked yet. Pick it on the Models page in Settings, or write it by hand."
+  decision_model: "Default decision model: a model name from runode-infer, local (for example clef-flash:gguf-q4_k_m) or hosted (for example cf/clef-flash); empty means none picked yet."
   config_file: |-
     Include another configuration file: a path, relative to this file's directory, ~/ for the home
     directory; prefix it with ? if the file may not exist. Can be repeated.

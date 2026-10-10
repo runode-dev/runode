@@ -563,7 +563,7 @@ settings:
     terminal: 终端
     files: 文件与预览
     agents: Agent
-    decision: 决策模型
+    decision: 模型
     remote: 远程访问
     keybinds: 快捷键
   section:
@@ -645,6 +645,8 @@ settings:
     agent_notifications_exclude: 不提醒的 agent
     agent_done_sound: agent 干完时的提示音
     agent_blocked_sound: agent 等你回答时的提示音
+    chat_model: 大模型的默认模型
+    decision_model: 决策模型的默认模型
     config_file: 引入的文件
     keybind: 快捷键
   hint:
@@ -702,6 +704,8 @@ settings:
     agent_notifications_exclude: 选中的 agent 不发通知也不出提示音，状态标记照常显示。
     agent_done_sound: 系统自带的声音。
     agent_blocked_sound: 系统自带的声音。
+    chat_model: runode-infer 里的一个大模型，不设就是还没选。
+    decision_model: runode-infer 里的一个决策模型，本机的或托管的，不设就是还没选。
     config_file: 读完这个文件之后再读的配置文件。相对路径从这个文件所在目录算；路径前加 ? 表示文件可以不存在。
     keybind: 你的快捷键叠在默认快捷键上。
   choice:
@@ -754,7 +758,7 @@ settings:
     failed: "没能修改登录时启动的设置：%{err}"
   decision:
     service: runode-infer
-    service_hint: 给这台 Mac 上的程序回答带类型的问题（是或否、几项里选一项、打个分），用 TypeSafe 的 Jev、Cloudflare 的 Clef，或者在本机跑的模型。它要单独下载，Runode 只管它。
+    service_hint: 在这台 Mac 上给别的程序跑模型。大模型写回答（OpenAI 的聊天格式）；决策模型回答带类型的问题（是或否、几项里选一项、打个分），在本机跑，或者用 TypeSafe 的 Jev、Cloudflare 的 Clef。它要单独下载，Runode 只管它。
     loading: 正在查看 runode-infer…
     missing: 没装 runode-infer。装好以后再回到这一页。
     download: 打开下载页
@@ -789,6 +793,14 @@ settings:
     pull_stopped: 下载没完成就停了，再点一次下载会接着下。
     cannot_run: 这台 Mac 上跑不了
     more_models: 别的 GGUF 决策模型可以在终端里用 runode-infer pull hf.co/<org>/<repo>:<量化> 下载。
+    more_chat_models: 别的 GGUF 大模型可以在终端里用 runode-infer pull hf.co/<org>/<repo>:<量化> 下载。
+    kind: 模型类型
+    kind_chat: 大模型
+    kind_decision: 决策模型
+    default_model: 默认模型
+    default_none: 不设
+    not_in_infer: 不在 runode-infer 里
+    chat_unsupported: 这个版本的 runode-infer 还不能跑大模型，升级后再来。
   pairing:
     title: 配对手机
     hint: 用手机上的 Runode 扫码配对。配好的手机在远程访问打开时能连上这台 Mac。

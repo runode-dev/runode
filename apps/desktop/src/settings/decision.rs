@@ -1,6 +1,8 @@
-//! 决策模型那一页：管用户自己装的 runode-infer（决策模型的本机服务，不随 Runode 打包）。启停服务、
-//! 填托管 API 的密钥、下载和删除本机的模型，都是去跑 `runode-infer … --json`，读它 stdout 上的
-//! `{"status":"ok","data":…}`。密钥经它的 stdin 交过去，Runode 自己不存。
+//! 模型那一页：管用户自己装的 runode-infer（大模型和决策模型的本机服务，不随 Runode 打包）。服务卡片
+//! 下面用分段控件切换大模型和决策模型，各管各的默认模型（配置里的 `chat-model`、`decision-model`）
+//! 和本机模型；托管 API 只有决策模型那边有。启停服务、填托管 API 的密钥、下载和删除本机的模型，都是
+//! 去跑 `runode-infer … --json`，读它 stdout 上的 `{"status":"ok","data":…}`。密钥经它的 stdin
+//! 交过去，Runode 自己不存。
 //!
 //! 从访达打开时 app 自己的 PATH 里没有 brew 装的目录，所以和模拟器页一样，用终端里 shell 报告的
 //! PATH 找它，找不到再看安装脚本默认装的 `~/.runode-infer/bin`。下载要好几分钟，放进
@@ -23,7 +25,9 @@ use serde_json::Value;
 
 use super::{
     SettingsView,
-    controls::{Cards, Colors, Press, button, input_box, row},
+    controls::{Cards, Colors, Press, button, dropdown, input_box, row, segmented},
+    pages::{key_hint, key_title},
+    picker::{PickItem, PickTarget},
 };
 use crate::ui::{
     a11y::Disable,
@@ -46,6 +50,43 @@ pub(super) struct State {
     inputs: Option<Inputs>,
     /// 上次看到 `DecisionPulls` 里正在下的模型，有一个不在了就是下完了，重新读状态。
     pulling: Vec<String>,
+    /// 分段控件选着哪一类；只记在界面里，不写配置。
+    kind: Kind,
+}
+
+/// 模型的类型，runode-infer 的 `kind`。
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum Kind {
+    #[default]
+    Chat,
+    Decision,
+}
+
+impl Kind {
+    fn name(self) -> &'static str {
+        match self {
+            Self::Chat => "chat",
+            Self::Decision => "decision",
+        }
+    }
+
+    /// 配置里这一类的默认模型的键。
+    fn key(self) -> &'static str {
+        match self {
+            Self::Chat => "chat-model",
+            Self::Decision => "decision-model",
+        }
+    }
+
+    /// runode-infer 给的 `kind`；旧版不给，那时只有决策模型。不认识的类型是 `None`，不列出来。
+    fn parse(value: &Value) -> Option<Self> {
+        match value.as_str() {
+            None => Some(Self::Decision),
+            Some("chat") => Some(Self::Chat),
+            Some("decision") => Some(Self::Decision),
+            Some(_) => None,
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -67,6 +108,18 @@ struct Status {
     models: Vec<Model>,
     /// 服务加载着的模型。
     loaded: Vec<String>,
+    /// 托管 API 上的模型；旧版 runode-infer 不给，为空。
+    hosted: Vec<Hosted>,
+    /// 这个版本的 runode-infer 跑得了大模型：目录里有一项带 `kind` 就算。
+    chat_supported: bool,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+struct Hosted {
+    id: String,
+    kind: Kind,
+    /// 要哪家的密钥，`Provider::name` 的写法。
+    provider: String,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -77,6 +130,7 @@ struct Model {
     installed: bool,
     /// runode-infer 说这台机器跑得了它。
     supported: bool,
+    kind: Kind,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -179,24 +233,99 @@ impl SettingsView {
                     .on_press(cx, move |this, _, cx| this.run_decision(Busy::Service, "service", &[command], None, cx));
                 cards.push(self.service_row(message.into_owned(), Some(control.into_any_element()), colors));
 
-                cards.section(tr("settings.section.decision_keys"));
-                cards.push(self.key_row(Provider::TypeSafe, status.typesafe, colors, window, cx).into_any_element());
-                cards
-                    .push(self.key_row(Provider::Cloudflare, status.cloudflare, colors, window, cx).into_any_element());
+                let kind = self.decision.kind;
+                let options = [Kind::Chat, Kind::Decision]
+                    .into_iter()
+                    .map(|kind| {
+                        (
+                            kind.name().to_owned(),
+                            SharedString::from(tr(&format!("settings.decision.kind_{}", kind.name()))),
+                        )
+                    })
+                    .collect();
+                let pick = segmented(
+                    "models-kind",
+                    tr("settings.decision.kind"),
+                    options,
+                    Some(kind.name()),
+                    colors,
+                    cx,
+                    |this, value, _, cx| {
+                        this.decision.kind = if value == Kind::Chat.name() { Kind::Chat } else { Kind::Decision };
+                        cx.notify();
+                    },
+                );
+                cards.raw(div().pt(px(16.)).pb(px(8.)).flex().child(pick).into_any_element());
+
+                if kind == Kind::Chat && !status.chat_supported {
+                    let open = button("models-download", tr("settings.decision.download"), colors)
+                        .on_press(cx, |_, _, cx| cx.open_url(DOWNLOAD_PAGE));
+                    cards.push(
+                        div()
+                            .pt(px(12.))
+                            .flex()
+                            .items_center()
+                            .justify_between()
+                            .gap(px(16.))
+                            .child(notice(
+                                "models-chat-unsupported",
+                                tr("settings.decision.chat_unsupported"),
+                                colors.fg,
+                            ))
+                            .child(div().pb(px(10.)).child(open))
+                            .into_any_element(),
+                    );
+                    return cards.finish();
+                }
+
+                cards.push(self.default_model_row(kind, status, colors, cx).into_any_element());
+
+                if kind == Kind::Decision {
+                    cards.section(tr("settings.section.decision_keys"));
+                    cards
+                        .push(self.key_row(Provider::TypeSafe, status.typesafe, colors, window, cx).into_any_element());
+                    cards.push(
+                        self.key_row(Provider::Cloudflare, status.cloudflare, colors, window, cx).into_any_element(),
+                    );
+                }
 
                 cards.section(tr("settings.section.decision_models"));
-                for model in &status.models {
+                for model in status.models.iter().filter(|model| model.kind == kind) {
                     let loaded = status.loaded.contains(&model.id);
                     cards.push(self.model_row(model, loaded, colors, cx).into_any_element());
                 }
-                cards.push(notice(
-                    "decision-more-models",
-                    tr("settings.decision.more_models"),
-                    colors.fg.opacity(0.55),
-                ));
+                let more = match kind {
+                    Kind::Chat => "settings.decision.more_chat_models",
+                    Kind::Decision => "settings.decision.more_models",
+                };
+                cards.push(notice("decision-more-models", tr(more), colors.fg.opacity(0.55)));
             }
         }
         cards.finish()
+    }
+
+    /// 这一类的默认模型：下拉框显示配置里写的，点开从下好的本机模型（决策模型还有填了密钥的托管模型）
+    /// 里挑。
+    fn default_model_row(&mut self, kind: Kind, status: &Status, colors: Colors, cx: &mut Context<Self>) -> Div {
+        let key = kind.key();
+        let current = self.config.values(key).into_iter().next();
+        let label = current.clone().unwrap_or_else(|| tr("settings.decision.default_none"));
+        let items = model_choices(kind, status, current.as_deref());
+        let control = dropdown(("models-default", kind as usize), key_title(key), None, label, 220., colors).on_press(
+            cx,
+            move |this, window, cx| {
+                let items = items.iter().map(|(value, detail)| {
+                    let label = if value.is_empty() { tr("settings.decision.default_none") } else { value.clone() };
+                    let item = PickItem::new(value.clone(), label);
+                    if let Some(detail) = detail { item.with_detail(tr(detail)) } else { item }
+                });
+                let current = this.config.values(key).into_iter().next().unwrap_or_default();
+                this.open_picker(key_title(key), items.collect(), Some(current), PickTarget::Value(key), window, cx);
+            },
+        );
+        let reset = self.reset(key, colors, cx);
+        let error = self.errors.get(key).cloned();
+        row(tr("settings.decision.default_model"), Some(key_hint(key)), control, reset, error, colors)
     }
 
     /// 服务那一行：说明下面是状态（报给辅助工具的提示文字），右边是按钮。
@@ -480,6 +609,27 @@ fn start_pull(program: PathBuf, path: Option<OsString>, model: String, stopped: 
     .detach();
 }
 
+/// 默认模型下拉框里的选项：(值, 补充说明的翻译键)。先是「不设」（空值，删掉这个键），再是这一类下好的
+/// 本机模型，决策模型再加上填了密钥的托管模型；配置里写着、列表里又没有的值也放进去，标上不在
+/// runode-infer 里，不悄悄吞掉用户手写的值。
+fn model_choices(kind: Kind, status: &Status, current: Option<&str>) -> Vec<(String, Option<&'static str>)> {
+    let keyed = |provider: &str| match provider {
+        "typesafe" => status.typesafe,
+        "cloudflare" => status.cloudflare,
+        _ => false,
+    };
+    let local = status.models.iter().filter(|m| m.kind == kind && m.installed).map(|m| &m.id);
+    let hosted = status.hosted.iter().filter(|h| h.kind == kind && keyed(&h.provider)).map(|h| &h.id);
+    let mut items: Vec<(String, Option<&'static str>)> =
+        std::iter::once(String::new()).chain(local.chain(hosted).cloned()).map(|id| (id, None)).collect();
+    if let Some(current) = current
+        && !items.iter().any(|(id, _)| id == current)
+    {
+        items.push((current.to_owned(), Some("settings.decision.not_in_infer")));
+    }
+    items
+}
+
 /// 只起提示作用的一行字（状态、出错），报给辅助工具。
 fn notice(id: &'static str, text: impl Into<SharedString>, color: Hsla) -> AnyElement {
     let text = text.into();
@@ -581,19 +731,24 @@ fn parse_status(status: &Value, catalog: &Value, installed: &Value, loaded: &Val
     let models_of = |value: &Value| value["models"].as_array().cloned().unwrap_or_default();
     // runode-infer 说这台机器跑不了的（比如 MLX 模型在 Intel Mac 上）不列出来，免得白下几个 GB；
     // 已经下好了的照样列出来，能删掉。
-    let mut models: Vec<Model> = models_of(catalog)
+    let catalog_models = models_of(catalog);
+    let mut models: Vec<Model> = catalog_models
         .iter()
         .filter(|m| m["supported"].as_bool().unwrap_or(true) || m["installed"].as_bool().unwrap_or(false))
-        .map(|m| Model {
-            id: text(&m["model"]),
-            description: text(&m["description"]),
-            size: m["size"].as_u64().unwrap_or(0),
-            installed: m["installed"].as_bool().unwrap_or(false),
-            supported: m["supported"].as_bool().unwrap_or(true),
+        .filter_map(|m| {
+            Some(Model {
+                id: text(&m["model"]),
+                description: text(&m["description"]),
+                size: m["size"].as_u64().unwrap_or(0),
+                installed: m["installed"].as_bool().unwrap_or(false),
+                supported: m["supported"].as_bool().unwrap_or(true),
+                kind: Kind::parse(&m["kind"])?,
+            })
         })
         .collect();
     for m in models_of(installed) {
         let id = text(&m["model"]);
+        let Some(kind) = Kind::parse(&m["kind"]) else { continue };
         if !models.iter().any(|model| model.id == id) {
             let description = text(&m["repo"]);
             models.push(Model {
@@ -602,9 +757,18 @@ fn parse_status(status: &Value, catalog: &Value, installed: &Value, loaded: &Val
                 size: m["size"].as_u64().unwrap_or(0),
                 installed: true,
                 supported: true,
+                kind,
             });
         }
     }
+    let hosted = catalog["hosted"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|h| {
+            Some(Hosted { id: text(&h["model"]), kind: Kind::parse(&h["kind"])?, provider: text(&h["provider"]) })
+        })
+        .collect();
     Status {
         version: text(&status["version"]),
         running: status["running"].as_bool().unwrap_or(false),
@@ -613,6 +777,8 @@ fn parse_status(status: &Value, catalog: &Value, installed: &Value, loaded: &Val
         cloudflare: status["keys"]["cloudflare"].as_bool().unwrap_or(false),
         models,
         loaded: models_of(loaded).iter().map(|m| text(&m["model"])).collect(),
+        hosted,
+        chat_supported: catalog_models.iter().any(|m| m.get("kind").is_some()),
     }
 }
 
@@ -690,6 +856,70 @@ mod tests {
         );
         assert!(!status.models[2].supported && status.models[0].supported);
         assert_eq!(status.loaded, ["clef-flash:gguf-q4_k_m"]);
+        // 旧版没有 `kind` 也没有 `hosted`：一律当决策模型，托管的为空，跑不了大模型。
+        assert!(status.models.iter().all(|m| m.kind == Kind::Decision));
+        assert!(status.hosted.is_empty() && !status.chat_supported);
+    }
+
+    #[test]
+    fn reads_kinds_and_hosted_models() {
+        let status = json!({"version": "0.2.0", "running": false, "keys": {"typesafe": false, "cloudflare": true}});
+        let catalog = json!({
+            "models": [
+                {"model": "gemma-4-e4b:gguf-q4_0", "size": 1, "installed": true, "kind": "chat"},
+                {"model": "clef-flash:gguf-q4_k_m", "size": 1, "installed": true, "kind": "decision"},
+                {"model": "embed:gguf", "size": 1, "installed": true, "kind": "embedding"}],
+            "hosted": [
+                {"model": "jev-latest", "kind": "decision", "provider": "typesafe"},
+                {"model": "cf/clef-flash", "kind": "decision", "provider": "cloudflare"}]});
+        let installed = json!({"models": [
+            {"model": "hf.co/org/chat:Q4_K_M", "repo": "org/chat", "size": 1, "kind": "chat"},
+            {"model": "hf.co/org/old:Q8_0", "repo": "org/old", "size": 1}]});
+        let status = parse_status(&status, &catalog, &installed, &Value::Null);
+        assert!(status.chat_supported);
+        let kinds: Vec<_> = status.models.iter().map(|m| (m.id.as_str(), m.kind)).collect();
+        // 不认识的类型不列出来；`list` 里没写类型的按决策模型算。
+        assert_eq!(
+            kinds,
+            [
+                ("gemma-4-e4b:gguf-q4_0", Kind::Chat),
+                ("clef-flash:gguf-q4_k_m", Kind::Decision),
+                ("hf.co/org/chat:Q4_K_M", Kind::Chat),
+                ("hf.co/org/old:Q8_0", Kind::Decision)
+            ]
+        );
+        assert_eq!(
+            status.hosted,
+            [
+                Hosted { id: "jev-latest".into(), kind: Kind::Decision, provider: "typesafe".into() },
+                Hosted { id: "cf/clef-flash".into(), kind: Kind::Decision, provider: "cloudflare".into() }
+            ]
+        );
+
+        // 默认模型的选项：不设、这一类下好的本机模型、填了密钥的托管模型，再是列表里没有的当前值。
+        let values = |kind, current| {
+            model_choices(kind, &status, current)
+                .into_iter()
+                .map(|(id, detail)| (id, detail.is_some()))
+                .collect::<Vec<_>>()
+        };
+        let item = |id: &str, missing| (id.to_owned(), missing);
+        assert_eq!(
+            values(Kind::Chat, None),
+            [item("", false), item("gemma-4-e4b:gguf-q4_0", false), item("hf.co/org/chat:Q4_K_M", false)]
+        );
+        assert_eq!(
+            values(Kind::Decision, Some("cf/clef-flash")),
+            [
+                item("", false),
+                item("clef-flash:gguf-q4_k_m", false),
+                item("hf.co/org/old:Q8_0", false),
+                item("cf/clef-flash", false)
+            ]
+        );
+        // jev-latest 没填 TypeSafe 的密钥，不在列表里：手写了的照样列出来，标上不在 runode-infer 里。
+        assert_eq!(values(Kind::Decision, Some("jev-latest")).last(), Some(&item("jev-latest", true)));
+        assert_eq!(values(Kind::Chat, Some("")).len(), 3);
     }
 
     #[test]

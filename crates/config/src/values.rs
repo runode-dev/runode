@@ -141,6 +141,8 @@ impl Config {
             }
             "agent-done-sound" => sound(&self.agent_done_sound),
             "agent-blocked-sound" => sound(&self.agent_blocked_sound),
+            "chat-model" => self.chat_model.iter().cloned().collect(),
+            "decision-model" => self.decision_model.iter().cloned().collect(),
             _ => Vec::new(),
         }
     }
@@ -174,7 +176,7 @@ mod tests {
              file-tree-preview-click = double\npalette = 3=#010203\nremote-access = true\n\
              remote-access-push = false\nremote-access-push-delay = 30\napns-key-file = ~/AuthKey_X.p8\n\
              apns-key-id = X\napns-team-id = T\napns-bundle-id = cn.example.app\npush-relay-url = https://relay.example\n\
-             clipboard-write = deny\nclipboard-read = allow"]);
+             clipboard-write = deny\nclipboard-read = allow\nchat-model = gemma-4-e4b\ndecision-model = cf/clef"]);
         let text: String = KEYS
             .iter()
             .flat_map(|group| group.iter())
