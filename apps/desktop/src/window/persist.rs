@@ -262,8 +262,6 @@ impl WindowView {
             active: self.active,
             sidebar: self.sidebar_shown,
             sidebar_width: self.sidebar_width,
-            git: self.git_shown(),
-            files: self.files_shown(),
             panel_width: self.panel_width,
             preview_width: self.preview_width,
             preview_wrap: self.preview_wrap,
@@ -333,6 +331,11 @@ impl WindowView {
             if wi <= saved.active {
                 active = self.workspaces.len();
             }
+            let panel = if saved_workspace.files {
+                Some(SidePanel::Files)
+            } else {
+                saved_workspace.git.then_some(SidePanel::Git)
+            };
             let mut project = Project::default();
             project.tasks_last = saved_workspace.last_task;
             let id = self.next_id();
@@ -345,13 +348,14 @@ impl WindowView {
                 tabs,
                 tab_scroll: gpui::ScrollHandle::new(),
                 project,
+                panel,
+                last_panel: panel.unwrap_or_default(),
+                simulator_device: None,
             });
         }
         if !self.workspaces.is_empty() {
             self.sidebar_shown = saved.sidebar;
             self.sidebar_width = saved.sidebar_width;
-            // 文件树和 Git 面板还是两栏时存的窗口可能两个都开着，留下文件树。
-            self.panel = if saved.files { Some(SidePanel::Files) } else { saved.git.then_some(SidePanel::Git) };
             self.panel_width = saved.panel_width;
             self.preview_width = saved.preview_width;
             self.preview_wrap = saved.preview_wrap;
@@ -452,6 +456,8 @@ impl WindowView {
             tabs: workspace.tabs.iter().map(|tab| self.save_tab(tab, cx)).collect(),
             active: workspace.active,
             last_task: workspace.project.tasks_last.clone(),
+            git: workspace.panel == Some(SidePanel::Git),
+            files: workspace.panel == Some(SidePanel::Files),
         }
     }
 

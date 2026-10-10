@@ -43,11 +43,6 @@ pub struct SavedWindow {
     /// 用户拖动过侧栏宽度时是那个宽度；没拖过时为空，用默认宽度。
     #[serde(default)]
     pub sidebar_width: Option<f32>,
-    /// 右侧面板显示的是 Git 面板还是文件树，至多一个为真；收着时都为假。
-    #[serde(default)]
-    pub git: bool,
-    #[serde(default)]
-    pub files: bool,
     /// 右侧面板拖动过的宽度；没拖过时为空，用默认宽度。文件树和 Git 面板还是两栏时存的是
     /// 文件树的宽度。
     #[serde(default, alias = "files_width")]
@@ -126,6 +121,11 @@ pub struct SavedWorkspace {
     /// 标题栏命令菜单里上次跑的命令行（`Project::tasks_last`）。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_task: Option<String>,
+    /// 这个 workspace 的右侧面板显示的是 Git 面板还是文件树，至多一个为真；收着时都为假。
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub git: bool,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub files: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -356,12 +356,12 @@ mod tests {
                 tabs: vec![tab],
                 active: 0,
                 last_task: None,
+                git: true,
+                files: false,
             }],
             active: 0,
             sidebar: None,
             sidebar_width: Some(240.),
-            git: true,
-            files: false,
             panel_width: Some(200.),
             preview_width: Some(420.),
             preview_wrap: true,

@@ -94,8 +94,9 @@ pub(super) fn status_color(status: FileStatus) -> Rgb {
 }
 
 /// 右侧面板显示的那一页。
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(super) enum SidePanel {
+    #[default]
     Files,
     Git,
     Simulator,
@@ -116,19 +117,19 @@ impl PanelWidths {
 
 impl WindowView {
     pub(super) fn project_visible(&self) -> bool {
-        self.panel.is_some() || self.preview_shown()
+        self.workspace().panel.is_some() || self.preview_shown()
     }
 
     pub(super) fn files_shown(&self) -> bool {
-        self.panel == Some(SidePanel::Files)
+        self.workspace().panel == Some(SidePanel::Files)
     }
 
     pub(super) fn git_shown(&self) -> bool {
-        self.panel == Some(SidePanel::Git)
+        self.workspace().panel == Some(SidePanel::Git)
     }
 
     pub(super) fn simulator_shown(&self) -> bool {
-        self.panel == Some(SidePanel::Simulator)
+        self.workspace().panel == Some(SidePanel::Simulator)
     }
 
     /// 右侧面板读哪个目录：当前终端的目录，取不到时是 workspace 的目录。
@@ -371,15 +372,16 @@ impl WindowView {
 
     /// 右侧面板切到 `page` 这一页，已经在这一页时收起。
     fn toggle_panel(&mut self, page: SidePanel, window: &mut Window, cx: &mut Context<Self>) {
-        self.set_panel((self.panel != Some(page)).then_some(page), window, cx);
+        self.set_panel((self.workspace().panel != Some(page)).then_some(page), window, cx);
     }
 
     /// 右侧面板切到 `panel` 这一页，为空时收起。
     fn set_panel(&mut self, panel: Option<SidePanel>, window: &mut Window, cx: &mut Context<Self>) {
         let (git_was_shown, files_were_shown) = (self.git_shown(), self.files_shown());
-        self.panel = panel;
+        let workspace = self.workspace_mut();
+        workspace.panel = panel;
         if let Some(panel) = panel {
-            self.last_panel = panel;
+            workspace.last_panel = panel;
         }
         // 收起或切走时焦点还在提交说明框或文件树里的话，按键就没处去了，交回终端。
         if git_was_shown && !self.git_shown() {
@@ -407,7 +409,7 @@ impl WindowView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
-        match self.panel? {
+        match self.workspace().panel? {
             SidePanel::Files => Some(self.render_files_panel(width, fg, bg, cx).into_any_element()),
             SidePanel::Git => Some(self.render_git_panel(width, fg, bg, window, cx).into_any_element()),
             SidePanel::Simulator => Some(self.render_simulator_panel(width, fg, bg, window, cx).into_any_element()),
@@ -421,7 +423,7 @@ impl WindowView {
         let room = viewport - sidebar - MAIN_MIN_WIDTH;
         // 放大的预览栏盖在终端区上，不占右侧的宽度。
         let preview_shown = self.preview_in_column();
-        let panel_shown = self.panel.is_some();
+        let panel_shown = self.workspace().panel.is_some();
         let panel = if panel_shown { self.panel_width.unwrap_or(PANEL_WIDTH) } else { 0. };
         let preview = if preview_shown { self.preview_width.unwrap_or(PREVIEW_WIDTH) } else { 0. };
         let preview = if preview_shown { preview.min(room - panel).max(PREVIEW_MIN_WIDTH) } else { 0. };
@@ -490,7 +492,7 @@ impl WindowView {
     /// 卡片到窗口右边的间距、右边各张卡片之间的间距，分隔线落在两张卡片中间。
     pub(super) fn right_divider_offset(&self, divider: Divider, widths: PanelWidths, cards: bool) -> f32 {
         let panels = match divider {
-            Divider::Preview => [(widths.preview, true), (widths.panel, self.panel.is_some())],
+            Divider::Preview => [(widths.preview, true), (widths.panel, self.workspace().panel.is_some())],
             _ => [(0., false), (widths.panel, true)],
         };
         let width: f32 = panels.iter().map(|(width, _)| width).sum();
@@ -504,7 +506,7 @@ impl WindowView {
     /// 标题栏右上角的按钮：先是项目命令按钮，然后是开关右侧面板的按钮，展开时底色亮一些，打开的是
     /// 上次显示的那一页。位置由调用方接着写。
     pub(super) fn render_panel_toggles(&self, fg: Rgb, bg: Rgb, window: &Window, cx: &mut Context<Self>) -> Div {
-        let shown = self.panel.is_some();
+        let shown = self.workspace().panel.is_some();
         let text = if shown { rust_i18n::t!("tooltip.hide_panel") } else { rust_i18n::t!("tooltip.show_panel") };
         let view = cx.entity().downgrade();
         let toggle = icon_toggle("toggle-panel", PANEL_RIGHT_ICON, 16., shown, fg, bg)
@@ -518,13 +520,13 @@ impl WindowView {
                 MouseButton::Left,
                 cx.listener(|this, _, window, cx| {
                     cx.stop_propagation();
-                    let panel = if this.panel.is_some() { None } else { Some(this.last_panel) };
+                    let panel = if this.workspace().panel.is_some() { None } else { Some(this.workspace().last_panel) };
                     this.set_panel(panel, window, cx);
                 }),
             )
             // 按下鼠标就办，没有 on_click，辅助工具的按下另外登记。
             .on_a11y_press(view, move |this, window, cx| {
-                let panel = if this.panel.is_some() { None } else { Some(this.last_panel) };
+                let panel = if this.workspace().panel.is_some() { None } else { Some(this.workspace().last_panel) };
                 this.set_panel(panel, window, cx);
             });
         div()
@@ -548,10 +550,10 @@ impl WindowView {
                 }
             };
             let view = cx.entity().downgrade();
-            icon_toggle(id, icon, 16., self.panel == Some(page), fg, bg)
+            icon_toggle(id, icon, 16., self.workspace().panel == Some(page), fg, bg)
                 .role(Role::Tab)
                 .aria_label(text.clone().into_owned())
-                .aria_selected(self.panel == Some(page))
+                .aria_selected(self.workspace().panel == Some(page))
                 .w(px(TOGGLE_WIDTH))
                 .h(px(TOGGLE_HEIGHT))
                 .tooltip(tooltip(text, Some(action), fg, bg))

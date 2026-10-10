@@ -281,6 +281,7 @@ impl WindowView {
                             page.stream = None;
                         }
                         page.devices = Some(sorted(devices));
+                        this.workspace_mut().simulator_device = this.simulator.selected.clone();
                         // 只看状态时设备还开着，就留着流断开的原因。
                         if connect || !this.selected_device().is_some_and(Device::online) {
                             this.simulator.error = None;
@@ -338,18 +339,43 @@ impl WindowView {
         if self.simulator.selected.as_ref() == Some(&id) {
             return;
         }
+        self.show_device(Some(id), cx);
+        self.connect_device(cx);
+    }
+
+    /// 模拟器页换成 `id` 这台设备：停掉原来那台的画面，清掉它的出错、元素和最后一帧，记进当前
+    /// workspace。不连新的那台。
+    fn show_device(&mut self, id: Option<String>, cx: &mut Context<Self>) {
+        self.workspace_mut().simulator_device = id.clone();
         let page = &mut self.simulator;
-        page.selected = Some(id);
+        page.selected = id;
         page.screen = None;
         page.stream = None;
+        // 还在连原来那台的任务一起丢掉，免得连完把它的画面装上来。
+        page.loading = None;
         page.error = None;
         page.busy = None;
         page.elements.clear();
         if let Some(frame) = page.frame.take() {
             cx.drop_image(frame, None);
         }
-        self.connect_device(cx);
         cx.notify();
+    }
+
+    /// 切到别的 workspace 后，模拟器页换成它选的设备；它还没选过时用默认的那台。
+    pub(super) fn follow_workspace_device(&mut self, cx: &mut Context<Self>) {
+        let devices = self.simulator.devices.as_deref();
+        let id = self
+            .workspace()
+            .simulator_device
+            .clone()
+            .or_else(|| devices.and_then(default_device).map(|device| device.id.clone()));
+        self.simulator.picking = false;
+        if self.simulator.selected == id {
+            self.workspace_mut().simulator_device = id;
+        } else {
+            self.show_device(id, cx);
+        }
     }
 
     /// 选中的设备开着、页显示着而画面没在推时，先问屏幕大小，再拉起推画面的进程。
@@ -439,14 +465,24 @@ impl WindowView {
     ) {
         let Some(id) = self.simulator.selected.clone() else { return };
         let path = self.simulator_path(cx);
+        let device = id.clone();
         let job = cx.background_spawn(async move {
             let mut args: Vec<&str> = args.iter().map(String::as_str).collect();
-            args.extend(["--device", &id]);
+            args.extend(["--device", &device]);
             mobilecli(path.as_deref(), &args)
         });
         cx.spawn(async move |this, cx| {
             let result = job.await;
             this.update(cx, |this, cx| {
+                // 做完时页上已经换了设备（选了别的、切到别的 workspace），结果不落到那台上：不报错、不重连。
+                // 设备列表整个窗口一份，启动这类命令改了设备的状态，只刷新列表，回到那台时看到的是新的；
+                // 正在连现在这台时不刷，免得顶掉连接的任务。
+                if this.simulator.selected.as_ref() != Some(&id) {
+                    if result.is_ok() && this.simulator.loading_done() {
+                        this.list_devices(false, cx);
+                    }
+                    return;
+                }
                 match result {
                     Ok(_) => then(this, cx),
                     Err(err) => {

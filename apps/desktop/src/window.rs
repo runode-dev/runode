@@ -267,10 +267,7 @@ pub struct WindowView {
     sidebar_width: Option<f32>,
     /// 侧栏里 workspace 列表的滚动位置。
     sidebar_scroll: ScrollHandle,
-    /// 右侧面板显示的是文件树、Git 还是模拟器，收着时为空；拖动过宽度时是那个宽度，没拖过时用默认宽度。
-    panel: Option<project::SidePanel>,
-    /// 右侧面板上次显示的那一页，标题栏的开关按钮打开它。
-    last_panel: project::SidePanel,
+    /// 右侧面板拖动过宽度时是那个宽度，没拖过时用默认宽度；显示哪一页每个 workspace 各记一份（`Workspace::panel`）。
     panel_width: Option<f32>,
     /// Git 面板里改动的文件以树形式查看，否则是列表；整个窗口一个设置。
     git_tree: bool,
@@ -433,8 +430,6 @@ impl WindowView {
             sidebar_shown: None,
             sidebar_width: None,
             sidebar_scroll: ScrollHandle::new(),
-            panel: None,
-            last_panel: project::SidePanel::Files,
             panel_width: None,
             git_tree: false,
             git_graph_collapsed: false,
@@ -532,6 +527,9 @@ impl WindowView {
                     active: 0,
                     tab_scroll: ScrollHandle::new(),
                     project: Default::default(),
+                    panel: None,
+                    last_panel: Default::default(),
+                    simulator_device: None,
                 });
                 self.activate_workspace(ix, window, cx);
             }
@@ -599,7 +597,7 @@ impl WindowView {
         let width = self.right_panel_widths(f32::from(window.viewport_size().width)).preview;
         let font = self.font_family(cx);
         // 经典样式下右侧面板收着时预览栏贴着窗口右边。
-        let rightmost = !cards(cx) && self.panel.is_none();
+        let rightmost = !cards(cx) && self.workspace().panel.is_none();
         self.render_preview_panel(width, rightmost, fg, bg, font, window, cx)
             .map_or_else(|| Empty.into_any_element(), IntoElement::into_any_element)
     }
@@ -805,7 +803,7 @@ impl WindowView {
         let left_inset = if self.sidebar_visible() { 0. } else { sidebar::sidebar_toggle_inset(fullscreen) };
         // 右侧面板的开关按钮：右侧都收着时落在标题栏右端，标题栏给它让位；打开着时落在
         // 面板顶上。全屏又只有一个标签、右侧也都收着时没有地方放，不画。放大的预览栏不在右侧。
-        let right_column = self.panel.is_some() || self.preview_in_column();
+        let right_column = self.workspace().panel.is_some() || self.preview_in_column();
         let right_inset = if shown && !right_column { project::PANEL_TOGGLES_INSET } else { 0. };
         ClassicTitlebar { fullscreen, show_tabs, shown, left_inset, right_column, right_inset }
     }
@@ -837,10 +835,10 @@ impl WindowView {
             None
         };
         let preview = preview_column.then(|| column_slot(&slots.preview, widths.preview, window));
-        let panel = self.panel.is_some().then(|| column_slot(&slots.panel, widths.panel, window));
+        let panel = self.workspace().panel.is_some().then(|| column_slot(&slots.panel, widths.panel, window));
         let right_handles = [
             preview_column.then(|| self.render_right_handle(Divider::Preview, widths.preview + widths.panel, cx)),
-            self.panel.is_some().then(|| self.render_right_handle(Divider::Panel, widths.panel, cx)),
+            self.workspace().panel.is_some().then(|| self.render_right_handle(Divider::Panel, widths.panel, cx)),
         ];
         let panel_toggles = (titlebar_shown || right_column).then(|| {
             self.render_panel_toggles(fg, bg, window, cx)
@@ -967,7 +965,7 @@ impl WindowView {
         // 放大的预览栏盖在终端区上，宽度是终端区的宽度：除去侧栏、两边的空隙和右侧面板。它盖着终端，
         // 跟着终端一起重画，不缓存。
         let maximized_preview = if self.preview_maximized() {
-            let panel = if self.panel.is_some() { widths.panel + CARD_GAP } else { 0. };
+            let panel = if self.workspace().panel.is_some() { widths.panel + CARD_GAP } else { 0. };
             let width = viewport - sidebar_width - 2. * CARD_GAP - panel;
             let font = self.font_family(cx);
             self.render_preview_panel(width, false, fg, bg, font, window, cx).map(cover_panes)
@@ -975,16 +973,18 @@ impl WindowView {
             None
         };
         let preview = self.preview_in_column().then(|| column_slot(&slots.preview, widths.preview, window));
-        let panel = self.panel.is_some().then(|| column_slot(&slots.panel, widths.panel, window));
-        let right_handles =
-            [self.preview_in_column().then_some(Divider::Preview), self.panel.is_some().then_some(Divider::Panel)]
-                .into_iter()
-                .flatten()
-                .map(|divider| {
-                    let right = self.right_divider_offset(divider, widths, true);
-                    self.render_right_handle(divider, right, cx)
-                })
-                .collect::<Vec<_>>();
+        let panel = self.workspace().panel.is_some().then(|| column_slot(&slots.panel, widths.panel, window));
+        let right_handles = [
+            self.preview_in_column().then_some(Divider::Preview),
+            self.workspace().panel.is_some().then_some(Divider::Panel),
+        ]
+        .into_iter()
+        .flatten()
+        .map(|divider| {
+            let right = self.right_divider_offset(divider, widths, true);
+            self.render_right_handle(divider, right, cx)
+        })
+        .collect::<Vec<_>>();
         let titlebar = row_slot(&slots.titlebar, TITLEBAR_HEIGHT, window);
         let panes = covered_panes(panes, maximized_preview.is_some());
         let content = div()

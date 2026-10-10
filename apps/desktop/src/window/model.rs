@@ -17,7 +17,7 @@ use runode_shared_types::{
 use super::{
     WindowView,
     persist::{self, format},
-    project::Project,
+    project::{Project, SidePanel},
     sidebar::RepoBadge,
 };
 use crate::terminal_view::{PROVISIONAL_SIZE, SHOW_WAIT, TerminalEvent, TerminalView};
@@ -95,6 +95,13 @@ pub(super) struct Workspace {
     pub(super) tab_scroll: ScrollHandle,
     /// Git 面板和文件树显示的内容。
     pub(super) project: Project,
+    /// 右侧面板显示的是文件树、Git 还是模拟器，收着时为空；每个 workspace 各记一份。
+    pub(super) panel: Option<SidePanel>,
+    /// 右侧面板上次显示的那一页，标题栏的开关按钮打开它。
+    pub(super) last_panel: SidePanel,
+    /// 模拟器页选的设备；还没选过时为空，用默认的那台。设备列表和画面流整个窗口一份，只推当前
+    /// workspace 选的那台。
+    pub(super) simulator_device: Option<String>,
 }
 
 impl Workspace {
@@ -261,6 +268,9 @@ impl WindowView {
             active: 0,
             tab_scroll: ScrollHandle::new(),
             project: Project::default(),
+            panel: None,
+            last_panel: SidePanel::default(),
+            simulator_device: None,
         };
         self.workspaces.insert(ix, workspace);
         // 插在当前 workspace 前面时它往后挪了一位；窗口里本来没有 workspace 时调用方接着切过去。
@@ -403,7 +413,13 @@ impl WindowView {
     /// 切到第 `ix` 个 workspace，显示它切走之前的那个标签。
     pub(super) fn activate_workspace(&mut self, ix: usize, window: &mut Window, cx: &mut Context<Self>) {
         let shown = self.active == ix;
+        // 分支列表可能列的是上一个 workspace 的仓库。不按下标判断换没换：关掉或拖动 workspace 时
+        // 下标和 workspace 对不上。
+        self.close_branch_picker(window, cx);
         self.active = ix;
+        // 右侧面板跟着 workspace 换，模拟器页换成它选的设备，按它开没开着模拟器页接上或停掉画面。
+        self.follow_workspace_device(cx);
+        self.simulator_panel_changed(cx);
         self.sidebar_scroll.scroll_to_item(ix);
         self.follow_workspace_in_file_search(self.workspaces[ix].id, cx);
         self.refresh_project(cx);
