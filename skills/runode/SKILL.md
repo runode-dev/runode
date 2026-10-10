@@ -30,21 +30,10 @@ window).
 Every command takes a SESSION that must match exactly one terminal; when it
 matches several, runode lists them and fails, and you pick one by id.
 
-| SESSION | means |
-| --- | --- |
-| `3fa9c2d1` | an id or any unique prefix of it, from `runode list` |
-| `self` or `.` | your own terminal |
-| `left` `right` `up` `down` | the pane next to yours |
-| `next` `prev` | the next or previous pane in your tab |
-| `pane:2` | pane 2 of your tab |
-| `tab:3`, `tab:3.2` | tab 3 of your workspace (its focused pane, or pane 2) |
-| `win:2/tab:1`, `ws:2/pane:1` | look in window 2 or workspace 2 |
-| `title:server` | the title contains "server" (ignoring case) |
-| `agent:codex`, `agent:claude:idle` | runs that agent, optionally in that state |
-| `cwd:~/src/app`, `cwd:app` | works in that directory (or one named `app`) |
-
-Positions count from 1 in the order the app shows them. Positional forms need
-an open runode window; ids, titles, agents and directories always work.
+Common forms: an id or any unique prefix of it, `self`, `left` `right` `up`
+`down` (the pane next to yours), `agent:codex` or `agent:claude:idle`,
+`title:server`, `cwd:app`. Every form, including tabs, windows and
+workspaces, is in [references/sessions.md](references/sessions.md).
 
 If there is no terminal to use, open one; it prints the new id:
 
@@ -120,52 +109,16 @@ output. When its start has scrolled away, runode says so on stderr.
 
 ```sh
 runode send right --key ctrl-c                 # interrupt the running program
-runode send right --key 'down*3' --key enter   # press down three times, then Enter
-runode send right --key esc                    # leave insert mode in vim...
-runode send right ':wq' --enter                # ...then save and quit
 runode send right --paste "$(cat snippet.py)"  # paste instead of typing
 ```
 
-A key is a letter, digit or one of `` - = [ ] \ ; ' , . / ` ``, or a name:
-`esc tab enter backspace delete insert space up down left right home end pageup
-pagedown f1`..`f12`. Put `ctrl-`, `alt-` or `shift-` in front, stacked if need
-be (`shift-tab`, `ctrl-alt-x`); `'down*3'` repeats (quote it: the shell would
-expand the `*`).
-They are encoded for whatever the program has switched on (application cursor
-keys, the kitty keyboard protocol), as if the user pressed them.
-
-One `send` types the text first, then presses the keys, then Enter; for another
-order, use several `send` commands. Text is typed literally; `--paste` sends it
-as a paste, which multi-line input and editors handle better. `-` instead of
-TEXT reads it from stdin.
+Key names, repeats, the order one `send` uses and when to paste are in
+[references/keys.md](references/keys.md).
 
 ## Typical workflows
 
-Run tests next to you and look at the failures:
-
-```sh
-runode send right 'cargo test 2>&1 | tail -50' --enter --wait --timeout 900
-runode read right --command
-```
-
-Start a dev server once and check on it later:
-
-```sh
-id=$(runode open --down --cwd ~/src/app)
-runode send "$id" 'npm run dev' --enter
-runode wait "$id" --for text 'ready|error' --timeout 120
-runode read "$id" --lines 30
-```
-
-Ask another agent to do something and collect the answer. Start it in a
-terminal of your own rather than typing into an agent the user is talking to:
-
-```sh
-id=$(runode open --right -- codex)
-runode wait "$id" --for idle --timeout 60
-runode send "$id" 'Review the diff in src/parser.rs and list bugs' --enter --wait --timeout 1800
-runode read "$id" --lines 80
-```
+Tests in the pane next to you, a dev server you check on later and a task for
+another agent, as complete commands: [references/examples.md](references/examples.md).
 
 ## Work with several agents
 

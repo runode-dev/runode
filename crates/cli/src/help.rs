@@ -200,8 +200,8 @@ Options:
 ";
 
 const SETUP: &str = "\
-Teach an agent to use runode: installs the skills runode and
-runode-simulator in ~/.claude/skills (claude) or ~/.agents/skills (codex).
+Teach an agent to use runode: installs runode's skills in ~/.claude/skills
+(claude) or ~/.agents/skills (codex).
 The latest skills come from runode's GitHub repository; without a network,
 the ones built into this version.
 

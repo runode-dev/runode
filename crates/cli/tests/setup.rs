@@ -11,9 +11,13 @@ fn claude_gets_a_skill() {
     let home = fake.env.dirs.home.clone().unwrap();
     let skill = home.join(".claude/skills/runode/SKILL.md");
     let simulator = home.join(".claude/skills/runode-simulator/SKILL.md");
+    let paths = runode_cli::setup_paths(SetupTarget::Claude, &home);
+    assert!(paths.contains(&skill) && paths.contains(&simulator));
+    assert!(paths.contains(&home.join(".claude/skills/runode/references/keys.md")));
     let (code, out, err) = run("setup claude", &fake.env);
     assert_eq!(code, exit::OK, "{err}");
-    assert_eq!(out, format!("installed {}\ninstalled {}\n", skill.display(), simulator.display()));
+    let listed: String = paths.iter().map(|path| format!("installed {}\n", path.display())).collect();
+    assert_eq!(out, listed);
     let installed = std::fs::read_to_string(&skill).unwrap();
     let installed_simulator = std::fs::read_to_string(&simulator).unwrap();
     assert!(installed_simulator.starts_with("---\nname: runode-simulator\n"), "{installed_simulator}");
@@ -22,7 +26,11 @@ fn claude_gets_a_skill() {
     // 再装一次照样，内容不变；--print 只打印，和装的一样。
     assert_eq!(run("setup claude", &fake.env).0, exit::OK);
     assert_eq!(std::fs::read_to_string(&skill).unwrap(), installed);
-    assert_eq!(run("setup claude --print", &fake.env).1, format!("{installed}\n{installed_simulator}"));
+    let printed = run("setup claude --print", &fake.env).1;
+    for (path, content) in runode_cli::bundled_skills() {
+        assert!(printed.contains(&format!("==> {path} <==\n{content}")), "{path}");
+        assert_eq!(std::fs::read_to_string(home.join(".claude/skills").join(&path)).unwrap(), content);
+    }
 }
 
 #[test]
@@ -37,7 +45,8 @@ fn codex_gets_a_skill_and_loses_the_old_section() {
         .unwrap();
     let (code, out, err) = run("setup codex", &fake.env);
     assert_eq!(code, exit::OK, "{err}");
-    assert_eq!(out, format!("installed {}\ninstalled {}\n", skill.display(), simulator.display()));
+    assert!(out.contains(&format!("installed {}\n", skill.display())), "{out}");
+    assert!(out.contains(&format!("installed {}\n", simulator.display())), "{out}");
     assert!(std::fs::read_to_string(&skill).unwrap().starts_with("---\nname: runode\n"));
     // 早先装进 AGENTS.md 的那段删掉，别的内容留着。
     assert_eq!(std::fs::read_to_string(&agents).unwrap(), "# Mine\n\nAlways run the tests.\n");
@@ -59,7 +68,8 @@ fn refresh_rewrites_only_installed_skills() {
 
     // 装过的：旧了、缺了一份都重装成这一版的；一样时不动。
     runode_cli::setup(SetupTarget::Claude, home, &skills).unwrap();
-    let [skill, simulator] = <[_; 2]>::try_from(runode_cli::setup_paths(SetupTarget::Claude, home)).unwrap();
+    let skill = home.join(".claude/skills/runode/SKILL.md");
+    let simulator = home.join(".claude/skills/runode-simulator/SKILL.md");
     let current = std::fs::read_to_string(&skill).unwrap();
     assert!(!runode_cli::refresh(SetupTarget::Claude, home, &skills).unwrap());
     std::fs::write(&skill, "old").unwrap();
