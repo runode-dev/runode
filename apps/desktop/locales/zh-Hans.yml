@@ -800,6 +800,8 @@ settings:
     default_model: 默认模型
     default_none: 不设
     not_in_infer: 不在 runode-infer 里
+    not_downloaded: 没下载
+    no_key: 没填密钥
     chat_unsupported: 这个版本的 runode-infer 还不能跑大模型，升级后再来。
     keep_alive: 空闲多久卸载
     keep_alive_hint: 加载着的模型这么多分钟没有请求就卸载，腾出内存；常驻的不卸载。

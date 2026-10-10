@@ -60,10 +60,15 @@ pub(super) struct State {
     inputs: Option<Inputs>,
     /// 上次看到 `DecisionPulls` 里正在下的模型，有一个不在了就是下完了，重新读状态。
     pulling: Vec<String>,
-    /// 分段控件选着哪一类；只记在界面里，不写配置。
-    kind: Kind,
+    /// 分段控件选着哪一类；只记在界面里，不写配置。用户没点过时为 `None`，按 `chat_supported` 取。
+    kind: Option<Kind>,
     /// 这一页发出了 `load`、还没回话的模型；加载要好几分钟，各行自己记，不占 `busy`。
     loading_models: HashSet<String>,
+    /// 这一页发出了 `unload`、`pin` 或 `unpin`、还没回话的模型；那一行的卸载按钮和常驻开关灰着。
+    busy_models: HashSet<String>,
+    /// 每发出、办完一个改 runode-infer 状态的操作加一；定时读 `ps`、`config` 出发和回来时对不上就整轮
+    /// 丢掉，免得旧数据盖掉刚改的。
+    epoch: u64,
     /// 服务在跑时定时读 `ps` 的任务；丢掉就停。
     poll: Option<Task<()>>,
     /// 空闲时间的输入框，第一次显示那一行时建。
@@ -79,13 +84,14 @@ impl State {
 
 struct KeepAlive {
     input: Entity<TextField>,
+    /// 上次程序写进输入框的文字；输入框里还是它就是用户没改过。
+    shown: String,
     _subscriptions: [gpui::Subscription; 2],
 }
 
 /// 模型的类型，runode-infer 的 `kind`。
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Kind {
-    #[default]
     Chat,
     Decision,
 }
@@ -328,7 +334,8 @@ impl SettingsView {
                     cards.push(self.keep_alive_row(config.keep_alive, colors, window, cx).into_any_element());
                 }
 
-                let kind = self.decision.kind;
+                let kind =
+                    self.decision.kind.unwrap_or(if status.chat_supported { Kind::Chat } else { Kind::Decision });
                 let options = [Kind::Chat, Kind::Decision]
                     .into_iter()
                     .map(|kind| {
@@ -346,7 +353,7 @@ impl SettingsView {
                     colors,
                     cx,
                     |this, value, _, cx| {
-                        this.decision.kind = if value == Kind::Chat.name() { Kind::Chat } else { Kind::Decision };
+                        this.decision.kind = Some(if value == Kind::Chat.name() { Kind::Chat } else { Kind::Decision });
                         cx.notify();
                     },
                 );
@@ -607,6 +614,7 @@ impl SettingsView {
         // 下好的本机模型：常驻开关只改设置文件，服务没在跑也能改；加载、卸载要服务在跑，不靠设置，
         // 读设置出错时照样显示。
         let manage = model.installed && pull.is_none();
+        let busy = self.decision.busy_models.contains(&model.id);
         let pin = status.config.as_ref().filter(|_| manage).map(|config| {
             let on = config.pinned.contains(&model.id);
             let id = model.id.clone();
@@ -620,6 +628,8 @@ impl SettingsView {
                 .child(tr("settings.decision.pin"))
                 .child(
                     switch(element_id("decision-pin"), label, on, colors)
+                        .aria_disabled(busy)
+                        .when(busy, |switch| switch.opacity(0.5))
                         .on_press(cx, move |this, _, cx| this.pin_model(id.clone(), !on, cx)),
                 )
         });
@@ -637,6 +647,8 @@ impl SettingsView {
                 let label = rust_i18n::t!("settings.decision.unload_label", model = model.id).into_owned();
                 button(element_id("decision-unload"), tr("settings.decision.unload"), colors)
                     .aria_label(label)
+                    .aria_disabled(busy)
+                    .when(busy, |button| button.opacity(0.5))
                     .on_press(cx, move |this, _, cx| this.unload_model(id.clone(), cx))
             } else {
                 let label = rust_i18n::t!("settings.decision.load_label", model = model.id).into_owned();
@@ -668,9 +680,9 @@ impl SettingsView {
         if let Some(field) = &self.decision.keep_alive {
             return field.input.clone();
         }
-        let input = cx.new(|cx| {
-            TextField::editing(minutes(keep_alive), 0, cx).with_label(tr("settings.decision.keep_alive_label"))
-        });
+        let shown = minutes(keep_alive);
+        let input =
+            cx.new(|cx| TextField::editing(shown.clone(), 0, cx).with_label(tr("settings.decision.keep_alive_label")));
         let changed = cx.subscribe_in(&input, window, |this, _, event: &TextFieldEvent, window, cx| match event {
             TextFieldEvent::Changed(_) => {}
             TextFieldEvent::Next | TextFieldEvent::Previous => this.commit_keep_alive(cx),
@@ -684,7 +696,7 @@ impl SettingsView {
             }
         });
         let blurred = cx.on_focus_out(&input.focus_handle(cx), window, |this, _, _, cx| this.commit_keep_alive(cx));
-        self.decision.keep_alive = Some(KeepAlive { input: input.clone(), _subscriptions: [changed, blurred] });
+        self.decision.keep_alive = Some(KeepAlive { input: input.clone(), shown, _subscriptions: [changed, blurred] });
         input
     }
 
@@ -696,25 +708,39 @@ impl SettingsView {
     }
 
     fn set_keep_alive_text(&mut self, text: String, cx: &mut Context<Self>) {
-        if let Some(field) = &self.decision.keep_alive {
-            field.input.update(cx, |input, cx| input.set_query(text, cx));
+        if let Some(field) = &mut self.decision.keep_alive {
+            field.input.update(cx, |input, cx| input.set_query(text.clone(), cx));
+            field.shown = text;
         }
     }
 
-    /// 读到了新的空闲时间：输入框里还是旧值（用户没在改）时换成新的。
+    /// 读到了新的空闲时间：输入框里还是上次写进去的（用户没在改）时换成新的。按输入框自己记的
+    /// `KeepAlive::shown` 比，不按快照里的设置：快照中途可能没有设置（读出错、重新读），那时不跟。
     fn keep_alive_changed(&mut self, keep_alive: u64, cx: &mut Context<Self>) {
-        let (Some(old), Some(field)) = (self.keep_alive_setting(), &self.decision.keep_alive) else { return };
-        if old != keep_alive && field.input.read(cx).query().trim() == minutes(old) {
-            self.set_keep_alive_text(minutes(keep_alive), cx);
+        let Some(field) = &mut self.decision.keep_alive else { return };
+        let text = field.input.read(cx).query().trim().to_owned();
+        let new = minutes(keep_alive);
+        if !keep_alive_follows(&text, &field.shown, &new) {
+            return;
+        }
+        if text == new {
+            // 用户填的正是新值（比如刚提交的回话）：不动光标，只记下。
+            field.shown = new;
+        } else {
+            self.set_keep_alive_text(new, cx);
         }
     }
 
-    /// 把输入框里的分钟数写给 runode-infer；和显示的当前值一样时不写（比如 90 秒显示成 1 分钟，失焦时
-    /// 不该改成 60 秒）。范围由 runode-infer 查，越界时它报错。
+    /// 把输入框里的分钟数写给 runode-infer；和上次写进输入框的一样时不写（用户没改过；比如 90 秒显示成
+    /// 1 分钟，失焦时不该改成 60 秒）。范围由 runode-infer 查，越界时它报错。
     pub(super) fn commit_keep_alive(&mut self, cx: &mut Context<Self>) {
-        let (Some(keep_alive), Some(field)) = (self.keep_alive_setting(), &self.decision.keep_alive) else { return };
+        // 页上没显示空闲时间那一行时不写。
+        if self.keep_alive_setting().is_none() {
+            return;
+        }
+        let Some(field) = &self.decision.keep_alive else { return };
         let text = field.input.read(cx).query().trim().to_owned();
-        if text == minutes(keep_alive) {
+        if !keep_alive_edited(&text, &field.shown) {
             self.decision.errors.remove(KEEP_ALIVE);
             cx.notify();
             return;
@@ -731,12 +757,21 @@ impl SettingsView {
         });
     }
 
-    /// 常驻开关：`runode-infer pin` 或 `unpin`。
+    /// 常驻开关：`runode-infer pin` 或 `unpin`。这个模型还有 `pin`、`unpin`、`unload` 没回话时不办。
     fn pin_model(&mut self, model: String, pin: bool, cx: &mut Context<Self>) {
+        if self.decision.busy_models.contains(&model) {
+            return;
+        }
         self.decision.errors.remove(&model);
         let command = if pin { "pin" } else { "unpin" };
         let area = model.clone();
-        self.run_infer(&[command, &model], cx, move |this, result, cx| this.config_replied(result, &area, cx));
+        let started = self.run_infer(&[command, &model], cx, move |this, result, cx| {
+            this.decision.busy_models.remove(&area);
+            this.config_replied(result, &area, cx)
+        });
+        if started {
+            self.decision.busy_models.insert(model);
+        }
     }
 
     /// `config`、`pin`、`unpin` 交回的设置换进状态，失败的原因记在 `area` 下面。加载着的模型里的
@@ -775,18 +810,25 @@ impl SettingsView {
     }
 
     fn unload_model(&mut self, model: String, cx: &mut Context<Self>) {
+        if self.decision.busy_models.contains(&model) {
+            return;
+        }
         self.decision.errors.remove(&model);
         let name = model.clone();
-        self.run_infer(&["unload", &model], cx, move |this, result, cx| {
+        let started = self.run_infer(&["unload", &model], cx, move |this, result, cx| {
+            this.decision.busy_models.remove(&name);
             if let Err(err) = result {
                 this.decision.errors.insert(name, err);
             }
             this.refresh_decision(cx);
         });
+        if started {
+            self.decision.busy_models.insert(model);
+        }
     }
 
     /// 在后台跑 `runode-infer <args> --json`，不占 `busy`；办完在界面线程上把结果交给 `done`。找不到
-    /// runode-infer 时不跑，返回假。
+    /// runode-infer 时不跑，返回假。跑的都是改状态的命令，发出和办完时各给 `State::epoch` 加一。
     fn run_infer(
         &mut self,
         args: &[&str],
@@ -800,6 +842,7 @@ impl SettingsView {
         };
         let path = self.shell_path.clone();
         let args: Vec<String> = args.iter().map(|arg| (*arg).to_owned()).collect();
+        self.decision.epoch += 1;
         let job = cx.background_spawn(async move {
             let args: Vec<&str> = args.iter().map(String::as_str).collect();
             run(&program, path.as_deref(), &args, None)
@@ -807,6 +850,8 @@ impl SettingsView {
         cx.spawn(async move |this, cx| {
             let result = job.await;
             this.update(cx, |this, cx| {
+                // 办着时出发的定时读取可能读到改之前的，回来时也丢掉。
+                this.decision.epoch += 1;
                 done(this, result, cx);
                 cx.notify();
             })
@@ -818,7 +863,9 @@ impl SettingsView {
     }
 
     /// 服务在跑时每隔 `POLL_INTERVAL` 在后台读一次 `ps` 和 `config`，只换加载着的模型和设置，没变时
-    /// 不重画；同时读 `status`，服务在别处停掉了就重新读整套状态。服务不在跑时停掉。换页时 `State::stop_polling`、收起设置页时 `State` 跟着丢掉，也就停了。
+    /// 不重画（旧版没有 `config` 命令，不读）；同时读 `status`，服务在别处停掉了就重新读整套状态。读的时候
+    /// 这一页改过状态（`State::epoch` 变了）就整轮丢掉。服务不在跑时停掉；换页时 `State::stop_polling`、
+    /// 收起设置页时 `State` 跟着丢掉，也就停了。
     fn keep_polling(&mut self, running: bool, cx: &mut Context<Self>) {
         if !running {
             self.decision.poll = None;
@@ -833,16 +880,30 @@ impl SettingsView {
             loop {
                 cx.background_executor().timer(POLL_INTERVAL).await;
                 let (program, path) = (program.clone(), path.clone());
+                // 已经认定是旧版（没有 `config` 命令）时不再白跑它。
+                let Ok((epoch, legacy)) = this.read_with(cx, |this, _| {
+                    let legacy = matches!(
+                        &this.decision.snapshot,
+                        Some(Snapshot::Ready(Status { config: None, config_error: None, .. }))
+                    );
+                    (this.decision.epoch, legacy)
+                }) else {
+                    break;
+                };
                 // 设置也一起读：在终端里 pin、改空闲时间时，开关和输入框跟着变。
                 let (ps, config, service) = cx
                     .background_spawn(async move {
                         let run = |args: &[&str]| run(&program, path.as_deref(), args, None);
-                        (run(&["ps"]), run(&["config"]), run(&["status"]))
+                        (run(&["ps"]), (!legacy).then(|| run(&["config"])), run(&["status"]))
                     })
                     .await;
                 let alive = this.update(cx, |this, cx| {
+                    // 读的时候这一页改过状态：读到的可能是改之前的，整轮丢掉，等下一轮。
+                    if this.decision.epoch != epoch {
+                        return;
+                    }
                     // `ps`、`config` 读不到时留着上次的。
-                    let config = config.ok().as_ref().and_then(parse_config);
+                    let config = config.and_then(Result::ok).as_ref().and_then(parse_config);
                     if let Some(config) = &config {
                         this.keep_alive_changed(config.keep_alive, cx);
                     }
@@ -890,6 +951,7 @@ impl SettingsView {
             return;
         };
         self.decision.busy = Some(busy);
+        self.decision.epoch += 1;
         self.decision.errors.remove(area);
         let (area, path) = (area.to_owned(), self.shell_path.clone());
         let args: Vec<String> = args.iter().map(|arg| (*arg).to_owned()).collect();
@@ -901,6 +963,7 @@ impl SettingsView {
             let result = job.await;
             this.update(cx, |this, cx| {
                 this.decision.busy = None;
+                this.decision.epoch += 1;
                 if let Err(err) = result {
                     this.decision.errors.insert(area, err);
                 } else if let Some(inputs) = &this.decision.inputs {
@@ -983,8 +1046,8 @@ fn start_pull(program: PathBuf, path: Option<OsString>, model: String, stopped: 
 }
 
 /// 默认模型下拉框里的选项：(值, 补充说明的翻译键)。先是「不设」（空值，删掉这个键），再是这一类下好的
-/// 本机模型，决策模型再加上填了密钥的托管模型；配置里写着、列表里又没有的值也放进去，标上不在
-/// runode-infer 里，不悄悄吞掉用户手写的值。
+/// 本机模型，决策模型再加上填了密钥的托管模型；配置里写着、列表里又没有的值也放进去，标上为什么不在
+/// （没下载、没填密钥、不在 runode-infer 里），不悄悄吞掉用户手写的值。
 fn model_choices(kind: Kind, status: &Status, current: Option<&str>) -> Vec<(String, Option<&'static str>)> {
     let keyed = |provider: &str| match provider {
         "typesafe" => status.typesafe,
@@ -998,7 +1061,15 @@ fn model_choices(kind: Kind, status: &Status, current: Option<&str>) -> Vec<(Str
     if let Some(current) = current
         && !items.iter().any(|(id, _)| id == current)
     {
-        items.push((current.to_owned(), Some("settings.decision.not_in_infer")));
+        // 下好的本机模型、填了密钥的托管模型已经在列表里，这里找到的就是没下载、没填密钥的。
+        let detail = if status.models.iter().any(|m| m.kind == kind && m.id == current) {
+            "settings.decision.not_downloaded"
+        } else if status.hosted.iter().any(|h| h.kind == kind && h.id == current) {
+            "settings.decision.no_key"
+        } else {
+            "settings.decision.not_in_infer"
+        };
+        items.push((current.to_owned(), Some(detail)));
     }
     items
 }
@@ -1028,6 +1099,16 @@ fn provider_id(prefix: &str, provider: Provider) -> SharedString {
 /// 输入框里显示的分钟数。
 fn minutes(seconds: u64) -> String {
     (seconds / 60).to_string()
+}
+
+/// 输入框里的 `text`（去掉首尾空白）和上次程序写进去的 `shown` 不一样，就是用户改过。
+fn keep_alive_edited(text: &str, shown: &str) -> bool {
+    text != shown
+}
+
+/// 读到新的空闲时间（`new`，显示成的分钟数）时输入框跟不跟：用户没改过，或者改成的正是新值。
+fn keep_alive_follows(text: &str, shown: &str, new: &str) -> bool {
+    !keep_alive_edited(text, shown) || text == new
 }
 
 /// 给人看的大小，比如 `6.5 GB`。
@@ -1097,11 +1178,21 @@ fn load(path: Option<&OsStr>) -> Snapshot {
 
 fn load_status(program: &Path, path: Option<&OsStr>) -> Result<Status, String> {
     let status = run(program, path, &["status"], None)?;
-    let catalog = run(program, path, &["catalog"], None)?;
-    let installed = run(program, path, &["list"], None)?;
     let running = status["running"].as_bool().unwrap_or(false);
-    let loaded = if running { run(program, path, &["ps"], None)? } else { Value::Null };
-    let (config, config_error) = match run(program, path, &["config"], None) {
+    // 别的几个互不相干，一起跑；`ps` 要服务在跑。
+    let (catalog, installed, loaded, config) = std::thread::scope(|scope| {
+        let spawn = |args: &'static [&'static str]| scope.spawn(move || run(program, path, args, None));
+        let join = |handle: std::thread::ScopedJoinHandle<'_, Result<Value, String>>| {
+            handle.join().unwrap_or_else(|_| Err(format!("{PROGRAM}: panicked")))
+        };
+        let (catalog, installed) = (spawn(&["catalog"]), spawn(&["list"]));
+        let loaded = running.then(|| spawn(&["ps"]));
+        let config = spawn(&["config"]);
+        (join(catalog), join(installed), loaded.map(join), join(config))
+    });
+    let (catalog, installed) = (catalog?, installed?);
+    let loaded = loaded.transpose()?.unwrap_or(Value::Null);
+    let (config, config_error) = match config {
         Ok(data) => (parse_config(&data), None),
         // 旧版没有 `config` 命令：当作不支持加载、卸载和常驻。
         Err(err) if lacks_command(&err) => (None, None),
@@ -1334,8 +1425,17 @@ mod tests {
                 item("cf/clef-flash", false)
             ]
         );
-        // jev-latest 没填 TypeSafe 的密钥，不在列表里：手写了的照样列出来，标上不在 runode-infer 里。
-        assert_eq!(values(Kind::Decision, Some("jev-latest")).last(), Some(&item("jev-latest", true)));
+        // 列表里没有的当前值照样列出来，标上为什么不在：没填密钥的托管模型、没下载的本机模型、
+        // runode-infer 不知道的。
+        let detail =
+            |status: &Status, kind, current| model_choices(kind, status, Some(current)).pop().and_then(|i| i.1);
+        assert_eq!(detail(&status, Kind::Decision, "jev-latest"), Some("settings.decision.no_key"));
+        assert_eq!(detail(&status, Kind::Decision, "nope"), Some("settings.decision.not_in_infer"));
+        // 别的类的模型也算不在这一类里。
+        assert_eq!(detail(&status, Kind::Chat, "cf/clef-flash"), Some("settings.decision.not_in_infer"));
+        let mut missing = status.clone();
+        missing.models[0].installed = false;
+        assert_eq!(detail(&missing, Kind::Chat, "gemma-4-e4b:gguf-q4_0"), Some("settings.decision.not_downloaded"));
         assert_eq!(values(Kind::Chat, Some("")).len(), 3);
     }
 
@@ -1380,6 +1480,18 @@ mod tests {
         assert_eq!(LoadState::of(Some(&loaded[3]), true), Some(LoadState::Loading));
         assert_eq!(LoadState::of(None, true), Some(LoadState::Loading));
         assert_eq!(LoadState::of(None, false), None);
+    }
+
+    #[test]
+    fn keep_alive_input_follows_only_untouched_text() {
+        // 输入框还是上次写进去的 5：没改过，不提交，读到新值 10 时跟上。
+        assert!(!keep_alive_edited("5", "5"));
+        assert!(keep_alive_follows("5", "5", "10"));
+        // 用户改成 7：要提交，读到 10 时不盖掉。
+        assert!(keep_alive_edited("7", "5"));
+        assert!(!keep_alive_follows("7", "5", "10"));
+        // 用户改成的正好是读到的新值（比如自己提交后的回话）：跟上，之后不再当成改过。
+        assert!(keep_alive_follows("10", "5", "10"));
     }
 
     #[test]

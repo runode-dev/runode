@@ -800,6 +800,8 @@ settings:
     default_model: Default model
     default_none: None
     not_in_infer: not in runode-infer
+    not_downloaded: not downloaded
+    no_key: no API key
     chat_unsupported: This version of runode-infer can't run chat models yet. Update it, then come back.
     keep_alive: Unload when idle
     keep_alive_hint: A loaded model with no requests for this many minutes is unloaded to free memory. Models kept loaded stay.
