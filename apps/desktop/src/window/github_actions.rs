@@ -445,7 +445,7 @@ impl WindowView {
             return;
         };
         adding.edit.release_focus(&self.focus_handle(cx), window, cx);
-        let name = adding.edit.text(cx);
+        let name = adding.edit.text(cx).trim().to_owned();
         if commit && !name.is_empty() {
             self.set_in_terminal(adding.secret, adding.scope, &name, window, cx);
         }
@@ -1260,8 +1260,7 @@ impl WindowView {
         self.workspace()
             .pinned_workflows
             .iter()
-            .enumerate()
-            .map(|(ix, pin)| {
+            .map(|pin| {
                 let latest = match page.data.get(&Query::WorkflowRuns(pin.id)) {
                     Some(Ok(Data::Runs(runs))) => runs.first(),
                     _ => None,
@@ -1273,7 +1272,7 @@ impl WindowView {
                 };
                 let url = latest.map(|run| run.url.clone());
                 div()
-                    .id(("status-workflow", ix))
+                    .id(SharedString::from(format!("status-workflow-{}", pin.id)))
                     .role(Role::Button)
                     .aria_label(pin.name.clone())
                     .aria_description(description.clone())
@@ -1308,7 +1307,7 @@ fn state_icon(state: State, fg: Rgb) -> gpui::Svg {
         State::Skipped => (ACTIONS_SKIPPED_ICON, hsla(fg).opacity(0.5)),
         State::InProgress => (ACTIONS_INPROGRESS_ICON, hsla(MODIFIED)),
         State::Queued => (ACTIONS_QUEUED_ICON, hsla(MODIFIED)),
-        State::Waiting => (ACTIONS_WAITING_ICON, hsla(MODIFIED)),
+        State::Waiting | State::ActionRequired => (ACTIONS_WAITING_ICON, hsla(MODIFIED)),
         State::Pending => (ACTIONS_PENDING_ICON, hsla(fg).opacity(0.5)),
     };
     svg().flex_none().path(icon).size(px(13.)).text_color(color)
@@ -1322,7 +1321,7 @@ fn state_label(state: State) -> Cow<'static, str> {
         State::Skipped => rust_i18n::t!("github_actions.state.skipped"),
         State::InProgress => rust_i18n::t!("github_actions.state.in_progress"),
         State::Queued => rust_i18n::t!("github_actions.state.queued"),
-        State::Waiting => rust_i18n::t!("github_actions.state.waiting"),
+        State::Waiting | State::ActionRequired => rust_i18n::t!("github_actions.state.waiting"),
         State::Pending => rust_i18n::t!("github_actions.state.pending"),
     }
 }

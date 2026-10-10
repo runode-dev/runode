@@ -121,6 +121,8 @@ pub(super) enum State {
     Queued,
     /// 等人批准，或者等部署环境的保护规则。
     Waiting,
+    /// 已经结束，要人批准以后才会真的跑（比如来自 fork 的 PR）；图标和等待一样，但不会再变，也取消不了。
+    ActionRequired,
     Pending,
 }
 
@@ -130,7 +132,8 @@ impl State {
             ("completed", "success" | "neutral") => Self::Success,
             ("completed", "cancelled") => Self::Cancelled,
             ("completed", "skipped" | "stale") => Self::Skipped,
-            ("completed", "action_required") | ("waiting" | "action_required", _) => Self::Waiting,
+            ("completed", "action_required") => Self::ActionRequired,
+            ("waiting" | "action_required", _) => Self::Waiting,
             ("completed", _) => Self::Failure,
             ("in_progress", _) => Self::InProgress,
             ("queued" | "requested", _) => Self::Queued,
@@ -412,6 +415,8 @@ mod tests {
         assert_eq!(State::of("in_progress", ""), State::InProgress);
         assert_eq!(State::of("queued", ""), State::Queued);
         assert_eq!(State::of("waiting", ""), State::Waiting);
+        assert_eq!(State::of("completed", "action_required"), State::ActionRequired);
+        assert!(!State::of("completed", "action_required").running());
         assert_eq!(State::of("pending", ""), State::Pending);
         assert!(State::of("pending", "").running());
         assert!(!State::of("completed", "failure").running());
