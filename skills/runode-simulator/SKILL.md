@@ -13,13 +13,16 @@ which prints JSON, on the same device, and the user sees every tap you make.
 
 ## Before you start
 
-Ask the user to open the simulator page (View > Simulator, cmd-shift-M by
-default) and to pick or boot the device there; you cannot open the page from
-the command line. Then find the device's id:
+Find the booted device and its id:
 
 ```sh
 mobilecli devices          # booted devices: id, name, platform, type
 ```
+
+If it lists one, use it and tell the user to watch it on the simulator page
+(View > Simulator, cmd-shift-M by default). If it lists none or several, ask
+the user to pick or boot the device on that page; you cannot open the page
+from the command line.
 
 Do not open Simulator.app (`open -a Simulator`) or start a second emulator
 window, and do not run a project script that does: the page already shows the
@@ -29,24 +32,22 @@ is already booted:
 
 ```sh
 xcodebuild -project App.xcodeproj -scheme App -configuration Debug \
-  -destination "platform=iOS Simulator,id=$id" -derivedDataPath build/dd build
+  -destination "platform=iOS Simulator,id=$id" -derivedDataPath build/dd -quiet build
 xcrun simctl install "$id" build/dd/Build/Products/Debug-iphonesimulator/App.app
 xcrun simctl launch --terminate-running-process "$id" com.example.app
 
 adb -s "$id" install -r app/build/outputs/apk/debug/app-debug.apk
 ```
 
-Long builds go in a pane of their own (`runode open --right`, then `runode
-send ... --enter --wait`, see the runode skill) so the user can watch them.
-
 ## Drive the device
 
 ```sh
-mobilecli dump ui --device <id>                     # elements with their rects
-mobilecli snapshot --device <id>                    # the same as text
-mobilecli screenshot --device <id> --output /tmp/screen.png   # then read the image
+mobilecli snapshot --device <id>                    # elements as text, each with a ref like @e5
+mobilecli dump ui --device <id>                     # the same as JSON with rects, nested in children
+mobilecli screenshot --device <id> --output /tmp/screen.png --max-size 800   # then read the image
+mobilecli io tap --device <id> @e5                  # the centre of that element
 mobilecli io tap --device <id> 120,640              # screen points on iOS, pixels on Android
-mobilecli io longpress --device <id> 120,640
+mobilecli io longpress --device <id> @e5
 mobilecli io swipe --device <id> 200,700,200,200
 mobilecli io text --device <id> 'hello'             # types into the focused field
 mobilecli io button --device <id> HOME              # BACK on Android only
@@ -55,9 +56,10 @@ mobilecli apps launch --device <id> com.example.app
 mobilecli device logs --device <id> --filter process=App --limit 100
 ```
 
-Find what to tap in `dump ui` and tap the centre of its rect rather than
-guessing from a screenshot; after each step dump or screenshot again to check
-that the screen changed the way you expected, and report what you saw.
+Tap elements by the ref from the latest `snapshot` or `dump ui` rather than
+by coordinates guessed from a screenshot; after each step take a snapshot or
+screenshot again to check that the screen changed the way you expected, and
+report what you saw.
 
 The first command on an iOS simulator may fail with "agent is not installed":
 run `mobilecli agent install --device <id>` once. A real iPhone needs a
