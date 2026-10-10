@@ -12,6 +12,8 @@ syntect.workspace = true
 two-face.workspace = true
 # Markdown 解析成不碰界面的块结构。
 pulldown-cmark.workspace = true
+# 标题锚点按 Unicode 分类留字，标准库认不出组合记号。
+regex.workspace = true
 
 [lints]
 workspace = true

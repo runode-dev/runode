@@ -220,6 +220,7 @@ impl WindowView {
             (None, None) => None,
         };
         let new_name = name.clone();
+        let had_shortcut = dialog.initial_shortcut.is_some();
         let job = cx.background_spawn(async move {
             let file = Dirs::from_env().tasks_file().ok_or("no home directory")?;
             // 编辑本项目的命令时还是那个项目；加到本项目时现查终端目录在哪个仓库里。
@@ -239,8 +240,13 @@ impl WindowView {
             this.update_in(cx, |this, window, cx| {
                 match saved {
                     Ok((project, elsewhere)) => {
+                        // 一个键只能绑一条命令：别处同名的命令还用着它时，改了名的这条不跟着拿走，告诉用户；
+                        // 对话框里的键还在，再保存就是改绑到这条上。
+                        let kept = elsewhere && had_shortcut && matches!(keybind, Some(TaskKeybind::Rename { .. }));
                         let keybind = if elsewhere { keybind.and_then(TaskKeybind::keep_old) } else { keybind };
-                        let bound = keybind.map_or(Ok(()), |keybind| write_task_keybind(&keybind, cx));
+                        let bound = keybind.map_or(Ok(()), |keybind| write_task_keybind(&keybind, cx)).and_then(|()| {
+                            if kept { Err(rust_i18n::t!("tasks.shortcut_kept_elsewhere").into_owned()) } else { Ok(()) }
+                        });
                         this.workspace_mut().project.tasks_stale = true;
                         this.list_tasks(cx);
                         match bound {

@@ -146,7 +146,7 @@ fn tables_and_images_become_rows() {
         Path::new("/repo"),
         |path| (path == Path::new("/repo/a.png")).then(|| Picture::Svg(Arc::new(RenderImage::new(Vec::new())))),
     );
-    let Leaf::Table { aligns, head, rows } = &doc.rows[0].leaf else { panic!() };
+    let Leaf::Table { aligns, head, rows, .. } = &doc.rows[0].leaf else { panic!() };
     assert_eq!(aligns, &[Align::Left, Align::Right]);
     assert_eq!(head[1].text.as_ref(), "b");
     assert_eq!(rows[0][0].text.as_ref(), "1");
@@ -236,4 +236,30 @@ fn reloads_release_only_pictures_the_new_doc_drops() {
     let new = Doc::new(parse("text\n\n![](keep.png)\n"), Path::new("/repo"), pictures);
     let unused: Vec<_> = old.unused_pictures(&new).into_iter().map(Picture::key).collect();
     assert!(unused == [bitmap(2).key()], "只放掉 gone.png");
+}
+
+/// 撑列宽的格子按终端里占几格挑：汉字算两格，表头也算一行。
+#[test]
+fn widest_cells_count_wide_characters() {
+    let rich = |text: &str| Rich { text: text.to_owned().into(), ..Rich::default() };
+    let head = [rich("names"), rich("n")];
+    let rows = [vec![rich("abc"), rich("123")], vec![rich("中文"), rich("4")], vec![rich("x")]];
+    assert_eq!(widest_cells(2, &head, &rows), [0, 1]);
+    assert_eq!(widest_cells(2, &[rich("ab"), rich("1")], &rows), [2, 1]);
+}
+
+/// 表格只画露出来（连同上下多画的 `OVERDRAW`）的表体行：表头 30 高、表体每行 20 高、1000 行，列表 600 高。
+#[test]
+fn shown_rows_cover_the_viewport() {
+    let shown =
+        |item_ix, offset: f32| shown_rows(ListOffset { item_ix, offset_in_item: px(offset) }, 600., 5, 30., 20., 1000);
+    // 滚到表格里：上面多画 400，下面露出的 600 再多画 400。
+    assert_eq!(shown(5, 1030.), 30..101);
+    // 表格从视口里或视口下面开始：从第一行画到视口加多画的那段。
+    assert_eq!(shown(3, 0.), 0..49);
+    // 表格整个在视口上面：只画底下多画的那段。
+    assert_eq!(shown(7, 0.), 980..1000);
+    // 刚滚进表格、空表格都不越界。
+    assert_eq!(shown(5, 0.), 0..49);
+    assert_eq!(shown_rows(ListOffset { item_ix: 5, offset_in_item: px(0.) }, 600., 5, 30., 20., 0), 0..0);
 }

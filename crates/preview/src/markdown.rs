@@ -20,10 +20,15 @@ use std::{
     mem,
     ops::Range,
     path::Path,
-    sync::atomic::{AtomicBool, Ordering},
+    sync::{
+        LazyLock,
+        atomic::{AtomicBool, Ordering},
+    },
 };
 
 use pulldown_cmark::{Alignment, BlockQuoteKind, CodeBlockKind, Event, Options, Parser, Tag, TagEnd};
+
+use regex::Regex;
 
 use crate::highlight::{Span, highlight_code};
 
@@ -215,18 +220,16 @@ pub fn parse_markdown(text: &str, cancel: &AtomicBool) -> Option<Vec<Block>> {
     (!cancel.load(Ordering::Relaxed)).then_some(builder.root)
 }
 
-/// GitHub 给标题算锚点的规则（github-slugger）：转小写，去掉标点和符号（留下字母、数字、`-`、`_`
-/// 和空格），空格换成 `-`。重名的由调用方加编号。
+/// 标题算锚点时留下的字：字母、组合记号（天城文的元音符号和 virama、分解写法的重音）、十进制和字母型
+/// 数字（`²`、`½` 这类不算）、连接标点（`_` 等）、`-` 和空格，和 github-slugger 按的分类一样。
+static SLUG_KEPT: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"[\p{L}\p{M}\p{Nd}\p{Nl}\p{Pc} -]+").expect("写死的正则"));
+
+/// GitHub 给标题算锚点的规则（github-slugger）：转小写，只留 `SLUG_KEPT` 里的字，空格换成 `-`。
+/// 重名的由调用方加编号。
 fn slug(text: &str) -> String {
-    text.to_lowercase()
-        .chars()
-        .filter_map(|ch| match ch {
-            ' ' => Some('-'),
-            '-' | '_' => Some(ch),
-            _ if ch.is_alphanumeric() => Some(ch),
-            _ => None,
-        })
-        .collect()
+    let lower = text.to_lowercase();
+    SLUG_KEPT.find_iter(&lower).map(|kept| kept.as_str()).collect::<String>().replace(' ', "-")
 }
 
 /// 给一篇文档里的标题发锚点，和 GitHub 一样重名的依次加 `-1`、`-2`。
@@ -413,6 +416,19 @@ struct Table {
     row: Vec<Vec<Inline>>,
 }
 
+/// 块开头时行内样式和链接叠了几层；块结束时退回这个样子，块里没闭上的 HTML 标签（`<b>`、`<a href>`）
+/// 不带到后面的块里。
+#[derive(Clone, Copy, Default)]
+struct InlineState {
+    bold: u32,
+    italic: u32,
+    strike: u32,
+    kbd: u32,
+    html_code: u32,
+    links: usize,
+    html_links: usize,
+}
+
 #[derive(Default)]
 struct Builder<'a> {
     /// 总是有；只为了能 `Default`。
@@ -433,6 +449,10 @@ struct Builder<'a> {
     links: Vec<String>,
     /// 没闭上的 HTML `<a>` 各自往 `links` 里压了地址没有（`<a name>` 这类没有 `href` 的不压）。
     html_links: Vec<bool>,
+    /// 正在收的 Markdown 段落、标题、表格单元格或 HTML 标题开头的样子，见 `InlineState`。
+    inline_saved: Option<InlineState>,
+    /// 各层没摊平的列表项开头的样子：紧凑列表项里的文字没有段落标记，项结束时退回。
+    item_saved: Vec<InlineState>,
     /// 没闭上的 HTML 块级标签，最多 `MAX_NESTING` 个，再多的不记。
     html_open: Vec<HtmlOpen>,
     /// 最近收的块是 `Block::Images`，之后只来过空格：再来的图片并进那一块。
@@ -550,7 +570,10 @@ impl Builder<'_> {
                 self.flush_implicit();
                 self.stack.push(Frame::List { start, loose: false, items: Vec::new() });
             }
-            Tag::Item => self.stack.push(Frame::Item(ListItem::default())),
+            Tag::Item => {
+                self.item_saved.push(self.inline_state());
+                self.stack.push(Frame::Item(ListItem::default()));
+            }
             Tag::FootnoteDefinition(label) => {
                 self.flush_implicit();
                 self.stack.push(Frame::Footnote(label.to_lowercase(), Vec::new()));
@@ -591,7 +614,10 @@ impl Builder<'_> {
             return;
         }
         match tag {
-            TagEnd::Paragraph | TagEnd::Heading(_) => self.close_inlines(),
+            TagEnd::Paragraph | TagEnd::Heading(_) => {
+                self.close_inlines();
+                self.restore_inline_state();
+            }
             TagEnd::BlockQuote(_) => {
                 self.flush_implicit();
                 if let Some(Frame::Quote(alert, blocks)) = self.stack.pop() {
@@ -630,6 +656,9 @@ impl Builder<'_> {
             }
             TagEnd::Item => {
                 self.flush_implicit();
+                if let Some(saved) = self.item_saved.pop() {
+                    self.set_inline_state(saved);
+                }
                 if let Some(Frame::Item(item)) = self.stack.pop()
                     && let Some(Frame::List { items, .. }) = self.stack.last_mut()
                 {
@@ -649,6 +678,7 @@ impl Builder<'_> {
             }
             TagEnd::TableCell => {
                 self.open = None;
+                self.restore_inline_state();
                 let cell = self.autolink();
                 if let Some(table) = &mut self.table {
                     table.row.push(cell);
@@ -817,6 +847,9 @@ impl Builder<'_> {
             _ if html_heading(name).is_some() || HTML_BLOCKS.contains(&name) => {
                 // 先收起段落、标题，块还算在居中的标签里。
                 self.close_html_inlines();
+                if html_heading(name).is_some() {
+                    self.restore_inline_state();
+                }
                 self.image_run = false;
                 if let Some(ix) = self.html_open.iter().rposition(|open| open.name == name) {
                     self.html_open.truncate(ix);
@@ -869,9 +902,41 @@ impl Builder<'_> {
 
     fn open_inlines(&mut self, open: Open) {
         self.flush_implicit();
+        self.inline_saved = Some(self.inline_state());
         self.image_run = false;
         self.open = Some(open);
         self.inlines.clear();
+    }
+
+    fn inline_state(&self) -> InlineState {
+        InlineState {
+            bold: self.bold,
+            italic: self.italic,
+            strike: self.strike,
+            kbd: self.kbd,
+            html_code: self.html_code,
+            links: self.links.len(),
+            html_links: self.html_links.len(),
+        }
+    }
+
+    /// 退回块开头的样子 `saved`：块里 HTML 开了没关的行内标签退掉。Markdown 自己的强调、链接在块里
+    /// 总是成对的。
+    fn set_inline_state(&mut self, saved: InlineState) {
+        self.bold = saved.bold;
+        self.italic = saved.italic;
+        self.strike = saved.strike;
+        self.kbd = saved.kbd;
+        self.html_code = saved.html_code;
+        self.links.truncate(saved.links);
+        self.html_links.truncate(saved.html_links);
+    }
+
+    /// 段落、标题、单元格结束时退回它开头的样子。
+    fn restore_inline_state(&mut self) {
+        if let Some(saved) = self.inline_saved.take() {
+            self.set_inline_state(saved);
+        }
     }
 
     /// 收起正在收的段落或标题；只有空白的段落（比如两张图片之间的换行）不要。

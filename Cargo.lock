@@ -5273,6 +5273,7 @@ name = "runode-preview"
 version = "0.1.5"
 dependencies = [
  "pulldown-cmark",
+ "regex",
  "syntect",
  "two-face",
 ]

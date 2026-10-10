@@ -455,14 +455,16 @@ fn bare_urls_become_links_outside_code() {
 
 #[test]
 fn heading_ids_follow_github_slugs() {
-    let ids: Vec<String> = parse("# Hello, World!\n## Hello World\n### hello world\n# 中文 标题\n# `code` & more\n")
-        .into_iter()
-        .filter_map(|block| match block {
-            Block::Heading { id, .. } => Some(id),
-            _ => None,
-        })
-        .collect();
-    assert_eq!(ids, ["hello-world", "hello-world-1", "hello-world-2", "中文-标题", "code--more"]);
+    let ids: Vec<String> =
+        parse("# Hello, World!\n## Hello World\n### hello world\n# 中文 标题\n# `code` & more\n# नमस्ते x²\n")
+            .into_iter()
+            .filter_map(|block| match block {
+                Block::Heading { id, .. } => Some(id),
+                _ => None,
+            })
+            .collect();
+    // 天城文的 virama（`्`）是组合记号，留着；上标数字不留。
+    assert_eq!(ids, ["hello-world", "hello-world-1", "hello-world-2", "中文-标题", "code--more", "नमस्ते-x"]);
 }
 
 /// 网址后面紧跟中文标点时到标点为止；中文域名、路径里的汉字照算。
@@ -522,4 +524,20 @@ fn deep_nesting_is_capped() {
     }
     // 套得深但没到上限的照常嵌套。
     assert_eq!(depth(&parse(&format!("{}x\n", "> ".repeat(10)))), 10);
+}
+
+/// 块里没闭上的 `<b>`、`<a href>` 不带到后面的段落里。
+#[test]
+fn unclosed_inline_html_does_not_leak_into_later_blocks() {
+    let blocks = parse("<b>bold\n\n<a href=\"x\">link\n\nplain\n");
+    let Some(Block::Paragraph(last)) = blocks.last() else { panic!("{blocks:?}") };
+    assert_eq!(last.len(), 1);
+    assert!(!last[0].style.bold);
+    assert_eq!(last[0].link, None);
+    // 紧凑列表项没有段落标记、HTML 标题不经 Markdown 的标题，结束时也退回。
+    for text in ["- <b>one\n- two\n\nafter\n", "<h1><b>Title</h1>\n\nafter\n"] {
+        let blocks = parse(text);
+        let Some(Block::Paragraph(last)) = blocks.last() else { panic!("{blocks:?}") };
+        assert!(!last[0].style.bold, "{text:?}: {blocks:?}");
+    }
 }

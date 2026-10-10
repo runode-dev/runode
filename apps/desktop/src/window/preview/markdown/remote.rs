@@ -8,6 +8,7 @@ use std::{
     collections::HashMap,
     io::Read as _,
     net::{IpAddr, Ipv4Addr, Ipv6Addr, ToSocketAddrs as _},
+    panic::{self, AssertUnwindSafe},
     path::Path,
     process::{Command, Stdio},
     sync::{
@@ -83,7 +84,8 @@ fn fetch_with(
             let (done, result) = oneshot::channel();
             let url = url.to_owned();
             let job: Job = Box::new(move || {
-                let picture = work(&url);
+                // 解码坏图之类 panic 了当作下不了：地址照常去掉好重试，下载线程也不跟着退出。
+                let picture = panic::catch_unwind(AssertUnwindSafe(|| work(&url))).ok().flatten();
                 if picture.is_none() {
                     downloads.lock().unwrap_or_else(PoisonError::into_inner).remove(&url);
                 }
@@ -415,11 +417,17 @@ mod tests {
         assert!(futures::executor::block_on(fetch_with(&DOWNLOADS, url, run(Some(picture())))).unwrap().is_some());
         assert!(futures::executor::block_on(fetch_with(&DOWNLOADS, url, run(None))).unwrap().is_some());
         assert_eq!(RUNS.load(Ordering::SeqCst), 2);
+        // 下载时 panic 了当作下不了，再要时重下。
+        let broken = "https://example.com/broken.png";
+        let panics = |_: &str| -> Option<Picture> { panic!("坏图") };
+        assert!(futures::executor::block_on(fetch_with(&DOWNLOADS, broken, panics)).unwrap().is_none());
+        assert!(futures::executor::block_on(fetch_with(&DOWNLOADS, broken, run(Some(picture())))).unwrap().is_some());
+        assert_eq!(RUNS.load(Ordering::SeqCst), 3);
         // 本机地址不排进下载队列。
         assert!(
             futures::executor::block_on(fetch_with(&DOWNLOADS, "http://localhost/a.png", run(None))).unwrap().is_none()
         );
-        assert_eq!(RUNS.load(Ordering::SeqCst), 2);
+        assert_eq!(RUNS.load(Ordering::SeqCst), 3);
     }
 
     #[test]

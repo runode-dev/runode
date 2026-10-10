@@ -250,6 +250,7 @@ tasks:
   shortcut_clear: "清除"
   shortcut_taken: "「%{what}」現在用著這個鍵，儲存後改成執行這條命令。"
   shortcut_not_applied: "命令存好了，快捷鍵沒改成：設定裡還有別的 keybind 行蓋著它，可能在 config-file 引入的檔案裡，要到設定裡改那一行。"
+  shortcut_kept_elsewhere: "命令存好了，快捷鍵沒跟著改名：別處還有同名的命令用著這個鍵。要把它改給這條命令，再儲存一次。"
 files:
   new_file: 新增檔案…
   new_folder: 新增檔案夾…

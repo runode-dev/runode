@@ -150,6 +150,14 @@ enum Note {
 }
 
 impl Preview {
+    /// 能排版显示：不是 diff 标签的 Markdown 文件，也没截断。截断的文件排版到一半会悄悄结束、代码块
+    /// 可能切成两半，只给看源码，源码视图末尾有截断的说明。
+    fn typesettable(&self) -> bool {
+        self.diff.is_none()
+            && runode_preview::is_markdown(&self.path)
+            && !matches!(self.content, Some(Loaded::Text { truncated: true, .. }))
+    }
+
     fn new(path: PathBuf, diff: Option<DiffTarget>, pinned: bool) -> Self {
         let real_path = fs::canonicalize(&path).unwrap_or_else(|_| path.clone());
         Self {
@@ -571,15 +579,21 @@ impl WindowView {
                         }
                     };
                     let lines = match &mut content {
-                        Loaded::Text { lines, highlights, markdown, .. } => {
+                        Loaded::Text { lines, highlights, markdown, truncated, .. } => {
                             *highlights = old_highlights;
-                            *markdown = old_markdown;
+                            if *truncated {
+                                if let Some(old) = old_markdown {
+                                    old.release(cx);
+                                }
+                            } else {
+                                *markdown = old_markdown;
+                            }
                             if let Some((anchor, head)) = &mut preview.selection {
                                 let last = lines.len().saturating_sub(1);
                                 *anchor = (*anchor).min(last);
                                 *head = (*head).min(last);
                             }
-                            Some(lines.clone())
+                            Some((lines.clone(), *truncated))
                         }
                         _ => {
                             if let Some(old) = old_markdown {
@@ -596,10 +610,10 @@ impl WindowView {
                 })
                 .ok()
                 .flatten();
-            let Some(lines) = lines else {
+            let Some((lines, truncated)) = lines else {
                 return;
             };
-            if is_markdown {
+            if is_markdown && !truncated {
                 let doc = cx
                     .background_spawn({
                         let (cancel, lines, path) = (cancel.clone(), lines.clone(), path.clone());
@@ -757,14 +771,13 @@ impl WindowView {
             };
         // 这几个按钮只有按下的处理，辅助工具按不到，另外登记按下时做的事。
         let view = cx.entity().downgrade();
-        let is_markdown = preview.diff.is_none() && runode_preview::is_markdown(&preview.path);
         let typeset = self.markdown_shown(preview);
         let buttons = div()
             .flex_none()
             .flex()
             .items_center()
             .gap(px(2.))
-            .when(is_markdown, |buttons| {
+            .when(preview.typesettable(), |buttons| {
                 let text =
                     if typeset { rust_i18n::t!("preview.show_source") } else { rust_i18n::t!("preview.show_rendered") };
                 // 悬停提示说按了会怎样，跟着状态换；报给辅助工具的名字不换，开着表示正显示源码。

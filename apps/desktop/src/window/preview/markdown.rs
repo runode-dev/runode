@@ -125,6 +125,35 @@ fn row_hint(font_size: f32) -> Pixels {
     px(font_size * LINE_HEIGHT * 2.)
 }
 
+/// 表格每列估计最宽的格子在第几行（表头算第 0 行）：按终端里占几格估，不量字体。表格只画看得见的
+/// 行，每列另垫一个看不见的这格撑住列宽，滚动时列宽不跟着露出的行跳。
+fn widest_cells(columns: usize, head: &[Rich], rows: &[Vec<Rich>]) -> Vec<usize> {
+    let cells = || std::iter::once(head).chain(rows.iter().map(Vec::as_slice)).enumerate();
+    let width = |rich: &Rich| rich.text.chars().map(|ch| usize::from(runode_terminal::cell_width(ch))).sum::<usize>();
+    (0..columns.max(1))
+        .map(|column| cells().max_by_key(|(_, row)| row.get(column).map_or(0, width)).map_or(0, |(row_ix, _)| row_ix))
+        .collect()
+}
+
+/// 第 `ix` 行的表格要画表体的哪几行：露出来的，连同列表上下多画的 `OVERDRAW`。`top` 是列表滚到哪儿，
+/// `viewport` 是列表的高，`head_h`、`body_h` 是表头和表体一行的高。从这一行的顶上算起，行上面的间距
+/// 让范围往下偏一点，多画的那段盖得住。
+fn shown_rows(top: ListOffset, viewport: f32, ix: usize, head_h: f32, body_h: f32, rows: usize) -> Range<usize> {
+    let total = head_h + rows as f32 * body_h;
+    let (from, to) = if top.item_ix == ix {
+        let offset = f32::from(top.offset_in_item);
+        (offset - OVERDRAW, offset + viewport + OVERDRAW)
+    } else if top.item_ix < ix {
+        // 从视口里或视口下面开始。
+        (0., viewport + OVERDRAW)
+    } else {
+        // 整个在视口上面，只有底下多画的那段。
+        (total - OVERDRAW, total)
+    };
+    let row = |y: f32| (((y - head_h) / body_h).max(0.) as usize).min(rows);
+    row(from)..(row(to) + 1).min(rows)
+}
+
 /// 摊平后的整篇文档。
 pub(super) struct Doc {
     pub rows: Vec<Row>,
@@ -173,6 +202,8 @@ pub(super) enum Leaf {
         aligns: Vec<Align>,
         head: Vec<Rich>,
         rows: Vec<Vec<Rich>>,
+        /// 每列估计最宽的格子在第几行（表头算第 0 行），见 `widest_cells`。
+        widest: Vec<usize>,
     },
     /// 分割线；在脚注前面时是一条细线。
     Rule,
@@ -438,11 +469,13 @@ impl Flatten<'_> {
                     let (text, spans) = code_text(&lines, &highlights);
                     Leaf::Code { text: text.into(), spans, source: lines.join("\n").into() }
                 }
-                Block::Table { aligns, head, rows } => Leaf::Table {
-                    aligns,
-                    head: head.iter().map(|cell| self.rich(cell)).collect(),
-                    rows: rows.iter().map(|row| row.iter().map(|cell| self.rich(cell)).collect()).collect(),
-                },
+                Block::Table { aligns, head, rows } => {
+                    let head: Vec<_> = head.iter().map(|cell| self.rich(cell)).collect();
+                    let rows: Vec<Vec<_>> =
+                        rows.iter().map(|row| row.iter().map(|cell| self.rich(cell)).collect()).collect();
+                    let widest = widest_cells(aligns.len(), &head, &rows);
+                    Leaf::Table { aligns, head, rows, widest }
+                }
                 Block::Rule => Leaf::Rule,
                 Block::Images(images) => Leaf::Images(
                     images
@@ -876,9 +909,9 @@ fn link_nodes(rich: &Rich, view: &WeakEntity<WindowView>) -> Vec<AnyElement> {
 }
 
 impl WindowView {
-    /// 预览栏现在是不是 Markdown 的排版视图：普通标签、Markdown 文件、没切到源码。
+    /// 预览栏现在是不是 Markdown 的排版视图：普通标签、没截断的 Markdown 文件、没切到源码。
     pub(super) fn markdown_shown(&self, preview: &Preview) -> bool {
-        !self.preview_source && preview.diff.is_none() && runode_preview::is_markdown(&preview.path)
+        !self.preview_source && preview.typesettable()
     }
 
     /// 排版视图；还没解析完时空着。`width` 是预览栏的宽度，图片据此缩小；`mono` 是终端字体。
@@ -1153,13 +1186,37 @@ impl WindowView {
                     )
                     .into_any_element()
             }
-            Leaf::Table { aligns, head, rows } => {
+            Leaf::Table { aligns, head, rows, widest } => {
                 let columns = aligns.len().max(1);
                 let empty = Rich::default();
-                // 一列一列排：每列的宽是它最宽的格子（max-content），格子一样高，各行自然对齐。
+                let all = || std::iter::once(head).chain(rows);
+                // 表头上下两条边、表体一条，格子一样高，按像素就知道哪几行露出来。
+                let (head_h, body_h) = (line_height + 14., line_height + 13.);
+                let viewport = f32::from(view.list.viewport_bounds().size.height);
+                let shown = shown_rows(view.list.logical_scroll_top(), viewport, ix, head_h, body_h, rows.len());
+                let (above, below) = (shown.start as f32 * body_h, (rows.len() - shown.end) as f32 * body_h);
+                // 一列一列排：每列的宽是它最宽的格子（max-content），格子一样高，各行自然对齐。只画表头
+                // 和露出来的行，上下用空白占住没画的行；每列垫一个看不见、不占高的估计最宽的格子撑住列宽。
                 let table = div().flex().flex_none().whitespace_nowrap().children((0..columns).map(|column| {
-                    let cells = std::iter::once(head).chain(rows).map(|row| row.get(column).unwrap_or(&empty));
-                    div().flex_none().flex().flex_col().children(cells.enumerate().map(|(row_ix, cell)| {
+                    let sizer = widest.get(column).and_then(|&row_ix| {
+                        let cell = all().nth(row_ix)?.get(column)?;
+                        let mono: Vec<_> = cell
+                            .runs
+                            .iter()
+                            .filter(|(_, style, _)| style.code || style.kbd)
+                            .map(|(range, ..)| (range.clone(), mono.clone()))
+                            .collect();
+                        let styled = StyledText::new(cell.text.clone())
+                            .with_highlights(rich_highlights(cell, colors, None))
+                            .with_font_family_overrides(mono);
+                        let sizer = div().h_0().overflow_hidden().invisible().px(px(13.)).border_r_1();
+                        Some(sizer.when(row_ix == 0, |cell| cell.font_weight(FontWeight::SEMIBOLD)).child(styled))
+                    });
+                    let body = rows.iter().enumerate().skip(shown.start).take(shown.len());
+                    let cells = std::iter::once((0, head))
+                        .chain(body.map(|(row_ix, row)| (row_ix + 1, row)))
+                        .map(|(row_ix, row)| (row_ix, row.get(column).unwrap_or(&empty)));
+                    let cells = cells.map(|(row_ix, cell)| {
                         // 表头算第 0 行；表体的偶数行（第 2、4……行）垫底色。
                         let border = if row_ix == 0 { 2. } else { 1. };
                         div()
@@ -1185,7 +1242,16 @@ impl WindowView {
                             .border_color(colors.border)
                             .when(row_ix > 0 && row_ix % 2 == 0, |cell| cell.bg(colors.subtle))
                             .child(paint.rich(cell, (ix, columns * row_ix + column)))
-                    }))
+                            .into_any_element()
+                    });
+                    let mut cells: Vec<AnyElement> = cells.collect();
+                    if above > 0. {
+                        cells.insert(1, div().h(px(above)).into_any_element());
+                    }
+                    if below > 0. {
+                        cells.push(div().h(px(below)).into_any_element());
+                    }
+                    div().flex_none().flex().flex_col().children(sizer).children(cells)
                 }));
                 div()
                     .id(("md-table", ix))
