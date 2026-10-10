@@ -819,15 +819,32 @@ impl SettingsView {
             loop {
                 cx.background_executor().timer(POLL_INTERVAL).await;
                 let (program, path) = (program.clone(), path.clone());
-                let ps = cx.background_spawn(async move { run(&program, path.as_deref(), &["ps"], None) }).await;
+                // 设置也一起读：在终端里 pin、改空闲时间时，开关和输入框跟着变。
+                let (ps, config) = cx
+                    .background_spawn(async move {
+                        let run = |args: &[&str]| run(&program, path.as_deref(), args, None);
+                        (run(&["ps"]), run(&["config"]))
+                    })
+                    .await;
                 let alive = this.update(cx, |this, cx| {
                     // 读不到（比如服务刚被别处停掉）时先留着上次的，等重新读状态时再说。
-                    if let (Ok(ps), Some(Snapshot::Ready(status))) = (ps, &mut this.decision.snapshot) {
+                    let config = config.ok().as_ref().and_then(parse_config);
+                    if let Some(config) = &config {
+                        this.keep_alive_changed(config.keep_alive, cx);
+                    }
+                    let Some(Snapshot::Ready(status)) = &mut this.decision.snapshot else { return };
+                    let mut changed = false;
+                    if let Ok(ps) = ps {
                         let loaded = parse_loaded(&ps);
-                        if status.loaded != loaded {
-                            status.loaded = loaded;
-                            cx.notify();
-                        }
+                        changed |= status.loaded != loaded;
+                        status.loaded = loaded;
+                    }
+                    if config.is_some() && status.config != config {
+                        status.config = config;
+                        changed = true;
+                    }
+                    if changed {
+                        cx.notify();
                     }
                 });
                 if alive.is_err() {
