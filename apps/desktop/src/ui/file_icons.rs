@@ -78,6 +78,7 @@ icons! {
     C = "c",
     H = "h",
     SWIFT = "swift",
+    DART = "dart",
     XML = "xml",
     IMAGE = "image",
     SVG = "svg",
@@ -138,6 +139,7 @@ fn icon_by_name(name: &str) -> Option<&'static str> {
         ".dockerignore" | "docker-compose.yml" | "docker-compose.yaml" | "compose.yml" | "compose.yaml" => DOCKER,
         "rust-toolchain" => TOML,
         "go.mod" | "go.sum" => GO,
+        "pubspec.yaml" => DART,
         _ => {
             // 这几类常带后缀写成一族名字：`LICENSE-MIT`、`Dockerfile.dev`、`.env.local`，
             // 按名字的开头认。
@@ -180,6 +182,7 @@ fn icon_by_extension(ext: &str) -> Option<&'static str> {
         "c" | "cc" | "cpp" | "cxx" | "m" | "mm" => C,
         "h" | "hh" | "hpp" | "hxx" => H,
         "swift" => SWIFT,
+        "dart" => DART,
         "xml" | "plist" | "xib" | "storyboard" | "entitlements" => XML,
         "png" | "jpg" | "jpeg" | "gif" | "webp" | "bmp" | "ico" | "icns" | "tif" | "tiff" | "avif" | "heic" => IMAGE,
         "svg" => SVG,
@@ -202,6 +205,8 @@ mod tests {
         assert_eq!(file_icon("Cargo.toml"), TOML);
         assert_eq!(file_icon("pnpm-lock.yaml"), LOCK);
         assert_eq!(file_icon("ci.yaml"), YAML);
+        assert_eq!(file_icon("pubspec.yaml"), DART);
+        assert_eq!(file_icon("me_header.dart"), DART);
         assert_eq!(file_icon("package-lock.json"), LOCK);
         assert_eq!(file_icon("package.json"), JSON);
         assert_eq!(file_icon("CLAUDE.md"), MARKDOWN_GUIDE);
