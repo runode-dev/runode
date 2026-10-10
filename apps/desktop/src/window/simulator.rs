@@ -59,6 +59,8 @@ const LONG_PRESS: Duration = Duration::from_millis(500);
 const MAX_FRAME_BYTES: usize = 16 << 20;
 /// 辅助工具开着时隔多久重读一次设备里的元素：画面自己会变，agent 也在操作同一台设备。
 const ELEMENTS_POLL: Duration = Duration::from_secs(2);
+/// 画面流断了以后隔多久再看一次设备是不是关了。
+const SHUTDOWN_POLL: Duration = Duration::from_secs(2);
 /// 设备四周的留白。
 const SCREEN_PADDING: f32 = 12.;
 /// 灵动岛的颜色，和真机的一样是黑的，深浅主题下都不变。
@@ -244,7 +246,7 @@ impl WindowView {
     pub(super) fn simulator_panel_changed(&mut self, cx: &mut Context<Self>) {
         if self.simulator_shown() {
             if self.simulator.devices.is_none() {
-                self.list_devices(cx);
+                self.list_devices(true, cx);
             } else if self.simulator.stream.is_none() {
                 self.connect_device(cx);
             }
@@ -253,7 +255,8 @@ impl WindowView {
         }
     }
 
-    fn list_devices(&mut self, cx: &mut Context<Self>) {
+    /// 列一遍设备；`connect` 为假时只更新设备的状态，不拉起画面，画面流断了以后用它看出设备是不是关了。
+    fn list_devices(&mut self, connect: bool, cx: &mut Context<Self>) {
         let path = self.simulator_path(cx);
         let job = cx.background_spawn(async move { mobilecli(path.as_deref(), &["devices", "--include-offline"]) });
         self.simulator.loading = Some(cx.spawn(async move |this, cx| {
@@ -270,18 +273,50 @@ impl WindowView {
                             page.stream = None;
                         }
                         page.devices = Some(sorted(devices));
-                        page.error = None;
+                        // 只看状态时设备还开着，就留着流断开的原因。
+                        if connect || !this.selected_device().is_some_and(Device::online) {
+                            this.simulator.error = None;
+                        }
                     }
                     Err(err) => {
                         page.devices.get_or_insert_default();
                         page.error = Some(err);
                     }
                 }
-                this.connect_device(cx);
+                if connect {
+                    this.connect_device(cx);
+                }
                 cx.notify();
             })
             .ok();
         }));
+    }
+
+    /// 画面流断了以后隔一会儿列一遍设备，最多十来秒：模拟器正在关时流先断，
+    /// mobilecli 要等关完、不再是 Booted 才报 offline。
+    fn watch_device_shutdown(&mut self, cx: &mut Context<Self>) {
+        let id = self.simulator.selected.clone();
+        cx.spawn(async move |this, cx| {
+            for _ in 0..6 {
+                // 选了别的设备、重连了或在连、页收起了、设备已经报关了，都不用再看。
+                let stalled = this.update(cx, |this, cx| {
+                    let stalled = this.simulator.selected == id
+                        && this.simulator.stream.is_none()
+                        && this.simulator.loading_done()
+                        && this.simulator_shown()
+                        && this.selected_device().is_some_and(Device::online);
+                    if stalled {
+                        this.list_devices(false, cx);
+                    }
+                    stalled
+                });
+                if !matches!(stalled, Ok(true)) {
+                    return;
+                }
+                cx.background_executor().timer(SHUTDOWN_POLL).await;
+            }
+        })
+        .detach();
     }
 
     fn selected_device(&self) -> Option<&Device> {
@@ -361,11 +396,13 @@ impl WindowView {
                             return;
                         }
                     }
-                    // 流断了（设备关了、mobilecli 退了），留着最后一帧，等用户按重连。
+                    // 流断了（设备关了、mobilecli 退了），留着最后一帧，等用户按重连；
+                    // 设备关了时换成「没在运行」和启动按钮。
                     this.update(cx, |this, cx| {
                         let page = &mut this.simulator;
                         page.stream = None;
                         page.error.get_or_insert_with(|| rust_i18n::t!("simulator.stream_ended").into_owned());
+                        this.watch_device_shutdown(cx);
                         cx.notify();
                     })
                     .ok();
@@ -419,7 +456,7 @@ impl WindowView {
             vec!["device".into(), "boot".into()],
             |this, cx| {
                 this.simulator.busy = None;
-                this.list_devices(cx);
+                this.list_devices(true, cx);
             },
             cx,
         );
@@ -554,10 +591,10 @@ impl WindowView {
                 MouseButton::Left,
                 cx.listener(|this, _, _, cx| {
                     cx.stop_propagation();
-                    this.list_devices(cx);
+                    this.list_devices(true, cx);
                 }),
             )
-            .on_a11y_press(view.clone(), |this, _, cx| this.list_devices(cx));
+            .on_a11y_press(view.clone(), |this, _, cx| this.list_devices(true, cx));
         let shell = panel_shell("simulator-panel", width, fg, bg, cx)
             .bg(hsla(bg.mix(fg, 0.03)))
             .text_size(px(12.))
@@ -836,17 +873,22 @@ impl WindowView {
             .into_any_element()
     }
 
-    /// 设备下面那条胶囊形的工具栏：主屏幕键、音量键和电源键，Android 另有返回键。
+    /// 设备下面那条胶囊形的工具栏：主屏幕键、音量键和电源键，Android 另有返回键，iOS 模拟器没有音量键。
     fn render_device_toolbar(&self, device: &Device, fg: Rgb, bg: Rgb, cx: &mut Context<Self>) -> Div {
         let view = cx.entity().downgrade();
+        // mobilecli 在 iOS 上不认 POWER，锁屏键叫 LOCK；Android 那边只认 POWER。
+        let power = if device.android() { "POWER" } else { "LOCK" };
         let mut keys = vec![
             ("HOME", HOME_BUTTON_ICON, rust_i18n::t!("simulator.home")),
             ("VOLUME_DOWN", VOLUME_DOWN_ICON, rust_i18n::t!("simulator.volume_down")),
             ("VOLUME_UP", VOLUME_UP_ICON, rust_i18n::t!("simulator.volume_up")),
-            ("POWER", POWER_ICON, rust_i18n::t!("simulator.power")),
+            (power, POWER_ICON, rust_i18n::t!("simulator.power")),
         ];
         if device.android() {
             keys.insert(0, ("BACK", ARROW_LEFT_ICON, rust_i18n::t!("simulator.back")));
+        } else if device.kind != "real" {
+            // XCTest 的音量键只在真机上有用，iOS 模拟器上 mobilecli 回 ok 却什么都不做。
+            keys.retain(|(button, ..)| !button.starts_with("VOLUME"));
         }
         let keys = keys.into_iter().map(|(button, icon, text)| {
             icon_toggle(button, icon, 14., false, fg, bg)
