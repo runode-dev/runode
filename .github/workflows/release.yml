@@ -254,6 +254,8 @@ jobs:
 
   check-macos-x86_64:
     # x86_64 的 Mac 包是交叉编译的，打包时没跑过；公开前在 Intel 机器上跑一下，起不来就不发。
+    # shortcut: 只能在 Intel runner 上跑，GitHub 停掉 macos-15-intel 时这一步等不到机器、整个发版卡住；
+    # 到时改在 macos-15 上用 Rosetta 跑（arch -x86_64），或者不再发 x86_64。
     needs: [prepare, build-macos]
     runs-on: macos-15-intel
     steps:
