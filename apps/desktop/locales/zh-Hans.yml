@@ -44,6 +44,7 @@ menu:
   toggle_status_bar: 显示或隐藏状态栏
   toggle_git: 显示或隐藏 Git
   toggle_files: 显示或隐藏文件
+  toggle_simulator: 显示或隐藏模拟器
   toggle_tasks: 项目命令…
   toggle_full_screen: 切换全屏
   window: 窗口
@@ -314,6 +315,7 @@ tooltip:
   hide_git: 隐藏 Git
   show_files: 显示文件
   hide_files: 隐藏文件
+  show_simulator: 显示模拟器
   show_panel: 显示面板
   hide_panel: 隐藏面板
   tasks: 命令
@@ -855,3 +857,33 @@ mobile:
   paired_on: "配对于 %{date}"
   date: "%{y}/%{m}/%{d}"
   pair_another: "与另一台设备配对"
+simulator:
+  swipe_up: 在画面上向上滑
+  swipe_down: 在画面上向下滑
+  swipe_left: 在画面上向左滑
+  swipe_right: 在画面上向右滑
+  booting: 正在启动设备…
+  choose_device: 选择设备
+  not_running: 这台设备没有启动。
+  connecting: 正在连接…
+  agent_missing: 第一次用这台模拟器时，mobilecli 要往里装它的 agent，才能显示画面、转发点按。
+  agent_missing_real: 真机要用你的描述文件签好 mobilecli 的 agent。在终端里运行 mobilecli agent install --device %{id} --provisioning-profile <路径>，再按刷新。
+  refresh: 刷新设备列表
+  loading: 正在列出设备…
+  missing: 没有找到 mobilecli。在终端里运行 npm i -g mobilecli 装好后按刷新。
+  no_devices: 没有设备。开一个 iOS 模拟器或 Android 模拟器后按刷新。
+  devices: 设备
+  real: 真机
+  virtual: 模拟器
+  offline: 未启动
+  boot: 启动
+  install_agent: 安装 mobilecli 的 agent
+  installing_agent: 正在往设备里装 mobilecli 的 agent…
+  reconnect: 重连
+  stream_ended: 画面断了
+  type_text: 往设备里打字，回车发送
+  home: 主屏幕
+  back: 返回
+  volume_down: 音量−
+  volume_up: 音量+
+  power: 电源

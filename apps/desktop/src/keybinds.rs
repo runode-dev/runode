@@ -30,7 +30,7 @@ use crate::{
         OpenSelectedFile, PreviousTab, PreviousWorkspace, RenameFile, RenameWorkspace, ResizePane, RevealInFinder,
         RunNamedTask, SelectFirstFile, SelectLastFile, SelectLastTab, SelectLastWorkspace, SelectNextFile,
         SelectPreviousFile, SelectTab, SelectWorkspace, ToggleFiles, ToggleGit, TogglePaneZoom, ToggleSidebar,
-        ToggleStatusBar, ToggleTasks,
+        ToggleSimulator, ToggleStatusBar, ToggleTasks,
     },
 };
 
@@ -97,6 +97,7 @@ fn gpui_action(action: Action) -> (Box<dyn gpui::Action>, Contexts) {
         Action::ToggleStatusBar => (boxed(ToggleStatusBar), WINDOW),
         Action::ToggleGit => (boxed(ToggleGit), WINDOW),
         Action::ToggleFiles => (boxed(ToggleFiles), WINDOW),
+        Action::ToggleSimulator => (boxed(ToggleSimulator), WINDOW),
         Action::ToggleTasks => (boxed(ToggleTasks), WINDOW),
         Action::RunTask(name) => (boxed(RunNamedTask(name)), WINDOW),
         Action::GotoAgent => (boxed(GotoAgent), WINDOW),

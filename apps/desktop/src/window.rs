@@ -39,6 +39,7 @@ mod quit;
 mod remote;
 mod settings_page;
 mod sidebar;
+mod simulator;
 mod status_bar;
 mod tasks;
 mod titlebar;
@@ -120,6 +121,8 @@ actions!(
         ToggleGit,
         /// 显示或隐藏右侧的文件树。
         ToggleFiles,
+        /// 显示或隐藏右侧的模拟器页。
+        ToggleSimulator,
         /// 打开或关掉标题栏上的项目命令菜单。
         ToggleTasks,
         /// 打开或关掉列出所有窗口里 agent 的浮层。
@@ -262,7 +265,7 @@ pub struct WindowView {
     sidebar_width: Option<f32>,
     /// 侧栏里 workspace 列表的滚动位置。
     sidebar_scroll: ScrollHandle,
-    /// 右侧面板显示的是文件树还是 Git，收着时为空；拖动过宽度时是那个宽度，没拖过时用默认宽度。
+    /// 右侧面板显示的是文件树、Git 还是模拟器，收着时为空；拖动过宽度时是那个宽度，没拖过时用默认宽度。
     panel: Option<project::SidePanel>,
     /// 右侧面板上次显示的那一页，标题栏的开关按钮打开它。
     last_panel: project::SidePanel,
@@ -276,6 +279,8 @@ pub struct WindowView {
     git_focus: FocusHandle,
     /// 开着的分支列表。
     branch_picker: Option<git_panel::BranchPicker>,
+    /// 模拟器页的设备列表、画面和输入框。
+    simulator: simulator::SimulatorPage,
     /// 预览栏拖动过宽度时是那个宽度；预览栏在打开文件时出现，标签都关掉时收起，不存档。
     preview_width: Option<f32>,
     /// 预览栏的焦点：点了预览的文字后 cmd+c 复制选中的行。
@@ -410,6 +415,7 @@ impl WindowView {
             git_graph_height: None,
             git_focus: cx.focus_handle(),
             branch_picker: None,
+            simulator: Default::default(),
             preview_width: None,
             preview_focus: cx.focus_handle(),
             preview_wrap: false,
@@ -618,6 +624,7 @@ impl Render for WindowView {
             // 只沿焦点所在的路径传，侧栏不在这条路上。
             .on_modifiers_changed(cx.listener(|_, _, _, cx| cx.notify()))
             .on_action(Self::act(cx, Self::toggle_files))
+            .on_action(Self::act(cx, Self::toggle_simulator))
             .on_action(Self::act(cx, Self::goto_agent))
             .on_action(Self::act(cx, Self::next_agent))
             .on_action(Self::act(cx, Self::arrange_panes))

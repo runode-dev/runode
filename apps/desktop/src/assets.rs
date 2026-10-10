@@ -83,6 +83,11 @@ icons! {
     pub PLUG_ICON = "plug",
     /// 侧栏顶上手机端入口和引导页的图标。
     pub PHONE_ICON = "phone",
+    /// 模拟器页设备下面那条工具栏上的主屏幕键、音量键和电源键。
+    pub HOME_BUTTON_ICON = "home-button",
+    pub VOLUME_DOWN_ICON = "volume-down",
+    pub VOLUME_UP_ICON = "volume-up",
+    pub POWER_ICON = "power",
     /// 设置页侧栏顶上的返回，以及各页的图标（终端、文件、agent、远程访问几页借用上面的）。
     pub ARROW_LEFT_ICON = "arrow-left",
     pub SETTINGS_ICON = "settings",

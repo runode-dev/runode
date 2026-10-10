@@ -44,6 +44,7 @@ menu:
   toggle_status_bar: Show or Hide Status Bar
   toggle_git: Show or Hide Git
   toggle_files: Show or Hide Files
+  toggle_simulator: Show or Hide Simulators
   toggle_tasks: Tasks…
   toggle_full_screen: Toggle Full Screen
   window: Window
@@ -314,6 +315,7 @@ tooltip:
   hide_git: Hide Git
   show_files: Show Files
   hide_files: Hide Files
+  show_simulator: Show Simulators
   show_panel: Show Panel
   hide_panel: Hide Panel
   tasks: Tasks
@@ -855,3 +857,33 @@ mobile:
   paired_on: "Paired %{date}"
   date: "%{m}/%{d}/%{y}"
   pair_another: "Pair Another Device"
+simulator:
+  swipe_up: Swipe Up on the Screen
+  swipe_down: Swipe Down on the Screen
+  swipe_left: Swipe Left on the Screen
+  swipe_right: Swipe Right on the Screen
+  booting: Booting the device…
+  choose_device: Choose a Device
+  not_running: This device is not running.
+  connecting: Connecting…
+  agent_missing: The first time, mobilecli installs its agent on the simulator to show the screen and send taps.
+  agent_missing_real: "A real device needs the mobilecli agent signed with your provisioning profile. Run this in a terminal, then press Refresh: mobilecli agent install --device %{id} --provisioning-profile <path>"
+  refresh: Refresh Devices
+  loading: Listing devices…
+  missing: mobilecli was not found. Run npm i -g mobilecli in a terminal, then press Refresh.
+  no_devices: No devices. Start an iOS simulator or Android emulator, then press Refresh.
+  devices: Devices
+  real: Device
+  virtual: Simulator
+  offline: Not running
+  boot: Boot
+  install_agent: Install mobilecli Agent
+  installing_agent: Installing the mobilecli agent on the device…
+  reconnect: Reconnect
+  stream_ended: The screen stream stopped
+  type_text: Type into the device, Enter to send
+  home: Home
+  back: Back
+  volume_down: Volume −
+  volume_up: Volume +
+  power: Power
