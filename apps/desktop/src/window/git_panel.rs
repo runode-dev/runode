@@ -30,6 +30,7 @@ use std::{
     time::Duration,
 };
 
+use gpui::SharedString;
 use gpui::{
     Action, Animation, AnimationExt, AnyElement, Context, Div, ElementId, Focusable, Hsla, MouseButton, MouseDownEvent,
     Role, Stateful, Transformation, Window, actions, div, list, percentage, prelude::*, px, svg, uniform_list,
@@ -61,6 +62,7 @@ use rows::{GitRow, GitSection};
 
 pub(super) use ai_message::CommitMessageDialog;
 pub(super) use branch_picker::BranchPicker;
+pub(super) use list::chevron;
 pub(super) use rows::{Busy, GitPanel};
 
 actions!(
@@ -417,7 +419,7 @@ impl WindowView {
                     .flex()
                     .flex_col()
                     .child(self.render_branch_bar(0, git, fg, bg, cx))
-                    .children(git.info.operation.map(|operation| operation_banner(0, operation, fg)))
+                    .children(git.info.operation.map(|operation| operation_banner(&git.root, operation, fg)))
                     .child(self.render_commit_area(0, git, fg, bg, window, cx))
                     .child(list)
                     .into_any_element()
@@ -499,7 +501,7 @@ impl WindowView {
         let changed = repo.changed();
         let root = repo.root.clone();
         let more = div()
-            .id(("git-repo-more", ri))
+            .id(repo_id("git-repo-more", &repo.root))
             .role(Role::Button)
             .aria_label(rust_i18n::t!("git.more").into_owned())
             .flex_none()
@@ -521,7 +523,7 @@ impl WindowView {
             description.push_str(&format!(" · {changed}"));
         }
         let title = div()
-            .id(("git-repo", ri))
+            .id(repo_id("git-repo", &repo.root))
             .role(Role::TreeItem)
             .aria_level(1)
             .aria_expanded(expanded)
@@ -570,7 +572,7 @@ impl WindowView {
         div().w_full().flex().flex_col().child(title).when(expanded, |block| {
             block
                 .child(self.render_branch_bar(ri, repo, fg, bg, cx))
-                .children(repo.info.operation.map(|operation| operation_banner(ri, operation, fg)))
+                .children(repo.info.operation.map(|operation| operation_banner(&repo.root, operation, fg)))
                 .child(self.render_commit_area(ri, repo, fg, bg, window, cx))
         })
     }
@@ -608,7 +610,7 @@ impl WindowView {
         let name = branch_name(info);
         let root = repo.root.clone();
         let branch = div()
-            .id(("git-branch", ri))
+            .id(repo_id("git-branch", &repo.root))
             .role(Role::ComboBox)
             .aria_label(rust_i18n::t!("git.checkout").into_owned())
             .aria_value(name.clone())
@@ -637,7 +639,7 @@ impl WindowView {
                 .collect::<Vec<_>>()
                 .join(" ");
             div()
-                .id(("git-line-changes", ri))
+                .id(repo_id("git-line-changes", &repo.root))
                 .role(Role::Label)
                 .aria_label(label)
                 .flex_none()
@@ -662,7 +664,7 @@ impl WindowView {
         let sync = sync.map(|(label, name, text, action)| {
             let root = root.clone();
             div()
-                .id(("git-sync", ri))
+                .id(repo_id("git-sync", &repo.root))
                 .role(Role::Button)
                 .aria_label(name)
                 .aria_description(text.clone().into_owned())
@@ -747,7 +749,7 @@ impl WindowView {
         // 写着在生成。
         let can_write = dirty && !busy;
         let sparkle = div()
-            .id(("git-commit-sparkle", ri))
+            .id(repo_id("git-commit-sparkle", &repo.root))
             .role(Role::Button)
             .aria_label(rust_i18n::t!("git.ai_message.button").into_owned())
             .absolute()
@@ -774,7 +776,7 @@ impl WindowView {
                     .on_press_down(cx, move |this, window, cx| this.generate_commit_message(&root, window, cx))
             });
         let commit_box = div()
-            .id(("git-commit-box", ri))
+            .id(repo_id("git-commit-box", &repo.root))
             .relative()
             .flex_none()
             .w_full()
@@ -794,7 +796,7 @@ impl WindowView {
             .child(area)
             .child(sparkle);
         let main = div()
-            .id(("git-commit", ri))
+            .id(repo_id("git-commit", &repo.root))
             .role(Role::Button)
             .aria_label(label.clone())
             .aria_disabled(!enabled)
@@ -816,7 +818,7 @@ impl WindowView {
                     .on_press_down(cx, move |this, window, cx| this.run_primary(&root, primary, window, cx))
             });
         let more = div()
-            .id(("git-commit-more", ri))
+            .id(repo_id("git-commit-more", &repo.root))
             .role(Role::Button)
             .aria_label(rust_i18n::t!("git.commit_more").into_owned())
             .flex_none()
@@ -938,6 +940,12 @@ pub(super) fn sync_icon(id: impl Into<ElementId>, spinning: bool, size: f32, col
     .into_any_element()
 }
 
+/// 一个仓库的块里各个元素的 id，按根目录取：辅助工具按元素 id 给节点编号，按块的序号取的话，多出或少了
+/// 子仓库时后面几块的节点就对不上了。
+pub(super) fn repo_id(prefix: &str, root: &Path) -> SharedString {
+    format!("{prefix}-{}", root.display()).into()
+}
+
 /// 块头和图表标题上写的仓库名：主仓库和工作树是目录名（工作树多半不在主仓库目录里，完整路径在
 /// 块头的 tooltip 里），子仓库是相对主仓库的路径。
 fn repo_name(repo: &git::Snapshot) -> String {
@@ -956,8 +964,8 @@ fn branch_name(info: &git::RepoInfo) -> String {
     }
 }
 
-/// 第 `ri` 个仓库合并、变基这些进行到一半时的提示条。
-fn operation_banner(ri: usize, operation: Operation, fg: Rgb) -> Stateful<Div> {
+/// 根目录是 `root` 的仓库合并、变基这些进行到一半时的提示条。
+fn operation_banner(root: &Path, operation: Operation, fg: Rgb) -> Stateful<Div> {
     let text = match operation {
         Operation::Merge => rust_i18n::t!("git.operation.merge"),
         Operation::Rebase => rust_i18n::t!("git.operation.rebase"),
@@ -965,7 +973,7 @@ fn operation_banner(ri: usize, operation: Operation, fg: Rgb) -> Stateful<Div> {
         Operation::Revert => rust_i18n::t!("git.operation.revert"),
     };
     div()
-        .id(("git-operation", ri))
+        .id(repo_id("git-operation", root))
         .role(Role::Status)
         .aria_label(text.clone().into_owned())
         .flex_none()

@@ -13,6 +13,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
+use gpui::SharedString;
 use gpui::{
     AccessibleAction, Action, AnyElement, BorderStyle, Bounds, ClipboardItem, ContentMask, Context, CursorStyle, Div,
     Hsla, MouseButton, MouseDownEvent, PathBuilder, Pixels, PromptLevel, Role, Window, canvas, div, fill, img, point,
@@ -444,7 +445,6 @@ impl WindowView {
     /// 图表里的一个提交：左边的线和点，引用标签，说明首行，行尾多久以前。
     pub(super) fn render_commit(
         &self,
-        ix: usize,
         repo: &git::Snapshot,
         ci: usize,
         fg: Rgb,
@@ -472,7 +472,7 @@ impl WindowView {
         let id = commit.id.clone();
         let fit = fit_commit_row(self.workspace().project.git_panel.width, width, commit);
         let labels = ref_labels(commit, fit.labels, fg, bg);
-        self.git_row(("git-commit", ix), 0., fg, bg)
+        self.git_row(SharedString::from(format!("git-commit-{id}")), 0., fg, bg)
             .role(Role::TreeItem)
             .aria_level(1)
             .aria_expanded(expanded)
@@ -548,7 +548,8 @@ impl WindowView {
         let target =
             DiffTarget { root: repo.root.clone(), rel: file.path.clone(), old_rel: file.old_path.clone(), side };
         let open = target.clone();
-        self.git_row(("git-commit-file", ix), 0., fg, bg)
+        let row_id = format!("git-commit-file-{}-{}", commit.id, file.path.display());
+        self.git_row(SharedString::from(row_id), 0., fg, bg)
             .role(Role::TreeItem)
             .aria_level(depth as usize + 2)
             .aria_label(name.clone())
@@ -591,7 +592,9 @@ impl WindowView {
         let depth = panel.graph_depth.get(ix).copied().unwrap_or(0) as f32;
         let width = self.graph(&dir.root).map_or(0., |graph| lane_geometry(graph.lanes).1);
         let last = base_name(&dir.path);
-        self.git_row(("git-commit-dir", ix), 0., fg, bg)
+        let commit = self.graph(&dir.root).and_then(|graph| graph.commit(ci)).map(|commit| commit.id.clone());
+        let row_id = format!("git-commit-dir-{}-{}", commit.unwrap_or_default(), dir.path.display());
+        self.git_row(SharedString::from(row_id), 0., fg, bg)
             .role(Role::TreeItem)
             .aria_level(depth as usize + 2)
             .aria_expanded(dir.expanded)
@@ -615,7 +618,6 @@ impl WindowView {
     /// 一页。还没有提交时的说明缩进写在开头。
     pub(super) fn render_graph_note(
         &self,
-        ix: usize,
         repo: &git::Snapshot,
         note: GraphNote,
         fg: Rgb,
@@ -634,7 +636,7 @@ impl WindowView {
             .map(|row| (row, lane_geometry(graph.map_or(0, |graph| graph.lanes))));
         // 「加载更多」报成按钮，其余是一句说明。
         let row = self
-            .git_row(("git-graph-note", ix), 0., fg, bg)
+            .git_row(super::repo_id(&format!("git-graph-note-{note:?}"), &repo.root), 0., fg, bg)
             .role(if note == GraphNote::More { Role::Button } else { Role::Label })
             .aria_label(text.clone().into_owned());
         let Some((last, (lane, width))) = last else {
@@ -675,7 +677,6 @@ impl WindowView {
     /// 展开的提交下面不列文件时的说明。
     pub(super) fn render_commit_note(
         &self,
-        ix: usize,
         repo: &git::Snapshot,
         ci: usize,
         note: CommitNote,
@@ -688,7 +689,9 @@ impl WindowView {
             CommitNote::Empty => rust_i18n::t!("git.graph.no_files"),
         };
         let width = self.graph(&repo.root).map_or(0., |graph| lane_geometry(graph.lanes).1);
-        self.git_row(("git-commit-note", ix), 0., fg, bg)
+        let commit = self.graph(&repo.root).and_then(|graph| graph.commit(ci)).map(|commit| commit.id.clone());
+        let row_id = format!("git-commit-note-{}", commit.unwrap_or_default());
+        self.git_row(SharedString::from(row_id), 0., fg, bg)
             .role(Role::Label)
             .aria_label(text.clone().into_owned())
             .relative()

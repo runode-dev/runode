@@ -45,6 +45,7 @@ menu:
   toggle_git: 顯示或隱藏 Git
   toggle_files: 顯示或隱藏檔案
   toggle_simulator: 顯示或隱藏模擬器
+  toggle_github_actions: 顯示或隱藏 GitHub Actions
   toggle_tasks: 專案命令…
   toggle_full_screen: 切換全螢幕
   window: 視窗
@@ -316,6 +317,7 @@ tooltip:
   show_files: 顯示檔案
   hide_files: 隱藏檔案
   show_simulator: 顯示模擬器
+  show_github_actions: 顯示 GitHub Actions
   show_panel: 顯示面板
   hide_panel: 隱藏面板
   tasks: 命令
@@ -928,3 +930,54 @@ simulator:
   volume_down: 音量−
   volume_up: 音量+
   power: 電源
+github_actions:
+  refresh: 重新整理
+  missing: 找不到 gh。在終端機裡執行 brew install gh 安裝、gh auth login 登入後按重新整理。
+  login_needed: gh 還沒登入 GitHub，或者登入已經失效。在終端機裡登入後，這一頁會自己重新整理。
+  login: 在終端機裡登入
+  resize: "調整「%{name}」的高度"
+  loading: 正在讀取…
+  no_branch: 不在分支上
+  current_branch: 目前分支
+  workflows: 工作流程
+  settings: 設定
+  no_runs: 沒有執行
+  no_workflows: 沒有工作流程
+  no_jobs: 沒有 job
+  none: 沒有
+  previous_attempts: 之前的嘗試
+  attempt: "第 %{n} 次嘗試"
+  open_in_browser: 在瀏覽器中打開
+  watch: 在終端機裡盯著
+  cancel: 取消執行
+  rerun: 重新執行
+  logs: 在終端機裡看日誌
+  step_logs: 在瀏覽器中看這一步的日誌
+  trigger: 執行工作流程
+  open_workflow: 打開工作流程檔案
+  pin: 固定到狀態列
+  unpin: 從狀態列取消固定
+  disabled: 已停用
+  secrets: Secrets
+  variables: Variables
+  org_secrets: 組織的 Secrets
+  org_variables: 組織的 Variables
+  environments: 部署環境
+  add_secret: 新增 Secret
+  add_variable: 新增 Variable
+  copy_name: 複製名稱
+  copy_value: 複製值
+  update: 在終端機裡改值
+  delete: 刪除
+  delete_secret_title: "刪除 secret %{name}？"
+  delete_variable_title: "刪除 variable %{name}？"
+  delete_detail: 用到它的工作流程就拿不到了，刪除後無法復原。
+  state:
+    success: 成功
+    failure: 失敗
+    cancelled: 已取消
+    skipped: 已略過
+    in_progress: 正在執行
+    queued: 排隊中
+    waiting: 等待中
+    pending: 未開始

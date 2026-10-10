@@ -123,6 +123,7 @@ action:
   toggle_git: 顯示或隱藏右側的 Git 面板：暫存、提交、切換分支、同步和儲藏
   toggle_files: 顯示或隱藏右側的檔案樹，按兩下檔案把路徑打進終端機
   toggle_simulator: 顯示或隱藏右側的模擬器頁：經 mobilecli 看和操作 iOS 模擬器、Android 模擬器的即時畫面
+  toggle_github_actions: 顯示或隱藏右側的 GitHub Actions 頁：經 gh 看目前分支的執行、工作流程，管理 secret 和 variable
   toggle_tasks: 打開或關閉標題列上的專案命令選單，上下鍵選、Enter 執行
   run_task: 執行專案命令選單裡叫這個名字的命令（自己加的、Makefile 目標或 package.json 的 script），和在選單裡點它一樣；同名的取選單裡靠上的
   goto_agent: 列出所有視窗裡的 agent，選一個跳過去

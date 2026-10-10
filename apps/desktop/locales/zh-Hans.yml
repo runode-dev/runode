@@ -45,6 +45,7 @@ menu:
   toggle_git: 显示或隐藏 Git
   toggle_files: 显示或隐藏文件
   toggle_simulator: 显示或隐藏模拟器
+  toggle_github_actions: 显示或隐藏 GitHub Actions
   toggle_tasks: 项目命令…
   toggle_full_screen: 切换全屏
   window: 窗口
@@ -316,6 +317,7 @@ tooltip:
   show_files: 显示文件
   hide_files: 隐藏文件
   show_simulator: 显示模拟器
+  show_github_actions: 显示 GitHub Actions
   show_panel: 显示面板
   hide_panel: 隐藏面板
   tasks: 命令
@@ -928,3 +930,54 @@ simulator:
   volume_down: 音量−
   volume_up: 音量+
   power: 电源
+github_actions:
+  refresh: 刷新
+  missing: 没有找到 gh。在终端里运行 brew install gh 装好、gh auth login 登录后按刷新。
+  login_needed: gh 还没登录 GitHub，或者登录已经失效。在终端里登录后，这一页会自己刷新。
+  login: 在终端里登录
+  resize: "调整「%{name}」的高度"
+  loading: 正在读取…
+  no_branch: 不在分支上
+  current_branch: 当前分支
+  workflows: 工作流
+  settings: 设置
+  no_runs: 没有运行
+  no_workflows: 没有工作流
+  no_jobs: 没有 job
+  none: 没有
+  previous_attempts: 之前的尝试
+  attempt: "第 %{n} 次尝试"
+  open_in_browser: 在浏览器中打开
+  watch: 在终端里盯着
+  cancel: 取消运行
+  rerun: 重新运行
+  logs: 在终端里看日志
+  step_logs: 在浏览器中看这一步的日志
+  trigger: 运行工作流
+  open_workflow: 打开工作流文件
+  pin: 固定到状态栏
+  unpin: 从状态栏取消固定
+  disabled: 已停用
+  secrets: Secrets
+  variables: Variables
+  org_secrets: 组织的 Secrets
+  org_variables: 组织的 Variables
+  environments: 部署环境
+  add_secret: 新建 Secret
+  add_variable: 新建 Variable
+  copy_name: 复制名字
+  copy_value: 复制值
+  update: 在终端里改值
+  delete: 删除
+  delete_secret_title: "删除 secret %{name}？"
+  delete_variable_title: "删除 variable %{name}？"
+  delete_detail: 用到它的工作流就拿不到了，删了不能恢复。
+  state:
+    success: 成功
+    failure: 失败
+    cancelled: 已取消
+    skipped: 已跳过
+    in_progress: 正在运行
+    queued: 排队中
+    waiting: 等待中
+    pending: 未开始

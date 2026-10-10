@@ -21,8 +21,8 @@ use crate::{
     window::{
         ArrangePanes, ClosePane, CloseTab, CloseWorkspace, EqualizePanes, FocusNextPane, FocusPreviousPane, GotoAgent,
         NewSplitDown, NewSplitRight, NewTab, NewWorkspace, NextAgent, NextTab, NextWorkspace, PreviousTab,
-        PreviousWorkspace, RenameWorkspace, ToggleFiles, ToggleGit, TogglePaneZoom, ToggleSidebar, ToggleSimulator,
-        ToggleStatusBar, ToggleTasks,
+        PreviousWorkspace, RenameWorkspace, ToggleFiles, ToggleGit, ToggleGitHubActions, TogglePaneZoom, ToggleSidebar,
+        ToggleSimulator, ToggleStatusBar, ToggleTasks,
     },
 };
 
@@ -156,6 +156,7 @@ pub fn set_menus(cx: &mut App) {
             MenuItem::action(tr("menu.toggle_git"), ToggleGit),
             MenuItem::action(tr("menu.toggle_files"), ToggleFiles),
             MenuItem::action(tr("menu.toggle_simulator"), ToggleSimulator),
+            MenuItem::action(tr("menu.toggle_github_actions"), ToggleGitHubActions),
             MenuItem::action(tr("menu.toggle_tasks"), ToggleTasks),
             MenuItem::action(tr("menu.toggle_full_screen"), ToggleFullScreen),
         ]),

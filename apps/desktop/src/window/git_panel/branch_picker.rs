@@ -273,7 +273,10 @@ impl WindowView {
                 };
                 let view = cx.entity().downgrade();
                 div()
-                    .id(("branch-row", ix))
+                    .id(SharedString::from(match &row {
+                        PickerRow::Create(_) => "branch-create".to_owned(),
+                        PickerRow::Branch(branch) => format!("branch-{}-{}", branch.remote, branch.name),
+                    }))
                     .role(Role::ListBoxOption)
                     .aria_label(name.clone())
                     .aria_description(detail.clone())

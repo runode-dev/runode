@@ -77,6 +77,8 @@ pub(super) fn base_name(path: &Path) -> String {
 
 /// workspace 的标识，挪动位置后不变。
 pub(super) type WorkspaceId = u64;
+/// 上次看 PATH 里有没有某个命令行工具时的 PATH 和结果，见 `WindowView::tool_on_path`。
+pub(super) type ToolCache = std::cell::RefCell<Option<(Option<std::ffi::OsString>, bool)>>;
 
 /// 一个项目目录，以及在其中打开的一组标签。
 pub(super) struct Workspace {
@@ -102,6 +104,8 @@ pub(super) struct Workspace {
     /// 模拟器页选的设备；还没选过时为空，用默认的那台。设备列表和画面流整个窗口一份，只推当前
     /// workspace 选的那台。
     pub(super) simulator_device: Option<String>,
+    /// GitHub Actions 页里固定到状态栏上的工作流。
+    pub(super) pinned_workflows: Vec<format::PinnedWorkflow>,
 }
 
 impl Workspace {
@@ -177,6 +181,30 @@ impl WindowView {
         self.spawned.retain(|_, (at, _)| at.elapsed() < persist::SHELL_STARTUP);
         let start = start.map(Path::to_path_buf).or_else(home_dir);
         self.spawned.insert(view.entity_id(), (Instant::now(), start));
+    }
+
+    /// 找用户自己装的命令行工具（mobilecli、gh）用的 PATH：从访达打开时 app 自己的 PATH 里没有 npm、
+    /// brew 装的目录，用终端里 shell 报告的 PATH。
+    pub(super) fn shell_path(&self, cx: &App) -> Option<std::ffi::OsString> {
+        let path = self.focused_view().and_then(|view| view.read(cx).meta().shell_path.clone());
+        path.or_else(|| std::env::var_os("PATH"))
+    }
+
+    /// shell 报告的 PATH 里有没有叫 `program` 的命令行工具（mobilecli、gh）。结果记在 `cache` 里，PATH 没变
+    /// 就不再找：标签每帧都问。
+    pub(super) fn tool_on_path(&self, cache: &ToolCache, program: &str, cx: &App) -> bool {
+        let path = self.shell_path(cx);
+        let mut found = cache.borrow_mut();
+        match &*found {
+            Some((seen, installed)) if *seen == path => *installed,
+            _ => {
+                let on_path =
+                    |path: &std::ffi::OsString| std::env::split_paths(path).any(|dir| dir.join(program).is_file());
+                let installed = path.as_ref().is_some_and(on_path);
+                *found = Some((path, installed));
+                installed
+            }
+        }
     }
 
     /// 在 `cwd` 里启动一个终端，为空时在家目录；启动失败时记日志，返回 `None`。
@@ -271,6 +299,7 @@ impl WindowView {
             panel: None,
             last_panel: SidePanel::default(),
             simulator_device: None,
+            pinned_workflows: Vec::new(),
         };
         self.workspaces.insert(ix, workspace);
         // 插在当前 workspace 前面时它往后挪了一位；窗口里本来没有 workspace 时调用方接着切过去。

@@ -99,6 +99,18 @@ icons! {
     /// 外观页配色的三张预览卡：跟着系统换、一个主题、不用主题；`BAN_ICON` 也是快捷键页去掉一个绑定的按钮。
     pub MONITOR_ICON = "monitor",
     pub BAN_ICON = "ban",
+    /// GitHub Actions 页：标签和工作流的图标、运行和 step 各种状态的图标，行尾的复制和固定按钮。
+    pub ACTIONS_WORKFLOW_ICON = "actions/workflow",
+    pub ACTIONS_SUCCESS_ICON = "actions/success",
+    pub ACTIONS_FAILURE_ICON = "actions/failure",
+    pub ACTIONS_CANCELLED_ICON = "actions/cancelled",
+    pub ACTIONS_SKIPPED_ICON = "actions/skipped",
+    pub ACTIONS_INPROGRESS_ICON = "actions/inprogress",
+    pub ACTIONS_QUEUED_ICON = "actions/queued",
+    pub ACTIONS_WAITING_ICON = "actions/waiting",
+    pub ACTIONS_PENDING_ICON = "actions/pending",
+    pub COPY_ICON = "copy",
+    pub PIN_ICON = "pin",
 }
 
 fn all_files() -> impl Iterator<Item = &'static (&'static str, &'static [u8])> {

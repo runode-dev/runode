@@ -10,8 +10,7 @@
 
 use std::{
     borrow::Cow,
-    cell::{Cell, RefCell},
-    ffi::OsString,
+    cell::Cell,
     io::{self, BufRead, BufReader},
     os::unix::process::CommandExt as _,
     process::{Child, Command, Stdio},
@@ -35,6 +34,7 @@ use runode_shared_types::color::Rgb;
 
 use super::{
     WindowView,
+    model::ToolCache,
     project::{ADDED, panel_message, panel_shell, panel_title},
     titlebar::icon_toggle,
 };
@@ -188,7 +188,7 @@ pub(super) struct SimulatorPage {
     room: Rc<Cell<Option<(f32, f32)>>>,
     text: Option<(Entity<TextField>, Subscription)>,
     /// 上次看 PATH 里有没有 mobilecli 时的 PATH 和结果，标签要不要显示靠它，PATH 没变就不再找。
-    found: RefCell<Option<(Option<OsString>, bool)>>,
+    found: ToolCache,
     loading: Option<Task<()>>,
     /// 标题行展开着设备列表；选好一台后收起，把地方让给画面。
     picking: bool,
@@ -223,27 +223,12 @@ impl Drop for StreamProcess {
 }
 
 impl WindowView {
-    /// 从访达打开时 app 自己的 PATH 里没有 npm、brew 装的目录，用终端里 shell 报告的 PATH。
-    fn simulator_path(&self, cx: &App) -> Option<OsString> {
-        let path = self.focused_view().and_then(|view| view.read(cx).meta().shell_path.clone());
-        path.or_else(|| std::env::var_os("PATH"))
-    }
-
     /// PATH 里有 mobilecli 时才显示模拟器的标签；正显示着时仍留着。
     pub(super) fn simulator_tab_visible(&self, cx: &App) -> bool {
         if self.simulator_shown() {
             return true;
         }
-        let path = self.simulator_path(cx);
-        let mut found = self.simulator.found.borrow_mut();
-        match &*found {
-            Some((seen, installed)) if *seen == path => *installed,
-            _ => {
-                let installed = path.as_ref().is_some_and(on_path);
-                *found = Some((path, installed));
-                installed
-            }
-        }
+        self.tool_on_path(&self.simulator.found, PROGRAM, cx)
     }
 
     /// 切到模拟器页时列一遍设备；切走或收起时停掉画面，放掉最后一帧：一帧是整块屏幕大小的位图，
@@ -265,7 +250,7 @@ impl WindowView {
 
     /// 列一遍设备；`connect` 为假时只更新设备的状态，不拉起画面，画面流断了以后用它看出设备是不是关了。
     fn list_devices(&mut self, connect: bool, cx: &mut Context<Self>) {
-        let path = self.simulator_path(cx);
+        let path = self.shell_path(cx);
         let job = cx.background_spawn(async move { mobilecli(path.as_deref(), &["devices", "--include-offline"]) });
         self.simulator.loading = Some(cx.spawn(async move |this, cx| {
             let result = job.await.and_then(|data| parse_devices(&data));
@@ -391,7 +376,7 @@ impl WindowView {
         }
         let Some(device) = self.selected_device().filter(|device| device.online()) else { return };
         let id = device.id.clone();
-        let path = self.simulator_path(cx);
+        let path = self.shell_path(cx);
         let svg = cx.svg_renderer();
         let job = cx.background_spawn(async move {
             let data = mobilecli(path.as_deref(), &["device", "info", "--device", &id])?;
@@ -470,7 +455,7 @@ impl WindowView {
         cx: &mut Context<Self>,
     ) {
         let Some(id) = self.simulator.selected.clone() else { return };
-        let path = self.simulator_path(cx);
+        let path = self.shell_path(cx);
         let device = id.clone();
         let job = cx.background_spawn(async move {
             let mut args: Vec<&str> = args.iter().map(String::as_str).collect();
@@ -570,7 +555,7 @@ impl WindowView {
             return;
         }
         let Some(id) = self.simulator.selected.clone() else { return };
-        let path = self.simulator_path(cx);
+        let path = self.shell_path(cx);
         let task = cx.spawn(async move |this, cx| {
             loop {
                 let (path, id) = (path.clone(), id.clone());
@@ -1111,7 +1096,7 @@ fn default_device(devices: &[Device]) -> Option<&Device> {
 }
 
 /// 面板里的文字按钮。
-fn text_button(id: &'static str, text: String, fg: Rgb, bg: Rgb) -> Stateful<Div> {
+pub(super) fn text_button(id: &'static str, text: String, fg: Rgb, bg: Rgb) -> Stateful<Div> {
     div()
         .id(id)
         .role(Role::Button)
@@ -1130,11 +1115,6 @@ fn text_button(id: &'static str, text: String, fg: Rgb, bg: Rgb) -> Stateful<Div
 
 /// 找不到 mobilecli 时 `mobilecli` 返回的错，页上据此显示怎么装。
 const MISSING: &str = "mobilecli not found";
-
-/// PATH 里哪个目录有 mobilecli。
-fn on_path(path: &OsString) -> bool {
-    std::env::split_paths(path).any(|dir| dir.join(PROGRAM).is_file())
-}
 
 /// 跑一条 mobilecli 命令，交回它 JSON 里的 `data`；出错时交回它说的原因。
 fn mobilecli(path: Option<&std::ffi::OsStr>, args: &[&str]) -> Result<Value, String> {

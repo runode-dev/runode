@@ -21,7 +21,7 @@
 | `update` | 桌面 app 的自动更新：读 GitHub 上最新 Release 里的版本清单 `latest.json`、比版本号，经 NSURLSession 下载这台 Mac 架构的 zip、解压到装着的 .app 旁边，核对新包是 Developer ID 签的、和在跑的这份出自同一个 Team ID、同一个 bundle id，app 退出时再核对一次、用 `renamex_np` 原子地换上 | serde、serde_json、tracing、libc、objc2、block2、objc2-foundation |
 | `autostart` | 登录时自启：macOS 写 launchd 的 LaunchAgent，Linux 写 systemd 的用户服务，能拉起无界面的宿主（`runode --host`）或桌面 app（只有 macOS）；装没装看服务文件在不在，命令行（`runode service`）和设置页共用 | paths |
 | `cli` | 命令行前端（`runode list`、`read`、`send`、`wait`、`open`、`kill`、`focus`、`setup`、`remote`、`service`）：经宿主的 Unix socket 按 protocol 说话，列会话、读屏幕、发输入、等 agent，请 app 开终端、切到终端；`setup` 把根目录 `skills/` 里的 skill 装给 agent；`service` 不经宿主，经 `autostart` 装上、去掉登录时自启；`remote` 不经宿主，经 `remote-access` 给手机配对、列出和撤销设备，配对成了以后问用户要不要在配置里打开 `terminal-host`（经 `config` 改配置文件），让退出 app 后远程访问留在后台 | protocol、shared-types、paths、config、remote-access、autostart、qrcode |
-| `desktop` | GPUI 桌面 app：窗口、视图、菜单、窗口存档和 Info.plist；带子命令启动时交给 `cli`、带 `--host` 时是单独一个进程的宿主、带 `--host --take-over` 时是升级时接手旧宿主会话的新宿主，和命令行、宿主是同一个可执行文件；远程访问的监听开在宿主所在的那个进程里（`remote_access`）；右侧面板的模拟器页经用户自己装的 mobilecli 看和操作 iOS 模拟器、Android 模拟器（不打包它，它不是开源许可）；设置页的决策模型页经用户自己装的 runode-infer（另一个仓库，跑 `runode-infer … --json`）启停服务、存托管 API 的密钥、下载和删除本机模型，不打包它，密钥经它的 stdin 交过去、Runode 自己不存；打包脚本按 `apps/desktop#` 找它的构建产物 | 以上全部（含 host、protocol、cli、remote-access）、GPUI |
+| `desktop` | GPUI 桌面 app：窗口、视图、菜单、窗口存档和 Info.plist；带子命令启动时交给 `cli`、带 `--host` 时是单独一个进程的宿主、带 `--host --take-over` 时是升级时接手旧宿主会话的新宿主，和命令行、宿主是同一个可执行文件；远程访问的监听开在宿主所在的那个进程里（`remote_access`）；右侧面板的模拟器页经用户自己装的 mobilecli 看和操作 iOS 模拟器、Android 模拟器（不打包它，它不是开源许可）；右侧面板的 GitHub Actions 页经用户自己装的 gh 看运行、job 和 step，管工作流、secret 和 variable，看日志、触发工作流、填 secret 的值在分出的终端里交给 gh，固定的工作流显示在状态栏左边（状态图标出自 vscode-github-actions，MIT）；设置页的决策模型页经用户自己装的 runode-infer（另一个仓库，跑 `runode-infer … --json`）启停服务、存托管 API 的密钥、下载和删除本机模型，不打包它，密钥经它的 stdin 交过去、Runode 自己不存；打包脚本按 `apps/desktop#` 找它的构建产物 | 以上全部（含 host、protocol、cli、remote-access）、GPUI |
 
 不变量：
 
@@ -58,12 +58,13 @@
 桌面 app 的界面都要让辅助工具读得到、按得动。辅助工具包括 VoiceOver，也包括 CUA 这类读 AX 树的自动化工具。新加或改动的界面在同一个提交里把无障碍一起做完。
 
 - GPUI 只把同时有 `id` 和 `role` 的元素报给辅助工具。名字用 `aria_label`，写翻译过的文字；图标按钮的名字写它做什么，不写图标叫什么。状态用 `aria_selected`、`aria_expanded`、`aria_toggled`、`aria_value`。不可用的元素用 `ui::a11y` 的 `Disable`，被模态对话框盖住的部分用 `Hide`。
+- 元素的 `id` 按它显示的东西取（运行、文件、段的名字或 id），不按在列表里的行号：GPUI 按元素 id 给辅助工具的节点编号，读到数据、上面多出几行时行号一变，VoiceOver 的焦点就跳，按下会按到别的行上。悬停这类只管当前一帧的状态仍可以按行号记。
 - 能点的东西辅助工具都要按得到。GPUI 默认把辅助工具的按下换成在元素中心合成一次点击，元素滚出可见区域或被盖住时就点空了。点击用 `ui::a11y` 的 `Press`，按下就办的用 `PressDown`；只能自己写鼠标处理时，另挂 `A11yPress::on_a11y_press`。展开、收起、设值、滚动这些操作也要另外用 `on_a11y_action` 登记。
 - 自己画出来的内容（canvas、图片、视频帧）要另外给出辅助工具能读、能操作的节点。终端报成文本区域。模拟器页在画面上按位置摆出设备里的元素，按下就点那个元素，写字就打进去；画面四边另有滑动按钮，因为 GPUI 在 macOS 上不转辅助工具的滚动动作。macOS 把图片当叶子节点，挂在它下面的子节点报不出去，所以要摆子节点的容器用 `Role::Group`。
 - 只给辅助工具用、算起来又费事的节点，看 `Window::is_a11y_active` 再决定画不画，没开时不画。比如 Git 面板里每行都画出的按钮、模拟器页摆的设备元素。
 - 缓存的视图（`.cached()`）照搬上一帧时跳过 prepaint，报给辅助工具的节点就丢了，所以辅助工具开着时不缓存，见窗口的 `Slot` 和终端分屏。
 - 出错、空状态、加载中这些只起提示作用的文字，用 `Role::Label` 报出去；`project` 的 `panel_message` 已经这样做了。
-- 改完用 CUA 的 `get_window_state` 看一遍 AX 树：每个按钮都要有名字，用 `AXPress` 按得动；状态变了，树里的状态也跟着变。
+- 改完用 CUA 的 `get_window_state` 看一遍 AX 树：每个按钮都要有名字，用 `AXPress` 按得动；状态变了，树里的状态也跟着变。列表要在数据读进来、行数变了以后再按一遍下面的行，只按第一行看不出节点编号跟着行号变的问题。
 
 # 重画
 

@@ -134,6 +134,7 @@ action:
   toggle_git: Show or hide the Git panel on the right to stage, commit, switch branches, sync and stash
   toggle_files: Show or hide the file tree on the right; double-click a file to type its path into the terminal
   toggle_simulator: Show or hide the simulator page on the right, with the live screen of an iOS simulator or Android emulator driven through mobilecli
+  toggle_github_actions: Show or hide the GitHub Actions page on the right, with the workflow runs of the current branch, workflows, secrets and variables, read and changed through gh
   toggle_tasks: Open or close the project tasks menu in the title bar; pick with the arrow keys and press Enter to run
   run_task: Run the task with this name from the project tasks menu (your own, a Makefile target or a package.json script), as if clicked there; with duplicate names the one higher in the menu wins
   goto_agent: List the agents in every window and jump to the one you pick

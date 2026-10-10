@@ -25,6 +25,7 @@ mod clipboard;
 mod devices;
 mod files;
 mod git_panel;
+mod github_actions;
 mod inline_edit;
 mod layout_report;
 mod mobile;
@@ -37,6 +38,7 @@ mod preview;
 mod project;
 mod quit;
 mod remote;
+mod row_buttons;
 mod settings_page;
 mod sidebar;
 mod simulator;
@@ -125,6 +127,8 @@ actions!(
         ToggleFiles,
         /// 显示或隐藏右侧的模拟器页。
         ToggleSimulator,
+        /// 显示或隐藏右侧的 GitHub Actions 页。
+        ToggleGitHubActions,
         /// 打开或关掉标题栏上的项目命令菜单。
         ToggleTasks,
         /// 打开或关掉列出所有窗口里 agent 的浮层。
@@ -248,6 +252,8 @@ enum Divider {
     Panel,
     /// Git 面板底部图表上沿的分隔线，拖动改变图表的高度。
     GitGraph,
+    /// GitHub Actions 页第几段上沿的分隔线，拖动改变上面那段的高度。
+    GitHubActions(usize),
 }
 
 /// 侧栏里正在改名的 workspace，以及改名用的输入框。
@@ -280,6 +286,7 @@ pub struct WindowView {
     branch_picker: Option<git_panel::BranchPicker>,
     /// 模拟器页的设备列表、画面和输入框。
     simulator: simulator::SimulatorPage,
+    github_actions: github_actions::ActionsPage,
     /// 预览栏拖动过宽度时是那个宽度；预览栏在打开文件时出现，标签都关掉时收起，不存档。
     preview_width: Option<f32>,
     /// 预览栏的焦点：点了预览的文字后 cmd+c 复制选中的行。
@@ -437,6 +444,7 @@ impl WindowView {
             git_focus: cx.focus_handle(),
             branch_picker: None,
             simulator: Default::default(),
+            github_actions: Default::default(),
             preview_width: None,
             preview_focus: cx.focus_handle(),
             preview_wrap: false,
@@ -530,6 +538,7 @@ impl WindowView {
                     panel: None,
                     last_panel: Default::default(),
                     simulator_device: None,
+                    pinned_workflows: Vec::new(),
                 });
                 self.activate_workspace(ix, window, cx);
             }
@@ -738,6 +747,7 @@ impl Render for WindowView {
             .on_modifiers_changed(cx.listener(|_, _, _, cx| cx.notify()))
             .on_action(Self::act(cx, Self::toggle_files))
             .on_action(Self::act(cx, Self::toggle_simulator))
+            .on_action(Self::act(cx, Self::toggle_github_actions))
             .on_action(Self::act(cx, Self::goto_agent))
             .on_action(Self::act(cx, Self::next_agent))
             .on_action(Self::act(cx, Self::arrange_panes))

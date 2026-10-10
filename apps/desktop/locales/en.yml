@@ -45,6 +45,7 @@ menu:
   toggle_git: Show or Hide Git
   toggle_files: Show or Hide Files
   toggle_simulator: Show or Hide Simulators
+  toggle_github_actions: Show or Hide GitHub Actions
   toggle_tasks: Tasks…
   toggle_full_screen: Toggle Full Screen
   window: Window
@@ -316,6 +317,7 @@ tooltip:
   show_files: Show Files
   hide_files: Hide Files
   show_simulator: Show Simulators
+  show_github_actions: Show GitHub Actions
   show_panel: Show Panel
   hide_panel: Hide Panel
   tasks: Tasks
@@ -928,3 +930,54 @@ simulator:
   volume_down: Volume −
   volume_up: Volume +
   power: Power
+github_actions:
+  refresh: Refresh
+  missing: gh was not found. Install it with brew install gh, sign in with gh auth login, then press Refresh.
+  login_needed: gh isn't signed in to GitHub, or its sign-in has expired. Sign in in the terminal; this page picks it up by itself.
+  login: Sign In in Terminal
+  resize: "Resize %{name}"
+  loading: Loading…
+  no_branch: Not on a branch
+  current_branch: Current Branch
+  workflows: Workflows
+  settings: Settings
+  no_runs: No runs
+  no_workflows: No workflows
+  no_jobs: No jobs
+  none: None
+  previous_attempts: Previous attempts
+  attempt: "Attempt %{n}"
+  open_in_browser: Open in Browser
+  watch: Watch in Terminal
+  cancel: Cancel Run
+  rerun: Re-run
+  logs: View Logs in Terminal
+  step_logs: View Step Logs in Browser
+  trigger: Run Workflow
+  open_workflow: Open Workflow File
+  pin: Pin to Status Bar
+  unpin: Unpin from Status Bar
+  disabled: disabled
+  secrets: Secrets
+  variables: Variables
+  org_secrets: Organization Secrets
+  org_variables: Organization Variables
+  environments: Environments
+  add_secret: New Secret
+  add_variable: New Variable
+  copy_name: Copy Name
+  copy_value: Copy Value
+  update: Change Value in Terminal
+  delete: Delete
+  delete_secret_title: "Delete secret %{name}?"
+  delete_variable_title: "Delete variable %{name}?"
+  delete_detail: Workflows that use it stop getting it. This can't be undone.
+  state:
+    success: succeeded
+    failure: failed
+    cancelled: cancelled
+    skipped: skipped
+    in_progress: in progress
+    queued: queued
+    waiting: waiting
+    pending: pending

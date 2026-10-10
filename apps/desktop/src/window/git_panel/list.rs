@@ -3,11 +3,11 @@
 //! diff。
 
 use std::{
-    borrow::Cow,
     ops::Range,
     path::{Path, PathBuf},
 };
 
+use gpui::SharedString;
 use gpui::{
     AccessibleAction, AnyElement, App, Context, Div, ElementId, MouseButton, MouseDownEvent, Role, Stateful, Window,
     accesskit::ActionData, div, img, prelude::*, px, svg,
@@ -28,7 +28,6 @@ use crate::{
     ui::{
         file_icons::{file_icon, folder_icon},
         hsla,
-        tooltip::tooltip,
     },
     window::{
         WindowView,
@@ -36,6 +35,7 @@ use crate::{
         model::base_name,
         preview::DiffTarget,
         project::{added_label, removed_label, status_color},
+        row_buttons::{RowButton, button, row_buttons},
     },
 };
 
@@ -43,22 +43,6 @@ use crate::{
 pub(super) const ROW_HEIGHT: f32 = 22.;
 /// 文件比段标题往右缩进的宽度，树形式里每深一层再缩进这么多。
 const INDENT: f32 = 12.;
-type Handler = Box<dyn Fn(&mut WindowView, &mut Window, &mut Context<WindowView>)>;
-
-/// 行尾的一个图标按钮：图标、提示文字和按下时做的事。
-struct RowButton {
-    icon: &'static str,
-    text: Cow<'static, str>,
-    handler: Handler,
-}
-
-fn button(
-    icon: &'static str,
-    text: Cow<'static, str>,
-    handler: impl Fn(&mut WindowView, &mut Window, &mut Context<WindowView>) + 'static,
-) -> RowButton {
-    RowButton { icon, text, handler: Box::new(handler) }
-}
 
 impl WindowView {
     /// 只有一个仓库时列表里看得见的那些行。
@@ -106,7 +90,7 @@ impl WindowView {
                 None => div().into_any_element(),
             },
             GitRow::Clean(_) => div()
-                .id(("git-clean", ix))
+                .id(super::repo_id("git-clean", &repo.root))
                 .role(Role::Label)
                 .aria_label(rust_i18n::t!("panel.no_changes").into_owned())
                 .flex_none()
@@ -119,10 +103,10 @@ impl WindowView {
                 .text_color(hsla(fg).opacity(0.45))
                 .child(rust_i18n::t!("panel.no_changes").into_owned())
                 .into_any_element(),
-            GitRow::Commit(_, ci) => self.render_commit(ix, repo, ci, fg, bg, cx),
+            GitRow::Commit(_, ci) => self.render_commit(repo, ci, fg, bg, cx),
             GitRow::CommitFile(_, ci, fi) => self.render_commit_file(ix, repo, ci, fi, fg, bg, cx),
-            GitRow::CommitNote(_, ci, note) => self.render_commit_note(ix, repo, ci, note, fg, bg),
-            GitRow::GraphNote(_, note) => self.render_graph_note(ix, repo, note, fg, bg, cx),
+            GitRow::CommitNote(_, ci, note) => self.render_commit_note(repo, ci, note, fg, bg),
+            GitRow::GraphNote(_, note) => self.render_graph_note(repo, note, fg, bg, cx),
         }
     }
 
@@ -164,9 +148,7 @@ impl WindowView {
         1 + usize::from(multi) + if section { 0 } else { 1 + depth }
     }
 
-    /// 第 `ix` 行行尾的按钮，鼠标不在这行时不画、不占宽，名字能排满整行；辅助工具在读时每行都画。
-    /// 根目录是 `root` 的仓库有操作在跑时按不动。不用 `hidden` 加 `group_hover` 露出来：gpui 在
-    /// prepaint 时还不知道这一帧行被悬停，会跳过藏着的按钮，paint 时却要画它们，就 panic 了。
+    /// 第 `ix` 行行尾的按钮，鼠标在这行或辅助工具在读时才画；根目录是 `root` 的仓库有操作在跑时按不动。
     #[allow(clippy::too_many_arguments)]
     fn row_buttons(
         &self,
@@ -178,31 +160,8 @@ impl WindowView {
         cx: &mut Context<Self>,
     ) -> Option<Div> {
         let panel = &self.workspace().project.git_panel;
-        if panel.hovered != Some(ix) && !panel.a11y {
-            return None;
-        }
-        let enabled = panel.busy(root).is_none();
-        let hover_bg = hsla(bg.mix(fg, 0.14));
-        let icon_color = hsla(fg).opacity(if enabled { 0.75 } else { 0.3 });
-        let buttons = div().flex_none().flex().items_center().gap(px(2.)).children(
-            buttons.into_iter().enumerate().map(|(bi, button)| {
-                let handler = button.handler;
-                div()
-                    .id(("git-row-button", bi))
-                    .role(Role::Button)
-                    .aria_label(button.text.clone())
-                    .flex_none()
-                    .size(px(20.))
-                    .rounded(px(3.))
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .tooltip(tooltip(button.text, None, fg, bg))
-                    .child(svg().path(button.icon).size(px(14.)).text_color(icon_color))
-                    .when(enabled, |button| button.hover(|button| button.bg(hover_bg)).on_press_down(cx, handler))
-            }),
-        );
-        Some(buttons)
+        let shown = panel.hovered == Some(ix) || panel.a11y;
+        row_buttons(buttons, shown, panel.busy(root).is_none(), fg, bg, cx)
     }
 
     fn render_git_section(
@@ -240,7 +199,7 @@ impl WindowView {
             GitSection::Stashes => Vec::new(),
         };
         let expanded = panel.section_expanded(&root, section);
-        self.git_row(("git-section", ix), 0., fg, bg)
+        self.git_row(super::repo_id(&format!("git-section-{section:?}"), &root), 0., fg, bg)
             .role(Role::TreeItem)
             .aria_level(self.tree_level(true, 0))
             .aria_expanded(expanded)
@@ -312,7 +271,8 @@ impl WindowView {
         let side = if section == Section::Staged { DiffSide::Index } else { DiffSide::Worktree };
         let target = DiffTarget { root: root.clone(), rel: path.clone(), old_rel: file.old_path.clone(), side };
         let open = target.clone();
-        self.git_row(("git-file", ix), INDENT * (depth + 1.), fg, bg)
+        let id = format!("git-file-{shown_in:?}-{}-{}", root.display(), path.display());
+        self.git_row(SharedString::from(id), INDENT * (depth + 1.), fg, bg)
             .role(Role::TreeItem)
             .aria_level(self.tree_level(false, depth as usize))
             .aria_label(name.clone())
@@ -384,7 +344,8 @@ impl WindowView {
         };
         let last = base_name(&path);
         let menu = action(DirOp::Stage);
-        self.git_row(("git-dir", ix), INDENT * (depth + 1.), fg, bg)
+        let id = format!("git-dir-{section:?}-{}-{}", root.display(), path.display());
+        self.git_row(SharedString::from(id), INDENT * (depth + 1.), fg, bg)
             .role(Role::TreeItem)
             .aria_level(self.tree_level(false, depth as usize))
             .aria_expanded(dir.expanded)
@@ -481,7 +442,9 @@ impl WindowView {
             stash_button(STASH_POP_ICON, "git.stash_pop", StashOp::Pop),
             stash_button(TRASH_ICON, "git.stash_drop", StashOp::Drop),
         ];
-        self.git_row(("git-stash", ix), INDENT, fg, bg)
+        // 按从最早一条数起的序号认：新存一条时最上面的 `stash@{0}` 变了，下面各条的 `index` 都加一。
+        let id = format!("git-stash-{}-{}", root.display(), git.info.stashes.len() - index);
+        self.git_row(SharedString::from(id), INDENT, fg, bg)
             .role(Role::TreeItem)
             .aria_level(self.tree_level(false, 0))
             .aria_label(format!("#{index} {}", stash.message))
@@ -543,7 +506,7 @@ pub(super) fn status_letter(status: FileStatus) -> Div {
     div().flex_none().w(px(12.)).flex().justify_center().text_color(hsla(status_color(status))).child(status.letter())
 }
 
-pub(super) fn chevron(expanded: bool, fg: Rgb) -> gpui::Svg {
+pub(in crate::window) fn chevron(expanded: bool, fg: Rgb) -> gpui::Svg {
     svg()
         .flex_none()
         .path(if expanded { CHEVRON_DOWN_ICON } else { CHEVRON_RIGHT_ICON })

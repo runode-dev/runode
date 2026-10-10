@@ -8,7 +8,9 @@ mod custom;
 
 use std::path::{Path, PathBuf};
 
-use gpui::{Action, App, Context, Div, Focusable, MouseButton, Role, SharedString, Stateful, Window, prelude::*, px};
+use gpui::{
+    Action, App, Context, Div, Entity, Focusable, MouseButton, Role, SharedString, Stateful, Window, prelude::*, px,
+};
 use runode_config::TaskPlacement;
 use runode_paths::Dirs;
 use runode_protocol::{TaskSource, TaskSourceKind};
@@ -27,6 +29,7 @@ use crate::{
     assets::{PENCIL_ICON, PLAY_ICON, TRASH_ICON},
     config::AppConfig,
     host_client,
+    terminal_view::TerminalView,
     ui::{display_dir, tooltip::tooltip},
     window::WindowView,
 };
@@ -150,17 +153,28 @@ impl WindowView {
         let Some(dir) = action.dir.clone().or(listed) else {
             return;
         };
-        let Some(view) = self.spawn_terminal(Some(&dir), window, cx) else {
-            return;
-        };
-        let command = action.command.clone();
-        self.workspace_mut().project.tasks_last = Some(command.clone());
+        if self.run_in_terminal(&dir, action.command.clone(), window, cx).is_some() {
+            self.workspace_mut().project.tasks_last = Some(action.command.clone());
+        }
+    }
+
+    /// 在 `dir` 里开一个终端跑 `command`：按配置项 `task-placement` 在当前标签里分出来或者在它右边开新标签。
+    /// GitHub Actions 页看日志、触发工作流也这样开。交回开出来的终端，没开成时为空。
+    pub(super) fn run_in_terminal(
+        &mut self,
+        dir: &Path,
+        command: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Option<Entity<TerminalView>> {
+        let view = self.spawn_terminal(Some(dir), window, cx)?;
         view.update(cx, |view, cx| view.run_command(command, cx));
         match cx.global::<AppConfig>().0.task_placement {
-            TaskPlacement::Right => self.split_with(view, Axis::Horizontal, window, cx),
-            TaskPlacement::Down => self.split_with(view, Axis::Vertical, window, cx),
-            TaskPlacement::Tab => self.insert_tab(self.workspace().active + 1, view, window, cx),
+            TaskPlacement::Right => self.split_with(view.clone(), Axis::Horizontal, window, cx),
+            TaskPlacement::Down => self.split_with(view.clone(), Axis::Vertical, window, cx),
+            TaskPlacement::Tab => self.insert_tab(self.workspace().active + 1, view.clone(), window, cx),
         }
+        Some(view)
     }
 
     /// 按了绑着 `run_task:名字` 的快捷键：现请宿主列一遍终端目录的命令（菜单没打开过时还没列），按菜单里

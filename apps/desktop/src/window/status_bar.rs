@@ -6,6 +6,8 @@
 //! - 端口：终端里跑的程序在监听几个 TCP 端口；浮层里列出来，点了在浏览器里打开，别的程序监听的收在
 //!   「外部端口」里。
 //!
+//! 左边是 GitHub Actions 页里固定到状态栏上的工作流，见 `render_pinned_workflows`。
+//!
 //! 用户点了「检查更新…」以后，查和下载期间最左边还有一块转着圈的「正在检查更新…」，见 `update::status_label`。
 //!
 //! 数据全 app 一份（`Status`），每 `POLL_INTERVAL` 更新一次：有窗口在前台时现问 `ps` 和 `lsof`，
@@ -325,6 +327,7 @@ impl WindowView {
                 .child(sync_icon("status-update-spinner", true, 13., fg_h.opacity(0.6)))
                 .child(label)
         });
+        let pinned = self.render_pinned_workflows(fg, bg, cx);
         let hidden = &cx.global::<AppConfig>().0.status_bar_hidden;
         let shown = |item| !hidden.contains(&item);
         div()
@@ -337,7 +340,6 @@ impl WindowView {
             .px(px(6.))
             .flex()
             .items_center()
-            .justify_end()
             .gap(px(2.))
             .text_size(px(11.))
             .text_color(fg_h.opacity(0.7))
@@ -350,6 +352,9 @@ impl WindowView {
                     this.open_status_menu(event.position, cx);
                 }),
             )
+            // 左边是 GitHub Actions 页里固定的工作流，其余几块靠右。
+            .children(pinned)
+            .child(div().flex_1())
             .children(update)
             .when(shown(StatusItem::Sleep), |bar| bar.child(sleep_item))
             .when(shown(StatusItem::Resources), |bar| bar.child(resources_item))

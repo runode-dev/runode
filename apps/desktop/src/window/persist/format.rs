@@ -76,6 +76,9 @@ pub struct SavedWindow {
     pub git_graph_collapsed: bool,
     #[serde(default)]
     pub git_graph_height: Option<f32>,
+    /// GitHub Actions 页三段拖过分隔线后的高度（`ActionsPage::heights`），没拖过的为空。
+    #[serde(default)]
+    pub github_actions_heights: [Option<f32>; 3],
 }
 
 /// 文件树按内容搜索时的选项：区分大小写、全字匹配、用正则，以及要包含、要排除的文件（逗号
@@ -129,6 +132,16 @@ pub struct SavedWorkspace {
     /// 模拟器页选的设备（`Workspace::simulator_device`），mobilecli 给的设备 id。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub simulator_device: Option<String>,
+    /// GitHub Actions 页里固定到状态栏上的工作流（`Workspace::pinned_workflows`）。
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub pinned_workflows: Vec<PinnedWorkflow>,
+}
+
+/// 固定到状态栏上的一个工作流：gh 给的工作流 id，和读到它之前先显示的名字。
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct PinnedWorkflow {
+    pub id: u64,
+    pub name: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -362,6 +375,7 @@ mod tests {
                 git: true,
                 files: false,
                 simulator_device: Some("9812845E-4A33-41F8-9FAA-4636328F190A".into()),
+                pinned_workflows: vec![PinnedWorkflow { id: 375441921, name: "CI".into() }],
             }],
             active: 0,
             sidebar: None,
@@ -383,6 +397,7 @@ mod tests {
             },
             git_graph_collapsed: true,
             git_graph_height: Some(260.),
+            github_actions_heights: [Some(300.), None, None],
         }])
     }
 
@@ -423,12 +438,16 @@ mod tests {
     #[test]
     fn reads_windows_saved_before_the_graph_pane() {
         let text = serde_json::to_string(&state()).unwrap();
-        let old = text.replace(r#","git_graph_collapsed":true,"git_graph_height":260.0"#, "");
+        let old = text.replace(
+            r#","git_graph_collapsed":true,"git_graph_height":260.0,"github_actions_heights":[300.0,null,null]"#,
+            "",
+        );
         assert_ne!(old, text);
         // 以前存的窗口图表展开着，用默认高度。
         let state: State = serde_json::from_str(&old).unwrap();
         assert!(!state.windows[0].git_graph_collapsed);
         assert_eq!(state.windows[0].git_graph_height, None);
+        assert_eq!(state.windows[0].github_actions_heights, [None; 3]);
     }
 
     /// 每个测试一个空的临时目录。

@@ -58,6 +58,7 @@ pub enum Action {
     ToggleGit,
     ToggleFiles,
     ToggleSimulator,
+    ToggleGitHubActions,
     /// 打开或关掉标题栏上的项目命令菜单。
     ToggleTasks,
     /// 跑项目命令菜单里叫这个名字的命令，和在菜单里点它一样。
@@ -226,6 +227,7 @@ pub static ACTIONS: &[ActionSpec] = &[
     plain!("toggle_git", Action::ToggleGit),
     plain!("toggle_files", Action::ToggleFiles),
     plain!("toggle_simulator", Action::ToggleSimulator),
+    plain!("toggle_github_actions", Action::ToggleGitHubActions),
     plain!("toggle_tasks", Action::ToggleTasks),
     ActionSpec {
         name: "run_task",
@@ -354,6 +356,7 @@ pub static DEFAULTS: &[&str] = &[
     "cmd+shift+g=toggle_git",
     "cmd+shift+e=toggle_files",
     "cmd+shift+m=toggle_simulator",
+    "cmd+shift+i=toggle_github_actions",
     "cmd+shift+r=toggle_tasks",
     "cmd+shift+a=goto_agent",
     "cmd+alt+a=next_agent",

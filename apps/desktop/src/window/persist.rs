@@ -273,6 +273,7 @@ impl WindowView {
             file_search_options: self.file_search.options(cx),
             git_graph_collapsed: self.git_graph_collapsed,
             git_graph_height: self.git_graph_height,
+            github_actions_heights: self.github_actions.heights,
         }
     }
 
@@ -351,6 +352,7 @@ impl WindowView {
                 panel,
                 last_panel: panel.unwrap_or_default(),
                 simulator_device: saved_workspace.simulator_device,
+                pinned_workflows: saved_workspace.pinned_workflows,
             });
         }
         if !self.workspaces.is_empty() {
@@ -367,6 +369,7 @@ impl WindowView {
             self.file_search.set_options(saved.file_search_options, cx);
             self.git_graph_collapsed = saved.git_graph_collapsed;
             self.git_graph_height = saved.git_graph_height;
+            self.github_actions.heights = saved.github_actions_heights;
             self.activate_workspace(active, window, cx);
         }
         shell
@@ -459,6 +462,7 @@ impl WindowView {
             git: workspace.panel == Some(SidePanel::Git),
             files: workspace.panel == Some(SidePanel::Files),
             simulator_device: workspace.simulator_device.clone(),
+            pinned_workflows: workspace.pinned_workflows.clone(),
         }
     }
 

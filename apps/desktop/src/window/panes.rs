@@ -549,7 +549,8 @@ impl WindowView {
 
     /// 拖动分隔线期间盖在整个窗口上的一层：接住所有鼠标移动和松开，免得落进终端或侧栏。
     pub(super) fn render_divider_drag(&self, divider: Divider, cx: &mut Context<Self>) -> Div {
-        let vertical = matches!(divider, Divider::Split(_, Axis::Vertical) | Divider::GitGraph);
+        let vertical =
+            matches!(divider, Divider::Split(_, Axis::Vertical) | Divider::GitGraph | Divider::GitHubActions(_));
         div()
             .absolute()
             .size_full()
@@ -588,6 +589,11 @@ impl WindowView {
                             0.
                         };
                         this.resize_right_panel(divider, f32::from(event.position.x), viewport - spacing);
+                        cx.notify();
+                        return;
+                    }
+                    Divider::GitHubActions(si) => {
+                        this.resize_actions_section(si, f32::from(event.position.y));
                         cx.notify();
                         return;
                     }
