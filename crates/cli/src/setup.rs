@@ -3,7 +3,8 @@
 //! `~/.agents/skills/<名字>/`，两边是同样的文件：`SKILL.md`，加上它按需让 agent 去读的
 //! `references/<主题>.md`。
 //! 装的是 GitHub 上仓库 main 里最新的一套（`SKILLS_URL`）：先下文件清单 `files.txt`，再照着下每个
-//! 文件，只改 skill 或加文件都不用发新版 app；下不到时用编进这一版的 `FILES`。
+//! 文件，只改 skill 或加文件都不用发新版 app；下不到时用编进这一版的 `FILES`。装过哪些文件记在
+//! skill 目录下的 `INSTALLED` 里，下到的清单里去掉的下次装时删掉。
 //! 早先给 Codex 装在 `~/.codex/AGENTS.md` 的 `<!-- runode:begin -->`、`<!-- runode:end -->` 之间，
 //! 再装时把这一段删掉，文件里别的内容不动。
 
@@ -34,6 +35,8 @@ pub const SKILLS_URL: &str = "https://raw.githubusercontent.com/runode-dev/runod
 const MAX_FILE_BYTES: usize = 256 * 1024;
 /// 清单最多列这么多文件。
 const MAX_FILES: usize = 64;
+/// 上次装了哪些文件，一行一个路径，放在 skill 目录下；agent 只认 `<名字>/SKILL.md`，不会读它。
+const INSTALLED: &str = ".runode-files";
 const BEGIN: &str = "<!-- runode:begin -->";
 const END: &str = "<!-- runode:end -->";
 
@@ -57,17 +60,19 @@ pub fn bundled_skills() -> SkillFiles {
 
 /// 从 `url`（通常是 `SKILLS_URL`）下最新的一套 skill 文件：先下清单 `files.txt`，再下清单里的每个。
 /// 清单里有一个路径不对、一个文件下不到或不像 skill，就整套不用，返回 `None`，免得装上新旧混着的
-/// 一套。外调 curl，每个文件最多等十秒。
+/// 一套。外调 curl，清单下到后各个文件同时下，每个请求最多等十秒。
 pub fn fetch_skills(url: &str) -> Option<SkillFiles> {
     let list = String::from_utf8(download(&format!("{url}/files.txt"))?).ok()?;
     let paths: Vec<&str> = list.lines().map(str::trim).filter(|line| !line.is_empty()).collect();
     if paths.is_empty() || paths.len() > MAX_FILES || !paths.iter().all(|path| is_skill_path(path)) {
         return None;
     }
-    paths
-        .into_iter()
-        .map(|path| Some((path.to_owned(), as_skill_file(path, download(&format!("{url}/{path}"))?)?)))
-        .collect()
+    let bodies: Vec<Option<Vec<u8>>> = std::thread::scope(|scope| {
+        let downloads: Vec<_> =
+            paths.iter().map(|path| scope.spawn(move || download(&format!("{url}/{path}")))).collect();
+        downloads.into_iter().map(|download| download.join().ok().flatten()).collect()
+    });
+    paths.into_iter().zip(bodies).map(|(path, body)| Some((path.to_owned(), as_skill_file(path, body?)?))).collect()
 }
 
 fn download(url: &str) -> Option<Vec<u8>> {
@@ -80,7 +85,8 @@ fn download(url: &str) -> Option<Vec<u8>> {
 }
 
 /// 清单里的路径只能是 `<名字>/SKILL.md` 或 `<名字>/references/<主题>.md`，名字和主题只用小写字母、
-/// 数字和 `-`：下回来的清单不能让文件写到 skill 目录外面去。
+/// 数字和 `-`：下回来的清单不能让文件写到 skill 目录外面去。已经发出去的 app 都按这条规矩收，skill
+/// 里放了别的路径（比如 `scripts/`），旧版 app 就整套不用、一直停在编进去的那套。
 fn is_skill_path(path: &str) -> bool {
     let plain = |part: &str| {
         !part.is_empty() && part.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
@@ -104,10 +110,11 @@ fn as_skill_file(path: &str, body: Vec<u8>) -> Option<String> {
 }
 
 /// 把 `files`（`fetch_skills` 或 `bundled_skills` 给的）装到 `home` 下 `target` 读的地方，返回写的
-/// 文件。可以重复执行，每次整个换掉；给 Codex 装时顺带删掉早先写进 `~/.codex/AGENTS.md` 的那段。
-/// shortcut: 清单里去掉的文件留在用户那里，没有 SKILL.md 指着就不会被读到；要是哪天会误导 agent，再
-/// 在装之前清掉 `references/` 里清单外的文件。
-pub fn setup(target: SetupTarget, home: &Path, files: &[(String, String)]) -> Result<Vec<PathBuf>> {
+/// 文件。可以重复执行，每次整个换掉。`latest` 说 `files` 是不是下到的最新一套：是时上次装了、这次
+/// 没有的文件删掉，免得去掉的 skill 还被 agent 加载；编进这一版的那套可能比 main 旧，没有的未必是
+/// 去掉了，不删，留在记录里等下到最新的再说。给 Codex 装时顺带删掉早先写进 `~/.codex/AGENTS.md`
+/// 的那段。
+pub fn setup(target: SetupTarget, home: &Path, files: &[(String, String)], latest: bool) -> Result<Vec<PathBuf>> {
     let dir = skills_dir(target, home);
     let mut written = Vec::new();
     for (path, content) in files {
@@ -119,6 +126,28 @@ pub fn setup(target: SetupTarget, home: &Path, files: &[(String, String)]) -> Re
             .with_context(|| format!("failed to write {}", path.display()))?;
         written.push(path);
     }
+    let mut record: String = files.iter().map(|(path, _)| format!("{path}\n")).collect();
+    // 记录是这台电脑上的文件，照样只认 skill 目录里的路径。
+    let gone = installed_paths(&dir)?.into_iter().flatten().filter(|old| files.iter().all(|(path, _)| path != old));
+    for old in gone.filter(|old| is_skill_path(old)) {
+        if !latest {
+            record.push_str(&format!("{old}\n"));
+            continue;
+        }
+        let path = dir.join(&old);
+        match std::fs::remove_file(&path) {
+            Ok(()) => {}
+            Err(err) if err.kind() == io::ErrorKind::NotFound => {}
+            Err(err) => return Err(err).with_context(|| format!("failed to remove {}", path.display())),
+        }
+        // 空了的 `references/` 和 skill 目录一起删；里面还有用户自己放的文件时删不掉，留着。
+        for parent in Path::new(&old).ancestors().skip(1).filter(|parent| !parent.as_os_str().is_empty()) {
+            let _ = std::fs::remove_dir(dir.join(parent));
+        }
+    }
+    let record_file = dir.join(INSTALLED);
+    runode_paths::replace_file(&record_file, record.as_bytes())
+        .with_context(|| format!("failed to write {}", record_file.display()))?;
     if target == SetupTarget::Codex {
         let agents = home.join(".codex/AGENTS.md");
         match std::fs::read_to_string(&agents) {
@@ -135,13 +164,16 @@ pub fn setup(target: SetupTarget, home: &Path, files: &[(String, String)]) -> Re
     Ok(written)
 }
 
-/// 给 `target` 装过使用说明（`setup_paths` 或 `files` 里有文件在），又和 `files` 不一样或缺了文件时
-/// 重装，返回重装了没有。app 启动时拿 `fetch_skills` 下到的用，skill 更新了不用手动再装；没装过的
-/// 不装，不替用户装上他没要的东西。
+/// 给 `target` 装过使用说明（`setup_paths` 或 `files` 里有文件在），又和 `files` 不一样、缺了文件
+/// 或清单变了时重装，返回重装了没有。`files` 得是 `fetch_skills` 下到的，app 启动时用它，skill
+/// 更新了不用手动再装；没装过的不装，不替用户装上他没要的东西，用户删掉了 skill 只剩记录的也算
+/// 没装过。
 pub fn refresh(target: SetupTarget, home: &Path, files: &[(String, String)]) -> Result<bool> {
     let dir = skills_dir(target, home);
+    let recorded = installed_paths(&dir)?;
     let mut installed = setup_paths(target, home).iter().any(|path| path.exists());
-    let mut stale = false;
+    // 没有记录的是记录之前装的，重装一次补上，以后去掉的 skill 才删得掉。
+    let mut stale = recorded.is_none_or(|recorded| !recorded.iter().eq(files.iter().map(|(path, _)| path)));
     for (path, content) in files {
         let path = dir.join(path);
         match std::fs::read(&path) {
@@ -156,8 +188,18 @@ pub fn refresh(target: SetupTarget, home: &Path, files: &[(String, String)]) -> 
     if !(installed && stale) {
         return Ok(false);
     }
-    setup(target, home, files)?;
+    setup(target, home, files, true)?;
     Ok(true)
+}
+
+/// `dir` 下上次装了哪些文件，没有记录时返回 `None`。
+fn installed_paths(dir: &Path) -> Result<Option<Vec<String>>> {
+    let file = dir.join(INSTALLED);
+    match std::fs::read_to_string(&file) {
+        Ok(text) => Ok(Some(text.lines().map(str::to_owned).collect())),
+        Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(None),
+        Err(err) => Err(err).with_context(|| format!("failed to read {}", file.display())),
+    }
 }
 
 /// 删掉 `existing` 里用标记包着的那段，连同它前面用来隔开的空行；没有这一段时返回 `None`。
@@ -219,9 +261,14 @@ mod tests {
         while let Some(dir) = dirs.pop() {
             for entry in std::fs::read_dir(dir).unwrap() {
                 let path = entry.unwrap().path();
+                let name = path.file_name().unwrap().to_string_lossy().into_owned();
+                // Finder 留下的 .DS_Store 这类隐藏文件不算。
+                if name.starts_with('.') {
+                    continue;
+                }
                 if path.is_dir() {
                     dirs.push(path);
-                } else if path.file_name().is_some_and(|name| name != "files.txt") {
+                } else if name != "files.txt" {
                     on_disk.push(path.strip_prefix(&root).unwrap().to_string_lossy().into_owned());
                 }
             }

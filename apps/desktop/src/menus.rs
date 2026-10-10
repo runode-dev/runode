@@ -286,9 +286,10 @@ fn install_agent_integration(cx: &mut App) {
         let installed: anyhow::Result<Vec<_>> = cx
             .background_executor()
             .spawn(async move {
-                let skills =
-                    runode_cli::fetch_skills(runode_cli::SKILLS_URL).unwrap_or_else(runode_cli::bundled_skills);
-                SETUP_TARGETS.iter().map(|target| runode_cli::setup(*target, &home, &skills)).collect()
+                let latest = runode_cli::fetch_skills(runode_cli::SKILLS_URL);
+                let fetched = latest.is_some();
+                let skills = latest.unwrap_or_else(runode_cli::bundled_skills);
+                SETUP_TARGETS.iter().map(|target| runode_cli::setup(*target, &home, &skills, fetched)).collect()
             })
             .await;
         let installed = installed.map(|paths| paths.into_iter().flatten());

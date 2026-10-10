@@ -67,7 +67,7 @@ fn refresh_rewrites_only_installed_skills() {
     assert!(!home.join(".claude").exists());
 
     // 装过的：旧了、缺了一份都重装成这一版的；一样时不动。
-    runode_cli::setup(SetupTarget::Claude, home, &skills).unwrap();
+    runode_cli::setup(SetupTarget::Claude, home, &skills, true).unwrap();
     let skill = home.join(".claude/skills/runode/SKILL.md");
     let simulator = home.join(".claude/skills/runode-simulator/SKILL.md");
     let current = std::fs::read_to_string(&skill).unwrap();
@@ -80,4 +80,42 @@ fn refresh_rewrites_only_installed_skills() {
     // 只装了 Claude 的，Codex 那边照样不碰。
     assert!(!runode_cli::refresh(SetupTarget::Codex, home, &skills).unwrap());
     assert!(!home.join(".agents").exists());
+}
+
+#[test]
+fn a_skill_dropped_from_the_list_is_removed() {
+    let fake = FakeHost::start("setupdrop", |_| vec![]);
+    let home = fake.env.dirs.home.as_deref().unwrap();
+    let skills = home.join(".claude/skills");
+    let file = |path: &str, content: &str| (path.to_owned(), content.to_owned());
+    let old = vec![
+        file("runode/SKILL.md", "---\nname: runode\n"),
+        file("gone/SKILL.md", "---\nname: gone\n"),
+        file("gone/references/a.md", "# A\n"),
+        file("kept/SKILL.md", "---\nname: kept\n"),
+        file("kept/references/b.md", "# B\n"),
+    ];
+    runode_cli::setup(SetupTarget::Claude, home, &old, true).unwrap();
+    std::fs::write(skills.join("kept/notes.md"), "mine").unwrap();
+    std::fs::write(skills.join("other.md"), "not ours").unwrap();
+
+    // 断网时装的是编进这一版的那套，可能比 main 旧，少了的不删。
+    let new = vec![file("runode/SKILL.md", "---\nname: runode\n"), file("kept/SKILL.md", "---\nname: kept\n")];
+    runode_cli::setup(SetupTarget::Claude, home, &new, false).unwrap();
+    assert!(skills.join("gone/references/a.md").exists());
+
+    // 下到的清单里去掉的 skill 整个删掉；还在的 skill 里去掉的 reference 删掉，用户自己放的文件留着。
+    assert!(runode_cli::refresh(SetupTarget::Claude, home, &new).unwrap());
+    assert!(!skills.join("gone").exists());
+    assert!(!skills.join("kept/references").exists());
+    assert!(skills.join("kept/SKILL.md").exists() && skills.join("kept/notes.md").exists());
+    assert!(skills.join("other.md").exists());
+    assert!(!runode_cli::refresh(SetupTarget::Claude, home, &new).unwrap());
+
+    // 用户删掉了 skill，只剩记录时不再装回去。
+    for name in ["runode", "kept"] {
+        std::fs::remove_dir_all(skills.join(name)).unwrap();
+    }
+    assert!(!runode_cli::refresh(SetupTarget::Claude, home, &new).unwrap());
+    assert!(!skills.join("runode").exists());
 }
