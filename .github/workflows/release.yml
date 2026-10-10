@@ -7,8 +7,8 @@
 #
 # 之后：对这个标签跑一遍 CI（ci.yml），同时在 Apple 芯片的 runner 上打 arm64 和 x86_64 两份 dmg 和
 # 自动更新用的 zip（x86_64 交叉编译，Intel runner 慢一倍），用 Developer ID 签名、公证；在 x86_64 和
-# aarch64 的 Linux 上各打一份只有可执行文件的 tar.gz（没有桌面界面，用命令行和 `runode --host`）；CI
-# 和各个包都成了才汇总起来生成版本清单 latest.json 和校验和 SHA256SUMS，先发成草稿、文件都传齐了再
+# aarch64 的 Linux 上各打一份只有可执行文件的 tar.gz（没有桌面界面，用命令行和 `runode --host`）；
+# x86_64 的 Mac 包再到 Intel 的 runner 上跑一下；CI 和各个包都成了才汇总起来生成版本清单 latest.json 和校验和 SHA256SUMS，先发成草稿、文件都传齐了再
 # 公开；最后在 macOS 和 Linux 上各用 scripts/install.sh 装一遍这个版本，确认装得上、跑得起来。
 #
 # app 经 releases/latest/download/latest.json 查新版本（`runode_update::MANIFEST_URL`），
@@ -252,9 +252,27 @@ jobs:
           path: target/release/bundle/runode-*.tar.gz
           if-no-files-found: error
 
+  check-macos-x86_64:
+    # x86_64 的 Mac 包是交叉编译的，打包时没跑过；公开前在 Intel 机器上跑一下，起不来就不发。
+    needs: [prepare, build-macos]
+    runs-on: macos-15-intel
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: bundle-macos-x86_64
+          path: bundle
+      - name: 解开 zip、核对版本号
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          ditto -x -k bundle/Runode-"$VERSION"-x86_64.zip "$RUNNER_TEMP/app"
+          reported=$("$RUNNER_TEMP/app/Runode.app/Contents/MacOS/runode" --version)
+          echo "$reported"
+          [[ "$reported" == "runode $VERSION."* ]] || { echo "跑出来的不是 $VERSION" >&2; exit 1; }
+
   publish:
-    # CI 过了、各平台各架构都打好了才发，缺一个就不发。
-    needs: [prepare, ci, build-macos, build-linux]
+    # CI 过了、各平台各架构都打好了、x86_64 的 Mac 包跑过了才发，缺一个就不发。
+    needs: [prepare, ci, build-macos, build-linux, check-macos-x86_64]
     runs-on: ubuntu-latest
     env:
       TAG: ${{ needs.prepare.outputs.tag }}
@@ -331,7 +349,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # macos-15-intel 装的是 x86_64 的包：它是交叉编译的，别处都不跑它。
+        # macos-15-intel 走 Intel Mac 的安装路径，装的是 x86_64 的包。
         runner: [macos-15, macos-15-intel, ubuntu-22.04, ubuntu-22.04-arm]
     runs-on: ${{ matrix.runner }}
     steps:

@@ -112,6 +112,8 @@ if [[ -z "$yes" ]]; then
   fi
 fi
 
+# 这一版要发了，答过不发的草稿没用了；留着会让下一版检查工作区时以为有改动。
+rm -f "$declined"
 sed -i.bak '/^\[workspace.package\]/,/^\[/s/^version = ".*"/version = "'"$version"'"/' Cargo.toml
 rm Cargo.toml.bak
 # 只更新 Cargo.lock 里 workspace 自己的包的版本，不动依赖。
