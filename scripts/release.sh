@@ -13,7 +13,8 @@
 # `gh release edit vX.Y.Z --prerelease=false --latest --title "Runode X.Y.Z"`。
 #
 # 带 --yes 时不开编辑器、不问确认，直接发已经写好的 docs/releases/vX.Y.Z.md，没写好时不发；给 agent
-# 这类没有终端可交互的用。
+# 这类没有终端可交互的用。问发不发时答了不发，草稿挪成 vX.Y.Z.draft.md，--yes 不会把它发出去，不带
+# --yes 再运行时接着改它。
 #
 # 用法：release.sh [--beta] [--yes] [版本号]，版本号是 x.y.z，不给时补丁号加一。
 set -euo pipefail
@@ -42,6 +43,7 @@ else
 fi
 tag="v$version"
 notes="docs/releases/$tag.md"
+declined="docs/releases/$tag.draft.md"
 
 [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || die "版本号 $version 不是 x.y.z"
 # 新版本要比现在的大，app 才会更新过去。
@@ -49,7 +51,7 @@ notes="docs/releases/$tag.md"
   || die "版本号 $version 不比现在的 $current 大"
 [[ "$(git branch --show-current)" == main ]] || die "要在 main 上发版"
 # 上次没发完留下的草稿不算改动。
-[[ -z "$(git status --porcelain -- ":(exclude)$notes")" ]] || die "工作区有没提交的改动"
+[[ -z "$(git status --porcelain -- ":(exclude)$notes" ":(exclude)$declined")" ]] || die "工作区有没提交的改动"
 git fetch -q --tags origin main
 [[ "$(git rev-parse HEAD)" == "$(git rev-parse origin/main)" ]] || die "本地 main 和 origin/main 不一致，先同步"
 ! git rev-parse -q --verify "refs/tags/$tag" >/dev/null || die "标签 $tag 已经有了"
@@ -61,6 +63,9 @@ commits() {
   git log --no-merges --format=%s "$range" | sed -n "s/^$1\(([^)]*)\)\{0,1\}!\{0,1\}: */- /p"
 }
 
+if [[ -z "$yes" && ! -f "$notes" && -f "$declined" ]]; then
+  mv "$declined" "$notes"
+fi
 if [[ ! -f "$notes" ]]; then
   [[ -z "$yes" ]] || die "--yes 只发写好的更新说明，先写好 $notes"
   # 上一版的说明给 claude 当格式的样子，要在新文件建出来之前找。
@@ -101,7 +106,10 @@ if [[ -n "$beta" ]]; then printf '%s\n%s\n' "$marker" "$body"; else printf '%s\n
 cat "$notes"
 if [[ -z "$yes" ]]; then
   read -rp "发布 ${tag}${beta:+ beta}？[y/N] " answer
-  [[ "$answer" == [yY] ]] || die "没发，草稿留在 $notes"
+  if [[ "$answer" != [yY] ]]; then
+    mv "$notes" "$declined"
+    die "没发，草稿挪到 ${declined}，再运行（不带 --yes）时接着改"
+  fi
 fi
 
 sed -i.bak '/^\[workspace.package\]/,/^\[/s/^version = ".*"/version = "'"$version"'"/' Cargo.toml
