@@ -75,6 +75,8 @@ struct Model {
     description: String,
     size: u64,
     installed: bool,
+    /// runode-decide 说这台机器跑得了它。
+    supported: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -335,6 +337,10 @@ impl SettingsView {
             hint.push_str(" · ");
             hint.push_str(&tr("settings.decision.loaded"));
         }
+        if !model.supported {
+            hint.push_str(" · ");
+            hint.push_str(&tr("settings.decision.cannot_run"));
+        }
         let id = model.id.clone();
         let element_id = |prefix: &str| SharedString::from(format!("{prefix}-{}", model.id));
         let control = match &pull {
@@ -583,13 +589,20 @@ fn parse_status(status: &Value, catalog: &Value, installed: &Value, loaded: &Val
             description: text(&m["description"]),
             size: m["size"].as_u64().unwrap_or(0),
             installed: m["installed"].as_bool().unwrap_or(false),
+            supported: m["supported"].as_bool().unwrap_or(true),
         })
         .collect();
     for m in models_of(installed) {
         let id = text(&m["model"]);
         if !models.iter().any(|model| model.id == id) {
             let description = text(&m["repo"]);
-            models.push(Model { id, description, size: m["size"].as_u64().unwrap_or(0), installed: true });
+            models.push(Model {
+                id,
+                description,
+                size: m["size"].as_u64().unwrap_or(0),
+                installed: true,
+                supported: true,
+            });
         }
     }
     Status {
@@ -657,7 +670,8 @@ mod tests {
         let catalog = json!({"models": [
             {"model": "clef-flash:gguf-q4_k_m", "description": "Clef-Flash 9B, 4-bit", "size": 6486448288u64, "installed": true},
             {"model": "clef:gguf-q4_k_m", "description": "Clef 27B, 4-bit", "size": 19232219200u64, "installed": false},
-            {"model": "clef-flash:mlx-4bit", "description": "Clef-Flash 9B, MLX", "size": 1, "installed": false, "supported": false}]});
+            {"model": "clef-flash:mlx-4bit", "description": "Clef-Flash 9B, MLX", "size": 1, "installed": false, "supported": false},
+            {"model": "clef:mlx-4bit", "description": "Clef 27B, MLX", "size": 1, "installed": true, "supported": false}]});
         let installed = json!({"models": [
             {"model": "clef-flash:gguf-q4_k_m", "repo": "ggml-org/Clef-Flash-GGUF", "size": 6486448288u64},
             {"model": "hf.co/org/repo:Q8_0", "repo": "org/repo", "size": 1000}]});
@@ -665,7 +679,16 @@ mod tests {
         let status = parse_status(&status, &catalog, &installed, &loaded);
         assert!(status.running && status.typesafe && !status.cloudflare);
         let ids: Vec<_> = status.models.iter().map(|m| (m.id.as_str(), m.installed)).collect();
-        assert_eq!(ids, [("clef-flash:gguf-q4_k_m", true), ("clef:gguf-q4_k_m", false), ("hf.co/org/repo:Q8_0", true)]);
+        assert_eq!(
+            ids,
+            [
+                ("clef-flash:gguf-q4_k_m", true),
+                ("clef:gguf-q4_k_m", false),
+                ("clef:mlx-4bit", true),
+                ("hf.co/org/repo:Q8_0", true)
+            ]
+        );
+        assert!(!status.models[2].supported && status.models[0].supported);
         assert_eq!(status.loaded, ["clef-flash:gguf-q4_k_m"]);
     }
 

@@ -782,6 +782,7 @@ settings:
     save_label: "保存 %{what}"
     clear_label: "去掉 %{what}"
     pull_stopped: 下载没完成就停了，再点一次下载会接着下。
+    cannot_run: 这台 Mac 上跑不了
     more_models: 别的 GGUF 决策模型可以在终端里用 runode-decide pull hf.co/<org>/<repo>:<量化> 下载。
   pairing:
     title: 配对手机
