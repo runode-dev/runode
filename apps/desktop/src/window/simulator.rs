@@ -201,17 +201,21 @@ type PageAction = fn(&mut WindowView, &mut Context<WindowView>);
 /// 那个按钮的标识、文字和按下时做的事。
 type StatusAction = (&'static str, Cow<'static, str>, PageAction);
 
-/// 推画面的 mobilecli 进程。丢掉时连它拉起的子进程一起结束。
+/// 正在推的画面：推流的进程和收帧的任务，丢掉时一起停。
 struct Stream {
-    child: Option<Child>,
+    _process: StreamProcess,
     _frames: Task<()>,
     /// 辅助工具开着时定时读设备里的元素，跟着画面一起停。
     elements: Option<Task<()>>,
 }
 
-impl Drop for Stream {
+/// 推画面的 mobilecli 进程，丢掉时连它拉起的子进程一起结束。一拉起来就包上：连接的任务被新的连接
+/// 顶掉时，已经拉起的进程随任务的结果一起丢掉，也会结束。
+struct StreamProcess(Option<Child>);
+
+impl Drop for StreamProcess {
     fn drop(&mut self) {
-        let Some(mut child) = self.child.take() else { return };
+        let Some(mut child) = self.0.take() else { return };
         // mobilecli 是 npm 装的 node 包装脚本，真正推流的二进制是它的子进程，所以杀整个进程组。
         unsafe { libc::killpg(child.id() as libc::pid_t, libc::SIGTERM) };
         thread::spawn(move || child.wait());
@@ -361,10 +365,10 @@ impl WindowView {
             let data = mobilecli(path.as_deref(), &["device", "info", "--device", &id])?;
             let screen = parse_screen(&data)?;
             let (child, frames) = start_stream(path.as_deref(), &id, svg)?;
-            Ok::<_, String>((screen, child, frames))
+            Ok::<_, String>((screen, StreamProcess(Some(child)), frames))
         });
         self.simulator.loading = Some(cx.spawn(async move |this, cx| {
-            let (screen, child, mut frames) = match job.await {
+            let (screen, process, mut frames) = match job.await {
                 Ok(started) => started,
                 Err(err) => {
                     this.update(cx, |this, cx| {
@@ -413,7 +417,7 @@ impl WindowView {
                 }
             });
             this.update(cx, |this, cx| {
-                let stream = Stream { child: Some(child), _frames: pump, elements: None };
+                let stream = Stream { _process: process, _frames: pump, elements: None };
                 // 连着的时候页收起来了：不推画面，丢掉的 `Stream` 顺带结束 mobilecli。
                 if !this.simulator_shown() {
                     return;
