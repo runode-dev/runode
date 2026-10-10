@@ -805,6 +805,7 @@ settings:
     keep_alive_hint: A loaded model with no requests for this many minutes is unloaded to free memory. Models kept loaded stay.
     keep_alive_label: Unload when idle for (minutes)
     keep_alive_invalid: Enter a whole number of minutes.
+    config_failed: "Could not read the runode-infer settings: %{err}"
     minutes: min
     load: Load
     load_label: "Load %{model}"

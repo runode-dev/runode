@@ -10,7 +10,8 @@
 //!
 //! 服务在跑时，下好的本机模型能手动加载、卸载，设成常驻；服务对没有请求的模型空等一阵（`keep_alive`）
 //! 就卸载，常驻的不卸载。页面开着、服务在跑时每隔 `POLL_INTERVAL` 跑一次 `ps` 刷新加载着的模型。
-//! 旧版 runode-infer 没有 `config` 命令，那时这几样都不显示。
+//! 旧版 runode-infer 没有 `config` 命令，那时这几样都不显示；新版读 `config` 出错时显示原因，加载、
+//! 卸载照常，空闲时间和常驻没值可显示，不显示。
 
 use std::{
     collections::{HashMap, HashSet},
@@ -139,8 +140,11 @@ struct Status {
     hosted: Vec<Hosted>,
     /// 这个版本的 runode-infer 跑得了大模型：目录里有一项带 `kind` 就算。
     chat_supported: bool,
-    /// 空闲卸载和常驻的设置；旧版没有 `config` 命令，为 `None`，页上不显示加载、卸载和常驻。
+    /// 空闲卸载和常驻的设置；旧版没有 `config` 命令，或者读出错（原因在 `config_error`）时为 `None`，
+    /// 页上不显示空闲时间和常驻。
     config: Option<InferConfig>,
+    /// 新版读 `config` 出错的原因，显示在服务卡片里；这时加载、卸载照常显示。
+    config_error: Option<String>,
 }
 
 /// 服务加载着的一个模型，`ps` 里的一项。
@@ -422,12 +426,19 @@ impl SettingsView {
     fn service_row(&self, message: String, control: Option<AnyElement>, colors: Colors) -> AnyElement {
         let hint: SharedString = tr("settings.decision.service_hint").into();
         let error = self.decision.errors.get("service").cloned();
+        let config_error = match &self.decision.snapshot {
+            Some(Snapshot::Ready(Status { config_error: Some(err), .. })) => {
+                Some(rust_i18n::t!("settings.decision.config_failed", err = err).into_owned())
+            }
+            _ => None,
+        };
         div()
             .flex()
             .flex_col()
             .child(row(tr("settings.decision.service"), Some(hint), div().children(control), None, None, colors))
             .child(notice("decision-status", message, colors.fg.opacity(0.7)))
             .children(error.map(|err| notice("decision-service-error", err, colors.error)))
+            .children(config_error.map(|err| notice("decision-config-error", err, colors.error)))
             .into_any_element()
     }
 
@@ -593,9 +604,10 @@ impl SettingsView {
                     .into_any_element()
             }
         };
-        // 下好的本机模型：常驻开关只改设置文件，服务没在跑也能改；加载、卸载要服务在跑。
-        let manage = status.config.as_ref().filter(|_| model.installed && pull.is_none());
-        let pin = manage.map(|config| {
+        // 下好的本机模型：常驻开关只改设置文件，服务没在跑也能改；加载、卸载要服务在跑，不靠设置，
+        // 读设置出错时照样显示。
+        let manage = model.installed && pull.is_none();
+        let pin = status.config.as_ref().filter(|_| manage).map(|config| {
             let on = config.pinned.contains(&model.id);
             let id = model.id.clone();
             let label = rust_i18n::t!("settings.decision.pin_label", model = model.id).into_owned();
@@ -611,9 +623,11 @@ impl SettingsView {
                         .on_press(cx, move |this, _, cx| this.pin_model(id.clone(), !on, cx)),
                 )
         });
-        let load = manage.filter(|_| status.running).map(|_| {
+        let new_infer = status.config.is_some() || status.config_error.is_some();
+        let load = (manage && new_infer && status.running).then(|| {
             let id = model.id.clone();
-            if loading {
+            // 加载中的（不管是不是这一页发起的）不能卸载，卸了 runode-infer 回 409。
+            if loading || loaded.is_some_and(|loaded| loaded.loading) {
                 let label = rust_i18n::t!("settings.decision.load_label", model = model.id).into_owned();
                 button(element_id("decision-load"), tr("settings.decision.loading_model"), colors)
                     .aria_label(label)
@@ -697,7 +711,7 @@ impl SettingsView {
 
     /// 把输入框里的分钟数写给 runode-infer；和显示的当前值一样时不写（比如 90 秒显示成 1 分钟，失焦时
     /// 不该改成 60 秒）。范围由 runode-infer 查，越界时它报错。
-    fn commit_keep_alive(&mut self, cx: &mut Context<Self>) {
+    pub(super) fn commit_keep_alive(&mut self, cx: &mut Context<Self>) {
         let (Some(keep_alive), Some(field)) = (self.keep_alive_setting(), &self.decision.keep_alive) else { return };
         let text = field.input.read(cx).query().trim().to_owned();
         if text == minutes(keep_alive) {
@@ -803,8 +817,8 @@ impl SettingsView {
         true
     }
 
-    /// 服务在跑时每隔 `POLL_INTERVAL` 在后台读一次 `ps`，只换加载着的模型那部分，没变时不重画；
-    /// 服务不在跑时停掉。换页时 `State::stop_polling`、收起设置页时 `State` 跟着丢掉，也就停了。
+    /// 服务在跑时每隔 `POLL_INTERVAL` 在后台读一次 `ps` 和 `config`，只换加载着的模型和设置，没变时
+    /// 不重画；同时读 `status`，服务在别处停掉了就重新读整套状态。服务不在跑时停掉。换页时 `State::stop_polling`、收起设置页时 `State` 跟着丢掉，也就停了。
     fn keep_polling(&mut self, running: bool, cx: &mut Context<Self>) {
         if !running {
             self.decision.poll = None;
@@ -820,19 +834,28 @@ impl SettingsView {
                 cx.background_executor().timer(POLL_INTERVAL).await;
                 let (program, path) = (program.clone(), path.clone());
                 // 设置也一起读：在终端里 pin、改空闲时间时，开关和输入框跟着变。
-                let (ps, config) = cx
+                let (ps, config, service) = cx
                     .background_spawn(async move {
                         let run = |args: &[&str]| run(&program, path.as_deref(), args, None);
-                        (run(&["ps"]), run(&["config"]))
+                        (run(&["ps"]), run(&["config"]), run(&["status"]))
                     })
                     .await;
                 let alive = this.update(cx, |this, cx| {
-                    // 读不到（比如服务刚被别处停掉）时先留着上次的，等重新读状态时再说。
+                    // `ps`、`config` 读不到时留着上次的。
                     let config = config.ok().as_ref().and_then(parse_config);
                     if let Some(config) = &config {
                         this.keep_alive_changed(config.keep_alive, cx);
                     }
+                    let reloading = this.decision.loading.is_some();
                     let Some(Snapshot::Ready(status)) = &mut this.decision.snapshot else { return };
+                    // 服务在别处停掉时 `ps` 不报错、只给空列表，要看 `status`：和页上的对不上就重新读整套
+                    // 状态，读到没在跑时 `render_decision` 停掉轮询。已经在重新读时不再打断它。
+                    if !reloading
+                        && service.is_ok_and(|data| data["running"].as_bool().unwrap_or(false) != status.running)
+                    {
+                        this.refresh_decision(cx);
+                        return;
+                    }
                     let mut changed = false;
                     if let Ok(ps) = ps {
                         let loaded = parse_loaded(&ps);
@@ -841,6 +864,7 @@ impl SettingsView {
                     }
                     if config.is_some() && status.config != config {
                         status.config = config;
+                        status.config_error = None;
                         changed = true;
                     }
                     if changed {
@@ -1077,9 +1101,19 @@ fn load_status(program: &Path, path: Option<&OsStr>) -> Result<Status, String> {
     let installed = run(program, path, &["list"], None)?;
     let running = status["running"].as_bool().unwrap_or(false);
     let loaded = if running { run(program, path, &["ps"], None)? } else { Value::Null };
-    // 旧版没有 `config` 命令，跑了报错：当作不支持加载、卸载和常驻。
-    let config = run(program, path, &["config"], None).ok().and_then(|data| parse_config(&data));
-    Ok(Status { config, ..parse_status(&status, &catalog, &installed, &loaded) })
+    let (config, config_error) = match run(program, path, &["config"], None) {
+        Ok(data) => (parse_config(&data), None),
+        // 旧版没有 `config` 命令：当作不支持加载、卸载和常驻。
+        Err(err) if lacks_command(&err) => (None, None),
+        Err(err) => (None, Some(err)),
+    };
+    Ok(Status { config, config_error, ..parse_status(&status, &catalog, &installed, &loaded) })
+}
+
+/// `run` 交回的错误是不是这个版本的 runode-infer 没有这个命令：它对不认识的命令回
+/// `unknown command; see …`。
+fn lacks_command(err: &str) -> bool {
+    err.contains("unknown command")
 }
 
 /// `ps` 的 data：每项的 `state` 是 `loading` 或 `ready`，`expires_in` 是几秒后卸载（常驻、正在用时为
@@ -1158,6 +1192,7 @@ fn parse_status(status: &Value, catalog: &Value, installed: &Value, loaded: &Val
         hosted,
         chat_supported: catalog_models.iter().any(|m| m.get("kind").is_some()),
         config: None,
+        config_error: None,
     }
 }
 
@@ -1331,6 +1366,10 @@ mod tests {
         );
         assert_eq!(parse_config(&json!({"keep_alive": 60})), Some(InferConfig { keep_alive: 60, pinned: vec![] }));
         assert_eq!(parse_config(&json!({"pinned": []})), None);
+        // 旧版对没有的命令回这句，当作不支持；别的错误（比如跑不起来）要显示出来。
+        assert!(lacks_command("unknown command; see `runode-infer --help`"));
+        assert!(!lacks_command("runode-infer: Permission denied (os error 13)"));
+        assert!(!lacks_command("could not read config.toml: invalid TOML"));
         assert_eq!(minutes(300), "5");
         assert_eq!(minutes(90), "1");
 

@@ -805,6 +805,7 @@ settings:
     keep_alive_hint: 加载着的模型这么多分钟没有请求就卸载，腾出内存；常驻的不卸载。
     keep_alive_label: 空闲多久卸载（分钟）
     keep_alive_invalid: 填整数分钟。
+    config_failed: "没能读 runode-infer 的设置：%{err}"
     minutes: 分钟
     load: 加载
     load_label: "加载 %{model}"

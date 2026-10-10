@@ -232,13 +232,14 @@ impl SettingsView {
         }
     }
 
-    /// 换页、收起前把还没写回的输入框写回。
+    /// 换页、收起前把还没写回的输入框写回，模型页的空闲时间也在内。
     pub fn commit_all(&mut self, cx: &mut Context<Self>) {
         let pending: Vec<String> =
             self.fields.iter().filter(|(_, field)| field.pending.is_some()).map(|(id, _)| id.clone()).collect();
         for id in pending {
             self.commit(&id, cx);
         }
+        self.commit_keep_alive(cx);
     }
 
     /// 把输入框 `id` 里的文字写回配置文件；和当前的值一样时不写。
