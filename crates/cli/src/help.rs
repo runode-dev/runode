@@ -101,8 +101,9 @@ Usage: runode send SESSION [TEXT...] [--paste] [--key KEY]... [--enter]
 
 Arguments:
   SESSION    The session to type into. See `runode help session`
-  [TEXT...]  Words joined by spaces; `-` reads the text from stdin. Put `--`
-             before text that starts with a dash
+  [TEXT...]  Words joined by spaces; `-` reads the text from stdin. A last
+             word Enter presses Enter, as in tmux send-keys. Put `--` before
+             text that starts with a dash or ends with the word Enter
 
 Options:
       --paste         Paste TEXT instead of typing it

@@ -31,7 +31,11 @@
       "description": "Type text or press keys in a session",
       "args": [
         { "name": "session", "generatorName": "sessions" },
-        { "name": "text", "isOptional": true, "isVariadic": true, "suggestions": [{ "name": "-", "description": "Read the text from stdin" }] }
+        { "name": "text", "isOptional": true, "isVariadic": true, "suggestions": [
+            { "name": "-", "description": "Read the text from stdin" },
+            { "name": "Enter", "description": "As the last word, press Enter (like --enter)" }
+          ]
+        }
       ],
       "options": [
         { "name": "--paste", "description": "Paste the text instead of typing it" },

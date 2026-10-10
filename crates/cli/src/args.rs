@@ -112,11 +112,14 @@ pub(crate) enum Until {
 /// 解析参数，出错时返回说明。
 pub(crate) fn parse(args: &[String]) -> Result<Command, String> {
     let mut words = Vec::new();
+    // `--` 之后的第一个词在 `words` 里的位置：从这里起都是原样的字。
+    let mut literal_from = None;
     let mut flags = Flags::default();
     let mut rest = args.iter().peekable();
     while let Some(arg) = rest.next() {
         match arg.as_str() {
             "--" => {
+                literal_from.get_or_insert(words.len());
                 words.extend(rest.by_ref().cloned());
             }
             "-h" | "--help" => flags.help = true,
@@ -174,6 +177,9 @@ pub(crate) fn parse(args: &[String]) -> Result<Command, String> {
     if flags.version {
         return Ok(Command::Version);
     }
+    // tmux send-keys 的写法：`send` 最后单独一个 Enter 是按回车，agent 常这么写；放在 `--` 后面的才当字打。
+    let enter_word =
+        words.last().is_some_and(|word| word == "Enter") && literal_from.is_none_or(|from| from >= words.len());
     let Some((name, words)) = words.split_first() else {
         return Ok(Command::Help(None));
     };
@@ -197,7 +203,11 @@ pub(crate) fn parse(args: &[String]) -> Result<Command, String> {
             Command::Read { session: session(words.first())?, lines: flags.lines.take(), command }
         }
         "send" => {
-            let (target, text) = words.split_first().ok_or("send needs a SESSION")?;
+            let (target, mut text) = words.split_first().ok_or("send needs a SESSION")?;
+            if enter_word && let Some((_, typed)) = text.split_last() {
+                text = typed;
+                flags.enter = true;
+            }
             let text = match text {
                 [dash] if dash == "-" => Text::Stdin,
                 words => Text::Given(words.join(" ")),
@@ -435,6 +445,20 @@ mod tests {
         assert_eq!(parse("send ab12 hello  world"), Ok(send("ab12", "hello world")));
         assert!(matches!(parse("send ab12 -"), Ok(Command::Send { text: Text::Stdin, .. })));
         assert_eq!(parse("send ab12 -- --enter"), Ok(send("ab12", "--enter")));
+        // 末尾单独的 Enter 照 tmux 当回车，`--` 后面的才是字。
+        let entered = |text: &str| {
+            let mut command = send("ab12", text);
+            if let Command::Send { enter, .. } = &mut command {
+                *enter = true;
+            }
+            Ok(command)
+        };
+        assert_eq!(parse("send ab12 make run Enter"), entered("make run"));
+        assert_eq!(parse("send ab12 Enter"), entered(""));
+        assert!(matches!(parse("send ab12 - Enter"), Ok(Command::Send { text: Text::Stdin, enter: true, .. })));
+        assert_eq!(parse("send ab12 -- press Enter"), Ok(send("ab12", "press Enter")));
+        assert_eq!(parse("send ab12 press -- Enter"), Ok(send("ab12", "press Enter")));
+        assert_eq!(parse("send ab12 Enter now"), Ok(send("ab12", "Enter now")));
         assert_eq!(
             parse("wait ab12 --for done"),
             Ok(Command::Wait { session: id("ab12"), until: Until::Done, timeout: None })
