@@ -5,11 +5,11 @@
 #   - 自己改版本号、提交、打同名标签推上来（push 标签），一般用 scripts/release.sh：它还写好中英双语的
 #     更新说明 docs/releases/vX.Y.Z.md 一起提交。标签只认 main 上的提交。
 #
-# 之后：对这个标签跑一遍 CI（ci.yml）；在 Apple 芯片和 Intel 的 runner 上各打一份 dmg 和自动更新用的
-# zip，用 Developer ID 签名、公证；在 x86_64 和 aarch64 的 Linux 上各打一份只有可执行文件的 tar.gz
-# （没有桌面界面，用命令行和 `runode --host`）；汇总起来生成版本清单 latest.json 和校验和 SHA256SUMS，
-# 先发成草稿、文件都传齐了再公开；最后在 macOS 和 Linux 上各用 scripts/install.sh 装一遍这个版本，
-# 确认装得上、跑得起来。
+# 之后：对这个标签跑一遍 CI（ci.yml），同时在 Apple 芯片的 runner 上打 arm64 和 x86_64 两份 dmg 和
+# 自动更新用的 zip（x86_64 交叉编译，Intel runner 慢一倍），用 Developer ID 签名、公证；在 x86_64 和
+# aarch64 的 Linux 上各打一份只有可执行文件的 tar.gz（没有桌面界面，用命令行和 `runode --host`）；CI
+# 和各个包都成了才汇总起来生成版本清单 latest.json 和校验和 SHA256SUMS，先发成草稿、文件都传齐了再
+# 公开；最后在 macOS 和 Linux 上各用 scripts/install.sh 装一遍这个版本，确认装得上、跑得起来。
 #
 # app 经 releases/latest/download/latest.json 查新版本（`runode_update::MANIFEST_URL`），
 # scripts/install.sh 也从 releases/latest/download/ 下载，所以 Release 一公开，开着自动更新的 app
@@ -134,16 +134,20 @@ jobs:
       ref: ${{ needs.prepare.outputs.tag }}
 
   build-macos:
-    needs: [prepare, ci]
-    # 包名里的架构由打包脚本按 `lipo -archs` 取，这里的 arch 只用来给产物和缓存起名。
+    # 不等 CI，和它同时跑；publish 等两边都成了才发。
+    needs: prepare
+    # 两份都在 Apple 芯片上编，x86_64 经 CARGO_BUILD_TARGET 交叉编译。包名里的架构由打包脚本按
+    # `lipo -archs` 取，这里的 arch 只用来给产物和缓存起名。
     strategy:
       matrix:
         include:
-          - runner: macos-15
-            arch: arm64
-          - runner: macos-15-intel
-            arch: x86_64
-    runs-on: ${{ matrix.runner }}
+          - arch: arm64
+            target: aarch64-apple-darwin
+          - arch: x86_64
+            target: x86_64-apple-darwin
+    runs-on: macos-15
+    env:
+      CARGO_BUILD_TARGET: ${{ matrix.target }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -154,12 +158,15 @@ jobs:
         with:
           version: 0.16.0
       - name: 装 Rust 工具链
-        run: rustup toolchain install
+        run: |
+          rustup toolchain install
+          rustup target add "$CARGO_BUILD_TARGET"
       - name: 确认有 Metal 编译器
         run: xcrun -f metal || xcodebuild -downloadComponent MetalToolchain
       - uses: Swatinem/rust-cache@v2
         with:
-          key: ${{ matrix.arch }}
+          # 带上目标三元组，不接着用以前在 Intel runner 上存的缓存。
+          key: macos-${{ matrix.target }}
       - name: 导入签名证书
         env:
           MACOS_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE }}
@@ -201,7 +208,7 @@ jobs:
           if-no-files-found: error
 
   build-linux:
-    needs: [prepare, ci]
+    needs: prepare
     # 在较老的 Ubuntu 上编，glibc 版本低，新一些的发行版都能跑。GPUI 在 Linux 上的图形库都是运行时
     # 才 dlopen 的，可执行文件只依赖 libc，没有图形界面的服务器上也能跑命令行和宿主。
     strategy:
@@ -246,8 +253,8 @@ jobs:
           if-no-files-found: error
 
   publish:
-    # 各平台各架构都打好了才发，缺一个就不发。
-    needs: [prepare, build-macos, build-linux]
+    # CI 过了、各平台各架构都打好了才发，缺一个就不发。
+    needs: [prepare, ci, build-macos, build-linux]
     runs-on: ubuntu-latest
     env:
       TAG: ${{ needs.prepare.outputs.tag }}

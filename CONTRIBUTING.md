@@ -28,7 +28,7 @@ CI 会跑同样的检查。代码分在哪个 crate、能依赖谁，以及命�
 
 ## 发版
 
-把 `vX.Y.Z` 标签推到 GitHub 就会触发 Release 工作流（`.github/workflows/release.yml`），后面的构建、签名、公证、发 Release 和装一遍核对全自动。一般用 `scripts/release.sh`，它会生成中英双语的更新说明，改版本号、提交、打标签、推送一步做完。
+把 `vX.Y.Z` 标签推到 GitHub 就会触发 Release 工作流（`.github/workflows/release.yml`），后面的构建、签名、公证、发 Release 和装一遍核对全自动。一般用 `scripts/release.sh`，它会生成中英双语的更新说明（本机有 claude 时让它照上一版的说明归纳），改版本号、提交、打标签、推送一步做完；更新说明已经写好时，`--yes` 不开编辑器、不问确认，agent 也能一条命令发版。CI 和各平台的打包同时跑，两种 Mac 都在 Apple 芯片上编（x86_64 交叉编译），从推标签到公开大约 20 分钟。
 
 手动发版的步骤：
 

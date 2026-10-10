@@ -4,24 +4,34 @@
 # 更新说明存成 docs/releases/vX.Y.Z.md，和版本号一起提交；release.yml 发 Release 时拿它当说明，
 # 没有这个文件时（比如在 Actions 页面手动发版）退回 GitHub 自动生成的说明。
 #
-# 草稿按上个标签以来的提交生成：feat、fix、perf 各归一组，其他前缀的不列；英文部分本机有 claude
-# 命令时让它翻译，没有时留 TODO。草稿在编辑器（$EDITOR，默认 vi）里打开，改好保存退出；里面还有
-# TODO 时不往下走。
+# 草稿按上个标签以来的 feat、fix、perf 提交生成：本机有 claude 命令时让它照上一版的说明归纳成中英
+# 两段，没有时（或它失败时）中文列出提交标题、英文留 TODO。草稿在编辑器（$EDITOR，默认 vi）里打开，
+# 改好保存退出；里面还有 TODO 时不往下走。
 #
 # 带 --beta 时发成 beta：说明第一行写上 `<!-- prerelease -->`，release.yml 见到它就发成预发布、不标
 # latest，自动更新拿不到；测好了转正，连标题里的 Beta 一起去掉：
 # `gh release edit vX.Y.Z --prerelease=false --latest --title "Runode X.Y.Z"`。
 #
-# 用法：release.sh [--beta] [版本号]，版本号是 x.y.z，不给时补丁号加一。
+# 带 --yes 时不开编辑器、不问确认，直接发已经写好的 docs/releases/vX.Y.Z.md，没写好时不发；给 agent
+# 这类没有终端可交互的用。
+#
+# 用法：release.sh [--beta] [--yes] [版本号]，版本号是 x.y.z，不给时补丁号加一。
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
+die() { echo "$*" >&2; exit 1; }
+
 beta=
-if [[ "${1:-}" == --beta ]]; then
-  beta=1
+yes=
+while [[ "${1:-}" == --* ]]; do
+  case "$1" in
+    --beta) beta=1 ;;
+    --yes) yes=1 ;;
+    *) die "不认识的选项 $1" ;;
+  esac
   shift
-fi
+done
 
 current=$(sed -n '/^\[workspace.package\]/,/^\[/s/^version = "\(.*\)"/\1/p' Cargo.toml)
 if [[ -n "${1:-}" ]]; then
@@ -32,8 +42,6 @@ else
 fi
 tag="v$version"
 notes="docs/releases/$tag.md"
-
-die() { echo "$*" >&2; exit 1; }
 
 [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || die "版本号 $version 不是 x.y.z"
 # 新版本要比现在的大，app 才会更新过去。
@@ -54,6 +62,9 @@ commits() {
 }
 
 if [[ ! -f "$notes" ]]; then
+  [[ -z "$yes" ]] || die "--yes 只发写好的更新说明，先写好 $notes"
+  # 上一版的说明给 claude 当格式的样子，要在新文件建出来之前找。
+  previous=$(ls docs/releases/v*.md 2>/dev/null | sort -V | tail -1)
   mkdir -p docs/releases
   zh=$(
     for group in "feat:新功能" "fix:修复" "perf:性能"; do
@@ -61,17 +72,25 @@ if [[ ! -f "$notes" ]]; then
       if [[ -n "$lines" ]]; then printf '### %s\n\n%s\n\n' "${group#*:}" "$lines"; fi
     done
   )
-  en="TODO：把上面的中文译成英文，标题用 ### Features、### Fixes、### Performance。"
+  en="TODO：把上面的中文归纳好、译成英文，标题用 ### Features、### Fixes、### Performance。"
+  draft=$(printf '## 中文\n\n%s\n\n## English\n\n%s\n' "${zh:-TODO：写这一版的改动。}" "$en")
   if command -v claude >/dev/null && [[ -n "$zh" ]]; then
-    echo "让 claude 翻译英文部分……" >&2
-    en=$(claude -p --no-session-persistence \
-      "Translate these release notes of Runode (a terminal app) from Chinese to English. Keep the Markdown structure; headings become ### Features, ### Fixes, ### Performance. Output only the translated Markdown." \
-      <<<"$zh") || en="TODO：claude 翻译失败，手动写英文。"
+    echo "让 claude 归纳更新说明……" >&2
+    draft=$(
+      {
+        if [[ -n "$previous" ]]; then printf 'Previous release notes:\n\n%s\n\n' "$(cat "$previous")"; fi
+        printf 'Commits since the previous release:\n\n%s\n' "$zh"
+      } | claude -p --no-session-persistence \
+        "Write the release notes for the next version of Runode (a terminal app for AI coding agents) from the commits on stdin. Follow the previous notes' format and level of detail: a '## 中文' section with '### 新功能', '### 修复', '### 性能' (only the groups that have entries), then a '## English' section with the same bullets in English under '### Features', '### Fixes', '### Performance'. Merge related commits into one bullet, say what users notice rather than how it was done, give big features a short bold name, leave out changes users cannot notice (tests, refactors, CI), write each bullet as one line with no nested lists, and keep each group to about a dozen bullets. Output only the Markdown."
+    ) || {
+      echo "claude 归纳失败，草稿只列提交标题" >&2
+      draft=$(printf '## 中文\n\n%s\n\n## English\n\n%s\n' "$zh" "$en")
+    }
   fi
-  printf '## 中文\n\n%s\n\n## English\n\n%s\n' "${zh:-TODO：写这一版的改动。}" "$en" >"$notes"
+  printf '%s\n' "$draft" >"$notes"
 fi
 
-${EDITOR:-vi} "$notes"
+[[ -n "$yes" ]] || ${EDITOR:-vi} "$notes"
 ! grep -q TODO "$notes" || die "$notes 里还有 TODO，改好后重新运行（草稿留着）"
 grep -q '^## 中文' "$notes" && grep -q '^## English' "$notes" || die "$notes 要有「## 中文」和「## English」两段"
 # 标记跟着这次的 --beta 走：草稿可能是上次按另一种发法留下的。
@@ -80,8 +99,10 @@ body=$(grep -vxF "$marker" "$notes")
 if [[ -n "$beta" ]]; then printf '%s\n%s\n' "$marker" "$body"; else printf '%s\n' "$body"; fi >"$notes"
 
 cat "$notes"
-read -rp "发布 ${tag}${beta:+ beta}？[y/N] " answer
-[[ "$answer" == [yY] ]] || die "没发，草稿留在 $notes"
+if [[ -z "$yes" ]]; then
+  read -rp "发布 ${tag}${beta:+ beta}？[y/N] " answer
+  [[ "$answer" == [yY] ]] || die "没发，草稿留在 $notes"
+fi
 
 sed -i.bak '/^\[workspace.package\]/,/^\[/s/^version = ".*"/version = "'"$version"'"/' Cargo.toml
 rm Cargo.toml.bak
