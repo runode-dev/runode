@@ -47,7 +47,7 @@ enum Item {
     Pairing,
     /// 登录时自启的两项（宿主、app），装没装看服务文件，不是配置里的键。
     Autostart,
-    /// 决策模型那一页的全部内容，经 runode-decide 读写，不是配置里的键。
+    /// 决策模型那一页的全部内容，经 runode-infer 读写，不是配置里的键。
     Decision,
 }
 
@@ -298,7 +298,7 @@ impl SettingsView {
                 Item::ConfigFileActions => self.render_config_file_actions(colors, cx).into_any_element(),
                 Item::Pairing => self.render_pairing(colors, cx).into_any_element(),
                 Item::Autostart => self.render_autostart(colors, cx).into_any_element(),
-                // 自己分组、自己画卡片：没装 runode-decide 时只有一张。
+                // 自己分组、自己画卡片：没装 runode-infer 时只有一张。
                 Item::Decision => {
                     cards.raw(self.render_decision(colors, window, cx).into_any_element());
                     continue;

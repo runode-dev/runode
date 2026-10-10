@@ -8,7 +8,7 @@
 //!
 //! 哪一页有哪些项在 `pages`，开关、选项这些控件在 `controls`，从长列表里挑一项的浮层在 `picker`，
 //! 快捷键那一页在 `keybinds`，远程访问那一页的配对手机在 `pairing`，外观页的配色在 `theme`，
-//! 决策模型那一页（经用户自己装的 runode-decide）在 `decision`。
+//! 决策模型那一页（经用户自己装的 runode-infer）在 `decision`。
 
 mod autostart;
 mod controls;
@@ -87,7 +87,7 @@ pub struct SettingsView {
     /// 读过的主题的颜色，按主题名；找不到的主题记为 `None`，不再去找。
     theme_looks: HashMap<String, Option<theme::Look>>,
     scroll: ScrollHandle,
-    /// 终端里 shell 报告的 PATH，找 runode-decide 用。
+    /// 终端里 shell 报告的 PATH，找 runode-infer 用。
     shell_path: Option<OsString>,
     decision: decision::State,
     _observe: Subscription,

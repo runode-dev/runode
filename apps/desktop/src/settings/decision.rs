@@ -1,9 +1,9 @@
-//! 决策模型那一页：管用户自己装的 runode-decide（决策模型的本机服务，不随 Runode 打包）。启停服务、
-//! 填托管 API 的密钥、下载和删除本机的模型，都是去跑 `runode-decide … --json`，读它 stdout 上的
+//! 决策模型那一页：管用户自己装的 runode-infer（决策模型的本机服务，不随 Runode 打包）。启停服务、
+//! 填托管 API 的密钥、下载和删除本机的模型，都是去跑 `runode-infer … --json`，读它 stdout 上的
 //! `{"status":"ok","data":…}`。密钥经它的 stdin 交过去，Runode 自己不存。
 //!
 //! 从访达打开时 app 自己的 PATH 里没有 brew 装的目录，所以和模拟器页一样，用终端里 shell 报告的
-//! PATH 找它，找不到再看安装脚本默认装的 `~/.runode-decide/bin`。下载要好几分钟，放进
+//! PATH 找它，找不到再看安装脚本默认装的 `~/.runode-infer/bin`。下载要好几分钟，放进
 //! `DecisionPulls`：关掉设置页也接着下，再打开时看得到进度。
 
 use std::{
@@ -30,8 +30,8 @@ use crate::ui::{
     text_field::{TextField, TextFieldEvent},
 };
 
-const PROGRAM: &str = "runode-decide";
-const DOWNLOAD_PAGE: &str = "https://github.com/runode-dev/runode-decide/releases";
+const PROGRAM: &str = "runode-infer";
+const DOWNLOAD_PAGE: &str = "https://github.com/runode-dev/runode-infer/releases";
 
 /// 这一页的状态，挂在 `SettingsView` 上。
 #[derive(Default)]
@@ -50,7 +50,7 @@ pub(super) struct State {
 
 #[derive(Clone, Debug, PartialEq)]
 enum Snapshot {
-    /// PATH 里和 `~/.runode-decide/bin` 都没有。
+    /// PATH 里和 `~/.runode-infer/bin` 都没有。
     Missing,
     Failed(String),
     Ready(Status),
@@ -75,7 +75,7 @@ struct Model {
     description: String,
     size: u64,
     installed: bool,
-    /// runode-decide 说这台机器跑得了它。
+    /// runode-infer 说这台机器跑得了它。
     supported: bool,
 }
 
@@ -128,7 +128,7 @@ enum PullEvent {
 }
 
 impl SettingsView {
-    /// 重新问一遍 runode-decide 的状态、能下的和下好的模型。
+    /// 重新问一遍 runode-infer 的状态、能下的和下好的模型。
     pub(super) fn refresh_decision(&mut self, cx: &mut Context<Self>) {
         let path = self.shell_path.clone();
         let job = cx.background_spawn(async move { load(path.as_deref()) });
@@ -314,7 +314,7 @@ impl SettingsView {
         (inputs.typesafe.clone(), inputs.account.clone(), inputs.token.clone())
     }
 
-    /// 把输入框里的密钥交给 `runode-decide key set`，成功后清空输入框。
+    /// 把输入框里的密钥交给 `runode-infer key set`，成功后清空输入框。
     fn save_key(&mut self, provider: Provider, cx: &mut Context<Self>) {
         let Some(inputs) = &self.decision.inputs else { return };
         let text = |input: &Entity<TextField>| input.read(cx).query().trim().to_owned();
@@ -376,7 +376,7 @@ impl SettingsView {
         row(model.id.clone(), Some(hint.into()), control, None, error, colors)
     }
 
-    /// 在后台跑 `runode-decide <args> --json`，`stdin` 有的话经 stdin 交过去；办完重新读状态，失败的原因
+    /// 在后台跑 `runode-infer <args> --json`，`stdin` 有的话经 stdin 交过去；办完重新读状态，失败的原因
     /// 记在 `area` 下面。
     fn run_decision(&mut self, busy: Busy, area: &str, args: &[&str], stdin: Option<String>, cx: &mut Context<Self>) {
         if self.decision.busy.is_some() {
@@ -508,10 +508,10 @@ fn size(bytes: u64) -> String {
     if bytes >= 1e9 { format!("{:.1} GB", bytes / 1e9) } else { format!("{:.0} MB", bytes / 1e6) }
 }
 
-/// runode-decide 装在哪：`path` 里的各个目录，再是安装脚本默认装的 `~/.runode-decide/bin`。
+/// runode-infer 装在哪：`path` 里的各个目录，再是安装脚本默认装的 `~/.runode-infer/bin`。
 fn find_program(path: Option<&OsStr>) -> Option<PathBuf> {
     let dirs: Vec<PathBuf> = path.map(|path| std::env::split_paths(path).collect()).unwrap_or_default();
-    let installed = runode_paths::Dirs::from_env().home.map(|home| home.join(".runode-decide").join("bin"));
+    let installed = runode_paths::Dirs::from_env().home.map(|home| home.join(".runode-infer").join("bin"));
     dirs.into_iter().chain(installed).map(|dir| dir.join(PROGRAM)).find(|program| program.is_file())
 }
 
@@ -524,7 +524,7 @@ fn command(program: &Path, path: Option<&OsStr>) -> Command {
     command
 }
 
-/// 跑 `runode-decide <args> --json`，交回 `data`；出错时交回它说的原因。
+/// 跑 `runode-infer <args> --json`，交回 `data`；出错时交回它说的原因。
 fn run(program: &Path, path: Option<&OsStr>, args: &[&str], stdin: Option<&str>) -> Result<Value, String> {
     let mut child = command(program, path)
         .args(args)
@@ -579,7 +579,7 @@ fn load_status(program: &Path, path: Option<&OsStr>) -> Result<Status, String> {
 fn parse_status(status: &Value, catalog: &Value, installed: &Value, loaded: &Value) -> Status {
     let text = |value: &Value| value.as_str().unwrap_or_default().to_owned();
     let models_of = |value: &Value| value["models"].as_array().cloned().unwrap_or_default();
-    // runode-decide 说这台机器跑不了的（比如 MLX 模型在 Intel Mac 上）不列出来，免得白下几个 GB；
+    // runode-infer 说这台机器跑不了的（比如 MLX 模型在 Intel Mac 上）不列出来，免得白下几个 GB；
     // 已经下好了的照样列出来，能删掉。
     let mut models: Vec<Model> = models_of(catalog)
         .iter()
@@ -616,7 +616,7 @@ fn parse_status(status: &Value, catalog: &Value, installed: &Value, loaded: &Val
     }
 }
 
-/// 跑 `runode-decide pull <model> --json`，每读到一行进度调一次 `progress`。
+/// 跑 `runode-infer pull <model> --json`，每读到一行进度调一次 `progress`。
 fn pull(
     program: &Path,
     path: Option<&OsStr>,
@@ -660,7 +660,7 @@ mod tests {
         let stdout = b"{\"status\":\"progress\",\"completed\":1,\"total\":2}\n{\"status\":\"ok\",\"data\":{\"a\":1}}\n";
         assert_eq!(reply(stdout, b""), Ok(json!({"a": 1})));
         assert_eq!(reply(b"{\"status\":\"error\",\"error\":\"nope\"}\n", b""), Err("nope".to_owned()));
-        assert_eq!(reply(b"", b"boom\n\n"), Err("runode-decide: boom".to_owned()));
+        assert_eq!(reply(b"", b"boom\n\n"), Err("runode-infer: boom".to_owned()));
     }
 
     #[test]

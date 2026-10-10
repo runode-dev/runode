@@ -748,12 +748,12 @@ settings:
       hint: 不開視窗，只在背景啟動終端宿主。遠端存取打開、又有配對過的手機時它一直留著，不用開著 Runode 手機也連得上。關掉開關不會停下正在跑的宿主，它託管的會話不受影響。
     failed: "沒能修改登入時啟動的設定：%{err}"
   decision:
-    service: runode-decide
+    service: runode-infer
     service_hint: 為這台 Mac 上的程式回答帶型別的問題（是或否、幾項裡選一項、打個分），用 TypeSafe 的 Jev、Cloudflare 的 Clef，或在本機跑的模型。它要另外下載，Runode 只負責管理。
-    loading: 正在查看 runode-decide…
-    missing: 沒有安裝 runode-decide。裝好之後再回到這一頁。
+    loading: 正在查看 runode-infer…
+    missing: 沒有安裝 runode-infer。裝好之後再回到這一頁。
     download: 開啟下載頁
-    failed: "無法和 runode-decide 溝通：%{err}"
+    failed: "無法和 runode-infer 溝通：%{err}"
     retry: 重試
     running: "在 http://%{address} 執行中（版本 %{version}）"
     stopped: "沒有在執行（版本 %{version}）"
@@ -761,7 +761,7 @@ settings:
     stop: 停止
     working: 處理中…
     typesafe: TypeSafe API key
-    typesafe_hint: 使用 jev-latest 時需要。Runode 把它交給 runode-decide，自己不保留。
+    typesafe_hint: 使用 jev-latest 時需要。Runode 把它交給 runode-infer，自己不保留。
     cloudflare: Cloudflare Workers AI
     cloudflare_hint: 使用 cf/clef-flash 和 cf/clef 時需要：帳戶 ID 和一個能執行 Workers AI 的 API token。
     account: Cloudflare 帳戶 ID
@@ -783,7 +783,7 @@ settings:
     clear_label: "移除 %{what}"
     pull_stopped: 下載沒完成就停了，再按一次下載會接著下。
     cannot_run: 這台 Mac 上無法執行
-    more_models: 其他 GGUF 決策模型可以在終端機裡用 runode-decide pull hf.co/<org>/<repo>:<量化> 下載。
+    more_models: 其他 GGUF 決策模型可以在終端機裡用 runode-infer pull hf.co/<org>/<repo>:<量化> 下載。
   pairing:
     title: 配對手機
     hint: 用手機上的 Runode 掃碼配對。配好的手機在遠端存取打開時能連上這台 Mac。
