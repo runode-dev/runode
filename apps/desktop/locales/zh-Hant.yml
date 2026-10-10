@@ -779,6 +779,9 @@ settings:
     remove: 刪除
     remove_label: "刪除 %{model}"
     loaded: 已載入
+    save_label: "儲存 %{what}"
+    clear_label: "移除 %{what}"
+    pull_stopped: 下載沒完成就停了，再按一次下載會接著下。
     more_models: 其他 GGUF 決策模型可以在終端機裡用 runode-decide pull hf.co/<org>/<repo>:<量化> 下載。
   pairing:
     title: 配對手機

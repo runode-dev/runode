@@ -114,7 +114,7 @@ impl Cards {
 }
 
 /// 一行设置：左边是名字和说明，右边是控件；`reset` 是 runode 的配置文件里写了这一项时的恢复按钮，
-/// `error` 是上次写回失败的原因。
+/// `error` 是上次写回失败的原因，报给辅助工具。
 pub(super) fn row(
     title: impl Into<SharedString>,
     hint: Option<SharedString>,
@@ -139,7 +139,15 @@ pub(super) fn row(
                 .gap(px(3.))
                 .child(div().text_size(px(13.5)).font_weight(gpui::FontWeight::MEDIUM).child(title.into()))
                 .children(hint.map(|hint| div().text_size(px(12.)).text_color(colors.fg.opacity(0.55)).child(hint)))
-                .children(error.map(|err| div().text_size(px(11.5)).text_color(colors.error).child(err))),
+                .children(error.map(|err| {
+                    div()
+                        .id(SharedString::from(format!("row-error-{err}")))
+                        .role(Role::Label)
+                        .aria_label(err.clone())
+                        .text_size(px(11.5))
+                        .text_color(colors.error)
+                        .child(err)
+                })),
         )
         // 控件贴着右边，恢复按钮有的时候放在它左边。
         .child(div().flex_none().flex().items_center().gap(px(6.)).children(reset).child(control))

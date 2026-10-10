@@ -231,6 +231,7 @@ impl SettingsView {
         let control = if set {
             let clear = self
                 .action_button(provider_id("decision-clear", provider), tr("settings.decision.clear"), busy, colors)
+                .aria_label(rust_i18n::t!("settings.decision.clear_label", what = title).into_owned())
                 .on_press(cx, move |this, _, cx| {
                     this.run_decision(busy, provider.name(), &["key", "rm", provider.name()], None, cx)
                 });
@@ -252,6 +253,7 @@ impl SettingsView {
             let inputs = self.decision_inputs(window, cx);
             let save = self
                 .action_button(provider_id("decision-save", provider), tr("settings.decision.save"), busy, colors)
+                .aria_label(rust_i18n::t!("settings.decision.save_label", what = title).into_owned())
                 .on_press(cx, move |this, _, cx| this.save_key(provider, cx));
             let fields = match provider {
                 Provider::TypeSafe => vec![(inputs.0, 220.)],
@@ -418,7 +420,7 @@ impl SettingsView {
             return;
         };
         self.decision.errors.remove(&model);
-        start_pull(program, self.shell_path.clone(), model, cx);
+        start_pull(program, self.shell_path.clone(), model, tr("settings.decision.pull_stopped"), cx);
     }
 
     /// 下载有了进展；有下完的（不在 `DecisionPulls` 里了）就重新读一遍状态。
@@ -434,7 +436,8 @@ impl SettingsView {
     }
 }
 
-fn start_pull(program: PathBuf, path: Option<OsString>, model: String, cx: &mut App) {
+/// `stopped` 是下载进程没说原因就退出时报的错。
+fn start_pull(program: PathBuf, path: Option<OsString>, model: String, stopped: String, cx: &mut App) {
     let pulls = &mut cx.default_global::<DecisionPulls>().0;
     if pulls.get(&model).is_some_and(|pull| pull.error.is_none()) {
         return;
@@ -443,7 +446,7 @@ fn start_pull(program: PathBuf, path: Option<OsString>, model: String, cx: &mut 
     let (tx, mut rx) = futures::channel::mpsc::unbounded();
     let name = model.clone();
     std::thread::spawn(move || {
-        let result = pull(&program, path.as_deref(), &name, |completed, total| {
+        let result = pull(&program, path.as_deref(), &name, stopped, |completed, total| {
             let _ = tx.unbounded_send(PullEvent::Progress(completed, total));
         });
         let _ = tx.unbounded_send(PullEvent::Done(result));
@@ -570,8 +573,11 @@ fn load_status(program: &Path, path: Option<&OsStr>) -> Result<Status, String> {
 fn parse_status(status: &Value, catalog: &Value, installed: &Value, loaded: &Value) -> Status {
     let text = |value: &Value| value.as_str().unwrap_or_default().to_owned();
     let models_of = |value: &Value| value["models"].as_array().cloned().unwrap_or_default();
+    // runode-decide 说这台机器跑不了的（比如 MLX 模型在 Intel Mac 上）不列出来，免得白下几个 GB；
+    // 已经下好了的照样列出来，能删掉。
     let mut models: Vec<Model> = models_of(catalog)
         .iter()
+        .filter(|m| m["supported"].as_bool().unwrap_or(true) || m["installed"].as_bool().unwrap_or(false))
         .map(|m| Model {
             id: text(&m["model"]),
             description: text(&m["description"]),
@@ -598,7 +604,13 @@ fn parse_status(status: &Value, catalog: &Value, installed: &Value, loaded: &Val
 }
 
 /// 跑 `runode-decide pull <model> --json`，每读到一行进度调一次 `progress`。
-fn pull(program: &Path, path: Option<&OsStr>, model: &str, mut progress: impl FnMut(u64, u64)) -> Result<(), String> {
+fn pull(
+    program: &Path,
+    path: Option<&OsStr>,
+    model: &str,
+    stopped: String,
+    mut progress: impl FnMut(u64, u64),
+) -> Result<(), String> {
     let mut child = command(program, path)
         .args(["pull", model, "--json"])
         .stdin(Stdio::null())
@@ -606,7 +618,7 @@ fn pull(program: &Path, path: Option<&OsStr>, model: &str, mut progress: impl Fn
         .stderr(Stdio::null())
         .spawn()
         .map_err(|err| format!("{PROGRAM}: {err}"))?;
-    let mut last = Err(format!("{PROGRAM} pull stopped without saying why"));
+    let mut last = Err(stopped);
     if let Some(stdout) = child.stdout.take() {
         for line in BufReader::new(stdout).lines().map_while(Result::ok) {
             let Ok(json) = serde_json::from_str::<Value>(&line) else { continue };
@@ -644,7 +656,8 @@ mod tests {
                             "keys": {"typesafe": true, "cloudflare": false}});
         let catalog = json!({"models": [
             {"model": "clef-flash:gguf-q4_k_m", "description": "Clef-Flash 9B, 4-bit", "size": 6486448288u64, "installed": true},
-            {"model": "clef:gguf-q4_k_m", "description": "Clef 27B, 4-bit", "size": 19232219200u64, "installed": false}]});
+            {"model": "clef:gguf-q4_k_m", "description": "Clef 27B, 4-bit", "size": 19232219200u64, "installed": false},
+            {"model": "clef-flash:mlx-4bit", "description": "Clef-Flash 9B, MLX", "size": 1, "installed": false, "supported": false}]});
         let installed = json!({"models": [
             {"model": "clef-flash:gguf-q4_k_m", "repo": "ggml-org/Clef-Flash-GGUF", "size": 6486448288u64},
             {"model": "hf.co/org/repo:Q8_0", "repo": "org/repo", "size": 1000}]});

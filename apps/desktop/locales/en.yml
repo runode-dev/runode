@@ -779,6 +779,9 @@ settings:
     remove: Delete
     remove_label: "Delete %{model}"
     loaded: loaded
+    save_label: "Save %{what}"
+    clear_label: "Remove %{what}"
+    pull_stopped: The download stopped before it finished; download again to continue.
     more_models: Other GGUF decision models can be downloaded in a terminal with runode-decide pull hf.co/<org>/<repo>:<quant>.
   pairing:
     title: Pair a phone
