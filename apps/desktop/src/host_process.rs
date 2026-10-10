@@ -6,7 +6,8 @@
 //! （配对过的设备，或者正在配对）时不因空闲退出。
 //!
 //! `runode --host --take-over`（`take_over`）是升级时新版本的 app 拉起的新宿主：先接手 socket 上
-//! 旧宿主的会话和 socket，再照常跑。
+//! 旧宿主的会话和 socket，再照常跑。交出会话的旧宿主不马上退出，等它拉起的 shell 都结束了才退出
+//! （`wait_for_children`）。
 
 use std::{
     fs::{File, OpenOptions},
@@ -16,7 +17,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use runode_host::{BuildId, Host, STATUS_FD, TakeOverError, TakeOverOptions};
+use runode_host::{BuildId, Host, STATUS_FD, Stopped, TakeOverError, TakeOverOptions};
 
 use crate::host_client::{HandoffFailure, HandoffStatus, READY_BY};
 
@@ -48,7 +49,27 @@ fn serve(host: &Host) {
     let stopped = host.run_until_idle(IDLE_EXIT);
     // 先停远程访问再退出：交接时新宿主在等这个进程放开端口。
     drop(remote);
+    if stopped == Stopped::Handoff {
+        tracing::info!("host {} handed off; waiting for its shells to exit", std::process::id());
+        wait_for_children();
+    }
     tracing::info!("host {} exits: {stopped:?}", std::process::id());
+}
+
+/// 等这个进程的子进程（交出去的会话里的 shell）都结束。macOS 按责任进程认本地网络权限，shell 的
+/// 责任进程是拉起它的宿主：宿主一退出，shell 里的程序连局域网就被拦（No route to host），新宿主
+/// 接手了也一样，所以交出会话后还得留着。交接时每个 shell 已经有一个线程在等它（`pty-reaper`），
+/// 这里谁先收到都行。
+fn wait_for_children() {
+    loop {
+        // SAFETY: 不要退出状态，只等任意一个子进程结束。
+        if unsafe { libc::waitpid(-1, std::ptr::null_mut(), 0) } == -1
+            && std::io::Error::last_os_error().raw_os_error() != Some(libc::EINTR)
+        {
+            // ECHILD：子进程都结束了。
+            return;
+        }
+    }
 }
 
 /// `runode --host --take-over`：接手 socket 上旧宿主的会话（见 `Host::take_over`），把结果写成一行

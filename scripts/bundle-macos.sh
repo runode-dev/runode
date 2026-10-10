@@ -66,6 +66,28 @@ dmg="$bundle_dir/Runode-$version-$arch.dmg"
 rm -rf "$app"
 mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
 cp "$exe" "$app/Contents/MacOS/runode"
+# macOS 的本地网络权限按责任进程程序里的 Mach-O UUID 认它是不是这个 app。shell 的责任进程是拉起它的
+# 宿主，升级后宿主还是旧版的程序，UUID 换了的话，接手过来的终端连局域网一律被拦（No route to host），
+# 放到新位置还会再弹权限框。所以每个版本都写同一个 UUID（按架构定），旧宿主照样被认作这个 app。
+# 发布构建去掉了调试信息、不出 dSYM，崩溃报告不靠 UUID 找符号。
+python3 -I - "$app/Contents/MacOS/runode" "$arch" <<'PY'
+import struct, sys, uuid
+
+path, arch = sys.argv[1:]
+data = bytearray(open(path, "rb").read())
+if struct.unpack_from("<I", data)[0] != 0xFEEDFACF:
+    sys.exit(f"{path}: 不是单一架构的 64 位 Mach-O")
+offset = 32
+for _ in range(struct.unpack_from("<I", data, 16)[0]):
+    command, size = struct.unpack_from("<II", data, offset)
+    if command == 0x1B:  # LC_UUID
+        data[offset + 8 : offset + 24] = uuid.uuid5(uuid.NAMESPACE_DNS, f"{arch}.runode.dev").bytes
+        open(path, "wb").write(data)
+        break
+    offset += size
+else:
+    sys.exit(f"{path}: 没有 LC_UUID")
+PY
 # 命令行的短名字：app 把这个目录加进终端的 PATH，敲 rn 和敲 runode 一样。
 ln -s runode "$app/Contents/MacOS/rn"
 cp "$plist" "$app/Contents/Info.plist"

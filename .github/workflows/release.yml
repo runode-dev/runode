@@ -141,10 +141,13 @@ jobs:
     strategy:
       matrix:
         include:
+          # uuid 是打包脚本给这个架构写进程序的固定 UUID，每个版本都一样，见下面的核对。
           - arch: arm64
             target: aarch64-apple-darwin
+            uuid: 1D1AFDE6-3D39-5E7B-A9D8-E30F3FB0C040
           - arch: x86_64
             target: x86_64-apple-darwin
+            uuid: 9214D93C-3F36-574E-B25E-6F340825BCAF
     runs-on: macos-15
     env:
       CARGO_BUILD_TARGET: ${{ matrix.target }}
@@ -194,6 +197,14 @@ jobs:
           NOTARY_KEY_ID: ${{ secrets.NOTARY_KEY_ID }}
           NOTARY_ISSUER: ${{ secrets.NOTARY_ISSUER }}
         run: scripts/bundle-macos.sh
+      - name: 核对程序 UUID 是固定的
+        # 本地网络权限按程序的 UUID 认 app，UUID 跟着版本变的话，升级后接手过来的终端连不上局域网，
+        # 而且要到下次升级才看得出来，所以在这里拦住。
+        run: |
+          exe=target/release/bundle/Runode.app/Contents/MacOS/runode
+          dwarfdump --uuid "$exe"
+          dwarfdump --uuid "$exe" | grep -q "UUID: ${{ matrix.uuid }} " ||
+            { echo "程序 UUID 不是固定的 ${{ matrix.uuid }}，见 scripts/bundle-macos.sh" >&2; exit 1; }
       - name: 删掉签名用的钥匙串和密钥
         if: always()
         run: |
