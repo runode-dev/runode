@@ -97,8 +97,8 @@ impl Page {
 
     pub fn icon(self) -> &'static str {
         use crate::assets::{
-            FILES_ICON, KEYBOARD_ICON, PALETTE_ICON, PHONE_ICON, SCALE_ICON, SETTINGS_ICON, SLIDERS_ICON, SPARKLE_ICON,
-            TERMINAL_ICON,
+            FILES_ICON, KEYBOARD_ICON, MEMORY_ICON, PALETTE_ICON, PHONE_ICON, SETTINGS_ICON, SLIDERS_ICON,
+            SPARKLE_ICON, TERMINAL_ICON,
         };
         match self {
             Self::General => SETTINGS_ICON,
@@ -107,7 +107,7 @@ impl Page {
             Self::Terminal => TERMINAL_ICON,
             Self::Files => FILES_ICON,
             Self::Agents => SPARKLE_ICON,
-            Self::Decision => SCALE_ICON,
+            Self::Decision => MEMORY_ICON,
             Self::Remote => PHONE_ICON,
             Self::Keybinds => KEYBOARD_ICON,
         }
