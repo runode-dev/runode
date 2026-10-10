@@ -7,6 +7,7 @@ use gpui::{App, Menu, MenuItem, OsAction, PromptLevel, SystemMenuType, actions};
 use runode_cli::SetupTarget;
 
 use crate::{
+    config::AppConfig,
     i18n::tr,
     terminal_view::{
         ClearScreen, DecreaseFontSize, IncreaseFontSize, JumpToPrompt, PasteSelection, ReloadShell, ResetFontSize,
@@ -228,13 +229,23 @@ fn fix_key_equivalents(menu: &objc2_app_kit::NSMenu) {
 const SETUP_TARGETS: [SetupTarget; 2] = [SetupTarget::Claude, SetupTarget::Codex];
 
 /// 装过 agent 集成的，把装着的使用说明换成 GitHub 上最新的：skill 更新了不用再从菜单装一遍。
-/// 下不到时不动装着的。
+/// 下不到时不动装着的；关了自动更新时也不动，没装过时不联网。要在配置装上之后调用。
 pub fn refresh_agent_integration(cx: &App) {
+    if !cx.global::<AppConfig>().0.auto_update {
+        return;
+    }
     let Some(home) = runode_paths::Dirs::from_env().home else {
         return;
     };
     cx.background_executor()
         .spawn(async move {
+            let installed = SETUP_TARGETS
+                .iter()
+                .flat_map(|target| runode_cli::setup_paths(*target, &home))
+                .any(|path| path.exists());
+            if !installed {
+                return;
+            }
             let Some(skills) = runode_cli::fetch_skills(runode_cli::SKILLS_URL) else {
                 return;
             };
