@@ -1,6 +1,6 @@
 # Crate 分层
 
-代码分在几个 crate 里，依赖只能自上而下。能单独运行的 app 放在 `apps/` 下（Rust 的 `apps/desktop` 和 Swift 的 `apps/ios`），给它们用的库放在 `crates/` 下。根目录的 `skills/` 放教 agent 用 runode 的 skill（`skills/runode/SKILL.md`），`cli` 的 `runode setup` 把它编进二进制，装成 Claude Code 和 Codex 的 skill。`apps/` 下不全是 Rust 项目，新加的 Rust app 要在根 `Cargo.toml` 的 `members` 和 `default-members` 里列出。目录名直接说明职责，包名是目录名加 `runode-` 前缀（`crates/terminal` 是 `runode-terminal`），只有桌面 app 的包名是 `runode`，让可执行文件仍叫 runode。包名带前缀是因为依赖树里已有 `dirs` 这类同名的第三方 crate，不加前缀会撞名，`cargo -p` 也会有歧义。
+代码分在几个 crate 里，依赖只能自上而下。能单独运行的 app 放在 `apps/` 下（Rust 的 `apps/desktop` 和 Swift 的 `apps/ios`），给它们用的库放在 `crates/` 下。根目录的 `skills/` 放教 agent 用 runode 的 skill：`skills/runode/SKILL.md` 讲操作别的终端，`skills/runode-simulator/SKILL.md` 讲在模拟器页看着的模拟器上跑和测 app；`cli` 的 `runode setup` 把它们编进二进制（`SKILLS`），装成 Claude Code 和 Codex 的 skill。`apps/` 下不全是 Rust 项目，新加的 Rust app 要在根 `Cargo.toml` 的 `members` 和 `default-members` 里列出。目录名直接说明职责，包名是目录名加 `runode-` 前缀（`crates/terminal` 是 `runode-terminal`），只有桌面 app 的包名是 `runode`，让可执行文件仍叫 runode。包名带前缀是因为依赖树里已有 `dirs` 这类同名的第三方 crate，不加前缀会撞名，`cargo -p` 也会有歧义。
 
 | 目录 | 职责 | 可以依赖 |
 | --- | --- | --- |

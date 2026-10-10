@@ -209,12 +209,14 @@ pub(crate) fn run(command: Command, env: &Env, out: &mut dyn Write, err: &mut dy
         }
         Command::Setup { target, print } => {
             if print {
-                out.write_all(crate::setup::SKILL.as_bytes())?;
+                let skills = crate::setup::SKILLS.map(|(_, skill)| skill);
+                out.write_all(skills.join("\n").as_bytes())?;
             } else {
                 let home =
                     env.dirs.home.as_deref().ok_or_else(|| anyhow!("cannot tell where your home directory is"))?;
-                let path = crate::setup(target, home)?;
-                writeln!(out, "installed {}", path.display())?;
+                for path in crate::setup(target, home)? {
+                    writeln!(out, "installed {}", path.display())?;
+                }
             }
         }
         Command::RemotePair { addrs } => {

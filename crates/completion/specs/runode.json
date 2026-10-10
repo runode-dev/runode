@@ -116,8 +116,8 @@
       "args": {
         "name": "agent",
         "suggestions": [
-          { "name": "claude", "description": "Install a skill in ~/.claude/skills/runode" },
-          { "name": "codex", "description": "Install a skill in ~/.agents/skills/runode" }
+          { "name": "claude", "description": "Install the skills in ~/.claude/skills" },
+          { "name": "codex", "description": "Install the skills in ~/.agents/skills" }
         ]
       },
       "options": [

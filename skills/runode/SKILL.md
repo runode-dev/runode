@@ -208,25 +208,8 @@ it, or say why it is not a problem. Write your answers to /tmp/blue.md." \
 
 ## iOS simulators and Android emulators
 
-runode does not drive devices itself; use [mobilecli](https://github.com/mobile-next/mobilecli)
-(`npm i -g mobilecli`), which prints JSON. The user watches the same device in the
-simulator page on the right of the runode window, so they see every tap you make.
-
-```sh
-mobilecli devices                                   # ids, platform, online/offline
-mobilecli device boot --device <id>
-mobilecli screenshot --device <id> --output /tmp/screen.png   # then read the image
-mobilecli dump ui --device <id>                     # elements with their rects
-mobilecli io tap --device <id> 120,640              # screen points on iOS, pixels on Android
-mobilecli io swipe --device <id> 200,700,200,200
-mobilecli io text --device <id> 'hello'
-mobilecli io button --device <id> HOME              # BACK on Android only
-mobilecli apps launch --device <id> com.example.app
-```
-
-The first command on an iOS simulator may fail with "agent is not installed": run
-`mobilecli agent install --device <id>` once. A real iPhone needs a provisioning
-profile for that step; ask the user instead of guessing one.
+To build, run or test an app on a simulator or emulator, which the user watches
+in runode's simulator page, use the runode-simulator skill.
 
 ## Be careful
 

@@ -236,7 +236,7 @@ fn install_agent_integration(cx: &mut App) {
     let Some(window) = cx.active_window().or_else(|| cx.windows().into_iter().next()) else {
         return;
     };
-    let paths = setup_paths(SETUP_TARGETS.iter().map(|target| runode_cli::setup_path(*target, &home)));
+    let paths = setup_paths(SETUP_TARGETS.iter().flat_map(|target| runode_cli::setup_paths(*target, &home)));
     let title = rust_i18n::t!("setup.confirm_title");
     let detail = rust_i18n::t!("setup.confirm_detail", paths = paths);
     let answers = [&*rust_i18n::t!("setup.install"), &*rust_i18n::t!("setup.cancel")];
@@ -251,6 +251,7 @@ fn install_agent_integration(cx: &mut App) {
         }
         let installed: anyhow::Result<Vec<_>> =
             SETUP_TARGETS.iter().map(|target| runode_cli::setup(*target, &home)).collect();
+        let installed = installed.map(|paths| paths.into_iter().flatten());
         let (level, title, detail) = match installed {
             Ok(paths) => (
                 PromptLevel::Info,
