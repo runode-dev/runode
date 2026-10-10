@@ -27,6 +27,15 @@ const CLOEXEC_DEFAULT: libc::c_int = libc::POSIX_SPAWN_CLOEXEC_DEFAULT;
 #[cfg(not(target_os = "macos"))]
 const CLOEXEC_DEFAULT: libc::c_int = 0;
 
+// libSystem 导出、没有公开头文件的接口：子进程不再把拉起它的 app 当作「责任进程」，自己担着。
+// macOS 按责任进程判断本地网络这类隐私权限；宿主比 app 活得久，挂在 app 名下的话，app 一退出，
+// 宿主和它拉起的 shell 都查不到授权，连局域网报 `No route to host`。宿主是同一个 .app 里的可执行
+// 文件，自己担着时照样按这个 app 的授权算。
+#[cfg(target_os = "macos")]
+unsafe extern "C" {
+    fn responsibility_spawnattrs_setdisclaim(attr: *mut libc::posix_spawnattr_t, disclaim: bool) -> libc::c_int;
+}
+
 /// 进程自己的环境变量表。
 #[cfg(target_os = "macos")]
 fn environ() -> *const *mut c_char {
@@ -47,7 +56,8 @@ fn environ() -> *const *mut c_char {
 ///
 /// 子进程在新的会话里（`setsid`），标准输入输出接 `/dev/null`，除此之外不继承任何描述符
 /// （`POSIX_SPAWN_CLOEXEC_DEFAULT`：app 开着的 socket、PTY 这些都不带过去），信号处理恢复默认、
-/// 信号屏蔽清空，环境变量照抄。退出后由这里起的一个线程收尸，不留僵尸进程。
+/// 信号屏蔽清空，环境变量照抄，macOS 上自己担着责任进程（见 `responsibility_spawnattrs_setdisclaim`）。
+/// 退出后由这里起的一个线程收尸，不留僵尸进程。
 ///
 /// 连上它（每隔几毫秒试一次 socket，撞上它正因空闲退出时重来）是调用方的事。
 pub fn launch(exe: &Path) -> io::Result<u32> {
@@ -85,7 +95,7 @@ pub fn launch_successor(exe: &Path) -> io::Result<Successor> {
 
 /// 在新的会话里用 `exe extra_args...` 拉起进程，返回 pid：标准输入输出接 `/dev/null`，给了
 /// `status` 时把它接到 `STATUS_FD` 上，此外不继承任何描述符；信号处理恢复默认、信号屏蔽清空，
-/// 环境变量照抄。退出后由这里起的一个线程收尸。
+/// 环境变量照抄，macOS 上自己担着责任进程。退出后由这里起的一个线程收尸。
 fn detach(exe: &Path, extra_args: &[&CStr], status: Option<&OwnedFd>) -> io::Result<u32> {
     let program = CString::new(exe.as_os_str().as_bytes())?;
     let argv: Vec<*mut c_char> = std::iter::once(program.as_c_str())
@@ -115,6 +125,8 @@ fn detach(exe: &Path, extra_args: &[&CStr], status: Option<&OwnedFd>) -> io::Res
         let mut none: libc::sigset_t = std::mem::zeroed();
         libc::sigemptyset(&mut none);
         check(libc::posix_spawnattr_setsigmask(attr.as_mut_ptr(), &none))?;
+        #[cfg(target_os = "macos")]
+        check(responsibility_spawnattrs_setdisclaim(attr.as_mut_ptr(), true))?;
     }
     let mut pid: libc::pid_t = 0;
     // SAFETY: 路径和参数都是以 NUL 结尾的字符串，参数表以空指针结尾，在调用期间都活着；环境表
