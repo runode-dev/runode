@@ -25,6 +25,7 @@ pub(super) enum Page {
     Terminal,
     Files,
     Agents,
+    Decision,
     Remote,
     Keybinds,
 }
@@ -46,6 +47,8 @@ enum Item {
     Pairing,
     /// 登录时自启的两项（宿主、app），装没装看服务文件，不是配置里的键。
     Autostart,
+    /// 决策模型那一页的全部内容，经 runode-decide 读写，不是配置里的键。
+    Decision,
 }
 
 #[derive(Clone, Copy)]
@@ -61,13 +64,14 @@ enum Control {
 }
 
 impl Page {
-    pub const ALL: [Self; 8] = [
+    pub const ALL: [Self; 9] = [
         Self::General,
         Self::Appearance,
         Self::Colors,
         Self::Terminal,
         Self::Files,
         Self::Agents,
+        Self::Decision,
         Self::Remote,
         Self::Keybinds,
     ];
@@ -80,6 +84,7 @@ impl Page {
             Self::Terminal => "terminal",
             Self::Files => "files",
             Self::Agents => "agents",
+            Self::Decision => "decision",
             Self::Remote => "remote",
             Self::Keybinds => "keybinds",
         }
@@ -91,7 +96,7 @@ impl Page {
 
     pub fn icon(self) -> &'static str {
         use crate::assets::{
-            FILES_ICON, KEYBOARD_ICON, PALETTE_ICON, PHONE_ICON, SETTINGS_ICON, SLIDERS_ICON, SPARKLE_ICON,
+            FILES_ICON, KEYBOARD_ICON, PALETTE_ICON, PHONE_ICON, SCALE_ICON, SETTINGS_ICON, SLIDERS_ICON, SPARKLE_ICON,
             TERMINAL_ICON,
         };
         match self {
@@ -101,6 +106,7 @@ impl Page {
             Self::Terminal => TERMINAL_ICON,
             Self::Files => FILES_ICON,
             Self::Agents => SPARKLE_ICON,
+            Self::Decision => SCALE_ICON,
             Self::Remote => PHONE_ICON,
             Self::Keybinds => KEYBOARD_ICON,
         }
@@ -178,6 +184,7 @@ impl Page {
                 Row("agent-blocked-sound", Sound),
                 AgentExclude,
             ],
+            Self::Decision => &[Decision],
             Self::Remote => &[
                 Row("remote-access", Switch),
                 Row("remote-access-port", Text(80.)),
@@ -214,7 +221,7 @@ impl Page {
                 Item::StatusBarHidden => Some("status-bar-hidden"),
                 Item::AgentExclude => Some("agent-notifications-exclude"),
                 Item::ConfigFiles => Some("config-file"),
-                Item::Section(_) | Item::ConfigFileActions | Item::Pairing | Item::Autostart => None,
+                Item::Section(_) | Item::ConfigFileActions | Item::Pairing | Item::Autostart | Item::Decision => None,
             })
             .collect()
     }
@@ -291,6 +298,11 @@ impl SettingsView {
                 Item::ConfigFileActions => self.render_config_file_actions(colors, cx).into_any_element(),
                 Item::Pairing => self.render_pairing(colors, cx).into_any_element(),
                 Item::Autostart => self.render_autostart(colors, cx).into_any_element(),
+                // 自己分组、自己画卡片：没装 runode-decide 时只有一张。
+                Item::Decision => {
+                    cards.raw(self.render_decision(colors, window, cx).into_any_element());
+                    continue;
+                }
             };
             cards.push(element);
         }

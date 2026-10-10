@@ -57,6 +57,9 @@ pub struct TextField {
     placeholder: Option<SharedString>,
     /// 报给辅助工具的名字，比如设置项的标题；界面上不画。
     label: Option<SharedString>,
+    /// 填密钥的输入框：每个字画成 `MASK`，不能复制、剪切，只收可见的 ASCII 字符，报给辅助工具时
+    /// 是密码框、不带内容。
+    masked: bool,
     /// 上一帧排好的文字、输入框位置和横向滚动量，鼠标点选、输入法摆候选窗都靠它们换算。
     layout: Option<ShapedLine>,
     bounds: Option<Bounds<Pixels>>,
@@ -144,6 +147,7 @@ impl TextField {
             history: History::default(),
             placeholder: Some(rust_i18n::t!("search.placeholder").into_owned().into()),
             label: None,
+            masked: false,
             layout: None,
             bounds: None,
             scroll_x: px(0.),
@@ -172,14 +176,36 @@ impl TextField {
         self
     }
 
+    /// 改成填密钥的输入框，见 `masked`。
+    pub fn masked(mut self) -> Self {
+        self.masked = true;
+        self
+    }
+
     pub fn query(&self) -> &str {
         &self.query
+    }
+
+    /// 能写进输入框的文字：去掉控制字符；填密钥的只留可见的 ASCII 字符。
+    fn allowed(&self, text: &str) -> String {
+        let text = without_controls(text);
+        if self.masked { text.chars().filter(char::is_ascii_graphic).collect() } else { text }
+    }
+
+    /// `text` 里的字节偏移在画出来的那行里的字节偏移：填密钥时每个字画成一个 `MASK`。
+    fn shown_offset(&self, index: usize) -> usize {
+        if self.masked { masked_index(&self.text, index) } else { index }
+    }
+
+    /// 画出来的那行里的字节偏移换回 `text` 里的。
+    fn text_offset(&self, index: usize) -> usize {
+        if self.masked { unmasked_index(&self.text, index) } else { index }
     }
 
     /// 辅助工具直接写入的文字：换掉全部（可撤销），光标放到末尾，和打字一样发 `Changed`。换行这些控制
     /// 字符和打字时一样滤掉，不然写进配置会多出一行。
     fn set_value(&mut self, value: String, cx: &mut Context<Self>) {
-        let value = without_controls(&value);
+        let value = self.allowed(&value);
         self.record(None);
         self.selected = value.len()..value.len();
         self.reversed = false;
@@ -298,7 +324,7 @@ impl TextField {
         let (Some(layout), Some(bounds)) = (&self.layout, self.bounds) else {
             return self.text.len();
         };
-        layout.closest_index_for_x(x - bounds.left() + self.scroll_x)
+        self.text_offset(layout.closest_index_for_x(x - bounds.left() + self.scroll_x))
     }
 
     fn key_down(&mut self, event: &KeyDownEvent, _: &mut Window, cx: &mut Context<Self>) {
@@ -385,9 +411,9 @@ impl TextField {
             return;
         };
         // 输入框只有一行，多行内容只取第一行。
-        let line = text.lines().next().unwrap_or_default();
+        let line = self.allowed(text.lines().next().unwrap_or_default());
         self.record(None);
-        self.replace(self.selected.clone(), line, cx);
+        self.replace(self.selected.clone(), &line, cx);
     }
 
     fn select_all(&mut self, _: &SelectAll, _: &mut Window, cx: &mut Context<Self>) {
@@ -398,11 +424,13 @@ impl TextField {
     }
 
     fn copy(&mut self, _: &Copy, _: &mut Window, cx: &mut Context<Self>) {
-        copy_selection(&self.text, &self.selected, cx);
+        if !self.masked {
+            copy_selection(&self.text, &self.selected, cx);
+        }
     }
 
     fn cut(&mut self, _: &Cut, window: &mut Window, cx: &mut Context<Self>) {
-        if self.selected.is_empty() || self.marked.is_some() {
+        if self.masked || self.selected.is_empty() || self.marked.is_some() {
             return;
         }
         self.copy(&Copy, window, cx);
@@ -499,10 +527,10 @@ impl Render for TextField {
         let field = cx.entity().downgrade();
         div()
             .id("text-field")
-            .role(Role::TextInput)
+            .role(if self.masked { Role::PasswordInput } else { Role::TextInput })
             .when_some(self.label.clone(), |el, label| el.aria_label(label))
             .when_some(self.placeholder.clone(), |el, placeholder| el.aria_placeholder(placeholder))
-            .aria_value(SharedString::from(self.query.clone()))
+            .when(!self.masked, |el| el.aria_value(SharedString::from(self.query.clone())))
             .on_a11y_action(AccessibleAction::SetValue, move |data, _, cx| {
                 if let Some(ActionData::Value(value)) = data {
                     let value = value.to_string();
@@ -568,7 +596,7 @@ impl EntityInputHandler for TextField {
             .or(self.marked.clone())
             .unwrap_or(self.selected.clone());
         // 回车、制表符等由按键绑定处理，不进文字。
-        let text = without_controls(text);
+        let text = self.allowed(text);
         if text.is_empty() && range.is_empty() && self.marked.is_none() {
             return;
         }
@@ -594,6 +622,12 @@ impl EntityInputHandler for TextField {
         if self.marked.is_none() {
             self.record(Some(EditKind::Insert));
         }
+        // 填密钥的输入框不组字：输入法交来的就是要写的字。
+        if self.masked {
+            let text = self.allowed(text);
+            self.replace(range, &text, cx);
+            return;
+        }
         self.text.replace_range(range.clone(), text);
         self.marked = (!text.is_empty()).then(|| range.start..range.start + text.len());
         // 输入法给的选区相对于组字开头，按 UTF-16 计。
@@ -617,7 +651,7 @@ impl EntityInputHandler for TextField {
     ) -> Option<Bounds<Pixels>> {
         let layout = self.layout.as_ref()?;
         let range = range_from_utf16(&self.text, &range);
-        let x = |index| bounds.left() + layout.x_for_index(index) - self.scroll_x;
+        let x = |index| bounds.left() + layout.x_for_index(self.shown_offset(index)) - self.scroll_x;
         Some(Bounds::from_corners(point(x(range.start), bounds.top()), point(x(range.end), bounds.bottom())))
     }
 
@@ -628,7 +662,7 @@ impl EntityInputHandler for TextField {
         _: &mut Context<Self>,
     ) -> Option<usize> {
         let bounds = self.bounds?;
-        let index = self.layout.as_ref()?.index_for_x(point.x - bounds.left() + self.scroll_x)?;
+        let index = self.text_offset(self.layout.as_ref()?.index_for_x(point.x - bounds.left() + self.scroll_x)?);
         Some(offset_to_utf16(&self.text, index))
     }
 }
@@ -701,21 +735,23 @@ impl Element for TextFieldText {
             underline: None,
             strikethrough: None,
         };
+        let shown: SharedString =
+            if field.masked { MASK.repeat(field.text.chars().count()).into() } else { field.text.clone().into() };
         let runs: Vec<TextRun> = match &field.marked {
             Some(marked) => [
-                run(marked.start, style.color),
+                run(field.shown_offset(marked.start), style.color),
                 TextRun {
                     underline: Some(UnderlineStyle { color: Some(style.color), thickness: px(1.), wavy: false }),
-                    ..run(marked.len(), style.color)
+                    ..run(field.shown_offset(marked.end) - field.shown_offset(marked.start), style.color)
                 },
-                run(field.text.len() - marked.end, style.color),
+                run(shown.len() - field.shown_offset(marked.end), style.color),
             ]
             .into_iter()
             .filter(|run| run.len > 0)
             .collect(),
-            None => vec![run(field.text.len(), style.color)],
+            None => vec![run(shown.len(), style.color)],
         };
-        let line = window.text_system().shape_line(field.text.clone().into(), font_size, &runs, None);
+        let line = window.text_system().shape_line(shown, font_size, &runs, None);
         let placeholder = field.placeholder.clone().filter(|_| field.text.is_empty()).map(|text| {
             let len = text.len();
             window.text_system().shape_line(text, font_size, &[run(len, style.color.opacity(0.4))], None)
@@ -723,7 +759,7 @@ impl Element for TextFieldText {
 
         // 横向滚动到光标露出来为止，文字缩短时也别在右边留空。
         let width = bounds.size.width - CARET_WIDTH;
-        let caret_x = line.x_for_index(field.cursor());
+        let caret_x = line.x_for_index(field.shown_offset(field.cursor()));
         let mut scroll_x = field.scroll_x;
         if caret_x - scroll_x > width {
             scroll_x = caret_x - width;
@@ -739,7 +775,7 @@ impl Element for TextFieldText {
             scroll_x = px(0.);
         }
 
-        let x = |index| bounds.left() + line.x_for_index(index) - scroll_x;
+        let x = |index| bounds.left() + line.x_for_index(field.shown_offset(index)) - scroll_x;
         let selection = (!field.selected.is_empty()).then(|| {
             fill(
                 Bounds::from_corners(
@@ -818,6 +854,19 @@ impl Element for TextFieldText {
     }
 }
 
+/// 填密钥的输入框里每个字画成这个。
+const MASK: &str = "•";
+
+/// `text` 的字节偏移 `index` 在每个字都换成 `MASK` 之后的字节偏移。
+fn masked_index(text: &str, index: usize) -> usize {
+    text[..index].chars().count() * MASK.len()
+}
+
+/// `masked_index` 反过来：落在一个 `MASK` 中间时算到它开头的那个字。
+fn unmasked_index(text: &str, index: usize) -> usize {
+    text.char_indices().nth(index / MASK.len()).map_or(text.len(), |(i, _)| i)
+}
+
 /// 去掉回车、换行、制表符这些控制字符：输入框只有一行，写进去的文字不带它们。
 fn without_controls(text: &str) -> String {
     text.chars().filter(|c| !c.is_control()).collect()
@@ -826,6 +875,20 @@ fn without_controls(text: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn masked_offsets_round_trip() {
+        for text in ["", "sk-abc123", "é中a"] {
+            let boundaries: Vec<usize> = text.char_indices().map(|(i, _)| i).chain([text.len()]).collect();
+            for (n, &index) in boundaries.iter().enumerate() {
+                assert_eq!(masked_index(text, index), n * MASK.len());
+                assert_eq!(unmasked_index(text, masked_index(text, index)), index);
+            }
+        }
+        // 落在一个 MASK 的中间（点在两个点之间时排版给的偏移不会这样，但别出界）。
+        assert_eq!(unmasked_index("ab", 1), 0);
+        assert_eq!(unmasked_index("ab", 100), 2);
+    }
 
     #[test]
     fn written_text_drops_control_characters() {

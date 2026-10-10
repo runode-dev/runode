@@ -558,6 +558,7 @@ settings:
     terminal: Terminal
     files: Files & Preview
     agents: Agents
+    decision: Decision Models
     remote: Remote Access
     keybinds: Keyboard Shortcuts
   section:
@@ -574,6 +575,9 @@ settings:
     login: Start at Login
     push: Live Activities
     push_key: Your Own Phone App
+    decision_service: Service
+    decision_keys: Hosted APIs
+    decision_models: Models on This Mac
   theme:
     none: No Theme
     single: One Theme
@@ -743,6 +747,39 @@ settings:
       title: Run the host in the background at login
       hint: Starts the terminal host without a window. It stays in the background while remote access is on and a phone is paired, so the phone can connect without Runode open. Turning this off does not stop a host that is already running, so its sessions stay open.
     failed: "Could not change the login setting: %{err}"
+  decision:
+    service: runode-decide
+    service_hint: Answers typed questions (yes or no, pick one, give a score) for programs on this Mac, with TypeSafe Jev, Cloudflare Clef or a model that runs here. It is a separate download; Runode only manages it.
+    loading: Checking runode-decide…
+    missing: runode-decide is not installed. Install it, then come back to this page.
+    download: Open Download Page
+    failed: "Could not talk to runode-decide: %{err}"
+    retry: Try Again
+    running: "Running at http://%{address} (version %{version})"
+    stopped: "Not running (version %{version})"
+    start: Start
+    stop: Stop
+    working: Working…
+    typesafe: TypeSafe API Key
+    typesafe_hint: For jev-latest. Runode passes the key to runode-decide and does not keep it.
+    cloudflare: Cloudflare Workers AI
+    cloudflare_hint: "For cf/clef-flash and cf/clef: your account ID and an API token that can run Workers AI."
+    account: Cloudflare account ID
+    token: Cloudflare API token
+    key_placeholder: API key
+    account_placeholder: Account ID
+    token_placeholder: API token
+    key_empty: Fill in every field first.
+    key_set: Saved
+    save: Save
+    clear: Remove
+    pull: Download
+    pull_label: "Download %{model}"
+    pulling: "Downloading, %{percent}%"
+    remove: Delete
+    remove_label: "Delete %{model}"
+    loaded: loaded
+    more_models: Other GGUF decision models can be downloaded in a terminal with runode-decide pull hf.co/<org>/<repo>:<quant>.
   pairing:
     title: Pair a phone
     hint: Scan a code with Runode on your phone. A paired phone can reach this Mac while remote access is on.

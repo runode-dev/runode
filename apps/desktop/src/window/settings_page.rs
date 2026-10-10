@@ -41,8 +41,10 @@ impl WindowView {
         self.new_workspace = None;
         self.add_task = None;
         self.commit_message_dialog = None;
+        // 决策模型那一页按终端里 shell 报告的 PATH 找 runode-decide。
+        let shell_path = self.focused_view().and_then(|view| view.read(cx).meta().shell_path.clone());
         let page = self.settings.get_or_insert_with(|| {
-            let view = cx.new(|cx| SettingsView::new(window, cx));
+            let view = cx.new(|cx| SettingsView::new(shell_path, window, cx));
             let close =
                 cx.subscribe_in(&view, window, |this, _, _: &Close, window, cx| this.close_settings(window, cx));
             SettingsPage { view, _close: close }

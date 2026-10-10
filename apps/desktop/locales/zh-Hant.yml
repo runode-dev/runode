@@ -558,6 +558,7 @@ settings:
     terminal: 終端機
     files: 檔案與預覽
     agents: Agent
+    decision: 決策模型
     remote: 遠端存取
     keybinds: 快速鍵
   section:
@@ -574,6 +575,9 @@ settings:
     login: 登入時啟動
     push: 即時動態
     push_key: 自己編譯的手機 App
+    decision_service: 服務
+    decision_keys: 託管 API
+    decision_models: 這台 Mac 上的模型
   theme:
     none: 不用主題
     single: 一個主題
@@ -743,6 +747,39 @@ settings:
       title: 登入時在背景啟動宿主
       hint: 不開視窗，只在背景啟動終端宿主。遠端存取打開、又有配對過的手機時它一直留著，不用開著 Runode 手機也連得上。關掉開關不會停下正在跑的宿主，它託管的會話不受影響。
     failed: "沒能修改登入時啟動的設定：%{err}"
+  decision:
+    service: runode-decide
+    service_hint: 為這台 Mac 上的程式回答帶型別的問題（是或否、幾項裡選一項、打個分），用 TypeSafe 的 Jev、Cloudflare 的 Clef，或在本機跑的模型。它要另外下載，Runode 只負責管理。
+    loading: 正在查看 runode-decide…
+    missing: 沒有安裝 runode-decide。裝好之後再回到這一頁。
+    download: 開啟下載頁
+    failed: "無法和 runode-decide 溝通：%{err}"
+    retry: 重試
+    running: "在 http://%{address} 執行中（版本 %{version}）"
+    stopped: "沒有在執行（版本 %{version}）"
+    start: 啟動
+    stop: 停止
+    working: 處理中…
+    typesafe: TypeSafe API key
+    typesafe_hint: 使用 jev-latest 時需要。Runode 把它交給 runode-decide，自己不保留。
+    cloudflare: Cloudflare Workers AI
+    cloudflare_hint: 使用 cf/clef-flash 和 cf/clef 時需要：帳戶 ID 和一個能執行 Workers AI 的 API token。
+    account: Cloudflare 帳戶 ID
+    token: Cloudflare API token
+    key_placeholder: API key
+    account_placeholder: 帳戶 ID
+    token_placeholder: API token
+    key_empty: 先把每一欄都填上。
+    key_set: 已儲存
+    save: 儲存
+    clear: 移除
+    pull: 下載
+    pull_label: "下載 %{model}"
+    pulling: "正在下載，%{percent}%"
+    remove: 刪除
+    remove_label: "刪除 %{model}"
+    loaded: 已載入
+    more_models: 其他 GGUF 決策模型可以在終端機裡用 runode-decide pull hf.co/<org>/<repo>:<量化> 下載。
   pairing:
     title: 配對手機
     hint: 用手機上的 Runode 掃碼配對。配好的手機在遠端存取打開時能連上這台 Mac。

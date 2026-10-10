@@ -7,10 +7,13 @@
 //! 一会儿、按回车或者失去焦点时写回，写之前按读配置时的规矩检查，不对就不写、在那一项下面说原因。
 //!
 //! 哪一页有哪些项在 `pages`，开关、选项这些控件在 `controls`，从长列表里挑一项的浮层在 `picker`，
-//! 快捷键那一页在 `keybinds`，远程访问那一页的配对手机在 `pairing`，外观页的配色在 `theme`。
+//! 快捷键那一页在 `keybinds`，远程访问那一页的配对手机在 `pairing`，外观页的配色在 `theme`，
+//! 决策模型那一页（经用户自己装的 runode-decide）在 `decision`。
 
 mod autostart;
 mod controls;
+mod decision;
+pub(crate) use decision::DecisionPulls;
 mod keybinds;
 pub(crate) use keybinds::caps as keybind_caps;
 mod pages;
@@ -18,7 +21,7 @@ mod pairing;
 mod picker;
 mod theme;
 
-use std::{collections::HashMap, sync::Arc, time::Duration};
+use std::{collections::HashMap, ffi::OsString, sync::Arc, time::Duration};
 
 use gpui::{
     App, AppContext as _, Context, Entity, EventEmitter, FocusHandle, Focusable, KeyDownEvent, MouseButton,
@@ -84,14 +87,20 @@ pub struct SettingsView {
     /// 读过的主题的颜色，按主题名；找不到的主题记为 `None`，不再去找。
     theme_looks: HashMap<String, Option<theme::Look>>,
     scroll: ScrollHandle,
+    /// 终端里 shell 报告的 PATH，找 runode-decide 用。
+    shell_path: Option<OsString>,
+    decision: decision::State,
     _observe: Subscription,
+    _pulls: Subscription,
 }
 
 impl EventEmitter<Close> for SettingsView {}
 
 impl SettingsView {
-    pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
+    /// `shell_path` 是打开设置页时那个终端里 shell 报告的 PATH。
+    pub fn new(shell_path: Option<OsString>, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let observe = cx.observe_global_in::<AppConfig>(window, |this, window, cx| this.config_changed(window, cx));
+        let pulls = cx.observe_global::<DecisionPulls>(|this, cx| this.pulls_changed(cx));
         Self {
             focus_handle: cx.focus_handle(),
             page: Page::General,
@@ -103,7 +112,10 @@ impl SettingsView {
             keybinds: keybinds::State::default(),
             theme_looks: HashMap::new(),
             scroll: ScrollHandle::new(),
+            shell_path,
+            decision: decision::State::default(),
             _observe: observe,
+            _pulls: pulls,
         }
     }
 
@@ -136,6 +148,9 @@ impl SettingsView {
         self.picker = None;
         self.keybinds.stop_recording();
         self.scroll.set_offset(point(px(0.), px(0.)));
+        if page == Page::Decision {
+            self.refresh_decision(cx);
+        }
         window.focus(&self.focus_handle, cx);
         cx.notify();
     }
