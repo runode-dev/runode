@@ -126,6 +126,9 @@ pub struct SavedWorkspace {
     pub git: bool,
     #[serde(default, skip_serializing_if = "is_false")]
     pub files: bool,
+    /// 模拟器页选的设备（`Workspace::simulator_device`），mobilecli 给的设备 id。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub simulator_device: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -358,6 +361,7 @@ mod tests {
                 last_task: None,
                 git: true,
                 files: false,
+                simulator_device: Some("9812845E-4A33-41F8-9FAA-4636328F190A".into()),
             }],
             active: 0,
             sidebar: None,

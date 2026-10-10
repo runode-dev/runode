@@ -350,7 +350,7 @@ impl WindowView {
                 project,
                 panel,
                 last_panel: panel.unwrap_or_default(),
-                simulator_device: None,
+                simulator_device: saved_workspace.simulator_device,
             });
         }
         if !self.workspaces.is_empty() {
@@ -458,6 +458,7 @@ impl WindowView {
             last_task: workspace.project.tasks_last.clone(),
             git: workspace.panel == Some(SidePanel::Git),
             files: workspace.panel == Some(SidePanel::Files),
+            simulator_device: workspace.simulator_device.clone(),
         }
     }
 

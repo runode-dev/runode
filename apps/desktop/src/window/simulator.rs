@@ -281,7 +281,12 @@ impl WindowView {
                             page.stream = None;
                         }
                         page.devices = Some(sorted(devices));
-                        this.workspace_mut().simulator_device = this.simulator.selected.clone();
+                        // 只给还没选过的 workspace 记下挑的这台；选过的那台暂时不在（真机没插）时留着它，
+                        // 插回来后还是它，用户手动换了才改。
+                        if this.workspace().simulator_device.is_none() {
+                            this.workspace_mut().simulator_device = this.simulator.selected.clone();
+                            this.save(cx);
+                        }
                         // 只看状态时设备还开着，就留着流断开的原因。
                         if connect || !this.selected_device().is_some_and(Device::online) {
                             this.simulator.error = None;
@@ -359,6 +364,7 @@ impl WindowView {
         if let Some(frame) = page.frame.take() {
             cx.drop_image(frame, None);
         }
+        self.save(cx);
         cx.notify();
     }
 
