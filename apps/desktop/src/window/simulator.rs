@@ -413,8 +413,13 @@ impl WindowView {
                 }
             });
             this.update(cx, |this, cx| {
+                let stream = Stream { child: Some(child), _frames: pump, elements: None };
+                // 连着的时候页收起来了：不推画面，丢掉的 `Stream` 顺带结束 mobilecli。
+                if !this.simulator_shown() {
+                    return;
+                }
                 this.simulator.screen = Some(screen);
-                this.simulator.stream = Some(Stream { child: Some(child), _frames: pump, elements: None });
+                this.simulator.stream = Some(stream);
                 cx.notify();
             })
             .ok();

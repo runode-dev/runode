@@ -351,6 +351,8 @@ pub struct WindowView {
     _project_events: Task<()>,
     /// 包成缓存视图的几块界面，见 `Slot`。第一次画窗口时才建：建 `WindowView` 时它还没有实体。
     slots: Option<Slots>,
+    /// 缓存的几块上次是按哪组配色画的，见 `follow_colors`。
+    slot_colors: Option<(Rgb, Rgb)>,
 }
 
 /// 窗口里包成缓存视图的几块，终端有输出时照搬上一帧，见 `Slot`。
@@ -467,6 +469,7 @@ impl WindowView {
             project_events,
             _project_events: project_events_task,
             slots: None,
+            slot_colors: None,
         }
     }
 
@@ -559,6 +562,22 @@ impl WindowView {
         self.slots.clone().unwrap()
     }
 
+    /// 窗口的配色跟着有焦点的终端当前的配色走，程序用 OSC 10/11 改了默认色时没有谁通知窗口，缓存的
+    /// 几块会停在旧颜色上：配色一变就叫它们重画。这时正在画窗口，画的时候发的通知不会再要一帧，
+    /// 所以等这一帧画完再通知。
+    fn follow_colors(&mut self, colors: (Rgb, Rgb), cx: &mut Context<Self>) {
+        if self.slot_colors.replace(colors) == Some(colors) {
+            return;
+        }
+        if let Some(slots) = self.slots.clone() {
+            cx.defer(move |cx| {
+                for slot in [slots.sidebar, slots.titlebar, slots.preview, slots.panel, slots.status_bar] {
+                    slot.update(cx, |_, cx| cx.notify());
+                }
+            });
+        }
+    }
+
     fn render_sidebar_slot(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let (fg, bg) = self.colors(cx);
         self.render_sidebar(fg, bg, window, cx).into_any_element()
@@ -640,6 +659,7 @@ impl Render for WindowView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.focus_menu(window, cx);
         let (fg, bg) = self.colors(cx);
+        self.follow_colors((fg, bg), cx);
         let (base, body) = if let Some(page) = &self.settings {
             (bg, vec![page.view.clone().into_any_element()])
         } else if self.mobile.is_some() {
