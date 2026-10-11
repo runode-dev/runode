@@ -157,7 +157,7 @@ jobs:
           ref: ${{ needs.prepare.outputs.tag }}
       - name: 拉子模块
         run: make submodules
-      - uses: vercel-labs/setup-zig@v1
+      - uses: vercel-labs/setup-zig@83c1594f26b86da8a9a8ddd9b5ee5f3af0f96943 # v1.0.2
         with:
           version: 0.16.0
       - name: 装 Rust 工具链
@@ -166,7 +166,7 @@ jobs:
           rustup target add "$CARGO_BUILD_TARGET"
       - name: 确认有 Metal 编译器
         run: xcrun -f metal || xcodebuild -downloadComponent MetalToolchain
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           # 带上目标三元组，不接着用以前在 Intel runner 上存的缓存。
           key: macos-${{ matrix.target }}
@@ -236,7 +236,7 @@ jobs:
           ref: ${{ needs.prepare.outputs.tag }}
       - name: 拉子模块
         run: make submodules
-      - uses: vercel-labs/setup-zig@v1
+      - uses: vercel-labs/setup-zig@83c1594f26b86da8a9a8ddd9b5ee5f3af0f96943 # v1.0.2
         with:
           version: 0.16.0
       - name: 装 Rust 工具链
@@ -246,7 +246,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev libx11-xcb-dev \
             libxcb1-dev libfontconfig-dev libfreetype-dev libvulkan-dev libssl-dev libasound2-dev libzstd-dev
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           key: linux-${{ matrix.arch }}
       - name: 构建、打包

@@ -59,7 +59,7 @@ jobs:
       - name: 拉子模块
         run: make submodules
       # vendor/ghostty 的 build.zig.zon 要求的 zig 版本（minimum_zig_version）。
-      - uses: vercel-labs/setup-zig@v1
+      - uses: vercel-labs/setup-zig@83c1594f26b86da8a9a8ddd9b5ee5f3af0f96943 # v1.0.2
         with:
           version: 0.16.0
       - name: 装 Rust 工具链
@@ -70,8 +70,8 @@ jobs:
       - name: 确认有 Metal 编译器
         # 新版 Xcode 把 Metal 工具链拆成了单独下载的组件。
         run: xcrun -f metal || xcodebuild -downloadComponent MetalToolchain
-      - uses: Swatinem/rust-cache@v2
-      - uses: taiki-e/install-action@v2
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - uses: taiki-e/install-action@ab6895351a88b908e96a4697860d4ffea5e57dbe # v2.87.27
         with:
           tool: cargo-deny,cargo-nextest
       - name: 检查格式
@@ -95,7 +95,7 @@ jobs:
           ref: ${{ inputs.ref }}
       - name: 拉子模块
         run: make submodules
-      - uses: vercel-labs/setup-zig@v1
+      - uses: vercel-labs/setup-zig@83c1594f26b86da8a9a8ddd9b5ee5f3af0f96943 # v1.0.2
         with:
           version: 0.16.0
       - name: 装 Rust 工具链
@@ -107,6 +107,6 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev libx11-xcb-dev \
             libxcb1-dev libfontconfig-dev libfreetype-dev libvulkan-dev libssl-dev libasound2-dev libzstd-dev
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       - name: clippy
         run: cargo clippy -p runode -- -D warnings
