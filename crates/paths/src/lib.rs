@@ -256,7 +256,7 @@ fn create_private_dir(dir: Option<PathBuf>) -> std::io::Result<PathBuf> {
     Ok(dir)
 }
 
-/// 把 `contents` 整个换进用户的文件 `path`（配置文件、`~/.codex/AGENTS.md` 这类用户手写过的）：先写到
+/// 把 `contents` 整个换进用户的文件 `path`（配置文件这类用户手写过的）：先写到
 /// 同一目录的临时文件再改名换上，写到一半崩溃或磁盘满时原文件原样还在，不会被截成空的。`path` 是
 /// 符号链接时换的是它最终指向的文件，链接留着，dotfiles 管理器靠它；原文件的权限照旧。目录要已经有了。
 pub fn replace_file(path: &Path, contents: &[u8]) -> std::io::Result<()> {

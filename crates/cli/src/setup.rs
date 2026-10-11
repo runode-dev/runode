@@ -4,8 +4,6 @@
 //! 装的是 GitHub 上仓库 main 里最新的一套（`SKILLS_URL`）：先下文件清单 `files.txt`，再照着下每个
 //! 文件，只改 skill 或加文件都不用发新版 app；下不到时用编进这一版的 `FILES`。装过哪些文件记在
 //! skill 目录下的 `INSTALLED` 里，下到的清单里去掉的下次装时删掉。
-//! 早先给 Codex 装在 `~/.codex/AGENTS.md` 的 `<!-- runode:begin -->`、`<!-- runode:end -->` 之间，
-//! 再装时把这一段删掉，文件里别的内容不动。
 
 use std::{
     io,
@@ -36,8 +34,6 @@ const MAX_FILE_BYTES: usize = 256 * 1024;
 const MAX_FILES: usize = 64;
 /// 上次装了哪些文件，一行一个路径，放在 skill 目录下；agent 只认 `<名字>/SKILL.md`，不会读它。
 const INSTALLED: &str = ".runode-files";
-const BEGIN: &str = "<!-- runode:begin -->";
-const END: &str = "<!-- runode:end -->";
 
 fn skills_dir(target: SetupTarget, home: &Path) -> PathBuf {
     match target {
@@ -84,8 +80,7 @@ fn download(url: &str) -> Option<Vec<u8>> {
 }
 
 /// 清单里的路径只能是 `<名字>/SKILL.md` 或 `<名字>/references/<主题>.md`，名字和主题只用小写字母、
-/// 数字和 `-`：下回来的清单不能让文件写到 skill 目录外面去。已经发出去的 app 都按这条规矩收，skill
-/// 里放了别的路径（比如 `scripts/`），旧版 app 就整套不用、一直停在编进去的那套。
+/// 数字和 `-`：下回来的清单不能让文件写到 skill 目录外面去。
 fn is_skill_path(path: &str) -> bool {
     let plain = |part: &str| {
         !part.is_empty() && part.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
@@ -111,8 +106,7 @@ fn as_skill_file(path: &str, body: Vec<u8>) -> Option<String> {
 /// 把 `files`（`fetch_skills` 或 `bundled_skills` 给的）装到 `home` 下 `target` 读的地方，返回写的
 /// 文件。可以重复执行，每次整个换掉。`latest` 说 `files` 是不是下到的最新一套：是时上次装了、这次
 /// 没有的文件删掉，免得去掉的 skill 还被 agent 加载；编进这一版的那套可能比 main 旧，没有的未必是
-/// 去掉了，不删，留在记录里等下到最新的再说。给 Codex 装时顺带删掉早先写进 `~/.codex/AGENTS.md`
-/// 的那段。
+/// 去掉了，不删，留在记录里等下到最新的再说。
 pub fn setup(target: SetupTarget, home: &Path, files: &[(String, String)], latest: bool) -> Result<Vec<PathBuf>> {
     let dir = skills_dir(target, home);
     let mut written = Vec::new();
@@ -147,19 +141,6 @@ pub fn setup(target: SetupTarget, home: &Path, files: &[(String, String)], lates
     let record_file = dir.join(INSTALLED);
     runode_paths::replace_file(&record_file, record.as_bytes())
         .with_context(|| format!("failed to write {}", record_file.display()))?;
-    if target == SetupTarget::Codex {
-        let agents = home.join(".codex/AGENTS.md");
-        match std::fs::read_to_string(&agents) {
-            Ok(existing) => {
-                if let Some(rest) = remove_section(&existing) {
-                    runode_paths::replace_file(&agents, rest.as_bytes())
-                        .with_context(|| format!("failed to write {}", agents.display()))?;
-                }
-            }
-            Err(err) if err.kind() == io::ErrorKind::NotFound => {}
-            Err(err) => return Err(err).with_context(|| format!("failed to read {}", agents.display())),
-        }
-    }
     Ok(written)
 }
 
@@ -171,8 +152,7 @@ pub fn refresh(target: SetupTarget, home: &Path, files: &[(String, String)]) -> 
     let dir = skills_dir(target, home);
     let recorded = installed_paths(&dir)?;
     let mut installed = setup_paths(target, home).iter().any(|path| path.exists());
-    // 没有记录的是记录之前装的，重装一次补上，以后去掉的 skill 才删得掉。
-    let mut stale = recorded.is_none_or(|recorded| !recorded.iter().eq(files.iter().map(|(path, _)| path)));
+    let mut stale = recorded.is_some_and(|recorded| !recorded.iter().eq(files.iter().map(|(path, _)| path)));
     for (path, content) in files {
         let path = dir.join(path);
         match std::fs::read(&path) {
@@ -199,20 +179,6 @@ fn installed_paths(dir: &Path) -> Result<Option<Vec<String>>> {
         Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(None),
         Err(err) => Err(err).with_context(|| format!("failed to read {}", file.display())),
     }
-}
-
-/// 删掉 `existing` 里用标记包着的那段，连同它前面用来隔开的空行；没有这一段时返回 `None`。
-fn remove_section(existing: &str) -> Option<String> {
-    let start = existing.find(BEGIN)?;
-    let end = start + existing[start..].find(END)? + END.len();
-    let rest = existing[end..].strip_prefix('\n').unwrap_or(&existing[end..]);
-    let before = &existing[..start];
-    let before = if rest.is_empty() { before.trim_end_matches('\n') } else { before };
-    let mut out = format!("{before}{rest}");
-    if !out.is_empty() && !out.ends_with('\n') {
-        out.push('\n');
-    }
-    Some(out)
 }
 
 #[cfg(test)]
@@ -299,21 +265,5 @@ mod tests {
             let description = skill.lines().nth(2).unwrap().trim_start_matches("description: ");
             assert!(description.chars().count() <= 1024, "{name}: {}", description.chars().count());
         }
-    }
-
-    #[test]
-    fn the_old_section_is_removed() {
-        let section = format!("{BEGIN}\nold text\n{END}\n");
-        assert_eq!(remove_section("# My rules\nbe nice\n"), None);
-        assert_eq!(remove_section(&section).as_deref(), Some(""));
-        assert_eq!(
-            remove_section(&format!("# My rules\nbe nice\n\n{section}")).as_deref(),
-            Some("# My rules\nbe nice\n")
-        );
-        // 用户在那一段后面接着写的内容留着。
-        assert_eq!(
-            remove_section(&format!("# Mine\n\n{section}more rules\n")).as_deref(),
-            Some("# Mine\n\nmore rules\n")
-        );
     }
 }
