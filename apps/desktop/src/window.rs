@@ -422,7 +422,13 @@ impl WindowView {
                 }
             }
         });
-        let config_watch = cx.observe_global::<AppConfig>(|_, cx| cx.notify());
+        let config_watch = cx.observe_global::<AppConfig>(|this, cx| {
+            // Git 面板跟着 `file-tree-font-size` 变高变矮，多个仓库时的列表记着量过的行高，要重新量。
+            for workspace in &this.workspaces {
+                workspace.project.git_panel.list.remeasure();
+            }
+            cx.notify();
+        });
         persist::track(cx);
         // 窗口关掉后它的分屏都没了，发过的通知点了也跳不过去，一并收回。
         cx.on_release(|view, cx| {

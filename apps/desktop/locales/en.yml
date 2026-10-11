@@ -660,7 +660,7 @@ settings:
     window_style: Cards puts each split and side panel on its own rounded card; classic lets the terminal fill the window.
     status_bar: Shows sleep prevention, memory and ports at the bottom of the window.
     status_bar_hidden: "The parts left out of the status bar. You can also right-click the status bar."
-    file_tree_font_size: In points.
+    file_tree_font_size: In points. The Git panel uses it too.
     file_tree_preview_click: A single click opens a temporary tab that the next file replaces; a double click keeps it.
     preview_font_size: In points.
     task_placement: Where a task picked from the title bar's task menu runs.

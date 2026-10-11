@@ -84,7 +84,7 @@ pub struct Config {
     pub status_bar: bool,
     /// 状态栏上不显示的几块。
     pub status_bar_hidden: Vec<StatusItem>,
-    /// 右侧文件树的字号。
+    /// 右侧文件树和 Git 面板的字号。
     pub file_tree_font_size: f32,
     pub file_tree_preview_click: PreviewClick,
     /// 预览栏的字号。
