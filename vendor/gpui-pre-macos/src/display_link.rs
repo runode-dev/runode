@@ -333,6 +333,16 @@ impl WindowFrameSource {
         Ok(())
     }
 
+    pub fn is_started(&self) -> bool {
+        self.registration.is_some()
+    }
+
+    /// Delivers one frame request on the main queue without waiting for the
+    /// display's next vsync tick.
+    pub fn request_frame(&self) {
+        self.frame_requests.merge_data(1);
+    }
+
     pub fn take_signal(&self) -> Option<(Instant, FrameRequestSource)> {
         self.signal.take()
     }
