@@ -988,7 +988,10 @@ pub(super) fn sync_icon(id: impl Into<ElementId>, spinning: bool, size: f32, col
     if !spinning {
         return icon.into_any_element();
     }
-    icon.with_animation(id, Animation::new(Duration::from_secs(1)).repeat(), |icon, delta| {
+    // 不限帧时每一帧都要重画，连带它所在的整个窗口按屏幕刷新率重画；帧率和 `AgentKind::spinner` 默认的一格
+    // 80 毫秒一样。
+    let animation = Animation::new(Duration::from_secs(1)).repeat().with_max_fps(12.5);
+    icon.with_animation(id, animation, |icon, delta| {
         icon.with_transformation(Transformation::rotate(percentage(delta)))
     })
     .into_any_element()
