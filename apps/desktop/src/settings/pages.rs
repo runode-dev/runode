@@ -196,9 +196,9 @@ impl Page {
                 Row("remote-access-push-delay", Text(80.)),
                 Section("push_key"),
                 Row("apns-key-file", Text(300.)),
-                Row("apns-key-id", Text(120.)),
-                Row("apns-team-id", Text(120.)),
-                Row("apns-bundle-id", Text(200.)),
+                Row("apns-key-id", Text(300.)),
+                Row("apns-team-id", Text(300.)),
+                Row("apns-bundle-id", Text(300.)),
             ],
             Self::Keybinds => &[],
         }
@@ -275,7 +275,17 @@ impl SettingsView {
         }
         // 小标题把一页分成几组，每组收进一张卡片。
         let mut cards = Cards::new(page, colors);
-        for item in self.page.items() {
+        // 发布的版本经中转推官方 App，用不着直连 APNs 的密钥，这一节只在自己编译的版本里显示。
+        let official = runode_protocol::push::RELAY_URL.is_some();
+        let shown = |item: &&Item| {
+            !(official
+                && matches!(
+                    item,
+                    Item::Section("push_key")
+                        | Item::Row("apns-key-file" | "apns-key-id" | "apns-team-id" | "apns-bundle-id", _)
+                ))
+        };
+        for item in self.page.items().iter().filter(shown) {
             let element = match *item {
                 Item::Section(name) => {
                     cards.section(tr(&format!("settings.section.{name}")));
@@ -622,8 +632,15 @@ impl SettingsView {
     }
 }
 
-/// 输入框空着时的提示：默认值，没有默认值的写「默认」。
+/// 输入框空着时的提示：默认值，没有默认值的写「默认」；APNs 几项留空就是不用，给出写法的样子。
 fn key_placeholder(key: &str) -> SharedString {
+    match key {
+        "apns-key-file" => return "~/AuthKey_ABC123DEFG.p8".into(),
+        "apns-key-id" => return "ABC123DEFG".into(),
+        "apns-team-id" => return "DEF123GHIJ".into(),
+        "apns-bundle-id" => return "com.example.runode".into(),
+        _ => {}
+    }
     match runode_config::Config::default().values(key).into_iter().next() {
         Some(value) => value.into(),
         None => rust_i18n::t!("settings.default").into_owned().into(),
