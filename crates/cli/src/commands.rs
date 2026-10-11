@@ -99,7 +99,11 @@ pub(crate) fn run(command: Command, env: &Env, out: &mut dyn Write, err: &mut dy
             }
             let id = info.id;
             // 先连上再发，之后 agent 的状态变化和命令结束才不会漏掉。
-            let (channel, meta) = attach(&connection, id)?;
+            let (channel, mut meta) = attach(&connection, id)?;
+            // 刚开的终端还没出提示符时认不出 shell 集成，只能等屏幕安静，命令失败也照样算成功。
+            if wait && meta.foreground_is_shell {
+                meta = wait_for_prompt(&connection, id, meta)?;
+            }
             let text = match text {
                 Text::Given(text) => text,
                 Text::Stdin => stdin_text()?,
@@ -659,19 +663,18 @@ fn wait_for_agent(
 
 /// 等新开的 shell 第一次显示提示符（shell 集成报告了 `SessionMeta::prompt_cwd`）再打字，免得
 /// 打的字在 shell 准备好之前就被终端原样回显出来。没开 shell 集成时等不到，最多等
-/// `PROMPT_TIMEOUT`。
-fn wait_for_prompt(connection: &Connection, id: SessionId, meta: SessionMeta) -> Result<(), Failure> {
+/// `PROMPT_TIMEOUT`。返回最后收到的状态。
+fn wait_for_prompt(connection: &Connection, id: SessionId, mut meta: SessionMeta) -> Result<SessionMeta, Failure> {
     let deadline = Instant::now() + PROMPT_TIMEOUT;
-    let mut ready = meta.prompt_cwd.is_some();
-    while !ready {
+    while meta.prompt_cwd.is_none() {
         match connection.next(Some(deadline))? {
             None => break,
-            Some(HostMsg::Meta { id: changed, meta }) if changed == id => ready = meta.prompt_cwd.is_some(),
+            Some(HostMsg::Meta { id: changed, meta: changed_meta }) if changed == id => meta = changed_meta,
             Some(HostMsg::Exited { id: exited, .. }) if exited == id => return Err(Failure::Exited),
             Some(_) => {}
         }
     }
-    Ok(())
+    Ok(meta)
 }
 
 /// 按写法找正好一个会话，见 `select`。

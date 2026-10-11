@@ -152,6 +152,15 @@ fn send_wait_picks_what_to_wait_for() {
         // shell 提示符、按了回车：等命令。
         ("send 5e55 make --enter --wait", at_prompt(), vec![finished(Some(1))], "--for command", 4, "exit 1\n"),
         ("send 5e55 make --key enter --wait", at_prompt(), vec![finished(Some(0))], "--for command", 0, "exit 0\n"),
+        // 刚开的 shell 还没出提示符：先等它出来，再照样等命令。
+        (
+            "send 5e55 make --enter --wait",
+            SessionMeta { prompt_cwd: None, ..at_prompt() },
+            vec![HostMsg::Meta { id: id(S), meta: at_prompt() }, finished(Some(1))],
+            "--for command",
+            4,
+            "exit 1\n",
+        ),
         // 没按回车、没有 shell 集成、前台不是 shell：等屏幕安静。
         ("send 5e55 make --wait", at_prompt(), vec![], "--for quiet", exit::OK, "quiet\n"),
         ("send 5e55 make --enter --wait", meta("zsh", None), vec![], "--for quiet", exit::OK, "quiet\n"),
