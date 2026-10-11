@@ -67,13 +67,15 @@ if [[ -n "$old_host" ]]; then
   echo "让新宿主接手宿主 $old_host 的会话"
   # 新宿主把接手的结果按行写成 JSON 交给 fd 3 上的管道（`host_process::take_over`，和 app 拉起它时一样）：
   # 先是一行 `ready`，再是结果。读管道而不翻日志：日志会被 RUST_LOG 关掉，也会被别的日志冲走。
-  status_fifo=$(mktemp -u "${TMPDIR:-/tmp}/runode-restart.XXXXXX")
+  # 管道放在只有自己能进的临时目录里，别人换不成指向别处的符号链接。
+  status_dir=$(mktemp -d "${TMPDIR:-/tmp}/runode-restart.XXXXXX")
+  status_fifo="$status_dir/status"
   mkfifo "$status_fifo"
   nohup "$bin" --host --take-over 3>"$status_fifo" >/dev/null 2>&1 </dev/null &
   new_host=$!
   disown
   exec 4<"$status_fifo"
-  rm -f "$status_fifo"
+  rm -rf "$status_dir"
   result=""
   # 读到结尾是新宿主没报结果就退出了；一行等太久（app 那边最多等 45 秒）当没接成。
   while IFS= read -r -t 60 -u 4 line; do
@@ -87,9 +89,14 @@ if [[ -n "$old_host" ]]; then
   elif [[ $result == *'"kind":"busy"'* ]]; then
     # 同构建的宿主不交接：在跑的已经是磁盘上这份代码（没重新 make install，或者改动和上次装的一样）。
     echo "在跑的宿主和装好的是同一个构建，不用换，只重开 app"
+  elif [[ -z $result ]] && kill -0 "$new_host" 2>/dev/null; then
+    # 和 app 一样不杀它：要是在旧宿主提交之后才卡住，会话已经在它手里；提交之前卡住的，旧宿主到期限会自己
+    # 杀掉它、回滚。
+    echo "新宿主 $new_host 没在期限内报结果，没动它，看 $host_log" >&2
+    exit 1
   else
-    echo "新宿主没有接手会话（${result:-没报结果}），看 $host_log" >&2
-    kill "$new_host" 2>/dev/null || true
+    # 报了没接成的会自己退出。
+    echo "新宿主没有接手会话（${result:-没报结果就退出了}），看 $host_log" >&2
     exit 1
   fi
 else
