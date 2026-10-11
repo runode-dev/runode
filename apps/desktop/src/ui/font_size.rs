@@ -57,10 +57,10 @@ pub fn scaled(points: f32) -> Rems {
     rems(points / BASE)
 }
 
-/// 配置的界面字号，窗口的 rem 设成它。限在 6 到 20 点：太小时小几档的字看不见；标题栏、标签、
-/// 分屏标题条和状态栏的高度跟着窗口按钮定死，再大字就装不下了。
+/// 配置的界面字号，窗口的 rem 设成它。限在 11 到 20 点：列表一行（基准 22 点高）里的按钮和图标是
+/// 定死的 20px，再小就截掉了；标题栏、标签、分屏标题条和状态栏的高度跟着窗口按钮定死，再大字就装不下了。
 pub fn rem_size(cx: &App) -> Pixels {
-    px(cx.global::<AppConfig>().0.ui_font_size.clamp(6., 20.))
+    px(cx.global::<AppConfig>().0.ui_font_size.clamp(11., 20.))
 }
 
 /// 界面相对基准字号放大的倍数。要拿长度做算术时（估宽度、拖动的上下限）乘上它。
