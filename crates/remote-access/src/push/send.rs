@@ -401,7 +401,18 @@ impl Worker {
             Ok(request) => request,
             Err(why) => return Outcome::Failed(why),
         };
-        apns::outcome(route.via, &call, self.curl.send(&request))
+        let outcome = apns::outcome(route.via, &call, self.curl.send(&request));
+        if matches!(outcome, Outcome::Done(_)) {
+            // 不打 `call` 的 Debug：里面有设备的推送 token。
+            let what = match &call {
+                Call::CreateChannel => "created a channel".to_owned(),
+                Call::DeleteChannel { .. } => "deleted a channel".to_owned(),
+                Call::Start { .. } => "started a Live Activity".to_owned(),
+                Call::Broadcast { event, .. } => format!("broadcast {event:?}"),
+            };
+            tracing::info!("push for session {session}: {what} via {:?} ({:?})", route.via, route.env);
+        }
+        outcome
     }
 
     /// 刷新或者收起：拆成会话每个频道上的请求，收起时再删频道，排在原来的位置。
