@@ -34,7 +34,8 @@ pub use paths::{is_executable, resolve_path};
 pub struct Shell {
     /// 没报告过时为 `None`，用 runode 自己的 PATH。
     pub path: Option<OsString>,
-    pub names: ShellNames,
+    /// 和 `Session::shell_names` 共用一份，每次按键拿它不用深拷贝各个名字表。
+    pub names: Arc<ShellNames>,
     pub usage: Arc<usage::Usage>,
 }
 

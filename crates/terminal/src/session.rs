@@ -30,6 +30,7 @@ mod snapshot;
 use std::{
     cell::{Cell as StdCell, RefCell},
     rc::Rc,
+    sync::Arc,
     time::{Duration, Instant},
 };
 
@@ -245,8 +246,8 @@ impl Session {
     }
 
     /// shell 集成报告的别名、函数、内建命令和关键字（内容变了才报告）；没报告过的为空。
-    pub fn shell_names(&self) -> ShellNames {
-        ShellNames::clone(&self.meta.shell_names)
+    pub fn shell_names(&self) -> Arc<ShellNames> {
+        self.meta.shell_names.clone()
     }
 
     /// 宿主最近一次读到的前台是不是 shell 自己。

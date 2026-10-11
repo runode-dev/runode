@@ -50,7 +50,8 @@ impl Scratch {
                     "function", "while",
                 ]),
                 tab_widget: String::new(),
-            },
+            }
+            .into(),
             usage: Default::default(),
         }
     }
@@ -128,7 +129,7 @@ fn every_command_in_a_pipeline_is_looked_up() {
 #[test]
 fn unknown_commands_are_not_marked_before_the_shell_reports_its_names() {
     let scratch = Scratch::new();
-    let shell = Shell { names: ShellNames::default(), ..scratch.shell() };
+    let shell = Shell { names: Default::default(), ..scratch.shell() };
     assert_eq!(painted("nope", &shell, Some(scratch.path())), []);
 }
 

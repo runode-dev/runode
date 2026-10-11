@@ -51,7 +51,8 @@ fn the_first_word_lists_shell_names_and_executables() {
             builtins: vec!["cd".into()],
             keywords: vec!["if".into()],
             tab_widget: String::new(),
-        },
+        }
+        .into(),
         usage: Arc::new(usage::Usage::from_commands(["git status", "git log", "gst"])),
     };
     let listed = |input: &str| -> Vec<Candidate> {
