@@ -101,7 +101,8 @@ pub(crate) fn run(command: Command, env: &Env, out: &mut dyn Write, err: &mut dy
             // 先连上再发，之后 agent 的状态变化和命令结束才不会漏掉。
             let (channel, mut meta) = attach(&connection, id)?;
             // 刚开的终端还没出提示符时认不出 shell 集成，只能等屏幕安静，命令失败也照样算成功。
-            if wait && meta.foreground_is_shell {
+            // 不按回车时用不着认 shell 集成，不为它白等。
+            if wait && (enter || presses_enter(&keys)) && meta.foreground_is_shell {
                 meta = wait_for_prompt(&connection, id, meta)?;
             }
             let text = match text {
