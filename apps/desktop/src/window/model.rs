@@ -99,13 +99,10 @@ pub(super) struct Workspace {
     pub(super) tab_scroll: ScrollHandle,
     /// Git 面板和文件树显示的内容。
     pub(super) project: Project,
-    /// 右侧面板显示的是文件树、Git 还是模拟器，收着时为空；每个 workspace 各记一份。
+    /// 右侧面板显示的是文件树、Git 还是 GitHub Actions，收着时为空；每个 workspace 各记一份。
     pub(super) panel: Option<SidePanel>,
     /// 右侧面板上次显示的那一页，标题栏的开关按钮打开它。
     pub(super) last_panel: SidePanel,
-    /// 模拟器页选的设备；还没选过时为空，用默认的那台。设备列表和画面流整个窗口一份，只推当前
-    /// workspace 选的那台。
-    pub(super) simulator_device: Option<String>,
     /// GitHub Actions 页里固定到状态栏上的工作流。
     pub(super) pinned_workflows: Vec<format::PinnedWorkflow>,
 }
@@ -185,14 +182,14 @@ impl WindowView {
         self.spawned.insert(view.entity_id(), (Instant::now(), start));
     }
 
-    /// 找用户自己装的命令行工具（mobilecli、gh）用的 PATH：从访达打开时 app 自己的 PATH 里没有 npm、
+    /// 找用户自己装的命令行工具（gh）用的 PATH：从访达打开时 app 自己的 PATH 里没有
     /// brew 装的目录，用终端里 shell 报告的 PATH。
     pub(super) fn shell_path(&self, cx: &App) -> Option<std::ffi::OsString> {
         let path = self.focused_view().and_then(|view| view.read(cx).meta().shell_path.clone());
         path.or_else(|| std::env::var_os("PATH"))
     }
 
-    /// shell 报告的 PATH 里有没有叫 `program` 的命令行工具（mobilecli、gh）。结果记在 `cache` 里，PATH 没变
+    /// shell 报告的 PATH 里有没有叫 `program` 的命令行工具（gh）。结果记在 `cache` 里，PATH 没变
     /// 就不再找：标签每帧都问。
     pub(super) fn tool_on_path(&self, cache: &ToolCache, program: &str, cx: &App) -> bool {
         let path = self.shell_path(cx);
@@ -301,7 +298,6 @@ impl WindowView {
             project: Project::default(),
             panel: None,
             last_panel: SidePanel::default(),
-            simulator_device: None,
             pinned_workflows: Vec::new(),
         };
         self.workspaces.insert(ix, workspace);
@@ -449,9 +445,6 @@ impl WindowView {
         // 下标和 workspace 对不上。
         self.close_branch_picker(window, cx);
         self.active = ix;
-        // 右侧面板跟着 workspace 换，模拟器页换成它选的设备，按它开没开着模拟器页接上或停掉画面。
-        self.follow_workspace_device(cx);
-        self.simulator_panel_changed(cx);
         self.sidebar_scroll.scroll_to_item(ix);
         self.follow_workspace_in_file_search(self.workspaces[ix].id, cx);
         self.refresh_project(cx);

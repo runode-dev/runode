@@ -134,9 +134,6 @@ pub struct SavedWorkspace {
     pub git: bool,
     #[serde(default, skip_serializing_if = "is_false")]
     pub files: bool,
-    /// 模拟器页选的设备（`Workspace::simulator_device`），mobilecli 给的设备 id。
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub simulator_device: Option<String>,
     /// GitHub Actions 页里固定到状态栏上的工作流（`Workspace::pinned_workflows`）。
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub pinned_workflows: Vec<PinnedWorkflow>,
@@ -383,7 +380,6 @@ mod tests {
                 last_task: None,
                 git: true,
                 files: false,
-                simulator_device: Some("9812845E-4A33-41F8-9FAA-4636328F190A".into()),
                 pinned_workflows: vec![PinnedWorkflow { id: 375441921, name: "CI".into() }],
             }],
             active: 0,

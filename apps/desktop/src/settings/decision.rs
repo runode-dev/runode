@@ -4,7 +4,7 @@
 //! 去跑 `runode-infer … --json`，读它 stdout 上的 `{"status":"ok","data":…}`。密钥经它的 stdin
 //! 交过去，Runode 自己不存。
 //!
-//! 从访达打开时 app 自己的 PATH 里没有 brew 装的目录，所以和模拟器页一样，用终端里 shell 报告的
+//! 从访达打开时 app 自己的 PATH 里没有 brew 装的目录，所以和 GitHub Actions 页一样，用终端里 shell 报告的
 //! PATH 找它，找不到再看安装脚本默认装的 `~/.runode-infer/bin`。下载要好几分钟，放进
 //! `DecisionPulls`：关掉设置页也接着下，再打开时看得到进度。
 //!

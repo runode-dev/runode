@@ -4,7 +4,7 @@
 //! 复制、删除；看日志、盯着运行、触发工作流（有输入参数时 gh 一个个问）和填 secret、variable 的值
 //! 在旁边分出的终端里交给 gh。工作流可以固定到状态栏上，显示它最近一次运行的状态。
 //!
-//! 经用户自己装的 gh 读写，见 `gh`；和模拟器页一样用终端里 shell 报告的 PATH 找它。窗口在前台时，
+//! 经用户自己装的 gh 读写，见 `gh`；用终端里 shell 报告的 PATH 找它。窗口在前台时，
 //! 页上显示着的和固定在状态栏上的数据隔 `POLL_IDLE` 重读一次，有没跑完的运行或 job 时隔 `POLL_RUNNING`。
 
 mod gh;
@@ -33,7 +33,6 @@ use super::{
     persist::format::PinnedWorkflow,
     project::{ADDED, MODIFIED, REMOVED, panel_message, panel_shell, panel_title},
     row_buttons::{RowButton, button, row_buttons},
-    simulator::text_button,
     status_bar,
     titlebar::icon_toggle,
 };
@@ -1347,4 +1346,22 @@ fn state_label(state: State) -> Cow<'static, str> {
         State::Waiting | State::ActionRequired => rust_i18n::t!("github_actions.state.waiting"),
         State::Pending => rust_i18n::t!("github_actions.state.pending"),
     }
+}
+
+/// 面板里的文字按钮。
+fn text_button(id: &'static str, text: String, fg: Rgb, bg: Rgb) -> Stateful<Div> {
+    div()
+        .id(id)
+        .role(Role::Button)
+        .aria_label(text.clone())
+        .h(px(22.))
+        .px(px(8.))
+        .flex()
+        .items_center()
+        .rounded(px(4.))
+        .border_1()
+        .border_color(hsla(fg).opacity(0.12))
+        .text_color(hsla(fg).opacity(0.8))
+        .hover(|button| button.bg(hsla(bg.mix(fg, 0.10))))
+        .child(text)
 }

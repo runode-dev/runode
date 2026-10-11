@@ -1,7 +1,6 @@
-//! 教 agent 用 runode：把使用说明装成 agent 按需加载的 skill，一份讲操作别的终端，一份讲在模拟器页
-//! 看着的模拟器上跑和测 app。Claude Code 读 `~/.claude/skills/<名字>/`，Codex 读
-//! `~/.agents/skills/<名字>/`，两边是同样的文件：`SKILL.md`，加上它按需让 agent 去读的
-//! `references/<主题>.md`。
+//! 教 agent 用 runode：把操作别的终端的使用说明装成 agent 按需加载的 skill。Claude Code 读
+//! `~/.claude/skills/<名字>/`，Codex 读 `~/.agents/skills/<名字>/`，两边是同样的文件：`SKILL.md`，
+//! 加上它按需让 agent 去读的 `references/<主题>.md`。
 //! 装的是 GitHub 上仓库 main 里最新的一套（`SKILLS_URL`）：先下文件清单 `files.txt`，再照着下每个
 //! 文件，只改 skill 或加文件都不用发新版 app；下不到时用编进这一版的 `FILES`。装过哪些文件记在
 //! skill 目录下的 `INSTALLED` 里，下到的清单里去掉的下次装时删掉。

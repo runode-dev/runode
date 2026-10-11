@@ -1,5 +1,5 @@
 //! 右侧各栏共用的项目状态：当前终端所在仓库的 git 改动和文件树。面板显示时监听仓库目录，
-//! 有文件变了才在后台重读，监听不了时定时重读。文件树、Git 面板、模拟器页和 GitHub Actions 页合在右侧面板里，顶上一排
+//! 有文件变了才在后台重读，监听不了时定时重读。文件树、Git 面板和 GitHub Actions 页合在右侧面板里，顶上一排
 //! 标签切换；面板的开关，右侧各栏的宽度、分隔线，以及开关按钮也在这里。
 //!
 //! 读目录和 git 状态、给路径找标记在 `scan`，文件树排成行的状态在 `state`，监听目录
@@ -24,11 +24,11 @@ use runode_shared_types::color::Rgb;
 
 use super::{
     CARD_GAP, DIVIDER_GRAB_WIDTH, Divider, PANE_HEADER_HEIGHT, TITLEBAR_HEIGHT, ToggleFiles, ToggleGit,
-    ToggleGitHubActions, ToggleSimulator, WindowView, card, cards, divider_color, drag_window, titlebar::icon_toggle,
+    ToggleGitHubActions, WindowView, card, cards, divider_color, drag_window, titlebar::icon_toggle,
 };
 use crate::ui::a11y::A11yPress;
 use crate::{
-    assets::{ACTIONS_WORKFLOW_ICON, FILES_ICON, GIT_ICON, PANEL_RIGHT_ICON, PHONE_ICON},
+    assets::{ACTIONS_WORKFLOW_ICON, FILES_ICON, GIT_ICON, PANEL_RIGHT_ICON},
     ui::{hsla, tooltip::tooltip},
 };
 use scan::scan;
@@ -99,7 +99,6 @@ pub(super) enum SidePanel {
     #[default]
     Files,
     Git,
-    Simulator,
     GitHubActions,
 }
 
@@ -127,10 +126,6 @@ impl WindowView {
 
     pub(super) fn git_shown(&self) -> bool {
         self.workspace().panel == Some(SidePanel::Git)
-    }
-
-    pub(super) fn simulator_shown(&self) -> bool {
-        self.workspace().panel == Some(SidePanel::Simulator)
     }
 
     /// 右侧面板读哪个目录：当前终端的目录，取不到时是 workspace 的目录。
@@ -368,10 +363,6 @@ impl WindowView {
         self.toggle_panel(SidePanel::Files, window, cx);
     }
 
-    pub(super) fn toggle_simulator(&mut self, _: &ToggleSimulator, window: &mut Window, cx: &mut Context<Self>) {
-        self.toggle_panel(SidePanel::Simulator, window, cx);
-    }
-
     pub(super) fn toggle_github_actions(
         &mut self,
         _: &ToggleGitHubActions,
@@ -407,7 +398,6 @@ impl WindowView {
         if !self.github_actions_shown() {
             self.cancel_github_actions_edit(window, cx);
         }
-        self.simulator_panel_changed(cx);
         self.sync_project_watch();
         self.refresh_project(cx);
         self.save(cx);
@@ -426,7 +416,6 @@ impl WindowView {
         match self.workspace().panel? {
             SidePanel::Files => Some(self.render_files_panel(width, fg, bg, cx).into_any_element()),
             SidePanel::Git => Some(self.render_git_panel(width, fg, bg, window, cx).into_any_element()),
-            SidePanel::Simulator => Some(self.render_simulator_panel(width, fg, bg, window, cx).into_any_element()),
             SidePanel::GitHubActions => {
                 Some(self.render_github_actions_panel(width, fg, bg, window, cx).into_any_element())
             }
@@ -562,9 +551,6 @@ impl WindowView {
             let (id, icon, text, action): (_, _, _, &dyn Action) = match page {
                 SidePanel::Files => ("tab-files", FILES_ICON, rust_i18n::t!("tooltip.show_files"), &ToggleFiles),
                 SidePanel::Git => ("tab-git", GIT_ICON, rust_i18n::t!("tooltip.show_git"), &ToggleGit),
-                SidePanel::Simulator => {
-                    ("tab-simulator", PHONE_ICON, rust_i18n::t!("tooltip.show_simulator"), &ToggleSimulator)
-                }
                 SidePanel::GitHubActions => (
                     "tab-github-actions",
                     ACTIONS_WORKFLOW_ICON,
@@ -596,7 +582,6 @@ impl WindowView {
             .gap(px(TOGGLE_GAP))
             .child(tab(SidePanel::Files, cx))
             .when(self.git_button_visible(), |tabs| tabs.child(tab(SidePanel::Git, cx)))
-            .when(self.simulator_tab_visible(cx), |tabs| tabs.child(tab(SidePanel::Simulator, cx)))
             .when(self.github_actions_tab_visible(cx), |tabs| tabs.child(tab(SidePanel::GitHubActions, cx)))
     }
 

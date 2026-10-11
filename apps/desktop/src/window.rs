@@ -41,7 +41,6 @@ mod remote;
 mod row_buttons;
 mod settings_page;
 mod sidebar;
-mod simulator;
 mod slot;
 mod status_bar;
 mod tasks;
@@ -127,8 +126,6 @@ actions!(
         ToggleGit,
         /// 显示或隐藏右侧的文件树。
         ToggleFiles,
-        /// 显示或隐藏右侧的模拟器页。
-        ToggleSimulator,
         /// 显示或隐藏右侧的 GitHub Actions 页。
         ToggleGitHubActions,
         /// 打开或关掉标题栏上的项目命令菜单。
@@ -289,8 +286,6 @@ pub struct WindowView {
     git_focus: FocusHandle,
     /// 开着的分支列表。
     branch_picker: Option<git_panel::BranchPicker>,
-    /// 模拟器页的设备列表、画面和输入框。
-    simulator: simulator::SimulatorPage,
     github_actions: github_actions::ActionsPage,
     /// 预览栏拖动过宽度时是那个宽度；预览栏在打开文件时出现，标签都关掉时收起，不存档。
     preview_width: Option<f32>,
@@ -450,7 +445,6 @@ impl WindowView {
             git_graph_height: None,
             git_focus: cx.focus_handle(),
             branch_picker: None,
-            simulator: Default::default(),
             github_actions: Default::default(),
             preview_width: None,
             preview_focus: cx.focus_handle(),
@@ -544,7 +538,6 @@ impl WindowView {
                     project: Default::default(),
                     panel: None,
                     last_panel: Default::default(),
-                    simulator_device: None,
                     pinned_workflows: Vec::new(),
                 });
                 self.activate_workspace(ix, window, cx);
@@ -754,7 +747,6 @@ impl Render for WindowView {
             // 只沿焦点所在的路径传，侧栏不在这条路上。
             .on_modifiers_changed(cx.listener(|_, _, _, cx| cx.notify()))
             .on_action(Self::act(cx, Self::toggle_files))
-            .on_action(Self::act(cx, Self::toggle_simulator))
             .on_action(Self::act(cx, Self::toggle_github_actions))
             .on_action(Self::act(cx, Self::goto_agent))
             .on_action(Self::act(cx, Self::next_agent))

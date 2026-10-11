@@ -163,11 +163,6 @@ it, or say why it is not a problem. Write your answers to /tmp/blue.md." \
 - Leave the agents' panes open when you are done: the user may want to read
   them or keep talking to them.
 
-## iOS simulators and Android emulators
-
-To build, run or test an app on a simulator or emulator, which the user watches
-in runode's simulator page, use the runode-simulator skill.
-
 ## Be careful
 
 - The other terminals belong to the user. Do not send keys or text to a
