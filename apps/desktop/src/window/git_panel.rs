@@ -759,8 +759,8 @@ impl WindowView {
         };
         // 推送、拉取要跑好几秒：跑的时候按钮写着在做什么，连远端的图标还转着圈，免得以为没点上。
         let label = running.map_or(label, Busy::label);
-        // 主按钮反着来：前景色做底、背景色写字，跟着主题走，和写说明对话框的主按钮一样。
-        let (accent, accent_hover, on_accent) = (hsla(bg.mix(fg, 0.88)), hsla(bg.mix(fg, 0.75)), hsla(bg));
+        // 主按钮的底色由前景混进背景算出，跟着主题走，和新建工作区对话框的主按钮一样。
+        let (accent, accent_hover, on_accent) = (hsla(bg.mix(fg, 0.16)), hsla(bg.mix(fg, 0.22)), fg_hsla);
         let icon = match running {
             Some(running) if running.is_remote() => sync_icon(("git-commit-icon", ri), true, 14., on_accent),
             _ => svg().flex_none().path(icon).size(px(14.)).text_color(on_accent).into_any_element(),
