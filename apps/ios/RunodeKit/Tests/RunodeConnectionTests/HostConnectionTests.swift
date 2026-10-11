@@ -215,6 +215,30 @@ import Testing
         await flaky.stop()
     }
 
+    /// 组播不通、Bonjour 一直找不到时，记着的地址照常马上连，不等 Bonjour 的超时。
+    @Test func storedAddressesDoNotWaitForBonjour() async throws {
+        struct SlowDiscovery: HostDiscovery {
+            func locate(_ fingerprint: CertificateFingerprint, timeout: Duration) async -> TransportTarget? {
+                try? await Task.sleep(for: .seconds(30))
+                return nil
+            }
+        }
+        let link = HostConnection(
+            machine: machine, keyStore: keys, machines: store, discovery: SlowDiscovery(),
+            identity: ClientIdentity(build: "ios-test", deviceName: "测试 iPhone"),
+            policy: ReconnectPolicy(base: .milliseconds(10), maximum: .milliseconds(20)), open: supply.opener)
+        let transport = FakeTransport()
+        supply.add(transport)
+        var events = await link.events().makeAsyncIterator()
+        let started = ContinuousClock.now
+        await link.start()
+        var host = FakeHost(transport)
+        _ = try await admit(&host)
+        #expect(await waitReady(&events) != nil)
+        #expect(ContinuousClock.now - started < .seconds(5))
+        await link.stop()
+    }
+
     @Test func missingKeyIsFatal() async throws {
         try keys.deleteKey(for: machine.id)
         let link = connection()

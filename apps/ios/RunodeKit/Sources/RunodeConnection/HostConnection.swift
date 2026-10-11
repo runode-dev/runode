@@ -176,7 +176,7 @@ public actor HostConnection: HostLink {
             var reason: String
             do {
                 let session = try await establish()
-                failures = 0
+                let connectedAt = ContinuousClock.now
                 generation += 1
                 transport = session.transport
                 setState(.connected(hostName: session.hostName, address: session.transport.remoteAddress))
@@ -184,8 +184,9 @@ public actor HostConnection: HostLink {
                 reason = await readUntilClosed(session.transport, decoder: session.decoder)
                 transport = nil
                 session.transport.close()
-                // 刚连上又断的（比如宿主交接给新版本）马上重连一次，之后照常退避。
-                failures = 1
+                // 连了一阵才断的（比如宿主交接给新版本）马上重连，重连失败了从第一档退避起；一连上就断的接着
+                // 退避，免得宿主过了门禁就关时来回撞。
+                failures = ContinuousClock.now - connectedAt > .seconds(10) ? 0 : failures + 1
             } catch let failure as LinkFailure where failure.isFatal {
                 wanted = false
                 setState(.failed(failure))
@@ -221,12 +222,47 @@ public actor HostConnection: HostLink {
         var hostName: String
     }
 
-    /// 按顺序试各个地址：Bonjour 找到的、上次成功的、二维码里的。不能重试的失败直接报。
+    /// Bonjour 找到的地址和记着的地址（上次成功的、二维码里的，按顺序试）同时连，谁先过门禁用谁：组播
+    /// 不通的 Wi-Fi 上 Bonjour 要等满超时，记着的地址不跟着等。晚到的那条也连上了就关掉。不能重试的
+    /// 失败直接报；都失败时报记着的地址的错，没有记着的地址才报 Bonjour 的。
     private func establish() async throws -> Session {
         guard let key = try keyStore.key(for: machine.id) else { throw LinkFailure.missingKey }
-        let targets = await discovery.targets(for: machine.fingerprint, then: machine.fallbackTargets)
-        return try await firstSuccess(of: targets) { target in
-            try await handshake(with: target, key: key)
+        let discovery = discovery
+        let fingerprint = machine.fingerprint
+        let fallback = machine.fallbackTargets
+        return try await withThrowingTaskGroup(of: Session.self) { group in
+            group.addTask {
+                try await firstSuccess(of: fallback) { target in try await self.handshake(with: target, key: key) }
+            }
+            group.addTask {
+                guard let found = await discovery.locate(fingerprint, timeout: .seconds(2)) else {
+                    throw LinkFailure.noAddress
+                }
+                return try await self.handshake(with: found, key: key)
+            }
+            var winner: Session?
+            var failure: (any Error)?
+            while let result = await group.nextResult() {
+                switch result {
+                case .success(let session) where winner == nil:
+                    winner = session
+                    group.cancelAll()
+                case .success(let session):
+                    session.transport.close()
+                case .failure(let error as LinkFailure) where error.isFatal && winner == nil:
+                    group.cancelAll()
+                    throw error
+                case .failure(let error):
+                    // 限速的拒绝要传上去，`run` 才会等最长的退避。
+                    if failure == nil || (failure as? LinkFailure) == .noAddress
+                        || (error as? LinkFailure) == .rejected(.rateLimited)
+                    {
+                        failure = error
+                    }
+                }
+            }
+            if let winner { return winner }
+            throw failure ?? LinkFailure.noAddress
         }
     }
 
