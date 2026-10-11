@@ -49,6 +49,7 @@ impl Scratch {
                     "if", "then", "else", "fi", "for", "in", "do", "done", "case", "esac", "[[", "]]", "{", "}", "!",
                     "function", "while",
                 ]),
+                tab_widget: String::new(),
             },
             usage: Default::default(),
         }

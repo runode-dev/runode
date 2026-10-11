@@ -207,11 +207,7 @@ impl TerminalView {
             before_word: request.before_word().to_owned(),
             cells_before_cursor: 0,
             cwd: session.cwd(),
-            shell: Shell {
-                path: session.shell_path(),
-                names,
-                usage: completion::usage::current(),
-            },
+            shell: Shell { path: session.shell_path(), names, usage: completion::usage::current() },
             typed: String::new(),
             local: Vec::new(),
             generated: Vec::new(),
