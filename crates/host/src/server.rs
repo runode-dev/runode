@@ -60,6 +60,9 @@ use crate::{
 const SNAPSHOT_CHUNK: usize = 1 << 20;
 /// 一条连接最多积压这么多字节还没写出去，再多就让输出最多的会话改发 `Resync`。
 const OUTBOX_LIMIT: usize = 32 << 20;
+/// 手机连接（`ClientKind::Mobile`）的 `OUTBOX_LIMIT`：手机隔着 Wi-Fi 和 TLS 读得慢，积压的每个字节都是
+/// 回显前要等的，宁可早点 `Resync` 跳过一段输出，也不让画面落后几秒。
+const MOBILE_OUTBOX_LIMIT: usize = 1 << 20;
 /// 等会话线程回话（列会话、读屏幕）的最长时间。
 pub(crate) const REPLY_TIMEOUT: Duration = Duration::from_secs(5);
 /// 一条连接上最多同时有这么多列会话、读屏幕的请求在等回话，读写 git 的请求、列目录和列项目命令的
@@ -73,6 +76,8 @@ const ACCEPT_BACKOFF: Duration = Duration::from_millis(100);
 /// 每条连接 socket 的收发缓冲。macOS 上默认只有 8 KiB，刷屏的输出一块就塞满，读写两边来回
 /// 切换的次数多到吞吐上不去；内核允许的上限（`kern.ipc.maxsockbuf`）是 8 MiB。
 const SOCKET_BUFFER: libc::c_int = 4 << 20;
+/// 手机连接的发送缓冲：发出去的积压在这里也有一份，同样为了回显不排在几 MiB 的旧输出后面。
+const MOBILE_SOCKET_BUFFER: libc::c_int = 256 << 10;
 /// 写的线程一次最多攒这么多字节再写出去。
 const WRITE_BUFFER: usize = 256 << 10;
 
@@ -601,20 +606,24 @@ fn peer_uid(stream: &UnixStream) -> Option<libc::uid_t> {
 /// 把 socket 的收发缓冲设成 `SOCKET_BUFFER`；设不了时记日志，照常用。
 pub fn set_buffers(stream: &UnixStream) {
     for option in [libc::SO_SNDBUF, libc::SO_RCVBUF] {
-        let size = SOCKET_BUFFER;
-        // SAFETY: 描述符来自 `stream`；值指向本地变量，长度是它的大小。
-        let result = unsafe {
-            libc::setsockopt(
-                stream.as_raw_fd(),
-                libc::SOL_SOCKET,
-                option,
-                (&raw const size).cast(),
-                std::mem::size_of_val(&size) as libc::socklen_t,
-            )
-        };
-        if result != 0 {
-            tracing::debug!("failed to set a socket buffer: {}", io::Error::last_os_error());
-        }
+        set_buffer(stream, option, SOCKET_BUFFER);
+    }
+}
+
+/// 把 socket 的一个缓冲（`SO_SNDBUF` 或 `SO_RCVBUF`）设成 `size`；设不了时记日志，照常用。
+fn set_buffer(stream: &UnixStream, option: libc::c_int, size: libc::c_int) {
+    // SAFETY: 描述符来自 `stream`；值指向本地变量，长度是它的大小。
+    let result = unsafe {
+        libc::setsockopt(
+            stream.as_raw_fd(),
+            libc::SOL_SOCKET,
+            option,
+            (&raw const size).cast(),
+            std::mem::size_of_val(&size) as libc::socklen_t,
+        )
+    };
+    if result != 0 {
+        tracing::debug!("failed to set a socket buffer: {}", io::Error::last_os_error());
     }
 }
 
@@ -680,7 +689,7 @@ fn start_writer(stream: &UnixStream) -> Option<Outbox> {
         }
     };
     let (tx, rx) = mpsc::channel();
-    let out = Outbox { tx, queued: Arc::default() };
+    let out = Outbox { tx, queued: Arc::default(), limit: OUTBOX_LIMIT };
     let queued = out.queued.clone();
     let spawned = thread::Builder::new().name("host-connection-writer".into()).spawn(move || {
         pty::set_current_thread_interactive();
@@ -701,6 +710,8 @@ pub(crate) struct Outbox {
     tx: mpsc::Sender<Out>,
     /// 已经交给写的线程、还没写出去的载荷字节数。
     queued: Arc<AtomicUsize>,
+    /// `queued` 过了它就算积压，见 `backed_up`；收到 `Hello` 后按前端种类定，之后才有会话的 sink 克隆它。
+    limit: usize,
 }
 
 enum Out {
@@ -747,7 +758,7 @@ impl Outbox {
     }
 
     fn backed_up(&self) -> bool {
-        self.queued.load(Ordering::Relaxed) > OUTBOX_LIMIT
+        self.queued.load(Ordering::Relaxed) > self.limit
     }
 }
 
@@ -848,6 +859,10 @@ impl Connection {
             return;
         }
         self.kind = client;
+        if client == ClientKind::Mobile {
+            self.out.limit = MOBILE_OUTBOX_LIMIT;
+            set_buffer(reader.get_ref(), libc::SO_SNDBUF, MOBILE_SOCKET_BUFFER);
+        }
         self.by = session;
         self.device = device;
         self.snapshots = caps.snapshot && build == self.shared.build;

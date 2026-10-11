@@ -223,6 +223,25 @@ fn a_backed_up_connection_gets_no_more_snapshots_or_replies() {
     host.shared.kill_all();
 }
 
+/// 手机连接积压的上限比别的连接小：同样的积压，命令行照常回话，手机已经算积压了。
+#[test]
+fn mobile_connections_back_up_sooner() {
+    for (client, backed_up) in [(ClientKind::Cli, false), (ClientKind::Mobile, true)] {
+        let host = Host::new(BuildId("test".into()));
+        let id = host.shared.spawn(options("/bin/cat")).unwrap();
+        let (mut stream, frames) = greet(&host, client);
+        let out = host.shared.peers().connections.values().find_map(|peer| peer.out.clone()).unwrap();
+        out.queued.fetch_add(MOBILE_OUTBOX_LIMIT + 1, Ordering::Relaxed);
+        send(&mut stream, &ClientMsg::ReadScreen { id, lines: None, command: None });
+        match message(&frames) {
+            HostMsg::Error { message, .. } if backed_up => assert!(message.contains("backed up"), "{message}"),
+            HostMsg::ScreenText { .. } if !backed_up => {}
+            other => panic!("{client:?}: unexpected reply {other:?}"),
+        }
+        host.shared.kill_all();
+    }
+}
+
 /// 发请求的连接断开后，它转给界面、界面还没回话的请求跟着撤掉；界面之后再回话也只是丢掉。
 #[test]
 fn requests_from_a_closed_connection_are_forgotten() {
