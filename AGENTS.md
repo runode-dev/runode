@@ -10,9 +10,7 @@
 | `git` | 用 git 命令行读仓库的状态、逐行改动、分支、stash 和提交图，也做暂存（含按块暂存）、丢弃、提交、切换分支、stash 和与远端同步这些操作 | 只有 std |
 | `preview` | 文件预览不碰界面的部分：读文件、判断是文本、图片还是二进制，语法高亮出调色板语义的颜色，把 Markdown 解析成块结构（标题、段落、列表、引用、代码块、表格、图片等，照 GitHub 认提示块、脚注、裸网址链接和 README 里常用的 HTML（图片、标题、链接、居中），给标题算锚点） | std、syntect、two-face、pulldown-cmark、regex |
 | `agent-detect` | 认出终端前台在跑哪个 AI 编程 agent，判断它在干活、空闲还是等用户回答：按前台进程识别、识别规则的格式和求值（内置规则编进二进制）、状态去抖 | shared-types、serde、regex、toml |
-| `ghostty-vt-sys` | libghostty-vt 的 C 接口绑定（bindgen 生成后提交在仓库里，`gen-bindings` 重新生成），构建脚本用 zig 从 `vendor/ghostty` 编译出库；源自 libghostty-rs，许可 MIT 或 Apache-2.0，库名沿用 `libghostty_vt_sys` | 只有 std |
-| `ghostty-vt` | libghostty-vt 的安全封装：终端状态机、渲染状态、选区、搜索、按键和鼠标编码；源自 libghostty-rs，库名和依赖名沿用 `libghostty_vt`（`libghostty-vt`），代码里照旧 `use libghostty_vt` | ghostty-vt-sys、bitflags、int-enum |
-| `terminal` | 终端会话：libghostty-vt 状态机接在 shell 的 PTY 上，shell 集成、命令历史；把前台进程、屏幕文字、标题和进度报告交给 `agent-detect` | shared-types、paths、agent-detect、ghostty-vt、portable-pty |
+| `terminal` | 终端会话：libghostty-vt 状态机接在 shell 的 PTY 上，shell 集成、命令历史；把前台进程、屏幕文字、标题和进度报告交给 `agent-detect` | shared-types、paths、agent-detect、libghostty-vt、portable-pty |
 | `completion` | 按 Tab 的命令补全：命令规格、候选排序、生成器 | terminal、shared-types、paths |
 | `prompt-highlight` | 提示符上输入的语法高亮：把命令行分成命令名、关键字、选项、字符串、变量、路径等几类，按 fast-syntax-highlighting 的默认主题定色；命令名和子命令借 `completion` 查 | completion、paths |
 | `config` | Ghostty 兼容的配置文件、主题、快捷键写法和配置模板，生成 `TermSettings` | shared-types、paths |
@@ -23,10 +21,14 @@
 | `cli` | 命令行前端（`runode list`、`read`、`send`、`wait`、`open`、`kill`、`focus`、`setup`、`remote`、`service`）：经宿主的 Unix socket 按 protocol 说话，列会话、读屏幕、发输入、等 agent，请 app 开终端、切到终端；`setup` 把根目录 `skills/` 里的 skill 装给 agent；`service` 不经宿主，经 `autostart` 装上、去掉登录时自启；`remote` 不经宿主，经 `remote-access` 给手机配对、列出和撤销设备，配对成了以后问用户要不要在配置里打开 `terminal-host`（经 `config` 改配置文件），让退出 app 后远程访问留在后台 | protocol、shared-types、paths、config、remote-access、autostart、qrcode |
 | `desktop` | GPUI 桌面 app：窗口、视图、菜单、窗口存档和 Info.plist；带子命令启动时交给 `cli`、带 `--host` 时是单独一个进程的宿主、带 `--host --take-over` 时是升级时接手旧宿主会话的新宿主，和命令行、宿主是同一个可执行文件；远程访问的监听开在宿主所在的那个进程里（`remote_access`）；右侧面板的模拟器页经用户自己装的 mobilecli 看和操作 iOS 模拟器、Android 模拟器（不打包它，它不是开源许可）；右侧面板的 GitHub Actions 页经用户自己装的 gh 看运行、job 和 step，管工作流、secret 和 variable，看日志、触发工作流、填 secret 的值在分出的终端里交给 gh，固定的工作流显示在状态栏左边（状态图标出自 vscode-github-actions，MIT）；设置页的模型页（大模型、决策模型，分段切换）经用户自己装的 runode-infer（另一个仓库，跑 `runode-infer … --json`）启停服务、存托管 API 的密钥（只有决策模型有）、下载、删除、加载和卸载本机模型，设常驻和空闲多久卸载，不打包它，密钥经它的 stdin 交过去、Runode 自己不存；两类各自的默认模型记在配置项 `chat-model`、`decision-model`，暂时只是记下来，还没有地方读；打包脚本按 `apps/desktop#` 找它的构建产物 | 以上全部（含 host、protocol、cli、remote-access）、GPUI |
 
+终端仿真用的 libghostty-vt 不在 `crates/` 下，取自子模块 `vendor/libghostty-rs`。它是 runode-dev 对 Uzaaft 的 libghostty-rs（MIT 或 Apache-2.0）的 fork，runode 用它的 `runode` 分支，里面有安全封装 `libghostty-vt` 和 C 接口绑定 `libghostty-vt-sys`；绑定由 bindgen 生成后提交在那边，重新生成时在 fork 的一份单独克隆里设 `GHOSTTY_SOURCE_DIR` 指向 runode 的 `vendor/ghostty`，跑 `cargo run -p libghostty-vt-sys --features bindgen-tool --bin gen-bindings`；别在子模块里跑，`vendor/rustfmt.toml` 关掉了 vendor 下的格式化，生成的绑定不会排版。它自成一个 workspace，根 `Cargo.toml` 按路径依赖它，`vendor` 在 `exclude` 里，所以本仓库的 lint 不管它。`.cargo/config.toml` 设的 `GHOSTTY_SOURCE_DIR` 让 `libghostty-vt-sys` 的构建脚本从 `vendor/ghostty` 编出库，不去网上拉。runode 要用而上游还没有的接口加在 `runode` 分支上，一样东西一个提交，好在以后变基；上游已有同样能力、只是名字或形状不同的，改 runode 去适应，不改 fork。
+
+同步 ghostty 上游时两个子模块一起动。`vendor/ghostty` 是 runode-dev/ghostty 的 fork，等于上游 main 加一个 runode 的修复提交：把这个提交变基到上游最新，用 `git push --force-with-lease` 推上 fork。同一次同步里，在 `vendor/libghostty-rs` 里把 `libghostty-vt-sys` 构建脚本的 `GHOSTTY_COMMIT` 改成 ghostty fork 所基于的那个上游 commit，用 `gen-bindings` 重新生成绑定，提交并推上 fork 的 `runode` 分支；要跟进 Uzaaft 的上游时，也是把 `runode` 分支变基上去。最后在 runode 里一起挪两个子模块的指针，绑定有变化就看 `terminal` 要不要跟着改。两边必须对齐，因为构建时编的是 `vendor/ghostty` 的源码，绑定却是照 `GHOSTTY_COMMIT` 那版头文件生成的，不一致时结构体布局可能对不上，编得过，运行时却读写错内存。
+
 不变量：
 
-- 只有 `desktop` 能依赖 GPUI（`gpui-pre`、`gpui-pre-platform`）；`ghostty-vt`（libghostty-vt）和 portable-pty 只有 `terminal` 能直接依赖，`ghostty-vt-sys` 只有 `ghostty-vt` 能直接依赖；syntect 和 two-face 只有 `preview` 能直接依赖；rustls、rcgen 和 ring 只有 `remote-access` 能直接依赖。这几条由 `deny.toml` 守着，CI 里跑 `cargo deny check bans`。
-- `shared-types` 只放数据，不依赖其他 runode crate，也不依赖终端仿真或界面；`paths`、`git`、`preview`、`update` 不依赖任何 runode crate，`ghostty-vt` 只依赖 `ghostty-vt-sys`。
+- 只有 `desktop` 能依赖 GPUI（`gpui-pre`、`gpui-pre-platform`）；`libghostty-vt` 和 portable-pty 只有 `terminal` 能直接依赖，`libghostty-vt-sys` 只有 `libghostty-vt` 能直接依赖；syntect 和 two-face 只有 `preview` 能直接依赖；rustls、rcgen 和 ring 只有 `remote-access` 能直接依赖。这几条由 `deny.toml` 守着，CI 里跑 `cargo deny check bans`。
+- `shared-types` 只放数据，不依赖其他 runode crate，也不依赖终端仿真或界面；`paths`、`git`、`preview`、`update` 不依赖任何 runode crate。
 - `protocol` 只依赖 `shared-types`，不碰终端仿真、PTY 和界面。消息里用到的类型，别的 crate 也要用的（网格尺寸、agent 状态、会话公布的状态等）放 `shared-types`，只在协议里用的（会话标识、帧、连接方式等）放 `protocol` 自己。
 - `agent-detect` 只依赖 `shared-types`，不碰终端仿真、PTY 和界面：屏幕文字、前台进程组由 `terminal` 读好了交给它，用户规则目录由调用方从 `paths` 取来传进去。内置规则文件的出处和许可写在它的 `LICENSE-rules` 里。
 - `host` 不依赖 GPUI，也不直接依赖 libghostty-vt 和 portable-pty：VT 和 PTY 经 `terminal` 的 `HostSession` 用。一个终端有两份 VT，宿主那份（`HostSession`）是权威的，只有它应答终端查询；界面那份（`Session`）只消费同样的字节流，改 VT 状态的操作（改尺寸、清屏、换主题）一律经宿主在输出流里标出位置后两边一起做。现在只有 `desktop` 能直接依赖 `host`（建进程内的宿主、跑 `runode --host`），由 `deny.toml` 守着；它和宿主说话也只经 `protocol`，不碰宿主的内部。别的前端经 `protocol` 连 `paths` 的 `host_socket_file` 上的 socket。
