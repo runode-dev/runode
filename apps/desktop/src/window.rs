@@ -345,6 +345,9 @@ pub struct WindowView {
     _bounds_watch: Subscription,
     /// 窗口切到前台时重读右侧面板的内容。
     _activation_watch: Subscription,
+    /// 窗口看不看得见（被盖住、最小化、在别的 Space 上、显示器睡了）变了时重新告诉终端显示着没有，
+    /// 见 `sync_visibility`。
+    _visibility_watch: Subscription,
     /// 配置重载后重画，文件树的字号等跟着变。
     _config_watch: Subscription,
     /// 右侧面板显示时定时看终端换没换目录，监听不了目录时定时重读。
@@ -394,6 +397,8 @@ impl WindowView {
                 this.mark_seen(window, cx);
             }
         });
+        let visibility_watch =
+            cx.observe_window_visibility(window, |this, _, window, cx| this.sync_visibility(window, cx));
         let project_poll = cx.spawn_in(window, async move |this, cx| {
             loop {
                 cx.background_executor().timer(project::POLL_INTERVAL).await;
@@ -483,6 +488,7 @@ impl WindowView {
             emptied: false,
             _bounds_watch: bounds_watch,
             _activation_watch: activation_watch,
+            _visibility_watch: visibility_watch,
             _config_watch: config_watch,
             _project_poll: project_poll,
             project_watch: None,

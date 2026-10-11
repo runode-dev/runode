@@ -483,6 +483,13 @@ impl TerminalView {
         self.screen.visible()
     }
 
+    /// 界面这份 VT 上有丢了要不回来的状态：往回翻着、选着字、开着搜索。宿主给的屏幕停在最底下、
+    /// 没有选区，丢掉 VT 再要回来时这些都没了。
+    pub fn holds_view_state(&self) -> bool {
+        self.search_field.is_some()
+            || self.screen.shown().is_some_and(|session| !session.viewport_at_bottom() || session.has_selection())
+    }
+
     /// 不显示满了宽限：丢掉界面这份 VT，改成只看状态。
     fn hide_if_due(&mut self, cx: &mut Context<Self>) {
         self._hide_timer = None;

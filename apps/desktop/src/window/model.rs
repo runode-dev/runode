@@ -416,17 +416,20 @@ impl WindowView {
 
     /// 告诉窗口里的每个终端它显示着没有：当前 workspace 当前标签里的分屏都算显示着（被放大的
     /// 分屏挡住的也算，取消放大时要马上画得出来），其余的离开显示一段时间后丢掉界面这份 VT、只看
-    /// 状态，见 `TerminalView::request_visible`。显示的标签变了、往不显示的标签里加了终端时调。
+    /// 状态，见 `TerminalView::request_visible`。显示的标签变了、往不显示的标签里加了终端、窗口
+    /// 看不看得见变了时调。窗口看不见时平台不出帧，所有终端都按不显示处理，见 `draws_screen`。
     ///
     /// 要重新要屏幕的先一起发出去，再按同一个截止时间依次等，一次显示好几个分屏时总共最多等
     /// `SHOW_WAIT`，不是每个各等一份。
     pub(super) fn sync_visibility(&self, window: &mut Window, cx: &mut Context<Self>) {
         let deadline = Instant::now() + SHOW_WAIT;
+        let window_visible = window.is_visible();
         let mut waiting = Vec::new();
         for (wi, workspace) in self.workspaces.iter().enumerate() {
             for (ti, tab) in workspace.tabs.iter().enumerate() {
-                let shown = self.is_shown(wi, ti);
+                let selected = self.is_shown(wi, ti);
                 for (view, _) in tab.panes.values() {
+                    let shown = draws_screen(window_visible, selected, || view.read(cx).holds_view_state());
                     if view.read(cx).visible() != shown && view.update(cx, |view, cx| view.request_visible(shown, cx)) {
                         waiting.push(view.clone());
                     }
@@ -763,6 +766,13 @@ fn reveal_offset(x: f32, view: (f32, f32), tab: (f32, f32), span: (f32, f32), ma
     x.clamp(-max.max(0.), 0.)
 }
 
+/// 终端要不要留着界面这份 VT 画屏：标签选中着（`WindowView::is_shown`），窗口也看得见。窗口被
+/// 盖住、最小化、在别的 Space 上或者显示器睡了时平台不出帧，界面这份 VT 白算；只是宿主的快照停在
+/// 最底下、没有选区，往回翻着或选着字的终端（`holds_view_state`）丢了它就回不到原样，照样留着。
+fn draws_screen(window_visible: bool, selected: bool, holds_view_state: impl FnOnce() -> bool) -> bool {
+    selected && (window_visible || holds_view_state())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -840,5 +850,16 @@ mod tests {
         // 两头的标签滚不到正中，不越界。
         assert_eq!(reveal(-300., 0.), 0.);
         assert_eq!(reveal(0., 9.), -500.);
+    }
+
+    #[test]
+    fn a_hidden_window_draws_only_terminals_holding_view_state() {
+        // 窗口看得见：只看选中没选中。
+        assert!(draws_screen(true, true, || false));
+        assert!(!draws_screen(true, false, || true));
+        // 窗口看不见：选中的也不画，除非界面这份 VT 上有回不来的状态；没选中的照旧不画。
+        assert!(!draws_screen(false, true, || false));
+        assert!(draws_screen(false, true, || true));
+        assert!(!draws_screen(false, false, || true));
     }
 }
