@@ -5,3 +5,7 @@
 	path = vendor/command-signatures
 	url = https://github.com/runode-dev/command-signatures
 	branch = main
+[submodule "vendor/libghostty-rs"]
+	path = vendor/libghostty-rs
+	url = https://github.com/runode-dev/libghostty-rs
+	branch = runode

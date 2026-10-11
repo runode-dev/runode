@@ -73,7 +73,7 @@ pub(crate) fn configure_common(terminal: &mut Terminal<'_, '_>, scrollback_bytes
     terminal
         .set_scrollback_max_lines(Some(SCROLLBACK_LINES))?
         .set_scrollback_max_bytes(scrollback_bytes)?
-        .set_unknown_sequence_max_bytes(UNKNOWN_SEQUENCE_MAX_BYTES)?;
+        .set_unknown_max_bytes(UNKNOWN_SEQUENCE_MAX_BYTES)?;
     Ok(())
 }
 
@@ -212,7 +212,8 @@ pub(crate) fn format_replay(
     default_cursor: settings::CursorStyle,
 ) -> Result<Vec<u8>> {
     let mut out = Vec::new();
-    Formatter::new(terminal, replay_options())?.format_into(&mut out)?;
+    // SAFETY: 写进 `Vec` 不会回头调用这个格式化器或它的终端。
+    unsafe { Formatter::new(terminal, replay_options())?.format_write(&mut out) }?;
     let shape = RenderState::new()?.update(terminal)?.cursor_visual_style()?;
     let decscusr = match shape {
         CursorVisualStyle::Block => Some((1, settings::CursorStyle::Block)),

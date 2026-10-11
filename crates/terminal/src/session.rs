@@ -99,7 +99,7 @@ pub struct Session {
     /// 宿主最近一次公布的状态。
     meta: SessionMeta,
     /// 打开搜索栏期间的搜索；关掉就丢弃。
-    search: Option<Search<'static>>,
+    search: Option<Search<'static, 'static>>,
     /// 平滑滚动不足一行的部分，0 到 1 之间：画面整体往下错开这么多行，见 `scroll_smoothly`。
     scroll_offset: f32,
     option_as_alt: OptionAsAlt,

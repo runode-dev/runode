@@ -108,7 +108,7 @@ jobs:
           echo "version=$version" >>"$GITHUB_OUTPUT"
           echo "tag=v$version" >>"$GITHUB_OUTPUT"
       - name: 装 Rust 工具链、拉子模块
-        # 更新 Cargo.lock 要读到所有 workspace 的包，有的依赖在子模块里（vendor/command-signatures）。
+        # 更新 Cargo.lock 要读到所有 workspace 的包，有的依赖在子模块里（vendor/command-signatures、vendor/libghostty-rs）。
         if: github.event_name == 'workflow_dispatch'
         run: |
           rustup toolchain install --profile minimal

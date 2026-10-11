@@ -1,7 +1,7 @@
 //! 搜索：搜索栏打开期间的 libghostty 搜索，以及把视口里的匹配换算成高亮段。
 
 use libghostty_vt::{
-    search::Search,
+    search::{MatchBuffer, Search},
     terminal::{PointSpace, Terminal},
 };
 
@@ -20,10 +20,11 @@ impl Session {
             Some(search) => search,
             None => self.search.insert(Search::new(&mut self.terminal)?),
         };
+        // 空的 needle 清掉搜索，回到空闲。
         if needle.is_empty() {
-            search.clear_needle(&mut self.terminal)?;
+            search.set_needle(&mut self.terminal, b"")?;
         } else {
-            search.set_needle(&mut self.terminal, needle)?;
+            search.set_needle(&mut self.terminal, needle.as_bytes())?;
             search.run(&mut self.terminal)?;
             search.select_next(&mut self.terminal)?;
         }
@@ -56,17 +57,18 @@ impl Session {
 
 /// 让搜索追上终端的最新内容，再把视口里的匹配换算成逐行的高亮段。
 pub(super) fn search_highlights(
-    search: &mut Search<'static>,
+    search: &mut Search<'static, 'static>,
     terminal: &mut Terminal<'static, 'static>,
 ) -> libghostty_vt::error::Result<Vec<Highlight>> {
-    search.feed(terminal)?;
     search.run(terminal)?;
-    let terminal = &*terminal;
+    let snapshot = search.snapshot(terminal)?;
+    let terminal = snapshot.terminal();
     let cols = terminal.cols()?;
     let rows = terminal.rows()?;
-    let selected = search.selected_match(terminal)?;
+    let selected = snapshot.selected_match()?;
     let mut highlights = Vec::new();
-    for found in search.viewport_matches(terminal)? {
+    let mut matches = MatchBuffer::new();
+    for found in snapshot.viewport_matches(&mut matches)? {
         let start = terminal.point_from_grid_ref(&found.start(), PointSpace::Viewport)?;
         let end = terminal.point_from_grid_ref(&found.end(), PointSpace::Viewport)?;
         // 一端在视口外的匹配按视口边缘截断；两端都在外面的不画。

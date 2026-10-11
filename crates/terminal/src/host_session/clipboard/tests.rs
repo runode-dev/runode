@@ -240,7 +240,7 @@ fn vt_answers(bytes: &[u8]) -> Vec<Vec<u8>> {
             move |_, data| written.borrow_mut().push(data.to_vec())
         })
         .unwrap()
-        .on_clipboard_read(|_, read| read.reply(Err(libghostty_vt::terminal::ClipboardReadError::Denied)))
+        .on_clipboard_read(|_, read| read.reply(Err(libghostty_vt::terminal::ClipboardReadError::Denied), &[], false))
         .unwrap();
     terminal.vt_write(bytes);
     written.take().into_iter().filter(|answer| answer.starts_with(b"\x1b]52;")).collect()

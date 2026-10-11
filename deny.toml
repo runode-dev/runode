@@ -21,8 +21,8 @@ deny = [
         "gpui-pre-windows",
     ], reason = "只有 app 能依赖界面框架，其余 crate 不碰 GPUI" },
     { crate = "gpui-pre-platform", wrappers = ["runode"], reason = "只有 app 能依赖界面框架，其余 crate 不碰 GPUI" },
-    { crate = "runode-ghostty-vt", wrappers = ["runode-terminal"], reason = "终端仿真只在 runode-terminal 里" },
-    { crate = "runode-ghostty-vt-sys", wrappers = ["runode-ghostty-vt"], reason = "终端仿真只在 runode-terminal 里，C 接口经 runode-ghostty-vt 的安全封装用" },
+    { crate = "libghostty-vt", wrappers = ["runode-terminal"], reason = "终端仿真只在 runode-terminal 里" },
+    { crate = "libghostty-vt-sys", wrappers = ["libghostty-vt"], reason = "终端仿真只在 runode-terminal 里，C 接口经 libghostty-vt 的安全封装用" },
     { crate = "portable-pty", wrappers = ["runode-terminal"], reason = "PTY 只在 runode-terminal 里" },
     { crate = "runode-host", wrappers = ["runode"], reason = "只有 app 直接用宿主：在自己进程里建它、或者以 runode --host 单独跑它，说话也经 runode-protocol；别的前端经 runode-protocol 连宿主的 socket，不直接依赖它" },
     # two-face 打包的语法定义要和 syntect 配套，它也直接依赖 syntect。

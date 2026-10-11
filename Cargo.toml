@@ -30,18 +30,10 @@ runode-agent-detect = { path = "crates/agent-detect" }
 runode-remote-access = { path = "crates/remote-access" }
 runode-update = { path = "crates/update" }
 runode-autostart = { path = "crates/autostart" }
-# libghostty-vt 的 Rust 绑定，源自 libghostty-rs（MIT 或 Apache-2.0）。依赖名沿用 libghostty-vt，
-# 包名加 runode- 前缀，免得和 crates.io 上原项目的同名 crate 撞名。
-libghostty-vt = { package = "runode-ghostty-vt", path = "crates/ghostty-vt" }
-libghostty-vt-sys = { package = "runode-ghostty-vt-sys", path = "crates/ghostty-vt-sys" }
-allocator-api2 = "0.4"
-bitflags = "2"
-int-enum = "1"
-png = "0.18"
-log = "0.4"
-bindgen = "0.72"
-heck = "0.5"
-pkg-config = "0.3"
+# libghostty-vt 的 Rust 绑定（MIT 或 Apache-2.0），取自子模块 vendor/libghostty-rs，即 runode-dev 对
+# libghostty-rs 的 fork 的 runode 分支。它自成一个 workspace，不是本 workspace 的成员（见 exclude）。
+# 它的 C 接口绑定 libghostty-vt-sys 只经 libghostty-vt 间接用到，不列在这里。
+libghostty-vt = { path = "vendor/libghostty-rs/crates/libghostty-vt" }
 gpui = { package = "gpui-pre", version = "=0.3.8" }
 gpui_platform = { package = "gpui-pre-platform", version = "=0.3.8" }
 anyhow = "1"
