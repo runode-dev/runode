@@ -30,6 +30,20 @@ import Testing
         #expect(attaches(link.sent).isEmpty)
     }
 
+    /// 停了订阅收不到断开的状态：`stop` 自己当作断开，回到前台、还没连上时不往没有的连接上发请求。
+    @Test func stoppingCountsAsDisconnected() {
+        let model = SessionListModel(machine: machineRecord(), link: link)
+        model.handle(.state(.connected(hostName: "homelab", address: nil)))
+        model.handle(.ready(generation: 1))
+        model.handle(.message(.sessionList([info(sessionA, title: "a")])))
+        model.stop()
+        link.clearSent()
+        #expect(!model.linkState.isConnected)
+        model.refresh()
+        model.screenClosed(sessionA)
+        #expect(link.sent.isEmpty)
+    }
+
     @Test func metaUpdatesArriveLive() {
         let model = SessionListModel(machine: machineRecord(), link: link)
         model.handle(.ready(generation: 1))

@@ -265,10 +265,12 @@ public final class SessionListModel {
         }
     }
 
-    /// 离开这台电脑或者 App 进了后台：停止订阅，断开连接。
+    /// 离开这台电脑或者 App 进了后台：停止订阅，断开连接。订阅停了，连接断开的状态转不过来，这里自己
+    /// 当作断开处理，不然回到前台、还没连上时会照旧往没有的连接上发请求。
     public func stop() {
         task?.cancel()
         task = nil
+        handle(.state(.idle))
         let link = self.link
         let previous = linkControl
         linkControl = Task {

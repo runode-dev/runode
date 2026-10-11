@@ -359,6 +359,7 @@ private let secondToken = Data([0x01, 0x02])
         try await Task.sleep(for: .milliseconds(20))
         #expect(system.ended.isEmpty)
         app.setActive(true)
+        connect(list)
         list.handle(.message(.sessionList([info(sessionA, .working)])))
         #expect(await eventually { system.ended == [activity(sessionA)] })
     }

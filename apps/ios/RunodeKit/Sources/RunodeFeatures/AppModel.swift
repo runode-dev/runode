@@ -289,18 +289,12 @@ public final class AppModel {
         dependencies.themes.save(theme)
     }
 
-    /// App 回到前台或进了后台。后台里 iOS 会挂起 App，连接迟早被断，主动断开干净；回来时重连。断开时
-    /// 会话列表不再收事件，不会转来断开的状态，这里直接告诉推送登记别等回话了，回来连上时再登记。
+    /// App 回到前台或进了后台。后台里 iOS 会挂起 App，连接迟早被断，主动断开干净；回来时重连。
     public func setActive(_ isActive: Bool) {
         guard isActive != active else { return }
         active = isActive
         for list in sessionLists.values {
-            if isActive {
-                list.start()
-            } else {
-                list.stop()
-                push.disconnected(list.machine.id)
-            }
+            if isActive { list.start() } else { list.stop() }
         }
     }
 
