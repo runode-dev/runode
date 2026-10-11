@@ -341,18 +341,18 @@ git:
   more: 更多操作
   view_options: 视图选项
   ai_message:
-    menu: 生成提交信息…
+    menu: 生成提交说明…
     button: 用 AI 生成提交说明
-    title: 生成提交信息
+    title: 生成提交说明
     close: 关闭
-    subtitle: 为此运行选择智能体和提示词模板。
-    agent: 智能体
+    subtitle: 选这次用的 agent 和提示词模板。
+    agent: Agent
     args: CLI 参数
     template: 提示词模板
     variables: "{} 变量"
     scope: 保存到
-    scope_repo: 此存储库
-    scope_all: 所有存储库
+    scope_repo: 这个仓库
+    scope_all: 所有仓库
     save: 保存
     saved: 已保存。
     generate: 生成
@@ -365,16 +365,16 @@ git:
       branch: "当前分支名。示例："
       stagedFiles: "要提交的文件，一行一个，前面是状态字母：有暂存的改动时是暂存的，没有时是全部改动。示例："
       stagedPatch: "要提交的改动，太大时截短。示例："
-    will_run: 将运行
+    will_run: 会运行
     via_stdin: 提示词经标准输入传入。
     via_argv: 提示词放在 <prompt> 处。
     nothing: 没有要提交的改动。
     busy: 仓库正在忙。
-    unknown_agent: "不认识的智能体：%{agent}"
+    unknown_agent: "不认识的 agent：%{agent}"
     unclosed_quote: CLI 参数里的引号没有配对。
     missing: "找不到 %{binary} 命令。请先安装，或者确认它在 shell 的 PATH 里。"
     timeout: "%{binary} 太久没有结果，已经停掉。"
-    empty: 智能体返回的提交说明是空的。
+    empty: agent 返回的提交说明是空的。
   busy:
     stage: 正在暂存…
     discard: 正在放弃更改…
@@ -897,7 +897,7 @@ status:
 mobile:
   entry: "手机端"
   eyebrow: "RUNODE 手机端"
-  intro_title: "工作区随身带着。"
+  intro_title: "在 iPhone 上用 Runode。"
   intro_body: "在 iPhone 上看 agent 在做什么、回答它们的提问，打开任何一个终端接着干活。手机经局域网或 Tailscale 直接连到这台 Mac，不经过别的服务器。"
   start: "开始使用"
   step: "第 %{n} 步（共 %{total} 步）"

@@ -341,40 +341,40 @@ git:
   more: 更多操作
   view_options: 檢視選項
   ai_message:
-    menu: 產生提交訊息…
+    menu: 產生提交說明…
     button: 用 AI 產生提交說明
-    title: 產生提交訊息
+    title: 產生提交說明
     close: 關閉
-    subtitle: 為此次執行選擇智慧體和提示詞範本。
-    agent: 智慧體
+    subtitle: 選這次用的 agent 和提示詞範本。
+    agent: Agent
     args: CLI 參數
     template: 提示詞範本
     variables: "{} 變數"
     scope: 儲存到
-    scope_repo: 此存放庫
-    scope_all: 所有存放庫
+    scope_repo: 這個倉庫
+    scope_all: 所有倉庫
     save: 儲存
     saved: 已儲存。
     generate: 產生
     custom: 自訂指令
     command: 指令
-    command_hint: "開頭可以寫 NAME=value 設定環境變數。參數裡的 {prompt} 換成提示詞；沒寫 {prompt} 時提示詞經標準輸入傳入。在存放庫目錄裡直接執行，不經 shell。"
+    command_hint: "開頭可以寫 NAME=value 設定環境變數。參數裡的 {prompt} 換成提示詞；沒寫 {prompt} 時提示詞經標準輸入傳入。在倉庫目錄裡直接執行，不經 shell。"
     empty_command: 自訂指令是空的。
     var:
       basePrompt: "runode 內建的提示詞：照著最近幾條提交說明的寫法寫，帶上分支、變更的檔案和變更內容。範例："
       branch: "目前的分支名稱。範例："
       stagedFiles: "要提交的檔案，一行一個，前面是狀態字母：有暫存的變更時是暫存的，沒有時是全部變更。範例："
       stagedPatch: "要提交的變更內容，太大時截短。範例："
-    will_run: 將執行
+    will_run: 會執行
     via_stdin: 提示詞經標準輸入傳入。
     via_argv: 提示詞放在 <prompt> 處。
     nothing: 沒有要提交的變更。
-    busy: 存放庫正在忙。
-    unknown_agent: "不認識的智慧體：%{agent}"
+    busy: 倉庫正在忙。
+    unknown_agent: "不認識的 agent：%{agent}"
     unclosed_quote: CLI 參數裡的引號沒有配對。
     missing: "找不到 %{binary} 指令。請先安裝，或確認它在 shell 的 PATH 裡。"
     timeout: "%{binary} 太久沒有結果，已經停止。"
-    empty: 智慧體傳回的提交說明是空的。
+    empty: agent 傳回的提交說明是空的。
   busy:
     stage: 正在暫存…
     discard: 正在捨棄變更…
@@ -897,7 +897,7 @@ status:
 mobile:
   entry: "手機端"
   eyebrow: "RUNODE 手機端"
-  intro_title: "工作區隨身帶著。"
+  intro_title: "在 iPhone 上用 Runode。"
   intro_body: "在 iPhone 上看 agent 在做什麼、回答它們的提問，打開任何一個終端機接著工作。手機經區域網路或 Tailscale 直接連到這台 Mac，不經過別的伺服器。"
   start: "開始使用"
   step: "第 %{n} 步（共 %{total} 步）"
