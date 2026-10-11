@@ -122,7 +122,11 @@
             if alpha == 1, let cached = colorCache[rgb] { return cached }
             let color = CGColor(
                 srgbRed: CGFloat(rgb.r) / 255, green: CGFloat(rgb.g) / 255, blue: CGFloat(rgb.b) / 255, alpha: alpha)
-            if alpha == 1 { colorCache[rgb] = color }
+            if alpha == 1 {
+                // 真彩色渐变一屏就能有上万种颜色，不设上限会一直涨。
+                if colorCache.count > 20_000 { colorCache.removeAll() }
+                colorCache[rgb] = color
+            }
             return color
         }
 
