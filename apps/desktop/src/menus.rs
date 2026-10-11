@@ -229,7 +229,8 @@ fn fix_key_equivalents(menu: &objc2_app_kit::NSMenu) {
 const SETUP_TARGETS: [SetupTarget; 2] = [SetupTarget::Claude, SetupTarget::Codex];
 
 /// 装过 agent 集成的，把装着的使用说明换成 GitHub 上最新的：skill 更新了不用再从菜单装一遍。
-/// 下不到时不动装着的；关了自动更新时也不动，没装过时不联网。要在配置装上之后调用。
+/// 下不到时不动装着的；关了自动更新时也不动，没装过时不联网。要在配置装上之后调用。和自动更新的第一次
+/// 检查一样等 `update::FIRST_CHECK` 再下，不和开窗口抢 CPU 和网络。
 pub fn refresh_agent_integration(cx: &App) {
     if !cx.global::<AppConfig>().0.auto_update {
         return;
@@ -237,8 +238,10 @@ pub fn refresh_agent_integration(cx: &App) {
     let Some(home) = runode_paths::Dirs::from_env().home else {
         return;
     };
+    let executor = cx.background_executor().clone();
     cx.background_executor()
         .spawn(async move {
+            executor.timer(crate::update::FIRST_CHECK).await;
             let installed = SETUP_TARGETS
                 .iter()
                 .flat_map(|target| runode_cli::setup_paths(*target, &home))

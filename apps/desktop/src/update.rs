@@ -29,7 +29,7 @@ use runode_update::{Error, Installation, Release, Staged};
 use crate::config::AppConfig;
 
 /// 启动后过这么久第一次查：不和启动抢资源。
-const FIRST_CHECK: Duration = Duration::from_secs(30);
+pub(crate) const FIRST_CHECK: Duration = Duration::from_secs(30);
 /// 之后每隔这么久查一次。
 const CHECK_INTERVAL: Duration = Duration::from_secs(6 * 60 * 60);
 /// 下载时多久看一次进度。
