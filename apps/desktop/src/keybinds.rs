@@ -29,8 +29,8 @@ use crate::{
         GotoAgent, NewSplitDown, NewSplitRight, NewTab, NewWorkspace, NextAgent, NextTab, NextWorkspace,
         OpenSelectedFile, PreviousTab, PreviousWorkspace, RenameFile, RenameWorkspace, ResizePane, RevealInFinder,
         RunNamedTask, SelectFirstFile, SelectLastFile, SelectLastTab, SelectLastWorkspace, SelectNextFile,
-        SelectPreviousFile, SelectTab, SelectWorkspace, ToggleFiles, ToggleGit, ToggleGitHubActions, TogglePaneZoom,
-        ToggleSidebar, ToggleSimulator, ToggleStatusBar, ToggleTasks,
+        SelectPreviousFile, SelectTab, SelectWorkspace, ToggleFiles, ToggleGit, ToggleGitHubActions, TogglePaneFold,
+        TogglePaneZoom, ToggleSidebar, ToggleSimulator, ToggleStatusBar, ToggleTasks,
     },
 };
 
@@ -85,6 +85,7 @@ fn gpui_action(action: Action) -> (Box<dyn gpui::Action>, Contexts) {
         Action::ResizeSplit(direction) => (boxed(ResizePane(direction)), WINDOW),
         Action::EqualizeSplits => (boxed(EqualizePanes), WINDOW),
         Action::ToggleSplitZoom => (boxed(TogglePaneZoom), WINDOW),
+        Action::ToggleSplitFold => (boxed(TogglePaneFold), WINDOW),
         Action::ArrangeSplits => (boxed(ArrangePanes), WINDOW),
         Action::NewWorkspace => (boxed(NewWorkspace), WINDOW),
         Action::CloseWorkspace => (boxed(CloseWorkspace), WINDOW),

@@ -59,6 +59,7 @@ menu:
   previous_split: Select Previous Split
   next_split: Select Next Split
   zoom_split: Zoom Split
+  fold_split: Collapse or Expand Split
   equalize_splits: Equalize Splits
   goto_agent: Go to Agent…
   next_agent: Next Agent Needing Attention
@@ -325,6 +326,8 @@ tooltip:
   close_search: Close Search
   close_split: Close Split
   restore_split: Restore Split
+  collapse_split: Collapse Split
+  expand_split: Expand Split
 git:
   title: Source Control
   refresh: Refresh

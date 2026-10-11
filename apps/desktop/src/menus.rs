@@ -21,8 +21,8 @@ use crate::{
     window::{
         ArrangePanes, ClosePane, CloseTab, CloseWorkspace, EqualizePanes, FocusNextPane, FocusPreviousPane, GotoAgent,
         NewSplitDown, NewSplitRight, NewTab, NewWorkspace, NextAgent, NextTab, NextWorkspace, PreviousTab,
-        PreviousWorkspace, RenameWorkspace, ToggleFiles, ToggleGit, ToggleGitHubActions, TogglePaneZoom, ToggleSidebar,
-        ToggleSimulator, ToggleStatusBar, ToggleTasks,
+        PreviousWorkspace, RenameWorkspace, ToggleFiles, ToggleGit, ToggleGitHubActions, TogglePaneFold,
+        TogglePaneZoom, ToggleSidebar, ToggleSimulator, ToggleStatusBar, ToggleTasks,
     },
 };
 
@@ -174,6 +174,7 @@ pub fn set_menus(cx: &mut App) {
             MenuItem::action(tr("menu.previous_split"), FocusPreviousPane),
             MenuItem::action(tr("menu.next_split"), FocusNextPane),
             MenuItem::action(tr("menu.zoom_split"), TogglePaneZoom),
+            MenuItem::action(tr("menu.fold_split"), TogglePaneFold),
             MenuItem::action(tr("menu.equalize_splits"), EqualizePanes),
             MenuItem::separator(),
             MenuItem::action(tr("menu.goto_agent"), GotoAgent),

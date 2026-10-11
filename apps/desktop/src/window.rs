@@ -110,6 +110,8 @@ actions!(
         FocusPreviousPane,
         EqualizePanes,
         TogglePaneZoom,
+        /// 卡片样式下把当前分屏收到终端区底部，只剩标题条；已经折叠过的展开。
+        TogglePaneFold,
         /// 填名字、选目录，在里面新建 workspace；已经有这个目录的 workspace 时切过去（填了名字就改成它）。
         NewWorkspace,
         /// 关掉当前 workspace，里面的终端都随之结束。
@@ -724,6 +726,7 @@ impl Render for WindowView {
             .on_action(Self::act(cx, Self::resize_pane))
             .on_action(Self::act(cx, Self::equalize_panes))
             .on_action(Self::act(cx, Self::toggle_pane_zoom))
+            .on_action(Self::act(cx, Self::toggle_pane_fold))
             .on_action(Self::act(cx, Self::new_workspace))
             .on_action(Self::act(cx, Self::close_workspace))
             .on_action(Self::act(cx, Self::rename_workspace))

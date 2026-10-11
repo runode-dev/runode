@@ -59,6 +59,7 @@ menu:
   previous_split: 選擇上一個分割畫面
   next_split: 選擇下一個分割畫面
   zoom_split: 放大分割畫面
+  fold_split: 摺疊或展開分割畫面
   equalize_splits: 平均分割畫面
   goto_agent: 前往 agent…
   next_agent: 下一個要處理的 agent
@@ -325,6 +326,8 @@ tooltip:
   close_search: 關閉搜尋
   close_split: 關閉分割畫面
   restore_split: 還原分割畫面
+  collapse_split: 摺疊分割畫面
+  expand_split: 展開分割畫面
 git:
   title: 原始碼控制
   refresh: 重新整理

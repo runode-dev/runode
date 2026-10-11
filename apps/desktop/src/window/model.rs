@@ -35,6 +35,8 @@ pub(super) struct Tab {
     pub(super) focused: EntityId,
     /// 当前终端放大占满整个标签，其他分屏暂时不画。
     pub(super) zoomed: bool,
+    /// 卡片样式下折叠成只剩标题条的分屏；当前分屏照样展开着画，见 `Tab::folded`。
+    pub(super) collapsed: HashSet<EntityId>,
     /// 不在前台时响过铃，切过去后清掉。agent 停下来不算，那由 agent 的标记表示。
     pub(super) bell: bool,
     /// agent 干完了、用户还没看过的分屏，见 `Mark::new`；用户看到那个分屏时清掉。
@@ -240,6 +242,7 @@ impl WindowView {
             panes: HashMap::from([(id, entry)]),
             focused: id,
             zoomed: false,
+            collapsed: HashSet::new(),
             bell: false,
             done: HashSet::new(),
         }
@@ -594,6 +597,7 @@ impl WindowView {
         let shown = self.is_shown(wi, ti);
         let tab = &mut self.workspaces[wi].tabs[ti];
         tab.done.remove(&pane);
+        tab.collapsed.remove(&pane);
         let Some(next) = tab.root.remove(pane) else {
             self.close_tab_at(wi, ti, window, cx);
             return;

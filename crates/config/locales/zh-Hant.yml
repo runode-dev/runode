@@ -110,6 +110,7 @@ action:
   resize_split: 把最近的分隔線往這個方向移，步長固定
   equalize_splits: 平均分割畫面
   toggle_split_zoom: 放大或還原目前的分割畫面
+  toggle_split_fold: 把目前的分割畫面摺疊到標籤底部，或展開回原位
   arrange_splits: 在目前的分割畫面旁一次開出幾個新終端機，先選方向和個數
   new_workspace: 選一個目錄，在裡面新增工作區
   close_workspace: 關閉工作區和裡面所有分頁

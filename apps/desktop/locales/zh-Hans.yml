@@ -59,6 +59,7 @@ menu:
   previous_split: 选择上一个分屏
   next_split: 选择下一个分屏
   zoom_split: 放大分屏
+  fold_split: 折叠或展开分屏
   equalize_splits: 均分分屏
   goto_agent: 前往 agent…
   next_agent: 下一个要处理的 agent
@@ -325,6 +326,8 @@ tooltip:
   close_search: 关闭搜索
   close_split: 关闭分屏
   restore_split: 还原分屏
+  collapse_split: 折叠分屏
+  expand_split: 展开分屏
 git:
   title: 源代码管理
   refresh: 刷新

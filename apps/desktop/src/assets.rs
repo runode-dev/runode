@@ -22,6 +22,8 @@ icons! {
     /// Git 面板和文件树里展开、收起的箭头。
     pub CHEVRON_RIGHT_ICON = "chevron-right",
     pub CHEVRON_DOWN_ICON = "chevron-down",
+    /// 收在终端区底部的分屏上展开它的箭头。
+    pub CHEVRON_UP_ICON = "chevron-up",
     /// 文件树搜索框前面的图标。
     pub FILTER_ICON = "filter",
     /// 文件树「更多」菜单里用 VS Code 打开的图标。

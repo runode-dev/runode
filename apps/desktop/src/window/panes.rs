@@ -21,7 +21,7 @@ use runode_shared_types::{
 
 use super::{
     AGENT_MARK_WIDTH, CARD_GAP, ClosePane, DIVIDER_GRAB_WIDTH, Divider, NewSplitDown, NewSplitRight, NewTab,
-    PANE_HEADER_HEIGHT, PressDown, TogglePaneZoom, WindowView,
+    PANE_HEADER_HEIGHT, PressDown, TogglePaneFold, TogglePaneZoom, WindowView,
     agents::logo::agent_logo,
     card, cards,
     files::DraggedFile,
@@ -30,7 +30,10 @@ use super::{
     titlebar::{icon_toggle, pane_label, styled_agent_mark},
 };
 use crate::{
-    assets::{CLOSE_ICON, MAXIMIZE_ICON, MINIMIZE_ICON, SPLIT_DOWN_ICON, SPLIT_RIGHT_ICON, TERMINAL_ICON},
+    assets::{
+        CHEVRON_UP_ICON, CLOSE_ICON, MAXIMIZE_ICON, MINIMIZE_ICON, MINUS_ICON, SPLIT_DOWN_ICON, SPLIT_RIGHT_ICON,
+        TERMINAL_ICON,
+    },
     ui::{
         hsla,
         tooltip::{shortcut_text, tooltip},
@@ -41,6 +44,8 @@ use crate::{
 const UNFOCUSED_DIM: f32 = 0.3;
 /// 卡片样式下分屏比这窄时标题条上不放按钮，标题留着位置；分屏、放大和关闭照样能用快捷键和菜单。
 const PANE_BUTTONS_MIN_WIDTH: f32 = 240.;
+/// 终端区底部每个折叠的分屏最宽这么宽，靠左排；多了平分。
+const FOLDED_MAX_WIDTH: f32 = 320.;
 /// 驱动标记从最近一次操作起显示这么久，之后自己消失。
 const DRIVER_SHOWN_MS: u64 = 10_000;
 
@@ -82,6 +87,17 @@ fn driver_text(name: Option<&str>, action: DriveAction, locale: &str) -> String 
 }
 
 impl Tab {
+    /// 这个分屏折叠着：用户折叠过，又不是当前分屏。切到它时（比如按方向键过去）照样展开着画，
+    /// 所以标签里总有一个分屏是展开的。
+    fn folded(&self, id: EntityId) -> bool {
+        self.collapsed.contains(&id) && id != self.focused
+    }
+
+    /// 折叠这个分屏时接替它的分屏：标签里另一个展开着的；没有时不能折叠。
+    fn fold_successor(&self, id: EntityId) -> Option<EntityId> {
+        self.root.leaves().into_iter().find(|other| *other != id && !self.folded(*other))
+    }
+
     /// 这个标签里有分屏正被别的终端里的程序操作着（驱动标记还没消失）。
     pub(super) fn driven(&self, now_ms: u64, cx: &App) -> bool {
         self.panes.values().any(|(view, _)| {
@@ -95,6 +111,8 @@ impl WindowView {
     pub(super) fn render_panes(&mut self, fg: Rgb, bg: Rgb, window: &Window, cx: &mut Context<Self>) -> AnyElement {
         let now = now_ms();
         let badges = self.driver_badges(now, window, cx);
+        // 这一帧画出来的分隔线再记下位置；不在画面上的（比如折叠时拿掉的）查不到，按键调大小时就跳过它。
+        self.layout.borrow_mut().splits.clear();
         self.schedule_driver_redraw(now, cx);
         let Some(tab) = self.tab() else {
             return self.render_empty_tab(fg, bg, cx);
@@ -102,7 +120,37 @@ impl WindowView {
         if tab.zoomed || tab.root.is_leaf() {
             return self.render_leaf(tab, tab.focused, &badges, fg, bg, window, cx);
         }
-        self.render_node(tab, &tab.root, &badges, fg, bg, window, cx)
+        let folded: Vec<EntityId> =
+            if cards(cx) { tab.root.leaves().into_iter().filter(|id| tab.folded(*id)).collect() } else { Vec::new() };
+        if folded.is_empty() {
+            return self.render_node(tab, &tab.root, &badges, fg, bg, window, cx);
+        }
+        // 折叠的分屏从分屏树里拿掉，只剩标题条，在终端区底部排成一行；当前分屏不会折叠，树不会空。
+        // 拿掉的是一份拷贝，原来的树和比例不动，展开后回到原位。
+        let mut root = tab.root.clone();
+        for id in &folded {
+            root.remove(*id);
+        }
+        let bar = folded
+            .into_iter()
+            .map(|id| {
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .max_w(px(FOLDED_MAX_WIDTH))
+                    .h_full()
+                    .child(self.render_leaf(tab, id, &badges, fg, bg, window, cx))
+            })
+            .collect::<Vec<_>>();
+        div()
+            .size_full()
+            .flex()
+            .flex_col()
+            .gap(px(CARD_GAP))
+            .child(div().flex_1().min_h_0().child(self.render_node(tab, &root, &badges, fg, bg, window, cx)))
+            // 卡片的边框各占一像素。
+            .child(div().flex_none().h(px(PANE_HEADER_HEIGHT + 2.)).flex().gap(px(CARD_GAP)).children(bar))
+            .into_any_element()
     }
 
     /// 没有标签的 workspace 的终端区：一句说明和新建标签的按钮。接着窗口自己的焦点，快捷键照常派发。
@@ -294,11 +342,30 @@ impl WindowView {
         if !cards {
             return pane_group(terminal.id(("pane", id))).into_any_element();
         }
+        let group = SharedString::from(format!("pane-{}", id.as_u64()));
+        // 折叠的分屏只画标题条（摆在终端区底部，见 `render_panes`），终端不画；位置照样记下，按方向
+        // 切换时能切过去。
+        if split && tab.folded(id) {
+            let layout = self.layout.clone();
+            return pane_group(card(hsla(fg), hsla(bg)).id(("pane", id)))
+                .aria_expanded(false)
+                .group(group.clone())
+                .relative()
+                .size_full()
+                .overflow_hidden()
+                .child(self.render_pane_header(tab, id, group, fg, bg, cx))
+                .child(
+                    canvas(move |bounds, _, _| _ = layout.borrow_mut().panes.insert(id, bounds), |_, (), _, _| {})
+                        .absolute()
+                        .size_full(),
+                )
+                .into_any_element();
+        }
         // 卡片：上面是标题条，下面是终端。终端四周留一点，它的方角落在卡片的圆角里面。终端用四边
         // 定位撑满标题条下面的部分：百分比的高度在这里会按整张卡片算，比剩下的高出一个标题条。
-        let group = SharedString::from(format!("pane-{}", id.as_u64()));
         let inset = px(4.);
         pane_group(card(hsla(fg), hsla(bg)).id(("pane", id)))
+            .when(split, |el| el.aria_expanded(true))
             .group(group.clone())
             .size_full()
             .flex()
@@ -350,15 +417,44 @@ impl WindowView {
                 .into_any_element(),
         };
         type Handler = fn(&mut WindowView, EntityId, &mut Window, &mut Context<WindowView>);
-        let mut button =
-            |key: &'static str, icon: &'static str, text: Cow<'static, str>, action: &dyn Action, handler: Handler| {
-                icon_toggle(key, icon, 13., false, fg, bg)
-                    .aria_label(text.clone())
-                    .flex_none()
-                    .size(px(22.))
-                    .tooltip(tooltip(text, Some(action), fg, bg))
-                    .on_press_down(cx, move |this, window, cx| handler(this, id, window, cx))
-            };
+        let mut button = |key: &'static str,
+                          icon: &'static str,
+                          text: Cow<'static, str>,
+                          action: Option<&dyn Action>,
+                          handler: Handler| {
+            icon_toggle(key, icon, 13., false, fg, bg)
+                .aria_label(text.clone())
+                .flex_none()
+                .size(px(22.))
+                .tooltip(tooltip(text, action, fg, bg))
+                .on_press_down(cx, move |this, window, cx| handler(this, id, window, cx))
+        };
+        let folded = split && tab.folded(id);
+        let hover_bg = hsla(bg.mix(fg, 0.06));
+        // 展开和点标题条一样：`focus_pane_from_header` 先把它展开。
+        let fold = if folded {
+            Some(button(
+                "pane-fold",
+                CHEVRON_UP_ICON,
+                rust_i18n::t!("tooltip.expand_split"),
+                None,
+                |this, id, window, cx| {
+                    this.focus_pane_from_header(id, window, cx);
+                },
+            ))
+        } else if split && !tab.zoomed && tab.fold_successor(id).is_some() {
+            Some(button(
+                "pane-fold",
+                MINUS_ICON,
+                rust_i18n::t!("tooltip.collapse_split"),
+                Some(&TogglePaneFold),
+                |this, id, window, cx| {
+                    this.fold_pane(id, window, cx);
+                },
+            ))
+        } else {
+            None
+        };
         let (zoom_icon, zoom_text) = if tab.zoomed {
             (MINIMIZE_ICON, rust_i18n::t!("tooltip.restore_split"))
         } else {
@@ -368,43 +464,56 @@ impl WindowView {
             .flex_none()
             .flex()
             .gap(px(2.))
-            .child(button(
-                "pane-split-right",
-                SPLIT_RIGHT_ICON,
-                rust_i18n::t!("menu.split_right"),
-                &NewSplitRight,
-                |this, id, window, cx| {
-                    this.focus_pane_from_header(id, window, cx);
-                    this.new_split_right(&NewSplitRight, window, cx);
-                },
-            ))
-            .child(button(
-                "pane-split-down",
-                SPLIT_DOWN_ICON,
-                rust_i18n::t!("menu.split_down"),
-                &NewSplitDown,
-                |this, id, window, cx| {
-                    this.focus_pane_from_header(id, window, cx);
-                    this.new_split_down(&NewSplitDown, window, cx);
-                },
-            ))
-            .when(split, |buttons| {
-                buttons.child(button("pane-zoom", zoom_icon, zoom_text, &TogglePaneZoom, |this, id, window, cx| {
-                    this.focus_pane_from_header(id, window, cx);
-                    this.toggle_pane_zoom(&TogglePaneZoom, window, cx);
-                }))
+            // 折叠的分屏只有展开和关闭两个按钮，一直显示，窄了也不收。
+            .when(!folded, |buttons| {
+                buttons
+                    .child(button(
+                        "pane-split-right",
+                        SPLIT_RIGHT_ICON,
+                        rust_i18n::t!("menu.split_right"),
+                        Some(&NewSplitRight),
+                        |this, id, window, cx| {
+                            this.focus_pane_from_header(id, window, cx);
+                            this.new_split_right(&NewSplitRight, window, cx);
+                        },
+                    ))
+                    .child(button(
+                        "pane-split-down",
+                        SPLIT_DOWN_ICON,
+                        rust_i18n::t!("menu.split_down"),
+                        Some(&NewSplitDown),
+                        |this, id, window, cx| {
+                            this.focus_pane_from_header(id, window, cx);
+                            this.new_split_down(&NewSplitDown, window, cx);
+                        },
+                    ))
+            })
+            .children(fold)
+            .when(split && !folded, |buttons| {
+                buttons.child(button(
+                    "pane-zoom",
+                    zoom_icon,
+                    zoom_text,
+                    Some(&TogglePaneZoom),
+                    |this, id, window, cx| {
+                        this.focus_pane_from_header(id, window, cx);
+                        this.toggle_pane_zoom(&TogglePaneZoom, window, cx);
+                    },
+                ))
             })
             .child(button(
                 "pane-close",
                 CLOSE_ICON,
                 rust_i18n::t!("tooltip.close_split"),
-                &ClosePane,
+                Some(&ClosePane),
                 |this, id, window, cx| {
                     this.confirm_close_pane(id, window, cx);
                 },
             ))
             // 不能用 display 切换，见 `render_tab` 里关闭按钮的说明。
-            .when(!(current && split), |buttons| buttons.invisible().group_hover(group, |buttons| buttons.visible()));
+            .when(!(current && split) && !folded, |buttons| {
+                buttons.invisible().group_hover(group, |buttons| buttons.visible())
+            });
         div()
             .id(("pane-header", id))
             .flex_none()
@@ -419,10 +528,16 @@ impl WindowView {
             .text_color(fg_hsla.opacity(if current || !split { 0.9 } else { 0.55 }))
             .child(icon)
             .child(div().flex_shrink_0().max_w(relative(0.6)).truncate().child(name))
-            .children(dir.map(|dir| div().min_w_0().truncate().text_color(fg_hsla.opacity(0.45)).child(dir)))
+            // 折叠的分屏地方小，只写标题。
+            .children(
+                dir.filter(|_| !folded)
+                    .map(|dir| div().min_w_0().truncate().text_color(fg_hsla.opacity(0.45)).child(dir)),
+            )
             .children(trailing_mark.map(|mark| styled_agent_mark(mark, ("pane-agent", id), fg_hsla, true)))
             .child(div().flex_1())
-            .children((!narrow).then_some(buttons))
+            .children((!narrow || folded).then_some(buttons))
+            // 折叠的分屏整条都能点，点了展开。
+            .when(folded, |header| header.cursor_pointer().hover(|header| header.bg(hover_bg)))
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |this, event: &MouseDownEvent, window, cx| {
@@ -435,12 +550,50 @@ impl WindowView {
             )
     }
 
-    /// 在分屏的标题条上点了一下：切到这个分屏。已经是当前分屏时不动，放大着也不还原。
+    /// 在分屏的标题条上点了一下：切到这个分屏，折叠着的展开。已经是当前分屏时不动，放大着也不还原。
     fn focus_pane_from_header(&mut self, id: EntityId, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(tab) = self.tab_mut()
+            && tab.collapsed.remove(&id)
+        {
+            self.save(cx);
+        }
         if self.tab().is_some_and(|tab| tab.focused == id) {
             window.focus(&self.focus_handle(cx), cx);
         } else {
             self.focus_pane_in_active_tab(id, window, cx);
+        }
+    }
+
+    /// 把分屏折叠成只剩标题条，收到终端区底部，空出的地方让给别的分屏。折叠的是当前分屏时焦点交给别的
+    /// 展开着的分屏。
+    fn fold_pane(&mut self, id: EntityId, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(tab) = self.tab_mut() else {
+            return;
+        };
+        let Some(next) = tab.fold_successor(id) else {
+            return;
+        };
+        tab.collapsed.insert(id);
+        if tab.focused == id {
+            self.focus_pane_in_active_tab(next, window, cx);
+        } else {
+            self.save(cx);
+            cx.notify();
+        }
+    }
+
+    /// 快捷键和菜单：折叠当前分屏；切过去看的折叠分屏（见 `Tab::folded`）就地展开。经典样式没有
+    /// 标题条可收，放大着时别的分屏都看不见，都不办。
+    pub(super) fn toggle_pane_fold(&mut self, _: &TogglePaneFold, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(tab) = self.tab_mut() else {
+            return;
+        };
+        let id = tab.focused;
+        if tab.collapsed.remove(&id) {
+            self.save(cx);
+            cx.notify();
+        } else if cards(cx) && !tab.zoomed {
+            self.fold_pane(id, window, cx);
         }
     }
 

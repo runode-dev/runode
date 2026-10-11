@@ -43,6 +43,8 @@ pub enum Action {
     ResizeSplit(Direction),
     EqualizeSplits,
     ToggleSplitZoom,
+    /// 把当前分屏收到终端区底部，只剩标题条；已经折叠过的展开。
+    ToggleSplitFold,
     /// 在当前分屏旁边一次开出几个新终端，先选方向和个数。
     ArrangeSplits,
     NewWorkspace,
@@ -207,6 +209,7 @@ pub static ACTIONS: &[ActionSpec] = &[
     },
     plain!("equalize_splits", Action::EqualizeSplits),
     plain!("toggle_split_zoom", Action::ToggleSplitZoom),
+    plain!("toggle_split_fold", Action::ToggleSplitFold),
     plain!("arrange_splits", Action::ArrangeSplits),
     plain!("new_workspace", Action::NewWorkspace),
     plain!("close_workspace", Action::CloseWorkspace),
@@ -345,6 +348,7 @@ pub static DEFAULTS: &[&str] = &[
     "ctrl+cmd+down=resize_split:down",
     "ctrl+cmd+equal=equalize_splits",
     "cmd+shift+enter=toggle_split_zoom",
+    "ctrl+cmd+minus=toggle_split_fold",
     "cmd+shift+l=arrange_splits",
     "cmd+shift+n=new_workspace",
     "ctrl+cmd+]=next_workspace",

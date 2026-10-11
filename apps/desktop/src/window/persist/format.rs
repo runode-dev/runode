@@ -151,6 +151,9 @@ pub struct SavedTab {
     pub focused: usize,
     #[serde(default)]
     pub zoomed: bool,
+    /// 折叠成只剩标题条的终端在叶子顺序里的位置。
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub collapsed: Vec<usize>,
 }
 
 /// 分屏树，结构和 `pane::Node` 一样，叶子记终端所在的目录和宿主里的会话。
@@ -356,6 +359,7 @@ mod tests {
             },
             focused: 2,
             zoomed: false,
+            collapsed: vec![1],
         };
         State::new(vec![SavedWindow {
             bounds: SavedBounds {
@@ -532,7 +536,8 @@ mod tests {
 
     fn window(tabs: Vec<SavedNode>) -> SavedWindow {
         let mut window = state().windows.remove(0);
-        window.workspaces[0].tabs = tabs.into_iter().map(|root| SavedTab { root, focused: 0, zoomed: false }).collect();
+        window.workspaces[0].tabs =
+            tabs.into_iter().map(|root| SavedTab { root, focused: 0, zoomed: false, collapsed: Vec::new() }).collect();
         window
     }
 

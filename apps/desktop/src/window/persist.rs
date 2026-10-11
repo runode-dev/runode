@@ -313,12 +313,14 @@ impl WindowView {
                 };
                 let leaves = root.leaves();
                 let focused = leaves.get(saved_tab.focused).copied().unwrap_or(leaves[0]);
+                let collapsed = saved_tab.collapsed.iter().filter_map(|ix| leaves.get(*ix).copied()).collect();
                 if ti <= saved_workspace.active {
                     active_tab = tabs.len();
                 }
                 tabs.push(Tab {
                     id: self.next_id(),
                     zoomed: saved_tab.zoomed && !root.is_leaf(),
+                    collapsed,
                     root,
                     panes,
                     focused,
@@ -471,6 +473,14 @@ impl WindowView {
             root: self.save_node(&tab.root, tab, cx),
             focused: tab.root.leaves().iter().position(|id| *id == tab.focused).unwrap_or(0),
             zoomed: tab.zoomed,
+            collapsed: tab
+                .root
+                .leaves()
+                .iter()
+                .enumerate()
+                .filter(|(_, id)| tab.collapsed.contains(id))
+                .map(|(ix, _)| ix)
+                .collect(),
         }
     }
 

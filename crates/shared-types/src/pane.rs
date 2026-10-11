@@ -44,13 +44,13 @@ pub type SplitId = u64;
 /// 两侧都不能比这个比例更窄。
 const MIN_RATIO: f32 = 0.05;
 
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum Node<T> {
     Leaf(T),
     Split(Split<T>),
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Split<T> {
     pub id: SplitId,
     pub axis: Axis,
