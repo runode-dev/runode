@@ -51,6 +51,17 @@ impl Procs {
         Self { procs, children }
     }
 
+    /// `pid` 和它所有的子孙进程。
+    fn subtree(&self, pid: u32) -> Vec<u32> {
+        let mut all = Vec::new();
+        let mut stack = vec![pid];
+        while let Some(pid) = stack.pop() {
+            all.push(pid);
+            stack.extend(self.children.get(&pid).into_iter().flatten().filter(|&&child| child != pid));
+        }
+        all
+    }
+
     /// 只算 `pid` 这一个进程。
     pub(super) fn one(&self, pid: u32) -> Usage {
         self.procs.get(&pid).map_or(Usage::default(), |proc| Usage { cpu: proc.cpu, memory: proc.memory })
@@ -58,13 +69,7 @@ impl Procs {
 
     /// `pid` 和它所有的子孙进程加起来。
     pub(super) fn tree(&self, pid: u32) -> Usage {
-        let mut total = Usage::default();
-        let mut stack = vec![pid];
-        while let Some(pid) = stack.pop() {
-            total = total + self.one(pid);
-            stack.extend(self.children.get(&pid).into_iter().flatten().filter(|&&child| child != pid));
-        }
-        total
+        self.subtree(pid).into_iter().fold(Usage::default(), |total, pid| total + self.one(pid))
     }
 
     /// `roots` 里各个进程连同子孙加起来；一个进程在另一个的子孙里时只算一次。
@@ -95,6 +100,13 @@ impl Procs {
     }
 }
 
+/// 子孙关系由 `procs` 决定，`children` 里的顺序随 `HashMap` 的遍历而变，不比。
+impl PartialEq for Procs {
+    fn eq(&self, other: &Self) -> bool {
+        self.procs == other.procs
+    }
+}
+
 /// 一个在监听的 TCP 端口，和监听它的进程。
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct Port {
@@ -103,16 +115,18 @@ pub(super) struct Port {
     pub command: String,
 }
 
-/// 现在的进程表；`ps` 跑不了时是空的。
-pub(super) fn processes() -> Procs {
+/// 现在的进程表；`ps` 跑不了时是空的。phys_footprint 只问 `roots` 和它们的子孙：状态栏只算这些进程的内存，
+/// 别的进程只用来认父子关系，`ps` 列出的几百个进程挨个问一遍白白耗时。
+pub(super) fn processes(roots: &HashSet<u32>) -> Procs {
     let text = output(Command::new("/bin/ps").args(["-axo", "pid=,ppid=,rss=,%cpu="]), PROBE_TIMEOUT);
-    let mut procs = parse_ps(&text);
-    for (&pid, proc) in &mut procs {
-        if let Some(footprint) = phys_footprint(pid) {
+    let mut procs = Procs::new(parse_ps(&text));
+    let used: HashSet<u32> = roots.iter().flat_map(|&root| procs.subtree(root)).collect();
+    for pid in used {
+        if let (Some(proc), Some(footprint)) = (procs.procs.get_mut(&pid), phys_footprint(pid)) {
             proc.memory = footprint;
         }
     }
-    Procs::new(procs)
+    procs
 }
 
 /// 进程的 phys_footprint，和活动监视器「内存」一栏同一个口径。`ps` 的 rss 把映射进来的可执行文件、

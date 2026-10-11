@@ -10,21 +10,22 @@
 //!
 //! 用户点了「检查更新…」以后，查和下载期间最左边还有一块转着圈的「正在检查更新…」，见 `update::status_label`。
 //!
-//! 数据全 app 一份（`Status`），每 `POLL_INTERVAL` 更新一次：有窗口在前台时现问 `ps` 和 `lsof`，
-//! 状态栏上藏起来的几块用不着的不问；都在后台时只看 agent 在不在干活，好决定挡不挡休眠。终端靠
-//! `SessionMeta::pid`（shell 的进程号）认领它的子孙进程和这些进程监听的端口。
+//! 数据全 app 一份（`Status`），每 `POLL_INTERVAL` 更新一次：有窗口在前台时现问 `ps`，`lsof` 隔
+//! `PORTS_INTERVAL` 才问一次，状态栏没显示、或者上面藏起来的几块用不着的不问；都在后台时只看 agent
+//! 在不在干活，好决定挡不挡休眠。终端靠 `SessionMeta::pid`（shell 的进程号）认领它的子孙进程和这些
+//! 进程监听的端口。
 
 mod probe;
 
 use std::{
     collections::{HashMap, HashSet},
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use gpui::{
     AccessibleAction, Action, Anchor, AnyElement, App, Context, Div, Focusable, FontWeight, Global, Hsla, MouseButton,
-    MouseDownEvent, Pixels, Point, Role, SharedString, Stateful, Window, anchored, deferred, div, point, prelude::*,
-    px, svg,
+    MouseDownEvent, Pixels, Point, Role, SharedString, Stateful, Window, WindowHandle, anchored, deferred, div, point,
+    prelude::*, px, svg,
 };
 use runode_config::StatusItem;
 use runode_shared_types::{
@@ -52,6 +53,8 @@ use probe::{Caffeinate, Port, Procs, Usage};
 
 /// 隔多久重新问一次系统。
 const POLL_INTERVAL: Duration = Duration::from_secs(3);
+/// 隔多久重新问一次在监听的端口：状态栏上只是个小数字，`lsof` 又比 `ps` 慢得多；开着端口浮层时每次都问。
+const PORTS_INTERVAL: Duration = Duration::from_secs(15);
 /// 状态栏的高度。
 pub(super) const STATUS_BAR_HEIGHT: f32 = 26.;
 /// 浮层离状态栏和窗口边留的距离。
@@ -182,22 +185,36 @@ impl Status {
 pub fn watch(cx: &mut App) {
     cx.default_global::<Status>();
     cx.spawn(async move |cx| {
+        let mut ports_probed: Option<Instant> = None;
         loop {
-            // 状态栏上藏起来的几块不问：内存和端口都要进程树（端口靠它认是哪个终端的），端口还要 `lsof`；
-            // 只剩防止休眠时什么都不问，agent 在不在干活从各窗口里看。
-            let (active, procs, ports) = cx.update(|cx| {
-                let hidden = &cx.global::<AppConfig>().0.status_bar_hidden;
-                let ports = !hidden.contains(&StatusItem::Ports);
-                let procs = ports || !hidden.contains(&StatusItem::Resources);
-                (cx.active_window().is_some(), procs, ports)
+            // 状态栏没显示、上面藏起来的几块不问：内存和端口都要进程树（端口靠它认是哪个终端的），端口还要
+            // `lsof`；只剩防止休眠时什么都不问，agent 在不在干活从各窗口里看。
+            let (active, procs, ports, shells) = cx.update(|cx| {
+                let config = &cx.global::<AppConfig>().0;
+                let windows = remote::windows(cx);
+                let ports = config.status_bar && !config.status_bar_hidden.contains(&StatusItem::Ports);
+                let procs = ports || config.status_bar && !config.status_bar_hidden.contains(&StatusItem::Resources);
+                let ports_open = windows.iter().any(|handle| {
+                    handle
+                        .read(cx)
+                        .is_ok_and(|window| matches!(window.status_popover, Some(StatusPopover::Ports { .. })))
+                });
+                let ports =
+                    ports && (ports_open || ports_probed.is_none_or(|probed| probed.elapsed() >= PORTS_INTERVAL));
+                (cx.active_window().is_some(), procs, ports, terminals(&windows, cx).0)
             });
             let probed = if active && procs {
+                if ports {
+                    ports_probed = Some(Instant::now());
+                }
                 Some(
                     cx.background_executor()
                         .spawn(async move {
                             // 等宿主连好要阻塞，放在后台问。
-                            let ports = if ports { probe::listening_ports() } else { Vec::new() };
-                            (probe::processes(), ports, crate::host_client::link().host_pid())
+                            let host = crate::host_client::link().host_pid();
+                            let ports = ports.then(probe::listening_ports);
+                            let roots = shells.into_iter().chain([std::process::id()]).chain(host).collect();
+                            (probe::processes(&roots), ports, host)
                         })
                         .await,
                 )
@@ -211,11 +228,10 @@ pub fn watch(cx: &mut App) {
     .detach();
 }
 
-/// 收下问到的进程和端口，从各窗口里数终端、看 agent，再决定挡不挡休眠，重画各窗口。
-fn tick(probed: Option<(Procs, Vec<Port>, Option<u32>)>, cx: &mut App) {
-    let windows = remote::windows(cx);
+/// 各窗口里终端的 shell 的进程号、终端数，以及有没有 agent 在干活。
+fn terminals(windows: &[WindowHandle<WindowView>], cx: &App) -> (HashSet<u32>, usize, bool) {
     let (mut shells, mut terminals, mut working) = (HashSet::new(), 0, false);
-    for handle in &windows {
+    for handle in windows {
         let Ok(window) = handle.read(cx) else { continue };
         for view in window.terminal_views() {
             let view = view.read(cx);
@@ -225,13 +241,25 @@ fn tick(probed: Option<(Procs, Vec<Port>, Option<u32>)>, cx: &mut App) {
                 view.agent().is_some_and(|agent| agent.kind != AgentKind::Other && agent.state == AgentState::Working);
         }
     }
+    (shells, terminals, working)
+}
+
+/// 收下问到的进程和端口（这次没问端口时为 `None`，沿用上次的），从各窗口里数终端、看 agent，再决定挡不挡
+/// 休眠；状态栏上的东西变了时重画各窗口的状态栏。
+fn tick(probed: Option<(Procs, Option<Vec<Port>>, Option<u32>)>, cx: &mut App) {
+    let windows = remote::windows(cx);
+    let (shells, terminals, working) = terminals(&windows, cx);
     let status = cx.default_global::<Status>();
     let before = (status.terminals, status.caffeinate.is_some());
-    let mut changed = probed.is_some();
+    let mut changed = shells != status.shells;
     if let Some((procs, ports, host)) = probed {
+        changed |= procs != status.procs || host != status.host;
         status.procs = procs;
-        status.ports = ports;
         status.host = host;
+        if let Some(ports) = ports {
+            changed |= ports != status.ports;
+            status.ports = ports;
+        }
     }
     status.shells = shells;
     status.terminals = terminals;
@@ -239,8 +267,13 @@ fn tick(probed: Option<(Procs, Vec<Port>, Option<u32>)>, cx: &mut App) {
     status.apply_sleep();
     changed |= before != (status.terminals, status.caffeinate.is_some());
     if changed {
+        // 只叫状态栏那一块重画（浮层也画在它里面），窗口里别的缓存的几块照搬上一帧。
         for handle in windows {
-            let _ = handle.update(cx, |_, _, cx| cx.notify());
+            let _ = handle.update(cx, |view, _, cx| {
+                if let Some(slots) = &view.slots {
+                    slots.status_bar.update(cx, |_, cx| cx.notify());
+                }
+            });
         }
     }
 }
