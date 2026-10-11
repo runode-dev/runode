@@ -686,7 +686,7 @@ settings:
     shell_integration: Detect picks by the shell's program name. Needed for prompt jumps, command history and suggestions.
     shell_integration_features: "A bar at the prompt, a block in zsh's vi command mode, back to the cursor style while a command runs. Applies to new terminals."
     command_suggestions: Suggests the rest of a command from history in gray; → or End accepts it. Off also stops reading and writing history.
-    command_completions: Tab shows a menu of commands, subcommands, options and arguments. Off always passes Tab to the shell.
+    command_completions: Tab shows a menu of commands, subcommands, options and arguments, unless zsh binds Tab to another completion such as fzf-tab. Off always passes Tab to the shell.
     command_highlighting: Colors commands, options, strings and paths as you type, unless the shell already does.
     clipboard_write: Lets programs in the terminal, such as vim, tmux or a shell over ssh, put text on the clipboard.
     clipboard_read: Lets programs in the terminal read the text you copied, passwords included. Ask shows which program wants it first.

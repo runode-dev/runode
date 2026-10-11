@@ -429,6 +429,17 @@ fn real_zsh_reloads_with_the_integration() {
     ));
 }
 
+/// zsh 报告 Tab 绑的 widget：插件在提示符之间新绑上的，下一个提示符前也报告。
+#[test]
+fn real_zsh_reports_the_tab_widget() {
+    let rc = "PROMPT='[z]%% '\n";
+    let Some(mut shell) = RealShell::start("zsh", "zsh-tab", rc, "[z]%", &["[z]%"]) else { return };
+    shell.wait_for_bytes("the builtin Tab widget", 0, b"\x1b]6973;0123456789abcdef;tab=expand-or-complete\x07");
+    let start = shell.raw.len();
+    shell.run("my-tab() { zle expand-or-complete }; zle -N my-tab; bindkey '^I' my-tab");
+    shell.wait_for_bytes("the new Tab widget", start, b"\x1b]6973;0123456789abcdef;tab=my-tab\x07");
+}
+
 #[test]
 fn real_bash_reloads_with_the_integration() {
     reload_in(RealShell::start(

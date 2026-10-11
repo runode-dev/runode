@@ -94,6 +94,7 @@ _runode_precmd() {
         fi
     fi
     _runode_report_names
+    _runode_report_tab
     # 用户配置自己定义的 zle-line-init、zle-keymap-select 要先定义好，所以等 .zshrc 加载完、第一次
     # 显示提示符时才挂。
     if [[ -n $_runode_cursor && -z $_runode_zle_hooked ]]; then
@@ -145,6 +146,22 @@ _runode_report_names() {
     done
     _runode_urlencode "$lines"
     'builtin' 'print' -rn -- $'\e]6973;'"$_runode_report_token;alias_values=$REPLY"$'\a'
+}
+
+# 把主键位表里 Tab 绑的 widget 报告给 runode：绑的不是 zsh 自带的补全（比如 fzf-tab）时
+# runode 不接管 Tab。读绑定要起子 shell，所以只在 widget 有增减时（插件加载了）重读。
+# shortcut: 不增减 widget 的改绑（disable-fzf-tab 之类）要等下次有 widget 增减才报告，有人用到再每次都读。
+_runode_report_tab() {
+    [[ -n ${_runode_report_token-} ]] || 'builtin' 'return' 0
+    'builtin' 'emulate' -L zsh -o extended_glob
+    'builtin' 'zmodload' -i zsh/zleparameter 2>/dev/null || 'builtin' 'return' 0
+    'builtin' 'local' raw=${(j: :)${(k)widgets}} widget
+    [[ $raw == "${_runode_names_raw[widgets]-}" ]] && 'builtin' 'return'
+    _runode_names_raw[widgets]=$raw
+    widget=${${(z)"$('builtin' 'bindkey' -M main '^I' 2>/dev/null)"}[2]}
+    [[ $widget == "${_runode_names[tab]-}" || $widget != [[:alnum:]._:-]## ]] && 'builtin' 'return'
+    _runode_names[tab]=$widget
+    'builtin' 'print' -rn -- $'\e]6973;'"$_runode_report_token;tab=$widget"$'\a'
 }
 
 # 把 $1 按字节做百分号编码，结果放在 REPLY 里：分号、换行、ESC、BEL 和非 ASCII 字节都不会

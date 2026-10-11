@@ -66,4 +66,24 @@ pub struct ShellNames {
     pub functions: Vec<String>,
     pub builtins: Vec<String>,
     pub keywords: Vec<String>,
+    /// zsh 主键位表里 Tab 绑的 widget；没报告过（bash、fish）时为空。
+    pub tab_widget: String,
+}
+
+impl ShellNames {
+    /// Tab 绑的是 shell 自带的补全（或者没报告过），runode 可以接管；绑了 fzf-tab 这类别的补全时
+    /// 交给它，用户配的界面才出得来。Prezto 默认、Oh My Zsh 开了 `COMPLETION_WAITING_DOTS` 时
+    /// 绑的是包了一层自带补全的 widget，也算自带的。
+    pub fn tab_is_builtin_completion(&self) -> bool {
+        matches!(
+            self.tab_widget.trim_start_matches('.'),
+            "" | "expand-or-complete"
+                | "expand-or-complete-prefix"
+                | "complete-word"
+                | "menu-complete"
+                | "menu-expand-or-complete"
+                | "expand-or-complete-with-indicator"
+                | "expand-or-complete-with-dots"
+        )
+    }
 }

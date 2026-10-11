@@ -165,8 +165,8 @@ impl TerminalView {
         key == "tab" && plain && self.complete_on_tab(cx)
     }
 
-    /// 一次没有菜单时的 Tab：光标在提示符输入里、所在命令有规格、光标不在命令名上时由
-    /// runode 补全，返回 true；否则返回 false，Tab 交给 shell。
+    /// 一次没有菜单时的 Tab：光标在提示符输入里、所在命令有规格、光标不在命令名上，且 shell 的
+    /// Tab 没绑别的补全（fzf-tab 之类）时由 runode 补全，返回 true；否则返回 false，Tab 交给 shell。
     fn complete_on_tab(&mut self, cx: &mut Context<Self>) -> bool {
         // 没在看（重新连上的过程中、和宿主断开了）时也不接管，这个键随之丢掉。
         if !self.config.command_completions
@@ -191,7 +191,7 @@ impl TerminalView {
         self.open_completion(cx)
     }
 
-    /// 按现在屏幕上的输入打开菜单；runode 补不了时返回 false。
+    /// 按现在屏幕上的输入打开菜单；runode 补不了、或者 shell 的 Tab 绑了别的补全时返回 false。
     fn open_completion(&mut self, cx: &mut Context<Self>) -> bool {
         let Some(request) = self.completion_request() else {
             return false;
@@ -199,13 +199,17 @@ impl TerminalView {
         let Some(session) = self.screen.live() else {
             return false;
         };
+        let names = session.shell_names();
+        if !names.tab_is_builtin_completion() {
+            return false;
+        }
         self.completion = Some(CompletionMenu {
             before_word: request.before_word().to_owned(),
             cells_before_cursor: 0,
             cwd: session.cwd(),
             shell: Shell {
                 path: session.shell_path(),
-                names: session.shell_names(),
+                names,
                 usage: completion::usage::current(),
             },
             typed: String::new(),

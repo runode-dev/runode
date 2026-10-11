@@ -61,7 +61,7 @@ config:
   apns_team_id: Apple 开发者账号的 Team ID（10 个字符）。
   apns_bundle_id: 自己编译的手机 App 的 bundle ID；这个 App 的登记用上面的密钥推。
   push_relay_url: 给官方手机 App 发推送的中转服务：https:// 开头的网址。
-  command_completions: 在 shell 提示符上按 Tab 时从菜单里选命令名、子命令、选项或参数（参数只限 Runode 认识的命令），没有可选的时 Tab 照常交给 shell。false 时 Tab 总是交给 shell。
+  command_completions: 在 shell 提示符上按 Tab 时从菜单里选命令名、子命令、选项或参数（参数只限 Runode 认识的命令），没有可选的时、或者 zsh 里 Tab 绑了别的补全（比如 fzf-tab）时，Tab 照常交给 shell。false 时 Tab 总是交给 shell。
   agent_notifications: agent 在你没在看的分屏里等你回答或者干完了时，发系统通知：true、false。只有打包好的 Runode.app 能发通知。
   agent_notifications_exclude: |-
     不发通知也不出提示音的 agent（状态标记照常显示）：用逗号隔开的短名，可以写多行，值为空时清空。

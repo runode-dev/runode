@@ -50,7 +50,8 @@
           ],
           "builtins": [],
           "functions": [],
-          "keywords": []
+          "keywords": [],
+          "tab_widget": ""
         },
         "shell_path": {
           "Unix": [
@@ -635,7 +636,8 @@
           "aliases": [],
           "builtins": [],
           "functions": [],
-          "keywords": []
+          "keywords": [],
+          "tab_widget": ""
         },
         "shell_path": null,
         "title": null
@@ -833,7 +835,8 @@
               ],
               "builtins": [],
               "functions": [],
-              "keywords": []
+              "keywords": [],
+              "tab_widget": ""
             },
             "shell_path": {
               "Unix": [

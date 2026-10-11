@@ -52,7 +52,7 @@ pub(super) struct Effects {
 /// `ESC ] 6973;<口令>;<字段>=<百分号编码的值> BEL`。字段是 `cwd`（shell 的当前目录，每次显示
 /// 提示符前都发）、`path`（PATH）或 `aliases`、
 /// `functions`、`builtins`、`keywords`（名字之间用空格分开）、`alias_values`（一行一个
-/// 「名字<Tab>值」）。另有 `command`：shell 开始运行命令时紧接在 OSC 133;C 前面发，值是命令
+/// 「名字<Tab>值」）、`tab`（zsh 里 Tab 绑的 widget）。另有 `command`：shell 开始运行命令时紧接在 OSC 133;C 前面发，值是命令
 /// 原文（拿不到时为空），见 `Effects::command_report`。
 ///
 /// 记进历史的命令同样只认这条报告，133;C 自带的命令原文一律不用：伪造的命令进了历史，就会被
@@ -116,6 +116,10 @@ impl Effects {
                 .filter_map(|line| line.split_once('\t'))
                 .map(|(n, v)| (n.to_owned(), v.to_owned()))
                 .collect();
+            return;
+        }
+        if field == b"tab" {
+            names.tab_widget = String::from_utf8_lossy(&value).into_owned();
             return;
         }
         let list = match field {
@@ -422,6 +426,15 @@ mod tests {
         session.feed(format!("\x1b]6973;{TOKEN};aliases=ll\x07").as_bytes());
         assert_eq!(session.meta().shell_names.aliases, ["ll"]);
         assert_eq!(names.aliases, ["ll", "gs"]);
+        // Tab 绑的 widget：没报告过时 runode 照常接管，绑了 fzf-tab 时让给它。
+        assert!(names.tab_is_builtin_completion());
+        session.feed(format!("\x1b]6973;{TOKEN};tab=fzf-tab-complete\x07").as_bytes());
+        assert_eq!(session.meta().shell_names.tab_widget, "fzf-tab-complete");
+        assert!(!session.meta().shell_names.tab_is_builtin_completion());
+        session.feed(format!("\x1b]6973;{TOKEN};tab=.expand-or-complete\x07").as_bytes());
+        assert!(session.meta().shell_names.tab_is_builtin_completion());
+        session.feed(format!("\x1b]6973;{TOKEN};tab=expand-or-complete-with-indicator\x07").as_bytes());
+        assert!(session.meta().shell_names.tab_is_builtin_completion());
         assert_eq!(percent_decode(b"a%2fb%zz%4"), b"a/b%zz%4");
     }
 
