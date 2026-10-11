@@ -112,6 +112,8 @@ public final class TerminalModel {
     @ObservationIgnored private var claudeWheel = ClaudeWheelPacer()
     @ObservationIgnored private var claudeWheelAnchor = (column: 0, row: 0)
     @ObservationIgnored private var claudeWheelRetry: Task<Void, Never>?
+    /// 宿主因为积压不接订阅时，过一会儿再连的那次；关页面、断线、重新连时撤掉。
+    @ObservationIgnored private var attachRetry: Task<Void, Never>?
 
     /// `onOpen`、`onClose` 告诉会话列表这个会话正被终端页看着（列表就不再给它发只看状态的 `Attach`，
     /// 免得换掉这里的订阅）；关掉时由列表改回只看状态。`ownerProbeDelay` 是 `ownerHint` 为 `unknown`
@@ -183,6 +185,8 @@ public final class TerminalModel {
     public func close() {
         task?.cancel()
         task = nil
+        attachRetry?.cancel()
+        attachRetry = nil
         onClose(sessionId)
         terminal = nil
         channel = nil
@@ -345,6 +349,8 @@ public final class TerminalModel {
 
     /// `rejoin` 为空时适配手机就带上尺寸，算一次交互；重新连上时一律不带。
     private func attach(_ rejoin: Rejoin? = nil) {
+        attachRetry?.cancel()
+        attachRetry = nil
         awaitingAttach = true
         channel = nil
         self.rejoin = rejoin
@@ -463,6 +469,17 @@ public final class TerminalModel {
                 let wasFitting = fitsPhone
                 autoFit = mine
                 applySizeMode(wasFitting: wasFitting)
+            }
+        case .error(_, _, let message) where awaitingAttach && message.hasPrefix("the connection is backed up"):
+            // 宿主那边这条连接还积压着（多半刚因此发来 `Resync`），不接新的订阅：等它发完再连。
+            let rejoin = rejoin
+            let generation = generation
+            attachRetry?.cancel()
+            attachRetry = Task { [weak self] in
+                try? await Task.sleep(for: .milliseconds(100))
+                guard !Task.isCancelled, let self, self.awaitingAttach, generation != nil, self.generation == generation
+                else { return }
+                self.attach(rejoin)
             }
         case .error(_, _, let message) where awaitingAttach && message.hasPrefix("no session"):
             // 宿主说没有这个会话。同一条连接上会话列表读预览出错（读屏幕超时之类）也回不带编号、带着

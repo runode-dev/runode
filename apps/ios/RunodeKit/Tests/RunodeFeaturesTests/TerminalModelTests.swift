@@ -291,6 +291,17 @@ import Testing
     }
 
     /// 适配着的时候 `Resync`：宿主还记着这条连接要过的尺寸，不带尺寸重新订阅，也不再发 `Focus`。
+    /// `Resync` 后重新连时宿主说这条连接还积压着、不接订阅：过一会儿再连，不停在「连接中」。
+    @Test func resyncRetriesWhileTheConnectionIsBackedUp() async throws {
+        let model = live()
+        model.handle(.message(.resync(id: sessionA, reason: "slow")))
+        link.clearSent()
+        model.handle(.message(.error(req: nil, id: sessionA, message: "the connection is backed up; read first")))
+        #expect(link.sent.isEmpty)
+        try await Task.sleep(for: .milliseconds(300))
+        #expect(link.sent == [.attach(id: sessionA, size: nil, mode: .vtReplay)])
+    }
+
     @Test func resyncWhileFittingDoesNotClaimAgain() {
         let model = followingModel()
         model.setSizePreference(.fitPhone)
