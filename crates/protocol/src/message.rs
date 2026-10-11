@@ -589,6 +589,8 @@ pub enum Placement {
 pub struct SessionInfo {
     pub id: SessionId,
     pub size: GridSize,
+    /// 会话对外公布的状态，只是 `shell_names` 总是空的：列会话的都用不着，要它的从 `Attached`
+    /// 和 `Meta` 拿。
     pub meta: SessionMeta,
     /// 现在连着它的前端有几个。
     #[serde(default)]

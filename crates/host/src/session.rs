@@ -682,11 +682,13 @@ impl Runner {
                 }
             }
             Inbox::Subscribe(subscribe) => self.subscribe(subscribe),
+            // 列会话的（推送每两秒轮询一次、桌面的后台会话列表、命令行、手机）都不读 shell 的
+            // 别名和函数，一个会话可能有几十 KB，不带；要它的界面从 `Attached` 和 `Meta` 拿。
             Inbox::Info(reply) => {
                 let _ = reply.send(SessionInfo {
                     id: self.id,
                     size: self.session.size(),
-                    meta: self.session.meta(),
+                    meta: SessionMeta { shell_names: Arc::default(), ..self.session.meta() },
                     clients: u32::try_from(self.subscribers.len()).unwrap_or(u32::MAX),
                     claimed: self.subscribers.iter().any(|s| s.desktop),
                     exited: self.exited,
