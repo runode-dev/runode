@@ -239,6 +239,58 @@ import Testing
         await link.stop()
     }
 
+    /// 一次读到的帧里，同一通道上连着的输出拼成一帧交出去；控制消息和别的通道把它隔开，先后不变。
+    @Test func mergesConsecutiveOutputFrames() async throws {
+        let link = connection()
+        let transport = FakeTransport()
+        supply.add(transport)
+        var events = await link.events().makeAsyncIterator()
+        await link.start()
+        var host = FakeHost(transport)
+        _ = try await admit(&host)
+        #expect(await waitReady(&events) != nil)
+        func output(_ channel: UInt32, _ text: String) throws -> Data {
+            try Frame(kind: .output, channel: channel, payload: Data(text.utf8)).encoded()
+        }
+        let bell = try Frame(
+            kind: .control, channel: 0, payload: Data(#"{"type":"bell","id":"0123456789abcdef0011223344556677"}"#.utf8)
+        ).encoded()
+        transport.inbound.push(try output(1, "ab") + output(1, "cd") + bell + output(1, "ef") + output(2, "gh"))
+        var seen: [String] = []
+        while seen.count < 4, let event = await events.next() {
+            switch event {
+            case .frame(let frame, _): seen.append("\(frame.channel):\(String(decoding: frame.payload, as: UTF8.self))")
+            case .message(.bell): seen.append("bell")
+            default: break
+            }
+        }
+        #expect(seen == ["1:abcd", "bell", "1:ef", "2:gh"])
+        await link.stop()
+    }
+
+    /// 订阅者不取输出、积压过了上限时不再往下读，积压留在网络和宿主那边；取走以后接着读，一帧不丢。
+    @Test func stopsReadingWhileASubscriberFallsBehind() async throws {
+        let link = connection()
+        let transport = FakeTransport()
+        supply.add(transport)
+        var events = await link.events().makeAsyncIterator()
+        await link.start()
+        var host = FakeHost(transport)
+        _ = try await admit(&host)
+        #expect(await waitReady(&events) != nil)
+        let chunk = try Frame(kind: .output, channel: 1, payload: Data(count: 64 << 10)).encoded()
+        for _ in 0..<16 { transport.inbound.push(chunk) }
+        try await Task.sleep(for: .milliseconds(200))
+        #expect(transport.inbound.pending > 8)
+        var frames = 0
+        while frames < 16, let event = await events.next() {
+            if case .frame = event { frames += 1 }
+        }
+        #expect(frames == 16)
+        #expect(transport.inbound.pending == 0)
+        await link.stop()
+    }
+
     @Test func missingKeyIsFatal() async throws {
         try keys.deleteKey(for: machine.id)
         let link = connection()

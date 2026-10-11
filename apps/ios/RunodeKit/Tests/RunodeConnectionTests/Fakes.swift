@@ -27,6 +27,11 @@ final class ChunkQueue: Sendable {
         waiter?.resume(returning: data)
     }
 
+    /// 推进来、还没被取走的块数。
+    var pending: Int {
+        state.withLock { $0.chunks.count }
+    }
+
     func close() {
         let waiter = state.withLock { state -> CheckedContinuation<Data?, Never>? in
             state.closed = true

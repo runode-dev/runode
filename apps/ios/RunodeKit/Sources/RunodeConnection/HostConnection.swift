@@ -1,5 +1,6 @@
 import Foundation
 import RunodeProtocol
+import Synchronization
 
 /// 断线重连等多久：第 n 次连续失败后等 `base * 2^(n-1)`，最多 `maximum`。
 public struct ReconnectPolicy: Hashable, Sendable {
@@ -29,12 +30,14 @@ public actor HostConnection: HostLink {
     private let policy: ReconnectPolicy
     private let open: TransportOpener
 
-    private var subscribers: [Int: AsyncStream<HostEvent>.Continuation] = [:]
+    private var subscribers: [Int: Subscriber] = [:]
     private var nextSubscriber = 0
     private var state: LinkState = .idle
     /// 门禁和握手都过了的连接；没连上时为空，排着的消息就丢掉。
     private var transport: (any FrameTransport)?
     private var generation: UInt64 = 0
+    /// 一个订阅者转出去、还没取走的输出和快照最多这么多字节，再多就先不读，见 `readUntilClosed`。
+    private static let backlogLimit = 256 << 10
     /// 上层要不要连接：`start` 置真，`stop` 和不能重试的失败置假。
     private var wanted = false
     private var runTask: Task<Void, Never>?
@@ -70,18 +73,20 @@ public actor HostConnection: HostLink {
 
     deinit {
         outbox.finish()
-        for continuation in subscribers.values {
-            continuation.finish()
+        for subscriber in subscribers.values {
+            subscriber.continuation.finish()
         }
     }
 
     // MARK: HostLink
 
+    /// 给出去的流在订阅者取走一帧输出时从它的 `Backlog` 里减掉，读的一方据此知道它积压了多少。
     public func events() -> AsyncStream<HostEvent> {
-        let (stream, continuation) = AsyncStream.makeStream(of: HostEvent.self)
+        let (inner, continuation) = AsyncStream.makeStream(of: HostEvent.self)
         let id = nextSubscriber
         nextSubscriber += 1
-        subscribers[id] = continuation
+        let backlog = Backlog()
+        subscribers[id] = Subscriber(continuation: continuation, backlog: backlog)
         continuation.onTermination = { [weak self] _ in
             Task { await self?.unsubscribe(id) }
         }
@@ -89,7 +94,16 @@ public actor HostConnection: HostLink {
         if transport != nil {
             continuation.yield(.ready(generation: generation))
         }
-        return stream
+        let source = EventSource(inner.makeAsyncIterator())
+        return AsyncStream {
+            let event = await source.next()
+            if case .frame(let frame, _)? = event {
+                backlog.bytes.withLock { $0 -= frame.payload.count }
+            }
+            return event
+        } onCancel: { [weak self] in
+            Task { await self?.unsubscribe(id) }
+        }
     }
 
     public nonisolated func send(_ message: ClientMsg) {
@@ -157,8 +171,10 @@ public actor HostConnection: HostLink {
     }
 
     private func broadcast(_ event: HostEvent) {
-        for continuation in subscribers.values {
-            continuation.yield(event)
+        let bytes = if case .frame(let frame, _) = event { frame.payload.count } else { 0 }
+        for subscriber in subscribers.values {
+            if bytes > 0 { subscriber.backlog.bytes.withLock { $0 += bytes } }
+            subscriber.continuation.yield(event)
         }
     }
 
@@ -307,15 +323,38 @@ public actor HostConnection: HostLink {
     }
 
     /// 读到连接断开，返回断开的原因。
+    ///
+    /// 订阅者的事件流不限长，读多少就攒多少：手机喂 VT 跟不上时输出全堆在内存里，画面越落越后，宿主
+    /// 那边却看不到积压，不会让会话改发 `Resync`。所以有订阅者积压过了 `backlogLimit` 时先不读，等它
+    /// 取走，积压留在 TCP 和宿主那边。
+    ///
+    /// 刷屏时宿主转来的输出帧很碎（一帧常常只有一两行），订阅者每取一帧都有固定开销；所以一次读到的
+    /// 帧里，同一通道上连着的输出（或快照）先拼成一帧再交出去。
     private func readUntilClosed(_ transport: any FrameTransport, decoder: FrameDecoder) async -> String {
         var decoder = decoder
         var goodbye: GoodbyeReason?
         do {
             while true {
+                var held: Frame?
                 while let frame = try decoder.next() {
-                    if case .goodbye(let reason)? = handle(frame) {
+                    if frame.kind != .control, frame.kind == held?.kind, frame.channel == held?.channel {
+                        held?.payload.append(frame.payload)
+                        continue
+                    }
+                    if let previous = held { handle(previous) }
+                    held = nil
+                    if frame.kind == .output || frame.kind == .snapshot {
+                        held = frame
+                    } else if case .goodbye(let reason)? = handle(frame) {
                         goodbye = reason
                     }
+                }
+                if let previous = held { handle(previous) }
+                // shortcut: 积压时每 5 毫秒看一次，不等订阅者通知；积压本来就要几十毫秒才消化得掉。
+                while subscribers.values.contains(where: { $0.backlog.bytes.withLock { $0 } > Self.backlogLimit }),
+                    !Task.isCancelled
+                {
+                    try? await Task.sleep(for: .milliseconds(5))
                 }
                 guard let chunk = try await transport.receive() else {
                     try decoder.finish()
@@ -366,5 +405,28 @@ public actor HostConnection: HostLink {
         }
         guard let bytes = try? frame.encoded() else { return }
         transport.send(bytes)
+    }
+}
+
+/// 一个订阅者转出去、还没取走的输出和快照字节数。
+private final class Backlog: Sendable {
+    let bytes = Mutex(0)
+}
+
+private struct Subscriber {
+    let continuation: AsyncStream<HostEvent>.Continuation
+    let backlog: Backlog
+}
+
+/// `events` 给出去的流从里层的流取事件：只有订阅者那一个消费方按先后调 `next`，不会同时取。
+private final class EventSource: @unchecked Sendable {
+    private var iterator: AsyncStream<HostEvent>.Iterator
+
+    init(_ iterator: AsyncStream<HostEvent>.Iterator) {
+        self.iterator = iterator
+    }
+
+    func next() async -> HostEvent? {
+        await iterator.next()
     }
 }
