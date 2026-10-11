@@ -8,9 +8,11 @@ use std::{
     path::Path,
     str::FromStr as _,
     sync::{
-        OnceLock,
+        Arc, Mutex, PoisonError,
         atomic::{AtomicBool, Ordering},
     },
+    thread,
+    time::{Duration, Instant},
 };
 
 use syntect::{
@@ -125,10 +127,55 @@ fn theme() -> Theme {
     }
 }
 
-/// 语法定义和配色表，第一次用时加载，几十毫秒，所以只在后台线程里用。
-fn assets() -> &'static (SyntaxSet, Theme) {
-    static ASSETS: OnceLock<(SyntaxSet, Theme)> = OnceLock::new();
-    ASSETS.get_or_init(|| (two_face::syntax::extra_newlines(), theme()))
+/// 语法定义和配色表。
+type Assets = (SyntaxSet, Theme);
+
+/// 加载好的 `Assets` 和最后一次取用的时间，为空时下次用到再加载。
+type Slot = Mutex<Option<(Arc<Assets>, Instant)>>;
+
+/// 这么久没人用就丢掉 `Assets`：每种语言第一次高亮时编译的正则都挂在 `SyntaxSet` 里，看过十几种
+/// 语言能占两百多 MB，丢掉后重新加载只要几毫秒，重新编译某种语言的正则在后台线程里也只要零点几秒。
+const IDLE: Duration = Duration::from_secs(60);
+
+static ASSETS: Slot = Mutex::new(None);
+
+/// 取 `Assets`，没加载时加载（几毫秒，所以只在后台线程里用）。加载时另起一个线程，空闲 `IDLE`
+/// 后丢掉它、跟着退出，不常驻。
+fn assets() -> Arc<Assets> {
+    let (assets, loaded) = acquire(&ASSETS);
+    if loaded {
+        thread::spawn(|| {
+            while let Some(wait) = release_if_idle(&ASSETS, IDLE) {
+                thread::sleep(wait);
+            }
+        });
+    }
+    assets
+}
+
+/// 取 `slot` 里的 `Assets` 并记下取用时间；第二项表示是这次新加载的。
+fn acquire(slot: &Slot) -> (Arc<Assets>, bool) {
+    let mut slot = slot.lock().unwrap_or_else(PoisonError::into_inner);
+    let loaded = slot.is_none();
+    let (assets, used) =
+        slot.get_or_insert_with(|| (Arc::new((two_face::syntax::extra_newlines(), theme())), Instant::now()));
+    *used = Instant::now();
+    (assets.clone(), loaded)
+}
+
+/// 空闲了 `idle` 且没人拿着时丢掉 `slot` 里的 `Assets`，返回空；否则返回还要再等多久。
+fn release_if_idle(slot: &Slot, idle: Duration) -> Option<Duration> {
+    let mut slot = slot.lock().unwrap_or_else(PoisonError::into_inner);
+    let (assets, used) = slot.as_ref()?;
+    if Arc::strong_count(assets) > 1 {
+        return Some(idle);
+    }
+    let left = idle.saturating_sub(used.elapsed());
+    if left.is_zero() {
+        *slot = None;
+        return None;
+    }
+    Some(left)
 }
 
 /// 先按完整文件名（`Dockerfile`、`Makefile` 这类），再按扩展名，最后按第一行（`#!` 之类）找语言。
@@ -148,18 +195,24 @@ fn find_syntax<'a>(set: &'a SyntaxSet, path: &Path, first_line: &str) -> Option<
 /// 按文件开头的状态重新高亮，所以长行后面的行照样有颜色，只是跨行的结构（比如多行注释）
 /// 可能断开。
 pub fn highlight(path: &Path, lines: &[String], cancel: &AtomicBool) -> Option<Vec<Vec<Span>>> {
-    let syntax = find_syntax(&assets().0, path, lines.first().map_or("", String::as_str))?;
-    highlight_with(syntax, lines, cancel)
+    let assets = assets();
+    let syntax = find_syntax(&assets.0, path, lines.first().map_or("", String::as_str))?;
+    highlight_with(&assets, syntax, lines, cancel)
 }
 
 /// 和 `highlight` 一样逐行高亮，语言按 Markdown 代码块标的名字（`rust`、`js` 这类语言名或扩展名）找。
 pub(crate) fn highlight_code(lang: &str, lines: &[String], cancel: &AtomicBool) -> Option<Vec<Vec<Span>>> {
-    let syntax = assets().0.find_syntax_by_token(lang).filter(|syntax| syntax.name != "Plain Text")?;
-    highlight_with(syntax, lines, cancel)
+    let assets = assets();
+    let syntax = assets.0.find_syntax_by_token(lang).filter(|syntax| syntax.name != "Plain Text")?;
+    highlight_with(&assets, syntax, lines, cancel)
 }
 
-fn highlight_with(syntax: &SyntaxReference, lines: &[String], cancel: &AtomicBool) -> Option<Vec<Vec<Span>>> {
-    let (set, theme) = assets();
+fn highlight_with(
+    (set, theme): &Assets,
+    syntax: &SyntaxReference,
+    lines: &[String],
+    cancel: &AtomicBool,
+) -> Option<Vec<Vec<Span>>> {
     let mut highlighter = HighlightLines::new(syntax, theme);
     let mut result = Vec::with_capacity(lines.len());
     let mut buffer = String::new();
@@ -260,6 +313,22 @@ mod tests {
 语法集里的路径，再附上许可全文。这份文件由 runode-preview 的测试 syntax_licenses_are_listed
 生成并核对。
 ";
+
+    #[test]
+    fn idle_assets_are_dropped_and_reloaded() {
+        let slot = Slot::new(None);
+        let (first, loaded) = acquire(&slot);
+        assert!(loaded);
+        let (again, loaded) = acquire(&slot);
+        assert!(!loaded && Arc::ptr_eq(&first, &again));
+        // 还有人拿着时不丢，没空闲够也不丢。
+        assert!(release_if_idle(&slot, Duration::ZERO).is_some());
+        drop((first, again));
+        assert!(release_if_idle(&slot, Duration::from_secs(60)).is_some());
+        assert!(release_if_idle(&slot, Duration::ZERO).is_none());
+        assert!(slot.lock().unwrap().is_none());
+        assert!(acquire(&slot).1);
+    }
 
     #[test]
     fn skips_very_long_lines_and_goes_on() {
