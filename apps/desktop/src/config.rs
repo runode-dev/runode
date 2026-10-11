@@ -8,7 +8,9 @@ use std::{
     time::{Duration, SystemTime},
 };
 
+use futures::StreamExt as _;
 use gpui::{App, Global, WindowAppearance};
+use notify::Watcher as _;
 use runode_config::{Config, ConfigFile};
 
 /// 当前生效的配置。视图通过 `observe_global` 在重载后重新应用。
@@ -16,8 +18,10 @@ pub struct AppConfig(pub Arc<Config>);
 
 impl Global for AppConfig {}
 
-/// 两次检查配置文件是否变化的间隔。
+/// 盯不了目录时，退回隔这么久比一次配置文件的修改时间。
 const WATCH_INTERVAL: Duration = Duration::from_secs(1);
+/// 目录里有动静后先等这么久再比。
+const WATCH_DEBOUNCE: Duration = Duration::from_millis(100);
 
 /// 加载配置并开始监视配置文件，保存后自动重载。启动时后台线程已经读过一遍（见
 /// `host_client::take_config`），拿它对得上系统外观时直接用，不再读。
@@ -38,18 +42,122 @@ pub fn install(cx: &mut App) {
     {
         tracing::warn!("failed to create {}: {err}", path.display());
     }
+    let (changed, mut events) = futures::channel::mpsc::unbounded::<()>();
+    let mut files = {
+        let changed = changed.clone();
+        FileWatch::new(move || {
+            changed.unbounded_send(()).ok();
+        })
+    }
+    .inspect_err(|err| tracing::warn!("cannot watch the config files, checking them every second: {err}"))
+    .ok();
+    if files.is_some() {
+        // 第一轮挑出要盯的目录；之后每次重载都再挑一遍，新配置可能多了文件（比如换了主题）。
+        changed.unbounded_send(()).ok();
+        cx.observe_global::<AppConfig>(move |_| {
+            changed.unbounded_send(()).ok();
+        })
+        .detach();
+    }
     cx.spawn(async move |cx| {
         loop {
-            cx.background_executor().timer(WATCH_INTERVAL).await;
+            if files.is_some() {
+                if events.next().await.is_none() {
+                    return;
+                }
+                // 保存一次常连着来几个事件，攒一下再比，也免得读到写了一半的文件。
+                cx.background_executor().timer(WATCH_DEBOUNCE).await;
+                while events.try_recv().is_ok() {}
+            } else {
+                cx.background_executor().timer(WATCH_INTERVAL).await;
+            }
             cx.update(|cx| {
                 let stamp = watch_stamp(&cx.global::<AppConfig>().0);
                 if cx.try_global::<Seen>().is_some_and(|seen| seen.0 != stamp) {
                     reload(cx);
                 }
+                if let Some(files) = &mut files {
+                    files.follow(&cx.global::<AppConfig>().0.watch_paths());
+                }
             });
         }
     })
     .detach();
+}
+
+/// 盯着一组文件所在的目录，有动静就调 `changed`，由调用方比修改时间看是不是真变了。盯目录不盯文件：
+/// 编辑器保存时常是写好临时文件再改名换上，盯着文件本身会跟丢，文件起初不存在时也盯不了。
+pub(crate) struct FileWatch {
+    watcher: notify::RecommendedWatcher,
+    /// 文件所在的目录还不存在时，只在这几个目录（配置目录、数据目录）里面往上找已有的目录来盯。
+    roots: Vec<PathBuf>,
+    /// 正盯着的目录，都是真实路径。
+    dirs: Vec<PathBuf>,
+}
+
+impl FileWatch {
+    /// 先什么都不盯，由 `follow` 给出要盯的文件。
+    pub(crate) fn new(changed: impl Fn() + Send + 'static) -> notify::Result<Self> {
+        let watcher = notify::recommended_watcher(move |event: notify::Result<notify::Event>| {
+            // 出错（比如事件太多丢了一些）时也叫调用方比一遍。
+            if !event.is_ok_and(|event| event.kind.is_access()) {
+                changed();
+            }
+        })?;
+        let dirs = runode_paths::Dirs::from_env();
+        Ok(Self { watcher, roots: [dirs.config, dirs.data].into_iter().flatten().collect(), dirs: Vec::new() })
+    }
+
+    /// 改成盯着 `paths` 所在的目录（见 `watch_dirs`）。盯不上的下次再试。
+    pub(crate) fn follow(&mut self, paths: &[PathBuf]) {
+        let wanted = watch_dirs(paths, &self.roots);
+        if wanted == self.dirs {
+            return;
+        }
+        for dir in self.dirs.iter().filter(|dir| !wanted.contains(dir)) {
+            let _ = self.watcher.unwatch(dir);
+        }
+        let mut watched = Vec::new();
+        for dir in wanted {
+            let ok = self.dirs.contains(&dir)
+                || self
+                    .watcher
+                    .watch(&dir, notify::RecursiveMode::NonRecursive)
+                    .inspect_err(|err| tracing::warn!("cannot watch {}: {err}", dir.display()))
+                    .is_ok();
+            if ok {
+                watched.push(dir);
+            }
+        }
+        self.dirs = watched;
+    }
+}
+
+/// 盯哪些目录才看得到 `paths` 变了，按真实路径去重：每个文件所在的目录；是符号链接时还有它指向的文件
+/// 所在的目录，改那边的文件时链接所在的目录没有动静。目录还不存在时盯已有的上层，建出来就看得到，但只在
+/// `roots` 里面往上找：家目录、`~/Library/Application Support` 这类地方别的程序一直在写，盯着白白被叫醒。
+///
+/// shortcut: `roots` 外面还不存在的目录（比如还没装 Ghostty 时它在 Application Support 下的目录）建出来时
+/// 看不到，要等盯着的目录里再有动静才补上；真有人抱怨再给这种目录加慢速轮询。
+fn watch_dirs(paths: &[PathBuf], roots: &[PathBuf]) -> Vec<PathBuf> {
+    let mut dirs = Vec::new();
+    for path in paths {
+        let target = std::fs::canonicalize(path).ok();
+        for file in std::iter::once(path).chain(&target) {
+            let Some(parent) = file.parent() else { continue };
+            let existing = parent
+                .ancestors()
+                .find(|dir| dir.is_dir())
+                .filter(|dir| *dir == parent || roots.iter().any(|root| dir.starts_with(root)));
+            if let Some(dir) = existing {
+                let dir = std::fs::canonicalize(dir).unwrap_or_else(|_| dir.to_owned());
+                if !dirs.contains(&dir) {
+                    dirs.push(dir);
+                }
+            }
+        }
+    }
+    dirs
 }
 
 /// 各配置文件和看到的修改时间（不存在时为 `None`），见 `watch_stamp`。
@@ -173,5 +281,58 @@ mod tests {
         assert_eq!(seen_after(&before, &config), before);
         assert_eq!(seen_after(&before[1..], &config)[1..], before[1..]);
         assert_eq!(seen_after(&[], &config), watch_stamp(&config));
+    }
+
+    #[test]
+    fn watch_dirs_cover_symlinks_and_missing_dirs() {
+        let root = std::env::temp_dir().join(format!("rdr-watch-dirs-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        for dir in ["data", "config", "dotfiles"] {
+            std::fs::create_dir_all(root.join(dir)).unwrap();
+        }
+        std::fs::write(root.join("data/config.conf"), "").unwrap();
+        std::fs::write(root.join("dotfiles/ghostty"), "").unwrap();
+        std::os::unix::fs::symlink(root.join("dotfiles/ghostty"), root.join("data/link")).unwrap();
+        let roots = [root.join("config"), root.join("data")];
+        let real = |dir: &str| std::fs::canonicalize(root.join(dir)).unwrap();
+        let dirs = |paths: &[&str]| watch_dirs(&paths.iter().map(|path| root.join(path)).collect::<Vec<_>>(), &roots);
+        // 已有的文件和还没建的文件都盯所在的目录，同一个目录只盯一次。
+        assert_eq!(dirs(&["data/config.conf", "data/new.conf"]), [real("data")]);
+        // 符号链接还要盯它指向的文件所在的目录。
+        assert_eq!(dirs(&["data/link"]), [real("data"), real("dotfiles")]);
+        // 目录还没建时在配置目录里往上找。
+        assert_eq!(dirs(&["config/ghostty/config"]), [real("config")]);
+        // 出了配置和数据目录不往上找。
+        assert_eq!(dirs(&["elsewhere/app/config"]), Vec::<PathBuf>::new());
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// 编辑器写临时文件再改名换上、改符号链接指向的文件，都叫得醒。
+    #[test]
+    fn file_watch_sees_atomic_saves_and_symlink_targets() {
+        let root = std::env::temp_dir().join(format!("rdr-file-watch-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        for dir in ["data", "dotfiles"] {
+            std::fs::create_dir_all(root.join(dir)).unwrap();
+        }
+        std::fs::write(root.join("dotfiles/theme"), "a").unwrap();
+        std::os::unix::fs::symlink(root.join("dotfiles/theme"), root.join("data/theme")).unwrap();
+        let (tx, rx) = std::sync::mpsc::channel();
+        let mut files = FileWatch::new(move || tx.send(()).unwrap()).unwrap();
+        files.follow(&[root.join("data/config.conf"), root.join("data/theme")]);
+        let settle = || {
+            std::thread::sleep(Duration::from_millis(300));
+            while rx.try_recv().is_ok() {}
+        };
+        let woken = || rx.recv_timeout(Duration::from_secs(10)).is_ok();
+        settle();
+        std::fs::write(root.join("data/config.conf.tmp"), "font-size = 14").unwrap();
+        std::fs::rename(root.join("data/config.conf.tmp"), root.join("data/config.conf")).unwrap();
+        assert!(woken());
+        settle();
+        std::fs::write(root.join("dotfiles/theme"), "b").unwrap();
+        assert!(woken());
+        drop(files);
+        std::fs::remove_dir_all(&root).unwrap();
     }
 }
