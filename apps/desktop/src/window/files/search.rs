@@ -3,7 +3,7 @@
 //! 结果可以排成列表，也可以按目录排成树（和 Git 面板共用 `file_tree`），目录能收起。
 //!
 //! 在后台搜：仓库里按名称找的是 `runode_git::list_files` 列出的文件，不在仓库里时从根目录往下走，
-//! 列一次记着，文件树重读过时再列；按内容找调 `runode_git::grep`。按名称找时搜索词全小写就不分大小写；按内容找时可以区分大小写、
+//! 列一次记着，文件树重读过时再列；按内容找调 `runode_git::grep`，等打字停一下再起。按名称找时搜索词全小写就不分大小写；按内容找时可以区分大小写、
 //! 全字匹配、用正则，还能只找或不找某些文件（逗号隔开的 glob，写法和 VS Code 一样）。文件树
 //! 重读过（文件可能变了）、根目录、搜索词、方式或选项变了时重搜。
 
@@ -16,6 +16,7 @@ use std::{
         Arc, OnceLock,
         atomic::{AtomicBool, Ordering},
     },
+    time::Duration,
 };
 
 use gpui::{
@@ -50,6 +51,8 @@ use crate::{
 const MAX_FILES: usize = 500;
 /// 按内容最多列出的行数。
 const MAX_LINES: usize = 2000;
+/// 按内容找时停止打字这么久才搜。
+const CONTENT_DEBOUNCE: Duration = Duration::from_millis(200);
 /// 不在仓库里时从根目录往下最多看这么多个文件，免得在家目录这种地方走个没完。
 const MAX_WALK: usize = 50_000;
 /// 内容结果里命中处前面最多留的字节数，再多就从前面截掉，命中的词才露得出来。
@@ -474,13 +477,22 @@ impl WindowView {
             .names
             .get_or_insert_with(|| Arc::new(NameList { root: key.root.clone(), files: OnceLock::new() }))
             .clone();
-        let job = cx.background_spawn({
-            let key = key.clone();
-            let cancel = cancel.clone();
-            async move { run_search(&key, &names, &cancel) }
-        });
         cx.spawn(async move |this, cx| {
-            let found = job.await;
+            // 按内容找每次都要 git grep 走一遍整个目录，等打字停一下再起；按名称找只在内存里匹配，不用等。
+            if key.mode == SearchMode::Content {
+                cx.background_executor().timer(CONTENT_DEBOUNCE).await;
+                if cancel.load(Ordering::Relaxed) {
+                    return;
+                }
+            }
+            let found = cx
+                .background_executor()
+                .spawn({
+                    let key = key.clone();
+                    let cancel = cancel.clone();
+                    async move { run_search(&key, &names, &cancel) }
+                })
+                .await;
             this.update(cx, |this, cx| {
                 // 搜的时候换了词，结果作废。
                 if cancel.load(Ordering::Relaxed) {
