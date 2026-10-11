@@ -10,8 +10,11 @@ use gpui::{AppContext, Context, SharedString};
 
 use super::super::WindowView;
 
-/// 隔多久重新问一次各 workspace 的分支。
+/// 隔多久重新问一次当前 workspace 的分支。
 const BRANCH_INTERVAL: Duration = Duration::from_secs(5);
+/// 别的 workspace 隔多久问一次：每个都 5 秒起一次 git 太多。切过去以后按 `BRANCH_INTERVAL` 算，
+/// 下一轮就问。
+const BACKGROUND_BRANCH_INTERVAL: Duration = Duration::from_secs(60);
 /// 缓存的头像过了这么久再下载一次，owner 换了头像也跟得上。
 const AVATAR_MAX_AGE: Duration = Duration::from_secs(7 * 24 * 3600);
 /// 下载头像最多等多久，没网时不一直占着后台线程。
@@ -29,12 +32,24 @@ pub(in crate::window) struct RepoBadge {
     avatar_looked: bool,
 }
 
+impl RepoBadge {
+    /// 问到过 workspace 目录 `workspace_dir` 在仓库里时，下面的 `dir` 也在（`.git` 里面除外），右侧面板问
+    /// 在不在仓库里时不用再起一个 git。
+    pub(in crate::window) fn covers_repo_dir(&self, workspace_dir: &Path, dir: &Path) -> bool {
+        self.branch.is_some()
+            && dir.strip_prefix(workspace_dir).is_ok_and(|rel| !rel.components().any(|part| part.as_os_str() == ".git"))
+    }
+}
+
 impl WindowView {
-    /// 隔 `BRANCH_INTERVAL` 在后台问一次每个 workspace 的分支，头像每次运行只找一次。
+    /// 在后台问各 workspace 的分支，当前的隔 `BRANCH_INTERVAL`、别的隔 `BACKGROUND_BRANCH_INTERVAL`；
+    /// 头像每次运行只找一次。
     pub(in crate::window) fn refresh_repo_badges(&mut self, cx: &mut Context<Self>) {
-        for workspace in &mut self.workspaces {
+        let active = self.active;
+        for (ix, workspace) in self.workspaces.iter_mut().enumerate() {
             let badge = &mut workspace.repo;
-            if badge.checking || badge.checked.is_some_and(|at| at.elapsed() < BRANCH_INTERVAL) {
+            let interval = if ix == active { BRANCH_INTERVAL } else { BACKGROUND_BRANCH_INTERVAL };
+            if badge.checking || badge.checked.is_some_and(|at| at.elapsed() < interval) {
                 continue;
             }
             badge.checking = true;
@@ -116,7 +131,21 @@ fn github_owner(url: &str) -> Option<&str> {
 
 #[cfg(test)]
 mod tests {
-    use super::github_owner;
+    use super::{Path, RepoBadge, github_owner};
+
+    #[test]
+    fn a_repo_badge_covers_dirs_below_the_workspace() {
+        let workspace = Path::new("/code/app");
+        let mut badge = RepoBadge::default();
+        // 还没问到分支，或者不在仓库里：看不出来，要自己问。
+        assert!(!badge.covers_repo_dir(workspace, workspace));
+        badge.branch = Some("main".into());
+        assert!(badge.covers_repo_dir(workspace, workspace));
+        assert!(badge.covers_repo_dir(workspace, Path::new("/code/app/src")));
+        assert!(!badge.covers_repo_dir(workspace, Path::new("/code/app/.git/refs")));
+        assert!(!badge.covers_repo_dir(workspace, Path::new("/code")));
+        assert!(!badge.covers_repo_dir(workspace, Path::new("/code/other")));
+    }
 
     #[test]
     fn github_owner_reads_common_remote_urls() {

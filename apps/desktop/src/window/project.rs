@@ -266,6 +266,14 @@ impl WindowView {
     fn probe_repo(&mut self, cx: &mut Context<Self>) {
         let dir = self.project_dir(cx);
         let workspace = &mut self.workspaces[self.active];
+        // 侧栏的分支徽标每轮都在问当前 workspace 的分支，看得出来时用它的。
+        if workspace.repo.covers_repo_dir(&workspace.dir, &dir) {
+            if workspace.project.in_repo != Some(true) {
+                workspace.project.in_repo = Some(true);
+                cx.notify();
+            }
+            return;
+        }
         let project = &mut workspace.project;
         let fresh =
             project.probed.as_ref().is_some_and(|(probed, at)| *probed == dir && at.elapsed() < REPO_PROBE_INTERVAL);
