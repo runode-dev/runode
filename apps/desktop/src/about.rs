@@ -46,11 +46,12 @@ pub(crate) fn in_app_bundle() -> bool {
 }
 
 /// 打开 macOS 标准关于面板。名称、版本、版权来自构建脚本嵌进可执行文件的应用信息表，
-/// 图标来自 bundle 或 `install_icon`，所以不需要传任何选项。
+/// 图标来自 bundle 或 `install_icon`；括号里默认显示的构建号重复了版本号，换成只有提交号的 `RUNODE_REVISION`。
 #[cfg(target_os = "macos")]
 pub fn show() {
-    use objc2::MainThreadMarker;
-    use objc2_app_kit::NSApplication;
+    use objc2::{MainThreadMarker, runtime::AnyObject};
+    use objc2_app_kit::{NSAboutPanelOptionVersion, NSApplication};
+    use objc2_foundation::{NSDictionary, NSString};
 
     // 菜单动作总在主线程上执行；拿不到标记说明调用方式出了错，宁可不显示也不要崩。
     let Some(mtm) = MainThreadMarker::new() else {
@@ -58,7 +59,13 @@ pub fn show() {
         return;
     };
     let app = NSApplication::sharedApplication(mtm);
-    app.orderFrontStandardAboutPanel(None);
+    let revision = NSString::from_str(env!("RUNODE_REVISION"));
+    // SAFETY: 键是 AppKit 导出的常量。
+    let key = unsafe { NSAboutPanelOptionVersion };
+    let value: &AnyObject = &revision;
+    let options = NSDictionary::from_slices(&[key], &[value]);
+    // SAFETY: 在主线程上调用，Version 的值要求是 NSString。
+    unsafe { app.orderFrontStandardAboutPanelWithOptions(&options) };
     app.activate();
 }
 

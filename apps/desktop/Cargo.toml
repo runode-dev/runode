@@ -53,7 +53,7 @@ notify.workspace = true
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2.workspace = true
 # 文件树删除文件时移到废纸篓，用 NSFileManager。
-objc2-foundation = { workspace = true, features = ["std", "NSArray", "NSData", "NSError", "NSFileManager", "NSLocale", "NSString", "NSURL"] }
+objc2-foundation = { workspace = true, features = ["std", "NSArray", "NSData", "NSDictionary", "NSError", "NSFileManager", "NSLocale", "NSString", "NSURL"] }
 # agent 要人处理时的提示音用 NSSound 按名字播放系统声音。
 objc2-app-kit = { workspace = true, features = ["std", "NSApplication", "NSResponder", "NSImage", "NSMenu", "NSMenuItem", "NSEvent", "NSSound"] }
 # 问系统设置里有没有允许发通知，设置页在被拒时提示。

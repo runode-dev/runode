@@ -12,11 +12,13 @@ fn main() {
     println!("cargo:rerun-if-env-changed=RUNODE_BUILD_TAG");
     let version = env::var("CARGO_PKG_VERSION").unwrap();
     let commit = git_short_head().unwrap_or_else(|| "unknown".into());
-    // 关于面板显示为「版本 0.1.0 (0.1.0.<commit>)」，带改动时是「0.1.0.<commit>-dirty.<摘要>」。
-    let build = match env::var("RUNODE_BUILD_TAG") {
-        Ok(tag) if !tag.is_empty() => format!("{version}.{commit}-{tag}"),
-        _ => format!("{version}.{commit}"),
+    // 构建号是「0.1.0.<commit>」，带改动时是「0.1.0.<commit>-dirty.<摘要>」；关于面板的括号里只显示版本号后面那段。
+    let revision = match env::var("RUNODE_BUILD_TAG") {
+        Ok(tag) if !tag.is_empty() => format!("{commit}-{tag}"),
+        _ => commit,
     };
+    let build = format!("{version}.{revision}");
+    println!("cargo:rustc-env=RUNODE_REVISION={revision}");
     // 宿主在握手时报这个构建号，前端的一样才给快照。
     println!("cargo:rustc-env=RUNODE_BUILD={build}");
 
