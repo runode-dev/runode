@@ -995,6 +995,8 @@ github_actions:
   variables: Variables
   org_secrets: Organization Secrets
   org_variables: Organization Variables
+  manage_in_browser: Manage in Browser
+  not_org: This repository belongs to a personal account, not an organization, so it has no organization secrets or variables.
   environments: Environments
   add_secret: New Secret
   add_variable: New Variable

@@ -995,6 +995,8 @@ github_actions:
   variables: Variables
   org_secrets: 組織的 Secrets
   org_variables: 組織的 Variables
+  manage_in_browser: 在瀏覽器中管理
+  not_org: 這個儲存庫屬於個人帳號，不屬於組織，沒有組織的 Secrets 和 Variables。
   environments: 部署環境
   add_secret: 新增 Secret
   add_variable: 新增 Variable

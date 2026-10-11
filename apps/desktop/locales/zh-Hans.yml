@@ -995,6 +995,8 @@ github_actions:
   variables: Variables
   org_secrets: 组织的 Secrets
   org_variables: 组织的 Variables
+  manage_in_browser: 在浏览器中管理
+  not_org: 这个仓库属于个人账号，不属于组织，没有组织的 Secrets 和 Variables。
   environments: 部署环境
   add_secret: 新建 Secret
   add_variable: 新建 Variable

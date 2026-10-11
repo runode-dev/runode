@@ -109,7 +109,7 @@ pub(super) struct ActionsPage {
     expanded: HashSet<Node>,
     hovered: Option<usize>,
     adding: Option<Adding>,
-    /// 重跑、取消、删除出的错，显示在标题下面，下次操作或刷新时清掉。
+    /// 重跑、取消、删除和打开组织设置页出的错，显示在标题下面，下次操作或刷新时清掉。
     error: Option<String>,
     /// 上次看 PATH 里有没有 gh 时的 PATH 和结果，标签要不要显示靠它，PATH 没变就不再找。
     found: ToolCache,
@@ -338,11 +338,11 @@ impl WindowView {
         }
     }
 
-    /// 在后台跑一条改东西的 gh 命令，出错时显示在标题下面，跑完重读 `then` 给的数据。
-    fn run_gh(
+    /// 在后台跑一条 gh 命令，出错时显示在标题下面；跑完不管成败都交给 `then`，成了时带上结果。
+    fn run_gh<T: Send + 'static>(
         &mut self,
-        work: impl FnOnce(&Gh) -> Result<(), String> + Send + 'static,
-        then: fn(&mut Self, &mut Context<Self>),
+        work: impl FnOnce(&Gh) -> Result<T, String> + Send + 'static,
+        then: impl FnOnce(&mut Self, Option<T>, &mut Context<Self>) + 'static,
         cx: &mut Context<Self>,
     ) {
         self.github_actions.error = None;
@@ -351,11 +351,14 @@ impl WindowView {
         cx.spawn(async move |this, cx| {
             let result = job.await;
             this.update(cx, |this, cx| {
-                this.github_actions.error = result.err().map(|err| match err.as_str() {
-                    gh::LOGIN => rust_i18n::t!("github_actions.login_needed").into_owned(),
-                    _ => err,
-                });
-                then(this, cx);
+                let value = match result {
+                    Ok(value) => Some(value),
+                    Err(err) => {
+                        this.github_actions.error = Some(gh_error(err));
+                        None
+                    }
+                };
+                then(this, value, cx);
                 cx.notify();
             })
             .ok();
@@ -479,7 +482,7 @@ impl WindowView {
                 return;
             }
             this.update(cx, |this, cx| {
-                this.run_gh(move |gh| gh.delete(secret, &scope, &name), Self::refetch_settings, cx);
+                this.run_gh(move |gh| gh.delete(secret, &scope, &name), |this, _, cx| this.refetch_settings(cx), cx);
             })
             .ok();
         })
@@ -829,11 +832,11 @@ impl WindowView {
                 this.run_gh_in_terminal(gh::watch_command(id), window, cx);
             }));
             buttons.push(button(BAN_ICON, rust_i18n::t!("github_actions.cancel"), move |this, _, cx| {
-                this.run_gh(move |gh| gh.cancel(id), Self::refetch_runs, cx);
+                this.run_gh(move |gh| gh.cancel(id), |this, _, cx| this.refetch_runs(cx), cx);
             }));
         } else {
             buttons.push(button(SYNC_ICON, rust_i18n::t!("github_actions.rerun"), move |this, _, cx| {
-                this.run_gh(move |gh| gh.rerun(id), Self::refetch_runs, cx);
+                this.run_gh(move |gh| gh.rerun(id), |this, _, cx| this.refetch_runs(cx), cx);
             }));
         }
         let row = self
@@ -1006,10 +1009,9 @@ impl WindowView {
         walk.rows.push(row.into_any_element());
     }
 
-    /// `scope` 那一级的 secret 和 variable 两组；组织那一级只能看、复制。
+    /// `scope` 那一级的 secret 和 variable 两组；组织那一级只能看、复制，改要到浏览器里组织的设置页去。
     #[allow(clippy::too_many_arguments)]
     fn walk_settings(&self, walk: &mut Walk, scope: Scope, depth: usize, fg: Rgb, bg: Rgb, cx: &mut Context<Self>) {
-        let editable = scope != Scope::Org;
         for secret in [true, false] {
             let (node, query) = if secret {
                 (Node::Secrets(scope.clone()), Query::Secrets(scope.clone()))
@@ -1022,14 +1024,26 @@ impl WindowView {
                 (_, true) => rust_i18n::t!("github_actions.secrets"),
                 (_, false) => rust_i18n::t!("github_actions.variables"),
             };
-            let add = editable.then(|| {
+            let add = if scope == Scope::Org {
+                button(GLOBE_ICON, rust_i18n::t!("github_actions.manage_in_browser"), move |this, _, cx| {
+                    this.run_gh(
+                        move |gh| gh.org_settings_url(secret),
+                        |_, url, cx| {
+                            if let Some(url) = url {
+                                cx.open_url(&url)
+                            }
+                        },
+                        cx,
+                    )
+                })
+            } else {
                 let scope = scope.clone();
                 let key = if secret { "github_actions.add_secret" } else { "github_actions.add_variable" };
                 button(PLUS_ICON, rust_i18n::t!(key), move |this, window, cx| {
                     this.start_adding(secret, scope.clone(), window, cx)
                 })
-            });
-            self.group_row(walk, node.clone(), depth, label, add, fg, bg, cx);
+            };
+            self.group_row(walk, node.clone(), depth, label, Some(add), fg, bg, cx);
             if !self.github_actions.expanded.contains(&node) {
                 continue;
             }
@@ -1295,6 +1309,15 @@ impl WindowView {
                     .into_any_element()
             })
             .collect()
+    }
+}
+
+/// gh 报的错换成页上显示的话：没登录、仓库不属于组织这两种有专门的说明。
+fn gh_error(err: String) -> String {
+    match err.as_str() {
+        gh::LOGIN => rust_i18n::t!("github_actions.login_needed").into_owned(),
+        gh::NOT_ORG => rust_i18n::t!("github_actions.not_org").into_owned(),
+        _ => err,
     }
 }
 

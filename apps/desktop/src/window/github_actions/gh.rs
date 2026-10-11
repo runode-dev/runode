@@ -21,6 +21,8 @@ pub(super) const PROGRAM: &str = "gh";
 pub(super) const MISSING: &str = "gh not found";
 /// gh 没登录或者令牌失效时 `Gh` 返回的错，页上据此请用户登录。
 pub(super) const LOGIN: &str = "gh auth required";
+/// 仓库属于个人、不属于组织时 `Gh::org_settings_url` 返回的错。
+pub(super) const NOT_ORG: &str = "repository is not owned by an organization";
 /// 在终端里登录 GitHub：gh 一步步问登哪个主机、用浏览器还是令牌。
 pub(super) const LOGIN_COMMAND: &str = "gh auth login";
 /// 列运行时最多列几条。
@@ -265,6 +267,13 @@ impl Gh {
         self.output(&args).map(drop)
     }
 
+    /// 仓库所属组织在 GitHub 上管 secret（`secret` 为真）或 variable 的设置页；组织那一级页上只读，要改到那里去改。
+    pub fn org_settings_url(&self, secret: bool) -> Result<String, String> {
+        let jq = r#".owner | select(.type == "Organization") | .html_url"#;
+        let out = self.output(&["api", "repos/{owner}/{repo}", "--jq", jq])?;
+        org_settings_url(String::from_utf8_lossy(&out).trim(), secret).ok_or_else(|| NOT_ORG.to_owned())
+    }
+
     /// `gh api` 分页读一个列表，`key` 是回复里装列表的那个字段。
     fn api_list<T: DeserializeOwned>(&self, endpoint: &str, key: &str) -> Result<Vec<T>, String> {
         let jq = format!(".{key}[]");
@@ -313,6 +322,13 @@ impl Gh {
 
 fn names(named: Vec<Named>) -> Vec<String> {
     named.into_iter().map(|named| named.name).collect()
+}
+
+/// 组织主页 `https://<主机>/<组织>` 换成它管 Actions secret 或 variable 的设置页，主机照搬，GitHub Enterprise 也对。
+fn org_settings_url(org_page: &str, secret: bool) -> Option<String> {
+    let (host, org) = org_page.trim_end_matches('/').rsplit_once('/').filter(|(_, org)| !org.is_empty())?;
+    let kind = if secret { "secrets" } else { "variables" };
+    Some(format!("{host}/organizations/{org}/settings/{kind}/actions"))
 }
 
 fn env_args(scope: &Scope) -> Vec<&str> {
@@ -403,6 +419,24 @@ pub(super) fn step_url(job: &Job, index: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn org_settings_url_keeps_the_host() {
+        assert_eq!(
+            org_settings_url("https://github.com/acme", true).as_deref(),
+            Some("https://github.com/organizations/acme/settings/secrets/actions")
+        );
+        assert_eq!(
+            org_settings_url("https://ghe.example.com/acme", false).as_deref(),
+            Some("https://ghe.example.com/organizations/acme/settings/variables/actions")
+        );
+        assert_eq!(
+            org_settings_url("https://github.com/acme/", true).as_deref(),
+            Some("https://github.com/organizations/acme/settings/secrets/actions")
+        );
+        // 仓库属于个人时 jq 什么也不输出。
+        assert_eq!(org_settings_url("", true), None);
+    }
 
     #[test]
     fn states_follow_status_and_conclusion() {
