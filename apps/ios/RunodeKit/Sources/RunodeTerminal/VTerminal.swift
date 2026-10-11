@@ -10,8 +10,12 @@ import RunodeProtocol
 /// 归谁管：libghostty 的句柄不能跨线程用，所以这是个非 `Sendable` 的类，由主 actor 上的
 /// `TerminalModel` 持有，只在主 actor 上建、喂、读和释放；编译器保证它不会被送到别的隔离域。
 public final class VTerminal {
-    /// 回滚历史最多留多少行，和宿主的 `SCROLLBACK_LINES` 一致；另有 `TermSettings.scrollbackLimit` 的字节上限。
+    /// 回滚历史最多留多少行，和宿主的 `SCROLLBACK_LINES` 一致；另有字节上限，见 `scrollbackBytesCap`。
     static let scrollbackLines = 10_000
+    /// 回滚历史的字节上限取宿主下发的 `TermSettings.scrollbackLimit`（默认 10 MiB）和它中小的那个：手机
+    /// 这份 VT 从宿主的重放起步，本来就没有连上之前的历史，用不着和桌面留一样多；iPhone 内存紧，一个
+    /// 会话占太多会被 jetsam 杀掉。
+    static let scrollbackBytesCap: UInt64 = 4 << 20
     /// 未知 OSC 最多留多少字节，和宿主的 `UNKNOWN_SEQUENCE_MAX_BYTES` 一致。
     static let unknownSequenceMaxBytes = 256 * 1024
 
@@ -193,10 +197,10 @@ public final class VTerminal {
         }
     }
 
-    /// 宿主 `vt::configure_common` 里两份 VT 必须一致的选项。
+    /// 宿主 `vt::configure_common` 里的选项，回滚的字节上限另按 `scrollbackBytesCap` 封顶。
     private func configureCommon(scrollbackBytes: UInt64) {
         var lines = Self.scrollbackLines
-        var bytes = Int(clamping: scrollbackBytes)
+        var bytes = Int(clamping: min(scrollbackBytes, Self.scrollbackBytesCap))
         var unknown = Self.unknownSequenceMaxBytes
         ghostty_terminal_set(handle, GHOSTTY_TERMINAL_OPT_SCROLLBACK_MAX_LINES, &lines)
         ghostty_terminal_set(handle, GHOSTTY_TERMINAL_OPT_SCROLLBACK_MAX_BYTES, &bytes)
@@ -445,6 +449,13 @@ public final class VTerminal {
         ghostty_render_state_clean(renderState)
         return FrameChange(
             full: full, rows: full ? [] : changedRows, cursorChanged: cursorChanged, aboveChanged: aboveChanged)
+    }
+
+    /// 回滚历史现在的字节上限。测试用。
+    var scrollbackMaxBytes: Int {
+        var bytes = 0
+        ghostty_terminal_get(handle, GHOSTTY_TERMINAL_DATA_SCROLLBACK_MAX_BYTES, &bytes)
+        return bytes
     }
 
     /// 当前一屏的文字，一行一个，行尾空白去掉。测试和调试用。

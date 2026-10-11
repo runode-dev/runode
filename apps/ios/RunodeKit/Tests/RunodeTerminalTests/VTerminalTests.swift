@@ -145,6 +145,19 @@ import Testing
         #expect(vt.scrollbar.atBottom)
     }
 
+    /// 回滚的字节上限取宿主给的和 4 MiB 中小的那个，换主题时也一样。
+    @Test func scrollbackBytesAreCappedOnThePhone() throws {
+        var settings = TermSettings.default
+        let vt = try VTerminal(size: size, settings: settings)
+        #expect(vt.scrollbackMaxBytes == 4 << 20)
+        settings.scrollbackLimit = 1 << 20
+        vt.applyTheme(settings)
+        #expect(vt.scrollbackMaxBytes == 1 << 20)
+        settings.scrollbackLimit = 64 << 20
+        vt.applyTheme(settings)
+        #expect(vt.scrollbackMaxBytes == 4 << 20)
+    }
+
     @Test func smoothScrollKeepsTheFractionAndTheRowAbove() throws {
         let vt = try terminal()
         for line in 1...20 {
