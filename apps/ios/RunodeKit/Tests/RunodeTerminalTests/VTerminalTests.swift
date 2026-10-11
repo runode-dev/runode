@@ -47,6 +47,23 @@ import Testing
         #expect(frame.background == TermSettings.default.background)
     }
 
+    /// 不带样式的字和空白格不读颜色；只有背景色的格子（带背景色擦掉的）仍读得到背景。
+    @Test func plainAndBackgroundOnlyCellsAreRead() throws {
+        let vt = try terminal()
+        vt.feed(Array("ab\r\n\u{1b}[44m\u{1b}[K\u{1b}[0mc\u{1b}[48;2;1;2;3m\u{1b}[X".utf8))
+        var frame = ScreenFrame()
+        _ = vt.refresh(&frame)
+        #expect(frame.cells[0][0] == ScreenCell(
+            text: "a", foreground: nil, background: nil, attributes: [], underline: .none, width: .narrow))
+        #expect(frame.cells[0][2] == .blank)
+        #expect(frame.cells[1][0].text == "c")
+        #expect(frame.cells[1][0].background == nil)
+        #expect(frame.cells[1][1].text == "")
+        #expect(frame.cells[1][1].background == Rgb(1, 2, 3))
+        #expect(frame.cells[1][5].background == Rgb(hex: 0x2D9AFF))
+        #expect(frame.cells[1][5].foreground == nil)
+    }
+
     @Test func onlyChangedRowsAreReported() throws {
         let vt = try terminal()
         var frame = ScreenFrame()

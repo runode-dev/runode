@@ -26,6 +26,19 @@ public final class VTerminal {
     /// 读字素簇的缓冲，够大多数字素簇用，不够时临时分配。
     private let graphemeBuffer: UnsafeMutablePointer<UInt8>
     private static let graphemeCapacity = 64
+    /// `readCell` 用 `ghostty_cell_get_multi` 一次取齐的格子属性：`cellFieldPointers` 按 `cellKeys` 的
+    /// 顺序指着 `cellFields` 的各个字段，建一次一直用，读格子时不分配。
+    private let cellFields: UnsafeMutablePointer<CellFields>
+    private let cellFieldPointers: UnsafeMutablePointer<UnsafeMutableRawPointer?>
+    private static let cellKeys = [
+        GHOSTTY_CELL_DATA_CONTENT_TAG, GHOSTTY_CELL_DATA_WIDE, GHOSTTY_CELL_DATA_HAS_TEXT, GHOSTTY_CELL_DATA_HAS_STYLING,
+    ]
+    private struct CellFields {
+        var tag = GHOSTTY_CELL_CONTENT_CODEPOINT
+        var wide = GHOSTTY_CELL_WIDE_NARROW
+        var hasText = false
+        var styled = false
+    }
     private let hold = RenderHold()
     /// 最近一次改尺寸、最近一次喂字节的时刻，见 `isRenderHeld`。
     private var resizedAt = ContinuousClock.now - .seconds(10)
@@ -70,6 +83,16 @@ public final class VTerminal {
         self.mouseEncoder = mouseEncoder
         self.mouseEvent = mouseEvent
         graphemeBuffer = .allocate(capacity: Self.graphemeCapacity)
+        cellFields = .allocate(capacity: 1)
+        cellFields.initialize(to: CellFields())
+        cellFieldPointers = .allocate(capacity: Self.cellKeys.count)
+        let fieldPointers: [UnsafeMutableRawPointer?] = [
+            UnsafeMutableRawPointer(cellFields.pointer(to: \.tag)!),
+            UnsafeMutableRawPointer(cellFields.pointer(to: \.wide)!),
+            UnsafeMutableRawPointer(cellFields.pointer(to: \.hasText)!),
+            UnsafeMutableRawPointer(cellFields.pointer(to: \.styled)!),
+        ]
+        cellFieldPointers.initialize(from: fieldPointers, count: fieldPointers.count)
         self.size = size
         self.settings = settings
         configureCommon(scrollbackBytes: settings.scrollbackLimit)
@@ -92,6 +115,8 @@ public final class VTerminal {
         ghostty_render_state_free(renderState)
         ghostty_terminal_free(handle)
         graphemeBuffer.deallocate()
+        cellFields.deallocate()
+        cellFieldPointers.deallocate()
     }
 
     // MARK: 喂字节、改尺寸、换主题
@@ -444,20 +469,27 @@ public final class VTerminal {
         }
     }
 
+    /// 一屏大多是空白格和不带样式的字，所以先从原始格子一次取齐有没有字、样式、单设的背景色，
+    /// 没有的就不再一项项去问颜色和样式。
     private func readCell() -> ScreenCell {
-        var cell = ScreenCell.blank
         var raw: GhosttyCell = 0
-        if ghostty_render_state_row_cells_get(rowCells, GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_RAW, &raw) == GHOSTTY_SUCCESS {
-            var wide = GHOSTTY_CELL_WIDE_NARROW
-            ghostty_cell_get(raw, GHOSTTY_CELL_DATA_WIDE, &wide)
-            switch wide {
-            case GHOSTTY_CELL_WIDE_WIDE: cell.width = .wide
-            case GHOSTTY_CELL_WIDE_SPACER_TAIL: cell.width = .spacerTail
-            case GHOSTTY_CELL_WIDE_SPACER_HEAD: cell.width = .spacerHead
-            default: cell.width = .narrow
-            }
+        guard ghostty_render_state_row_cells_get(rowCells, GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_RAW, &raw) == GHOSTTY_SUCCESS,
+            ghostty_cell_get_multi(raw, Self.cellKeys.count, Self.cellKeys, cellFieldPointers, nil) == GHOSTTY_SUCCESS
+        else { return .blank }
+        let fields = cellFields.pointee
+        var cell = ScreenCell.blank
+        switch fields.wide {
+        case GHOSTTY_CELL_WIDE_WIDE: cell.width = .wide
+        case GHOSTTY_CELL_WIDE_SPACER_TAIL: cell.width = .spacerTail
+        case GHOSTTY_CELL_WIDE_SPACER_HEAD: cell.width = .spacerHead
+        default: cell.width = .narrow
         }
-        cell.text = readGrapheme()
+        if fields.hasText {
+            cell.text = readGrapheme()
+        }
+        // 前景色只来自样式，背景色来自样式或只有背景色的格子（`CONTENT_TAG` 是 `BG_COLOR_*`）。
+        let onlyText = fields.tag == GHOSTTY_CELL_CONTENT_CODEPOINT || fields.tag == GHOSTTY_CELL_CONTENT_CODEPOINT_GRAPHEME
+        guard fields.styled || !onlyText else { return cell }
         var color = GhosttyColorRgb()
         if ghostty_render_state_row_cells_get(rowCells, GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_FG_COLOR, &color)
             == GHOSTTY_SUCCESS
@@ -469,9 +501,7 @@ public final class VTerminal {
         {
             cell.background = Self.rgb(color)
         }
-        var styled = false
-        ghostty_render_state_row_cells_get(rowCells, GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_HAS_STYLING, &styled)
-        if styled {
+        if fields.styled {
             var style = GhosttyStyle()
             style.size = MemoryLayout<GhosttyStyle>.size
             if ghostty_render_state_row_cells_get(rowCells, GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_STYLE, &style)
