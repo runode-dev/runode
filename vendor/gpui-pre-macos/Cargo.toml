@@ -305,3 +305,8 @@ priority = -1
 [lints.rust.unexpected_cfgs]
 level = "allow"
 priority = 0
+
+# runode: 从 crates.io 编时 cargo 压掉依赖的警告，换成路径依赖后 cocoa 的弃用警告每次构建一千多条。
+[lints.rust.deprecated]
+level = "allow"
+priority = 0
