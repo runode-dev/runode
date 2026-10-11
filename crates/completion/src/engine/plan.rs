@@ -3,7 +3,7 @@
 
 use std::collections::HashSet;
 
-use warp_command_signatures::{Argument, ArgumentType, Opt, Signature};
+use warp_command_signatures::{Argument, ArgumentType, Opt, Signature, TemplateType};
 
 use super::{Candidate, Kind, Plan, Source};
 use crate::{
@@ -14,8 +14,8 @@ use crate::{
 /// 光标所在的词能不能由 runode 补全，能的话要补什么。
 ///
 /// 光标在命令名上（一段命令跳过变量赋值后的第一个词，或者 `sudo` 这类命令后面那个本身是
-/// 命令的参数）时补命令名。在重定向目标上、正在写变量赋值、或者参数所属的命令没有规格时
-/// 为 `None`，这时 Tab 交给 shell。
+/// 命令的参数）时补命令名；参数所属的命令没有规格时按文件和目录补。在重定向目标上、正在写
+/// 变量赋值时为 `None`，这时 Tab 交给 shell。
 pub fn plan(segment: &Segment, cursor: usize) -> Option<Plan> {
     let words = &segment.words;
     let current = &words[segment.current];
@@ -33,7 +33,10 @@ pub fn plan(segment: &Segment, cursor: usize) -> Option<Plan> {
     let mut command_at = start;
     loop {
         let name = command_name(&words[command_at].value());
-        let spec = specs::lookup(&name)?;
+        let Some(spec) = specs::lookup(&name) else {
+            // 交给没配补全的 shell 只会把文件网格印在屏幕上，Esc 关不掉，也看不出选中了哪个。
+            return Some(files_plan(name, typed, env));
+        };
         // 光标前的、不是重定向目标的参数。
         let args: Vec<(usize, String)> =
             (command_at + 1..segment.current).filter(|&i| !words[i].redirect).map(|i| (i, words[i].value())).collect();
@@ -70,6 +73,19 @@ fn command_plan(typed: String, env: Vec<String>) -> Plan {
         command: String::new(),
         candidates: Vec::new(),
         sources: vec![source],
+        typed,
+        tokens: Vec::new(),
+        env,
+        top_level: false,
+    }
+}
+
+/// 没有规格的命令的参数：列出文件和目录。
+fn files_plan(command: String, typed: String, env: Vec<String>) -> Plan {
+    Plan {
+        command,
+        candidates: Vec::new(),
+        sources: vec![Source::Template { kind: TemplateType::FilesAndFolders, filter: None, from: 0 }],
         typed,
         tokens: Vec::new(),
         env,
@@ -328,13 +344,24 @@ mod tests {
     }
 
     #[test]
-    fn hands_unknown_commands_and_redirects_to_the_shell() {
-        assert!(plan_at("no-such-command-xyz a^").is_none());
+    fn hands_redirects_and_assignments_to_the_shell() {
         assert!(plan_at("git status > ou^").is_none());
         // 正在写变量赋值。
         assert!(plan_at("FOO=^").is_none());
         // 变量赋值后面的命令照样补。
         assert_eq!(plan_at("FOO=1 git ch^").unwrap().env, ["FOO=1"]);
+    }
+
+    #[test]
+    fn commands_without_a_spec_complete_files() {
+        for input in ["no-such-command-xyz a^", "no-such-command-xyz ^", "sudo no-such-command-xyz ^"] {
+            let plan = plan_at(input).unwrap_or_else(|| panic!("{input}"));
+            assert!(
+                matches!(plan.sources.as_slice(), [Source::Template { kind: TemplateType::FilesAndFolders, .. }]),
+                "{input}: {:?}",
+                plan.sources
+            );
+        }
     }
 
     fn is_command_plan(plan: &Plan) -> bool {

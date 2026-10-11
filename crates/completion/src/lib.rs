@@ -60,8 +60,8 @@ pub struct GeneratorJob {
 }
 
 impl Request {
-    /// 输入 `text`、光标在字节位置 `cursor` 时，光标处能不能由 runode 补全：光标在命令的
-    /// 参数上（不是命令名本身）、这条命令有规格时才能，否则为 `None`。
+    /// 输入 `text`、光标在字节位置 `cursor` 时，光标处能不能由 runode 补全：在重定向目标上、
+    /// 正在写变量赋值时不能，为 `None`。命令没有规格时参数按文件和目录补。
     pub fn new(text: &str, cursor: usize) -> Option<Self> {
         let segment = line::parse(text, cursor);
         let plan = engine::plan(&segment, cursor)?;

@@ -165,7 +165,7 @@ impl TerminalView {
         key == "tab" && plain && self.complete_on_tab(cx)
     }
 
-    /// 一次没有菜单时的 Tab：光标在提示符输入里、所在命令有规格、光标不在命令名上，且 shell 的
+    /// 一次没有菜单时的 Tab：光标在提示符输入里、不在重定向目标或变量赋值上，且 shell 的
     /// Tab 没绑别的补全（fzf-tab 之类）时由 runode 补全，返回 true；否则返回 false，Tab 交给 shell。
     fn complete_on_tab(&mut self, cx: &mut Context<Self>) -> bool {
         // 没在看（重新连上的过程中、和宿主断开了）时也不接管，这个键随之丢掉。
