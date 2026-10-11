@@ -99,14 +99,14 @@
         }
 
         private var titleView: some View {
-            TimelineView(.periodic(from: .now, by: 1)) { context in
+            LinkClock(state: model.linkState) { now in
                 VStack(spacing: 0) {
                     Text(model.title)
                         .font(.headline)
                         .lineLimit(1)
                     Text(
                         Presentation.terminalSubtitle(
-                            agent: model.agent, link: model.linkState, phase: model.phase, now: context.date)
+                            agent: model.agent, link: model.linkState, phase: model.phase, now: now)
                     )
                     .font(.caption)
                     .foregroundStyle(.secondary)

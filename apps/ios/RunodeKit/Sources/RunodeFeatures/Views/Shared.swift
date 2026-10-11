@@ -622,6 +622,20 @@
         }
     }
 
+    /// 连接状态的文字：只有等着重连时带倒计时，要按秒刷新；别的状态下文字不随时间变，不必每秒重画。
+    struct LinkClock<Content: View>: View {
+        let state: LinkState
+        @ViewBuilder let content: (Date) -> Content
+
+        var body: some View {
+            if case .waiting = state {
+                TimelineView(.periodic(from: .now, by: 1)) { context in content(context.date) }
+            } else {
+                content(.now)
+            }
+        }
+    }
+
     /// 连接状态：图标、文字（重连时带倒计时），断开时有「重试」。
     struct ConnectionStatusRow: View {
         let state: LinkState
@@ -639,9 +653,9 @@
                 case .connected:
                     Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
                 }
-                TimelineView(.periodic(from: .now, by: 1)) { context in
+                LinkClock(state: state) { now in
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(Presentation.linkStatus(state, now: context.date))
+                        Text(Presentation.linkStatus(state, now: now))
                             .font(.subheadline.weight(.semibold))
                         if case .failed = state {
                             Text(Presentation.linkState(state))

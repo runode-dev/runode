@@ -485,11 +485,10 @@
                         .lineLimit(1)
                     HStack(alignment: .firstTextBaseline, spacing: 6) {
                         StatusDot(state: state)
-                        TimelineView(.periodic(from: .now, by: 1)) { context in
+                        LinkClock(state: state) { now in
                             Text(
                                 Presentation.machineSummary(
-                                    state, sessions: list?.sessions ?? [], loaded: list?.loaded ?? false,
-                                    now: context.date))
+                                    state, sessions: list?.sessions ?? [], loaded: list?.loaded ?? false, now: now))
                         }
                         .font(.footnote)
                         .foregroundStyle(.secondary)
