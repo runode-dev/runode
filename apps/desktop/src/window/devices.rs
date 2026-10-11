@@ -1,13 +1,13 @@
 //! 经远程访问配对过的设备，连着的标出来，手机端引导页列出它们，撤销前问过用户。
 //! 设备表和连着哪些设备（监听方写在状态文件里的 `ListenerStatus::connected`）都是数据目录里的文件，
-//! 监听不一定开在这个进程里，所以每隔 `DEVICES_POLL` 读一次。
+//! 监听不一定开在这个进程里，所以有窗口开着手机端引导页时每隔 `DEVICES_POLL` 读一次，打开时先读一次。
 
 use std::time::Duration;
 
-use gpui::{App, Context, Global, PromptLevel, SharedString, Window};
+use gpui::{App, Context, Global, PromptLevel, SharedString, Task, Window};
 use runode_protocol::remote::DeviceId;
 
-use super::WindowView;
+use super::{WindowView, remote};
 
 /// 隔多久读一次配对过的设备和连着哪些。
 const DEVICES_POLL: Duration = Duration::from_secs(2);
@@ -28,21 +28,35 @@ pub(super) struct Paired {
     pub(super) live: bool,
 }
 
-/// 在后台一直跟着配对过的设备和连着哪些，变了就重画各窗口。
+/// 在后台跟着配对过的设备和连着哪些，变了就重画各窗口；只有手机端引导页用得着，没有窗口开着它时不读。
 pub fn watch(cx: &mut App) {
     cx.spawn(async move |cx| {
         loop {
-            let devices = cx.background_executor().spawn(async { read_devices() }).await;
-            cx.update(|cx| {
-                if cx.try_global::<Devices>() != Some(&devices) {
-                    cx.set_global(devices);
-                    cx.refresh_windows();
-                }
+            let read = cx.update(|cx| {
+                let shown =
+                    remote::windows(cx).iter().any(|handle| handle.read(cx).is_ok_and(|view| view.mobile.is_some()));
+                shown.then(|| refresh(cx))
             });
+            if let Some(read) = read {
+                read.await;
+            }
             cx.background_executor().timer(DEVICES_POLL).await;
         }
     })
     .detach();
+}
+
+/// 现读一次设备表，变了就重画各窗口。
+pub(super) fn refresh(cx: &mut App) -> Task<()> {
+    cx.spawn(async move |cx| {
+        let devices = cx.background_executor().spawn(async { read_devices() }).await;
+        cx.update(|cx| {
+            if cx.try_global::<Devices>() != Some(&devices) {
+                cx.set_global(devices);
+                cx.refresh_windows();
+            }
+        });
+    })
 }
 
 /// 读设备表和监听方的状态。读不了设备表时当没有设备；监听没开时都没连着。
@@ -63,7 +77,7 @@ fn read_devices() -> Devices {
     )
 }
 
-/// 配对过的设备，按配对的先后；启动后第一次读到之前是空的。
+/// 配对过的设备，按配对的先后；第一次打开手机端引导页、读到之前是空的。
 pub(super) fn devices(cx: &App) -> &[Paired] {
     cx.try_global::<Devices>().map_or(&[], |devices| &devices.0)
 }

@@ -107,6 +107,8 @@ impl WindowView {
                 });
             // 回车、点别处都是离开输入框，在这里写回。
             let blurred = cx.on_focus_out(&name.focus_handle(cx), window, |this, _, _, cx| this.save_machine_name(cx));
+            // 设备表只在手机端引导页开着时轮询，刚打开时现读，不等下一轮。
+            super::devices::refresh(cx).detach();
             self.mobile = Some(MobilePage {
                 step: Step::Intro,
                 pairing: Pairing::Idle,
