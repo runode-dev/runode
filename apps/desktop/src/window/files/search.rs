@@ -2,8 +2,8 @@
 //! 单击在预览栏里打开（内容结果跳到那一行），双击开成固定标签，回车打开选中的那一条，Esc 清空。
 //! 结果可以排成列表，也可以按目录排成树（和 Git 面板共用 `file_tree`），目录能收起。
 //!
-//! 在后台搜：仓库里按名称找的是 `runode_git::list_files` 列出的文件，不在仓库里时从根目录往下走；
-//! 按内容找调 `runode_git::grep`。按名称找时搜索词全小写就不分大小写；按内容找时可以区分大小写、
+//! 在后台搜：仓库里按名称找的是 `runode_git::list_files` 列出的文件，不在仓库里时从根目录往下走，
+//! 列一次记着，文件树重读过时再列；按内容找调 `runode_git::grep`。按名称找时搜索词全小写就不分大小写；按内容找时可以区分大小写、
 //! 全字匹配、用正则，还能只找或不找某些文件（逗号隔开的 glob，写法和 VS Code 一样）。文件树
 //! 重读过（文件可能变了）、根目录、搜索词、方式或选项变了时重搜。
 
@@ -13,7 +13,7 @@ use std::{
     ops::Range,
     path::{Path, PathBuf},
     sync::{
-        Arc,
+        Arc, OnceLock,
         atomic::{AtomicBool, Ordering},
     },
 };
@@ -141,6 +141,12 @@ struct SearchKey {
     options: ContentOptions,
 }
 
+/// `root` 下按名称找的文件，相对 `root`，第一次搜时在后台列出；同时在跑的几次搜索等同一次列完。
+struct NameList {
+    root: PathBuf,
+    files: OnceLock<Vec<PathBuf>>,
+}
+
 pub(in crate::window) struct FileSearch {
     field: Entity<TextField>,
     mode: SearchMode,
@@ -162,6 +168,8 @@ pub(in crate::window) struct FileSearch {
     searched: Option<SearchKey>,
     /// 后台正在跑的那次搜索和取消它的标志；换了搜索词时置位，停下上一次。
     pending: Option<(SearchKey, Arc<AtomicBool>)>,
+    /// 按名称找时列出的文件，接着打字时不用每个键都再列一遍；文件树重读过、换了根目录时换一份。
+    names: Option<Arc<NameList>>,
     selected: Option<usize>,
     scroll: UniformListScrollHandle,
     /// 框里的搜索词是哪个 workspace 的。
@@ -223,6 +231,7 @@ impl FileSearch {
             rows: Vec::new(),
             searched: None,
             pending: None,
+            names: None,
             selected: None,
             scroll: UniformListScrollHandle::new(),
             workspace: None,
@@ -265,12 +274,13 @@ fn walk_files(root: &Path) -> Vec<PathBuf> {
 }
 
 /// `files` 里名字含有 `query` 的，搜索词带 `/` 时比整个相对路径。名字以它开头的排在前面，
-/// 其余保持原来的顺序；最多 `MAX_FILES` 个。
-fn match_names(files: Vec<PathBuf>, query: &str) -> Vec<PathBuf> {
+/// 其余保持原来的顺序。`cancel` 置位时停下，返回已经找到的。
+fn match_names<'a>(files: &'a [PathBuf], query: &str, cancel: &AtomicBool) -> Vec<&'a PathBuf> {
     let fold = |text: &str| if ignore_case(query) { text.to_lowercase() } else { text.to_owned() };
     let needle = fold(query);
     let mut hits: Vec<_> = files
-        .into_iter()
+        .iter()
+        .take_while(|_| !cancel.load(Ordering::Relaxed))
         .filter_map(|rel| {
             let haystack = if query.contains('/') { rel.to_string_lossy() } else { rel.file_name()?.to_string_lossy() };
             let at = fold(&haystack).find(&needle)?;
@@ -278,7 +288,7 @@ fn match_names(files: Vec<PathBuf>, query: &str) -> Vec<PathBuf> {
         })
         .collect();
     hits.sort_by_key(|(later, _)| *later);
-    hits.into_iter().take(MAX_FILES).map(|(_, rel)| rel).collect()
+    hits.into_iter().map(|(_, rel)| rel).collect()
 }
 
 /// 内容结果里标出命中处用的正则，和交给 git grep 的条件一致；正则写得不对时是错误。
@@ -376,13 +386,16 @@ fn found(root: &Path, rel: PathBuf, lines: Vec<FoundLine>) -> Found {
     Found { path: root.join(&rel), rel, name: name.into(), dir: dir.into(), lines }
 }
 
-/// 按 `key` 搜；在后台跑。正则写得不对时为空。
-fn run_search(key: &SearchKey, cancel: &AtomicBool) -> Option<Vec<Found>> {
+/// 按 `key` 搜；在后台跑。按名称找时在 `names` 里找，还没列出时先列。正则写得不对时为空。
+fn run_search(key: &SearchKey, names: &NameList, cancel: &AtomicBool) -> Option<Vec<Found>> {
     let SearchKey { root, query, options, .. } = key;
     match key.mode {
         SearchMode::Name => {
-            let files = runode_git::list_files(root).unwrap_or_else(|| walk_files(root));
-            Some(match_names(files, query).into_iter().map(|rel| found(root, rel, Vec::new())).collect())
+            let files = names.files.get_or_init(|| runode_git::list_files(root).unwrap_or_else(|| walk_files(root)));
+            // 列表可能是一会儿前列的，git 也列出工作区里删掉了的已跟踪文件，只查要显示的这些在不在。
+            let hits = match_names(files, query, cancel).into_iter();
+            let hits = hits.filter(|rel| root.join(rel).symlink_metadata().is_ok()).take(MAX_FILES);
+            Some(hits.map(|rel| found(root, rel.clone(), Vec::new())).collect())
         }
         SearchMode::Content => {
             let matcher = matcher(query, options).ok()?;
@@ -436,6 +449,10 @@ impl WindowView {
         let key = SearchKey { root: self.files_root(), query, mode: search.mode, options };
         let search = &mut self.file_search;
         cx.notify();
+        // 文件树重读过，文件可能变了。
+        if force || search.names.as_ref().is_some_and(|names| names.root != key.root) {
+            search.names = None;
+        }
         let current = search.pending.as_ref().map(|(key, _)| key).or(search.searched.as_ref());
         if !force && current == Some(&key) {
             return;
@@ -453,10 +470,14 @@ impl WindowView {
         }
         let cancel = Arc::new(AtomicBool::new(false));
         search.pending = Some((key.clone(), cancel.clone()));
+        let names = search
+            .names
+            .get_or_insert_with(|| Arc::new(NameList { root: key.root.clone(), files: OnceLock::new() }))
+            .clone();
         let job = cx.background_spawn({
             let key = key.clone();
             let cancel = cancel.clone();
-            async move { run_search(&key, &cancel) }
+            async move { run_search(&key, &names, &cancel) }
         });
         cx.spawn(async move |this, cx| {
             let found = job.await;
@@ -942,11 +963,45 @@ mod tests {
     #[test]
     fn matches_names_prefix_first_and_paths_with_a_slash() {
         let files = ["src/main.rs", "src/domain.rs", "README.md", "lib/main/x.rs"].map(PathBuf::from).to_vec();
-        assert_eq!(match_names(files.clone(), "main"), [PathBuf::from("src/main.rs"), PathBuf::from("src/domain.rs")]);
+        let go = AtomicBool::new(false);
+        assert_eq!(match_names(&files, "main", &go), [Path::new("src/main.rs"), Path::new("src/domain.rs")]);
         // 带大写字母时区分大小写。
-        assert_eq!(match_names(files.clone(), "Main"), Vec::<PathBuf>::new());
-        assert_eq!(match_names(files.clone(), "readme"), [PathBuf::from("README.md")]);
-        assert_eq!(match_names(files, "main/"), [PathBuf::from("lib/main/x.rs")]);
+        assert!(match_names(&files, "Main", &go).is_empty());
+        assert_eq!(match_names(&files, "readme", &go), [Path::new("README.md")]);
+        assert_eq!(match_names(&files, "main/", &go), [Path::new("lib/main/x.rs")]);
+        assert!(match_names(&files, "main", &AtomicBool::new(true)).is_empty());
+    }
+
+    /// 同一份列表里接着找时不再列，只查要显示的在不在；换一份列表才看得到新文件。
+    #[test]
+    fn name_search_reuses_the_listing_and_skips_deleted_files() {
+        let root = std::env::temp_dir().join(format!("rfs-{}-names", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(root.join("src")).unwrap();
+        fs::write(root.join("src/a.rs"), "").unwrap();
+        fs::write(root.join("src/ab.rs"), "").unwrap();
+        let key = SearchKey {
+            root: root.clone(),
+            query: "a".into(),
+            mode: SearchMode::Name,
+            options: ContentOptions::default(),
+        };
+        let names = NameList { root: root.clone(), files: OnceLock::new() };
+        let search = |names: &NameList| {
+            let found = run_search(&key, names, &AtomicBool::new(false)).unwrap();
+            let mut rels: Vec<_> = found.into_iter().map(|found| found.rel).collect();
+            rels.sort();
+            rels
+        };
+        assert_eq!(search(&names), [PathBuf::from("src/a.rs"), PathBuf::from("src/ab.rs")]);
+        fs::remove_file(root.join("src/ab.rs")).unwrap();
+        fs::write(root.join("src/abc.rs"), "").unwrap();
+        assert_eq!(search(&names), [PathBuf::from("src/a.rs")]);
+        let fresh = NameList { root: root.clone(), files: OnceLock::new() };
+        assert_eq!(search(&fresh), [PathBuf::from("src/a.rs"), PathBuf::from("src/abc.rs")]);
+        // 取消了的不找。
+        assert!(run_search(&key, &fresh, &AtomicBool::new(true)).unwrap().is_empty());
+        fs::remove_dir_all(&root).unwrap();
     }
 
     #[test]

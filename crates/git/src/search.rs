@@ -31,12 +31,12 @@ pub struct GrepMatch {
 }
 
 /// `root` 下已跟踪和未跟踪、没被忽略的文件，相对 `root`；`root` 不在仓库里时为空。子模块
-/// 里的文件不列，已跟踪但在工作区里删掉了的也不列。
+/// 里的文件不列。已跟踪但在工作区里删掉了的照样列出：逐个查在不在占了大仓库里列文件的大半时间，
+/// 调用方只查要用的那些。
 pub fn list_files(root: &Path) -> Option<Vec<PathBuf>> {
     let out = git(root, &["ls-files", "-z", "--cached", "--others", "--exclude-standard", "--deduplicate"])?;
-    let paths =
-        out.split(|&b| b == 0).filter(|path| !path.is_empty()).map(|path| PathBuf::from(OsStr::from_bytes(path)));
-    Some(paths.filter(|path| root.join(path).symlink_metadata().is_ok()).collect())
+    let paths = out.split(|&b| b == 0).filter(|path| !path.is_empty());
+    Some(paths.map(|path| PathBuf::from(OsStr::from_bytes(path))).collect())
 }
 
 /// 按内容找什么、在哪些文件里找。

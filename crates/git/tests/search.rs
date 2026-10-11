@@ -19,7 +19,8 @@ fn lists_tracked_and_untracked_files_but_not_ignored_ones() {
     repo.write("build/out.o", "x");
     let mut files = list_files(repo.path()).unwrap();
     files.sort();
-    assert_eq!(files, [PathBuf::from(".gitignore"), PathBuf::from("src/main.rs")]);
+    // 工作区里删掉了的已跟踪文件照样列出，由调用方查。
+    assert_eq!(files, [PathBuf::from(".gitignore"), PathBuf::from("gone.txt"), PathBuf::from("src/main.rs")]);
     assert!(list_files(&std::env::temp_dir()).is_none());
 }
 
