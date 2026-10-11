@@ -12,7 +12,7 @@ Start a dev server once and check on it later:
 ```sh
 id=$(runode open --down --cwd ~/src/app)
 runode send "$id" 'npm run dev' --enter
-runode wait "$id" --for text 'ready|error' --timeout 120
+runode wait "$id" --for text 'ready|error' --new --timeout 120
 runode read "$id" --lines 30
 ```
 

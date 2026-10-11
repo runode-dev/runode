@@ -1,6 +1,6 @@
 ---
 name: runode-simulator
-description: Run, test and operate apps on an iOS simulator or Android emulator while the user watches it in runode's simulator page - build and install the app, tap, swipe, type, read the screen and its UI tree with mobilecli. Use it whenever you run inside a runode terminal (RUNODE_SESSION is set) and the task touches a simulator, an emulator or a mobile app on one - "test the iOS app", "try it on the simulator", "check the Android build", a UI flow to click through, a screenshot of the app - even if the project has its own script that opens Simulator.app.
+description: Build, install, run and test apps on the iOS simulator, Android emulator or phone that the user watches in runode's simulator page, and tap, swipe, type and read its screen and UI tree with mobilecli. Use it whenever you run inside a runode terminal (RUNODE_SESSION is set) and the task touches a simulator, an emulator or a mobile app on one - "test the iOS app", "try it on the simulator", "check the Android build", a UI flow to click through, a screenshot of the app - even if the project has its own script that opens Simulator.app.
 ---
 
 # Simulators and emulators in runode
@@ -46,18 +46,20 @@ mobilecli snapshot --device <id>                    # elements as text, each wit
 mobilecli dump ui --device <id>                     # the same as JSON with rects, nested in children
 mobilecli screenshot --device <id> --output /tmp/screen.png --max-size 800   # then read the image
 mobilecli io tap --device <id> @e5                  # the centre of that element
-mobilecli io tap --device <id> 120,640              # screen points on iOS, pixels on Android
+mobilecli io tap --device <id> 120,640              # whole numbers: points on iOS, pixels on Android
 mobilecli io longpress --device <id> @e5
 mobilecli io swipe --device <id> 200,700,200,200
 mobilecli io text --device <id> 'hello'             # types into the focused field
-mobilecli io button --device <id> HOME              # BACK on Android only
+mobilecli io button --device <id> HOME              # BACK on Android only; others vary by device
 mobilecli url --device <id> 'myapp://path'          # open a deep link
 mobilecli apps launch --device <id> com.example.app
 mobilecli device logs --device <id> --filter process=App --limit 100
 ```
 
 Tap elements by the ref from the latest `snapshot` or `dump ui` rather than
-by coordinates guessed from a screenshot; after each step take a snapshot or
+by coordinates guessed from a screenshot. When you do compute coordinates
+from a `dump ui` rect, check the element was found and round to whole numbers
+first: mobilecli rejects anything else. After each step take a snapshot or
 screenshot again to check that the screen changed the way you expected, and
 report what you saw.
 

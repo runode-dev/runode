@@ -1,6 +1,6 @@
 ---
 name: runode
-description: Drive other terminals in the runode app - open panes and tabs, list them, type commands or send control keys into them, wait for a command or another agent to finish, and read their output. Use it whenever you run inside a runode terminal (RUNODE_SESSION is set) and the task involves another terminal or another coding agent - tests, a build or a dev server in a pane next to yours, what a neighbouring pane printed, work handed to other agents. In particular use it whenever the user names agent CLIs to bring in (claude, codex, pi, gemini, opencode...), in any language - "use claude and pi to review this", "let codex fix it", a cross-review, a red team / blue team review, a second opinion. Start each named agent in a pane of its own and talk to it through runode instead of imitating it with your own subagents, even if it is the same agent as you. Also use it when the user only says "the pane on the right", "the other terminal" or "run it on the side" and never names runode.
+description: Operate the other terminals of the runode app from inside one of them (RUNODE_SESSION is set) - open panes and tabs, type commands or keys into them, wait for them to finish and read their output. Use it whenever the task involves another terminal - tests, a build or a dev server beside yours, what a neighbouring pane printed - even if the user only says "the pane on the right", "the other terminal" or "run it on the side" and never names runode. Use it also whenever the user names agent CLIs to bring in (claude, codex, pi, gemini, opencode...), in any language - "use claude and pi to review this", "let codex fix it", a cross-review, a red team / blue team review, a second opinion. Run each named agent in a pane of its own and talk to it through runode instead of imitating it with your own subagents, even if it is the same agent as you.
 ---
 
 # Driving other runode terminals
@@ -28,7 +28,9 @@ for an answer), `VIEW` is `shown`, `hidden` (another tab) or `bg` (in no
 window).
 
 Every command takes a SESSION that must match exactly one terminal; when it
-matches several, runode lists them and fails, and you pick one by id.
+matches several, runode lists them and fails, and you pick one by id. The user
+may close a terminal at any time; when an id stops working (`no session`), run
+`runode list` again.
 
 Common forms: an id or any unique prefix of it, `self`, `left` `right` `up`
 `down` (the pane next to yours), `agent:codex` or `agent:claude:idle`,
@@ -86,8 +88,9 @@ runode wait agent:codex                           # the agent is not working now
 
 Without `--for`, `wait` waits for `stopped`: the agent is idle, asking a
 question, or gone. `--for working`, `idle` or `blocked` wait for that state.
-`--for text` looks at the whole screen; `--lines N` widens it to the last N
-lines, scrollback included.
+`--for text` looks at the whole screen, so without `--new` it also matches
+what is already there, the command you just typed included; `--lines N` widens
+it to the last N lines, scrollback included.
 
 `--timeout SECS` gives up with status 124. Status 3 means the terminal exited.
 `--for command` needs shell integration; without it use `--for quiet` or
@@ -153,7 +156,8 @@ it, or say why it is not a problem. Write your answers to /tmp/blue.md." \
   the user.
 - When agents really work at the same time (say each reviews half the
   change), run their `send ... --wait` in the background (`&`, then `wait`)
-  so neither waits for the other.
+  so neither waits for the other. A short `--timeout` is no way to avoid
+  waiting: it only ends in `timed out` while the agent keeps working.
 - Long or multi-line prompts go with `--paste`; give file paths rather than
   pasting large content.
 - Leave the agents' panes open when you are done: the user may want to read
@@ -173,7 +177,7 @@ in runode's simulator page, use the runode-simulator skill.
   sending: text meant for a shell does damage when a REPL, an editor or an
   agent is in front.
 - `ctrl-c` stops whatever runs there, and `runode kill` ends the terminal and
-  closes its pane. Use them only on terminals you started or were asked to
+  closes its pane (one SESSION per call). Use them only on terminals you started or were asked to
   manage.
 - Do not paste secrets: everything you send is visible on the user's screen.
 - The app marks a terminal you operate on as driven by yours; the user sees
