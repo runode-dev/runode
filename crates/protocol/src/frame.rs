@@ -118,8 +118,9 @@ pub fn read_frame_limited(reader: &mut impl Read, limit: u32) -> Result<Option<F
     }
     let kind = FrameKind::from_u8(header[4]).ok_or(FrameError::UnknownKind(header[4]))?;
     let channel = u32::from_le_bytes([header[5], header[6], header[7], header[8]]);
-    // 缓冲按实际到达的字节增长，不照着对面声明的长度一上来就分配。
-    let mut payload = Vec::new();
+    // 声明的长度不大时一次分配够，省掉倍增的几次搬动；大的只先分配 256 KiB，之后按实际到达的字节
+    // 增长，对面谎报长度时不照着它一上来就分配。
+    let mut payload = Vec::with_capacity((len as usize).min(256 << 10));
     reader.take(u64::from(len)).read_to_end(&mut payload)?;
     if payload.len() != len as usize {
         return Err(FrameError::Truncated);
