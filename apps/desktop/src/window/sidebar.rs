@@ -20,7 +20,8 @@ use super::{
 };
 use crate::ui::a11y::A11yPress;
 use crate::{
-    assets::{BRANCH_ICON, GIT_ICON, SIDEBAR_ICON},
+    assets::{BRANCH_ICON, GIT_ICON, SETTINGS_ICON, SIDEBAR_ICON},
+    menus::OpenSettings,
     ui::{
         display_dir,
         font_size::{self, FontSize, scaled},
@@ -241,7 +242,7 @@ impl WindowView {
                     .children(rows),
             )
             .children(self.render_background(fg, bg, cx))
-            .child(self.render_new_workspace_button(fg, bg, cx))
+            .child(self.render_sidebar_footer(fg, bg, cx))
     }
 
     fn render_row(&self, ix: usize, fg: Rgb, bg: Rgb, modifiers: Modifiers, cx: &mut Context<Self>) -> Stateful<Div> {
@@ -424,6 +425,28 @@ impl WindowView {
             )
     }
 
+    /// 侧栏底部一行：左边新建工作区，右边打开设置页。
+    fn render_sidebar_footer(&self, fg: Rgb, bg: Rgb, cx: &mut Context<Self>) -> Div {
+        let settings = rust_i18n::t!("workspace.settings");
+        let settings_tooltip = tooltip(settings.clone(), Some(&OpenSettings), fg, bg);
+        div()
+            .flex_none()
+            .h(scaled(32.))
+            .m(px(6.))
+            .flex()
+            .gap(px(2.))
+            .child(self.render_new_workspace_button(fg, bg, cx))
+            .child(
+                icon_toggle("sidebar-settings", SETTINGS_ICON, 15., false, fg, bg)
+                    .flex_none()
+                    .w(px(32.))
+                    .rounded(px(6.))
+                    .aria_label(settings)
+                    .tooltip(settings_tooltip)
+                    .on_press_down(cx, |this, window, cx| this.open_settings(window, cx)),
+            )
+    }
+
     fn render_new_workspace_button(&self, fg: Rgb, bg: Rgb, cx: &mut Context<Self>) -> Stateful<Div> {
         let hover_bg = hsla(bg.mix(fg, 0.06));
         let tooltip = tooltip(rust_i18n::t!("workspace.new"), Some(&NewWorkspace), fg, bg);
@@ -432,9 +455,8 @@ impl WindowView {
             .id("new-workspace")
             .role(Role::Button)
             .aria_label(rust_i18n::t!("workspace.new"))
-            .flex_none()
-            .h(scaled(32.))
-            .m(px(6.))
+            .flex_1()
+            .min_w_0()
             .px(px(8.))
             .rounded(px(6.))
             .flex()

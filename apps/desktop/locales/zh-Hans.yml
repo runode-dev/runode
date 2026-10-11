@@ -103,6 +103,7 @@ host:
   degraded_detail: 升级时 %{count} 个终端的回滚历史没能带过来，屏幕和正在运行的程序都不受影响。
 workspace:
   new: 新建工作区
+  settings: 设置
   choose: 打开
   close_title: 关闭工作区“%{name}”？
   close_detail: 里面的 %{count} 个终端会一起关闭。

@@ -103,6 +103,7 @@ host:
   degraded_detail: "Scrollback history couldn't be carried over for some terminals (%{count}). Their screens and running programs are fine."
 workspace:
   new: New Workspace
+  settings: Settings
   choose: Open
   close_title: Close the workspace “%{name}”?
   close_detail: Its %{count} terminals will be closed along with it.

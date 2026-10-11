@@ -103,6 +103,7 @@ host:
   degraded_detail: 升級時有 %{count} 個終端機的捲動紀錄沒能帶過來，畫面和正在執行的程式都不受影響。
 workspace:
   new: 新增工作區
+  settings: 設定
   choose: 打開
   close_title: 關閉工作區「%{name}」？
   close_detail: 裡面的 %{count} 個終端機會一起關閉。
