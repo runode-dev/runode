@@ -950,10 +950,12 @@ impl WindowView {
             view.hinted_width.set(laid);
             cx.notify();
         }
+        // 行在 `list` 排版时才画，那时它正可变借着 `ListState`，行里再读它就 panic，所以在这里先读好。
+        let scroll = (view.list.logical_scroll_top(), f32::from(view.list.viewport_bounds().size.height));
         let rows = list(
             view.list.clone(),
             cx.processor(move |this, ix: usize, window, cx| {
-                this.render_markdown_row(ix, width, mono.clone(), fg, bg, window, cx)
+                this.render_markdown_row(ix, width, scroll, mono.clone(), fg, bg, window, cx)
             }),
         )
         .size_full();
@@ -991,6 +993,7 @@ impl WindowView {
         &self,
         ix: usize,
         width: f32,
+        (top, viewport): (ListOffset, f32),
         mono: SharedString,
         fg: Rgb,
         bg: Rgb,
@@ -1192,8 +1195,7 @@ impl WindowView {
                 let all = || std::iter::once(head).chain(rows);
                 // 表头上下两条边、表体一条，格子一样高，按像素就知道哪几行露出来。
                 let (head_h, body_h) = (line_height + 14., line_height + 13.);
-                let viewport = f32::from(view.list.viewport_bounds().size.height);
-                let shown = shown_rows(view.list.logical_scroll_top(), viewport, ix, head_h, body_h, rows.len());
+                let shown = shown_rows(top, viewport, ix, head_h, body_h, rows.len());
                 let (above, below) = (shown.start as f32 * body_h, (rows.len() - shown.end) as f32 * body_h);
                 // 一列一列排：每列的宽是它最宽的格子（max-content），格子一样高，各行自然对齐。只画表头
                 // 和露出来的行，上下用空白占住没画的行；每列垫一个看不见、不占高的估计最宽的格子撑住列宽。
