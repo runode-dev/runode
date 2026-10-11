@@ -41,8 +41,8 @@
 //!    拒绝后宿主关闭连接。
 //! 5. 通过以后，客户端发的第一帧必须是 `ClientMsg::Hello`，`client` 是 `ClientKind::Mobile`，否则
 //!    宿主直接断开。之后整条连接就是普通的连接，和本机 Unix socket 上的一样，只有一个例外：管宿主
-//!    本身、或者只有本机的 app 才该做的请求——`ClientMsg::Shutdown`、交接用的 `Handoff`、
-//!    `HandoffReady`、`HandoffAbort`、`HandoffDone`，以及 `UiReply`、`SetOptions`、`SetTheme`——不转给
+//!    本身、或者只有本机的 app 才该做的请求（`ClientMsg::Shutdown`、交接用的 `Handoff`、
+//!    `HandoffReady`、`HandoffAbort`、`HandoffDone`，以及 `UiReply`、`SetOptions`、`SetTheme`）不转给
 //!    宿主，宿主在发往客户端的方向、两帧之间回一条 `HostMsg::Error`（这几种都不带 `req` 和会话，
 //!    `Error` 也就不带），连接照旧。关单个会话（`Kill`）、开会话、输入、改尺寸这些照常。登记推送的
 //!    `ClientMsg::PushRegister`（见 `push`）也不转给宿主，由监听方按这台设备记下，

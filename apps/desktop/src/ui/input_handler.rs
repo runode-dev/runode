@@ -1,4 +1,4 @@
-//! 输入框和终端挂给窗口的输入处理：照搬 GPUI 的 `ElementInputHandler`，只改一处——按着 Option 时
+//! 输入框和终端挂给窗口的输入处理：照搬 GPUI 的 `ElementInputHandler`，只改一处：按着 Option 时
 //! 按键先走快捷键。
 //!
 //! 中文这类输入法开着时，GPUI 在 macOS 上把不带 Control、Command 的可打印键先交给输入法，输入法把
