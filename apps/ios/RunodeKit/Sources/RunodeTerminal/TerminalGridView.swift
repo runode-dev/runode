@@ -63,6 +63,8 @@
         var hasKeyboardFocus = false {
             didSet { if hasKeyboardFocus != oldValue { invalidateCursor() } }
         }
+        /// 上次刷新以来 `draw` 一共花的时间，`TerminalView.scheduleRefresh` 按它拉开两次刷新、取走后清零。
+        var drawTime: Duration = .zero
         private var colorCache: [Rgb: CGColor] = [:]
         /// 要找后备字体排版的多码位字素簇（emoji 序列、组合字符）排好的 CTLine 和宽度，按文字和字体缓存：
         /// 整屏重画时（全屏 agent 界面每滚一下都是）不再逐字重新排版。颜色从上下文取，不进缓存键。
@@ -132,6 +134,8 @@
         }
 
         override func draw(_ rect: CGRect) {
+            let started = ContinuousClock.now
+            defer { drawTime += .now - started }
             guard let context = UIGraphicsGetCurrentContext() else { return }
             context.setFillColor(color(screen.background))
             context.fill(rect)

@@ -40,6 +40,8 @@
         /// 软键盘收着时界面底部那条按键栏，由 `makeRestingKeyBar` 给出去。
         private weak var restingBar: KeyboardAccessoryBar?
         private var refreshScheduled = false
+        /// 下一次刷新最早在这时候，见 `scheduleRefresh`。
+        private var nextRefresh = ContinuousClock.now
         /// 用户自己捏合缩放过：网格尺寸变了也不再自动按屏幕宽度缩放。
         private var userZoomed = false
         private var lastFitSize: GridSize?
@@ -249,14 +251,24 @@
             scheduleRefresh()
         }
 
-        /// VT 变了：下一轮主循环再从 render state 抄变了的行，一轮里多块输出只刷新一次。
+        /// VT 变了：下一轮主循环再从 render state 抄变了的行，一轮里多块输出只刷新一次。刷屏时输出一块块
+        /// 地来，每块都整屏抄一遍、重画一遍会占满主线程，喂 VT 反倒跟不上；所以两次刷新至少隔一帧，抄和
+        /// 画得慢时再拉开：画发生在刷新之后的空档里，空档取这一轮抄加上一轮画的耗时的两倍，抄和画最多占
+        /// 一半主线程。离上次刷新已经够久时（打字回显）照旧马上刷。
         public func scheduleRefresh() {
             guard !refreshScheduled else { return }
             refreshScheduled = true
             Task { @MainActor [weak self] in
+                guard let wait = self.map({ $0.nextRefresh - .now }) else { return }
+                if wait > .zero { try? await Task.sleep(for: wait) }
                 guard let self else { return }
                 refreshScheduled = false
+                let started = ContinuousClock.now
                 refreshNow()
+                let now = ContinuousClock.now
+                let cost = now - started + grid.drawTime
+                grid.drawTime = .zero
+                nextRefresh = now + max(.milliseconds(16), cost * 2)
             }
         }
 
