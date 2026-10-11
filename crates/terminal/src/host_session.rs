@@ -32,8 +32,8 @@ use anyhow::{Result, anyhow};
 use libghostty_vt::{
     screen::Screen,
     terminal::{
-        ConformanceLevel, DeviceAttributeFeature, DeviceAttributes, DeviceType, PrimaryDeviceAttributes,
-        ProgramStatusState, ProgressState, SecondaryDeviceAttributes, SemanticPrompt, SizeReportSize, Terminal,
+        ColorScheme, ConformanceLevel, DeviceAttributeFeature, DeviceAttributes, DeviceType, PrimaryDeviceAttributes,
+        Mode, ProgramStatusState, ProgressState, SecondaryDeviceAttributes, SemanticPrompt, SizeReportSize, Terminal,
         UnknownSequence,
     },
 };
@@ -457,9 +457,30 @@ impl HostSession {
         if self.settings == *settings {
             return false;
         }
+        let scheme = color_scheme(&self.terminal);
         vt::apply_theme(&mut self.terminal, settings);
         self.settings = settings.clone();
+        self.report_color_scheme(scheme);
         true
+    }
+
+    /// 主题的深浅从 `before` 变了，程序又用 DEC 模式 2031 订了通知时，告诉它现在是深色还是浅色
+    /// （`CSI ? 997 ; 1/2 n`）。Claude Code 的 Auto 主题这类跟着终端换配色的程序靠它切换。
+    fn report_color_scheme(&self, before: Option<ColorScheme>) {
+        let Some(scheme) = color_scheme(&self.terminal).filter(|&scheme| Some(scheme) != before) else {
+            return;
+        };
+        if !self.terminal.mode(Mode::COLOR_SCHEME_REPORT).unwrap_or(false) {
+            return;
+        }
+        let mut buf = [0; 16];
+        match scheme.encode_report(&mut buf) {
+            Ok(len) => {
+                self.replies.set(self.replies.get() + 1);
+                self.writer.reply(&buf[..len]);
+            }
+            Err(err) => tracing::warn!("failed to encode the color scheme report: {err}"),
+        }
     }
 
     /// 把界面发来的输入写给程序。不等写完，见 `PtyWriter`。
@@ -610,7 +631,7 @@ impl HostSession {
         self.writer.write(&query.answer(text));
     }
 
-    /// VT 应答查询写回程序的次数。
+    /// VT 应答查询、宿主主动报告（见 `report_color_scheme`）写回程序的次数。
     pub fn replies(&self) -> u64 {
         self.replies.get()
     }
@@ -710,6 +731,14 @@ fn recapture_report(terminal: &mut Terminal<'static, 'static>) {
     }
 }
 
+/// 主题是深色还是浅色，按默认背景色（主题的，不算程序用 OSC 11 改的）的亮度定，回答程序的
+/// `CSI ? 996 n`，变了时见 `HostSession::report_color_scheme`。
+fn color_scheme(terminal: &Terminal<'_, '_>) -> Option<ColorScheme> {
+    let bg = terminal.default_bg_color().ok()??;
+    let luma = 299 * u32::from(bg.r) + 587 * u32::from(bg.g) + 114 * u32::from(bg.b);
+    Some(if luma < 128_000 { ColorScheme::Dark } else { ColorScheme::Light })
+}
+
 /// 给宿主那份 VT 注册回调：查询的回复写回 `writer`，标题、响铃、进度、提示符、shell 集成的
 /// 报告和写剪贴板的请求记进 `effects`。
 fn register_callbacks(
@@ -767,6 +796,7 @@ fn register_callbacks(
             }
         })?
         .on_xtversion(|_| Some(crate::XTVERSION))?
+        .on_color_scheme(color_scheme)?
         .on_title_changed({
             let effects = effects.clone();
             move |_| effects.title_changed.set(true)

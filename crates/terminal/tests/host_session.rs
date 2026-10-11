@@ -8,13 +8,35 @@ use std::{
 };
 
 use common::idle_host;
-use runode_shared_types::grid::GridSize;
+use runode_shared_types::{color::Rgb, grid::GridSize, settings::TermSettings};
 
 #[test]
 fn terminal_queries_are_answered_by_the_host() {
     let mut session = idle_host();
     session.feed(b"\x1b[c\x1b[5n\x1b[6n\x1b[>q");
     assert!(session.replies() >= 4, "{}", session.replies());
+}
+
+/// 主题深浅的查询（`CSI ? 996 n`）有回答；换主题时只在深浅变了、程序又订了通知（DEC 2031）时才主动报告。
+#[test]
+fn color_scheme_is_reported_when_the_theme_turns_light_or_dark() {
+    let mut session = idle_host();
+    let replies = session.replies();
+    session.feed(b"\x1b[?996n");
+    assert_eq!(session.replies(), replies + 1);
+    let light = TermSettings { background: Rgb(250, 250, 250), foreground: Rgb(20, 20, 20), ..TermSettings::default() };
+    let other_light = TermSettings { background: Rgb(240, 240, 240), ..light.clone() };
+    // 没订通知时不报告。
+    assert!(session.apply_theme(&light));
+    assert_eq!(session.replies(), replies + 1);
+    session.feed(b"\x1b[?2031h");
+    assert!(session.apply_theme(&TermSettings::default()));
+    assert_eq!(session.replies(), replies + 2);
+    assert!(session.apply_theme(&light));
+    assert_eq!(session.replies(), replies + 3);
+    // 换了主题但还是浅色，不报告。
+    assert!(session.apply_theme(&other_light));
+    assert_eq!(session.replies(), replies + 3);
 }
 
 /// shell 集成标了 `redraw=1` 的提示符，改尺寸时整个清掉，shell 收到 SIGWINCH 后重画。折成两行的
