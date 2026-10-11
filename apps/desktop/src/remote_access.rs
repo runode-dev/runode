@@ -54,7 +54,7 @@ pub fn push_settings(config: &Config) -> PushSettings {
         text: config.remote_access_push_text,
         delay: config.remote_access_push_delay,
         direct,
-        relay: config.push_relay_url.clone(),
+        ..PushSettings::default()
     }
 }
 
@@ -137,7 +137,6 @@ mod tests {
 
     #[test]
     fn push_settings_follow_the_config() {
-        assert_eq!(Config::default().push_relay_url, runode_protocol::push::RELAY_URL);
         assert_eq!(push_settings(&Config::default()), PushSettings::default());
         let config = Config {
             apns_key_file: Some("/keys/AuthKey_X.p8".into()),

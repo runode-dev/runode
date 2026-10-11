@@ -134,7 +134,6 @@ impl Config {
             "apns-key-id" => self.apns_key_id.iter().cloned().collect(),
             "apns-team-id" => self.apns_team_id.iter().cloned().collect(),
             "apns-bundle-id" => self.apns_bundle_id.iter().cloned().collect(),
-            "push-relay-url" => vec![self.push_relay_url.clone()],
             "agent-notifications" => bool(self.agent_notifications),
             "agent-notifications-exclude" => {
                 self.agent_notifications_exclude.iter().map(|kind| kind.label().to_owned()).collect()
@@ -175,7 +174,7 @@ mod tests {
              agent-notifications-exclude = codex,claude\nagent-done-sound = none\nlanguage = en\n\
              file-tree-preview-click = double\npalette = 3=#010203\nremote-access = true\n\
              remote-access-push = false\nremote-access-push-delay = 30\napns-key-file = ~/AuthKey_X.p8\n\
-             apns-key-id = X\napns-team-id = T\napns-bundle-id = cn.example.app\npush-relay-url = https://relay.example\n\
+             apns-key-id = X\napns-team-id = T\napns-bundle-id = cn.example.app\n\
              clipboard-write = deny\nclipboard-read = allow\nchat-model = gemma-4-e4b\ndecision-model = cf/clef"]);
         let text: String = KEYS
             .iter()

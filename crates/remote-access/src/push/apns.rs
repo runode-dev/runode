@@ -128,12 +128,12 @@ pub(crate) enum Call<'a> {
     Broadcast { channel: &'a str, event: ActivityEvent, content: &'a ActivityContent },
 }
 
-/// 拼出 `call` 在路线 `route` 上的请求。直连时要 `direct`；`relay` 是中转服务的基址。
+/// 拼出 `call` 在路线 `route` 上的请求。直连时要 `direct`，经中转时要 `relay`（中转服务的基址）。
 pub(crate) fn request(
     route: Route,
     call: &Call<'_>,
     direct: Option<&mut DirectKey>,
-    relay: &str,
+    relay: Option<&str>,
     now: u64,
 ) -> Result<Request, String> {
     match route.via {
@@ -141,7 +141,10 @@ pub(crate) fn request(
             let key = direct.ok_or_else(|| "no APNs key is configured".to_owned())?;
             direct_request(route.env, call, key, now)
         }
-        Via::Relay => relay_request(route.env, call, relay, now),
+        Via::Relay => {
+            let relay = relay.ok_or_else(|| "this build has no push relay".to_owned())?;
+            relay_request(route.env, call, relay, now)
+        }
     }
 }
 
@@ -356,7 +359,7 @@ mod tests {
         let dev = Route { env: ApnsEnv::Development, via: Via::Direct };
         let prod = Route { env: ApnsEnv::Production, via: Via::Direct };
 
-        let create = request(dev, &Call::CreateChannel, Some(&mut key), "", 5).unwrap();
+        let create = request(dev, &Call::CreateChannel, Some(&mut key), None, 5).unwrap();
         assert_eq!(create.method, "POST");
         assert_eq!(
             create.url,
@@ -368,7 +371,7 @@ mod tests {
             Some(br#"{"message-storage-policy":0,"push-type":"LiveActivity"}"#.as_slice())
         );
 
-        let delete = request(prod, &Call::DeleteChannel { channel: CHANNEL }, Some(&mut key), "", 5).unwrap();
+        let delete = request(prod, &Call::DeleteChannel { channel: CHANNEL }, Some(&mut key), None, 5).unwrap();
         assert_eq!(delete.method, "DELETE");
         assert_eq!(delete.url, "https://api-manage-broadcast.push.apple.com:2196/1/apps/dev.runode.mobile/channels");
         assert!(delete.headers.contains(&("apns-channel-id", CHANNEL.into())));
@@ -376,7 +379,7 @@ mod tests {
 
         let (attributes, content) = (attributes(), content());
         let start = Call::Start { token: "00ff", channel: CHANNEL, attributes: &attributes, content: &content };
-        let start = request(prod, &start, Some(&mut key), "", 5).unwrap();
+        let start = request(prod, &start, Some(&mut key), None, 5).unwrap();
         assert_eq!(start.url, "https://api.push.apple.com/3/device/00ff");
         for header in [
             ("apns-topic", "dev.runode.mobile.push-type.liveactivity".to_owned()),
@@ -388,20 +391,20 @@ mod tests {
         assert_eq!(start.body, start_payload(&attributes, &content, CHANNEL, 5));
 
         let end = Call::Broadcast { channel: CHANNEL, event: ActivityEvent::End, content: &content };
-        let end = request(dev, &end, Some(&mut key), "", 7).unwrap();
+        let end = request(dev, &end, Some(&mut key), None, 7).unwrap();
         assert_eq!(end.url, "https://api.sandbox.push.apple.com/4/broadcasts/apps/dev.runode.mobile");
         assert!(end.headers.contains(&("apns-push-type", "LiveActivity".into())));
         assert!(end.headers.contains(&("apns-channel-id", CHANNEL.into())));
         assert_eq!(end.body, end_payload(&content, 7));
 
-        assert!(request(dev, &Call::CreateChannel, None, "", 5).is_err());
+        assert!(request(dev, &Call::CreateChannel, None, None, 5).is_err());
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]
     fn relay_requests_use_the_relay_bodies() {
         let route = Route { env: ApnsEnv::Production, via: Via::Relay };
-        let relay = "https://relay.example/";
+        let relay = Some("https://relay.example/");
         let create = request(route, &Call::CreateChannel, None, relay, 5).unwrap();
         assert_eq!((create.method, create.url.as_str()), ("POST", "https://relay.example/v1/channels"));
         assert_eq!(create.body.as_deref(), Some(br#"{"v":1,"env":"production"}"#.as_slice()));
@@ -409,6 +412,8 @@ mod tests {
 
         let delete = request(route, &Call::DeleteChannel { channel: "c" }, None, relay, 5).unwrap();
         assert_eq!(delete.url, "https://relay.example/v1/channels/delete");
+        // 没带中转的构建发不了。
+        assert!(request(route, &Call::CreateChannel, None, None, 5).is_err());
 
         let content = content();
         let update = Call::Broadcast { channel: "c", event: ActivityEvent::Update, content: &content };

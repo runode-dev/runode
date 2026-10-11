@@ -52,6 +52,8 @@ permissions:
 
 env:
   CARGO_TERM_COLOR: always
+  # 推送中转只编进发布的版本，见 `runode_protocol::push::RELAY_URL`。
+  RUNODE_PUSH_RELAY: https://push.runode.dev
 
 jobs:
   prepare:

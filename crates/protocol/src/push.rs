@@ -52,8 +52,9 @@ pub const STALE_AFTER: u64 = 30 * 60;
 pub const RELEVANCE_SCORE: u32 = 100;
 /// 中转请求体的版本，各请求体的 `v`。
 pub const RELAY_VERSION: u32 = 1;
-/// 官方中转服务的基址，下面几个接口的路径接在它后面。配置项 `push-relay-url` 可以换成别的。
-pub const RELAY_URL: &str = "https://push.runode.dev";
+/// 官方中转服务的基址，下面几个接口的路径接在它后面。只有发布流水线编译时设 `RUNODE_PUSH_RELAY`，
+/// 开发版和自己编译的版本里是 `None`，不经中转推官方 App；本地要测中转时编译前自己设上。
+pub const RELAY_URL: Option<&str> = option_env!("RUNODE_PUSH_RELAY");
 /// 建频道：`POST`，体是 `RelayCreateChannel`，回 `RelayChannel`。
 pub const RELAY_CREATE_CHANNEL: &str = "/v1/channels";
 /// 删频道：`POST`，体是 `RelayDeleteChannel`，回 204。

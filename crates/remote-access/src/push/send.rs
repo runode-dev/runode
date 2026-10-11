@@ -59,7 +59,7 @@ pub(crate) struct Target {
 /// 交给发送线程的事。
 enum Command {
     /// 直连的密钥（`None` 是没配）和中转服务的基址。
-    Settings(Option<ApnsKey>, String),
+    Settings(Option<ApnsKey>, Option<String>),
     /// 读频道文件（只在第一次读），回上次没收起的会话和推出去的最后内容。
     Load(mpsc::Sender<Vec<(SessionId, ActivityContent)>>),
     /// 起 Live Activity：每条路线建一个频道，再推给路线上的每台手机。
@@ -83,7 +83,7 @@ impl Sender {
             direct_config: None,
             direct: None,
             direct_broken: false,
-            relay: runode_protocol::push::RELAY_URL.to_owned(),
+            relay: runode_protocol::push::RELAY_URL.map(str::to_owned),
             queue: Vec::new(),
             open: Vec::new(),
             loaded: false,
@@ -92,7 +92,7 @@ impl Sender {
         Ok(Self { tx })
     }
 
-    pub(crate) fn settings(&self, direct: Option<ApnsKey>, relay: String) {
+    pub(crate) fn settings(&self, direct: Option<ApnsKey>, relay: Option<String>) {
         let _ = self.tx.send(Command::Settings(direct, relay));
     }
 
@@ -223,7 +223,7 @@ struct Worker {
     direct: Option<DirectKey>,
     /// APNs 说密钥不对，配置换了密钥之前直连的都不发。
     direct_broken: bool,
-    relay: String,
+    relay: Option<String>,
     queue: Vec<Queued>,
     open: Vec<OpenSession>,
     /// 读过频道文件了。
@@ -397,7 +397,8 @@ impl Worker {
             Work::DeleteChannel { channel, .. } => Call::DeleteChannel { channel },
             Work::Broadcast { .. } => return Outcome::Done(None),
         };
-        let request = match apns::request(route, &call, self.direct.as_mut(), &self.relay, crate::now_unix()) {
+        let request = match apns::request(route, &call, self.direct.as_mut(), self.relay.as_deref(), crate::now_unix())
+        {
             Ok(request) => request,
             Err(why) => return Outcome::Failed(why),
         };

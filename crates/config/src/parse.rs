@@ -75,7 +75,7 @@ pub const KEYS: &[&[&str]] = &[
         "remote-access-push-text",
         "remote-access-push-delay",
     ],
-    &["apns-key-file", "apns-key-id", "apns-team-id", "apns-bundle-id", "push-relay-url"],
+    &["apns-key-file", "apns-key-id", "apns-team-id", "apns-bundle-id"],
     &["agent-notifications", "agent-notifications-exclude", "agent-done-sound", "agent-blocked-sound"],
     &["chat-model", "decision-model"],
     &["config-file"],
@@ -351,15 +351,6 @@ impl Config {
             "chat-model" => self.chat_model = text(value),
             "decision-model" => self.decision_model = text(value),
             "apns-bundle-id" => self.apns_bundle_id = text(value),
-            "push-relay-url" => {
-                self.push_relay_url = or_default(empty, defaults.push_relay_url, || {
-                    let url = value.trim();
-                    if url.strip_prefix("https://").is_none_or(str::is_empty) {
-                        return Err("expected an https:// URL".into());
-                    }
-                    Ok(url.trim_end_matches('/').to_owned())
-                })?;
-            }
             "agent-notifications" => {
                 self.agent_notifications = or_default(empty, defaults.agent_notifications, || parse_bool(value))?;
             }
@@ -771,11 +762,10 @@ unknown-key = whatever
             (d.remote_access_push, d.remote_access_push_text, d.remote_access_push_delay),
             (true, true, Duration::from_secs(10))
         );
-        assert_eq!((d.apns_key_file.as_deref(), d.push_relay_url.as_str()), (None, "https://push.runode.dev"));
+        assert_eq!(d.apns_key_file, None);
         let config = load(&[
             "remote-access-push = false\nremote-access-push-text = false\nremote-access-push-delay = 30\n\
-             apns-key-file =  ~/keys/AuthKey_X.p8 \napns-key-id = X\napns-team-id = T\napns-bundle-id = cn.example.app\n\
-             push-relay-url = https://relay.example/",
+             apns-key-file =  ~/keys/AuthKey_X.p8 \napns-key-id = X\napns-team-id = T\napns-bundle-id = cn.example.app",
         ]);
         assert_eq!(
             (config.remote_access_push, config.remote_access_push_text, config.remote_access_push_delay),
@@ -786,13 +776,7 @@ unknown-key = whatever
             (config.apns_key_id.as_deref(), config.apns_team_id.as_deref(), config.apns_bundle_id.as_deref()),
             (Some("X"), Some("T"), Some("cn.example.app"))
         );
-        assert_eq!(config.push_relay_url, "https://relay.example");
-        // 不是 https 的、秒数写错的保留前面的值；值为空回到默认。
-        for bad in ["http://relay.example", "relay.example", "https://"] {
-            let config = load(&[&format!("push-relay-url = https://a.example\npush-relay-url = {bad}")]);
-            assert_eq!(config.push_relay_url, "https://a.example", "{bad}");
-        }
-        assert_eq!(load(&["push-relay-url = https://a.example\npush-relay-url ="]).push_relay_url, d.push_relay_url);
+        // 秒数写错的保留前面的值；值为空回到默认。
         for bad in ["-1", "2.5", "soon"] {
             let config = load(&[&format!("remote-access-push-delay = 5\nremote-access-push-delay = {bad}")]);
             assert_eq!(config.remote_access_push_delay, Duration::from_secs(5), "{bad}");

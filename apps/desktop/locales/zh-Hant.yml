@@ -641,7 +641,6 @@ settings:
     apns_key_id: 金鑰 ID
     apns_team_id: Team ID
     apns_bundle_id: App 的 bundle ID
-    push_relay_url: 推播中轉
     agent_notifications: 通知
     agent_notifications_exclude: 不提醒的 agent
     agent_done_sound: agent 完成時的提示音
@@ -700,7 +699,6 @@ settings:
     apns_key_id: 這把金鑰的 10 位 ID，也在檔名 AuthKey_ID.p8 裡。
     apns_team_id: Apple 開發者帳號的 10 位 Team ID。
     apns_bundle_id: 自己編譯的手機 App 的 bundle ID。
-    push_relay_url: 為官方手機 App 發送推播的服務。
     agent_notifications: agent 在你沒在看的分割畫面裡完成或等你回答時發系統通知。只有打包好的 Runode.app 能發通知。
     agent_notifications_exclude: 選中的 agent 不發通知也不出提示音，狀態標記照常顯示。
     agent_done_sound: 系統內建的聲音。

@@ -68,7 +68,6 @@ config:
   apns_key_id: "The ID of that key (10 characters, also in the file name AuthKey_<ID>.p8)."
   apns_team_id: "Your Apple developer team ID (10 characters)."
   apns_bundle_id: "The bundle ID of your build of the phone app; registrations from this app are pushed with your key."
-  push_relay_url: "The relay that sends pushes for the official phone app: an https:// URL."
   command_completions: "Press Tab at the shell prompt to pick a command name, subcommand, option or argument from a menu (arguments only for commands Runode has a spec for); when there is nothing to offer, or zsh binds Tab to another completion such as fzf-tab, Tab goes to the shell. false always sends Tab to the shell."
   agent_notifications: "Post a system notification when an agent is waiting for your answer or has finished in a split you are not looking at: true, false. Notifications only work in the packaged Runode.app."
   agent_notifications_exclude: |-

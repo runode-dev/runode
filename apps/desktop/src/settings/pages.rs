@@ -199,7 +199,6 @@ impl Page {
                 Row("apns-key-id", Text(120.)),
                 Row("apns-team-id", Text(120.)),
                 Row("apns-bundle-id", Text(200.)),
-                Row("push-relay-url", Text(300.)),
             ],
             Self::Keybinds => &[],
         }

@@ -31,6 +31,7 @@ use super::{
     ApnsKey, Listening, PushSettings, Pusher,
     apns::{Route, Via, test_key},
     curl::Curl,
+    route,
     send::{Sender, Target},
 };
 use crate::devices::{self, Device, PushRegistration};
@@ -189,7 +190,7 @@ fn url(config: &str) -> &str {
 fn a_round_through_the_relay() {
     let scratch = Scratch::new("relay");
     let sender = Sender::start(scratch.dirs.clone(), scratch.curl.clone()).unwrap();
-    sender.settings(None, "https://relay.example".into());
+    sender.settings(None, Some("https://relay.example".into()));
     assert_eq!(sender.load(), []);
     sender.open(SESSION, vec![(RELAY_PROD, vec![target()])], content(&["Proceed?"]));
     let requests = scratch.wait_for(2);
@@ -227,7 +228,7 @@ fn direct_pushes_sign_with_the_key() {
     let (key_file, _) = test_key(&scratch.root);
     let sender = Sender::start(scratch.dirs.clone(), scratch.curl.clone()).unwrap();
     let key = ApnsKey { key_file, key_id: "K".into(), team_id: "T".into(), bundle: "dev.example.app".into() };
-    sender.settings(Some(key), "https://relay.example".into());
+    sender.settings(Some(key), Some("https://relay.example".into()));
     let route = Route { env: ApnsEnv::Development, via: Via::Direct };
     sender.open(SESSION, vec![(route, vec![target()])], content(&[]));
     let requests = scratch.wait_for(2);
@@ -249,7 +250,7 @@ fn direct_pushes_sign_with_the_key() {
     let (key_file, _) = test_key(&scratch.root);
     sender.settings(
         Some(ApnsKey { key_file, key_id: "K2".into(), team_id: "T".into(), bundle: "dev.example.app".into() }),
-        "https://relay.example".into(),
+        Some("https://relay.example".into()),
     );
     sender.update(SESSION, content(&["c"]));
     let requests = scratch.wait_for(4);
@@ -262,7 +263,7 @@ fn bad_tokens_try_the_other_environment() {
     let scratch = Scratch::new("badtoken");
     scratch.register(ApnsEnv::Production, OFFICIAL_BUNDLE);
     let sender = Sender::start(scratch.dirs.clone(), scratch.curl.clone()).unwrap();
-    sender.settings(None, "https://relay.example".into());
+    sender.settings(None, Some("https://relay.example".into()));
     scratch.rule("/v1/start", r#"HTTP/2 400\r\n\r\n{"reason":"BadDeviceToken"}"#);
     sender.open(SESSION, vec![(RELAY_PROD, vec![target()])], content(&[]));
     let requests = scratch.wait_for(4);
@@ -288,7 +289,7 @@ fn bad_tokens_try_the_other_environment() {
 fn failures_are_retried_and_ends_win() {
     let scratch = Scratch::new("retry");
     let sender = Sender::start(scratch.dirs.clone(), scratch.curl.clone()).unwrap();
-    sender.settings(None, "https://relay.example".into());
+    sender.settings(None, Some("https://relay.example".into()));
     scratch.rule("/v1/channels", "FAIL");
     let started = Instant::now();
     sender.open(SESSION, vec![(RELAY_PROD, vec![target()])], content(&[]));
@@ -311,14 +312,14 @@ fn failures_are_retried_and_ends_win() {
 fn open_rounds_survive_a_restart() {
     let scratch = Scratch::new("restart");
     let sender = Sender::start(scratch.dirs.clone(), scratch.curl.clone()).unwrap();
-    sender.settings(None, "https://relay.example".into());
+    sender.settings(None, Some("https://relay.example".into()));
     sender.load();
     sender.open(SESSION, vec![(RELAY_PROD, vec![target()])], content(&["q"]));
     scratch.wait_for(2);
     drop(sender);
     let sender = Sender::start(scratch.dirs.clone(), scratch.curl.clone()).unwrap();
     assert_eq!(sender.load(), [(SESSION, content(&["q"]))]);
-    sender.settings(None, "https://relay.example".into());
+    sender.settings(None, Some("https://relay.example".into()));
     sender.end(SESSION, content(&["q"]));
     let requests = scratch.wait_for(4);
     assert_eq!(body(&requests[3])["channel"], "relay-000");
@@ -401,7 +402,7 @@ fn the_pusher_follows_the_host() {
     host.set(AgentState::Blocked);
     let pusher = Pusher::start_with(scratch.dirs.clone(), host.connect(), scratch.curl.clone()).unwrap();
     let settings =
-        PushSettings { delay: Duration::ZERO, relay: "https://relay.example".into(), ..PushSettings::default() };
+        PushSettings { delay: Duration::ZERO, relay: Some("https://relay.example".into()), ..PushSettings::default() };
     pusher.set_settings(settings.clone());
     pusher.set_listening(Listening::On);
     // 没有登记时不连。
@@ -434,4 +435,34 @@ fn the_pusher_follows_the_host() {
     thread::sleep(Duration::from_secs(3));
     assert_eq!(host.connections.load(Ordering::SeqCst), 1);
     assert_eq!(scratch.requests().len(), 4);
+}
+
+/// 官方 App 只在这个构建带着中转时经中转推，没带时跳过。
+#[test]
+fn the_official_app_needs_a_relay() {
+    let registration = PushRegistration {
+        device_id: DEVICE,
+        token: TOKEN.into(),
+        env: ApnsEnv::Production,
+        bundle: OFFICIAL_BUNDLE.into(),
+        machine: "6F9619FF-8B86-D011-B42D-00C04FC964FF".into(),
+        machine_name: "Mac".into(),
+        updated_at: 1,
+    };
+    let relay = PushSettings { relay: Some("https://relay.example".into()), ..PushSettings::default() };
+    assert_eq!(route(&registration, &relay), Some(RELAY_PROD));
+    assert_eq!(route(&registration, &PushSettings { relay: None, ..relay }), None);
+}
+
+/// 登记都推不出去（没带中转的构建里只有官方 App 的登记）时不连宿主，单独跑的宿主照常能因空闲退出。
+#[test]
+fn unroutable_registrations_leave_the_host_alone() {
+    let scratch = Scratch::new("unroutable");
+    let host = FakeHost::default();
+    let pusher = Pusher::start_with(scratch.dirs.clone(), host.connect(), scratch.curl.clone()).unwrap();
+    pusher.set_settings(PushSettings { delay: Duration::ZERO, relay: None, ..PushSettings::default() });
+    pusher.set_listening(Listening::On);
+    scratch.register(ApnsEnv::Production, OFFICIAL_BUNDLE);
+    thread::sleep(Duration::from_secs(3));
+    assert_eq!(host.connections.load(Ordering::SeqCst), 0);
 }

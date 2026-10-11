@@ -8,7 +8,7 @@
 //! 不满足条件时断开这条连接，单独跑的宿主照常能因空闲退出。
 //!
 //! 推送的路线按登记的 bundle id 定：等于配置的 `ApnsKey::bundle` 时用那把密钥直连 APNs，等于官方 App
-//! 的 `OFFICIAL_BUNDLE` 时经中转服务，别的跳过（每个 bundle 记一次日志）。
+//! 的 `OFFICIAL_BUNDLE` 而这个构建带着中转（`RELAY_URL`）时经中转服务，别的跳过（每个 bundle 记一次日志）。
 //!
 //! 关了推送、关了远程访问、登记都删光了时，开着的回合都收起。监听只是暂时没开成（端口被占、交接时
 //! 旧宿主还没放手）时不收起，回合留在频道文件里。宿主说它交接给了新版本（`GoodbyeReason::Handoff`）
@@ -68,13 +68,19 @@ pub struct PushSettings {
     pub delay: Duration,
     /// 直连 APNs 用的密钥；没配时为 `None`，只能经中转推官方 App。
     pub direct: Option<ApnsKey>,
-    /// 中转服务的基址。
-    pub relay: String,
+    /// 中转服务的基址；这个构建没带中转时为 `None`，见 `RELAY_URL`。
+    pub relay: Option<String>,
 }
 
 impl Default for PushSettings {
     fn default() -> Self {
-        Self { enabled: true, text: true, delay: Duration::from_secs(10), direct: None, relay: RELAY_URL.to_owned() }
+        Self {
+            enabled: true,
+            text: true,
+            delay: Duration::from_secs(10),
+            direct: None,
+            relay: RELAY_URL.map(str::to_owned),
+        }
     }
 }
 
@@ -175,7 +181,7 @@ struct Poller {
     /// curl 能不能用，第一次要推时看一次。
     curl_ok: Option<bool>,
     /// 交给发送线程的密钥和中转基址，变了才再交。
-    sent_settings: Option<(Option<ApnsKey>, String)>,
+    sent_settings: Option<(Option<ApnsKey>, Option<String>)>,
     /// 宿主交接给了新版本，不再连。
     handed_off: bool,
     /// 下次要会话列表、读设备表的时刻。
@@ -313,9 +319,10 @@ impl Poller {
         }
     }
 
-    /// 现在该不该连着宿主推：开着推送、监听开着、有登记、curl 能用、宿主没交接走。
+    /// 现在该不该连着宿主推：开着推送、监听开着、有推得出去的登记、curl 能用、宿主没交接走。
     fn active(&mut self, settings: &PushSettings, listening: Listening) -> bool {
-        if !settings.enabled || listening != Listening::On || self.registrations.is_empty() || self.handed_off {
+        let routable = self.registrations.iter().any(|registration| route(registration, settings).is_some());
+        if !settings.enabled || listening != Listening::On || !routable || self.handed_off {
             return false;
         }
         *self.curl_ok.get_or_insert_with(|| {
@@ -353,11 +360,12 @@ impl Poller {
         for registration in &self.registrations {
             let Some(route) = route(registration, settings) else {
                 if self.skipped.insert(registration.bundle.clone()) {
-                    tracing::info!(
-                        "not pushing to the app {} ({:?}): no APNs key is configured for it",
-                        registration.bundle,
-                        registration.env
-                    );
+                    let why = if registration.bundle == OFFICIAL_BUNDLE {
+                        "this build has no push relay"
+                    } else {
+                        "no APNs key is configured for it"
+                    };
+                    tracing::info!("not pushing to the app {} ({:?}): {why}", registration.bundle, registration.env);
                 }
                 continue;
             };
@@ -382,7 +390,7 @@ fn route(registration: &PushRegistration, settings: &PushSettings) -> Option<Rou
     }
     let via = if settings.direct.as_ref().is_some_and(|key| key.bundle == registration.bundle) {
         Via::Direct
-    } else if registration.bundle == OFFICIAL_BUNDLE {
+    } else if registration.bundle == OFFICIAL_BUNDLE && settings.relay.is_some() {
         Via::Relay
     } else {
         return None;

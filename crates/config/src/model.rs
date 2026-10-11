@@ -158,8 +158,6 @@ pub struct Config {
     pub apns_key_id: Option<String>,
     pub apns_team_id: Option<String>,
     pub apns_bundle_id: Option<String>,
-    /// 推官方 App 时经过的中转服务的基址。
-    pub push_relay_url: String,
     /// 界面语言，是 locales 里的某个语言标签；`None` 表示跟随系统。
     pub language: Option<String>,
     /// agent 等用户回答或者干完了、用户又没在看那个分屏时，发系统通知。
@@ -237,8 +235,6 @@ impl Default for Config {
             apns_key_id: None,
             apns_team_id: None,
             apns_bundle_id: None,
-            // 和 `runode_protocol::push::RELAY_URL` 一样；config 不依赖 protocol，桌面的测试对着两边。
-            push_relay_url: "https://push.runode.dev".into(),
             language: None,
             agent_notifications: true,
             agent_notifications_exclude: Vec::new(),
