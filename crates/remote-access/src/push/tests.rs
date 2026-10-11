@@ -16,7 +16,7 @@ use std::{
 use runode_paths::Dirs;
 use runode_protocol::{
     ClientMsg, Frame, FrameKind, HostMsg, PROTOCOL_VERSION, SessionId, SessionInfo,
-    push::{ActivityAttributes, ActivityContent, ApnsEnv, OFFICIAL_BUNDLE},
+    push::{ApnsEnv, EXPIRES_AFTER, Notification, OFFICIAL_BUNDLE},
     read_frame,
     remote::{Bytes, DeviceId},
     write_frame,
@@ -28,9 +28,10 @@ use runode_shared_types::{
 };
 
 use super::{
-    ApnsKey, Listening, PushSettings, Pusher,
+    ApnsKey, Listening, PushSettings, Pusher, TestPush,
     apns::{Route, Via, test_key},
     curl::Curl,
+    probe::probe,
     route,
     send::{Sender, Target},
 };
@@ -94,7 +95,7 @@ impl Scratch {
         requests
     }
 
-    /// 配对一台设备，登记 `bundle` 的 push-to-start token。
+    /// 配对一台设备，登记 `bundle` 的 device token。
     fn register(&self, env: ApnsEnv, bundle: &str) {
         let device =
             Device { device_id: DEVICE, name: "手机".into(), public_key: Bytes(vec![4]), paired_at: 1, last_seen: 1 };
@@ -114,11 +115,6 @@ impl Scratch {
     fn registrations(&self) -> Vec<PushRegistration> {
         devices::push_registrations(&self.dirs).unwrap()
     }
-
-    fn channels_file(&self) -> Option<serde_json::Value> {
-        let text = std::fs::read_to_string(self.dirs.remote_access_push_channels_file().unwrap()).ok()?;
-        Some(serde_json::from_str(&text).unwrap())
-    }
 }
 
 impl Drop for Scratch {
@@ -128,7 +124,7 @@ impl Drop for Scratch {
 }
 
 /// 假的 curl：`--version` 说自己会 HTTP/2；别的时候把 stdin 上的配置存成 `req-NNN`，先找第一条匹配的
-/// 规则（`rule-NNN`：第一行是要找的文字，其余是响应），没有就按 URL 回：建频道回一个新频道，别的回 200。
+/// 规则（`rule-NNN`：第一行是要找的文字，其余是响应），没有就回 200。
 const FAKE_CURL: &str = r#"#!/bin/sh
 dir='@LOG@'
 if [ "$1" = "--version" ]; then
@@ -150,27 +146,24 @@ for rule in "$dir"/rule-*; do
     exit 0
   fi
 done
-case $(cat "$req") in
-  *'/v1/channels"'*) printf 'HTTP/2 200\r\n\r\n{"channel":"relay-%s"}' "$n" ;;
-  *'/channels"'*'request = "POST"'*) printf 'HTTP/2 201\r\napns-channel-id: direct-%s\r\n\r\n' "$n" ;;
-  *) printf 'HTTP/2 200\r\n\r\n' ;;
-esac
+printf 'HTTP/2 200\r\n\r\n'
 "#;
 
-fn content(lines: &[&str]) -> ActivityContent {
-    ActivityContent {
+const MACHINE: &str = "6F9619FF-8B86-D011-B42D-00C04FC964FF";
+
+fn notification(lines: &[&str]) -> Notification {
+    Notification {
+        machine: MACHINE.into(),
+        machine_name: "Mac".into(),
+        session: SESSION,
         title: "修 bug".into(),
         agent: "Claude Code".into(),
         lines: lines.iter().map(|l| (*l).into()).collect(),
     }
 }
 
-fn target() -> Target {
-    Target {
-        device: DEVICE,
-        token: TOKEN.into(),
-        attributes: ActivityAttributes::new("6F9619FF-8B86-D011-B42D-00C04FC964FF".into(), "Mac", SESSION),
-    }
+fn target(route: Route, lines: &[&str]) -> Target {
+    Target { route, device: DEVICE, token: TOKEN.into(), notification: notification(lines) }
 }
 
 /// 请求体里的 JSON。
@@ -185,43 +178,33 @@ fn url(config: &str) -> &str {
     &line[1..line.len() - 1]
 }
 
-/// 经中转起、刷新、收起：建频道 → 起 → 广播刷新 → 广播收起 → 删频道，频道文件跟着记下又删掉。
+/// 请求头 `name` 的值。
+fn header<'a>(config: &'a str, name: &str) -> Option<&'a str> {
+    let prefix = format!("header = \"{name}: ");
+    config.lines().find_map(|line| line.strip_prefix(prefix.as_str())).map(|value| &value[..value.len() - 1])
+}
+
+/// 经中转：一条通知一个请求，体是 `RelayNotify`。
 #[test]
-fn a_round_through_the_relay() {
+fn notifications_through_the_relay() {
     let scratch = Scratch::new("relay");
     let sender = Sender::start(scratch.dirs.clone(), scratch.curl.clone()).unwrap();
     sender.settings(None, Some("https://relay.example".into()));
-    assert_eq!(sender.load(), []);
-    sender.open(SESSION, vec![(RELAY_PROD, vec![target()])], content(&["Proceed?"]));
-    let requests = scratch.wait_for(2);
-    assert_eq!(url(&requests[0]), "https://relay.example/v1/channels");
-    assert_eq!(body(&requests[0]), serde_json::json!({ "v": 1, "env": "production" }));
-    assert_eq!(url(&requests[1]), "https://relay.example/v1/start");
-    let start = body(&requests[1]);
-    assert_eq!((start["token"].as_str(), start["channel"].as_str()), (Some(TOKEN), Some("relay-000")));
-    assert_eq!(start["content"]["lines"], serde_json::json!(["Proceed?"]));
-    let file = scratch.channels_file().unwrap();
-    assert_eq!(file["sessions"][0]["channels"][0]["channel"], "relay-000");
-
-    sender.update(SESSION, content(&["Allow edits?"]));
-    let requests = scratch.wait_for(3);
-    let update = body(&requests[2]);
-    assert_eq!((url(&requests[2]), update["event"].as_str()), ("https://relay.example/v1/broadcast", Some("update")));
-    assert_eq!(update["content"]["lines"], serde_json::json!(["Allow edits?"]));
-    assert_eq!(
-        scratch.channels_file().unwrap()["sessions"][0]["content"]["lines"],
-        serde_json::json!(["Allow edits?"])
-    );
-
-    sender.end(SESSION, content(&[]));
-    let requests = scratch.wait_for(5);
-    assert_eq!(body(&requests[3])["event"], "end");
-    assert_eq!(url(&requests[4]), "https://relay.example/v1/channels/delete");
-    assert_eq!(body(&requests[4])["channel"], "relay-000");
-    assert_eq!(scratch.channels_file().unwrap()["sessions"], serde_json::json!([]));
+    let before = crate::now_unix();
+    sender.notify(vec![target(RELAY_PROD, &["Proceed?"])]);
+    let requests = scratch.wait_for(1);
+    assert_eq!(url(&requests[0]), "https://relay.example/v2/notify");
+    let notify = body(&requests[0]);
+    assert_eq!((notify["v"].as_u64(), notify["env"].as_str()), (Some(2), Some("production")));
+    assert_eq!(notify["token"], TOKEN);
+    assert_eq!(notify["notification"]["lines"], serde_json::json!(["Proceed?"]));
+    assert_eq!(notify["notification"]["session"], SESSION.to_string());
+    let expiration = notify["expiration"].as_u64().unwrap();
+    assert!((before + EXPIRES_AFTER..=crate::now_unix() + EXPIRES_AFTER).contains(&expiration));
 }
 
-/// 直连：JWT 只在 stdin 的配置里，不在命令行参数里；建频道拿响应头里的 id。
+/// 直连：JWT 只在 stdin 的配置里，不在命令行参数里；请求头带上 topic、提醒类型、过期时刻和
+/// collapse-id。
 #[test]
 fn direct_pushes_sign_with_the_key() {
     let scratch = Scratch::new("direct");
@@ -230,99 +213,108 @@ fn direct_pushes_sign_with_the_key() {
     let key = ApnsKey { key_file, key_id: "K".into(), team_id: "T".into(), bundle: "dev.example.app".into() };
     sender.settings(Some(key), Some("https://relay.example".into()));
     let route = Route { env: ApnsEnv::Development, via: Via::Direct };
-    sender.open(SESSION, vec![(route, vec![target()])], content(&[]));
-    let requests = scratch.wait_for(2);
-    assert_eq!(
-        url(&requests[0]),
-        "https://api-manage-broadcast.sandbox.push.apple.com:2195/1/apps/dev.example.app/channels"
-    );
-    assert!(requests[0].contains("header = \"authorization: bearer "));
-    assert_eq!(url(&requests[1]), format!("https://api.sandbox.push.apple.com/3/device/{TOKEN}"));
-    assert_eq!(body(&requests[1])["aps"]["input-push-channel"], "direct-000");
+    let before = crate::now_unix();
+    sender.notify(vec![target(route, &["Proceed?"])]);
+    let requests = scratch.wait_for(1);
+    let request = &requests[0];
+    assert_eq!(url(request), format!("https://api.sandbox.push.apple.com/3/device/{TOKEN}"));
+    assert!(header(request, "authorization").unwrap().starts_with("bearer "));
+    assert_eq!(header(request, "apns-topic"), Some("dev.example.app"));
+    assert_eq!(header(request, "apns-push-type"), Some("alert"));
+    assert_eq!(header(request, "apns-priority"), Some("10"));
+    assert_eq!(header(request, "apns-collapse-id"), Some(SESSION.to_string().as_str()));
+    let expiration: u64 = header(request, "apns-expiration").unwrap().parse().unwrap();
+    assert!((before + EXPIRES_AFTER..=crate::now_unix() + EXPIRES_AFTER).contains(&expiration));
+    assert_eq!(body(request)["aps"]["alert"]["body"], "Proceed?");
+    assert_eq!(body(request)["session"], SESSION.to_string());
 
     // 密钥不对：记错误，直连的不再发，换了配置才再发。
-    scratch.rule("/4/broadcasts", r#"HTTP/2 403\r\n\r\n{"reason":"InvalidProviderToken"}"#);
-    sender.update(SESSION, content(&["a"]));
-    scratch.wait_for(3);
-    sender.update(SESSION, content(&["b"]));
+    scratch.rule("/3/device", r#"HTTP/2 403\r\n\r\n{"reason":"InvalidProviderToken"}"#);
+    sender.notify(vec![target(route, &["a"])]);
+    scratch.wait_for(2);
+    sender.notify(vec![target(route, &["b"])]);
     thread::sleep(Duration::from_millis(500));
-    assert_eq!(scratch.requests().len(), 3);
+    assert_eq!(scratch.requests().len(), 2);
     let (key_file, _) = test_key(&scratch.root);
     sender.settings(
         Some(ApnsKey { key_file, key_id: "K2".into(), team_id: "T".into(), bundle: "dev.example.app".into() }),
         Some("https://relay.example".into()),
     );
-    sender.update(SESSION, content(&["c"]));
-    let requests = scratch.wait_for(4);
-    assert_eq!(body(&requests[3])["aps"]["content-state"]["lines"], serde_json::json!(["c"]));
+    sender.notify(vec![target(route, &["c"])]);
+    let requests = scratch.wait_for(3);
+    assert_eq!(body(&requests[2])["aps"]["alert"]["body"], "c");
 }
 
-/// token 不认时换另一个环境（另建频道）再起，成了把登记的环境改过来；两边都不认就删掉登记。
+/// token 不认时换另一个环境再发，成了把登记的环境改过来；两边都不认就删掉登记。
 #[test]
 fn bad_tokens_try_the_other_environment() {
     let scratch = Scratch::new("badtoken");
     scratch.register(ApnsEnv::Production, OFFICIAL_BUNDLE);
     let sender = Sender::start(scratch.dirs.clone(), scratch.curl.clone()).unwrap();
     sender.settings(None, Some("https://relay.example".into()));
-    scratch.rule("/v1/start", r#"HTTP/2 400\r\n\r\n{"reason":"BadDeviceToken"}"#);
-    sender.open(SESSION, vec![(RELAY_PROD, vec![target()])], content(&[]));
-    let requests = scratch.wait_for(4);
-    assert_eq!(body(&requests[2]), serde_json::json!({ "v": 1, "env": "development" }));
-    let start = body(&requests[3]);
-    assert_eq!((start["env"].as_str(), start["channel"].as_str()), (Some("development"), Some("relay-002")));
+    scratch.rule("/v2/notify", r#"HTTP/2 400\r\n\r\n{"reason":"BadDeviceToken"}"#);
+    sender.notify(vec![target(RELAY_PROD, &[])]);
+    let requests = scratch.wait_for(2);
+    assert_eq!(body(&requests[0])["env"], "production");
+    assert_eq!(body(&requests[1])["env"], "development");
     assert_eq!(scratch.registrations()[0].env, ApnsEnv::Development);
-    // 收起时两个频道都收起、都删掉。
-    sender.end(SESSION, content(&[]));
-    let requests = scratch.wait_for(8);
-    let deleted: Vec<String> = requests[6..].iter().map(|r| body(r)["channel"].as_str().unwrap().to_owned()).collect();
-    assert_eq!(deleted, ["relay-000", "relay-002"]);
 
-    scratch.rule("/v1/start", r#"HTTP/2 410\r\n\r\n{"reason":"Unregistered"}"#);
-    scratch.rule("/v1/start", r#"HTTP/2 410\r\n\r\n{"reason":"Unregistered"}"#);
-    sender.open(SESSION, vec![(RELAY_PROD, vec![target()])], content(&[]));
-    scratch.wait_for(12);
+    scratch.rule("/v2/notify", r#"HTTP/2 410\r\n\r\n{"reason":"Unregistered"}"#);
+    scratch.rule("/v2/notify", r#"HTTP/2 410\r\n\r\n{"reason":"Unregistered"}"#);
+    sender.notify(vec![target(RELAY_PROD, &[])]);
+    scratch.wait_for(4);
     assert_eq!(scratch.registrations(), []);
 }
 
-/// 连不上时退避重试；收起时还没起来的不用起了。
+/// 连不上时退避重试。
 #[test]
-fn failures_are_retried_and_ends_win() {
+fn failures_are_retried() {
     let scratch = Scratch::new("retry");
     let sender = Sender::start(scratch.dirs.clone(), scratch.curl.clone()).unwrap();
     sender.settings(None, Some("https://relay.example".into()));
-    scratch.rule("/v1/channels", "FAIL");
+    scratch.rule("/v2/notify", "FAIL");
     let started = Instant::now();
-    sender.open(SESSION, vec![(RELAY_PROD, vec![target()])], content(&[]));
-    let requests = scratch.wait_for(3);
+    sender.notify(vec![target(RELAY_PROD, &[])]);
+    let requests = scratch.wait_for(2);
     assert!(started.elapsed() >= Duration::from_secs(2));
-    assert_eq!(url(&requests[2]), "https://relay.example/v1/start");
-
-    // 起 Live Activity 一直失败时，收起会把它从队里拿掉，接着收起、删频道。
-    let other = SessionId(2);
-    scratch.rule("/v1/channels", "HTTP/2 503\\r\\n\\r\\n");
-    sender.open(other, vec![(RELAY_PROD, vec![target()])], content(&[]));
-    scratch.wait_for(4);
-    sender.end(other, content(&[]));
-    thread::sleep(Duration::from_secs(3));
-    assert_eq!(scratch.requests().len(), 4);
+    assert_eq!(body(&requests[0])["notification"], body(&requests[1])["notification"]);
 }
 
-/// 频道文件读回来的是上次没收起的会话和最后内容。
+/// 在退避的通知：会话不再等了就不发；同一个会话又等了，只发新的，旧的不会晚到把新问题替掉。
 #[test]
-fn open_rounds_survive_a_restart() {
-    let scratch = Scratch::new("restart");
+fn backing_off_notifications_are_cancelled_or_replaced() {
+    let scratch = Scratch::new("cancel");
     let sender = Sender::start(scratch.dirs.clone(), scratch.curl.clone()).unwrap();
     sender.settings(None, Some("https://relay.example".into()));
-    sender.load();
-    sender.open(SESSION, vec![(RELAY_PROD, vec![target()])], content(&["q"]));
+    scratch.rule("/v2/notify", "FAIL");
+    sender.notify(vec![target(RELAY_PROD, &["old"])]);
+    scratch.wait_for(1);
+    sender.cancel(SESSION);
+    thread::sleep(Duration::from_secs(3));
+    scratch.wait_for(1);
+
+    scratch.rule("/v2/notify", "FAIL");
+    sender.notify(vec![target(RELAY_PROD, &["old"])]);
     scratch.wait_for(2);
-    drop(sender);
+    sender.notify(vec![target(RELAY_PROD, &["new"])]);
+    let requests = scratch.wait_for(3);
+    assert_eq!(body(&requests[2])["notification"]["lines"], serde_json::json!(["new"]));
+    thread::sleep(Duration::from_secs(3));
+    scratch.wait_for(3);
+}
+
+/// 在退避的通知：那台手机注销了、换了 token 或者关了推送，就不发了。
+#[test]
+fn backing_off_notifications_follow_the_registrations() {
+    let scratch = Scratch::new("keep");
     let sender = Sender::start(scratch.dirs.clone(), scratch.curl.clone()).unwrap();
-    assert_eq!(sender.load(), [(SESSION, content(&["q"]))]);
     sender.settings(None, Some("https://relay.example".into()));
-    sender.end(SESSION, content(&["q"]));
-    let requests = scratch.wait_for(4);
-    assert_eq!(body(&requests[3])["channel"], "relay-000");
+    scratch.rule("/v2/notify", "FAIL");
+    sender.notify(vec![target(RELAY_PROD, &[])]);
+    scratch.wait_for(1);
+    sender.keep(vec![(DEVICE, "0123".into())]);
+    thread::sleep(Duration::from_secs(3));
+    scratch.wait_for(1);
 }
 
 /// 假的宿主：每条连接一个线程，回 `Welcome`、会话列表和屏幕文字。
@@ -393,8 +385,8 @@ fn wait_until(what: &str, done: impl Fn() -> bool) {
     }
 }
 
-/// 整条路：有登记才连宿主；连上时已经在等的不推，之后变成等回答的起 Live Activity（带屏幕上的问题），
-/// 答了收起；关了推送就断开。
+/// 整条路：有登记才连宿主；连上时已经在等的不推，之后变成等回答的推一条通知（带屏幕上的问题），
+/// 一直等着也只推这一条；关了推送就断开。
 #[test]
 fn the_pusher_follows_the_host() {
     let scratch = Scratch::new("pusher");
@@ -418,15 +410,16 @@ fn the_pusher_follows_the_host() {
     host.set(AgentState::Working);
     thread::sleep(Duration::from_millis(2500));
     host.set(AgentState::Blocked);
-    let requests = scratch.wait_for(2);
-    let start = body(&requests[1]);
-    assert_eq!(start["content"]["lines"], serde_json::json!(["Do you want to proceed?"]));
-    assert_eq!(start["attributes"]["session"], SESSION.to_string());
-
+    let requests = scratch.wait_for(1);
+    let notification = &body(&requests[0])["notification"];
+    assert_eq!(notification["lines"], serde_json::json!(["Do you want to proceed?"]));
+    assert_eq!(notification["session"], SESSION.to_string());
+    assert_eq!((notification["machine"].as_str(), notification["machine_name"].as_str()), (Some(MACHINE), Some("Mac")));
+    // 一直等着不再推，答了也不推。
+    thread::sleep(Duration::from_secs(3));
     host.set(AgentState::Working);
-    let requests = scratch.wait_for(4);
-    assert_eq!(body(&requests[2])["event"], "end");
-    assert_eq!(url(&requests[3]), "https://relay.example/v1/channels/delete");
+    thread::sleep(Duration::from_millis(2500));
+    assert_eq!(scratch.requests().len(), 1);
 
     // 关了推送：断开，不再连。
     pusher.set_settings(PushSettings { enabled: false, ..settings });
@@ -434,7 +427,7 @@ fn the_pusher_follows_the_host() {
     host.set(AgentState::Blocked);
     thread::sleep(Duration::from_secs(3));
     assert_eq!(host.connections.load(Ordering::SeqCst), 1);
-    assert_eq!(scratch.requests().len(), 4);
+    assert_eq!(scratch.requests().len(), 1);
 }
 
 /// 官方 App 只在这个构建带着中转时经中转推，没带时跳过。
@@ -465,4 +458,33 @@ fn unroutable_registrations_leave_the_host_alone() {
     scratch.register(ApnsEnv::Production, OFFICIAL_BUNDLE);
     thread::sleep(Duration::from_secs(3));
     assert_eq!(host.connections.load(Ordering::SeqCst), 0);
+}
+
+/// 测试推送：给每条登记直接发一条通知，回推到了几台；没有登记时回 0，推不到的登记回原因，不发请求。
+#[test]
+fn a_test_push_notifies_each_phone() {
+    let scratch = Scratch::new("probe");
+    let (key_file, _) = test_key(&scratch.root);
+    let key = ApnsKey { key_file, key_id: "K".into(), team_id: "T".into(), bundle: "dev.example.app".into() };
+    let settings = PushSettings { enabled: false, direct: Some(key), relay: None, ..PushSettings::default() };
+    let content = TestPush { title: "测试推送".into(), lines: vec!["推送没问题。".into()] };
+    let probe = |settings: &PushSettings| probe(&scratch.dirs, settings, &content, &scratch.curl);
+    assert_eq!(probe(&settings), Ok(0));
+    scratch.register(ApnsEnv::Development, "dev.example.app");
+    assert_eq!(probe(&settings), Ok(1));
+    let requests = scratch.wait_for(1);
+    assert_eq!(url(&requests[0]), format!("https://api.sandbox.push.apple.com/3/device/{TOKEN}"));
+    let alert = &body(&requests[0])["aps"]["alert"];
+    assert_eq!(alert["body"], "推送没问题。");
+    assert_eq!(alert["subtitle-loc-args"], serde_json::json!(["测试推送", "Mac"]));
+    assert!(alert.get("title-loc-args").is_none());
+
+    let err = probe(&PushSettings { direct: None, ..settings.clone() }).unwrap_err();
+    assert!(err.contains("dev.example.app"), "{err}");
+    scratch.wait_for(1);
+    scratch.rule("/3/device", r#"HTTP/2 400\r\n\r\n{"reason":"BadDeviceToken"}"#);
+    let err = probe(&settings).unwrap_err();
+    assert!(err.contains("BadDeviceToken"), "{err}");
+    // 不改设备表。
+    assert_eq!(scratch.registrations()[0].env, ApnsEnv::Development);
 }

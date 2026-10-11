@@ -42,13 +42,6 @@
     {
       "target": {
         "containerPath": "container:RunodeKit",
-        "identifier": "RunodeActivityTests",
-        "name": "RunodeActivityTests"
-      }
-    },
-    {
-      "target": {
-        "containerPath": "container:RunodeKit",
         "identifier": "RunodeFeaturesTests",
         "name": "RunodeFeaturesTests"
       }

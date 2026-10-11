@@ -1,7 +1,7 @@
 //! 远程访问（手机经网络连上宿主，见 `runode_remote_access`）跟着宿主活：宿主跑在哪个进程里，监听
 //! 就开在哪个进程里，门禁过了的连接经 `Host::connect_pair` 接到宿主上。开关（配置项
 //! `remote-access`）、端口（`remote-access-port`）和给手机看的名字（`remote-access-name`）随配置变，
-//! 几秒内生效。agent 等回答时推给手机的 Live Activity 也在这个进程里发，设置（`remote-access-push`
+//! 几秒内生效。agent 等回答时给手机的推送也在这个进程里发，设置（`remote-access-push`
 //! 这几项和 `apns-*`）同样随配置变，见 `push_settings`。
 //!
 //! 宿主跑在 app 里时，app 每次应用配置都告诉它（见 `host_client::configure`）；单独跑的宿主

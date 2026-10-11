@@ -146,7 +146,7 @@ pub struct Config {
     pub remote_access_port: u16,
     /// 配对过的手机上显示的这台电脑的名字；`None` 时用系统设置里的电脑名。
     pub remote_access_name: Option<String>,
-    /// agent 等回答时推 Live Activity 到配对过、登记了推送的手机上。
+    /// agent 等回答时给配对过、登记了推送的手机推一条通知。
     pub remote_access_push: bool,
     /// 推送带屏幕上的问题和选项；关着时只有标题和 agent。
     pub remote_access_push_text: bool,

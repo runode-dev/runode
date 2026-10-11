@@ -450,54 +450,54 @@
         }
       }
     },
-    "agent 停下来等你回答时，电脑会经 Apple 的推送服务在灵动岛和锁屏上提醒你，Runode 不用开着；屏幕上的问题文字也会经推送服务转达。" : {
+    "agent 停下来等你回答时，电脑会经 Apple 的推送服务给你发通知，Runode 不用开着；屏幕上的问题文字也会经推送服务转达。" : {
       "extractionState" : "manual",
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "When an agent stops to wait for your answer, your Mac alerts you in the Dynamic Island and on the Lock Screen through Apple's push service, even with Runode closed. The question on screen is also sent through the push service."
+            "value" : "When an agent stops to wait for your answer, your Mac sends you a notification through Apple's push service, even with Runode closed. The question on screen is also sent through the push service."
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "agent 停下来等你回答时，电脑会经 Apple 的推送服务在灵动岛和锁屏上提醒你，Runode 不用开着；屏幕上的问题文字也会经推送服务转达。"
+            "value" : "agent 停下来等你回答时，电脑会经 Apple 的推送服务给你发通知，Runode 不用开着；屏幕上的问题文字也会经推送服务转达。"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "agent 停下來等你回答時，電腦會經 Apple 的推播服務在動態島和鎖定畫面上提醒你，Runode 不用開著；螢幕上的問題文字也會經推播服務轉達。"
+            "value" : "agent 停下來等你回答時，電腦會經 Apple 的推播服務傳通知給你，Runode 不用開著；螢幕上的問題文字也會經推播服務轉達。"
           }
         }
       }
     },
-    "agent 问你问题时在灵动岛提醒" : {
+    "agent 问你问题时通知我" : {
       "extractionState" : "manual",
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Alert in the Dynamic Island when an agent asks a question"
+            "value" : "Notify me when an agent asks a question"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "agent 问你问题时在灵动岛提醒"
+            "value" : "agent 问你问题时通知我"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "agent 問你問題時在動態島提醒"
+            "value" : "agent 問你問題時通知我"
           }
         }
       }
     },
     "agent.blocked.body" : {
-      "comment" : "电脑经推送起 agent 等回答的 Live Activity 时提醒的正文（APNs 的 loc-key），参数依次是会话标题和电脑名。",
+      "comment" : "电脑推来的 agent 等回答通知的副标题（APNs 的 subtitle-loc-key），参数依次是会话标题和电脑名。",
       "extractionState" : "manual",
       "localizations" : {
         "en" : {
@@ -521,7 +521,7 @@
       }
     },
     "agent.blocked.title" : {
-      "comment" : "电脑经推送起 agent 等回答的 Live Activity 时提醒的标题（APNs 的 loc-key），参数是 agent 的名字。",
+      "comment" : "电脑推来的 agent 等回答通知的标题（APNs 的 title-loc-key），参数是 agent 的名字。",
       "extractionState" : "manual",
       "localizations" : {
         "en" : {
@@ -540,6 +540,30 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "%@ 在等你回答"
+          }
+        }
+      }
+    },
+    "agent.blocked.title.unnamed" : {
+      "comment" : "电脑推来的等回答通知的标题（APNs 的 title-loc-key），不知道是哪个 agent 时用，比如电脑上的测试推送。",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "A terminal is waiting for your answer"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "有终端在等你回答"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "有終端機在等你回答"
           }
         }
       }
@@ -3606,6 +3630,29 @@
         }
       }
     },
+    "拿不到推送用的设备标识：%@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Could not get a push token: %@"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "拿不到推送用的设备标识：%@"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "拿不到推送用的裝置標識：%@"
+          }
+        }
+      }
+    },
     "推送" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -5079,29 +5126,6 @@
         }
       }
     },
-    "灵动岛" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Dynamic Island"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "灵动岛"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "動態島"
-          }
-        }
-      }
-    },
     "点上面的按钮打开扫码，对准电脑屏幕上的二维码。配好后电脑就出现在这里。" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -5837,25 +5861,25 @@
         }
       }
     },
-    "系统设置里关掉了 Runode 的实时活动，打开后才能提醒" : {
+    "系统设置里关掉了 Runode 的通知，打开后才能提醒" : {
       "extractionState" : "manual",
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Live Activities are off for Runode in system Settings. Turn them on to get alerts."
+            "value" : "Notifications are off for Runode in system Settings. Turn them on to get alerts."
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "系统设置里关掉了 Runode 的实时活动，打开后才能提醒"
+            "value" : "系统设置里关掉了 Runode 的通知，打开后才能提醒"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "系統設定裡關掉了 Runode 的即時動態，開啟後才能提醒"
+            "value" : "系統設定裡關掉了 Runode 的通知，開啟後才能提醒"
           }
         }
       }
@@ -7029,6 +7053,29 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "通用命令"
+          }
+        }
+      }
+    },
+    "通知" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Notifications"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "通知"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "通知"
           }
         }
       }

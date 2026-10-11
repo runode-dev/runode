@@ -1,5 +1,5 @@
 //! 手机经远程访问登记推送（`ClientMsg::PushRegister`，见 `runode_protocol::push`）：不转给宿主，在这里
-//! 按过了门禁的这台设备办。push-to-start token 记进设备表（`devices::set_push`），手机断开后照样推得到，
+//! 按过了门禁的这台设备办。APNs device token 记进设备表（`devices::set_push`），手机断开后照样推得到，
 //! 推送由 `crate::push` 发。办好回 `Done`，办不了回带 `req` 的 `Error`。
 
 use runode_paths::Dirs;

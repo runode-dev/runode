@@ -1,21 +1,20 @@
-//! agent 停下来等回答时推 Live Activity 到登记过的手机上（线上格式和整个流程见
-//! `runode_protocol::push`）。
+//! agent 停下来等回答时给登记过的手机推一条通知（线上格式和整个流程见 `runode_protocol::push`）。
 //!
 //! `Pusher` 跟着监听活在同一个进程里：开着推送、监听开着、设备表里至少有一条登记时，它像命令行一样
 //! 经 `Connect` 连上宿主（`ClientKind::Cli`），每 `POLL_INTERVAL` 要一次会话列表，交给 `Rounds`
-//! 决定什么时候起、刷新、收起，要读屏幕时发 `ReadScreen`；要发的推送交给发送线程（`send`）。不用
+//! 决定什么时候推，要读屏幕时发 `ReadScreen`；要发的推送交给发送线程（`send`）。不用
 //! `Attach`：只看状态的连接也会让会话的 `SessionInfo::clients` 加一，桌面靠它为零回收后台已退出的会话。
 //! 不满足条件时断开这条连接，单独跑的宿主照常能因空闲退出。
 //!
 //! 推送的路线按登记的 bundle id 定：等于配置的 `ApnsKey::bundle` 时用那把密钥直连 APNs，等于官方 App
 //! 的 `OFFICIAL_BUNDLE` 而这个构建带着中转（`RELAY_URL`）时经中转服务，别的跳过（每个 bundle 记一次日志）。
 //!
-//! 关了推送、关了远程访问、登记都删光了时，开着的回合都收起。监听只是暂时没开成（端口被占、交接时
-//! 旧宿主还没放手）时不收起，回合留在频道文件里。宿主说它交接给了新版本（`GoodbyeReason::Handoff`）
-//! 以后这边不再连，开着的回合由新宿主进程里的 `Pusher` 从频道文件接着办。
+//! 发出去的通知撤不回，答完的由手机自己清掉。宿主说它交接给了新版本（`GoodbyeReason::Handoff`）以后
+//! 这边不再连，推送由新宿主进程里的 `Pusher` 接着办。
 
 mod apns;
 mod curl;
+mod probe;
 mod rounds;
 mod send;
 #[cfg(test)]
@@ -34,10 +33,12 @@ use std::{
 use runode_paths::Dirs;
 use runode_protocol::{
     BuildId, Caps, ClientKind, ClientMsg, Frame, FrameKind, GoodbyeReason, HostMsg, PROTOCOL_VERSION, SessionId,
-    push::{ActivityAttributes, ApnsEnv, OFFICIAL_BUNDLE, RELAY_URL},
+    push::{ApnsEnv, Notification, OFFICIAL_BUNDLE, RELAY_URL},
     read_frame, write_frame,
 };
+use runode_shared_types::session::SessionMeta;
 
+pub use self::probe::{TestPush, send_test_push};
 use self::{
     apns::{Route, Via},
     curl::Curl,
@@ -175,8 +176,7 @@ struct Poller {
     curl: Curl,
     sender: Sender,
     host: Option<HostLink>,
-    /// 第一次要推时才从频道文件读出上次没收起的回合。
-    rounds: Option<Rounds>,
+    rounds: Rounds,
     registrations: Vec<PushRegistration>,
     /// curl 能不能用，第一次要推时看一次。
     curl_ok: Option<bool>,
@@ -200,7 +200,7 @@ impl Poller {
             curl,
             sender,
             host: None,
-            rounds: None,
+            rounds: Rounds::new(PushSettings::default().delay, true),
             registrations: Vec::new(),
             curl_ok: None,
             sent_settings: None,
@@ -229,7 +229,7 @@ impl Poller {
             let poll = now >= self.next_poll;
             if poll {
                 self.next_poll = now + POLL_INTERVAL;
-                self.registrations = if settings.enabled && listening == Listening::On {
+                let registrations = if settings.enabled && listening == Listening::On {
                     devices::push_registrations(&self.dirs).unwrap_or_else(|err| {
                         tracing::warn!("cannot read push registrations: {err}");
                         Vec::new()
@@ -237,17 +237,16 @@ impl Poller {
                 } else {
                     Vec::new()
                 };
+                if registrations != self.registrations {
+                    // 关了推送、注销了或者换了 token 的手机，排着还没发出去的通知不发了。
+                    let kept =
+                        registrations.iter().map(|registration| (registration.device_id, registration.token.clone()));
+                    self.sender.keep(kept.collect());
+                }
+                self.registrations = registrations;
             }
             if !self.active(&settings, listening) {
                 self.host = None;
-                // 监听只是暂时没开成时回合留着，见模块文档。
-                if listening != Listening::Starting
-                    && !self.handed_off
-                    && let Some(rounds) = &mut self.rounds
-                {
-                    let actions = rounds.end_all();
-                    self.dispatch(&settings, actions);
-                }
                 let state = shared.state.lock().unwrap_or_else(PoisonError::into_inner);
                 if !state.quit {
                     let wait = self.next_poll.saturating_duration_since(Instant::now());
@@ -255,10 +254,7 @@ impl Poller {
                 }
                 continue;
             }
-            let restored = if self.rounds.is_none() { Some(self.sender.load()) } else { None };
-            let rounds = self
-                .rounds
-                .get_or_insert_with(|| Rounds::new(restored.unwrap_or_default(), settings.delay, settings.text));
+            let rounds = &mut self.rounds;
             rounds.set_options(settings.delay, settings.text);
             if self.host.is_none() {
                 match HostLink::connect(&self.connect) {
@@ -298,8 +294,8 @@ impl Poller {
             let now = Instant::now();
             let actions = match link.messages.recv_timeout(wait) {
                 Ok(HostMsg::SessionList { sessions }) => rounds.observe(&sessions, now),
-                Ok(HostMsg::ScreenText { id, text, .. }) => rounds.screen(id, Some(&text), now),
-                Ok(HostMsg::Error { id: Some(id), .. }) => rounds.screen(id, None, now),
+                Ok(HostMsg::ScreenText { id, text, .. }) => rounds.screen(id, Some(&text)),
+                Ok(HostMsg::Error { id: Some(id), .. }) => rounds.screen(id, None),
                 Ok(HostMsg::Goodbye { reason }) => {
                     if reason == GoodbyeReason::Handoff {
                         tracing::info!("the host handed its sessions over, leaving the pushes to the new host");
@@ -342,21 +338,26 @@ impl Poller {
                         self.host = None;
                     }
                 }
-                Action::Start(id, content) => {
-                    let groups = self.groups(settings, id);
-                    if !groups.is_empty() {
-                        self.sender.open(id, groups, content);
+                Action::Notify(id, meta, lines) => {
+                    let targets = self.targets(settings, id, &meta, &lines);
+                    if !targets.is_empty() {
+                        self.sender.notify(targets);
                     }
                 }
-                Action::Update(id, content) => self.sender.update(id, content),
-                Action::End(id, content) => self.sender.end(id, content),
+                Action::Cancel(id) => self.sender.cancel(id),
             }
         }
     }
 
-    /// 会话 `session` 推给哪些手机，按路线分组。
-    fn groups(&mut self, settings: &PushSettings, session: SessionId) -> Vec<(Route, Vec<Target>)> {
-        let mut groups: Vec<(Route, Vec<Target>)> = Vec::new();
+    /// 会话 `session` 的通知推给哪些手机，每台手机的通知带着它自己给这台电脑编的标识和名字。
+    fn targets(
+        &mut self,
+        settings: &PushSettings,
+        session: SessionId,
+        meta: &SessionMeta,
+        lines: &[String],
+    ) -> Vec<Target> {
+        let mut targets = Vec::new();
         for registration in &self.registrations {
             let Some(route) = route(registration, settings) else {
                 if self.skipped.insert(registration.bundle.clone()) {
@@ -369,17 +370,20 @@ impl Poller {
                 }
                 continue;
             };
-            let target = Target {
+            targets.push(Target {
+                route,
                 device: registration.device_id,
                 token: registration.token.clone(),
-                attributes: ActivityAttributes::new(registration.machine.clone(), &registration.machine_name, session),
-            };
-            match groups.iter_mut().find(|(known, _)| *known == route) {
-                Some((_, targets)) => targets.push(target),
-                None => groups.push((route, vec![target])),
-            }
+                notification: Notification::new(
+                    registration.machine.clone(),
+                    &registration.machine_name,
+                    session,
+                    meta,
+                    lines,
+                ),
+            });
         }
-        groups
+        targets
     }
 }
 

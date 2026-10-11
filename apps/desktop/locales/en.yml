@@ -579,7 +579,7 @@ settings:
     clipboard: Clipboard
     tasks: Tasks
     login: Start at Login
-    push: Live Activities
+    push: Phone Notifications
     push_key: Your Own Phone App
     decision_service: Service
     decision_keys: Hosted APIs
@@ -633,7 +633,7 @@ settings:
     remote_access: Remote access
     remote_access_port: Port
     remote_access_name: "Computer name"
-    remote_access_push: Show waiting agents on the phone
+    remote_access_push: Notify the phone when an agent waits
     remote_access_push_text: Include the question
     remote_access_push_delay: Wait before notifying
     apns_key_file: APNs key file
@@ -691,7 +691,7 @@ settings:
     remote_access: Lets a paired phone reach the terminals over the local network or Tailscale. Pair below, or with runode remote pair.
     remote_access_port: TCP port, 1 to 65535.
     remote_access_name: "The name paired phones show. When empty, the system computer name. Connected phones drop briefly when it changes."
-    remote_access_push: When an agent waits for your answer, paired phones show it in the Dynamic Island and on the Lock Screen, even with the app closed.
+    remote_access_push: When an agent waits for your answer, paired phones get a notification, even with the app closed.
     remote_access_push_text: Sends the question and choices from the bottom of the screen. Off sends only the title and the agent.
     remote_access_push_delay: Seconds the agent has to keep waiting first, so answering at the computer doesn't buzz the phone. 0 notifies right away.
     apns_key_file: The .p8 key file from your Apple developer account; ~ stands for $HOME. All four fields are needed to push straight to APNs.
@@ -817,6 +817,16 @@ settings:
     state_loading: loading
     state_pinned: loaded · kept loaded
     state_expires: "loaded · unloads in %{minutes} min"
+  test_push:
+    title: Test push
+    hint: Send a notification to registered phones now. Checks the push settings and key.
+    send: Send
+    sending: Sending…
+    sent: "Sent to %{count} phone(s)."
+    no_phone: No phone has registered for push yet. Open Runode on the phone and connect to this Mac.
+    failed: "Could not send: %{err}"
+    push_title: Runode test push
+    push_line: Push notifications work.
   pairing:
     title: Pair a phone
     hint: Scan a code with Runode on your phone. A paired phone can reach this Mac while remote access is on.

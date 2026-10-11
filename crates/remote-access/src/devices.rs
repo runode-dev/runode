@@ -38,7 +38,7 @@ pub struct Device {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PushRegistration {
     pub device_id: DeviceId,
-    /// push-to-start token，十六进制。
+    /// APNs device token，十六进制。
     pub token: String,
     pub env: ApnsEnv,
     /// App 的 bundle id。
@@ -104,7 +104,7 @@ pub(crate) fn clear_push(dirs: &Dirs, id: DeviceId) -> io::Result<bool> {
     })
 }
 
-/// 设备 `id` 登记的 push-to-start token 还是 `token` 时，把它的环境改成 `env`：推送时发现登记的环境
+/// 设备 `id` 登记的 device token 还是 `token` 时，把它的环境改成 `env`：推送时发现登记的环境
 /// 不对、换一个推成了。登记已经换了（手机又登记过）时不动，返回 false。
 pub(crate) fn set_push_env(dirs: &Dirs, id: DeviceId, token: &str, env: ApnsEnv) -> io::Result<bool> {
     update(dirs, |table| {
@@ -117,7 +117,7 @@ pub(crate) fn set_push_env(dirs: &Dirs, id: DeviceId, token: &str, env: ApnsEnv)
     })
 }
 
-/// 设备 `id` 登记的 push-to-start token 还是 `token` 时删掉这条登记：两个环境的 APNs 都不认它。登记
+/// 设备 `id` 登记的 device token 还是 `token` 时删掉这条登记：两个环境的 APNs 都不认它。登记
 /// 已经换了时不动，返回 false。
 pub(crate) fn drop_push_token(dirs: &Dirs, id: DeviceId, token: &str) -> io::Result<bool> {
     update(dirs, |table| {

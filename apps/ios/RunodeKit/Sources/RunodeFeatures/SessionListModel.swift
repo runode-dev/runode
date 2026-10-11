@@ -152,7 +152,7 @@ public final class SessionListModel {
     @ObservationIgnored public var onSpawned: @MainActor (SessionId) -> Void = { _ in }
     /// `theme` 变了，`AppModel` 据此记下 App 现在用的主题。
     @ObservationIgnored var onThemeChanged: @MainActor () -> Void = {}
-    /// 会话、连接状态变了，`AppModel` 据此收起灵动岛上已经答完的提醒。
+    /// 会话、连接状态变了，`AppModel` 据此从通知中心清掉已经答完的通知。
     @ObservationIgnored var onSessionsChanged: @MainActor () -> Void = {}
     /// 连接的事件（帧以外的），在列表自己处理之前转给 `AppModel`，由它交给 `PushRegistration`。
     @ObservationIgnored var onLinkEvent: @MainActor (HostEvent) -> Void = { _ in }

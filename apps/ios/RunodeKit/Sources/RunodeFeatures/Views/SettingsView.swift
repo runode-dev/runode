@@ -2,7 +2,7 @@
     import RunodeConnection
     import SwiftUI
 
-    /// 设置页：终端的默认尺寸方式、字号、响铃震动，agent 等回答时的灵动岛提醒，配对过的电脑，报给电脑的
+    /// 设置页：终端的默认尺寸方式、字号、响铃震动，agent 等回答时的通知，配对过的电脑，报给电脑的
     /// 设备名，以及版本和开源许可。开关、选择器要系统的行样式，所以用分组的 `Form`，不用首页那种自己画的卡片列表。改了马上
     /// 生效、马上存（见 `SettingsModel`）。
     struct SettingsView: View {
@@ -81,22 +81,25 @@
                 set: { settings.setFontSize($0) })
         }
 
-        // MARK: 灵动岛
+        // MARK: 通知
 
         private var alertSection: some View {
             Section {
-                Toggle("agent 问你问题时在灵动岛提醒", isOn: $settings.preferences.alertsBlockedAgents)
+                Toggle("agent 问你问题时通知我", isOn: $settings.preferences.alertsBlockedAgents)
                     .tint(.green)
                 if settings.preferences.alertsBlockedAgents {
                     if !app.push.systemAllowed {
                         Button {
-                            if let url = URL(string: UIApplication.openSettingsURLString) {
+                            if let url = URL(string: UIApplication.openNotificationSettingsURLString) {
                                 UIApplication.shared.open(url)
                             }
                         } label: {
-                            Label("系统设置里关掉了 Runode 的实时活动，打开后才能提醒", systemImage: "exclamationmark.triangle")
+                            Label("系统设置里关掉了 Runode 的通知，打开后才能提醒", systemImage: "exclamationmark.triangle")
                                 .foregroundStyle(.orange)
                         }
+                    } else if let error = app.push.tokenError {
+                        Label("拿不到推送用的设备标识：\(error)", systemImage: "exclamationmark.triangle")
+                            .foregroundStyle(.orange)
                     }
                     ForEach(machines.machines) { machine in
                         if let problem = Self.pushProblem(app.push.statuses[machine.id]) {
@@ -109,9 +112,9 @@
                     }
                 }
             } header: {
-                Text("灵动岛")
+                Text("通知")
             } footer: {
-                Text("agent 停下来等你回答时，电脑会经 Apple 的推送服务在灵动岛和锁屏上提醒你，Runode 不用开着；屏幕上的问题文字也会经推送服务转达。")
+                Text("agent 停下来等你回答时，电脑会经 Apple 的推送服务给你发通知，Runode 不用开着；屏幕上的问题文字也会经推送服务转达。")
             }
             .themedRows()
         }

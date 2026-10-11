@@ -324,10 +324,10 @@ pub enum ClientMsg {
     /// 让宿主退出。`kill_sessions` 为假时会话跟着宿主一起留到交接或者下次启动，见
     /// `GoodbyeReason`。
     Shutdown { kill_sessions: bool },
-    /// 手机登记（`token` 为空时注销）这台电脑推送 Live Activity 用的 push-to-start token，见 `push`。
-    /// `env` 是 token 所属的 APNs 环境，`bundle` 是 App 的 bundle id（APNs 的 topic 由它拼出），
+    /// 手机登记（`token` 为空时注销）这台电脑给它推通知用的 APNs device token，见 `push`。
+    /// `env` 是 token 所属的 APNs 环境，`bundle` 是 App 的 bundle id（APNs 的 topic），
     /// `machine` 是手机给这台电脑编的 UUID、`machine_name` 是手机上显示的电脑名，推送时原样带回
-    /// （`push::ActivityAttributes`）。只有手机经远程访问连上来时由监听方记进配对设备表、回 `Done`，
+    /// （`push::Notification`）。只有手机经远程访问连上来时由监听方记进配对设备表、回 `Done`，
     /// 不到宿主；宿主直接收到时回 `Error`。
     PushRegister {
         req: u32,

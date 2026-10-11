@@ -10,7 +10,7 @@ import Testing
     }
 
     @Test func liveDependenciesComposeWithoutTouchingTheNetwork() {
-        let dependencies = AppComposition.dependencies()
+        let dependencies = AppComposition.dependencies(notifications: nil)
         #expect(!dependencies.deviceName.isEmpty)
     }
 }

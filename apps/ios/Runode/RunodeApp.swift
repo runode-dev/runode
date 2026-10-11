@@ -5,21 +5,45 @@ import UIKit
 
 @main
 struct RunodeApp: App {
-    @State private var app = AppModel(dependencies: AppComposition.dependencies())
+    @UIApplicationDelegateAdaptor private var delegate: AppDelegate
 
     var body: some Scene {
         WindowGroup {
-            RootView(app: app)
-                .task { await AppComposition.prepare(app) }
+            RootView(app: delegate.app)
+                .task { await AppComposition.prepare(delegate.app) }
         }
     }
 }
 
+/// App delegate：系统把 APNs 的 device token 交到这里，转给通知的系统接口。整个 App 的状态也由它持有，
+/// 点开通知时好打开那个会话；它在 App 启动完之前建好，冷启动时点开的那条通知也接得住。
+final class AppDelegate: NSObject, UIApplicationDelegate {
+    let notifications: SystemPushNotifications
+    let app: AppModel
+
+    override init() {
+        let notifications = SystemPushNotifications()
+        let app = AppModel(dependencies: AppComposition.dependencies(notifications: notifications))
+        notifications.onOpen = { [weak app] link in app?.open(link) }
+        self.notifications = notifications
+        self.app = app
+        super.init()
+    }
+
+    func application(_ application: UIApplication, didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data) {
+        notifications.received(token: deviceToken)
+    }
+
+    func application(_ application: UIApplication, didFailToRegisterForRemoteNotificationsWithError error: any Error) {
+        notifications.failed(error: error)
+    }
+}
+
 /// 把真的依赖组装起来：Keychain 里的设备私钥、Application Support 里的电脑列表、Bonjour 发现、
-/// 每台电脑一条 `HostConnection`，以及登记推送用的 Live Activity 系统接口和 Info.plist 里的 APNs 环境。
+/// 每台电脑一条 `HostConnection`，以及登记推送用的通知系统接口和 Info.plist 里的 APNs 环境。
 @MainActor
 enum AppComposition {
-    static func dependencies() -> AppDependencies {
+    static func dependencies(notifications: (any PushNotifications)?) -> AppDependencies {
         #if DEBUG
             if let demo = DemoComposition.dependenciesIfRequested() {
                 return demo
@@ -41,7 +65,7 @@ enum AppComposition {
             },
             deviceName: systemName, recents: DefaultsStore("recentTerminal"), preferences: preferences,
             themes: DefaultsStore("theme"))
-        dependencies.liveActivities = SystemLiveActivities()
+        dependencies.notifications = notifications
         dependencies.pushIdentity = PushIdentity(
             info: Bundle.main.infoDictionary ?? [:], bundle: Bundle.main.bundleIdentifier)
         return dependencies

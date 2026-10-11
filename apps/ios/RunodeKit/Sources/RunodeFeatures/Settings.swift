@@ -11,7 +11,7 @@ public struct AppPreferences: Hashable, Sendable, Codable {
     public var bellHaptics = true
     /// 报给电脑的设备名；为空时用系统给的名字。
     public var deviceName: String?
-    /// agent 停下来等回答时，由电脑经推送在灵动岛和锁屏上提醒（Live Activity）。关掉时向各台电脑注销推送。
+    /// agent 停下来等回答时，由电脑经推送发通知提醒。关掉时向各台电脑注销推送。
     public var alertsBlockedAgents = true
 
     public init() {}

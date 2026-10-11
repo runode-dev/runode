@@ -1,68 +1,100 @@
 import Foundation
+import RunodeProtocol
 import Testing
 
-/// 宿主（Rust）`runode_protocol::push` 那批照规格写出的推送样例：Live Activity 的 attributes、
-/// content-state 和 APNs payload。小组件那边的 Live Activity 类型用 Swift 默认的 `Codable` 解它们，这里
-/// 用同样写法的两个类型核对键名：读得出来、写回去和样例一样。
+/// 宿主（Rust）`runode_protocol::push` 那批照规格写出的推送样例：电脑经 APNs 推来的等回答通知。
 enum PushSamples {
-    static let directory: URL = URL(filePath: #filePath)
+    static let repository: URL = URL(filePath: #filePath)
         .deletingLastPathComponent()  // RunodeProtocolTests
         .deletingLastPathComponent()  // Tests
         .deletingLastPathComponent()  // RunodeKit
         .deletingLastPathComponent()  // ios
         .deletingLastPathComponent()  // apps
         .deletingLastPathComponent()  // 仓库根
-        .appending(path: "crates/protocol/tests/fixtures/push")
+    static let directory = repository.appending(path: "crates/protocol/tests/fixtures/push")
 
     static func data(_ name: String) throws -> Data {
         try Data(contentsOf: directory.appending(path: name))
     }
+
+    /// 整条 APNs payload，系统交给 App 的 `userInfo` 就是它。
+    static func payload(_ name: String) throws -> [AnyHashable: Any] {
+        try #require(JSONSerialization.jsonObject(with: data(name)) as? [AnyHashable: Any], "\(name)")
+    }
 }
 
-/// 和 Rust 的 `ActivityAttributes` 对得上的默认 `Codable` 写法。
-private struct Attributes: Hashable, Codable {
-    var machine: String
-    var machineName: String
-    var session: String
-}
-
-/// 和 Rust 的 `ActivityContent` 对得上的默认 `Codable` 写法。
-private struct ContentState: Hashable, Codable {
-    var title: String
-    var agent: String
-    var lines: [String]
-}
+private let sampleMachine = UUID(uuidString: "6F9619FF-8B86-D011-B42D-00C04FC964FF")!
+private let sampleSession = "0123456789abcdef0011223344556677"
 
 @Suite struct PushTests {
-    @Test func attributesAndContentUseDefaultCodableKeys() throws {
-        let attributes = try PushSamples.data("attributes.json")
-        let decoded = try JSONDecoder().decode(Attributes.self, from: attributes)
-        #expect(decoded.machineName == "Ethan 的 MacBook Pro")
-        #expect(decoded.session == "0123456789abcdef0011223344556677")
-        #expect(try sameJSON(JSONEncoder().encode(decoded), attributes))
-
-        let content = try PushSamples.data("content_state.json")
-        let state = try JSONDecoder().decode(ContentState.self, from: content)
-        #expect(state.agent == "Claude Code")
-        #expect(state.lines.count == 3)
-        #expect(try sameJSON(JSONEncoder().encode(state), content))
+    /// 点开通知时按 `aps` 外面的 `machine`、`session` 打开那个会话；同一台电脑的通知按 `thread-id` 归在一组。
+    @Test(arguments: ["apns_notify.json", "apns_notify_unnamed.json"])
+    func notificationsCarryTheSession(_ name: String) throws {
+        let payload = try PushSamples.payload(name)
+        #expect(SessionLink(userInfo: payload) == SessionLink(machine: sampleMachine, session: sampleSession))
+        let aps = try #require(payload["aps"] as? [String: Any])
+        #expect(aps["thread-id"] as? String == sampleMachine.uuidString)
     }
 
-    /// APNs payload 里的 attributes 和 content-state 也是这个样子，起 Live Activity 时按类型名找类型；
-    /// 起来的 activity 订阅广播频道（`input-push-channel`），不要 update token。
-    @Test(arguments: ["apns_start.json", "apns_update.json", "apns_end.json"])
-    func payloadsCarryTheSameShapes(_ name: String) throws {
-        let root = try #require(
-            JSONSerialization.jsonObject(with: PushSamples.data(name)) as? [String: Any], "\(name)")
-        let aps = try #require(root["aps"] as? [String: Any], "\(name)")
-        let state = try JSONSerialization.data(withJSONObject: #require(aps["content-state"]))
-        _ = try JSONDecoder().decode(ContentState.self, from: state)
-        if name == "apns_start.json" {
-            #expect(aps["attributes-type"] as? String == "AgentActivityAttributes")
-            let attributes = try JSONSerialization.data(withJSONObject: #require(aps["attributes"]))
-            _ = try JSONDecoder().decode(Attributes.self, from: attributes)
-            #expect(aps["input-push-channel"] is String)
-            #expect(aps["input-push-token"] == nil)
+    /// 通知的标题、副标题由手机按 loc-key 查 App 的 String Catalog 拼出来：样例里用到的键每种语言都要有，
+    /// 占位符的个数和 loc-args 的个数一样。
+    @Test(arguments: ["apns_notify.json", "apns_notify_unnamed.json"])
+    func alertKeysAreLocalized(_ name: String) throws {
+        let aps = try #require(PushSamples.payload(name)["aps"] as? [String: Any])
+        let alert = try #require(aps["alert"] as? [String: Any])
+        let catalogURL = PushSamples.repository.appending(path: "apps/ios/Runode/Localizable.xcstrings")
+        let catalog = try #require(
+            JSONSerialization.jsonObject(with: Data(contentsOf: catalogURL)) as? [String: Any])
+        let strings = try #require(catalog["strings"] as? [String: Any])
+        for part in ["title", "subtitle"] {
+            let key = try #require(alert["\(part)-loc-key"] as? String, "\(name) \(part)")
+            let args = (alert["\(part)-loc-args"] as? [String])?.count ?? 0
+            let entry = try #require(strings[key] as? [String: Any], "\(key) 不在 catalog 里")
+            let localizations = try #require(entry["localizations"] as? [String: Any])
+            for language in ["zh-Hans", "en", "zh-Hant"] {
+                let value = try #require(
+                    ((localizations[language] as? [String: Any])?["stringUnit"] as? [String: Any])?["value"]
+                        as? String, "\(key) 缺 \(language)")
+                let placeholders = value.matches(of: /%(\d+\$)?@/).count
+                #expect(placeholders == args, "\(key) 的 \(language)：\(value)")
+            }
         }
+    }
+
+    @Test func otherNotificationsHaveNoSession() {
+        #expect(SessionLink(userInfo: [:]) == nil)
+        #expect(SessionLink(userInfo: ["machine": "not-a-uuid", "session": sampleSession]) == nil)
+        #expect(SessionLink(userInfo: ["machine": sampleMachine.uuidString, "session": ""]) == nil)
+        #expect(SessionLink(userInfo: ["machine": sampleMachine.uuidString]) == nil)
+    }
+}
+
+@Suite struct SessionLinkTests {
+    @Test func deepLinkRoundTrips() throws {
+        let link = SessionLink(machine: sampleMachine, session: sampleSession)
+        let url = try #require(link.url)
+        #expect(
+            url.absoluteString
+                == "runode://session?machine=6F9619FF-8B86-D011-B42D-00C04FC964FF&session=0123456789abcdef0011223344556677")
+        #expect(SessionLink(url: url) == link)
+    }
+
+    @Test(arguments: [
+        "runode://pair?v=1&name=MacBook",
+        "runode://session?session=0123456789abcdef0011223344556677",
+        "runode://session?machine=not-a-uuid&session=0123456789abcdef0011223344556677",
+        "runode://session?machine=6F9619FF-8B86-D011-B42D-00C04FC964FF&session=",
+        "https://session?machine=6F9619FF-8B86-D011-B42D-00C04FC964FF&session=00",
+    ])
+    func otherLinksAreNotSessionLinks(_ text: String) throws {
+        #expect(SessionLink(url: try #require(URL(string: text))) == nil)
+    }
+
+    @Test func hostAndSchemeIgnoreCase() throws {
+        let url = try #require(
+            URL(string: "RUNODE://Session?machine=6f9619ff-8b86-d011-b42d-00c04fc964ff&session=abc"))
+        let link = try #require(SessionLink(url: url))
+        #expect(link.machine == sampleMachine)
+        #expect(link.session == "abc")
     }
 }

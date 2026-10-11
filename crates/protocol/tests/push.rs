@@ -7,9 +7,8 @@ use std::path::Path;
 use runode_protocol::{
     SessionId,
     push::{
-        ActivityAttributes, ActivityContent, ActivityEvent, ApnsEnv, BLOCKED_LINES, LINE_LIMIT, MAX_APNS_PAYLOAD,
-        PushError, RELAY_VERSION, RelayBroadcast, RelayChannel, RelayCreateChannel, RelayDeleteChannel, RelayStart,
-        TEXT_LIMIT, end_payload, preview_lines, start_payload, update_payload,
+        ApnsEnv, BLOCKED_LINES, LINE_LIMIT, MAX_APNS_PAYLOAD, Notification, PushError, RelayNotify, TEXT_LIMIT,
+        notify_payload, preview_lines,
     },
 };
 use runode_shared_types::{
@@ -21,7 +20,8 @@ use serde_json::Value;
 
 const NOW: u64 = 1_760_000_000;
 const TOKEN: &str = "80f0c8b3a4e2d1c0ffeeddccbbaa99887766554433221100aabbccddeeff0011";
-const CHANNEL: &str = "mLiGCQf1Ee+wAAAAAAAAAA==";
+const MACHINE: &str = "6F9619FF-8B86-D011-B42D-00C04FC964FF";
+const SESSION: SessionId = SessionId(0x0123_4567_89ab_cdef_0011_2233_4455_6677);
 
 /// 样例文件的内容，去掉结尾的换行。
 fn fixture(name: &str) -> String {
@@ -36,14 +36,6 @@ fn matches<T: Serialize + DeserializeOwned + PartialEq + std::fmt::Debug>(name: 
     let read: T = serde_json::from_str(&text).unwrap_or_else(|err| panic!("{name}: {err}"));
     assert_eq!(&read, expected, "{name}");
     assert_eq!(serde_json::to_string(expected).unwrap(), text, "{name}");
-}
-
-fn attributes() -> ActivityAttributes {
-    ActivityAttributes::new(
-        "6F9619FF-8B86-D011-B42D-00C04FC964FF".into(),
-        "Ethan 的 MacBook Pro",
-        SessionId(0x0123_4567_89ab_cdef_0011_2233_4455_6677),
-    )
 }
 
 fn meta() -> SessionMeta {
@@ -61,62 +53,44 @@ fn screen() -> &'static str {
 }
 
 /// 样例里的几行和手机端的测试共用，不随 `preview_lines` 的取法变。
-fn content() -> ActivityContent {
-    let lines = ["Do you want to proceed?", "❯ 1. Yes", "  2. No, and tell Claude what to do differently (esc)"];
-    ActivityContent::new(&meta(), &lines.map(String::from))
-}
-
-fn ended() -> ActivityContent {
-    ActivityContent::new(&meta(), &[])
+fn notification() -> Notification {
+    let lines = ["Bash command", "cargo test", "Do you want to proceed?"];
+    Notification::new(MACHINE.into(), "Ethan 的 MacBook Pro", SESSION, &meta(), &lines.map(String::from))
 }
 
 #[test]
-fn attributes_and_content_match_the_fixtures() {
-    matches("attributes.json", &attributes());
-    matches("content_state.json", &content());
+fn notifications_match_the_fixtures() {
+    matches("notification.json", &notification());
+    let payload = notify_payload(&notification()).unwrap();
+    assert_eq!(String::from_utf8(payload).unwrap(), fixture("apns_notify.json"));
+    assert_eq!(notification().collapse_id(), "0123456789abcdef0011223344556677");
 }
 
+/// 不知道是哪个 agent 时标题换一个本地化键、不带参数；没有屏幕文字时不写正文。
 #[test]
-fn apns_payloads_match_the_fixtures() {
-    let start = start_payload(&attributes(), &content(), CHANNEL, NOW).unwrap();
-    assert_eq!(String::from_utf8(start).unwrap(), fixture("apns_start.json"));
-    let update = update_payload(&content(), NOW + 60).unwrap();
-    assert_eq!(String::from_utf8(update).unwrap(), fixture("apns_update.json"));
-    let end = end_payload(&ended(), NOW + 120).unwrap();
-    assert_eq!(String::from_utf8(end).unwrap(), fixture("apns_end.json"));
+fn unnamed_agents_and_empty_screens_have_their_own_shape() {
+    let meta = SessionMeta { agent: None, ..meta() };
+    let bare = Notification::new(MACHINE.into(), "Ethan 的 MacBook Pro", SESSION, &meta, &[]);
+    assert_eq!(String::from_utf8(notify_payload(&bare).unwrap()).unwrap(), fixture("apns_notify_unnamed.json"));
 }
 
 #[test]
 fn relay_requests_match_the_fixtures() {
-    matches("relay_create_channel.json", &RelayCreateChannel { v: RELAY_VERSION, env: ApnsEnv::Development });
-    matches("relay_channel.json", &RelayChannel { channel: CHANNEL.into() });
-    matches(
-        "relay_delete_channel.json",
-        &RelayDeleteChannel { v: RELAY_VERSION, env: ApnsEnv::Production, channel: CHANNEL.into() },
-    );
-    let start = RelayStart::new(ApnsEnv::Production, TOKEN.into(), CHANNEL.into(), attributes(), &content(), NOW);
-    matches("relay_start.json", &start.unwrap());
-    let update = RelayBroadcast::update(ApnsEnv::Production, CHANNEL.into(), &content(), NOW + 60).unwrap();
-    assert_eq!((update.event, update.stale_date), (ActivityEvent::Update, Some(NOW + 60 + 1800)));
-    matches("relay_update.json", &update);
-    let end = RelayBroadcast::end(ApnsEnv::Development, CHANNEL.into(), &ended(), NOW + 120).unwrap();
-    matches("relay_end.json", &end);
+    let notify = RelayNotify::new(ApnsEnv::Production, TOKEN.into(), &notification(), NOW).unwrap();
+    assert_eq!(notify.expiration, NOW + 1800);
+    matches("relay_notify.json", &notify);
     matches("push_error.json", &PushError { reason: "BadDeviceToken".into() });
 }
 
 /// 中转请求体里的内容和直连时的 payload 一样照上限删减过：中转服务拼出的 payload 也装得下。
 #[test]
 fn relay_requests_carry_fitted_content() {
-    let mut content = content();
-    content.lines = (0..3).map(|i| format!("{i}{}", "x".repeat(1500))).collect();
-    let start =
-        RelayStart::new(ApnsEnv::Production, TOKEN.into(), CHANNEL.into(), attributes(), &content, NOW).unwrap();
-    let payload: Value =
-        serde_json::from_slice(&start_payload(&attributes(), &content, CHANNEL, NOW).unwrap()).unwrap();
-    assert_eq!(serde_json::to_value(&start.content).unwrap(), payload["aps"]["content-state"]);
-    assert_eq!(start.content.lines.len(), 2);
-    let update = RelayBroadcast::update(ApnsEnv::Production, CHANNEL.into(), &content, NOW).unwrap();
-    assert_eq!(update.content.lines.len(), 2);
+    let mut notification = notification();
+    notification.lines = (0..3).map(|i| format!("{i}{}", "x".repeat(1500))).collect();
+    let notify = RelayNotify::new(ApnsEnv::Production, TOKEN.into(), &notification, NOW).unwrap();
+    let payload: Value = serde_json::from_slice(&notify_payload(&notification).unwrap()).unwrap();
+    assert_eq!(notify.notification.lines.join("\n"), payload["aps"]["alert"]["body"].as_str().unwrap());
+    assert_eq!(notify.notification.lines.len(), 2);
 }
 
 /// 比自己新的一方才有的环境读成 `Unknown`，不至于整条读不了。
@@ -148,64 +122,52 @@ fn preview_lines_keep_the_question_without_options_and_hints() {
 
 /// 标题依次用程序设置的、前台程序名或目录名，空的跳过，都没有时是「终端」；各项截到上限。
 #[test]
-fn content_falls_back_and_clips() {
+fn notifications_fall_back_and_clip() {
+    let new = |meta: &SessionMeta, lines: &[String]| Notification::new(MACHINE.into(), "Mac", SESSION, meta, lines);
     let mut meta = SessionMeta { title: Some(String::new()), fallback_title: Some("zsh".into()), ..meta() };
-    assert_eq!(ActivityContent::new(&meta, &[]).title, "zsh");
+    assert_eq!(new(&meta, &[]).title, "zsh");
     meta.fallback_title = None;
-    let content = ActivityContent::new(&meta, &[]);
-    assert_eq!((content.title.as_str(), content.agent.as_str()), ("终端", "Claude Code"));
+    let notification = new(&meta, &[]);
+    assert_eq!((notification.title.as_str(), notification.agent.as_str()), ("终端", "Claude Code"));
     meta.agent = None;
-    assert_eq!(ActivityContent::new(&meta, &[]).agent, "");
+    assert_eq!(new(&meta, &[]).agent, "");
 
     meta.title = Some("长".repeat(TEXT_LIMIT + 1));
     let lines: Vec<String> = (0..5).map(|i| format!("{i}{}", "x".repeat(LINE_LIMIT))).collect();
-    let content = ActivityContent::new(&meta, &lines);
-    assert_eq!(content.title, format!("{}…", "长".repeat(TEXT_LIMIT - 1)));
-    assert_eq!(content.lines.len(), BLOCKED_LINES);
-    assert!(content.lines[0].starts_with('2'));
-    assert!(content.lines.iter().all(|line| line.chars().count() == LINE_LIMIT && line.ends_with('…')));
+    let notification = new(&meta, &lines);
+    assert_eq!(notification.title, format!("{}…", "长".repeat(TEXT_LIMIT - 1)));
+    assert_eq!(notification.lines.len(), BLOCKED_LINES);
+    assert!(notification.lines[0].starts_with('2'));
+    assert!(notification.lines.iter().all(|line| line.chars().count() == LINE_LIMIT && line.ends_with('…')));
     meta.title = Some("长".repeat(TEXT_LIMIT));
-    assert_eq!(ActivityContent::new(&meta, &[]).title, "长".repeat(TEXT_LIMIT));
+    assert_eq!(new(&meta, &[]).title, "长".repeat(TEXT_LIMIT));
 
-    let long = ActivityAttributes::new("m".into(), &"名".repeat(60), SessionId(1));
+    let long = Notification::new("m".into(), &"名".repeat(60), SessionId(1), &meta, &[]);
     assert_eq!(long.machine_name.chars().count(), TEXT_LIMIT);
 }
 
-/// payload 超过上限时先从最上面一行起删，删光了还超才缩短标题，提醒里的标题跟着一起短。
+/// payload 超过上限时先从最上面一行起删，删光了还超才缩短标题，副标题里的标题跟着一起短。
 #[test]
 fn oversized_payloads_drop_lines_then_shorten_the_title() {
-    let attributes = attributes();
-    let mut content = content();
-    content.lines = (0..3).map(|i| format!("{i}{}", "x".repeat(1500))).collect();
-    let payload: Value = serde_json::from_slice(&start_payload(&attributes, &content, CHANNEL, NOW).unwrap()).unwrap();
-    let lines: Vec<&str> = payload["aps"]["content-state"]["lines"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .map(|line| line.as_str().unwrap())
-        .collect();
+    let mut notification = notification();
+    notification.lines = (0..3).map(|i| format!("{i}{}", "x".repeat(1500))).collect();
+    let payload: Value = serde_json::from_slice(&notify_payload(&notification).unwrap()).unwrap();
+    let body = payload["aps"]["alert"]["body"].as_str().unwrap();
+    let lines: Vec<&str> = body.split('\n').collect();
     assert_eq!(lines.len(), 2);
     assert!(lines[0].starts_with('1') && lines[1].starts_with('2'));
 
-    content.lines = vec!["x".repeat(5000)];
-    content.title = "标".repeat(2000);
-    for payload in [
-        start_payload(&attributes, &content, CHANNEL, NOW).unwrap(),
-        update_payload(&content, NOW).unwrap(),
-        end_payload(&content, NOW).unwrap(),
-    ] {
-        assert!(payload.len() <= MAX_APNS_PAYLOAD, "{}", payload.len());
-        let payload: Value = serde_json::from_slice(&payload).unwrap();
-        let state = &payload["aps"]["content-state"];
-        assert_eq!(state["lines"], Value::Array(vec![]));
-        let title = state["title"].as_str().unwrap();
-        assert!(title.ends_with('…') && title.chars().count() < 2000, "{title}");
-        if let Some(alert) = payload["aps"].get("alert") {
-            assert_eq!(alert["body"]["loc-args"][0].as_str(), Some(title));
-        }
-    }
+    notification.lines = vec!["x".repeat(5000)];
+    notification.title = "标".repeat(2000);
+    let payload = notify_payload(&notification).unwrap();
+    assert!(payload.len() <= MAX_APNS_PAYLOAD, "{}", payload.len());
+    let payload: Value = serde_json::from_slice(&payload).unwrap();
+    let alert = &payload["aps"]["alert"];
+    assert_eq!(alert.get("body"), None);
+    let title = alert["subtitle-loc-args"][0].as_str().unwrap();
+    assert!(title.ends_with('…') && title.chars().count() < 2000, "{title}");
 
-    // 标题删光了也装不下：attributes 没按 `ActivityAttributes::new` 截过。
-    let huge = ActivityAttributes { machine_name: "x".repeat(5000), ..attributes };
-    assert_eq!(start_payload(&huge, &content, CHANNEL, NOW), None);
+    // 标题删光了也装不下：电脑名没按 `Notification::new` 截过。
+    let huge = Notification { machine_name: "x".repeat(5000), ..notification };
+    assert_eq!(notify_payload(&huge), None);
 }

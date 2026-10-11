@@ -1,37 +1,45 @@
 import Foundation
-import RunodeActivity
 import RunodeConnection
 import RunodeProtocol
 import Testing
 
 @testable import RunodeFeatures
 
-/// 假的 Live Activity 系统接口：token 和系统开关由测试推，记下收起了哪些。
+/// 假的通知系统接口：权限由测试定，token 由测试推，记下要了几次权限和 token、删了哪些通知。
 @MainActor
-final class FakeLiveActivities: LiveActivities {
-    var areEnabled = true
-    var shown: [AgentActivityAttributes] = []
-    var ended: [AgentActivityAttributes] = []
+final class FakePushNotifications: PushNotifications {
+    var allowed = true
+    var authorizationRequests = 0
+    var remoteRegistrations = 0
+    var shown: [DeliveredNotification] = []
+    var removed: [String] = []
     private let tokens: AsyncStream<Data>
     private let tokenSink: AsyncStream<Data>.Continuation
-    private let enablement: AsyncStream<Bool>
-    private let enablementSink: AsyncStream<Bool>.Continuation
+    private let failures: AsyncStream<String>
+    private let failureSink: AsyncStream<String>.Continuation
 
     init() {
         (tokens, tokenSink) = AsyncStream.makeStream(of: Data.self)
-        (enablement, enablementSink) = AsyncStream.makeStream(of: Bool.self)
+        (failures, failureSink) = AsyncStream.makeStream(of: String.self)
     }
 
-    func pushToStartTokens() -> AsyncStream<Data> { tokens }
-    func enablementUpdates() -> AsyncStream<Bool> { enablement }
+    func requestAuthorization() async -> Bool {
+        authorizationRequests += 1
+        return allowed
+    }
+
+    func registerForRemoteNotifications() { remoteRegistrations += 1 }
+    func deviceTokens() -> AsyncStream<Data> { tokens }
+    func registrationFailures() -> AsyncStream<String> { failures }
+    func delivered() async -> [DeliveredNotification] { shown }
+
+    func removeDelivered(_ ids: [String]) {
+        removed += ids
+        shown.removeAll { ids.contains($0.id) }
+    }
 
     func give(token: Data) { tokenSink.yield(token) }
-    func allow(_ allowed: Bool) { enablementSink.yield(allowed) }
-
-    func end(machine: String, session: String) async {
-        ended += shown.filter { $0.machine == machine && $0.session == session }
-        shown.removeAll { $0.machine == machine && $0.session == session }
-    }
+    func fail(_ reason: String) { failureSink.yield(reason) }
 }
 
 /// 一次登记推送的消息里要核对的几项。
@@ -61,7 +69,7 @@ private let secondToken = Data([0x01, 0x02])
 
 @MainActor
 @Suite struct PushRegistrationTests {
-    let system = FakeLiveActivities()
+    let system = FakePushNotifications()
     let machine = machineRecord(name: "书房的 Mac")
     let link = FakeLink()
 
@@ -195,12 +203,80 @@ private let secondToken = Data([0x01, 0x02])
         #expect(link.registrations.isEmpty)
     }
 
-    @Test func followsTheSystemSwitch() async {
-        system.areEnabled = false
+    /// 连上电脑时要通知权限，允许了才向 APNs 要 token。
+    @Test func connectingAsksForPermissionThenForAToken() async {
         let push = registration()
+        push.connected(machine, link: link)
+        #expect(await eventually { system.remoteRegistrations == 1 })
+        #expect(system.authorizationRequests == 1)
+        #expect(push.systemAllowed)
+    }
+
+    /// 系统不允许发通知：不要 token，对电脑注销，拿到 token 也不登记；设置页据此提示。
+    @Test func deniedPermissionUnregisters() async {
+        system.allowed = false
+        let push = registration()
+        push.connected(machine, link: link)
+        #expect(await eventually { link.registrations.count == 1 })
+        #expect(link.registrations.first?.token == nil)
         #expect(!push.systemAllowed)
-        system.allow(true)
-        #expect(await eventually { push.systemAllowed })
+        system.give(token: firstToken)
+        #expect(await eventually { push.token != nil })
+        try? await Task.sleep(for: .milliseconds(20))
+        #expect(link.registrations.count == 1)
+        #expect(system.remoteRegistrations == 0)
+    }
+
+    /// 登记过以后在系统设置里关了通知：再连上时注销，电脑不再把问题推给 APNs。
+    @Test func permissionRevokedLaterUnregisters() async {
+        let push = registration()
+        system.give(token: firstToken)
+        #expect(await eventually { push.token != nil })
+        push.connected(machine, link: link)
+        #expect(await eventually { link.registrations.count == 1 })
+        #expect(link.registrations.first?.token == "80f00a")
+        push.disconnected(machine.id)
+        system.allowed = false
+        push.connected(machine, link: link)
+        #expect(await eventually { link.registrations.count == 2 })
+        #expect(link.registrations.last?.token == nil)
+    }
+
+    /// 在系统设置里打开了通知，再连上时登记，token 没变也一样。
+    @Test func permissionGrantedLaterRegisters() async {
+        system.allowed = false
+        let push = registration()
+        system.give(token: firstToken)
+        #expect(await eventually { push.token != nil })
+        push.connected(machine, link: link)
+        #expect(await eventually { link.registrations.count == 1 })
+        #expect(!push.systemAllowed)
+        push.disconnected(machine.id)
+        system.allowed = true
+        push.connected(machine, link: link)
+        #expect(await eventually { link.registrations.count == 2 })
+        #expect(link.registrations.first?.token == nil)
+        #expect(link.registrations.last?.token == "80f00a")
+        #expect(push.systemAllowed)
+    }
+
+    /// 要 device token 失败了记下原因给设置页，之后拿到 token 就清掉。
+    @Test func tokenFailuresAreShownUntilATokenArrives() async {
+        let push = registration()
+        system.fail("no valid aps-environment entitlement")
+        #expect(await eventually { push.tokenError == "no valid aps-environment entitlement" })
+        system.give(token: firstToken)
+        #expect(await eventually { push.tokenError == nil })
+    }
+
+    /// 关着提醒时不要权限：连上的电脑只注销。
+    @Test func alertsOffDoNotAskForPermission() async {
+        let push = registration(enabled: false)
+        push.connected(machine, link: link)
+        #expect(await eventually { link.registrations.count == 1 })
+        #expect(system.authorizationRequests == 0)
+        push.enabled = true
+        #expect(await eventually { system.authorizationRequests == 1 })
     }
 
     @Test func identityComesFromTheInfoPlist() {
@@ -217,12 +293,12 @@ private let secondToken = Data([0x01, 0x02])
     }
 }
 
-/// `AppModel` 把推送登记、本地收起和深链接接到各台电脑的连接上。
+/// `AppModel` 把推送登记、清掉答完的通知和打开会话接到各台电脑的连接上。
 @MainActor
 @Suite struct AppPushTests {
     let machine = machineRecord()
     let link = FakeLink()
-    let system = FakeLiveActivities()
+    let system = FakePushNotifications()
     let preferences = DefaultsStore<AppPreferences>("preferences", defaults: .temporary())
 
     func app(load: Bool = true) async -> AppModel {
@@ -232,7 +308,7 @@ private let secondToken = Data([0x01, 0x02])
         var dependencies = AppDependencies(
             store: store, keyStore: MemoryDeviceKeyStore(), pairing: FakePairing { _ in machineRecord() },
             makeLink: { _ in link }, deviceName: "测试 iPhone", preferences: preferences)
-        dependencies.liveActivities = system
+        dependencies.notifications = system
         dependencies.pushIdentity = pushIdentity
         let app = AppModel(dependencies: dependencies)
         if load { await app.machineList.load() }
@@ -245,9 +321,10 @@ private let secondToken = Data([0x01, 0x02])
             meta: SessionMeta(title: "t", agent: state.map { Agent(kind: AgentKind("claude"), state: $0) }))
     }
 
-    func activity(_ session: SessionId, machine: UUID? = nil) -> AgentActivityAttributes {
-        AgentActivityAttributes(
-            machine: (machine ?? self.machine.id).uuidString, machineName: "MacBook", session: session.rawValue)
+    func notification(_ session: SessionId, machine: UUID? = nil) -> DeliveredNotification {
+        let machine = machine ?? self.machine.id
+        return DeliveredNotification(
+            id: "\(machine)-\(session)", link: SessionLink(machine: machine, session: session.rawValue))
     }
 
     func connect(_ list: SessionListModel) {
@@ -324,44 +401,54 @@ private let secondToken = Data([0x01, 0x02])
         #expect(await eventually { link.registrations.count == 2 })
     }
 
-    @Test func answeredActivitiesAreEndedInTheForeground() async throws {
+    @Test func answeredNotificationsAreClearedInTheForeground() async throws {
         let app = await app()
         let elsewhere = UUID()
         system.shown = [
-            activity(sessionA), activity(sessionB), activity(sessionC), activity(sessionA, machine: elsewhere),
+            notification(sessionA), notification(sessionB), notification(sessionC),
+            notification(sessionA, machine: elsewhere),
         ]
         let list = try #require(app.sessionList(for: machine.id))
         connect(list)
         // A 已经不等了，B 还在等，C 没了；别的电脑上的不动。
         list.handle(.message(.sessionList([info(sessionA, .working), info(sessionB, .blocked)])))
-        #expect(await eventually { system.ended.count == 2 })
-        #expect(Set(system.ended) == [activity(sessionA), activity(sessionC)])
-        #expect(system.shown == [activity(sessionB), activity(sessionA, machine: elsewhere)])
-        // 答完了也收起。
+        #expect(await eventually { system.removed.count == 2 })
+        #expect(Set(system.removed) == [notification(sessionA).id, notification(sessionC).id])
+        #expect(system.shown == [notification(sessionB), notification(sessionA, machine: elsewhere)])
+        // 答完了也清掉。
         list.handle(.message(.meta(id: sessionB, meta: info(sessionB, .working).meta)))
-        #expect(await eventually { system.ended.count == 3 })
+        #expect(await eventually { system.removed.count == 3 })
     }
 
     /// 重连上还没收到新列表时手上是断开前的列表，不能拿它判断；在后台时也不动。
-    @Test func staleListsAndTheBackgroundLeaveActivitiesAlone() async throws {
+    @Test func staleListsAndTheBackgroundLeaveNotificationsAlone() async throws {
         let app = await app()
         let list = try #require(app.sessionList(for: machine.id))
         connect(list)
         list.handle(.message(.sessionList([info(sessionA, .working)])))
         list.handle(.state(.waiting(reason: "断了", retryAt: .now)))
-        system.shown = [activity(sessionA)]
+        system.shown = [notification(sessionA)]
         connect(list)
         list.handle(.message(.meta(id: sessionA, meta: info(sessionA, .working).meta)))
         try await Task.sleep(for: .milliseconds(20))
-        #expect(system.ended.isEmpty)
+        #expect(system.removed.isEmpty)
         app.setActive(false)
         list.handle(.message(.sessionList([info(sessionA, .working)])))
         try await Task.sleep(for: .milliseconds(20))
-        #expect(system.ended.isEmpty)
+        #expect(system.removed.isEmpty)
         app.setActive(true)
         connect(list)
         list.handle(.message(.sessionList([info(sessionA, .working)])))
-        #expect(await eventually { system.ended == [activity(sessionA)] })
+        #expect(await eventually { system.removed == [notification(sessionA).id] })
+    }
+
+    /// 点开通知：打开那个会话的终端页，设置页开着就关掉。
+    @Test func openingANotificationOpensTheTerminal() async throws {
+        let app = await app()
+        app.showingSettings = true
+        app.open(SessionLink(machine: machine.id, session: sessionB.rawValue))
+        #expect(app.path == [.machine(machine.id), .terminal(machine: machine.id, session: sessionB)])
+        #expect(!app.showingSettings)
     }
 
     @Test func sessionLinksOpenTheTerminal() async throws {

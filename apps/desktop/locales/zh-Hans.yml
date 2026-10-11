@@ -579,7 +579,7 @@ settings:
     clipboard: 剪贴板
     tasks: 项目命令
     login: 登录时启动
-    push: 实时活动
+    push: 手机通知
     push_key: 自己编译的手机 App
     decision_service: 服务
     decision_keys: 托管 API
@@ -633,7 +633,7 @@ settings:
     remote_access: 远程访问
     remote_access_port: 端口
     remote_access_name: "电脑名"
-    remote_access_push: 在手机上显示等回答的 agent
+    remote_access_push: agent 等回答时通知手机
     remote_access_push_text: 带上问题
     remote_access_push_delay: 等多久再推
     apns_key_file: APNs 密钥文件
@@ -691,7 +691,7 @@ settings:
     remote_access: 让配对过的手机经局域网或 Tailscale 连上这台 Mac 的终端。在下面配对，或者用 runode remote pair。
     remote_access_port: TCP 端口，1 到 65535。
     remote_access_name: "配对过的手机上显示的名字，留空时用系统的电脑名。改了以后连着的手机会断开一下再连上。"
-    remote_access_push: agent 等你回答时，配对过的手机在灵动岛和锁屏上显示出来，App 没开着也行。
+    remote_access_push: agent 等你回答时，配对过的手机会收到一条通知，App 没开着也行。
     remote_access_push_text: 带上屏幕底部的问题和选项；关掉时只发标题和 agent。
     remote_access_push_delay: agent 要先等这么多秒，在电脑前很快答了的不打扰手机。0 是马上推。
     apns_key_file: Apple 开发者账号里下载的 .p8 文件，~ 表示 $HOME。四项都填了才直连 APNs。
@@ -817,6 +817,16 @@ settings:
     state_loading: 加载中
     state_pinned: 已加载 · 常驻
     state_expires: "已加载 · %{minutes} 分钟后卸载"
+  test_push:
+    title: 测试推送
+    hint: 马上给登记过的手机推一条通知，看推送设置和密钥对不对。
+    send: 发送
+    sending: 发送中…
+    sent: "已推给 %{count} 台手机。"
+    no_phone: 还没有手机登记推送：在手机上打开 Runode，连上这台 Mac。
+    failed: "发送失败：%{err}"
+    push_title: Runode 测试推送
+    push_line: 推送没问题。
   pairing:
     title: 配对手机
     hint: 用手机上的 Runode 扫码配对。配好的手机在远程访问打开时能连上这台 Mac。

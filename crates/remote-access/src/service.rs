@@ -3,8 +3,8 @@
 //! 手机会断开后自己重连。开不了（端口被占、另一个 runode 进程正占着监听，比如交接时还没退出的旧宿主）就每隔
 //! `RETRY` 再试，直到开成或者不要了。
 //!
-//! agent 等回答时推 Live Activity 的 `Pusher` 也归它管：监听开着时才推（只有占着监听的那个进程推，
-//! 频道文件不会被两个进程抢着写），推送的设置由 `set_push` 给。
+//! agent 等回答时给手机推通知的 `Pusher` 也归它管：监听开着时才推（只有占着监听的那个进程推，同一次
+//! 等回答不会被两个进程各推一遍），推送的设置由 `set_push` 给。
 
 use std::{
     sync::{Arc, Condvar, Mutex, PoisonError},
@@ -136,7 +136,7 @@ fn run(shared: &Wanted, pusher: &Pusher, options: Options) {
         }
     }
     drop(state);
-    // 进程要退出或者不要远程访问了：推送停下，开着的回合留在频道文件里，下次接着办。
+    // 进程要退出或者不要远程访问了：推送停下。
     pusher.set_listening(Listening::Starting);
     drop(running);
 }

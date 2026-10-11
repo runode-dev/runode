@@ -1,6 +1,5 @@
 import Foundation
 import Observation
-import RunodeActivity
 import RunodeConnection
 import RunodeProtocol
 
@@ -36,8 +35,8 @@ public struct AppDependencies {
     public var preferences: DefaultsStore<AppPreferences>
     /// 上次用的主题记在哪里，App 刚启动、电脑还没连上时先用它，用浅色主题的不会先闪一下默认的深色。
     public var themes: DefaultsStore<AppTheme>
-    /// 灵动岛和锁屏上 Live Activity 的系统接口；默认为空，不登记推送、不收起过时的（测试、演示模式）。
-    public var liveActivities: (any LiveActivities)?
+    /// 通知的系统接口；默认为空，不登记推送、不清通知（测试、演示模式）。
+    public var notifications: (any PushNotifications)?
     /// 登记推送时报给电脑的 App 身份，App 入口从 Info.plist 读；为空时不登记推送。
     public var pushIdentity: PushIdentity?
 
@@ -57,7 +56,7 @@ public struct AppDependencies {
         self.recents = recents
         self.preferences = preferences
         self.themes = themes
-        liveActivities = nil
+        notifications = nil
         pushIdentity = nil
     }
 }
@@ -66,9 +65,9 @@ public struct AppDependencies {
 /// 时都连着，首页据此显示各台的状态、等回答的会话和统计；App 进后台时全部断开，回到前台再连上、
 /// 各页重新 `Attach`。
 ///
-/// agent 等回答时灵动岛和锁屏上的提醒由电脑经推送起、更新和收起，手机不用连着：每台电脑连上时由
-/// `PushRegistration` 登记推送。App 在前台、连着某台电脑时，本地还留着它上面已经不等回答的会话的
-/// 提醒（电脑没收起来）就在这里收起。
+/// agent 等回答时由电脑经 APNs 推通知，手机不用连着：每台电脑连上时由 `PushRegistration` 登记推送。
+/// 电脑撤不回发出去的通知，App 在前台、连着某台电脑时，通知中心里它上面已经不等回答的会话的通知就在
+/// 这里清掉。
 @Observable
 @MainActor
 public final class AppModel {
@@ -102,8 +101,8 @@ public final class AppModel {
     @ObservationIgnored private var active = true
     /// 系统交来、要等电脑列表读进来才能打开的会话链接（冷启动时）。
     @ObservationIgnored private var pendingLink: SessionLink?
-    /// 正在收起的提醒，收起之前列表又变了也不再叫一次。
-    @ObservationIgnored private var endingActivities: Set<AgentActivityAttributes> = []
+    /// 正在查通知中心的电脑，查完之前列表又变了不再查一次：查完时按那时的列表筛。
+    @ObservationIgnored private var clearingNotifications: Set<UUID> = []
 
     public init(dependencies: AppDependencies) {
         self.dependencies = dependencies
@@ -111,7 +110,7 @@ public final class AppModel {
         let settings = SettingsModel(store: dependencies.preferences, systemDeviceName: dependencies.deviceName)
         self.settings = settings
         push = PushRegistration(
-            system: dependencies.liveActivities, identity: dependencies.pushIdentity,
+            system: dependencies.notifications, identity: dependencies.pushIdentity,
             enabled: settings.preferences.alertsBlockedAgents)
         recent = dependencies.recents.load()
         savedTheme = dependencies.themes.load()
@@ -188,8 +187,8 @@ public final class AppModel {
         return model
     }
 
-    /// 系统交来的 `runode://` 链接：`runode://pair?…` 打开配对页，`runode://session?…`（Live Activity 的
-    /// 卡片）打开那台电脑上那个会话的终端页。别的不认。
+    /// 系统交来的 `runode://` 链接：`runode://pair?…` 打开配对页，`runode://session?…` 打开那台电脑上那个
+    /// 会话的终端页。别的不认。
     public func open(url: URL) {
         guard url.scheme?.lowercased() == "runode" else { return }
         switch url.host?.lowercased() {
@@ -197,11 +196,16 @@ public final class AppModel {
             startPairing(link: url.absoluteString)
         case SessionLink.host:
             guard let link = SessionLink(url: url) else { return }
-            pendingLink = link
-            openPendingLink()
+            open(link)
         default:
             break
         }
+    }
+
+    /// 打开那台电脑上那个会话的终端页：点开了等回答的通知，或者系统交来了会话链接。
+    public func open(_ link: SessionLink) {
+        pendingLink = link
+        openPendingLink()
     }
 
     /// 打开记下的会话链接。电脑列表还没读进来时先留着，读进来以后（`syncConnections`）再开；不认识的
@@ -235,7 +239,7 @@ public final class AppModel {
         model.onSpawned = { [weak self] session in self?.openTerminal(machine: machineId, session: session) }
         model.onThemeChanged = { [weak self] in self?.saveTheme() }
         model.onSessionsChanged = { [weak self, weak model] in
-            if let model { self?.endAnsweredActivities(on: model) }
+            if let model { self?.clearAnsweredNotifications(on: model) }
         }
         model.onLinkEvent = { [weak self, weak model] event in
             guard let self, let model else { return }
@@ -313,21 +317,29 @@ public final class AppModel {
         }
     }
 
-    /// 前台、连着这台电脑、这次连上以后收到过列表时，收起本地还留着的、这台电脑上已经不等回答
-    /// （或者没了）的会话的提醒。电脑在会话答完时会自己收起，这是它没收成时的兜底。
-    private func endAnsweredActivities(on list: SessionListModel) {
-        guard active, list.linkState.isConnected, list.listCurrent, let system = dependencies.liveActivities else {
-            return
-        }
-        for shown in system.shown where UUID(uuidString: shown.machine) == list.machine.id {
-            let session = SessionId(shown.session).flatMap(list.session)
-            guard session.map(SessionGroup.of) != .waiting, !endingActivities.contains(shown) else { continue }
-            endingActivities.insert(shown)
-            Task { [weak self] in
-                await system.end(machine: shown.machine, session: shown.session)
-                self?.endingActivities.remove(shown)
+    /// 前台、连着这台电脑、这次连上以后收到过列表时，从通知中心清掉这台电脑上已经不等回答（或者没了）的
+    /// 会话的通知：电脑撤不回发出去的通知。
+    private func clearAnsweredNotifications(on list: SessionListModel) {
+        let machine = list.machine.id
+        guard let system = dependencies.notifications, current(list), !clearingNotifications.contains(machine)
+        else { return }
+        clearingNotifications.insert(machine)
+        Task { [weak self, weak list] in
+            let delivered = await system.delivered()
+            guard let self else { return }
+            self.clearingNotifications.remove(machine)
+            guard let list, self.current(list) else { return }
+            let answered = delivered.filter { notification in
+                notification.link.machine == machine
+                    && SessionId(notification.link.session).flatMap(list.session).map(SessionGroup.of) != .waiting
             }
+            if !answered.isEmpty { system.removeDelivered(answered.map(\.id)) }
         }
+    }
+
+    /// 能拿这台电脑的列表判断哪些会话还在等：App 在前台、连着、这次连上以后收到过列表。
+    private func current(_ list: SessionListModel) -> Bool {
+        active && list.linkState.isConnected && list.listCurrent
     }
 
     /// 导航栈变了或切了分屏：退出去的终端页、Git 页关掉，新打开的终端记作「上次打开」。会话列表的连接

@@ -7,7 +7,7 @@
 //! 一会儿、按回车或者失去焦点时写回，写之前按读配置时的规矩检查，不对就不写、在那一项下面说原因。
 //!
 //! 哪一页有哪些项在 `pages`，开关、选项这些控件在 `controls`，从长列表里挑一项的浮层在 `picker`，
-//! 快捷键那一页在 `keybinds`，远程访问那一页的配对手机在 `pairing`，外观页的配色在 `theme`，
+//! 快捷键那一页在 `keybinds`，远程访问那一页的配对手机在 `pairing`、测试推送在 `test_push`，外观页的配色在 `theme`，
 //! 模型那一页（大模型和决策模型，经用户自己装的 runode-infer）在 `decision`。
 
 mod autostart;
@@ -19,6 +19,7 @@ pub(crate) use keybinds::caps as keybind_caps;
 mod pages;
 mod pairing;
 mod picker;
+mod test_push;
 mod theme;
 
 use std::{collections::HashMap, ffi::OsString, sync::Arc, time::Duration};
@@ -91,6 +92,7 @@ pub struct SettingsView {
     /// 终端里 shell 报告的 PATH，找 runode-infer 用。
     shell_path: Option<OsString>,
     decision: decision::State,
+    test_push: test_push::State,
     _observe: Subscription,
     _pulls: Subscription,
 }
@@ -115,6 +117,7 @@ impl SettingsView {
             scroll: ScrollHandle::new(),
             shell_path,
             decision: decision::State::default(),
+            test_push: test_push::State::default(),
             _observe: observe,
             _pulls: pulls,
         }

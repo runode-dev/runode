@@ -15,8 +15,6 @@
 			</array>
 		</dict>
 	</array>
-	<key>NSSupportsLiveActivities</key>
-	<true/>
 	<key>RunodeAPSEnvironment</key>
 	<string>$(RUNODE_APS_ENVIRONMENT)</string>
 	<key>NSBonjourServices</key>
