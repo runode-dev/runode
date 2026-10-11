@@ -272,6 +272,16 @@ impl Picture {
         }
     }
 
+    /// 留着这张图占的字节：位图按编码的字节（解码前不知道多大），SVG 按画好的各帧。
+    fn bytes(&self) -> usize {
+        match self {
+            Picture::Bitmap(image) => image.bytes().len(),
+            Picture::Svg(image) => {
+                (0..image.frame_count()).filter_map(|frame| image.as_bytes(frame)).map(<[u8]>::len).sum()
+            }
+        }
+    }
+
     /// 关掉或换掉时放掉解码结果，和 `Preview::release_image` 一样。
     fn release(&self, cx: &mut App) {
         match self {
@@ -1536,7 +1546,8 @@ impl WindowView {
                         return;
                     }
                     if let Some((preview, _)) = this.preview_for(id, &cancel) {
-                        preview.markdown_view.remote.insert(url, picture);
+                        preview.markdown_view.remote.insert(url.clone(), picture);
+                        remote::trim(&url, cx);
                         cx.notify();
                     }
                 })

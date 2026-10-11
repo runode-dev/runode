@@ -1,6 +1,7 @@
 //! 排版视图里的网络图片（`http`、`https`）：外调 curl 在几个固定的下载线程里下载，限 10 秒、限
-//! `runode_preview::MAX_IMAGE_BYTES` 字节，只收图片类型；同一个地址整个 app 只下一次，下好的结果留着
-//! 给之后打开的文档用，下不了的不留，下次打开文档再试。主机是本机或局域网地址的不下载：网址里写的
+//! `runode_preview::MAX_IMAGE_BYTES` 字节，只收图片类型；同一个地址下好的结果留着给之后打开的文档用，
+//! 一共留到 `MAX_KEPT_BYTES`，多了放掉最久没要过的，再要时重下；下不了的不留，下次打开文档再试。
+//! 主机是本机或局域网地址的不下载：网址里写的
 //! 主机先查一遍，再自己解析出地址查一遍，解析到的地址交给 curl（`--resolve`）不让它再解析；重定向
 //! 自己一跳一跳地跟，每跳都这样查。
 
@@ -18,7 +19,7 @@ use std::{
 };
 
 use futures::{FutureExt as _, channel::oneshot, future::Shared};
-use gpui::SvgRenderer;
+use gpui::{App, SvgRenderer};
 use runode_preview::{Content, ImageFormat, MAX_IMAGE_BYTES};
 
 use super::{Picture, picture_of};
@@ -33,9 +34,22 @@ const WORKERS: usize = 4;
 /// 下载中或下完的图片，等到的是画好的图，下不了时为空。
 pub(super) type Pending = Shared<oneshot::Receiver<Option<Picture>>>;
 
-/// 按地址记着的下载。shortcut: 下好的图（连同 GPUI 里解码的结果）一直留到 app 退出，关标签也不放；
-/// 打开的网络图片多到占内存时再按用量清。
-static DOWNLOADS: LazyLock<Mutex<HashMap<String, Pending>>> = LazyLock::new(Default::default);
+/// 下好的图一共最多留这么多字节（位图按下载的字节，SVG 按画好的位图），多了先放掉最久没要过的。
+const MAX_KEPT_BYTES: usize = 96 << 20;
+
+/// 按地址记着的下载，`used` 是最后一次要它时 `clock` 的值。
+#[derive(Default)]
+struct Downloads {
+    entries: HashMap<String, Download>,
+    clock: u64,
+}
+
+struct Download {
+    pending: Pending,
+    used: u64,
+}
+
+static DOWNLOADS: LazyLock<Mutex<Downloads>> = LazyLock::new(Default::default);
 
 type Job = Box<dyn FnOnce() + Send>;
 
@@ -66,10 +80,41 @@ pub(super) fn fetch(url: &str, svg: &SvgRenderer) -> Pending {
     })
 }
 
+/// 地址 `url` 的图下好、换上以后调用：留着的图超过 `MAX_KEPT_BYTES` 时放掉最久没要过的（不放 `url`
+/// 自己），连同 GPUI 里解码的结果。
+pub(super) fn trim(url: &str, cx: &mut App) {
+    for picture in trim_with(&DOWNLOADS, url, MAX_KEPT_BYTES) {
+        picture.release(cx);
+    }
+}
+
+/// `trim` 去掉 GPUI 的部分：从 `downloads` 里去掉的图。
+fn trim_with(downloads: &Mutex<Downloads>, keep: &str, budget: usize) -> Vec<Picture> {
+    let mut downloads = downloads.lock().unwrap_or_else(PoisonError::into_inner);
+    // 还在下的、下不了的不算。
+    let picture = |download: &Download| download.pending.peek().and_then(|done| done.clone().ok()).flatten();
+    let mut total: usize = downloads.entries.values().filter_map(picture).map(|picture| picture.bytes()).sum();
+    let mut dropped = Vec::new();
+    while total > budget {
+        let oldest = downloads
+            .entries
+            .iter()
+            .filter(|&(url, download)| url != keep && picture(download).is_some())
+            .min_by_key(|(_, download)| download.used)
+            .map(|(url, _)| url.clone());
+        let Some(picture) = oldest.and_then(|url| downloads.entries.remove(&url)).as_ref().and_then(picture) else {
+            break;
+        };
+        total -= picture.bytes();
+        dropped.push(picture);
+    }
+    dropped
+}
+
 /// `fetch` 去掉 curl 的部分：按地址记在 `downloads` 里，由下载线程跑 `work`；跑出来为空时把这个地址
 /// 从表里去掉，下次再要时重下。
 fn fetch_with(
-    downloads: &'static Mutex<HashMap<String, Pending>>,
+    downloads: &'static Mutex<Downloads>,
     url: &str,
     work: impl FnOnce(&str) -> Option<Picture> + Send + 'static,
 ) -> Pending {
@@ -78,23 +123,25 @@ fn fetch_with(
         let _ = done.send(None);
         return result.shared();
     }
-    let mut map = downloads.lock().unwrap_or_else(PoisonError::into_inner);
-    map.entry(url.to_owned())
-        .or_insert_with(|| {
-            let (done, result) = oneshot::channel();
-            let url = url.to_owned();
-            let job: Job = Box::new(move || {
-                // 解码坏图之类 panic 了当作下不了：地址照常去掉好重试，下载线程也不跟着退出。
-                let picture = panic::catch_unwind(AssertUnwindSafe(|| work(&url))).ok().flatten();
-                if picture.is_none() {
-                    downloads.lock().unwrap_or_else(PoisonError::into_inner).remove(&url);
-                }
-                let _ = done.send(picture);
-            });
-            let _ = QUEUE.send(job);
-            result.shared()
-        })
-        .clone()
+    let mut state = downloads.lock().unwrap_or_else(PoisonError::into_inner);
+    state.clock += 1;
+    let used = state.clock;
+    let download = state.entries.entry(url.to_owned()).or_insert_with(|| {
+        let (done, result) = oneshot::channel();
+        let url = url.to_owned();
+        let job: Job = Box::new(move || {
+            // 解码坏图之类 panic 了当作下不了：地址照常去掉好重试，下载线程也不跟着退出。
+            let picture = panic::catch_unwind(AssertUnwindSafe(|| work(&url))).ok().flatten();
+            if picture.is_none() {
+                downloads.lock().unwrap_or_else(PoisonError::into_inner).entries.remove(&url);
+            }
+            let _ = done.send(picture);
+        });
+        let _ = QUEUE.send(job);
+        Download { pending: result.shared(), used }
+    });
+    download.used = used;
+    download.pending.clone()
 }
 
 /// 网址里写的主机是本机或局域网：`localhost`、`.localhost`、`.local` 结尾的名字，`is_local_ip` 那些
@@ -403,7 +450,7 @@ mod tests {
     /// 下不了的不记着，再要时重下；下好的记着，再要时不再下。
     #[test]
     fn failed_downloads_are_retried() {
-        static DOWNLOADS: LazyLock<Mutex<HashMap<String, Pending>>> = LazyLock::new(Default::default);
+        static DOWNLOADS: LazyLock<Mutex<Downloads>> = LazyLock::new(Default::default);
         static RUNS: AtomicUsize = AtomicUsize::new(0);
         let url = "https://example.com/a.png";
         let picture = || Picture::Bitmap(Arc::new(gpui::Image::from_bytes(gpui::ImageFormat::Png, vec![1])));
@@ -428,6 +475,29 @@ mod tests {
             futures::executor::block_on(fetch_with(&DOWNLOADS, "http://localhost/a.png", run(None))).unwrap().is_none()
         );
         assert_eq!(RUNS.load(Ordering::SeqCst), 3);
+    }
+
+    /// 超出用量时先放掉最久没要过的，刚换上的那张不放。
+    #[test]
+    fn kept_pictures_are_trimmed_least_recently_used_first() {
+        static DOWNLOADS: LazyLock<Mutex<Downloads>> = LazyLock::new(Default::default);
+        let get = |url: &str| {
+            let picture = Picture::Bitmap(Arc::new(gpui::Image::from_bytes(gpui::ImageFormat::Png, vec![0; 4])));
+            futures::executor::block_on(fetch_with(&DOWNLOADS, url, move |_| Some(picture))).unwrap();
+        };
+        let kept = || {
+            let mut urls: Vec<_> = DOWNLOADS.lock().unwrap().entries.keys().cloned().collect();
+            urls.sort();
+            urls
+        };
+        for url in ["https://x/a", "https://x/b", "https://x/c", "https://x/a"] {
+            get(url);
+        }
+        assert!(trim_with(&DOWNLOADS, "https://x/c", 12).is_empty());
+        assert_eq!(trim_with(&DOWNLOADS, "https://x/c", 8).len(), 1);
+        assert_eq!(kept(), ["https://x/a", "https://x/c"]);
+        assert_eq!(trim_with(&DOWNLOADS, "https://x/c", 0).len(), 1);
+        assert_eq!(kept(), ["https://x/c"]);
     }
 
     #[test]
