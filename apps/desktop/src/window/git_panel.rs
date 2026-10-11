@@ -409,7 +409,8 @@ impl WindowView {
                 .into_any_element(),
             Some(git) => {
                 let git = &git.main;
-                let list: AnyElement = if panel.rows.is_empty() {
+                // 只剩「没有改动」那一行时不当列表画，和别的空状态一样居中说一句。
+                let list: AnyElement = if matches!(panel.rows[..], [] | [GitRow::Clean(_)]) {
                     panel_message(rust_i18n::t!("panel.no_changes").into_owned(), fg).into_any_element()
                 } else {
                     div()
