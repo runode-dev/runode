@@ -63,6 +63,11 @@ pub(crate) use clipboard::CLIPBOARD_READ_PATIENCE;
 /// 按字节而不按块数算：程序不停输出时一次只读到 1 KiB 左右，按块数限的话积压不了多少，会话
 /// 线程稍一耽搁读线程就得停下。
 const PTY_BACKLOG_BYTES: usize = 64 * 64 * 1024;
+/// 会话线程一次最多把这么多字节相邻的 PTY 输出合成一块处理，见 `coalesce`。处理一块时不看
+/// 轮询的时刻和 `Handle::killed`，所以块的大小也是它们最多被耽搁多久：发布构建里 VT 喂 64 KiB
+/// 不到 1 ms；开发构建的 libghostty 是 Zig 的 Debug 构建，喂 64 KiB 要三秒左右，前台进程和结束
+/// 会话都跟着拖住，所以只合到 4 KiB。
+const COALESCE_BYTES: usize = if cfg!(debug_assertions) { 4 * 1024 } else { 64 * 1024 };
 /// 重新读取前台进程的间隔：不输出的程序（比如 `sleep`）启动后，标签名也能跟上。
 const FOREGROUND_POLL_INTERVAL: Duration = Duration::from_secs(1);
 /// 有输出时重读前台进程的最短间隔：大量输出时不必每块都做几次系统调用，推迟的那次到点补上。
@@ -507,15 +512,27 @@ impl Runner {
     }
 
     fn run(mut self, inbox: &mpsc::Receiver<Inbox>, killed: &AtomicBool) {
+        // 合并输出时多取出来的那条消息，下一轮先办它，见 `coalesce`。
+        let mut stash = None;
         loop {
-            let Some(message) = self.wait(inbox) else {
-                return;
+            let message = match stash.take() {
+                Some(message) => Some(message),
+                None => match self.wait(inbox) {
+                    Some(message) => message,
+                    None => return,
+                },
             };
             if killed.load(Ordering::Acquire) {
                 self.ended();
                 self.answer_pending(message, inbox);
                 return;
             }
+            let message = match message {
+                Some(Inbox::Pty(PtyEvent::Output(data))) => {
+                    Some(Inbox::Pty(PtyEvent::Output(coalesce(data, inbox, &mut stash))))
+                }
+                message => message,
+            };
             // 处理一条消息时 panic 的话，`HostSession` 可能停在半路，不能再往下处理；告诉前端会话
             // 没了，免得视图一直停在最后一屏不动。
             let handled = panic::catch_unwind(AssertUnwindSafe(|| match message {
@@ -1211,6 +1228,28 @@ impl Credits {
     }
 }
 
+/// 把收件箱里紧跟在 `first` 后面排着的 PTY 输出接到它后面，合起来最多 `COALESCE_BYTES`，好让
+/// 刷屏时一次喂 VT、一次发帧，不必每个小块（常常只有十几个字节）都走一遍 `Runner::output`。
+/// 取到的第一条别的消息，或者接上就超了的那块输出，放进 `stash` 由下一轮先办，先后不变。
+fn coalesce(first: Arc<[u8]>, inbox: &mpsc::Receiver<Inbox>, stash: &mut Option<Inbox>) -> Arc<[u8]> {
+    let mut merged: Option<Vec<u8>> = None;
+    let mut len = first.len();
+    while len < COALESCE_BYTES {
+        let Ok(message) = inbox.try_recv() else { break };
+        match message {
+            Inbox::Pty(PtyEvent::Output(data)) if len + data.len() <= COALESCE_BYTES => {
+                merged.get_or_insert_with(|| first.to_vec()).extend_from_slice(&data);
+                len += data.len();
+            }
+            message => {
+                *stash = Some(message);
+                break;
+            }
+        }
+    }
+    merged.map_or(first, Arc::from)
+}
+
 fn output_len(event: &PtyEvent) -> usize {
     match event {
         PtyEvent::Output(data) => data.len(),
@@ -1261,6 +1300,50 @@ mod tests {
         assert!(runner.session.started());
         let deadline = runner.deadline().expect("a started session polls its foreground");
         assert!(deadline >= before + FOREGROUND_POLL_INTERVAL && deadline <= Instant::now() + FOREGROUND_POLL_INTERVAL);
+    }
+
+    /// 排在一起的输出合成一块，夹着别的消息时各自成块、先后不变；接上就超了 `COALESCE_BYTES`
+    /// 的那块另起一块。
+    #[test]
+    fn adjacent_output_is_coalesced_in_order() {
+        let (tx, rx) = mpsc::channel();
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let sink_seen = seen.clone();
+        let sink: EventSink = Box::new(move |event| {
+            sink_seen.lock().unwrap().push(event);
+            true
+        });
+        let start = Box::new(move |_| Some(sink));
+        let subscribe =
+            Subscribe { connection: 1, size: None, mode: AttachMode::MetaOnly, start, desktop: false, device: None };
+        let output = |data: &[u8]| Inbox::Pty(PtyEvent::Output(data.into()));
+        let big = vec![b'x'; COALESCE_BYTES];
+        for message in [
+            Inbox::Subscribe(subscribe),
+            output(b"a"),
+            output(b"b"),
+            Inbox::Resize { connection: 2, size: GridSize { cols: 30, ..SIZE } },
+            output(b"c"),
+            output(&big),
+            output(b"d"),
+            output(b"e"),
+        ] {
+            tx.send(message).unwrap();
+        }
+        drop(tx);
+        runner(true).run(&rx, &AtomicBool::new(false));
+        let seen: Vec<Vec<u8>> = seen
+            .lock()
+            .unwrap()
+            .iter()
+            .filter_map(|event| match event {
+                Event::Output(data) => Some(data.to_vec()),
+                Event::Msg(message) if matches!(**message, HostMsg::Resized { .. }) => Some(b"<resized>".to_vec()),
+                Event::Msg(_) => None,
+            })
+            .collect();
+        let expected = [b"ab".to_vec(), b"<resized>".to_vec(), b"c".to_vec(), big, b"de".to_vec()];
+        assert_eq!(seen, expected);
     }
 
     #[test]
