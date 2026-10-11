@@ -46,6 +46,7 @@ use crate::{
     terminal_view::{TerminalEvent, TerminalView},
     ui::{
         a11y::{A11yPress, PressDown},
+        font_size::{self, FontSize, scaled},
         hsla,
         scrollbar::scrollbar,
         tooltip::tooltip,
@@ -517,7 +518,7 @@ impl WindowView {
             .child(refresh);
         let shell = panel_shell("github-actions-panel", width, fg, bg, cx)
             .bg(hsla(bg.mix(fg, 0.03)))
-            .text_size(px(12.))
+            .text_size(FontSize::Body)
             .child(self.render_panel_tabs(fg, bg, cx))
             .child(title);
         if !self.git_button_visible() {
@@ -561,6 +562,7 @@ impl WindowView {
         let heights = page.heights;
         let dragged = heights.iter().any(Option::is_some);
         let all_bounds = page.bounds.clone();
+        let (row_height, section_min) = (ROW_HEIGHT * font_size::scale(cx), SECTION_MIN_HEIGHT * font_size::scale(cx));
         let sections =
             walk.sections.into_iter().zip(page.scrolls.clone()).enumerate().map(|(si, ((header, body), scroll))| {
                 let measure = {
@@ -588,11 +590,9 @@ impl WindowView {
                 if body.is_empty() {
                     return section.flex_none();
                 }
-                let height = (body.len() + 1) as f32 * ROW_HEIGHT + 1.;
+                let height = (body.len() + 1) as f32 * row_height + 1.;
                 let section = match heights[si].filter(|_| Some(si) != last) {
-                    Some(set) => {
-                        section.flex_initial().h(px(set.min(height))).min_h(px(SECTION_MIN_HEIGHT.min(height)))
-                    }
+                    Some(set) => section.flex_initial().h(px(set.min(height))).min_h(px(section_min.min(height))),
                     // 拖过分隔线以后最后一段填满剩下的地方，分隔线停在松手的位置，不在底下空出一截。
                     None if Some(si) == last && dragged => section.flex_1().min_h_0(),
                     None => section.flex_1().min_h_0().max_h(px(height)),
@@ -634,7 +634,7 @@ impl WindowView {
                 view.update(cx, |this, cx| {
                     let above = this.github_actions.bounds.get()[si - 1];
                     if let Some(above) = above {
-                        this.resize_actions_section(si, f32::from(above.bottom()) + delta);
+                        this.resize_actions_section(si, f32::from(above.bottom()) + delta, cx);
                         cx.notify();
                     }
                 })
@@ -670,7 +670,8 @@ impl WindowView {
 
     /// 拖第 `si` 段上沿的分隔线到窗口里的纵坐标 `y`：上面那段的下沿跟到 `y`，下面那段拖过高度的
     /// 下沿不动；两段都至少留一个标题加一行。
-    pub(super) fn resize_actions_section(&mut self, si: usize, y: f32) {
+    pub(super) fn resize_actions_section(&mut self, si: usize, y: f32, cx: &App) {
+        let section_min = SECTION_MIN_HEIGHT * font_size::scale(cx);
         let page = &mut self.github_actions;
         let bounds = page.bounds.get();
         let (Some(above), Some(below)) = (bounds[si - 1], bounds[si]) else {
@@ -678,8 +679,8 @@ impl WindowView {
         };
         let top = f32::from(above.origin.y);
         let bottom = f32::from(below.bottom());
-        let below_min = f32::from(below.size.height).min(SECTION_MIN_HEIGHT);
-        let y = y.min(bottom - below_min).max(top + SECTION_MIN_HEIGHT);
+        let below_min = f32::from(below.size.height).min(section_min);
+        let y = y.min(bottom - below_min).max(top + section_min);
         page.heights[si - 1] = Some(y - top);
         if page.heights[si].is_some() {
             page.heights[si] = Some(bottom - y);
@@ -1059,7 +1060,11 @@ impl WindowView {
                     .actions_row("adding".to_owned(), walk.ix(), depth + 1, fg, bg, cx)
                     .aria_label(label.into_owned())
                     .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-                    .child(div().flex_1().min_w_0().child(adding.edit.render(px(ROW_HEIGHT - 4.), fg, bg)));
+                    .child(div().flex_1().min_w_0().child(adding.edit.render(
+                        px((ROW_HEIGHT - 4.) * font_size::scale(cx)),
+                        fg,
+                        bg,
+                    )));
                 walk.rows.push(row.into_any_element());
             }
             match self.query_rows(walk, &query, depth + 1, fg) {
@@ -1162,7 +1167,7 @@ impl WindowView {
             .aria_expanded(expanded)
             .aria_label(aria)
             .child(chevron(expanded, fg))
-            .child(div().flex_none().text_size(px(11.)).font_weight(gpui::FontWeight::SEMIBOLD).child(label))
+            .child(div().flex_none().text_size(FontSize::Small).font_weight(gpui::FontWeight::SEMIBOLD).child(label))
             .child(div().flex_1().min_w_0().truncate().text_color(hsla(fg).opacity(0.5)).children(detail))
             .on_press_down(cx, move |this, _, cx| this.toggle_actions_node(node.clone(), cx));
         walk.rows.push(row.into_any_element());
@@ -1201,7 +1206,7 @@ impl WindowView {
             .role(Role::Label)
             .aria_label(text.clone())
             .flex_none()
-            .min_h(px(ROW_HEIGHT))
+            .min_h(scaled(ROW_HEIGHT))
             .w_full()
             .pl(px(8. + (depth as f32 + 1.) * INDENT))
             .pr(px(8.))
@@ -1232,7 +1237,7 @@ impl WindowView {
             .role(Role::TreeItem)
             .aria_level(depth + 1)
             .flex_none()
-            .h(px(ROW_HEIGHT))
+            .h(scaled(ROW_HEIGHT))
             .w_full()
             .pl(px(8. + depth as f32 * INDENT))
             .pr(px(8.))
@@ -1354,7 +1359,7 @@ fn text_button(id: &'static str, text: String, fg: Rgb, bg: Rgb) -> Stateful<Div
         .id(id)
         .role(Role::Button)
         .aria_label(text.clone())
-        .h(px(22.))
+        .h(scaled(22.))
         .px(px(8.))
         .flex()
         .items_center()

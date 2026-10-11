@@ -35,6 +35,7 @@ use crate::{
         TERMINAL_ICON,
     },
     ui::{
+        font_size::FontSize,
         hsla,
         tooltip::{shortcut_text, tooltip},
     },
@@ -183,7 +184,7 @@ impl WindowView {
             .items_center()
             .justify_center()
             .gap(px(12.))
-            .text_size(px(13.))
+            .text_size(FontSize::Medium)
             .text_color(fg.opacity(0.45))
             .child(
                 div()
@@ -523,7 +524,7 @@ impl WindowView {
             .flex()
             .items_center()
             .gap(px(6.))
-            .text_size(px(12.))
+            .text_size(FontSize::Body)
             .font_weight(FontWeight::MEDIUM)
             .text_color(fg_hsla.opacity(if current || !split { 0.9 } else { 0.55 }))
             .child(icon)
@@ -746,7 +747,7 @@ impl WindowView {
                         return;
                     }
                     Divider::GitHubActions(si) => {
-                        this.resize_actions_section(si, f32::from(event.position.y));
+                        this.resize_actions_section(si, f32::from(event.position.y), cx);
                         cx.notify();
                         return;
                     }
@@ -802,7 +803,7 @@ fn driver_badge(id: impl Into<gpui::ElementId>, text: SharedString, fg: Rgb, bg:
         .bg(panel.opacity(0.92))
         .border_1()
         .border_color(fg.opacity(0.15))
-        .text_size(px(11.))
+        .text_size(FontSize::Small)
         .text_color(fg.opacity(0.8))
         .child(div().min_w_0().truncate().child(text))
 }

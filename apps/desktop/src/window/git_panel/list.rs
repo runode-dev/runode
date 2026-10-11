@@ -25,9 +25,9 @@ use crate::{
         CHEVRON_DOWN_ICON, CHEVRON_RIGHT_ICON, DISCARD_ICON, MINUS_ICON, OPEN_FILE_ICON, PLUS_ICON, STASH_APPLY_ICON,
         STASH_POP_ICON, TRASH_ICON,
     },
-    config::AppConfig,
     ui::{
         file_icons::{file_icon, folder_icon},
+        font_size::{FontSize, scaled},
         hsla,
     },
     window::{
@@ -40,19 +40,8 @@ use crate::{
     },
 };
 
-/// 行高比字号多出的高度。
-const ROW_EXTRA_HEIGHT: f32 = 9.;
-
-/// Git 面板正文的字号，和右侧文件树共用 `file-tree-font-size`。次要的文字比它小一号，计数和
-/// 分支标签小两号；配置写得太小时按 6 点算，小两号的字也还是正的。
-pub(super) fn font_size(cx: &App) -> f32 {
-    cx.global::<AppConfig>().0.file_tree_font_size.max(6.)
-}
-
-/// 每一行的高度，跟着字号变：段标题、文件、提交都一样高，列表才能只画看得见的部分。
-pub(super) fn row_height(cx: &App) -> f32 {
-    font_size(cx) + ROW_EXTRA_HEIGHT
-}
+/// 每一行的高度：段标题、文件、提交都一样高，列表才能只画看得见的部分。
+pub(super) const ROW_HEIGHT: f32 = 22.;
 /// 文件比段标题往右缩进的宽度，树形式里每深一层再缩进这么多。
 const INDENT: f32 = 12.;
 
@@ -106,7 +95,7 @@ impl WindowView {
                 .role(Role::Label)
                 .aria_label(rust_i18n::t!("panel.no_changes").into_owned())
                 .flex_none()
-                .h(px(row_height(cx)))
+                .h(scaled(ROW_HEIGHT))
                 .w_full()
                 .pl(px(8. + INDENT))
                 .flex()
@@ -117,18 +106,18 @@ impl WindowView {
                 .into_any_element(),
             GitRow::Commit(_, ci) => self.render_commit(repo, ci, fg, bg, cx),
             GitRow::CommitFile(_, ci, fi) => self.render_commit_file(ix, repo, ci, fi, fg, bg, cx),
-            GitRow::CommitNote(_, ci, note) => self.render_commit_note(repo, ci, note, fg, bg, cx),
+            GitRow::CommitNote(_, ci, note) => self.render_commit_note(repo, ci, note, fg, bg),
             GitRow::GraphNote(_, note) => self.render_graph_note(repo, note, fg, bg, cx),
         }
     }
 
     /// 一行的外框：定高、横着排、鼠标移上去时底色变亮，按钮跟着露出来。提交图里的行也用它，
     /// 图紧贴左边（`pl` 给 0）。
-    pub(super) fn git_row(&self, id: impl Into<ElementId>, pl: f32, fg: Rgb, bg: Rgb, cx: &App) -> Stateful<Div> {
+    pub(super) fn git_row(&self, id: impl Into<ElementId>, pl: f32, fg: Rgb, bg: Rgb) -> Stateful<Div> {
         div()
             .id(id)
             .flex_none()
-            .h(px(row_height(cx)))
+            .h(scaled(ROW_HEIGHT))
             .w_full()
             .pl(px(8. + pl))
             .pr(px(8.))
@@ -212,7 +201,7 @@ impl WindowView {
             GitSection::Stashes => Vec::new(),
         };
         let expanded = panel.section_expanded(&root, section);
-        self.git_row(super::repo_id(&format!("git-section-{section:?}"), &root), 0., fg, bg, cx)
+        self.git_row(super::repo_id(&format!("git-section-{section:?}"), &root), 0., fg, bg)
             .role(Role::TreeItem)
             .aria_level(self.tree_level(true, 0))
             .aria_expanded(expanded)
@@ -224,12 +213,12 @@ impl WindowView {
                     .flex_1()
                     .min_w_0()
                     .truncate()
-                    .text_size(px(font_size(cx) - 1.))
+                    .text_size(FontSize::Small)
                     .font_weight(gpui::FontWeight::SEMIBOLD)
                     .child(label.into_owned()),
             )
             .children(self.row_buttons(ix, &root, buttons, fg, bg, cx))
-            .child(count_badge(count, font_size(cx), fg, bg))
+            .child(count_badge(count, fg, bg))
             .on_press_down(cx, move |this, _, cx| {
                 let project = &mut this.workspace_mut().project;
                 project.git_panel.toggle_section(&root, section, project.git.as_ref());
@@ -285,7 +274,7 @@ impl WindowView {
         let target = DiffTarget { root: root.clone(), rel: path.clone(), old_rel: file.old_path.clone(), side };
         let open = target.clone();
         let id = format!("git-file-{shown_in:?}-{}-{}", root.display(), path.display());
-        self.git_row(SharedString::from(id), INDENT * (depth + 1.), fg, bg, cx)
+        self.git_row(SharedString::from(id), INDENT * (depth + 1.), fg, bg)
             .role(Role::TreeItem)
             .aria_level(self.tree_level(false, depth as usize))
             .aria_label(name.clone())
@@ -302,7 +291,7 @@ impl WindowView {
                     .when(deleted, |name| name.line_through().text_color(dim))
                     .child(name),
             )
-            .child(div().flex_1().min_w_0().truncate().text_size(px(font_size(cx) - 1.)).text_color(dim).child(dir))
+            .child(div().flex_1().min_w_0().truncate().text_size(FontSize::Small).text_color(dim).child(dir))
             .children(self.row_buttons(ix, &root, buttons, fg, bg, cx))
             .when(file.added > 0, |row| row.child(added_label(file.added)))
             .when(file.removed > 0, |row| row.child(removed_label(file.removed)))
@@ -358,7 +347,7 @@ impl WindowView {
         let last = base_name(&path);
         let menu = action(DirOp::Stage);
         let id = format!("git-dir-{section:?}-{}-{}", root.display(), path.display());
-        self.git_row(SharedString::from(id), INDENT * (depth + 1.), fg, bg, cx)
+        self.git_row(SharedString::from(id), INDENT * (depth + 1.), fg, bg)
             .role(Role::TreeItem)
             .aria_level(self.tree_level(false, depth as usize))
             .aria_expanded(dir.expanded)
@@ -457,7 +446,7 @@ impl WindowView {
         ];
         // 按从最早一条数起的序号认：新存一条时最上面的 `stash@{0}` 变了，下面各条的 `index` 都加一。
         let id = format!("git-stash-{}-{}", root.display(), git.info.stashes.len() - index);
-        self.git_row(SharedString::from(id), INDENT, fg, bg, cx)
+        self.git_row(SharedString::from(id), INDENT, fg, bg)
             .role(Role::TreeItem)
             .aria_level(self.tree_level(false, 0))
             .aria_label(format!("#{index} {}", stash.message))
@@ -465,7 +454,7 @@ impl WindowView {
             .child(
                 div()
                     .flex_none()
-                    .text_size(px(font_size(cx) - 1.))
+                    .text_size(FontSize::Small)
                     .text_color(hsla(fg).opacity(0.5))
                     .child(format!("#{index}")),
             )
@@ -503,19 +492,19 @@ pub(super) fn file_description(file: &git::FileDiff, dir: &str) -> String {
     parts.join(" · ")
 }
 
-/// 段标题和块头上的个数，圆角的小底子，比正文字号 `font` 小两号。
-pub(super) fn count_badge(count: usize, font: f32, fg: Rgb, bg: Rgb) -> Div {
+/// 段标题和块头上的个数，圆角的小底子。
+pub(super) fn count_badge(count: usize, fg: Rgb, bg: Rgb) -> Div {
     div()
         .flex_none()
         .min_w(px(18.))
-        .h(px(font + 4.))
+        .h(scaled(16.))
         .px(px(5.))
         .rounded_full()
         .flex()
         .items_center()
         .justify_center()
         .bg(hsla(bg.mix(fg, 0.12)))
-        .text_size(px(font - 2.))
+        .text_size(FontSize::Tiny)
         .text_color(hsla(fg).opacity(0.5))
         .child(count.to_string())
 }

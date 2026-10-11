@@ -43,6 +43,7 @@ use crate::{
     ui::{
         actions::{Copy, Cut, Paste},
         file_icons::{file_icon, folder_icon},
+        font_size::{self, FontSize},
         hsla,
         scrollbar::scrollbar,
         tooltip::tooltip,
@@ -289,7 +290,7 @@ impl WindowView {
             .child(div().flex_initial().min_w_0().truncate().text_color(hsla(fg)).child(name))
             .child(div().flex_1())
             .child(div().flex().gap(px(4.)).child(view_toggle).child(refresh).child(more));
-        let font_size = cx.global::<AppConfig>().0.file_tree_font_size;
+        let font_size = FontSize::Medium.points() * font_size::scale(cx);
         let search_box = self.render_file_search_box(fg, bg, cx);
         let content = match self.render_file_search_results(font_size, fg, bg, cx) {
             Some(results) => results,

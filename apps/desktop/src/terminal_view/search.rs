@@ -8,6 +8,7 @@ use runode_terminal::session::Session;
 use super::TerminalView;
 use crate::ui::{
     a11y::Press,
+    font_size::{FontSize, scaled},
     hsla,
     text_field::{EndSearch, SearchNext, SearchPrevious, TextField, TextFieldEvent},
     tooltip::tooltip,
@@ -152,7 +153,7 @@ impl TerminalView {
             .top(px(8.))
             .right(px(16.))
             .w(px(320.))
-            .h(px(32.))
+            .h(scaled(32.))
             .pl(px(10.))
             .pr(px(4.))
             .flex()
@@ -164,7 +165,7 @@ impl TerminalView {
             .border_color(fg.opacity(0.15))
             .shadow_md()
             .occlude()
-            .text_size(px(12.))
+            .text_size(FontSize::Body)
             .text_color(fg)
             .cursor(CursorStyle::Arrow)
             // 搜索词常从终端里复制而来，带着提示符图标之类的字符，界面字体没有这些字形，

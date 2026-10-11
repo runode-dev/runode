@@ -599,9 +599,9 @@ settings:
     window_padding_x: 左右內距
     window_padding_y: 上下內距
     window_style: 樣式
+    ui_font_size: 介面字級
     status_bar: 狀態列
     status_bar_hidden: 狀態列上隱藏
-    file_tree_font_size: 檔案樹字級
     file_tree_preview_click: 在預覽欄打開檔案
     preview_font_size: 預覽欄字級
     task_placement: 執行專案命令
@@ -658,9 +658,9 @@ settings:
     window_padding_x: 單位是點。一個數表示兩邊相同，或寫成 左,右。
     window_padding_y: 單位是點。一個數表示上下相同，或寫成 上,下。
     window_style: 卡片：每個分割畫面和右側面板各是一張圓角卡片；經典：終端機鋪滿視窗。
+    ui_font_size: 單位是點，6 到 20。除了終端和預覽欄的內文，介面上的字都按它等比縮放。
     status_bar: 視窗底部顯示防止睡眠、記憶體和連接埠。
     status_bar_hidden: 選中的幾塊不在狀態列上顯示。也可以在狀態列上按右鍵勾選。
-    file_tree_font_size: 單位是點，Git 面板也用這個字級。
     file_tree_preview_click: 單擊開成暫時分頁，打開別的檔案時被換掉；雙擊固定下來。
     preview_font_size: 單位是點。
     task_placement: 標題列命令選單裡點了一條命令時，在哪開終端執行它。

@@ -14,7 +14,7 @@ use super::{
 };
 use crate::{
     i18n::tr,
-    ui::{display_dir, hsla},
+    ui::{display_dir, font_size::FontSize, hsla},
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -135,6 +135,7 @@ impl Page {
                 Row("adjust-cell-height", Text(80.)),
                 Section("window"),
                 Row("window-style", Choice(&["cards", "classic"])),
+                Row("ui-font-size", Text(80.)),
                 Row("window-padding-x", Text(80.)),
                 Row("window-padding-y", Text(80.)),
                 Row("status-bar", Switch),
@@ -174,11 +175,9 @@ impl Page {
                 Section("tasks"),
                 Row("task-placement", Choice(&["right", "down", "tab"])),
             ],
-            Self::Files => &[
-                Row("file-tree-font-size", Text(80.)),
-                Row("file-tree-preview-click", Choice(&["single", "double"])),
-                Row("preview-font-size", Text(80.)),
-            ],
+            Self::Files => {
+                &[Row("file-tree-preview-click", Choice(&["single", "double"])), Row("preview-font-size", Text(80.))]
+            }
             Self::Agents => &[
                 Row("agent-notifications", Switch),
                 Row("agent-done-sound", Sound),
@@ -268,7 +267,7 @@ impl SettingsView {
             .aria_label(self.page.title())
             .pt(px(8.))
             .pb(px(12.))
-            .text_size(px(22.))
+            .text_size(FontSize::Display)
             .font_weight(gpui::FontWeight::SEMIBOLD)
             .child(self.page.title());
         let page = div().flex().flex_col().child(title);
@@ -484,14 +483,14 @@ impl SettingsView {
                             .child(
                                 div()
                                     .w(px(18.))
-                                    .text_size(px(11.))
+                                    .text_size(FontSize::Small)
                                     .text_color(colors.fg.opacity(0.55))
                                     .child(ix.to_string()),
                             )
                             .child(swatch(color, 18., colors))
                             .child(input_box(input, Some(92.), error.is_some(), colors, window, cx)),
                     )
-                    .children(error.map(|err| div().text_size(px(11.)).text_color(colors.error).child(err)))
+                    .children(error.map(|err| div().text_size(FontSize::Small).text_color(colors.error).child(err)))
             })
             .collect();
         div()
@@ -600,7 +599,7 @@ impl SettingsView {
                             .child(input_box(input, None, error.is_some(), colors, window, cx))
                             .child(div().w(px(20.)).children(remove)),
                     )
-                    .children(error.map(|err| div().text_size(px(11.5)).text_color(colors.error).child(err))),
+                    .children(error.map(|err| div().text_size(FontSize::Small).text_color(colors.error).child(err))),
             );
         }
         out

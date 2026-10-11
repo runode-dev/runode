@@ -32,10 +32,11 @@ pub const KEYS: &[&[&str]] = &[
         "window-padding-x",
         "window-padding-y",
         "window-style",
+        "ui-font-size",
         "status-bar",
         "status-bar-hidden",
     ],
-    &["file-tree-font-size", "file-tree-preview-click", "preview-font-size"],
+    &["file-tree-preview-click", "preview-font-size"],
     &["task-placement"],
     &[
         "theme",
@@ -207,8 +208,8 @@ impl Config {
                     }
                 }
             }
-            "file-tree-font-size" => {
-                self.file_tree_font_size = or_default(empty, defaults.file_tree_font_size, || parse_positive(value))?;
+            "ui-font-size" => {
+                self.ui_font_size = or_default(empty, defaults.ui_font_size, || parse_positive(value))?;
             }
             "preview-font-size" => {
                 self.preview_font_size = or_default(empty, defaults.preview_font_size, || parse_positive(value))?;
@@ -747,12 +748,12 @@ unknown-key = whatever
     }
 
     #[test]
-    fn file_tree_font_size_takes_positive_numbers() {
-        assert_eq!(Config::default().file_tree_font_size, 13.);
-        assert_eq!(load(&["file-tree-font-size = 15"]).file_tree_font_size, 15.);
+    fn ui_font_size_takes_positive_numbers() {
+        assert_eq!(Config::default().ui_font_size, 12.);
+        assert_eq!(load(&["ui-font-size = 15"]).ui_font_size, 15.);
         // 不是正数的跳过，保留前面的值。
-        assert_eq!(load(&["file-tree-font-size = 15\nfile-tree-font-size = 0"]).file_tree_font_size, 15.);
-        assert_eq!(load(&["file-tree-font-size = -3"]).file_tree_font_size, 13.);
+        assert_eq!(load(&["ui-font-size = 15\nui-font-size = 0"]).ui_font_size, 15.);
+        assert_eq!(load(&["ui-font-size = -3"]).ui_font_size, 12.);
     }
 
     #[test]

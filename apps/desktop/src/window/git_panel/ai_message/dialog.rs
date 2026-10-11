@@ -20,6 +20,7 @@ use crate::{
     assets::{CHEVRON_DOWN_ICON, CLOSE_ICON, SPARKLE_ICON, TERMINAL_ICON},
     ui::{
         a11y::{Disable, Press},
+        font_size::{FontSize, scaled},
         hsla,
         text_area::{TextArea, TextAreaEvent},
         text_field::{TextField, TextFieldEvent},
@@ -262,12 +263,12 @@ impl WindowView {
         let mono = self.font_family(cx);
         let section = |key: &str| {
             div()
-                .text_size(px(11.))
+                .text_size(FontSize::Small)
                 .font_weight(FontWeight::SEMIBOLD)
                 .text_color(fg.opacity(0.6))
                 .child(rust_i18n::t!(key).into_owned())
         };
-        let note = |text: String| div().text_size(px(11.)).text_color(fg.opacity(0.5)).child(text);
+        let note = |text: String| div().text_size(FontSize::Small).text_color(fg.opacity(0.5)).child(text);
         let field_box = || {
             div()
                 .px(px(8.))
@@ -307,7 +308,7 @@ impl WindowView {
                             .id("commit-message-title")
                             .role(Role::Heading)
                             .aria_label(rust_i18n::t!("git.ai_message.title").into_owned())
-                            .text_size(px(15.))
+                            .text_size(FontSize::Title)
                             .font_weight(FontWeight::BOLD)
                             .child(rust_i18n::t!("git.ai_message.title").into_owned()),
                     )
@@ -331,7 +332,7 @@ impl WindowView {
             .aria_label(rust_i18n::t!("git.ai_message.agent").into_owned())
             .aria_value(name.clone())
             .flex_none()
-            .h(px(28.))
+            .h(scaled(28.))
             .px(px(8.))
             .flex()
             .items_center()
@@ -373,7 +374,7 @@ impl WindowView {
                             .rounded(px(6.))
                             .bg(hsla(bg_rgb.mix(fg_rgb, 0.06)))
                             .font_family(mono.clone())
-                            .text_size(px(11.))
+                            .text_size(FontSize::Small)
                             .text_color(fg.opacity(0.85))
                             .child(format!("$ {line}")),
                     )
@@ -384,7 +385,7 @@ impl WindowView {
                 .id("commit-message-preview")
                 .role(Role::Label)
                 .aria_label(err.clone())
-                .text_size(px(11.))
+                .text_size(FontSize::Small)
                 .text_color(gpui::red())
                 .child(err)
                 .into_any_element(),
@@ -394,7 +395,7 @@ impl WindowView {
             .flex_col()
             .gap(px(6.))
             .child(section(input_label))
-            .child(field_box().h(px(28.)).flex().items_center().child(input.clone()))
+            .child(field_box().h(scaled(28.)).flex().items_center().child(input.clone()))
             .children(hint)
             .child(section("git.ai_message.will_run"))
             .child(preview);
@@ -405,7 +406,7 @@ impl WindowView {
             .flex_wrap()
             .items_center()
             .gap(px(4.))
-            .text_size(px(11.))
+            .text_size(FontSize::Small)
             .child(
                 div()
                     .mr(px(2.))
@@ -492,7 +493,7 @@ impl WindowView {
                 .id("commit-message-status")
                 .role(Role::Status)
                 .aria_label(text.clone())
-                .text_size(px(11.))
+                .text_size(FontSize::Small)
                 .text_color(color)
                 .child(text)
         });
@@ -580,7 +581,7 @@ impl WindowView {
             .border_1()
             .border_color(border)
             .shadow_lg()
-            .text_size(px(12.))
+            .text_size(FontSize::Body)
             .text_color(fg)
             // 点在对话框里不算点到外面。
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())

@@ -53,6 +53,7 @@ use crate::{
         VIEW_LIST_ICON, VIEW_TREE_ICON,
     },
     ui::{
+        font_size::{FontSize, scaled},
         hsla,
         scrollbar::list_scrollbar,
         text_area::{TextArea, TextAreaEvent},
@@ -146,9 +147,9 @@ pub(in crate::window) struct GitDirAction {
 
 /// 提交说明框最少和最多显示几行，再多就在框里滚动。
 const COMMIT_BOX_LINES: (usize, usize) = (1, 8);
-/// 分支一行和提交按钮比列表的一行高出多少。
-const BRANCH_BAR_EXTRA_HEIGHT: f32 = 8.;
-const COMMIT_BUTTON_EXTRA_HEIGHT: f32 = 4.;
+/// 分支一行和提交按钮的高度。
+const BRANCH_BAR_HEIGHT: f32 = 30.;
+const COMMIT_BUTTON_HEIGHT: f32 = 26.;
 /// 标题栏上图标按钮的边长。
 const HEADER_BUTTON_SIZE: f32 = 22.;
 
@@ -455,7 +456,7 @@ impl WindowView {
         panel_shell("git-panel", width, fg, bg, cx)
             .track_focus(&self.git_focus)
             .bg(hsla(bg))
-            .text_size(px(list::font_size(cx)))
+            .text_size(FontSize::Body)
             .child(self.render_panel_tabs(fg, bg, cx))
             .child(header)
             .child(body)
@@ -551,7 +552,7 @@ impl WindowView {
             .aria_label(name.clone())
             .aria_description(description)
             .flex_none()
-            .h(px(list::row_height(cx) + 4.))
+            .h(scaled(list::ROW_HEIGHT + 4.))
             .w_full()
             .px(px(8.))
             .flex()
@@ -565,17 +566,9 @@ impl WindowView {
             .child(list::chevron(expanded, fg))
             .child(svg().flex_none().path(GIT_ICON).size(px(13.)).text_color(fg_hsla.opacity(0.75)))
             .child(div().flex_initial().min_w_0().truncate().font_weight(gpui::FontWeight::SEMIBOLD).child(name))
-            .child(
-                div()
-                    .flex_1()
-                    .min_w_0()
-                    .truncate()
-                    .text_size(px(list::font_size(cx) - 1.))
-                    .text_color(dim)
-                    .child(detail),
-            )
+            .child(div().flex_1().min_w_0().truncate().text_size(FontSize::Small).text_color(dim).child(detail))
             .child(more)
-            .when(changed > 0, |title| title.child(list::count_badge(changed, list::font_size(cx), fg, bg)))
+            .when(changed > 0, |title| title.child(list::count_badge(changed, fg, bg)))
             .on_press_down(cx, move |this, window, cx| {
                 // 收起时焦点还在这块的说明框里的话，按键就没处去了，交给面板。
                 if this.commit_box(&root).is_some_and(|area| area.focus_handle(cx).is_focused(window)) {
@@ -645,7 +638,7 @@ impl WindowView {
             .aria_value(name.clone())
             .flex_initial()
             .min_w_0()
-            .h(px(list::row_height(cx)))
+            .h(scaled(22.))
             .px(px(6.))
             .rounded(px(4.))
             .flex()
@@ -674,6 +667,7 @@ impl WindowView {
                 .flex_none()
                 .flex()
                 .gap(px(6.))
+                .text_size(FontSize::Body)
                 .when(added > 0, |changes| changes.child(added_label(added)))
                 .when(removed > 0, |changes| changes.child(removed_label(removed)))
         });
@@ -697,7 +691,7 @@ impl WindowView {
                 .aria_label(name)
                 .aria_description(text.clone().into_owned())
                 .flex_none()
-                .h(px(list::row_height(cx)))
+                .h(scaled(22.))
                 .px(px(6.))
                 .rounded(px(4.))
                 .flex()
@@ -714,7 +708,7 @@ impl WindowView {
         });
         div()
             .flex_none()
-            .h(px(list::row_height(cx) + BRANCH_BAR_EXTRA_HEIGHT))
+            .h(scaled(BRANCH_BAR_HEIGHT))
             .px(px(6.))
             .flex()
             .items_center()
@@ -850,7 +844,7 @@ impl WindowView {
             .role(Role::Button)
             .aria_label(rust_i18n::t!("git.commit_more").into_owned())
             .flex_none()
-            .w(px(list::row_height(cx) + COMMIT_BUTTON_EXTRA_HEIGHT))
+            .w(scaled(COMMIT_BUTTON_HEIGHT))
             .h_full()
             .rounded_r(px(4.))
             .border_l_1()
@@ -878,7 +872,7 @@ impl WindowView {
             .child(
                 div()
                     .flex_none()
-                    .h(px(list::row_height(cx) + COMMIT_BUTTON_EXTRA_HEIGHT))
+                    .h(scaled(COMMIT_BUTTON_HEIGHT))
                     .flex()
                     .when(!enabled, |buttons| buttons.opacity(0.5))
                     .child(main)

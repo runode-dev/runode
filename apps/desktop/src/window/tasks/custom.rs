@@ -29,6 +29,7 @@ use crate::{
     settings::keybind_caps,
     ui::{
         a11y::Press,
+        font_size::{FontSize, scaled},
         hsla,
         text_field::{TextField, TextFieldEvent},
     },
@@ -287,7 +288,7 @@ impl WindowView {
         let field = |label: String, input: &Entity<TextField>| {
             div().flex().flex_col().gap(px(6.)).child(div().text_color(fg.opacity(0.7)).child(label)).child(
                 div()
-                    .h(px(28.))
+                    .h(scaled(28.))
                     .px(px(8.))
                     .flex()
                     .items_center()
@@ -346,7 +347,7 @@ impl WindowView {
             .role(Role::Button)
             .aria_label(shortcut_title.clone())
             .aria_value(shortcut_label.clone())
-            .h(px(28.))
+            .h(scaled(28.))
             .px(px(10.))
             .flex()
             .items_center()
@@ -416,7 +417,7 @@ impl WindowView {
             .border_1()
             .border_color(border)
             .shadow_lg()
-            .text_size(px(12.))
+            .text_size(FontSize::Body)
             .text_color(fg)
             // 点在对话框里不算点到外面。
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
@@ -426,7 +427,7 @@ impl WindowView {
                     .role(Role::Heading)
                     .aria_level(1)
                     .aria_label(title.clone())
-                    .text_size(px(16.))
+                    .text_size(FontSize::Title)
                     .font_weight(FontWeight::BOLD)
                     .child(title),
             )

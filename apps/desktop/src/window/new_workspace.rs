@@ -16,6 +16,7 @@ use crate::{
     assets::{CLOSE_ICON, FOLDER_OPEN_ICON, GLOBE_ICON, PLUS_ICON},
     ui::{
         a11y::Press,
+        font_size::{FontSize, scaled},
         hsla,
         text_field::{TextField, TextFieldEvent},
     },
@@ -183,7 +184,7 @@ impl WindowView {
                         .flex()
                         .flex_col()
                         .gap(px(2.))
-                        .child(div().text_size(px(14.)).font_weight(FontWeight::SEMIBOLD).child(title))
+                        .child(div().text_size(FontSize::Large).font_weight(FontWeight::SEMIBOLD).child(title))
                         .child(div().text_color(fg.opacity(0.55)).child(hint)),
                 )
         };
@@ -215,7 +216,7 @@ impl WindowView {
                     div()
                         .flex_1()
                         .min_w_0()
-                        .h(px(28.))
+                        .h(scaled(28.))
                         .px(px(8.))
                         .flex()
                         .items_center()
@@ -278,7 +279,7 @@ impl WindowView {
             .border_1()
             .border_color(border)
             .shadow_lg()
-            .text_size(px(12.))
+            .text_size(FontSize::Body)
             .text_color(fg)
             // 点在对话框里不算点到外面。
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
@@ -294,7 +295,7 @@ impl WindowView {
                             .role(Role::Heading)
                             .aria_level(1)
                             .aria_label(title.clone())
-                            .text_size(px(18.))
+                            .text_size(FontSize::Heading)
                             .font_weight(FontWeight::BOLD)
                             .child(title),
                     )

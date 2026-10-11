@@ -35,6 +35,7 @@ use crate::{
     assets::{ARROW_DOWN_ICON, ARROW_UP_ICON, DISCARD_ICON, MINUS_ICON, PLUS_ICON},
     config::AppConfig,
     ui::{
+        font_size::{FontSize, scaled},
         hsla,
         scrollbar::{row_markers, scrollbar},
         tooltip::tooltip,
@@ -372,7 +373,7 @@ impl WindowView {
             .flex()
             .items_center()
             .gap(px(6.))
-            .text_size(px(12.))
+            .text_size(FontSize::Body)
             .border_b_1()
             .border_color(divider_color(hsla(fg)))
             .child(
@@ -650,12 +651,12 @@ impl WindowView {
                     .on_a11y_press(view, move |this, window, cx| this.diff_hunk_action(hunk, action, window, cx))
                     .flex_none()
                     .px(px(6.))
-                    .h(px(18.))
+                    .h(scaled(18.))
                     .rounded(px(3.))
                     .flex()
                     .items_center()
                     .gap(px(4.))
-                    .text_size(px(11.))
+                    .text_size(FontSize::Small)
                     .text_color(fg_hsla.opacity(0.8))
                     .hover(|button| button.bg(hsla(bg.mix(fg, 0.12))))
                     .child(svg().path(icon).size(px(12.)).text_color(fg_hsla.opacity(0.75)))

@@ -10,7 +10,11 @@ use runode_shared_types::color::Rgb;
 
 use super::SettingsView;
 pub(super) use crate::ui::a11y::Press;
-use crate::ui::{hsla, text_field::TextField};
+use crate::ui::{
+    font_size::{FontSize, scaled},
+    hsla,
+    text_field::TextField,
+};
 
 /// 控件的高度。
 pub(super) const CONTROL_HEIGHT: f32 = 26.;
@@ -59,7 +63,13 @@ impl Colors {
 
 /// 一页里的小标题。
 pub(super) fn section(title: impl Into<SharedString>, colors: Colors) -> Div {
-    div().pt(px(20.)).pb(px(10.)).pl(px(4.)).text_size(px(14.)).text_color(colors.fg.opacity(0.6)).child(title.into())
+    div()
+        .pt(px(20.))
+        .pb(px(10.))
+        .pl(px(4.))
+        .text_size(FontSize::Large)
+        .text_color(colors.fg.opacity(0.6))
+        .child(title.into())
 }
 
 /// 把一页的各项按小标题分组，每组收进一张圆角卡片。
@@ -137,14 +147,16 @@ pub(super) fn row(
                 .flex()
                 .flex_col()
                 .gap(px(3.))
-                .child(div().text_size(px(13.5)).font_weight(gpui::FontWeight::MEDIUM).child(title.into()))
-                .children(hint.map(|hint| div().text_size(px(12.)).text_color(colors.fg.opacity(0.55)).child(hint)))
+                .child(div().text_size(FontSize::Medium).font_weight(gpui::FontWeight::MEDIUM).child(title.into()))
+                .children(
+                    hint.map(|hint| div().text_size(FontSize::Body).text_color(colors.fg.opacity(0.55)).child(hint)),
+                )
                 .children(error.map(|err| {
                     div()
                         .id(SharedString::from(format!("row-error-{err}")))
                         .role(Role::Label)
                         .aria_label(err.clone())
-                        .text_size(px(11.5))
+                        .text_size(FontSize::Small)
                         .text_color(colors.error)
                         .child(err)
                 })),
@@ -225,7 +237,7 @@ pub(super) fn segmented(
         .role(Role::RadioGroup)
         .aria_label(label)
         .flex()
-        .h(px(CONTROL_HEIGHT))
+        .h(scaled(CONTROL_HEIGHT))
         .p(px(2.))
         .gap(px(2.))
         .rounded(px(7.))
@@ -244,7 +256,7 @@ pub(super) fn segmented(
                 .flex()
                 .items_center()
                 .rounded(px(5.))
-                .text_size(px(12.))
+                .text_size(FontSize::Body)
                 .map(|item| {
                     if on {
                         item.bg(colors.selected).text_color(colors.fg)
@@ -264,7 +276,7 @@ pub(super) fn button(id: impl Into<ElementId>, label: impl Into<SharedString>, c
         .id(id)
         .role(Role::Button)
         .aria_label(label.clone())
-        .h(px(CONTROL_HEIGHT))
+        .h(scaled(CONTROL_HEIGHT))
         .px(px(12.))
         .flex()
         .items_center()
@@ -272,7 +284,7 @@ pub(super) fn button(id: impl Into<ElementId>, label: impl Into<SharedString>, c
         .bg(colors.control)
         .border_1()
         .border_color(colors.border)
-        .text_size(px(12.))
+        .text_size(FontSize::Body)
         .hover(|button| button.bg(colors.hover))
         .child(label)
 }
@@ -294,7 +306,7 @@ pub(super) fn dropdown(
         .aria_label(name)
         .aria_value(label.clone())
         .w(px(width))
-        .h(px(CONTROL_HEIGHT))
+        .h(scaled(CONTROL_HEIGHT))
         .pl(px(10.))
         .pr(px(6.))
         .flex()
@@ -304,7 +316,7 @@ pub(super) fn dropdown(
         .bg(colors.control)
         .border_1()
         .border_color(colors.border)
-        .text_size(px(12.))
+        .text_size(FontSize::Body)
         .hover(|button| button.bg(colors.hover))
         .children(leading)
         .child(div().flex_1().min_w_0().truncate().child(label))
@@ -332,7 +344,7 @@ pub(super) fn input_box(
             Some(width) => field.w(px(width)),
             None => field.flex_1().min_w_0(),
         })
-        .h(px(CONTROL_HEIGHT))
+        .h(scaled(CONTROL_HEIGHT))
         .px(px(8.))
         .flex()
         .items_center()
@@ -340,7 +352,7 @@ pub(super) fn input_box(
         .bg(colors.control)
         .border_1()
         .border_color(border)
-        .text_size(px(12.))
+        .text_size(FontSize::Body)
         .child(div().flex_1().min_w_0().h_full().child(input))
 }
 
@@ -358,7 +370,7 @@ pub(super) fn chip(
         .role(Role::CheckBox)
         .aria_label(label.clone())
         .aria_toggled(on.into())
-        .h(px(24.))
+        .h(scaled(24.))
         .px(px(8.))
         .flex()
         .items_center()
@@ -366,7 +378,7 @@ pub(super) fn chip(
         .rounded(px(6.))
         .border_1()
         .border_color(if on { colors.accent } else { colors.border })
-        .text_size(px(12.))
+        .text_size(FontSize::Body)
         .when(on, |chip| chip.bg(colors.accent.opacity(0.15)))
         .hover(|chip| chip.bg(colors.hover))
         .children(on.then(|| svg().path("icons/check.svg").size(px(11.)).text_color(colors.accent)))

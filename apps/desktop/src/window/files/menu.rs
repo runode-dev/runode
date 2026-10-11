@@ -21,6 +21,7 @@ use crate::{
     assets::{CHEVRON_DOWN_ICON, CHEVRON_RIGHT_ICON},
     ui::{
         actions::{Copy, Cut, Paste},
+        font_size::{FontSize, scaled},
         hsla,
         tooltip::{shortcut_text, tooltip},
     },
@@ -485,7 +486,7 @@ impl WindowView {
                 // 菜单拿着焦点，选中的那一项报成辅助工具眼里的焦点。
                 .when(highlighted, |row| row.aria_active_descendant())
                 .flex_none()
-                .h(px(24.))
+                .h(scaled(24.))
                 .px(px(10.))
                 .mx(px(4.))
                 .rounded(px(4.))
@@ -582,7 +583,7 @@ impl WindowView {
             .border_color(fg.opacity(0.15))
             .bg(menu_bg)
             .shadow_lg()
-            .text_size(px(12.))
+            .text_size(FontSize::Body)
             .occlude()
             .children(items)
             .on_mouse_down_out(cx.listener(|this, _, window, cx| this.close_menu(window, cx)));

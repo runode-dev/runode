@@ -59,6 +59,7 @@ use crate::{
     ui::{
         self,
         actions::{Copy, SelectAll},
+        font_size::FontSize,
         hsla,
         tooltip::tooltip,
     },
@@ -841,7 +842,15 @@ impl WindowView {
             .pr(px(if rightmost { PANEL_TOGGLES_INSET } else { 6. }))
             .child(tab_underline(fg))
             .child(buttons);
-        let header = self.panel_header(fg, cx).border_b_0().px_0().gap_0().child(strip).child(filler);
+        // 标签条是界面，不跟着正文的 `preview-font-size`。
+        let header = self
+            .panel_header(fg, cx)
+            .border_b_0()
+            .px_0()
+            .gap_0()
+            .text_size(FontSize::Medium)
+            .child(strip)
+            .child(filler);
         // 正文整个报成一篇文档，以标签上的名字为名。
         let body = div()
             .id("preview-body")

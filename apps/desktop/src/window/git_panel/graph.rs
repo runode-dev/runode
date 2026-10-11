@@ -24,7 +24,7 @@ use runode_shared_types::color::Rgb;
 
 use super::{
     PressDown,
-    list::{a11y_open_diff, chevron, file_description, font_size, row_height, status_letter},
+    list::{ROW_HEIGHT, a11y_open_diff, chevron, file_description, status_letter},
     repo_name,
     rows::{Busy, CommitChanges, CommitNote, GRAPH_PAGE, Graph, GraphNote},
 };
@@ -32,6 +32,7 @@ use crate::{
     assets::{ARROW_DOWN_ICON, REFRESH_ICON},
     ui::{
         file_icons::{file_icon, folder_icon},
+        font_size::{self, FontSize, scaled},
         hsla,
         tooltip::tooltip,
     },
@@ -63,11 +64,10 @@ fn lane_color(color: LaneColor) -> Rgb {
 const LANE_WIDTH: f32 = 10.;
 const MAX_GRAPH_WIDTH: f32 = 80.;
 const MIN_LANE_WIDTH: f32 = 4.;
-/// 下面这些宽度以正文 13 点（`file-tree-font-size` 的默认值）为准，字号变了按比例缩放（`scale`）。
-const BASE_FONT_SIZE: f32 = 13.;
 /// 一行最多显示几个引用标签，其余合成「+N」。
 const MAX_REF_LABELS: usize = 2;
-/// 引用标签最宽这么宽，再长的截断；估算宽度时按每个字 6px 加两边留白。
+/// 引用标签最宽这么宽，再长的截断；估算宽度时按每个字 6 点加两边留白。这里到 `MORE_LABEL_WIDTH`
+/// 都是基准字号下的点数，跟着界面字号等比缩放。
 const MAX_LABEL_WIDTH: f32 = 90.;
 /// 说明首行至少留这么宽：放不下时先不显示日期，再少显示标签。
 const MIN_SUBJECT_WIDTH: f32 = 80.;
@@ -157,7 +157,7 @@ impl WindowView {
             .aria_expanded(open)
             .when_some(name.clone(), |header, name| header.aria_description(name))
             .flex_none()
-            .h(px(row_height(cx) + 4.))
+            .h(scaled(ROW_HEIGHT + 4.))
             .w_full()
             .px(px(8.))
             .flex()
@@ -171,7 +171,7 @@ impl WindowView {
             .child(
                 div()
                     .flex_none()
-                    .text_size(px(font_size(cx) - 1.))
+                    .text_size(FontSize::Small)
                     .font_weight(gpui::FontWeight::SEMIBOLD)
                     .child(title.clone()),
             )
@@ -180,7 +180,7 @@ impl WindowView {
                     .flex_1()
                     .min_w_0()
                     .truncate()
-                    .text_size(px(font_size(cx) - 1.))
+                    .text_size(FontSize::Small)
                     .text_color(fg_hsla.opacity(0.5))
                     .children(name),
             )
@@ -484,9 +484,11 @@ impl WindowView {
         let expanded = graph.expanded.contains(&commit.id);
         let root = repo.root.clone();
         let id = commit.id.clone();
-        let fit = fit_commit_row(self.workspace().project.git_panel.width, width, commit, font_size(cx));
-        let labels = ref_labels(commit, fit.labels, font_size(cx), fg, bg);
-        self.git_row(SharedString::from(format!("git-commit-{id}")), 0., fg, bg, cx)
+        // 下面估的宽度都是基准字号下的点数，面板和图的宽度先折成同样的单位再比。
+        let scale = font_size::scale(cx);
+        let fit = fit_commit_row(self.workspace().project.git_panel.width / scale, width / scale, commit);
+        let labels = ref_labels(commit, fit.labels, fg, bg);
+        self.git_row(SharedString::from(format!("git-commit-{id}")), 0., fg, bg)
             .role(Role::TreeItem)
             .aria_level(1)
             .aria_expanded(expanded)
@@ -507,9 +509,9 @@ impl WindowView {
                 row.child(
                     div()
                         .flex_none()
-                        .max_w(px(DATE_WIDTH * scale(font_size(cx))))
+                        .max_w(scaled(DATE_WIDTH))
                         .truncate()
-                        .text_size(px(font_size(cx) - 1.))
+                        .text_size(FontSize::Small)
                         .text_color(dim)
                         .child(short_date(&commit.date)),
                 )
@@ -563,7 +565,7 @@ impl WindowView {
             DiffTarget { root: repo.root.clone(), rel: file.path.clone(), old_rel: file.old_path.clone(), side };
         let open = target.clone();
         let row_id = format!("git-commit-file-{}-{}", commit.id, file.path.display());
-        self.git_row(SharedString::from(row_id), 0., fg, bg, cx)
+        self.git_row(SharedString::from(row_id), 0., fg, bg)
             .role(Role::TreeItem)
             .aria_level(depth as usize + 2)
             .aria_label(name.clone())
@@ -574,7 +576,7 @@ impl WindowView {
             .when(tree, |row| row.child(div().flex_none().w(px(12.))))
             .child(img(file_icon(&name)).flex_none().size(px(14.)))
             .child(div().flex_initial().min_w_0().truncate().child(name))
-            .child(div().flex_1().min_w_0().truncate().text_size(px(font_size(cx) - 1.)).text_color(dim).child(dir))
+            .child(div().flex_1().min_w_0().truncate().text_size(FontSize::Small).text_color(dim).child(dir))
             .when(file.added > 0, |row| row.child(added_label(file.added)))
             .when(file.removed > 0, |row| row.child(removed_label(file.removed)))
             .child(status_letter(file.status))
@@ -608,7 +610,7 @@ impl WindowView {
         let last = base_name(&dir.path);
         let commit = self.graph(&dir.root).and_then(|graph| graph.commit(ci)).map(|commit| commit.id.clone());
         let row_id = format!("git-commit-dir-{}-{}", commit.unwrap_or_default(), dir.path.display());
-        self.git_row(SharedString::from(row_id), 0., fg, bg, cx)
+        self.git_row(SharedString::from(row_id), 0., fg, bg)
             .role(Role::TreeItem)
             .aria_level(depth as usize + 2)
             .aria_expanded(dir.expanded)
@@ -650,7 +652,7 @@ impl WindowView {
             .map(|row| (row, lane_geometry(graph.map_or(0, |graph| graph.lanes))));
         // 「加载更多」报成按钮，其余是一句说明。
         let row = self
-            .git_row(super::repo_id(&format!("git-graph-note-{note:?}"), &repo.root), 0., fg, bg, cx)
+            .git_row(super::repo_id(&format!("git-graph-note-{note:?}"), &repo.root), 0., fg, bg)
             .role(if note == GraphNote::More { Role::Button } else { Role::Label })
             .aria_label(text.clone().into_owned());
         let Some((last, (lane, width))) = last else {
@@ -670,7 +672,7 @@ impl WindowView {
         row.child(
             div()
                 .flex_none()
-                .h(px(18.))
+                .h(scaled(18.))
                 .px(px(6.))
                 .ml(px(-6.))
                 .rounded(px(4.))
@@ -696,7 +698,6 @@ impl WindowView {
         note: CommitNote,
         fg: Rgb,
         bg: Rgb,
-        cx: &gpui::App,
     ) -> AnyElement {
         let text = match note {
             CommitNote::Loading => rust_i18n::t!("git.graph.loading_changes"),
@@ -706,7 +707,7 @@ impl WindowView {
         let width = self.graph(&repo.root).map_or(0., |graph| lane_geometry(graph.lanes).1);
         let commit = self.graph(&repo.root).and_then(|graph| graph.commit(ci)).map(|commit| commit.id.clone());
         let row_id = format!("git-commit-note-{}", commit.unwrap_or_default());
-        self.git_row(SharedString::from(row_id), 0., fg, bg, cx)
+        self.git_row(SharedString::from(row_id), 0., fg, bg)
             .role(Role::Label)
             .aria_label(text.clone().into_owned())
             .relative()
@@ -726,34 +727,28 @@ struct Fit {
     date: bool,
 }
 
-/// 正文字号 `font` 时上面那些宽度要乘的倍数。
-fn scale(font: f32) -> f32 {
-    font / BASE_FONT_SIZE
+/// 估一个引用标签多宽。
+fn label_width(name: &str) -> f32 {
+    (name.chars().count() as f32 * 6. + 12.).min(MAX_LABEL_WIDTH)
 }
 
-/// 估一个引用标签多宽：字跟着正文字号 `font` 缩放，两边留白不变。
-fn label_width(name: &str, font: f32) -> f32 {
-    (name.chars().count() as f32 * 6. * scale(font) + 12.).min(MAX_LABEL_WIDTH * scale(font))
-}
-
-/// 面板 `panel` 宽、图 `graph` 宽、正文字号 `font` 时这一行放得下什么：说明首行至少留 `MIN_SUBJECT_WIDTH`，不够时
+/// 面板 `panel` 宽、图 `graph` 宽时这一行放得下什么：说明首行至少留 `MIN_SUBJECT_WIDTH`，不够时
 /// 先不显示日期，再从后往前少显示标签（少了的合进「+N」）。面板宽度还不知道时都显示。
-fn fit_commit_row(panel: f32, graph: f32, commit: &Commit, font: f32) -> Fit {
+fn fit_commit_row(panel: f32, graph: f32, commit: &Commit) -> Fit {
     let shown = commit.refs.len().min(MAX_REF_LABELS);
     if panel <= 0. {
         return Fit { labels: shown, date: true };
     }
     // 两边留白 16，各部分之间的间隔 6。
     let room = panel - 16. - graph - 6.;
-    let (date, subject) = (DATE_WIDTH * scale(font), MIN_SUBJECT_WIDTH * scale(font));
     let labels = |count: usize| {
-        let more = if commit.refs.len() > count { MORE_LABEL_WIDTH * scale(font) + 6. } else { 0. };
-        commit.refs.iter().take(count).map(|r| label_width(&r.name, font) + 6.).sum::<f32>() + more
+        let more = if commit.refs.len() > count { MORE_LABEL_WIDTH + 6. } else { 0. };
+        commit.refs.iter().take(count).map(|r| label_width(&r.name) + 6.).sum::<f32>() + more
     };
-    if room - labels(shown) - date - 6. >= subject {
+    if room - labels(shown) - DATE_WIDTH - 6. >= MIN_SUBJECT_WIDTH {
         return Fit { labels: shown, date: true };
     }
-    let count = (0..=shown).rev().find(|&count| room - labels(count) >= subject).unwrap_or(0);
+    let count = (0..=shown).rev().find(|&count| room - labels(count) >= MIN_SUBJECT_WIDTH).unwrap_or(0);
     Fit { labels: count, date: false }
 }
 
@@ -763,9 +758,8 @@ fn short_date(date: &str) -> String {
 }
 
 /// 指向提交的引用的前 `shown` 个小标签：HEAD 所在的分支（或分离的 HEAD）实心突出，本地分支描边，
-/// 远端分支淡一些、描 lane 推上去那段的紫色，tag 带黄色；太长的截断。其余的合成「+N」。字比正文
-/// 字号 `font` 小两号。
-fn ref_labels(commit: &Commit, shown: usize, font: f32, fg: Rgb, bg: Rgb) -> Vec<gpui::Div> {
+/// 远端分支淡一些、描 lane 推上去那段的紫色，tag 带黄色；太长的截断。其余的合成「+N」。
+fn ref_labels(commit: &Commit, shown: usize, fg: Rgb, bg: Rgb) -> Vec<gpui::Div> {
     let fg_hsla = hsla(fg);
     let mut labels: Vec<_> = commit
         .refs
@@ -774,13 +768,13 @@ fn ref_labels(commit: &Commit, shown: usize, font: f32, fg: Rgb, bg: Rgb) -> Vec
         .map(|r| {
             let label = div()
                 .flex_none()
-                .max_w(px(MAX_LABEL_WIDTH * scale(font)))
-                .h(px(font + 4.))
+                .max_w(scaled(MAX_LABEL_WIDTH))
+                .h(scaled(16.))
                 .px(px(5.))
                 .rounded(px(8.))
                 .flex()
                 .items_center()
-                .text_size(px(font - 2.))
+                .text_size(FontSize::Tiny)
                 .border_1()
                 .truncate();
             let label = match r.kind {
@@ -802,7 +796,7 @@ fn ref_labels(commit: &Commit, shown: usize, font: f32, fg: Rgb, bg: Rgb) -> Vec
         labels.push(
             div()
                 .flex_none()
-                .text_size(px(font - 2.))
+                .text_size(FontSize::Tiny)
                 .text_color(fg_hsla.opacity(0.5))
                 .child(format!("+{}", commit.refs.len() - shown)),
         );
@@ -916,18 +910,15 @@ mod tests {
     #[test]
     fn narrow_rows_drop_the_date_then_labels() {
         let two = commit(&["main", "origin/main"]);
-        assert_eq!(fit_commit_row(320., 20., &two, BASE_FONT_SIZE), Fit { labels: 2, date: true });
+        assert_eq!(fit_commit_row(320., 20., &two), Fit { labels: 2, date: true });
         // 窄了先不要日期，再少显示标签，说明首行总留着最小宽度。
-        assert_eq!(fit_commit_row(250., 20., &two, BASE_FONT_SIZE), Fit { labels: 2, date: false });
-        assert_eq!(fit_commit_row(200., 20., &two, BASE_FONT_SIZE), Fit { labels: 1, date: false });
-        assert_eq!(fit_commit_row(140., 20., &two, BASE_FONT_SIZE), Fit { labels: 0, date: false });
-        // 字号大了字变宽，同样宽的面板放得下的少了。
-        assert_eq!(fit_commit_row(320., 20., &two, 19.5), Fit { labels: 1, date: false });
+        assert_eq!(fit_commit_row(250., 20., &two), Fit { labels: 2, date: false });
+        assert_eq!(fit_commit_row(200., 20., &two), Fit { labels: 1, date: false });
+        assert_eq!(fit_commit_row(140., 20., &two), Fit { labels: 0, date: false });
         // 很长的分支名按最大宽度算，会被截断。
         let long = commit(&[&"x".repeat(60)]);
-        assert_eq!(label_width(&long.refs[0].name, BASE_FONT_SIZE), MAX_LABEL_WIDTH);
-        assert_eq!(label_width(&long.refs[0].name, 19.5), MAX_LABEL_WIDTH * 1.5);
-        assert_eq!(fit_commit_row(0., 20., &long, BASE_FONT_SIZE), Fit { labels: 1, date: true });
+        assert_eq!(label_width(&long.refs[0].name), MAX_LABEL_WIDTH);
+        assert_eq!(fit_commit_row(0., 20., &long), Fit { labels: 1, date: true });
         assert_eq!(short_date("2 days ago"), "2 days");
     }
 

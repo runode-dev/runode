@@ -29,6 +29,7 @@ impl Config {
             },
             "window-padding-x" => vec![pair(self.window_padding_x)],
             "window-padding-y" => vec![pair(self.window_padding_y)],
+            "ui-font-size" => vec![self.ui_font_size.to_string()],
             "status-bar" => bool(self.status_bar),
             "status-bar-hidden" => self.status_bar_hidden.iter().map(|item| item.name().to_owned()).collect(),
             "window-style" => vec![
@@ -38,7 +39,6 @@ impl Config {
                 }
                 .into(),
             ],
-            "file-tree-font-size" => vec![self.file_tree_font_size.to_string()],
             "file-tree-preview-click" => vec![
                 match self.file_tree_preview_click {
                     PreviewClick::Single => "single",

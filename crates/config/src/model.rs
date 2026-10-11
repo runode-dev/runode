@@ -80,12 +80,12 @@ pub struct Config {
     /// (上, 下)
     pub window_padding_y: (f32, f32),
     pub window_style: WindowStyle,
+    /// 界面文字的基准字号：终端和预览栏以外的字都从它按比例推出来。
+    pub ui_font_size: f32,
     /// 窗口底部的状态栏显示不显示。
     pub status_bar: bool,
     /// 状态栏上不显示的几块。
     pub status_bar_hidden: Vec<StatusItem>,
-    /// 右侧文件树和 Git 面板的字号。
-    pub file_tree_font_size: f32,
     pub file_tree_preview_click: PreviewClick,
     /// 预览栏的字号。
     pub preview_font_size: f32,
@@ -194,9 +194,9 @@ impl Default for Config {
             window_padding_x: (2., 2.),
             window_padding_y: (0., 6.),
             window_style: WindowStyle::Cards,
+            ui_font_size: 12.,
             status_bar: true,
             status_bar_hidden: Vec::new(),
-            file_tree_font_size: 13.,
             file_tree_preview_click: PreviewClick::Single,
             preview_font_size: 13.,
             task_placement: TaskPlacement::Right,

@@ -1,5 +1,5 @@
 //! 不属于哪个具体功能、几处界面都用的 GPUI 部件和小工具：单行输入框（`text_field`）、多行输入框
-//! （`text_area`）、滚动条（`scrollbar`）、悬停提示（`tooltip`）、系统声音（`sound`）、按文件类型区分的图标（`file_icons`）、
+//! （`text_area`）、滚动条（`scrollbar`）、悬停提示（`tooltip`）、界面各档字号（`font_size`）、系统声音（`sound`）、按文件类型区分的图标（`file_icons`）、
 //! 让 Option 组合键先走快捷键的输入处理（`input_handler`）、
 //! 复制粘贴这类共用的编辑动作（`actions`），把调色板的颜色换成 GPUI 颜色的 `hsla`，以及把家目录写成
 //! `~` 显示路径的 `display_dir`，放掉图片在图集里那份的 `drop_render_image`、`release_bitmap`，以及让辅助工具认得界面的
@@ -11,6 +11,7 @@
 pub mod a11y;
 pub mod actions;
 pub mod file_icons;
+pub mod font_size;
 pub mod input_handler;
 pub mod scrollbar;
 pub mod sound;

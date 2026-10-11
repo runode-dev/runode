@@ -16,7 +16,9 @@ use super::{
     titlebar::styled_agent_mark,
 };
 use crate::ui::{
-    display_dir, hsla,
+    display_dir,
+    font_size::{FontSize, scaled},
+    hsla,
     text_field::{TextField, TextFieldEvent},
 };
 
@@ -198,7 +200,7 @@ impl WindowView {
                     .aria_description(format!("{} · {dir}", entry.mark.status.label()))
                     .aria_selected(ix == selected)
                     .flex_none()
-                    .h(px(ROW_HEIGHT))
+                    .h(scaled(ROW_HEIGHT))
                     .px(px(8.))
                     .rounded(px(6.))
                     .flex()
@@ -228,7 +230,7 @@ impl WindowView {
                             // 路径长时留下结尾：最后几级目录最能区分。
                             .child(
                                 div()
-                                    .text_size(px(11.))
+                                    .text_size(FontSize::Small)
                                     .text_color(fg.opacity(0.45))
                                     .overflow_hidden()
                                     .whitespace_nowrap()
@@ -239,7 +241,7 @@ impl WindowView {
                     .child(
                         div()
                             .flex_none()
-                            .text_size(px(11.))
+                            .text_size(FontSize::Small)
                             .text_color(fg.opacity(0.45))
                             .child(entry.mark.status.label()),
                     )
@@ -255,7 +257,7 @@ impl WindowView {
             .id("agent-list")
             .role(Role::ListBox)
             .aria_label(rust_i18n::t!("agent.picker.title"))
-            .max_h(px(ROW_HEIGHT * VISIBLE_ROWS + 8.))
+            .max_h(scaled(ROW_HEIGHT * VISIBLE_ROWS + 8.))
             .track_scroll(&picker.scroll)
             .children(rows)
             .children(empty);
@@ -297,12 +299,12 @@ pub(super) fn picker_panel(
         .border_color(fg.opacity(0.15))
         .shadow_md()
         .occlude()
-        .text_size(px(12.))
+        .text_size(FontSize::Body)
         .text_color(fg)
         .child(
             div()
                 .flex_none()
-                .h(px(INPUT_HEIGHT))
+                .h(scaled(INPUT_HEIGHT))
                 .px(px(10.))
                 .flex()
                 .items_center()

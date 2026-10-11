@@ -599,9 +599,9 @@ settings:
     window_padding_x: Horizontal padding
     window_padding_y: Vertical padding
     window_style: Style
+    ui_font_size: Interface font size
     status_bar: Status bar
     status_bar_hidden: Hidden in the status bar
-    file_tree_font_size: File tree font size
     file_tree_preview_click: Open files in the preview with
     preview_font_size: Preview font size
     task_placement: Run tasks in
@@ -658,9 +658,9 @@ settings:
     window_padding_x: Left and right, in points. One number for both sides, or left,right.
     window_padding_y: Top and bottom, in points. One number for both, or top,bottom.
     window_style: Cards puts each split and side panel on its own rounded card; classic lets the terminal fill the window.
+    ui_font_size: In points, 6 to 20. All text scales with it except the terminal and the body of the preview pane.
     status_bar: Shows sleep prevention, memory and ports at the bottom of the window.
     status_bar_hidden: "The parts left out of the status bar. You can also right-click the status bar."
-    file_tree_font_size: In points. The Git panel uses it too.
     file_tree_preview_click: A single click opens a temporary tab that the next file replaces; a double click keeps it.
     preview_font_size: In points.
     task_placement: Where a task picked from the title bar's task menu runs.

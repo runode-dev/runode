@@ -42,7 +42,11 @@ use crate::ui::a11y::A11yPress;
 use crate::{
     assets::{CHEVRON_DOWN_ICON, CHEVRON_RIGHT_ICON, COFFEE_ICON, MEMORY_ICON, PLUG_ICON, SHELL_ICON},
     config::AppConfig,
-    ui::{hsla, tooltip::tooltip},
+    ui::{
+        font_size::{FontSize, scaled},
+        hsla,
+        tooltip::tooltip,
+    },
 };
 use probe::{Caffeinate, Port, Procs, Usage};
 
@@ -341,7 +345,7 @@ impl WindowView {
             .flex()
             .items_center()
             .gap(px(2.))
-            .text_size(px(11.))
+            .text_size(FontSize::Small)
             .text_color(fg_h.opacity(0.7))
             .when(!cards(cx), |bar| bar.border_t_1().border_color(divider_color(fg_h)))
             // 右键选显示哪几块，或者藏起整条；几块全藏起来时这一条还在，照样能右键找回来。
@@ -440,7 +444,7 @@ impl WindowView {
                                 .border_color(border)
                                 .bg(popover_bg)
                                 .shadow_lg()
-                                .text_size(px(12.))
+                                .text_size(FontSize::Body)
                                 .text_color(hsla(fg))
                                 .occlude()
                                 .child(content)
@@ -529,7 +533,7 @@ impl WindowView {
                     div()
                         .flex_none()
                         .w(px(8.))
-                        .h(px(16.))
+                        .h(scaled(16.))
                         .flex()
                         .items_center()
                         .children(selected.then(|| div().size(px(6.)).rounded_full().bg(fg_h))),
@@ -542,7 +546,7 @@ impl WindowView {
                         .child(div().font_weight(FontWeight::MEDIUM).child(sleep_label(mode)))
                         .child(
                             div()
-                                .text_size(px(11.))
+                                .text_size(FontSize::Small)
                                 .text_color(fg_h.opacity(0.55))
                                 .child(rust_i18n::t!(detail).into_owned()),
                         ),
@@ -589,7 +593,7 @@ impl WindowView {
                 .id(("resource-row", n))
                 .role(Role::Label)
                 .aria_label(format!("{name} · CPU {} · {}", format_cpu(usage.cpu), format_bytes(usage.memory)))
-                .h(px(26.))
+                .h(scaled(26.))
                 .px(px(12.))
                 .flex()
                 .items_center()
@@ -637,11 +641,11 @@ impl WindowView {
         rows.push(row("Runode".into(), own_sum, false, true).into_any_element());
         rows.extend(own.into_iter().map(|(name, usage)| row(name, usage, true, false).into_any_element()));
         let columns = div()
-            .h(px(24.))
+            .h(scaled(24.))
             .px(px(12.))
             .flex()
             .items_center()
-            .text_size(px(11.))
+            .text_size(FontSize::Small)
             .text_color(fg_h.opacity(0.5))
             .border_b_1()
             .border_color(divider_color(fg_h))
@@ -698,7 +702,7 @@ impl WindowView {
                 .role(Role::Link)
                 .aria_label(label)
                 .aria_description(rust_i18n::t!("status.open_port"))
-                .h(px(26.))
+                .h(scaled(26.))
                 .mx(px(6.))
                 .px(px(8.))
                 .rounded(px(6.))
@@ -736,7 +740,7 @@ impl WindowView {
             .aria_label(rust_i18n::t!("status.external_ports"))
             .aria_description(external.len().to_string())
             .aria_expanded(external_open)
-            .h(px(28.))
+            .h(scaled(28.))
             .mx(px(6.))
             .px(px(6.))
             .rounded(px(6.))
@@ -808,7 +812,7 @@ fn empty_note(text: String, fg: Hsla) -> Stateful<Div> {
         .id("empty-note")
         .role(Role::Label)
         .aria_label(text.clone())
-        .h(px(40.))
+        .h(scaled(40.))
         .flex()
         .items_center()
         .justify_center()
@@ -823,7 +827,7 @@ fn popover_header(icon: Option<&'static str>, title: String, detail: String, fg:
         .role(Role::Heading)
         .aria_label(title.clone())
         .aria_description(detail.clone())
-        .h(px(36.))
+        .h(scaled(36.))
         .px(px(12.))
         .flex()
         .items_center()

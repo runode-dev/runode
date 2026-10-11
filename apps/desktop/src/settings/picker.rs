@@ -9,7 +9,10 @@ use gpui::{
 };
 
 use super::{SettingsView, controls::Colors};
-use crate::ui::text_field::{TextField, TextFieldEvent};
+use crate::ui::{
+    font_size::{FontSize, scaled},
+    text_field::{TextField, TextFieldEvent},
+};
 
 const PICKER_WIDTH: f32 = 420.;
 const ROW_HEIGHT: f32 = 28.;
@@ -205,7 +208,7 @@ impl SettingsView {
                         .aria_label(item.label.clone())
                         .aria_selected(row == picker.highlighted)
                         .w_full()
-                        .h(px(ROW_HEIGHT))
+                        .h(scaled(ROW_HEIGHT))
                         .px(px(8.))
                         .flex()
                         .items_center()
@@ -229,7 +232,11 @@ impl SettingsView {
                         )
                         .child(div().flex_1().min_w_0().truncate().child(item.label.clone()))
                         .children(item.detail.clone().map(|detail| {
-                            div().flex_none().text_size(px(11.)).text_color(colors.fg.opacity(0.45)).child(detail)
+                            div()
+                                .flex_none()
+                                .text_size(FontSize::Small)
+                                .text_color(colors.fg.opacity(0.45))
+                                .child(detail)
                         }))
                         .into_any_element(),
                 )
@@ -246,7 +253,7 @@ impl SettingsView {
             cx.processor(move |this, range: Range<usize>, _, cx| this.render_picker_rows(range, colors, cx)),
         )
         .track_scroll(&picker.scroll)
-        .h(px(ROW_HEIGHT * VISIBLE_ROWS.min(count.max(1) as f32) + 8.))
+        .h(scaled(ROW_HEIGHT * VISIBLE_ROWS.min(count.max(1) as f32) + 8.))
         .p(px(4.));
         let empty = (count == 0).then(|| {
             div()
@@ -268,7 +275,7 @@ impl SettingsView {
             .border_color(colors.border)
             .shadow_lg()
             .occlude()
-            .text_size(px(12.5))
+            .text_size(FontSize::Body)
             .capture_key_down(cx.listener(Self::picker_key))
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
             .child(
@@ -276,13 +283,13 @@ impl SettingsView {
                     .px(px(12.))
                     .pt(px(10.))
                     .pb(px(4.))
-                    .text_size(px(11.))
+                    .text_size(FontSize::Small)
                     .text_color(colors.fg.opacity(0.55))
                     .child(picker.title.clone()),
             )
             .child(
                 div()
-                    .h(px(30.))
+                    .h(scaled(30.))
                     .mx(px(8.))
                     .px(px(8.))
                     .flex()

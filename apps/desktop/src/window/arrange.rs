@@ -15,7 +15,7 @@ use runode_shared_types::{
 };
 
 use super::{PressDown, TITLEBAR_HEIGHT, WindowView, divider_color};
-use crate::ui::hsla;
+use crate::ui::{font_size::FontSize, hsla};
 
 actions!(
     runode,
@@ -296,7 +296,7 @@ impl WindowView {
             .border_color(fg.opacity(0.15))
             .shadow_md()
             .occlude()
-            .text_size(px(12.))
+            .text_size(FontSize::Body)
             .text_color(fg)
             .child(div().text_color(fg).child(rust_i18n::t!("layout.title").into_owned()))
             .child(
@@ -317,7 +317,7 @@ impl WindowView {
                     .pt(px(8.))
                     .border_t_1()
                     .border_color(divider_color(fg))
-                    .text_size(px(11.))
+                    .text_size(FontSize::Small)
                     .text_color(fg.opacity(0.45))
                     .child(rust_i18n::t!("layout.hint").into_owned()),
             );

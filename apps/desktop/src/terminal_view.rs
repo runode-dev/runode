@@ -48,7 +48,7 @@ use runode_terminal::{
 
 use crate::{
     host_client::LinkEvent,
-    ui::{a11y::Press, hsla, text_field::TextField},
+    ui::{a11y::Press, font_size::FontSize, hsla, text_field::TextField},
 };
 use completion_menu::{CompletionMenu, PendingKey};
 use crop::Crop;
@@ -410,7 +410,7 @@ impl TerminalView {
                 .border_1()
                 .border_color(fg.opacity(0.15))
                 .occlude()
-                .text_size(px(11.))
+                .text_size(FontSize::Small)
                 .text_color(fg.opacity(0.8))
                 .cursor(CursorStyle::PointingHand)
                 .hover(|label| label.text_color(fg))
@@ -447,7 +447,7 @@ impl TerminalView {
             .border_color(fg.opacity(0.15))
             .shadow_md()
             .occlude()
-            .text_size(px(12.))
+            .text_size(FontSize::Body)
             .text_color(fg)
             .cursor(CursorStyle::Arrow)
             .child(div().flex_1().min_w_0().child(message))

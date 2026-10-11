@@ -19,6 +19,7 @@ use crate::ui::a11y::A11yPress;
 use crate::{
     assets::{BRANCH_ICON, CHECK_ICON, PLUS_ICON},
     ui::{
+        font_size::{FontSize, scaled},
         hsla,
         text_field::{TextField, TextFieldEvent},
     },
@@ -284,7 +285,7 @@ impl WindowView {
                     // 当前分支前面打着勾。
                     .when(current, |item| item.aria_toggled(true.into()))
                     .flex_none()
-                    .h(px(ROW_HEIGHT))
+                    .h(scaled(ROW_HEIGHT))
                     .px(px(8.))
                     .rounded(px(6.))
                     .flex()
@@ -312,7 +313,7 @@ impl WindowView {
                     })
                     .child(svg().flex_none().path(icon).size(px(14.)).text_color(fg.opacity(0.7)))
                     .child(div().flex_none().max_w(px(PICKER_WIDTH * 0.5)).truncate().text_color(fg).child(name))
-                    .child(div().flex_1().min_w_0().truncate().text_size(px(11.)).text_color(dim).child(detail))
+                    .child(div().flex_1().min_w_0().truncate().text_size(FontSize::Small).text_color(dim).child(detail))
             })
             .collect();
         let title = picker_title(picker.create_only);
@@ -326,7 +327,7 @@ impl WindowView {
             .id("branch-list")
             .role(Role::ListBox)
             .aria_label(title)
-            .max_h(px(ROW_HEIGHT * VISIBLE_ROWS + 8.))
+            .max_h(scaled(ROW_HEIGHT * VISIBLE_ROWS + 8.))
             .track_scroll(&picker.scroll)
             .children(items)
             .children(empty);

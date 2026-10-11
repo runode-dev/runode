@@ -33,6 +33,7 @@ use crate::{
     ui::{
         a11y::Press,
         file_icons::{file_icon, folder_icon},
+        font_size::{FontSize, scaled},
         hsla,
         text_field::{TextField, TextFieldEvent},
         tooltip::tooltip,
@@ -548,7 +549,7 @@ impl WindowView {
         // 输入框外框；`leading` 画在文字前面。
         let input_box = |field: &Entity<TextField>, leading: Option<gpui::Svg>| {
             div()
-                .h(px(28.))
+                .h(scaled(28.))
                 .px(px(8.))
                 .flex()
                 .items_center()
@@ -566,14 +567,14 @@ impl WindowView {
                 .id(id)
                 .aria_label(tip.clone())
                 .flex_none()
-                .h(px(20.))
-                .min_w(px(20.))
+                .h(scaled(20.))
+                .min_w(scaled(20.))
                 .px(px(3.))
                 .rounded(px(4.))
                 .flex()
                 .items_center()
                 .justify_center()
-                .text_size(px(11.))
+                .text_size(FontSize::Small)
                 .map(|item| {
                     if on {
                         item.bg(hsla(bg.mix(fg, 0.18))).text_color(hsla(fg))
@@ -629,7 +630,7 @@ impl WindowView {
                 .items_center()
                 .justify_center()
                 .rounded(px(5.))
-                .text_size(px(12.))
+                .text_size(FontSize::Body)
                 .map(|item| {
                     if on {
                         item.bg(hsla(bg)).text_color(hsla(fg))
@@ -644,7 +645,7 @@ impl WindowView {
             .id("search-mode")
             .role(Role::RadioGroup)
             .aria_label(rust_i18n::t!("files.search_mode").into_owned())
-            .h(px(26.))
+            .h(scaled(26.))
             .p(px(2.))
             .flex()
             .rounded(px(7.))
@@ -662,7 +663,10 @@ impl WindowView {
                 .flex_col()
                 .gap(px(4.))
                 .child(
-                    div().text_size(px(12.)).text_color(hsla(fg).opacity(0.7)).child(rust_i18n::t!(label).into_owned()),
+                    div()
+                        .text_size(FontSize::Body)
+                        .text_color(hsla(fg).opacity(0.7))
+                        .child(rust_i18n::t!(label).into_owned()),
                 )
                 .child(input_box(field, None))
         };
@@ -745,7 +749,7 @@ impl WindowView {
             .flex_none()
             .px(px(10.))
             .pb(px(4.))
-            .text_size(px(12.))
+            .text_size(FontSize::Body)
             .text_color(hsla(fg).opacity(0.5));
         Some(
             div()

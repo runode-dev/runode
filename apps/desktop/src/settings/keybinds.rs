@@ -17,6 +17,7 @@ use super::{
     SettingsView,
     controls::{CONTROL_HEIGHT, Cards, Colors, Press, button, icon_button, row, switch},
 };
+use crate::ui::font_size::{FontSize, scaled};
 
 const KEY: &str = "keybind";
 
@@ -447,7 +448,7 @@ impl SettingsView {
                         .child(
                             div()
                                 .flex_1()
-                                .text_size(px(11.5))
+                                .text_size(FontSize::Small)
                                 .text_color(colors.fg.opacity(0.55))
                                 .child(rust_i18n::t!("settings.keybind.custom_hint").into_owned()),
                         )
@@ -466,20 +467,20 @@ impl SettingsView {
             div()
                 .flex_none()
                 .px(px(7.))
-                .h(px(20.))
+                .h(scaled(20.))
                 .flex()
                 .items_center()
                 .rounded_full()
                 .border_1()
                 .border_color(colors.border)
-                .text_size(px(11.))
+                .text_size(FontSize::Small)
                 .text_color(colors.fg.opacity(0.6))
                 .child(param.to_owned())
         });
         let title = div()
             .flex_1()
             .min_w_0()
-            .h(px(CONTROL_HEIGHT))
+            .h(scaled(CONTROL_HEIGHT))
             .flex()
             .items_center()
             .gap(px(8.))
@@ -492,7 +493,7 @@ impl SettingsView {
         let add =
             icon_button(SharedString::from(format!("keybind-add-{ix}")), "icons/plus.svg", add_label.clone(), colors)
                 .flex_none()
-                .mt(px((CONTROL_HEIGHT - 20.) / 2.))
+                .mt(scaled((CONTROL_HEIGHT - 20.) / 2.))
                 .when(!row.bound.is_empty() && !adding, |add| {
                     add.invisible().group_hover(group.clone(), |add| add.visible())
                 })
@@ -551,7 +552,7 @@ impl SettingsView {
                 RowKey::Digits(_) => rust_i18n::t!("settings.keybind.press_digit_hint"),
                 RowKey::Action(_) => rust_i18n::t!("settings.keybind.press_hint"),
             };
-            div().text_size(px(11.5)).text_color(colors.fg.opacity(0.55)).child(hint.into_owned())
+            div().text_size(FontSize::Small).text_color(colors.fg.opacity(0.55)).child(hint.into_owned())
         });
         let conflict =
             self.keybinds.conflict.as_ref().filter(|conflict| conflict.target.row == row.key).map(|conflict| {
@@ -585,7 +586,9 @@ impl SettingsView {
                     .flex()
                     .items_center()
                     .gap(px(8.))
-                    .child(div().flex_1().text_size(px(11.5)).text_color(colors.error).child(message.into_owned()))
+                    .child(
+                        div().flex_1().text_size(FontSize::Small).text_color(colors.error).child(message.into_owned()),
+                    )
                     .child(cancel)
                     .child(replace)
             });
@@ -605,8 +608,8 @@ impl SettingsView {
 
 fn keycap(cap: String, colors: Colors) -> Div {
     div()
-        .min_w(px(CONTROL_HEIGHT))
-        .h(px(CONTROL_HEIGHT))
+        .min_w(scaled(CONTROL_HEIGHT))
+        .h(scaled(CONTROL_HEIGHT))
         .px(px(7.))
         .flex()
         .items_center()
@@ -615,7 +618,7 @@ fn keycap(cap: String, colors: Colors) -> Div {
         .bg(colors.control)
         .border_1()
         .border_color(colors.border)
-        .text_size(px(12.))
+        .text_size(FontSize::Body)
         .child(cap)
 }
 

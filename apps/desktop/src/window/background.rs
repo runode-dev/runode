@@ -26,7 +26,11 @@ use super::{
 use crate::{
     host_client::{self, Mode},
     terminal_view::{DEFAULT_TITLE, TerminalView},
-    ui::{display_dir, hsla},
+    ui::{
+        display_dir,
+        font_size::{FontSize, scaled},
+        hsla,
+    },
 };
 
 /// 列表不空时隔这么久重问一次宿主。
@@ -216,12 +220,12 @@ impl WindowView {
         let fg = hsla(fg);
         let header = div()
             .flex_none()
-            .h(px(28.))
+            .h(scaled(28.))
             .px(px(8.))
             .flex()
             .items_center()
             .gap(px(6.))
-            .text_size(px(11.))
+            .text_size(FontSize::Small)
             .child(
                 div()
                     .flex_1()
@@ -250,7 +254,7 @@ impl WindowView {
                 .role(Role::Group)
                 .aria_label(rust_i18n::t!("background.title"))
                 .flex_none()
-                .max_h(px(GROUP_MAX_HEIGHT))
+                .max_h(scaled(GROUP_MAX_HEIGHT))
                 .overflow_y_scroll()
                 .px(px(6.))
                 .pt(px(4.))
@@ -292,7 +296,7 @@ fn background_row(ix: usize, session: &SessionInfo, fg: Rgb, bg: Rgb, cx: &mut C
         div()
             .flex()
             .gap(px(4.))
-            .text_size(px(11.))
+            .text_size(FontSize::Small)
             .text_color(fg.opacity(0.45))
             .whitespace_nowrap()
             .children(agent.map(|agent| div().flex_none().child(agent)))
@@ -305,13 +309,13 @@ fn background_row(ix: usize, session: &SessionInfo, fg: Rgb, bg: Rgb, cx: &mut C
         .aria_label(title(session))
         .when(!description.is_empty(), |row| row.aria_description(description))
         .flex_none()
-        .h(px(ROW_HEIGHT))
+        .h(scaled(ROW_HEIGHT))
         .px(px(8.))
         .rounded(px(6.))
         .flex()
         .items_center()
         .gap(px(6.))
-        .text_size(px(12.))
+        .text_size(FontSize::Body)
         .text_color(fg.opacity(0.7))
         .hover(|row| row.bg(hover_bg).text_color(fg))
         .on_press_down(cx, move |this, window, cx| this.open_background(id, window, cx))

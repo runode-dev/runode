@@ -87,7 +87,7 @@ pub use tasks::RunNamedTask;
 pub use titlebar::titlebar_options;
 
 use crate::ui::a11y::{Hide, PressDown};
-use crate::{config::AppConfig, prespawn::Prespawned, terminal_view::TerminalView, ui::hsla};
+use crate::{config::AppConfig, prespawn::Prespawned, terminal_view::TerminalView, ui::font_size::FontSize, ui::hsla};
 use model::{PaneLayout, Workspace, WorkspaceId, home_dir};
 use persist::format::SavedWindow;
 use slot::Slot;
@@ -423,7 +423,7 @@ impl WindowView {
             }
         });
         let config_watch = cx.observe_global::<AppConfig>(|this, cx| {
-            // Git 面板跟着 `file-tree-font-size` 变高变矮，多个仓库时的列表记着量过的行高，要重新量。
+            // 界面跟着 `ui-font-size` 缩放，Git 面板有多个仓库时的列表记着量过的行高，要重新量。
             for workspace in &this.workspaces {
                 workspace.project.git_panel.list.remeasure();
             }
@@ -676,6 +676,8 @@ impl Focusable for WindowView {
 
 impl Render for WindowView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        // 界面的字号和跟着字号变的长度都按 rem 写（`ui::font_size`），rem 就是配置的界面字号。
+        window.set_rem_size(crate::ui::font_size::rem_size(cx));
         self.focus_menu(window, cx);
         let (fg, bg) = self.colors(cx);
         self.follow_colors((fg, bg), cx);
@@ -951,7 +953,7 @@ impl WindowView {
             .h(px(TITLEBAR_HEIGHT))
             .flex_none()
             .flex()
-            .text_size(px(12.))
+            .text_size(FontSize::Body)
             .on_mouse_down(MouseButton::Left, drag_window)
             // 给红绿灯和侧栏开关让出的位置；后面跟着标签时右边画一条分隔线，和新建标签按钮
             // 左边那条对称。
@@ -1064,7 +1066,7 @@ impl WindowView {
             .flex()
             .items_center()
             .pr(px(CARD_GAP))
-            .text_size(px(12.))
+            .text_size(FontSize::Body)
             .on_mouse_down(MouseButton::Left, drag_window)
             .child(div().flex_none().w(px(left_inset)))
             .child(strip)

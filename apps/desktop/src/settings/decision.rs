@@ -37,6 +37,7 @@ use super::{
 };
 use crate::ui::{
     a11y::Disable,
+    font_size::FontSize,
     text_field::{TextField, TextFieldEvent},
 };
 
@@ -483,7 +484,7 @@ impl SettingsView {
                         .id(provider_id("decision-saved", provider))
                         .role(Role::Label)
                         .aria_label(tr("settings.decision.key_set"))
-                        .text_size(px(12.))
+                        .text_size(FontSize::Body)
                         .text_color(colors.fg.opacity(0.6))
                         .child(tr("settings.decision.key_set")),
                 )
@@ -591,7 +592,7 @@ impl SettingsView {
                     .role(Role::ProgressIndicator)
                     .aria_label(rust_i18n::t!("settings.decision.pull_label", model = model.id).into_owned())
                     .aria_value(text.clone())
-                    .text_size(px(12.))
+                    .text_size(FontSize::Body)
                     .text_color(colors.fg.opacity(0.7))
                     .child(text)
                     .into_any_element()
@@ -623,7 +624,7 @@ impl SettingsView {
                 .flex()
                 .items_center()
                 .gap(px(6.))
-                .text_size(px(12.))
+                .text_size(FontSize::Body)
                 .text_color(colors.fg.opacity(0.7))
                 .child(tr("settings.decision.pin"))
                 .child(
@@ -671,7 +672,12 @@ impl SettingsView {
             .items_center()
             .gap(px(6.))
             .child(input_box(input, Some(64.), error.is_some(), colors, window, cx))
-            .child(div().text_size(px(12.)).text_color(colors.fg.opacity(0.7)).child(tr("settings.decision.minutes")));
+            .child(
+                div()
+                    .text_size(FontSize::Body)
+                    .text_color(colors.fg.opacity(0.7))
+                    .child(tr("settings.decision.minutes")),
+            );
         let hint: SharedString = tr("settings.decision.keep_alive_hint").into();
         row(tr("settings.decision.keep_alive"), Some(hint), control, None, error, colors)
     }
@@ -1082,7 +1088,7 @@ fn notice(id: &'static str, text: impl Into<SharedString>, color: Hsla) -> AnyEl
         .role(Role::Label)
         .aria_label(text.clone())
         .pb(px(10.))
-        .text_size(px(12.))
+        .text_size(FontSize::Body)
         .text_color(color)
         .child(text)
         .into_any_element()

@@ -14,6 +14,7 @@ use super::{
 use crate::{
     assets::{BAN_ICON, MONITOR_ICON, PALETTE_ICON},
     i18n::tr,
+    ui::font_size::FontSize,
     ui::hsla,
 };
 
@@ -197,7 +198,8 @@ impl SettingsView {
                         )
                         .on_press(cx, move |this, window, cx| this.pick_theme_mode(mode, window, cx))
                 });
-        let note = |text: String, color| div().pt(px(10.)).pl(px(4.)).text_size(px(12.)).text_color(color).child(text);
+        let note =
+            |text: String, color| div().pt(px(10.)).pl(px(4.)).text_size(FontSize::Body).text_color(color).child(text);
         div()
             .flex()
             .flex_col()

@@ -21,7 +21,12 @@ use super::{
 use crate::ui::a11y::A11yPress;
 use crate::{
     assets::{BRANCH_ICON, GIT_ICON, SIDEBAR_ICON},
-    ui::{display_dir, hsla, tooltip::tooltip},
+    ui::{
+        display_dir,
+        font_size::{self, FontSize, scaled},
+        hsla,
+        tooltip::tooltip,
+    },
 };
 pub(super) use repo::RepoBadge;
 
@@ -82,7 +87,7 @@ fn path_line(path: String) -> impl IntoElement {
         },
     )
     .w_full()
-    .h(px(PATH_LINE_HEIGHT))
+    .h(scaled(PATH_LINE_HEIGHT))
 }
 
 /// 路径放不下时整级整级地从开头删，前面写 `…`：`…/barey.cn/runode`；最后一级也放不下时再从它的开头按字删。
@@ -119,8 +124,8 @@ struct DraggedWorkspace {
 }
 
 impl Render for DraggedWorkspace {
-    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
-        drag_chip(px(self.width - 12.), px(ROW_HEIGHT), self.name.clone(), self.fg, self.bg)
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        drag_chip(px(self.width - 12.), px(ROW_HEIGHT * font_size::scale(cx)), self.name.clone(), self.fg, self.bg)
     }
 }
 
@@ -212,7 +217,7 @@ impl WindowView {
             })
             // 从访达拖来的东西悬在侧栏上时提示放下能开 workspace；放下由窗口根上的 `open_dropped_dirs` 办。
             .drag_over::<ExternalPaths>(move |style, _, _, _| style.bg(drop_bg))
-            .text_size(px(12.))
+            .text_size(FontSize::Body)
             // 顶上这条放红绿灯（全屏时没有）和侧栏开关，和标题栏一样能拖动窗口、双击缩放，比标题栏
             // 多留一点，第一行不贴着开关。
             .child(div().flex_none().h(px(TITLEBAR_HEIGHT + 6.)).on_mouse_down(MouseButton::Left, drag_window))
@@ -293,7 +298,7 @@ impl WindowView {
             let held = modifiers == Modifiers::command()
                 || shortcut_modifiers(&SelectWorkspace(ix), &SelectLastWorkspace, is_last, cx) == Some(modifiers);
             div()
-                .text_size(px(11.))
+                .text_size(FontSize::Small)
                 .text_color(fg.opacity(0.5))
                 // 不按时只是看不见、位置照留，按下时名字一栏不变窄，截断的地方不跳。
                 .when(!held, |hint| hint.invisible())
@@ -319,7 +324,7 @@ impl WindowView {
                 .flex()
                 .items_center()
                 .gap(px(6.))
-                .text_size(px(11.))
+                .text_size(FontSize::Small)
                 .text_color(fg.opacity(0.45))
                 .children(branch)
                 // 路径长时留下结尾：最后几级目录最能区分。
@@ -338,7 +343,7 @@ impl WindowView {
             .when(!a11y_description.is_empty(), |row| row.aria_description(a11y_description))
             .group(group.clone())
             .flex_none()
-            .h(px(ROW_HEIGHT))
+            .h(scaled(ROW_HEIGHT))
             .px(px(8.))
             .rounded(px(6.))
             .flex()
@@ -384,7 +389,7 @@ impl WindowView {
                     .flex()
                     .items_start()
                     .gap(px(6.))
-                    .line_height(px(PATH_LINE_HEIGHT))
+                    .line_height(scaled(PATH_LINE_HEIGHT))
                     .child(icon)
                     .child(div().flex_1().min_w_0().flex().flex_col().gap(px(1.)).child(name).children(details)),
             )
@@ -402,7 +407,8 @@ impl WindowView {
                         close_button(("workspace-close", ix), fg)
                             .absolute()
                             .right_0()
-                            .top(px((ROW_HEIGHT - TAB_CLOSE_SIZE) / 2.))
+                            .top(relative(0.5))
+                            .mt(px(-TAB_CLOSE_SIZE / 2.))
                             .invisible()
                             .group_hover(group, |close| close.visible())
                             .aria_label(close_label)
@@ -425,7 +431,7 @@ impl WindowView {
             .role(Role::Button)
             .aria_label(rust_i18n::t!("workspace.new"))
             .flex_none()
-            .h(px(32.))
+            .h(scaled(32.))
             .m(px(6.))
             .px(px(8.))
             .rounded(px(6.))

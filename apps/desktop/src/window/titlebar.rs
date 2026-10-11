@@ -25,7 +25,9 @@ use crate::{
     assets::{PIXEL_QUESTION_ICON, PLUS_ICON, PROMPT_ICON},
     terminal_view::{DEFAULT_TITLE, TerminalView},
     ui::{
-        display_dir, hsla,
+        display_dir,
+        font_size::FontSize,
+        hsla,
         tooltip::{shortcut_text, tooltip},
     },
 };
@@ -95,7 +97,7 @@ pub(super) fn drag_chip(width: Pixels, height: Pixels, label: SharedString, fg: 
             spread_radius: px(0.),
             inset: false,
         }])
-        .text_size(px(12.))
+        .text_size(FontSize::Body)
         .text_color(fg)
         .child(div().min_w_0().truncate().child(label))
 }
@@ -401,7 +403,7 @@ impl WindowView {
             if tab.bell {
                 bell_dot().into_any_element()
             } else {
-                div().text_size(px(11.)).text_color(fg.opacity(0.35)).children(shortcut).into_any_element()
+                div().text_size(FontSize::Small).text_color(fg.opacity(0.35)).children(shortcut).into_any_element()
             }
         };
         // 默认是 ⌘1 到 ⌘8 对应前八个标签，⌘9 对应最后一个。

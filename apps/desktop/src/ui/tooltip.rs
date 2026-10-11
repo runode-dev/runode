@@ -3,6 +3,7 @@
 use gpui::{Action, AnyView, App, Context, IntoElement, Render, Role, SharedString, Window, div, prelude::*, px};
 use runode_shared_types::color::Rgb;
 
+use super::font_size::FontSize;
 use crate::ui::hsla;
 
 /// 说明再长也不比这宽，多了折行。
@@ -80,8 +81,8 @@ impl Render for Tooltip {
                     .overflow_hidden()
                     .py(px(6.))
                     .font_family(font.clone())
-                    .text_size(px(11.)),
-                None => tooltip.max_w(px(TOOLTIP_MAX_WIDTH)).text_size(px(12.)),
+                    .text_size(FontSize::Small),
+                None => tooltip.max_w(px(TOOLTIP_MAX_WIDTH)).text_size(FontSize::Body),
             })
             // 字放在能缩的一格里，长的一行才会在最宽处折行，不然撑出框外。
             .child(div().flex_1().min_w_0().child(self.text.clone()))

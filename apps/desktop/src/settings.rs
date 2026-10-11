@@ -35,6 +35,7 @@ use crate::{
     config::AppConfig,
     ui::{
         a11y::Hide,
+        font_size::{FontSize, scaled},
         text_field::{TextField, TextFieldEvent},
     },
 };
@@ -329,13 +330,13 @@ impl SettingsView {
             div()
                 .id(id)
                 .aria_label(label.clone())
-                .h(px(34.))
+                .h(scaled(34.))
                 .px(px(10.))
                 .flex()
                 .items_center()
                 .gap(px(10.))
                 .rounded(px(8.))
-                .text_size(px(14.))
+                .text_size(FontSize::Large)
                 .map(|item| {
                     if selected {
                         item.bg(colors.selected).text_color(colors.fg)
@@ -440,7 +441,7 @@ impl Render for SettingsView {
             .flex()
             .bg(colors.bg)
             .text_color(colors.fg)
-            .text_size(px(13.))
+            .text_size(FontSize::Medium)
             .child(nav.aria_hidden(modal))
             .child(
                 div().flex_1().min_w_0().h_full().flex().flex_col().child(titlebar_strip()).child(

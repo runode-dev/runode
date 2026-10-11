@@ -28,6 +28,7 @@ use crate::{
     remote_access::pairing::{BACKGROUND_KEY, Pairing, Qr, qr_code},
     ui::{
         a11y::Press,
+        font_size::{FontSize, scaled},
         hsla,
         text_field::{TextField, TextFieldEvent},
     },
@@ -235,7 +236,7 @@ impl WindowView {
             .role(Role::Button)
             .aria_label(label.clone())
             .flex_none()
-            .h(px(30.))
+            .h(scaled(30.))
             .mx(px(6.))
             .mb(px(4.))
             .px(px(8.))
@@ -353,7 +354,7 @@ impl WindowView {
             .flex()
             .items_center()
             .gap(px(8.))
-            .text_size(px(12.))
+            .text_size(FontSize::Body)
             .text_color(colors.fg.opacity(0.5))
             .child(svg().path(PHONE_ICON).size(px(14.)).text_color(colors.fg.opacity(0.5)))
             .child(eyebrow_text);
@@ -533,7 +534,7 @@ impl WindowView {
                         .flex()
                         .items_center()
                         .gap(px(10.))
-                        .text_size(px(12.))
+                        .text_size(FontSize::Body)
                         .child(text_label(
                             "mobile-expires",
                             rust_i18n::t!("mobile.expires", time = waiting.remaining()).into_owned(),
@@ -659,7 +660,7 @@ impl WindowView {
                         .px(px(10.))
                         .py(px(7.))
                         .rounded(px(6.))
-                        .text_size(px(13.))
+                        .text_size(FontSize::Medium)
                         .cursor_pointer()
                         .when(chosen, |option| option.bg(colors.hover))
                         .hover(|option| option.bg(colors.hover))
@@ -690,7 +691,7 @@ fn device_row(ix: usize, device: &Paired, colors: Colors, cx: &mut Context<Windo
     let paired_on = rust_i18n::t!("mobile.paired_on", date = date).into_owned();
     let summary =
         if device.live { format!("{} · {paired_on}", rust_i18n::t!("machine.live")) } else { paired_on.clone() };
-    let status = div().flex().items_center().gap(px(6.)).text_size(px(12.)).text_color(colors.fg.opacity(0.5));
+    let status = div().flex().items_center().gap(px(6.)).text_size(FontSize::Body).text_color(colors.fg.opacity(0.5));
     let status = if device.live {
         status
             .child(div().size(px(7.)).rounded_full().bg(gpui::green()))
@@ -731,7 +732,13 @@ fn device_row(ix: usize, device: &Paired, colors: Colors, cx: &mut Context<Windo
                 .flex()
                 .flex_col()
                 .gap(px(3.))
-                .child(div().text_size(px(14.)).font_weight(FontWeight::SEMIBOLD).truncate().child(device.name.clone()))
+                .child(
+                    div()
+                        .text_size(FontSize::Large)
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .truncate()
+                        .child(device.name.clone()),
+                )
                 .child(status),
         )
         .child(
@@ -807,15 +814,15 @@ fn headline(text: String, size: f32) -> Stateful<Div> {
         .role(Role::Heading)
         .aria_level(1)
         .aria_label(text.clone())
-        .text_size(px(size))
-        .line_height(px(size * 1.2))
+        .text_size(scaled(size))
+        .line_height(scaled(size * 1.2))
         .font_weight(FontWeight::BOLD)
         .child(text)
 }
 
 /// 大标题下面的一段说明；每页只有一段，id 写死。
 fn lead(text: String, colors: Colors) -> Stateful<Div> {
-    text_label("mobile-lead", text, colors.fg.opacity(0.6)).text_size(px(15.)).line_height(px(24.))
+    text_label("mobile-lead", text, colors.fg.opacity(0.6)).text_size(FontSize::Title).line_height(scaled(24.))
 }
 
 /// 一句报给辅助工具的文字：GPUI 不报文字本身，名字要另外写。
@@ -838,7 +845,7 @@ fn step_line(n: u32, colors: Colors) -> Stateful<Div> {
         .flex()
         .items_center()
         .gap(px(10.))
-        .text_size(px(13.))
+        .text_size(FontSize::Medium)
         .text_color(colors.fg.opacity(0.6))
         .child(
             div()
@@ -863,15 +870,15 @@ fn labeled(id: &'static str, label: String, content: impl IntoElement, hint: Str
         .flex()
         .flex_col()
         .gap(px(6.))
-        .child(div().text_size(px(12.)).font_weight(FontWeight::SEMIBOLD).child(label))
+        .child(div().text_size(FontSize::Body).font_weight(FontWeight::SEMIBOLD).child(label))
         .child(content)
-        .child(text_label("hint", hint, colors.fg.opacity(0.5)).text_size(px(12.)).line_height(px(18.)))
+        .child(text_label("hint", hint, colors.fg.opacity(0.5)).text_size(FontSize::Body).line_height(scaled(18.)))
 }
 
 /// 输入框和下拉框的外框。
 fn input_box(colors: Colors) -> Div {
     div()
-        .h(px(36.))
+        .h(scaled(36.))
         .px(px(12.))
         .flex()
         .items_center()
@@ -879,7 +886,7 @@ fn input_box(colors: Colors) -> Div {
         .bg(colors.panel)
         .border_1()
         .border_color(colors.fg.opacity(0.15))
-        .text_size(px(13.))
+        .text_size(FontSize::Medium)
 }
 
 /// 一块浅底的提示文字。
@@ -893,8 +900,8 @@ fn notice(id: &'static str, text: String, colors: Colors) -> Stateful<Div> {
         .bg(colors.panel)
         .border_1()
         .border_color(colors.fg.opacity(0.1))
-        .text_size(px(13.))
-        .line_height(px(20.))
+        .text_size(FontSize::Medium)
+        .line_height(scaled(20.))
         .text_color(colors.fg.opacity(0.75))
         .child(text)
 }
@@ -915,7 +922,7 @@ fn placeholder(text: String, colors: Colors) -> Stateful<Div> {
         .justify_center()
         .gap(px(12.))
         .p(px(20.))
-        .text_size(px(12.))
+        .text_size(FontSize::Body)
         .text_color(colors.fg.opacity(0.5))
         .child(svg().path(PHONE_ICON).size(px(28.)).text_color(colors.fg.opacity(0.25)))
         .child(text)
@@ -928,13 +935,13 @@ fn pill(id: &'static str, label: impl Into<SharedString>, primary: bool, colors:
         .id(id)
         .role(Role::Button)
         .aria_label(spoken(&label))
-        .h(px(36.))
+        .h(scaled(36.))
         .px(px(20.))
         .rounded_full()
         .flex()
         .items_center()
         .justify_center()
-        .text_size(px(13.))
+        .text_size(FontSize::Medium)
         .font_weight(FontWeight::MEDIUM)
         .cursor_pointer()
         .map(|button| {
@@ -954,7 +961,7 @@ fn link(id: &'static str, label: impl Into<SharedString>, colors: Colors) -> Sta
         .id(id)
         .role(Role::Button)
         .aria_label(spoken(&label))
-        .text_size(px(13.))
+        .text_size(FontSize::Medium)
         .text_color(colors.fg.opacity(0.75))
         .underline()
         .cursor_pointer()
