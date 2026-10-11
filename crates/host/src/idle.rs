@@ -7,6 +7,9 @@ use crate::Host;
 
 /// 有连接断开时之外，隔多久再看一次是不是空闲了；短的空闲时限按它的几分之一看。
 const MAX_TICK: Duration = Duration::from_millis(500);
+/// `stay_up` 或有连接时隔多久看一次：这两样一变都会通知 `peers_changed`，用不着常醒，只防漏了哪处通知。
+/// 只有会话、没有连接时仍按 `MAX_TICK` 看，`Host::kill` 结束会话不通知，要靠定时看出来。
+const LONG_TICK: Duration = Duration::from_secs(30);
 /// 收到 `Shutdown` 后，最多等这么久让各条连接写完 `Goodbye` 断开。
 const DRAIN_TIMEOUT: Duration = Duration::from_secs(2);
 
@@ -60,7 +63,8 @@ impl Host {
             } else {
                 quiet_since = None;
             }
-            peers = shared.peers_changed.wait_timeout(peers, tick).map_or_else(|err| err.into_inner().0, |(p, _)| p);
+            let wait = if peers.stay_up || peers.connection_count() > 0 { LONG_TICK } else { tick };
+            peers = shared.peers_changed.wait_timeout(peers, wait).map_or_else(|err| err.into_inner().0, |(p, _)| p);
         };
         peers.accepting = false;
         if let Some(listening) = peers.listening.take() {
