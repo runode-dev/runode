@@ -75,6 +75,11 @@ ring = "0.17"
 # 配对的二维码：`runode remote pair` 画在终端里，设置页画在界面上；不要默认特性（画成图片、SVG 用不上）。
 qrcode = { version = "0.14", default-features = false }
 
+# gpui-pre 的 macOS 平台层换成 vendor 下的副本（那一版源码原样复制，再加 runode 的改动）。版本要和上面
+# gpui-pre 的 `=` 版本一致，不一致时 cargo 只警告 patch 没用上，照旧用 crates.io 上的那份。
+[patch.crates-io]
+gpui-pre-macos = { path = "vendor/gpui-pre-macos" }
+
 [profile.dev.package."*"]
 opt-level = 2
 
