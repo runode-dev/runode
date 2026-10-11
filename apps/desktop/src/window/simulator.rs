@@ -44,6 +44,7 @@ use crate::{
         VOLUME_DOWN_ICON, VOLUME_UP_ICON,
     },
     ui::{
+        self,
         a11y::A11yPress,
         hsla,
         text_field::{TextField, TextFieldEvent},
@@ -243,7 +244,7 @@ impl WindowView {
         } else {
             self.simulator.stream = None;
             if let Some(frame) = self.simulator.frame.take() {
-                cx.drop_image(frame, None);
+                ui::drop_render_image(frame, cx);
             }
         }
     }
@@ -347,7 +348,7 @@ impl WindowView {
         page.busy = None;
         page.elements.clear();
         if let Some(frame) = page.frame.take() {
-            cx.drop_image(frame, None);
+            ui::drop_render_image(frame, cx);
         }
         self.save(cx);
         cx.notify();
@@ -414,7 +415,7 @@ impl WindowView {
                             match frame {
                                 Ok(frame) => {
                                     if let Some(old) = page.frame.replace(frame) {
-                                        cx.drop_image(old, None);
+                                        ui::drop_render_image(old, cx);
                                     }
                                     page.error = None;
                                 }

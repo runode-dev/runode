@@ -48,7 +48,7 @@ use crate::{
         ALERT_CAUTION_ICON, ALERT_IMPORTANT_ICON, ALERT_NOTE_ICON, ALERT_TIP_ICON, ALERT_WARNING_ICON, CHECK_ICON,
     },
     config::AppConfig,
-    ui::{a11y::Press, hsla, scrollbar::list_scrollbar},
+    ui::{self, a11y::Press, hsla, scrollbar::list_scrollbar},
     window::{WindowView, project::RENAMED},
 };
 
@@ -275,8 +275,8 @@ impl Picture {
     /// 关掉或换掉时放掉解码结果，和 `Preview::release_image` 一样。
     fn release(&self, cx: &mut App) {
         match self {
-            Picture::Bitmap(image) => ImageSource::Image(image.clone()).remove_asset(cx),
-            Picture::Svg(image) => cx.drop_image(image.clone(), None),
+            Picture::Bitmap(image) => ui::release_bitmap(image.clone(), cx),
+            Picture::Svg(image) => ui::drop_render_image(image.clone(), cx),
         }
     }
 }

@@ -35,8 +35,8 @@ use std::{
 };
 
 use gpui::{
-    Action, App, ClipboardItem, Context, Div, Focusable as _, Image, ImageSource, MouseButton, MouseMoveEvent,
-    RenderImage, Role, SMOOTH_SVG_SCALE_FACTOR, ScrollHandle, ScrollStrategy, SharedString, Stateful, SvgRenderer,
+    Action, App, ClipboardItem, Context, Div, Focusable as _, Image, MouseButton, MouseMoveEvent, RenderImage, Role,
+    SMOOTH_SVG_SCALE_FACTOR, ScrollHandle, ScrollStrategy, SharedString, Stateful, SvgRenderer,
     UniformListScrollHandle, Window, div, linear_color_stop, linear_gradient, prelude::*, px,
 };
 use runode_git::{self as git, FileStatus, Section};
@@ -57,6 +57,7 @@ use crate::{
     assets::{CODE_ICON, MAXIMIZE_ICON, MINIMIZE_ICON, WRAP_ICON},
     config::AppConfig,
     ui::{
+        self,
         actions::{Copy, SelectAll},
         hsla,
         tooltip::tooltip,
@@ -261,12 +262,12 @@ impl Loaded {
     /// 放掉这份内容里图片的解码结果，见 `Preview::release_image`。
     fn release(&self, cx: &mut App) {
         match self {
-            Loaded::Image(image) => ImageSource::Image(image.clone()).remove_asset(cx),
-            Loaded::Svg(image) => cx.drop_image(image.clone(), None),
+            Loaded::Image(image) => ui::release_bitmap(image.clone(), cx),
+            Loaded::Svg(image) => ui::drop_render_image(image.clone(), cx),
             Loaded::Text { markdown: Some(doc), .. } => doc.release(cx),
             Loaded::ImageDiff { old, new } => {
                 for image in old.iter().chain(new) {
-                    ImageSource::Image(image.clone()).remove_asset(cx);
+                    ui::release_bitmap(image.clone(), cx);
                 }
             }
             _ => {}
