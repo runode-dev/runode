@@ -17,7 +17,7 @@ use super::{
     SettingsView,
     controls::{CONTROL_HEIGHT, Cards, Colors, Press, button, icon_button, row, switch},
 };
-use crate::ui::font_size::{FontSize, scaled};
+use crate::ui::font_size::{self, FontSize, scaled};
 
 const KEY: &str = "keybind";
 
@@ -493,7 +493,7 @@ impl SettingsView {
         let add =
             icon_button(SharedString::from(format!("keybind-add-{ix}")), "icons/plus.svg", add_label.clone(), colors)
                 .flex_none()
-                .mt(scaled((CONTROL_HEIGHT - 20.) / 2.))
+                .mt(px((CONTROL_HEIGHT * font_size::scale(cx) - 20.) / 2.))
                 .when(!row.bound.is_empty() && !adding, |add| {
                     add.invisible().group_hover(group.clone(), |add| add.visible())
                 })
