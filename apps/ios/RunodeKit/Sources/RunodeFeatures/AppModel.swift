@@ -246,6 +246,7 @@ public final class AppModel {
             self.linkEvent(event, on: model)
         }
         sessionLists[machineId] = model
+        model.link.setFocused(path.contains { $0.machine == machineId })
         if active { model.start() }
         return model
     }
@@ -343,7 +344,7 @@ public final class AppModel {
     }
 
     /// 导航栈变了或切了分屏：退出去的终端页、Git 页关掉，新打开的终端记作「上次打开」。会话列表的连接
-    /// 不跟导航栈走。
+    /// 不跟导航栈走，只是栈里有页面的电脑算在看（`HostLink.setFocused`），连不上时重试得勤一些。
     private func pathChanged() {
         panes = panes.filter { path.contains($0.key) }
         let live = Set(path.map(shown))
@@ -360,6 +361,10 @@ public final class AppModel {
             shownHistory.removeAll { $0 == session }
             shownHistory.append(session)
             if shownHistory.count > 32 { shownHistory.removeFirst() }
+        }
+        let viewed = Set(path.map(\.machine))
+        for (id, list) in sessionLists {
+            list.link.setFocused(viewed.contains(id))
         }
     }
 

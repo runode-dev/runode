@@ -679,6 +679,30 @@ extension LinkState {
         #expect(await eventually { link.starts == 2 })
     }
 
+    /// 导航栈里有页面的电脑算在看，连不上时重试得勤；回到首页时都不算。
+    @Test func machinesOnThePathAreFocused() async throws {
+        let store = MemoryMachineStore()
+        let machine = machineRecord()
+        let other = machineRecord(name: "Mac mini", fingerprintByte: 2)
+        await store.upsert(machine)
+        await store.upsert(other)
+        let link = FakeLink()
+        let otherLink = FakeLink()
+        let app = AppModel(
+            dependencies: AppDependencies(
+                store: store, keyStore: MemoryDeviceKeyStore(),
+                pairing: FakePairing { _ in machine }, makeLink: { $0.id == machine.id ? link : otherLink },
+                deviceName: "测试 iPhone"))
+        await app.machineList.load()
+        #expect(link.focused.last == false)
+        #expect(otherLink.focused.last == false)
+        app.openTerminal(machine: machine.id, session: sessionA)
+        #expect(link.focused.last == true)
+        #expect(otherLink.focused.last == false)
+        app.path = []
+        #expect(link.focused.last == false)
+    }
+
     @Test func deletingAMachineLeavesItsPages() async throws {
         let store = MemoryMachineStore()
         let machine = machineRecord()

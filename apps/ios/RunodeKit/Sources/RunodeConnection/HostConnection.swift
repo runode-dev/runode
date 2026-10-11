@@ -2,20 +2,23 @@ import Foundation
 import RunodeProtocol
 import Synchronization
 
-/// 断线重连等多久：第 n 次连续失败后等 `base * 2^(n-1)`，最多 `maximum`。
+/// 断线重连等多久：第 n 次连续失败后等 `base * 2^(n-1)`，最多 `maximum`；用户没在看的电脑
+/// （`HostLink.setFocused`）最多 `idleMaximum`。
 public struct ReconnectPolicy: Hashable, Sendable {
     public var base: Duration
     public var maximum: Duration
+    public var idleMaximum: Duration
 
-    public init(base: Duration = .seconds(1), maximum: Duration = .seconds(15)) {
+    public init(base: Duration = .seconds(1), maximum: Duration = .seconds(15), idleMaximum: Duration = .seconds(60)) {
         self.base = base
         self.maximum = maximum
+        self.idleMaximum = idleMaximum
     }
 
-    public func delay(afterFailures failures: Int) -> Duration {
+    public func delay(afterFailures failures: Int, focused: Bool = true) -> Duration {
         guard failures > 0 else { return .zero }
         let factor = 1 << min(failures - 1, 16)
-        return min(base * factor, maximum)
+        return min(base * factor, focused ? maximum : max(maximum, idleMaximum))
     }
 }
 
@@ -44,6 +47,8 @@ public actor HostConnection: HostLink {
     private var backoffTask: Task<Void, any Error>?
     private var writerTask: Task<Void, Never>?
     private var requestCounter: UInt32 = 0
+    /// 用户在看这台电脑，见 `setFocused`。不经 actor，`AppModel` 在主线程上按导航栈同步设。
+    private nonisolated let focused = Mutex(true)
 
     /// 发出去的东西先排在这里，由 `writerTask` 按先后写；`send` 因此可以是同步的。
     private nonisolated let outbox: AsyncStream<Outgoing>.Continuation
@@ -153,6 +158,25 @@ public actor HostConnection: HostLink {
         }
     }
 
+    /// 不在看的电脑连不上时最多等 `ReconnectPolicy.idleMaximum` 再试：首页上连着所有配对过的电脑，关着的
+    /// 那几台每 15 秒找一遍 Bonjour、挨个试地址太费电。变回在看时，还要等比 `maximum` 久的马上重试。
+    public nonisolated func setFocused(_ focused: Bool) {
+        let gained = self.focused.withLock { old in
+            defer { old = focused }
+            return focused && !old
+        }
+        if gained {
+            Task { await self.focusGained() }
+        }
+    }
+
+    private func focusGained() {
+        guard focused.withLock({ $0 }), case .waiting(_, let retryAt) = state,
+            Duration.seconds(retryAt.timeIntervalSinceNow) > policy.maximum
+        else { return }
+        backoffTask?.cancel()
+    }
+
     /// 下次握手起在 `Hello` 里报新的设备名；这次连接上已经报过的不改。
     public func setDeviceName(_ name: String) {
         identity.deviceName = name
@@ -218,7 +242,7 @@ public actor HostConnection: HostLink {
                 reason = (error as? LinkFailure)?.errorDescription ?? error.localizedDescription
             }
             guard wanted, !Task.isCancelled else { break }
-            let delay = policy.delay(afterFailures: failures)
+            let delay = policy.delay(afterFailures: failures, focused: focused.withLock { $0 })
             setState(.waiting(reason: reason, retryAt: .now + TimeInterval(delay.components.seconds)))
             let backoff = Task { try await Task.sleep(for: delay) }
             backoffTask = backoff

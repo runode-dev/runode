@@ -79,6 +79,7 @@
         func start() async {}
         func stop() async {}
         func reconnectNow() async {}
+        func setFocused(_ focused: Bool) {}
         func setDeviceName(_ name: String) async {}
         func nextRequestId() async -> UInt32 { 0 }
     }
@@ -282,6 +283,7 @@
         func start() async {}
         func stop() async {}
         func reconnectNow() async {}
+        func setFocused(_ focused: Bool) {}
         func setDeviceName(_ name: String) async {}
 
         private let request = Mutex<UInt32>(0)

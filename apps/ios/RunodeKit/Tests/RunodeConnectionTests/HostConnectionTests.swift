@@ -310,6 +310,35 @@ import Testing
         #expect(policy.delay(afterFailures: 1) == .seconds(1))
         #expect(policy.delay(afterFailures: 3) == .seconds(4))
         #expect(policy.delay(afterFailures: 10) == .seconds(15))
+        #expect(policy.delay(afterFailures: 3, focused: false) == .seconds(4))
+        #expect(policy.delay(afterFailures: 6, focused: false) == .seconds(32))
+        #expect(policy.delay(afterFailures: 10, focused: false) == .seconds(60))
+    }
+
+    /// 不在看的电脑连不上时退避到 `idleMaximum`；变回在看时不等这么久，马上重试。
+    @Test func focusingAnIdleMachineRetriesAtOnce() async throws {
+        let link = HostConnection(
+            machine: machine, keyStore: keys, machines: store, discovery: NoDiscovery(),
+            identity: ClientIdentity(build: "ios-test", deviceName: "测试 iPhone"),
+            // 第一次失败就等 5 秒，比 `maximum` 长得多，测试不用等它一档档涨上去。
+            policy: ReconnectPolicy(base: .seconds(5), maximum: .milliseconds(20), idleMaximum: .seconds(30)),
+            open: supply.opener)
+        link.setFocused(false)
+        var events = await link.events().makeAsyncIterator()
+        await link.start()
+        // 没有准备连接，连不上。
+        while let event = await events.next() {
+            if case .state(.waiting(_, let retryAt)) = event, retryAt.timeIntervalSinceNow > 2 { break }
+        }
+        let transport = FakeTransport()
+        supply.add(transport)
+        let started = ContinuousClock.now
+        link.setFocused(true)
+        var host = FakeHost(transport)
+        _ = try await admit(&host)
+        #expect(await waitReady(&events) != nil)
+        #expect(ContinuousClock.now - started < .seconds(2))
+        await link.stop()
     }
 }
 

@@ -108,6 +108,8 @@ public protocol HostLink: AnyObject, Sendable {
     func stop() async
     /// 正在等下一次重试时立刻重试；失败后停着的也重新开始。
     func reconnectNow() async
+    /// 用户在不在看这台电脑（它的页面在不在导航栈里）：不在看的连不上时重试得慢一些。默认在看。
+    func setFocused(_ focused: Bool)
     /// 用户改了设备名：以后每次连上时在 `Hello` 里报这个名字。
     func setDeviceName(_ name: String) async
     /// `Spawn` 这类请求的编号，一条连接上不重复。

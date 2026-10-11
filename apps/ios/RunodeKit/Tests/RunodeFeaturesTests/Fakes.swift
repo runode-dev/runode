@@ -17,6 +17,7 @@ final class FakeLink: HostLink {
         var reconnects = 0
         var request: UInt32 = 0
         var deviceNames: [String] = []
+        var focused: [Bool] = []
     }
 
     private let state = Mutex(State())
@@ -27,6 +28,8 @@ final class FakeLink: HostLink {
     var stops: Int { state.withLock { $0.stops } }
     var subscriberCount: Int { state.withLock { $0.subscribers.count } }
     var deviceNames: [String] { state.withLock { $0.deviceNames } }
+    /// 每次 `setFocused` 设的值。
+    var focused: [Bool] { state.withLock { $0.focused } }
 
     func clearSent() {
         state.withLock { $0.sent.removeAll() }
@@ -56,6 +59,7 @@ final class FakeLink: HostLink {
     func stop() async { state.withLock { $0.stops += 1 } }
     func reconnectNow() async { state.withLock { $0.reconnects += 1 } }
     func setDeviceName(_ name: String) async { state.withLock { $0.deviceNames.append(name) } }
+    func setFocused(_ focused: Bool) { state.withLock { $0.focused.append(focused) } }
 
     func nextRequestId() async -> UInt32 {
         state.withLock {
