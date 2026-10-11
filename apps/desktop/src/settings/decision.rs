@@ -9,7 +9,7 @@
 //! `DecisionPulls`：关掉设置页也接着下，再打开时看得到进度。
 //!
 //! 服务在跑时，下好的本机模型能手动加载、卸载，设成常驻；服务对没有请求的模型空等一阵（`keep_alive`）
-//! 就卸载，常驻的不卸载。页面开着、服务在跑时每隔 `POLL_INTERVAL` 跑一次 `ps` 刷新加载着的模型。
+//! 就卸载，常驻的不卸载。页面开着、窗口在前台、服务在跑时每隔 `POLL_INTERVAL` 跑一次 `ps` 刷新加载着的模型。
 //! 旧版 runode-infer 没有 `config` 命令，那时这几样都不显示；新版读 `config` 出错时显示原因，加载、
 //! 卸载照常，空闲时间和常驻没值可显示，不显示。
 
@@ -302,7 +302,7 @@ impl SettingsView {
         let mut cards = Cards::new(div().flex().flex_col(), colors);
         cards.section(tr("settings.section.decision_service"));
         let snapshot = self.decision.snapshot.clone();
-        self.keep_polling(matches!(&snapshot, Some(Snapshot::Ready(status)) if status.running), cx);
+        self.keep_polling(matches!(&snapshot, Some(Snapshot::Ready(status)) if status.running), window, cx);
         match &snapshot {
             None => cards.push(self.service_row(tr("settings.decision.loading"), None, colors)),
             Some(Snapshot::Missing) => {
@@ -871,8 +871,8 @@ impl SettingsView {
     /// 服务在跑时每隔 `POLL_INTERVAL` 在后台读一次 `ps` 和 `config`，只换加载着的模型和设置，没变时
     /// 不重画（旧版没有 `config` 命令，不读）；同时读 `status`，服务在别处停掉了就重新读整套状态。读的时候
     /// 这一页改过状态（`State::epoch` 变了）就整轮丢掉。服务不在跑时停掉；换页时 `State::stop_polling`、
-    /// 收起设置页时 `State` 跟着丢掉，也就停了。
-    fn keep_polling(&mut self, running: bool, cx: &mut Context<Self>) {
+    /// 收起设置页时 `State` 跟着丢掉，也就停了。窗口不在前台时不读，一轮起三个子进程；回到前台马上读一轮。
+    fn keep_polling(&mut self, running: bool, window: &mut Window, cx: &mut Context<Self>) {
         if !running {
             self.decision.poll = None;
             return;
@@ -882,19 +882,39 @@ impl SettingsView {
         }
         let Some(program) = find_program(self.shell_path.as_deref()) else { return };
         let path = self.shell_path.clone();
-        self.decision.poll = Some(cx.spawn(async move |this, cx| {
+        let (wake, mut woken) = futures::channel::mpsc::unbounded();
+        let activation = cx.observe_window_activation(window, move |_, window, _| {
+            if window.is_window_active() {
+                wake.unbounded_send(()).ok();
+            }
+        });
+        self.decision.poll = Some(cx.spawn_in(window, async move |this, cx| {
+            let _activation = activation;
+            let mut wait = true;
             loop {
-                cx.background_executor().timer(POLL_INTERVAL).await;
+                if wait {
+                    let timer = cx.background_executor().timer(POLL_INTERVAL);
+                    futures::future::select(timer, woken.next()).await;
+                }
+                wait = true;
                 let (program, path) = (program.clone(), path.clone());
                 // 已经认定是旧版（没有 `config` 命令）时不再白跑它。
-                let Ok((epoch, legacy)) = this.read_with(cx, |this, _| {
+                let Ok(round) = this.update_in(cx, |this, window, _| {
                     let legacy = matches!(
                         &this.decision.snapshot,
                         Some(Snapshot::Ready(Status { config: None, config_error: None, .. }))
                     );
-                    (this.decision.epoch, legacy)
+                    window.is_window_active().then_some((this.decision.epoch, legacy))
                 }) else {
                     break;
+                };
+                let Some((epoch, legacy)) = round else {
+                    // 等窗口回到前台再读，不再定时醒。
+                    if woken.next().await.is_none() {
+                        break;
+                    }
+                    wait = false;
+                    continue;
                 };
                 // 设置也一起读：在终端里 pin、改空闲时间时，开关和输入框跟着变。
                 let (ps, config, service) = cx
