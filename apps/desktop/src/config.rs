@@ -21,7 +21,7 @@ impl Global for AppConfig {}
 /// 盯不了目录时，退回隔这么久比一次配置文件的修改时间。
 const WATCH_INTERVAL: Duration = Duration::from_secs(1);
 /// 目录里有动静后先等这么久再比。
-const WATCH_DEBOUNCE: Duration = Duration::from_millis(100);
+pub(crate) const WATCH_DEBOUNCE: Duration = Duration::from_millis(100);
 
 /// 加载配置并开始监视配置文件，保存后自动重载。启动时后台线程已经读过一遍（见
 /// `host_client::take_config`），拿它对得上系统外观时直接用，不再读。
