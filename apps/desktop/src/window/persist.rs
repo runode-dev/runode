@@ -269,6 +269,8 @@ impl WindowView {
             show_ignored: self.show_ignored,
             hide_dotfiles: !self.show_dotfiles,
             git_tree: self.git_tree,
+            git_hide_subs: !self.git_show_subs,
+            git_hide_worktrees: !self.git_show_worktrees,
             file_search_tree: self.file_search.tree,
             file_search_options: self.file_search.options(cx),
             git_graph_collapsed: self.git_graph_collapsed,
@@ -367,6 +369,8 @@ impl WindowView {
             self.show_ignored = saved.show_ignored;
             self.show_dotfiles = !saved.hide_dotfiles;
             self.git_tree = saved.git_tree;
+            self.git_show_subs = !saved.git_hide_subs;
+            self.git_show_worktrees = !saved.git_hide_worktrees;
             self.file_search.set_tree(saved.file_search_tree);
             self.file_search.set_options(saved.file_search_options, cx);
             self.git_graph_collapsed = saved.git_graph_collapsed;

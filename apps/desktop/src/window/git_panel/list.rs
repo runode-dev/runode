@@ -144,7 +144,8 @@ impl WindowView {
     /// 报给辅助工具的层级：段标题是第一层，多个仓库时在块头下面再深一层；段里的行比段标题深一层，
     /// 以树形式查看时再加上它在树里的深度 `depth`。
     pub(super) fn tree_level(&self, section: bool, depth: usize) -> usize {
-        let multi = self.workspace().project.git.as_ref().is_some_and(|git| git.count() > 1);
+        let project = &self.workspace().project;
+        let multi = project.git.as_ref().is_some_and(|git| project.git_panel.multi(git));
         1 + usize::from(multi) + if section { 0 } else { 1 + depth }
     }
 

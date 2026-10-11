@@ -3,7 +3,8 @@
 //! 或丢掉，标题栏的「更多」菜单里是拉取、推送、分支和储藏这些操作。
 //!
 //! 仓库里有子模块或嵌套仓库时，每个仓库一块：块头是可以收起的仓库名和
-//! 分支，展开后是这个仓库自己的分支栏、提交说明框和各段改动，「更多」菜单挪到块头上。块里的
+//! 分支，展开后是这个仓库自己的分支栏、提交说明框和各段改动，仓库的操作挪到块头的「更多」菜单，
+//! 标题栏的「更多」只留面板的显示设置（树形式、显示子模块和嵌套仓库、显示其他工作树）。块里的
 //! 按钮作用到这块的仓库；菜单和快捷键派发的动作作用到 `WindowView::git_target` 选的仓库。
 //!
 //! 面板底部单独一栏是提交历史的图表，可以收起，上沿拖动改变高度，见 `graph`。同一个仓库的其他
@@ -40,7 +41,7 @@ use runode_shared_types::color::Rgb;
 
 use super::{
     TITLEBAR_HEIGHT, WindowView, divider_color,
-    files::menu_item,
+    files::{MenuItem, check_item, menu_item},
     model::base_name,
     project::{RENAMED, added_label, panel_message, panel_shell, panel_title, removed_label},
     status_bar,
@@ -94,7 +95,11 @@ actions!(
         GitCheckout,
         GitCreateBranch,
         /// 改动的文件在树形式和列表形式之间切换。
-        GitToggleTreeView
+        GitToggleTreeView,
+        /// 显示或藏起子模块和嵌套仓库。
+        GitToggleSubmodules,
+        /// 显示或藏起同一个仓库的其他工作树。
+        GitToggleWorktrees
     ]
 );
 
@@ -188,6 +193,18 @@ impl WindowView {
             .on_action(cx.listener(Self::git_checkout))
             .on_action(cx.listener(Self::git_create_branch))
             .on_action(cx.listener(Self::git_toggle_tree_view))
+            .on_action(cx.listener(|this, _: &GitToggleSubmodules, _, cx| {
+                this.git_show_subs = !this.git_show_subs;
+                this.save(cx);
+                cx.notify();
+            }))
+            .on_action(cx.listener(|this, _: &GitToggleWorktrees, _, cx| {
+                this.git_show_worktrees = !this.git_show_worktrees;
+                this.save(cx);
+                // 藏起来时不再读其他工作树，重新显示时要读一遍。
+                this.refresh_project(cx);
+                cx.notify();
+            }))
     }
 
     /// 根目录是 `root` 的仓库的提交说明框，第一次用时建出来；按 cmd-enter 提交到这个仓库。提示里
@@ -235,7 +252,8 @@ impl WindowView {
                 .and_then(|repo| repo.commit_box.as_ref())
                 .is_some_and(|area| area.focus_handle(cx).is_focused(window))
         });
-        let active = panel.active.as_ref().and_then(|root| git.iter().find(|repo| repo.root == *root));
+        let active =
+            panel.active.as_ref().and_then(|root| git.iter().find(|repo| repo.root == *root && panel.shows(repo)));
         Some(focused.or(active).unwrap_or(&git.main).root.clone())
     }
 
@@ -257,13 +275,21 @@ impl WindowView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Stateful<Div> {
+        // 先跟上窗口的设置，下面按它算显示哪些仓库。
+        let view = (self.git_tree, self.git_show_subs, self.git_show_worktrees);
+        let project = &mut self.workspaces[self.active].project;
+        let panel = &mut project.git_panel;
+        if (panel.tree, panel.show_subs, panel.show_worktrees) != view {
+            (panel.tree, panel.show_subs, panel.show_worktrees) = view;
+            panel.rebuild(project.git.as_ref());
+        }
         // 显示着的各个仓库的提交说明框；多个仓库时收起的块不显示说明框。
         let shown: Vec<_> = match &self.workspace().project.git {
             Some(git) => {
                 let panel = &self.workspace().project.git_panel;
-                let multi = git.count() > 1;
+                let multi = panel.multi(git);
                 git.iter()
-                    .filter(|repo| !multi || panel.repo_expanded(repo))
+                    .filter(|repo| panel.shows(repo) && (!multi || panel.repo_expanded(repo)))
                     .map(|repo| (repo.root.clone(), repo.info.branch.clone()))
                     .collect()
             }
@@ -271,12 +297,7 @@ impl WindowView {
         };
         // 别处的仓库的说明框空着、也没有操作在跑时不再留着；写了一半的留着，回来时还在。丢掉的
         // 说明框还有焦点的话，按键就没处去了，交给面板。
-        let tree = self.git_tree;
         let project = &mut self.workspaces[self.active].project;
-        if project.git_panel.tree != tree {
-            project.git_panel.tree = tree;
-            project.git_panel.rebuild(project.git.as_ref());
-        }
         let graph_root = project
             .git
             .as_ref()
@@ -307,7 +328,7 @@ impl WindowView {
         let project = &self.workspace().project;
         let panel = &project.git_panel;
         let dim = hsla(fg).opacity(0.5);
-        let multi = project.git.as_ref().is_some_and(|git| git.count() > 1);
+        let multi = project.git.as_ref().is_some_and(|git| panel.multi(git));
         let main_root = project.git.as_ref().map(|git| git.main.root.clone());
         // 多个仓库时各块的忙碌状态写在块头上。
         let busy = main_root.as_deref().filter(|_| !multi).and_then(|root| panel.busy(root));
@@ -359,14 +380,13 @@ impl WindowView {
                             this.git_refresh(&GitRefresh, window, cx);
                         },
                     ))
-                    .when(!multi, |header| {
-                        header.child(
-                            self.header_button("git-more", MORE_ICON, None, fg, bg, cx, move |this, window, cx| {
-                                this.open_git_menu(&root, window.mouse_position(), cx);
-                            })
-                            .aria_label(rust_i18n::t!("git.more").into_owned()),
-                        )
-                    })
+                    .child(
+                        self.header_button("git-more", MORE_ICON, None, fg, bg, cx, move |this, window, cx| {
+                            this.open_git_menu(&root, true, window.mouse_position(), cx);
+                        })
+                        // 多个仓库时这里只有显示设置，仓库的操作在块头的「更多操作」里。
+                        .aria_label(rust_i18n::t!(if multi { "git.view_options" } else { "git.more" }).into_owned()),
+                    )
             });
         let body: AnyElement = match &project.git {
             _ if project.root.is_none() => div().flex_1().into_any_element(),
@@ -514,7 +534,7 @@ impl WindowView {
             .child(svg().path(MORE_ICON).size(px(14.)).text_color(fg_hsla.opacity(0.75)))
             .on_press_down(cx, {
                 let root = root.clone();
-                move |this, window, cx| this.open_git_menu(&root, window.mouse_position(), cx)
+                move |this, window, cx| this.open_git_menu(&root, false, window.mouse_position(), cx)
             });
         // 块头整行报成可以展开收起的一项：名字是仓库名，说明里是种类、分支或正在跑的操作，和改了
         // 几个文件。
@@ -876,9 +896,49 @@ impl WindowView {
         self.open_menu(position, items, target, cx);
     }
 
-    /// 「更多」弹出的菜单：拉取推送、分支、整体暂存和储藏，作用到根目录是 `root` 的仓库。只有
-    /// 一个仓库时按钮在标题栏上，多个仓库时在各块的块头上。
-    fn open_git_menu(&mut self, root: &Path, position: gpui::Point<gpui::Pixels>, cx: &mut Context<Self>) {
+    /// 「更多」弹出的菜单。块头上的（`header` 为假）是拉取推送、分支、整体暂存和储藏，作用到根目录
+    /// 是 `root` 的仓库；标题栏上的是面板的显示设置，只有一个仓库时前面还有那个仓库的操作。
+    fn open_git_menu(
+        &mut self,
+        root: &Path,
+        header: bool,
+        position: gpui::Point<gpui::Pixels>,
+        cx: &mut Context<Self>,
+    ) {
+        let project = &self.workspace().project;
+        let multi = project.git.as_ref().is_some_and(|git| project.git_panel.multi(git));
+        let mut items = if header && multi { Vec::new() } else { self.git_repo_menu_items(root, cx) };
+        if header {
+            if !items.is_empty() {
+                items.push(None);
+            }
+            items.extend([
+                Some(menu_item(
+                    if self.git_tree { "git.view_as_list" } else { "git.view_as_tree" },
+                    Box::new(GitToggleTreeView),
+                    true,
+                    cx,
+                )),
+                Some(check_item(
+                    rust_i18n::t!("git.show_submodules").into_owned(),
+                    None,
+                    self.git_show_subs,
+                    Box::new(GitToggleSubmodules),
+                )),
+                Some(check_item(
+                    rust_i18n::t!("git.show_worktrees").into_owned(),
+                    None,
+                    self.git_show_worktrees,
+                    Box::new(GitToggleWorktrees),
+                )),
+            ]);
+        }
+        let target = self.git_focus.clone();
+        self.open_menu(position, items, target, cx);
+    }
+
+    /// 作用到根目录是 `root` 的仓库的那些菜单项，并记下点的是这个仓库。
+    fn git_repo_menu_items(&mut self, root: &Path, cx: &mut Context<Self>) -> Vec<Option<MenuItem>> {
         self.set_git_active(root);
         let enabled = self.workspace().project.git_panel.busy(root).is_none();
         let item = |key: &str, action: Box<dyn Action>| Some(menu_item(key, action, enabled, cx));
@@ -908,16 +968,8 @@ impl WindowView {
             item("git.stash_pop_latest", Box::new(GitStashPopLatest)),
             None,
             item("git.undo_last_commit", Box::new(GitUndoLastCommit)),
-            None,
-            Some(menu_item(
-                if self.git_tree { "git.view_as_list" } else { "git.view_as_tree" },
-                Box::new(GitToggleTreeView),
-                true,
-                cx,
-            )),
         ]);
-        let target = self.git_focus.clone();
-        self.open_menu(position, items, target, cx);
+        items
     }
 
     /// 改动的文件在树形式和列表形式之间切换，所有 workspace 一起，存进窗口存档。

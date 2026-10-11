@@ -279,6 +279,9 @@ pub struct WindowView {
     panel_width: Option<f32>,
     /// Git 面板里改动的文件以树形式查看，否则是列表；整个窗口一个设置。
     git_tree: bool,
+    /// Git 面板里显示子模块和嵌套仓库、显示同一个仓库的其他工作树；整个窗口一个设置。
+    git_show_subs: bool,
+    git_show_worktrees: bool,
     /// Git 面板底部的图表收起来了；拖动过高度时是那个高度。整个窗口一个设置。
     git_graph_collapsed: bool,
     git_graph_height: Option<f32>,
@@ -441,6 +444,8 @@ impl WindowView {
             sidebar_scroll: ScrollHandle::new(),
             panel_width: None,
             git_tree: false,
+            git_show_subs: true,
+            git_show_worktrees: true,
             git_graph_collapsed: false,
             git_graph_height: None,
             git_focus: cx.focus_handle(),

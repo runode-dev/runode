@@ -145,7 +145,7 @@ impl WindowView {
         let open = !self.git_graph_collapsed;
         let fg_hsla = hsla(fg);
         let repo = git.get(panel.graph_repo(git));
-        let name = repo.filter(|_| git.count() > 1).map(repo_name);
+        let name = repo.filter(|_| panel.multi(git)).map(repo_name);
         let root = repo.map(|repo| repo.root.clone());
         let title = rust_i18n::t!("git.section.graph").into_owned();
         let header = div()

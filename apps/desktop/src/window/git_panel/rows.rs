@@ -274,6 +274,9 @@ pub(in crate::window) struct GitPanel {
     pub dirs: Vec<DirRow>,
     /// 改动的文件以树形式查看，否则是列表；跟着窗口的设置。
     pub tree: bool,
+    /// 显示子模块和嵌套仓库、显示其他工作树；跟着窗口的设置，见 `shows`。
+    pub show_subs: bool,
+    pub show_worktrees: bool,
     /// 以树形式查看时收起的目录：仓库根、段和相对仓库根的路径；默认都展开。
     collapsed_dirs: HashSet<(PathBuf, GitSection, PathBuf)>,
     /// 收起的段，按仓库根记。
@@ -309,6 +312,8 @@ impl Default for GitPanel {
             graph_depth: Vec::new(),
             dirs: Vec::new(),
             tree: false,
+            show_subs: true,
+            show_worktrees: true,
             collapsed_dirs: HashSet::new(),
             collapsed: HashSet::new(),
             repo_open: HashMap::new(),
@@ -397,9 +402,26 @@ impl GitPanel {
         (0..files.len()).filter(|&fi| section_of(&files[fi], source) == section).collect()
     }
 
-    /// 图表显示哪个仓库（在 `git::Repos::iter` 里的位置）：最近点过的那块，没有时是主仓库。
+    /// 这个仓库在面板里显示：主仓库总显示，子模块和嵌套仓库、其他工作树可以藏起来。
+    pub fn shows(&self, repo: &git::Snapshot) -> bool {
+        match repo.kind {
+            RepoKind::Main => true,
+            RepoKind::Submodule | RepoKind::Nested => self.show_subs,
+            RepoKind::Worktree => self.show_worktrees,
+        }
+    }
+
+    /// 显示着不止一个仓库，各占一块。
+    pub fn multi(&self, git: &git::Repos) -> bool {
+        git.iter().filter(|repo| self.shows(repo)).nth(1).is_some()
+    }
+
+    /// 图表显示哪个仓库（在 `git::Repos::iter` 里的位置）：最近点过的那块，没有或藏起来了时是主仓库。
     pub fn graph_repo(&self, git: &git::Repos) -> usize {
-        self.active.as_deref().and_then(|root| git.iter().position(|repo| repo.root == root)).unwrap_or(0)
+        self.active
+            .as_deref()
+            .and_then(|root| git.iter().position(|repo| repo.root == root && self.shows(repo)))
+            .unwrap_or(0)
     }
 
     /// 按 `git` 重新排行。
@@ -410,8 +432,8 @@ impl GitPanel {
             (self.graph_rows, self.graph_depth) = (Vec::new(), Vec::new());
             return;
         };
-        let multi = git.count() > 1;
-        for (ri, repo) in git.iter().enumerate() {
+        let multi = self.multi(git);
+        for (ri, repo) in git.iter().enumerate().filter(|(_, repo)| self.shows(repo)) {
             if multi {
                 out.push(GitRow::Repo(ri));
                 if !self.repo_expanded(repo) {
@@ -662,6 +684,28 @@ mod tests {
         assert!(panel.repo_expanded(&sub));
         panel.active = Some("/repo".into());
         assert!(!panel.repo_expanded(&sub));
+    }
+
+    #[test]
+    fn hides_sub_repos_and_worktrees() {
+        let mut panel = GitPanel::default();
+        let mut repos = git::Repos::new(repo("", RepoKind::Main, &["a.txt"]));
+        repos.subs.push(repo("libs/lib", RepoKind::Submodule, &["b.txt"]));
+        repos.worktrees.push(repo("../feat", RepoKind::Worktree, &["c.txt"]));
+        panel.active = Some("/repo/libs/lib".into());
+        panel.show_subs = false;
+        panel.rebuild(Some(&repos));
+        // 子模块藏起来了，图表回到主仓库；行号仍按 `git::Repos::iter` 的位置记。
+        assert_eq!(panel.graph_repo(&repos), 0);
+        assert_eq!(
+            panel.rows.iter().filter(|row| matches!(row, GitRow::Repo(_))).collect::<Vec<_>>(),
+            [&GitRow::Repo(0), &GitRow::Repo(2)]
+        );
+        // 只剩主仓库时和只有一个仓库一样，没有块头。
+        panel.show_worktrees = false;
+        panel.rebuild(Some(&repos));
+        assert!(!panel.multi(&repos));
+        assert_eq!(panel.rows, [GitRow::Section(0, GitSection::Unstaged), GitRow::File(0, Section::Unstaged, 0)]);
     }
 
     #[test]

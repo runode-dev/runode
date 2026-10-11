@@ -65,6 +65,11 @@ pub struct SavedWindow {
     /// Git 面板里改动的文件以树形式查看；默认是列表。
     #[serde(default)]
     pub git_tree: bool,
+    /// Git 面板里不显示子模块和嵌套仓库、不显示其他工作树；默认都显示。
+    #[serde(default)]
+    pub git_hide_subs: bool,
+    #[serde(default)]
+    pub git_hide_worktrees: bool,
     /// 文件树的搜索结果以树形式查看；默认是列表。
     #[serde(default)]
     pub file_search_tree: bool,
@@ -391,6 +396,8 @@ mod tests {
             show_ignored: true,
             hide_dotfiles: true,
             git_tree: true,
+            git_hide_subs: true,
+            git_hide_worktrees: true,
             file_search_tree: true,
             file_search_options: SavedSearchOptions {
                 match_case: true,

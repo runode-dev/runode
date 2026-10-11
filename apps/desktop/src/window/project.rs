@@ -237,8 +237,8 @@ impl WindowView {
         let id = workspace.id;
         let expanded = project.expanded_dirs.iter().cloned().collect();
         let untracked = std::mem::take(&mut project.untracked);
-        // 其他工作树只在 Git 面板里显示，面板没开时不读；打开面板时 `toggle_git` 会重读一次。
-        let worktrees = self.git_shown();
+        // 其他工作树只在 Git 面板里显示，面板没开或者藏起来了时不读；打开面板时 `toggle_git` 会重读一次。
+        let worktrees = self.git_shown() && self.git_show_worktrees;
         let job = cx.background_spawn(async move { scan(dir, expanded, untracked, worktrees) });
         cx.spawn(async move |this, cx| {
             let scan = job.await;
