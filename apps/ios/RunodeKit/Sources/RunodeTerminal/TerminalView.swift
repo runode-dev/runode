@@ -254,7 +254,8 @@
         /// VT 变了：下一轮主循环再从 render state 抄变了的行，一轮里多块输出只刷新一次。刷屏时输出一块块
         /// 地来，每块都整屏抄一遍、重画一遍会占满主线程，喂 VT 反倒跟不上；所以两次刷新至少隔一帧，抄和
         /// 画得慢时再拉开：画发生在刷新之后的空档里，空档取这一轮抄加上一轮画的耗时的两倍，抄和画最多占
-        /// 一半主线程。离上次刷新已经够久时（打字回显）照旧马上刷。
+        /// 一半主线程。空档最多 250 毫秒：拖动滚动时直接刷新引起的画也记在里面，不能让它把下一次刷新推得
+        /// 太远。离上次刷新已经够久时（打字回显）照旧马上刷。
         public func scheduleRefresh() {
             guard !refreshScheduled else { return }
             refreshScheduled = true
@@ -268,7 +269,7 @@
                 let now = ContinuousClock.now
                 let cost = now - started + grid.drawTime
                 grid.drawTime = .zero
-                nextRefresh = now + max(.milliseconds(16), cost * 2)
+                nextRefresh = now + min(max(.milliseconds(16), cost * 2), .milliseconds(250))
             }
         }
 

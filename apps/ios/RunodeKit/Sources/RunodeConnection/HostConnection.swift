@@ -240,7 +240,7 @@ public actor HostConnection: HostLink {
 
     /// Bonjour 找到的地址和记着的地址（上次成功的、二维码里的，按顺序试）同时连，谁先过门禁用谁：组播
     /// 不通的 Wi-Fi 上 Bonjour 要等满超时，记着的地址不跟着等。晚到的那条也连上了就关掉。不能重试的
-    /// 失败直接报；都失败时报记着的地址的错，没有记着的地址才报 Bonjour 的。
+    /// 失败直接报；都失败时报先到的那个不是「没有地址」的错，有限速的拒绝时报它。
     private func establish() async throws -> Session {
         guard let key = try keyStore.key(for: machine.id) else { throw LinkFailure.missingKey }
         let discovery = discovery
