@@ -61,29 +61,34 @@ if [[ -n "$app_pid" ]]; then
   fi
 fi
 
-# 2. 让新的可执行文件接手旧宿主的会话。成了以后旧宿主自己退出，新宿主接着跑。
+# 2. 让新的可执行文件接手旧宿主的会话。成了以后新宿主接着跑，旧宿主等它拉起的 shell 都结束再退出。
 old_host=$(lsof -t "$socket" 2>/dev/null | head -n 1 || true)
 if [[ -n "$old_host" ]]; then
   echo "让新宿主接手宿主 $old_host 的会话"
-  nohup "$bin" --host --take-over >/dev/null 2>&1 </dev/null &
+  # 新宿主把接手的结果按行写成 JSON 交给 fd 3 上的管道（`host_process::take_over`，和 app 拉起它时一样）：
+  # 先是一行 `ready`，再是结果。读管道而不翻日志：日志会被 RUST_LOG 关掉，也会被别的日志冲走。
+  status_fifo=$(mktemp -u "${TMPDIR:-/tmp}/runode-restart.XXXXXX")
+  mkfifo "$status_fifo"
+  nohup "$bin" --host --take-over 3>"$status_fifo" >/dev/null 2>&1 </dev/null &
   new_host=$!
   disown
-  # 等旧宿主交完退出；新宿主先退出了就是没接成，不用等满。
-  for ((i = 0; i < 300; i++)); do
-    kill -0 "$old_host" 2>/dev/null && kill -0 "$new_host" 2>/dev/null || break
-    sleep 0.1
+  exec 4<"$status_fifo"
+  rm -f "$status_fifo"
+  result=""
+  # 读到结尾是新宿主没报结果就退出了；一行等太久（app 那边最多等 45 秒）当没接成。
+  while IFS= read -r -t 60 -u 4 line; do
+    [[ $line == *'"ready":true'* ]] && continue
+    result=$line
+    break
   done
-  if ! kill -0 "$old_host" 2>/dev/null; then
-    if ! kill -0 "$new_host" 2>/dev/null; then
-      echo "新宿主接手后没在跑，看 $host_log" >&2
-      exit 1
-    fi
+  exec 4<&-
+  if [[ $result == *'"ok":true'* ]] && kill -0 "$new_host" 2>/dev/null; then
     echo "新宿主 $new_host 接手了会话"
-  elif tail -n 20 "$host_log" | grep -q "host $new_host did not take over.*refused to hand over: Busy"; then
+  elif [[ $result == *'"kind":"busy"'* ]]; then
     # 同构建的宿主不交接：在跑的已经是磁盘上这份代码（没重新 make install，或者改动和上次装的一样）。
     echo "在跑的宿主和装好的是同一个构建，不用换，只重开 app"
   else
-    echo "旧宿主 30 秒内没有交出会话，看 $host_log" >&2
+    echo "新宿主没有接手会话（${result:-没报结果}），看 $host_log" >&2
     kill "$new_host" 2>/dev/null || true
     exit 1
   fi
