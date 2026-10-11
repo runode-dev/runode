@@ -206,10 +206,11 @@ pub(crate) fn reveal_notified(tag: &str, cx: &mut App) {
 }
 
 impl WindowView {
-    /// 用户正看着这个分屏：窗口在前台，它所在的标签正显示着，焦点在它上面，也没被设置页或手机端
-    /// 引导页盖住。
+    /// 用户正看着这个分屏：窗口在前台、也确实看得见，它所在的标签正显示着，焦点在它上面，也没被
+    /// 设置页或手机端引导页盖住。显示器睡了或切到别的 Space 时窗口可能仍在前台，却没人看得到。
     fn is_watching_pane(&self, pane: EntityId, wi: usize, ti: usize, window: &Window) -> bool {
         window.is_window_active()
+            && window.is_visible()
             && self.is_shown(wi, ti)
             && self.workspaces[wi].tabs[ti].focused == pane
             && self.settings.is_none()
