@@ -23,7 +23,7 @@
 
 终端仿真用的 libghostty-vt 不在 `crates/` 下，取自子模块 `vendor/libghostty-rs`。它是 runode-dev 对 Uzaaft 的 libghostty-rs（MIT 或 Apache-2.0）的 fork，runode 用它的 `main` 分支，里面有安全封装 `libghostty-vt` 和 C 接口绑定 `libghostty-vt-sys`；绑定由 bindgen 生成后提交在那边，重新生成时在 fork 的一份单独克隆里设 `GHOSTTY_SOURCE_DIR` 指向 runode 的 `vendor/ghostty`，跑 `cargo run -p libghostty-vt-sys --features bindgen-tool --bin gen-bindings`；别在子模块里跑，`vendor/rustfmt.toml` 关掉了 vendor 下的格式化，生成的绑定不会排版。它自成一个 workspace，根 `Cargo.toml` 按路径依赖它，`vendor` 在 `exclude` 里，所以本仓库的 lint 不管它。`.cargo/config.toml` 设的 `GHOSTTY_SOURCE_DIR` 让 `libghostty-vt-sys` 的构建脚本从 `vendor/ghostty` 编出库，不去网上拉。runode 要用而上游还没有的接口加在 `main` 上，一样东西一个提交，好在以后变基；上游已有同样能力、只是名字或形状不同的，改 runode 去适应，不改 fork。
 
-同步 ghostty 上游时两个子模块一起动。`vendor/ghostty` 是 runode-dev/ghostty 的 fork，等于上游 main 加一个 runode 的修复提交：把这个提交变基到上游最新，用 `git push --force-with-lease` 推上 fork。同一次同步里，在 `vendor/libghostty-rs` 里把 `libghostty-vt-sys` 构建脚本的 `GHOSTTY_COMMIT` 改成 ghostty fork 所基于的那个上游 commit，用 `gen-bindings` 重新生成绑定，提交并推上 fork 的 `main`；要跟进 Uzaaft 的上游时，也是把 `main` 变基到上游的 `master` 上。最后在 runode 里一起挪两个子模块的指针，绑定有变化就看 `terminal` 要不要跟着改。两边必须对齐，因为构建时编的是 `vendor/ghostty` 的源码，绑定却是照 `GHOSTTY_COMMIT` 那版头文件生成的，不一致时结构体布局可能对不上，编得过，运行时却读写错内存。
+同步 ghostty 上游时两个子模块一起动。`vendor/ghostty` 是 runode-dev/ghostty 的 fork，等于上游 main 加几个 runode 的修复提交，一处修复一个提交，彼此独立（fork 上另有同名的 `fix/` 分支，各自只基于上游、只带一处）：把这组提交一起变基到上游最新，用 `git push --force-with-lease` 推上 fork；上游自己修好了哪处，就删掉对应的提交。同一次同步里，在 `vendor/libghostty-rs` 里把 `libghostty-vt-sys` 构建脚本的 `GHOSTTY_COMMIT` 改成 ghostty fork 所基于的那个上游 commit，用 `gen-bindings` 重新生成绑定，提交并推上 fork 的 `main`；要跟进 Uzaaft 的上游时，也是把 `main` 变基到上游的 `master` 上。最后在 runode 里一起挪两个子模块的指针，绑定有变化就看 `terminal` 要不要跟着改。两边必须对齐，因为构建时编的是 `vendor/ghostty` 的源码，绑定却是照 `GHOSTTY_COMMIT` 那版头文件生成的，不一致时结构体布局可能对不上，编得过，运行时却读写错内存。
 
 不变量：
 
