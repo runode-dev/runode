@@ -23,6 +23,14 @@ data="$HOME/.runode"
 socket="$data/run/host.sock"
 host_log="$data/cache/host.log"
 log="$data/cache/restart.log"
+# 新宿主和 app 只带 launchd 平时给 app 的这几个变量起，和在程序坞里打开时一样：宿主开的终端都继承它的
+# 环境，带上调用这个脚本的终端里的变量（CLAUDECODE、CLAUDE_CODE_*、RUNODE_SESSION 这类），终端里的
+# 程序会以为自己跑在别的程序里面。`open` 也会把调用方的环境传给 app。
+launch_env=(env -i HOME="$HOME" USER="$USER" LOGNAME="${LOGNAME:-$USER}" SHELL="${SHELL:-/bin/zsh}"
+  TMPDIR="${TMPDIR:-/tmp}" PATH=/usr/bin:/bin:/usr/sbin:/sbin)
+for name in LANG SSH_AUTH_SOCK __CF_USER_TEXT_ENCODING; do
+  if [[ -n "${!name:-}" ]]; then launch_env+=("$name=${!name}"); fi
+done
 
 if [[ ! -x "$bin" ]]; then
   echo "找不到 ${bin}，先 make install" >&2
@@ -71,7 +79,7 @@ if [[ -n "$old_host" ]]; then
   status_dir=$(mktemp -d "${TMPDIR:-/tmp}/runode-restart.XXXXXX")
   status_fifo="$status_dir/status"
   mkfifo "$status_fifo"
-  nohup "$bin" --host --take-over 3>"$status_fifo" >/dev/null 2>&1 </dev/null &
+  nohup "${launch_env[@]}" "$bin" --host --take-over 3>"$status_fifo" >/dev/null 2>&1 </dev/null &
   new_host=$!
   disown
   exec 4<"$status_fifo"
@@ -104,5 +112,5 @@ else
 fi
 
 # 3. 重新打开 app，它会连上这个构建的宿主。
-open "$app"
+"${launch_env[@]}" open "$app"
 echo "已重新打开 $app"
