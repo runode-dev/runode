@@ -258,16 +258,18 @@ public actor HostConnection: HostLink {
             }
             var winner: Session?
             var failure: (any Error)?
+            var fatal: LinkFailure?
+            // 有了结果也把另一条等完：它可能已经连上了，要关掉，不能留着一条没人读的连接。
             while let result = await group.nextResult() {
                 switch result {
-                case .success(let session) where winner == nil:
+                case .success(let session) where winner == nil && fatal == nil:
                     winner = session
                     group.cancelAll()
                 case .success(let session):
                     session.transport.close()
                 case .failure(let error as LinkFailure) where error.isFatal && winner == nil:
+                    fatal = fatal ?? error
                     group.cancelAll()
-                    throw error
                 case .failure(let error):
                     // 限速的拒绝要传上去，`run` 才会等最长的退避。
                     if failure == nil || (failure as? LinkFailure) == .noAddress
@@ -277,6 +279,7 @@ public actor HostConnection: HostLink {
                     }
                 }
             }
+            if let fatal { throw fatal }
             if let winner { return winner }
             throw failure ?? LinkFailure.noAddress
         }
