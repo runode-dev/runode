@@ -43,7 +43,7 @@ use super::{
     TITLEBAR_HEIGHT, WindowView, divider_color,
     files::{MenuItem, check_item, menu_item},
     model::base_name,
-    project::{RENAMED, added_label, panel_message, panel_shell, panel_title, removed_label},
+    project::{added_label, panel_message, panel_shell, panel_title, removed_label},
     status_bar,
 };
 use crate::ui::a11y::{Disable, PressDown};
@@ -759,14 +759,14 @@ impl WindowView {
         };
         // 推送、拉取要跑好几秒：跑的时候按钮写着在做什么，连远端的图标还转着圈，免得以为没点上。
         let label = running.map_or(label, Busy::label);
-        let on_accent = gpui::white();
+        // 主按钮反着来：前景色做底、背景色写字，跟着主题走，和写说明对话框的主按钮一样。
+        let (accent, accent_hover, on_accent) = (hsla(bg.mix(fg, 0.88)), hsla(bg.mix(fg, 0.75)), hsla(bg));
         let icon = match running {
             Some(running) if running.is_remote() => sync_icon(("git-commit-icon", ri), true, 14., on_accent),
             _ => svg().flex_none().path(icon).size(px(14.)).text_color(on_accent).into_any_element(),
         };
         let enabled = !busy && (primary != PrimaryAction::Commit || (dirty && has_message));
-        let accent = hsla(RENAMED);
-        let box_border = if focused { accent } else { fg_hsla.opacity(0.15) };
+        let box_border = if focused { fg_hsla.opacity(0.4) } else { fg_hsla.opacity(0.15) };
         // 说明框右上角让 AI 写说明的按钮：有改动、仓库没在忙时才能点，写的时候说明框底下的提交按钮
         // 写着在生成。
         let can_write = dirty && !busy;
@@ -836,7 +836,7 @@ impl WindowView {
             .child(div().min_w_0().truncate().child(label))
             .when(enabled, |main| {
                 let root = root.clone();
-                main.hover(|main| main.bg(accent.opacity(0.85)))
+                main.hover(move |main| main.bg(accent_hover))
                     .on_press_down(cx, move |this, window, cx| this.run_primary(&root, primary, window, cx))
             });
         let more = div()
@@ -855,7 +855,7 @@ impl WindowView {
             .bg(accent)
             .child(svg().path(CHEVRON_DOWN_ICON).size(px(12.)).text_color(on_accent))
             .when(!busy, |more| {
-                more.hover(|more| more.bg(accent.opacity(0.85))).on_press_down(cx, move |this, window, cx| {
+                more.hover(move |more| more.bg(accent_hover)).on_press_down(cx, move |this, window, cx| {
                     this.open_commit_menu(&root, window.mouse_position(), cx)
                 })
             });
