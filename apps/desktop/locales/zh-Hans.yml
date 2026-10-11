@@ -2,7 +2,6 @@ _version: 1
 menu:
   about: 关于 Runode
   settings: 设置…
-  reload_config: 重新加载配置
   services: 服务
   hide: 隐藏 Runode
   hide_others: 隐藏其他

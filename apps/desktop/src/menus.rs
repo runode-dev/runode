@@ -95,7 +95,6 @@ pub fn set_menus(cx: &mut App) {
                 MenuItem::action(crate::update::menu_label(cx), CheckForUpdates),
                 MenuItem::separator(),
                 MenuItem::action(tr("menu.settings"), OpenSettings),
-                MenuItem::action(tr("menu.reload_config"), ReloadConfiguration),
                 MenuItem::action(tr("setup.menu"), InstallAgentIntegration),
                 MenuItem::separator(),
                 MenuItem::os_submenu(tr("menu.services"), SystemMenuType::Services),

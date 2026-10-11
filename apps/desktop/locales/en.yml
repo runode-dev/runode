@@ -2,7 +2,6 @@ _version: 1
 menu:
   about: About Runode
   settings: Settings…
-  reload_config: Reload Configuration
   services: Services
   hide: Hide Runode
   hide_others: Hide Others
