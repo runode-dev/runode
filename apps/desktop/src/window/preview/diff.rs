@@ -35,7 +35,7 @@ use crate::{
     assets::{ARROW_DOWN_ICON, ARROW_UP_ICON, DISCARD_ICON, MINUS_ICON, PLUS_ICON},
     config::AppConfig,
     ui::{
-        font_size::{FontSize, scaled},
+        font_size::FontSize,
         hsla,
         scrollbar::{row_markers, scrollbar},
         tooltip::tooltip,
@@ -633,6 +633,8 @@ impl WindowView {
             (DiffSide::Index, true) => vec![(MINUS_ICON, "git.unstage_hunk", HunkAction::Unstage)],
             _ => Vec::new(),
         };
+        // 按钮挂在 diff 的行里，跟着正文的 `preview-font-size` 走，不跟界面字号，才装得进这一行。
+        let font_size = cx.global::<AppConfig>().0.preview_font_size;
         let fg_hsla = hsla(fg);
         row.id(("preview-diff-header", ix))
             .role(Role::Group)
@@ -651,12 +653,12 @@ impl WindowView {
                     .on_a11y_press(view, move |this, window, cx| this.diff_hunk_action(hunk, action, window, cx))
                     .flex_none()
                     .px(px(6.))
-                    .h(scaled(18.))
+                    .h(px(font_size + ROW_EXTRA_HEIGHT - 3.))
                     .rounded(px(3.))
                     .flex()
                     .items_center()
                     .gap(px(4.))
-                    .text_size(FontSize::Small)
+                    .text_size(px(font_size - 2.))
                     .text_color(fg_hsla.opacity(0.8))
                     .hover(|button| button.bg(hsla(bg.mix(fg, 0.12))))
                     .child(svg().path(icon).size(px(12.)).text_color(fg_hsla.opacity(0.75)))

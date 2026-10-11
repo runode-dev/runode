@@ -602,12 +602,12 @@ impl WindowView {
                 .child(
                     div()
                         .flex_none()
-                        .w(px(CPU_WIDTH))
+                        .w(scaled(CPU_WIDTH))
                         .text_right()
                         .text_color(fg_h.opacity(0.7))
                         .child(format_cpu(usage.cpu)),
                 )
-                .child(div().flex_none().w(px(MEMORY_WIDTH)).text_right().child(format_bytes(usage.memory)))
+                .child(div().flex_none().w(scaled(MEMORY_WIDTH)).text_right().child(format_bytes(usage.memory)))
         };
         let mut rows: Vec<AnyElement> = Vec::new();
         for workspace in &self.workspaces {
@@ -650,9 +650,13 @@ impl WindowView {
             .border_b_1()
             .border_color(divider_color(fg_h))
             .child(div().flex_1().child(rust_i18n::t!("status.name").into_owned()))
-            .child(div().flex_none().w(px(CPU_WIDTH)).text_right().child("CPU"))
+            .child(div().flex_none().w(scaled(CPU_WIDTH)).text_right().child("CPU"))
             .child(
-                div().flex_none().w(px(MEMORY_WIDTH)).text_right().child(rust_i18n::t!("status.memory").into_owned()),
+                div()
+                    .flex_none()
+                    .w(scaled(MEMORY_WIDTH))
+                    .text_right()
+                    .child(rust_i18n::t!("status.memory").into_owned()),
             );
         div()
             .w(px(400.))
@@ -712,7 +716,9 @@ impl WindowView {
                 .cursor_pointer()
                 .hover(|row| row.bg(hover_bg))
                 .tooltip(tooltip(rust_i18n::t!("status.open_port"), None, fg, bg))
-                .child(div().flex_none().w(px(52.)).font_weight(FontWeight::MEDIUM).child(format!(":{}", port.port)))
+                .child(
+                    div().flex_none().w(scaled(52.)).font_weight(FontWeight::MEDIUM).child(format!(":{}", port.port)),
+                )
                 .child(div().flex_1().min_w_0().truncate().text_color(fg_h.opacity(0.7)).child(port.command.clone()))
                 .children(
                     workspace.map(|name| {

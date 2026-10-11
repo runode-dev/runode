@@ -536,6 +536,8 @@ impl WindowView {
             .child(
                 div()
                     .flex()
+                    // 界面字号大时一行放不下，折到下一行，「生成」不被挤出对话框。
+                    .flex_wrap()
                     .items_center()
                     .gap(px(8.))
                     .child(
