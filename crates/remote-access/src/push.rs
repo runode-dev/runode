@@ -248,7 +248,12 @@ impl Poller {
             if !self.active(&settings, listening) {
                 self.host = None;
                 let state = shared.state.lock().unwrap_or_else(PoisonError::into_inner);
-                if !state.quit {
+                if state.quit || state.settings != settings || state.listening != listening {
+                    // 放开锁的这会儿设置变了，通知已经错过，马上再看一遍。
+                } else if !settings.enabled || listening != Listening::On {
+                    // 不读设备表，没有要定时做的事，只等 `set_settings`、`set_listening` 或丢掉 `Pusher` 叫醒。
+                    drop(shared.changed.wait(state).unwrap_or_else(PoisonError::into_inner));
+                } else {
                     let wait = self.next_poll.saturating_duration_since(Instant::now());
                     drop(shared.changed.wait_timeout(state, wait).unwrap_or_else(PoisonError::into_inner));
                 }
