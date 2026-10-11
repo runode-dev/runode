@@ -82,6 +82,10 @@ use std::{
 
 const WINDOW_STATE_IVAR: &str = "windowState";
 
+/// Vsync ticks without a frame before `step` stops the display link. A few
+/// ticks of slack keep bursts of output from restarting the link every frame.
+const IDLE_FRAMES_BEFORE_STOP: u8 = 3;
+
 static RESTORES_WORKSPACE_AT_LAUNCH_DEFAULT: Once = Once::new();
 
 static mut WINDOW_CLASS: *const Class = ptr::null();
@@ -665,6 +669,14 @@ struct MacWindowState {
     cursor_style: CursorStyle,
     cursor_visible: Arc<AtomicBool>,
     frame_source: Option<WindowFrameSource>,
+    // Whether a frame was presented or requested since the last `step`; `step`
+    // stops the display link after `IDLE_FRAMES_BEFORE_STOP` vsyncs without
+    // either, and the waker from `frame_waker` restarts it.
+    frame_busy: bool,
+    idle_frames: u8,
+    // Set once `MacWindow` is dropped, so a late frame waker cannot create a
+    // new frame source for a window that is going away.
+    released: bool,
     renderer: renderer::Renderer,
     request_frame_callback: Option<Box<dyn FnMut(RequestFrameOptions)>>,
     event_callback: Option<Box<dyn FnMut(PlatformInput) -> gpui::DispatchEventResult>>,
@@ -847,6 +859,7 @@ impl MacWindowState {
             return;
         };
         let data = self.native_view.as_ptr() as *mut c_void;
+        self.idle_frames = 0;
         self.frame_source
             .get_or_insert_with(|| WindowFrameSource::new(data, step))
             .start(display_id)
@@ -856,6 +869,32 @@ impl MacWindowState {
     fn stop_display_link(&mut self) {
         if let Some(frame_source) = self.frame_source.as_mut() {
             frame_source.stop();
+        }
+    }
+
+    /// GPUI wants a frame: restart the display link if `step` stopped it for
+    /// being idle, and draw right away instead of waiting for its first vsync.
+    fn wake_display_link(&mut self) {
+        if self.released {
+            return;
+        }
+        self.frame_busy = true;
+        if self
+            .frame_source
+            .as_ref()
+            .is_some_and(WindowFrameSource::is_started)
+        {
+            return;
+        }
+        // Does nothing while the window is occluded; the occlusion handler
+        // restarts the link once it is visible again.
+        self.start_display_link();
+        if let Some(frame_source) = self
+            .frame_source
+            .as_ref()
+            .filter(|frame_source| frame_source.is_started())
+        {
+            frame_source.request_frame();
         }
     }
 
@@ -1098,6 +1137,9 @@ impl MacWindow {
                 cursor_style: CursorStyle::Arrow,
                 cursor_visible,
                 frame_source: None,
+                frame_busy: false,
+                idle_frames: 0,
+                released: false,
                 renderer: renderer::new_renderer(
                     renderer_context,
                     native_window as *mut _,
@@ -1387,6 +1429,7 @@ impl Drop for MacWindow {
         this.renderer.destroy();
         let window = this.native_window;
         let sheet_parent = this.sheet_parent.take();
+        this.released = true;
         this.frame_source.take();
         unsafe {
             this.native_window.setDelegate_(nil);
@@ -2011,6 +2054,18 @@ impl PlatformWindow for MacWindow {
         }
     }
 
+    fn frame_waker(&self) -> Option<Rc<dyn Fn()>> {
+        // Weak: GPUI stores the waker in the window's invalidator, which
+        // `request_frame_callback` captures, so a strong reference would leak
+        // the window state.
+        let state = Arc::downgrade(&self.0);
+        Some(Rc::new(move || {
+            if let Some(state) = state.upgrade() {
+                state.lock().wake_display_link();
+            }
+        }))
+    }
+
     fn on_request_frame(&self, callback: Box<dyn FnMut(RequestFrameOptions)>) {
         self.0.as_ref().lock().request_frame_callback = Some(callback);
     }
@@ -2112,6 +2167,7 @@ impl PlatformWindow for MacWindow {
 
     fn draw(&self, scene: &gpui::Scene) {
         let mut this = self.0.lock();
+        this.frame_busy = true;
         this.renderer.draw(scene);
     }
 
@@ -3329,7 +3385,18 @@ extern "C" fn step(view: *mut c_void) {
             signal_source,
             ..Default::default()
         });
-        window_state.lock().request_frame_callback = Some(callback);
+        let mut lock = window_state.lock();
+        lock.request_frame_callback = Some(callback);
+        // GPUI wakes the window (`frame_waker`) whenever it needs another
+        // frame, so the link only has to keep ticking while frames are busy.
+        if mem::take(&mut lock.frame_busy) {
+            lock.idle_frames = 0;
+        } else {
+            lock.idle_frames = lock.idle_frames.saturating_add(1);
+            if lock.idle_frames >= IDLE_FRAMES_BEFORE_STOP {
+                lock.stop_display_link();
+            }
+        }
     }
 }
 
