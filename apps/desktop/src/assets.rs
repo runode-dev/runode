@@ -91,7 +91,7 @@ icons! {
     pub SLIDERS_ICON = "sliders",
     pub PALETTE_ICON = "palette",
     pub KEYBOARD_ICON = "keyboard",
-    /// 外观页配色的三张预览卡：跟着系统换、一个主题、不用主题；`BAN_ICON` 也是快捷键页去掉一个绑定的按钮。
+    /// 外观页配色的预览卡（跟着系统换、一个主题用 `PALETTE_ICON`）；`BAN_ICON` 是快捷键页去掉一个绑定的按钮。
     pub MONITOR_ICON = "monitor",
     pub BAN_ICON = "ban",
     /// GitHub Actions 页：标签和工作流的图标、运行和 step 各种状态的图标，行尾的复制和固定按钮。

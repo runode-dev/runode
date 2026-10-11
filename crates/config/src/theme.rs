@@ -8,6 +8,12 @@ pub(crate) fn pick_theme(value: &str, dark: bool) -> String {
     value.split(',').map(str::trim).find_map(|part| part.strip_prefix(want)).unwrap_or(value).trim().to_owned()
 }
 
+/// runode 自己的深色主题，和不设 `theme` 时的默认配色一样；设置页把不设主题显示成它。
+pub const DEFAULT_THEME: &str = "Runode Dark";
+
+/// runode 自己的主题，在选主题的列表里排最前。
+const RUNODE_THEMES: [&str; 2] = [DEFAULT_THEME, "Runode Light"];
+
 /// 编进二进制的配色主题，按名字排序。
 pub(crate) static BUNDLED_THEMES: &[(&str, &str)] = include!(concat!(env!("OUT_DIR"), "/themes.rs"));
 
@@ -18,8 +24,11 @@ pub(crate) enum Theme {
 
 /// 主题可以是绝对路径，否则依次在 runode、Ghostty 的用户主题目录、
 /// Ghostty 自带的主题目录里找同名文件，都没有再用内置的同名主题。Ghostty 自带的目录要向系统
-/// 查，前面的目录里找到了就不查。
+/// 查，前面的目录里找到了就不查。runode 自己的主题总用内置的，免得同名文件换掉不设主题时的配色。
 pub(crate) fn find_theme(name: &str) -> Option<Theme> {
+    if RUNODE_THEMES.contains(&name) {
+        return bundled_theme(name).map(Theme::Bundled);
+    }
     let paths = runode_paths::Dirs::from_env();
     let path = paths.expand_home(name);
     if path.is_absolute() {
@@ -34,7 +43,7 @@ pub(crate) fn find_theme(name: &str) -> Option<Theme> {
 }
 
 /// 能选的主题名：用户的主题目录、Ghostty 的用户和自带主题目录里的文件，以及内置的主题，去重后
-/// 按名字排序（不分大小写）。
+/// 按名字排序（不分大小写），runode 自己的 `RUNODE_THEMES` 排最前。
 pub fn theme_names() -> Vec<String> {
     let paths = runode_paths::Dirs::from_env();
     let bundled_dir = ghostty_resources_dir().map(|dir| dir.join("themes"));
@@ -48,7 +57,7 @@ pub fn theme_names() -> Vec<String> {
         .filter(|name| !name.starts_with('.'))
         .chain(BUNDLED_THEMES.iter().map(|(name, _)| (*name).to_owned()))
         .collect();
-    names.sort_by_key(|name| name.to_lowercase());
+    names.sort_by_key(|name| (!RUNODE_THEMES.contains(&name.as_str()), name.to_lowercase()));
     names.dedup();
     names
 }
@@ -89,7 +98,10 @@ fn look_up_ghostty_resources_dir() -> Option<PathBuf> {
 
 #[cfg(test)]
 mod tests {
-    use runode_shared_types::color::{Rgb, TerminalColor};
+    use runode_shared_types::{
+        color::{Rgb, TerminalColor},
+        theme,
+    };
 
     use super::*;
     use crate::{Config, parse::parse_entries};
@@ -106,6 +118,17 @@ mod tests {
         assert_eq!(config.selection_background, rgb(0x58, 0x5b, 0x70));
         assert!(config.palette.contains(&(15, Rgb(0xba, 0xc2, 0xde))));
         assert!(bundled_theme("No Such Theme").is_none());
+    }
+
+    #[test]
+    fn default_theme_matches_the_built_in_colors() {
+        let mut config = Config::default();
+        config.apply_layer(&parse_entries(bundled_theme(DEFAULT_THEME).unwrap(), DEFAULT_THEME));
+        assert_eq!((config.background, config.foreground), (theme::BACKGROUND, theme::FOREGROUND));
+        let palette: Vec<_> = (0..16).map(|ix| config.palette.iter().rfind(|(i, _)| *i == ix).unwrap().1).collect();
+        assert_eq!(palette, theme::ANSI);
+        assert_eq!(theme_names()[..2], RUNODE_THEMES);
+        assert!(RUNODE_THEMES.iter().all(|name| matches!(find_theme(name), Some(Theme::Bundled(_)))));
     }
 
     #[test]

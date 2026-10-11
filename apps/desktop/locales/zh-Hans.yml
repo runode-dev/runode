@@ -585,7 +585,6 @@ settings:
     decision_keys: 托管 API
     decision_models: 这台 Mac 上的模型
   theme:
-    none: 不用主题
     single: 一个主题
     pair: 浅色深色分开
     name: 主题

@@ -585,7 +585,6 @@ settings:
     decision_keys: Hosted APIs
     decision_models: Models on This Mac
   theme:
-    none: No Theme
     single: One Theme
     pair: Light & Dark
     name: Theme
