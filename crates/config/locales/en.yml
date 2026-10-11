@@ -45,6 +45,7 @@ config:
   search_selected_background: "Background of the current search match: same as above."
   search_selected_foreground: "Text color of the current search match: same as above."
   palette: "Palette: N=COLOR with N from 0 to 255, can be repeated; 0-7 are the normal colors, 8-15 the bright ones."
+  minimum_contrast: "Minimum contrast between text and its background: 1 to 21, 3 by default. When a program's fixed colors are hard to read on the current background (say, a program with a dark color scheme under a light theme), text is drawn darker or lighter until it reaches this contrast, keeping its hue; box drawing, block elements and other symbols that form shapes are left alone. 1 turns it off."
   cursor_style: "Cursor shape: block, bar, underline, block_hollow."
   cursor_style_blink: "Cursor blinking: true, false (the default, the cursor stays solid); running programs can still turn blinking on or off."
   cursor_style_blink_timeout: "When the cursor blinks, stop blinking and keep it solid after this many seconds without typing, terminal output or the window regaining focus; any of those starts it blinking again. 0 keeps it blinking."

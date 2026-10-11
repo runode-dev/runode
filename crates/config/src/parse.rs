@@ -51,6 +51,7 @@ pub const KEYS: &[&[&str]] = &[
         "search-selected-background",
         "search-selected-foreground",
         "palette",
+        "minimum-contrast",
     ],
     &[
         "cursor-style",
@@ -275,6 +276,15 @@ impl Config {
                 let color = parse_color(color)?;
                 self.palette.retain(|(i, _)| *i != index);
                 self.palette.push((index, color));
+            }
+            "minimum-contrast" => {
+                // 和 Ghostty 一样限在 1 到 21。
+                self.minimum_contrast = or_default(empty, defaults.minimum_contrast, || {
+                    Some(parse_f32(value)?)
+                        .filter(|n| !n.is_nan())
+                        .map(|n| n.clamp(1., 21.))
+                        .ok_or_else(|| "expected a number".into())
+                })?;
             }
             "scrollback-limit" => {
                 self.scrollback_limit = or_default(empty, defaults.scrollback_limit, || {
@@ -736,6 +746,17 @@ unknown-key = whatever
         assert_eq!(load(&["font-size = 0"]).font_size, default);
         assert_eq!(load(&["font-size = -3"]).font_size, default);
         assert_eq!(load(&["font-size = nan"]).font_size, default);
+    }
+
+    #[test]
+    fn minimum_contrast_is_clamped_to_the_wcag_range() {
+        assert_eq!(Config::default().minimum_contrast, 3.);
+        assert_eq!(load(&["minimum-contrast = 4.5"]).minimum_contrast, 4.5);
+        assert_eq!(load(&["minimum-contrast = 0"]).minimum_contrast, 1.);
+        assert_eq!(load(&["minimum-contrast = 30"]).minimum_contrast, 21.);
+        // 不是数的跳过，保留前面的值；留空回到默认值。
+        assert_eq!(load(&["minimum-contrast = 1\nminimum-contrast = nan"]).minimum_contrast, 1.);
+        assert_eq!(load(&["minimum-contrast = 1\nminimum-contrast ="]).minimum_contrast, 3.);
     }
 
     #[test]

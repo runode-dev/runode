@@ -117,6 +117,9 @@ pub struct Config {
     pub search_selected_foreground: TerminalColor,
     /// 覆盖默认 256 色中的若干项。
     pub palette: Vec<(u8, Rgb)>,
+    /// 文字和底色的对比度（WCAG 2.0 的算法，1 到 21）至少要多少，不够时画字时把字调深或调浅；
+    /// 1 表示不调。
+    pub minimum_contrast: f32,
     pub macos_option_as_alt: OptionAsAlt,
     /// 每个终端的回滚历史最多占多少字节。
     pub scrollback_limit: usize,
@@ -213,6 +216,7 @@ impl Default for Config {
             search_selected_background: term.search_selected_background,
             search_selected_foreground: term.search_selected_foreground,
             palette: term.palette,
+            minimum_contrast: 3.,
             macos_option_as_alt: term.option_as_alt,
             scrollback_limit: term.scrollback_limit,
             shell_integration: IntegrationMode::Detect,

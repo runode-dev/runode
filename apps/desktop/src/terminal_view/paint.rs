@@ -1,7 +1,7 @@
 //! 把一帧画出来：单元格尺寸、字形排版缓存，以及背景、文字、装饰线、光标、输入的语法高亮和
 //! 灰字建议的绘制。
 
-use std::{collections::HashMap, rc::Rc};
+use std::{collections::HashMap, rc::Rc, sync::LazyLock};
 
 use gpui::{
     Bounds, ContentMask, FontStyle, FontWeight, Hsla, Pixels, Point, ShapedLine, SharedString, TextRun, Window, fill,
@@ -89,6 +89,47 @@ impl TerminalView {
 /// `fg` 与 `bg` 的中间色，用于暗淡（SGR 2）文字。
 pub(super) fn faint(fg: Rgb, bg: Rgb) -> Rgb {
     fg.mix(bg, 0.5)
+}
+
+/// sRGB 分量（0 到 255）对应的线性值，算相对亮度用；查表省得每帧每格都算乘方。
+static LINEAR: LazyLock<[f32; 256]> = LazyLock::new(|| {
+    std::array::from_fn(|i| {
+        let c = i as f32 / 255.;
+        if c <= 0.04045 { c / 12.92 } else { ((c + 0.055) / 1.055).powf(2.4) }
+    })
+});
+
+/// WCAG 2.0 的相对亮度。
+fn luminance(c: Rgb) -> f32 {
+    0.2126 * LINEAR[usize::from(c.0)] + 0.7152 * LINEAR[usize::from(c.1)] + 0.0722 * LINEAR[usize::from(c.2)]
+}
+
+/// 两个相对亮度之间的对比度，1 到 21。
+fn contrast(a: f32, b: f32) -> f32 {
+    (a.max(b) + 0.05) / (a.min(b) + 0.05)
+}
+
+/// `fg` 在 `bg` 上的对比度不到 `min`（配置项 `minimum-contrast`）时，把它往黑或白（在 `bg` 上
+/// 对比度更高的那个）混，混到刚好够为止；混成纯黑、纯白还不够就用纯黑、纯白。Ghostty 直接换成
+/// 黑白，这里按比例混、色相不变，深色配色的语法高亮放到浅色底上仍分得出颜色。
+pub(super) fn with_contrast(fg: Rgb, bg: Rgb, min: f32) -> Rgb {
+    let bg_luminance = luminance(bg);
+    if contrast(luminance(fg), bg_luminance) >= min {
+        return fg;
+    }
+    let target =
+        if contrast(1., bg_luminance) >= contrast(0., bg_luminance) { Rgb(255, 255, 255) } else { Rgb(0, 0, 0) };
+    // 越过 `bg` 的亮度之前对比度只会更低，之后随着混得越多越高，所以能二分找刚够的那一点。
+    let (mut low, mut high) = (0., 1.);
+    for _ in 0..8 {
+        let mid = (low + high) / 2.;
+        if contrast(luminance(fg.mix(target, mid)), bg_luminance) >= min {
+            high = mid;
+        } else {
+            low = mid;
+        }
+    }
+    fg.mix(target, high)
 }
 
 pub(super) fn paint_frame(
@@ -184,6 +225,12 @@ pub(super) fn paint_frame(
                     {
                         attrs.underline = true;
                     }
+                    // 方框线、块元素、Powerline 等符号自绘，铺满单元格，不用字体字形。
+                    let sprite = if cell.wide { None } else { sprites::shapes(&cell.text, sprite_metrics) };
+                    // 字在底色上看不清时调深或调浅；自绘的符号拼的是图形，照 Ghostty 不调。
+                    if sprite.is_none() {
+                        fg = with_contrast(fg, bg, view.config.minimum_contrast);
+                    }
                     if let Some(cursor) = filled_cursor.filter(|c| c.x == x && i32::from(c.y) == y) {
                         fg = cursor.text;
                     }
@@ -204,10 +251,7 @@ pub(super) fn paint_frame(
                     if cell.text.is_empty() || cell.text == " " {
                         continue;
                     }
-                    // 方框线、块元素、Powerline 等符号自绘，铺满单元格，不用字体字形。
-                    if !cell.wide
-                        && let Some(shapes) = sprites::shapes(&cell.text, sprite_metrics)
-                    {
+                    if let Some(shapes) = sprite {
                         sprites::paint(&shapes, position, scale, hsla(fg), window);
                         continue;
                     }
@@ -311,5 +355,52 @@ pub(super) fn paint_glyphs(line: &ShapedLine, baseline_origin: Point<Pixels>, co
                 tracing::debug!("glyph paint failed: {err}");
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const LIGHT: Rgb = Rgb(0xfb, 0xfa, 0xf7);
+    const DARK: Rgb = Rgb(0x17, 0x16, 0x18);
+
+    fn ratio(fg: Rgb, bg: Rgb) -> f32 {
+        contrast(luminance(fg), luminance(bg))
+    }
+
+    #[test]
+    fn readable_text_keeps_its_color() {
+        assert_eq!(with_contrast(Rgb(0x2a, 0x27, 0x24), LIGHT, 3.), Rgb(0x2a, 0x27, 0x24));
+        assert_eq!(with_contrast(Rgb(0xe6, 0xe1, 0xd8), DARK, 3.), Rgb(0xe6, 0xe1, 0xd8));
+        // 1 是不调，和底色一样的字也照旧。
+        assert_eq!(with_contrast(LIGHT, LIGHT, 1.), LIGHT);
+    }
+
+    #[test]
+    fn dark_scheme_colors_on_a_light_background_get_just_enough_contrast() {
+        // 深色配色（Monokai）的正文和青色关键字放到浅色底上。
+        for fg in [Rgb(0xf8, 0xf8, 0xf2), Rgb(0x66, 0xd9, 0xef)] {
+            let out = with_contrast(fg, LIGHT, 3.);
+            assert!(ratio(out, LIGHT) >= 3., "{out:?}");
+            // 刚够就停，不一路压成黑色。
+            assert!(ratio(out, LIGHT) < 3.2, "{out:?}");
+        }
+        // 往黑色混是按比例缩，色相不变：青色仍是蓝绿多、红少。
+        let cyan = with_contrast(Rgb(0x66, 0xd9, 0xef), LIGHT, 3.);
+        assert!(cyan.2 > cyan.1 && cyan.1 > cyan.0, "{cyan:?}");
+    }
+
+    #[test]
+    fn dark_text_on_a_dark_background_is_lightened() {
+        let out = with_contrast(Rgb(0x39, 0x3a, 0x3d), DARK, 3.);
+        assert!(ratio(out, DARK) >= 3., "{out:?}");
+        assert!(luminance(out) > luminance(Rgb(0x39, 0x3a, 0x3d)));
+    }
+
+    #[test]
+    fn unreachable_contrast_falls_back_to_black_or_white() {
+        assert_eq!(with_contrast(Rgb(128, 128, 128), Rgb(128, 128, 128), 21.), Rgb(0, 0, 0));
+        assert_eq!(with_contrast(DARK, DARK, 21.), Rgb(255, 255, 255));
     }
 }

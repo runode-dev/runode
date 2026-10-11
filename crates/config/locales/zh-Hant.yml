@@ -37,6 +37,7 @@ config:
   search_selected_background: 目前選中的搜尋符合項目的底色：同上。
   search_selected_foreground: 目前選中的搜尋符合項目的文字顏色：同上。
   palette: 調色盤：序號=顏色，序號為 0 到 255，可以寫多行；0-7 是一般色，8-15 是亮色。
+  minimum_contrast: 文字和底色的最低對比度：1 到 21，預設 3。程式寫死的顏色在目前底色上看不清時（例如深色配色的程式開在淺色主題裡），繪製文字時把它調深或調淺到這個對比度，色相不變；方框線、區塊元素這類拼圖形的符號不調。1 表示不調。
   cursor_style: 游標形狀：block、bar、underline、block_hollow。
   cursor_style_blink: 游標是否閃爍：true、false（預設，游標常亮不閃）；執行中的程式仍可打開或關掉閃爍。
   cursor_style_blink_timeout: 游標閃爍時，這麼多秒沒有鍵盤輸入、終端沒有輸出、視窗也沒有重新取得焦點，就停止閃爍、游標常亮，有了其中任何一樣就立刻恢復閃爍。0 表示一直閃。

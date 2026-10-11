@@ -154,6 +154,7 @@ impl Page {
                 Row("search-foreground", Color),
                 Row("search-selected-background", Color),
                 Row("search-selected-foreground", Color),
+                Row("minimum-contrast", Text(80.)),
                 Palette,
             ],
             Self::Terminal => &[

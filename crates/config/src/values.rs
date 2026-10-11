@@ -67,6 +67,7 @@ impl Config {
             "search-selected-background" => vec![color(self.search_selected_background)],
             "search-selected-foreground" => vec![color(self.search_selected_foreground)],
             "palette" => self.palette.iter().map(|(i, c)| format!("{i}={}", hex(*c))).collect(),
+            "minimum-contrast" => vec![self.minimum_contrast.to_string()],
             "cursor-style" => vec![
                 match self.cursor_style {
                     CursorStyle::Block => "block",

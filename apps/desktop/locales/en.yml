@@ -616,6 +616,7 @@ settings:
     search_selected_background: Current match background
     search_selected_foreground: Current match text
     palette: Palette
+    minimum_contrast: Minimum contrast
     cursor_style: Cursor shape
     cursor_style_blink: Cursor blinking
     cursor_style_blink_timeout: Stop blinking after
@@ -674,6 +675,7 @@ settings:
     search_selected_background: A color, or cell-foreground / cell-background.
     search_selected_foreground: A color, or cell-foreground / cell-background.
     palette: Colors 0–7 are the normal colors and 8–15 the bright ones. Clear a box to go back to the theme's color.
+    minimum_contrast: 1 to 21. Text that is hard to read on its background is drawn darker or lighter until it reaches this contrast. 1 turns it off.
     cursor_style: Programs can still change it while they run.
     cursor_style_blink: Programs can still turn blinking on or off while they run.
     cursor_style_blink_timeout: Seconds without typing or output before the cursor stops blinking. 0 keeps blinking.

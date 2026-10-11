@@ -616,6 +616,7 @@ settings:
     search_selected_background: 当前匹配底色
     search_selected_foreground: 当前匹配文字
     palette: 调色板
+    minimum_contrast: 最低对比度
     cursor_style: 光标形状
     cursor_style_blink: 光标闪烁
     cursor_style_blink_timeout: 停止闪烁的等待时间
@@ -674,6 +675,7 @@ settings:
     search_selected_background: 颜色，或者 cell-foreground、cell-background。
     search_selected_foreground: 颜色，或者 cell-foreground、cell-background。
     palette: 0–7 是普通色，8–15 是亮色。清空一格就回到主题里的颜色。
+    minimum_contrast: 1 到 21。程序的字在底色上看不清时调深或调浅到这个对比度，1 表示不调。
     cursor_style: 运行中的程序仍然可以改。
     cursor_style_blink: 运行中的程序仍然可以打开或关掉闪烁。
     cursor_style_blink_timeout: 这么多秒没有输入也没有输出，光标就停止闪烁、常亮。0 表示一直闪。
