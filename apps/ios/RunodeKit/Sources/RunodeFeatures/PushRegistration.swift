@@ -283,7 +283,9 @@ public final class PushRegistration {
     /// device token 由系统交给 App delegate，App delegate 转给 `received(token:)`。要在 App 启动完之前建好，
     /// 冷启动时点开的那条通知才交得到这里。
     @MainActor
-    public final class SystemPushNotifications: NSObject, PushNotifications, UNUserNotificationCenterDelegate {
+    public final class SystemPushNotifications: NSObject, PushNotifications,
+        @preconcurrency UNUserNotificationCenterDelegate
+    {
         /// 点开了一条等回答的通知。
         public var onOpen: @MainActor (SessionLink) -> Void = { _ in }
         private let tokens: AsyncStream<Data>
@@ -340,22 +342,20 @@ public final class PushRegistration {
             }
         }
 
-        public nonisolated func userNotificationCenter(
+        public func userNotificationCenter(
             _ center: UNUserNotificationCenter, willPresent notification: UNNotification
         ) async -> UNNotificationPresentationOptions {
             [.banner, .list, .sound]
         }
 
-        public nonisolated func userNotificationCenter(
+        // 跟着类在主线程上跑：系统交来的完成回调在方法返回的地方调，UIKit 收到后马上更新 App 快照，不在
+        // 主线程上时断言失败，App 在后台时点开通知就闪退。
+        public func userNotificationCenter(
             _ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse
         ) async {
             guard response.actionIdentifier == UNNotificationDefaultActionIdentifier,
                 let link = SessionLink(userInfo: response.notification.request.content.userInfo)
             else { return }
-            await open(link)
-        }
-
-        private func open(_ link: SessionLink) {
             onOpen(link)
         }
     }
