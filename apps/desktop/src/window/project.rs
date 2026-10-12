@@ -24,8 +24,9 @@ use runode_shared_types::color::Rgb;
 
 use super::{
     CARD_GAP, DIVIDER_GRAB_WIDTH, Divider, TITLEBAR_HEIGHT, ToggleFiles, ToggleGit, ToggleGitHubActions, WindowView,
-    cards, titlebar::icon_toggle,
+    cards,
 };
+use crate::ui::button::Toggle;
 // 面板外框在 `runode_ui::panel`、改动颜色在 `runode_ui::theme`，窗口里各面板照旧从这里引。
 use crate::ui::a11y::A11yPress;
 pub(super) use crate::ui::{
@@ -515,9 +516,8 @@ impl WindowView {
         let shown = self.workspace().panel.is_some();
         let text = if shown { rust_i18n::t!("tooltip.hide_panel") } else { rust_i18n::t!("tooltip.show_panel") };
         let view = cx.entity().downgrade();
-        let toggle = icon_toggle("toggle-panel", PANEL_RIGHT_ICON, 16., shown, cx)
-            .role(Role::Button)
-            .aria_label(text.clone().into_owned())
+        let toggle = Toggle::new("toggle-panel", PANEL_RIGHT_ICON, text.clone().into_owned())
+            .pressed(shown)
             .aria_expanded(shown)
             .w(px(TOGGLE_WIDTH))
             .h(px(TOGGLE_HEIGHT))
@@ -559,9 +559,9 @@ impl WindowView {
                 ),
             };
             let view = cx.entity().downgrade();
-            icon_toggle(id, icon, 16., self.workspace().panel == Some(page), cx)
+            Toggle::new(id, icon, text.clone().into_owned())
+                .pressed(self.workspace().panel == Some(page))
                 .role(Role::Tab)
-                .aria_label(text.clone().into_owned())
                 .aria_selected(self.workspace().panel == Some(page))
                 .w(px(TOGGLE_WIDTH))
                 .h(px(TOGGLE_HEIGHT))

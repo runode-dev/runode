@@ -3,6 +3,7 @@
 
 mod repo;
 
+use crate::ui::button::{Button, ButtonSize, Toggle};
 use crate::ui::theme::ActiveTheme as _;
 use gpui::{
     Action, AnyElement, App, Axis, Context, CursorStyle, Div, ExternalPaths, Focusable, Modifiers, MouseButton,
@@ -17,7 +18,7 @@ use super::{
     cards, drag_window,
     inline_edit::InlineEdit,
     model::WorkspaceId,
-    titlebar::{close_button, drag_chip, drop_marker, icon_toggle, shortcut_hint, styled_agent_mark},
+    titlebar::{drag_chip, drop_marker, shortcut_hint, styled_agent_mark},
 };
 use crate::ui::a11y::A11yPress;
 use crate::{
@@ -177,15 +178,15 @@ impl WindowView {
     }
 
     /// 红绿灯右边收起、展开侧栏的按钮，侧栏收着时也在原处，不随侧栏跳动。
-    pub(super) fn render_sidebar_toggle(&self, fullscreen: bool, cx: &mut Context<Self>) -> Stateful<Div> {
+    pub(super) fn render_sidebar_toggle(&self, fullscreen: bool, cx: &mut Context<Self>) -> Toggle {
         let text = if self.sidebar_visible() {
             rust_i18n::t!("tooltip.hide_sidebar")
         } else {
             rust_i18n::t!("tooltip.show_sidebar")
         };
         let tooltip = tooltip(text.clone(), Some(&ToggleSidebar));
-        icon_toggle("sidebar-toggle", SIDEBAR_ICON, 16., false, cx)
-            .aria_label(text)
+        // 外观一直是没按下的样子，只报给辅助工具侧栏开着没有。
+        Toggle::new("sidebar-toggle", SIDEBAR_ICON, text)
             .aria_toggled(self.sidebar_visible().into())
             .absolute()
             .left(px(sidebar_toggle_left(fullscreen)))
@@ -400,14 +401,16 @@ impl WindowView {
                     .justify_end()
                     .child(div().group_hover(group.clone(), |hint| hint.invisible()).child(hint))
                     .child(
-                        close_button(("workspace-close", ix), cx)
+                        Button::new(("workspace-close", ix), close_label)
+                            .with_size(ButtonSize::IconXs)
+                            .text_size(px(14.))
+                            .child("×")
                             .absolute()
                             .right_0()
                             .top(relative(0.5))
                             .mt(px(-TAB_CLOSE_SIZE / 2.))
                             .invisible()
                             .group_hover(group, |close| close.visible())
-                            .aria_label(close_label)
                             .tooltip(close_tooltip)
                             .on_press_down(cx, move |this, window, cx| {
                                 if let Some(ix) = this.workspaces.iter().position(|w| w.id == id) {
@@ -430,11 +433,13 @@ impl WindowView {
             .gap(px(2.))
             .child(self.render_new_workspace_button(fg, bg, cx))
             .child(
-                icon_toggle("sidebar-settings", SETTINGS_ICON, 15., false, cx)
-                    .flex_none()
+                Button::new("sidebar-settings", settings)
+                    .icon(SETTINGS_ICON)
+                    .icon_size(15.)
+                    .with_size(ButtonSize::Icon)
                     .w(px(32.))
+                    .h_auto()
                     .rounded(px(6.))
-                    .aria_label(settings)
                     .tooltip(settings_tooltip)
                     .on_press_down(cx, |this, window, cx| this.open_settings(window, cx)),
             )

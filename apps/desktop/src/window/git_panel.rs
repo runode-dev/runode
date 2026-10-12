@@ -25,6 +25,7 @@ mod worktree;
 /// 文件树的搜索结果以树形式查看时也按这个分层。
 pub(super) use tree::{TreeItem, file_tree};
 
+use crate::ui::button::{Button, ButtonSize};
 use crate::ui::theme::ActiveTheme as _;
 use std::{
     ops::Range,
@@ -605,12 +606,12 @@ impl WindowView {
         text: Option<String>,
         cx: &mut Context<Self>,
         handler: impl Fn(&mut Self, &mut Window, &mut Context<Self>) + 'static,
-    ) -> Stateful<Div> {
-        super::titlebar::icon_toggle(id, icon, 14., false, cx)
-            .role(Role::Button)
-            .flex_none()
+    ) -> Button {
+        Button::new(id, text.clone().unwrap_or_default())
+            .icon(icon)
+            .with_size(ButtonSize::Icon)
             .size(px(HEADER_BUTTON_SIZE))
-            .when_some(text, |button, text| button.aria_label(text.clone()).tooltip(tooltip(text, None)))
+            .when_some(text, |button, text| button.tooltip(tooltip(text, None)))
             .on_press_down(cx, handler)
     }
 

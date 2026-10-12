@@ -8,9 +8,7 @@ mod custom;
 
 use std::path::{Path, PathBuf};
 
-use gpui::{
-    Action, App, Context, Div, Entity, Focusable, MouseButton, Role, SharedString, Stateful, Window, prelude::*, px,
-};
+use gpui::{Action, App, Context, Entity, Focusable, MouseButton, SharedString, Window, prelude::*, px};
 use runode_config::TaskPlacement;
 use runode_paths::Dirs;
 use runode_protocol::{TaskSource, TaskSourceKind};
@@ -22,9 +20,9 @@ use super::{
     ToggleTasks,
     files::{MenuButton, MenuItem},
     project::{TOGGLE_HEIGHT, TOGGLE_WIDTH},
-    titlebar::icon_toggle,
 };
 use crate::ui::a11y::A11yPress;
+use crate::ui::button::Toggle;
 use crate::ui::menu::MenuHost as _;
 use crate::{
     assets::{PENCIL_ICON, PLAY_ICON, TRASH_ICON},
@@ -223,11 +221,10 @@ impl WindowView {
     }
 
     /// 标题栏右上角、面板开关左边的命令按钮，菜单挂在它下面，开着时底色亮一些。
-    pub(super) fn render_tasks_button(&self, window: &Window, cx: &mut Context<Self>) -> Stateful<Div> {
+    pub(super) fn render_tasks_button(&self, window: &Window, cx: &mut Context<Self>) -> Toggle {
         let view = cx.entity().downgrade();
-        icon_toggle("tasks", PLAY_ICON, 16., self.dropdown_open(), cx)
-            .role(Role::Button)
-            .aria_label(rust_i18n::t!("tooltip.tasks").into_owned())
+        Toggle::new("tasks", PLAY_ICON, rust_i18n::t!("tooltip.tasks"))
+            .pressed(self.dropdown_open())
             .aria_expanded(self.dropdown_open())
             .w(px(TOGGLE_WIDTH))
             .h(px(TOGGLE_HEIGHT))

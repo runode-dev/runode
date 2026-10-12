@@ -20,15 +20,14 @@ use super::{
     model::{Tab, TabId},
     panes::now_ms,
 };
-// 开关按钮在 `runode_ui::panel`，窗口里照旧从这里引。
 use crate::ui::a11y::A11yPress;
-pub(super) use crate::ui::panel::icon_toggle;
-// 标签共用的关闭按钮、拖动卡片和落点提示在 `runode_ui::tabs`，侧栏照旧从这里引。
-pub(super) use crate::ui::tabs::{close_button, drag_chip, drop_marker};
+// 标签共用的拖动卡片和落点提示在 `runode_ui::tabs`，侧栏照旧从这里引。
+pub(super) use crate::ui::tabs::{drag_chip, drop_marker};
 use crate::{
     assets::{PIXEL_QUESTION_ICON, PLUS_ICON, PROMPT_ICON},
     terminal_view::{DEFAULT_TITLE, TerminalView},
     ui::{
+        button::{Button, ButtonSize},
         display_dir,
         font_size::FontSize,
         hsla,
@@ -457,9 +456,10 @@ impl WindowView {
                     .children(driven_tooltip.map(|driven| driven_icon(("tab-driven", ix), fg).tooltip(driven)))
                     .children(mark.map(|mark| styled_agent_mark(mark, ("tab-agent", ix), fg, true)))
                     .map(|el| {
-                        let close = close_button(("tab-close", ix), cx)
-                            .flex_none()
-                            .aria_label(close_label.clone())
+                        let close = Button::new(("tab-close", ix), close_label.clone())
+                            .with_size(ButtonSize::IconXs)
+                            .text_size(px(14.))
+                            .child("×")
                             .tooltip(close_tooltip)
                             .on_press_down(cx, move |this, window, cx| this.close_tab_by_id(id, window, cx));
                         if compact {
@@ -498,8 +498,10 @@ impl WindowView {
                 }
                 _ => el
                     .child(
-                        close_button(("tab-close", ix), cx)
-                            .flex_none()
+                        Button::new(("tab-close", ix), close_label)
+                            .with_size(ButtonSize::IconXs)
+                            .text_size(px(14.))
+                            .child("×")
                             // 紧凑时平时宽度为零，悬停时才撑开，标题让出位置，两者不重叠。
                             // 不能用 display 切换：悬停状态在 prepaint 和 paint 之间可能变化，
                             // prepaint 时隐藏、paint 时显示会让 gpui 去画没 prepaint 过的子元素而 panic。
@@ -513,7 +515,6 @@ impl WindowView {
                                     close.invisible().group_hover(group, |close| close.visible())
                                 }
                             })
-                            .aria_label(close_label)
                             .tooltip(close_tooltip)
                             .on_press_down(cx, move |this, window, cx| this.close_tab_by_id(id, window, cx)),
                     )
@@ -524,15 +525,16 @@ impl WindowView {
     }
 
     /// 卡片样式下标签条右边的新建标签按钮。`bg` 是外框的颜色。
-    pub(super) fn render_new_tab_button_card(&self, cx: &mut Context<Self>) -> Stateful<Div> {
+    pub(super) fn render_new_tab_button_card(&self, cx: &mut Context<Self>) -> Button {
         let tooltip = tooltip(rust_i18n::t!("menu.new_tab"), Some(&NewTab));
-        icon_toggle("new-tab", PLUS_ICON, 16., false, cx)
-            .flex_none()
+        Button::new("new-tab", rust_i18n::t!("menu.new_tab"))
+            .icon(PLUS_ICON)
+            .icon_size(16.)
+            .with_size(ButtonSize::Icon)
             .ml(px(4.))
             .mr(px(6.))
             .w(px(NEW_TAB_BUTTON_WIDTH - 8.))
             .h(px(TAB_TRACK_HEIGHT - 4.))
-            .aria_label(rust_i18n::t!("menu.new_tab"))
             .tooltip(tooltip)
             .on_press_down(cx, |this, window, cx| this.new_tab(&NewTab, window, cx))
     }

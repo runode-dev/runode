@@ -10,6 +10,7 @@ mod menu;
 mod ops;
 mod search;
 
+use crate::ui::button::{Button, ButtonSize};
 use crate::ui::theme::ActiveTheme as _;
 use std::{
     borrow::Cow,
@@ -33,7 +34,7 @@ pub(super) use search::FileSearch;
 use super::{
     WindowView,
     project::{Decoration, Project, TreeFilter, panel_shell, panel_title, status_color},
-    titlebar::{drag_chip, icon_toggle},
+    titlebar::drag_chip,
 };
 use crate::ui::a11y::A11yPress;
 use crate::{
@@ -233,10 +234,9 @@ impl WindowView {
         // 标题行上的图标按钮。按下时不往外传：外层的文件树按下时会把焦点抢回去，新建时刚交给
         // 输入框的焦点就丢了。
         let button = |id, icon, text: Cow<'static, str>| {
-            icon_toggle(id, icon, 14., false, cx)
-                .role(Role::Button)
-                .aria_label(SharedString::from(text.clone()))
-                .flex_none()
+            Button::new(id, SharedString::from(text.clone()))
+                .icon(icon)
+                .with_size(ButtonSize::Icon)
                 .size(px(TOOLBAR_BUTTON_SIZE))
                 .tooltip(tooltip(text, None))
         };

@@ -31,6 +31,7 @@ use gpui::{
 use runode_shared_types::color::Rgb;
 use runode_ui::{
     a11y::{A11yPress, PressDown},
+    button::{Button, ButtonSize},
     font_size::{self, FontSize, scaled},
     hsla,
     icons::{
@@ -38,7 +39,7 @@ use runode_ui::{
         SYNC_ICON, TERMINAL_ICON, TRASH_ICON,
     },
     inline_edit::InlineEdit,
-    panel::{DIVIDER_GRAB_WIDTH, chevron, icon_toggle, panel_message, panel_title},
+    panel::{DIVIDER_GRAB_WIDTH, chevron, panel_message, panel_title},
     row_buttons::{RowButton, button, row_buttons},
     scrollbar::scrollbar,
     theme::{ADDED, MODIFIED, REMOVED},
@@ -513,9 +514,9 @@ impl ActionsPanel {
         let (fg, bg) = self.colors;
         self.a11y = window.is_a11y_active();
         let view = cx.entity().downgrade();
-        let refresh = icon_toggle("actions-refresh", REFRESH_ICON, 14., false, cx)
-            .aria_label(rust_i18n::t!("github_actions.refresh").into_owned())
-            .flex_none()
+        let refresh = Button::new("actions-refresh", rust_i18n::t!("github_actions.refresh"))
+            .icon(REFRESH_ICON)
+            .with_size(ButtonSize::Icon)
             .size(px(22.))
             .tooltip(tooltip(rust_i18n::t!("github_actions.refresh"), None))
             .on_mouse_down(

@@ -27,8 +27,9 @@ use super::{
     files::DraggedFile,
     model::Tab,
     status_bar,
-    titlebar::{icon_toggle, pane_label, styled_agent_mark},
+    titlebar::{pane_label, styled_agent_mark},
 };
+use crate::ui::button::{Button, ButtonSize};
 use crate::{
     assets::{
         CHEVRON_UP_ICON, CLOSE_ICON, MAXIMIZE_ICON, MINIMIZE_ICON, MINUS_ICON, SPLIT_DOWN_ICON, SPLIT_RIGHT_ICON,
@@ -419,9 +420,10 @@ impl WindowView {
                           text: Cow<'static, str>,
                           action: Option<&dyn Action>,
                           handler: Handler| {
-            icon_toggle(key, icon, 13., false, cx)
-                .aria_label(text.clone())
-                .flex_none()
+            Button::new(key, text.clone())
+                .icon(icon)
+                .icon_size(13.)
+                .with_size(ButtonSize::Icon)
                 .size(px(22.))
                 .tooltip(tooltip(text, action))
                 .on_press_down(cx, move |this, window, cx| handler(this, id, window, cx))

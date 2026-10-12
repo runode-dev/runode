@@ -41,9 +41,9 @@ use std::{
 };
 
 use gpui::{
-    Action, App, ClipboardItem, Context, Div, EventEmitter, FocusHandle, Focusable, Image, MouseButton, MouseMoveEvent,
-    Render, RenderImage, Role, SMOOTH_SVG_SCALE_FACTOR, ScrollHandle, ScrollStrategy, SharedString, Stateful,
-    SvgRenderer, UniformListScrollHandle, Window, div, linear_color_stop, linear_gradient, prelude::*, px,
+    App, ClipboardItem, Context, Div, EventEmitter, FocusHandle, Focusable, Image, MouseButton, MouseMoveEvent, Render,
+    RenderImage, Role, SMOOTH_SVG_SCALE_FACTOR, ScrollHandle, ScrollStrategy, SharedString, Stateful, SvgRenderer,
+    UniformListScrollHandle, Window, div, linear_color_stop, linear_gradient, prelude::*, px,
 };
 use runode_git::{self as git, FileStatus, HunkAction, Section};
 use runode_preview::{Content, ImageFormat, Span};
@@ -53,6 +53,7 @@ use runode_ui::{
     a11y::A11yPress,
     actions::{Copy, SelectAll, TogglePaneZoom},
     base_name,
+    button::{Button, ButtonSize, Toggle},
     font_size::FontSize,
     hsla,
     icons::{CODE_ICON, MAXIMIZE_ICON, MINIMIZE_ICON},
@@ -950,15 +951,14 @@ impl PreviewPanel {
             .children((0..previews.tabs.len()).map(|ix| self.render_preview_tab(ix, fg, bg, cx)).collect::<Vec<_>>());
         // 标签下面那条分隔线由各个标签和后面的空白各画一段，当前标签底下空着，和正文连在一起。
         let maximized = previews.maximized;
-        let button =
-            |id: &'static str, icon: &'static str, on: bool, text: Cow<'static, str>, action: Option<&dyn Action>| {
-                ui::panel::icon_toggle(id, icon, 13., on, cx)
-                    .role(Role::Button)
-                    .aria_label(SharedString::from(text.clone()))
-                    .flex_none()
-                    .size(px(22.))
-                    .tooltip(tooltip(text, action))
-            };
+        let toggle = |id: &'static str, icon: &'static str, on: bool, text: Cow<'static, str>| {
+            Toggle::new(id, icon, SharedString::from(text.clone()))
+                .pressed(on)
+                .icon_size(13.)
+                .flex_none()
+                .size(px(22.))
+                .tooltip(tooltip(text, None))
+        };
         // 这几个按钮只有按下的处理，辅助工具按不到，另外登记按下时做的事。
         let view = cx.entity().downgrade();
         let typeset = self.markdown_shown(preview);
@@ -972,9 +972,8 @@ impl PreviewPanel {
                     if typeset { rust_i18n::t!("preview.show_source") } else { rust_i18n::t!("preview.show_rendered") };
                 // 悬停提示说按了会怎样，跟着状态换；报给辅助工具的名字不换，开着表示正显示源码。
                 buttons.child(
-                    button("preview-source", CODE_ICON, !typeset, text, None)
+                    toggle("preview-source", CODE_ICON, !typeset, text)
                         .aria_label(rust_i18n::t!("preview.show_source").into_owned())
-                        .aria_toggled((!typeset).into())
                         .on_mouse_down(
                             MouseButton::Left,
                             cx.listener(|this, _, _, cx| {
@@ -988,8 +987,7 @@ impl PreviewPanel {
             // 排版视图的正文总是按栏宽换行（代码块横着滚），自动换行的开关只在源码视图里有。
             .when(!typeset, |buttons| {
                 buttons.child(
-                    button("preview-wrap", WRAP_ICON, self.wrap, rust_i18n::t!("preview.wrap"), None)
-                        .aria_toggled(self.wrap.into())
+                    toggle("preview-wrap", WRAP_ICON, self.wrap, rust_i18n::t!("preview.wrap"))
                         .on_mouse_down(
                             MouseButton::Left,
                             cx.listener(|this, _, _, cx| {
@@ -1000,23 +998,23 @@ impl PreviewPanel {
                         .on_a11y_press(view.clone(), |this, _, cx| this.toggle_preview_wrap(cx)),
                 )
             })
-            .child(
-                button(
-                    "preview-maximize",
-                    if maximized { MINIMIZE_ICON } else { MAXIMIZE_ICON },
-                    false,
-                    if maximized { rust_i18n::t!("preview.restore") } else { rust_i18n::t!("preview.maximize") },
-                    Some(&TogglePaneZoom),
-                )
-                .on_mouse_down(
-                    MouseButton::Left,
-                    cx.listener(|this, _, window, cx| {
-                        cx.stop_propagation();
-                        this.toggle_preview_maximized(window, cx);
-                    }),
-                )
-                .on_a11y_press(view, Self::toggle_preview_maximized),
-            );
+            .child({
+                let text = if maximized { rust_i18n::t!("preview.restore") } else { rust_i18n::t!("preview.maximize") };
+                Button::new("preview-maximize", SharedString::from(text.clone()))
+                    .icon(if maximized { MINIMIZE_ICON } else { MAXIMIZE_ICON })
+                    .icon_size(13.)
+                    .with_size(ButtonSize::Icon)
+                    .size(px(22.))
+                    .tooltip(tooltip(text, Some(&TogglePaneZoom)))
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(|this, _, window, cx| {
+                            cx.stop_propagation();
+                            this.toggle_preview_maximized(window, cx);
+                        }),
+                    )
+                    .on_a11y_press(view, Self::toggle_preview_maximized)
+            });
         // 按钮靠右；预览栏在最右边时再让出右上角面板开关的宽度，标签和按钮不钻到开关底下。不设
         // `min_w_0`：标签多了挤的是标签条（它自己横着滚），这里至少留出按钮的宽度，按钮不叠到标签上。
         let filler = div()

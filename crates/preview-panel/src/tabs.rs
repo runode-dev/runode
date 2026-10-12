@@ -14,11 +14,12 @@ use runode_ui::{
     a11y::A11yPress,
     actions::{ClosePane, CloseTab, TogglePaneZoom},
     base_name,
+    button::{Button, ButtonSize},
     file_icons::file_icon,
     follow_move, hsla,
     menu::{MenuHost as _, MenuItem},
     panel::TITLEBAR_HEIGHT,
-    tabs::{close_button, drag_chip, drop_marker},
+    tabs::{drag_chip, drop_marker},
     theme::{ADDED, MODIFIED, REMOVED, RENAMED},
     tooltip::tooltip,
 };
@@ -291,9 +292,10 @@ impl PreviewPanel {
                     .tooltip(path_tooltip),
             )
             .child(
-                close_button(("preview-tab-close", ix), cx)
-                    .role(Role::Button)
-                    .aria_label(close_label)
+                Button::new(("preview-tab-close", ix), close_label)
+                    .with_size(ButtonSize::IconXs)
+                    .text_size(px(14.))
+                    .child("×")
                     .on_a11y_press(view, move |this, window, cx| this.retain_previews(|i, _| i != ix, window, cx))
                     .flex_none()
                     .when(!active, |close| close.invisible().group_hover(group, |close| close.visible()))

@@ -1,6 +1,5 @@
-//! 窗口外框和右侧面板共用的写法：卡片样式的卡片、面板的外框、顶上那一条、标题行和居中的说明，改动
-//! 行数的标签，以及标题栏和面板上带图标的开关按钮。颜色从主题读（分隔线是 `Theme::border`），所以只在
-//! render 里调。
+//! 窗口外框和右侧面板共用的写法：卡片样式的卡片、面板的外框、顶上那一条、标题行和居中的说明，以及改动
+//! 行数的标签。颜色从主题读（分隔线是 `Theme::border`），所以只在 render 里调。
 
 use gpui::{App, BoxShadow, Div, Hsla, MouseButton, Role, Stateful, div, point, prelude::*, px, svg};
 
@@ -78,33 +77,6 @@ pub fn panel_header(cards: bool, cx: &App) -> Div {
 pub fn panel_shell(id: &'static str, width: f32, cards: bool, cx: &App) -> Stateful<Div> {
     let shell = if cards { card(cx).overflow_hidden() } else { div().border_l_1().border_color(cx.theme().border) };
     shell.id(id).flex_none().w(px(width)).h_full().flex().flex_col()
-}
-
-/// 标题栏和面板上带图标的开关按钮，图标边长 `icon_size`；悬停时底色和图标变亮，`shown` 时
-/// 底色一直亮着，图标也亮一些。位置、尺寸、提示和点击由调用方接着写，报给辅助工具的名字
-/// （`aria_label`，通常是提示的文字）和开关状态也是。
-pub fn icon_toggle(id: &'static str, icon: &'static str, icon_size: f32, shown: bool, cx: &App) -> Stateful<Div> {
-    let theme = cx.theme();
-    let hover_bg = theme.mix(0.10);
-    let active_bg = theme.mix(0.07);
-    let fg = theme.foreground;
-    div()
-        .id(id)
-        .role(Role::Button)
-        .group(id)
-        .rounded(px(4.))
-        .flex()
-        .items_center()
-        .justify_center()
-        .when(shown, |button| button.bg(active_bg))
-        .hover(|button| button.bg(hover_bg))
-        .child(
-            svg()
-                .path(icon)
-                .size(px(icon_size))
-                .text_color(fg.opacity(if shown { 0.9 } else { 0.55 }))
-                .group_hover(id, |icon| icon.text_color(fg)),
-        )
 }
 
 /// 树形列表里展开（`expanded`）或收起的箭头。
