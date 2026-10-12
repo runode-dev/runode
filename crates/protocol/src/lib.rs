@@ -6,7 +6,7 @@
 //!
 //! 手机这类别的设备经网络连上来时，先过一段门禁才说这些消息，门禁的消息和整个流程见 `remote`。
 //! 它们没有自己的 git，请宿主在会话所在的仓库里读写，线上的类型见 `git`。agent 等回答时经 APNs
-//! 给手机推通知，推送的格式见 `push`。
+//! 给手机推通知，推送的格式见 `push`。派给 agent 的任务和定时（任务板）的数据见 `todo`。
 //!
 //! 这里只放数据和编解码，只依赖 `runode_shared_types` 和 serde；终端仿真和 PTY 都不碰。
 
@@ -18,6 +18,7 @@ pub mod message;
 pub mod project_tasks;
 pub mod push;
 pub mod remote;
+pub mod todo;
 
 pub use frame::{Frame, FrameError, FrameKind, MAX_PAYLOAD, read_frame, read_frame_limited, write_frame};
 pub use handoff::{
