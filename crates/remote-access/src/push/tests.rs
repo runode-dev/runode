@@ -322,6 +322,8 @@ fn backing_off_notifications_follow_the_registrations() {
 struct FakeHost {
     sessions: Arc<Mutex<Vec<SessionInfo>>>,
     connections: Arc<AtomicUsize>,
+    /// 宿主这头的各条连接，`hang_up` 用。
+    streams: Arc<Mutex<Vec<UnixStream>>>,
 }
 
 impl FakeHost {
@@ -330,6 +332,7 @@ impl FakeHost {
         Arc::new(move || -> io::Result<UnixStream> {
             let (ours, theirs) = UnixStream::pair()?;
             host.connections.fetch_add(1, Ordering::SeqCst);
+            host.streams.lock().unwrap().push(theirs.try_clone()?);
             let host = host.clone();
             thread::spawn(move || host.serve(theirs));
             Ok(ours)
@@ -362,6 +365,13 @@ impl FakeHost {
             if write_frame(&mut stream, FrameKind::Control, frame.channel, &frame.payload).is_err() {
                 return;
             }
+        }
+    }
+
+    /// 断开所有连接。
+    fn hang_up(&self) {
+        for stream in self.streams.lock().unwrap().drain(..) {
+            let _ = stream.shutdown(std::net::Shutdown::Both);
         }
     }
 
@@ -427,6 +437,31 @@ fn the_pusher_follows_the_host() {
     host.set(AgentState::Blocked);
     thread::sleep(Duration::from_secs(3));
     assert_eq!(host.connections.load(Ordering::SeqCst), 1);
+    assert_eq!(scratch.requests().len(), 1);
+}
+
+/// 关了推送时，在退避的通知马上不发了：不到下一轮读设备表就被叫醒（这里是宿主断开）时也一样。
+#[test]
+fn turning_pushes_off_drops_backing_off_notifications() {
+    let scratch = Scratch::new("pusher-off");
+    let host = FakeHost::default();
+    host.set(AgentState::Working);
+    let pusher = Pusher::start_with(scratch.dirs.clone(), host.connect(), scratch.curl.clone()).unwrap();
+    let settings =
+        PushSettings { delay: Duration::ZERO, relay: Some("https://relay.example".into()), ..PushSettings::default() };
+    pusher.set_settings(settings.clone());
+    pusher.set_listening(Listening::On);
+    scratch.register(ApnsEnv::Production, OFFICIAL_BUNDLE);
+    wait_until("the pusher connects", || host.connections.load(Ordering::SeqCst) == 1);
+    thread::sleep(Duration::from_millis(2500));
+
+    scratch.rule("/v2/notify", "FAIL");
+    host.set(AgentState::Blocked);
+    wait_until("the first attempt", || scratch.requests().len() == 1);
+    pusher.set_settings(PushSettings { enabled: false, ..settings });
+    host.hang_up();
+    // 退避两秒后本该重试。
+    thread::sleep(Duration::from_secs(3));
     assert_eq!(scratch.requests().len(), 1);
 }
 
