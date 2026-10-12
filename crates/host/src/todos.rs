@@ -182,10 +182,14 @@ impl Shared {
         self.todos_writable()?;
         let id = &self.resolve_todo(id)?;
         if let Some(spec) = spec {
-            check_spec(spec)?;
             let old = self.todos.with_db(|db| db.todo_by_id(id))?.ok_or_else(|| no_todo(id))?;
-            if old.started.is_some() && (old.spec.dir != spec.dir || old.spec.worktree != spec.worktree) {
+            if old.started.is_none() {
+                check_spec(spec)?;
+            } else if old.spec.dir != spec.dir || old.spec.worktree != spec.worktree {
                 return Err(format!("todo {id} has started; its directory and worktree stay as they are"));
+            } else {
+                // 目录不变，原目录没了（比如工作树里的 agent 还在跑）也能改标题和提示词。
+                check_text(spec)?;
             }
         }
         let done_at = done.map(|done| done.then(unix_now));
@@ -202,15 +206,52 @@ impl Shared {
         let id = &self.resolve_todo(id)?;
         let todo = self.todos.with_db(|db| db.remove_todo(id))?.ok_or_else(|| no_todo(id))?;
         self.todos_changed();
+        if let Some(session) = todo.session {
+            self.end_if_exited(session);
+        }
         if !self.in_use(&todo) {
             clean_worktree(&todo);
         }
         Ok(HostMsg::Done { req })
     }
 
-    /// 任务的会话还在。
+    /// 任务的会话还在跑，见 `running`。
     fn in_use(&self, todo: &Todo) -> bool {
-        todo.session.is_some_and(|session| self.registry().sessions.contains_key(&session))
+        todo.session.is_some_and(|session| self.running(session))
+    }
+
+    /// 会话 `id` 还在跑。shell 退出了的会话留在宿主里给人看最后的输出，不算；没及时回话的算还在，免得
+    /// 清掉它正在用的工作树。
+    fn running(&self, id: SessionId) -> bool {
+        let known = self.registry().sessions.contains_key(&id);
+        known && !self.session_info(id).is_some_and(|info| info.exited)
+    }
+
+    /// 收掉 shell 已经退出的会话 `id`；还在跑的、开在界面上的不动，界面关掉它时自己收。
+    fn end_if_exited(&self, id: SessionId) {
+        if self.session_info(id).is_some_and(|info| info.exited && info.clients == 0) {
+            self.kill(id);
+        }
+    }
+
+    /// 收掉完成了的任务的、shell 已经退出的会话：没完成时留着给人看 agent 最后的输出，完成了就没用了。
+    /// 定时的线程每一轮都做，见 `sweep_worktrees`。
+    fn end_finished_sessions(&self) {
+        if self.todos_writable().is_err() {
+            return;
+        }
+        let todos = match self.todos.with_db(|db| db.list_todos(unix_now())) {
+            Ok(todos) => todos,
+            Err(err) => {
+                tracing::warn!("cannot read the todos: {err}");
+                return;
+            }
+        };
+        for todo in todos.iter().filter(|todo| todo.done_at.is_some()) {
+            if let Some(session) = todo.session {
+                self.end_if_exited(session);
+            }
+        }
     }
 
     /// 清掉完成了的任务的工作树和分支（见 `clean_worktree`），每张只试一次；会话还在的等它结束后再清。
@@ -304,10 +345,12 @@ impl Shared {
         if todo.done_at.is_some() {
             return Err(format!("todo {id} is done"));
         }
-        if let Some(session) = todo.session
-            && self.registry().sessions.contains_key(&session)
-        {
-            return Ok(session);
+        if let Some(session) = todo.session {
+            if self.running(session) {
+                return Ok(session);
+            }
+            // shell 退出了：收掉旧会话，下面开新的。
+            self.end_if_exited(session);
         }
         // 别的程序可以不经宿主直接写库（`runode_todo::Store`），所以开新会话、打进 shell 之前再查一遍；
         // 会话还在时上面已经直接给出，不因原目录没了打不开。
@@ -367,6 +410,18 @@ fn no_todo(id: &str) -> String {
 
 /// 前端给的任务内容能不能用：本机任何进程和配对的手机都能发这些消息，见模块文档。
 fn check_spec(spec: &TodoSpec) -> Result<(), String> {
+    check_text(spec)?;
+    if !spec.dir.is_absolute() || !spec.dir.is_dir() {
+        return Err(format!("{} is not a directory", spec.dir.display()));
+    }
+    if spec.worktree && Repo::open(&spec.dir).is_none() {
+        return Err(format!("{} is not in a git repository, so it cannot have a worktree", spec.dir.display()));
+    }
+    Ok(())
+}
+
+/// `check_spec` 里不看目录的部分：标题、提示词和 agent。
+fn check_text(spec: &TodoSpec) -> Result<(), String> {
     if spec.title.trim().is_empty() {
         return Err("a todo needs a title".into());
     }
@@ -379,12 +434,6 @@ fn check_spec(spec: &TodoSpec) -> Result<(), String> {
     }
     if spec.agent.trim().is_empty() || spec.agent.chars().any(char::is_control) {
         return Err("the agent must be a one-line command".into());
-    }
-    if !spec.dir.is_absolute() || !spec.dir.is_dir() {
-        return Err(format!("{} is not a directory", spec.dir.display()));
-    }
-    if spec.worktree && Repo::open(&spec.dir).is_none() {
-        return Err(format!("{} is not in a git repository, so it cannot have a worktree", spec.dir.display()));
     }
     Ok(())
 }

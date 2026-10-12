@@ -167,7 +167,7 @@
         },
         {
           "name": "rm",
-          "description": "Remove a task (its terminal stays open)",
+          "description": "Remove a task (a running terminal stays open)",
           "args": { "name": "id", "generatorName": "all_todos" }
         }
       ]

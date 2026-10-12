@@ -237,13 +237,14 @@ Commands:
          has stopped, or its terminal is gone) or done
   show   Print everything about one task: its column, prompt, worktree and
          branch, session, schedule and times; done tasks of any age too
-  start  Start a task and print the id of its session; a task whose session
-         is still there is not started again. Making the worktree can take a
-         while in a big repository
-  done   Mark a task done. Once its terminal is gone, its worktree and
-         branch are removed, unless the worktree has uncommitted changes or
-         the branch has unmerged commits
-  rm     Remove a task; its terminal stays open
+  start  Start a task and print the id of its session; a task whose terminal
+         is still running is not started again, one whose shell has exited
+         starts in a new terminal. Making the worktree can take a while in a
+         big repository
+  done   Mark a task done. Once its terminal is gone or its shell has exited,
+         the terminal, worktree and branch are removed, unless the worktree
+         has uncommitted changes or the branch has unmerged commits
+  rm     Remove a task; its terminal stays open while its shell runs
 
 Arguments:
   TITLE...  With `add`: the title, words joined by spaces; also the prompt
@@ -271,8 +272,8 @@ const SCHEDULE: &str = "\
 Start a task for an agent at set times: when a schedule is due, runode adds a
 task to the task board (see `runode help todo`) and starts it. Times are this
 computer's local time. A schedule missed while the computer slept or runode was
-not running fires once when it is back; one whose last task is still working
-is skipped.
+not running fires once when it is back; one whose last task is still working,
+or could not start, is skipped.
 
 Usage: runode schedule add TITLE... (--at TIME | --daily HH:MM [--days DAYS] |
                            --every MINUTES) [--prompt TEXT] [--cwd DIR]

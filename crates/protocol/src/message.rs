@@ -365,8 +365,8 @@ pub enum ClientMsg {
     /// 加一张待办的任务（不开始），回 `TodoAdded`。
     AddTodo { req: u32, spec: TodoSpec },
     /// 改任务：`spec` 给了时换掉要做的事（开始过的不能改目录和要不要工作树），`done` 给了时标成
-    /// 完成或取消完成；回 `Done`。标成完成后，等它的会话不在了，宿主清掉给它开的工作树和分支：有改动的
-    /// 工作树、有没合并提交的分支留着。
+    /// 完成或取消完成；回 `Done`。标成完成后，等它的会话不在了（shell 退出了也算，宿主随后收掉这个会话），
+    /// 宿主清掉给它开的工作树和分支：有改动的工作树、有没合并提交的分支留着。
     UpdateTodo {
         req: u32,
         id: String,
@@ -375,10 +375,11 @@ pub enum ClientMsg {
         #[serde(default)]
         done: Option<bool>,
     },
-    /// 删掉任务，回 `Done`。不结束它的会话；会话已经不在时，像标完成一样清掉它的工作树和分支。
+    /// 删掉任务，回 `Done`。不结束它还在跑的会话，shell 已经退出的收掉；会话不在了时，像标完成一样清掉它的
+    /// 工作树和分支。
     RemoveTodo { req: u32, id: String },
     /// 开始任务：在它的目录（要工作树时先新开一个）里开会话、在提示符上跑 agent，回 `Opened`。会话
-    /// 还在时不再开，回原来那个。
+    /// 还在跑时不再开，回原来那个；shell 已经退出时收掉旧会话再开新的。
     StartTodo { req: u32, id: String },
     /// 要一张任务的全部内容，完成了多久的都行，回 `Todo`。这几条要任务标识的消息（`UpdateTodo`、
     /// `RemoveTodo`、`StartTodo`、`MoveTodo` 和它）都也认编号，写成 `5` 或 `#5`（`Todo::number`）；

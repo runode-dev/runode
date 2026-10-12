@@ -25,6 +25,7 @@ pub(super) fn run(todos: &Arc<Todos>, shared: &Weak<Shared>) {
         let seen = todos.generation();
         let Some(strong) = shared.upgrade() else { return };
         strong.sweep_worktrees();
+        strong.end_finished_sessions();
         let next = strong.fire_due();
         drop(strong);
         let sleep = next.map_or(MAX_SLEEP, |at| Duration::from_secs(at.saturating_sub(unix_now())).min(MAX_SLEEP));
@@ -62,14 +63,22 @@ impl Shared {
         soonest
     }
 
-    /// 定时到点：记下到点的时刻（一次性的删掉），开一张新任务并开始它；上次开出的那张还在干活时跳过。
+    /// 定时到点：记下到点的时刻（一次性的删掉），开一张新任务并开始它；上次开出的那张没开始成或者还在干活时
+    /// 跳过。
     fn fire(&self, schedule: &Schedule, now: u64) {
         let previous = self.todos.with_db(|db| db.latest_open_todo_of(&schedule.id));
+        // 上次开出的那张没开始成（比如目录没了）时也跳过，免得每到点就多一张开不起来的待办。
         if let Ok(Some(todo)) = &previous
-            && let Some(session) = todo.session
-            && column(todo, self.session_info(session).as_ref(), now) == Column::InProgress
+            && match todo.session {
+                None => true,
+                Some(session) => column(todo, self.session_info(session).as_ref(), now) == Column::InProgress,
+            }
         {
-            tracing::info!("schedule {} skips this run: its last todo {} is still in progress", schedule.id, todo.id);
+            tracing::info!(
+                "schedule {} skips this run: its last todo {} has not started or is still in progress",
+                schedule.id,
+                todo.id
+            );
             if let Err(err) = self.todos.with_db(|db| db.set_fired(&schedule.id, now)) {
                 tracing::warn!("cannot record that schedule {} fired: {err}", schedule.id);
             }

@@ -16,7 +16,10 @@ use std::{
 
 use common::{Peer, listen, script, temp_dir};
 use runode_host::{ClientMsg, Host, HostMsg, SessionId, Stopped};
-use runode_protocol::todo::{Column, Todo, TodoSpec, When, column};
+use runode_protocol::{
+    SessionInfo,
+    todo::{Column, Schedule, Todo, TodoSpec, When, column},
+};
 
 /// 宿主开的任务会话跑的 shell。
 fn use_plain_sh() {
@@ -54,6 +57,38 @@ fn list(peer: &mut Peer) -> Vec<Todo> {
             HostMsg::TodosChanged => {}
             other => panic!("expected the todos, got {other:?}"),
         }
+    }
+}
+
+/// 任务和定时。
+fn board_state(peer: &mut Peer) -> (Vec<Todo>, Vec<Schedule>) {
+    peer.send(&ClientMsg::ListTodos { req: 2 });
+    loop {
+        match peer.reply() {
+            HostMsg::Todos { req: 2, todos, schedules } => return (todos, schedules),
+            HostMsg::TodosChanged => {}
+            other => panic!("expected the todos, got {other:?}"),
+        }
+    }
+}
+
+fn sessions(peer: &mut Peer) -> Vec<SessionInfo> {
+    peer.send(&ClientMsg::ListSessions);
+    loop {
+        match peer.reply() {
+            HostMsg::SessionList { sessions } => return sessions,
+            HostMsg::TodosChanged => {}
+            other => panic!("expected the sessions, got {other:?}"),
+        }
+    }
+}
+
+/// 等到 `done` 成立。
+fn wait_until(what: &str, mut done: impl FnMut() -> bool) {
+    let deadline = Instant::now() + Duration::from_secs(20);
+    while !done() {
+        assert!(Instant::now() < deadline, "{what} never happened");
+        thread::sleep(Duration::from_millis(100));
     }
 }
 
@@ -320,4 +355,64 @@ fn a_running_todo_reopens_after_its_directory_is_gone() {
     let session = start(&mut peer, &id);
     std::fs::remove_dir_all(&work).unwrap();
     assert_eq!(start(&mut peer, &id), session);
+    // 目录不变时也还能改标题。
+    let renamed = ClientMsg::UpdateTodo { req: 4, id, spec: Some(spec("Renamed", &work, "true")), done: None };
+    let reply = ask(&mut peer, &renamed);
+    assert!(matches!(reply, HostMsg::Done { req: 4 }), "{reply:?}");
+}
+
+/// agent 把 shell 也带走了：再开始任务开新会话、收掉旧的；标完成后新会话的 shell 退出了也收掉。
+#[test]
+fn an_exited_todo_session_is_replaced_and_ended() {
+    let (_host, dir, mut peer) = board("todo-exited");
+    let agent = script(&dir, "agent", "kill -KILL $PPID");
+    let id = add(&mut peer, spec("Exits", &dir, &agent));
+    let exited =
+        |peer: &mut Peer, id: SessionId| sessions(peer).iter().any(|session| session.id == id && session.exited);
+    let first = start(&mut peer, &id);
+    wait_until("the first shell exiting", || exited(&mut peer, first));
+    let second = start(&mut peer, &id);
+    assert_ne!(second, first);
+    assert!(!sessions(&mut peer).iter().any(|session| session.id == first), "the exited session stayed");
+    wait_until("the second shell exiting", || exited(&mut peer, second));
+    let reply = ask(&mut peer, &ClientMsg::UpdateTodo { req: 4, id, spec: None, done: Some(true) });
+    assert!(matches!(reply, HostMsg::Done { req: 4 }), "{reply:?}");
+    wait_until("the finished todo's session ending", || {
+        !sessions(&mut peer).iter().any(|session| session.id == second)
+    });
+}
+
+/// 定时的目录没了，开出的任务开始不了：之后到点跳过，不再每次多一张开不起来的待办。
+#[test]
+fn a_schedule_whose_todo_cannot_start_does_not_pile_up() {
+    use_plain_sh();
+    let dir = temp_dir("todo-pile-up");
+    let work = dir.join("work");
+    std::fs::create_dir_all(&work).unwrap();
+    let db = dir.join("todos.db");
+    let schedule = {
+        let (host, socket) = listen(&temp_dir("todo-pile-up-1"));
+        host.serve_todos(db.clone());
+        let mut peer = Peer::hello(&socket, false);
+        let when = When::Every { minutes: 60 };
+        peer.send(&ClientMsg::AddSchedule { req: 1, spec: spec("Gone", &work, "true"), when });
+        let HostMsg::TodoAdded { req: 1, id } = peer.reply() else { panic!("expected the schedule") };
+        id
+    };
+    std::fs::remove_dir_all(&work).unwrap();
+    let store = runode_todo::Store::open(&db).unwrap();
+    store.set_fired(&schedule, 1).unwrap();
+
+    let (host, socket) = listen(&temp_dir("todo-pile-up-2"));
+    let mut peer = Peer::hello(&socket, false);
+    host.serve_todos(db);
+    let fired = |peer: &mut Peer| board_state(peer).1.iter().all(|schedule| schedule.last_fired > 1);
+    wait_until("the first run", || fired(&mut peer));
+    // 再让它到点一次；加一张别的任务叫醒定时的线程。
+    store.set_fired(&schedule, 1).unwrap();
+    add(&mut peer, spec("Poke", &dir, "true"));
+    wait_until("the second run", || fired(&mut peer));
+    let (todos, _) = board_state(&mut peer);
+    let from_schedule = todos.iter().filter(|todo| todo.schedule.as_deref() == Some(schedule.as_str())).count();
+    assert_eq!(from_schedule, 1);
 }

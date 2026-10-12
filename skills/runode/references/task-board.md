@@ -27,7 +27,8 @@ runode todo add 'Update the CLI docs' --agent 'codex --full-auto' --prompt '...'
 - Without `--start` the task waits in the todo column for the user to start
   it. `--start` starts it at once and prints the task id, then the id of the
   session its agent runs in. Making the worktree can take a while in a big
-  repository. `runode todo start ID` starts a task added earlier.
+  repository. `runode todo start ID` starts a task added earlier, or starts it
+  again in a new terminal once its shell has exited.
 
 ## Follow the tasks
 
@@ -56,9 +57,10 @@ runode read "$session" --lines 80
 
 When a task needs the user, tell them rather than answering for them unless
 they asked you to. `runode todo done ID` marks a task done once its work is
-merged or no longer wanted; when its terminal is gone, its worktree and
-branch are removed, unless they hold uncommitted changes or unmerged commits.
-`runode todo rm ID` drops a task from the board and leaves its terminal open.
+merged or no longer wanted; once its terminal is gone or its shell has
+exited, the terminal, worktree and branch are removed, unless they hold
+uncommitted changes or unmerged commits. `runode todo rm ID` drops a task from
+the board and leaves its terminal open while its shell runs.
 
 ## Schedules
 
@@ -77,5 +79,6 @@ runode schedule rm ID    # the tasks it started stay
 Scheduled tasks work in DIR itself unless you add `--worktree` (DIR must then
 be in a git repository), since a new worktree each time is rarely wanted for
 reports and checks. A schedule missed while the computer slept fires once
-when it wakes; one whose last task is still working is skipped. Schedules
+when it wakes; one whose last task is still working, or could not start, is
+skipped. Schedules
 fire while runode runs, or its host runs in the background.
