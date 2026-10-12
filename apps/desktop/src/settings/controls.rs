@@ -13,7 +13,7 @@ pub(super) use crate::ui::a11y::Press;
 use crate::ui::{
     font_size::{FontSize, scaled},
     hsla,
-    text_field::TextField,
+    input::InputState,
 };
 
 /// 控件的高度。
@@ -266,7 +266,7 @@ pub(super) fn dropdown(
 
 /// 输入框的外框；`width` 为 `None` 时占满剩下的宽度。正在输入时描强调色，出错时描错误色。
 pub(super) fn input_box(
-    input: Entity<TextField>,
+    input: Entity<InputState>,
     width: Option<f32>,
     error: bool,
     colors: Colors,

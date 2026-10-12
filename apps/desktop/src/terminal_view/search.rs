@@ -10,7 +10,7 @@ use crate::ui::{
     a11y::Press,
     font_size::{FontSize, scaled},
     hsla,
-    text_field::{EndSearch, SearchNext, SearchPrevious, TextField, TextFieldEvent},
+    input::{EndSearch, InputEvent, InputState, SearchNext, SearchPrevious},
     tooltip::tooltip,
 };
 
@@ -43,7 +43,7 @@ impl TerminalView {
             Some((field, _)) => field.clone(),
             None => {
                 let field = cx.new(|cx| {
-                    TextField::new(String::new(), cx)
+                    InputState::new(String::new(), cx)
                         .with_label(rust_i18n::t!("search.placeholder"))
                         .with_placeholder(rust_i18n::t!("search.placeholder"))
                 });
@@ -64,16 +64,16 @@ impl TerminalView {
 
     fn handle_search_event(
         &mut self,
-        _: &Entity<TextField>,
-        event: &TextFieldEvent,
+        _: &Entity<InputState>,
+        event: &InputEvent,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         match (event, self.screen.shown_mut()) {
-            (TextFieldEvent::Dismiss, _) => self.close_search(window, cx),
-            (TextFieldEvent::Changed(query), Some(session)) => session.search(query),
-            (TextFieldEvent::Next, Some(session)) => session.search_step(false),
-            (TextFieldEvent::Previous, Some(session)) => session.search_step(true),
+            (InputEvent::Dismiss, _) => self.close_search(window, cx),
+            (InputEvent::Changed(query), Some(session)) => session.search(query),
+            (InputEvent::Next, Some(session)) => session.search_step(false),
+            (InputEvent::Previous, Some(session)) => session.search_step(true),
             // 没有界面这份 VT 时没有可搜的，回到显示时按搜索栏里的词重新搜，见 `vt_replaced`。
             (_, None) => {}
         }
@@ -117,7 +117,7 @@ impl TerminalView {
     /// 右上角的搜索栏：输入框、匹配进度、上下切换和关闭按钮。
     pub(super) fn render_search_bar(
         &self,
-        field: &Entity<TextField>,
+        field: &Entity<InputState>,
         cx: &mut Context<Self>,
     ) -> gpui::Stateful<gpui::Div> {
         let frame = self.colors;

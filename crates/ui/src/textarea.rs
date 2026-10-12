@@ -1,6 +1,6 @@
 //! 多行文字输入框：Git 面板写提交说明用。
 //!
-//! 写法照单行输入框 `TextField`：自己管文字编辑（光标、选区、鼠标点选拖选、输入法组字、
+//! 写法照单行输入框 `InputState`：自己管文字编辑（光标、选区、鼠标点选拖选、输入法组字、
 //! 撤销重做），自己排版绘制以便按位置换算字符；撤销记录 `History`、按字符和按词移动、UTF-16
 //! 换算和它共用。多出来的是按宽度软换行、换行符硬换行、上下按视觉行移动，以及高度随行数在上下限
 //! 之间伸缩、超过上限时竖着滚动。字号、颜色、字体继承父元素的文本样式；边框、内边距和底色由调用方
@@ -21,12 +21,12 @@ use gpui::{
 
 use gpui::accesskit::ActionData;
 
-use super::text_field::{
+use super::input::{
     EditKind, History, Snapshot, copy_selection, next_char, next_word, offset_to_utf16, previous_char, previous_word,
     range_from_utf16, range_to_utf16,
 };
 use crate::actions::{Copy, Cut, Paste, Redo, SelectAll, Undo};
-use element::TextAreaText;
+use element::TextareaText;
 use rows::{Row, caret_x, index_at_point, plain_rows, row_at, row_end, row_start, rows_from_lines, vertical, x_in_row};
 
 actions!(
@@ -43,14 +43,14 @@ const NEWLINE_WIDTH: Pixels = px(5.);
 /// 提示文字往右让开光标的距离。
 const PLACEHOLDER_INSET: Pixels = px(2.);
 
-pub enum TextAreaEvent {
+pub enum TextareaEvent {
     /// 已经确定的文字变了，不含组字的变化。
     Changed,
     /// 按了 cmd-enter。
     Submit,
 }
 
-pub struct TextArea {
+pub struct TextareaState {
     focus_handle: FocusHandle,
     /// 全部文字；输入法组字时也包括正在组的字。
     content: String,
@@ -105,9 +105,9 @@ enum Drag {
     Line(Range<usize>),
 }
 
-impl EventEmitter<TextAreaEvent> for TextArea {}
+impl EventEmitter<TextareaEvent> for TextareaState {}
 
-impl TextArea {
+impl TextareaState {
     pub fn new(cx: &mut Context<Self>) -> Self {
         Self {
             focus_handle: cx.focus_handle(),
@@ -150,7 +150,7 @@ impl TextArea {
         self.content = text;
         // 文字没变时 `sync` 不发，这里照样发一次，调用方不必区分。
         if !self.sync(cx) {
-            cx.emit(TextAreaEvent::Changed);
+            cx.emit(TextareaEvent::Changed);
         }
     }
 
@@ -293,7 +293,7 @@ impl TextArea {
         let changed = committed != self.committed;
         if changed {
             self.committed = committed;
-            cx.emit(TextAreaEvent::Changed);
+            cx.emit(TextareaEvent::Changed);
         }
         cx.notify();
         changed
@@ -526,13 +526,13 @@ impl TextArea {
     }
 }
 
-impl Focusable for TextArea {
+impl Focusable for TextareaState {
     fn focus_handle(&self, _: &App) -> FocusHandle {
         self.focus_handle.clone()
     }
 }
 
-impl Render for TextArea {
+impl Render for TextareaState {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let area = cx.entity().downgrade();
         div()
@@ -559,14 +559,14 @@ impl Render for TextArea {
             .on_action(cx.listener(Self::undo))
             .on_action(cx.listener(Self::redo))
             .on_action(cx.listener(Self::select_all))
-            .on_action(cx.listener(|_, _: &SubmitText, _, cx| cx.emit(TextAreaEvent::Submit)))
+            .on_action(cx.listener(|_, _: &SubmitText, _, cx| cx.emit(TextareaEvent::Submit)))
             .w_full()
             .cursor_text()
-            .child(TextAreaText { area: cx.entity() })
+            .child(TextareaText { area: cx.entity() })
     }
 }
 
-impl EntityInputHandler for TextArea {
+impl EntityInputHandler for TextareaState {
     fn text_for_range(
         &mut self,
         range: Range<usize>,
@@ -695,7 +695,7 @@ fn line_range_at(text: &str, offset: usize) -> Range<usize> {
 /// 双击选中的范围：和单行输入框一样，只是不越过换行。
 fn word_range_at(text: &str, offset: usize) -> Range<usize> {
     let line = hard_line_at(text, offset);
-    let word = super::text_field::word_range_at(&text[line.clone()], offset - line.start);
+    let word = super::input::word_range_at(&text[line.clone()], offset - line.start);
     line.start + word.start..line.start + word.end
 }
 

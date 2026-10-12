@@ -11,7 +11,7 @@ use gpui::{
 use super::{SettingsView, controls::Colors};
 use crate::ui::{
     font_size::{FontSize, scaled},
-    text_field::{TextField, TextFieldEvent},
+    input::{InputEvent, InputState},
 };
 
 const PICKER_WIDTH: f32 = 420.;
@@ -66,7 +66,7 @@ pub(super) struct Picker {
     /// 当前选着的值，列表里打个勾。
     current: Option<String>,
     target: PickTarget,
-    field: Entity<TextField>,
+    field: Entity<InputState>,
     /// 高亮的那一行，在筛过的列表里数。
     highlighted: usize,
     scroll: UniformListScrollHandle,
@@ -93,21 +93,21 @@ impl SettingsView {
     ) {
         let title = title.into();
         let field = cx.new(|cx| {
-            TextField::new(String::new(), cx)
+            InputState::new(String::new(), cx)
                 .with_label(title.clone())
                 .with_placeholder(rust_i18n::t!("search.placeholder"))
         });
-        let subscription = cx.subscribe_in(&field, window, |this, _, event: &TextFieldEvent, window, cx| match event {
-            TextFieldEvent::Changed(_) => {
+        let subscription = cx.subscribe_in(&field, window, |this, _, event: &InputEvent, window, cx| match event {
+            InputEvent::Changed(_) => {
                 if let Some(picker) = &mut this.picker {
                     picker.highlighted = 0;
                     picker.scroll.scroll_to_item(0, ScrollStrategy::Top);
                 }
                 cx.notify();
             }
-            TextFieldEvent::Next => this.confirm_picker(window, cx),
-            TextFieldEvent::Dismiss => this.close_picker(window, cx),
-            TextFieldEvent::Previous => {}
+            InputEvent::Next => this.confirm_picker(window, cx),
+            InputEvent::Dismiss => this.close_picker(window, cx),
+            InputEvent::Previous => {}
         });
         let highlighted = current.as_ref().and_then(|current| items.iter().position(|item| item.value == *current));
         let scroll = UniformListScrollHandle::new();

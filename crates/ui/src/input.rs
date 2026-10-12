@@ -1,11 +1,11 @@
 //! 单行文字输入框：终端的搜索栏、选 agent 和分支的弹窗、文件树和 workspace 就地改名都用它。
 //!
 //! 输入框管文字编辑（光标、选区、鼠标点选拖选、输入法组字、撤销重做），把文字的变化和回车、
-//! Shift+回车、Esc 作为 `TextFieldEvent` 交给调用方；输入框外面的东西（搜索的匹配数、上下切换
+//! Shift+回车、Esc 作为 `InputEvent` 交给调用方；输入框外面的东西（搜索的匹配数、上下切换
 //! 按钮、候选列表）由调用方画。回车、Shift+回车、Esc 绑定的是 `SearchNext`、`SearchPrevious`、
 //! `EndSearch`，终端没开搜索栏时这几个动作也由终端自己响应。
 //!
-//! 多行输入框 `TextArea` 和它共用的编辑内核也在这里：撤销记录 `History`、按字符和按词移动、
+//! 多行输入框 `TextareaState` 和它共用的编辑内核也在这里：撤销记录 `History`、按字符和按词移动、
 //! 字节偏移和输入法用的 UTF-16 偏移之间的换算。
 
 use std::ops::Range;
@@ -31,14 +31,14 @@ const UNDO_LIMIT: usize = 100;
 
 /// 输入框交给调用方的事件：文字变了（`Changed`，不含正在组的字）、回车（`Next`）、
 /// Shift+回车（`Previous`）和 Esc（`Dismiss`）。
-pub enum TextFieldEvent {
+pub enum InputEvent {
     Changed(String),
     Next,
     Previous,
     Dismiss,
 }
 
-pub struct TextField {
+pub struct InputState {
     focus_handle: FocusHandle,
     /// 输入框里的全部文字；输入法组字时也包括正在组的字。
     text: String,
@@ -48,7 +48,7 @@ pub struct TextField {
     reversed: bool,
     /// 正在组的字在 `text` 里的范围，确认后才算进 `query`。
     marked: Option<Range<usize>>,
-    /// 最近一次经 `TextFieldEvent::Changed` 交出去的文字，不含组字。
+    /// 最近一次经 `InputEvent::Changed` 交出去的文字，不含组字。
     query: String,
     /// 按住鼠标拖选中；双击后拖动按词扩展。
     drag: Option<Drag>,
@@ -128,9 +128,9 @@ impl History {
     }
 }
 
-impl EventEmitter<TextFieldEvent> for TextField {}
+impl EventEmitter<InputEvent> for InputState {}
 
-impl TextField {
+impl InputState {
     pub fn new(query: String, cx: &mut Context<Self>) -> Self {
         let end = query.len();
         Self {
@@ -279,7 +279,7 @@ impl TextField {
         self.sync_query(cx);
     }
 
-    /// 去掉组字后的文字有变化时发 `TextFieldEvent::Changed`。
+    /// 去掉组字后的文字有变化时发 `InputEvent::Changed`。
     fn sync_query(&mut self, cx: &mut Context<Self>) {
         let committed = match &self.marked {
             Some(marked) => [&self.text[..marked.start], &self.text[marked.end..]].concat(),
@@ -287,7 +287,7 @@ impl TextField {
         };
         if committed != self.query {
             self.query = committed.clone();
-            cx.emit(TextFieldEvent::Changed(committed));
+            cx.emit(InputEvent::Changed(committed));
         }
         cx.notify();
     }
@@ -486,13 +486,13 @@ pub(super) fn range_to_utf16(text: &str, range: &Range<usize>) -> Range<usize> {
     offset_to_utf16(text, range.start)..offset_to_utf16(text, range.end)
 }
 
-impl Focusable for TextField {
+impl Focusable for InputState {
     fn focus_handle(&self, _: &App) -> FocusHandle {
         self.focus_handle.clone()
     }
 }
 
-impl Render for TextField {
+impl Render for InputState {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let field = cx.entity().downgrade();
         div()
@@ -517,18 +517,18 @@ impl Render for TextField {
             .on_action(cx.listener(Self::undo))
             .on_action(cx.listener(Self::redo))
             .on_action(cx.listener(Self::select_all))
-            .on_action(cx.listener(|_, _: &SearchNext, _, cx| cx.emit(TextFieldEvent::Next)))
-            .on_action(cx.listener(|_, _: &SearchPrevious, _, cx| cx.emit(TextFieldEvent::Previous)))
-            .on_action(cx.listener(|_, _: &EndSearch, _, cx| cx.emit(TextFieldEvent::Dismiss)))
+            .on_action(cx.listener(|_, _: &SearchNext, _, cx| cx.emit(InputEvent::Next)))
+            .on_action(cx.listener(|_, _: &SearchPrevious, _, cx| cx.emit(InputEvent::Previous)))
+            .on_action(cx.listener(|_, _: &EndSearch, _, cx| cx.emit(InputEvent::Dismiss)))
             .size_full()
             .flex()
             .items_center()
             .overflow_hidden()
-            .child(TextFieldText { field: cx.entity() })
+            .child(InputText { field: cx.entity() })
     }
 }
 
-impl EntityInputHandler for TextField {
+impl EntityInputHandler for InputState {
     fn text_for_range(
         &mut self,
         range: Range<usize>,
@@ -632,11 +632,11 @@ impl EntityInputHandler for TextField {
 }
 
 /// 输入框里的文字、选区和光标，自己排版绘制以便按位置换算字符。
-struct TextFieldText {
-    field: Entity<TextField>,
+struct InputText {
+    field: Entity<InputState>,
 }
 
-struct TextFieldTextLayout {
+struct InputTextLayout {
     line: ShapedLine,
     /// 占位文字；有内容时为 `None`。
     placeholder: Option<ShapedLine>,
@@ -646,7 +646,7 @@ struct TextFieldTextLayout {
     caret: Option<PaintQuad>,
 }
 
-impl IntoElement for TextFieldText {
+impl IntoElement for InputText {
     type Element = Self;
 
     fn into_element(self) -> Self::Element {
@@ -654,9 +654,9 @@ impl IntoElement for TextFieldText {
     }
 }
 
-impl Element for TextFieldText {
+impl Element for InputText {
     type RequestLayoutState = ();
-    type PrepaintState = TextFieldTextLayout;
+    type PrepaintState = InputTextLayout;
 
     fn id(&self) -> Option<ElementId> {
         None
@@ -687,7 +687,7 @@ impl Element for TextFieldText {
         _: &mut (),
         window: &mut Window,
         cx: &mut App,
-    ) -> TextFieldTextLayout {
+    ) -> InputTextLayout {
         let field = self.field.read(cx);
         let style = window.text_style();
         let font_size = style.font_size.to_pixels(window.rem_size());
@@ -756,7 +756,7 @@ impl Element for TextFieldText {
                 style.color,
             )
         });
-        TextFieldTextLayout { line, placeholder, scroll_x, selection, caret }
+        InputTextLayout { line, placeholder, scroll_x, selection, caret }
     }
 
     fn paint(
@@ -765,7 +765,7 @@ impl Element for TextFieldText {
         _: Option<&gpui::InspectorElementId>,
         bounds: Bounds<Pixels>,
         _: &mut (),
-        layout: &mut TextFieldTextLayout,
+        layout: &mut InputTextLayout,
         window: &mut Window,
         cx: &mut App,
     ) {

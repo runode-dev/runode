@@ -32,7 +32,7 @@ use crate::{
         a11y::Press,
         font_size::{FontSize, scaled},
         hsla,
-        text_field::{TextField, TextFieldEvent},
+        input::{InputEvent, InputState},
     },
     window::{TITLEBAR_HEIGHT, WindowView},
 };
@@ -42,8 +42,8 @@ pub(in crate::window) struct AddTaskDialog {
     editing: Option<(Option<PathBuf>, String)>,
     /// 选的是通用的。
     global: bool,
-    name: Entity<TextField>,
-    command: Entity<TextField>,
+    name: Entity<InputState>,
+    command: Entity<InputState>,
     /// 快捷键，配置文件的写法（`alt+cmd+r`）；为空时不绑。编辑时先填上现在绑着的。
     shortcut: Option<String>,
     /// 打开时填上的快捷键：保存时没改过它就不动它绑着的那几行。
@@ -86,22 +86,21 @@ impl WindowView {
             let field = |label: &str, placeholder: &str, text: String, cx: &mut Context<Self>| {
                 let (label, placeholder) = (rust_i18n::t!(label).into_owned(), rust_i18n::t!(placeholder).into_owned());
                 let select = text.len();
-                cx.new(|cx| TextField::editing(text, select, cx).with_placeholder(placeholder).with_label(label))
+                cx.new(|cx| InputState::editing(text, select, cx).with_placeholder(placeholder).with_label(label))
             };
             let name = field("tasks.name", "tasks.name_placeholder", name, cx);
             let command = field("tasks.command", "tasks.command_placeholder", command, cx);
             // 名字里回车跳到命令，命令里回车添加；Esc 关掉对话框。
-            let on_name = cx.subscribe_in(&name, window, |this, _, event: &TextFieldEvent, window, cx| match event {
-                TextFieldEvent::Next => this.focus_add_task_field(true, window, cx),
-                TextFieldEvent::Dismiss => this.close_add_task(window, cx),
-                TextFieldEvent::Changed(_) | TextFieldEvent::Previous => {}
+            let on_name = cx.subscribe_in(&name, window, |this, _, event: &InputEvent, window, cx| match event {
+                InputEvent::Next => this.focus_add_task_field(true, window, cx),
+                InputEvent::Dismiss => this.close_add_task(window, cx),
+                InputEvent::Changed(_) | InputEvent::Previous => {}
             });
-            let on_command =
-                cx.subscribe_in(&command, window, |this, _, event: &TextFieldEvent, window, cx| match event {
-                    TextFieldEvent::Next => this.save_task(window, cx),
-                    TextFieldEvent::Dismiss => this.close_add_task(window, cx),
-                    TextFieldEvent::Changed(_) | TextFieldEvent::Previous => {}
-                });
+            let on_command = cx.subscribe_in(&command, window, |this, _, event: &InputEvent, window, cx| match event {
+                InputEvent::Next => this.save_task(window, cx),
+                InputEvent::Dismiss => this.close_add_task(window, cx),
+                InputEvent::Changed(_) | InputEvent::Previous => {}
+            });
             let global = editing.as_ref().is_some_and(|(project, _)| project.is_none());
             let shortcut = editing.as_ref().and_then(|(_, name)| task_shortcut(name, cx));
             self.add_task = Some(AddTaskDialog {
@@ -285,7 +284,7 @@ impl WindowView {
         let primary_bg = hsla(bg.mix(fg, 0.16));
         let fg = hsla(fg);
         let border = fg.opacity(0.12);
-        let field = |label: String, input: &Entity<TextField>| {
+        let field = |label: String, input: &Entity<InputState>| {
             div().flex().flex_col().gap(px(6.)).child(div().text_color(fg.opacity(0.7)).child(label)).child(
                 div()
                     .h(scaled(28.))

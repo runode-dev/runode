@@ -25,8 +25,8 @@ use crate::{
         a11y::Press,
         font_size::{FontSize, scaled},
         hsla,
-        text_area::{TextArea, TextAreaEvent},
-        text_field::{TextField, TextFieldEvent},
+        input::{InputEvent, InputState},
+        textarea::{TextareaEvent, TextareaState},
         tooltip::{code_tooltip, tooltip},
     },
     window::{
@@ -54,9 +54,9 @@ pub(in crate::window) struct CommitMessageDialog {
     root: PathBuf,
     /// 选的 agent；为空时跑自己定义的命令。
     agent: Option<&'static AgentSpec>,
-    args: Entity<TextField>,
-    command: Entity<TextField>,
-    template: Entity<TextArea>,
+    args: Entity<InputState>,
+    command: Entity<InputState>,
+    template: Entity<TextareaState>,
     /// 存成这个仓库自己的；否则存成所有仓库的默认值。
     repo_only: bool,
     status: Option<Status>,
@@ -82,34 +82,33 @@ impl WindowView {
         let field = |text: &str, placeholder: &'static str, label: &str, cx: &mut Context<Self>| {
             let label = rust_i18n::t!(label).into_owned();
             cx.new(|cx| {
-                TextField::editing(text.to_owned(), text.len(), cx).with_placeholder(placeholder).with_label(label)
+                InputState::editing(text.to_owned(), text.len(), cx).with_placeholder(placeholder).with_label(label)
             })
         };
         let args = field(&recipe.args, "--model sonnet", "git.ai_message.args", cx);
         let command = field(&recipe.command, "MODEL=small my-agent --print {prompt}", "git.ai_message.command", cx);
         let template = cx.new(|cx| {
-            let mut area = TextArea::new(cx);
+            let mut area = TextareaState::new(cx);
             area.set_line_limits(6, 12, cx);
             area.set_label(rust_i18n::t!("git.ai_message.template"), cx);
             area.set_text(recipe.template.clone(), cx);
             area
         });
-        let on_field =
-            |this: &mut Self, event: &TextFieldEvent, window: &mut Window, cx: &mut Context<Self>| match event {
-                TextFieldEvent::Next => this.generate_from_dialog(window, cx),
-                TextFieldEvent::Dismiss => this.close_commit_message_dialog(window, cx),
-                // 改了参数，下面「将运行」的命令跟着变。
-                TextFieldEvent::Changed(_) => cx.notify(),
-                TextFieldEvent::Previous => {}
-            };
+        let on_field = |this: &mut Self, event: &InputEvent, window: &mut Window, cx: &mut Context<Self>| match event {
+            InputEvent::Next => this.generate_from_dialog(window, cx),
+            InputEvent::Dismiss => this.close_commit_message_dialog(window, cx),
+            // 改了参数，下面「将运行」的命令跟着变。
+            InputEvent::Changed(_) => cx.notify(),
+            InputEvent::Previous => {}
+        };
         let on_args =
             cx.subscribe_in(&args, window, move |this, _, event, window, cx| on_field(this, event, window, cx));
         let on_command =
             cx.subscribe_in(&command, window, move |this, _, event, window, cx| on_field(this, event, window, cx));
         let on_template =
-            cx.subscribe_in(&template, window, |this, _, event: &TextAreaEvent, window, cx| match event {
-                TextAreaEvent::Submit => this.generate_from_dialog(window, cx),
-                TextAreaEvent::Changed => {}
+            cx.subscribe_in(&template, window, |this, _, event: &TextareaEvent, window, cx| match event {
+                TextareaEvent::Submit => this.generate_from_dialog(window, cx),
+                TextareaEvent::Changed => {}
             });
         let agent = (recipe.agent != CUSTOM_AGENT).then(|| agent(&recipe.agent).unwrap_or(&AGENTS[0]));
         window.focus(&if agent.is_some() { &args } else { &command }.focus_handle(cx), cx);

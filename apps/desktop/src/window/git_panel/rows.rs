@@ -12,7 +12,7 @@ use gpui::{Entity, ListAlignment, ListState, Subscription, UniformListScrollHand
 use runode_git::{self as git, FileStatus, RepoKind, Section};
 
 use super::tree::{TreeItem, file_tree};
-use crate::ui::text_area::TextArea;
+use crate::ui::textarea::TextareaState;
 
 /// 多个仓库时的列表往可见区域外多画这么高，滚动时块头不至于一下子冒出来。
 const LIST_OVERDRAW: f32 = 200.;
@@ -211,7 +211,7 @@ impl Busy {
 #[derive(Default)]
 pub(in crate::window) struct RepoPanel {
     /// 提交说明框，第一次显示这个仓库时建出来；以及它的事件订阅。
-    pub commit_box: Option<Entity<TextArea>>,
+    pub commit_box: Option<Entity<TextareaState>>,
     pub commit_events: Option<Subscription>,
     /// 提交说明框的提示里写的分支，变了才换提示。
     pub placeholder_branch: Option<Option<String>>,

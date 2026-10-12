@@ -19,14 +19,14 @@ use crate::{
         a11y::Press,
         font_size::{FontSize, scaled},
         hsla,
-        text_field::{TextField, TextFieldEvent},
+        input::{InputEvent, InputState},
     },
 };
 
 pub(super) struct NewWorkspaceDialog {
     focus: FocusHandle,
     /// 点了「从 URL 克隆」后展开的地址框。
-    url: Option<(Entity<TextField>, Subscription)>,
+    url: Option<(Entity<InputState>, Subscription)>,
 }
 
 impl WindowView {
@@ -88,15 +88,15 @@ impl WindowView {
         };
         let (url, _) = dialog.url.get_or_insert_with(|| {
             let url = cx.new(|cx| {
-                TextField::editing(String::new(), 0, cx)
+                InputState::editing(String::new(), 0, cx)
                     .with_placeholder(rust_i18n::t!("workspace.clone_url").into_owned())
                     .with_label(rust_i18n::t!("workspace.clone").into_owned())
             });
             // 回车是克隆，Esc 是关掉整个对话框。
-            let events = cx.subscribe_in(&url, window, |this, _, event: &TextFieldEvent, window, cx| match event {
-                TextFieldEvent::Next => this.clone_new_workspace(window, cx),
-                TextFieldEvent::Dismiss => this.close_new_workspace(window, cx),
-                TextFieldEvent::Changed(_) | TextFieldEvent::Previous => {}
+            let events = cx.subscribe_in(&url, window, |this, _, event: &InputEvent, window, cx| match event {
+                InputEvent::Next => this.clone_new_workspace(window, cx),
+                InputEvent::Dismiss => this.close_new_workspace(window, cx),
+                InputEvent::Changed(_) | InputEvent::Previous => {}
             });
             (url, events)
         });

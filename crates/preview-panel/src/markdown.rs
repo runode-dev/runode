@@ -42,8 +42,7 @@ use select::{MdPos, TextKey};
 use text::{MdText, TextBox, Texts};
 
 use runode_ui::{
-    self as ui, a11y::Press, hsla, icons::CHECK_ICON, scrollbar::list_scrollbar, text_field::word_range_at,
-    theme::RENAMED,
+    self as ui, a11y::Press, hsla, icons::CHECK_ICON, input::word_range_at, scrollbar::list_scrollbar, theme::RENAMED,
 };
 
 use super::{

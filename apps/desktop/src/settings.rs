@@ -34,7 +34,7 @@ use crate::{
     ui::{
         a11y::Hide,
         font_size::{FontSize, scaled},
-        text_field::{TextField, TextFieldEvent},
+        input::{InputEvent, InputState},
     },
 };
 use controls::Colors;
@@ -64,7 +64,7 @@ enum Commit {
 }
 
 struct Field {
-    input: Entity<TextField>,
+    input: Entity<InputState>,
     commit: Commit,
     /// 停手一会儿再写回的计时。
     pending: Option<Task<()>>,
@@ -175,7 +175,7 @@ impl SettingsView {
         placeholder: Option<SharedString>,
         window: &mut Window,
         cx: &mut Context<Self>,
-    ) -> Entity<TextField> {
+    ) -> Entity<InputState> {
         if let Some(field) = self.fields.get(id) {
             return field.input.clone();
         }
@@ -185,17 +185,17 @@ impl SettingsView {
             Commit::Palette(ix) => format!("{} {ix}", pages::key_title("palette")),
         };
         let input = cx.new(|cx| {
-            let input = TextField::editing(text, 0, cx).with_label(label);
+            let input = InputState::editing(text, 0, cx).with_label(label);
             match placeholder {
                 Some(placeholder) => input.with_placeholder(placeholder),
                 None => input,
             }
         });
         let key = id.to_owned();
-        let changed = cx.subscribe_in(&input, window, move |this, _, event: &TextFieldEvent, window, cx| match event {
-            TextFieldEvent::Changed(_) => this.schedule_commit(&key, cx),
-            TextFieldEvent::Next | TextFieldEvent::Previous => this.commit(&key, cx),
-            TextFieldEvent::Dismiss => {
+        let changed = cx.subscribe_in(&input, window, move |this, _, event: &InputEvent, window, cx| match event {
+            InputEvent::Changed(_) => this.schedule_commit(&key, cx),
+            InputEvent::Next | InputEvent::Previous => this.commit(&key, cx),
+            InputEvent::Dismiss => {
                 this.revert(&key, cx);
                 window.focus(&this.focus_handle, cx);
             }

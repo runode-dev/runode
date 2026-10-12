@@ -31,7 +31,7 @@ use crate::{
         button::{Button, ButtonSize, ButtonVariant},
         font_size::{FontSize, scaled},
         hsla,
-        text_field::{TextField, TextFieldEvent},
+        input::{InputEvent, InputState},
     },
 };
 
@@ -59,7 +59,7 @@ pub(super) struct MobilePage {
     /// 装 App 的二维码，有安装链接时才有。
     install_qr: Option<Rc<Qr>>,
     /// 电脑名的输入框，以及它的回车、Esc 和失焦；空着时用系统的电脑名 `system_name`。
-    name: Entity<TextField>,
+    name: Entity<InputState>,
     system_name: SharedString,
     _name_events: [Subscription; 2],
     /// 这台机器的网卡和地址，进配对这一步、点刷新时重读。
@@ -93,21 +93,20 @@ impl WindowView {
             let system_name = host_name();
             let saved = cx.global::<AppConfig>().0.remote_access_name.clone().unwrap_or_default();
             let name = cx.new(|cx| {
-                TextField::new(saved, cx)
+                InputState::new(saved, cx)
                     .with_placeholder(system_name.clone())
                     .with_label(rust_i18n::t!("mobile.name_label").into_owned())
             });
-            let events =
-                cx.subscribe_in(&name, window, |this, field, event: &TextFieldEvent, window, cx| match event {
-                    TextFieldEvent::Next => this.focus_mobile(window, cx),
-                    // 不改了：换回配置里的名字。
-                    TextFieldEvent::Dismiss => {
-                        let saved = cx.global::<AppConfig>().0.remote_access_name.clone().unwrap_or_default();
-                        field.update(cx, |field, cx| field.set_query(saved, cx));
-                        this.focus_mobile(window, cx);
-                    }
-                    TextFieldEvent::Changed(_) | TextFieldEvent::Previous => {}
-                });
+            let events = cx.subscribe_in(&name, window, |this, field, event: &InputEvent, window, cx| match event {
+                InputEvent::Next => this.focus_mobile(window, cx),
+                // 不改了：换回配置里的名字。
+                InputEvent::Dismiss => {
+                    let saved = cx.global::<AppConfig>().0.remote_access_name.clone().unwrap_or_default();
+                    field.update(cx, |field, cx| field.set_query(saved, cx));
+                    this.focus_mobile(window, cx);
+                }
+                InputEvent::Changed(_) | InputEvent::Previous => {}
+            });
             // 回车、点别处都是离开输入框，在这里写回。
             let blurred = cx.on_focus_out(&name.focus_handle(cx), window, |this, _, _, cx| this.save_machine_name(cx));
             // 设备表只在手机端引导页开着时轮询，刚打开时现读，不等下一轮。

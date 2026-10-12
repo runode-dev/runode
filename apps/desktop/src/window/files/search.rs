@@ -36,7 +36,7 @@ use crate::{
         file_icons::{file_icon, folder_icon},
         font_size::{FontSize, scaled},
         hsla,
-        text_field::{TextField, TextFieldEvent},
+        input::{InputEvent, InputState},
         tooltip::tooltip,
     },
     window::{
@@ -151,14 +151,14 @@ struct NameList {
 }
 
 pub(in crate::window) struct FileSearch {
-    field: Entity<TextField>,
+    field: Entity<InputState>,
     mode: SearchMode,
     /// 按内容找时的区分大小写、全字匹配和正则开关，以及要包含、要排除的文件。
     match_case: bool,
     whole_word: bool,
     regex: bool,
-    include: Entity<TextField>,
-    exclude: Entity<TextField>,
+    include: Entity<InputState>,
+    exclude: Entity<InputState>,
     /// 上次搜的正则写得不对。
     bad_regex: bool,
     /// 排成树还是列表，整个窗口一个设置，存进窗口存档；树形式时收起的目录。
@@ -184,20 +184,20 @@ impl FileSearch {
     pub(in crate::window) fn new(window: &mut Window, cx: &mut Context<WindowView>) -> Self {
         let placeholder = rust_i18n::t!("files.search_placeholder").into_owned();
         let field = cx
-            .new(|cx| TextField::new(String::new(), cx).with_label(placeholder.clone()).with_placeholder(placeholder));
-        let events = cx.subscribe_in(&field, window, |this, field, event: &TextFieldEvent, window, cx| match event {
-            TextFieldEvent::Changed(_) => this.sync_file_search(cx),
+            .new(|cx| InputState::new(String::new(), cx).with_label(placeholder.clone()).with_placeholder(placeholder));
+        let events = cx.subscribe_in(&field, window, |this, field, event: &InputEvent, window, cx| match event {
+            InputEvent::Changed(_) => this.sync_file_search(cx),
             // 没选中时打开第一个文件，跳过树形式开头的目录。
-            TextFieldEvent::Next => {
+            InputEvent::Next => {
                 let rows = &this.file_search.rows;
                 let first = rows.iter().position(|row| !matches!(row, SearchRow::Dir { .. }));
                 if let Some(ix) = this.file_search.selected.or(first) {
                     this.open_search_row(ix, false, cx);
                 }
             }
-            TextFieldEvent::Previous => {}
+            InputEvent::Previous => {}
             // 有搜索词时清空，已经空着时把焦点交回终端。
-            TextFieldEvent::Dismiss => {
+            InputEvent::Dismiss => {
                 if field.read(cx).query().is_empty() {
                     window.focus(&this.focus_handle(cx), cx);
                 } else {
@@ -208,9 +208,9 @@ impl FileSearch {
         });
         let filter = |label: &str, placeholder: &str, cx: &mut Context<WindowView>| {
             let (label, placeholder) = (rust_i18n::t!(label).into_owned(), rust_i18n::t!(placeholder).into_owned());
-            let field = cx.new(|cx| TextField::new(String::new(), cx).with_label(label).with_placeholder(placeholder));
-            let events = cx.subscribe(&field, |this, _, event: &TextFieldEvent, cx| {
-                if let TextFieldEvent::Changed(_) = event {
+            let field = cx.new(|cx| InputState::new(String::new(), cx).with_label(label).with_placeholder(placeholder));
+            let events = cx.subscribe(&field, |this, _, event: &InputEvent, cx| {
+                if let InputEvent::Changed(_) = event {
                     this.sync_file_search(cx);
                     this.save(cx);
                 }
@@ -580,7 +580,7 @@ impl WindowView {
         let search = &self.file_search;
         let content = search.mode == SearchMode::Content;
         // 输入框外框；`leading` 画在文字前面。
-        let input_box = |field: &Entity<TextField>, leading: Option<gpui::Svg>| {
+        let input_box = |field: &Entity<InputState>, leading: Option<gpui::Svg>| {
             div()
                 .h(scaled(28.))
                 .px(px(8.))
@@ -690,7 +690,7 @@ impl WindowView {
                 SearchMode::Content,
                 cx,
             ));
-        let labeled = |label: &str, field: &Entity<TextField>| {
+        let labeled = |label: &str, field: &Entity<InputState>| {
             div()
                 .flex()
                 .flex_col()

@@ -16,7 +16,7 @@ use crate::{
     ui::{
         actions::{Copy, Cut, Paste, Redo, SelectAll, Undo},
         display_dir,
-        text_field::{SearchNext, SearchPrevious},
+        input::{SearchNext, SearchPrevious},
     },
     window::{
         ArrangePanes, ClosePane, CloseTab, CloseWorkspace, EqualizePanes, FocusNextPane, FocusPreviousPane, GotoAgent,

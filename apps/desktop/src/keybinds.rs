@@ -20,8 +20,8 @@ use crate::{
     },
     ui::{
         actions::{Copy, Cut, Paste, Redo, SelectAll, Undo},
-        text_area::SubmitText,
-        text_field::{EndSearch, SearchNext, SearchPrevious},
+        input::{EndSearch, SearchNext, SearchPrevious},
+        textarea::SubmitText,
     },
     window::{
         ArrangePanes, ClosePane, CloseTab, CloseWorkspace, CollapseSelectedFile, CopyPath, CopyRelativePath,
@@ -40,7 +40,7 @@ type Contexts = &'static [Option<&'static str>];
 const GLOBAL: Contexts = &[None];
 const WINDOW: Contexts = &[Some("Window")];
 const TERMINAL: Contexts = &[Some("Terminal")];
-/// 终端的搜索框（单行输入框 `TextField`）不在 `Terminal` 上下文里，搜索导航在那里也要能用。
+/// 终端的搜索框（单行输入框 `InputState`）不在 `Terminal` 上下文里，搜索导航在那里也要能用。
 const TERMINAL_AND_TEXT_FIELD: Contexts = &[Some("Terminal"), Some("TextField")];
 /// 预览栏里选中的行也能全选；单行、多行输入框都能全选、复制、粘贴。
 const SELECT_ALL: Contexts = &[Some("Terminal"), Some("TextField"), Some("TextArea"), Some("Preview")];
@@ -253,7 +253,7 @@ mod tests {
 
     /// 多行输入框里 cmd-enter 是提交，盖过默认配置里全局的 cmd-enter（切换全屏）；别处照旧切换全屏。
     #[test]
-    fn cmd_enter_submits_in_text_area() {
+    fn cmd_enter_submits_in_textarea() {
         let mut bindings = Vec::new();
         for (keys, action) in keybind::resolve(&[]) {
             let (action, contexts) = gpui_action(action);

@@ -46,7 +46,7 @@ use runode_terminal::session::{Link, Session};
 
 use crate::{
     host_client::LinkEvent,
-    ui::{a11y::Press, font_size::FontSize, hsla, text_field::TextField},
+    ui::{a11y::Press, font_size::FontSize, hsla, input::InputState},
 };
 use completion_menu::{CompletionMenu, PendingKey};
 use crop::Crop;
@@ -229,7 +229,7 @@ pub struct TerminalView {
     /// 等 shell 出了提示符再打进去的命令，见 `run_command`。
     pending_command: Option<String>,
     /// 打开着的搜索栏输入框，以及对它事件的订阅。
-    search_field: Option<(Entity<TextField>, Subscription)>,
+    search_field: Option<(Entity<InputState>, Subscription)>,
     /// 收宿主发来的输出和状态的任务，见 `read_events`。
     _reader: Task<()>,
     /// 前台 agent 上次换了种类或状态的时刻，agent 列表按它排同一状态里的先后。

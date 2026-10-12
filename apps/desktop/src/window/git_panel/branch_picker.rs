@@ -21,7 +21,7 @@ use crate::{
     ui::{
         font_size::{FontSize, scaled},
         hsla,
-        text_field::{TextField, TextFieldEvent},
+        input::{InputEvent, InputState},
     },
 };
 
@@ -36,7 +36,7 @@ pub(in crate::window) struct BranchPicker {
     repo: PathBuf,
     /// 从哪个提交新建分支，为空时从当前提交。只在从图表里新建分支时有。
     start: Option<String>,
-    field: Entity<TextField>,
+    field: Entity<InputState>,
     /// 后台读到的分支；还没读完时为空。
     branches: Option<Vec<Branch>>,
     /// 只新建分支，不列出已有的。
@@ -105,13 +105,13 @@ impl WindowView {
             None => rust_i18n::t!("git.picker.placeholder"),
         };
         let field = cx.new(|cx| {
-            TextField::new(String::new(), cx)
+            InputState::new(String::new(), cx)
                 .with_placeholder(placeholder.into_owned())
                 .with_label(picker_title(create_only))
         });
         // 输入框原本是搜索框：回车是「下一个」，Esc 是「关闭搜索」，在这里分别是确定和关掉。
-        let events = cx.subscribe_in(&field, window, |this, _, event: &TextFieldEvent, window, cx| match event {
-            TextFieldEvent::Changed(query) => {
+        let events = cx.subscribe_in(&field, window, |this, _, event: &InputEvent, window, cx| match event {
+            InputEvent::Changed(query) => {
                 if let Some(picker) = &mut this.branch_picker {
                     let query = query.trim();
                     picker.valid_name = !query.is_empty() && git::valid_branch_name(query);
@@ -120,9 +120,9 @@ impl WindowView {
                 }
                 cx.notify();
             }
-            TextFieldEvent::Next => this.confirm_branch_picker(window, cx),
-            TextFieldEvent::Dismiss => this.close_branch_picker(window, cx),
-            TextFieldEvent::Previous => {}
+            InputEvent::Next => this.confirm_branch_picker(window, cx),
+            InputEvent::Dismiss => this.close_branch_picker(window, cx),
+            InputEvent::Previous => {}
         });
         let focus = field.focus_handle(cx);
         // 点到别处就关掉；切到别的应用时窗口失去焦点，回来接着用。

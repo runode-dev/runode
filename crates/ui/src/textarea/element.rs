@@ -1,5 +1,5 @@
 //! 多行输入框里画文字、选区、光标和提示文字的元素：自己排版，量高度时按宽度折行，画完把排好的
-//! 视觉行和位置交回给 `TextArea`，按键、鼠标和输入法换算位置都靠它们。
+//! 视觉行和位置交回给 `TextareaState`，按键、鼠标和输入法换算位置都靠它们。
 
 use gpui::{
     App, AvailableSpace, Bounds, ContentMask, DispatchPhase, Element, ElementId, Entity, GlobalElementId, IntoElement,
@@ -8,7 +8,7 @@ use gpui::{
 };
 
 use super::{
-    CARET_WIDTH, Metrics, PLACEHOLDER_INSET, TextArea,
+    CARET_WIDTH, Metrics, PLACEHOLDER_INSET, TextareaState,
     rows::{Row, row_at, rows_from_lines, selection_spans, x_in_row},
 };
 
@@ -35,11 +35,11 @@ fn placeholder_run(style: &TextStyle, len: usize) -> TextRun {
 }
 
 /// 输入框里的文字、选区和光标，自己排版绘制以便按位置换算字符。
-pub(super) struct TextAreaText {
-    pub(super) area: Entity<TextArea>,
+pub(super) struct TextareaText {
+    pub(super) area: Entity<TextareaState>,
 }
 
-pub(super) struct TextAreaTextLayout {
+pub(super) struct TextareaTextLayout {
     /// 每段硬换行排好的文字。
     lines: Vec<WrappedLine>,
     /// 提示文字；有内容时为 `None`。
@@ -57,7 +57,7 @@ pub(super) struct TextAreaTextLayout {
     caret: Option<PaintQuad>,
 }
 
-impl IntoElement for TextAreaText {
+impl IntoElement for TextareaText {
     type Element = Self;
 
     fn into_element(self) -> Self::Element {
@@ -89,9 +89,9 @@ fn paint_lines(
     }
 }
 
-impl Element for TextAreaText {
+impl Element for TextareaText {
     type RequestLayoutState = ();
-    type PrepaintState = TextAreaTextLayout;
+    type PrepaintState = TextareaTextLayout;
 
     fn id(&self) -> Option<ElementId> {
         None
@@ -149,7 +149,7 @@ impl Element for TextAreaText {
         _: &mut (),
         window: &mut Window,
         cx: &mut App,
-    ) -> TextAreaTextLayout {
+    ) -> TextareaTextLayout {
         let area = self.area.read(cx);
         let style = window.text_style();
         let font_size = style.font_size.to_pixels(window.rem_size());
@@ -213,7 +213,7 @@ impl Element for TextAreaText {
                 style.color,
             )
         });
-        TextAreaTextLayout {
+        TextareaTextLayout {
             lines,
             placeholder,
             rows,
@@ -234,7 +234,7 @@ impl Element for TextAreaText {
         _: Option<&gpui::InspectorElementId>,
         bounds: Bounds<Pixels>,
         _: &mut (),
-        layout: &mut TextAreaTextLayout,
+        layout: &mut TextareaTextLayout,
         window: &mut Window,
         cx: &mut App,
     ) {

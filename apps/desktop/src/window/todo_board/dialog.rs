@@ -22,8 +22,8 @@ use crate::{
         display_dir,
         font_size::{FontSize, scaled},
         hsla,
-        text_area::{TextArea, TextAreaEvent},
-        text_field::{TextField, TextFieldEvent},
+        input::{InputEvent, InputState},
+        textarea::{TextareaEvent, TextareaState},
     },
     window::{TITLEBAR_HEIGHT, WindowView},
 };
@@ -47,18 +47,18 @@ pub(in crate::window) struct TodoDialog {
     /// 是定时（否则是任务）。
     schedule: bool,
     editing: Option<Editing>,
-    title: Entity<TextField>,
-    prompt: Entity<TextArea>,
-    agent: Entity<TextField>,
+    title: Entity<InputState>,
+    prompt: Entity<TextareaState>,
+    agent: Entity<InputState>,
     dir: PathBuf,
     worktree: bool,
     /// 任务开始过了：目录和要不要工作树不能再改。
     locked: bool,
     kind: Kind,
     /// 一次：`YYYY-MM-DD HH:MM`；每天：`HH:MM`；每隔：分钟数。三个框各记各的，切来切去不丢。
-    at: Entity<TextField>,
-    clock: Entity<TextField>,
-    minutes: Entity<TextField>,
+    at: Entity<InputState>,
+    clock: Entity<InputState>,
+    minutes: Entity<InputState>,
     /// 每天跑时只在这几天（第 0 位是星期日），全不选是每天。
     days: u8,
     error: Option<String>,
@@ -162,7 +162,7 @@ impl WindowView {
         let field = |text: String, label: &str, placeholder: &str, cx: &mut Context<Self>| {
             let (label, placeholder) = (rust_i18n::t!(label).into_owned(), rust_i18n::t!(placeholder).into_owned());
             let select = text.len();
-            cx.new(|cx| TextField::editing(text, select, cx).with_label(label).with_placeholder(placeholder))
+            cx.new(|cx| InputState::editing(text, select, cx).with_label(label).with_placeholder(placeholder))
         };
         let title = field(
             spec.as_ref().map(|spec| spec.title.clone()).unwrap_or_default(),
@@ -178,7 +178,7 @@ impl WindowView {
         );
         let prompt_text = spec.as_ref().map(|spec| spec.prompt.clone()).unwrap_or_default();
         let prompt = cx.new(|cx| {
-            let mut area = TextArea::new(cx);
+            let mut area = TextareaState::new(cx);
             area.set_line_limits(3, 10, cx);
             area.set_label(rust_i18n::t!("todo_board.dialog.prompt"), cx);
             area.set_placeholder(rust_i18n::t!("todo_board.dialog.prompt_placeholder").into_owned().into(), cx);
@@ -204,15 +204,15 @@ impl WindowView {
         // 输入框里回车保存，Esc 关掉对话框；提示词里 ⌘回车保存。
         let mut events = Vec::new();
         for input in [&title, &agent, &at, &clock, &minutes] {
-            events.push(cx.subscribe_in(input, window, |this, _, event: &TextFieldEvent, window, cx| match event {
-                TextFieldEvent::Next => this.save_todo_dialog(cx),
-                TextFieldEvent::Dismiss => this.close_todo_dialog(window, cx),
-                TextFieldEvent::Changed(_) | TextFieldEvent::Previous => {}
+            events.push(cx.subscribe_in(input, window, |this, _, event: &InputEvent, window, cx| match event {
+                InputEvent::Next => this.save_todo_dialog(cx),
+                InputEvent::Dismiss => this.close_todo_dialog(window, cx),
+                InputEvent::Changed(_) | InputEvent::Previous => {}
             }));
         }
-        events.push(cx.subscribe_in(&prompt, window, |this, _, event: &TextAreaEvent, _, cx| match event {
-            TextAreaEvent::Submit => this.save_todo_dialog(cx),
-            TextAreaEvent::Changed => {}
+        events.push(cx.subscribe_in(&prompt, window, |this, _, event: &TextareaEvent, _, cx| match event {
+            TextareaEvent::Submit => this.save_todo_dialog(cx),
+            TextareaEvent::Changed => {}
         }));
         window.focus(&title.focus_handle(cx), cx);
         self.todo_dialog = Some(TodoDialog {

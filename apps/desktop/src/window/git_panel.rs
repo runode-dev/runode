@@ -59,7 +59,7 @@ use crate::{
         font_size::{FontSize, scaled},
         hsla,
         scrollbar::list_scrollbar,
-        text_area::{TextArea, TextAreaEvent},
+        textarea::{TextareaEvent, TextareaState},
         tooltip::tooltip,
     },
 };
@@ -216,16 +216,16 @@ impl WindowView {
         let panel = self.workspaces[self.active].project.git_panel.repo_mut(root);
         if panel.commit_box.is_none() {
             let area = cx.new(|cx| {
-                let mut area = TextArea::new(cx);
+                let mut area = TextareaState::new(cx);
                 area.set_line_limits(COMMIT_BOX_LINES.0, COMMIT_BOX_LINES.1, cx);
                 area.set_label(rust_i18n::t!("git.message_label"), cx);
                 area
             });
             let target = root.to_path_buf();
             let events =
-                cx.subscribe_in(&area, window, move |this, _, event: &TextAreaEvent, window, cx| match event {
-                    TextAreaEvent::Submit => this.submit_commit_box(target.clone(), window, cx),
-                    TextAreaEvent::Changed => cx.notify(),
+                cx.subscribe_in(&area, window, move |this, _, event: &TextareaEvent, window, cx| match event {
+                    TextareaEvent::Submit => this.submit_commit_box(target.clone(), window, cx),
+                    TextareaEvent::Changed => cx.notify(),
                 });
             panel.commit_box = Some(area);
             panel.commit_events = Some(events);

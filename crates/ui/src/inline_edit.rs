@@ -6,11 +6,11 @@ use runode_shared_types::color::Rgb;
 
 use crate::{
     hsla,
-    text_field::{TextField, TextFieldEvent},
+    input::{InputEvent, InputState},
 };
 
 pub struct InlineEdit {
-    pub field: Entity<TextField>,
+    pub field: Entity<InputState>,
     _subscriptions: [Subscription; 2],
 }
 
@@ -26,13 +26,13 @@ impl InlineEdit {
         window: &mut Window,
         cx: &mut Context<V>,
     ) -> Self {
-        let field = cx.new(|cx| TextField::editing(text, select, cx).with_label(label));
+        let field = cx.new(|cx| InputState::editing(text, select, cx).with_label(label));
         // 输入框原本是搜索框：回车是「下一个」，Esc 是「关闭搜索」，在这里分别是确定和取消。
-        let events = cx.subscribe_in(&field, window, move |this, _, event: &TextFieldEvent, window, cx| match event {
-            TextFieldEvent::Next => finish(this, true, window, cx),
-            TextFieldEvent::Dismiss => finish(this, false, window, cx),
-            TextFieldEvent::Changed(_) => cx.notify(),
-            TextFieldEvent::Previous => {}
+        let events = cx.subscribe_in(&field, window, move |this, _, event: &InputEvent, window, cx| match event {
+            InputEvent::Next => finish(this, true, window, cx),
+            InputEvent::Dismiss => finish(this, false, window, cx),
+            InputEvent::Changed(_) => cx.notify(),
+            InputEvent::Previous => {}
         });
         let focus = field.focus_handle(cx);
         let blur = cx.on_blur(&focus, window, move |this, window, cx| {

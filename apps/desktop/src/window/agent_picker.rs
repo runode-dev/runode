@@ -20,7 +20,7 @@ use crate::ui::{
     display_dir,
     font_size::{FontSize, scaled},
     hsla,
-    text_field::{TextField, TextFieldEvent},
+    input::{InputEvent, InputState},
 };
 
 /// 浮层的宽度；窗口窄时随窗口收窄。
@@ -33,7 +33,7 @@ const INPUT_HEIGHT: f32 = 34.;
 
 /// 开着的 agent 列表。
 pub(super) struct AgentPicker {
-    field: Entity<TextField>,
+    field: Entity<InputState>,
     /// 选中的那一行的分屏；状态变化让行重新排序时选中项跟着走。还没选过或者它不在列表里了时
     /// 选第一行。
     selected: Option<EntityId>,
@@ -51,22 +51,22 @@ impl WindowView {
             return;
         }
         let field = cx.new(|cx| {
-            TextField::new(String::new(), cx)
+            InputState::new(String::new(), cx)
                 .with_label(rust_i18n::t!("agent.picker.filter"))
                 .with_placeholder(rust_i18n::t!("search.placeholder"))
         });
         // 输入框原本是搜索框：回车是「下一个」，Esc 是「关闭搜索」，在这里分别是跳过去和关掉。
-        let events = cx.subscribe_in(&field, window, |this, _, event: &TextFieldEvent, window, cx| match event {
-            TextFieldEvent::Changed(_) => {
+        let events = cx.subscribe_in(&field, window, |this, _, event: &InputEvent, window, cx| match event {
+            InputEvent::Changed(_) => {
                 if let Some(picker) = &mut this.agent_picker {
                     picker.selected = None;
                     picker.scroll.scroll_to_item(0);
                 }
                 cx.notify();
             }
-            TextFieldEvent::Next => this.confirm_agent_picker(window, cx),
-            TextFieldEvent::Dismiss => this.close_agent_picker(window, cx),
-            TextFieldEvent::Previous => {}
+            InputEvent::Next => this.confirm_agent_picker(window, cx),
+            InputEvent::Dismiss => this.close_agent_picker(window, cx),
+            InputEvent::Previous => {}
         });
         let focus = field.focus_handle(cx);
         // 点到别处就关掉；切到别的应用时窗口失去焦点，回来接着用。
@@ -289,7 +289,7 @@ pub(super) fn nav_delta(event: &KeyDownEvent) -> Option<isize> {
 /// 下方正中。
 pub(super) fn picker_panel(
     panel: Stateful<Div>,
-    field: Entity<TextField>,
+    field: Entity<InputState>,
     list: Stateful<Div>,
     fg: Hsla,
     panel_bg: Hsla,
