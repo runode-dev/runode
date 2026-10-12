@@ -304,6 +304,8 @@ impl Shared {
         if todo.done_at.is_some() {
             return Err(format!("todo {id} is done"));
         }
+        // 别的程序可以不经宿主直接写库（`runode_todo::Store`），所以要打进 shell 之前再查一遍。
+        check_spec(&todo.spec)?;
         if let Some(session) = todo.session
             && self.registry().sessions.contains_key(&session)
         {

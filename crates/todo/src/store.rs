@@ -13,7 +13,7 @@ use runode_protocol::{
     SessionId,
     todo::{Schedule, Todo, TodoSpec, When},
 };
-use rusqlite::{Connection, OptionalExtension as _, Row, Transaction, params};
+use rusqlite::{Connection, OptionalExtension as _, Row, Transaction, TransactionBehavior, params};
 
 /// 这个版本认得的表结构。2 加了任务的编号（`todos.number`）和发编号的计数（`meta`）。
 const VERSION: i64 = 2;
@@ -185,19 +185,20 @@ impl Store {
         if let Some(dir) = path.parent() {
             std::fs::create_dir_all(dir).map_err(|err| format!("cannot create {}: {err}", dir.display()))?;
         }
-        let conn = Connection::open(path).map_err(|err| format!("cannot open {}: {err}", path.display()))?;
+        let mut conn = Connection::open(path).map_err(|err| format!("cannot open {}: {err}", path.display()))?;
         conn.busy_timeout(Duration::from_secs(5)).map_err(failed)?;
-        let version: i64 = conn.query_row("PRAGMA user_version", [], |row| row.get(0)).map_err(failed)?;
+        // 事务一开始就拿写锁：几个进程同时先读后写时，DEFERRED 事务抢写锁会直接报库被锁，不按
+        // `busy_timeout` 等。查版本和建表、升级也在同一个事务里，两个进程同时第一次打开时后到的看到建好的表。
+        conn.set_transaction_behavior(TransactionBehavior::Immediate);
+        let tx = conn.transaction().map_err(failed)?;
+        let version: i64 = tx.query_row("PRAGMA user_version", [], |row| row.get(0)).map_err(failed)?;
         match version {
-            0 => conn
-                .execute_batch(&format!("BEGIN; {SCHEMA} PRAGMA user_version = {VERSION}; COMMIT;"))
-                .map_err(failed)?,
-            1 => conn
-                .execute_batch(&format!("BEGIN; {MIGRATE_TO_2} PRAGMA user_version = {VERSION}; COMMIT;"))
-                .map_err(failed)?,
+            0 => tx.execute_batch(&format!("{SCHEMA} PRAGMA user_version = {VERSION};")).map_err(failed)?,
+            1 => tx.execute_batch(&format!("{MIGRATE_TO_2} PRAGMA user_version = {VERSION};")).map_err(failed)?,
             VERSION => {}
             newer => return Err(format!("{} was written by a newer runode (schema {newer})", path.display())),
         }
+        tx.commit().map_err(failed)?;
         Ok(Self { conn })
     }
 

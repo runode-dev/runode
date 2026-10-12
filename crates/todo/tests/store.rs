@@ -172,3 +172,28 @@ fn numbers_the_todos_of_a_version_1_database_in_the_order_they_were_added() {
     let added = store.add_todo(&spec("c"), 3, None).unwrap();
     assert_eq!(store.todo_by_id(&added).unwrap().unwrap().number, 3);
 }
+
+/// 两个进程同时加任务时都等对方写完，不报库被锁：先读后写的事务一开始就拿写锁，`busy_timeout` 才管用。
+#[test]
+fn concurrent_writers_wait_for_each_other() {
+    let path = temp_db("concurrent");
+    drop(Store::open(&path).unwrap());
+    let writers: Vec<_> = (0..2)
+        .map(|_| {
+            let path = path.clone();
+            std::thread::spawn(move || {
+                let mut store = Store::open(&path).unwrap();
+                for at in 0..50 {
+                    store.add_todo(&spec("t"), at, None).unwrap();
+                }
+            })
+        })
+        .collect();
+    for writer in writers {
+        writer.join().unwrap();
+    }
+    let mut numbers: Vec<u64> =
+        Store::open(&path).unwrap().list_todos(100).unwrap().into_iter().map(|todo| todo.number).collect();
+    numbers.sort_unstable();
+    assert_eq!(numbers, (1..=100).collect::<Vec<_>>());
+}

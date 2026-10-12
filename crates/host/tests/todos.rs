@@ -297,3 +297,15 @@ fn schedules_keep_a_standalone_host_up() {
     drop(peer);
     assert_eq!(stopped.join().unwrap(), Stopped::Idle);
 }
+
+/// 别的程序直接写进库里的任务，开始时宿主照样检查：agent 里带换行的不打进 shell。
+#[test]
+fn a_bad_todo_written_straight_into_the_database_does_not_start() {
+    let (_host, dir, mut peer) = board("todo-bad-db");
+    let id = runode_todo::Store::open(&dir.join("todos.db"))
+        .unwrap()
+        .add_todo(&spec("Bad", &dir, "true\ntouch pwned"), 1, None)
+        .unwrap();
+    let reply = ask(&mut peer, &ClientMsg::StartTodo { req: 3, id });
+    assert!(matches!(reply, HostMsg::Error { req: Some(3), .. }), "{reply:?}");
+}
