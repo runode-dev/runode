@@ -1,8 +1,12 @@
-//! agent 停下来等回答时给登记过的手机推一条通知（线上格式和整个流程见 `runode_protocol::push`）。
+//! agent 停下来等回答、任务板上的任务做完时给登记过的手机推一条通知（线上格式和整个流程见
+//! `runode_protocol::push`）。
 //!
 //! `Pusher` 跟着监听活在同一个进程里：开着推送、监听开着、设备表里至少有一条登记时，它像命令行一样
-//! 经 `Connect` 连上宿主（`ClientKind::Cli`），每 `POLL_INTERVAL` 要一次会话列表，交给 `Rounds`
-//! 决定什么时候推，要读屏幕时发 `ReadScreen`；要发的推送交给发送线程（`send`）。不用
+//! 经 `Connect` 连上宿主（`ClientKind::Cli`），每 `POLL_INTERVAL` 要一次会话列表，宿主认得任务板
+//! （`Welcome` 的 `todos`）时接着要一次任务表（`ListTodos`），交给 `Rounds` 决定什么时候推，要读屏幕时
+//! 发 `ReadScreen`；要发的推送交给发送线程（`send`）。两份回话谁先到不一定（宿主另起线程回任务表），
+//! `Rounds` 记着最近一份任务表，会话列表来时一起看；问过 `ListTodos` 后宿主发来的 `TodosChanged`
+//! 不理，下一轮照常要。不用
 //! `Attach`：只看状态的连接也会让会话的 `SessionInfo::clients` 加一，桌面靠它为零回收后台已退出的会话。
 //! 不满足条件时断开这条连接，单独跑的宿主照常能因空闲退出。
 //!
@@ -32,11 +36,10 @@ use std::{
 
 use runode_paths::Dirs;
 use runode_protocol::{
-    BuildId, Caps, ClientKind, ClientMsg, Frame, FrameKind, GoodbyeReason, HostMsg, PROTOCOL_VERSION, SessionId,
+    BuildId, Caps, ClientKind, ClientMsg, Frame, FrameKind, GoodbyeReason, HostMsg, PROTOCOL_VERSION,
     push::{ApnsEnv, Notification, OFFICIAL_BUNDLE, RELAY_URL},
     read_frame, write_frame,
 };
-use runode_shared_types::session::SessionMeta;
 
 pub use self::probe::{TestPush, send_test_push};
 use self::{
@@ -292,7 +295,12 @@ impl Poller {
                     }
                 }
             }
-            if poll && self.host.as_ref().is_some_and(|link| link.send(&ClientMsg::ListSessions).is_err()) {
+            if poll
+                && self.host.as_ref().is_some_and(|link| {
+                    link.send(&ClientMsg::ListSessions).is_err()
+                        || (link.todos && link.send(&ClientMsg::ListTodos { req: 0 }).is_err())
+                })
+            {
                 self.host = None;
                 continue;
             }
@@ -300,7 +308,15 @@ impl Poller {
             let wait = self.next_poll.saturating_duration_since(Instant::now());
             let now = Instant::now();
             let actions = match link.messages.recv_timeout(wait) {
-                Ok(HostMsg::SessionList { sessions }) => rounds.observe(&sessions, now),
+                Ok(HostMsg::SessionList { sessions }) => {
+                    let mut actions = rounds.observe(&sessions, now);
+                    actions.extend(rounds.observe_todos(&sessions, now, crate::now_unix()));
+                    actions
+                }
+                Ok(HostMsg::Todos { todos, .. }) => {
+                    rounds.set_todos(todos);
+                    Vec::new()
+                }
                 Ok(HostMsg::ScreenText { id, text, .. }) => rounds.screen(id, Some(&text)),
                 Ok(HostMsg::Error { id: Some(id), .. }) => rounds.screen(id, None),
                 Ok(HostMsg::Goodbye { reason }) => {
@@ -346,7 +362,17 @@ impl Poller {
                     }
                 }
                 Action::Notify(id, meta, lines) => {
-                    let targets = self.targets(settings, id, &meta, &lines);
+                    let targets = self.targets(settings, |registration| {
+                        Notification::new(registration.machine.clone(), &registration.machine_name, id, &meta, &lines)
+                    });
+                    if !targets.is_empty() {
+                        self.sender.notify(targets);
+                    }
+                }
+                Action::TodoDone(id, title) => {
+                    let targets = self.targets(settings, |registration| {
+                        Notification::todo_done(registration.machine.clone(), &registration.machine_name, id, &title)
+                    });
                     if !targets.is_empty() {
                         self.sender.notify(targets);
                     }
@@ -356,13 +382,11 @@ impl Poller {
         }
     }
 
-    /// 会话 `session` 的通知推给哪些手机，每台手机的通知带着它自己给这台电脑编的标识和名字。
+    /// 一条通知推给哪些手机；`notification` 给每台手机拼它那份，带着它自己给这台电脑编的标识和名字。
     fn targets(
         &mut self,
         settings: &PushSettings,
-        session: SessionId,
-        meta: &SessionMeta,
-        lines: &[String],
+        notification: impl Fn(&PushRegistration) -> Notification,
     ) -> Vec<Target> {
         let mut targets = Vec::new();
         for registration in &self.registrations {
@@ -381,13 +405,7 @@ impl Poller {
                 route,
                 device: registration.device_id,
                 token: registration.token.clone(),
-                notification: Notification::new(
-                    registration.machine.clone(),
-                    &registration.machine_name,
-                    session,
-                    meta,
-                    lines,
-                ),
+                notification: notification(registration),
             });
         }
         targets
@@ -414,6 +432,8 @@ fn route(registration: &PushRegistration, settings: &PushSettings) -> Option<Rou
 struct HostLink {
     stream: UnixStream,
     messages: mpsc::Receiver<HostMsg>,
+    /// 宿主认得任务板（`Welcome` 的 `todos`）；旧宿主不认得，对 `ListTodos` 回 `Error`，不发。
+    todos: bool,
 }
 
 impl HostLink {
@@ -432,7 +452,7 @@ impl HostLink {
                 }
             }
         })?;
-        let link = Self { stream, messages };
+        let mut link = Self { stream, messages, todos: false };
         link.send(&ClientMsg::Hello {
             protocol: PROTOCOL_VERSION,
             // 只在要快照时比对构建，这里不要。
@@ -443,7 +463,10 @@ impl HostLink {
             device: None,
         })?;
         match link.messages.recv_timeout(HELLO_TIMEOUT) {
-            Ok(HostMsg::Welcome { .. }) => Ok(link),
+            Ok(HostMsg::Welcome { todos, .. }) => {
+                link.todos = todos;
+                Ok(link)
+            }
             Ok(HostMsg::Incompatible { reason, .. }) => Err(io::Error::other(format!("the host refused: {reason}"))),
             Ok(_) => Err(io::Error::other("unexpected answer to hello")),
             Err(_) => Err(io::Error::new(io::ErrorKind::TimedOut, "the host did not answer hello")),

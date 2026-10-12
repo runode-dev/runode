@@ -2,7 +2,7 @@ import Foundation
 import RunodeProtocol
 import Testing
 
-/// 宿主（Rust）`runode_protocol::push` 那批照规格写出的推送样例：电脑经 APNs 推来的等回答通知。
+/// 宿主（Rust）`runode_protocol::push` 那批照规格写出的推送样例：电脑经 APNs 推来的等回答、任务做完的通知。
 enum PushSamples {
     static let repository: URL = URL(filePath: #filePath)
         .deletingLastPathComponent()  // RunodeProtocolTests
@@ -28,7 +28,7 @@ private let sampleSession = "0123456789abcdef0011223344556677"
 
 @Suite struct PushTests {
     /// 点开通知时按 `aps` 外面的 `machine`、`session` 打开那个会话；同一台电脑的通知按 `thread-id` 归在一组。
-    @Test(arguments: ["apns_notify.json", "apns_notify_unnamed.json"])
+    @Test(arguments: ["apns_notify.json", "apns_notify_unnamed.json", "apns_todo_done.json"])
     func notificationsCarryTheSession(_ name: String) throws {
         let payload = try PushSamples.payload(name)
         #expect(SessionLink(userInfo: payload) == SessionLink(machine: sampleMachine, session: sampleSession))
@@ -38,7 +38,7 @@ private let sampleSession = "0123456789abcdef0011223344556677"
 
     /// 通知的标题、副标题由手机按 loc-key 查 App 的 String Catalog 拼出来：样例里用到的键每种语言都要有，
     /// 占位符的个数和 loc-args 的个数一样。
-    @Test(arguments: ["apns_notify.json", "apns_notify_unnamed.json"])
+    @Test(arguments: ["apns_notify.json", "apns_notify_unnamed.json", "apns_todo_done.json"])
     func alertKeysAreLocalized(_ name: String) throws {
         let aps = try #require(PushSamples.payload(name)["aps"] as? [String: Any])
         let alert = try #require(aps["alert"] as? [String: Any])

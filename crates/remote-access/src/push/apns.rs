@@ -11,7 +11,7 @@ use ring::{
     signature::{ECDSA_P256_SHA256_FIXED_SIGNING, EcdsaKeyPair},
 };
 use runode_protocol::{
-    push::{ApnsEnv, EXPIRES_AFTER, Notification, PushError, RELAY_NOTIFY, RelayNotify, notify_payload},
+    push::{ApnsEnv, EXPIRES_AFTER, Notification, PushError, RelayNotify, notify_payload},
     remote::{decode_base64url, encode_base64url},
 };
 
@@ -141,7 +141,9 @@ pub(crate) fn request(
             let notify = RelayNotify::new(route.env, token.to_owned(), notification, now).ok_or_else(too_big)?;
             // 只有结构体、字符串和数，编不出来的情况实际不会有。
             let body = serde_json::to_vec(&notify).unwrap_or_default();
-            let url = format!("{}{RELAY_NOTIFY}", relay.trim_end_matches('/'));
+            // 接口按通知的种类分：旧中转没有 v3 的接口，回 404，按 `outcome` 算推不了、不重试。
+            let (_, path) = notification.kind.relay();
+            let url = format!("{}{path}", relay.trim_end_matches('/'));
             Ok(Request { method: "POST", url, headers: Vec::new(), body: Some(body) })
         }
     }
@@ -218,7 +220,7 @@ pub(super) fn test_key(dir: &Path) -> (std::path::PathBuf, Vec<u8>) {
 #[cfg(test)]
 mod tests {
     use ring::signature::{ECDSA_P256_SHA256_FIXED, UnparsedPublicKey};
-    use runode_protocol::SessionId;
+    use runode_protocol::{SessionId, push::NotificationKind};
 
     use super::*;
 
@@ -266,6 +268,7 @@ mod tests {
             title: "t".into(),
             agent: "Claude Code".into(),
             lines: vec!["Proceed?".into()],
+            kind: NotificationKind::Blocked,
         }
     }
 
@@ -310,6 +313,13 @@ mod tests {
         assert_eq!(body, RelayNotify::new(ApnsEnv::Production, "00ff".into(), &notification, 5).unwrap());
         // 没带中转的构建发不了。
         assert!(request(route, "00ff", &notification, None, None, 5).is_err());
+
+        // 任务做完的走 v3：旧中转不认得 `kind`，发到 v2 会被拼成等回答。
+        let done = Notification::todo_done("M".into(), "Mac", SessionId(1), "t");
+        let push = request(route, "00ff", &done, None, Some("https://relay.example"), 5).unwrap();
+        assert_eq!(push.url, "https://relay.example/v3/notify");
+        let body: serde_json::Value = serde_json::from_slice(push.body.as_deref().unwrap()).unwrap();
+        assert_eq!((body["v"].as_u64(), body["notification"]["kind"].as_str()), (Some(3), Some("todo_done")));
     }
 
     fn response(status: u16, headers: &[(&str, &str)], body: &str) -> Result<Response, String> {
@@ -351,6 +361,8 @@ mod tests {
             Outcome::ExpiredJwt
         );
         assert!(matches!(outcome(Via::Direct, response(400, &[], r#"{"reason":"BadTopic"}"#)), Outcome::Failed(_)));
+        // 旧中转没有 v3 的接口：不重试。
+        assert!(matches!(outcome(Via::Relay, response(404, &[], "")), Outcome::Failed(_)));
     }
 
     #[test]

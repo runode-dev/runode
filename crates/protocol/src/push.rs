@@ -1,6 +1,8 @@
 //! agent 停下来等回答时，会话所在电脑的宿主经 APNs 给手机推一条普通通知，标题是「<agent> 在等你回答」，
-//! 副标题是会话标题和电脑名，正文是屏幕底部的问题。这里是推送的线上格式：发给 APNs 的 payload 和请求
-//! 头里要用的值，以及经中转服务发送时的请求体。
+//! 副标题是会话标题和电脑名，正文是屏幕底部的问题。任务板上的任务做完了（agent 干完活停下来，不是在等
+//! 回答）时推另一种（`NotificationKind::TodoDone`），标题是「任务做完了」，副标题是任务标题和电脑名，
+//! 没有正文。这里是推送的线上格式：发给 APNs 的 payload 和请求头里要用的值，以及经中转服务发送时的
+//! 请求体。
 //!
 //! # 流程
 //!
@@ -11,6 +13,8 @@
 //!    一次等回答只推一次，等的时候屏幕上的问题变了不再推。通知的 `apns-collapse-id` 是会话标识
 //!    （`Notification::collapse_id`），同一个会话再等时新通知替掉通知中心里的旧的；`thread-id` 是电脑，
 //!    同一台电脑的通知归在一组。电脑撤不回发出去的通知，答完的由手机打开 App 时自己清掉。
+//! 3. 任务板上的任务从进行中变成需要你、又不是在等回答（agent 干完活停下来）时，电脑同样推一条
+//!    （`Notification::todo_done`），一次做完只推一次；`apns-collapse-id` 也是任务的会话标识。
 //!
 //! 官方 App 的推送经中转服务发（它持有签 APNs 请求的密钥），请求体是 `RelayNotify`；自己签名打包的
 //! App 由电脑拿用户配置的密钥直连 APNs。
@@ -21,9 +25,13 @@
 //! 点开通知时据此打开那个会话。时间是 Unix 秒，由调用方传入 `now`。payload 超过 `MAX_APNS_PAYLOAD`
 //! 字节时先从最上面一行起删 `lines`，删完还超就缩短 `title`，见 `notify_payload`。
 //!
-//! 中转请求体的键是 snake_case，都带 `v`（`RELAY_VERSION`）和 `env`。中转服务按请求体拼出和
-//! `notify_payload` 一样的 payload、带上同样的请求头发给 APNs，所以请求体里的内容已经照 payload 的上限
-//! 删减过。出错时中转服务原样带回 APNs 的 HTTP 状态和 `PushError`，限流时回 429 带 `Retry-After`。
+//! 中转请求体的键是 snake_case，都带 `v` 和 `env`。中转服务按请求体拼出和 `notify_payload` 一样的
+//! payload、带上同样的请求头发给 APNs，所以请求体里的内容已经照 payload 的上限删减过。出错时中转服务
+//! 原样带回 APNs 的 HTTP 状态和 `PushError`，限流时回 429 带 `Retry-After`。
+//!
+//! 等回答的通知发到 `RELAY_NOTIFY`、`v` 是 `RELAY_VERSION`，请求体里没有 `kind`；别的种类发到
+//! `RELAY_NOTIFY_V3`、`v` 是 `RELAY_VERSION_V3`，带 `kind`。分开是因为还没升级的中转服务不认得 `kind`，
+//! 发到 v2 会被拼成「在等你回答」；它对 v3 回 404，这边算推不了、不重试。
 //!
 //! 和 `remote` 一样，`tests/fixtures/push` 里存着照规格另外写出来的样例（不由这里的类型生成），手机端
 //! 的测试读同一批文件；改格式要两边一起改。
@@ -44,13 +52,17 @@ pub const BLOCKED_LINES: usize = 3;
 /// 通知在 APNs 那里最多留这么多秒（`apns-expiration`）：手机这段时间一直连不上就不送了，等回答的事
 /// 过时了。
 pub const EXPIRES_AFTER: u64 = 30 * 60;
-/// 中转请求体的版本，各请求体的 `v`。
+/// 等回答的通知的中转请求体版本（`v`），发到 `RELAY_NOTIFY`。
 pub const RELAY_VERSION: u32 = 2;
+/// 别的种类的通知（带 `kind`）的中转请求体版本，发到 `RELAY_NOTIFY_V3`。
+pub const RELAY_VERSION_V3: u32 = 3;
 /// 官方中转服务的基址，下面的接口路径接在它后面。只有发布流水线编译时设 `RUNODE_PUSH_RELAY`，
 /// 开发版和自己编译的版本里是 `None`，不经中转推官方 App；本地要测中转时编译前自己设上。
 pub const RELAY_URL: Option<&str> = option_env!("RUNODE_PUSH_RELAY");
-/// 发通知：`POST`，体是 `RelayNotify`，回 200。
+/// 发等回答的通知：`POST`，体是 `v` 为 `RELAY_VERSION` 的 `RelayNotify`，回 200。
 pub const RELAY_NOTIFY: &str = "/v2/notify";
+/// 发别的种类的通知：`POST`，体是 `v` 为 `RELAY_VERSION_V3` 的 `RelayNotify`，回 200。
+pub const RELAY_NOTIFY_V3: &str = "/v3/notify";
 /// 官方 App 的 bundle id：登记的是它时经中转服务推送。
 pub const OFFICIAL_BUNDLE: &str = "dev.runode.mobile";
 /// 没有标题时 `Notification::title` 用的名字。
@@ -59,6 +71,8 @@ const UNTITLED: &str = "终端";
 const TITLE_KEY: &str = "agent.blocked.title";
 const TITLE_KEY_UNNAMED: &str = "agent.blocked.title.unnamed";
 const SUBTITLE_KEY: &str = "agent.blocked.body";
+/// 任务做完的通知的标题，不带参数；副标题和等回答的一样用 `SUBTITLE_KEY`。
+const TODO_DONE_TITLE_KEY: &str = "todo.done.title";
 
 /// 推给哪个 APNs 环境：App Store、TestFlight 装的是 `Production`，Xcode 直接装的是 `Development`。
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -71,7 +85,33 @@ pub enum ApnsEnv {
     Unknown,
 }
 
-/// 一条等回答的通知里的东西。
+/// 通知是哪一种。
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum NotificationKind {
+    /// agent 在等回答。
+    #[default]
+    Blocked,
+    /// 任务板上的任务做完了：agent 干完活停下来，不是在等回答。`Notification` 的 `title` 是任务标题，
+    /// `agent`、`lines` 为空。
+    TodoDone,
+}
+
+impl NotificationKind {
+    fn is_blocked(&self) -> bool {
+        *self == Self::Blocked
+    }
+
+    /// 经中转发时请求体的 `v` 和接口路径，见模块文档。
+    pub fn relay(self) -> (u32, &'static str) {
+        match self {
+            Self::Blocked => (RELAY_VERSION, RELAY_NOTIFY),
+            Self::TodoDone => (RELAY_VERSION_V3, RELAY_NOTIFY_V3),
+        }
+    }
+}
+
+/// 一条通知里的东西。
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Notification {
     /// 手机注册时给这台电脑编的 UUID（`ClientMsg::PushRegister::machine`），原样带回，手机据此认出
@@ -86,6 +126,9 @@ pub struct Notification {
     pub agent: String,
     /// 屏幕底部的问题，最多 `BLOCKED_LINES` 行、每行 `LINE_LIMIT` 个字；不带屏幕文字时为空。
     pub lines: Vec<String>,
+    /// 等回答时不写出来，等回答的线上格式和加它之前一样。
+    #[serde(default, skip_serializing_if = "NotificationKind::is_blocked")]
+    pub kind: NotificationKind,
 }
 
 impl Notification {
@@ -107,6 +150,20 @@ impl Notification {
             title: clipped(title, TEXT_LIMIT),
             agent: agent.to_owned(),
             lines: lines.iter().map(|line| clipped(line, LINE_LIMIT)).collect(),
+            kind: NotificationKind::Blocked,
+        }
+    }
+
+    /// 任务 `title` 做完了：它的会话是 `session`；标题、电脑名截到 `TEXT_LIMIT` 个字。
+    pub fn todo_done(machine: String, machine_name: &str, session: SessionId, title: &str) -> Self {
+        Self {
+            machine,
+            machine_name: clipped(machine_name, TEXT_LIMIT),
+            session,
+            title: clipped(title, TEXT_LIMIT),
+            agent: String::new(),
+            lines: Vec::new(),
+            kind: NotificationKind::TodoDone,
         }
     }
 
@@ -165,7 +222,8 @@ fn indent(line: &str) -> usize {
     line.chars().take_while(|c| c.is_whitespace()).count()
 }
 
-/// 通知的 APNs payload：标题是「<agent> 在等你回答」（没有 agent 时是另一句），副标题是标题和电脑名，
+/// 通知的 APNs payload：标题是「<agent> 在等你回答」（没有 agent 时是另一句，任务做完时是「任务做完了」），
+/// 副标题是标题和电脑名，
 /// 文字在手机端的本地化表里；正文是屏幕上的几行，没有时不写；同一台电脑的归一组（`thread-id`）。
 /// 超过 `MAX_APNS_PAYLOAD` 字节时先从最上面一行起删 `lines`，删完还超就把标题一次次缩短一半；标题
 /// 删光了还超（电脑名没按 `Notification::new` 截过才会）时为 `None`。
@@ -173,10 +231,11 @@ pub fn notify_payload(notification: &Notification) -> Option<Vec<u8>> {
     fit(notification).map(|(bytes, _)| bytes)
 }
 
-/// 经中转服务发通知：中转服务照 `notify_payload` 拼 payload，请求头照直连时的写。
+/// 经中转服务发通知：中转服务照 `notify_payload` 拼 payload，请求头照直连时的写。发到哪个接口、`v` 是几
+/// 看通知的种类（`NotificationKind::relay`）。
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RelayNotify {
-    /// `RELAY_VERSION`。
+    /// `RELAY_VERSION` 或 `RELAY_VERSION_V3`，见 `NotificationKind::relay`。
     pub v: u32,
     pub env: ApnsEnv,
     /// device token，十六进制。
@@ -190,7 +249,8 @@ impl RelayNotify {
     /// 过期时刻是 `now` 加 `EXPIRES_AFTER`，内容照 `notify_payload` 删减到装得下；装不下时为 `None`。
     pub fn new(env: ApnsEnv, token: String, notification: &Notification, now: u64) -> Option<Self> {
         let (_, notification) = fit(notification)?;
-        Some(Self { v: RELAY_VERSION, env, token, expiration: now + EXPIRES_AFTER, notification })
+        let (v, _) = notification.kind.relay();
+        Some(Self { v, env, token, expiration: now + EXPIRES_AFTER, notification })
     }
 }
 
@@ -230,10 +290,10 @@ struct Alert<'a> {
 }
 
 fn encode(notification: &Notification) -> Option<Vec<u8>> {
-    let (title_loc_key, title_loc_args) = if notification.agent.is_empty() {
-        (TITLE_KEY_UNNAMED, Vec::new())
-    } else {
-        (TITLE_KEY, vec![notification.agent.as_str()])
+    let (title_loc_key, title_loc_args) = match notification.kind {
+        NotificationKind::TodoDone => (TODO_DONE_TITLE_KEY, Vec::new()),
+        NotificationKind::Blocked if notification.agent.is_empty() => (TITLE_KEY_UNNAMED, Vec::new()),
+        NotificationKind::Blocked => (TITLE_KEY, vec![notification.agent.as_str()]),
     };
     let alert = Alert {
         title_loc_key,

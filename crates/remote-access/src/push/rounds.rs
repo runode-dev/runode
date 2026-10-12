@@ -7,6 +7,12 @@
 //!
 //! 连上宿主后的第一份列表（`reconnected` 之后）只记下各会话现在的样子：那时已经在等的不算刚开始等，
 //! 交接或者重启后不会再推一遍。
+//!
+//! 任务板上的任务另算（`set_todos`、`observe_todos`）：每份会话列表来时拿最近一份任务表，按
+//! `runode_protocol::todo::column` 推出每个任务在哪一列，从进行中变成需要你、又不是在等回答（那个有上面
+//! 等回答的通知），过了同样的宽限期还是这样时推一条任务做完的通知；一次做完只推一次。会话没了、shell
+//! 退出了也算需要你，但多半是用户自己关的，不推。重连时清掉记着的任务表和各任务的列，第一次看到的任务
+//! 只记基线，规矩同会话。
 
 use std::{
     collections::HashMap,
@@ -16,6 +22,7 @@ use std::{
 use runode_protocol::{
     SessionId, SessionInfo,
     push::{BLOCKED_LINES, preview_lines},
+    todo::{Column, Todo, column},
 };
 use runode_shared_types::{agent::AgentState, session::SessionMeta};
 
@@ -28,6 +35,8 @@ pub(crate) enum Action {
     Notify(SessionId, Box<SessionMeta>, Vec<String>),
     /// 会话不再等了（答了、退出了或者没了）：还没发出去的通知别发了。
     Cancel(SessionId),
+    /// 推一条任务做完的通知：任务的会话和标题。
+    TodoDone(SessionId, String),
 }
 
 /// 各会话等没等回答、推没推过，见模块文档。
@@ -39,6 +48,16 @@ pub(crate) struct Rounds {
     delay: Duration,
     /// 带屏幕上的文字；不带时不读屏幕，`Action::Notify` 的几行为空。
     text: bool,
+    /// 最近一份任务表，见 `set_todos`。
+    todos: Vec<Todo>,
+    /// 各任务（按 `Todo::id`）上一轮在哪一列、什么时候做完的。
+    todo_tracked: HashMap<String, TodoTrack>,
+}
+
+struct TodoTrack {
+    column: Column,
+    /// 什么时候从进行中变成做完的；这次做完还没推时有。
+    finished_at: Option<Instant>,
 }
 
 #[derive(Default)]
@@ -54,7 +73,7 @@ struct Track {
 impl Rounds {
     /// 接着的第一份列表只记现状。
     pub(crate) fn new(delay: Duration, text: bool) -> Self {
-        Self { tracked: HashMap::new(), baseline: true, delay, text }
+        Self { tracked: HashMap::new(), baseline: true, delay, text, todos: Vec::new(), todo_tracked: HashMap::new() }
     }
 
     pub(crate) fn set_options(&mut self, delay: Duration, text: bool) {
@@ -68,6 +87,46 @@ impl Rounds {
         for track in self.tracked.values_mut() {
             track.reading = false;
         }
+        // 断开时的任务表过时了；任务全当第一次看到，只记基线。
+        self.todos.clear();
+        self.todo_tracked.clear();
+    }
+
+    /// 收到一份任务表：留到下一份会话列表来时用（`observe_todos`）。
+    pub(crate) fn set_todos(&mut self, todos: Vec<Todo>) {
+        self.todos = todos;
+    }
+
+    /// 拿最近一份任务表和刚收到的会话列表看任务做没做完，见模块文档。`unix` 是现在的 Unix 秒，
+    /// 推列要用。
+    pub(crate) fn observe_todos(&mut self, sessions: &[SessionInfo], now: Instant, unix: u64) -> Vec<Action> {
+        let mut actions = Vec::new();
+        let mut tracked = HashMap::new();
+        for todo in &self.todos {
+            let info = todo.session.and_then(|id| sessions.iter().find(|info| info.id == id));
+            let column = column(todo, info, unix);
+            // 停下来不是在等回答，会话还在。
+            let finished = column == Column::NeedsYou
+                && info.is_some_and(|info| {
+                    !info.exited && info.meta.agent.is_none_or(|agent| agent.state != AgentState::Blocked)
+                });
+            let previous = self.todo_tracked.remove(&todo.id);
+            let mut finished_at = match previous {
+                _ if !finished => None,
+                Some(TodoTrack { column: Column::InProgress, .. }) => Some(now),
+                Some(track) => track.finished_at,
+                None => None,
+            };
+            if let (Some(at), Some(info)) = (finished_at, info)
+                && now.duration_since(at) >= self.delay
+            {
+                finished_at = None;
+                actions.push(Action::TodoDone(info.id, todo.spec.title.clone()));
+            }
+            tracked.insert(todo.id.clone(), TodoTrack { column, finished_at });
+        }
+        self.todo_tracked = tracked;
+        actions
     }
 
     /// 收到一份会话列表。
@@ -125,7 +184,10 @@ impl Rounds {
 
 #[cfg(test)]
 mod tests {
-    use runode_protocol::SessionInfo;
+    use runode_protocol::{
+        SessionInfo,
+        todo::{Todo, TodoSpec},
+    };
     use runode_shared_types::{
         agent::{Agent, AgentKind},
         grid::GridSize,
@@ -266,5 +328,111 @@ mod tests {
         assert_eq!(rounds.observe(&[blocked(B)], secs(t, 32)), [Action::ReadScreen(B)]);
         rounds.set_options(Duration::ZERO, false);
         assert_eq!(rounds.screen(B, Some("secret")), [notify(B, &[])]);
+    }
+
+    /// 任务板上的任务用的 Unix 秒：任务早过了开始后的宽限期。
+    const UNIX: u64 = 1_760_000_000;
+
+    fn todo(id: &str, session: SessionId) -> Todo {
+        Todo {
+            id: id.into(),
+            spec: TodoSpec {
+                title: format!("任务 {id}"),
+                prompt: String::new(),
+                dir: "/tmp".into(),
+                agent: "claude".into(),
+                worktree: false,
+            },
+            created: UNIX - 200,
+            started: Some(UNIX - 100),
+            session: Some(session),
+            worktree_dir: None,
+            branch: None,
+            done_at: None,
+            schedule: None,
+            rank: 0,
+        }
+    }
+
+    fn idle(id: SessionId) -> SessionInfo {
+        session(id, Some(AgentState::Idle))
+    }
+
+    fn done(id: SessionId) -> Action {
+        Action::TodoDone(id, "任务 1".into())
+    }
+
+    /// 从进行中变成做完，过了宽限期还是做完才推，一次做完只推一次；又干活、又做完是新的一次。
+    #[test]
+    fn finished_todos_are_pushed_once() {
+        let t = Instant::now();
+        let mut rounds = Rounds::new(DELAY, true);
+        rounds.set_todos(vec![todo("1", A)]);
+        assert_eq!(rounds.observe_todos(&[working(A)], t, UNIX), []);
+        assert_eq!(rounds.observe_todos(&[idle(A)], secs(t, 2), UNIX), []);
+        assert_eq!(rounds.observe_todos(&[idle(A)], secs(t, 10), UNIX), []);
+        assert_eq!(rounds.observe_todos(&[idle(A)], secs(t, 12), UNIX), [done(A)]);
+        assert_eq!(rounds.observe_todos(&[idle(A)], secs(t, 30), UNIX), []);
+        // agent 退出、前台回到 shell 也还是同一次做完。
+        let shell = [SessionInfo {
+            meta: SessionMeta { foreground_is_shell: true, ..session(A, None).meta },
+            ..session(A, None)
+        }];
+        assert_eq!(rounds.observe_todos(&shell, secs(t, 32), UNIX), []);
+        assert_eq!(rounds.observe_todos(&[working(A)], secs(t, 34), UNIX), []);
+        assert_eq!(rounds.observe_todos(&shell, secs(t, 36), UNIX), []);
+        assert_eq!(rounds.observe_todos(&shell, secs(t, 46), UNIX), [done(A)]);
+    }
+
+    /// 等回答也是需要你，但那个有等回答的通知：不推做完；等完答了停下来也不算刚做完。宽限期里变成等
+    /// 回答、回去干活的也不推。
+    #[test]
+    fn waiting_and_quick_resumes_are_not_finished() {
+        let t = Instant::now();
+        let mut rounds = Rounds::new(DELAY, true);
+        rounds.set_todos(vec![todo("1", A)]);
+        rounds.observe_todos(&[working(A)], t, UNIX);
+        assert_eq!(rounds.observe_todos(&[blocked(A)], secs(t, 2), UNIX), []);
+        assert_eq!(rounds.observe_todos(&[blocked(A)], secs(t, 60), UNIX), []);
+        assert_eq!(rounds.observe_todos(&[idle(A)], secs(t, 62), UNIX), []);
+        assert_eq!(rounds.observe_todos(&[idle(A)], secs(t, 120), UNIX), []);
+
+        rounds.observe_todos(&[working(A)], secs(t, 200), UNIX);
+        assert_eq!(rounds.observe_todos(&[idle(A)], secs(t, 202), UNIX), []);
+        assert_eq!(rounds.observe_todos(&[blocked(A)], secs(t, 206), UNIX), []);
+        assert_eq!(rounds.observe_todos(&[idle(A)], secs(t, 220), UNIX), []);
+        rounds.observe_todos(&[working(A)], secs(t, 300), UNIX);
+        assert_eq!(rounds.observe_todos(&[idle(A)], secs(t, 302), UNIX), []);
+        assert_eq!(rounds.observe_todos(&[working(A)], secs(t, 306), UNIX), []);
+        assert_eq!(rounds.observe_todos(&[working(A)], secs(t, 330), UNIX), []);
+    }
+
+    /// 第一次看到的任务只记基线；重连后记着的都清掉，做完了一半的也不推。会话没了、shell 退出了不推。
+    #[test]
+    fn todos_start_from_a_baseline() {
+        let t = Instant::now();
+        let mut rounds = Rounds::new(Duration::ZERO, true);
+        rounds.set_todos(vec![todo("1", A), todo("2", B)]);
+        assert_eq!(rounds.observe_todos(&[idle(A), working(B)], t, UNIX), []);
+        // 任务表还没来，用的是上一份。
+        assert_eq!(rounds.observe_todos(&[idle(A), idle(B)], secs(t, 2), UNIX), [Action::TodoDone(B, "任务 2".into())]);
+
+        let mut rounds = Rounds::new(DELAY, true);
+        rounds.set_todos(vec![todo("1", A)]);
+        rounds.observe_todos(&[working(A)], t, UNIX);
+        rounds.observe_todos(&[idle(A)], secs(t, 2), UNIX);
+        rounds.reconnected();
+        assert_eq!(rounds.observe_todos(&[idle(A)], secs(t, 20), UNIX), []);
+        rounds.set_todos(vec![todo("1", A)]);
+        assert_eq!(rounds.observe_todos(&[idle(A)], secs(t, 22), UNIX), []);
+        assert_eq!(rounds.observe_todos(&[idle(A)], secs(t, 60), UNIX), []);
+
+        rounds.observe_todos(&[working(A)], secs(t, 62), UNIX);
+        assert_eq!(rounds.observe_todos(&[], secs(t, 64), UNIX), []);
+        assert_eq!(rounds.observe_todos(&[], secs(t, 100), UNIX), []);
+        rounds.observe_todos(&[working(A)], secs(t, 102), UNIX);
+        let exited = [SessionInfo { exited: true, ..idle(A) }];
+        assert_eq!(rounds.observe_todos(&exited, secs(t, 104), UNIX), []);
+        assert_eq!(rounds.observe_todos(&exited, secs(t, 140), UNIX), []);
     }
 }

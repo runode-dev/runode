@@ -16,9 +16,10 @@ use std::{
 use runode_paths::Dirs;
 use runode_protocol::{
     ClientMsg, Frame, FrameKind, HostMsg, PROTOCOL_VERSION, SessionId, SessionInfo,
-    push::{ApnsEnv, EXPIRES_AFTER, Notification, OFFICIAL_BUNDLE},
+    push::{ApnsEnv, EXPIRES_AFTER, Notification, NotificationKind, OFFICIAL_BUNDLE},
     read_frame,
     remote::{Bytes, DeviceId},
+    todo::{Todo, TodoSpec},
     write_frame,
 };
 use runode_shared_types::{
@@ -159,6 +160,7 @@ fn notification(lines: &[&str]) -> Notification {
         title: "修 bug".into(),
         agent: "Claude Code".into(),
         lines: lines.iter().map(|l| (*l).into()).collect(),
+        kind: NotificationKind::Blocked,
     }
 }
 
@@ -303,6 +305,21 @@ fn backing_off_notifications_are_cancelled_or_replaced() {
     scratch.wait_for(3);
 }
 
+/// 任务做完的通知发到中转的 v3 接口；旧中转没有这个接口、回 404 时算推不了，不重试。
+#[test]
+fn todo_done_needs_the_v3_relay() {
+    let scratch = Scratch::new("v3");
+    let sender = Sender::start(scratch.dirs.clone(), scratch.curl.clone()).unwrap();
+    sender.settings(None, Some("https://relay.example".into()));
+    scratch.rule("/v3/notify", r#"HTTP/2 404\r\n\r\n"#);
+    let done = Notification::todo_done(MACHINE.into(), "Mac", SESSION, "加暗色模式");
+    sender.notify(vec![Target { route: RELAY_PROD, device: DEVICE, token: TOKEN.into(), notification: done }]);
+    let requests = scratch.wait_for(1);
+    assert_eq!(url(&requests[0]), "https://relay.example/v3/notify");
+    thread::sleep(Duration::from_secs(3));
+    scratch.wait_for(1);
+}
+
 /// 在退避的通知：那台手机注销了、换了 token 或者关了推送，就不发了。
 #[test]
 fn backing_off_notifications_follow_the_registrations() {
@@ -317,10 +334,15 @@ fn backing_off_notifications_follow_the_registrations() {
     scratch.wait_for(1);
 }
 
-/// 假的宿主：每条连接一个线程，回 `Welcome`、会话列表和屏幕文字。
+/// 假的宿主：每条连接一个线程，回 `Welcome`、会话列表和屏幕文字；有任务表时说认得任务板，回任务表，
+/// 回完紧跟一条 `TodosChanged`。
 #[derive(Clone, Default)]
 struct FakeHost {
     sessions: Arc<Mutex<Vec<SessionInfo>>>,
+    /// 任务表；为 `None` 时是不认得任务板的旧宿主。
+    todos: Arc<Mutex<Option<Vec<Todo>>>>,
+    /// 收到过几条 `ListTodos`。
+    list_todos: Arc<AtomicUsize>,
     connections: Arc<AtomicUsize>,
     /// 宿主这头的各条连接，`hang_up` 用。
     streams: Arc<Mutex<Vec<UnixStream>>>,
@@ -353,10 +375,19 @@ impl FakeHost {
                         standalone: false,
                         handoff: 0,
                         keep_awake: false,
-                        todos: false,
+                        todos: self.todos.lock().unwrap().is_some(),
                     }
                 }
                 ClientMsg::ListSessions => HostMsg::SessionList { sessions: self.sessions.lock().unwrap().clone() },
+                ClientMsg::ListTodos { req } => {
+                    self.list_todos.fetch_add(1, Ordering::SeqCst);
+                    let todos = self.todos.lock().unwrap().clone().expect("an old host got ListTodos");
+                    let frame = Frame::control(&HostMsg::Todos { req, todos, schedules: Vec::new() }).unwrap();
+                    if write_frame(&mut stream, FrameKind::Control, frame.channel, &frame.payload).is_err() {
+                        return;
+                    }
+                    HostMsg::TodosChanged
+                }
                 ClientMsg::ReadScreen { id, lines, .. } => {
                     assert_eq!(lines, Some(30));
                     HostMsg::ScreenText { id, text: "Do you want to proceed?\n❯ 1. Yes\n".into(), truncated: false }
@@ -439,6 +470,60 @@ fn the_pusher_follows_the_host() {
     host.set(AgentState::Blocked);
     thread::sleep(Duration::from_secs(3));
     assert_eq!(host.connections.load(Ordering::SeqCst), 1);
+    assert_eq!(scratch.requests().len(), 1);
+    // 宿主不认得任务板：不要任务表。
+    assert_eq!(host.list_todos.load(Ordering::SeqCst), 0);
+}
+
+/// 任务从进行中变成做完：经中转的 v3 接口推一条任务做完的通知，不推等回答的。
+#[test]
+fn finished_todos_are_pushed() {
+    let scratch = Scratch::new("pusher-todo");
+    let host = FakeHost::default();
+    host.set(AgentState::Working);
+    let now = crate::now_unix();
+    let todo = Todo {
+        id: "0000002a".into(),
+        spec: TodoSpec {
+            title: "加暗色模式".into(),
+            prompt: String::new(),
+            dir: "/tmp".into(),
+            agent: "claude".into(),
+            worktree: false,
+        },
+        created: now - 200,
+        started: Some(now - 100),
+        session: Some(SESSION),
+        worktree_dir: None,
+        branch: None,
+        done_at: None,
+        schedule: None,
+        rank: 0,
+    };
+    *host.todos.lock().unwrap() = Some(vec![todo]);
+    let pusher = Pusher::start_with(scratch.dirs.clone(), host.connect(), scratch.curl.clone()).unwrap();
+    pusher.set_settings(PushSettings {
+        delay: Duration::ZERO,
+        relay: Some("https://relay.example".into()),
+        ..PushSettings::default()
+    });
+    pusher.set_listening(Listening::On);
+    scratch.register(ApnsEnv::Production, OFFICIAL_BUNDLE);
+    wait_until("the pusher reads the todos", || host.list_todos.load(Ordering::SeqCst) >= 2);
+
+    host.set(AgentState::Idle);
+    let requests = scratch.wait_for(1);
+    assert_eq!(url(&requests[0]), "https://relay.example/v3/notify");
+    let notify = body(&requests[0]);
+    assert_eq!(notify["v"], 3);
+    let notification = &notify["notification"];
+    assert_eq!(
+        (notification["kind"].as_str(), notification["title"].as_str()),
+        (Some("todo_done"), Some("加暗色模式"))
+    );
+    assert_eq!(notification["session"], SESSION.to_string());
+    // 一直停着不再推。
+    thread::sleep(Duration::from_millis(2500));
     assert_eq!(scratch.requests().len(), 1);
 }
 

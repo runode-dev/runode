@@ -7,8 +7,8 @@ use std::path::Path;
 use runode_protocol::{
     SessionId,
     push::{
-        ApnsEnv, BLOCKED_LINES, LINE_LIMIT, MAX_APNS_PAYLOAD, Notification, PushError, RelayNotify, TEXT_LIMIT,
-        notify_payload, preview_lines,
+        ApnsEnv, BLOCKED_LINES, LINE_LIMIT, MAX_APNS_PAYLOAD, Notification, NotificationKind, PushError, RELAY_NOTIFY,
+        RELAY_NOTIFY_V3, RelayNotify, TEXT_LIMIT, notify_payload, preview_lines,
     },
 };
 use runode_shared_types::{
@@ -80,6 +80,23 @@ fn relay_requests_match_the_fixtures() {
     assert_eq!(notify.expiration, NOW + 1800);
     matches("relay_notify.json", &notify);
     matches("push_error.json", &PushError { reason: "BadDeviceToken".into() });
+}
+
+/// 任务做完的通知：标题换成任务做完的键、不带参数，副标题同等回答的；没有正文。中转请求体带 `kind`、
+/// `v` 是 3，发到 v3 的接口；等回答的仍是 v2，请求体里没有 `kind`。
+#[test]
+fn todo_done_notifications_match_the_fixtures() {
+    let done = Notification::todo_done(MACHINE.into(), "Ethan 的 MacBook Pro", SESSION, "给设置页加暗色模式");
+    assert_eq!(String::from_utf8(notify_payload(&done).unwrap()).unwrap(), fixture("apns_todo_done.json"));
+    assert_eq!(done.collapse_id(), "0123456789abcdef0011223344556677");
+    let notify = RelayNotify::new(ApnsEnv::Production, TOKEN.into(), &done, NOW).unwrap();
+    matches("relay_notify_todo_done.json", &notify);
+    assert_eq!(done.kind.relay(), (3, RELAY_NOTIFY_V3));
+    assert_eq!(NotificationKind::Blocked.relay(), (2, RELAY_NOTIFY));
+    assert_eq!((RELAY_NOTIFY, RELAY_NOTIFY_V3), ("/v2/notify", "/v3/notify"));
+
+    let long = Notification::todo_done("m".into(), &"名".repeat(60), SESSION, &"长".repeat(60));
+    assert_eq!((long.title.chars().count(), long.machine_name.chars().count()), (TEXT_LIMIT, TEXT_LIMIT));
 }
 
 /// 中转请求体里的内容和直连时的 payload 一样照上限删减过：中转服务拼出的 payload 也装得下。

@@ -731,6 +731,30 @@
         }
       }
     },
+    "todo.done.title" : {
+      "comment" : "电脑推来的任务做完通知的标题（APNs 的 title-loc-key），不带参数；副标题同 agent.blocked.body，是任务标题和电脑名。",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Task finished"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "任务做完了"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "任務做完了"
+          }
+        }
+      }
+    },
     "−%u" : {
       "extractionState" : "manual",
       "localizations" : {
