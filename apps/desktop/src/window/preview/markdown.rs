@@ -1542,12 +1542,15 @@ impl WindowView {
             cx.spawn(async move |this, cx| {
                 let picture = pending.await.ok().flatten();
                 this.update(cx, |this, cx| {
+                    // 文档关了也下好了，照样算进留着的总量里。
+                    if picture.is_some() {
+                        remote::trim(&url, cx);
+                    }
                     if cancel.load(Ordering::Relaxed) {
                         return;
                     }
                     if let Some((preview, _)) = this.preview_for(id, &cancel) {
                         preview.markdown_view.remote.insert(url.clone(), picture);
-                        remote::trim(&url, cx);
                         cx.notify();
                     }
                 })
