@@ -23,13 +23,17 @@ use super::{
     AGENT_MARK_WIDTH, CARD_GAP, ClosePane, DIVIDER_GRAB_WIDTH, Divider, NewSplitDown, NewSplitRight, NewTab,
     PANE_HEADER_HEIGHT, PressDown, TogglePaneFold, TogglePaneZoom, WindowView,
     agents::logo::agent_logo,
-    card, cards,
+    cards,
     files::DraggedFile,
     model::Tab,
     status_bar,
     titlebar::{pane_label, styled_agent_mark},
 };
 use crate::ui::button::{Button, ButtonSize, ButtonVariant};
+use crate::ui::{
+    badge::{Badge, BadgeVariant},
+    card::Card,
+};
 use crate::{
     assets::{
         CHEVRON_UP_ICON, CLOSE_ICON, MAXIMIZE_ICON, MINIMIZE_ICON, MINUS_ICON, SPLIT_DOWN_ICON, SPLIT_RIGHT_ICON,
@@ -188,7 +192,7 @@ impl WindowView {
                     .child(rust_i18n::t!("workspace.empty").into_owned()),
             )
             .child(button);
-        if cards(cx) { card(cx).size_full().child(empty).into_any_element() } else { empty.into_any_element() }
+        if cards(cx) { Card::new().size_full().child(empty).into_any_element() } else { empty.into_any_element() }
     }
 
     /// 当前标签里各个正被操作的分屏上要显示的驱动标记。
@@ -287,15 +291,8 @@ impl WindowView {
         let layout = self.layout.clone();
         let badge = badges.get(&id).map(|text| driver_badge(("driver-badge", id), text.clone(), fg, bg));
         let cards = cards(cx);
-        // 每个分屏报成一组，名字是标题条上写的；分了屏时标出哪个是当前分屏。
-        let (name, dir) = pane_label(view.read(cx));
+        let label = pane_label(view.read(cx));
         let (split, focused) = (!tab.zoomed && !tab.root.is_leaf(), id == tab.focused);
-        let pane_group = move |el: Stateful<Div>| {
-            el.role(Role::Group)
-                .aria_label(name)
-                .when_some(dir, |el, dir| el.aria_description(dir))
-                .when(split, |el| el.aria_selected(focused))
-        };
         let terminal = div()
             .relative()
             .when(!cards, |terminal| terminal.size_full())
@@ -331,14 +328,14 @@ impl WindowView {
                 this.drop_paths_on_pane(id, dropped.paths(), window, cx);
             }));
         if !cards {
-            return pane_group(terminal.id(("pane", id))).into_any_element();
+            return pane_group(terminal.id(("pane", id)), label, split, focused).into_any_element();
         }
         let group = SharedString::from(format!("pane-{}", id.as_u64()));
         // 折叠的分屏只画标题条（摆在终端区底部，见 `render_panes`），终端不画；位置照样记下，按方向
         // 切换时能切过去。
         if split && tab.folded(id) {
             let layout = self.layout.clone();
-            return pane_group(card(cx).id(("pane", id)))
+            return pane_group(Card::new().id(("pane", id)), label, split, focused)
                 .aria_expanded(false)
                 .group(group.clone())
                 .relative()
@@ -355,7 +352,7 @@ impl WindowView {
         // 卡片：上面是标题条，下面是终端。终端四周留一点，它的方角落在卡片的圆角里面。终端用四边
         // 定位撑满标题条下面的部分：百分比的高度在这里会按整张卡片算，比剩下的高出一个标题条。
         let inset = px(4.);
-        pane_group(card(cx).id(("pane", id)))
+        pane_group(Card::new().id(("pane", id)), label, split, focused)
             .when(split, |el| el.aria_expanded(true))
             .group(group.clone())
             .size_full()
@@ -776,27 +773,39 @@ impl WindowView {
     }
 }
 
+/// 把分屏报成一组，名字（`label`）是标题条上写的；分了屏（`split`）时标出它是不是当前分屏。经典样式下
+/// 是终端本身，卡片样式下是那张卡片。
+fn pane_group<E: StatefulInteractiveElement + IntoElement>(
+    el: E,
+    (name, dir): (SharedString, Option<SharedString>),
+    split: bool,
+    focused: bool,
+) -> E {
+    el.role(Role::Group)
+        .aria_label(name)
+        .when_some(dir, |el, dir| el.aria_description(dir))
+        .when(split, |el| el.aria_selected(focused))
+}
+
 /// 分屏右上角的驱动标记。没有鼠标处理，点击照样落到下面的终端上。
-fn driver_badge(id: impl Into<gpui::ElementId>, text: SharedString, fg: Rgb, bg: Rgb) -> Stateful<Div> {
-    let panel = hsla(bg.mix(fg, 0.12));
-    let fg = hsla(fg);
-    div()
+fn driver_badge(id: impl Into<gpui::ElementId>, text: SharedString, fg: Rgb, bg: Rgb) -> Badge {
+    Badge::new(text.clone())
+        .variant(BadgeVariant::Outline)
         .id(id)
         .role(Role::Status)
-        .aria_label(text.clone())
+        .aria_label(text)
         .absolute()
         .top(px(6.))
         .right(px(10.))
         .max_w(relative(0.8))
+        .min_w_0()
+        .h_auto()
         .px(px(8.))
         .py(px(3.))
         .rounded(px(6.))
-        .bg(panel.opacity(0.92))
-        .border_1()
-        .border_color(fg.opacity(0.15))
+        .bg(hsla(bg.mix(fg, 0.12)).opacity(0.92))
         .text_size(FontSize::Small)
-        .text_color(fg.opacity(0.8))
-        .child(div().min_w_0().truncate().child(text))
+        .text_color(hsla(fg).opacity(0.8))
 }
 
 #[cfg(test)]

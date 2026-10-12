@@ -56,6 +56,7 @@ use crate::{
         VIEW_LIST_ICON, VIEW_TREE_ICON,
     },
     ui::{
+        badge::{Badge, BadgeVariant},
         font_size::{FontSize, scaled},
         hsla,
         scrollbar::list_scrollbar,
@@ -542,7 +543,7 @@ impl WindowView {
             .child(div().flex_initial().min_w_0().truncate().font_weight(gpui::FontWeight::SEMIBOLD).child(name))
             .child(div().flex_1().min_w_0().truncate().text_size(FontSize::Small).text_color(dim).child(detail))
             .child(more)
-            .when(changed > 0, |title| title.child(list::count_badge(changed, fg, bg)))
+            .when(changed > 0, |title| title.child(Badge::new(changed.to_string()).variant(BadgeVariant::Secondary)))
             .on_press_down(cx, move |this, window, cx| {
                 // 收起时焦点还在这块的说明框里的话，按键就没处去了，交给面板。
                 if this.commit_box(&root).is_some_and(|area| area.focus_handle(cx).is_focused(window)) {

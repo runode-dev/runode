@@ -17,6 +17,7 @@ use crate::{
     assets::{CLOSE_ICON, FOLDER_OPEN_ICON, GLOBE_ICON, PLUS_ICON},
     ui::{
         a11y::Press,
+        card::Card,
         font_size::FontSize,
         hsla,
         input::{Input, InputEvent, InputState},
@@ -156,11 +157,9 @@ impl WindowView {
         let dialog = self.new_workspace.as_ref()?;
         let panel_bg = hsla(bg.mix(fg, 0.03));
         let hover_bg = hsla(bg.mix(fg, 0.06));
-        let card_bg = hsla(bg);
         let fg = hsla(fg);
         let border = fg.opacity(0.12);
-        let card =
-            || div().flex().flex_col().rounded(px(10.)).overflow_hidden().bg(card_bg).border_1().border_color(border);
+        let card = || Card::new().flex().flex_col().overflow_hidden();
         // 一个来源一行：左边图标，右边标题和一行说明，整行可点。
         let option = |id: &'static str, icon: &'static str, title: SharedString, hint: SharedString| {
             div()

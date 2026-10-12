@@ -1,9 +1,10 @@
-//! 窗口外框和右侧面板共用的写法：卡片样式的卡片、面板的外框、顶上那一条、标题行和居中的说明，以及改动
+//! 窗口外框和右侧面板共用的写法：面板的外框、顶上那一条、标题行和居中的说明，以及改动
 //! 行数的标签。颜色从主题读（分隔线是 `Theme::border`），所以只在 render 里调。
 
-use gpui::{App, BoxShadow, Div, Hsla, MouseButton, Role, Stateful, div, point, prelude::*, px, svg};
+use gpui::{App, Div, MouseButton, Role, Stateful, div, prelude::*, px, svg};
 
 use crate::{
+    card::card_style,
     drag_window, hsla,
     icons::{CHEVRON_DOWN_ICON, CHEVRON_RIGHT_ICON},
     theme::{ADDED, ActiveTheme as _, REMOVED},
@@ -17,20 +18,6 @@ pub const CARD_RADIUS: f32 = 10.;
 pub const PANE_HEADER_HEIGHT: f32 = 30.;
 /// 分隔线两边各留这么宽能按住拖动。
 pub const DIVIDER_GRAB_WIDTH: f32 = 6.;
-
-/// 卡片的外观：终端背景色的圆角块，一圈淡淡的边和一点阴影，从外框上浮起来。
-pub fn card(cx: &App) -> Div {
-    let theme = cx.theme();
-    div().rounded(px(CARD_RADIUS)).bg(theme.card).border_1().border_color(theme.foreground.opacity(0.08)).shadow(vec![
-        BoxShadow {
-            color: Hsla::black().opacity(0.06),
-            offset: point(px(0.), px(1.)),
-            blur_radius: px(3.),
-            spread_radius: px(0.),
-            inset: false,
-        },
-    ])
-}
 
 /// 加了多少行、删了多少行的标签，「+N」和「−N」。
 pub fn added_label(count: usize) -> Div {
@@ -75,7 +62,11 @@ pub fn panel_header(cards: bool, cx: &App) -> Div {
 /// 右侧面板的外框：定宽、占满高度、竖着排。经典样式下左边一条分隔线，卡片样式（`cards`）下是一张
 /// 卡片。底色和字号由调用方接着写。
 pub fn panel_shell(id: &'static str, width: f32, cards: bool, cx: &App) -> Stateful<Div> {
-    let shell = if cards { card(cx).overflow_hidden() } else { div().border_l_1().border_color(cx.theme().border) };
+    let shell = if cards {
+        card_style(div(), cx.theme()).overflow_hidden()
+    } else {
+        div().border_l_1().border_color(cx.theme().border)
+    };
     shell.id(id).flex_none().w(px(width)).h_full().flex().flex_col()
 }
 

@@ -16,7 +16,7 @@ use runode_remote_access::{host_name, local_interfaces};
 use runode_shared_types::color::Rgb;
 
 use super::{
-    CARD_GAP, TITLEBAR_HEIGHT, WindowView, card, cards,
+    CARD_GAP, TITLEBAR_HEIGHT, WindowView, cards,
     devices::{Paired, devices},
     drag_window,
     sidebar::ROW_ICON_SIZE,
@@ -29,6 +29,7 @@ use crate::{
     ui::{
         a11y::Press,
         button::{Button, ButtonSize, ButtonVariant},
+        card::Card,
         font_size::{FontSize, scaled},
         hsla,
         input::{Input, InputEvent, InputState},
@@ -330,9 +331,16 @@ impl WindowView {
             .flex_col()
             .child(div().flex_none().h(px(TITLEBAR_HEIGHT)).on_mouse_down(MouseButton::Left, drag_window))
             .child(if cards {
-                card(cx).flex_1().min_h_0().mr(px(CARD_GAP)).mb(px(CARD_GAP)).overflow_hidden().child(page)
+                Card::new()
+                    .flex_1()
+                    .min_h_0()
+                    .mr(px(CARD_GAP))
+                    .mb(px(CARD_GAP))
+                    .overflow_hidden()
+                    .child(page)
+                    .into_any_element()
             } else {
-                div().flex_1().min_h_0().child(page)
+                div().flex_1().min_h_0().child(page).into_any_element()
             });
         let mut body: Vec<AnyElement> = Vec::new();
         body.extend(sidebar.map(IntoElement::into_any_element));

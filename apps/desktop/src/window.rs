@@ -94,7 +94,7 @@ pub(crate) use crate::ui::panel::TITLEBAR_HEIGHT;
 use crate::ui::{
     drag_window, inline_edit,
     menu::{Menu, MenuHost},
-    panel::{DIVIDER_GRAB_WIDTH, PANE_HEADER_HEIGHT, card},
+    panel::{DIVIDER_GRAB_WIDTH, PANE_HEADER_HEIGHT},
     row_buttons,
     tabs::TAB_CLOSE_SIZE,
     theme::{ActiveTheme as _, Theme, ansi_colors, frame_color, tab_track_colors},

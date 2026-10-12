@@ -24,6 +24,7 @@ use crate::ui::menu::MenuHost as _;
 use crate::{
     assets::{DISCARD_ICON, MINUS_ICON, OPEN_FILE_ICON, PLUS_ICON, STASH_APPLY_ICON, STASH_POP_ICON, TRASH_ICON},
     ui::{
+        badge::{Badge, BadgeVariant},
         file_icons::{file_icon, folder_icon},
         font_size::{FontSize, scaled},
         hsla,
@@ -213,7 +214,7 @@ impl WindowView {
                     .child(label.into_owned()),
             )
             .children(self.row_buttons(ix, &root, buttons, cx))
-            .child(count_badge(count, fg, bg))
+            .child(Badge::new(count.to_string()).variant(BadgeVariant::Secondary))
             .on_press_down(cx, move |this, _, cx| {
                 let project = &mut this.workspace_mut().project;
                 project.git_panel.toggle_section(&root, section, project.git.as_deref());
@@ -491,23 +492,6 @@ pub(super) fn file_description(file: &git::FileDiff, dir: &str) -> String {
         parts.push(format!("−{}", file.removed));
     }
     parts.join(" · ")
-}
-
-/// 段标题和块头上的个数，圆角的小底子。
-pub(super) fn count_badge(count: usize, fg: Rgb, bg: Rgb) -> Div {
-    div()
-        .flex_none()
-        .min_w(px(18.))
-        .h(scaled(16.))
-        .px(px(5.))
-        .rounded_full()
-        .flex()
-        .items_center()
-        .justify_center()
-        .bg(hsla(bg.mix(fg, 0.12)))
-        .text_size(FontSize::Tiny)
-        .text_color(hsla(fg).opacity(0.5))
-        .child(count.to_string())
 }
 
 /// 行尾的状态字母，按状态上色。

@@ -51,6 +51,7 @@ use crate::{
     terminal_view::TerminalView,
     ui::{
         a11y::Press,
+        badge::Badge,
         button::{Button, ButtonSize, ButtonVariant},
         font_size::{FontSize, scaled},
         hsla,
@@ -777,24 +778,16 @@ impl WindowView {
         });
         // 需要你那一列有卡片时计数是个实心的徽标，一眼看得到。
         let badge = column == Column::NeedsYou && !cards.is_empty();
-        let tally = div()
-            .flex_none()
-            .text_size(FontSize::Tiny)
-            .when(badge, |tally| {
-                tally
-                    .min_w(scaled(16.))
-                    .h(scaled(16.))
-                    .px(px(4.))
-                    .rounded_full()
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .bg(gpui::rgb(ACCENT))
-                    .text_color(gpui::white())
-                    .font_weight(FontWeight::SEMIBOLD)
-            })
-            .when(!badge, |tally| tally.text_color(fg_h.opacity(0.5)))
-            .child(cards.len().to_string());
+        let tally = if badge {
+            Badge::new(cards.len().to_string()).bg(gpui::rgb(ACCENT)).text_color(gpui::white()).into_any_element()
+        } else {
+            div()
+                .flex_none()
+                .text_size(FontSize::Tiny)
+                .text_color(fg_h.opacity(0.5))
+                .child(cards.len().to_string())
+                .into_any_element()
+        };
         let window_hint = (column == Column::Done).then(|| {
             div()
                 .text_size(FontSize::Small)
