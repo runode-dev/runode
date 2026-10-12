@@ -2,8 +2,7 @@
 //! 终端的前景和背景，和终端窗口的界面一个色调。
 
 use gpui::{
-    AnyElement, App, Context, Div, ElementId, Entity, Focusable, Hsla, Role, SharedString, Stateful, Window, div,
-    prelude::*, px, svg,
+    AnyElement, Context, Div, ElementId, Entity, Hsla, Role, SharedString, Stateful, Window, div, prelude::*, px, svg,
 };
 use runode_config::Config;
 use runode_shared_types::color::Rgb;
@@ -13,7 +12,7 @@ pub(super) use crate::ui::a11y::Press;
 use crate::ui::{
     font_size::{FontSize, scaled},
     hsla,
-    input::InputState,
+    input::{Input, InputState},
 };
 
 /// 控件的高度。
@@ -264,37 +263,17 @@ pub(super) fn dropdown(
         .child(svg().flex_none().path("icons/chevron-down.svg").size(px(12.)).text_color(colors.fg.opacity(0.6)))
 }
 
-/// 输入框的外框；`width` 为 `None` 时占满剩下的宽度。正在输入时描强调色，出错时描错误色。
-pub(super) fn input_box(
-    input: Entity<InputState>,
-    width: Option<f32>,
-    error: bool,
-    colors: Colors,
-    window: &Window,
-    cx: &App,
-) -> Div {
-    let border = if error {
-        colors.error
-    } else if input.focus_handle(cx).is_focused(window) {
-        colors.accent
-    } else {
-        colors.border
-    };
-    div()
+/// 设置页的输入框：比别处的 `Input` 矮一些，底色和别的控件一样；`width` 为 `None` 时占满剩下的宽度。
+pub(super) fn input_box(input: &Entity<InputState>, width: Option<f32>, error: bool, colors: Colors) -> Input {
+    Input::new(input)
+        .invalid(error)
         .map(|field| match width {
             Some(width) => field.w(px(width)),
             None => field.flex_1().min_w_0(),
         })
         .h(scaled(CONTROL_HEIGHT))
-        .px(px(8.))
-        .flex()
-        .items_center()
-        .rounded(px(6.))
         .bg(colors.control)
-        .border_1()
-        .border_color(border)
         .text_size(FontSize::Body)
-        .child(div().flex_1().min_w_0().h_full().child(input))
 }
 
 /// 可以选上、取消的小标签，选上的描强调色、打个勾。

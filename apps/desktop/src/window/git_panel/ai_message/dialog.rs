@@ -25,8 +25,8 @@ use crate::{
         a11y::Press,
         font_size::{FontSize, scaled},
         hsla,
-        input::{InputEvent, InputState},
-        textarea::{TextareaEvent, TextareaState},
+        input::{Input, InputEvent, InputState},
+        textarea::{Textarea, TextareaEvent, TextareaState},
         tooltip::{code_tooltip, tooltip},
     },
     window::{
@@ -269,16 +269,6 @@ impl WindowView {
                 .child(rust_i18n::t!(key).into_owned())
         };
         let note = |text: String| div().text_size(FontSize::Small).text_color(fg.opacity(0.5)).child(text);
-        let field_box = || {
-            div()
-                .px(px(8.))
-                .rounded(px(6.))
-                .bg(field_bg)
-                .border_1()
-                .border_color(fg.opacity(0.2))
-                .font_family(mono.clone())
-        };
-
         let close = Button::new("commit-message-close", rust_i18n::t!("git.ai_message.close"))
             .icon(CLOSE_ICON)
             .icon_size(12.)
@@ -388,7 +378,7 @@ impl WindowView {
             .flex_col()
             .gap(px(6.))
             .child(section(input_label))
-            .child(field_box().h(scaled(28.)).flex().items_center().child(input.clone()))
+            .child(Input::new(input).font_family(mono.clone()))
             .children(hint)
             .child(section("git.ai_message.will_run"))
             .child(preview);
@@ -434,7 +424,7 @@ impl WindowView {
             .flex_col()
             .gap(px(6.))
             .child(section("git.ai_message.template"))
-            .child(field_box().py(px(6.)).child(dialog.template.clone()))
+            .child(Textarea::new(&dialog.template).font_family(mono))
             .child(variables);
 
         // 底栏左边存成预设：存到哪（两段按钮）和保存按钮；右边是生成。

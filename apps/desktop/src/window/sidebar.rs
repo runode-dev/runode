@@ -249,7 +249,6 @@ impl WindowView {
         let hover_bg = hsla(bg.mix(fg, 0.06));
         let close_label = rust_i18n::t!("menu.close_workspace");
         let close_tooltip = tooltip(close_label.clone(), None);
-        let rgb_fg = fg;
         let fg = hsla(fg);
         let group = SharedString::from(format!("workspace-{ix}"));
         let renaming = self.renaming.as_ref().filter(|renaming| renaming.id == id);
@@ -276,9 +275,7 @@ impl WindowView {
         .join(" · ");
         let mark = mark.map(|mark| styled_agent_mark(mark, ("workspace-agent", ix), fg, cards(cx)));
         let name: AnyElement = match renaming {
-            Some(renaming) => {
-                renaming.edit.render(px(RENAME_FIELD_HEIGHT * font_size::scale(cx)), rgb_fg, bg).into_any_element()
-            }
+            Some(renaming) => renaming.edit.render(px(RENAME_FIELD_HEIGHT * font_size::scale(cx))).into_any_element(),
             None => div()
                 .flex()
                 .items_center()

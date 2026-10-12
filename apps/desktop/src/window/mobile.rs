@@ -31,7 +31,7 @@ use crate::{
         button::{Button, ButtonSize, ButtonVariant},
         font_size::{FontSize, scaled},
         hsla,
-        input::{InputEvent, InputState},
+        input::{Input, InputEvent, InputState},
     },
 };
 
@@ -688,7 +688,13 @@ impl WindowView {
         labeled(
             "mobile-name",
             rust_i18n::t!("mobile.name_label").into_owned(),
-            input_box(colors).child(page.name.clone()),
+            // 和下面网络的下拉框一个样子，见 `input_box`。
+            Input::new(&page.name)
+                .h(scaled(36.))
+                .px(px(12.))
+                .rounded(px(8.))
+                .bg(colors.panel)
+                .text_size(FontSize::Medium),
             rust_i18n::t!("mobile.name_hint", name = shown).into_owned(),
             colors,
         )
@@ -967,7 +973,7 @@ fn labeled(id: &'static str, label: String, content: impl IntoElement, hint: Str
         .child(text_label("hint", hint, colors.fg.opacity(0.5)).text_size(FontSize::Body).line_height(scaled(18.)))
 }
 
-/// 输入框和下拉框的外框。
+/// 下拉框的外框，和电脑名的输入框一个样子。
 fn input_box(colors: Colors) -> Div {
     div()
         .h(scaled(36.))

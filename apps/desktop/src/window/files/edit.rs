@@ -84,14 +84,7 @@ impl WindowView {
     }
 
     /// 新建时插进文件树的那一行，图标跟着输入的名字变。
-    pub(super) fn render_new_entry_row(
-        &self,
-        depth: usize,
-        font_size: f32,
-        fg: Rgb,
-        bg: Rgb,
-        cx: &Context<Self>,
-    ) -> AnyElement {
+    pub(super) fn render_new_entry_row(&self, depth: usize, font_size: f32, fg: Rgb, cx: &Context<Self>) -> AnyElement {
         let Some(FileEdit { target: EditTarget::New { is_dir, .. }, edit }) = &self.file_edit else {
             return div().into_any_element();
         };
@@ -114,7 +107,7 @@ impl WindowView {
                     .gap(px(4.))
                     .child(div().flex_none().w(px(font_size)))
                     .child(img(icon).flex_none().size(px(font_size + 2.)))
-                    .child(edit.render(px(font_size + 6.), fg, bg).flex_1().min_w_0()),
+                    .child(edit.render(px(font_size + 6.)).flex_1().min_w_0()),
             )
             .into_any_element()
     }

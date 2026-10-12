@@ -11,7 +11,7 @@ use gpui::{
 use super::{SettingsView, controls::Colors};
 use crate::ui::{
     font_size::{FontSize, scaled},
-    input::{InputEvent, InputState},
+    input::{Input, InputEvent, InputState},
 };
 
 const PICKER_WIDTH: f32 = 420.;
@@ -291,19 +291,7 @@ impl SettingsView {
                     .text_color(colors.fg.opacity(0.55))
                     .child(picker.title.clone()),
             )
-            .child(
-                div()
-                    .h(scaled(30.))
-                    .mx(px(8.))
-                    .px(px(8.))
-                    .flex()
-                    .items_center()
-                    .rounded(px(6.))
-                    .bg(colors.control)
-                    .border_1()
-                    .border_color(colors.border)
-                    .child(div().flex_1().min_w_0().h_full().child(picker.field.clone())),
-            )
+            .child(Input::new(&picker.field).h(scaled(30.)).mx(px(8.)).bg(colors.control))
             .map(|panel| match empty {
                 Some(empty) => panel.child(empty),
                 None => panel.child(list),

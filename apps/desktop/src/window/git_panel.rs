@@ -59,7 +59,7 @@ use crate::{
         font_size::{FontSize, scaled},
         hsla,
         scrollbar::list_scrollbar,
-        textarea::{TextareaEvent, TextareaState},
+        textarea::{Textarea, TextareaEvent, TextareaState},
         tooltip::tooltip,
     },
 };
@@ -400,7 +400,7 @@ impl WindowView {
                 .child(
                     list(
                         panel.list.clone(),
-                        cx.processor(move |this, ix: usize, window, cx| this.render_git_item(ix, fg, bg, window, cx)),
+                        cx.processor(move |this, ix: usize, _, cx| this.render_git_item(ix, fg, bg, cx)),
                     )
                     .size_full(),
                 )
@@ -440,7 +440,7 @@ impl WindowView {
                     .flex_col()
                     .child(self.render_branch_bar(0, git, fg, bg, cx))
                     .children(git.info.operation.map(|operation| operation_banner(&git.root, operation, fg)))
-                    .child(self.render_commit_area(0, git, fg, bg, window, cx))
+                    .child(self.render_commit_area(0, git, fg, bg, cx))
                     .child(list)
                     .into_any_element()
             }
@@ -463,14 +463,7 @@ impl WindowView {
 
     /// 多个仓库时列表里的一项：块头是仓库标题连着分支栏和提交说明框，其余和只有一个仓库时的行
     /// 一样。点在哪一块里，菜单和快捷键的动作就作用到那块的仓库。
-    fn render_git_item(
-        &mut self,
-        ix: usize,
-        fg: Rgb,
-        bg: Rgb,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
+    fn render_git_item(&mut self, ix: usize, fg: Rgb, bg: Rgb, cx: &mut Context<Self>) -> AnyElement {
         let project = &self.workspace().project;
         let (Some(git), Some(&row)) = (project.git.as_ref(), project.git_panel.rows.get(ix)) else {
             return div().into_any_element();
@@ -480,7 +473,7 @@ impl WindowView {
         };
         let root = repo.root.clone();
         let element = match row {
-            GitRow::Repo(ri) => self.render_repo_block(ri, repo, fg, bg, window, cx).into_any_element(),
+            GitRow::Repo(ri) => self.render_repo_block(ri, repo, fg, bg, cx).into_any_element(),
             row => self.render_git_row(ix, row, git, fg, bg, cx),
         };
         div()
@@ -492,15 +485,7 @@ impl WindowView {
 
     /// 多个仓库时一块的开头：可以收起的标题，写着仓库名（子仓库是相对主仓库的路径）、分支或者
     /// 正在跑的操作、改动的文件数和「更多」按钮；展开时下面是分支栏、提示条和提交说明框。
-    fn render_repo_block(
-        &self,
-        ri: usize,
-        repo: &git::Snapshot,
-        fg: Rgb,
-        bg: Rgb,
-        window: &Window,
-        cx: &mut Context<Self>,
-    ) -> Div {
+    fn render_repo_block(&self, ri: usize, repo: &git::Snapshot, fg: Rgb, bg: Rgb, cx: &mut Context<Self>) -> Div {
         let panel = &self.workspace().project.git_panel;
         let expanded = panel.repo_expanded(repo);
         let active = panel.active.as_deref() == Some(repo.root.as_path());
@@ -584,7 +569,7 @@ impl WindowView {
             block
                 .child(self.render_branch_bar(ri, repo, fg, bg, cx))
                 .children(repo.info.operation.map(|operation| operation_banner(&repo.root, operation, fg)))
-                .child(self.render_commit_area(ri, repo, fg, bg, window, cx))
+                .child(self.render_commit_area(ri, repo, fg, bg, cx))
         })
     }
 
@@ -708,15 +693,7 @@ impl WindowView {
 
     /// 第 `ri` 个仓库的提交说明框，下面是提交按钮和旁边弹出更多提交方式的箭头。没有改动时提交
     /// 按钮换成同步或者发布分支。
-    fn render_commit_area(
-        &self,
-        ri: usize,
-        repo: &git::Snapshot,
-        fg: Rgb,
-        bg: Rgb,
-        window: &Window,
-        cx: &mut Context<Self>,
-    ) -> Div {
+    fn render_commit_area(&self, ri: usize, repo: &git::Snapshot, fg: Rgb, bg: Rgb, cx: &mut Context<Self>) -> Div {
         let panel = &self.workspace().project.git_panel;
         let (info, dirty, root) = (&repo.info, !repo.is_clean(), repo.root.clone());
         let running = panel.busy(&root);
@@ -725,7 +702,6 @@ impl WindowView {
         let Some(area) = panel.repos.get(&root).and_then(|repo| repo.commit_box.clone()) else {
             return div();
         };
-        let focused = area.focus_handle(cx).is_focused(window);
         let has_message = !area.read(cx).text().trim().is_empty();
         let primary = if dirty {
             PrimaryAction::Commit
@@ -752,7 +728,6 @@ impl WindowView {
             _ => svg().flex_none().path(icon).size(px(14.)).text_color(on_accent).into_any_element(),
         };
         let enabled = !busy && (primary != PrimaryAction::Commit || (dirty && has_message));
-        let box_border = if focused { fg_hsla.opacity(0.4) } else { fg_hsla.opacity(0.15) };
         // 说明框右上角让 AI 写说明的按钮：有改动、仓库没在忙时才能点，写的时候说明框底下的提交按钮
         // 写着在生成。
         let can_write = dirty && !busy;
@@ -783,7 +758,7 @@ impl WindowView {
                     .hover(|sparkle| sparkle.bg(fg_hsla.opacity(0.08)))
                     .on_press_down(cx, move |this, window, cx| this.generate_commit_message(&root, window, cx))
             });
-        let commit_box = div()
+        let commit_box = Textarea::new(&area)
             .id(repo_id("git-commit-box", &repo.root))
             .relative()
             .flex_none()
@@ -792,16 +767,12 @@ impl WindowView {
             .pr(px(30.))
             .py(px(4.))
             .rounded(px(4.))
-            .border_1()
-            .border_color(box_border)
             .bg(hsla(bg.mix(fg, 0.04)))
-            .text_color(fg_hsla)
             .cursor_text()
             .on_mouse_down(MouseButton::Left, {
                 let area = area.clone();
                 move |_, window, cx| window.focus(&area.focus_handle(cx), cx)
             })
-            .child(area)
             .child(sparkle);
         let main = div()
             .id(repo_id("git-commit", &repo.root))

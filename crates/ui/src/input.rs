@@ -1,6 +1,7 @@
 //! 单行文字输入框：终端的搜索栏、选 agent 和分支的弹窗、文件树和 workspace 就地改名都用它。
 //!
-//! 输入框管文字编辑（光标、选区、鼠标点选拖选、输入法组字、撤销重做），把文字的变化和回车、
+//! 照 shadcn 分成两样：`InputState` 是管编辑的 entity，`Input` 是包在它外面画边框、底色的组件。
+//! `InputState` 管文字编辑（光标、选区、鼠标点选拖选、输入法组字、撤销重做），把文字的变化和回车、
 //! Shift+回车、Esc 作为 `InputEvent` 交给调用方；输入框外面的东西（搜索的匹配数、上下切换
 //! 按钮、候选列表）由调用方画。回车、Shift+回车、Esc 绑定的是 `SearchNext`、`SearchPrevious`、
 //! `EndSearch`，终端没开搜索栏时这几个动作也由终端自己响应。
@@ -11,16 +12,20 @@
 use std::ops::Range;
 
 use gpui::{
-    AccessibleAction, App, Bounds, ClipboardItem, Context, DispatchPhase, Element, ElementId, Entity,
-    EntityInputHandler, EventEmitter, FocusHandle, Focusable, GlobalElementId, KeyDownEvent, LayoutId, MouseButton,
-    MouseDownEvent, MouseMoveEvent, MouseUpEvent, PaintQuad, Pixels, Point, Render, Role, ShapedLine, SharedString,
-    Style, TextAlign, TextRun, UTF16Selection, UnderlineStyle, Window, actions, div, fill, point, prelude::*, px,
-    relative, size,
+    AccessibleAction, AnyElement, App, Bounds, ClipboardItem, Context, DispatchPhase, Div, Element, ElementId, Entity,
+    EntityInputHandler, EventEmitter, FocusHandle, Focusable, GlobalElementId, Hsla, KeyDownEvent, LayoutId,
+    MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, PaintQuad, Pixels, Point, Render, Role, ShapedLine,
+    SharedString, Style, TextAlign, TextRun, UTF16Selection, UnderlineStyle, Window, actions, div, fill, point,
+    prelude::*, px, relative, size,
 };
 
 use gpui::accesskit::ActionData;
 
-use crate::actions::{Copy, Cut, Paste, Redo, SelectAll, Undo};
+use crate::{
+    actions::{Copy, Cut, Paste, Redo, SelectAll, Undo},
+    font_size::scaled,
+    theme::{ActiveTheme as _, Theme},
+};
 
 actions!(runode, [SearchNext, SearchPrevious, EndSearch]);
 
@@ -631,6 +636,117 @@ impl EntityInputHandler for InputState {
     }
 }
 
+/// 输入框的外框（照 shadcn 的 `Input`），里面是 `InputState`：高 28 点、左右留白 8px、圆角 6px，终端背景色
+/// 的底、前景色的字，字号跟着外面的。边框和设置页原来的一样：出错（`invalid`）时是 `Theme::destructive`，
+/// 有焦点时是 `Theme::ring`，平时是 `Theme::input`。`prefix` 画在文字前面，子元素画在文字后面。
+///
+/// 调用方接着写的样式盖在这些上面（render 时先取下调用方写的，铺上外框的，再叠回去）；写了
+/// `border_color` 就不再跟着焦点和出错变。
+#[derive(IntoElement)]
+pub struct Input {
+    frame: Frame<InputState>,
+    prefix: Option<AnyElement>,
+}
+
+impl Input {
+    pub fn new(state: &Entity<InputState>) -> Self {
+        Self { frame: Frame::new(state), prefix: None }
+    }
+
+    /// 内容不对：边框描成出错的颜色。
+    pub fn invalid(mut self, invalid: bool) -> Self {
+        self.frame.invalid = invalid;
+        self
+    }
+
+    /// 画在文字前面的东西，比如搜索框的图标。
+    pub fn prefix(mut self, prefix: impl IntoElement) -> Self {
+        self.prefix = Some(prefix.into_any_element());
+        self
+    }
+}
+
+impl RenderOnce for Input {
+    fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
+        let (div, state, children) = self.frame.finish(window, cx, |div| div.h(scaled(28.)).flex().items_center());
+        div.children(self.prefix).child(gpui::div().flex_1().min_w_0().h_full().child(state)).children(children)
+    }
+}
+
+/// `Input` 和多行的 `Textarea` 共用的外框：外面的元素、里面管编辑的 entity、出错没有和调用方加的子元素。
+pub(crate) struct Frame<T> {
+    pub(crate) div: Div,
+    state: Entity<T>,
+    pub(crate) invalid: bool,
+    pub(crate) children: Vec<AnyElement>,
+}
+
+impl<T: Focusable> Frame<T> {
+    pub(crate) fn new(state: &Entity<T>) -> Self {
+        Self { div: div(), state: state.clone(), invalid: false, children: Vec::new() }
+    }
+
+    /// 取下调用方写的样式，铺上外框共用的和 `own`，再把调用方的叠回去。返回外面的元素、管编辑的
+    /// entity 和调用方加的子元素。
+    pub(crate) fn finish(
+        self,
+        window: &Window,
+        cx: &App,
+        own: impl FnOnce(Div) -> Div,
+    ) -> (Div, Entity<T>, Vec<AnyElement>) {
+        let Self { mut div, state, invalid, children } = self;
+        let theme = cx.theme();
+        let border = frame_border(theme, invalid, state.focus_handle(cx).is_focused(window));
+        let user = std::mem::take(div.style());
+        let mut div = own(div)
+            .px(px(8.))
+            .rounded(px(6.))
+            .bg(theme.background)
+            .border_1()
+            .border_color(border)
+            .text_color(theme.foreground);
+        div.style().refine(&user);
+        (div, state, children)
+    }
+}
+
+/// 外框的边框色：出错优先，其次有焦点，平时是 `Theme::input`。
+fn frame_border(theme: &Theme, invalid: bool, focused: bool) -> Hsla {
+    if invalid {
+        theme.destructive
+    } else if focused {
+        theme.ring
+    } else {
+        theme.input
+    }
+}
+
+/// `Input`、`Textarea` 把样式、交互和子元素转给外面的元素。
+macro_rules! forward_frame {
+    ($ty:ty) => {
+        impl gpui::Styled for $ty {
+            fn style(&mut self) -> &mut gpui::StyleRefinement {
+                self.frame.div.style()
+            }
+        }
+
+        impl gpui::InteractiveElement for $ty {
+            fn interactivity(&mut self) -> &mut gpui::Interactivity {
+                self.frame.div.interactivity()
+            }
+        }
+
+        impl gpui::ParentElement for $ty {
+            fn extend(&mut self, elements: impl IntoIterator<Item = gpui::AnyElement>) {
+                self.frame.children.extend(elements);
+            }
+        }
+    };
+}
+pub(crate) use forward_frame;
+
+forward_frame!(Input);
+
 /// 输入框里的文字、选区和光标，自己排版绘制以便按位置换算字符。
 struct InputText {
     field: Entity<InputState>,
@@ -851,5 +967,19 @@ mod tests {
         // 撤销过后再打字从新的一步开始，重做的记录清掉。
         history.record(Some(EditKind::Insert), at("q"));
         assert!(history.redo(at("")()).is_none());
+    }
+
+    /// 出错时总描出错色，有焦点时描强调色，平时描输入框的淡边。
+    #[test]
+    fn frame_border_prefers_invalid_then_focus() {
+        let ansi = crate::theme::ansi_colors(&[]);
+        let theme = Theme::new(
+            runode_shared_types::color::Rgb(0xE6, 0xE1, 0xD8),
+            runode_shared_types::color::Rgb(0x17, 0x16, 0x18),
+            ansi,
+        );
+        assert_eq!(frame_border(&theme, true, true), theme.destructive);
+        assert_eq!(frame_border(&theme, false, true), theme.ring);
+        assert_eq!(frame_border(&theme, false, false), theme.input);
     }
 }

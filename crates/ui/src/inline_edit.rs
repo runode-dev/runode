@@ -1,13 +1,9 @@
 //! 就地输入框：侧栏改 workspace 的名字、文件树新建和改名、GitHub Actions 页加 secret 共用。回车确定，
 //! Esc 取消，点到别处也算确定；切到别的应用时窗口失去焦点，回来接着改。
 
-use gpui::{App, Context, Div, Entity, FocusHandle, Focusable, Pixels, Subscription, Window, div, prelude::*, px};
-use runode_shared_types::color::Rgb;
+use gpui::{App, Context, Entity, FocusHandle, Focusable, Pixels, Subscription, Window, prelude::*, px};
 
-use crate::{
-    hsla,
-    input::{InputEvent, InputState},
-};
+use crate::input::{Input, InputEvent, InputState};
 
 pub struct InlineEdit {
     pub field: Entity<InputState>,
@@ -56,16 +52,8 @@ impl InlineEdit {
         }
     }
 
-    /// 带边框的输入框，高 `height`。
-    pub fn render(&self, height: Pixels, fg: Rgb, bg: Rgb) -> Div {
-        div()
-            .h(height)
-            .px(px(3.))
-            .rounded(px(3.))
-            .bg(hsla(bg))
-            .border_1()
-            .border_color(hsla(fg).opacity(0.3))
-            .text_color(hsla(fg))
-            .child(self.field.clone())
+    /// 带边框的输入框，高 `height`，比别处的 `Input` 留白和圆角小一些，好塞进一行里。
+    pub fn render(&self, height: Pixels) -> Input {
+        Input::new(&self.field).h(height).px(px(3.)).rounded(px(3.))
     }
 }

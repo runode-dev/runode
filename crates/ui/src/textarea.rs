@@ -3,8 +3,8 @@
 //! 写法照单行输入框 `InputState`：自己管文字编辑（光标、选区、鼠标点选拖选、输入法组字、
 //! 撤销重做），自己排版绘制以便按位置换算字符；撤销记录 `History`、按字符和按词移动、UTF-16
 //! 换算和它共用。多出来的是按宽度软换行、换行符硬换行、上下按视觉行移动，以及高度随行数在上下限
-//! 之间伸缩、超过上限时竖着滚动。字号、颜色、字体继承父元素的文本样式；边框、内边距和底色由调用方
-//! 包在外面画，这里只画文字、选区、光标和提示文字。
+//! 之间伸缩、超过上限时竖着滚动。字号、颜色、字体继承父元素的文本样式；边框、内边距和底色由外框组件
+//! `Textarea` 画，`TextareaState` 只画文字、选区、光标和提示文字。
 //!
 //! 按视觉行换算光标位置和选区的纯函数在 `rows`，排版绘制的元素在 `element`。
 
@@ -14,16 +14,16 @@ mod rows;
 use std::ops::Range;
 
 use gpui::{
-    AccessibleAction, App, Bounds, Context, EntityInputHandler, EventEmitter, FocusHandle, Focusable, KeyDownEvent,
-    MouseButton, MouseDownEvent, Pixels, Point, Render, Role, ScrollWheelEvent, SharedString, TextRun, TextStyle,
-    UTF16Selection, UnderlineStyle, Window, actions, div, point, prelude::*, px,
+    AccessibleAction, App, Bounds, Context, ElementId, Entity, EntityInputHandler, EventEmitter, FocusHandle,
+    Focusable, KeyDownEvent, MouseButton, MouseDownEvent, Pixels, Point, Render, Role, ScrollWheelEvent, SharedString,
+    TextRun, TextStyle, UTF16Selection, UnderlineStyle, Window, actions, div, point, prelude::*, px,
 };
 
 use gpui::accesskit::ActionData;
 
 use super::input::{
-    EditKind, History, Snapshot, copy_selection, next_char, next_word, offset_to_utf16, previous_char, previous_word,
-    range_from_utf16, range_to_utf16,
+    EditKind, Frame, History, Snapshot, copy_selection, forward_frame, next_char, next_word, offset_to_utf16,
+    previous_char, previous_word, range_from_utf16, range_to_utf16,
 };
 use crate::actions::{Copy, Cut, Paste, Redo, SelectAll, Undo};
 use element::TextareaText;
@@ -525,6 +525,41 @@ impl TextareaState {
         self.replace(self.selected.clone(), "", cx);
     }
 }
+
+/// 多行输入框的外框（照 shadcn 的 `Textarea`），里面是 `TextareaState`：和单行的 `Input` 一样的边框、底色、
+/// 圆角和左右留白，上下留白 6px，高度跟着行数。子元素画在文字后面。调用方接着写的样式盖在这些上面，见
+/// `Input`。
+#[derive(IntoElement)]
+pub struct Textarea {
+    frame: Frame<TextareaState>,
+}
+
+impl Textarea {
+    pub fn new(state: &Entity<TextareaState>) -> Self {
+        Self { frame: Frame::new(state) }
+    }
+
+    /// 内容不对：边框描成出错的颜色。
+    pub fn invalid(mut self, invalid: bool) -> Self {
+        self.frame.invalid = invalid;
+        self
+    }
+
+    /// 外框的元素 id。外框仍是个 `Div`，只多了 id，用不上 `on_click` 这些要 id 的写法。
+    pub fn id(mut self, id: impl Into<ElementId>) -> Self {
+        self.frame.div.interactivity().element_id = Some(id.into());
+        self
+    }
+}
+
+impl RenderOnce for Textarea {
+    fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
+        let (div, state, children) = self.frame.finish(window, cx, |div| div.py(px(6.)));
+        div.child(state).children(children)
+    }
+}
+
+forward_frame!(Textarea);
 
 impl Focusable for TextareaState {
     fn focus_handle(&self, _: &App) -> FocusHandle {

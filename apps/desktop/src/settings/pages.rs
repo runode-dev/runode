@@ -375,7 +375,7 @@ impl SettingsView {
             }
             Control::Text(width) => {
                 let input = self.field(key, Commit::Value(key), Some(key_placeholder(key)), window, cx);
-                input_box(input, Some(width), self.errors.contains_key(key), colors, window, cx).into_any_element()
+                input_box(&input, Some(width), self.errors.contains_key(key), colors).into_any_element()
             }
             Control::Color => {
                 let color = current.first().and_then(|value| runode_config::color::parse(value)).map(hsla);
@@ -385,7 +385,7 @@ impl SettingsView {
                     .items_center()
                     .gap(px(8.))
                     .child(swatch(color, 20., colors))
-                    .child(input_box(input, Some(130.), self.errors.contains_key(key), colors, window, cx))
+                    .child(input_box(&input, Some(130.), self.errors.contains_key(key), colors))
                     .into_any_element()
             }
             Control::Language => {
@@ -502,7 +502,7 @@ impl SettingsView {
                                     .child(ix.to_string()),
                             )
                             .child(swatch(color, 18., colors))
-                            .child(input_box(input, Some(92.), error.is_some(), colors, window, cx)),
+                            .child(input_box(&input, Some(92.), error.is_some(), colors)),
                     )
                     .children(error.map(|err| div().text_size(FontSize::Small).text_color(colors.error).child(err)))
             })
@@ -613,7 +613,7 @@ impl SettingsView {
                             .flex()
                             .items_center()
                             .gap(px(6.))
-                            .child(input_box(input, None, error.is_some(), colors, window, cx))
+                            .child(input_box(&input, None, error.is_some(), colors))
                             .child(div().w(px(20.)).children(remove)),
                     )
                     .children(error.map(|err| div().text_size(FontSize::Small).text_color(colors.error).child(err))),

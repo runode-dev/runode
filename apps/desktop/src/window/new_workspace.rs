@@ -17,9 +17,9 @@ use crate::{
     assets::{CLOSE_ICON, FOLDER_OPEN_ICON, GLOBE_ICON, PLUS_ICON},
     ui::{
         a11y::Press,
-        font_size::{FontSize, scaled},
+        font_size::FontSize,
         hsla,
-        input::{InputEvent, InputState},
+        input::{Input, InputEvent, InputState},
     },
 };
 
@@ -211,20 +211,7 @@ impl WindowView {
                 .pl(px(48.))
                 .pr(px(16.))
                 .pb(px(12.))
-                .child(
-                    div()
-                        .flex_1()
-                        .min_w_0()
-                        .h(scaled(28.))
-                        .px(px(8.))
-                        .flex()
-                        .items_center()
-                        .rounded(px(6.))
-                        .bg(panel_bg)
-                        .border_1()
-                        .border_color(fg.opacity(0.2))
-                        .child(url.clone()),
-                )
+                .child(Input::new(url).flex_1().min_w_0().bg(panel_bg))
                 .child(
                     Button::new("new-workspace-clone-go", rust_i18n::t!("workspace.clone_to"))
                         .variant(ButtonVariant::Secondary)

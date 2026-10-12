@@ -36,7 +36,7 @@ use crate::{
         file_icons::{file_icon, folder_icon},
         font_size::{FontSize, scaled},
         hsla,
-        input::{InputEvent, InputState},
+        input::{Input, InputEvent, InputState},
         tooltip::tooltip,
     },
     window::{
@@ -579,21 +579,8 @@ impl WindowView {
     pub(super) fn render_file_search_box(&self, fg: Rgb, bg: Rgb, cx: &mut Context<Self>) -> Div {
         let search = &self.file_search;
         let content = search.mode == SearchMode::Content;
-        // 输入框外框；`leading` 画在文字前面。
-        let input_box = |field: &Entity<InputState>, leading: Option<gpui::Svg>| {
-            div()
-                .h(scaled(28.))
-                .px(px(8.))
-                .flex()
-                .items_center()
-                .gap(px(4.))
-                .rounded(px(6.))
-                .border_1()
-                .border_color(hsla(fg).opacity(0.12))
-                .bg(hsla(bg.mix(fg, 0.06)))
-                .children(leading)
-                .child(div().flex_1().min_w_0().h_full().text_color(hsla(fg)).child(field.clone()))
-        };
+        // 输入框，比文件树的底色浅一档。
+        let input_box = |field: &Entity<InputState>| Input::new(field).gap(px(4.)).bg(hsla(bg.mix(fg, 0.06)));
         // 搜索框里的小按钮：开着的开关垫一层底色。
         let small_button = |id: &'static str, tip: String, on: bool| {
             div()
@@ -648,7 +635,8 @@ impl WindowView {
             ]
         });
         let filter_icon = svg().path(FILTER_ICON).flex_none().size(px(14.)).text_color(hsla(fg).opacity(0.5));
-        let field = input_box(&search.field, Some(filter_icon)).children(clear).children(options.into_iter().flatten());
+        let field =
+            input_box(&search.field).prefix(filter_icon).children(clear).children(options.into_iter().flatten());
         let mode = search.mode;
         let segment = |id, label: SharedString, value: SearchMode, cx: &mut Context<Self>| {
             let on = mode == value;
@@ -701,7 +689,7 @@ impl WindowView {
                         .text_color(hsla(fg).opacity(0.7))
                         .child(rust_i18n::t!(label).into_owned()),
                 )
-                .child(input_box(field, None))
+                .child(input_box(field))
         };
         let filters = content.then(|| {
             div()

@@ -407,7 +407,7 @@ impl WindowView {
     ) -> Vec<AnyElement> {
         range
             .filter_map(|ix| match new_entry {
-                Some((at, depth)) if ix == at => Some(self.render_new_entry_row(depth, font_size, fg, bg, cx)),
+                Some((at, depth)) if ix == at => Some(self.render_new_entry_row(depth, font_size, fg, cx)),
                 Some((at, _)) if ix > at => self.render_file_row(ix - 1, font_size, focused, fg, bg, cx),
                 _ => self.render_file_row(ix, font_size, focused, fg, bg, cx),
             })
@@ -479,7 +479,7 @@ impl WindowView {
         let badge = badge.map(|text| div().flex_none().pl(px(6.)).text_color(color).child(text));
         let renaming = self.renaming(&row.path);
         let name: AnyElement = match renaming {
-            Some(edit) => edit.render(px(font_size + 6.), fg, bg).flex_1().min_w_0().into_any_element(),
+            Some(edit) => edit.render(px(font_size + 6.)).flex_1().min_w_0().into_any_element(),
             None => div().min_w_0().truncate().text_color(color).child(row.name.clone()).into_any_element(),
         };
         // 改名时在输入框里拖选文字，不能把整行拖走。

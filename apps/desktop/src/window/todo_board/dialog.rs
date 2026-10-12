@@ -22,8 +22,9 @@ use crate::{
         display_dir,
         font_size::{FontSize, scaled},
         hsla,
-        input::{InputEvent, InputState},
-        textarea::{TextareaEvent, TextareaState},
+        input::{Input, InputEvent, InputState},
+        textarea::{Textarea, TextareaEvent, TextareaState},
+        theme::ActiveTheme as _,
     },
     window::{TITLEBAR_HEIGHT, WindowView},
 };
@@ -318,26 +319,10 @@ impl WindowView {
         let hover_bg = hsla(bg.mix(fg, 0.06));
         let primary_bg = hsla(bg.mix(fg, 0.16));
         let fg_h = hsla(fg);
-        let boxed = |child: gpui::AnyElement| {
-            div()
-                .min_h(scaled(28.))
-                .px(px(8.))
-                .py(px(4.))
-                .flex()
-                .items_center()
-                .rounded(px(6.))
-                .bg(hsla(bg))
-                .border_1()
-                .border_color(fg_h.opacity(0.2))
-                .child(child)
-        };
+        // 输入框随内容长高，至少 28 点。
+        let input = |state: &Entity<InputState>| Input::new(state).h_auto().min_h(scaled(28.)).py(px(4.));
         let field = |label: String, child: gpui::AnyElement| {
-            div()
-                .flex()
-                .flex_col()
-                .gap(px(6.))
-                .child(div().text_color(fg_h.opacity(0.7)).child(label))
-                .child(boxed(child))
+            div().flex().flex_col().gap(px(6.)).child(div().text_color(fg_h.opacity(0.7)).child(label)).child(child)
         };
         // 对话框底下的按钮：比 `ButtonSize::Default` 高一些，高度由上下留白撑开。
         let button = |id: &'static str, label: String, variant: ButtonVariant| {
@@ -371,7 +356,8 @@ impl WindowView {
             .rounded(px(6.))
             .bg(hsla(bg))
             .border_1()
-            .border_color(fg_h.opacity(0.2))
+            // 和上下的输入框（`Input`）一样的边框。
+            .border_color(cx.theme().input)
             .truncate()
             .child(dir_text)
             .when(!dialog.locked, |dir| {
@@ -447,10 +433,10 @@ impl WindowView {
                 .child(kind("todo-dialog-once", Kind::Once, "todo_board.dialog.kind_once", cx))
                 .child(kind("todo-dialog-daily", Kind::Daily, "todo_board.dialog.kind_daily", cx))
                 .child(kind("todo-dialog-every", Kind::Every, "todo_board.dialog.kind_every", cx));
-            let input = match dialog.kind {
-                Kind::Once => dialog.at.clone(),
-                Kind::Daily => dialog.clock.clone(),
-                Kind::Every => dialog.minutes.clone(),
+            let when_input = match dialog.kind {
+                Kind::Once => &dialog.at,
+                Kind::Daily => &dialog.clock,
+                Kind::Every => &dialog.minutes,
             };
             let days = (dialog.kind == Kind::Daily).then(|| {
                 let pills: Vec<_> = (0..7u8)
@@ -487,7 +473,7 @@ impl WindowView {
                         .child(div().text_color(fg_h.opacity(0.7)).child(when_label))
                         .child(kinds),
                 )
-                .child(boxed(input.into_any_element()))
+                .child(input(when_input))
                 .children(days)
         });
         let title = match (&dialog.editing, dialog.schedule) {
@@ -550,11 +536,16 @@ impl WindowView {
                     .gap(px(12.))
                     .child(field(
                         rust_i18n::t!("todo_board.dialog.title_label").into_owned(),
-                        dialog.title.clone().into_any_element(),
+                        input(&dialog.title).into_any_element(),
                     ))
                     .child(field(
                         rust_i18n::t!("todo_board.dialog.prompt").into_owned(),
-                        dialog.prompt.clone().into_any_element(),
+                        Textarea::new(&dialog.prompt)
+                            .min_h(scaled(28.))
+                            .py(px(4.))
+                            .flex()
+                            .items_center()
+                            .into_any_element(),
                     ))
                     .children(when)
                     .child(
@@ -567,7 +558,7 @@ impl WindowView {
                     )
                     .child(field(
                         rust_i18n::t!("todo_board.dialog.agent").into_owned(),
-                        dialog.agent.clone().into_any_element(),
+                        input(&dialog.agent).into_any_element(),
                     ))
                     .child(div().flex().child(worktree)),
             )

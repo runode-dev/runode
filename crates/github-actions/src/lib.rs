@@ -1077,11 +1077,12 @@ impl ActionsPanel {
                     .actions_row("adding".to_owned(), walk.ix(), depth + 1, fg, bg, cx)
                     .aria_label(label.into_owned())
                     .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-                    .child(div().flex_1().min_w_0().child(adding.edit.render(
-                        px((ROW_HEIGHT - 4.) * font_size::scale(cx)),
-                        fg,
-                        bg,
-                    )));
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .child(adding.edit.render(px((ROW_HEIGHT - 4.) * font_size::scale(cx)))),
+                    );
                 walk.rows.push(row.into_any_element());
             }
             match self.query_rows(walk, &query, depth + 1, fg) {

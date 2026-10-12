@@ -32,7 +32,7 @@ use crate::{
         a11y::Press,
         font_size::{FontSize, scaled},
         hsla,
-        input::{InputEvent, InputState},
+        input::{Input, InputEvent, InputState},
     },
     window::{TITLEBAR_HEIGHT, WindowView},
 };
@@ -285,18 +285,12 @@ impl WindowView {
         let fg = hsla(fg);
         let border = fg.opacity(0.12);
         let field = |label: String, input: &Entity<InputState>| {
-            div().flex().flex_col().gap(px(6.)).child(div().text_color(fg.opacity(0.7)).child(label)).child(
-                div()
-                    .h(scaled(28.))
-                    .px(px(8.))
-                    .flex()
-                    .items_center()
-                    .rounded(px(6.))
-                    .bg(hsla(bg))
-                    .border_1()
-                    .border_color(fg.opacity(0.2))
-                    .child(input.clone()),
-            )
+            div()
+                .flex()
+                .flex_col()
+                .gap(px(6.))
+                .child(div().text_color(fg.opacity(0.7)).child(label))
+                .child(Input::new(input))
         };
         // 对话框底下的按钮：比 `ButtonSize::Default` 高一些，高度由上下留白撑开。
         let button = |id: &'static str, label: String, variant: ButtonVariant| {
