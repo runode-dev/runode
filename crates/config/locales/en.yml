@@ -137,6 +137,7 @@ action:
   toggle_files: Show or hide the file tree on the right; double-click a file to type its path into the terminal
   toggle_github_actions: Show or hide the GitHub Actions page on the right, with the workflow runs of the current branch, workflows, secrets and variables, read and changed through gh
   toggle_tasks: Open or close the project tasks menu in the title bar; pick with the arrow keys and press Enter to run
+  toggle_todo_board: "Open or close the full-window todo board: tasks handed to agents in columns by their state, and the schedules that start them"
   run_task: Run the task with this name from the project tasks menu (your own, a Makefile target or a package.json script), as if clicked there; with duplicate names the one higher in the menu wins
   goto_agent: List the agents in every window and jump to the one you pick
   next_agent: Jump to the next agent that needs you, those waiting for an answer first, then those that finished

@@ -94,6 +94,7 @@ fn main() {
         drop(shell);
         window::watch_background(cx);
         window::watch_devices(cx);
+        window::watch_todos(cx);
         window::watch_status(cx);
         cx.activate(true);
         host_client::show_notice(cx);

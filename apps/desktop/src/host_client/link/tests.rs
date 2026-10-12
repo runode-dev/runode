@@ -830,3 +830,44 @@ mod bench {
         throughput("host-process", process("cat"));
     }
 }
+
+/// 任务板的回话按请求编号交回，宿主说任务板变了时通知看任务板的一方；连上时先通知一次，叫它去问。
+#[test]
+fn todo_requests_get_their_answers_and_changes_are_announced() {
+    let dir = temp_dir("todos");
+    let host = Host::new(BuildId(BUILD.into()));
+    host.serve_todos(dir.join("todos.db"));
+    let link = Link::new(BuildId(BUILD.into()));
+    let mut changed = link.todos_changed().unwrap();
+    assert!(link.todos_changed().is_none());
+    link.connect(host.connect_pair().unwrap()).unwrap();
+    assert!(link.host_knows_todos());
+    let wait_changed = |changed: &mut UnboundedReceiver<()>| {
+        let deadline = Instant::now() + WAIT;
+        while changed.try_recv().is_err() {
+            assert!(Instant::now() < deadline, "no change was announced");
+            thread::sleep(Duration::from_millis(2));
+        }
+    };
+    wait_changed(&mut changed);
+
+    let list = link.request(|req| ClientMsg::ListTodos { req }, WAIT).unwrap();
+    assert!(matches!(list, HostMsg::Todos { ref todos, .. } if todos.is_empty()), "{list:?}");
+    let spec = runode_protocol::todo::TodoSpec {
+        title: "t".into(),
+        prompt: String::new(),
+        dir,
+        agent: "claude".into(),
+        worktree: false,
+    };
+    let HostMsg::TodoAdded { id, .. } = link.request(|req| ClientMsg::AddTodo { req, spec }, WAIT).unwrap() else {
+        panic!("expected the new todo");
+    };
+    wait_changed(&mut changed);
+    let moved = link.request(|req| ClientMsg::MoveTodo { req, id, before: None }, WAIT).unwrap();
+    assert!(matches!(moved, HostMsg::Done { .. }), "{moved:?}");
+    // 宿主回的错带着请求编号，交回给等着的一方，连接照旧。
+    let missing = link.request(|req| ClientMsg::RemoveTodo { req, id: "nothere".into() }, WAIT);
+    assert!(missing.is_err());
+    assert!(link.connected());
+}

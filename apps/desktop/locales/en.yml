@@ -45,6 +45,7 @@ menu:
   toggle_files: Show or Hide Files
   toggle_github_actions: Show or Hide GitHub Actions
   toggle_tasks: Tasks…
+  toggle_todo_board: Todo Board
   toggle_full_screen: Toggle Full Screen
   window: Window
   minimize: Minimize
@@ -927,3 +928,81 @@ github_actions:
     queued: queued
     waiting: waiting
     pending: pending
+todo_board:
+  title: Todo Board
+  todos: Tasks
+  schedules: Schedules
+  new_todo: New Task
+  new_schedule: New Schedule
+  close: Close the todo board
+  count: "%{count} tasks"
+  empty: Nothing here
+  started_at: "started %{time}"
+  from_schedule: "from %{name}"
+  reorder_hint: Adjust the value to move it up or down
+  start: Start
+  open: Open its terminal
+  finish: Mark as done
+  reopen: Mark as not done
+  edit: Edit Task
+  remove_todo: Delete task
+  remove_title: "Delete “%{title}”?"
+  remove_detail: Its terminal keeps running in the background.
+  remove: Delete
+  cancel: Cancel
+  save: Save
+  edit_schedule: Edit Schedule
+  remove_schedule: Delete schedule
+  schedules_need_host: "Schedules only run while the terminal host is running. To keep them running after you quit the app, turn on terminal-host and run `runode service install host`."
+  no_schedules: No schedules yet
+  no_next: Will not run again
+  next: "next %{time}"
+  worktree_on: own worktree
+  host_too_old: The terminal host is too old for the todo board; restart Runode to upgrade it.
+  column:
+    todo: To Do
+    in_progress: In Progress
+    needs_you: Needs You
+    done: Done
+  when:
+    once: "Once at %{time}"
+    daily: "Every day at %{time}"
+    weekly: "%{time} on %{days}"
+    every_hours: "Every %{count} h"
+    every_minutes: "Every %{count} min"
+    unknown: Unknown schedule
+  weekday:
+    "0": Sun
+    "1": Mon
+    "2": Tue
+    "3": Wed
+    "4": Thu
+    "5": Fri
+    "6": Sat
+  dialog:
+    title_label: Title
+    title_placeholder: Defaults to the first line of the prompt
+    prompt: Prompt for the agent
+    prompt_placeholder: What should the agent do? ⌘↩ saves
+    agent: Agent command
+    agent_placeholder: claude
+    dir: Directory
+    choose_dir: Choose
+    worktree: Work in its own worktree
+    when: Runs
+    kind_once: Once
+    kind_daily: Daily
+    kind_every: Every
+    once: Date and time
+    once_placeholder: YYYY-MM-DD HH:MM
+    daily: Time of day
+    daily_placeholder: HH:MM
+    every: Minutes
+    every_placeholder: "60"
+    days_hint: No days picked means every day.
+    need_title: Give it a title or a prompt.
+    need_agent: Say which agent to run.
+    bad_dir: The directory does not exist.
+    bad_once: "Write the time as YYYY-MM-DD HH:MM."
+    bad_daily: "Write the time of day as HH:MM."
+    bad_every: The interval is at least one minute.

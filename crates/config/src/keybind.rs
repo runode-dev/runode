@@ -68,6 +68,8 @@ pub enum Action {
     GotoAgent,
     /// 不弹列表，直接跳到下一个要处理的 agent：先等回答的，再干完了没看的。
     NextAgent,
+    /// 打开或收起铺满窗口的任务板。
+    ToggleTodoBoard,
     Copy,
     Paste,
     PasteSelection,
@@ -230,6 +232,7 @@ pub static ACTIONS: &[ActionSpec] = &[
     plain!("toggle_files", Action::ToggleFiles),
     plain!("toggle_github_actions", Action::ToggleGitHubActions),
     plain!("toggle_tasks", Action::ToggleTasks),
+    plain!("toggle_todo_board", Action::ToggleTodoBoard),
     ActionSpec {
         name: "run_task",
         param: Some("NAME"),
@@ -359,6 +362,7 @@ pub static DEFAULTS: &[&str] = &[
     "cmd+shift+e=toggle_files",
     "cmd+shift+i=toggle_github_actions",
     "cmd+shift+r=toggle_tasks",
+    "cmd+shift+b=toggle_todo_board",
     "cmd+shift+a=goto_agent",
     "cmd+alt+a=next_agent",
     "cmd+c=copy_to_clipboard",

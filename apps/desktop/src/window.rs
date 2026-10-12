@@ -9,7 +9,7 @@
 //! 右侧的预览栏、Git 面板和文件树（`project`、`preview`、`git_panel`、`files`），侧栏和文件树共用的
 //! 就地输入框（`inline_edit`），新建 workspace 的对话框（`new_workspace`），开窗口（`open`），存档（`persist`，存档文件的格式在
 //! `persist::format`），侧栏里没在窗口里显示的后台会话（`background`），退出和关窗口时会话怎么办
-//! （`quit`），侧栏顶上手机端入口打开的引导页（`mobile`），铺满窗口的设置页（`settings_page`），以及别的进程经宿主请 app 开终端、切到某个终端、问各个终端摆在哪（`remote`、
+//! （`quit`），侧栏顶上手机端入口打开的引导页（`mobile`），铺满窗口的任务板（`todo_board`），铺满窗口的设置页（`settings_page`），以及别的进程经宿主请 app 开终端、切到某个终端、问各个终端摆在哪（`remote`、
 //! `layout_report`），一次在当前分屏旁开几个分屏（`arrange`），经远程访问配对过的设备
 //! （`devices`），以及窗口底部的状态栏（`status_bar`）。
 //!
@@ -45,6 +45,7 @@ mod slot;
 mod status_bar;
 mod tasks;
 mod titlebar;
+mod todo_board;
 
 use std::{cell::RefCell, collections::HashMap, path::PathBuf, rc::Rc, time::Instant};
 
@@ -85,6 +86,7 @@ pub(crate) use status_bar::item_icon_and_title as status_item_icon_and_title;
 pub use status_bar::watch as watch_status;
 pub use tasks::RunNamedTask;
 pub use titlebar::titlebar_options;
+pub use todo_board::store::watch as watch_todos;
 
 use crate::ui::a11y::{Hide, PressDown};
 use crate::{config::AppConfig, prespawn::Prespawned, terminal_view::TerminalView, ui::font_size::FontSize, ui::hsla};
@@ -133,7 +135,9 @@ actions!(
         /// 打开或关掉列出所有窗口里 agent 的浮层。
         GotoAgent,
         /// 跳到下一个要处理的 agent：先等回答的，再干完了没看的。
-        NextAgent
+        NextAgent,
+        /// 打开或收起铺满窗口的任务板。
+        ToggleTodoBoard
     ]
 );
 
@@ -319,6 +323,9 @@ pub struct WindowView {
     mobile: Option<mobile::MobilePage>,
     /// 开着的设置页，盖住整个窗口。
     settings: Option<settings_page::SettingsPage>,
+    /// 开着的任务板，和手机端引导页一样盖住标签和分屏；新建、编辑任务和定时的对话框。
+    todo_board: Option<todo_board::TodoBoard>,
+    todo_dialog: Option<todo_board::TodoDialog>,
     /// 当前 workspace 里没有标签时窗口的焦点，快捷键（新开标签等）照常派发得到。
     empty_focus: FocusHandle,
     /// 开着的 agent 列表。
@@ -479,6 +486,8 @@ impl WindowView {
             commit_message_dialog: None,
             mobile: None,
             settings: None,
+            todo_board: None,
+            todo_dialog: None,
             empty_focus: cx.focus_handle(),
             agent_picker: None,
             arrange_picker: None,
@@ -671,13 +680,16 @@ struct ClassicTitlebar {
 }
 
 impl Focusable for WindowView {
-    /// 开着设置页、手机端引导页时是它；否则是有焦点的终端，当前 workspace 里没有终端时是窗口自己的。
+    /// 开着设置页、手机端引导页、任务板时是它；否则是有焦点的终端，当前 workspace 里没有终端时是窗口自己的。
     fn focus_handle(&self, cx: &App) -> FocusHandle {
         if let Some(page) = &self.settings {
             return page.view.focus_handle(cx);
         }
         if let Some(page) = &self.mobile {
             return page.focus.clone();
+        }
+        if let Some(board) = &self.todo_board {
+            return board.focus.clone();
         }
         match self.focused_view() {
             Some(view) => view.focus_handle(cx),
@@ -697,6 +709,8 @@ impl Render for WindowView {
             (bg, vec![page.view.clone().into_any_element()])
         } else if self.mobile.is_some() {
             (if cards(cx) { frame_color(fg, bg) } else { bg }, self.render_mobile_body(fg, bg, window, cx))
+        } else if self.todo_board.is_some() {
+            (if cards(cx) { frame_color(fg, bg) } else { bg }, self.render_todo_body(fg, bg, window, cx))
         } else if cards(cx) {
             (frame_color(fg, bg), self.render_cards_body(fg, bg, window, cx))
         } else {
@@ -710,6 +724,7 @@ impl Render for WindowView {
         let new_workspace = self.render_new_workspace(fg, bg, cx);
         let add_task = self.render_add_task(fg, bg, cx);
         let commit_message_dialog = self.render_commit_message_dialog(fg, bg, cx);
+        let todo_dialog = self.render_todo_dialog(fg, bg, cx);
         let status_bar = (self.settings.is_none() && status_bar::shown(cx))
             .then(|| row_slot(&self.slots(cx).status_bar, status_bar::STATUS_BAR_HEIGHT, window));
         // 这几个浮层挡住了后面的界面，开着时后面的不报给辅助工具。
@@ -718,7 +733,8 @@ impl Render for WindowView {
             || branch_picker.is_some()
             || new_workspace.is_some()
             || add_task.is_some()
-            || commit_message_dialog.is_some();
+            || commit_message_dialog.is_some()
+            || todo_dialog.is_some();
         div()
             .id("window")
             .key_context("Window")
@@ -730,10 +746,12 @@ impl Render for WindowView {
             .on_action(Self::act(cx, Self::select_last_tab))
             .on_action(Self::act(cx, Self::new_split_right))
             .on_action(Self::act(cx, Self::new_split_down))
-            // 设置页开着时关分屏的动作（菜单里的「关闭」）只收起设置页，不关它盖着的分屏。
+            // 设置页、任务板开着时关分屏的动作（菜单里的「关闭」）只收起它，不关它盖着的分屏。
             .on_action(cx.listener(|this, action, window, cx| {
                 if this.settings.is_some() {
                     this.close_settings(window, cx);
+                } else if this.todo_board.is_some() {
+                    this.close_todo_board(window, cx);
                 } else {
                     this.close_pane(action, window, cx);
                 }
@@ -770,6 +788,7 @@ impl Render for WindowView {
             .on_action(Self::act(cx, Self::toggle_github_actions))
             .on_action(Self::act(cx, Self::goto_agent))
             .on_action(Self::act(cx, Self::next_agent))
+            .on_action(Self::act(cx, Self::toggle_todo_board))
             .on_action(Self::act(cx, Self::arrange_panes))
             .map(|window| Self::bind_git_actions(window, cx))
             // 终端和新建对话框没接住的拖放落到这里：侧栏收着时拖到标题栏、空 workspace 上也能开。
@@ -798,6 +817,7 @@ impl Render for WindowView {
             .children(new_workspace)
             .children(add_task)
             .children(commit_message_dialog)
+            .children(todo_dialog)
     }
 }
 

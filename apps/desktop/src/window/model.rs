@@ -378,6 +378,8 @@ impl WindowView {
     /// 上次画出时的布局可能已经过时（开了侧栏、缩了窗口），按它算的偏移不准。
     fn show_tab(&mut self, ix: usize, reveal_now: bool, window: &mut Window, cx: &mut Context<Self>) {
         self.mobile = None;
+        self.todo_board = None;
+        self.todo_dialog = None;
         let workspace = self.workspace_mut();
         workspace.active = ix;
         // 焦点要交给终端，盖着终端的放大预览栏还原。

@@ -100,10 +100,19 @@ pub(super) fn dispatch(inner: &Inner, generation: u64, message: HostMsg) {
                 let _ = inner.control(&ClientMsg::Kill { id });
             }
         },
-        message @ (HostMsg::ProjectTasks { req, .. } | HostMsg::Layout { req, .. }) => {
+        message @ (HostMsg::ProjectTasks { req, .. }
+        | HostMsg::Layout { req, .. }
+        | HostMsg::Todos { req, .. }
+        | HostMsg::TodoAdded { req, .. }
+        | HostMsg::Done { req }
+        | HostMsg::Opened { req, .. }) => {
             if let Some(reply) = state.replies.remove(&req) {
                 let _ = reply.send(message);
             }
+        }
+        HostMsg::TodosChanged => {
+            drop(state);
+            let _ = inner.todos.unbounded_send(());
         }
         HostMsg::SessionList { sessions } => {
             // 等的一方超时走了，它的位置还排在队里：跳过这些，交给下一个还在等的。回话按先后

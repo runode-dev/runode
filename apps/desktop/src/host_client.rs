@@ -50,6 +50,8 @@ pub enum Mode {
 
 /// 列会话最多等这么久。
 const LIST_TIMEOUT: Duration = Duration::from_secs(2);
+/// 任务板的请求最多等这么久：开始任务时宿主要跑 `git worktree add`（git 自己最多 120 秒）。
+const TODO_TIMEOUT: Duration = Duration::from_secs(130);
 /// 让留下的宿主退出后，最多等这么久拿到它放开的锁、开自己的 socket。
 const LISTEN_RETRY: Duration = Duration::from_secs(2);
 /// 另一个新 app 正在让新宿主接手（`HandoffRefusal::Busy`）时，等这么久再探一次：多半会探到它
@@ -247,6 +249,11 @@ pub fn serve_ui() -> Option<UnboundedReceiver<(UiTicket, ClientMsg)>> {
     link().ui_requests()
 }
 
+/// 任务板变了、或者换了一条连接要重新问任务板，见 `Link::todos_changed`。只能取一次。
+pub fn todos_changed() -> Option<UnboundedReceiver<()>> {
+    link().todos_changed()
+}
+
 /// 和宿主的连接断了以后重新连上：跑在 app 里时重开一对 socket；单独一个进程时重连它的 socket，
 /// 没有就重新拉起（`terminal-host` 已经关了、只是接回上次的会话时，改成跑在 app 里）。重连期间
 /// 最多卡住调用的线程约 2 秒。已经连着时什么都不做。之前的会话要重新 `attach`。
@@ -297,6 +304,17 @@ pub fn held_layout() -> Result<Vec<WindowLayout>> {
 /// 宿主在 `dir` 里列出的项目命令，见 `ClientMsg::ListProjectTasks`。会等宿主回话，别在主线程上调。
 pub fn list_project_tasks(dir: PathBuf) -> Result<Vec<TaskSource>> {
     link().list_project_tasks(dir, LIST_TIMEOUT)
+}
+
+/// 发一条任务板的请求（`ClientMsg::ListTodos` 等），等宿主回话；宿主不认得这些消息时直接报错，见
+/// `Link::host_knows_todos`。开始任务要建工作树，大仓库上要一会儿，所以等得久些。会等宿主回话，别在
+/// 主线程上调。
+pub fn ask_todos(make: impl FnOnce(u32) -> ClientMsg) -> Result<runode_protocol::HostMsg> {
+    let link = link();
+    if !link.host_knows_todos() {
+        return Err(anyhow!(rust_i18n::t!("todo_board.host_too_old").into_owned()));
+    }
+    link.request(make, TODO_TIMEOUT)
 }
 
 /// 宿主的 socket 放在哪；建不了 `run/` 目录或者路径太长时为 `None`。

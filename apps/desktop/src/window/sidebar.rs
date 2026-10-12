@@ -223,7 +223,8 @@ impl WindowView {
             // 多留一点，第一行不贴着开关。
             .child(div().flex_none().h(px(TITLEBAR_HEIGHT + 6.)).on_mouse_down(MouseButton::Left, drag_window))
             .child(self.render_mobile_entry(fg, bg, cx))
-            // 手机端入口不是 workspace，和下面的列表用一条线隔开。
+            .child(self.render_todo_board_entry(fg, bg, cx))
+            // 手机端和任务板的入口不是 workspace，和下面的列表用一条线隔开。
             .child(div().flex_none().mx(px(14.)).mb(px(6.)).h(px(1.)).bg(divider_color(hsla(fg))))
             .child(
                 div()
@@ -248,8 +249,8 @@ impl WindowView {
     fn render_row(&self, ix: usize, fg: Rgb, bg: Rgb, modifiers: Modifiers, cx: &mut Context<Self>) -> Stateful<Div> {
         let workspace = &self.workspaces[ix];
         let id = workspace.id;
-        // 开着手机端引导页时高亮的是入口。
-        let active = ix == self.active && self.mobile.is_none();
+        // 开着手机端引导页、任务板时高亮的是入口。
+        let active = ix == self.active && self.mobile.is_none() && self.todo_board.is_none();
         let active_bg = hsla(bg.mix(fg, 0.10));
         let hover_bg = hsla(bg.mix(fg, 0.06));
         let close_label = rust_i18n::t!("menu.close_workspace");

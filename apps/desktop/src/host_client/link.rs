@@ -6,8 +6,8 @@
 //!
 //! 读：一个 `host-link-reader` 线程读帧，按会话分发成 `LinkEvent`：输出帧按通道找到会话；快照帧
 //! 拼好到 `SnapshotEnd` 作为一份 `Screen` 交出去；带 `req` 的回话交给等着的调用方；
-//! `UiRequest` 交给界面（见 `Link::ui_requests`）；连接断开时给每个会话发 `LinkEvent::Lost`。读线程
-//! 那一组函数在 `reader`。
+//! `UiRequest` 交给界面（见 `Link::ui_requests`）；任务板变了（`TodosChanged`）告诉看任务板的一方
+//! （见 `Link::todos_changed`）；连接断开时给每个会话发 `LinkEvent::Lost`。读线程那一组函数在 `reader`。
 //!
 //! 连上一个会话（`attach`）时先登记再发 `Attach`。发出 `Attach` 到收到对应的 `Attached` 之间，
 //! 这个会话的输出和标记一律丢掉：宿主按先后处理同一条连接上的消息，旧订阅的帧都排在新的
@@ -155,6 +155,9 @@ struct Inner {
     writer: Mutex<Option<Writer>>,
     ui: UnboundedSender<(UiTicket, ClientMsg)>,
     ui_requests: Mutex<Option<UnboundedReceiver<(UiTicket, ClientMsg)>>>,
+    /// 任务板变了，或者换了一条连接（新连接上还没问过任务板，宿主不会再说变了），见 `Link::todos_changed`。
+    todos: UnboundedSender<()>,
+    todos_changed: Mutex<Option<UnboundedReceiver<()>>>,
     next_req: AtomicU32,
 }
 
@@ -202,6 +205,8 @@ struct State {
     host_build: Option<BuildId>,
     /// 现在这条连接上的宿主的进程号，见 `Link::host_pid`。
     host_pid: Option<u32>,
+    /// 现在这条连接上的宿主认得任务板的消息，见 `Link::host_knows_todos`。
+    todos: bool,
 }
 
 /// 一个连着（或正连着）的会话。
@@ -353,12 +358,15 @@ impl Link {
     /// 给快照。
     pub fn new(build: BuildId) -> Self {
         let (ui, ui_requests) = unbounded();
+        let (todos, todos_changed) = unbounded();
         let inner = Inner {
             build,
             state: Mutex::default(),
             writer: Mutex::new(None),
             ui,
             ui_requests: Mutex::new(Some(ui_requests)),
+            todos,
+            todos_changed: Mutex::new(Some(todos_changed)),
             next_req: AtomicU32::new(1),
         };
         Self { inner: Arc::new(inner) }
@@ -404,6 +412,7 @@ impl Link {
             state.snapshots = snapshots;
             state.host_build = Some(welcome.build);
             state.host_pid = Some(host_pid);
+            state.todos = welcome.todos;
             *self.inner.writer() =
                 Some(Writer { generation: state.generation, stream: BufWriter::with_capacity(WRITE_BUFFER, stream) });
             state.generation
@@ -431,6 +440,8 @@ impl Link {
         if let Some(windows) = layout {
             let _ = self.inner.control(&ClientMsg::LayoutChanged { windows: Some(windows) });
         }
+        // 看着任务板的一方重新问一次，新连接上就又会收到变化。
+        let _ = self.inner.todos.unbounded_send(());
         tracing::info!("connected to the host (pid {host_pid})");
         Ok(())
     }
@@ -450,6 +461,19 @@ impl Link {
     /// 最近一次连上的宿主在 `Welcome` 里报的构建；还没连上过时为 `None`。
     pub fn host_build(&self) -> Option<BuildId> {
         self.inner.state().host_build.clone()
+    }
+
+    /// 现在连着的宿主认得任务板的消息（`ClientMsg::ListTodos` 等，见 `HostMsg::Welcome`）。旧宿主不认得：
+    /// 它回的 `Error` 不带请求编号，等的一方等到超时，整条连接按断开处理，所以不认得时一条都不发。
+    pub fn host_knows_todos(&self) -> bool {
+        let state = self.inner.state();
+        state.connected && state.todos
+    }
+
+    /// 任务板变了（`HostMsg::TodosChanged`，只给问过 `ListTodos` 的连接发），或者换了一条连接、要重新问。
+    /// 只能取一次，第二次返回 `None`。
+    pub fn todos_changed(&self) -> Option<UnboundedReceiver<()>> {
+        self.inner.todos_changed.lock().unwrap_or_else(PoisonError::into_inner).take()
     }
 
     /// 最近一次连上的宿主在 `Welcome` 里报的进程号；宿主跑在 app 里时就是 app 自己。
@@ -682,7 +706,7 @@ impl Link {
 
     /// 发 `make` 用新的请求编号造出的请求，等带着这个编号的回话，最多等 `timeout`；回 `Error` 时是
     /// 它的说明。超时时这条连接按断开处理（`Inner::timed_out`）。
-    fn request(&self, make: impl FnOnce(u32) -> ClientMsg, timeout: Duration) -> Result<HostMsg> {
+    pub fn request(&self, make: impl FnOnce(u32) -> ClientMsg, timeout: Duration) -> Result<HostMsg> {
         let req = self.inner.next_req.fetch_add(1, Ordering::Relaxed);
         let (reply, generation) = self.expect_reply(req)?;
         if let Err(err) = self.inner.control(&make(req)) {
@@ -749,6 +773,7 @@ struct Welcome {
     snapshot_format: u16,
     standalone: bool,
     build: BuildId,
+    todos: bool,
 }
 
 /// 以桌面界面的身份握手，返回宿主的 `Welcome`。
@@ -771,8 +796,8 @@ fn handshake(stream: &UnixStream, build: &BuildId) -> Result<Welcome, ConnectErr
         match read_frame(&mut reader).map_err(frame_error)? {
             None => return Err(ConnectError::Closed),
             Some(frame) if frame.kind == FrameKind::Control => match frame.message::<HostMsg>() {
-                Ok(HostMsg::Welcome { host_pid, snapshot_format, standalone, build, .. }) => {
-                    break Ok(Welcome { host_pid, snapshot_format, standalone, build });
+                Ok(HostMsg::Welcome { host_pid, snapshot_format, standalone, build, todos, .. }) => {
+                    break Ok(Welcome { host_pid, snapshot_format, standalone, build, todos });
                 }
                 Ok(HostMsg::Incompatible { reason, .. }) => break Err(ConnectError::Incompatible(reason)),
                 Ok(HostMsg::Goodbye { .. }) => break Err(ConnectError::Closed),

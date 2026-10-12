@@ -86,6 +86,8 @@ impl WindowView {
     /// 打开手机端引导页；已经开着时把焦点给它。
     pub(super) fn show_mobile(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.drop_settings(cx);
+        self.todo_board = None;
+        self.todo_dialog = None;
         if self.mobile.is_none() {
             let system_name = host_name();
             let saved = cx.global::<AppConfig>().0.remote_access_name.clone().unwrap_or_default();
@@ -227,55 +229,89 @@ impl WindowView {
 
     /// 侧栏顶上的入口，引导页开着时高亮。
     pub(super) fn render_mobile_entry(&self, fg: Rgb, bg: Rgb, cx: &mut Context<Self>) -> Stateful<Div> {
-        let active = self.mobile.is_some();
-        let active_bg = hsla(bg.mix(fg, 0.10));
-        let hover_bg = hsla(bg.mix(fg, 0.06));
-        let fg = hsla(fg);
         let label = rust_i18n::t!("mobile.entry").into_owned();
-        let view = cx.entity().downgrade();
-        div()
-            .id("mobile-entry")
-            .role(Role::Button)
-            .aria_label(label.clone())
-            .flex_none()
-            .h(scaled(30.))
-            .mx(px(6.))
-            .mb(px(4.))
-            .px(px(8.))
-            .rounded(px(6.))
-            .flex()
-            .items_center()
-            .gap(px(6.))
-            .map(|row| {
-                if active {
-                    row.bg(active_bg).text_color(fg)
-                } else {
-                    row.text_color(fg.opacity(0.7)).hover(|row| row.bg(hover_bg).text_color(fg))
-                }
-            })
-            .child(
-                div()
-                    .flex_none()
-                    .w(px(ROW_ICON_SIZE))
-                    .flex()
-                    .justify_center()
-                    .child(svg().path(PHONE_ICON).size(px(14.)).text_color(fg.opacity(if active { 0.9 } else { 0.6 }))),
-            )
-            .child(div().min_w_0().truncate().child(label))
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(|this, _, window, cx| {
-                    cx.stop_propagation();
-                    this.show_mobile(window, cx);
-                }),
-            )
-            // 按下鼠标就开，没有 on_click，辅助工具的按下另外登记。
-            .on_a11y_press(view, move |this, window, cx| this.show_mobile(window, cx))
+        page_entry("mobile-entry", PHONE_ICON, label, self.mobile.is_some(), fg, bg, cx, |this, window, cx| {
+            this.show_mobile(window, cx);
+        })
     }
 
-    /// 引导页开着时窗口的内容：侧栏（收着时没有），右边整块是引导页，顶上留一条拖动窗口、放红绿灯。
+    /// 引导页开着时窗口的内容。
     pub(super) fn render_mobile_body(
         &mut self,
+        fg: Rgb,
+        bg: Rgb,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Vec<AnyElement> {
+        let page = self.render_mobile_page(fg, bg, cx).into_any_element();
+        self.render_page_body(page, fg, bg, window, cx)
+    }
+}
+
+/// 侧栏顶上打开一页（手机端、任务板）的入口，那一页开着时高亮。按下鼠标就开，辅助工具的按下另外登记。
+#[allow(clippy::too_many_arguments)]
+pub(super) fn page_entry(
+    id: &'static str,
+    icon: &'static str,
+    label: String,
+    active: bool,
+    fg: Rgb,
+    bg: Rgb,
+    cx: &mut Context<WindowView>,
+    open: impl Fn(&mut WindowView, &mut Window, &mut Context<WindowView>) + 'static,
+) -> Stateful<Div> {
+    let active_bg = hsla(bg.mix(fg, 0.10));
+    let hover_bg = hsla(bg.mix(fg, 0.06));
+    let fg = hsla(fg);
+    let open = Rc::new(open);
+    let press = open.clone();
+    let view = cx.entity().downgrade();
+    div()
+        .id(id)
+        .role(Role::Button)
+        .aria_label(label.clone())
+        .aria_selected(active)
+        .flex_none()
+        .h(scaled(30.))
+        .mx(px(6.))
+        .mb(px(4.))
+        .px(px(8.))
+        .rounded(px(6.))
+        .flex()
+        .items_center()
+        .gap(px(6.))
+        .map(|row| {
+            if active {
+                row.bg(active_bg).text_color(fg)
+            } else {
+                row.text_color(fg.opacity(0.7)).hover(|row| row.bg(hover_bg).text_color(fg))
+            }
+        })
+        .child(
+            div()
+                .flex_none()
+                .w(px(ROW_ICON_SIZE))
+                .flex()
+                .justify_center()
+                .child(svg().path(icon).size(px(14.)).text_color(fg.opacity(if active { 0.9 } else { 0.6 }))),
+        )
+        .child(div().min_w_0().truncate().child(label))
+        .on_mouse_down(
+            MouseButton::Left,
+            cx.listener(move |this, _, window, cx| {
+                cx.stop_propagation();
+                open(this, window, cx);
+            }),
+        )
+        .on_a11y_press(view, move |this, window, cx| press(this, window, cx))
+}
+
+impl WindowView {
+    /// 铺满窗口的一页（手机端引导页、任务板）开着时窗口的内容：侧栏（收着时没有），右边整块是 `page`，
+    /// 顶上留一条拖动窗口、放红绿灯。
+    pub(super) fn render_page_body(
+        &mut self,
+        page: AnyElement,
         fg: Rgb,
         bg: Rgb,
         window: &mut Window,
@@ -286,7 +322,6 @@ impl WindowView {
         let sidebar = self.sidebar_visible().then(|| self.render_sidebar(fg, bg, window, cx));
         let handle = sidebar.is_some().then(|| self.render_sidebar_handle(cx));
         let toggle = self.render_sidebar_toggle(fullscreen, fg, if cards { frame_color(fg, bg) } else { bg }, cx);
-        let page = self.render_mobile_page(fg, bg, cx);
         let main = div()
             .flex_1()
             .min_w_0()
