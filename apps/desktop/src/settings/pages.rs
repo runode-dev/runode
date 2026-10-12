@@ -93,8 +93,8 @@ impl Page {
 
     pub fn icon(self) -> &'static str {
         use crate::assets::{
-            FILES_ICON, KEYBOARD_ICON, PALETTE_ICON, PHONE_ICON, SETTINGS_ICON, SLIDERS_ICON,
-            SPARKLE_ICON, TERMINAL_ICON,
+            FILES_ICON, KEYBOARD_ICON, PALETTE_ICON, PHONE_ICON, SETTINGS_ICON, SLIDERS_ICON, SPARKLE_ICON,
+            TERMINAL_ICON,
         };
         match self {
             Self::General => SETTINGS_ICON,
@@ -217,11 +217,7 @@ impl Page {
                 Item::StatusBarHidden => Some("status-bar-hidden"),
                 Item::AgentExclude => Some("agent-notifications-exclude"),
                 Item::ConfigFiles => Some("config-file"),
-                Item::Section(_)
-                | Item::ConfigFileActions
-                | Item::Pairing
-                | Item::TestPush
-                | Item::Autostart => None,
+                Item::Section(_) | Item::ConfigFileActions | Item::Pairing | Item::TestPush | Item::Autostart => None,
             })
             .collect()
     }
