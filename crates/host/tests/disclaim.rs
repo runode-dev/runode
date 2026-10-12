@@ -20,6 +20,8 @@ fn main() {
                 libc::_exit(0);
             }
         }
+        // fork 失败时 -1 交给下面的 kill 会杀掉这个用户的所有进程。
+        assert!(child > 0, "fork failed");
         let responsible = common::responsible_pid(child);
         // SAFETY: 结束上面 fork 出的子进程并收尸。
         unsafe {
