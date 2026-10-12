@@ -223,6 +223,15 @@ impl Render for Spinner {
     }
 }
 
+/// 在 `id` 处画一个按 `frames` 转的圈，见 `AgentSpinner`。
+pub(super) fn spinner(
+    id: impl Into<ElementId>,
+    frames: &'static [&'static str],
+    frame_time: Duration,
+) -> impl IntoElement {
+    AgentSpinner { id: id.into(), frames, frame_time }
+}
+
 /// 在 `id` 处画 `Spinner`，连续几帧都画着时沿用同一个（存在元素状态里）。不用 `use_keyed_state`：
 /// 它把状态的通知转给外层视图，转圈每动一格又成了外层的状态变了。
 #[derive(IntoElement)]
@@ -341,9 +350,9 @@ fn tab_icons(tab: &Tab, fg: Rgb, bg: Rgb, cx: &App) -> Div {
 }
 
 /// agent 等用户回答时标记的颜色。
-const AGENT_BLOCKED_COLOR: u32 = 0xE5A50A;
+pub(super) const AGENT_BLOCKED_COLOR: u32 = 0xE5A50A;
 /// agent 干完了、用户还没看时标记的颜色。
-const AGENT_DONE_COLOR: u32 = 0x3FB950;
+pub(super) const AGENT_DONE_COLOR: u32 = 0x3FB950;
 
 /// 快捷键提示，从键位表里查，快捷键改了也跟着变：先找 `select` 的绑定，`is_last` 时再找
 /// `last` 的。后加的绑定优先，显示最后一个。

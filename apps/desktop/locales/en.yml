@@ -958,6 +958,12 @@ todo_board:
   no_next: Will not run again
   next: "next %{time}"
   worktree_on: own worktree
+  done_window: Last 7 days
+  toast:
+    starting: Starting the task…
+    started: Task started
+    failed: Couldn’t start the task
+    close: Dismiss
   host_too_old: The terminal host is too old for the todo board; restart Runode to upgrade it.
   column:
     todo: To Do

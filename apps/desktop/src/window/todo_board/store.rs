@@ -80,15 +80,30 @@ fn board_open(cx: &App) -> bool {
     remote::windows(cx).iter().any(|handle| handle.read(cx).is_ok_and(|view| view.todo_board.is_some()))
 }
 
-/// 现问一次任务和定时，变了就重画各窗口。
+/// 现问一次任务和定时，连同任务会话的状态一起问：刚开始的任务的会话还没问过时，它会先被算成会话没了、
+/// 落进需要你那一列，下一轮才回到进行中。变了就重画各窗口。
 pub(in crate::window) fn refresh_todos(cx: &mut App) -> Task<()> {
     cx.spawn(async move |cx| {
-        let answer =
-            cx.background_executor().spawn(async { host_client::ask_todos(|req| ClientMsg::ListTodos { req }) }).await;
+        let (answer, live) = cx
+            .background_executor()
+            .spawn(async {
+                let answer = host_client::ask_todos(|req| ClientMsg::ListTodos { req });
+                let live = host_client::list_sessions().ok();
+                (answer, live)
+            })
+            .await;
         cx.update(|cx| {
             let mut data = take(cx);
             match answer {
                 Ok(HostMsg::Todos { todos, schedules, .. }) => {
+                    if let Some(live) = live {
+                        let wanted: HashSet<SessionId> = todos.iter().filter_map(|todo| todo.session).collect();
+                        data.sessions = live
+                            .into_iter()
+                            .filter(|info| wanted.contains(&info.id))
+                            .map(|info| (info.id, info))
+                            .collect();
+                    }
                     data.todos = todos;
                     data.schedules = schedules;
                     data.error = None;
@@ -128,7 +143,8 @@ pub(in crate::window) fn ask(cx: &mut App, step: Step) -> Task<Result<HostMsg>> 
 pub(in crate::window) type Step = Box<dyn FnOnce(u32) -> ClientMsg + Send>;
 
 /// 在后台依次发几条任务板的请求，前一条没办成就不发后面的，原因显示在看板上；办成了的等宿主说变了再重问。
-pub(in crate::window) fn send(cx: &mut App, steps: Vec<Step>) {
+/// 等到的是都办成了没有。
+pub(in crate::window) fn send(cx: &mut App, steps: Vec<Step>) -> Task<bool> {
     cx.spawn(async move |cx| {
         let sent = cx
             .background_executor()
@@ -139,16 +155,15 @@ pub(in crate::window) fn send(cx: &mut App, steps: Vec<Step>) {
                 anyhow::Ok(())
             })
             .await;
-        if let Err(err) = sent {
-            let message = format!("{err:#}");
-            cx.update(|cx| {
-                let mut data = take(cx);
-                data.error = Some(message);
-                put(data, cx);
-            });
-        }
+        let Err(err) = sent else { return true };
+        let message = format!("{err:#}");
+        cx.update(|cx| {
+            let mut data = take(cx);
+            data.error = Some(message);
+            put(data, cx);
+        });
+        false
     })
-    .detach();
 }
 
 /// 拿出现在的数据改，改完用 `put` 放回去。

@@ -958,6 +958,12 @@ todo_board:
   no_next: 不會再跑
   next: "下一次 %{time}"
   worktree_on: 獨立工作樹
+  done_window: 最近 7 天
+  toast:
+    starting: 正在開始任務…
+    started: 任務已開始
+    failed: 沒能開始任務
+    close: 關掉提示
   host_too_old: 終端機宿主太舊，不認得任務板；重開 Runode 讓它升級。
   column:
     todo: 待辦

@@ -958,6 +958,12 @@ todo_board:
   no_next: 不会再跑
   next: "下一次 %{time}"
   worktree_on: 独立工作树
+  done_window: 最近 7 天
+  toast:
+    starting: 正在开始任务…
+    started: 任务已开始
+    failed: 没能开始任务
+    close: 关掉提示
   host_too_old: 终端宿主太旧，不认得任务板；重开 Runode 让它升级。
   column:
     todo: 待办
