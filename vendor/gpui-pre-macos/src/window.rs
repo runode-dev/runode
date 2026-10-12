@@ -11,9 +11,10 @@ use cocoa::{
     appkit::{
         NSApplication, NSBackingStoreBuffered, NSColor, NSEvent, NSEventModifierFlags, NSEventType,
         NSFilenamesPboardType, NSPasteboard, NSRequestUserAttentionType, NSScreen, NSView,
-        NSViewHeightSizable, NSViewWidthSizable, NSVisualEffectMaterial, NSVisualEffectState,
-        NSVisualEffectView, NSWindow, NSWindowCollectionBehavior, NSWindowOcclusionState,
-        NSWindowOrderingMode, NSWindowStyleMask, NSWindowTitleVisibility,
+        NSViewHeightSizable, NSViewWidthSizable, NSVisualEffectBlendingMode,
+        NSVisualEffectMaterial, NSVisualEffectState, NSVisualEffectView, NSWindow,
+        NSWindowCollectionBehavior, NSWindowOcclusionState, NSWindowOrderingMode,
+        NSWindowStyleMask, NSWindowTitleVisibility,
     },
     base::{id, nil},
     foundation::{
@@ -77,16 +78,10 @@ use std::{
         Arc, Once, Weak,
         atomic::{AtomicBool, Ordering},
     },
-    time::{Duration, Instant},
+    time::Duration,
 };
 
 const WINDOW_STATE_IVAR: &str = "windowState";
-
-/// How long `step` keeps the display link ticking without a frame before it
-/// stops it. Long enough that output and animations at ten or more frames a
-/// second (an agent's spinner) keep the link running instead of restarting it,
-/// and a new thread, every frame.
-const IDLE_BEFORE_STOP: Duration = Duration::from_millis(100);
 
 static RESTORES_WORKSPACE_AT_LAUNCH_DEFAULT: Once = Once::new();
 
@@ -671,14 +666,6 @@ struct MacWindowState {
     cursor_style: CursorStyle,
     cursor_visible: Arc<AtomicBool>,
     frame_source: Option<WindowFrameSource>,
-    // Whether a frame was presented or requested since the last `step`; `step`
-    // stops the display link once `IDLE_BEFORE_STOP` has passed since
-    // `last_busy` without either, and the waker from `frame_waker` restarts it.
-    frame_busy: bool,
-    last_busy: Instant,
-    // Set once `MacWindow` is dropped, so a late frame waker cannot create a
-    // new frame source for a window that is going away.
-    released: bool,
     renderer: renderer::Renderer,
     request_frame_callback: Option<Box<dyn FnMut(RequestFrameOptions)>>,
     event_callback: Option<Box<dyn FnMut(PlatformInput) -> gpui::DispatchEventResult>>,
@@ -689,6 +676,7 @@ struct MacWindowState {
     last_visibility: Option<WindowVisibility>,
     resize_callback: Option<Box<dyn FnMut(Size<Pixels>, f32)>>,
     moved_callback: Option<Box<dyn FnMut()>>,
+    display_changed_callback: Option<Box<dyn FnMut()>>,
     should_close_callback: Option<Box<dyn FnMut() -> bool>>,
     close_callback: Option<Box<dyn FnOnce()>>,
     appearance_changed_callback: Option<Box<dyn FnMut()>>,
@@ -861,7 +849,6 @@ impl MacWindowState {
             return;
         };
         let data = self.native_view.as_ptr() as *mut c_void;
-        self.last_busy = Instant::now();
         self.frame_source
             .get_or_insert_with(|| WindowFrameSource::new(data, step))
             .start(display_id)
@@ -871,32 +858,6 @@ impl MacWindowState {
     fn stop_display_link(&mut self) {
         if let Some(frame_source) = self.frame_source.as_mut() {
             frame_source.stop();
-        }
-    }
-
-    /// GPUI wants a frame: restart the display link if `step` stopped it for
-    /// being idle, and draw right away instead of waiting for its first vsync.
-    fn wake_display_link(&mut self) {
-        if self.released {
-            return;
-        }
-        self.frame_busy = true;
-        if self
-            .frame_source
-            .as_ref()
-            .is_some_and(WindowFrameSource::is_started)
-        {
-            return;
-        }
-        // Does nothing while the window is occluded; the occlusion handler
-        // restarts the link once it is visible again.
-        self.start_display_link();
-        if let Some(frame_source) = self
-            .frame_source
-            .as_ref()
-            .filter(|frame_source| frame_source.is_started())
-        {
-            frame_source.request_frame();
         }
     }
 
@@ -1139,9 +1100,6 @@ impl MacWindow {
                 cursor_style: CursorStyle::Arrow,
                 cursor_visible,
                 frame_source: None,
-                frame_busy: false,
-                last_busy: Instant::now(),
-                released: false,
                 renderer: renderer::new_renderer(
                     renderer_context,
                     native_window as *mut _,
@@ -1156,6 +1114,7 @@ impl MacWindow {
                 last_visibility: None,
                 resize_callback: None,
                 moved_callback: None,
+                display_changed_callback: None,
                 should_close_callback: None,
                 close_callback: None,
                 appearance_changed_callback: None,
@@ -1431,7 +1390,6 @@ impl Drop for MacWindow {
         this.renderer.destroy();
         let window = this.native_window;
         let sheet_parent = this.sheet_parent.take();
-        this.released = true;
         this.frame_source.take();
         unsafe {
             this.native_window.setDelegate_(nil);
@@ -1833,14 +1791,18 @@ impl PlatformWindow for MacWindow {
     fn activate(&self) {
         let lock = self.0.lock();
         let window = lock.native_window;
+        let view = lock.native_view.as_ptr();
         let closed = lock.closed.clone();
         let executor = lock.foreground_executor.clone();
         executor
             .spawn(async move {
                 if !closed.load(Ordering::Acquire) {
-                    unsafe {
-                        let _: () = msg_send![window, makeKeyAndOrderFront: nil];
+                    let window = unsafe { &*window.cast::<Objc2NSWindow>() };
+                    if !window.isVisible() {
+                        let view = unsafe { &*view.cast::<Objc2NSView>() };
+                        view.setNeedsDisplay(true);
                     }
+                    window.makeKeyAndOrderFront(None);
                 }
             })
             .detach();
@@ -2056,18 +2018,6 @@ impl PlatformWindow for MacWindow {
         }
     }
 
-    fn frame_waker(&self) -> Option<Rc<dyn Fn()>> {
-        // Weak: GPUI stores the waker in the window's invalidator, which
-        // `request_frame_callback` captures, so a strong reference would leak
-        // the window state.
-        let state = Arc::downgrade(&self.0);
-        Some(Rc::new(move || {
-            if let Some(state) = state.upgrade() {
-                state.lock().wake_display_link();
-            }
-        }))
-    }
-
     fn on_request_frame(&self, callback: Box<dyn FnMut(RequestFrameOptions)>) {
         self.0.as_ref().lock().request_frame_callback = Some(callback);
     }
@@ -2090,6 +2040,10 @@ impl PlatformWindow for MacWindow {
 
     fn on_resize(&self, callback: Box<dyn FnMut(Size<Pixels>, f32)>) {
         self.0.as_ref().lock().resize_callback = Some(callback);
+    }
+
+    fn on_display_changed(&self, callback: Box<dyn FnMut()>) {
+        self.0.as_ref().lock().display_changed_callback = Some(callback);
     }
 
     fn on_moved(&self, callback: Box<dyn FnMut()>) {
@@ -2169,7 +2123,6 @@ impl PlatformWindow for MacWindow {
 
     fn draw(&self, scene: &gpui::Scene) {
         let mut this = self.0.lock();
-        this.frame_busy = true;
         this.renderer.draw(scene);
     }
 
@@ -3171,6 +3124,25 @@ extern "C" fn window_did_change_screen(this: &Object, _: Sel, _: id) {
     lock.start_display_link();
     drop(lock);
     update_window_scale_factor(&window_state);
+    report_display_change(&window_state);
+}
+
+fn report_display_change(window_state: &Arc<Mutex<MacWindowState>>) {
+    let executor = window_state.lock().foreground_executor.clone();
+    // AppKit can post screen changes while GPUI is updating a window, e.g.
+    // from `setFrame:`, so deliver after that update completes.
+    executor
+        .spawn({
+            let window_state = window_state.clone();
+            async move {
+                let callback = window_state.lock().display_changed_callback.take();
+                if let Some(mut callback) = callback {
+                    callback();
+                    window_state.lock().display_changed_callback = Some(callback);
+                }
+            }
+        })
+        .detach();
 }
 
 extern "C" fn window_did_change_key_status(this: &Object, selector: Sel, _: id) {
@@ -3387,15 +3359,7 @@ extern "C" fn step(view: *mut c_void) {
             signal_source,
             ..Default::default()
         });
-        let mut lock = window_state.lock();
-        lock.request_frame_callback = Some(callback);
-        // GPUI wakes the window (`frame_waker`) whenever it needs another
-        // frame, so the link only has to keep ticking while frames are busy.
-        if mem::take(&mut lock.frame_busy) {
-            lock.last_busy = Instant::now();
-        } else if lock.last_busy.elapsed() >= IDLE_BEFORE_STOP {
-            lock.stop_display_link();
-        }
+        window_state.lock().request_frame_callback = Some(callback);
     }
 }
 
@@ -3842,9 +3806,13 @@ fn display_id_for_screen(screen: id) -> Option<CGDirectDisplayID> {
 extern "C" fn blurred_view_init_with_frame(this: &Object, _: Sel, frame: NSRect) -> id {
     unsafe {
         let view = msg_send![super(this, class!(NSVisualEffectView)), initWithFrame: frame];
-        // Use a colorless semantic material. The default value `AppearanceBased`, though not
-        // manually set, is deprecated.
-        NSVisualEffectView::setMaterial_(view, NSVisualEffectMaterial::Selection);
+        // A window-background material, whose tint and extra saturation
+        // `blurred_view_update_layer` strips, leaving only the blur. `Selection`, used before,
+        // has no `CABackdropLayer` on macOS 27, so nothing behind the window was blurred. (Setting
+        // a material also avoids the deprecated default, `AppearanceBased`.)
+        NSVisualEffectView::setMaterial_(view, NSVisualEffectMaterial::UnderWindowBackground);
+        // The default, but blurring what's behind the window is this view's whole purpose.
+        NSVisualEffectView::setBlendingMode_(view, NSVisualEffectBlendingMode::BehindWindow);
         NSVisualEffectView::setState_(view, NSVisualEffectState::Active);
         view
     }
