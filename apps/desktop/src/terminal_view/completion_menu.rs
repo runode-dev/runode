@@ -230,7 +230,7 @@ impl TerminalView {
     /// 从屏幕上读出提示符上的输入，看光标处能不能补全。
     fn completion_request(&self) -> Option<Request> {
         let input = self.screen.live()?.prompt_input()?;
-        Request::new(&input.text, input.cursor)
+        Request::new(&input.text, input.cursor, runode_terminal::cell_width)
     }
 
     /// 按新的输入重算候选：过滤用的词、文件列表；生成器的命令变了的重新跑，没变的留着。

@@ -7,7 +7,12 @@ use runode_shared_types::shell::ShellNames;
 
 fn request(input: &str) -> Option<Request> {
     let cursor = input.find('^').unwrap();
-    Request::new(&input.replacen('^', "", 1), cursor)
+    Request::new(&input.replacen('^', "", 1), cursor, width)
+}
+
+/// 代替终端的字宽表：组合字符 0 格，中日韩文字 2 格。
+fn width(c: char) -> u8 {
+    unicode_width::UnicodeWidthChar::width(c).map_or(0, |w| w as u8)
 }
 
 /// `input` 光标处（`^`）排好序的本地候选的值。

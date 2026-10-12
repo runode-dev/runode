@@ -4730,6 +4730,7 @@ dependencies = [
  "regex",
  "runode-autostart",
  "runode-cli",
+ "runode-command-history",
  "runode-completion",
  "runode-config",
  "runode-git",
@@ -4786,17 +4787,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "runode-command-history"
+version = "0.1.8"
+dependencies = [
+ "runode-paths",
+ "runode-shared-types",
+ "serde",
+ "serde_json",
+ "tracing",
+]
+
+[[package]]
 name = "runode-completion"
 version = "0.1.8"
 dependencies = [
  "futures",
  "libc",
  "miniz_oxide 0.9.1",
+ "runode-command-history",
  "runode-paths",
  "runode-shared-types",
- "runode-terminal",
  "serde_json",
  "tracing",
+ "unicode-width",
  "warp-command-signatures",
 ]
 
@@ -4822,6 +4835,7 @@ version = "0.1.8"
 dependencies = [
  "anyhow",
  "libc",
+ "runode-command-history",
  "runode-git",
  "runode-paths",
  "runode-project-tasks",
@@ -4908,6 +4922,7 @@ dependencies = [
  "libghostty-vt",
  "portable-pty",
  "runode-agent-detect",
+ "runode-command-history",
  "runode-paths",
  "runode-shared-types",
  "serde",

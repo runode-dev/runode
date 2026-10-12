@@ -38,13 +38,11 @@ use gpui::{
     Action, App, Bounds, Context, CursorStyle, Entity, EventEmitter, FocusHandle, Focusable, Font, Pixels, Point,
     Render, Role, ShapedLine, SharedString, Subscription, Task, Window, actions, div, prelude::*, px, rgb,
 };
+use runode_command_history as history;
 use runode_config::Config;
 use runode_protocol::SessionId;
 use runode_shared_types::{color::Rgb, frame::Frame, grid::GridSize};
-use runode_terminal::{
-    history,
-    session::{Link, Session},
-};
+use runode_terminal::session::{Link, Session};
 
 use crate::{
     host_client::LinkEvent,

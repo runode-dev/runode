@@ -4,6 +4,8 @@
 
 use std::ops::Range;
 
+use crate::CellWidth;
+
 /// 一处文字所在的引号。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Quote {
@@ -242,13 +244,19 @@ pub fn escape(text: &str, quote: Quote, at_word_start: bool) -> String {
 
 /// shell 行编辑里这段文字算几个字符，方向键和退格按它走：零宽的组合字符跟着前一个字，
 /// 宽字符也只算一个。
-pub fn edit_chars(text: &str) -> usize {
-    text.chars().filter(|&c| runode_terminal::cell_width(c) > 0).count()
+pub fn edit_chars(text: &str, width: CellWidth) -> usize {
+    text.chars().filter(|&c| width(c) > 0).count()
 }
 
 /// 这段文字在终端里占几格。
-pub fn cells(text: &str) -> usize {
-    text.chars().map(|c| usize::from(runode_terminal::cell_width(c))).sum()
+pub fn cells(text: &str, width: CellWidth) -> usize {
+    text.chars().map(|c| usize::from(width(c))).sum()
+}
+
+/// 测试里代替终端的宽度表：组合字符 0 格，中日韩文字 2 格。
+#[cfg(test)]
+pub(crate) fn test_width(c: char) -> u8 {
+    unicode_width::UnicodeWidthChar::width(c).map_or(0, |w| w as u8)
 }
 
 #[cfg(test)]
@@ -359,9 +367,9 @@ mod tests {
 
     #[test]
     fn counts_edit_steps_and_cells() {
-        assert_eq!(edit_chars("中文ab"), 4);
-        assert_eq!(cells("中文ab"), 6);
+        assert_eq!(edit_chars("中文ab", test_width), 4);
+        assert_eq!(cells("中文ab", test_width), 6);
         // e 加上组合重音符号：一个字。
-        assert_eq!(edit_chars("e\u{301}"), 1);
+        assert_eq!(edit_chars("e\u{301}", test_width), 1);
     }
 }

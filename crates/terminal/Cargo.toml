@@ -1,6 +1,6 @@
 [package]
 name = "runode-terminal"
-description = "Terminal sessions for runode: the libghostty-vt state machine on a shell's PTY, shell integration and command history"
+description = "Terminal sessions for runode: the libghostty-vt state machine on a shell's PTY, and shell integration"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -10,6 +10,8 @@ publish.workspace = true
 runode-paths.workspace = true
 runode-shared-types.workspace = true
 runode-agent-detect.workspace = true
+# shell 集成报告一条命令开始运行时记成历史的一条。
+runode-command-history.workspace = true
 libghostty-vt.workspace = true
 portable-pty.workspace = true
 anyhow.workspace = true

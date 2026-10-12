@@ -11,6 +11,8 @@ runode-git.workspace = true
 # 前端没说列哪个目录时列家目录。
 runode-paths.workspace = true
 runode-terminal.workspace = true
+# 认出命令运行完了就记进命令历史，升级交接时带上正在跑的那条。
+runode-command-history.workspace = true
 runode-protocol.workspace = true
 runode-shared-types.workspace = true
 anyhow.workspace = true

@@ -13,10 +13,10 @@ use std::{
     time::{Duration, Instant},
 };
 
+use runode_command_history::Entry;
 use runode_shared_types::{grid::GridSize, session::DriveAction, settings::TermSettings, shell::IntegrationMode};
 use runode_terminal::{
     fd_passing::{recv_with_fds, send_with_fds},
-    history::Entry,
     host_session::{HostSession, ImportScreen, RedactorState, ReportRedactor, SessionExport},
     pty::{Pty, PtyEvent, PtyHandoff, PtySink},
 };

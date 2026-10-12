@@ -46,8 +46,10 @@ use runode_shared_types::{
     shell::IntegrationMode,
 };
 
+use runode_command_history as history;
+
 use crate::{
-    history, prompt_input,
+    prompt_input,
     pty::{Pty, PtyHandoff, PtyWriter},
     vt::{self, CommandOutput, SnapshotError},
 };

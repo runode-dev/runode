@@ -2,7 +2,8 @@
 
 use std::time::Instant;
 
-use runode_terminal::{PromptInput, history, session::Session};
+use runode_command_history as history;
+use runode_terminal::{PromptInput, session::Session};
 
 use super::{ECHO_WAIT, Suggestion, TerminalView};
 

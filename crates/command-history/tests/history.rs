@@ -3,7 +3,7 @@
 
 use std::path::Path;
 
-use runode_terminal::history::{Entry, History, Suggester, next_word, worth_recording};
+use runode_command_history::{Entry, History, Suggester, next_word, worth_recording};
 
 fn entry(cmd: &str, cwd: Option<&str>) -> Entry {
     Entry { cmd: cmd.into(), cwd: cwd.map(Into::into), exit: None, ts: 0 }

@@ -10,7 +10,9 @@ use std::{
 use runode_shared_types::{agent::AgentState, shell::ShellNames};
 
 use super::{ClipboardRequest, HostSession};
-use crate::{history, pty};
+use runode_command_history as history;
+
+use crate::pty;
 
 /// 宿主那份 VT 的回调累积下来的变化。
 #[derive(Default)]

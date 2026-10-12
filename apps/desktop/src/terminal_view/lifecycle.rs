@@ -20,6 +20,7 @@ use std::{
 
 use futures::{StreamExt as _, channel::mpsc::UnboundedReceiver, task::ArcWake};
 use gpui::{App, AppContext as _, Context, Entity, Font, Global, Point, SharedString, Task, Window, font, px};
+use runode_command_history as history;
 use runode_protocol::{AttachMode, ClientMsg, HostMsg, SessionId};
 use runode_shared_types::{
     agent::Agent,
@@ -29,7 +30,6 @@ use runode_shared_types::{
     settings::TermSettings,
 };
 use runode_terminal::{
-    history,
     pty::dir_label,
     session::{self, Request, SYNC_OUTPUT_TIMEOUT, Session},
 };

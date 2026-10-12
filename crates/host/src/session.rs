@@ -38,6 +38,7 @@ use std::{
 };
 
 use anyhow::{Context as _, Result, anyhow};
+use runode_command_history as history;
 use runode_protocol::{AttachMode, FinishedCommand, HostMsg, SessionId, SessionInfo};
 use runode_shared_types::{
     clipboard::ClipboardAccess,
@@ -48,7 +49,7 @@ use runode_shared_types::{
     shell::IntegrationMode,
 };
 use runode_terminal::{
-    SnapshotError, history,
+    SnapshotError,
     host_session::{HostSession, ImportError, ImportScreen, RedactorState, ReportRedactor, SessionExport},
     pty::{self, Pty, PtyEvent, PtyHandoff},
 };

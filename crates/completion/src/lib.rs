@@ -39,12 +39,16 @@ pub struct Shell {
     pub usage: Arc<usage::Usage>,
 }
 
+/// 一个字在终端里占几格，由调用方给：菜单对齐和退格的次数要和终端排版用同一张表。
+pub type CellWidth = fn(char) -> u8;
+
 /// 对一行输入的一次补全：光标所在的那一段命令，以及光标处要补什么。
 pub struct Request {
     text: String,
     cursor: usize,
     segment: Segment,
     plan: Plan,
+    width: CellWidth,
 }
 
 /// 要在后台跑的一个生成器。
@@ -62,11 +66,11 @@ pub struct GeneratorJob {
 
 impl Request {
     /// 输入 `text`、光标在字节位置 `cursor` 时，光标处能不能由 runode 补全：在重定向目标上、
-    /// 正在写变量赋值时不能，为 `None`。命令没有规格时参数按文件和目录补。
-    pub fn new(text: &str, cursor: usize) -> Option<Self> {
+    /// 正在写变量赋值时不能，为 `None`。命令没有规格时参数按文件和目录补。字宽按 `width` 算。
+    pub fn new(text: &str, cursor: usize, width: CellWidth) -> Option<Self> {
         let segment = line::parse(text, cursor);
         let plan = engine::plan(&segment, cursor)?;
-        Some(Self { text: text.to_owned(), cursor, segment, plan })
+        Some(Self { text: text.to_owned(), cursor, segment, plan, width })
     }
 
     fn word(&self) -> &line::Word {
@@ -85,7 +89,7 @@ impl Request {
 
     /// 从当前词的起点到光标在终端里占几格。
     pub fn cells_before_cursor(&self) -> usize {
-        line::cells(&self.text[self.word_start()..self.cursor])
+        line::cells(&self.text[self.word_start()..self.cursor], self.width)
     }
 
     /// 当前词在光标之前的部分，去掉了引号和转义；候选按它来匹配。
@@ -197,12 +201,20 @@ impl Request {
 
     /// 接受 `candidate` 时要发的按键：只改光标前的部分，见 `engine::edit`。
     pub fn accept(&self, candidate: &Candidate) -> Edit {
-        engine::edit(&self.text, self.cursor, self.word(), candidate.from, &candidate.value, candidate.finish)
+        engine::edit(
+            &self.text,
+            self.cursor,
+            self.word(),
+            candidate.from,
+            &candidate.value,
+            candidate.finish,
+            self.width,
+        )
     }
 
     /// 只把当前词从第 `from` 个字符起换成 `prefix`（候选的公共开头），这个词还没写完。
     pub fn insert_prefix(&self, from: usize, prefix: &str) -> Edit {
-        engine::edit(&self.text, self.cursor, self.word(), from, prefix, false)
+        engine::edit(&self.text, self.cursor, self.word(), from, prefix, false, self.width)
     }
 }
 

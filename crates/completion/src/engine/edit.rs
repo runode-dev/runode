@@ -1,6 +1,9 @@
 //! 接受候选时要发给 shell 的按键：只改光标前的部分，补齐引号和空格。
 
-use crate::line::{self, Quote, Word};
+use crate::{
+    CellWidth,
+    line::{self, Quote, Word},
+};
 
 /// 改写当前词时要发给 shell 的按键：先退格删掉光标前要换的部分，再写新的字。光标不动、
 /// 光标后面的字一概不碰：那里可能是 shell 或插件画的灰字建议，屏幕上和真的输入分不出来，
@@ -16,8 +19,8 @@ pub struct Edit {
 ///
 /// 写完后要回到光标处原来的引号状态，光标后面的字才照旧解析：删掉的部分里有引号开关时
 /// 补上相应的引号。`finish` 且光标在词尾时这个词算写完了：闭合引号，后面不是空白就补一个
-/// 空格；光标在词中间时不补空格，免得把后面的字拆成另一个词。
-pub fn edit(text: &str, cursor: usize, word: &Word, from: usize, value: &str, finish: bool) -> Edit {
+/// 空格；光标在词中间时不补空格，免得把后面的字拆成另一个词。退格几下按 `width` 数字。
+pub fn edit(text: &str, cursor: usize, word: &Word, from: usize, value: &str, finish: bool, width: CellWidth) -> Edit {
     let cursor = cursor.clamp(word.raw.start, word.raw.end);
     let at_cursor = line::quote_at(text, word.raw.start, cursor);
     let (start, quote) = match word.char_at(from) {
@@ -40,7 +43,7 @@ pub fn edit(text: &str, cursor: usize, word: &Word, from: usize, value: &str, fi
         close(&mut out, quote);
         close(&mut out, at_cursor);
     }
-    Edit { backspace: line::edit_chars(&text[start..cursor]), text: out }
+    Edit { backspace: line::edit_chars(&text[start..cursor], width), text: out }
 }
 
 #[cfg(test)]
@@ -52,7 +55,7 @@ mod tests {
         let cursor = input.find('^').unwrap();
         let text = input.replacen('^', "", 1);
         let segment = parse(&text, cursor);
-        edit(&text, cursor, &segment.words[segment.current], from, value, finish)
+        edit(&text, cursor, &segment.words[segment.current], from, value, finish, line::test_width)
     }
 
     fn keys(backspace: usize, text: &str) -> Edit {

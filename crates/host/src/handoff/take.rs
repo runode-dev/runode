@@ -11,6 +11,7 @@ use std::{
     time::{Duration, Instant},
 };
 
+use runode_command_history as history;
 use runode_protocol::{
     BuildId, Caps, ClientKind, ClientMsg, Frame, FrameKind, GoodbyeReason, HANDOFF_FORMAT, HandoffPart, HandoffRefusal,
     HostMsg, OLDEST_READABLE_HANDOFF_FORMAT, PROTOCOL_VERSION, SessionId, WindowLayout, decode_part, read_frame,
@@ -18,7 +19,7 @@ use runode_protocol::{
 };
 use runode_shared_types::{clipboard::ClipboardAccess, settings::TermSettings, shell::IntegrationMode};
 use runode_terminal::{
-    fd_passing, history,
+    fd_passing,
     host_session::{RedactorState, SessionExport},
     pty::PtyHandoff,
 };

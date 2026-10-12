@@ -241,7 +241,7 @@ impl TerminalView {
         let word_row = usize::from(cursor.y).saturating_sub(back.div_ceil(cols.max(1)));
         let labels: Vec<String> =
             menu.groups.iter().map(|(kind, detail)| kind_label(*kind, detail.as_deref())).collect();
-        let widths: Vec<usize> = labels.iter().map(|label| completion::cells(label)).collect();
+        let widths: Vec<usize> = labels.iter().map(|label| cells(label)).collect();
         let Some(layout) = layout(cols, rows, usize::from(cursor.y), word_row, menu.items.len(), &widths) else {
             menu.shown = None;
             return;
@@ -287,7 +287,7 @@ impl TerminalView {
         let total = menu.total;
         let selected = if menu.items.is_empty() { 0 } else { menu.selected + 1 };
         let count = format!("{selected}/{}", menu.items.len());
-        let mut col = completion::cells(&count);
+        let mut col = cells(&count);
         spans.push(Span { bold: true, ..plain(top_row, 0, cols, count, fg) });
         let mut notes = Vec::new();
         if total != menu.items.len() {
@@ -297,7 +297,7 @@ impl TerminalView {
             notes.push(rust_i18n::t!("completion.loading").into_owned());
         }
         for note in notes {
-            let width = completion::cells(&note);
+            let width = cells(&note);
             spans.push(plain(top_row, col + 1, cols, note, dim));
             col += 1 + width;
         }
@@ -331,7 +331,7 @@ impl TerminalView {
 
         // 候选：色条占开头一列，然后是名字一列和说明。
         let visible = &menu.items[menu.top..(menu.top + list_rows).min(menu.items.len())];
-        let name_widths: Vec<usize> = visible.iter().map(|&i| completion::cells(&menu.candidates[i].label)).collect();
+        let name_widths: Vec<usize> = visible.iter().map(|&i| cells(&menu.candidates[i].label)).collect();
         let name_width = name_column(&name_widths, cols);
         for (n, &i) in visible.iter().enumerate() {
             let row = list_row + n as i32;
@@ -390,7 +390,7 @@ impl TerminalView {
         let (cw, ch) = (metrics.cell.width, metrics.cell.height);
         let baseline = (ch - metrics.ascent - metrics.descent) / 2. + metrics.ascent;
         let available = span.end.saturating_sub(span.col);
-        let truncated = completion::cells(&span.text) > available;
+        let truncated = cells(&span.text) > available;
         let limit = span.col + if truncated { available.saturating_sub(1) } else { available };
         let mut col = span.col;
         // 宽字符和终端里一样，字形从它占的两格的左边画起。
@@ -420,6 +420,11 @@ impl TerminalView {
             draw(self, '…', col, false, span.color, window);
         }
     }
+}
+
+/// 这段文字在终端里占几格。
+fn cells(text: &str) -> usize {
+    completion::cells(text, runode_terminal::cell_width)
 }
 
 #[cfg(test)]

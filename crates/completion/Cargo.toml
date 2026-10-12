@@ -9,8 +9,8 @@ publish.workspace = true
 [dependencies]
 runode-paths.workspace = true
 runode-shared-types.workspace = true
-# 命令历史里各命令的常用程度，以及文字在终端里占几格。
-runode-terminal.workspace = true
+# 命令历史里各命令的常用程度。
+runode-command-history.workspace = true
 # 命令规格的数据类型和动态补全的生成器。
 warp-command-signatures.workspace = true
 # 解压构建脚本嵌进来的命令规格。
@@ -20,6 +20,10 @@ futures.workspace = true
 # 补全的生成器命令跑在自己的进程组里，超时时整组结束。
 libc.workspace = true
 tracing.workspace = true
+
+[dev-dependencies]
+# 测试里代替终端的字宽表。
+unicode-width.workspace = true
 
 [build-dependencies]
 # 构建脚本把命令规格的 JSON 压紧、逐个压缩后嵌进二进制。
