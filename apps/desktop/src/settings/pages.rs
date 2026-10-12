@@ -6,7 +6,7 @@ use runode_shared_types::agent::AgentKind;
 
 use super::{
     Commit, SettingsView,
-    controls::{Cards, Colors, Press, chip, dropdown, input_box, row, segmented, swatch, switch},
+    controls::{Cards, Colors, Press, chip, dropdown, input_box, row, segmented, swatch},
     picker::{PickItem, PickTarget},
 };
 use crate::{
@@ -16,6 +16,7 @@ use crate::{
         display_dir,
         font_size::FontSize,
         hsla,
+        switch::Switch,
     },
 };
 
@@ -342,7 +343,7 @@ impl SettingsView {
         let control = match control {
             Control::Switch => {
                 let on = current.first().is_some_and(|value| value == "true");
-                let switch = switch(id("switch", key), key_title(key), on, colors)
+                let switch = Switch::new(id("switch", key), key_title(key), on)
                     .on_press(cx, move |this, _, cx| this.write_or_report(key, vec![(!on).to_string()], cx));
                 let notify = key == "agent-notifications" && on;
                 // 开着通知、系统设置里却拒绝了：通知发不出来，提示去系统设置里打开。

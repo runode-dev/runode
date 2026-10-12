@@ -23,6 +23,7 @@ use crate::{
         font_size::{FontSize, scaled},
         hsla,
         input::{Input, InputEvent, InputState},
+        switch::Switch,
         textarea::{Textarea, TextareaEvent, TextareaState},
         theme::ActiveTheme as _,
     },
@@ -366,32 +367,10 @@ impl WindowView {
             .when(dialog.locked, |dir| dir.opacity(0.6))
             .aria_disabled(dialog.locked);
         let worktree_label = rust_i18n::t!("todo_board.dialog.worktree").into_owned();
-        // 和设置页的开关一个样子：一行字配一个拨钮，打开时是调色板里的蓝色。
-        let on = dialog.worktree;
-        let palette = &cx.global::<crate::config::AppConfig>().0.palette;
-        let accent = hsla(palette.iter().rfind(|(ix, _)| *ix == 4).map_or(Rgb(0x3b, 0x82, 0xf6), |(_, rgb)| *rgb));
-        let worktree = div()
-            .id("todo-dialog-worktree")
-            .role(Role::Switch)
-            .aria_label(worktree_label.clone())
-            .aria_toggled(on.into())
-            .flex()
-            .items_center()
-            .gap(px(8.))
+        // 一行字配一个开关，点字也算点开关。
+        let worktree = Switch::new("todo-dialog-worktree", worktree_label.clone(), dialog.worktree)
+            .label(worktree_label)
             .cursor_pointer()
-            .child(
-                div()
-                    .w(px(34.))
-                    .h(px(20.))
-                    .flex_none()
-                    .rounded_full()
-                    .p(px(2.))
-                    .flex()
-                    .when(on, |track| track.justify_end())
-                    .bg(if on { accent } else { fg_h.opacity(0.18) })
-                    .child(div().size(px(16.)).rounded_full().bg(gpui::white()).shadow_sm()),
-            )
-            .child(worktree_label)
             .when(!dialog.locked, |pill| {
                 pill.on_press(cx, |this, _, cx| {
                     if let Some(dialog) = &mut this.todo_dialog {

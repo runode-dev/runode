@@ -7,8 +7,9 @@ use runode_autostart::Kind;
 
 use super::{
     SettingsView,
-    controls::{Colors, Press, row, switch},
+    controls::{Colors, Press, row},
 };
+use crate::ui::switch::Switch;
 
 impl SettingsView {
     pub(super) fn render_autostart(&mut self, colors: Colors, cx: &mut Context<Self>) -> Div {
@@ -17,7 +18,7 @@ impl SettingsView {
         for kind in [Kind::App, Kind::Host].into_iter().filter(|kind| kind.supported()) {
             let on = runode_autostart::is_installed(kind, &dirs);
             let title = rust_i18n::t!(format!("settings.autostart.{}.title", kind.name())).into_owned();
-            let switch = switch(format!("autostart-{}", kind.name()), title.clone(), on, colors)
+            let switch = Switch::new(format!("autostart-{}", kind.name()), title.clone(), on)
                 .on_press(cx, move |this, _, cx| this.toggle_autostart(kind, cx));
             rows = rows.child(row(
                 title,

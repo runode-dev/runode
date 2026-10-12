@@ -15,10 +15,11 @@ use runode_config::{
 
 use super::{
     SettingsView,
-    controls::{CONTROL_HEIGHT, Cards, Colors, Press, row, switch},
+    controls::{CONTROL_HEIGHT, Cards, Colors, Press, row},
 };
 use crate::ui::button::{Button, ButtonSize, ButtonVariant};
 use crate::ui::font_size::{self, FontSize, scaled};
+use crate::ui::switch::Switch;
 
 const KEY: &str = "keybind";
 
@@ -382,7 +383,7 @@ impl SettingsView {
         let values = self.file.values(KEY);
         let cleared = values.iter().any(|value| value == "clear");
         let title = rust_i18n::t!("settings.keybind.use_defaults").into_owned();
-        let defaults = switch("use-defaults", title.clone(), !cleared, colors).on_press(cx, move |this, _, cx| {
+        let defaults = Switch::new("use-defaults", title.clone(), !cleared).on_press(cx, move |this, _, cx| {
             let mut values = this.file.values(KEY);
             if cleared {
                 values.retain(|value| value != "clear");

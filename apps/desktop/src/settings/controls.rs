@@ -1,4 +1,4 @@
-//! 设置页里的控件：一行设置的排版，开关、分段选项、下拉按钮、输入框和色块（按钮用 `Button`）。颜色取自
+//! 设置页里的控件：一行设置的排版，分段选项、下拉按钮、输入框和色块（按钮用 `Button`，开关用 `Switch`）。颜色取自
 //! 终端的前景和背景，和终端窗口的界面一个色调。
 
 use gpui::{
@@ -157,29 +157,6 @@ pub(super) fn row(
         )
         // 控件贴着右边，恢复按钮有的时候放在它左边。
         .child(div().flex_none().flex().items_center().gap(px(6.)).children(reset).child(control))
-}
-
-/// 开关；`label` 是它管的那一项的名字，报给辅助工具。
-pub(super) fn switch(
-    id: impl Into<ElementId>,
-    label: impl Into<SharedString>,
-    on: bool,
-    colors: Colors,
-) -> Stateful<Div> {
-    div()
-        .id(id)
-        .role(Role::Switch)
-        .aria_label(label)
-        .aria_toggled(on.into())
-        .w(px(34.))
-        .h(px(20.))
-        .flex_none()
-        .rounded_full()
-        .p(px(2.))
-        .flex()
-        .when(on, |track| track.justify_end())
-        .bg(if on { colors.accent } else { colors.fg.opacity(0.18) })
-        .child(div().size(px(16.)).rounded_full().bg(gpui::white()).shadow_sm())
 }
 
 /// 分段选项：几个挨在一起的按钮，选中的那个高亮。`options` 是 (值, 显示的文字)，`label` 是这一组的名字。
