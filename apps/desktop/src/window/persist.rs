@@ -15,7 +15,7 @@ use std::{collections::HashMap, path::Path, time::Duration};
 use gpui::{
     App, Bounds, Context, EntityId, Global, Task, WeakEntity, Window, WindowBounds, WindowOptions, point, px, size,
 };
-use runode_protocol::SessionInfo;
+use runode_protocol::{SessionInfo, WindowLayout};
 use runode_shared_types::pane::{Node, Split};
 
 use super::{
@@ -87,6 +87,8 @@ pub(super) fn freeze(cx: &mut App) {
     if cx.global::<Saver>().frozen {
         return;
     }
+    // 还在等着报的布局变化先报给宿主，冻结以后就不报了，见 `layout_report`。
+    super::layout_report::report_change(cx);
     let windows: Vec<_> = cx.global::<Saver>().windows.iter().map(|(window, _)| window.clone()).collect();
     let fresh: Vec<_> = windows.iter().map(|window| window.upgrade().map(|view| view.read(cx).snapshot(cx))).collect();
     let saver = cx.global_mut::<Saver>();
@@ -99,19 +101,31 @@ pub(super) fn freeze(cx: &mut App) {
     cx.global_mut::<Saver>().frozen = true;
 }
 
+/// 已经开始退出，存档冻结了（`freeze`）。
+pub(super) fn frozen(cx: &App) -> bool {
+    cx.try_global::<Saver>().is_some_and(|saver| saver.frozen)
+}
+
+/// 存档里还留着窗口：窗口一个不剩时，是关窗口退出（下次启动恢复它们），不是用户把工作区都关完了。
+pub(super) fn keeps_windows(cx: &App) -> bool {
+    cx.try_global::<Saver>().is_some_and(|saver| !saver.windows.is_empty())
+}
+
 /// 冻结之后又不退出了（退出前没能把会话交出去，用户取消了）：存档重新跟着布局变。
 pub(super) fn thaw(cx: &mut App) {
     cx.global_mut::<Saver>().frozen = false;
 }
 
 /// 上次存下的各个窗口，以及恢复时打开它们用的窗口选项（位置、大小、所在屏幕）。没有存档或
-/// 读不了时为空；读不了时文件挪到一边（`format::load`），从默认布局开始。终端记的会话按宿主里
+/// 读不了时为空；读不了时文件挪到一边（`format::load`），从默认布局开始。没开 app 时手机、命令行
+/// 经宿主新开的终端、新建的工作区和改的名字按宿主手里的布局接进来（`format::adopt`）。终端记的会话按宿主里
 /// 还活着的会话定下接不接（`format::plan_restore`）；宿主里已经退出又没人连着的、存档记着却一直没启动的会话
 /// 这时结束掉（没有存档也照样做）。
 pub fn saved_window_options(cx: &App) -> Vec<(SavedWindow, WindowOptions)> {
-    let windows = format::load().map(|state| state.windows).unwrap_or_default();
-    let windows: Vec<_> = windows.into_iter().filter(|window| !window.workspaces.is_empty()).collect();
+    let mut windows = format::load().map(|state| state.windows).unwrap_or_default();
     let live = live_sessions();
+    format::adopt(&mut windows, &held_layout(), &live, workspace_name);
+    let windows: Vec<_> = windows.into_iter().filter(|window| !window.workspaces.is_empty()).collect();
     let plan = format::plan_restore(windows, &live);
     let link = host_client::link();
     for id in plan.end {
@@ -135,6 +149,20 @@ fn live_sessions() -> Vec<SessionInfo> {
     }
     host_client::list_sessions().unwrap_or_else(|err| {
         tracing::warn!("failed to list the host's sessions, starting every saved terminal over: {err:#}");
+        Vec::new()
+    })
+}
+
+/// 宿主手里的布局，见 `format::adopt`。宿主跑在 app 里时它刚建好，手里没有，不问；问不到时当作
+/// 没有，没开 app 时新开的终端成为后台会话。
+fn held_layout() -> Vec<WindowLayout> {
+    if host_client::mode() == Mode::InProcess {
+        return Vec::new();
+    }
+    host_client::held_layout().unwrap_or_else(|err| {
+        tracing::warn!(
+            "failed to get the host's layout, leaving what changed without the app in the background: {err:#}"
+        );
         Vec::new()
     })
 }

@@ -75,6 +75,8 @@ Options:
 
 Columns: * marks your own terminal, REL where a session sits next to yours,
 FG the program in front, VIEW shown, hidden (another tab) or bg (in no window).
+While the app is closed, places and VIEW follow the layout it left behind, so
+shown does not mean on screen.
 ";
 
 const READ: &str = "\
@@ -179,6 +181,9 @@ Options:
                       split opened from an agent's terminal is folded unless
                       the `agent-split-fold` setting is off
   -h, --help          Show this help
+
+While the app is closed, `open` makes a new tab at the end of SESSION's
+workspace whatever the placement, and does not switch to it.
 ";
 
 const KILL: &str = "\
@@ -294,5 +299,5 @@ candidates. It is one of
                 runs that agent (claude, codex, ...), in that state
   cwd:DIR       works in DIR; a bare name matches the last part of the path
 Windows, workspaces, tabs and panes count from 1 in the order the app shows
-them. The positional forms need a runode window.
+them; while the app is closed, in the layout it left behind.
 ";

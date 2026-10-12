@@ -16,5 +16,5 @@ it matches several, runode lists them and fails, and you pick one by id.
 | `agent:codex`, `agent:claude:idle` | runs that agent, optionally in that state |
 | `cwd:~/src/app`, `cwd:app` | works in that directory (or one named `app`) |
 
-Positions count from 1 in the order the app shows them. Positional forms need
-an open runode window; ids, titles, agents and directories always work.
+Positions count from 1 in the order the app shows them; while the app is closed,
+in the layout it left behind. Ids, titles, agents and directories always work.

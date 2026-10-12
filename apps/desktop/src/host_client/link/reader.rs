@@ -100,9 +100,9 @@ pub(super) fn dispatch(inner: &Inner, generation: u64, message: HostMsg) {
                 let _ = inner.control(&ClientMsg::Kill { id });
             }
         },
-        HostMsg::ProjectTasks { req, dir, sources } => {
+        message @ (HostMsg::ProjectTasks { req, .. } | HostMsg::Layout { req, .. }) => {
             if let Some(reply) = state.replies.remove(&req) {
-                let _ = reply.send(HostMsg::ProjectTasks { req, dir, sources });
+                let _ = reply.send(message);
             }
         }
         HostMsg::SessionList { sessions } => {

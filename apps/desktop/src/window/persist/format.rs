@@ -11,7 +11,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use runode_protocol::{SessionId, SessionInfo};
+use runode_protocol::{SessionId, SessionInfo, WindowLayout};
 use runode_shared_types::pane::Axis;
 use serde::{Deserialize, Serialize};
 
@@ -31,7 +31,7 @@ impl State {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct SavedWindow {
     pub bounds: SavedBounds,
     pub workspaces: Vec<SavedWorkspace>,
@@ -97,8 +97,9 @@ pub struct SavedSearchOptions {
     pub exclude: String,
 }
 
-/// 窗口的位置和大小，相对于它所在的屏幕；放大和全屏时是还原后的位置和大小。
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+/// 窗口的位置和大小，相对于它所在的屏幕；放大和全屏时是还原后的位置和大小。默认的大小是 0，恢复时
+/// 按默认位置开。
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct SavedBounds {
     /// 屏幕的 UUID，重启后不变；取不到时为空，恢复到主屏幕上。
     #[serde(default)]
@@ -110,15 +111,16 @@ pub struct SavedBounds {
     pub height: f32,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum WindowMode {
+    #[default]
     Windowed,
     Maximized,
     Fullscreen,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct SavedWorkspace {
     pub name: String,
     pub dir: PathBuf,
@@ -255,6 +257,72 @@ pub fn plan_restore(mut windows: Vec<SavedWindow>, live: &[SessionInfo]) -> Rest
         }
     }
     RestorePlan { windows, end }
+}
+
+/// 没开 app 时手机、命令行经宿主办的事接进要恢复的存档：宿主手里的布局 `held`（app 上次报给它的，
+/// 加上之后宿主自己办的改动，见 `ClientMsg::LayoutChanged`）里有、存档里没有的工作区，存档里哪儿都没
+/// 记着、也没有别的界面连着的活会话，以及改过的工作区名字。两边按窗口的序号对；窗口里目录一样的工作区
+/// 是同一个（几个同目录的先看序号一样的），名字跟着宿主那边改，新会话各开一个标签加在后面；存档里没有
+/// 这个目录的，在同一个序号的窗口（没有时最后一个窗口，一个窗口都没有时新开一个）末尾按宿主那边的目录
+/// 和名字新建，会话都没了的也建，和 app 里关掉最后一个标签后工作区还在一样；没有名字时用 `name_of`
+/// 按目录取。宿主那边不知道目录的工作区不接，里面的会话成为后台会话。
+pub fn adopt(
+    windows: &mut Vec<SavedWindow>,
+    held: &[WindowLayout],
+    live: &[SessionInfo],
+    name_of: impl Fn(&Path) -> String,
+) {
+    let mut known: HashSet<SessionId> = windows
+        .iter_mut()
+        .flat_map(|window| &mut window.workspaces)
+        .flat_map(|workspace| &mut workspace.tabs)
+        .flat_map(|tab| tab.root.leaves_mut())
+        .filter_map(|leaf| match leaf {
+            SavedNode::Leaf { session, .. } => *session,
+            SavedNode::Split { .. } => None,
+        })
+        .collect();
+    for (wi, held_window) in held.iter().enumerate() {
+        for (si, held_workspace) in held_window.workspaces.iter().enumerate() {
+            let Some(dir) = &held_workspace.dir else {
+                continue;
+            };
+            let fresh: Vec<SavedTab> = held_workspace
+                .tabs
+                .iter()
+                .flat_map(|tab| &tab.panes)
+                .filter_map(|pane| live.iter().find(|info| info.id == pane.id && !info.exited && !info.claimed))
+                .filter(|info| known.insert(info.id))
+                .map(|info| SavedTab {
+                    root: SavedNode::Leaf { cwd: info.meta.cwd.clone(), session: Some(info.id), unstarted: false },
+                    focused: 0,
+                    zoomed: false,
+                    collapsed: Vec::new(),
+                })
+                .collect();
+            let saved = windows.get_mut(wi).and_then(|window| {
+                let workspaces = &mut window.workspaces;
+                let ix = Some(si)
+                    .filter(|&si| workspaces.get(si).is_some_and(|workspace| workspace.dir == *dir))
+                    .or_else(|| workspaces.iter().position(|workspace| workspace.dir == *dir))?;
+                workspaces.get_mut(ix)
+            });
+            if let Some(workspace) = saved {
+                if let Some(name) = &held_workspace.name {
+                    workspace.name.clone_from(name);
+                }
+                workspace.tabs.extend(fresh);
+                continue;
+            }
+            if windows.is_empty() {
+                windows.push(SavedWindow::default());
+            }
+            let window = wi.min(windows.len() - 1);
+            let name = held_workspace.name.clone().unwrap_or_else(|| name_of(dir));
+            let workspace = SavedWorkspace { name, dir: dir.clone(), tabs: fresh, ..SavedWorkspace::default() };
+            windows[window].workspaces.push(workspace);
+        }
+    }
 }
 
 /// 恢复的终端从哪里开始：记下的目录还在就用它，否则用 workspace 的目录；都不在了为空，
@@ -626,6 +694,74 @@ mod tests {
         let plan = plan_restore(windows, &[]);
         assert_eq!(sessions(&plan.windows), [None, None]);
         assert!(plan.end.is_empty());
+    }
+
+    fn held(workspaces: Vec<(&str, Option<&str>, Vec<u128>)>) -> Vec<WindowLayout> {
+        use runode_protocol::{PaneLayout, PaneRect, TabLayout, WorkspaceLayout};
+        let rect = PaneRect { x: 0, y: 0, width: PaneRect::EXTENT, height: PaneRect::EXTENT };
+        let tab = |id| TabLayout {
+            index: 1,
+            active: true,
+            panes: vec![PaneLayout { index: 1, id: SessionId(id), rect, focused: true }],
+        };
+        let workspaces = workspaces
+            .into_iter()
+            .map(|(dir, name, ids)| WorkspaceLayout {
+                index: 1,
+                name: name.map(Into::into),
+                dir: Some(dir.into()),
+                active: false,
+                tabs: ids.into_iter().map(tab).collect(),
+            })
+            .collect();
+        vec![WindowLayout { index: 1, front: true, workspaces }]
+    }
+
+    /// 没开 app 时在已有的工作区里开的终端接在它后面，改的名字跟上；新建的工作区加在窗口末尾，没名字的
+    /// 按目录取；存档里有的、退出了的、不在了的、别的界面连着的会话不接。
+    #[test]
+    fn what_the_host_did_without_the_app_is_adopted() {
+        let mut windows = vec![window(vec![session_leaf(1, false)])];
+        let dir = windows[0].workspaces[0].dir.to_string_lossy().into_owned();
+        let held = held(vec![
+            ("/new", None, vec![4, 5, 6]),
+            (&dir, Some("renamed"), vec![1, 2, 3]),
+            ("/gone", Some("gone"), vec![9]),
+        ]);
+        // 3 的 shell 退出了，5 不在了，6 有别的界面连着。
+        let live = [
+            info(1, false, false),
+            info(2, false, false),
+            info(3, false, true),
+            info(4, false, false),
+            info(6, true, false),
+        ];
+        adopt(&mut windows, &held, &live, |dir| format!("named {}", dir.display()));
+        let [window] = windows.as_slice() else { panic!("one window") };
+        let names: Vec<_> = window.workspaces.iter().map(|workspace| workspace.name.as_str()).collect();
+        // 存档里的工作区挪了位置也认得出；会话都没了的工作区照样建。
+        assert_eq!(names, ["renamed", "named /new", "gone"]);
+        assert_eq!(sessions(&windows), [Some(1), Some(2), Some(4)]);
+    }
+
+    /// 没有存档时新开一个窗口放宿主那边的工作区；目录对不上的同一个序号的工作区不是同一个。
+    #[test]
+    fn adopted_workspaces_get_a_window_and_match_by_dir() {
+        let mut windows = Vec::new();
+        adopt(&mut windows, &held(vec![("/a", Some("a"), vec![1])]), &[info(1, false, false)], |_| unreachable!());
+        assert_eq!(windows.len(), 1);
+        assert_eq!(windows[0].workspaces[0].name, "a");
+
+        let mut windows = vec![window(vec![leaf("/")])];
+        let saved = windows[0].workspaces[0].name.clone();
+        adopt(
+            &mut windows,
+            &held(vec![("/elsewhere", Some("b"), vec![1])]),
+            &[info(1, false, false)],
+            |_| unreachable!(),
+        );
+        let names: Vec<_> = windows[0].workspaces.iter().map(|workspace| workspace.name.clone()).collect();
+        assert_eq!(names, [saved, "b".into()]);
     }
 
     #[test]

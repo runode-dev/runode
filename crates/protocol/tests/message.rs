@@ -161,6 +161,7 @@ fn client_messages_round_trip() {
         ClientMsg::SendKeys { req: 5, id: ID, keys: vec!["ctrl-c".into(), "down*3".into(), "f5".into()] },
         ClientMsg::Paste { req: 6, id: ID, text: "echo 中文\nls\n".into() },
         ClientMsg::Layout { req: 7 },
+        ClientMsg::LayoutChanged { windows: Some(layout()) },
         ClientMsg::UiReply { ui: 8, reply: Box::new(HostMsg::Layout { req: 7, windows: layout() }) },
         ClientMsg::UiReply {
             ui: 9,
@@ -360,6 +361,9 @@ fn missing_and_unknown_fields_are_tolerated() {
     ))
     .unwrap();
     assert!(matches!(spawn, ClientMsg::Spawn { req: 1, .. }));
+    // 旧的界面报布局变了时不带布局。
+    let changed: ClientMsg = serde_json::from_str(r#"{"type":"layout_changed"}"#).unwrap();
+    assert_eq!(changed, ClientMsg::LayoutChanged { windows: None });
     // 必填字段缺了读不了。
     assert!(serde_json::from_str::<ClientMsg>(r#"{"type":"detach"}"#).is_err());
 }
@@ -611,6 +615,7 @@ fn clipboard_messages_and_their_old_readings() {
         Layout {
             req: u32,
         },
+        LayoutChanged,
         #[serde(other)]
         Unknown,
     }
@@ -623,6 +628,10 @@ fn clipboard_messages_and_their_old_readings() {
     }
     let old: OldClientMsg = serde_json::from_str(r#"{"type":"layout","req":2}"#).unwrap();
     assert_eq!(old, OldClientMsg::Layout { req: 2 });
+    // 旧的宿主读带着布局的 `LayoutChanged`：不认识的字段不管。
+    let changed = ClientMsg::LayoutChanged { windows: Some(layout()) };
+    let old: OldClientMsg = serde_json::from_str(&serde_json::to_string(&changed).unwrap()).unwrap();
+    assert_eq!(old, OldClientMsg::LayoutChanged);
 }
 
 /// 剪贴板的文字在线上是普通的字符串，`Debug` 只写长度：带着它的消息（包括套在 `UiRequest`、`UiReply`

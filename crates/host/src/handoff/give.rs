@@ -311,6 +311,7 @@ fn send_parts<'a>(
         record_history: shared.record_history.load(std::sync::atomic::Ordering::Relaxed),
         socket: giving.socket.clone(),
         clipboard,
+        layout: shared.peers().layout.clone(),
     };
     send_part(stream, &host, &[], &[giving.listener.as_fd(), giving.lock.as_fd()])?;
     for (id, exported) in handed {

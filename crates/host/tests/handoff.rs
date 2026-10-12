@@ -28,7 +28,8 @@ use runode_host::{
 };
 use runode_protocol::{
     AttachMode, Caps, ClientKind, Frame, FrameKind, GoodbyeReason, HANDOFF_FORMAT, HandoffPart,
-    OLDEST_READABLE_HANDOFF_FORMAT, PROTOCOL_VERSION, decode_part, read_frame, write_frame,
+    OLDEST_READABLE_HANDOFF_FORMAT, PROTOCOL_VERSION, PaneLayout, PaneRect, TabLayout, WindowLayout, WorkspaceLayout,
+    decode_part, read_frame, write_frame,
 };
 use runode_shared_types::{
     agent::{Agent, AgentKind, AgentState},
@@ -487,15 +488,22 @@ fn a_new_host_takes_every_session_over() {
 }
 
 /// 剪贴板的规矩跟着交接过去：旧宿主上设成不让写，新宿主上的会话照样不让写（DA1 的回答里没有 52），
-/// 不用等桌面重新设。
+/// 不用等桌面重新设。宿主手里的布局也跟着过去，桌面再连上时要得回来。
 #[test]
-fn the_clipboard_rules_go_with_the_handoff() {
+fn the_clipboard_rules_and_the_layout_go_with_the_handoff() {
     let dir = temp_dir("clipboard");
     let (_old, socket) = old_process(&dir);
     let mut desktop = Peer::desktop(&socket);
     let clipboard = ClipboardAccess { write: ClipboardWrite::Deny, read: ClipboardRead::Ask };
     desktop.send(&ClientMsg::SetOptions { record_history: false, clipboard });
     let id = desktop.spawn(&script(&dir, "da.sh", r"while read line; do printf '\033[c'; done"));
+    let rect = PaneRect { x: 0, y: 0, width: PaneRect::EXTENT, height: PaneRect::EXTENT };
+    let tab = TabLayout { index: 1, active: true, panes: vec![PaneLayout { index: 1, id, rect, focused: true }] };
+    let workspace =
+        WorkspaceLayout { index: 1, name: Some("app".into()), dir: Some(dir.clone()), active: true, tabs: vec![tab] };
+    let layout = vec![WindowLayout { index: 1, front: true, workspaces: vec![workspace] }];
+    desktop.send(&ClientMsg::LayoutChanged { windows: Some(layout.clone()) });
+    desktop.sessions();
     drop(desktop);
     // 桌面连着时旧宿主不交；断开要一会儿才登记下来，拒绝了就再试。
     let mut tries = 0;
@@ -510,6 +518,8 @@ fn the_clipboard_rules_go_with_the_handoff() {
         thread::sleep(Duration::from_millis(100));
     };
     let mut desktop = Peer::desktop(&socket);
+    desktop.send(&ClientMsg::Layout { req: 1 });
+    assert_eq!(desktop.reply(), HostMsg::Layout { req: 1, windows: layout });
     let (channel, _) = desktop.attach(id, AttachMode::VtReplay);
     desktop.input(channel, b"x\r");
     // 行规程把 DA1 的回答回显出来。

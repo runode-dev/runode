@@ -18,9 +18,9 @@
 //! 宿主编的快照格式（`HostMsg::Welcome::snapshot_format`）和这边解得了的不一样时，要快照一律改要
 //! VT 重放。
 //!
-//! 换主题和改选项（`SetTheme`、`SetOptions`）记着最近一次的，重连后补发。
+//! 换主题、改选项和报布局（`SetTheme`、`SetOptions`、`LayoutChanged`）记着最近一次的，重连后补发。
 //!
-//! 等回话的请求（`attach_now`、`list_sessions`、`list_project_tasks`）超时了，这条连接按断开处理
+//! 等回话的请求（`attach_now`、`list_sessions`、`list_project_tasks`、`held_layout`）超时了，这条连接按断开处理
 //! （`Inner::timed_out`）：宿主按先后处理同一条连接上的消息，一个请求等不到回话，说明它卡住了，
 //! socket 却没断，不断开的话之后每个请求都要在主线程上等满超时。断开后请求立刻失败，等重连。
 //! `spawn` 例外，超时了连接照旧：宿主多半只是开会话慢，开好后回的 `Spawned` 没人等，读线程见了就
@@ -48,7 +48,7 @@ use anyhow::{Result, anyhow};
 use futures::channel::mpsc::{UnboundedReceiver, UnboundedSender, unbounded};
 use runode_protocol::{
     AttachMode, BuildId, Caps, ClientKind, ClientMsg, Frame, FrameError, FrameKind, HostMsg, PROTOCOL_VERSION,
-    SessionId, SessionInfo, TaskSource, read_frame, write_frame,
+    SessionId, SessionInfo, TaskSource, WindowLayout, read_frame, write_frame,
 };
 use runode_shared_types::{
     clipboard::ClipboardAccess, grid::GridSize, session::SessionMeta, settings::TermSettings, shell::IntegrationMode,
@@ -194,6 +194,8 @@ struct State {
     /// 最近一次换的主题和选项（`SetOptions` 的两项），重连后补发。
     theme: Option<TermSettings>,
     options: Option<(bool, ClipboardAccess)>,
+    /// 最近一次报的布局，重连后补发：断开时报的那次宿主没收到，换了宿主时新宿主手里也要有。
+    layout: Option<Vec<WindowLayout>>,
     /// 现在这条连接上的宿主编的快照这边解得了，见 `snapshots_usable`；为假时要快照改要 VT 重放。
     snapshots: bool,
     /// 现在这条连接上的宿主的构建，见 `Link::host_build`。
@@ -416,15 +418,18 @@ impl Link {
             self.inner.lost(generation);
             return Err(ConnectError::Io(err));
         }
-        let (theme, options) = {
+        let (theme, options, layout) = {
             let state = self.inner.state();
-            (state.theme.clone(), state.options)
+            (state.theme.clone(), state.options, state.layout.clone())
         };
         if let Some(settings) = theme {
             let _ = self.inner.control(&ClientMsg::SetTheme { settings });
         }
         if let Some((record_history, clipboard)) = options {
             let _ = self.inner.control(&ClientMsg::SetOptions { record_history, clipboard });
+        }
+        if let Some(windows) = layout {
+            let _ = self.inner.control(&ClientMsg::LayoutChanged { windows: Some(windows) });
         }
         tracing::info!("connected to the host (pid {host_pid})");
         Ok(())
@@ -452,7 +457,7 @@ impl Link {
         self.inner.state().host_pid
     }
 
-    /// 发一条控制消息，不等回话；没连着或写不出去时记一笔日志。`SetTheme`、`SetOptions` 记下来，
+    /// 发一条控制消息，不等回话；没连着或写不出去时记一笔日志。`SetTheme`、`SetOptions`、`LayoutChanged` 记下来，
     /// 重连后补发；`Kill`、`Detach` 顺带忘掉这个会话，同 `kill`、`detach`。连会话用 `attach`。
     pub fn send(&self, message: ClientMsg) {
         match &message {
@@ -460,6 +465,7 @@ impl Link {
             ClientMsg::SetOptions { record_history, clipboard } => {
                 self.inner.state().options = Some((*record_history, *clipboard));
             }
+            ClientMsg::LayoutChanged { windows: Some(windows) } => self.inner.state().layout = Some(windows.clone()),
             ClientMsg::Kill { id } | ClientMsg::Detach { id } => self.forget(*id),
             _ => {}
         }
@@ -659,9 +665,27 @@ impl Link {
 
     /// 宿主在 `dir` 里列出的项目命令（Makefile 的目标、package.json 的 scripts），最多等 `timeout`。
     pub fn list_project_tasks(&self, dir: PathBuf, timeout: Duration) -> Result<Vec<TaskSource>> {
+        match self.request(|req| ClientMsg::ListProjectTasks { req, dir }, timeout)? {
+            HostMsg::ProjectTasks { sources, .. } => Ok(sources),
+            other => Err(anyhow!("unexpected answer from the host: {other:?}")),
+        }
+    }
+
+    /// 宿主手里的布局（app 上次报给它的，加上之后没开 app 时它自己办的改动，见 `ClientMsg::Layout`），
+    /// 最多等 `timeout`。
+    pub fn held_layout(&self, timeout: Duration) -> Result<Vec<WindowLayout>> {
+        match self.request(|req| ClientMsg::Layout { req }, timeout)? {
+            HostMsg::Layout { windows, .. } => Ok(windows),
+            other => Err(anyhow!("unexpected answer from the host: {other:?}")),
+        }
+    }
+
+    /// 发 `make` 用新的请求编号造出的请求，等带着这个编号的回话，最多等 `timeout`；回 `Error` 时是
+    /// 它的说明。超时时这条连接按断开处理（`Inner::timed_out`）。
+    fn request(&self, make: impl FnOnce(u32) -> ClientMsg, timeout: Duration) -> Result<HostMsg> {
         let req = self.inner.next_req.fetch_add(1, Ordering::Relaxed);
         let (reply, generation) = self.expect_reply(req)?;
-        if let Err(err) = self.inner.control(&ClientMsg::ListProjectTasks { req, dir }) {
+        if let Err(err) = self.inner.control(&make(req)) {
             self.inner.state().replies.remove(&req);
             return Err(anyhow!("failed to ask the host: {err}"));
         }
@@ -670,10 +694,9 @@ impl Link {
             self.inner.timed_out(generation);
         }
         match answer {
-            Ok(HostMsg::ProjectTasks { sources, .. }) => Ok(sources),
             Ok(HostMsg::Error { message, .. }) => Err(anyhow!(message)),
-            Ok(other) => Err(anyhow!("unexpected answer from the host: {other:?}")),
-            Err(mpsc::RecvTimeoutError::Timeout) => Err(anyhow!("the host did not list the tasks in time")),
+            Ok(reply) => Ok(reply),
+            Err(mpsc::RecvTimeoutError::Timeout) => Err(anyhow!("the host did not answer in time")),
             Err(mpsc::RecvTimeoutError::Disconnected) => Err(anyhow!("lost the connection to the host")),
         }
     }

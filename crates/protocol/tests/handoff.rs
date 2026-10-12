@@ -2,7 +2,7 @@
 
 use runode_protocol::{
     BuildId, HANDOFF_FORMAT, HandoffPart, HandoffPartError, OLDEST_READABLE_HANDOFF_FORMAT, RedactorState, ReportToken,
-    RunningCommand, SessionId, decode_part, encode_part,
+    RunningCommand, SessionId, WindowLayout, decode_part, encode_part,
 };
 use runode_shared_types::{
     agent::{Agent, AgentKind, AgentState},
@@ -24,6 +24,7 @@ fn host() -> HandoffPart {
         record_history: false,
         socket: "/tmp/runode/host.sock".into(),
         clipboard: ClipboardAccess { write: ClipboardWrite::Deny, read: ClipboardRead::Allow },
+        layout: vec![WindowLayout { index: 1, front: true, workspaces: Vec::new() }],
     }
 }
 
@@ -163,6 +164,22 @@ fn unreadable_headers_are_rejected() {
     }
 }
 
+/// 读不懂的布局（比如后来的版本给它加了必填的字段）当空的读，整条 `Host` 照样读得了。
+#[test]
+fn an_unreadable_layout_reads_as_none() {
+    let mut header = serde_json::json!({ "part": host(), "blocks": [] });
+    header["part"]["layout"] = serde_json::json!([{ "index": 1, "workspaces": [{ "future": true }] }]);
+    let header = header.to_string();
+    let mut data = u32::try_from(header.len()).unwrap().to_le_bytes().to_vec();
+    data.extend_from_slice(header.as_bytes());
+    let (part, _) = decode_part(&data).unwrap();
+    let mut expected = host();
+    if let HandoffPart::Host { layout, .. } = &mut expected {
+        layout.clear();
+    }
+    assert_eq!(part, expected);
+}
+
 /// JSON 只放得下 UTF-8 的路径，放不下时编码报错而不是 panic。
 #[cfg(unix)]
 #[test]
@@ -178,6 +195,7 @@ fn non_utf8_paths_fail_to_encode() {
         record_history: true,
         socket: PathBuf::from(OsStr::from_bytes(b"/tmp/\xff.sock")),
         clipboard: ClipboardAccess::default(),
+        layout: Vec::new(),
     };
     assert!(matches!(encode_part(&part, &[]), Err(HandoffPartError::Json(_))));
 }

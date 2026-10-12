@@ -13,7 +13,8 @@
 //!
 //! 宿主不管窗口：要界面办的请求（`Open`、`OpenWorkspace`、`RenameWorkspace`、`Reveal`、`Layout`）包成 `HostMsg::UiRequest` 转给
 //! 登记为界面的那条连接（`Hello` 里说自己是 `ClientKind::Desktop` 的），界面用 `ClientMsg::UiReply`
-//! 回话，宿主再原样转回发请求的一方。会话里的程序读写剪贴板（OSC 52）也这样请界面办，回话交回
+//! 回话，宿主再原样转回发请求的一方。没有界面连着时，除 `Reveal` 外宿主照界面上次报来的布局自己办，
+//! 见 `workspaces`。会话里的程序读写剪贴板（OSC 52）也这样请界面办，回话交回
 //! 会话线程，见 `session` 的 `clipboard`。
 //!
 //! 前端也能请宿主在某个会话所在的仓库里读写 git（`ClientMsg::Git`），手机靠它管电脑上的仓库，
@@ -29,6 +30,7 @@ mod launch;
 mod project_tasks;
 mod server;
 mod session;
+mod workspaces;
 
 use std::{
     collections::HashMap,

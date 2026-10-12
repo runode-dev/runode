@@ -8,7 +8,9 @@
 //! 左右上下找相邻分屏时要的是分屏之间的位置关系，放大时也不变。
 //!
 //! 布局变了时（`changed`）发 `ClientMsg::LayoutChanged` 告诉宿主，宿主转告问过布局的连接，手机据此
-//! 马上重新要布局，不用轮询。
+//! 马上重新要布局，不用轮询。新布局跟着一起报，宿主记下：app 退出后手机、命令行照它看工作区、在里面
+//! 开终端。所以退出时（存档冻结以后、关窗口退出时）关窗口引起的变化不报，宿主手里留着退出前的布局；
+//! 冻结前还在等着报的变化当场报掉。连接断过时，连接重连后补发最近一次报的布局。
 
 use std::{collections::HashMap, path::Path, time::Duration};
 
@@ -164,15 +166,20 @@ pub(super) fn changed(cx: &mut App) {
     cx.global_mut::<Reported>().pending = Some(task);
 }
 
-fn report_change(cx: &mut App) {
+/// 现在的布局和上次告诉宿主的不同时发 `LayoutChanged`，取代还在等的那次。
+pub(super) fn report_change(cx: &mut App) {
     let layout = current(cx);
-    let reported = cx.global_mut::<Reported>();
+    // 窗口一个不剩、存档却还留着它们，是关窗口退出：宿主留着退出前的布局。存档也没留（最后一个工作区
+    // 被关掉了）时照实报空的，免得下次启动又把关掉的工作区接回来。
+    let quitting = super::persist::frozen(cx) || (layout.is_empty() && super::persist::keeps_windows(cx));
+    // `freeze` 在退出时直接调到这里，那时 `changed` 可能一次都没调过。
+    let reported = cx.default_global::<Reported>();
     reported.pending = None;
-    if reported.layout.as_ref() == Some(&layout) {
+    if quitting || reported.layout.as_ref() == Some(&layout) {
         return;
     }
-    reported.layout = Some(layout);
-    crate::host_client::link().send(ClientMsg::LayoutChanged);
+    reported.layout = Some(layout.clone());
+    crate::host_client::link().send(ClientMsg::LayoutChanged { windows: Some(layout) });
 }
 
 /// app 里所有窗口现在的布局。

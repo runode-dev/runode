@@ -29,7 +29,7 @@ use futures::channel::mpsc::UnboundedReceiver;
 use gpui::{App, PromptLevel};
 use runode_config::Config;
 use runode_host::{BuildId, ClientMsg, Host};
-use runode_protocol::{HandoffRefusal, SessionInfo, TaskSource};
+use runode_protocol::{HandoffRefusal, SessionInfo, TaskSource, WindowLayout};
 
 pub use handoff::{HandoffFailure, HandoffStatus, READY_BY};
 use launch::{Choice, Probe};
@@ -287,6 +287,11 @@ pub fn reconnect() -> Result<()> {
 /// 宿主里所有的会话。
 pub fn list_sessions() -> Result<Vec<SessionInfo>> {
     link().list_sessions(LIST_TIMEOUT)
+}
+
+/// 宿主手里的布局，见 `Link::held_layout`。
+pub fn held_layout() -> Result<Vec<WindowLayout>> {
+    link().held_layout(LIST_TIMEOUT)
 }
 
 /// 宿主在 `dir` 里列出的项目命令，见 `ClientMsg::ListProjectTasks`。会等宿主回话，别在主线程上调。

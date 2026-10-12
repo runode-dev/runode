@@ -44,7 +44,7 @@ use std::{
 use anyhow::{Context as _, Result, anyhow};
 use runode_protocol::{
     AttachMode, ClientKind, ClientMsg, Frame, FrameError, FrameKind, GoodbyeReason, HANDOFF_FORMAT, HostMsg,
-    PROTOCOL_VERSION, SessionId, SessionInfo, git::GitRequest, read_frame, write_frame,
+    PROTOCOL_VERSION, SessionId, SessionInfo, WindowLayout, git::GitRequest, read_frame, write_frame,
 };
 use runode_shared_types::{grid::GridSize, input::parse_keys, session::DriveAction};
 use runode_terminal::pty;
@@ -91,6 +91,8 @@ pub(crate) struct Peers {
     /// 转给界面、还没回话的请求，按 `HostMsg::UiRequest::ui`。
     pending: HashMap<u64, Pending>,
     next_ui: u64,
+    /// 宿主手里的布局：界面上次报来的，没有界面连着时宿主自己办的请求也改它，见 `workspaces`。
+    pub(crate) layout: Vec<WindowLayout>,
     /// 还接新连接；退出时在判断要退出的同一把锁里置为 false。
     pub(crate) accepting: bool,
     /// `Host::listen` 开的 socket 和拿着的锁。
@@ -118,6 +120,7 @@ impl Default for Peers {
             desktops: Vec::new(),
             pending: HashMap::new(),
             next_ui: 1,
+            layout: Vec::new(),
             accepting: true,
             listening: None,
             standalone: false,
@@ -138,6 +141,15 @@ impl Peers {
     /// 有桌面的界面连着。
     pub(crate) fn has_desktop(&self) -> bool {
         !self.desktops.is_empty()
+    }
+
+    /// 布局变了：告诉问过 `Layout` 的连接。
+    pub(crate) fn layout_changed(&self) {
+        for peer in self.connections.values().filter(|peer| peer.watches_layout) {
+            if let Some(out) = &peer.out {
+                out.control(&HostMsg::LayoutChanged);
+            }
+        }
     }
 
     /// 给 `except` 以外的连接都发 `Goodbye`，写完后断开；`spare_desktops` 时桌面的界面也不发。
@@ -1030,19 +1042,23 @@ impl Connection {
                 self.to_ui(req, message);
             }
             ClientMsg::Layout { req } => {
+                // 界面自己问的是宿主手里的布局：恢复窗口前接回没开着时宿主办的事，见 `workspaces`。
+                if self.kind == ClientKind::Desktop {
+                    self.out.control(&HostMsg::Layout { req, windows: self.shared.held_layout() });
+                    return;
+                }
                 if let Some(peer) = self.shared.peers().connections.get_mut(&self.id) {
                     peer.watches_layout = true;
                 }
                 self.to_ui(req, message);
             }
-            ClientMsg::LayoutChanged => {
+            ClientMsg::LayoutChanged { windows } => {
                 if self.kind == ClientKind::Desktop {
-                    let peers = self.shared.peers();
-                    for peer in peers.connections.values().filter(|peer| peer.watches_layout) {
-                        if let Some(out) = &peer.out {
-                            out.control(&HostMsg::LayoutChanged);
-                        }
+                    let mut peers = self.shared.peers();
+                    if let Some(windows) = windows {
+                        peers.layout = windows;
                     }
+                    peers.layout_changed();
                 } else {
                     self.error(None, None, "only the runode app reports its layout".into());
                 }
@@ -1086,7 +1102,7 @@ impl Connection {
     }
 
     /// 把要界面办的请求转给现在的界面（最近连上的 `ClientKind::Desktop` 连接）。没有界面连接
-    /// 时回一句没办成。
+    /// 时宿主自己办，见 `headless`。
     fn to_ui(&self, req: u32, request: ClientMsg) {
         let mut peers = self.shared.peers();
         if let Some(&desktop) = peers.desktops.last()
@@ -1112,7 +1128,30 @@ impl Connection {
             return;
         }
         drop(peers);
-        self.error(Some(req), None, "there is no runode window to do this in".into());
+        self.headless(req, request);
+    }
+
+    /// 没有界面连着时办要界面办的请求：布局、开终端、新建工作区、改名照宿主手里的布局办，见
+    /// `workspaces`；切到终端没有窗口可切，回一句没办成。开终端要等会话线程、stat 目录，和读文件系统的
+    /// 请求一样另起线程办。
+    fn headless(&self, req: u32, request: ClientMsg) {
+        let shared = self.shared.clone();
+        match request {
+            ClientMsg::Layout { req } => {
+                self.out.control(&HostMsg::Layout { req, windows: shared.held_layout() });
+            }
+            ClientMsg::RenameWorkspace { req, window, workspace, name } => {
+                let reply = shared.rename_workspace(req, window, workspace, &name);
+                self.out.control(&reply.unwrap_or_else(|message| HostMsg::Error { req: Some(req), id: None, message }));
+            }
+            ClientMsg::OpenWorkspace { req, dir, name, .. } => {
+                self.read_files(req, "host-open-workspace", move || shared.open_workspace(req, dir, name));
+            }
+            ClientMsg::Open { req, near, cwd, .. } => {
+                self.read_files(req, "host-open", move || shared.open_tab(req, near, cwd));
+            }
+            _ => self.error(Some(req), None, "there is no runode window to do this in".into()),
+        }
     }
 
     /// 界面回话：转给发请求的一方，会话自己的请求交回会话线程。只认被转去的那个界面回的；对不上的
@@ -1228,8 +1267,8 @@ impl Connection {
         });
     }
 
-    /// 另起线程办一件要读文件系统的请求（列目录、列项目命令），占 `files_waiting` 的一个名额：
-    /// 断掉的网络挂载上 stat、读目录会一直卡住，卡住的不能是读线程。`answer` 的 `Err` 回成带着
+    /// 另起线程办一件要读文件系统的请求（列目录、列项目命令，没有界面时开终端），占 `files_waiting`
+    /// 的一个名额：断掉的网络挂载上 stat、读目录会一直卡住，卡住的不能是读线程。`answer` 的 `Err` 回成带着
     /// `req` 的 `Error`。
     fn read_files(&self, req: u32, name: &str, answer: impl FnOnce() -> Result<HostMsg, String> + Send + 'static) {
         let Some(slot) = self.files_waiting.enter() else {

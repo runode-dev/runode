@@ -25,7 +25,8 @@ runode list --json     # the same with every detail, for parsing
 `down`), `FG` is the program in front (`zsh`, `node`, `vim`...), `AGENT` and
 `STATE` show an agent and whether it is `working`, `idle` or `blocked` (waiting
 for an answer), `VIEW` is `shown`, `hidden` (another tab) or `bg` (in no
-window).
+window). While the app is closed, places and `VIEW` follow the layout it left
+behind, so `shown` does not mean the user sees it.
 
 Every command takes a SESSION that must match exactly one terminal; when it
 matches several, runode lists them and fails, and you pick one by id. The user
@@ -53,6 +54,9 @@ again and again until the panes are too thin to read.
 `open` leaves the user's focus where it is unless you pass `--focus`. To show
 the user a terminal later, `runode focus SESSION` brings its pane and window to
 the front.
+
+While the app is closed, `open` always makes a new tab at the end of the
+workspace (no split, no `--focus`) and `runode focus` fails.
 
 A split opened from your terminal is folded down to its title bar so it takes
 no room; the program keeps running and the user unfolds it by clicking the bar.

@@ -274,13 +274,13 @@ fn layout_changes_reach_connections_that_asked_for_the_layout() {
     send(&mut desktop, &ClientMsg::UiReply { ui, reply: Box::new(HostMsg::Layout { req: 0, windows: vec![] }) });
     assert!(matches!(message(&mobile_frames), HostMsg::Layout { .. }));
 
-    send(&mut desktop, &ClientMsg::LayoutChanged);
+    send(&mut desktop, &ClientMsg::LayoutChanged { windows: None });
     assert_eq!(message(&mobile_frames), HostMsg::LayoutChanged);
     // 没问过布局的连接收不到：它下一条收到的是自己请求的回话。
     send(&mut cli, &ClientMsg::ListSessions);
     assert!(matches!(message(&cli_frames), HostMsg::SessionList { .. }));
 
-    send(&mut mobile, &ClientMsg::LayoutChanged);
+    send(&mut mobile, &ClientMsg::LayoutChanged { windows: None });
     assert!(matches!(message(&mobile_frames), HostMsg::Error { .. }));
     send(&mut desktop, &ClientMsg::ListSessions);
     assert!(matches!(message(&desktop_frames), HostMsg::SessionList { .. }));

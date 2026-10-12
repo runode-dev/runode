@@ -232,16 +232,24 @@ pub enum ClientMsg {
     /// 往会话里粘贴一段文字，程序开着括号粘贴模式（mode 2004）时套上括号，回 `Done`。
     Paste { req: u32, id: SessionId, text: String },
     /// 要 app 里各个终端摆在哪，宿主转给界面，回 `HostMsg::Layout`。问过的连接之后在布局变了时
-    /// 收到 `HostMsg::LayoutChanged`。
+    /// 收到 `HostMsg::LayoutChanged`。没有界面连着时宿主照自己手里的布局回；界面自己发时也回宿主手里
+    /// 的布局，不转给界面，见 `LayoutChanged`。
     Layout { req: u32 },
     /// 界面里的布局变了（开关窗口、工作区、标签、分屏，换了焦点、调了分屏大小）。只有桌面的界面发，
-    /// 不用回；宿主转成 `HostMsg::LayoutChanged` 告诉问过布局的连接。
-    LayoutChanged,
+    /// 不用回；宿主转成 `HostMsg::LayoutChanged` 告诉问过布局的连接。`windows` 是新的布局，宿主记下
+    /// 它：没有界面连着时手机、命令行要的布局照它回，在工作区里开终端、新建工作区、改名也由宿主改它，
+    /// 界面再连上时用 `Layout` 要回去。旧的界面不带，宿主手里的布局不变。
+    LayoutChanged {
+        #[serde(default)]
+        windows: Option<Vec<WindowLayout>>,
+    },
     /// 界面办完了宿主转来的 `HostMsg::UiRequest`：`ui` 是那条请求的编号，`reply` 原样转给发请求
     /// 的一方。只有桌面的界面发。
     UiReply { ui: u64, reply: Box<HostMsg> },
     /// 在 app 里开一个新终端，宿主转给 app 的界面，回 `Opened`。`near` 是放在哪个会话的分屏
-    /// 旁边，为空时放在最前面那个窗口当前的分屏旁边；`cwd` 为空时沿用旁边那个终端的目录；
+    /// 旁边，为空时放在最前面那个窗口当前的分屏旁边；`cwd` 为空时沿用旁边那个终端的目录。没有界面
+    /// 连着时宿主自己开，放进宿主手里的布局里 `near` 所在的工作区（为空时最前面那个窗口当前的工作区），
+    /// 一律开成排在最后的新标签；
     /// `focus` 为假时不切过去，不打断用户手上的事。`fold` 说新分屏一开出来折不折叠（只对分出的
     /// 分屏、卡片样式有用）：为空时按配置项 `agent-split-fold`，`from`（发这条命令的会话）里跑着
     /// agent 才折叠，要切过去的也不折叠；为真为假时照办。
@@ -271,7 +279,7 @@ pub enum ClientMsg {
     /// 在 app 最前面那个窗口里开一个目录是 `dir` 的工作区，宿主转给 app 的界面，回 `Opened`：新工作区
     /// 第一个终端的会话。窗口里已经有这个目录的工作区时不新建，回它当前标签里有焦点的那个分屏的会话。
     /// `focus` 为假时不切过去，不打断用户手上的事。`name` 是新工作区在侧栏里的名字，为空时按目录取；
-    /// 已经有这个目录的工作区时不改它的名字。
+    /// 已经有这个目录的工作区时不改它的名字。没有界面连着时宿主照样在自己手里的布局里办。
     OpenWorkspace {
         req: u32,
         dir: PathBuf,
@@ -281,7 +289,8 @@ pub enum ClientMsg {
         name: Option<String>,
     },
     /// 把第 `window` 个窗口里的第 `workspace` 个工作区改名为 `name`，序号和 `HostMsg::Layout` 里的一样，
-    /// 从 1 开始。宿主转给 app 的界面，回 `Done`；没有这个工作区、`name` 去掉首尾空白后为空时回 `Error`。
+    /// 从 1 开始。宿主转给 app 的界面（没有界面连着时自己改手里的布局），回 `Done`；没有这个工作区、
+    /// `name` 去掉首尾空白后为空时回 `Error`。
     RenameWorkspace { req: u32, window: u32, workspace: u32, name: String },
     /// 列 `dir` 这个目录里能跑的项目命令（Makefile 的目标、package.json 的 scripts），回
     /// `HostMsg::ProjectTasks`，见 `project_tasks` 模块；`dir` 不是绝对路径、不是目录时回 `Error`。
@@ -504,7 +513,8 @@ pub enum HostMsg {
         dir: PathBuf,
         sources: Vec<TaskSource>,
     },
-    /// 宿主转给界面去办的请求（`Open`、`OpenWorkspace`、`RenameWorkspace`、`Reveal`、`Layout`），只发给登记为界面的
+    /// 宿主转给界面去办的请求（`Open`、`OpenWorkspace`、`RenameWorkspace`、`Reveal`、`Layout`；没有界面
+    /// 连着时除 `Reveal` 外宿主自己办），只发给登记为界面的
     /// 连接（`Hello` 里 `client` 是 `Desktop` 的，有几个时是最近连上的那个）。`request` 原样带着
     /// 发请求一方的 `req`；界面办完了用 `ClientMsg::UiReply` 带着同一个 `ui` 回话。
     ///

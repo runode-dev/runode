@@ -13,7 +13,8 @@ use std::{
 
 use runode_protocol::{
     BuildId, Caps, ClientKind, ClientMsg, Frame, FrameKind, GoodbyeReason, HANDOFF_FORMAT, HandoffPart, HandoffRefusal,
-    HostMsg, OLDEST_READABLE_HANDOFF_FORMAT, PROTOCOL_VERSION, SessionId, decode_part, read_frame, write_frame,
+    HostMsg, OLDEST_READABLE_HANDOFF_FORMAT, PROTOCOL_VERSION, SessionId, WindowLayout, decode_part, read_frame,
+    write_frame,
 };
 use runode_shared_types::{clipboard::ClipboardAccess, settings::TermSettings, shell::IntegrationMode};
 use runode_terminal::{
@@ -142,8 +143,8 @@ impl Host {
         Ok(report)
     }
 
-    /// 旧宿主提交了：登记会话，套用旧宿主的主题和选项（剪贴板的规矩也交给各个会话，它们开出来时
-    /// 拿的是默认的），把它没写进 PTY 的输入排进各个会话的写队列，打开各个会话的闸门。
+    /// 旧宿主提交了：登记会话，套用旧宿主的主题、选项和手里的布局（剪贴板的规矩也交给各个会话，它们
+    /// 开出来时拿的是默认的），把它没写进 PTY 的输入排进各个会话的写队列，打开各个会话的闸门。
     fn commit(&self, taken: &mut Taken, mut pending: HashMap<SessionId, Vec<u8>>) {
         let shared = &self.shared;
         shared.record_history.store(taken.record_history, Ordering::Relaxed);
@@ -159,6 +160,8 @@ impl Host {
                 registry.sessions.insert(*id, handle.clone());
             }
         }
+        // 会话登记好以后再放布局：这之前有人问布局的话，整理（`tidy`）会把布局里的会话当成已经不在而去掉。
+        shared.peers().layout = std::mem::take(&mut taken.layout);
         for (id, handle) in &taken.handles {
             handle.send(Inbox::Open(pending.remove(id).unwrap_or_default()));
         }
@@ -255,6 +258,7 @@ struct HostState {
     theme: Option<TermSettings>,
     record_history: bool,
     clipboard: ClipboardAccess,
+    layout: Vec<WindowLayout>,
 }
 
 /// 接手了的会话，PTY 都停在闸门上。
@@ -263,6 +267,7 @@ struct Taken {
     theme: Option<TermSettings>,
     record_history: bool,
     clipboard: ClipboardAccess,
+    layout: Vec<WindowLayout>,
     handles: Vec<(SessionId, Handle)>,
     replayed: Vec<SessionId>,
 }
@@ -293,8 +298,8 @@ impl Received {
             return Err(reason);
         }
         handles.sort_by_key(|(id, _)| *id);
-        let HostState { listener, lock, socket, theme, record_history, clipboard } = host;
-        Ok((Taken { socket, theme, record_history, clipboard, handles, replayed }, listener, lock))
+        let HostState { listener, lock, socket, theme, record_history, clipboard, layout } = host;
+        Ok((Taken { socket, theme, record_history, clipboard, layout, handles, replayed }, listener, lock))
     }
 }
 
@@ -312,6 +317,7 @@ fn receive(shared: &Shared, stream: &UnixStream, sessions: u32, our_format: u16)
         socket,
         build,
         clipboard,
+        layout,
         ..
     } = part
     else {
@@ -332,6 +338,7 @@ fn receive(shared: &Shared, stream: &UnixStream, sessions: u32, our_format: u16)
             theme,
             record_history,
             clipboard,
+            layout,
         },
         adopting: Vec::new(),
         rebuilt: Vec::new(),

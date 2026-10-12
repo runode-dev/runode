@@ -168,8 +168,9 @@ fn host_part_is_readable() {
             theme: Some(settings()),
             record_history: true,
             socket: "/tmp/runode/host.sock".into(),
-            // 格式 1 的旧宿主没有这一项，按默认的规矩读。
+            // 格式 1 的旧宿主没有这两项，按默认的规矩、空的布局读。
             clipboard: ClipboardAccess::default(),
+            layout: Vec::new(),
         }
     );
     assert!(blocks.is_empty());

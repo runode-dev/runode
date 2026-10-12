@@ -22,9 +22,12 @@
 use std::{fmt, path::PathBuf};
 
 use runode_shared_types::{clipboard::ClipboardAccess, grid::GridSize, session::SessionMeta, settings::TermSettings};
-use serde::{Deserialize, Deserializer, Serialize};
+use serde::{Deserialize, Deserializer, Serialize, de::DeserializeOwned};
 
-use crate::message::{BuildId, SessionId};
+use crate::{
+    layout::WindowLayout,
+    message::{BuildId, SessionId},
+};
 
 /// 这个版本的宿主交出会话时写的交接格式，见 `HostMsg::Welcome::handoff`。
 pub const HANDOFF_FORMAT: u32 = 1;
@@ -58,6 +61,11 @@ pub enum HandoffPart {
         /// 等桌面重连后补发。
         #[serde(default)]
         clipboard: ClipboardAccess,
+        /// 宿主手里的布局，见 `ClientMsg::LayoutChanged`。旧宿主没有这一项，新宿主从空的开始；读不懂
+        /// （`WindowLayout` 后来加了必填的字段）时也从空的开始：丢了布局只是没开 app 时一时看不到工作区，
+        /// 不能为它放弃交接，所以 `WindowLayout` 不受上面冻结的约束。
+        #[serde(default, deserialize_with = "or_default")]
+        layout: Vec<WindowLayout>,
     },
     /// 一个会话。已经启动的会话带一个描述符 `[PTY master]`，还没启动的不带，新宿主重新打开伪终端；
     /// 两个块依次是 `snapshot`（宿主那份 VT 的原始快照，没抹掉报告口令；编不出来时为空）和
@@ -234,6 +242,12 @@ pub fn decode_part(data: &[u8]) -> Result<(HandoffPart, Vec<&[u8]>), HandoffPart
         return Err(HandoffPartError::MissingBlocks { needed, got: blocks.len() });
     }
     Ok((header.part, blocks))
+}
+
+/// 读得懂就照读，读不懂当默认值。
+fn or_default<'de, D: Deserializer<'de>, T: DeserializeOwned + Default>(deserializer: D) -> Result<T, D::Error> {
+    let value = serde_json::Value::deserialize(deserializer)?;
+    Ok(serde_json::from_value(value).unwrap_or_default())
 }
 
 /// 字段出现了就是外层的 `Some`，`null` 读成 `Some(None)`；字段不在时由 `#[serde(default)]` 给

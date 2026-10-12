@@ -5,6 +5,7 @@
 mod common;
 
 use std::{
+    path::{Path, PathBuf},
     sync::mpsc,
     thread,
     time::{Duration, Instant},
@@ -491,16 +492,14 @@ fn a_desktop_hears_welcome_before_any_request() {
 }
 
 /// 有几个界面连接时转给最近连上的那个；它断开时还没回话的请求回 `Error`，之后的请求转给剩下
-/// 的；一个界面都没有时回 `Error`。
+/// 的；一个界面都没有时宿主自己回。
 #[test]
 fn window_requests_follow_the_latest_desktop() {
     let dir = temp_dir("uis");
     let (_host, socket) = listen(&dir);
     let mut cli = Peer::hello(&socket, false);
     cli.send(&ClientMsg::Layout { req: 1 });
-    assert!(
-        matches!(cli.reply(), HostMsg::Error { req: Some(1), message, .. } if message.contains("no runode window"))
-    );
+    assert_eq!(cli.reply(), HostMsg::Layout { req: 1, windows: empty_window() });
 
     let mut older = Peer::desktop(&socket);
     let newer = Peer::desktop(&socket);
@@ -517,9 +516,7 @@ fn window_requests_follow_the_latest_desktop() {
     let deadline = Instant::now() + WAIT;
     loop {
         cli.send(&ClientMsg::Layout { req: 4 });
-        if let HostMsg::Error { req: Some(4), message, .. } = cli.reply()
-            && message.contains("no runode window")
-        {
+        if matches!(cli.reply(), HostMsg::Layout { req: 4, .. }) {
             break;
         }
         assert!(Instant::now() < deadline, "the desktop is still registered");
@@ -527,29 +524,145 @@ fn window_requests_follow_the_latest_desktop() {
     }
 }
 
-/// 没有界面连接时，开终端、切到终端的请求都回 `Error`，连接照旧。
+/// 宿主自己回的布局里一个工作区都没有时：一个空窗口。
+fn empty_window() -> Vec<WindowLayout> {
+    vec![WindowLayout { index: 1, front: true, workspaces: Vec::new() }]
+}
+
+/// 布局里各个工作区的目录、名字和会话。
+fn workspaces(windows: &[WindowLayout]) -> Vec<(Option<PathBuf>, Option<String>, Vec<SessionId>)> {
+    let sessions =
+        |workspace: &WorkspaceLayout| workspace.tabs.iter().flat_map(|tab| &tab.panes).map(|pane| pane.id).collect();
+    windows
+        .iter()
+        .flat_map(|window| &window.workspaces)
+        .map(|workspace| (workspace.dir.clone(), workspace.name.clone(), sessions(workspace)))
+        .collect()
+}
+
+/// 没有界面连着时宿主照自己手里的布局办：新建工作区、在工作区里开标签、改名都改这份布局，问过布局的
+/// 连接先收到 `LayoutChanged`；同一个目录的工作区不另建；会话没了工作区还在；切到终端没有窗口可切，回
+/// `Error`。
 #[test]
-fn window_requests_without_a_desktop_fail() {
-    let dir = temp_dir("nowindow");
+fn without_a_desktop_the_host_keeps_the_workspaces() {
+    let dir = temp_dir("headless");
+    let canonical = std::fs::canonicalize(&dir).unwrap();
     let (_host, socket) = listen(&dir);
-    let mut peer = Peer::hello(&socket, false);
-    peer.send(&ClientMsg::Open {
+    let mut phone = Peer::connect(&socket).greet(ClientKind::Mobile, false);
+    phone.send(&ClientMsg::Layout { req: 1 });
+    assert_eq!(phone.reply(), HostMsg::Layout { req: 1, windows: empty_window() });
+    let open = |req, near| ClientMsg::Open {
+        req,
+        placement: Placement::Right,
+        near,
+        cwd: None,
+        focus: true,
+        fold: None,
+        from: None,
+    };
+    phone.send(&open(2, None));
+    assert!(matches!(phone.reply(), HostMsg::Error { req: Some(2), .. }), "no workspace to open it in");
+
+    phone.send(&ClientMsg::OpenWorkspace { req: 3, dir: dir.clone(), focus: false, name: Some(" app ".into()) });
+    assert_eq!(phone.reply(), HostMsg::LayoutChanged);
+    let HostMsg::Opened { req: 3, id: first } = phone.reply() else { panic!("expected opened") };
+    phone.send(&ClientMsg::OpenWorkspace { req: 4, dir, focus: false, name: None });
+    assert_eq!(phone.reply(), HostMsg::Opened { req: 4, id: first });
+    phone.send(&open(5, Some(first)));
+    assert_eq!(phone.reply(), HostMsg::LayoutChanged);
+    let HostMsg::Opened { req: 5, id: second } = phone.reply() else { panic!("expected opened") };
+    phone.send(&ClientMsg::RenameWorkspace { req: 6, window: 1, workspace: 1, name: "renamed".into() });
+    assert_eq!(phone.reply(), HostMsg::LayoutChanged);
+    assert_eq!(phone.reply(), HostMsg::Done { req: 6 });
+    phone.send(&ClientMsg::RenameWorkspace { req: 7, window: 1, workspace: 2, name: "x".into() });
+    assert!(matches!(phone.reply(), HostMsg::Error { req: Some(7), .. }));
+
+    phone.send(&ClientMsg::Layout { req: 8 });
+    let HostMsg::Layout { windows, .. } = phone.reply() else { panic!("expected the layout") };
+    assert_eq!(workspaces(&windows), [(Some(canonical.clone()), Some("renamed".into()), vec![first, second])]);
+
+    phone.send(&ClientMsg::Kill { id: first });
+    phone.send(&ClientMsg::Kill { id: second });
+    phone.send(&ClientMsg::Layout { req: 9 });
+    let HostMsg::Layout { windows, .. } = phone.reply() else { panic!("expected the layout") };
+    assert_eq!(workspaces(&windows), [(Some(canonical), Some("renamed".into()), vec![])]);
+    phone.send(&ClientMsg::Reveal { req: 10, id: first });
+    assert!(
+        matches!(phone.reply(), HostMsg::Error { req: Some(10), message, .. } if message.contains("no runode window"))
+    );
+}
+
+/// 一个界面报了布局 `windows` 后断开，等宿主看到它断开了（`cli` 问布局时不再转给界面），返回宿主回的布局。
+fn report_and_leave(socket: &Path, cli: &mut Peer, windows: Vec<WindowLayout>) -> Vec<WindowLayout> {
+    let mut desktop = Peer::desktop(socket);
+    desktop.send(&ClientMsg::LayoutChanged { windows: Some(windows) });
+    // 宿主读完了 `LayoutChanged` 再断开：命令行还没问过布局，不会收到它。
+    desktop.sessions();
+    drop(desktop);
+    let deadline = Instant::now() + WAIT;
+    loop {
+        cli.send(&ClientMsg::Layout { req: 1 });
+        if let HostMsg::Layout { windows, .. } = cli.reply() {
+            return windows;
+        }
+        assert!(Instant::now() < deadline, "the desktop is still registered");
+        thread::sleep(Duration::from_millis(20));
+    }
+}
+
+/// 界面记的目录经过软链接、没规范化：手机对同一个目录发 `OpenWorkspace` 时，不管写成布局里的软链接
+/// 还是真实路径都认得出这个工作区，不另建一个。
+#[test]
+fn a_workspace_is_found_by_the_dir_the_desktop_wrote() {
+    let dir = temp_dir("written");
+    let real = dir.join("real");
+    std::fs::create_dir(&real).unwrap();
+    let link = dir.join("link");
+    std::os::unix::fs::symlink(&real, &link).unwrap();
+    let (_host, socket) = listen(&dir);
+    let mut cli = Peer::hello(&socket, false);
+    let workspace =
+        WorkspaceLayout { index: 1, name: Some("w".into()), dir: Some(link.clone()), active: true, tabs: vec![] };
+    report_and_leave(&socket, &mut cli, vec![WindowLayout { index: 1, front: true, workspaces: vec![workspace] }]);
+    cli.send(&ClientMsg::OpenWorkspace { req: 2, dir: link.clone(), focus: false, name: None });
+    assert_eq!(cli.reply(), HostMsg::LayoutChanged);
+    let HostMsg::Opened { req: 2, id } = cli.reply() else { panic!("expected opened") };
+    cli.send(&ClientMsg::Layout { req: 3 });
+    let HostMsg::Layout { windows, .. } = cli.reply() else { panic!("expected the layout") };
+    assert_eq!(workspaces(&windows), [(Some(link), Some("w".into()), vec![id])]);
+    // 目录写成软链接指向的真实路径（手机浏览目录时拿到的就是它）也认得出。
+    cli.send(&ClientMsg::OpenWorkspace { req: 4, dir: real, focus: false, name: None });
+    assert_eq!(cli.reply(), HostMsg::Opened { req: 4, id });
+    cli.send(&ClientMsg::Kill { id });
+}
+
+/// 界面报来的布局宿主记着：界面断开后照它回布局、在里面开终端；界面再连上时问 `Layout`，宿主回自己
+/// 手里的，不转给界面。
+#[test]
+fn the_desktops_layout_outlives_the_desktop() {
+    let (_host, socket) = listen(&temp_dir("held"));
+    let mut cli = Peer::hello(&socket, false);
+    let id = cli.spawn("/bin/cat");
+    assert_eq!(report_and_leave(&socket, &mut cli, layout(id)), layout(id));
+    cli.send(&ClientMsg::Open {
         req: 2,
         placement: Placement::Tab,
-        near: None,
+        near: Some(id),
         cwd: None,
         focus: false,
         fold: None,
         from: None,
     });
-    assert!(
-        matches!(peer.reply(), HostMsg::Error { req: Some(2), message, .. } if message.contains("no runode window"))
-    );
-    peer.send(&ClientMsg::Reveal { req: 3, id: SessionId(9) });
-    assert!(
-        matches!(peer.reply(), HostMsg::Error { req: Some(3), message, .. } if message.contains("no runode window"))
-    );
-    assert!(peer.sessions().is_empty());
+    assert_eq!(cli.reply(), HostMsg::LayoutChanged);
+    let HostMsg::Opened { req: 2, id: opened } = cli.reply() else { panic!("expected opened") };
+
+    let mut desktop = Peer::desktop(&socket);
+    desktop.send(&ClientMsg::Layout { req: 3 });
+    let HostMsg::Layout { req: 3, windows } = desktop.reply() else { panic!("expected the held layout") };
+    assert_eq!(workspaces(&windows), [(None, None, vec![id, opened])]);
+    cli.send(&ClientMsg::Layout { req: 4 });
+    assert!(matches!(desktop.reply(), HostMsg::UiRequest { .. }), "with a desktop the layout is its own");
+    cli.send(&ClientMsg::Kill { id: opened });
 }
 
 /// `claimed` 只算桌面的界面连着的（只看状态的也算），命令行连着的不算。
