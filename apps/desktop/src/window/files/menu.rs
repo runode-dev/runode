@@ -12,7 +12,7 @@ use super::{
 use crate::{
     ui::{
         actions::{Copy, Cut, Paste},
-        menu::{MenuHost, menu_item},
+        menu::{MenuHost, MenuItem},
     },
     window::WindowView,
 };
@@ -23,7 +23,7 @@ impl WindowView {
     pub(super) fn open_file_menu(&mut self, position: Point<Pixels>, cx: &mut Context<Self>) {
         let selected = self.selected_entry();
         let can_paste = self.file_clipboard.is_some();
-        let item = |key: &str, action: Box<dyn Action>| Some(menu_item(rust_i18n::t!(key), action, true, cx));
+        let item = |key: &str, action: Box<dyn Action>| Some(MenuItem::new(rust_i18n::t!(key), action, true, cx));
         let mut items = vec![
             item("files.new_file", Box::new(NewFile)),
             item("files.new_folder", Box::new(NewFolder)),
@@ -42,7 +42,7 @@ impl WindowView {
         if selected.is_some() {
             items.extend([item("menu.cut", Box::new(Cut)), item("menu.copy", Box::new(Copy))]);
         }
-        items.push(Some(menu_item(rust_i18n::t!("menu.paste"), Box::new(Paste), can_paste, cx)));
+        items.push(Some(MenuItem::new(rust_i18n::t!("menu.paste"), Box::new(Paste), can_paste, cx)));
         items.extend([
             None,
             item("files.copy_path", Box::new(CopyPath)),
@@ -59,7 +59,7 @@ impl WindowView {
             ]);
         }
         let target = self.files_focus.clone();
-        self.open_menu(position, items, target, cx);
+        self.open_context_menu(position, items, target, cx);
     }
 
     /// 选中的那一项，没选中时是根目录。

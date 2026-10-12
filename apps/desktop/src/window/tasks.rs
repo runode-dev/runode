@@ -14,13 +14,13 @@ use gpui::{
 use runode_config::TaskPlacement;
 use runode_paths::Dirs;
 use runode_protocol::{TaskSource, TaskSourceKind};
-use runode_shared_types::{color::Rgb, pane::Axis};
+use runode_shared_types::pane::Axis;
 
 pub(super) use custom::AddTaskDialog;
 
 use super::{
     ToggleTasks,
-    files::{MenuButton, MenuItem, group_item, labeled_item, menu_item},
+    files::{MenuButton, MenuItem},
     project::{TOGGLE_HEIGHT, TOGGLE_WIDTH},
     titlebar::icon_toggle,
 };
@@ -223,13 +223,7 @@ impl WindowView {
     }
 
     /// 标题栏右上角、面板开关左边的命令按钮，菜单挂在它下面，开着时底色亮一些。
-    pub(super) fn render_tasks_button(
-        &self,
-        fg: Rgb,
-        bg: Rgb,
-        window: &Window,
-        cx: &mut Context<Self>,
-    ) -> Stateful<Div> {
+    pub(super) fn render_tasks_button(&self, window: &Window, cx: &mut Context<Self>) -> Stateful<Div> {
         let view = cx.entity().downgrade();
         icon_toggle("tasks", PLAY_ICON, 16., self.dropdown_open(), cx)
             .role(Role::Button)
@@ -254,7 +248,7 @@ impl WindowView {
             )
             // 按下鼠标就开，没有 on_click，辅助工具的按下另外登记：和快捷键一样开关菜单、开时选中第一条。
             .on_a11y_press(view, move |this, window, cx| this.toggle_tasks(&ToggleTasks, window, cx))
-            .children(self.render_dropdown(super::TITLEBAR_HEIGHT, fg, bg, window, cx))
+            .children(self.render_dropdown_menu(super::TITLEBAR_HEIGHT, window, cx))
     }
 
     /// 在命令按钮下面弹出命令菜单，各项见 `tasks_menu_items`。上次跑的命令还在菜单里时选中它；不然从键盘
@@ -332,7 +326,7 @@ impl WindowView {
     /// 淡淡地写它的说明，自己加的命令选中时行尾有编辑和删除按钮。另外给出上次跑的命令在第几项，它所在的组
     /// 收着或者它没了时为空。
     fn tasks_menu_items(&self, cx: &App) -> (Vec<Option<MenuItem>>, Option<usize>) {
-        let mut items = vec![Some(menu_item(rust_i18n::t!("tasks.add"), Box::new(AddTask), true, cx))];
+        let mut items = vec![Some(MenuItem::new(rust_i18n::t!("tasks.add"), Box::new(AddTask), true, cx))];
         let mut last = None;
         let project = &self.workspace().project;
         let listed = project.tasks.as_ref();
@@ -352,7 +346,7 @@ impl WindowView {
             let folded = project.tasks_folded.contains(&group_key(source));
             let count = Some(source.tasks.len().to_string().into());
             let toggle = ToggleTaskGroup { key: group_key(source) };
-            items.push(Some(group_item(label, count, folded, Box::new(toggle))));
+            items.push(Some(MenuItem::group(label, count, folded, Box::new(toggle))));
             if folded {
                 continue;
             }
@@ -370,8 +364,9 @@ impl WindowView {
                     Some(text) => format!("{text}\n{}", task.command),
                     None => task.command.clone(),
                 };
-                let item = labeled_item(task.name.clone(), description.map(SharedString::from), Some(Box::new(action)))
-                    .with_tooltip(full);
+                let item =
+                    MenuItem::label(task.name.clone(), description.map(SharedString::from), Some(Box::new(action)))
+                        .with_tooltip(full);
                 if !custom {
                     return Some(item);
                 }

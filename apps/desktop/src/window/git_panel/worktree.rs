@@ -8,11 +8,7 @@ use runode_git::{self as git, RepoKind};
 
 use super::rows::Busy;
 use crate::ui::menu::MenuHost as _;
-use crate::window::{
-    WindowView,
-    files::{MenuItem, menu_item},
-    model::base_name,
-};
+use crate::window::{WindowView, files::MenuItem, model::base_name};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum WorktreeOp {
@@ -48,7 +44,7 @@ impl WindowView {
         let enabled = main.is_some_and(|main| self.workspace().project.git_panel.busy(&main).is_none());
         let removable = self.worktree(root).is_some_and(git::Snapshot::is_linked_worktree);
         let item = |key: &str, op, enabled| {
-            Some(menu_item(
+            Some(MenuItem::new(
                 rust_i18n::t!(key),
                 Box::new(GitWorktreeAction { worktree: root.to_path_buf(), op }),
                 enabled,
@@ -69,7 +65,7 @@ impl WindowView {
     pub(super) fn open_worktree_menu(&mut self, root: &Path, position: Point<Pixels>, cx: &mut Context<Self>) {
         let items = self.worktree_menu_items(root, cx);
         let target = self.git_focus.clone();
-        self.open_menu(position, items, target, cx);
+        self.open_context_menu(position, items, target, cx);
     }
 
     pub(super) fn git_worktree_action(

@@ -40,7 +40,7 @@ use crate::{
     },
     window::{
         DIVIDER_GRAB_WIDTH, Divider, TITLEBAR_HEIGHT, WindowView,
-        files::menu_item,
+        files::MenuItem,
         model::base_name,
         preview::DiffTarget,
         project::{ADDED, MODIFIED, REMOVED, RENAMED, added_label, removed_label},
@@ -430,7 +430,7 @@ impl WindowView {
         let enabled = self.workspace().project.git_panel.busy(&root).is_none();
         let item = |key: &str, op, enabled| {
             let action = GitCommitAction { repo: root.clone(), id: id.clone(), op };
-            Some(menu_item(rust_i18n::t!(key), Box::new(action), enabled, cx))
+            Some(MenuItem::new(rust_i18n::t!(key), Box::new(action), enabled, cx))
         };
         let items = vec![
             item("git.graph.copy_id", CommitOp::CopyId, true),
@@ -439,7 +439,7 @@ impl WindowView {
             item("git.graph.create_branch", CommitOp::CreateBranch, enabled),
         ];
         let target = self.git_focus.clone();
-        self.open_menu(position, items, target, cx);
+        self.open_context_menu(position, items, target, cx);
     }
 
     /// 根目录是 `root` 的仓库的图表状态。

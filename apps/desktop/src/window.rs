@@ -698,7 +698,7 @@ impl Render for WindowView {
             (bg, self.render_classic_body(fg, bg, window, cx))
         };
         let drag = self.dragging_divider.map(|divider| self.render_divider_drag(divider, cx));
-        let file_menu = self.render_menu(fg, bg, window, cx);
+        let file_menu = self.render_context_menu(window, cx);
         let agent_picker = self.render_agent_picker(fg, bg, window, cx);
         let arrange_picker = self.render_arrange_picker(fg, bg, cx);
         let branch_picker = self.render_branch_picker(fg, bg, cx);
@@ -863,7 +863,7 @@ impl WindowView {
             self.workspace().panel.is_some().then(|| self.render_right_handle(Divider::Panel, widths.panel, cx)),
         ];
         let panel_toggles = (titlebar_shown || right_column).then(|| {
-            self.render_panel_toggles(fg, bg, window, cx)
+            self.render_panel_toggles(window, cx)
                 .absolute()
                 .top(px((TITLEBAR_HEIGHT - project::TOGGLE_HEIGHT) / 2.))
                 .right(px(project::TOGGLE_MARGIN))
@@ -1031,7 +1031,6 @@ impl WindowView {
     /// 卡片样式的标题栏：左边给侧栏开关让位，中间是胶囊样式的标签条，右边是新建标签和右侧面板的开关。
     fn render_cards_titlebar(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let (fg, bg) = self.colors(cx);
-        let frame = frame_color(fg, bg);
         let viewport = f32::from(window.viewport_size().width);
         let tab_count = self.workspace().tabs.len();
         let sidebar_visible = self.sidebar_visible();
@@ -1075,7 +1074,7 @@ impl WindowView {
             .child(self.render_new_tab_button_card(cx))
             // 标签条只占标签本身的宽度，新建标签按钮紧跟在后面，剩下的空白留给拖动窗口。
             .child(div().flex_1().h_full())
-            .child(self.render_panel_toggles(fg, frame, window, cx))
+            .child(self.render_panel_toggles(window, cx))
             .into_any_element()
     }
 }

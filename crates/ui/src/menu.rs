@@ -1,17 +1,18 @@
-//! 右键菜单和按钮下面弹出的菜单：菜单项、键盘和鼠标的操作、画法。文件树、预览标签、Git 面板、
-//! 状态栏和标题栏的命令按钮都用它；菜单开着时存在哪个视图里由 `MenuHost` 说，同一时刻只开一个。
+//! 菜单：右键菜单（ContextMenu，`MenuHost::open_context_menu` 打开、`render_context_menu` 画）和按钮下面
+//! 弹出的菜单（DropdownMenu，`open_dropdown` 打开、按钮用 `render_dropdown_menu` 画在自己下面）共用的菜单项
+//! （`MenuItem`）、键盘和鼠标的操作、画法。文件树、预览标签、Git 面板、状态栏和标题栏的命令按钮都用它；
+//! 菜单开着时存在哪个视图里由 `MenuHost` 说，同一时刻只开一个。颜色在画的时候从主题读。
 
 use gpui::{
     Action, Anchor, AnyElement, App, Context, Div, FocusHandle, KeyDownEvent, MouseButton, Pixels, Point, Role,
     ScrollHandle, SharedString, Stateful, Window, anchored, deferred, div, point, prelude::*, px, relative, svg,
 };
-use runode_shared_types::color::Rgb;
 
 use crate::{
     a11y::{A11yPress, Disable},
     font_size::{FontSize, scaled},
-    hsla,
     icons::{CHEVRON_DOWN_ICON, CHEVRON_RIGHT_ICON},
+    theme::ActiveTheme as _,
     tooltip::{shortcut_text, tooltip},
 };
 
@@ -50,6 +51,69 @@ pub struct MenuButton {
 }
 
 impl MenuItem {
+    /// 菜单里写着 `label` 的一项，快捷键在这时查，查的是这一刻的键位表。
+    pub fn new(label: impl Into<String>, action: Box<dyn Action>, enabled: bool, cx: &App) -> Self {
+        let shortcut = shortcut_text(action.as_ref(), cx);
+        Self {
+            label: label.into(),
+            action: Some(action),
+            shortcut,
+            enabled,
+            buttons: Vec::new(),
+            icon: None,
+            checked: None,
+            keep_open: false,
+            tooltip: None,
+        }
+    }
+
+    /// 可以勾选的一项，有 `icon` 时字前面画它；点了派发 `action`，打不打勾由派发后的状态决定，下次打开菜单时再查。
+    pub fn checkbox(label: String, icon: Option<&'static str>, checked: bool, action: Box<dyn Action>) -> Self {
+        Self {
+            label,
+            action: Some(action),
+            shortcut: None,
+            enabled: true,
+            buttons: Vec::new(),
+            icon,
+            checked: Some(checked),
+            keep_open: false,
+            tooltip: None,
+        }
+    }
+
+    /// 写好了字、点整行派发 `action` 的一项，`detail` 淡淡地写在右边快捷键的位置；没有 `action` 的
+    /// 灰着，当小标题用。
+    pub fn label(label: String, detail: Option<SharedString>, action: Option<Box<dyn Action>>) -> Self {
+        Self {
+            label,
+            enabled: action.is_some(),
+            action,
+            shortcut: detail,
+            buttons: Vec::new(),
+            icon: None,
+            checked: None,
+            keep_open: false,
+            tooltip: None,
+        }
+    }
+
+    /// 可以收起的一组的标题，前面画展开或收起（`folded`）的箭头，`detail` 写在右边。点了派发 `action`，
+    /// 菜单不关，由动作的处理方用 `replace_menu_items` 换上收起或展开后的各项。
+    pub fn group(label: String, detail: Option<SharedString>, folded: bool, action: Box<dyn Action>) -> Self {
+        Self {
+            label,
+            action: Some(action),
+            shortcut: detail,
+            enabled: true,
+            buttons: Vec::new(),
+            icon: Some(if folded { CHEVRON_RIGHT_ICON } else { CHEVRON_DOWN_ICON }),
+            checked: None,
+            keep_open: true,
+            tooltip: None,
+        }
+    }
+
     /// 鼠标停在这一行上时显示 `text`。
     pub fn with_tooltip(mut self, text: impl Into<SharedString>) -> Self {
         self.tooltip = Some(text.into());
@@ -66,69 +130,6 @@ impl MenuItem {
     pub fn with_button(mut self, button: MenuButton, action: Box<dyn Action>) -> Self {
         self.buttons.push((button, action));
         self
-    }
-}
-
-/// 菜单里写着 `label` 的一项，快捷键在这时查，查的是这一刻的键位表。
-pub fn menu_item(label: impl Into<String>, action: Box<dyn Action>, enabled: bool, cx: &App) -> MenuItem {
-    let shortcut = shortcut_text(action.as_ref(), cx);
-    MenuItem {
-        label: label.into(),
-        action: Some(action),
-        shortcut,
-        enabled,
-        buttons: Vec::new(),
-        icon: None,
-        checked: None,
-        keep_open: false,
-        tooltip: None,
-    }
-}
-
-/// 可以勾选的一项，有 `icon` 时字前面画它；点了派发 `action`，打不打勾由派发后的状态决定，下次打开菜单时再查。
-pub fn check_item(label: String, icon: Option<&'static str>, checked: bool, action: Box<dyn Action>) -> MenuItem {
-    MenuItem {
-        label,
-        action: Some(action),
-        shortcut: None,
-        enabled: true,
-        buttons: Vec::new(),
-        icon,
-        checked: Some(checked),
-        keep_open: false,
-        tooltip: None,
-    }
-}
-
-/// 写好了字、点整行派发 `action` 的一项，`detail` 淡淡地写在右边快捷键的位置；没有 `action` 的
-/// 灰着，当小标题用。
-pub fn labeled_item(label: String, detail: Option<SharedString>, action: Option<Box<dyn Action>>) -> MenuItem {
-    MenuItem {
-        label,
-        enabled: action.is_some(),
-        action,
-        shortcut: detail,
-        buttons: Vec::new(),
-        icon: None,
-        checked: None,
-        keep_open: false,
-        tooltip: None,
-    }
-}
-
-/// 可以收起的一组的标题，前面画展开或收起（`folded`）的箭头，`detail` 写在右边。点了派发 `action`，
-/// 菜单不关，由动作的处理方用 `replace_menu_items` 换上收起或展开后的各项。
-pub fn group_item(label: String, detail: Option<SharedString>, folded: bool, action: Box<dyn Action>) -> MenuItem {
-    MenuItem {
-        label,
-        action: Some(action),
-        shortcut: detail,
-        enabled: true,
-        buttons: Vec::new(),
-        icon: Some(if folded { CHEVRON_RIGHT_ICON } else { CHEVRON_DOWN_ICON }),
-        checked: None,
-        keep_open: true,
-        tooltip: None,
     }
 }
 
@@ -188,7 +189,7 @@ pub trait MenuHost: Sized + 'static {
     fn menu(&self) -> Option<&Menu>;
 
     /// 在 `position` 弹出 `items`，点了的那项先把焦点交给 `target` 再派发。
-    fn open_menu(
+    fn open_context_menu(
         &mut self,
         position: Point<Pixels>,
         items: Vec<Option<MenuItem>>,
@@ -199,7 +200,7 @@ pub trait MenuHost: Sized + 'static {
         cx.notify();
     }
 
-    /// 弹出挂在按钮下面的菜单，按钮用 `render_dropdown` 把它画在自己下面。给了 `select_after` 时
+    /// 弹出挂在按钮下面的菜单，按钮用 `render_dropdown_menu` 把它画在自己下面。给了 `select_after` 时
     /// 先选中它后面第一个能选的项（后面没有就绕回来），从键盘打开时回车就能用。
     fn open_dropdown(
         &mut self,
@@ -335,10 +336,10 @@ pub trait MenuHost: Sized + 'static {
     }
 
     /// 右键菜单，盖在窗口最上层，左上角对着右键按下的位置。
-    fn render_menu(&self, fg: Rgb, bg: Rgb, window: &Window, cx: &mut Context<Self>) -> Option<AnyElement> {
+    fn render_context_menu(&self, window: &Window, cx: &mut Context<Self>) -> Option<AnyElement> {
         let position = self.menu()?.position?;
         let max_height = f32::from(window.viewport_size().height) - MENU_MARGIN * 2.;
-        let list = self.render_menu_list(max_height, fg, bg, window, cx)?;
+        let list = self.render_menu_list(max_height, window, cx)?;
         Some(
             deferred(anchored().position(position).snap_to_window_with_margin(px(MENU_MARGIN)).child(list))
                 .with_priority(1)
@@ -348,19 +349,12 @@ pub trait MenuHost: Sized + 'static {
 
     /// 挂在按钮下面的菜单，按钮把它作为子元素：右上角对着按钮的右下角，往下让出一点；放不下时
     /// 贴着窗口边挪进来。按钮下沿离窗口顶 `button_bottom`，菜单最高到窗口底边。
-    fn render_dropdown(
-        &self,
-        button_bottom: f32,
-        fg: Rgb,
-        bg: Rgb,
-        window: &Window,
-        cx: &mut Context<Self>,
-    ) -> Option<Div> {
+    fn render_dropdown_menu(&self, button_bottom: f32, window: &Window, cx: &mut Context<Self>) -> Option<Div> {
         if !self.dropdown_open() {
             return None;
         }
         let max_height = f32::from(window.viewport_size().height) - button_bottom - DROPDOWN_GAP - MENU_MARGIN;
-        let list = self.render_menu_list(max_height, fg, bg, window, cx)?;
+        let list = self.render_menu_list(max_height, window, cx)?;
         Some(
             div().absolute().bottom_0().right_0().child(
                 deferred(
@@ -376,22 +370,15 @@ pub trait MenuHost: Sized + 'static {
     }
 
     /// 菜单本身，最高 `max_height`，超出窗口时才在里面滚动；点到菜单外面就关掉。
-    fn render_menu_list(
-        &self,
-        max_height: f32,
-        fg: Rgb,
-        bg: Rgb,
-        window: &Window,
-        cx: &mut Context<Self>,
-    ) -> Option<Stateful<Div>> {
+    fn render_menu_list(&self, max_height: f32, window: &Window, cx: &mut Context<Self>) -> Option<Stateful<Div>> {
         let menu = self.menu()?;
         // 辅助工具悬停不了，行里的按钮在它读着时一直露出来，不然按不到。
         let a11y = window.is_a11y_active();
-        let hover_bg = hsla(bg.mix(fg, 0.12));
+        let theme = cx.theme();
+        let hover_bg = theme.mix(0.12);
         // 选中的行底色已经是 `hover_bg`，行里按钮悬停时再深一些。
-        let button_hover_bg = hsla(bg.mix(fg, 0.22));
-        let menu_bg = hsla(bg.mix(fg, 0.06));
-        let fg = hsla(fg);
+        let button_hover_bg = theme.mix(0.22);
+        let (menu_bg, border, fg) = (theme.popover, theme.input, theme.popover_foreground);
         // 有勾选项时每一行左边都留出打勾的那一列，字对齐。
         let check_column = menu.items.iter().flatten().any(|item| item.checked.is_some());
         let items = menu.items.iter().enumerate().map(|(ix, item)| {
@@ -511,7 +498,7 @@ pub trait MenuHost: Sized + 'static {
             .flex_col()
             .rounded(px(6.))
             .border_1()
-            .border_color(fg.opacity(0.15))
+            .border_color(border)
             .bg(menu_bg)
             .shadow_lg()
             .text_size(FontSize::Body)

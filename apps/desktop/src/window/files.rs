@@ -27,7 +27,7 @@ use runode_shared_types::color::Rgb;
 
 pub(super) use edit::{FileClipboard, FileEdit};
 // 菜单在 `runode_ui::menu`，窗口里各处照旧从这里引。
-pub(super) use crate::ui::menu::{MenuButton, MenuHost, MenuItem, check_item, group_item, labeled_item, menu_item};
+pub(super) use crate::ui::menu::{MenuButton, MenuHost, MenuItem};
 pub(super) use search::FileSearch;
 
 use super::{
@@ -182,9 +182,9 @@ impl WindowView {
 
     /// 标题行「更多」按钮的菜单：新建、全部收起，显示哪些文件，用别的程序打开根目录。
     fn open_files_more_menu(&mut self, position: gpui::Point<Pixels>, cx: &mut Context<Self>) {
-        let item = |key: &str, action: Box<dyn Action>| Some(menu_item(rust_i18n::t!(key), action, true, cx));
+        let item = |key: &str, action: Box<dyn Action>| Some(MenuItem::new(rust_i18n::t!(key), action, true, cx));
         let check = |key: &str, checked: bool, action: Box<dyn Action>| {
-            Some(check_item(rust_i18n::t!(key).into_owned(), None, checked, action))
+            Some(MenuItem::checkbox(rust_i18n::t!(key).into_owned(), None, checked, action))
         };
         let items = vec![
             item("files.new_file", Box::new(NewFile)),
@@ -198,7 +198,7 @@ impl WindowView {
             item("files.open_in_finder", Box::new(OpenRootInFinder)).map(|item| item.with_icon(FOLDER_OPEN_ICON)),
         ];
         let target = self.files_focus.clone();
-        self.open_menu(position, items, target, cx);
+        self.open_context_menu(position, items, target, cx);
     }
 
     /// 选中的那一项和它是不是目录；没选中时为空。

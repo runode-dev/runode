@@ -34,12 +34,7 @@ use runode_shared_types::{
     color::Rgb,
 };
 
-use super::{
-    PressDown, ToggleStatusBar, WindowView, cards,
-    files::{check_item, menu_item},
-    git_panel::sync_icon,
-    remote,
-};
+use super::{PressDown, ToggleStatusBar, WindowView, cards, files::MenuItem, git_panel::sync_icon, remote};
 use crate::ui::a11y::A11yPress;
 use crate::ui::menu::MenuHost as _;
 use crate::{
@@ -407,12 +402,17 @@ impl WindowView {
             .into_iter()
             .map(|item| {
                 let (icon, title) = item_icon_and_title(item);
-                Some(check_item(title, Some(icon), !hidden.contains(&item), Box::new(ToggleStatusItem { item })))
+                Some(MenuItem::checkbox(
+                    title,
+                    Some(icon),
+                    !hidden.contains(&item),
+                    Box::new(ToggleStatusItem { item }),
+                ))
             })
-            .chain([None, Some(menu_item(rust_i18n::t!("status.hide_bar"), Box::new(ToggleStatusBar), true, cx))])
+            .chain([None, Some(MenuItem::new(rust_i18n::t!("status.hide_bar"), Box::new(ToggleStatusBar), true, cx))])
             .collect();
         let target = self.focus_handle(cx);
-        self.open_menu(position, items, target, cx);
+        self.open_context_menu(position, items, target, cx);
     }
 
     /// 显示或隐藏状态栏上的一块：改写配置文件的 `status-bar-hidden`，所有窗口跟着重载的配置一起变。

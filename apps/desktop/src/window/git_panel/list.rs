@@ -30,7 +30,7 @@ use crate::{
     },
     window::{
         WindowView,
-        files::menu_item,
+        files::MenuItem,
         model::base_name,
         preview::DiffTarget,
         project::{added_label, removed_label, status_color},
@@ -375,7 +375,7 @@ impl WindowView {
     fn open_git_dir_menu(&mut self, position: gpui::Point<gpui::Pixels>, base: GitDirAction, cx: &mut Context<Self>) {
         let enabled = self.workspace().project.git_panel.busy(&base.repo).is_none();
         let item = |key: &str, op| {
-            Some(menu_item(rust_i18n::t!(key), Box::new(GitDirAction { op, ..base.clone() }), enabled, cx))
+            Some(MenuItem::new(rust_i18n::t!(key), Box::new(GitDirAction { op, ..base.clone() }), enabled, cx))
         };
         let items = match base.section {
             GitSection::Merge => vec![item("git.mark_resolved", DirOp::Stage)],
@@ -383,7 +383,7 @@ impl WindowView {
             _ => vec![item("git.stage", DirOp::Stage), item("git.discard", DirOp::Discard)],
         };
         let target = self.git_focus.clone();
-        self.open_menu(position, items, target, cx);
+        self.open_context_menu(position, items, target, cx);
     }
 
     /// 根目录是 `root` 的仓库里那个文件的右键菜单。
@@ -400,7 +400,7 @@ impl WindowView {
         let gitlink = self.git_file(&root, section, &path).is_some_and(|file| file.gitlink);
         let item = |key: &str, op, enabled| {
             let action = GitFileAction { repo: root.clone(), op, section, path: path.clone() };
-            Some(menu_item(rust_i18n::t!(key), Box::new(action), enabled, cx))
+            Some(MenuItem::new(rust_i18n::t!(key), Box::new(action), enabled, cx))
         };
         let mut items = vec![
             item("git.open_file", FileOp::Open, true),
@@ -419,7 +419,7 @@ impl WindowView {
             }
         }
         let target = self.git_focus.clone();
-        self.open_menu(position, items, target, cx);
+        self.open_context_menu(position, items, target, cx);
     }
 
     fn render_git_stash(

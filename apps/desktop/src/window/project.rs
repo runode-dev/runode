@@ -511,7 +511,7 @@ impl WindowView {
 
     /// 标题栏右上角的按钮：先是项目命令按钮，然后是开关右侧面板的按钮，展开时底色亮一些，打开的是
     /// 上次显示的那一页。位置由调用方接着写。
-    pub(super) fn render_panel_toggles(&self, fg: Rgb, bg: Rgb, window: &Window, cx: &mut Context<Self>) -> Div {
+    pub(super) fn render_panel_toggles(&self, window: &Window, cx: &mut Context<Self>) -> Div {
         let shown = self.workspace().panel.is_some();
         let text = if shown { rust_i18n::t!("tooltip.hide_panel") } else { rust_i18n::t!("tooltip.show_panel") };
         let view = cx.entity().downgrade();
@@ -540,7 +540,7 @@ impl WindowView {
             .flex()
             .items_center()
             .gap(px(TOGGLE_GAP))
-            .child(self.render_tasks_button(fg, bg, window, cx))
+            .child(self.render_tasks_button(window, cx))
             .child(toggle)
     }
 

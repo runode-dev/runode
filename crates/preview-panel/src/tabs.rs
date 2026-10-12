@@ -16,7 +16,7 @@ use runode_ui::{
     base_name,
     file_icons::file_icon,
     follow_move, hsla,
-    menu::{MenuHost as _, menu_item},
+    menu::{MenuHost as _, MenuItem},
     panel::TITLEBAR_HEIGHT,
     tabs::{close_button, drag_chip, drop_marker},
     theme::{ADDED, MODIFIED, REMOVED, RENAMED},
@@ -354,7 +354,7 @@ impl PreviewPanel {
         let (count, active) = (previews.tabs.len(), previews.active);
         let pinned = previews.active().is_some_and(|tab| tab.pinned);
         let item = |key: &str, action: Box<dyn Action>, enabled: bool| {
-            Some(menu_item(rust_i18n::t!(key), action, enabled, cx))
+            Some(MenuItem::new(rust_i18n::t!(key), action, enabled, cx))
         };
         let mut items = vec![
             item("preview.close", Box::new(CloseTab), true),
@@ -366,7 +366,7 @@ impl PreviewPanel {
             items.extend([None, item("preview.keep_open", Box::new(KeepPreviewOpen), true)]);
         }
         let target = self.focus.clone();
-        self.open_menu(position, items, target, cx);
+        self.open_context_menu(position, items, target, cx);
     }
 }
 

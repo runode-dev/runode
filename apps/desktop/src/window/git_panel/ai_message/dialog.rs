@@ -30,7 +30,7 @@ use crate::{
     window::{
         TITLEBAR_HEIGHT, WindowView,
         agents::logo::{agent_logo, colored_logo, logo_path},
-        files::check_item,
+        files::MenuItem,
     },
 };
 
@@ -215,14 +215,14 @@ impl WindowView {
                 let icon = spec.kind.and_then(logo_path).or(spec.logo);
                 let checked = dialog.agent.is_some_and(|agent| agent.id == spec.id);
                 let action = Box::new(SelectCommitAgent { index: Some(index) });
-                Some(check_item(spec.label.to_owned(), icon, checked, action))
+                Some(MenuItem::checkbox(spec.label.to_owned(), icon, checked, action))
             })
             .collect();
         let custom = rust_i18n::t!("git.ai_message.custom").into_owned();
         let action = Box::new(SelectCommitAgent { index: None });
-        items.extend([None, Some(check_item(custom, Some(TERMINAL_ICON), dialog.agent.is_none(), action))]);
+        items.extend([None, Some(MenuItem::checkbox(custom, Some(TERMINAL_ICON), dialog.agent.is_none(), action))]);
         let target = self.focus_handle(cx);
-        self.open_menu(position, items, target, cx);
+        self.open_context_menu(position, items, target, cx);
     }
 
     fn commit_message_dialog_key(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {

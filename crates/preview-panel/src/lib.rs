@@ -1074,10 +1074,9 @@ impl Render for PreviewPanel {
             return div().into_any_element();
         };
         let maximized = self.maximized(self.ws);
-        let (fg, bg) = (self.input.fg, self.input.bg);
         panel
             .when(maximized, |panel| panel.absolute().top_0().left_0().size_full().occlude())
-            .children(self.render_menu(fg, bg, window, cx))
+            .children(self.render_context_menu(window, cx))
             .into_any_element()
     }
 }
