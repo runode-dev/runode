@@ -49,9 +49,9 @@ use std::{cell::RefCell, collections::HashMap, path::PathBuf, rc::Rc, time::Inst
 
 use futures::StreamExt as _;
 use gpui::{
-    Action, AnyElement, App, Context, Div, Empty, Entity, EntityId, ExternalPaths, FocusHandle, Focusable, MouseButton,
-    Render, Role, ScrollHandle, SharedString, Stateful, StyleRefinement, Subscription, Task, Window, WindowBounds,
-    actions, div, prelude::*, px,
+    Action, AnyElement, App, Context, Div, Empty, Entity, EntityId, ExternalPaths, FocusHandle, Focusable,
+    KeyDownEvent, MouseButton, Render, Role, ScrollHandle, SharedString, Stateful, StyleRefinement, Subscription, Task,
+    Window, WindowBounds, actions, div, prelude::*, px,
 };
 use runode_config::WindowStyle;
 use runode_shared_types::{
@@ -716,9 +716,28 @@ impl Render for WindowView {
             || add_task.is_some()
             || commit_message_dialog.is_some()
             || todo_dialog.is_some();
+        // 状态栏的浮层不拿焦点，挡住后面的对话框一开就收起，免得叠在对话框上面。状态栏是缓存的视图，等这一帧
+        // 画完再通知。
+        if modal && self.status_popover.take().is_some() {
+            let this = cx.entity().downgrade();
+            cx.defer(move |cx| {
+                this.update(cx, |_, cx| cx.notify()).ok();
+            });
+        }
         div()
             .id("window")
             .key_context("Window")
+            // 状态栏的浮层开着时 Esc 关掉它，不再传给焦点所在的终端。
+            .capture_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
+                if this.status_popover.is_some()
+                    && event.keystroke.key == "escape"
+                    && !event.keystroke.modifiers.modified()
+                {
+                    this.status_popover = None;
+                    cx.stop_propagation();
+                    cx.notify();
+                }
+            }))
             .on_action(Self::act(cx, Self::new_tab))
             .on_action(Self::act(cx, Self::close_tab))
             .on_action(Self::act(cx, Self::next_tab))
