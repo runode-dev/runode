@@ -19,6 +19,7 @@ use runode_remote_access::{
 };
 
 use crate::Env;
+use unicode_width::UnicodeWidthStr as _;
 
 /// 等配对时隔多久看一眼口令文件。
 const POLL_INTERVAL: Duration = Duration::from_millis(250);
@@ -87,11 +88,11 @@ pub(crate) fn devices(env: &Env, json: bool, out: &mut dyn Write) -> anyhow::Res
         return Ok(());
     }
     let now = now_unix();
-    let width = devices.iter().map(|device| device.name.chars().count()).max().unwrap_or(0).max("NAME".len());
+    let width = devices.iter().map(|device| device.name.width()).max().unwrap_or(0).max("NAME".len());
     writeln!(out, "{:<32}  {:<width$}  {:<10}  LAST SEEN", "ID", "NAME", "PAIRED")?;
     for Device { device_id, name, paired_at, last_seen, .. } in &devices {
-        // `{:<width$}` 按字符数补齐，宽字符（中文）照样对不齐，名字放在 ID 后面影响小一些。
-        let pad = width.saturating_sub(name.chars().count());
+        // `{:<width$}` 按字符数补齐，宽字符（中文）对不齐，所以按显示宽度自己补。
+        let pad = width.saturating_sub(name.width());
         writeln!(out, "{device_id}  {name}{:pad$}  {:<10}  {}", "", ago(now, *paired_at), ago(now, *last_seen))?;
     }
     Ok(())

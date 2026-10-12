@@ -19,6 +19,7 @@ use crate::{
     commands::tilde,
     local_time::LocalTime,
 };
+use unicode_width::UnicodeWidthStr as _;
 
 /// 等 `StartTodo` 回话的最长时间：宿主可能先在大仓库里跑 `git worktree add`，git 自己的上限是 120 秒。
 const START_TIMEOUT: Duration = Duration::from_secs(130);
@@ -278,21 +279,21 @@ fn days_text(days: u8) -> String {
     parts.join(",")
 }
 
-/// 打印表格：各列按最宽的格子补齐，列间两个空格。
+/// 打印表格：各列按最宽的格子的显示宽度补齐，列间两个空格。
 fn table(header: &[&str], rows: impl Iterator<Item = Vec<String>>, out: &mut dyn Write) -> Result<()> {
     let header: Vec<String> = header.iter().map(|&cell| cell.to_owned()).collect();
     let rows: Vec<Vec<String>> = std::iter::once(header).chain(rows).collect();
     let mut widths = vec![0; rows[0].len()];
     for row in &rows {
         for (width, cell) in widths.iter_mut().zip(row) {
-            *width = (*width).max(cell.chars().count());
+            *width = (*width).max(cell.width());
         }
     }
     for row in &rows {
         let cells: Vec<String> = row
             .iter()
             .zip(&widths)
-            .map(|(cell, width)| format!("{cell}{}", " ".repeat(width - cell.chars().count())))
+            .map(|(cell, width)| format!("{cell}{}", " ".repeat(width - cell.width())))
             .collect();
         writeln!(out, "{}", cells.join("  ").trim_end())?;
     }

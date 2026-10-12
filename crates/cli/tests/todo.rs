@@ -14,6 +14,7 @@ use runode_protocol::{
     todo::{DEFAULT_AGENT, Schedule, Todo, TodoSpec, When},
 };
 use runode_shared_types::agent::{AgentKind, AgentState};
+use unicode_width::UnicodeWidthStr as _;
 
 const S: u128 = 0x5e55_0000_0000_0000_0000_0000_0000_0001;
 
@@ -136,7 +137,7 @@ fn list_shows_each_task_in_its_column() {
     let mut gone = Todo { started: Some(now() - 100), session: Some(SessionId(S + 1)), ..todo("00000004", "gone") };
     gone.spec.dir = "/elsewhere".into();
     gone.spec.agent = "codex --full-auto".into();
-    let fake = host("todolist", vec![finished, todo("00000001", "not yet"), gone, started], vec![]);
+    let fake = host("todolist", vec![finished, todo("00000001", "还没开始"), gone, started], vec![]);
     let (code, out, err) = run("todo list", &fake.env);
     assert_eq!(code, exit::OK, "{err}");
     let rows: Vec<Vec<&str>> =
@@ -145,13 +146,16 @@ fn list_shows_each_task_in_its_column() {
         rows,
         [
             vec!["ID", "COLUMN", "AGENT", "TITLE", "DIR"],
-            vec!["00000001", "todo", "claude", "not yet", "/tmp/project"],
+            vec!["00000001", "todo", "claude", "还没开始", "/tmp/project"],
             vec!["00000002", "in_progress", "claude", "working one", "/tmp/project"],
             vec!["00000004", "needs_you", "codex --full-auto", "gone", "/elsewhere"],
             vec!["00000003", "done", "claude", "finished", "/tmp/project"],
         ],
         "{out}"
     );
+    // 中文标题占两格，后面的列照样对齐。
+    let dir_starts: Vec<usize> = out.lines().map(|line| line[..line.len() - last_cell(line).len()].width()).collect();
+    assert!(dir_starts.iter().all(|&start| start == dir_starts[0]), "{out}");
     // 先问会话、再问任务；之后宿主发的 `TodosChanged` 不当回话。
     assert!(matches!(requests(&fake).as_slice(), [ClientMsg::ListSessions, ClientMsg::ListTodos { .. }]));
 
@@ -168,7 +172,12 @@ fn list_shows_each_task_in_its_column() {
         columns,
         [("00000001", "todo"), ("00000002", "in_progress"), ("00000004", "needs_you"), ("00000003", "done")]
     );
-    assert_eq!(listed[0]["spec"]["title"], "not yet");
+    assert_eq!(listed[0]["spec"]["title"], "还没开始");
+}
+
+/// 表格一行里最后一格。
+fn last_cell(line: &str) -> &str {
+    line.rsplit("  ").next().unwrap().trim_start()
 }
 
 #[test]

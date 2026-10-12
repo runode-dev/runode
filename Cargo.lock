@@ -4781,6 +4781,7 @@ dependencies = [
  "runode-remote-access",
  "runode-shared-types",
  "serde_json",
+ "unicode-width",
 ]
 
 [[package]]

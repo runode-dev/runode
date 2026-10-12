@@ -23,6 +23,7 @@ use crate::{
     help,
     select::{Place, Selector, World, place_name},
 };
+use unicode_width::UnicodeWidthStr as _;
 
 /// `send --enter` 打完字等这么久再按回车。很多 agent 的界面把同一次读到的文字和回车当成一次
 /// 粘贴，回车只换行不提交。发控制键之前也等这么久，道理一样。
@@ -352,7 +353,7 @@ fn list(world: &World, json: bool, out: &mut dyn Write) -> anyhow::Result<()> {
     let mut widths = vec![0; header.len()];
     for row in std::iter::once(&header).chain(&rows) {
         for (width, cell) in widths.iter_mut().zip(row) {
-            *width = (*width).max(cell.chars().count());
+            *width = (*width).max(cell.width());
         }
     }
     for row in std::iter::once(&header).chain(&rows) {
@@ -364,7 +365,7 @@ fn list(world: &World, json: bool, out: &mut dyn Write) -> anyhow::Result<()> {
                 line.push(' ');
             }
             line.push_str(cell);
-            line.extend(std::iter::repeat_n(' ', width - cell.chars().count()));
+            line.extend(std::iter::repeat_n(' ', width - cell.width()));
         }
         writeln!(out, "{}", line.trim_end())?;
     }
