@@ -226,7 +226,9 @@ impl Poller {
                 self.sent_settings = Some(wanted);
             }
             let now = Instant::now();
-            let poll = now >= self.next_poll;
+            // 关了推送或停了监听时马上清掉登记，排着没发的通知不等到下一轮才放掉。
+            let poll = now >= self.next_poll
+                || (!self.registrations.is_empty() && !(settings.enabled && listening == Listening::On));
             if poll {
                 self.next_poll = now + POLL_INTERVAL;
                 let registrations = if settings.enabled && listening == Listening::On {
