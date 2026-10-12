@@ -237,7 +237,7 @@ impl WindowView {
                     .children(rows),
             )
             .children(self.render_background(fg, bg, cx))
-            .child(self.render_sidebar_footer(fg, bg, cx))
+            .child(self.render_sidebar_footer(fg, cx))
     }
 
     fn render_row(&self, ix: usize, fg: Rgb, bg: Rgb, modifiers: Modifiers, cx: &mut Context<Self>) -> Stateful<Div> {
@@ -422,7 +422,7 @@ impl WindowView {
     }
 
     /// 侧栏底部一行：左边新建工作区，右边打开设置页。
-    fn render_sidebar_footer(&self, fg: Rgb, bg: Rgb, cx: &mut Context<Self>) -> Div {
+    fn render_sidebar_footer(&self, fg: Rgb, cx: &mut Context<Self>) -> Div {
         let settings = rust_i18n::t!("workspace.settings");
         let settings_tooltip = tooltip(settings.clone(), Some(&OpenSettings));
         div()
@@ -431,7 +431,7 @@ impl WindowView {
             .m(px(6.))
             .flex()
             .gap(px(2.))
-            .child(self.render_new_workspace_button(fg, bg, cx))
+            .child(self.render_new_workspace_button(fg, cx))
             .child(
                 Button::new("sidebar-settings", settings)
                     .icon(SETTINGS_ICON)
@@ -445,23 +445,16 @@ impl WindowView {
             )
     }
 
-    fn render_new_workspace_button(&self, fg: Rgb, bg: Rgb, cx: &mut Context<Self>) -> Stateful<Div> {
-        let hover_bg = hsla(bg.mix(fg, 0.06));
+    fn render_new_workspace_button(&self, fg: Rgb, cx: &mut Context<Self>) -> Button {
         let tooltip = tooltip(rust_i18n::t!("workspace.new"), Some(&NewWorkspace));
         let fg = hsla(fg);
-        div()
-            .id("new-workspace")
-            .role(Role::Button)
-            .aria_label(rust_i18n::t!("workspace.new"))
+        Button::new("new-workspace", rust_i18n::t!("workspace.new"))
             .flex_1()
             .min_w_0()
+            .h_auto()
             .px(px(8.))
-            .rounded(px(6.))
-            .flex()
-            .items_center()
-            .gap(px(6.))
+            .justify_start()
             .text_color(fg.opacity(0.55))
-            .hover(|button| button.bg(hover_bg).text_color(fg))
             .child(div().flex_none().w(px(ROW_ICON_SIZE)).flex().justify_center().text_size(px(14.)).child("+"))
             .child(div().min_w_0().truncate().child(rust_i18n::t!("workspace.new").into_owned()))
             .tooltip(tooltip)

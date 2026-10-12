@@ -539,25 +539,16 @@ impl WindowView {
             .on_press_down(cx, |this, window, cx| this.new_tab(&NewTab, window, cx))
     }
 
-    pub(super) fn render_new_tab_button(&self, fg: Rgb, bg: Rgb, cx: &mut Context<Self>) -> Stateful<Div> {
-        let hover_bg = hsla(bg.mix(fg, 0.04));
+    pub(super) fn render_new_tab_button(&self, cx: &mut Context<Self>) -> Button {
         let tooltip = tooltip(rust_i18n::t!("menu.new_tab"), Some(&NewTab));
-        let fg = hsla(fg);
-        div()
-            .id("new-tab")
-            .role(Role::Button)
-            .aria_label(rust_i18n::t!("menu.new_tab"))
-            .flex_none()
+        Button::new("new-tab", rust_i18n::t!("menu.new_tab"))
+            .with_size(ButtonSize::IconSm)
             .w(px(NEW_TAB_BUTTON_WIDTH))
             .h_full()
-            .flex()
-            .items_center()
-            .justify_center()
+            .rounded(px(0.))
             .border_l_1()
             .border_color(cx.theme().border)
             .text_size(px(16.))
-            .text_color(fg.opacity(0.55))
-            .hover(|button| button.bg(hover_bg).text_color(fg))
             .child("+")
             .tooltip(tooltip)
             .on_press_down(cx, |this, window, cx| this.new_tab(&NewTab, window, cx))

@@ -25,6 +25,7 @@ use runode_preview::Span;
 use runode_shared_types::color::Rgb;
 use runode_ui::{
     a11y::A11yPress,
+    button::{Button, ButtonSize},
     font_size::FontSize,
     hsla,
     icons::{ARROW_DOWN_ICON, DISCARD_ICON, MINUS_ICON, PLUS_ICON},
@@ -329,20 +330,11 @@ impl PreviewPanel {
         let jump = |id: &'static str, icon: &'static str, key: &'static str, forward: bool| {
             // 只有按下的处理，辅助工具按不到，另外登记。
             let view = cx.entity().downgrade();
-            div()
-                .id(id)
-                .role(Role::Button)
-                .aria_label(rust_i18n::t!(key).into_owned())
+            Button::new(id, rust_i18n::t!(key))
+                .icon(icon)
+                .with_size(ButtonSize::IconSm)
                 .on_a11y_press(view, move |this, _, cx| this.jump_to_change(forward, row_height, cx))
-                .flex_none()
-                .size(px(20.))
-                .rounded(px(3.))
-                .flex()
-                .items_center()
-                .justify_center()
-                .hover(|button| button.bg(hsla(bg.mix(fg, 0.12))))
                 .tooltip(tooltip(rust_i18n::t!(key), None))
-                .child(svg().path(icon).size(px(14.)).text_color(hsla(fg).opacity(0.75)))
                 .on_mouse_down(
                     MouseButton::Left,
                     cx.listener(move |this, _, _, cx| {

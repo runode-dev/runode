@@ -26,7 +26,7 @@ pub enum ButtonVariant {
     Secondary,
     /// 描一圈边，没有底色。
     Outline,
-    /// 平时只有字或图标，悬停时才有底色；只有图标时图标淡一些。
+    /// 平时只有字或图标，悬停时才有底色。只有图标时（这一种和 `Outline`）图标淡一些。
     #[default]
     Ghost,
     /// 带下划线的文字，没有底色和留白，不管 size 的高度和留白、只取它的字号。
@@ -222,9 +222,8 @@ impl RenderOnce for Button {
             ButtonVariant::Secondary => {
                 (theme.secondary_foreground, Some(theme.secondary), Some(theme.mix(0.22)), None)
             }
-            ButtonVariant::Outline => (fg, None, Some(theme.mix(0.10)), None),
             // 只有图标时图标淡一些，悬停或切换着才全亮；有字时字照常。
-            ButtonVariant::Ghost => {
+            ButtonVariant::Outline | ButtonVariant::Ghost => {
                 let dim = !on && self.size.icon_box().is_some();
                 (if dim { fg.opacity(0.6) } else { fg }, None, Some(theme.mix(0.10)), Some(fg))
             }

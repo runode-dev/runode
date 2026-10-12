@@ -924,7 +924,12 @@ impl WindowView {
                 .h_full()
                 .when(right_inset > 0., |inset| inset.border_l_1().border_color(cx.theme().border));
             let spacer = div().id("tabs-spacer").flex_1().h_full();
-            vec![strip, self.render_new_tab_button(fg, bg, cx), spacer, inset]
+            vec![
+                strip.into_any_element(),
+                self.render_new_tab_button(cx).into_any_element(),
+                spacer.into_any_element(),
+                inset.into_any_element(),
+            ]
         } else {
             // 只有一个标签时标题居中画在侧栏和右侧面板之间；两头让出的宽度取大的那个，
             // 没有侧栏和右侧面板时标题在整个窗口里居中。没有标签时标题是 workspace 的名字。
@@ -948,7 +953,8 @@ impl WindowView {
                     .pr(px(inset))
                     .flex()
                     .text_color(fg.opacity(0.55))
-                    .child(titled(title, mark, "window-agent", fg).flex_1()),
+                    .child(titled(title, mark, "window-agent", fg).flex_1())
+                    .into_any_element(),
             ]
         };
         div()

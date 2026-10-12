@@ -29,7 +29,7 @@ use super::{
     status_bar,
     titlebar::{pane_label, styled_agent_mark},
 };
-use crate::ui::button::{Button, ButtonSize};
+use crate::ui::button::{Button, ButtonSize, ButtonVariant};
 use crate::{
     assets::{
         CHEVRON_UP_ICON, CLOSE_ICON, MAXIMIZE_ICON, MINIMIZE_ICON, MINUS_ICON, SPLIT_DOWN_ICON, SPLIT_RIGHT_ICON,
@@ -117,7 +117,7 @@ impl WindowView {
         self.layout.borrow_mut().splits.clear();
         self.schedule_driver_redraw(now, cx);
         let Some(tab) = self.tab() else {
-            return self.render_empty_tab(fg, bg, cx);
+            return self.render_empty_tab(fg, cx);
         };
         if tab.zoomed || tab.root.is_leaf() {
             return self.render_leaf(tab, tab.focused, &badges, fg, bg, window, cx);
@@ -156,23 +156,16 @@ impl WindowView {
     }
 
     /// 没有标签的 workspace 的终端区：一句说明和新建标签的按钮。接着窗口自己的焦点，快捷键照常派发。
-    fn render_empty_tab(&self, fg: Rgb, bg: Rgb, cx: &mut Context<Self>) -> AnyElement {
-        let hover_bg = hsla(bg.mix(fg, 0.06));
+    fn render_empty_tab(&self, fg: Rgb, cx: &mut Context<Self>) -> AnyElement {
         let fg = hsla(fg);
         let shortcut = shortcut_text(&NewTab, cx);
-        let button = div()
-            .id("empty-new-tab")
-            .role(Role::Button)
-            .aria_label(rust_i18n::t!("menu.new_tab"))
-            .px(px(12.))
+        let button = Button::new("empty-new-tab", rust_i18n::t!("menu.new_tab"))
+            .variant(ButtonVariant::Outline)
+            .h_auto()
             .py(px(6.))
-            .rounded(px(6.))
-            .border_1()
-            .border_color(fg.opacity(0.15))
-            .flex()
             .gap(px(8.))
+            .text_size(FontSize::Medium)
             .text_color(fg.opacity(0.8))
-            .hover(|button| button.bg(hover_bg).text_color(fg))
             .child(rust_i18n::t!("menu.new_tab").into_owned())
             .children(shortcut.map(|shortcut| div().text_color(fg.opacity(0.4)).child(shortcut)))
             .on_press_down(cx, |this, window, cx| this.new_tab(&NewTab, window, cx));

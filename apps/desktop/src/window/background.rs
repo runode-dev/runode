@@ -8,6 +8,7 @@
 //! 就停；启动、接上、结束之后各问一次。问到 shell 已经退出、谁都没连着的会话（多半是列表里的后台
 //! 会话自己退出了）顺手结束，免得它一直留在宿主里、挡着宿主空闲退出。
 
+use crate::ui::button::{Button, ButtonSize};
 use crate::ui::theme::ActiveTheme as _;
 use std::{
     collections::HashSet,
@@ -218,7 +219,6 @@ impl WindowView {
         }
         let rows: Vec<_> =
             sessions.iter().enumerate().map(|(ix, session)| background_row(ix, session, fg, bg, cx)).collect();
-        let hover_bg = hsla(bg.mix(fg, 0.06));
         let fg = hsla(fg);
         let header = div()
             .flex_none()
@@ -237,17 +237,13 @@ impl WindowView {
                     .child(rust_i18n::t!("background.title").into_owned()),
             )
             .child(
-                div()
-                    .id("background-end-all")
-                    .role(Role::Button)
-                    .aria_label(rust_i18n::t!("background.end_all"))
-                    .flex_none()
+                Button::new("background-end-all", rust_i18n::t!("background.end_all"))
+                    .with_size(ButtonSize::Sm)
+                    .h_auto()
                     .px(px(6.))
                     .py(px(2.))
                     .rounded(px(4.))
                     .text_color(fg.opacity(0.55))
-                    .hover(|button| button.bg(hover_bg).text_color(fg))
-                    .child(rust_i18n::t!("background.end_all").into_owned())
                     .on_press_down(cx, |this, window, cx| this.end_background(window, cx)),
             );
         Some(

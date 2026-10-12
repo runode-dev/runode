@@ -352,17 +352,13 @@ impl WindowView {
             .child(shortcut_label)
             .on_press(cx, |this, window, cx| this.record_task_shortcut(window, cx));
         let clear_shortcut = dialog.shortcut.as_ref().filter(|_| dialog.recording.is_none()).map(|_| {
-            div()
-                .id("add-task-shortcut-clear")
-                .role(Role::Button)
-                .aria_label(rust_i18n::t!("tasks.shortcut_clear").into_owned())
+            Button::new("add-task-shortcut-clear", rust_i18n::t!("tasks.shortcut_clear"))
+                .h_auto()
                 .px(px(6.))
                 .py(px(3.))
                 .rounded(px(4.))
                 .text_color(fg.opacity(0.6))
-                .hover(move |clear| clear.bg(hover_bg))
                 .cursor_pointer()
-                .child(rust_i18n::t!("tasks.shortcut_clear").into_owned())
                 .on_press(cx, |this, _, cx| {
                     if let Some(dialog) = &mut this.add_task {
                         dialog.shortcut = None;

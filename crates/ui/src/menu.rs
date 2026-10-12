@@ -10,6 +10,7 @@ use gpui::{
 
 use crate::{
     a11y::{A11yPress, Disable},
+    button::{Button, ButtonSize},
     font_size::{FontSize, scaled},
     icons::{CHEVRON_DOWN_ICON, CHEVRON_RIGHT_ICON},
     theme::ActiveTheme as _,
@@ -458,19 +459,14 @@ pub trait MenuHost: Sized + 'static {
                     div().flex_none().mr(px(-6.)).flex().gap(px(2.)).children(buttons.iter().enumerate().map(
                         |(b, (button, _))| {
                             let view = cx.entity().downgrade();
-                            div()
-                                .id(("file-menu-button", ix * 4 + b))
-                                .role(Role::Button)
-                                .aria_label(button.tooltip.clone())
-                                .flex_none()
+                            // 菜单项高亮着时底色已经亮了一档，悬停再亮一些。
+                            Button::new(("file-menu-button", ix * 4 + b), button.tooltip.clone())
+                                .icon(button.icon)
+                                .icon_size(12.)
+                                .with_size(ButtonSize::IconSm)
                                 .size(px(18.))
-                                .rounded(px(4.))
-                                .flex()
-                                .items_center()
-                                .justify_center()
                                 .hover(|button| button.bg(button_hover_bg))
                                 .tooltip(tooltip(button.tooltip.clone(), None))
-                                .child(svg().path(button.icon).size(px(12.)).text_color(fg.opacity(0.6)))
                                 .on_mouse_down(
                                     MouseButton::Left,
                                     cx.listener(move |this, _, window, cx| {

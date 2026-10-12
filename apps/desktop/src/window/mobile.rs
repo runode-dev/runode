@@ -724,21 +724,13 @@ impl WindowView {
                 }
                 cx.notify();
             });
-        let refresh = div()
-            .id("mobile-network-refresh")
-            .role(Role::Button)
-            .aria_label(rust_i18n::t!("mobile.refresh_networks").into_owned())
-            .flex_none()
+        let refresh = Button::new("mobile-network-refresh", rust_i18n::t!("mobile.refresh_networks"))
+            .variant(ButtonVariant::Outline)
+            .icon(REFRESH_ICON)
+            .with_size(ButtonSize::Icon)
             .size(px(36.))
             .rounded(px(8.))
-            .border_1()
-            .border_color(colors.fg.opacity(0.15))
-            .flex()
-            .items_center()
-            .justify_center()
             .cursor_pointer()
-            .hover(|button| button.bg(colors.hover))
-            .child(svg().path(REFRESH_ICON).size(px(14.)).text_color(colors.fg.opacity(0.7)))
             .on_press(cx, |this, _, cx| {
                 this.refresh_interfaces();
                 this.restart_mobile_pairing(cx);
@@ -850,19 +842,13 @@ fn device_row(ix: usize, device: &Paired, colors: Colors, cx: &mut Context<Windo
                 .child(status),
         )
         .child(
-            div()
-                .id(("mobile-device-revoke", ix))
-                .role(Role::Button)
-                .aria_label(rust_i18n::t!("machine.revoke").into_owned())
-                .flex_none()
+            Button::new(("mobile-device-revoke", ix), rust_i18n::t!("machine.revoke"))
+                .icon(TRASH_ICON)
+                .icon_size(15.)
+                .with_size(ButtonSize::Icon)
                 .size(px(30.))
                 .rounded(px(6.))
-                .flex()
-                .items_center()
-                .justify_center()
                 .cursor_pointer()
-                .hover(|button| button.bg(colors.hover))
-                .child(svg().path(TRASH_ICON).size(px(15.)).text_color(colors.fg.opacity(0.6)))
                 .on_press(cx, move |this, window, cx| this.revoke_device(id, window, cx)),
         )
 }

@@ -518,21 +518,14 @@ impl WindowView {
             Page::Schedules => ("todo-board-new-schedule", rust_i18n::t!("todo_board.new_schedule").into_owned()),
         };
         let page = board.page;
-        let new = div()
-            .id(new_id)
-            .role(Role::Button)
-            .aria_label(new_label.clone())
-            .flex()
-            .items_center()
-            .gap(px(6.))
+        let new = Button::new(new_id, new_label)
+            .variant(ButtonVariant::Secondary)
+            .icon(PLUS_ICON)
+            .icon_size(12.)
+            .h_auto()
             .px(px(10.))
             .py(px(4.))
-            .rounded(px(6.))
-            .bg(hsla(bg.mix(fg, 0.12)))
-            .hover(|button| button.bg(hsla(bg.mix(fg, 0.18))))
             .cursor_pointer()
-            .child(svg().path(PLUS_ICON).size(px(12.)).text_color(hsla(fg)))
-            .child(new_label)
             .on_press(cx, move |this, window, cx| this.open_todo_dialog(page == Page::Schedules, None, window, cx));
         let close_label = rust_i18n::t!("todo_board.close").into_owned();
         let close = Button::new("todo-board-close", close_label.clone())

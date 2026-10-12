@@ -520,18 +520,9 @@ impl WindowView {
         };
         let changed = repo.changed();
         let root = repo.root.clone();
-        let more = div()
-            .id(repo_id("git-repo-more", &repo.root))
-            .role(Role::Button)
-            .aria_label(rust_i18n::t!("git.more").into_owned())
-            .flex_none()
-            .size(px(20.))
-            .rounded(px(3.))
-            .flex()
-            .items_center()
-            .justify_center()
-            .hover(|button| button.bg(hsla(bg.mix(fg, 0.14))))
-            .child(svg().path(MORE_ICON).size(px(14.)).text_color(fg_hsla.opacity(0.75)))
+        let more = Button::new(repo_id("git-repo-more", &repo.root), rust_i18n::t!("git.more"))
+            .icon(MORE_ICON)
+            .with_size(ButtonSize::IconSm)
             .on_press_down(cx, {
                 let root = root.clone();
                 move |this, window, cx| this.open_git_menu(&root, false, window.mouse_position(), cx)
