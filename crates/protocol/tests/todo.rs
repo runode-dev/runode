@@ -18,6 +18,7 @@ const SESSION: SessionId = SessionId(7);
 fn todo() -> Todo {
     Todo {
         id: "0000abcd".into(),
+        number: 0,
         spec: TodoSpec {
             title: "Fix login".into(),
             prompt: String::new(),

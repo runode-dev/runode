@@ -336,6 +336,7 @@ mod tests {
     fn todo(id: &str, session: SessionId) -> Todo {
         Todo {
             id: id.into(),
+            number: 0,
             spec: TodoSpec {
                 title: format!("任务 {id}"),
                 prompt: String::new(),

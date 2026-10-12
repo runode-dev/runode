@@ -484,6 +484,7 @@ fn finished_todos_are_pushed() {
     let now = crate::now_unix();
     let todo = Todo {
         id: "0000002a".into(),
+        number: 0,
         spec: TodoSpec {
             title: "加暗色模式".into(),
             prompt: String::new(),

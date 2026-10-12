@@ -148,6 +148,14 @@
           ]
         },
         {
+          "name": "show",
+          "description": "Print everything about one task",
+          "args": { "name": "id", "generatorName": "all_todos" },
+          "options": [
+            { "name": "--json", "description": "Print the task as JSON" }
+          ]
+        },
+        {
           "name": "start",
           "description": "Start a task and print its session id",
           "args": { "name": "id", "generatorName": "todos" }

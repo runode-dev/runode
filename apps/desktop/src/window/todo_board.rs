@@ -859,8 +859,9 @@ impl WindowView {
             )
     }
 
-    /// 卡片的样子，看板上的和飞着的共用：第一行是目录，`corner` 摆在右上角；有分支时下面一行是分支；再下面是
-    /// 标题；最后一行是 agent、开始的时间和来自哪个定时，`primary` 摆在右下角。`agent_id` 给 agent 标记用（它转圈要 id）。
+    /// 卡片的样子，看板上的和飞着的共用：第一行是目录，`corner` 和编号摆在右上角；有分支时下面一行是
+    /// 分支；再下面是标题；最后一行是 agent、开始的时间和来自哪个定时，`primary` 摆在右下角。`agent_id`
+    /// 给 agent 标记用（它转圈要 id）。
     #[allow(clippy::too_many_arguments)]
     fn card_face(
         &self,
@@ -899,7 +900,9 @@ impl WindowView {
             .child(place_badge(&place))
             .child(div().min_w_0().truncate().child(place))
             .child(div().flex_1())
-            .children(corner);
+            .children(corner)
+            // 旧宿主没给编号（0）时不写。
+            .when(todo.number > 0, |row| row.child(div().flex_none().child(format!("#{}", todo.number))));
         // 分支单独一行，和目录挤在一行时窄列里两个都截得认不出。
         let branch = todo.branch.clone().map(|branch| {
             div()
@@ -974,11 +977,13 @@ impl WindowView {
             schedule.map(|s| rust_i18n::t!("todo_board.from_schedule", name = s.spec.title.as_str()).into_owned());
         let line2: Vec<String> = [Some(place), todo.branch.clone()].into_iter().flatten().collect();
         let line3: Vec<String> = [Some(status), started, from].into_iter().flatten().collect();
-        let description = [line2.join(" · "), line3.join(" · "), rust_i18n::t!("todo_board.reorder_hint").into_owned()]
-            .into_iter()
-            .filter(|part| !part.is_empty())
-            .collect::<Vec<_>>()
-            .join("。");
+        let number = if todo.number > 0 { format!("#{}", todo.number) } else { String::new() };
+        let description =
+            [number, line2.join(" · "), line3.join(" · "), rust_i18n::t!("todo_board.reorder_hint").into_owned()]
+                .into_iter()
+                .filter(|part| !part.is_empty())
+                .collect::<Vec<_>>()
+                .join("。");
         let drops: [Option<DropAction>; 4] = Column::ALL.map(|to| drop_action(todo, session, to, now));
         let dragged = DraggedTodo {
             id: todo.id.clone(),
@@ -1446,6 +1451,7 @@ mod tests {
     fn todo(id: &str, started: Option<u64>, done_at: Option<u64>) -> Todo {
         Todo {
             id: id.into(),
+            number: 0,
             spec: TodoSpec {
                 title: id.into(),
                 prompt: String::new(),

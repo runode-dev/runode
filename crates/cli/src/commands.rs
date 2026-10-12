@@ -242,6 +242,7 @@ pub(crate) fn run(command: Command, env: &Env, out: &mut dyn Write, err: &mut dy
             crate::todo::add(env, crate::todo::Spec { title, prompt, cwd, agent, worktree }, start, out)?
         }
         Command::TodoList { json } => crate::todo::list(env, json, out)?,
+        Command::TodoShow { id, json } => crate::todo::show(env, &id, json, out)?,
         Command::TodoStart { id } => crate::todo::start(env, &id, out)?,
         Command::TodoDone { id } => crate::todo::done(env, id)?,
         Command::TodoRemove { id } => crate::todo::remove(env, id)?,

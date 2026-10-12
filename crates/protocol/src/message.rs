@@ -380,6 +380,10 @@ pub enum ClientMsg {
     /// 开始任务：在它的目录（要工作树时先新开一个）里开会话、在提示符上跑 agent，回 `Opened`。会话
     /// 还在时不再开，回原来那个。
     StartTodo { req: u32, id: String },
+    /// 要一张任务的全部内容，完成了多久的都行，回 `Todo`。这几条要任务标识的消息（`UpdateTodo`、
+    /// `RemoveTodo`、`StartTodo`、`MoveTodo` 和它）都也认编号，写成 `5` 或 `#5`（`Todo::number`）；
+    /// 正好也是哪张任务的标识时按标识算。
+    GetTodo { req: u32, id: String },
     /// 调任务的先后：挪到 `before` 前面，为空时挪到最后；回 `Done`。
     MoveTodo {
         req: u32,
@@ -613,6 +617,11 @@ pub enum HostMsg {
         req: u32,
         todos: Vec<Todo>,
         schedules: Vec<Schedule>,
+    },
+    /// 回 `ClientMsg::GetTodo`。
+    Todo {
+        req: u32,
+        todo: Todo,
     },
     /// 回 `ClientMsg::AddTodo`、`AddSchedule`：新任务或新定时的标识。
     TodoAdded {

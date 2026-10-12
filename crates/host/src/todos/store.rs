@@ -15,8 +15,8 @@ use runode_protocol::{
 };
 use rusqlite::{Connection, OptionalExtension as _, Row, Transaction, params};
 
-/// 这个版本认得的表结构。
-const VERSION: i64 = 1;
+/// 这个版本认得的表结构。2 加了任务的编号（`todos.number`）和发编号的计数（`meta`）。
+const VERSION: i64 = 2;
 
 /// 完成了的任务给前端最近这么久（秒）的，更早的留在库里。
 pub(super) const DONE_KEPT: u64 = 7 * 24 * 60 * 60;
@@ -38,8 +38,13 @@ CREATE TABLE todos (
     schedule TEXT,
     rank INTEGER NOT NULL,
     -- 完成后清过它的工作树和分支了（清不掉的留着，不再试）；取消完成时重置。
-    swept INTEGER NOT NULL DEFAULT 0
+    swept INTEGER NOT NULL DEFAULT 0,
+    number INTEGER NOT NULL
 );
+CREATE UNIQUE INDEX todos_number ON todos (number);
+-- 下一张任务的编号：删掉的任务的编号不再发，所以不能按现有的最大值算。
+CREATE TABLE meta (key TEXT PRIMARY KEY NOT NULL, value INTEGER NOT NULL);
+INSERT INTO meta VALUES ('next_number', 1);
 CREATE TABLE schedules (
     id TEXT PRIMARY KEY NOT NULL,
     title TEXT NOT NULL,
@@ -57,8 +62,17 @@ CREATE TABLE schedules (
 );
 ";
 
-const TODO_COLUMNS: &str =
-    "id, title, prompt, dir, agent, worktree, created, started, session, worktree_dir, branch, done_at, schedule, rank";
+/// 版本 1 的库升到 2：已有的任务按加的先后编号。
+const MIGRATE_TO_2: &str = "
+ALTER TABLE todos ADD COLUMN number INTEGER NOT NULL DEFAULT 0;
+UPDATE todos SET number = (SELECT COUNT(*) FROM todos AS earlier WHERE earlier.rowid <= todos.rowid);
+CREATE UNIQUE INDEX todos_number ON todos (number);
+CREATE TABLE meta (key TEXT PRIMARY KEY NOT NULL, value INTEGER NOT NULL);
+INSERT INTO meta VALUES ('next_number', (SELECT COALESCE(MAX(number), 0) + 1 FROM todos));
+";
+
+const TODO_COLUMNS: &str = "id, number, title, prompt, dir, agent, worktree, created, started, session, worktree_dir, \
+     branch, done_at, schedule, rank";
 const SCHEDULE_COLUMNS: &str =
     "id, title, prompt, dir, agent, worktree, kind, at, hour, minute, days, minutes, last_fired";
 
@@ -81,6 +95,9 @@ pub(super) fn open(path: &Path) -> Result<Connection> {
         0 => {
             conn.execute_batch(&format!("BEGIN; {SCHEMA} PRAGMA user_version = {VERSION}; COMMIT;")).map_err(failed)?
         }
+        1 => conn
+            .execute_batch(&format!("BEGIN; {MIGRATE_TO_2} PRAGMA user_version = {VERSION}; COMMIT;"))
+            .map_err(failed)?,
         VERSION => {}
         newer => return Err(format!("{} was written by a newer runode (schema {newer})", path.display())),
     }
@@ -112,6 +129,7 @@ fn spec(row: &Row<'_>) -> rusqlite::Result<TodoSpec> {
 fn todo(row: &Row<'_>) -> rusqlite::Result<Todo> {
     Ok(Todo {
         id: row.get("id")?,
+        number: u64::try_from(row.get::<_, i64>("number")?).unwrap_or(0),
         spec: spec(row)?,
         created: secs(row.get("created")?),
         started: row.get::<_, Option<i64>>("started")?.map(secs),
@@ -161,6 +179,15 @@ pub(super) fn todo_by_id(conn: &Connection, id: &str) -> Result<Option<Todo>> {
     conn.query_row(&format!("SELECT {TODO_COLUMNS} FROM todos WHERE id = ?1"), [id], todo).optional().map_err(failed)
 }
 
+/// 前端写的任务（标识，或者 `5`、`#5` 这样的编号）对应的标识；正好也是哪张任务的标识时按标识算。没有时为空。
+pub(super) fn resolve_todo(conn: &Connection, text: &str) -> Result<Option<String>> {
+    if todo_by_id(conn, text)?.is_some() {
+        return Ok(Some(text.to_owned()));
+    }
+    let Ok(number) = text.strip_prefix('#').unwrap_or(text).parse::<i64>() else { return Ok(None) };
+    conn.query_row("SELECT id FROM todos WHERE number = ?1", [number], |row| row.get(0)).optional().map_err(failed)
+}
+
 /// 定时开出来的、最新的一张没完成的任务。
 pub(super) fn latest_open_todo_of(conn: &Connection, schedule: &str) -> Result<Option<Todo>> {
     conn.query_row(
@@ -205,10 +232,23 @@ fn new_id(tx: &Transaction<'_>) -> Result<String> {
 pub(super) fn add_todo(conn: &mut Connection, spec: &TodoSpec, now: u64, schedule: Option<&str>) -> Result<String> {
     let tx = conn.transaction().map_err(failed)?;
     let id = new_id(&tx)?;
+    let number: i64 =
+        tx.query_row("SELECT value FROM meta WHERE key = 'next_number'", [], |row| row.get(0)).map_err(failed)?;
+    tx.execute("UPDATE meta SET value = ?1 WHERE key = 'next_number'", [number + 1]).map_err(failed)?;
     tx.execute(
-        "INSERT INTO todos (id, title, prompt, dir, agent, worktree, created, schedule, rank)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, (SELECT COALESCE(MAX(rank), 0) + 1 FROM todos))",
-        params![id, spec.title, spec.prompt, path_bytes(&spec.dir), spec.agent, spec.worktree, now as i64, schedule],
+        "INSERT INTO todos (id, number, title, prompt, dir, agent, worktree, created, schedule, rank)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, (SELECT COALESCE(MAX(rank), 0) + 1 FROM todos))",
+        params![
+            id,
+            number,
+            spec.title,
+            spec.prompt,
+            path_bytes(&spec.dir),
+            spec.agent,
+            spec.worktree,
+            now as i64,
+            schedule
+        ],
     )
     .map_err(failed)?;
     tx.commit().map_err(failed)?;
@@ -533,5 +573,49 @@ mod tests {
         std::fs::write(&path, "not a database, keep me").unwrap();
         assert!(open(&path).is_err());
         assert_eq!(std::fs::read_to_string(&path).unwrap(), "not a database, keep me");
+    }
+    #[test]
+    fn numbers_count_up_and_are_never_reused() {
+        let mut conn = open(&temp_db("numbers")).unwrap();
+        let first = add_todo(&mut conn, &spec("a"), 100, None).unwrap();
+        let second = add_todo(&mut conn, &spec("b"), 101, None).unwrap();
+        remove_todo(&conn, &second).unwrap();
+        let third = add_todo(&mut conn, &spec("c"), 102, None).unwrap();
+        let number = |id: &str| todo_by_id(&conn, id).unwrap().unwrap().number;
+        assert_eq!((number(&first), number(&third)), (1, 3));
+
+        assert_eq!(resolve_todo(&conn, &first).unwrap(), Some(first.clone()));
+        assert_eq!(resolve_todo(&conn, "3").unwrap(), Some(third));
+        assert_eq!(resolve_todo(&conn, "#1").unwrap(), Some(first));
+        assert_eq!(resolve_todo(&conn, "#2").unwrap(), None);
+        assert_eq!(resolve_todo(&conn, "nothere").unwrap(), None);
+    }
+
+    #[test]
+    fn numbers_the_todos_of_a_version_1_database_in_the_order_they_were_added() {
+        let path = temp_db("v1");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        Connection::open(&path)
+            .unwrap()
+            .execute_batch(
+                "CREATE TABLE todos (id TEXT PRIMARY KEY NOT NULL, title TEXT NOT NULL, prompt TEXT NOT NULL,
+                     dir BLOB NOT NULL, agent TEXT NOT NULL, worktree INTEGER NOT NULL, created INTEGER NOT NULL,
+                     started INTEGER, session TEXT, worktree_dir BLOB, branch TEXT, done_at INTEGER, schedule TEXT,
+                     rank INTEGER NOT NULL, swept INTEGER NOT NULL DEFAULT 0);
+                 CREATE TABLE schedules (id TEXT PRIMARY KEY NOT NULL, title TEXT NOT NULL, prompt TEXT NOT NULL,
+                     dir BLOB NOT NULL, agent TEXT NOT NULL, worktree INTEGER NOT NULL, kind TEXT NOT NULL,
+                     at INTEGER, hour INTEGER, minute INTEGER, days INTEGER, minutes INTEGER,
+                     last_fired INTEGER NOT NULL);
+                 INSERT INTO todos (id, title, prompt, dir, agent, worktree, created, rank)
+                     VALUES ('0000000b', 'b', '', x'2f', 'claude', 0, 1, 2), ('0000000a', 'a', '', x'2f', 'claude', 0, 2, 1);
+                 PRAGMA user_version = 1;",
+            )
+            .unwrap();
+        let mut conn = open(&path).unwrap();
+        let numbers: Vec<(String, u64)> =
+            list_todos(&conn, 10).unwrap().into_iter().map(|todo| (todo.id, todo.number)).collect();
+        assert_eq!(numbers, [("0000000a".into(), 2), ("0000000b".into(), 1)]);
+        let added = add_todo(&mut conn, &spec("c"), 3, None).unwrap();
+        assert_eq!(todo_by_id(&conn, &added).unwrap().unwrap().number, 3);
     }
 }

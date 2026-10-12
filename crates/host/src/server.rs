@@ -1105,6 +1105,9 @@ impl Connection {
             ClientMsg::StartTodo { req, id } => self.todos(req, "host-start-todo", move |shared| {
                 shared.start_todo(&id).map(|session| HostMsg::Opened { req, id: session })
             }),
+            ClientMsg::GetTodo { req, id } => {
+                self.todos(req, "host-get-todo", move |shared| shared.get_todo(req, &id));
+            }
             ClientMsg::MoveTodo { req, id, before } => {
                 self.todos(req, "host-move-todo", move |shared| shared.move_todo(req, &id, before.as_deref()));
             }

@@ -185,7 +185,8 @@ yourself and need the answer back now, use panes as above.
 
 ```sh
 runode todo add 'Fix the flaky login test' --prompt 'Find why ... Commit the fix.' --start
-runode todo list          # COLUMN: todo, in_progress, needs_you, done
+runode todo list          # #, COLUMN: todo, in_progress, needs_you, done
+runode todo show 5        # everything about task #5, done ones too
 runode schedule add 'Dependency report' --daily 09:00 --days mon-fri \
   --prompt 'List outdated dependencies and write the report to reports/deps.md'
 ```

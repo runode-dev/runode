@@ -135,14 +135,24 @@ fn column_name(column: Column) -> String {
     serde_json::to_value(column).ok().and_then(|value| value.as_str().map(str::to_owned)).unwrap_or_default()
 }
 
+/// 宿主里的会话，算任务在哪一列要看。
+fn sessions(connection: &Connection) -> Result<Vec<SessionInfo>> {
+    connection.send(&ClientMsg::ListSessions)?;
+    match connection.reply()? {
+        HostMsg::SessionList { sessions } => Ok(sessions),
+        other => bail!("unexpected answer: {}", kind(&other)),
+    }
+}
+
+/// 任务的编号，写成 `#5`；旧宿主没给编号时为 `-`。
+fn number_text(todo: &Todo) -> String {
+    if todo.number == 0 { "-".into() } else { format!("#{}", todo.number) }
+}
+
 /// 列出任务和各自在看板的哪一列，按看板从左到右，同一列里照宿主给的先后。
 pub(crate) fn list(env: &Env, json: bool, out: &mut dyn Write) -> Result<()> {
     let connection = open(env)?;
-    connection.send(&ClientMsg::ListSessions)?;
-    let sessions: Vec<SessionInfo> = match connection.reply()? {
-        HostMsg::SessionList { sessions } => sessions,
-        other => bail!("unexpected answer: {}", kind(&other)),
-    };
+    let sessions = sessions(&connection)?;
     let (todos, _) = board(&connection)?;
     let now = unix_now();
     let mut todos: Vec<(Todo, Column)> = todos
@@ -173,6 +183,7 @@ pub(crate) fn list(env: &Env, json: bool, out: &mut dyn Write) -> Result<()> {
     let home = env.dirs.home.as_deref();
     let rows = todos.iter().map(|(todo, column)| {
         vec![
+            number_text(todo),
             todo.id.clone(),
             column_name(*column),
             todo.spec.agent.clone(),
@@ -180,7 +191,68 @@ pub(crate) fn list(env: &Env, json: bool, out: &mut dyn Write) -> Result<()> {
             tilde(&todo.spec.dir, home),
         ]
     });
-    table(&["ID", "COLUMN", "AGENT", "TITLE", "DIR"], rows, out)
+    table(&["#", "ID", "COLUMN", "AGENT", "TITLE", "DIR"], rows, out)
+}
+
+/// 打印一张任务的全部内容：编号、标识、在哪一列、要做的事、工作树、会话、定时和各个时刻。`id` 是标识或者
+/// 编号（`5`、`#5`），完成了多久的都查得到。
+pub(crate) fn show(env: &Env, id: &str, json: bool, out: &mut dyn Write) -> Result<()> {
+    let connection = open(env)?;
+    let req = connection.req();
+    connection.send(&ClientMsg::GetTodo { req, id: id.to_owned() })?;
+    let todo = match connection.reply()? {
+        HostMsg::Todo { todo, .. } => todo,
+        other => bail!("unexpected answer: {}", kind(&other)),
+    };
+    let sessions = sessions(&connection)?;
+    let session = sessions.iter().find(|info| Some(info.id) == todo.session);
+    let column = column(&todo, session, unix_now());
+    let (_, schedules) = board(&connection)?;
+    let schedule = todo.schedule.as_ref().and_then(|id| schedules.iter().find(|schedule| &schedule.id == id));
+    if json {
+        let mut value = serde_json::to_value(&todo)?;
+        value["column"] = column_name(column).into();
+        value["session_alive"] = session.is_some_and(|info| !info.exited).into();
+        serde_json::to_writer_pretty(&mut *out, &value)?;
+        writeln!(out)?;
+        return Ok(());
+    }
+    let home = env.dirs.home.as_deref();
+    let local = |at: u64| LocalTime::from_unix(at).map_or_else(|| at.to_string(), |at| at.to_string());
+    let alive = |session: &SessionId| {
+        let state = if sessions.iter().any(|info| info.id == *session && !info.exited) { "open" } else { "gone" };
+        format!("{session} ({state})")
+    };
+    let title =
+        if todo.number == 0 { todo.spec.title.clone() } else { format!("#{}  {}", todo.number, todo.spec.title) };
+    writeln!(out, "{title}")?;
+    let fields: [(&str, Option<String>); 11] = [
+        ("id", Some(todo.id.clone())),
+        ("column", Some(column_name(column))),
+        ("agent", Some(todo.spec.agent.clone())),
+        ("dir", Some(tilde(&todo.spec.dir, home))),
+        ("worktree", todo.worktree_dir.as_deref().map(|dir| tilde(dir, home))),
+        ("branch", todo.branch.clone()),
+        ("session", todo.session.as_ref().map(alive)),
+        // 定时删掉了时只剩它的标识。
+        (
+            "schedule",
+            todo.schedule.clone().map(|id| schedule.map_or(id.clone(), |s| format!("{} ({id})", s.spec.title))),
+        ),
+        ("created", Some(local(todo.created))),
+        ("started", todo.started.map(local)),
+        ("done", todo.done_at.map(local)),
+    ];
+    for (label, value) in fields {
+        if let Some(value) = value {
+            writeln!(out, "{label:<9} {value}")?;
+        }
+    }
+    writeln!(out, "prompt")?;
+    for line in todo.spec.prompt().lines() {
+        writeln!(out, "  {line}")?;
+    }
+    Ok(())
 }
 
 /// 加一个定时，打印它的标识。工作树要用户要了才开，目录不在 git 仓库里时报错。

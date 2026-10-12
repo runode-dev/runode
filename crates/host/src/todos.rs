@@ -182,6 +182,7 @@ impl Shared {
         done: Option<bool>,
     ) -> Result<HostMsg, String> {
         self.todos_writable()?;
+        let id = &self.resolve_todo(id)?;
         if let Some(spec) = spec {
             check_spec(spec)?;
             let old = self.todos.with_db(|conn| store::todo_by_id(conn, id))?.ok_or_else(|| no_todo(id))?;
@@ -200,6 +201,7 @@ impl Shared {
     /// 回 `ClientMsg::RemoveTodo`：它的会话已经不在时，顺带清掉工作树和分支，见 `clean_worktree`。
     pub(crate) fn remove_todo(&self, req: u32, id: &str) -> Result<HostMsg, String> {
         self.todos_writable()?;
+        let id = &self.resolve_todo(id)?;
         let todo = self.todos.with_db(|conn| store::remove_todo(conn, id))?.ok_or_else(|| no_todo(id))?;
         self.todos_changed();
         if !self.in_use(&todo) {
@@ -234,10 +236,24 @@ impl Shared {
         }
     }
 
+    /// 回 `ClientMsg::GetTodo`。
+    pub(crate) fn get_todo(&self, req: u32, id: &str) -> Result<HostMsg, String> {
+        let id = self.resolve_todo(id)?;
+        let todo = self.todos.with_db(|conn| store::todo_by_id(conn, &id))?.ok_or_else(|| no_todo(&id))?;
+        Ok(HostMsg::Todo { req, todo })
+    }
+
+    /// 前端写的任务（标识，或者 `5`、`#5` 这样的编号，见 `ClientMsg::GetTodo`）的标识。
+    fn resolve_todo(&self, text: &str) -> Result<String, String> {
+        self.todos.with_db(|conn| store::resolve_todo(conn, text))?.ok_or_else(|| no_todo(text))
+    }
+
     /// 回 `ClientMsg::MoveTodo`。
     pub(crate) fn move_todo(&self, req: u32, id: &str, before: Option<&str>) -> Result<HostMsg, String> {
         self.todos_writable()?;
-        self.todos.with_db(|conn| store::move_todo(conn, id, before))?;
+        let id = &self.resolve_todo(id)?;
+        let before = before.map(|before| self.resolve_todo(before)).transpose()?;
+        self.todos.with_db(|conn| store::move_todo(conn, id, before.as_deref()))?;
         self.todos_changed();
         Ok(HostMsg::Done { req })
     }
@@ -285,6 +301,7 @@ impl Shared {
     /// 开始任务 `id`，返回它的会话：会话还在时就是那个，否则在它的目录（或给它开的工作树）里新开一个。
     pub(crate) fn start_todo(&self, id: &str) -> Result<SessionId, String> {
         self.todos_writable()?;
+        let id = &self.resolve_todo(id)?;
         let todo = self.todos.with_db(|conn| store::todo_by_id(conn, id))?.ok_or_else(|| no_todo(id))?;
         if todo.done_at.is_some() {
             return Err(format!("todo {id} is done"));

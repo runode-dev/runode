@@ -202,7 +202,12 @@ fn edits_are_announced_and_checked() {
     let b = add(&mut peer, spec("b", &dir, "claude"));
     assert_eq!(watcher.reply(), HostMsg::TodosChanged);
 
-    let move_b = ClientMsg::MoveTodo { req: 5, id: b.clone(), before: Some(a.clone()) };
+    // 要标识的地方也认编号：b 是第 2 张，a 是第 1 张。
+    match ask(&mut peer, &ClientMsg::GetTodo { req: 4, id: "#2".into() }) {
+        HostMsg::Todo { req: 4, todo } => assert_eq!((todo.id.as_str(), todo.number), (b.as_str(), 2)),
+        other => panic!("expected todo #2, got {other:?}"),
+    }
+    let move_b = ClientMsg::MoveTodo { req: 5, id: "#2".into(), before: Some("1".into()) };
     assert_eq!(ask(&mut peer, &move_b), HostMsg::Done { req: 5 });
     assert_eq!(watcher.reply(), HostMsg::TodosChanged);
     assert_eq!(list(&mut peer).iter().map(|todo| todo.id.clone()).collect::<Vec<_>>(), [b.clone(), a.clone()]);
@@ -212,13 +217,14 @@ fn edits_are_announced_and_checked() {
     let todos = list(&mut peer);
     assert_eq!(column(&todos[1], None, todos[1].done_at.unwrap()), Column::Done);
 
-    // 不对的请求：没有这个任务、标题空着、目录不存在、不在仓库里却要工作树、时间已经过了。
+    // 不对的请求：没有这个任务（标识、编号）、标题空着、目录不存在、不在仓库里却要工作树、时间已经过了。
     for (req, message) in [
         (7, ClientMsg::RemoveTodo { req: 7, id: "nothere".into() }),
         (8, ClientMsg::AddTodo { req: 8, spec: spec(" ", &dir, "claude") }),
         (9, ClientMsg::AddTodo { req: 9, spec: spec("t", &dir.join("missing"), "claude") }),
         (10, ClientMsg::AddTodo { req: 10, spec: TodoSpec { worktree: true, ..spec("t", &dir, "claude") } }),
         (11, ClientMsg::AddSchedule { req: 11, spec: spec("t", &dir, "claude"), when: When::Once { at: 1 } }),
+        (13, ClientMsg::GetTodo { req: 13, id: "#99".into() }),
     ] {
         assert!(matches!(ask(&mut peer, &message), HostMsg::Error { req: Some(r), .. } if r == req), "{message:?}");
     }

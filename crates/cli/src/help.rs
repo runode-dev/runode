@@ -224,6 +224,7 @@ it does not touch your checkout.
 Usage: runode todo add TITLE... [--prompt TEXT] [--cwd DIR] [--agent CMD]
                        [--no-worktree] [--start]
        runode todo list [--json]
+       runode todo show ID [--json]
        runode todo start ID
        runode todo done ID
        runode todo rm ID
@@ -234,6 +235,8 @@ Commands:
   list   List the tasks and their column on the board: todo (not started),
          in_progress (the agent is working), needs_you (the agent is asking,
          has stopped, or its terminal is gone) or done
+  show   Print everything about one task: its column, prompt, worktree and
+         branch, session, schedule and times; done tasks of any age too
   start  Start a task and print the id of its session; a task whose session
          is still there is not started again. Making the worktree can take a
          while in a big repository
@@ -245,7 +248,8 @@ Commands:
 Arguments:
   TITLE...  With `add`: the title, words joined by spaces; also the prompt
             unless --prompt is given
-  ID        A task id, as `runode todo list` shows
+  ID        A task, as `runode todo list` shows: its number (5 or #5) or
+            its id
 
 Options:
       --prompt TEXT  With `add`: the prompt for the agent
@@ -256,10 +260,11 @@ Options:
       --no-worktree  With `add`: work in DIR itself, not in a new worktree.
                      Implied when DIR is not in a git repository
       --start        With `add`: start the task right away
-      --json         With `list`: print JSON instead of a table
+      --json         With `list` and `show`: print JSON instead of text
   -h, --help         Show this help
 
-Done tasks are listed for seven days.
+Done tasks are listed for seven days; `show` finds them later too. Numbers
+count up as tasks are added and are never given to another task.
 ";
 
 const SCHEDULE: &str = "\

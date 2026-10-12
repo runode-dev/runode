@@ -89,6 +89,22 @@ fn project_tasks() -> Vec<TaskSource> {
 }
 
 /// 经过帧编码、解码再读回来。
+fn sample_todo() -> Todo {
+    Todo {
+        id: "0000abcd".into(),
+        number: 5,
+        spec: todo_spec(),
+        created: 1_760_000_000,
+        started: Some(1_760_000_100),
+        session: Some(ID),
+        worktree_dir: Some("/Users/me/中文/.worktrees/fix".into()),
+        branch: Some("runode/fix".into()),
+        done_at: None,
+        schedule: Some("0000cafe".into()),
+        rank: 3,
+    }
+}
+
 fn todo_spec() -> TodoSpec {
     TodoSpec {
         title: "修好登录页".into(),
@@ -224,6 +240,7 @@ fn client_messages_round_trip() {
         ClientMsg::UpdateTodo { req: 22, id: "0000abcd".into(), spec: None, done: Some(true) },
         ClientMsg::RemoveTodo { req: 23, id: "0000abcd".into() },
         ClientMsg::StartTodo { req: 24, id: "0000abcd".into() },
+        ClientMsg::GetTodo { req: 28, id: "#5".into() },
         ClientMsg::MoveTodo { req: 25, id: "0000abcd".into(), before: Some("0000beef".into()) },
         ClientMsg::MoveTodo { req: 26, id: "0000abcd".into(), before: None },
         ClientMsg::AddSchedule { req: 27, spec: todo_spec(), when: When::Daily { hour: 9, minute: 30, days: 62 } },
@@ -360,18 +377,7 @@ fn host_messages_round_trip() {
         HostMsg::SizeOwner { id: ID, mine: false, owner: None },
         HostMsg::Todos {
             req: 19,
-            todos: vec![Todo {
-                id: "0000abcd".into(),
-                spec: todo_spec(),
-                created: 1_760_000_000,
-                started: Some(1_760_000_100),
-                session: Some(ID),
-                worktree_dir: Some("/Users/me/中文/.worktrees/fix".into()),
-                branch: Some("runode/fix".into()),
-                done_at: None,
-                schedule: Some("0000cafe".into()),
-                rank: 3,
-            }],
+            todos: vec![sample_todo()],
             schedules: vec![Schedule {
                 id: "0000cafe".into(),
                 spec: todo_spec(),
@@ -380,6 +386,7 @@ fn host_messages_round_trip() {
                 next_fire: Some(1_760_003_600),
             }],
         },
+        HostMsg::Todo { req: 28, todo: sample_todo() },
         HostMsg::TodoAdded { req: 20, id: "0000abcd".into() },
         HostMsg::TodosChanged,
     ];

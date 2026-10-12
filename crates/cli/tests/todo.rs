@@ -26,9 +26,11 @@ fn spec(title: &str, dir: &str) -> TodoSpec {
     TodoSpec { title: title.into(), prompt: String::new(), dir: dir.into(), agent: "claude".into(), worktree: false }
 }
 
+/// 编号取标识的末位，`00000003` 是 #3。
 fn todo(id: &str, title: &str) -> Todo {
     Todo {
         id: id.into(),
+        number: id[7..].parse().unwrap(),
         spec: spec(title, "/tmp/project"),
         created: 1,
         started: None,
@@ -57,6 +59,12 @@ fn host(name: &str, todos: Vec<Todo>, schedules: Vec<Schedule>) -> FakeHost {
         ClientMsg::AddTodo { req, .. } => vec![HostMsg::TodoAdded { req: *req, id: "0000abcd".into() }],
         ClientMsg::AddSchedule { req, .. } => vec![HostMsg::TodoAdded { req: *req, id: "0000beef".into() }],
         ClientMsg::StartTodo { req, .. } => vec![HostMsg::Opened { req: *req, id: SessionId(S) }],
+        ClientMsg::GetTodo { req, id } => {
+            match todos.iter().find(|todo| todo.id == *id || format!("#{}", todo.number) == *id) {
+                Some(todo) => vec![HostMsg::Todo { req: *req, todo: todo.clone() }],
+                None => vec![HostMsg::Error { req: Some(*req), id: None, message: format!("no todo {id}") }],
+            }
+        }
         ClientMsg::UpdateTodo { req, .. }
         | ClientMsg::RemoveTodo { req, .. }
         | ClientMsg::RemoveSchedule { req, .. } => {
@@ -145,11 +153,11 @@ fn list_shows_each_task_in_its_column() {
     assert_eq!(
         rows,
         [
-            vec!["ID", "COLUMN", "AGENT", "TITLE", "DIR"],
-            vec!["00000001", "todo", "claude", "还没开始", "/tmp/project"],
-            vec!["00000002", "in_progress", "claude", "working one", "/tmp/project"],
-            vec!["00000004", "needs_you", "codex --full-auto", "gone", "/elsewhere"],
-            vec!["00000003", "done", "claude", "finished", "/tmp/project"],
+            vec!["#", "ID", "COLUMN", "AGENT", "TITLE", "DIR"],
+            vec!["#1", "00000001", "todo", "claude", "还没开始", "/tmp/project"],
+            vec!["#2", "00000002", "in_progress", "claude", "working one", "/tmp/project"],
+            vec!["#4", "00000004", "needs_you", "codex --full-auto", "gone", "/elsewhere"],
+            vec!["#3", "00000003", "done", "claude", "finished", "/tmp/project"],
         ],
         "{out}"
     );
@@ -178,6 +186,56 @@ fn list_shows_each_task_in_its_column() {
 /// 表格一行里最后一格。
 fn last_cell(line: &str) -> &str {
     line.rsplit("  ").next().unwrap().trim_start()
+}
+
+#[test]
+fn show_prints_everything_about_one_task() {
+    let mut gone = Todo {
+        started: Some(now() - 100),
+        session: Some(SessionId(S + 1)),
+        worktree_dir: Some("/tmp/project/.worktrees/gone".into()),
+        branch: Some("runode/gone".into()),
+        schedule: Some("0000cafe".into()),
+        ..todo("00000004", "gone")
+    };
+    gone.spec.prompt = "first line\nsecond line".into();
+    let nightly = Schedule {
+        id: "0000cafe".into(),
+        spec: spec("nightly", "/tmp/project"),
+        when: When::Every { minutes: 60 },
+        last_fired: 0,
+        next_fire: None,
+    };
+    let fake = host("todoshow", vec![gone], vec![nightly]);
+    let (code, out, err) = run("todo show #4", &fake.env);
+    assert_eq!(code, exit::OK, "{err}");
+    let lines: Vec<&str> = out.lines().collect();
+    assert_eq!(lines[0], "#4  gone");
+    for wanted in [
+        "id        00000004",
+        "column    needs_you",
+        "worktree  /tmp/project/.worktrees/gone",
+        "branch    runode/gone",
+        "schedule  nightly (0000cafe)",
+        "prompt",
+        "  first line",
+        "  second line",
+    ] {
+        assert!(lines.contains(&wanted), "{wanted:?} missing from\n{out}");
+    }
+    assert!(lines.iter().any(|line| line.starts_with("session") && line.ends_with("(gone)")), "{out}");
+    assert!(!lines.iter().any(|line| line.starts_with("done")), "{out}");
+    assert!(matches!(requests(&fake).first(), Some(ClientMsg::GetTodo { id, .. }) if id == "#4"));
+
+    let (code, out, _) = run("todo show 00000004 --json", &fake.env);
+    assert_eq!(code, exit::OK);
+    let shown: serde_json::Value = serde_json::from_str(&out).unwrap();
+    assert_eq!((shown["number"].as_u64(), shown["column"].as_str()), (Some(4), Some("needs_you")));
+    assert_eq!(shown["session_alive"], false);
+
+    let (code, _, err) = run("todo show #9", &fake.env);
+    assert_ne!(code, exit::OK);
+    assert!(err.contains("no todo #9"), "{err}");
 }
 
 #[test]

@@ -89,6 +89,11 @@ pub(crate) enum Command {
     TodoList {
         json: bool,
     },
+    /// 打印一张任务的全部内容；`id` 是标识或编号（`5`、`#5`）。
+    TodoShow {
+        id: String,
+        json: bool,
+    },
     TodoDone {
         id: String,
     },
@@ -391,7 +396,7 @@ pub(crate) fn parse(args: &[String]) -> Result<Command, String> {
             }
         }
         "todo" => {
-            let (what, words) = words.split_first().ok_or("todo needs add, list, start, done or rm")?;
+            let (what, words) = words.split_first().ok_or("todo needs add, list, show, start, done or rm")?;
             match what.as_str() {
                 "add" => {
                     if words.is_empty() {
@@ -410,6 +415,11 @@ pub(crate) fn parse(args: &[String]) -> Result<Command, String> {
                     no_more(words, 0, "todo list")?;
                     Command::TodoList { json: std::mem::take(&mut flags.json) }
                 }
+                "show" => {
+                    no_more(words, 1, "todo show")?;
+                    let id = words.first().ok_or("todo show needs an ID")?.clone();
+                    Command::TodoShow { id, json: std::mem::take(&mut flags.json) }
+                }
                 "done" | "start" | "rm" => {
                     let name = format!("todo {what}");
                     no_more(words, 1, &name)?;
@@ -420,7 +430,7 @@ pub(crate) fn parse(args: &[String]) -> Result<Command, String> {
                         _ => Command::TodoRemove { id },
                     }
                 }
-                other => return Err(format!("todo knows add, list, start, done and rm, not {other}")),
+                other => return Err(format!("todo knows add, list, show, start, done and rm, not {other}")),
             }
         }
         "schedule" => {
@@ -833,11 +843,14 @@ mod tests {
             })
         );
         assert_eq!(parse("todo list --json"), Ok(Command::TodoList { json: true }));
+        assert_eq!(parse("todo show 5"), Ok(Command::TodoShow { id: "5".into(), json: false }));
+        assert_eq!(parse("todo show #5 --json"), Ok(Command::TodoShow { id: "#5".into(), json: true }));
+        assert!(parse("todo show").unwrap_err().contains("ID"));
         assert_eq!(parse("todo done 0a1b2c3d"), Ok(Command::TodoDone { id: "0a1b2c3d".into() }));
         assert_eq!(parse("todo start 0a1b2c3d"), Ok(Command::TodoStart { id: "0a1b2c3d".into() }));
         assert_eq!(parse("todo rm 0a1b2c3d"), Ok(Command::TodoRemove { id: "0a1b2c3d".into() }));
         assert!(parse("todo start").unwrap_err().contains("ID"));
-        assert!(parse("todo").unwrap_err().contains("add, list, start, done or rm"));
+        assert!(parse("todo").unwrap_err().contains("add, list, show, start, done or rm"));
         assert!(parse("todo add").unwrap_err().contains("TITLE"));
         assert!(parse("todo done").unwrap_err().contains("ID"));
         assert!(parse("todo list --start").unwrap_err().contains("does not take --start"));

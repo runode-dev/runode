@@ -204,9 +204,27 @@ fn devices(output: &str) -> GeneratorResults {
         .collect_ordered_results()
 }
 
-/// `runode todo list --json` 的输出换成任务候选：标识，说明是标题；`all` 为假时只给还没完成的。
+/// `runode todo list --json` 的输出换成任务候选：编号（旧宿主没给编号时是标识），说明是标题；`all` 为假时
+/// 只给还没完成的。
 fn todos(output: &str, all: bool) -> GeneratorResults {
-    titled(output, |todo| all || todo["done_at"].is_null(), |todo| todo["spec"]["title"].as_str())
+    let items: serde_json::Value = serde_json::from_str(output).unwrap_or_default();
+    items
+        .as_array()
+        .map(Vec::as_slice)
+        .unwrap_or_default()
+        .iter()
+        .filter(|todo| all || todo["done_at"].is_null())
+        .filter_map(|todo| {
+            let key = match todo["number"].as_u64() {
+                Some(number) if number > 0 => number.to_string(),
+                _ => todo["id"].as_str()?.to_owned(),
+            };
+            Some(match todo["spec"]["title"].as_str() {
+                Some(title) => Suggestion::with_description(key, title),
+                None => Suggestion::new(key),
+            })
+        })
+        .collect_ordered_results()
 }
 
 /// `runode schedule list --json` 的输出换成定时候选：标识，说明是标题。
@@ -324,11 +342,12 @@ mod tests {
     }
 
     #[test]
-    fn todos_and_schedules_are_listed_by_id_with_their_titles() {
-        let output = r#"[{"id":"0000000a","spec":{"title":"fix login"},"done_at":null},
+    fn todos_by_number_and_schedules_by_id_with_their_titles() {
+        let output = r#"[{"id":"0000000a","number":7,"spec":{"title":"fix login"},"done_at":null},
             {"id":"0000000b","spec":{"title":"old"},"done_at":5}]"#;
-        let fix = ("0000000a".to_owned(), Some("fix login".to_owned()));
+        let fix = ("7".to_owned(), Some("fix login".to_owned()));
         assert_eq!(values(todos(output, false)), std::slice::from_ref(&fix));
+        // 旧宿主没给编号的用标识。
         assert_eq!(values(todos(output, true)), [fix, ("0000000b".into(), Some("old".into()))]);
         let output = r#"[{"id":"0000000c","spec":{"title":"report"},"when":{"kind":"every","minutes":5}}]"#;
         assert_eq!(values(schedules(output)), [("0000000c".into(), Some("report".into()))]);

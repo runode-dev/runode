@@ -31,10 +31,20 @@ runode todo add 'Update the CLI docs' --agent 'codex --full-auto' --prompt '...'
 
 ## Follow the tasks
 
+Every task has a number, shown as `#5` on the board and in `runode todo list`;
+numbers count up and are never reused. Wherever a command takes a task ID,
+the number works too (`5`; quote `'#5'`, since `#` starts a comment in some
+shells). The user will often name a task by its number.
+
 `runode todo list` shows each task's column: `todo` (not started),
 `in_progress` (the agent is working), `needs_you` (the agent asks a question,
 has stopped, or its terminal is gone) and `done`. `--json` adds the details:
-the session, the worktree and the branch.
+the session, the worktree and the branch. Done tasks are listed for seven
+days.
+
+`runode todo show ID` prints everything about one task, however long ago it
+was done: its column, prompt, worktree and branch, session (and whether it
+is still open), schedule and times. `--json` gives the same as JSON.
 
 A task's terminal is not in any window until the user opens it from the
 board, but the session commands work on its session id:
