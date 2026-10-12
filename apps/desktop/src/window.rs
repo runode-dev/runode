@@ -343,6 +343,7 @@ pub struct WindowView {
     /// 所有 workspace 都关掉了，窗口因此关闭；这样的窗口不留存档。
     emptied: bool,
     _bounds_watch: Subscription,
+    _display_watch: Subscription,
     /// 窗口切到前台时重读右侧面板的内容。
     _activation_watch: Subscription,
     /// 窗口看不看得见（被盖住、最小化、在别的 Space 上、显示器睡了）变了时重新告诉终端显示着没有，
@@ -384,11 +385,15 @@ impl Slots {
 
 impl WindowView {
     fn empty(window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let bounds_watch = cx.observe_window_bounds(window, |this, window, cx| {
+        let remember_bounds = |this: &mut Self, window: &mut Window, cx: &mut Context<Self>| {
             this.bounds = window.window_bounds();
             this.display = Self::display_uuid(window, cx);
             this.save(cx);
-        });
+        };
+        let bounds_watch = cx.observe_window_bounds(window, remember_bounds);
+        // 窗口移到别的屏幕上时，macOS 先报移动、后报换屏，GPUI 到换屏时才改窗口所在的屏幕：
+        // 移动时读到的还是原来那块，换屏后要再记一次。
+        let display_watch = cx.observe_window_display(window, remember_bounds);
         let activation_watch = cx.observe_window_activation(window, |this, window, cx| {
             if window.is_window_active() {
                 this.refresh_project(cx);
@@ -487,6 +492,7 @@ impl WindowView {
             spawned: HashMap::new(),
             emptied: false,
             _bounds_watch: bounds_watch,
+            _display_watch: display_watch,
             _activation_watch: activation_watch,
             _visibility_watch: visibility_watch,
             _config_watch: config_watch,
