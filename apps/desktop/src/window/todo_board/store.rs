@@ -49,7 +49,7 @@ pub(in crate::window) fn todo_sessions(cx: &App) -> HashSet<SessionId> {
     data(cx).todos.iter().filter_map(|todo| todo.session).collect()
 }
 
-/// 在后台跟着任务板：现在问一次，宿主说变了就重问；有窗口开着看板时轮询任务会话的状态。
+/// 在后台跟着任务板：现在问一次，宿主说变了就重问。任务会话的状态在看板开着时才轮询，见 `poll_sessions`。
 pub fn watch(cx: &mut App) {
     refresh_todos(cx).detach();
     if let Some(mut changed) = host_client::todos_changed() {
@@ -63,13 +63,33 @@ pub fn watch(cx: &mut App) {
         })
         .detach();
     }
+}
+
+/// 正在轮询任务会话的状态，见 `poll_sessions`。
+#[derive(Default)]
+struct Polling(bool);
+
+impl Global for Polling {}
+
+/// 看板打开时调：现问一次任务会话的状态，之后每 `SESSIONS_POLL` 问一次，没有窗口开着看板时停下，空闲时
+/// 不再定时唤醒主线程。
+pub(in crate::window) fn poll_sessions(cx: &mut App) {
+    refresh_sessions(cx).detach();
+    if std::mem::replace(&mut cx.default_global::<Polling>().0, true) {
+        return;
+    }
     cx.spawn(async move |cx| {
         loop {
-            let poll = cx.update(|cx| board_open(cx).then(|| refresh_sessions(cx)));
-            if let Some(poll) = poll {
-                poll.await;
-            }
             cx.background_executor().timer(SESSIONS_POLL).await;
+            let poll = cx.update(|cx| {
+                let open = board_open(cx);
+                if !open {
+                    cx.default_global::<Polling>().0 = false;
+                }
+                open.then(|| refresh_sessions(cx))
+            });
+            let Some(poll) = poll else { return };
+            poll.await;
         }
     })
     .detach();
@@ -117,7 +137,7 @@ pub(in crate::window) fn refresh_todos(cx: &mut App) -> Task<()> {
 }
 
 /// 现问一次任务会话的状态，变了就重画各窗口。
-pub(in crate::window) fn refresh_sessions(cx: &mut App) -> Task<()> {
+fn refresh_sessions(cx: &mut App) -> Task<()> {
     let wanted = todo_sessions(cx);
     cx.spawn(async move |cx| {
         if wanted.is_empty() {

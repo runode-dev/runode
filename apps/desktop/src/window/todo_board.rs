@@ -211,7 +211,7 @@ impl WindowView {
         }
     }
 
-    /// 打开任务板，焦点给它；马上重问一次任务会话的状态，不等下一轮。
+    /// 打开任务板，焦点给它；马上重问一次任务会话的状态，开着时接着轮询。
     pub(super) fn show_todo_board(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.mobile = None;
         self.drop_settings(cx);
@@ -229,7 +229,7 @@ impl WindowView {
             serial: 0,
         });
         window.focus(&board.focus, cx);
-        store::refresh_sessions(cx).detach();
+        store::poll_sessions(cx);
         cx.notify();
     }
 
