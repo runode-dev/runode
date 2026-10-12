@@ -15,18 +15,20 @@ the running runode app; inside a runode terminal they find it through
 RUNODE_SOCKET, and RUNODE_SESSION names the terminal they run in.
 
 Commands:
-  list     List the terminal sessions
-  read     Print the text on a session's screen
-  send     Type text and keys into a session
-  wait     Wait for an agent, a command or some text on the screen
-  open     Open a terminal in the app
-  kill     End a session and close its pane
-  focus    Show a session's pane and bring its window to the front
-  setup    Teach an agent to use runode
-  remote   Pair phones for remote access and manage them
-  service  Start runode at login
-  help     Show this help, or the help of a command
-  version  Show the version
+  list      List the terminal sessions
+  read      Print the text on a session's screen
+  send      Type text and keys into a session
+  wait      Wait for an agent, a command or some text on the screen
+  open      Open a terminal in the app
+  kill      End a session and close its pane
+  focus     Show a session's pane and bring its window to the front
+  todo      Put tasks for agents on the task board and start them
+  schedule  Start a task for an agent at set times
+  setup     Teach an agent to use runode
+  remote    Pair phones for remote access and manage them
+  service   Start runode at login
+  help      Show this help, or the help of a command
+  version   Show the version
 
 Options:
   -h, --help     Show this help; after a command, the help of that command
@@ -48,6 +50,8 @@ pub(crate) const PAGES: &[(&str, &str)] = &[
     ("open", OPEN),
     ("kill", KILL),
     ("focus", FOCUS),
+    ("todo", TODO),
+    ("schedule", SCHEDULE),
     ("setup", SETUP),
     ("remote", REMOTE),
     ("service", SERVICE),
@@ -211,6 +215,93 @@ Options:
   -h, --help  Show this help
 ";
 
+const TODO: &str = "\
+Put tasks for agents on runode's task board. Starting a task opens a terminal
+of its own (not in any window until you open it from the board) and runs the
+agent there with the prompt; by default in a new git worktree and branch, so
+it does not touch your checkout.
+
+Usage: runode todo add TITLE... [--prompt TEXT] [--cwd DIR] [--agent CMD]
+                       [--no-worktree] [--start]
+       runode todo list [--json]
+       runode todo start ID
+       runode todo done ID
+       runode todo rm ID
+
+Commands:
+  add    Add a task and print its id; with --start, also start it and print
+         the id of the session its agent runs in
+  list   List the tasks and their column on the board: todo (not started),
+         in_progress (the agent is working), needs_you (the agent is asking,
+         has stopped, or its terminal is gone) or done
+  start  Start a task and print the id of its session; a task whose session
+         is still there is not started again. Making the worktree can take a
+         while in a big repository
+  done   Mark a task done. Once its terminal is gone, its worktree and
+         branch are removed, unless the worktree has uncommitted changes or
+         the branch has unmerged commits
+  rm     Remove a task; its terminal stays open
+
+Arguments:
+  TITLE...  With `add`: the title, words joined by spaces; also the prompt
+            unless --prompt is given
+  ID        A task id, as `runode todo list` shows
+
+Options:
+      --prompt TEXT  With `add`: the prompt for the agent
+      --cwd DIR      With `add`: the directory to work in; defaults to the
+                     current one
+      --agent CMD    With `add`: the command the prompt is given to, such as
+                     `codex --full-auto` (default claude)
+      --no-worktree  With `add`: work in DIR itself, not in a new worktree.
+                     Implied when DIR is not in a git repository
+      --start        With `add`: start the task right away
+      --json         With `list`: print JSON instead of a table
+  -h, --help         Show this help
+
+Done tasks are listed for seven days.
+";
+
+const SCHEDULE: &str = "\
+Start a task for an agent at set times: when a schedule is due, runode adds a
+task to the task board (see `runode help todo`) and starts it. Times are this
+computer's local time. A schedule missed while the computer slept or runode was
+not running fires once when it is back; one whose last task is still working
+is skipped.
+
+Usage: runode schedule add TITLE... (--at TIME | --daily HH:MM [--days DAYS] |
+                           --every MINUTES) [--prompt TEXT] [--cwd DIR]
+                           [--agent CMD] [--worktree]
+       runode schedule list [--json]
+       runode schedule rm ID
+
+Commands:
+  add   Add a schedule and print its id
+  list  List the schedules with when they fire and the next time they will
+  rm    Remove a schedule; the tasks it started stay
+
+Arguments:
+  TITLE...  With `add`: the title of the tasks it starts, words joined by
+            spaces; also the prompt unless --prompt is given
+  ID        A schedule id, as `runode schedule list` shows
+
+Options:
+      --at TIME        With `add`: once, at TIME written \"YYYY-MM-DD HH:MM\"
+      --daily HH:MM    With `add`: every day at HH:MM (24-hour clock)
+      --days DAYS      With --daily: only on these days, like mon,wed,fri or
+                       mon-fri
+      --every MINUTES  With `add`: every MINUTES minutes
+      --prompt TEXT    With `add`: the prompt for the agent
+      --cwd DIR        With `add`: the directory to work in; defaults to the
+                       current one
+      --agent CMD      With `add`: the command the prompt is given to
+                       (default claude)
+      --worktree       With `add`: give each task a new git worktree and
+                       branch; DIR must be in a git repository
+      --json           With `list`: print JSON instead of a table
+  -h, --help           Show this help
+";
+
 const SETUP: &str = "\
 Teach an agent to use runode: installs runode's skills in ~/.claude/skills
 (claude) or ~/.agents/skills (codex).
@@ -270,7 +361,8 @@ Commands:
 Arguments:
   host  The terminal host without a window (`runode --host`), the default.
         It keeps running in the background while remote-access = true and a
-        phone is paired, so the phone can connect without the app open;
+        phone is paired, so the phone can connect without the app open,
+        and while the task board has schedules, so they start on time;
         otherwise it exits when idle
   app   The Runode app, opened at the next login (macOS only)
 

@@ -1,6 +1,6 @@
 ---
 name: runode
-description: Operate the other terminals of the runode app from inside one of them (RUNODE_SESSION is set) - open panes and tabs, type commands or keys into them, wait for them to finish and read their output. Use it whenever the task involves another terminal - tests, a build or a dev server beside yours, what a neighbouring pane printed - even if the user only says "the pane on the right", "the other terminal" or "run it on the side" and never names runode. Use it also whenever the user names agent CLIs to bring in (claude, codex, pi, gemini, opencode...), in any language - "use claude and pi to review this", "let codex fix it", a cross-review, a red team / blue team review, a second opinion. Run each named agent in a pane of its own and talk to it through runode instead of imitating it with your own subagents, even if it is the same agent as you.
+description: Operate the other terminals of the runode app from inside one of them (RUNODE_SESSION is set) - open panes and tabs, type commands or keys into them, wait for them to finish and read their output. Use it whenever the task involves another terminal - tests, a build or a dev server beside yours, what a neighbouring pane printed - even if the user only says "the pane on the right", "the other terminal" or "run it on the side" and never names runode. Use it also whenever the user names agent CLIs to bring in (claude, codex, pi, gemini, opencode...), in any language - "use claude and pi to review this", "let codex fix it", a cross-review, a red team / blue team review, a second opinion. Run each named agent in a pane of its own and talk to it through runode instead of imitating it with your own subagents, even if it is the same agent as you. Use it also to put work for agents on runode's task board (runode todo, runode schedule) - "split this into tasks and hand them out", "have an agent do this every morning".
 ---
 
 # Driving other runode terminals
@@ -173,6 +173,25 @@ it, or say why it is not a problem. Write your answers to /tmp/blue.md." \
   pasting large content.
 - Leave the agents' panes open when you are done: the user may want to read
   them or keep talking to them.
+
+## Hand work out on the task board
+
+runode has a task board: each task is a prompt for an agent that runs in a
+terminal of its own, by default in a new git worktree and branch so it does
+not touch the user's checkout, and the user follows the tasks on the board.
+Use it when the user asks you to split work into tasks or hand it out, or to
+have an agent do something later or on a schedule. For work you coordinate
+yourself and need the answer back now, use panes as above.
+
+```sh
+runode todo add 'Fix the flaky login test' --prompt 'Find why ... Commit the fix.' --start
+runode todo list          # COLUMN: todo, in_progress, needs_you, done
+runode schedule add 'Dependency report' --daily 09:00 --days mon-fri \
+  --prompt 'List outdated dependencies and write the report to reports/deps.md'
+```
+
+How to split the work and write the prompts, follow the tasks, and set up
+schedules: [references/task-board.md](references/task-board.md).
 
 ## Be careful
 

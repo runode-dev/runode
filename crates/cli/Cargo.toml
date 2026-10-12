@@ -21,6 +21,8 @@ anyhow.workspace = true
 regex.workspace = true
 # `list --json` 的输出。
 serde_json.workspace = true
+# `schedule` 按本机的本地时间换算定时的钟点（`mktime`、`localtime_r`）。
+libc.workspace = true
 # `remote pair` 在终端里画配对的二维码。
 qrcode.workspace = true
 

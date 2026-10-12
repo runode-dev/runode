@@ -38,8 +38,8 @@ pub struct FakeHost {
 }
 
 impl FakeHost {
-    /// 起一个假宿主。`script` 对每条控制消息（`Hello` 除外）给出要回的消息；连上来的每条连接
-    /// 都由它回话，同一个测试里能跑好几条命令。
+    /// 起一个假宿主。`script` 对每条控制消息给出要回的消息；对 `Hello` 什么都不回时由假宿主回
+    /// `welcome(false)`。连上来的每条连接都由它回话，同一个测试里能跑好几条命令。
     pub fn start(name: &str, script: impl FnMut(&ClientMsg) -> Vec<HostMsg> + Send + 'static) -> Self {
         let dir = std::env::temp_dir().join(format!("rnc-{}-{name}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
@@ -72,7 +72,7 @@ impl FakeHost {
     }
 }
 
-/// 一条连接从头到尾：自动回 `Hello`，别的控制消息交给 `script`。
+/// 一条连接从头到尾：控制消息交给 `script`，它不回 `Hello` 时替它回。
 fn serve(mut stream: UnixStream, tx: &mpsc::Sender<Received>, script: &Mutex<impl FnMut(&ClientMsg) -> Vec<HostMsg>>) {
     let mut writer = stream.try_clone().unwrap();
     let mut reply = |message: &HostMsg| {
@@ -85,23 +85,28 @@ fn serve(mut stream: UnixStream, tx: &mpsc::Sender<Received>, script: &Mutex<imp
             continue;
         }
         let message: ClientMsg = frame.message().unwrap();
-        let replies = match &message {
-            ClientMsg::Hello { .. } => vec![HostMsg::Welcome {
-                protocol: PROTOCOL_VERSION,
-                build: BuildId("test".into()),
-                host_pid: 1,
-                snapshot_format: 1,
-                standalone: false,
-                handoff: 0,
-                keep_awake: false,
-                todos: false,
-            }],
-            other => (script.lock().unwrap())(other),
-        };
+        let mut replies = (script.lock().unwrap())(&message);
+        if replies.is_empty() && matches!(message, ClientMsg::Hello { .. }) {
+            replies.push(welcome(false));
+        }
         let _ = tx.send(Received::Control(message));
         if !replies.iter().all(&mut reply) {
             return;
         }
+    }
+}
+
+/// 回 `Hello` 的 `Welcome`；`todos` 是宿主认得任务板的消息。
+pub fn welcome(todos: bool) -> HostMsg {
+    HostMsg::Welcome {
+        protocol: PROTOCOL_VERSION,
+        build: BuildId("test".into()),
+        host_pid: 1,
+        snapshot_format: 1,
+        standalone: false,
+        handoff: 0,
+        keep_awake: false,
+        todos,
     }
 }
 

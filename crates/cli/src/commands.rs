@@ -237,6 +237,18 @@ pub(crate) fn run(command: Command, env: &Env, out: &mut dyn Write, err: &mut dy
         Command::ServiceInstall { kind } => crate::service::install(env, kind, out)?,
         Command::ServiceUninstall { kind } => crate::service::uninstall(env, kind, out)?,
         Command::ServiceStatus => crate::service::status(env, out)?,
+        Command::TodoAdd { title, prompt, cwd, agent, worktree, start } => {
+            crate::todo::add(env, crate::todo::Spec { title, prompt, cwd, agent, worktree }, start, out)?
+        }
+        Command::TodoList { json } => crate::todo::list(env, json, out)?,
+        Command::TodoStart { id } => crate::todo::start(env, &id, out)?,
+        Command::TodoDone { id } => crate::todo::done(env, id)?,
+        Command::TodoRemove { id } => crate::todo::remove(env, id)?,
+        Command::ScheduleAdd { title, prompt, cwd, agent, worktree, timing } => {
+            crate::todo::add_schedule(env, crate::todo::Spec { title, prompt, cwd, agent, worktree }, timing, out)?
+        }
+        Command::ScheduleList { json } => crate::todo::list_schedules(env, json, out)?,
+        Command::ScheduleRemove { id } => crate::todo::remove_schedule(env, id)?,
     }
     Ok(())
 }

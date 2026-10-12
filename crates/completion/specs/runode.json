@@ -117,6 +117,99 @@
       "args": { "name": "session", "isOptional": true, "generatorName": "sessions" }
     },
     {
+      "name": "todo",
+      "description": "Put tasks for agents on the task board",
+      "subcommands": [
+        {
+          "name": "add",
+          "description": "Add a task and print its id",
+          "args": { "name": "title", "isVariadic": true },
+          "options": [
+            { "name": "--prompt", "description": "The prompt for the agent (default: the title)", "args": { "name": "TEXT" } },
+            {
+              "name": "--cwd",
+              "description": "The directory to work in (default: the current one)",
+              "args": { "name": "DIR", "template": "folders" }
+            },
+            {
+              "name": "--agent",
+              "description": "The command the prompt is given to (default: claude)",
+              "args": { "name": "CMD", "suggestions": ["claude", "codex"] }
+            },
+            { "name": "--no-worktree", "description": "Work in DIR itself, not in a new git worktree" },
+            { "name": "--start", "description": "Start the task right away and print its session id" }
+          ]
+        },
+        {
+          "name": "list",
+          "description": "List the tasks and their column on the board",
+          "options": [
+            { "name": "--json", "description": "Print the tasks as JSON" }
+          ]
+        },
+        {
+          "name": "start",
+          "description": "Start a task and print its session id",
+          "args": { "name": "id", "generatorName": "todos" }
+        },
+        {
+          "name": "done",
+          "description": "Mark a task done",
+          "args": { "name": "id", "generatorName": "todos" }
+        },
+        {
+          "name": "rm",
+          "description": "Remove a task (its terminal stays open)",
+          "args": { "name": "id", "generatorName": "all_todos" }
+        }
+      ]
+    },
+    {
+      "name": "schedule",
+      "description": "Start a task for an agent at set times",
+      "subcommands": [
+        {
+          "name": "add",
+          "description": "Add a schedule and print its id",
+          "args": { "name": "title", "isVariadic": true },
+          "options": [
+            { "name": "--at", "description": "Once, at \"YYYY-MM-DD HH:MM\" local time", "args": { "name": "TIME" } },
+            { "name": "--daily", "description": "Every day at HH:MM", "args": { "name": "HH:MM" } },
+            {
+              "name": "--days",
+              "description": "With --daily: only on these days",
+              "args": { "name": "DAYS", "suggestions": ["mon-fri", "sat,sun"] }
+            },
+            { "name": "--every", "description": "Every MINUTES minutes", "args": { "name": "MINUTES" } },
+            { "name": "--prompt", "description": "The prompt for the agent (default: the title)", "args": { "name": "TEXT" } },
+            {
+              "name": "--cwd",
+              "description": "The directory to work in (default: the current one)",
+              "args": { "name": "DIR", "template": "folders" }
+            },
+            {
+              "name": "--agent",
+              "description": "The command the prompt is given to (default: claude)",
+              "args": { "name": "CMD", "suggestions": ["claude", "codex"] }
+            },
+            { "name": "--worktree", "description": "Give each task a new git worktree and branch" }
+          ]
+        },
+        {
+          "name": "list",
+          "description": "List the schedules and when they fire next",
+          "options": [
+            { "name": "--json", "description": "Print the schedules as JSON" }
+          ]
+        },
+        {
+          "name": "rm",
+          "description": "Remove a schedule (its tasks stay)",
+          "args": { "name": "id", "generatorName": "schedules" }
+        }
+      ]
+    },
+    {
       "name": "setup",
       "description": "Teach an agent to use runode",
       "args": {
@@ -183,7 +276,7 @@
       "args": {
         "name": "topic",
         "isOptional": true,
-        "suggestions": ["list", "read", "send", "wait", "open", "kill", "focus", "setup", "remote", "service", "session"]
+        "suggestions": ["list", "read", "send", "wait", "open", "kill", "focus", "todo", "schedule", "setup", "remote", "service", "session"]
       }
     },
     { "name": "version", "description": "Show the version" }

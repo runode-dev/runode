@@ -61,6 +61,8 @@ pub(crate) struct Connection {
     exited: RefCell<HashSet<SessionId>>,
     /// 下一个请求的编号。
     next_req: Cell<u32>,
+    /// 宿主认得任务板的几条消息（`Welcome` 的 `todos`）。
+    pub(crate) todos: bool,
 }
 
 impl Connection {
@@ -82,8 +84,14 @@ impl Connection {
                 }
             }
         })?;
-        let connection =
-            Self { stream, messages, pending: RefCell::default(), exited: RefCell::default(), next_req: Cell::new(1) };
+        let mut connection = Self {
+            stream,
+            messages,
+            pending: RefCell::default(),
+            exited: RefCell::default(),
+            next_req: Cell::new(1),
+            todos: false,
+        };
         connection.send(&ClientMsg::Hello {
             protocol: PROTOCOL_VERSION,
             build: BuildId(env.build.clone()),
@@ -95,7 +103,10 @@ impl Connection {
             device: None,
         })?;
         match connection.reply()? {
-            HostMsg::Welcome { .. } => Ok(connection),
+            HostMsg::Welcome { todos, .. } => {
+                connection.todos = todos;
+                Ok(connection)
+            }
             HostMsg::Incompatible { reason, .. } => bail!("the runode app speaks another protocol: {reason}"),
             other => bail!("unexpected answer to hello: {}", kind(&other)),
         }
@@ -135,13 +146,17 @@ impl Connection {
 
     /// 回话：跳过 `Meta` 这类随时会插进来的会话事件，宿主报错时返回错误。
     pub(crate) fn reply(&self) -> Result<HostMsg> {
-        self.answer()?.map_err(|message| anyhow!(message))
+        self.reply_by(Instant::now() + REPLY_TIMEOUT)
+    }
+
+    /// 同 `reply`，但等到 `deadline`：宿主要办好一阵子的请求（`StartTodo` 可能先跑 `git worktree add`）用它。
+    pub(crate) fn reply_by(&self, deadline: Instant) -> Result<HostMsg> {
+        self.answer(deadline)?.map_err(|message| anyhow!(message))
     }
 
     /// 回话，宿主报的错放在里层，由调用方决定怎么办。跳过的事件里有会话结束（`Exited`）时记下来。
     /// 宿主说 `Goodbye` 时是外层的错误，见 `goodbye`。
-    fn answer(&self) -> Result<Result<HostMsg, String>> {
-        let deadline = Instant::now() + REPLY_TIMEOUT;
+    fn answer(&self, deadline: Instant) -> Result<Result<HostMsg, String>> {
         loop {
             // 不从 `pending` 取：那里的都是已经跳过的事件。
             let message = match self.messages.recv_timeout(deadline.saturating_duration_since(Instant::now())) {
@@ -161,8 +176,9 @@ impl Connection {
                 | HostMsg::ThemeApplied { .. }
                 | HostMsg::SnapshotEnd { .. }
                 | HostMsg::Resync { .. } => self.pending.borrow_mut().push_back(message),
-                // 问过 `Layout` 以后 app 的布局一变就来一条 `LayoutChanged`，不是回话。
-                HostMsg::UiRequest { .. } | HostMsg::LayoutChanged | HostMsg::Unknown => {}
+                // 问过 `Layout` 以后 app 的布局一变就来一条 `LayoutChanged`，问过 `ListTodos` 以后任务板
+                // 一变就来一条 `TodosChanged`，都不是回话。
+                HostMsg::UiRequest { .. } | HostMsg::LayoutChanged | HostMsg::TodosChanged | HostMsg::Unknown => {}
                 HostMsg::Error { message, .. } => return Ok(Err(message)),
                 HostMsg::Goodbye { reason } => return Err(goodbye(&reason)),
                 message => return Ok(Ok(message)),
@@ -200,7 +216,7 @@ impl Connection {
     pub(crate) fn layout(&self) -> Result<Option<Vec<WindowLayout>>> {
         let req = self.req();
         self.send(&ClientMsg::Layout { req })?;
-        match self.answer()? {
+        match self.answer(Instant::now() + REPLY_TIMEOUT)? {
             Ok(HostMsg::Layout { windows, .. }) => Ok(Some(windows)),
             Ok(other) => bail!("unexpected answer: {}", kind(&other)),
             Err(_) => Ok(None),

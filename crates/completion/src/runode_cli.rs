@@ -1,4 +1,5 @@
-//! runode 自己的命令行的动态补全：会话的写法和配对过的设备，都由 runode 命令行自己列出来。
+//! runode 自己的命令行的动态补全：会话的写法、配对过的设备、任务板上的任务和定时，都由 runode 命令行
+//! 自己列出来。
 //! 命令规格和别的命令的一样是一份 JSON，和 crate 放在一起，构建脚本把它和子模块里的规格
 //! 一起编进二进制；它要跟着命令行的参数解析一起改。
 
@@ -24,6 +25,9 @@ pub fn generators() -> CommandSignatureGenerators {
     CommandSignatureGenerators::new("runode")
         .add_generator("sessions", Generator::script(runode("list --json"), sessions))
         .add_generator("devices", Generator::script(runode("remote devices --json"), devices))
+        .add_generator("todos", Generator::script(runode("todo list --json"), |output| todos(output, false)))
+        .add_generator("all_todos", Generator::script(runode("todo list --json"), |output| todos(output, true)))
+        .add_generator("schedules", Generator::script(runode("schedule list --json"), schedules))
 }
 
 /// 跑 runode 的命令行。环境里有 `RUNODE_BIN` 时用它指的那个可执行文件：PATH 里可能还有另一个
@@ -200,6 +204,39 @@ fn devices(output: &str) -> GeneratorResults {
         .collect_ordered_results()
 }
 
+/// `runode todo list --json` 的输出换成任务候选：标识，说明是标题；`all` 为假时只给还没完成的。
+fn todos(output: &str, all: bool) -> GeneratorResults {
+    titled(output, |todo| all || todo["done_at"].is_null(), |todo| todo["spec"]["title"].as_str())
+}
+
+/// `runode schedule list --json` 的输出换成定时候选：标识，说明是标题。
+fn schedules(output: &str) -> GeneratorResults {
+    titled(output, |_| true, |schedule| schedule["spec"]["title"].as_str())
+}
+
+/// JSON 数组里 `keep` 留下的每项的 `id`，说明是 `title` 取出的文字。
+fn titled(
+    output: &str,
+    keep: impl Fn(&serde_json::Value) -> bool,
+    title: impl Fn(&serde_json::Value) -> Option<&str>,
+) -> GeneratorResults {
+    let items: serde_json::Value = serde_json::from_str(output).unwrap_or_default();
+    items
+        .as_array()
+        .map(Vec::as_slice)
+        .unwrap_or_default()
+        .iter()
+        .filter(|item| keep(item))
+        .filter_map(|item| {
+            let id = item["id"].as_str()?;
+            Some(match title(item) {
+                Some(title) => Suggestion::with_description(id, title),
+                None => Suggestion::new(id),
+            })
+        })
+        .collect_ordered_results()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -284,5 +321,17 @@ mod tests {
             r#"[{"device_id":"00112233445566778899aabbccddeeff","name":"iPhone","paired_at":1,"last_seen":2}]"#;
         assert_eq!(values(devices(output)), [("00112233445566778899aabbccddeeff".into(), Some("iPhone".into()))]);
         assert!(values(devices("")).is_empty());
+    }
+
+    #[test]
+    fn todos_and_schedules_are_listed_by_id_with_their_titles() {
+        let output = r#"[{"id":"0000000a","spec":{"title":"fix login"},"done_at":null},
+            {"id":"0000000b","spec":{"title":"old"},"done_at":5}]"#;
+        let fix = ("0000000a".to_owned(), Some("fix login".to_owned()));
+        assert_eq!(values(todos(output, false)), std::slice::from_ref(&fix));
+        assert_eq!(values(todos(output, true)), [fix, ("0000000b".into(), Some("old".into()))]);
+        let output = r#"[{"id":"0000000c","spec":{"title":"report"},"when":{"kind":"every","minutes":5}}]"#;
+        assert_eq!(values(schedules(output)), [("0000000c".into(), Some("report".into()))]);
+        assert!(values(todos("", true)).is_empty());
     }
 }
