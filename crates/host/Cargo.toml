@@ -14,13 +14,14 @@ runode-terminal.workspace = true
 runode-protocol.workspace = true
 runode-shared-types.workspace = true
 anyhow.workspace = true
-# 读 package.json 里的 scripts，按文件里的先后列出来。
-serde_json = { workspace = true, features = ["preserve_order"] }
+serde_json.workspace = true
 # 锁文件（flock）和认连上来的进程是谁（getpeereid）。
 libc.workspace = true
 tracing.workspace = true
-# 任务板的库，见 `todos`。
-rusqlite.workspace = true
+# 任务板的库和定时，见 `todos`。
+runode-todo.workspace = true
+# 会话卡片上能跑的 Makefile 目标和 package.json 的 scripts。
+runode-project-tasks.workspace = true
 
 [lints]
 workspace = true

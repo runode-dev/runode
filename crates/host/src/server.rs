@@ -52,7 +52,7 @@ use runode_terminal::pty;
 use crate::{
     Host, Shared, SpawnOptions, Stopped, browse,
     git::{GitWorker, Job},
-    handoff, project_tasks,
+    handoff,
     session::{Drive, Event, EventSink, Inbox, Screen, Subscribe},
 };
 
@@ -1083,7 +1083,7 @@ impl Connection {
                 Ok(HostMsg::Dirs { req, path, dirs, truncated })
             }),
             ClientMsg::ListProjectTasks { req, dir } => self.read_files(req, "host-list-project-tasks", move || {
-                let sources = project_tasks::list(&dir)?;
+                let sources = runode_project_tasks::list(&dir)?;
                 Ok(HostMsg::ProjectTasks { req, dir, sources })
             }),
             ClientMsg::Git { req, id, request } => self.git(req, id, request),

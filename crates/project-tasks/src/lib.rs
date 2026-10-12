@@ -1,8 +1,7 @@
-//! 列一个目录里能跑的项目命令（`ClientMsg::ListProjectTasks`）：手机在会话卡片上列出来，点一下就在
-//! 那个会话里跑。先是 runode 根目录的 `tasks.json` 里自己加的、这个目录所在项目的和通用的命令，再从
-//! 目录往上找最近的 Makefile 和 package.json，读出目标和 scripts，拼好在这个目录里能直接跑的命令行，
-//! 回 `HostMsg::ProjectTasks`。只读几个小文件，但在断掉的网络挂载上也会一直卡住，所以连接另起
-//! 线程来调，见 `Connection::read_files`。
+//! 列一个目录里能跑的项目命令（`list`）：先是 runode 根目录的 `tasks.json` 里自己加的、这个目录所在
+//! 项目的和通用的命令，再从目录往上找最近的 Makefile 和 package.json，读出目标和 scripts，拼好在这个
+//! 目录里能直接跑的命令行。宿主用它回 `ClientMsg::ListProjectTasks`，手机在会话卡片上、桌面在标题栏的
+//! 菜单里列出来。只读几个小文件，但在断掉的网络挂载上也会一直卡住，调用方别在要及时响应的线程上调。
 
 use std::{
     fs,
@@ -27,7 +26,7 @@ const LOCKFILES: [(&str, &str); 5] = [
 const PACKAGE_MANAGERS: [&str; 4] = ["npm", "pnpm", "yarn", "bun"];
 
 /// 列出 `dir` 里能跑的命令，依次是自己加的这个项目的、通用的、Makefile 和 package.json。办不了时返回给前端看的原因。
-pub(crate) fn list(dir: &Path) -> Result<Vec<TaskSource>, String> {
+pub fn list(dir: &Path) -> Result<Vec<TaskSource>, String> {
     if !dir.is_absolute() {
         return Err(format!("{} is not an absolute path", dir.display()));
     }

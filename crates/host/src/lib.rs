@@ -20,17 +20,16 @@
 //! 前端也能请宿主在某个会话所在的仓库里读写 git（`ClientMsg::Git`），手机靠它管电脑上的仓库，
 //! 见 `git`。手机新建工作区时一级级浏览电脑上的目录，也由宿主列出来（`ClientMsg::ListDirs`），
 //! 见 `browse`；会话卡片上列的 Makefile 目标和 package.json 的 scripts 也是（`ClientMsg::ListProjectTasks`），
-//! 见 `project_tasks`。
+//! 见 `runode_project_tasks`。
 //!
-//! 任务板（派给 agent 的任务和定时）也由宿主持有：存在它自己的库里，到点开任务、开会话跑 agent，见
-//! `todos`。
+//! 任务板（派给 agent 的任务和定时）也由宿主持有：存在它自己的库里（`runode_todo`），到点开任务、开会话
+//! 跑 agent，见 `todos`。
 
 mod browse;
 mod git;
 mod handoff;
 mod idle;
 mod launch;
-mod project_tasks;
 mod server;
 mod session;
 mod todos;

@@ -1,0 +1,17 @@
+[package]
+name = "runode-project-tasks"
+description = "The commands a directory can run: the user's own from tasks.json, the nearest Makefile's targets and package.json's scripts, as ready-to-run command lines"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+runode-protocol.workspace = true
+# 自己加的命令在 runode 根目录的 tasks.json 里，往上找时停在家目录。
+runode-paths.workspace = true
+# 读 tasks.json 和 package.json 里的 scripts，按文件里的先后列出来。
+serde_json = { workspace = true, features = ["preserve_order"] }
+
+[lints]
+workspace = true

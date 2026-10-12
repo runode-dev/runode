@@ -1,4 +1,4 @@
-//! 任务板（见 `runode_protocol::todo`）：任务和定时存在宿主自己的 SQLite 库里（`store`），只有宿主读写，
+//! 任务板（见 `runode_protocol::todo`）：任务和定时存在宿主自己的 SQLite 库里（`runode_todo::Store`），
 //! 前端经 `ClientMsg::ListTodos` 这几条消息要。app 在宿主拿到会话和监听的 socket 以后调
 //! `Host::serve_todos` 告诉它库在哪、起定时的线程（`schedule`）；之前这些消息都回 `Error`。
 //!
@@ -11,7 +11,6 @@
 //! 进程同时开着。锁的先后：拿着 `Todos::state` 可以再拿 `peers` 和 `registry`，反过来不行。
 
 mod schedule;
-mod store;
 
 use std::{
     collections::HashSet,
@@ -25,7 +24,7 @@ use runode_protocol::{
     HostMsg, SessionId, SessionInfo,
     todo::{Todo, TodoSpec, When},
 };
-use rusqlite::Connection;
+use runode_todo::Store;
 
 use crate::{Host, Shared, server::REPLY_TIMEOUT, session::Inbox, workspaces::spawn_options};
 
@@ -51,7 +50,7 @@ struct State {
     /// 库的路径，`Host::serve_todos` 给的；为空时任务板没开。
     path: Option<PathBuf>,
     /// 打开着的库；打不开时为空，下次用时再试，用户修好文件后自己恢复。
-    conn: Option<Connection>,
+    db: Option<Store>,
     /// 任务板变一次加一，定时的线程据此知道要重新看。
     generation: u64,
     /// 正在开始的任务，同一个不会同时开两次。
@@ -74,18 +73,18 @@ impl Todos {
     }
 
     /// 在库上做 `f`。任务板没开、库打不开时报错；`f` 出错时关掉库，下次重新打开。
-    fn with_db<T>(&self, f: impl FnOnce(&mut Connection) -> store::Result<T>) -> Result<T, String> {
+    fn with_db<T>(&self, f: impl FnOnce(&mut Store) -> runode_todo::Result<T>) -> Result<T, String> {
         let mut state = self.lock();
         let Some(path) = state.path.clone() else {
             return Err("this host does not keep a todo board".into());
         };
-        let conn = match &mut state.conn {
-            Some(conn) => conn,
-            empty => empty.insert(store::open(&path)?),
+        let db = match &mut state.db {
+            Some(db) => db,
+            empty => empty.insert(Store::open(&path)?),
         };
-        let result = f(conn);
+        let result = f(db);
         if result.is_err() {
-            state.conn = None;
+            state.db = None;
         }
         result
     }
@@ -156,10 +155,9 @@ impl Shared {
     /// 回 `ClientMsg::ListTodos`。
     pub(crate) fn list_todos(&self, req: u32) -> Result<HostMsg, String> {
         let now = unix_now();
-        let (todos, mut schedules) =
-            self.todos.with_db(|conn| Ok((store::list_todos(conn, now)?, store::list_schedules(conn)?)))?;
+        let (todos, mut schedules) = self.todos.with_db(|db| Ok((db.list_todos(now)?, db.list_schedules()?)))?;
         for schedule in &mut schedules {
-            schedule.next_fire = schedule::next_fire(&schedule.when, schedule.last_fired);
+            schedule.next_fire = runode_todo::next_fire(&schedule.when, schedule.last_fired);
         }
         Ok(HostMsg::Todos { req, todos, schedules })
     }
@@ -168,7 +166,7 @@ impl Shared {
     pub(crate) fn add_todo(&self, req: u32, spec: &TodoSpec) -> Result<HostMsg, String> {
         self.todos_writable()?;
         check_spec(spec)?;
-        let id = self.todos.with_db(|conn| store::add_todo(conn, spec, unix_now(), None))?;
+        let id = self.todos.with_db(|db| db.add_todo(spec, unix_now(), None))?;
         self.todos_changed();
         Ok(HostMsg::TodoAdded { req, id })
     }
@@ -185,13 +183,13 @@ impl Shared {
         let id = &self.resolve_todo(id)?;
         if let Some(spec) = spec {
             check_spec(spec)?;
-            let old = self.todos.with_db(|conn| store::todo_by_id(conn, id))?.ok_or_else(|| no_todo(id))?;
+            let old = self.todos.with_db(|db| db.todo_by_id(id))?.ok_or_else(|| no_todo(id))?;
             if old.started.is_some() && (old.spec.dir != spec.dir || old.spec.worktree != spec.worktree) {
                 return Err(format!("todo {id} has started; its directory and worktree stay as they are"));
             }
         }
         let done_at = done.map(|done| done.then(unix_now));
-        if !self.todos.with_db(|conn| store::update_todo(conn, id, spec, done_at))? {
+        if !self.todos.with_db(|db| db.update_todo(id, spec, done_at))? {
             return Err(no_todo(id));
         }
         self.todos_changed();
@@ -202,7 +200,7 @@ impl Shared {
     pub(crate) fn remove_todo(&self, req: u32, id: &str) -> Result<HostMsg, String> {
         self.todos_writable()?;
         let id = &self.resolve_todo(id)?;
-        let todo = self.todos.with_db(|conn| store::remove_todo(conn, id))?.ok_or_else(|| no_todo(id))?;
+        let todo = self.todos.with_db(|db| db.remove_todo(id))?.ok_or_else(|| no_todo(id))?;
         self.todos_changed();
         if !self.in_use(&todo) {
             clean_worktree(&todo);
@@ -221,7 +219,7 @@ impl Shared {
         if self.todos_writable().is_err() {
             return;
         }
-        let done = match self.todos.with_db(|conn| store::unswept_done(conn)) {
+        let done = match self.todos.with_db(|db| db.unswept_done()) {
             Ok(done) => done,
             Err(err) => {
                 tracing::warn!("cannot read the finished todos: {err}");
@@ -230,7 +228,7 @@ impl Shared {
         };
         for todo in done.iter().filter(|todo| !self.in_use(todo)) {
             let (worktree_gone, branch_gone) = clean_worktree(todo);
-            if let Err(err) = self.todos.with_db(|conn| store::set_swept(conn, &todo.id, worktree_gone, branch_gone)) {
+            if let Err(err) = self.todos.with_db(|db| db.set_swept(&todo.id, worktree_gone, branch_gone)) {
                 tracing::warn!("cannot record that todo {} was cleaned up: {err}", todo.id);
             }
         }
@@ -239,13 +237,13 @@ impl Shared {
     /// 回 `ClientMsg::GetTodo`。
     pub(crate) fn get_todo(&self, req: u32, id: &str) -> Result<HostMsg, String> {
         let id = self.resolve_todo(id)?;
-        let todo = self.todos.with_db(|conn| store::todo_by_id(conn, &id))?.ok_or_else(|| no_todo(&id))?;
+        let todo = self.todos.with_db(|db| db.todo_by_id(&id))?.ok_or_else(|| no_todo(&id))?;
         Ok(HostMsg::Todo { req, todo })
     }
 
     /// 前端写的任务（标识，或者 `5`、`#5` 这样的编号，见 `ClientMsg::GetTodo`）的标识。
     fn resolve_todo(&self, text: &str) -> Result<String, String> {
-        self.todos.with_db(|conn| store::resolve_todo(conn, text))?.ok_or_else(|| no_todo(text))
+        self.todos.with_db(|db| db.resolve_todo(text))?.ok_or_else(|| no_todo(text))
     }
 
     /// 回 `ClientMsg::MoveTodo`。
@@ -253,7 +251,7 @@ impl Shared {
         self.todos_writable()?;
         let id = &self.resolve_todo(id)?;
         let before = before.map(|before| self.resolve_todo(before)).transpose()?;
-        self.todos.with_db(|conn| store::move_todo(conn, id, before.as_deref()))?;
+        self.todos.with_db(|db| db.move_todo(id, before.as_deref()))?;
         self.todos_changed();
         Ok(HostMsg::Done { req })
     }
@@ -264,7 +262,7 @@ impl Shared {
         check_spec(spec)?;
         let now = unix_now();
         check_when(when, now)?;
-        let id = self.todos.with_db(|conn| store::add_schedule(conn, spec, when, now))?;
+        let id = self.todos.with_db(|db| db.add_schedule(spec, when, now))?;
         self.todos_changed();
         Ok(HostMsg::TodoAdded { req, id })
     }
@@ -281,7 +279,7 @@ impl Shared {
         let now = unix_now();
         spec.map_or(Ok(()), check_spec)?;
         when.map_or(Ok(()), |when| check_when(when, now))?;
-        if !self.todos.with_db(|conn| store::update_schedule(conn, id, spec, when, now))? {
+        if !self.todos.with_db(|db| db.update_schedule(id, spec, when, now))? {
             return Err(format!("no schedule {id}"));
         }
         self.todos_changed();
@@ -291,7 +289,7 @@ impl Shared {
     /// 回 `ClientMsg::RemoveSchedule`。
     pub(crate) fn remove_schedule(&self, req: u32, id: &str) -> Result<HostMsg, String> {
         self.todos_writable()?;
-        if !self.todos.with_db(|conn| store::remove_schedule(conn, id))? {
+        if !self.todos.with_db(|db| db.remove_schedule(id))? {
             return Err(format!("no schedule {id}"));
         }
         self.todos_changed();
@@ -302,7 +300,7 @@ impl Shared {
     pub(crate) fn start_todo(&self, id: &str) -> Result<SessionId, String> {
         self.todos_writable()?;
         let id = &self.resolve_todo(id)?;
-        let todo = self.todos.with_db(|conn| store::todo_by_id(conn, id))?.ok_or_else(|| no_todo(id))?;
+        let todo = self.todos.with_db(|db| db.todo_by_id(id))?.ok_or_else(|| no_todo(id))?;
         if todo.done_at.is_some() {
             return Err(format!("todo {id} is done"));
         }
@@ -350,7 +348,7 @@ impl Shared {
         let command = format!("{} \"${ENV_TODO_PROMPT}\"\r", todo.spec.agent);
         self.deliver(session, Inbox::TypeAtPrompt(command.into_bytes()));
         let worktree = made.as_ref().map(|(root, branch)| (root.as_path(), branch.as_str()));
-        if let Err(err) = self.todos.with_db(|conn| store::set_started(conn, &todo.id, unix_now(), session, worktree)) {
+        if let Err(err) = self.todos.with_db(|db| db.set_started(&todo.id, unix_now(), session, worktree)) {
             self.kill(session);
             undo_worktree();
             return Err(err);

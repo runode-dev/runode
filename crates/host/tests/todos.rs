@@ -253,15 +253,16 @@ fn a_missed_schedule_fires_once_when_the_board_opens() {
     let agent = script(&dir, "agent", &format!("echo ran >> '{}'", out.display()));
     // 先用一个宿主建好库、加上定时，再把它的上一次到点改到很久以前。
     let db = dir.join("todos.db");
-    {
+    let id = {
         let (host, socket) = listen(&temp_dir("todo-catch-up-1"));
         host.serve_todos(db.clone());
         let mut peer = Peer::hello(&socket, false);
         let when = When::Every { minutes: 60 };
         peer.send(&ClientMsg::AddSchedule { req: 1, spec: spec("Nightly report", &dir, &agent), when });
-        assert!(matches!(peer.reply(), HostMsg::TodoAdded { req: 1, .. }));
-    }
-    rusqlite::Connection::open(&db).unwrap().execute("UPDATE schedules SET last_fired = 1", []).unwrap();
+        let HostMsg::TodoAdded { req: 1, id } = peer.reply() else { panic!("expected the schedule") };
+        id
+    };
+    runode_todo::Store::open(&db).unwrap().set_fired(&id, 1).unwrap();
 
     let (host, socket) = listen(&temp_dir("todo-catch-up-2"));
     let mut peer = Peer::hello(&socket, false);
