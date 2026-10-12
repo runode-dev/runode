@@ -10,6 +10,7 @@ use gpui::{
 
 use super::{SettingsView, controls::Colors};
 use crate::ui::popover::Popover;
+use crate::ui::theme::ActiveTheme as _;
 use crate::ui::{
     font_size::{FontSize, scaled},
     input::{Input, InputEvent, InputState},
@@ -201,6 +202,8 @@ impl SettingsView {
             return Vec::new();
         };
         let visible = picker.visible(cx);
+        // 浮层底色是 `Theme::popover`，悬停要比它深一档才看得出。
+        let row_hover = cx.theme().mix(0.10);
         range
             .filter_map(|row| {
                 let ix = *visible.get(row)?;
@@ -223,7 +226,7 @@ impl SettingsView {
                             if row == picker.highlighted {
                                 el.bg(colors.selected)
                             } else {
-                                el.hover(|el| el.bg(colors.hover))
+                                el.hover(|el| el.bg(row_hover))
                             }
                         })
                         // 用 on_click 而不是按下就选：辅助工具点它时走的也是这个。

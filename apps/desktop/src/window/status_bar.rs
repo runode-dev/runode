@@ -561,7 +561,7 @@ impl WindowView {
                 .rounded(px(6.))
                 .flex()
                 .gap(px(8.))
-                .when(selected, |row| row.bg(hsla(bg.mix(fg, 0.07))))
+                .when(selected, |row| row.bg(hsla(bg.mix(fg, 0.12))))
                 .hover(|row| row.bg(hsla(bg.mix(fg, 0.10))))
                 .child(
                     div()

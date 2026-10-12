@@ -56,7 +56,7 @@ impl RenderOnce for Badge {
         let user = std::mem::take(div.style());
         let div = div
             .flex_none()
-            .min_w(px(18.))
+            .min_w(scaled(18.))
             .h(scaled(16.))
             .px(px(5.))
             .rounded_full()

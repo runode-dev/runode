@@ -317,7 +317,7 @@ impl WindowView {
         cx: &mut Context<Self>,
     ) -> Option<Stateful<gpui::Div>> {
         let dialog = self.todo_dialog.as_ref()?;
-        let hover_bg = hsla(bg.mix(fg, 0.06));
+        let hover_bg = hsla(bg.mix(fg, 0.10));
         let primary_bg = hsla(bg.mix(fg, 0.16));
         let fg_h = hsla(fg);
         // 输入框随内容长高，至少 28 点。

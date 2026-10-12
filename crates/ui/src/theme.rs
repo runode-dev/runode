@@ -170,7 +170,7 @@ mod tests {
             let ansi = palette();
             let theme = Theme::new(fg, bg, ansi);
             let (f, b) = (hsla(fg), hsla(bg));
-            // 窗口、卡片（`panel::card`）的底色和字色。
+            // 窗口、卡片（`Card`）的底色和字色。
             assert_eq!((theme.background, theme.foreground), (b, f));
             assert_eq!((theme.card, theme.card_foreground), (b, f));
             // 菜单和各个浮层（`Popover`）的底色，原来菜单的写法。
