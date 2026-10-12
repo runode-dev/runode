@@ -1,7 +1,7 @@
 # cargo-deny 的配置，CI 里只跑 `cargo deny check bans`，用来守住 crate 的分层：
 # 界面框架只许 app（runode）直接依赖，终端仿真和 PTY 只许 runode-terminal 直接依赖，
 # 语法高亮只许 runode-preview 直接依赖，终端宿主只许 app 直接依赖，TLS 和密码学只许
-# runode-remote-access 直接依赖，SQLite 只许 runode-host 直接依赖。
+# runode-remote-access 直接依赖，SQLite 只许 runode-todo 直接依赖。
 # `wrappers` 列出的 crate 可以直接依赖被禁的 crate，其他 crate 直接依赖时报错；经由这些
 # crate 间接用到不算违规。
 

@@ -75,14 +75,22 @@ impl Shared {
             }
             return;
         }
+        // 先记到点、再加任务、最后删一次性的定时：加任务失败时定时还在（记过到点，不会马上又触发），不会
+        // 连任务带定时一起丢掉。
         let added = self.todos.with_db(|db| {
             db.set_fired(&schedule.id, now)?;
-            if matches!(schedule.when, When::Once { .. }) {
-                db.remove_schedule(&schedule.id)?;
+            let id = db.add_todo(&schedule.spec, now, Some(&schedule.id))?;
+            if matches!(schedule.when, When::Once { .. })
+                && let Err(err) = db.remove_schedule(&schedule.id)
+            {
+                tracing::warn!("cannot remove the one-time schedule {}: {err}", schedule.id);
             }
-            db.add_todo(&schedule.spec, now, Some(&schedule.id))
+            Ok(id)
         });
-        self.todos_changed();
+        // 失败时不通知：通知会叫醒定时的线程马上再来一轮，记不进库时就成了空转。
+        if added.is_ok() {
+            self.todos_changed();
+        }
         match added {
             Ok(id) => {
                 tracing::info!("schedule {} fired: todo {id}", schedule.id);
