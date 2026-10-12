@@ -225,14 +225,14 @@ impl PreviewPanel {
 
     /// 第 `ix` 个预览标签：文件图标和名字，名字按 git 状态上色，临时标签用斜体；当前标签和
     /// 悬停着的标签显示关闭按钮。
-    pub(super) fn render_preview_tab(&self, ix: usize, fg: Rgb, bg: Rgb, cx: &mut Context<Self>) -> Stateful<Div> {
+    pub(super) fn render_preview_tab(&self, ix: usize, cx: &mut Context<Self>) -> Stateful<Div> {
         let Some(previews) = self.tabs() else {
             return div().id(("preview-tab", ix));
         };
         let tab = &previews.tabs[ix];
         let active = ix == previews.active;
         let name = tab.name();
-        let hover_bg = hsla(bg.mix(fg, 0.04));
+        let hover_bg = cx.theme().mix(0.04);
         let underline = tab_underline(cx);
         let close_text = rust_i18n::t!("tooltip.close_preview");
         let close_label = SharedString::from(close_text.clone());
@@ -241,7 +241,7 @@ impl PreviewPanel {
         let path_tooltip = tooltip(path.clone(), None);
         // 标签和关闭按钮只有按下的处理，辅助工具按不到，另外登记：按标签切过去，按关闭按钮关掉。
         let view = cx.entity().downgrade();
-        let fg = hsla(fg);
+        let fg = cx.theme().foreground;
         let color = tab.status.map_or(fg, |status| hsla(status_color(status)));
         let group = SharedString::from(format!("preview-tab-{ix}"));
         let dragged = DraggedPreviewTab { ix, name: name.clone() };

@@ -22,7 +22,6 @@ use gpui::{
 };
 use runode_git::{self as git, DiffRow, DiffSide, DiffView, FileStatus, HunkAction, LineKind, hunk_actionable};
 use runode_preview::Span;
-use runode_shared_types::color::Rgb;
 use runode_ui::{
     a11y::A11yPress,
     button::{Button, ButtonSize},
@@ -37,6 +36,7 @@ use runode_ui::{
 
 use super::{
     ARROW_UP_ICON, BODY_PADDING, Loaded, MAX_COLUMNS, Note, PreviewEvent, PreviewPanel, ROW_EXTRA_HEIGHT,
+    background_rgb,
     body::{TEXT_RIGHT_PADDING, WRAP_SLACK, highlight_style, shown_text},
     gpui_format, right_fade,
     wrap::{WrapCache, segment},
@@ -272,8 +272,6 @@ impl PreviewPanel {
         width: f32,
         font: SharedString,
         font_size: f32,
-        fg: Rgb,
-        bg: Rgb,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let Some(preview) = self.preview() else {
@@ -298,9 +296,7 @@ impl PreviewPanel {
         let list = uniform_list(
             "preview-diff",
             rows,
-            cx.processor(move |this, range: Range<usize>, _, cx| {
-                this.render_diff_rows(range, row_height, number, fg, bg, cx)
-            }),
+            cx.processor(move |this, range: Range<usize>, _, cx| this.render_diff_rows(range, row_height, number, cx)),
         )
         .when(wrapped.is_none(), |list| {
             list.with_width_from_item(Some(content.widest))
@@ -311,7 +307,7 @@ impl PreviewPanel {
         .py(px(BODY_PADDING))
         .font_family(font);
         let handle = preview.scroll.0.borrow().base_handle.clone();
-        let fade = right_fade(&handle, bg);
+        let fade = right_fade(&handle, cx);
         let markers = row_markers(
             rows,
             view.rows.iter().enumerate().filter_map(|(ix, row)| {
@@ -464,8 +460,6 @@ impl PreviewPanel {
         range: Range<usize>,
         row_height: f32,
         number: f32,
-        fg: Rgb,
-        bg: Rgb,
         cx: &mut Context<Self>,
     ) -> Vec<AnyElement> {
         let Some(preview) = self.preview() else {
@@ -476,8 +470,9 @@ impl PreviewPanel {
         };
         let view = &content.view;
         let actionable = self.diff_hunks_actionable(target, view);
-        let palette = self.input.palette;
-        let dim = hsla(fg).opacity(0.4);
+        let theme = cx.theme().clone();
+        let bg = background_rgb(&theme);
+        let dim = theme.foreground.opacity(0.4);
         let worktree = target.side == DiffSide::Worktree;
         let full = preview.path.clone();
         // 换行时一项是折出来的一段：列表里的第几项、diff 的哪一行、这一行的哪一段、是不是第一段。
@@ -497,7 +492,7 @@ impl PreviewPanel {
             .map(|(item, ix, row, piece, first)| {
                 let base = div().flex_none().h(px(row_height)).w_full().flex().items_center().whitespace_nowrap();
                 if let DiffRow::Header(hunk) = row {
-                    return self.render_diff_header(ix, hunk, actionable, target, base, fg, bg, cx);
+                    return self.render_diff_header(ix, hunk, actionable, target, base, cx);
                 }
                 let (kind, old, new) = match row {
                     DiffRow::Context { old, new } => (LineKind::Context, Some(old), Some(new)),
@@ -519,11 +514,8 @@ impl PreviewPanel {
                     _ => None,
                 };
                 let shown = runode_preview::display_line(text, spans.map_or(&[][..], Vec::as_slice), MAX_COLUMNS);
-                let runs: Vec<_> = shown
-                    .spans
-                    .iter()
-                    .map(|span| (span.range.clone(), highlight_style(span.style, fg, &palette)))
-                    .collect();
+                let runs: Vec<_> =
+                    shown.spans.iter().map(|span| (span.range.clone(), highlight_style(span.style, &theme))).collect();
                 let mut text = shown.text;
                 if shown.cut {
                     text.push('…');
@@ -564,7 +556,7 @@ impl PreviewPanel {
                         div()
                             .flex_none()
                             .pr(px(TEXT_RIGHT_PADDING))
-                            .text_color(hsla(fg))
+                            .text_color(theme.foreground)
                             .child(StyledText::new(text).with_highlights(runs)),
                     )
                     .when_some(jump, |row, line| {
@@ -591,8 +583,6 @@ impl PreviewPanel {
         actionable: bool,
         target: &DiffTarget,
         row: gpui::Div,
-        fg: Rgb,
-        bg: Rgb,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let Some(Loaded::Diff(content)) = self.preview().and_then(|preview| preview.content.as_ref()) else {
@@ -609,13 +599,14 @@ impl PreviewPanel {
         };
         // 按钮挂在 diff 的行里，跟着正文的 `preview-font-size` 走，不跟界面字号，才装得进这一行。
         let font_size = self.input.font_size;
-        let fg_hsla = hsla(fg);
+        let fg_hsla = cx.theme().foreground;
+        let (header_bg, hover_bg) = (cx.theme().mix(0.05), cx.theme().mix(0.12));
         row.id(("preview-diff-header", ix))
             .role(Role::Group)
             .aria_label(header.clone())
             .px(px(8.))
             .gap(px(6.))
-            .bg(hsla(bg.mix(fg, 0.05)))
+            .bg(header_bg)
             .child(div().flex_1().min_w_0().truncate().text_color(fg_hsla.opacity(0.5)).child(header))
             .children(buttons.into_iter().enumerate().map(|(bi, (icon, key, action))| {
                 // 只有按下的处理，辅助工具按不到，另外登记。
@@ -634,7 +625,7 @@ impl PreviewPanel {
                     .gap(px(4.))
                     .text_size(px(font_size - 2.))
                     .text_color(fg_hsla.opacity(0.8))
-                    .hover(|button| button.bg(hsla(bg.mix(fg, 0.12))))
+                    .hover(|button| button.bg(hover_bg))
                     .child(svg().path(icon).size(px(12.)).text_color(fg_hsla.opacity(0.75)))
                     .child(rust_i18n::t!(key).into_owned())
                     .on_mouse_down(

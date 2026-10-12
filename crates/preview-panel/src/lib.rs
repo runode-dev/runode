@@ -8,10 +8,10 @@
 //! 从 Git 面板点开的是 diff 标签，和同一个文件的普通标签分开，见 `diff`。
 //!
 //! 预览栏是一个单独的视图（`PreviewPanel`），一个窗口一个，标签按 workspace 各记一份（`PreviewTabs`），
-//! 显示的是 app 经 `set_workspace` 说的那个 workspace 的。配色、字体、栏宽和配置里的预览字号、ANSI 颜色由
-//! app 每次画之前经 `set_input` 交进来，各 workspace 最近读到的 git 状态经 `set_git` 交进来；要 app 办的事
-//! （文件树定位、预览栏出现收起和放大还原、开关变了要存档、把路径打进终端、按块暂存）经 `PreviewEvent`
-//! 交出去。右键菜单存在页自己身上。
+//! 显示的是 app 经 `set_workspace` 说的那个 workspace 的。字体、栏宽和配置里的预览字号由 app 每次画之前
+//! 经 `set_input` 交进来，颜色（连同语法高亮用的 ANSI 16 色）画的时候从主题（`ActiveTheme`）读，各
+//! workspace 最近读到的 git 状态经 `set_git` 交进来；要 app 办的事（文件树定位、预览栏出现收起和放大还原、
+//! 开关变了要存档、把路径打进终端、按块暂存）经 `PreviewEvent` 交出去。右键菜单存在页自己身上。
 //!
 //! 读文件、判断类型和高亮在 `runode_preview`，这里只管状态、后台任务和画：标签条在 `tabs`，正文的
 //! 行和图片在 `body`，行号旁的改动标记在 `marks`，自动换行在 `wrap`，Markdown 的排版视图在 `markdown`。
@@ -55,10 +55,10 @@ use runode_ui::{
     base_name,
     button::{Button, ButtonSize, Toggle},
     font_size::FontSize,
-    hsla,
     icons::{CODE_ICON, MAXIMIZE_ICON, MINIMIZE_ICON},
     menu::{Menu, MenuHost},
     panel::{panel_header, panel_shell},
+    theme::{ActiveTheme as _, Theme},
     tooltip::tooltip,
 };
 
@@ -105,14 +105,10 @@ pub struct Input {
     pub width: f32,
     /// 标签条右边的按钮再往左让出的宽度：预览栏在窗口最右边时让出右上角面板开关的地方。
     pub right_inset: f32,
-    pub fg: Rgb,
-    pub bg: Rgb,
     /// 正文用的终端字体。
     pub font: SharedString,
     /// 配置的预览字号（`preview-font-size`），正文按它排。
     pub font_size: f32,
-    /// 当前终端主题的 ANSI 16 色，语法高亮按它上色。
-    pub palette: [Rgb; 16],
     /// 窗口用卡片样式：预览栏是一张卡片，顶上一条和分屏的标题条一样高。
     pub cards: bool,
     /// 窗口底部状态栏这时占的高度，藏起来时是 0；diff 里并排的两张图按除去它的高度摆。
@@ -124,11 +120,8 @@ impl Default for Input {
         Self {
             width: 0.,
             right_inset: 6.,
-            fg: Rgb(0xff, 0xff, 0xff),
-            bg: Rgb(0, 0, 0),
             font: SharedString::default(),
             font_size: 13.,
-            palette: runode_shared_types::theme::ANSI,
             cards: false,
             status_bar_height: 0.,
         }
@@ -372,15 +365,24 @@ fn diff_file<'a>(git: Option<&'a git::Repos>, diff: &DiffTarget) -> Option<&'a g
 }
 
 /// 长行往右还有内容时盖在右边缘的渐隐，提示能横着滚；滚到头了或者没有长行时没有。
-fn right_fade(handle: &ScrollHandle, bg: Rgb) -> Option<Div> {
+fn right_fade(handle: &ScrollHandle, cx: &App) -> Option<Div> {
     let (offset, max) = (handle.offset().x, handle.max_offset().x);
+    let bg = cx.theme().background;
     (max > px(1.) && -offset < max - px(1.)).then(|| {
         div().absolute().top_0().right_0().h_full().w(px(FADE_WIDTH)).bg(linear_gradient(
             90.,
-            linear_color_stop(hsla(bg).opacity(0.), 0.),
-            linear_color_stop(hsla(bg), 1.),
+            linear_color_stop(bg.opacity(0.), 0.),
+            linear_color_stop(bg, 1.),
         ))
     })
+}
+
+/// 主题背景色的 `Rgb`：`Theme` 只给 `Hsla`，背景要和改动色在 sRGB 里按整数混（选中的行、diff 的红绿
+/// 底色、Markdown 的选区）才和原来逐值一样。`hsla` 换过去再换回来，取整后就是原来的值。
+fn background_rgb(theme: &Theme) -> Rgb {
+    let color = theme.background.to_rgb();
+    let channel = |v: f32| (v * 255.).round() as u8;
+    Rgb(channel(color.r), channel(color.g), channel(color.b))
 }
 
 fn file_stamp(path: &Path) -> Option<(u64, SystemTime)> {
@@ -936,7 +938,7 @@ impl PreviewPanel {
     fn render_preview_panel(&self, window: &mut Window, cx: &mut Context<Self>) -> Option<Stateful<Div>> {
         let preview = self.preview()?;
         let previews = self.tabs()?;
-        let Input { width, right_inset, fg, bg, font_size, cards, .. } = self.input;
+        let Input { width, right_inset, font_size, cards, .. } = self.input;
         let font = self.input.font.clone();
         // 标签条后面的空白处和标题栏一样能拖动窗口。
         let strip = div()
@@ -948,7 +950,7 @@ impl PreviewPanel {
             .flex()
             .overflow_x_scroll()
             .track_scroll(&previews.scroll)
-            .children((0..previews.tabs.len()).map(|ix| self.render_preview_tab(ix, fg, bg, cx)).collect::<Vec<_>>());
+            .children((0..previews.tabs.len()).map(|ix| self.render_preview_tab(ix, cx)).collect::<Vec<_>>());
         // 标签下面那条分隔线由各个标签和后面的空白各画一段，当前标签底下空着，和正文连在一起。
         let maximized = previews.maximized;
         let toggle = |id: &'static str, icon: &'static str, on: bool, text: Cow<'static, str>| {
@@ -1040,7 +1042,7 @@ impl PreviewPanel {
             .min_h_0()
             .flex()
             .flex_col()
-            .child(self.render_preview_body(preview, width, font, fg, bg, window, cx));
+            .child(self.render_preview_body(preview, width, font, window, cx));
         Some(
             panel_shell("preview-panel", width, cards, cx)
                 .key_context("Preview")
@@ -1055,7 +1057,7 @@ impl PreviewPanel {
                 .on_action(cx.listener(Self::close_all_previews))
                 .on_action(cx.listener(Self::keep_preview_open))
                 .on_action(cx.listener(Self::zoom_preview))
-                .bg(hsla(bg))
+                .bg(cx.theme().background)
                 .text_size(px(font_size))
                 .child(header)
                 .child(body),
@@ -1088,5 +1090,19 @@ mod tests {
         let lines: Vec<String> = ["ab", "abcd", "中文字"].iter().map(|s| (*s).to_owned()).collect();
         assert_eq!(widest_line(&lines), 1);
         assert_eq!(widest_line(&[]), 0);
+    }
+
+    /// 背景色换成 `Hsla` 再换回 `Rgb` 后和原值一样，按整数混出来的颜色才不变。
+    #[test]
+    fn background_survives_the_round_trip() {
+        for r in (0..=255u8).step_by(3) {
+            for g in (0..=255u8).step_by(5) {
+                for b in (0..=255u8).step_by(7) {
+                    let bg = Rgb(r, g, b);
+                    let theme = Theme::new(Rgb(0xff, 0xff, 0xff), bg, runode_shared_types::theme::ANSI);
+                    assert_eq!(background_rgb(&theme), bg);
+                }
+            }
+        }
     }
 }

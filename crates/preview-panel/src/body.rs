@@ -13,12 +13,12 @@ use runode_ui::{
     hsla,
     panel::{PANE_HEADER_HEIGHT, TITLEBAR_HEIGHT, panel_message},
     scrollbar::{row_markers, scrollbar},
-    theme::{ADDED, MODIFIED, REMOVED, RENAMED},
+    theme::{ADDED, ActiveTheme as _, MODIFIED, REMOVED, RENAMED, Theme},
 };
 
 use super::{
-    BODY_PADDING, Loaded, MAX_COLUMNS, Note, Preview, PreviewPanel, ROW_EXTRA_HEIGHT, marks::Mark, right_fade,
-    wrap::segment,
+    BODY_PADDING, Loaded, MAX_COLUMNS, Note, Preview, PreviewPanel, ROW_EXTRA_HEIGHT, background_rgb, marks::Mark,
+    right_fade, wrap::segment,
 };
 
 /// 改动标记的宽度；只删了行的地方在下一行顶上画一小段，这么高。
@@ -43,13 +43,14 @@ pub(super) fn shown_text(line: &str) -> String {
     text
 }
 
-pub(super) fn highlight_style(style: runode_preview::Style, fg: Rgb, palette: &[Rgb; 16]) -> HighlightStyle {
+/// 语法高亮的一段按主题上色：前景色，或者调色板里的 ANSI 16 色。
+pub(super) fn highlight_style(style: runode_preview::Style, theme: &Theme) -> HighlightStyle {
     let color = match style.color {
-        runode_preview::Color::Foreground => fg,
-        runode_preview::Color::Ansi(ix) => palette[usize::from(ix.min(15))],
+        runode_preview::Color::Foreground => theme.foreground,
+        runode_preview::Color::Ansi(ix) => hsla(theme.ansi[usize::from(ix.min(15))]),
     };
     HighlightStyle {
-        color: Some(hsla(color)),
+        color: Some(color),
         font_weight: style.bold.then_some(FontWeight::BOLD),
         font_style: style.italic.then_some(FontStyle::Italic),
         ..HighlightStyle::default()
@@ -64,8 +65,6 @@ impl PreviewPanel {
         preview: &Preview,
         width: f32,
         font: SharedString,
-        fg: Rgb,
-        bg: Rgb,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
@@ -112,6 +111,7 @@ impl PreviewPanel {
                     - PANE_HEADER_HEIGHT
                     - self.input.status_bar_height;
                 let stacked = stack_images(width - 24., height - 24., &sizes);
+                let missing = cx.theme().foreground.opacity(0.5);
                 let side = |label: String, color: Rgb, image: &Option<std::sync::Arc<gpui::Image>>| {
                     div()
                         .id(SharedString::from(label.clone()))
@@ -135,7 +135,7 @@ impl PreviewPanel {
                                 .child(img(image.clone()).max_w_full().max_h_full())
                                 .into_any_element(),
                             None => div()
-                                .text_color(hsla(fg).opacity(0.5))
+                                .text_color(missing)
                                 .child(rust_i18n::t!("preview.diff.image_missing").into_owned())
                                 .into_any_element(),
                         })
@@ -174,10 +174,8 @@ impl PreviewPanel {
                     )
                     .into_any_element()
             }
-            Some(Loaded::Diff(content)) => self.render_diff_body(content, width, font, font_size, fg, bg, cx),
-            Some(Loaded::Text { .. }) if self.markdown_shown(preview) => {
-                self.render_markdown(preview, width, font, fg, bg, cx)
-            }
+            Some(Loaded::Diff(content)) => self.render_diff_body(content, width, font, font_size, cx),
+            Some(Loaded::Text { .. }) if self.markdown_shown(preview) => self.render_markdown(preview, width, font, cx),
             Some(Loaded::Text { lines, truncated, widest, wrap, .. }) => {
                 let count = lines.len() + usize::from(*truncated);
                 let digits = lines.len().to_string().len();
@@ -194,7 +192,7 @@ impl PreviewPanel {
                     "preview",
                     rows,
                     cx.processor(move |this, range: Range<usize>, _, cx| {
-                        this.render_preview_rows(range, font_size, gutter, fg, bg, cx)
+                        this.render_preview_rows(range, font_size, gutter, cx)
                     }),
                 )
                 .when(wrapped.is_none(), |list| {
@@ -206,7 +204,7 @@ impl PreviewPanel {
                 .py(px(BODY_PADDING))
                 .font_family(font);
                 let handle = preview.scroll.0.borrow().base_handle.clone();
-                let fade = right_fade(&handle, bg);
+                let fade = right_fade(&handle, cx);
                 let mut changes: Vec<_> = preview
                     .marks
                     .iter()
@@ -250,8 +248,6 @@ impl PreviewPanel {
         range: Range<usize>,
         font_size: f32,
         gutter: f32,
-        fg: Rgb,
-        bg: Rgb,
         cx: &mut Context<Self>,
     ) -> Vec<AnyElement> {
         let Some(preview) = self.preview() else {
@@ -261,10 +257,10 @@ impl PreviewPanel {
             return Vec::new();
         };
         let marks = &preview.marks;
-        let palette = self.input.palette;
+        let theme = cx.theme().clone();
         let selected = preview.selected_lines().unwrap_or(0..0);
-        let selected_bg = hsla(bg.mix(RENAMED, 0.30));
-        let dim = hsla(fg).opacity(0.4);
+        let selected_bg = hsla(background_rgb(&theme).mix(RENAMED, 0.30));
+        let dim = theme.foreground.opacity(0.4);
         let last = lines.len();
         let row_height = font_size + ROW_EXTRA_HEIGHT;
         // 换行时一项是折出来的一段：列表里的第几项、哪一行、这一行的哪一段、是不是第一段。
@@ -315,11 +311,8 @@ impl PreviewPanel {
                     }));
                 let spans = highlights.as_ref().and_then(|all| all.get(ix)).map_or(&[][..], Vec::as_slice);
                 let shown = runode_preview::display_line(line, spans, MAX_COLUMNS);
-                let runs: Vec<_> = shown
-                    .spans
-                    .iter()
-                    .map(|span| (span.range.clone(), highlight_style(span.style, fg, &palette)))
-                    .collect();
+                let runs: Vec<_> =
+                    shown.spans.iter().map(|span| (span.range.clone(), highlight_style(span.style, &theme))).collect();
                 let mut content = shown.text;
                 if shown.cut {
                     content.push('…');
@@ -349,7 +342,7 @@ impl PreviewPanel {
                         div()
                             .flex_none()
                             .pr(px(TEXT_RIGHT_PADDING))
-                            .text_color(hsla(fg))
+                            .text_color(theme.foreground)
                             .child(StyledText::new(content).with_highlights(runs)),
                     )
                     .on_mouse_down(

@@ -37,17 +37,22 @@ use gpui::{
     StyledText, SvgRenderer, UnderlineStyle, WeakEntity, Window, canvas, div, img, list, prelude::*, px, relative, svg,
 };
 use runode_preview::{Alert, Align, Block, Content, Image as MdImage, Inline, InlineStyle, Span};
-use runode_shared_types::color::Rgb;
 use select::{MdPos, TextKey};
 use text::{MdText, TextBox, Texts};
 
 use runode_ui::{
-    self as ui, a11y::Press, hsla, icons::CHECK_ICON, input::word_range_at, scrollbar::list_scrollbar, theme::RENAMED,
+    self as ui,
+    a11y::Press,
+    hsla,
+    icons::CHECK_ICON,
+    input::word_range_at,
+    scrollbar::list_scrollbar,
+    theme::{ActiveTheme as _, RENAMED, Theme},
 };
 
 use super::{
     ALERT_CAUTION_ICON, ALERT_IMPORTANT_ICON, ALERT_NOTE_ICON, ALERT_TIP_ICON, ALERT_WARNING_ICON, Loaded, MAX_COLUMNS,
-    Preview, PreviewPanel, WorkspaceId, body::highlight_style, loaded,
+    Preview, PreviewPanel, WorkspaceId, background_rgb, body::highlight_style, loaded,
 };
 
 /// 正文左右和上下留的空。
@@ -799,6 +804,8 @@ fn picture_of(content: Content, svg: &SvgRenderer) -> Option<Picture> {
 #[derive(Clone, Copy)]
 struct Colors {
     fg: Hsla,
+    /// 背景色：勾上的任务框里勾的颜色。
+    bg: Hsla,
     /// fgColor-muted：引用、六级标题、脚注的文字。
     muted: Hsla,
     link: Hsla,
@@ -816,18 +823,21 @@ struct Colors {
 }
 
 impl Colors {
-    fn new(fg: Rgb, bg: Rgb, palette: &[Rgb; 16]) -> Self {
+    fn new(theme: &Theme) -> Self {
+        let bg = background_rgb(theme);
+        let palette = &theme.ansi;
         // GitHub 深色主题的灰比浅色的调得重，按背景的亮度分开调。
         let dark = 0.299 * f32::from(bg.0) + 0.587 * f32::from(bg.1) + 0.114 * f32::from(bg.2) < 128.;
         let (muted, code) = if dark { (0.6, 0.18) } else { (0.74, 0.08) };
         Self {
-            fg: hsla(fg),
-            muted: hsla(bg.mix(fg, muted)),
+            fg: theme.foreground,
+            bg: theme.background,
+            muted: theme.mix(muted),
             link: hsla(palette[4]),
-            code_bg: hsla(bg.mix(fg, code)),
-            subtle: hsla(bg.mix(fg, 0.05)),
-            border: hsla(bg.mix(fg, 0.2)),
-            border_muted: hsla(bg.mix(fg, 0.14)),
+            code_bg: theme.mix(code),
+            subtle: theme.mix(0.05),
+            border: theme.mix(0.2),
+            border_muted: theme.mix(0.14),
             selection: hsla(bg.mix(RENAMED, 0.30)),
             alerts: [palette[4], palette[2], palette[5], palette[3], palette[1]].map(hsla),
         }
@@ -938,8 +948,6 @@ impl PreviewPanel {
         preview: &Preview,
         width: f32,
         mono: SharedString,
-        fg: Rgb,
-        bg: Rgb,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let view = &preview.markdown_view;
@@ -972,7 +980,7 @@ impl PreviewPanel {
         let rows = list(
             view.list.clone(),
             cx.processor(move |this, ix: usize, window, cx| {
-                this.render_markdown_row(ix, width, scroll, mono.clone(), fg, bg, window, cx)
+                this.render_markdown_row(ix, width, scroll, mono.clone(), window, cx)
             }),
         )
         .size_full();
@@ -997,7 +1005,7 @@ impl PreviewPanel {
         .absolute()
         .size_full();
         // 文字的颜色和留白都给到行上：`list` 不把自己的内边距套到各行，没设颜色的文字是 GPUI 默认的黑色。
-        body.text_color(hsla(fg))
+        body.text_color(cx.theme().foreground)
             .cursor(if view.hover.is_some() { CursorStyle::PointingHand } else { CursorStyle::IBeam })
             .child(rows)
             .child(events)
@@ -1012,8 +1020,6 @@ impl PreviewPanel {
         width: f32,
         (top, viewport): (ListOffset, f32),
         mono: SharedString,
-        fg: Rgb,
-        bg: Rgb,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
@@ -1029,8 +1035,8 @@ impl PreviewPanel {
         };
         let view = &preview.markdown_view;
         let font_size = self.input.font_size;
-        let palette = self.input.palette;
-        let colors = Colors::new(fg, bg, &palette);
+        let theme = cx.theme().clone();
+        let colors = Colors::new(&theme);
         let paint = Paint {
             mono: mono.clone(),
             colors,
@@ -1105,7 +1111,7 @@ impl PreviewPanel {
                             .pr(px(size * 0.4))
                             .flex()
                             .justify_end()
-                            .children(marker.map(|marker| render_marker(marker, depth, size, color, colors, bg))),
+                            .children(marker.map(|marker| render_marker(marker, depth, size, color, colors))),
                     );
                 }
             }
@@ -1150,7 +1156,7 @@ impl PreviewPanel {
             // 拆成一行一个元素。
             Leaf::Code { text: code, spans, source } => {
                 let runs: Vec<_> =
-                    spans.iter().map(|span| (span.range.clone(), highlight_style(span.style, fg, &palette))).collect();
+                    spans.iter().map(|span| (span.range.clone(), highlight_style(span.style, &theme))).collect();
                 let styled = StyledText::new(code.clone()).with_highlights(runs);
                 let source = source.clone();
                 let copied = source.clone();
@@ -1564,7 +1570,7 @@ impl PreviewPanel {
 }
 
 /// 列表项的记号：圆点按层数换成实心圆、空心圆、实心方块，有序列表是序号，任务列表是勾选框。
-fn render_marker(marker: Marker, depth: usize, size: f32, color: Hsla, colors: Colors, bg: Rgb) -> AnyElement {
+fn render_marker(marker: Marker, depth: usize, size: f32, color: Hsla, colors: Colors) -> AnyElement {
     let line = div().h(px(size * LINE_HEIGHT)).flex().items_center();
     match marker {
         Marker::Bullet => {
@@ -1585,7 +1591,7 @@ fn render_marker(marker: Marker, depth: usize, size: f32, color: Hsla, colors: C
                         check
                             .bg(colors.link)
                             .border_color(colors.link)
-                            .child(svg().path(CHECK_ICON).size(px(side - 3.)).text_color(hsla(bg)))
+                            .child(svg().path(CHECK_ICON).size(px(side - 3.)).text_color(colors.bg))
                     } else {
                         check.border_color(colors.muted)
                     }

@@ -1,8 +1,8 @@
 //! 把右侧的预览栏接到窗口上。预览栏本身在 `runode_preview_panel`：一个窗口一个 `PreviewPanel`，各 workspace
 //! 的标签都在它里面。这里每次对它做什么之前告诉它当前是哪个 workspace、交给它那个 workspace 最近读到的 git
-//! 状态，画的时候交给它配色、字体、栏宽和配置里的预览字号；它要窗口办的事（文件树定位、出现收起和放大还原时
-//! 重排窗口、开关变了要存档、把路径打进终端、按块暂存）经 `PreviewEvent` 交回来。自动换行和 Markdown 显示
-//! 源码的开关在它身上，随窗口存档。
+//! 状态，画的时候交给它字体、栏宽和配置里的预览字号（颜色它自己从主题读）；它要窗口办的事（文件树定位、
+//! 出现收起和放大还原时重排窗口、开关变了要存档、把路径打进终端、按块暂存）经 `PreviewEvent` 交回来。自动
+//! 换行和 Markdown 显示源码的开关在它身上，随窗口存档。
 
 use std::path::{Path, PathBuf};
 
@@ -10,7 +10,7 @@ use gpui::{AnyElement, App, Context, Empty, Entity, Focusable as _, IntoElement 
 use runode_config::PreviewClick;
 use runode_git::{self as git, HunkAction};
 use runode_preview_panel::{Input, PreviewEvent, PreviewPanel};
-use runode_shared_types::{color::Rgb, theme};
+use runode_shared_types::color::Rgb;
 
 pub(in crate::window) use runode_preview_panel::DiffTarget;
 
@@ -117,34 +117,25 @@ impl WindowView {
     }
 
     /// 当前 workspace 的预览栏，宽 `width`；`rightmost` 时它贴着窗口右边，标签条给右上角的面板开关让位。
-    /// 没有标签时什么也不画。放大着时它自己盖满终端区。
+    /// 没有标签时什么也不画。放大着时它自己盖满终端区。预览栏的颜色从主题读，`_fg`、`_bg` 用不着了，留着
+    /// 只为不在这一步改窗口里的几处调用。
     pub(super) fn render_preview(
         &mut self,
         width: f32,
         rightmost: bool,
-        fg: Rgb,
-        bg: Rgb,
+        _fg: Rgb,
+        _bg: Rgb,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         if !self.preview_shown(cx) {
             return Empty.into_any_element();
         }
         let config = &cx.global::<AppConfig>().0;
-        // 当前终端主题的 ANSI 16 色：默认配色上盖上配置里改过的那几项。
-        let mut palette = theme::ANSI;
-        for &(ix, rgb) in &config.palette {
-            if let Some(slot) = palette.get_mut(usize::from(ix)) {
-                *slot = rgb;
-            }
-        }
         let input = Input {
             width,
             right_inset: if rightmost { PANEL_TOGGLES_INSET } else { 6. },
-            fg,
-            bg,
             font: self.font_family(cx),
             font_size: config.preview_font_size,
-            palette,
             cards: cards(cx),
             status_bar_height: status_bar::height(cx),
         };
