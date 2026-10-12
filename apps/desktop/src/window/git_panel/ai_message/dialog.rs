@@ -17,6 +17,7 @@ use super::{
     command_preview, save_recipe, saved_recipe, variable_preview,
 };
 use crate::ui::button::{Button, ButtonSize, ButtonVariant};
+use crate::ui::dialog::Dialog;
 use crate::ui::menu::MenuHost as _;
 use crate::ui::theme::ActiveTheme as _;
 use crate::{
@@ -254,7 +255,6 @@ impl WindowView {
     ) -> Option<Stateful<Div>> {
         let dialog = self.commit_message_dialog.as_ref()?;
         let (fg_rgb, bg_rgb) = (fg, bg);
-        let panel_bg = hsla(bg.mix(fg, 0.03));
         let field_bg = hsla(bg);
         let hover_bg = hsla(bg.mix(fg, 0.08));
         let selected_bg = hsla(bg.mix(fg, 0.16));
@@ -529,10 +529,7 @@ impl WindowView {
             )
             .children(status);
 
-        let panel = div()
-            .id("commit-message-dialog")
-            .role(Role::Dialog)
-            .aria_label(rust_i18n::t!("git.ai_message.title").into_owned())
+        let panel = Dialog::new("commit-message-dialog", rust_i18n::t!("git.ai_message.title").into_owned())
             .aria_description(rust_i18n::t!("git.ai_message.subtitle").into_owned())
             .on_key_down(cx.listener(Self::commit_message_dialog_key))
             .w(px(560.))
@@ -541,15 +538,6 @@ impl WindowView {
             .flex()
             .flex_col()
             .gap(px(16.))
-            .rounded(px(12.))
-            .bg(panel_bg)
-            .border_1()
-            .border_color(border)
-            .shadow_lg()
-            .text_size(FontSize::Body)
-            .text_color(fg)
-            // 点在对话框里不算点到外面。
-            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
             .child(header)
             .child(
                 div()

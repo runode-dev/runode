@@ -16,6 +16,7 @@ use runode_shared_types::color::Rgb;
 
 use super::store;
 use crate::ui::button::{Button, ButtonVariant};
+use crate::ui::dialog::Dialog;
 use crate::{
     ui::{
         a11y::{Disable as _, Press},
@@ -316,7 +317,6 @@ impl WindowView {
         cx: &mut Context<Self>,
     ) -> Option<Stateful<gpui::Div>> {
         let dialog = self.todo_dialog.as_ref()?;
-        let panel_bg = hsla(bg.mix(fg, 0.03));
         let hover_bg = hsla(bg.mix(fg, 0.06));
         let primary_bg = hsla(bg.mix(fg, 0.16));
         let fg_h = hsla(fg);
@@ -468,10 +468,7 @@ impl WindowView {
         let save = button("todo-dialog-save", rust_i18n::t!("todo_board.save").into_owned(), ButtonVariant::Secondary)
             .when(dialog.saving, |button| button.opacity(0.5))
             .on_press(cx, |this, _, cx| this.save_todo_dialog(cx));
-        let panel = div()
-            .id("todo-dialog")
-            .role(Role::Dialog)
-            .aria_label(title.clone())
+        let panel = Dialog::new("todo-dialog", title.clone())
             .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
                 if event.keystroke.key == "escape" && !event.keystroke.modifiers.modified() {
                     cx.stop_propagation();
@@ -485,14 +482,6 @@ impl WindowView {
             .flex()
             .flex_col()
             .gap(px(12.))
-            .rounded(px(12.))
-            .bg(panel_bg)
-            .border_1()
-            .border_color(fg_h.opacity(0.12))
-            .shadow_lg()
-            .text_size(FontSize::Body)
-            .text_color(fg_h)
-            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
             .child(
                 div()
                     .id("todo-dialog-title")

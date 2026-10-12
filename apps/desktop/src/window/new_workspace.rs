@@ -18,6 +18,7 @@ use crate::{
     ui::{
         a11y::Press,
         card::Card,
+        dialog::Dialog,
         font_size::FontSize,
         hsla,
         input::{Input, InputEvent, InputState},
@@ -236,10 +237,7 @@ impl WindowView {
             .on_press(cx, |this, window, cx| this.close_new_workspace(window, cx));
         let title = rust_i18n::t!("workspace.new").into_owned();
         let other = rust_i18n::t!("workspace.other").into_owned();
-        let panel = div()
-            .id("new-workspace-dialog")
-            .role(Role::Dialog)
-            .aria_label(title.clone())
+        let panel = Dialog::new("new-workspace-dialog", title.clone())
             .track_focus(&dialog.focus)
             .on_key_down(cx.listener(Self::new_workspace_key))
             .w(px(480.))
@@ -248,15 +246,6 @@ impl WindowView {
             .flex()
             .flex_col()
             .gap(px(12.))
-            .rounded(px(12.))
-            .bg(panel_bg)
-            .border_1()
-            .border_color(border)
-            .shadow_lg()
-            .text_size(FontSize::Body)
-            .text_color(fg)
-            // 点在对话框里不算点到外面。
-            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
             .child(
                 div()
                     .pb(px(8.))

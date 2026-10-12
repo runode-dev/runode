@@ -25,6 +25,7 @@ use serde_json::{Map, Value};
 
 use super::{AddTask, EditTask};
 use crate::ui::button::{Button, ButtonVariant};
+use crate::ui::dialog::Dialog;
 use crate::{
     config::AppConfig,
     settings::keybind_caps,
@@ -279,11 +280,9 @@ impl WindowView {
 
     pub(in crate::window) fn render_add_task(&self, fg: Rgb, bg: Rgb, cx: &mut Context<Self>) -> Option<Stateful<Div>> {
         let dialog = self.add_task.as_ref()?;
-        let panel_bg = hsla(bg.mix(fg, 0.03));
         let hover_bg = hsla(bg.mix(fg, 0.06));
         let primary_bg = hsla(bg.mix(fg, 0.16));
         let fg = hsla(fg);
-        let border = fg.opacity(0.12);
         let field = |label: String, input: &Entity<InputState>| {
             div()
                 .flex()
@@ -380,10 +379,7 @@ impl WindowView {
             .on_press(cx, |this, window, cx| this.save_task(window, cx));
         let (title, scope_label, hint) =
             (title.into_owned(), rust_i18n::t!("tasks.scope").into_owned(), hint.into_owned());
-        let panel = div()
-            .id("add-task-dialog")
-            .role(Role::Dialog)
-            .aria_label(title.clone())
+        let panel = Dialog::new("add-task-dialog", title.clone())
             .on_key_down(cx.listener(Self::add_task_key))
             .w(px(420.))
             .max_w_full()
@@ -391,15 +387,6 @@ impl WindowView {
             .flex()
             .flex_col()
             .gap(px(12.))
-            .rounded(px(12.))
-            .bg(panel_bg)
-            .border_1()
-            .border_color(border)
-            .shadow_lg()
-            .text_size(FontSize::Body)
-            .text_color(fg)
-            // 点在对话框里不算点到外面。
-            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
             .child(
                 div()
                     .id("add-task-title")
