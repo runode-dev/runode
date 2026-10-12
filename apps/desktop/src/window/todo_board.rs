@@ -859,8 +859,8 @@ impl WindowView {
             )
     }
 
-    /// 卡片的样子，看板上的和飞着的共用：第一行是目录和分支，`corner` 摆在右上角；第二行是标题；第三行是
-    /// agent、开始的时间和来自哪个定时，`primary` 摆在右下角。`agent_id` 给 agent 标记用（它转圈要 id）。
+    /// 卡片的样子，看板上的和飞着的共用：第一行是目录，`corner` 摆在右上角；有分支时下面一行是分支；再下面是
+    /// 标题；最后一行是 agent、开始的时间和来自哪个定时，`primary` 摆在右下角。`agent_id` 给 agent 标记用（它转圈要 id）。
     #[allow(clippy::too_many_arguments)]
     fn card_face(
         &self,
@@ -898,17 +898,20 @@ impl WindowView {
             .text_color(muted)
             .child(place_badge(&place))
             .child(div().min_w_0().truncate().child(place))
-            .children(todo.branch.clone().map(|branch| {
-                div()
-                    .flex()
-                    .items_center()
-                    .gap(px(3.))
-                    .min_w_0()
-                    .child(svg().path(BRANCH_ICON).flex_none().size(px(11.)).text_color(fg_h.opacity(0.45)))
-                    .child(div().truncate().child(branch))
-            }))
             .child(div().flex_1())
             .children(corner);
+        // 分支单独一行，和目录挤在一行时窄列里两个都截得认不出。
+        let branch = todo.branch.clone().map(|branch| {
+            div()
+                .flex()
+                .items_center()
+                .gap(px(4.))
+                .min_w_0()
+                .text_size(FontSize::Small)
+                .text_color(muted)
+                .child(svg().path(BRANCH_ICON).flex_none().size(px(11.)).text_color(fg_h.opacity(0.45)))
+                .child(div().min_w_0().truncate().child(branch))
+        });
         let bottom = div()
             .flex()
             .items_center()
@@ -939,6 +942,7 @@ impl WindowView {
             .border_color(fg_h.opacity(0.08))
             .shadow(card_shadow(None, false))
             .child(top)
+            .children(branch)
             .child(div().min_w_0().truncate().font_weight(FontWeight::MEDIUM).child(todo.spec.title.clone()))
             .child(bottom)
     }
