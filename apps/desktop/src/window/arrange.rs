@@ -6,6 +6,7 @@
 //! 方向、数字键或上下键改个数、回车打开、Esc 关掉，也可以用鼠标点。
 
 use crate::ui::button::{Button, ButtonVariant};
+use crate::ui::popover::Popover;
 use crate::ui::theme::ActiveTheme as _;
 use gpui::{
     Context, Div, FocusHandle, Focusable, Hsla, KeyDownEvent, Role, SharedString, Stateful, Subscription, Window,
@@ -212,7 +213,6 @@ impl WindowView {
     /// 浮在标题栏下方正中的排列浮层：方向、个数、排出来的样子和打开按钮。
     pub(super) fn render_arrange_picker(&self, fg: Rgb, bg: Rgb, cx: &mut Context<Self>) -> Option<Div> {
         let picker = self.arrange_picker.as_ref()?;
-        let panel_bg = hsla(bg.mix(fg, 0.05));
         let selected_bg = hsla(bg.mix(fg, 0.16));
         let hover_bg = hsla(bg.mix(fg, 0.09));
         let fg = hsla(fg);
@@ -275,8 +275,7 @@ impl WindowView {
             .py(px(5.))
             .rounded(px(5.))
             .on_press_down(cx, |this, window, cx| this.confirm_arrange(window, cx));
-        let panel = div()
-            .id("arrange-picker")
+        let panel = Popover::new("arrange-picker")
             .role(Role::Dialog)
             .aria_label(rust_i18n::t!("layout.title"))
             .track_focus(&picker.focus)
@@ -287,14 +286,6 @@ impl WindowView {
             .flex()
             .flex_col()
             .gap(px(10.))
-            .rounded(px(8.))
-            .bg(panel_bg)
-            .border_1()
-            .border_color(fg.opacity(0.15))
-            .shadow_md()
-            .occlude()
-            .text_size(FontSize::Body)
-            .text_color(fg)
             .child(div().text_color(fg).child(rust_i18n::t!("layout.title").into_owned()))
             .child(
                 row("arrange-directions", rust_i18n::t!("layout.direction").into_owned().into()).children(directions),

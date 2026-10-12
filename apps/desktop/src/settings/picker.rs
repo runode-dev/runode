@@ -9,6 +9,7 @@ use gpui::{
 };
 
 use super::{SettingsView, controls::Colors};
+use crate::ui::popover::Popover;
 use crate::ui::{
     font_size::{FontSize, scaled},
     input::{Input, InputEvent, InputState},
@@ -266,20 +267,13 @@ impl SettingsView {
                 .text_color(colors.fg.opacity(0.5))
                 .child(rust_i18n::t!("settings.no_matches").into_owned())
         });
-        let panel = div()
-            .id("picker")
+        let panel = Popover::new("picker")
             .role(Role::Dialog)
             .aria_label(picker.title.clone())
             .w(px(PICKER_WIDTH))
             .flex()
             .flex_col()
-            .rounded(px(8.))
-            .bg(colors.panel)
-            .border_1()
-            .border_color(colors.border)
             .shadow_lg()
-            .occlude()
-            .text_size(FontSize::Body)
             .capture_key_down(cx.listener(Self::picker_key))
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
             .child(

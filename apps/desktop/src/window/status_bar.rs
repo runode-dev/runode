@@ -17,6 +17,7 @@
 
 mod probe;
 
+use crate::ui::popover::Popover;
 use crate::ui::theme::ActiveTheme as _;
 use std::{
     collections::{HashMap, HashSet},
@@ -458,8 +459,6 @@ impl WindowView {
             StatusPopover::Resources => self.render_resources_popover(fg, cx),
             StatusPopover::Ports { external } => self.render_ports_popover(external, fg, bg, cx),
         });
-        let popover_bg = hsla(bg.mix(fg, 0.04));
-        let border = hsla(fg).opacity(0.15);
         let title = popover.title();
         // 浮层的左下角对着这一块的左上角，往上让出一点；放不下时贴着窗口边挪进来。
         let content = content.map(|content| {
@@ -470,18 +469,10 @@ impl WindowView {
                         .offset(point(px(0.), px(-POPOVER_GAP)))
                         .snap_to_window_with_margin(px(POPOVER_GAP))
                         .child(
-                            div()
-                                .id("status-popover")
+                            Popover::new("status-popover")
                                 .role(Role::Dialog)
                                 .aria_label(title.clone())
-                                .rounded(px(8.))
-                                .border_1()
-                                .border_color(border)
-                                .bg(popover_bg)
                                 .shadow_lg()
-                                .text_size(FontSize::Body)
-                                .text_color(hsla(fg))
-                                .occlude()
                                 .child(content)
                                 .on_mouse_down_out(cx.listener(|this, _, _, cx| {
                                     this.status_popover = None;

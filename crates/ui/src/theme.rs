@@ -173,7 +173,7 @@ mod tests {
             // 窗口、卡片（`panel::card`）的底色和字色。
             assert_eq!((theme.background, theme.foreground), (b, f));
             assert_eq!((theme.card, theme.card_foreground), (b, f));
-            // 菜单的底色（`render_menu_list` 的 `menu_bg`）。
+            // 菜单和各个浮层（`Popover`）的底色，原来菜单的写法。
             assert_eq!(theme.popover, hsla(bg.mix(fg, 0.06)));
             assert_eq!(theme.popover_foreground, f);
             assert_eq!((theme.primary, theme.primary_foreground), (f, b));

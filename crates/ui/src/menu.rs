@@ -5,14 +5,15 @@
 
 use gpui::{
     Action, Anchor, AnyElement, App, Context, Div, FocusHandle, KeyDownEvent, MouseButton, Pixels, Point, Role,
-    ScrollHandle, SharedString, Stateful, Window, anchored, deferred, div, point, prelude::*, px, relative, svg,
+    ScrollHandle, SharedString, Window, anchored, deferred, div, point, prelude::*, px, relative, svg,
 };
 
 use crate::{
     a11y::{A11yPress, Disable},
     button::{Button, ButtonSize},
-    font_size::{FontSize, scaled},
+    font_size::scaled,
     icons::{CHEVRON_DOWN_ICON, CHEVRON_RIGHT_ICON},
+    popover::Popover,
     theme::ActiveTheme as _,
     tooltip::{shortcut_text, tooltip},
 };
@@ -371,7 +372,7 @@ pub trait MenuHost: Sized + 'static {
     }
 
     /// 菜单本身，最高 `max_height`，超出窗口时才在里面滚动；点到菜单外面就关掉。
-    fn render_menu_list(&self, max_height: f32, window: &Window, cx: &mut Context<Self>) -> Option<Stateful<Div>> {
+    fn render_menu_list(&self, max_height: f32, window: &Window, cx: &mut Context<Self>) -> Option<Popover> {
         let menu = self.menu()?;
         // 辅助工具悬停不了，行里的按钮在它读着时一直露出来，不然按不到。
         let a11y = window.is_a11y_active();
@@ -379,7 +380,7 @@ pub trait MenuHost: Sized + 'static {
         let hover_bg = theme.mix(0.12);
         // 选中的行底色已经是 `hover_bg`，行里按钮悬停时再深一些。
         let button_hover_bg = theme.mix(0.22);
-        let (menu_bg, border, fg) = (theme.popover, theme.input, theme.popover_foreground);
+        let fg = theme.popover_foreground;
         // 有勾选项时每一行左边都留出打勾的那一列，字对齐。
         let check_column = menu.items.iter().flatten().any(|item| item.checked.is_some());
         let items = menu.items.iter().enumerate().map(|(ix, item)| {
@@ -480,8 +481,7 @@ pub trait MenuHost: Sized + 'static {
                 }))
                 .into_any_element()
         });
-        let list = div()
-            .id("file-menu")
+        let list = Popover::new("file-menu")
             .role(Role::Menu)
             .track_focus(&menu.focus)
             .on_key_down(cx.listener(Self::menu_key))
@@ -493,12 +493,7 @@ pub trait MenuHost: Sized + 'static {
             .flex()
             .flex_col()
             .rounded(px(6.))
-            .border_1()
-            .border_color(border)
-            .bg(menu_bg)
             .shadow_lg()
-            .text_size(FontSize::Body)
-            .occlude()
             .children(items)
             .on_mouse_down_out(cx.listener(|this, _, window, cx| this.close_menu(window, cx)));
         Some(list)

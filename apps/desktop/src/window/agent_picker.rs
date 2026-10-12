@@ -1,11 +1,12 @@
 //! agent 列表：盖在窗口上面的浮层，列出所有窗口里的 agent 分屏，输入文字过滤，上下键选、回车
 //! 跳过去、Esc 关掉。排序和过滤的规则见 `agents`。
 
+use crate::ui::popover::Popover;
 use crate::ui::theme::ActiveTheme as _;
 use std::collections::HashMap;
 
 use gpui::{
-    App, Context, Div, Entity, EntityId, Focusable, Hsla, KeyDownEvent, Role, ScrollHandle, SharedString, Stateful,
+    App, Context, Div, Entity, EntityId, Focusable, KeyDownEvent, Role, ScrollHandle, SharedString, Stateful,
     Subscription, Window, div, prelude::*, px,
 };
 use runode_shared_types::color::Rgb;
@@ -173,7 +174,6 @@ impl WindowView {
         let rows = self.picker_rows(window, cx);
         let selected = self.picker_selected(&rows);
         let picker = self.agent_picker.as_ref()?;
-        let panel_bg = hsla(bg.mix(fg, 0.05));
         let selected_bg = hsla(bg.mix(fg, 0.14));
         let hover_bg = hsla(bg.mix(fg, 0.09));
         let fg = hsla(fg);
@@ -252,8 +252,7 @@ impl WindowView {
                     )
             })
             .collect();
-        let panel = div()
-            .id("agent-picker")
+        let panel = Popover::new("agent-picker")
             .role(Role::Dialog)
             .aria_label(rust_i18n::t!("agent.picker.title"))
             .w(px(PICKER_WIDTH))
@@ -266,7 +265,7 @@ impl WindowView {
             .track_scroll(&picker.scroll)
             .children(rows)
             .children(empty);
-        Some(picker_panel(panel, picker.field.clone(), list, fg, panel_bg, cx))
+        Some(picker_panel(panel, picker.field.clone(), list, cx))
     }
 }
 
@@ -287,26 +286,11 @@ pub(super) fn nav_delta(event: &KeyDownEvent) -> Option<isize> {
 /// agent 列表和分支列表共用的浮层：`panel` 是调用方定好 id、宽度和按键处理的外框，上面一行放
 /// 输入框，下面是 `list`（调用方定好 id、最高多高、各行和滚动位置），多了竖着滚动。整个浮在标题栏
 /// 下方正中。
-pub(super) fn picker_panel(
-    panel: Stateful<Div>,
-    field: Entity<InputState>,
-    list: Stateful<Div>,
-    fg: Hsla,
-    panel_bg: Hsla,
-    cx: &App,
-) -> Div {
+pub(super) fn picker_panel(panel: Popover, field: Entity<InputState>, list: Stateful<Div>, cx: &App) -> Div {
     let panel = panel
         .max_w_full()
         .flex()
         .flex_col()
-        .rounded(px(8.))
-        .bg(panel_bg)
-        .border_1()
-        .border_color(fg.opacity(0.15))
-        .shadow_md()
-        .occlude()
-        .text_size(FontSize::Body)
-        .text_color(fg)
         .child(
             div()
                 .flex_none()

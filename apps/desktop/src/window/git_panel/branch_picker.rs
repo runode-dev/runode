@@ -16,6 +16,7 @@ use super::super::{
     agent_picker::{nav_delta, picker_panel},
 };
 use crate::ui::a11y::A11yPress;
+use crate::ui::popover::Popover;
 use crate::{
     assets::{BRANCH_ICON, CHECK_ICON, PLUS_ICON},
     ui::{
@@ -223,7 +224,6 @@ impl WindowView {
         let picker = self.branch_picker.as_ref()?;
         let rows = picker.rows(cx);
         let selected = picker.selected.min(rows.len().saturating_sub(1));
-        let panel_bg = hsla(bg.mix(fg, 0.05));
         let selected_bg = hsla(bg.mix(fg, 0.14));
         let hover_bg = hsla(bg.mix(fg, 0.09));
         let fg = hsla(fg);
@@ -317,8 +317,7 @@ impl WindowView {
             })
             .collect();
         let title = picker_title(picker.create_only);
-        let panel = div()
-            .id("branch-picker")
+        let panel = Popover::new("branch-picker")
             .role(Role::Dialog)
             .aria_label(title.clone())
             .w(px(PICKER_WIDTH))
@@ -331,6 +330,6 @@ impl WindowView {
             .track_scroll(&picker.scroll)
             .children(items)
             .children(empty);
-        Some(picker_panel(panel, picker.field.clone(), list, fg, panel_bg, cx))
+        Some(picker_panel(panel, picker.field.clone(), list, cx))
     }
 }
