@@ -11,7 +11,7 @@ use std::{
 use gpui::{Entity, ListAlignment, ListState, Subscription, UniformListScrollHandle, px};
 use runode_git::{self as git, FileStatus, RepoKind, Section};
 
-use super::tree::{TreeItem, file_tree};
+use crate::ui::path_tree::{TreeItem, path_tree};
 use crate::ui::textarea::TextareaState;
 
 /// 多个仓库时的列表往可见区域外多画这么高，滚动时块头不至于一下子冒出来。
@@ -480,7 +480,7 @@ impl GitPanel {
             }
             let paths: Vec<_> = files.iter().map(|&fi| (fi, git.files(source)[fi].path.as_path())).collect();
             let expanded = |dir: &Path| !self.collapsed_dirs.contains(&(git.root.clone(), section, dir.to_path_buf()));
-            for item in file_tree(&paths, expanded) {
+            for item in path_tree(&paths, expanded) {
                 match item {
                     TreeItem::Dir { path, name, depth, expanded } => {
                         out.level = depth;
@@ -606,7 +606,7 @@ fn push_graph(out: &mut Out, ri: usize, root: &Path, graph: Option<&Graph>, tree
         }
         let paths: Vec<_> = files.iter().enumerate().map(|(fi, file)| (fi, file.path.as_path())).collect();
         let expanded = |dir: &Path| !graph.collapsed_dirs.contains(&(commit.id.clone(), dir.to_path_buf()));
-        for item in file_tree(&paths, expanded) {
+        for item in path_tree(&paths, expanded) {
             match item {
                 TreeItem::Dir { path, name, depth, expanded } => {
                     out.level = depth;

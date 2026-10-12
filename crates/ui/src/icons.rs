@@ -29,4 +29,13 @@ crate::icons! {
     /// 放大和还原：分屏标题条和预览栏的标签条。
     pub MAXIMIZE_ICON = "maximize",
     pub MINIMIZE_ICON = "minimize",
+    /// 面板标题行上的「更多」菜单，Git 面板和文件树共用。
+    pub MORE_ICON = "more",
+    /// Git 面板和文件树搜索结果切换树形式、列表形式的按钮，画的是切过去以后的样子。
+    pub VIEW_TREE_ICON = "view-tree",
+    pub VIEW_LIST_ICON = "view-list",
+    /// 浏览文件夹、在访达里打开：新建工作区对话框和文件树的「更多」菜单。
+    pub FOLDER_OPEN_ICON = "folder-open",
+    /// 关闭、清空：分屏标题条、对话框、任务板和文件树的搜索框。
+    pub CLOSE_ICON = "close",
 }

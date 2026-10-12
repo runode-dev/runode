@@ -19,11 +19,7 @@ mod graph;
 mod list;
 mod rows;
 mod run;
-mod tree;
 mod worktree;
-
-/// 文件树的搜索结果以树形式查看时也按这个分层。
-pub(super) use tree::{TreeItem, file_tree};
 
 use crate::ui::button::{Button, ButtonSize};
 use crate::ui::theme::ActiveTheme as _;

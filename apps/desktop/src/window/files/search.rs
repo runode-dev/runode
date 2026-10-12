@@ -1,6 +1,6 @@
 //! 文件树上面的搜索框：按名称找文件，或者按内容找文件里的行。搜索词不为空时文件树换成结果，
 //! 单击在预览栏里打开（内容结果跳到那一行），双击开成固定标签，回车打开选中的那一条，Esc 清空。
-//! 结果可以排成列表，也可以按目录排成树（和 Git 面板共用 `file_tree`），目录能收起。
+//! 结果可以排成列表，也可以按目录排成树（和 Git 面板共用 `path_tree`），目录能收起。
 //!
 //! 在后台搜：仓库里按名称找的是 `runode_git::list_files` 列出的文件，不在仓库里时从根目录往下走，
 //! 列一次记着，文件树重读过时再列；按内容找调 `runode_git::grep`，等打字停一下再起。按名称找时搜索词全小写就不分大小写；按内容找时可以区分大小写、
@@ -37,14 +37,10 @@ use crate::{
         font_size::{FontSize, scaled},
         hsla,
         input::{Input, InputEvent, InputState},
+        path_tree::{TreeItem, path_tree},
         tooltip::tooltip,
     },
-    window::{
-        git_panel::{TreeItem, file_tree},
-        model::WorkspaceId,
-        persist::format::SavedSearchOptions as ContentOptions,
-        project::panel_message,
-    },
+    window::{model::WorkspaceId, persist::format::SavedSearchOptions as ContentOptions, project::panel_message},
 };
 
 /// 按名称最多列出的文件数。
@@ -112,7 +108,7 @@ enum SearchRow {
 fn layout_rows(found: &[Found], tree: bool, collapsed: &HashSet<PathBuf>) -> Vec<SearchRow> {
     let files: Vec<_> = if tree {
         let paths: Vec<_> = found.iter().enumerate().map(|(ix, found)| (ix, found.rel.as_path())).collect();
-        file_tree(&paths, |dir| !collapsed.contains(dir))
+        path_tree(&paths, |dir| !collapsed.contains(dir))
     } else {
         (0..found.len()).map(|index| TreeItem::File { index, depth: 0 }).collect()
     };

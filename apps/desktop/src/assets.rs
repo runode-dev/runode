@@ -14,9 +14,9 @@ use crate::{
 
 /// 几处共用的图标在 `runode_ui` 里：展开、收起的箭头，行尾和菜单常用的按钮，和预览栏共用的那些。
 pub use crate::ui::icons::{
-    ARROW_DOWN_ICON, CHECK_ICON, CHEVRON_DOWN_ICON, CHEVRON_RIGHT_ICON, CODE_ICON, DISCARD_ICON, GLOBE_ICON,
-    MAXIMIZE_ICON, MINIMIZE_ICON, MINUS_ICON, OPEN_FILE_ICON, PENCIL_ICON, PLAY_ICON, PLUS_ICON, REFRESH_ICON,
-    SYNC_ICON, TERMINAL_ICON, TRASH_ICON,
+    ARROW_DOWN_ICON, CHECK_ICON, CHEVRON_DOWN_ICON, CHEVRON_RIGHT_ICON, CLOSE_ICON, CODE_ICON, DISCARD_ICON,
+    FOLDER_OPEN_ICON, GLOBE_ICON, MAXIMIZE_ICON, MINIMIZE_ICON, MINUS_ICON, MORE_ICON, OPEN_FILE_ICON, PENCIL_ICON,
+    PLAY_ICON, PLUS_ICON, REFRESH_ICON, SYNC_ICON, TERMINAL_ICON, TRASH_ICON, VIEW_LIST_ICON, VIEW_TREE_ICON,
 };
 /// GitHub Actions 页的标签图标，图标本身跟着页面在 `runode_github_actions` 里。
 pub use runode_github_actions::WORKFLOW_ICON as ACTIONS_WORKFLOW_ICON;
@@ -35,20 +35,13 @@ icons! {
     pub FILTER_ICON = "filter",
     /// Git 面板提交说明框里让 AI 写说明的按钮。
     pub SPARKLE_ICON = "sparkle",
-    /// Git 面板里的按钮：分支、更多，以及储藏的应用和弹出（取消暂存、放弃改动和提交的在 `runode_ui`）。
+    /// Git 面板里的按钮：分支，以及储藏的应用和弹出（更多、取消暂存、放弃改动和提交的在 `runode_ui`）。
     pub BRANCH_ICON = "branch",
-    pub MORE_ICON = "more",
     pub STASH_APPLY_ICON = "stash-apply",
     pub STASH_POP_ICON = "stash-pop",
-    /// Git 面板标题栏上切换改动的文件以树形式还是列表形式查看的按钮，画的是切过去以后的样子。
-    pub VIEW_TREE_ICON = "view-tree",
-    pub VIEW_LIST_ICON = "view-list",
-    /// 卡片样式下分屏标题条右边向右、向下分屏和关闭分屏的按钮（放大、还原的在 `runode_ui`）。
+    /// 卡片样式下分屏标题条右边向右、向下分屏的按钮（关闭、放大、还原的在 `runode_ui`）。
     pub SPLIT_RIGHT_ICON = "split-right",
     pub SPLIT_DOWN_ICON = "split-down",
-    pub CLOSE_ICON = "close",
-    /// 新建工作区对话框里浏览文件夹的图标（从 URL 克隆用 `GLOBE_ICON`，创建新项目用 `PLUS_ICON`）。
-    pub FOLDER_OPEN_ICON = "folder-open",
     /// 卡片样式下标签图标叠里代表 shell 和普通程序的那块：深色底上的提示符。
     pub PROMPT_ICON = "prompt",
     /// 卡片样式下 agent 等你回答时的标记：像素画的问号。

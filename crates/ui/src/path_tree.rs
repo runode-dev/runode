@@ -9,7 +9,7 @@ use std::{
 
 /// 排成树以后的一行。
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(in crate::window) enum TreeItem {
+pub enum TreeItem {
     /// 目录：`path` 是相对根目录的路径，并成一行的是链条最深的那个；`name` 是显示的名字。
     Dir { path: PathBuf, name: String, depth: usize, expanded: bool },
     /// 文件：`index` 是调用方给的下标。
@@ -39,7 +39,7 @@ impl Node {
 
 /// 把 `files`（下标和相对根目录的路径）排成树。`expanded` 说某个目录（并成一行的按链条最深的
 /// 那个）展开着没有，收起的目录下面的不排。
-pub(in crate::window) fn file_tree(files: &[(usize, &Path)], expanded: impl Fn(&Path) -> bool) -> Vec<TreeItem> {
+pub fn path_tree(files: &[(usize, &Path)], expanded: impl Fn(&Path) -> bool) -> Vec<TreeItem> {
     let mut root = Node::default();
     for &(index, path) in files {
         let mut node = &mut root;
@@ -94,7 +94,7 @@ mod tests {
     fn groups_files_by_directory() {
         let paths = ["src/main.rs", "README.md", "src/a/b.rs", "Cargo.toml", "src/A.rs", "docs/x.md"];
         let files: Vec<_> = paths.iter().enumerate().map(|(ix, path)| (ix, Path::new(*path))).collect();
-        let items = file_tree(&files, |_| true);
+        let items = path_tree(&files, |_| true);
         // 目录在前、文件在后，各自按名字排，不分大小写；只有一个文件的目录不并。
         assert_eq!(
             items,
@@ -116,7 +116,7 @@ mod tests {
     fn compacts_single_child_directories() {
         let paths = ["crates/desktop/src/a.rs", "crates/desktop/src/b/c.rs", "crates/desktop/src/b/d.rs"];
         let files: Vec<_> = paths.iter().enumerate().map(|(ix, path)| (ix, Path::new(*path))).collect();
-        let items = file_tree(&files, |_| true);
+        let items = path_tree(&files, |_| true);
         assert_eq!(
             items,
             [
@@ -128,7 +128,7 @@ mod tests {
             ]
         );
         // 收起的目录下面的不排；展开与否按并成一行后最深的那个目录认。
-        let items = file_tree(&files, |path| path != Path::new("crates/desktop/src"));
+        let items = path_tree(&files, |path| path != Path::new("crates/desktop/src"));
         assert_eq!(
             items,
             [TreeItem::Dir {
@@ -143,7 +143,7 @@ mod tests {
     #[test]
     fn files_at_the_root_stay_flat() {
         let files = [(0, Path::new("b.txt")), (1, Path::new("a.txt"))];
-        assert_eq!(file_tree(&files, |_| true), [file(1, 0), file(0, 0)]);
-        assert!(file_tree(&[], |_| true).is_empty());
+        assert_eq!(path_tree(&files, |_| true), [file(1, 0), file(0, 0)]);
+        assert!(path_tree(&[], |_| true).is_empty());
     }
 }
