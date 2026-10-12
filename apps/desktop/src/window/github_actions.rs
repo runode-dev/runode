@@ -93,14 +93,14 @@ impl WindowView {
             return shell.child(panel_message(rust_i18n::t!("panel.not_repo").into_owned(), cx));
         }
         self.sync_github_actions(cx);
-        self.github_actions.update(cx, |page, _| page.set_colors(fg, bg));
         shell.child(div().flex_1().min_h_0().child(self.github_actions.clone()))
     }
 
-    /// 状态栏左边固定的工作流。
-    pub(super) fn render_pinned_workflows(&self, fg: Rgb, bg: Rgb, cx: &mut Context<Self>) -> Vec<AnyElement> {
+    /// 状态栏左边固定的工作流。颜色由 `render_pinned` 从主题读，`_fg`、`_bg` 用不着了，留着只为不在这一步
+    /// 改状态栏的调用。
+    pub(super) fn render_pinned_workflows(&self, _fg: Rgb, _bg: Rgb, cx: &mut Context<Self>) -> Vec<AnyElement> {
         let items = self.github_actions.read(cx).pinned_items();
-        render_pinned(items, status_bar::STATUS_BAR_HEIGHT - 6., fg, bg, cx)
+        render_pinned(items, status_bar::STATUS_BAR_HEIGHT - 6., cx)
     }
 
     /// 页要窗口办的事。

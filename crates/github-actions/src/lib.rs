@@ -6,9 +6,9 @@
 //! 最近一次运行的状态（`render_pinned`）。
 //!
 //! 页是一个单独的视图（`ActionsPanel`），面板外框和顶上的标签由 app 画。仓库、分支、shell 报告的 PATH、
-//! 固定的工作流和配色由 app 经 `set_input` 交进来，要 app 办的事经 `ActionsEvent` 交出去。经用户自己装的
-//! gh 读写，见 `gh`；app 在窗口在前台时每秒调一次 `poll`，页上显示着的和固定在状态栏上的数据隔
-//! `POLL_IDLE` 重读一次，有没跑完的运行或 job 时隔 `POLL_RUNNING`。
+//! 固定的工作流由 app 经 `set_input` 交进来，颜色画的时候从主题（`ActiveTheme`）读，要 app 办的事经
+//! `ActionsEvent` 交出去。经用户自己装的 gh 读写，见 `gh`；app 在窗口在前台时每秒调一次 `poll`，页上
+//! 显示着的和固定在状态栏上的数据隔 `POLL_IDLE` 重读一次，有没跑完的运行或 job 时隔 `POLL_RUNNING`。
 
 mod gh;
 
@@ -28,7 +28,6 @@ use gpui::{
     FocusHandle, IntoElement, MouseButton, MouseDownEvent, Pixels, Render, Role, ScrollHandle, SharedString, Stateful,
     Window, canvas, div, prelude::*, px, svg,
 };
-use runode_shared_types::color::Rgb;
 use runode_ui::{
     a11y::{A11yPress, PressDown},
     button::{Button, ButtonSize, ButtonVariant},
@@ -153,8 +152,6 @@ struct Adding {
 
 pub struct ActionsPanel {
     input: Input,
-    /// 前景和背景色，见 `set_colors`。
-    colors: (Rgb, Rgb),
     /// 数据是在哪个仓库里读的；终端换了仓库时清掉重读。
     dir: Option<PathBuf>,
     data: HashMap<Query, Result<Data, String>>,
@@ -182,7 +179,6 @@ impl Default for ActionsPanel {
     fn default() -> Self {
         Self {
             input: Input::default(),
-            colors: (Rgb(0xff, 0xff, 0xff), Rgb(0, 0, 0)),
             dir: None,
             data: HashMap::new(),
             fetched: HashMap::new(),
@@ -238,7 +234,7 @@ pub struct PinnedItem {
 }
 
 impl ActionsPanel {
-    /// 换上 app 交来的仓库、分支、PATH、固定的工作流和配色。仓库换了时清掉读过的数据，展开的只留三段。
+    /// 换上 app 交来的仓库、分支、PATH 和固定的工作流。仓库换了时清掉读过的数据，展开的只留三段。
     pub fn set_input(&mut self, input: Input) {
         if self.dir.as_ref() != Some(&input.dir) {
             self.dir = Some(input.dir.clone());
@@ -251,11 +247,6 @@ impl ActionsPanel {
             self.expanded.retain(Node::section);
         }
         self.input = input;
-    }
-
-    /// 画页用的前景和背景色，app 画面板时交进来。
-    pub fn set_colors(&mut self, fg: Rgb, bg: Rgb) {
-        self.colors = (fg, bg);
     }
 
     /// 拖过分隔线的三段高度，随窗口存档；`set_heights` 换上存档里的。
@@ -511,7 +502,6 @@ impl ActionsPanel {
 
     /// 页的标题行和内容，面板外框和顶上的标签由 app 画。
     fn render_page(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Div {
-        let (fg, bg) = self.colors;
         self.a11y = window.is_a11y_active();
         let view = cx.entity().downgrade();
         let refresh = Button::new("actions-refresh", rust_i18n::t!("github_actions.refresh"))
@@ -528,7 +518,7 @@ impl ActionsPanel {
             )
             .on_a11y_press(view, |this, _, cx| this.refresh_github_actions(cx));
         let title = panel_title()
-            .child(div().flex_1().min_w_0().truncate().text_color(hsla(fg)).child("GitHub Actions"))
+            .child(div().flex_1().min_w_0().truncate().text_color(cx.theme().foreground).child("GitHub Actions"))
             .child(refresh);
         let shell = div().size_full().flex().flex_col().child(title);
         let missing = self.data.values().any(|result| matches!(result, Err(err) if err == gh::MISSING));
@@ -538,7 +528,7 @@ impl ActionsPanel {
         // 没登录时每份数据都是同一个错，整页换成登录的说明，不在每段里各说一遍。
         let login = self.data.values().any(|result| matches!(result, Err(err) if err == gh::LOGIN));
         if login {
-            return shell.child(self.render_actions_login(fg, cx));
+            return shell.child(self.render_actions_login(cx));
         }
         let error = self.error.clone().map(|error| {
             div()
@@ -552,7 +542,7 @@ impl ActionsPanel {
                 .child(error)
         });
         let mut walk = Walk::default();
-        self.walk_actions(&mut walk, fg, bg, cx);
+        self.walk_actions(&mut walk, cx);
         // 树里展开了、还没读过的现在读。
         let missing: Vec<Query> = walk.shown.iter().filter(|query| !self.data.contains_key(*query)).cloned().collect();
         self.shown = walk.shown;
@@ -693,7 +683,7 @@ impl ActionsPanel {
     }
 
     /// gh 没登录或令牌失效：说明，和在旁边的终端里跑 `gh auth login` 的按钮。登好以后定时重读时自己恢复。
-    fn render_actions_login(&self, fg: Rgb, cx: &mut Context<Self>) -> Div {
+    fn render_actions_login(&self, cx: &mut Context<Self>) -> Div {
         let text = rust_i18n::t!("github_actions.login_needed").into_owned();
         let login = |this: &mut Self, _: &mut Window, cx: &mut Context<Self>| {
             this.run_in_terminal(gh::LOGIN_COMMAND.to_owned(), None, cx);
@@ -713,7 +703,7 @@ impl ActionsPanel {
                     .aria_label(text.clone())
                     .w_full()
                     .text_center()
-                    .text_color(hsla(fg).opacity(0.6))
+                    .text_color(cx.theme().foreground.opacity(0.6))
                     .child(text),
             )
             .child(
@@ -729,57 +719,57 @@ impl ActionsPanel {
     }
 
     /// 排出树里看得见的各行。
-    fn walk_actions(&self, walk: &mut Walk, fg: Rgb, bg: Rgb, cx: &mut Context<Self>) {
+    fn walk_actions(&self, walk: &mut Walk, cx: &mut Context<Self>) {
         let page = self;
         let branch = self.input.branch.clone();
         let detail = branch.clone().unwrap_or_else(|| rust_i18n::t!("github_actions.no_branch").into_owned());
-        self.section_row(walk, Node::Branch, "github_actions.current_branch", Some(detail), fg, bg, cx);
+        self.section_row(walk, Node::Branch, "github_actions.current_branch", Some(detail), cx);
         let header = walk.take();
         if page.expanded.contains(&Node::Branch) {
             match branch {
                 Some(branch) => {
                     let query = Query::BranchRuns(branch);
-                    if let Some(Data::Runs(runs)) = self.query_rows(walk, &query, 1, fg) {
+                    if let Some(Data::Runs(runs)) = self.query_rows(walk, &query, 1, cx) {
                         for run in runs {
-                            self.walk_run(walk, run, false, 1, fg, bg, cx);
+                            self.walk_run(walk, run, false, 1, cx);
                         }
                     }
                 }
-                None => self.note_row(walk, 1, rust_i18n::t!("github_actions.no_branch").into_owned(), fg),
+                None => self.note_row(walk, 1, rust_i18n::t!("github_actions.no_branch").into_owned(), cx),
             }
         }
         walk.end_section(header);
-        self.section_row(walk, Node::Workflows, "github_actions.workflows", None, fg, bg, cx);
+        self.section_row(walk, Node::Workflows, "github_actions.workflows", None, cx);
         let header = walk.take();
         if page.expanded.contains(&Node::Workflows)
-            && let Some(Data::Workflows(workflows)) = self.query_rows(walk, &Query::Workflows, 1, fg)
+            && let Some(Data::Workflows(workflows)) = self.query_rows(walk, &Query::Workflows, 1, cx)
         {
             for workflow in workflows {
-                self.workflow_row(walk, workflow, fg, bg, cx);
+                self.workflow_row(walk, workflow, cx);
                 if page.expanded.contains(&Node::Workflow(workflow.id))
-                    && let Some(Data::Runs(runs)) = self.query_rows(walk, &Query::WorkflowRuns(workflow.id), 2, fg)
+                    && let Some(Data::Runs(runs)) = self.query_rows(walk, &Query::WorkflowRuns(workflow.id), 2, cx)
                 {
                     for run in runs {
-                        self.walk_run(walk, run, true, 2, fg, bg, cx);
+                        self.walk_run(walk, run, true, 2, cx);
                     }
                 }
             }
         }
         walk.end_section(header);
-        self.section_row(walk, Node::Settings, "github_actions.settings", None, fg, bg, cx);
+        self.section_row(walk, Node::Settings, "github_actions.settings", None, cx);
         let header = walk.take();
         if page.expanded.contains(&Node::Settings) {
-            self.walk_settings(walk, Scope::Repo, 1, fg, bg, cx);
-            self.walk_settings(walk, Scope::Org, 1, fg, bg, cx);
-            self.group_row(walk, Node::Environments, 1, rust_i18n::t!("github_actions.environments"), None, fg, bg, cx);
+            self.walk_settings(walk, Scope::Repo, 1, cx);
+            self.walk_settings(walk, Scope::Org, 1, cx);
+            self.group_row(walk, Node::Environments, 1, rust_i18n::t!("github_actions.environments"), None, cx);
             if page.expanded.contains(&Node::Environments)
-                && let Some(Data::Names(envs)) = self.query_rows(walk, &Query::Environments, 2, fg)
+                && let Some(Data::Names(envs)) = self.query_rows(walk, &Query::Environments, 2, cx)
             {
                 for env in envs {
                     let node = Node::Environment(env.clone());
-                    self.group_row(walk, node.clone(), 2, Cow::Owned(env.clone()), None, fg, bg, cx);
+                    self.group_row(walk, node.clone(), 2, Cow::Owned(env.clone()), None, cx);
                     if page.expanded.contains(&node) {
-                        self.walk_settings(walk, Scope::Env(env.clone()), 3, fg, bg, cx);
+                        self.walk_settings(walk, Scope::Env(env.clone()), 3, cx);
                     }
                 }
             }
@@ -788,12 +778,12 @@ impl ActionsPanel {
     }
 
     /// 一份数据的状态：在读、出错、是空的时排一行说明；读好了交回数据。
-    fn query_rows<'a>(&'a self, walk: &mut Walk, query: &Query, depth: usize, fg: Rgb) -> Option<&'a Data> {
+    fn query_rows<'a>(&'a self, walk: &mut Walk, query: &Query, depth: usize, cx: &App) -> Option<&'a Data> {
         walk.shown.insert(query.clone());
         let empty = match self.data.get(query) {
             None => Some(rust_i18n::t!("github_actions.loading")),
             Some(Err(err)) => {
-                self.note_row(walk, depth, err.clone(), fg);
+                self.note_row(walk, depth, err.clone(), cx);
                 return None;
             }
             Some(Ok(data)) => match data {
@@ -808,7 +798,7 @@ impl ActionsPanel {
             },
         };
         if let Some(text) = empty {
-            self.note_row(walk, depth, text.into_owned(), fg);
+            self.note_row(walk, depth, text.into_owned(), cx);
         }
         None
     }
@@ -816,16 +806,7 @@ impl ActionsPanel {
     /// 一次运行，展开后是它最近这次尝试的 job，重跑过的另有之前的尝试。`in_workflow` 为真时排在
     /// 工作流下面，旁边写分支；否则写工作流。
     #[allow(clippy::too_many_arguments)]
-    fn walk_run(
-        &self,
-        walk: &mut Walk,
-        run: &Run,
-        in_workflow: bool,
-        depth: usize,
-        fg: Rgb,
-        bg: Rgb,
-        cx: &mut Context<Self>,
-    ) {
+    fn walk_run(&self, walk: &mut Walk, run: &Run, in_workflow: bool, depth: usize, cx: &mut Context<Self>) {
         let node = Node::Run(run.id);
         let expanded = self.expanded.contains(&node);
         let state = run.state();
@@ -854,34 +835,32 @@ impl ActionsPanel {
             }));
         }
         let row = self
-            .actions_row(format!("run-{}", run.id), ix, depth, fg, bg, cx)
+            .actions_row(format!("run-{}", run.id), ix, depth, cx)
             .aria_expanded(expanded)
             .aria_label(format!("{title}, {detail}, {}", state_label(state)))
             .child(chevron(expanded, cx))
-            .child(state_icon(state, fg))
+            .child(state_icon(state, cx))
             .child(div().flex_initial().min_w_0().truncate().child(title))
-            .child(div().flex_1().min_w_0().truncate().text_color(hsla(fg).opacity(0.5)).child(detail.clone()))
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .truncate()
+                    .text_color(cx.theme().foreground.opacity(0.5))
+                    .child(detail.clone()),
+            )
             .children(self.actions_row_buttons(ix, buttons, cx))
             .on_press_down(cx, move |this, _, cx| this.toggle_actions_node(node.clone(), cx));
         walk.rows.push(row.into_any_element());
         if !expanded {
             return;
         }
-        self.walk_jobs(walk, run.id, run.attempt, depth + 1, fg, bg, cx);
+        self.walk_jobs(walk, run.id, run.attempt, depth + 1, cx);
         if run.attempt <= 1 {
             return;
         }
         let attempts = Node::Attempts(run.id);
-        self.group_row(
-            walk,
-            attempts.clone(),
-            depth + 1,
-            rust_i18n::t!("github_actions.previous_attempts"),
-            None,
-            fg,
-            bg,
-            cx,
-        );
+        self.group_row(walk, attempts.clone(), depth + 1, rust_i18n::t!("github_actions.previous_attempts"), None, cx);
         if !self.expanded.contains(&attempts) {
             return;
         }
@@ -891,34 +870,25 @@ impl ActionsPanel {
             let url = format!("{}/attempts/{attempt}", run.url);
             let open =
                 button(GLOBE_ICON, rust_i18n::t!("github_actions.open_in_browser"), move |_, _, cx| cx.open_url(&url));
-            self.group_row(walk, node.clone(), depth + 2, text, Some(open), fg, bg, cx);
+            self.group_row(walk, node.clone(), depth + 2, text, Some(open), cx);
             if self.expanded.contains(&node) {
-                self.walk_jobs(walk, run.id, attempt, depth + 3, fg, bg, cx);
+                self.walk_jobs(walk, run.id, attempt, depth + 3, cx);
             }
         }
     }
 
     #[allow(clippy::too_many_arguments)]
-    fn walk_jobs(
-        &self,
-        walk: &mut Walk,
-        run: u64,
-        attempt: u32,
-        depth: usize,
-        fg: Rgb,
-        bg: Rgb,
-        cx: &mut Context<Self>,
-    ) {
-        let Some(Data::Jobs(jobs)) = self.query_rows(walk, &Query::Jobs(run, attempt), depth, fg) else {
+    fn walk_jobs(&self, walk: &mut Walk, run: u64, attempt: u32, depth: usize, cx: &mut Context<Self>) {
+        let Some(Data::Jobs(jobs)) = self.query_rows(walk, &Query::Jobs(run, attempt), depth, cx) else {
             return;
         };
         for job in jobs {
-            self.walk_job(walk, job, depth, fg, bg, cx);
+            self.walk_job(walk, job, depth, cx);
         }
     }
 
     /// 一个 job，展开后是它的 step；点 step 在浏览器里打开 job 页上那一步的日志。
-    fn walk_job(&self, walk: &mut Walk, job: &Job, depth: usize, fg: Rgb, bg: Rgb, cx: &mut Context<Self>) {
+    fn walk_job(&self, walk: &mut Walk, job: &Job, depth: usize, cx: &mut Context<Self>) {
         let node = Node::Job(job.id);
         let expanded = self.expanded.contains(&node);
         let state = job.state();
@@ -936,11 +906,11 @@ impl ActionsPanel {
             cx.open_url(&url)
         }));
         let row = self
-            .actions_row(format!("job-{}", job.id), ix, depth, fg, bg, cx)
+            .actions_row(format!("job-{}", job.id), ix, depth, cx)
             .aria_expanded(expanded)
             .aria_label(format!("{}, {}", job.name, state_label(state)))
             .child(chevron(expanded, cx))
-            .child(state_icon(state, fg))
+            .child(state_icon(state, cx))
             .child(div().flex_1().min_w_0().truncate().child(job.name.clone()))
             .children(self.actions_row_buttons(ix, buttons, cx))
             .on_press_down(cx, move |this, _, cx| this.toggle_actions_node(node.clone(), cx));
@@ -957,10 +927,10 @@ impl ActionsPanel {
                 button(GLOBE_ICON, rust_i18n::t!("github_actions.step_logs"), move |_, _, cx| cx.open_url(&url))
             };
             let row = self
-                .actions_row(format!("step-{}-{si}", job.id), ix, depth + 1, fg, bg, cx)
+                .actions_row(format!("step-{}-{si}", job.id), ix, depth + 1, cx)
                 .aria_label(format!("{}, {}", step.name, state_label(state)))
                 .child(div().flex_none().w(px(12.)))
-                .child(state_icon(state, fg))
+                .child(state_icon(state, cx))
                 .child(div().flex_1().min_w_0().truncate().child(step.name.clone()))
                 .children(self.actions_row_buttons(ix, vec![open], cx))
                 .on_press_down(cx, move |_, _, cx| cx.open_url(&url));
@@ -968,7 +938,7 @@ impl ActionsPanel {
         }
     }
 
-    fn workflow_row(&self, walk: &mut Walk, workflow: &Workflow, fg: Rgb, bg: Rgb, cx: &mut Context<Self>) {
+    fn workflow_row(&self, walk: &mut Walk, workflow: &Workflow, cx: &mut Context<Self>) {
         let node = Node::Workflow(workflow.id);
         let expanded = self.expanded.contains(&node);
         let active = workflow.state == "active";
@@ -1004,21 +974,23 @@ impl ActionsPanel {
             label.push_str(&format!(" ({})", rust_i18n::t!("github_actions.disabled")));
         }
         let row = self
-            .actions_row(format!("workflow-{}", workflow.id), ix, 1, fg, bg, cx)
+            .actions_row(format!("workflow-{}", workflow.id), ix, 1, cx)
             .aria_expanded(expanded)
             .aria_label(label.clone())
             .child(chevron(expanded, cx))
-            .child(svg().flex_none().path(WORKFLOW_ICON).size(px(13.)).text_color(hsla(fg).opacity(if active {
-                0.6
-            } else {
-                0.3
-            })))
+            .child(
+                svg()
+                    .flex_none()
+                    .path(WORKFLOW_ICON)
+                    .size(px(13.))
+                    .text_color(cx.theme().foreground.opacity(if active { 0.6 } else { 0.3 })),
+            )
             .child(
                 div()
                     .flex_1()
                     .min_w_0()
                     .truncate()
-                    .when(!active, |name| name.text_color(hsla(fg).opacity(0.5)))
+                    .when(!active, |name| name.text_color(cx.theme().foreground.opacity(0.5)))
                     .child(label),
             )
             .children(self.actions_row_buttons(ix, buttons, cx))
@@ -1028,7 +1000,7 @@ impl ActionsPanel {
 
     /// `scope` 那一级的 secret 和 variable 两组；组织那一级只能看、复制，改要到浏览器里组织的设置页去。
     #[allow(clippy::too_many_arguments)]
-    fn walk_settings(&self, walk: &mut Walk, scope: Scope, depth: usize, fg: Rgb, bg: Rgb, cx: &mut Context<Self>) {
+    fn walk_settings(&self, walk: &mut Walk, scope: Scope, depth: usize, cx: &mut Context<Self>) {
         for secret in [true, false] {
             let (node, query) = if secret {
                 (Node::Secrets(scope.clone()), Query::Secrets(scope.clone()))
@@ -1060,7 +1032,7 @@ impl ActionsPanel {
                     this.start_adding(secret, scope.clone(), window, cx)
                 })
             };
-            self.group_row(walk, node.clone(), depth, label, Some(add), fg, bg, cx);
+            self.group_row(walk, node.clone(), depth, label, Some(add), cx);
             if !self.expanded.contains(&node) {
                 continue;
             }
@@ -1074,7 +1046,7 @@ impl ActionsPanel {
                     rust_i18n::t!("github_actions.add_variable")
                 };
                 let row = self
-                    .actions_row("adding".to_owned(), walk.ix(), depth + 1, fg, bg, cx)
+                    .actions_row("adding".to_owned(), walk.ix(), depth + 1, cx)
                     .aria_label(label.into_owned())
                     .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                     .child(
@@ -1085,25 +1057,15 @@ impl ActionsPanel {
                     );
                 walk.rows.push(row.into_any_element());
             }
-            match self.query_rows(walk, &query, depth + 1, fg) {
+            match self.query_rows(walk, &query, depth + 1, cx) {
                 Some(Data::Names(names)) => {
                     for name in names {
-                        self.setting_row(walk, secret, &scope, name, None, depth + 1, fg, bg, cx);
+                        self.setting_row(walk, secret, &scope, name, None, depth + 1, cx);
                     }
                 }
                 Some(Data::Variables(variables)) => {
                     for variable in variables {
-                        self.setting_row(
-                            walk,
-                            secret,
-                            &scope,
-                            &variable.name,
-                            Some(&variable.value),
-                            depth + 1,
-                            fg,
-                            bg,
-                            cx,
-                        );
+                        self.setting_row(walk, secret, &scope, &variable.name, Some(&variable.value), depth + 1, cx);
                     }
                 }
                 _ => {}
@@ -1121,8 +1083,6 @@ impl ActionsPanel {
         name: &str,
         value: Option<&str>,
         depth: usize,
-        fg: Rgb,
-        bg: Rgb,
         cx: &mut Context<Self>,
     ) {
         let ix = walk.ix();
@@ -1154,12 +1114,17 @@ impl ActionsPanel {
             None => name.to_owned(),
         };
         let row = self
-            .actions_row(format!("setting-{secret}-{scope:?}-{name}"), ix, depth, fg, bg, cx)
+            .actions_row(format!("setting-{secret}-{scope:?}-{name}"), ix, depth, cx)
             .aria_label(label)
             .child(div().flex_none().w(px(12.)))
             .child(div().flex_initial().min_w_0().truncate().child(name.to_owned()))
             .children(value.map(|value| {
-                div().flex_1().min_w_0().truncate().text_color(hsla(fg).opacity(0.5)).child(value.to_owned())
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .truncate()
+                    .text_color(cx.theme().foreground.opacity(0.5))
+                    .child(value.to_owned())
             }))
             .when(value.is_none(), |row| row.child(div().flex_1()))
             .children(self.actions_row_buttons(ix, buttons, cx));
@@ -1174,8 +1139,6 @@ impl ActionsPanel {
         node: Node,
         key: &'static str,
         detail: Option<String>,
-        fg: Rgb,
-        bg: Rgb,
         cx: &mut Context<Self>,
     ) {
         let expanded = self.expanded.contains(&node);
@@ -1185,12 +1148,12 @@ impl ActionsPanel {
             None => label.clone(),
         };
         let row = self
-            .actions_row(format!("{node:?}"), walk.ix(), 0, fg, bg, cx)
+            .actions_row(format!("{node:?}"), walk.ix(), 0, cx)
             .aria_expanded(expanded)
             .aria_label(aria)
             .child(chevron(expanded, cx))
             .child(div().flex_none().text_size(FontSize::Small).font_weight(gpui::FontWeight::SEMIBOLD).child(label))
-            .child(div().flex_1().min_w_0().truncate().text_color(hsla(fg).opacity(0.5)).children(detail))
+            .child(div().flex_1().min_w_0().truncate().text_color(cx.theme().foreground.opacity(0.5)).children(detail))
             .on_press_down(cx, move |this, _, cx| this.toggle_actions_node(node.clone(), cx));
         walk.rows.push(row.into_any_element());
     }
@@ -1204,14 +1167,12 @@ impl ActionsPanel {
         depth: usize,
         label: Cow<'static, str>,
         action: Option<RowButton<Self>>,
-        fg: Rgb,
-        bg: Rgb,
         cx: &mut Context<Self>,
     ) {
         let expanded = self.expanded.contains(&node);
         let ix = walk.ix();
         let row = self
-            .actions_row(format!("{node:?}"), ix, depth, fg, bg, cx)
+            .actions_row(format!("{node:?}"), ix, depth, cx)
             .aria_expanded(expanded)
             .aria_label(label.clone().into_owned())
             .child(chevron(expanded, cx))
@@ -1222,7 +1183,7 @@ impl ActionsPanel {
     }
 
     /// 在读、出错、没有内容时的一行说明，也报给辅助工具。
-    fn note_row(&self, walk: &mut Walk, depth: usize, text: String, fg: Rgb) {
+    fn note_row(&self, walk: &mut Walk, depth: usize, text: String, cx: &App) {
         let row = div()
             .id(("actions-note", walk.ix()))
             .role(Role::Label)
@@ -1235,7 +1196,7 @@ impl ActionsPanel {
             .flex()
             .items_center()
             .italic()
-            .text_color(hsla(fg).opacity(0.45))
+            .text_color(cx.theme().foreground.opacity(0.45))
             // gh 的错可能很长，折行显示完整。
             .child(div().flex_1().min_w_0().child(text));
         walk.rows.push(row.into_any_element());
@@ -1245,15 +1206,8 @@ impl ActionsPanel {
     /// （运行、job 的 id，段名），不按行号：辅助工具按元素 id 认节点，读到数据、上面多出几行时行号会变，
     /// 用行号的话 VoiceOver 的焦点会跳、按下会按到别的行上。悬停只管这一帧，仍按行号 `ix` 记。
     #[allow(clippy::too_many_arguments)]
-    fn actions_row(
-        &self,
-        key: String,
-        ix: usize,
-        depth: usize,
-        fg: Rgb,
-        bg: Rgb,
-        cx: &mut Context<Self>,
-    ) -> Stateful<Div> {
+    fn actions_row(&self, key: String, ix: usize, depth: usize, cx: &mut Context<Self>) -> Stateful<Div> {
+        let hover = cx.theme().mix(0.06);
         div()
             .id(SharedString::from(key))
             .role(Role::TreeItem)
@@ -1267,8 +1221,8 @@ impl ActionsPanel {
             .items_center()
             .gap(px(6.))
             .overflow_hidden()
-            .text_color(hsla(fg))
-            .hover(|row| row.bg(hsla(bg.mix(fg, 0.06))))
+            .text_color(cx.theme().foreground)
+            .hover(|row| row.bg(hover))
             .on_hover(cx.listener(move |this, hovered: &bool, _, cx| {
                 let page = &mut *this;
                 if *hovered {
@@ -1314,13 +1268,8 @@ impl Render for ActionsPanel {
 }
 
 /// 状态栏左边固定的工作流，高 `height`：最近一次运行的状态和工作流名，点了在浏览器里打开那次运行。
-pub fn render_pinned<V: 'static>(
-    items: Vec<PinnedItem>,
-    height: f32,
-    fg: Rgb,
-    bg: Rgb,
-    cx: &mut Context<V>,
-) -> Vec<AnyElement> {
+pub fn render_pinned<V: 'static>(items: Vec<PinnedItem>, height: f32, cx: &mut Context<V>) -> Vec<AnyElement> {
+    let hover = cx.theme().mix(0.10);
     items
         .into_iter()
         .map(|item| {
@@ -1342,9 +1291,9 @@ pub fn render_pinned<V: 'static>(
                 .flex()
                 .items_center()
                 .gap(px(5.))
-                .hover(|button| button.bg(hsla(bg.mix(fg, 0.10))))
+                .hover(|button| button.bg(hover))
                 .tooltip(tooltip(description, None))
-                .children(state.map(|state| state_icon(state, fg)))
+                .children(state.map(|state| state_icon(state, cx)))
                 .child(item.name)
                 .on_press_down(cx, move |_, _, cx| {
                     if let Some(url) = &url {
@@ -1366,16 +1315,16 @@ fn gh_error(err: String) -> String {
 }
 
 /// 状态的图标，按状态上色：成功绿、失败红、在跑和排队黄，其余灰。
-fn state_icon(state: State, fg: Rgb) -> gpui::Svg {
+fn state_icon(state: State, cx: &App) -> gpui::Svg {
     let (icon, color) = match state {
         State::Success => (SUCCESS_ICON, hsla(ADDED)),
         State::Failure => (FAILURE_ICON, hsla(REMOVED)),
-        State::Cancelled => (CANCELLED_ICON, hsla(fg).opacity(0.5)),
-        State::Skipped => (SKIPPED_ICON, hsla(fg).opacity(0.5)),
+        State::Cancelled => (CANCELLED_ICON, cx.theme().foreground.opacity(0.5)),
+        State::Skipped => (SKIPPED_ICON, cx.theme().foreground.opacity(0.5)),
         State::InProgress => (INPROGRESS_ICON, hsla(MODIFIED)),
         State::Queued => (QUEUED_ICON, hsla(MODIFIED)),
         State::Waiting | State::ActionRequired => (WAITING_ICON, hsla(MODIFIED)),
-        State::Pending => (PENDING_ICON, hsla(fg).opacity(0.5)),
+        State::Pending => (PENDING_ICON, cx.theme().foreground.opacity(0.5)),
     };
     svg().flex_none().path(icon).size(px(13.)).text_color(color)
 }
