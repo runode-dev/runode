@@ -16,12 +16,14 @@ mod remote_access;
 mod settings;
 mod startup;
 mod terminal_view;
-mod ui;
 mod update;
 mod window;
 
 // 界面文字的翻译，见 `i18n`；某种语言缺了某个键时取英文。
 rust_i18n::i18n!("locales", fallback = "en");
+
+// 共用的界面部件，各模块照旧写 `crate::ui::…`。
+use runode_ui as ui;
 
 use gpui::App;
 use gpui_platform::application;

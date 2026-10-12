@@ -4,7 +4,7 @@ use gpui::{Action, AnyView, App, Context, IntoElement, Render, Role, SharedStrin
 use runode_shared_types::color::Rgb;
 
 use super::font_size::FontSize;
-use crate::ui::hsla;
+use crate::hsla;
 
 /// 说明再长也不比这宽，多了折行。
 const TOOLTIP_MAX_WIDTH: f32 = 420.;

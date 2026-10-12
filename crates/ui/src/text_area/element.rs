@@ -242,7 +242,7 @@ impl Element for TextAreaText {
         let focus_handle = area.focus_handle.clone();
         let focused = focus_handle.is_focused(window);
         let dragging = area.drag.is_some();
-        window.handle_input(&focus_handle, crate::ui::input_handler::ElementInput::new(bounds, self.area.clone()), cx);
+        window.handle_input(&focus_handle, crate::input_handler::ElementInput::new(bounds, self.area.clone()), cx);
 
         let line_height = layout.line_height;
         let origin = point(bounds.left(), bounds.top() - layout.scroll_y);

@@ -1,0 +1,23 @@
+[package]
+name = "runode-ui"
+description = "GPUI widgets and helpers shared across runode's desktop views: text fields, scrollbars, tooltips, font sizes, file type icons, system sounds and accessibility helpers"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+# `display_dir` 把家目录写成 `~`，`sound::names` 找用户装的声音。
+runode-paths.workspace = true
+# 调色板的颜色，`hsla` 换成 GPUI 的颜色。
+runode-shared-types.workspace = true
+gpui.workspace = true
+tracing.workspace = true
+
+# 提示音用 NSSound 按名字播放系统声音。
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2-foundation = { workspace = true, features = ["std", "NSString"] }
+objc2-app-kit = { workspace = true, features = ["std", "NSSound"] }
+
+[lints]
+workspace = true

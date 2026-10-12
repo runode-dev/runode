@@ -5,8 +5,8 @@
 //! `~` 显示路径的 `display_dir`，放掉图片在图集里那份的 `drop_render_image`、`release_bitmap`，以及让辅助工具认得界面的
 //! 共用写法（`a11y`）。
 //!
-//! 依赖只能从功能模块指向这里：`ui` 不依赖 `terminal_view`、`window`、`host_client` 这些具体
-//! 功能的模块，它们要的东西由调用方经参数或事件交过来。
+//! 不依赖桌面 app 里的功能模块，它们要的东西由调用方经参数、事件或 `font_size::UiFontSize` 这类
+//! 全局值交过来；文字一律由调用方翻译好再给，这里不带翻译。
 
 pub mod a11y;
 pub mod actions;

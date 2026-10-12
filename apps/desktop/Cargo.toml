@@ -29,6 +29,8 @@ runode-remote-access.workspace = true
 # 自动更新：查新版本、下载、核对签名、退出时换上 .app。
 runode-update.workspace = true
 runode-autostart.workspace = true
+# 几处界面共用的 GPUI 部件和小工具。
+runode-ui.workspace = true
 # 设置页里配对手机时画二维码。
 qrcode.workspace = true
 gpui.workspace = true
@@ -54,8 +56,7 @@ notify.workspace = true
 objc2.workspace = true
 # 文件树删除文件时移到废纸篓，用 NSFileManager。
 objc2-foundation = { workspace = true, features = ["std", "NSArray", "NSData", "NSDictionary", "NSError", "NSFileManager", "NSLocale", "NSString", "NSURL"] }
-# agent 要人处理时的提示音用 NSSound 按名字播放系统声音。
-objc2-app-kit = { workspace = true, features = ["std", "NSApplication", "NSResponder", "NSImage", "NSMenu", "NSMenuItem", "NSEvent", "NSSound"] }
+objc2-app-kit = { workspace = true, features = ["std", "NSApplication", "NSResponder", "NSImage", "NSMenu", "NSMenuItem", "NSEvent"] }
 # 问系统设置里有没有允许发通知，设置页在被拒时提示。
 objc2-user-notifications = { workspace = true, features = ["std", "block2", "UNUserNotificationCenter", "UNNotificationSettings"] }
 block2.workspace = true

@@ -4741,6 +4741,7 @@ dependencies = [
  "runode-remote-access",
  "runode-shared-types",
  "runode-terminal",
+ "runode-ui",
  "runode-update",
  "rust-i18n",
  "serde",
@@ -4921,6 +4922,18 @@ dependencies = [
  "libc",
  "runode-protocol",
  "rusqlite",
+]
+
+[[package]]
+name = "runode-ui"
+version = "0.1.8"
+dependencies = [
+ "gpui-pre",
+ "objc2-app-kit 0.3.2",
+ "objc2-foundation 0.3.2",
+ "runode-paths",
+ "runode-shared-types",
+ "tracing",
 ]
 
 [[package]]

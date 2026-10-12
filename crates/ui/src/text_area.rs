@@ -25,7 +25,7 @@ use super::text_field::{
     EditKind, History, Snapshot, copy_selection, next_char, next_word, offset_to_utf16, previous_char, previous_word,
     range_from_utf16, range_to_utf16,
 };
-use crate::ui::actions::{Copy, Cut, Paste, Redo, SelectAll, Undo};
+use crate::actions::{Copy, Cut, Paste, Redo, SelectAll, Undo};
 use element::TextAreaText;
 use rows::{Row, caret_x, index_at_point, plain_rows, row_at, row_end, row_start, rows_from_lines, vertical, x_in_row};
 

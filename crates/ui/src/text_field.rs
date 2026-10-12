@@ -20,7 +20,7 @@ use gpui::{
 
 use gpui::accesskit::ActionData;
 
-use crate::ui::actions::{Copy, Cut, Paste, Redo, SelectAll, Undo};
+use crate::actions::{Copy, Cut, Paste, Redo, SelectAll, Undo};
 
 actions!(runode, [SearchNext, SearchPrevious, EndSearch]);
 
@@ -142,7 +142,7 @@ impl TextField {
             query,
             drag: None,
             history: History::default(),
-            placeholder: Some(rust_i18n::t!("search.placeholder").into_owned().into()),
+            placeholder: None,
             label: None,
             layout: None,
             bounds: None,
@@ -150,17 +150,15 @@ impl TextField {
         }
     }
 
-    /// 就地编辑一段已有文字用的输入框：不画「搜索」提示，前 `select` 个字节选中，直接打字就
-    /// 替换掉它们。
+    /// 就地编辑一段已有文字用的输入框：前 `select` 个字节选中，直接打字就替换掉它们。
     pub fn editing(text: String, select: usize, cx: &mut Context<Self>) -> Self {
         let select = (0..=select.min(text.len())).rev().find(|&i| text.is_char_boundary(i)).unwrap_or(0);
         let mut field = Self::new(text, cx);
-        field.placeholder = None;
         field.selected = 0..select;
         field
     }
 
-    /// 空着时画的提示换成 `text`。
+    /// 空着时画的提示文字，默认不画。
     pub fn with_placeholder(mut self, text: impl Into<SharedString>) -> Self {
         self.placeholder = Some(text.into());
         self
@@ -447,7 +445,7 @@ pub(super) fn next_word(text: &str, offset: usize) -> usize {
 }
 
 /// 双击选中的范围：点在词上选整个词，否则选连续的同类字符。
-pub(crate) fn word_range_at(text: &str, offset: usize) -> Range<usize> {
+pub fn word_range_at(text: &str, offset: usize) -> Range<usize> {
     let Some(c) = text[offset..].chars().next().or_else(|| text[..offset].chars().next_back()) else {
         return offset..offset;
     };
@@ -775,7 +773,7 @@ impl Element for TextFieldText {
         let focus_handle = field.focus_handle.clone();
         let focused = focus_handle.is_focused(window);
         let dragging = field.drag.is_some();
-        window.handle_input(&focus_handle, crate::ui::input_handler::ElementInput::new(bounds, self.field.clone()), cx);
+        window.handle_input(&focus_handle, crate::input_handler::ElementInput::new(bounds, self.field.clone()), cx);
 
         let line_height = window.line_height();
         if focused && let Some(selection) = layout.selection.take() {

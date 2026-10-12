@@ -7,7 +7,7 @@ use std::borrow::Cow;
 use gpui::{AssetSource, SharedString};
 
 use crate::{
-    ui::file_icons::{self, icons},
+    ui::{file_icons, icons},
     window,
 };
 

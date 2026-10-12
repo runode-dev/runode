@@ -8,7 +8,8 @@
 /// 列出一组编进二进制的图标：给每个图标一个资源路径常量（`$dir` 加名字），并把它们连同文件内容
 /// 收进 `FILES`，路径和文件名只写一遍，免得两边对不上。`$src` 是从调用它的文件到同一目录的相对
 /// 路径；`$vis` 是 `FILES` 的可见性，每个常量前面可以带文档和自己的可见性。这里的类型图标和
-/// `crate::assets` 里界面上的图标都用它。
+/// 桌面 app 的 `Assets` 里界面上的图标都用它。
+#[macro_export]
 macro_rules! icons {
     (
         $vis:vis FILES, $dir:literal, $src:literal;
@@ -22,10 +23,9 @@ macro_rules! icons {
         ];
     };
 }
-pub(crate) use icons;
 
 icons! {
-    pub FILES, "icons/types/", "../../assets/icons/types/";
+    pub FILES, "icons/types/", "../assets/icons/types/";
     FOLDER = "folder",
     FOLDER_OPEN = "folder-open",
     FOLDER_SRC = "folder-src",

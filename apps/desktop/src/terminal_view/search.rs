@@ -42,8 +42,11 @@ impl TerminalView {
         let field = match &self.search_field {
             Some((field, _)) => field.clone(),
             None => {
-                let field =
-                    cx.new(|cx| TextField::new(String::new(), cx).with_label(rust_i18n::t!("search.placeholder")));
+                let field = cx.new(|cx| {
+                    TextField::new(String::new(), cx)
+                        .with_label(rust_i18n::t!("search.placeholder"))
+                        .with_placeholder(rust_i18n::t!("search.placeholder"))
+                });
                 let events = cx.subscribe_in(&field, window, Self::handle_search_event);
                 self.search_field = Some((field.clone(), events));
                 field

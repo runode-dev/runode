@@ -49,7 +49,11 @@ impl WindowView {
             self.close_agent_picker(window, cx);
             return;
         }
-        let field = cx.new(|cx| TextField::new(String::new(), cx).with_label(rust_i18n::t!("agent.picker.filter")));
+        let field = cx.new(|cx| {
+            TextField::new(String::new(), cx)
+                .with_label(rust_i18n::t!("agent.picker.filter"))
+                .with_placeholder(rust_i18n::t!("search.placeholder"))
+        });
         // 输入框原本是搜索框：回车是「下一个」，Esc 是「关闭搜索」，在这里分别是跳过去和关掉。
         let events = cx.subscribe_in(&field, window, |this, _, event: &TextFieldEvent, window, cx| match event {
             TextFieldEvent::Changed(_) => {

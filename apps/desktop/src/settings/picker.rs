@@ -92,7 +92,11 @@ impl SettingsView {
         cx: &mut Context<Self>,
     ) {
         let title = title.into();
-        let field = cx.new(|cx| TextField::new(String::new(), cx).with_label(title.clone()));
+        let field = cx.new(|cx| {
+            TextField::new(String::new(), cx)
+                .with_label(title.clone())
+                .with_placeholder(rust_i18n::t!("search.placeholder"))
+        });
         let subscription = cx.subscribe_in(&field, window, |this, _, event: &TextFieldEvent, window, cx| match event {
             TextFieldEvent::Changed(_) => {
                 if let Some(picker) = &mut this.picker {

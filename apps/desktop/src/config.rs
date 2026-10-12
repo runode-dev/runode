@@ -190,6 +190,7 @@ fn apply(cx: &mut App, config: Config, seen: Stamps) {
     // 宿主先换主题，视图等它在各个会话的输出流里标出位置后再跟着换。
     crate::host_client::configure(&config);
     cx.set_global(Seen(seen));
+    cx.set_global(runode_ui::font_size::UiFontSize(config.ui_font_size));
     cx.set_global(AppConfig(Arc::new(config)));
 }
 
