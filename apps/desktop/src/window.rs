@@ -397,8 +397,13 @@ impl WindowView {
                 this.mark_seen(window, cx);
             }
         });
-        let visibility_watch =
-            cx.observe_window_visibility(window, |this, _, window, cx| this.sync_visibility(window, cx));
+        let visibility_watch = cx.observe_window_visibility(window, |this, _, window, cx| {
+            this.sync_visibility(window, cx);
+            // 显示器醒来时窗口一直在前台，激活不变，要在这里算看到了当前分屏。
+            if window.is_visible() {
+                this.mark_seen(window, cx);
+            }
+        });
         let project_poll = cx.spawn_in(window, async move |this, cx| {
             loop {
                 cx.background_executor().timer(project::POLL_INTERVAL).await;
