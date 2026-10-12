@@ -838,8 +838,9 @@ impl WindowView {
                     .min_h_0()
                     .overflow_y_scroll()
                     .px(px(8.))
-                    // 顶上留出落下时描边的宽度，不然第一张卡片的描边上沿被滚动区裁掉。
-                    .pt(px(RING_WIDTH))
+                    // 顶上留出落下时描边的宽度，不然第一张卡片的描边上沿被滚动区裁掉；裁剪按整像素取，
+                    // 正好留描边那么宽仍会切掉一截，所以多留一点。
+                    .pt(px(RING_WIDTH * 2.))
                     .pb(px(8.))
                     .flex()
                     .flex_col()
