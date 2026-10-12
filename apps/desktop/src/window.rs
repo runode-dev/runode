@@ -67,10 +67,6 @@ pub(crate) use agents::{
 pub use arrange::ArrangePanes;
 pub use background::refresh as watch_background;
 pub use devices::watch as watch_devices;
-pub use files::{
-    CollapseSelectedFile, CopyPath, CopyRelativePath, DeleteFile, ExpandSelectedFile, FocusTerminal, OpenSelectedFile,
-    RenameFile, RevealInFinder, SelectFirstFile, SelectLastFile, SelectNextFile, SelectPreviousFile,
-};
 pub(crate) use mobile::show_pairing;
 pub(crate) use open::{open_window, open_window_with};
 pub use persist::saved_window_options;
@@ -79,6 +75,11 @@ pub use quit::{
     terminal_windows,
 };
 pub use remote::serve_requests;
+// 文件树的动作跟着文件树在 `runode_file_tree`，快捷键表照旧从这里引。
+pub use runode_file_tree::{
+    CollapseSelectedFile, CopyPath, CopyRelativePath, DeleteFile, ExpandSelectedFile, FocusTerminal, OpenSelectedFile,
+    RenameFile, RevealInFinder, SelectFirstFile, SelectLastFile, SelectNextFile, SelectPreviousFile,
+};
 pub(crate) use settings_page::show_settings;
 pub(crate) use status_bar::item_icon_and_title as status_item_icon_and_title;
 pub use status_bar::watch as watch_status;
@@ -102,6 +103,7 @@ use crate::ui::{
 use crate::{config::AppConfig, prespawn::Prespawned, terminal_view::TerminalView, ui::font_size::FontSize, ui::hsla};
 use model::{PaneLayout, Workspace, WorkspaceId, home_dir};
 use persist::format::SavedWindow;
+use runode_file_tree::FileTree;
 use runode_github_actions::ActionsPanel;
 use runode_preview_panel::PreviewPanel;
 use slot::Slot;
@@ -258,19 +260,12 @@ pub struct WindowView {
     /// 预览栏，见 `preview`：各 workspace 的预览标签都在它里面，自动换行和 Markdown 显示源码的开关也是。
     preview: Entity<PreviewPanel>,
     _preview_events: Subscription,
-    /// 文件树里显示被 git 忽略的文件。
-    show_ignored: bool,
-    /// 文件树里显示名字以 `.` 开头的文件。
-    show_dotfiles: bool,
-    /// 文件树的焦点：点了文件树后方向键在里面移动选中的行。
-    files_focus: FocusHandle,
-    /// 文件树上面的搜索框和搜到的结果；整个窗口一个，换了 workspace 时按新的根目录重搜。
-    file_search: files::FileSearch,
-    /// 文件树的右键菜单（预览标签的在预览栏自己身上），文件树里正在新建或改名的输入框，以及剪切或
-    /// 复制下来等着粘贴的文件。
-    file_menu: Option<Menu>,
-    file_edit: Option<files::FileEdit>,
-    file_clipboard: Option<files::FileClipboard>,
+    /// 右侧面板的文件树，见 `files`：各 workspace 的树都在它里面，显示哪些文件和搜索的选项也是。
+    file_tree: Entity<FileTree>,
+    _file_tree_events: Subscription,
+    /// 窗口开着的菜单：Git 面板、状态栏、标题栏命令按钮这些的右键菜单和按钮下面的菜单，同一时刻只开一个。
+    /// 预览栏和文件树的菜单存在它们自己身上。
+    menu: Option<Menu>,
     renaming: Option<Renaming>,
     /// 新建 workspace 的对话框。
     new_workspace: Option<new_workspace::NewWorkspaceDialog>,
@@ -417,6 +412,8 @@ impl WindowView {
         let actions_events = cx.subscribe_in(&github_actions, window, Self::on_github_actions_event);
         let preview = cx.new(|cx| PreviewPanel::new(runode_terminal::cell_width, cx));
         let preview_events = cx.subscribe_in(&preview, window, Self::on_preview_event);
+        let file_tree = cx.new(FileTree::new);
+        let file_tree_events = cx.subscribe_in(&file_tree, window, Self::on_file_tree_event);
         Self {
             workspaces: Vec::new(),
             active: 0,
@@ -438,13 +435,9 @@ impl WindowView {
             preview_width: None,
             preview,
             _preview_events: preview_events,
-            show_ignored: false,
-            show_dotfiles: true,
-            files_focus: cx.focus_handle(),
-            file_search: files::FileSearch::new(window, cx),
-            file_menu: None,
-            file_edit: None,
-            file_clipboard: None,
+            file_tree,
+            _file_tree_events: file_tree_events,
+            menu: None,
             renaming: None,
             new_workspace: None,
             add_task: None,
@@ -652,11 +645,11 @@ struct ClassicTitlebar {
 
 impl MenuHost for WindowView {
     fn menu_slot(&mut self) -> &mut Option<Menu> {
-        &mut self.file_menu
+        &mut self.menu
     }
 
     fn menu(&self) -> Option<&Menu> {
-        self.file_menu.as_ref()
+        self.menu.as_ref()
     }
 }
 
@@ -698,7 +691,7 @@ impl Render for WindowView {
             (bg, self.render_classic_body(fg, bg, window, cx))
         };
         let drag = self.dragging_divider.map(|divider| self.render_divider_drag(divider, cx));
-        let file_menu = self.render_context_menu(window, cx);
+        let menu = self.render_context_menu(window, cx);
         let agent_picker = self.render_agent_picker(fg, bg, window, cx);
         let arrange_picker = self.render_arrange_picker(fg, bg, cx);
         let branch_picker = self.render_branch_picker(fg, bg, cx);
@@ -810,7 +803,7 @@ impl Render for WindowView {
                     .children(status_bar),
             )
             .children(drag)
-            .children(file_menu)
+            .children(menu)
             .children(agent_picker)
             .children(arrange_picker)
             .children(branch_picker)

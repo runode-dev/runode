@@ -1,112 +1,28 @@
-//! 右侧的文件树：当前终端所在仓库或目录下的文件，图标按文件类型，名字按 git 状态着色，行尾标出状态。
-//! 单击目录展开收起，双击文件在预览栏里打开，也可以配置成单击打开、双击把路径打进终端。
+//! 把右侧面板的文件树接到窗口上。文件树本身在 `runode_file_tree`：一个窗口一个 `FileTree`，各 workspace 的树
+//! 都在它里面。这里每次对它做什么之前告诉它当前是哪个 workspace、交给它 workspace 的名字、目录和单击打不打开
+//! 文件，画面板外框和顶上的标签；后台读到的目录和 git 状态由 `refresh_project` 经 `FileTree::apply_scan` 交给它。
+//! 它要窗口办的事（开预览、把路径打进终端、开新标签、预览跟着改名和删除、重读、焦点交回终端、开关变了要存档）
+//! 经 `FileTreeEvent` 交回来。
 //!
-//! 点过文件树后它拿到焦点，方向键移动选中的行，各种快捷键作用在选中的那一项上。右键菜单在
-//! `menu`；就地新建、改名，删除、剪切复制粘贴和拖动挪位置在 `edit`，它们落到文件系统上的
-//! 操作在 `ops`。上面的搜索框在 `search`。
+//! 把路径打进终端（`insert_path`）和拖到终端上（`drop_paths_on_pane`）也在这里，预览栏、Git 面板和分屏都用。
 
-mod edit;
-mod menu;
-mod ops;
-mod search;
+use std::path::{Path, PathBuf};
 
-use crate::ui::button::{Button, ButtonSize};
-use crate::ui::theme::ActiveTheme as _;
-use std::{
-    borrow::Cow,
-    ops::Range,
-    path::{Path, PathBuf},
-};
-
-use gpui::{
-    AccessibleAction, Action, AnyElement, Axis, ClickEvent, Context, Div, Focusable, MouseButton, MouseDownEvent,
-    Pixels, Render, Role, ScrollStrategy, SharedString, Stateful, Window, actions, div, img, prelude::*, px, svg,
-    uniform_list,
-};
+use gpui::{Context, Div, Entity, Focusable, Stateful, Window, div, prelude::*, px};
 use runode_config::PreviewClick;
-use runode_shared_types::color::Rgb;
+use runode_file_tree::{FileTree, FileTreeEvent, Input};
 
-pub(super) use edit::{FileClipboard, FileEdit};
 // 菜单在 `runode_ui::menu`，窗口里各处照旧从这里引。
-pub(super) use crate::ui::menu::{MenuButton, MenuHost, MenuItem};
-pub(super) use search::FileSearch;
+pub(super) use crate::ui::menu::{MenuButton, MenuItem};
 
-use super::{
-    WindowView,
-    project::{Decoration, Project, TreeFilter, panel_shell, panel_title, status_color},
-    titlebar::drag_chip,
-};
-use crate::ui::a11y::A11yPress;
+use super::{WindowView, cards, project::panel_shell};
 use crate::{
-    assets::{
-        CHEVRON_DOWN_ICON, CHEVRON_RIGHT_ICON, CODE_ICON, FOLDER_OPEN_ICON, MORE_ICON, REFRESH_ICON, VIEW_LIST_ICON,
-        VIEW_TREE_ICON,
-    },
     config::AppConfig,
     ui::{
-        actions::{Copy, Cut, Paste},
-        file_icons::{file_icon, folder_icon},
         font_size::{self, FontSize},
-        hsla,
-        scrollbar::scrollbar,
-        tooltip::tooltip,
+        theme::ActiveTheme as _,
     },
 };
-
-actions!(
-    runode,
-    [
-        /// 文件树里选中上一项、下一项、第一项和最后一项。
-        SelectPreviousFile,
-        SelectNextFile,
-        SelectFirstFile,
-        SelectLastFile,
-        /// 收起选中的目录，已经收着或者选中的是文件时跳到上一级目录。
-        CollapseSelectedFile,
-        /// 展开选中的目录，已经展开时跳到它的第一项。
-        ExpandSelectedFile,
-        /// 选中的目录展开或收起，文件在预览栏里打开。
-        OpenSelectedFile,
-        /// 把选中项的路径打进终端。
-        InsertFilePath,
-        /// 在选中的目录或文件所在的目录里新建文件、文件夹。
-        NewFile,
-        NewFolder,
-        RenameFile,
-        /// 把选中的文件或目录移到废纸篓。
-        DeleteFile,
-        /// 把选中的文件或目录写进它所在仓库根目录的 `.gitignore`。
-        AddToGitignore,
-        /// 在访达里显示选中的文件或目录。
-        RevealInFinder,
-        /// 开一个新标签页，终端的目录是选中的目录或文件所在的目录。
-        OpenInTerminal,
-        /// 把选中项的绝对路径、相对文件树根目录的路径复制到剪贴板。
-        CopyPath,
-        CopyRelativePath,
-        /// 收起文件树里所有展开的目录。
-        CollapseAllFiles,
-        /// 文件树里显示、隐藏名字以 `.` 开头的文件和被 git 忽略的文件。
-        ToggleShowDotfiles,
-        ToggleShowIgnored,
-        /// 用 VS Code 打开文件树的根目录，在访达里打开它。
-        OpenRootInVsCode,
-        OpenRootInFinder,
-        /// 焦点从文件树交回终端。
-        FocusTerminal
-    ]
-);
-
-/// 行高比字号多出的部分。
-const ROW_EXTRA_HEIGHT: f32 = 10.;
-/// 每深一层往右缩进的宽度。
-const INDENT: f32 = 12.;
-/// 行的左边距。
-const ROW_PADDING: f32 = 4.;
-/// 标题那一行上按钮的边长。
-const TOOLBAR_BUTTON_SIZE: f32 = 24.;
-/// 剪切下来等着粘贴的行画得淡一些。
-const CUT_OPACITY: f32 = 0.5;
 
 /// 打进 shell 不用引号也不用转义的常见字符。
 fn is_shell_plain(c: char) -> bool {
@@ -144,551 +60,68 @@ fn shell_escape(text: &str) -> String {
     escaped
 }
 
-/// 用 VS Code 打开 `dir`，按 bundle id 找它，不管装在哪里。没装时只记一条日志。
-fn open_in_vscode(dir: PathBuf) {
-    std::thread::spawn(move || {
-        let status = std::process::Command::new("open").args(["-b", "com.microsoft.VSCode"]).arg(&dir).status();
-        if !status.is_ok_and(|status| status.success()) {
-            tracing::warn!("failed to open {} in VS Code", dir.display());
-        }
-    });
-}
-
-/// 从文件树拖出来的一项：放到终端上把路径打进去，放到文件树的目录上挪进那个目录。
-#[derive(Clone)]
-pub(super) struct DraggedFile {
-    pub path: PathBuf,
-    name: SharedString,
-    width: Pixels,
-    height: Pixels,
-}
-
-impl Render for DraggedFile {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        drag_chip(self.width, self.height, self.name.clone(), cx.theme().mix(0.10), cx)
-    }
-}
-
 impl WindowView {
-    /// 文件树的根目录：终端所在的仓库或目录，还没读过时是 workspace 的目录。
-    pub(super) fn files_root(&self) -> PathBuf {
+    /// 当前 workspace 交给文件树的名字、目录和单击打不打开文件。
+    fn file_tree_input(&self, cx: &Context<Self>) -> Input {
         let workspace = self.workspace();
-        workspace.project.root.clone().unwrap_or_else(|| workspace.dir.clone())
-    }
-
-    /// 文件树显示哪些文件。
-    pub(super) fn tree_filter(&self) -> TreeFilter {
-        TreeFilter { ignored: self.show_ignored, dotfiles: self.show_dotfiles }
-    }
-
-    /// 标题行「更多」按钮的菜单：新建、全部收起，显示哪些文件，用别的程序打开根目录。
-    fn open_files_more_menu(&mut self, position: gpui::Point<Pixels>, cx: &mut Context<Self>) {
-        let item = |key: &str, action: Box<dyn Action>| Some(MenuItem::new(rust_i18n::t!(key), action, true, cx));
-        let check = |key: &str, checked: bool, action: Box<dyn Action>| {
-            Some(MenuItem::checkbox(rust_i18n::t!(key).into_owned(), None, checked, action))
-        };
-        let items = vec![
-            item("files.new_file", Box::new(NewFile)),
-            item("files.new_folder", Box::new(NewFolder)),
-            item("files.collapse_all", Box::new(CollapseAllFiles)),
-            None,
-            check("files.show_dotfiles", self.show_dotfiles, Box::new(ToggleShowDotfiles)),
-            check("files.show_ignored", self.show_ignored, Box::new(ToggleShowIgnored)),
-            None,
-            item("files.open_in_vscode", Box::new(OpenRootInVsCode)).map(|item| item.with_icon(CODE_ICON)),
-            item("files.open_in_finder", Box::new(OpenRootInFinder)).map(|item| item.with_icon(FOLDER_OPEN_ICON)),
-        ];
-        let target = self.files_focus.clone();
-        self.open_context_menu(position, items, target, cx);
-    }
-
-    /// 选中的那一项和它是不是目录；没选中时为空。
-    fn selected_entry(&self) -> Option<(PathBuf, bool)> {
-        let project = &self.workspace().project;
-        let path = project.selected.clone()?;
-        let is_dir = match project.selected_row() {
-            Some(ix) => project.file_rows[ix].is_dir,
-            None => path.is_dir(),
-        };
-        Some((path, is_dir))
-    }
-
-    /// 新建、粘贴和开终端落在哪个目录：选中的目录，选中文件所在的目录，没选中时是根目录。
-    fn target_dir(&self) -> PathBuf {
-        match self.selected_entry() {
-            Some((path, true)) => path,
-            Some((path, false)) => path.parent().map_or_else(|| self.files_root(), Path::to_path_buf),
-            None => self.files_root(),
+        Input {
+            name: workspace.name.clone(),
+            dir: workspace.dir.clone(),
+            single_click: cx.global::<AppConfig>().0.file_tree_preview_click == PreviewClick::Single,
         }
     }
 
-    pub(super) fn render_files_panel(&self, width: f32, fg: Rgb, bg: Rgb, cx: &mut Context<Self>) -> Stateful<Div> {
-        let workspace = self.workspace();
-        // 显示的是终端所在的仓库或目录，不一定是 workspace 的目录。
-        let name = match workspace.project.root.as_deref().and_then(Path::file_name) {
-            Some(name) if workspace.project.root.as_ref() != Some(&workspace.dir) => {
-                SharedString::from(name.to_string_lossy().into_owned())
-            }
-            _ => workspace.name.clone(),
-        };
-        // 标题行上的图标按钮。按下时不往外传：外层的文件树按下时会把焦点抢回去，新建时刚交给
-        // 输入框的焦点就丢了。
-        let button = |id, icon, text: Cow<'static, str>| {
-            Button::new(id, SharedString::from(text.clone()))
-                .icon(icon)
-                .with_size(ButtonSize::Icon)
-                .size(px(TOOLBAR_BUTTON_SIZE))
-                .tooltip(tooltip(text, None))
-        };
-        // 这几个按钮只有按下的处理，辅助工具按不到，另外登记按下时做的事。
-        let view = cx.entity().downgrade();
-        // 搜索结果排成树还是列表；没在搜时淡着、点了没反应。
-        let searching = self.searching(cx);
-        let (icon, text) = if self.file_search.tree {
-            (VIEW_LIST_ICON, rust_i18n::t!("files.view_as_list"))
-        } else {
-            (VIEW_TREE_ICON, rust_i18n::t!("files.view_as_tree"))
-        };
-        let view_toggle = button("search-view", icon, text)
-            .when(!searching, |button| button.opacity(0.4))
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(|this, _, _, cx| {
-                    cx.stop_propagation();
-                    if this.searching(cx) {
-                        this.toggle_search_tree(cx);
-                    }
-                }),
-            )
-            .on_a11y_press(view.clone(), |this, _, cx| {
-                if this.searching(cx) {
-                    this.toggle_search_tree(cx);
-                }
-            });
-        let refresh = button("files-refresh", REFRESH_ICON, rust_i18n::t!("files.refresh"))
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(|this, _, _, cx| {
-                    cx.stop_propagation();
-                    this.refresh_project(cx);
-                }),
-            )
-            .on_a11y_press(view.clone(), |this, _, cx| this.refresh_project(cx));
-        let more = button("files-more", MORE_ICON, rust_i18n::t!("files.more"))
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(|this, event: &MouseDownEvent, _, cx| {
-                    cx.stop_propagation();
-                    this.open_files_more_menu(event.position, cx);
-                }),
-            )
-            // 辅助工具按下时没有鼠标事件，菜单弹在鼠标所在的地方，贴着窗口边挪进来。
-            .on_a11y_press(view, |this, window, cx| this.open_files_more_menu(window.mouse_position(), cx));
-        // 标题那一行：目录名，右边是搜索结果的排法、刷新和「更多」菜单。
-        let header = panel_title()
-            .gap(px(6.))
-            .child(div().flex_initial().min_w_0().truncate().text_color(hsla(fg)).child(name))
-            .child(div().flex_1())
-            .child(div().flex().gap(px(4.)).child(view_toggle).child(refresh).child(more));
-        let font_size = FontSize::Medium.points() * font_size::scale(cx);
-        let search_box = self.render_file_search_box(fg, bg, cx);
-        let content = match self.render_file_search_results(font_size, fg, bg, cx) {
-            Some(results) => results,
-            None => self.render_file_tree(font_size, fg, bg, cx).into_any_element(),
-        };
-        // 搜索框不在文件树的按键上下文里：文件树绑的方向键、删除这些不能抢输入框的键。
-        let tree = div()
-            .flex_1()
-            .min_h_0()
-            .flex()
-            .flex_col()
-            // 新建或改名时输入框在文件树里面，方向键这些归输入框。
-            .key_context(if self.file_edit.is_some() { "FileTree editing" } else { "FileTree" })
-            .track_focus(&self.files_focus)
-            .on_action(cx.listener(Self::select_previous_file))
-            .on_action(cx.listener(Self::select_next_file))
-            .on_action(cx.listener(Self::select_first_file))
-            .on_action(cx.listener(Self::select_last_file))
-            .on_action(cx.listener(Self::collapse_selected_file))
-            .on_action(cx.listener(Self::expand_selected_file))
-            .on_action(cx.listener(Self::open_selected_file))
-            .on_action(cx.listener(Self::collapse_all_files))
-            .on_action(cx.listener(|this, _: &ToggleShowDotfiles, _, cx| this.toggle_show_dotfiles(cx)))
-            .on_action(cx.listener(|this, _: &ToggleShowIgnored, _, cx| this.toggle_show_ignored(cx)))
-            .on_action(cx.listener(|this, _: &OpenRootInVsCode, _, _| open_in_vscode(this.files_root())))
-            .on_action(cx.listener(|this, _: &OpenRootInFinder, _, cx| cx.open_with_system(&this.files_root())))
-            .on_action(cx.listener(Self::focus_terminal))
-            .on_action(cx.listener(Self::new_file))
-            .on_action(cx.listener(Self::new_folder))
-            .on_action(cx.listener(Self::rename_file))
-            .on_action(cx.listener(Self::delete_file))
-            .on_action(cx.listener(Self::add_to_gitignore))
-            .on_action(cx.listener(Self::reveal_in_finder))
-            .on_action(cx.listener(Self::insert_file_path))
-            .on_action(cx.listener(Self::open_in_terminal))
-            .on_action(cx.listener(Self::copy_path))
-            .on_action(cx.listener(Self::copy_relative_path))
-            .on_action(cx.listener(|this, _: &Copy, _, cx| this.copy_file(false, cx)))
-            .on_action(cx.listener(|this, _: &Cut, _, cx| this.copy_file(true, cx)))
-            .on_action(cx.listener(|this, _: &Paste, window, cx| this.paste_file(window, cx)))
-            // 拖到空白处：挪到根目录。
-            .on_drop(cx.listener(|this, dragged: &DraggedFile, window, cx| {
-                let root = this.files_root();
-                this.drop_file(&dragged.path, root, window, cx);
-            }))
-            .child(content);
-        panel_shell("files-panel", width, super::cards(cx), cx)
-            .bg(hsla(bg.mix(fg, 0.03)))
-            .text_size(px(font_size))
-            .child(self.render_panel_tabs(cx))
-            .child(header)
-            .child(search_box)
-            .child(tree)
-    }
-
-    /// 文件树的行列表和滚动条。
-    fn render_file_tree(&self, font_size: f32, fg: Rgb, bg: Rgb, cx: &mut Context<Self>) -> Stateful<Div> {
-        let workspace = self.workspace();
-        let new_entry = self.new_entry_row();
-        let count = workspace.project.file_rows.len() + usize::from(new_entry.is_some());
-        let list = uniform_list(
-            "files",
-            count,
-            cx.processor(move |this, range: Range<usize>, window, cx| {
-                let focused = this.files_focus.contains_focused(window, cx);
-                this.render_file_rows(range, new_entry, font_size, focused, fg, bg, cx)
-            }),
-        )
-        .track_scroll(&workspace.project.files_scroll)
-        .size_full()
-        .p(px(4.))
-        // 点在行下面的空白处：取消选中，右键弹出对根目录的菜单。
-        .on_mouse_down(
-            MouseButton::Left,
-            cx.listener(|this, _, _, cx| {
-                this.workspace_mut().project.selected = None;
-                cx.notify();
-            }),
-        )
-        .on_mouse_down(
-            MouseButton::Right,
-            cx.listener(|this, event: &MouseDownEvent, window, cx| {
-                cx.stop_propagation();
-                window.focus(&this.files_focus, cx);
-                this.workspace_mut().project.selected = None;
-                this.open_file_menu(event.position, cx);
-            }),
-        );
-        let scroll = workspace.project.files_scroll.0.borrow().base_handle.clone();
-        // 列表只画看得见的行，辅助工具也只读到这些行。
-        div()
-            .id("file-tree")
-            .role(Role::Tree)
-            .aria_label(rust_i18n::t!("files.tree").into_owned())
-            .flex_1()
-            .min_h_0()
-            .relative()
-            .child(list)
-            .child(scrollbar("files-scroll", scroll, Axis::Vertical))
-    }
-
-    /// 文件树的行。行高、箭头和图标跟着字号 `font_size` 一起缩放。新建时输入框插在
-    /// `new_entry`（即 `new_entry_row`）那一行，后面的行往下错一行。
-    #[allow(clippy::too_many_arguments)]
-    fn render_file_rows(
-        &self,
-        range: Range<usize>,
-        new_entry: Option<(usize, usize)>,
-        font_size: f32,
-        focused: bool,
-        fg: Rgb,
-        bg: Rgb,
+    /// 对当前 workspace 的文件树做 `f`：先交给它 `file_tree_input`，告诉它是哪个 workspace（换了时它换上那个
+    /// workspace 的搜索词重搜）。会让文件树重画，不能在画的时候调。
+    pub(super) fn with_file_tree<R>(
+        &mut self,
         cx: &mut Context<Self>,
-    ) -> Vec<AnyElement> {
-        range
-            .filter_map(|ix| match new_entry {
-                Some((at, depth)) if ix == at => Some(self.render_new_entry_row(depth, font_size, fg, cx)),
-                Some((at, _)) if ix > at => self.render_file_row(ix - 1, font_size, focused, fg, bg, cx),
-                _ => self.render_file_row(ix, font_size, focused, fg, bg, cx),
-            })
-            .collect()
-    }
-
-    /// 缩进：每一层一格，格子中间一条竖线，对准那一层的箭头，上下相邻的行连成一条。
-    fn indent_guides(depth: usize, fg: Rgb) -> impl Iterator<Item = Div> {
-        let guide = hsla(fg).opacity(0.2);
-        (0..depth).map(move |_| {
-            div().flex_none().w(px(INDENT)).h_full().flex().justify_center().child(div().w(px(1.)).h_full().bg(guide))
+        f: impl FnOnce(&mut FileTree, &mut Context<FileTree>) -> R,
+    ) -> R {
+        let input = self.file_tree_input(cx);
+        let id = self.workspace().id;
+        self.file_tree.update(cx, |tree, cx| {
+            tree.set_input(input);
+            tree.switch_workspace(id, cx);
+            f(tree, cx)
         })
     }
 
-    /// 文件树的一行：外框、缩进和底色，里面放箭头、图标和名字。
-    fn file_row_shell(id: impl Into<gpui::ElementId>, depth: usize, font_size: f32, fg: Rgb) -> Stateful<Div> {
-        div()
-            .id(id)
-            .flex_none()
-            .h(px(font_size + ROW_EXTRA_HEIGHT))
-            // 占满整行宽度，名字后面的空白处也能点、也有悬停底色。
-            .w_full()
-            .pl(px(ROW_PADDING))
-            .pr(px(6.))
-            .rounded(px(4.))
-            .flex()
-            .items_center()
-            .overflow_hidden()
-            .children(Self::indent_guides(depth, fg))
+    /// 右侧面板的文件树页：外框和顶上的标签在这里画，里面是文件树。
+    pub(super) fn render_files_panel(&mut self, width: f32, cx: &mut Context<Self>) -> Stateful<Div> {
+        let input = self.file_tree_input(cx);
+        self.file_tree.update(cx, |tree, _| tree.set_input(input));
+        let font_size = FontSize::Medium.points() * font_size::scale(cx);
+        panel_shell("files-panel", width, cards(cx), cx)
+            .bg(cx.theme().mix(0.03))
+            .text_size(px(font_size))
+            .child(self.render_panel_tabs(cx))
+            .child(div().flex_1().min_h_0().child(self.file_tree.clone()))
     }
 
-    /// 第 `ix` 个 `FileRow`；`focused` 是文件树有没有焦点，有焦点时选中的行更醒目。
-    fn render_file_row(
-        &self,
-        ix: usize,
-        font_size: f32,
-        focused: bool,
-        fg: Rgb,
-        bg: Rgb,
-        cx: &mut Context<Self>,
-    ) -> Option<AnyElement> {
-        let project = &self.workspace().project;
-        let row = project.file_rows.get(ix)?;
-        let selected_bg = hsla(bg.mix(fg, if focused { 0.16 } else { 0.10 }));
-        let hover_bg = hsla(bg.mix(fg, 0.06));
-        let drop_bg = hsla(bg.mix(fg, 0.20));
-        let color = match row.decoration {
-            Decoration::None | Decoration::Ignored => hsla(fg).opacity(0.85),
-            Decoration::Status(status) | Decoration::ContainsChanges(status) => hsla(status_color(status)),
-        };
-        let selected = project.selected.as_ref() == Some(&row.path);
-        let cut = self.file_clipboard.as_ref().is_some_and(|clip| clip.cut && clip.path == row.path);
-        let chevron = row.is_dir.then(|| {
-            svg()
-                .path(if row.expanded { CHEVRON_DOWN_ICON } else { CHEVRON_RIGHT_ICON })
-                .size(px(font_size))
-                .text_color(hsla(fg).opacity(0.5))
-        });
-        // 并成一行的目录按最里层的名字挑图标。
-        let last = row.path.file_name().map(|name| name.to_string_lossy()).unwrap_or_default();
-        let icon = if row.is_dir { folder_icon(&last, row.expanded) } else { file_icon(&last) };
-        // 行尾的 git 标记：文件写状态字母，含改动的目录画一个点。
-        let badge = match row.decoration {
-            Decoration::Status(status) => Some(status.letter()),
-            Decoration::ContainsChanges(_) => Some("•"),
-            Decoration::None | Decoration::Ignored => None,
-        };
-        let status = badge;
-        let badge = badge.map(|text| div().flex_none().pl(px(6.)).text_color(color).child(text));
-        let renaming = self.renaming(&row.path);
-        let name: AnyElement = match renaming {
-            Some(edit) => edit.render(px(font_size + 6.)).flex_1().min_w_0().into_any_element(),
-            None => div().min_w_0().truncate().text_color(color).child(row.name.clone()).into_any_element(),
-        };
-        // 改名时在输入框里拖选文字，不能把整行拖走。
-        let dragged = renaming.is_none().then(|| DraggedFile {
-            path: row.path.clone(),
-            name: row.name.clone(),
-            width: px(180.),
-            height: px(font_size + ROW_EXTRA_HEIGHT),
-        });
-        let path = row.path.clone();
-        let is_dir = row.is_dir;
-        // 放到目录上挪进这个目录，放到文件上挪进文件所在的目录。
-        let drop_dir =
-            if is_dir { path.clone() } else { path.parent().map_or_else(|| self.files_root(), Path::to_path_buf) };
-        let expanded = row.expanded;
-        // 辅助工具按下时打开文件、展开或收起目录；目录还能直接展开、收起。
-        let a11y = |want: Option<bool>, cx: &mut Context<Self>| {
-            let (view, path) = (cx.entity().downgrade(), path.clone());
-            move |_: Option<&gpui::accesskit::ActionData>, window: &mut Window, cx: &mut gpui::App| {
-                view.update(cx, |this, cx| match want {
-                    // 和点击一样，正在改名的那一行不动。
-                    _ if this.renaming(&path).is_some() => {}
-                    Some(want) if want == expanded => {}
-                    Some(_) => {
-                        this.workspace_mut().project.selected = Some(path.clone());
-                        this.with_tree(|project, root, filter| project.toggle_dir(&path, root, filter));
-                        cx.notify();
-                    }
-                    // 和点击一样把焦点交给文件树。按两下的打开法：预览设成双击才打开时单击什么也不做，而辅助
-                    // 工具按下总该打开文件；目录不看按了几下，照样展开、收起。
-                    None => {
-                        window.focus(&this.files_focus, cx);
-                        this.click_file(&path, is_dir, 2, cx);
-                    }
-                })
-                .ok();
-            }
-        };
-        Some(
-            Self::file_row_shell(("file", ix), row.depth, font_size, fg)
-                .role(Role::TreeItem)
-                .aria_label(row.name.clone())
-                .aria_level(row.depth + 1)
-                .aria_selected(selected)
-                .when_some(status, |item, status| item.aria_description(status))
-                .when(is_dir, |item| {
-                    item.aria_expanded(expanded)
-                        .on_a11y_action(AccessibleAction::Expand, a11y(Some(true), cx))
-                        .on_a11y_action(AccessibleAction::Collapse, a11y(Some(false), cx))
-                })
-                .on_a11y_action(AccessibleAction::Click, a11y(None, cx))
-                .when(row.decoration == Decoration::Ignored, |item| item.opacity(0.45))
-                .when(cut, |item| item.opacity(CUT_OPACITY))
-                .map(|item| if selected { item.bg(selected_bg) } else { item.hover(|item| item.bg(hover_bg)) })
-                .child(
-                    div()
-                        .flex_1()
-                        .min_w_0()
-                        .flex()
-                        .items_center()
-                        .gap(px(4.))
-                        .child(div().flex_none().w(px(font_size)).flex().items_center().children(chevron))
-                        .child(img(icon).flex_none().size(px(font_size + 2.)))
-                        .child(name),
-                )
-                .children(badge)
-                .on_mouse_down(
-                    MouseButton::Left,
-                    cx.listener({
-                        let path = path.clone();
-                        move |this, _: &MouseDownEvent, window, cx| {
-                            // 点在改名输入框里时交给输入框挪光标、选字。
-                            cx.stop_propagation();
-                            if this.renaming(&path).is_some() {
-                                return;
-                            }
-                            window.focus(&this.files_focus, cx);
-                            this.workspace_mut().project.selected = Some(path.clone());
-                            cx.notify();
-                        }
-                    }),
-                )
-                // 按下只选中，松开才展开目录、打开预览：拖动时 GPUI 不发点击，拖走的文件不会被打开。
-                .on_click(cx.listener({
-                    let path = path.clone();
-                    move |this, event: &ClickEvent, _, cx| {
-                        if this.renaming(&path).is_none() {
-                            this.click_file(&path, is_dir, event.click_count(), cx);
-                        }
-                    }
-                }))
-                .on_mouse_down(
-                    MouseButton::Right,
-                    cx.listener(move |this, event: &MouseDownEvent, window, cx| {
-                        cx.stop_propagation();
-                        window.focus(&this.files_focus, cx);
-                        this.workspace_mut().project.selected = Some(path.clone());
-                        this.open_file_menu(event.position, cx);
-                    }),
-                )
-                .when_some(dragged, |row, dragged| {
-                    row.on_drag(dragged, |dragged, _, _, cx| cx.new(|_| dragged.clone()))
-                })
-                .drag_over::<DraggedFile>(move |style, _, _, _| style.bg(drop_bg))
-                .on_drop(cx.listener(move |this, dragged: &DraggedFile, window, cx| {
-                    this.drop_file(&dragged.path, drop_dir.clone(), window, cx);
-                }))
-                .into_any_element(),
-        )
-    }
-
-    /// 点击（按下又松开、没拖动）选中，目录同时展开或收起。文件按配置的 `PreviewClick`
-    /// 在预览栏里打开：单击打开时单击开成临时标签，双击固定下来；双击打开时双击开成固定标签。
-    fn click_file(&mut self, path: &Path, is_dir: bool, clicks: usize, cx: &mut Context<Self>) {
-        self.workspace_mut().project.selected = Some(path.to_path_buf());
-        if is_dir {
-            self.with_tree(|project, root, filter| project.toggle_dir(path, root, filter));
-            cx.notify();
-            return;
-        }
-        let single = cx.global::<AppConfig>().0.file_tree_preview_click == PreviewClick::Single;
-        if clicks >= 2 {
-            self.open_preview(path, true, cx);
-        } else if single {
-            self.open_preview(path, false, cx);
-        }
-        cx.notify();
-    }
-
-    /// 拿文件树的根目录和是否显示被忽略的文件，对 `Project` 做 `f`。
-    pub(super) fn with_tree<R>(&mut self, f: impl FnOnce(&mut Project, &Path, TreeFilter) -> R) -> R {
-        let (root, filter) = (self.files_root(), self.tree_filter());
-        f(&mut self.workspace_mut().project, &root, filter)
-    }
-
-    /// 键盘移动选中的行：`f` 返回新选中的位置，滚到那里，关掉右键菜单。
-    fn move_selection(
+    /// 文件树要窗口办的事。
+    pub(super) fn on_file_tree_event(
         &mut self,
-        f: impl FnOnce(&mut Project, &Path, TreeFilter) -> Option<usize>,
+        _: &Entity<FileTree>,
+        event: &FileTreeEvent,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.with_tree(|project, root, filter| {
-            if let Some(ix) = f(project, root, filter) {
-                project.files_scroll.scroll_to_item(ix, ScrollStrategy::Nearest);
+        match event {
+            FileTreeEvent::Open { path, line: None, pin } => self.open_preview(path, *pin, cx),
+            FileTreeEvent::Open { path, line: Some(line), pin } => self.open_preview_at(path, *line, *pin, cx),
+            FileTreeEvent::InsertPath(path) => self.insert_path(path, None, window, cx),
+            FileTreeEvent::OpenTerminal(dir) => {
+                if let Some(view) = self.spawn_terminal(Some(dir), window, cx) {
+                    self.insert_tab(self.workspace().active + 1, view, window, cx);
+                }
             }
-        });
-        self.file_menu = None;
-        cx.notify();
-    }
-
-    fn select_previous_file(&mut self, _: &SelectPreviousFile, _: &mut Window, cx: &mut Context<Self>) {
-        self.move_selection(|project, _, _| project.select_step(-1), cx);
-    }
-
-    fn select_next_file(&mut self, _: &SelectNextFile, _: &mut Window, cx: &mut Context<Self>) {
-        self.move_selection(|project, _, _| project.select_step(1), cx);
-    }
-
-    fn select_first_file(&mut self, _: &SelectFirstFile, _: &mut Window, cx: &mut Context<Self>) {
-        self.move_selection(|project, _, _| project.select_row(0), cx);
-    }
-
-    fn select_last_file(&mut self, _: &SelectLastFile, _: &mut Window, cx: &mut Context<Self>) {
-        self.move_selection(|project, _, _| project.select_row(project.file_rows.len().checked_sub(1)?), cx);
-    }
-
-    fn collapse_selected_file(&mut self, _: &CollapseSelectedFile, _: &mut Window, cx: &mut Context<Self>) {
-        self.move_selection(Project::select_out, cx);
-    }
-
-    fn expand_selected_file(&mut self, _: &ExpandSelectedFile, _: &mut Window, cx: &mut Context<Self>) {
-        self.move_selection(Project::select_in, cx);
-    }
-
-    fn open_selected_file(&mut self, _: &OpenSelectedFile, _: &mut Window, cx: &mut Context<Self>) {
-        let Some((path, is_dir)) = self.selected_entry() else {
-            return;
-        };
-        if is_dir {
-            self.move_selection(
-                |project, root, filter| {
-                    project.toggle_dir(&path, root, filter);
-                    None
-                },
-                cx,
-            );
-        } else {
-            self.open_preview(&path, false, cx);
-            // 预览栏刚打开时文件树变窄，选中的行可能被挤出视野。
-            self.move_selection(|project, _, _| project.selected_row(), cx);
+            FileTreeEvent::Moved { from, to } => self.move_previews(from, to, cx),
+            FileTreeEvent::Removed(path) => self.close_previews_under(path, window, cx),
+            FileTreeEvent::Refresh => self.refresh_project(cx),
+            FileTreeEvent::FocusTerminal => window.focus(&self.focus_handle(cx), cx),
+            FileTreeEvent::OptionsChanged => self.save(cx),
         }
-    }
-
-    fn collapse_all_files(&mut self, _: &CollapseAllFiles, _: &mut Window, cx: &mut Context<Self>) {
-        self.move_selection(
-            |project, root, filter| {
-                project.collapse_all(root, filter);
-                None
-            },
-            cx,
-        );
-    }
-
-    fn focus_terminal(&mut self, _: &FocusTerminal, window: &mut Window, cx: &mut Context<Self>) {
-        if self.file_menu.take().is_some() {
-            cx.notify();
-            return;
-        }
-        window.focus(&self.focus_handle(cx), cx);
     }
 
     /// 把从文件树或访达拖来的 `paths` 放到终端 `pane` 上：切到那个终端，把路径一个个打进去。

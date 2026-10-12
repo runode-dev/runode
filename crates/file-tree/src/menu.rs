@@ -4,25 +4,22 @@
 use std::path::{Path, PathBuf};
 
 use gpui::{Action, ClipboardItem, Context, Pixels, Point, Window};
-
-use super::{
-    AddToGitignore, CopyPath, CopyRelativePath, DeleteFile, InsertFilePath, NewFile, NewFolder, OpenInTerminal,
-    OpenSelectedFile, RenameFile, RevealInFinder,
+use runode_ui::{
+    actions::{Copy, Cut, Paste},
+    menu::{MenuHost, MenuItem},
 };
+
 use crate::{
-    ui::{
-        actions::{Copy, Cut, Paste},
-        menu::{MenuHost, MenuItem},
-    },
-    window::WindowView,
+    AddToGitignore, CopyPath, CopyRelativePath, DeleteFile, FileTree, FileTreeEvent, InsertFilePath, NewFile,
+    NewFolder, OpenInTerminal, OpenSelectedFile, RenameFile, RevealInFinder,
 };
 
-impl WindowView {
+impl FileTree {
     /// 在 `position` 弹出文件树的右键菜单，作用在当前选中的那一项上：选中文件、选中目录和点在
     /// 空白处各有不同。
     pub(super) fn open_file_menu(&mut self, position: Point<Pixels>, cx: &mut Context<Self>) {
         let selected = self.selected_entry();
-        let can_paste = self.file_clipboard.is_some();
+        let can_paste = self.clipboard.is_some();
         let item = |key: &str, action: Box<dyn Action>| Some(MenuItem::new(rust_i18n::t!(key), action, true, cx));
         let mut items = vec![
             item("files.new_file", Box::new(NewFile)),
@@ -58,7 +55,7 @@ impl WindowView {
                 item("files.delete", Box::new(DeleteFile)),
             ]);
         }
-        let target = self.files_focus.clone();
+        let target = self.focus.clone();
         self.open_context_menu(position, items, target, cx);
     }
 
@@ -71,18 +68,15 @@ impl WindowView {
         cx.reveal_path(&self.selected_or_root());
     }
 
-    pub(super) fn insert_file_path(&mut self, _: &InsertFilePath, window: &mut Window, cx: &mut Context<Self>) {
+    pub(super) fn insert_file_path(&mut self, _: &InsertFilePath, _: &mut Window, cx: &mut Context<Self>) {
         if let Some((path, _)) = self.selected_entry() {
-            self.insert_path(&path, None, window, cx);
+            cx.emit(FileTreeEvent::InsertPath(path));
         }
     }
 
     /// 在当前 workspace 里开一个新标签页，终端的目录是 `target_dir`。
-    pub(super) fn open_in_terminal(&mut self, _: &OpenInTerminal, window: &mut Window, cx: &mut Context<Self>) {
-        let dir = self.target_dir();
-        if let Some(view) = self.spawn_terminal(Some(&dir), window, cx) {
-            self.insert_tab(self.workspace().active + 1, view, window, cx);
-        }
+    pub(super) fn open_in_terminal(&mut self, _: &OpenInTerminal, _: &mut Window, cx: &mut Context<Self>) {
+        cx.emit(FileTreeEvent::OpenTerminal(self.target_dir()));
     }
 
     pub(super) fn copy_path(&mut self, _: &CopyPath, _: &mut Window, cx: &mut Context<Self>) {

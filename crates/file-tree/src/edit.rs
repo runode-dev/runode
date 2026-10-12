@@ -5,20 +5,21 @@ use std::path::{Path, PathBuf};
 
 use gpui::{AnyElement, Context, PromptLevel, Role, ScrollStrategy, Window, div, img, prelude::*, px};
 use runode_git::Repo;
-use runode_shared_types::color::Rgb;
-
-use super::{
-    AddToGitignore, DeleteFile, NewFile, NewFolder, RenameFile,
-    ops::{self, OpError},
+use runode_ui::{
+    base_name,
+    file_icons::{file_icon, folder_icon},
+    follow_move,
+    inline_edit::InlineEdit,
 };
+
 use crate::{
-    ui::file_icons::{file_icon, folder_icon},
-    window::{WindowView, inline_edit::InlineEdit, model::base_name, project::follow_move},
+    AddToGitignore, DeleteFile, FileTree, FileTreeEvent, NewFile, NewFolder, RenameFile,
+    ops::{self, OpError},
 };
 
 /// 剪切或复制下来等着粘贴的文件或目录。
 #[derive(Clone)]
-pub(in crate::window) struct FileClipboard {
+pub(crate) struct FileClipboard {
     pub path: PathBuf,
     /// 剪切的粘贴时挪过去，粘贴一次就清掉；复制的可以一直粘贴。
     pub cut: bool,
@@ -32,7 +33,7 @@ enum EditTarget {
 }
 
 /// 文件树里正在新建或改名的输入框。
-pub(in crate::window) struct FileEdit {
+pub(crate) struct FileEdit {
     target: EditTarget,
     edit: InlineEdit,
 }
@@ -49,7 +50,7 @@ fn error_text(err: &OpError, name: &str) -> String {
     }
 }
 
-impl WindowView {
+impl FileTree {
     pub(super) fn new_file(&mut self, _: &NewFile, window: &mut Window, cx: &mut Context<Self>) {
         let dir = self.target_dir();
         self.start_file_edit(EditTarget::New { dir, is_dir: false }, window, cx);
@@ -68,31 +69,31 @@ impl WindowView {
 
     /// 正在改 `path` 的名字时是那个输入框。
     pub(super) fn renaming(&self, path: &Path) -> Option<&InlineEdit> {
-        let edit = self.file_edit.as_ref()?;
+        let edit = self.edit.as_ref()?;
         matches!(&edit.target, EditTarget::Rename { path: renaming, .. } if renaming == path).then_some(&edit.edit)
     }
 
     /// 新建时输入框占的那一行：插在第几行、缩进几层。目录的那一行找不到时放在最上面，
     /// 总要看得见。
     pub(super) fn new_entry_row(&self) -> Option<(usize, usize)> {
-        let EditTarget::New { dir, .. } = &self.file_edit.as_ref()?.target else {
+        let EditTarget::New { dir, .. } = &self.edit.as_ref()?.target else {
             return None;
         };
-        let rows = &self.workspace().project.file_rows;
+        let rows = &self.state().rows;
         let row = rows.iter().position(|row| row.path == *dir).filter(|_| *dir != self.files_root());
         Some(row.map_or((0, 0), |ix| (ix + 1, rows[ix].depth + 1)))
     }
 
     /// 新建时插进文件树的那一行，图标跟着输入的名字变。
-    pub(super) fn render_new_entry_row(&self, depth: usize, font_size: f32, fg: Rgb, cx: &Context<Self>) -> AnyElement {
-        let Some(FileEdit { target: EditTarget::New { is_dir, .. }, edit }) = &self.file_edit else {
+    pub(super) fn render_new_entry_row(&self, depth: usize, font_size: f32, cx: &Context<Self>) -> AnyElement {
+        let Some(FileEdit { target: EditTarget::New { is_dir, .. }, edit }) = &self.edit else {
             return div().into_any_element();
         };
         let name = edit.field.read(cx).query();
         let icon = if *is_dir { folder_icon(name, false) } else { file_icon(name) };
         // 输入框报不了自己的名字（`InlineEdit` 建的 `InputState` 没有），这一行替它说是在新建什么。
         let label = if *is_dir { rust_i18n::t!("files.new_folder") } else { rust_i18n::t!("files.new_file") };
-        Self::file_row_shell("new-file-entry", depth, font_size, fg)
+        Self::file_row_shell("new-file-entry", depth, font_size, cx)
             .role(Role::TreeItem)
             .aria_label(label.into_owned())
             .aria_level(depth + 1)
@@ -116,12 +117,12 @@ impl WindowView {
     fn start_file_edit(&mut self, target: EditTarget, window: &mut Window, cx: &mut Context<Self>) {
         // 正在改别的时先把那个改完。
         self.finish_file_edit(true, window, cx);
-        self.file_menu = None;
+        self.menu = None;
         let (text, select) = match &target {
             EditTarget::New { dir, .. } => {
-                self.with_tree(|project, root, filter| {
-                    if dir != root && !project.expanded_dirs.contains(dir) {
-                        project.toggle_dir(dir, root, filter);
+                self.with_tree(|state, root, filter| {
+                    if dir != root && !state.expanded.contains(dir) {
+                        state.toggle_dir(dir, root, filter);
                     }
                 });
                 (String::new(), 0)
@@ -141,21 +142,21 @@ impl WindowView {
             window,
             cx,
         );
-        self.file_edit = Some(FileEdit { target, edit });
-        let row = self.new_entry_row().map(|(ix, _)| ix).or_else(|| self.workspace().project.selected_row());
+        self.edit = Some(FileEdit { target, edit });
+        let row = self.new_entry_row().map(|(ix, _)| ix).or_else(|| self.state().selected_row());
         if let Some(row) = row {
-            self.workspace_mut().project.files_scroll.scroll_to_item(row, ScrollStrategy::Nearest);
+            self.state_mut().scroll.scroll_to_item(row, ScrollStrategy::Nearest);
         }
         cx.notify();
     }
 
     /// 关掉输入框；`commit` 时按输入的名字新建或改名，空的不算。
     fn finish_file_edit(&mut self, commit: bool, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(FileEdit { target, edit }) = self.file_edit.take() else {
+        let Some(FileEdit { target, edit }) = self.edit.take() else {
             return;
         };
         let name = edit.text(cx);
-        edit.release_focus(&self.files_focus, window, cx);
+        edit.release_focus(&self.focus, window, cx);
         cx.notify();
         if !commit || name.is_empty() {
             return;
@@ -178,7 +179,7 @@ impl WindowView {
         self.relist_and_reveal(vec![dir.to_path_buf()], &path, cx);
         // 新建的文件直接开成固定标签，接着就能看。
         if !is_dir {
-            self.open_preview(&path, true, cx);
+            cx.emit(FileTreeEvent::Open { path, line: None, pin: true });
         }
     }
 
@@ -199,29 +200,29 @@ impl WindowView {
 
     /// 当场重读 `dirs`，再选中 `path`、滚到它。
     fn relist_and_reveal(&mut self, dirs: Vec<PathBuf>, path: &Path, cx: &mut Context<Self>) {
-        self.with_tree(|project, root, filter| {
-            project.relist(dirs, root, filter);
-            project.reveal_file(path, root, filter);
+        self.with_tree(|state, root, filter| {
+            state.relist(dirs, root, filter);
+            state.reveal_file(path, root, filter);
         });
         cx.notify();
     }
 
     /// `from` 改了名或挪到了 `to`：展开的目录、选中的路径和预览的文件跟过去，重读两边的目录。
     fn after_move(&mut self, from: &Path, to: &Path, cx: &mut Context<Self>) {
-        self.workspace_mut().project.moved(from, to);
-        if let Some(clip) = &mut self.file_clipboard
+        self.state_mut().moved(from, to);
+        if let Some(clip) = &mut self.clipboard
             && let Some(path) = follow_move(&clip.path, from, to)
         {
             clip.path = path;
         }
         let dirs = [from.parent(), to.parent()].into_iter().flatten().map(Path::to_path_buf).collect();
         self.relist_and_reveal(dirs, to, cx);
-        self.move_previews(from, to, cx);
+        cx.emit(FileTreeEvent::Moved { from: from.to_path_buf(), to: to.to_path_buf() });
     }
 
     /// 选中的那一项先问一下，再在后台移到废纸篓：外置卷上可能要复制一遍。
     pub(super) fn delete_file(&mut self, _: &DeleteFile, window: &mut Window, cx: &mut Context<Self>) {
-        self.file_menu = None;
+        self.menu = None;
         let Some((path, is_dir)) = self.selected_entry() else {
             return;
         };
@@ -257,21 +258,21 @@ impl WindowView {
     /// `path` 移到了废纸篓：关掉它和它下面的文件的预览标签，选中原来那个位置上的行，接着按删除键
     /// 可以一路删下去。
     fn after_delete(&mut self, path: &Path, window: &mut Window, cx: &mut Context<Self>) {
-        self.close_previews_under(path, window, cx);
-        if self.file_clipboard.as_ref().is_some_and(|clip| clip.path.starts_with(path)) {
-            self.file_clipboard = None;
+        cx.emit(FileTreeEvent::Removed(path.to_path_buf()));
+        if self.clipboard.as_ref().is_some_and(|clip| clip.path.starts_with(path)) {
+            self.clipboard = None;
         }
-        self.with_tree(|project, root, filter| {
-            let ix = project.selected_row();
-            project.removed(path);
-            project.selected = None;
-            project.relist(path.parent().map(Path::to_path_buf).into_iter().collect(), root, filter);
-            let last = project.file_rows.len().checked_sub(1);
-            if let Some(ix) = ix.zip(last).and_then(|(ix, last)| project.select_row(ix.min(last))) {
-                project.files_scroll.scroll_to_item(ix, ScrollStrategy::Nearest);
+        self.with_tree(|state, root, filter| {
+            let ix = state.selected_row();
+            state.removed(path);
+            state.selected = None;
+            state.relist(path.parent().map(Path::to_path_buf).into_iter().collect(), root, filter);
+            let last = state.rows.len().checked_sub(1);
+            if let Some(ix) = ix.zip(last).and_then(|(ix, last)| state.select_row(ix.min(last))) {
+                state.scroll.scroll_to_item(ix, ScrollStrategy::Nearest);
             }
         });
-        window.focus(&self.files_focus, cx);
+        window.focus(&self.focus, cx);
         cx.notify();
     }
 
@@ -279,7 +280,7 @@ impl WindowView {
     /// 已经被忽略、或者选中的就是仓库根目录时为空。
     pub(super) fn gitignore_target(&self) -> Option<(Repo, PathBuf, bool)> {
         let (path, is_dir) = self.selected_entry()?;
-        let git = self.workspace().project.git.as_ref()?;
+        let git = self.state().git.as_ref()?;
         let rel = path.strip_prefix(&git.main.root).ok()?;
         if git.is_ignored(rel) {
             return None;
@@ -291,7 +292,7 @@ impl WindowView {
     /// 写进 `.gitignore` 后当场重读，选中的那一项马上标成被忽略。git 跟踪着的写进去也不生效，先问要不要
     /// 不再跟踪它（文件留在磁盘上）。
     pub(super) fn add_to_gitignore(&mut self, _: &AddToGitignore, window: &mut Window, cx: &mut Context<Self>) {
-        self.file_menu = None;
+        self.menu = None;
         let Some((repo, rel, is_dir)) = self.gitignore_target() else {
             return;
         };
@@ -327,7 +328,7 @@ impl WindowView {
                 })
                 .await;
             this.update_in(cx, |this, window, cx| match result {
-                Ok(()) => this.refresh_project(cx),
+                Ok(()) => cx.emit(FileTreeEvent::Refresh),
                 Err(err) => this.show_file_error(error_text(&err, ".gitignore"), window, cx),
             })
             .ok();
@@ -337,17 +338,17 @@ impl WindowView {
 
     /// 剪切（`cut`）或复制选中的那一项，等着粘贴。
     pub(super) fn copy_file(&mut self, cut: bool, cx: &mut Context<Self>) {
-        self.file_menu = None;
+        self.menu = None;
         if let Some((path, _)) = self.selected_entry() {
-            self.file_clipboard = Some(FileClipboard { path, cut });
+            self.clipboard = Some(FileClipboard { path, cut });
             cx.notify();
         }
     }
 
     /// 粘贴到 `target_dir`。
     pub(super) fn paste_file(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.file_menu = None;
-        if let Some(clip) = self.file_clipboard.clone() {
+        self.menu = None;
+        if let Some(clip) = self.clipboard.clone() {
             let mut dir = self.target_dir();
             // 选中的就是复制下来的目录时，副本放在它旁边，不然成了放进它自己里面。
             if dir == clip.path
@@ -393,8 +394,8 @@ impl WindowView {
             let result = job.await;
             this.update_in(cx, |this, window, cx| match result {
                 Ok(dest) if cut => {
-                    if this.file_clipboard.as_ref().is_some_and(|clip| clip.cut && clip.path == src) {
-                        this.file_clipboard = None;
+                    if this.clipboard.as_ref().is_some_and(|clip| clip.cut && clip.path == src) {
+                        this.clipboard = None;
                     }
                     if dest != src {
                         this.after_move(&src, &dest, cx);

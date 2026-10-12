@@ -1,0 +1,31 @@
+[package]
+name = "runode-file-tree"
+description = "The file tree page of runode's right panel: the workspace's files colored by git status, name and content search, and creating, renaming, moving and trashing files, as a GPUI view"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+# 行的 git 着色、加进 .gitignore，按名称搜时列仓库里的文件，按内容搜时跑 git grep。
+runode-git.workspace = true
+# 改动的颜色。
+runode-shared-types.workspace = true
+# 面板的标题行和说明、菜单、输入框、就地输入框、按钮、滚动条、悬停提示、文件图标和共用的图标。
+runode-ui.workspace = true
+gpui.workspace = true
+# 页上文字的翻译：每种语言一个 locales/<语言>.yml，编译时嵌进二进制，跟着 app 当前的语言。
+rust-i18n.workspace = true
+# 按内容搜时标出结果里命中的那一段。
+regex.workspace = true
+# 按内容搜的选项随窗口存档。
+serde.workspace = true
+# 用 VS Code 打开根目录失败时记一条。
+tracing.workspace = true
+
+# 删除文件时移到废纸篓，用 NSFileManager。
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2-foundation = { workspace = true, features = ["std", "NSError", "NSFileManager", "NSString", "NSURL"] }
+
+[lints]
+workspace = true

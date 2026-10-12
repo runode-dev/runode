@@ -20,28 +20,25 @@ use std::{
 };
 
 use gpui::{
-    AnyElement, ClickEvent, Context, Div, Entity, Focusable as _, HighlightStyle, Role, ScrollStrategy, SharedString,
-    StyledText, Subscription, UniformListScrollHandle, Window, div, img, prelude::*, px, svg, uniform_list,
+    AnyElement, App, ClickEvent, Context, Div, Entity, HighlightStyle, Role, ScrollStrategy, SharedString, StyledText,
+    Subscription, UniformListScrollHandle, div, img, prelude::*, px, svg, uniform_list,
 };
 use regex::{Regex, RegexBuilder};
 use runode_git::GrepQuery;
-use runode_shared_types::color::Rgb;
-
-use super::WindowView;
-use crate::ui::a11y::A11yPress;
-use crate::{
-    assets::{CHEVRON_DOWN_ICON, CHEVRON_RIGHT_ICON, CLOSE_ICON, FILTER_ICON},
-    ui::{
-        a11y::Press,
-        file_icons::{file_icon, folder_icon},
-        font_size::{FontSize, scaled},
-        hsla,
-        input::{Input, InputEvent, InputState},
-        path_tree::{TreeItem, path_tree},
-        tooltip::tooltip,
-    },
-    window::{model::WorkspaceId, persist::format::SavedSearchOptions as ContentOptions, project::panel_message},
+use runode_ui::{
+    a11y::{A11yPress, Press},
+    file_icons::{file_icon, folder_icon},
+    font_size::{FontSize, scaled},
+    icons::{CHEVRON_DOWN_ICON, CHEVRON_RIGHT_ICON, CLOSE_ICON},
+    input::{Input, InputEvent, InputState},
+    panel::panel_message,
+    path_tree::{TreeItem, path_tree},
+    theme::ActiveTheme as _,
+    tooltip::tooltip,
 };
+use serde::{Deserialize, Serialize};
+
+use crate::{FILTER_ICON, FileTree, FileTreeEvent};
 
 /// 按名称最多列出的文件数。
 const MAX_FILES: usize = 500;
@@ -57,9 +54,21 @@ const SNIPPET_LEAD: usize = 24;
 const SNIPPET_MAX: usize = 300;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(in crate::window) enum SearchMode {
+pub(crate) enum SearchMode {
     Name,
     Content,
+}
+
+/// 按内容搜索时的选项：区分大小写、全字匹配、用正则，以及要包含、要排除的文件（逗号
+/// 隔开的 glob）。随窗口存档；搜索时也拿它比较两次搜索的条件一不一样。
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct SearchOptions {
+    pub match_case: bool,
+    pub whole_word: bool,
+    pub regex: bool,
+    pub include: String,
+    pub exclude: String,
 }
 
 /// 找到的一个文件；按内容找时带着其中命中的行。
@@ -137,7 +146,7 @@ struct SearchKey {
     root: PathBuf,
     query: String,
     mode: SearchMode,
-    options: ContentOptions,
+    options: SearchOptions,
 }
 
 /// `root` 下按名称找的文件，相对 `root`，第一次搜时在后台列出；同时在跑的几次搜索等同一次列完。
@@ -146,7 +155,7 @@ struct NameList {
     files: OnceLock<Vec<PathBuf>>,
 }
 
-pub(in crate::window) struct FileSearch {
+pub(crate) struct FileSearch {
     field: Entity<InputState>,
     mode: SearchMode,
     /// 按内容找时的区分大小写、全字匹配和正则开关，以及要包含、要排除的文件。
@@ -158,7 +167,7 @@ pub(in crate::window) struct FileSearch {
     /// 上次搜的正则写得不对。
     bad_regex: bool,
     /// 排成树还是列表，整个窗口一个设置，存进窗口存档；树形式时收起的目录。
-    pub(in crate::window) tree: bool,
+    pub(crate) tree: bool,
     collapsed: HashSet<PathBuf>,
     found: Vec<Found>,
     /// `found` 按 `tree` 和 `collapsed` 排成的行。
@@ -171,23 +180,21 @@ pub(in crate::window) struct FileSearch {
     names: Option<Arc<NameList>>,
     selected: Option<usize>,
     scroll: UniformListScrollHandle,
-    /// 框里的搜索词是哪个 workspace 的。
-    workspace: Option<WorkspaceId>,
     _events: [Subscription; 3],
 }
 
 impl FileSearch {
-    pub(in crate::window) fn new(window: &mut Window, cx: &mut Context<WindowView>) -> Self {
+    pub(crate) fn new(cx: &mut Context<FileTree>) -> Self {
         let placeholder = rust_i18n::t!("files.search_placeholder").into_owned();
         let field = cx
             .new(|cx| InputState::new(String::new(), cx).with_label(placeholder.clone()).with_placeholder(placeholder));
-        let events = cx.subscribe_in(&field, window, |this, field, event: &InputEvent, window, cx| match event {
+        let events = cx.subscribe(&field, |this, field, event: &InputEvent, cx| match event {
             InputEvent::Changed(_) => this.sync_file_search(cx),
             // 没选中时打开第一个文件，跳过树形式开头的目录。
             InputEvent::Next => {
-                let rows = &this.file_search.rows;
+                let rows = &this.search.rows;
                 let first = rows.iter().position(|row| !matches!(row, SearchRow::Dir { .. }));
-                if let Some(ix) = this.file_search.selected.or(first) {
+                if let Some(ix) = this.search.selected.or(first) {
                     this.open_search_row(ix, false, cx);
                 }
             }
@@ -195,20 +202,20 @@ impl FileSearch {
             // 有搜索词时清空，已经空着时把焦点交回终端。
             InputEvent::Dismiss => {
                 if field.read(cx).query().is_empty() {
-                    window.focus(&this.focus_handle(cx), cx);
+                    cx.emit(FileTreeEvent::FocusTerminal);
                 } else {
                     field.update(cx, |field, cx| field.set_query(String::new(), cx));
                     this.sync_file_search(cx);
                 }
             }
         });
-        let filter = |label: &str, placeholder: &str, cx: &mut Context<WindowView>| {
+        let filter = |label: &str, placeholder: &str, cx: &mut Context<FileTree>| {
             let (label, placeholder) = (rust_i18n::t!(label).into_owned(), rust_i18n::t!(placeholder).into_owned());
             let field = cx.new(|cx| InputState::new(String::new(), cx).with_label(label).with_placeholder(placeholder));
             let events = cx.subscribe(&field, |this, _, event: &InputEvent, cx| {
                 if let InputEvent::Changed(_) = event {
                     this.sync_file_search(cx);
-                    this.save(cx);
+                    cx.emit(FileTreeEvent::OptionsChanged);
                 }
             });
             (field, events)
@@ -233,7 +240,6 @@ impl FileSearch {
             names: None,
             selected: None,
             scroll: UniformListScrollHandle::new(),
-            workspace: None,
             _events: [events, include_events, exclude_events],
         }
     }
@@ -293,7 +299,7 @@ fn match_names<'a>(files: &'a [PathBuf], query: &str, cancel: &AtomicBool) -> Ve
 /// 内容结果里标出命中处用的正则，和交给 git grep 的条件一致；正则写得不对时是错误。
 /// shortcut: git grep 用的是 POSIX 扩展正则，`\d` 这类 Rust 正则才有的写法这里认、git 不认，
 /// 搜不到时再考虑换成 `git grep -P`。
-fn matcher(query: &str, options: &ContentOptions) -> Result<Regex, regex::Error> {
+fn matcher(query: &str, options: &SearchOptions) -> Result<Regex, regex::Error> {
     let pattern = if options.regex { query.to_owned() } else { regex::escape(query) };
     let pattern = if options.whole_word { format!(r"\b(?:{pattern})\b") } else { pattern };
     RegexBuilder::new(&pattern).case_insensitive(!options.match_case).build()
@@ -426,27 +432,27 @@ fn run_search(key: &SearchKey, names: &NameList, cancel: &AtomicBool) -> Option<
     }
 }
 
-impl WindowView {
+impl FileTree {
     /// 正在搜：搜索词不为空。新建、改名的输入框在文件树里，那时照样显示文件树。
     pub(super) fn searching(&self, cx: &gpui::App) -> bool {
-        self.file_edit.is_none() && !self.file_search.field.read(cx).query().trim().is_empty()
+        self.edit.is_none() && !self.search.field.read(cx).query().trim().is_empty()
     }
 
     /// 根目录、搜索词或方式和上次搜的不一样时在后台重搜，停下还在跑的上一次。
-    fn sync_file_search(&mut self, cx: &mut Context<Self>) {
+    pub(super) fn sync_file_search(&mut self, cx: &mut Context<Self>) {
         self.search_files(false, cx);
     }
 
     /// 同 `sync_file_search`；`force` 时条件没变也重搜（文件树重读过），新结果到之前旧结果照旧显示。
     fn search_files(&mut self, force: bool, cx: &mut Context<Self>) {
-        let search = &self.file_search;
+        let search = &self.search;
         let options = match search.mode {
-            SearchMode::Name => ContentOptions::default(),
+            SearchMode::Name => SearchOptions::default(),
             SearchMode::Content => search.options(cx),
         };
         let query = search.field.read(cx).query().trim().to_owned();
         let key = SearchKey { root: self.files_root(), query, mode: search.mode, options };
-        let search = &mut self.file_search;
+        let search = &mut self.search;
         cx.notify();
         // 文件树重读过，文件可能变了。
         if force || search.names.as_ref().is_some_and(|names| names.root != key.root) {
@@ -494,7 +500,7 @@ impl WindowView {
                 if cancel.load(Ordering::Relaxed) {
                     return;
                 }
-                let search = &mut this.file_search;
+                let search = &mut this.search;
                 search.pending = None;
                 // 只是重读后重搜（同一个根目录，词、方式和选项都没变）时留着选中的行和滚动位置。
                 let same = search.searched.as_ref() == Some(&key);
@@ -515,39 +521,25 @@ impl WindowView {
     }
 
     /// 文件树重读过，文件可能变了：有搜索词时重搜。
-    pub(in crate::window) fn refresh_file_search(&mut self, cx: &mut Context<Self>) {
+    pub(crate) fn refresh_file_search(&mut self, cx: &mut Context<Self>) {
         self.search_files(true, cx);
     }
 
-    /// 切到了 workspace `id`：框里的词存回原来那个 workspace（它还在的话），换上这个 workspace 的词。
-    pub(in crate::window) fn follow_workspace_in_file_search(&mut self, id: WorkspaceId, cx: &mut Context<Self>) {
-        let Some(old) = self.file_search.workspace.replace(id).filter(|&old| old != id) else {
-            return;
-        };
-        let query = self.file_search.field.read(cx).query().to_owned();
-        if let Some(workspace) = self.workspaces.iter_mut().find(|workspace| workspace.id == old) {
-            workspace.project.file_query = query;
-        }
-        let query = self.workspace().project.file_query.clone();
-        self.file_search.field.update(cx, |field, cx| field.set_query(query, cx));
-        self.sync_file_search(cx);
-    }
-
     pub(super) fn toggle_search_tree(&mut self, cx: &mut Context<Self>) {
-        let tree = !self.file_search.tree;
-        self.file_search.set_tree(tree);
-        self.save(cx);
+        let tree = !self.search.tree;
+        self.search.set_tree(tree);
+        cx.emit(FileTreeEvent::OptionsChanged);
         cx.notify();
     }
 
     fn set_search_mode(&mut self, mode: SearchMode, cx: &mut Context<Self>) {
-        self.file_search.mode = mode;
+        self.search.mode = mode;
         self.sync_file_search(cx);
     }
 
     /// 在预览栏里打开第 `ix` 行结果，`pin` 时开成固定标签；内容结果跳到那一行，目录展开或收起。
     fn open_search_row(&mut self, ix: usize, pin: bool, cx: &mut Context<Self>) {
-        let search = &mut self.file_search;
+        let search = &mut self.search;
         match search.rows.get(ix).cloned() {
             Some(SearchRow::Dir { path, .. }) => {
                 if !search.collapsed.remove(&path) {
@@ -557,26 +549,29 @@ impl WindowView {
             }
             Some(SearchRow::File { file, .. }) => {
                 let path = search.found[file].path.clone();
-                self.open_preview(&path, pin, cx);
+                cx.emit(FileTreeEvent::Open { path, line: None, pin });
             }
             Some(SearchRow::Line { file, line, .. }) => {
                 let found = &search.found[file];
                 let (path, line) = (found.path.clone(), found.lines[line].line);
-                self.open_preview_at(&path, line.saturating_sub(1) as usize, pin, cx);
+                cx.emit(FileTreeEvent::Open { path, line: Some(line.saturating_sub(1) as usize), pin });
             }
             None => return,
         }
-        self.file_search.selected = Some(ix);
+        self.search.selected = Some(ix);
         cx.notify();
     }
 
     /// 搜索框，下面是切换按名称、按内容找的两段按钮；按内容找时搜索框里多出区分大小写、全字
     /// 匹配和正则三个开关，下面多出要包含、要排除的文件两个输入框。
-    pub(super) fn render_file_search_box(&self, fg: Rgb, bg: Rgb, cx: &mut Context<Self>) -> Div {
-        let search = &self.file_search;
+    pub(super) fn render_file_search_box(&self, cx: &mut Context<Self>) -> Div {
+        let search = &self.search;
         let content = search.mode == SearchMode::Content;
+        let theme = cx.theme();
+        let (fg, bg, input_bg, on_bg, track_bg) =
+            (theme.foreground, theme.background, theme.mix(0.06), theme.mix(0.18), theme.mix(0.08));
         // 输入框，比文件树的底色浅一档。
-        let input_box = |field: &Entity<InputState>| Input::new(field).gap(px(4.)).bg(hsla(bg.mix(fg, 0.06)));
+        let input_box = |field: &Entity<InputState>| Input::new(field).gap(px(4.)).bg(input_bg);
         // 搜索框里的小按钮：开着的开关垫一层底色。
         let small_button = |id: &'static str, tip: String, on: bool| {
             div()
@@ -593,9 +588,9 @@ impl WindowView {
                 .text_size(FontSize::Small)
                 .map(|item| {
                     if on {
-                        item.bg(hsla(bg.mix(fg, 0.18))).text_color(hsla(fg))
+                        item.bg(on_bg).text_color(fg)
                     } else {
-                        item.text_color(hsla(fg).opacity(0.55)).hover(|item| item.text_color(hsla(fg)))
+                        item.text_color(fg.opacity(0.55)).hover(|item| item.text_color(fg))
                     }
                 })
                 .tooltip(tooltip(tip, None))
@@ -607,18 +602,18 @@ impl WindowView {
                 .aria_toggled(on.into())
                 .child(label)
                 .on_press(cx, move |this, _, cx| {
-                    flip(&mut this.file_search);
+                    flip(&mut this.search);
                     this.sync_file_search(cx);
-                    this.save(cx);
+                    cx.emit(FileTreeEvent::OptionsChanged);
                 })
         };
         let has_query = !search.field.read(cx).query().is_empty();
         let clear = has_query.then(|| {
             small_button("search-clear", rust_i18n::t!("files.clear_search").into_owned(), false)
                 .role(Role::Button)
-                .child(svg().path(CLOSE_ICON).size(px(12.)).text_color(hsla(fg).opacity(0.6)))
+                .child(svg().path(CLOSE_ICON).size(px(12.)).text_color(fg.opacity(0.6)))
                 .on_press(cx, |this, _, cx| {
-                    this.file_search.field.update(cx, |field, cx| field.set_query(String::new(), cx));
+                    this.search.field.update(cx, |field, cx| field.set_query(String::new(), cx));
                     this.sync_file_search(cx);
                 })
         });
@@ -630,7 +625,7 @@ impl WindowView {
                 option("search-regex", ".*", "files.use_regex", search.regex, |s| s.regex ^= true, cx),
             ]
         });
-        let filter_icon = svg().path(FILTER_ICON).flex_none().size(px(14.)).text_color(hsla(fg).opacity(0.5));
+        let filter_icon = svg().path(FILTER_ICON).flex_none().size(px(14.)).text_color(fg.opacity(0.5));
         let field =
             input_box(&search.field).prefix(filter_icon).children(clear).children(options.into_iter().flatten());
         let mode = search.mode;
@@ -650,9 +645,9 @@ impl WindowView {
                 .text_size(FontSize::Body)
                 .map(|item| {
                     if on {
-                        item.bg(hsla(bg)).text_color(hsla(fg))
+                        item.bg(bg).text_color(fg)
                     } else {
-                        item.text_color(hsla(fg).opacity(0.6)).hover(|item| item.text_color(hsla(fg)))
+                        item.text_color(fg.opacity(0.6)).hover(|item| item.text_color(fg))
                     }
                 })
                 .child(label)
@@ -666,7 +661,7 @@ impl WindowView {
             .p(px(2.))
             .flex()
             .rounded(px(7.))
-            .bg(hsla(bg.mix(fg, 0.08)))
+            .bg(track_bg)
             .child(segment("search-name", rust_i18n::t!("files.search_name").into_owned().into(), SearchMode::Name, cx))
             .child(segment(
                 "search-content",
@@ -682,7 +677,7 @@ impl WindowView {
                 .child(
                     div()
                         .text_size(FontSize::Body)
-                        .text_color(hsla(fg).opacity(0.7))
+                        .text_color(fg.opacity(0.7))
                         .child(rust_i18n::t!(label).into_owned()),
                 )
                 .child(input_box(field))
@@ -708,17 +703,11 @@ impl WindowView {
     }
 
     /// 搜索结果，没有正在搜时为空（显示文件树）。
-    pub(super) fn render_file_search_results(
-        &self,
-        font_size: f32,
-        fg: Rgb,
-        bg: Rgb,
-        cx: &mut Context<Self>,
-    ) -> Option<AnyElement> {
+    pub(super) fn render_file_search_results(&self, font_size: f32, cx: &mut Context<Self>) -> Option<AnyElement> {
         if !self.searching(cx) {
             return None;
         }
-        let search = &self.file_search;
+        let search = &self.search;
         // 换了 workspace 后、重搜完之前，不显示另一个根目录的结果。
         let fresh = search.searched.as_ref().is_some_and(|key| key.root == self.files_root());
         if !fresh || search.rows.is_empty() {
@@ -753,7 +742,7 @@ impl WindowView {
             "file-search",
             search.rows.len(),
             cx.processor(move |this, range: Range<usize>, _, cx| {
-                range.map(|ix| this.render_search_row(ix, font_size, gutter, fg, bg, cx)).collect::<Vec<_>>()
+                range.map(|ix| this.render_search_row(ix, font_size, gutter, cx)).collect::<Vec<_>>()
             }),
         )
         .track_scroll(&search.scroll)
@@ -767,7 +756,7 @@ impl WindowView {
             .px(px(10.))
             .pb(px(4.))
             .text_size(FontSize::Body)
-            .text_color(hsla(fg).opacity(0.5));
+            .text_color(cx.theme().foreground.opacity(0.5));
         Some(
             div()
                 .flex_1()
@@ -789,18 +778,12 @@ impl WindowView {
         )
     }
 
-    fn render_search_row(
-        &self,
-        ix: usize,
-        font_size: f32,
-        gutter: f32,
-        fg: Rgb,
-        bg: Rgb,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let search = &self.file_search;
+    fn render_search_row(&self, ix: usize, font_size: f32, gutter: f32, cx: &mut Context<Self>) -> AnyElement {
+        let search = &self.search;
         let row = &search.rows[ix];
-        let dim = hsla(fg).opacity(0.5);
+        let theme = cx.theme();
+        let (fg, hit_bg, selected_bg, hover_bg) = (theme.foreground, theme.mix(0.25), theme.mix(0.12), theme.mix(0.06));
+        let dim = fg.opacity(0.5);
         // 树形式时文件和目录前面留出箭头的位置，名字对齐。
         let chevron = |expanded: Option<bool>| {
             let icon = expanded.map(|expanded| {
@@ -825,7 +808,7 @@ impl WindowView {
                     .gap(px(4.))
                     .child(chevron(Some(*expanded)))
                     .child(img(folder_icon(&last, *expanded)).flex_none().size(px(font_size + 2.)))
-                    .child(div().min_w_0().truncate().text_color(hsla(fg).opacity(0.85)).child(name.clone()));
+                    .child(div().min_w_0().truncate().text_color(fg.opacity(0.85)).child(name.clone()));
                 (*depth, path.display().to_string(), content, name.clone())
             }
             SearchRow::File { file, depth } => {
@@ -844,7 +827,7 @@ impl WindowView {
                             .flex_none()
                             .max_w_full()
                             .truncate()
-                            .text_color(hsla(fg).opacity(0.85))
+                            .text_color(fg.opacity(0.85))
                             .child(found.name.clone()),
                     )
                     .child(
@@ -863,11 +846,8 @@ impl WindowView {
             SearchRow::Line { file, line, depth } => {
                 let found = &search.found[*file];
                 let line = &found.lines[*line];
-                let highlight = HighlightStyle {
-                    color: Some(hsla(fg)),
-                    background_color: Some(hsla(bg.mix(fg, 0.25))),
-                    ..Default::default()
-                };
+                let highlight =
+                    HighlightStyle { color: Some(fg), background_color: Some(hit_bg), ..Default::default() };
                 let text =
                     StyledText::new(line.text.clone()).with_highlights(line.hit.clone().map(|hit| (hit, highlight)));
                 let content = div()
@@ -886,14 +866,14 @@ impl WindowView {
                             .text_color(dim)
                             .child(line.line.to_string()),
                     )
-                    .child(div().flex_1().min_w_0().truncate().text_color(hsla(fg).opacity(0.7)).child(text));
+                    .child(div().flex_1().min_w_0().truncate().text_color(fg.opacity(0.7)).child(text));
                 let label = format!("{}: {}", line.line, line.text).into();
                 (*depth, format!("{}:{}", found.path.display(), line.line), content, label)
             }
         };
         let selected = search.selected == Some(ix);
         let view = cx.entity().downgrade();
-        Self::file_row_shell(("file-search", ix), depth, font_size, fg)
+        Self::file_row_shell(("file-search", ix), depth, font_size, cx)
             .role(Role::TreeItem)
             .aria_label(label)
             .aria_description(tip.clone())
@@ -902,13 +882,7 @@ impl WindowView {
             .when_some(expanded_state, |item, expanded| item.aria_expanded(expanded))
             // 点击要看点了几下，辅助工具按下另外登记，和单击一样。
             .on_a11y_press(view, move |this, _, cx| this.open_search_row(ix, false, cx))
-            .map(|item| {
-                if selected {
-                    item.bg(hsla(bg.mix(fg, 0.12)))
-                } else {
-                    item.hover(|item| item.bg(hsla(bg.mix(fg, 0.06))))
-                }
-            })
+            .map(|item| if selected { item.bg(selected_bg) } else { item.hover(|item| item.bg(hover_bg)) })
             .child(content)
             .on_click(cx.listener(move |this, event: &ClickEvent, _, cx| {
                 this.open_search_row(ix, event.click_count() >= 2, cx);
@@ -920,8 +894,8 @@ impl WindowView {
 
 impl FileSearch {
     /// 按内容找时的选项，存进窗口存档。
-    pub(in crate::window) fn options(&self, cx: &gpui::App) -> ContentOptions {
-        ContentOptions {
+    pub(crate) fn options(&self, cx: &gpui::App) -> SearchOptions {
+        SearchOptions {
             match_case: self.match_case,
             whole_word: self.whole_word,
             regex: self.regex,
@@ -931,7 +905,7 @@ impl FileSearch {
     }
 
     /// 恢复窗口时换上存档里的选项；这时还没有搜索词，不用重搜。
-    pub(in crate::window) fn set_options(&mut self, options: ContentOptions, cx: &mut gpui::App) {
+    pub(crate) fn set_options(&mut self, options: SearchOptions, cx: &mut gpui::App) {
         self.match_case = options.match_case;
         self.whole_word = options.whole_word;
         self.regex = options.regex;
@@ -939,7 +913,17 @@ impl FileSearch {
         self.exclude.update(cx, |field, cx| field.set_query(options.exclude, cx));
     }
 
-    pub(in crate::window) fn set_tree(&mut self, tree: bool) {
+    /// 框里的搜索词。
+    pub(crate) fn query(&self, cx: &App) -> String {
+        self.field.read(cx).query().to_owned()
+    }
+
+    /// 换上 `query`，由调用方接着重搜。
+    pub(crate) fn set_query(&self, query: String, cx: &mut App) {
+        self.field.update(cx, |field, cx| field.set_query(query, cx));
+    }
+
+    pub(crate) fn set_tree(&mut self, tree: bool) {
         self.tree = tree;
         self.selected = None;
         self.relayout();
@@ -980,7 +964,7 @@ mod tests {
             root: root.clone(),
             query: "a".into(),
             mode: SearchMode::Name,
-            options: ContentOptions::default(),
+            options: SearchOptions::default(),
         };
         let names = NameList { root: root.clone(), files: OnceLock::new() };
         let search = |names: &NameList| {
@@ -1034,7 +1018,7 @@ mod tests {
     }
 
     fn literal(query: &str) -> Regex {
-        matcher(query, &ContentOptions::default()).unwrap()
+        matcher(query, &SearchOptions::default()).unwrap()
     }
 
     #[test]
@@ -1042,7 +1026,7 @@ mod tests {
         assert_eq!(snippet("    let foo = 1;", &literal("foo")), ("let foo = 1;".to_owned(), Some(4..7)));
         assert_eq!(snippet("Foo", &literal("foo")), ("Foo".to_owned(), Some(0..3)));
         assert_eq!(snippet("Ärger", &literal("ä")), ("Ärger".to_owned(), Some(0..2)));
-        let case = ContentOptions { match_case: true, ..ContentOptions::default() };
+        let case = SearchOptions { match_case: true, ..SearchOptions::default() };
         assert_eq!(snippet("foo", &matcher("Foo", &case).unwrap()), ("foo".to_owned(), None));
         let long = format!("{}needle", "x".repeat(100));
         let (text, hit) = snippet(&long, &literal("needle"));
@@ -1057,10 +1041,10 @@ mod option_tests {
 
     #[test]
     fn matchers_follow_the_word_and_regex_switches() {
-        let word = ContentOptions { whole_word: true, ..ContentOptions::default() };
+        let word = SearchOptions { whole_word: true, ..SearchOptions::default() };
         assert!(matcher("foo", &word).unwrap().find("foobar").is_none());
-        assert!(matcher("a.c", &ContentOptions::default()).unwrap().find("abc").is_none());
-        let regex = ContentOptions { regex: true, ..ContentOptions::default() };
+        assert!(matcher("a.c", &SearchOptions::default()).unwrap().find("abc").is_none());
+        let regex = SearchOptions { regex: true, ..SearchOptions::default() };
         assert!(matcher("a.c", &regex).unwrap().find("abc").is_some());
         assert!(matcher("(", &regex).is_err());
     }

@@ -7,8 +7,7 @@ use std::{
 
 use futures::channel::mpsc::UnboundedSender;
 use notify::Watcher as _;
-
-use super::state::Project;
+use runode_git as git;
 
 /// 右侧面板在看的仓库或目录的监听。
 pub(in crate::window) struct ProjectWatch {
@@ -47,8 +46,9 @@ impl ProjectWatch {
     /// `path` 变了要不要重读。git 目录里只看暂存区、引用这些，写对象和锁文件之后总跟着
     /// 改它们；`root` 下面的 git 目录（主仓库的 `.git`、子模块在 `.git/modules` 下的、嵌套
     /// 仓库自己的 `.git`）按路径里的 `.git` 认。被忽略的文件只在它所在的目录正显示在文件树里
-    /// 时才算，免得编译时产物目录里一直在写，跟着一直重读；忽略与否按文件所在的那个仓库算。
-    pub(super) fn affects(&self, path: &Path, project: &Project) -> bool {
+    /// （`listed`，见 `FileTree::is_listed`）时才算，免得编译时产物目录里一直在写，跟着一直重读；忽略与否按
+    /// 文件所在的那个仓库（`git`）算。
+    pub(super) fn affects(&self, path: &Path, git: Option<&git::Repos>, listed: &dyn Fn(&Path) -> bool) -> bool {
         // 文件系统监视的守护进程每次 `git status` 都会在自己的目录里写一下，也不看。
         let git_internal = |rel: &Path| {
             !rel.components().any(|part| part.as_os_str() == "objects" || part.as_os_str() == "fsmonitor--daemon")
@@ -63,7 +63,7 @@ impl ProjectWatch {
         if let Some(ix) = rel.components().position(|part| part.as_os_str() == ".git") {
             return git_internal(&rel.components().skip(ix + 1).collect::<PathBuf>());
         }
-        let ignored = project.git.as_ref().is_some_and(|git| git.is_ignored(rel));
-        !ignored || rel.parent().is_some_and(|parent| project.listings.contains_key(&self.root.join(parent)))
+        let ignored = git.is_some_and(|git| git.is_ignored(rel));
+        !ignored || rel.parent().is_some_and(|parent| listed(&self.root.join(parent)))
     }
 }

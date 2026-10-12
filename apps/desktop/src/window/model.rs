@@ -449,7 +449,8 @@ impl WindowView {
         self.close_branch_picker(window, cx);
         self.active = ix;
         self.sidebar_scroll.scroll_to_item(ix);
-        self.follow_workspace_in_file_search(self.workspaces[ix].id, cx);
+        // 文件树切到这个 workspace 的树，搜索框换上它的搜索词。
+        self.with_file_tree(cx, |_, _| {});
         self.refresh_project(cx);
         // 目录监听只跟着当前 workspace，切走期间这个 workspace 预览的文件可能变过。
         self.refresh_preview_if_changed(cx);
@@ -630,6 +631,7 @@ impl WindowView {
         }
         let id = self.workspaces.remove(ix).id;
         self.forget_previews(id, cx);
+        self.file_tree.update(cx, |tree, _| tree.forget_workspace(id));
         let active =
             if ix < self.active || self.active == self.workspaces.len() { self.active - 1 } else { self.active };
         self.activate_workspace(active, window, cx);

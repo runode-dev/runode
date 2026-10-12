@@ -4727,12 +4727,12 @@ dependencies = [
  "objc2-foundation 0.3.2",
  "objc2-user-notifications",
  "qrcode",
- "regex",
  "runode-autostart",
  "runode-cli",
  "runode-command-history",
  "runode-completion",
  "runode-config",
+ "runode-file-tree",
  "runode-git",
  "runode-github-actions",
  "runode-host",
@@ -4823,6 +4823,21 @@ dependencies = [
  "runode-paths",
  "runode-shared-types",
  "rust-i18n",
+ "tracing",
+]
+
+[[package]]
+name = "runode-file-tree"
+version = "0.1.8"
+dependencies = [
+ "gpui-pre",
+ "objc2-foundation 0.3.2",
+ "regex",
+ "runode-git",
+ "runode-shared-types",
+ "runode-ui",
+ "rust-i18n",
+ "serde",
  "tracing",
 ]
 

@@ -35,6 +35,8 @@ runode-ui.workspace = true
 runode-github-actions.workspace = true
 # 右侧的预览栏：文件、diff 和 Markdown 的标签。
 runode-preview-panel.workspace = true
+# 右侧面板的文件树。
+runode-file-tree.workspace = true
 # 设置页里配对手机时画二维码。
 qrcode.workspace = true
 gpui.workspace = true
@@ -48,7 +50,6 @@ tracing.workspace = true
 tracing-subscriber.workspace = true
 # 界面文字的翻译：每种语言一个 locales/<语言>.yml，编译时嵌进二进制；配置模板的翻译在 runode-config。
 rust-i18n.workspace = true
-regex.workspace = true
 # 窗口布局的存档，存成 JSON。
 serde.workspace = true
 serde_json.workspace = true
@@ -58,8 +59,8 @@ notify.workspace = true
 # 标准「关于」面板、系统偏好的语言和窗口菜单只有 AppKit 提供，GPUI 没有封装。
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2.workspace = true
-# 文件树删除文件时移到废纸篓，用 NSFileManager。
-objc2-foundation = { workspace = true, features = ["std", "NSArray", "NSData", "NSDictionary", "NSError", "NSFileManager", "NSLocale", "NSString", "NSURL"] }
+# 「关于」面板的内容和系统偏好的语言。
+objc2-foundation = { workspace = true, features = ["std", "NSArray", "NSData", "NSDictionary", "NSLocale", "NSString"] }
 objc2-app-kit = { workspace = true, features = ["std", "NSApplication", "NSResponder", "NSImage", "NSMenu", "NSMenuItem", "NSEvent"] }
 # 问系统设置里有没有允许发通知，设置页在被拒时提示。
 objc2-user-notifications = { workspace = true, features = ["std", "block2", "UNUserNotificationCenter", "UNNotificationSettings"] }

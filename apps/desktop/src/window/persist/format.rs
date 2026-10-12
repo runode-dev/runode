@@ -85,17 +85,8 @@ pub struct SavedWindow {
     pub github_actions_heights: [Option<f32>; 3],
 }
 
-/// 文件树按内容搜索时的选项：区分大小写、全字匹配、用正则，以及要包含、要排除的文件（逗号
-/// 隔开的 glob）。搜索时也拿它比较两次搜索的条件一不一样。
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(default)]
-pub struct SavedSearchOptions {
-    pub match_case: bool,
-    pub whole_word: bool,
-    pub regex: bool,
-    pub include: String,
-    pub exclude: String,
-}
+/// 文件树按内容搜索时的选项，定义跟着文件树。
+pub use runode_file_tree::SearchOptions as SavedSearchOptions;
 
 /// 窗口的位置和大小，相对于它所在的屏幕；放大和全屏时是还原后的位置和大小。默认的大小是 0，恢复时
 /// 按默认位置开。

@@ -166,10 +166,7 @@ impl WindowView {
                 cx.notify();
             }
             PreviewEvent::ZoomChanged => cx.notify(),
-            PreviewEvent::Reveal(path) => {
-                self.reveal_in_tree(path);
-                cx.notify();
-            }
+            PreviewEvent::Reveal(path) => self.with_file_tree(cx, |tree, cx| tree.reveal_file(path, cx)),
             PreviewEvent::OptionsChanged => self.save(cx),
             PreviewEvent::InsertPath { path, line } => self.insert_path(path, Some(*line), window, cx),
             PreviewEvent::ApplyHunk { root, file, hunk, action } => {
@@ -182,10 +179,5 @@ impl WindowView {
                 });
             }
         }
-    }
-
-    /// 文件树跟着展开到预览的文件，选中它、滚到能看见。
-    fn reveal_in_tree(&mut self, path: &Path) {
-        self.with_tree(|project, root, filter| project.reveal_file(path, root, filter));
     }
 }

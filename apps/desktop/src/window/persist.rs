@@ -277,6 +277,7 @@ impl WindowView {
             WindowBounds::Maximized(bounds) => (WindowMode::Maximized, bounds),
             WindowBounds::Fullscreen(bounds) => (WindowMode::Fullscreen, bounds),
         };
+        let file_tree = self.file_tree.read(cx).options(cx);
         SavedWindow {
             bounds: SavedBounds {
                 display: self.display.clone(),
@@ -294,13 +295,13 @@ impl WindowView {
             preview_width: self.preview_width,
             preview_wrap: self.preview.read(cx).wrap(),
             preview_source: self.preview.read(cx).source(),
-            show_ignored: self.show_ignored,
-            hide_dotfiles: !self.show_dotfiles,
+            show_ignored: file_tree.show_ignored,
+            hide_dotfiles: !file_tree.show_dotfiles,
             git_tree: self.git_tree,
             git_hide_subs: !self.git_show_subs,
             git_hide_worktrees: !self.git_show_worktrees,
-            file_search_tree: self.file_search.tree,
-            file_search_options: self.file_search.options(cx),
+            file_search_tree: file_tree.search_tree,
+            file_search_options: file_tree.search,
             git_graph_collapsed: self.git_graph_collapsed,
             git_graph_height: self.git_graph_height,
             github_actions_heights: self.github_actions.read(cx).heights(),
@@ -392,13 +393,16 @@ impl WindowView {
             self.panel_width = saved.panel_width;
             self.preview_width = saved.preview_width;
             self.preview.update(cx, |panel, _| panel.set_options(saved.preview_wrap, saved.preview_source));
-            self.show_ignored = saved.show_ignored;
-            self.show_dotfiles = !saved.hide_dotfiles;
+            let file_tree = runode_file_tree::Options {
+                show_ignored: saved.show_ignored,
+                show_dotfiles: !saved.hide_dotfiles,
+                search_tree: saved.file_search_tree,
+                search: saved.file_search_options,
+            };
+            self.file_tree.update(cx, |tree, cx| tree.set_options(file_tree, cx));
             self.git_tree = saved.git_tree;
             self.git_show_subs = !saved.git_hide_subs;
             self.git_show_worktrees = !saved.git_hide_worktrees;
-            self.file_search.set_tree(saved.file_search_tree);
-            self.file_search.set_options(saved.file_search_options, cx);
             self.git_graph_collapsed = saved.git_graph_collapsed;
             self.git_graph_height = saved.git_graph_height;
             self.github_actions.update(cx, |page, _| page.set_heights(saved.github_actions_heights));

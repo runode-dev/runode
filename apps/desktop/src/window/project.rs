@@ -2,8 +2,8 @@
 //! 有文件变了才在后台重读，监听不了时定时重读。文件树、Git 面板和 GitHub Actions 页合在右侧面板里，顶上一排
 //! 标签切换；面板的开关，右侧各栏的宽度、分隔线，以及开关按钮也在这里。
 //!
-//! 读目录和 git 状态、给路径找标记在 `scan`，文件树排成行的状态在 `state`，监听目录
-//! 在 `watch`；这三处不碰界面。
+//! 在后台读 git 状态和文件树要显示的目录在 `scan`，每个 workspace 记着的状态和换上读到的结果在 `state`，
+//! 监听目录在 `watch`；这三处不碰界面。文件树本身在 `runode_file_tree`，读到的目录交给它，见 `files`。
 
 mod scan;
 mod state;
@@ -39,8 +39,7 @@ use crate::{
 };
 use scan::scan;
 
-pub(super) use scan::Decoration;
-pub(super) use state::{Project, TreeFilter, follow_move};
+pub(super) use state::Project;
 pub(super) use watch::ProjectWatch;
 
 /// 显示右侧面板时隔这么久看一次终端换没换目录。
@@ -58,8 +57,6 @@ const WORKTREE_INTERVAL: Duration = Duration::from_secs(10);
 pub(super) const WATCH_DEBOUNCE: Duration = Duration::from_millis(150);
 /// 监听到改动时，离上次开始读至少隔上次耗时的这么多倍。
 const WATCH_BACKOFF: u32 = 3;
-/// 只有一个子目录的目录最多连着并这么多层，防着指回上层的符号链接绕圈。
-const MAX_COMPACT: usize = 16;
 /// 右侧各栏的默认宽度，以及拖动的下限。
 const PANEL_WIDTH: f32 = 280.;
 const PANEL_MIN_WIDTH: f32 = 220.;
@@ -177,8 +174,10 @@ impl WindowView {
         let Some(watch) = &self.project_watch else {
             return;
         };
-        let project = &self.workspace().project;
-        if !self.watching() || !paths.iter().any(|path| watch.affects(path, project)) {
+        let (id, git) = (self.workspace().id, self.workspace().project.git.as_deref());
+        let tree = self.file_tree.read(cx);
+        let listed = |dir: &std::path::Path| tree.is_listed(id, dir);
+        if !self.watching() || !paths.iter().any(|path| watch.affects(path, git, &listed)) {
             return;
         }
         // 项目命令从这几个文件里来，它们变了就重列。
@@ -211,6 +210,7 @@ impl WindowView {
             return;
         }
         let dir = self.project_dir(cx);
+        let expanded = self.file_tree.read(cx).expanded_dirs(self.workspace().id);
         let workspace = &mut self.workspaces[self.active];
         let project = &mut workspace.project;
         if project.refreshing {
@@ -221,7 +221,6 @@ impl WindowView {
         project.stale = false;
         project.refreshed_at = Some(Instant::now());
         let id = workspace.id;
-        let expanded = project.expanded_dirs.iter().cloned().collect();
         let untracked = std::mem::take(&mut project.untracked);
         // 其他工作树只在 Git 面板里显示，面板没开或者藏起来了时不读；打开面板时 `toggle_git` 会重读一次。
         let worktrees = self.git_shown() && self.git_show_worktrees;
@@ -229,23 +228,24 @@ impl WindowView {
         cx.spawn(async move |this, cx| {
             let scan = job.await;
             this.update(cx, |this, cx| {
-                let filter = this.tree_filter();
                 // 读的时候 workspace 可能已经关掉了。
                 let Some(workspace) = this.workspaces.iter_mut().find(|workspace| workspace.id == id) else {
                     return;
                 };
                 workspace.project.refreshing = false;
                 workspace.project.scan_cost = scan.cost;
-                if workspace.apply_scan(scan, filter) {
+                let (changed, tree) = workspace.apply_scan(scan);
+                if changed {
                     cx.notify();
                 }
+                // 文件树换上读到的目录；是它正显示着的 workspace 时它自己重画，有搜索词时重搜。
+                this.file_tree.update(cx, |page, cx| page.apply_scan(id, tree, cx));
                 // 预览栏按新的 git 状态重算改动标记，diff 标签记下要不要重读。
                 this.sync_preview_git(id, cx);
                 if this.workspace().id == id {
                     this.sync_project_watch(cx);
                     this.reload_stale_diff(cx);
                     this.list_tasks(cx);
-                    this.refresh_file_search(cx);
                     this.refresh_if_due(cx);
                 }
             })
@@ -335,29 +335,6 @@ impl WindowView {
         }
     }
 
-    /// 切换文件树里是否显示被 git 忽略的文件、名字以 `.` 开头的文件。
-    pub(super) fn toggle_show_ignored(&mut self, cx: &mut Context<Self>) {
-        self.show_ignored = !self.show_ignored;
-        self.rebuild_all_file_rows(cx);
-    }
-
-    pub(super) fn toggle_show_dotfiles(&mut self, cx: &mut Context<Self>) {
-        self.show_dotfiles = !self.show_dotfiles;
-        self.rebuild_all_file_rows(cx);
-    }
-
-    /// 文件树显示哪些变了：所有 workspace 的文件树重排，存进窗口存档。
-    fn rebuild_all_file_rows(&mut self, cx: &mut Context<Self>) {
-        let filter = self.tree_filter();
-        for workspace in &mut self.workspaces {
-            if let Some(root) = workspace.project.root.clone() {
-                workspace.project.rebuild_file_rows(&root, filter);
-            }
-        }
-        self.save(cx);
-        cx.notify();
-    }
-
     pub(super) fn toggle_git(&mut self, _: &ToggleGit, window: &mut Window, cx: &mut Context<Self>) {
         self.toggle_panel(SidePanel::Git, window, cx);
     }
@@ -395,7 +372,7 @@ impl WindowView {
             }
             self.close_branch_picker(window, cx);
         }
-        if files_were_shown && !self.files_shown() && self.files_focus.contains_focused(window, cx) {
+        if files_were_shown && !self.files_shown() && self.file_tree.focus_handle(cx).contains_focused(window, cx) {
             window.focus(&self.focus_handle(cx), cx);
         }
         if !self.github_actions_shown() {
@@ -417,7 +394,7 @@ impl WindowView {
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
         match self.workspace().panel? {
-            SidePanel::Files => Some(self.render_files_panel(width, fg, bg, cx).into_any_element()),
+            SidePanel::Files => Some(self.render_files_panel(width, cx).into_any_element()),
             SidePanel::Git => Some(self.render_git_panel(width, fg, bg, window, cx).into_any_element()),
             SidePanel::GitHubActions => Some(self.render_github_actions_panel(width, fg, bg, cx).into_any_element()),
         }
