@@ -229,6 +229,7 @@ fn answers_to_requests_from_an_earlier_connection_are_dropped() {
             snapshot_format: 1,
             standalone: true,
             handoff: 0,
+            keep_awake: false,
         };
         let frame = Frame::control(&welcome).unwrap();
         write_frame(&mut stream, frame.kind, 0, &frame.payload).unwrap();
@@ -445,6 +446,7 @@ fn a_host_with_another_snapshot_format_gets_asked_for_replays() {
             snapshot_format: local_snapshot_format().unwrap() + 1,
             standalone: true,
             handoff: 0,
+            keep_awake: false,
         };
         let frame = Frame::control(&welcome).unwrap();
         write_frame(&mut stream, frame.kind, 0, &frame.payload).unwrap();
@@ -476,6 +478,7 @@ fn fake_host(then: impl FnOnce(UnixStream) + Send + 'static) -> Link {
             snapshot_format: 1,
             standalone: true,
             handoff: 0,
+            keep_awake: false,
         };
         let frame = Frame::control(&welcome).unwrap();
         write_frame(&mut stream, frame.kind, 0, &frame.payload).unwrap();
@@ -624,6 +627,7 @@ fn theme_and_options_are_sent_again_after_reconnecting() {
             snapshot_format: 1,
             standalone: true,
             handoff: 0,
+            keep_awake: false,
         };
         let frame = Frame::control(&welcome).unwrap();
         write_frame(&mut stream, frame.kind, 0, &frame.payload).unwrap();

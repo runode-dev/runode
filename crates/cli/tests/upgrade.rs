@@ -173,6 +173,7 @@ fn an_unknown_goodbye_reason_closes_the_connection() {
                             snapshot_format: 1,
                             standalone: true,
                             handoff: 1,
+                            keep_awake: false,
                         };
                         Frame::control(&welcome).unwrap().payload
                     }

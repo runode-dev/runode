@@ -85,6 +85,7 @@ fn welcome_with_handoff_is_readable() {
             snapshot_format: 1,
             standalone: true,
             handoff: 1,
+            keep_awake: false,
         }
     );
     let incompatible: HostMsg =

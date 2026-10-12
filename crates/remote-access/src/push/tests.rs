@@ -352,6 +352,7 @@ impl FakeHost {
                         snapshot_format: 0,
                         standalone: false,
                         handoff: 0,
+                        keep_awake: false,
                     }
                 }
                 ClientMsg::ListSessions => HostMsg::SessionList { sessions: self.sessions.lock().unwrap().clone() },

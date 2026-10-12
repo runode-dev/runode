@@ -403,7 +403,12 @@ import Testing
         #expect(await eventually { link.subscriberCount == 1 })
         link.emit(.ready(generation: 1))
         #expect(await eventually { link.sent.contains(.attach(id: sessionA, size: nil, mode: .vtReplay)) })
+        // 开着时一直发 `keepAwake`，关掉就停。
+        #expect(await eventually { link.keepAwakes >= 2 })
         model.close()
         #expect(closed == [sessionA])
+        let stopped = link.keepAwakes
+        try? await Task.sleep(for: TerminalModel.keepAwakeInterval * 2)
+        #expect(link.keepAwakes == stopped)
     }
 }

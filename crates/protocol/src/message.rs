@@ -343,6 +343,10 @@ pub enum ClientMsg {
         machine: String,
         machine_name: String,
     },
+    /// 手机看着终端时每隔一小会儿发一条，宿主不回、什么都不做：iPhone 的 Wi-Fi 一闲下来就省电，
+    /// 收发会卡上一两秒，打的字攒着一起到；一直有包来回它就醒着。宿主在 `Welcome` 的 `keep_awake`
+    /// 里说自己认得它，旧宿主会回 `Error`，手机不发。
+    KeepAwake,
     /// 比自己新的一方才有的消息。宿主回 `HostMsg::Error`，连接照旧。
     #[serde(other)]
     Unknown,
@@ -357,7 +361,7 @@ pub enum HostMsg {
     /// 前端解不了这个格式时改要 `VtReplay`。`standalone` 是宿主单独一个进程在跑（`runode --host`）；
     /// 为假时宿主跑在某个 app 的进程里，那个 app 才是它的界面，别的 app 不该接手它的会话、也不该
     /// 让它退出。`handoff` 是宿主交出会话时写的交接格式（`handoff::HANDOFF_FORMAT`），0 是这个
-    /// 宿主不会交接。
+    /// 宿主不会交接。`keep_awake` 是宿主认得 `ClientMsg::KeepAwake`。
     Welcome {
         protocol: u32,
         build: BuildId,
@@ -367,6 +371,8 @@ pub enum HostMsg {
         standalone: bool,
         #[serde(default)]
         handoff: u32,
+        #[serde(default)]
+        keep_awake: bool,
     },
     /// 协议版本对不上，宿主接着关掉连接。
     Incompatible {

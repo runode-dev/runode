@@ -218,6 +218,7 @@ fn host_messages_round_trip() {
             snapshot_format: 1,
             standalone: false,
             handoff: 0,
+            keep_awake: false,
         },
         HostMsg::Welcome {
             protocol: 4,
@@ -226,6 +227,7 @@ fn host_messages_round_trip() {
             snapshot_format: 1,
             standalone: true,
             handoff: 1,
+            keep_awake: true,
         },
         HostMsg::Incompatible { protocol: 2, build: BuildId("b".into()), reason: "too new".into() },
         HostMsg::SessionList {

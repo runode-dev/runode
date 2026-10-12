@@ -10,6 +10,7 @@ import Synchronization
 final class FakeLink: HostLink {
     private struct State {
         var sent: [ClientMsg] = []
+        var keepAwakes = 0
         var inputs: [(data: Data, channel: UInt32, generation: UInt64)] = []
         var subscribers: [AsyncStream<HostEvent>.Continuation] = []
         var starts = 0
@@ -23,6 +24,8 @@ final class FakeLink: HostLink {
     private let state = Mutex(State())
 
     var sent: [ClientMsg] { state.withLock { $0.sent } }
+    /// 发过几次 `keepAwake`；它们按时发，不记进 `sent`。
+    var keepAwakes: Int { state.withLock { $0.keepAwakes } }
     var inputs: [(data: Data, channel: UInt32, generation: UInt64)] { state.withLock { $0.inputs } }
     var starts: Int { state.withLock { $0.starts } }
     var stops: Int { state.withLock { $0.stops } }
@@ -48,7 +51,9 @@ final class FakeLink: HostLink {
     }
 
     func send(_ message: ClientMsg) {
-        state.withLock { $0.sent.append(message) }
+        state.withLock {
+            if message == .keepAwake { $0.keepAwakes += 1 } else { $0.sent.append(message) }
+        }
     }
 
     func sendInput(_ data: Data, channel: UInt32, generation: UInt64) {

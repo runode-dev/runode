@@ -25,13 +25,13 @@ import Testing
     }
 
     /// 扮演宿主走完门禁和握手，返回 `Hello` 的内容。
-    func admit(_ host: inout FakeHost) async throws -> [String: Any] {
+    func admit(_ host: inout FakeHost, welcome: String = FakeHost.welcome) async throws -> [String: Any] {
         host.challenge()
         let auth = try #require(try await host.readControl())
         #expect(auth["type"] as? String == "remote_auth")
         host.send(.accepted(deviceId: machine.deviceId))
         let hello = try #require(try await host.readControl())
-        host.send(json: FakeHost.welcome)
+        host.send(json: welcome)
         return hello
     }
 
@@ -41,6 +41,25 @@ import Testing
             if case .ready(let generation) = event { return generation }
         }
         return nil
+    }
+
+    /// `keepAwake` 只发给在 `Welcome` 里说认得它的宿主：旧宿主回的 `Error` 不带编号，会被别的页面认错。
+    @Test(arguments: [false, true]) func keepAwakeOnlyGoesToHostsThatKnowIt(_ knows: Bool) async throws {
+        let transport = FakeTransport()
+        supply.add(transport)
+        let link = connection()
+        var events = await link.events().makeAsyncIterator()
+        await link.start()
+        var host = FakeHost(transport)
+        let welcome =
+            knows ? FakeHost.welcome.replacingOccurrences(of: "}", with: #","keep_awake":true}"#) : FakeHost.welcome
+        _ = try await admit(&host, welcome: welcome)
+        _ = try #require(await waitReady(&events))
+        link.send(.keepAwake)
+        link.send(.listSessions)
+        let first = try await host.readControl()?["type"] as? String
+        #expect(first == (knows ? "keep_awake" : "list_sessions"))
+        await link.stop()
     }
 
     @Test func connectsSaysHelloAndForwardsMessages() async throws {

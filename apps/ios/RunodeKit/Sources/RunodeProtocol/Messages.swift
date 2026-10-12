@@ -51,7 +51,7 @@ public enum ApnsEnv: String, Hashable, Sendable, Encodable {
 
 /// 前端发给宿主的消息。只列出手机这个前端会发的几种：`Hello`、`ListSessions`、`Layout`、`Open`、
 /// `OpenWorkspace`、`RenameWorkspace`、`ListDirs`、`Spawn`、`Attach`、`Detach`、`Resize`、`Focus`、`Kill`、
-/// `ReadScreen`、`SendKeys`、`Paste`、`Git`、`PushRegister`。JSON 的样子和
+/// `ReadScreen`、`SendKeys`、`Paste`、`Git`、`PushRegister`、`KeepAwake`。JSON 的样子和
 /// 宿主的 `ClientMsg` 一致，可缺省的字段也照宿主序列化的样子写出 `null`。宿主对手机连接上的 `Shutdown`、
 /// 交接（`Handoff` 等）、`UiReply`、`SetOptions`、`SetTheme` 只回 `Error`，这里故意不定义它们，手机就
 /// 发不出去。
@@ -105,6 +105,9 @@ public enum ClientMsg: Hashable, Sendable, Encodable {
     /// 的电脑名，推送时原样带回。由电脑上的远程访问记进配对设备表，不到宿主。
     case pushRegister(
         req: UInt32, token: String?, env: ApnsEnv, bundle: String, machine: String, machineName: String)
+    /// 看着终端时每隔一小会儿发一条，宿主不回：一直有包来回，iPhone 的 Wi-Fi 就不省电，打字不卡。只发给在
+    /// `Welcome` 里说认得它的宿主，旧宿主会回不带编号的 `Error`。
+    case keepAwake
 
     private struct Key: CodingKey {
         var stringValue: String
@@ -213,6 +216,8 @@ public enum ClientMsg: Hashable, Sendable, Encodable {
             try c.encode(bundle, forKey: Key("bundle"))
             try c.encode(machine, forKey: Key("machine"))
             try c.encode(machineName, forKey: Key("machine_name"))
+        case .keepAwake:
+            try c.encode("keep_awake", forKey: Key("type"))
         }
     }
 }
@@ -285,9 +290,10 @@ public enum GoodbyeReason: Hashable, Sendable, Decodable {
 
 /// 宿主发给前端的消息，和宿主的 `HostMsg` 一一对应。不认识的种类读成 `unknown`（和宿主的
 /// `#[serde(other)]` 一样），认识的种类缺了必填字段时整条解析失败。手机用不上的几种（界面转来的
-/// 请求、交接、跑完的命令）只解出编号，内容不读；`Welcome` 只认种类。
+/// 请求、交接、跑完的命令）只解出编号，内容不读；`Welcome` 只读 `keep_awake`。
 public enum HostMsg: Hashable, Sendable, Decodable {
-    case welcome
+    /// `keepAwake`：宿主认得 `ClientMsg.keepAwake`。
+    case welcome(keepAwake: Bool)
     case incompatible(protocol: UInt32, build: String, reason: String)
     case sessionList([SessionInfo])
     case spawned(req: UInt32, id: SessionId)
@@ -374,6 +380,7 @@ public enum HostMsg: Hashable, Sendable, Decodable {
         case type, `protocol`, build, reason, sessions, req, id, channel, size, mode, meta, settings
         case status, text, truncated, ui, message, format, mine, owner, windows, path, dirs, diff, branches
         case dir, sources
+        case keepAwake = "keep_awake"
     }
 
     public init(from decoder: any Decoder) throws {
@@ -381,7 +388,7 @@ public enum HostMsg: Hashable, Sendable, Decodable {
         let type = try c.decode(String.self, forKey: .type)
         switch type {
         case "welcome":
-            self = .welcome
+            self = .welcome(keepAwake: try c.decodeIfPresent(Bool.self, forKey: .keepAwake) ?? false)
         case "incompatible":
             self = .incompatible(
                 protocol: try c.decode(UInt32.self, forKey: .protocol),

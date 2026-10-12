@@ -114,6 +114,10 @@ public final class TerminalModel {
     @ObservationIgnored private var claudeWheelRetry: Task<Void, Never>?
     /// 宿主因为积压不接订阅时，过一会儿再连的那次；关页面、断线、重新连时撤掉。
     @ObservationIgnored private var attachRetry: Task<Void, Never>?
+    /// 页面开着时按 `keepAwakeInterval` 发 `keepAwake`。
+    @ObservationIgnored private var keepAwake: Task<Void, Never>?
+    /// 实测每秒一个包时 iPhone 的 Wi-Fi 照样省电，收发常卡一两秒；每 0.2 秒一个就一直醒着。
+    static let keepAwakeInterval: Duration = .milliseconds(200)
 
     /// `onOpen`、`onClose` 告诉会话列表这个会话正被终端页看着（列表就不再给它发只看状态的 `Attach`，
     /// 免得换掉这里的订阅）；关掉时由列表改回只看状态。`ownerProbeDelay` 是 `ownerHint` 为 `unknown`
@@ -179,12 +183,20 @@ public final class TerminalModel {
                 self.handle(event)
             }
         }
+        keepAwake = Task {
+            while !Task.isCancelled {
+                link.send(.keepAwake)
+                try? await Task.sleep(for: Self.keepAwakeInterval)
+            }
+        }
     }
 
     /// 不看了：停止订阅，会话交回列表（改回只看状态）。
     public func close() {
         task?.cancel()
         task = nil
+        keepAwake?.cancel()
+        keepAwake = nil
         attachRetry?.cancel()
         attachRetry = nil
         onClose(sessionId)

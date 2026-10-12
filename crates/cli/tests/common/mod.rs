@@ -93,6 +93,7 @@ fn serve(mut stream: UnixStream, tx: &mpsc::Sender<Received>, script: &Mutex<imp
                 snapshot_format: 1,
                 standalone: false,
                 handoff: 0,
+                keep_awake: false,
             }],
             other => (script.lock().unwrap())(other),
         };

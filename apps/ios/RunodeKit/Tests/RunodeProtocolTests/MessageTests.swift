@@ -46,7 +46,7 @@ func sameJSON(_ a: Data, _ b: Data) throws -> Bool {
         "list_project_tasks", "spawn",
         "attach_vt", "attach_meta", "attach_size", "detach", "resize", "focus", "kill",
         "read_screen", "read_screen_command", "send_keys", "paste",
-        "push_register", "push_unregister",
+        "push_register", "push_unregister", "keep_awake",
     ])
     func matchesTheHost(_ name: String) throws {
         let message: ClientMsg =
@@ -86,6 +86,7 @@ func sameJSON(_ a: Data, _ b: Data) throws -> Bool {
                 .pushRegister(
                     req: 11, token: nil, env: .development, bundle: "cn.barey.runode",
                     machine: "6F9619FF-8B86-D011-B42D-00C04FC964FF", machineName: "Ethan 的 MacBook Pro")
+            case "keep_awake": .keepAwake
             default: .listSessions
             }
         #expect(try sameJSON(JSONEncoder().encode(message), RustSamples.data(name)))
@@ -124,11 +125,13 @@ func sameJSON(_ a: Data, _ b: Data) throws -> Bool {
             .sendKeys(req: 1, id: id, keys: ["enter"]), .paste(req: 2, id: id, text: "y"),
             .git(req: 3, id: id, request: .status),
             .pushRegister(req: 4, token: "00", env: .production, bundle: "b", machine: "m", machineName: "n"),
+            .keepAwake,
         ]
         func covered(_ message: ClientMsg) -> Bool {
             switch message {
             case .hello, .listSessions, .layout, .open, .openWorkspace, .renameWorkspace, .listDirs, .listProjectTasks,
-                .spawn, .attach, .detach, .resize, .focus, .kill, .readScreen, .sendKeys, .paste, .git, .pushRegister:
+                .spawn, .attach, .detach, .resize, .focus, .kill, .readScreen, .sendKeys, .paste, .git, .pushRegister,
+                .keepAwake:
                 true
             }
         }
@@ -159,7 +162,10 @@ func sameJSON(_ a: Data, _ b: Data) throws -> Bool {
     }
 
     @Test func welcomeAndIncompatible() throws {
-        #expect(try decode("welcome") == .welcome)
+        #expect(try decode("welcome") == .welcome(keepAwake: true))
+        // 旧宿主的 `Welcome` 没有 `keep_awake`。
+        let old = Data(#"{"type":"welcome","protocol":4}"#.utf8)
+        #expect(try JSONDecoder().decode(HostMsg.self, from: old) == .welcome(keepAwake: false))
         #expect(try decode("incompatible") == .incompatible(protocol: 5, build: "x", reason: "old"))
     }
 

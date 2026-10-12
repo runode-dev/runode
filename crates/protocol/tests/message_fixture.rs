@@ -244,6 +244,7 @@ fn samples() -> BTreeMap<&'static str, Value> {
                 machine_name: "Ethan 的 MacBook Pro".into(),
             },
         ),
+        ("keep_awake", ClientMsg::KeepAwake),
     ];
 
     let host = [
@@ -256,6 +257,7 @@ fn samples() -> BTreeMap<&'static str, Value> {
                 snapshot_format: 1,
                 standalone: true,
                 handoff: 1,
+                keep_awake: true,
             },
         ),
         ("incompatible", HostMsg::Incompatible { protocol: 5, build: BuildId("x".into()), reason: "old".into() }),

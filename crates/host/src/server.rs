@@ -915,6 +915,7 @@ impl Connection {
             snapshot_format: self.shared.snapshot_format,
             standalone,
             handoff: HANDOFF_FORMAT,
+            keep_awake: true,
         }
     }
 
@@ -1079,6 +1080,7 @@ impl Connection {
             ClientMsg::PushRegister { req, .. } => {
                 self.error(Some(req), None, "only a remote device registers for push through remote access".into());
             }
+            ClientMsg::KeepAwake => {}
             ClientMsg::Unknown => self.error(None, None, "unknown message".into()),
         }
     }

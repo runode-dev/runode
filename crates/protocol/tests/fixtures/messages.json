@@ -519,6 +519,9 @@
     "integration_force": {
       "force": "zsh"
     },
+    "keep_awake": {
+      "type": "keep_awake"
+    },
     "kill": {
       "id": "0123456789abcdef0011223344556677",
       "type": "kill"
@@ -1237,6 +1240,7 @@
       "build": "0.1.0+abc",
       "handoff": 1,
       "host_pid": 123,
+      "keep_awake": true,
       "protocol": 4,
       "snapshot_format": 1,
       "standalone": true,
