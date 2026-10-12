@@ -77,14 +77,16 @@ use std::{
         Arc, Once, Weak,
         atomic::{AtomicBool, Ordering},
     },
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 const WINDOW_STATE_IVAR: &str = "windowState";
 
-/// Vsync ticks without a frame before `step` stops the display link. A few
-/// ticks of slack keep bursts of output from restarting the link every frame.
-const IDLE_FRAMES_BEFORE_STOP: u8 = 3;
+/// How long `step` keeps the display link ticking without a frame before it
+/// stops it. Long enough that output and animations at ten or more frames a
+/// second (an agent's spinner) keep the link running instead of restarting it,
+/// and a new thread, every frame.
+const IDLE_BEFORE_STOP: Duration = Duration::from_millis(100);
 
 static RESTORES_WORKSPACE_AT_LAUNCH_DEFAULT: Once = Once::new();
 
@@ -670,10 +672,10 @@ struct MacWindowState {
     cursor_visible: Arc<AtomicBool>,
     frame_source: Option<WindowFrameSource>,
     // Whether a frame was presented or requested since the last `step`; `step`
-    // stops the display link after `IDLE_FRAMES_BEFORE_STOP` vsyncs without
-    // either, and the waker from `frame_waker` restarts it.
+    // stops the display link once `IDLE_BEFORE_STOP` has passed since
+    // `last_busy` without either, and the waker from `frame_waker` restarts it.
     frame_busy: bool,
-    idle_frames: u8,
+    last_busy: Instant,
     // Set once `MacWindow` is dropped, so a late frame waker cannot create a
     // new frame source for a window that is going away.
     released: bool,
@@ -859,7 +861,7 @@ impl MacWindowState {
             return;
         };
         let data = self.native_view.as_ptr() as *mut c_void;
-        self.idle_frames = 0;
+        self.last_busy = Instant::now();
         self.frame_source
             .get_or_insert_with(|| WindowFrameSource::new(data, step))
             .start(display_id)
@@ -1138,7 +1140,7 @@ impl MacWindow {
                 cursor_visible,
                 frame_source: None,
                 frame_busy: false,
-                idle_frames: 0,
+                last_busy: Instant::now(),
                 released: false,
                 renderer: renderer::new_renderer(
                     renderer_context,
@@ -3390,12 +3392,9 @@ extern "C" fn step(view: *mut c_void) {
         // GPUI wakes the window (`frame_waker`) whenever it needs another
         // frame, so the link only has to keep ticking while frames are busy.
         if mem::take(&mut lock.frame_busy) {
-            lock.idle_frames = 0;
-        } else {
-            lock.idle_frames = lock.idle_frames.saturating_add(1);
-            if lock.idle_frames >= IDLE_FRAMES_BEFORE_STOP {
-                lock.stop_display_link();
-            }
+            lock.last_busy = Instant::now();
+        } else if lock.last_busy.elapsed() >= IDLE_BEFORE_STOP {
+            lock.stop_display_link();
         }
     }
 }
