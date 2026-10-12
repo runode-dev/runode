@@ -268,6 +268,8 @@ impl WindowView {
         let workspace = &mut self.workspaces[self.active];
         // 侧栏的分支徽标每轮都在问当前 workspace 的分支，看得出来时用它的。
         if workspace.repo.covers_repo_dir(&workspace.dir, &dir) {
+            // 记着的那次问的结论已经不是 `in_repo` 了，回到那个目录时要重问。
+            workspace.project.probed = None;
             if workspace.project.in_repo != Some(true) {
                 workspace.project.in_repo = Some(true);
                 cx.notify();
