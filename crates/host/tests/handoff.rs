@@ -769,6 +769,7 @@ fn a_goodbye_for_a_handoff_means_busy() {
         standalone: true,
         handoff: HANDOFF_FORMAT,
         keep_awake: false,
+        todos: false,
     };
     let goodbye = HostMsg::Goodbye { reason: GoodbyeReason::Handoff };
     let scripts = [vec![goodbye.clone()], vec![welcome, goodbye]];
@@ -837,6 +838,7 @@ fn an_old_host_without_handoffs_is_pre_handoff() {
             standalone: true,
             handoff: 0,
             keep_awake: false,
+            todos: false,
         },
     ];
     let fake = thread::spawn(move || {

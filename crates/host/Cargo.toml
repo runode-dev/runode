@@ -19,6 +19,8 @@ serde_json = { workspace = true, features = ["preserve_order"] }
 # 锁文件（flock）和认连上来的进程是谁（getpeereid）。
 libc.workspace = true
 tracing.workspace = true
+# 任务板的库，见 `todos`。
+rusqlite.workspace = true
 
 [lints]
 workspace = true

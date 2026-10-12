@@ -1244,6 +1244,7 @@
       "protocol": 4,
       "snapshot_format": 1,
       "standalone": true,
+      "todos": false,
       "type": "welcome"
     }
   }

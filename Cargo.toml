@@ -72,6 +72,9 @@ block2 = "0.6"
 rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }
 rcgen = { version = "0.14", default-features = false, features = ["crypto", "ring"] }
 ring = "0.17"
+# 任务板的库（MIT）：任务和定时存在宿主的一个 SQLite 文件里。编进 SQLite 的源码（bundled），不依赖系统的
+# libsqlite3，单独跑的宿主在没装它的 Linux 上也能用。只许 runode-host 直接依赖，见 deny.toml。
+rusqlite = { version = "0.40.2", default-features = false, features = ["bundled"] }
 # 配对的二维码：`runode remote pair` 画在终端里，设置页画在界面上；不要默认特性（画成图片、SVG 用不上）。
 qrcode = { version = "0.14", default-features = false }
 

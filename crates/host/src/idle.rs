@@ -1,5 +1,5 @@
 //! 宿主单独一个进程跑时（`runode --host`）什么时候退出：没有会话也没有连接、持续一段时间后
-//! 自己退出（`Host::set_stay_up` 时不因空闲退出），或者前端发来 `Shutdown`。
+//! 自己退出（`Host::set_stay_up` 时、任务板上有定时时不因空闲退出），或者前端发来 `Shutdown`。
 
 use std::time::{Duration, Instant};
 
@@ -52,7 +52,10 @@ impl Host {
                 break reason;
             }
             // 锁的先后：拿着 `peers` 再拿 `registry`。
-            let quiet = !peers.stay_up && peers.connection_count() == 0 && shared.registry().sessions.is_empty();
+            let quiet = !peers.stay_up
+                && !peers.scheduled
+                && peers.connection_count() == 0
+                && shared.registry().sessions.is_empty();
             if quiet {
                 let since = *quiet_since.get_or_insert_with(Instant::now);
                 let since = since.max(peers.activity_at);
@@ -63,7 +66,7 @@ impl Host {
             } else {
                 quiet_since = None;
             }
-            let wait = if peers.stay_up || peers.connection_count() > 0 { LONG_TICK } else { tick };
+            let wait = if peers.stay_up || peers.scheduled || peers.connection_count() > 0 { LONG_TICK } else { tick };
             peers = shared.peers_changed.wait_timeout(peers, wait).map_or_else(|err| err.into_inner().0, |(p, _)| p);
         };
         peers.accepting = false;

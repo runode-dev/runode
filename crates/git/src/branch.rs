@@ -110,6 +110,15 @@ impl Repo {
         }
         run(&self.root, ["switch", "-c", name].into_iter().chain(start), None).map(drop)
     }
+
+    /// 删掉本地分支 `name`，只删已经合进当前分支（或它的上游）的（`git branch -d`）：有没合并的提交、或者
+    /// 它正检出在哪个工作树里时 git 拒绝，报它的错。
+    pub fn delete_merged_branch(&self, name: &str) -> Result {
+        if name.starts_with('-') {
+            return Err(GitError::new(format!("不是分支名：{name}")));
+        }
+        run(&self.root, ["branch", "-d", name], None).map(drop)
+    }
 }
 
 #[cfg(test)]

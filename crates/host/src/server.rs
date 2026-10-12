@@ -111,6 +111,8 @@ pub(crate) struct Peers {
     pub(crate) activity_at: Instant,
     /// 没有会话也没有连接时也不算空闲，见 `Host::set_stay_up`。
     pub(crate) stay_up: bool,
+    /// 任务板上有定时：到点要开任务，没有会话也没有连接时也不算空闲，见 `todos`。
+    pub(crate) scheduled: bool,
 }
 
 impl Default for Peers {
@@ -129,6 +131,7 @@ impl Default for Peers {
             yielding: false,
             activity_at: Instant::now(),
             stay_up: false,
+            scheduled: false,
         }
     }
 }
@@ -152,6 +155,15 @@ impl Peers {
         }
     }
 
+    /// 任务板变了：告诉问过 `ListTodos` 的连接。
+    pub(crate) fn todos_changed(&self) {
+        for peer in self.connections.values().filter(|peer| peer.watches_todos) {
+            if let Some(out) = &peer.out {
+                out.control(&HostMsg::TodosChanged);
+            }
+        }
+    }
+
     /// 给 `except` 以外的连接都发 `Goodbye`，写完后断开；`spare_desktops` 时桌面的界面也不发。
     /// 写线程还没起好的连接起好时自己发，见 `serve`。
     pub(crate) fn say_goodbye(&self, except: Option<u64>, spare_desktops: bool, reason: &GoodbyeReason) {
@@ -171,6 +183,8 @@ struct Peer {
     out: Option<Outbox>,
     /// 问过 `Layout`：界面说布局变了时告诉它，见 `HostMsg::LayoutChanged`。
     watches_layout: bool,
+    /// 问过 `ListTodos`：任务板变了时告诉它，见 `HostMsg::TodosChanged`。
+    watches_todos: bool,
 }
 
 /// 转给界面、还没回话的一条请求。
@@ -422,7 +436,7 @@ fn register(shared: &Shared) -> Option<u64> {
         return None;
     }
     let id = shared.next_connection();
-    peers.connections.insert(id, Peer { out: None, watches_layout: false });
+    peers.connections.insert(id, Peer { out: None, watches_layout: false, watches_todos: false });
     peers.activity_at = Instant::now();
     Some(id)
 }
@@ -928,6 +942,7 @@ impl Connection {
             standalone,
             handoff: HANDOFF_FORMAT,
             keep_awake: true,
+            todos: true,
         }
     }
 
@@ -1072,6 +1087,38 @@ impl Connection {
                 Ok(HostMsg::ProjectTasks { req, dir, sources })
             }),
             ClientMsg::Git { req, id, request } => self.git(req, id, request),
+            ClientMsg::ListTodos { req } => {
+                if let Some(peer) = self.shared.peers().connections.get_mut(&self.id) {
+                    peer.watches_todos = true;
+                }
+                self.todos(req, "host-list-todos", move |shared| shared.list_todos(req));
+            }
+            ClientMsg::AddTodo { req, spec } => {
+                self.todos(req, "host-add-todo", move |shared| shared.add_todo(req, &spec))
+            }
+            ClientMsg::UpdateTodo { req, id, spec, done } => {
+                self.todos(req, "host-update-todo", move |shared| shared.update_todo(req, &id, spec.as_ref(), done));
+            }
+            ClientMsg::RemoveTodo { req, id } => {
+                self.todos(req, "host-remove-todo", move |shared| shared.remove_todo(req, &id));
+            }
+            ClientMsg::StartTodo { req, id } => self.todos(req, "host-start-todo", move |shared| {
+                shared.start_todo(&id).map(|session| HostMsg::Opened { req, id: session })
+            }),
+            ClientMsg::MoveTodo { req, id, before } => {
+                self.todos(req, "host-move-todo", move |shared| shared.move_todo(req, &id, before.as_deref()));
+            }
+            ClientMsg::AddSchedule { req, spec, when } => {
+                self.todos(req, "host-add-schedule", move |shared| shared.add_schedule(req, &spec, &when));
+            }
+            ClientMsg::UpdateSchedule { req, id, spec, when } => {
+                self.todos(req, "host-update-schedule", move |shared| {
+                    shared.update_schedule(req, &id, spec.as_ref(), when.as_ref())
+                })
+            }
+            ClientMsg::RemoveSchedule { req, id } => {
+                self.todos(req, "host-remove-schedule", move |shared| shared.remove_schedule(req, &id));
+            }
             ClientMsg::UiReply { ui, reply } => self.ui_reply(ui, *reply),
             // 读写剪贴板是宿主替会话里的程序请界面办的，前端不能直接要。
             ClientMsg::WriteClipboard { .. } | ClientMsg::ReadClipboard { .. } => {
@@ -1281,6 +1328,12 @@ impl Connection {
             out.control(&message);
             drop(slot);
         });
+    }
+
+    /// 另起线程办一件任务板的请求，见 `todos`：要读写库、stat 目录，开始任务时还要跑 git、开会话。
+    fn todos(&self, req: u32, name: &str, answer: impl FnOnce(&Shared) -> Result<HostMsg, String> + Send + 'static) {
+        let shared = self.shared.clone();
+        self.read_files(req, name, move || answer(&shared));
     }
 
     /// 在会话 `id` 所在的仓库里办 git 请求：向会话线程要它的目录，连同请求交给这条连接的 git

@@ -263,6 +263,15 @@ fn adds_a_worktree_inside_the_repo_without_dirtying_it() {
     let second = handle.root.join(".worktrees").join("second");
     std::fs::write(second.join("a.txt"), "changed\n").unwrap();
     assert!(handle.remove_worktree(&second, false).is_err());
+
+    // 没有新提交的分支删得掉；有没合并的提交、或者还检出在工作树里的删不掉。
+    handle.delete_merged_branch("runode/fix-login").unwrap();
+    assert!(!repo.git(&["branch", "--list"]).contains("runode/fix-login"));
+    assert!(handle.delete_merged_branch("runode/second").is_err());
+    repo.git(&["-C", &second.to_string_lossy(), "commit", "-qam", "work"]);
+    handle.remove_worktree(&second, false).unwrap();
+    assert!(handle.delete_merged_branch("runode/second").is_err());
+    assert!(handle.delete_merged_branch("-D").is_err());
 }
 
 #[test]

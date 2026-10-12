@@ -3,7 +3,12 @@
 use runode_protocol::{
     AttachMode, BuildId, Caps, ClientKind, ClientMsg, FinishedCommand, Frame, FrameKind, GoodbyeReason, HandoffRefusal,
     HostMsg, PaneLayout, PaneRect, Placement, ProjectTask, SessionId, SessionInfo, TabLayout, TaskSource,
-    TaskSourceKind, WindowLayout, WorkspaceLayout, message::InvalidSessionId, push::ApnsEnv, read_frame, write_frame,
+    TaskSourceKind, WindowLayout, WorkspaceLayout,
+    message::InvalidSessionId,
+    push::ApnsEnv,
+    read_frame,
+    todo::{Schedule, Todo, TodoSpec, When},
+    write_frame,
 };
 use runode_shared_types::{
     agent::{Agent, AgentKind, AgentState},
@@ -84,6 +89,16 @@ fn project_tasks() -> Vec<TaskSource> {
 }
 
 /// 经过帧编码、解码再读回来。
+fn todo_spec() -> TodoSpec {
+    TodoSpec {
+        title: "修好登录页".into(),
+        prompt: "the redirect \"loops\"\nfix it".into(),
+        dir: "/Users/me/中文".into(),
+        agent: "codex --full-auto".into(),
+        worktree: true,
+    }
+}
+
 fn through_frame<T: Serialize + serde::de::DeserializeOwned>(message: &T) -> T {
     let frame = Frame::control(message).unwrap();
     let mut stream = Vec::new();
@@ -203,6 +218,22 @@ fn client_messages_round_trip() {
             machine: "m".into(),
             machine_name: String::new(),
         },
+        ClientMsg::ListTodos { req: 19 },
+        ClientMsg::AddTodo { req: 20, spec: todo_spec() },
+        ClientMsg::UpdateTodo { req: 21, id: "0000abcd".into(), spec: Some(todo_spec()), done: None },
+        ClientMsg::UpdateTodo { req: 22, id: "0000abcd".into(), spec: None, done: Some(true) },
+        ClientMsg::RemoveTodo { req: 23, id: "0000abcd".into() },
+        ClientMsg::StartTodo { req: 24, id: "0000abcd".into() },
+        ClientMsg::MoveTodo { req: 25, id: "0000abcd".into(), before: Some("0000beef".into()) },
+        ClientMsg::MoveTodo { req: 26, id: "0000abcd".into(), before: None },
+        ClientMsg::AddSchedule { req: 27, spec: todo_spec(), when: When::Daily { hour: 9, minute: 30, days: 62 } },
+        ClientMsg::UpdateSchedule {
+            req: 28,
+            id: "0000cafe".into(),
+            spec: None,
+            when: Some(When::Every { minutes: 15 }),
+        },
+        ClientMsg::RemoveSchedule { req: 29, id: "0000cafe".into() },
     ];
     for message in messages {
         assert_eq!(through_frame(&message), message);
@@ -220,6 +251,7 @@ fn host_messages_round_trip() {
             standalone: false,
             handoff: 0,
             keep_awake: false,
+            todos: false,
         },
         HostMsg::Welcome {
             protocol: 4,
@@ -229,6 +261,7 @@ fn host_messages_round_trip() {
             standalone: true,
             handoff: 1,
             keep_awake: true,
+            todos: false,
         },
         HostMsg::Incompatible { protocol: 2, build: BuildId("b".into()), reason: "too new".into() },
         HostMsg::SessionList {
@@ -325,10 +358,49 @@ fn host_messages_round_trip() {
         HostMsg::HandoffBegin { format: 1, sessions: 12 },
         HostMsg::SizeOwner { id: ID, mine: true, owner: Some("Ethan 的 MacBook".into()) },
         HostMsg::SizeOwner { id: ID, mine: false, owner: None },
+        HostMsg::Todos {
+            req: 19,
+            todos: vec![Todo {
+                id: "0000abcd".into(),
+                spec: todo_spec(),
+                created: 1_760_000_000,
+                started: Some(1_760_000_100),
+                session: Some(ID),
+                worktree_dir: Some("/Users/me/中文/.worktrees/fix".into()),
+                branch: Some("runode/fix".into()),
+                done_at: None,
+                schedule: Some("0000cafe".into()),
+                rank: 3,
+            }],
+            schedules: vec![Schedule {
+                id: "0000cafe".into(),
+                spec: todo_spec(),
+                when: When::Once { at: 1_760_003_600 },
+                last_fired: 1_760_000_000,
+                next_fire: Some(1_760_003_600),
+            }],
+        },
+        HostMsg::TodoAdded { req: 20, id: "0000abcd".into() },
+        HostMsg::TodosChanged,
     ];
     for message in messages {
         assert_eq!(through_frame(&message), message);
     }
+}
+
+/// 改任务时没给的部分缺省，旧宿主的 `Welcome` 没有 `todos`。
+#[test]
+fn todo_messages_fill_in_defaults() {
+    let update: ClientMsg = serde_json::from_str(r#"{"type":"update_todo","req":1,"id":"0000abcd"}"#).unwrap();
+    assert_eq!(update, ClientMsg::UpdateTodo { req: 1, id: "0000abcd".into(), spec: None, done: None });
+    let moved: ClientMsg = serde_json::from_str(r#"{"type":"move_todo","req":2,"id":"0000abcd"}"#).unwrap();
+    assert_eq!(moved, ClientMsg::MoveTodo { req: 2, id: "0000abcd".into(), before: None });
+    let welcome: HostMsg =
+        serde_json::from_str(r#"{"type":"welcome","protocol":4,"build":"b","host_pid":9,"snapshot_format":1}"#)
+            .unwrap();
+    assert!(matches!(welcome, HostMsg::Welcome { todos: false, .. }));
+    let changed: HostMsg = serde_json::from_str(r#"{"type":"todos_changed"}"#).unwrap();
+    assert_eq!(changed, HostMsg::TodosChanged);
 }
 
 #[test]

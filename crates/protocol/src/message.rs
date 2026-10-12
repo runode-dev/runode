@@ -41,6 +41,7 @@ use crate::{
     layout::WindowLayout,
     project_tasks::TaskSource,
     push::ApnsEnv,
+    todo::{Schedule, Todo, TodoSpec, When},
 };
 
 /// 一个终端会话的标识：128 位随机数，写成 32 个小写十六进制数字。宿主重启、交接后照旧，
@@ -356,6 +357,49 @@ pub enum ClientMsg {
     /// 收发会卡上一两秒，打的字攒着一起到；一直有包来回它就醒着。宿主在 `Welcome` 的 `keep_awake`
     /// 里说自己认得它，旧宿主会回 `Error`，手机不发。
     KeepAwake,
+    /// 要任务板上的任务和定时（见 `todo` 模块），宿主回 `Todos`；之后任务或定时有变化时给这条连接发
+    /// `TodosChanged`。完成了的任务只给最近七天的。下面这几条宿主自己办，宿主在 `Welcome` 的 `todos`
+    /// 里说自己认得它们；还没打开任务库（见 `runode_host` 的 `Host::serve_todos`）、正在交出会话时回
+    /// `Error`。
+    ListTodos { req: u32 },
+    /// 加一张待办的任务（不开始），回 `TodoAdded`。
+    AddTodo { req: u32, spec: TodoSpec },
+    /// 改任务：`spec` 给了时换掉要做的事（开始过的不能改目录和要不要工作树），`done` 给了时标成
+    /// 完成或取消完成；回 `Done`。标成完成后，等它的会话不在了，宿主清掉给它开的工作树和分支：有改动的
+    /// 工作树、有没合并提交的分支留着。
+    UpdateTodo {
+        req: u32,
+        id: String,
+        #[serde(default)]
+        spec: Option<TodoSpec>,
+        #[serde(default)]
+        done: Option<bool>,
+    },
+    /// 删掉任务，回 `Done`。不结束它的会话；会话已经不在时，像标完成一样清掉它的工作树和分支。
+    RemoveTodo { req: u32, id: String },
+    /// 开始任务：在它的目录（要工作树时先新开一个）里开会话、在提示符上跑 agent，回 `Opened`。会话
+    /// 还在时不再开，回原来那个。
+    StartTodo { req: u32, id: String },
+    /// 调任务的先后：挪到 `before` 前面，为空时挪到最后；回 `Done`。
+    MoveTodo {
+        req: u32,
+        id: String,
+        #[serde(default)]
+        before: Option<String>,
+    },
+    /// 加一个定时，回 `TodoAdded`。
+    AddSchedule { req: u32, spec: TodoSpec, when: When },
+    /// 改定时，只改给了的部分；改了 `when` 时从现在重新算起。回 `Done`。
+    UpdateSchedule {
+        req: u32,
+        id: String,
+        #[serde(default)]
+        spec: Option<TodoSpec>,
+        #[serde(default)]
+        when: Option<When>,
+    },
+    /// 删掉定时，回 `Done`；它开出来的任务留着。
+    RemoveSchedule { req: u32, id: String },
     /// 比自己新的一方才有的消息。宿主回 `HostMsg::Error`，连接照旧。
     #[serde(other)]
     Unknown,
@@ -370,7 +414,8 @@ pub enum HostMsg {
     /// 前端解不了这个格式时改要 `VtReplay`。`standalone` 是宿主单独一个进程在跑（`runode --host`）；
     /// 为假时宿主跑在某个 app 的进程里，那个 app 才是它的界面，别的 app 不该接手它的会话、也不该
     /// 让它退出。`handoff` 是宿主交出会话时写的交接格式（`handoff::HANDOFF_FORMAT`），0 是这个
-    /// 宿主不会交接。`keep_awake` 是宿主认得 `ClientMsg::KeepAwake`。
+    /// 宿主不会交接。`keep_awake` 是宿主认得 `ClientMsg::KeepAwake`，`todos` 是认得任务板的几条
+    /// 消息（`ClientMsg::ListTodos` 等）。
     Welcome {
         protocol: u32,
         build: BuildId,
@@ -382,6 +427,8 @@ pub enum HostMsg {
         handoff: u32,
         #[serde(default)]
         keep_awake: bool,
+        #[serde(default)]
+        todos: bool,
     },
     /// 协议版本对不上，宿主接着关掉连接。
     Incompatible {
@@ -561,6 +608,20 @@ pub enum HostMsg {
         #[serde(default)]
         text: Option<ClipboardContent>,
     },
+    /// 回 `ClientMsg::ListTodos`：任务按先后（`Todo::rank`）排好，定时按建的先后。
+    Todos {
+        req: u32,
+        todos: Vec<Todo>,
+        schedules: Vec<Schedule>,
+    },
+    /// 回 `ClientMsg::AddTodo`、`AddSchedule`：新任务或新定时的标识。
+    TodoAdded {
+        req: u32,
+        id: String,
+    },
+    /// 任务板变了（有人增删改、开始了任务、定时到点开了任务），发给问过 `ListTodos` 的连接；要看新的再
+    /// 发一次 `ListTodos`。任务会话里 agent 的状态变了不算，那个看会话自己的状态。
+    TodosChanged,
     /// 比自己新的宿主才有的消息，前端忽略它。
     #[serde(other)]
     Unknown,

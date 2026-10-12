@@ -258,6 +258,7 @@ fn samples() -> BTreeMap<&'static str, Value> {
                 standalone: true,
                 handoff: 1,
                 keep_awake: true,
+                todos: false,
             },
         ),
         ("incompatible", HostMsg::Incompatible { protocol: 5, build: BuildId("x".into()), reason: "old".into() }),

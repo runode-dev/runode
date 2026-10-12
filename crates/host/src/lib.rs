@@ -21,6 +21,9 @@
 //! 见 `git`。手机新建工作区时一级级浏览电脑上的目录，也由宿主列出来（`ClientMsg::ListDirs`），
 //! 见 `browse`；会话卡片上列的 Makefile 目标和 package.json 的 scripts 也是（`ClientMsg::ListProjectTasks`），
 //! 见 `project_tasks`。
+//!
+//! 任务板（派给 agent 的任务和定时）也由宿主持有：存在它自己的库里，到点开任务、开会话跑 agent，见
+//! `todos`。
 
 mod browse;
 mod git;
@@ -30,11 +33,12 @@ mod launch;
 mod project_tasks;
 mod server;
 mod session;
+mod todos;
 mod workspaces;
 
 use std::{
     collections::HashMap,
-    ffi::OsString,
+    ffi::{OsStr, OsString},
     path::PathBuf,
     sync::{
         Arc, Condvar, Mutex, MutexGuard, PoisonError, Weak,
@@ -97,6 +101,8 @@ struct Shared {
     handoff_deadline: Mutex<Duration>,
     /// 读剪贴板最多等界面多久，见 `Host::set_clipboard_read_patience`。
     clipboard_patience: Mutex<Duration>,
+    /// 任务板，见 `todos`；定时的线程也拿着一份。锁的先后：拿着它可以再拿 `peers` 和 `registry`。
+    todos: Arc<todos::Todos>,
 }
 
 /// 会话、主题和剪贴板的规矩放在同一把锁下：新会话加进来和换主题、改规矩不会互相错过，见
@@ -142,6 +148,11 @@ impl Shared {
     ///
     /// 交接给新宿主期间不开新会话（交出去的会话已经定了，新开的会跟着这个宿主一起退出）。
     fn spawn(&self, options: SpawnOptions) -> Result<SessionId> {
+        self.spawn_with(options, &[])
+    }
+
+    /// 同 `spawn`，这个会话的 shell 另外设上 `env` 里的环境变量。
+    fn spawn_with(&self, options: SpawnOptions, env: &[(&str, &str)]) -> Result<SessionId> {
         let id = SessionId::random()?;
         let (settings, generation) = {
             let registry = self.registry();
@@ -151,7 +162,11 @@ impl Shared {
             };
             (settings, registry.theme_generation)
         };
-        let setup = self.setup(id, settings);
+        let mut setup = self.setup(id, settings);
+        for (key, value) in env {
+            setup.env.retain(|(k, _)| k != key);
+            setup.env.push(((*key).into(), OsStr::new(value).into()));
+        }
         let clipboard = setup.clipboard;
         // 开伪终端、启动 shell 要几毫秒，不占着锁。
         let handle = session::spawn(setup, options)?;
@@ -250,6 +265,7 @@ impl Host {
             peers_changed: Condvar::new(),
             handoff_deadline: Mutex::new(handoff::DEFAULT_DEADLINE),
             clipboard_patience: Mutex::new(session::CLIPBOARD_READ_PATIENCE),
+            todos: Arc::default(),
         };
         Self { shared: Arc::new_cyclic(shared) }
     }

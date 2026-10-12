@@ -145,7 +145,8 @@ impl Shared {
     }
 }
 
-fn spawn_options(cwd: Option<PathBuf>) -> SpawnOptions {
+/// 宿主自己开会话（没有界面时开终端、开始任务）用的选项：从 `cwd` 开始，尺寸是 `SPAWN_SIZE`。
+pub(crate) fn spawn_options(cwd: Option<PathBuf>) -> SpawnOptions {
     SpawnOptions {
         size: SPAWN_SIZE,
         cwd,

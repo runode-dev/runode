@@ -73,6 +73,8 @@ const PTY_BACKLOG_BYTES: usize = 1024 * 1024;
 const COALESCE_BYTES: usize = if cfg!(debug_assertions) { 4 * 1024 } else { 64 * 1024 };
 /// 重新读取前台进程的间隔：不输出的程序（比如 `sleep`）启动后，标签名也能跟上。
 const FOREGROUND_POLL_INTERVAL: Duration = Duration::from_secs(1);
+/// `Inbox::TypeAtPrompt` 最多等提示符这么久；没有 shell 集成的 shell 不报提示符，到时就写。
+const TYPE_AT_PROMPT_PATIENCE: Duration = Duration::from_secs(5);
 /// 有输出时重读前台进程的最短间隔：大量输出时不必每块都做几次系统调用，推迟的那次到点补上。
 const FOREGROUND_REFRESH_INTERVAL: Duration = Duration::from_millis(50);
 /// 交接时 VT 停在一条编不进快照的序列中间（`SnapshotError::Unfinished`），最多这么久里让程序
@@ -142,6 +144,10 @@ pub(crate) enum Inbox {
     Keys(Vec<KeyChord>),
     /// 按宿主 VT 当前的模式把这段文字当粘贴写给程序，见 `HostSession::encode_paste`。
     Paste(String),
+    /// 等 shell 出了提示符（shell 集成报告了提示符所在的目录）再把这些字节写给程序，最多等
+    /// `TYPE_AT_PROMPT_PATIENCE`。任务板在新开的会话里打 agent 的命令用：shell 还在读配置时打进去的字
+    /// 可能被配置里的程序读走。
+    TypeAtPrompt(Vec<u8>),
     /// 谁最近在操作这个会话，见 `SessionMeta::driver`：`Some` 是别的终端里的程序经 socket 做了
     /// 一件事，排在那件事前面；`None` 是用户在界面里打了字，清掉记录。
     Driven(Option<Drive>),
@@ -475,6 +481,8 @@ struct Runner {
     read_patience: Duration,
     /// 在等界面回的那个读剪贴板的请求，见 `clipboard`。
     clipboard_read: Option<clipboard::PendingRead>,
+    /// 等着提示符出来再写的字节和最晚写的时刻，见 `Inbox::TypeAtPrompt`。
+    type_ahead: Option<(Vec<u8>, Instant)>,
 }
 
 impl Runner {
@@ -508,6 +516,7 @@ impl Runner {
             clipboard: ClipboardAccess::default(),
             read_patience: CLIPBOARD_READ_PATIENCE,
             clipboard_read: None,
+            type_ahead: None,
         };
         // shell 已经在起始目录里跑起来了，不等第一次输出，前端一连上就有名字。
         runner.refresh_foreground(now);
@@ -572,8 +581,20 @@ impl Runner {
         if self.deadline().is_some_and(|at| Instant::now() >= at) {
             self.tick();
         }
+        self.type_at_prompt();
         self.publish_meta();
         true
+    }
+
+    /// 等着的 `Inbox::TypeAtPrompt` 到时候了就写出去：提示符出来了，或者等够了。
+    fn type_at_prompt(&mut self) {
+        let Some((_, by)) = &self.type_ahead else { return };
+        if Instant::now() < *by && self.session.meta().prompt_cwd.is_none() {
+            return;
+        }
+        if let Some((data, _)) = self.type_ahead.take() {
+            self.session.write(data);
+        }
     }
 
     /// 会话结束了（前端要结束它，或者处理消息时 panic）：还没报告过退出的，告诉连着的前端
@@ -634,7 +655,8 @@ impl Runner {
         if self.exited {
             return None;
         }
-        [self.next_poll, self.foreground_due, self.session.agent_deadline(), self.clipboard_deadline()]
+        let type_ahead = self.type_ahead.as_ref().map(|(_, by)| *by);
+        [self.next_poll, self.foreground_due, self.session.agent_deadline(), self.clipboard_deadline(), type_ahead]
             .into_iter()
             .flatten()
             .min()
@@ -712,6 +734,7 @@ impl Runner {
                 Ok(_) => {}
                 Err(err) => tracing::warn!("session {} cannot encode a paste: {err:#}", self.id),
             },
+            Inbox::TypeAtPrompt(data) => self.type_ahead = Some((data, Instant::now() + TYPE_AT_PROMPT_PATIENCE)),
             Inbox::Driven(Some(Drive { by, action })) => {
                 let at_ms = std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
@@ -887,8 +910,9 @@ impl Runner {
         self.publish_meta();
     }
 
-    /// 交接提交了：交出 PTY（不结束 shell），返回交出时没写进 PTY 的输入，`held` 里存下的输入编好
-    /// 接在后面。还没启动 shell 的会话没有 PTY 可交，只有存下的输入。
+    /// 交接提交了：交出 PTY（不结束 shell），返回交出时没写进 PTY 的输入，还在等提示符的
+    /// `TypeAtPrompt` 和 `held` 里存下的输入编好接在后面。还没启动 shell 的会话没有 PTY 可交，只有存下的
+    /// 输入。
     fn release(&mut self, held: Vec<Inbox>) -> Vec<u8> {
         let mut pending = match self.session.release_pty() {
             // 丢掉交出来的 master 只关这边这份，新宿主手里还有一份。
@@ -898,9 +922,12 @@ impl Runner {
                 Vec::new()
             }
         };
+        if let Some((data, _)) = self.type_ahead.take() {
+            pending.extend_from_slice(&data);
+        }
         for message in held {
             let bytes = match message {
-                Inbox::Input { data, .. } => Ok(data),
+                Inbox::Input { data, .. } | Inbox::TypeAtPrompt(data) => Ok(data),
                 Inbox::Keys(keys) => self.session.encode_keys(&keys),
                 Inbox::Paste(text) => self.session.encode_paste(&text),
                 _ => continue,

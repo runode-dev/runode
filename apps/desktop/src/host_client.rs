@@ -602,13 +602,17 @@ fn listen_in_app(host: &Host) {
     }
 }
 
-/// 建好 runode 自己的 `run/` 目录，拿着宿主的锁在宿主的 socket 上开监听，返回 socket 的路径。跑在
-/// app 里的宿主（`listen_in_app`）和单独跑的宿主（`host_process::run`）都这样开。
+/// 建好 runode 自己的 `run/` 目录，拿着宿主的锁在宿主的 socket 上开监听，再打开任务板，返回 socket 的
+/// 路径。跑在 app 里的宿主（`listen_in_app`）和单独跑的宿主（`host_process::run`）都这样开。
 pub fn listen(host: &Host, dirs: &runode_paths::Dirs) -> Result<PathBuf> {
     dirs.create_runtime_dir()?;
     let socket = dirs.host_socket_file().ok_or_else(|| anyhow!("the socket path is too long"))?;
     let lock = dirs.host_lock_file().ok_or_else(|| anyhow!("no place for the host lock"))?;
     host.listen(&socket, &lock)?;
+    // 拿着锁的宿主只有一个，任务板和定时也只由它办。
+    if let Some(db) = dirs.todos_db() {
+        host.serve_todos(db);
+    }
     Ok(socket)
 }
 
