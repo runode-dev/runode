@@ -1,10 +1,11 @@
 //! agent 列表：盖在窗口上面的浮层，列出所有窗口里的 agent 分屏，输入文字过滤，上下键选、回车
 //! 跳过去、Esc 关掉。排序和过滤的规则见 `agents`。
 
+use crate::ui::theme::ActiveTheme as _;
 use std::collections::HashMap;
 
 use gpui::{
-    Context, Div, Entity, EntityId, Focusable, Hsla, KeyDownEvent, Role, ScrollHandle, SharedString, Stateful,
+    App, Context, Div, Entity, EntityId, Focusable, Hsla, KeyDownEvent, Role, ScrollHandle, SharedString, Stateful,
     Subscription, Window, div, prelude::*, px,
 };
 use runode_shared_types::color::Rgb;
@@ -12,7 +13,7 @@ use runode_shared_types::color::Rgb;
 use super::{
     GotoAgent, PressDown, TITLEBAR_HEIGHT, WindowView,
     agents::{AgentEntry, matches_query, reveal},
-    cards, divider_color,
+    cards,
     titlebar::styled_agent_mark,
 };
 use crate::ui::{
@@ -265,7 +266,7 @@ impl WindowView {
             .track_scroll(&picker.scroll)
             .children(rows)
             .children(empty);
-        Some(picker_panel(panel, picker.field.clone(), list, fg, panel_bg))
+        Some(picker_panel(panel, picker.field.clone(), list, fg, panel_bg, cx))
     }
 }
 
@@ -292,6 +293,7 @@ pub(super) fn picker_panel(
     list: Stateful<Div>,
     fg: Hsla,
     panel_bg: Hsla,
+    cx: &App,
 ) -> Div {
     let panel = panel
         .max_w_full()
@@ -313,7 +315,7 @@ pub(super) fn picker_panel(
                 .flex()
                 .items_center()
                 .border_b_1()
-                .border_color(divider_color(fg))
+                .border_color(cx.theme().border)
                 .child(div().flex_1().min_w_0().h_full().child(field)),
         )
         .child(list.overflow_y_scroll().p(px(4.)).flex().flex_col().gap(px(1.)));

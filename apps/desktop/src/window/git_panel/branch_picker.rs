@@ -331,6 +331,6 @@ impl WindowView {
             .track_scroll(&picker.scroll)
             .children(items)
             .children(empty);
-        Some(picker_panel(panel, picker.field.clone(), list, fg, panel_bg))
+        Some(picker_panel(panel, picker.field.clone(), list, fg, panel_bg, cx))
     }
 }

@@ -85,12 +85,12 @@ impl WindowView {
         bg: Rgb,
         cx: &mut Context<Self>,
     ) -> Stateful<Div> {
-        let shell = panel_shell("github-actions-panel", width, fg, bg, cards(cx))
+        let shell = panel_shell("github-actions-panel", width, cards(cx), cx)
             .bg(hsla(bg.mix(fg, 0.03)))
             .text_size(FontSize::Body)
-            .child(self.render_panel_tabs(fg, bg, cx));
+            .child(self.render_panel_tabs(cx));
         if !self.git_button_visible() {
-            return shell.child(panel_message(rust_i18n::t!("panel.not_repo").into_owned(), fg));
+            return shell.child(panel_message(rust_i18n::t!("panel.not_repo").into_owned(), cx));
         }
         self.sync_github_actions(cx);
         self.github_actions.update(cx, |page, _| page.set_colors(fg, bg));

@@ -1,10 +1,11 @@
 //! 预览栏的标签条：开着的标签（`PreviewTabs`）怎么换、关、挪，拖动标签换位置，标签的样子和
 //! 右键菜单，以及菜单里关标签、固定标签的动作。
 
+use runode_ui::theme::ActiveTheme as _;
 use std::{path::Path, sync::Arc};
 
 use gpui::{
-    Action, Axis, Context, Div, Hsla, MouseButton, MouseDownEvent, Pixels, Point, Render, Role, ScrollHandle,
+    Action, App, Axis, Context, Div, MouseButton, MouseDownEvent, Pixels, Point, Render, Role, ScrollHandle,
     SharedString, Stateful, Window, actions, div, img, prelude::*, px, svg,
 };
 use runode_git::{self as git, FileStatus};
@@ -16,7 +17,7 @@ use runode_ui::{
     file_icons::file_icon,
     follow_move, hsla,
     menu::{MenuHost as _, menu_item},
-    panel::{TITLEBAR_HEIGHT, divider_color},
+    panel::TITLEBAR_HEIGHT,
     tabs::{close_button, drag_chip, drop_marker},
     theme::{ADDED, MODIFIED, REMOVED, RENAMED},
     tooltip::tooltip,
@@ -45,8 +46,8 @@ const DRAG_CHIP_WIDTH: f32 = 140.;
 const TAB_ACCENT_HEIGHT: f32 = 2.;
 
 /// 标签条底下的分隔线，叠在不是当前标签的标签和标签后面的空白底部。
-pub(super) fn tab_underline(fg: Rgb) -> Div {
-    div().absolute().bottom_0().left_0().w_full().h(px(1.)).bg(divider_color(hsla(fg)))
+pub(super) fn tab_underline(cx: &App) -> Div {
+    div().absolute().bottom_0().left_0().w_full().h(px(1.)).bg(cx.theme().border)
 }
 
 /// 标签名按文件的 git 状态上的颜色。
@@ -151,13 +152,12 @@ struct DraggedPreviewTab {
     /// 开始拖动时所在的位置：挪的是这个标签，落点提示也按它画在目标标签的哪一边。
     ix: usize,
     name: SharedString,
-    fg: Hsla,
-    bg: Hsla,
 }
 
 impl Render for DraggedPreviewTab {
-    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
-        drag_chip(px(DRAG_CHIP_WIDTH), px(TITLEBAR_HEIGHT), self.name.clone(), self.fg, self.bg)
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        // 底色和当前标签一样。
+        drag_chip(px(DRAG_CHIP_WIDTH), px(TITLEBAR_HEIGHT), self.name.clone(), cx.theme().mix(0.08), cx)
     }
 }
 
@@ -231,20 +231,19 @@ impl PreviewPanel {
         let tab = &previews.tabs[ix];
         let active = ix == previews.active;
         let name = tab.name();
-        let active_bg = hsla(bg.mix(fg, 0.08));
         let hover_bg = hsla(bg.mix(fg, 0.04));
-        let underline = tab_underline(fg);
+        let underline = tab_underline(cx);
         let close_text = rust_i18n::t!("tooltip.close_preview");
         let close_label = SharedString::from(close_text.clone());
-        let close_tooltip = tooltip(close_text, None, fg, bg);
+        let close_tooltip = tooltip(close_text, None);
         let path = SharedString::from(tab.path.display().to_string());
-        let path_tooltip = tooltip(path.clone(), None, fg, bg);
+        let path_tooltip = tooltip(path.clone(), None);
         // 标签和关闭按钮只有按下的处理，辅助工具按不到，另外登记：按标签切过去，按关闭按钮关掉。
         let view = cx.entity().downgrade();
         let fg = hsla(fg);
         let color = tab.status.map_or(fg, |status| hsla(status_color(status)));
         let group = SharedString::from(format!("preview-tab-{ix}"));
-        let dragged = DraggedPreviewTab { ix, name: name.clone(), fg, bg: active_bg };
+        let dragged = DraggedPreviewTab { ix, name: name.clone() };
         // diff 标签的图标是 diff 的样子，不是文件类型的。
         let icon = match &tab.diff {
             Some(_) => svg().path(DIFF_ICON).flex_none().size(px(14.)).text_color(fg.opacity(0.8)).into_any_element(),
@@ -271,7 +270,7 @@ impl PreviewPanel {
             .gap(px(6.))
             .relative()
             .border_r_1()
-            .border_color(divider_color(fg))
+            .border_color(cx.theme().border)
             // 当前标签顶上一条强调色，底下不画分隔线，和正文连成一块；别的标签悬停时稍亮。
             .map(|tab| {
                 if active {
@@ -292,7 +291,7 @@ impl PreviewPanel {
                     .tooltip(path_tooltip),
             )
             .child(
-                close_button(("preview-tab-close", ix), fg)
+                close_button(("preview-tab-close", ix), cx)
                     .role(Role::Button)
                     .aria_label(close_label)
                     .on_a11y_press(view, move |this, window, cx| this.retain_previews(|i, _| i != ix, window, cx))
@@ -339,8 +338,8 @@ impl PreviewPanel {
                 }),
             )
             .on_drag(dragged, |dragged, _, _, cx| cx.new(|_| dragged.clone()))
-            .drag_over::<DraggedPreviewTab>(move |style, dragged, _, _| {
-                drop_marker(style, dragged.ix, ix, Axis::Horizontal, fg)
+            .drag_over::<DraggedPreviewTab>(move |style, dragged, _, cx| {
+                drop_marker(style, dragged.ix, ix, Axis::Horizontal, cx)
             })
             .on_drop(cx.listener(move |this, dragged: &DraggedPreviewTab, _, cx| {
                 this.move_preview(dragged.ix, ix, cx);

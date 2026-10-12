@@ -1,5 +1,6 @@
 //! 标题栏：窗口的标题栏设置、标签和新建标签按钮、拖动中的标签，以及标题、agent 状态标记和快捷键提示。
 
+use crate::ui::theme::ActiveTheme as _;
 use std::time::Duration;
 
 use gpui::{
@@ -16,7 +17,6 @@ use super::{
         Mark, Status,
         logo::{accent, agent_logo, brand_color},
     },
-    divider_color,
     model::{Tab, TabId},
     panes::now_ms,
 };
@@ -58,13 +58,13 @@ struct DraggedTab {
     ix: usize,
     title: SharedString,
     width: Pixels,
-    fg: Hsla,
-    bg: Hsla,
 }
 
 impl Render for DraggedTab {
-    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
-        drag_chip(self.width, px(TITLEBAR_HEIGHT), self.title.clone(), self.fg, self.bg).justify_center()
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        // 底色和当前标签一样，见 `render_tab`。
+        let bg = if super::cards(cx) { cx.theme().tab_active } else { cx.theme().mix(0.08) };
+        drag_chip(self.width, px(TITLEBAR_HEIGHT), self.title.clone(), bg, cx).justify_center()
     }
 }
 
@@ -314,13 +314,13 @@ impl WindowView {
         .collect::<Vec<_>>()
         .join(" · ");
         let close_label = rust_i18n::t!("menu.close_tab");
-        let close_tooltip = tooltip(close_label.clone(), None, fg, bg);
-        let driven_tooltip = tab.driven(now_ms(), cx).then(|| tooltip(rust_i18n::t!("driver.tab"), None, fg, bg));
+        let close_tooltip = tooltip(close_label.clone(), None);
+        let driven_tooltip = tab.driven(now_ms(), cx).then(|| tooltip(rust_i18n::t!("driver.tab"), None));
         let fg = hsla(fg);
         let group = SharedString::from(format!("tab-{ix}"));
         // 当前标签自己就是一块亮色，和它相邻的分隔线去掉，只是不画颜色，免得宽度跳动。
-        let divider = if active || ix == workspace.active + 1 { fg.opacity(0.) } else { divider_color(fg) };
-        let dragged = DraggedTab { id, ix, title: title.clone(), width, fg, bg: active_bg };
+        let divider = if active || ix == workspace.active + 1 { fg.opacity(0.) } else { cx.theme().border };
+        let dragged = DraggedTab { id, ix, title: title.clone(), width };
         let compact = width < px(TAB_COMPACT_WIDTH);
         let bell_dot = || div().size(px(6.)).rounded_full().bg(fg.opacity(0.8));
         // 右侧槽位的内容：响铃标记优先，其次快捷键提示。
@@ -404,8 +404,8 @@ impl WindowView {
                 }),
             )
             .on_drag(dragged, |dragged, _, _, cx| cx.new(|_| dragged.clone()))
-            .drag_over::<DraggedTab>(move |style, dragged, _, _| {
-                drop_marker(style, dragged.ix, ix, Axis::Horizontal, fg)
+            .drag_over::<DraggedTab>(move |style, dragged, _, cx| {
+                drop_marker(style, dragged.ix, ix, Axis::Horizontal, cx)
             })
             .on_drop(cx.listener(move |this, dragged: &DraggedTab, window, cx| {
                 this.move_tab(dragged.id, ix, window, cx);
@@ -450,14 +450,14 @@ impl WindowView {
                                 }),
                         );
                     el.when(separator, |el| {
-                        el.child(div().absolute().left_0().top(px(7.)).bottom(px(7.)).w(px(1.)).bg(divider_color(fg)))
+                        el.child(div().absolute().left_0().top(px(7.)).bottom(px(7.)).w(px(1.)).bg(cx.theme().border))
                     })
                     .child(icons)
                     .child(label)
                     .children(driven_tooltip.map(|driven| driven_icon(("tab-driven", ix), fg).tooltip(driven)))
                     .children(mark.map(|mark| styled_agent_mark(mark, ("tab-agent", ix), fg, true)))
                     .map(|el| {
-                        let close = close_button(("tab-close", ix), fg)
+                        let close = close_button(("tab-close", ix), cx)
                             .flex_none()
                             .aria_label(close_label.clone())
                             .tooltip(close_tooltip)
@@ -498,7 +498,7 @@ impl WindowView {
                 }
                 _ => el
                     .child(
-                        close_button(("tab-close", ix), fg)
+                        close_button(("tab-close", ix), cx)
                             .flex_none()
                             // 紧凑时平时宽度为零，悬停时才撑开，标题让出位置，两者不重叠。
                             // 不能用 display 切换：悬停状态在 prepaint 和 paint 之间可能变化，
@@ -524,9 +524,9 @@ impl WindowView {
     }
 
     /// 卡片样式下标签条右边的新建标签按钮。`bg` 是外框的颜色。
-    pub(super) fn render_new_tab_button_card(&self, fg: Rgb, bg: Rgb, cx: &mut Context<Self>) -> Stateful<Div> {
-        let tooltip = tooltip(rust_i18n::t!("menu.new_tab"), Some(&NewTab), fg, bg);
-        icon_toggle("new-tab", PLUS_ICON, 16., false, fg, bg)
+    pub(super) fn render_new_tab_button_card(&self, cx: &mut Context<Self>) -> Stateful<Div> {
+        let tooltip = tooltip(rust_i18n::t!("menu.new_tab"), Some(&NewTab));
+        icon_toggle("new-tab", PLUS_ICON, 16., false, cx)
             .flex_none()
             .ml(px(4.))
             .mr(px(6.))
@@ -539,7 +539,7 @@ impl WindowView {
 
     pub(super) fn render_new_tab_button(&self, fg: Rgb, bg: Rgb, cx: &mut Context<Self>) -> Stateful<Div> {
         let hover_bg = hsla(bg.mix(fg, 0.04));
-        let tooltip = tooltip(rust_i18n::t!("menu.new_tab"), Some(&NewTab), fg, bg);
+        let tooltip = tooltip(rust_i18n::t!("menu.new_tab"), Some(&NewTab));
         let fg = hsla(fg);
         div()
             .id("new-tab")
@@ -552,7 +552,7 @@ impl WindowView {
             .items_center()
             .justify_center()
             .border_l_1()
-            .border_color(divider_color(fg))
+            .border_color(cx.theme().border)
             .text_size(px(16.))
             .text_color(fg.opacity(0.55))
             .hover(|button| button.bg(hover_bg).text_color(fg))

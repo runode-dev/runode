@@ -952,12 +952,12 @@ impl PreviewPanel {
         let maximized = previews.maximized;
         let button =
             |id: &'static str, icon: &'static str, on: bool, text: Cow<'static, str>, action: Option<&dyn Action>| {
-                ui::panel::icon_toggle(id, icon, 13., on, fg, bg)
+                ui::panel::icon_toggle(id, icon, 13., on, cx)
                     .role(Role::Button)
                     .aria_label(SharedString::from(text.clone()))
                     .flex_none()
                     .size(px(22.))
-                    .tooltip(tooltip(text, action, fg, bg))
+                    .tooltip(tooltip(text, action))
             };
         // 这几个按钮只有按下的处理，辅助工具按不到，另外登记按下时做的事。
         let view = cx.entity().downgrade();
@@ -1028,11 +1028,11 @@ impl PreviewPanel {
             .justify_end()
             .pl(px(4.))
             .pr(px(right_inset))
-            .child(tab_underline(fg))
+            .child(tab_underline(cx))
             .child(buttons);
         // 标签条是界面，不跟着正文的 `preview-font-size`。
         let header =
-            panel_header(fg, cards).border_b_0().px_0().gap_0().text_size(FontSize::Medium).child(strip).child(filler);
+            panel_header(cards, cx).border_b_0().px_0().gap_0().text_size(FontSize::Medium).child(strip).child(filler);
         // 正文整个报成一篇文档，以标签上的名字为名。
         let body = div()
             .id("preview-body")
@@ -1044,7 +1044,7 @@ impl PreviewPanel {
             .flex_col()
             .child(self.render_preview_body(preview, width, font, fg, bg, window, cx));
         Some(
-            panel_shell("preview-panel", width, fg, bg, cards)
+            panel_shell("preview-panel", width, cards, cx)
                 .key_context("Preview")
                 .track_focus(&self.focus)
                 .on_action(cx.listener(Self::copy_preview))

@@ -17,6 +17,7 @@
 
 mod probe;
 
+use crate::ui::theme::ActiveTheme as _;
 use std::{
     collections::{HashMap, HashSet},
     time::{Duration, Instant},
@@ -34,7 +35,7 @@ use runode_shared_types::{
 };
 
 use super::{
-    PressDown, ToggleStatusBar, WindowView, cards, divider_color,
+    PressDown, ToggleStatusBar, WindowView, cards,
     files::{check_item, menu_item},
     git_panel::sync_icon,
     remote,
@@ -336,7 +337,7 @@ impl WindowView {
             .child(dot);
         let resources_item = self
             .status_item("status-resources", StatusPopover::Resources, fg, bg, cx)
-            .tooltip(tooltip(rust_i18n::t!("status.resources_tooltip"), None, fg, bg))
+            .tooltip(tooltip(rust_i18n::t!("status.resources_tooltip"), None))
             .aria_description(format!(
                 "{}: {} · {terminals}",
                 rust_i18n::t!("status.resources_tooltip"),
@@ -381,7 +382,7 @@ impl WindowView {
             .gap(px(2.))
             .text_size(FontSize::Small)
             .text_color(fg_h.opacity(0.7))
-            .when(!cards(cx), |bar| bar.border_t_1().border_color(divider_color(fg_h)))
+            .when(!cards(cx), |bar| bar.border_t_1().border_color(cx.theme().border))
             // 右键选显示哪几块，或者藏起整条；几块全藏起来时这一条还在，照样能右键找回来。
             .on_mouse_down(
                 MouseButton::Right,
@@ -540,6 +541,14 @@ impl WindowView {
             .map_or((SleepMode::Off, false), |status| (status.sleep, status.caffeinate.is_some()));
         let state =
             if effective { rust_i18n::t!("status.sleep_active") } else { rust_i18n::t!("status.sleep_inactive") };
+        // 先画好标题：下面各项的闭包要借着 `cx`。
+        let header = popover_header(
+            None,
+            rust_i18n::t!("status.sleep_title").into_owned(),
+            format!("{} · {state}", sleep_label(current)),
+            fg_h,
+            cx,
+        );
         let options = [
             (SleepMode::On, "status.sleep_on_detail"),
             (SleepMode::Agent, "status.sleep_agent_detail"),
@@ -595,12 +604,7 @@ impl WindowView {
             .pb(px(6.))
             .flex()
             .flex_col()
-            .child(popover_header(
-                None,
-                rust_i18n::t!("status.sleep_title").into_owned(),
-                format!("{} · {state}", sleep_label(current)),
-                fg_h,
-            ))
+            .child(header)
             .child(div().h(px(6.)))
             .child(
                 div()
@@ -671,7 +675,7 @@ impl WindowView {
             .map(|(name, pid)| (SharedString::from(name), procs.one(pid)))
             .collect();
         let own_sum = own.iter().fold(Usage::default(), |sum, (_, usage)| sum + *usage);
-        rows.push(div().h(px(1.)).my(px(4.)).bg(divider_color(fg_h)).into_any_element());
+        rows.push(div().h(px(1.)).my(px(4.)).bg(cx.theme().border).into_any_element());
         rows.push(row("Runode".into(), own_sum, false, true).into_any_element());
         rows.extend(own.into_iter().map(|(name, usage)| row(name, usage, true, false).into_any_element()));
         let columns = div()
@@ -682,7 +686,7 @@ impl WindowView {
             .text_size(FontSize::Small)
             .text_color(fg_h.opacity(0.5))
             .border_b_1()
-            .border_color(divider_color(fg_h))
+            .border_color(cx.theme().border)
             .child(div().flex_1().child(rust_i18n::t!("status.name").into_owned()))
             .child(div().flex_none().w(scaled(CPU_WIDTH)).text_right().child("CPU"))
             .child(
@@ -701,6 +705,7 @@ impl WindowView {
                 rust_i18n::t!("status.resources_title").into_owned(),
                 format!("{} · {}", format_cpu(total.cpu), format_bytes(total.memory)),
                 fg_h,
+                cx,
             ))
             .child(columns)
             .child(div().id("resources-rows").max_h(px(420.)).py(px(4.)).overflow_y_scroll().children(rows))
@@ -749,7 +754,7 @@ impl WindowView {
                 .gap(px(8.))
                 .cursor_pointer()
                 .hover(|row| row.bg(hover_bg))
-                .tooltip(tooltip(rust_i18n::t!("status.open_port"), None, fg, bg))
+                .tooltip(tooltip(rust_i18n::t!("status.open_port"), None))
                 .child(
                     div().flex_none().w(scaled(52.)).font_weight(FontWeight::MEDIUM).child(format!(":{}", port.port)),
                 )
@@ -821,6 +826,7 @@ impl WindowView {
                 rust_i18n::t!("status.ports_title").into_owned(),
                 rust_i18n::t!("status.ports_summary", ours = ours.len(), external = external.len()).into_owned(),
                 fg_h,
+                cx,
             ))
             .child(
                 div()
@@ -829,7 +835,7 @@ impl WindowView {
                     .py(px(4.))
                     .overflow_y_scroll()
                     .children(body)
-                    .child(div().h(px(1.)).my(px(4.)).bg(divider_color(fg_h)))
+                    .child(div().h(px(1.)).my(px(4.)).bg(cx.theme().border))
                     .child(external_header)
                     .children(external_rows),
             )
@@ -861,7 +867,7 @@ fn empty_note(text: String, fg: Hsla) -> Stateful<Div> {
 }
 
 /// 浮层顶上的一行：图标和标题在左，`detail` 淡淡地写在右边，下面一条分隔线。
-fn popover_header(icon: Option<&'static str>, title: String, detail: String, fg: Hsla) -> Stateful<Div> {
+fn popover_header(icon: Option<&'static str>, title: String, detail: String, fg: Hsla, cx: &App) -> Stateful<Div> {
     div()
         .id("popover-header")
         .role(Role::Heading)
@@ -873,7 +879,7 @@ fn popover_header(icon: Option<&'static str>, title: String, detail: String, fg:
         .items_center()
         .gap(px(8.))
         .border_b_1()
-        .border_color(divider_color(fg))
+        .border_color(cx.theme().border)
         .children(icon.map(|icon| svg().flex_none().path(icon).size(px(14.)).text_color(fg.opacity(0.7))))
         .child(div().flex_1().font_weight(FontWeight::SEMIBOLD).child(title))
         .child(div().flex_none().text_color(fg.opacity(0.55)).child(detail))

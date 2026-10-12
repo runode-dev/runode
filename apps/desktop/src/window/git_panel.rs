@@ -25,6 +25,7 @@ mod worktree;
 /// 文件树的搜索结果以树形式查看时也按这个分层。
 pub(super) use tree::{TreeItem, file_tree};
 
+use crate::ui::theme::ActiveTheme as _;
 use std::{
     ops::Range,
     path::{Path, PathBuf},
@@ -40,7 +41,7 @@ use runode_git::{self as git, Operation, RepoKind, Section};
 use runode_shared_types::color::Rgb;
 
 use super::{
-    TITLEBAR_HEIGHT, WindowView, divider_color,
+    TITLEBAR_HEIGHT, WindowView,
     files::{MenuItem, check_item, menu_item},
     model::base_name,
     project::{added_label, panel_message, panel_shell, panel_title, removed_label},
@@ -365,8 +366,6 @@ impl WindowView {
                         "git-view-mode",
                         icon,
                         Some(text.into_owned()),
-                        fg,
-                        bg,
                         cx,
                         |this, window, cx| this.git_toggle_tree_view(&GitToggleTreeView, window, cx),
                     ))
@@ -374,15 +373,13 @@ impl WindowView {
                         "git-refresh",
                         REFRESH_ICON,
                         Some(rust_i18n::t!("git.refresh").into_owned()),
-                        fg,
-                        bg,
                         cx,
                         |this, window, cx| {
                             this.git_refresh(&GitRefresh, window, cx);
                         },
                     ))
                     .child(
-                        self.header_button("git-more", MORE_ICON, None, fg, bg, cx, move |this, window, cx| {
+                        self.header_button("git-more", MORE_ICON, None, cx, move |this, window, cx| {
                             this.open_git_menu(&root, true, window.mouse_position(), cx);
                         })
                         // 多个仓库时这里只有显示设置，仓库的操作在块头的「更多操作」里。
@@ -391,7 +388,7 @@ impl WindowView {
             });
         let body: AnyElement = match &project.git {
             _ if project.root.is_none() => div().flex_1().into_any_element(),
-            None => panel_message(rust_i18n::t!("panel.not_repo").into_owned(), fg).into_any_element(),
+            None => panel_message(rust_i18n::t!("panel.not_repo").into_owned(), cx).into_any_element(),
             Some(_) if multi => div()
                 .id("git-repos")
                 .role(Role::Tree)
@@ -406,13 +403,13 @@ impl WindowView {
                     )
                     .size_full(),
                 )
-                .child(list_scrollbar("git-items-scroll", panel.list.clone(), hsla(fg)))
+                .child(list_scrollbar("git-items-scroll", panel.list.clone()))
                 .into_any_element(),
             Some(git) => {
                 let git = &git.main;
                 // 只剩「没有改动」那一行时不当列表画，和别的空状态一样居中说一句。
                 let list: AnyElement = if matches!(panel.rows[..], [] | [GitRow::Clean(_)]) {
-                    panel_message(rust_i18n::t!("panel.no_changes").into_owned(), fg).into_any_element()
+                    panel_message(rust_i18n::t!("panel.no_changes").into_owned(), cx).into_any_element()
                 } else {
                     div()
                         .id("git-changes")
@@ -453,11 +450,11 @@ impl WindowView {
             .as_ref()
             .filter(|_| project.root.is_some())
             .map(|git| self.render_graph_pane(git, room, fg, bg, cx));
-        panel_shell("git-panel", width, fg, bg, super::cards(cx))
+        panel_shell("git-panel", width, super::cards(cx), cx)
             .track_focus(&self.git_focus)
             .bg(hsla(bg))
             .text_size(FontSize::Body)
-            .child(self.render_panel_tabs(fg, bg, cx))
+            .child(self.render_panel_tabs(cx))
             .child(header)
             .child(body)
             .children(graph)
@@ -558,12 +555,12 @@ impl WindowView {
             .flex()
             .items_center()
             .gap(px(6.))
-            .when(ri > 0, |title| title.border_t_1().border_color(divider_color(fg_hsla)))
+            .when(ri > 0, |title| title.border_t_1().border_color(cx.theme().border))
             .when(active, |title| title.bg(hsla(bg.mix(fg, 0.04))))
             .hover(|title| title.bg(hsla(bg.mix(fg, 0.06))))
             .text_color(fg_hsla)
-            .tooltip(tooltip(format!("{kind} · {}", repo.root.display()), None, fg, bg))
-            .child(list::chevron(expanded, fg))
+            .tooltip(tooltip(format!("{kind} · {}", repo.root.display()), None))
+            .child(list::chevron(expanded, cx))
             .child(svg().flex_none().path(GIT_ICON).size(px(13.)).text_color(fg_hsla.opacity(0.75)))
             .child(div().flex_initial().min_w_0().truncate().font_weight(gpui::FontWeight::SEMIBOLD).child(name))
             .child(div().flex_1().min_w_0().truncate().text_size(FontSize::Small).text_color(dim).child(detail))
@@ -601,22 +598,19 @@ impl WindowView {
 
     /// 标题栏上的图标按钮；按下时不往外传，免得标题栏把它当成拖动窗口。弹出菜单的按钮不带提示，
     /// 不然提示会盖住菜单的第一项，报给辅助工具的名字由调用方另给。
-    #[allow(clippy::too_many_arguments)]
     fn header_button(
         &self,
         id: &'static str,
         icon: &'static str,
         text: Option<String>,
-        fg: Rgb,
-        bg: Rgb,
         cx: &mut Context<Self>,
         handler: impl Fn(&mut Self, &mut Window, &mut Context<Self>) + 'static,
     ) -> Stateful<Div> {
-        super::titlebar::icon_toggle(id, icon, 14., false, fg, bg)
+        super::titlebar::icon_toggle(id, icon, 14., false, cx)
             .role(Role::Button)
             .flex_none()
             .size(px(HEADER_BUTTON_SIZE))
-            .when_some(text, |button, text| button.aria_label(text.clone()).tooltip(tooltip(text, None, fg, bg)))
+            .when_some(text, |button, text| button.aria_label(text.clone()).tooltip(tooltip(text, None)))
             .on_press_down(cx, handler)
     }
 
@@ -645,7 +639,7 @@ impl WindowView {
             .items_center()
             .gap(px(6.))
             .hover(|branch| branch.bg(hover_bg))
-            .tooltip(tooltip(rust_i18n::t!("git.checkout"), Some(&GitCheckout), fg, bg))
+            .tooltip(tooltip(rust_i18n::t!("git.checkout"), Some(&GitCheckout)))
             .on_press_down(cx, {
                 let root = root.clone();
                 move |this, window, cx| this.open_branch_picker(&root, false, None, window, cx)
@@ -698,7 +692,7 @@ impl WindowView {
                 .items_center()
                 .gap(px(4.))
                 .text_color(fg_hsla.opacity(if busy { 0.35 } else { 0.75 }))
-                .tooltip(tooltip(text, None, fg, bg))
+                .tooltip(tooltip(text, None))
                 .child(sync_icon(("git-sync-icon", ri), spinning, 13., fg_hsla.opacity(if busy { 0.35 } else { 0.75 })))
                 .child(label)
                 .when(!busy, |sync| {
@@ -784,7 +778,7 @@ impl WindowView {
             .justify_center()
             // 说明框整块是文字光标，按钮上换回箭头，能点时是手指。
             .cursor_default()
-            .tooltip(tooltip(rust_i18n::t!("git.ai_message.button"), None, fg, bg))
+            .tooltip(tooltip(rust_i18n::t!("git.ai_message.button"), None))
             .child(svg().path(SPARKLE_ICON).size(px(18.)).text_color(fg_hsla.opacity(if can_write {
                 0.75
             } else {
@@ -867,7 +861,7 @@ impl WindowView {
             .flex_col()
             .gap(px(6.))
             .border_b_1()
-            .border_color(divider_color(fg_hsla))
+            .border_color(cx.theme().border)
             .child(commit_box)
             .child(
                 div()

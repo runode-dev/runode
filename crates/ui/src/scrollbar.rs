@@ -9,6 +9,8 @@
 //! 竖的滚动条可以带改动标记（`markers`）：按在全文里的位置画在轨道上，内容能滚时一直画着，
 //! 不等鼠标进来，滚的时候看得出哪里改了。
 //!
+//! 滑块的颜色是主题的前景色调淡，画的时候现读。
+//!
 //! 内容能滚时报给辅助工具：方向和滚到了哪里（0 到 1），位置只占轨道那一条，不盖住内容。
 
 use std::{cell::Cell, ops::Range, rc::Rc};
@@ -20,6 +22,8 @@ use gpui::{
     fill, point, px, relative, size,
 };
 
+use crate::theme::ActiveTheme as _;
+
 /// 轨道的宽度，也是能按住的宽度；滑块画在轨道中间，这么粗。
 const TRACK_WIDTH: f32 = 10.;
 const THUMB_WIDTH: f32 = 6.;
@@ -28,14 +32,14 @@ const MIN_THUMB_LENGTH: f32 = 24.;
 /// 改动标记再短也画这么长，只改了一行也看得见。
 const MIN_MARKER_LENGTH: f32 = 2.;
 
-/// `handle` 所在的滚动区域在 `axis` 方向上的滚动条，颜色是 `color` 调淡。
-pub fn scrollbar(id: impl Into<ElementId>, handle: ScrollHandle, axis: Axis, color: Hsla) -> Scrollbar {
-    Scrollbar { id: id.into(), handle: Handle::Scroll(handle), axis, color, markers: Vec::new(), scale: 1. }
+/// `handle` 所在的滚动区域在 `axis` 方向上的滚动条。
+pub fn scrollbar(id: impl Into<ElementId>, handle: ScrollHandle, axis: Axis) -> Scrollbar {
+    Scrollbar { id: id.into(), handle: Handle::Scroll(handle), axis, markers: Vec::new(), scale: 1. }
 }
 
 /// `gpui::list` 的竖滚动条，样子和用法同 `scrollbar`。
-pub fn list_scrollbar(id: impl Into<ElementId>, list: ListState, color: Hsla) -> Scrollbar {
-    Scrollbar { id: id.into(), handle: Handle::List(list), axis: Axis::Vertical, color, markers: Vec::new(), scale: 1. }
+pub fn list_scrollbar(id: impl Into<ElementId>, list: ListState) -> Scrollbar {
+    Scrollbar { id: id.into(), handle: Handle::List(list), axis: Axis::Vertical, markers: Vec::new(), scale: 1. }
 }
 
 /// 滚动条管的是哪种滚动区域。
@@ -112,7 +116,6 @@ pub struct Scrollbar {
     id: ElementId,
     handle: Handle,
     axis: Axis,
-    color: Hsla,
     markers: Vec<Marker>,
     /// 窗口的缩放，`prepaint` 时记下；报给辅助工具的位置按物理像素算。
     scale: f32,
@@ -273,7 +276,7 @@ impl Element for Scrollbar {
         _: &mut (),
         hitbox: &mut Option<Hitbox>,
         window: &mut Window,
-        _: &mut App,
+        cx: &mut App,
     ) {
         let Some(id) = id else {
             return;
@@ -375,7 +378,7 @@ impl Element for Scrollbar {
             ),
         };
         let active = dragging || hitbox.is_hovered(window);
-        let color = self.color.opacity(if active { 0.5 } else { 0.28 });
+        let color = cx.theme().foreground.opacity(if active { 0.5 } else { 0.28 });
         window.paint_quad(fill(thumb, color).corner_radii(px(THUMB_WIDTH / 2.)));
     }
 }

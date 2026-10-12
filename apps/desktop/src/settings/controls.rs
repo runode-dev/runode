@@ -21,9 +21,6 @@ pub(super) const CONTROL_HEIGHT: f32 = 26.;
 
 #[derive(Clone, Copy)]
 pub(super) struct Colors {
-    /// 终端的前景、背景色，悬停提示要原样的颜色。
-    pub fg_rgb: Rgb,
-    pub bg_rgb: Rgb,
     pub fg: Hsla,
     pub bg: Hsla,
     /// 侧栏和浮层的底色。
@@ -45,8 +42,6 @@ impl Colors {
         let (fg, bg) = (config.foreground, config.background);
         let ansi = |ix: u8, fallback: Rgb| config.palette.iter().rfind(|(i, _)| *i == ix).map_or(fallback, |(_, c)| *c);
         Self {
-            fg_rgb: fg,
-            bg_rgb: bg,
             fg: hsla(fg),
             bg: hsla(bg),
             panel: hsla(bg.mix(fg, 0.035)),
@@ -174,7 +169,7 @@ pub(super) fn reset_button(
 ) -> AnyElement {
     let label = rust_i18n::t!("settings.reset").into_owned();
     icon_button(id, "icons/refresh.svg", label.clone(), colors)
-        .tooltip(crate::ui::tooltip::tooltip(label, None, colors.fg_rgb, colors.bg_rgb))
+        .tooltip(crate::ui::tooltip::tooltip(label, None))
         .on_press(cx, f)
         .into_any_element()
 }

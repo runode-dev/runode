@@ -186,7 +186,7 @@ mod tests {
             // 各处的悬停底色。
             assert_eq!(theme.accent, hsla(bg.mix(fg, 0.06)));
             assert_eq!(theme.accent_foreground, f);
-            // 分隔线（`divider_color`）和浮层的描边。
+            // 分隔线（原来的 `divider_color`）和浮层的描边。
             assert_eq!(theme.border, f.opacity(0.09));
             assert_eq!(theme.input, f.opacity(0.15));
             assert_eq!(theme.destructive, hsla(ansi[1]));

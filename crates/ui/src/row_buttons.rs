@@ -4,11 +4,10 @@
 use std::borrow::Cow;
 
 use gpui::{Context, Div, Role, Window, div, prelude::*, px, svg};
-use runode_shared_types::color::Rgb;
 
 use crate::{
     a11y::{Disable, PressDown},
-    hsla,
+    theme::ActiveTheme as _,
     tooltip::tooltip,
 };
 
@@ -38,8 +37,6 @@ pub fn row_buttons<V: 'static>(
     buttons: Vec<RowButton<V>>,
     shown: bool,
     enabled: bool,
-    fg: Rgb,
-    bg: Rgb,
     cx: &mut Context<V>,
 ) -> Option<Div> {
     let buttons: Vec<RowButton<V>> =
@@ -47,7 +44,8 @@ pub fn row_buttons<V: 'static>(
     if buttons.is_empty() {
         return None;
     }
-    let hover_bg = hsla(bg.mix(fg, 0.14));
+    let hover_bg = cx.theme().mix(0.14);
+    let fg = cx.theme().foreground;
     let row = div().flex_none().flex().items_center().gap(px(2.)).children(buttons.into_iter().enumerate().map(
         |(bi, button)| {
             let handler = button.handler;
@@ -68,8 +66,8 @@ pub fn row_buttons<V: 'static>(
                 .flex()
                 .items_center()
                 .justify_center()
-                .tooltip(tooltip(button.text, None, fg, bg))
-                .child(svg().path(button.icon).size(px(14.)).text_color(hsla(fg).opacity(opacity)))
+                .tooltip(tooltip(button.text, None))
+                .child(svg().path(button.icon).size(px(14.)).text_color(fg.opacity(opacity)))
                 .when(enabled, |button| button.hover(|button| button.bg(hover_bg)).on_press_down(cx, handler))
         },
     ));

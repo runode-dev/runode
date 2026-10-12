@@ -12,6 +12,7 @@
 
 mod gh;
 
+use runode_ui::theme::ActiveTheme as _;
 use std::{
     borrow::Cow,
     cell::Cell,
@@ -37,7 +38,7 @@ use runode_ui::{
         SYNC_ICON, TERMINAL_ICON, TRASH_ICON,
     },
     inline_edit::InlineEdit,
-    panel::{DIVIDER_GRAB_WIDTH, chevron, divider_color, icon_toggle, panel_message, panel_title},
+    panel::{DIVIDER_GRAB_WIDTH, chevron, icon_toggle, panel_message, panel_title},
     row_buttons::{RowButton, button, row_buttons},
     scrollbar::scrollbar,
     theme::{ADDED, MODIFIED, REMOVED},
@@ -512,11 +513,11 @@ impl ActionsPanel {
         let (fg, bg) = self.colors;
         self.a11y = window.is_a11y_active();
         let view = cx.entity().downgrade();
-        let refresh = icon_toggle("actions-refresh", REFRESH_ICON, 14., false, fg, bg)
+        let refresh = icon_toggle("actions-refresh", REFRESH_ICON, 14., false, cx)
             .aria_label(rust_i18n::t!("github_actions.refresh").into_owned())
             .flex_none()
             .size(px(22.))
-            .tooltip(tooltip(rust_i18n::t!("github_actions.refresh"), None, fg, bg))
+            .tooltip(tooltip(rust_i18n::t!("github_actions.refresh"), None))
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(|this, _, _, cx| {
@@ -531,7 +532,7 @@ impl ActionsPanel {
         let shell = div().size_full().flex().flex_col().child(title);
         let missing = self.data.values().any(|result| matches!(result, Err(err) if err == gh::MISSING));
         if missing {
-            return shell.child(panel_message(rust_i18n::t!("github_actions.missing").into_owned(), fg));
+            return shell.child(panel_message(rust_i18n::t!("github_actions.missing").into_owned(), cx));
         }
         // 没登录时每份数据都是同一个错，整页换成登录的说明，不在每段里各说一遍。
         let login = self.data.values().any(|result| matches!(result, Err(err) if err == gh::LOGIN));
@@ -586,7 +587,7 @@ impl ActionsPanel {
                     .relative()
                     .flex()
                     .flex_col()
-                    .when(si > 0, |section| section.border_t_1().border_color(divider_color(hsla(fg))))
+                    .when(si > 0, |section| section.border_t_1().border_color(cx.theme().border))
                     .child(measure)
                     .children(header)
                     // 上面一段展开着才能拖这一段上沿的分隔线。
@@ -611,7 +612,6 @@ impl ActionsPanel {
                     ("actions-scroll", si),
                     scroll,
                     Axis::Vertical,
-                    hsla(fg),
                 )))
             });
         let tree = div()
@@ -851,11 +851,11 @@ impl ActionsPanel {
             .actions_row(format!("run-{}", run.id), ix, depth, fg, bg, cx)
             .aria_expanded(expanded)
             .aria_label(format!("{title}, {detail}, {}", state_label(state)))
-            .child(chevron(expanded, fg))
+            .child(chevron(expanded, cx))
             .child(state_icon(state, fg))
             .child(div().flex_initial().min_w_0().truncate().child(title))
             .child(div().flex_1().min_w_0().truncate().text_color(hsla(fg).opacity(0.5)).child(detail.clone()))
-            .children(self.actions_row_buttons(ix, buttons, fg, bg, cx))
+            .children(self.actions_row_buttons(ix, buttons, cx))
             .on_press_down(cx, move |this, _, cx| this.toggle_actions_node(node.clone(), cx));
         walk.rows.push(row.into_any_element());
         if !expanded {
@@ -933,10 +933,10 @@ impl ActionsPanel {
             .actions_row(format!("job-{}", job.id), ix, depth, fg, bg, cx)
             .aria_expanded(expanded)
             .aria_label(format!("{}, {}", job.name, state_label(state)))
-            .child(chevron(expanded, fg))
+            .child(chevron(expanded, cx))
             .child(state_icon(state, fg))
             .child(div().flex_1().min_w_0().truncate().child(job.name.clone()))
-            .children(self.actions_row_buttons(ix, buttons, fg, bg, cx))
+            .children(self.actions_row_buttons(ix, buttons, cx))
             .on_press_down(cx, move |this, _, cx| this.toggle_actions_node(node.clone(), cx));
         walk.rows.push(row.into_any_element());
         if !expanded {
@@ -956,7 +956,7 @@ impl ActionsPanel {
                 .child(div().flex_none().w(px(12.)))
                 .child(state_icon(state, fg))
                 .child(div().flex_1().min_w_0().truncate().child(step.name.clone()))
-                .children(self.actions_row_buttons(ix, vec![open], fg, bg, cx))
+                .children(self.actions_row_buttons(ix, vec![open], cx))
                 .on_press_down(cx, move |_, _, cx| cx.open_url(&url));
             walk.rows.push(row.into_any_element());
         }
@@ -1001,7 +1001,7 @@ impl ActionsPanel {
             .actions_row(format!("workflow-{}", workflow.id), ix, 1, fg, bg, cx)
             .aria_expanded(expanded)
             .aria_label(label.clone())
-            .child(chevron(expanded, fg))
+            .child(chevron(expanded, cx))
             .child(svg().flex_none().path(WORKFLOW_ICON).size(px(13.)).text_color(hsla(fg).opacity(if active {
                 0.6
             } else {
@@ -1015,7 +1015,7 @@ impl ActionsPanel {
                     .when(!active, |name| name.text_color(hsla(fg).opacity(0.5)))
                     .child(label),
             )
-            .children(self.actions_row_buttons(ix, buttons, fg, bg, cx))
+            .children(self.actions_row_buttons(ix, buttons, cx))
             .on_press_down(cx, move |this, _, cx| this.toggle_actions_node(node.clone(), cx));
         walk.rows.push(row.into_any_element());
     }
@@ -1155,7 +1155,7 @@ impl ActionsPanel {
                 div().flex_1().min_w_0().truncate().text_color(hsla(fg).opacity(0.5)).child(value.to_owned())
             }))
             .when(value.is_none(), |row| row.child(div().flex_1()))
-            .children(self.actions_row_buttons(ix, buttons, fg, bg, cx));
+            .children(self.actions_row_buttons(ix, buttons, cx));
         walk.rows.push(row.into_any_element());
     }
 
@@ -1181,7 +1181,7 @@ impl ActionsPanel {
             .actions_row(format!("{node:?}"), walk.ix(), 0, fg, bg, cx)
             .aria_expanded(expanded)
             .aria_label(aria)
-            .child(chevron(expanded, fg))
+            .child(chevron(expanded, cx))
             .child(div().flex_none().text_size(FontSize::Small).font_weight(gpui::FontWeight::SEMIBOLD).child(label))
             .child(div().flex_1().min_w_0().truncate().text_color(hsla(fg).opacity(0.5)).children(detail))
             .on_press_down(cx, move |this, _, cx| this.toggle_actions_node(node.clone(), cx));
@@ -1207,9 +1207,9 @@ impl ActionsPanel {
             .actions_row(format!("{node:?}"), ix, depth, fg, bg, cx)
             .aria_expanded(expanded)
             .aria_label(label.clone().into_owned())
-            .child(chevron(expanded, fg))
+            .child(chevron(expanded, cx))
             .child(div().flex_1().min_w_0().truncate().child(label.into_owned()))
-            .children(self.actions_row_buttons(ix, action.into_iter().collect(), fg, bg, cx))
+            .children(self.actions_row_buttons(ix, action.into_iter().collect(), cx))
             .on_press_down(cx, move |this, _, cx| this.toggle_actions_node(node.clone(), cx));
         walk.rows.push(row.into_any_element());
     }
@@ -1275,16 +1275,9 @@ impl ActionsPanel {
 
     /// 第 `ix` 行行尾的按钮，鼠标在这行或辅助工具在读时才画；固定着的工作流不悬停也露出图钉，
     /// 一眼看出哪些固定了。
-    fn actions_row_buttons(
-        &self,
-        ix: usize,
-        buttons: Vec<RowButton<Self>>,
-        fg: Rgb,
-        bg: Rgb,
-        cx: &mut Context<Self>,
-    ) -> Option<Div> {
+    fn actions_row_buttons(&self, ix: usize, buttons: Vec<RowButton<Self>>, cx: &mut Context<Self>) -> Option<Div> {
         let page = self;
-        row_buttons(buttons, page.hovered == Some(ix) || page.a11y, true, fg, bg, cx)
+        row_buttons(buttons, page.hovered == Some(ix) || page.a11y, true, cx)
     }
 
     /// 固定到状态栏上的工作流和各自最近一次运行，交给 `render_pinned` 画。
@@ -1343,7 +1336,7 @@ pub fn render_pinned<V: 'static>(
                 .items_center()
                 .gap(px(5.))
                 .hover(|button| button.bg(hsla(bg.mix(fg, 0.10))))
-                .tooltip(tooltip(description, None, fg, bg))
+                .tooltip(tooltip(description, None))
                 .children(state.map(|state| state_icon(state, fg)))
                 .child(item.name)
                 .on_press_down(cx, move |_, _, cx| {

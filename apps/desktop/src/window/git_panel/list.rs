@@ -149,19 +149,16 @@ impl WindowView {
     }
 
     /// 第 `ix` 行行尾的按钮，鼠标在这行或辅助工具在读时才画；根目录是 `root` 的仓库有操作在跑时按不动。
-    #[allow(clippy::too_many_arguments)]
     fn row_buttons(
         &self,
         ix: usize,
         root: &Path,
         buttons: Vec<RowButton<Self>>,
-        fg: Rgb,
-        bg: Rgb,
         cx: &mut Context<Self>,
     ) -> Option<Div> {
         let panel = &self.workspace().project.git_panel;
         let shown = panel.hovered == Some(ix) || panel.a11y;
-        row_buttons(buttons, shown, panel.busy(root).is_none(), fg, bg, cx)
+        row_buttons(buttons, shown, panel.busy(root).is_none(), cx)
     }
 
     fn render_git_section(
@@ -205,7 +202,7 @@ impl WindowView {
             .aria_expanded(expanded)
             .aria_label(format!("{label} ({count})"))
             .on_hover(self.track_row_hover(ix, cx))
-            .child(chevron(expanded, fg))
+            .child(chevron(expanded, cx))
             .child(
                 div()
                     .flex_1()
@@ -215,7 +212,7 @@ impl WindowView {
                     .font_weight(gpui::FontWeight::SEMIBOLD)
                     .child(label.into_owned()),
             )
-            .children(self.row_buttons(ix, &root, buttons, fg, bg, cx))
+            .children(self.row_buttons(ix, &root, buttons, cx))
             .child(count_badge(count, fg, bg))
             .on_press_down(cx, move |this, _, cx| {
                 let project = &mut this.workspace_mut().project;
@@ -292,7 +289,7 @@ impl WindowView {
                     .child(name),
             )
             .child(div().flex_1().min_w_0().truncate().text_size(FontSize::Small).text_color(dim).child(dir))
-            .children(self.row_buttons(ix, &root, buttons, fg, bg, cx))
+            .children(self.row_buttons(ix, &root, buttons, cx))
             .when(file.added > 0, |row| row.child(added_label(file.added)))
             .when(file.removed > 0, |row| row.child(removed_label(file.removed)))
             .child(status_letter(file.status))
@@ -355,10 +352,10 @@ impl WindowView {
             .aria_expanded(dir.expanded)
             .aria_label(dir.name.clone())
             .on_hover(self.track_row_hover(ix, cx))
-            .child(chevron(dir.expanded, fg))
+            .child(chevron(dir.expanded, cx))
             .child(img(folder_icon(&last, dir.expanded)).flex_none().size(px(14.)))
             .child(div().flex_1().min_w_0().truncate().child(dir.name.clone()))
-            .children(self.row_buttons(ix, &root, buttons, fg, bg, cx))
+            .children(self.row_buttons(ix, &root, buttons, cx))
             .on_press_down(cx, move |this, _, cx| {
                 let project = &mut this.workspace_mut().project;
                 project.git_panel.toggle_dir(di, project.git.as_deref());
@@ -463,7 +460,7 @@ impl WindowView {
                     .child(format!("#{index}")),
             )
             .child(div().flex_1().min_w_0().truncate().child(stash.message.clone()))
-            .children(self.row_buttons(ix, &root, buttons, fg, bg, cx))
+            .children(self.row_buttons(ix, &root, buttons, cx))
             .into_any_element()
     }
 }

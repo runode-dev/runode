@@ -427,7 +427,7 @@ impl WindowView {
                     .text_color(fg.opacity(0.85))
                     .cursor_pointer()
                     .hover(move |chip| chip.bg(selected_bg))
-                    .tooltip(code_tooltip(variable_preview(name), mono.clone(), fg_rgb, bg_rgb))
+                    .tooltip(code_tooltip(variable_preview(name), mono.clone()))
                     .on_press(cx, move |this, window, cx| {
                         if let Some(dialog) = &this.commit_message_dialog {
                             let template = dialog.template.clone();
@@ -521,7 +521,7 @@ impl WindowView {
                     .opacity(0.5)
                     .aria_disabled(true)
                     .aria_description(rust_i18n::t!(reason).into_owned())
-                    .tooltip(tooltip(rust_i18n::t!(reason), None, fg_rgb, bg_rgb)),
+                    .tooltip(tooltip(rust_i18n::t!(reason), None)),
                 None => button
                     .cursor_pointer()
                     .hover(move |button| button.bg(accent_hover))

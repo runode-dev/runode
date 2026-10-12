@@ -3,8 +3,9 @@
 
 mod repo;
 
+use crate::ui::theme::ActiveTheme as _;
 use gpui::{
-    Action, AnyElement, App, Axis, Context, CursorStyle, Div, ExternalPaths, Focusable, Hsla, Modifiers, MouseButton,
+    Action, AnyElement, App, Axis, Context, CursorStyle, Div, ExternalPaths, Focusable, Modifiers, MouseButton,
     MouseDownEvent, Orientation, Render, Role, SharedString, Stateful, TextAlign, Window, canvas, div, img, prelude::*,
     px, relative, svg,
 };
@@ -13,7 +14,7 @@ use runode_shared_types::color::Rgb;
 use super::{
     CARD_GAP, DIVIDER_GRAB_WIDTH, Divider, NewWorkspace, PressDown, RenameWorkspace, Renaming, SelectLastWorkspace,
     SelectWorkspace, TAB_CLOSE_SIZE, TITLEBAR_HEIGHT, TRAFFIC_LIGHTS_WIDTH, ToggleSidebar, WindowView, background,
-    cards, divider_color, drag_window,
+    cards, drag_window,
     inline_edit::InlineEdit,
     model::WorkspaceId,
     titlebar::{close_button, drag_chip, drop_marker, icon_toggle, shortcut_hint, styled_agent_mark},
@@ -120,13 +121,13 @@ struct DraggedWorkspace {
     name: SharedString,
     /// 侧栏当前的宽度，预览照这个宽度画。
     width: f32,
-    fg: Hsla,
-    bg: Hsla,
 }
 
 impl Render for DraggedWorkspace {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        drag_chip(px(self.width - 12.), px(ROW_HEIGHT * font_size::scale(cx)), self.name.clone(), self.fg, self.bg)
+        // 底色和当前 workspace 那一行一样。
+        let bg = cx.theme().mix(0.10);
+        drag_chip(px(self.width - 12.), px(ROW_HEIGHT * font_size::scale(cx)), self.name.clone(), bg, cx)
     }
 }
 
@@ -176,20 +177,14 @@ impl WindowView {
     }
 
     /// 红绿灯右边收起、展开侧栏的按钮，侧栏收着时也在原处，不随侧栏跳动。
-    pub(super) fn render_sidebar_toggle(
-        &self,
-        fullscreen: bool,
-        fg: Rgb,
-        bg: Rgb,
-        cx: &mut Context<Self>,
-    ) -> Stateful<Div> {
+    pub(super) fn render_sidebar_toggle(&self, fullscreen: bool, cx: &mut Context<Self>) -> Stateful<Div> {
         let text = if self.sidebar_visible() {
             rust_i18n::t!("tooltip.hide_sidebar")
         } else {
             rust_i18n::t!("tooltip.show_sidebar")
         };
-        let tooltip = tooltip(text.clone(), Some(&ToggleSidebar), fg, bg);
-        icon_toggle("sidebar-toggle", SIDEBAR_ICON, 16., false, fg, bg)
+        let tooltip = tooltip(text.clone(), Some(&ToggleSidebar));
+        icon_toggle("sidebar-toggle", SIDEBAR_ICON, 16., false, cx)
             .aria_label(text)
             .aria_toggled(self.sidebar_visible().into())
             .absolute()
@@ -213,9 +208,7 @@ impl WindowView {
             .flex()
             .flex_col()
             // 卡片样式下侧栏直接画在外框上。
-            .when(!cards(cx), |sidebar| {
-                sidebar.bg(hsla(bg.mix(fg, 0.03))).border_r_1().border_color(divider_color(hsla(fg)))
-            })
+            .when(!cards(cx), |sidebar| sidebar.bg(hsla(bg.mix(fg, 0.03))).border_r_1().border_color(cx.theme().border))
             // 从访达拖来的东西悬在侧栏上时提示放下能开 workspace；放下由窗口根上的 `open_dropped_dirs` 办。
             .drag_over::<ExternalPaths>(move |style, _, _, _| style.bg(drop_bg))
             .text_size(FontSize::Body)
@@ -225,7 +218,7 @@ impl WindowView {
             .child(self.render_mobile_entry(fg, bg, cx))
             .child(self.render_todo_board_entry(fg, bg, cx))
             // 手机端和任务板的入口不是 workspace，和下面的列表用一条线隔开。
-            .child(div().flex_none().mx(px(14.)).mb(px(6.)).h(px(1.)).bg(divider_color(hsla(fg))))
+            .child(div().flex_none().mx(px(14.)).mb(px(6.)).h(px(1.)).bg(cx.theme().border))
             .child(
                 div()
                     .id("workspace-list")
@@ -254,7 +247,7 @@ impl WindowView {
         let active_bg = hsla(bg.mix(fg, 0.10));
         let hover_bg = hsla(bg.mix(fg, 0.06));
         let close_label = rust_i18n::t!("menu.close_workspace");
-        let close_tooltip = tooltip(close_label.clone(), None, fg, bg);
+        let close_tooltip = tooltip(close_label.clone(), None);
         let rgb_fg = fg;
         let fg = hsla(fg);
         let group = SharedString::from(format!("workspace-{ix}"));
@@ -334,8 +327,7 @@ impl WindowView {
                 // 路径长时留下结尾：最后几级目录最能区分。
                 .children(dir.map(|dir| div().flex_1().min_w_0().child(path_line(dir))))
         });
-        let dragged =
-            DraggedWorkspace { id, ix, name: workspace.name.clone(), width: self.sidebar_width(), fg, bg: active_bg };
+        let dragged = DraggedWorkspace { id, ix, name: workspace.name.clone(), width: self.sidebar_width() };
         let view = cx.entity().downgrade();
         div()
             // 改名时换一个 id：双击那次按下被 GPUI 记作待拖动，改名期间不挂 `on_drag`，松开时也就没人清它，
@@ -379,8 +371,8 @@ impl WindowView {
             .on_a11y_press(view, move |this, window, cx| this.activate_workspace(ix, window, cx))
             // 改名时在输入框里拖选文字，不能把整行拖走。
             .when(renaming.is_none(), |row| row.on_drag(dragged, |dragged, _, _, cx| cx.new(|_| dragged.clone())))
-            .drag_over::<DraggedWorkspace>(move |style, dragged, _, _| {
-                drop_marker(style, dragged.ix, ix, Axis::Vertical, fg)
+            .drag_over::<DraggedWorkspace>(move |style, dragged, _, cx| {
+                drop_marker(style, dragged.ix, ix, Axis::Vertical, cx)
             })
             .on_drop(cx.listener(move |this, dragged: &DraggedWorkspace, window, cx| {
                 this.move_workspace(dragged.id, ix, window, cx);
@@ -408,7 +400,7 @@ impl WindowView {
                     .justify_end()
                     .child(div().group_hover(group.clone(), |hint| hint.invisible()).child(hint))
                     .child(
-                        close_button(("workspace-close", ix), fg)
+                        close_button(("workspace-close", ix), cx)
                             .absolute()
                             .right_0()
                             .top(relative(0.5))
@@ -429,7 +421,7 @@ impl WindowView {
     /// 侧栏底部一行：左边新建工作区，右边打开设置页。
     fn render_sidebar_footer(&self, fg: Rgb, bg: Rgb, cx: &mut Context<Self>) -> Div {
         let settings = rust_i18n::t!("workspace.settings");
-        let settings_tooltip = tooltip(settings.clone(), Some(&OpenSettings), fg, bg);
+        let settings_tooltip = tooltip(settings.clone(), Some(&OpenSettings));
         div()
             .flex_none()
             .h(scaled(32.))
@@ -438,7 +430,7 @@ impl WindowView {
             .gap(px(2.))
             .child(self.render_new_workspace_button(fg, bg, cx))
             .child(
-                icon_toggle("sidebar-settings", SETTINGS_ICON, 15., false, fg, bg)
+                icon_toggle("sidebar-settings", SETTINGS_ICON, 15., false, cx)
                     .flex_none()
                     .w(px(32.))
                     .rounded(px(6.))
@@ -450,7 +442,7 @@ impl WindowView {
 
     fn render_new_workspace_button(&self, fg: Rgb, bg: Rgb, cx: &mut Context<Self>) -> Stateful<Div> {
         let hover_bg = hsla(bg.mix(fg, 0.06));
-        let tooltip = tooltip(rust_i18n::t!("workspace.new"), Some(&NewWorkspace), fg, bg);
+        let tooltip = tooltip(rust_i18n::t!("workspace.new"), Some(&NewWorkspace));
         let fg = hsla(fg);
         div()
             .id("new-workspace")

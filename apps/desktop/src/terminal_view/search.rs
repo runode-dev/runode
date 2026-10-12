@@ -195,29 +195,28 @@ impl TerminalView {
                     .child(status),
             )
             .child(
-                button("search-previous", "↑", &previous)
-                    .tooltip(tooltip(previous, Some(&SearchPrevious), frame.0, frame.1))
-                    .on_press(cx, |view, _, cx| {
-                        if let Some(session) = view.screen.shown_mut() {
-                            session.search_step(true);
-                        }
-                        cx.notify();
-                    }),
-            )
-            .child(
-                button("search-next", "↓", &next).tooltip(tooltip(next, Some(&SearchNext), frame.0, frame.1)).on_press(
+                button("search-previous", "↑", &previous).tooltip(tooltip(previous, Some(&SearchPrevious))).on_press(
                     cx,
                     |view, _, cx| {
                         if let Some(session) = view.screen.shown_mut() {
-                            session.search_step(false);
+                            session.search_step(true);
                         }
                         cx.notify();
                     },
                 ),
             )
+            .child(button("search-next", "↓", &next).tooltip(tooltip(next, Some(&SearchNext))).on_press(
+                cx,
+                |view, _, cx| {
+                    if let Some(session) = view.screen.shown_mut() {
+                        session.search_step(false);
+                    }
+                    cx.notify();
+                },
+            ))
             .child(
                 button("search-close", "×", &close)
-                    .tooltip(tooltip(close, Some(&EndSearch), frame.0, frame.1))
+                    .tooltip(tooltip(close, Some(&EndSearch)))
                     .on_press(cx, |view, window, cx| view.close_search(window, cx)),
             )
     }

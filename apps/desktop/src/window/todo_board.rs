@@ -15,6 +15,7 @@
 mod dialog;
 pub(super) mod store;
 
+use crate::ui::theme::ActiveTheme as _;
 use std::{
     cell::RefCell,
     collections::HashMap,
@@ -147,8 +148,6 @@ struct DraggedTodo {
     /// 放进各列（按 `Column::ALL` 的顺序）时做什么；办不到的为空，那一列不接。
     drops: [Option<DropAction>; 4],
     title: SharedString,
-    fg: Hsla,
-    bg: Hsla,
 }
 
 impl DraggedTodo {
@@ -160,7 +159,7 @@ impl DraggedTodo {
 impl Render for DraggedTodo {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let scale = crate::ui::font_size::scale(cx);
-        drag_chip(px(COLUMN_MIN_WIDTH * scale), px(32. * scale), self.title.clone(), self.fg, self.bg)
+        drag_chip(px(COLUMN_MIN_WIDTH * scale), px(32. * scale), self.title.clone(), cx.theme().mix(0.06), cx)
     }
 }
 
@@ -746,7 +745,7 @@ impl WindowView {
                     .gap(px(12.))
                     .children(columns),
             )
-            .child(scrollbar("todo-columns-scrollbar", board.columns_scroll.clone(), Axis::Horizontal, hsla(fg)))
+            .child(scrollbar("todo-columns-scrollbar", board.columns_scroll.clone(), Axis::Horizontal))
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -964,7 +963,6 @@ impl WindowView {
         a11y: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let fg_h = hsla(fg);
         let session = todo.session.and_then(|id| data.sessions.get(&id));
         let agent = session.and_then(|info| info.meta.agent);
         let mark = agent.map(|agent| Mark::new(agent, false));
@@ -985,15 +983,8 @@ impl WindowView {
                 .collect::<Vec<_>>()
                 .join("。");
         let drops: [Option<DropAction>; 4] = Column::ALL.map(|to| drop_action(todo, session, to, now));
-        let dragged = DraggedTodo {
-            id: todo.id.clone(),
-            from: column,
-            ix,
-            drops,
-            title: todo.spec.title.clone().into(),
-            fg: fg_h,
-            bg: hsla(bg.mix(fg, 0.06)),
-        };
+        let dragged =
+            DraggedTodo { id: todo.id.clone(), from: column, ix, drops, title: todo.spec.title.clone().into() };
         let id = todo.id.clone();
         let open_session = todo.session.filter(|_| session.is_some());
         // 这一列最该做的事是右下角的主按钮，别的收在右上角，鼠标移到卡片上（或者辅助工具开着）才露出来。
@@ -1098,13 +1089,13 @@ impl WindowView {
             .relative()
             .cursor_grab()
             .on_drag(dragged, |dragged, _, _, cx| cx.new(|_| dragged.clone()))
-            .drag_over::<DraggedTodo>(move |style, dragged, _, _| {
+            .drag_over::<DraggedTodo>(move |style, dragged, _, cx| {
                 if dragged.drop_into(column).is_none() {
                     return style;
                 }
                 // 跨列放下时插在这张前面，提示画在上边。
                 let from = if dragged.from == column { dragged.ix } else { usize::MAX };
-                drop_marker(style, from, ix, Axis::Vertical, fg_h)
+                drop_marker(style, from, ix, Axis::Vertical, cx)
             })
             .on_drop(cx.listener({
                 let before = todo.id.clone();
@@ -1181,7 +1172,7 @@ impl WindowView {
                         .children(rows)
                         .children(empty),
                 )
-                .child(scrollbar("todo-schedules-scrollbar", board.schedules_scroll.clone(), Axis::Vertical, fg_h)),
+                .child(scrollbar("todo-schedules-scrollbar", board.schedules_scroll.clone(), Axis::Vertical)),
         )
     }
 
@@ -1318,7 +1309,7 @@ fn icon_button(id: &'static str, icon: &'static str, label: String, fg: Rgb, bg:
         .rounded(px(4.))
         .cursor_pointer()
         .hover(move |button| button.bg(hsla(bg.mix(fg, 0.08))))
-        .tooltip(tooltip(label, None, fg, bg))
+        .tooltip(tooltip(label, None))
         .child(svg().path(icon).size(px(13.)).text_color(fg_h.opacity(0.7)))
 }
 

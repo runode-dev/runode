@@ -231,13 +231,13 @@ impl WindowView {
         cx: &mut Context<Self>,
     ) -> Stateful<Div> {
         let view = cx.entity().downgrade();
-        icon_toggle("tasks", PLAY_ICON, 16., self.dropdown_open(), fg, bg)
+        icon_toggle("tasks", PLAY_ICON, 16., self.dropdown_open(), cx)
             .role(Role::Button)
             .aria_label(rust_i18n::t!("tooltip.tasks").into_owned())
             .aria_expanded(self.dropdown_open())
             .w(px(TOGGLE_WIDTH))
             .h(px(TOGGLE_HEIGHT))
-            .tooltip(tooltip(rust_i18n::t!("tooltip.tasks"), Some(&ToggleTasks), fg, bg))
+            .tooltip(tooltip(rust_i18n::t!("tooltip.tasks"), Some(&ToggleTasks)))
             // 菜单开着时在捕获阶段就关掉、不再往下传：菜单自己的「点到外面就关」和下面再打开的都不跑。
             .capture_any_mouse_down(cx.listener(|this, _, window, cx| {
                 if this.dropdown_open() {

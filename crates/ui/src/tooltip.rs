@@ -1,10 +1,9 @@
-//! 悬停提示：鼠标在按钮或标题上停一会儿弹出的一小块文字，有快捷键时跟在说明后面。
-
-use gpui::{Action, AnyView, App, Context, IntoElement, Render, Role, SharedString, Window, div, prelude::*, px};
-use runode_shared_types::color::Rgb;
+//! 悬停提示：鼠标在按钮或标题上停一会儿弹出的一小块文字，有快捷键时跟在说明后面。颜色在提示自己
+//! 画的时候从主题读：弹出它的是悬停事件，那时读到的主题可能是别的窗口的。
 
 use super::font_size::FontSize;
-use crate::hsla;
+use crate::theme::ActiveTheme as _;
+use gpui::{Action, AnyView, App, Context, IntoElement, Render, Role, SharedString, Window, div, prelude::*, px};
 
 /// 说明再长也不比这宽，多了折行。
 const TOOLTIP_MAX_WIDTH: f32 = 420.;
@@ -27,14 +26,12 @@ pub fn shortcut_text(action: &dyn Action, cx: &App) -> Option<SharedString> {
 pub fn tooltip(
     text: impl Into<SharedString>,
     action: Option<&dyn Action>,
-    fg: Rgb,
-    bg: Rgb,
 ) -> impl Fn(&mut Window, &mut App) -> AnyView + 'static {
     let text = text.into();
     let action = action.map(Action::boxed_clone);
     move |_, cx| {
         let shortcut = action.as_deref().and_then(|action| shortcut_text(action, cx));
-        cx.new(|_| Tooltip { text: text.clone(), shortcut, font: None, fg, bg }).into()
+        cx.new(|_| Tooltip { text: text.clone(), shortcut, font: None }).into()
     }
 }
 
@@ -43,11 +40,9 @@ pub fn tooltip(
 pub fn code_tooltip(
     text: impl Into<SharedString>,
     font: SharedString,
-    fg: Rgb,
-    bg: Rgb,
 ) -> impl Fn(&mut Window, &mut App) -> AnyView + 'static {
     let text = text.into();
-    move |_, cx| cx.new(|_| Tooltip { text: text.clone(), shortcut: None, font: Some(font.clone()), fg, bg }).into()
+    move |_, cx| cx.new(|_| Tooltip { text: text.clone(), shortcut: None, font: Some(font.clone()) }).into()
 }
 
 struct Tooltip {
@@ -55,12 +50,12 @@ struct Tooltip {
     shortcut: Option<SharedString>,
     /// 代码样的说明用的等宽字体，见 `code_tooltip`。
     font: Option<SharedString>,
-    fg: Rgb,
-    bg: Rgb,
 }
 
 impl Render for Tooltip {
-    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let theme = cx.theme();
+        let fg = theme.foreground;
         div()
             .id("tooltip")
             .role(Role::Tooltip)
@@ -71,9 +66,9 @@ impl Render for Tooltip {
             .gap(px(8.))
             .rounded(px(4.))
             .border_1()
-            .border_color(hsla(self.fg).opacity(0.15))
-            .bg(hsla(self.bg.mix(self.fg, 0.08)))
-            .text_color(hsla(self.fg))
+            .border_color(theme.input)
+            .bg(theme.mix(0.08))
+            .text_color(fg)
             .map(|tooltip| match &self.font {
                 Some(font) => tooltip
                     .max_w(px(CODE_TOOLTIP_MAX_WIDTH))
@@ -86,8 +81,6 @@ impl Render for Tooltip {
             })
             // 字放在能缩的一格里，长的一行才会在最宽处折行，不然撑出框外。
             .child(div().flex_1().min_w_0().child(self.text.clone()))
-            .children(
-                self.shortcut.clone().map(|shortcut| div().text_color(hsla(self.fg).opacity(0.5)).child(shortcut)),
-            )
+            .children(self.shortcut.clone().map(|shortcut| div().text_color(fg.opacity(0.5)).child(shortcut)))
     }
 }

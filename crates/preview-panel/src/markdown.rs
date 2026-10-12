@@ -1002,7 +1002,7 @@ impl PreviewPanel {
             .cursor(if view.hover.is_some() { CursorStyle::PointingHand } else { CursorStyle::IBeam })
             .child(rows)
             .child(events)
-            .child(list_scrollbar("markdown-scroll", view.list.clone(), hsla(fg)))
+            .child(list_scrollbar("markdown-scroll", view.list.clone()))
             .into_any_element()
     }
 

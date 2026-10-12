@@ -6,6 +6,7 @@
 //! 整篇 diff 由 `runode_git::Repo::file_view` 读；工作区和暂存区的 diff 跟着扫描结果重读，
 //! 滚动位置不动，文件已经没有这种改动时写一句「没有改动」，标签留着。
 
+use runode_ui::theme::ActiveTheme as _;
 use std::{
     ops::Range,
     path::PathBuf,
@@ -27,7 +28,7 @@ use runode_ui::{
     font_size::FontSize,
     hsla,
     icons::{ARROW_DOWN_ICON, DISCARD_ICON, MINUS_ICON, PLUS_ICON},
-    panel::{added_label, divider_color, removed_label},
+    panel::{added_label, removed_label},
     scrollbar::{row_markers, scrollbar},
     theme::{ADDED, REMOVED},
     tooltip::tooltip,
@@ -340,7 +341,7 @@ impl PreviewPanel {
                 .items_center()
                 .justify_center()
                 .hover(|button| button.bg(hsla(bg.mix(fg, 0.12))))
-                .tooltip(tooltip(rust_i18n::t!(key), None, fg, bg))
+                .tooltip(tooltip(rust_i18n::t!(key), None))
                 .child(svg().path(icon).size(px(14.)).text_color(hsla(fg).opacity(0.75)))
                 .on_mouse_down(
                     MouseButton::Left,
@@ -361,7 +362,7 @@ impl PreviewPanel {
             .gap(px(6.))
             .text_size(FontSize::Body)
             .border_b_1()
-            .border_color(divider_color(hsla(fg)))
+            .border_color(cx.theme().border)
             .child(
                 added_label(view.file.added)
                     .id("diff-added")
@@ -390,10 +391,8 @@ impl PreviewPanel {
                     .relative()
                     .child(list)
                     .children(fade)
-                    .child(
-                        scrollbar("preview-diff-scroll-y", handle.clone(), Axis::Vertical, hsla(fg)).markers(markers),
-                    )
-                    .child(scrollbar("preview-diff-scroll-x", handle, Axis::Horizontal, hsla(fg))),
+                    .child(scrollbar("preview-diff-scroll-y", handle.clone(), Axis::Vertical).markers(markers))
+                    .child(scrollbar("preview-diff-scroll-x", handle, Axis::Horizontal)),
             )
             .into_any_element()
     }

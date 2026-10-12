@@ -8,6 +8,7 @@
 //! 储藏之后）或者点了刷新才重读，工作区里的文件变了不重读。lane 怎么排由
 //! `runode_git::graph_layout` 算好，这里只照着画。
 
+use crate::ui::theme::ActiveTheme as _;
 use std::{
     ops::Range,
     path::{Path, PathBuf},
@@ -38,7 +39,7 @@ use crate::{
         tooltip::tooltip,
     },
     window::{
-        DIVIDER_GRAB_WIDTH, Divider, TITLEBAR_HEIGHT, WindowView, divider_color,
+        DIVIDER_GRAB_WIDTH, Divider, TITLEBAR_HEIGHT, WindowView,
         files::menu_item,
         model::base_name,
         preview::DiffTarget,
@@ -165,10 +166,10 @@ impl WindowView {
             .items_center()
             .gap(px(6.))
             .border_t_1()
-            .border_color(divider_color(fg_hsla))
+            .border_color(cx.theme().border)
             .text_color(fg_hsla)
             .hover(|header| header.bg(hsla(bg.mix(fg, 0.06))))
-            .child(chevron(open, fg))
+            .child(chevron(open, cx))
             .child(
                 div()
                     .flex_none()
@@ -190,8 +191,6 @@ impl WindowView {
                     "git-graph-refresh",
                     REFRESH_ICON,
                     Some(rust_i18n::t!("git.graph.refresh").into_owned()),
-                    fg,
-                    bg,
                     cx,
                     move |this, _, cx| this.refresh_graph(&root, cx),
                 ))
@@ -495,7 +494,7 @@ impl WindowView {
             .aria_expanded(expanded)
             .aria_label(commit.subject.clone())
             .aria_description(detail)
-            .tooltip(tooltip(tip, None, fg, bg))
+            .tooltip(tooltip(tip, None))
             .child(lanes_canvas(row.clone(), lane, width, commit.parents.len() > 1, head, bg))
             .children(labels)
             .child(
@@ -619,7 +618,7 @@ impl WindowView {
             .relative()
             .children(self.lanes_below(&dir.root, ci))
             .pl(px(8. + width + INDENT * (depth + 1.)))
-            .child(chevron(dir.expanded, fg))
+            .child(chevron(dir.expanded, cx))
             .child(img(folder_icon(&last, dir.expanded)).flex_none().size(px(14.)))
             .child(div().flex_1().min_w_0().truncate().child(dir.name.clone()))
             .on_press_down(cx, move |this, _, cx| {

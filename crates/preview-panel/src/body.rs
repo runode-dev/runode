@@ -81,7 +81,7 @@ impl PreviewPanel {
                     Note::NoContent => rust_i18n::t!("panel.no_content").into_owned(),
                     Note::DiffTooLarge => rust_i18n::t!("preview.diff.too_large").into_owned(),
                 };
-                panel_message(text.clone(), fg).id("preview-note").role(Role::Label).aria_label(text).into_any_element()
+                panel_message(text.clone(), cx).id("preview-note").role(Role::Label).aria_label(text).into_any_element()
             }
             Some(Loaded::Image(image)) => div()
                 .id("preview-image")
@@ -237,8 +237,8 @@ impl PreviewPanel {
                     .relative()
                     .child(list)
                     .children(fade)
-                    .child(scrollbar("preview-scroll-y", handle.clone(), Axis::Vertical, hsla(fg)).markers(markers))
-                    .child(scrollbar("preview-scroll-x", handle, Axis::Horizontal, hsla(fg)))
+                    .child(scrollbar("preview-scroll-y", handle.clone(), Axis::Vertical).markers(markers))
+                    .child(scrollbar("preview-scroll-x", handle, Axis::Horizontal))
                     .into_any_element()
             }
         }

@@ -10,6 +10,7 @@ mod menu;
 mod ops;
 mod search;
 
+use crate::ui::theme::ActiveTheme as _;
 use std::{
     borrow::Cow,
     ops::Range,
@@ -17,7 +18,7 @@ use std::{
 };
 
 use gpui::{
-    AccessibleAction, Action, AnyElement, Axis, ClickEvent, Context, Div, Focusable, Hsla, MouseButton, MouseDownEvent,
+    AccessibleAction, Action, AnyElement, Axis, ClickEvent, Context, Div, Focusable, MouseButton, MouseDownEvent,
     Pixels, Render, Role, ScrollStrategy, SharedString, Stateful, Window, actions, div, img, prelude::*, px, svg,
     uniform_list,
 };
@@ -159,13 +160,11 @@ pub(super) struct DraggedFile {
     name: SharedString,
     width: Pixels,
     height: Pixels,
-    fg: Hsla,
-    bg: Hsla,
 }
 
 impl Render for DraggedFile {
-    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
-        drag_chip(self.width, self.height, self.name.clone(), self.fg, self.bg)
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        drag_chip(self.width, self.height, self.name.clone(), cx.theme().mix(0.10), cx)
     }
 }
 
@@ -234,12 +233,12 @@ impl WindowView {
         // 标题行上的图标按钮。按下时不往外传：外层的文件树按下时会把焦点抢回去，新建时刚交给
         // 输入框的焦点就丢了。
         let button = |id, icon, text: Cow<'static, str>| {
-            icon_toggle(id, icon, 14., false, fg, bg)
+            icon_toggle(id, icon, 14., false, cx)
                 .role(Role::Button)
                 .aria_label(SharedString::from(text.clone()))
                 .flex_none()
                 .size(px(TOOLBAR_BUTTON_SIZE))
-                .tooltip(tooltip(text, None, fg, bg))
+                .tooltip(tooltip(text, None))
         };
         // 这几个按钮只有按下的处理，辅助工具按不到，另外登记按下时做的事。
         let view = cx.entity().downgrade();
@@ -338,10 +337,10 @@ impl WindowView {
                 this.drop_file(&dragged.path, root, window, cx);
             }))
             .child(content);
-        panel_shell("files-panel", width, fg, bg, super::cards(cx))
+        panel_shell("files-panel", width, super::cards(cx), cx)
             .bg(hsla(bg.mix(fg, 0.03)))
             .text_size(px(font_size))
-            .child(self.render_panel_tabs(fg, bg, cx))
+            .child(self.render_panel_tabs(cx))
             .child(header)
             .child(search_box)
             .child(tree)
@@ -390,7 +389,7 @@ impl WindowView {
             .min_h_0()
             .relative()
             .child(list)
-            .child(scrollbar("files-scroll", scroll, Axis::Vertical, hsla(fg)))
+            .child(scrollbar("files-scroll", scroll, Axis::Vertical))
     }
 
     /// 文件树的行。行高、箭头和图标跟着字号 `font_size` 一起缩放。新建时输入框插在
@@ -455,7 +454,6 @@ impl WindowView {
         let selected_bg = hsla(bg.mix(fg, if focused { 0.16 } else { 0.10 }));
         let hover_bg = hsla(bg.mix(fg, 0.06));
         let drop_bg = hsla(bg.mix(fg, 0.20));
-        let drag_bg = hsla(bg.mix(fg, 0.10));
         let color = match row.decoration {
             Decoration::None | Decoration::Ignored => hsla(fg).opacity(0.85),
             Decoration::Status(status) | Decoration::ContainsChanges(status) => hsla(status_color(status)),
@@ -490,8 +488,6 @@ impl WindowView {
             name: row.name.clone(),
             width: px(180.),
             height: px(font_size + ROW_EXTRA_HEIGHT),
-            fg: hsla(fg),
-            bg: drag_bg,
         });
         let path = row.path.clone();
         let is_dir = row.is_dir;

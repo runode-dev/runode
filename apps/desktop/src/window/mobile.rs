@@ -18,7 +18,7 @@ use runode_shared_types::color::Rgb;
 use super::{
     CARD_GAP, TITLEBAR_HEIGHT, WindowView, card, cards,
     devices::{Paired, devices},
-    drag_window, frame_color,
+    drag_window,
     sidebar::ROW_ICON_SIZE,
 };
 use crate::ui::a11y::A11yPress;
@@ -321,7 +321,7 @@ impl WindowView {
         let cards = cards(cx);
         let sidebar = self.sidebar_visible().then(|| self.render_sidebar(fg, bg, window, cx));
         let handle = sidebar.is_some().then(|| self.render_sidebar_handle(cx));
-        let toggle = self.render_sidebar_toggle(fullscreen, fg, if cards { frame_color(fg, bg) } else { bg }, cx);
+        let toggle = self.render_sidebar_toggle(fullscreen, cx);
         let main = div()
             .flex_1()
             .min_w_0()
@@ -330,13 +330,7 @@ impl WindowView {
             .flex_col()
             .child(div().flex_none().h(px(TITLEBAR_HEIGHT)).on_mouse_down(MouseButton::Left, drag_window))
             .child(if cards {
-                card(hsla(fg), hsla(bg))
-                    .flex_1()
-                    .min_h_0()
-                    .mr(px(CARD_GAP))
-                    .mb(px(CARD_GAP))
-                    .overflow_hidden()
-                    .child(page)
+                card(cx).flex_1().min_h_0().mr(px(CARD_GAP)).mb(px(CARD_GAP)).overflow_hidden().child(page)
             } else {
                 div().flex_1().min_h_0().child(page)
             });

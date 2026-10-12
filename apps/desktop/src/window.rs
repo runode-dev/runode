@@ -94,7 +94,7 @@ pub(crate) use crate::ui::panel::TITLEBAR_HEIGHT;
 use crate::ui::{
     drag_window, inline_edit,
     menu::{Menu, MenuHost},
-    panel::{DIVIDER_GRAB_WIDTH, PANE_HEADER_HEIGHT, card, divider_color},
+    panel::{DIVIDER_GRAB_WIDTH, PANE_HEADER_HEIGHT, card},
     row_buttons,
     tabs::TAB_CLOSE_SIZE,
     theme::{ActiveTheme as _, Theme, ansi_colors, frame_color, tab_track_colors},
@@ -846,8 +846,7 @@ impl WindowView {
         let ClassicTitlebar { fullscreen, shown: titlebar_shown, right_column, .. } = self.classic_titlebar(window, cx);
         let panes = self.render_panes(fg, bg, window, cx);
         let sidebar = self.sidebar_visible().then(|| column_slot(&slots.sidebar, self.sidebar_width(), window));
-        let sidebar_toggle =
-            (titlebar_shown || sidebar.is_some()).then(|| self.render_sidebar_toggle(fullscreen, fg, bg, cx));
+        let sidebar_toggle = (titlebar_shown || sidebar.is_some()).then(|| self.render_sidebar_toggle(fullscreen, cx));
         let sidebar_width = if sidebar.is_some() { self.sidebar_width() } else { 0. };
         let sidebar_handle = sidebar.is_some().then(|| self.render_sidebar_handle(cx));
         let widths = self.right_panel_widths(f32::from(window.viewport_size().width), cx);
@@ -923,7 +922,7 @@ impl WindowView {
                 .flex_none()
                 .w(px(right_inset))
                 .h_full()
-                .when(right_inset > 0., |inset| inset.border_l_1().border_color(divider_color(hsla(fg))));
+                .when(right_inset > 0., |inset| inset.border_l_1().border_color(cx.theme().border));
             let spacer = div().id("tabs-spacer").flex_1().h_full();
             vec![strip, self.render_new_tab_button(fg, bg, cx), spacer, inset]
         } else {
@@ -963,9 +962,11 @@ impl WindowView {
             // 给红绿灯和侧栏开关让出的位置；后面跟着标签时右边画一条分隔线，和新建标签按钮
             // 左边那条对称。
             .child(
-                div().flex_none().w(px(left_inset)).h_full().when(show_tabs && left_inset > 0., |inset| {
-                    inset.border_r_1().border_color(divider_color(hsla(fg)))
-                }),
+                div()
+                    .flex_none()
+                    .w(px(left_inset))
+                    .h_full()
+                    .when(show_tabs && left_inset > 0., |inset| inset.border_r_1().border_color(cx.theme().border)),
             )
             .children(tabs)
             .into_any_element()
@@ -976,12 +977,11 @@ impl WindowView {
     /// 标签（只有一个标签时也画），右边是新建标签和右侧面板的开关。
     fn render_cards_body(&mut self, fg: Rgb, bg: Rgb, window: &mut Window, cx: &mut Context<Self>) -> Vec<AnyElement> {
         let slots = self.slots(cx);
-        let frame = frame_color(fg, bg);
         let fullscreen = window.is_fullscreen();
         let viewport = f32::from(window.viewport_size().width);
         let panes = self.render_panes(fg, bg, window, cx);
         let sidebar = self.sidebar_visible().then(|| column_slot(&slots.sidebar, self.sidebar_width(), window));
-        let sidebar_toggle = self.render_sidebar_toggle(fullscreen, fg, frame, cx);
+        let sidebar_toggle = self.render_sidebar_toggle(fullscreen, cx);
         let sidebar_width = if sidebar.is_some() { self.sidebar_width() } else { 0. };
         let sidebar_handle = sidebar.is_some().then(|| self.render_sidebar_handle(cx));
         let widths = self.right_panel_widths(viewport, cx);
@@ -1072,7 +1072,7 @@ impl WindowView {
             .on_mouse_down(MouseButton::Left, drag_window)
             .child(div().flex_none().w(px(left_inset)))
             .child(strip)
-            .child(self.render_new_tab_button_card(fg, frame, cx))
+            .child(self.render_new_tab_button_card(cx))
             // 标签条只占标签本身的宽度，新建标签按钮紧跟在后面，剩下的空白留给拖动窗口。
             .child(div().flex_1().h_full())
             .child(self.render_panel_toggles(fg, frame, window, cx))

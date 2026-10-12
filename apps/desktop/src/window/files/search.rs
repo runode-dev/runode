@@ -615,7 +615,7 @@ impl WindowView {
                         item.text_color(hsla(fg).opacity(0.55)).hover(|item| item.text_color(hsla(fg)))
                     }
                 })
-                .tooltip(tooltip(tip, None, fg, bg))
+                .tooltip(tooltip(tip, None))
         };
         type Flip = fn(&mut FileSearch);
         let option = |id, label: &'static str, tip: &str, on: bool, flip: Flip, cx: &mut Context<Self>| {
@@ -745,7 +745,7 @@ impl WindowView {
             } else {
                 rust_i18n::t!("files.search_empty").into_owned()
             };
-            return Some(panel_message(text, fg).into_any_element());
+            return Some(panel_message(text, cx).into_any_element());
         }
         // 结果统计：按内容找时是命中的行数和文件数，找够上限时说只列出了前面这些。
         let files = search.found.len();
@@ -929,7 +929,7 @@ impl WindowView {
             .on_click(cx.listener(move |this, event: &ClickEvent, _, cx| {
                 this.open_search_row(ix, event.click_count() >= 2, cx);
             }))
-            .tooltip(tooltip(tip, None, fg, bg))
+            .tooltip(tooltip(tip, None))
             .into_any_element()
     }
 }

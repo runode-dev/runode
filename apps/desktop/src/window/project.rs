@@ -515,13 +515,13 @@ impl WindowView {
         let shown = self.workspace().panel.is_some();
         let text = if shown { rust_i18n::t!("tooltip.hide_panel") } else { rust_i18n::t!("tooltip.show_panel") };
         let view = cx.entity().downgrade();
-        let toggle = icon_toggle("toggle-panel", PANEL_RIGHT_ICON, 16., shown, fg, bg)
+        let toggle = icon_toggle("toggle-panel", PANEL_RIGHT_ICON, 16., shown, cx)
             .role(Role::Button)
             .aria_label(text.clone().into_owned())
             .aria_expanded(shown)
             .w(px(TOGGLE_WIDTH))
             .h(px(TOGGLE_HEIGHT))
-            .tooltip(tooltip(text, None, fg, bg))
+            .tooltip(tooltip(text, None))
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(|this, _, window, cx| {
@@ -546,7 +546,7 @@ impl WindowView {
 
     /// 右侧面板顶上那排切换文件树和 Git 的标签，显示着的那个底色亮一些。经典样式下标题栏右上角的
     /// 开关按钮盖在这一条的右端。
-    pub(super) fn render_panel_tabs(&self, fg: Rgb, bg: Rgb, cx: &mut Context<Self>) -> Stateful<Div> {
+    pub(super) fn render_panel_tabs(&self, cx: &mut Context<Self>) -> Stateful<Div> {
         let tab = |page: SidePanel, cx: &mut Context<Self>| {
             let (id, icon, text, action): (_, _, _, &dyn Action) = match page {
                 SidePanel::Files => ("tab-files", FILES_ICON, rust_i18n::t!("tooltip.show_files"), &ToggleFiles),
@@ -559,13 +559,13 @@ impl WindowView {
                 ),
             };
             let view = cx.entity().downgrade();
-            icon_toggle(id, icon, 16., self.workspace().panel == Some(page), fg, bg)
+            icon_toggle(id, icon, 16., self.workspace().panel == Some(page), cx)
                 .role(Role::Tab)
                 .aria_label(text.clone().into_owned())
                 .aria_selected(self.workspace().panel == Some(page))
                 .w(px(TOGGLE_WIDTH))
                 .h(px(TOGGLE_HEIGHT))
-                .tooltip(tooltip(text, Some(action), fg, bg))
+                .tooltip(tooltip(text, Some(action)))
                 .on_mouse_down(
                     MouseButton::Left,
                     cx.listener(move |this, _, window, cx| {
@@ -575,7 +575,7 @@ impl WindowView {
                 )
                 .on_a11y_press(view, move |this, window, cx| this.set_panel(Some(page), window, cx))
         };
-        self.panel_header(fg, cx)
+        self.panel_header(cx)
             .id("panel-tabs")
             .role(Role::TabList)
             .px(px(6.))
@@ -586,7 +586,7 @@ impl WindowView {
     }
 
     /// 右侧面板顶上的一条，见 `runode_ui::panel::panel_header`。
-    pub(super) fn panel_header(&self, fg: Rgb, cx: &App) -> Div {
-        crate::ui::panel::panel_header(fg, cards(cx))
+    pub(super) fn panel_header(&self, cx: &App) -> Div {
+        crate::ui::panel::panel_header(cards(cx), cx)
     }
 }

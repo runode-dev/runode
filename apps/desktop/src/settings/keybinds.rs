@@ -497,7 +497,7 @@ impl SettingsView {
                 .when(!row.bound.is_empty() && !adding, |add| {
                     add.invisible().group_hover(group.clone(), |add| add.visible())
                 })
-                .tooltip(crate::ui::tooltip::tooltip(add_label, None, colors.fg_rgb, colors.bg_rgb))
+                .tooltip(crate::ui::tooltip::tooltip(add_label, None))
                 .on_press(cx, move |this, window, cx| {
                     if this.keybinds.target() == Some(&add_target) {
                         this.keybinds.stop_recording();
@@ -519,7 +519,7 @@ impl SettingsView {
                     remove_label.clone(),
                     colors,
                 )
-                .tooltip(crate::ui::tooltip::tooltip(remove_label, None, colors.fg_rgb, colors.bg_rgb))
+                .tooltip(crate::ui::tooltip::tooltip(remove_label, None))
                 .on_press(cx, move |this, _, cx| this.remove_bound(&remove_bound, cx));
                 keys = keys.child(div().flex().items_center().gap(px(6.)).child(remove).child(press_box(
                     SharedString::from(format!("keybind-press-{ix}-{jx}")),

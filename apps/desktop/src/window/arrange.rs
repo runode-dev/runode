@@ -5,6 +5,7 @@
 //! 动作 `ArrangePanes` 弹出一个小浮层选方向（右边、下边、右侧叠放）和个数（1 到 4），左右键换
 //! 方向、数字键或上下键改个数、回车打开、Esc 关掉，也可以用鼠标点。
 
+use crate::ui::theme::ActiveTheme as _;
 use gpui::{
     Context, Div, FocusHandle, Focusable, Hsla, KeyDownEvent, Role, SharedString, Stateful, Subscription, Window,
     actions, div, prelude::*, px, relative,
@@ -14,7 +15,7 @@ use runode_shared_types::{
     pane::{Axis, Node, Rect, SplitId},
 };
 
-use super::{PressDown, TITLEBAR_HEIGHT, WindowView, divider_color};
+use super::{PressDown, TITLEBAR_HEIGHT, WindowView};
 use crate::ui::{font_size::FontSize, hsla};
 
 actions!(
@@ -316,7 +317,7 @@ impl WindowView {
                 div()
                     .pt(px(8.))
                     .border_t_1()
-                    .border_color(divider_color(fg))
+                    .border_color(cx.theme().border)
                     .text_size(FontSize::Small)
                     .text_color(fg.opacity(0.45))
                     .child(rust_i18n::t!("layout.hint").into_owned()),

@@ -8,6 +8,7 @@
 //! 就停；启动、接上、结束之后各问一次。问到 shell 已经退出、谁都没连着的会话（多半是列表里的后台
 //! 会话自己退出了）顺手结束，免得它一直留在宿主里、挡着宿主空闲退出。
 
+use crate::ui::theme::ActiveTheme as _;
 use std::{
     collections::HashSet,
     sync::atomic::{AtomicBool, Ordering},
@@ -20,8 +21,7 @@ use runode_protocol::{SessionId, SessionInfo};
 use runode_shared_types::color::Rgb;
 
 use super::{
-    AGENT_MARK_WIDTH, PressDown, WindowView, agents::Mark, cards, divider_color, quit::held_sessions,
-    titlebar::styled_agent_mark,
+    AGENT_MARK_WIDTH, PressDown, WindowView, agents::Mark, cards, quit::held_sessions, titlebar::styled_agent_mark,
 };
 use crate::{
     host_client::{self, Mode},
@@ -261,7 +261,7 @@ impl WindowView {
                 .px(px(6.))
                 .pt(px(4.))
                 .border_t_1()
-                .border_color(divider_color(fg))
+                .border_color(cx.theme().border)
                 .flex()
                 .flex_col()
                 .gap(px(2.))

@@ -194,11 +194,7 @@ impl WindowView {
                     .child(rust_i18n::t!("workspace.empty").into_owned()),
             )
             .child(button);
-        if cards(cx) {
-            card(fg, hsla(bg)).size_full().child(empty).into_any_element()
-        } else {
-            empty.into_any_element()
-        }
+        if cards(cx) { card(cx).size_full().child(empty).into_any_element() } else { empty.into_any_element() }
     }
 
     /// 当前标签里各个正被操作的分屏上要显示的驱动标记。
@@ -348,7 +344,7 @@ impl WindowView {
         // 切换时能切过去。
         if split && tab.folded(id) {
             let layout = self.layout.clone();
-            return pane_group(card(hsla(fg), hsla(bg)).id(("pane", id)))
+            return pane_group(card(cx).id(("pane", id)))
                 .aria_expanded(false)
                 .group(group.clone())
                 .relative()
@@ -365,7 +361,7 @@ impl WindowView {
         // 卡片：上面是标题条，下面是终端。终端四周留一点，它的方角落在卡片的圆角里面。终端用四边
         // 定位撑满标题条下面的部分：百分比的高度在这里会按整张卡片算，比剩下的高出一个标题条。
         let inset = px(4.);
-        pane_group(card(hsla(fg), hsla(bg)).id(("pane", id)))
+        pane_group(card(cx).id(("pane", id)))
             .when(split, |el| el.aria_expanded(true))
             .group(group.clone())
             .size_full()
@@ -423,11 +419,11 @@ impl WindowView {
                           text: Cow<'static, str>,
                           action: Option<&dyn Action>,
                           handler: Handler| {
-            icon_toggle(key, icon, 13., false, fg, bg)
+            icon_toggle(key, icon, 13., false, cx)
                 .aria_label(text.clone())
                 .flex_none()
                 .size(px(22.))
-                .tooltip(tooltip(text, action, fg, bg))
+                .tooltip(tooltip(text, action))
                 .on_press_down(cx, move |this, window, cx| handler(this, id, window, cx))
         };
         let folded = split && tab.folded(id);

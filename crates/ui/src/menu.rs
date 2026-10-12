@@ -391,7 +391,6 @@ pub trait MenuHost: Sized + 'static {
         // 选中的行底色已经是 `hover_bg`，行里按钮悬停时再深一些。
         let button_hover_bg = hsla(bg.mix(fg, 0.22));
         let menu_bg = hsla(bg.mix(fg, 0.06));
-        let fg_rgb = fg;
         let fg = hsla(fg);
         // 有勾选项时每一行左边都留出打勾的那一列，字对齐。
         let check_column = menu.items.iter().flatten().any(|item| item.checked.is_some());
@@ -427,7 +426,7 @@ pub trait MenuHost: Sized + 'static {
                 .gap(px(16.))
                 .text_color(if item.enabled { fg } else { fg.opacity(0.35) })
                 .when(highlighted, |row| row.bg(hover_bg))
-                .when_some(item.tooltip.clone(), |row, text| row.tooltip(tooltip(text, None, fg_rgb, bg)))
+                .when_some(item.tooltip.clone(), |row, text| row.tooltip(tooltip(text, None)))
                 .when(row_action, |row| {
                     row.on_hover(cx.listener(move |this, hovered: &bool, _, cx| {
                         if let Some(menu) = this.menu_slot().as_mut().filter(|_| *hovered) {
@@ -483,7 +482,7 @@ pub trait MenuHost: Sized + 'static {
                                 .items_center()
                                 .justify_center()
                                 .hover(|button| button.bg(button_hover_bg))
-                                .tooltip(tooltip(button.tooltip.clone(), None, fg_rgb, bg))
+                                .tooltip(tooltip(button.tooltip.clone(), None))
                                 .child(svg().path(button.icon).size(px(12.)).text_color(fg.opacity(0.6)))
                                 .on_mouse_down(
                                     MouseButton::Left,
