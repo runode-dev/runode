@@ -37,7 +37,7 @@ run-ios: ## 调试构建 iOS app，装到模拟器上启动
 	IOS_SIM="$(IOS_SIM)" apps/ios/scripts/run-simulator.sh
 
 # 真机用哪台，例如 make run-ios-device IOS_DEVICE="我的 iPhone"；不给时用连着的那台 iPhone。
-run-ios-device: ## 调试构建 iOS app，装到连着的真机上启动
+run-ios-device: ## Release 构建 iOS app，装到连着的真机上启动
 	IOS_DEVICE="$(IOS_DEVICE)" apps/ios/scripts/run-device.sh
 
 # 本机自己用的包按 Cargo.toml 里的 local profile 编，不开 LTO，改一点代码后重编快得多；

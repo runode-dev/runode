@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# 调试构建 iOS app，装到连着的真机上启动。
+# Release 构建 iOS app，装到连着的真机上启动。Debug 不做优化，手机上画一帧要多两成，刷新又按耗时限速，
+# 帧率跟着掉，真机上试手感要用 Release；要断点调试时在 Xcode 里跑 Debug。
 #
 # 用哪台：IOS_DEVICE 给了就用这个名字或 UDID 的那台；没给时用第一台已经和这台电脑配对、连着的 iPhone
 # （数据线或同一个网络都行）。ghostty-vt 的 xcframework 还没编过时先编一份。
@@ -48,8 +49,8 @@ if [[ -z "$udid" ]]; then
   exit 1
 fi
 
-xcodebuild -project "$ios_dir/Runode.xcodeproj" -scheme Runode -configuration Debug \
+xcodebuild -project "$ios_dir/Runode.xcodeproj" -scheme Runode -configuration Release \
   -destination "platform=iOS,id=$udid" -derivedDataPath "$derived" -allowProvisioningUpdates -quiet build
 
-xcrun devicectl device install app --device "$udid" "$derived/Build/Products/Debug-iphoneos/Runode.app"
+xcrun devicectl device install app --device "$udid" "$derived/Build/Products/Release-iphoneos/Runode.app"
 xcrun devicectl device process launch --device "$udid" --terminate-existing "$bundle_id"
