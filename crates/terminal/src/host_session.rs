@@ -32,9 +32,9 @@ use anyhow::{Result, anyhow};
 use libghostty_vt::{
     screen::Screen,
     terminal::{
-        ColorScheme, ConformanceLevel, DeviceAttributeFeature, DeviceAttributes, DeviceType, PrimaryDeviceAttributes,
-        Mode, ProgramStatusState, ProgressState, SecondaryDeviceAttributes, SemanticPrompt, SizeReportSize, Terminal,
-        UnknownSequence,
+        ColorScheme, ConformanceLevel, DeviceAttributeFeature, DeviceAttributes, DeviceType, Mode,
+        PrimaryDeviceAttributes, ProgramStatusState, ProgressState, SecondaryDeviceAttributes, SemanticPrompt,
+        SizeReportSize, Terminal, UnknownSequence,
     },
 };
 use runode_agent_detect::Tracker;
