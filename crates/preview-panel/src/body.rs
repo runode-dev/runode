@@ -11,8 +11,9 @@ use gpui::{
 use runode_shared_types::color::Rgb;
 use runode_ui::{
     hsla,
-    panel::{ADDED, MODIFIED, PANE_HEADER_HEIGHT, REMOVED, RENAMED, TITLEBAR_HEIGHT, panel_message},
+    panel::{PANE_HEADER_HEIGHT, TITLEBAR_HEIGHT, panel_message},
     scrollbar::{row_markers, scrollbar},
+    theme::{ADDED, MODIFIED, REMOVED, RENAMED},
 };
 
 use super::{

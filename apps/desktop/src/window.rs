@@ -97,6 +97,7 @@ use crate::ui::{
     panel::{DIVIDER_GRAB_WIDTH, PANE_HEADER_HEIGHT, card, divider_color},
     row_buttons,
     tabs::TAB_CLOSE_SIZE,
+    theme::{ActiveTheme as _, Theme, ansi_colors, frame_color, tab_track_colors},
 };
 use crate::{config::AppConfig, prespawn::Prespawned, terminal_view::TerminalView, ui::font_size::FontSize, ui::hsla};
 use model::{PaneLayout, Workspace, WorkspaceId, home_dir};
@@ -196,24 +197,6 @@ const TAB_TRACK_HEIGHT: f32 = 28.;
 /// 窗口用卡片样式，见 `WindowStyle`。
 fn cards(cx: &App) -> bool {
     cx.global::<AppConfig>().0.window_style == WindowStyle::Cards
-}
-
-/// 背景比前景亮，是浅色主题。
-fn is_light(fg: Rgb, bg: Rgb) -> bool {
-    let luma = |c: Rgb| 0.299 * f32::from(c.0) + 0.587 * f32::from(c.1) + 0.114 * f32::from(c.2);
-    luma(bg) > luma(fg)
-}
-
-/// 卡片样式下窗口的底色，衬在卡片后面：浅色主题往前景色混一点，深色主题往黑色压一些，两种都比
-/// 终端背景深一档。
-fn frame_color(fg: Rgb, bg: Rgb) -> Rgb {
-    if is_light(fg, bg) { bg.mix(fg, 0.06) } else { bg.mix(Rgb(0, 0, 0), 0.4) }
-}
-
-/// 卡片样式下标签条的底色，以及条里当前标签那颗胶囊的颜色。浅色主题里条介于外框
-/// 和卡片之间、胶囊就是卡片的白；深色主题里卡片已经比外框亮，条用卡片的颜色，胶囊再亮一档。
-fn tab_track_colors(fg: Rgb, bg: Rgb) -> (Rgb, Rgb) {
-    if is_light(fg, bg) { (frame_color(fg, bg).mix(bg, 0.5), bg) } else { (bg, bg.mix(fg, 0.12)) }
 }
 
 /// 正在用鼠标拖动的分隔线。
@@ -342,8 +325,8 @@ pub struct WindowView {
     _project_events: Task<()>,
     /// 包成缓存视图的几块界面，见 `Slot`。第一次画窗口时才建：建 `WindowView` 时它还没有实体。
     slots: Option<Slots>,
-    /// 缓存的几块上次是按哪组配色画的，见 `follow_colors`。
-    slot_colors: Option<(Rgb, Rgb)>,
+    /// 缓存的几块上次是按哪个主题画的，见 `follow_colors`。
+    slot_theme: Option<Theme>,
 }
 
 /// 窗口里包成缓存视图的几块，终端有输出时照搬上一帧，见 `Slot`。
@@ -492,7 +475,7 @@ impl WindowView {
             project_events,
             _project_events: project_events_task,
             slots: None,
-            slot_colors: None,
+            slot_theme: None,
         }
     }
 
@@ -588,13 +571,21 @@ impl WindowView {
         self.slots.clone().unwrap()
     }
 
-    /// 窗口的配色跟着有焦点的终端当前的配色走，程序用 OSC 10/11 改了默认色时没有谁通知窗口，缓存的
-    /// 几块会停在旧颜色上：配色一变就叫它们重画。这时正在画窗口，画的时候发的通知不会再要一帧，
-    /// 所以等这一帧画完再通知。
-    fn follow_colors(&mut self, colors: (Rgb, Rgb), cx: &mut Context<Self>) {
-        if self.slot_colors.replace(colors) == Some(colors) {
+    /// 按窗口的配色 `fg`、`bg` 和配置的调色板换上全 app 共用的主题 token（`Theme`）：同一次绘制里接着
+    /// 画的缓存的几块、悬停提示和拖动预览读到的就是这个窗口的。每次画窗口时一开头调。
+    ///
+    /// 窗口的配色跟着有焦点的终端当前的配色走，程序用 OSC 10/11 改了默认色、配置改了调色板时没有谁
+    /// 通知缓存的几块，它们会停在旧颜色上：主题一变就叫它们重画。这时正在画窗口，画的时候发的通知
+    /// 不会再要一帧，所以等这一帧画完再通知。
+    fn follow_colors(&mut self, fg: Rgb, bg: Rgb, cx: &mut Context<Self>) {
+        let theme = Theme::new(fg, bg, ansi_colors(&cx.global::<AppConfig>().0.palette));
+        if *cx.theme() != theme {
+            cx.set_global(theme.clone());
+        }
+        if self.slot_theme.as_ref() == Some(&theme) {
             return;
         }
+        self.slot_theme = Some(theme);
         if let Some(slots) = self.slots.clone() {
             cx.defer(move |cx| slots.notify_all(cx));
         }
@@ -694,7 +685,7 @@ impl Render for WindowView {
         window.set_rem_size(crate::ui::font_size::rem_size(cx));
         self.focus_menu(window, cx);
         let (fg, bg) = self.colors(cx);
-        self.follow_colors((fg, bg), cx);
+        self.follow_colors(fg, bg, cx);
         let (base, body) = if let Some(page) = &self.settings {
             (bg, vec![page.view.clone().into_any_element()])
         } else if self.mobile.is_some() {

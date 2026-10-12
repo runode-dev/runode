@@ -27,8 +27,9 @@ use runode_ui::{
     font_size::FontSize,
     hsla,
     icons::{ARROW_DOWN_ICON, DISCARD_ICON, MINUS_ICON, PLUS_ICON},
-    panel::{ADDED, REMOVED, added_label, divider_color, removed_label},
+    panel::{added_label, divider_color, removed_label},
     scrollbar::{row_markers, scrollbar},
+    theme::{ADDED, REMOVED},
     tooltip::tooltip,
 };
 

@@ -37,11 +37,10 @@ use runode_ui::{
         SYNC_ICON, TERMINAL_ICON, TRASH_ICON,
     },
     inline_edit::InlineEdit,
-    panel::{
-        ADDED, DIVIDER_GRAB_WIDTH, MODIFIED, REMOVED, chevron, divider_color, icon_toggle, panel_message, panel_title,
-    },
+    panel::{DIVIDER_GRAB_WIDTH, chevron, divider_color, icon_toggle, panel_message, panel_title},
     row_buttons::{RowButton, button, row_buttons},
     scrollbar::scrollbar,
+    theme::{ADDED, MODIFIED, REMOVED},
     tooltip::tooltip,
 };
 use serde::{Deserialize, Serialize};

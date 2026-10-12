@@ -1,5 +1,5 @@
 //! 窗口外框和右侧面板共用的写法：分隔线的颜色、卡片样式的卡片、面板的外框、顶上那一条、标题行和居中的
-//! 说明，改动行数的标签和改动状态的颜色，以及标题栏和面板上带图标的开关按钮。
+//! 说明，改动行数的标签，以及标题栏和面板上带图标的开关按钮。
 
 use gpui::{BoxShadow, Div, Hsla, MouseButton, Role, Stateful, div, point, prelude::*, px, svg};
 use runode_shared_types::color::Rgb;
@@ -7,6 +7,7 @@ use runode_shared_types::color::Rgb;
 use crate::{
     drag_window, hsla,
     icons::{CHEVRON_DOWN_ICON, CHEVRON_RIGHT_ICON},
+    theme::{ADDED, REMOVED},
 };
 
 /// 透明标题栏的高度：终端内容从它下面开始，这一条用来拖动窗口，多个标签时也画在这里；
@@ -17,12 +18,6 @@ pub const CARD_RADIUS: f32 = 10.;
 pub const PANE_HEADER_HEIGHT: f32 = 30.;
 /// 分隔线两边各留这么宽能按住拖动。
 pub const DIVIDER_GRAB_WIDTH: f32 = 6.;
-
-/// 改动和文件状态的颜色，深浅背景上都看得清。
-pub const ADDED: Rgb = Rgb(0x57, 0xAB, 0x5A);
-pub const REMOVED: Rgb = Rgb(0xE5, 0x53, 0x4B);
-pub const MODIFIED: Rgb = Rgb(0xD2, 0xA8, 0x3E);
-pub const RENAMED: Rgb = Rgb(0x53, 0x9B, 0xF5);
 
 /// 面板之间、标题下面和标签之间这些分隔线的颜色：前景色调淡，各处一样深。
 pub fn divider_color(fg: Hsla) -> Hsla {

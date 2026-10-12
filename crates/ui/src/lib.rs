@@ -4,7 +4,7 @@
 //! 复制粘贴这类共用的编辑动作（`actions`），标签条共用的关闭按钮、拖动卡片和落点提示（`tabs`），把调色板的颜色换成
 //! GPUI 颜色的 `hsla`，以及把家目录写成 `~` 显示路径的 `display_dir`、取路径最后一段的 `base_name`、跟着改名挪路径的
 //! `follow_move`、在标题栏这类地方按下鼠标拖动窗口的 `drag_window`，放掉图片在图集里那份的 `drop_render_image`、
-//! `release_bitmap`，以及让辅助工具认得界面的共用写法（`a11y`）。
+//! `release_bitmap`，让辅助工具认得界面的共用写法（`a11y`），以及各部件取颜色的主题 token（`theme`）。
 //!
 //! 不依赖桌面 app 里的功能模块，它们要的东西由调用方经参数、事件或 `font_size::UiFontSize` 这类
 //! 全局值交过来；文字一律由调用方翻译好再给，这里不带翻译。
@@ -24,6 +24,7 @@ pub mod sound;
 pub mod tabs;
 pub mod text_area;
 pub mod text_field;
+pub mod theme;
 pub mod tooltip;
 
 use std::{

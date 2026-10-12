@@ -231,7 +231,7 @@ fn tab_icons(tab: &Tab, fg: Rgb, bg: Rgb, cx: &App) -> Div {
             agent.map(|agent| agent.kind).filter(|kind| accent(*kind).is_some())
         })
         .collect();
-    let light = super::is_light(fg, bg);
+    let light = crate::ui::theme::is_light(fg, bg);
     let logo_bg = if light { gpui::white() } else { hsla(bg.mix(fg, 0.14)) };
     let fg = hsla(fg);
     let tile = |color: Hsla| {
@@ -295,7 +295,7 @@ impl WindowView {
         let rgb_fg = fg;
         // 卡片样式下当前标签是终端背景色的胶囊，从标签条上浮起来。
         let (active_bg, hover_bg) = if cards {
-            let (track, pill) = super::tab_track_colors(fg, bg);
+            let (track, pill) = crate::ui::theme::tab_track_colors(fg, bg);
             (hsla(pill), hsla(track.mix(pill, 0.5)))
         } else {
             (hsla(bg.mix(fg, 0.08)), hsla(bg.mix(fg, 0.04)))
@@ -414,7 +414,8 @@ impl WindowView {
                 (Some(icons), Some((name, dir))) => {
                     // 卡片样式：图标叠、靠左的名字和目录（放不下时末尾渐隐）、状态标记，悬停时右边出关闭
                     // 按钮。两个不是当前标签的标签之间画一条短竖线。
-                    let tab_bg = if active { active_bg } else { hsla(super::tab_track_colors(rgb_fg, bg).0) };
+                    let tab_bg =
+                        if active { active_bg } else { hsla(crate::ui::theme::tab_track_colors(rgb_fg, bg).0) };
                     let separator = ix > 0 && !active && ix != workspace.active + 1;
                     let fade = |color: Hsla| {
                         linear_gradient(90., linear_color_stop(color.opacity(0.), 0.), linear_color_stop(color, 1.))

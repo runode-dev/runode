@@ -16,8 +16,9 @@ use runode_ui::{
     file_icons::file_icon,
     follow_move, hsla,
     menu::{MenuHost as _, menu_item},
-    panel::{ADDED, MODIFIED, REMOVED, RENAMED, TITLEBAR_HEIGHT, divider_color},
+    panel::{TITLEBAR_HEIGHT, divider_color},
     tabs::{close_button, drag_chip, drop_marker},
+    theme::{ADDED, MODIFIED, REMOVED, RENAMED},
     tooltip::tooltip,
 };
 

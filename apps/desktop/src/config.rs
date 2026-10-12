@@ -191,6 +191,9 @@ fn apply(cx: &mut App, config: Config, seen: Stamps) {
     crate::host_client::configure(&config);
     cx.set_global(Seen(seen));
     cx.set_global(runode_ui::font_size::UiFontSize(config.ui_font_size));
+    // 主题 token 的初值；各窗口画的时候再换成自己的配色，见 `WindowView::follow_colors`。
+    let palette = runode_ui::theme::ansi_colors(&config.palette);
+    cx.set_global(runode_ui::theme::Theme::new(config.foreground, config.background, palette));
     cx.set_global(AppConfig(Arc::new(config)));
 }
 

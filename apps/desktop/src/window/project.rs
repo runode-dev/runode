@@ -26,10 +26,11 @@ use super::{
     CARD_GAP, DIVIDER_GRAB_WIDTH, Divider, TITLEBAR_HEIGHT, ToggleFiles, ToggleGit, ToggleGitHubActions, WindowView,
     cards, titlebar::icon_toggle,
 };
-// 面板外框和改动颜色在 `runode_ui::panel`，窗口里各面板照旧从这里引。
+// 面板外框在 `runode_ui::panel`、改动颜色在 `runode_ui::theme`，窗口里各面板照旧从这里引。
 use crate::ui::a11y::A11yPress;
-pub(super) use crate::ui::panel::{
-    ADDED, MODIFIED, REMOVED, RENAMED, added_label, panel_message, panel_shell, panel_title, removed_label,
+pub(super) use crate::ui::{
+    panel::{added_label, panel_message, panel_shell, panel_title, removed_label},
+    theme::{ADDED, MODIFIED, REMOVED, RENAMED},
 };
 use crate::{
     assets::{ACTIONS_WORKFLOW_ICON, FILES_ICON, GIT_ICON, PANEL_RIGHT_ICON},
