@@ -295,3 +295,13 @@ impl Peer {
         }
     }
 }
+
+/// macOS 按哪个进程的授权判断 `pid` 的隐私权限（本地网络等）。
+#[cfg(target_os = "macos")]
+pub fn responsible_pid(pid: libc::pid_t) -> libc::pid_t {
+    unsafe extern "C" {
+        fn responsibility_get_pid_responsible_for_pid(pid: libc::pid_t) -> libc::pid_t;
+    }
+    // SAFETY: 只按 pid 查，不碰内存。
+    unsafe { responsibility_get_pid_responsible_for_pid(pid) }
+}

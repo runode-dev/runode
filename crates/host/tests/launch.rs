@@ -38,7 +38,7 @@ fn the_host_runs_in_its_own_session_without_our_descriptors() {
     let (sid, pgid, ours) = unsafe { (libc::getsid(pid), libc::getpgid(pid), libc::getsid(0)) };
     let fds = std::fs::read_to_string(&listing).unwrap();
     #[cfg(target_os = "macos")]
-    let responsible = responsible_pid(pid);
+    let responsible = common::responsible_pid(pid);
     // SAFETY: 结束拉起的子进程；它由 `launch` 起的线程收尸。
     unsafe { libc::kill(pid, libc::SIGTERM) };
 
@@ -49,16 +49,6 @@ fn the_host_runs_in_its_own_session_without_our_descriptors() {
     let fds: Vec<&str> = fds.split_whitespace().collect();
     assert!(!fds.contains(&LEAKY_FD.to_string().as_str()), "inherited {fds:?}");
     assert!(fds.contains(&"0") && fds.contains(&"2"), "{fds:?}");
-}
-
-/// macOS 按哪个进程的授权判断 `pid` 的隐私权限（本地网络等）。
-#[cfg(target_os = "macos")]
-fn responsible_pid(pid: libc::pid_t) -> libc::pid_t {
-    unsafe extern "C" {
-        fn responsibility_get_pid_responsible_for_pid(pid: libc::pid_t) -> libc::pid_t;
-    }
-    // SAFETY: 只按 pid 查，不碰内存。
-    unsafe { responsibility_get_pid_responsible_for_pid(pid) }
 }
 
 #[test]

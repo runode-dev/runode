@@ -22,3 +22,8 @@ tracing.workspace = true
 
 [lints]
 workspace = true
+
+# 要在没有别的线程时调 `disclaim_responsibility`，libtest 会给每个测试开线程，所以自己写 main。
+[[test]]
+name = "disclaim"
+harness = false

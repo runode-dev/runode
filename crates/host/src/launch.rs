@@ -93,6 +93,45 @@ pub fn launch_successor(exe: &Path) -> io::Result<Successor> {
     Ok(Successor { pid, status: File::from(OwnedFd::from(reader)) })
 }
 
+/// 让这个宿主进程自己担着责任进程：带上 `responsibility_spawnattrs_setdisclaim` 原地重新执行自己一次
+/// （`POSIX_SPAWN_SETEXEC`，pid、参数、环境和没设 close-on-exec 的描述符都不变），重新执行后的那次调用
+/// 直接返回。`launch` 拉起的本来就自己担着；在终端里直接跑的（重启脚本拉起的新宿主就是）挂在那个终端
+/// 的责任进程（通常是旧宿主）名下，那个进程一退出，这个宿主开的终端就都连不上局域网。要在开任何线程
+/// 之前调用：要改环境变量。成功时不返回。
+pub fn disclaim_responsibility() -> io::Result<()> {
+    #[cfg(target_os = "macos")]
+    {
+        // 重新执行过的标记，免得一直重来；读到就去掉，不传给宿主开的 shell。
+        const MARK: &str = "RUNODE_HOST_DISCLAIMED";
+        if std::env::var_os(MARK).is_some() {
+            // SAFETY: 调用方保证还没有别的线程。
+            unsafe { std::env::remove_var(MARK) };
+            return Ok(());
+        }
+        let program = CString::new(std::env::current_exe()?.into_os_string().as_bytes())?;
+        let args = std::env::args_os().map(|arg| CString::new(arg.as_bytes())).collect::<Result<Vec<_>, _>>()?;
+        let argv: Vec<*mut c_char> = args.iter().map(|arg| arg.as_ptr().cast_mut()).chain([ptr::null_mut()]).collect();
+        let mut attr = SpawnAttr::new()?;
+        // SAFETY: `attr` 已经初始化。
+        unsafe {
+            check(libc::posix_spawnattr_setflags(attr.as_mut_ptr(), libc::POSIX_SPAWN_SETEXEC as libc::c_short))?;
+            check(responsibility_spawnattrs_setdisclaim(attr.as_mut_ptr(), true))?;
+        }
+        // SAFETY: 调用方保证还没有别的线程。
+        unsafe { std::env::set_var(MARK, "1") };
+        let mut pid: libc::pid_t = 0;
+        // SAFETY: 同 `detach`；成功时这个进程换成新的映像，不再回到这里。
+        let failed = check(unsafe {
+            libc::posix_spawn(&mut pid, program.as_ptr(), ptr::null(), attr.as_ptr(), argv.as_ptr(), environ())
+        });
+        // SAFETY: 同上。
+        unsafe { std::env::remove_var(MARK) };
+        failed
+    }
+    #[cfg(not(target_os = "macos"))]
+    Ok(())
+}
+
 /// 在新的会话里用 `exe extra_args...` 拉起进程，返回 pid：标准输入输出接 `/dev/null`，给了
 /// `status` 时把它接到 `STATUS_FD` 上，此外不继承任何描述符；信号处理恢复默认、信号屏蔽清空，
 /// 环境变量照抄，macOS 上自己担着责任进程。退出后由这里起的一个线程收尸。
