@@ -28,6 +28,7 @@ use crate::{
     remote_access::pairing::{BACKGROUND_KEY, Pairing, Qr, qr_code},
     ui::{
         a11y::Press,
+        button::{Button, ButtonSize, ButtonVariant},
         font_size::{FontSize, scaled},
         hsla,
         text_field::{TextField, TextFieldEvent},
@@ -393,8 +394,14 @@ impl WindowView {
         if !paired.is_empty() {
             let rows: Vec<_> =
                 paired.iter().enumerate().map(|(ix, device)| device_row(ix, device, colors, cx)).collect();
-            let another = pill("mobile-pair-another", rust_i18n::t!("mobile.pair_another").into_owned(), false, colors)
+            let another = Button::new("mobile-pair-another", rust_i18n::t!("mobile.pair_another").into_owned())
+                .variant(ButtonVariant::Outline)
+                .with_size(ButtonSize::Lg)
+                .rounded_full()
+                .font_weight(FontWeight::MEDIUM)
+                .cursor_pointer()
                 .gap(px(8.))
+                .child(rust_i18n::t!("mobile.pair_another").into_owned())
                 .child(svg().path(PHONE_ICON).size(px(14.)).text_color(colors.fg.opacity(0.8)))
                 .on_press(cx, move |this, _, cx| this.go_mobile(first, cx));
             return div()
@@ -428,8 +435,17 @@ impl WindowView {
             .child(lead(rust_i18n::t!("mobile.intro_body").into_owned(), colors))
             .child(
                 div().pt(px(12.)).child(
-                    pill("mobile-start", format!("{}  →", rust_i18n::t!("mobile.start")), true, colors)
-                        .on_press(cx, move |this, _, cx| this.go_mobile(first, cx)),
+                    {
+                        let label = format!("{}  →", rust_i18n::t!("mobile.start"));
+                        Button::new("mobile-start", spoken(&label))
+                            .variant(ButtonVariant::Default)
+                            .with_size(ButtonSize::Lg)
+                            .rounded_full()
+                            .font_weight(FontWeight::MEDIUM)
+                            .cursor_pointer()
+                            .child(label)
+                    }
+                    .on_press(cx, move |this, _, cx| this.go_mobile(first, cx)),
                 ),
             )
     }
@@ -451,11 +467,19 @@ impl WindowView {
                     .items_center()
                     .gap(px(16.))
                     .child(
-                        pill("mobile-open-app", rust_i18n::t!("mobile.open_link").into_owned(), false, colors)
+                        Button::new("mobile-open-app", rust_i18n::t!("mobile.open_link").into_owned())
+                            .variant(ButtonVariant::Outline)
+                            .with_size(ButtonSize::Lg)
+                            .rounded_full()
+                            .font_weight(FontWeight::MEDIUM)
+                            .cursor_pointer()
                             .on_press(cx, move |_, _, cx| cx.open_url(url)),
                     )
                     .child(
-                        link("mobile-copy-app", rust_i18n::t!("mobile.copy_link").into_owned(), colors)
+                        Button::new("mobile-copy-app", rust_i18n::t!("mobile.copy_link").into_owned())
+                            .variant(ButtonVariant::Link)
+                            .with_size(ButtonSize::Lg)
+                            .cursor_pointer()
                             .on_press(cx, move |_, _, cx| {
                                 cx.write_to_clipboard(ClipboardItem::new_string(url.to_owned()))
                             }),
@@ -468,11 +492,27 @@ impl WindowView {
             }),
         );
         let footer = footer(
-            link("mobile-back", format!("←  {}", rust_i18n::t!("mobile.back")), colors)
-                .on_press(cx, |this, _, cx| this.go_mobile(Step::Intro, cx)),
+            {
+                let label = format!("←  {}", rust_i18n::t!("mobile.back"));
+                Button::new("mobile-back", spoken(&label))
+                    .variant(ButtonVariant::Link)
+                    .with_size(ButtonSize::Lg)
+                    .cursor_pointer()
+                    .child(label)
+            }
+            .on_press(cx, |this, _, cx| this.go_mobile(Step::Intro, cx)),
             Some(
-                pill("mobile-next", format!("{}  →", rust_i18n::t!("mobile.next")), true, colors)
-                    .on_press(cx, |this, _, cx| this.go_mobile(Step::Pair, cx)),
+                {
+                    let label = format!("{}  →", rust_i18n::t!("mobile.next"));
+                    Button::new("mobile-next", spoken(&label))
+                        .variant(ButtonVariant::Default)
+                        .with_size(ButtonSize::Lg)
+                        .rounded_full()
+                        .font_weight(FontWeight::MEDIUM)
+                        .cursor_pointer()
+                        .child(label)
+                }
+                .on_press(cx, |this, _, cx| this.go_mobile(Step::Pair, cx)),
             ),
         );
         columns(left, right).child(footer)
@@ -482,8 +522,15 @@ impl WindowView {
         let config = &cx.global::<AppConfig>().0;
         let (remote_on, background_on) = (config.remote_access, config.terminal_host);
         let back_to = if IOS_APP_URL.is_some() { Step::Install } else { Step::Intro };
-        let back = link("mobile-back", format!("←  {}", rust_i18n::t!("mobile.back")), colors)
-            .on_press(cx, move |this, _, cx| this.go_mobile(back_to, cx));
+        let back = {
+            let label = format!("←  {}", rust_i18n::t!("mobile.back"));
+            Button::new("mobile-back", spoken(&label))
+                .variant(ButtonVariant::Link)
+                .with_size(ButtonSize::Lg)
+                .cursor_pointer()
+                .child(label)
+        }
+        .on_press(cx, move |this, _, cx| this.go_mobile(back_to, cx));
         let mut left = div().flex_1().min_w_0().flex().flex_col().gap(px(18.));
         if IOS_APP_URL.is_some() {
             left = left.child(step_line(2, colors));
@@ -495,26 +542,40 @@ impl WindowView {
                 .items_center()
                 .gap(px(16.))
                 .child(
-                    pill("mobile-done", rust_i18n::t!("mobile.done").into_owned(), true, colors)
+                    Button::new("mobile-done", rust_i18n::t!("mobile.done").into_owned())
+                        .variant(ButtonVariant::Default)
+                        .with_size(ButtonSize::Lg)
+                        .rounded_full()
+                        .font_weight(FontWeight::MEDIUM)
+                        .cursor_pointer()
                         .on_press(cx, |this, window, cx| this.close_mobile(window, cx)),
                 )
                 .child(
-                    link("mobile-again", rust_i18n::t!("mobile.again").into_owned(), colors)
+                    Button::new("mobile-again", rust_i18n::t!("mobile.again").into_owned())
+                        .variant(ButtonVariant::Link)
+                        .with_size(ButtonSize::Lg)
+                        .cursor_pointer()
                         .on_press(cx, |this, _, cx| this.start_mobile_pairing(cx)),
                 );
             // 宿主跑在 app 里时退出 app 远程访问跟着停，提醒一句。
             let background = (!background_on).then(|| {
                 notice("mobile-background", rust_i18n::t!("settings.pairing.background").into_owned(), colors).child(
                     div().pt(px(10.)).child(
-                        pill("mobile-keep", rust_i18n::t!("mobile.keep").into_owned(), false, colors).on_press(
-                            cx,
-                            // 配置重载后窗口跟着重画，这一块就收起来了。
-                            |_, _, cx| {
-                                if let Err(err) = crate::config::set(BACKGROUND_KEY, "true", cx) {
-                                    tracing::warn!("could not turn on {BACKGROUND_KEY}: {err:#}");
-                                }
-                            },
-                        ),
+                        Button::new("mobile-keep", rust_i18n::t!("mobile.keep").into_owned())
+                            .variant(ButtonVariant::Outline)
+                            .with_size(ButtonSize::Lg)
+                            .rounded_full()
+                            .font_weight(FontWeight::MEDIUM)
+                            .cursor_pointer()
+                            .on_press(
+                                cx,
+                                // 配置重载后窗口跟着重画，这一块就收起来了。
+                                |_, _, cx| {
+                                    if let Err(err) = crate::config::set(BACKGROUND_KEY, "true", cx) {
+                                        tracing::warn!("could not turn on {BACKGROUND_KEY}: {err:#}");
+                                    }
+                                },
+                            ),
                     ),
                 )
             });
@@ -551,7 +612,10 @@ impl WindowView {
                         ))
                         .child({
                             let uri = uri.clone();
-                            link("mobile-copy-code", rust_i18n::t!("mobile.copy_code").into_owned(), colors)
+                            Button::new("mobile-copy-code", rust_i18n::t!("mobile.copy_code").into_owned())
+                                .variant(ButtonVariant::Link)
+                                .with_size(ButtonSize::Lg)
+                                .cursor_pointer()
                                 .on_press(cx, move |_, _, cx| {
                                     cx.write_to_clipboard(ClipboardItem::new_string(uri.to_string()))
                                 })
@@ -572,7 +636,10 @@ impl WindowView {
                             colors.fg.opacity(0.5),
                         ))
                         .child(
-                            link("mobile-regenerate", rust_i18n::t!("mobile.regenerate").into_owned(), colors)
+                            Button::new("mobile-regenerate", rust_i18n::t!("mobile.regenerate").into_owned())
+                                .variant(ButtonVariant::Link)
+                                .with_size(ButtonSize::Lg)
+                                .cursor_pointer()
                                 .on_press(cx, |this, _, cx| this.start_mobile_pairing(cx)),
                         ),
                 )
@@ -586,14 +653,24 @@ impl WindowView {
                         if matches!(page.pairing, Pairing::Failed(_)) { "mobile.retry" } else { "mobile.generate" };
                     left.child(
                         div().child(
-                            pill("mobile-generate", rust_i18n::t!(label).into_owned(), true, colors)
+                            Button::new("mobile-generate", rust_i18n::t!(label).into_owned())
+                                .variant(ButtonVariant::Default)
+                                .with_size(ButtonSize::Lg)
+                                .rounded_full()
+                                .font_weight(FontWeight::MEDIUM)
+                                .cursor_pointer()
                                 .on_press(cx, |this, _, cx| this.start_mobile_pairing(cx)),
                         ),
                     )
                 } else {
                     left.child(notice("mobile-off", rust_i18n::t!("mobile.off").into_owned(), colors)).child(
                         div().child(
-                            pill("mobile-turn-on", rust_i18n::t!("mobile.turn_on").into_owned(), true, colors)
+                            Button::new("mobile-turn-on", rust_i18n::t!("mobile.turn_on").into_owned())
+                                .variant(ButtonVariant::Default)
+                                .with_size(ButtonSize::Lg)
+                                .rounded_full()
+                                .font_weight(FontWeight::MEDIUM)
+                                .cursor_pointer()
                                 .on_press(cx, |this, _, cx| this.turn_on_remote_access(cx)),
                         ),
                     )
@@ -817,7 +894,6 @@ fn network_label(interface: &str, addr: IpAddr) -> String {
 #[derive(Clone, Copy)]
 struct Colors {
     fg: Hsla,
-    bg: Hsla,
     /// 浅一档的面，提示块和二维码占位用。
     panel: Hsla,
     hover: Hsla,
@@ -825,7 +901,7 @@ struct Colors {
 
 impl Colors {
     fn new(fg: Rgb, bg: Rgb) -> Self {
-        Self { fg: hsla(fg), bg: hsla(bg), panel: hsla(bg.mix(fg, 0.04)), hover: hsla(bg.mix(fg, 0.08)) }
+        Self { fg: hsla(fg), panel: hsla(bg.mix(fg, 0.04)), hover: hsla(bg.mix(fg, 0.08)) }
     }
 }
 
@@ -834,7 +910,7 @@ fn columns(left: Div, right: Div) -> Div {
     div().flex().flex_col().gap(px(36.)).child(div().flex().items_start().gap(px(48.)).child(left).child(right))
 }
 
-fn footer(back: Stateful<Div>, next: Option<Stateful<Div>>) -> Div {
+fn footer(back: Button, next: Option<Button>) -> Div {
     div().flex().items_center().justify_between().child(back).children(next)
 }
 
@@ -957,47 +1033,6 @@ fn placeholder(text: String, colors: Colors) -> Stateful<Div> {
         .text_color(colors.fg.opacity(0.5))
         .child(svg().path(PHONE_ICON).size(px(28.)).text_color(colors.fg.opacity(0.25)))
         .child(text)
-}
-
-/// 胶囊按钮；`primary` 的实心、字用背景色，其余的描边。
-fn pill(id: &'static str, label: impl Into<SharedString>, primary: bool, colors: Colors) -> Stateful<Div> {
-    let label = label.into();
-    div()
-        .id(id)
-        .role(Role::Button)
-        .aria_label(spoken(&label))
-        .h(scaled(36.))
-        .px(px(20.))
-        .rounded_full()
-        .flex()
-        .items_center()
-        .justify_center()
-        .text_size(FontSize::Medium)
-        .font_weight(FontWeight::MEDIUM)
-        .cursor_pointer()
-        .map(|button| {
-            if primary {
-                button.bg(colors.fg.opacity(0.9)).text_color(colors.bg).hover(|button| button.bg(colors.fg))
-            } else {
-                button.border_1().border_color(colors.fg.opacity(0.18)).hover(|button| button.bg(colors.hover))
-            }
-        })
-        .child(label)
-}
-
-/// 带下划线的文字按钮。
-fn link(id: &'static str, label: impl Into<SharedString>, colors: Colors) -> Stateful<Div> {
-    let label = label.into();
-    div()
-        .id(id)
-        .role(Role::Button)
-        .aria_label(spoken(&label))
-        .text_size(FontSize::Medium)
-        .text_color(colors.fg.opacity(0.75))
-        .underline()
-        .cursor_pointer()
-        .hover(|link| link.text_color(colors.fg))
-        .child(label)
 }
 
 /// 按钮报给辅助工具的名字：去掉画在文字两边的箭头。

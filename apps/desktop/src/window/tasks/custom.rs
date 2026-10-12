@@ -24,6 +24,7 @@ use runode_shared_types::color::Rgb;
 use serde_json::{Map, Value};
 
 use super::{AddTask, EditTask};
+use crate::ui::button::{Button, ButtonVariant};
 use crate::{
     config::AppConfig,
     settings::keybind_caps,
@@ -282,7 +283,6 @@ impl WindowView {
         let panel_bg = hsla(bg.mix(fg, 0.03));
         let hover_bg = hsla(bg.mix(fg, 0.06));
         let primary_bg = hsla(bg.mix(fg, 0.16));
-        let primary_hover_bg = hsla(bg.mix(fg, 0.22));
         let fg = hsla(fg);
         let border = fg.opacity(0.12);
         let field = |label: String, input: &Entity<TextField>| {
@@ -299,19 +299,9 @@ impl WindowView {
                     .child(input.clone()),
             )
         };
-        let button = |id: &'static str, label: String, bg: Hsla, hover: Hsla| {
-            div()
-                .id(id)
-                .role(Role::Button)
-                .aria_label(label.clone())
-                .flex_none()
-                .px(px(12.))
-                .py(px(5.))
-                .rounded(px(6.))
-                .bg(bg)
-                .hover(move |button| button.bg(hover))
-                .cursor_pointer()
-                .child(label)
+        // 对话框底下的按钮：比 `ButtonSize::Default` 高一些，高度由上下留白撑开。
+        let button = |id: &'static str, label: String, variant: ButtonVariant| {
+            Button::new(id, label).variant(variant).h_auto().py(px(5.)).cursor_pointer()
         };
         // 本项目还是所有目录：两段按钮，选中的那段底色亮一些。
         let scope = |id: &'static str, global: bool, label: String, cx: &mut Context<Self>| {
@@ -390,13 +380,13 @@ impl WindowView {
         } else {
             rust_i18n::t!("tasks.hint_project", file = TASKS_FILE_HINT)
         };
-        let cancel = button("add-task-cancel", rust_i18n::t!("tasks.cancel").into_owned(), panel_bg, hover_bg)
+        let cancel = button("add-task-cancel", rust_i18n::t!("tasks.cancel").into_owned(), ButtonVariant::Ghost)
             .on_press(cx, |this, window, cx| this.close_add_task(window, cx));
         let (title, save) = match dialog.editing {
             Some(_) => (rust_i18n::t!("tasks.edit_title"), rust_i18n::t!("tasks.update")),
             None => (rust_i18n::t!("tasks.add_title"), rust_i18n::t!("tasks.save")),
         };
-        let save = button("add-task-save", save.into_owned(), primary_bg, primary_hover_bg)
+        let save = button("add-task-save", save.into_owned(), ButtonVariant::Secondary)
             .when(dialog.saving, |button| button.opacity(0.5))
             .on_press(cx, |this, window, cx| this.save_task(window, cx));
         let (title, scope_label, hint) =

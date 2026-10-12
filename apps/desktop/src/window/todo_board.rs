@@ -51,6 +51,7 @@ use crate::{
     terminal_view::TerminalView,
     ui::{
         a11y::Press,
+        button::{Button, ButtonSize, ButtonVariant},
         font_size::{FontSize, scaled},
         hsla,
         scrollbar::scrollbar,
@@ -62,7 +63,7 @@ use crate::{
 const COLUMN_MIN_WIDTH: f32 = 240.;
 /// 定时那一页里每个定时下面最多列它最近开出的几张任务。
 const RECENT_RUNS: usize = 3;
-/// 强调色：主按钮、落下后的描边、需要你那一列的计数。
+/// 强调色：落下后的描边、需要你那一列的计数。
 const ACCENT: u32 = 0x4F46E5;
 /// 进行中那一列的圆点。
 const IN_PROGRESS_COLOR: u32 = 0x3B82F6;
@@ -534,7 +535,12 @@ impl WindowView {
             .child(new_label)
             .on_press(cx, move |this, window, cx| this.open_todo_dialog(page == Page::Schedules, None, window, cx));
         let close_label = rust_i18n::t!("todo_board.close").into_owned();
-        let close = icon_button("todo-board-close", CLOSE_ICON, close_label, fg, bg)
+        let close = Button::new("todo-board-close", close_label.clone())
+            .icon(CLOSE_ICON)
+            .icon_size(13.)
+            .with_size(ButtonSize::Icon)
+            .cursor_pointer()
+            .tooltip(tooltip(close_label, None))
             .on_press(cx, |this, window, cx| this.close_todo_board(window, cx));
         let header = div()
             .flex_none()
@@ -869,7 +875,7 @@ impl WindowView {
         now: u64,
         agent_id: ElementId,
         corner: Option<Div>,
-        primary: Option<Stateful<Div>>,
+        primary: Option<Button>,
         fg: Rgb,
         bg: Rgb,
         cx: &mut Context<Self>,
@@ -991,19 +997,31 @@ impl WindowView {
         let primary = if todo.started.is_none() && todo.done_at.is_none() {
             let id = id.clone();
             Some(
-                primary_button("todo-start", rust_i18n::t!("todo_board.start").into_owned())
+                Button::new("todo-start", rust_i18n::t!("todo_board.start").into_owned())
+                    .variant(ButtonVariant::Default)
+                    .with_size(ButtonSize::Sm)
+                    .font_weight(FontWeight::MEDIUM)
+                    .cursor_pointer()
                     .on_press(cx, move |this, _, cx| this.start_todo(id.clone(), cx)),
             )
         } else if column == Column::NeedsYou {
             Some(match open_session {
                 Some(session_id) => {
                     let todo = todo.clone();
-                    primary_button("todo-open", rust_i18n::t!("todo_board.open").into_owned())
+                    Button::new("todo-open", rust_i18n::t!("todo_board.open").into_owned())
+                        .variant(ButtonVariant::Default)
+                        .with_size(ButtonSize::Sm)
+                        .font_weight(FontWeight::MEDIUM)
+                        .cursor_pointer()
                         .on_press(cx, move |this, window, cx| this.open_todo_session(session_id, &todo, window, cx))
                 }
                 None => {
                     let id = id.clone();
-                    primary_button("todo-done", rust_i18n::t!("todo_board.finish").into_owned())
+                    Button::new("todo-done", rust_i18n::t!("todo_board.finish").into_owned())
+                        .variant(ButtonVariant::Default)
+                        .with_size(ButtonSize::Sm)
+                        .font_weight(FontWeight::MEDIUM)
+                        .cursor_pointer()
                         .on_press(cx, move |this, _, cx| this.finish_todo(id.clone(), true, cx))
                 }
             })
@@ -1016,28 +1034,46 @@ impl WindowView {
             _ => "start",
         });
         let shown = a11y || board.hovered.as_ref() == Some(&todo.id);
-        let mut buttons: Vec<Stateful<Div>> = Vec::new();
+        let mut buttons: Vec<Button> = Vec::new();
         if shown {
             if let Some(session_id) = open_session.filter(|_| primary_id != Some("open")) {
                 let todo = todo.clone();
+                let label = rust_i18n::t!("todo_board.open").into_owned();
                 buttons.push(
-                    icon_button("todo-open", TERMINAL_ICON, rust_i18n::t!("todo_board.open").into_owned(), fg, bg)
+                    Button::new("todo-open", label.clone())
+                        .icon(TERMINAL_ICON)
+                        .icon_size(13.)
+                        .with_size(ButtonSize::Icon)
+                        .cursor_pointer()
+                        .tooltip(tooltip(label, None))
                         .on_press(cx, move |this, window, cx| this.open_todo_session(session_id, &todo, window, cx)),
                 );
             }
             if primary_id != Some("done") {
                 let done = todo.done_at.is_none();
                 let label = if done { rust_i18n::t!("todo_board.finish") } else { rust_i18n::t!("todo_board.reopen") };
+                let label = label.into_owned();
                 let id = id.clone();
                 buttons.push(
-                    icon_button("todo-done", CHECK_ICON, label.into_owned(), fg, bg)
+                    Button::new("todo-done", label.clone())
+                        .icon(CHECK_ICON)
+                        .icon_size(13.)
+                        .with_size(ButtonSize::Icon)
+                        .cursor_pointer()
+                        .tooltip(tooltip(label, None))
                         .on_press(cx, move |this, _, cx| this.finish_todo(id.clone(), done, cx)),
                 );
             }
             {
                 let todo = todo.clone();
+                let label = rust_i18n::t!("todo_board.edit").into_owned();
                 buttons.push(
-                    icon_button("todo-edit", PENCIL_ICON, rust_i18n::t!("todo_board.edit").into_owned(), fg, bg)
+                    Button::new("todo-edit", label.clone())
+                        .icon(PENCIL_ICON)
+                        .icon_size(13.)
+                        .with_size(ButtonSize::Icon)
+                        .cursor_pointer()
+                        .tooltip(tooltip(label, None))
                         .on_press(cx, move |this, window, cx| {
                             this.open_todo_dialog(false, Some(dialog::Editing::Todo(todo.clone())), window, cx)
                         }),
@@ -1045,15 +1081,15 @@ impl WindowView {
             }
             {
                 let id = id.clone();
+                let label = rust_i18n::t!("todo_board.remove_todo").into_owned();
                 buttons.push(
-                    icon_button(
-                        "todo-remove",
-                        TRASH_ICON,
-                        rust_i18n::t!("todo_board.remove_todo").into_owned(),
-                        fg,
-                        bg,
-                    )
-                    .on_press(cx, move |this, window, cx| this.remove_todo(id.clone(), window, cx)),
+                    Button::new("todo-remove", label.clone())
+                        .icon(TRASH_ICON)
+                        .icon_size(13.)
+                        .with_size(ButtonSize::Icon)
+                        .cursor_pointer()
+                        .tooltip(tooltip(label, None))
+                        .on_press(cx, move |this, window, cx| this.remove_todo(id.clone(), window, cx)),
                 );
             }
         }
@@ -1232,27 +1268,27 @@ impl WindowView {
             .collect();
         let edit = {
             let schedule = schedule.clone();
-            icon_button(
-                "todo-schedule-edit",
-                PENCIL_ICON,
-                rust_i18n::t!("todo_board.edit_schedule").into_owned(),
-                fg,
-                bg,
-            )
-            .on_press(cx, move |this, window, cx| {
-                this.open_todo_dialog(true, Some(dialog::Editing::Schedule(schedule.clone())), window, cx)
-            })
+            let label = rust_i18n::t!("todo_board.edit_schedule").into_owned();
+            Button::new("todo-schedule-edit", label.clone())
+                .icon(PENCIL_ICON)
+                .icon_size(13.)
+                .with_size(ButtonSize::Icon)
+                .cursor_pointer()
+                .tooltip(tooltip(label, None))
+                .on_press(cx, move |this, window, cx| {
+                    this.open_todo_dialog(true, Some(dialog::Editing::Schedule(schedule.clone())), window, cx)
+                })
         };
         let remove = {
             let id = schedule.id.clone();
-            icon_button(
-                "todo-schedule-remove",
-                TRASH_ICON,
-                rust_i18n::t!("todo_board.remove_schedule").into_owned(),
-                fg,
-                bg,
-            )
-            .on_press(cx, move |this, _, cx| this.remove_schedule(id.clone(), cx))
+            let label = rust_i18n::t!("todo_board.remove_schedule").into_owned();
+            Button::new("todo-schedule-remove", label.clone())
+                .icon(TRASH_ICON)
+                .icon_size(13.)
+                .with_size(ButtonSize::Icon)
+                .cursor_pointer()
+                .tooltip(tooltip(label, None))
+                .on_press(cx, move |this, _, cx| this.remove_schedule(id.clone(), cx))
         };
         div()
             .id(named("todo-schedule", &schedule.id))
@@ -1292,47 +1328,6 @@ impl WindowView {
             )
             .child(div().flex_none().flex().items_start().gap(px(2.)).child(edit).child(remove))
     }
-}
-
-/// 只有图标的小按钮，名字（辅助工具读的、悬停提示）写它做什么。
-fn icon_button(id: &'static str, icon: &'static str, label: String, fg: Rgb, bg: Rgb) -> Stateful<Div> {
-    let fg_h = hsla(fg);
-    div()
-        .id(id)
-        .role(Role::Button)
-        .aria_label(label.clone())
-        .flex_none()
-        .size(px(24.))
-        .flex()
-        .items_center()
-        .justify_center()
-        .rounded(px(4.))
-        .cursor_pointer()
-        .hover(move |button| button.bg(hsla(bg.mix(fg, 0.08))))
-        .tooltip(tooltip(label, None))
-        .child(svg().path(icon).size(px(13.)).text_color(fg_h.opacity(0.7)))
-}
-
-/// 卡片右下角的主按钮：强调色的底，写它做什么。
-fn primary_button(id: &'static str, label: String) -> Stateful<Div> {
-    let accent = gpui::rgb(ACCENT);
-    div()
-        .id(id)
-        .role(Role::Button)
-        .aria_label(label.clone())
-        .flex_none()
-        .h(scaled(22.))
-        .px(px(10.))
-        .flex()
-        .items_center()
-        .rounded(px(6.))
-        .bg(accent)
-        .hover(move |button| button.bg(Hsla::from(accent).opacity(0.85)))
-        .cursor_pointer()
-        .text_size(FontSize::Small)
-        .font_weight(FontWeight::MEDIUM)
-        .text_color(gpui::white())
-        .child(label)
 }
 
 /// 卡片的阴影：平时浅浅一层，`lifted`（飞着、提示条）时浮起来；`ring` 是落下后描的那圈强调色的浓淡。

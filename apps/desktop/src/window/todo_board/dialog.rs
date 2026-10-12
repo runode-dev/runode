@@ -15,6 +15,7 @@ use runode_protocol::{
 use runode_shared_types::color::Rgb;
 
 use super::store;
+use crate::ui::button::{Button, ButtonVariant};
 use crate::{
     ui::{
         a11y::{Disable as _, Press},
@@ -316,7 +317,6 @@ impl WindowView {
         let panel_bg = hsla(bg.mix(fg, 0.03));
         let hover_bg = hsla(bg.mix(fg, 0.06));
         let primary_bg = hsla(bg.mix(fg, 0.16));
-        let primary_hover_bg = hsla(bg.mix(fg, 0.22));
         let fg_h = hsla(fg);
         let boxed = |child: gpui::AnyElement| {
             div()
@@ -339,19 +339,9 @@ impl WindowView {
                 .child(div().text_color(fg_h.opacity(0.7)).child(label))
                 .child(boxed(child))
         };
-        let button = |id: &'static str, label: String, bg: Hsla, hover: Hsla| {
-            div()
-                .id(id)
-                .role(Role::Button)
-                .aria_label(label.clone())
-                .flex_none()
-                .px(px(12.))
-                .py(px(5.))
-                .rounded(px(6.))
-                .bg(bg)
-                .hover(move |button| button.bg(hover))
-                .cursor_pointer()
-                .child(label)
+        // 对话框底下的按钮：比 `ButtonSize::Default` 高一些，高度由上下留白撑开。
+        let button = |id: &'static str, label: String, variant: ButtonVariant| {
+            Button::new(id, label).variant(variant).h_auto().py(px(5.)).cursor_pointer()
         };
         let pill = |id: gpui::ElementId, label: String, on: bool, role: Role| {
             div()
@@ -507,12 +497,12 @@ impl WindowView {
             (None, true) => rust_i18n::t!("todo_board.new_schedule"),
         }
         .into_owned();
-        let cancel = button("todo-dialog-cancel", rust_i18n::t!("todo_board.cancel").into_owned(), panel_bg, hover_bg)
-            .on_press(cx, |this, window, cx| this.close_todo_dialog(window, cx));
-        let save =
-            button("todo-dialog-save", rust_i18n::t!("todo_board.save").into_owned(), primary_bg, primary_hover_bg)
-                .when(dialog.saving, |button| button.opacity(0.5))
-                .on_press(cx, |this, _, cx| this.save_todo_dialog(cx));
+        let cancel =
+            button("todo-dialog-cancel", rust_i18n::t!("todo_board.cancel").into_owned(), ButtonVariant::Ghost)
+                .on_press(cx, |this, window, cx| this.close_todo_dialog(window, cx));
+        let save = button("todo-dialog-save", rust_i18n::t!("todo_board.save").into_owned(), ButtonVariant::Secondary)
+            .when(dialog.saving, |button| button.opacity(0.5))
+            .on_press(cx, |this, _, cx| this.save_todo_dialog(cx));
         let panel = div()
             .id("todo-dialog")
             .role(Role::Dialog)

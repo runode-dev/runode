@@ -16,11 +16,13 @@ use super::{
     agents::{AGENTS, AgentSpec, CUSTOM_AGENT, agent},
     command_preview, save_recipe, saved_recipe, variable_preview,
 };
+use crate::ui::button::{Button, ButtonSize, ButtonVariant};
 use crate::ui::menu::MenuHost as _;
+use crate::ui::theme::ActiveTheme as _;
 use crate::{
     assets::{CHEVRON_DOWN_ICON, CLOSE_ICON, SPARKLE_ICON, TERMINAL_ICON},
     ui::{
-        a11y::{Disable, Press},
+        a11y::Press,
         font_size::{FontSize, scaled},
         hsla,
         text_area::{TextArea, TextAreaEvent},
@@ -259,8 +261,6 @@ impl WindowView {
         let selected_bg = hsla(bg.mix(fg, 0.16));
         let fg = hsla(fg);
         let border = fg.opacity(0.12);
-        // 主按钮反着来：前景色做底、背景色写字，深浅主题下都最醒目。
-        let (accent, accent_hover) = (hsla(bg_rgb.mix(fg_rgb, 0.88)), hsla(bg_rgb.mix(fg_rgb, 0.75)));
         let mono = self.font_family(cx);
         let section = |key: &str| {
             div()
@@ -280,19 +280,12 @@ impl WindowView {
                 .font_family(mono.clone())
         };
 
-        let close = div()
-            .id("commit-message-close")
-            .role(Role::Button)
-            .aria_label(rust_i18n::t!("git.ai_message.close").into_owned())
-            .flex_none()
-            .size(px(24.))
+        let close = Button::new("commit-message-close", rust_i18n::t!("git.ai_message.close"))
+            .icon(CLOSE_ICON)
+            .icon_size(12.)
+            .with_size(ButtonSize::Icon)
             .rounded(px(6.))
-            .flex()
-            .items_center()
-            .justify_center()
             .cursor_pointer()
-            .hover(move |close| close.bg(hover_bg))
-            .child(svg().path(CLOSE_ICON).size(px(12.)).text_color(fg.opacity(0.6)))
             .on_press(cx, |this, window, cx| this.close_commit_message_dialog(window, cx));
         let header = div()
             .flex()
@@ -469,20 +462,13 @@ impl WindowView {
                     }
                 })
         };
-        let save = div()
-            .id("commit-message-save")
-            .role(Role::Button)
-            .aria_label(rust_i18n::t!("git.ai_message.save").into_owned())
-            .flex_none()
+        let save = Button::new("commit-message-save", rust_i18n::t!("git.ai_message.save"))
+            .variant(ButtonVariant::Outline)
+            .h_auto()
             .px(px(10.))
             .py(px(4.))
-            .rounded(px(6.))
-            .border_1()
-            .border_color(fg.opacity(0.2))
             .cursor_pointer()
-            .hover(move |button| button.bg(hover_bg))
             .when(dialog.saving, |button| button.opacity(0.5))
-            .child(rust_i18n::t!("git.ai_message.save").into_owned())
             .on_press(cx, |this, window, cx| this.save_dialog_recipe(window, cx));
         let status = match &dialog.status {
             Some(Status::Saved) => Some((rust_i18n::t!("git.ai_message.saved").into_owned(), fg.opacity(0.5))),
@@ -499,33 +485,20 @@ impl WindowView {
                 .child(text)
         });
         let blocker = self.commit_message_blocker(&dialog.root);
-        let on_accent = hsla(bg_rgb);
-        let generate = div()
-            .id("commit-message-generate")
-            .role(Role::Button)
-            .aria_label(rust_i18n::t!("git.ai_message.generate").into_owned())
-            .flex_none()
-            .px(px(12.))
+        let generate = Button::new("commit-message-generate", rust_i18n::t!("git.ai_message.generate"))
+            .variant(ButtonVariant::Default)
+            .icon(SPARKLE_ICON)
+            .icon_size(13.)
+            .h_auto()
             .py(px(5.))
-            .flex()
-            .items_center()
-            .gap(px(6.))
-            .rounded(px(6.))
-            .bg(accent)
-            .text_color(on_accent)
-            .child(svg().path(SPARKLE_ICON).size(px(13.)).text_color(on_accent))
+            .disabled(blocker.is_some())
             .child(rust_i18n::t!("git.ai_message.generate").into_owned())
-            .child(div().text_color(on_accent.opacity(0.6)).child("⌘↩"))
+            .child(div().text_color(cx.theme().primary_foreground.opacity(0.6)).child("⌘↩"))
             .map(|button| match blocker {
                 Some(reason) => button
-                    .opacity(0.5)
-                    .aria_disabled(true)
                     .aria_description(rust_i18n::t!(reason).into_owned())
                     .tooltip(tooltip(rust_i18n::t!(reason), None)),
-                None => button
-                    .cursor_pointer()
-                    .hover(move |button| button.bg(accent_hover))
-                    .on_press(cx, |this, window, cx| this.generate_from_dialog(window, cx)),
+                None => button.cursor_pointer().on_press(cx, |this, window, cx| this.generate_from_dialog(window, cx)),
             });
         let footer = div()
             .pt(px(12.))

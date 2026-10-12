@@ -15,8 +15,9 @@ use runode_config::{
 
 use super::{
     SettingsView,
-    controls::{CONTROL_HEIGHT, Cards, Colors, Press, button, icon_button, row, switch},
+    controls::{CONTROL_HEIGHT, Cards, Colors, Press, row, switch},
 };
+use crate::ui::button::{Button, ButtonSize, ButtonVariant};
 use crate::ui::font_size::{self, FontSize, scaled};
 
 const KEY: &str = "keybind";
@@ -406,15 +407,17 @@ impl SettingsView {
         let (rows, bad) = self.keybind_rows();
         for (ix, line) in bad {
             let err = keybind::parse(&line).err().unwrap_or_default();
-            let remove =
-                icon_button(("remove-bad-keybind", ix), "icons/minus.svg", rust_i18n::t!("settings.remove"), colors)
-                    .on_press(cx, move |this, _, cx| {
-                        let mut values = this.file.values(KEY);
-                        if ix < values.len() {
-                            values.remove(ix);
-                        }
-                        report(this, &values, cx);
-                    });
+            let remove = Button::new(("remove-bad-keybind", ix), rust_i18n::t!("settings.remove"))
+                .icon("icons/minus.svg")
+                .icon_size(12.)
+                .with_size(ButtonSize::IconSm)
+                .on_press(cx, move |this, _, cx| {
+                    let mut values = this.file.values(KEY);
+                    if ix < values.len() {
+                        values.remove(ix);
+                    }
+                    report(this, &values, cx);
+                });
             out.push(
                 row(line, None, remove, None, Some(rust_i18n::t!("settings.invalid", err = err).into()), colors)
                     .into_any_element(),
@@ -437,7 +440,8 @@ impl SettingsView {
                 out.push(self.render_keybind_row(ix, row, colors, cx).into_any_element());
             }
             if custom {
-                let open = button("keybind-open-config", rust_i18n::t!("settings.open_config").into_owned(), colors)
+                let open = Button::new("keybind-open-config", rust_i18n::t!("settings.open_config").into_owned())
+                    .variant(ButtonVariant::Outline)
                     .on_press(cx, |_, _, cx| crate::config::open(cx));
                 out.push(
                     div()
@@ -490,22 +494,24 @@ impl SettingsView {
         let add_target = Record { row: row.key.clone(), usage: row.usage.clone(), replace: None };
         let adding = recording.as_ref() == Some(&add_target);
         let add_label = rust_i18n::t!("settings.keybind.add").into_owned();
-        let add =
-            icon_button(SharedString::from(format!("keybind-add-{ix}")), "icons/plus.svg", add_label.clone(), colors)
-                .flex_none()
-                .mt(px((CONTROL_HEIGHT * font_size::scale(cx) - 20.) / 2.))
-                .when(!row.bound.is_empty() && !adding, |add| {
-                    add.invisible().group_hover(group.clone(), |add| add.visible())
-                })
-                .tooltip(crate::ui::tooltip::tooltip(add_label, None))
-                .on_press(cx, move |this, window, cx| {
-                    if this.keybinds.target() == Some(&add_target) {
-                        this.keybinds.stop_recording();
-                        cx.notify();
-                    } else {
-                        this.start_recording(add_target.clone(), window, cx);
-                    }
-                });
+        let add = Button::new(SharedString::from(format!("keybind-add-{ix}")), add_label.clone())
+            .icon("icons/plus.svg")
+            .icon_size(12.)
+            .with_size(ButtonSize::IconSm)
+            .flex_none()
+            .mt(px((CONTROL_HEIGHT * font_size::scale(cx) - 20.) / 2.))
+            .when(!row.bound.is_empty() && !adding, |add| {
+                add.invisible().group_hover(group.clone(), |add| add.visible())
+            })
+            .tooltip(crate::ui::tooltip::tooltip(add_label, None))
+            .on_press(cx, move |this, window, cx| {
+                if this.keybinds.target() == Some(&add_target) {
+                    this.keybinds.stop_recording();
+                    cx.notify();
+                } else {
+                    this.start_recording(add_target.clone(), window, cx);
+                }
+            });
 
         let mut keys = div().flex_none().flex().flex_col().items_end().gap(px(6.));
         for (jx, bound) in row.bound.iter().enumerate() {
@@ -513,14 +519,12 @@ impl SettingsView {
             if recording.as_ref() == Some(&target) {
                 let remove_bound = bound.clone();
                 let remove_label = rust_i18n::t!("settings.keybind.remove").into_owned();
-                let remove = icon_button(
-                    SharedString::from(format!("keybind-remove-{ix}-{jx}")),
-                    "icons/ban.svg",
-                    remove_label.clone(),
-                    colors,
-                )
-                .tooltip(crate::ui::tooltip::tooltip(remove_label, None))
-                .on_press(cx, move |this, _, cx| this.remove_bound(&remove_bound, cx));
+                let remove = Button::new(SharedString::from(format!("keybind-remove-{ix}-{jx}")), remove_label.clone())
+                    .icon("icons/ban.svg")
+                    .icon_size(12.)
+                    .with_size(ButtonSize::IconSm)
+                    .tooltip(crate::ui::tooltip::tooltip(remove_label, None))
+                    .on_press(cx, move |this, _, cx| this.remove_bound(&remove_bound, cx));
                 keys = keys.child(div().flex().items_center().gap(px(6.)).child(remove).child(press_box(
                     SharedString::from(format!("keybind-press-{ix}-{jx}")),
                     colors,
@@ -562,22 +566,22 @@ impl SettingsView {
                     keys = keys.join(" "),
                     actions = conflict.others.join(" / ")
                 );
-                let replace = button(
+                let replace = Button::new(
                     SharedString::from(format!("keybind-replace-{ix}")),
                     rust_i18n::t!("settings.keybind.replace").into_owned(),
-                    colors,
                 )
+                .variant(ButtonVariant::Outline)
                 .border_color(colors.accent)
                 .on_press(cx, |this, _, cx| {
                     if let Some(Conflict { target, trigger, .. }) = this.keybinds.conflict.take() {
                         this.apply_recorded(target, &trigger, cx);
                     }
                 });
-                let cancel = button(
+                let cancel = Button::new(
                     SharedString::from(format!("keybind-cancel-{ix}")),
                     rust_i18n::t!("settings.keybind.cancel").into_owned(),
-                    colors,
                 )
+                .variant(ButtonVariant::Outline)
                 .on_press(cx, |this, _, cx| {
                     this.keybinds.stop_recording();
                     cx.notify();
@@ -624,7 +628,8 @@ fn keycap(cap: String, colors: Colors) -> Div {
 
 /// 正在录键的框，点一下不录了。
 fn press_box(id: SharedString, colors: Colors, cx: &mut Context<SettingsView>) -> impl IntoElement {
-    button(id, rust_i18n::t!("settings.keybind.press").into_owned(), colors)
+    Button::new(id, rust_i18n::t!("settings.keybind.press").into_owned())
+        .variant(ButtonVariant::Outline)
         .border_color(colors.accent)
         .text_color(colors.fg.opacity(0.7))
         .on_press(cx, |this, _, cx| {

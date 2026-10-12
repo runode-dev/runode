@@ -6,9 +6,10 @@ use gpui::{AppContext as _, Context, Div, Task};
 
 use super::{
     SettingsView,
-    controls::{Colors, Press, button, row},
+    controls::{Colors, Press, row},
 };
 use crate::ui::a11y::Disable as _;
+use crate::ui::button::{Button, ButtonVariant};
 
 const ERROR_ID: &str = "test-push";
 /// 测试推送用到的配置项，按下时都要已经写回。
@@ -29,7 +30,8 @@ impl SettingsView {
     pub(super) fn render_test_push(&mut self, colors: Colors, cx: &mut Context<Self>) -> Div {
         let sending = matches!(self.test_push, State::Sending { .. });
         let label = if sending { "settings.test_push.sending" } else { "settings.test_push.send" };
-        let send = button("test-push", rust_i18n::t!(label).into_owned(), colors)
+        let send = Button::new("test-push", rust_i18n::t!(label).into_owned())
+            .variant(ButtonVariant::Outline)
             .aria_disabled(sending)
             .on_press(cx, |this, _, cx| this.send_test_push(cx));
         let hint = match self.test_push {

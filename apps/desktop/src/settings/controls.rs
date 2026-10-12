@@ -1,4 +1,4 @@
-//! 设置页里的控件：一行设置的排版，开关、分段选项、按钮、下拉按钮、输入框和色块。颜色取自
+//! 设置页里的控件：一行设置的排版，开关、分段选项、下拉按钮、输入框和色块（按钮用 `Button`）。颜色取自
 //! 终端的前景和背景，和终端窗口的界面一个色调。
 
 use gpui::{
@@ -160,40 +160,6 @@ pub(super) fn row(
         .child(div().flex_none().flex().items_center().gap(px(6.)).children(reset).child(control))
 }
 
-/// 恢复按钮：删掉 runode 配置文件里写的这一项。
-pub(super) fn reset_button(
-    id: impl Into<ElementId>,
-    colors: Colors,
-    cx: &mut Context<SettingsView>,
-    f: impl Fn(&mut SettingsView, &mut Window, &mut Context<SettingsView>) + 'static,
-) -> AnyElement {
-    let label = rust_i18n::t!("settings.reset").into_owned();
-    icon_button(id, "icons/refresh.svg", label.clone(), colors)
-        .tooltip(crate::ui::tooltip::tooltip(label, None))
-        .on_press(cx, f)
-        .into_any_element()
-}
-
-/// 只有图标的按钮；`label` 不显示，报给辅助工具。
-pub(super) fn icon_button(
-    id: impl Into<ElementId>,
-    icon: &'static str,
-    label: impl Into<SharedString>,
-    colors: Colors,
-) -> Stateful<Div> {
-    div()
-        .id(id)
-        .role(Role::Button)
-        .aria_label(label)
-        .size(px(20.))
-        .flex()
-        .items_center()
-        .justify_center()
-        .rounded(px(4.))
-        .hover(|button| button.bg(colors.hover))
-        .child(svg().path(icon).size(px(12.)).text_color(colors.fg.opacity(0.6)))
-}
-
 /// 开关；`label` 是它管的那一项的名字，报给辅助工具。
 pub(super) fn switch(
     id: impl Into<ElementId>,
@@ -262,26 +228,6 @@ pub(super) fn segmented(
                 .on_press(cx, move |this, window, cx| pick(this, &value, window, cx))
                 .child(label)
         }))
-}
-
-/// 普通按钮。
-pub(super) fn button(id: impl Into<ElementId>, label: impl Into<SharedString>, colors: Colors) -> Stateful<Div> {
-    let label = label.into();
-    div()
-        .id(id)
-        .role(Role::Button)
-        .aria_label(label.clone())
-        .h(scaled(CONTROL_HEIGHT))
-        .px(px(12.))
-        .flex()
-        .items_center()
-        .rounded(px(6.))
-        .bg(colors.control)
-        .border_1()
-        .border_color(colors.border)
-        .text_size(FontSize::Body)
-        .hover(|button| button.bg(colors.hover))
-        .child(label)
 }
 
 /// 点开一个列表从里面挑的按钮：显示当前选的，`leading` 放在它左边（比如主题的色块），右边一个

@@ -31,7 +31,7 @@ use gpui::{
 use runode_shared_types::color::Rgb;
 use runode_ui::{
     a11y::{A11yPress, PressDown},
-    button::{Button, ButtonSize},
+    button::{Button, ButtonSize, ButtonVariant},
     font_size::{self, FontSize, scaled},
     hsla,
     icons::{
@@ -538,7 +538,7 @@ impl ActionsPanel {
         // 没登录时每份数据都是同一个错，整页换成登录的说明，不在每段里各说一遍。
         let login = self.data.values().any(|result| matches!(result, Err(err) if err == gh::LOGIN));
         if login {
-            return shell.child(self.render_actions_login(fg, bg, cx));
+            return shell.child(self.render_actions_login(fg, cx));
         }
         let error = self.error.clone().map(|error| {
             div()
@@ -693,7 +693,7 @@ impl ActionsPanel {
     }
 
     /// gh 没登录或令牌失效：说明，和在旁边的终端里跑 `gh auth login` 的按钮。登好以后定时重读时自己恢复。
-    fn render_actions_login(&self, fg: Rgb, bg: Rgb, cx: &mut Context<Self>) -> Div {
+    fn render_actions_login(&self, fg: Rgb, cx: &mut Context<Self>) -> Div {
         let text = rust_i18n::t!("github_actions.login_needed").into_owned();
         let login = |this: &mut Self, _: &mut Window, cx: &mut Context<Self>| {
             this.run_in_terminal(gh::LOGIN_COMMAND.to_owned(), None, cx);
@@ -717,7 +717,12 @@ impl ActionsPanel {
                     .child(text),
             )
             .child(
-                text_button("actions-login", rust_i18n::t!("github_actions.login").into_owned(), fg, bg)
+                Button::new("actions-login", rust_i18n::t!("github_actions.login"))
+                    .variant(ButtonVariant::Outline)
+                    .with_size(ButtonSize::Sm)
+                    .px(px(8.))
+                    .rounded(px(4.))
+                    .text_size(FontSize::Body)
                     .on_click(cx.listener(move |this, _, window, cx| login(this, window, cx)))
                     .on_a11y_press(cx.entity().downgrade(), login),
             )
@@ -1385,22 +1390,4 @@ fn state_label(state: State) -> Cow<'static, str> {
         State::Waiting | State::ActionRequired => rust_i18n::t!("github_actions.state.waiting"),
         State::Pending => rust_i18n::t!("github_actions.state.pending"),
     }
-}
-
-/// 面板里的文字按钮。
-fn text_button(id: &'static str, text: String, fg: Rgb, bg: Rgb) -> Stateful<Div> {
-    div()
-        .id(id)
-        .role(Role::Button)
-        .aria_label(text.clone())
-        .h(scaled(22.))
-        .px(px(8.))
-        .flex()
-        .items_center()
-        .rounded(px(4.))
-        .border_1()
-        .border_color(hsla(fg).opacity(0.12))
-        .text_color(hsla(fg).opacity(0.8))
-        .hover(|button| button.bg(hsla(bg.mix(fg, 0.10))))
-        .child(text)
 }

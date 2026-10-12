@@ -5,6 +5,7 @@
 //! 动作 `ArrangePanes` 弹出一个小浮层选方向（右边、下边、右侧叠放）和个数（1 到 4），左右键换
 //! 方向、数字键或上下键改个数、回车打开、Esc 关掉，也可以用鼠标点。
 
+use crate::ui::button::{Button, ButtonVariant};
 use crate::ui::theme::ActiveTheme as _;
 use gpui::{
     Context, Div, FocusHandle, Focusable, Hsla, KeyDownEvent, Role, SharedString, Stateful, Subscription, Window,
@@ -214,7 +215,6 @@ impl WindowView {
         let panel_bg = hsla(bg.mix(fg, 0.05));
         let selected_bg = hsla(bg.mix(fg, 0.16));
         let hover_bg = hsla(bg.mix(fg, 0.09));
-        let open_hover_bg = hsla(bg.mix(fg, 0.22));
         let fg = hsla(fg);
         let choice = |id: (&'static str, usize), label: SharedString, selected: bool| -> Stateful<Div> {
             div()
@@ -268,16 +268,12 @@ impl WindowView {
                 .gap(px(6.))
                 .child(div().w(px(48.)).flex_none().text_color(fg.opacity(0.6)).child(label))
         };
-        let open = div()
-            .id("arrange-open")
-            .role(Role::Button)
-            .aria_label(rust_i18n::t!("layout.open"))
+        let open = Button::new("arrange-open", rust_i18n::t!("layout.open"))
+            .variant(ButtonVariant::Secondary)
+            .h_auto()
             .px(px(14.))
             .py(px(5.))
             .rounded(px(5.))
-            .bg(selected_bg)
-            .hover(|button| button.bg(open_hover_bg))
-            .child(rust_i18n::t!("layout.open").into_owned())
             .on_press_down(cx, |this, window, cx| this.confirm_arrange(window, cx));
         let panel = div()
             .id("arrange-picker")

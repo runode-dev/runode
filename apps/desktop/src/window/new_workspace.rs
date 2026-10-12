@@ -12,6 +12,7 @@ use gpui::{
 use runode_shared_types::color::Rgb;
 
 use super::{NewWorkspace, TITLEBAR_HEIGHT, WindowView, files::shell_quote, model::home_dir};
+use crate::ui::button::{Button, ButtonSize, ButtonVariant};
 use crate::{
     assets::{CLOSE_ICON, FOLDER_OPEN_ICON, GLOBE_ICON, PLUS_ICON},
     ui::{
@@ -155,8 +156,6 @@ impl WindowView {
         let dialog = self.new_workspace.as_ref()?;
         let panel_bg = hsla(bg.mix(fg, 0.03));
         let hover_bg = hsla(bg.mix(fg, 0.06));
-        let primary_bg = hsla(bg.mix(fg, 0.16));
-        let primary_hover_bg = hsla(bg.mix(fg, 0.22));
         let card_bg = hsla(bg);
         let fg = hsla(fg);
         let border = fg.opacity(0.12);
@@ -227,18 +226,11 @@ impl WindowView {
                         .child(url.clone()),
                 )
                 .child(
-                    div()
-                        .id("new-workspace-clone-go")
-                        .role(Role::Button)
-                        .aria_label(rust_i18n::t!("workspace.clone_to").into_owned())
-                        .flex_none()
-                        .px(px(12.))
+                    Button::new("new-workspace-clone-go", rust_i18n::t!("workspace.clone_to"))
+                        .variant(ButtonVariant::Secondary)
+                        .h_auto()
                         .py(px(5.))
-                        .rounded(px(6.))
-                        .bg(primary_bg)
-                        .hover(move |button| button.bg(primary_hover_bg))
                         .cursor_pointer()
-                        .child(rust_i18n::t!("workspace.clone_to").into_owned())
                         .on_press(cx, |this, window, cx| this.clone_new_workspace(window, cx)),
                 )
         });
@@ -249,16 +241,12 @@ impl WindowView {
             rust_i18n::t!("workspace.create_hint").into_owned().into(),
         )
         .on_press(cx, |this, window, cx| this.new_workspace_dir(None, None, window, cx));
-        let close = div()
-            .id("new-workspace-close")
-            .role(Role::Button)
-            .aria_label(rust_i18n::t!("workspace.close").into_owned())
-            .flex_none()
-            .p(px(4.))
+        let close = Button::new("new-workspace-close", rust_i18n::t!("workspace.close"))
+            .icon(CLOSE_ICON)
+            .icon_size(16.)
+            .with_size(ButtonSize::Icon)
             .rounded(px(6.))
             .cursor_pointer()
-            .hover(move |button| button.bg(hover_bg))
-            .child(svg().path(CLOSE_ICON).size(px(16.)).text_color(fg.opacity(0.7)))
             .on_press(cx, |this, window, cx| this.close_new_workspace(window, cx));
         let title = rust_i18n::t!("workspace.new").into_owned();
         let other = rust_i18n::t!("workspace.other").into_owned();

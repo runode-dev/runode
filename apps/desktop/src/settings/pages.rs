@@ -6,15 +6,17 @@ use runode_shared_types::agent::AgentKind;
 
 use super::{
     Commit, SettingsView,
-    controls::{
-        Cards, Colors, Press, button, chip, dropdown, icon_button, input_box, reset_button, row, segmented, swatch,
-        switch,
-    },
+    controls::{Cards, Colors, Press, chip, dropdown, input_box, row, segmented, swatch, switch},
     picker::{PickItem, PickTarget},
 };
 use crate::{
     i18n::tr,
-    ui::{display_dir, font_size::FontSize, hsla},
+    ui::{
+        button::{Button, ButtonSize, ButtonVariant},
+        display_dir,
+        font_size::FontSize,
+        hsla,
+    },
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -313,10 +315,17 @@ impl SettingsView {
 
     /// runode 的配置文件里写了 `key`、写的又不是默认值时的恢复按钮：写的正是默认值时删掉它也没有变化，
     /// 比如开关拨回默认的那一边。
-    pub(super) fn reset(&self, key: &'static str, colors: Colors, cx: &mut Context<Self>) -> Option<AnyElement> {
+    pub(super) fn reset(&self, key: &'static str, cx: &mut Context<Self>) -> Option<AnyElement> {
         let changed = self.file.has(key) && self.file.values(key) != runode_config::Config::default().values(key);
         changed.then(|| {
-            reset_button(id("reset", key), colors, cx, move |this, _, cx| this.write_or_report(key, Vec::new(), cx))
+            let label = rust_i18n::t!("settings.reset").into_owned();
+            Button::new(id("reset", key), label.clone())
+                .icon("icons/refresh.svg")
+                .icon_size(12.)
+                .with_size(ButtonSize::IconSm)
+                .tooltip(crate::ui::tooltip::tooltip(label, None))
+                .on_press(cx, move |this, _, cx| this.write_or_report(key, Vec::new(), cx))
+                .into_any_element()
         })
     }
 
@@ -342,13 +351,15 @@ impl SettingsView {
                     error.get_or_insert_with(|| rust_i18n::t!("settings.notifications_denied").into_owned());
                 }
                 let open = denied.then(|| {
-                    button("open-notification-settings", rust_i18n::t!("settings.open_notification_settings"), colors)
+                    Button::new("open-notification-settings", rust_i18n::t!("settings.open_notification_settings"))
+                        .variant(ButtonVariant::Outline)
                         .on_click(|_, _, cx| {
                             cx.open_url("x-apple.systempreferences:com.apple.Notifications-Settings.extension")
                         })
                 });
                 let test = notify.then(|| {
-                    button("test-notification", rust_i18n::t!("settings.test_notification"), colors)
+                    Button::new("test-notification", rust_i18n::t!("settings.test_notification"))
+                        .variant(ButtonVariant::Outline)
                         .on_click(|_, _, cx| crate::window::test_notification(cx))
                 });
                 div().flex().items_center().gap(px(8.)).children(open).children(test).child(switch).into_any_element()
@@ -396,7 +407,7 @@ impl SettingsView {
                     .into_any_element()
             }
         };
-        let reset = self.reset(key, colors, cx);
+        let reset = self.reset(key, cx);
         row(key_title(key), Some(key_hint(key)), control, reset, error, colors)
     }
 
@@ -427,7 +438,7 @@ impl SettingsView {
                 (
                     key_title("font-family"),
                     Some(key_hint("font-family")),
-                    self.reset("font-family", colors, cx),
+                    self.reset("font-family", cx),
                     self.errors.get("font-family").cloned(),
                 )
             } else {
@@ -436,19 +447,22 @@ impl SettingsView {
             let current = name.clone();
             let picker = dropdown(("font", ix), title.clone(), None, name, 240., colors)
                 .on_press(cx, move |this, window, cx| this.open_font_picker(ix, Some(current.clone()), window, cx));
-            let remove =
-                (count > 1).then(|| {
-                    icon_button(("remove-font", ix), "icons/minus.svg", rust_i18n::t!("settings.remove"), colors)
-                        .on_press(cx, move |this, _, cx| {
-                            let mut fonts = this.config.font_family.clone();
-                            fonts.remove(ix);
-                            this.write_or_report("font-family", fonts, cx);
-                        })
-                });
+            let remove = (count > 1).then(|| {
+                Button::new(("remove-font", ix), rust_i18n::t!("settings.remove"))
+                    .icon("icons/minus.svg")
+                    .icon_size(12.)
+                    .with_size(ButtonSize::IconSm)
+                    .on_press(cx, move |this, _, cx| {
+                        let mut fonts = this.config.font_family.clone();
+                        fonts.remove(ix);
+                        this.write_or_report("font-family", fonts, cx);
+                    })
+            });
             let control = div().flex().items_center().gap(px(4.)).children(remove).child(picker);
             out = out.child(row(title, hint, control, reset, error, colors));
         }
-        let add = button("add-font", rust_i18n::t!("settings.add_fallback_font").into_owned(), colors)
+        let add = Button::new("add-font", rust_i18n::t!("settings.add_fallback_font").into_owned())
+            .variant(ButtonVariant::Outline)
             .on_press(cx, move |this, window, cx| this.open_font_picker(count, None, window, cx));
         out.child(div().py(px(10.)).flex().child(add))
     }
@@ -462,7 +476,7 @@ impl SettingsView {
     }
 
     fn render_palette(&mut self, colors: Colors, window: &mut Window, cx: &mut Context<Self>) -> Div {
-        let reset = self.reset("palette", colors, cx);
+        let reset = self.reset("palette", cx);
         let error = self.errors.get("palette").cloned();
         let header = row(key_title("palette"), Some(key_hint("palette")), div(), reset, error, colors);
         let cells: Vec<_> = (0..16u8)
@@ -523,7 +537,7 @@ impl SettingsView {
                 })
             })
             .collect();
-        let reset = self.reset(KEY, colors, cx);
+        let reset = self.reset(KEY, cx);
         let error = self.errors.get(KEY).cloned();
         let control = div().flex().gap(px(6.)).children(chips);
         row(key_title(KEY), Some(key_hint(KEY)), control, reset, error, colors)
@@ -554,7 +568,7 @@ impl SettingsView {
                 })
             })
             .collect();
-        let reset = self.reset(KEY, colors, cx);
+        let reset = self.reset(KEY, cx);
         let error = self.errors.get(KEY).cloned();
         div()
             .flex()
@@ -566,7 +580,7 @@ impl SettingsView {
     fn render_config_files(&mut self, colors: Colors, window: &mut Window, cx: &mut Context<Self>) -> Div {
         const KEY: &str = "config-file";
         let files = self.file.values(KEY);
-        let reset = self.reset(KEY, colors, cx);
+        let reset = self.reset(KEY, cx);
         let mut out =
             div().flex().flex_col().child(row(key_title(KEY), Some(key_hint(KEY)), div(), reset, None, colors));
         // 末尾总留一个空的，在里面打字就是加一行。
@@ -577,7 +591,10 @@ impl SettingsView {
             let input = self.field(&id, Commit::Item(KEY, ix), Some(placeholder.into()), window, cx);
             let error = self.errors.get(&id).cloned();
             let remove = (ix < files.len()).then(|| {
-                icon_button(("remove-config-file", ix), "icons/minus.svg", rust_i18n::t!("settings.remove"), colors)
+                Button::new(("remove-config-file", ix), rust_i18n::t!("settings.remove"))
+                    .icon("icons/minus.svg")
+                    .icon_size(12.)
+                    .with_size(ButtonSize::IconSm)
                     .on_press(cx, move |this, _, cx| {
                         let mut files = this.file.values(KEY);
                         files.remove(ix);
@@ -607,9 +624,11 @@ impl SettingsView {
 
     fn render_config_file_actions(&mut self, colors: Colors, cx: &mut Context<Self>) -> Div {
         let path = runode_config::config_path().map(|path| display_dir(&path));
-        let open = button("open-config", rust_i18n::t!("settings.open_config").into_owned(), colors)
+        let open = Button::new("open-config", rust_i18n::t!("settings.open_config").into_owned())
+            .variant(ButtonVariant::Outline)
             .on_press(cx, |_, _, cx| crate::config::open(cx));
-        let reload = button("reload-config", rust_i18n::t!("settings.reload_config").into_owned(), colors)
+        let reload = Button::new("reload-config", rust_i18n::t!("settings.reload_config").into_owned())
+            .variant(ButtonVariant::Outline)
             .on_press(cx, |_, _, cx| crate::config::reload(cx));
         let hint = rust_i18n::t!("settings.config_file_hint", path = path.unwrap_or_default()).into_owned();
         row(
