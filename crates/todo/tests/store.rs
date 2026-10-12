@@ -40,6 +40,7 @@ fn todos_round_trip_and_keep_their_order() {
 
     let session = SessionId(0xabc);
     store.set_started(&b, 150, session, Some((Path::new("/src/app/.worktrees/b"), "runode/b"))).unwrap();
+    assert!(store.set_started("nothere", 150, session, None).is_err());
     let read = store.todo_by_id(&b).unwrap().unwrap();
     assert_eq!(
         (read.started, read.session, read.worktree_dir.as_deref(), read.branch.as_deref(), read.schedule.as_deref()),

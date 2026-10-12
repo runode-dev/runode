@@ -283,30 +283,31 @@ impl Store {
     }
 
     /// 换掉任务要做的事，`done` 给了时改完成的时刻（`Some(None)` 是取消完成）。没有这个任务时为假。
-    pub fn update_todo(&self, id: &str, spec: Option<&TodoSpec>, done_at: Option<Option<u64>>) -> Result<bool> {
-        let mut changed = 0;
+    pub fn update_todo(&mut self, id: &str, spec: Option<&TodoSpec>, done_at: Option<Option<u64>>) -> Result<bool> {
+        let tx = self.conn.transaction().map_err(failed)?;
         if let Some(spec) = spec {
-            changed = self
-                .conn
-                .execute(
-                    "UPDATE todos SET title = ?2, prompt = ?3, dir = ?4, agent = ?5, worktree = ?6 WHERE id = ?1",
-                    params![id, spec.title, spec.prompt, path_bytes(&spec.dir), spec.agent, spec.worktree],
-                )
-                .map_err(failed)?;
+            tx.execute(
+                "UPDATE todos SET title = ?2, prompt = ?3, dir = ?4, agent = ?5, worktree = ?6 WHERE id = ?1",
+                params![id, spec.title, spec.prompt, path_bytes(&spec.dir), spec.agent, spec.worktree],
+            )
+            .map_err(failed)?;
         }
         if let Some(done_at) = done_at {
-            changed = self
-                .conn
-                .execute(
-                    "UPDATE todos SET done_at = ?2, swept = 0 WHERE id = ?1",
-                    params![id, done_at.map(|at| at as i64)],
-                )
-                .map_err(failed)?;
+            tx.execute(
+                "UPDATE todos SET done_at = ?2, swept = 0 WHERE id = ?1",
+                params![id, done_at.map(|at| at as i64)],
+            )
+            .map_err(failed)?;
         }
-        Ok(changed > 0 || self.todo_by_id(id)?.is_some())
+        let exists = tx
+            .query_row("SELECT EXISTS (SELECT 1 FROM todos WHERE id = ?1)", [id], |row| row.get(0))
+            .map_err(failed)?;
+        tx.commit().map_err(failed)?;
+        Ok(exists)
     }
 
-    /// 记下任务开始了：时刻、会话，以及给它开的工作树和分支。
+    /// 记下任务开始了：时刻、会话，以及给它开的工作树和分支。任务已经不在了（开的途中被别的进程删掉）时
+    /// 报错，调用方好收掉刚开的会话和工作树。
     pub fn set_started(
         &self,
         id: &str,
@@ -314,7 +315,8 @@ impl Store {
         session: SessionId,
         worktree: Option<(&Path, &str)>,
     ) -> Result<()> {
-        self.conn
+        let changed = self
+            .conn
             .execute(
                 "UPDATE todos SET started = ?2, session = ?3,
              worktree_dir = COALESCE(?4, worktree_dir), branch = COALESCE(?5, branch)
@@ -328,6 +330,9 @@ impl Store {
                 ],
             )
             .map_err(failed)?;
+        if changed == 0 {
+            return Err(format!("no todo {id}"));
+        }
         Ok(())
     }
 
@@ -359,9 +364,11 @@ impl Store {
 
     /// 删掉任务，返回删掉的那张；没有时为空。
     pub fn remove_todo(&self, id: &str) -> Result<Option<Todo>> {
-        let todo = self.todo_by_id(id)?;
-        self.conn.execute("DELETE FROM todos WHERE id = ?1", [id]).map_err(failed)?;
-        Ok(todo)
+        // 一条语句删掉并取回：先读再删的话，中间别的进程改过的会读成旧的。
+        self.conn
+            .query_row(&format!("DELETE FROM todos WHERE id = ?1 RETURNING {TODO_COLUMNS}"), [id], todo)
+            .optional()
+            .map_err(failed)
     }
 
     /// 把任务挪到 `before` 前面，为空时挪到最后。没有这个任务、或者没有 `before` 时报错。
@@ -420,35 +427,36 @@ impl Store {
     }
 
     /// 改定时，只改给了的部分；改了 `when` 时从 `now` 重新算起。没有这个定时时为假。
-    pub fn update_schedule(&self, id: &str, spec: Option<&TodoSpec>, when: Option<&When>, now: u64) -> Result<bool> {
-        let mut changed = 0;
+    pub fn update_schedule(
+        &mut self,
+        id: &str,
+        spec: Option<&TodoSpec>,
+        when: Option<&When>,
+        now: u64,
+    ) -> Result<bool> {
+        let tx = self.conn.transaction().map_err(failed)?;
         if let Some(spec) = spec {
-            changed = self
-                .conn
-                .execute(
-                    "UPDATE schedules SET title = ?2, prompt = ?3, dir = ?4, agent = ?5, worktree = ?6 WHERE id = ?1",
-                    params![id, spec.title, spec.prompt, path_bytes(&spec.dir), spec.agent, spec.worktree],
-                )
-                .map_err(failed)?;
+            tx.execute(
+                "UPDATE schedules SET title = ?2, prompt = ?3, dir = ?4, agent = ?5, worktree = ?6 WHERE id = ?1",
+                params![id, spec.title, spec.prompt, path_bytes(&spec.dir), spec.agent, spec.worktree],
+            )
+            .map_err(failed)?;
         }
         if let Some(when) = when {
             let (kind, [at, hour, minute, days, minutes]) = when_columns(when);
-            changed = self
-                .conn
-                .execute(
-                    "UPDATE schedules SET kind = ?2, at = ?3, hour = ?4, minute = ?5, days = ?6, minutes = ?7,
+            tx.execute(
+                "UPDATE schedules SET kind = ?2, at = ?3, hour = ?4, minute = ?5, days = ?6, minutes = ?7,
                      last_fired = ?8
                  WHERE id = ?1",
-                    params![id, kind, at, hour, minute, days, minutes, now as i64],
-                )
-                .map_err(failed)?;
+                params![id, kind, at, hour, minute, days, minutes, now as i64],
+            )
+            .map_err(failed)?;
         }
-        if changed > 0 {
-            return Ok(true);
-        }
-        self.conn
+        let exists = tx
             .query_row("SELECT EXISTS (SELECT 1 FROM schedules WHERE id = ?1)", [id], |row| row.get(0))
-            .map_err(failed)
+            .map_err(failed)?;
+        tx.commit().map_err(failed)?;
+        Ok(exists)
     }
 
     /// 记下定时到点了。

@@ -309,3 +309,15 @@ fn a_bad_todo_written_straight_into_the_database_does_not_start() {
     let reply = ask(&mut peer, &ClientMsg::StartTodo { req: 3, id });
     assert!(matches!(reply, HostMsg::Error { req: Some(3), .. }), "{reply:?}");
 }
+
+/// 会话还在时再开始任务直接给出那个会话，任务的目录没了也一样：检查任务内容只管开新会话。
+#[test]
+fn a_running_todo_reopens_after_its_directory_is_gone() {
+    let (_host, dir, mut peer) = board("todo-reopen");
+    let work = dir.join("work");
+    std::fs::create_dir_all(&work).unwrap();
+    let id = add(&mut peer, spec("Reopen", &work, "true"));
+    let session = start(&mut peer, &id);
+    std::fs::remove_dir_all(&work).unwrap();
+    assert_eq!(start(&mut peer, &id), session);
+}

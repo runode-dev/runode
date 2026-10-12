@@ -304,13 +304,14 @@ impl Shared {
         if todo.done_at.is_some() {
             return Err(format!("todo {id} is done"));
         }
-        // 别的程序可以不经宿主直接写库（`runode_todo::Store`），所以要打进 shell 之前再查一遍。
-        check_spec(&todo.spec)?;
         if let Some(session) = todo.session
             && self.registry().sessions.contains_key(&session)
         {
             return Ok(session);
         }
+        // 别的程序可以不经宿主直接写库（`runode_todo::Store`），所以开新会话、打进 shell 之前再查一遍；
+        // 会话还在时上面已经直接给出，不因原目录没了打不开。
+        check_spec(&todo.spec)?;
         if !self.todos.lock().starting.insert(id.to_owned()) {
             return Err(format!("todo {id} is already starting"));
         }
