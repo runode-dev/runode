@@ -77,7 +77,13 @@ pub const KEYS: &[&[&str]] = &[
         "remote-access-push-delay",
     ],
     &["apns-key-file", "apns-key-id", "apns-team-id", "apns-bundle-id"],
-    &["agent-notifications", "agent-notifications-exclude", "agent-done-sound", "agent-blocked-sound"],
+    &[
+        "agent-notifications",
+        "agent-notifications-exclude",
+        "agent-done-sound",
+        "agent-blocked-sound",
+        "agent-split-fold",
+    ],
     &["chat-model", "decision-model"],
     &["config-file"],
     &["keybind"],
@@ -363,6 +369,9 @@ impl Config {
             "apns-bundle-id" => self.apns_bundle_id = text(value),
             "agent-notifications" => {
                 self.agent_notifications = or_default(empty, defaults.agent_notifications, || parse_bool(value))?;
+            }
+            "agent-split-fold" => {
+                self.agent_split_fold = or_default(empty, defaults.agent_split_fold, || parse_bool(value))?;
             }
             "agent-notifications-exclude" => {
                 // 值为空时清空；可以写多行，也可以一行用逗号隔开几个。
@@ -896,6 +905,9 @@ unknown-key = whatever
     fn agent_alerts_can_be_turned_off() {
         let d = Config::default();
         assert!(d.agent_notifications);
+        assert!(d.agent_split_fold);
+        assert!(!load(&["agent-split-fold = false"]).agent_split_fold);
+        assert!(load(&["agent-split-fold = false\nagent-split-fold ="]).agent_split_fold);
         assert_eq!(d.agent_done_sound.as_deref(), Some("Glass"));
         assert_eq!(d.agent_blocked_sound.as_deref(), Some("Ping"));
         let config = load(&["agent-notifications = false\nagent-done-sound = none\nagent-blocked-sound = Funk\n\

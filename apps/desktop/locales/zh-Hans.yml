@@ -645,6 +645,7 @@ settings:
     agent_notifications_exclude: 不提醒的 agent
     agent_done_sound: agent 干完时的提示音
     agent_blocked_sound: agent 等你回答时的提示音
+    agent_split_fold: 折叠 agent 开的分屏
     chat_model: 大模型的默认模型
     decision_model: 决策模型的默认模型
     config_file: 引入的文件
@@ -704,6 +705,7 @@ settings:
     agent_notifications_exclude: 选中的 agent 不发通知也不出提示音，状态标记照常显示。
     agent_done_sound: 系统自带的声音。
     agent_blocked_sound: 系统自带的声音。
+    agent_split_fold: agent 用 runode open 分出的分屏默认折叠成标题条，不占地方，点标题条展开。只在卡片样式的窗口里起作用。
     chat_model: runode-infer 里的一个大模型，不设就是还没选。
     decision_model: runode-infer 里的一个决策模型，本机的或托管的，不设就是还没选。
     config_file: 读完这个文件之后再读的配置文件。相对路径从这个文件所在目录算；路径前加 ? 表示文件可以不存在。

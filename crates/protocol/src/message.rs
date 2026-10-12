@@ -242,7 +242,9 @@ pub enum ClientMsg {
     UiReply { ui: u64, reply: Box<HostMsg> },
     /// 在 app 里开一个新终端，宿主转给 app 的界面，回 `Opened`。`near` 是放在哪个会话的分屏
     /// 旁边，为空时放在最前面那个窗口当前的分屏旁边；`cwd` 为空时沿用旁边那个终端的目录；
-    /// `focus` 为假时不切过去，不打断用户手上的事。
+    /// `focus` 为假时不切过去，不打断用户手上的事。`fold` 说新分屏一开出来折不折叠（只对分出的
+    /// 分屏、卡片样式有用）：为空时按配置项 `agent-split-fold`，`from`（发这条命令的会话）里跑着
+    /// agent 才折叠，要切过去的也不折叠；为真为假时照办。
     Open {
         req: u32,
         placement: Placement,
@@ -252,6 +254,10 @@ pub enum ClientMsg {
         cwd: Option<PathBuf>,
         #[serde(default)]
         focus: bool,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        fold: Option<bool>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        from: Option<SessionId>,
     },
     /// 在 app 里切到显示这个会话的分屏，激活它的窗口，回 `Done`。
     Reveal { req: u32, id: SessionId },

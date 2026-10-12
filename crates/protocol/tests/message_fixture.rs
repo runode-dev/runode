@@ -167,7 +167,18 @@ fn samples() -> BTreeMap<&'static str, Value> {
         ),
         ("list", ClientMsg::ListSessions),
         ("layout_request", ClientMsg::Layout { req: 0 }),
-        ("open", ClientMsg::Open { req: 7, placement: Placement::Tab, near: None, cwd: None, focus: false }),
+        (
+            "open",
+            ClientMsg::Open {
+                req: 7,
+                placement: Placement::Tab,
+                near: None,
+                cwd: None,
+                focus: false,
+                fold: None,
+                from: None,
+            },
+        ),
         (
             "open_workspace",
             ClientMsg::OpenWorkspace { req: 8, dir: "/Users/ethan/dev/中文".into(), focus: false, name: None },

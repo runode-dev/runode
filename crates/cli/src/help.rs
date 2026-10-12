@@ -158,7 +158,7 @@ const OPEN: &str = "\
 Open a terminal in the app and print the new session's id.
 
 Usage: runode open [--tab | --right | --down] [--near SESSION] [--cwd DIR]
-                   [--focus] [-- COMMAND...]
+                   [--focus] [--fold | --no-fold] [-- COMMAND...]
 
 Arguments:
   [COMMAND...]  Typed into the new shell
@@ -172,6 +172,12 @@ Options:
       --cwd DIR       Start in DIR; defaults to SESSION's directory
       --focus         Switch to the new terminal; without it the app stays
                       where it is
+      --fold          Open the split already folded to its title bar; needs
+                      --right or --down and the cards window style, and
+                      cannot be combined with --focus
+      --no-fold       Keep the split unfolded. Without --fold or --no-fold, a
+                      split opened from an agent's terminal is folded unless
+                      the `agent-split-fold` setting is off
   -h, --help          Show this help
 ";
 

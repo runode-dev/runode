@@ -12,8 +12,8 @@ use runode_protocol::{ClientMsg, HostMsg, Placement, SessionId};
 use runode_shared_types::pane::Axis;
 
 use super::persist::format;
-use super::{WindowView, agents::reveal, clipboard, layout_report};
-use crate::host_client;
+use super::{WindowView, agents::reveal, cards, clipboard, layout_report};
+use crate::{config::AppConfig, host_client};
 
 /// 开始收别的进程的请求。
 pub fn serve_requests(cx: &mut App) {
@@ -40,7 +40,7 @@ pub fn serve_requests(cx: &mut App) {
 fn handle(request: ClientMsg, cx: &mut App) -> HostMsg {
     let fail = |req: u32, message: String| HostMsg::Error { req: Some(req), id: None, message };
     match request {
-        ClientMsg::Open { req, placement, near, cwd, focus } => {
+        ClientMsg::Open { req, placement, near, cwd, focus, fold, from } => {
             let target = match near {
                 Some(id) => find_session(id, cx).map(|(window, pane)| (window, Some(pane))),
                 None => front_pane(cx),
@@ -54,8 +54,12 @@ fn handle(request: ClientMsg, cx: &mut App) -> HostMsg {
                     },
                 );
             };
+            // 没说折不折叠时，agent 在自己的终端里分出的分屏按配置项 `agent-split-fold` 默认折叠。
+            let fold = fold.unwrap_or_else(|| {
+                !focus && cx.global::<AppConfig>().0.agent_split_fold && from.is_some_and(|id| runs_agent(id, cx))
+            });
             let opened = window
-                .update(cx, |view, window, cx| view.open_beside(pane, placement, cwd, focus, window, cx))
+                .update(cx, |view, window, cx| view.open_beside(pane, placement, cwd, focus, fold, window, cx))
                 .ok()
                 .flatten();
             match opened {
@@ -126,6 +130,18 @@ pub(super) fn find_session(id: SessionId, cx: &App) -> Option<(WindowHandle<Wind
     windows(cx).into_iter().find_map(|window| Some((window, pane_of(window, id, cx)?)))
 }
 
+/// 这个会话的前台跑着认得出的 agent。
+fn runs_agent(id: SessionId, cx: &App) -> bool {
+    windows(cx).into_iter().filter_map(|window| window.read(cx).ok()).any(|view| {
+        view.workspaces.iter().flat_map(|workspace| &workspace.tabs).flat_map(|tab| &tab.panes).any(
+            |(_, (terminal, _))| {
+                let terminal = terminal.read(cx);
+                terminal.session_id() == Some(id) && terminal.agent().is_some_and(|agent| agent.kind.is_known())
+            },
+        )
+    })
+}
+
 fn pane_of(window: WindowHandle<WindowView>, id: SessionId, cx: &App) -> Option<EntityId> {
     let view = window.read(cx).ok()?;
     view.workspaces
@@ -158,13 +174,17 @@ impl WindowView {
     /// 在 `beside` 这个分屏旁边开一个新终端，返回它的会话。`cwd` 为空时沿用旁边那个终端的
     /// 目录。不切过去（`focus` 为假）时当前的 workspace、标签和焦点都不动，新终端看不见的话
     /// 按旁边那个终端的尺寸现在就启动 shell，别的进程马上就能往里打字。`beside` 为空时当前
-    /// workspace 里没有标签：新终端不管 `placement`，作为它的第一个标签当场显示出来。
+    /// workspace 里没有标签：新终端不管 `placement`，作为它的第一个标签当场显示出来。`fold` 为真
+    /// 时分出来的新分屏直接折叠；经典样式没有标题条可收，标签里没有别的展开着的分屏时也折不了，
+    /// 都照常展开。
+    #[allow(clippy::too_many_arguments)]
     fn open_beside(
         &mut self,
         beside: Option<EntityId>,
         placement: Placement,
         cwd: Option<PathBuf>,
         focus: bool,
+        fold: bool,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Option<SessionId> {
@@ -200,6 +220,9 @@ impl WindowView {
                 tab.panes.insert(id, entry);
                 // 放大着时新分屏看不见。
                 tab.zoomed = false;
+                if fold && cards(cx) && tab.fold_successor(id).is_some() {
+                    tab.collapsed.insert(id);
+                }
             }
         }
         if !focus {

@@ -241,8 +241,13 @@ mod tests {
             let group = without(&full, &["file-tree-preview-click", "preview-font-size"]);
             assert_eq!(fill_missing_keys(&group, &locale), full);
             // agent 通知这一组是后来加的，旧配置文件整组都没有。
-            let agents =
-                ["agent-notifications", "agent-notifications-exclude", "agent-done-sound", "agent-blocked-sound"];
+            let agents = [
+                "agent-notifications",
+                "agent-notifications-exclude",
+                "agent-done-sound",
+                "agent-blocked-sound",
+                "agent-split-fold",
+            ];
             assert_eq!(fill_missing_keys(&without(&full, &agents), &locale), full);
             assert_eq!(fill_missing_keys(&full, &locale), full);
         }

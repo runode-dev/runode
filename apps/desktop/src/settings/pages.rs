@@ -186,6 +186,7 @@ impl Page {
                 Row("agent-done-sound", Sound),
                 Row("agent-blocked-sound", Sound),
                 AgentExclude,
+                Row("agent-split-fold", Switch),
             ],
             Self::Decision => &[Decision],
             Self::Remote => &[

@@ -44,6 +44,7 @@ pub(crate) enum Command {
         near: Option<Selector>,
         cwd: Option<PathBuf>,
         focus: bool,
+        fold: Option<bool>,
         command: String,
     },
     Kill {
@@ -163,6 +164,12 @@ pub(crate) fn parse(args: &[String]) -> Result<Command, String> {
             }
             "--cwd" => flags.cwd = Some(value(&mut rest, arg)?.into()),
             "--focus" => flags.focus = true,
+            "--fold" | "--no-fold" => {
+                let fold = arg == "--fold";
+                if flags.fold.replace(fold).is_some_and(|before| before != fold) {
+                    return Err("give only one of --fold and --no-fold".into());
+                }
+            }
             // 单独一个 `-` 是位置参数（`send` 从标准输入读）。
             option if option.starts_with('-') && option != "-" => return Err(format!("unknown option {option}")),
             _ => words.push(arg.clone()),
@@ -235,13 +242,25 @@ pub(crate) fn parse(args: &[String]) -> Result<Command, String> {
             }
             Command::Wait { session: Selector::parse(target)?, until, timeout: flags.timeout.take() }
         }
-        "open" => Command::Open {
-            placement: flags.placement.take().unwrap_or(Placement::Tab),
-            near: flags.near.take(),
-            cwd: flags.cwd.take(),
-            focus: std::mem::take(&mut flags.focus),
-            command: words.join(" "),
-        },
+        "open" => {
+            let placement = flags.placement.take().unwrap_or(Placement::Tab);
+            let fold = flags.fold.take();
+            // `--no-fold` 在新标签里无事可做，放行，免得脚本白白失败。
+            if fold == Some(true) && placement == Placement::Tab {
+                return Err("--fold needs --right or --down".into());
+            }
+            if fold == Some(true) && flags.focus {
+                return Err("--fold and --focus cannot be used together".into());
+            }
+            Command::Open {
+                placement,
+                near: flags.near.take(),
+                cwd: flags.cwd.take(),
+                focus: std::mem::take(&mut flags.focus),
+                fold,
+                command: words.join(" "),
+            }
+        }
         "kill" => {
             no_more(words, 1, name)?;
             Command::Kill { session: Selector::parse(words.first().ok_or("kill needs a SESSION")?)? }
@@ -324,6 +343,7 @@ struct Flags {
     near: Option<Selector>,
     cwd: Option<PathBuf>,
     focus: bool,
+    fold: Option<bool>,
     addrs: Vec<IpAddr>,
 }
 
@@ -345,6 +365,7 @@ impl Flags {
             (self.near.is_some(), "--near"),
             (self.cwd.is_some(), "--cwd"),
             (self.focus, "--focus"),
+            (self.fold.is_some(), "--fold or --no-fold"),
             (!self.addrs.is_empty(), "--addr"),
         ]
         .into_iter()
@@ -534,6 +555,7 @@ mod tests {
                 near: None,
                 cwd: None,
                 focus: false,
+                fold: None,
                 command: String::new()
             })
         );
@@ -544,9 +566,27 @@ mod tests {
                 near: Some(id("ab12")),
                 cwd: Some("/tmp".into()),
                 focus: true,
+                fold: None,
                 command: "claude --model opus".into(),
             })
         );
+        assert_eq!(
+            parse("open --down --fold"),
+            Ok(Command::Open {
+                placement: Placement::Down,
+                near: None,
+                cwd: None,
+                focus: false,
+                fold: Some(true),
+                command: String::new()
+            })
+        );
+        assert!(matches!(parse("open --down --no-fold"), Ok(Command::Open { fold: Some(false), .. })));
+        assert!(parse("open --down --fold --no-fold").unwrap_err().contains("only one"));
+        assert!(parse("open --fold").unwrap_err().contains("--right or --down"));
+        assert!(matches!(parse("open --no-fold"), Ok(Command::Open { fold: Some(false), .. })));
+        assert!(parse("open --right --fold --focus").unwrap_err().contains("cannot be used together"));
+        assert!(parse("kill ab12 --fold").unwrap_err().contains("--fold"));
         assert_eq!(parse("kill ab12"), Ok(Command::Kill { session: id("ab12") }));
         assert_eq!(parse("focus"), Ok(Command::Focus { session: None }));
         assert!(parse("open --right --down").unwrap_err().contains("only one"));

@@ -167,6 +167,9 @@ pub struct Config {
     pub agent_notifications: bool,
     /// 这些 agent 不发通知也不出提示音，标记照常显示。
     pub agent_notifications_exclude: Vec<AgentKind>,
+    /// agent 在自己的终端里用 `runode open --right`、`--down` 分出的分屏默认折叠，不抢终端区的地方；
+    /// 命令行的 `--fold`、`--no-fold` 优先。
+    pub agent_split_fold: bool,
     /// agent 干完了、等用户回答时播放的系统声音名；`None` 表示不出声。
     pub agent_done_sound: Option<String>,
     pub agent_blocked_sound: Option<String>,
@@ -242,6 +245,7 @@ impl Default for Config {
             language: None,
             agent_notifications: true,
             agent_notifications_exclude: Vec::new(),
+            agent_split_fold: true,
             agent_done_sound: Some("Glass".into()),
             agent_blocked_sound: Some("Ping".into()),
             chat_model: None,

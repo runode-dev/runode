@@ -421,7 +421,15 @@ fn window_requests_go_to_the_desktop_connection() {
     let (_host, socket) = listen(&dir);
     let mut desktop = Peer::desktop(&socket);
     let mut cli = Peer::hello(&socket, false);
-    let open = ClientMsg::Open { req: 4, placement: Placement::Right, near: None, cwd: None, focus: true };
+    let open = ClientMsg::Open {
+        req: 4,
+        placement: Placement::Right,
+        near: None,
+        cwd: None,
+        focus: true,
+        fold: None,
+        from: None,
+    };
     cli.send(&open);
     let forwarded = answer_ui(&mut desktop, |_| HostMsg::Opened { req: 4, id: SessionId(9) });
     assert_eq!(forwarded, open);
@@ -525,7 +533,15 @@ fn window_requests_without_a_desktop_fail() {
     let dir = temp_dir("nowindow");
     let (_host, socket) = listen(&dir);
     let mut peer = Peer::hello(&socket, false);
-    peer.send(&ClientMsg::Open { req: 2, placement: Placement::Tab, near: None, cwd: None, focus: false });
+    peer.send(&ClientMsg::Open {
+        req: 2,
+        placement: Placement::Tab,
+        near: None,
+        cwd: None,
+        focus: false,
+        fold: None,
+        from: None,
+    });
     assert!(
         matches!(peer.reply(), HostMsg::Error { req: Some(2), message, .. } if message.contains("no runode window"))
     );

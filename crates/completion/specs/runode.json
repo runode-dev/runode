@@ -101,7 +101,9 @@
           "args": { "name": "session", "generatorName": "sessions" }
         },
         { "name": "--cwd", "description": "Start the shell in DIR", "args": { "name": "DIR", "template": "folders" } },
-        { "name": "--focus", "description": "Switch the app to the new terminal" }
+        { "name": "--focus", "description": "Switch the app to the new terminal" },
+        { "name": "--fold", "description": "Open the split already folded (with --right or --down)" },
+        { "name": "--no-fold", "description": "Keep the split unfolded, even from an agent's terminal" }
       ]
     },
     {

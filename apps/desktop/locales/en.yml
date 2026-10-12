@@ -645,6 +645,7 @@ settings:
     agent_notifications_exclude: Agents without alerts
     agent_done_sound: Sound when an agent finishes
     agent_blocked_sound: Sound when an agent needs you
+    agent_split_fold: Fold splits opened by agents
     chat_model: Default chat model
     decision_model: Default decision model
     config_file: Included files
@@ -704,6 +705,7 @@ settings:
     agent_notifications_exclude: These agents get neither notifications nor sounds; their status marks still show.
     agent_done_sound: A system sound.
     agent_blocked_sound: A system sound.
+    agent_split_fold: An agent running `runode open --right` or `--down` gets a split folded to its title bar, so it does not take room; click the title bar to unfold. Cards window style only.
     chat_model: A chat model from runode-infer; None means not picked yet.
     decision_model: A decision model from runode-infer, local or hosted; None means not picked yet.
     config_file: Other configuration files to read after this one. Relative paths start from this file's folder; a leading ? means the file may be missing.

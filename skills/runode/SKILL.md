@@ -54,6 +54,12 @@ again and again until the panes are too thin to read.
 the user a terminal later, `runode focus SESSION` brings its pane and window to
 the front.
 
+A split opened from your terminal is folded down to its title bar so it takes
+no room; the program keeps running and the user unfolds it by clicking the bar.
+Add `--no-fold` for a split the user should see right away (a review, a result
+to read), or `--fold` to force it. Both only work with `--right` or `--down`,
+and `--fold` cannot be combined with `--focus`.
+
 ## Run a command and wait for it
 
 ```sh
@@ -136,8 +142,9 @@ team's list to start, so give it its task only once the list is there; a
 "read ahead and wait for me" prompt only makes it look stuck while you wait.
 
 ```sh
-red=$(runode open --right -- claude)
-blue=$(runode open --near "$red" --down -- pi)
+# --no-fold: the user asked for these agents, so they should see them work.
+red=$(runode open --right --no-fold -- claude)
+blue=$(runode open --near "$red" --down --no-fold -- pi)
 runode wait "$red" --for idle --timeout 60
 runode wait "$blue" --for idle --timeout 60
 

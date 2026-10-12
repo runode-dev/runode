@@ -95,7 +95,7 @@ impl Tab {
     }
 
     /// 折叠这个分屏时接替它的分屏：标签里另一个展开着的；没有时不能折叠。
-    fn fold_successor(&self, id: EntityId) -> Option<EntityId> {
+    pub(super) fn fold_successor(&self, id: EntityId) -> Option<EntityId> {
         self.root.leaves().into_iter().find(|other| *other != id && !self.folded(*other))
     }
 

@@ -136,6 +136,7 @@ impl Config {
             "apns-team-id" => self.apns_team_id.iter().cloned().collect(),
             "apns-bundle-id" => self.apns_bundle_id.iter().cloned().collect(),
             "agent-notifications" => bool(self.agent_notifications),
+            "agent-split-fold" => bool(self.agent_split_fold),
             "agent-notifications-exclude" => {
                 self.agent_notifications_exclude.iter().map(|kind| kind.label().to_owned()).collect()
             }

@@ -154,15 +154,16 @@ pub(crate) fn run(command: Command, env: &Env, out: &mut dyn Write, err: &mut dy
             let (_, meta) = attach(&connection, info.id)?;
             wait_until(&mut Watch { env, connection, id: info.id }, &meta, &until, timeout, None, out)?;
         }
-        Command::Open { placement, near, cwd, focus, command } => {
+        Command::Open { placement, near, cwd, focus, fold, command } => {
             let connection = Connection::open(env)?;
             let near = match near.or_else(|| env.session.as_ref().map(|_| Selector::Own)) {
                 Some(near) => Some(resolve(&connection, env, &near)?.id),
                 None => None,
             };
             let cwd = cwd.map(|dir| std::env::current_dir().map(|here| here.join(dir))).transpose()?;
+            let from = env.session.as_deref().and_then(|id| id.parse().ok());
             let req = connection.req();
-            connection.send(&ClientMsg::Open { req, placement, near, cwd, focus })?;
+            connection.send(&ClientMsg::Open { req, placement, near, cwd, focus, fold, from })?;
             let id = match connection.reply()? {
                 HostMsg::Opened { id, .. } => id,
                 other => return Err(unexpected(&other)),

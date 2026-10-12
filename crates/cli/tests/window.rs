@@ -61,6 +61,8 @@ fn open_beside_your_own_session() {
             near: Some(SessionId(MINE)),
             cwd: Some(here.join("sub")),
             focus: false,
+            fold: None,
+            from: Some(SessionId(MINE)),
         }
     );
 }
@@ -80,6 +82,8 @@ fn open_types_the_command_into_the_new_terminal() {
         near: None,
         cwd: None,
         focus: true,
+        fold: None,
+        from: None,
     })));
     let inputs: Vec<_> = received.into_iter().filter(|r| matches!(r, Received::Input(..))).collect();
     assert_eq!(inputs, [Received::Input(5, b"claude fix it".to_vec()), Received::Input(5, b"\r".to_vec())]);

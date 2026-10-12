@@ -166,7 +166,15 @@ fn client_messages_round_trip() {
             ui: 9,
             reply: Box::new(HostMsg::Error { req: Some(1), id: None, message: "no window".into() }),
         },
-        ClientMsg::Open { req: 10, placement: Placement::Down, near: Some(ID), cwd: Some("/tmp".into()), focus: true },
+        ClientMsg::Open {
+            req: 10,
+            placement: Placement::Down,
+            near: Some(ID),
+            cwd: Some("/tmp".into()),
+            focus: true,
+            fold: Some(true),
+            from: Some(ID),
+        },
         ClientMsg::Reveal { req: 11, id: ID },
         ClientMsg::ListDirs { req: 12, path: None },
         ClientMsg::ListDirs { req: 13, path: Some("/Users/me/中文".into()) },
@@ -287,6 +295,8 @@ fn host_messages_round_trip() {
                 near: None,
                 cwd: None,
                 focus: false,
+                fold: None,
+                from: None,
             }),
         },
         HostMsg::UiRequest { ui: 3, request: Box::new(ClientMsg::WriteClipboard { id: ID, text: "x".into() }) },
@@ -398,7 +408,18 @@ fn random_session_ids_differ() {
 #[test]
 fn open_fills_in_defaults() {
     let open: ClientMsg = serde_json::from_str(r#"{"type":"open","req":4,"placement":"right"}"#).unwrap();
-    assert_eq!(open, ClientMsg::Open { req: 4, placement: Placement::Right, near: None, cwd: None, focus: false });
+    assert_eq!(
+        open,
+        ClientMsg::Open {
+            req: 4,
+            placement: Placement::Right,
+            near: None,
+            cwd: None,
+            focus: false,
+            fold: None,
+            from: None
+        }
+    );
     let opened = HostMsg::Opened { req: 4, id: SessionId(7) };
     assert_eq!(serde_json::from_str::<HostMsg>(&serde_json::to_string(&opened).unwrap()).unwrap(), opened);
 }
