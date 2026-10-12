@@ -263,7 +263,7 @@ impl WindowView {
         let project = &mut self.workspace_mut().project;
         if project.git_panel.active.as_deref() != Some(root) {
             project.git_panel.active = Some(root.to_path_buf());
-            project.git_panel.rebuild(project.git.as_ref());
+            project.git_panel.rebuild(project.git.as_deref());
         }
     }
 
@@ -282,7 +282,7 @@ impl WindowView {
         let panel = &mut project.git_panel;
         if (panel.tree, panel.show_subs, panel.show_worktrees) != view {
             (panel.tree, panel.show_subs, panel.show_worktrees) = view;
-            panel.rebuild(project.git.as_ref());
+            panel.rebuild(project.git.as_deref());
         }
         // 显示着的各个仓库的提交说明框；多个仓库时收起的块不显示说明框。
         let shown: Vec<_> = match &self.workspace().project.git {
@@ -577,7 +577,7 @@ impl WindowView {
                 // 辅助工具按下时不经过 `render_git_item` 的鼠标捕获，这里补记是哪一块。
                 this.set_git_active(&root);
                 let project = &mut this.workspace_mut().project;
-                project.git_panel.toggle_repo(&root, expanded, project.git.as_ref());
+                project.git_panel.toggle_repo(&root, expanded, project.git.as_deref());
                 cx.notify();
             })
             .when(worktree, |title| {

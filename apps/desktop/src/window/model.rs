@@ -72,10 +72,8 @@ pub(super) fn workspace_name(dir: &Path) -> String {
     root.file_name().map_or_else(|| dir.display().to_string(), |name| name.to_string_lossy().into_owned())
 }
 
-/// 路径的最后一段，用在标签、提示和列表里；没有最后一段（比如 `/`）时写整个路径。
-pub(super) fn base_name(path: &Path) -> String {
-    path.file_name().map_or_else(|| path.display().to_string(), |name| name.to_string_lossy().into_owned())
-}
+// 路径的最后一段在 `runode_ui`，预览栏也用；窗口里照旧从这里引。
+pub(super) use crate::ui::base_name;
 
 /// workspace 的标识，挪动位置后不变。
 pub(super) type WorkspaceId = u64;
@@ -380,10 +378,10 @@ impl WindowView {
         self.mobile = None;
         self.todo_board = None;
         self.todo_dialog = None;
+        // 焦点要交给终端，盖着终端的放大预览栏还原。
+        self.restore_preview_zoom(cx);
         let workspace = self.workspace_mut();
         workspace.active = ix;
-        // 焦点要交给终端，盖着终端的放大预览栏还原。
-        workspace.project.previews.maximized = false;
         if let Some(tab) = workspace.tabs.get_mut(ix) {
             tab.bell = false;
             if reveal_now {
@@ -630,7 +628,8 @@ impl WindowView {
             window.remove_window();
             return;
         }
-        self.workspaces.remove(ix);
+        let id = self.workspaces.remove(ix).id;
+        self.forget_previews(id, cx);
         let active =
             if ix < self.active || self.active == self.workspaces.len() { self.active - 1 } else { self.active };
         self.activate_workspace(active, window, cx);

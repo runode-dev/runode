@@ -4,26 +4,20 @@
 use std::ops::Range;
 
 use gpui::{
-    AnyElement, App, Axis, Bounds, Context, FontStyle, FontWeight, HighlightStyle, ImageSource,
+    AnyElement, Axis, Bounds, Context, FontStyle, FontWeight, HighlightStyle, ImageSource,
     ListHorizontalSizingBehavior, MouseButton, MouseDownEvent, MouseMoveEvent, Role, SMOOTH_SVG_SCALE_FACTOR,
     SharedString, StyledText, Window, canvas, div, fill, img, point, prelude::*, px, size, uniform_list,
 };
-use runode_shared_types::{color::Rgb, theme};
+use runode_shared_types::color::Rgb;
+use runode_ui::{
+    hsla,
+    panel::{ADDED, MODIFIED, PANE_HEADER_HEIGHT, REMOVED, RENAMED, TITLEBAR_HEIGHT, panel_message},
+    scrollbar::{row_markers, scrollbar},
+};
 
 use super::{
-    BODY_PADDING, Loaded, MAX_COLUMNS, Note, Preview, ROW_EXTRA_HEIGHT, marks::Mark, right_fade, wrap::segment,
-};
-use crate::{
-    config::AppConfig,
-    ui::{
-        hsla,
-        scrollbar::{row_markers, scrollbar},
-    },
-    window::{
-        PANE_HEADER_HEIGHT, TITLEBAR_HEIGHT, WindowView,
-        project::{ADDED, MODIFIED, REMOVED, RENAMED, panel_message},
-        status_bar,
-    },
+    BODY_PADDING, Loaded, MAX_COLUMNS, Note, Preview, PreviewPanel, ROW_EXTRA_HEIGHT, marks::Mark, right_fade,
+    wrap::segment,
 };
 
 /// 改动标记的宽度；只删了行的地方在下一行顶上画一小段，这么高。
@@ -37,17 +31,6 @@ pub(super) const WRAP_SLACK: f32 = 4.;
 const CHECKER_LIGHT: Rgb = Rgb(0xFF, 0xFF, 0xFF);
 const CHECKER_DARK: Rgb = Rgb(0xE4, 0xE4, 0xE4);
 const CHECKER_CELL: f32 = 8.;
-
-/// 当前终端主题的 ANSI 16 色：默认配色上盖上配置里改过的那几项。
-pub(super) fn ansi_palette(cx: &App) -> [Rgb; 16] {
-    let mut colors = theme::ANSI;
-    for &(ix, rgb) in &cx.global::<AppConfig>().0.palette {
-        if let Some(slot) = colors.get_mut(usize::from(ix)) {
-            *slot = rgb;
-        }
-    }
-    colors
-}
 
 /// 一行显示出来的文字：制表符展开，太长的截断后带省略号。换行按它折。
 pub(super) fn shown_text(line: &str) -> String {
@@ -72,7 +55,7 @@ pub(super) fn highlight_style(style: runode_preview::Style, fg: Rgb, palette: &[
     }
 }
 
-impl WindowView {
+impl PreviewPanel {
     /// 预览栏的正文：说明、图片、SVG、diff 或者文本的行，按读到的内容画；字号按配置的预览字号。
     #[allow(clippy::too_many_arguments)]
     pub(super) fn render_preview_body(
@@ -85,7 +68,7 @@ impl WindowView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let font_size = cx.global::<AppConfig>().0.preview_font_size;
+        let font_size = self.input.font_size;
         match &preview.content {
             None => div().flex_1().into_any_element(),
             Some(Loaded::Note(note)) => {
@@ -126,7 +109,7 @@ impl WindowView {
                 let height = f32::from(window.viewport_size().height)
                     - TITLEBAR_HEIGHT
                     - PANE_HEADER_HEIGHT
-                    - status_bar::height(cx);
+                    - self.input.status_bar_height;
                 let stacked = stack_images(width - 24., height - 24., &sizes);
                 let side = |label: String, color: Rgb, image: &Option<std::sync::Arc<gpui::Image>>| {
                     div()
@@ -200,7 +183,7 @@ impl WindowView {
                 // 行号一栏按位数定宽，等宽字体一个数字大约 0.6 个字号宽。
                 let gutter = (digits as f32 * font_size * 0.62 + 16.).ceil();
                 // 换行时文字能占的宽度：除去左边框、改动标记、行号和右边留的空。
-                let wrapped = self.preview_wrap.then(|| {
+                let wrapped = self.wrap.then(|| {
                     let text_width = width - 1. - MARK_WIDTH - gutter - TEXT_RIGHT_PADDING - WRAP_SLACK;
                     wrap.get(text_width, font_size, &font, count, |ix| lines.get(ix).map(|line| shown_text(line)), cx)
                 });
@@ -277,14 +260,14 @@ impl WindowView {
             return Vec::new();
         };
         let marks = &preview.marks;
-        let palette = ansi_palette(cx);
+        let palette = self.input.palette;
         let selected = preview.selected_lines().unwrap_or(0..0);
         let selected_bg = hsla(bg.mix(RENAMED, 0.30));
         let dim = hsla(fg).opacity(0.4);
         let last = lines.len();
         let row_height = font_size + ROW_EXTRA_HEIGHT;
         // 换行时一项是折出来的一段：列表里的第几项、哪一行、这一行的哪一段、是不是第一段。
-        let wrapped = self.preview_wrap.then(|| wrap.current()).flatten();
+        let wrapped = self.wrap.then(|| wrap.current()).flatten();
         let items: Vec<(usize, usize, Option<Range<usize>>, bool)> = match &wrapped {
             Some(wrapped) => range
                 .filter_map(|row| {

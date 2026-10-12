@@ -264,7 +264,7 @@ impl WindowView {
     /// `path` 移到了废纸篓：关掉它和它下面的文件的预览标签，选中原来那个位置上的行，接着按删除键
     /// 可以一路删下去。
     fn after_delete(&mut self, path: &Path, window: &mut Window, cx: &mut Context<Self>) {
-        self.retain_previews(|_, preview| !preview.path.starts_with(path), window, cx);
+        self.close_previews_under(path, window, cx);
         if self.file_clipboard.as_ref().is_some_and(|clip| clip.path.starts_with(path)) {
             self.file_clipboard = None;
         }

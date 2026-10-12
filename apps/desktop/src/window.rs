@@ -50,8 +50,8 @@ use std::{cell::RefCell, collections::HashMap, path::PathBuf, rc::Rc, time::Inst
 use futures::StreamExt as _;
 use gpui::{
     Action, AnyElement, App, Context, Div, Empty, Entity, EntityId, ExternalPaths, FocusHandle, Focusable, MouseButton,
-    MouseDownEvent, Render, Role, ScrollHandle, SharedString, Stateful, StyleRefinement, Subscription, Task, Window,
-    WindowBounds, actions, div, prelude::*, px,
+    Render, Role, ScrollHandle, SharedString, Stateful, StyleRefinement, Subscription, Task, Window, WindowBounds,
+    actions, div, prelude::*, px,
 };
 use runode_config::WindowStyle;
 use runode_shared_types::{
@@ -87,16 +87,22 @@ pub use titlebar::titlebar_options;
 pub use todo_board::store::watch as watch_todos;
 
 use crate::ui::a11y::{Hide, PressDown};
+// 关标签、关分屏和放大分屏这几个动作在 `runode_ui::actions`，焦点在预览栏里时由预览栏接住；
+// 标题栏的高度、拖动窗口和标签的关闭按钮也在 `runode_ui`，窗口里照旧从这里引。
+pub use crate::ui::actions::{ClosePane, CloseTab, TogglePaneZoom};
+pub(crate) use crate::ui::panel::TITLEBAR_HEIGHT;
 use crate::ui::{
-    inline_edit,
+    drag_window, inline_edit,
     menu::{Menu, MenuHost},
     panel::{DIVIDER_GRAB_WIDTH, PANE_HEADER_HEIGHT, card, divider_color},
     row_buttons,
+    tabs::TAB_CLOSE_SIZE,
 };
 use crate::{config::AppConfig, prespawn::Prespawned, terminal_view::TerminalView, ui::font_size::FontSize, ui::hsla};
 use model::{PaneLayout, Workspace, WorkspaceId, home_dir};
 use persist::format::SavedWindow;
 use runode_github_actions::ActionsPanel;
+use runode_preview_panel::PreviewPanel;
 use slot::Slot;
 use titlebar::titled;
 
@@ -104,18 +110,14 @@ actions!(
     runode,
     [
         NewTab,
-        CloseTab,
         NextTab,
         PreviousTab,
         SelectLastTab,
         NewSplitRight,
         NewSplitDown,
-        /// 关掉当前分屏；标签里只剩它时关掉整个标签。
-        ClosePane,
         FocusNextPane,
         FocusPreviousPane,
         EqualizePanes,
-        TogglePaneZoom,
         /// 卡片样式下把当前分屏收到终端区底部，只剩标题条；已经折叠过的展开。
         TogglePaneFold,
         /// 填名字、选目录，在里面新建 workspace；已经有这个目录的 workspace 时切过去（填了名字就改成它）。
@@ -166,16 +168,11 @@ pub struct FocusPane(pub Direction);
 #[action(namespace = runode, no_json)]
 pub struct ResizePane(pub Direction);
 
-/// 透明标题栏的高度：终端内容从它下面开始，这一条用来拖动窗口，多个标签时也画在这里；
-/// 显示侧栏时红绿灯落在侧栏顶上。
-pub(crate) const TITLEBAR_HEIGHT: f32 = 36.;
 /// 红绿灯按钮的直径。
 const TRAFFIC_LIGHT_SIZE: f32 = 14.;
 /// 红绿灯按钮的位置，竖直方向在标题栏里居中，和标签文字对齐；以及标题栏左侧给它们留出的宽度。
 const TRAFFIC_LIGHTS_ORIGIN: (f32, f32) = (14., (TITLEBAR_HEIGHT - TRAFFIC_LIGHT_SIZE) / 2.);
 const TRAFFIC_LIGHTS_WIDTH: f32 = 84.;
-/// 标签上关闭按钮的边长。
-const TAB_CLOSE_SIZE: f32 = 16.;
 /// 标签栏最右边新建标签按钮的宽度。
 const NEW_TAB_BUTTON_WIDTH: f32 = TITLEBAR_HEIGHT;
 /// 标签最窄的宽度；标签多到挤不下时标签条改为横向滚动。
@@ -217,15 +214,6 @@ fn frame_color(fg: Rgb, bg: Rgb) -> Rgb {
 /// 和卡片之间、胶囊就是卡片的白；深色主题里卡片已经比外框亮，条用卡片的颜色，胶囊再亮一档。
 fn tab_track_colors(fg: Rgb, bg: Rgb) -> (Rgb, Rgb) {
     if is_light(fg, bg) { (frame_color(fg, bg).mix(bg, 0.5), bg) } else { (bg, bg.mix(fg, 0.12)) }
-}
-
-/// 在标题栏这类能拖动窗口的地方按下鼠标：双击缩放窗口，否则开始拖动窗口。
-fn drag_window(event: &MouseDownEvent, window: &mut Window, _: &mut App) {
-    if event.click_count >= 2 {
-        window.titlebar_double_click();
-    } else {
-        window.start_window_move();
-    }
 }
 
 /// 正在用鼠标拖动的分隔线。
@@ -284,12 +272,9 @@ pub struct WindowView {
     _actions_events: Subscription,
     /// 预览栏拖动过宽度时是那个宽度；预览栏在打开文件时出现，标签都关掉时收起，不存档。
     preview_width: Option<f32>,
-    /// 预览栏的焦点：点了预览的文字后 cmd+c 复制选中的行。
-    preview_focus: FocusHandle,
-    /// 预览的文本和 diff 按栏宽自动换行。
-    preview_wrap: bool,
-    /// Markdown 文件显示源码而不是排版后的样子。
-    preview_source: bool,
+    /// 预览栏，见 `preview`：各 workspace 的预览标签都在它里面，自动换行和 Markdown 显示源码的开关也是。
+    preview: Entity<PreviewPanel>,
+    _preview_events: Subscription,
     /// 文件树里显示被 git 忽略的文件。
     show_ignored: bool,
     /// 文件树里显示名字以 `.` 开头的文件。
@@ -298,8 +283,8 @@ pub struct WindowView {
     files_focus: FocusHandle,
     /// 文件树上面的搜索框和搜到的结果；整个窗口一个，换了 workspace 时按新的根目录重搜。
     file_search: files::FileSearch,
-    /// 文件树或预览标签的右键菜单，文件树里正在新建或改名的输入框，以及剪切或复制下来等着粘贴的
-    /// 文件。
+    /// 文件树的右键菜单（预览标签的在预览栏自己身上），文件树里正在新建或改名的输入框，以及剪切或
+    /// 复制下来等着粘贴的文件。
     file_menu: Option<Menu>,
     file_edit: Option<files::FileEdit>,
     file_clipboard: Option<files::FileClipboard>,
@@ -447,6 +432,8 @@ impl WindowView {
         .detach();
         let github_actions = cx.new(|_| ActionsPanel::default());
         let actions_events = cx.subscribe_in(&github_actions, window, Self::on_github_actions_event);
+        let preview = cx.new(|cx| PreviewPanel::new(runode_terminal::cell_width, cx));
+        let preview_events = cx.subscribe_in(&preview, window, Self::on_preview_event);
         Self {
             workspaces: Vec::new(),
             active: 0,
@@ -466,9 +453,8 @@ impl WindowView {
             actions_watches: HashMap::new(),
             _actions_events: actions_events,
             preview_width: None,
-            preview_focus: cx.focus_handle(),
-            preview_wrap: false,
-            preview_source: false,
+            preview,
+            _preview_events: preview_events,
             show_ignored: false,
             show_dotfiles: true,
             files_focus: cx.focus_handle(),
@@ -626,17 +612,15 @@ impl WindowView {
     /// 在终端区右边占一栏的预览栏；放大的预览栏盖在终端上，不经这里。
     fn render_preview_slot(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let (fg, bg) = self.colors(cx);
-        let width = self.right_panel_widths(f32::from(window.viewport_size().width)).preview;
-        let font = self.font_family(cx);
+        let width = self.right_panel_widths(f32::from(window.viewport_size().width), cx).preview;
         // 经典样式下右侧面板收着时预览栏贴着窗口右边。
         let rightmost = !cards(cx) && self.workspace().panel.is_none();
-        self.render_preview_panel(width, rightmost, fg, bg, font, window, cx)
-            .map_or_else(|| Empty.into_any_element(), IntoElement::into_any_element)
+        self.render_preview(width, rightmost, fg, bg, cx)
     }
 
     fn render_panel_slot(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let (fg, bg) = self.colors(cx);
-        let width = self.right_panel_widths(f32::from(window.viewport_size().width)).panel;
+        let width = self.right_panel_widths(f32::from(window.viewport_size().width), cx).panel;
         self.render_side_panel(width, fg, bg, window, cx).unwrap_or_else(|| Empty.into_any_element())
     }
 
@@ -827,11 +811,6 @@ impl Render for WindowView {
     }
 }
 
-/// 放大的预览栏：盖满终端区，挡住下面终端的鼠标事件；终端不改尺寸，还原后原样露出来。
-fn cover_panes(preview: Stateful<Div>) -> Stateful<Div> {
-    preview.absolute().top_0().left_0().size_full().occlude()
-}
-
 /// 终端区的各个分屏；被放大的预览栏盖住（`covered`）时不报给辅助工具，不然辅助工具照样读得到、按得到
 /// 底下的终端。
 fn covered_panes(panes: AnyElement, covered: bool) -> Stateful<Div> {
@@ -850,7 +829,7 @@ impl WindowView {
     }
 
     /// 经典样式下标题栏画不画、两头让出多宽。
-    fn classic_titlebar(&self, window: &Window) -> ClassicTitlebar {
+    fn classic_titlebar(&self, window: &Window, cx: &App) -> ClassicTitlebar {
         let fullscreen = window.is_fullscreen();
         let show_tabs = self.workspace().tabs.len() > 1;
         // 标题栏透明后内容铺到红绿灯下面，顶部这条要能拖动窗口、双击缩放。红绿灯和侧栏开关
@@ -859,7 +838,7 @@ impl WindowView {
         let left_inset = if self.sidebar_visible() { 0. } else { sidebar::sidebar_toggle_inset(fullscreen) };
         // 右侧面板的开关按钮：右侧都收着时落在标题栏右端，标题栏给它让位；打开着时落在
         // 面板顶上。全屏又只有一个标签、右侧也都收着时没有地方放，不画。放大的预览栏不在右侧。
-        let right_column = self.workspace().panel.is_some() || self.preview_in_column();
+        let right_column = self.workspace().panel.is_some() || self.preview_in_column(cx);
         let right_inset = if shown && !right_column { project::PANEL_TOGGLES_INSET } else { 0. };
         ClassicTitlebar { fullscreen, show_tabs, shown, left_inset, right_column, right_inset }
     }
@@ -873,23 +852,20 @@ impl WindowView {
         cx: &mut Context<Self>,
     ) -> Vec<AnyElement> {
         let slots = self.slots(cx);
-        let ClassicTitlebar { fullscreen, shown: titlebar_shown, right_column, .. } = self.classic_titlebar(window);
+        let ClassicTitlebar { fullscreen, shown: titlebar_shown, right_column, .. } = self.classic_titlebar(window, cx);
         let panes = self.render_panes(fg, bg, window, cx);
         let sidebar = self.sidebar_visible().then(|| column_slot(&slots.sidebar, self.sidebar_width(), window));
         let sidebar_toggle =
             (titlebar_shown || sidebar.is_some()).then(|| self.render_sidebar_toggle(fullscreen, fg, bg, cx));
         let sidebar_width = if sidebar.is_some() { self.sidebar_width() } else { 0. };
         let sidebar_handle = sidebar.is_some().then(|| self.render_sidebar_handle(cx));
-        let widths = self.right_panel_widths(f32::from(window.viewport_size().width));
-        let preview_column = self.preview_in_column();
+        let widths = self.right_panel_widths(f32::from(window.viewport_size().width), cx);
+        let preview_column = self.preview_in_column(cx);
         // 放大的预览栏盖在终端区上，宽度是终端区的宽度。它盖着终端，跟着终端一起重画，不缓存。
-        let maximized_preview = if self.preview_maximized() {
+        let maximized_preview = self.preview_maximized(cx).then(|| {
             let width = f32::from(window.viewport_size().width) - sidebar_width - widths.panel;
-            let font = self.font_family(cx);
-            self.render_preview_panel(width, false, fg, bg, font, window, cx).map(cover_panes)
-        } else {
-            None
-        };
+            self.render_preview(width, false, fg, bg, cx)
+        });
         let preview = preview_column.then(|| column_slot(&slots.preview, widths.preview, window));
         let panel = self.workspace().panel.is_some().then(|| column_slot(&slots.panel, widths.panel, window));
         let right_handles = [
@@ -927,10 +903,10 @@ impl WindowView {
     /// 经典样式的标题栏：多个标签时是标签条和新建标签按钮，只有一个时居中写标题。
     fn render_classic_titlebar(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let (fg, bg) = self.colors(cx);
-        let ClassicTitlebar { show_tabs, left_inset, right_inset, .. } = self.classic_titlebar(window);
+        let ClassicTitlebar { show_tabs, left_inset, right_inset, .. } = self.classic_titlebar(window, cx);
         let tab_count = self.workspace().tabs.len();
         let sidebar_width = if self.sidebar_visible() { self.sidebar_width() } else { 0. };
-        let widths = self.right_panel_widths(f32::from(window.viewport_size().width));
+        let widths = self.right_panel_widths(f32::from(window.viewport_size().width), cx);
         let tabs: Vec<_> = if show_tabs {
             // 标签平分标题栏除去两头的宽度，限制在 `TAB_MIN_WIDTH` 到 `TAB_MAX_WIDTH` 之间，
             // 挤不下就让标签条滚动；拖动时的预览也照这个宽度画。
@@ -1017,21 +993,18 @@ impl WindowView {
         let sidebar_toggle = self.render_sidebar_toggle(fullscreen, fg, frame, cx);
         let sidebar_width = if sidebar.is_some() { self.sidebar_width() } else { 0. };
         let sidebar_handle = sidebar.is_some().then(|| self.render_sidebar_handle(cx));
-        let widths = self.right_panel_widths(viewport);
+        let widths = self.right_panel_widths(viewport, cx);
         // 放大的预览栏盖在终端区上，宽度是终端区的宽度：除去侧栏、两边的空隙和右侧面板。它盖着终端，
         // 跟着终端一起重画，不缓存。
-        let maximized_preview = if self.preview_maximized() {
+        let maximized_preview = self.preview_maximized(cx).then(|| {
             let panel = if self.workspace().panel.is_some() { widths.panel + CARD_GAP } else { 0. };
             let width = viewport - sidebar_width - 2. * CARD_GAP - panel;
-            let font = self.font_family(cx);
-            self.render_preview_panel(width, false, fg, bg, font, window, cx).map(cover_panes)
-        } else {
-            None
-        };
-        let preview = self.preview_in_column().then(|| column_slot(&slots.preview, widths.preview, window));
+            self.render_preview(width, false, fg, bg, cx)
+        });
+        let preview = self.preview_in_column(cx).then(|| column_slot(&slots.preview, widths.preview, window));
         let panel = self.workspace().panel.is_some().then(|| column_slot(&slots.panel, widths.panel, window));
         let right_handles = [
-            self.preview_in_column().then_some(Divider::Preview),
+            self.preview_in_column(cx).then_some(Divider::Preview),
             self.workspace().panel.is_some().then_some(Divider::Panel),
         ]
         .into_iter()

@@ -38,18 +38,17 @@ use gpui::{
 };
 use runode_preview::{Alert, Align, Block, Content, Image as MdImage, Inline, InlineStyle, Span};
 use runode_shared_types::color::Rgb;
-pub(super) use select::MdPos;
-use select::TextKey;
+use select::{MdPos, TextKey};
 use text::{MdText, TextBox, Texts};
 
-use super::{Loaded, MAX_COLUMNS, Preview, body::ansi_palette, body::highlight_style, loaded};
-use crate::{
-    assets::{
-        ALERT_CAUTION_ICON, ALERT_IMPORTANT_ICON, ALERT_NOTE_ICON, ALERT_TIP_ICON, ALERT_WARNING_ICON, CHECK_ICON,
-    },
-    config::AppConfig,
-    ui::{self, a11y::Press, hsla, scrollbar::list_scrollbar},
-    window::{WindowView, project::RENAMED},
+use runode_ui::{
+    self as ui, a11y::Press, hsla, icons::CHECK_ICON, panel::RENAMED, scrollbar::list_scrollbar,
+    text_field::word_range_at,
+};
+
+use super::{
+    ALERT_CAUTION_ICON, ALERT_IMPORTANT_ICON, ALERT_NOTE_ICON, ALERT_TIP_ICON, ALERT_WARNING_ICON, Loaded, MAX_COLUMNS,
+    Preview, PreviewPanel, WorkspaceId, body::highlight_style, loaded,
 };
 
 /// 正文左右和上下留的空。
@@ -125,11 +124,11 @@ fn row_hint(font_size: f32) -> Pixels {
     px(font_size * LINE_HEIGHT * 2.)
 }
 
-/// 表格每列估计最宽的格子在第几行（表头算第 0 行）：按终端里占几格估，不量字体。表格只画看得见的
-/// 行，每列另垫一个看不见的这格撑住列宽，滚动时列宽不跟着露出的行跳。
-fn widest_cells(columns: usize, head: &[Rich], rows: &[Vec<Rich>]) -> Vec<usize> {
+/// 表格每列估计最宽的格子在第几行（表头算第 0 行）：按终端里占几格（`cell_width`）估，不量字体。表格只画
+/// 看得见的行，每列另垫一个看不见的这格撑住列宽，滚动时列宽不跟着露出的行跳。
+fn widest_cells(columns: usize, head: &[Rich], rows: &[Vec<Rich>], cell_width: fn(char) -> u8) -> Vec<usize> {
     let cells = || std::iter::once(head).chain(rows.iter().map(Vec::as_slice)).enumerate();
-    let width = |rich: &Rich| rich.text.chars().map(|ch| usize::from(runode_terminal::cell_width(ch))).sum::<usize>();
+    let width = |rich: &Rich| rich.text.chars().map(|ch| usize::from(cell_width(ch))).sum::<usize>();
     (0..columns.max(1))
         .map(|column| cells().max_by_key(|(_, row)| row.get(column).map_or(0, width)).map_or(0, |(row_ix, _)| row_ix))
         .collect()
@@ -329,13 +328,20 @@ impl Rich {
 }
 
 impl Doc {
-    /// 摊平 `blocks`；`dir` 是 Markdown 文件所在的目录，`picture` 读出这个目录下引用的本地图片文件，
-    /// 同一个文件只读一次，最多读 `MAX_LOCAL_IMAGES` 个；网络图片不经它。
-    pub fn new(blocks: Vec<Block>, dir: &Path, picture: impl Fn(&Path) -> Option<Picture>) -> Self {
+    /// 摊平 `blocks`；`dir` 是 Markdown 文件所在的目录，`cell_width` 说一个字在终端里占几格（表格估列宽用），
+    /// `picture` 读出这个目录下引用的本地图片文件，同一个文件只读一次，最多读 `MAX_LOCAL_IMAGES` 个；网络图片
+    /// 不经它。
+    pub fn new(
+        blocks: Vec<Block>,
+        dir: &Path,
+        cell_width: fn(char) -> u8,
+        picture: impl Fn(&Path) -> Option<Picture>,
+    ) -> Self {
         let mut flat = Flatten {
             rows: Vec::new(),
             anchors: HashMap::new(),
             dir,
+            cell_width,
             picture: &picture,
             pictures: HashMap::new(),
             footnote: false,
@@ -410,6 +416,8 @@ struct Flatten<'a> {
     anchors: HashMap<String, usize>,
     /// Markdown 文件所在的目录，本地图片的地址相对它。
     dir: &'a Path,
+    /// 一个字在终端里占几格，见 `widest_cells`。
+    cell_width: fn(char) -> u8,
     picture: &'a dyn Fn(&Path) -> Option<Picture>,
     /// 读过的本地图片文件，读不了的也记着，不再读第二次。
     pictures: HashMap<PathBuf, Option<Picture>>,
@@ -483,7 +491,7 @@ impl Flatten<'_> {
                     let head: Vec<_> = head.iter().map(|cell| self.rich(cell)).collect();
                     let rows: Vec<Vec<_>> =
                         rows.iter().map(|row| row.iter().map(|cell| self.rich(cell)).collect()).collect();
-                    let widest = widest_cells(aligns.len(), &head, &rows);
+                    let widest = widest_cells(aligns.len(), &head, &rows, self.cell_width);
                     Leaf::Table { aligns, head, rows, widest }
                 }
                 Block::Rule => Leaf::Rule,
@@ -551,13 +559,14 @@ impl Flatten<'_> {
 }
 
 fn alert_title(alert: Alert) -> String {
-    crate::i18n::tr(match alert {
+    let key = match alert {
         Alert::Note => "preview.alert.note",
         Alert::Tip => "preview.alert.tip",
         Alert::Important => "preview.alert.important",
         Alert::Warning => "preview.alert.warning",
         Alert::Caution => "preview.alert.caution",
-    })
+    };
+    rust_i18n::t!(key).into_owned()
 }
 
 /// 代码块各行展开制表符、过长的截断后用换行接起来，高亮的范围跟着换算。
@@ -898,7 +907,7 @@ impl Paint {
 
 /// `rich` 里的链接报给辅助工具：链接画在文字里，不是单独的元素，这里每个链接另放一个不占地方的
 /// 节点，以链接的文字为名，按下时和点击一样打开它。
-fn link_nodes(rich: &Rich, view: &WeakEntity<WindowView>) -> Vec<AnyElement> {
+fn link_nodes(rich: &Rich, view: &WeakEntity<PreviewPanel>) -> Vec<AnyElement> {
     rich.links
         .iter()
         .enumerate()
@@ -918,10 +927,10 @@ fn link_nodes(rich: &Rich, view: &WeakEntity<WindowView>) -> Vec<AnyElement> {
         .collect()
 }
 
-impl WindowView {
+impl PreviewPanel {
     /// 预览栏现在是不是 Markdown 的排版视图：普通标签、没截断的 Markdown 文件、没切到源码。
     pub(super) fn markdown_shown(&self, preview: &Preview) -> bool {
-        !self.preview_source && preview.typesettable()
+        !self.source && preview.typesettable()
     }
 
     /// 排版视图；还没解析完时空着。`width` 是预览栏的宽度，图片据此缩小；`mono` 是终端字体。
@@ -940,7 +949,7 @@ impl WindowView {
         let body = div().flex_1().min_h_0().relative().on_mouse_down(
             MouseButton::Left,
             cx.listener(|this, event: &MouseDownEvent, window, cx| {
-                window.focus(&this.preview_focus, cx);
+                window.focus(&this.focus, cx);
                 this.press_markdown(event, cx);
             }),
         );
@@ -953,8 +962,7 @@ impl WindowView {
         if view.hinted_width.get() != laid {
             if laid > 0. {
                 let top = view.list.logical_scroll_top();
-                view.list
-                    .reset_with_uniform_height(doc.rows.len(), row_hint(cx.global::<AppConfig>().0.preview_font_size));
+                view.list.reset_with_uniform_height(doc.rows.len(), row_hint(self.input.font_size));
                 view.list.scroll_to(top);
             }
             view.hinted_width.set(laid);
@@ -1021,8 +1029,8 @@ impl WindowView {
             return div().into_any_element();
         };
         let view = &preview.markdown_view;
-        let font_size = cx.global::<AppConfig>().0.preview_font_size;
-        let palette = ansi_palette(cx);
+        let font_size = self.input.font_size;
+        let palette = self.input.palette;
         let colors = Colors::new(fg, bg, &palette);
         let paint = Paint {
             mono: mono.clone(),
@@ -1172,7 +1180,7 @@ impl WindowView {
                         div()
                             .id("md-copy")
                             .role(Role::Button)
-                            .aria_label(crate::i18n::tr("menu.copy"))
+                            .aria_label(rust_i18n::t!("menu.copy").into_owned())
                             // 只有按下的处理，辅助工具按不到，另外登记；按钮悬停时才露出来，辅助工具照样按得到。
                             .on_a11y_action(AccessibleAction::Click, move |_, _, cx| {
                                 cx.write_to_clipboard(ClipboardItem::new_string(copied.to_string()));
@@ -1190,7 +1198,7 @@ impl WindowView {
                             .invisible()
                             .group_hover("md-code", |button| button.visible())
                             .hover(|button| button.text_color(colors.fg))
-                            .child(crate::i18n::tr("menu.copy"))
+                            .child(rust_i18n::t!("menu.copy").into_owned())
                             // 按下就复制，也不让正文的拖选接着开始。
                             .on_mouse_down(MouseButton::Left, move |_, _, cx| {
                                 cx.stop_propagation();
@@ -1392,7 +1400,7 @@ impl WindowView {
         let at = |offset| MdPos { offset, ..pos };
         match (event.click_count, text) {
             (2, Some(text)) => {
-                let word = crate::ui::text_field::word_range_at(&text, pos.offset.min(text.len()));
+                let word = word_range_at(&text, pos.offset.min(text.len()));
                 view.selection = Some((at(word.start), at(word.end)));
             }
             (3.., Some(text)) => view.selection = Some((at(0), at(text.len()))),
@@ -1505,7 +1513,7 @@ impl WindowView {
         };
         match link_target(&dir, url) {
             Some(LinkTarget::Web(url)) => cx.open_url(&url),
-            Some(LinkTarget::File(path)) if path.is_file() => self.open_preview(&path, false, cx),
+            Some(LinkTarget::File(path)) if path.is_file() => self.open(&path, false, cx),
             Some(LinkTarget::Anchor(id)) => {
                 if let Some(preview) = self.preview_mut()
                     && let Some(Loaded::Text { markdown: Some(doc), .. }) = &preview.content
@@ -1521,12 +1529,7 @@ impl WindowView {
 
     /// 换上解析好的文档后，在后台下载里面的网络图片，下好一张换上一张。`cancel` 是读这次文件的那个，
     /// 又重读了时丢掉结果（重读会再要一次，下过的直接拿到）。
-    pub(super) fn load_remote_images(
-        &mut self,
-        id: crate::window::model::WorkspaceId,
-        cancel: &Arc<AtomicBool>,
-        cx: &mut Context<Self>,
-    ) {
+    pub(super) fn load_remote_images(&mut self, id: WorkspaceId, cancel: &Arc<AtomicBool>, cx: &mut Context<Self>) {
         let Some((preview, _)) = self.preview_for(id, cancel) else {
             return;
         };

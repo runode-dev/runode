@@ -23,8 +23,8 @@ use runode_git::FileStatus;
 use runode_shared_types::color::Rgb;
 
 use super::{
-    CARD_GAP, DIVIDER_GRAB_WIDTH, Divider, PANE_HEADER_HEIGHT, TITLEBAR_HEIGHT, ToggleFiles, ToggleGit,
-    ToggleGitHubActions, WindowView, cards, divider_color, drag_window, titlebar::icon_toggle,
+    CARD_GAP, DIVIDER_GRAB_WIDTH, Divider, TITLEBAR_HEIGHT, ToggleFiles, ToggleGit, ToggleGitHubActions, WindowView,
+    cards, titlebar::icon_toggle,
 };
 // 面板外框和改动颜色在 `runode_ui::panel`，窗口里各面板照旧从这里引。
 use crate::ui::a11y::A11yPress;
@@ -33,7 +33,7 @@ pub(super) use crate::ui::panel::{
 };
 use crate::{
     assets::{ACTIONS_WORKFLOW_ICON, FILES_ICON, GIT_ICON, PANEL_RIGHT_ICON},
-    ui::{hsla, tooltip::tooltip},
+    ui::tooltip::tooltip,
 };
 use scan::scan;
 
@@ -105,8 +105,8 @@ impl PanelWidths {
 }
 
 impl WindowView {
-    pub(super) fn project_visible(&self) -> bool {
-        self.workspace().panel.is_some() || self.preview_shown()
+    pub(super) fn project_visible(&self, cx: &App) -> bool {
+        self.workspace().panel.is_some() || self.preview_shown(cx)
     }
 
     pub(super) fn files_shown(&self) -> bool {
@@ -130,9 +130,9 @@ impl WindowView {
     }
 
     /// 让监听跟上当前 workspace 的文件树根目录；右侧面板都收着时不听。
-    pub(super) fn sync_project_watch(&mut self) {
+    pub(super) fn sync_project_watch(&mut self, cx: &App) {
         let project = &self.workspace().project;
-        let root = project.root.clone().filter(|_| self.project_visible());
+        let root = project.root.clone().filter(|_| self.project_visible(cx));
         let Some(root) = root else {
             self.project_watch = None;
             return;
@@ -165,8 +165,8 @@ impl WindowView {
     /// 监听到 `paths` 变了：有要紧的就重读。窗口在后台时只记下来，切到前台时再读。
     pub(super) fn project_changed(&mut self, paths: Vec<PathBuf>, active: bool, cx: &mut Context<Self>) {
         // 预览的文件变了就重读；窗口在后台时等切回前台再按修改时间判断。
-        if active && self.preview().is_some_and(|preview| preview.affected_by(&paths)) {
-            self.load_preview(cx);
+        if active {
+            self.preview_files_changed(&paths, cx);
         }
         // 分支、tag 变了时图表重读；工作区里的文件变了不重读。
         if self.git_shown() {
@@ -202,9 +202,9 @@ impl WindowView {
     /// 在后台重读当前终端目录的 git 状态和展开的目录；右侧面板都收着时不读，上次还没读完时
     /// 记下来，读完再读一次。
     pub(super) fn refresh_project(&mut self, cx: &mut Context<Self>) {
-        if !self.project_visible() {
+        if !self.project_visible(cx) {
             // 切到右侧什么都不显示的 workspace 时，放掉上一个 workspace 的目录监听。
-            self.sync_project_watch();
+            self.sync_project_watch(cx);
             self.probe_repo(cx);
             return;
         }
@@ -237,8 +237,10 @@ impl WindowView {
                 if workspace.apply_scan(scan, filter) {
                     cx.notify();
                 }
+                // 预览栏按新的 git 状态重算改动标记，diff 标签记下要不要重读。
+                this.sync_preview_git(id, cx);
                 if this.workspace().id == id {
-                    this.sync_project_watch();
+                    this.sync_project_watch(cx);
                     this.reload_stale_diff(cx);
                     this.list_tasks(cx);
                     this.refresh_file_search(cx);
@@ -303,7 +305,7 @@ impl WindowView {
         self.list_tasks(cx);
         self.poll_github_actions(cx);
         self.refresh_repo_badges(cx);
-        if !self.project_visible() {
+        if !self.project_visible(cx) {
             self.probe_repo(cx);
             return;
         }
@@ -397,7 +399,7 @@ impl WindowView {
         if !self.github_actions_shown() {
             self.cancel_github_actions_edit(window, cx);
         }
-        self.sync_project_watch();
+        self.sync_project_watch(cx);
         self.refresh_project(cx);
         self.save(cx);
         cx.notify();
@@ -421,11 +423,11 @@ impl WindowView {
 
     /// 右侧各栏实际画多宽，收着的为零。窗口窄时先压预览栏，再压右侧面板，尽量给终端区留出
     /// `MAIN_MIN_WIDTH`，但不窄于各自的下限。
-    pub(super) fn right_panel_widths(&self, viewport: f32) -> PanelWidths {
+    pub(super) fn right_panel_widths(&self, viewport: f32, cx: &App) -> PanelWidths {
         let sidebar = if self.sidebar_visible() { self.sidebar_width() } else { 0. };
         let room = viewport - sidebar - MAIN_MIN_WIDTH;
         // 放大的预览栏盖在终端区上，不占右侧的宽度。
-        let preview_shown = self.preview_in_column();
+        let preview_shown = self.preview_in_column(cx);
         let panel_shown = self.workspace().panel.is_some();
         let panel = if panel_shown { self.panel_width.unwrap_or(PANEL_WIDTH) } else { 0. };
         let preview = if preview_shown { self.preview_width.unwrap_or(PREVIEW_WIDTH) } else { 0. };
@@ -435,10 +437,10 @@ impl WindowView {
     }
 
     /// 拖动右侧面板左边的分隔线，左边跟到窗口里的横坐标 `x`。
-    pub(super) fn resize_right_panel(&mut self, divider: Divider, x: f32, viewport: f32) {
+    pub(super) fn resize_right_panel(&mut self, divider: Divider, x: f32, viewport: f32, cx: &App) {
         let sidebar = if self.sidebar_visible() { self.sidebar_width() } else { 0. };
         let room = viewport - sidebar - MAIN_MIN_WIDTH;
-        let PanelWidths { preview, panel } = self.right_panel_widths(viewport);
+        let PanelWidths { preview, panel } = self.right_panel_widths(viewport, cx);
         match divider {
             Divider::Preview => {
                 let width = (viewport - panel - x).min(room - panel).max(PREVIEW_MIN_WIDTH);
@@ -582,20 +584,8 @@ impl WindowView {
             .when(self.github_actions_tab_visible(cx), |tabs| tabs.child(tab(SidePanel::GitHubActions, cx)))
     }
 
-    /// 预览栏和右侧面板顶上的一条。经典样式下和标题栏等高，能拖动窗口、双击缩放；卡片样式下是
-    /// 卡片的标题条，和分屏的一样高。
+    /// 右侧面板顶上的一条，见 `runode_ui::panel::panel_header`。
     pub(super) fn panel_header(&self, fg: Rgb, cx: &App) -> Div {
-        let header = div()
-            .flex_none()
-            .px(px(10.))
-            .flex()
-            .items_center()
-            .gap(px(8.))
-            .border_b_1()
-            .border_color(divider_color(hsla(fg)));
-        if cards(cx) {
-            return header.h(px(PANE_HEADER_HEIGHT));
-        }
-        header.h(px(TITLEBAR_HEIGHT)).on_mouse_down(MouseButton::Left, drag_window)
+        crate::ui::panel::panel_header(fg, cards(cx))
     }
 }

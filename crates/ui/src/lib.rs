@@ -1,9 +1,10 @@
 //! 不属于哪个具体功能、几处界面都用的 GPUI 部件和小工具：单行输入框（`text_field`）、多行输入框
 //! （`text_area`）、滚动条（`scrollbar`）、悬停提示（`tooltip`）、界面各档字号（`font_size`）、系统声音（`sound`）、按文件类型区分的图标（`file_icons`）、
 //! 让 Option 组合键先走快捷键的输入处理（`input_handler`）、
-//! 复制粘贴这类共用的编辑动作（`actions`），把调色板的颜色换成 GPUI 颜色的 `hsla`，以及把家目录写成
-//! `~` 显示路径的 `display_dir`，放掉图片在图集里那份的 `drop_render_image`、`release_bitmap`，以及让辅助工具认得界面的
-//! 共用写法（`a11y`）。
+//! 复制粘贴这类共用的编辑动作（`actions`），标签条共用的关闭按钮、拖动卡片和落点提示（`tabs`），把调色板的颜色换成
+//! GPUI 颜色的 `hsla`，以及把家目录写成 `~` 显示路径的 `display_dir`、取路径最后一段的 `base_name`、跟着改名挪路径的
+//! `follow_move`、在标题栏这类地方按下鼠标拖动窗口的 `drag_window`，放掉图片在图集里那份的 `drop_render_image`、
+//! `release_bitmap`，以及让辅助工具认得界面的共用写法（`a11y`）。
 //!
 //! 不依赖桌面 app 里的功能模块，它们要的东西由调用方经参数、事件或 `font_size::UiFontSize` 这类
 //! 全局值交过来；文字一律由调用方翻译好再给，这里不带翻译。
@@ -20,13 +21,17 @@ pub mod panel;
 pub mod row_buttons;
 pub mod scrollbar;
 pub mod sound;
+pub mod tabs;
 pub mod text_area;
 pub mod text_field;
 pub mod tooltip;
 
-use std::{path::Path, sync::Arc};
+use std::{
+    path::{Path, PathBuf},
+    sync::Arc,
+};
 
-use gpui::{App, Hsla, Image, ImageSource, RenderImage, rgb};
+use gpui::{App, Hsla, Image, ImageSource, MouseDownEvent, RenderImage, Window, rgb};
 use runode_shared_types::color::Rgb;
 
 /// 调色板里的颜色换成 GPUI 画图用的颜色。
@@ -45,6 +50,27 @@ pub fn display_dir(dir: &Path) -> String {
         return format!("~/{}", rest.display());
     }
     dir.display().to_string()
+}
+
+/// 路径的最后一段，用在标签、提示和列表里；没有最后一段（比如 `/`）时写整个路径。
+pub fn base_name(path: &Path) -> String {
+    path.file_name().map_or_else(|| path.display().to_string(), |name| name.to_string_lossy().into_owned())
+}
+
+/// `from` 改名或挪到了 `to` 之后 `path` 的新路径；`path` 不是 `from` 也不在它下面时为 `None`。
+/// `path` 就是 `from` 时直接是 `to`：`to.join("")` 会多出结尾的 `/`，把文件当成目录去读。
+pub fn follow_move(path: &Path, from: &Path, to: &Path) -> Option<PathBuf> {
+    let rest = path.strip_prefix(from).ok()?;
+    Some(if rest.as_os_str().is_empty() { to.to_path_buf() } else { to.join(rest) })
+}
+
+/// 在标题栏这类能拖动窗口的地方按下鼠标：双击缩放窗口，否则开始拖动窗口。
+pub fn drag_window(event: &MouseDownEvent, window: &mut Window, _: &mut App) {
+    if event.click_count >= 2 {
+        window.titlebar_double_click();
+    } else {
+        window.start_window_move();
+    }
 }
 
 /// 把画过的图从各窗口的图集里删掉。`App::drop_image` 不传窗口时只删留在 `App` 里的窗口，而处理某个窗口的

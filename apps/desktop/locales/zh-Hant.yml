@@ -186,39 +186,6 @@ background:
 panel:
   no_changes: 沒有未提交的改動
   not_repo: 不在 git 倉庫裡
-  no_content: 內容沒有變化
-preview:
-  binary: 無法預覽二進位檔案
-  too_large: 圖片太大，無法預覽
-  unreadable: "無法讀取檔案：%{error}"
-  truncated: 檔案太大，只顯示了前 %{count} 行
-  close: 關閉
-  close_others: 關閉其他
-  close_right: 關閉右側
-  close_all: 全部關閉
-  keep_open: 保持開啟
-  wrap: 自動換行
-  show_source: 顯示原始碼
-  show_rendered: 顯示排版
-  alert:
-    note: 備註
-    tip: 提示
-    important: 重要
-    warning: 警告
-    caution: 注意
-  maximize: 放大預覽
-  restore: 還原預覽
-  diff:
-    worktree_tab: "%{name}（工作區）"
-    staged_tab: "%{name}（已暫存）"
-    no_changes: 沒有改動
-    previous_change: 上一處改動
-    next_change: 下一處改動
-    discard_hunk_title: 捨棄這一塊改動？
-    too_large: 改動太多，不顯示
-    image_before: 改之前
-    image_after: 改之後
-    image_missing: 沒有這個檔案
 paste:
   title: 貼上的內容可能會直接執行指令
   detail: 內容含有換行或終端機控制序列，貼上後可能被當作指令立即執行。
@@ -321,7 +288,6 @@ tooltip:
   show_panel: 顯示面板
   hide_panel: 隱藏面板
   tasks: 命令
-  close_preview: 關閉預覽
   close_search: 關閉搜尋
   close_split: 關閉分割畫面
   restore_split: 還原分割畫面
@@ -427,9 +393,6 @@ git:
   stage_all: 暫存所有變更
   unstage_all: 取消暫存所有變更
   discard_all: 捨棄所有變更
-  stage_hunk: 暫存這一塊
-  unstage_hunk: 取消暫存這一塊
-  discard_hunk: 捨棄這一塊
   stash: 儲藏
   stash_include_untracked: 儲藏（包括未追蹤的檔案）
   stash_pop_latest: 彈出最新的儲藏

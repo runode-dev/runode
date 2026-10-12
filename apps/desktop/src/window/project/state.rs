@@ -3,6 +3,7 @@
 use std::{
     collections::{HashMap, HashSet},
     path::{Path, PathBuf},
+    sync::Arc,
     time::{Duration, Instant},
 };
 
@@ -43,8 +44,9 @@ pub(in crate::window) struct Project {
     pub root: Option<PathBuf>,
     /// 上次读的是哪个目录，终端换了目录时据此在文件树里定位过去。
     pub(super) dir: Option<PathBuf>,
-    /// 最近一次读到的 git 状态：主仓库以及它里面的子模块和嵌套仓库；不在 git 仓库里时为空。
-    pub git: Option<git::Repos>,
+    /// 最近一次读到的 git 状态：主仓库以及它里面的子模块和嵌套仓库；不在 git 仓库里时为空。和预览栏共用
+    /// 一份，变了才换一份新的。
+    pub git: Option<Arc<git::Repos>>,
     /// 当前目录在不在 git 仓库里，没问过时为空；面板都收着时只靠它决定显不显示 Git 按钮。
     pub(super) in_repo: Option<bool>,
     /// 上次问 `in_repo` 的目录和时刻，以及后台是不是正在问。
@@ -54,8 +56,6 @@ pub(in crate::window) struct Project {
     pub(super) listings: HashMap<PathBuf, Vec<DirEntry>>,
     /// 文件树里选中的路径。
     pub selected: Option<PathBuf>,
-    /// 预览栏的标签。
-    pub previews: super::super::preview::PreviewTabs,
     /// Git 面板排成的行、展开收起和提交说明。
     pub git_panel: super::super::git_panel::GitPanel,
     pub file_rows: Vec<FileRow>,
@@ -84,7 +84,7 @@ pub(in crate::window) struct Project {
 
 impl Project {
     pub(super) fn rebuild_file_rows(&mut self, root: &Path, filter: TreeFilter) {
-        let decorator = Decorator::new(self.git.as_ref());
+        let decorator = Decorator::new(self.git.as_deref());
         let mut rows = Vec::new();
         self.push_dir(root, 0, &decorator, filter, &mut rows);
         self.file_rows = rows;
@@ -137,7 +137,7 @@ impl Project {
         if dirs.is_empty() {
             return;
         }
-        let listings = list_dirs(dirs, &Decorator::new(self.git.as_ref()));
+        let listings = list_dirs(dirs, &Decorator::new(self.git.as_deref()));
         for (dir, listing) in listings {
             if let Some(listing) = listing {
                 self.listings.insert(dir, listing);
@@ -330,11 +330,8 @@ impl Workspace {
             project.files_scroll.scroll_to_item(0, ScrollStrategy::Top);
             changed = true;
         }
-        if project.git != scan.git {
-            let old = std::mem::replace(&mut project.git, scan.git);
-            for preview in &mut project.previews.tabs {
-                preview.git_changed(old.as_ref(), project.git.as_ref());
-            }
+        if project.git.as_deref() != scan.git.as_ref() {
+            project.git = scan.git.map(Arc::new);
             changed = true;
         }
         for (dir, listing) in scan.listings {
@@ -353,7 +350,7 @@ impl Workspace {
             }
         }
         if changed {
-            project.git_panel.rebuild(project.git.as_ref());
+            project.git_panel.rebuild(project.git.as_deref());
             project.rebuild_file_rows(&scan.root, filter);
         }
         // 终端换了目录，文件树跟过去。
@@ -366,12 +363,8 @@ impl Workspace {
     }
 }
 
-/// `from` 改名或挪到了 `to` 之后 `path` 的新路径；`path` 不是 `from` 也不在它下面时为 `None`。
-/// `path` 就是 `from` 时直接是 `to`：`to.join("")` 会多出结尾的 `/`，把文件当成目录去读。
-pub fn follow_move(path: &Path, from: &Path, to: &Path) -> Option<PathBuf> {
-    let rest = path.strip_prefix(from).ok()?;
-    Some(if rest.as_os_str().is_empty() { to.to_path_buf() } else { to.join(rest) })
-}
+// 跟着改名挪路径在 `runode_ui`，预览栏也用；窗口里照旧从这里引。
+pub use crate::ui::follow_move;
 
 #[cfg(test)]
 mod tests {
@@ -488,7 +481,7 @@ mod tests {
 
     #[test]
     fn hides_ignored_entries() {
-        let mut project = Project { git: Some(snapshot()), ..Default::default() };
+        let mut project = Project { git: Some(Arc::new(snapshot())), ..Default::default() };
         let root = Path::new("/repo");
         project.listings.insert(root.into(), vec![dir("src"), dir("target"), file("new.txt")]);
         project.rebuild_file_rows(root, NO_IGNORED);
@@ -497,7 +490,7 @@ mod tests {
         assert_eq!(project.file_rows.len(), 3);
 
         // 只装着被忽略目录的目录不和它并成一行。
-        project.git.as_mut().unwrap().main.ignored.insert("out/target".into());
+        Arc::get_mut(project.git.as_mut().unwrap()).unwrap().main.ignored.insert("out/target".into());
         project.listings.insert(root.into(), vec![dir("out")]);
         project.listings.insert("/repo/out".into(), vec![dir("target")]);
         project.rebuild_file_rows(root, NO_IGNORED);

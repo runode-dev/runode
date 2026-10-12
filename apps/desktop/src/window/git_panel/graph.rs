@@ -266,7 +266,7 @@ impl WindowView {
         let limit = graph.limit();
         // 「加载更多」那一行换成「正在读取」。
         let project = &mut self.workspace_mut().project;
-        project.git_panel.rebuild(project.git.as_ref());
+        project.git_panel.rebuild(project.git.as_deref());
         let job = cx.background_spawn(async move { repo.history(limit) });
         cx.spawn(async move |this, cx| {
             let history = job.await;
@@ -281,7 +281,7 @@ impl WindowView {
                 graph.lanes =
                     history.as_ref().map_or(0, |history| history.rows.iter().map(|row| row.width).max().unwrap_or(0));
                 graph.history = Some(history.map_err(|err| err.message));
-                project.git_panel.rebuild(project.git.as_ref());
+                project.git_panel.rebuild(project.git.as_deref());
                 cx.notify();
             })
             .ok();
@@ -350,7 +350,7 @@ impl WindowView {
         else {
             return;
         };
-        let load = project.git_panel.toggle_commit(root, &commit.id, project.git.as_ref());
+        let load = project.git_panel.toggle_commit(root, &commit.id, project.git.as_deref());
         cx.notify();
         if !load {
             return;
@@ -377,7 +377,7 @@ impl WindowView {
                     Err(_) => CommitChanges::Failed,
                 };
                 graph.changes.insert(commit, changes);
-                project.git_panel.rebuild(project.git.as_ref());
+                project.git_panel.rebuild(project.git.as_deref());
                 cx.notify();
             })
             .ok();
@@ -624,7 +624,7 @@ impl WindowView {
             .child(div().flex_1().min_w_0().truncate().child(dir.name.clone()))
             .on_press_down(cx, move |this, _, cx| {
                 let project = &mut this.workspace_mut().project;
-                project.git_panel.toggle_dir(di, project.git.as_ref());
+                project.git_panel.toggle_dir(di, project.git.as_deref());
                 cx.notify();
             })
             .into_any_element()

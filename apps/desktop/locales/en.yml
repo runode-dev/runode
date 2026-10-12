@@ -186,39 +186,6 @@ background:
 panel:
   no_changes: No uncommitted changes
   not_repo: Not a git repository
-  no_content: No content changes
-preview:
-  binary: Can't preview a binary file
-  too_large: The image is too large to preview
-  unreadable: "Can't read the file: %{error}"
-  truncated: The file is too large; only the first %{count} lines are shown
-  close: Close
-  close_others: Close Others
-  close_right: Close to the Right
-  close_all: Close All
-  keep_open: Keep Open
-  wrap: Word Wrap
-  show_source: Show Source
-  show_rendered: Show Formatted
-  alert:
-    note: Note
-    tip: Tip
-    important: Important
-    warning: Warning
-    caution: Caution
-  maximize: Maximize Preview
-  restore: Restore Preview
-  diff:
-    worktree_tab: "%{name} (Working Tree)"
-    staged_tab: "%{name} (Staged)"
-    no_changes: No changes
-    previous_change: Previous Change
-    next_change: Next Change
-    discard_hunk_title: Discard this change?
-    too_large: Too many changes to show
-    image_before: Before
-    image_after: After
-    image_missing: No file
 paste:
   title: The pasted text may run commands
   detail: It contains line breaks or terminal control sequences, so it may run as a command right after pasting.
@@ -321,7 +288,6 @@ tooltip:
   show_panel: Show Panel
   hide_panel: Hide Panel
   tasks: Tasks
-  close_preview: Close Preview
   close_search: Close Search
   close_split: Close Split
   restore_split: Restore Split
@@ -427,9 +393,6 @@ git:
   stage_all: Stage All Changes
   unstage_all: Unstage All Changes
   discard_all: Discard All Changes
-  stage_hunk: Stage Hunk
-  unstage_hunk: Unstage Hunk
-  discard_hunk: Discard Hunk
   stash: Stash
   stash_include_untracked: Stash (Include Untracked)
   stash_pop_latest: Pop Latest Stash

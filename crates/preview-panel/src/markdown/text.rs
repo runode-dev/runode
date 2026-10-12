@@ -13,10 +13,10 @@ use gpui::{
 use super::select::{MdPos, TextKey};
 
 /// 这一帧画出来的各段文字和它们的布局，鼠标事件据此找点在哪段文字上。每帧画之前清空。
-pub(in crate::window::preview) type Texts = Rc<RefCell<Vec<Placed>>>;
+pub(crate) type Texts = Rc<RefCell<Vec<Placed>>>;
 
 /// 画出来的一段文字：是哪段、排好的布局、是不是居中排的。
-pub(in crate::window::preview) struct Placed {
+pub(crate) struct Placed {
     key: TextKey,
     layout: TextLayout,
     centered: bool,

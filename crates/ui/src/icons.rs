@@ -18,4 +18,15 @@ crate::icons! {
     pub BAN_ICON = "ban",
     pub COPY_ICON = "copy",
     pub PIN_ICON = "pin",
+    /// 文件树「更多」菜单里用 VS Code 打开，预览栏里切到源码。
+    pub CODE_ICON = "code",
+    /// 取消暂存、丢弃改动和打勾：Git 面板和预览栏的 diff 共用，打勾还有任务板和 Markdown 的任务列表。
+    pub MINUS_ICON = "minus",
+    pub DISCARD_ICON = "discard",
+    pub CHECK_ICON = "check",
+    /// 向下的箭头：Git 面板的图表和预览栏 diff 里跳到下一处改动。
+    pub ARROW_DOWN_ICON = "arrow-down",
+    /// 放大和还原：分屏标题条和预览栏的标签条。
+    pub MAXIMIZE_ICON = "maximize",
+    pub MINIMIZE_ICON = "minimize",
 }

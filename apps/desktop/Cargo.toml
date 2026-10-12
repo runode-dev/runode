@@ -24,8 +24,6 @@ runode-completion.workspace = true
 runode-prompt-highlight.workspace = true
 # 配置文件的读取、主题、快捷键的写法和配置模板。
 runode-config.workspace = true
-# 预览栏读文件、判断类型和语法高亮。
-runode-preview.workspace = true
 # 远程访问的监听跟着宿主活：宿主跑在 app 里时由 app 开，单独跑时由 `runode --host` 开。
 runode-remote-access.workspace = true
 # 自动更新：查新版本、下载、核对签名、退出时换上 .app。
@@ -35,6 +33,8 @@ runode-autostart.workspace = true
 runode-ui.workspace = true
 # 右侧面板的 GitHub Actions 页。
 runode-github-actions.workspace = true
+# 右侧的预览栏：文件、diff 和 Markdown 的标签。
+runode-preview-panel.workspace = true
 # 设置页里配对手机时画二维码。
 qrcode.workspace = true
 gpui.workspace = true

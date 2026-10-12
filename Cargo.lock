@@ -4737,7 +4737,7 @@ dependencies = [
  "runode-github-actions",
  "runode-host",
  "runode-paths",
- "runode-preview",
+ "runode-preview-panel",
  "runode-prompt-highlight",
  "runode-protocol",
  "runode-remote-access",
@@ -4872,6 +4872,19 @@ dependencies = [
  "regex",
  "syntect",
  "two-face",
+]
+
+[[package]]
+name = "runode-preview-panel"
+version = "0.1.8"
+dependencies = [
+ "futures",
+ "gpui-pre",
+ "runode-git",
+ "runode-preview",
+ "runode-shared-types",
+ "runode-ui",
+ "rust-i18n",
 ]
 
 [[package]]

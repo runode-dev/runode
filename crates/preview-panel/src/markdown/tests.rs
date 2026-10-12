@@ -2,8 +2,18 @@ use std::sync::atomic::AtomicBool;
 
 use super::*;
 
+/// 测试里一个字占几格：ASCII 一格，别的（这里只有汉字）两格，和终端里一样。
+pub(super) fn cell_width(ch: char) -> u8 {
+    if ch.is_ascii() { 1 } else { 2 }
+}
+
 fn doc(text: &str) -> Doc {
-    Doc::new(runode_preview::parse_markdown(text, &AtomicBool::new(false)).unwrap(), Path::new("/repo"), |_| None)
+    Doc::new(
+        runode_preview::parse_markdown(text, &AtomicBool::new(false)).unwrap(),
+        Path::new("/repo"),
+        cell_width,
+        |_| None,
+    )
 }
 
 /// 各行的套层，只看引用的提示种类和列表项的记号。
@@ -144,6 +154,7 @@ fn tables_and_images_become_rows() {
         )
         .unwrap(),
         Path::new("/repo"),
+        cell_width,
         |path| (path == Path::new("/repo/a.png")).then(|| Picture::Svg(Arc::new(RenderImage::new(Vec::new())))),
     );
     let Leaf::Table { aligns, head, rows, .. } = &doc.rows[0].leaf else { panic!() };
@@ -200,13 +211,14 @@ fn local_images_are_read_once_per_file_and_capped() {
         Some(bitmap(1))
     };
     let parse = |text: &str| runode_preview::parse_markdown(text, &AtomicBool::new(false)).unwrap();
-    let doc = Doc::new(parse("![a](x.png)\n\n![b](./x.png)\n\n![c](sub/../x.png)\n"), Path::new("/repo"), read);
+    let doc =
+        Doc::new(parse("![a](x.png)\n\n![b](./x.png)\n\n![c](sub/../x.png)\n"), Path::new("/repo"), cell_width, read);
     assert_eq!(reads.get(), 1);
     assert_eq!(doc.pictures().count(), 3);
 
     reads.set(0);
     let many: String = (0..MAX_LOCAL_IMAGES + 10).map(|ix| format!("![{ix}](img{ix}.png)\n\n")).collect();
-    let doc = Doc::new(parse(&many), Path::new("/repo"), read);
+    let doc = Doc::new(parse(&many), Path::new("/repo"), cell_width, read);
     assert_eq!(reads.get(), MAX_LOCAL_IMAGES);
     let rows: Vec<bool> = doc.images().map(|image| image.picture.is_some()).collect();
     assert!(rows[..MAX_LOCAL_IMAGES].iter().all(|&shown| shown));
@@ -232,8 +244,8 @@ fn reloads_release_only_pictures_the_new_doc_drops() {
         "gone.png" => Some(bitmap(2)),
         _ => None,
     };
-    let old = Doc::new(parse("![](keep.png)\n\n![](gone.png)\n"), Path::new("/repo"), pictures);
-    let new = Doc::new(parse("text\n\n![](keep.png)\n"), Path::new("/repo"), pictures);
+    let old = Doc::new(parse("![](keep.png)\n\n![](gone.png)\n"), Path::new("/repo"), cell_width, pictures);
+    let new = Doc::new(parse("text\n\n![](keep.png)\n"), Path::new("/repo"), cell_width, pictures);
     let unused: Vec<_> = old.unused_pictures(&new).into_iter().map(Picture::key).collect();
     assert!(unused == [bitmap(2).key()], "只放掉 gone.png");
 }
@@ -244,8 +256,8 @@ fn widest_cells_count_wide_characters() {
     let rich = |text: &str| Rich { text: text.to_owned().into(), ..Rich::default() };
     let head = [rich("names"), rich("n")];
     let rows = [vec![rich("abc"), rich("123")], vec![rich("中文"), rich("4")], vec![rich("x")]];
-    assert_eq!(widest_cells(2, &head, &rows), [0, 1]);
-    assert_eq!(widest_cells(2, &[rich("ab"), rich("1")], &rows), [2, 1]);
+    assert_eq!(widest_cells(2, &head, &rows, cell_width), [0, 1]);
+    assert_eq!(widest_cells(2, &[rich("ab"), rich("1")], &rows, cell_width), [2, 1]);
 }
 
 /// 表格只画露出来（连同上下多画的 `OVERDRAW`）的表体行：表头 30 高、表体每行 20 高、1000 行，列表 600 高。

@@ -219,7 +219,7 @@ impl WindowView {
             .child(count_badge(count, fg, bg))
             .on_press_down(cx, move |this, _, cx| {
                 let project = &mut this.workspace_mut().project;
-                project.git_panel.toggle_section(&root, section, project.git.as_ref());
+                project.git_panel.toggle_section(&root, section, project.git.as_deref());
                 cx.notify();
             })
             .into_any_element()
@@ -361,7 +361,7 @@ impl WindowView {
             .children(self.row_buttons(ix, &root, buttons, fg, bg, cx))
             .on_press_down(cx, move |this, _, cx| {
                 let project = &mut this.workspace_mut().project;
-                project.git_panel.toggle_dir(di, project.git.as_ref());
+                project.git_panel.toggle_dir(di, project.git.as_deref());
                 cx.notify();
             })
             .on_mouse_down(

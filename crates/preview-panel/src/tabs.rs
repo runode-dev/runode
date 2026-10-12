@@ -1,29 +1,27 @@
 //! 预览栏的标签条：开着的标签（`PreviewTabs`）怎么换、关、挪，拖动标签换位置，标签的样子和
 //! 右键菜单，以及菜单里关标签、固定标签的动作。
 
-use std::path::Path;
+use std::{path::Path, sync::Arc};
 
 use gpui::{
     Action, Axis, Context, Div, Hsla, MouseButton, MouseDownEvent, Pixels, Point, Render, Role, ScrollHandle,
     SharedString, Stateful, Window, actions, div, img, prelude::*, px, svg,
 };
+use runode_git::{self as git, FileStatus};
 use runode_shared_types::color::Rgb;
-
-use super::{DiffTarget, Preview};
-use crate::ui::a11y::A11yPress;
-use crate::ui::menu::MenuHost as _;
-use crate::window::project::follow_move;
-use crate::{
-    assets::DIFF_ICON,
-    ui::{file_icons::file_icon, hsla, tooltip::tooltip},
-    window::{
-        ClosePane, CloseTab, TITLEBAR_HEIGHT, TogglePaneZoom, WindowView, divider_color,
-        files::menu_item,
-        model::base_name,
-        project::{RENAMED, status_color},
-        titlebar::{close_button, drag_chip, drop_marker},
-    },
+use runode_ui::{
+    a11y::A11yPress,
+    actions::{ClosePane, CloseTab, TogglePaneZoom},
+    base_name,
+    file_icons::file_icon,
+    follow_move, hsla,
+    menu::{MenuHost as _, menu_item},
+    panel::{ADDED, MODIFIED, REMOVED, RENAMED, TITLEBAR_HEIGHT, divider_color},
+    tabs::{close_button, drag_chip, drop_marker},
+    tooltip::tooltip,
 };
+
+use super::{DIFF_ICON, DiffTarget, Preview, PreviewPanel};
 
 actions!(
     runode,
@@ -50,9 +48,19 @@ pub(super) fn tab_underline(fg: Rgb) -> Div {
     div().absolute().bottom_0().left_0().w_full().h(px(1.)).bg(divider_color(hsla(fg)))
 }
 
-/// 预览栏的标签：一个文件一个，没固定的临时标签最多一个。没有标签时预览栏不显示。不进存档。
+/// 标签名按文件的 git 状态上的颜色。
+fn status_color(status: FileStatus) -> Rgb {
+    match status {
+        FileStatus::Modified => MODIFIED,
+        FileStatus::Added | FileStatus::Untracked => ADDED,
+        FileStatus::Deleted | FileStatus::Conflicted => REMOVED,
+        FileStatus::Renamed => RENAMED,
+    }
+}
+
+/// 一个 workspace 的预览标签：一个文件一个，没固定的临时标签最多一个。没有标签时预览栏不显示。不进存档。
 #[derive(Default)]
-pub(in crate::window) struct PreviewTabs {
+pub(super) struct PreviewTabs {
     pub tabs: Vec<Preview>,
     /// 当前显示的标签。
     pub active: usize,
@@ -60,6 +68,8 @@ pub(in crate::window) struct PreviewTabs {
     pub scroll: ScrollHandle,
     /// 预览栏放大到盖住终端区；标签都关掉时还原。
     pub maximized: bool,
+    /// 这个 workspace 最近读到的 git 状态，见 `PreviewPanel::set_git`。
+    pub git: Option<Arc<git::Repos>>,
 }
 
 impl PreviewTabs {
@@ -67,13 +77,13 @@ impl PreviewTabs {
         self.tabs.get(self.active)
     }
 
-    pub(super) fn active_mut(&mut self) -> Option<&mut Preview> {
+    pub fn active_mut(&mut self) -> Option<&mut Preview> {
         self.tabs.get_mut(self.active)
     }
 
     /// 打开 `path`（`diff` 不为空时是它的 diff）并切过去，`pin` 时固定下来。已经开着就切过去；
     /// 没开着时换掉临时标签，没有临时标签就插在当前标签右边。返回被换掉的临时标签。
-    pub(super) fn open(&mut self, path: &Path, diff: Option<DiffTarget>, pin: bool) -> Option<Preview> {
+    pub fn open(&mut self, path: &Path, diff: Option<DiffTarget>, pin: bool) -> Option<Preview> {
         if let Some(ix) = self.tabs.iter().position(|tab| tab.path == path && tab.diff == diff) {
             self.active = ix;
             self.tabs[ix].pinned |= pin;
@@ -92,7 +102,7 @@ impl PreviewTabs {
 
     /// 只留下 `keep` 为真的标签，返回关掉的。当前标签关掉时切到它右边的那个，右边没有了就切到
     /// 最后一个。
-    pub(super) fn retain(&mut self, mut keep: impl FnMut(usize, &Preview) -> bool) -> Vec<Preview> {
+    pub fn retain(&mut self, mut keep: impl FnMut(usize, &Preview) -> bool) -> Vec<Preview> {
         let mut kept_before_active = 0;
         let (mut kept, mut closed) = (Vec::new(), Vec::new());
         for (ix, tab) in std::mem::take(&mut self.tabs).into_iter().enumerate() {
@@ -122,7 +132,7 @@ impl PreviewTabs {
 
     /// `from` 改了名或挪到了 `to`：它和它下面的文件的标签换成新路径，固定与否不变。返回换下来的
     /// 旧标签。diff 标签不跟，扫描到新的改动时它自己会重读。
-    pub(super) fn moved(&mut self, from: &Path, to: &Path) -> Vec<Preview> {
+    pub fn moved(&mut self, from: &Path, to: &Path) -> Vec<Preview> {
         let mut old = Vec::new();
         for tab in self.tabs.iter_mut().filter(|tab| tab.diff.is_none()) {
             if let Some(path) = follow_move(&tab.path, from, to) {
@@ -150,7 +160,7 @@ impl Render for DraggedPreviewTab {
     }
 }
 
-impl WindowView {
+impl PreviewPanel {
     pub(super) fn close_preview_tab(&mut self, _: &CloseTab, window: &mut Window, cx: &mut Context<Self>) {
         self.close_active_preview(window, cx);
     }
@@ -166,12 +176,12 @@ impl WindowView {
     }
 
     fn close_active_preview(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let active = self.workspace().project.previews.active;
+        let active = self.tabs_mut().active;
         self.retain_previews(|ix, _| ix != active, window, cx);
     }
 
     pub(super) fn close_other_previews(&mut self, _: &CloseOtherPreviews, window: &mut Window, cx: &mut Context<Self>) {
-        let active = self.workspace().project.previews.active;
+        let active = self.tabs_mut().active;
         self.retain_previews(|ix, _| ix == active, window, cx);
     }
 
@@ -181,7 +191,7 @@ impl WindowView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let active = self.workspace().project.previews.active;
+        let active = self.tabs_mut().active;
         self.retain_previews(|ix, _| ix <= active, window, cx);
     }
 
@@ -198,7 +208,7 @@ impl WindowView {
 
     /// 把第 `from` 个标签挪到第 `to` 个位置并切过去。
     fn move_preview(&mut self, from: usize, to: usize, cx: &mut Context<Self>) {
-        let previews = &mut self.workspace_mut().project.previews;
+        let previews = self.tabs_mut();
         if from >= previews.tabs.len() {
             return;
         }
@@ -214,7 +224,9 @@ impl WindowView {
     /// 第 `ix` 个预览标签：文件图标和名字，名字按 git 状态上色，临时标签用斜体；当前标签和
     /// 悬停着的标签显示关闭按钮。
     pub(super) fn render_preview_tab(&self, ix: usize, fg: Rgb, bg: Rgb, cx: &mut Context<Self>) -> Stateful<Div> {
-        let previews = &self.workspace().project.previews;
+        let Some(previews) = self.tabs() else {
+            return div().id(("preview-tab", ix));
+        };
         let tab = &previews.tabs[ix];
         let active = ix == previews.active;
         let name = tab.name();
@@ -244,7 +256,7 @@ impl WindowView {
             .aria_description(path)
             .aria_selected(active)
             .on_a11y_press(view.clone(), move |this, window, cx| {
-                window.focus(&this.preview_focus, cx);
+                window.focus(&this.focus, cx);
                 this.activate_preview(ix, cx);
             })
             .group(group.clone())
@@ -299,9 +311,9 @@ impl WindowView {
                 MouseButton::Left,
                 cx.listener(move |this, event: &MouseDownEvent, window, cx| {
                     cx.stop_propagation();
-                    window.focus(&this.preview_focus, cx);
+                    window.focus(&this.focus, cx);
                     if event.click_count >= 2
-                        && let Some(tab) = this.workspace_mut().project.previews.tabs.get_mut(ix)
+                        && let Some(tab) = this.tabs_mut().tabs.get_mut(ix)
                     {
                         tab.pinned = true;
                     }
@@ -320,7 +332,7 @@ impl WindowView {
                 MouseButton::Right,
                 cx.listener(move |this, event: &MouseDownEvent, window, cx| {
                     cx.stop_propagation();
-                    window.focus(&this.preview_focus, cx);
+                    window.focus(&this.focus, cx);
                     this.activate_preview(ix, cx);
                     this.open_preview_menu(event.position, cx);
                 }),
@@ -336,7 +348,9 @@ impl WindowView {
 
     /// 在 `position` 弹出当前预览标签的右键菜单。
     fn open_preview_menu(&mut self, position: Point<Pixels>, cx: &mut Context<Self>) {
-        let previews = &self.workspace().project.previews;
+        let Some(previews) = self.tabs() else {
+            return;
+        };
         let (count, active) = (previews.tabs.len(), previews.active);
         let pinned = previews.active().is_some_and(|tab| tab.pinned);
         let item = |key: &str, action: Box<dyn Action>, enabled: bool| {
@@ -351,7 +365,7 @@ impl WindowView {
         if !pinned {
             items.extend([None, item("preview.keep_open", Box::new(KeepPreviewOpen), true)]);
         }
-        let target = self.preview_focus.clone();
+        let target = self.focus.clone();
         self.open_menu(position, items, target, cx);
     }
 }

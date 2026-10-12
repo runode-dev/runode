@@ -292,8 +292,8 @@ impl WindowView {
             sidebar_width: self.sidebar_width,
             panel_width: self.panel_width,
             preview_width: self.preview_width,
-            preview_wrap: self.preview_wrap,
-            preview_source: self.preview_source,
+            preview_wrap: self.preview.read(cx).wrap(),
+            preview_source: self.preview.read(cx).source(),
             show_ignored: self.show_ignored,
             hide_dotfiles: !self.show_dotfiles,
             git_tree: self.git_tree,
@@ -391,8 +391,7 @@ impl WindowView {
             self.sidebar_width = saved.sidebar_width;
             self.panel_width = saved.panel_width;
             self.preview_width = saved.preview_width;
-            self.preview_wrap = saved.preview_wrap;
-            self.preview_source = saved.preview_source;
+            self.preview.update(cx, |panel, _| panel.set_options(saved.preview_wrap, saved.preview_source));
             self.show_ignored = saved.show_ignored;
             self.show_dotfiles = !saved.hide_dotfiles;
             self.git_tree = saved.git_tree;

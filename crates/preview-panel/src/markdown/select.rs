@@ -6,11 +6,11 @@ use std::ops::Range;
 use super::{Doc, Leaf, Nest, gap, marker_text};
 
 /// 一段能选的文字：第几行、行里的第几段（表格的格子按先表头后各行、从左到右数，别的只有一段）。
-pub(in crate::window::preview) type TextKey = (usize, usize);
+pub(crate) type TextKey = (usize, usize);
 
 /// 选区的一端。按字段的先后比大小就是在文档里的先后。
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
-pub(in crate::window::preview) struct MdPos {
+pub(crate) struct MdPos {
     pub row: usize,
     pub text: usize,
     /// 段里的字节偏移，落在字符边界上。
@@ -127,6 +127,7 @@ mod tests {
         Doc::new(
             runode_preview::parse_markdown(text, &AtomicBool::new(false)).unwrap(),
             std::path::Path::new("/"),
+            crate::markdown::tests::cell_width,
             |_| None,
         )
     }

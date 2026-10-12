@@ -7,7 +7,7 @@ use runode_git::{self as git, LineKind, Section};
 
 /// 行号旁的改动标记。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(in crate::window) enum Mark {
+pub(crate) enum Mark {
     Added,
     Modified,
     /// 这一行上面删掉了行。

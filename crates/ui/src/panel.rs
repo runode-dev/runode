@@ -1,14 +1,17 @@
-//! 窗口外框和右侧面板共用的写法：分隔线的颜色、卡片样式的卡片、面板的外框、标题行和居中的说明，
-//! 改动行数的标签和改动状态的颜色，以及标题栏和面板上带图标的开关按钮。
+//! 窗口外框和右侧面板共用的写法：分隔线的颜色、卡片样式的卡片、面板的外框、顶上那一条、标题行和居中的
+//! 说明，改动行数的标签和改动状态的颜色，以及标题栏和面板上带图标的开关按钮。
 
-use gpui::{BoxShadow, Div, Hsla, Role, Stateful, div, point, prelude::*, px, svg};
+use gpui::{BoxShadow, Div, Hsla, MouseButton, Role, Stateful, div, point, prelude::*, px, svg};
 use runode_shared_types::color::Rgb;
 
 use crate::{
-    hsla,
+    drag_window, hsla,
     icons::{CHEVRON_DOWN_ICON, CHEVRON_RIGHT_ICON},
 };
 
+/// 透明标题栏的高度：终端内容从它下面开始，这一条用来拖动窗口，多个标签时也画在这里；
+/// 显示侧栏时红绿灯落在侧栏顶上。
+pub const TITLEBAR_HEIGHT: f32 = 36.;
 /// 卡片样式下卡片的圆角，分屏和面板顶上标题条的高度。
 pub const CARD_RADIUS: f32 = 10.;
 pub const PANE_HEADER_HEIGHT: f32 = 30.;
@@ -64,6 +67,23 @@ pub fn panel_message(text: String, fg: Rgb) -> Stateful<Div> {
         .px(px(16.))
         .text_color(hsla(fg).opacity(0.5))
         .child(text)
+}
+
+/// 预览栏和右侧面板顶上的一条。经典样式下和标题栏等高，能拖动窗口、双击缩放；卡片样式（`cards`）下是
+/// 卡片的标题条，和分屏的一样高。
+pub fn panel_header(fg: Rgb, cards: bool) -> Div {
+    let header = div()
+        .flex_none()
+        .px(px(10.))
+        .flex()
+        .items_center()
+        .gap(px(8.))
+        .border_b_1()
+        .border_color(divider_color(hsla(fg)));
+    if cards {
+        return header.h(px(PANE_HEADER_HEIGHT));
+    }
+    header.h(px(TITLEBAR_HEIGHT)).on_mouse_down(MouseButton::Left, drag_window)
 }
 
 /// 右侧面板的外框：定宽、占满高度、竖着排。经典样式下左边一条分隔线，卡片样式（`cards`）下是一张

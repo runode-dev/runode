@@ -19,32 +19,24 @@ use gpui::{
     AnyElement, Axis, Context, Image, ListHorizontalSizingBehavior, MouseButton, MouseDownEvent, PromptLevel, Role,
     ScrollStrategy, SharedString, StyledText, Window, div, prelude::*, px, svg, uniform_list,
 };
-use runode_config::PreviewClick;
 use runode_git::{self as git, DiffRow, DiffSide, DiffView, FileStatus, HunkAction, LineKind, hunk_actionable};
 use runode_preview::Span;
 use runode_shared_types::color::Rgb;
+use runode_ui::{
+    a11y::A11yPress,
+    font_size::FontSize,
+    hsla,
+    icons::{ARROW_DOWN_ICON, DISCARD_ICON, MINUS_ICON, PLUS_ICON},
+    panel::{ADDED, REMOVED, added_label, divider_color, removed_label},
+    scrollbar::{row_markers, scrollbar},
+    tooltip::tooltip,
+};
 
 use super::{
-    BODY_PADDING, Loaded, MAX_COLUMNS, Note, ROW_EXTRA_HEIGHT,
-    body::{TEXT_RIGHT_PADDING, WRAP_SLACK, ansi_palette, highlight_style, shown_text},
+    ARROW_UP_ICON, BODY_PADDING, Loaded, MAX_COLUMNS, Note, PreviewEvent, PreviewPanel, ROW_EXTRA_HEIGHT,
+    body::{TEXT_RIGHT_PADDING, WRAP_SLACK, highlight_style, shown_text},
     gpui_format, right_fade,
     wrap::{WrapCache, segment},
-};
-use crate::ui::a11y::A11yPress;
-use crate::{
-    assets::{ARROW_DOWN_ICON, ARROW_UP_ICON, DISCARD_ICON, MINUS_ICON, PLUS_ICON},
-    config::AppConfig,
-    ui::{
-        font_size::FontSize,
-        hsla,
-        scrollbar::{row_markers, scrollbar},
-        tooltip::tooltip,
-    },
-    window::{
-        WindowView, divider_color,
-        git_panel::Busy,
-        project::{ADDED, REMOVED, added_label, removed_label},
-    },
 };
 
 /// 顶上那一条的高度。
@@ -54,7 +46,7 @@ const SIGN_WIDTH: f32 = 14.;
 
 /// 预览栏里看哪个文件的哪种 diff。
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(in crate::window) struct DiffTarget {
+pub struct DiffTarget {
     /// 文件所在仓库的根目录。
     pub root: PathBuf,
     /// 相对仓库根的路径；改名的文件 `old_rel` 是原来的路径。
@@ -135,26 +127,20 @@ fn row_text<'a>(view: &'a DiffView, row: &DiffRow, removed: &'a [String], at: Op
     }
 }
 
-impl WindowView {
-    /// Git 面板里点了改动的文件：按配置的 `PreviewClick` 在预览栏里打开它的 diff，单击打开时单击开成
-    /// 临时标签、双击固定；双击打开时双击开成固定标签。
-    pub(in crate::window) fn click_diff(&mut self, target: DiffTarget, clicks: usize, cx: &mut Context<Self>) {
-        let single = cx.global::<AppConfig>().0.file_tree_preview_click == PreviewClick::Single;
-        if clicks >= 2 {
-            self.open_diff(target, true, cx);
-        } else if single {
-            self.open_diff(target, false, cx);
-        }
-        cx.notify();
-    }
-
-    fn open_diff(&mut self, target: DiffTarget, pin: bool, cx: &mut Context<Self>) {
+impl PreviewPanel {
+    /// 在预览栏里打开 `target` 的 diff 标签：`pin` 时开成固定标签，否则开成临时标签。
+    pub fn open_diff(&mut self, target: DiffTarget, pin: bool, cx: &mut Context<Self>) {
         let path = target.root.join(&target.rel);
         self.open_tab(&path, Some(target), pin, cx);
     }
 
+    /// 按块操作做完了：当前显示的是 diff 标签时马上重读，不等扫描。
+    pub fn reload_diff(&mut self, cx: &mut Context<Self>) {
+        self.load_diff(cx);
+    }
+
     /// 扫描结果换上以后，当前显示的 diff 标签对应的 git 状态变了就重读；别的标签等切过去时再读。
-    pub(in crate::window) fn reload_stale_diff(&mut self, cx: &mut Context<Self>) {
+    pub fn reload_stale_diff(&mut self, cx: &mut Context<Self>) {
         if self.preview().is_some_and(|preview| preview.diff.is_some() && preview.diff_stale) {
             self.load_diff(cx);
         }
@@ -163,16 +149,15 @@ impl WindowView {
     /// 在后台读当前 diff 标签的整篇 diff，读完换上，接着在后台高亮。第一次读时滚到第一处改动，
     /// 重读时滚动位置不动。
     pub(super) fn load_diff(&mut self, cx: &mut Context<Self>) {
-        let id = self.workspace().id;
-        let project = &self.workspace().project;
-        let Some(target) = project.previews.active().and_then(|preview| preview.diff.clone()) else {
+        let id = self.ws;
+        let Some(tabs) = self.tabs() else {
             return;
         };
-        let repo = project
-            .git
-            .as_ref()
-            .and_then(|git| git.iter().find(|repo| repo.root == target.root))
-            .map(git::Snapshot::repo);
+        let Some(target) = tabs.active().and_then(|preview| preview.diff.clone()) else {
+            return;
+        };
+        let repo =
+            tabs.git.as_ref().and_then(|git| git.iter().find(|repo| repo.root == target.root)).map(git::Snapshot::repo);
         let Some(preview) = self.preview_mut() else {
             return;
         };
@@ -297,7 +282,7 @@ impl WindowView {
         let number = (lines.max(1).to_string().len() as f32 * font_size * 0.62 + 10.).ceil();
         let row_height = font_size + ROW_EXTRA_HEIGHT;
         // 换行时文字能占的宽度：除去左边框、两栏行号、正负号和右边留的空。块头不折。
-        let wrapped = self.preview_wrap.then(|| {
+        let wrapped = self.wrap.then(|| {
             let text_width = width - 1. - 2. * number - SIGN_WIDTH - TEXT_RIGHT_PADDING - WRAP_SLACK;
             let text = |ix: usize| match view.rows.get(ix)? {
                 DiffRow::Header(_) => None,
@@ -423,7 +408,7 @@ impl WindowView {
         let offset = -f32::from(preview.scroll.0.borrow().base_handle.offset().y) - BODY_PADDING;
         let top = (offset.max(0.) / row_height).round() as usize;
         // 换行时块头在列表里的位置是它折出来的第一段。
-        let wrapped = self.preview_wrap.then(|| content.wrap.current()).flatten();
+        let wrapped = self.wrap.then(|| content.wrap.current()).flatten();
         let at = |header: usize| wrapped.as_ref().map_or(header, |wrapped| wrapped.span(header).start);
         let mut headers = content.headers.iter().map(|&header| at(header));
         let target = if forward { headers.find(|&row| row > top) } else { headers.rev().find(|&row| row < top) };
@@ -434,8 +419,8 @@ impl WindowView {
         }
     }
 
-    /// 块头上的按钮：暂存、丢掉或取消暂存这一块。丢掉先问一下。用的是这次读到的块，文件在这之后又
-    /// 改过时 git 认不出来，报错后跟着扫描重读即可。
+    /// 块头上的按钮：暂存、丢掉或取消暂存这一块，交给 app 做（`PreviewEvent::ApplyHunk`）。丢掉先问一下。
+    /// 用的是这次读到的块，文件在这之后又改过时 git 认不出来，报错后跟着扫描重读即可。
     fn diff_hunk_action(&mut self, hunk: usize, action: HunkAction, window: &mut Window, cx: &mut Context<Self>) {
         let Some(preview) = self.preview() else {
             return;
@@ -444,11 +429,8 @@ impl WindowView {
             return;
         };
         let (root, file) = (target.root.clone(), content.view.file.clone());
-        let busy = if action == HunkAction::Discard { Busy::Discard } else { Busy::Stage };
-        let run = move |this: &mut Self, window: &mut Window, cx: &mut Context<Self>| {
-            // 做完马上重读，不等扫描，接着点下一块时块还对得上。
-            let op = move |repo: &git::Repo| repo.apply_hunk(&file, hunk, action);
-            this.run_git(&root, busy, window, cx, op, |this, (), _, cx| this.load_diff(cx));
+        let run = move |_: &mut Self, _: &mut Window, cx: &mut Context<Self>| {
+            cx.emit(PreviewEvent::ApplyHunk { root, file, hunk, action });
         };
         if action != HunkAction::Discard {
             run(self, window, cx);
@@ -475,7 +457,7 @@ impl WindowView {
         if matches!(target.side, DiffSide::Commit { .. }) || !hunk_actionable(&view.file) {
             return false;
         }
-        let git = self.workspace().project.git.as_ref();
+        let git = self.tabs().and_then(|tabs| tabs.git.as_ref());
         let repo = git.and_then(|git| git.iter().find(|repo| repo.root == target.root));
         let conflicted = repo.is_some_and(|repo| {
             repo.unstaged.iter().any(|file| file.path == target.rel && file.status == FileStatus::Conflicted)
@@ -502,12 +484,12 @@ impl WindowView {
         };
         let view = &content.view;
         let actionable = self.diff_hunks_actionable(target, view);
-        let palette = ansi_palette(cx);
+        let palette = self.input.palette;
         let dim = hsla(fg).opacity(0.4);
         let worktree = target.side == DiffSide::Worktree;
         let full = preview.path.clone();
         // 换行时一项是折出来的一段：列表里的第几项、diff 的哪一行、这一行的哪一段、是不是第一段。
-        let wrapped = self.preview_wrap.then(|| content.wrap.current()).flatten();
+        let wrapped = self.wrap.then(|| content.wrap.current()).flatten();
         let items: Vec<(usize, usize, Option<Range<usize>>, bool)> = match &wrapped {
             Some(wrapped) => range
                 .filter_map(|item| {
@@ -596,9 +578,9 @@ impl WindowView {
                     .when_some(jump, |row, line| {
                         row.on_mouse_down(
                             MouseButton::Left,
-                            cx.listener(move |this, event: &MouseDownEvent, window, cx| {
+                            cx.listener(move |_, event: &MouseDownEvent, _, cx| {
                                 if event.click_count >= 2 {
-                                    this.insert_path(&full, Some(line), window, cx);
+                                    cx.emit(PreviewEvent::InsertPath { path: full.clone(), line });
                                 }
                             }),
                         )
@@ -634,7 +616,7 @@ impl WindowView {
             _ => Vec::new(),
         };
         // 按钮挂在 diff 的行里，跟着正文的 `preview-font-size` 走，不跟界面字号，才装得进这一行。
-        let font_size = cx.global::<AppConfig>().0.preview_font_size;
+        let font_size = self.input.font_size;
         let fg_hsla = hsla(fg);
         row.id(("preview-diff-header", ix))
             .role(Role::Group)
@@ -678,7 +660,7 @@ impl WindowView {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::window::preview::PreviewTabs;
+    use crate::tabs::PreviewTabs;
     use runode_git::{FileDiff, Hunk, Line};
     use std::path::Path;
 
