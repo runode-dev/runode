@@ -564,7 +564,6 @@ settings:
     terminal: 終端機
     files: 檔案與預覽
     agents: Agent
-    decision: 模型
     remote: 遠端存取
     keybinds: 快速鍵
   section:
@@ -581,9 +580,6 @@ settings:
     login: 登入時啟動
     push: 手機通知
     push_key: 自己編譯的手機 App
-    decision_service: 服務
-    decision_keys: 託管 API
-    decision_models: 這台 Mac 上的模型
   theme:
     single: 一個主題
     pair: 淺色深色分開
@@ -646,8 +642,6 @@ settings:
     agent_done_sound: agent 完成時的提示音
     agent_blocked_sound: agent 等你回答時的提示音
     agent_split_fold: 摺疊 agent 開的分割畫面
-    chat_model: 大模型的預設模型
-    decision_model: 決策模型的預設模型
     config_file: 引入的檔案
     keybind: 快速鍵
   hint:
@@ -706,8 +700,6 @@ settings:
     agent_done_sound: 系統內建的聲音。
     agent_blocked_sound: 系統內建的聲音。
     agent_split_fold: agent 用 runode open 分出的分割畫面預設摺疊成標題列，不佔地方，點標題列展開。只在卡片樣式的視窗裡起作用。
-    chat_model: runode-infer 裡的一個大模型，不設定就是還沒選。
-    decision_model: runode-infer 裡的一個決策模型，本機的或託管的，不設定就是還沒選。
     config_file: 讀完這個檔案之後再讀的設定檔。相對路徑從這個檔案所在目錄算；路徑前加 ? 表示檔案可以不存在。
     keybind: 你的快速鍵疊在預設快速鍵上。
   choice:
@@ -758,69 +750,6 @@ settings:
       title: 登入時在背景啟動宿主
       hint: 不開視窗，只在背景啟動終端宿主。遠端存取打開、又有配對過的手機時它一直留著，不用開著 Runode 手機也連得上。關掉開關不會停下正在跑的宿主，它託管的會話不受影響。
     failed: "沒能修改登入時啟動的設定：%{err}"
-  decision:
-    service: runode-infer
-    service_hint: 在這台 Mac 上為別的程式執行模型。大模型寫回答（OpenAI 的聊天格式）；決策模型回答帶型別的問題（是或否、幾項裡選一項、打個分），在本機執行，或者用 TypeSafe 的 Jev、Cloudflare 的 Clef。它要另外下載，Runode 只負責管理。
-    loading: 正在查看 runode-infer…
-    missing: 沒有安裝 runode-infer。裝好之後再回到這一頁。
-    download: 開啟下載頁
-    failed: "無法和 runode-infer 溝通：%{err}"
-    retry: 重試
-    running: "在 http://%{address} 執行中（版本 %{version}）"
-    stopped: "沒有在執行（版本 %{version}）"
-    start: 啟動
-    stop: 停止
-    working: 處理中…
-    typesafe: TypeSafe API key
-    typesafe_hint: 使用 jev-latest 時需要。Runode 把它交給 runode-infer，自己不保留。
-    cloudflare: Cloudflare Workers AI
-    cloudflare_hint: 使用 cf/clef-flash 和 cf/clef 時需要：帳戶 ID 和一個能執行 Workers AI 的 API token。
-    account: Cloudflare 帳戶 ID
-    token: Cloudflare API token
-    key_placeholder: API key
-    account_placeholder: 帳戶 ID
-    token_placeholder: API token
-    key_empty: 先把每一欄都填上。
-    key_set: 已儲存
-    save: 儲存
-    clear: 移除
-    pull: 下載
-    pull_label: "下載 %{model}"
-    pulling: "正在下載，%{percent}%"
-    remove: 刪除
-    remove_label: "刪除 %{model}"
-    loaded: 已載入
-    save_label: "儲存 %{what}"
-    clear_label: "移除 %{what}"
-    pull_stopped: 下載沒完成就停了，再按一次下載會接著下。
-    cannot_run: 這台 Mac 上無法執行
-    more_models: 其他 GGUF 決策模型可以在終端機裡用 runode-infer pull hf.co/<org>/<repo>:<量化> 下載。
-    more_chat_models: 其他 GGUF 大模型可以在終端機裡用 runode-infer pull hf.co/<org>/<repo>:<量化> 下載。
-    kind: 模型類型
-    kind_chat: 大模型
-    kind_decision: 決策模型
-    default_model: 預設模型
-    default_none: 不設定
-    not_in_infer: 不在 runode-infer 裡
-    not_downloaded: 沒下載
-    no_key: 沒填金鑰
-    chat_unsupported: 這個版本的 runode-infer 還不能執行大模型，升級後再來。
-    keep_alive: 閒置多久卸載
-    keep_alive_hint: 載入的模型這麼多分鐘沒有請求就卸載，騰出記憶體；常駐的不卸載。
-    keep_alive_label: 閒置多久卸載（分鐘）
-    keep_alive_invalid: 填整數分鐘。
-    config_failed: "沒能讀 runode-infer 的設定：%{err}"
-    minutes: 分鐘
-    load: 載入
-    load_label: "載入 %{model}"
-    loading_model: 載入中…
-    unload: 卸載
-    unload_label: "卸載 %{model}"
-    pin: 常駐
-    pin_label: "常駐 %{model}"
-    state_loading: 載入中
-    state_pinned: 已載入 · 常駐
-    state_expires: "已載入 · %{minutes} 分鐘後卸載"
   test_push:
     title: 測試推送
     hint: 馬上給登記過的手機推送一則通知，看推送設定和金鑰對不對。

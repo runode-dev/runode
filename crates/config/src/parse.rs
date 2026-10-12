@@ -84,7 +84,6 @@ pub const KEYS: &[&[&str]] = &[
         "agent-blocked-sound",
         "agent-split-fold",
     ],
-    &["chat-model", "decision-model"],
     &["config-file"],
     &["keybind"],
 ];
@@ -364,8 +363,6 @@ impl Config {
             "apns-key-file" => self.apns_key_file = text(value),
             "apns-key-id" => self.apns_key_id = text(value),
             "apns-team-id" => self.apns_team_id = text(value),
-            "chat-model" => self.chat_model = text(value),
-            "decision-model" => self.decision_model = text(value),
             "apns-bundle-id" => self.apns_bundle_id = text(value),
             "agent-notifications" => {
                 self.agent_notifications = or_default(empty, defaults.agent_notifications, || parse_bool(value))?;

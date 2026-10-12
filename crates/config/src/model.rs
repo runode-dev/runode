@@ -173,10 +173,6 @@ pub struct Config {
     /// agent 干完了、等用户回答时播放的系统声音名；`None` 表示不出声。
     pub agent_done_sound: Option<String>,
     pub agent_blocked_sound: Option<String>,
-    /// 大模型、决策模型各自的默认模型：runode-infer 里的模型名，`None` 是还没选。不校验，由
-    /// runode-infer 判断对不对；现在只记下来，还没有地方读。
-    pub chat_model: Option<String>,
-    pub decision_model: Option<String>,
     /// 叠在默认快捷键上的 `keybind`，按出现顺序；只认 runode 自己的配置文件。
     pub keybinds: Vec<Keybind>,
     /// 本次读到的全部文件（含主题和 config-file 引入的），供热重载监视。
@@ -248,8 +244,6 @@ impl Default for Config {
             agent_split_fold: true,
             agent_done_sound: Some("Glass".into()),
             agent_blocked_sound: Some("Ping".into()),
-            chat_model: None,
-            decision_model: None,
             keybinds: Vec::new(),
             sources: Vec::new(),
             dark: true,

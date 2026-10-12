@@ -564,7 +564,6 @@ settings:
     terminal: Terminal
     files: Files & Preview
     agents: Agents
-    decision: Models
     remote: Remote Access
     keybinds: Keyboard Shortcuts
   section:
@@ -581,9 +580,6 @@ settings:
     login: Start at Login
     push: Phone Notifications
     push_key: Your Own Phone App
-    decision_service: Service
-    decision_keys: Hosted APIs
-    decision_models: Models on This Mac
   theme:
     single: One Theme
     pair: Light & Dark
@@ -646,8 +642,6 @@ settings:
     agent_done_sound: Sound when an agent finishes
     agent_blocked_sound: Sound when an agent needs you
     agent_split_fold: Fold splits opened by agents
-    chat_model: Default chat model
-    decision_model: Default decision model
     config_file: Included files
     keybind: Keyboard shortcuts
   hint:
@@ -706,8 +700,6 @@ settings:
     agent_done_sound: A system sound.
     agent_blocked_sound: A system sound.
     agent_split_fold: An agent running `runode open --right` or `--down` gets a split folded to its title bar, so it does not take room; click the title bar to unfold. Cards window style only.
-    chat_model: A chat model from runode-infer; None means not picked yet.
-    decision_model: A decision model from runode-infer, local or hosted; None means not picked yet.
     config_file: Other configuration files to read after this one. Relative paths start from this file's folder; a leading ? means the file may be missing.
     keybind: Your shortcuts are added on top of the defaults.
   choice:
@@ -758,69 +750,6 @@ settings:
       title: Run the host in the background at login
       hint: Starts the terminal host without a window. It stays in the background while remote access is on and a phone is paired, so the phone can connect without Runode open. Turning this off does not stop a host that is already running, so its sessions stay open.
     failed: "Could not change the login setting: %{err}"
-  decision:
-    service: runode-infer
-    service_hint: Runs models on this Mac for other programs. Chat models write replies (the OpenAI chat format); decision models answer typed questions (yes or no, pick one, give a score), here or with TypeSafe Jev and Cloudflare Clef. It is a separate download; Runode only manages it.
-    loading: Checking runode-infer…
-    missing: runode-infer is not installed. Install it, then come back to this page.
-    download: Open Download Page
-    failed: "Could not talk to runode-infer: %{err}"
-    retry: Try Again
-    running: "Running at http://%{address} (version %{version})"
-    stopped: "Not running (version %{version})"
-    start: Start
-    stop: Stop
-    working: Working…
-    typesafe: TypeSafe API Key
-    typesafe_hint: For jev-latest. Runode passes the key to runode-infer and does not keep it.
-    cloudflare: Cloudflare Workers AI
-    cloudflare_hint: "For cf/clef-flash and cf/clef: your account ID and an API token that can run Workers AI."
-    account: Cloudflare account ID
-    token: Cloudflare API token
-    key_placeholder: API key
-    account_placeholder: Account ID
-    token_placeholder: API token
-    key_empty: Fill in every field first.
-    key_set: Saved
-    save: Save
-    clear: Remove
-    pull: Download
-    pull_label: "Download %{model}"
-    pulling: "Downloading, %{percent}%"
-    remove: Delete
-    remove_label: "Delete %{model}"
-    loaded: loaded
-    save_label: "Save %{what}"
-    clear_label: "Remove %{what}"
-    pull_stopped: The download stopped before it finished; download again to continue.
-    cannot_run: can't run on this Mac
-    more_models: Other GGUF decision models can be downloaded in a terminal with runode-infer pull hf.co/<org>/<repo>:<quant>.
-    more_chat_models: Other GGUF chat models can be downloaded in a terminal with runode-infer pull hf.co/<org>/<repo>:<quant>.
-    kind: Model type
-    kind_chat: Chat Models
-    kind_decision: Decision Models
-    default_model: Default model
-    default_none: None
-    not_in_infer: not in runode-infer
-    not_downloaded: not downloaded
-    no_key: no API key
-    chat_unsupported: This version of runode-infer can't run chat models yet. Update it, then come back.
-    keep_alive: Unload when idle
-    keep_alive_hint: A loaded model with no requests for this many minutes is unloaded to free memory. Models kept loaded stay.
-    keep_alive_label: Unload when idle for (minutes)
-    keep_alive_invalid: Enter a whole number of minutes.
-    config_failed: "Could not read the runode-infer settings: %{err}"
-    minutes: min
-    load: Load
-    load_label: "Load %{model}"
-    loading_model: Loading…
-    unload: Unload
-    unload_label: "Unload %{model}"
-    pin: Keep loaded
-    pin_label: "Keep %{model} loaded"
-    state_loading: loading
-    state_pinned: loaded · kept loaded
-    state_expires: "loaded · unloads in %{minutes} min"
   test_push:
     title: Test push
     hint: Send a notification to registered phones now. Checks the push settings and key.

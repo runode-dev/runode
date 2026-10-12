@@ -7,13 +7,10 @@
 //! 一会儿、按回车或者失去焦点时写回，写之前按读配置时的规矩检查，不对就不写、在那一项下面说原因。
 //!
 //! 哪一页有哪些项在 `pages`，开关、选项这些控件在 `controls`，从长列表里挑一项的浮层在 `picker`，
-//! 快捷键那一页在 `keybinds`，远程访问那一页的配对手机在 `pairing`、测试推送在 `test_push`，外观页的配色在 `theme`，
-//! 模型那一页（大模型和决策模型，经用户自己装的 runode-infer）在 `decision`。
+//! 快捷键那一页在 `keybinds`，远程访问那一页的配对手机在 `pairing`、测试推送在 `test_push`，外观页的配色在 `theme`。
 
 mod autostart;
 mod controls;
-mod decision;
-pub(crate) use decision::DecisionPulls;
 mod keybinds;
 pub(crate) use keybinds::caps as keybind_caps;
 mod pages;
@@ -22,7 +19,7 @@ mod picker;
 mod test_push;
 mod theme;
 
-use std::{collections::HashMap, ffi::OsString, sync::Arc, time::Duration};
+use std::{collections::HashMap, sync::Arc, time::Duration};
 
 use gpui::{
     App, AppContext as _, Context, Entity, EventEmitter, FocusHandle, Focusable, KeyDownEvent, MouseButton,
@@ -89,21 +86,15 @@ pub struct SettingsView {
     /// 读过的主题的颜色，按主题名；找不到的主题记为 `None`，不再去找。
     theme_looks: HashMap<String, Option<theme::Look>>,
     scroll: ScrollHandle,
-    /// 终端里 shell 报告的 PATH，找 runode-infer 用。
-    shell_path: Option<OsString>,
-    decision: decision::State,
     test_push: test_push::State,
     _observe: Subscription,
-    _pulls: Subscription,
 }
 
 impl EventEmitter<Close> for SettingsView {}
 
 impl SettingsView {
-    /// `shell_path` 是打开设置页时那个终端里 shell 报告的 PATH。
-    pub fn new(shell_path: Option<OsString>, window: &mut Window, cx: &mut Context<Self>) -> Self {
+    pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         let observe = cx.observe_global_in::<AppConfig>(window, |this, window, cx| this.config_changed(window, cx));
-        let pulls = cx.observe_global::<DecisionPulls>(|this, cx| this.pulls_changed(cx));
         Self {
             focus_handle: cx.focus_handle(),
             page: Page::General,
@@ -115,11 +106,8 @@ impl SettingsView {
             keybinds: keybinds::State::default(),
             theme_looks: HashMap::new(),
             scroll: ScrollHandle::new(),
-            shell_path,
-            decision: decision::State::default(),
             test_push: test_push::State::default(),
             _observe: observe,
-            _pulls: pulls,
         }
     }
 
@@ -151,11 +139,7 @@ impl SettingsView {
         self.errors.clear();
         self.picker = None;
         self.keybinds.stop_recording();
-        self.decision.stop_polling();
         self.scroll.set_offset(point(px(0.), px(0.)));
-        if page == Page::Decision {
-            self.refresh_decision(cx);
-        }
         window.focus(&self.focus_handle, cx);
         cx.notify();
     }
@@ -236,14 +220,13 @@ impl SettingsView {
         }
     }
 
-    /// 换页、收起前把还没写回的输入框写回，模型页的空闲时间也在内。
+    /// 换页、收起前把还没写回的输入框写回。
     pub fn commit_all(&mut self, cx: &mut Context<Self>) {
         let pending: Vec<String> =
             self.fields.iter().filter(|(_, field)| field.pending.is_some()).map(|(id, _)| id.clone()).collect();
         for id in pending {
             self.commit(&id, cx);
         }
-        self.commit_keep_alive(cx);
     }
 
     /// 把输入框 `id` 里的文字写回配置文件；和当前的值一样时不写。

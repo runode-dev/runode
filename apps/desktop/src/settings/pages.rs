@@ -25,7 +25,6 @@ pub(super) enum Page {
     Terminal,
     Files,
     Agents,
-    Decision,
     Remote,
     Keybinds,
 }
@@ -49,9 +48,6 @@ enum Item {
     TestPush,
     /// 登录时自启的两项（宿主、app），装没装看服务文件，不是配置里的键。
     Autostart,
-    /// 模型那一页的全部内容，大多经 runode-infer 读写；只有两个默认模型（`chat-model`、
-    /// `decision-model`）是配置里的键。
-    Decision,
 }
 
 #[derive(Clone, Copy)]
@@ -67,14 +63,13 @@ enum Control {
 }
 
 impl Page {
-    pub const ALL: [Self; 9] = [
+    pub const ALL: [Self; 8] = [
         Self::General,
         Self::Appearance,
         Self::Colors,
         Self::Terminal,
         Self::Files,
         Self::Agents,
-        Self::Decision,
         Self::Remote,
         Self::Keybinds,
     ];
@@ -87,7 +82,6 @@ impl Page {
             Self::Terminal => "terminal",
             Self::Files => "files",
             Self::Agents => "agents",
-            Self::Decision => "decision",
             Self::Remote => "remote",
             Self::Keybinds => "keybinds",
         }
@@ -99,7 +93,7 @@ impl Page {
 
     pub fn icon(self) -> &'static str {
         use crate::assets::{
-            FILES_ICON, KEYBOARD_ICON, MEMORY_ICON, PALETTE_ICON, PHONE_ICON, SETTINGS_ICON, SLIDERS_ICON,
+            FILES_ICON, KEYBOARD_ICON, PALETTE_ICON, PHONE_ICON, SETTINGS_ICON, SLIDERS_ICON,
             SPARKLE_ICON, TERMINAL_ICON,
         };
         match self {
@@ -109,7 +103,6 @@ impl Page {
             Self::Terminal => TERMINAL_ICON,
             Self::Files => FILES_ICON,
             Self::Agents => SPARKLE_ICON,
-            Self::Decision => MEMORY_ICON,
             Self::Remote => PHONE_ICON,
             Self::Keybinds => KEYBOARD_ICON,
         }
@@ -188,7 +181,6 @@ impl Page {
                 AgentExclude,
                 Row("agent-split-fold", Switch),
             ],
-            Self::Decision => &[Decision],
             Self::Remote => &[
                 Row("remote-access", Switch),
                 Row("remote-access-port", Text(80.)),
@@ -229,11 +221,8 @@ impl Page {
                 | Item::ConfigFileActions
                 | Item::Pairing
                 | Item::TestPush
-                | Item::Autostart
-                | Item::Decision => None,
+                | Item::Autostart => None,
             })
-            // 模型页的两个默认模型不是 `Item::Row`，画在 `render_decision` 里。
-            .chain(if self == Self::Decision { &["chat-model", "decision-model"][..] } else { &[] }.iter().copied())
             .collect()
     }
 }
@@ -320,11 +309,6 @@ impl SettingsView {
                 Item::Pairing => self.render_pairing(colors, cx).into_any_element(),
                 Item::TestPush => self.render_test_push(colors, cx).into_any_element(),
                 Item::Autostart => self.render_autostart(colors, cx).into_any_element(),
-                // 自己分组、自己画卡片：没装 runode-infer 时只有一张。
-                Item::Decision => {
-                    cards.raw(self.render_decision(colors, window, cx).into_any_element());
-                    continue;
-                }
             };
             cards.push(element);
         }
