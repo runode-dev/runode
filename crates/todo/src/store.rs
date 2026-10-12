@@ -9,8 +9,8 @@ use std::{
     time::Duration,
 };
 
-use runode_protocol::{
-    SessionId,
+use runode_shared_types::{
+    session::SessionId,
     todo::{Schedule, Todo, TodoSpec, When},
 };
 use rusqlite::{Connection, OptionalExtension as _, Row, Transaction, TransactionBehavior, params};

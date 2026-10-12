@@ -1,4 +1,4 @@
-//! 任务板（见 `runode_protocol::todo`）的库和定时：任务和定时存在一个 SQLite 文件里（`Store`），定时
+//! 任务板（见 `runode_shared_types::todo`）的库和定时：任务和定时存在一个 SQLite 文件里（`Store`），定时
 //! 按本地时间算下一次到点（`next_fire`）。
 //!
 //! 宿主拿着库开任务、按定时开新任务，前端经宿主的 `ClientMsg::ListTodos` 这几条消息读写任务板。别的程序

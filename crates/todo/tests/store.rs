@@ -2,8 +2,8 @@
 
 use std::path::{Path, PathBuf};
 
-use runode_protocol::{
-    SessionId,
+use runode_shared_types::{
+    session::SessionId,
     todo::{TodoSpec, When},
 };
 use runode_todo::{DONE_KEPT, Store};

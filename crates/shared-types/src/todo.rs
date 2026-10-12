@@ -1,0 +1,108 @@
+//! 任务板上的数据：派给 agent 的任务，和到点自动开一张新任务的定时。宿主持有它们，存在
+//! 任务板的库里，前端经宿主的消息读写；卡片在看板的哪一列另由协议按会话的状态推出来。
+//!
+//! 开始一个任务时，宿主在任务的目录（或给它新开的工作树）里开一个会话，在提示符上跑
+//! `<agent> "<提示词>"`。
+
+use std::path::PathBuf;
+
+use serde::{Deserialize, Serialize};
+
+use crate::session::SessionId;
+
+/// 没写 agent 时跑的命令。
+pub const DEFAULT_AGENT: &str = "claude";
+
+/// 任务要做的事，新建任务和定时都用它。
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TodoSpec {
+    pub title: String,
+    /// 交给 agent 的提示词；为空时用标题，见 `TodoSpec::prompt`。
+    #[serde(default)]
+    pub prompt: String,
+    /// 在哪个目录里做，绝对路径。
+    pub dir: PathBuf,
+    /// 跑哪个 agent：提示词前面的那段命令，比如 `claude`、`codex --full-auto`。
+    #[serde(default = "default_agent")]
+    pub agent: String,
+    /// 给任务新开一个工作树和分支，不在 `dir` 里直接改；`dir` 要在 git 仓库里。
+    #[serde(default)]
+    pub worktree: bool,
+}
+
+impl TodoSpec {
+    /// 实际交给 agent 的提示词：没写时用标题。
+    pub fn prompt(&self) -> &str {
+        if self.prompt.trim().is_empty() { &self.title } else { &self.prompt }
+    }
+}
+
+fn default_agent() -> String {
+    DEFAULT_AGENT.to_owned()
+}
+
+/// 一张任务卡片。时间都是 Unix 时间的秒数。
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Todo {
+    /// 宿主给的标识，8 个小写十六进制数字。
+    pub id: String,
+    /// 宿主给的编号：从 1 起按加的先后，删掉了也不再给别的任务，界面和命令行上写成 `#5`。要标识的消息
+    /// 也认编号（`5` 或 `#5`），见 `ClientMsg::GetTodo`。旧宿主没有编号，为 0。
+    #[serde(default)]
+    pub number: u64,
+    pub spec: TodoSpec,
+    pub created: u64,
+    /// 什么时候开始的；还没开始时为空。
+    #[serde(default)]
+    pub started: Option<u64>,
+    /// 开始时开的会话。会话可能已经没了。
+    #[serde(default)]
+    pub session: Option<SessionId>,
+    /// 给它新开的工作树的根目录和分支；没开时为空。
+    #[serde(default)]
+    pub worktree_dir: Option<PathBuf>,
+    #[serde(default)]
+    pub branch: Option<String>,
+    /// 标成完成的时刻；没完成时为空。
+    #[serde(default)]
+    pub done_at: Option<u64>,
+    /// 由哪个定时开出来的（`Schedule::id`）；用户自己加的为空。
+    #[serde(default)]
+    pub schedule: Option<String>,
+    /// 先后：所有任务排成一列，各列里的卡片按它排，越小越靠前。新任务排在最后。
+    #[serde(default)]
+    pub rank: i64,
+}
+
+/// 一个定时：到点时按 `spec` 新建一张任务并开始它。
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Schedule {
+    pub id: String,
+    pub spec: TodoSpec,
+    pub when: When,
+    /// 上一次到点的时刻；还没到过时是建好或者改了 `when` 的时刻，下一次从这里算起。
+    pub last_fired: u64,
+    /// 宿主按本地时间算好的下一次；不会再到点（一次性的已经过了、读不懂的 `when`）时为空。
+    #[serde(default)]
+    pub next_fire: Option<u64>,
+}
+
+/// 定时什么时候到点，按宿主所在电脑的本地时间。
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum When {
+    /// 只在 `at`（Unix 时间的秒数）到一次，到过以后这个定时就删掉。
+    Once { at: u64 },
+    /// 每天 `hour:minute`；`days` 不为 0 时只在这几天，第 0 位是星期日，第 6 位是星期六。
+    Daily {
+        hour: u8,
+        minute: u8,
+        #[serde(default)]
+        days: u8,
+    },
+    /// 每隔 `minutes` 分钟。
+    Every { minutes: u32 },
+    /// 新版本加的、读不懂的种类；永远不会到点。
+    #[serde(other)]
+    Unknown,
+}

@@ -4866,7 +4866,7 @@ name = "runode-project-tasks"
 version = "0.1.8"
 dependencies = [
  "runode-paths",
- "runode-protocol",
+ "runode-shared-types",
  "serde_json",
 ]
 
@@ -4935,7 +4935,7 @@ name = "runode-todo"
 version = "0.1.8"
 dependencies = [
  "libc",
- "runode-protocol",
+ "runode-shared-types",
  "rusqlite",
 ]
 

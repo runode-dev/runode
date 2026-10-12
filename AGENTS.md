@@ -5,11 +5,11 @@
 | 目录 | 职责 | 可以依赖 |
 | --- | --- | --- |
 | `paths` | 配置、数据和缓存放在哪：`Dirs::from_env()` 和每个文件的路径，以及覆盖写用户手写过的文件（配置文件）的 `replace_file`：先写临时文件再改名换上，顺着符号链接写 | 只有 std |
-| `shared-types` | 各端共用的纯数据：终端帧、网格、分屏布局、agent 状态、会话对外公布的状态、终端设置、读写剪贴板的规矩（`clipboard-write`、`clipboard-read` 的取值和一次读写的上限）、输入事件 | std、serde |
-| `protocol` | 宿主进程和各个前端之间的消息：帧格式、控制消息、会话标识，请宿主在会话所在的仓库里读写 git 的消息（`git`），一个目录里能跑的 Makefile 目标和 package.json scripts（`project_tasks`），任务板上派给 agent 的任务和定时、卡片在哪一列和拖拽放下时做什么（`todo`，读写它的是 `ListTodos` 这几条消息），agent 等回答、任务做完时推给手机的通知的格式（`push`：通知内容、APNs payload 和请求头里的值、中转请求体，等回答的走中转的 v2 接口，任务做完的走 v3），以及手机经网络连上来时的门禁（`remote`：门禁消息、签名的字节串、base64url、配对 URI，是远程访问线上格式的正式定义） | shared-types、serde、serde_json |
+| `shared-types` | 各端共用的纯数据：终端帧、网格、分屏布局、agent 状态、会话的标识（`SessionId`）和对外公布的状态、任务板上的任务和定时（`todo`）、一个目录里能跑的项目命令（`project_tasks`）、终端设置、读写剪贴板的规矩（`clipboard-write`、`clipboard-read` 的取值和一次读写的上限）、输入事件 | std、serde |
+| `protocol` | 宿主进程和各个前端之间的消息：帧格式、控制消息、会话标识，请宿主在会话所在的仓库里读写 git 的消息（`git`），列项目命令、读写任务板的消息（`ListProjectTasks`、`ListTodos` 这几条，任务、定时和项目命令的数据在 `shared-types`，这里转出去），卡片在哪一列和拖拽放下时做什么（`todo` 的 `column`、`drop_action`），agent 等回答、任务做完时推给手机的通知的格式（`push`：通知内容、APNs payload 和请求头里的值、中转请求体，等回答的走中转的 v2 接口，任务做完的走 v3），以及手机经网络连上来时的门禁（`remote`：门禁消息、签名的字节串、base64url、配对 URI，是远程访问线上格式的正式定义） | shared-types、serde、serde_json |
 | `git` | 用 git 命令行读仓库的状态、逐行改动、分支、stash 和提交图，也做暂存（含按块暂存）、丢弃、提交、切换分支、stash、新建和删除工作树，以及与远端同步这些操作 | 只有 std |
-| `todo` | 任务板的库和定时：任务和定时存在一个 SQLite 文件里（`Store`：增删改查、排序、编号，旧库升级，比自己新的库不碰），定时按本地的墙上时间算下一次到点（`next_fire`）；宿主拿着它开任务，别的程序也能直接读写，但宿主在跑时改任务板仍经宿主的消息，它才会告诉在看任务板的前端 | protocol、rusqlite、libc |
-| `project-tasks` | 一个目录里能跑的项目命令：runode 根目录 `tasks.json` 里自己加的、往上最近的 Makefile 的目标和 package.json 的 scripts，拼好在这个目录里能直接跑的命令行（`list`） | protocol、paths、serde_json |
+| `todo` | 任务板的库和定时：任务和定时存在一个 SQLite 文件里（`Store`：增删改查、排序、编号，旧库升级，比自己新的库不碰），定时按本地的墙上时间算下一次到点（`next_fire`）；宿主拿着它开任务，别的程序也能直接读写，但宿主在跑时改任务板仍经宿主的消息，它才会告诉在看任务板的前端 | shared-types、rusqlite、libc |
+| `project-tasks` | 一个目录里能跑的项目命令：runode 根目录 `tasks.json` 里自己加的、往上最近的 Makefile 的目标和 package.json 的 scripts，拼好在这个目录里能直接跑的命令行（`list`） | shared-types、paths、serde_json |
 | `preview` | 文件预览不碰界面的部分：读文件、判断是文本、图片还是二进制，语法高亮出调色板语义的颜色，把 Markdown 解析成块结构（标题、段落、列表、引用、代码块、表格、图片等，照 GitHub 认提示块、脚注、裸网址链接和 README 里常用的 HTML（图片、标题、链接、居中），给标题算锚点） | std、syntect、two-face、pulldown-cmark、regex |
 | `agent-detect` | 认出终端前台在跑哪个 AI 编程 agent，判断它在干活、空闲还是等用户回答：按前台进程识别、识别规则的格式和求值（内置规则编进二进制）、状态去抖 | shared-types、serde、regex、toml |
 | `command-history` | 命令历史：shell 自己的历史文件，加上 runode 记下的命令（带目录和退出码）；宿主记、界面读，输入时的灰字建议和补全里各命令的常用程度从这里来 | shared-types、paths、serde、serde_json |
@@ -35,7 +35,7 @@ GPUI 取自 crates.io 上的 gpui-pre（Zed 的 gpui 的快照），只有它的
 
 - 只有 `desktop` 和 `ui` 能依赖 GPUI（`gpui-pre`；`gpui-pre-platform` 只有 `desktop`）；`libghostty-vt` 和 portable-pty 只有 `terminal` 能直接依赖，`libghostty-vt-sys` 只有 `libghostty-vt` 能直接依赖；syntect 和 two-face 只有 `preview` 能直接依赖；rustls、rcgen 和 ring 只有 `remote-access` 能直接依赖；rusqlite 只有 `todo` 能直接依赖。这几条由 `deny.toml` 守着，CI 里跑 `cargo deny check bans`。
 - `shared-types` 只放数据，不依赖其他 runode crate，也不依赖终端仿真或界面；`paths`、`git`、`preview`、`update` 不依赖任何 runode crate。
-- `protocol` 只依赖 `shared-types`，不碰终端仿真、PTY 和界面。消息里用到的类型，别的 crate 也要用的（网格尺寸、agent 状态、会话公布的状态等）放 `shared-types`，只在协议里用的（会话标识、帧、连接方式等）放 `protocol` 自己。
+- `protocol` 只依赖 `shared-types`，不碰终端仿真、PTY 和界面。消息里用到的类型，别的 crate 也要用的（网格尺寸、agent 状态、会话公布的状态等）放 `shared-types`，只在协议里用的（帧、连接方式等）放 `protocol` 自己；`protocol` 把消息里用到的 `shared-types` 类型转出去，前端照旧从 `protocol` 引。
 - `agent-detect` 只依赖 `shared-types`，不碰终端仿真、PTY 和界面：屏幕文字、前台进程组由 `terminal` 读好了交给它，用户规则目录由调用方从 `paths` 取来传进去。内置规则文件的出处和许可写在它的 `LICENSE-rules` 里。
 - `host` 不依赖 GPUI，也不直接依赖 libghostty-vt 和 portable-pty：VT 和 PTY 经 `terminal` 的 `HostSession` 用。一个终端有两份 VT，宿主那份（`HostSession`）是权威的，只有它应答终端查询；界面那份（`Session`）只消费同样的字节流，改 VT 状态的操作（改尺寸、清屏、换主题）一律经宿主在输出流里标出位置后两边一起做。现在只有 `desktop` 能直接依赖 `host`（建进程内的宿主、跑 `runode --host`），由 `deny.toml` 守着；它和宿主说话也只经 `protocol`，不碰宿主的内部。别的前端经 `protocol` 连 `paths` 的 `host_socket_file` 上的 socket。
 - `cli` 只经 socket 和宿主说话，不依赖 `host`、`terminal` 和 GPUI。`deny.toml` 连测试依赖一起查，所以它的测试也不起真宿主，对着 `tests/common` 里按 protocol 回话的假宿主跑；宿主那边的 socket 由 `host` 自己的测试管。宿主给每个 shell 设 `RUNODE_SESSION`、`RUNODE_SOCKET`（`protocol` 的 `ENV_SESSION`、`ENV_SOCKET`），桌面另设 `RUNODE_BIN`，命令行据此找到开它的那个 app 和自己所在的会话。

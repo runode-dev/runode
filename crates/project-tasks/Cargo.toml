@@ -7,7 +7,7 @@ license.workspace = true
 publish.workspace = true
 
 [dependencies]
-runode-protocol.workspace = true
+runode-shared-types.workspace = true
 # 自己加的命令在 runode 根目录的 tasks.json 里，往上找时停在家目录。
 runode-paths.workspace = true
 # 读 tasks.json 和 package.json 里的 scripts，按文件里的先后列出来。

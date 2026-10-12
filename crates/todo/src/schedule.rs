@@ -1,6 +1,6 @@
 //! 定时按本地时间算下一次到点（`next_fire`）。
 
-use runode_protocol::todo::When;
+use runode_shared_types::todo::When;
 
 /// `when` 从 `base`（上一次到点或者建好的时刻，Unix 时间的秒数）算起的下一次到点；不会再到点时为空。
 pub fn next_fire(when: &When, base: u64) -> Option<u64> {

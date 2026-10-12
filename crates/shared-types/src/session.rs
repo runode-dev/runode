@@ -1,8 +1,10 @@
 //! 一个终端会话对外公布的状态：标签上的名字、前台 agent、所在目录、shell 集成报告的东西，
 //! 以及最近是不是有别的终端里的程序在操作它。管着会话的一方随时把它发给连着的各个界面，界面
-//! 不用自己去读 VT 或问操作系统。
+//! 不用自己去读 VT 或问操作系统。会话的标识 `SessionId` 也在这里。
 
-use std::{ffi::OsString, path::PathBuf, sync::Arc};
+use std::{ffi::OsString, fmt, path::PathBuf, str::FromStr, sync::Arc};
+
+use serde::{Deserialize, Serialize};
 
 use crate::{agent::Agent, shell::ShellNames};
 
@@ -66,4 +68,63 @@ pub enum DriveAction {
     /// 比自己新的一方才有的操作。
     #[serde(other)]
     Unknown,
+}
+
+/// 一个终端会话的标识：128 位随机数，写成 32 个小写十六进制数字。宿主重启、交接后照旧，
+/// 前端靠它找回原来的会话。
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct SessionId(pub u128);
+
+impl SessionId {
+    /// 一个新的随机标识，从系统的随机数源取。
+    #[cfg(unix)]
+    pub fn random() -> std::io::Result<Self> {
+        use std::io::Read as _;
+
+        let mut bytes = [0u8; 16];
+        std::fs::File::open("/dev/urandom")?.read_exact(&mut bytes)?;
+        Ok(Self(u128::from_le_bytes(bytes)))
+    }
+}
+
+impl fmt::Display for SessionId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{:032x}", self.0)
+    }
+}
+
+/// `SessionId` 的写法不对：不是正好 32 个十六进制数字。
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct InvalidSessionId;
+
+impl fmt::Display for InvalidSessionId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "a session id is 32 hexadecimal digits")
+    }
+}
+
+impl std::error::Error for InvalidSessionId {}
+
+impl FromStr for SessionId {
+    type Err = InvalidSessionId;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        if s.len() != 32 || !s.bytes().all(|b| b.is_ascii_hexdigit()) {
+            return Err(InvalidSessionId);
+        }
+        u128::from_str_radix(s, 16).map(Self).map_err(|_| InvalidSessionId)
+    }
+}
+
+impl Serialize for SessionId {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.collect_str(self)
+    }
+}
+
+impl<'de> Deserialize<'de> for SessionId {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let s = <std::borrow::Cow<'de, str>>::deserialize(deserializer)?;
+        s.parse().map_err(serde::de::Error::custom)
+    }
 }

@@ -1,6 +1,6 @@
 //! 定时的下一次到点（`next_fire`）：按本地的墙上时间算，只在选中的星期几。
 
-use runode_protocol::todo::When;
+use runode_shared_types::todo::When;
 use runode_todo::next_fire;
 
 /// `at` 的本地时间：时、分、星期几。
