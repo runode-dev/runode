@@ -28,6 +28,7 @@ use super::{
     repo_name,
     rows::{Busy, CommitChanges, CommitNote, GRAPH_PAGE, Graph, GraphNote},
 };
+use crate::ui::menu::MenuHost as _;
 use crate::{
     assets::{ARROW_DOWN_ICON, REFRESH_ICON},
     ui::{
@@ -430,7 +431,7 @@ impl WindowView {
         let enabled = self.workspace().project.git_panel.busy(&root).is_none();
         let item = |key: &str, op, enabled| {
             let action = GitCommitAction { repo: root.clone(), id: id.clone(), op };
-            Some(menu_item(key, Box::new(action), enabled, cx))
+            Some(menu_item(rust_i18n::t!(key), Box::new(action), enabled, cx))
         };
         let items = vec![
             item("git.graph.copy_id", CommitOp::CopyId, true),

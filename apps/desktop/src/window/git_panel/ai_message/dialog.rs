@@ -16,6 +16,7 @@ use super::{
     agents::{AGENTS, AgentSpec, CUSTOM_AGENT, agent},
     command_preview, save_recipe, saved_recipe, variable_preview,
 };
+use crate::ui::menu::MenuHost as _;
 use crate::{
     assets::{CHEVRON_DOWN_ICON, CLOSE_ICON, SPARKLE_ICON, TERMINAL_ICON},
     ui::{

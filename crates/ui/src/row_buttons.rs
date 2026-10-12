@@ -6,44 +6,44 @@ use std::borrow::Cow;
 use gpui::{Context, Div, Role, Window, div, prelude::*, px, svg};
 use runode_shared_types::color::Rgb;
 
-use super::WindowView;
-use crate::ui::{
+use crate::{
     a11y::{Disable, PressDown},
     hsla,
     tooltip::tooltip,
 };
 
-type Handler = Box<dyn Fn(&mut WindowView, &mut Window, &mut Context<WindowView>)>;
+type Handler<V> = Box<dyn Fn(&mut V, &mut Window, &mut Context<V>)>;
 
-/// 行尾的一个图标按钮：图标、提示文字和按下时做的事。
-pub(super) struct RowButton {
+/// 行尾的一个图标按钮：图标、提示文字和按下时在视图 `V` 上做的事。
+pub struct RowButton<V> {
     icon: &'static str,
     text: Cow<'static, str>,
     /// 按下去是切换的，切换着时图标亮一些；普通按钮为空。
     pub toggled: Option<bool>,
-    handler: Handler,
+    handler: Handler<V>,
 }
 
-pub(super) fn button(
+pub fn button<V>(
     icon: &'static str,
     text: Cow<'static, str>,
-    handler: impl Fn(&mut WindowView, &mut Window, &mut Context<WindowView>) + 'static,
-) -> RowButton {
+    handler: impl Fn(&mut V, &mut Window, &mut Context<V>) + 'static,
+) -> RowButton<V> {
     RowButton { icon, text, toggled: None, handler: Box::new(handler) }
 }
 
 /// 一行行尾的按钮。`shown` 为假（鼠标不在这行、辅助工具也没开）时只画切换着的，一个都没有就不画、
 /// 不占宽，名字能排满整行；`enabled` 为假时按不动。不用 `hidden` 加 `group_hover` 露出来：gpui 在
 /// prepaint 时还不知道这一帧行被悬停，会跳过藏着的按钮，paint 时却要画它们，就 panic 了。
-pub(super) fn row_buttons(
-    buttons: Vec<RowButton>,
+pub fn row_buttons<V: 'static>(
+    buttons: Vec<RowButton<V>>,
     shown: bool,
     enabled: bool,
     fg: Rgb,
     bg: Rgb,
-    cx: &mut Context<WindowView>,
+    cx: &mut Context<V>,
 ) -> Option<Div> {
-    let buttons: Vec<RowButton> = buttons.into_iter().filter(|button| shown || button.toggled == Some(true)).collect();
+    let buttons: Vec<RowButton<V>> =
+        buttons.into_iter().filter(|button| shown || button.toggled == Some(true)).collect();
     if buttons.is_empty() {
         return None;
     }

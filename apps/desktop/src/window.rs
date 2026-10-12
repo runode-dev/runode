@@ -26,7 +26,6 @@ mod devices;
 mod files;
 mod git_panel;
 mod github_actions;
-mod inline_edit;
 mod layout_report;
 mod mobile;
 mod model;
@@ -38,7 +37,6 @@ mod preview;
 mod project;
 mod quit;
 mod remote;
-mod row_buttons;
 mod settings_page;
 mod sidebar;
 mod slot;
@@ -51,9 +49,9 @@ use std::{cell::RefCell, collections::HashMap, path::PathBuf, rc::Rc, time::Inst
 
 use futures::StreamExt as _;
 use gpui::{
-    Action, AnyElement, App, BoxShadow, Context, Div, Empty, Entity, EntityId, ExternalPaths, FocusHandle, Focusable,
-    Hsla, MouseButton, MouseDownEvent, Render, Role, ScrollHandle, SharedString, Stateful, StyleRefinement,
-    Subscription, Task, Window, WindowBounds, actions, div, point, prelude::*, px,
+    Action, AnyElement, App, Context, Div, Empty, Entity, EntityId, ExternalPaths, FocusHandle, Focusable, MouseButton,
+    MouseDownEvent, Render, Role, ScrollHandle, SharedString, Stateful, StyleRefinement, Subscription, Task, Window,
+    WindowBounds, actions, div, prelude::*, px,
 };
 use runode_config::WindowStyle;
 use runode_shared_types::{
@@ -89,6 +87,12 @@ pub use titlebar::titlebar_options;
 pub use todo_board::store::watch as watch_todos;
 
 use crate::ui::a11y::{Hide, PressDown};
+use crate::ui::{
+    inline_edit,
+    menu::{Menu, MenuHost},
+    panel::{PANE_HEADER_HEIGHT, card, divider_color},
+    row_buttons,
+};
 use crate::{config::AppConfig, prespawn::Prespawned, terminal_view::TerminalView, ui::font_size::FontSize, ui::hsla};
 use model::{PaneLayout, Workspace, WorkspaceId, home_dir};
 use persist::format::SavedWindow;
@@ -188,15 +192,8 @@ pub fn install(cx: &mut App) {
     quit::install(cx);
 }
 
-/// 面板之间、标题下面和标签之间这些分隔线的颜色：前景色调淡，各处一样深。
-fn divider_color(fg: gpui::Hsla) -> gpui::Hsla {
-    fg.opacity(0.09)
-}
-
-/// 卡片样式下卡片的圆角，卡片之间、卡片到窗口边的间距，分屏顶上标题条的高度。
-const CARD_RADIUS: f32 = 10.;
+/// 卡片之间、卡片到窗口边的间距。
 const CARD_GAP: f32 = 8.;
-const PANE_HEADER_HEIGHT: f32 = 30.;
 /// 卡片样式下标题栏里标签条的高度，标签是条里的胶囊，上下各留 2 点。
 const TAB_TRACK_HEIGHT: f32 = 28.;
 
@@ -221,17 +218,6 @@ fn frame_color(fg: Rgb, bg: Rgb) -> Rgb {
 /// 和卡片之间、胶囊就是卡片的白；深色主题里卡片已经比外框亮，条用卡片的颜色，胶囊再亮一档。
 fn tab_track_colors(fg: Rgb, bg: Rgb) -> (Rgb, Rgb) {
     if is_light(fg, bg) { (frame_color(fg, bg).mix(bg, 0.5), bg) } else { (bg, bg.mix(fg, 0.12)) }
-}
-
-/// 卡片的外观：终端背景色的圆角块，一圈淡淡的边和一点阴影，从外框上浮起来。
-fn card(fg: Hsla, bg: Hsla) -> gpui::Div {
-    div().rounded(px(CARD_RADIUS)).bg(bg).border_1().border_color(fg.opacity(0.08)).shadow(vec![BoxShadow {
-        color: Hsla::black().opacity(0.06),
-        offset: point(px(0.), px(1.)),
-        blur_radius: px(3.),
-        spread_radius: px(0.),
-        inset: false,
-    }])
 }
 
 /// 在标题栏这类能拖动窗口的地方按下鼠标：双击缩放窗口，否则开始拖动窗口。
@@ -309,7 +295,7 @@ pub struct WindowView {
     file_search: files::FileSearch,
     /// 文件树或预览标签的右键菜单，文件树里正在新建或改名的输入框，以及剪切或复制下来等着粘贴的
     /// 文件。
-    file_menu: Option<files::FileMenu>,
+    file_menu: Option<Menu>,
     file_edit: Option<files::FileEdit>,
     file_clipboard: Option<files::FileClipboard>,
     renaming: Option<Renaming>,
@@ -679,6 +665,16 @@ struct ClassicTitlebar {
     right_inset: f32,
 }
 
+impl MenuHost for WindowView {
+    fn menu_slot(&mut self) -> &mut Option<Menu> {
+        &mut self.file_menu
+    }
+
+    fn menu(&self) -> Option<&Menu> {
+        self.file_menu.as_ref()
+    }
+}
+
 impl Focusable for WindowView {
     /// 开着设置页、手机端引导页、任务板时是它；否则是有焦点的终端，当前 workspace 里没有终端时是窗口自己的。
     fn focus_handle(&self, cx: &App) -> FocusHandle {
@@ -717,7 +713,7 @@ impl Render for WindowView {
             (bg, self.render_classic_body(fg, bg, window, cx))
         };
         let drag = self.dragging_divider.map(|divider| self.render_divider_drag(divider, cx));
-        let file_menu = self.render_file_menu(fg, bg, window, cx);
+        let file_menu = self.render_menu(fg, bg, window, cx);
         let agent_picker = self.render_agent_picker(fg, bg, window, cx);
         let arrange_picker = self.render_arrange_picker(fg, bg, cx);
         let branch_picker = self.render_branch_picker(fg, bg, cx);

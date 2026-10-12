@@ -7,6 +7,7 @@ use gpui::{Action, Context, Pixels, Point, PromptLevel, Window};
 use runode_git::{self as git, RepoKind};
 
 use super::rows::Busy;
+use crate::ui::menu::MenuHost as _;
 use crate::window::{
     WindowView,
     files::{MenuItem, menu_item},
@@ -47,7 +48,12 @@ impl WindowView {
         let enabled = main.is_some_and(|main| self.workspace().project.git_panel.busy(&main).is_none());
         let removable = self.worktree(root).is_some_and(git::Snapshot::is_linked_worktree);
         let item = |key: &str, op, enabled| {
-            Some(menu_item(key, Box::new(GitWorktreeAction { worktree: root.to_path_buf(), op }), enabled, cx))
+            Some(menu_item(
+                rust_i18n::t!(key),
+                Box::new(GitWorktreeAction { worktree: root.to_path_buf(), op }),
+                enabled,
+                cx,
+            ))
         };
         let mut items = vec![
             item("git.worktree.open_in_new_tab", WorktreeOp::OpenInNewTab, true),

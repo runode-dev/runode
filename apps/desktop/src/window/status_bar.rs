@@ -40,6 +40,7 @@ use super::{
     remote,
 };
 use crate::ui::a11y::A11yPress;
+use crate::ui::menu::MenuHost as _;
 use crate::{
     assets::{CHEVRON_DOWN_ICON, CHEVRON_RIGHT_ICON, COFFEE_ICON, MEMORY_ICON, PLUG_ICON, SHELL_ICON},
     config::AppConfig,
@@ -407,7 +408,7 @@ impl WindowView {
                 let (icon, title) = item_icon_and_title(item);
                 Some(check_item(title, Some(icon), !hidden.contains(&item), Box::new(ToggleStatusItem { item })))
             })
-            .chain([None, Some(menu_item("status.hide_bar", Box::new(ToggleStatusBar), true, cx))])
+            .chain([None, Some(menu_item(rust_i18n::t!("status.hide_bar"), Box::new(ToggleStatusBar), true, cx))])
             .collect();
         let target = self.focus_handle(cx);
         self.open_menu(position, items, target, cx);

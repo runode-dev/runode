@@ -1,6 +1,6 @@
 //! 编进二进制的界面资源：`svg()`、`img()` 这类元素按路径向 GPUI 要文件，GPUI 再来这里取。
 //! 文件树的彩色类型图标和 agent 的 logo 数量多，单独列在 `file_icons::FILES` 和
-//! `window::AGENT_LOGO_FILES`，这里一并查。
+//! `window::AGENT_LOGO_FILES`，`runode_ui` 的部件自己画的图标在 `icons::FILES`，这里一并查。
 
 use std::borrow::Cow;
 
@@ -11,6 +11,9 @@ use crate::{
     window,
 };
 
+/// Git 面板、文件树和菜单里展开、收起的箭头，画它们的部件在 `runode_ui` 里。
+pub use crate::ui::icons::{CHEVRON_DOWN_ICON, CHEVRON_RIGHT_ICON};
+
 icons! {
     FILES, "icons/", "../assets/icons/";
     /// 侧栏开关的图标。
@@ -19,9 +22,6 @@ icons! {
     pub GIT_ICON = "git",
     pub FILES_ICON = "files",
     pub PANEL_RIGHT_ICON = "panel-right",
-    /// Git 面板和文件树里展开、收起的箭头。
-    pub CHEVRON_RIGHT_ICON = "chevron-right",
-    pub CHEVRON_DOWN_ICON = "chevron-down",
     /// 收在终端区底部的分屏上展开它的箭头。
     pub CHEVRON_UP_ICON = "chevron-up",
     /// 文件树搜索框前面的图标。
@@ -109,7 +109,7 @@ icons! {
 }
 
 fn all_files() -> impl Iterator<Item = &'static (&'static str, &'static [u8])> {
-    FILES.iter().chain(file_icons::FILES).chain(window::AGENT_LOGO_FILES)
+    FILES.iter().chain(icons::FILES).chain(file_icons::FILES).chain(window::AGENT_LOGO_FILES)
 }
 
 pub struct Assets;

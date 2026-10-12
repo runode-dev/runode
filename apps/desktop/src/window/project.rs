@@ -24,9 +24,13 @@ use runode_shared_types::color::Rgb;
 
 use super::{
     CARD_GAP, DIVIDER_GRAB_WIDTH, Divider, PANE_HEADER_HEIGHT, TITLEBAR_HEIGHT, ToggleFiles, ToggleGit,
-    ToggleGitHubActions, WindowView, card, cards, divider_color, drag_window, titlebar::icon_toggle,
+    ToggleGitHubActions, WindowView, cards, divider_color, drag_window, titlebar::icon_toggle,
 };
+// 面板外框和改动颜色在 `runode_ui::panel`，窗口里各面板照旧从这里引。
 use crate::ui::a11y::A11yPress;
+pub(super) use crate::ui::panel::{
+    ADDED, MODIFIED, REMOVED, RENAMED, added_label, panel_message, panel_shell, panel_title, removed_label,
+};
 use crate::{
     assets::{ACTIONS_WORKFLOW_ICON, FILES_ICON, GIT_ICON, PANEL_RIGHT_ICON},
     ui::{hsla, tooltip::tooltip},
@@ -68,21 +72,6 @@ const TOGGLE_GAP: f32 = 4.;
 pub(super) const TOGGLE_MARGIN: f32 = 10.;
 /// 右侧面板都收着时标题栏右边给右上角的命令按钮和面板开关让出的宽度。
 pub(super) const PANEL_TOGGLES_INSET: f32 = TOGGLE_WIDTH * 2. + TOGGLE_GAP + TOGGLE_MARGIN + 6.;
-
-/// 改动和文件状态的颜色，深浅背景上都看得清。
-pub(super) const ADDED: Rgb = Rgb(0x57, 0xAB, 0x5A);
-pub(super) const REMOVED: Rgb = Rgb(0xE5, 0x53, 0x4B);
-pub(super) const MODIFIED: Rgb = Rgb(0xD2, 0xA8, 0x3E);
-pub(super) const RENAMED: Rgb = Rgb(0x53, 0x9B, 0xF5);
-
-/// 加了多少行、删了多少行的标签，「+N」和「−N」。
-pub(super) fn added_label(count: usize) -> Div {
-    div().flex_none().text_color(hsla(ADDED)).child(format!("+{count}"))
-}
-
-pub(super) fn removed_label(count: usize) -> Div {
-    div().flex_none().text_color(hsla(REMOVED)).child(format!("−{count}"))
-}
 
 pub(super) fn status_color(status: FileStatus) -> Rgb {
     match status {
@@ -611,35 +600,4 @@ impl WindowView {
         }
         header.h(px(TITLEBAR_HEIGHT)).on_mouse_down(MouseButton::Left, drag_window)
     }
-}
-
-/// 右侧面板标签下面那一行：这一页的标题和按钮。
-pub(super) fn panel_title() -> Div {
-    div().flex_none().h(px(PANE_HEADER_HEIGHT)).px(px(10.)).flex().items_center().gap(px(8.))
-}
-
-/// 面板里居中的一句说明，比如不在仓库里、没有改动、预览不了；也报给辅助工具。
-pub(super) fn panel_message(text: String, fg: Rgb) -> Stateful<Div> {
-    div()
-        .id("panel-message")
-        .role(Role::Label)
-        .aria_label(text.clone())
-        .flex_1()
-        .flex()
-        .items_center()
-        .justify_center()
-        .px(px(16.))
-        .text_color(hsla(fg).opacity(0.5))
-        .child(text)
-}
-
-/// 右侧面板的外框：定宽、占满高度、竖着排。经典样式下左边一条分隔线，卡片样式下是一张卡片。
-/// 底色和字号由调用方接着写。
-pub(super) fn panel_shell(id: &'static str, width: f32, fg: Rgb, bg: Rgb, cx: &App) -> Stateful<Div> {
-    let shell = if cards(cx) {
-        card(hsla(fg), hsla(bg)).overflow_hidden()
-    } else {
-        div().border_l_1().border_color(divider_color(hsla(fg)))
-    };
-    shell.id(id).flex_none().w(px(width)).h_full().flex().flex_col()
 }

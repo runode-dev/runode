@@ -20,7 +20,9 @@ use super::{
     model::{Tab, TabId},
     panes::now_ms,
 };
+// 开关按钮在 `runode_ui::panel`，窗口里照旧从这里引。
 use crate::ui::a11y::A11yPress;
+pub(super) use crate::ui::panel::icon_toggle;
 use crate::{
     assets::{PIXEL_QUESTION_ICON, PLUS_ICON, PROMPT_ICON},
     terminal_view::{DEFAULT_TITLE, TerminalView},
@@ -117,39 +119,6 @@ pub(super) fn close_button(id: impl Into<ElementId>, fg: Hsla) -> Stateful<Div> 
         .text_color(fg.opacity(0.75))
         .hover(|close| close.bg(fg.opacity(0.18)).text_color(fg))
         .child("×")
-}
-
-/// 标题栏和面板上带图标的开关按钮，图标边长 `icon_size`；悬停时底色和图标变亮，`shown` 时
-/// 底色一直亮着，图标也亮一些。位置、尺寸、提示和点击由调用方接着写，报给辅助工具的名字
-/// （`aria_label`，通常是提示的文字）和开关状态也是。
-pub(super) fn icon_toggle(
-    id: &'static str,
-    icon: &'static str,
-    icon_size: f32,
-    shown: bool,
-    fg: Rgb,
-    bg: Rgb,
-) -> Stateful<Div> {
-    let hover_bg = hsla(bg.mix(fg, 0.10));
-    let active_bg = hsla(bg.mix(fg, 0.07));
-    let fg = hsla(fg);
-    div()
-        .id(id)
-        .role(Role::Button)
-        .group(id)
-        .rounded(px(4.))
-        .flex()
-        .items_center()
-        .justify_center()
-        .when(shown, |button| button.bg(active_bg))
-        .hover(|button| button.bg(hover_bg))
-        .child(
-            svg()
-                .path(icon)
-                .size(px(icon_size))
-                .text_color(fg.opacity(if shown { 0.9 } else { 0.55 }))
-                .group_hover(id, |icon| icon.text_color(fg)),
-        )
 }
 
 /// 居中的标题，有 agent 时前面加上它的状态标记。

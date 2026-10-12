@@ -11,6 +11,7 @@ use runode_shared_types::color::Rgb;
 
 use super::{DiffTarget, Preview};
 use crate::ui::a11y::A11yPress;
+use crate::ui::menu::MenuHost as _;
 use crate::window::project::follow_move;
 use crate::{
     assets::DIFF_ICON,
@@ -338,7 +339,9 @@ impl WindowView {
         let previews = &self.workspace().project.previews;
         let (count, active) = (previews.tabs.len(), previews.active);
         let pinned = previews.active().is_some_and(|tab| tab.pinned);
-        let item = |key: &str, action: Box<dyn Action>, enabled: bool| Some(menu_item(key, action, enabled, cx));
+        let item = |key: &str, action: Box<dyn Action>, enabled: bool| {
+            Some(menu_item(rust_i18n::t!(key), action, enabled, cx))
+        };
         let mut items = vec![
             item("preview.close", Box::new(CloseTab), true),
             item("preview.close_others", Box::new(CloseOtherPreviews), count > 1),

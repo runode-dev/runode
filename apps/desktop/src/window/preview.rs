@@ -862,7 +862,7 @@ impl WindowView {
             .flex_col()
             .child(self.render_preview_body(preview, width, font, fg, bg, window, cx));
         Some(
-            panel_shell("preview-panel", width, fg, bg, cx)
+            panel_shell("preview-panel", width, fg, bg, super::cards(cx))
                 .key_context("Preview")
                 .track_focus(&self.preview_focus)
                 .on_action(cx.listener(Self::copy_preview))

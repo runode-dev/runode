@@ -1,29 +1,31 @@
-//! 就地输入框：侧栏改 workspace 的名字、文件树新建和改名共用。回车确定，Esc 取消，点到别处
-//! 也算确定；切到别的应用时窗口失去焦点，回来接着改。
+//! 就地输入框：侧栏改 workspace 的名字、文件树新建和改名、GitHub Actions 页加 secret 共用。回车确定，
+//! Esc 取消，点到别处也算确定；切到别的应用时窗口失去焦点，回来接着改。
 
 use gpui::{App, Context, Div, Entity, FocusHandle, Focusable, Pixels, Subscription, Window, div, prelude::*, px};
 use runode_shared_types::color::Rgb;
 
-use super::WindowView;
-use crate::ui::{
+use crate::{
     hsla,
     text_field::{TextField, TextFieldEvent},
 };
 
-/// 输入框结束时调的函数，`commit` 为真是确定，为假是取消。
-type Finish = fn(&mut WindowView, bool, &mut Window, &mut Context<WindowView>);
-
-pub(super) struct InlineEdit {
+pub struct InlineEdit {
     pub field: Entity<TextField>,
     _subscriptions: [Subscription; 2],
 }
 
 impl InlineEdit {
-    /// 打开输入框并把焦点给它，`text` 的前 `select` 个字节选中，直接打字就替换掉。结束时调
-    /// `finish`；文字变了时重画窗口，旁边跟着文字变的东西（比如文件图标）也跟着变。
-    pub fn new(text: String, select: usize, finish: Finish, window: &mut Window, cx: &mut Context<WindowView>) -> Self {
-        // 改 workspace 名、新建和改名文件都是在填一个名字，报给辅助工具的名字就叫「名字」。
-        let label = rust_i18n::t!("workspace.edit_name").into_owned();
+    /// 在视图 `V` 里打开输入框并把焦点给它，`text` 的前 `select` 个字节选中，直接打字就替换掉；
+    /// 报给辅助工具的名字是 `label`。结束时调 `finish`，`commit` 为真是确定、为假是取消；文字变了时
+    /// 重画 `V`，旁边跟着文字变的东西（比如文件图标）也跟着变。
+    pub fn new<V: 'static>(
+        text: String,
+        select: usize,
+        label: String,
+        finish: fn(&mut V, bool, &mut Window, &mut Context<V>),
+        window: &mut Window,
+        cx: &mut Context<V>,
+    ) -> Self {
         let field = cx.new(|cx| TextField::editing(text, select, cx).with_label(label));
         // 输入框原本是搜索框：回车是「下一个」，Esc 是「关闭搜索」，在这里分别是确定和取消。
         let events = cx.subscribe_in(&field, window, move |this, _, event: &TextFieldEvent, window, cx| match event {

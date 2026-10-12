@@ -140,7 +140,14 @@ impl WindowView {
                 (name, select)
             }
         };
-        let edit = InlineEdit::new(text, select, Self::finish_file_edit, window, cx);
+        let edit = InlineEdit::new(
+            text,
+            select,
+            rust_i18n::t!("workspace.edit_name").into_owned(),
+            Self::finish_file_edit,
+            window,
+            cx,
+        );
         self.file_edit = Some(FileEdit { target, edit });
         let row = self.new_entry_row().map(|(ix, _)| ix).or_else(|| self.workspace().project.selected_row());
         if let Some(row) = row {

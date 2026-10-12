@@ -483,7 +483,14 @@ impl WindowView {
         let id = workspace.id;
         let name = workspace.name.to_string();
         let select = name.len();
-        let edit = InlineEdit::new(name, select, Self::finish_rename, window, cx);
+        let edit = InlineEdit::new(
+            name,
+            select,
+            rust_i18n::t!("workspace.edit_name").into_owned(),
+            Self::finish_rename,
+            window,
+            cx,
+        );
         self.renaming = Some(Renaming { id, edit });
         self.sidebar_scroll.scroll_to_item(ix);
         cx.notify();

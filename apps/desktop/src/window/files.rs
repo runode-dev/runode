@@ -25,7 +25,8 @@ use runode_config::PreviewClick;
 use runode_shared_types::color::Rgb;
 
 pub(super) use edit::{FileClipboard, FileEdit};
-pub(super) use menu::{FileMenu, MenuButton, MenuItem, check_item, group_item, labeled_item, menu_item};
+// 菜单在 `runode_ui::menu`，窗口里各处照旧从这里引。
+pub(super) use crate::ui::menu::{MenuButton, MenuHost, MenuItem, check_item, group_item, labeled_item, menu_item};
 pub(super) use search::FileSearch;
 
 use super::{
@@ -182,7 +183,7 @@ impl WindowView {
 
     /// 标题行「更多」按钮的菜单：新建、全部收起，显示哪些文件，用别的程序打开根目录。
     fn open_files_more_menu(&mut self, position: gpui::Point<Pixels>, cx: &mut Context<Self>) {
-        let item = |key: &str, action: Box<dyn Action>| Some(menu_item(key, action, true, cx));
+        let item = |key: &str, action: Box<dyn Action>| Some(menu_item(rust_i18n::t!(key), action, true, cx));
         let check = |key: &str, checked: bool, action: Box<dyn Action>| {
             Some(check_item(rust_i18n::t!(key).into_owned(), None, checked, action))
         };
@@ -337,7 +338,7 @@ impl WindowView {
                 this.drop_file(&dragged.path, root, window, cx);
             }))
             .child(content);
-        panel_shell("files-panel", width, fg, bg, cx)
+        panel_shell("files-panel", width, fg, bg, super::cards(cx))
             .bg(hsla(bg.mix(fg, 0.03)))
             .text_size(px(font_size))
             .child(self.render_panel_tabs(fg, bg, cx))

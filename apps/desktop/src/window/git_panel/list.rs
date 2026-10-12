@@ -10,7 +10,7 @@ use std::{
 use gpui::SharedString;
 use gpui::{
     AccessibleAction, AnyElement, App, Context, Div, ElementId, MouseButton, MouseDownEvent, Role, Stateful, Window,
-    accesskit::ActionData, div, img, prelude::*, px, svg,
+    accesskit::ActionData, div, img, prelude::*, px,
 };
 use runode_git::{self as git, DiffSide, FileStatus, Section};
 use runode_shared_types::color::Rgb;
@@ -20,11 +20,9 @@ use super::{
     rows::{DirOwner, GitPanel, GitRow, GitSection, section_of},
     run::StashOp,
 };
+use crate::ui::menu::MenuHost as _;
 use crate::{
-    assets::{
-        CHEVRON_DOWN_ICON, CHEVRON_RIGHT_ICON, DISCARD_ICON, MINUS_ICON, OPEN_FILE_ICON, PLUS_ICON, STASH_APPLY_ICON,
-        STASH_POP_ICON, TRASH_ICON,
-    },
+    assets::{DISCARD_ICON, MINUS_ICON, OPEN_FILE_ICON, PLUS_ICON, STASH_APPLY_ICON, STASH_POP_ICON, TRASH_ICON},
     ui::{
         file_icons::{file_icon, folder_icon},
         font_size::{FontSize, scaled},
@@ -156,7 +154,7 @@ impl WindowView {
         &self,
         ix: usize,
         root: &Path,
-        buttons: Vec<RowButton>,
+        buttons: Vec<RowButton<Self>>,
         fg: Rgb,
         bg: Rgb,
         cx: &mut Context<Self>,
@@ -185,7 +183,7 @@ impl WindowView {
         };
         let section_button = |icon, key: &'static str, stage: bool| {
             let root = root.clone();
-            button(icon, rust_i18n::t!(key), move |this, window, cx| {
+            button(icon, rust_i18n::t!(key), move |this: &mut Self, window, cx| {
                 this.git_section_action(&root, section, stage, window, cx);
             })
         };
@@ -253,7 +251,9 @@ impl WindowView {
         let action = |op| GitFileAction { repo: root.clone(), op, section, path: file.path.clone() };
         let file_button = |icon, key: &'static str, op| {
             let action = action(op);
-            button(icon, rust_i18n::t!(key), move |this, window, cx| this.git_file_action(&action, window, cx))
+            button(icon, rust_i18n::t!(key), move |this: &mut Self, window, cx| {
+                this.git_file_action(&action, window, cx)
+            })
         };
         let mut buttons = vec![file_button(OPEN_FILE_ICON, "git.open_file", FileOp::Open)];
         match shown_in {
@@ -334,7 +334,9 @@ impl WindowView {
         let action = |op| GitDirAction { repo: root.clone(), section, dir: path.clone(), op };
         let dir_button = |icon, key: &'static str, op| {
             let action = action(op);
-            button(icon, rust_i18n::t!(key), move |this, window, cx| this.git_dir_action(&action, window, cx))
+            button(icon, rust_i18n::t!(key), move |this: &mut Self, window, cx| {
+                this.git_dir_action(&action, window, cx)
+            })
         };
         let buttons = match section {
             GitSection::Merge => vec![dir_button(PLUS_ICON, "git.mark_resolved", DirOp::Stage)],
@@ -375,7 +377,9 @@ impl WindowView {
     /// 目录的右键菜单，`base` 里除了 `op` 都是这个目录的。
     fn open_git_dir_menu(&mut self, position: gpui::Point<gpui::Pixels>, base: GitDirAction, cx: &mut Context<Self>) {
         let enabled = self.workspace().project.git_panel.busy(&base.repo).is_none();
-        let item = |key: &str, op| Some(menu_item(key, Box::new(GitDirAction { op, ..base.clone() }), enabled, cx));
+        let item = |key: &str, op| {
+            Some(menu_item(rust_i18n::t!(key), Box::new(GitDirAction { op, ..base.clone() }), enabled, cx))
+        };
         let items = match base.section {
             GitSection::Merge => vec![item("git.mark_resolved", DirOp::Stage)],
             GitSection::Staged => vec![item("git.unstage", DirOp::Unstage)],
@@ -399,7 +403,7 @@ impl WindowView {
         let gitlink = self.git_file(&root, section, &path).is_some_and(|file| file.gitlink);
         let item = |key: &str, op, enabled| {
             let action = GitFileAction { repo: root.clone(), op, section, path: path.clone() };
-            Some(menu_item(key, Box::new(action), enabled, cx))
+            Some(menu_item(rust_i18n::t!(key), Box::new(action), enabled, cx))
         };
         let mut items = vec![
             item("git.open_file", FileOp::Open, true),
@@ -435,7 +439,7 @@ impl WindowView {
         let root = git.root.clone();
         let stash_button = |icon, key: &'static str, op: StashOp| {
             let root = root.clone();
-            button(icon, rust_i18n::t!(key), move |this, window, cx| {
+            button(icon, rust_i18n::t!(key), move |this: &mut Self, window, cx| {
                 this.git_stash_action(&root, index, op, window, cx)
             })
         };
@@ -514,10 +518,5 @@ pub(super) fn status_letter(status: FileStatus) -> Div {
     div().flex_none().w(px(12.)).flex().justify_center().text_color(hsla(status_color(status))).child(status.letter())
 }
 
-pub(in crate::window) fn chevron(expanded: bool, fg: Rgb) -> gpui::Svg {
-    svg()
-        .flex_none()
-        .path(if expanded { CHEVRON_DOWN_ICON } else { CHEVRON_RIGHT_ICON })
-        .size(px(12.))
-        .text_color(hsla(fg).opacity(0.45))
-}
+// 展开、收起的箭头在 `runode_ui::panel`，窗口里照旧从这里引。
+pub(in crate::window) use crate::ui::panel::chevron;

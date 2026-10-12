@@ -25,6 +25,7 @@ use super::{
     titlebar::icon_toggle,
 };
 use crate::ui::a11y::A11yPress;
+use crate::ui::menu::MenuHost as _;
 use crate::{
     assets::{PENCIL_ICON, PLAY_ICON, TRASH_ICON},
     config::AppConfig,
@@ -253,7 +254,7 @@ impl WindowView {
             )
             // 按下鼠标就开，没有 on_click，辅助工具的按下另外登记：和快捷键一样开关菜单、开时选中第一条。
             .on_a11y_press(view, move |this, window, cx| this.toggle_tasks(&ToggleTasks, window, cx))
-            .children(self.render_dropdown(fg, bg, window, cx))
+            .children(self.render_dropdown(super::TITLEBAR_HEIGHT, fg, bg, window, cx))
     }
 
     /// 在命令按钮下面弹出命令菜单，各项见 `tasks_menu_items`。上次跑的命令还在菜单里时选中它；不然从键盘
@@ -331,7 +332,7 @@ impl WindowView {
     /// 淡淡地写它的说明，自己加的命令选中时行尾有编辑和删除按钮。另外给出上次跑的命令在第几项，它所在的组
     /// 收着或者它没了时为空。
     fn tasks_menu_items(&self, cx: &App) -> (Vec<Option<MenuItem>>, Option<usize>) {
-        let mut items = vec![Some(menu_item("tasks.add", Box::new(AddTask), true, cx))];
+        let mut items = vec![Some(menu_item(rust_i18n::t!("tasks.add"), Box::new(AddTask), true, cx))];
         let mut last = None;
         let project = &self.workspace().project;
         let listed = project.tasks.as_ref();

@@ -430,7 +430,14 @@ impl WindowView {
     fn start_adding(&mut self, secret: bool, scope: Scope, window: &mut Window, cx: &mut Context<Self>) {
         let node = if secret { Node::Secrets(scope.clone()) } else { Node::Variables(scope.clone()) };
         self.github_actions.expanded.insert(node);
-        let edit = InlineEdit::new(String::new(), 0, Self::finish_adding, window, cx);
+        let edit = InlineEdit::new(
+            String::new(),
+            0,
+            rust_i18n::t!("workspace.edit_name").into_owned(),
+            Self::finish_adding,
+            window,
+            cx,
+        );
         self.github_actions.adding = Some(Adding { secret, scope, edit });
         cx.notify();
     }
@@ -516,7 +523,7 @@ impl WindowView {
         let title = panel_title()
             .child(div().flex_1().min_w_0().truncate().text_color(hsla(fg)).child("GitHub Actions"))
             .child(refresh);
-        let shell = panel_shell("github-actions-panel", width, fg, bg, cx)
+        let shell = panel_shell("github-actions-panel", width, fg, bg, super::cards(cx))
             .bg(hsla(bg.mix(fg, 0.03)))
             .text_size(FontSize::Body)
             .child(self.render_panel_tabs(fg, bg, cx))
@@ -828,14 +835,18 @@ impl WindowView {
         }];
         let id = run.id;
         if state.running() {
-            buttons.push(button(TERMINAL_ICON, rust_i18n::t!("github_actions.watch"), move |this, window, cx| {
-                this.run_gh_in_terminal(gh::watch_command(id), window, cx);
-            }));
-            buttons.push(button(BAN_ICON, rust_i18n::t!("github_actions.cancel"), move |this, _, cx| {
+            buttons.push(button(
+                TERMINAL_ICON,
+                rust_i18n::t!("github_actions.watch"),
+                move |this: &mut Self, window, cx| {
+                    this.run_gh_in_terminal(gh::watch_command(id), window, cx);
+                },
+            ));
+            buttons.push(button(BAN_ICON, rust_i18n::t!("github_actions.cancel"), move |this: &mut Self, _, cx| {
                 this.run_gh(move |gh| gh.cancel(id), |this, _, cx| this.refetch_runs(cx), cx);
             }));
         } else {
-            buttons.push(button(SYNC_ICON, rust_i18n::t!("github_actions.rerun"), move |this, _, cx| {
+            buttons.push(button(SYNC_ICON, rust_i18n::t!("github_actions.rerun"), move |this: &mut Self, _, cx| {
                 this.run_gh(move |gh| gh.rerun(id), |this, _, cx| this.refetch_runs(cx), cx);
             }));
         }
@@ -913,9 +924,13 @@ impl WindowView {
         let mut buttons = Vec::new();
         // 日志要等 job 跑完才拿得到。
         if !state.running() {
-            buttons.push(button(TERMINAL_ICON, rust_i18n::t!("github_actions.logs"), move |this, window, cx| {
-                this.run_gh_in_terminal(gh::logs_command(id), window, cx);
-            }));
+            buttons.push(button(
+                TERMINAL_ICON,
+                rust_i18n::t!("github_actions.logs"),
+                move |this: &mut Self, window, cx| {
+                    this.run_gh_in_terminal(gh::logs_command(id), window, cx);
+                },
+            ));
         }
         let url = job.url.clone();
         buttons.push(button(GLOBE_ICON, rust_i18n::t!("github_actions.open_in_browser"), move |_, _, cx| {
@@ -964,18 +979,27 @@ impl WindowView {
         let id = workflow.id;
         if active && workflow.dispatch {
             let branch = self.actions_branch();
-            buttons.push(button(PLAY_ICON, rust_i18n::t!("github_actions.trigger"), move |this, window, cx| {
-                this.run_gh_in_terminal(gh::trigger_command(id, branch.as_deref()), window, cx);
-            }));
+            buttons.push(button(
+                PLAY_ICON,
+                rust_i18n::t!("github_actions.trigger"),
+                move |this: &mut Self, window, cx| {
+                    this.run_gh_in_terminal(gh::trigger_command(id, branch.as_deref()), window, cx);
+                },
+            ));
         }
         let file = self.actions_dir(cx).join(&workflow.path);
-        buttons.push(button(OPEN_FILE_ICON, rust_i18n::t!("github_actions.open_workflow"), move |this, _, cx| {
-            this.open_preview(&file, true, cx);
-        }));
+        buttons.push(button(
+            OPEN_FILE_ICON,
+            rust_i18n::t!("github_actions.open_workflow"),
+            move |this: &mut Self, _, cx| {
+                this.open_preview(&file, true, cx);
+            },
+        ));
         let pin = {
             let workflow = workflow.clone();
             let key = if pinned { "github_actions.unpin" } else { "github_actions.pin" };
-            let mut pin = button(PIN_ICON, rust_i18n::t!(key), move |this, _, cx| this.toggle_pin(&workflow, cx));
+            let mut pin =
+                button(PIN_ICON, rust_i18n::t!(key), move |this: &mut Self, _, cx| this.toggle_pin(&workflow, cx));
             pin.toggled = Some(pinned);
             pin
         };
@@ -1025,7 +1049,7 @@ impl WindowView {
                 (_, false) => rust_i18n::t!("github_actions.variables"),
             };
             let add = if scope == Scope::Org {
-                button(GLOBE_ICON, rust_i18n::t!("github_actions.manage_in_browser"), move |this, _, cx| {
+                button(GLOBE_ICON, rust_i18n::t!("github_actions.manage_in_browser"), move |this: &mut Self, _, cx| {
                     this.run_gh(
                         move |gh| gh.org_settings_url(secret),
                         |_, url, cx| {
@@ -1039,7 +1063,7 @@ impl WindowView {
             } else {
                 let scope = scope.clone();
                 let key = if secret { "github_actions.add_secret" } else { "github_actions.add_variable" };
-                button(PLUS_ICON, rust_i18n::t!(key), move |this, window, cx| {
+                button(PLUS_ICON, rust_i18n::t!(key), move |this: &mut Self, window, cx| {
                     this.start_adding(secret, scope.clone(), window, cx)
                 })
             };
@@ -1121,11 +1145,15 @@ impl WindowView {
             let (scope, name) = (scope.clone(), name.to_owned());
             buttons.push(button(PENCIL_ICON, rust_i18n::t!("github_actions.update"), {
                 let (scope, name) = (scope.clone(), name.clone());
-                move |this, window, cx| this.set_in_terminal(secret, scope.clone(), &name, window, cx)
+                move |this: &mut Self, window, cx| this.set_in_terminal(secret, scope.clone(), &name, window, cx)
             }));
-            buttons.push(button(TRASH_ICON, rust_i18n::t!("github_actions.delete"), move |this, window, cx| {
-                this.delete_setting(secret, scope.clone(), name.clone(), window, cx);
-            }));
+            buttons.push(button(
+                TRASH_ICON,
+                rust_i18n::t!("github_actions.delete"),
+                move |this: &mut Self, window, cx| {
+                    this.delete_setting(secret, scope.clone(), name.clone(), window, cx);
+                },
+            ));
         }
         let label = match value {
             Some(value) => format!("{name} = {value}"),
@@ -1181,7 +1209,7 @@ impl WindowView {
         node: Node,
         depth: usize,
         label: Cow<'static, str>,
-        action: Option<RowButton>,
+        action: Option<RowButton<Self>>,
         fg: Rgb,
         bg: Rgb,
         cx: &mut Context<Self>,
@@ -1263,7 +1291,7 @@ impl WindowView {
     fn actions_row_buttons(
         &self,
         ix: usize,
-        buttons: Vec<RowButton>,
+        buttons: Vec<RowButton<Self>>,
         fg: Rgb,
         bg: Rgb,
         cx: &mut Context<Self>,

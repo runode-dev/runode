@@ -47,6 +47,7 @@ use super::{
     status_bar,
 };
 use crate::ui::a11y::{Disable, PressDown};
+use crate::ui::menu::MenuHost as _;
 use crate::{
     assets::{
         BRANCH_ICON, CHECK_ICON, CHEVRON_DOWN_ICON, GIT_ICON, MORE_ICON, REFRESH_ICON, SPARKLE_ICON, SYNC_ICON,
@@ -453,7 +454,7 @@ impl WindowView {
             .as_ref()
             .filter(|_| project.root.is_some())
             .map(|git| self.render_graph_pane(git, room, fg, bg, cx));
-        panel_shell("git-panel", width, fg, bg, cx)
+        panel_shell("git-panel", width, fg, bg, super::cards(cx))
             .track_focus(&self.git_focus)
             .bg(hsla(bg))
             .text_size(FontSize::Body)
@@ -883,7 +884,7 @@ impl WindowView {
     /// 提交按钮旁边箭头弹出的菜单：各种提交方式，作用到根目录是 `root` 的仓库。
     fn open_commit_menu(&mut self, root: &Path, position: gpui::Point<gpui::Pixels>, cx: &mut Context<Self>) {
         self.set_git_active(root);
-        let item = |key: &str, action: Box<dyn Action>| Some(menu_item(key, action, true, cx));
+        let item = |key: &str, action: Box<dyn Action>| Some(menu_item(rust_i18n::t!(key), action, true, cx));
         let items = vec![
             item("git.commit", Box::new(GitCommit)),
             item("git.commit_amend", Box::new(GitCommitAmend)),
@@ -916,7 +917,7 @@ impl WindowView {
             }
             items.extend([
                 Some(menu_item(
-                    if self.git_tree { "git.view_as_list" } else { "git.view_as_tree" },
+                    rust_i18n::t!(if self.git_tree { "git.view_as_list" } else { "git.view_as_tree" }),
                     Box::new(GitToggleTreeView),
                     true,
                     cx,
@@ -943,7 +944,7 @@ impl WindowView {
     fn git_repo_menu_items(&mut self, root: &Path, cx: &mut Context<Self>) -> Vec<Option<MenuItem>> {
         self.set_git_active(root);
         let enabled = self.workspace().project.git_panel.busy(root).is_none();
-        let item = |key: &str, action: Box<dyn Action>| Some(menu_item(key, action, enabled, cx));
+        let item = |key: &str, action: Box<dyn Action>| Some(menu_item(rust_i18n::t!(key), action, enabled, cx));
         // 其他工作树的「更多」菜单前面加上打开、显示和删除它。
         let mut items = if self.is_worktree(root) {
             let mut items = self.worktree_menu_items(root, cx);
