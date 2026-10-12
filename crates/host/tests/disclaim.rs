@@ -5,7 +5,8 @@ mod common;
 
 fn main() {
     let before = std::process::id();
-    runode_host::disclaim_responsibility().unwrap();
+    // SAFETY: 自己写的 main，还没开别的线程。
+    unsafe { runode_host::disclaim_responsibility() }.unwrap();
     assert_eq!(std::process::id(), before, "re-executed in place");
     assert!(std::env::var_os("RUNODE_HOST_DISCLAIMED").is_none(), "the marker does not reach the shells");
     #[cfg(target_os = "macos")]

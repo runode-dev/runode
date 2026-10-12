@@ -28,7 +28,8 @@ const LOG_LIMIT: u64 = 8 << 20;
 
 /// 跑宿主，返回进程的退出码。
 pub fn run() -> i32 {
-    let disclaimed = runode_host::disclaim_responsibility();
+    // SAFETY: `main` 直接交到这里，还没开别的线程。
+    let disclaimed = unsafe { runode_host::disclaim_responsibility() };
     let dirs = runode_paths::Dirs::from_env();
     init_logging(&dirs);
     warn_if_not_disclaimed(disclaimed);
@@ -80,7 +81,8 @@ fn wait_for_children() {
 /// `READY_BY` 就不再回，见 `host_client::handoff` 的模块文档。返回进程的退出码。
 pub fn take_over() -> i32 {
     // 先于认领状态管道：认领后它带着 close-on-exec，重新执行就丢了。
-    let disclaimed = runode_host::disclaim_responsibility();
+    // SAFETY: `main` 直接交到这里，还没开别的线程。
+    let disclaimed = unsafe { runode_host::disclaim_responsibility() };
     let ready_by = Instant::now() + READY_BY;
     // 先于打开任何文件：没有状态管道时 `STATUS_FD` 这个号会被日志文件这类占去。
     let mut status = StatusPipe::take();

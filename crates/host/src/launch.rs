@@ -96,9 +96,12 @@ pub fn launch_successor(exe: &Path) -> io::Result<Successor> {
 /// 让这个宿主进程自己担着责任进程：带上 `responsibility_spawnattrs_setdisclaim` 原地重新执行自己一次
 /// （`POSIX_SPAWN_SETEXEC`，pid、参数、环境和没设 close-on-exec 的描述符都不变），重新执行后的那次调用
 /// 直接返回。`launch` 拉起的本来就自己担着；在终端里直接跑的（重启脚本拉起的新宿主就是）挂在那个终端
-/// 的责任进程（通常是旧宿主）名下，那个进程一退出，这个宿主开的终端就都连不上局域网。要在开任何线程
-/// 之前调用：要改环境变量。成功时不返回。
-pub fn disclaim_responsibility() -> io::Result<()> {
+/// 的责任进程（通常是旧宿主）名下，那个进程一退出，这个宿主开的终端就都连不上局域网。成功时不返回。
+///
+/// # Safety
+///
+/// 要改环境变量：调用时进程里不能有别的线程。
+pub unsafe fn disclaim_responsibility() -> io::Result<()> {
     #[cfg(target_os = "macos")]
     {
         // 重新执行过的标记，免得一直重来；读到就去掉，不传给宿主开的 shell。
