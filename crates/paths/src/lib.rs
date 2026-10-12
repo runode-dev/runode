@@ -1,7 +1,7 @@
 //! runode 读写的目录和文件的位置，统一从环境变量算出来。
 //!
 //! runode 自己的东西在所有系统上都放在同一个根目录：`~/.runode`，不跟着 `XDG_CONFIG_HOME` 走。
-//! 配置文件和要留着的数据（窗口布局的存档、命令历史、自己加的项目命令）直接放在根目录，
+//! 配置文件和要留着的数据（窗口布局的存档、命令历史、自己加的项目命令、任务板）直接放在根目录，
 //! 随时能重新生成的缓存（shell 集成脚本、首个终端的尺寸、宿主进程的日志）放在根目录的
 //! `cache/` 里，宿主进程的 socket 和锁放在根目录的 `run/` 里，远程访问的证书、设备表和配对口令放在
 //! 根目录的 `remote-access/` 里。
@@ -15,6 +15,9 @@ use std::{
 /// 宿主进程的 socket、锁和日志的文件名（不含扩展名）。调试构建用另一个名字，免得开发版
 /// 连上装好的那个版本的宿主，或者反过来。
 const HOST_NAME: &str = if cfg!(debug_assertions) { "host-dev" } else { "host" };
+
+/// 任务板的库名。调试构建的宿主另用一份：两边的宿主各自在跑，共用一份库时定时会触发两次。
+const TODOS_DB: &str = if cfg!(debug_assertions) { "todos-dev.db" } else { "todos.db" };
 
 /// `sockaddr_un.sun_path` 的长度（macOS 上最短，104 字节），含结尾的 NUL；socket 路径的
 /// 字节数要比它小，否则绑定和连接都会失败。
@@ -155,6 +158,11 @@ impl Dirs {
     /// 用户自己加的项目命令：通用的，和按项目目录分开的，见 `runode_protocol::TaskSourceKind`。
     pub fn tasks_file(&self) -> Option<PathBuf> {
         self.data_file("tasks.json")
+    }
+
+    /// 任务板：派给 agent 的任务和定时，SQLite 库，只由宿主读写。
+    pub fn todos_db(&self) -> Option<PathBuf> {
+        self.data_file(TODOS_DB)
     }
 
     /// Git 面板 AI 写提交说明的预设：用哪个 agent、加什么参数、提示词模板，分所有仓库的默认值和
@@ -302,6 +310,7 @@ mod tests {
         assert_eq!(dirs.config_file(), Some("/home/me/.runode/config.conf".into()));
         assert_eq!(dirs.windows_file(), Some("/home/me/.runode/windows.json".into()));
         assert_eq!(dirs.history_file(), Some("/home/me/.runode/history.jsonl".into()));
+        assert_eq!(dirs.todos_db(), Some(PathBuf::from("/home/me/.runode").join(TODOS_DB)));
         assert_eq!(dirs.themes_dir(), Some("/home/me/.runode/themes".into()));
         assert_eq!(dirs.agent_detection_dir(), Some("/home/me/.runode/agent-detection".into()));
         assert_eq!(dirs.completions_dir(), Some("/home/me/.runode/completions".into()));

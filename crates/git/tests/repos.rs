@@ -235,3 +235,44 @@ fn reads_other_worktrees() {
     assert!(!feat.0.exists());
     assert!(read_all(&repo).worktrees.is_empty());
 }
+
+#[test]
+fn adds_a_worktree_inside_the_repo_without_dirtying_it() {
+    let repo = TestRepo::new("repos-add-worktree");
+    repo.commit_file("a.txt", "one\n", "init");
+    let handle = runode_git::Repo::open(repo.path()).unwrap();
+    let worktree = handle.root.join(".worktrees").join("fix-login");
+
+    handle.add_worktree(&worktree, "runode/fix-login").unwrap();
+    assert_eq!(std::fs::read_to_string(worktree.join("a.txt")).unwrap(), "one\n");
+    assert_eq!(repo.git(&["-C", &worktree.to_string_lossy(), "branch", "--show-current"]).trim(), "runode/fix-login");
+    // 新工作树的目录写进了 info/exclude，主仓库的状态里看不到它；`.gitignore` 没被碰。
+    assert!(repo.status().is_empty(), "{:?}", repo.status());
+    assert!(!repo.path().join(".gitignore").exists());
+    let exclude = std::fs::read_to_string(repo.path().join(".git/info/exclude")).unwrap();
+    assert!(exclude.ends_with("/.worktrees/\n"), "{exclude:?}");
+
+    // 第二个工作树不再重复写；分支已经有了时 git 拒绝。
+    handle.add_worktree(&handle.root.join(".worktrees").join("second"), "runode/second").unwrap();
+    assert_eq!(std::fs::read_to_string(repo.path().join(".git/info/exclude")).unwrap(), exclude);
+    assert!(handle.add_worktree(&handle.root.join(".worktrees").join("again"), "runode/fix-login").is_err());
+
+    // 干净时不强制也删得掉，有改动时删不掉。
+    handle.remove_worktree(&worktree, false).unwrap();
+    assert!(!worktree.exists());
+    let second = handle.root.join(".worktrees").join("second");
+    std::fs::write(second.join("a.txt"), "changed\n").unwrap();
+    assert!(handle.remove_worktree(&second, false).is_err());
+}
+
+#[test]
+fn leaves_info_exclude_alone_when_the_worktree_dir_is_ignored() {
+    let repo = TestRepo::new("repos-add-worktree-ignored");
+    repo.commit_file(".gitignore", ".worktrees/\n", "init");
+    let handle = runode_git::Repo::open(repo.path()).unwrap();
+    let before = std::fs::read_to_string(repo.path().join(".git/info/exclude")).unwrap_or_default();
+
+    handle.add_worktree(&handle.root.join(".worktrees").join("a"), "runode/a").unwrap();
+    assert_eq!(std::fs::read_to_string(repo.path().join(".git/info/exclude")).unwrap_or_default(), before);
+    assert!(repo.status().is_empty(), "{:?}", repo.status());
+}

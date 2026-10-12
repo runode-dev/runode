@@ -170,6 +170,41 @@ impl Repo {
         args.extend([std::ffi::OsStr::new("--"), worktree.as_os_str()]);
         run(&self.root, args, None).map(drop)
     }
+
+    /// 在 `worktree` 新建一个工作树，从当前 HEAD 拉出新分支 `branch` 检出在里面
+    /// （`git worktree add -b`）。分支已经有了、或者 `worktree` 已经有东西时 git 拒绝，报它的错。
+    /// `worktree` 在本仓库的工作树里、而且没被忽略时，把它最上层的那一级目录写进 `info/exclude`，
+    /// 主仓库的状态里就不会多出它；仓库里提交的 `.gitignore` 不碰。
+    pub fn add_worktree(&self, worktree: &Path, branch: &str) -> Result {
+        let args = ["worktree", "add", "-b", branch, "--"].map(std::ffi::OsStr::new);
+        run(&self.root, args.into_iter().chain([worktree.as_os_str()]), None)?;
+        self.exclude_top_dir(worktree)
+    }
+
+    /// 把 `path` 在仓库里最上层的那一级目录写进 `info/exclude`，见 `add_worktree`。
+    fn exclude_top_dir(&self, path: &Path) -> Result {
+        let Some(Component::Normal(top)) = path.strip_prefix(&self.root).ok().and_then(|rel| rel.components().next())
+        else {
+            return Ok(());
+        };
+        let pattern = format!("/{}/", top.to_string_lossy());
+        if git(&self.root, &["check-ignore", "-q", "--", &pattern[1..]]).is_some() {
+            return Ok(());
+        }
+        let exclude = git(&self.root, &["rev-parse", "--git-path", "info/exclude"])
+            .ok_or_else(|| crate::GitError::new("没能找到 info/exclude"))?;
+        let exclude = self.root.join(String::from_utf8_lossy(&exclude).trim_end());
+        let write = || -> std::io::Result<()> {
+            if let Some(dir) = exclude.parent() {
+                fs::create_dir_all(dir)?;
+            }
+            let old = fs::read(&exclude).unwrap_or_default();
+            let mut file = fs::OpenOptions::new().create(true).append(true).open(&exclude)?;
+            let newline = if old.is_empty() || old.ends_with(b"\n") { "" } else { "\n" };
+            std::io::Write::write_all(&mut file, format!("{newline}{pattern}\n").as_bytes())
+        };
+        write().map_err(|err| crate::GitError::new(format!("没能写 {}：{err}", exclude.display())))
+    }
 }
 
 /// 读 `dir` 所在的仓库、它里面的子模块和嵌套仓库，以及（`worktrees` 时）同一个仓库的其他
