@@ -1017,10 +1017,10 @@ impl PreviewPanel {
                 )
                 .on_a11y_press(view, Self::toggle_preview_maximized),
             );
-        // 按钮靠右；预览栏在最右边时再让出右上角面板开关的宽度，标签和按钮不钻到开关底下。
+        // 按钮靠右；预览栏在最右边时再让出右上角面板开关的宽度，标签和按钮不钻到开关底下。不设
+        // `min_w_0`：标签多了挤的是标签条（它自己横着滚），这里至少留出按钮的宽度，按钮不叠到标签上。
         let filler = div()
             .flex_1()
-            .min_w_0()
             .h_full()
             .relative()
             .flex()
