@@ -303,7 +303,7 @@ impl WindowView {
             file_search_options: self.file_search.options(cx),
             git_graph_collapsed: self.git_graph_collapsed,
             git_graph_height: self.git_graph_height,
-            github_actions_heights: self.github_actions.heights,
+            github_actions_heights: self.github_actions.read(cx).heights(),
         }
     }
 
@@ -402,7 +402,7 @@ impl WindowView {
             self.file_search.set_options(saved.file_search_options, cx);
             self.git_graph_collapsed = saved.git_graph_collapsed;
             self.git_graph_height = saved.git_graph_height;
-            self.github_actions.heights = saved.github_actions_heights;
+            self.github_actions.update(cx, |page, _| page.set_heights(saved.github_actions_heights));
             self.activate_workspace(active, window, cx);
         }
         shell

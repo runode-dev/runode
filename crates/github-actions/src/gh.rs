@@ -14,9 +14,7 @@ use std::{
 
 use serde::{Deserialize, de::DeserializeOwned};
 
-use crate::window::files::shell_quote;
-
-pub(super) const PROGRAM: &str = "gh";
+pub const PROGRAM: &str = "gh";
 /// 找不到 gh 时 `Gh` 返回的错，页上据此显示怎么装。
 pub(super) const MISSING: &str = "gh not found";
 /// gh 没登录或者令牌失效时 `Gh` 返回的错，页上据此请用户登录。
@@ -414,6 +412,17 @@ pub(super) fn dispatchable(source: &str) -> bool {
 /// 一个 step 在网页上的位置：job 页加上 step 的序号（从 1 数）。
 pub(super) fn step_url(job: &Job, index: usize) -> String {
     format!("{}#step:{}:1", job.url, index + 1)
+}
+
+/// 打进 shell 的参数：只含常见字符时原样，否则用单引号括起来；开头是 `=` 或 `%` 时也括起来，zsh 会把
+/// `=foo` 展开成命令的路径。和桌面文件树往终端里插路径时括法一样。
+fn shell_quote(text: &str) -> String {
+    let plain = |c: char| c.is_alphanumeric() || matches!(c, '/' | '.' | '_' | '-' | '+' | '@' | '%' | ':' | ',' | '=');
+    if !text.is_empty() && !text.starts_with(['=', '%']) && text.chars().all(plain) {
+        text.to_owned()
+    } else {
+        format!("'{}'", text.replace('\'', r"'\''"))
+    }
 }
 
 #[cfg(test)]

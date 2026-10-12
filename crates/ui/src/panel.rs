@@ -12,6 +12,8 @@ use crate::{
 /// 卡片样式下卡片的圆角，分屏和面板顶上标题条的高度。
 pub const CARD_RADIUS: f32 = 10.;
 pub const PANE_HEADER_HEIGHT: f32 = 30.;
+/// 分隔线两边各留这么宽能按住拖动。
+pub const DIVIDER_GRAB_WIDTH: f32 = 6.;
 
 /// 改动和文件状态的颜色，深浅背景上都看得清。
 pub const ADDED: Rgb = Rgb(0x57, 0xAB, 0x5A);

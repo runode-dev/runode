@@ -33,6 +33,8 @@ runode-update.workspace = true
 runode-autostart.workspace = true
 # 几处界面共用的 GPUI 部件和小工具。
 runode-ui.workspace = true
+# 右侧面板的 GitHub Actions 页。
+runode-github-actions.workspace = true
 # 设置页里配对手机时画二维码。
 qrcode.workspace = true
 gpui.workspace = true

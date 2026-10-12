@@ -65,7 +65,6 @@ use rows::{GitRow, GitSection};
 
 pub(super) use ai_message::CommitMessageDialog;
 pub(super) use branch_picker::BranchPicker;
-pub(super) use list::chevron;
 pub(super) use rows::{Busy, GitPanel};
 
 actions!(

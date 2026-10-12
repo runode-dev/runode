@@ -11,8 +11,13 @@ use crate::{
     window,
 };
 
-/// Git 面板、文件树和菜单里展开、收起的箭头，画它们的部件在 `runode_ui` 里。
-pub use crate::ui::icons::{CHEVRON_DOWN_ICON, CHEVRON_RIGHT_ICON};
+/// 几处共用的图标在 `runode_ui` 里：展开、收起的箭头，行尾和菜单常用的按钮。
+pub use crate::ui::icons::{
+    CHEVRON_DOWN_ICON, CHEVRON_RIGHT_ICON, GLOBE_ICON, OPEN_FILE_ICON, PENCIL_ICON, PLAY_ICON, PLUS_ICON, REFRESH_ICON,
+    SYNC_ICON, TERMINAL_ICON, TRASH_ICON,
+};
+/// GitHub Actions 页的标签图标，图标本身跟着页面在 `runode_github_actions` 里。
+pub use runode_github_actions::WORKFLOW_ICON as ACTIONS_WORKFLOW_ICON;
 
 icons! {
     FILES, "icons/", "../assets/icons/";
@@ -30,24 +35,14 @@ icons! {
     pub CODE_ICON = "code",
     /// Git 面板提交说明框里让 AI 写说明的按钮。
     pub SPARKLE_ICON = "sparkle",
-    /// 标题栏右上角项目命令按钮的运行图标。
-    pub PLAY_ICON = "play",
-    /// Git 面板里的按钮：分支、暂存、取消暂存、放弃改动、提交、刷新、更多、同步、打开文件，以及储藏的
-    /// 应用、弹出和删除。
+    /// Git 面板里的按钮：分支、取消暂存、放弃改动、提交、更多，以及储藏的应用和弹出。
     pub BRANCH_ICON = "branch",
-    pub PLUS_ICON = "plus",
     pub MINUS_ICON = "minus",
     pub DISCARD_ICON = "discard",
     pub CHECK_ICON = "check",
-    pub REFRESH_ICON = "refresh",
     pub MORE_ICON = "more",
-    pub SYNC_ICON = "sync",
-    pub OPEN_FILE_ICON = "open-file",
     pub STASH_APPLY_ICON = "stash-apply",
     pub STASH_POP_ICON = "stash-pop",
-    pub TRASH_ICON = "trash",
-    /// 项目命令菜单里编辑自己加的命令的按钮。
-    pub PENCIL_ICON = "pencil",
     /// Git 面板标题栏上切换改动的文件以树形式还是列表形式查看的按钮，画的是切过去以后的样子。
     pub VIEW_TREE_ICON = "view-tree",
     pub VIEW_LIST_ICON = "view-list",
@@ -63,17 +58,14 @@ icons! {
     pub ALERT_IMPORTANT_ICON = "alert-important",
     pub ALERT_WARNING_ICON = "alert-warning",
     pub ALERT_CAUTION_ICON = "alert-caution",
-    /// 卡片样式下分屏标题条上的图标：前台不是 agent 时的终端图标，以及右边向右、向下分屏，放大、
-    /// 还原和关闭分屏的按钮。
-    pub TERMINAL_ICON = "terminal",
+    /// 卡片样式下分屏标题条右边向右、向下分屏，放大、还原和关闭分屏的按钮。
     pub SPLIT_RIGHT_ICON = "split-right",
     pub SPLIT_DOWN_ICON = "split-down",
     pub MAXIMIZE_ICON = "maximize",
     pub MINIMIZE_ICON = "minimize",
     pub CLOSE_ICON = "close",
-    /// 新建工作区对话框里浏览文件夹和从 URL 克隆的图标（创建新项目用 `PLUS_ICON`）。
+    /// 新建工作区对话框里浏览文件夹的图标（从 URL 克隆用 `GLOBE_ICON`，创建新项目用 `PLUS_ICON`）。
     pub FOLDER_OPEN_ICON = "folder-open",
-    pub GLOBE_ICON = "globe",
     /// 卡片样式下标签图标叠里代表 shell 和普通程序的那块：深色底上的提示符。
     pub PROMPT_ICON = "prompt",
     /// 卡片样式下 agent 等你回答时的标记：像素画的问号。
@@ -91,25 +83,17 @@ icons! {
     pub SLIDERS_ICON = "sliders",
     pub PALETTE_ICON = "palette",
     pub KEYBOARD_ICON = "keyboard",
-    /// 外观页配色的预览卡（跟着系统换、一个主题用 `PALETTE_ICON`）；`BAN_ICON` 是快捷键页去掉一个绑定的按钮。
+    /// 外观页配色的预览卡（跟着系统换、一个主题用 `PALETTE_ICON`）。
     pub MONITOR_ICON = "monitor",
-    pub BAN_ICON = "ban",
-    /// GitHub Actions 页：标签和工作流的图标、运行和 step 各种状态的图标，行尾的复制和固定按钮。
-    pub ACTIONS_WORKFLOW_ICON = "actions/workflow",
-    pub ACTIONS_SUCCESS_ICON = "actions/success",
-    pub ACTIONS_FAILURE_ICON = "actions/failure",
-    pub ACTIONS_CANCELLED_ICON = "actions/cancelled",
-    pub ACTIONS_SKIPPED_ICON = "actions/skipped",
-    pub ACTIONS_INPROGRESS_ICON = "actions/inprogress",
-    pub ACTIONS_QUEUED_ICON = "actions/queued",
-    pub ACTIONS_WAITING_ICON = "actions/waiting",
-    pub ACTIONS_PENDING_ICON = "actions/pending",
-    pub COPY_ICON = "copy",
-    pub PIN_ICON = "pin",
 }
 
 fn all_files() -> impl Iterator<Item = &'static (&'static str, &'static [u8])> {
-    FILES.iter().chain(icons::FILES).chain(file_icons::FILES).chain(window::AGENT_LOGO_FILES)
+    FILES
+        .iter()
+        .chain(icons::FILES)
+        .chain(runode_github_actions::FILES)
+        .chain(file_icons::FILES)
+        .chain(window::AGENT_LOGO_FILES)
 }
 
 pub struct Assets;

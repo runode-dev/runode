@@ -90,12 +90,13 @@ use crate::ui::a11y::{Hide, PressDown};
 use crate::ui::{
     inline_edit,
     menu::{Menu, MenuHost},
-    panel::{PANE_HEADER_HEIGHT, card, divider_color},
+    panel::{DIVIDER_GRAB_WIDTH, PANE_HEADER_HEIGHT, card, divider_color},
     row_buttons,
 };
 use crate::{config::AppConfig, prespawn::Prespawned, terminal_view::TerminalView, ui::font_size::FontSize, ui::hsla};
 use model::{PaneLayout, Workspace, WorkspaceId, home_dir};
 use persist::format::SavedWindow;
+use runode_github_actions::ActionsPanel;
 use slot::Slot;
 use titlebar::titled;
 
@@ -183,8 +184,6 @@ const TAB_MIN_WIDTH: f32 = 64.;
 const TAB_MAX_WIDTH: f32 = 200.;
 /// 标题前面 agent 状态标记的宽度，固定下来标题才不会随转圈的字符左右跳。
 const AGENT_MARK_WIDTH: f32 = 12.;
-/// 分隔线两侧可以按住拖动的宽度。
-const DIVIDER_GRAB_WIDTH: f32 = 6.;
 
 /// 装上存档（`persist::install`）和系统发起的退出的收尾（`quit::install`）。要在打开窗口之前调用。
 pub fn install(cx: &mut App) {
@@ -276,7 +275,13 @@ pub struct WindowView {
     git_focus: FocusHandle,
     /// 开着的分支列表。
     branch_picker: Option<git_panel::BranchPicker>,
-    github_actions: github_actions::ActionsPage,
+    /// 右侧面板的 GitHub Actions 页，见 `github_actions`。
+    github_actions: Entity<ActionsPanel>,
+    /// 上次看 PATH 里有没有 gh 时的 PATH 和结果，标签要不要显示靠它，PATH 没变就不再找。
+    actions_found: model::ToolCache,
+    /// 在终端里填 secret、variable 值的那几个终端，按终端记着订阅，gh 跑完时让页重读对应的列表。
+    actions_watches: HashMap<EntityId, Subscription>,
+    _actions_events: Subscription,
     /// 预览栏拖动过宽度时是那个宽度；预览栏在打开文件时出现，标签都关掉时收起，不存档。
     preview_width: Option<f32>,
     /// 预览栏的焦点：点了预览的文字后 cmd+c 复制选中的行。
@@ -440,6 +445,8 @@ impl WindowView {
             agents::dismiss_alerts(panes.collect::<Vec<_>>(), cx);
         })
         .detach();
+        let github_actions = cx.new(|_| ActionsPanel::default());
+        let actions_events = cx.subscribe_in(&github_actions, window, Self::on_github_actions_event);
         Self {
             workspaces: Vec::new(),
             active: 0,
@@ -454,7 +461,10 @@ impl WindowView {
             git_graph_height: None,
             git_focus: cx.focus_handle(),
             branch_picker: None,
-            github_actions: Default::default(),
+            github_actions,
+            actions_found: Default::default(),
+            actions_watches: HashMap::new(),
+            _actions_events: actions_events,
             preview_width: None,
             preview_focus: cx.focus_handle(),
             preview_wrap: false,

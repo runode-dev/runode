@@ -140,12 +140,8 @@ pub struct SavedWorkspace {
     pub pinned_workflows: Vec<PinnedWorkflow>,
 }
 
-/// 固定到状态栏上的一个工作流：gh 给的工作流 id，和读到它之前先显示的名字。
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct PinnedWorkflow {
-    pub id: u64,
-    pub name: String,
-}
+/// 固定到状态栏上的一个工作流，定义跟着 GitHub Actions 页。
+pub use runode_github_actions::PinnedWorkflow;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct SavedTab {
