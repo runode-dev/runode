@@ -29,9 +29,9 @@ use std::{
 };
 
 use gpui::{
-    AccessibleAction, Action, AnyElement, App, Axis, ClickEvent, Context, Div, EventEmitter, FocusHandle, Focusable,
-    Hsla, MouseButton, MouseDownEvent, Pixels, Render, Role, ScrollStrategy, SharedString, Stateful, Window, actions,
-    div, img, prelude::*, px, svg, uniform_list,
+    AccessibleAction, Action, AnyElement, App, Axis, ClickEvent, Context, Div, ElementId, EventEmitter, FocusHandle,
+    Focusable, Hsla, MouseButton, MouseDownEvent, Pixels, Render, Role, ScrollStrategy, SharedString, Stateful, Window,
+    actions, div, img, prelude::*, px, svg, uniform_list,
 };
 use runode_git::{self as git, FileStatus};
 use runode_shared_types::color::Rgb;
@@ -671,8 +671,10 @@ impl FileTree {
                 .ok();
             }
         };
+        // id 按路径取，不按行号：展开目录、新建时上面多出几行，辅助工具的节点和焦点仍跟着同一个文件。
+        let id = ElementId::Path(Arc::from(row.path.as_path()));
         Some(
-            Self::file_row_shell(("file", ix), row.depth, font_size, cx)
+            Self::file_row_shell(id, row.depth, font_size, cx)
                 .role(Role::TreeItem)
                 .aria_label(row.name.clone())
                 .aria_level(row.depth + 1)

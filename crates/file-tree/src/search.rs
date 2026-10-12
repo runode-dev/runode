@@ -873,7 +873,9 @@ impl FileTree {
         };
         let selected = search.selected == Some(ix);
         let view = cx.entity().downgrade();
-        Self::file_row_shell(("file-search", ix), depth, font_size, cx)
+        // id 按显示的东西取，不按行号：收起目录、重搜时行号会变。`tip` 里目录是相对路径，文件是绝对路径，
+        // 命中的行带行号，彼此不重。
+        Self::file_row_shell(SharedString::from(tip.clone()), depth, font_size, cx)
             .role(Role::TreeItem)
             .aria_label(label)
             .aria_description(tip.clone())
