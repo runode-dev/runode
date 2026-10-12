@@ -4690,7 +4690,7 @@ dependencies = [
 
 [[package]]
 name = "runode"
-version = "0.1.7"
+version = "0.1.8"
 dependencies = [
  "anyhow",
  "block2 0.6.2",
@@ -4728,7 +4728,7 @@ dependencies = [
 
 [[package]]
 name = "runode-agent-detect"
-version = "0.1.7"
+version = "0.1.8"
 dependencies = [
  "regex",
  "runode-shared-types",
@@ -4738,14 +4738,14 @@ dependencies = [
 
 [[package]]
 name = "runode-autostart"
-version = "0.1.7"
+version = "0.1.8"
 dependencies = [
  "runode-paths",
 ]
 
 [[package]]
 name = "runode-cli"
-version = "0.1.7"
+version = "0.1.8"
 dependencies = [
  "anyhow",
  "qrcode",
@@ -4761,7 +4761,7 @@ dependencies = [
 
 [[package]]
 name = "runode-completion"
-version = "0.1.7"
+version = "0.1.8"
 dependencies = [
  "futures",
  "libc",
@@ -4776,7 +4776,7 @@ dependencies = [
 
 [[package]]
 name = "runode-config"
-version = "0.1.7"
+version = "0.1.8"
 dependencies = [
  "objc2-app-kit 0.3.2",
  "objc2-foundation 0.3.2",
@@ -4788,11 +4788,11 @@ dependencies = [
 
 [[package]]
 name = "runode-git"
-version = "0.1.7"
+version = "0.1.8"
 
 [[package]]
 name = "runode-host"
-version = "0.1.7"
+version = "0.1.8"
 dependencies = [
  "anyhow",
  "libc",
@@ -4807,11 +4807,11 @@ dependencies = [
 
 [[package]]
 name = "runode-paths"
-version = "0.1.7"
+version = "0.1.8"
 
 [[package]]
 name = "runode-preview"
-version = "0.1.7"
+version = "0.1.8"
 dependencies = [
  "pulldown-cmark",
  "regex",
@@ -4821,7 +4821,7 @@ dependencies = [
 
 [[package]]
 name = "runode-prompt-highlight"
-version = "0.1.7"
+version = "0.1.8"
 dependencies = [
  "runode-completion",
  "runode-paths",
@@ -4830,7 +4830,7 @@ dependencies = [
 
 [[package]]
 name = "runode-protocol"
-version = "0.1.7"
+version = "0.1.8"
 dependencies = [
  "runode-shared-types",
  "serde",
@@ -4839,7 +4839,7 @@ dependencies = [
 
 [[package]]
 name = "runode-remote-access"
-version = "0.1.7"
+version = "0.1.8"
 dependencies = [
  "anyhow",
  "libc",
@@ -4856,7 +4856,7 @@ dependencies = [
 
 [[package]]
 name = "runode-shared-types"
-version = "0.1.7"
+version = "0.1.8"
 dependencies = [
  "serde",
  "serde_json",
@@ -4864,7 +4864,7 @@ dependencies = [
 
 [[package]]
 name = "runode-terminal"
-version = "0.1.7"
+version = "0.1.8"
 dependencies = [
  "anyhow",
  "libc",
@@ -4880,7 +4880,7 @@ dependencies = [
 
 [[package]]
 name = "runode-update"
-version = "0.1.7"
+version = "0.1.8"
 dependencies = [
  "block2 0.6.2",
  "libc",
