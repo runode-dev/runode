@@ -8,7 +8,10 @@
 
 use std::path::{Path, PathBuf};
 
-use crate::file_tree::{FileTree, FileTreeEvent, Input};
+use crate::{
+    file_tree::{FileTree, FileTreeEvent, Input, WorkspaceId},
+    preview_panel::PreviewPanel,
+};
 use gpui::{Context, Div, Entity, Focusable, Stateful, Window, div, prelude::*, px};
 use runode_config::PreviewClick;
 
@@ -116,12 +119,42 @@ impl WindowView {
                     self.insert_tab(self.workspace().active + 1, view, window, cx);
                 }
             }
-            FileTreeEvent::Moved { from, to } => self.move_previews(from, to, cx),
-            FileTreeEvent::Removed(path) => self.close_previews_under(path, window, cx),
+            FileTreeEvent::Moved { ws, from, to } if *ws == self.workspace().id => self.move_previews(from, to, cx),
+            FileTreeEvent::Removed { ws, path } if *ws == self.workspace().id => {
+                self.close_previews_under(path, window, cx);
+            }
+            // 后台挪动、删除做完时已经切到了别的 workspace：改发起的那个 workspace 的预览标签。
+            FileTreeEvent::Moved { ws, from, to } => self.with_background_preview(*ws, cx, |panel, cx| {
+                panel.moved(from, to, cx);
+            }),
+            FileTreeEvent::Removed { ws, path } => self.with_background_preview(*ws, cx, |panel, cx| {
+                panel.close_under(path, window, cx);
+            }),
             FileTreeEvent::Refresh => self.refresh_project(cx),
             FileTreeEvent::FocusTerminal => window.focus(&self.focus_handle(cx), cx),
             FileTreeEvent::OptionsChanged => self.save(cx),
         }
+    }
+
+    /// 对后台 workspace `ws` 的预览栏做 `f`，做完换回当前 workspace；那个 workspace 已经关掉时不做。
+    /// shortcut: 借预览栏的当前 workspace 改后台的标签，它这时发出的事件（标签关完了、定位文件树）仍按当前
+    /// workspace 办，后台 workspace 的标签全关完时焦点在预览栏上会交回终端；预览栏有按 workspace 改标签的
+    /// 接口时换掉。
+    fn with_background_preview(
+        &mut self,
+        ws: WorkspaceId,
+        cx: &mut Context<Self>,
+        f: impl FnOnce(&mut PreviewPanel, &mut Context<PreviewPanel>),
+    ) {
+        if !self.workspaces.iter().any(|workspace| workspace.id == ws) {
+            return;
+        }
+        let current = self.workspace().id;
+        self.preview.update(cx, |panel, cx| {
+            panel.set_workspace(ws);
+            f(panel, cx);
+            panel.set_workspace(current);
+        });
     }
 
     /// 把从文件树或访达拖来的 `paths` 放到终端 `pane` 上：切到那个终端，把路径一个个打进去。

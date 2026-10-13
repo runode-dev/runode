@@ -165,10 +165,11 @@ pub enum FileTreeEvent {
     InsertPath(PathBuf),
     /// 在当前 workspace 里开一个新标签页，终端的目录是这个目录。
     OpenTerminal(PathBuf),
-    /// `from` 改了名或挪到了 `to`：它和它下面的文件的预览标签跟过去。
-    Moved { from: PathBuf, to: PathBuf },
-    /// 这个文件或目录移到了废纸篓：关掉它和它下面的文件的预览标签。
-    Removed(PathBuf),
+    /// `from` 改了名或挪到了 `to`：workspace `ws` 里它和它下面的文件的预览标签跟过去。后台挪的做完时可能已经
+    /// 切到了别的 workspace，`ws` 是发起的那个。
+    Moved { ws: WorkspaceId, from: PathBuf, to: PathBuf },
+    /// `path` 移到了废纸篓：关掉 workspace `ws`（发起的那个，同 `Moved`）里它和它下面的文件的预览标签。
+    Removed { ws: WorkspaceId, path: PathBuf },
     /// 重读当前 workspace 的 git 状态和目录：按了刷新，或者改了 `.gitignore`。
     Refresh,
     /// 焦点交回终端。
@@ -762,6 +763,20 @@ impl FileTree {
     fn with_tree<R>(&mut self, f: impl FnOnce(&mut TreeState, &Path, TreeFilter) -> R) -> R {
         let (root, filter) = (self.files_root(), self.filter());
         f(self.state_mut(), &root, filter)
+    }
+
+    /// 和 `with_tree` 一样，但对的是 workspace `ws` 的树：后台改文件的操作做完时可能已经切到了别的 workspace。
+    /// 那个 workspace 关掉了或者还没读到根目录时不做。
+    fn with_tree_of(&mut self, ws: Option<WorkspaceId>, f: impl FnOnce(&mut TreeState, &Path, TreeFilter)) {
+        if ws == self.ws {
+            return self.with_tree(f);
+        }
+        let filter = self.filter();
+        if let Some(state) = ws.and_then(|ws| self.workspaces.get_mut(&ws))
+            && let Some(root) = state.root.clone()
+        {
+            f(state, &root, filter);
+        }
     }
 
     /// 键盘移动选中的行：`f` 返回新选中的位置，滚到那里，关掉右键菜单。

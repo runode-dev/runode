@@ -13,7 +13,7 @@ use gpui::{AnyElement, Context, PromptLevel, Role, ScrollStrategy, Window, div, 
 use runode_git::Repo;
 
 use crate::file_tree::{
-    AddToGitignore, DeleteFile, FileTree, FileTreeEvent, NewFile, NewFolder, RenameFile,
+    AddToGitignore, DeleteFile, FileTree, FileTreeEvent, NewFile, NewFolder, RenameFile, WorkspaceId,
     ops::{self, OpError},
 };
 
@@ -176,7 +176,7 @@ impl FileTree {
             self.show_file_error(error_text(&err, name), window, cx);
             return;
         }
-        self.relist_and_reveal(vec![dir.to_path_buf()], &path, cx);
+        self.relist_and_reveal(self.ws, vec![dir.to_path_buf()], &path, cx);
         // 新建的文件直接开成固定标签，接着就能看。
         if !is_dir {
             cx.emit(FileTreeEvent::Open { path, line: None, pin: true });
@@ -193,31 +193,33 @@ impl FileTree {
             return;
         }
         match ops::rename(path, &to) {
-            Ok(()) => self.after_move(path, &to, cx),
+            Ok(()) => self.after_move(self.ws, path, &to, cx),
             Err(err) => self.show_file_error(error_text(&err, name), window, cx),
         }
     }
 
-    /// 当场重读 `dirs`，再选中 `path`、滚到它。
-    fn relist_and_reveal(&mut self, dirs: Vec<PathBuf>, path: &Path, cx: &mut Context<Self>) {
-        self.with_tree(|state, root, filter| {
+    /// 当场重读 workspace `ws` 的树里的 `dirs`，再选中 `path`、滚到它。
+    fn relist_and_reveal(&mut self, ws: Option<WorkspaceId>, dirs: Vec<PathBuf>, path: &Path, cx: &mut Context<Self>) {
+        self.with_tree_of(ws, |state, root, filter| {
             state.relist(dirs, root, filter);
             state.reveal_file(path, root, filter);
         });
         cx.notify();
     }
 
-    /// `from` 改了名或挪到了 `to`：展开的目录、选中的路径和预览的文件跟过去，重读两边的目录。
-    fn after_move(&mut self, from: &Path, to: &Path, cx: &mut Context<Self>) {
-        self.state_mut().moved(from, to);
+    /// workspace `ws` 里 `from` 改了名或挪到了 `to`：展开的目录、选中的路径和预览的文件跟过去，重读两边的目录。
+    /// 剪贴板整个窗口一份，不管是哪个 workspace 都跟过去。
+    fn after_move(&mut self, ws: Option<WorkspaceId>, from: &Path, to: &Path, cx: &mut Context<Self>) {
+        self.with_tree_of(ws, |state, _, _| state.moved(from, to));
         if let Some(clip) = &mut self.clipboard
             && let Some(path) = follow_move(&clip.path, from, to)
         {
             clip.path = path;
         }
         let dirs = [from.parent(), to.parent()].into_iter().flatten().map(Path::to_path_buf).collect();
-        self.relist_and_reveal(dirs, to, cx);
-        cx.emit(FileTreeEvent::Moved { from: from.to_path_buf(), to: to.to_path_buf() });
+        self.relist_and_reveal(ws, dirs, to, cx);
+        let ws = ws.unwrap_or_default();
+        cx.emit(FileTreeEvent::Moved { ws, from: from.to_path_buf(), to: to.to_path_buf() });
     }
 
     /// 选中的那一项先问一下，再在后台移到废纸篓：外置卷上可能要复制一遍。
@@ -237,7 +239,7 @@ impl FileTree {
             &[&*rust_i18n::t!("files.delete_confirm"), &*rust_i18n::t!("files.cancel")],
             cx,
         );
-        // 完成时已经切到别的 workspace 的话不动现在这棵树；原来那棵切回去重读时会跟上。
+        // 完成时可能已经切到了别的 workspace，改的是发起的那个 workspace 的树和预览。
         let ws = self.ws;
         cx.spawn_in(window, async move |this, cx| {
             if answer.await.ok() != Some(0) {
@@ -249,8 +251,7 @@ impl FileTree {
             });
             let result = result.await;
             this.update_in(cx, |this, window, cx| match result {
-                Ok(()) if this.ws == ws => this.after_delete(&path, window, cx),
-                Ok(()) => {}
+                Ok(()) => this.after_delete(ws, &path, window, cx),
                 Err(err) => this.show_file_error(error_text(&err, &name), window, cx),
             })
             .ok();
@@ -258,14 +259,14 @@ impl FileTree {
         .detach();
     }
 
-    /// `path` 移到了废纸篓：关掉它和它下面的文件的预览标签，选中原来那个位置上的行，接着按删除键
-    /// 可以一路删下去。
-    fn after_delete(&mut self, path: &Path, window: &mut Window, cx: &mut Context<Self>) {
-        cx.emit(FileTreeEvent::Removed(path.to_path_buf()));
+    /// workspace `ws` 里 `path` 移到了废纸篓：关掉它和它下面的文件的预览标签，选中原来那个位置上的行，接着按
+    /// 删除键可以一路删下去。剪贴板整个窗口一份，不管是哪个 workspace 都清掉。
+    fn after_delete(&mut self, ws: Option<WorkspaceId>, path: &Path, window: &mut Window, cx: &mut Context<Self>) {
+        cx.emit(FileTreeEvent::Removed { ws: ws.unwrap_or_default(), path: path.to_path_buf() });
         if self.clipboard.as_ref().is_some_and(|clip| clip.path.starts_with(path)) {
             self.clipboard = None;
         }
-        self.with_tree(|state, root, filter| {
+        self.with_tree_of(ws, |state, root, filter| {
             let ix = state.selected_row();
             state.removed(path);
             state.selected = None;
@@ -275,7 +276,9 @@ impl FileTree {
                 state.scroll.scroll_to_item(ix, ScrollStrategy::Nearest);
             }
         });
-        window.focus(&self.focus, cx);
+        if ws == self.ws {
+            window.focus(&self.focus, cx);
+        }
         cx.notify();
     }
 
@@ -389,7 +392,7 @@ impl FileTree {
 
     /// 在后台把 `src` 挪进（`cut`）或复制进 `dir`，目录可能很大；完了选中挪过去或复制出来的那一项。
     fn transfer(&mut self, src: PathBuf, dir: PathBuf, cut: bool, window: &mut Window, cx: &mut Context<Self>) {
-        // 同 `delete_file`：完成时已经切走的话不动现在这棵树。
+        // 同 `delete_file`：完成时可能已经切走了，改的是发起的那个 workspace。
         let ws = self.ws;
         let job = cx.background_spawn({
             let (src, dir) = (src.clone(), dir.clone());
@@ -402,12 +405,11 @@ impl FileTree {
                     if this.clipboard.as_ref().is_some_and(|clip| clip.cut && clip.path == src) {
                         this.clipboard = None;
                     }
-                    if dest != src && this.ws == ws {
-                        this.after_move(&src, &dest, cx);
+                    if dest != src {
+                        this.after_move(ws, &src, &dest, cx);
                     }
                 }
-                Ok(dest) if this.ws == ws => this.relist_and_reveal(vec![dir], &dest, cx),
-                Ok(_) => {}
+                Ok(dest) => this.relist_and_reveal(ws, vec![dir], &dest, cx),
                 Err(err) => this.show_file_error(error_text(&err, &base_name(&src)), window, cx),
             })
             .ok();
