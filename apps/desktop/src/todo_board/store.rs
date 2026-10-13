@@ -72,21 +72,22 @@ impl Host {
 }
 
 /// 在后台跟着任务板：记下和宿主说话的 `host`，现在问一次，`changed`（宿主说任务板变了、换了一条连接）来了
-/// 就重问。任务会话的状态在看板开着时才轮询，见 `poll_sessions`。
+/// 就重问。几次问一个接一个，不重叠，免得慢回来的旧答案盖掉新的。任务会话的状态在看板开着时才轮询，见
+/// `poll_sessions`。
 pub fn watch(host: Host, changed: Option<UnboundedReceiver<()>>, cx: &mut App) {
     cx.set_global(host);
-    refresh_todos(cx).detach();
-    if let Some(mut changed) = changed {
-        cx.spawn(async move |cx| {
-            while changed.next().await.is_some() {
-                // 一下子变了好几次时只问一次。
-                while changed.try_recv().is_ok() {}
-                let refreshed = cx.update(refresh_todos);
-                refreshed.await;
-            }
-        })
-        .detach();
-    }
+    cx.spawn(async move |cx| {
+        let refreshed = cx.update(refresh_todos);
+        refreshed.await;
+        let Some(mut changed) = changed else { return };
+        while changed.next().await.is_some() {
+            // 一下子变了好几次时只问一次。
+            while changed.try_recv().is_ok() {}
+            let refreshed = cx.update(refresh_todos);
+            refreshed.await;
+        }
+    })
+    .detach();
 }
 
 /// 正在轮询任务会话的状态，见 `poll_sessions`。
