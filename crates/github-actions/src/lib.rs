@@ -1248,10 +1248,10 @@ impl ActionsPanel {
         row_buttons(buttons, page.hovered == Some(ix) || page.a11y, true, cx)
     }
 
-    /// 固定到状态栏上的工作流和各自最近一次运行，交给 `render_pinned` 画。
-    pub fn pinned_items(&self) -> Vec<PinnedItem> {
-        self.input
-            .pinned
+    /// 固定到状态栏上的工作流 `pinned` 和各自最近一次运行，交给 `render_pinned` 画。固定的是哪些由 app
+    /// 按当前 workspace 现给：页上那份 `Input` 只在页显示着或要轮询时才换，切走以后还是上一个 workspace 的。
+    pub fn pinned_items(&self, pinned: &[PinnedWorkflow]) -> Vec<PinnedItem> {
+        pinned
             .iter()
             .map(|pin| {
                 let latest = match self.data.get(&Query::WorkflowRuns(pin.id)) {

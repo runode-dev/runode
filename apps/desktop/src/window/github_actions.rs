@@ -87,10 +87,9 @@ impl WindowView {
         shell.child(div().flex_1().min_h_0().child(self.github_actions.clone()))
     }
 
-    /// 状态栏左边固定的工作流。颜色由 `render_pinned` 从主题读，`_fg`、`_bg` 用不着了，留着只为不在这一步
-    /// 改状态栏的调用。
+    /// 状态栏左边当前 workspace 固定的工作流，颜色由 `render_pinned` 从主题读。
     pub(super) fn render_pinned_workflows(&self, cx: &mut Context<Self>) -> Vec<AnyElement> {
-        let items = self.github_actions.read(cx).pinned_items();
+        let items = self.github_actions.read(cx).pinned_items(&self.workspace().pinned_workflows);
         render_pinned(items, status_bar::STATUS_BAR_HEIGHT - 6., cx)
     }
 
