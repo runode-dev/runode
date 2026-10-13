@@ -105,6 +105,11 @@ fn schedules_round_trip() {
         ("weekly", &When::Once { at: 9_999 }, 700)
     );
     assert!(!store.update_schedule("nothere", None, None, 700).unwrap());
+    // 存不下的时刻不收，原来的不动。
+    assert!(store.add_schedule(&spec("never"), &When::Once { at: u64::MAX }, 700).is_err());
+    assert!(store.update_schedule(&id, Some(&spec("never")), Some(&When::Once { at: u64::MAX }), 800).is_err());
+    let kept = &store.list_schedules().unwrap()[0];
+    assert_eq!((kept.spec.title.as_str(), &kept.when), ("weekly", &When::Once { at: 9_999 }));
 
     assert!(store.remove_schedule(&id).unwrap());
     assert!(!store.remove_schedule(&id).unwrap());

@@ -192,16 +192,20 @@ fn insert_todo(tx: &Transaction<'_>, spec: &TodoSpec, now: u64, schedule: Option
     Ok(id)
 }
 
-/// `when` 拆成表里的几列：种类，以及 `at`、`hour`、`minute`、`days`、`minutes`。
-fn when_columns(when: &When) -> (&'static str, [Option<i64>; 5]) {
-    match *when {
-        When::Once { at } => ("once", [Some(at as i64), None, None, None, None]),
+/// `when` 拆成表里的几列：种类，以及 `at`、`hour`、`minute`、`days`、`minutes`。存不下的时刻报错：转成负数存进去
+/// 会读回成 0，定时就再也不到点了。
+fn when_columns(when: &When) -> Result<(&'static str, [Option<i64>; 5])> {
+    Ok(match *when {
+        When::Once { at } => {
+            let at = i64::try_from(at).map_err(|_| format!("{at} is too far in the future"))?;
+            ("once", [Some(at), None, None, None, None])
+        }
         When::Daily { hour, minute, days } => {
             ("daily", [None, Some(hour.into()), Some(minute.into()), Some(days.into()), None])
         }
         When::Every { minutes } => ("every", [None, None, None, None, Some(minutes.into())]),
         When::Unknown => ("unknown", [None; 5]),
-    }
+    })
 }
 
 impl Store {
@@ -406,7 +410,7 @@ impl Store {
     pub fn add_schedule(&mut self, spec: &TodoSpec, when: &When, now: u64) -> Result<String> {
         let tx = self.conn.transaction().map_err(failed)?;
         let id = new_id(&tx)?;
-        let (kind, [at, hour, minute, days, minutes]) = when_columns(when);
+        let (kind, [at, hour, minute, days, minutes]) = when_columns(when)?;
         tx.execute(
         &format!(
             "INSERT INTO schedules ({SCHEDULE_COLUMNS}) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)"
@@ -449,7 +453,7 @@ impl Store {
             .map_err(failed)?;
         }
         if let Some(when) = when {
-            let (kind, [at, hour, minute, days, minutes]) = when_columns(when);
+            let (kind, [at, hour, minute, days, minutes]) = when_columns(when)?;
             tx.execute(
                 "UPDATE schedules SET kind = ?2, at = ?3, hour = ?4, minute = ?5, days = ?6, minutes = ?7,
                      last_fired = ?8
