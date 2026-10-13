@@ -174,11 +174,15 @@ impl Repo {
     /// 在 `worktree` 新建一个工作树，从当前 HEAD 拉出新分支 `branch` 检出在里面
     /// （`git worktree add -b`）。分支已经有了、或者 `worktree` 已经有东西时 git 拒绝，报它的错。
     /// `worktree` 在本仓库的工作树里、而且没被忽略时，把它最上层的那一级目录写进 `info/exclude`，
-    /// 主仓库的状态里就不会多出它；仓库里提交的 `.gitignore` 不碰。
+    /// 主仓库的状态里就不会多出它；仓库里提交的 `.gitignore` 不碰。写不进 `info/exclude` 时撤掉刚建的
+    /// 工作树和分支再报错，报错就是什么也没留下，调用方换个名字重试也不会多出没人管的工作树。
     pub fn add_worktree(&self, worktree: &Path, branch: &str) -> Result {
         let args = ["worktree", "add", "-b", branch, "--"].map(std::ffi::OsStr::new);
         run(&self.root, args.into_iter().chain([worktree.as_os_str()]), None)?;
-        self.exclude_top_dir(worktree)
+        self.exclude_top_dir(worktree).inspect_err(|_| {
+            // 分支刚从 HEAD 拉出来、没有新提交，`delete_merged_branch` 删得掉。
+            drop(self.remove_worktree(worktree, true).and_then(|()| self.delete_merged_branch(branch)));
+        })
     }
 
     /// 把 `path` 在仓库里最上层的那一级目录写进 `info/exclude`，见 `add_worktree`。

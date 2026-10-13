@@ -275,6 +275,23 @@ fn adds_a_worktree_inside_the_repo_without_dirtying_it() {
 }
 
 #[test]
+fn removes_the_new_worktree_and_branch_when_info_exclude_cannot_be_written() {
+    let repo = TestRepo::new("repos-add-worktree-no-exclude");
+    repo.commit_file("a.txt", "one\n", "init");
+    // info/exclude 指向不存在的目录时追加写不进去，git 读它时只当没有。
+    let exclude = repo.path().join(".git/info/exclude");
+    std::fs::remove_file(&exclude).ok();
+    std::os::unix::fs::symlink(repo.path().join("missing/exclude"), &exclude).unwrap();
+    let handle = runode_git::Repo::open(repo.path()).unwrap();
+    let worktree = handle.root.join(".worktrees").join("a");
+
+    assert!(handle.add_worktree(&worktree, "runode/a").is_err());
+    assert!(!worktree.exists());
+    assert!(!repo.git(&["branch", "--list"]).contains("runode/a"));
+    assert!(!repo.git(&["worktree", "list"]).contains(".worktrees"));
+}
+
+#[test]
 fn leaves_info_exclude_alone_when_the_worktree_dir_is_ignored() {
     let repo = TestRepo::new("repos-add-worktree-ignored");
     repo.commit_file(".gitignore", ".worktrees/\n", "init");
