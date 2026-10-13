@@ -17,29 +17,6 @@ pub struct PromptInput {
     pub text: String,
     /// 光标在 `text` 里的字节位置。
     pub cursor: usize,
-    /// 光标之后（这一行剩下的单元格，以及软换行接在后面的行）一个字也没有。
-    pub at_end: bool,
-    /// `text` 里各个字所在的单元格，按顺序。
-    pub cells: Vec<InputCell>,
-}
-
-/// 输入里的一个字所在的单元格。
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct InputCell {
-    /// 这个字在 `PromptInput::text` 里的字节位置。
-    pub at: usize,
-    /// 在活动区里的列和行。
-    pub x: u16,
-    pub y: u16,
-    /// 程序给这一格设了颜色或别的样式，比如 shell 自己的语法高亮或者灰字建议。
-    pub styled: bool,
-}
-
-impl PromptInput {
-    /// 光标之前的那部分输入。
-    pub fn before_cursor(&self) -> &str {
-        &self.text[..self.cursor]
-    }
 }
 
 /// 一个单元格里的内容。
@@ -88,44 +65,32 @@ pub fn read(terminal: &Terminal<'_, '_>) -> Result<Option<PromptInput>> {
     let (cursor_x, cursor_y) = (terminal.cursor_x()?, u32::from(terminal.cursor_y()?));
     let (top, bottom) = wrapped_rows(terminal, cursor_y, rows)?;
 
-    // 各行的单元格按顺序连成一串，各自记下是不是提示符、在哪一格、有没有样式。
+    // 各行的单元格按顺序连成一串，各自记下是不是提示符。
     let mut slots = Vec::with_capacity((bottom - top + 1) as usize * usize::from(cols));
     for y in top..=bottom {
         for x in 0..cols {
             let grid_ref = terminal.grid_ref(Point::Active(PointCoordinate { x, y }))?;
-            let cell = grid_ref.cell()?;
-            let prompt = cell.semantic_content()? == CellSemanticContent::Prompt;
-            let at = InputCell { at: 0, x, y: y as u16, styled: cell.has_styling()? };
-            slots.push((slot(&grid_ref)?, prompt, at));
+            let prompt = grid_ref.cell()?.semantic_content()? == CellSemanticContent::Prompt;
+            slots.push((slot(&grid_ref)?, prompt));
         }
     }
     let cursor = (cursor_y - top) as usize * usize::from(cols) + usize::from(cursor_x);
     // 输入从光标前最后一个提示符单元格之后开始。光标后面的提示符单元格是画在行尾的右侧
-    // 提示符，不算输入，也不挡住「光标在输入末尾」。
-    let Some(start) = slots[..cursor].iter().rposition(|(_, prompt, _)| *prompt).map(|i| i + 1) else {
+    // 提示符，不算输入。
+    let Some(start) = slots[..cursor].iter().rposition(|(_, prompt)| *prompt).map(|i| i + 1) else {
         return Ok(None);
     };
 
     let mut text = String::new();
-    let mut cells = Vec::new();
-    let mut push = |slot: &Slot, at: InputCell, text: &mut String| {
-        if !matches!(slot, Slot::Spacer) {
-            cells.push(InputCell { at: text.len(), ..at });
-        }
-        slot.push_to(text);
-    };
-    for (slot, _, at) in &slots[start..cursor] {
-        push(slot, *at, &mut text);
+    for (slot, _) in &slots[start..cursor] {
+        slot.push_to(&mut text);
     }
     let before = text.len();
-    let rest: Vec<_> = slots[cursor..].iter().filter(|(_, prompt, _)| !prompt).collect();
-    for (slot, _, at) in &rest {
-        push(slot, *at, &mut text);
+    for (slot, _) in slots[cursor..].iter().filter(|(_, prompt)| !prompt) {
+        slot.push_to(&mut text);
     }
     text.truncate(before + text[before..].trim_end().len());
-    cells.retain(|cell| cell.at < text.len());
-    let at_end = !rest.iter().any(|(slot, ..)| matches!(slot, Slot::Text(_)));
-    Ok(Some(PromptInput { text, cursor: before, at_end, cells }))
+    Ok(Some(PromptInput { text, cursor: before }))
 }
 
 /// 刚提交的那条命令：从光标所在行往上，把 shell 集成标为用户输入的单元格读出来，直到主
@@ -221,28 +186,19 @@ mod tests {
         let mut t = terminal(40, 5);
         t.vt_write(b"\x1b]133;A\x07~ % \x1b]133;B\x07git st");
         let input = read(&t).unwrap().unwrap();
-        assert_eq!(input.text, "git st");
-        assert_eq!(input.before_cursor(), "git st");
-        assert!(input.at_end);
-        // 光标往左挪两格：光标之后还有字。
+        assert_eq!((input.text.as_str(), input.cursor), ("git st", 6));
+        // 光标往左挪两格。
         t.vt_write(b"\x1b[2D");
         let input = read(&t).unwrap().unwrap();
-        assert_eq!(input.before_cursor(), "git ");
-        assert!(!input.at_end);
+        assert_eq!((input.text.as_str(), input.cursor), ("git st", 4));
     }
 
     #[test]
-    fn records_where_each_character_is_and_whether_it_is_styled() {
-        let mut t = terminal(8, 5);
-        // 第二行接着软换行；`中` 占两格；`ok` 是程序上了色的。
-        t.vt_write(b"\x1b]133;A\x07$ \x1b]133;B\x07ab \xe4\xb8\xad\x1b[32mok\x1b[0m");
+    fn a_wide_character_counts_once() {
+        let mut t = terminal(40, 5);
+        t.vt_write(b"\x1b]133;A\x07$ \x1b]133;B\x07ab \xe4\xb8\xadok");
         let input = read(&t).unwrap().unwrap();
-        assert_eq!(input.text, "ab 中ok");
-        let cells: Vec<_> = input.cells.iter().map(|c| (c.at, c.x, c.y, c.styled)).collect();
-        assert_eq!(
-            cells,
-            [(0, 2, 0, false), (1, 3, 0, false), (2, 4, 0, false), (3, 5, 0, false), (6, 7, 0, true), (7, 0, 1, true)]
-        );
+        assert_eq!((input.text.as_str(), input.cursor), ("ab 中ok", "ab 中ok".len()));
     }
 
     #[test]
@@ -250,8 +206,7 @@ mod tests {
         let mut t = terminal(40, 5);
         t.vt_write(b"\x1b]133;A\x07$ \x1b]133;B\x07git ");
         let input = read(&t).unwrap().unwrap();
-        assert_eq!(input.before_cursor(), "git ");
-        assert_eq!(input.text, "git ");
+        assert_eq!((input.text.as_str(), input.cursor), ("git ", 4));
     }
 
     #[test]
@@ -259,7 +214,7 @@ mod tests {
         let mut t = terminal(10, 5);
         t.vt_write(b"\x1b]133;A\x07$ \x1b]133;B\x07echo hello wor");
         let input = read(&t).unwrap().unwrap();
-        assert_eq!(input.before_cursor(), "echo hello wor");
+        assert_eq!((input.text.as_str(), input.cursor), ("echo hello wor", 14));
     }
 
     #[test]
@@ -272,13 +227,13 @@ mod tests {
     }
 
     #[test]
-    fn text_after_the_cursor_on_the_row_means_not_at_the_end() {
+    fn text_after_the_cursor_on_the_row_belongs_to_the_input() {
         let mut t = terminal(40, 5);
         // 光标停在 `ls` 后面，右边还画着别的东西。
         t.vt_write(b"\x1b]133;A\x07$ \x1b]133;B\x07ls\x1b[30Gabc\x1b[5G");
         let input = read(&t).unwrap().unwrap();
-        assert_eq!(input.before_cursor(), "ls");
-        assert!(!input.at_end);
+        assert_eq!(input.cursor, 2);
+        assert!(input.text.ends_with("abc"), "{:?}", input.text);
     }
 
     /// 提示符画完以后，像 zsh 那样在行尾画右侧提示符，再把光标挪回输入处；右侧提示符用
@@ -291,11 +246,11 @@ mod tests {
         t.vt_write(RIGHT_PROMPT);
         t.vt_write(b"git st");
         let input = read(&t).unwrap().unwrap();
-        assert_eq!((input.text.as_str(), input.before_cursor(), input.at_end), ("git st", "git st", true));
+        assert_eq!((input.text.as_str(), input.cursor), ("git st", 6));
         // 光标往左挪两格：光标后面还有输入，右侧提示符照样不算。
         t.vt_write(b"\x1b[2D");
         let input = read(&t).unwrap().unwrap();
-        assert_eq!((input.text.as_str(), input.before_cursor(), input.at_end), ("git st", "git ", false));
+        assert_eq!((input.text.as_str(), input.cursor), ("git st", 4));
     }
 
     #[test]

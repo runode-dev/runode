@@ -232,11 +232,6 @@ impl Session {
         self.meta.cwd.clone()
     }
 
-    /// shell 最近一次等着输入时所在的目录；还没等过输入时为 shell 当前所在的目录。
-    pub fn prompt_cwd(&self) -> Option<std::path::PathBuf> {
-        self.meta.prompt_cwd.clone().or_else(|| self.cwd())
-    }
-
     /// 宿主最近一次读到的前台是不是 shell 自己。
     pub fn foreground_is_shell(&self) -> bool {
         self.meta.foreground_is_shell

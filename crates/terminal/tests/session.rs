@@ -30,5 +30,4 @@ fn meta_from_the_host_sets_the_title_and_agent() {
         ..SessionMeta::default()
     }));
     assert_eq!(session.cwd(), Some("/tmp".into()));
-    assert_eq!(session.prompt_cwd(), Some("/tmp".into()));
 }

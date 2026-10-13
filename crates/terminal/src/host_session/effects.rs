@@ -357,7 +357,7 @@ mod tests {
         assert_eq!(prompt_input(&session).map(|input| input.text), Some(String::new()));
         session.feed(b"git st");
         let input = prompt_input(&session).unwrap();
-        assert_eq!((input.before_cursor(), input.at_end), ("git st", true));
+        assert_eq!((input.text.as_str(), input.cursor), ("git st", 6));
         // 报告没带原文，从屏幕上读。
         session.feed(format!("atus\r\n\x1b]6973;{TOKEN};command=\x07\x1b]133;C\x07clean\r\n").as_bytes());
         // 命令还在跑，没有结束报告。
