@@ -76,6 +76,10 @@ impl TreeState {
                     let Some(child) = self.listings.get(&path).and_then(|entries| single_dir(entries)) else {
                         break;
                     };
+                    // 藏着点文件时点开头的子目录也不并进来，不然隐藏的目录跟着上级露出来。
+                    if !filter.dotfiles && child.starts_with('.') {
+                        break;
+                    }
                     // 被忽略的子目录不并进没被忽略的目录：隐藏时要单独藏起来，显示时也不该连累上级变暗。
                     if decorator.of(&path.join(child), true) == Decoration::Ignored
                         && decorator.of(&path, true) != Decoration::Ignored
@@ -473,6 +477,14 @@ mod tests {
         assert_eq!(names(&state), [("a".into(), 0)]);
         state.rebuild_rows(root, ALL);
         assert_eq!(state.rows.len(), 3);
+
+        // 只装着一个点开头子目录的目录不和它并成一行。
+        state.listings.insert(root.into(), vec![dir("visible")]);
+        state.listings.insert("/p/visible".into(), vec![dir(".hidden")]);
+        state.rebuild_rows(root, TreeFilter { ignored: true, dotfiles: false });
+        assert_eq!(names(&state), [("visible".into(), 0)]);
+        state.rebuild_rows(root, ALL);
+        assert_eq!(names(&state), [("visible / .hidden".into(), 0)]);
     }
 
     #[test]
