@@ -133,6 +133,12 @@ fn parse_date_time(text: &str) -> Option<u64> {
     from_local(i32::try_from(year).ok()?, month, day, hour.into(), minute.into())
 }
 
+/// 一次性定时的时间栏 `text` 是哪一刻。和编辑前的 `original` 显示得一样（没改）时照原样，不重新解析：
+/// `full_time` 不带秒，夏令时回拨那个钟点也可能换成另一刻。
+fn once_at(text: &str, original: Option<u64>) -> Option<u64> {
+    original.filter(|at| full_time(*at) == text.trim()).or_else(|| parse_date_time(text))
+}
+
 /// 至少一分钟的分钟数。
 fn parse_minutes(text: &str) -> Option<u32> {
     text.trim().parse().ok().filter(|minutes| *minutes >= 1)
@@ -571,10 +577,16 @@ impl TodoDialog {
             });
         }
         let when = match self.kind {
-            Kind::Once => When::Once {
-                at: parse_date_time(self.at.read(cx).query())
-                    .ok_or_else(|| rust_i18n::t!("todo_board.dialog.bad_once").into_owned())?,
-            },
+            Kind::Once => {
+                let original = match &self.editing {
+                    Some(Editing::Schedule(Schedule { when: When::Once { at }, .. })) => Some(*at),
+                    _ => None,
+                };
+                When::Once {
+                    at: once_at(self.at.read(cx).query(), original)
+                        .ok_or_else(|| rust_i18n::t!("todo_board.dialog.bad_once").into_owned())?,
+                }
+            }
             Kind::Daily => {
                 let (hour, minute) = parse_clock(self.clock.read(cx).query())
                     .ok_or_else(|| rust_i18n::t!("todo_board.dialog.bad_daily").into_owned())?;
@@ -651,6 +663,10 @@ mod tests {
         assert_eq!((local.year, local.month, local.day, local.hour, local.minute), (2026, 10, 13, 14, 30));
         assert_eq!(full_time(at), "2026-10-13 14:30");
         assert!(next_hour().ends_with(":00"));
+        // 时间栏没改时带秒的原值照旧，改了才按填的算。
+        assert_eq!(once_at("2026-10-13 14:30", Some(at + 17)), Some(at + 17));
+        assert_eq!(once_at("2026-10-13 14:31", Some(at + 17)), Some(at + 60));
+        assert_eq!(once_at("2026-10-13 14:30", None), Some(at));
         for now in [at, at + 59, at + 30 * 60, at + 89 * 60 + 59] {
             let next = next_local_hour(now);
             assert!(next > now && next - now <= 3600, "{now} -> {next}");
