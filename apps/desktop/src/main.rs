@@ -111,10 +111,10 @@ fn main() {
     });
 }
 
-/// 由 launchd 直接拉起（从 Dock 或 Finder 打开、登录项、登录时自启的宿主）时继承的 `SHELL` 是这次登录时
-/// 定下的，改了登录 shell（chsh）要重新登录才变，终端就照旧开原来的 shell。这时照 Terminal.app 改用账户
-/// 记录里的登录 shell，宿主进程和各个终端都继承它。别的进程拉起的（从终端里启动的，app 拉起的宿主）
-/// 沿用父进程给的 `SHELL`。
+/// 父进程是 launchd（从程序坞、Finder 或 `open` 打开，登录项，登录时自启的宿主）时照 Terminal.app 改用
+/// 账户记录里的登录 shell。`open` 会把调用方的环境带给 app：在 chsh 之前起的终端里打开时带进来的是旧
+/// shell，宿主和各个终端都继承它，在这些终端里再重启 app 又带下去，一直换不过来。别的进程拉起的
+/// （从终端里直接运行的，app 拉起的宿主）沿用父进程给的 `SHELL`。
 fn use_login_shell() {
     // SAFETY: getppid 总是成功，没有副作用。
     if unsafe { libc::getppid() } != 1 {
