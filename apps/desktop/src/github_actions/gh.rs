@@ -6,9 +6,12 @@
 
 use std::{
     ffi::OsString,
-    fs, io,
+    fs,
+    io::{self, Read},
+    os::unix::process::CommandExt as _,
     path::PathBuf,
-    process::{Command, Stdio},
+    process::{Command, Output, Stdio},
+    thread::{self, JoinHandle},
     time::{Duration, Instant},
 };
 
@@ -23,6 +26,8 @@ pub(super) const LOGIN: &str = "gh auth required";
 pub(super) const NOT_ORG: &str = "repository is not owned by an organization";
 /// 在终端里登录 GitHub：gh 一步步问登哪个主机、用浏览器还是令牌。
 pub(super) const LOGIN_COMMAND: &str = "gh auth login";
+/// gh 一次最多跑多久，到点连同它拉起的进程一起结束：gh 或凭据 helper 卡住时查询报错，不会一直在读。
+const TIMEOUT: Duration = Duration::from_secs(60);
 /// 列运行时最多列几条。
 const RUN_LIMIT: &str = "20";
 const RUN_FIELDS: &str = "databaseId,number,displayTitle,workflowName,status,conclusion,event,headBranch,attempt,url";
@@ -298,16 +303,14 @@ impl Gh {
         if let Some(path) = &self.path {
             command.env("PATH", path);
         }
-        let output = command
+        command
             .args(args)
             .current_dir(&self.dir)
             // 不在终端里，gh 别问话、别检查更新、别上色。
             .env("GH_PROMPT_DISABLED", "1")
             .env("GH_NO_UPDATE_NOTIFIER", "1")
-            .env("NO_COLOR", "1")
-            .stdin(Stdio::null())
-            .output()
-            .map_err(spawn_error)?;
+            .env("NO_COLOR", "1");
+        let output = output_within(&mut command, TIMEOUT)?;
         if output.status.success() {
             Ok(output.stdout)
         } else if needs_login(output.status.code(), &output.stderr) {
@@ -316,6 +319,46 @@ impl Gh {
             Err(failure(&output.stderr))
         }
     }
+}
+
+/// 跑完 `command` 拿输出；`timeout` 内没跑完时杀掉它的整个进程组，返回错误。
+fn output_within(command: &mut Command, timeout: Duration) -> Result<Output, String> {
+    // 自成一个进程组，到点时连同拉起的凭据 helper 一起杀掉，它们可能拿着输出的管道。
+    let spawned = command.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped()).process_group(0).spawn();
+    let mut child = spawned.map_err(spawn_error)?;
+    // 输出另起线程读，多过管道的缓冲时 gh 不会卡在写上。到点时不等这两个线程：脱离了进程组的子孙进程
+    // 可能还拿着管道。
+    let (stdout, stderr) = (read_all(child.stdout.take()), read_all(child.stderr.take()));
+    let deadline = Instant::now() + timeout;
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) if stdout.is_finished() && stderr.is_finished() => {
+                let (stdout, stderr) = (stdout.join().unwrap_or_default(), stderr.join().unwrap_or_default());
+                return Ok(Output { status, stdout, stderr });
+            }
+            Ok(_) if Instant::now() < deadline => thread::sleep(Duration::from_millis(10)),
+            waited => {
+                // 进程组号就是 gh 的进程号（`process_group(0)`）。
+                unsafe { libc::killpg(child.id() as libc::pid_t, libc::SIGKILL) };
+                let _ = child.wait();
+                return Err(match waited {
+                    Err(err) => format!("{PROGRAM}: {err}"),
+                    Ok(_) => format!("{PROGRAM} did not finish in {} s", timeout.as_secs()),
+                });
+            }
+        }
+    }
+}
+
+/// 在另一个线程里读完 `pipe`。
+fn read_all(pipe: Option<impl Read + Send + 'static>) -> JoinHandle<Vec<u8>> {
+    thread::spawn(move || {
+        let mut out = Vec::new();
+        if let Some(mut pipe) = pipe {
+            let _ = pipe.read_to_end(&mut out);
+        }
+        out
+    })
 }
 
 fn names(named: Vec<Named>) -> Vec<String> {
@@ -542,6 +585,18 @@ mod tests {
         assert_eq!(set_command(true, &Scope::Repo, "TOKEN"), "gh secret set TOKEN");
         assert_eq!(set_command(false, &Scope::Env("prod env".into()), "URL"), "gh variable set URL --env 'prod env'");
         assert_eq!(logs_command(9), "gh run view --log --job 9");
+    }
+
+    #[test]
+    fn a_stuck_command_is_killed_at_the_timeout() {
+        let started = Instant::now();
+        let err = output_within(Command::new("/bin/sh").args(["-c", "sleep 30"]), Duration::from_millis(200));
+        assert_eq!(err.unwrap_err(), "gh did not finish in 0 s");
+        assert!(started.elapsed() < Duration::from_secs(10));
+        let out = output_within(Command::new("/bin/sh").args(["-c", "echo hi; echo no >&2"]), TIMEOUT).unwrap();
+        assert!(out.status.success());
+        assert_eq!((&out.stdout[..], &out.stderr[..]), (&b"hi\n"[..], &b"no\n"[..]));
+        assert_eq!(output_within(&mut Command::new("/nonexistent/gh"), TIMEOUT).unwrap_err(), MISSING);
     }
 
     #[test]
