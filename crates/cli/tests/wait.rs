@@ -93,6 +93,31 @@ fn wait_for_text_reads_the_screen_until_a_line_matches() {
     assert_eq!(reads, 3);
 }
 
+/// 会话里的程序要改窗口尺寸（CSI 8 t）时宿主随时插进来的 `ResizeWindow` 不是回话。
+#[test]
+fn a_window_resize_request_is_not_an_answer() {
+    let meta = at_prompt();
+    let fake = FakeHost::start("resize-window", move |message| match message {
+        ClientMsg::ListSessions => vec![HostMsg::SessionList { sessions: vec![session(id(S), meta.clone())] }],
+        ClientMsg::Attach { id, .. } => vec![HostMsg::Attached {
+            id: *id,
+            channel: 7,
+            size: SIZE,
+            mode: AttachMode::MetaOnly,
+            meta: meta.clone(),
+            settings: None,
+        }],
+        ClientMsg::ReadScreen { id, .. } => vec![
+            HostMsg::ResizeWindow { id: *id, rows: 50, columns: 120 },
+            HostMsg::ScreenText { id: *id, text: "error: boom\n".into(), truncated: false },
+        ],
+        _ => vec![],
+    });
+    let (code, out, err) = run("wait 5e55 --for text ^error --timeout 5", &fake.env);
+    assert_eq!(code, exit::OK, "{err}");
+    assert_eq!(out, "error: boom\n");
+}
+
 /// 大到算截止时间会溢出的超时当作不设，不 panic。
 #[test]
 fn a_huge_timeout_means_no_timeout() {

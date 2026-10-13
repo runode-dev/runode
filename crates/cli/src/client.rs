@@ -173,6 +173,7 @@ impl Connection {
                 | HostMsg::CommandFinished { .. }
                 | HostMsg::Bell { .. }
                 | HostMsg::Resized { .. }
+                | HostMsg::ResizeWindow { .. }
                 | HostMsg::ThemeApplied { .. }
                 | HostMsg::SnapshotEnd { .. }
                 | HostMsg::Resync { .. } => self.pending.borrow_mut().push_back(message),
