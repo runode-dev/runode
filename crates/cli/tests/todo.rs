@@ -103,7 +103,9 @@ fn add_sends_an_absolute_dir_and_the_default_agent() {
         worktree: true,
     };
     assert!(
-        matches!(requests(&fake).as_slice(), [ClientMsg::AddTodo { spec, .. }] if *spec == wanted),
+        // 按字节比：`PathBuf` 相等不看尾斜杠。
+        matches!(requests(&fake).as_slice(), [ClientMsg::AddTodo { spec, .. }]
+            if *spec == wanted && spec.dir.as_os_str() == wanted.dir.as_os_str()),
         "{:?}",
         requests(&fake)
     );

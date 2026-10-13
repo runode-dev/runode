@@ -38,10 +38,15 @@ pub(crate) struct Spec {
 impl Spec {
     /// 照 `open --cwd`：相对路径按命令行的当前目录算；没给 agent 时用 `DEFAULT_AGENT`。
     fn resolve(self) -> Result<TodoSpec> {
+        let here = std::env::current_dir()?;
         Ok(TodoSpec {
             title: self.title,
             prompt: self.prompt,
-            dir: std::env::current_dir()?.join(self.cwd.unwrap_or_default()),
+            // 不拿空路径去 join：那样会多出一个尾斜杠，库里的目录和给了 `--cwd` 的写法对不上。
+            dir: match self.cwd {
+                Some(dir) => here.join(dir),
+                None => here,
+            },
             agent: self.agent.unwrap_or_else(|| DEFAULT_AGENT.to_owned()),
             worktree: self.worktree,
         })
