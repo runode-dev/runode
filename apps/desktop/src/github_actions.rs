@@ -929,7 +929,7 @@ impl ActionsPanel {
         for (si, step) in job.steps.iter().enumerate() {
             let ix = walk.ix();
             let state = step.state();
-            let url = gh::step_url(job, si);
+            let url = gh::step_url(job, step);
             let open = {
                 let url = url.clone();
                 button(GLOBE_ICON, rust_i18n::t!("github_actions.step_logs"), move |_, _, cx| cx.open_url(&url))

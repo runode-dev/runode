@@ -79,6 +79,8 @@ impl Job {
 #[derive(Clone, Debug, PartialEq, Deserialize)]
 pub(super) struct Step {
     pub name: String,
+    /// GitHub 给的编号，不一定连续（post 步骤会留空），网页上日志的锚点按它。
+    pub number: u64,
     pub status: String,
     pub conclusion: String,
 }
@@ -451,9 +453,9 @@ pub(super) fn dispatchable(source: &str) -> bool {
     source.contains("workflow_dispatch")
 }
 
-/// 一个 step 在网页上的位置：job 页加上 step 的序号（从 1 数）。
-pub(super) fn step_url(job: &Job, index: usize) -> String {
-    format!("{}#step:{}:1", job.url, index + 1)
+/// 一个 step 在网页上的位置：job 页加上 step 的编号。
+pub(super) fn step_url(job: &Job, step: &Step) -> String {
+    format!("{}#step:{}:1", job.url, step.number)
 }
 
 /// 打进 shell 的参数：只含常见字符时原样，否则用单引号括起来；开头是 `=` 或 `%` 时也括起来，zsh 会把
@@ -521,11 +523,14 @@ mod tests {
 
         let job: Job = serde_json::from_str(
             r#"{"databaseId":9,"name":"check","status":"completed","conclusion":"success","url":"https://x/job/9",
-                "steps":[{"name":"Set up job","number":1,"status":"completed","conclusion":"success"}]}"#,
+                "steps":[{"name":"Set up job","number":1,"status":"completed","conclusion":"success"},
+                         {"name":"Post checkout","number":4,"status":"completed","conclusion":"success"}]}"#,
         )
         .unwrap();
         assert_eq!(job.steps[0].state(), State::Success);
-        assert_eq!(step_url(&job, 0), "https://x/job/9#step:1:1");
+        assert_eq!(step_url(&job, &job.steps[0]), "https://x/job/9#step:1:1");
+        // 编号不连续时按编号，不按第几个。
+        assert_eq!(step_url(&job, &job.steps[1]), "https://x/job/9#step:4:1");
     }
 
     #[test]
