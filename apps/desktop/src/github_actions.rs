@@ -144,6 +144,8 @@ pub struct ActionsPanel {
     input: Input,
     /// 数据是在哪个仓库里读的；终端换了仓库时清掉重读。
     dir: Option<PathBuf>,
+    /// 换一次仓库加一：读完、跑完时代际变了就丢掉结果。只比目录挡不住 A → B → A，A 的旧请求会盖掉新的。
+    generation: u64,
     data: HashMap<Query, Result<Data, String>>,
     fetched: HashMap<Query, Instant>,
     loading: HashSet<Query>,
@@ -170,6 +172,7 @@ impl Default for ActionsPanel {
         Self {
             input: Input::default(),
             dir: None,
+            generation: 0,
             data: HashMap::new(),
             fetched: HashMap::new(),
             loading: HashSet::new(),
@@ -228,6 +231,7 @@ impl ActionsPanel {
     pub fn set_input(&mut self, input: Input) {
         if self.dir.as_ref() != Some(&input.dir) {
             self.dir = Some(input.dir.clone());
+            self.generation += 1;
             self.data.clear();
             self.fetched.clear();
             self.loading.clear();
@@ -252,13 +256,13 @@ impl ActionsPanel {
         Gh { dir: self.input.dir.clone(), path: self.input.path.clone() }
     }
 
-    /// 在后台读一份数据；同一份正在读时不再读。读完时仓库已经换了就丢掉。
+    /// 在后台读一份数据；同一份正在读时不再读。读完时仓库已经换过（哪怕又换回来）就丢掉。
     fn fetch_actions(&mut self, query: Query, cx: &mut Context<Self>) {
         if !self.loading.insert(query.clone()) {
             return;
         }
         let gh = self.actions_gh();
-        let dir = gh.dir.clone();
+        let generation = self.generation;
         let job = cx.background_spawn({
             let query = query.clone();
             async move { gh.fetch(&query) }
@@ -266,7 +270,7 @@ impl ActionsPanel {
         cx.spawn(async move |this, cx| {
             let result = job.await;
             this.update(cx, |page, cx| {
-                if page.dir.as_ref() != Some(&dir) {
+                if page.generation != generation {
                     return;
                 }
                 page.loading.remove(&query);
@@ -368,7 +372,8 @@ impl ActionsPanel {
         }
     }
 
-    /// 在后台跑一条 gh 命令，出错时显示在标题下面；跑完不管成败都交给 `then`，成了时带上结果。
+    /// 在后台跑一条 gh 命令，出错时显示在标题下面；跑完不管成败都交给 `then`，成了时带上结果。跑完时仓库
+    /// 已经换了就都不管。
     fn run_gh<T: Send + 'static>(
         &mut self,
         work: impl FnOnce(&Gh) -> Result<T, String> + Send + 'static,
@@ -377,10 +382,14 @@ impl ActionsPanel {
     ) {
         self.error = None;
         let gh = self.actions_gh();
+        let generation = self.generation;
         let job = cx.background_spawn(async move { work(&gh) });
         cx.spawn(async move |this, cx| {
             let result = job.await;
             this.update(cx, |this, cx| {
+                if this.generation != generation {
+                    return;
+                }
                 let value = match result {
                     Ok(value) => Some(value),
                     Err(err) => {
@@ -1336,5 +1345,28 @@ fn state_label(state: State) -> Cow<'static, str> {
         State::Queued => rust_i18n::t!("github_actions.state.queued"),
         State::Waiting | State::ActionRequired => rust_i18n::t!("github_actions.state.waiting"),
         State::Pending => rust_i18n::t!("github_actions.state.pending"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn input(dir: &str) -> Input {
+        Input { dir: PathBuf::from(dir), ..Input::default() }
+    }
+
+    #[test]
+    fn switching_away_and_back_is_a_new_generation() {
+        let mut page = ActionsPanel::default();
+        page.set_input(input("/a"));
+        let first = page.generation;
+        // 同一个仓库再交一次不算换。
+        page.set_input(input("/a"));
+        assert_eq!(page.generation, first);
+        // A → B → A：换回来的 A 和最初的 A 不是同一代，A 的旧请求回来时会被丢掉。
+        page.set_input(input("/b"));
+        page.set_input(input("/a"));
+        assert_ne!(page.generation, first);
     }
 }
