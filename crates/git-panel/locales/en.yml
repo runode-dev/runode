@@ -91,6 +91,8 @@ git:
   stage_all_title: There are no staged changes
   stage_all_detail: Stage all your changes and commit them directly?
   stage_all_confirm: Stage and Commit
+  conflicts_title: Resolve the conflicts first
+  conflicts_detail: Some files still have conflicts. Resolve them and stage them before committing.
   operation:
     merge: "Merging: resolve the conflicts, stage them, then commit"
     rebase: "Rebasing: resolve the conflicts, then continue in the terminal"

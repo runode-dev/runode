@@ -275,6 +275,17 @@ impl GitPanel {
             if git.unstaged.is_empty() {
                 return;
             }
+            // 暂存全部会把带冲突标记的文件也暂存进去，绕过 git 自己「有冲突不让提交」的保护。
+            if git.unstaged.iter().any(|file| file.status == git::FileStatus::Conflicted) {
+                drop(window.prompt(
+                    PromptLevel::Warning,
+                    &rust_i18n::t!("git.conflicts_title"),
+                    Some(&rust_i18n::t!("git.conflicts_detail")),
+                    &[&*rust_i18n::t!("git.ok")],
+                    cx,
+                ));
+                return;
+            }
             let answer = window.prompt(
                 PromptLevel::Info,
                 &rust_i18n::t!("git.stage_all_title"),

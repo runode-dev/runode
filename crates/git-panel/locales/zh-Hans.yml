@@ -91,6 +91,8 @@ git:
   stage_all_title: 没有暂存的更改
   stage_all_detail: 要把所有更改都暂存起来，直接提交吗？
   stage_all_confirm: 暂存并提交
+  conflicts_title: 先解决冲突
+  conflicts_detail: 还有文件有冲突，解决并暂存以后再提交。
   operation:
     merge: 正在合并：解决冲突并暂存后提交
     rebase: 正在变基：解决冲突后在终端里继续
