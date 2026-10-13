@@ -79,6 +79,9 @@ fn lists_stashes_newest_first() {
     handle.stash(None, false).unwrap();
     let stashes = info(&repo).stashes;
     assert_eq!(stashes.len(), 2);
-    assert_eq!(stashes[1], Stash { index: 1, message: "On main: first".into() });
+    assert_eq!(
+        stashes[1],
+        Stash { index: 1, id: repo.git(&["rev-parse", "stash@{1}"]), message: "On main: first".into() }
+    );
     assert!(stashes[0].message.starts_with("WIP on main: "), "{:?}", stashes[0]);
 }

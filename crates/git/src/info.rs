@@ -38,6 +38,8 @@ pub enum Operation {
 pub struct Stash {
     /// `stash@{index}` 里的序号，给 `Repo::stash_apply` 这些用。
     pub index: usize,
+    /// 读到时 `stash@{index}` 的对象 ID；别处 push、pop 过以后序号会挪，`Repo::stash_drop` 拿它核对。
+    pub id: String,
     /// `git stash list` 的标题，如 `WIP on main: 1a2b3c4 改了什么` 或 `On main: 留着的说明`。
     pub message: String,
 }
@@ -50,7 +52,7 @@ pub(crate) struct Extra {
 
 pub(crate) fn read_extra(repo: &Path) -> Extra {
     let (stashes, remotes) = std::thread::scope(|scope| {
-        let stashes = scope.spawn(|| git(repo, &["stash", "list", "-z", "--format=%s"]));
+        let stashes = scope.spawn(|| git(repo, &["stash", "list", "-z", "--format=%H %s"]));
         let remotes = git(repo, &["remote"]);
         (stashes.join().unwrap_or_else(|panic| std::panic::resume_unwind(panic)), remotes)
     });
@@ -132,14 +134,20 @@ fn operation(git_dir: &Path) -> Option<Operation> {
     }
 }
 
-/// `git stash list -z --format=%s` 的输出：每个 stash 一项，`stash@{0}` 在前。
+/// `git stash list -z --format=%H %s` 的输出：每个 stash 一项，`stash@{0}` 在前。
 fn parse_stashes(output: &[u8]) -> Vec<Stash> {
     let text = String::from_utf8_lossy(output);
     let text = text.strip_suffix('\0').unwrap_or(&text);
     if text.trim().is_empty() {
         return Vec::new();
     }
-    text.split('\0').enumerate().map(|(index, message)| Stash { index, message: message.trim().to_owned() }).collect()
+    text.split('\0')
+        .enumerate()
+        .map(|(index, entry)| {
+            let (id, message) = entry.split_once(' ').unwrap_or((entry, ""));
+            Stash { index, id: id.trim().to_owned(), message: message.trim().to_owned() }
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -172,9 +180,10 @@ mod tests {
     #[test]
     fn parses_stash_list() {
         assert!(parse_stashes(b"").is_empty());
-        let stashes = parse_stashes(b"On main: two\0WIP on main: 1a2b3c4 one\n");
+        let stashes = parse_stashes(b"aaa On main: two\0bbb WIP on main: 1a2b3c4 one\n");
         assert_eq!(stashes.len(), 2);
-        assert_eq!(stashes[0], Stash { index: 0, message: "On main: two".into() });
+        assert_eq!(stashes[0], Stash { index: 0, id: "aaa".into(), message: "On main: two".into() });
+        assert_eq!(stashes[1].id, "bbb");
         assert_eq!(stashes[1].message, "WIP on main: 1a2b3c4 one");
     }
 }

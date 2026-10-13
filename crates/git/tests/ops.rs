@@ -297,10 +297,18 @@ fn stashes_and_restores_changes() {
 
     handle.stash_pop(0).unwrap();
     assert_eq!(repo.read("new.txt"), "n\n");
-    assert_eq!(read(&repo).info.stashes.len(), 1);
-    handle.stash_drop(0).unwrap();
+    let stashes = read(&repo).info.stashes;
+    assert_eq!(stashes.len(), 1);
+    // 读到以后别处又 push 了一个，`stash@{0}` 换了人，不删。
+    repo.write("a.txt", "three\n");
+    handle.stash(None, false).unwrap();
+    assert!(handle.stash_drop(&stashes[0]).is_err());
+    assert_eq!(read(&repo).info.stashes.len(), 2);
+    let stashes = read(&repo).info.stashes;
+    handle.stash_drop(&stashes[1]).unwrap();
+    handle.stash_drop(&read(&repo).info.stashes[0]).unwrap();
     assert!(read(&repo).info.stashes.is_empty());
-    assert!(handle.stash_drop(0).is_err());
+    assert!(handle.stash_drop(&stashes[1]).is_err());
 }
 
 #[test]

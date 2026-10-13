@@ -11,7 +11,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use crate::{FileDiff, FileStatus, find_repo, git, git_command};
+use crate::{FileDiff, FileStatus, Stash, find_repo, git, git_command};
 
 /// 一条写仓库的 git 命令最多跑这么久，到时杀掉：推送、拉取要联网，给得长些；等的是 ssh 问口令、
 /// 确认主机指纹或者 gpg 等着输密码这种永远等不来的输入时，不让后台线程一直挂着。
@@ -465,9 +465,15 @@ impl Repo {
         self.stash_command("pop", index)
     }
 
-    /// 删掉 `stash@{index}`。
-    pub fn stash_drop(&self, index: usize) -> Result {
-        self.stash_command("drop", index)
+    /// 删掉 `stash`。读到它以后别处 push、pop 过，`stash@{index}` 已经不是它时不删，报错。
+    pub fn stash_drop(&self, stash: &Stash) -> Result {
+        let rev = format!("stash@{{{}}}", stash.index);
+        let now = git(&self.root, &["rev-parse", "--verify", "--quiet", &rev]).unwrap_or_default();
+        if String::from_utf8_lossy(&now).trim() != stash.id {
+            return Err(GitError::new(format!("{rev} 已经变了，没有删，看过最新的储藏列表再来")));
+        }
+        // shortcut: 核对和删之间还有几毫秒的窗口（`git stash drop` 只认序号），真撞上过再改成拿 refs/stash 的锁。
+        self.stash_command("drop", stash.index)
     }
 
     fn stash_command(&self, command: &str, index: usize) -> Result {
