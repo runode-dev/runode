@@ -213,9 +213,12 @@ impl WindowView {
             && window.is_visible()
             && self.is_shown(wi, ti)
             && self.workspaces[wi].tabs[ti].focused == pane
-            && self.settings.is_none()
-            && self.mobile.is_none()
-            && self.todo_board.is_none()
+            && !self.page_covers_terminals()
+    }
+
+    /// 设置页、手机端引导页或任务板铺满了窗口，终端都看不见。
+    pub(super) fn page_covers_terminals(&self) -> bool {
+        self.settings.is_some() || self.mobile.is_some() || self.todo_board.is_some()
     }
 
     /// 前台 agent 从工作中停了下来。停在空闲、用户又没在看时记为 done 并提醒；否则（用户看着、

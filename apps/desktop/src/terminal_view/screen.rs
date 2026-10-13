@@ -28,7 +28,12 @@ use std::{
 };
 
 use runode_protocol::{AttachMode, FinishedCommand, HostMsg, SessionId};
-use runode_shared_types::{agent::Agent, grid::GridSize, session::SessionMeta, settings::TermSettings};
+use runode_shared_types::{
+    agent::Agent,
+    grid::{GridSize, merge_window_resize},
+    session::SessionMeta,
+    settings::TermSettings,
+};
 
 use crate::host_client::{LinkEvent, Screen as HostScreen};
 
@@ -123,7 +128,7 @@ pub(super) struct Changes {
     pub(super) commands: Vec<FinishedCommand>,
     /// 程序响过铃。
     pub(super) bell: bool,
-    /// 程序最近一次要求把窗口改成的行数和列数（CSI 8 t），0 是那一维不变。
+    /// 程序要求把窗口改成的行数和列数（CSI 8 t），这一批里的几次合起来，0 是那一维不变。
     pub(super) resize_window: Option<(u16, u16)>,
     /// shell 退出了。
     pub(super) exited: bool,
@@ -519,7 +524,9 @@ impl<S: Vt> ScreenState<S> {
             }
             HostMsg::CommandFinished { command, .. } => changes.commands.push(command),
             HostMsg::Bell { .. } => changes.bell = true,
-            HostMsg::ResizeWindow { rows, columns, .. } => changes.resize_window = Some((rows, columns)),
+            HostMsg::ResizeWindow { rows, columns, .. } => {
+                changes.resize_window = Some(merge_window_resize(changes.resize_window, (rows, columns)));
+            }
             HostMsg::Exited { .. } => {
                 self.exited = true;
                 changes.exited = true;

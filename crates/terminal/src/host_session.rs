@@ -40,7 +40,7 @@ use libghostty_vt::{
 use runode_agent_detect::Tracker;
 use runode_shared_types::{
     agent::{Agent, AgentState},
-    grid::GridSize,
+    grid::{GridSize, merge_window_resize},
     session::{DriveAction, Driver, SessionMeta},
     settings::TermSettings,
     shell::IntegrationMode,
@@ -608,7 +608,7 @@ impl HostSession {
         self.effects.bell.take()
     }
 
-    /// 自上次以来程序用 CSI 8 t 要求改窗口尺寸的话，返回最近一次要的行数和列数，0 是那一维不变。
+    /// 自上次以来程序用 CSI 8 t 要求改窗口尺寸的话，返回几次要求合起来的行数和列数，0 是那一维不变。
     /// VT 自己不改尺寸，改不改窗口由界面按配置定。
     pub fn take_resize_window(&self) -> Option<(u16, u16)> {
         self.effects.resize_window.take()
@@ -817,7 +817,8 @@ fn register_callbacks(
             let effects = effects.clone();
             move |_, request| {
                 if let ResizeWindow::Grid { rows, columns } = request {
-                    effects.resize_window.set(Some((rows, columns)));
+                    let merged = merge_window_resize(effects.resize_window.get(), (rows, columns));
+                    effects.resize_window.set(Some(merged));
                 }
             }
         })?

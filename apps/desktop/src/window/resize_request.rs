@@ -1,11 +1,11 @@
 //! 终端里的程序用 CSI 8 t 要求改窗口尺寸（宿主转来的 `HostMsg::ResizeWindow`）：配置项
-//! `vt-window-resize-allowed` 开着、终端正显示着并独占标签、窗口不是全屏时，按终端要多出或少掉的
-//! 格数改窗口，侧栏、标题栏和右侧面板照旧。照 Ghostty 的规矩：小于 40 列 10 行的按 40 列 10 行办，
-//! 窗口不大过屏幕，左上角不动。
+//! `vt-window-resize-allowed` 开着、终端正显示着（没被铺满窗口的页或放大的预览栏盖住）并独占标签、
+//! 窗口不是全屏时，按终端要多出或少掉的格数改窗口，侧栏、标题栏和右侧面板照旧。照 Ghostty 的规矩：
+//! 小于 40 列 10 行的按 40 列 10 行办，窗口不大过屏幕，左上角不动。
 
 use gpui::{App, Context, Entity, Window};
 
-use super::WindowView;
+use super::{WindowView, project::PanelWidths};
 use crate::{config::AppConfig, terminal_view::TerminalView};
 
 /// 程序最多能把终端缩到这么小，免得缩成看不见来藏起自己的输出。
@@ -24,6 +24,8 @@ impl WindowView {
         let alone = self.workspaces[wi].tabs[ti].panes.len() == 1;
         if !cx.global::<AppConfig>().0.vt_window_resize_allowed
             || !self.is_shown(wi, ti)
+            || self.page_covers_terminals()
+            || self.preview_maximized(cx)
             || !alone
             || window.is_fullscreen()
         {
@@ -40,7 +42,13 @@ impl WindowView {
                 (f64::from(want.max(min)) - f64::from(have)) * f64::from(cell_px) / f64::from(scale)
             }
         };
-        let dw = grow(columns, MIN_COLUMNS, size.cols, size.cell_width_px);
+        let mut dw = grow(columns, MIN_COLUMNS, size.cols, size.cell_width_px);
+        if dw > 0. {
+            // 窄窗口里右侧的预览栏和面板被压窄过的，窗口一放宽先放回它们原来的宽度，要多给这一截。
+            let total = |widths: PanelWidths| f64::from(widths.preview + widths.panel);
+            let now = self.right_panel_widths(f32::from(window.viewport_size().width), cx);
+            dw += total(self.right_panel_widths(f32::INFINITY, cx)) - total(now);
+        }
         let dh = grow(rows, MIN_ROWS, size.rows, size.cell_height_px);
         if dw != 0. || dh != 0. {
             resize_by(window, cx, dw, dh);
