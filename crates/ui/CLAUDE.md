@@ -1,0 +1,1 @@
+@../../apps/desktop/AGENTS.md
