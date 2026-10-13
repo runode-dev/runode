@@ -119,6 +119,9 @@ impl GitPanel {
                 self.run_git(&root, Busy::Stage, window, cx, move |repo| repo.stage(&paths), |_, (), _, _| {});
             }
             FileOp::Unstage => {
+                // 暂存了的改名连同原来的路径一起撤回，同 `git_dir_action`。
+                let old = self.git_file(&root, action.section, &action.path).and_then(|file| file.old_path);
+                let paths: Vec<PathBuf> = paths.into_iter().chain(old).collect();
                 self.run_git(&root, Busy::Stage, window, cx, move |repo| repo.unstage(&paths), |_, (), _, _| {});
             }
             FileOp::Discard => {
