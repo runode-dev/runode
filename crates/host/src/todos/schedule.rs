@@ -71,7 +71,11 @@ impl Shared {
         if let Ok(Some(todo)) = &previous
             && match todo.session {
                 None => true,
-                Some(session) => column(todo, self.session_info(session).as_ref(), now) == Column::InProgress,
+                Some(session) => match self.session_info(session) {
+                    Some(info) => column(todo, Some(&info), now) == Column::InProgress,
+                    // 会话还在却没及时回话：看不出它在不在干活，当它在干，免得两个 agent 一起跑。
+                    None => self.registry().sessions.contains_key(&session),
+                },
             }
         {
             tracing::info!(
