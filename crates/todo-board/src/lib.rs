@@ -206,6 +206,17 @@ fn column_index(column: Column) -> usize {
     Column::ALL.iter().position(|c| *c == column).unwrap_or(0)
 }
 
+/// 卡片 `dragged` 放在 `column` 列第 `ix` 张（`target`）上时挪到谁前面，交给 `TodoBoard::drop_todo`。同一列里
+/// 往下拖时落点提示画在目标下边，挪到它后面：所有任务里紧跟在它后面的那张前面，没有时为空（排到这一列最后）；
+/// 别的时候挪到它前面。
+fn drop_before(dragged: &DraggedTodo, column: Column, ix: usize, target: &str, todos: &[Todo]) -> Option<String> {
+    if dragged.from != column || dragged.ix >= ix {
+        return Some(target.to_owned());
+    }
+    let at = todos.iter().position(|todo| todo.id == target)?;
+    todos.get(at + 1).map(|todo| todo.id.clone())
+}
+
 /// 现在的 Unix 时间，秒。
 fn unix_now() -> u64 {
     SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |elapsed| elapsed.as_secs())
@@ -952,8 +963,11 @@ impl TodoBoard {
                 drop_marker(style, from, ix, Axis::Vertical, cx)
             })
             .on_drop(cx.listener({
-                let before = todo.id.clone();
-                move |this, dragged: &DraggedTodo, _, cx| this.drop_todo(dragged, column, Some(before.clone()), cx)
+                let target = todo.id.clone();
+                move |this, dragged: &DraggedTodo, _, cx| {
+                    let before = drop_before(dragged, column, ix, &target, &store::data(cx).todos);
+                    this.drop_todo(dragged, column, before, cx);
+                }
             }))
             .child(
                 // 记下这张卡片画在哪，换列时从这里起飞。
@@ -1372,6 +1386,28 @@ mod tests {
             schedule: None,
             rank: 0,
         }
+    }
+
+    /// 同一列里往下拖挪到目标后面，往上拖、跨列挪到目标前面，和落点提示画的一样。
+    #[test]
+    fn drops_land_where_the_marker_is() {
+        let todos = [todo("a", None, None), todo("b", None, None), todo("c", None, None)];
+        let dragged = |ix: usize, from: Column| DraggedTodo {
+            id: todos[ix].id.clone(),
+            from,
+            ix,
+            drops: [Some(DropAction::Reorder); 4],
+            title: SharedString::default(),
+        };
+        let before = |ix: usize, from: Column, onto: usize| {
+            drop_before(&dragged(ix, from), Column::Todo, onto, &todos[onto].id, &todos)
+        };
+        // a 拖到 b 上：b、a、c；拖到 c 上：排到最后。
+        assert_eq!(before(0, Column::Todo, 1), Some("c".into()));
+        assert_eq!(before(0, Column::Todo, 2), None);
+        // c 拖到 a 上：c、a、b；从别的列拖来插在目标前面。
+        assert_eq!(before(2, Column::Todo, 0), Some("a".into()));
+        assert_eq!(before(0, Column::Done, 1), Some("b".into()));
     }
 
     #[test]
