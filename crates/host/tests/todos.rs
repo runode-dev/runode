@@ -11,7 +11,7 @@ use std::{
     process::Command,
     sync::Once,
     thread,
-    time::{Duration, Instant},
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
 use common::{Peer, listen, script, temp_dir};
@@ -446,6 +446,16 @@ fn a_schedule_whose_todo_cannot_start_does_not_pile_up() {
     store.set_fired(&schedule, 1).unwrap();
     add(&mut peer, spec("Poke", &dir, "true"));
     wait_until("the second run", || fired(&mut peer));
+    let (todos, _) = board_state(&mut peer);
+    let from_schedule = todos.iter().filter(|todo| todo.schedule.as_deref() == Some(schedule.as_str())).count();
+    assert_eq!(from_schedule, 1);
+
+    // 改成一次性的：到点时上次那张仍没开始成，跳过并删掉这个定时，不再开新的。
+    let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
+    let when = Some(When::Once { at: now + 2 });
+    let update = ClientMsg::UpdateSchedule { req: 3, id: schedule.clone(), spec: None, when };
+    assert!(matches!(ask(&mut peer, &update), HostMsg::Done { req: 3 }));
+    wait_until("the one-off run", || board_state(&mut peer).1.is_empty());
     let (todos, _) = board_state(&mut peer);
     let from_schedule = todos.iter().filter(|todo| todo.schedule.as_deref() == Some(schedule.as_str())).count();
     assert_eq!(from_schedule, 1);
