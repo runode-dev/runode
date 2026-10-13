@@ -52,7 +52,7 @@ use runode_ui::{
 
 use super::{
     ALERT_CAUTION_ICON, ALERT_IMPORTANT_ICON, ALERT_NOTE_ICON, ALERT_TIP_ICON, ALERT_WARNING_ICON, Loaded, MAX_COLUMNS,
-    Preview, PreviewPanel, WorkspaceId, background_rgb, body::highlight_style, loaded,
+    Preview, PreviewPanel, WorkspaceId, body::highlight_style, loaded,
 };
 
 /// 正文左右和上下留的空。
@@ -824,7 +824,7 @@ struct Colors {
 
 impl Colors {
     fn new(theme: &Theme) -> Self {
-        let bg = background_rgb(theme);
+        let bg = theme.bg_rgb();
         let palette = &theme.ansi;
         // GitHub 深色主题的灰比浅色的调得重，按背景的亮度分开调。
         let dark = 0.299 * f32::from(bg.0) + 0.587 * f32::from(bg.1) + 0.114 * f32::from(bg.2) < 128.;

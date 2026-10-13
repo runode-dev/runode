@@ -36,7 +36,6 @@ use runode_ui::{
 
 use super::{
     ARROW_UP_ICON, BODY_PADDING, Loaded, MAX_COLUMNS, Note, PreviewEvent, PreviewPanel, ROW_EXTRA_HEIGHT,
-    background_rgb,
     body::{TEXT_RIGHT_PADDING, WRAP_SLACK, highlight_style, shown_text},
     gpui_format, right_fade,
     wrap::{WrapCache, segment},
@@ -471,7 +470,7 @@ impl PreviewPanel {
         let view = &content.view;
         let actionable = self.diff_hunks_actionable(target, view);
         let theme = cx.theme().clone();
-        let bg = background_rgb(&theme);
+        let bg = theme.bg_rgb();
         let dim = theme.foreground.opacity(0.4);
         let worktree = target.side == DiffSide::Worktree;
         let full = preview.path.clone();

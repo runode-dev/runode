@@ -107,6 +107,16 @@ impl Theme {
     pub fn mix(&self, k: f32) -> Hsla {
         hsla(self.bg.mix(self.fg, k))
     }
+
+    /// 终端前景色的原值：要拿 `Rgb` 算的地方（对比度、亮度、原生控件）用，不必从 `foreground` 换回来。
+    pub fn fg_rgb(&self) -> Rgb {
+        self.fg
+    }
+
+    /// 终端背景色的原值，同 `fg_rgb`。
+    pub fn bg_rgb(&self) -> Rgb {
+        self.bg
+    }
 }
 
 /// 从配置的调色板（`(序号, 颜色)`，后写的算数）取 ANSI 16 色，`Theme::new` 用。没配置的序号用

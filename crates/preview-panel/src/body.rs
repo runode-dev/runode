@@ -17,8 +17,8 @@ use runode_ui::{
 };
 
 use super::{
-    BODY_PADDING, Loaded, MAX_COLUMNS, Note, Preview, PreviewPanel, ROW_EXTRA_HEIGHT, background_rgb, marks::Mark,
-    right_fade, wrap::segment,
+    BODY_PADDING, Loaded, MAX_COLUMNS, Note, Preview, PreviewPanel, ROW_EXTRA_HEIGHT, marks::Mark, right_fade,
+    wrap::segment,
 };
 
 /// 改动标记的宽度；只删了行的地方在下一行顶上画一小段，这么高。
@@ -259,7 +259,7 @@ impl PreviewPanel {
         let marks = &preview.marks;
         let theme = cx.theme().clone();
         let selected = preview.selected_lines().unwrap_or(0..0);
-        let selected_bg = hsla(background_rgb(&theme).mix(RENAMED, 0.30));
+        let selected_bg = hsla(theme.bg_rgb().mix(RENAMED, 0.30));
         let dim = theme.foreground.opacity(0.4);
         let last = lines.len();
         let row_height = font_size + ROW_EXTRA_HEIGHT;

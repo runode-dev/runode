@@ -47,7 +47,6 @@ use gpui::{
 };
 use runode_git::{self as git, FileStatus, HunkAction, Section};
 use runode_preview::{Content, ImageFormat, Span};
-use runode_shared_types::color::Rgb;
 use runode_ui::{
     self as ui,
     a11y::A11yPress,
@@ -58,7 +57,7 @@ use runode_ui::{
     icons::{CODE_ICON, MAXIMIZE_ICON, MINIMIZE_ICON},
     menu::{Menu, MenuHost},
     panel::{panel_header, panel_shell},
-    theme::{ActiveTheme as _, Theme},
+    theme::ActiveTheme as _,
     tooltip::tooltip,
 };
 
@@ -375,14 +374,6 @@ fn right_fade(handle: &ScrollHandle, cx: &App) -> Option<Div> {
             linear_color_stop(bg, 1.),
         ))
     })
-}
-
-/// 主题背景色的 `Rgb`：`Theme` 只给 `Hsla`，背景要和改动色在 sRGB 里按整数混（选中的行、diff 的红绿
-/// 底色、Markdown 的选区）才和原来逐值一样。`hsla` 换过去再换回来，取整后就是原来的值。
-fn background_rgb(theme: &Theme) -> Rgb {
-    let color = theme.background.to_rgb();
-    let channel = |v: f32| (v * 255.).round() as u8;
-    Rgb(channel(color.r), channel(color.g), channel(color.b))
 }
 
 fn file_stamp(path: &Path) -> Option<(u64, SystemTime)> {
@@ -1090,19 +1081,5 @@ mod tests {
         let lines: Vec<String> = ["ab", "abcd", "中文字"].iter().map(|s| (*s).to_owned()).collect();
         assert_eq!(widest_line(&lines), 1);
         assert_eq!(widest_line(&[]), 0);
-    }
-
-    /// 背景色换成 `Hsla` 再换回 `Rgb` 后和原值一样，按整数混出来的颜色才不变。
-    #[test]
-    fn background_survives_the_round_trip() {
-        for r in (0..=255u8).step_by(3) {
-            for g in (0..=255u8).step_by(5) {
-                for b in (0..=255u8).step_by(7) {
-                    let bg = Rgb(r, g, b);
-                    let theme = Theme::new(Rgb(0xff, 0xff, 0xff), bg, runode_shared_types::theme::ANSI);
-                    assert_eq!(background_rgb(&theme), bg);
-                }
-            }
-        }
     }
 }
