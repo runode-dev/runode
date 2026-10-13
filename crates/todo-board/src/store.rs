@@ -184,15 +184,29 @@ fn refresh_sessions(cx: &mut App) -> Task<()> {
         let live = cx.background_executor().spawn(async move { (host.list_sessions)() }).await;
         let Ok(live) = live else { return };
         cx.update(|cx| {
+            let now_wanted = todo_sessions(cx);
             let mut data = take(cx);
-            data.sessions =
-                live.into_iter().filter(|info| wanted.contains(&info.id)).map(|info| (info.id, info)).collect();
+            merge_sessions(&mut data.sessions, live, &wanted, &now_wanted);
             if settling(&data.todos, crate::unix_now()) {
                 cx.refresh_windows();
             }
             put(data, cx);
         });
     })
+}
+
+/// 把问到的会话 `live` 换进 `sessions`：只换问的时候要的（`asked`）那些，问的时候还没有的（等宿主回话时
+/// 刚开始的任务的会话，`refresh_todos` 已经放进来了）留着，免得那张卡片落进需要你一轮；现在不再要（`wanted`）
+/// 的去掉。
+fn merge_sessions(
+    sessions: &mut HashMap<SessionId, SessionInfo>,
+    live: Vec<SessionInfo>,
+    asked: &HashSet<SessionId>,
+    wanted: &HashSet<SessionId>,
+) {
+    sessions.retain(|id, _| wanted.contains(id) && !asked.contains(id));
+    let live = live.into_iter().filter(|info| asked.contains(&info.id) && wanted.contains(&info.id));
+    sessions.extend(live.map(|info| (info.id, info)));
 }
 
 /// 在后台发一条任务板的请求，等宿主回话；办成了的等宿主说变了再重问。
@@ -254,6 +268,31 @@ mod tests {
     use runode_protocol::todo::TodoSpec;
 
     use super::*;
+
+    fn session(id: u128) -> SessionInfo {
+        SessionInfo {
+            id: SessionId(id),
+            size: runode_shared_types::grid::GridSize { cols: 80, rows: 24, cell_width_px: 0, cell_height_px: 0 },
+            meta: Default::default(),
+            clients: 0,
+            claimed: false,
+            exited: false,
+            size_owner: None,
+        }
+    }
+
+    /// 只换问的时候要的会话：等回话时刚开始的任务的会话留着，问到没有的去掉，不再要的去掉。
+    #[test]
+    fn polled_sessions_only_replace_what_was_asked() {
+        let mut sessions: HashMap<_, _> = [1, 2, 3, 4].map(|id| (SessionId(id), session(id))).into();
+        let asked = HashSet::from([SessionId(1), SessionId(2), SessionId(3)]);
+        let wanted = HashSet::from([SessionId(1), SessionId(2), SessionId(4)]);
+        // 2 没了，3 不再要，4 是刚开始的任务的，问的时候还没有。
+        merge_sessions(&mut sessions, vec![session(1), session(3)], &asked, &wanted);
+        let mut ids: Vec<_> = sessions.keys().map(|id| id.0).collect();
+        ids.sort_unstable();
+        assert_eq!(ids, [1, 4]);
+    }
 
     fn todo(started: Option<u64>, done_at: Option<u64>) -> Todo {
         Todo {
