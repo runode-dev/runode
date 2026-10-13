@@ -405,12 +405,14 @@ impl Shared {
             Some(root) => in_worktree(root, &todo.spec.dir),
             None => todo.spec.dir.clone(),
         };
+        // 分支也删：留着的话下次开始时名字被占，两个候选名都占了以后这张任务再也开不起来。
         let undo_worktree = || {
-            if let Some((root, _)) = &made
-                && let Some(repo) = Repo::open(&todo.spec.dir)
-                && let Err(err) = repo.remove_worktree(root, false)
-            {
+            let Some((root, branch)) = &made else { return };
+            let Some(repo) = Repo::open(&todo.spec.dir) else { return };
+            if let Err(err) = repo.remove_worktree(root, false) {
                 tracing::warn!("cannot remove the worktree {} made for todo {}: {err}", root.display(), todo.id);
+            } else if let Err(err) = repo.delete_merged_branch(branch) {
+                tracing::warn!("cannot remove the branch {branch} made for todo {}: {err}", todo.id);
             }
         };
         let env = [(ENV_TODO_PROMPT, todo.spec.prompt())];
