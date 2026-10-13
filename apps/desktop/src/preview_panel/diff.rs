@@ -37,7 +37,7 @@ use runode_preview::Span;
 use super::{
     ARROW_UP_ICON, BODY_PADDING, Loaded, MAX_COLUMNS, Note, PreviewEvent, PreviewPanel, ROW_EXTRA_HEIGHT,
     body::{TEXT_RIGHT_PADDING, WRAP_SLACK, highlight_style, shown_text},
-    gpui_format, right_fade,
+    gpui_format, right_fade, shown_width,
     wrap::{WrapCache, segment},
 };
 
@@ -69,14 +69,15 @@ pub(super) struct DiffContent {
     removed_spans: Option<Arc<Vec<Vec<Span>>>>,
     /// 各块块头在 `view.rows` 里的位置，跳到上一处、下一处改动用。
     headers: Vec<usize>,
-    /// 最长的一行在 `view.rows` 里的位置，列表按它的宽度横向滚动。
+    /// 画出来最宽的一行在 `view.rows` 里的位置，列表按它的宽度横向滚动。
     widest: usize,
     /// 自动换行时折好的各段。
     wrap: WrapCache,
 }
 
 impl DiffContent {
-    fn new(view: DiffView) -> Self {
+    /// `cell_width` 说一个字占几格，挑最宽的行用。
+    fn new(view: DiffView, cell_width: fn(char) -> u8) -> Self {
         let mut removed = Vec::new();
         let mut removed_at = Vec::with_capacity(view.rows.len());
         let mut headers = Vec::new();
@@ -94,7 +95,7 @@ impl DiffContent {
                 }
             }
             removed_at.push(at);
-            let len = row_text(&view, row, &removed, at).chars().count();
+            let len = shown_width(row_text(&view, row, &removed, at), cell_width);
             if len > widest_len {
                 (widest, widest_len) = (ix, len);
             }
@@ -191,6 +192,7 @@ impl PreviewPanel {
             let (view, image) = job.await.unzip();
             let texts = this
                 .update(cx, |this, cx| {
+                    let cell_width = this.cell_width;
                     let (preview, git) = this.preview_for(id, &cancel)?;
                     // 和上次读到的一样（比如按块暂存后马上读了一次，扫描后又读一次）就留着，不重新高亮；
                     // 上次的高亮还没做完就被这次读取取消了的，重新起。
@@ -216,7 +218,7 @@ impl PreviewPanel {
                             Loaded::Note(Note::NoContent)
                         }
                         Some(view) => {
-                            let mut content = DiffContent::new(view);
+                            let mut content = DiffContent::new(view, cell_width);
                             (content.new_spans, content.removed_spans) = (old_new, old_removed);
                             if first && let Some(&header) = content.headers.first() {
                                 preview.reveal.set(Some((header, ScrollStrategy::Top)));
@@ -675,7 +677,7 @@ mod tests {
 
     #[test]
     fn indexes_removed_lines_and_headers() {
-        let content = DiffContent::new(view());
+        let content = DiffContent::new(view(), |_| 1);
         assert_eq!(content.headers, [0]);
         assert_eq!(content.removed.as_slice(), ["old"]);
         assert_eq!(content.removed_at, [None, Some(0), None, None, None]);

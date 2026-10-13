@@ -394,11 +394,12 @@ fn render_svg(renderer: &SvgRenderer, bytes: &[u8]) -> Result<Arc<RenderImage>, 
     renderer.render_single_frame(bytes, SVG_MIN_SIDE / longest).map_err(|err| err.to_string())
 }
 
-/// 读到的内容换成预览栏存的样子，在后台做：文本包进 `Arc`、找出最长的行、画好 SVG，UI 线程只管换上。
-fn loaded(content: Content, svg: &SvgRenderer) -> Loaded {
+/// 读到的内容换成预览栏存的样子，在后台做：文本包进 `Arc`、找出最宽的行（字占几格按 `cell_width`）、
+/// 画好 SVG，UI 线程只管换上。
+fn loaded(content: Content, svg: &SvgRenderer, cell_width: fn(char) -> u8) -> Loaded {
     match content {
         Content::Text(text) => {
-            let widest = widest_line(&text.lines);
+            let widest = widest_line(&text.lines, cell_width);
             Loaded::Text {
                 lines: Arc::new(text.lines),
                 truncated: text.truncated,
@@ -419,9 +420,14 @@ fn loaded(content: Content, svg: &SvgRenderer) -> Loaded {
     }
 }
 
-/// 字符数最多的那一行；等宽字体下它最宽。
-fn widest_line(lines: &[String]) -> usize {
-    lines.iter().enumerate().max_by_key(|(_, line)| line.chars().count().min(MAX_COLUMNS)).map_or(0, |(ix, _)| ix)
+/// 画出来最宽的那一行，见 `shown_width`。
+fn widest_line(lines: &[String], cell_width: fn(char) -> u8) -> usize {
+    lines.iter().enumerate().max_by_key(|(_, line)| shown_width(line, cell_width)).map_or(0, |(ix, _)| ix)
+}
+
+/// `line` 画出来占几格：制表符照 `display_line` 展开，一个字按 `cell_width` 算。
+fn shown_width(line: &str, cell_width: fn(char) -> u8) -> usize {
+    runode_preview::display_line(line, &[], MAX_COLUMNS).text.chars().map(|ch| usize::from(cell_width(ch))).sum()
 }
 
 /// 预览栏，见模块说明。
@@ -739,7 +745,7 @@ impl PreviewPanel {
             let svg = svg.clone();
             async move {
                 let stamp = file_stamp(&path);
-                (loaded(runode_preview::load(&path), &svg), stamp)
+                (loaded(runode_preview::load(&path), &svg, cell_width), stamp)
             }
         });
         cx.spawn(async move |this, cx| {
@@ -1064,8 +1070,12 @@ mod tests {
 
     #[test]
     fn picks_the_widest_line() {
-        let lines: Vec<String> = ["ab", "abcd", "中文字"].iter().map(|s| (*s).to_owned()).collect();
-        assert_eq!(widest_line(&lines), 1);
-        assert_eq!(widest_line(&[]), 0);
+        let lines = |texts: &[&str]| texts.iter().map(|s| (*s).to_owned()).collect::<Vec<_>>();
+        let cell_width = |ch: char| -> u8 { if ch.is_ascii() { 1 } else { 2 } };
+        assert_eq!(widest_line(&lines(&["ab", "abcd", "中"]), cell_width), 1);
+        // 按画出来的宽度比：汉字两格，制表符展开到下一个制表位。
+        assert_eq!(widest_line(&lines(&["abcde", "中文字"]), cell_width), 1);
+        assert_eq!(widest_line(&lines(&["abcdefg", "\t\t"]), cell_width), 1);
+        assert_eq!(widest_line(&[], cell_width), 0);
     }
 }

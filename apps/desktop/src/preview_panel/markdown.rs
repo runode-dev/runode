@@ -52,7 +52,7 @@ use crate::ui::{
 
 use super::{
     ALERT_CAUTION_ICON, ALERT_IMPORTANT_ICON, ALERT_NOTE_ICON, ALERT_TIP_ICON, ALERT_WARNING_ICON, Loaded, MAX_COLUMNS,
-    Preview, PreviewPanel, WorkspaceId, body::highlight_style, loaded,
+    Preview, PreviewPanel, WorkspaceId, body::highlight_style, gpui_format,
 };
 
 /// 正文左右和上下留的空。
@@ -796,9 +796,10 @@ fn picture_of(content: Content, svg: &SvgRenderer) -> Option<Picture> {
     if let Content::Image { format: runode_preview::ImageFormat::Svg, bytes } = &content {
         return svg.render_single_frame(bytes, 1.).ok().map(Picture::Svg);
     }
-    match loaded(content, svg) {
-        Loaded::Image(image) => Some(Picture::Bitmap(image)),
-        Loaded::Svg(image) => Some(Picture::Svg(image)),
+    match content {
+        Content::Image { format, bytes } => {
+            Some(Picture::Bitmap(Arc::new(Image::from_bytes(gpui_format(format), bytes))))
+        }
         _ => None,
     }
 }
