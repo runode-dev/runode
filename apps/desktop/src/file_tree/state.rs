@@ -290,11 +290,12 @@ impl TreeState {
         let TreeScan { root, git, listings, reveal } = scan;
         // 第一次读时 `root` 还是空的，下面换上根目录时一定算作有变化。
         let mut changed = false;
-        // 终端换到了别的仓库或目录：上一处的目录列表不再相干。展开的目录
-        // 是绝对路径，留着，回到原处时还是展开的。
+        // 终端换到了别的仓库或目录：上一处的目录列表和选中的行不再相干，选中项留着的话删除、改名
+        // 还会作用在看不见的旧路径上。展开的目录是绝对路径，留着，回到原处时还是展开的。
         if self.root.as_ref() != Some(&root) {
             self.root = Some(root.clone());
             self.listings.clear();
+            self.selected = None;
             self.scroll.scroll_to_item(0, ScrollStrategy::Top);
             changed = true;
         }
@@ -575,8 +576,11 @@ mod tests {
         assert_eq!(names(&state), [("a".into(), 0), ("c".into(), 1), ("b".into(), 0)]);
         assert!(state.apply_scan(scan(vec![(PathBuf::from("/p/a"), None)], None), ALL));
         assert!(!state.expanded.contains(Path::new("/p/a")));
+        // 换了根目录时上一处选中的路径不留着，免得删除、改名作用在看不见的旧路径上。
+        state.selected = Some(PathBuf::from("/p/b"));
         let moved = TreeScan { root: "/q".into(), git: None, listings: Vec::new(), reveal: None };
         assert!(state.apply_scan(moved, ALL));
         assert!(state.listings.is_empty());
+        assert_eq!(state.selected, None);
     }
 }
