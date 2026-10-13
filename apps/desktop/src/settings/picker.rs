@@ -286,7 +286,7 @@ impl SettingsView {
                     .text_color(theme.foreground.opacity(0.55))
                     .child(picker.title.clone()),
             )
-            .child(Input::new(&picker.field).h(scaled(30.)).mx(px(8.)).bg(theme.mix(0.06)))
+            .child(Input::new(&picker.field).h(scaled(30.)).mx(px(8.)).bg(theme.mix(0.10)))
             .map(|panel| match empty {
                 Some(empty) => panel.child(empty),
                 None => panel.child(list),

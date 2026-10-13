@@ -249,7 +249,7 @@ impl WindowView {
         let dialog = self.commit_message_dialog.as_ref()?;
         let field_bg = cx.theme().background;
         let hover_bg = cx.theme().mix(0.08);
-        let chip_bg = cx.theme().mix(0.06);
+        let chip_bg = cx.theme().mix(0.10);
         let selected_bg = cx.theme().mix(0.16);
         let fg = cx.theme().foreground;
         let border = fg.opacity(0.12);
