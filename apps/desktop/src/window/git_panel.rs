@@ -35,7 +35,6 @@ use gpui::{
     Role, Stateful, Transformation, Window, actions, div, list, percentage, prelude::*, px, svg, uniform_list,
 };
 use runode_git::{self as git, Operation, RepoKind, Section};
-use runode_shared_types::color::Rgb;
 
 use super::{
     TITLEBAR_HEIGHT, WindowView,
@@ -270,8 +269,6 @@ impl WindowView {
     pub(super) fn render_git_panel(
         &mut self,
         width: f32,
-        fg: Rgb,
-        bg: Rgb,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Stateful<Div> {
@@ -327,7 +324,7 @@ impl WindowView {
         self.sync_graphs(cx);
         let project = &self.workspace().project;
         let panel = &project.git_panel;
-        let dim = hsla(fg).opacity(0.5);
+        let dim = cx.theme().foreground.opacity(0.5);
         let multi = project.git.as_ref().is_some_and(|git| panel.multi(git));
         let main_root = project.git.as_ref().map(|git| git.main.root.clone());
         // 多个仓库时各块的忙碌状态写在块头上。
@@ -340,7 +337,7 @@ impl WindowView {
                     .role(Role::Heading)
                     .aria_label(title.clone())
                     .flex_none()
-                    .text_color(hsla(fg))
+                    .text_color(cx.theme().foreground)
                     .child(title.clone()),
             )
             .child(
@@ -395,11 +392,8 @@ impl WindowView {
                 .min_h_0()
                 .relative()
                 .child(
-                    list(
-                        panel.list.clone(),
-                        cx.processor(move |this, ix: usize, _, cx| this.render_git_item(ix, fg, bg, cx)),
-                    )
-                    .size_full(),
+                    list(panel.list.clone(), cx.processor(move |this, ix: usize, _, cx| this.render_git_item(ix, cx)))
+                        .size_full(),
                 )
                 .child(list_scrollbar("git-items-scroll", panel.list.clone()))
                 .into_any_element(),
@@ -421,9 +415,7 @@ impl WindowView {
                             uniform_list(
                                 "git-rows",
                                 panel.rows.len(),
-                                cx.processor(move |this, range: Range<usize>, _, cx| {
-                                    this.render_git_rows(range, fg, bg, cx)
-                                }),
+                                cx.processor(move |this, range: Range<usize>, _, cx| this.render_git_rows(range, cx)),
                             )
                             .track_scroll(&panel.scroll)
                             .flex_1(),
@@ -435,22 +427,19 @@ impl WindowView {
                     .min_h_0()
                     .flex()
                     .flex_col()
-                    .child(self.render_branch_bar(0, git, fg, bg, cx))
-                    .children(git.info.operation.map(|operation| operation_banner(&git.root, operation, fg)))
-                    .child(self.render_commit_area(0, git, fg, bg, cx))
+                    .child(self.render_branch_bar(0, git, cx))
+                    .children(git.info.operation.map(|operation| operation_banner(&git.root, operation, cx)))
+                    .child(self.render_commit_area(0, git, cx))
                     .child(list)
                     .into_any_element()
             }
         };
         let room = f32::from(window.viewport_size().height) - TITLEBAR_HEIGHT - status_bar::height(cx);
-        let graph = project
-            .git
-            .as_ref()
-            .filter(|_| project.root.is_some())
-            .map(|git| self.render_graph_pane(git, room, fg, bg, cx));
+        let graph =
+            project.git.as_ref().filter(|_| project.root.is_some()).map(|git| self.render_graph_pane(git, room, cx));
         panel_shell("git-panel", width, super::cards(cx), cx)
             .track_focus(&self.git_focus)
-            .bg(hsla(bg))
+            .bg(cx.theme().background)
             .text_size(FontSize::Body)
             .child(self.render_panel_tabs(cx))
             .child(header)
@@ -460,7 +449,7 @@ impl WindowView {
 
     /// 多个仓库时列表里的一项：块头是仓库标题连着分支栏和提交说明框，其余和只有一个仓库时的行
     /// 一样。点在哪一块里，菜单和快捷键的动作就作用到那块的仓库。
-    fn render_git_item(&mut self, ix: usize, fg: Rgb, bg: Rgb, cx: &mut Context<Self>) -> AnyElement {
+    fn render_git_item(&mut self, ix: usize, cx: &mut Context<Self>) -> AnyElement {
         let project = &self.workspace().project;
         let (Some(git), Some(&row)) = (project.git.as_ref(), project.git_panel.rows.get(ix)) else {
             return div().into_any_element();
@@ -470,8 +459,8 @@ impl WindowView {
         };
         let root = repo.root.clone();
         let element = match row {
-            GitRow::Repo(ri) => self.render_repo_block(ri, repo, fg, bg, cx).into_any_element(),
-            row => self.render_git_row(ix, row, git, fg, bg, cx),
+            GitRow::Repo(ri) => self.render_repo_block(ri, repo, cx).into_any_element(),
+            row => self.render_git_row(ix, row, git, cx),
         };
         div()
             .w_full()
@@ -482,11 +471,11 @@ impl WindowView {
 
     /// 多个仓库时一块的开头：可以收起的标题，写着仓库名（子仓库是相对主仓库的路径）、分支或者
     /// 正在跑的操作、改动的文件数和「更多」按钮；展开时下面是分支栏、提示条和提交说明框。
-    fn render_repo_block(&self, ri: usize, repo: &git::Snapshot, fg: Rgb, bg: Rgb, cx: &mut Context<Self>) -> Div {
+    fn render_repo_block(&self, ri: usize, repo: &git::Snapshot, cx: &mut Context<Self>) -> Div {
         let panel = &self.workspace().project.git_panel;
         let expanded = panel.repo_expanded(repo);
         let active = panel.active.as_deref() == Some(repo.root.as_path());
-        let fg_hsla = hsla(fg);
+        let fg_hsla = cx.theme().foreground;
         let dim = fg_hsla.opacity(0.5);
         let name = repo_name(repo);
         let kind = match repo.kind {
@@ -530,8 +519,8 @@ impl WindowView {
             .items_center()
             .gap(px(6.))
             .when(ri > 0, |title| title.border_t_1().border_color(cx.theme().border))
-            .when(active, |title| title.bg(hsla(bg.mix(fg, 0.04))))
-            .hover(|title| title.bg(hsla(bg.mix(fg, 0.06))))
+            .when(active, |title| title.bg(cx.theme().mix(0.04)))
+            .hover(|title| title.bg(cx.theme().mix(0.06)))
             .text_color(fg_hsla)
             .tooltip(tooltip(format!("{kind} · {}", repo.root.display()), None))
             .child(list::chevron(expanded, cx))
@@ -564,9 +553,9 @@ impl WindowView {
             });
         div().w_full().flex().flex_col().child(title).when(expanded, |block| {
             block
-                .child(self.render_branch_bar(ri, repo, fg, bg, cx))
-                .children(repo.info.operation.map(|operation| operation_banner(&repo.root, operation, fg)))
-                .child(self.render_commit_area(ri, repo, fg, bg, cx))
+                .child(self.render_branch_bar(ri, repo, cx))
+                .children(repo.info.operation.map(|operation| operation_banner(&repo.root, operation, cx)))
+                .child(self.render_commit_area(ri, repo, cx))
         })
     }
 
@@ -590,13 +579,13 @@ impl WindowView {
 
     /// 第 `ri` 个仓库的当前分支（点了切换分支）、没提交的改动加减了多少行，和右边的同步按钮：有上游时写着落后、领先几个
     /// 提交，没有上游时是发布分支。
-    fn render_branch_bar(&self, ri: usize, repo: &git::Snapshot, fg: Rgb, bg: Rgb, cx: &mut Context<Self>) -> Div {
+    fn render_branch_bar(&self, ri: usize, repo: &git::Snapshot, cx: &mut Context<Self>) -> Div {
         let info = &repo.info;
         let busy = self.workspace().project.git_panel.busy(&repo.root);
         let spinning = busy.is_some_and(Busy::is_remote);
         let busy = busy.is_some();
-        let fg_hsla = hsla(fg);
-        let hover_bg = hsla(bg.mix(fg, 0.08));
+        let fg_hsla = cx.theme().foreground;
+        let hover_bg = cx.theme().mix(0.08);
         let name = branch_name(info);
         let root = repo.root.clone();
         let branch = div()
@@ -690,12 +679,12 @@ impl WindowView {
 
     /// 第 `ri` 个仓库的提交说明框，下面是提交按钮和旁边弹出更多提交方式的箭头。没有改动时提交
     /// 按钮换成同步或者发布分支。
-    fn render_commit_area(&self, ri: usize, repo: &git::Snapshot, fg: Rgb, bg: Rgb, cx: &mut Context<Self>) -> Div {
+    fn render_commit_area(&self, ri: usize, repo: &git::Snapshot, cx: &mut Context<Self>) -> Div {
         let panel = &self.workspace().project.git_panel;
         let (info, dirty, root) = (&repo.info, !repo.is_clean(), repo.root.clone());
         let running = panel.busy(&root);
         let busy = running.is_some();
-        let fg_hsla = hsla(fg);
+        let fg_hsla = cx.theme().foreground;
         let Some(area) = panel.repos.get(&root).and_then(|repo| repo.commit_box.clone()) else {
             return div();
         };
@@ -719,7 +708,7 @@ impl WindowView {
         // 推送、拉取要跑好几秒：跑的时候按钮写着在做什么，连远端的图标还转着圈，免得以为没点上。
         let label = running.map_or(label, Busy::label);
         // 主按钮的底色由前景混进背景算出，跟着主题走，和新建工作区对话框的主按钮一样。
-        let (accent, accent_hover, on_accent) = (hsla(bg.mix(fg, 0.16)), hsla(bg.mix(fg, 0.22)), fg_hsla);
+        let (accent, accent_hover, on_accent) = (cx.theme().mix(0.16), cx.theme().mix(0.22), fg_hsla);
         let icon = match running {
             Some(running) if running.is_remote() => sync_icon(("git-commit-icon", ri), true, 14., on_accent),
             _ => svg().flex_none().path(icon).size(px(14.)).text_color(on_accent).into_any_element(),
@@ -764,7 +753,7 @@ impl WindowView {
             .pr(px(30.))
             .py(px(4.))
             .rounded(px(4.))
-            .bg(hsla(bg.mix(fg, 0.04)))
+            .bg(cx.theme().mix(0.04))
             .cursor_text()
             .on_mouse_down(MouseButton::Left, {
                 let area = area.clone();
@@ -976,7 +965,7 @@ fn branch_name(info: &git::RepoInfo) -> String {
 }
 
 /// 根目录是 `root` 的仓库合并、变基这些进行到一半时的提示条。
-fn operation_banner(root: &Path, operation: Operation, fg: Rgb) -> Stateful<Div> {
+fn operation_banner(root: &Path, operation: Operation, cx: &gpui::App) -> Stateful<Div> {
     let text = match operation {
         Operation::Merge => rust_i18n::t!("git.operation.merge"),
         Operation::Rebase => rust_i18n::t!("git.operation.rebase"),
@@ -994,6 +983,6 @@ fn operation_banner(root: &Path, operation: Operation, fg: Rgb) -> Stateful<Div>
         .py(px(4.))
         .rounded(px(4.))
         .bg(hsla(super::project::MODIFIED).opacity(0.15))
-        .text_color(hsla(fg))
+        .text_color(cx.theme().foreground)
         .child(text.into_owned())
 }

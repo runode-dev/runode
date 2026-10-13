@@ -8,7 +8,6 @@ use gpui::{
     Action, Context, Div, Entity, Focusable, FontWeight, Hsla, KeyDownEvent, MouseButton, Pixels, Point, Role,
     Stateful, Subscription, Window, div, prelude::*, px, svg,
 };
-use runode_shared_types::color::Rgb;
 
 use super::{
     super::PressDown,
@@ -25,7 +24,6 @@ use crate::{
     ui::{
         a11y::Press,
         font_size::{FontSize, scaled},
-        hsla,
         input::{Input, InputEvent, InputState},
         textarea::{Textarea, TextareaEvent, TextareaState},
         tooltip::{code_tooltip, tooltip},
@@ -247,18 +245,13 @@ impl WindowView {
         }
     }
 
-    pub(in crate::window) fn render_commit_message_dialog(
-        &self,
-        fg: Rgb,
-        bg: Rgb,
-        cx: &mut Context<Self>,
-    ) -> Option<Stateful<Div>> {
+    pub(in crate::window) fn render_commit_message_dialog(&self, cx: &mut Context<Self>) -> Option<Stateful<Div>> {
         let dialog = self.commit_message_dialog.as_ref()?;
-        let (fg_rgb, bg_rgb) = (fg, bg);
-        let field_bg = hsla(bg);
-        let hover_bg = hsla(bg.mix(fg, 0.08));
-        let selected_bg = hsla(bg.mix(fg, 0.16));
-        let fg = hsla(fg);
+        let field_bg = cx.theme().background;
+        let hover_bg = cx.theme().mix(0.08);
+        let chip_bg = cx.theme().mix(0.06);
+        let selected_bg = cx.theme().mix(0.16);
+        let fg = cx.theme().foreground;
         let border = fg.opacity(0.12);
         let mono = self.font_family(cx);
         let section = |key: &str| {
@@ -355,7 +348,7 @@ impl WindowView {
                             .px(px(8.))
                             .py(px(6.))
                             .rounded(px(6.))
-                            .bg(hsla(bg_rgb.mix(fg_rgb, 0.06)))
+                            .bg(chip_bg)
                             .font_family(mono.clone())
                             .text_size(FontSize::Small)
                             .text_color(fg.opacity(0.85))
@@ -404,7 +397,7 @@ impl WindowView {
                     .px(px(6.))
                     .py(px(1.))
                     .rounded(px(4.))
-                    .bg(hsla(bg_rgb.mix(fg_rgb, 0.06)))
+                    .bg(chip_bg)
                     .font_family(mono.clone())
                     .text_color(fg.opacity(0.85))
                     .cursor_pointer()

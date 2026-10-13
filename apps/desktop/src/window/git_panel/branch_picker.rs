@@ -2,6 +2,7 @@
 //! 第一行是「新建分支」。上下键选、回车切过去、Esc 关掉。只新建分支时只有新建那一行。列的是
 //! 打开时选定的那个仓库（主仓库或子仓库）的分支，切换、新建也在那个仓库里做。
 
+use crate::ui::theme::ActiveTheme as _;
 use std::path::{Path, PathBuf};
 
 use gpui::{
@@ -9,7 +10,6 @@ use gpui::{
     div, prelude::*, px, svg,
 };
 use runode_git::{self as git, Branch};
-use runode_shared_types::color::Rgb;
 
 use super::super::{
     WindowView,
@@ -21,7 +21,6 @@ use crate::{
     assets::{BRANCH_ICON, CHECK_ICON, PLUS_ICON},
     ui::{
         font_size::{FontSize, scaled},
-        hsla,
         input::{InputEvent, InputState},
     },
 };
@@ -220,13 +219,13 @@ impl WindowView {
     }
 
     /// 浮在标题栏下方正中的列表：上面是输入框，下面是各行。
-    pub(in crate::window) fn render_branch_picker(&self, fg: Rgb, bg: Rgb, cx: &mut Context<Self>) -> Option<Div> {
+    pub(in crate::window) fn render_branch_picker(&self, cx: &mut Context<Self>) -> Option<Div> {
         let picker = self.branch_picker.as_ref()?;
         let rows = picker.rows(cx);
         let selected = picker.selected.min(rows.len().saturating_sub(1));
-        let selected_bg = hsla(bg.mix(fg, 0.14));
-        let hover_bg = hsla(bg.mix(fg, 0.09));
-        let fg = hsla(fg);
+        let selected_bg = cx.theme().mix(0.14);
+        let hover_bg = cx.theme().mix(0.09);
+        let fg = cx.theme().foreground;
         let dim = fg.opacity(0.5);
         let empty = rows.is_empty().then(|| {
             let text = match &picker.branches {

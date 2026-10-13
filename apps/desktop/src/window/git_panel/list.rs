@@ -2,6 +2,7 @@
 //! 露出来。每一行都属于某个仓库，按钮作用到那个仓库。点文件在预览栏里看它的整篇
 //! diff。
 
+use crate::ui::theme::ActiveTheme as _;
 use std::{
     ops::Range,
     path::{Path, PathBuf},
@@ -13,7 +14,6 @@ use gpui::{
     accesskit::ActionData, div, img, prelude::*, px,
 };
 use runode_git::{self as git, DiffSide, FileStatus, Section};
-use runode_shared_types::color::Rgb;
 
 use super::{
     DirOp, FileOp, GitDirAction, GitFileAction, PressDown,
@@ -46,13 +46,7 @@ const INDENT: f32 = 12.;
 
 impl WindowView {
     /// 只有一个仓库时列表里看得见的那些行。
-    pub(super) fn render_git_rows(
-        &self,
-        range: Range<usize>,
-        fg: Rgb,
-        bg: Rgb,
-        cx: &mut Context<Self>,
-    ) -> Vec<AnyElement> {
+    pub(super) fn render_git_rows(&self, range: Range<usize>, cx: &mut Context<Self>) -> Vec<AnyElement> {
         let project = &self.workspace().project;
         let Some(git) = &project.git else {
             return Vec::new();
@@ -60,7 +54,7 @@ impl WindowView {
         let panel = &project.git_panel;
         range
             .filter_map(|ix| panel.rows.get(ix).map(|row| (ix, *row)))
-            .map(|(ix, row)| self.render_git_row(ix, row, git, fg, bg, cx))
+            .map(|(ix, row)| self.render_git_row(ix, row, git, cx))
             .collect()
     }
 
@@ -72,8 +66,6 @@ impl WindowView {
         ix: usize,
         row: GitRow,
         git: &git::Repos,
-        fg: Rgb,
-        bg: Rgb,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let Some(repo) = git.get(row.repo()) else {
@@ -81,12 +73,12 @@ impl WindowView {
         };
         match row {
             GitRow::Repo(_) => div().into_any_element(),
-            GitRow::Section(_, section) => self.render_git_section(ix, section, repo, fg, bg, cx),
-            GitRow::File(_, section, fi) => self.render_git_file(ix, section, fi, repo, fg, bg, cx),
-            GitRow::Stash(_, si) => self.render_git_stash(ix, si, repo, fg, bg, cx),
+            GitRow::Section(_, section) => self.render_git_section(ix, section, repo, cx),
+            GitRow::File(_, section, fi) => self.render_git_file(ix, section, fi, repo, cx),
+            GitRow::Stash(_, si) => self.render_git_stash(ix, si, repo, cx),
             GitRow::Dir(_, di) => match self.workspace().project.git_panel.dirs.get(di).map(|dir| dir.owner) {
-                Some(DirOwner::Section(section)) => self.render_git_dir(ix, di, section, fg, bg, cx),
-                Some(DirOwner::Commit(ci)) => self.render_commit_dir(ix, di, ci, fg, bg, cx),
+                Some(DirOwner::Section(section)) => self.render_git_dir(ix, di, section, cx),
+                Some(DirOwner::Commit(ci)) => self.render_commit_dir(ix, di, ci, cx),
                 None => div().into_any_element(),
             },
             GitRow::Clean(_) => div()
@@ -100,19 +92,20 @@ impl WindowView {
                 .flex()
                 .items_center()
                 .italic()
-                .text_color(hsla(fg).opacity(0.45))
+                .text_color(cx.theme().foreground.opacity(0.45))
                 .child(rust_i18n::t!("panel.no_changes").into_owned())
                 .into_any_element(),
-            GitRow::Commit(_, ci) => self.render_commit(repo, ci, fg, bg, cx),
-            GitRow::CommitFile(_, ci, fi) => self.render_commit_file(ix, repo, ci, fi, fg, bg, cx),
-            GitRow::CommitNote(_, ci, note) => self.render_commit_note(repo, ci, note, fg, bg),
-            GitRow::GraphNote(_, note) => self.render_graph_note(repo, note, fg, bg, cx),
+            GitRow::Commit(_, ci) => self.render_commit(repo, ci, cx),
+            GitRow::CommitFile(_, ci, fi) => self.render_commit_file(ix, repo, ci, fi, cx),
+            GitRow::CommitNote(_, ci, note) => self.render_commit_note(repo, ci, note, cx),
+            GitRow::GraphNote(_, note) => self.render_graph_note(repo, note, cx),
         }
     }
 
     /// 一行的外框：定高、横着排、鼠标移上去时底色变亮，按钮跟着露出来。提交图里的行也用它，
     /// 图紧贴左边（`pl` 给 0）。
-    pub(super) fn git_row(&self, id: impl Into<ElementId>, pl: f32, fg: Rgb, bg: Rgb) -> Stateful<Div> {
+    pub(super) fn git_row(&self, id: impl Into<ElementId>, pl: f32, cx: &App) -> Stateful<Div> {
+        let hover_bg = cx.theme().mix(0.06);
         div()
             .id(id)
             .flex_none()
@@ -124,8 +117,8 @@ impl WindowView {
             .items_center()
             .gap(px(6.))
             .overflow_hidden()
-            .text_color(hsla(fg))
-            .hover(|row| row.bg(hsla(bg.mix(fg, 0.06))))
+            .text_color(cx.theme().foreground)
+            .hover(|row| row.bg(hover_bg))
     }
 
     /// 鼠标进出第 `ix` 行时记到 `GitPanel::hovered`，好让按钮只画在那一行。
@@ -167,8 +160,6 @@ impl WindowView {
         ix: usize,
         section: GitSection,
         git: &git::Snapshot,
-        fg: Rgb,
-        bg: Rgb,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let panel = &self.workspace().project.git_panel;
@@ -197,7 +188,7 @@ impl WindowView {
             GitSection::Stashes => Vec::new(),
         };
         let expanded = panel.section_expanded(&root, section);
-        self.git_row(super::repo_id(&format!("git-section-{section:?}"), &root), 0., fg, bg)
+        self.git_row(super::repo_id(&format!("git-section-{section:?}"), &root), 0., cx)
             .role(Role::TreeItem)
             .aria_level(self.tree_level(true, 0))
             .aria_expanded(expanded)
@@ -230,8 +221,6 @@ impl WindowView {
         section: Section,
         fi: usize,
         git: &git::Snapshot,
-        fg: Rgb,
-        bg: Rgb,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let file = &git.files(section)[fi];
@@ -266,13 +255,13 @@ impl WindowView {
             }
         }
         let path = file.path.clone();
-        let dim = hsla(fg).opacity(0.5);
+        let dim = cx.theme().foreground.opacity(0.5);
         let deleted = file.status == FileStatus::Deleted;
         let side = if section == Section::Staged { DiffSide::Index } else { DiffSide::Worktree };
         let target = DiffTarget { root: root.clone(), rel: path.clone(), old_rel: file.old_path.clone(), side };
         let open = target.clone();
         let id = format!("git-file-{shown_in:?}-{}-{}", root.display(), path.display());
-        self.git_row(SharedString::from(id), INDENT * (depth + 1.), fg, bg)
+        self.git_row(SharedString::from(id), INDENT * (depth + 1.), cx)
             .role(Role::TreeItem)
             .aria_level(self.tree_level(false, depth as usize))
             .aria_label(name.clone())
@@ -319,8 +308,6 @@ impl WindowView {
         ix: usize,
         di: usize,
         section: GitSection,
-        fg: Rgb,
-        bg: Rgb,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let panel = &self.workspace().project.git_panel;
@@ -347,7 +334,7 @@ impl WindowView {
         let last = base_name(&path);
         let menu = action(DirOp::Stage);
         let id = format!("git-dir-{section:?}-{}-{}", root.display(), path.display());
-        self.git_row(SharedString::from(id), INDENT * (depth + 1.), fg, bg)
+        self.git_row(SharedString::from(id), INDENT * (depth + 1.), cx)
             .role(Role::TreeItem)
             .aria_level(self.tree_level(false, depth as usize))
             .aria_expanded(dir.expanded)
@@ -423,15 +410,7 @@ impl WindowView {
         self.open_context_menu(position, items, target, cx);
     }
 
-    fn render_git_stash(
-        &self,
-        ix: usize,
-        si: usize,
-        git: &git::Snapshot,
-        fg: Rgb,
-        bg: Rgb,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
+    fn render_git_stash(&self, ix: usize, si: usize, git: &git::Snapshot, cx: &mut Context<Self>) -> AnyElement {
         let stash = &git.info.stashes[si];
         let index = stash.index;
         let root = git.root.clone();
@@ -448,7 +427,7 @@ impl WindowView {
         ];
         // 按从最早一条数起的序号认：新存一条时最上面的 `stash@{0}` 变了，下面各条的 `index` 都加一。
         let id = format!("git-stash-{}-{}", root.display(), git.info.stashes.len() - index);
-        self.git_row(SharedString::from(id), INDENT, fg, bg)
+        self.git_row(SharedString::from(id), INDENT, cx)
             .role(Role::TreeItem)
             .aria_level(self.tree_level(false, 0))
             .aria_label(format!("#{index} {}", stash.message))
@@ -457,7 +436,7 @@ impl WindowView {
                 div()
                     .flex_none()
                     .text_size(FontSize::Small)
-                    .text_color(hsla(fg).opacity(0.5))
+                    .text_color(cx.theme().foreground.opacity(0.5))
                     .child(format!("#{index}")),
             )
             .child(div().flex_1().min_w_0().truncate().child(stash.message.clone()))

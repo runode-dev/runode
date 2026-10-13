@@ -137,17 +137,10 @@ impl WindowView {
 
     /// 面板底部的图表：标题一行，点了收起展开；展开时下面是提交的列表，高度由标题上沿的分隔线
     /// 拖动，双击分隔线恢复默认高度。`room` 是面板标题以下的高度。
-    pub(super) fn render_graph_pane(
-        &self,
-        git: &git::Repos,
-        room: f32,
-        fg: Rgb,
-        bg: Rgb,
-        cx: &mut Context<Self>,
-    ) -> Div {
+    pub(super) fn render_graph_pane(&self, git: &git::Repos, room: f32, cx: &mut Context<Self>) -> Div {
         let panel = &self.workspace().project.git_panel;
         let open = !self.git_graph_collapsed;
-        let fg_hsla = hsla(fg);
+        let fg_hsla = cx.theme().foreground;
         let repo = git.get(panel.graph_repo(git));
         let name = repo.filter(|_| panel.multi(git)).map(repo_name);
         let root = repo.map(|repo| repo.root.clone());
@@ -168,7 +161,7 @@ impl WindowView {
             .border_t_1()
             .border_color(cx.theme().border)
             .text_color(fg_hsla)
-            .hover(|header| header.bg(hsla(bg.mix(fg, 0.06))))
+            .hover(|header| header.bg(cx.theme().mix(0.06)))
             .child(chevron(open, cx))
             .child(
                 div()
@@ -208,7 +201,7 @@ impl WindowView {
             uniform_list(
                 "git-graph-rows",
                 panel.graph_rows.len(),
-                cx.processor(move |this, range: Range<usize>, _, cx| this.render_graph_rows(range, fg, bg, cx)),
+                cx.processor(move |this, range: Range<usize>, _, cx| this.render_graph_rows(range, cx)),
             )
             .track_scroll(&panel.graph_scroll)
             .flex_1(),
@@ -243,7 +236,7 @@ impl WindowView {
     }
 
     /// 图表的列表里看得见的那些行。
-    fn render_graph_rows(&self, range: Range<usize>, fg: Rgb, bg: Rgb, cx: &mut Context<Self>) -> Vec<AnyElement> {
+    fn render_graph_rows(&self, range: Range<usize>, cx: &mut Context<Self>) -> Vec<AnyElement> {
         let project = &self.workspace().project;
         let Some(git) = &project.git else {
             return Vec::new();
@@ -251,7 +244,7 @@ impl WindowView {
         let panel = &project.git_panel;
         range
             .filter_map(|ix| panel.graph_rows.get(ix).map(|row| (ix, *row)))
-            .map(|(ix, row)| self.render_git_row(ix, row, git, fg, bg, cx))
+            .map(|(ix, row)| self.render_git_row(ix, row, git, cx))
             .collect()
     }
 
@@ -457,14 +450,7 @@ impl WindowView {
     }
 
     /// 图表里的一个提交：左边的线和点，引用标签，说明首行，行尾多久以前。
-    pub(super) fn render_commit(
-        &self,
-        repo: &git::Snapshot,
-        ci: usize,
-        fg: Rgb,
-        bg: Rgb,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
+    pub(super) fn render_commit(&self, repo: &git::Snapshot, ci: usize, cx: &mut Context<Self>) -> AnyElement {
         let Some(graph) = self.graph(&repo.root) else {
             return div().into_any_element();
         };
@@ -473,7 +459,7 @@ impl WindowView {
             return div().into_any_element();
         };
         let (lane, width) = lane_geometry(graph.lanes);
-        let dim = hsla(fg).opacity(0.5);
+        let dim = cx.theme().foreground.opacity(0.5);
         let head = commit.refs.iter().any(|r| matches!(r.kind, RefKind::Head | RefKind::CurrentBranch));
         let mut detail = format!("{} · {} · {}", commit.author, commit.date, commit.short_id());
         if !commit.refs.is_empty() {
@@ -487,15 +473,15 @@ impl WindowView {
         // 下面估的宽度都是基准字号下的点数，面板和图的宽度先折成同样的单位再比。
         let scale = font_size::scale(cx);
         let fit = fit_commit_row(self.workspace().project.git_panel.width / scale, width / scale, commit);
-        let labels = ref_labels(commit, fit.labels, fg, bg);
-        self.git_row(SharedString::from(format!("git-commit-{id}")), 0., fg, bg)
+        let labels = ref_labels(commit, fit.labels, cx);
+        self.git_row(SharedString::from(format!("git-commit-{id}")), 0., cx)
             .role(Role::TreeItem)
             .aria_level(1)
             .aria_expanded(expanded)
             .aria_label(commit.subject.clone())
             .aria_description(detail)
             .tooltip(tooltip(tip, None))
-            .child(lanes_canvas(row.clone(), lane, width, commit.parents.len() > 1, head, bg))
+            .child(lanes_canvas(row.clone(), lane, width, commit.parents.len() > 1, head, cx.theme().background))
             .children(labels)
             .child(
                 div()
@@ -538,8 +524,6 @@ impl WindowView {
         repo: &git::Snapshot,
         ci: usize,
         fi: usize,
-        fg: Rgb,
-        bg: Rgb,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let Some(graph) = self.graph(&repo.root) else {
@@ -559,13 +543,13 @@ impl WindowView {
         } else {
             file.path.parent().map(|dir| dir.display().to_string()).unwrap_or_default()
         };
-        let dim = hsla(fg).opacity(0.5);
+        let dim = cx.theme().foreground.opacity(0.5);
         let side = DiffSide::Commit { id: commit.id.clone(), parent: commit.parents.first().cloned() };
         let target =
             DiffTarget { root: repo.root.clone(), rel: file.path.clone(), old_rel: file.old_path.clone(), side };
         let open = target.clone();
         let row_id = format!("git-commit-file-{}-{}", commit.id, file.path.display());
-        self.git_row(SharedString::from(row_id), 0., fg, bg)
+        self.git_row(SharedString::from(row_id), 0., cx)
             .role(Role::TreeItem)
             .aria_level(depth as usize + 2)
             .aria_label(name.clone())
@@ -592,15 +576,7 @@ impl WindowView {
     }
 
     /// 以树形式查看时展开的提交下面的一个目录，点了展开收起。
-    pub(super) fn render_commit_dir(
-        &self,
-        ix: usize,
-        di: usize,
-        ci: usize,
-        fg: Rgb,
-        bg: Rgb,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
+    pub(super) fn render_commit_dir(&self, ix: usize, di: usize, ci: usize, cx: &mut Context<Self>) -> AnyElement {
         let panel = &self.workspace().project.git_panel;
         let Some(dir) = panel.dirs.get(di) else {
             return div().into_any_element();
@@ -610,7 +586,7 @@ impl WindowView {
         let last = base_name(&dir.path);
         let commit = self.graph(&dir.root).and_then(|graph| graph.commit(ci)).map(|commit| commit.id.clone());
         let row_id = format!("git-commit-dir-{}-{}", commit.unwrap_or_default(), dir.path.display());
-        self.git_row(SharedString::from(row_id), 0., fg, bg)
+        self.git_row(SharedString::from(row_id), 0., cx)
             .role(Role::TreeItem)
             .aria_level(depth as usize + 2)
             .aria_expanded(dir.expanded)
@@ -636,8 +612,6 @@ impl WindowView {
         &self,
         repo: &git::Snapshot,
         note: GraphNote,
-        fg: Rgb,
-        bg: Rgb,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let text = match note {
@@ -652,20 +626,24 @@ impl WindowView {
             .map(|row| (row, lane_geometry(graph.map_or(0, |graph| graph.lanes))));
         // 「加载更多」报成按钮，其余是一句说明。
         let row = self
-            .git_row(super::repo_id(&format!("git-graph-note-{note:?}"), &repo.root), 0., fg, bg)
+            .git_row(super::repo_id(&format!("git-graph-note-{note:?}"), &repo.root), 0., cx)
             .role(if note == GraphNote::More { Role::Button } else { Role::Label })
             .aria_label(text.clone().into_owned());
         let Some((last, (lane, width))) = last else {
             return row
                 .pl(px(8. + INDENT))
                 .italic()
-                .text_color(hsla(fg).opacity(0.45))
+                .text_color(cx.theme().foreground.opacity(0.45))
                 .child(text.into_owned())
                 .into_any_element();
         };
         let row = row.child(lanes_tail(last, lane, width, true));
         if note != GraphNote::More {
-            return row.italic().text_color(hsla(fg).opacity(0.45)).child(text.into_owned()).into_any_element();
+            return row
+                .italic()
+                .text_color(cx.theme().foreground.opacity(0.45))
+                .child(text.into_owned())
+                .into_any_element();
         }
         let accent = hsla(RENAMED);
         let root = repo.root.clone();
@@ -696,8 +674,7 @@ impl WindowView {
         repo: &git::Snapshot,
         ci: usize,
         note: CommitNote,
-        fg: Rgb,
-        bg: Rgb,
+        cx: &gpui::App,
     ) -> AnyElement {
         let text = match note {
             CommitNote::Loading => rust_i18n::t!("git.graph.loading_changes"),
@@ -707,14 +684,14 @@ impl WindowView {
         let width = self.graph(&repo.root).map_or(0., |graph| lane_geometry(graph.lanes).1);
         let commit = self.graph(&repo.root).and_then(|graph| graph.commit(ci)).map(|commit| commit.id.clone());
         let row_id = format!("git-commit-note-{}", commit.unwrap_or_default());
-        self.git_row(SharedString::from(row_id), 0., fg, bg)
+        self.git_row(SharedString::from(row_id), 0., cx)
             .role(Role::Label)
             .aria_label(text.clone().into_owned())
             .relative()
             .children(self.lanes_below(&repo.root, ci))
             .pl(px(8. + width + INDENT))
             .italic()
-            .text_color(hsla(fg).opacity(0.45))
+            .text_color(cx.theme().foreground.opacity(0.45))
             .child(text.into_owned())
             .into_any_element()
     }
@@ -759,8 +736,8 @@ fn short_date(date: &str) -> String {
 
 /// 指向提交的引用的前 `shown` 个小标签：HEAD 所在的分支（或分离的 HEAD）实心突出，本地分支描边，
 /// 远端分支淡一些、描 lane 推上去那段的紫色，tag 带黄色；太长的截断。其余的合成「+N」。
-fn ref_labels(commit: &Commit, shown: usize, fg: Rgb, bg: Rgb) -> Vec<gpui::Div> {
-    let fg_hsla = hsla(fg);
+fn ref_labels(commit: &Commit, shown: usize, cx: &gpui::App) -> Vec<gpui::Div> {
+    let fg_hsla = cx.theme().foreground;
     let mut labels: Vec<_> = commit
         .refs
         .iter()
@@ -785,9 +762,10 @@ fn ref_labels(commit: &Commit, shown: usize, fg: Rgb, bg: Rgb) -> Vec<gpui::Div>
                     .font_weight(gpui::FontWeight::SEMIBOLD),
                 RefKind::Branch => label.border_color(fg_hsla.opacity(0.35)).text_color(fg_hsla),
                 RefKind::Remote => label.border_color(hsla(REMOTE_LANE).opacity(0.6)).text_color(fg_hsla.opacity(0.7)),
-                RefKind::Tag => {
-                    label.bg(hsla(bg.mix(MODIFIED, 0.18))).border_color(hsla(MODIFIED).opacity(0.5)).text_color(fg_hsla)
-                }
+                RefKind::Tag => label
+                    .bg(hsla(cx.theme().bg_rgb().mix(MODIFIED, 0.18)))
+                    .border_color(hsla(MODIFIED).opacity(0.5))
+                    .text_color(fg_hsla),
             };
             label.child(r.name.clone())
         })
@@ -846,9 +824,8 @@ fn lanes_tail(last: &GraphRow, lane: f32, width: f32, dashed: bool) -> impl Into
 
 /// 一行的线和点。线：上半段从行顶连到点的高度，下半段从点的高度连到行底，换列的用曲线连。点：
 /// 合并提交是空心的，HEAD 大一圈。超出图宽的 lane 截掉，点贴在右边界上。
-fn lanes_canvas(row: GraphRow, lane: f32, width: f32, merge: bool, head: bool, bg: Rgb) -> impl IntoElement {
+fn lanes_canvas(row: GraphRow, lane: f32, width: f32, merge: bool, head: bool, bg: Hsla) -> impl IntoElement {
     let color = |color: LaneColor| hsla(lane_color(color));
-    let bg = hsla(bg);
     canvas(
         |_, _, _| {},
         move |bounds: Bounds<Pixels>, (), window, _| {

@@ -694,10 +694,10 @@ impl Render for WindowView {
         let menu = self.render_context_menu(window, cx);
         let agent_picker = self.render_agent_picker(fg, bg, window, cx);
         let arrange_picker = self.render_arrange_picker(fg, bg, cx);
-        let branch_picker = self.render_branch_picker(fg, bg, cx);
+        let branch_picker = self.render_branch_picker(cx);
         let new_workspace = self.render_new_workspace(fg, bg, cx);
         let add_task = self.render_add_task(fg, bg, cx);
-        let commit_message_dialog = self.render_commit_message_dialog(fg, bg, cx);
+        let commit_message_dialog = self.render_commit_message_dialog(cx);
         let todo_dialog = self.render_todo_dialog(fg, bg, cx);
         let status_bar = (self.settings.is_none() && status_bar::shown(cx))
             .then(|| row_slot(&self.slots(cx).status_bar, status_bar::STATUS_BAR_HEIGHT, window));
