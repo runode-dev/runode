@@ -27,7 +27,7 @@ log="$data/cache/restart.log"
 # 环境，带上调用这个脚本的终端里的变量（CLAUDECODE、CLAUDE_CODE_*、RUNODE_SESSION 这类），终端里的
 # 程序会以为自己跑在别的程序里面。`open` 也会把调用方的环境传给 app。SHELL 取账户记录里的登录 shell：
 # 新宿主不是 launchd 拉起的，沿用这里给的 SHELL，而调用方的可能是 chsh 之前的旧值。
-login_shell=$(dscl . -read "/Users/$USER" UserShell 2>/dev/null | awk '{print $2}' || true)
+login_shell=$(id -P 2>/dev/null | awk -F: '{print $NF}' || true)
 launch_env=(env -i HOME="$HOME" USER="$USER" LOGNAME="${LOGNAME:-$USER}" SHELL="${login_shell:-${SHELL:-/bin/zsh}}"
   TMPDIR="${TMPDIR:-/tmp}" PATH=/usr/bin:/bin:/usr/sbin:/sbin)
 for name in LANG SSH_AUTH_SOCK __CF_USER_TEXT_ENCODING; do
