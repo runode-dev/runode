@@ -40,7 +40,8 @@ impl GitPanel {
     }
 
     /// 在后台对当前 workspace 里根目录是 `root` 的仓库跑 `op`，跑的时候这个仓库写着 `busy`。
-    /// 跑完马上重读，成功时再调 `done`，出错时弹框。
+    /// 跑完马上重读，成功时再调 `done`，出错时弹框。`done` 跑的时候当前 workspace 可能已经换了，
+    /// 要动的提交说明框这些在开始时就取好。
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn run_git<T: Send + 'static>(
         &mut self,
@@ -311,9 +312,9 @@ impl GitPanel {
                 AfterCommit::Sync => repo.sync().err(),
             })
         };
-        let target = root.clone();
-        self.run_git(&root, Busy::Commit, window, cx, op, move |this, remote_error, window, cx| {
-            if let Some(area) = this.commit_box(&target) {
+        let area = self.commit_box(&root);
+        self.run_git(&root, Busy::Commit, window, cx, op, move |_, remote_error, window, cx| {
+            if let Some(area) = area {
                 area.update(cx, |area, cx| area.set_text(String::new(), cx));
             }
             if let Some(err) = remote_error {
@@ -388,9 +389,9 @@ impl GitPanel {
         let Some(root) = self.git_target(window, cx) else {
             return;
         };
-        let target = root.clone();
-        self.run_git(&root, Busy::Commit, window, cx, git::Repo::undo_last_commit, move |this, message, _, cx| {
-            if let Some(area) = this.commit_box(&target)
+        let area = self.commit_box(&root);
+        self.run_git(&root, Busy::Commit, window, cx, git::Repo::undo_last_commit, move |_, message, _, cx| {
+            if let Some(area) = area
                 && area.read(cx).text().trim().is_empty()
             {
                 area.update(cx, |area, cx| area.set_text(message.trim_end().to_owned(), cx));

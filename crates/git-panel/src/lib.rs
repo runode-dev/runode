@@ -394,9 +394,9 @@ impl GitPanel {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let target = root.to_path_buf();
-        self.run_git(root, Busy::Message, window, cx, op, move |this, message, _, cx| {
-            if let Some(area) = this.commit_box(&target) {
+        let area = self.commit_box(root);
+        self.run_git(root, Busy::Message, window, cx, op, move |_, message, _, cx| {
+            if let Some(area) = area {
                 area.update(cx, |area, cx| area.set_text(message, cx));
             }
         });
