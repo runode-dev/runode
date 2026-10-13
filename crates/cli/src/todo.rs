@@ -21,8 +21,10 @@ use crate::{
 };
 use unicode_width::UnicodeWidthStr as _;
 
-/// 等 `StartTodo` 回话的最长时间：宿主可能先在大仓库里跑 `git worktree add`，git 自己的上限是 120 秒。
-const START_TIMEOUT: Duration = Duration::from_secs(130);
+/// 等 `StartTodo`、`RemoveTodo` 回话的最长时间：开始任务时宿主可能先在大仓库里跑 `git worktree add`，
+/// 没成时换个名字再跑一次；删任务时跑 `git worktree remove` 和 `git branch -d`。每条 git 自己的上限是
+/// 120 秒，这里盖住两条。
+const GIT_TIMEOUT: Duration = Duration::from_secs(250);
 
 /// `todo add`、`schedule add` 共有的部分，见 `args::Command::TodoAdd`。
 pub(crate) struct Spec {
@@ -88,7 +90,7 @@ pub(crate) fn start(env: &Env, id: &str, out: &mut dyn Write) -> Result<()> {
 fn start_todo(connection: &Connection, id: &str) -> Result<SessionId> {
     let req = connection.req();
     connection.send(&ClientMsg::StartTodo { req, id: id.to_owned() })?;
-    match connection.reply_by(Instant::now() + START_TIMEOUT) {
+    match connection.reply_by(Instant::now() + GIT_TIMEOUT) {
         Ok(HostMsg::Opened { id, .. }) => Ok(id),
         Ok(other) => bail!("unexpected answer: {}", kind(&other)),
         Err(err) => Err(err.context(format!("cannot start todo {id}"))),
@@ -113,7 +115,11 @@ pub(crate) fn done(env: &Env, id: String) -> Result<()> {
 pub(crate) fn remove(env: &Env, id: String) -> Result<()> {
     let connection = open(env)?;
     let req = connection.req();
-    connection.request_done(&ClientMsg::RemoveTodo { req, id })
+    connection.send(&ClientMsg::RemoveTodo { req, id })?;
+    match connection.reply_by(Instant::now() + GIT_TIMEOUT)? {
+        HostMsg::Done { .. } => Ok(()),
+        other => bail!("unexpected answer: {}", kind(&other)),
+    }
 }
 
 /// 任务板上的任务和定时。

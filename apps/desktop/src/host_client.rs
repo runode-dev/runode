@@ -50,8 +50,10 @@ pub enum Mode {
 
 /// 列会话最多等这么久。
 const LIST_TIMEOUT: Duration = Duration::from_secs(2);
-/// 任务板的请求最多等这么久：开始任务时宿主要跑 `git worktree add`（git 自己最多 120 秒）。
-const TODO_TIMEOUT: Duration = Duration::from_secs(130);
+/// 任务板的请求最多等这么久：开始任务时宿主要跑 `git worktree add`，没成时换个名字再跑一次；删任务时
+/// 跑 `git worktree remove` 和 `git branch -d`。每条 git 自己最多 120 秒，等不到时整条连接按断开处理，
+/// 所以盖住两条。
+const TODO_TIMEOUT: Duration = Duration::from_secs(250);
 /// 让留下的宿主退出后，最多等这么久拿到它放开的锁、开自己的 socket。
 const LISTEN_RETRY: Duration = Duration::from_secs(2);
 /// 另一个新 app 正在让新宿主接手（`HandoffRefusal::Busy`）时，等这么久再探一次：多半会探到它
