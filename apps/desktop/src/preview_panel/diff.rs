@@ -1,7 +1,7 @@
 //! 预览栏里的 diff 标签，内联显示差异：从 Git 面板点开改动的文件（工作区、已暂存或
 //! 某个提交里的），整篇显示，没改的行照常排着，删掉的行红底插在原来的位置，加的行绿底，左边两栏是
-//! 旧行号和新行号，按文件类型高亮。每块改动前面一行块头，工作区和暂存区的块头上有按块暂存、丢弃、
-//! 取消暂存的按钮。顶上一条能跳到上一处、下一处改动，打开时先滚到第一处。
+//! 旧行号和新行号，按文件类型高亮；成对的删掉和加的行里真正改了的字再垫深一点的底色。每块改动
+//! 前面一行块头，工作区和暂存区的块头上有按块暂存、丢弃、取消暂存的按钮。顶上一条能跳到上一处、下一处改动，打开时先滚到第一处。
 //!
 //! 整篇 diff 由 `runode_git::Repo::file_view` 读；工作区和暂存区的 diff 跟着扫描结果重读，
 //! 滚动位置不动，文件已经没有这种改动时写一句「没有改动」，标签留着。
@@ -28,8 +28,9 @@ use crate::ui::{
     tooltip::tooltip,
 };
 use gpui::{
-    AnyElement, Axis, Context, Image, ListHorizontalSizingBehavior, MouseButton, MouseDownEvent, PromptLevel, Role,
-    ScrollStrategy, SharedString, StyledText, Window, div, prelude::*, px, svg, uniform_list,
+    AnyElement, Axis, Context, HighlightStyle, Image, ListHorizontalSizingBehavior, MouseButton, MouseDownEvent,
+    PromptLevel, Role, ScrollStrategy, SharedString, StyledText, Window, combine_highlights, div, prelude::*, px, svg,
+    uniform_list,
 };
 use runode_git::{self as git, DiffRow, DiffSide, DiffView, FileStatus, HunkAction, LineKind, hunk_actionable};
 use runode_preview::Span;
@@ -67,6 +68,8 @@ pub(super) struct DiffContent {
     /// 新文件各行和删掉的各行的高亮，后台做完之前为空；重读时留着上一次的，行对不上也只是颜色暂时不准。
     new_spans: Option<Arc<Vec<Vec<Span>>>>,
     removed_spans: Option<Arc<Vec<Vec<Span>>>>,
+    /// 块里各行真正改了的字（`word_changes`），和高亮一起在后台做；重读时清掉，免得标到别的字上。
+    words: Option<Arc<WordChanges>>,
     /// 各块块头在 `view.rows` 里的位置，跳到上一处、下一处改动用。
     headers: Vec<usize>,
     /// 画出来最宽的一行在 `view.rows` 里的位置，列表按它的宽度横向滚动。
@@ -106,10 +109,17 @@ impl DiffContent {
             removed_at,
             new_spans: None,
             removed_spans: None,
+            words: None,
             headers,
             widest,
             wrap: WrapCache::default(),
         }
+    }
+
+    /// 后台的高亮还没做完。换上新读的 diff 时挪过来了旧的高亮，那两份不空，`words` 却是空的，
+    /// 所以要连它一起看，不然这时被下一次读取取消掉，就再也不重算了。
+    fn unhighlighted(&self) -> bool {
+        self.new_spans.is_none() || self.removed_spans.is_none() || self.words.is_none()
     }
 }
 
@@ -128,6 +138,36 @@ fn row_text<'a>(view: &'a DiffView, row: &DiffRow, removed: &'a [String], at: Op
             }
         }
     }
+}
+
+/// 块里各行改了的字节范围，按 `[块][行]` 放，范围是这一行 `row_text` 里的位置。
+type WordChanges = Vec<Vec<Vec<Range<usize>>>>;
+
+/// 每块里紧跟着的一串删掉的行和一串加的行按先后一一配对，用 `git::changed_words` 找出各自改了哪些字；
+/// 配不上对的行不标。
+fn word_changes(view: &DiffView) -> WordChanges {
+    view.file
+        .hunks
+        .iter()
+        .map(|hunk| {
+            let lines = &hunk.lines;
+            let run =
+                |from: usize, kind| from..from + lines[from..].iter().take_while(|line| line.kind == kind).count();
+            let mut words = vec![Vec::new(); lines.len()];
+            let mut ix = 0;
+            while ix < lines.len() {
+                let removed = run(ix, LineKind::Removed);
+                let added = run(removed.end, LineKind::Added);
+                for (old, new) in removed.clone().zip(added.clone()) {
+                    let line = &lines[new];
+                    let text = line.new.and_then(|new| view.new_line(new)).unwrap_or(&line.text);
+                    (words[old], words[new]) = git::changed_words(&lines[old].text, text);
+                }
+                ix = added.end.max(ix + 1);
+            }
+            words
+        })
+        .collect()
 }
 
 impl PreviewPanel {
@@ -199,8 +239,9 @@ impl PreviewPanel {
                     if let (Some(Loaded::Diff(old)), Some(view)) = (&preview.content, &view)
                         && *old.view == *view
                     {
-                        return (old.new_spans.is_none() || old.removed_spans.is_none())
-                            .then(|| (Arc::new(old.view.new_lines.clone()), old.removed.clone()));
+                        return old
+                            .unhighlighted()
+                            .then(|| (old.view.clone(), Arc::new(old.view.new_lines.clone()), old.removed.clone()));
                     }
                     preview.release_image(cx);
                     let first = !matches!(preview.content, Some(Loaded::Diff(_)));
@@ -227,9 +268,11 @@ impl PreviewPanel {
                         }
                     };
                     let texts = match &content {
-                        Loaded::Diff(content) => {
-                            Some((Arc::new(content.view.new_lines.clone()), content.removed.clone()))
-                        }
+                        Loaded::Diff(content) => Some((
+                            content.view.clone(),
+                            Arc::new(content.view.new_lines.clone()),
+                            content.removed.clone(),
+                        )),
                         _ => None,
                     };
                     preview.selection = None;
@@ -240,16 +283,16 @@ impl PreviewPanel {
                 })
                 .ok()
                 .flatten();
-            let Some((new_lines, removed)) = texts else {
+            let Some((view, new_lines, removed)) = texts else {
                 return;
             };
-            let (new_spans, removed_spans) = cx
+            let (new_spans, removed_spans, words) = cx
                 .background_spawn({
                     let cancel = cancel.clone();
                     async move {
                         let new = runode_preview::highlight(&path, &new_lines, &cancel);
                         let removed = runode_preview::highlight(&path, &removed, &cancel);
-                        (new, removed)
+                        (new, removed, word_changes(&view))
                     }
                 })
                 .await;
@@ -259,6 +302,7 @@ impl PreviewPanel {
                 {
                     content.new_spans = new_spans.map(Arc::new);
                     content.removed_spans = removed_spans.map(Arc::new);
+                    content.words = Some(Arc::new(words));
                     cx.notify();
                 }
             })
@@ -517,8 +561,22 @@ impl PreviewPanel {
                     _ => None,
                 };
                 let shown = runode_preview::display_line(text, spans.map_or(&[][..], Vec::as_slice), MAX_COLUMNS);
-                let runs: Vec<_> =
+                let mut runs: Vec<_> =
                     shown.spans.iter().map(|span| (span.range.clone(), highlight_style(span.style, &theme))).collect();
+                let words = match row {
+                    DiffRow::Hunk { hunk, line } => content.words.as_ref().and_then(|words| words.get(hunk)?.get(line)),
+                    _ => None,
+                };
+                if let Some(words) = words.filter(|words| !words.is_empty()) {
+                    // 借 `display_line` 把范围换到展开制表符、截断以后的位置。
+                    let style =
+                        runode_preview::Style { color: runode_preview::Color::Foreground, bold: false, italic: false };
+                    let words: Vec<_> = words.iter().map(|range| Span { range: range.clone(), style }).collect();
+                    let color = bg.mix(if kind == LineKind::Added { ADDED } else { REMOVED }, 0.6);
+                    let emphasis = HighlightStyle { background_color: Some(hsla(color)), ..HighlightStyle::default() };
+                    let words = runode_preview::display_line(text, &words, MAX_COLUMNS).spans;
+                    runs = combine_highlights(runs, words.into_iter().map(|span| (span.range, emphasis))).collect();
+                }
                 let mut text = shown.text;
                 if shown.cut {
                     text.push('…');
@@ -684,6 +742,24 @@ mod tests {
         assert_eq!(content.widest, 2);
         let view = &content.view;
         assert_eq!(row_text(view, &view.rows[4], &content.removed, None), "c");
+    }
+
+    #[test]
+    fn pairs_removed_with_added_lines_for_word_changes() {
+        let mut view = view();
+        view.file.hunks[0].lines[0].text = "a longer new line".into();
+        assert_eq!(word_changes(&view), [vec![vec![], vec![2..7], vec![]]]);
+    }
+
+    #[test]
+    fn carried_over_highlights_still_need_word_changes() {
+        let mut content = DiffContent::new(view(), |_| 1);
+        assert!(content.unhighlighted());
+        // 重读时挪过来的旧高亮。
+        (content.new_spans, content.removed_spans) = (Some(Arc::default()), Some(Arc::default()));
+        assert!(content.unhighlighted());
+        content.words = Some(Arc::default());
+        assert!(!content.unhighlighted());
     }
 
     #[test]

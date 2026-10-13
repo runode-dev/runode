@@ -1,7 +1,8 @@
 //! 项目目录的 git：读工作区相对 HEAD 的逐行改动、每个文件的状态、分支和 stash，供右侧的
 //! 文件树、预览栏和 Git 面板使用；主仓库里的子模块和嵌套仓库各读一份，见 `snapshot_repos`。
 //! 暂存、按块暂存、提交、切分支、stash 和同步远端这些写操作，以及读提交历史和图表（`graph`），
-//! 挂在 `Repo` 上；预览栏看一个文件的整篇 diff 见 `view`，文件树按名字和内容找文件见 `search`。
+//! 挂在 `Repo` 上；预览栏看一个文件的整篇 diff 见 `view`，一对改过的行里改了哪些字见 `changed_words`，
+//! 文件树按名字和内容找文件见 `search`。
 //! 一律调 `git` 命令行，不直接读写 git 目录里的对象。
 
 mod branch;
@@ -14,6 +15,7 @@ mod repos;
 mod search;
 mod snapshot;
 mod view;
+mod words;
 
 pub use branch::{Branch, valid_branch_name};
 pub use graph::{
@@ -26,6 +28,7 @@ pub use repos::{RepoKind, Repos, snapshot_repos};
 pub use search::{GrepMatch, GrepQuery, grep, list_files};
 pub use snapshot::{FileDiff, FileStatus, Hunk, Line, LineKind, Section, Snapshot, UntrackedCache, snapshot};
 pub use view::{DiffRow, DiffSide, DiffView, ReadOptions, TooLarge, first_lines, merge_rows};
+pub use words::changed_words;
 
 use std::{
     fs,
