@@ -3,7 +3,8 @@
 //! 结果可以排成列表，也可以按目录排成树（和 Git 面板共用 `path_tree`），目录能收起。
 //!
 //! 在后台搜：仓库里按名称找的是 `runode_git::list_files` 列出的文件，不在仓库里时从根目录往下走，
-//! 列一次记着，文件树重读过时再列；按内容找调 `runode_git::grep`，等打字停一下再起。按名称找时搜索词全小写就不分大小写；按内容找时可以区分大小写、
+//! 列一次记着，文件树重读过时再列；按内容找调 `runode_git::grep`，等打字停一下再起，正则按 git 的写法，
+//! 写得不对时显示 git 的报错。按名称找时搜索词全小写就不分大小写；按内容找时可以区分大小写、
 //! 全字匹配、用正则，还能只找或不找某些文件（逗号隔开的 glob，写法和 VS Code 一样）。文件树
 //! 重读过（文件可能变了）、根目录、搜索词、方式或选项变了时重搜。
 
@@ -164,8 +165,8 @@ pub(crate) struct FileSearch {
     regex: bool,
     include: Entity<InputState>,
     exclude: Entity<InputState>,
-    /// 上次搜的正则写得不对。
-    bad_regex: bool,
+    /// 上次搜出了错（比如正则按 git 的写法不对）时是报错。
+    error: Option<String>,
     /// 排成树还是列表，整个窗口一个设置，存进窗口存档；树形式时收起的目录。
     pub(crate) tree: bool,
     collapsed: HashSet<PathBuf>,
@@ -230,7 +231,7 @@ impl FileSearch {
             regex: false,
             include,
             exclude,
-            bad_regex: false,
+            error: None,
             tree: false,
             collapsed: HashSet::new(),
             found: Vec::new(),
@@ -296,9 +297,8 @@ fn match_names<'a>(files: &'a [PathBuf], query: &str, cancel: &AtomicBool) -> Ve
     hits.into_iter().map(|(_, rel)| rel).collect()
 }
 
-/// 内容结果里标出命中处用的正则，和交给 git grep 的条件一致；正则写得不对时是错误。
-/// shortcut: git grep 用的是 POSIX 扩展正则，`\d` 这类 Rust 正则才有的写法这里认、git 不认，
-/// 搜不到时再考虑换成 `git grep -P`。
+/// 内容结果里标出命中处用的正则，尽量和交给 git grep 的条件一致。只用来标出命中处，搜索本身和正则对不对
+/// 都以 git 为准：git 用的是 POSIX 扩展正则，Rust 的 regex 不认的写法（比如反向引用）这里是错误，只是不标。
 fn matcher(query: &str, options: &SearchOptions) -> Result<Regex, regex::Error> {
     let pattern = if options.regex { query.to_owned() } else { regex::escape(query) };
     let pattern = if options.whole_word { format!(r"\b(?:{pattern})\b") } else { pattern };
@@ -370,10 +370,10 @@ fn expand_braces(glob: &str) -> Vec<String> {
 }
 
 /// 内容结果里显示的一行：去掉开头的缩进，命中处太靠后时把前面截掉，太长时截短；返回显示的
-/// 文字和其中按 `matcher` 命中的第一段。
-fn snippet(text: &str, matcher: &Regex) -> (String, Option<Range<usize>>) {
+/// 文字和其中按 `matcher` 命中的第一段；没有 `matcher` 时不标。
+fn snippet(text: &str, matcher: Option<&Regex>) -> (String, Option<Range<usize>>) {
     let text = text.trim_start();
-    let at = matcher.find(text).map(|hit| hit.range()).filter(|hit| !hit.is_empty());
+    let at = matcher.and_then(|matcher| matcher.find(text)).map(|hit| hit.range()).filter(|hit| !hit.is_empty());
     let start = match &at {
         Some(at) if at.start > SNIPPET_LEAD => text.floor_char_boundary(at.start - SNIPPET_LEAD),
         _ => 0,
@@ -391,8 +391,8 @@ fn found(root: &Path, rel: PathBuf, lines: Vec<FoundLine>) -> Found {
     Found { path: root.join(&rel), rel, name: name.into(), dir: dir.into(), lines }
 }
 
-/// 按 `key` 搜；在后台跑。按名称找时在 `names` 里找，还没列出时先列。正则写得不对时为空。
-fn run_search(key: &SearchKey, names: &NameList, cancel: &AtomicBool) -> Option<Vec<Found>> {
+/// 按 `key` 搜；在后台跑。按名称找时在 `names` 里找，还没列出时先列。git grep 报错时是它的报错。
+fn run_search(key: &SearchKey, names: &NameList, cancel: &AtomicBool) -> Result<Vec<Found>, String> {
     let SearchKey { root, query, options, .. } = key;
     match key.mode {
         SearchMode::Name => {
@@ -400,10 +400,10 @@ fn run_search(key: &SearchKey, names: &NameList, cancel: &AtomicBool) -> Option<
             // 列表可能是一会儿前列的，git 也列出工作区里删掉了的已跟踪文件，只查要显示的这些在不在。
             let hits = match_names(files, query, cancel).into_iter();
             let hits = hits.filter(|rel| root.join(rel).symlink_metadata().is_ok()).take(MAX_FILES);
-            Some(hits.map(|rel| found(root, rel.clone(), Vec::new())).collect())
+            Ok(hits.map(|rel| found(root, rel.clone(), Vec::new())).collect())
         }
         SearchMode::Content => {
-            let matcher = matcher(query, options).ok()?;
+            let matcher = matcher(query, options).ok();
             let pathspecs = pathspecs(&options.include, &options.exclude);
             let grep = GrepQuery {
                 pattern: query,
@@ -412,7 +412,7 @@ fn run_search(key: &SearchKey, names: &NameList, cancel: &AtomicBool) -> Option<
                 regex: options.regex,
                 pathspecs: &pathspecs,
             };
-            let matches = runode_git::grep(root, &grep, MAX_LINES, cancel);
+            let matches = runode_git::grep(root, &grep, MAX_LINES, cancel).map_err(|err| err.message)?;
             // git grep 按文件一段段地输出，同一个文件的行连在一起。
             let groups = matches.chunk_by(|a, b| a.path == b.path);
             let found = groups
@@ -420,14 +420,14 @@ fn run_search(key: &SearchKey, names: &NameList, cancel: &AtomicBool) -> Option<
                     let lines = group
                         .iter()
                         .map(|hit| {
-                            let (text, range) = snippet(&hit.text, &matcher);
+                            let (text, range) = snippet(&hit.text, matcher.as_ref());
                             FoundLine { line: hit.line, text: text.into(), hit: range }
                         })
                         .collect();
                     found(root, group[0].path.clone(), lines)
                 })
                 .collect();
-            Some(found)
+            Ok(found)
         }
     }
 }
@@ -470,7 +470,7 @@ impl FileTree {
             search.rows.clear();
             search.searched = None;
             search.selected = None;
-            search.bad_regex = false;
+            search.error = None;
             return;
         }
         let cancel = Arc::new(AtomicBool::new(false));
@@ -509,8 +509,10 @@ impl FileTree {
                     search.collapsed.clear();
                     search.scroll.scroll_to_item(0, ScrollStrategy::Top);
                 }
-                search.bad_regex = found.is_none();
-                search.found = found.unwrap_or_default();
+                (search.found, search.error) = match found {
+                    Ok(found) => (found, None),
+                    Err(err) => (Vec::new(), Some(err)),
+                };
                 search.searched = Some(key);
                 search.relayout();
                 cx.notify();
@@ -713,8 +715,8 @@ impl FileTree {
         if !fresh || search.rows.is_empty() {
             let text = if search.pending.is_some() {
                 String::new()
-            } else if search.bad_regex {
-                rust_i18n::t!("files.bad_regex").into_owned()
+            } else if let Some(error) = &search.error {
+                rust_i18n::t!("files.search_failed", error = error).into_owned()
             } else {
                 rust_i18n::t!("files.search_empty").into_owned()
             };
@@ -1025,13 +1027,15 @@ mod tests {
 
     #[test]
     fn snippets_trim_indent_and_keep_the_hit_in_view() {
-        assert_eq!(snippet("    let foo = 1;", &literal("foo")), ("let foo = 1;".to_owned(), Some(4..7)));
-        assert_eq!(snippet("Foo", &literal("foo")), ("Foo".to_owned(), Some(0..3)));
-        assert_eq!(snippet("Ärger", &literal("ä")), ("Ärger".to_owned(), Some(0..2)));
+        assert_eq!(snippet("    let foo = 1;", Some(&literal("foo"))), ("let foo = 1;".to_owned(), Some(4..7)));
+        assert_eq!(snippet("Foo", Some(&literal("foo"))), ("Foo".to_owned(), Some(0..3)));
+        assert_eq!(snippet("Ärger", Some(&literal("ä"))), ("Ärger".to_owned(), Some(0..2)));
         let case = SearchOptions { match_case: true, ..SearchOptions::default() };
-        assert_eq!(snippet("foo", &matcher("Foo", &case).unwrap()), ("foo".to_owned(), None));
+        assert_eq!(snippet("foo", Some(&matcher("Foo", &case).unwrap())), ("foo".to_owned(), None));
+        // git 认、Rust 的 regex 不认的正则照样列出这一行，只是不标命中处。
+        assert_eq!(snippet("  (a)a", None), ("(a)a".to_owned(), None));
         let long = format!("{}needle", "x".repeat(100));
-        let (text, hit) = snippet(&long, &literal("needle"));
+        let (text, hit) = snippet(&long, Some(&literal("needle")));
         assert!(text.starts_with('…'));
         assert_eq!(&text[hit.unwrap()], "needle");
     }

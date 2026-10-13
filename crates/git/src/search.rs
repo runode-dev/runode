@@ -14,7 +14,7 @@ use std::{
     time::Duration,
 };
 
-use crate::{git, git_command, in_repo};
+use crate::{GitError, Result, git, git_command, in_repo, ops::output_result};
 
 /// `git grep` 输出的一行（含路径和行号）最多读这么多字节，多出的丢掉：压缩过的 js 一行就有几 MB，
 /// 结果里只显示命中处附近的一小段。
@@ -54,10 +54,11 @@ pub struct GrepQuery<'a> {
 
 /// 在 `root` 下按内容找 `query`。在仓库里时连未跟踪的文件一起找、跳过被忽略的，不在仓库里时
 /// 找整个目录；跳过二进制文件。找够 `limit` 行就停下，不等 git 把整个目录找完；`cancel` 置位
-/// 时杀掉 git、返回已经找到的，用来在搜索词变了时停下在大目录里跑着的上一次。
-pub fn grep(root: &Path, query: &GrepQuery, limit: usize, cancel: &AtomicBool) -> Vec<GrepMatch> {
+/// 时杀掉 git、返回已经找到的，用来在搜索词变了时停下在大目录里跑着的上一次。git 报错时（比如正则
+/// 按 git 的写法不对）是它的报错。
+pub fn grep(root: &Path, query: &GrepQuery, limit: usize, cancel: &AtomicBool) -> Result<Vec<GrepMatch>> {
     if query.pattern.is_empty() {
-        return Vec::new();
+        return Ok(Vec::new());
     }
     let scope = if in_repo(root) { "--untracked" } else { "--no-index" };
     let child = git_command(root)
@@ -69,17 +70,21 @@ pub fn grep(root: &Path, query: &GrepQuery, limit: usize, cancel: &AtomicBool) -
         .args(["-e", query.pattern, "--"])
         .args(query.pathspecs)
         .stdout(Stdio::piped())
-        .stderr(Stdio::null())
+        .stderr(Stdio::piped())
         .env("GIT_OPTIONAL_LOCKS", "0")
         .spawn();
-    let Ok(mut child) = child else {
-        return Vec::new();
-    };
-    let stdout = child.stdout.take();
+    let mut child = child.map_err(|err| GitError::new(format!("没能运行 git：{err}")))?;
+    let (stdout, stderr) = (child.stdout.take(), child.stderr.take());
     let child = Mutex::new(child);
     let done = AtomicBool::new(false);
     let mut matches = Vec::new();
-    thread::scope(|scope| {
+    let stderr = thread::scope(|scope| {
+        // 边跑边读完报错，不然报错多了 git 会卡在写上。
+        let stderr = scope.spawn(|| {
+            let mut out = Vec::new();
+            let _ = stderr.map(|mut pipe| pipe.read_to_end(&mut out));
+            out
+        });
         // git 一直没有输出时读会一直等着，取消得由另一个线程杀掉它。
         scope.spawn(|| {
             while !done.load(Ordering::Relaxed) {
@@ -110,14 +115,17 @@ pub fn grep(root: &Path, query: &GrepQuery, limit: usize, cancel: &AtomicBool) -
                 break;
             }
         }
+        // 找够了时 git 可能还在跑，杀掉了读报错的线程才等得到头。
+        let _ = child.lock().map(|mut child| child.kill());
         done.store(true, Ordering::Relaxed);
+        stderr.join().unwrap_or_default()
     });
-    // 找够了时 git 可能还在跑。
-    if let Ok(mut child) = child.into_inner() {
-        let _ = child.kill();
-        let _ = child.wait();
+    let status = child.into_inner().ok().and_then(|mut child| child.wait().ok());
+    // 找到了是 0、没找到是 1，被杀掉的没有退出码；别的是 git 报错。
+    if let Some(status) = status.filter(|status| status.code().is_some_and(|code| code > 1)) {
+        output_result(status, Vec::new(), &stderr)?;
     }
-    matches
+    Ok(matches)
 }
 
 /// 读一行，不含结尾的换行；超过 `MAX_GREP_LINE_BYTES` 的部分读掉、丢掉，不留在内存里。读到头或者

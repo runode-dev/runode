@@ -157,7 +157,7 @@ fn kill_group(child: &mut Child) {
 }
 
 /// git 退出以后，成功时是标准输出，失败时把标准错误（没有就用标准输出）整理成错误。
-fn output_result(status: ExitStatus, stdout: Vec<u8>, stderr: &[u8]) -> Result<Vec<u8>> {
+pub(crate) fn output_result(status: ExitStatus, stdout: Vec<u8>, stderr: &[u8]) -> Result<Vec<u8>> {
     if status.success() {
         return Ok(stdout);
     }

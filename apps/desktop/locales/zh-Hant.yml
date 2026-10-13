@@ -989,7 +989,7 @@ files:
   search_summary: "%{count} 個結果，在 %{files} 個檔案中"
   search_files: "%{files} 個檔案"
   search_truncated: "（只列出前 %{limit} 個）"
-  bad_regex: 規則運算式寫得不對
+  search_failed: "搜尋出錯：%{error}"
   refresh: 重新整理
   more: 更多
   show_dotfiles: 顯示點檔案

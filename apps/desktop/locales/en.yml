@@ -989,7 +989,7 @@ files:
   search_summary: "%{count} results in %{files} files"
   search_files: "%{files} files"
   search_truncated: " (showing the first %{limit})"
-  bad_regex: Invalid regular expression
+  search_failed: "Search failed: %{error}"
   refresh: Refresh
   more: More
   show_dotfiles: Show Dotfiles
