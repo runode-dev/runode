@@ -234,24 +234,24 @@ impl GitPanel {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        // 记下现在显示的这个储藏：按下以后、弹框期间别处 push、pop 挪了序号时 `Repo` 认得出来，不会动错。
+        let Some(stash) = self
+            .state()
+            .git
+            .as_ref()
+            .and_then(|git| git.iter().find(|repo| repo.root == root))
+            .and_then(|repo| repo.info.stashes.get(index).cloned())
+        else {
+            return;
+        };
         match op {
             StashOp::Apply => {
-                self.run_git(root, Busy::Stash, window, cx, move |repo| repo.stash_apply(index), |_, (), _, _| {});
+                self.run_git(root, Busy::Stash, window, cx, move |repo| repo.stash_apply(&stash), |_, (), _, _| {});
             }
             StashOp::Pop => {
-                self.run_git(root, Busy::Stash, window, cx, move |repo| repo.stash_pop(index), |_, (), _, _| {});
+                self.run_git(root, Busy::Stash, window, cx, move |repo| repo.stash_pop(&stash), |_, (), _, _| {});
             }
             StashOp::Drop => {
-                // 记下现在显示的这个储藏，弹框期间别处 push、pop 挪了序号时 `stash_drop` 认得出来。
-                let Some(stash) = self
-                    .state()
-                    .git
-                    .as_ref()
-                    .and_then(|git| git.iter().find(|repo| repo.root == root))
-                    .and_then(|repo| repo.info.stashes.get(index).cloned())
-                else {
-                    return;
-                };
                 let title = rust_i18n::t!("git.drop_stash_title", index = index).into_owned();
                 let detail = rust_i18n::t!("git.irreversible").into_owned();
                 let confirm = rust_i18n::t!("git.drop_stash_confirm").into_owned();

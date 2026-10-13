@@ -319,13 +319,17 @@ fn stashes_and_restores_changes() {
     assert_eq!(stashes.len(), 2);
     assert_eq!(stashes[1].message, "On main: tracked only");
 
-    handle.stash_apply(1).unwrap();
+    handle.stash_apply(&stashes[1]).unwrap();
     assert_eq!(repo.read("a.txt"), "two\n");
     assert_eq!(read(&repo).info.stashes.len(), 2);
     repo.git(&["checkout", "--", "a.txt"]);
 
-    handle.stash_pop(0).unwrap();
+    handle.stash_pop(&stashes[0]).unwrap();
     assert_eq!(repo.read("new.txt"), "n\n");
+    // pop 过以后序号挪了，拿着旧序号的不再 pop，也不再 drop；按对象 ID 的 apply 照常。
+    assert!(handle.stash_pop(&stashes[1]).is_err());
+    handle.stash_apply(&stashes[1]).unwrap();
+    repo.git(&["checkout", "--", "a.txt"]);
     let stashes = read(&repo).info.stashes;
     assert_eq!(stashes.len(), 1);
     // 读到以后别处又 push 了一个，`stash@{0}` 换了人，不删。
@@ -350,7 +354,7 @@ fn stash_keeps_nested_repositories() {
     handle.stash(None, true).unwrap();
     assert!(inner.join(".git").exists() && inner.join("a.txt").exists());
     assert!(!repo.path().join("new.txt").exists());
-    handle.stash_pop(0).unwrap();
+    handle.stash_pop(&read(&repo).info.stashes[0]).unwrap();
     assert_eq!(repo.read("new.txt"), "n\n");
     assert!(inner.join(".git").exists() && inner.join("a.txt").exists());
 }

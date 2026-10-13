@@ -469,29 +469,32 @@ impl Repo {
         run(&self.root, args, None).map(drop)
     }
 
-    /// 把 `stash@{index}` 的改动放回工作区，stash 留着。
-    pub fn stash_apply(&self, index: usize) -> Result {
-        self.stash_command("apply", index)
+    /// 把 `stash` 的改动放回工作区，stash 留着。按对象 ID 应用（`git stash apply` 认任何像 stash 的提交），
+    /// 读到它以后序号挪了也不会应用错。
+    pub fn stash_apply(&self, stash: &Stash) -> Result {
+        run(&self.root, ["stash", "apply", &stash.id], None).map(drop)
     }
 
-    /// 把 `stash@{index}` 的改动放回工作区并删掉它；有冲突时 git 不删。
-    pub fn stash_pop(&self, index: usize) -> Result {
-        self.stash_command("pop", index)
+    /// 把 `stash` 的改动放回工作区并删掉它；有冲突时 git 不删。读到它以后别处 push、pop 过，
+    /// `stash@{index}` 已经不是它时不动，报错。
+    pub fn stash_pop(&self, stash: &Stash) -> Result {
+        self.stash_command("pop", stash)
     }
 
     /// 删掉 `stash`。读到它以后别处 push、pop 过，`stash@{index}` 已经不是它时不删，报错。
     pub fn stash_drop(&self, stash: &Stash) -> Result {
+        self.stash_command("drop", stash)
+    }
+
+    /// pop 和 drop 只认 `stash@{index}` 这样的序号，先核对序号上仍是 `stash`。
+    fn stash_command(&self, command: &str, stash: &Stash) -> Result {
         let rev = format!("stash@{{{}}}", stash.index);
         let now = git(&self.root, &["rev-parse", "--verify", "--quiet", &rev]).unwrap_or_default();
         if String::from_utf8_lossy(&now).trim() != stash.id {
-            return Err(GitError::new(format!("{rev} 已经变了，没有删，看过最新的储藏列表再来")));
+            return Err(GitError::new(format!("{rev} 已经变了，什么也没做，看过最新的储藏列表再来")));
         }
-        // shortcut: 核对和删之间还有几毫秒的窗口（`git stash drop` 只认序号），真撞上过再改成拿 refs/stash 的锁。
-        self.stash_command("drop", stash.index)
-    }
-
-    fn stash_command(&self, command: &str, index: usize) -> Result {
-        run(&self.root, ["stash", command, &format!("stash@{{{index}}}")], None).map(drop)
+        // shortcut: 核对和动手之间还有几毫秒的窗口（git 只认序号），真撞上过再改成拿 refs/stash 的锁。
+        run(&self.root, ["stash", command, &rev], None).map(drop)
     }
 }
 
