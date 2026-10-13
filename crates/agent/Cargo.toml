@@ -1,5 +1,5 @@
 [package]
-name = "runode-agent-detect"
+name = "runode-agent"
 description = "Recognize AI coding agents in a terminal and tell whether they are working, idle or waiting for the user"
 version.workspace = true
 edition.workspace = true

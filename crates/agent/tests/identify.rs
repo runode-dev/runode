@@ -2,7 +2,7 @@
 //! 符号链接的启动器。
 
 use AgentKind::*;
-use runode_agent_detect::{ForegroundJob, ForegroundProcess, agent_from_name, identify_job};
+use runode_agent::{ForegroundJob, ForegroundProcess, agent_from_name, identify_job};
 use runode_shared_types::agent::AgentKind;
 
 fn process(pid: u32, name: &str, argv: &[&str]) -> ForegroundProcess {

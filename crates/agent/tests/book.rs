@@ -1,6 +1,6 @@
 //! 用户目录里的规则覆盖内置的同名规则，写错的退回内置的并留下警告。
 
-use runode_agent_detect::{RuleBook, Signals, Verdict};
+use runode_agent::{RuleBook, Signals, Verdict};
 use runode_shared_types::agent::AgentKind;
 
 #[test]

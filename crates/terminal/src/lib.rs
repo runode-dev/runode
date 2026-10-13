@@ -1,5 +1,5 @@
 //! runode 的终端：接到子 shell 的 PTY 上的 libghostty-vt 状态机，以及 shell 集成、提示符上
-//! 正在编辑的输入和运行完的命令。前台 agent 的识别由 `runode_agent_detect` 判断，这里把前台进程、
+//! 正在编辑的输入和运行完的命令。前台 agent 的识别由 `runode_agent` 判断，这里把前台进程、
 //! 屏幕文字、标题和进度报告交给它。
 //!
 //! 一个终端有两份 VT：宿主那份（`host_session::HostSession`）接着 PTY，是权威的，应答查询、

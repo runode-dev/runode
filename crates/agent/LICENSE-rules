@@ -1,4 +1,4 @@
-runode-agent-detect 内置的 agent 识别规则（rules/ 目录下的 22 份 .toml 文件）取自 herdr
+runode-agent 内置的 agent 识别规则（rules/ 目录下的 22 份 .toml 文件）取自 herdr
 （https://github.com/herdrdev/herdr，版本 0.9.3，提交 c4653a4f10502601ac110b12b2c45a5f7134082b，
 原路径 src/detect/manifests/），按 Apache License 2.0 使用，随 runode 的二进制一起分发。
 规则文件的改动只有两处：删掉了注释里指向 herdr 自身和它的 issue 编号的出处说明，

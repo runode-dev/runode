@@ -4581,7 +4581,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "runode-agent-detect"
+name = "runode-agent"
 version = "0.1.8"
 dependencies = [
  "regex",
@@ -4711,7 +4711,7 @@ dependencies = [
  "libc",
  "libghostty-vt",
  "portable-pty",
- "runode-agent-detect",
+ "runode-agent",
  "runode-paths",
  "runode-shared-types",
  "tracing",

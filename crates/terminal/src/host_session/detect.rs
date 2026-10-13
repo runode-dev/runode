@@ -1,5 +1,5 @@
 //! 前台 agent 的识别：把前台进程组、屏幕底部的文字、标题和进度报告交给
-//! `runode_agent_detect::Tracker`，由它判断是哪个 agent、在干什么。
+//! `runode_agent::Tracker`，由它判断是哪个 agent、在干什么。
 //!
 //! 标题和进度在 `HostSession::feed` 里随输出交过去；前台进程组在 `HostSession::refresh_foreground`
 //! 里认；屏幕文字只在 tracker 要比规则时才读。tracker 自己按时间节流，调用方在
@@ -10,7 +10,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use runode_agent_detect::{Foreground, RuleBook, identify_job};
+use runode_agent::{Foreground, RuleBook, identify_job};
 use runode_shared_types::agent::AgentKind;
 
 use super::{HostSession, log_err};
@@ -127,7 +127,7 @@ mod tests {
 
     #[test]
     fn a_title_reported_agent_is_checked_against_its_rules() {
-        use runode_agent_detect::EVAL_INTERVAL;
+        use runode_agent::EVAL_INTERVAL;
         use runode_shared_types::{
             agent::{Agent, AgentKind, AgentState},
             grid::GridSize,

@@ -37,7 +37,7 @@ use libghostty_vt::{
         SemanticPrompt, SizeReportSize, Terminal, UnknownSequence,
     },
 };
-use runode_agent_detect::Tracker;
+use runode_agent::Tracker;
 use runode_shared_types::{
     agent::{Agent, AgentState},
     grid::{GridSize, merge_window_resize},
@@ -148,7 +148,7 @@ pub struct HostSession {
     title: Option<String>,
     /// 前台 agent 和它的状态，由 `agent_tracker` 合成；不是 agent 在前台时为 `None`。
     agent: Option<Agent>,
-    /// 识别前台 agent 用的各路信号和去抖状态，见 `runode_agent_detect::Tracker`。
+    /// 识别前台 agent 用的各路信号和去抖状态，见 `runode_agent::Tracker`。
     agent_tracker: Tracker,
     /// 上次认前台进程组的结果，见 `detect::ForegroundProbe`。
     foreground_probe: detect::ForegroundProbe,
