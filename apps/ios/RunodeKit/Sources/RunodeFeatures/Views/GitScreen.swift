@@ -493,6 +493,9 @@
     struct GitDiffScreen: View {
         let model: GitModel
         let target: GitDiffTarget
+        /// 各块各行真正改了的字（`gitWordChanges`）和它们是哪份 diff 的；在后台算，块很大时也不卡界面，
+        /// 算好之前和 diff 换了以后先不标。
+        @State private var words: (diff: GitFileDiff, hunks: [[[Range<String.Index>]]])?
         @Environment(\.dismiss) private var dismiss
         @Environment(\.themeColors) private var colors
 
@@ -516,6 +519,13 @@
                     }
                 }
                 .task { await model.openDiff(target) }
+                .task(id: model.diff) {
+                    guard let diff = model.diff else { return }
+                    let hunks = await Task.detached(priority: .userInitiated) {
+                        diff.hunks.map(Presentation.gitWordChanges)
+                    }.value
+                    words = (diff, hunks)
+                }
                 .onDisappear { model.closeDiff() }
         }
 
@@ -536,8 +546,9 @@
                                 .foregroundStyle(.secondary)
                                 .padding(.horizontal, 12)
                                 .padding(.vertical, 8)
-                            ForEach(Array(diff.hunks.enumerated()), id: \.offset) { _, hunk in
-                                GitHunkView(hunk: hunk)
+                            let hunkWords = words?.diff == diff ? words?.hunks : nil
+                            ForEach(Array(diff.hunks.enumerated()), id: \.offset) { ix, hunk in
+                                GitHunkView(hunk: hunk, words: hunkWords?[ix])
                             }
                             if diff.truncated {
                                 Text("改动太多，只显示了前面一部分。")
@@ -561,6 +572,8 @@
     /// 一块改动：块头，接着一行一行。
     private struct GitHunkView: View {
         let hunk: GitHunk
+        /// 各行真正改了的字，和 `hunk.lines` 一一对应；还没算好时为空。
+        let words: [[Range<String.Index>]]?
         @Environment(\.themeColors) private var colors
 
         var body: some View {
@@ -573,9 +586,8 @@
                     .padding(.vertical, 6)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .background(colors.card)
-                let words = Presentation.gitWordChanges(hunk)
                 ForEach(Array(hunk.lines.enumerated()), id: \.offset) { ix, line in
-                    GitLineView(line: line, words: words[ix])
+                    GitLineView(line: line, words: words?[ix] ?? [])
                 }
             }
         }

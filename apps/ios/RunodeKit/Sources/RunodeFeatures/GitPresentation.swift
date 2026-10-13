@@ -194,11 +194,13 @@ extension Presentation {
     /// 当整行重写，都不标。收到的行里制表符已经展开，不用另外处理。
     public static func gitChangedWords(_ old: String, _ new: String) -> ([Range<String.Index>], [Range<String.Index>]) {
         let (rangesA, rangesB) = (wordTokens(old), wordTokens(new))
-        // 词换成编号再比，免得在最长公共子序列的内层循环里比字符串。
-        var ids: [Substring: Int] = [:]
+        // 词换成编号再比，免得在最长公共子序列的内层循环里比字符串。按字节认：`Substring` 的相等把
+        // 写法不同、看着一样的字（é 和 e 加尖音符）当成一样，git 和电脑上都按字节，那种改动要标出来。
+        var ids: [[UInt8]: Int] = [:]
         func id(_ word: Substring) -> Int {
-            if let id = ids[word] { return id }
-            ids[word] = ids.count
+            let key = Array(word.utf8)
+            if let id = ids[key] { return id }
+            ids[key] = ids.count
             return ids.count - 1
         }
         let a = rangesA.map { id(old[$0]) }

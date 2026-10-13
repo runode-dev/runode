@@ -272,6 +272,12 @@ import Testing
         #expect(changed("改动现在只有一处：实现。", "改动现在有两处：实现，再关掉。") == (["只", "一"], ["两", "，再关掉"]))
     }
 
+    @Test func comparesBytesNotCanonicalForms() {
+        // é 写成一个字和写成 e 加尖音符，看着一样，字节不同，要标出来。
+        let (a, b) = Presentation.gitChangedWords("let title = \"\u{E9}\";", "let title = \"e\u{301}\";")
+        #expect(a.count == 1 && b.count == 1)
+    }
+
     @Test func rewrittenLinesAreNotMarked() {
         #expect(changed("fn alpha() {}", "let beta = gamma;") == ([], []))
     }
