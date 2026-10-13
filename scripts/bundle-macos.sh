@@ -127,6 +127,16 @@ notarize() {
         exit 1
     fi
 }
+# stapler 从 Apple 的 CloudKit 取票据，CI 的 runner 上连接时不时断掉（NSURLErrorDomain -1005），隔一会儿再试。
+staple() {
+    local attempt
+    for attempt in 1 2 3 4; do
+        xcrun stapler staple "$1" && return
+        [[ $attempt == 4 ]] || sleep $((attempt * 15))
+    done
+    echo "钉不上公证票据：$1" >&2
+    exit 1
+}
 notarizing=false
 if [[ -n "${NOTARY_PROFILE:-}" || -n "${NOTARY_KEY:-}" ]]; then
     notarizing=true
@@ -139,7 +149,7 @@ rm -f "$zip"
 ditto -c -k --keepParent --sequesterRsrc "$app" "$zip"
 if $notarizing; then
     notarize "$zip"
-    xcrun stapler staple "$app"
+    staple "$app"
     rm -f "$zip"
     ditto -c -k --keepParent --sequesterRsrc "$app" "$zip"
 fi
@@ -162,7 +172,7 @@ if [[ "$SIGN_IDENTITY" != - ]]; then
 fi
 if $notarizing; then
     notarize "$dmg"
-    xcrun stapler staple "$dmg"
+    staple "$dmg"
 fi
 
 echo "$dmg"
