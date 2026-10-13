@@ -27,6 +27,7 @@ use super::{
     cards,
 };
 use crate::ui::button::Toggle;
+use crate::ui::menu::MenuHost as _;
 // 面板外框在 `runode_ui::panel`、改动颜色在 `runode_ui::theme`，窗口里各面板照旧从这里引。
 use crate::ui::a11y::A11yPress;
 pub(super) use crate::ui::{
@@ -372,8 +373,12 @@ impl WindowView {
             }
             self.close_branch_picker(window, cx);
         }
-        if files_were_shown && !self.files_shown() && self.file_tree.focus_handle(cx).contains_focused(window, cx) {
-            window.focus(&self.focus_handle(cx), cx);
+        if files_were_shown && !self.files_shown() {
+            // 菜单存在页上，页不画了菜单也画不出来：先关掉，焦点回到树上再一起交回终端。
+            self.file_tree.update(cx, |page, cx| page.close_menu(window, cx));
+            if self.file_tree.focus_handle(cx).contains_focused(window, cx) {
+                window.focus(&self.focus_handle(cx), cx);
+            }
         }
         if !self.github_actions_shown() {
             self.cancel_github_actions_edit(window, cx);

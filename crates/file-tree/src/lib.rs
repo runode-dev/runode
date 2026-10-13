@@ -290,10 +290,8 @@ impl FileTree {
         let Some(old) = self.ws.replace(ws).filter(|&old| old != ws) else {
             return;
         };
-        let query = self.search.query(cx);
-        if let Some(state) = self.workspaces.get_mut(&old) {
-            state.query = query;
-        }
+        // 首次扫描还没回来时旧 workspace 可能还没有树，搜索词也要记下。
+        self.workspaces.entry(old).or_default().query = self.search.query(cx);
         let query = self.state().query.clone();
         self.search.set_query(query, cx);
         self.sync_file_search(cx);
