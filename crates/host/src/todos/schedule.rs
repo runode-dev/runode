@@ -9,7 +9,7 @@ use std::{
     time::Duration,
 };
 
-use runode_protocol::todo::{Column, Schedule, When, column};
+use runode_protocol::todo::{Column, Schedule, column};
 use runode_todo::next_fire;
 
 use super::{Todos, unix_now};
@@ -84,29 +84,17 @@ impl Shared {
             }
             return;
         }
-        // 先记到点、再加任务、最后删一次性的定时：加任务失败时定时还在（记过到点，不会马上又触发），不会
-        // 连任务带定时一起丢掉。
-        let added = self.todos.with_db(|db| {
-            db.set_fired(&schedule.id, now)?;
-            let id = db.add_todo(&schedule.spec, now, Some(&schedule.id))?;
-            if matches!(schedule.when, When::Once { .. })
-                && let Err(err) = db.remove_schedule(&schedule.id)
-            {
-                tracing::warn!("cannot remove the one-time schedule {}: {err}", schedule.id);
-            }
-            Ok(id)
-        });
-        // 失败时不通知：通知会叫醒定时的线程马上再来一轮，记不进库时就成了空转。
-        if added.is_ok() {
-            self.todos_changed();
-        }
-        match added {
-            Ok(id) => {
+        // `schedule` 是这一轮开头读的，之后可能被删、被改过：`fire_schedule` 照库里现在的样子办。
+        match self.todos.with_db(|db| db.fire_schedule(&schedule.id, now)) {
+            Ok(Some(id)) => {
+                self.todos_changed();
                 tracing::info!("schedule {} fired: todo {id}", schedule.id);
                 if let Err(err) = self.start_todo(&id) {
                     tracing::warn!("schedule {} could not start todo {id}: {err}", schedule.id);
                 }
             }
+            Ok(None) => tracing::info!("schedule {} was removed or changed before it fired", schedule.id),
+            // 不通知：通知会叫醒定时的线程马上再来一轮，记不进库时就成了空转；下一轮（最多 `MAX_SLEEP`）再试。
             Err(err) => tracing::warn!("schedule {} could not add its todo: {err}", schedule.id),
         }
     }

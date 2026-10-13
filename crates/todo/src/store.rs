@@ -167,6 +167,31 @@ fn new_id(tx: &Transaction<'_>) -> Result<String> {
     Err("cannot pick an unused id".into())
 }
 
+/// 在 `tx` 里加一张待办的任务，见 `Store::add_todo`。
+fn insert_todo(tx: &Transaction<'_>, spec: &TodoSpec, now: u64, schedule: Option<&str>) -> Result<String> {
+    let id = new_id(tx)?;
+    let number: i64 =
+        tx.query_row("SELECT value FROM meta WHERE key = 'next_number'", [], |row| row.get(0)).map_err(failed)?;
+    tx.execute("UPDATE meta SET value = ?1 WHERE key = 'next_number'", [number + 1]).map_err(failed)?;
+    tx.execute(
+        "INSERT INTO todos (id, number, title, prompt, dir, agent, worktree, created, schedule, rank)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, (SELECT COALESCE(MAX(rank), 0) + 1 FROM todos))",
+        params![
+            id,
+            number,
+            spec.title,
+            spec.prompt,
+            path_bytes(&spec.dir),
+            spec.agent,
+            spec.worktree,
+            now as i64,
+            schedule
+        ],
+    )
+    .map_err(failed)?;
+    Ok(id)
+}
+
 /// `when` 拆成表里的几列：种类，以及 `at`、`hour`、`minute`、`days`、`minutes`。
 fn when_columns(when: &When) -> (&'static str, [Option<i64>; 5]) {
     match *when {
@@ -258,26 +283,7 @@ impl Store {
     /// 加一张待办的任务，排在最后；`schedule` 是开出它的定时。返回新任务的标识。
     pub fn add_todo(&mut self, spec: &TodoSpec, now: u64, schedule: Option<&str>) -> Result<String> {
         let tx = self.conn.transaction().map_err(failed)?;
-        let id = new_id(&tx)?;
-        let number: i64 =
-            tx.query_row("SELECT value FROM meta WHERE key = 'next_number'", [], |row| row.get(0)).map_err(failed)?;
-        tx.execute("UPDATE meta SET value = ?1 WHERE key = 'next_number'", [number + 1]).map_err(failed)?;
-        tx.execute(
-            "INSERT INTO todos (id, number, title, prompt, dir, agent, worktree, created, schedule, rank)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, (SELECT COALESCE(MAX(rank), 0) + 1 FROM todos))",
-            params![
-                id,
-                number,
-                spec.title,
-                spec.prompt,
-                path_bytes(&spec.dir),
-                spec.agent,
-                spec.worktree,
-                now as i64,
-                schedule
-            ],
-        )
-        .map_err(failed)?;
+        let id = insert_todo(&tx, spec, now, schedule)?;
         tx.commit().map_err(failed)?;
         Ok(id)
     }
@@ -459,7 +465,33 @@ impl Store {
         Ok(exists)
     }
 
-    /// 记下定时到点了。
+    /// 定时 `id` 到点了：照库里它现在的样子加一张任务、记下到点的时刻（一次性的删掉），都在一个事务里，
+    /// 中途失败或者进程退出时定时原样留着、下一轮再试。定时已经删掉了、或者照现在的样子还没到点（读出来
+    /// 以后被改过）时什么都不做，为空。返回新任务的标识。
+    pub fn fire_schedule(&mut self, id: &str, now: u64) -> Result<Option<String>> {
+        let tx = self.conn.transaction().map_err(failed)?;
+        let Some(current) = tx
+            .query_row(&format!("SELECT {SCHEDULE_COLUMNS} FROM schedules WHERE id = ?1"), [id], schedule)
+            .optional()
+            .map_err(failed)?
+        else {
+            return Ok(None);
+        };
+        if !crate::next_fire(&current.when, current.last_fired).is_some_and(|at| at <= now) {
+            return Ok(None);
+        }
+        let todo = insert_todo(&tx, &current.spec, now, Some(id))?;
+        if matches!(current.when, When::Once { .. }) {
+            tx.execute("DELETE FROM schedules WHERE id = ?1", [id]).map_err(failed)?;
+        } else {
+            tx.execute("UPDATE schedules SET last_fired = ?2 WHERE id = ?1", params![id, now as i64])
+                .map_err(failed)?;
+        }
+        tx.commit().map_err(failed)?;
+        Ok(Some(todo))
+    }
+
+    /// 记下定时到点了、这次跳过，不开任务。
     pub fn set_fired(&self, id: &str, at: u64) -> Result<()> {
         self.conn
             .execute("UPDATE schedules SET last_fired = ?2 WHERE id = ?1", params![id, at as i64])

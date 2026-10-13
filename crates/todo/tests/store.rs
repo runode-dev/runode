@@ -111,6 +111,46 @@ fn schedules_round_trip() {
 }
 
 #[test]
+fn firing_a_schedule_follows_what_the_database_says_now() {
+    let mut store = Store::open(&temp_db("fire")).unwrap();
+    let every = store.add_schedule(&spec("poll"), &When::Every { minutes: 1 }, 100).unwrap();
+    let once = store.add_schedule(&spec("deploy"), &When::Once { at: 200 }, 100).unwrap();
+
+    // 还没到点：不开任务。
+    assert_eq!(store.fire_schedule(&every, 150).unwrap(), None);
+    // 到点：开一张照现在的内容的任务，记下到点的时刻。
+    assert!(store.update_schedule(&every, Some(&spec("poll v2")), None, 0).unwrap());
+    let todo = store.fire_schedule(&every, 160).unwrap().unwrap();
+    let todo = store.todo_by_id(&todo).unwrap().unwrap();
+    assert_eq!((todo.spec.title.as_str(), todo.schedule.as_deref()), ("poll v2", Some(every.as_str())));
+    assert_eq!(store.list_schedules().unwrap()[0].last_fired, 160);
+    // 改了时间（从改的时刻重新算起）以后，按旧的样子到点的这次不开。
+    assert!(store.update_schedule(&every, None, Some(&When::Every { minutes: 10 }), 300).unwrap());
+    assert_eq!(store.fire_schedule(&every, 400).unwrap(), None);
+
+    // 一次性的开完就删；删掉了的不再开。
+    assert!(store.fire_schedule(&once, 250).unwrap().is_some());
+    assert_eq!(store.fire_schedule(&once, 250).unwrap(), None);
+    assert!(store.remove_schedule(&every).unwrap());
+    assert_eq!(store.fire_schedule(&every, 10_000).unwrap(), None);
+    assert!(store.list_schedules().unwrap().is_empty());
+    assert_eq!(store.list_todos(10_000).unwrap().len(), 2);
+}
+
+#[test]
+fn a_schedule_that_fails_to_add_its_todo_is_left_as_it_was() {
+    let path = temp_db("fire-fails");
+    let mut store = Store::open(&path).unwrap();
+    let once = store.add_schedule(&spec("deploy"), &When::Once { at: 200 }, 100).unwrap();
+    // 加任务那一步失败：发编号的计数没了。
+    Connection::open(&path).unwrap().execute("DELETE FROM meta", []).unwrap();
+    assert!(store.fire_schedule(&once, 250).is_err());
+    let left = store.list_schedules().unwrap();
+    assert_eq!((left.len(), left[0].last_fired), (1, 100));
+    assert!(store.list_todos(250).unwrap().is_empty());
+}
+
+#[test]
 fn refuses_a_database_from_a_newer_runode_and_leaves_it_alone() {
     let path = temp_db("newer");
     drop(Store::open(&path).unwrap());
