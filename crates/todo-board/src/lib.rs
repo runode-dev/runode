@@ -341,7 +341,10 @@ impl TodoBoard {
     fn drop_todo(&mut self, dragged: &DraggedTodo, to: Column, before: Option<String>, cx: &mut Context<Self>) {
         let Some(action) = dragged.drop_into(to) else { return };
         let id = dragged.id.clone();
-        self.dropped = Some(id.clone());
+        // 同一列里调先后不换列，记下了就一直留着，这张卡片以后换列时会被当成拖着放下的、不飞。
+        if action != DropAction::Reorder {
+            self.dropped = Some(id.clone());
+        }
         let mut steps: Vec<Step> = Vec::new();
         {
             let id = id.clone();
