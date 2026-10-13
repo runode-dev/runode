@@ -25,7 +25,7 @@ pub use patch::{HunkAction, hunk_actionable};
 pub use repos::{RepoKind, Repos, snapshot_repos};
 pub use search::{GrepMatch, GrepQuery, grep, list_files};
 pub use snapshot::{FileDiff, FileStatus, Hunk, Line, LineKind, Section, Snapshot, UntrackedCache, snapshot};
-pub use view::{DiffRow, DiffSide, DiffView, ReadOptions, TooLarge, merge_rows};
+pub use view::{DiffRow, DiffSide, DiffView, ReadOptions, TooLarge, first_lines, merge_rows};
 
 use std::{
     fs,

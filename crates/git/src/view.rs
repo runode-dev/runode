@@ -71,7 +71,7 @@ fn range(part: &str) -> Option<(u32, u32)> {
 
 /// 块头 `@@ -a,b +c,d @@` 里旧文件和新文件的第一行：行数为 0 的那边（只有加或只有删）块头
 /// 写的是块前面那一行，块从它的下一行开始。
-pub(crate) fn first_lines(header: &str) -> Option<(u32, u32)> {
+pub fn first_lines(header: &str) -> Option<(u32, u32)> {
     let mut parts = header.strip_prefix("@@ ")?.split(' ');
     let (old, old_count) = range(parts.next()?)?;
     let (new, new_count) = range(parts.next()?)?;

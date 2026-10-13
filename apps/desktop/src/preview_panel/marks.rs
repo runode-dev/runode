@@ -21,7 +21,8 @@ fn diff_marks(diff: &git::FileDiff) -> HashMap<u32, Mark> {
     for hunk in &diff.hunks {
         let mut removed = 0;
         let mut added = Vec::new();
-        let mut last_new = 0;
+        // 从块头起算：没有上下文行（`diff.context=0`）、只删不增的块里没有新行号。
+        let mut last_new = git::first_lines(&hunk.header).map_or(0, |(_, new)| new.saturating_sub(1));
         let flush = |removed: &mut usize, added: &mut Vec<u32>, next: u32, marks: &mut HashMap<u32, Mark>| {
             if added.is_empty() && *removed > 0 {
                 marks.entry(next.max(1)).or_insert(Mark::Removed);
@@ -51,18 +52,24 @@ fn diff_marks(diff: &git::FileDiff) -> HashMap<u32, Mark> {
 /// 暂存区的改动。
 fn index_to_worktree(unstaged: &git::FileDiff, line: u32) -> Option<u32> {
     let mut delta: i64 = 0;
-    for diff_line in unstaged.hunks.iter().flat_map(|hunk| &hunk.lines) {
-        match diff_line.old {
-            Some(old) if old == line => {
-                return if diff_line.kind == LineKind::Context { diff_line.new } else { None };
-            }
-            Some(old) if old > line => break,
-            _ => {}
+    'hunks: for hunk in &unstaged.hunks {
+        // 整块在这一行之后的不算；只加不删的块没有旧行号，要看块头。
+        if git::first_lines(&hunk.header).is_some_and(|(old, _)| old > line) {
+            break;
         }
-        match diff_line.kind {
-            LineKind::Added => delta += 1,
-            LineKind::Removed => delta -= 1,
-            LineKind::Context => {}
+        for diff_line in &hunk.lines {
+            match diff_line.old {
+                Some(old) if old == line => {
+                    return if diff_line.kind == LineKind::Context { diff_line.new } else { None };
+                }
+                Some(old) if old > line => break 'hunks,
+                _ => {}
+            }
+            match diff_line.kind {
+                LineKind::Added => delta += 1,
+                LineKind::Removed => delta -= 1,
+                LineKind::Context => {}
+            }
         }
     }
     u32::try_from(i64::from(line) + delta).ok().filter(|line| *line > 0)
@@ -158,6 +165,31 @@ mod tests {
         assert_eq!(index_to_worktree(&unstaged, 5), Some(6));
         // 改动块之外的行按前面增减的行数平移。
         assert_eq!(index_to_worktree(&unstaged, 20), Some(21));
+    }
+
+    /// 没有上下文行的块（`diff.context=0`）按块头的行号算。
+    fn zero_context(hunks: &[(&str, Vec<Line>)]) -> FileDiff {
+        let hunks = hunks.iter().map(|(header, lines)| Hunk { header: (*header).to_owned(), lines: lines.clone() });
+        FileDiff { hunks: hunks.collect(), ..diff(Vec::new()) }
+    }
+
+    #[test]
+    fn zero_context_removals_mark_the_following_line() {
+        let file = zero_context(&[("@@ -50,2 +49,0 @@", vec![line(R, Some(50), None), line(R, Some(51), None)])]);
+        assert_eq!(diff_marks(&file), HashMap::from([(50, Mark::Removed)]));
+        // 删掉开头几行时标在第 1 行。
+        let file = zero_context(&[("@@ -1,2 +0,0 @@", vec![line(R, Some(1), None), line(R, Some(2), None)])]);
+        assert_eq!(diff_marks(&file), HashMap::from([(1, Mark::Removed)]));
+    }
+
+    #[test]
+    fn lines_before_a_zero_context_insertion_keep_their_numbers() {
+        // 第 100 行后面加了两行。
+        let unstaged =
+            zero_context(&[("@@ -100,0 +101,2 @@", vec![line(A, None, Some(101)), line(A, None, Some(102))])]);
+        assert_eq!(index_to_worktree(&unstaged, 2), Some(2));
+        assert_eq!(index_to_worktree(&unstaged, 100), Some(100));
+        assert_eq!(index_to_worktree(&unstaged, 101), Some(103));
     }
 
     #[test]
