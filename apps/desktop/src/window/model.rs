@@ -377,7 +377,6 @@ impl WindowView {
     fn show_tab(&mut self, ix: usize, reveal_now: bool, window: &mut Window, cx: &mut Context<Self>) {
         self.mobile = None;
         self.todo_board = None;
-        self.todo_dialog = None;
         // 焦点要交给终端，盖着终端的放大预览栏还原。
         self.restore_preview_zoom(cx);
         let workspace = self.workspace_mut();

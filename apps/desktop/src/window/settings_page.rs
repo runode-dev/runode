@@ -39,7 +39,6 @@ impl WindowView {
     pub(super) fn open_settings(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.mobile = None;
         self.todo_board = None;
-        self.todo_dialog = None;
         self.new_workspace = None;
         self.add_task = None;
         self.commit_message_dialog = None;

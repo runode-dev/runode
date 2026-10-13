@@ -90,7 +90,6 @@ impl WindowView {
     pub(super) fn show_mobile(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.drop_settings(cx);
         self.todo_board = None;
-        self.todo_dialog = None;
         if self.mobile.is_none() {
             let system_name = host_name();
             let saved = cx.global::<AppConfig>().0.remote_access_name.clone().unwrap_or_default();

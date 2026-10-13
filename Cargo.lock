@@ -4743,6 +4743,7 @@ dependencies = [
  "runode-remote-access",
  "runode-shared-types",
  "runode-terminal",
+ "runode-todo-board",
  "runode-ui",
  "runode-update",
  "rust-i18n",
@@ -4978,6 +4979,21 @@ dependencies = [
  "libc",
  "runode-shared-types",
  "rusqlite",
+]
+
+[[package]]
+name = "runode-todo-board"
+version = "0.1.8"
+dependencies = [
+ "anyhow",
+ "futures",
+ "gpui-pre",
+ "libc",
+ "runode-git",
+ "runode-protocol",
+ "runode-shared-types",
+ "runode-ui",
+ "rust-i18n",
 ]
 
 [[package]]

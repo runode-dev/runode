@@ -85,7 +85,7 @@ pub(crate) use status_bar::item_icon_and_title as status_item_icon_and_title;
 pub use status_bar::watch as watch_status;
 pub use tasks::RunNamedTask;
 pub use titlebar::titlebar_options;
-pub use todo_board::store::watch as watch_todos;
+pub use todo_board::watch_todos;
 
 use crate::ui::a11y::{Hide, PressDown};
 // 关标签、关分屏和放大分屏这几个动作在 `runode_ui::actions`，焦点在预览栏里时由预览栏接住；
@@ -278,8 +278,7 @@ pub struct WindowView {
     /// 开着的设置页，盖住整个窗口。
     settings: Option<settings_page::SettingsPage>,
     /// 开着的任务板，和手机端引导页一样盖住标签和分屏；新建、编辑任务和定时的对话框。
-    todo_board: Option<todo_board::TodoBoard>,
-    todo_dialog: Option<todo_board::TodoDialog>,
+    todo_board: Option<todo_board::OpenTodoBoard>,
     /// 当前 workspace 里没有标签时窗口的焦点，快捷键（新开标签等）照常派发得到。
     empty_focus: FocusHandle,
     /// 开着的 agent 列表。
@@ -445,7 +444,6 @@ impl WindowView {
             mobile: None,
             settings: None,
             todo_board: None,
-            todo_dialog: None,
             empty_focus: cx.focus_handle(),
             agent_picker: None,
             arrange_picker: None,
@@ -660,7 +658,7 @@ impl Focusable for WindowView {
             return page.focus.clone();
         }
         if let Some(board) = &self.todo_board {
-            return board.focus.clone();
+            return board.view.focus_handle(cx);
         }
         match self.focused_view() {
             Some(view) => view.focus_handle(cx),
@@ -697,7 +695,7 @@ impl Render for WindowView {
         let new_workspace = self.render_new_workspace(cx);
         let add_task = self.render_add_task(cx);
         let commit_message_dialog = self.render_commit_message_dialog(cx);
-        let todo_dialog = self.render_todo_dialog(fg, bg, cx);
+        let todo_dialog = self.todo_dialog(cx);
         let status_bar = (self.settings.is_none() && status_bar::shown(cx))
             .then(|| row_slot(&self.slots(cx).status_bar, status_bar::STATUS_BAR_HEIGHT, window));
         // 这几个浮层挡住了后面的界面，开着时后面的不报给辅助工具。

@@ -37,6 +37,8 @@ runode-github-actions.workspace = true
 runode-preview-panel.workspace = true
 # 右侧面板的文件树。
 runode-file-tree.workspace = true
+# 铺满窗口的任务板。
+runode-todo-board.workspace = true
 # 设置页里配对手机时画二维码。
 qrcode.workspace = true
 gpui.workspace = true

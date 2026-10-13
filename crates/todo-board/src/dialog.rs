@@ -1,39 +1,38 @@
 //! 新建、编辑任务和定时的对话框：标题、提示词、目录、agent、要不要独立的工作树；定时多一组什么时候跑
 //! （一次、每天某时可选星期几、每隔几分钟）。时间都按本机的本地时间填、显示，换算用 libc 的
 //! `localtime_r` 和 `mktime`。填得不对时在对话框里说，不发请求；宿主那边还会再查一遍。
+//!
+//! 对话框单独是一个视图（`TodoDialog`），由看板开、存在看板身上，盖住整个窗口，所以由 app 画在窗口的最上层
+//! （`TodoBoard::dialog`）。关掉、存好了经 `DialogEvent` 告诉看板。
 
 use std::path::PathBuf;
 
 use gpui::{
-    Context, Entity, Focusable, FontWeight, Hsla, KeyDownEvent, MouseButton, PathPromptOptions, Role, Stateful,
-    Subscription, Window, div, prelude::*, px,
+    App, Context, Entity, EventEmitter, Focusable, FontWeight, Hsla, KeyDownEvent, MouseButton, PathPromptOptions,
+    Render, Role, Subscription, Window, div, prelude::*, px,
 };
 use runode_protocol::{
     ClientMsg,
     todo::{DEFAULT_AGENT, Schedule, Todo, TodoSpec, When},
 };
-use runode_shared_types::color::Rgb;
-
-use super::store;
-use crate::ui::button::{Button, ButtonVariant};
-use crate::ui::dialog::Dialog;
-use crate::{
-    ui::{
-        a11y::{Disable as _, Press},
-        display_dir,
-        font_size::{FontSize, scaled},
-        hsla,
-        input::{Input, InputEvent, InputState},
-        switch::Switch,
-        textarea::{Textarea, TextareaEvent, TextareaState},
-        theme::ActiveTheme as _,
-    },
-    window::{TITLEBAR_HEIGHT, WindowView},
+use runode_ui::{
+    a11y::{Disable as _, Press},
+    button::{Button, ButtonVariant},
+    dialog::Dialog,
+    display_dir,
+    font_size::{FontSize, scaled},
+    input::{Input, InputEvent, InputState},
+    panel::TITLEBAR_HEIGHT,
+    switch::Switch,
+    textarea::{Textarea, TextareaEvent, TextareaState},
+    theme::ActiveTheme as _,
 };
+
+use crate::store;
 
 /// 对话框改的是哪一个；新建时为空。
 #[derive(Clone)]
-pub(in crate::window) enum Editing {
+pub(crate) enum Editing {
     Todo(Todo),
     Schedule(Schedule),
 }
@@ -46,7 +45,8 @@ enum Kind {
     Every,
 }
 
-pub(in crate::window) struct TodoDialog {
+/// 新建、编辑任务和定时的对话框，见模块说明。
+pub struct TodoDialog {
     /// 是定时（否则是任务）。
     schedule: bool,
     editing: Option<Editing>,
@@ -70,16 +70,16 @@ pub(in crate::window) struct TodoDialog {
 }
 
 /// 本地时间的年月日时分。
-pub(in crate::window) struct Local {
-    pub(in crate::window) year: i32,
-    pub(in crate::window) month: u32,
-    pub(in crate::window) day: u32,
-    pub(in crate::window) hour: u32,
-    pub(in crate::window) minute: u32,
+pub(crate) struct Local {
+    pub(crate) year: i32,
+    pub(crate) month: u32,
+    pub(crate) day: u32,
+    pub(crate) hour: u32,
+    pub(crate) minute: u32,
 }
 
 /// `at`（Unix 秒）的本地时间。
-pub(in crate::window) fn local(at: u64) -> Option<Local> {
+pub(crate) fn local(at: u64) -> Option<Local> {
     let at = libc::time_t::try_from(at).ok()?;
     // SAFETY: `tm` 是纯数据，全零是合法的值；`localtime_r` 只写它，两个指针都指向这里的局部变量。
     let mut tm: libc::tm = unsafe { std::mem::zeroed() };
@@ -143,22 +143,32 @@ fn first_line(text: &str) -> &str {
     text.lines().map(str::trim).find(|line| !line.is_empty()).unwrap_or_default()
 }
 
-impl WindowView {
-    /// 打开新建（`editing` 为空）或编辑任务、定时的对话框，焦点给标题。
-    pub(in crate::window) fn open_todo_dialog(
-        &mut self,
+/// 对话框要看板办的事。
+pub(crate) enum DialogEvent {
+    /// 按了取消、Esc 或点了外面：关掉，焦点交回看板。
+    Dismissed,
+    /// 宿主办成了：关掉。
+    Saved,
+}
+
+impl EventEmitter<DialogEvent> for TodoDialog {}
+
+impl TodoDialog {
+    /// 新建（`editing` 为空）或编辑任务、定时的对话框，焦点给标题；新建时目录先填 `dir`（当前 workspace 的）。
+    pub(crate) fn new(
         schedule: bool,
         editing: Option<Editing>,
+        dir: PathBuf,
         window: &mut Window,
         cx: &mut Context<Self>,
-    ) {
+    ) -> Self {
         let spec = match &editing {
             Some(Editing::Todo(todo)) => Some(todo.spec.clone()),
             Some(Editing::Schedule(schedule)) => Some(schedule.spec.clone()),
             None => None,
         };
         let locked = matches!(&editing, Some(Editing::Todo(todo)) if todo.started.is_some());
-        let dir = spec.as_ref().map_or_else(|| self.workspace().dir.clone(), |spec| spec.dir.clone());
+        let dir = spec.as_ref().map_or(dir, |spec| spec.dir.clone());
         // 新建任务时目录在 git 仓库里就默认开工作树；定时默认不开，每次到点都开一个会越堆越多。
         let worktree =
             spec.as_ref().map_or_else(|| !schedule && runode_git::repo_root(&dir).is_some(), |spec| spec.worktree);
@@ -207,18 +217,18 @@ impl WindowView {
         // 输入框里回车保存，Esc 关掉对话框；提示词里 ⌘回车保存。
         let mut events = Vec::new();
         for input in [&title, &agent, &at, &clock, &minutes] {
-            events.push(cx.subscribe_in(input, window, |this, _, event: &InputEvent, window, cx| match event {
-                InputEvent::Next => this.save_todo_dialog(cx),
-                InputEvent::Dismiss => this.close_todo_dialog(window, cx),
+            events.push(cx.subscribe_in(input, window, |this, _, event: &InputEvent, _, cx| match event {
+                InputEvent::Next => this.save(cx),
+                InputEvent::Dismiss => cx.emit(DialogEvent::Dismissed),
                 InputEvent::Changed(_) | InputEvent::Previous => {}
             }));
         }
         events.push(cx.subscribe_in(&prompt, window, |this, _, event: &TextareaEvent, _, cx| match event {
-            TextareaEvent::Submit => this.save_todo_dialog(cx),
+            TextareaEvent::Submit => this.save(cx),
             TextareaEvent::Changed => {}
         }));
         window.focus(&title.focus_handle(cx), cx);
-        self.todo_dialog = Some(TodoDialog {
+        Self {
             schedule,
             editing,
             title,
@@ -235,21 +245,11 @@ impl WindowView {
             error: None,
             saving: false,
             _events: events,
-        });
-        cx.notify();
-    }
-
-    fn close_todo_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.todo_dialog.take().is_some() {
-            if let Some(board) = &self.todo_board {
-                window.focus(&board.focus, cx);
-            }
-            cx.notify();
         }
     }
 
     /// 弹出系统的目录选择框，选好的目录换上。
-    fn browse_todo_dir(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    fn browse_dir(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let paths = cx.prompt_for_paths(PathPromptOptions {
             files: false,
             directories: true,
@@ -259,14 +259,12 @@ impl WindowView {
         cx.spawn_in(window, async move |this, cx| {
             let Ok(Ok(Some(paths))) = paths.await else { return };
             let Some(dir) = paths.into_iter().next() else { return };
-            this.update(cx, |this, cx| {
-                if let Some(dialog) = &mut this.todo_dialog {
-                    // 不在仓库里开不了工作树；新建任务换到仓库里时照打开对话框时的规矩默认打开。
-                    let new_todo = !dialog.schedule && dialog.editing.is_none();
-                    dialog.worktree = runode_git::repo_root(&dir).is_some() && (dialog.worktree || new_todo);
-                    dialog.dir = dir;
-                    cx.notify();
-                }
+            this.update(cx, |dialog, cx| {
+                // 不在仓库里开不了工作树；新建任务换到仓库里时照打开对话框时的规矩默认打开。
+                let new_todo = !dialog.schedule && dialog.editing.is_none();
+                dialog.worktree = runode_git::repo_root(&dir).is_some() && (dialog.worktree || new_todo);
+                dialog.dir = dir;
+                cx.notify();
             })
             .ok();
         })
@@ -274,33 +272,30 @@ impl WindowView {
     }
 
     /// 按对话框里填的发请求；填得不对时在对话框里说。宿主办成了就关掉对话框，没办成时说原因。
-    fn save_todo_dialog(&mut self, cx: &mut Context<Self>) {
-        let Some(dialog) = &mut self.todo_dialog else { return };
-        if dialog.saving {
+    fn save(&mut self, cx: &mut Context<Self>) {
+        if self.saving {
             return;
         }
-        let message = match dialog.request(cx) {
+        let message = match self.request(cx) {
             Ok(message) => message,
             Err(error) => {
-                dialog.error = Some(error);
+                self.error = Some(error);
                 cx.notify();
                 return;
             }
         };
-        dialog.saving = true;
-        dialog.error = None;
+        self.saving = true;
+        self.error = None;
         cx.notify();
         let answer = store::ask(cx, message);
         cx.spawn(async move |this, cx| {
             let answer = answer.await;
-            this.update(cx, |this, cx| {
+            this.update(cx, |dialog, cx| {
                 match answer {
-                    Ok(_) => this.todo_dialog = None,
+                    Ok(_) => cx.emit(DialogEvent::Saved),
                     Err(err) => {
-                        if let Some(dialog) = &mut this.todo_dialog {
-                            dialog.saving = false;
-                            dialog.error = Some(format!("{err:#}"));
-                        }
+                        dialog.saving = false;
+                        dialog.error = Some(format!("{err:#}"));
                     }
                 }
                 cx.notify();
@@ -309,17 +304,15 @@ impl WindowView {
         })
         .detach();
     }
+}
 
-    pub(in crate::window) fn render_todo_dialog(
-        &self,
-        fg: Rgb,
-        bg: Rgb,
-        cx: &mut Context<Self>,
-    ) -> Option<Stateful<gpui::Div>> {
-        let dialog = self.todo_dialog.as_ref()?;
-        let hover_bg = hsla(bg.mix(fg, 0.10));
-        let primary_bg = hsla(bg.mix(fg, 0.16));
-        let fg_h = hsla(fg);
+impl Render for TodoDialog {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let dialog = &*self;
+        let theme = cx.theme();
+        let hover_bg = theme.mix(0.10);
+        let primary_bg = theme.mix(0.16);
+        let (fg_h, bg_h, input_border) = (theme.foreground, theme.background, theme.input);
         // 输入框随内容长高，至少 28 点。
         let input = |state: &Entity<InputState>| Input::new(state).h_auto().min_h(scaled(28.)).py(px(4.));
         let field = |label: String, child: gpui::AnyElement| {
@@ -355,14 +348,14 @@ impl WindowView {
             .flex()
             .items_center()
             .rounded(px(6.))
-            .bg(hsla(bg))
+            .bg(bg_h)
             .border_1()
             // 和上下的输入框（`Input`）一样的边框。
-            .border_color(cx.theme().input)
+            .border_color(input_border)
             .truncate()
             .child(dir_text)
             .when(!dialog.locked, |dir| {
-                dir.cursor_pointer().on_press(cx, |this, window, cx| this.browse_todo_dir(window, cx))
+                dir.cursor_pointer().on_press(cx, |this, window, cx| this.browse_dir(window, cx))
             })
             .when(dialog.locked, |dir| dir.opacity(0.6))
             .aria_disabled(dialog.locked);
@@ -372,11 +365,9 @@ impl WindowView {
             .label(worktree_label)
             .cursor_pointer()
             .when(!dialog.locked, |pill| {
-                pill.on_press(cx, |this, _, cx| {
-                    if let Some(dialog) = &mut this.todo_dialog {
-                        dialog.worktree = !dialog.worktree;
-                        cx.notify();
-                    }
+                pill.on_press(cx, |dialog, _, cx| {
+                    dialog.worktree = !dialog.worktree;
+                    cx.notify();
                 })
             })
             .when(dialog.locked, |pill| pill.opacity(0.6))
@@ -385,17 +376,15 @@ impl WindowView {
             let kind = |id: &'static str, kind: Kind, label: &str, cx: &mut Context<Self>| {
                 pill(id.into(), rust_i18n::t!(label).into_owned(), dialog.kind == kind, Role::RadioButton).on_press(
                     cx,
-                    move |this, window, cx| {
-                        if let Some(dialog) = &mut this.todo_dialog {
-                            dialog.kind = kind;
-                            let input = match kind {
-                                Kind::Once => dialog.at.clone(),
-                                Kind::Daily => dialog.clock.clone(),
-                                Kind::Every => dialog.minutes.clone(),
-                            };
-                            window.focus(&input.focus_handle(cx), cx);
-                            cx.notify();
-                        }
+                    move |dialog, window, cx| {
+                        dialog.kind = kind;
+                        let input = match kind {
+                            Kind::Once => dialog.at.clone(),
+                            Kind::Daily => dialog.clock.clone(),
+                            Kind::Every => dialog.minutes.clone(),
+                        };
+                        window.focus(&input.focus_handle(cx), cx);
+                        cx.notify();
                     },
                 )
             };
@@ -408,7 +397,7 @@ impl WindowView {
                 .p(px(2.))
                 .gap(px(2.))
                 .rounded(px(6.))
-                .bg(hsla(bg))
+                .bg(bg_h)
                 .child(kind("todo-dialog-once", Kind::Once, "todo_board.dialog.kind_once", cx))
                 .child(kind("todo-dialog-daily", Kind::Daily, "todo_board.dialog.kind_daily", cx))
                 .child(kind("todo-dialog-every", Kind::Every, "todo_board.dialog.kind_every", cx));
@@ -421,14 +410,12 @@ impl WindowView {
                 let pills: Vec<_> = (0..7u8)
                     .map(|day| {
                         let on = dialog.days & (1 << day) != 0;
-                        let label = crate::i18n::tr(&format!("todo_board.weekday.{day}"));
+                        let label = weekday(day);
                         pill(("todo-weekday", usize::from(day)).into(), label, on, Role::CheckBox).on_press(
                             cx,
-                            move |this, _, cx| {
-                                if let Some(dialog) = &mut this.todo_dialog {
-                                    dialog.days ^= 1 << day;
-                                    cx.notify();
-                                }
+                            move |dialog, _, cx| {
+                                dialog.days ^= 1 << day;
+                                cx.notify();
                             },
                         )
                     })
@@ -464,15 +451,15 @@ impl WindowView {
         .into_owned();
         let cancel =
             button("todo-dialog-cancel", rust_i18n::t!("todo_board.cancel").into_owned(), ButtonVariant::Ghost)
-                .on_press(cx, |this, window, cx| this.close_todo_dialog(window, cx));
+                .on_press(cx, |_, _, cx| cx.emit(DialogEvent::Dismissed));
         let save = button("todo-dialog-save", rust_i18n::t!("todo_board.save").into_owned(), ButtonVariant::Secondary)
             .when(dialog.saving, |button| button.opacity(0.5))
-            .on_press(cx, |this, _, cx| this.save_todo_dialog(cx));
+            .on_press(cx, |this, _, cx| this.save(cx));
         let panel = Dialog::new("todo-dialog", title.clone())
-            .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
+            .on_key_down(cx.listener(|_, event: &KeyDownEvent, _, cx| {
                 if event.keystroke.key == "escape" && !event.keystroke.modifiers.modified() {
                     cx.stop_propagation();
-                    this.close_todo_dialog(window, cx);
+                    cx.emit(DialogEvent::Dismissed);
                 }
             }))
             .w(px(480.))
@@ -539,28 +526,26 @@ impl WindowView {
                     .child(error)
             }))
             .child(div().pt(px(4.)).flex().justify_end().gap(px(8.)).child(cancel).child(save));
-        Some(
-            div()
-                .id("todo-dialog-backdrop")
-                .absolute()
-                .size_full()
-                .pt(px(TITLEBAR_HEIGHT + 32.))
-                .pb(px(16.))
-                .px(px(16.))
-                .flex()
-                .justify_center()
-                .items_start()
-                .bg(Hsla::black().opacity(0.15))
-                .occlude()
-                .on_mouse_down(MouseButton::Left, cx.listener(|this, _, window, cx| this.close_todo_dialog(window, cx)))
-                .child(panel),
-        )
+        div()
+            .id("todo-dialog-backdrop")
+            .absolute()
+            .size_full()
+            .pt(px(TITLEBAR_HEIGHT + 32.))
+            .pb(px(16.))
+            .px(px(16.))
+            .flex()
+            .justify_center()
+            .items_start()
+            .bg(Hsla::black().opacity(0.15))
+            .occlude()
+            .on_mouse_down(MouseButton::Left, cx.listener(|_, _, _, cx| cx.emit(DialogEvent::Dismissed)))
+            .child(panel)
     }
 }
 
 impl TodoDialog {
     /// 按填的内容造出要发的请求；填得不对时是给人看的原因。
-    fn request(&self, cx: &Context<WindowView>) -> Result<store::Step, String> {
+    fn request(&self, cx: &App) -> Result<store::Step, String> {
         let prompt = self.prompt.read(cx).text().trim().to_owned();
         let typed = self.title.read(cx).query().trim().to_owned();
         let title = if typed.is_empty() { first_line(&prompt).to_owned() } else { typed };
@@ -611,6 +596,12 @@ impl TodoDialog {
     }
 }
 
+/// 星期几的简称，`day` 从 0（星期日）数。
+pub(crate) fn weekday(day: u8) -> String {
+    let key = format!("todo_board.weekday.{day}");
+    rust_i18n::t!(&key).into_owned()
+}
+
 /// 下一个整点，`YYYY-MM-DD HH:MM`：新建一次性的定时时先填上它。
 fn next_hour() -> String {
     let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |elapsed| elapsed.as_secs());
@@ -618,7 +609,7 @@ fn next_hour() -> String {
 }
 
 /// `YYYY-MM-DD HH:MM`，按本地时间。
-pub(in crate::window) fn full_time(at: u64) -> String {
+pub(crate) fn full_time(at: u64) -> String {
     local(at).map_or_else(String::new, |at| {
         format!("{:04}-{:02}-{:02} {:02}:{:02}", at.year, at.month, at.day, at.hour, at.minute)
     })

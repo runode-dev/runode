@@ -37,6 +37,7 @@ runode-command-history = { path = "crates/command-history" }
 runode-github-actions = { path = "crates/github-actions" }
 runode-preview-panel = { path = "crates/preview-panel" }
 runode-file-tree = { path = "crates/file-tree" }
+runode-todo-board = { path = "crates/todo-board" }
 # libghostty-vt 的 Rust 绑定（MIT 或 Apache-2.0），取自子模块 vendor/libghostty-rs，即 runode-dev 对
 # libghostty-rs 的 fork 的 main 分支。它自成一个 workspace，不是本 workspace 的成员（见 exclude）。
 # 它的 C 接口绑定 libghostty-vt-sys 只经 libghostty-vt 间接用到，不列在这里。

@@ -89,7 +89,7 @@ fn apply(live: Option<Result<Vec<SessionInfo>>>, cx: &mut App) {
         Some(Ok(live)) => {
             // 任务的会话在任务板上，不列在这里。
             let mut held = held_sessions(cx);
-            held.extend(super::todo_board::store::todo_sessions(cx));
+            held.extend(runode_todo_board::todo_sessions(cx));
             let link = host_client::link();
             for id in orphans(&live, &held) {
                 tracing::info!("ending the background session {id}: its shell exited");
