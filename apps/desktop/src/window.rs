@@ -521,7 +521,7 @@ impl WindowView {
 
 impl WindowView {
     /// 窗口跟着走的前景色和背景色：有焦点的终端当前的配色，没有终端时按配置。
-    /// 只给 `follow_colors` 换主题用（任务板拆出去前也还传给它），别处画的时候从主题（`cx.theme()`）读。
+    /// 只给 `follow_colors` 换主题用，别处画的时候从主题（`cx.theme()`）读。
     fn colors(&self, cx: &mut App) -> (Rgb, Rgb) {
         match self.focused_view() {
             Some(view) => view.update(cx, |view, _| view.colors()),

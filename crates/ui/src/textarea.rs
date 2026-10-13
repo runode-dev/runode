@@ -539,12 +539,6 @@ impl Textarea {
         Self { frame: Frame::new(state) }
     }
 
-    /// 内容不对：边框描成出错的颜色。
-    pub fn invalid(mut self, invalid: bool) -> Self {
-        self.frame.invalid = invalid;
-        self
-    }
-
     /// 外框的元素 id。外框仍是个 `Div`，只多了 id，用不上 `on_click` 这些要 id 的写法。
     pub fn id(mut self, id: impl Into<ElementId>) -> Self {
         self.frame.div.interactivity().element_id = Some(id.into());

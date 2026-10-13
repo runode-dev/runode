@@ -803,10 +803,6 @@ impl GitPanel {
             .rounded(px(4.))
             .bg(cx.theme().mix(0.04))
             .cursor_text()
-            .on_mouse_down(MouseButton::Left, {
-                let area = area.clone();
-                move |_, window, cx| window.focus(&area.focus_handle(cx), cx)
-            })
             .child(sparkle);
         let main = div()
             .id(repo_id("git-commit", &repo.root))

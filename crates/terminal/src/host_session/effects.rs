@@ -126,8 +126,8 @@ impl Effects {
 pub(super) enum PromptEvent {
     /// 提示符画完，shell 等着输入（OSC 133;B）。
     InputStart,
-    /// 命令开始运行（OSC 133;C），带着要记进历史的命令。前面没有带口令的 `command` 报告
-    /// （可能是伪造的）、或者报告没带原文又没能从屏幕上读到时为 `None`，不记。
+    /// 命令开始运行（OSC 133;C），带着运行完时要报告的命令。前面没有带口令的 `command` 报告
+    /// （可能是伪造的）、或者报告没带原文又没能从屏幕上读到时为 `None`，不报。
     OutputStart(Option<String>),
     /// 命令运行结束（OSC 133;D），带着退出码。
     CommandEnd(Option<i32>),

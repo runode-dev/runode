@@ -350,7 +350,7 @@ impl HostSession {
     /// 在新宿主里重建交接过来的会话：VT 从 `screen` 来，接到 `pty`（多半是 `Pty::adopt_paused`
     /// 接手来、还停着的）上，其余状态取自 `export`。导入后 `meta()` 和交出时一样，而且不算变化
     /// （`take_meta` 没有要交的）；前台 agent 接着交出时的状态（`Tracker::resume`），不重新认、
-    /// 不闪；正在运行的命令结束时带着原来的开始时刻和目录记进历史。
+    /// 不闪；正在运行的命令结束时带着原来的开始时刻和目录报告运行完。
     ///
     /// 从快照导入时不套主题（快照里带着），尺寸取快照里的，`pty` 要已经是这个尺寸；从重放导入时
     /// 按 `export.size` 新建 VT、套上 `export.settings`，喂完重放再补喂 `RedactorState::resume_bytes`。

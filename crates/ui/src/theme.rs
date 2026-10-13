@@ -31,9 +31,8 @@ pub struct Theme {
     /// 终端的背景色和前景色。
     pub background: Hsla,
     pub foreground: Hsla,
-    /// 卡片的底色和字色；卡片的边另用 `border` 一类。
+    /// 卡片的底色；字用 `foreground`，边另用 `border` 一类。
     pub card: Hsla,
-    pub card_foreground: Hsla,
     /// 菜单、悬停提示这类浮层的底色和字色。
     pub popover: Hsla,
     pub popover_foreground: Hsla,
@@ -46,9 +45,8 @@ pub struct Theme {
     /// 不起眼的底色和淡下去的字。
     pub muted: Hsla,
     pub muted_foreground: Hsla,
-    /// 悬停、选中时的底色和字色。
+    /// 悬停、选中时的底色；字用 `foreground`。
     pub accent: Hsla,
-    pub accent_foreground: Hsla,
     /// 出错：调色板里的红色。
     pub destructive: Hsla,
     /// 分隔线和卡片之间的淡线。
@@ -82,7 +80,6 @@ impl Theme {
             background: hsla(bg),
             foreground: hsla(fg),
             card: hsla(bg),
-            card_foreground: hsla(fg),
             popover: mix(0.06),
             popover_foreground: hsla(fg),
             primary: hsla(fg),
@@ -92,7 +89,6 @@ impl Theme {
             muted: mix(0.04),
             muted_foreground: hsla(fg).opacity(0.5),
             accent: mix(0.06),
-            accent_foreground: hsla(fg),
             destructive: hsla(ansi[1]),
             border: hsla(fg).opacity(0.09),
             input: hsla(fg).opacity(0.15),
@@ -191,7 +187,7 @@ mod tests {
             let (f, b) = (hsla(fg), hsla(bg));
             // 窗口、卡片（`Card`）的底色和字色。
             assert_eq!((theme.background, theme.foreground), (b, f));
-            assert_eq!((theme.card, theme.card_foreground), (b, f));
+            assert_eq!(theme.card, b);
             // 菜单和各个浮层（`Popover`）的底色，原来菜单的写法。
             assert_eq!(theme.popover, hsla(bg.mix(fg, 0.06)));
             assert_eq!(theme.popover_foreground, f);
@@ -204,7 +200,6 @@ mod tests {
             assert_eq!(theme.muted_foreground, f.opacity(0.5));
             // 各处的悬停底色。
             assert_eq!(theme.accent, hsla(bg.mix(fg, 0.06)));
-            assert_eq!(theme.accent_foreground, f);
             // 分隔线（原来的 `divider_color`）和浮层的描边。
             assert_eq!(theme.border, f.opacity(0.09));
             assert_eq!(theme.input, f.opacity(0.15));

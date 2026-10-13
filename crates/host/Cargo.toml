@@ -14,7 +14,6 @@ runode-terminal.workspace = true
 runode-protocol.workspace = true
 runode-shared-types.workspace = true
 anyhow.workspace = true
-serde_json.workspace = true
 # 锁文件（flock）和认连上来的进程是谁（getpeereid）。
 libc.workspace = true
 tracing.workspace = true

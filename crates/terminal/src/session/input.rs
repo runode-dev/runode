@@ -65,25 +65,6 @@ impl Session {
         true
     }
 
-    /// 改写 shell 正在编辑的输入：先按 `backspace` 下退格，然后把 `text` 当作普通文字写进去
-    /// （不走粘贴），一次发给程序。编码不出退格键时什么也不发，返回 false。
-    pub fn edit_input(&mut self, backspace: usize, text: &str) -> bool {
-        let mut bytes = Vec::new();
-        if backspace > 0 {
-            let Some(key) = self.encode_key(key::Key::Backspace) else {
-                return false;
-            };
-            bytes.extend(key.repeat(backspace));
-        }
-        bytes.extend_from_slice(text.as_bytes());
-        if bytes.is_empty() {
-            return true;
-        }
-        self.before_input();
-        self.send_input(bytes);
-        true
-    }
-
     /// 光标停在 shell 提示符上、shell 集成定义了 `runode-reload` 时，清掉正在编辑的输入，
     /// 输入 ` runode-reload` 并回车：换成一个新的 shell，重新读用户配置。清输入是先按方向键挪到
     /// 输入末尾，再按输入的字数退格；命令前面加个空格，开了 HIST_IGNORE_SPACE 之类设置的 shell
