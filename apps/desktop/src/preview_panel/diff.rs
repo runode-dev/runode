@@ -144,8 +144,8 @@ fn row_text<'a>(view: &'a DiffView, row: &DiffRow, removed: &'a [String], at: Op
 type WordChanges = Vec<Vec<Vec<Range<usize>>>>;
 
 /// 每块里紧跟着的一串删掉的行和一串加的行按先后一一配对，用 `git::changed_words` 找出各自改了哪些字；
-/// 配不上对的行不标。
-fn word_changes(view: &DiffView) -> WordChanges {
+/// 配不上对的行不标。`cancel` 置上时提前收手，算出来的不全，反正也不会用。
+fn word_changes(view: &DiffView, cancel: &AtomicBool) -> WordChanges {
     view.file
         .hunks
         .iter()
@@ -159,6 +159,9 @@ fn word_changes(view: &DiffView) -> WordChanges {
                 let removed = run(ix, LineKind::Removed);
                 let added = run(removed.end, LineKind::Added);
                 for (old, new) in removed.clone().zip(added.clone()) {
+                    if cancel.load(Ordering::Relaxed) {
+                        break;
+                    }
                     let line = &lines[new];
                     let text = line.new.and_then(|new| view.new_line(new)).unwrap_or(&line.text);
                     (words[old], words[new]) = git::changed_words(&lines[old].text, text);
@@ -292,7 +295,7 @@ impl PreviewPanel {
                     async move {
                         let new = runode_preview::highlight(&path, &new_lines, &cancel);
                         let removed = runode_preview::highlight(&path, &removed, &cancel);
-                        (new, removed, word_changes(&view))
+                        (new, removed, word_changes(&view, &cancel))
                     }
                 })
                 .await;
@@ -748,7 +751,7 @@ mod tests {
     fn pairs_removed_with_added_lines_for_word_changes() {
         let mut view = view();
         view.file.hunks[0].lines[0].text = "a longer new line".into();
-        assert_eq!(word_changes(&view), [vec![vec![], vec![2..7], vec![]]]);
+        assert_eq!(word_changes(&view, &AtomicBool::new(false)), [vec![vec![], vec![2..7], vec![]]]);
     }
 
     #[test]

@@ -39,9 +39,12 @@ pub fn changed_words(old: &str, new: &str) -> (Vec<Range<usize>>, Vec<Range<usiz
             }
         }
     }
-    let kept: usize = a[..prefix].iter().chain(&a[a.len() - suffix..]).map(|t| t.0.len()).sum::<usize>()
-        + mid_a.iter().zip(&keep_a).filter(|(_, keep)| **keep).map(|(t, _)| t.0.len()).sum::<usize>();
-    if kept * 4 < old.len().max(new.len()) {
+    // 长度按展开制表符后的样子算，一边展开过、一边原样时结果才一样。
+    let len = |tokens: &[(Range<usize>, Cow<str>)]| tokens.iter().map(|t| t.1.len()).sum::<usize>();
+    let kept = len(&a[..prefix])
+        + len(&a[a.len() - suffix..])
+        + mid_a.iter().zip(&keep_a).filter(|(_, keep)| **keep).map(|(t, _)| t.1.len()).sum::<usize>();
+    if kept * 4 < len(&a).max(len(&b)) {
         return (Vec::new(), Vec::new());
     }
     (ranges(old, mid_a, &keep_a), ranges(new, mid_b, &keep_b))
