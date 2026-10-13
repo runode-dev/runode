@@ -606,3 +606,15 @@ fn a_resize_from_the_owner_is_not_answered_with_our_size() {
     h.state.resize(BIG);
     assert_eq!(h.state.live().unwrap().requested, [BIG]);
 }
+
+/// 尺寸归别的前端管时，程序要改窗口尺寸（CSI 8 t）的请求不改这边的窗口。
+#[test]
+fn window_resize_requests_need_the_size() {
+    let mut h = Harness::live(b"");
+    let resize = || msg(HostMsg::ResizeWindow { id: SessionId(1), rows: 50, columns: 120 });
+    assert_eq!(h.apply(vec![resize()]).resize_window, Some((50, 120)));
+    h.apply(vec![size_owner(false, Some("phone"))]);
+    assert_eq!(h.apply(vec![resize()]).resize_window, None);
+    h.apply(vec![size_owner(true, None)]);
+    assert_eq!(h.apply(vec![resize()]).resize_window, Some((50, 120)));
+}
