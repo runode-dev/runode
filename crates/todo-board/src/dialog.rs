@@ -605,7 +605,14 @@ pub(crate) fn weekday(day: u8) -> String {
 /// 下一个整点，`YYYY-MM-DD HH:MM`：新建一次性的定时时先填上它。
 fn next_hour() -> String {
     let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |elapsed| elapsed.as_secs());
-    full_time((now / 3600 + 1) * 3600)
+    full_time(next_local_hour(now))
+}
+
+/// `now` 之后本地时间的下一个整点。按本地的分钟数补齐，不按 UTC 的整点：UTC+5:30 这类时区的 UTC 整点在本地
+/// 是半点。
+fn next_local_hour(now: u64) -> u64 {
+    let minute = local(now).map_or(0, |at| at.minute);
+    now - now % 60 + u64::from(60 - minute) * 60
 }
 
 /// `YYYY-MM-DD HH:MM`，按本地时间。
@@ -643,5 +650,10 @@ mod tests {
         assert_eq!((local.year, local.month, local.day, local.hour, local.minute), (2026, 10, 13, 14, 30));
         assert_eq!(full_time(at), "2026-10-13 14:30");
         assert!(next_hour().ends_with(":00"));
+        for now in [at, at + 59, at + 30 * 60, at + 89 * 60 + 59] {
+            let next = next_local_hour(now);
+            assert!(next > now && next - now <= 3600, "{now} -> {next}");
+            assert_eq!(super::local(next).unwrap().minute, 0, "{now} -> {next}");
+        }
     }
 }
