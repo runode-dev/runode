@@ -1,5 +1,6 @@
-//! shell 集成：启动 zsh、bash、fish 时自动加载一段脚本，让 shell 在提示符前后发 OSC 133
-//! 标记。终端据此分清提示符、用户输入和命令输出，单击挪光标、删除选区和按命令跳转都靠它。
+//! shell 集成：启动 zsh、bash、fish、elvish、nushell 时自动加载一段脚本，让 shell 在提示符前后
+//! 发 OSC 133 标记（nushell 自己会发，脚本只补报告）。终端据此分清提示符、用户输入和命令输出，
+//! 单击挪光标、删除选区和按命令跳转都靠它。
 //!
 //! 脚本编进二进制，第一次用到时写到用户自己的缓存目录里；用户的 shell 配置照常加载，
 //! 不需要改动。
@@ -23,6 +24,8 @@ const ZSH_ENV: &str = include_str!("../shell-integration/zsh/.zshenv");
 const ZSH_INTEGRATION: &str = include_str!("../shell-integration/zsh/runode-integration.zsh");
 const BASH_RC: &str = include_str!("../shell-integration/bash/runode.bash");
 const FISH_CONF: &str = include_str!("../shell-integration/fish/runode.fish");
+const ELVISH_RC: &str = include_str!("../shell-integration/elvish/runode.elv");
+const NUSHELL_CONF: &str = include_str!("../shell-integration/nushell/runode.nu");
 
 /// 按 `mode` 给启动 `program` 的命令加上集成，并补上登录 shell 的参数；集成脚本开哪些功能
 /// 按 `features`（见 `features`）。集成脚本写不出来或认不出 shell 时照常以登录 shell 启动，不注入。
@@ -61,27 +64,22 @@ pub fn prepare(mode: IntegrationMode, program: &str, features: &str, cmd: &mut C
             true
         }
         Some((Shell::Fish, dir)) => {
-            let data = dir.join("fish-data");
-            let mut dirs = vec![data.clone()];
-            // XDG_DATA_DIRS 没设时 fish 用这两个默认目录，加了我们的之后要显式带上。
-            let inherited = std::env::var_os("XDG_DATA_DIRS")
-                .filter(|v| !v.is_empty())
-                .unwrap_or_else(|| "/usr/local/share:/usr/share".into());
-            dirs.extend(std::env::split_paths(&inherited));
             // fish 4 自己也发 OSC 133，连 `read` 的提示符都标成提示符，还在跑的命令就被从中间切断；
             // 集成脚本自己标，关掉 fish 的。不认得这个功能名的老 fish 忽略它。
             cmd.args(["--features", "no-mark-prompt", "-l"]);
-            match std::env::join_paths(dirs) {
-                Ok(joined) => {
-                    cmd.env("XDG_DATA_DIRS", joined);
-                    cmd.env("RUNODE_FISH_DATA_DIR", data);
-                    true
-                }
-                Err(err) => {
-                    tracing::warn!("shell integration unavailable: {err}");
-                    false
-                }
-            }
+            prepend_data_dir(cmd, dir.join("fish-data"), "RUNODE_FISH_DATA_DIR")
+        }
+        Some((Shell::Nushell, dir)) => {
+            // nushell 读完用户的 config.nu 以后加载数据目录里 nushell/vendor/autoload 下的脚本。
+            cmd.arg("-l");
+            prepend_data_dir(cmd, dir.join("nushell-data"), "RUNODE_NU_DATA_DIR")
+        }
+        Some((Shell::Elvish, dir)) => {
+            // elvish 不自动加载别的脚本：换成集成的 rc，它先加载用户自己的 rc.elv。elvish 没有
+            // 登录 shell 一说，`-l` 是个空操作，不加。
+            cmd.arg("-rc");
+            cmd.arg(dir.join("elvish/runode.elv"));
+            true
         }
         None => {
             cmd.arg("-l");
@@ -95,6 +93,28 @@ pub fn prepare(mode: IntegrationMode, program: &str, features: &str, cmd: &mut C
     let token = report_token()?;
     cmd.env("RUNODE_REPORT_TOKEN", &token);
     Some(token)
+}
+
+/// 把 `data` 排到 `XDG_DATA_DIRS` 最前面，fish、nushell 启动时从那里自动加载集成；`var` 告诉
+/// 集成脚本加的是哪一项，脚本加载后把它去掉。拼不出来时不注入，返回 false。
+fn prepend_data_dir(cmd: &mut CommandBuilder, data: PathBuf, var: &str) -> bool {
+    let mut dirs = vec![data.clone()];
+    // XDG_DATA_DIRS 没设时 fish、nushell 用这两个默认目录，加了我们的之后要显式带上。
+    let inherited = std::env::var_os("XDG_DATA_DIRS")
+        .filter(|v| !v.is_empty())
+        .unwrap_or_else(|| "/usr/local/share:/usr/share".into());
+    dirs.extend(std::env::split_paths(&inherited));
+    match std::env::join_paths(dirs) {
+        Ok(joined) => {
+            cmd.env("XDG_DATA_DIRS", joined);
+            cmd.env(var, data);
+            true
+        }
+        Err(err) => {
+            tracing::warn!("shell integration unavailable: {err}");
+            false
+        }
+    }
 }
 
 /// 经环境变量 `RUNODE_SHELL_FEATURES` 告诉集成脚本开哪些功能：逗号隔开的功能名，和 Ghostty 的
@@ -142,6 +162,8 @@ fn install_into(dir: &Path) -> io::Result<()> {
         ("zsh/runode-integration.zsh", ZSH_INTEGRATION),
         ("bash/runode.bash", BASH_RC),
         ("fish-data/fish/vendor_conf.d/runode.fish", FISH_CONF),
+        ("elvish/runode.elv", ELVISH_RC),
+        ("nushell-data/nushell/vendor/autoload/runode.nu", NUSHELL_CONF),
     ] {
         let path = dir.join(path);
         if std::fs::read_to_string(&path).is_ok_and(|existing| existing == contents) {

@@ -296,10 +296,9 @@ impl Config {
             "shell-integration" => {
                 self.shell_integration = match value {
                     "" | "detect" => IntegrationMode::Detect,
-                    // elvish 和 nushell 还没有集成脚本，和 none 一样不启用。
-                    "none" | "elvish" | "nushell" => IntegrationMode::Off,
+                    "none" => IntegrationMode::Off,
                     name => IntegrationMode::Force(
-                        Shell::from_name(name).ok_or("expected none, detect, bash, zsh or fish")?,
+                        Shell::from_name(name).ok_or("expected none, detect, bash, zsh, fish, elvish or nushell")?,
                     ),
                 };
             }
@@ -689,6 +688,15 @@ unknown-key = whatever
                 .shell_integration_features
                 .cursor
         );
+    }
+
+    #[test]
+    fn shell_integration_names_a_shell_ghostty_style() {
+        let mode = |text: &str| load(&[text]).shell_integration;
+        assert_eq!(mode("shell-integration = nushell\n"), IntegrationMode::Force(Shell::Nushell));
+        assert_eq!(mode("shell-integration = elvish\n"), IntegrationMode::Force(Shell::Elvish));
+        assert_eq!(mode("shell-integration = none\n"), IntegrationMode::Off);
+        assert!(Config::default().apply("shell-integration", "nu", true).is_err());
     }
 
     #[test]

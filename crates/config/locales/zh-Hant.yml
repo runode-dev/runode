@@ -43,7 +43,7 @@ config:
   cursor_style_blink_timeout: 游標閃爍時，這麼多秒沒有鍵盤輸入、終端沒有輸出、視窗也沒有重新取得焦點，就停止閃爍、游標常亮，有了其中任何一樣就立刻恢復閃爍。0 表示一直閃。
   macos_option_as_alt: macOS 上把 Option 當作 Alt：true（兩邊都是）、false、left（只有左邊）、right（只有右邊）。
   scrollback_limit: 每個終端的捲動歷史最多佔多少位元組：非負整數，小於 2 MiB（2097152）時按 2 MiB 算。另外最多留 1 萬行，先到哪個上限就按哪個算。改了對已經開著的終端也生效。
-  shell_integration: Shell 整合：detect（依 shell 的程式名稱判斷）、none（關閉）、bash、zsh、fish。
+  shell_integration: Shell 整合：detect（依 shell 的程式名稱判斷）、none（關閉）、bash、zsh、fish、elvish、nushell。
   shell_integration_features: shell 整合另外做的事，寫法同 Ghostty：cursor（預設）在提示字元上把游標換成直線，zsh 的 vi 命令模式裡是方塊，執行指令時恢復成 cursor-style；no-cursor 不改游標。直線閃不閃跟 cursor-style-blink。Ghostty 的 sudo、title、ssh-env、ssh-terminfo、path 也認得，但不起作用。只對之後新開的 shell 生效。
   clipboard_write: 終端機裡的程式用 OSC 52 寫入系統剪貼簿時（vim、tmux 和經 ssh 連到遠端的 shell 都這樣複製）：allow 照寫，deny 丟掉。ask 還不支援，當作 deny。
   clipboard_read: 終端機裡的程式用 OSC 52 讀取剪貼簿時：ask 先跳出對話框說明是哪個終端機、哪個程式要讀，你同意了才給；allow 不問直接給；deny 回給程式一個空的剪貼簿。剪貼簿裡可能有密碼，只對信得過的程式用 allow。

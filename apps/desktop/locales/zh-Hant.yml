@@ -500,6 +500,8 @@ settings:
       zsh: zsh
       bash: bash
       fish: fish
+      elvish: elvish
+      nushell: nushell
     shell_integration_features:
       cursor: 直線
       no-cursor: 不改

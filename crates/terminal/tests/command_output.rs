@@ -1,6 +1,6 @@
 //! 按 shell 集成标出的提示符读某条命令的输出（`read --command`）：先是手写的理想序列，后面
-//! 是真的 bash、zsh、fish 加载仓库里的集成脚本发出的序列。系统里没有的 shell 不测，仓库的 nix
-//! 环境（`nix shell`）三个都给。
+//! 是真的 bash、zsh、fish、elvish、nushell 加载仓库里的集成脚本发出的序列。系统里没有的 shell
+//! 不测，仓库的 nix 环境（`nix shell`）都给。
 
 mod common;
 
@@ -123,9 +123,39 @@ struct RealShell {
     raw: Vec<u8>,
     /// 临时的家目录，用完删掉。
     home: PathBuf,
-    /// `read` 等输入时画在那一行上的提示符：fish 画 `read>`，bash、zsh 什么都不画。
-    read_prompt: &'static str,
+    syntax: &'static Syntax,
 }
+
+/// 同一件事在各个 shell 里的写法和样子。
+struct Syntax {
+    /// 打印 a、b、c 三行。
+    abc: &'static str,
+    /// 什么都不打印，成功退出。
+    nothing: &'static str,
+    /// 打印 one，读一行输入，再打印 two。
+    read: &'static str,
+    /// 读输入时画在那一行上的提示符：fish 画 `read>`，别的什么都不画。
+    read_prompt: &'static str,
+    /// 空着回车算不算一条命令：elvish 只能在画提示符之前标出用户输入开始，提示符的文字被当成
+    /// 了输入，算。
+    blank_counts: bool,
+}
+
+const POSIX: Syntax = Syntax {
+    abc: "printf 'a\\nb\\nc\\n'",
+    nothing: "true",
+    read: "echo one; read x; echo two",
+    read_prompt: "",
+    blank_counts: false,
+};
+const FISH: Syntax = Syntax { read_prompt: "read>", ..POSIX };
+const ELVISH: Syntax = Syntax {
+    abc: "print \"a\\nb\\nc\\n\"",
+    read: "echo one; var x = (read-line); echo two",
+    blank_counts: true,
+    ..POSIX
+};
+const NUSHELL: Syntax = Syntax { nothing: "^true", read: "print one; input | ignore; print two", ..POSIX };
 
 impl Drop for RealShell {
     fn drop(&mut self) {
@@ -158,8 +188,8 @@ fn bash_at_least(major: u32, minor: u32) -> bool {
 }
 
 impl RealShell {
-    /// 起 `shell`（`bash`、`zsh` 或 `fish`，见 `find_shell`），`rc` 写进它的启动配置；`name` 在同时
-    /// 跑的测试里各不相同，失败时也用它说是哪一个。系统里没有这个 shell 时为 `None`。
+    /// 起 `shell`（`bash`、`zsh`、`fish`、`elvish` 或 `nu`，见 `find_shell`），`rc` 写进它的启动配置；
+    /// `name` 在同时跑的测试里各不相同，失败时也用它说是哪一个。系统里没有这个 shell 时为 `None`。
     fn start(shell: &str, name: &str, rc: &str, prompt: &'static str, idle: &'static [&'static str]) -> Option<Self> {
         let program = find_shell(shell)?;
         let program = program.display();
@@ -168,24 +198,46 @@ impl RealShell {
         std::fs::create_dir_all(&home).unwrap();
         // 和 `shell_integration::prepare` 一样：bash 用 --rcfile 起非登录的交互式 shell，脚本自己加载
         // 登录配置；zsh 把 ZDOTDIR 指到集成目录，那里的 .zshenv 还原 ZDOTDIR 后加载用户配置和集成；
-        // fish 的数据目录加进 XDG_DATA_DIRS，fish 自己加载里面 vendor_conf.d 下的集成。
-        let (rc_file, launch) = match shell {
+        // fish、nushell 的数据目录加进 XDG_DATA_DIRS，它们自己加载里面的集成；elvish 用 -rc 读集成，
+        // 集成再加载用户的 rc.elv。
+        let data_dir = |name: &str, file: &str, script: &str| {
+            let data = home.join(name);
+            let target = data.join(file);
+            std::fs::create_dir_all(target.parent().unwrap()).unwrap();
+            std::fs::copy(integration_dir().join(script), target).unwrap();
+            data.display().to_string()
+        };
+        let (rc_file, launch, syntax) = match shell {
             "bash" => {
                 let script = integration_dir().join("bash/runode.bash");
-                (".bash_profile", format!("'{program}' --rcfile '{}'", script.display()))
+                (".bash_profile", format!("'{program}' --rcfile '{}'", script.display()), &POSIX)
             }
-            "zsh" => (".zshrc", format!("ZDOTDIR='{}' '{program}' -l", integration_dir().join("zsh").display())),
-            _ => {
-                let data = home.join("fish-data");
-                let conf = data.join("fish/vendor_conf.d");
-                std::fs::create_dir_all(&conf).unwrap();
-                std::fs::copy(integration_dir().join("fish/runode.fish"), conf.join("runode.fish")).unwrap();
-                let data = data.display();
+            "zsh" => {
+                (".zshrc", format!("ZDOTDIR='{}' '{program}' -l", integration_dir().join("zsh").display()), &POSIX)
+            }
+            "fish" => {
+                let data = data_dir("fish-data", "fish/vendor_conf.d/runode.fish", "fish/runode.fish");
                 (
                     ".config/fish/config.fish",
                     format!(
                         "XDG_DATA_DIRS='{data}:/usr/local/share:/usr/share' RUNODE_FISH_DATA_DIR='{data}' '{program}' --features no-mark-prompt -l"
                     ),
+                    &FISH,
+                )
+            }
+            "elvish" => {
+                let script = integration_dir().join("elvish/runode.elv");
+                (".config/elvish/rc.elv", format!("'{program}' -rc '{}'", script.display()), &ELVISH)
+            }
+            _ => {
+                let data = data_dir("nushell-data", "nushell/vendor/autoload/runode.nu", "nushell/runode.nu");
+                (
+                    ".config/nushell/config.nu",
+                    format!(
+                        "XDG_CONFIG_HOME='{}/.config' XDG_DATA_DIRS='{data}:/usr/local/share:/usr/share' RUNODE_NU_DATA_DIR='{data}' '{program}' -l",
+                        home.display()
+                    ),
+                    &NUSHELL,
                 )
             }
         };
@@ -215,9 +267,8 @@ impl RealShell {
         let pty =
             Pty::spawn(REAL_SIZE, Some(launcher.to_str().unwrap()), Some(&home), IntegrationMode::Off, sink).unwrap();
         let session = HostSession::new(REAL_SIZE, pty, None, &TermSettings::default()).unwrap();
-        let read_prompt = if shell == "fish" { "read>" } else { "" };
         let mut real =
-            Self { session, output, prompt, idle, prompts: 0, name: name.into(), raw: Vec::new(), home, read_prompt };
+            Self { session, output, prompt, idle, prompts: 0, name: name.into(), raw: Vec::new(), home, syntax };
         real.wait_for_prompt();
         Some(real)
     }
@@ -280,37 +331,38 @@ impl RealShell {
 /// 在真 shell 里跑一串命令，按提示符读各条命令的输出。
 fn read_commands_from(shell: Option<RealShell>) {
     let Some(mut shell) = shell else { return };
-    let name = shell.name.clone();
+    let (name, syntax) = (shell.name.clone(), shell.syntax);
     // 刚起来的 shell 还没跑过命令：开头打印的内容（如果有）算一条截断的，没有就是一条都没有。
     assert!(shell.session.command_output(1).map_or(true, |(_, truncated)| truncated), "{name}");
 
     // 多行输出。
-    shell.run("printf 'a\\nb\\nc\\n'");
+    shell.run(syntax.abc);
     assert_eq!(shell.output(1), "a\nb\nc\n", "{name}");
     // 没有输出；之前那条是第二条。
-    shell.run("true");
+    shell.run(syntax.nothing);
     assert_eq!(shell.output(1), "", "{name}");
     assert_eq!(shell.output(2), "a\nb\nc\n", "{name}");
-    // 空着回车不算一条命令。
+    // 空着回车不算一条命令（elvish 除外，之后数到的都多一条）。
     shell.run("");
+    let blank = u32::from(syntax.blank_counts);
     assert_eq!(shell.output(1), "", "{name}");
-    assert_eq!(shell.output(2), "a\nb\nc\n", "{name}");
+    assert_eq!(shell.output(2 + blank), "a\nb\nc\n", "{name}");
     // 命令行和输出都比终端宽，软折行。
     let wide = "y".repeat(45);
     shell.run(&format!("echo {wide}"));
     assert_eq!(shell.output(1), format!("{}\n{}\n", &wide[..40], &wide[40..]), "{name}");
-    assert_eq!(shell.output(3), "a\nb\nc\n", "{name}");
+    assert_eq!(shell.output(3 + blank), "a\nb\nc\n", "{name}");
 
-    // 还在跑的命令读到底：`read` 等着输入时只有第一行。
-    shell.session.write(b"echo one; read x; echo two\r".to_vec());
+    // 还在跑的命令读到底：读输入时只有第一行。
+    shell.session.write(format!("{}\r", syntax.read).into_bytes());
     shell.wait_until("the first line", |session| session.screen_text(Some(200)).unwrap().contains("\none\n"));
     assert_eq!(shell.output(1), "one\n", "{name}");
     assert_eq!(shell.output(2), format!("{}\n{}\n", &wide[..40], &wide[40..]), "{name}");
     shell.session.write(b"\r".to_vec());
     shell.wait_for_prompt();
-    // 回车被终端回显成一行，上面只有 `read` 的提示符。
-    assert_eq!(shell.output(1), format!("one\n{}\ntwo\n", shell.read_prompt), "{name}");
-    assert_eq!(shell.output(4), "a\nb\nc\n", "{name}");
+    // 回车被终端回显成一行，上面只有读输入的提示符。
+    assert_eq!(shell.output(1), format!("one\n{}\ntwo\n", syntax.read_prompt), "{name}");
+    assert_eq!(shell.output(4 + blank), "a\nb\nc\n", "{name}");
 }
 
 #[test]
@@ -500,5 +552,115 @@ fn real_fish_reloads_with_the_integration() {
     reload_in(
         RealShell::start("fish", "fish-reload", &fish_rc("test -r ~/extra; and source ~/extra\n"), "[f]>", &["[f]>"]),
         "echo (set -q RELOADED; and echo $RELOADED; or echo no) (set -q RUNODE_REPORT_TOKEN; and echo $RUNODE_REPORT_TOKEN; or echo gone)",
+    );
+}
+
+/// 集成加载时报告 `runode-reload`，提示符前报告百分号编码的目录，失败的命令报告退出码。
+fn reports_functions_and_exit_status(shell: Option<RealShell>, fail: &str) {
+    let Some(mut shell) = shell else { return };
+    shell.wait_for_bytes("runode-reload", 0, b"\x1b]6973;0123456789abcdef;functions=runode-reload");
+    // 宿主解码报告的目录，记作提示符所在的目录。
+    let dir = shell.home.join("a b;c");
+    std::fs::create_dir(&dir).unwrap();
+    shell.run("cd 'a b;c'");
+    shell.session.take_commands();
+    let cwd = shell.session.meta().prompt_cwd.and_then(|cwd| cwd.canonicalize().ok());
+    assert_eq!(cwd, dir.canonicalize().ok(), "{}", shell.name);
+    let start = shell.raw.len();
+    shell.run(fail);
+    shell.wait_for_bytes("the exit status", start, b"\x1b]133;D;1");
+}
+
+/// elvish 的提示符：`[e]>`，没有右侧提示符，加上 `extra`。
+fn elvish_rc(extra: &str) -> String {
+    format!("set edit:prompt = {{ put '[e]> ' }}\nset edit:rprompt = {{ put '' }}\n{extra}")
+}
+
+#[test]
+fn real_elvish_commands_are_read() {
+    read_commands_from(RealShell::start("elvish", "elvish", &elvish_rc(""), "[e]>", &["[e]>"]));
+}
+
+#[test]
+fn real_elvish_cursor_follows_the_prompt() {
+    let Some(mut shell) = RealShell::start("elvish", "elvish-cursor", &elvish_rc(""), "[e]>", &["[e]>"]) else {
+        return;
+    };
+    cursor_follows_the_prompt(&mut shell);
+}
+
+/// 用户 rc.elv 里定义的函数在交互环境里照样能用。
+#[test]
+fn real_elvish_keeps_what_the_user_rc_defines() {
+    let rc = elvish_rc("use str\nfn shout {|s| echo (str:to-upper $s) }\n");
+    let Some(mut shell) = RealShell::start("elvish", "elvish-rc", &rc, "[e]>", &["[e]>"]) else { return };
+    shell.run("shout hi");
+    assert_eq!(shell.output(1), "HI\n", "{}", shell.screen());
+}
+
+#[test]
+fn real_elvish_reports_functions_and_exit_status() {
+    reports_functions_and_exit_status(
+        RealShell::start("elvish", "elvish-status", &elvish_rc(""), "[e]>", &["[e]>"]),
+        "/usr/bin/false",
+    );
+}
+
+#[test]
+fn real_elvish_reloads_with_the_integration() {
+    reload_in(
+        RealShell::start(
+            "elvish",
+            "elvish-reload",
+            &elvish_rc("use os\nif (os:is-regular ~/extra) { set-env RELOADED yes }\n"),
+            "[e]>",
+            &["[e]>"],
+        ),
+        "echo (if (has-env RELOADED) { put $E:RELOADED } else { put no }) \
+         (if (has-env RUNODE_REPORT_TOKEN) { put $E:RUNODE_REPORT_TOKEN } else { put gone })",
+    );
+}
+
+/// nushell 的提示符：不打招呼，`[n]>` 加上 `extra`。
+fn nushell_rc(extra: &str) -> String {
+    format!(
+        "$env.config.show_banner = false\n$env.PROMPT_COMMAND = {{|| '[n]' }}\n\
+         $env.PROMPT_COMMAND_RIGHT = {{|| '' }}\n{extra}"
+    )
+}
+
+#[test]
+fn real_nushell_commands_are_read() {
+    let rc = nushell_rc("$env.PROMPT_COMMAND_RIGHT = {|| '<r>' }\n");
+    read_commands_from(RealShell::start("nu", "nushell", &rc, "[n]>", &["[n]>", "<r>"]));
+}
+
+#[test]
+fn real_nushell_cursor_follows_the_prompt() {
+    let Some(mut shell) = RealShell::start("nu", "nushell-cursor", &nushell_rc(""), "[n]>", &["[n]>"]) else {
+        return;
+    };
+    cursor_follows_the_prompt(&mut shell);
+}
+
+#[test]
+fn real_nushell_reports_functions_and_exit_status() {
+    reports_functions_and_exit_status(
+        RealShell::start("nu", "nushell-status", &nushell_rc(""), "[n]>", &["[n]>"]),
+        "^false",
+    );
+}
+
+#[test]
+fn real_nushell_reloads_with_the_integration() {
+    reload_in(
+        RealShell::start(
+            "nu",
+            "nushell-reload",
+            &nushell_rc("if ('~/extra' | path expand | path exists) { $env.RELOADED = 'yes' }\n"),
+            "[n]>",
+            &["[n]>"],
+        ),
+        "print $\"($env.RELOADED? | default no) ($env.RUNODE_REPORT_TOKEN? | default gone)\"",
     );
 }

@@ -162,7 +162,7 @@ impl Page {
                 Section("keyboard"),
                 Row("macos-option-as-alt", Choice(&["false", "true", "left", "right"])),
                 Section("shell"),
-                Row("shell-integration", Choice(&["detect", "none", "zsh", "bash", "fish"])),
+                Row("shell-integration", Choice(&["detect", "none", "zsh", "bash", "fish", "elvish", "nushell"])),
                 Row("shell-integration-features", Choice(&["cursor", "no-cursor"])),
                 Section("scrollback"),
                 Row("scrollback-limit", Text(120.)),

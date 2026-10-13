@@ -99,6 +99,8 @@ impl Config {
                     IntegrationMode::Force(Shell::Zsh) => "zsh",
                     IntegrationMode::Force(Shell::Bash) => "bash",
                     IntegrationMode::Force(Shell::Fish) => "fish",
+                    IntegrationMode::Force(Shell::Elvish) => "elvish",
+                    IntegrationMode::Force(Shell::Nushell) => "nushell",
                 }
                 .into(),
             ],

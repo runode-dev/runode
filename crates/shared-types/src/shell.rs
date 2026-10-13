@@ -37,6 +37,8 @@ pub enum Shell {
     Zsh,
     Bash,
     Fish,
+    Elvish,
+    Nushell,
 }
 
 impl Shell {
@@ -45,14 +47,18 @@ impl Shell {
             "zsh" => Some(Self::Zsh),
             "bash" => Some(Self::Bash),
             "fish" => Some(Self::Fish),
+            "elvish" => Some(Self::Elvish),
+            "nushell" => Some(Self::Nushell),
             _ => None,
         }
     }
 
-    /// 按可执行文件的名字认 shell；登录 shell 的 argv[0] 可能带前缀 `-`。
+    /// 按可执行文件的名字认 shell；登录 shell 的 argv[0] 可能带前缀 `-`。nushell 的程序叫 `nu`。
     pub fn detect(program: &str) -> Option<Self> {
-        let name = Path::new(program).file_name()?.to_str()?;
-        Self::from_name(name.trim_start_matches('-'))
+        match Path::new(program).file_name()?.to_str()?.trim_start_matches('-') {
+            "nu" => Some(Self::Nushell),
+            name => Self::from_name(name),
+        }
     }
 }
 

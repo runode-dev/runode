@@ -43,7 +43,7 @@ config:
   cursor_style_blink_timeout: 光标闪烁时，这么多秒没有键盘输入、终端没有输出、窗口也没有重新获得焦点，就停止闪烁、光标常亮，有了其中任何一样就立刻恢复闪烁。0 表示一直闪。
   macos_option_as_alt: macOS 上把 Option 当作 Alt：true（两边都是）、false、left（只有左边）、right（只有右边）。
   scrollback_limit: 每个终端的回滚历史最多占多少字节：非负整数，小于 2 MiB（2097152）时按 2 MiB 算。另外最多留 1 万行，先到哪个上限就按哪个算。改了对已经开着的终端也生效。
-  shell_integration: shell 集成：detect（按 shell 的程序名判断）、none（关闭）、bash、zsh、fish。
+  shell_integration: shell 集成：detect（按 shell 的程序名判断）、none（关闭）、bash、zsh、fish、elvish、nushell。
   shell_integration_features: shell 集成另外做的事，写法同 Ghostty：cursor（默认）在提示符上把光标换成竖线，zsh 的 vi 命令模式里是方块，跑命令时恢复成 cursor-style；no-cursor 不改光标。竖线闪不闪跟 cursor-style-blink。Ghostty 的 sudo、title、ssh-env、ssh-terminfo、path 也认，但不起作用。只对之后新开的 shell 生效。
   clipboard_write: 终端里的程序用 OSC 52 写系统剪贴板时（vim、tmux 和经 ssh 连到远端的 shell 都这样复制）：allow 照写，deny 丢掉。ask 还不支持，按 deny 办。
   clipboard_read: 终端里的程序用 OSC 52 读剪贴板时：ask 先弹框说明是哪个终端、哪个程序要读，你同意了才给；allow 不问直接给；deny 回给程序一个空的剪贴板。剪贴板里可能有密码，只对信得过的程序用 allow。
