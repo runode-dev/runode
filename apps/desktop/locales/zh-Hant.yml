@@ -966,6 +966,7 @@ files:
   failed: 操作沒有完成
   exists: 這裡已經有「%{name}」了。
   into_itself: 不能把「%{name}」放進它自己裡面。
+  newline_in_name: 名字裡有換行，沒法寫進 .gitignore，先改個名再加。
   invalid_name: 「%{name}」不能用作名稱。
   unsupported: 這個系統上不支援丟到垃圾桶。
   ok: 好

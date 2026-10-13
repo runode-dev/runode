@@ -43,6 +43,7 @@ fn error_text(err: &OpError, name: &str) -> String {
     match err {
         OpError::Exists => rust_i18n::t!("files.exists", name = name).into_owned(),
         OpError::IntoItself => rust_i18n::t!("files.into_itself", name = name).into_owned(),
+        OpError::NewlineInName => rust_i18n::t!("files.newline_in_name").into_owned(),
         OpError::Io(err) if err.kind() == std::io::ErrorKind::Unsupported => {
             rust_i18n::t!("files.unsupported").into_owned()
         }

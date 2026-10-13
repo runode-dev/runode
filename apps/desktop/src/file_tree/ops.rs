@@ -13,6 +13,8 @@ pub(super) enum OpError {
     Exists,
     /// 要把目录挪进或复制进它自己下面。
     IntoItself,
+    /// 名字里有换行或回车，没法写进按行分的 `.gitignore`。
+    NewlineInName,
     Io(io::Error),
 }
 
@@ -221,8 +223,12 @@ fn copy_file(src: &Path, dest: &Path) -> io::Result<()> {
 }
 
 /// 把仓库里的 `rel`（相对仓库根 `root`）写进根目录的 `.gitignore`：只匹配这一个路径，开头的 `/`
-/// 钉在根目录上，目录结尾加 `/`，`*?[\` 和结尾的空格转义。已经有同样的一行时不再写。
+/// 钉在根目录上，目录结尾加 `/`，`*?[\` 和结尾的空格转义。已经有同样的一行时不再写。名字里有换行或回车时
+/// 报 `NewlineInName`：写进去会拆成几行，成了别的规则。
 pub(super) fn add_to_gitignore(root: &Path, rel: &Path, is_dir: bool) -> Result {
+    if rel.as_os_str().as_encoded_bytes().iter().any(|b| matches!(b, b'\n' | b'\r')) {
+        return Err(OpError::NewlineInName);
+    }
     let mut pattern = String::from("/");
     for (ix, part) in rel.components().enumerate() {
         if ix > 0 {
@@ -352,6 +358,9 @@ mod tests {
         add_to_gitignore(&tmp.0, Path::new("dist"), true).unwrap();
         add_to_gitignore(&tmp.0, Path::new("dist"), true).unwrap();
         add_to_gitignore(&tmp.0, Path::new("x "), false).unwrap();
+        assert_eq!(fs::read_to_string(&file).unwrap(), "target\n/a/b\\*.log\n/dist/\n/x\\ \n");
+        assert!(matches!(add_to_gitignore(&tmp.0, Path::new("x\n*"), false), Err(OpError::NewlineInName)));
+        assert!(matches!(add_to_gitignore(&tmp.0, Path::new("a\r/b"), false), Err(OpError::NewlineInName)));
         assert_eq!(fs::read_to_string(&file).unwrap(), "target\n/a/b\\*.log\n/dist/\n/x\\ \n");
     }
 

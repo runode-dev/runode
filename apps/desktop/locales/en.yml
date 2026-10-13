@@ -966,6 +966,7 @@ files:
   failed: The operation couldn't be completed
   exists: "“%{name}” already exists here."
   into_itself: "Can't put “%{name}” inside itself."
+  newline_in_name: The name contains a line break, so it can't be written to .gitignore. Rename it first.
   invalid_name: "“%{name}” isn't a valid name."
   unsupported: Moving to the Trash isn't supported on this system.
   ok: OK
