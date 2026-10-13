@@ -38,4 +38,6 @@ crate::icons! {
     pub FOLDER_OPEN_ICON = "folder-open",
     /// 关闭、清空：分屏标题条、对话框、任务板和文件树的搜索框。
     pub CLOSE_ICON = "close",
+    /// 分支：Git 面板、侧栏和任务板的卡片。
+    pub BRANCH_ICON = "branch",
 }

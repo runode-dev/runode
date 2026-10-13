@@ -43,7 +43,7 @@ use super::{
     agents::{self, Mark},
     model::base_name,
     remote,
-    titlebar::{AGENT_BLOCKED_COLOR, AGENT_DONE_COLOR, drag_chip, drop_marker, spinner, styled_agent_mark},
+    titlebar::{drag_chip, drop_marker, styled_agent_mark},
 };
 use crate::{
     assets::{BRANCH_ICON, CHECK_ICON, CLOSE_ICON, PENCIL_ICON, PLUS_ICON, TERMINAL_ICON, TRASH_ICON},
@@ -56,6 +56,8 @@ use crate::{
         font_size::{FontSize, scaled},
         hsla,
         scrollbar::scrollbar,
+        spinner::spinner,
+        theme::{AGENT_BLOCKED_COLOR, AGENT_DONE_COLOR},
         tooltip::tooltip,
     },
 };

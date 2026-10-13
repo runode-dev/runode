@@ -1,5 +1,5 @@
 //! 不属于哪个具体功能、几处界面都用的 GPUI 部件和小工具：按钮和开关按钮（`button`）、开关（`switch`）、卡片（`card`）、
-//! 徽标（`badge`）、对话框的面板（`dialog`）、浮层的外框（`popover`）、单行输入框
+//! 徽标（`badge`）、对话框的面板（`dialog`）、浮层的外框（`popover`）、按几格字符转的圈（`spinner`）、单行输入框
 //! （`input`）、多行输入框（`textarea`，两样都分成画边框的组件和管编辑的 entity）、滚动条（`scrollbar`）、悬停提示（`tooltip`）、界面各档字号（`font_size`）、系统声音（`sound`）、按文件类型区分的图标（`file_icons`）、
 //! 让 Option 组合键先走快捷键的输入处理（`input_handler`）、
 //! 复制粘贴这类共用的编辑动作（`actions`），标签条共用的拖动卡片和落点提示（`tabs`），把调色板的颜色换成
@@ -30,6 +30,7 @@ pub mod popover;
 pub mod row_buttons;
 pub mod scrollbar;
 pub mod sound;
+pub mod spinner;
 pub mod switch;
 pub mod tabs;
 pub mod textarea;

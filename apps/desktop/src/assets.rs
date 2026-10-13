@@ -14,9 +14,9 @@ use crate::{
 
 /// 几处共用的图标在 `runode_ui` 里：展开、收起的箭头，行尾和菜单常用的按钮，和预览栏共用的那些。
 pub use crate::ui::icons::{
-    ARROW_DOWN_ICON, CHECK_ICON, CHEVRON_DOWN_ICON, CHEVRON_RIGHT_ICON, CLOSE_ICON, DISCARD_ICON, FOLDER_OPEN_ICON,
-    GLOBE_ICON, MAXIMIZE_ICON, MINIMIZE_ICON, MINUS_ICON, MORE_ICON, OPEN_FILE_ICON, PENCIL_ICON, PLAY_ICON, PLUS_ICON,
-    REFRESH_ICON, SYNC_ICON, TERMINAL_ICON, TRASH_ICON, VIEW_LIST_ICON, VIEW_TREE_ICON,
+    ARROW_DOWN_ICON, BRANCH_ICON, CHECK_ICON, CHEVRON_DOWN_ICON, CHEVRON_RIGHT_ICON, CLOSE_ICON, DISCARD_ICON,
+    FOLDER_OPEN_ICON, GLOBE_ICON, MAXIMIZE_ICON, MINIMIZE_ICON, MINUS_ICON, MORE_ICON, OPEN_FILE_ICON, PENCIL_ICON,
+    PLAY_ICON, PLUS_ICON, REFRESH_ICON, SYNC_ICON, TERMINAL_ICON, TRASH_ICON, VIEW_LIST_ICON, VIEW_TREE_ICON,
 };
 /// GitHub Actions 页的标签图标，图标本身跟着页面在 `runode_github_actions` 里。
 pub use runode_github_actions::WORKFLOW_ICON as ACTIONS_WORKFLOW_ICON;
@@ -33,8 +33,7 @@ icons! {
     pub CHEVRON_UP_ICON = "chevron-up",
     /// Git 面板提交说明框里让 AI 写说明的按钮。
     pub SPARKLE_ICON = "sparkle",
-    /// Git 面板里的按钮：分支，以及储藏的应用和弹出（更多、取消暂存、放弃改动和提交的在 `runode_ui`）。
-    pub BRANCH_ICON = "branch",
+    /// Git 面板里储藏的应用和弹出（分支、更多、取消暂存、放弃改动和提交的在 `runode_ui`）。
     pub STASH_APPLY_ICON = "stash-apply",
     pub STASH_POP_ICON = "stash-pop",
     /// 卡片样式下分屏标题条右边向右、向下分屏的按钮（关闭、放大、还原的在 `runode_ui`）。

@@ -17,6 +17,10 @@ pub const REMOVED: Rgb = Rgb(0xE5, 0x53, 0x4B);
 pub const MODIFIED: Rgb = Rgb(0xD2, 0xA8, 0x3E);
 pub const RENAMED: Rgb = Rgb(0x53, 0x9B, 0xF5);
 
+/// agent 等用户回答、干完了用户还没看时标记的颜色；任务板上需要你、完成两列的圆点也用它们。
+pub const AGENT_BLOCKED_COLOR: u32 = 0xE5A50A;
+pub const AGENT_DONE_COLOR: u32 = 0x3FB950;
+
 /// 调色板里没配置的强调色和出错色。
 const RING_FALLBACK: Rgb = Rgb(0x3b, 0x82, 0xf6);
 const DESTRUCTIVE_FALLBACK: Rgb = Rgb(0xe0, 0x50, 0x50);
@@ -117,6 +121,11 @@ impl Theme {
     pub fn bg_rgb(&self) -> Rgb {
         self.bg
     }
+
+    /// 前景色往背景色混 `k`：反色的浮层（任务板的提示条）的底色这样算。
+    pub fn mix_inverse(&self, k: f32) -> Hsla {
+        hsla(self.fg.mix(self.bg, k))
+    }
 }
 
 /// 从配置的调色板（`(序号, 颜色)`，后写的算数）取 ANSI 16 色，`Theme::new` 用。没配置的序号用
@@ -213,6 +222,7 @@ mod tests {
             for k in [0.04, 0.08, 0.10, 0.12, 0.14, 0.22] {
                 assert_eq!(theme.mix(k), hsla(bg.mix(fg, k)));
             }
+            assert_eq!(theme.mix_inverse(0.15), hsla(fg.mix(bg, 0.15)));
         }
         assert!(Theme::new(LIGHT.0, LIGHT.1, palette()).is_light);
         assert!(!Theme::new(DARK.0, DARK.1, palette()).is_light);

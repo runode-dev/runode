@@ -1,12 +1,11 @@
 //! 标题栏：窗口的标题栏设置、标签和新建标签按钮、拖动中的标签，以及标题、agent 状态标记和快捷键提示。
 
 use crate::ui::theme::ActiveTheme as _;
-use std::time::Duration;
 
 use gpui::{
-    Action, Animation, AnimationExt, AnyElement, App, Axis, BoxShadow, Context, Div, ElementId, Entity, Hsla,
-    MouseButton, MouseDownEvent, Pixels, Render, Role, SharedString, Stateful, TitlebarOptions, Window, div,
-    linear_color_stop, linear_gradient, point, prelude::*, px, svg,
+    Action, AnyElement, App, Axis, BoxShadow, Context, Div, ElementId, Hsla, MouseButton, MouseDownEvent, Pixels,
+    Render, Role, SharedString, Stateful, TitlebarOptions, Window, div, linear_color_stop, linear_gradient, point,
+    prelude::*, px, svg,
 };
 use runode_shared_types::agent::AgentKind;
 
@@ -21,6 +20,11 @@ use super::{
     panes::now_ms,
 };
 use crate::ui::a11y::A11yPress;
+// agent 状态标记的颜色和转圈在 `runode_ui`，任务板也用。
+use crate::ui::{
+    spinner::spinner,
+    theme::{AGENT_BLOCKED_COLOR, AGENT_DONE_COLOR},
+};
 // 标签共用的拖动卡片和落点提示在 `runode_ui::tabs`，侧栏照旧从这里引。
 pub(super) use crate::ui::tabs::{drag_chip, drop_marker};
 use crate::{
@@ -92,7 +96,7 @@ pub(super) fn styled_agent_mark(mark: Mark, id: impl Into<ElementId>, fg: Hsla, 
             let color = mark.kind.spinner_color().or_else(|| brand.then(|| brand_color(mark.kind)).flatten());
             slot.when_some(color, |slot, color| slot.text_color(gpui::rgb(color)))
                 .when(brand, |slot| slot.text_size(px(15.)).font_weight(gpui::FontWeight::BOLD))
-                .child(AgentSpinner { id: id.into(), frames, frame_time })
+                .child(spinner(id, frames, frame_time))
                 .into_any_element()
         }
         Status::Idle => {
@@ -112,65 +116,6 @@ pub(super) fn styled_agent_mark(mark: Mark, id: impl Into<ElementId>, fg: Hsla, 
         }
         // 干完了还没看：绿色对勾，和等回答的圆点形状也不同，不靠颜色也分得开。
         Status::Done => slot.text_size(px(11.)).text_color(gpui::rgb(AGENT_DONE_COLOR)).child("✓").into_any_element(),
-    }
-}
-
-/// 工作中的转圈，单独是一个视图：动画每动一格只通知它自己，GPUI 重画它和它外面的几层，但不当成
-/// `WindowView` 的状态变了，缓存的侧栏、标签栏和右侧面板（见 `Slot`）不跟着重画。
-struct Spinner {
-    frames: &'static [&'static str],
-    frame_time: Duration,
-}
-
-impl Render for Spinner {
-    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
-        let (frames, frame_time) = (self.frames, self.frame_time);
-        let period = frame_time * frames.len() as u32;
-        div().with_animation(
-            "spinner",
-            // 每格只重画一次。
-            Animation::new(period).repeat_synced().with_max_fps(1. / frame_time.as_secs_f32()),
-            move |spinner, delta| {
-                let frame = (delta * frames.len() as f32) as usize;
-                spinner.child(frames[frame.min(frames.len() - 1)])
-            },
-        )
-    }
-}
-
-/// 在 `id` 处画一个按 `frames` 转的圈，见 `AgentSpinner`。
-pub(super) fn spinner(
-    id: impl Into<ElementId>,
-    frames: &'static [&'static str],
-    frame_time: Duration,
-) -> impl IntoElement {
-    AgentSpinner { id: id.into(), frames, frame_time }
-}
-
-/// 在 `id` 处画 `Spinner`，连续几帧都画着时沿用同一个（存在元素状态里）。不用 `use_keyed_state`：
-/// 它把状态的通知转给外层视图，转圈每动一格又成了外层的状态变了。
-#[derive(IntoElement)]
-struct AgentSpinner {
-    id: ElementId,
-    frames: &'static [&'static str],
-    frame_time: Duration,
-}
-
-impl RenderOnce for AgentSpinner {
-    fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
-        let Self { id, frames, frame_time } = self;
-        let spinner = window.with_global_id(id, |id, window| {
-            window.with_element_state(id, |state: Option<Entity<Spinner>>, _| {
-                let spinner = state.unwrap_or_else(|| cx.new(|_| Spinner { frames, frame_time }));
-                (spinner.clone(), spinner)
-            })
-        });
-        // 同一个位置上 agent 换了种类时换成它的转圈。
-        spinner.update(cx, |spinner, _| {
-            spinner.frames = frames;
-            spinner.frame_time = frame_time;
-        });
-        spinner
     }
 }
 
@@ -262,11 +207,6 @@ fn tab_icons(tab: &Tab, cx: &App) -> Div {
         .children(back)
         .child(front.left_0())
 }
-
-/// agent 等用户回答时标记的颜色。
-pub(super) const AGENT_BLOCKED_COLOR: u32 = 0xE5A50A;
-/// agent 干完了、用户还没看时标记的颜色。
-pub(super) const AGENT_DONE_COLOR: u32 = 0x3FB950;
 
 /// 快捷键提示，从键位表里查，快捷键改了也跟着变：先找 `select` 的绑定，`is_last` 时再找
 /// `last` 的。后加的绑定优先，显示最后一个。
