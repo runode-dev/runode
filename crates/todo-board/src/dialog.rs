@@ -147,7 +147,7 @@ fn first_line(text: &str) -> &str {
 pub(crate) enum DialogEvent {
     /// 按了取消、Esc 或点了外面：关掉，焦点交回看板。
     Dismissed,
-    /// 宿主办成了：关掉。
+    /// 宿主办成了：关掉，焦点同样交回看板。
     Saved,
 }
 

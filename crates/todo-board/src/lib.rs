@@ -297,12 +297,10 @@ impl TodoBoard {
     fn open_dialog(&mut self, schedule: bool, editing: Option<Editing>, window: &mut Window, cx: &mut Context<Self>) {
         let dir = self.input.dir.clone();
         let dialog = cx.new(|cx| TodoDialog::new(schedule, editing, dir, window, cx));
-        let events = cx.subscribe_in(&dialog, window, |this, _, event: &DialogEvent, window, cx| {
+        let events = cx.subscribe_in(&dialog, window, |this, _, _: &DialogEvent, window, cx| {
             this.dialog = None;
-            // 存好了时焦点不动，和对话框还是窗口的一部分时一样。
-            if matches!(event, DialogEvent::Dismissed) {
-                window.focus(&this.focus, cx);
-            }
+            // 焦点在对话框的输入框里，对话框一丢就没了着落，看板的 Esc 也收不到：关掉、存好了都交回看板。
+            window.focus(&this.focus, cx);
             cx.notify();
         });
         self.dialog = Some((dialog, events));
