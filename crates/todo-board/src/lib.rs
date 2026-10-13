@@ -217,6 +217,14 @@ fn drop_before(dragged: &DraggedTodo, column: Column, ix: usize, target: &str, t
     todos.get(at + 1).map(|todo| todo.id.clone())
 }
 
+/// 定时 `schedule` 最近开的 `RECENT_RUNS` 个任务，新的在前。按建的先后挑，不按看板上的先后：卡片拖动过就不一样了。
+fn recent_runs<'a>(todos: &'a [Todo], schedule: &str) -> Vec<&'a Todo> {
+    let mut runs: Vec<&Todo> = todos.iter().filter(|todo| todo.schedule.as_deref() == Some(schedule)).collect();
+    runs.sort_by_key(|todo| std::cmp::Reverse(todo.created));
+    runs.truncate(RECENT_RUNS);
+    runs
+}
+
 /// 现在的 Unix 时间，秒。
 fn unix_now() -> u64 {
     SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |elapsed| elapsed.as_secs())
@@ -1054,13 +1062,7 @@ impl TodoBoard {
         let worktree = schedule.spec.worktree.then(|| rust_i18n::t!("todo_board.worktree_on").into_owned());
         let details: Vec<String> =
             [Some(place), Some(schedule.spec.agent.clone()), worktree].into_iter().flatten().collect();
-        let runs: Vec<&Todo> = data
-            .todos
-            .iter()
-            .filter(|todo| todo.schedule.as_ref() == Some(&schedule.id))
-            .rev()
-            .take(RECENT_RUNS)
-            .collect();
+        let runs = recent_runs(&data.todos, &schedule.id);
         let run_rows: Vec<_> = runs
             .iter()
             .map(|todo| {
@@ -1408,6 +1410,17 @@ mod tests {
         // c 拖到 a 上：c、a、b；从别的列拖来插在目标前面。
         assert_eq!(before(2, Column::Todo, 0), Some("a".into()));
         assert_eq!(before(0, Column::Done, 1), Some("b".into()));
+    }
+
+    /// 最近开的几个按建的先后挑，不管看板上拖成了什么顺序。
+    #[test]
+    fn recent_runs_go_by_creation() {
+        let run =
+            |id: &str, created: u64| Todo { created, schedule: Some("s".into()), ..todo(id, Some(created), None) };
+        // 拖动过：最早的 a 排到了最后。
+        let todos = [run("d", 4), run("c", 3), todo("x", None, None), run("b", 2), run("e", 5), run("a", 1)];
+        let ids: Vec<_> = recent_runs(&todos, "s").iter().map(|todo| todo.id.as_str()).collect();
+        assert_eq!(ids, ["e", "d", "c"]);
     }
 
     #[test]
