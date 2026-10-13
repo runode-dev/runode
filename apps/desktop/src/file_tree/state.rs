@@ -66,18 +66,18 @@ impl TreeState {
         for entry in entries {
             let mut path = dir.join(&entry.name);
             let hidden = (!filter.ignored && decorator.of(&path, entry.is_dir) == Decoration::Ignored)
-                || (!filter.dotfiles && entry.name.starts_with('.'));
+                || (!filter.dotfiles && entry.name.as_encoded_bytes().starts_with(b"."));
             if hidden {
                 continue;
             }
-            let mut name = entry.name.clone();
+            let mut name = entry.name.to_string_lossy().into_owned();
             if entry.is_dir {
                 for _ in 0..MAX_COMPACT {
                     let Some(child) = self.listings.get(&path).and_then(|entries| single_dir(entries)) else {
                         break;
                     };
                     // 藏着点文件时点开头的子目录也不并进来，不然隐藏的目录跟着上级露出来。
-                    if !filter.dotfiles && child.starts_with('.') {
+                    if !filter.dotfiles && child.as_encoded_bytes().starts_with(b".") {
                         break;
                     }
                     // 被忽略的子目录不并进没被忽略的目录：隐藏时要单独藏起来，显示时也不该连累上级变暗。
@@ -86,7 +86,7 @@ impl TreeState {
                     {
                         break;
                     }
-                    name = format!("{name} / {child}");
+                    name = format!("{name} / {}", child.to_string_lossy());
                     path = path.join(child);
                 }
             }
@@ -431,6 +431,22 @@ mod tests {
         state.expanded.insert("/p/src".into());
         state.rebuild_rows(root, ALL);
         assert_eq!(names(&state), [("src".into(), 0), ("main.rs".into(), 1), ("README.md".into(), 0)]);
+    }
+
+    /// 名字不是合法 UTF-8 时只在显示时换成替换字符，行的路径仍是原样的字节，打开、改名、删除不会落到
+    /// 名字恰好是替换字符的那个文件上。
+    #[cfg(unix)]
+    #[test]
+    fn keeps_raw_names_in_row_paths() {
+        use std::os::unix::ffi::OsStrExt as _;
+        let raw = std::ffi::OsStr::from_bytes(b"a\xff");
+        let mut state = TreeState::default();
+        let root = Path::new("/p");
+        state.listings.insert(root.into(), vec![DirEntry { name: raw.into(), is_dir: false }, file("a\u{FFFD}")]);
+        state.rebuild_rows(root, ALL);
+        assert_eq!(state.rows[0].path, root.join(raw));
+        assert_eq!(state.rows[0].name, "a\u{FFFD}");
+        assert_ne!(state.rows[0].path, state.rows[1].path);
     }
 
     #[test]
