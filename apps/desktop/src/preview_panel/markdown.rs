@@ -70,7 +70,7 @@ const MAX_LOCAL_IMAGES: usize = 256;
 const MAX_REMOTE_IMAGES: usize = 64;
 
 /// 一个预览标签的排版视图的状态：列表的滚动位置、选区、鼠标在干什么、下好的网络图片。重读文件时
-/// 留着。
+/// 留着，网络图片只留新文档还用的。
 pub(super) struct View {
     pub list: ListState,
     /// 选区：按下的那端和现在拖到的那端。
@@ -120,6 +120,9 @@ impl View {
         }
         self.drag = None;
         self.hover = None;
+        // 新文档不再用的网络图片不留着，否则反复改图片地址时这里攒下每一张下过的图。
+        let urls = doc.remote_urls();
+        self.remote.retain(|url, _| urls.contains(url));
     }
 }
 

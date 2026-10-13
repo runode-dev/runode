@@ -253,6 +253,17 @@ fn reloads_release_only_pictures_the_new_doc_drops() {
     assert!(unused == [bitmap(2).key()], "只放掉 gone.png");
 }
 
+/// 换上新文档时下好的网络图片只留新文档还用的。
+#[test]
+fn reloads_keep_only_remote_pictures_the_new_doc_uses() {
+    let mut view = View::new();
+    for url in ["https://x/keep.png", "https://x/gone.png"] {
+        view.remote.insert(url.to_owned(), Some(bitmap(1)));
+    }
+    view.replace_doc(None, &doc("![](https://x/keep.png)\n"), 14.);
+    assert_eq!(view.remote.keys().collect::<Vec<_>>(), ["https://x/keep.png"]);
+}
+
 /// 撑列宽的格子按终端里占几格挑：汉字算两格，表头也算一行。
 #[test]
 fn widest_cells_count_wide_characters() {
