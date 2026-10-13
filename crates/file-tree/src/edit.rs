@@ -237,6 +237,8 @@ impl FileTree {
             &[&*rust_i18n::t!("files.delete_confirm"), &*rust_i18n::t!("files.cancel")],
             cx,
         );
+        // 完成时已经切到别的 workspace 的话不动现在这棵树；原来那棵切回去重读时会跟上。
+        let ws = self.ws;
         cx.spawn_in(window, async move |this, cx| {
             if answer.await.ok() != Some(0) {
                 return;
@@ -247,7 +249,8 @@ impl FileTree {
             });
             let result = result.await;
             this.update_in(cx, |this, window, cx| match result {
-                Ok(()) => this.after_delete(&path, window, cx),
+                Ok(()) if this.ws == ws => this.after_delete(&path, window, cx),
+                Ok(()) => {}
                 Err(err) => this.show_file_error(error_text(&err, &name), window, cx),
             })
             .ok();
@@ -386,6 +389,8 @@ impl FileTree {
 
     /// 在后台把 `src` 挪进（`cut`）或复制进 `dir`，目录可能很大；完了选中挪过去或复制出来的那一项。
     fn transfer(&mut self, src: PathBuf, dir: PathBuf, cut: bool, window: &mut Window, cx: &mut Context<Self>) {
+        // 同 `delete_file`：完成时已经切走的话不动现在这棵树。
+        let ws = self.ws;
         let job = cx.background_spawn({
             let (src, dir) = (src.clone(), dir.clone());
             async move { if cut { ops::move_into(&src, &dir) } else { ops::copy_into(&src, &dir) } }
@@ -397,11 +402,12 @@ impl FileTree {
                     if this.clipboard.as_ref().is_some_and(|clip| clip.cut && clip.path == src) {
                         this.clipboard = None;
                     }
-                    if dest != src {
+                    if dest != src && this.ws == ws {
                         this.after_move(&src, &dest, cx);
                     }
                 }
-                Ok(dest) => this.relist_and_reveal(vec![dir], &dest, cx),
+                Ok(dest) if this.ws == ws => this.relist_and_reveal(vec![dir], &dest, cx),
+                Ok(_) => {}
                 Err(err) => this.show_file_error(error_text(&err, &base_name(&src)), window, cx),
             })
             .ok();

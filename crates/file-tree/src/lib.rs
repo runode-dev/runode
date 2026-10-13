@@ -291,6 +291,8 @@ impl FileTree {
         if old == Some(ws) {
             return;
         }
+        // 开着的改名、新建框作用在原来那个 workspace 的树上，切走就当取消。
+        self.edit = None;
         // 首次扫描还没回来时旧 workspace 可能还没有树，搜索词也要记下；关掉了的（`forget_workspace`）不记。
         if let Some(old) = old {
             self.workspaces.entry(old).or_default().query = self.search.query(cx);
