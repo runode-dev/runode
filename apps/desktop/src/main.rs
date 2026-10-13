@@ -16,6 +16,7 @@ mod keybinds;
 mod menus;
 mod prespawn;
 mod preview_panel;
+mod process_env;
 mod remote_access;
 mod settings;
 mod startup;
@@ -37,7 +38,7 @@ use crate::window::{open_window, open_window_with};
 
 fn main() {
     startup::begin();
-    use_login_shell();
+    process_env::fix();
     let args: Vec<std::ffi::OsString> = std::env::args_os().skip(1).collect();
     if args == ["--host"] {
         std::process::exit(host_process::run());
@@ -109,36 +110,4 @@ fn main() {
         // 窗口先出来；未打包运行时才需要的图标解码放到最后。
         about::install_icon();
     });
-}
-
-/// 父进程是 launchd（从程序坞、Finder 或 `open` 打开，登录项，登录时自启的宿主）时照 Terminal.app 改用
-/// 账户记录里的登录 shell。`open` 会把调用方的环境带给 app：在 chsh 之前起的终端里打开时带进来的是旧
-/// shell，宿主和各个终端都继承它，在这些终端里再重启 app 又带下去，一直换不过来。别的进程拉起的
-/// （从终端里直接运行的，app 拉起的宿主）沿用父进程给的 `SHELL`。
-fn use_login_shell() {
-    // SAFETY: getppid 总是成功，没有副作用。
-    if unsafe { libc::getppid() } != 1 {
-        return;
-    }
-    if let Some(shell) = login_shell() {
-        // SAFETY: 在 `main` 最开头调用，还没有别的线程读写环境变量。
-        unsafe { std::env::set_var("SHELL", shell) };
-    }
-}
-
-/// 账户记录（passwd）里的登录 shell，没有时为 `None`。
-fn login_shell() -> Option<std::ffi::OsString> {
-    use std::os::unix::ffi::OsStrExt as _;
-    // SAFETY: `passwd` 只有整数和指针，全零是合法的值。
-    let mut entry: libc::passwd = unsafe { std::mem::zeroed() };
-    let mut buf = vec![0; 4096];
-    let mut found = std::ptr::null_mut();
-    // SAFETY: 只往传进去的 `entry` 和 `buf` 里写，`entry` 里的字符串都指向 `buf`。
-    let code = unsafe { libc::getpwuid_r(libc::getuid(), &raw mut entry, buf.as_mut_ptr(), buf.len(), &raw mut found) };
-    if code != 0 || found.is_null() || entry.pw_shell.is_null() {
-        return None;
-    }
-    // SAFETY: 成功时 `pw_shell` 是 `buf` 里以 NUL 结尾的字符串，`buf` 还活着。
-    let shell = unsafe { std::ffi::CStr::from_ptr(entry.pw_shell) }.to_bytes();
-    (!shell.is_empty()).then(|| std::ffi::OsStr::from_bytes(shell).to_owned())
 }
