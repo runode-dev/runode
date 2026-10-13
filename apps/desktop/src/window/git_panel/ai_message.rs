@@ -25,9 +25,9 @@ use std::{
     time::{Duration, Instant},
 };
 
+use crate::git_panel::show_git_error;
 use gpui::{Context, Window};
 use runode_git::{self as git, GitError, Section};
-use runode_git_panel::show_git_error;
 use runode_paths::Dirs;
 use serde::{Deserialize, Serialize};
 

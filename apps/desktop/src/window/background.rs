@@ -95,7 +95,7 @@ fn live_sessions() -> Option<Result<Live>> {
 }
 
 /// 任务用到的会话，现问宿主的任务板：任务没做完时宿主特意留着 shell 已经退出的会话，给人看 agent 最后
-/// 的输出，不能当成没人要的结束掉。看板那份（`runode_todo_board::todo_sessions`）启动时还没问到、开始了
+/// 的输出，不能当成没人要的结束掉。看板那份（`todo_board::todo_sessions`）启动时还没问到、开始了
 /// 新任务时还没更新，靠不住。宿主不认得任务板时没有任务；问不到时为 `None`。
 fn todo_sessions() -> Option<HashSet<SessionId>> {
     let link = host_client::link();
@@ -125,7 +125,7 @@ fn apply(live: Option<Result<Live>>, cx: &mut App) {
         Some(Ok(Live { sessions: live, todos })) => {
             // 任务的会话在任务板上，不列在这里；没问到任务板时用看板那份兜底。
             let mut held = held_sessions(cx);
-            held.extend(runode_todo_board::todo_sessions(cx));
+            held.extend(crate::todo_board::todo_sessions(cx));
             held.extend(todos.iter().flatten());
             retry = todos.is_none() && live.iter().any(|session| session.exited);
             let link = host_client::link();

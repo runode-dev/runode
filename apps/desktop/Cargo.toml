@@ -24,18 +24,10 @@ runode-remote-access.workspace = true
 # 自动更新：查新版本、下载、核对签名、退出时换上 .app。
 runode-update.workspace = true
 runode-autostart.workspace = true
-# 几处界面共用的 GPUI 部件和小工具。
+# 几处界面共用的 GPUI 部件和小工具，连同所有图标。
 runode-ui.workspace = true
-# 右侧面板的 GitHub Actions 页。
-runode-github-actions.workspace = true
-# 右侧的预览栏：文件、diff 和 Markdown 的标签。
-runode-preview-panel.workspace = true
-# 右侧面板的文件树。
-runode-file-tree.workspace = true
-# 右侧面板的 Git 页。
-runode-git-panel.workspace = true
-# 铺满窗口的任务板。
-runode-todo-board.workspace = true
+# 预览栏读文件、判断类型、语法高亮和 Markdown 解析，不碰界面。
+runode-preview.workspace = true
 # 设置页里配对手机时画二维码。
 qrcode.workspace = true
 gpui.workspace = true
@@ -54,12 +46,14 @@ serde.workspace = true
 serde_json.workspace = true
 # 右侧面板监听仓库目录，有文件变了才重读 git 状态。
 notify.workspace = true
+# 文件树按内容搜时标出结果里命中的那一段。
+regex.workspace = true
 
 # 标准「关于」面板、系统偏好的语言和窗口菜单只有 AppKit 提供，GPUI 没有封装。
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2.workspace = true
-# 「关于」面板的内容和系统偏好的语言。
-objc2-foundation = { workspace = true, features = ["std", "NSArray", "NSData", "NSDictionary", "NSLocale", "NSString"] }
+# 「关于」面板的内容和系统偏好的语言；文件树删除文件时移到废纸篓，用 NSFileManager。
+objc2-foundation = { workspace = true, features = ["std", "NSArray", "NSData", "NSDictionary", "NSError", "NSFileManager", "NSLocale", "NSString", "NSURL"] }
 objc2-app-kit = { workspace = true, features = ["std", "NSApplication", "NSResponder", "NSImage", "NSMenu", "NSMenuItem", "NSEvent", "NSView", "NSWindow", "NSScreen"] }
 # 问系统设置里有没有允许发通知，设置页在被拒时提示。
 objc2-user-notifications = { workspace = true, features = ["std", "block2", "UNUserNotificationCenter", "UNNotificationSettings"] }

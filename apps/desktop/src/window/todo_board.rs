@@ -1,4 +1,4 @@
-//! 把铺满窗口的任务板接到窗口上。任务板本身在 `runode_todo_board`：打开时建一个 `TodoBoard`，收起时丢掉。
+//! 把铺满窗口的任务板接到窗口上。任务板本身在 `todo_board`：打开时建一个 `TodoBoard`，收起时丢掉。
 //! 这里启动时把和宿主说话的办法交给它（`watch_todos`），每次画之前交给它各 workspace 的目录和名字、当前的
 //! 目录、定时能不能在后台跑，画它的外框（和手机端引导页一样，见 `render_page_body`）和侧栏顶上的入口；卡片上
 //! agent 的状态标记照标签上的画（`AGENT_MARKS`）。它要窗口办的事（收起、把任务会话接进窗口）经
@@ -9,9 +9,9 @@
 
 use std::path::{Path, PathBuf};
 
+use crate::todo_board::{AgentMarks, Host, Input, TodoBoard, TodoBoardEvent, TodoDialog};
 use gpui::{AnyElement, App, Context, Div, Entity, Focusable as _, Stateful, Subscription, Window, prelude::*};
 use runode_protocol::{SessionId, todo::Todo};
-use runode_todo_board::{AgentMarks, Host, Input, TodoBoard, TodoBoardEvent, TodoDialog};
 
 use super::{
     ToggleTodoBoard, WindowView,
@@ -35,10 +35,10 @@ const AGENT_MARKS: AgentMarks = AgentMarks {
     describe: |agent| Mark::new(agent, false).describe(),
 };
 
-/// 在后台跟着任务板，见 `runode_todo_board::watch`：经 `host_client` 和宿主说话，宿主说变了就重问。
+/// 在后台跟着任务板，见 `todo_board::watch`：经 `host_client` 和宿主说话，宿主说变了就重问。
 pub fn watch_todos(cx: &mut App) {
     let host = Host { ask: |step| host_client::ask_todos(step), list_sessions: host_client::list_sessions };
-    runode_todo_board::watch(host, host_client::todos_changed(), cx);
+    crate::todo_board::watch(host, host_client::todos_changed(), cx);
 }
 
 /// 任务会话该接进哪个 workspace（`dirs` 是各 workspace 的目录）：目录正好是任务的工作树、正好是任务的
@@ -76,7 +76,7 @@ impl WindowView {
         if let Some(board) = &self.todo_board {
             window.focus(&board.view.focus_handle(cx), cx);
         }
-        runode_todo_board::poll_sessions(cx);
+        crate::todo_board::poll_sessions(cx);
         cx.notify();
     }
 

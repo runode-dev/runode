@@ -86,7 +86,7 @@ pub struct SavedWindow {
 }
 
 /// 文件树按内容搜索时的选项，定义跟着文件树。
-pub use runode_file_tree::SearchOptions as SavedSearchOptions;
+pub use crate::file_tree::SearchOptions as SavedSearchOptions;
 
 /// 窗口的位置和大小，相对于它所在的屏幕；放大和全屏时是还原后的位置和大小。默认的大小是 0，恢复时
 /// 按默认位置开。
@@ -132,7 +132,7 @@ pub struct SavedWorkspace {
 }
 
 /// 固定到状态栏上的一个工作流，定义跟着 GitHub Actions 页。
-pub use runode_github_actions::PinnedWorkflow;
+pub use crate::github_actions::PinnedWorkflow;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct SavedTab {

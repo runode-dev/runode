@@ -185,6 +185,8 @@ background:
   end_detail: 其中还有 %{count} 个 agent 在运行，会随之结束。
 panel:
   not_repo: 不在 git 仓库里
+  no_content: 内容没有变化
+  no_changes: 没有未提交的改动
 paste:
   title: 粘贴的内容可能会直接执行命令
   detail: 内容含有换行或终端控制序列，粘贴后可能被当作命令立即运行。
@@ -236,6 +238,7 @@ tooltip:
   restore_split: 还原分屏
   collapse_split: 折叠分屏
   expand_split: 展开分屏
+  close_preview: 关闭预览
 git:
   ai_message:
     title: 生成提交说明
@@ -270,6 +273,8 @@ git:
     missing: "找不到 %{binary} 命令。请先安装，或者确认它在 shell 的 PATH 里。"
     timeout: "%{binary} 太久没有结果，已经停掉。"
     empty: agent 返回的提交说明是空的。
+    menu: 生成提交说明…
+    button: 用 AI 生成提交说明
   checkout: 切换分支…
   create_branch: 新建分支…
   picker:
@@ -282,6 +287,119 @@ git:
     create: "新建分支“%{name}”"
     local: 本地
     remote: 远端
+  stage_hunk: 暂存这一块
+  unstage_hunk: 取消暂存这一块
+  discard_hunk: 放弃这一块
+  irreversible: 此操作不能撤销。
+  discard_confirm: 放弃更改
+  cancel: 取消
+  title: 源代码管理
+  refresh: 刷新
+  view_as_tree: 以树形式查看
+  view_as_list: 以列表形式查看
+  show_submodules: 显示子模块和嵌套仓库
+  show_worktrees: 显示其他工作树
+  ok: 好
+  failed: Git 操作没有完成
+  more: 更多操作
+  view_options: 视图选项
+  busy:
+    stage: 正在暂存…
+    discard: 正在放弃更改…
+    commit: 正在提交…
+    message: 正在生成提交说明…
+    checkout: 正在切换分支…
+    fetch: 正在抓取…
+    pull: 正在拉取…
+    push: 正在推送…
+    sync: 正在同步…
+    stash: 正在储藏…
+    remove_worktree: 正在删除工作树…
+  section:
+    merge: 合并冲突
+    staged: 暂存的更改
+    unstaged: 更改
+    stashes: 储藏
+    graph: 图表
+  message_label: 提交说明
+  message_placeholder: 提交说明（⌘↩ 提交）
+  message_placeholder_branch: 提交说明（⌘↩ 提交到“%{branch}”）
+  commit: 提交
+  commit_amend: 提交（修改上次提交）
+  commit_and_push: 提交并推送
+  commit_and_sync: 提交并同步
+  undo_last_commit: 撤销上次提交
+  commit_more: 更多提交方式
+  sync_changes: "同步更改 %{behind}↓ %{ahead}↑"
+  publish_branch: 发布分支
+  publish: 发布
+  publish_tooltip: 把这个分支推送到远端，并设为上游分支
+  sync_tooltip: 和“%{upstream}”同步：先拉取，再推送
+  detached: "分离于 %{head}"
+  no_commits: 还没有提交
+  repo_kind:
+    main: 仓库
+    submodule: 子模块
+    nested: 嵌套仓库
+    worktree: 工作树
+  pull: 拉取
+  push: 推送
+  sync: 同步
+  fetch: 抓取
+  stage: 暂存更改
+  unstage: 取消暂存更改
+  discard: 放弃更改
+  mark_resolved: 暂存（标记为已解决）
+  open_file: 打开文件
+  stage_all: 暂存所有更改
+  unstage_all: 取消暂存所有更改
+  discard_all: 放弃所有更改
+  stash: 储藏
+  stash_include_untracked: 储藏（包括未跟踪的文件）
+  stash_pop_latest: 弹出最新的储藏
+  stash_apply: 应用储藏
+  stash_pop: 弹出储藏
+  stash_drop: 删除储藏
+  discard_title: 放弃“%{name}”的更改？
+  delete_untracked_title: 删除未跟踪的文件“%{name}”？
+  delete_untracked_detail: 这个文件会从磁盘上删掉，不能撤销。
+  discard_all_title: 放弃全部 %{count} 个文件的更改？
+  discard_all_untracked_detail: 其中 %{count} 个未跟踪的文件会从磁盘上删掉。此操作不能撤销。
+  drop_stash_title: "删除储藏 #%{index}？"
+  drop_stash_confirm: 删除
+  stage_all_title: 没有暂存的更改
+  stage_all_detail: 要把所有更改都暂存起来，直接提交吗？
+  stage_all_confirm: 暂存并提交
+  conflicts_title: 先解决冲突
+  conflicts_detail: 还有文件有冲突，解决并暂存以后再提交。
+  operation:
+    merge: 正在合并：解决冲突并暂存后提交
+    rebase: 正在变基：解决冲突后在终端里继续
+    cherry_pick: 正在拣选：解决冲突并暂存后提交
+    revert: 正在还原：解决冲突并暂存后提交
+  worktree:
+    open_in_new_tab: 在新的终端标签页里打开
+    remove: 删除工作树…
+    remove_title: "删除工作树「%{name}」？"
+    remove_detail: 它的目录会被删掉，它所在的分支保留。
+    remove_dirty_detail: 它还有没提交的改动或未跟踪的文件，会随目录一起删掉，删了找不回来。
+    remove_detached_detail: 它的 HEAD 是游离的，只在这个工作树里做的提交删了以后可能就找不到了。
+    remove_confirm: 删除
+    remove_force: 仍然删除
+  graph:
+    loading: 正在读取提交历史…
+    failed: 读不出提交历史
+    more: 加载更多…
+    refresh: 刷新图表
+    loading_changes: 正在读取改动…
+    changes_failed: 读不出这个提交的改动
+    no_files: 没有改动文件
+    copy_id: 复制提交号
+    checkout: 切到这个提交（分离头指针）
+    create_branch: 从这里新建分支…
+    checkout_title: "切到提交 %{id}？"
+    checkout_detail: HEAD 会分离在这个提交上。要保留在这里做的新提交，请新建一个分支。
+    checkout_confirm: 切换
 driver:
   badge: "由 %{who} 操作 · %{action}"
   outside: runode 以外的程序
@@ -654,3 +772,227 @@ mobile:
 todo_board:
   title: 任务板
   host_too_old: 终端宿主太旧，不认得任务板；重开 Runode 让它升级。
+  todos: 任务
+  schedules: 定时
+  new_todo: 新建任务
+  new_schedule: 新建定时
+  close: 关闭任务板
+  count: "%{count} 个任务"
+  empty: 没有任务
+  started_at: "开始于 %{time}"
+  from_schedule: "来自定时「%{name}」"
+  reorder_hint: 调整值可以上移、下移
+  start: 开始
+  open: 打开终端
+  finish: 标为完成
+  reopen: 取消完成
+  edit: 编辑任务
+  remove_todo: 删除任务
+  remove_title: "删除「%{title}」？"
+  remove_detail: 它的终端还会在后台接着跑。
+  remove: 删除
+  cancel: 取消
+  save: 保存
+  edit_schedule: 编辑定时
+  remove_schedule: 删除定时
+  schedules_need_host: "定时只在终端宿主跑着时生效。退出 app 后也要跑的话，打开 terminal-host，并运行 `runode service install host`。"
+  no_schedules: 还没有定时
+  no_next: 不会再跑
+  next: "下一次 %{time}"
+  worktree_on: 独立工作树
+  done_window: 最近 7 天
+  toast:
+    starting: 正在开始任务…
+    started: 任务已开始
+    failed: 没能开始任务
+    close: 关掉提示
+  column:
+    todo: 待办
+    in_progress: 进行中
+    needs_you: 需要你
+    done: 完成
+  when:
+    once: "一次 · %{time}"
+    daily: "每天 %{time}"
+    weekly: "%{days} %{time}"
+    every_hours: "每 %{count} 小时"
+    every_minutes: "每 %{count} 分钟"
+    unknown: 看不懂的定时
+  weekday:
+    "0": 周日
+    "1": 周一
+    "2": 周二
+    "3": 周三
+    "4": 周四
+    "5": 周五
+    "6": 周六
+  dialog:
+    title_label: 标题
+    title_placeholder: 空着时用提示词的第一行
+    prompt: 交给 agent 的提示词
+    prompt_placeholder: 要 agent 做什么？⌘↩ 保存
+    agent: agent 命令
+    agent_placeholder: claude
+    dir: 目录
+    choose_dir: 选择
+    worktree: 在独立的工作树里做
+    when: 什么时候跑
+    kind_once: 一次
+    kind_daily: 每天
+    kind_every: 每隔
+    once: 日期和时间
+    once_placeholder: YYYY-MM-DD HH:MM
+    daily: 钟点
+    daily_placeholder: HH:MM
+    every: 分钟
+    every_placeholder: "60"
+    days_hint: 一天都不选就是每天。
+    need_title: 写个标题或者提示词。
+    need_agent: 写上跑哪个 agent。
+    bad_dir: 目录不存在。
+    bad_once: "时间写成 YYYY-MM-DD HH:MM。"
+    bad_daily: "钟点写成 HH:MM。"
+    bad_every: 间隔至少一分钟。
+github_actions:
+  name: 名字
+  dialog_cancel: 取消
+  refresh: 刷新
+  missing: 没有找到 gh。在终端里运行 brew install gh 装好、gh auth login 登录后按刷新。
+  login_needed: gh 还没登录 GitHub，或者登录已经失效。在终端里登录后，这一页会自己刷新。
+  login: 在终端里登录
+  resize: "调整「%{name}」的高度"
+  loading: 正在读取…
+  no_branch: 不在分支上
+  current_branch: 当前分支
+  workflows: 工作流
+  settings: 设置
+  no_runs: 没有运行
+  no_workflows: 没有工作流
+  no_jobs: 没有 job
+  none: 没有
+  previous_attempts: 之前的尝试
+  attempt: "第 %{n} 次尝试"
+  open_in_browser: 在浏览器中打开
+  watch: 在终端里盯着
+  cancel: 取消运行
+  rerun: 重新运行
+  logs: 在终端里看日志
+  step_logs: 在浏览器中看这一步的日志
+  trigger: 运行工作流
+  open_workflow: 打开工作流文件
+  pin: 固定到状态栏
+  unpin: 从状态栏取消固定
+  disabled: 已停用
+  secrets: Secrets
+  variables: Variables
+  org_secrets: 组织的 Secrets
+  org_variables: 组织的 Variables
+  manage_in_browser: 在浏览器中管理
+  not_org: 这个仓库属于个人账号，不属于组织，没有组织的 Secrets 和 Variables。
+  environments: 部署环境
+  add_secret: 新建 Secret
+  add_variable: 新建 Variable
+  copy_name: 复制名字
+  copy_value: 复制值
+  update: 在终端里改值
+  delete: 删除
+  delete_secret_title: "删除 secret %{name}？"
+  delete_variable_title: "删除 variable %{name}？"
+  delete_detail: 用到它的工作流就拿不到了，删了不能恢复。
+  state:
+    success: 成功
+    failure: 失败
+    cancelled: 已取消
+    skipped: 已跳过
+    in_progress: 正在运行
+    queued: 排队中
+    waiting: 等待中
+    pending: 未开始
+preview:
+  binary: 无法预览二进制文件
+  too_large: 图片太大，无法预览
+  unreadable: "无法读取文件：%{error}"
+  truncated: 文件太大，只显示了前 %{count} 行
+  close: 关闭
+  close_others: 关闭其他
+  close_right: 关闭右侧
+  close_all: 全部关闭
+  keep_open: 保持打开
+  wrap: 自动换行
+  show_source: 显示源码
+  show_rendered: 显示排版
+  alert:
+    note: 备注
+    tip: 提示
+    important: 重要
+    warning: 警告
+    caution: 注意
+  maximize: 放大预览
+  restore: 还原预览
+  diff:
+    worktree_tab: "%{name}（工作区）"
+    staged_tab: "%{name}（已暂存）"
+    no_changes: 没有改动
+    previous_change: 上一处改动
+    next_change: 下一处改动
+    discard_hunk_title: 丢掉这一块改动？
+    too_large: 改动太多，不显示
+    image_before: 改之前
+    image_after: 改之后
+    image_missing: 没有这个文件
+files:
+  new_file: 新建文件…
+  new_folder: 新建文件夹…
+  collapse_all: 全部收起
+  reveal: 在访达中显示
+  open_in_terminal: 在新标签页中打开
+  preview: 在预览中打开
+  insert_path: 把路径打进终端
+  copy_path: 复制路径
+  copy_relative_path: 复制相对路径
+  add_to_gitignore: 添加到 .gitignore
+  untrack_title: “%{name}”已经被 git 跟踪，不再跟踪它？
+  untrack_detail: 只写进 .gitignore 不会生效。不再跟踪会把它从暂存区拿掉，文件留在磁盘上，下次提交时从仓库里删掉。
+  untrack_confirm: 不再跟踪并忽略
+  rename: 重命名…
+  delete: 移到废纸篓
+  delete_title: 把“%{name}”移到废纸篓？
+  delete_detail: 之后可以从废纸篓放回原处。
+  delete_dir_detail: 里面的所有内容会一起移走，之后可以从废纸篓放回原处。
+  delete_confirm: 移到废纸篓
+  move_title: 把“%{name}”移到“%{dir}”里？
+  move_confirm: 移动
+  cancel: 取消
+  failed: 操作没有完成
+  exists: 这里已经有“%{name}”了。
+  into_itself: 不能把“%{name}”放进它自己里面。
+  invalid_name: “%{name}”不能用作名字。
+  unsupported: 这个系统上不支持移到废纸篓。
+  ok: 好
+  search_placeholder: 查找文件
+  search_name: 名称
+  search_content: 内容
+  search_mode: 搜索方式
+  search_results: 搜索结果
+  tree: 文件
+  search_empty: 没有找到
+  view_as_tree: 以树形式查看
+  view_as_list: 以列表形式查看
+  match_case: 区分大小写
+  whole_word: 全字匹配
+  use_regex: 使用正则表达式
+  clear_search: 清除
+  include: 要包含的文件
+  include_placeholder: 要包含的文件（例如 *.ts、src/**）
+  exclude: 要排除的文件
+  exclude_placeholder: 要排除的文件（例如 *.min.js、dist/**）
+  search_summary: "%{count} 个结果，在 %{files} 个文件中"
+  search_files: "%{files} 个文件"
+  search_truncated: "（只列出前 %{limit} 个）"
+  bad_regex: 正则表达式写得不对
+  refresh: 刷新
+  more: 更多
+  show_dotfiles: 显示点文件
+  show_ignored: 显示 Git 忽略的文件
+  open_in_vscode: 用 VS Code 打开
+  open_in_finder: 在访达中打开

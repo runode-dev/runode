@@ -1,6 +1,6 @@
 [package]
 name = "runode-ui"
-description = "GPUI widgets and helpers shared across runode's desktop views, shadcn style: theme tokens, buttons, text fields, switches, cards, badges, dialogs, popovers and menus, plus scrollbars, tooltips, font sizes, file type icons, system sounds and accessibility helpers"
+description = "GPUI widgets and helpers shared across runode's desktop views, shadcn style: theme tokens, buttons, text fields, switches, cards, badges, dialogs, popovers and menus, plus scrollbars, tooltips, font sizes, all the desktop icons (including file type icons and agent logos), system sounds and accessibility helpers"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

@@ -28,6 +28,7 @@ use super::{
     status_bar,
     titlebar::{pane_label, styled_agent_mark},
 };
+use crate::file_tree::DraggedFile;
 use crate::ui::button::{Button, ButtonSize, ButtonVariant};
 use crate::ui::{
     badge::{Badge, BadgeVariant},
@@ -43,7 +44,6 @@ use crate::{
         tooltip::{shortcut_text, tooltip},
     },
 };
-use runode_file_tree::DraggedFile;
 
 /// 没有焦点的分屏蒙上一层背景色，这是蒙层的不透明度。
 const UNFOCUSED_DIM: f32 = 0.3;

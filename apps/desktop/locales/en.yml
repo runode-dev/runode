@@ -185,6 +185,8 @@ background:
   end_detail: "Agents still running in them: %{count}. They will be stopped."
 panel:
   not_repo: Not a git repository
+  no_content: No content changes
+  no_changes: No uncommitted changes
 paste:
   title: The pasted text may run commands
   detail: It contains line breaks or terminal control sequences, so it may run as a command right after pasting.
@@ -236,6 +238,7 @@ tooltip:
   restore_split: Restore Split
   collapse_split: Collapse Split
   expand_split: Expand Split
+  close_preview: Close Preview
 git:
   ai_message:
     title: Generate Commit Message
@@ -270,6 +273,8 @@ git:
     missing: "Couldn't find the %{binary} command. Install it, or make sure it's on the PATH of your shell."
     timeout: "%{binary} took too long and was stopped."
     empty: The agent returned an empty commit message.
+    menu: Generate Commit Message…
+    button: Generate commit message with AI
   checkout: Checkout to…
   create_branch: Create Branch…
   picker:
@@ -282,6 +287,119 @@ git:
     create: "Create branch “%{name}”"
     local: Local
     remote: Remote
+  stage_hunk: Stage Hunk
+  unstage_hunk: Unstage Hunk
+  discard_hunk: Discard Hunk
+  irreversible: This can't be undone.
+  discard_confirm: Discard Changes
+  cancel: Cancel
+  title: Source Control
+  refresh: Refresh
+  view_as_tree: View as Tree
+  view_as_list: View as List
+  show_submodules: Show Submodules and Nested Repositories
+  show_worktrees: Show Other Worktrees
+  ok: OK
+  failed: The Git operation didn't complete
+  more: More Actions
+  view_options: View Options
+  busy:
+    stage: Staging…
+    discard: Discarding changes…
+    commit: Committing…
+    message: Writing commit message…
+    checkout: Switching branch…
+    fetch: Fetching…
+    pull: Pulling…
+    push: Pushing…
+    sync: Syncing…
+    stash: Stashing…
+    remove_worktree: Removing worktree…
+  section:
+    merge: Merge Changes
+    staged: Staged Changes
+    unstaged: Changes
+    stashes: Stashes
+    graph: Graph
+  message_label: Commit message
+  message_placeholder: Message (⌘↩ to commit)
+  message_placeholder_branch: "Message (⌘↩ to commit on “%{branch}”)"
+  commit: Commit
+  commit_amend: Commit (Amend)
+  commit_and_push: Commit & Push
+  commit_and_sync: Commit & Sync
+  undo_last_commit: Undo Last Commit
+  commit_more: More Commit Actions
+  sync_changes: "Sync Changes %{behind}↓ %{ahead}↑"
+  publish_branch: Publish Branch
+  publish: Publish
+  publish_tooltip: Push this branch to the remote and set it as the upstream
+  sync_tooltip: "Sync with “%{upstream}”: pull, then push"
+  detached: "Detached at %{head}"
+  no_commits: No commits yet
+  repo_kind:
+    main: Repository
+    submodule: Submodule
+    nested: Nested Repository
+    worktree: Worktree
+  pull: Pull
+  push: Push
+  sync: Sync
+  fetch: Fetch
+  stage: Stage Changes
+  unstage: Unstage Changes
+  discard: Discard Changes
+  mark_resolved: Stage (Mark as Resolved)
+  open_file: Open File
+  stage_all: Stage All Changes
+  unstage_all: Unstage All Changes
+  discard_all: Discard All Changes
+  stash: Stash
+  stash_include_untracked: Stash (Include Untracked)
+  stash_pop_latest: Pop Latest Stash
+  stash_apply: Apply Stash
+  stash_pop: Pop Stash
+  stash_drop: Drop Stash
+  discard_title: "Discard changes in “%{name}”?"
+  delete_untracked_title: "Delete the untracked file “%{name}”?"
+  delete_untracked_detail: The file will be deleted from disk. This can't be undone.
+  discard_all_title: "Discard changes in all %{count} files?"
+  discard_all_untracked_detail: "%{count} untracked files among them will be deleted from disk. This can't be undone."
+  drop_stash_title: "Drop stash #%{index}?"
+  drop_stash_confirm: Drop
+  stage_all_title: There are no staged changes
+  stage_all_detail: Stage all your changes and commit them directly?
+  stage_all_confirm: Stage and Commit
+  conflicts_title: Resolve the conflicts first
+  conflicts_detail: Some files still have conflicts. Resolve them and stage them before committing.
+  operation:
+    merge: "Merging: resolve the conflicts, stage them, then commit"
+    rebase: "Rebasing: resolve the conflicts, then continue in the terminal"
+    cherry_pick: "Cherry-picking: resolve the conflicts, stage them, then commit"
+    revert: "Reverting: resolve the conflicts, stage them, then commit"
+  worktree:
+    open_in_new_tab: Open in New Terminal Tab
+    remove: Remove Worktree…
+    remove_title: "Remove the worktree “%{name}”?"
+    remove_detail: Its directory will be deleted. The branch it was on stays.
+    remove_dirty_detail: It has uncommitted changes or untracked files, which will be deleted along with its directory. This can't be undone.
+    remove_detached_detail: Its HEAD is detached, so commits made only in this worktree may be lost.
+    remove_confirm: Remove
+    remove_force: Remove Anyway
+  graph:
+    loading: Loading history…
+    failed: Couldn't read the commit history
+    more: Load More…
+    refresh: Refresh Graph
+    loading_changes: Loading changes…
+    changes_failed: Couldn't read this commit's changes
+    no_files: No file changes
+    copy_id: Copy Commit ID
+    checkout: Checkout (Detached)
+    create_branch: Create Branch from Here…
+    checkout_title: "Switch to commit %{id}?"
+    checkout_detail: HEAD will be detached at this commit. Create a branch if you want to keep new commits made there.
+    checkout_confirm: Switch
 driver:
   badge: "Driven by %{who} · %{action}"
   outside: a program outside Runode
@@ -654,3 +772,227 @@ mobile:
 todo_board:
   title: Todo Board
   host_too_old: The terminal host is too old for the todo board; restart Runode to upgrade it.
+  todos: Tasks
+  schedules: Schedules
+  new_todo: New Task
+  new_schedule: New Schedule
+  close: Close the todo board
+  count: "%{count} tasks"
+  empty: Nothing here
+  started_at: "started %{time}"
+  from_schedule: "from %{name}"
+  reorder_hint: Adjust the value to move it up or down
+  start: Start
+  open: Open its terminal
+  finish: Mark as done
+  reopen: Mark as not done
+  edit: Edit Task
+  remove_todo: Delete task
+  remove_title: "Delete “%{title}”?"
+  remove_detail: Its terminal keeps running in the background.
+  remove: Delete
+  cancel: Cancel
+  save: Save
+  edit_schedule: Edit Schedule
+  remove_schedule: Delete schedule
+  schedules_need_host: "Schedules only run while the terminal host is running. To keep them running after you quit the app, turn on terminal-host and run `runode service install host`."
+  no_schedules: No schedules yet
+  no_next: Will not run again
+  next: "next %{time}"
+  worktree_on: own worktree
+  done_window: Last 7 days
+  toast:
+    starting: Starting the task…
+    started: Task started
+    failed: Couldn’t start the task
+    close: Dismiss
+  column:
+    todo: To Do
+    in_progress: In Progress
+    needs_you: Needs You
+    done: Done
+  when:
+    once: "Once at %{time}"
+    daily: "Every day at %{time}"
+    weekly: "%{time} on %{days}"
+    every_hours: "Every %{count} h"
+    every_minutes: "Every %{count} min"
+    unknown: Unknown schedule
+  weekday:
+    "0": Sun
+    "1": Mon
+    "2": Tue
+    "3": Wed
+    "4": Thu
+    "5": Fri
+    "6": Sat
+  dialog:
+    title_label: Title
+    title_placeholder: Defaults to the first line of the prompt
+    prompt: Prompt for the agent
+    prompt_placeholder: What should the agent do? ⌘↩ saves
+    agent: Agent command
+    agent_placeholder: claude
+    dir: Directory
+    choose_dir: Choose
+    worktree: Work in its own worktree
+    when: Runs
+    kind_once: Once
+    kind_daily: Daily
+    kind_every: Every
+    once: Date and time
+    once_placeholder: YYYY-MM-DD HH:MM
+    daily: Time of day
+    daily_placeholder: HH:MM
+    every: Minutes
+    every_placeholder: "60"
+    days_hint: No days picked means every day.
+    need_title: Give it a title or a prompt.
+    need_agent: Say which agent to run.
+    bad_dir: The directory does not exist.
+    bad_once: "Write the time as YYYY-MM-DD HH:MM."
+    bad_daily: "Write the time of day as HH:MM."
+    bad_every: The interval is at least one minute.
+github_actions:
+  name: Name
+  dialog_cancel: Cancel
+  refresh: Refresh
+  missing: gh was not found. Install it with brew install gh, sign in with gh auth login, then press Refresh.
+  login_needed: gh isn't signed in to GitHub, or its sign-in has expired. Sign in in the terminal; this page picks it up by itself.
+  login: Sign In in Terminal
+  resize: "Resize %{name}"
+  loading: Loading…
+  no_branch: Not on a branch
+  current_branch: Current Branch
+  workflows: Workflows
+  settings: Settings
+  no_runs: No runs
+  no_workflows: No workflows
+  no_jobs: No jobs
+  none: None
+  previous_attempts: Previous attempts
+  attempt: "Attempt %{n}"
+  open_in_browser: Open in Browser
+  watch: Watch in Terminal
+  cancel: Cancel Run
+  rerun: Re-run
+  logs: View Logs in Terminal
+  step_logs: View Step Logs in Browser
+  trigger: Run Workflow
+  open_workflow: Open Workflow File
+  pin: Pin to Status Bar
+  unpin: Unpin from Status Bar
+  disabled: disabled
+  secrets: Secrets
+  variables: Variables
+  org_secrets: Organization Secrets
+  org_variables: Organization Variables
+  manage_in_browser: Manage in Browser
+  not_org: This repository belongs to a personal account, not an organization, so it has no organization secrets or variables.
+  environments: Environments
+  add_secret: New Secret
+  add_variable: New Variable
+  copy_name: Copy Name
+  copy_value: Copy Value
+  update: Change Value in Terminal
+  delete: Delete
+  delete_secret_title: "Delete secret %{name}?"
+  delete_variable_title: "Delete variable %{name}?"
+  delete_detail: Workflows that use it stop getting it. This can't be undone.
+  state:
+    success: succeeded
+    failure: failed
+    cancelled: cancelled
+    skipped: skipped
+    in_progress: in progress
+    queued: queued
+    waiting: waiting
+    pending: pending
+preview:
+  binary: Can't preview a binary file
+  too_large: The image is too large to preview
+  unreadable: "Can't read the file: %{error}"
+  truncated: The file is too large; only the first %{count} lines are shown
+  close: Close
+  close_others: Close Others
+  close_right: Close to the Right
+  close_all: Close All
+  keep_open: Keep Open
+  wrap: Word Wrap
+  show_source: Show Source
+  show_rendered: Show Formatted
+  alert:
+    note: Note
+    tip: Tip
+    important: Important
+    warning: Warning
+    caution: Caution
+  maximize: Maximize Preview
+  restore: Restore Preview
+  diff:
+    worktree_tab: "%{name} (Working Tree)"
+    staged_tab: "%{name} (Staged)"
+    no_changes: No changes
+    previous_change: Previous Change
+    next_change: Next Change
+    discard_hunk_title: Discard this change?
+    too_large: Too many changes to show
+    image_before: Before
+    image_after: After
+    image_missing: No file
+files:
+  new_file: New File…
+  new_folder: New Folder…
+  collapse_all: Collapse Folders
+  reveal: Reveal in Finder
+  open_in_terminal: Open in New Tab
+  preview: Open in Preview
+  insert_path: Insert Path into Terminal
+  copy_path: Copy Path
+  copy_relative_path: Copy Relative Path
+  add_to_gitignore: Add to .gitignore
+  untrack_title: "“%{name}” is tracked by git. Stop tracking it?"
+  untrack_detail: Adding a tracked file to .gitignore has no effect. If you stop tracking it, it leaves the index but stays on disk, and the next commit deletes it from the repository.
+  untrack_confirm: Stop Tracking and Ignore
+  rename: Rename…
+  delete: Move to Trash
+  delete_title: "Move “%{name}” to the Trash?"
+  delete_detail: You can put it back from the Trash.
+  delete_dir_detail: Everything inside goes with it. You can put it back from the Trash.
+  delete_confirm: Move to Trash
+  move_title: "Move “%{name}” into “%{dir}”?"
+  move_confirm: Move
+  cancel: Cancel
+  failed: The operation couldn't be completed
+  exists: "“%{name}” already exists here."
+  into_itself: "Can't put “%{name}” inside itself."
+  invalid_name: "“%{name}” isn't a valid name."
+  unsupported: Moving to the Trash isn't supported on this system.
+  ok: OK
+  search_placeholder: Find files
+  search_name: Name
+  search_content: Content
+  search_mode: Search By
+  search_results: Search Results
+  tree: Files
+  search_empty: No results
+  view_as_tree: View as Tree
+  view_as_list: View as List
+  match_case: Match Case
+  whole_word: Match Whole Word
+  use_regex: Use Regular Expression
+  clear_search: Clear
+  include: Files to include
+  include_placeholder: "e.g. *.ts, src/**"
+  exclude: Files to exclude
+  exclude_placeholder: "e.g. *.min.js, dist/**"
+  search_summary: "%{count} results in %{files} files"
+  search_files: "%{files} files"
+  search_truncated: " (showing the first %{limit})"
+  bad_regex: Invalid regular expression
+  refresh: Refresh
+  more: More
+  show_dotfiles: Show Dotfiles
+  show_ignored: Show Git-Ignored Files
+  open_in_vscode: Open in VS Code
+  open_in_finder: Open in Finder

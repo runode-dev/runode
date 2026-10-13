@@ -6,16 +6,21 @@
 mod about;
 mod assets;
 mod config;
+mod file_tree;
+mod git_panel;
+mod github_actions;
 mod host_client;
 mod host_process;
 mod i18n;
 mod keybinds;
 mod menus;
 mod prespawn;
+mod preview_panel;
 mod remote_access;
 mod settings;
 mod startup;
 mod terminal_view;
+mod todo_board;
 mod update;
 mod window;
 

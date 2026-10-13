@@ -1,6 +1,6 @@
 //! 一个 workspace 的项目状态：读的是哪个目录、git 状态、后台读的调度，以及换上后台读到的结果。文件树
-//! 自己的状态（展开的目录、选中的行）在 `runode_file_tree` 里，Git 面板的（排好的行、提交说明框）在
-//! `runode_git_panel` 里。
+//! 自己的状态（展开的目录、选中的行）在 `file_tree` 里，Git 面板的（排好的行、提交说明框）在
+//! `git_panel` 里。
 
 use std::{
     collections::HashSet,
@@ -9,7 +9,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use runode_file_tree::TreeScan;
+use crate::file_tree::TreeScan;
 use runode_git as git;
 use runode_protocol::TaskSource;
 

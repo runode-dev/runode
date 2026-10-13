@@ -62,7 +62,6 @@ use runode_shared_types::{
 
 pub(crate) use agents::{
     alert::{listen as listen_notifications, notifications_denied, test as test_notification},
-    logo::FILES as AGENT_LOGO_FILES,
     reveal_notified,
 };
 pub use arrange::ArrangePanes;
@@ -76,8 +75,8 @@ pub use quit::{
     terminal_windows,
 };
 pub use remote::serve_requests;
-// 文件树的动作跟着文件树在 `runode_file_tree`，快捷键表照旧从这里引。
-pub use runode_file_tree::{
+// 文件树的动作跟着文件树在 `file_tree`，快捷键表照旧从这里引。
+pub use crate::file_tree::{
     CollapseSelectedFile, CopyPath, CopyRelativePath, DeleteFile, ExpandSelectedFile, FocusTerminal, OpenSelectedFile,
     RenameFile, RevealInFinder, SelectFirstFile, SelectLastFile, SelectNextFile, SelectPreviousFile,
 };
@@ -91,6 +90,10 @@ pub use todo_board::watch_todos;
 use crate::ui::a11y::{Hide, PressDown};
 // 关标签、关分屏和放大分屏这几个动作在 `runode_ui::actions`，焦点在预览栏里时由预览栏接住；
 // 标题栏的高度、拖动窗口和标签的关闭按钮也在 `runode_ui`，窗口里照旧从这里引。
+use crate::file_tree::FileTree;
+use crate::git_panel::GitPanel;
+use crate::github_actions::ActionsPanel;
+use crate::preview_panel::PreviewPanel;
 pub use crate::ui::actions::{ClosePane, CloseTab, TogglePaneZoom};
 pub(crate) use crate::ui::panel::TITLEBAR_HEIGHT;
 use crate::ui::{
@@ -103,10 +106,6 @@ use crate::ui::{
 use crate::{config::AppConfig, prespawn::Prespawned, terminal_view::TerminalView, ui::font_size::FontSize};
 use model::{PaneLayout, Workspace, WorkspaceId, home_dir};
 use persist::format::SavedWindow;
-use runode_file_tree::FileTree;
-use runode_git_panel::GitPanel;
-use runode_github_actions::ActionsPanel;
-use runode_preview_panel::PreviewPanel;
 use slot::Slot;
 use titlebar::titled;
 

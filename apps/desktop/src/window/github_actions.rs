@@ -1,12 +1,12 @@
-//! 把右侧面板的 GitHub Actions 页接到窗口上。页本身在 `runode_github_actions`：这里交给它仓库、分支、
+//! 把右侧面板的 GitHub Actions 页接到窗口上。页本身在 `github_actions`：这里交给它仓库、分支、
 //! shell 报告的 PATH 和固定到状态栏上的工作流，画面板外框和顶上的标签，替它在旁边的终端里跑 gh、
 //! 在预览栏里开工作流文件，存档固定的工作流和三段的高度。
 
 use crate::ui::theme::ActiveTheme as _;
 use std::path::PathBuf;
 
+use crate::github_actions::{ActionsEvent, ActionsPanel, Input, PROGRAM, render_pinned};
 use gpui::{AnyElement, App, Context, Div, Entity, Focusable, Stateful, Window, div, prelude::*};
-use runode_github_actions::{ActionsEvent, ActionsPanel, Input, PROGRAM, render_pinned};
 
 use super::{
     Divider, WindowView, cards,

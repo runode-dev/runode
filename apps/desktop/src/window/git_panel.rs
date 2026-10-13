@@ -1,4 +1,4 @@
-//! 把右侧面板的 Git 页接到窗口上。页本身在 `runode_git_panel`：一个窗口一个 `GitPanel`，各 workspace 的面板
+//! 把右侧面板的 Git 页接到窗口上。页本身在 `git_panel`：一个窗口一个 `GitPanel`，各 workspace 的面板
 //! 都在它里面。这里每次对它做什么之前告诉它当前是哪个 workspace，画的时候交给它栏宽和状态栏的高度，画面板
 //! 外框和顶上的标签；后台读到的 git 状态由 `refresh_project` 经 `GitPanel::set_git` 交给它。它要窗口办的事
 //! （开 diff 和文件的预览、把路径打进终端、开新标签、重读、打开分支列表和写提交说明的对话框、拖图表的分隔线、
@@ -12,8 +12,8 @@
 mod ai_message;
 mod branch_picker;
 
+use crate::git_panel::{GitPanel, GitPanelEvent, Input};
 use gpui::{Context, Div, Entity, Stateful, Window, div, prelude::*};
-use runode_git_panel::{GitPanel, GitPanelEvent, Input};
 
 pub(super) use ai_message::CommitMessageDialog;
 pub(super) use branch_picker::BranchPicker;

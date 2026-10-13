@@ -1,4 +1,4 @@
-//! 把右侧面板的文件树接到窗口上。文件树本身在 `runode_file_tree`：一个窗口一个 `FileTree`，各 workspace 的树
+//! 把右侧面板的文件树接到窗口上。文件树本身在 `file_tree`：一个窗口一个 `FileTree`，各 workspace 的树
 //! 都在它里面。这里每次对它做什么之前告诉它当前是哪个 workspace、交给它 workspace 的名字、目录和单击打不打开
 //! 文件，画面板外框和顶上的标签；后台读到的目录和 git 状态由 `refresh_project` 经 `FileTree::apply_scan` 交给它。
 //! 它要窗口办的事（开预览、把路径打进终端、开新标签、预览跟着改名和删除、重读、焦点交回终端、开关变了要存档）
@@ -8,9 +8,9 @@
 
 use std::path::{Path, PathBuf};
 
+use crate::file_tree::{FileTree, FileTreeEvent, Input};
 use gpui::{Context, Div, Entity, Focusable, Stateful, Window, div, prelude::*, px};
 use runode_config::PreviewClick;
-use runode_file_tree::{FileTree, FileTreeEvent, Input};
 
 // 菜单在 `runode_ui::menu`，窗口里各处照旧从这里引。
 pub(super) use crate::ui::menu::{MenuButton, MenuItem};

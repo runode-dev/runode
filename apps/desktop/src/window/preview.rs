@@ -1,4 +1,4 @@
-//! 把右侧的预览栏接到窗口上。预览栏本身在 `runode_preview_panel`：一个窗口一个 `PreviewPanel`，各 workspace
+//! 把右侧的预览栏接到窗口上。预览栏本身在 `preview_panel`：一个窗口一个 `PreviewPanel`，各 workspace
 //! 的标签都在它里面。这里每次对它做什么之前告诉它当前是哪个 workspace、交给它那个 workspace 最近读到的 git
 //! 状态，画的时候交给它字体、栏宽和配置里的预览字号（颜色它自己从主题读）；它要窗口办的事（文件树定位、
 //! 出现收起和放大还原时重排窗口、开关变了要存档、把路径打进终端、按块暂存）经 `PreviewEvent` 交回来。自动
@@ -6,11 +6,11 @@
 
 use std::path::{Path, PathBuf};
 
+use crate::preview_panel::{Input, PreviewEvent, PreviewPanel};
 use gpui::{AnyElement, App, Context, Empty, Entity, Focusable as _, IntoElement as _, Window};
 use runode_config::PreviewClick;
-use runode_preview_panel::{Input, PreviewEvent, PreviewPanel};
 
-pub(in crate::window) use runode_preview_panel::DiffTarget;
+pub(in crate::window) use crate::preview_panel::DiffTarget;
 
 use super::{WindowView, cards, model::WorkspaceId, project::PANEL_TOGGLES_INSET, status_bar};
 use crate::config::AppConfig;

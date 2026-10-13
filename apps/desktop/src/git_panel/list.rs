@@ -1,0 +1,505 @@
+//! Git 面板中间的列表：每段的标题、改动的文件和储藏；面板底部图表的各行也由 `render_git_row` 画。各行的按钮平时藏着，鼠标移到行上才
+//! 露出来。每一行都属于某个仓库，按钮作用到那个仓库。点文件在预览栏里看它的整篇
+//! diff。
+
+use std::{
+    ops::Range,
+    path::{Path, PathBuf},
+};
+
+use crate::ui::{
+    a11y::PressDown,
+    badge::{Badge, BadgeVariant},
+    base_name,
+    file_icons::{file_icon, folder_icon},
+    font_size::{FontSize, scaled},
+    hsla,
+    icons::{DISCARD_ICON, MINUS_ICON, OPEN_FILE_ICON, PLUS_ICON, TRASH_ICON},
+    menu::{MenuHost as _, MenuItem},
+    panel::{added_label, removed_label},
+    row_buttons::{RowButton, button, row_buttons},
+    theme::{ADDED, ActiveTheme as _, MODIFIED, REMOVED, RENAMED},
+};
+use gpui::SharedString;
+use gpui::{
+    AccessibleAction, AnyElement, App, Context, Div, ElementId, MouseButton, MouseDownEvent, Role, Stateful, Window,
+    accesskit::ActionData, div, img, prelude::*, px,
+};
+use runode_git::{self as git, DiffSide, FileStatus, Section};
+use runode_shared_types::color::Rgb;
+
+use super::{
+    DirOp, FileOp, GitDirAction, GitFileAction, GitPanel, GitPanelEvent, STASH_APPLY_ICON, STASH_POP_ICON, repo_id,
+    rows::{DirOwner, GitRow, GitSection, PanelState, section_of},
+    run::StashOp,
+};
+
+/// 每一行的高度：段标题、文件、提交都一样高，列表才能只画看得见的部分。
+pub(super) const ROW_HEIGHT: f32 = 22.;
+/// 文件比段标题往右缩进的宽度，树形式里每深一层再缩进这么多。
+const INDENT: f32 = 12.;
+
+/// 点文件行时在预览栏里打开的 diff，见 `GitPanelEvent::OpenDiff`。
+#[derive(Clone)]
+pub(super) struct Diff {
+    pub root: PathBuf,
+    pub rel: PathBuf,
+    pub old_rel: Option<PathBuf>,
+    pub side: DiffSide,
+}
+
+impl Diff {
+    /// 点了 `clicks` 下时请 app 打开它。
+    pub fn open(&self, clicks: usize) -> GitPanelEvent {
+        let Self { root, rel, old_rel, side } = self.clone();
+        GitPanelEvent::OpenDiff { root, rel, old_rel, side, clicks }
+    }
+}
+
+/// 文件名和状态字母按 git 状态上的颜色。
+fn status_color(status: FileStatus) -> Rgb {
+    match status {
+        FileStatus::Modified => MODIFIED,
+        FileStatus::Added | FileStatus::Untracked => ADDED,
+        FileStatus::Deleted | FileStatus::Conflicted => REMOVED,
+        FileStatus::Renamed => RENAMED,
+    }
+}
+
+impl GitPanel {
+    /// 只有一个仓库时列表里看得见的那些行。
+    pub(crate) fn render_git_rows(&self, range: Range<usize>, cx: &mut Context<Self>) -> Vec<AnyElement> {
+        let panel = self.state();
+        let Some(git) = &panel.git else {
+            return Vec::new();
+        };
+        range
+            .filter_map(|ix| panel.rows.get(ix).map(|row| (ix, *row)))
+            .map(|(ix, row)| self.render_git_row(ix, row, git, cx))
+            .collect()
+    }
+
+    /// 第 `ix` 行；图表里的行 `ix` 是在 `PanelState::graph_rows` 里的下标。块头不在这里画，见
+    /// `render_repo_block`。
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn render_git_row(
+        &self,
+        ix: usize,
+        row: GitRow,
+        git: &git::Repos,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let Some(repo) = git.get(row.repo()) else {
+            return div().into_any_element();
+        };
+        match row {
+            GitRow::Repo(_) => div().into_any_element(),
+            GitRow::Section(_, section) => self.render_git_section(ix, section, repo, cx),
+            GitRow::File(_, section, fi) => self.render_git_file(ix, section, fi, repo, cx),
+            GitRow::Stash(_, si) => self.render_git_stash(ix, si, repo, cx),
+            GitRow::Dir(_, di) => match self.state().dirs.get(di).map(|dir| dir.owner) {
+                Some(DirOwner::Section(section)) => self.render_git_dir(ix, di, section, cx),
+                Some(DirOwner::Commit(ci)) => self.render_commit_dir(ix, di, ci, cx),
+                None => div().into_any_element(),
+            },
+            GitRow::Clean(_) => div()
+                .id(repo_id("git-clean", &repo.root))
+                .role(Role::Label)
+                .aria_label(rust_i18n::t!("panel.no_changes").into_owned())
+                .flex_none()
+                .h(scaled(ROW_HEIGHT))
+                .w_full()
+                .pl(px(8. + INDENT))
+                .flex()
+                .items_center()
+                .italic()
+                .text_color(cx.theme().foreground.opacity(0.45))
+                .child(rust_i18n::t!("panel.no_changes").into_owned())
+                .into_any_element(),
+            GitRow::Commit(_, ci) => self.render_commit(repo, ci, cx),
+            GitRow::CommitFile(_, ci, fi) => self.render_commit_file(ix, repo, ci, fi, cx),
+            GitRow::CommitNote(_, ci, note) => self.render_commit_note(repo, ci, note, cx),
+            GitRow::GraphNote(_, note) => self.render_graph_note(repo, note, cx),
+        }
+    }
+
+    /// 一行的外框：定高、横着排、鼠标移上去时底色变亮，按钮跟着露出来。提交图里的行也用它，
+    /// 图紧贴左边（`pl` 给 0）。
+    pub(crate) fn git_row(&self, id: impl Into<ElementId>, pl: f32, cx: &App) -> Stateful<Div> {
+        let hover_bg = cx.theme().mix(0.06);
+        div()
+            .id(id)
+            .flex_none()
+            .h(scaled(ROW_HEIGHT))
+            .w_full()
+            .pl(px(8. + pl))
+            .pr(px(8.))
+            .flex()
+            .items_center()
+            .gap(px(6.))
+            .overflow_hidden()
+            .text_color(cx.theme().foreground)
+            .hover(|row| row.bg(hover_bg))
+    }
+
+    /// 鼠标进出第 `ix` 行时记到 `PanelState::hovered`，好让按钮只画在那一行。
+    fn track_row_hover(&self, ix: usize, cx: &mut Context<Self>) -> impl Fn(&bool, &mut Window, &mut App) + 'static {
+        cx.listener(move |this, hovered: &bool, _, cx| {
+            let panel = this.state_mut();
+            if *hovered {
+                panel.hovered = Some(ix);
+            } else if panel.hovered == Some(ix) {
+                panel.hovered = None;
+            }
+            cx.notify();
+        })
+    }
+
+    /// 报给辅助工具的层级：段标题是第一层，多个仓库时在块头下面再深一层；段里的行比段标题深一层，
+    /// 以树形式查看时再加上它在树里的深度 `depth`。
+    pub(crate) fn tree_level(&self, section: bool, depth: usize) -> usize {
+        let project = self.state();
+        let multi = project.git.as_ref().is_some_and(|git| project.multi(git));
+        1 + usize::from(multi) + if section { 0 } else { 1 + depth }
+    }
+
+    /// 第 `ix` 行行尾的按钮，鼠标在这行或辅助工具在读时才画；根目录是 `root` 的仓库有操作在跑时按不动。
+    fn row_buttons(
+        &self,
+        ix: usize,
+        root: &Path,
+        buttons: Vec<RowButton<Self>>,
+        cx: &mut Context<Self>,
+    ) -> Option<Div> {
+        let panel = &self.state();
+        let shown = panel.hovered == Some(ix) || panel.a11y;
+        row_buttons(buttons, shown, panel.busy(root).is_none(), cx)
+    }
+
+    fn render_git_section(
+        &self,
+        ix: usize,
+        section: GitSection,
+        git: &git::Snapshot,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let panel = &self.state();
+        let root = git.root.clone();
+        let (label, count) = match section {
+            GitSection::Merge => (rust_i18n::t!("git.section.merge"), PanelState::files(git, section).len()),
+            GitSection::Staged => (rust_i18n::t!("git.section.staged"), PanelState::files(git, section).len()),
+            GitSection::Unstaged => (rust_i18n::t!("git.section.unstaged"), PanelState::files(git, section).len()),
+            GitSection::Stashes => (rust_i18n::t!("git.section.stashes"), git.info.stashes.len()),
+        };
+        let section_button = |icon, key: &'static str, stage: bool| {
+            let root = root.clone();
+            button(icon, rust_i18n::t!(key), move |this: &mut Self, window, cx| {
+                this.git_section_action(&root, section, stage, window, cx);
+            })
+        };
+        let buttons = match section {
+            GitSection::Merge => vec![section_button(PLUS_ICON, "git.stage_all", true)],
+            GitSection::Staged => vec![section_button(MINUS_ICON, "git.unstage_all", false)],
+            GitSection::Unstaged => {
+                vec![
+                    section_button(DISCARD_ICON, "git.discard_all", false),
+                    section_button(PLUS_ICON, "git.stage_all", true),
+                ]
+            }
+            GitSection::Stashes => Vec::new(),
+        };
+        let expanded = panel.section_expanded(&root, section);
+        self.git_row(repo_id(&format!("git-section-{section:?}"), &root), 0., cx)
+            .role(Role::TreeItem)
+            .aria_level(self.tree_level(true, 0))
+            .aria_expanded(expanded)
+            .aria_label(format!("{label} ({count})"))
+            .on_hover(self.track_row_hover(ix, cx))
+            .child(chevron(expanded, cx))
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .truncate()
+                    .text_size(FontSize::Small)
+                    .font_weight(gpui::FontWeight::SEMIBOLD)
+                    .child(label.into_owned()),
+            )
+            .children(self.row_buttons(ix, &root, buttons, cx))
+            .child(Badge::new(count.to_string()).variant(BadgeVariant::Secondary))
+            .on_press_down(cx, move |this, _, cx| {
+                let panel = this.state_mut();
+                let git = panel.git.clone();
+                panel.toggle_section(&root, section, git.as_deref());
+                cx.notify();
+            })
+            .into_any_element()
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn render_git_file(
+        &self,
+        ix: usize,
+        section: Section,
+        fi: usize,
+        git: &git::Snapshot,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let file = &git.files(section)[fi];
+        let shown_in = section_of(file, section);
+        let root = git.root.clone();
+        let name = base_name(&file.path);
+        // 以树形式查看时所在目录已经在上面的行里了，不再写。
+        let panel = &self.state();
+        let depth = panel.depth.get(ix).copied().unwrap_or(0) as f32;
+        let dir = if panel.tree {
+            String::new()
+        } else {
+            file.path.parent().map(|dir| dir.display().to_string()).unwrap_or_default()
+        };
+        let action = |op| GitFileAction { repo: root.clone(), op, section, path: file.path.clone() };
+        let file_button = |icon, key: &'static str, op| {
+            let action = action(op);
+            button(icon, rust_i18n::t!(key), move |this: &mut Self, window, cx| {
+                this.git_file_action(&action, window, cx)
+            })
+        };
+        let mut buttons = vec![file_button(OPEN_FILE_ICON, "git.open_file", FileOp::Open)];
+        match shown_in {
+            GitSection::Merge => buttons.push(file_button(PLUS_ICON, "git.mark_resolved", FileOp::Stage)),
+            GitSection::Staged => buttons.push(file_button(MINUS_ICON, "git.unstage", FileOp::Unstage)),
+            _ => {
+                // 子模块那一条丢不掉，不给丢弃的按钮。
+                if !file.gitlink {
+                    buttons.push(file_button(DISCARD_ICON, "git.discard", FileOp::Discard));
+                }
+                buttons.push(file_button(PLUS_ICON, "git.stage", FileOp::Stage));
+            }
+        }
+        let path = file.path.clone();
+        let dim = cx.theme().foreground.opacity(0.5);
+        let deleted = file.status == FileStatus::Deleted;
+        let side = if section == Section::Staged { DiffSide::Index } else { DiffSide::Worktree };
+        let target = Diff { root: root.clone(), rel: path.clone(), old_rel: file.old_path.clone(), side };
+        let open = target.clone();
+        let id = format!("git-file-{shown_in:?}-{}-{}", root.display(), path.display());
+        self.git_row(SharedString::from(id), INDENT * (depth + 1.), cx)
+            .role(Role::TreeItem)
+            .aria_level(self.tree_level(false, depth as usize))
+            .aria_label(name.clone())
+            .aria_description(file_description(file, &dir))
+            .on_hover(self.track_row_hover(ix, cx))
+            // 树形式里目录行有箭头，文件行空出同样宽，名字才对得齐。
+            .when(panel.tree, |row| row.child(div().flex_none().w(px(12.))))
+            .child(img(file_icon(&name)).flex_none().size(px(14.)))
+            .child(
+                div()
+                    .flex_initial()
+                    .min_w_0()
+                    .truncate()
+                    .when(deleted, |name| name.line_through().text_color(dim))
+                    .child(name),
+            )
+            .child(div().flex_1().min_w_0().truncate().text_size(FontSize::Small).text_color(dim).child(dir))
+            .children(self.row_buttons(ix, &root, buttons, cx))
+            .when(file.added > 0, |row| row.child(added_label(file.added)))
+            .when(file.removed > 0, |row| row.child(removed_label(file.removed)))
+            .child(status_letter(file.status))
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(move |_, event: &MouseDownEvent, _, cx| {
+                    cx.stop_propagation();
+                    cx.emit(target.open(event.click_count));
+                }),
+            )
+            .on_a11y_action(AccessibleAction::Click, a11y_open_diff(open, cx))
+            .on_mouse_down(
+                MouseButton::Right,
+                cx.listener(move |this, event: &MouseDownEvent, _, cx| {
+                    cx.stop_propagation();
+                    this.open_git_file_menu(event.position, root.clone(), section, shown_in, path.clone(), cx);
+                }),
+            )
+            .into_any_element()
+    }
+
+    /// 以树形式查看时工作区改动里的一个目录：可以展开收起，悬停时有暂存、取消暂存或丢掉这个目录
+    /// 下所有改动的按钮，右键菜单同样。
+    pub(crate) fn render_git_dir(
+        &self,
+        ix: usize,
+        di: usize,
+        section: GitSection,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let panel = &self.state();
+        let Some(dir) = panel.dirs.get(di) else {
+            return div().into_any_element();
+        };
+        let depth = panel.depth.get(ix).copied().unwrap_or(0) as f32;
+        let (root, path) = (dir.root.clone(), dir.path.clone());
+        let action = |op| GitDirAction { repo: root.clone(), section, dir: path.clone(), op };
+        let dir_button = |icon, key: &'static str, op| {
+            let action = action(op);
+            button(icon, rust_i18n::t!(key), move |this: &mut Self, window, cx| {
+                this.git_dir_action(&action, window, cx)
+            })
+        };
+        let buttons = match section {
+            GitSection::Merge => vec![dir_button(PLUS_ICON, "git.mark_resolved", DirOp::Stage)],
+            GitSection::Staged => vec![dir_button(MINUS_ICON, "git.unstage", DirOp::Unstage)],
+            _ => vec![
+                dir_button(DISCARD_ICON, "git.discard", DirOp::Discard),
+                dir_button(PLUS_ICON, "git.stage", DirOp::Stage),
+            ],
+        };
+        let last = base_name(&path);
+        let menu = action(DirOp::Stage);
+        let id = format!("git-dir-{section:?}-{}-{}", root.display(), path.display());
+        self.git_row(SharedString::from(id), INDENT * (depth + 1.), cx)
+            .role(Role::TreeItem)
+            .aria_level(self.tree_level(false, depth as usize))
+            .aria_expanded(dir.expanded)
+            .aria_label(dir.name.clone())
+            .on_hover(self.track_row_hover(ix, cx))
+            .child(chevron(dir.expanded, cx))
+            .child(img(folder_icon(&last, dir.expanded)).flex_none().size(px(14.)))
+            .child(div().flex_1().min_w_0().truncate().child(dir.name.clone()))
+            .children(self.row_buttons(ix, &root, buttons, cx))
+            .on_press_down(cx, move |this, _, cx| {
+                let panel = this.state_mut();
+                let git = panel.git.clone();
+                panel.toggle_dir(di, git.as_deref());
+                cx.notify();
+            })
+            .on_mouse_down(
+                MouseButton::Right,
+                cx.listener(move |this, event: &MouseDownEvent, _, cx| {
+                    cx.stop_propagation();
+                    this.open_git_dir_menu(event.position, menu.clone(), cx);
+                }),
+            )
+            .into_any_element()
+    }
+
+    /// 目录的右键菜单，`base` 里除了 `op` 都是这个目录的。
+    fn open_git_dir_menu(&mut self, position: gpui::Point<gpui::Pixels>, base: GitDirAction, cx: &mut Context<Self>) {
+        let enabled = self.state().busy(&base.repo).is_none();
+        let item = |key: &str, op| {
+            Some(MenuItem::new(rust_i18n::t!(key), Box::new(GitDirAction { op, ..base.clone() }), enabled, cx))
+        };
+        let items = match base.section {
+            GitSection::Merge => vec![item("git.mark_resolved", DirOp::Stage)],
+            GitSection::Staged => vec![item("git.unstage", DirOp::Unstage)],
+            _ => vec![item("git.stage", DirOp::Stage), item("git.discard", DirOp::Discard)],
+        };
+        let target = self.focus.clone();
+        self.open_context_menu(position, items, target, cx);
+    }
+
+    /// 根目录是 `root` 的仓库里那个文件的右键菜单。
+    fn open_git_file_menu(
+        &mut self,
+        position: gpui::Point<gpui::Pixels>,
+        root: PathBuf,
+        section: Section,
+        shown_in: GitSection,
+        path: PathBuf,
+        cx: &mut Context<Self>,
+    ) {
+        let enabled = self.state().busy(&root).is_none();
+        let gitlink = self.git_file(&root, section, &path).is_some_and(|file| file.gitlink);
+        let item = |key: &str, op, enabled| {
+            let action = GitFileAction { repo: root.clone(), op, section, path: path.clone() };
+            Some(MenuItem::new(rust_i18n::t!(key), Box::new(action), enabled, cx))
+        };
+        let mut items = vec![
+            item("git.open_file", FileOp::Open, true),
+            item("files.reveal", FileOp::Reveal, true),
+            item("files.insert_path", FileOp::InsertPath, true),
+            None,
+        ];
+        match shown_in {
+            GitSection::Merge => items.push(item("git.mark_resolved", FileOp::Stage, enabled)),
+            GitSection::Staged => items.push(item("git.unstage", FileOp::Unstage, enabled)),
+            _ => {
+                items.push(item("git.stage", FileOp::Stage, enabled));
+                if !gitlink {
+                    items.push(item("git.discard", FileOp::Discard, enabled));
+                }
+            }
+        }
+        let target = self.focus.clone();
+        self.open_context_menu(position, items, target, cx);
+    }
+
+    fn render_git_stash(&self, ix: usize, si: usize, git: &git::Snapshot, cx: &mut Context<Self>) -> AnyElement {
+        let stash = &git.info.stashes[si];
+        let index = stash.index;
+        let root = git.root.clone();
+        let stash_button = |icon, key: &'static str, op: StashOp| {
+            let root = root.clone();
+            button(icon, rust_i18n::t!(key), move |this: &mut Self, window, cx| {
+                this.git_stash_action(&root, index, op, window, cx)
+            })
+        };
+        let buttons = vec![
+            stash_button(STASH_APPLY_ICON, "git.stash_apply", StashOp::Apply),
+            stash_button(STASH_POP_ICON, "git.stash_pop", StashOp::Pop),
+            stash_button(TRASH_ICON, "git.stash_drop", StashOp::Drop),
+        ];
+        // 按从最早一条数起的序号认：新存一条时最上面的 `stash@{0}` 变了，下面各条的 `index` 都加一。
+        let id = format!("git-stash-{}-{}", root.display(), git.info.stashes.len() - index);
+        self.git_row(SharedString::from(id), INDENT, cx)
+            .role(Role::TreeItem)
+            .aria_level(self.tree_level(false, 0))
+            .aria_label(format!("#{index} {}", stash.message))
+            .on_hover(self.track_row_hover(ix, cx))
+            .child(
+                div()
+                    .flex_none()
+                    .text_size(FontSize::Small)
+                    .text_color(cx.theme().foreground.opacity(0.5))
+                    .child(format!("#{index}")),
+            )
+            .child(div().flex_1().min_w_0().truncate().child(stash.message.clone()))
+            .children(self.row_buttons(ix, &root, buttons, cx))
+            .into_any_element()
+    }
+}
+
+/// 辅助工具按下文件行时打开它的 diff。按两下的打开法：预览设成双击才打开时单击什么也不做，而辅助
+/// 工具按下总该打开它。
+pub(crate) fn a11y_open_diff(
+    target: Diff,
+    cx: &mut Context<GitPanel>,
+) -> impl FnMut(Option<&ActionData>, &mut Window, &mut App) + 'static {
+    let view = cx.entity().downgrade();
+    move |_, _, cx| {
+        view.update(cx, |_, cx| cx.emit(target.open(2))).ok();
+    }
+}
+
+/// 报给辅助工具的文件行说明：状态字母、所在目录（`dir`，树形式时为空）和加减了多少行，界面上
+/// 这些是分开的几块字。
+pub(crate) fn file_description(file: &git::FileDiff, dir: &str) -> String {
+    let mut parts = vec![file.status.letter().to_owned()];
+    if !dir.is_empty() {
+        parts.push(dir.to_owned());
+    }
+    if file.added > 0 {
+        parts.push(format!("+{}", file.added));
+    }
+    if file.removed > 0 {
+        parts.push(format!("−{}", file.removed));
+    }
+    parts.join(" · ")
+}
+
+/// 行尾的状态字母，按状态上色。
+pub(crate) fn status_letter(status: FileStatus) -> Div {
+    div().flex_none().w(px(12.)).flex().justify_center().text_color(hsla(status_color(status))).child(status.letter())
+}
+
+// 展开、收起的箭头在 `crate::ui::panel`，面板里各处照旧从这里引。
+pub(crate) use crate::ui::panel::chevron;

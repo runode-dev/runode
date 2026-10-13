@@ -394,14 +394,14 @@ impl WindowView {
             self.panel_width = saved.panel_width;
             self.preview_width = saved.preview_width;
             self.preview.update(cx, |panel, _| panel.set_options(saved.preview_wrap, saved.preview_source));
-            let file_tree = runode_file_tree::Options {
+            let file_tree = crate::file_tree::Options {
                 show_ignored: saved.show_ignored,
                 show_dotfiles: !saved.hide_dotfiles,
                 search_tree: saved.file_search_tree,
                 search: saved.file_search_options,
             };
             self.file_tree.update(cx, |tree, cx| tree.set_options(file_tree, cx));
-            let git = runode_git_panel::Options {
+            let git = crate::git_panel::Options {
                 tree: saved.git_tree,
                 show_subs: !saved.git_hide_subs,
                 show_worktrees: !saved.git_hide_worktrees,

@@ -185,6 +185,8 @@ background:
   end_detail: 其中還有 %{count} 個 agent 在執行，會一併終止。
 panel:
   not_repo: 不在 git 倉庫裡
+  no_content: 內容沒有變化
+  no_changes: 沒有未提交的改動
 paste:
   title: 貼上的內容可能會直接執行指令
   detail: 內容含有換行或終端機控制序列，貼上後可能被當作指令立即執行。
@@ -236,6 +238,7 @@ tooltip:
   restore_split: 還原分割畫面
   collapse_split: 摺疊分割畫面
   expand_split: 展開分割畫面
+  close_preview: 關閉預覽
 git:
   ai_message:
     title: 產生提交說明
@@ -270,6 +273,8 @@ git:
     missing: "找不到 %{binary} 指令。請先安裝，或確認它在 shell 的 PATH 裡。"
     timeout: "%{binary} 太久沒有結果，已經停止。"
     empty: agent 傳回的提交說明是空的。
+    menu: 產生提交說明…
+    button: 用 AI 產生提交說明
   checkout: 切換分支…
   create_branch: 新增分支…
   picker:
@@ -282,6 +287,119 @@ git:
     create: "新增分支「%{name}」"
     local: 本機
     remote: 遠端
+  stage_hunk: 暫存這一塊
+  unstage_hunk: 取消暫存這一塊
+  discard_hunk: 捨棄這一塊
+  irreversible: 此操作無法復原。
+  discard_confirm: 捨棄變更
+  cancel: 取消
+  title: 原始碼控制
+  refresh: 重新整理
+  view_as_tree: 以樹狀檢視
+  view_as_list: 以清單檢視
+  show_submodules: 顯示子模組和巢狀倉庫
+  show_worktrees: 顯示其他工作樹
+  ok: 好
+  failed: Git 操作沒有完成
+  more: 更多操作
+  view_options: 檢視選項
+  busy:
+    stage: 正在暫存…
+    discard: 正在捨棄變更…
+    commit: 正在提交…
+    message: 正在產生提交說明…
+    checkout: 正在切換分支…
+    fetch: 正在擷取…
+    pull: 正在提取…
+    push: 正在推送…
+    sync: 正在同步…
+    stash: 正在儲藏…
+    remove_worktree: 正在刪除工作樹…
+  section:
+    merge: 合併衝突
+    staged: 暫存的變更
+    unstaged: 變更
+    stashes: 儲藏
+    graph: 圖表
+  message_label: 提交說明
+  message_placeholder: 提交說明（⌘↩ 提交）
+  message_placeholder_branch: 提交說明（⌘↩ 提交到「%{branch}」）
+  commit: 提交
+  commit_amend: 提交（修改上次提交）
+  commit_and_push: 提交並推送
+  commit_and_sync: 提交並同步
+  undo_last_commit: 復原上次提交
+  commit_more: 更多提交方式
+  sync_changes: "同步變更 %{behind}↓ %{ahead}↑"
+  publish_branch: 發佈分支
+  publish: 發佈
+  publish_tooltip: 把這個分支推送到遠端，並設為上游分支
+  sync_tooltip: 和「%{upstream}」同步：先提取，再推送
+  detached: "分離於 %{head}"
+  no_commits: 還沒有提交
+  repo_kind:
+    main: 倉庫
+    submodule: 子模組
+    nested: 巢狀倉庫
+    worktree: 工作樹
+  pull: 提取
+  push: 推送
+  sync: 同步
+  fetch: 擷取
+  stage: 暫存變更
+  unstage: 取消暫存變更
+  discard: 捨棄變更
+  mark_resolved: 暫存（標記為已解決）
+  open_file: 開啟檔案
+  stage_all: 暫存所有變更
+  unstage_all: 取消暫存所有變更
+  discard_all: 捨棄所有變更
+  stash: 儲藏
+  stash_include_untracked: 儲藏（包括未追蹤的檔案）
+  stash_pop_latest: 彈出最新的儲藏
+  stash_apply: 套用儲藏
+  stash_pop: 彈出儲藏
+  stash_drop: 刪除儲藏
+  discard_title: 捨棄「%{name}」的變更？
+  delete_untracked_title: 刪除未追蹤的檔案「%{name}」？
+  delete_untracked_detail: 這個檔案會從磁碟上刪掉，無法復原。
+  discard_all_title: 捨棄全部 %{count} 個檔案的變更？
+  discard_all_untracked_detail: 其中 %{count} 個未追蹤的檔案會從磁碟上刪掉。此操作無法復原。
+  drop_stash_title: "刪除儲藏 #%{index}？"
+  drop_stash_confirm: 刪除
+  stage_all_title: 沒有暫存的變更
+  stage_all_detail: 要把所有變更都暫存起來，直接提交嗎？
+  stage_all_confirm: 暫存並提交
+  conflicts_title: 先解決衝突
+  conflicts_detail: 還有檔案有衝突，解決並暫存以後再提交。
+  operation:
+    merge: 正在合併：解決衝突並暫存後提交
+    rebase: 正在重定基底：解決衝突後在終端機裡繼續
+    cherry_pick: 正在揀選：解決衝突並暫存後提交
+    revert: 正在還原：解決衝突並暫存後提交
+  worktree:
+    open_in_new_tab: 在新的終端機標籤頁中開啟
+    remove: 刪除工作樹…
+    remove_title: "刪除工作樹「%{name}」？"
+    remove_detail: 它的目錄會被刪除，它所在的分支保留。
+    remove_dirty_detail: 它還有未提交的改動或未追蹤的檔案，會隨目錄一起刪除，刪除後無法復原。
+    remove_detached_detail: 它的 HEAD 是分離的，只在這個工作樹裡做的提交刪除後可能就找不到了。
+    remove_confirm: 刪除
+    remove_force: 仍然刪除
+  graph:
+    loading: 正在讀取提交歷史…
+    failed: 讀不出提交歷史
+    more: 載入更多…
+    refresh: 重新整理圖表
+    loading_changes: 正在讀取變更…
+    changes_failed: 讀不出這個提交的變更
+    no_files: 沒有變更的檔案
+    copy_id: 拷貝提交編號
+    checkout: 切到這個提交（分離 HEAD）
+    create_branch: 從這裡新增分支…
+    checkout_title: "切到提交 %{id}？"
+    checkout_detail: HEAD 會分離在這個提交上。要保留在這裡做的新提交，請新增一個分支。
+    checkout_confirm: 切換
 driver:
   badge: "由 %{who} 操作 · %{action}"
   outside: runode 以外的程式
@@ -654,3 +772,227 @@ mobile:
 todo_board:
   title: 任務板
   host_too_old: 終端機宿主太舊，不認得任務板；重開 Runode 讓它升級。
+  todos: 任務
+  schedules: 定時
+  new_todo: 新增任務
+  new_schedule: 新增定時
+  close: 關閉任務板
+  count: "%{count} 個任務"
+  empty: 沒有任務
+  started_at: "開始於 %{time}"
+  from_schedule: "來自定時「%{name}」"
+  reorder_hint: 調整值可以上移、下移
+  start: 開始
+  open: 打開終端機
+  finish: 標為完成
+  reopen: 取消完成
+  edit: 編輯任務
+  remove_todo: 刪除任務
+  remove_title: "刪除「%{title}」？"
+  remove_detail: 它的終端機還會在背景繼續跑。
+  remove: 刪除
+  cancel: 取消
+  save: 儲存
+  edit_schedule: 編輯定時
+  remove_schedule: 刪除定時
+  schedules_need_host: "定時只在終端機宿主執行時生效。結束 app 後也要跑的話，打開 terminal-host，並執行 `runode service install host`。"
+  no_schedules: 還沒有定時
+  no_next: 不會再跑
+  next: "下一次 %{time}"
+  worktree_on: 獨立工作樹
+  done_window: 最近 7 天
+  toast:
+    starting: 正在開始任務…
+    started: 任務已開始
+    failed: 沒能開始任務
+    close: 關掉提示
+  column:
+    todo: 待辦
+    in_progress: 進行中
+    needs_you: 需要你
+    done: 完成
+  when:
+    once: "一次 · %{time}"
+    daily: "每天 %{time}"
+    weekly: "%{days} %{time}"
+    every_hours: "每 %{count} 小時"
+    every_minutes: "每 %{count} 分鐘"
+    unknown: 看不懂的定時
+  weekday:
+    "0": 週日
+    "1": 週一
+    "2": 週二
+    "3": 週三
+    "4": 週四
+    "5": 週五
+    "6": 週六
+  dialog:
+    title_label: 標題
+    title_placeholder: 空著時用提示詞的第一行
+    prompt: 交給 agent 的提示詞
+    prompt_placeholder: 要 agent 做什麼？⌘↩ 儲存
+    agent: agent 命令
+    agent_placeholder: claude
+    dir: 目錄
+    choose_dir: 選擇
+    worktree: 在獨立的工作樹裡做
+    when: 什麼時候跑
+    kind_once: 一次
+    kind_daily: 每天
+    kind_every: 每隔
+    once: 日期和時間
+    once_placeholder: YYYY-MM-DD HH:MM
+    daily: 鐘點
+    daily_placeholder: HH:MM
+    every: 分鐘
+    every_placeholder: "60"
+    days_hint: 一天都不選就是每天。
+    need_title: 寫個標題或者提示詞。
+    need_agent: 寫上跑哪個 agent。
+    bad_dir: 目錄不存在。
+    bad_once: "時間寫成 YYYY-MM-DD HH:MM。"
+    bad_daily: "鐘點寫成 HH:MM。"
+    bad_every: 間隔至少一分鐘。
+github_actions:
+  name: 名稱
+  dialog_cancel: 取消
+  refresh: 重新整理
+  missing: 找不到 gh。在終端機裡執行 brew install gh 安裝、gh auth login 登入後按重新整理。
+  login_needed: gh 還沒登入 GitHub，或者登入已經失效。在終端機裡登入後，這一頁會自己重新整理。
+  login: 在終端機裡登入
+  resize: "調整「%{name}」的高度"
+  loading: 正在讀取…
+  no_branch: 不在分支上
+  current_branch: 目前分支
+  workflows: 工作流程
+  settings: 設定
+  no_runs: 沒有執行
+  no_workflows: 沒有工作流程
+  no_jobs: 沒有 job
+  none: 沒有
+  previous_attempts: 之前的嘗試
+  attempt: "第 %{n} 次嘗試"
+  open_in_browser: 在瀏覽器中打開
+  watch: 在終端機裡盯著
+  cancel: 取消執行
+  rerun: 重新執行
+  logs: 在終端機裡看日誌
+  step_logs: 在瀏覽器中看這一步的日誌
+  trigger: 執行工作流程
+  open_workflow: 打開工作流程檔案
+  pin: 固定到狀態列
+  unpin: 從狀態列取消固定
+  disabled: 已停用
+  secrets: Secrets
+  variables: Variables
+  org_secrets: 組織的 Secrets
+  org_variables: 組織的 Variables
+  manage_in_browser: 在瀏覽器中管理
+  not_org: 這個儲存庫屬於個人帳號，不屬於組織，沒有組織的 Secrets 和 Variables。
+  environments: 部署環境
+  add_secret: 新增 Secret
+  add_variable: 新增 Variable
+  copy_name: 複製名稱
+  copy_value: 複製值
+  update: 在終端機裡改值
+  delete: 刪除
+  delete_secret_title: "刪除 secret %{name}？"
+  delete_variable_title: "刪除 variable %{name}？"
+  delete_detail: 用到它的工作流程就拿不到了，刪除後無法復原。
+  state:
+    success: 成功
+    failure: 失敗
+    cancelled: 已取消
+    skipped: 已略過
+    in_progress: 正在執行
+    queued: 排隊中
+    waiting: 等待中
+    pending: 未開始
+preview:
+  binary: 無法預覽二進位檔案
+  too_large: 圖片太大，無法預覽
+  unreadable: "無法讀取檔案：%{error}"
+  truncated: 檔案太大，只顯示了前 %{count} 行
+  close: 關閉
+  close_others: 關閉其他
+  close_right: 關閉右側
+  close_all: 全部關閉
+  keep_open: 保持開啟
+  wrap: 自動換行
+  show_source: 顯示原始碼
+  show_rendered: 顯示排版
+  alert:
+    note: 備註
+    tip: 提示
+    important: 重要
+    warning: 警告
+    caution: 注意
+  maximize: 放大預覽
+  restore: 還原預覽
+  diff:
+    worktree_tab: "%{name}（工作區）"
+    staged_tab: "%{name}（已暫存）"
+    no_changes: 沒有改動
+    previous_change: 上一處改動
+    next_change: 下一處改動
+    discard_hunk_title: 捨棄這一塊改動？
+    too_large: 改動太多，不顯示
+    image_before: 改之前
+    image_after: 改之後
+    image_missing: 沒有這個檔案
+files:
+  new_file: 新增檔案…
+  new_folder: 新增檔案夾…
+  collapse_all: 全部收合
+  reveal: 在 Finder 中顯示
+  open_in_terminal: 在新分頁中打開
+  preview: 在預覽中打開
+  insert_path: 把路徑打進終端機
+  copy_path: 拷貝路徑
+  copy_relative_path: 拷貝相對路徑
+  add_to_gitignore: 加入 .gitignore
+  untrack_title: 「%{name}」已經被 git 追蹤，不再追蹤它？
+  untrack_detail: 只寫進 .gitignore 不會生效。不再追蹤會把它從暫存區移除，檔案留在磁碟上，下次提交時從儲存庫裡刪掉。
+  untrack_confirm: 不再追蹤並忽略
+  rename: 重新命名…
+  delete: 丟到垃圾桶
+  delete_title: 把「%{name}」丟到垃圾桶？
+  delete_detail: 之後可以從垃圾桶放回原處。
+  delete_dir_detail: 裡面的所有內容會一起移走，之後可以從垃圾桶放回原處。
+  delete_confirm: 丟到垃圾桶
+  move_title: 把「%{name}」移到「%{dir}」裡？
+  move_confirm: 移動
+  cancel: 取消
+  failed: 操作沒有完成
+  exists: 這裡已經有「%{name}」了。
+  into_itself: 不能把「%{name}」放進它自己裡面。
+  invalid_name: 「%{name}」不能用作名稱。
+  unsupported: 這個系統上不支援丟到垃圾桶。
+  ok: 好
+  search_placeholder: 尋找檔案
+  search_name: 名稱
+  search_content: 內容
+  search_mode: 搜尋方式
+  search_results: 搜尋結果
+  tree: 檔案
+  search_empty: 沒有找到
+  view_as_tree: 以樹狀檢視
+  view_as_list: 以清單檢視
+  match_case: 大小寫須相符
+  whole_word: 全字拼寫須相符
+  use_regex: 使用規則運算式
+  clear_search: 清除
+  include: 要包含的檔案
+  include_placeholder: 要包含的檔案（例如 *.ts、src/**）
+  exclude: 要排除的檔案
+  exclude_placeholder: 要排除的檔案（例如 *.min.js、dist/**）
+  search_summary: "%{count} 個結果，在 %{files} 個檔案中"
+  search_files: "%{files} 個檔案"
+  search_truncated: "（只列出前 %{limit} 個）"
+  bad_regex: 規則運算式寫得不對
+  refresh: 重新整理
+  more: 更多
+  show_dotfiles: 顯示點檔案
+  show_ignored: 顯示 Git 忽略的檔案
+  open_in_vscode: 用 VS Code 開啟
+  open_in_finder: 在 Finder 中開啟

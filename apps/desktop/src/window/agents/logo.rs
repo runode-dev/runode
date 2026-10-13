@@ -1,5 +1,5 @@
 //! 各家 agent 的 logo，卡片样式下画在标签和分屏标题条上，一眼看出终端里跑的是哪个 agent。图标
-//! 的出处和许可写在图标目录的 `LICENSE` 里。
+//! 本身在 `runode_ui` 的 `agent_logos` 里，出处和许可写在图标目录的 `LICENSE` 里。
 //!
 //! 有品牌色的 logo 用 `img()` 按原色画；只有一种颜色的用 `svg()` 染成前景色，深浅两种背景上都
 //! 看得清。没收 logo 的 agent 画成圆角方框里它名字的头一个字母，认不出是哪个的（`Other`）为
@@ -8,50 +8,11 @@
 use gpui::{AnyElement, FontWeight, Hsla, Pixels, div, img, prelude::*, svg};
 use runode_shared_types::agent::AgentKind;
 
-/// 列出所有 logo：给每个 logo 一个资源路径常量，并把它们连同文件内容收进 `FILES`，
-/// 路径和文件名只写一遍，免得两边对不上。
-macro_rules! logos {
-    ($($konst:ident = $name:literal,)*) => {
-        $(const $konst: &str = concat!("icons/agents/", $name, ".svg");)*
-
-        /// 所有 agent logo 的资源路径和内容，`Assets` 按路径从这里取。
-        pub(crate) const FILES: &[(&str, &[u8])] = &[
-            $(($konst, include_bytes!(concat!("../../../assets/icons/agents/", $name, ".svg"))),)*
-        ];
-    };
-}
-
-logos! {
-    PI = "pi",
-    CLAUDE = "claude",
-    CODEX = "codex",
-    GEMINI = "gemini",
-    CURSOR = "cursor",
-    DEVIN = "devin",
-    ANTIGRAVITY = "antigravity",
-    CLINE = "cline",
-    MASTRACODE = "mastracode",
-    OPENCODE = "opencode",
-    GITHUB_COPILOT = "github-copilot",
-    KIMI = "kimi",
-    KIRO = "kiro",
-    AMP = "amp",
-    GROK = "grok",
-    HERMES = "hermes",
-    KILO = "kilo",
-    QODER = "qoder",
-    QWEN = "qwen",
-    GOOSE = "goose",
-    JUNIE = "junie",
-    OPENHANDS = "openhands",
-    TRAE = "trae",
-    CODEBUDDY = "codebuddy",
-    MISTRAL_VIBE = "mistral-vibe",
-    JULES = "jules",
-    OMP = "omp",
-    MUSE = "muse",
-    DEEPSEEK = "deepseek",
-}
+use crate::ui::icons::agent_logos::{
+    AMP, ANTIGRAVITY, CLAUDE, CLINE, CODEBUDDY, CODEX, CURSOR, DEEPSEEK, DEVIN, GEMINI, GITHUB_COPILOT, GOOSE, GROK,
+    HERMES, JULES, JUNIE, KILO, KIMI, KIRO, MASTRACODE, MISTRAL_VIBE, MUSE, OMP, OPENCODE, OPENHANDS, PI, QODER, QWEN,
+    TRAE,
+};
 
 /// 一个 logo 怎么画：按原色，染成前景色，还是没有 logo、写名字的头一个字母。
 enum Logo {
@@ -182,6 +143,7 @@ pub(in crate::window) fn agent_logo(kind: AgentKind, size: Pixels, fg: Hsla) -> 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ui::icons::agent_logos::FILES;
 
     #[test]
     fn every_known_agent_has_a_logo_or_an_initial() {

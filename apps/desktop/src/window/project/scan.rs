@@ -1,11 +1,11 @@
-//! 在后台读一次项目：git 状态，以及文件树要显示的目录内容（读目录在 `runode_file_tree::list_dirs`）。
+//! 在后台读一次项目：git 状态，以及文件树要显示的目录内容（读目录在 `file_tree::list_dirs`）。
 
 use std::{
     path::PathBuf,
     time::{Duration, Instant},
 };
 
-use runode_file_tree::{Listings, list_dirs};
+use crate::file_tree::{Listings, list_dirs};
 use runode_git as git;
 
 /// 后台读到的一份结果：git 状态，以及文件树根目录和展开的目录的内容，读不了的目录为 `None`。
