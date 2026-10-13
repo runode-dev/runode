@@ -34,26 +34,24 @@ impl WindowView {
         }
         let size = view.read(cx).size();
         let scale = window.scale_factor();
-        // 每一维要多出的点数：0 是这一维不变。
-        let grow = |want: u16, min: u16, have: u16, cell_px: u16| {
-            if want == 0 {
-                0.
-            } else {
-                (f64::from(want.max(min)) - f64::from(have)) * f64::from(cell_px) / f64::from(scale)
-            }
-        };
-        let mut dw = grow(columns, MIN_COLUMNS, size.cols, size.cell_width_px);
+        let mut dw = grow(columns, MIN_COLUMNS, size.cols, size.cell_width_px, scale);
         if dw > 0. {
             // 窄窗口里右侧的预览栏和面板被压窄过的，窗口一放宽先放回它们原来的宽度，要多给这一截。
             let total = |widths: PanelWidths| f64::from(widths.preview + widths.panel);
             let now = self.right_panel_widths(f32::from(window.viewport_size().width), cx);
             dw += total(self.right_panel_widths(f32::INFINITY, cx)) - total(now);
         }
-        let dh = grow(rows, MIN_ROWS, size.rows, size.cell_height_px);
+        let dh = grow(rows, MIN_ROWS, size.rows, size.cell_height_px, scale);
         if dw != 0. || dh != 0. {
             resize_by(window, cx, dw, dh);
         }
     }
+}
+
+/// 终端从 `have` 格变成程序要的 `want` 格（不少于 `min`），这一维要多出的点数，少了为负；`want` 为 0 是这一维
+/// 不变。`cell_px` 是一格的像素数，`scale` 是每点几个像素。
+fn grow(want: u16, min: u16, have: u16, cell_px: u16, scale: f32) -> f64 {
+    if want == 0 { 0. } else { (f64::from(want.max(min)) - f64::from(have)) * f64::from(cell_px) / f64::from(scale) }
 }
 
 /// 把窗口加宽 `dw`、加高 `dh` 点，不大过所在屏幕的可用区域，左上角不动。放到主线程的下一轮再改：
@@ -89,4 +87,21 @@ fn resize_by(window: &Window, cx: &App, dw: f64, dh: f64) {
 fn resize_by(window: &mut Window, _: &App, dw: f64, dh: f64) {
     let size = window.viewport_size();
     window.resize(gpui::size(size.width + gpui::px(dw as f32), size.height + gpui::px(dh as f32)));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn grow_counts_points_from_cells() {
+        // 0 是这一维不变。
+        assert_eq!(grow(0, MIN_COLUMNS, 80, 16, 2.), 0.);
+        // 80 列到 120 列，每格 16 像素，2 倍屏上是 8 点。
+        assert_eq!(grow(120, MIN_COLUMNS, 80, 16, 2.), 320.);
+        // 缩小为负。
+        assert_eq!(grow(60, MIN_COLUMNS, 80, 16, 2.), -160.);
+        // 要得比下限还小按下限办。
+        assert_eq!(grow(1, MIN_ROWS, 24, 32, 2.), -224.);
+    }
 }

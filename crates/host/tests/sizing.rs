@@ -498,3 +498,25 @@ fn oversized_grids_are_refused() {
     assert_eq!(resized(&seen), [widest]);
     a.send(&ClientMsg::Kill { id });
 }
+
+/// 程序用 CSI 8 t 要求改窗口尺寸：宿主不改会话尺寸，跟在含这条序列的那块输出后面转一条 `ResizeWindow`；
+/// 同一块里先后几次只转合并后的一条。
+#[test]
+fn a_window_resize_request_follows_its_output() {
+    let host = host();
+    let mut desktop = Peer::pair(&host);
+    let body = r"read go; printf 'before\033[8;50;0t\033[8;0;120tafter\n'; read _";
+    let id = desktop.spawn(&script(&temp_dir("resize-window"), "resizer", body));
+    let (channel, _) = desktop.attach(id, AttachMode::VtReplay);
+    desktop.input(channel, b"go\r");
+    let mut requests = Vec::new();
+    let output = desktop.wait(channel, |message, _| {
+        if let Some(HostMsg::ResizeWindow { id: from, rows, columns }) = message {
+            requests.push((*from, *rows, *columns));
+        }
+        !requests.is_empty()
+    });
+    assert!(common::contains(&output, b"after"), "the request came before its output");
+    assert_eq!(requests, [(id, 50, 120)]);
+    desktop.send(&ClientMsg::Kill { id });
+}
