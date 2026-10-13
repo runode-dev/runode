@@ -20,7 +20,10 @@ use super::{
     project::{Project, SidePanel},
     sidebar::RepoBadge,
 };
-use crate::terminal_view::{PROVISIONAL_SIZE, SHOW_WAIT, TerminalEvent, TerminalView};
+use crate::{
+    terminal_view::{PROVISIONAL_SIZE, SHOW_WAIT, TerminalEvent, TerminalView},
+    ui::menu::MenuHost as _,
+};
 
 /// 标签的标识，标签挪动位置后不变。
 pub(super) type TabId = u64;
@@ -446,6 +449,8 @@ impl WindowView {
         // 分支列表可能列的是上一个 workspace 的仓库。不按下标判断换没换：关掉或拖动 workspace 时
         // 下标和 workspace 对不上。
         self.close_branch_picker(window, cx);
+        // Git 页的菜单也是：撤销提交、丢掉全部这些项作用到当前 workspace 的仓库，切过去再按就按到别的仓库上。
+        self.git_panel.update(cx, |page, cx| page.close_menu(window, cx));
         self.active = ix;
         self.sidebar_scroll.scroll_to_item(ix);
         // 文件树切到这个 workspace 的树，搜索框换上它的搜索词。
