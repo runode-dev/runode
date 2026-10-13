@@ -171,10 +171,19 @@ fn integration_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("shell-integration")
 }
 
-/// 找 `shell`：先照 PATH（`nix shell` 给的在这里），再看 `/bin/`。都没有时为 `None`。
+/// 找 `shell`：先照 PATH（`nix shell` 给的在这里），再看 `/bin/`，跳过不能执行的同名文件。都没有时为 `None`。
 fn find_shell(shell: &str) -> Option<PathBuf> {
+    use std::os::unix::fs::PermissionsExt as _;
     let path = std::env::var_os("PATH").unwrap_or_default();
-    std::env::split_paths(&path).chain([PathBuf::from("/bin")]).map(|dir| dir.join(shell)).find(|p| p.is_file())
+    std::env::split_paths(&path)
+        .chain([PathBuf::from("/bin")])
+        .map(|dir| dir.join(shell))
+        .find(|p| p.metadata().is_ok_and(|meta| meta.is_file() && meta.permissions().mode() & 0o111 != 0))
+}
+
+/// 给 sh 用的单引号字面量：路径里的单引号写成 `'\''`，不会截断引号或混进 shell 语法。
+fn quoted(text: impl std::fmt::Display) -> String {
+    format!("'{}'", text.to_string().replace('\'', r"'\''"))
 }
 
 /// 找到的 bash 的版本不低于 `major.minor`；没有 bash 时为假。
@@ -191,8 +200,7 @@ impl RealShell {
     /// 起 `shell`（`bash`、`zsh`、`fish`、`elvish` 或 `nu`，见 `find_shell`），`rc` 写进它的启动配置；
     /// `name` 在同时跑的测试里各不相同，失败时也用它说是哪一个。系统里没有这个 shell 时为 `None`。
     fn start(shell: &str, name: &str, rc: &str, prompt: &'static str, idle: &'static [&'static str]) -> Option<Self> {
-        let program = find_shell(shell)?;
-        let program = program.display();
+        let program = quoted(find_shell(shell)?.display());
         let home = std::env::temp_dir().join(format!("rn-cmdout-{}-{name}", std::process::id()));
         let _ = std::fs::remove_dir_all(&home);
         std::fs::create_dir_all(&home).unwrap();
@@ -207,35 +215,34 @@ impl RealShell {
             std::fs::copy(integration_dir().join(script), target).unwrap();
             data.display().to_string()
         };
+        let integration = |script: &str| quoted(integration_dir().join(script).display());
         let (rc_file, launch, syntax) = match shell {
-            "bash" => {
-                let script = integration_dir().join("bash/runode.bash");
-                (".bash_profile", format!("'{program}' --rcfile '{}'", script.display()), &POSIX)
-            }
-            "zsh" => {
-                (".zshrc", format!("ZDOTDIR='{}' '{program}' -l", integration_dir().join("zsh").display()), &POSIX)
-            }
+            "bash" => (".bash_profile", format!("{program} --rcfile {}", integration("bash/runode.bash")), &POSIX),
+            "zsh" => (".zshrc", format!("ZDOTDIR={} {program} -l", integration("zsh")), &POSIX),
             "fish" => {
                 let data = data_dir("fish-data", "fish/vendor_conf.d/runode.fish", "fish/runode.fish");
                 (
                     ".config/fish/config.fish",
                     format!(
-                        "XDG_DATA_DIRS='{data}:/usr/local/share:/usr/share' RUNODE_FISH_DATA_DIR='{data}' '{program}' --features no-mark-prompt -l"
+                        "XDG_DATA_DIRS={} RUNODE_FISH_DATA_DIR={} {program} --features no-mark-prompt -l",
+                        quoted(format!("{data}:/usr/local/share:/usr/share")),
+                        quoted(&data)
                     ),
                     &FISH,
                 )
             }
             "elvish" => {
-                let script = integration_dir().join("elvish/runode.elv");
-                (".config/elvish/rc.elv", format!("'{program}' -rc '{}'", script.display()), &ELVISH)
+                (".config/elvish/rc.elv", format!("{program} -rc {}", integration("elvish/runode.elv")), &ELVISH)
             }
             _ => {
                 let data = data_dir("nushell-data", "nushell/vendor/autoload/runode.nu", "nushell/runode.nu");
                 (
                     ".config/nushell/config.nu",
                     format!(
-                        "XDG_CONFIG_HOME='{}/.config' XDG_DATA_DIRS='{data}:/usr/local/share:/usr/share' RUNODE_NU_DATA_DIR='{data}' '{program}' -l",
-                        home.display()
+                        "XDG_CONFIG_HOME={} XDG_DATA_DIRS={} RUNODE_NU_DATA_DIR={} {program} -l",
+                        quoted(home.join(".config").display()),
+                        quoted(format!("{data}:/usr/local/share:/usr/share")),
+                        quoted(&data)
                     ),
                     &NUSHELL,
                 )
@@ -248,10 +255,10 @@ impl RealShell {
         std::fs::write(
             &launcher,
             format!(
-                "#!/bin/sh\nexec /usr/bin/env -i HOME='{}' PATH=/usr/bin:/bin TERM=xterm-256color LANG=en_US.UTF-8 \
+                "#!/bin/sh\nexec /usr/bin/env -i HOME={} PATH=/usr/bin:/bin TERM=xterm-256color LANG=en_US.UTF-8 \
                  BASH_SILENCE_DEPRECATION_WARNING=1 RUNODE_REPORT_TOKEN=0123456789abcdef \
                  RUNODE_SHELL_FEATURES=cursor:steady {launch}\n",
-                home.display()
+                quoted(home.display())
             ),
         )
         .unwrap();
