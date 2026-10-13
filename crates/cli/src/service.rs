@@ -15,8 +15,10 @@ pub(crate) fn install(env: &Env, kind: Kind, out: &mut dyn Write) -> anyhow::Res
     }
     // 服务文件里写的是可执行文件的真实位置：`rn`、`runode` 这些链接以后可能指到别处。
     let exe = std::env::current_exe().and_then(std::fs::canonicalize).context("cannot find the runode executable")?;
-    let path = write_service(kind, &env.dirs, &exe)?;
-    writeln!(out, "Installed {}: runode {} starts at login.", path.display(), kind.name())?;
+    match write_service(kind, &env.dirs, &exe)? {
+        Some(path) => writeln!(out, "Installed {}: runode {} starts at login.", path.display(), kind.name())?,
+        None => writeln!(out, "Added Runode to the login items: the app opens at login.")?,
+    }
     if kind == Kind::Host {
         writeln!(
             out,
@@ -49,9 +51,13 @@ pub(crate) fn uninstall(env: &Env, kind: Kind, out: &mut dyn Write) -> anyhow::R
 
 pub(crate) fn status(env: &Env, out: &mut dyn Write) -> anyhow::Result<()> {
     for kind in Kind::ALL.into_iter().filter(|kind| kind.supported()) {
-        match service_file(kind, &env.dirs).filter(|_| is_installed(kind, &env.dirs)) {
+        if !is_installed(kind, &env.dirs) {
+            writeln!(out, "{:<5} not installed", kind.name())?;
+            continue;
+        }
+        match service_file(kind, &env.dirs).filter(|path| path.exists()) {
             Some(path) => writeln!(out, "{:<5} installed  {}", kind.name(), path.display())?,
-            None => writeln!(out, "{:<5} not installed", kind.name())?,
+            None => writeln!(out, "{:<5} installed  System Settings > General > Login Items", kind.name())?,
         }
     }
     Ok(())

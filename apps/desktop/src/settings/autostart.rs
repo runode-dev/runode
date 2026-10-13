@@ -1,5 +1,5 @@
 //! 通用页的登录时自启：两个开关，一个是 app 自己（只有 macOS），一个是后台的无界面宿主
-//! （`runode --host`，手机远程访问靠它）。开关的状态就是服务文件在不在（`runode_autostart`），
+//! （`runode --host`，手机远程访问靠它）。开关的状态就是服务文件在不在、登录项登没登记（`runode_autostart`），
 //! 和命令行的 `runode service` 是同一套，所以不进配置文件。
 
 use crate::ui::theme::Theme;

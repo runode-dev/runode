@@ -348,7 +348,8 @@ Options:
 
 const SERVICE: &str = "\
 Start runode at login: a launchd LaunchAgent on macOS, a systemd user service
-on Linux. Installing a service you already have replaces its file. Neither
+on Linux; the app is added to the login items on macOS 13 and later.
+Installing a service you already have replaces its file. Neither
 install nor uninstall stops a host that is already running, so its sessions
 stay open.
 

@@ -64,6 +64,8 @@ objc2 = "0.6"
 objc2-foundation = { version = "0.3", default-features = false }
 objc2-app-kit = { version = "0.3", default-features = false }
 objc2-user-notifications = { version = "0.3", default-features = false }
+# app 的登录项（SMAppService，macOS 13 起有）。
+objc2-service-management = { version = "0.3", default-features = false }
 # 给 Objective-C 的方法传回调（NSURLSession 的完成回调、问通知授权的回调）。
 block2 = "0.6"
 # 从 GPUI 的窗口拿到 NSWindow：程序要求改窗口尺寸时直接设 frame，保持左上角不动。
