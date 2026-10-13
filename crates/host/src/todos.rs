@@ -53,13 +53,31 @@ struct State {
     db: Option<Store>,
     /// 任务板变一次加一，定时的线程据此知道要重新看。
     generation: u64,
-    /// 正在开始的任务，同一个不会同时开两次。
-    starting: HashSet<String>,
+    /// 正在开始、或者正在清工作树的任务，见 `Todos::claim`。
+    busy: HashSet<String>,
+}
+
+/// `Todos::claim` 占住的任务，丢掉时放开。
+struct Claim<'a> {
+    todos: &'a Todos,
+    id: String,
+}
+
+impl Drop for Claim<'_> {
+    fn drop(&mut self) {
+        self.todos.lock().busy.remove(&self.id);
+    }
 }
 
 impl Todos {
     fn lock(&self) -> MutexGuard<'_, State> {
         self.state.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// 占住任务 `id`：同一张任务开始和清工作树一次只做一件，占住以后再读它，读到的才不会过时。已经被占着
+    /// 时为空。
+    fn claim(&self, id: &str) -> Option<Claim<'_>> {
+        self.lock().busy.insert(id.to_owned()).then(|| Claim { todos: self, id: id.to_owned() })
     }
 
     fn generation(&self) -> u64 {
@@ -267,8 +285,21 @@ impl Shared {
                 return;
             }
         };
-        for todo in done.iter().filter(|todo| !self.in_use(todo)) {
-            let (worktree_gone, branch_gone) = clean_worktree(todo);
+        for todo in &done {
+            // 正在开始的下一轮再看；占住以后重读，读出列表以后它可能被取消完成、又开始过。
+            let Some(_claim) = self.todos.claim(&todo.id) else { continue };
+            let todo = match self.todos.with_db(|db| db.todo_by_id(&todo.id)) {
+                Ok(Some(todo)) if todo.done_at.is_some() && todo.worktree_dir.is_some() => todo,
+                Ok(_) => continue,
+                Err(err) => {
+                    tracing::warn!("cannot read todo {}: {err}", todo.id);
+                    continue;
+                }
+            };
+            if self.in_use(&todo) {
+                continue;
+            }
+            let (worktree_gone, branch_gone) = clean_worktree(&todo);
             if let Err(err) = self.todos.with_db(|db| db.set_swept(&todo.id, worktree_gone, branch_gone)) {
                 tracing::warn!("cannot record that todo {} was cleaned up: {err}", todo.id);
             }
@@ -341,6 +372,8 @@ impl Shared {
     pub(crate) fn start_todo(&self, id: &str) -> Result<SessionId, String> {
         self.todos_writable()?;
         let id = &self.resolve_todo(id)?;
+        let _claim =
+            self.todos.claim(id).ok_or_else(|| format!("todo {id} is starting or being cleaned up; try again"))?;
         let todo = self.todos.with_db(|db| db.todo_by_id(id))?.ok_or_else(|| no_todo(id))?;
         if todo.done_at.is_some() {
             return Err(format!("todo {id} is done"));
@@ -355,12 +388,7 @@ impl Shared {
         // 别的程序可以不经宿主直接写库（`runode_todo::Store`），所以开新会话、打进 shell 之前再查一遍；
         // 会话还在时上面已经直接给出，不因原目录没了打不开。
         check_spec(&todo.spec)?;
-        if !self.todos.lock().starting.insert(id.to_owned()) {
-            return Err(format!("todo {id} is already starting"));
-        }
-        let started = self.launch_todo(&todo);
-        self.todos.lock().starting.remove(id);
-        let session = started?;
+        let session = self.launch_todo(&todo)?;
         self.todos_changed();
         Ok(session)
     }
@@ -526,6 +554,16 @@ mod tests {
         assert_eq!(slug("修复登录"), None);
         assert_eq!(slug(&"a".repeat(100)).map(|slug| slug.len()), Some(MAX_SLUG));
         assert_eq!(slug("ab-------------------------------------cd x").as_deref(), Some("ab-cd-x"));
+    }
+
+    #[test]
+    fn a_todo_is_claimed_by_one_at_a_time() {
+        let todos = Todos::default();
+        let claim = todos.claim("a").unwrap();
+        assert!(todos.claim("a").is_none());
+        assert!(todos.claim("b").is_some());
+        drop(claim);
+        assert!(todos.claim("a").is_some());
     }
 
     #[test]
