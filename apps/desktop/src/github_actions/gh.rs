@@ -333,12 +333,14 @@ fn output_within(command: &mut Command, timeout: Duration) -> Result<Output, Str
     let (stdout, stderr) = (read_all(child.stdout.take()), read_all(child.stderr.take()));
     let deadline = Instant::now() + timeout;
     loop {
-        match child.try_wait() {
-            Ok(Some(status)) if stdout.is_finished() && stderr.is_finished() => {
+        // 两个管道都读到头了才收尸：收了尸它的进程号就可能给了别的进程，到点时 killpg 会杀到别人。
+        let waited = if stdout.is_finished() && stderr.is_finished() { child.try_wait() } else { Ok(None) };
+        match waited {
+            Ok(Some(status)) => {
                 let (stdout, stderr) = (stdout.join().unwrap_or_default(), stderr.join().unwrap_or_default());
                 return Ok(Output { status, stdout, stderr });
             }
-            Ok(_) if Instant::now() < deadline => thread::sleep(Duration::from_millis(10)),
+            Ok(None) if Instant::now() < deadline => thread::sleep(Duration::from_millis(10)),
             waited => {
                 // 进程组号就是 gh 的进程号（`process_group(0)`）。
                 unsafe { libc::killpg(child.id() as libc::pid_t, libc::SIGKILL) };
