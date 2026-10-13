@@ -474,6 +474,8 @@ impl ActionsPanel {
         } else {
             rust_i18n::t!("github_actions.delete_variable_title", name = name)
         };
+        // 弹框前就定下在哪个仓库里删：弹框期间终端换了仓库时，确认的仍是弹框时那个仓库里的这一项。
+        let gh = self.actions_gh();
         let detail = rust_i18n::t!("github_actions.delete_detail");
         let confirm = rust_i18n::t!("github_actions.delete");
         let answer = window.prompt(
@@ -488,7 +490,7 @@ impl ActionsPanel {
                 return;
             }
             this.update(cx, |this, cx| {
-                this.run_gh(move |gh| gh.delete(secret, &scope, &name), |this, _, cx| this.refetch_settings(cx), cx);
+                this.run_gh(move |_| gh.delete(secret, &scope, &name), |this, _, cx| this.refetch_settings(cx), cx);
             })
             .ok();
         })
