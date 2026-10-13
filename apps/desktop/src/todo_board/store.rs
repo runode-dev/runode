@@ -108,6 +108,8 @@ impl Global for Polled {}
 struct Listed {
     issued: u64,
     applied: u64,
+    /// 套上的最新那份问的是哪些会话：它说没有的就是没了，慢回来的旧列表不把它们补回去。
+    covered: HashSet<SessionId>,
 }
 
 impl Global for Listed {}
@@ -119,21 +121,27 @@ fn next_listing(cx: &mut App) -> u64 {
     listed.issued
 }
 
-/// 领的是 `seq` 号的那份列表回来了：比套上过的都新时记下它，返回真。
-fn newest_listing(cx: &mut App, seq: u64) -> bool {
+/// 领的是 `seq` 号的那份列表回来了，问的是 `asked` 这些会话：比套上过的都新时记下它，返回真。
+fn newest_listing(cx: &mut App, seq: u64, asked: &HashSet<SessionId>) -> bool {
     let listed = cx.default_global::<Listed>();
     let newest = seq > listed.applied;
     if newest {
         listed.applied = seq;
+        listed.covered = asked.clone();
     }
     newest
 }
 
 /// 列表 `live` 比套上过的旧时只拿它补 `sessions` 里还没有的（等宿主回话时刚开始的任务的会话），不盖掉
-/// 新的；不再要（`wanted`）的去掉。
-fn fill_sessions(sessions: &mut HashMap<SessionId, SessionInfo>, live: Vec<SessionInfo>, wanted: &HashSet<SessionId>) {
+/// 新的，新的那份问过（`covered`）又没有的是已经没了的，不补；不再要（`wanted`）的去掉。
+fn fill_sessions(
+    sessions: &mut HashMap<SessionId, SessionInfo>,
+    live: Vec<SessionInfo>,
+    wanted: &HashSet<SessionId>,
+    covered: &HashSet<SessionId>,
+) {
     sessions.retain(|id, _| wanted.contains(id));
-    for info in live.into_iter().filter(|info| wanted.contains(&info.id)) {
+    for info in live.into_iter().filter(|info| wanted.contains(&info.id) && !covered.contains(&info.id)) {
         sessions.entry(info.id).or_insert(info);
     }
 }
@@ -208,11 +216,12 @@ fn refresh_todos(cx: &mut App) -> Task<()> {
                 Ok(HostMsg::Todos { todos, schedules, .. }) => {
                     if let Some(live) = live {
                         let wanted: HashSet<SessionId> = todos.iter().filter_map(|todo| todo.session).collect();
-                        if newest_listing(cx, seq) {
+                        if newest_listing(cx, seq, &wanted) {
                             let live = live.into_iter().filter(|info| wanted.contains(&info.id));
                             data.sessions = live.map(|info| (info.id, info)).collect();
                         } else {
-                            fill_sessions(&mut data.sessions, live, &wanted);
+                            let covered = &cx.default_global::<Listed>().covered;
+                            fill_sessions(&mut data.sessions, live, &wanted, covered);
                         }
                     }
                     data.todos = todos;
@@ -241,7 +250,7 @@ fn refresh_sessions(cx: &mut App) -> Task<()> {
         cx.update(|cx| {
             let now_wanted = todo_sessions(cx);
             let mut data = take(cx);
-            if newest_listing(cx, seq) {
+            if newest_listing(cx, seq, &wanted) {
                 merge_sessions(&mut data.sessions, live, &wanted, &now_wanted);
             }
             let now = crate::todo_board::unix_now();
@@ -355,14 +364,16 @@ mod tests {
         assert_eq!(ids, [1, 4]);
     }
 
-    /// 慢回来的旧列表只补还没有的会话，不盖掉已经套上的新的；不再要的去掉。
+    /// 慢回来的旧列表只补还没有的会话，不盖掉已经套上的新的，新的那份问过又没有的不补回来；不再要的去掉。
     #[test]
     fn a_stale_listing_only_fills_in_missing_sessions() {
         let mut fresh = session(1);
         fresh.exited = true;
         let mut sessions: HashMap<_, _> = [(SessionId(1), fresh), (SessionId(3), session(3))].into();
-        let wanted = HashSet::from([SessionId(1), SessionId(2)]);
-        fill_sessions(&mut sessions, vec![session(1), session(2), session(3)], &wanted);
+        let wanted = HashSet::from([SessionId(1), SessionId(2), SessionId(4)]);
+        // 4 是新的那份问过、宿主说没有的；2 是新的那份问的时候还没有的。
+        let covered = HashSet::from([SessionId(1), SessionId(4)]);
+        fill_sessions(&mut sessions, vec![session(1), session(2), session(3), session(4)], &wanted, &covered);
         let mut ids: Vec<_> = sessions.keys().map(|id| id.0).collect();
         ids.sort_unstable();
         assert_eq!(ids, [1, 2]);
