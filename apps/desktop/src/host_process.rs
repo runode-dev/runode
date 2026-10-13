@@ -118,13 +118,14 @@ pub fn take_over() -> i32 {
                 report.replayed.len(),
                 report.replayed,
             );
-            status.report(&HandoffStatus::took_over(report.sessions, report.replayed));
-            // 关掉管道，app 不必等这个进程退出。
-            drop(status);
-            // 旧宿主交出会话以后就不再改任务板、不再触发定时，这边接着办。
+            // 旧宿主交出会话以后就不再改任务板、不再触发定时，这边接着办。先于报告：app 看到报告就连上来
+            // 问 `ListTodos`，这时还没打开任务板的话回错，任务板一直停在错误上。
             if let Some(db) = dirs.todos_db() {
                 host.serve_todos(db);
             }
+            status.report(&HandoffStatus::took_over(report.sessions, report.replayed));
+            // 关掉管道，app 不必等这个进程退出。
+            drop(status);
             // 旧宿主退出前还占着远程访问的端口和锁，这边开不了时隔一会儿再试，见 `runode_remote_access::Service`。
             serve(&host);
             0
