@@ -240,7 +240,8 @@ pub(super) fn hit(texts: &[Placed], position: gpui::Point<Pixels>) -> Option<MdP
         .min_by(|a, b| distance_x(&a.layout, position.x).total_cmp(&distance_x(&b.layout, position.x)));
     if let Some(placed) = level {
         let bounds = placed.layout.bounds();
-        let clamped = point(position.x.clamp(bounds.left(), bounds.right() - px(1.)), position.y);
+        // 空的格子、列表项排出来不到一像素宽，上界不能比下界小，不然 `clamp` 会 panic。
+        let clamped = point(position.x.clamp(bounds.left(), (bounds.right() - px(1.)).max(bounds.left())), position.y);
         return Some(at(placed, clamped));
     }
     if let Some(placed) =
