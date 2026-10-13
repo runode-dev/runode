@@ -26,13 +26,12 @@ use crate::ui::theme::ActiveTheme as _;
 use std::{
     ops::Range,
     path::{Path, PathBuf},
-    time::Duration,
 };
 
 use gpui::SharedString;
 use gpui::{
-    Action, Animation, AnimationExt, AnyElement, Context, Div, ElementId, Focusable, Hsla, MouseButton, MouseDownEvent,
-    Role, Stateful, Transformation, Window, actions, div, list, percentage, prelude::*, px, svg, uniform_list,
+    Action, AnyElement, Context, Div, Focusable, MouseButton, MouseDownEvent, Role, Stateful, Window, actions, div,
+    list, prelude::*, px, svg, uniform_list,
 };
 use runode_git::{self as git, Operation, RepoKind, Section};
 
@@ -54,6 +53,7 @@ use crate::{
         badge::{Badge, BadgeVariant},
         font_size::{FontSize, scaled},
         hsla,
+        panel::sync_icon,
         scrollbar::list_scrollbar,
         textarea::{Textarea, TextareaEvent, TextareaState},
         tooltip::tooltip,
@@ -923,21 +923,6 @@ impl WindowView {
         self.save(cx);
         cx.notify();
     }
-}
-
-/// 同步图标；`spinning` 时一直转圈，表示还在连远端。
-pub(super) fn sync_icon(id: impl Into<ElementId>, spinning: bool, size: f32, color: Hsla) -> AnyElement {
-    let icon = svg().flex_none().path(SYNC_ICON).size(px(size)).text_color(color);
-    if !spinning {
-        return icon.into_any_element();
-    }
-    // 不限帧时每一帧都要重画，连带它所在的整个窗口按屏幕刷新率重画；帧率和 `AgentKind::spinner` 默认的一格
-    // 80 毫秒一样。
-    let animation = Animation::new(Duration::from_secs(1)).repeat().with_max_fps(12.5);
-    icon.with_animation(id, animation, |icon, delta| {
-        icon.with_transformation(Transformation::rotate(percentage(delta)))
-    })
-    .into_any_element()
 }
 
 /// 一个仓库的块里各个元素的 id，按根目录取：辅助工具按元素 id 给节点编号，按块的序号取的话，多出或少了

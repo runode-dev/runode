@@ -40,4 +40,8 @@ crate::icons! {
     pub CLOSE_ICON = "close",
     /// 分支：Git 面板、侧栏和任务板的卡片。
     pub BRANCH_ICON = "branch",
+    /// Git：右侧面板顶上的标签、侧栏和 Git 面板多个仓库时的块头。
+    pub GIT_ICON = "git",
+    /// 让 AI 写东西：Git 面板提交说明框里的按钮、写提交说明的对话框和设置页的 agent 页。
+    pub SPARKLE_ICON = "sparkle",
 }

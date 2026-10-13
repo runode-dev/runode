@@ -35,9 +35,10 @@ use runode_shared_types::{
     color::Rgb,
 };
 
-use super::{PressDown, ToggleStatusBar, WindowView, cards, files::MenuItem, git_panel::sync_icon, remote};
+use super::{PressDown, ToggleStatusBar, WindowView, cards, files::MenuItem, remote};
 use crate::ui::a11y::A11yPress;
 use crate::ui::menu::MenuHost as _;
+use crate::ui::panel::sync_icon;
 use crate::{
     assets::{CHEVRON_DOWN_ICON, CHEVRON_RIGHT_ICON, COFFEE_ICON, MEMORY_ICON, PLUG_ICON, SHELL_ICON},
     config::AppConfig,

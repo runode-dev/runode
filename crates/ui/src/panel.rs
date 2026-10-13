@@ -1,12 +1,17 @@
 //! 窗口外框和右侧面板共用的写法：面板的外框、顶上那一条、标题行和居中的说明，以及改动
 //! 行数的标签。颜色从主题读（分隔线是 `Theme::border`），所以只在 render 里调。
 
-use gpui::{App, Div, MouseButton, Role, Stateful, div, prelude::*, px, svg};
+use std::time::Duration;
+
+use gpui::{
+    Animation, AnimationExt as _, AnyElement, App, Div, ElementId, Hsla, MouseButton, Role, Stateful, Transformation,
+    div, percentage, prelude::*, px, svg,
+};
 
 use crate::{
     card::card_style,
     drag_window, hsla,
-    icons::{CHEVRON_DOWN_ICON, CHEVRON_RIGHT_ICON},
+    icons::{CHEVRON_DOWN_ICON, CHEVRON_RIGHT_ICON, SYNC_ICON},
     theme::{ADDED, ActiveTheme as _, REMOVED},
 };
 
@@ -77,4 +82,19 @@ pub fn chevron(expanded: bool, cx: &App) -> gpui::Svg {
         .path(if expanded { CHEVRON_DOWN_ICON } else { CHEVRON_RIGHT_ICON })
         .size(px(12.))
         .text_color(cx.theme().foreground.opacity(0.45))
+}
+
+/// 同步图标；`spinning` 时一直转圈，表示还在连远端。Git 面板的同步按钮、提交按钮和状态栏的更新都用。
+pub fn sync_icon(id: impl Into<ElementId>, spinning: bool, size: f32, color: Hsla) -> AnyElement {
+    let icon = svg().flex_none().path(SYNC_ICON).size(px(size)).text_color(color);
+    if !spinning {
+        return icon.into_any_element();
+    }
+    // 不限帧时每一帧都要重画，连带它所在的整个窗口按屏幕刷新率重画；帧率和 `AgentKind::spinner` 默认的一格
+    // 80 毫秒一样。
+    let animation = Animation::new(Duration::from_secs(1)).repeat().with_max_fps(12.5);
+    icon.with_animation(id, animation, |icon, delta| {
+        icon.with_transformation(Transformation::rotate(percentage(delta)))
+    })
+    .into_any_element()
 }

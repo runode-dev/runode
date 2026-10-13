@@ -12,11 +12,12 @@ use crate::{
     window,
 };
 
-/// 几处共用的图标在 `runode_ui` 里：展开、收起的箭头，行尾和菜单常用的按钮，和预览栏共用的那些。
+/// 几处共用的图标在 `runode_ui` 里：展开、收起的箭头，行尾和菜单常用的按钮，和预览栏、Git 面板共用的那些。
 pub use crate::ui::icons::{
     ARROW_DOWN_ICON, BRANCH_ICON, CHECK_ICON, CHEVRON_DOWN_ICON, CHEVRON_RIGHT_ICON, CLOSE_ICON, DISCARD_ICON,
-    FOLDER_OPEN_ICON, GLOBE_ICON, MAXIMIZE_ICON, MINIMIZE_ICON, MINUS_ICON, MORE_ICON, OPEN_FILE_ICON, PENCIL_ICON,
-    PLAY_ICON, PLUS_ICON, REFRESH_ICON, SYNC_ICON, TERMINAL_ICON, TRASH_ICON, VIEW_LIST_ICON, VIEW_TREE_ICON,
+    FOLDER_OPEN_ICON, GIT_ICON, GLOBE_ICON, MAXIMIZE_ICON, MINIMIZE_ICON, MINUS_ICON, MORE_ICON, OPEN_FILE_ICON,
+    PENCIL_ICON, PLAY_ICON, PLUS_ICON, REFRESH_ICON, SPARKLE_ICON, SYNC_ICON, TERMINAL_ICON, TRASH_ICON,
+    VIEW_LIST_ICON, VIEW_TREE_ICON,
 };
 /// GitHub Actions 页的标签图标，图标本身跟着页面在 `runode_github_actions` 里。
 pub use runode_github_actions::WORKFLOW_ICON as ACTIONS_WORKFLOW_ICON;
@@ -25,14 +26,11 @@ icons! {
     FILES, "icons/", "../assets/icons/";
     /// 侧栏开关的图标。
     pub SIDEBAR_ICON = "sidebar",
-    /// 右侧面板顶上 Git 和文件树标签的图标，以及标题栏右上角开关右侧面板的图标。
-    pub GIT_ICON = "git",
+    /// 右侧面板顶上文件树标签的图标（Git 标签的在 `runode_ui`），以及标题栏右上角开关右侧面板的图标。
     pub FILES_ICON = "files",
     pub PANEL_RIGHT_ICON = "panel-right",
     /// 收在终端区底部的分屏上展开它的箭头。
     pub CHEVRON_UP_ICON = "chevron-up",
-    /// Git 面板提交说明框里让 AI 写说明的按钮。
-    pub SPARKLE_ICON = "sparkle",
     /// Git 面板里储藏的应用和弹出（分支、更多、取消暂存、放弃改动和提交的在 `runode_ui`）。
     pub STASH_APPLY_ICON = "stash-apply",
     pub STASH_POP_ICON = "stash-pop",
