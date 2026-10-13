@@ -57,10 +57,11 @@ fn open(env: &Env) -> Result<Connection> {
     Ok(connection)
 }
 
-/// 目录或它的上级里有 `.git`（仓库是目录，工作树和子模块是文件）。
+/// 目录或它的上级里有 `.git`（仓库是目录，工作树和子模块是文件）。先解开符号链接和 `..`，按目录实际
+/// 所在的位置找，同宿主问 git 的结果一致。
 // shortcut: 不认 GIT_DIR 这类环境变量指的仓库；认错了宿主会报错，那时再改成问 git。
 fn in_git_repo(dir: &Path) -> bool {
-    dir.ancestors().any(|dir| dir.join(".git").exists())
+    dir.canonicalize().is_ok_and(|dir| dir.ancestors().any(|dir| dir.join(".git").exists()))
 }
 
 /// 加一张任务，打印它的标识；`start` 时接着开始它，再打印它的会话的标识。
@@ -393,5 +394,19 @@ mod tests {
         assert_eq!(days_text(0b000_0110), "mon,tue");
         assert_eq!(days_text(0b010_1010), "mon,wed,fri");
         assert_eq!(days_text(0x7f), "");
+    }
+
+    #[test]
+    fn a_repository_is_found_where_the_directory_really_is() {
+        let root = std::env::temp_dir().join(format!("rnc-{}-in-repo", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let (repo, outside) = (root.join("repo"), root.join("outside"));
+        std::fs::create_dir_all(repo.join(".git")).unwrap();
+        std::fs::create_dir_all(repo.join("sub")).unwrap();
+        std::fs::create_dir_all(&outside).unwrap();
+        std::os::unix::fs::symlink(repo.join("sub"), root.join("link")).unwrap();
+        assert!(in_git_repo(&root.join("link")));
+        assert!(!in_git_repo(&repo.join("..").join("outside")));
+        let _ = std::fs::remove_dir_all(&root);
     }
 }
