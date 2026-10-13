@@ -4,7 +4,7 @@
 //! 说一声（app 交进来的通知），说了就重问；换了一条连接也重问。卡片在哪一列要看任务会话里 agent 的状态，宿主不会为它说变了，所以有窗口开着
 //! 看板时每 `SESSIONS_POLL` 问一次宿主里的会话，只留任务用到的；不 attach，免得宿主把它们算成有界面连着。
 //! 数据变了才重画开着的看板，只有看板读这份数据，不让各窗口整页重画；刚开始的任务过宽限期时列会变、数据
-//! 却不一定变，那几轮也重画（`settling`）。
+//! 却不一定变，所以上一轮轮询以来有任务过了宽限期时也重画（`crossed_grace`）。
 //! 请求都在后台线程上等宿主回话。
 
 use std::{
@@ -94,6 +94,12 @@ pub fn watch(host: Host, changed: Option<UnboundedReceiver<()>>, cx: &mut App) {
 struct Polling(bool);
 
 impl Global for Polling {}
+
+/// 上一次问到任务会话的状态时的 Unix 时间，`crossed_grace` 从这之后算起。
+#[derive(Default)]
+struct Polled(u64);
+
+impl Global for Polled {}
 
 /// 看板打开时调：现问一次任务会话的状态，之后每 `SESSIONS_POLL` 问一次，没有窗口开着看板时停下，空闲时
 /// 不再定时唤醒主线程。
@@ -196,7 +202,9 @@ fn refresh_sessions(cx: &mut App) -> Task<()> {
             let now_wanted = todo_sessions(cx);
             let mut data = take(cx);
             merge_sessions(&mut data.sessions, live, &wanted, &now_wanted);
-            if settling(&data.todos, crate::todo_board::unix_now()) {
+            let now = crate::todo_board::unix_now();
+            let since = std::mem::replace(&mut cx.default_global::<Polled>().0, now);
+            if crossed_grace(&data.todos, since, now) {
                 notify_boards(cx);
             }
             put(data, cx);
@@ -257,11 +265,13 @@ fn take(cx: &mut App) -> TodoData {
     cx.default_global::<TodoData>().clone()
 }
 
-/// 有没做完的任务刚开始不久，宽限期（`START_GRACE`）在这一轮前后到头：到头时它的列可能变（干完了的从进行中
-/// 落进需要你），会话的样子却没变，`put` 比不出来。
-fn settling(todos: &[Todo], now: u64) -> bool {
-    let window = START_GRACE + SESSIONS_POLL.as_secs();
-    todos.iter().any(|todo| todo.done_at.is_none() && todo.started.is_some_and(|at| now <= at.saturating_add(window)))
+/// 有没做完的任务的宽限期（`START_GRACE`）在 `since` 之后、`now` 或之前到头：到头时它的列可能变（干完了的
+/// 从进行中落进需要你），会话的样子却没变，`put` 比不出来。按上一轮算，不按固定的窗口，晚了的一轮也不漏。
+fn crossed_grace(todos: &[Todo], since: u64, now: u64) -> bool {
+    todos.iter().any(|todo| {
+        todo.done_at.is_none()
+            && todo.started.is_some_and(|at| (since + 1..=now).contains(&at.saturating_add(START_GRACE)))
+    })
 }
 
 /// 放回改过的数据；和原来的不一样时重画看板。
@@ -325,16 +335,17 @@ mod tests {
         }
     }
 
-    /// 宽限期到头前后那一轮都算，过了一轮就不算；没开始的、做完了的不算。
+    /// 宽限期在上一轮之后、这一轮或之前到头才算，晚了好几秒的一轮也算；没开始的、做完了的不算。
     #[test]
-    fn settling_covers_the_end_of_the_grace_period() {
+    fn crossed_grace_counts_a_late_poll() {
         let start = 1_000;
+        let end = start + START_GRACE;
         let todos = [todo(Some(start), None)];
-        assert!(settling(&todos, start + 1));
-        assert!(settling(&todos, start + START_GRACE));
-        assert!(settling(&todos, start + START_GRACE + SESSIONS_POLL.as_secs()));
-        assert!(!settling(&todos, start + START_GRACE + SESSIONS_POLL.as_secs() + 1));
-        assert!(!settling(&[todo(None, None)], start));
-        assert!(!settling(&[todo(Some(start), Some(start + 1))], start + 1));
+        assert!(crossed_grace(&todos, end - 1, end));
+        assert!(crossed_grace(&todos, end - 1, end + 3));
+        assert!(!crossed_grace(&todos, end - 3, end - 1));
+        assert!(!crossed_grace(&todos, end, end + 2));
+        assert!(!crossed_grace(&[todo(None, None)], 0, end));
+        assert!(!crossed_grace(&[todo(Some(start), Some(start + 1))], 0, end));
     }
 }
