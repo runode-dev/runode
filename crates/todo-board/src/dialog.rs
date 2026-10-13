@@ -556,7 +556,8 @@ impl TodoDialog {
         if agent.is_empty() {
             return Err(rust_i18n::t!("todo_board.dialog.need_agent").into_owned());
         }
-        if !self.dir.is_dir() {
+        // 开始过的任务目录改不了，宿主也允许原目录没了（agent 还在工作树里跑）时只改文字。
+        if !self.locked && !self.dir.is_dir() {
             return Err(rust_i18n::t!("todo_board.dialog.bad_dir").into_owned());
         }
         let spec = TodoSpec { title, prompt, dir: self.dir.clone(), agent, worktree: self.worktree };
