@@ -75,6 +75,10 @@ const COALESCE_BYTES: usize = if cfg!(debug_assertions) { 4 * 1024 } else { 64 *
 const FOREGROUND_POLL_INTERVAL: Duration = Duration::from_secs(1);
 /// `Inbox::TypeAtPrompt` 最多等提示符这么久；没有 shell 集成的 shell 不报提示符，到时就写。
 const TYPE_AT_PROMPT_PATIENCE: Duration = Duration::from_secs(5);
+/// 注入了 shell 集成的 shell 迟早会报提示符，多等一会儿：配置跑得慢（比如启动时问要不要更新）时，
+/// 早写出去的命令会被配置里的程序读走。不一直等，免得集成没生效（配置里 exec 成了别的 shell）时
+/// 命令永远打不出去。
+const TYPE_AT_INTEGRATED_PROMPT_PATIENCE: Duration = Duration::from_secs(60);
 /// 有输出时重读前台进程的最短间隔：大量输出时不必每块都做几次系统调用，推迟的那次到点补上。
 const FOREGROUND_REFRESH_INTERVAL: Duration = Duration::from_millis(50);
 /// 交接时 VT 停在一条编不进快照的序列中间（`SnapshotError::Unfinished`），最多这么久里让程序
@@ -145,7 +149,7 @@ pub(crate) enum Inbox {
     /// 按宿主 VT 当前的模式把这段文字当粘贴写给程序，见 `HostSession::encode_paste`。
     Paste(String),
     /// 等 shell 出了提示符（shell 集成报告了提示符所在的目录）再把这些字节写给程序，最多等
-    /// `TYPE_AT_PROMPT_PATIENCE`。任务板在新开的会话里打 agent 的命令用：shell 还在读配置时打进去的字
+    /// `TYPE_AT_PROMPT_PATIENCE`（注入了集成的等 `TYPE_AT_INTEGRATED_PROMPT_PATIENCE`）。任务板在新开的会话里打 agent 的命令用：shell 还在读配置时打进去的字
     /// 可能被配置里的程序读走。
     TypeAtPrompt(Vec<u8>),
     /// 谁最近在操作这个会话，见 `SessionMeta::driver`：`Some` 是别的终端里的程序经 socket 做了
@@ -479,7 +483,7 @@ struct Runner {
     read_patience: Duration,
     /// 在等界面回的那个读剪贴板的请求，见 `clipboard`。
     clipboard_read: Option<clipboard::PendingRead>,
-    /// 等着提示符出来再写的字节和最晚写的时刻，见 `Inbox::TypeAtPrompt`。
+    /// 等着提示符出来再写的字节和收到请求的时刻，见 `Inbox::TypeAtPrompt`、`type_ahead_by`。
     type_ahead: Option<(Vec<u8>, Instant)>,
 }
 
@@ -584,13 +588,21 @@ impl Runner {
 
     /// 等着的 `Inbox::TypeAtPrompt` 到时候了就写出去：提示符出来了，或者等够了。
     fn type_at_prompt(&mut self) {
-        let Some((_, by)) = &self.type_ahead else { return };
-        if Instant::now() < *by && self.session.meta().prompt_cwd.is_none() {
+        let Some(by) = self.type_ahead_by() else { return };
+        if Instant::now() < by && self.session.meta().prompt_cwd.is_none() {
             return;
         }
         if let Some((data, _)) = self.type_ahead.take() {
             self.session.write(data);
         }
+    }
+
+    /// 等着的 `Inbox::TypeAtPrompt` 最晚什么时候写出去。注入集成的事可能在请求之后才发生（shell 还没
+    /// 启动），所以每次现查。
+    fn type_ahead_by(&self) -> Option<Instant> {
+        let (_, since) = self.type_ahead.as_ref()?;
+        let integrated = self.session.has_shell_integration();
+        Some(*since + if integrated { TYPE_AT_INTEGRATED_PROMPT_PATIENCE } else { TYPE_AT_PROMPT_PATIENCE })
     }
 
     /// 会话结束了（前端要结束它，或者处理消息时 panic）：还没报告过退出的，告诉连着的前端
@@ -651,7 +663,7 @@ impl Runner {
         if self.exited {
             return None;
         }
-        let type_ahead = self.type_ahead.as_ref().map(|(_, by)| *by);
+        let type_ahead = self.type_ahead_by();
         [self.next_poll, self.foreground_due, self.session.agent_deadline(), self.clipboard_deadline(), type_ahead]
             .into_iter()
             .flatten()
@@ -730,7 +742,7 @@ impl Runner {
                 Ok(_) => {}
                 Err(err) => tracing::warn!("session {} cannot encode a paste: {err:#}", self.id),
             },
-            Inbox::TypeAtPrompt(data) => self.type_ahead = Some((data, Instant::now() + TYPE_AT_PROMPT_PATIENCE)),
+            Inbox::TypeAtPrompt(data) => self.type_ahead = Some((data, Instant::now())),
             Inbox::Driven(Some(Drive { by, action })) => {
                 let at_ms = std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)

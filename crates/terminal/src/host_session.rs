@@ -601,6 +601,11 @@ impl HostSession {
         Some(meta)
     }
 
+    /// 启动 shell 时注入了 shell 集成（有报告口令），这个 shell 会报提示符。
+    pub fn has_shell_integration(&self) -> bool {
+        self.effects.report_token.borrow().is_some()
+    }
+
     /// 自上次以来程序响过铃（喂给 VT 的输出里有不属于任何序列的 BEL）的话返回 true。
     pub fn take_bell(&self) -> bool {
         self.effects.bell.take()
