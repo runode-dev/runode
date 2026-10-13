@@ -386,7 +386,8 @@ impl GitPanel {
     }
 
     /// 在当前 workspace 里根目录是 `root` 的仓库上跑 `op` 写提交说明，跑的时候这个仓库写着在写说明；写好了
-    /// 替换这个仓库提交说明框里的字，出错时弹框。仓库正忙时什么也不做。
+    /// 替换这个仓库提交说明框里的字（等的时候用户自己改了框里的字就不替换，不冲掉他写的），出错时弹框。
+    /// 仓库正忙时什么也不做。
     pub fn write_message(
         &mut self,
         root: &Path,
@@ -395,8 +396,11 @@ impl GitPanel {
         cx: &mut Context<Self>,
     ) {
         let area = self.commit_box(root);
+        let before = area.as_ref().map(|area| area.read(cx).text().to_owned());
         self.run_git(root, Busy::Message, window, cx, op, move |_, message, _, cx| {
-            if let Some(area) = area {
+            if let Some(area) = area
+                && Some(area.read(cx).text()) == before.as_deref()
+            {
                 area.update(cx, |area, cx| area.set_text(message, cx));
             }
         });

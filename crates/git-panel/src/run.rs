@@ -326,9 +326,13 @@ impl GitPanel {
                 AfterCommit::Sync => repo.sync().err(),
             })
         };
+        // 提交期间（比如 pre-commit 钩子跑得慢）框里又写了别的，就留着，只清掉提交出去的那段。
         let area = self.commit_box(&root);
+        let sent = area.as_ref().map(|area| area.read(cx).text().to_owned());
         self.run_git(&root, Busy::Commit, window, cx, op, move |_, remote_error, window, cx| {
-            if let Some(area) = area {
+            if let Some(area) = area
+                && Some(area.read(cx).text()) == sent.as_deref()
+            {
                 area.update(cx, |area, cx| area.set_text(String::new(), cx));
             }
             if let Some(err) = remote_error {
