@@ -39,22 +39,21 @@ pub fn row_buttons<V: 'static>(
     enabled: bool,
     cx: &mut Context<V>,
 ) -> Option<Div> {
-    let buttons: Vec<RowButton<V>> =
-        buttons.into_iter().filter(|button| shown || button.toggled == Some(true)).collect();
+    // 先编号再筛：按钮的 id 按它在整排里的位置取，露出别的按钮时切换着的那个 id 不变。
+    let buttons: Vec<(usize, RowButton<V>)> =
+        buttons.into_iter().enumerate().filter(|(_, button)| shown || button.toggled == Some(true)).collect();
     if buttons.is_empty() {
         return None;
     }
-    let row = div().flex_none().flex().items_center().gap(px(2.)).children(buttons.into_iter().enumerate().map(
-        |(bi, button)| {
-            let handler = button.handler;
-            Button::new(("row-button", bi), button.text.clone())
-                .icon(button.icon)
-                .with_size(ButtonSize::IconSm)
-                .toggled(button.toggled)
-                .disabled(!enabled)
-                .tooltip(tooltip(button.text, None))
-                .when(enabled, |button| button.on_press_down(cx, handler))
-        },
-    ));
+    let row = div().flex_none().flex().items_center().gap(px(2.)).children(buttons.into_iter().map(|(bi, button)| {
+        let handler = button.handler;
+        Button::new(("row-button", bi), button.text.clone())
+            .icon(button.icon)
+            .with_size(ButtonSize::IconSm)
+            .toggled(button.toggled)
+            .disabled(!enabled)
+            .tooltip(tooltip(button.text, None))
+            .when(enabled, |button| button.on_press_down(cx, handler))
+    }));
     Some(row)
 }
