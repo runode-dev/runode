@@ -197,7 +197,8 @@ pub(crate) fn diff_args(extra: &[&str]) -> Vec<String> {
         "--no-ext-diff",
         "--no-textconv",
     ];
-    args.extend(["--src-prefix=a/", "--dst-prefix=b/", "--ignore-submodules=dirty"]);
+    // 上下文钉成三行：仓库配了 `diff.context=0` 时块里没有上下文，`git apply` 不收按块暂存拼出的补丁。
+    args.extend(["--unified=3", "--src-prefix=a/", "--dst-prefix=b/", "--ignore-submodules=dirty"]);
     args.extend(extra);
     args.into_iter().map(str::to_owned).collect()
 }

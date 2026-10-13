@@ -57,6 +57,18 @@ fn discards_one_hunk() {
     assert_eq!(repo.git(&["show", ":a.txt"]), BASE.trim_end());
 }
 
+/// 仓库配了 `diff.context=0` 时块里没有上下文行，`git apply` 不收这样的补丁：读 diff 时钉死三行上下文。
+#[test]
+fn stages_a_hunk_when_the_repo_disables_context() {
+    let repo = two_hunks("hunk-no-context");
+    repo.git(&["config", "diff.context", "0"]);
+    let snapshot = read(&repo);
+    let a = file(&snapshot, Section::Unstaged, "a.txt");
+    assert_eq!(a.hunks.len(), 2);
+    snapshot.repo().apply_hunk(a, 1, HunkAction::Stage).unwrap();
+    assert_eq!(repo.git(&["show", ":a.txt"]), SECOND_ONLY);
+}
+
 #[test]
 fn keeps_tabs_and_missing_final_newline() {
     let repo = TestRepo::new("hunk-raw");
