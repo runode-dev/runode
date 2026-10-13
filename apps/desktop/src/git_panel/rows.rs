@@ -348,6 +348,26 @@ fn repo_open_by_default(repo: &git::Snapshot) -> bool {
 }
 
 impl PanelState {
+    /// `paths` 变了：落在哪个仓库的引用上，那个仓库读过或正在读的图表标成要重读，返回标了没有。
+    /// `RepoInfo` 看不出别的分支和 tag 的变化；正在读的那次读完也不清掉标记，随后再读一次，读到的可能
+    /// 是变化之前的。
+    pub fn refs_changed(&mut self, paths: &[PathBuf]) -> bool {
+        let Some(git) = self.git.clone() else {
+            return false;
+        };
+        let mut marked = false;
+        for repo in git.iter() {
+            if let Some(repo_state) = self.repos.get_mut(&repo.root)
+                && (repo_state.graph.history.is_some() || repo_state.graph.loading)
+                && paths.iter().any(|path| git::refs_changed(&repo.git_dir, path))
+            {
+                repo_state.graph.stale = true;
+                marked = true;
+            }
+        }
+        marked
+    }
+
     /// 根目录是 `root` 的仓库正在跑的操作。
     pub fn busy(&self, root: &Path) -> Option<Busy> {
         self.repos.get(root).and_then(|repo| repo.busy)
@@ -868,6 +888,22 @@ mod tests {
         panel.tree = false;
         panel.rebuild(Some(&repos));
         assert!(panel.dirs.is_empty() && panel.depth.iter().all(|&depth| depth == 0));
+    }
+
+    #[test]
+    fn refs_changed_while_loading_keeps_the_graph_stale() {
+        let mut panel = PanelState::default();
+        assert!(panel.replace_git(Some(Arc::new(git::Repos::new(repo("", RepoKind::Main, &[]))))));
+        let branch = [PathBuf::from("/repo/.git/refs/heads/feat")];
+        // 没读过的图表本来就要读，不用标。
+        panel.repo_mut(Path::new("/repo"));
+        assert!(!panel.refs_changed(&branch));
+        // 头一回读还没读完时分支变了：标成要重读，读完以后还要再读一次。
+        panel.repo_mut(Path::new("/repo")).graph.loading = true;
+        assert!(panel.refs_changed(&branch));
+        let graph = &mut panel.repo_mut(Path::new("/repo")).graph;
+        (graph.loading, graph.history, graph.read_for) = (false, Some(Err(String::new())), Some(RepoInfo::default()));
+        assert!(graph.needs_read(&RepoInfo::default()));
     }
 
     #[test]

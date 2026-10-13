@@ -304,24 +304,9 @@ impl GitPanel {
     }
 
     /// 监听到 workspace `ws` 里 `paths` 变了：落在哪个仓库的引用上（新建、删除、移动分支或 tag，HEAD 变了），
-    /// 那个仓库读过的图表就要重读，展开着时下次显示就读。`RepoInfo` 看不出别的分支和 tag 的变化。
+    /// 那个仓库读过或正在读的图表就要重读，展开着时下次显示就读，见 `PanelState::refs_changed`。
     pub fn refs_changed(&mut self, ws: WorkspaceId, paths: &[PathBuf], cx: &mut Context<Self>) {
-        let Some(state) = self.workspaces.get_mut(&ws) else {
-            return;
-        };
-        let Some(git) = state.git.clone() else {
-            return;
-        };
-        let mut marked = false;
-        for repo in git.iter() {
-            if let Some(repo_state) = state.repos.get_mut(&repo.root)
-                && repo_state.graph.history.is_some()
-                && paths.iter().any(|path| git::refs_changed(&repo.git_dir, path))
-            {
-                repo_state.graph.stale = true;
-                marked = true;
-            }
-        }
+        let marked = self.workspaces.get_mut(&ws).is_some_and(|state| state.refs_changed(paths));
         if marked && ws == self.ws {
             cx.notify();
         }
