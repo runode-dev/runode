@@ -24,7 +24,9 @@ use runode_protocol::{
 /// 宿主开的任务会话跑的 shell。
 fn use_plain_sh() {
     static SET: Once = Once::new();
-    // SAFETY: 只在这里改，开会话之前改好；这个测试程序里没有别处读写环境变量。
+    // SAFETY: 只在这里改。并行的测试经 std 读环境变量（`temp_dir` 读 TMPDIR，开会话读 SHELL），std 的
+    // 读写共用一把锁；绕过它直接读的 C 代码（算定时到点的 `localtime_r` 读 TZ、会话线程里的 VT）只在
+    // 打开任务板的宿主或开了会话之后才跑，这个测试程序里那些都先经过这里，等这次改完才开始。
     SET.call_once(|| unsafe { std::env::set_var("SHELL", "/bin/sh") });
 }
 
