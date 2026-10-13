@@ -111,7 +111,7 @@ impl WindowView {
 
     /// workspace `id` 关掉了，预览栏丢掉它的标签。
     pub(super) fn forget_previews(&mut self, id: WorkspaceId, cx: &mut Context<Self>) {
-        self.preview.update(cx, |panel, _| panel.remove_workspace(id));
+        self.preview.update(cx, |panel, cx| panel.remove_workspace(id, cx));
     }
 
     /// 当前 workspace 的预览栏，宽 `width`；`rightmost` 时它贴着窗口右边，标签条给右上角的面板开关让位。

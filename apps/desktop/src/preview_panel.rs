@@ -503,9 +503,11 @@ impl PreviewPanel {
         }
     }
 
-    /// workspace `ws` 关掉了，丢掉它的标签。
-    pub fn remove_workspace(&mut self, ws: WorkspaceId) {
-        self.workspaces.remove(&ws);
+    /// workspace `ws` 关掉了，丢掉它的标签，连同 GPUI 里解码的图片，和关标签时一样。
+    pub fn remove_workspace(&mut self, ws: WorkspaceId, cx: &mut App) {
+        for tab in self.workspaces.remove(&ws).iter().flat_map(|tabs| &tabs.tabs) {
+            tab.release_image(cx);
+        }
     }
 
     /// workspace `ws` 有开着的预览标签，预览栏显示着（放大与否都算）。
