@@ -847,6 +847,7 @@ todo_board:
     every: 分钟
     every_placeholder: "60"
     days_hint: 一天都不选就是每天。
+    unknown_hint: 这个定时是新版本建的，这里看不懂。不选上面的一种，保存时照原样留着。
     need_title: 写个标题或者提示词。
     need_agent: 写上跑哪个 agent。
     bad_dir: 目录不存在。

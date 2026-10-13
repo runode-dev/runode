@@ -847,6 +847,7 @@ todo_board:
     every: Minutes
     every_placeholder: "60"
     days_hint: No days picked means every day.
+    unknown_hint: This schedule was made by a newer version of runode. It stays as it is unless you pick one above.
     need_title: Give it a title or a prompt.
     need_agent: Say which agent to run.
     bad_dir: The directory does not exist.

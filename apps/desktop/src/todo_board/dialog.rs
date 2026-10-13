@@ -57,7 +57,8 @@ pub struct TodoDialog {
     worktree: bool,
     /// 任务开始过了：目录和要不要工作树不能再改。
     locked: bool,
-    kind: Kind,
+    /// 读不懂的定时规则（`When::Unknown`）在用户选一种之前为空，存的时候规则照原样留着。
+    kind: Option<Kind>,
     /// 一次：`YYYY-MM-DD HH:MM`；每天：`HH:MM`；每隔：分钟数。三个框各记各的，切来切去不丢。
     at: Entity<InputState>,
     clock: Entity<InputState>,
@@ -210,12 +211,15 @@ impl TodoDialog {
             _ => None,
         };
         let (kind, at_text, clock_text, minutes_text, days) = match when {
-            Some(When::Once { at }) => (Kind::Once, full_time(at), "09:00".to_owned(), "60".to_owned(), 0),
+            Some(When::Once { at }) => (Some(Kind::Once), full_time(at), "09:00".to_owned(), "60".to_owned(), 0),
             Some(When::Daily { hour, minute, days }) => {
-                (Kind::Daily, String::new(), format!("{hour:02}:{minute:02}"), "60".to_owned(), days)
+                (Some(Kind::Daily), String::new(), format!("{hour:02}:{minute:02}"), "60".to_owned(), days)
             }
-            Some(When::Every { minutes }) => (Kind::Every, String::new(), "09:00".to_owned(), minutes.to_string(), 0),
-            _ => (Kind::Daily, String::new(), "09:00".to_owned(), "60".to_owned(), 0),
+            Some(When::Every { minutes }) => {
+                (Some(Kind::Every), String::new(), "09:00".to_owned(), minutes.to_string(), 0)
+            }
+            Some(When::Unknown) => (None, String::new(), "09:00".to_owned(), "60".to_owned(), 0),
+            None => (Some(Kind::Daily), String::new(), "09:00".to_owned(), "60".to_owned(), 0),
         };
         let at_text = if at_text.is_empty() { next_hour() } else { at_text };
         let at = field(at_text, "todo_board.dialog.once", "todo_board.dialog.once_placeholder", cx);
@@ -406,10 +410,9 @@ impl Render for TodoDialog {
             .aria_disabled(dialog.locked);
         let when = dialog.schedule.then(|| {
             let kind = |id: &'static str, kind: Kind, label: &str, cx: &mut Context<Self>| {
-                pill(id.into(), rust_i18n::t!(label).into_owned(), dialog.kind == kind, Role::RadioButton).on_press(
-                    cx,
-                    move |dialog, window, cx| {
-                        dialog.kind = kind;
+                pill(id.into(), rust_i18n::t!(label).into_owned(), dialog.kind == Some(kind), Role::RadioButton)
+                    .on_press(cx, move |dialog, window, cx| {
+                        dialog.kind = Some(kind);
                         let input = match kind {
                             Kind::Once => dialog.at.clone(),
                             Kind::Daily => dialog.clock.clone(),
@@ -417,8 +420,7 @@ impl Render for TodoDialog {
                         };
                         window.focus(&input.focus_handle(cx), cx);
                         cx.notify();
-                    },
-                )
+                    })
             };
             let when_label = rust_i18n::t!("todo_board.dialog.when").into_owned();
             let kinds = div()
@@ -434,11 +436,22 @@ impl Render for TodoDialog {
                 .child(kind("todo-dialog-daily", Kind::Daily, "todo_board.dialog.kind_daily", cx))
                 .child(kind("todo-dialog-every", Kind::Every, "todo_board.dialog.kind_every", cx));
             let when_input = match dialog.kind {
-                Kind::Once => &dialog.at,
-                Kind::Daily => &dialog.clock,
-                Kind::Every => &dialog.minutes,
+                Some(Kind::Once) => input(&dialog.at).into_any_element(),
+                Some(Kind::Daily) => input(&dialog.clock).into_any_element(),
+                Some(Kind::Every) => input(&dialog.minutes).into_any_element(),
+                None => {
+                    let hint = rust_i18n::t!("todo_board.dialog.unknown_hint").into_owned();
+                    div()
+                        .id("todo-dialog-unknown")
+                        .role(Role::Label)
+                        .aria_label(hint.clone())
+                        .text_size(FontSize::Small)
+                        .text_color(fg_h.opacity(0.55))
+                        .child(hint)
+                        .into_any_element()
+                }
             };
-            let days = (dialog.kind == Kind::Daily).then(|| {
+            let days = (dialog.kind == Some(Kind::Daily)).then(|| {
                 let pills: Vec<_> = (0..7u8)
                     .map(|day| {
                         let on = dialog.days & (1 << day) != 0;
@@ -471,7 +484,7 @@ impl Render for TodoDialog {
                         .child(div().text_color(fg_h.opacity(0.7)).child(when_label))
                         .child(kinds),
                 )
-                .child(input(when_input))
+                .child(when_input)
                 .children(days)
         });
         let title = match (&dialog.editing, dialog.schedule) {
@@ -603,7 +616,9 @@ impl TodoDialog {
             });
         }
         let when = match self.kind {
-            Kind::Once => {
+            // 只有编辑读不懂的定时、还没选一种时为空：和原来的一样，下面就不发 `when`，规则照原样留着。
+            None => When::Unknown,
+            Some(Kind::Once) => {
                 let original = match &self.editing {
                     Some(Editing::Schedule(Schedule { when: When::Once { at }, .. })) => Some(*at),
                     _ => None,
@@ -613,12 +628,12 @@ impl TodoDialog {
                         .ok_or_else(|| rust_i18n::t!("todo_board.dialog.bad_once").into_owned())?,
                 }
             }
-            Kind::Daily => {
+            Some(Kind::Daily) => {
                 let (hour, minute) = parse_clock(self.clock.read(cx).query())
                     .ok_or_else(|| rust_i18n::t!("todo_board.dialog.bad_daily").into_owned())?;
                 When::Daily { hour, minute, days: self.days }
             }
-            Kind::Every => When::Every {
+            Some(Kind::Every) => When::Every {
                 minutes: parse_minutes(self.minutes.read(cx).query())
                     .ok_or_else(|| rust_i18n::t!("todo_board.dialog.bad_every").into_owned())?,
             },
