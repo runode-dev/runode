@@ -1193,6 +1193,11 @@ impl MacWindow {
                 accesskit_adapter: None,
                 sheet_parent: None,
             }));
+            // 不等 vsync、画完就交出去，由窗口服务器在下一次合成时用上。开着时 drawable 要排到 vsync
+            // 才呈现，终端程序的新画面平均晚一帧多上屏；Ghostty 直接设 IOSurface 当图层内容，也不排这个队。
+            if let Some(layer) = state.lock().renderer.layer() {
+                let _: () = msg_send![layer, setDisplaySyncEnabled: NO];
+            }
             let mut window = Self(state, marker);
 
             (*native_window).set_ivar(
