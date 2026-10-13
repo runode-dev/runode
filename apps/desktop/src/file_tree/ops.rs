@@ -54,12 +54,55 @@ pub(super) fn create(path: &Path, is_dir: bool) -> Result {
 /// 把 `from` 改名成 `to`。`to` 已经有了时报 `Exists`，只改大小写除外：不分大小写的文件系统上
 /// `to` 查到的就是 `from` 自己。
 pub(super) fn rename(from: &Path, to: &Path) -> Result {
-    if let Ok(existing) = fs::symlink_metadata(to)
-        && !same_file(&existing, &fs::symlink_metadata(from)?)
-    {
-        return Err(OpError::Exists);
+    if let Ok(existing) = fs::symlink_metadata(to) {
+        if !same_file(&existing, &fs::symlink_metadata(from)?) {
+            return Err(OpError::Exists);
+        }
+        return Ok(fs::rename(from, to)?);
     }
-    Ok(fs::rename(from, to)?)
+    Ok(rename_noreplace(from, to)?)
+}
+
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+fn c_path(path: &Path) -> io::Result<std::ffi::CString> {
+    use std::os::unix::ffi::OsStrExt as _;
+    std::ffi::CString::new(path.as_os_str().as_bytes()).map_err(io::Error::other)
+}
+
+/// 把 `from` 改名成 `to`，`to` 已经有了时报 `AlreadyExists`：查和改是一步，不会盖掉别的操作刚建出来的同名文件。
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+fn rename_noreplace(from: &Path, to: &Path) -> io::Result<()> {
+    let (c_from, c_to) = (c_path(from)?, c_path(to)?);
+    // SAFETY: 两个都是以 NUL 结尾的路径。
+    #[cfg(target_os = "macos")]
+    let rc = unsafe { libc::renamex_np(c_from.as_ptr(), c_to.as_ptr(), libc::RENAME_EXCL) };
+    #[cfg(target_os = "linux")]
+    let rc = unsafe {
+        libc::renameat2(libc::AT_FDCWD, c_from.as_ptr(), libc::AT_FDCWD, c_to.as_ptr(), libc::RENAME_NOREPLACE)
+    };
+    if rc == 0 {
+        return Ok(());
+    }
+    let err = io::Error::last_os_error();
+    // 文件系统不支持不覆盖的改名（网络卷、FAT 这类）时退回先查后改。
+    if matches!(err.raw_os_error(), Some(libc::ENOTSUP | libc::ENOSYS | libc::EINVAL)) {
+        return rename_checked(from, to);
+    }
+    Err(err)
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+fn rename_noreplace(from: &Path, to: &Path) -> io::Result<()> {
+    rename_checked(from, to)
+}
+
+/// shortcut: 先查后改，查和改之间别人建出来的同名文件会被盖掉；只在系统或文件系统没有不覆盖的改名时用，
+/// 要支持这样的平台时换成它自己的原子改名。
+fn rename_checked(from: &Path, to: &Path) -> io::Result<()> {
+    if fs::symlink_metadata(to).is_ok() {
+        return Err(io::ErrorKind::AlreadyExists.into());
+    }
+    fs::rename(from, to)
 }
 
 #[cfg(unix)]
@@ -96,9 +139,15 @@ pub(super) fn copy_into(src: &Path, dir: &Path) -> Result<PathBuf> {
     if inside(src, dir) {
         return Err(OpError::IntoItself);
     }
-    let dest = free_name(dir, Path::new(name));
-    copy_all(src, &dest)?;
-    Ok(dest)
+    // 挑好的名字不算占住：两次粘贴同时进行时会挑到同一个。建的时候不覆盖已有的，撞上了换下一个名字。
+    for _ in 0..8 {
+        let dest = free_name(dir, Path::new(name));
+        match copy_all(src, &dest) {
+            Err(err) if err.kind() == io::ErrorKind::AlreadyExists => continue,
+            result => return result.map(|()| dest).map_err(OpError::Io),
+        }
+    }
+    Err(OpError::Exists)
 }
 
 /// `dir` 是 `src` 自己或者在它下面。文件树把指向目录的符号链接也当目的地，所以再按真实路径比一次；
@@ -140,7 +189,7 @@ fn copy_all(src: &Path, dest: &Path) -> io::Result<()> {
         return fs::copy(src, dest).map(drop);
     }
     if !meta.is_dir() {
-        return fs::copy(src, dest).map(drop);
+        return copy_file(src, dest);
     }
     fs::create_dir(dest)?;
     for entry in fs::read_dir(src)? {
@@ -148,6 +197,27 @@ fn copy_all(src: &Path, dest: &Path) -> io::Result<()> {
         copy_all(&entry.path(), &dest.join(entry.file_name()))?;
     }
     Ok(())
+}
+
+/// 复制一个文件，`dest` 已经有了时报 `AlreadyExists`，不截断它（`fs::copy` 会截断）。
+#[cfg(target_os = "macos")]
+fn copy_file(src: &Path, dest: &Path) -> io::Result<()> {
+    let (c_src, c_dest) = (c_path(src)?, c_path(dest)?);
+    // 和 `fs::copy` 一样能克隆就克隆，连同权限和扩展属性一起复制。
+    let flags = libc::COPYFILE_METADATA | libc::COPYFILE_DATA | libc::COPYFILE_CLONE | libc::COPYFILE_EXCL;
+    // SAFETY: 两个都是以 NUL 结尾的路径，不传状态。
+    if unsafe { libc::copyfile(c_src.as_ptr(), c_dest.as_ptr(), std::ptr::null_mut(), flags) } == 0 {
+        Ok(())
+    } else {
+        Err(io::Error::last_os_error())
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn copy_file(src: &Path, dest: &Path) -> io::Result<()> {
+    let mut out = fs::OpenOptions::new().write(true).create_new(true).open(dest)?;
+    io::copy(&mut fs::File::open(src)?, &mut out)?;
+    out.set_permissions(fs::metadata(src)?.permissions())
 }
 
 /// 把仓库里的 `rel`（相对仓库根 `root`）写进根目录的 `.gitignore`：只匹配这一个路径，开头的 `/`
@@ -301,6 +371,28 @@ mod tests {
         assert_eq!(fs::read_to_string(copy.join("e/f")).unwrap(), "y");
         assert!(matches!(copy_into(&dir, &dir.join("e")), Err(OpError::IntoItself)));
         assert!(matches!(copy_into(&dir, &dir), Err(OpError::IntoItself)));
+    }
+
+    /// 复制和改名都不覆盖已有的：同时粘贴同一个文件时各得一个副本，改名不盖掉别的文件。
+    #[test]
+    fn copies_and_renames_never_overwrite() {
+        let tmp = TempDir::new("no-overwrite");
+        let (a, b) = (tmp.0.join("a"), tmp.0.join("b"));
+        fs::write(&a, "a").unwrap();
+        fs::write(&b, "b").unwrap();
+        assert_eq!(copy_file(&a, &b).unwrap_err().kind(), io::ErrorKind::AlreadyExists);
+        assert_eq!(rename_noreplace(&a, &b).unwrap_err().kind(), io::ErrorKind::AlreadyExists);
+        assert_eq!(fs::read_to_string(&b).unwrap(), "b");
+
+        let dir = tmp.0.join("out");
+        fs::create_dir(&dir).unwrap();
+        let copies: std::collections::HashSet<_> = std::thread::scope(|scope| {
+            let jobs: Vec<_> = (0..6).map(|_| scope.spawn(|| copy_into(&a, &dir).unwrap())).collect();
+            jobs.into_iter().map(|job| job.join().unwrap()).collect()
+        });
+        assert_eq!(copies.len(), 6);
+        assert_eq!(fs::read_dir(&dir).unwrap().count(), 6);
+        assert!(copies.iter().all(|copy| fs::read_to_string(copy).unwrap() == "a"));
     }
 
     /// 经符号链接指进自己下面的目录也算放进自己，挪动、复制都拦；源本身是符号链接时照旧只动链接。
