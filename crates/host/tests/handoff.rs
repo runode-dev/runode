@@ -822,41 +822,6 @@ fn of_two_successors_at_once_one_is_told_the_host_is_busy() {
     drop(first);
 }
 
-/// 不会交接的老宿主：协议 3 的回 `Incompatible`，`Welcome::handoff` 为 0 的也算。
-#[test]
-fn an_old_host_without_handoffs_is_pre_handoff() {
-    let dir = temp_dir("pre");
-    let socket = socket_in(&dir);
-    let listener = UnixListener::bind(&socket).unwrap();
-    let answers = [
-        HostMsg::Incompatible { protocol: 3, build: BuildId("v3".into()), reason: "old".into() },
-        HostMsg::Welcome {
-            protocol: PROTOCOL_VERSION,
-            build: BuildId("no-handoff".into()),
-            host_pid: 1,
-            snapshot_format: 1,
-            standalone: true,
-            handoff: 0,
-            keep_awake: false,
-            todos: false,
-        },
-    ];
-    let fake = thread::spawn(move || {
-        for answer in answers {
-            let (mut stream, _) = listener.accept().unwrap();
-            let hello = read_frame(&mut stream).unwrap().unwrap().message::<ClientMsg>().unwrap();
-            assert!(matches!(hello, ClientMsg::Hello { client: ClientKind::Successor, .. }));
-            let frame = Frame::control(&answer).unwrap();
-            write_frame(&mut stream, frame.kind, 0, &frame.payload).unwrap();
-        }
-    });
-    for _ in 0..2 {
-        let new = Host::new(BuildId(NEW_BUILD.into()));
-        assert!(matches!(new.take_over(&socket, TakeOverOptions::default()), Err(TakeOverError::PreHandoff)));
-    }
-    fake.join().unwrap();
-}
-
 /// 一个宿主接一个宿主连续交接 20 次（每一棒是不同的构建），每个新宿主开着的描述符一样多。
 #[test]
 fn twenty_handoffs_in_a_row_do_not_leak_descriptors() {

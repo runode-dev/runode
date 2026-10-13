@@ -135,10 +135,6 @@ and certificate leaf[subject.OU] = \"$team_id\"" "$tmp/Runode.app" ||
     app=$app_dir/Runode.app
     new=$app_dir/.Runode.app.new.$$
     old=$app_dir/.Runode.app.old.$$
-    # 以前的脚本换不上新的时把旧的留在 Runode.app.old，不知道用户还要不要，只提醒不删。
-    if [ ! -e "$app" ] && [ -e "$app_dir/Runode.app.old" ]; then
-        say "提示：$app_dir/Runode.app.old 是以前的安装脚本没装完留下的旧版 Runode，确认不要了可以删掉。"
-    fi
     rm -rf "$new" "$old"
     # 对调期间失败、被 Ctrl-C 或 kill 打断时：删掉没换上的新包，旧的已经挪开、新的还没换上就把旧的挪回去。
     trap restore_app EXIT

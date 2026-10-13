@@ -428,7 +428,7 @@ public actor HostConnection: HostLink {
         let frame: Frame
         switch item {
         case .message(let message):
-            // 旧宿主回的 `Error` 不带编号，会被等着回话的页面当成自己的。
+            // 宿主对不认得的消息回不带编号的 `Error`，会被等着回话的页面当成自己的。
             if message == .keepAwake, !hostKeepsAwake { return }
             guard let control = try? Frame.control(message) else { return }
             frame = control

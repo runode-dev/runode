@@ -88,7 +88,7 @@ public final class DirectoryPickerModel {
     }
 
     /// 是给自己的回话时处理掉并返回真。不认领不带编号的 `Error`：宿主对 `ListDirs` 出错一定回带编号的，
-    /// 不带编号的「unknown message」是旧版电脑不认识同一条连接上别的请求（比如 `ListTasks`）回的。
+    /// 不带编号的是同一条连接上别的请求的。
     func handle(_ message: HostMsg) -> Bool {
         switch message {
         case .dirs(let req, let path, let dirs, let truncated) where req == pending:

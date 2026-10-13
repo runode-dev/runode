@@ -15,7 +15,7 @@ use runode_types::{
 };
 use rusqlite::{Connection, OptionalExtension as _, Row, Transaction, TransactionBehavior, params};
 
-/// 这个版本认得的表结构。2 加了任务的编号（`todos.number`）和发编号的计数（`meta`）。
+/// 这个版本认得的表结构。
 const VERSION: i64 = 2;
 
 /// 完成了的任务给前端最近这么久（秒）的，更早的留在库里。
@@ -60,15 +60,6 @@ CREATE TABLE schedules (
     minutes INTEGER,
     last_fired INTEGER NOT NULL
 );
-";
-
-/// 版本 1 的库升到 2：已有的任务按加的先后编号。
-const MIGRATE_TO_2: &str = "
-ALTER TABLE todos ADD COLUMN number INTEGER NOT NULL DEFAULT 0;
-UPDATE todos SET number = (SELECT COUNT(*) FROM todos AS earlier WHERE earlier.rowid <= todos.rowid);
-CREATE UNIQUE INDEX todos_number ON todos (number);
-CREATE TABLE meta (key TEXT PRIMARY KEY NOT NULL, value INTEGER NOT NULL);
-INSERT INTO meta VALUES ('next_number', (SELECT COALESCE(MAX(number), 0) + 1 FROM todos));
 ";
 
 const TODO_COLUMNS: &str = "id, number, title, prompt, dir, agent, worktree, created, started, session, worktree_dir, \
@@ -223,7 +214,6 @@ impl Store {
         let version: i64 = tx.query_row("PRAGMA user_version", [], |row| row.get(0)).map_err(failed)?;
         match version {
             0 => tx.execute_batch(&format!("{SCHEMA} PRAGMA user_version = {VERSION};")).map_err(failed)?,
-            1 => tx.execute_batch(&format!("{MIGRATE_TO_2} PRAGMA user_version = {VERSION};")).map_err(failed)?,
             VERSION => {}
             newer => return Err(format!("{} was written by a newer runode (schema {newer})", path.display())),
         }

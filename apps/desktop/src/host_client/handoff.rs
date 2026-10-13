@@ -68,8 +68,6 @@ pub struct HandoffStatus {
 pub enum HandoffFailure {
     /// 旧宿主不交。
     Refused { reason: HandoffRefusal },
-    /// 旧宿主太老，不会交接（协议 3 及以前）。
-    PreHandoff,
     /// 别的错。
     Failed { message: String },
     #[serde(other)]
@@ -106,8 +104,6 @@ pub enum Outcome {
     TookOver { sessions: usize, replayed: usize },
     /// 旧宿主不交，会话还在它手里。
     Refused(HandoffRefusal),
-    /// 旧宿主太老，不会交接。
-    PreHandoff,
     /// 没交成（拉不起新宿主、新宿主报错、没报告就退出、超时），会话还在旧宿主手里。
     Failed(String),
 }
@@ -178,7 +174,6 @@ fn outcome(status: HandoffStatus) -> Outcome {
     }
     match status.error {
         Some(HandoffFailure::Refused { reason }) => Outcome::Refused(reason),
-        Some(HandoffFailure::PreHandoff) => Outcome::PreHandoff,
         Some(HandoffFailure::Failed { message }) => Outcome::Failed(message),
         Some(HandoffFailure::Unknown) | None => Outcome::Failed("the new host failed without saying why".into()),
     }
@@ -291,10 +286,6 @@ mod tests {
         let status = json(&HandoffStatus::failed(HandoffFailure::Failed { message: "boom".into() }));
         let exe = fake_successor("err", &format!("echo '{status}' >&3\nexit 1"));
         assert_eq!(hand_over(&exe, QUICK), Outcome::Failed("boom".into()));
-
-        let status = json(&HandoffStatus::failed(HandoffFailure::PreHandoff));
-        let exe = fake_successor("pre", &format!("echo '{status}' >&3"));
-        assert_eq!(hand_over(&exe, QUICK), Outcome::PreHandoff);
 
         let refused = HandoffFailure::Refused { reason: HandoffRefusal::UnsupportedFormat { writes: 9 } };
         let exe = fake_successor("format", &format!("echo '{}' >&3", json(&HandoffStatus::failed(refused))));

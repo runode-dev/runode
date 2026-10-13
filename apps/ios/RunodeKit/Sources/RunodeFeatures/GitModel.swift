@@ -19,8 +19,7 @@ public struct GitDiffTarget: Hashable, Sendable {
 /// 一件办，改仓库的操作回改完后的状态。
 ///
 /// 改仓库的操作一次只办一件（`running`），视图据此转圈、禁用别的按钮；读状态、读 diff、列分支不占它。
-/// 宿主回带着请求编号的 `Error` 算这件没办成，接着重读一次状态。电脑上的 runode 太旧、不认识
-/// `Git` 时回的 `Error` 不带编号（`HostMsg.unknownMessage`），据此标出不支持。
+/// 宿主回带着请求编号的 `Error` 算这件没办成，接着重读一次状态。
 @Observable
 @MainActor
 public final class GitModel {
@@ -47,8 +46,6 @@ public final class GitModel {
     public private(set) var linkState: LinkState = .idle
     /// 连上了、能发请求（收到过这次连接的 `ready`）。
     public private(set) var isReady = false
-    /// 电脑上的 runode 太旧，不认识 `Git`。
-    public private(set) var unsupported = false
     /// 提交说明的输入框。
     public var commitMessage = ""
     public var errorMessage: String?
@@ -132,7 +129,7 @@ public final class GitModel {
 
     /// 重读状态；打开着 diff 时也重读它。
     public func refresh() async {
-        guard isReady, !unsupported else { return }
+        guard isReady else { return }
         isRefreshing = true
         await request(.status, as: .status)
         if let diffTarget { await requestDiff(diffTarget) }
@@ -189,7 +186,7 @@ public final class GitModel {
     public func sync() async { await perform(.sync, .sync) }
 
     public func loadBranches() async {
-        guard isReady, !unsupported else { return }
+        guard isReady else { return }
         isLoadingBranches = true
         await request(.branches, as: .branches)
     }
@@ -215,14 +212,14 @@ public final class GitModel {
     // MARK: 收发
 
     private func perform(_ action: Action, _ request: GitRequest) async {
-        guard running == nil, isReady, !unsupported else { return }
+        guard running == nil, isReady else { return }
         running = action
         errorMessage = nil
         await self.request(request, as: .action(action))
     }
 
     private func requestDiff(_ target: GitDiffTarget) async {
-        guard isReady, !unsupported else { return }
+        guard isReady else { return }
         isLoadingDiff = true
         await request(.diff(path: target.path, staged: target.staged), as: .diff(target))
     }
@@ -277,15 +274,6 @@ public final class GitModel {
         case .error(let req?, _, let message):
             guard let kind = pending.removeValue(forKey: req) else { return false }
             failed(kind, message)
-        case .error(nil, _, HostMsg.unknownMessage) where !pending.isEmpty:
-            // 电脑上的 runode 太旧，不认识 `Git`，回的 `Error` 不带编号。
-            pending.removeAll()
-            unsupported = true
-            loaded = true
-            running = nil
-            isRefreshing = false
-            isLoadingDiff = false
-            isLoadingBranches = false
         default:
             return false
         }

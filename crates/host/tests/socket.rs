@@ -306,12 +306,12 @@ fn a_snapshot_taken_inside_a_shell_report_has_no_token() {
     let dir = temp_dir("midreport");
     let (_host, socket) = listen(&dir);
     // 报告的前半截写出去后停下等一行输入，前端这时连上来；之后写完报告和别的输出。
-    let aliases: String = (0..300).map(|i| format!("a{i}.ls-la.")).collect();
+    let names: String = (0..300).map(|i| format!("a{i}.ls-la.")).collect();
     let shell = script(
         &dir,
         "shell.sh",
         &format!(
-            "printf '\\033]6973;{TOKEN};alias_values={aliases}'\nread line\nprintf 'tail\\007visible\\n'\nexec /bin/cat"
+            "printf '\\033]6973;{TOKEN};functions={names}'\nread line\nprintf 'tail\\007visible\\n'\nexec /bin/cat"
         ),
     );
     // 先连上一个前端看着输出：它收到抹过的报告开头时，宿主那份 VT 已经喂过报告的前半截（先转发
@@ -330,7 +330,7 @@ fn a_snapshot_taken_inside_a_shell_report_has_no_token() {
     let output = peer.wait_for_output(channel, b"visible");
     for (name, bytes) in [("snapshot", &snapshot), ("output", &output)] {
         assert!(!contains(bytes, TOKEN.as_bytes()), "the {name} has the token");
-        assert!(!contains(bytes, b"alias_values"), "the {name} has the report");
+        assert!(!contains(bytes, b"functions"), "the {name} has the report");
     }
     view.feed(&output);
     assert!(!view.take_bell(), "the end of the report rang the bell");

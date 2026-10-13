@@ -101,8 +101,6 @@ pub enum Notice {
     /// `sessions` 个会话（协议对不上时不知道几个）照常跑着，这次跑在 app 里、不开 socket。问用户
     /// 留着它还是结束它。
     HandoffFailed { reason: String, sessions: Option<usize> },
-    /// socket 上的旧宿主太老，不会交接：同上，问用户留着它还是结束它。
-    PreHandoff,
     /// 交接成了，但 `count` 个终端退成了重放，回滚历史没带过来。不用用户做什么，不弹框。
     HandoffDegraded { count: usize },
     /// 旧版本的 app 还开着：它连着旧宿主、旧宿主不交（`HandoffRefusal::DesktopConnected`），或者
@@ -205,7 +203,6 @@ pub fn yield_sessions() -> Result<(), String> {
     let reason = match outcome {
         handoff::Outcome::TookOver { .. } => return Ok(()),
         handoff::Outcome::Refused(reason) => format!("the host refused to hand over: {reason:?}"),
-        handoff::Outcome::PreHandoff => "the host cannot hand over".to_owned(),
         handoff::Outcome::Failed(reason) => reason,
     };
     host.yield_on_quit(false);
@@ -343,11 +340,6 @@ fn establish(terminal_host: bool) {
         }
         break match (choice, socket.as_deref()) {
             (Choice::InProcess { listen }, _) => in_process(listen),
-            (Choice::PreHandoff, _) => {
-                tracing::warn!("a host too old to hand over is running, so the host runs in the app without a socket");
-                notify(Notice::PreHandoff);
-                in_process(false)
-            }
             (Choice::Retire, Some(socket)) => {
                 if let Err(err) = launch::retire(socket, &build) {
                     tracing::warn!("failed to stop the leftover host: {err}");
@@ -466,27 +458,21 @@ fn hand_over(socket: &Path, end_on_quit: bool, sessions: Option<usize>) -> Optio
             notify(Notice::OtherApp);
             in_process(false)
         }
-        handoff::Outcome::PreHandoff => {
-            tracing::warn!("the old host cannot hand over, running the host in the app without a socket");
-            notify(Notice::PreHandoff);
-            in_process(false)
-        }
         handoff::Outcome::Refused(reason) => failed(format!("the old host refused to hand over: {reason:?}")),
         handoff::Outcome::Failed(reason) => failed(reason),
     };
     Some(mode)
 }
 
-/// 用户在弹框里选了结束旧宿主（连同它的会话）：在后台线程里结束它（`terminate` 时不管它说
-/// 什么协议，直接发 SIGTERM，见 `launch::terminate`；否则见 `launch::end_old_host`），之后
-/// 这个 app 里的宿主开 socket，让命令行连得上。对面不是单独的宿主进程（宿主跑在旧版本的 app
-/// 里）时不结束它，改请用户先退出旧版本（`Notice::OldAppRunning`）。
+/// 用户在弹框里选了结束旧宿主（连同它的会话）：在后台线程里结束它（见 `launch::end_old_host`），
+/// 之后这个 app 里的宿主开 socket，让命令行连得上。对面不是单独的宿主进程（宿主跑在别的版本的
+/// app 里）时不结束它，改请用户先退出那个版本（`Notice::OldAppRunning`）。
 ///
 /// 动手前再探一次：弹框之后 socket 上可能已经换成这个构建的宿主（交接比这边等的久、最后成了，
 /// 或者另一个同版本的 app 让新宿主接手了），结束它就把刚接过去的会话全结束了。这时不结束，告诉
 /// 用户（`Notice::AlreadyUpgraded`）。不在运行中把这个 app 改连过去：窗口里的终端都在 app 自己
 /// 的宿主里，换了连接它们就断了。
-fn end_old_host(terminate: bool, cx: &mut gpui::AsyncApp) {
+fn end_old_host(cx: &mut gpui::AsyncApp) {
     let (tx, rx) = futures::channel::oneshot::channel();
     let spawned = thread::Builder::new().name("end-old-host".into()).spawn(move || {
         let Some(socket) = socket_path() else { return };
@@ -497,8 +483,7 @@ fn end_old_host(terminate: bool, cx: &mut gpui::AsyncApp) {
             let _ = tx.send(Notice::AlreadyUpgraded);
             return;
         }
-        let ended = if terminate { launch::terminate(&socket) } else { launch::end_old_host(&socket, &build()) };
-        match ended {
+        match launch::end_old_host(&socket, &build()) {
             Ok(launch::Ended::Ended) => {
                 tracing::info!("ended the old host and its sessions");
                 if let Some(host) = IN_PROCESS.get() {
@@ -637,33 +622,32 @@ pub fn listen(host: &Host, dirs: &runode_paths::Dirs) -> Result<PathBuf> {
 /// 留着旧宿主（默认）还是结束它。回滚历史没带过来这种不用做决定的事发系统通知，不弹框。
 pub fn show_notice(cx: &mut App) {
     let Some(notice) = take_notice() else { return };
-    // 选了「结束旧会话」时怎么结束：`Some(true)` 直接发 SIGTERM，`Some(false)` 先试着让它自己退出。
+    // `end`：问用户留着旧宿主还是结束它。
     let (title, detail, end) = match notice {
-        Notice::Incompatible(reason) => {
-            (rust_i18n::t!("host.incompatible_title"), rust_i18n::t!("host.incompatible_detail", reason = reason), None)
-        }
-        Notice::OtherApp => (rust_i18n::t!("host.other_app_title"), rust_i18n::t!("host.other_app_detail"), None),
+        Notice::Incompatible(reason) => (
+            rust_i18n::t!("host.incompatible_title"),
+            rust_i18n::t!("host.incompatible_detail", reason = reason),
+            false,
+        ),
+        Notice::OtherApp => (rust_i18n::t!("host.other_app_title"), rust_i18n::t!("host.other_app_detail"), false),
         Notice::Unreachable(reason) => {
-            (rust_i18n::t!("host.unreachable_title"), rust_i18n::t!("host.unreachable_detail", reason = reason), None)
+            (rust_i18n::t!("host.unreachable_title"), rust_i18n::t!("host.unreachable_detail", reason = reason), false)
         }
-        Notice::OldAppRunning => (rust_i18n::t!("host.old_app_title"), rust_i18n::t!("host.old_app_detail"), None),
+        Notice::OldAppRunning => (rust_i18n::t!("host.old_app_title"), rust_i18n::t!("host.old_app_detail"), false),
         Notice::AlreadyUpgraded => {
-            (rust_i18n::t!("host.already_upgraded_title"), rust_i18n::t!("host.already_upgraded_detail"), None)
-        }
-        Notice::PreHandoff => {
-            (rust_i18n::t!("host.pre_handoff_title"), rust_i18n::t!("host.pre_handoff_detail"), Some(true))
+            (rust_i18n::t!("host.already_upgraded_title"), rust_i18n::t!("host.already_upgraded_detail"), false)
         }
         Notice::HandoffFailed { reason, sessions } => {
             let detail = match sessions {
                 Some(count) => rust_i18n::t!("host.handoff_failed_detail", count = count, reason = reason),
                 None => rust_i18n::t!("host.handoff_failed_detail_uncounted", reason = reason),
             };
-            (rust_i18n::t!("host.handoff_failed_title"), detail, Some(false))
+            (rust_i18n::t!("host.handoff_failed_title"), detail, true)
         }
         Notice::BuildMismatch { host } => (
             rust_i18n::t!("host.build_mismatch_title"),
             rust_i18n::t!("host.build_mismatch_detail", host = host, app = build().0),
-            None,
+            false,
         ),
         Notice::HandoffDegraded { count } => {
             report_degraded(count, cx);
@@ -676,13 +660,13 @@ pub fn show_notice(cx: &mut App) {
     let ok = rust_i18n::t!("host.ok");
     let (keep, end_old) = (rust_i18n::t!("host.keep_old"), rust_i18n::t!("host.end_old"));
     // 默认（第一个）按钮留着旧宿主。
-    let answers: Vec<&str> = if end.is_some() { vec![&keep, &end_old] } else { vec![&ok] };
+    let answers: Vec<&str> = if end { vec![&keep, &end_old] } else { vec![&ok] };
     let answer =
         window.update(cx, |_, window, cx| window.prompt(PromptLevel::Warning, &title, Some(&detail), &answers, cx));
     if let Ok(answer) = answer {
         cx.spawn(async move |cx| {
-            if let (Some(terminate), Ok(1)) = (end, answer.await) {
-                end_old_host(terminate, cx);
+            if end && answer.await == Ok(1) {
+                end_old_host(cx);
             }
         })
         .detach();

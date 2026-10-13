@@ -266,7 +266,6 @@ pub enum ClientMsg {
     /// `min_format`..=`max_format` 是新宿主读得了的交接格式（`handoff::HANDOFF_FORMAT`），旧宿主
     /// 只写自己的那一个，不在范围里时回 `HandoffRefused { UnsupportedFormat }`，否则回
     /// `HandoffBegin`，接着在同一条连接上发描述符消息（见 `handoff::HandoffPart`）。
-    /// 早先的写法 `{"type":"handoff"}` 没有范围，读成 0..=0，哪个格式都不在里面。
     Handoff {
         #[serde(default)]
         min_format: u32,

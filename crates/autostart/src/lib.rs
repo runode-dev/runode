@@ -54,7 +54,7 @@ impl Kind {
 }
 
 /// `kind` 的服务文件放在哪；系统不支持、没有家目录时为 `None`。app 登记成登录项时不写服务文件，
-/// 这里给的是旧版写过的那个。
+/// 这里给的是登录项不可用时写的 LaunchAgent。
 pub fn service_file(kind: Kind, dirs: &Dirs) -> Option<PathBuf> {
     if !kind.supported() {
         return None;
@@ -66,11 +66,11 @@ pub fn service_file(kind: Kind, dirs: &Dirs) -> Option<PathBuf> {
     }
 }
 
-/// 装了没有。旧版给 app 写的 LaunchAgent 还在时也算：登录时它照样开 app。
+/// 装了没有。
 pub fn is_installed(kind: Kind, dirs: &Dirs) -> bool {
     #[cfg(target_os = "macos")]
-    if kind == Kind::App && login_item::available() && login_item::is_enabled() {
-        return true;
+    if kind == Kind::App && login_item::available() {
+        return login_item::is_enabled();
     }
     service_file(kind, dirs).is_some_and(|path| path.exists())
 }
@@ -93,8 +93,6 @@ pub fn install(kind: Kind, dirs: &Dirs, exe: &Path) -> io::Result<Option<PathBuf
     if kind == Kind::App && login_item::available() {
         bundle()?;
         login_item::register()?;
-        // 旧版写的 LaunchAgent 换成了登录项，留着它登录时会开两次。
-        remove_if_exists(&path)?;
         return Ok(None);
     }
     let content = match (kind, cfg!(target_os = "macos")) {
@@ -179,7 +177,7 @@ pub fn uninstall(kind: Kind, dirs: &Dirs) -> io::Result<bool> {
         if registered {
             login_item::unregister()?;
         }
-        return Ok(remove_if_exists(&path)? || registered);
+        return Ok(registered);
     }
     if !path.exists() {
         return Ok(false);
@@ -193,16 +191,6 @@ pub fn uninstall(kind: Kind, dirs: &Dirs) -> io::Result<bool> {
         let _ = systemctl(&["daemon-reload"]);
     }
     Ok(true)
-}
-
-/// 删掉 `path`，原来就没有时返回 `false`。
-#[cfg(target_os = "macos")]
-fn remove_if_exists(path: &Path) -> io::Result<bool> {
-    match std::fs::remove_file(path) {
-        Ok(()) => Ok(true),
-        Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(false),
-        Err(err) => Err(err),
-    }
 }
 
 const SYSTEMD_UNIT: &str = "runode-host.service";

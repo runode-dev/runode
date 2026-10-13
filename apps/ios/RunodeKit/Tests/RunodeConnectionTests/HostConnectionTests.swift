@@ -43,7 +43,7 @@ import Testing
         return nil
     }
 
-    /// `keepAwake` 只发给在 `Welcome` 里说认得它的宿主：旧宿主回的 `Error` 不带编号，会被别的页面认错。
+    /// `keepAwake` 只发给在 `Welcome` 里说认得它的宿主：宿主对不认得的消息回不带编号的 `Error`，会被别的页面认错。
     @Test(arguments: [false, true]) func keepAwakeOnlyGoesToHostsThatKnowIt(_ knows: Bool) async throws {
         let transport = FakeTransport()
         supply.add(transport)

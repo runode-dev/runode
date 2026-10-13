@@ -82,8 +82,6 @@ pub struct TakeOverReport {
 pub enum TakeOverError {
     /// 旧宿主不交，见 `HandoffRefusal`。
     Refused(HandoffRefusal),
-    /// 旧宿主不会交接：协议 3 及更早的版本（回 `Incompatible`），或者 `Welcome::handoff` 为 0。
-    PreHandoff,
     /// 连不上、对面说的不对、接手某个会话失败、旧宿主没提交就走了等等，说明在里面。
     Failed(String),
 }
@@ -92,7 +90,6 @@ impl fmt::Display for TakeOverError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Refused(reason) => write!(f, "the old host refused to hand over: {reason:?}"),
-            Self::PreHandoff => write!(f, "the old host cannot hand its sessions over"),
             Self::Failed(reason) => write!(f, "the handoff failed: {reason}"),
         }
     }

@@ -122,7 +122,6 @@
         /// 一台电脑上登记推送没办成的原因；办成了、还没结果时为空。
         static func pushProblem(_ status: PushRegistration.Status?) -> String? {
             switch status {
-            case .unsupported: String(localized: "电脑上的 runode 不支持推送，升级后才能提醒")
             case .failed(let reason): String(localized: "登记推送失败：\(reason)")
             case .registered, nil: nil
             }

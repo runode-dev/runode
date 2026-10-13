@@ -26,16 +26,7 @@ public struct AppPreferences: Hashable, Sendable, Codable {
         fontSize = try container.decodeIfPresent(Double.self, forKey: .fontSize)
         bellHaptics = try container.decodeIfPresent(Bool.self, forKey: .bellHaptics) ?? true
         deviceName = try container.decodeIfPresent(String.self, forKey: .deviceName)
-        // 以前的版本在 App 里自己显示 agent 状态，开关叫 `showsAgentActivity`：关过的照旧关着。
-        let legacy = try decoder.container(keyedBy: LegacyKeys.self)
-        alertsBlockedAgents =
-            try container.decodeIfPresent(Bool.self, forKey: .alertsBlockedAgents)
-            ?? legacy.decodeIfPresent(Bool.self, forKey: .showsAgentActivity) ?? true
-    }
-
-    /// 旧存档里还有、现在不再写的键。
-    private enum LegacyKeys: String, CodingKey {
-        case showsAgentActivity
+        alertsBlockedAgents = try container.decodeIfPresent(Bool.self, forKey: .alertsBlockedAgents) ?? true
     }
 }
 

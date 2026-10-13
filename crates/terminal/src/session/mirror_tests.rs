@@ -288,7 +288,7 @@ fn a_screen_given_inside_a_shell_report_leaves_out_its_contents() {
     for end in [&b"\x07"[..], b"\x1b\\", b"\x18", b"\x1a", b"\x1b[31m"] {
         let mut data = HEAD.to_vec();
         data.extend(TOKEN);
-        data.extend(b";alias_values=ll%3Dls");
+        data.extend(b";functions=ll");
         let report_end = data.len();
         data.extend(end);
         data.extend(b" after\r\n$ ");
@@ -320,7 +320,7 @@ fn a_screen_given_inside_a_shell_report_leaves_out_its_contents() {
             replayed.feed(&replay);
 
             let public = redactor.redact(tail).unwrap_or_else(|| tail.to_vec());
-            assert!(!contains(&public, b"alias"), "{context}");
+            assert!(!contains(&public, b"functions"), "{context}");
             host.feed(tail);
             view.feed(&public);
             replayed.feed(&public);
@@ -335,7 +335,7 @@ fn a_screen_given_inside_a_shell_report_leaves_out_its_contents() {
     }
 }
 
-/// 抹报告的差分测试加上中途换前端：输出里夹着很长的报告（几 KB 的 `alias_values` 会被切成好
+/// 抹报告的差分测试加上中途换前端：输出里夹着很长的报告（几 KB 的 `functions` 会被切成好
 /// 几块），每喂一块都可能按 `redacted_snapshot` 换一个新连上的界面，不少正停在报告中间；换上
 /// 的界面接着喂抹过的输出，每一步都和宿主那份一样，前端收到的所有字节里都没有口令。
 #[test]
@@ -347,11 +347,11 @@ fn clients_attached_inside_shell_reports_stay_in_step() {
     for &byte in &output {
         data.push(byte);
         if byte == b'\n' && rng.chance(40) {
-            let aliases: String = (0..200).map(|i| format!("a{i}%3Dls%20-la%0A")).collect();
+            let names: String = (0..200).map(|i| format!("function_{i}%20")).collect();
             let end: &[u8] = rng.pick(&[&b"\x07"[..], b"\x1b\\", b"\x18", b"\x1b[32m"]);
             data.extend(b"\x1b]6973;");
             data.extend(TOKEN);
-            data.extend(format!(";alias_values={aliases}").as_bytes());
+            data.extend(format!(";functions={names}").as_bytes());
             data.extend(end);
         }
     }

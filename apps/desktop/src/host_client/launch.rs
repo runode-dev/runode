@@ -22,15 +22,13 @@ const RETRY_INTERVAL: Duration = Duration::from_millis(5);
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(2);
 /// 拉起后这么久还连不上（比如它没抢到锁就退出了），再拉一次；多拉起的那个抢不到锁，自己退出。
 const RELAUNCH_AFTER: Duration = Duration::from_millis(500);
-/// 从这个协议版本起，宿主会把会话交给新版本的宿主（`ClientKind::Successor`）；更旧的不会。
-pub const HANDOFF_PROTOCOL: u32 = 4;
 
 /// socket 上在跑的宿主的样子，见 `probe`。
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Probe {
     /// 没有宿主在跑。
     Absent,
-    /// 有，但协议版本对不上：`protocol` 是它说的版本，比 `HANDOFF_PROTOCOL` 旧的不会交接。
+    /// 有，但协议版本对不上：`protocol` 是它说的版本。
     Incompatible { protocol: u32, reason: String },
     /// 有，但跑在另一个 app 的进程里（`Welcome::standalone` 为假）：那个 app 是它的界面，它的会话
     /// 有没有被认领、有没有会话都说明不了什么（那个 app 可能刚提前拉起 shell 还没连上，或者还没
@@ -53,8 +51,6 @@ pub enum Choice {
     Launch,
     /// 在跑的是别的构建：拉起这个构建的新宿主接手它的会话再连上，`end_on_quit` 同 `Keep`。
     HandOver { end_on_quit: bool },
-    /// 在跑的宿主太老，不会交接：这次跑在 app 里、不开 socket，问用户留着它还是结束它。
-    PreHandoff,
 }
 
 /// 按配置项 `terminal-host`、socket 上探到的宿主和这个构建（`build`）决定这次怎么跑：
@@ -65,14 +61,13 @@ pub enum Choice {
 ///   这次接着连它、把会话接回来（别的构建时先让新宿主接手），这次退出时让它连会话一起退出，
 ///   下次就跑在 app 里；没有会话时让它退出。有会话连着别的桌面时，那是另一个 runode 的宿主，
 ///   不碰它，跑在 app 里也不开 socket。
-/// - 协议对不上：比 `HANDOFF_PROTOCOL` 旧的不会交接，`PreHandoff`；新的会，按开关走 `HandOver`
-///   （开关关着时当作留下的会话没有界面连着，交接后这次退出时结束）。
+/// - 协议对不上：按开关走 `HandOver`（开关关着时当作留下的会话没有界面连着，交接后这次退出时
+///   结束）。
 /// - socket 上是另一个 app 进程里的宿主：不管开关，都不连进去当它的界面、也不让它退出，跑在
 ///   app 里，不开 socket（锁在那个 app 手里）。
 pub fn choose_mode(terminal_host: bool, probe: &Probe, build: &BuildId) -> Choice {
     match (terminal_host, probe) {
         (_, Probe::OtherApp) => Choice::InProcess { listen: false },
-        (_, Probe::Incompatible { protocol, .. }) if *protocol < HANDOFF_PROTOCOL => Choice::PreHandoff,
         (on, Probe::Incompatible { .. }) => Choice::HandOver { end_on_quit: !on },
         (true, Probe::Running { build: theirs, .. }) if theirs != build => Choice::HandOver { end_on_quit: false },
         (true, Probe::Running { .. }) => Choice::Keep { end_on_quit: false },
@@ -162,8 +157,8 @@ fn shut_down(mut stream: UnixStream) -> io::Result<()> {
 pub enum Ended {
     /// 旧宿主连同会话结束了。
     Ended,
-    /// socket 对面的进程不是以 `--host` 启动的单独宿主（多半是协议 3 及以前的旧 app，宿主跑在
-    /// 它的进程里）：没发信号，免得结束一整个 app。
+    /// socket 对面的进程不是以 `--host` 启动的单独宿主（协议对不上的另一个 app，宿主跑在它的
+    /// 进程里）：没发信号，免得结束一整个 app。
     NotAHost,
 }
 
@@ -189,9 +184,9 @@ pub fn end_old_host(socket: &Path, build: &BuildId) -> io::Result<Ended> {
 
 /// 给 `socket` 上的宿主进程发 SIGTERM（连同它的会话一起结束），不管它说什么协议：pid 见
 /// `host_pid`，只认同一个用户的进程，而且只认以 `--host` 启动的单独宿主进程（见
-/// `launched_as_host`）；别的（旧 app 进程里的宿主）不发，返回 `Ended::NotAHost`。发了之后等到
+/// `launched_as_host`）；别的（另一个 app 进程里的宿主）不发，返回 `Ended::NotAHost`。发了之后等到
 /// socket 连不上为止，最多 `CONNECT_TIMEOUT`。
-pub fn terminate(socket: &Path) -> io::Result<Ended> {
+fn terminate(socket: &Path) -> io::Result<Ended> {
     let pid = host_pid(socket)?;
     if pid <= 0 || pid.unsigned_abs() == std::process::id() {
         return Err(io::Error::other(format!("refusing to end process {pid}")));
@@ -277,11 +272,11 @@ fn parse_procargs(data: &[u8]) -> Option<Vec<Vec<u8>>> {
     Some(args)
 }
 
-/// `socket` 上宿主进程的 pid：打个招呼，等它回话（`Welcome`，协议对不上的老宿主回
+/// `socket` 上宿主进程的 pid：打个招呼，等它回话（`Welcome`，协议对不上的回
 /// `Incompatible`），回过话再读连接对端（`peer_pid`）。监听的 socket 交接过以后，对方 accept
 /// 之前读到的是最早建它的那个进程（可能早已退出、号被别的进程占了），回过话就一定 accept 了。
-/// `Welcome` 里有宿主自报的 `host_pid` 时以它为准，和对端对不上时记一笔；协议 3 及以前的
-/// `Incompatible` 不带 pid，用对端的。不回话的不猜，返回错误。
+/// `Welcome` 里有宿主自报的 `host_pid` 时以它为准，和对端对不上时记一笔；`Incompatible` 不带
+/// pid，用对端的。不回话的不猜，返回错误。
 fn host_pid(socket: &Path) -> io::Result<libc::pid_t> {
     let mut stream = connect_cli(socket)?;
     send(&mut stream, &hello(&super::build(), ClientKind::Cli))?;
@@ -490,10 +485,8 @@ mod tests {
             // 另一个 app 里的宿主：不碰。
             (true, Probe::OtherApp, InProcess { listen: false }),
             (false, Probe::OtherApp, InProcess { listen: false }),
-            // 协议对不上：太老的不会交接；比自己新的会，按开关交接。
-            (true, incompatible(3), PreHandoff),
-            (false, incompatible(3), PreHandoff),
-            (true, incompatible(2), PreHandoff),
+            // 协议对不上：按开关交接。
+            (true, incompatible(3), HandOver { end_on_quit: false }),
             (true, incompatible(5), HandOver { end_on_quit: false }),
             (false, incompatible(5), HandOver { end_on_quit: true }),
         ];

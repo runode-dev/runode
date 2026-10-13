@@ -163,9 +163,9 @@ func sameJSON(_ a: Data, _ b: Data) throws -> Bool {
 
     @Test func welcomeAndIncompatible() throws {
         #expect(try decode("welcome") == .welcome(keepAwake: true))
-        // 旧宿主的 `Welcome` 没有 `keep_awake`。
-        let old = Data(#"{"type":"welcome","protocol":4}"#.utf8)
-        #expect(try JSONDecoder().decode(HostMsg.self, from: old) == .welcome(keepAwake: false))
+        // 协议里 `keep_awake` 可以缺省，缺了当作不认得。
+        let bare = Data(#"{"type":"welcome","protocol":4}"#.utf8)
+        #expect(try JSONDecoder().decode(HostMsg.self, from: bare) == .welcome(keepAwake: false))
         #expect(try decode("incompatible") == .incompatible(protocol: 5, build: "x", reason: "old"))
     }
 
@@ -214,7 +214,7 @@ func sameJSON(_ a: Data, _ b: Data) throws -> Bool {
         #expect(try decode("size_owner") == .sizeOwner(id: id, mine: false, owner: "Ethan 的 MacBook"))
     }
 
-    /// 布局按窗口、工作区、标签、分屏一层层读出来，带分屏在标签里的位置；旧电脑不报的目录读成空。
+    /// 布局按窗口、工作区、标签、分屏一层层读出来，带分屏在标签里的位置；没有目录的工作区读成空。
     @Test func layoutDescribesWorkspaces() throws {
         guard case .layout(let req, let windows) = try decode("layout") else {
             Issue.record("not a layout")

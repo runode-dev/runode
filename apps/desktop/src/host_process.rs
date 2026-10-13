@@ -134,7 +134,6 @@ pub fn take_over() -> i32 {
             tracing::warn!("host {} did not take over after {:?}: {err}", std::process::id(), started.elapsed());
             let failure = match err {
                 TakeOverError::Refused(reason) => HandoffFailure::Refused { reason },
-                TakeOverError::PreHandoff => HandoffFailure::PreHandoff,
                 TakeOverError::Failed(message) => HandoffFailure::Failed { message },
             };
             status.report(&HandoffStatus::failed(failure));

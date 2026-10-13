@@ -199,10 +199,7 @@ fn handshake(shared: &Shared, stream: &UnixStream) -> Result<(u32, Option<libc::
     )
     .map_err(|err| failed("cannot greet the old host", &err))?;
     let old_pid = match receive_message(stream).map_err(|err| failed("no answer from the old host", &err))? {
-        HostMsg::Welcome { handoff: 0, .. } => return Err(TakeOverError::PreHandoff),
         HostMsg::Welcome { host_pid, .. } => old_host_pid(stream, host_pid),
-        // 协议 3 及更早的宿主不认识 `Successor`，按协议版本回 `Incompatible`。
-        HostMsg::Incompatible { protocol, .. } if protocol <= 3 => return Err(TakeOverError::PreHandoff),
         HostMsg::Goodbye { reason: GoodbyeReason::Handoff } => {
             return Err(TakeOverError::Refused(HandoffRefusal::Busy));
         }

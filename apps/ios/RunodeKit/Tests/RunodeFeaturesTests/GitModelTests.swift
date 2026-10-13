@@ -164,20 +164,6 @@ import Testing
         #expect(model.running == nil)
     }
 
-    /// 电脑上的 runode 太旧，回不带编号的「不认识」：标出不支持，之后不再发。
-    @Test func olderComputersAreReported() async throws {
-        let model = GitModel(sessionId: sessionA, link: link)
-        model.handle(.state(.connected(hostName: "mac", address: nil)))
-        model.handle(.ready(generation: 1))
-        #expect(await eventually { !link.sent.isEmpty })
-        model.handle(.error(req: nil, id: nil, message: HostMsg.unknownMessage))
-        #expect(model.unsupported)
-        #expect(model.loaded)
-        link.clearSent()
-        await model.refresh()
-        #expect(link.sent.isEmpty)
-    }
-
     /// 断线：在办的操作不会再有回话，放开并提醒；重新连上后重读。
     @Test func connectionLoss() async throws {
         let model = try await connectedModel(status(unstaged: [changed]))

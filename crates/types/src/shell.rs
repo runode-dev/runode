@@ -62,7 +62,7 @@ impl Shell {
     }
 }
 
-/// shell 集成报告的名字。旧版本还报告过别名、内建命令、关键字和 Tab 绑的 widget，读到时忽略。
+/// shell 集成报告的名字。
 #[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(default)]
 pub struct ShellNames {

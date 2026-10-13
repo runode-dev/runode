@@ -66,17 +66,6 @@ import Testing
         #expect(link.sent.isEmpty)
     }
 
-    /// 旧电脑不认识 `ListTasks`，回不带编号的「unknown message」：这次连着时不再要。
-    @Test func anOldComputerIsNotAskedAgain() async {
-        let model = model([info(sessionA)])
-        await model.loadTasks(in: dir)
-        model.handle(.message(.error(req: nil, id: nil, message: HostMsg.unknownMessage)))
-        link.clearSent()
-        await model.loadTasks(in: "/tmp")
-        #expect(link.sent.isEmpty)
-        #expect(model.errorMessage == nil)
-    }
-
     /// 点一条命令：粘贴命令行再回车。
     @Test func runningPastesTheCommandAndPressesEnter() async {
         let model = model([info(sessionA)])

@@ -101,11 +101,7 @@
 
         @ViewBuilder
         private var placeholder: some View {
-            if model.unsupported {
-                ContentUnavailableView(
-                    "电脑上的 runode 太旧", systemImage: "arrow.down.app",
-                    description: Text("升级电脑上的 runode 后就能在手机上管理 Git。"))
-            } else if model.loaded, model.status == nil, model.linkState.isConnected {
+            if model.loaded, model.status == nil, model.linkState.isConnected {
                 ContentUnavailableView(
                     "不在 Git 仓库里", systemImage: "folder.badge.questionmark",
                     description: Text("这个终端当前的目录不在 Git 仓库里。在终端里 cd 进仓库后下拉刷新。"))

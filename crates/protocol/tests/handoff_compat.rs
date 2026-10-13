@@ -113,8 +113,6 @@ fn goodbye_reasons_are_readable() {
     let cases = [
         (r#"{"kind":"shutdown"}"#, GoodbyeReason::Shutdown),
         (r#"{"kind":"handoff"}"#, GoodbyeReason::Handoff),
-        // 早先的版本定义过 `idle`，宿主从来发不出来，删掉后和以后的新原因一样读成 `Unknown`。
-        (r#"{"kind":"idle"}"#, GoodbyeReason::Unknown),
         (r#"{"kind":"error","message":"boom"}"#, GoodbyeReason::Error { message: "boom".into() }),
         (r#"{"kind":"maintenance","until":1790000000}"#, GoodbyeReason::Unknown),
     ];
@@ -177,14 +175,12 @@ fn host_part_is_readable() {
     assert!(blocks.is_empty());
 }
 
-/// 早先的旧宿主还写 `env`（开会话时另外设的环境变量），现在没有这一项，读时忽略。
 #[test]
 fn session_part_is_readable() {
     let header = format!(
         r#"{{"part":{{"type":"session","id":"{ID}","started":true,"pid":777,
             "size":{{"cols":80,"rows":24,"cell_width_px":16,"cell_height_px":32}},
             "report_token":"0f1e2d3c","settings":{SETTINGS},"shell":"/bin/zsh","start_dir":"/tmp",
-            "env":[["FOO","bar"]],
             "meta":{{"title":"vim","fallback_title":null,"agent":null,"cwd":"/tmp","prompt_cwd":null,
                 "foreground_is_shell":false,"shell_path":{{"Unix":[47,98,105,110]}},
                 "shell_names":{{"aliases":[],"alias_values":[],"functions":[],"builtins":[],"keywords":[]}},

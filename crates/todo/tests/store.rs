@@ -191,34 +191,6 @@ fn numbers_count_up_and_are_never_reused() {
     assert_eq!(store.resolve_todo("nothere").unwrap(), None);
 }
 
-#[test]
-fn numbers_the_todos_of_a_version_1_database_in_the_order_they_were_added() {
-    let path = temp_db("v1");
-    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-    Connection::open(&path)
-        .unwrap()
-        .execute_batch(
-            "CREATE TABLE todos (id TEXT PRIMARY KEY NOT NULL, title TEXT NOT NULL, prompt TEXT NOT NULL,
-                 dir BLOB NOT NULL, agent TEXT NOT NULL, worktree INTEGER NOT NULL, created INTEGER NOT NULL,
-                 started INTEGER, session TEXT, worktree_dir BLOB, branch TEXT, done_at INTEGER, schedule TEXT,
-                 rank INTEGER NOT NULL, swept INTEGER NOT NULL DEFAULT 0);
-             CREATE TABLE schedules (id TEXT PRIMARY KEY NOT NULL, title TEXT NOT NULL, prompt TEXT NOT NULL,
-                 dir BLOB NOT NULL, agent TEXT NOT NULL, worktree INTEGER NOT NULL, kind TEXT NOT NULL,
-                 at INTEGER, hour INTEGER, minute INTEGER, days INTEGER, minutes INTEGER,
-                 last_fired INTEGER NOT NULL);
-             INSERT INTO todos (id, title, prompt, dir, agent, worktree, created, rank)
-                 VALUES ('0000000b', 'b', '', x'2f', 'claude', 0, 1, 2), ('0000000a', 'a', '', x'2f', 'claude', 0, 2, 1);
-             PRAGMA user_version = 1;",
-        )
-        .unwrap();
-    let mut store = Store::open(&path).unwrap();
-    let numbers: Vec<(String, u64)> =
-        store.list_todos(10).unwrap().into_iter().map(|todo| (todo.id, todo.number)).collect();
-    assert_eq!(numbers, [("0000000a".into(), 2), ("0000000b".into(), 1)]);
-    let added = store.add_todo(&spec("c"), 3, None).unwrap();
-    assert_eq!(store.todo_by_id(&added).unwrap().unwrap().number, 3);
-}
-
 /// 两个进程同时加任务时都等对方写完，不报库被锁：先读后写的事务一开始就拿写锁，`busy_timeout` 才管用。
 #[test]
 fn concurrent_writers_wait_for_each_other() {

@@ -157,18 +157,6 @@ private let secondToken = Data([0x01, 0x02])
         #expect(push.statuses[machine.id] == .failed("cannot update the paired device table"))
     }
 
-    /// 老版本的 runode 回不带编号的「unknown message」或者干脆不回：等到时候就当它不支持。
-    @Test func noReplyMeansUnsupported() async {
-        let push = registration(timeout: .milliseconds(50))
-        system.give(token: firstToken)
-        #expect(await eventually { push.token != nil })
-        push.connected(machine, link: link)
-        #expect(await eventually { link.registrations.count == 1 })
-        push.handle(.error(req: nil, id: nil, message: HostMsg.unknownMessage), from: machine.id)
-        #expect(push.statuses[machine.id] == nil)
-        #expect(await eventually { push.statuses[machine.id] == .unsupported })
-    }
-
     @Test func disconnectingStopsWaitingForTheReply() async {
         let push = registration(timeout: .milliseconds(50))
         system.give(token: firstToken)

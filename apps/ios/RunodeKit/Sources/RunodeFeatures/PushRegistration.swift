@@ -71,8 +71,8 @@ public struct PushIdentity: Hashable, Sendable {
 /// 为空的同一条消息）：电脑记着登记，不注销的话它会接着把问题内容推给 APNs。设置里关掉提醒时同样对连着的
 /// 电脑注销，之后连上的也注销；再打开时重新登记。
 ///
-/// 电脑回 `Done` 算办好了；回带编号的 `Error` 记下原因；`replyTimeout` 内什么都没回（老版本的 runode
-/// 不认识这条消息，回不带编号的 `Error` 或者不回）就当它不支持推送。这些都只在设置页里显示，不弹错误。
+/// 电脑回 `Done` 算办好了；回带编号的 `Error` 记下原因，只在设置页里显示，不弹错误；`replyTimeout` 内
+/// 没回话就不再等。
 @Observable
 @MainActor
 public final class PushRegistration {
@@ -80,8 +80,6 @@ public final class PushRegistration {
     public enum Status: Hashable, Sendable {
         /// 电脑收下了这次登记（或注销）。
         case registered
-        /// 电脑上的 runode 太旧，不认识登记推送。
-        case unsupported
         /// 电脑回了错误。
         case failed(String)
     }
@@ -270,7 +268,6 @@ public final class PushRegistration {
             try? await Task.sleep(for: timeout)
             guard !Task.isCancelled, self.pending[id]?.attempt == attempt else { return }
             self.pending[id] = nil
-            self.statuses[id] = .unsupported
         }
         pending[id] = Pending(attempt: attempt, req: nil, task: task)
     }

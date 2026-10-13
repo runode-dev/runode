@@ -57,8 +57,7 @@ pub(super) struct Effects {
 
 /// shell 集成在显示提示符时、内容和上次报告的不一样时用的私有 OSC：
 /// `ESC ] 6973;<口令>;<字段>=<百分号编码的值> BEL`。字段是 `cwd`（shell 的当前目录，每次显示
-/// 提示符前都发）、`path`（PATH）或 `functions`（名字之间用空格分开）；旧版集成脚本还会报告
-/// `aliases`、`builtins`、`keywords`、`alias_values`、`tab`，不认识，丢掉。另有 `command`：shell 开始运行命令时紧接在 OSC 133;C 前面发，值是命令
+/// 提示符前都发）、`path`（PATH）或 `functions`（名字之间用空格分开），别的字段不认识，丢掉。另有 `command`：shell 开始运行命令时紧接在 OSC 133;C 前面发，值是命令
 /// 原文（拿不到时为空），见 `Effects::command_report`。
 ///
 /// 报告运行完的命令（`HostMsg::CommandFinished`）同样只认这条报告，133;C 自带的命令原文一律
@@ -407,11 +406,11 @@ mod tests {
         // 别的私有 OSC 不算。
         session.feed(format!("\x1b]69730;{TOKEN};path=/x\x07\x1b]6973;{TOKEN};other=1\x1b\\").as_bytes());
         assert_eq!(session.meta().shell_path, Some("/usr/bin:/opt/my bin".into()));
-        // 函数名，空格编码成 %20；很长的列表也收得下。旧版脚本报告的别名这类字段不管。
+        // 函数名，空格编码成 %20；很长的列表也收得下。
         let functions: Vec<String> = (0..3000).map(|i| format!("function_number_{i}")).collect();
         let mut report = format!("\x1b]6973;{TOKEN};functions=").into_bytes();
         report.extend(functions.join("%20").bytes());
-        report.extend(format!("\x07\x1b]6973;{TOKEN};aliases=ll%20gs\x07\x1b]6973;{TOKEN};tab=fzf-tab\x07").bytes());
+        report.push(0x07);
         session.feed(&report);
         let names = session.meta().shell_names;
         assert_eq!(names.functions, functions);

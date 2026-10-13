@@ -220,13 +220,12 @@ import Testing
         #expect(!model.isSpawning)
     }
 
-    /// 等 `OpenWorkspace` 时来了不带编号的「unknown message」（旧版电脑不认识同一条连接上的
-    /// `ListTasks`）：不是给新建工作区的，照样等着，随后的 `Opened` 仍然打开新终端；命令那边认下它。
+    /// 等 `OpenWorkspace` 时来了不带编号的 `Error`：不是给新建工作区的，照样等着，随后的 `Opened` 仍然
+    /// 打开新终端。
     @Test func unnumberedErrorsAreNotTakenForTheWorkspaceReply() async {
         let model = SessionListModel(machine: machineRecord(), link: link)
         model.handle(.ready(generation: 1))
         model.handle(.message(.layout(req: 0, windows: [WindowLayout(index: 1, workspaces: [])])))
-        await model.loadTasks(in: "/tmp")
         link.clearSent()
         await model.createWorkspace(at: "/Users/ethan")
         guard case .openWorkspace(let req, _, _, _)? = link.sent.first else {
@@ -235,13 +234,9 @@ import Testing
         }
         var spawned: [SessionId] = []
         model.onSpawned = { spawned.append($0) }
-        model.handle(.message(.error(req: nil, id: nil, message: HostMsg.unknownMessage)))
+        model.handle(.message(.error(req: nil, id: nil, message: "unknown message")))
         #expect(model.isSpawning)
         #expect(model.errorMessage == nil)
-        // 没开成的命令不再要。
-        link.clearSent()
-        await model.loadTasks(in: "/var")
-        #expect(link.sent.isEmpty)
         model.handle(.message(.opened(req: req, id: sessionB)))
         #expect(spawned == [sessionB])
         #expect(!model.isSpawning)
@@ -399,11 +394,6 @@ import Testing
         }
         model.handle(.message(.error(req: req, id: nil, message: "no workspace 9")))
         #expect(model.errorMessage == "改不了名：no workspace 9")
-        // 旧电脑不认识 `RenameWorkspace`，回不带编号的「unknown message」。
-        model.errorMessage = nil
-        await model.rename(section, to: "y")
-        model.handle(.message(.error(req: nil, id: nil, message: HostMsg.unknownMessage)))
-        #expect(model.errorMessage?.contains("太旧") == true)
     }
 
     /// 电脑上的 app 没开着窗口时建不了工作区：在选好的目录里开一个后台会话，开好后照样打开它的终端。
@@ -863,7 +853,7 @@ extension LinkState {
         #expect(picker.errorMessage == nil)
     }
 
-    /// 不带编号的「unknown message」是旧版电脑不认识别的请求回的，不当成列目录的回话，接着等。
+    /// 不带编号的 `Error` 是同一条连接上别的请求的，不当成列目录的回话，接着等。
     @Test func unnumberedErrorsAreNotClaimed() async {
         let picker = DirectoryPickerModel(link: link)
         await picker.load(nil)
@@ -871,7 +861,7 @@ extension LinkState {
             Issue.record("expected list_dirs for home, got \(link.sent)")
             return
         }
-        #expect(!picker.handle(.error(req: nil, id: nil, message: HostMsg.unknownMessage)))
+        #expect(!picker.handle(.error(req: nil, id: nil, message: "unknown message")))
         #expect(picker.isLoading)
         #expect(picker.errorMessage == nil)
         #expect(picker.handle(.dirs(req: req, path: "/Users/ethan", dirs: ["dev"], truncated: false)))

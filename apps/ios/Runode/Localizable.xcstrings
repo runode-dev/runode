@@ -1641,29 +1641,6 @@
         }
       }
     },
-    "升级电脑上的 runode 后就能在手机上管理 Git。" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Update runode on your Mac to manage Git from your phone."
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "升级电脑上的 runode 后就能在手机上管理 Git。"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "升級電腦上的 runode 後就能在手機上管理 Git。"
-          }
-        }
-      }
-    },
     "发送 %@" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -4000,29 +3977,6 @@
         }
       }
     },
-    "改不了名：电脑上的 runode 版本太旧，先升级它。" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Couldn't rename: runode on your Mac is too old. Update it first."
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "改不了名：电脑上的 runode 版本太旧，先升级它。"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "改不了名稱：電腦上的 runode 版本太舊，請先升級。"
-          }
-        }
-      }
-    },
     "改动 %lld" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -5422,52 +5376,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "電腦上的 Runode 結束了"
-          }
-        }
-      }
-    },
-    "电脑上的 runode 不支持推送，升级后才能提醒" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "runode on your Mac doesn't support push. Update it to get alerts."
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "电脑上的 runode 不支持推送，升级后才能提醒"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "電腦上的 runode 不支援推播，升級後才能提醒"
-          }
-        }
-      }
-    },
-    "电脑上的 runode 太旧" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "runode on your Mac is too old"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "电脑上的 runode 太旧"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "電腦上的 runode 太舊"
           }
         }
       }

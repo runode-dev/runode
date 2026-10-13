@@ -106,7 +106,7 @@ public enum ClientMsg: Hashable, Sendable, Encodable {
     case pushRegister(
         req: UInt32, token: String?, env: ApnsEnv, bundle: String, machine: String, machineName: String)
     /// 看着终端时每隔一小会儿发一条，宿主不回：一直有包来回，iPhone 的 Wi-Fi 就不省电，打字不卡。只发给在
-    /// `Welcome` 里说认得它的宿主，旧宿主会回不带编号的 `Error`。
+    /// `Welcome` 里说认得它的宿主。
     case keepAwake
 
     private struct Key: CodingKey {
@@ -358,10 +358,6 @@ public enum HostMsg: Hashable, Sendable, Decodable {
             self.settings = settings
         }
     }
-
-    /// 宿主收到不认识的消息时回的 `Error` 的说明（不带请求编号）。手机发了比电脑上的 runode 新的消息时
-    /// 据此知道它太旧。
-    public static let unknownMessage = "unknown message"
 
     /// 这条消息说的是哪个会话；不针对某个会话的消息为空。
     public var sessionId: SessionId? {

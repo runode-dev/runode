@@ -163,7 +163,7 @@ public final class SessionListModel {
     /// 终端页开着的会话。
     @ObservationIgnored private var screens: Set<SessionId> = []
     /// 在等回话的新开终端、新建工作区的请求。宿主对 `Open`、`OpenWorkspace`、`Spawn` 出错一定回带编号的
-    /// `Error`，不带编号的「unknown message」是给别的请求（比如旧版电脑不认识的 `ListTasks`）的，不认领。
+    /// `Error`，不带编号的不认领。
     @ObservationIgnored private var pendingSpawn: PendingSpawn?
     /// 在等回话的工作区改名的请求编号。
     @ObservationIgnored private var pendingRenames: Set<UInt32> = []
@@ -179,8 +179,6 @@ public final class SessionListModel {
     @ObservationIgnored private var pendingTasks: [UInt32: String] = [:]
     /// 正在列的目录：取请求编号之前就记上，同一个目录不会同时要两次。
     @ObservationIgnored private var listingDirs: Set<String> = []
-    /// 电脑上的 runode 太旧，不认识 `ListTasks`：这次连着时不再要。
-    @ObservationIgnored private var tasksUnsupported = false
 
     /// 在等回话的新开请求。
     private struct PendingSpawn {
@@ -492,7 +490,7 @@ public final class SessionListModel {
     /// 列 `dir` 里的命令：卡片出现、会话换了目录时要一次，列过的不再要；`refreshing` 为真时（下拉
     /// 刷新，Makefile、package.json 可能改过了）列过的也再要。同一个目录同时只等一次回话。
     public func loadTasks(in dir: String, refreshing: Bool = false) async {
-        guard connected, !tasksUnsupported, !listingDirs.contains(dir),
+        guard connected, !listingDirs.contains(dir),
             refreshing || tasks[dir] == nil
         else { return }
         listingDirs.insert(dir)
@@ -577,7 +575,6 @@ public final class SessionListModel {
                 pendingPreviews = [:]
                 pendingTasks = [:]
                 listingDirs = []
-                tasksUnsupported = false
                 pendingRenames = []
                 for reply in quickReplies.values {
                     reply.connectionLost()
@@ -706,15 +703,6 @@ public final class SessionListModel {
             } else if req == Self.layoutRequest {
                 // 电脑上没有 app 的界面连着宿主：所有会话都在后台。
                 windows = []
-            } else if req == nil, message == HostMsg.unknownMessage, !pendingRenames.isEmpty {
-                // 电脑上的 runode 太旧，不认识 `RenameWorkspace`。
-                pendingRenames = []
-                errorMessage = String(localized: "改不了名：电脑上的 runode 版本太旧，先升级它。")
-            } else if req == nil, message == HostMsg.unknownMessage, !pendingTasks.isEmpty {
-                // 电脑上的 runode 太旧，不认识 `ListTasks`：不列了，卡片上不出现命令。
-                pendingTasks = [:]
-                listingDirs = []
-                tasksUnsupported = true
             } else if let id, message.hasPrefix("no session") {
                 // 宿主说没有这个会话：别处已经结束了它。读屏幕超时这类错误不算。
                 watching.remove(id)
