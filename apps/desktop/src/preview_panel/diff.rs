@@ -192,11 +192,13 @@ impl PreviewPanel {
             let texts = this
                 .update(cx, |this, cx| {
                     let (preview, git) = this.preview_for(id, &cancel)?;
-                    // 和上次读到的一样（比如按块暂存后马上读了一次，扫描后又读一次）就留着，不重新高亮。
+                    // 和上次读到的一样（比如按块暂存后马上读了一次，扫描后又读一次）就留着，不重新高亮；
+                    // 上次的高亮还没做完就被这次读取取消了的，重新起。
                     if let (Some(Loaded::Diff(old)), Some(view)) = (&preview.content, &view)
                         && *old.view == *view
                     {
-                        return None;
+                        return (old.new_spans.is_none() || old.removed_spans.is_none())
+                            .then(|| (Arc::new(old.view.new_lines.clone()), old.removed.clone()));
                     }
                     preview.release_image(cx);
                     let first = !matches!(preview.content, Some(Loaded::Diff(_)));
