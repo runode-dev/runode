@@ -31,9 +31,12 @@
 
 use std::{fmt, path::PathBuf};
 
-pub use runode_shared_types::session::{InvalidSessionId, SessionId};
 use runode_shared_types::{
     clipboard::ClipboardAccess, grid::GridSize, session::SessionMeta, settings::TermSettings, shell::IntegrationMode,
+};
+pub use runode_shared_types::{
+    session::{InvalidSessionId, SessionId},
+    shell::FinishedCommand,
 };
 use serde::{Deserialize, Serialize};
 
@@ -153,9 +156,10 @@ pub enum ClientMsg {
     /// VT 后，在每个会话的输出流里发带着这份设置的 `ThemeApplied`，连着的前端到那里才应用，
     /// 不管是不是自己发的，见 `HostMsg::ThemeApplied`。
     SetTheme { settings: TermSettings },
-    /// 改宿主的选项：记不记命令历史，以及终端里的程序读写剪贴板（OSC 52）的规矩。旧的界面不带
-    /// `clipboard`，按默认值（照写、读前先问）。
+    /// 改宿主的选项：终端里的程序读写剪贴板（OSC 52）的规矩。旧的界面不带 `clipboard`，按默认值
+    /// （照写、读前先问）。
     SetOptions {
+        /// 旧宿主据此决定记不记命令历史；现在的宿主不记、不看它，前端照旧发 false，旧宿主读得了。
         record_history: bool,
         #[serde(default)]
         clipboard: ClipboardAccess,
@@ -648,20 +652,6 @@ pub struct SessionInfo {
     /// 时为空。
     #[serde(default)]
     pub size_owner: Option<String>,
-}
-
-/// shell 集成报告运行完的一条命令。
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct FinishedCommand {
-    pub cmd: String,
-    /// 命令在哪个目录里运行。
-    #[serde(default)]
-    pub cwd: Option<PathBuf>,
-    /// 退出码；shell 没报告时为空。
-    #[serde(default)]
-    pub exit: Option<i32>,
-    /// 开始运行的时刻，Unix 秒。
-    pub ts: u64,
 }
 
 /// 宿主为什么断开。

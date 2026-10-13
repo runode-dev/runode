@@ -1,16 +1,18 @@
 //! 宿主那份 VT 的回调累积下来的变化：标题和 agent 状态，以及 shell 集成报告的命令步骤、
-//! PATH 和各种名字。
+//! PATH 和函数名。
 
 use std::{
     cell::{Cell as StdCell, RefCell},
     sync::Arc,
-    time::Instant,
+    time::{Instant, SystemTime, UNIX_EPOCH},
 };
 
-use runode_shared_types::{agent::AgentState, shell::ShellNames};
+use runode_shared_types::{
+    agent::AgentState,
+    shell::{FinishedCommand, ShellNames},
+};
 
 use super::{ClipboardRequest, HostSession};
-use runode_command_history as history;
 
 use crate::pty;
 
@@ -36,7 +38,7 @@ pub(super) struct Effects {
     pub(super) shell_path: RefCell<Option<std::ffi::OsString>>,
     /// shell 集成在这次显示提示符前报告的目录，由下一个 `PromptEvent::InputStart` 取走。
     pub(super) shell_cwd: RefCell<Option<std::path::PathBuf>>,
-    /// shell 集成用 `SHELL_REPORT` 报告的别名、函数、内建命令和关键字，对外见 `SessionMeta::shell_names`。
+    /// shell 集成用 `SHELL_REPORT` 报告的函数名，对外见 `SessionMeta::shell_names`。
     /// 和交出去的状态共享同一份，报告变了才复制一份来改。
     pub(super) shell_names: RefCell<Arc<ShellNames>>,
     /// 启动 shell 时交给集成脚本的报告口令（见 `shell_integration::prepare`），`SHELL_REPORT`
@@ -55,16 +57,15 @@ pub(super) struct Effects {
 
 /// shell 集成在显示提示符时、内容和上次报告的不一样时用的私有 OSC：
 /// `ESC ] 6973;<口令>;<字段>=<百分号编码的值> BEL`。字段是 `cwd`（shell 的当前目录，每次显示
-/// 提示符前都发）、`path`（PATH）或 `aliases`、
-/// `functions`、`builtins`、`keywords`（名字之间用空格分开）、`alias_values`（一行一个
-/// 「名字<Tab>值」）、`tab`（zsh 里 Tab 绑的 widget）。另有 `command`：shell 开始运行命令时紧接在 OSC 133;C 前面发，值是命令
+/// 提示符前都发）、`path`（PATH）或 `functions`（名字之间用空格分开）；旧版集成脚本还会报告
+/// `aliases`、`builtins`、`keywords`、`alias_values`、`tab`，不认识，丢掉。另有 `command`：shell 开始运行命令时紧接在 OSC 133;C 前面发，值是命令
 /// 原文（拿不到时为空），见 `Effects::command_report`。
 ///
-/// 记进历史的命令同样只认这条报告，133;C 自带的命令原文一律不用：伪造的命令进了历史，就会被
-/// 当成灰字建议推给用户。
+/// 报告运行完的命令（`HostMsg::CommandFinished`）同样只认这条报告，133;C 自带的命令原文一律
+/// 不用：伪造的命令会让 `runode wait` 这类等命令的前端以为命令跑完了。
 ///
 /// 任何打印到终端的内容（`cat` 一个文件、ssh 远端的输出）都能写出这样的序列，而报告的 PATH
-/// 会被补全拿去跑命令，所以只认带着本 shell 口令的报告。口令只留在 shell 自己的变量里，子进程的
+/// 会被界面拿去找命令行工具（gh）来跑，所以只认带着本 shell 口令的报告。口令只留在 shell 自己的变量里，子进程的
 /// 环境里没有，在 shell 里运行的程序打印不出它。只看是否处在提示符状态挡不住伪造：输出里可以先
 /// 伪造一个 OSC 133;D。
 pub(super) const SHELL_REPORT: &[u8] = super::redact::REPORT_START.split_at(2).1;
@@ -109,32 +110,15 @@ impl Effects {
             }
             return;
         }
+        if field != b"functions" {
+            return;
+        }
         let Ok(mut names) = self.shell_names.try_borrow_mut() else {
             return;
         };
         let names = Arc::make_mut(&mut names);
         self.reported.set(true);
-        if field == b"alias_values" {
-            let text = String::from_utf8_lossy(&value);
-            names.alias_values = text
-                .lines()
-                .filter_map(|line| line.split_once('\t'))
-                .map(|(n, v)| (n.to_owned(), v.to_owned()))
-                .collect();
-            return;
-        }
-        if field == b"tab" {
-            names.tab_widget = String::from_utf8_lossy(&value).into_owned();
-            return;
-        }
-        let list = match field {
-            b"aliases" => &mut names.aliases,
-            b"functions" => &mut names.functions,
-            b"builtins" => &mut names.builtins,
-            b"keywords" => &mut names.keywords,
-            _ => return,
-        };
-        *list = String::from_utf8_lossy(&value).split_whitespace().map(str::to_owned).collect();
+        names.functions = String::from_utf8_lossy(&value).split_whitespace().map(str::to_owned).collect();
     }
 }
 
@@ -192,7 +176,7 @@ impl HostSession {
 
     /// 取走 shell 集成报告运行完了的命令，带着运行的目录和退出码，按结束的先后。每次 `feed`
     /// 之后调用：shell 回到提示符时在这里记下它的目录，之后开始运行的命令就算在那个目录里。
-    pub fn take_commands(&mut self) -> Vec<history::Entry> {
+    pub fn take_commands(&mut self) -> Vec<FinishedCommand> {
         let events = self.effects.prompts.take();
         let mut finished = Vec::new();
         for event in events {
@@ -212,8 +196,12 @@ impl HostSession {
                 }
                 PromptEvent::OutputStart(command) => {
                     self.prompt_reported = false;
-                    self.running = command.map(|command| {
-                        history::Entry::now(command, self.prompt_cwd.clone().or_else(|| self.live_cwd()))
+                    let ts = SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_secs());
+                    self.running = command.map(|cmd| FinishedCommand {
+                        cmd,
+                        cwd: self.prompt_cwd.clone().or_else(|| self.live_cwd()),
+                        exit: None,
+                        ts,
                     });
                 }
                 // 有的 shell 每次出提示符都报告一次结束，没在运行的命令时不算。
@@ -419,36 +407,19 @@ mod tests {
         // 别的私有 OSC 不算。
         session.feed(format!("\x1b]69730;{TOKEN};path=/x\x07\x1b]6973;{TOKEN};other=1\x1b\\").as_bytes());
         assert_eq!(session.meta().shell_path, Some("/usr/bin:/opt/my bin".into()));
-        // 各种名字，空格编码成 %20；很长的列表也收得下。
+        // 函数名，空格编码成 %20；很长的列表也收得下。旧版脚本报告的别名这类字段不管。
         let functions: Vec<String> = (0..3000).map(|i| format!("function_number_{i}")).collect();
         let mut report = format!("\x1b]6973;{TOKEN};functions=").into_bytes();
         report.extend(functions.join("%20").bytes());
-        report.extend(
-            format!(
-                "\x07\x1b]6973;{TOKEN};aliases=ll%20gs\x07\x1b]6973;{TOKEN};alias_values=ll%09ls%20-l%0Ags%09git%20status%0A\x07"
-            )
-            .bytes(),
-        );
+        report.extend(format!("\x07\x1b]6973;{TOKEN};aliases=ll%20gs\x07\x1b]6973;{TOKEN};tab=fzf-tab\x07").bytes());
         session.feed(&report);
         let names = session.meta().shell_names;
-        assert_eq!(names.aliases, ["ll", "gs"]);
-        assert_eq!(names.alias_values, [("ll".into(), "ls -l".into()), ("gs".into(), "git status".into())]);
         assert_eq!(names.functions, functions);
-        assert!(names.builtins.is_empty());
         // 名字没变时交出去的状态共享同一份；再报告时复制一份来改，之前交出去的不跟着变。
         assert!(Arc::ptr_eq(&names, &session.meta().shell_names));
-        session.feed(format!("\x1b]6973;{TOKEN};aliases=ll\x07").as_bytes());
-        assert_eq!(session.meta().shell_names.aliases, ["ll"]);
-        assert_eq!(names.aliases, ["ll", "gs"]);
-        // Tab 绑的 widget：没报告过时 runode 照常接管，绑了 fzf-tab 时让给它。
-        assert!(names.tab_is_builtin_completion());
-        session.feed(format!("\x1b]6973;{TOKEN};tab=fzf-tab-complete\x07").as_bytes());
-        assert_eq!(session.meta().shell_names.tab_widget, "fzf-tab-complete");
-        assert!(!session.meta().shell_names.tab_is_builtin_completion());
-        session.feed(format!("\x1b]6973;{TOKEN};tab=.expand-or-complete\x07").as_bytes());
-        assert!(session.meta().shell_names.tab_is_builtin_completion());
-        session.feed(format!("\x1b]6973;{TOKEN};tab=expand-or-complete-with-indicator\x07").as_bytes());
-        assert!(session.meta().shell_names.tab_is_builtin_completion());
+        session.feed(format!("\x1b]6973;{TOKEN};functions=f\x07").as_bytes());
+        assert_eq!(session.meta().shell_names.functions, ["f"]);
+        assert_eq!(names.functions, functions);
         assert_eq!(percent_decode(b"a%2fb%zz%4"), b"a/b%zz%4");
     }
 
@@ -459,9 +430,9 @@ mod tests {
         // 口令不对、少一位、缺口令（旧格式）、空口令，都不采用。
         session.feed(format!("\x1b]6973;{wrong};path=/evil\x07").as_bytes());
         session.feed(format!("\x1b]6973;{};path=/evil\x07", &TOKEN[1..]).as_bytes());
-        session.feed(b"\x1b]6973;path=/evil\x07\x1b]6973;;path=/evil\x07\x1b]6973;aliases=git\x07");
+        session.feed(b"\x1b]6973;path=/evil\x07\x1b]6973;;path=/evil\x07\x1b]6973;functions=git\x07");
         assert_eq!(session.meta().shell_path, None);
-        assert!(session.meta().shell_names.aliases.is_empty());
+        assert!(session.meta().shell_names.functions.is_empty());
         // 先伪造命令结束、回到提示符也没用。
         session
             .feed(format!("\x1b]133;D;0\x07\x1b]133;A\x07$ \x1b]133;B\x07\x1b]6973;{wrong};path=/evil\x07").as_bytes());
@@ -495,7 +466,7 @@ mod tests {
     }
 
     #[test]
-    fn forged_command_starts_stay_out_of_the_history() {
+    fn forged_command_starts_are_not_reported() {
         let mut session = reporting_host();
         let wrong = "0123456789abcdef0123456789abcdee";
         let forged = [

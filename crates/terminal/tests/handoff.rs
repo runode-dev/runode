@@ -13,8 +13,12 @@ use std::{
     time::{Duration, Instant},
 };
 
-use runode_command_history::Entry;
-use runode_shared_types::{grid::GridSize, session::DriveAction, settings::TermSettings, shell::IntegrationMode};
+use runode_shared_types::{
+    grid::GridSize,
+    session::DriveAction,
+    settings::TermSettings,
+    shell::{FinishedCommand, IntegrationMode},
+};
 use runode_terminal::{
     fd_passing::{recv_with_fds, send_with_fds},
     host_session::{HostSession, ImportScreen, RedactorState, ReportRedactor, SessionExport},
@@ -493,7 +497,10 @@ fn an_exported_session_is_imported_as_it_was() {
 
     imported.feed(b"done\r\n\x1b]133;D;3\x07");
     let finished = imported.take_commands();
-    assert_eq!(finished, [Entry { cmd: "make".into(), cwd: Some("/work/repo".into()), exit: Some(3), ts: 1000 }]);
+    assert_eq!(
+        finished,
+        [FinishedCommand { cmd: "make".into(), cwd: Some("/work/repo".into()), exit: Some(3), ts: 1000 }]
+    );
     imported.feed(PROMPT);
     imported.take_commands();
     assert_eq!(imported.prompt_cwd(), Some("/next".into()));

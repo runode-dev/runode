@@ -5,12 +5,12 @@
 #   133;C  命令开始执行     133;D  命令执行完（带退出码）
 #   133;P;k=r  右侧提示符开始，画完后用 133;B 回到用户输入
 #   6973;<口令>;cwd=…  runode 私有：shell 的当前目录（百分号编码），每次显示提示符前都发
-#   6973;<口令>;path=…  runode 私有：shell 的 PATH（百分号编码），变了才发，补全跑命令时用
-#   6973;<口令>;aliases=… 以及 functions、builtins  runode 私有：shell 里的缩写（当作别名）、
-#                函数和内建命令，名字之间用 %20 隔开，变了才发，补命令名时用
+#   6973;<口令>;path=…  runode 私有：shell 的 PATH（百分号编码），变了才发，界面找命令行工具时用
+#   6973;<口令>;functions=…  runode 私有：shell 里定义的函数名，名字之间用 %20 隔开，变了才发，
+#                看集成脚本装好了没有
 #   6973;<口令>;command=…  runode 私有：紧接在 133;C 前面，说明这次命令开始是真的，值是用户
 #                输入的命令原文（百分号编码），拿不到时为空，终端从屏幕上读；runode 只把这样
-#                认过的命令记进历史
+#                认过的命令当作真的跑过，报告给等它的前端
 #
 # runode 还经 RUNODE_SHELL_FEATURES 告诉集成脚本另外开哪些功能（逗号隔开，和 Ghostty 的
 # GHOSTTY_SHELL_FEATURES 一个写法）：
@@ -128,38 +128,27 @@ function __runode_report_path --on-event fish_prompt
     end
 end
 
-# 每次显示提示符前，把缩写（当作别名）、函数和内建命令报告给 runode，补命令名时用；和上次报告的
-# 一样就不发。只报告以字母或数字开头、由字母数字和 `_.:+@,=-` 组成的名字，名字之间写 %20 就是
-# 百分号编码。这些都是 fish 的内建命令，在命令替换里不起子进程。
+# 每次显示提示符前，把函数名报告给 runode，它据此看集成脚本装好了没有；和上次报告的一样就不发。
+# 只报告以字母或数字开头、由字母数字和 `_.:+@,=-` 组成的名字，名字之间写 %20 就是百分号编码。
+# 这些都是 fish 的内建命令，在命令替换里不起子进程。
 function __runode_report_names --on-event fish_prompt
     test -n "$__runode_report_token"; or return
-    for kind in aliases functions builtins
-        set -l names
-        switch $kind
-            case aliases
-                set names (abbr --list)
-            case functions
-                set names (functions --names)
-            case builtins
-                set names (builtin --names)
-        end
-        # 列表为空时 string 会改读标准输入，先判断。
-        set -l kept
-        if set -q names[1]
-            set kept (string match -r -- '^[[:alnum:]][[:alnum:]_.:+@,=-]*$' $names)
-        end
-        set -l joined (string replace -a ' ' %20 -- "$kept")
-        set -l var __runode_names_$kind
-        if test "$joined" != "$$var"
-            set -g $var $joined
-            printf '\e]6973;%s;%s=%s\a' $__runode_report_token $kind $joined
-        end
+    set -l names (functions --names)
+    # 列表为空时 string 会改读标准输入，先判断。
+    set -l kept
+    if set -q names[1]
+        set kept (string match -r -- '^[[:alnum:]][[:alnum:]_.:+@,=-]*$' $names)
+    end
+    set -l joined (string replace -a ' ' %20 -- "$kept")
+    if test "$joined" != "$__runode_names"
+        set -g __runode_names $joined
+        printf '\e]6973;%s;functions=%s\a' $__runode_report_token $joined
     end
 end
 
 # $argv[1] 是用户输入的命令原文，按百分号编码放进带口令的 command 报告，分号、换行和控制字符
 # 都不会打断转义序列；拿不到时报告的原文为空，终端从屏幕上读。没有口令时只报告命令开始，
-# runode 不把它记进历史。
+# runode 不把它报告给等命令的前端。
 function __runode_preexec --on-event fish_preexec
     if test -n "$__runode_report_token"
         set -l command

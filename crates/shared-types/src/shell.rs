@@ -1,6 +1,6 @@
-//! shell 的种类、shell 集成的开关，以及 shell 集成报告的名字。
+//! shell 的种类、shell 集成的开关，以及 shell 集成报告的函数名和运行完的命令。
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 /// 配置项 `shell-integration` 的取值。
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -56,34 +56,24 @@ impl Shell {
     }
 }
 
-/// shell 集成报告的各种名字，补命令名时用。
+/// shell 集成报告的名字。旧版本还报告过别名、内建命令、关键字和 Tab 绑的 widget，读到时忽略。
 #[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(default)]
 pub struct ShellNames {
-    pub aliases: Vec<String>,
-    /// 别名展开成什么：`(名字, 值)`。
-    pub alias_values: Vec<(String, String)>,
+    /// shell 里定义的函数，看集成脚本装好了没有（有没有 `runode-reload`）。
     pub functions: Vec<String>,
-    pub builtins: Vec<String>,
-    pub keywords: Vec<String>,
-    /// zsh 主键位表里 Tab 绑的 widget；没报告过（bash、fish）时为空。
-    pub tab_widget: String,
 }
 
-impl ShellNames {
-    /// Tab 绑的是 shell 自带的补全（或者没报告过），runode 可以接管；绑了 fzf-tab 这类别的补全时
-    /// 交给它，用户配的界面才出得来。Prezto 默认、Oh My Zsh 开了 `COMPLETION_WAITING_DOTS` 时
-    /// 绑的是包了一层自带补全的 widget，也算自带的。
-    pub fn tab_is_builtin_completion(&self) -> bool {
-        matches!(
-            self.tab_widget.trim_start_matches('.'),
-            "" | "expand-or-complete"
-                | "expand-or-complete-prefix"
-                | "complete-word"
-                | "menu-complete"
-                | "menu-expand-or-complete"
-                | "expand-or-complete-with-indicator"
-                | "expand-or-complete-with-dots"
-        )
-    }
+/// shell 集成报告运行完的一条命令。
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct FinishedCommand {
+    pub cmd: String,
+    /// 命令在哪个目录里运行。
+    #[serde(default)]
+    pub cwd: Option<PathBuf>,
+    /// 退出码；shell 没报告时为空。
+    #[serde(default)]
+    pub exit: Option<i32>,
+    /// 开始运行的时刻，Unix 秒。
+    pub ts: u64,
 }

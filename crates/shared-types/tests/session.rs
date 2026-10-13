@@ -22,7 +22,7 @@ fn round_trips_through_json() {
         prompt_cwd: Some("/tmp".into()),
         foreground_is_shell: false,
         shell_path: Some("/usr/bin:/bin".into()),
-        shell_names: ShellNames { aliases: vec!["ll".into()], ..ShellNames::default() }.into(),
+        shell_names: ShellNames { functions: vec!["runode-reload".into()] }.into(),
         foreground: Some("vim".into()),
         driver: Some(Driver {
             by: Some("0123456789abcdef0123456789abcdef".into()),

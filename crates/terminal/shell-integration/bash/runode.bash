@@ -8,14 +8,12 @@
 #   133;I  提示符结束、用户输入开始，输入到这一行的换行为止：bash 4.4 以下没有 133;C，用它
 #          代替 133;B
 #   6973;<口令>;cwd=…  runode 私有：shell 的当前目录（百分号编码），每次显示提示符前都发
-#   6973;<口令>;path=…  runode 私有：shell 的 PATH（百分号编码），变了才发，补全跑命令时用
-#   6973;<口令>;aliases=… 以及 functions、builtins、keywords  runode 私有：shell 里的这些
-#                名字，名字之间用 %20 隔开，变了才发，补命令名时用
-#   6973;<口令>;alias_values=…  runode 私有：别名展开成什么，一行一个「名字<Tab>值」，整体
-#                百分号编码，变了才发（bash 4 起），补命令名时当说明显示
+#   6973;<口令>;path=…  runode 私有：shell 的 PATH（百分号编码），变了才发，界面找命令行工具时用
+#   6973;<口令>;functions=…  runode 私有：shell 里定义的函数名，名字之间用 %20 隔开，变了才发，
+#                看集成脚本装好了没有
 #   6973;<口令>;command=…  runode 私有：紧接在 133;C 前面，说明这次命令开始是真的，值尽量是
 #                命令原文（百分号编码），拿不到时为空，终端从屏幕上读；runode 只把这样认过的
-#                命令记进历史。bash 4.4 起才有，更老的 bash 没有命令开始的标记
+#                命令当作真的跑过，报告给等它的前端。bash 4.4 起才有，更老的 bash 没有命令开始的标记
 #
 # 口令是 runode 启动这个 shell 时随机生成、经环境变量 RUNODE_REPORT_TOKEN 给的。runode 只认
 # 带着这个口令的 6973 报告，屏幕上的别的输出伪造不了。没有口令时不发 6973 报告：比如 exec bash
@@ -68,12 +66,10 @@ if [ -z "${_runode_integrated-}" ]; then
     _runode_ps2=
     # 上一次报告给 runode 的 PATH。
     _runode_path=
-    # 上一次报告给 runode 的各种名字，按种类各存一个变量。
-    _runode_names_aliases= _runode_names_functions= _runode_names_builtins= _runode_names_keywords=
-    _runode_alias_values=
+    # 上一次报告给 runode 的函数名。
+    _runode_names=
     # bash 5.3 起 compgen -V 能把结果直接放进数组，每次显示提示符都能重新收集而不起子进程。更老
-    # 的 bash 只能用命令替换（要起子进程），只在第一次显示提示符时收集一次；别名例外，bash 4 起
-    # 可以从 BASH_ALIASES 直接读。
+    # 的 bash 只能用命令替换（要起子进程），只在第一次显示提示符时收集一次。
     _runode_compgen_v=
     if [ "${BASH_VERSINFO[0]}" -gt 5 ] || { [ "${BASH_VERSINFO[0]}" -eq 5 ] && [ "${BASH_VERSINFO[1]}" -ge 3 ]; }; then
         _runode_compgen_v=1
@@ -133,67 +129,27 @@ if [ -z "${_runode_integrated-}" ]; then
         _runode_report_names
     }
 
-    # 把 $2 起的名字里以字母或数字开头、由字母数字和 `_.:+@,=-` 组成的那些用 %20 连起来（这样
-    # 就已经是百分号编码），报告为 $1 这一种；和上次报告的一样就不发。
-    _runode_report() {
-        local kind=$1 name joined= var
-        shift
-        for name in "$@"; do
-            [[ $name =~ ^[[:alnum:]][[:alnum:]_.:+@,=-]*$ ]] || continue
-            joined+=${joined:+%20}$name
-        done
-        var=_runode_names_$kind
-        if [ "$joined" != "${!var}" ]; then
-            printf -v "$var" '%s' "$joined"
-            printf '\033]6973;%s;%s=%s\007' "$_runode_report_token" "$kind" "$joined"
-        fi
-    }
-
-    # 别名展开成什么（bash 4 起从 BASH_ALIASES 读，不起子进程），和上次的一样就不发。值里有换行
-    # 或 Tab 的不报告。
-    _runode_report_alias_values() {
-        local name value lines=
-        for name in "${!BASH_ALIASES[@]}"; do
-            value=${BASH_ALIASES[$name]}
-            [[ $name =~ ^[[:alnum:]][[:alnum:]_.:+@,=-]*$ ]] || continue
-            [[ $value == *[$'\n\t']* ]] && continue
-            lines+=$name$'\t'$value$'\n'
-        done
-        [ "$lines" = "$_runode_alias_values" ] && return
-        _runode_alias_values=$lines
-        _runode_urlencode "$lines"
-        printf '\033]6973;%s;alias_values=%s\007' "$_runode_report_token" "$_runode_encoded"
-    }
-
-    # 把别名、函数、内建命令和关键字报告给 runode，补命令名时用。
+    # 把函数名报告给 runode，它据此看集成脚本装好了没有：只报以字母或数字开头、由字母数字和
+    # `_.:+@,=-` 组成的名字，用 %20 连起来（这样就已经是百分号编码）；和上次报告的一样就不发。
     _runode_report_names() {
         [ -n "${_runode_report_token-}" ] || return 0
         local -a list
+        local name joined=
         if [ -n "$_runode_compgen_v" ]; then
-            compgen -V list -a
-            _runode_report aliases "${list[@]}"
             compgen -V list -A function
-            _runode_report functions "${list[@]}"
-            compgen -V list -b
-            _runode_report builtins "${list[@]}"
-            compgen -V list -k
-            _runode_report keywords "${list[@]}"
-            _runode_report_alias_values
-            return
+        else
+            [ -n "$_runode_names_collected" ] && return
+            _runode_names_collected=1
+            local IFS=$'\n' GLOBIGNORE='*'
+            list=($(compgen -A function))
         fi
-        if [ "${BASH_VERSINFO[0]}" -ge 4 ]; then
-            _runode_report aliases "${!BASH_ALIASES[@]}"
-            _runode_report_alias_values
-        fi
-        [ -n "$_runode_names_collected" ] && return
-        _runode_names_collected=1
-        local IFS=$'\n' GLOBIGNORE='*'
-        if [ "${BASH_VERSINFO[0]}" -lt 4 ]; then
-            _runode_report aliases $(compgen -a)
-        fi
-        _runode_report functions $(compgen -A function)
-        _runode_report builtins $(compgen -b)
-        _runode_report keywords $(compgen -k)
+        for name in "${list[@]}"; do
+            [[ $name =~ ^[[:alnum:]][[:alnum:]_.:+@,=-]*$ ]] || continue
+            joined+=${joined:+%20}$name
+        done
+        [ "$joined" = "$_runode_names" ] && return
+        _runode_names=$joined
+        printf '\033]6973;%s;functions=%s\007' "$_runode_report_token" "$joined"
     }
 
     # 先记下退出码，再跑用户原有的 PROMPT_COMMAND，最后加标记。用换行连接：用户的值以 `;`、`&`
@@ -221,7 +177,7 @@ if [ -z "${_runode_integrated-}" ]; then
     # 在 PS0 里运行：先发带口令的 command 报告，再报告命令开始。历史里最新一条的编号正是这条
     # 命令该有的编号时，它就是刚输入的命令，报告里带上原文。命令没进历史（以空格开头、被
     # HISTIGNORE 忽略、关了历史等）时最新一条是别的命令，报告的原文为空，终端从屏幕上读。
-    # 没有口令时只报告命令开始，runode 不把它记进历史。
+    # 没有口令时只报告命令开始，runode 不把它报告给等命令的前端。
     _runode_command_start() {
         if [ -n "${_runode_report_token-}" ]; then
             local entry num

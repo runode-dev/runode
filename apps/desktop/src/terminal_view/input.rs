@@ -1,4 +1,4 @@
-//! 按键、滚轮和鼠标：先给选区、补全菜单和灰字建议处理，余下的发给程序或上报给它。
+//! 按键、滚轮和鼠标：先给选区处理，余下的发给程序或上报给它。
 
 use std::time::Duration;
 
@@ -62,29 +62,6 @@ impl TerminalView {
             cx.notify();
             return;
         }
-        // 补全菜单开着时的上下选择、接受和关闭，以及由 runode 接管的 Tab。这些键没有默认快捷键，
-        // 会走到这里。
-        if self.completion_key(keystroke, cx) {
-            cx.stop_propagation();
-            cx.notify();
-            return;
-        }
-        // 光标在输入末尾、后面画着建议时：→、End、Ctrl+F 接受整条，Option+→ 接受一个词。
-        // 默认快捷键把 Option+→ 映射成了 ESC f，那条路在 `send_text` 里处理。
-        let m = &keystroke.modifiers;
-        let accept = match keystroke.key.as_str() {
-            "right" | "end" if !m.modified() => Some(false),
-            "f" if m.control && !m.alt && !m.shift && !m.platform => Some(false),
-            "right" if m.alt && !m.control && !m.shift && !m.platform => Some(true),
-            _ => None,
-        };
-        if let Some(word) = accept
-            && self.accept_suggestion(word)
-        {
-            cx.stop_propagation();
-            cx.notify();
-            return;
-        }
         let Some(input) = keys::translate(&event.keystroke) else {
             return;
         };
@@ -96,10 +73,6 @@ impl TerminalView {
     }
 
     pub(super) fn scroll_wheel(&mut self, event: &ScrollWheelEvent, _: &mut Window, cx: &mut Context<Self>) {
-        // 滚在补全菜单上：上下移动选中项，不滚终端。
-        if self.completion_scroll(event, cx) {
-            return;
-        }
         let Some(metrics) = self.metrics else {
             return;
         };
@@ -137,10 +110,6 @@ impl TerminalView {
         }
         // 激活窗口的那一下只用来激活，不选择也不上报。
         if event.first_mouse {
-            return;
-        }
-        // 点在补全菜单上：接受点到的候选，不选择也不上报。
-        if self.completion_click(event, cx) {
             return;
         }
         let Some(at) = self.grid_point(event.position) else {

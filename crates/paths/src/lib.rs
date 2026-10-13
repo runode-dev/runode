@@ -1,7 +1,7 @@
 //! runode 读写的目录和文件的位置，统一从环境变量算出来。
 //!
 //! runode 自己的东西在所有系统上都放在同一个根目录：`~/.runode`，不跟着 `XDG_CONFIG_HOME` 走。
-//! 配置文件和要留着的数据（窗口布局的存档、命令历史、自己加的项目命令、任务板）直接放在根目录，
+//! 配置文件和要留着的数据（窗口布局的存档、自己加的项目命令、任务板）直接放在根目录，
 //! 随时能重新生成的缓存（shell 集成脚本、首个终端的尺寸、宿主进程的日志）放在根目录的
 //! `cache/` 里，宿主进程的 socket 和锁放在根目录的 `run/` 里，远程访问的证书、设备表和配对口令放在
 //! 根目录的 `remote-access/` 里。
@@ -145,11 +145,6 @@ impl Dirs {
         self.data_file("themes")
     }
 
-    /// 用户自己的命令补全规格，`<命令名>.json` 盖过内置的同名规格。
-    pub fn completions_dir(&self) -> Option<PathBuf> {
-        self.data_file("completions")
-    }
-
     /// 窗口布局的存档。
     pub fn windows_file(&self) -> Option<PathBuf> {
         self.data_file("windows.json")
@@ -169,11 +164,6 @@ impl Dirs {
     /// 按仓库根目录分开的。
     pub fn commit_message_file(&self) -> Option<PathBuf> {
         self.data_file("commit-message.json")
-    }
-
-    /// runode 自己记的命令历史。
-    pub fn history_file(&self) -> Option<PathBuf> {
-        self.data_file("history.jsonl")
     }
 
     /// 用户自己的 agent 识别规则，`<agent 短名>.toml` 覆盖内置的同名规则。
@@ -309,11 +299,9 @@ mod tests {
         let dirs = dirs(&[("HOME", "/home/me")]);
         assert_eq!(dirs.config_file(), Some("/home/me/.runode/config.conf".into()));
         assert_eq!(dirs.windows_file(), Some("/home/me/.runode/windows.json".into()));
-        assert_eq!(dirs.history_file(), Some("/home/me/.runode/history.jsonl".into()));
         assert_eq!(dirs.todos_db(), Some(PathBuf::from("/home/me/.runode").join(TODOS_DB)));
         assert_eq!(dirs.themes_dir(), Some("/home/me/.runode/themes".into()));
         assert_eq!(dirs.agent_detection_dir(), Some("/home/me/.runode/agent-detection".into()));
-        assert_eq!(dirs.completions_dir(), Some("/home/me/.runode/completions".into()));
         assert_eq!(dirs.shell_integration_dir(), Some("/home/me/.runode/cache/shell-integration".into()));
         assert_eq!(dirs.prespawn_size_file(), Some("/home/me/.runode/cache/first-terminal-size".into()));
         assert_eq!(dirs.ghostty_themes_dir(), Some("/home/me/.config/ghostty/themes".into()));

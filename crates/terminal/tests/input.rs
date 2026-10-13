@@ -51,7 +51,7 @@ fn reload_shell_clears_the_input_first() {
     session.feed(b"git st\x1b[2D");
     // 集成还没报告过 runode-reload（比如更早的版本启动的 shell）时不发。
     assert!(!session.reload_shell());
-    let names = ShellNames { functions: vec!["runode-reload".into()], ..ShellNames::default() };
+    let names = ShellNames { functions: vec!["runode-reload".into()] };
     session.apply_meta(SessionMeta { shell_names: Arc::new(names), ..SessionMeta::default() });
     assert!(session.reload_shell());
     // 光标后还有两个字：右移两下到末尾，退格六下，再输入命令回车。

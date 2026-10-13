@@ -10,17 +10,12 @@ publish.workspace = true
 runode-paths.workspace = true
 runode-shared-types.workspace = true
 runode-agent-detect.workspace = true
-# shell 集成报告一条命令开始运行时记成历史的一条。
-runode-command-history.workspace = true
 libghostty-vt.workspace = true
 portable-pty.workspace = true
 anyhow.workspace = true
 # 读终端前台进程的名字和当前目录，作程序没设置标题时的标签名。
 libc.workspace = true
 tracing.workspace = true
-# 命令历史存成一行一条的 JSON。
-serde.workspace = true
-serde_json.workspace = true
 
 [lints]
 workspace = true

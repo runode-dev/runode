@@ -30,7 +30,6 @@ mod snapshot;
 use std::{
     cell::{Cell as StdCell, RefCell},
     rc::Rc,
-    sync::Arc,
     time::{Duration, Instant},
 };
 
@@ -47,7 +46,6 @@ use runode_shared_types::{
     grid::{GridPoint, GridSize},
     session::SessionMeta,
     settings::{self, TermSettings},
-    shell::ShellNames,
 };
 
 use crate::{
@@ -237,17 +235,6 @@ impl Session {
     /// shell 最近一次等着输入时所在的目录；还没等过输入时为 shell 当前所在的目录。
     pub fn prompt_cwd(&self) -> Option<std::path::PathBuf> {
         self.meta.prompt_cwd.clone().or_else(|| self.cwd())
-    }
-
-    /// shell 集成报告的 shell 自己的 PATH（每次显示提示符时 PATH 变了才报告）；还没报告过时
-    /// 为 `None`。补全跑生成器命令时用它，和用户在 shell 里能找到的命令一致。
-    pub fn shell_path(&self) -> Option<std::ffi::OsString> {
-        self.meta.shell_path.clone()
-    }
-
-    /// shell 集成报告的别名、函数、内建命令和关键字（内容变了才报告）；没报告过的为空。
-    pub fn shell_names(&self) -> Arc<ShellNames> {
-        self.meta.shell_names.clone()
     }
 
     /// 宿主最近一次读到的前台是不是 shell 自己。

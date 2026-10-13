@@ -20,7 +20,6 @@ use std::{
 
 use futures::{StreamExt as _, channel::mpsc::UnboundedReceiver, task::ArcWake};
 use gpui::{App, AppContext as _, Context, Entity, Font, Global, Point, SharedString, Task, Window, font, px};
-use runode_command_history as history;
 use runode_protocol::{AttachMode, ClientMsg, HostMsg, SessionId};
 use runode_shared_types::{
     agent::Agent,
@@ -306,7 +305,7 @@ impl TerminalView {
     }
 
     /// 按先后处理宿主发来的一批事件（见 `ScreenState::apply`），再把变化转给外层：标题、agent、
-    /// 退出等事件，命令历史，要重新连上的就连，然后重绘。响铃留给调用方用 `ring_bell` 转发，
+    /// 退出等事件，要重新连上的就连，然后重绘。响铃留给调用方用 `ring_bell` 转发，
     /// 见 `new`；这一批里有退出时在退出之前转发。
     fn handle_link_events(&mut self, events: Vec<LinkEvent>, window: &mut Window, cx: &mut Context<Self>) {
         let settings = self.config.term_settings();
@@ -343,14 +342,8 @@ impl TerminalView {
             self.vt_replaced(cx);
         }
         if changes.fed {
-            self.input_changed = true;
-            self.completion_output(cx);
             // 有输出（包括键入的回显）时光标先亮起，免得打字时看不到它。
             self.reset_cursor_blink(cx);
-        }
-        if changes.theme_applied {
-            // 高亮的颜色取自调色板。
-            self.input_changed = true;
         }
         if changes.title_changed {
             cx.emit(TerminalEvent::TitleChanged);
@@ -366,17 +359,6 @@ impl TerminalView {
         }
         if changes.agent_blocked {
             cx.emit(TerminalEvent::AgentBlocked);
-        }
-        // 关掉建议时宿主不记，这边也不加。
-        if self.config.command_suggestions {
-            for command in changes.commands {
-                history::observe(history::Entry {
-                    cmd: command.cmd,
-                    cwd: command.cwd,
-                    exit: command.exit,
-                    ts: command.ts,
-                });
-            }
         }
         if changes.bell {
             self.bell_pending = true;
@@ -422,19 +404,13 @@ impl TerminalView {
         self.id.map_or_else(|| "(not opened yet)".to_owned(), |id| id.to_string())
     }
 
-    /// 界面这份 VT 换了或者没了：跟着旧 VT 的选区、补全、建议都作废，搜索栏开着的话在新的上面
+    /// 界面这份 VT 换了或者没了：跟着旧 VT 的选区作废，搜索栏开着的话在新的上面
     /// 重新搜。
     fn vt_replaced(&mut self, cx: &mut Context<Self>) {
-        self.completion = None;
-        self.completion_pending = None;
-        self._completion_wait = None;
-        self.suggestion = None;
-        self.highlight = Rc::default();
         self.selecting = false;
         self.reporting_press = false;
         self.click_cell = None;
         self._autoscroll = None;
-        self.input_changed = true;
         if let Some((field, _)) = &self.search_field {
             let query = field.read(cx).query().to_owned();
             if let Some(session) = self.screen.shown_mut()
@@ -716,7 +692,6 @@ impl TerminalView {
             // 字体、字号或行高调整都可能变了，单元格尺寸和字形缓存一律作废。
             view.metrics = None;
             view.glyphs.iter_mut().for_each(HashMap::clear);
-            view.input_changed = true;
             // 闪不闪、空闲期限都可能改了，空闲停下的闪烁按新配置重新算。
             view.reset_cursor_blink(cx);
             cx.notify();
@@ -731,11 +706,6 @@ impl TerminalView {
         let reconnect_watch =
             cx.observe_global_in::<HostReconnected>(window, |view, window, cx| view.host_reconnected(window, cx));
 
-        // 第一次用到时开始在后台读命令历史，开着建议时现在就读起来。
-        if config.command_suggestions {
-            history::load_in_background();
-        }
-
         let focus_handle = cx.focus_handle();
         let pane_focus = cx.focus_handle();
         let focus_watch = [
@@ -749,8 +719,6 @@ impl TerminalView {
             }),
             cx.on_blur(&focus_handle, window, |view, _, _| {
                 view._cursor_blink = None;
-                // 失焦时补全菜单也关掉。
-                view.completion = None;
             }),
         ];
 
@@ -773,15 +741,6 @@ impl TerminalView {
             metrics: None,
             glyphs: Default::default(),
             marked_text: None,
-            suggestion: None,
-            suggester: Default::default(),
-            highlight: Default::default(),
-            input_changed: true,
-            history_generation: 0,
-            completion: None,
-            completion_pending: None,
-            _completion_wait: None,
-            output_at: None,
             scroll_remainder: 0.,
             cursor_bounds: None,
             grid_origin: Point::default(),

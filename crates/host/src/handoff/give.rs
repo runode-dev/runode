@@ -308,7 +308,8 @@ fn send_parts<'a>(
         snapshot_format: shared.snapshot_format,
         sessions: u32::try_from(handed.len()).unwrap_or(u32::MAX),
         theme,
-        record_history: shared.record_history.load(std::sync::atomic::Ordering::Relaxed),
+        // 现在的宿主不记命令历史，也不看这一项。
+        record_history: false,
         socket: giving.socket.clone(),
         clipboard,
         layout: shared.peers().layout.clone(),

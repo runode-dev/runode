@@ -1,7 +1,7 @@
 //! 宿主这边的一个终端会话：权威的那份 VT 接在 shell 的 PTY 上。
 //!
 //! 终端查询（DA、DSR、XTVERSION、OSC 颜色、Kitty 键盘协议、mode 2048 的尺寸报告等）只由
-//! 这里应答；标题、前台 agent、shell 集成的报告和命令历史也在这里认，变了就整理成
+//! 这里应答；标题、前台 agent、shell 集成的报告和运行完的命令也在这里认，变了就整理成
 //! `SessionMeta` 交给界面。界面那份 VT（`Session`）只消费同样的字节流，自己不应答任何查询。
 //!
 //! 和 `Session` 一样不是 `Send`：libghostty 的 `Terminal` 只能单线程用，回调之间用 `Rc` 共享
@@ -43,10 +43,8 @@ use runode_shared_types::{
     grid::{GridSize, merge_window_resize},
     session::{DriveAction, Driver, SessionMeta},
     settings::TermSettings,
-    shell::IntegrationMode,
+    shell::{FinishedCommand, IntegrationMode},
 };
-
-use runode_command_history as history;
 
 use crate::{
     prompt_input,
@@ -79,8 +77,8 @@ pub struct SessionExport {
     pub start_dir: Option<PathBuf>,
     /// 这一轮提示符的目录是 shell 报告的，见 `HostSession::take_commands`。
     pub prompt_reported: bool,
-    /// 正在运行、还没报告结束的那条命令，结束时带着原来的开始时刻和目录记进历史。
-    pub running: Option<history::Entry>,
+    /// 正在运行、还没报告结束的那条命令，结束时带着原来的开始时刻和目录报告。
+    pub running: Option<FinishedCommand>,
     /// shell 集成报告了、还没被提示符取走的目录。
     pub pending_shell_cwd: Option<PathBuf>,
     /// 收到了带口令的 `command` 报告、还没等到命令开始运行：外层为 `None` 表示没收到，里面是
@@ -173,7 +171,7 @@ pub struct HostSession {
     /// 重画）不再现读去盖掉它，见 `take_commands`。命令开始运行时清掉。
     prompt_reported: bool,
     /// 正在运行、还没报告结束的那条命令。
-    running: Option<history::Entry>,
+    running: Option<FinishedCommand>,
     /// 最近一次收到界面发来的输入的时刻，agent 识别据此区分程序是自己在动还是在回显。
     input_at: Option<Instant>,
     /// 现在套用着的主题，见 `apply_theme`。

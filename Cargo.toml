@@ -24,8 +24,6 @@ runode-project-tasks = { path = "crates/project-tasks" }
 runode-terminal = { path = "crates/terminal" }
 runode-host = { path = "crates/host" }
 runode-cli = { path = "crates/cli" }
-runode-completion = { path = "crates/completion" }
-runode-prompt-highlight = { path = "crates/prompt-highlight" }
 runode-config = { path = "crates/config" }
 runode-preview = { path = "crates/preview" }
 runode-agent-detect = { path = "crates/agent-detect" }
@@ -33,7 +31,6 @@ runode-remote-access = { path = "crates/remote-access" }
 runode-update = { path = "crates/update" }
 runode-autostart = { path = "crates/autostart" }
 runode-ui = { path = "crates/ui" }
-runode-command-history = { path = "crates/command-history" }
 runode-github-actions = { path = "crates/github-actions" }
 runode-preview-panel = { path = "crates/preview-panel" }
 runode-file-tree = { path = "crates/file-tree" }
@@ -55,10 +52,6 @@ rust-i18n = "4"
 serde = { version = "1", features = ["derive", "rc"] }
 serde_json = "1"
 notify = "8"
-# 命令补全的规格库（MIT）。不开 embed-signatures：那会把整个 JSON 目录原样编进二进制，
-# 规格数据改由构建脚本压缩后嵌入。
-warp-command-signatures = { path = "vendor/command-signatures/command-signatures", default-features = false }
-miniz_oxide = "0.9"
 # agent 识别规则的格式（TOML）和规则里的正则。
 regex = "1"
 toml = "1"

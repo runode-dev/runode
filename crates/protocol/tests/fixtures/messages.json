@@ -44,14 +44,9 @@
         "pid": 4242,
         "prompt_cwd": "/tmp",
         "shell_names": {
-          "alias_values": [],
-          "aliases": [
-            "ll"
-          ],
-          "builtins": [],
-          "functions": [],
-          "keywords": [],
-          "tab_widget": ""
+          "functions": [
+            "runode-reload"
+          ]
         },
         "shell_path": {
           "Unix": [
@@ -635,12 +630,7 @@
         "pid": null,
         "prompt_cwd": null,
         "shell_names": {
-          "alias_values": [],
-          "aliases": [],
-          "builtins": [],
-          "functions": [],
-          "keywords": [],
-          "tab_widget": ""
+          "functions": []
         },
         "shell_path": null,
         "title": null
@@ -838,14 +828,9 @@
             "pid": 4242,
             "prompt_cwd": "/tmp",
             "shell_names": {
-              "alias_values": [],
-              "aliases": [
-                "ll"
-              ],
-              "builtins": [],
-              "functions": [],
-              "keywords": [],
-              "tab_widget": ""
+              "functions": [
+                "runode-reload"
+              ]
             },
             "shell_path": {
               "Unix": [

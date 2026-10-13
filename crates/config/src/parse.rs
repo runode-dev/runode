@@ -61,9 +61,6 @@ pub const KEYS: &[&[&str]] = &[
         "scrollback-limit",
         "shell-integration",
         "shell-integration-features",
-        "command-suggestions",
-        "command-completions",
-        "command-highlighting",
     ],
     &["clipboard-write", "clipboard-read", "vt-window-resize-allowed"],
     &["terminal-host"],
@@ -307,15 +304,6 @@ impl Config {
                 };
             }
             "shell-integration-features" => self.shell_integration_features = parse_shell_features(value)?,
-            "command-suggestions" => {
-                self.command_suggestions = or_default(empty, defaults.command_suggestions, || parse_bool(value))?;
-            }
-            "command-completions" => {
-                self.command_completions = or_default(empty, defaults.command_completions, || parse_bool(value))?;
-            }
-            "command-highlighting" => {
-                self.command_highlighting = or_default(empty, defaults.command_highlighting, || parse_bool(value))?;
-            }
             "clipboard-write" => {
                 self.clipboard_write = match value {
                     "" | "allow" => ClipboardWrite::Allow,

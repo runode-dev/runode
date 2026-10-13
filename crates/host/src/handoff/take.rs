@@ -6,18 +6,21 @@ use std::{
     io,
     os::unix::net::{UnixListener, UnixStream},
     path::{Path, PathBuf},
-    sync::{Arc, atomic::Ordering, mpsc},
+    sync::{Arc, mpsc},
     thread,
     time::{Duration, Instant},
 };
 
-use runode_command_history as history;
 use runode_protocol::{
     BuildId, Caps, ClientKind, ClientMsg, Frame, FrameKind, GoodbyeReason, HANDOFF_FORMAT, HandoffPart, HandoffRefusal,
     HostMsg, OLDEST_READABLE_HANDOFF_FORMAT, PROTOCOL_VERSION, SessionId, WindowLayout, decode_part, read_frame,
     write_frame,
 };
-use runode_shared_types::{clipboard::ClipboardAccess, settings::TermSettings, shell::IntegrationMode};
+use runode_shared_types::{
+    clipboard::ClipboardAccess,
+    settings::TermSettings,
+    shell::{FinishedCommand, IntegrationMode},
+};
 use runode_terminal::{
     fd_passing,
     host_session::{RedactorState, SessionExport},
@@ -144,11 +147,10 @@ impl Host {
         Ok(report)
     }
 
-    /// 旧宿主提交了：登记会话，套用旧宿主的主题、选项和手里的布局（剪贴板的规矩也交给各个会话，它们
+    /// 旧宿主提交了：登记会话，套用旧宿主的主题和手里的布局（剪贴板的规矩也交给各个会话，它们
     /// 开出来时拿的是默认的），把它没写进 PTY 的输入排进各个会话的写队列，打开各个会话的闸门。
     fn commit(&self, taken: &mut Taken, mut pending: HashMap<SessionId, Vec<u8>>) {
         let shared = &self.shared;
-        shared.record_history.store(taken.record_history, Ordering::Relaxed);
         {
             let mut registry = shared.registry();
             if let Some(theme) = taken.theme.take() {
@@ -257,7 +259,6 @@ struct HostState {
     lock: File,
     socket: PathBuf,
     theme: Option<TermSettings>,
-    record_history: bool,
     clipboard: ClipboardAccess,
     layout: Vec<WindowLayout>,
 }
@@ -266,7 +267,6 @@ struct HostState {
 struct Taken {
     socket: PathBuf,
     theme: Option<TermSettings>,
-    record_history: bool,
     clipboard: ClipboardAccess,
     layout: Vec<WindowLayout>,
     handles: Vec<(SessionId, Handle)>,
@@ -299,8 +299,8 @@ impl Received {
             return Err(reason);
         }
         handles.sort_by_key(|(id, _)| *id);
-        let HostState { listener, lock, socket, theme, record_history, clipboard, layout } = host;
-        Ok((Taken { socket, theme, record_history, clipboard, layout, handles, replayed }, listener, lock))
+        let HostState { listener, lock, socket, theme, clipboard, layout } = host;
+        Ok((Taken { socket, theme, clipboard, layout, handles, replayed }, listener, lock))
     }
 }
 
@@ -309,18 +309,8 @@ impl Received {
 fn receive(shared: &Shared, stream: &UnixStream, sessions: u32, our_format: u16) -> Result<Received, String> {
     let (data, fds) = fd_passing::recv_with_fds(stream).map_err(|err| format!("cannot receive the host: {err}"))?;
     let (part, _) = decode_part(&data).map_err(|err| format!("cannot read the host: {err}"))?;
-    let HandoffPart::Host {
-        format,
-        snapshot_format,
-        sessions: count,
-        theme,
-        record_history,
-        socket,
-        build,
-        clipboard,
-        layout,
-        ..
-    } = part
+    let HandoffPart::Host { format, snapshot_format, sessions: count, theme, socket, build, clipboard, layout, .. } =
+        part
     else {
         return Err("the old host did not start with itself".into());
     };
@@ -337,7 +327,6 @@ fn receive(shared: &Shared, stream: &UnixStream, sessions: u32, our_format: u16)
             lock: File::from(lock),
             socket,
             theme,
-            record_history,
             clipboard,
             layout,
         },
@@ -418,7 +407,7 @@ fn receive_session(
         settings,
         start_dir,
         prompt_reported,
-        running: running.map(|command| history::Entry {
+        running: running.map(|command| FinishedCommand {
             cmd: command.cmd,
             cwd: command.cwd,
             exit: None,

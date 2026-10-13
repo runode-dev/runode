@@ -3,13 +3,11 @@
 //! 这里是 `TerminalView` 本身、它的动作和事件，以及渲染出的元素树。其余按职责分在子模块里：
 //! 建视图、启动 shell 和读输出（`lifecycle`）、界面这份 VT 的状态机（`screen`）、按键和鼠标
 //! （`input`，按键翻译成终端的按键事件在 `keys`）、绑定的动作（`actions`）、
-//! 搜索栏（`search`）、灰字建议（`suggestion`）、输入的语法高亮（`prompt_highlight`）、
-//! 命令补全菜单（`completion_menu`）、输入法（`ime`）、终端网格元素（`element`）、画一帧（`paint`，
+//! 搜索栏（`search`）、输入法（`ime`）、终端网格元素（`element`）、画一帧（`paint`，
 //! 方框线、块元素这些自绘字符在 `sprites`），
 //! 以及尺寸归别的前端管时 VT 的哪一块画进视图（`crop`）。
 
 mod actions;
-mod completion_menu;
 mod crop;
 mod cursor_blink;
 mod element;
@@ -18,27 +16,17 @@ mod input;
 mod keys;
 mod lifecycle;
 mod paint;
-mod prompt_highlight;
 mod screen;
 mod search;
 mod sprites;
-mod suggestion;
 
-use std::{
-    cell::RefCell,
-    collections::HashMap,
-    path::PathBuf,
-    rc::Rc,
-    sync::Arc,
-    time::{Duration, Instant},
-};
+use std::{cell::RefCell, collections::HashMap, path::PathBuf, rc::Rc, sync::Arc, time::Instant};
 
 use futures::channel::mpsc::UnboundedReceiver;
 use gpui::{
     Action, App, Bounds, Context, CursorStyle, Entity, EventEmitter, FocusHandle, Focusable, Font, Pixels, Point,
     Render, Role, ShapedLine, SharedString, Subscription, Task, Window, actions, div, prelude::*, px, rgb,
 };
-use runode_command_history as history;
 use runode_config::Config;
 use runode_protocol::SessionId;
 use runode_shared_types::{color::Rgb, frame::Frame, grid::GridSize};
@@ -48,7 +36,6 @@ use crate::{
     host_client::LinkEvent,
     ui::{a11y::Press, font_size::FontSize, hsla, input::InputState},
 };
-use completion_menu::{CompletionMenu, PendingKey};
 use crop::Crop;
 use element::TerminalElement;
 use screen::ScreenState;
@@ -98,17 +85,6 @@ const MIN_FONT_SIZE: f32 = 6.;
 const MAX_FONT_SIZE: f32 = 72.;
 /// 程序没设置标题、也读不到前台进程时用的标题。
 pub const DEFAULT_TITLE: &str = "Runode";
-/// 发出输入后最多等这么久的回显；在那之前屏幕上的输入可能还没更新，不接受按旧屏幕算出的建议。
-const ECHO_WAIT: Duration = Duration::from_millis(200);
-
-/// 显示着的灰字建议。
-struct Suggestion {
-    /// 接在光标后面、还没输入的那部分。
-    rest: String,
-    /// 算它时读屏幕的时刻。
-    read_at: Instant,
-}
-
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct Metrics {
     cell: gpui::Size<Pixels>,
@@ -181,22 +157,6 @@ pub struct TerminalView {
     /// 程序开着鼠标上报时，精确滚动（触控板）不足一行的余量；滚回滚历史时余量由
     /// `Session::scroll_smoothly` 记着，画成平滑滚动。
     scroll_remainder: f32,
-    /// 按命令历史给出的灰字建议，画在光标后面。
-    suggestion: Option<Suggestion>,
-    suggester: history::Suggester,
-    /// 提示符上输入的语法高亮，绘制时盖在单元格上。
-    highlight: Rc<prompt_highlight::Highlight>,
-    /// 有了新输出或配置变了，屏幕上的输入可能变了，下次绘制前重读，见 `refresh_input`。
-    input_changed: bool,
-    /// 上次查建议时命令历史的版本，历史变了也要重查。
-    history_generation: u64,
-    /// 按 Tab 弹出的命令补全菜单。
-    completion: Option<CompletionMenu>,
-    /// 回显之前按下、等着处理的补全键，以及等回显的计时器。
-    completion_pending: Option<PendingKey>,
-    _completion_wait: Option<Task<()>>,
-    /// 最近一次收到输出的时刻，用来判断刚发出的输入回显了没有。
-    output_at: Option<Instant>,
     /// 光标单元格上次绘制的位置，供输入法候选窗定位。
     cursor_bounds: Option<Bounds<Pixels>>,
     /// 单元格网格的原点，用于把指针位置换算成单元格；平滑滚动错开时是错开后的位置，尺寸归别的前端管、
@@ -275,24 +235,18 @@ impl Focusable for TerminalView {
 impl Render for TerminalView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let (foreground, background) = self.colors();
-        self.check_completion();
         // 屏幕上的字只有辅助工具在读时才拼。
         let a11y = window.is_a11y_active();
         let screen_text = a11y.then(|| self.screen.shown_mut().map(|session| screen_lines(&session.frame())));
-        let suggestion = a11y
-            .then(|| self.visible_suggestion().map(|s| rust_i18n::t!("completion.suggestion", text = s.rest)))
-            .flatten();
-        let completion_list = a11y.then(|| self.render_completion_a11y(cx)).flatten();
         // 搜索栏和终端是兄弟节点，不在 `Terminal` 按键上下文里：在搜索栏里打字时，
         // ⌘← 之类映射给程序的快捷键不能生效。
         let search_bar = self.search_field.as_ref().map(|(field, _)| self.render_search_bar(field, cx));
         let terminal = div()
             .id("terminal")
-            // 报给辅助工具：名字是标题，值是这一屏的字，灰字建议放在说明里。
+            // 报给辅助工具：名字是标题，值是这一屏的字。
             .role(Role::Terminal)
             .aria_label(SharedString::from(self.title().to_owned()))
             .when_some(screen_text.flatten(), |terminal, text| terminal.aria_value(text))
-            .when_some(suggestion, |terminal, suggestion| terminal.aria_description(suggestion.into_owned()))
             // 搜索栏开着时多一个 `searching` 标记，只在这时才让 Esc 关搜索而不发给程序。
             .key_context(if self.search_field.is_some() { "Terminal searching" } else { "Terminal" })
             .track_focus(&self.focus_handle)
@@ -341,8 +295,7 @@ impl Render for TerminalView {
                         CursorStyle::IBeam
                     })
                     .child(TerminalElement { view: cx.entity() }),
-            )
-            .children(completion_list);
+            );
         let lost = self.screen.is_lost().then(|| self.render_lost_bar(foreground, background, cx));
         let size_owner = self.render_size_owner(foreground, background, cx);
         div()

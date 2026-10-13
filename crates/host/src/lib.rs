@@ -41,7 +41,7 @@ use std::{
     path::PathBuf,
     sync::{
         Arc, Condvar, Mutex, MutexGuard, PoisonError, Weak,
-        atomic::{AtomicBool, AtomicU64, Ordering},
+        atomic::{AtomicU64, Ordering},
     },
     time::Duration,
 };
@@ -85,8 +85,6 @@ struct Shared {
     /// 这个构建编的快照的格式版本，见 `HostMsg::Welcome`。
     snapshot_format: u16,
     registry: Mutex<Registry>,
-    /// 要不要把 shell 集成报告的命令记进历史文件，见 `ClientMsg::SetOptions`。
-    record_history: Arc<AtomicBool>,
     /// 下一条连接的编号。
     next_connection: AtomicU64,
     /// 之后启动的 shell 另外设的环境变量，见 `Host::set_env`。
@@ -198,8 +196,7 @@ impl Shared {
         let ui = server::UiPort::new(self.me.clone());
         let clipboard = self.registry().clipboard;
         let read_patience = *self.clipboard_patience.lock().unwrap_or_else(PoisonError::into_inner);
-        let record_history = self.record_history.clone();
-        session::Setup { id, settings, env, record_history, ui, clipboard, read_patience }
+        session::Setup { id, settings, env, ui, clipboard, read_patience }
     }
 
     /// 改剪贴板的规矩，告诉每个会话；和现在的一样时什么都不做。
@@ -245,7 +242,7 @@ impl Shared {
 }
 
 impl Host {
-    /// 一个还没有会话的宿主：主题是默认的，记命令历史。`build` 是这次构建的标识，连上来的前端
+    /// 一个还没有会话的宿主：主题是默认的。`build` 是这次构建的标识，连上来的前端
     /// 的构建一样时才给快照，见 `AttachMode`；快照的格式版本也在这里算好。
     pub fn new(build: BuildId) -> Self {
         let snapshot_format = runode_terminal::host_session::snapshot_format().unwrap_or_else(|err| {
@@ -257,7 +254,6 @@ impl Host {
             build,
             snapshot_format,
             registry: Mutex::default(),
-            record_history: Arc::new(AtomicBool::new(true)),
             next_connection: AtomicU64::new(1),
             env: Mutex::default(),
             peers: Mutex::default(),

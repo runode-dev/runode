@@ -134,11 +134,7 @@ impl Element for TerminalElement {
         });
         let focused = focus_handle.is_focused(window);
         self.view.update(cx, |view, cx| {
-            // 补全菜单画在哪几行画的时候才定，报给辅助工具的列表按它放（`render_completion_a11y`），
-            // 变了就再画一帧，不然要等下次有输出才跟上。
-            let shown = window.is_a11y_active().then(|| view.completion_shown());
             let metrics = view.metrics(window);
-            view.refresh_input();
             // 绘制时要同时用到帧和 `&mut view`（字形缓存），所以先把帧取出来，画完再放回。没有界面
             // 这份 VT（只看状态、还在等屏幕、断开时没有屏幕）时只有背景。
             let Some(frame) = view.screen.shown_mut().map(Session::take_frame) else {
@@ -152,8 +148,6 @@ impl Element for TerminalElement {
             match crop {
                 None => {
                     paint_frame(view, &frame, bounds.origin, metrics, focused, window);
-                    // 补全菜单盖在终端内容上面。
-                    view.paint_completion(&frame, metrics, window);
                 }
                 // 尺寸归别的前端管、VT 和视图对不上：只画 VT 落在视图里的那一块，裁掉的那几边渐隐，VT
                 // 小了空出来的地方留白。
@@ -165,7 +159,6 @@ impl Element for TerminalElement {
                         let origin = crop.vt_origin(bounds.origin, metrics.cell);
                         paint_frame(view, &frame, origin, metrics, focused, window);
                         paint_fades(bounds, crop.edges(vt, view_size), metrics.cell, frame.background, window);
-                        view.paint_completion(&frame, metrics, window);
                     });
                 }
             }
@@ -174,9 +167,6 @@ impl Element for TerminalElement {
             FIRST_CONTENT.mark_when("first_content", || frame.cells.iter().any(|cell| !cell.text.trim().is_empty()));
             if let Some(session) = view.screen.shown_mut() {
                 session.restore_frame(frame);
-            }
-            if shown.is_some_and(|shown| shown != view.completion_shown()) {
-                cx.notify();
             }
         });
     }

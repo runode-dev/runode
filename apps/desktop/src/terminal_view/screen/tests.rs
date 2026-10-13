@@ -186,7 +186,7 @@ fn frames_before_the_screen_are_dropped() {
         msg(HostMsg::ThemeApplied { id: SessionId(1), settings: TermSettings::default() }),
         meta(SessionMeta { title: Some("t".into()), ..SessionMeta::default() }),
     ]);
-    assert!(!changes.fed && !changes.theme_applied);
+    assert!(!changes.fed);
     assert!(changes.title_changed);
     // 冻结着的那份也没被喂。
     let Screen::Attaching { keep: Some(keep), .. } = h.state.screen() else { panic!("attaching") };

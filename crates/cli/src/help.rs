@@ -1,7 +1,5 @@
 //! 用法说明：`runode help` 打印总览，`runode help COMMAND`、`runode COMMAND --help` 打印那条命令的
-//! 一页。改了命令或选项，`runode-completion` 里 runode 自己的命令规格也要跟着改，按 Tab 才补得出来。
-//! 每页的 `Usage:` 块里，命令名（连同 `setup claude|codex` 这样写死的词）要和规格对得上，
-//! `args` 的测试 `help_and_completion_spec_list_the_same_commands` 会核对。
+//! 一页。
 
 /// `runode help` 打印的总览：只列命令，细节在各命令的页里。
 pub(crate) const OVERVIEW: &str = "\

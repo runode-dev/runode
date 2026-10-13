@@ -38,8 +38,7 @@ use std::{
 };
 
 use anyhow::{Context as _, Result, anyhow};
-use runode_command_history as history;
-use runode_protocol::{AttachMode, FinishedCommand, HostMsg, SessionId, SessionInfo};
+use runode_protocol::{AttachMode, HostMsg, SessionId, SessionInfo};
 use runode_shared_types::{
     clipboard::ClipboardAccess,
     grid::GridSize,
@@ -218,7 +217,6 @@ pub(crate) struct Setup {
     pub(crate) settings: TermSettings,
     /// 启动 shell 时另外设的全部环境变量（宿主的和 `runode_protocol::ENV_SESSION`）。
     pub(crate) env: Vec<(String, OsString)>,
-    pub(crate) record_history: Arc<AtomicBool>,
     /// 请界面办事（读写剪贴板）的一头。
     pub(crate) ui: UiPort,
     /// 一开始的读写剪贴板的规矩，之后改了经 `Inbox::Clipboard` 送来。
@@ -294,7 +292,7 @@ impl Handle {
 /// 开会话：在调用的线程里打开伪终端（`start` 时连 shell 一起启动），错误当场返回；再起会话线程，
 /// 等它把 `HostSession` 建好。
 pub(crate) fn spawn(setup: Setup, options: SpawnOptions) -> Result<Handle> {
-    let Setup { id, settings, env, record_history, ui, clipboard, read_patience } = setup;
+    let Setup { id, settings, env, ui, clipboard, read_patience } = setup;
     let (inbox, rx) = mpsc::channel();
     let credits = Arc::new(Credits::default());
     let sink = pty_sink(&inbox, &credits);
@@ -323,7 +321,7 @@ pub(crate) fn spawn(setup: Setup, options: SpawnOptions) -> Result<Handle> {
                 }
             };
             let _ = ready.send(Ok(()));
-            let mut runner = Runner::new(id, session, options.shell, settings, credits, record_history);
+            let mut runner = Runner::new(id, session, options.shell, settings, credits);
             runner.ui = ui;
             runner.set_clipboard(clipboard);
             runner.read_patience = read_patience;
@@ -350,7 +348,7 @@ fn pty_sink(inbox: &mpsc::Sender<Inbox>, credits: &Arc<Credits>) -> pty::PtySink
 /// 停着、从没开过闸的 `Pty` 直接丢掉其实也不结束 shell（见 `Pty::adopt_paused`），明着交回是把
 /// 「不接手了」说清楚、出错时记一笔，不靠丢掉时对停着的 `Pty` 的特殊处理。
 pub(crate) fn adopt(setup: Setup, adopted: Adopted) -> Result<Adopting> {
-    let Setup { id, settings: _, env: _, record_history, ui, clipboard, read_patience } = setup;
+    let Setup { id, settings: _, env: _, ui, clipboard, read_patience } = setup;
     let Adopted { handoff, export, snapshot, replay, redactor, shell } = adopted;
     let (inbox, rx) = mpsc::channel();
     let credits = Arc::new(Credits::default());
@@ -374,7 +372,7 @@ pub(crate) fn adopt(setup: Setup, adopted: Adopted) -> Result<Adopting> {
             }
         };
         let _ = ready.send(Ok(replayed));
-        let mut runner = Runner::new(id, session, shell, settings, credits, record_history);
+        let mut runner = Runner::new(id, session, shell, settings, credits);
         runner.redactor = ReportRedactor::from_state(redactor);
         runner.ui = ui;
         runner.set_clipboard(clipboard);
@@ -464,7 +462,6 @@ struct Runner {
     /// `Inbox::Start` 时启动的程序，见 `SpawnOptions::shell`。
     shell: Option<String>,
     credits: Arc<Credits>,
-    record_history: Arc<AtomicBool>,
     /// 前端要清屏，等 VT 回到 ground 再清。
     clear_pending: bool,
     exited: bool,
@@ -493,7 +490,6 @@ impl Runner {
         shell: Option<String>,
         settings: TermSettings,
         credits: Arc<Credits>,
-        record_history: Arc<AtomicBool>,
     ) -> Self {
         let now = Instant::now();
         let mut runner = Self {
@@ -507,7 +503,6 @@ impl Runner {
             settings: Arc::new(settings),
             shell,
             credits,
-            record_history,
             clear_pending: false,
             exited: false,
             next_poll: None,
@@ -1104,13 +1099,7 @@ impl Runner {
         if let Some((rows, columns)) = self.session.take_resize_window() {
             self.emit(Event::msg(HostMsg::ResizeWindow { id: self.id, rows, columns }));
         }
-        let record = self.record_history.load(Ordering::Relaxed);
-        for entry in self.session.take_commands() {
-            let command =
-                FinishedCommand { cmd: entry.cmd.clone(), cwd: entry.cwd.clone(), exit: entry.exit, ts: entry.ts };
-            if record {
-                history::record(entry);
-            }
+        for command in self.session.take_commands() {
             self.emit(Event::msg(HostMsg::CommandFinished { id: self.id, command }));
         }
         for request in self.session.take_clipboard() {
@@ -1315,14 +1304,7 @@ mod tests {
             pty.start(Some("/bin/cat"), None, IntegrationMode::Off).unwrap();
         }
         let session = HostSession::new(SIZE, pty, None, &TermSettings::default()).unwrap();
-        Runner::new(
-            SessionId(1),
-            session,
-            Some("/bin/cat".into()),
-            TermSettings::default(),
-            Arc::default(),
-            Arc::default(),
-        )
+        Runner::new(SessionId(1), session, Some("/bin/cat".into()), TermSettings::default(), Arc::default())
     }
 
     #[test]

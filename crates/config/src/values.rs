@@ -105,9 +105,6 @@ impl Config {
             "shell-integration-features" => {
                 vec![if self.shell_integration_features.cursor { "cursor" } else { "no-cursor" }.into()]
             }
-            "command-suggestions" => bool(self.command_suggestions),
-            "command-completions" => bool(self.command_completions),
-            "command-highlighting" => bool(self.command_highlighting),
             "clipboard-write" => vec![
                 match self.clipboard_write {
                     ClipboardWrite::Allow => "allow",

@@ -7,7 +7,7 @@
 //!
 //! 启动时 `start` 在后台线程里读配置、定模式、连上宿主，主线程第一次用 `link` 时等它连好，读到的
 //! 配置交给主线程当第一份生效的配置（`take_config`）。
-//! 主题和要不要记命令历史跟着配置走，见 `configure`；别的进程经宿主请界面办的事见 `serve_ui`；
+//! 主题和剪贴板的规矩跟着配置走，见 `configure`；别的进程经宿主请界面办的事见 `serve_ui`；
 //! 连接断了以后用 `reconnect` 重新连上。
 
 mod handoff;
@@ -216,17 +216,14 @@ pub fn take_notice() -> Option<Notice> {
 }
 
 /// 把配置里宿主关心的部分告诉它：主题（各个会话在输出流里标出换主题的位置，视图到那里再换）、
-/// 要不要把命令记进历史文件，以及终端里的程序读写剪贴板的规矩。和宿主现在的一样时它什么都不做；重连后 `Link` 自己补发。
+/// 不把命令记进历史文件（界面已经不读它），以及终端里的程序读写剪贴板的规矩。和宿主现在的一样时它什么都不做；重连后 `Link` 自己补发。
 ///
 /// 宿主跑在 app 里时，远程访问的监听也开在 app 里，在这里按配置开关；单独跑的宿主自己读配置，
 /// 见 `remote_access`。
 pub fn configure(config: &Config) {
     let link = link();
     link.send(ClientMsg::SetTheme { settings: config.term_settings() });
-    link.send(ClientMsg::SetOptions {
-        record_history: config.command_suggestions,
-        clipboard: config.clipboard_access(),
-    });
+    link.send(ClientMsg::SetOptions { record_history: false, clipboard: config.clipboard_access() });
     KEEP_SESSIONS.store(config.terminal_host, Ordering::Relaxed);
     let in_app = mode() == Mode::InProcess;
     let port = if in_app { crate::remote_access::wanted_port(config) } else { None };

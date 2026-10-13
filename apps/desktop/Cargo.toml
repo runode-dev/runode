@@ -11,17 +11,12 @@ runode-paths.workspace = true
 runode-git.workspace = true
 runode-shared-types.workspace = true
 runode-terminal.workspace = true
-# 输入命令时的灰字建议。
-runode-command-history.workspace = true
 # 终端会话的宿主：跑在 app 进程里，或者由 app 拉起成单独一个进程（`runode --host`）。
 runode-host.workspace = true
 # 和宿主之间的帧和消息，两种跑法都经一条连接说话。
 runode-protocol.workspace = true
 # 带子命令启动时走命令行，见 `runode_cli::wants_cli`。
 runode-cli.workspace = true
-# 按 Tab 弹出的命令补全。
-runode-completion.workspace = true
-runode-prompt-highlight.workspace = true
 # 配置文件的读取、主题、快捷键的写法和配置模板。
 runode-config.workspace = true
 # 远程访问的监听跟着宿主活：宿主跑在 app 里时由 app 开，单独跑时由 `runode --host` 开。

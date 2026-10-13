@@ -1,5 +1,4 @@
-//! 把一帧画出来：单元格尺寸、字形排版缓存，以及背景、文字、装饰线、光标、输入的语法高亮和
-//! 灰字建议的绘制。
+//! 把一帧画出来：单元格尺寸、字形排版缓存，以及背景、文字、装饰线和光标的绘制。
 
 use std::{collections::HashMap, rc::Rc, sync::LazyLock};
 
@@ -165,8 +164,6 @@ pub(super) fn paint_frame(
     let filled_cursor = frame
         .cursor
         .filter(|c| focused && !cursor_hidden && c.shape == CursorShape::Block && view.marked_text.is_none());
-    let suggestion = view.visible_suggestion().map(|s| s.rest.clone());
-    let highlight = view.visible_highlight();
 
     let mask = ContentMask { bounds: grid };
     window.with_content_mask(Some(mask), |window| {
@@ -209,16 +206,6 @@ pub(super) fn paint_frame(
                     let bg = cell.bg.unwrap_or(frame.background);
                     let mut fg = if cell.attrs.faint { faint(cell.fg, bg) } else { cell.fg };
                     let mut attrs = cell.attrs;
-                    // 高亮不盖选区和搜索匹配（它们有底色）。
-                    if !cell.selected
-                        && cell.bg.is_none()
-                        && let (Some(highlight), Ok(y)) = (&highlight, u16::try_from(y))
-                        && let Some(style) = highlight.get(x, y)
-                    {
-                        fg = style.fg;
-                        attrs.bold |= style.bold;
-                        attrs.underline |= style.underline;
-                    }
                     // 按着 ⌘ 悬停的链接加下划线。
                     if let (Some(link), Ok(y)) = (&view.hovered_link, u16::try_from(y))
                         && link.contains(x, y)
@@ -257,33 +244,6 @@ pub(super) fn paint_frame(
                     }
                     let line = view.shape(&cell.text, attrs, window);
                     paint_glyphs(&line, position + point(px(0.), baseline), hsla(fg), window);
-                }
-            }
-
-            // 灰字建议：从光标处往右逐字画，不写进屏幕；画到行尾为止，不折行。落在实心光标下的
-            // 那个字和普通文字一样改用光标文字色。
-            if let (Some(cursor), Some(rest)) = (frame.cursor, suggestion.as_deref()) {
-                let dim = faint(frame.foreground, frame.background);
-                let mut x = cursor.x;
-                for c in rest.chars() {
-                    let width = u16::from(runode_terminal::cell_width(c));
-                    if width == 0 {
-                        continue;
-                    }
-                    if x + width > frame.cols {
-                        break;
-                    }
-                    let color = match filled_cursor {
-                        Some(filled) if filled.x == x && filled.y == cursor.y => filled.text,
-                        _ => dim,
-                    };
-                    if c != ' ' {
-                        let mut buf = [0; 4];
-                        let line = view.shape(c.encode_utf8(&mut buf), Attrs::default(), window);
-                        let position = cell_origin(x, i32::from(cursor.y));
-                        paint_glyphs(&line, position + point(px(0.), baseline), hsla(color), window);
-                    }
-                    x += width;
                 }
             }
         })

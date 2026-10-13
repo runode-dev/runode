@@ -126,13 +126,6 @@ pub struct Config {
     pub shell_integration: IntegrationMode,
     /// 新启动的 shell 的集成开哪些功能。
     pub shell_integration_features: ShellFeatures,
-    /// 在 shell 提示符上输入时，按命令历史在光标后用灰字给出建议；关掉时也不读写命令历史。
-    pub command_suggestions: bool,
-    /// 按 Tab 时由 runode 弹出补全菜单（命令名，以及有规格的命令的参数）；关掉时 Tab 总是交给 shell。
-    pub command_completions: bool,
-    /// 在 shell 提示符上输入时给命令行上色，样子参照 zsh 插件 fast-syntax-highlighting；shell 自己
-    /// 已经上了色时不管。
-    pub command_highlighting: bool,
     /// 终端里的程序用 OSC 52 写剪贴板时照写还是丢掉。
     pub clipboard_write: ClipboardWrite,
     /// 终端里的程序用 OSC 52 读剪贴板时照读、先问还是回空的。
@@ -223,9 +216,6 @@ impl Default for Config {
             scrollback_limit: term.scrollback_limit,
             shell_integration: IntegrationMode::Detect,
             shell_integration_features: term.shell_features,
-            command_suggestions: true,
-            command_completions: true,
-            command_highlighting: true,
             clipboard_write: ClipboardWrite::default(),
             clipboard_read: ClipboardRead::default(),
             terminal_host: false,

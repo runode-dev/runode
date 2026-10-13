@@ -45,8 +45,6 @@ config:
   scrollback_limit: 每個終端的捲動歷史最多佔多少位元組：非負整數，小於 2 MiB（2097152）時按 2 MiB 算。另外最多留 1 萬行，先到哪個上限就按哪個算。改了對已經開著的終端也生效。
   shell_integration: Shell 整合：detect（依 shell 的程式名稱判斷）、none（關閉）、bash、zsh、fish。
   shell_integration_features: shell 整合另外做的事，寫法同 Ghostty：cursor（預設）在提示字元上把游標換成直線，zsh 的 vi 命令模式裡是方塊，執行指令時恢復成 cursor-style；no-cursor 不改游標。直線閃不閃跟 cursor-style-blink。Ghostty 的 sudo、title、ssh-env、ssh-terminfo、path 也認得，但不起作用。只對之後新開的 shell 生效。
-  command_suggestions: 在 shell 提示字元上輸入時，依指令歷史在游標後用灰字給出建議，按 → 或 End 接受，Option+→ 接受一個詞。false 時也不讀寫指令歷史。
-  command_highlighting: 在 shell 提示字元上輸入時替指令列上色：指令、關鍵字、選項、字串、變數、存在的路徑各有顏色，找不到的指令標紅，顏色參照 zsh 外掛 fast-syntax-highlighting、取自主題的調色盤。shell 自己已經上了色（裝了高亮外掛）時不管。
   clipboard_write: 終端機裡的程式用 OSC 52 寫入系統剪貼簿時（vim、tmux 和經 ssh 連到遠端的 shell 都這樣複製）：allow 照寫，deny 丟掉。ask 還不支援，當作 deny。
   clipboard_read: 終端機裡的程式用 OSC 52 讀取剪貼簿時：ask 先跳出對話框說明是哪個終端機、哪個程式要讀，你同意了才給；allow 不問直接給；deny 回給程式一個空的剪貼簿。剪貼簿裡可能有密碼，只對信得過的程式用 allow。
   vt_window_resize_allowed: 讓終端機裡的程式用 xterm 的序列 CSI 8 ; 列 ; 欄 t 改視窗大小：true、false。大小為 0 或沒給的那一維不變，小於 40 欄 10 列的當作 40 欄 10 列，視窗不會大過螢幕。終端機正顯示著、獨佔標籤頁（沒有分割）、視窗不是全螢幕時才改，否則不理。預設關閉：任何程式都能藉此改你的視窗，包括經 ssh 連到的遠端機器上的程式。
@@ -62,7 +60,6 @@ config:
   apns_key_id: 這把金鑰的 ID（10 個字元，也在檔名 AuthKey_<ID>.p8 裡）。
   apns_team_id: Apple 開發者帳號的 Team ID（10 個字元）。
   apns_bundle_id: 自己編譯的手機 App 的 bundle ID；這個 App 的登記用上面的金鑰推播。
-  command_completions: 在 shell 提示字元上按 Tab 時從選單裡選指令名稱、子指令、選項或參數（參數只限 Runode 認得的指令），沒有可選的時、或者 zsh 裡 Tab 綁了別的補全（比如 fzf-tab）時，Tab 照常交給 shell。false 時 Tab 總是交給 shell。
   agent_notifications: agent 在你沒在看的分割畫面裡等你回答或者做完了時，發系統通知：true、false。只有打包好的 Runode.app 能發通知。
   agent_notifications_exclude: |-
     不發通知也不出提示音的 agent（狀態標記照常顯示）：用逗號隔開的短名，可以寫多行，值為空時清空。

@@ -115,14 +115,7 @@ impl TerminalView {
     }
 
     pub(super) fn send_text(&mut self, action: &SendText, _: &mut Window, cx: &mut Context<Self>) {
-        // 有建议时，跳到行尾（Ctrl-E，默认的 ⌘→）接受整条，按词前进（ESC f，默认的 Option+→）
-        // 接受一个词：光标已经在输入末尾，这两个键原本也没有别的效果。
-        let accepted = match action.0.as_str() {
-            "\x05" => self.accept_suggestion(false),
-            "\x1bf" => self.accept_suggestion(true),
-            _ => false,
-        };
-        if !accepted && let Some(session) = self.screen.live_mut() {
+        if let Some(session) = self.screen.live_mut() {
             session.send_text(action.0.as_bytes());
         }
         cx.notify();

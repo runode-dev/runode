@@ -20,16 +20,15 @@ pub struct SessionMeta {
     pub agent: Option<Agent>,
     /// shell 当前所在的目录。
     pub cwd: Option<PathBuf>,
-    /// shell 最近一次等着输入时所在的目录，命令历史的建议按它挑在这个目录里用过的命令；还没
-    /// 等过输入时为 `None`。插件管理器在提示符出来后可能临时切进别的目录，所以和 `cwd` 分开。
+    /// shell 最近一次等着输入时所在的目录；还没等过输入时为 `None`。插件管理器在提示符出来后可能临时切进别的目录，所以和 `cwd` 分开。
     pub prompt_cwd: Option<PathBuf>,
     /// 前台是不是 shell 自己，即没有命令在运行。
     pub foreground_is_shell: bool,
-    /// shell 集成报告的 shell 自己的 PATH；补全跑生成器命令时用。PATH 不一定是合法的 UTF-8，
+    /// shell 集成报告的 shell 自己的 PATH；界面找用户装的命令行工具（gh）时用。PATH 不一定是合法的 UTF-8，
     /// 所以按操作系统的字符串存。
     pub shell_path: Option<OsString>,
-    /// shell 集成报告的别名、函数、内建命令和关键字。列表可能很长，状态每次变了都要整份交出去，
-    /// 所以共享着放：名字没变时各份状态指向同一份，不必每次深拷贝。
+    /// shell 集成报告的函数名。列表可能很长，状态每次变了都要整份交出去，所以共享着放：名字没变时
+    /// 各份状态指向同一份，不必每次深拷贝。
     pub shell_names: Arc<ShellNames>,
     /// 前台程序的名字（进程名，不带路径）；还没启动、读不到时为 `None`。
     pub foreground: Option<String>,

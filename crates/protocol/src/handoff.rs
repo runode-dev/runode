@@ -53,7 +53,7 @@ pub enum HandoffPart {
         /// 前端用 `SetTheme` 设过的主题；没设过时为空，新宿主照旧等前端来设。
         #[serde(default)]
         theme: Option<TermSettings>,
-        /// 记不记命令历史，见 `ClientMsg::SetOptions`。
+        /// 旧宿主记不记命令历史，见 `ClientMsg::SetOptions`；现在的宿主不看它，照旧写 false。
         record_history: bool,
         /// 监听的 socket 的路径。描述符传过去后路径不变，shell 里的 `RUNODE_SOCKET` 照样有效。
         socket: PathBuf,
@@ -95,7 +95,7 @@ pub enum HandoffPart {
         /// shell 集成报告过提示符。
         #[serde(default)]
         prompt_reported: bool,
-        /// 正在运行、还没报告结束的命令，结束时记进历史。
+        /// 正在运行、还没报告结束的命令，结束时发 `HostMsg::CommandFinished`。
         #[serde(default)]
         running: Option<RunningCommand>,
         /// shell 集成在这次提示符前报告的目录，还没被下一次等输入取走。
@@ -128,7 +128,7 @@ impl HandoffPart {
     }
 }
 
-/// 正在运行的命令，结束时记进历史，见 `FinishedCommand`。
+/// 正在运行的命令，结束时成为一条 `FinishedCommand`。
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RunningCommand {
     pub cmd: String,

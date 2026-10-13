@@ -8,8 +8,7 @@
 //! 之后不再另外 `apply_theme`。
 //!
 //! 后台标签、看不见的窗口里的终端不留界面这份 VT：离开显示 `HIDE_GRACE` 后改成只看状态
-//! （`AttachMode::MetaOnly`），回到显示时重新要一份屏幕。只看状态时标题、agent、响铃、命令历史照常
-//! 从宿主来。
+//! （`AttachMode::MetaOnly`），回到显示时重新要一份屏幕。只看状态时标题、agent、响铃照常从宿主来。
 //!
 //! 通知：第一次连上（建视图、断开后重新连上）时宿主给的状态（`Attached` 里带的，包括只看状态时
 //! 第一次给的）是「现在的样子」，不是刚发生的变化，不发 agent 停下来的通知；和宿主断开以后也不发。
@@ -27,7 +26,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use runode_protocol::{AttachMode, FinishedCommand, HostMsg, SessionId};
+use runode_protocol::{AttachMode, HostMsg, SessionId};
 use runode_shared_types::{
     agent::Agent,
     grid::{GridSize, merge_window_resize},
@@ -50,7 +49,7 @@ pub(super) trait Vt {
     fn apply_resized(&mut self, size: GridSize);
     /// 在宿主换主题的位置换主题。
     fn apply_theme(&mut self, settings: &TermSettings);
-    /// 写入宿主公布的状态（补全要用里面的目录、shell 的名字）。
+    /// 写入宿主公布的状态。
     fn apply_meta(&mut self, meta: SessionMeta);
     /// 视图的尺寸变了，请宿主改。
     fn resize(&mut self, size: GridSize);
@@ -110,7 +109,7 @@ pub(super) struct Attach {
 pub(super) struct Changes {
     /// 喂了输出：屏幕上的输入可能变了，光标要亮起来。
     pub(super) fed: bool,
-    /// 换了界面这份 VT（新的屏幕到了，或者丢掉了）：选区、搜索、补全都跟着旧的 VT 没了。
+    /// 换了界面这份 VT（新的屏幕到了，或者丢掉了）：选区、搜索都跟着旧的 VT 没了。
     pub(super) replaced: bool,
     /// 标题（含 `fallback_title`）或 agent 变了。
     pub(super) title_changed: bool,
@@ -122,10 +121,6 @@ pub(super) struct Changes {
     pub(super) agent_finished: bool,
     /// 前台 agent 刚停下来等用户回答，要通知外层 `AgentBlocked`。
     pub(super) agent_blocked: bool,
-    /// 换了主题：输入的高亮取自调色板，要重算。
-    pub(super) theme_applied: bool,
-    /// shell 跑完的命令，按先后。
-    pub(super) commands: Vec<FinishedCommand>,
     /// 程序响过铃。
     pub(super) bell: bool,
     /// 程序要求把窗口改成的行数和列数（CSI 8 t），这一批里的几次合起来，0 是那一维不变。
@@ -514,7 +509,6 @@ impl<S: Vt> ScreenState<S> {
             HostMsg::ThemeApplied { settings, .. } => {
                 if let Some(session) = self.live_mut() {
                     session.apply_theme(&settings);
-                    changes.theme_applied = true;
                 }
             }
             // 只认带着尺寸看着时的：只看状态时宿主不该发，发了也用不上。
@@ -522,7 +516,6 @@ impl<S: Vt> ScreenState<S> {
                 let follows = !mine && !matches!(self.screen, Screen::Hidden);
                 self.size_owner = follows.then_some(SizeOwner { device: owner });
             }
-            HostMsg::CommandFinished { command, .. } => changes.commands.push(command),
             HostMsg::Bell { .. } => changes.bell = true,
             HostMsg::ResizeWindow { rows, columns, .. } => {
                 changes.resize_window = Some(merge_window_resize(changes.resize_window, (rows, columns)));

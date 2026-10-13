@@ -49,7 +49,7 @@ fn meta() -> SessionMeta {
         prompt_cwd: Some("/tmp".into()),
         foreground_is_shell: false,
         shell_path: Some("/usr/bin:/bin".into()),
-        shell_names: ShellNames { aliases: vec!["ll".into()], ..ShellNames::default() }.into(),
+        shell_names: ShellNames { functions: vec!["runode-reload".into()] }.into(),
         foreground: Some("claude".into()),
         driver: Some(Driver { by: None, action: DriveAction::Paste, at_ms: 1 }),
         pid: Some(4242),

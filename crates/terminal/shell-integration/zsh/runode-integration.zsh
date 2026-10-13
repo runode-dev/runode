@@ -7,14 +7,12 @@
 #   133;P;k=r  右侧提示符开始，画完后用 133;B 回到用户输入
 #   6973;<口令>;cwd=…  runode 私有：shell 的当前目录（百分号编码），每次显示提示符前都发；
 #                提示符出来后插件管理器可能临时切进插件目录，runode 那时再读目录就不准了
-#   6973;<口令>;path=…  runode 私有：shell 的 PATH（百分号编码），变了才发，补全跑命令时用
-#   6973;<口令>;aliases=… 以及 functions、builtins、keywords  runode 私有：shell 里的这些
-#                名字，名字之间用 %20 隔开，变了才发，补命令名时用
-#   6973;<口令>;alias_values=…  runode 私有：别名展开成什么，一行一个「名字<Tab>值」，整体
-#                百分号编码，变了才发，补命令名时当说明显示
+#   6973;<口令>;path=…  runode 私有：shell 的 PATH（百分号编码），变了才发，界面找命令行工具时用
+#   6973;<口令>;functions=…  runode 私有：shell 里定义的函数名，名字之间用 %20 隔开，变了才发，
+#                看集成脚本装好了没有
 #   6973;<口令>;command=…  runode 私有：紧接在 133;C 前面，说明这次命令开始是真的，值是用户
 #                输入的命令原文（百分号编码），拿不到时为空，终端从屏幕上读；runode 只把这样
-#                认过的命令记进历史
+#                认过的命令当作真的跑过，报告给等它的前端
 #
 # 标记直接写进 PS1、PS2、RPROMPT，提示符因为改窗口大小等原因重画时会跟着重发。
 #
@@ -54,8 +52,8 @@ case ,${_runode_features-}, in
 esac
 # 已经把换光标挂到 zle 的钩子上了，见 _runode_hook_zle。
 'builtin' 'typeset' -g _runode_zle_hooked=
-# 上一次报告给 runode 的各种名字，按种类。别名、函数这些在 zsh/parameter 模块提供的数组里。
-'builtin' 'typeset' -gA _runode_names _runode_names_raw
+# 上一次报告给 runode 的函数名，以及过滤前的原样。函数在 zsh/parameter 模块提供的数组里。
+'builtin' 'typeset' -g _runode_names= _runode_names_raw=
 'builtin' 'zmodload' -i zsh/parameter 2>/dev/null
 
 # 排在 precmd 钩子的最前面，在别的钩子改掉 $? 之前记下退出码。
@@ -94,7 +92,6 @@ _runode_precmd() {
         fi
     fi
     _runode_report_names
-    _runode_report_tab
     # 用户配置自己定义的 zle-line-init、zle-keymap-select 要先定义好，所以等 .zshrc 加载完、第一次
     # 显示提示符时才挂。
     if [[ -n $_runode_cursor && -z $_runode_zle_hooked ]]; then
@@ -108,60 +105,20 @@ _runode_precmd() {
     fi
 }
 
-# 把别名、函数、内建命令和关键字报告给 runode，补命令名时用；和上次报告的一样就不发。只报告
-# 以字母或数字开头、由字母数字和 `_.:+@,=-` 组成的名字：用不着逐字编码，名字之间写 %20 就是
-# 百分号编码，也顺带滤掉补全系统和 runode 自己以 `_` 开头的内部函数。全是 zsh 内部的展开，
-# 不起子进程。
+# 把函数名报告给 runode，它据此看集成脚本装好了没有；和上次报告的一样就不发。只报告以字母或
+# 数字开头、由字母数字和 `_.:+@,=-` 组成的名字：用不着逐字编码，名字之间写 %20 就是百分号编码，
+# 也顺带滤掉补全系统和 runode 自己以 `_` 开头的内部函数。全是 zsh 内部的展开，不起子进程。
 _runode_report_names() {
     [[ -n ${_runode_report_token-} ]] || 'builtin' 'return' 0
     'builtin' 'emulate' -L zsh -o extended_glob
-    'builtin' 'local' kind raw joined
-    'builtin' 'local' -a names
-    for kind in aliases functions builtins keywords; do
-        case $kind in
-            (aliases) names=(${(k)aliases}) ;;
-            (functions) names=(${(k)functions}) ;;
-            (builtins) names=(${(k)builtins}) ;;
-            (keywords) names=($reswords) ;;
-        esac
-        # 先按原样比一次：没变时（绝大多数提示符）省掉过滤和排序。
-        raw=${(j: :)names}
-        [[ $raw == "${_runode_names_raw[$kind]-}" ]] && continue
-        _runode_names_raw[$kind]=$raw
-        names=(${(o)${(M)names:#[[:alnum:]][[:alnum:]_.:+@,=-]#}})
-        joined=${(j:%20:)names}
-        if [[ $joined != "${_runode_names[$kind]-}" ]]; then
-            _runode_names[$kind]=$joined
-            'builtin' 'print' -rn -- $'\e]6973;'"$_runode_report_token;$kind=$joined"$'\a'
-        fi
-    done
-    # 别名的值可能含任何字，逐字编码比较慢，只在别名有变化时做。值里有换行或 Tab 的不报告。
-    raw=${(j: :)${(kv)aliases}}
-    [[ $raw == "${_runode_names_raw[alias_values]-}" ]] && return
-    _runode_names_raw[alias_values]=$raw
-    'builtin' 'local' name lines= REPLY
-    for name in ${(ok)aliases}; do
-        [[ $name == [[:alnum:]][[:alnum:]_.:+@,=-]# && ${aliases[$name]} != *[$'\n\t']* ]] || continue
-        lines+=$name$'\t'${aliases[$name]}$'\n'
-    done
-    _runode_urlencode "$lines"
-    'builtin' 'print' -rn -- $'\e]6973;'"$_runode_report_token;alias_values=$REPLY"$'\a'
-}
-
-# 把主键位表里 Tab 绑的 widget 报告给 runode：绑的不是 zsh 自带的补全（比如 fzf-tab）时
-# runode 不接管 Tab。读绑定要起子 shell，所以只在 widget 有增减时（插件加载了）重读。
-# shortcut: 不增减 widget 的改绑（disable-fzf-tab 之类）要等下次有 widget 增减才报告，有人用到再每次都读。
-_runode_report_tab() {
-    [[ -n ${_runode_report_token-} ]] || 'builtin' 'return' 0
-    'builtin' 'emulate' -L zsh -o extended_glob
-    'builtin' 'zmodload' -i zsh/zleparameter 2>/dev/null || 'builtin' 'return' 0
-    'builtin' 'local' raw=${(j: :)${(k)widgets}} widget
-    [[ $raw == "${_runode_names_raw[widgets]-}" ]] && 'builtin' 'return'
-    _runode_names_raw[widgets]=$raw
-    widget=${${(z)"$('builtin' 'bindkey' -M main '^I' 2>/dev/null)"}[2]}
-    [[ $widget == "${_runode_names[tab]-}" || $widget != [[:alnum:]._:-]## ]] && 'builtin' 'return'
-    _runode_names[tab]=$widget
-    'builtin' 'print' -rn -- $'\e]6973;'"$_runode_report_token;tab=$widget"$'\a'
+    'builtin' 'local' raw=${(j: :)${(k)functions}} joined
+    # 先按原样比一次：没变时（绝大多数提示符）省掉过滤和排序。
+    [[ $raw == "$_runode_names_raw" ]] && 'builtin' 'return'
+    _runode_names_raw=$raw
+    joined=${(j:%20:)${(o)${(M)${(k)functions}:#[[:alnum:]][[:alnum:]_.:+@,=-]#}}}
+    [[ $joined == "$_runode_names" ]] && 'builtin' 'return'
+    _runode_names=$joined
+    'builtin' 'print' -rn -- $'\e]6973;'"$_runode_report_token;functions=$joined"$'\a'
 }
 
 # 把 $1 按字节做百分号编码，结果放在 REPLY 里：分号、换行、ESC、BEL 和非 ASCII 字节都不会
@@ -219,7 +176,7 @@ _runode_hook_zle() {
 'builtin' 'typeset' -gA _runode_zle_flags
 
 # $1 是用户输入的命令原文，放在带口令的 command 报告里；拿不到时报告的原文为空，终端从屏幕上
-# 读。没有口令时只报告命令开始，runode 不把它记进历史。
+# 读。没有口令时只报告命令开始，runode 不把它报告给等命令的前端。
 _runode_preexec() {
     if [[ -n ${_runode_report_token-} ]]; then
         'builtin' 'local' REPLY=

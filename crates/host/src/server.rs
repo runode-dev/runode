@@ -1025,11 +1025,11 @@ impl Connection {
                 self.shared.deliver(id, Inbox::ClearScreen);
             }
             ClientMsg::SetTheme { settings } => self.shared.set_theme(settings),
-            // 记不记命令历史是用户在 app 里的设置，只认说自己是界面的连接。种类是自报的，这只防
-            // 命令行之类误发，不防同一个用户的程序冒充界面，见模块文档。
-            ClientMsg::SetOptions { record_history, clipboard } => {
+            // 读写剪贴板的规矩是用户在 app 里的设置，只认说自己是界面的连接。种类是自报的，这只防
+            // 命令行之类误发，不防同一个用户的程序冒充界面，见模块文档。`record_history` 是旧宿主
+            // 用的，不看。
+            ClientMsg::SetOptions { clipboard, .. } => {
                 if self.kind == ClientKind::Desktop {
-                    self.shared.record_history.store(record_history, Ordering::Relaxed);
                     self.shared.set_clipboard(clipboard);
                 } else {
                     self.error(None, None, "only the runode app changes the host's options".into());

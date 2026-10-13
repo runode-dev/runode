@@ -282,24 +282,6 @@ git:
     create: "新增分支「%{name}」"
     local: 本機
     remote: 遠端
-completion:
-  loading: 載入中…
-  no_matches: 沒有符合項目
-  menu: 指令補全
-  suggestion: "建議：%{text}"
-  group:
-    command: 外部指令
-    alias: 別名
-    function: shell 函式
-    builtin: 內建指令
-    keyword: 關鍵字
-    subcommand: 子指令
-    option: 選項
-    value: 參數值
-    generated: 動態值
-    folder: 目錄
-    file: 檔案
-    named: "%{group}：%{name}"
 driver:
   badge: "由 %{who} 操作 · %{action}"
   outside: runode 以外的程式
@@ -417,9 +399,6 @@ settings:
     scrollback_limit: 回捲歷史大小
     shell_integration: Shell 整合
     shell_integration_features: 提示字元游標
-    command_suggestions: 指令建議
-    command_completions: Tab 補全選單
-    command_highlighting: 指令列上色
     clipboard_write: 程式寫剪貼簿
     clipboard_read: 程式讀剪貼簿
     vt_window_resize_allowed: 程式改視窗大小
@@ -474,11 +453,8 @@ settings:
     cursor_style_blink_timeout: 這麼多秒沒有輸入也沒有輸出，游標就停止閃爍、常亮。0 表示一直閃。
     macos_option_as_alt: 打開後按 Option 組合鍵送出的是 Alt 組合，不再輸入特殊字元。
     scrollback_limit: 每個終端機的回捲歷史最多佔多少位元組，至少 2 MiB（2097152），另外最多 1 萬行。
-    shell_integration: 自動偵測依 shell 的程式名判斷。跳提示字元、指令歷史和建議都靠它。
+    shell_integration: 自動偵測依 shell 的程式名判斷。跳提示字元這類功能靠它。
     shell_integration_features: 提示字元上用直線，zsh 的 vi 命令模式裡用方塊，執行指令時恢復成上面的游標形狀。對新開的終端機生效。
-    command_suggestions: 輸入時依指令歷史用灰字給出後半段，按 → 或 End 接受。關掉時也不讀寫指令歷史。
-    command_completions: 按 Tab 彈出指令、子指令、選項和參數的選單；zsh 裡 Tab 綁了 fzf-tab 這類補全時讓給它。關掉時 Tab 總是交給 shell。
-    command_highlighting: 輸入時給指令、選項、字串和路徑上色；shell 自己已經上了色時不管。
     clipboard_write: 終端機裡的程式（vim、tmux、經 ssh 連到遠端的 shell 等）能把文字放進剪貼簿。
     clipboard_read: 終端機裡的程式能讀到你複製過的文字，密碼也在內。選「詢問」時先說明是哪個程式要讀。
     vt_window_resize_allowed: 終端機裡的程式能用 CSI 8 t 改視窗大小；只在終端機獨佔標籤頁、視窗不是全螢幕時改。
