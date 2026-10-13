@@ -11,9 +11,9 @@
 //! 任务板上的任务另算（`set_todos`、`todo_sessions`）：同一轮的任务表和会话列表都到了才看（两份回话
 //! 谁先到不一定，拿上一轮的任务表看会把刚标成完成、刚删掉的任务也推出去），按
 //! `runode_protocol::todo::column` 推出每个任务在哪一列，从进行中变成需要你、又不是在等回答（那个有上面
-//! 等回答的通知），过了同样的宽限期还是这样时推一条任务做完的通知；一次做完只推一次。会话没了、shell 退出了
-//! 也算需要你，但多半是用户自己关的，不推。重连时清掉记着的任务表和各任务的列，第一次看到的任务只记
-//! 基线，规矩同会话。
+//! 等回答的通知），过了同样的宽限期还是这样时推一条任务做完的通知；一次做完只推一次，推过又回去干活时还没
+//! 发出去的别发了。会话没了、shell 退出了也算需要你，但多半是用户自己关的，不推。重连时清掉记着的任务表
+//! 和各任务的列，第一次看到的任务只记基线，规矩同会话。
 
 use std::{
     collections::HashMap,
@@ -34,7 +34,7 @@ pub(crate) enum Action {
     ReadScreen(SessionId),
     /// 推一条通知：会话的状态和屏幕底部的几行（不带文字时为空）。
     Notify(SessionId, Box<SessionMeta>, Vec<String>),
-    /// 会话不再等了（答了、退出了或者没了）：还没发出去的通知别发了。
+    /// 会话不再等了（答了、退出了或者没了），或者任务推过做完又回去干活：还没发出去的通知别发了。
     Cancel(SessionId),
     /// 推一条任务做完的通知：任务的会话和标题。
     TodoDone(SessionId, String),
@@ -60,6 +60,8 @@ struct TodoTrack {
     column: Column,
     /// 什么时候从进行中变成做完的；这次做完还没推时有。
     finished_at: Option<Instant>,
+    /// 这次做完推过了，还没回去干活。
+    pushed: bool,
 }
 
 #[derive(Default)]
@@ -129,6 +131,12 @@ impl Rounds {
                     !info.exited && info.meta.agent.is_none_or(|agent| agent.state != AgentState::Blocked)
                 });
             let previous = self.todo_tracked.remove(&todo.id);
+            let mut pushed = previous.as_ref().is_some_and(|track| track.pushed) && column == Column::NeedsYou;
+            // 推过做完又回去干活：还在退避、没发出去的那条过时了。进行中不会在等回答，同一个会话等回答的
+            // 通知一起撤掉也没错。
+            if let (Some(TodoTrack { pushed: true, .. }), Column::InProgress, Some(info)) = (&previous, column, info) {
+                actions.push(Action::Cancel(info.id));
+            }
             let mut finished_at = match previous {
                 _ if !finished => None,
                 Some(TodoTrack { column: Column::InProgress, .. }) => Some(now),
@@ -139,9 +147,10 @@ impl Rounds {
                 && now.duration_since(at) >= self.delay
             {
                 finished_at = None;
+                pushed = true;
                 actions.push(Action::TodoDone(info.id, todo.spec.title.clone()));
             }
-            tracked.insert(todo.id.clone(), TodoTrack { column, finished_at });
+            tracked.insert(todo.id.clone(), TodoTrack { column, finished_at, pushed });
         }
         self.todo_tracked = tracked;
         self.todos = None;
@@ -407,7 +416,7 @@ mod tests {
             ..session(A, None)
         }];
         assert_eq!(round(&mut rounds, &todos, &shell, secs(t, 32)), []);
-        assert_eq!(round(&mut rounds, &todos, &[working(A)], secs(t, 34)), []);
+        assert_eq!(round(&mut rounds, &todos, &[working(A)], secs(t, 34)), [Action::Cancel(A)]);
         assert_eq!(round(&mut rounds, &todos, &shell, secs(t, 36)), []);
         assert_eq!(round(&mut rounds, &todos, &shell, secs(t, 46)), [done(A)]);
     }
@@ -433,6 +442,21 @@ mod tests {
         assert_eq!(round(&mut rounds, &todos, &[idle(A)], secs(t, 302)), []);
         assert_eq!(round(&mut rounds, &todos, &[working(A)], secs(t, 306)), []);
         assert_eq!(round(&mut rounds, &todos, &[working(A)], secs(t, 330)), []);
+    }
+
+    /// 做完了又回去干活：还在退避、没发出去的做完的通知别发了。
+    #[test]
+    fn resuming_cancels_the_done_push() {
+        let t = Instant::now();
+        let mut rounds = Rounds::new(Duration::ZERO, true);
+        let todos = [todo("1", A)];
+        round(&mut rounds, &todos, &[working(A)], t);
+        assert_eq!(round(&mut rounds, &todos, &[idle(A)], secs(t, 2)), [done(A)]);
+        assert_eq!(round(&mut rounds, &todos, &[working(A)], secs(t, 4)), [Action::Cancel(A)]);
+        assert_eq!(round(&mut rounds, &todos, &[working(A)], secs(t, 6)), []);
+        // 没推过的不撤。
+        assert_eq!(round(&mut rounds, &todos, &[blocked(A)], secs(t, 8)), []);
+        assert_eq!(round(&mut rounds, &todos, &[working(A)], secs(t, 10)), []);
     }
 
     /// 第一次看到的任务只记基线；重连后记着的都清掉，做完了一半的也不推。会话没了、shell 退出了不推。
