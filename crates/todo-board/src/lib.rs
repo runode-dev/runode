@@ -258,6 +258,11 @@ impl TodoBoard {
         self.input = input;
     }
 
+    /// 显示着的是定时那一页：app 只在这时去查定时能不能在后台跑（`Input::resident`）。
+    pub fn showing_schedules(&self) -> bool {
+        self.page == Page::Schedules
+    }
+
     /// 开着的新建、编辑对话框。它盖住整个窗口，app 画在窗口的最上层，开着时把下面的界面藏起来不给辅助工具读。
     pub fn dialog(&self) -> Option<Entity<TodoDialog>> {
         self.dialog.as_ref().map(|(dialog, _)| dialog.clone())

@@ -155,8 +155,9 @@ impl WindowView {
     /// 任务板开着时窗口的内容，摆法和手机端引导页一样。
     pub(super) fn render_todo_body(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Vec<AnyElement> {
         let Some(board) = self.todo_board.as_ref().map(|board| board.view.clone()) else { return Vec::new() };
-        let config = &cx.global::<AppConfig>().0;
-        let resident = config.terminal_host
+        // 要读自启文件，只在定时那一页显示着时才查：窗口几乎每帧都重画。
+        let resident = board.read(cx).showing_schedules()
+            && cx.global::<AppConfig>().0.terminal_host
             && runode_autostart::is_installed(runode_autostart::Kind::Host, &runode_paths::Dirs::from_env());
         let input = Input {
             workspaces: self
