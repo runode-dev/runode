@@ -289,7 +289,9 @@ impl Repo {
     /// 的时候在终端里暂存了），一个也不丢、报错，免得照旧状态删掉已经暂存的内容。
     pub fn discard(&self, files: &[FileDiff]) -> Result {
         // shortcut: 重读整个仓库的状态和 diff，大仓库里丢一个文件也多读一遍；嫌慢了再改成只对这些路径跑 git status。
-        let now = crate::snapshot(&self.root, &mut UntrackedCache::default()).map(|s| s.unstaged).unwrap_or_default();
+        let Some(now) = crate::snapshot(&self.root, &mut UntrackedCache::default()).map(|s| s.unstaged) else {
+            return Err(GitError::new("没能读到仓库现在的状态，什么也没丢"));
+        };
         let same = |file: &FileDiff| {
             now.iter().any(|n| n.path == file.path && n.status == file.status && n.old_path == file.old_path)
         };
