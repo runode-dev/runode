@@ -359,15 +359,14 @@ fn failure(stderr: &[u8]) -> String {
 const POLL_RUNNING: Duration = Duration::from_secs(10);
 const POLL_IDLE: Duration = Duration::from_secs(60);
 
-/// 每秒问一次：上次读到 `data`、在 `fetched` 读完的一份数据到 `now` 该不该重读。没读过的马上读；跑完的
-/// 那次尝试的 job 不会再变，读到了就不再读；等登录的按快的间隔读，在终端里登好后页上自己恢复。差不到
-/// 一秒算到了，免得每次都晚一秒。
+/// 每秒问一次：上次读到 `data`、在 `fetched` 读完的一份数据到 `now` 该不该重读。没读过的马上读；等登录
+/// 的按快的间隔读，在终端里登好后页上自己恢复。差不到一秒算到了，免得每次都晚一秒。
+///
+/// 读到的 job 都跑完了也照常按慢的间隔重读：等部署审批的、按上一个 job 的输出生成的 matrix job 会后来
+/// 才出现，那次尝试不见得结束了。
+// shortcut: 早就结束的尝试展开着时也每分钟白读一次，要省时按父运行的状态判断尝试结束了再停。
 pub(super) fn due(data: Option<&Result<Data, String>>, fetched: Option<Instant>, now: Instant) -> bool {
     let every = match data {
-        // 排队的运行可能还没有 job，空的不算跑完。
-        Some(Ok(Data::Jobs(jobs))) if !jobs.is_empty() && !jobs.iter().any(|job| job.state().running()) => {
-            return false;
-        }
         Some(Ok(data)) if data.running() => POLL_RUNNING,
         Some(Err(err)) if err == LOGIN => POLL_RUNNING,
         _ => POLL_IDLE,
@@ -487,7 +486,7 @@ mod tests {
     }
 
     #[test]
-    fn polls_running_and_waiting_for_login_fast_and_finished_jobs_never() {
+    fn polls_running_and_waiting_for_login_fast_and_the_rest_slowly() {
         let t0 = Instant::now();
         let at = |secs| t0 + Duration::from_secs(secs);
         let runs = |status: &str| {
@@ -508,13 +507,14 @@ mod tests {
         // 等登录的十秒一次，别的错一分钟一次。
         assert!(due(Some(&Err(LOGIN.to_owned())), Some(t0), at(9)));
         assert!(!due(Some(&Err("HTTP 404".to_owned())), Some(t0), at(9)));
-        // 跑完的那次尝试的 job 不再读，还在跑的照读。
+        // 在跑的 job 十秒一次；都跑完了也一分钟一次，后来才出现的 job 还读得到。
         let jobs = |status: &str| {
             let job = format!(r#"{{"databaseId":9,"name":"c","status":"{status}","conclusion":"","url":"u"}}"#);
             Ok(Data::Jobs(vec![serde_json::from_str(&job).unwrap()]))
         };
-        assert!(!due(Some(&jobs("completed")), Some(t0), at(3600)));
         assert!(due(Some(&jobs("in_progress")), Some(t0), at(9)));
+        assert!(!due(Some(&jobs("completed")), Some(t0), at(30)));
+        assert!(due(Some(&jobs("completed")), Some(t0), at(59)));
         // 还没有 job 的（刚排上队）照常重读。
         assert!(due(Some(&Ok(Data::Jobs(Vec::new()))), Some(t0), at(59)));
     }
