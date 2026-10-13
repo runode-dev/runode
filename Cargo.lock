@@ -4665,7 +4665,6 @@ name = "runode-github-actions"
 version = "0.1.8"
 dependencies = [
  "gpui-pre",
- "runode-shared-types",
  "runode-ui",
  "rust-i18n",
  "serde",

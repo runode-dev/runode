@@ -7,7 +7,6 @@ license.workspace = true
 publish.workspace = true
 
 [dependencies]
-runode-shared-types.workspace = true
 # 面板外框、行尾按钮、就地输入框、悬停提示和共用的图标。
 runode-ui.workspace = true
 gpui.workspace = true
