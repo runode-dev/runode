@@ -229,35 +229,39 @@ pub(super) fn add_to_gitignore(root: &Path, rel: &Path, is_dir: bool) -> Result 
     if rel.as_os_str().as_encoded_bytes().iter().any(|b| matches!(b, b'\n' | b'\r')) {
         return Err(OpError::NewlineInName);
     }
-    let mut pattern = String::from("/");
+    // 按原样的字节拼，不经 UTF-8：名字不是合法 UTF-8 时 lossy 转出的规则匹配不到那个文件。
+    let mut pattern = b"/".to_vec();
     for (ix, part) in rel.components().enumerate() {
         if ix > 0 {
-            pattern.push('/');
+            pattern.push(b'/');
         }
-        for c in part.as_os_str().to_string_lossy().chars() {
-            if matches!(c, '*' | '?' | '[' | '\\') {
-                pattern.push('\\');
+        for &b in part.as_os_str().as_encoded_bytes() {
+            if matches!(b, b'*' | b'?' | b'[' | b'\\') {
+                pattern.push(b'\\');
             }
-            pattern.push(c);
+            pattern.push(b);
         }
     }
-    if pattern.ends_with(' ') {
-        pattern.insert(pattern.len() - 1, '\\');
+    if pattern.ends_with(b" ") {
+        pattern.insert(pattern.len() - 1, b'\\');
     }
     if is_dir {
-        pattern.push('/');
+        pattern.push(b'/');
     }
     let path = root.join(".gitignore");
-    let existing = match fs::read_to_string(&path) {
-        Err(err) if err.kind() == io::ErrorKind::NotFound => String::new(),
+    let existing = match fs::read(&path) {
+        Err(err) if err.kind() == io::ErrorKind::NotFound => Vec::new(),
         read => read?,
     };
-    if existing.lines().any(|line| line == pattern) {
+    if existing.split(|b| *b == b'\n').any(|line| line.strip_suffix(b"\r").unwrap_or(line) == pattern) {
         return Ok(());
     }
-    let sep = if existing.is_empty() || existing.ends_with('\n') { "" } else { "\n" };
     let mut file = fs::OpenOptions::new().append(true).create(true).open(path)?;
-    io::Write::write_all(&mut file, format!("{sep}{pattern}\n").as_bytes())?;
+    if !existing.is_empty() && !existing.ends_with(b"\n") {
+        pattern.insert(0, b'\n');
+    }
+    pattern.push(b'\n');
+    io::Write::write_all(&mut file, &pattern)?;
     Ok(())
 }
 
@@ -362,6 +366,18 @@ mod tests {
         assert!(matches!(add_to_gitignore(&tmp.0, Path::new("x\n*"), false), Err(OpError::NewlineInName)));
         assert!(matches!(add_to_gitignore(&tmp.0, Path::new("a\r/b"), false), Err(OpError::NewlineInName)));
         assert_eq!(fs::read_to_string(&file).unwrap(), "target\n/a/b\\*.log\n/dist/\n/x\\ \n");
+    }
+
+    /// 名字不是合法 UTF-8 时规则照原样的字节写，git 读 .gitignore 也按字节，才匹配得到那个文件。
+    #[cfg(unix)]
+    #[test]
+    fn gitignore_keeps_raw_bytes_in_names() {
+        use std::os::unix::ffi::OsStrExt as _;
+        let tmp = TempDir::new("gitignore-raw");
+        let raw = Path::new(std::ffi::OsStr::from_bytes(b"caf\xe9*"));
+        add_to_gitignore(&tmp.0, raw, false).unwrap();
+        add_to_gitignore(&tmp.0, raw, false).unwrap();
+        assert_eq!(fs::read(tmp.0.join(".gitignore")).unwrap(), b"/caf\xe9\\*\n");
     }
 
     #[test]
