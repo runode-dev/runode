@@ -287,19 +287,25 @@ impl FileTree {
     /// 之后显示的、操作的都是 workspace `ws` 的树：框里的搜索词存回原来那个 workspace，换上这个 workspace 的
     /// 词重搜。和上次是同一个时什么也不做。会重画，不能在画的时候调。
     pub fn switch_workspace(&mut self, ws: WorkspaceId, cx: &mut Context<Self>) {
-        let Some(old) = self.ws.replace(ws).filter(|&old| old != ws) else {
+        let old = self.ws.replace(ws);
+        if old == Some(ws) {
             return;
-        };
-        // 首次扫描还没回来时旧 workspace 可能还没有树，搜索词也要记下。
-        self.workspaces.entry(old).or_default().query = self.search.query(cx);
+        }
+        // 首次扫描还没回来时旧 workspace 可能还没有树，搜索词也要记下；关掉了的（`forget_workspace`）不记。
+        if let Some(old) = old {
+            self.workspaces.entry(old).or_default().query = self.search.query(cx);
+        }
         let query = self.state().query.clone();
         self.search.set_query(query, cx);
         self.sync_file_search(cx);
     }
 
-    /// workspace `ws` 关掉了，丢掉它的树。
+    /// workspace `ws` 关掉了，丢掉它的树；是当前的那个时，下次切换不再替它存搜索词。
     pub fn forget_workspace(&mut self, ws: WorkspaceId) {
         self.workspaces.remove(&ws);
+        if self.ws == Some(ws) {
+            self.ws = None;
+        }
     }
 
     /// workspace `ws` 展开着的目录，app 后台读的时候连同根目录一起读。
