@@ -46,9 +46,13 @@ end
 if set -q RUNODE_FISH_DATA_DIR
     # runode-reload 再把它加进去。
     set -gu __runode_data_dir $RUNODE_FISH_DATA_DIR
-    if set -l index (contains --index -- $RUNODE_FISH_DATA_DIR $XDG_DATA_DIRS)
-        set -e XDG_DATA_DIRS[$index]
-        if test (count $XDG_DATA_DIRS) -eq 0
+    # fish 不按冒号拆 XDG_DATA_DIRS，它是一整个字符串，拆开再找。
+    set -l dirs (string split : -- "$XDG_DATA_DIRS")
+    if set -l index (contains --index -- $RUNODE_FISH_DATA_DIR $dirs)
+        set -e dirs[$index]
+        if set -q dirs[1]
+            set -gx XDG_DATA_DIRS (string join : -- $dirs)
+        else
             set -e XDG_DATA_DIRS
         end
     end
