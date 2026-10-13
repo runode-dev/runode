@@ -4,9 +4,9 @@
 //! `Pusher` 跟着监听活在同一个进程里：开着推送、监听开着、设备表里至少有一条登记时，它像命令行一样
 //! 经 `Connect` 连上宿主（`ClientKind::Cli`），每 `POLL_INTERVAL` 要一次会话列表，宿主认得任务板
 //! （`Welcome` 的 `todos`）时接着要一次任务表（`ListTodos`），交给 `Rounds` 决定什么时候推，要读屏幕时
-//! 发 `ReadScreen`；要发的推送交给发送线程（`send`）。两份回话谁先到不一定（宿主另起线程回任务表），
-//! `Rounds` 记着最近一份任务表，会话列表来时一起看；问过 `ListTodos` 后宿主发来的 `TodosChanged`
-//! 不理，下一轮照常要。不用
+//! 发 `ReadScreen`；要发的推送交给发送线程（`send`）。两份回话谁先到不一定（宿主另起线程回），
+//! `Rounds` 等同一轮的两份都到了才看任务，任务表按请求编号认是不是这一轮的；问过 `ListTodos` 后宿主
+//! 发来的 `TodosChanged` 不理，下一轮照常要。不用
 //! `Attach`：只看状态的连接也会让会话的 `SessionInfo::clients` 加一，桌面靠它为零回收后台已退出的会话。
 //! 不满足条件时断开这条连接，单独跑的宿主照常能因空闲退出。
 //!
@@ -193,6 +193,8 @@ struct Poller {
     connect_failures: u32,
     /// 记过日志的、推不了的 bundle id。
     skipped: HashSet<String>,
+    /// 这一轮 `ListTodos` 的请求编号。
+    todo_req: u32,
 }
 
 impl Poller {
@@ -211,6 +213,7 @@ impl Poller {
             next_poll: Instant::now(),
             connect_failures: 0,
             skipped: HashSet::new(),
+            todo_req: 0,
         }
     }
 
@@ -295,10 +298,14 @@ impl Poller {
                     }
                 }
             }
+            if poll {
+                self.todo_req = self.todo_req.wrapping_add(1);
+            }
+            let req = self.todo_req;
             if poll
                 && self.host.as_ref().is_some_and(|link| {
                     link.send(&ClientMsg::ListSessions).is_err()
-                        || (link.todos && link.send(&ClientMsg::ListTodos { req: 0 }).is_err())
+                        || (link.todos && link.send(&ClientMsg::ListTodos { req }).is_err())
                 })
             {
                 self.host = None;
@@ -310,12 +317,14 @@ impl Poller {
             let actions = match link.messages.recv_timeout(wait) {
                 Ok(HostMsg::SessionList { sessions }) => {
                     let mut actions = rounds.observe(&sessions, now);
-                    actions.extend(rounds.observe_todos(&sessions, now, crate::now_unix()));
+                    if link.todos {
+                        actions.extend(rounds.todo_sessions(&sessions, now, crate::now_unix()));
+                    }
                     actions
                 }
-                Ok(HostMsg::Todos { todos, .. }) => {
-                    rounds.set_todos(todos);
-                    Vec::new()
+                // 上一轮晚到的任务表不要，免得盖掉这一轮的。
+                Ok(HostMsg::Todos { req: answered, todos, .. }) if answered == req => {
+                    rounds.set_todos(todos, now, crate::now_unix())
                 }
                 Ok(HostMsg::ScreenText { id, text, .. }) => rounds.screen(id, Some(&text)),
                 Ok(HostMsg::Error { id: Some(id), .. }) => rounds.screen(id, None),
