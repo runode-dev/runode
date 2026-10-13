@@ -201,7 +201,7 @@ public enum Presentation {
         session.meta.displayTitle ?? String(localized: "终端")
     }
 
-    /// 会话卡片菜单里一组项目命令的名字：文件名，不在会话目录里时带上它在哪一级（`Makefile · ../..`）。
+    /// 会话卡片菜单里一组命令的名字：文件名，不在会话目录里时带上它在哪一级（`Makefile · ../..`）。
     /// 自己加的命令按这个项目的和通用的分。
     public static func taskSourceTitle(_ source: TaskSource, cwd: String?) -> String {
         switch source.kind {
@@ -226,8 +226,8 @@ public enum Presentation {
         }
     }
 
-    /// 菜单里项目命令那一节的标题：终端结束了时说明为什么点不了，前台在跑别的程序时说明命令会在新终端里跑。
-    public static func projectTasksHeader(_ session: SessionInfo) -> String {
+    /// 菜单里命令那一节的标题：终端结束了时说明为什么点不了，前台在跑别的程序时说明命令会在新终端里跑。
+    public static func tasksHeader(_ session: SessionInfo) -> String {
         if session.exited { return String(localized: "运行 · 终端已经结束") }
         if session.meta.foregroundIsShell { return String(localized: "运行") }
         if let foreground = session.meta.foreground, !foreground.isEmpty {

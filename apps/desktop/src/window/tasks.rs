@@ -1,5 +1,5 @@
-//! 标题栏右上角的项目命令：自己加的这个项目的和通用的命令、终端目录往上最近的 Makefile 的目标和
-//! package.json 的 scripts，由宿主列出、拼好命令行（`ClientMsg::ListProjectTasks`），和手机会话卡片上的
+//! 标题栏右上角的命令：自己加的这个项目的和通用的命令、终端目录往上最近的 Makefile 的目标和
+//! package.json 的 scripts，由宿主列出、拼好命令行（`ClientMsg::ListTasks`），和手机会话卡片上的
 //! 是同一份。右侧面板开关左边的按钮弹出分组的菜单，点一条在当前标签里分出一个终端（或按配置开新标签）、
 //! 在列命令的目录里跑它；菜单最上面一项添加自己的
 //! 命令，自己加的命令行尾有编辑和删除按钮，添加、编辑的对话框和改写命令文件在 `custom`。
@@ -33,7 +33,7 @@ use crate::{
     window::WindowView,
 };
 
-/// 宿主从这些文件里读项目命令（锁文件决定用哪个包管理器），它们变了就重列。
+/// 宿主从这些文件里读命令（锁文件决定用哪个包管理器），它们变了就重列。
 const TASK_FILES: [&str; 9] = [
     "GNUmakefile",
     "makefile",
@@ -104,7 +104,7 @@ pub(in crate::window) fn is_task_file(path: &Path) -> bool {
 }
 
 impl WindowView {
-    /// 终端目录换了或者命令文件变了时，在后台请宿主重列项目命令。
+    /// 终端目录换了或者命令文件变了时，在后台请宿主重列命令。
     pub(in crate::window) fn list_tasks(&mut self, cx: &mut Context<Self>) {
         let root = self.project_dir(cx);
         let workspace = &mut self.workspaces[self.active];
@@ -118,7 +118,7 @@ impl WindowView {
         project.tasks_stale = false;
         let job = cx.background_spawn({
             let root = root.clone();
-            async move { host_client::list_project_tasks(root) }
+            async move { host_client::list_tasks(root) }
         });
         cx.spawn(async move |this, cx| {
             let listed = job.await;
@@ -183,7 +183,7 @@ impl WindowView {
         let name = action.0.clone();
         let job = cx.background_spawn({
             let root = root.clone();
-            async move { host_client::list_project_tasks(root) }
+            async move { host_client::list_tasks(root) }
         });
         cx.spawn_in(window, async move |this, cx| {
             let found = match job.await {

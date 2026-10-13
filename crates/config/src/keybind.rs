@@ -60,9 +60,9 @@ pub enum Action {
     ToggleGit,
     ToggleFiles,
     ToggleGitHubActions,
-    /// 打开或关掉标题栏上的项目命令菜单。
+    /// 打开或关掉标题栏上的命令菜单。
     ToggleTasks,
-    /// 跑项目命令菜单里叫这个名字的命令，和在菜单里点它一样。
+    /// 跑命令菜单里叫这个名字的命令，和在菜单里点它一样。
     RunTask(String),
     /// 列出所有窗口里的 agent，选一个跳过去。
     GotoAgent,
@@ -260,7 +260,7 @@ pub static ACTIONS: &[ActionSpec] = &[
     ),
     plain!(
         "toggle_tasks",
-        "Open or close the project tasks menu in the title bar; pick with the arrow keys and press Enter to run",
+        "Open or close the tasks menu in the title bar; pick with the arrow keys and press Enter to run",
         Action::ToggleTasks
     ),
     plain!(
@@ -270,7 +270,7 @@ pub static ACTIONS: &[ActionSpec] = &[
     ),
     ActionSpec {
         name: "run_task",
-        doc: "Run the task with this name from the project tasks menu (your own, a Makefile target or a package.json script), as if clicked there; with duplicate names the one higher in the menu wins",
+        doc: "Run the task with this name from the tasks menu (your own, a Makefile target or a package.json script), as if clicked there; with duplicate names the one higher in the menu wins",
         param: Some("NAME"),
         parse: |param| Ok(Action::RunTask(required(param)?.to_owned())),
     },

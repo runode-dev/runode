@@ -221,12 +221,12 @@ import Testing
     }
 
     /// 等 `OpenWorkspace` 时来了不带编号的「unknown message」（旧版电脑不认识同一条连接上的
-    /// `ListProjectTasks`）：不是给新建工作区的，照样等着，随后的 `Opened` 仍然打开新终端；项目命令那边认下它。
+    /// `ListTasks`）：不是给新建工作区的，照样等着，随后的 `Opened` 仍然打开新终端；命令那边认下它。
     @Test func unnumberedErrorsAreNotTakenForTheWorkspaceReply() async {
         let model = SessionListModel(machine: machineRecord(), link: link)
         model.handle(.ready(generation: 1))
         model.handle(.message(.layout(req: 0, windows: [WindowLayout(index: 1, workspaces: [])])))
-        await model.loadProjectTasks(in: "/tmp")
+        await model.loadTasks(in: "/tmp")
         link.clearSent()
         await model.createWorkspace(at: "/Users/ethan")
         guard case .openWorkspace(let req, _, _, _)? = link.sent.first else {
@@ -238,9 +238,9 @@ import Testing
         model.handle(.message(.error(req: nil, id: nil, message: HostMsg.unknownMessage)))
         #expect(model.isSpawning)
         #expect(model.errorMessage == nil)
-        // 没开成的项目命令不再要。
+        // 没开成的命令不再要。
         link.clearSent()
-        await model.loadProjectTasks(in: "/var")
+        await model.loadTasks(in: "/var")
         #expect(link.sent.isEmpty)
         model.handle(.message(.opened(req: req, id: sessionB)))
         #expect(spawned == [sessionB])
@@ -622,7 +622,7 @@ extension LinkState {
         list.handle(.ready(generation: 1))
         list.handle(.message(.sessionList([info(sessionA), info(sessionB), info(sessionC)])))
         app.path = [.machine(machine.id), .terminal(machine: machine.id, session: sessionA)]
-        // 在 A 上跑项目命令，开出来的 C 换掉了这一页。
+        // 在 A 上跑命令，开出来的 C 换掉了这一页。
         app.openTerminal(machine: machine.id, session: sessionC)
         app.leaveEndedPane(machine: machine.id, session: sessionC, tabMates: [sessionB, sessionA, sessionC])
         #expect(app.shownSession(machine: machine.id, session: sessionC) == sessionA)

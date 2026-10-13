@@ -1,5 +1,5 @@
-//! 一个目录里能跑的项目命令：用户自己加的命令、Makefile 的目标、package.json 的 scripts，回
-//! `ClientMsg::ListProjectTasks`。手机在会话卡片上列出来，点一下就在那个会话里跑。
+//! 一个目录里能跑的命令：用户自己加的命令、Makefile 的目标、package.json 的 scripts，回
+//! `ClientMsg::ListTasks`。手机在会话卡片上列出来，点一下就在那个会话里跑。
 //!
 //! 自己加的命令都在 runode 根目录的 `tasks.json` 里（`runode_paths::Dirs::tasks_file`）：
 //! `{"global": {"名字": "命令行", …}, "projects": {"/项目/目录": {"名字": "命令行", …}, …}}`。宿主列出
@@ -12,7 +12,7 @@ use std::path::PathBuf;
 use serde::{Deserialize, Serialize};
 
 /// `TaskSource::tasks` 一次最多给这么多条。
-pub const MAX_PROJECT_TASKS: usize = 200;
+pub const MAX_TASKS: usize = 200;
 
 /// 一个列出命令的文件。
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -24,9 +24,9 @@ pub struct TaskSource {
     /// 别的种类为空，在请求的目录里跑。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub project: Option<PathBuf>,
-    /// 按文件里的先后，最多 `MAX_PROJECT_TASKS` 条。
-    pub tasks: Vec<ProjectTask>,
-    /// 多于 `MAX_PROJECT_TASKS` 条，多出来的没给。
+    /// 按文件里的先后，最多 `MAX_TASKS` 条。
+    pub tasks: Vec<TaskEntry>,
+    /// 多于 `MAX_TASKS` 条，多出来的没给。
     #[serde(default)]
     pub truncated: bool,
 }
@@ -49,7 +49,7 @@ pub enum TaskSourceKind {
 
 /// 一条能跑的命令。
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ProjectTask {
+pub struct TaskEntry {
     /// 目标名或 script 名。
     pub name: String,
     /// 在 `TaskSource::project`（为空时是请求的目录）里打进 shell 就能跑的完整命令行，名字里有 shell 的

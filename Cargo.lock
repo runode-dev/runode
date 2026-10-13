@@ -4638,9 +4638,9 @@ dependencies = [
  "libc",
  "runode-git",
  "runode-paths",
- "runode-project-tasks",
  "runode-protocol",
  "runode-shared-types",
+ "runode-tasks",
  "runode-terminal",
  "runode-todo",
  "tracing",
@@ -4658,15 +4658,6 @@ dependencies = [
  "regex",
  "syntect",
  "two-face",
-]
-
-[[package]]
-name = "runode-project-tasks"
-version = "0.1.8"
-dependencies = [
- "runode-paths",
- "runode-shared-types",
- "serde_json",
 ]
 
 [[package]]
@@ -4700,6 +4691,15 @@ name = "runode-shared-types"
 version = "0.1.8"
 dependencies = [
  "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "runode-tasks"
+version = "0.1.8"
+dependencies = [
+ "runode-paths",
+ "runode-shared-types",
  "serde_json",
 ]
 

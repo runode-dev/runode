@@ -1,5 +1,5 @@
 [package]
-name = "runode-project-tasks"
+name = "runode-tasks"
 description = "The commands a directory can run: the user's own from tasks.json, the nearest Makefile's targets and package.json's scripts, as ready-to-run command lines"
 version.workspace = true
 edition.workspace = true

@@ -38,7 +38,7 @@ pub(in crate::window) struct Project {
     /// 上次开始读的时刻，以及读了多久，据此决定下次隔多久。
     pub(super) refreshed_at: Option<Instant>,
     pub(super) scan_cost: Duration,
-    /// 标题栏命令菜单里的项目命令（Makefile 的目标、package.json 的 scripts）和给哪个目录列的；还没列过时
+    /// 标题栏命令菜单里的命令（Makefile 的目标、package.json 的 scripts）和给哪个目录列的；还没列过时
     /// 为空。后台正在列时不再发起；Makefile、package.json 这类文件变了时标成要重列。
     pub tasks: Option<(PathBuf, Vec<TaskSource>)>,
     pub tasks_listing: bool,

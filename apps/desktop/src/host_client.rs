@@ -300,9 +300,9 @@ pub fn held_layout() -> Result<Vec<WindowLayout>> {
     link().held_layout(LIST_TIMEOUT)
 }
 
-/// 宿主在 `dir` 里列出的项目命令，见 `ClientMsg::ListProjectTasks`。会等宿主回话，别在主线程上调。
-pub fn list_project_tasks(dir: PathBuf) -> Result<Vec<TaskSource>> {
-    link().list_project_tasks(dir, LIST_TIMEOUT)
+/// 宿主在 `dir` 里列出的命令，见 `ClientMsg::ListTasks`。会等宿主回话，别在主线程上调。
+pub fn list_tasks(dir: PathBuf) -> Result<Vec<TaskSource>> {
+    link().list_tasks(dir, LIST_TIMEOUT)
 }
 
 /// 发一条任务板的请求（`ClientMsg::ListTodos` 等），等宿主回话；宿主不认得这些消息时直接报错，见

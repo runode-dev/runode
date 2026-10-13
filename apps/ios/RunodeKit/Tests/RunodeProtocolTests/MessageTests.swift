@@ -43,7 +43,7 @@ func sameJSON(_ a: Data, _ b: Data) throws -> Bool {
     @Test(arguments: [
         "hello", "list", "layout_request", "open", "open_workspace", "open_workspace_named", "rename_workspace",
         "list_dirs", "list_dirs_home",
-        "list_project_tasks", "spawn",
+        "list_tasks", "spawn",
         "attach_vt", "attach_meta", "attach_size", "detach", "resize", "focus", "kill",
         "read_screen", "read_screen_command", "send_keys", "paste",
         "push_register", "push_unregister", "keep_awake",
@@ -64,7 +64,7 @@ func sameJSON(_ a: Data, _ b: Data) throws -> Bool {
             case "rename_workspace": .renameWorkspace(req: 9, window: 1, workspace: 2, name: "前端")
             case "list_dirs": .listDirs(req: 5, path: "/Users/ethan")
             case "list_dirs_home": .listDirs(req: 5, path: nil)
-            case "list_project_tasks": .listProjectTasks(req: 5, dir: "/Users/ethan/dev/中文")
+            case "list_tasks": .listTasks(req: 5, dir: "/Users/ethan/dev/中文")
             case "spawn": .spawn(req: 3, size: size, cwd: nil, integration: .detect, start: true)
             case "attach_vt": .attach(id: id, size: nil, mode: .vtReplay)
             case "attach_meta": .attach(id: id, size: nil, mode: .metaOnly)
@@ -118,7 +118,7 @@ func sameJSON(_ a: Data, _ b: Data) throws -> Bool {
             .listSessions, .layout(req: 0), .open(req: 1, placement: .tab, near: id, cwd: "/tmp", focus: false),
             .openWorkspace(req: 1, dir: "/tmp", focus: false),
             .renameWorkspace(req: 1, window: 1, workspace: 1, name: "a"), .listDirs(req: 1, path: nil),
-            .listProjectTasks(req: 1, dir: "/tmp"),
+            .listTasks(req: 1, dir: "/tmp"),
             .spawn(req: 1, size: size, cwd: nil, integration: .detect, start: true),
             .attach(id: id, size: nil, mode: .vtReplay), .detach(id: id), .resize(id: id, size: size),
             .focus(id: id, focused: true), .kill(id: id), .readScreen(id: id, lines: 3),
@@ -129,7 +129,7 @@ func sameJSON(_ a: Data, _ b: Data) throws -> Bool {
         ]
         func covered(_ message: ClientMsg) -> Bool {
             switch message {
-            case .hello, .listSessions, .layout, .open, .openWorkspace, .renameWorkspace, .listDirs, .listProjectTasks,
+            case .hello, .listSessions, .layout, .open, .openWorkspace, .renameWorkspace, .listDirs, .listTasks,
                 .spawn, .attach, .detach, .resize, .focus, .kill, .readScreen, .sendKeys, .paste, .git, .pushRegister,
                 .keepAwake:
                 true
@@ -240,10 +240,10 @@ func sameJSON(_ a: Data, _ b: Data) throws -> Bool {
         #expect(try decode("layout_changed") == .layoutChanged)
     }
 
-    /// 项目命令按来源分组读出来；没有说明的读成空。
-    @Test func projectTasksAreGroupedBySource() throws {
-        guard case .projectTasks(let req, let dir, var sources) = try decode("project_tasks") else {
-            Issue.record("not project tasks")
+    /// 命令按来源分组读出来；没有说明的读成空。
+    @Test func tasksAreGroupedBySource() throws {
+        guard case .tasks(let req, let dir, var sources) = try decode("tasks") else {
+            Issue.record("not tasks")
             return
         }
         #expect(req == 6)
@@ -251,16 +251,16 @@ func sameJSON(_ a: Data, _ b: Data) throws -> Bool {
         #expect(sources.map(\.kind) == [.custom, .makefile, .packageJson])
         let custom = sources.removeFirst()
         #expect(custom.project == "/Users/ethan/dev/app")
-        #expect(custom.tasks == [ProjectTask(name: "lint", command: "cargo clippy # slow", description: "cargo clippy # slow")])
+        #expect(custom.tasks == [TaskEntry(name: "lint", command: "cargo clippy # slow", description: "cargo clippy # slow")])
         #expect(sources[0].project == nil)
         #expect(
             sources[0].tasks == [
-                ProjectTask(name: "build", command: "make -C .. build", description: "编译全部"),
-                ProjectTask(name: "test", command: "make -C .. test"),
+                TaskEntry(name: "build", command: "make -C .. build", description: "编译全部"),
+                TaskEntry(name: "test", command: "make -C .. test"),
             ])
         #expect(sources[0].file == "/Users/ethan/dev/app/Makefile")
         #expect(!sources[0].truncated && sources[1].truncated)
-        #expect(sources[1].tasks == [ProjectTask(name: "dev", command: "pnpm run dev", description: "vite")])
+        #expect(sources[1].tasks == [TaskEntry(name: "dev", command: "pnpm run dev", description: "vite")])
     }
 
     @Test func repliesAndGoodbyes() throws {
@@ -289,16 +289,16 @@ func sameJSON(_ a: Data, _ b: Data) throws -> Bool {
         let bell = try JSONDecoder().decode(
             HostMsg.self, from: Data(#"{"type":"bell","id":"0123456789abcdef0011223344556677","extra":true}"#.utf8))
         #expect(bell == .bell(id: id))
-        // 不认识的项目命令来源读成 `unknown`，缺的 `truncated` 读成假。
+        // 不认识的命令来源读成 `unknown`，缺的 `truncated` 读成假。
         let tasks = try JSONDecoder().decode(
             HostMsg.self,
             from: Data(
-                #"{"type":"project_tasks","req":1,"dir":"/a","sources":[{"kind":"justfile","file":"/a/justfile","tasks":[]}]}"#
+                #"{"type":"tasks","req":1,"dir":"/a","sources":[{"kind":"justfile","file":"/a/justfile","tasks":[]}]}"#
                     .utf8))
-        if case .projectTasks(_, _, let sources) = tasks {
+        if case .tasks(_, _, let sources) = tasks {
             #expect(sources.map(\.kind) == [.unknown] && !sources[0].truncated)
         } else {
-            Issue.record("not project tasks")
+            Issue.record("not tasks")
         }
         // 新的 agent 状态不让整条消息失败。
         let meta = try JSONDecoder().decode(

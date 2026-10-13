@@ -18,7 +18,7 @@
         var onSelectPane: (SessionId) -> Void = { _ in }
         /// 显示的分屏结束了，带着它所在标签里的分屏：切回别的分屏。
         var onPaneEnded: ([SessionId]) -> Void = { _ in }
-        /// 这台电脑的会话列表，「⋯」菜单里的项目命令从它取、经它跑。
+        /// 这台电脑的会话列表，「⋯」菜单里的命令从它取、经它跑。
         var sessions: SessionListModel?
         /// 断线横幅占的高度，终端视图据此在顶上让出地方，横幅不挡内容。
         @State private var bannerHeight: CGFloat = 0
@@ -73,7 +73,7 @@
                     if !Task.isCancelled { connectingLong = true }
                 }
                 .task(id: session?.meta.cwd) {
-                    if let cwd = session?.meta.cwd { await sessions?.loadProjectTasks(in: cwd) }
+                    if let cwd = session?.meta.cwd { await sessions?.loadTasks(in: cwd) }
                 }
                 .onChange(of: paneIds, initial: true) { _, ids in
                     if !ids.isEmpty { tabMates = ids }
@@ -119,7 +119,7 @@
             }
         }
 
-        /// 会话列表里这个终端的信息（目录、前台程序），菜单里的项目命令据此列出、判断能不能跑。
+        /// 会话列表里这个终端的信息（目录、前台程序），菜单里的命令据此列出、判断能不能跑。
         private var session: SessionInfo? { sessions?.session(model.sessionId) }
 
         private var sizeMenu: some View {
@@ -159,7 +159,7 @@
                     Button("Git", systemImage: "arrow.triangle.branch") { onOpenGit() }
                 }
                 if let sessions, let session, !model.isEnded {
-                    ProjectTasksSection(model: sessions, session: session) { model.scrollToBottom() }
+                    TasksSection(model: sessions, session: session) { model.scrollToBottom() }
                 }
                 if !model.isEnded {
                     Button("结束会话", systemImage: "xmark.circle", role: .destructive) {

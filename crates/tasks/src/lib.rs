@@ -1,6 +1,6 @@
-//! 列一个目录里能跑的项目命令（`list`）：先是 runode 根目录的 `tasks.json` 里自己加的、这个目录所在
+//! 列一个目录里能跑的命令（`list`）：先是 runode 根目录的 `tasks.json` 里自己加的、这个目录所在
 //! 项目的和通用的命令，再从目录往上找最近的 Makefile 和 package.json，读出目标和 scripts，拼好在这个
-//! 目录里能直接跑的命令行。宿主用它回 `ClientMsg::ListProjectTasks`，手机在会话卡片上、桌面在标题栏的
+//! 目录里能直接跑的命令行。宿主用它回 `ClientMsg::ListTasks`，手机在会话卡片上、桌面在标题栏的
 //! 菜单里列出来。只读几个小文件，但在断掉的网络挂载上也会一直卡住，调用方别在要及时响应的线程上调。
 
 use std::{
@@ -9,7 +9,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use runode_shared_types::project_tasks::{MAX_PROJECT_TASKS, ProjectTask, TaskSource, TaskSourceKind};
+use runode_shared_types::tasks::{MAX_TASKS, TaskEntry, TaskSource, TaskSourceKind};
 
 /// make 按这个顺序找默认的 makefile。
 const MAKEFILE_NAMES: [&str; 3] = ["GNUmakefile", "makefile", "Makefile"];
@@ -51,11 +51,11 @@ pub fn list(dir: &Path) -> Result<Vec<TaskSource>, String> {
             Some(rel) => format!("make -C {}", quote(&rel)),
         };
         let targets = makefile_targets(&text);
-        let truncated = targets.len() > MAX_PROJECT_TASKS;
+        let truncated = targets.len() > MAX_TASKS;
         let tasks = targets
             .into_iter()
-            .take(MAX_PROJECT_TASKS)
-            .map(|(name, description)| ProjectTask { command: format!("{prefix} {}", quote(&name)), name, description })
+            .take(MAX_TASKS)
+            .map(|(name, description)| TaskEntry { command: format!("{prefix} {}", quote(&name)), name, description })
             .collect();
         sources.push(TaskSource { kind: TaskSourceKind::Makefile, file, project: None, tasks, truncated });
     }
@@ -73,11 +73,11 @@ pub fn list(dir: &Path) -> Result<Vec<TaskSource>, String> {
             .filter(|(k, _)| quotable(k))
             .filter_map(|(k, v)| Some((k, v.as_str()?)))
             .collect();
-        let truncated = scripts.len() > MAX_PROJECT_TASKS;
+        let truncated = scripts.len() > MAX_TASKS;
         let tasks = scripts
             .into_iter()
-            .take(MAX_PROJECT_TASKS)
-            .map(|(name, body)| ProjectTask {
+            .take(MAX_TASKS)
+            .map(|(name, body)| TaskEntry {
                 command: format!("{manager} run {}", quote(name)),
                 name: name.clone(),
                 description: Some(body.to_owned()),
@@ -98,11 +98,11 @@ fn custom_sources(text: &str, file: &Path, dir: &Path) -> Vec<TaskSource> {
     };
     let source = |kind, project: Option<PathBuf>, entries: Option<&serde_json::Map<String, serde_json::Value>>| {
         let entries: Vec<_> = entries.into_iter().flatten().filter_map(|(k, v)| Some((k, v.as_str()?))).collect();
-        let truncated = entries.len() > MAX_PROJECT_TASKS;
+        let truncated = entries.len() > MAX_TASKS;
         let tasks: Vec<_> = entries
             .into_iter()
-            .take(MAX_PROJECT_TASKS)
-            .map(|(name, line)| ProjectTask {
+            .take(MAX_TASKS)
+            .map(|(name, line)| TaskEntry {
                 command: line.to_owned(),
                 name: name.clone(),
                 description: Some(line.to_owned()),
@@ -245,7 +245,7 @@ mod tests {
             }
         }"#;
         let file = Path::new("/h/.runode/tasks.json");
-        let task = |name: &str, command: &str, line: &str| ProjectTask {
+        let task = |name: &str, command: &str, line: &str| TaskEntry {
             name: name.into(),
             command: command.into(),
             description: Some(line.into()),

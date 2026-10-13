@@ -29,7 +29,7 @@ pub use message::{
     AttachMode, BuildId, Caps, ClientKind, ClientMsg, ClipboardContent, FinishedCommand, GoodbyeReason, HandoffRefusal,
     HostMsg, Placement, SessionId, SessionInfo,
 };
-pub use runode_shared_types::project_tasks::{self, MAX_PROJECT_TASKS, ProjectTask, TaskSource, TaskSourceKind};
+pub use runode_shared_types::tasks::{self, MAX_TASKS, TaskEntry, TaskSource, TaskSourceKind};
 
 /// 宿主给每个会话的 shell 设的环境变量：这个会话的 `SessionId`。在终端里跑的命令行据此知道
 /// 自己在哪个会话里。

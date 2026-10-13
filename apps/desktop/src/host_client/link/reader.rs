@@ -100,7 +100,7 @@ pub(super) fn dispatch(inner: &Inner, generation: u64, message: HostMsg) {
                 let _ = inner.control(&ClientMsg::Kill { id });
             }
         },
-        message @ (HostMsg::ProjectTasks { req, .. }
+        message @ (HostMsg::Tasks { req, .. }
         | HostMsg::Layout { req, .. }
         | HostMsg::Todos { req, .. }
         | HostMsg::Todo { req, .. }

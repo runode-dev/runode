@@ -43,8 +43,8 @@ use serde::{Deserialize, Serialize};
 use crate::{
     git::{GitBranch, GitFileDiff, GitRequest, GitStatus},
     layout::WindowLayout,
-    project_tasks::TaskSource,
     push::ApnsEnv,
+    tasks::TaskSource,
     todo::{Schedule, Todo, TodoSpec, When},
 };
 
@@ -239,10 +239,10 @@ pub enum ClientMsg {
     /// 从 1 开始。宿主转给 app 的界面（没有界面连着时自己改手里的布局），回 `Done`；没有这个工作区、
     /// `name` 去掉首尾空白后为空时回 `Error`。
     RenameWorkspace { req: u32, window: u32, workspace: u32, name: String },
-    /// 列 `dir` 这个目录里能跑的项目命令（Makefile 的目标、package.json 的 scripts），回
-    /// `HostMsg::ProjectTasks`，见 `project_tasks` 模块；`dir` 不是绝对路径、不是目录时回 `Error`。
+    /// 列 `dir` 这个目录里能跑的命令（Makefile 的目标、package.json 的 scripts），回
+    /// `HostMsg::Tasks`，见 `tasks` 模块；`dir` 不是绝对路径、不是目录时回 `Error`。
     /// 宿主自己办，不转给界面。
-    ListProjectTasks { req: u32, dir: PathBuf },
+    ListTasks { req: u32, dir: PathBuf },
     /// 在会话 `id` 的 shell 当前所在的仓库里读写 git，见 `git` 模块。一条连接上的这些请求按到达的
     /// 先后一件一件办，推送、拉取这类要等网络的会排着后面的。办不了时回的 `Error` 只带 `req`、不带
     /// `id`：错是这件请求的（git 的报错、没有这个会话），不是会话出了事。
@@ -512,9 +512,9 @@ pub enum HostMsg {
         #[serde(default)]
         truncated: bool,
     },
-    /// 回 `ClientMsg::ListProjectTasks`。`dir` 是请求里的目录；`sources` 先 Makefile 后 package.json，
+    /// 回 `ClientMsg::ListTasks`。`dir` 是请求里的目录；`sources` 先 Makefile 后 package.json，
     /// 一样都没找到时为空。
-    ProjectTasks {
+    Tasks {
         req: u32,
         dir: PathBuf,
         sources: Vec<TaskSource>,

@@ -139,9 +139,9 @@ public final class SessionListModel {
     public var errorMessage: String?
     /// 等用户确认结束的会话。
     public var killTarget: SessionId?
-    /// 各个会话目录里能跑的项目命令（Makefile 的目标、package.json 的 scripts），按目录；宿主回过话的
+    /// 各个会话目录里能跑的命令（Makefile 的目标、package.json 的 scripts），按目录；宿主回过话的
     /// 目录才有，列不出来的目录是空的。
-    public private(set) var projectTasks: [String: [TaskSource]] = [:]
+    public private(set) var tasks: [String: [TaskSource]] = [:]
     /// 新建工作区时选目录用的，选着的时候才有。
     public private(set) var directoryPicker: DirectoryPickerModel?
     /// 新开会话用的网格尺寸，视图按手机屏幕算好后设进来。
@@ -163,7 +163,7 @@ public final class SessionListModel {
     /// 终端页开着的会话。
     @ObservationIgnored private var screens: Set<SessionId> = []
     /// 在等回话的新开终端、新建工作区的请求。宿主对 `Open`、`OpenWorkspace`、`Spawn` 出错一定回带编号的
-    /// `Error`，不带编号的「unknown message」是给别的请求（比如旧版电脑不认识的 `ListProjectTasks`）的，不认领。
+    /// `Error`，不带编号的「unknown message」是给别的请求（比如旧版电脑不认识的 `ListTasks`）的，不认领。
     @ObservationIgnored private var pendingSpawn: PendingSpawn?
     /// 在等回话的工作区改名的请求编号。
     @ObservationIgnored private var pendingRenames: Set<UInt32> = []
@@ -175,12 +175,12 @@ public final class SessionListModel {
     /// 每个会话在等的那次读屏幕是哪种，回话按会话对上（`ScreenText` 不带请求编号，节流保证同一个
     /// 会话同时只有一次在等）。
     @ObservationIgnored private var pendingPreviews: [SessionId: PreviewRead] = [:]
-    /// 在等回话的列项目命令的请求，按请求编号记着列的目录。
-    @ObservationIgnored private var pendingProjectTasks: [UInt32: String] = [:]
+    /// 在等回话的列命令的请求，按请求编号记着列的目录。
+    @ObservationIgnored private var pendingTasks: [UInt32: String] = [:]
     /// 正在列的目录：取请求编号之前就记上，同一个目录不会同时要两次。
     @ObservationIgnored private var listingDirs: Set<String> = []
-    /// 电脑上的 runode 太旧，不认识 `ListProjectTasks`：这次连着时不再要。
-    @ObservationIgnored private var projectTasksUnsupported = false
+    /// 电脑上的 runode 太旧，不认识 `ListTasks`：这次连着时不再要。
+    @ObservationIgnored private var tasksUnsupported = false
 
     /// 在等回话的新开请求。
     private struct PendingSpawn {
@@ -191,7 +191,7 @@ public final class SessionListModel {
         var failure: String
         /// 退回 `Spawn` 时用的目录，为空时用家目录。
         var cwd: String? = nil
-        /// 开好后在新终端里跑的命令行（项目命令），带着预先取好的粘贴、回车的请求编号。
+        /// 开好后在新终端里跑的命令行，带着预先取好的粘贴、回车的请求编号。
         var command: (text: String, paste: UInt32, enter: UInt32)? = nil
     }
 
@@ -448,26 +448,26 @@ public final class SessionListModel {
         link.send(.layout(req: Self.layoutRequest))
     }
 
-    // MARK: 项目命令
+    // MARK: 命令
 
-    /// 这个会话目录里能跑的项目命令，还没列过或者目录不知道时为空。
-    public func projectTasks(for session: SessionInfo) -> [TaskSource] {
-        session.meta.cwd.flatMap { projectTasks[$0] } ?? []
+    /// 这个会话目录里能跑的命令，还没列过或者目录不知道时为空。
+    public func tasks(for session: SessionInfo) -> [TaskSource] {
+        session.meta.cwd.flatMap { tasks[$0] } ?? []
     }
 
-    /// 能跑这个会话目录里的项目命令：连着、终端没结束。
-    public func canRunProjectTask(in session: SessionInfo) -> Bool {
+    /// 能跑这个会话目录里的命令：连着、终端没结束。
+    public func canRunTask(in session: SessionInfo) -> Bool {
         connected && !session.exited
     }
 
-    /// 跑一条会话 `id` 目录里列出的项目命令，在 `project`（来源的 `TaskSource.project`，为空时是会话
+    /// 跑一条会话 `id` 目录里列出的命令，在 `project`（来源的 `TaskSource.project`，为空时是会话
     /// 目录）里跑。shell 停在提示符上、要跑的目录就是会话目录时像快速回复一样在这个会话里粘贴再回车，
     /// 返回真；前台在跑别的程序（agent、vim……）时打进去会落进那个程序，要跑的目录不是会话目录时打进去
     /// 会跑错地方，这两种都改在电脑上把它分屏、右边开一个那个目录的新终端跑，开好后调 `onSpawned` 打开新终端，
     /// 返回假。
     @discardableResult
-    public func runProjectTask(_ task: ProjectTask, at project: String? = nil, in id: SessionId) async -> Bool {
-        guard let session = session(id), canRunProjectTask(in: session) else { return false }
+    public func runTask(_ task: TaskEntry, at project: String? = nil, in id: SessionId) async -> Bool {
+        guard let session = session(id), canRunTask(in: session) else { return false }
         let cwd = project ?? session.meta.cwd
         if session.meta.foregroundIsShell, cwd == session.meta.cwd {
             let paste = await link.nextRequestId()
@@ -489,30 +489,30 @@ public final class SessionListModel {
         return false
     }
 
-    /// 列 `dir` 里的项目命令：卡片出现、会话换了目录时要一次，列过的不再要；`refreshing` 为真时（下拉
+    /// 列 `dir` 里的命令：卡片出现、会话换了目录时要一次，列过的不再要；`refreshing` 为真时（下拉
     /// 刷新，Makefile、package.json 可能改过了）列过的也再要。同一个目录同时只等一次回话。
-    public func loadProjectTasks(in dir: String, refreshing: Bool = false) async {
-        guard connected, !projectTasksUnsupported, !listingDirs.contains(dir),
-            refreshing || projectTasks[dir] == nil
+    public func loadTasks(in dir: String, refreshing: Bool = false) async {
+        guard connected, !tasksUnsupported, !listingDirs.contains(dir),
+            refreshing || tasks[dir] == nil
         else { return }
         listingDirs.insert(dir)
         let req = await link.nextRequestId()
-        pendingProjectTasks[req] = dir
-        link.send(.listProjectTasks(req: req, dir: dir))
+        pendingTasks[req] = dir
+        link.send(.listTasks(req: req, dir: dir))
     }
 
-    /// 下拉刷新：重新列一遍各个会话目录里的项目命令。
-    public func refreshProjectTasks() async {
+    /// 下拉刷新：重新列一遍各个会话目录里的命令。
+    public func refreshTasks() async {
         for dir in Set(sessions.compactMap(\.meta.cwd)).sorted() {
-            await loadProjectTasks(in: dir, refreshing: true)
+            await loadTasks(in: dir, refreshing: true)
         }
     }
 
-    /// 收到列项目命令的回话（或者它的 `Error`）：记下结果，列不出来的目录记成空的，不再要。
-    private func finishProjectTasks(_ req: UInt32, sources: [TaskSource]) {
-        guard let dir = pendingProjectTasks.removeValue(forKey: req) else { return }
+    /// 收到列命令的回话（或者它的 `Error`）：记下结果，列不出来的目录记成空的，不再要。
+    private func finishTasks(_ req: UInt32, sources: [TaskSource]) {
+        guard let dir = pendingTasks.removeValue(forKey: req) else { return }
         listingDirs.remove(dir)
-        projectTasks[dir] = sources
+        tasks[dir] = sources
     }
 
     // MARK: 预览
@@ -575,9 +575,9 @@ public final class SessionListModel {
                 watching = []
                 throttle.reset()
                 pendingPreviews = [:]
-                pendingProjectTasks = [:]
+                pendingTasks = [:]
                 listingDirs = []
-                projectTasksUnsupported = false
+                tasksUnsupported = false
                 pendingRenames = []
                 for reply in quickReplies.values {
                     reply.connectionLost()
@@ -667,8 +667,8 @@ public final class SessionListModel {
             }
         case .layoutChanged:
             refreshLayout()
-        case .projectTasks(let req, _, let sources):
-            finishProjectTasks(req, sources: sources)
+        case .tasks(let req, _, let sources):
+            finishTasks(req, sources: sources)
         case .done(let req) where pendingRenames.contains(req):
             pendingRenames.remove(req)
             refresh()
@@ -701,8 +701,8 @@ public final class SessionListModel {
                 }
             } else if let req, pendingRenames.remove(req) != nil {
                 errorMessage = String(localized: "改不了名：\(message)")
-            } else if let req, pendingProjectTasks[req] != nil {
-                finishProjectTasks(req, sources: [])
+            } else if let req, pendingTasks[req] != nil {
+                finishTasks(req, sources: [])
             } else if req == Self.layoutRequest {
                 // 电脑上没有 app 的界面连着宿主：所有会话都在后台。
                 windows = []
@@ -710,11 +710,11 @@ public final class SessionListModel {
                 // 电脑上的 runode 太旧，不认识 `RenameWorkspace`。
                 pendingRenames = []
                 errorMessage = String(localized: "改不了名：电脑上的 runode 版本太旧，先升级它。")
-            } else if req == nil, message == HostMsg.unknownMessage, !pendingProjectTasks.isEmpty {
-                // 电脑上的 runode 太旧，不认识 `ListProjectTasks`：不列了，卡片上不出现项目命令。
-                pendingProjectTasks = [:]
+            } else if req == nil, message == HostMsg.unknownMessage, !pendingTasks.isEmpty {
+                // 电脑上的 runode 太旧，不认识 `ListTasks`：不列了，卡片上不出现命令。
+                pendingTasks = [:]
                 listingDirs = []
-                projectTasksUnsupported = true
+                tasksUnsupported = true
             } else if let id, message.hasPrefix("no session") {
                 // 宿主说没有这个会话：别处已经结束了它。读屏幕超时这类错误不算。
                 watching.remove(id)

@@ -2,8 +2,8 @@
 
 use runode_protocol::{
     AttachMode, BuildId, Caps, ClientKind, ClientMsg, FinishedCommand, Frame, FrameKind, GoodbyeReason, HandoffRefusal,
-    HostMsg, PaneLayout, PaneRect, Placement, ProjectTask, SessionId, SessionInfo, TabLayout, TaskSource,
-    TaskSourceKind, WindowLayout, WorkspaceLayout,
+    HostMsg, PaneLayout, PaneRect, Placement, SessionId, SessionInfo, TabLayout, TaskEntry, TaskSource, TaskSourceKind,
+    WindowLayout, WorkspaceLayout,
     message::InvalidSessionId,
     push::ApnsEnv,
     read_frame,
@@ -65,13 +65,13 @@ fn layout() -> Vec<WindowLayout> {
     }]
 }
 
-fn project_tasks() -> Vec<TaskSource> {
+fn tasks() -> Vec<TaskSource> {
     vec![
         TaskSource {
             kind: TaskSourceKind::Makefile,
             file: "/Users/me/dev/Makefile".into(),
             project: None,
-            tasks: vec![ProjectTask {
+            tasks: vec![TaskEntry {
                 name: "build".into(),
                 command: "make build".into(),
                 description: Some("编译".into()),
@@ -82,7 +82,7 @@ fn project_tasks() -> Vec<TaskSource> {
             kind: TaskSourceKind::PackageJson,
             file: "/Users/me/package.json".into(),
             project: None,
-            tasks: vec![ProjectTask { name: "dev".into(), command: "pnpm run dev".into(), description: None }],
+            tasks: vec![TaskEntry { name: "dev".into(), command: "pnpm run dev".into(), description: None }],
             truncated: true,
         },
     ]
@@ -212,7 +212,7 @@ fn client_messages_round_trip() {
         ClientMsg::ListDirs { req: 13, path: Some("/Users/me/中文".into()) },
         ClientMsg::OpenWorkspace { req: 14, dir: "/Users/me/dev".into(), focus: true, name: Some("后端".into()) },
         ClientMsg::RenameWorkspace { req: 16, window: 1, workspace: 2, name: "前端".into() },
-        ClientMsg::ListProjectTasks { req: 15, dir: "/Users/me/中文".into() },
+        ClientMsg::ListTasks { req: 15, dir: "/Users/me/中文".into() },
         ClientMsg::Handoff { min_format: 1, max_format: 3 },
         ClientMsg::HandoffReady,
         ClientMsg::HandoffAbort { reason: "cannot adopt the pty".into() },
@@ -364,8 +364,8 @@ fn host_messages_round_trip() {
         HostMsg::Done { req: 4 },
         HostMsg::Dirs { req: 5, path: "/Users/me".into(), dirs: vec!["dev".into(), "文档".into()], truncated: false },
         HostMsg::Dirs { req: 6, path: "/".into(), dirs: Vec::new(), truncated: true },
-        HostMsg::ProjectTasks { req: 7, dir: "/Users/me/dev".into(), sources: project_tasks() },
-        HostMsg::ProjectTasks { req: 8, dir: "/".into(), sources: Vec::new() },
+        HostMsg::Tasks { req: 7, dir: "/Users/me/dev".into(), sources: tasks() },
+        HostMsg::Tasks { req: 8, dir: "/".into(), sources: Vec::new() },
         HostMsg::Error { req: Some(3), id: None, message: "no such directory".into() },
         HostMsg::Goodbye { reason: GoodbyeReason::Handoff },
         HostMsg::Goodbye { reason: GoodbyeReason::Error { message: "boom".into() } },
@@ -817,22 +817,22 @@ fn workspace_layouts_carry_their_directory() {
     assert_eq!(&serde_json::from_str::<WindowLayout>(&json).unwrap(), window);
 }
 
-/// 列项目命令的消息的 JSON 样子（手机端按这个写），缺了可缺省的字段、不认识的来源种类时的读法。
+/// 列命令的消息的 JSON 样子（手机端按这个写），缺了可缺省的字段、不认识的来源种类时的读法。
 #[test]
-fn project_task_messages() {
-    let list = ClientMsg::ListProjectTasks { req: 5, dir: "/Users/me/dev".into() };
+fn task_messages() {
+    let list = ClientMsg::ListTasks { req: 5, dir: "/Users/me/dev".into() };
     let json = serde_json::to_string(&list).unwrap();
-    assert_eq!(json, r#"{"type":"list_project_tasks","req":5,"dir":"/Users/me/dev"}"#);
+    assert_eq!(json, r#"{"type":"list_tasks","req":5,"dir":"/Users/me/dev"}"#);
     assert_eq!(serde_json::from_str::<ClientMsg>(&json).unwrap(), list);
 
-    let tasks = HostMsg::ProjectTasks {
+    let tasks = HostMsg::Tasks {
         req: 5,
         dir: "/Users/me/dev".into(),
         sources: vec![TaskSource {
             kind: TaskSourceKind::PackageJson,
             file: "/Users/me/dev/package.json".into(),
             project: None,
-            tasks: vec![ProjectTask {
+            tasks: vec![TaskEntry {
                 name: "dev".into(),
                 command: "npm run dev".into(),
                 description: Some("vite".into()),
@@ -843,14 +843,14 @@ fn project_task_messages() {
     let json = serde_json::to_string(&tasks).unwrap();
     assert_eq!(
         json,
-        r#"{"type":"project_tasks","req":5,"dir":"/Users/me/dev","sources":[{"kind":"package_json","file":"/Users/me/dev/package.json","tasks":[{"name":"dev","command":"npm run dev","description":"vite"}],"truncated":false}]}"#
+        r#"{"type":"tasks","req":5,"dir":"/Users/me/dev","sources":[{"kind":"package_json","file":"/Users/me/dev/package.json","tasks":[{"name":"dev","command":"npm run dev","description":"vite"}],"truncated":false}]}"#
     );
     assert_eq!(serde_json::from_str::<HostMsg>(&json).unwrap(), tasks);
     let short: HostMsg = serde_json::from_str(
-        r#"{"type":"project_tasks","req":5,"dir":"/","sources":[{"kind":"justfile","file":"/justfile","tasks":[{"name":"a","command":"just a"}]}]}"#,
+        r#"{"type":"tasks","req":5,"dir":"/","sources":[{"kind":"justfile","file":"/justfile","tasks":[{"name":"a","command":"just a"}]}]}"#,
     )
     .unwrap();
-    let HostMsg::ProjectTasks { sources, .. } = short else { panic!("expected project tasks") };
+    let HostMsg::Tasks { sources, .. } = short else { panic!("expected tasks") };
     assert_eq!(sources[0].kind, TaskSourceKind::Unknown);
     assert_eq!(sources[0].tasks[0].description, None);
     assert!(!sources[0].truncated);

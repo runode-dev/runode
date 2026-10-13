@@ -7,8 +7,7 @@ use std::{collections::BTreeMap, path::PathBuf};
 
 use runode_protocol::{
     AttachMode, BuildId, Caps, ClientKind, ClientMsg, FinishedCommand, GoodbyeReason, HostMsg, PaneLayout, PaneRect,
-    Placement, ProjectTask, SessionId, SessionInfo, TabLayout, TaskSource, TaskSourceKind, WindowLayout,
-    WorkspaceLayout,
+    Placement, SessionId, SessionInfo, TabLayout, TaskEntry, TaskSource, TaskSourceKind, WindowLayout, WorkspaceLayout,
     git::{
         GitBranch, GitFile, GitFileDiff, GitFileStatus, GitHunk, GitLine, GitLineKind, GitOperation, GitRequest,
         GitStatus,
@@ -113,8 +112,8 @@ fn git_file(path: &str, old_path: Option<&str>, status: GitFileStatus, added: u3
     }
 }
 
-fn project_tasks() -> Vec<TaskSource> {
-    let task = |name: &str, command: &str, description: Option<&str>| ProjectTask {
+fn tasks() -> Vec<TaskSource> {
+    let task = |name: &str, command: &str, description: Option<&str>| TaskEntry {
         name: name.into(),
         command: command.into(),
         description: description.map(Into::into),
@@ -195,7 +194,7 @@ fn samples() -> BTreeMap<&'static str, Value> {
         ("rename_workspace", ClientMsg::RenameWorkspace { req: 9, window: 1, workspace: 2, name: "前端".into() }),
         ("list_dirs", ClientMsg::ListDirs { req: 5, path: Some("/Users/ethan".into()) }),
         ("list_dirs_home", ClientMsg::ListDirs { req: 5, path: None }),
-        ("list_project_tasks", ClientMsg::ListProjectTasks { req: 5, dir: "/Users/ethan/dev/中文".into() }),
+        ("list_tasks", ClientMsg::ListTasks { req: 5, dir: "/Users/ethan/dev/中文".into() }),
         (
             "spawn",
             ClientMsg::Spawn {
@@ -382,10 +381,7 @@ fn samples() -> BTreeMap<&'static str, Value> {
                 truncated: true,
             },
         ),
-        (
-            "project_tasks",
-            HostMsg::ProjectTasks { req: 6, dir: "/Users/ethan/dev/app/web".into(), sources: project_tasks() },
-        ),
+        ("tasks", HostMsg::Tasks { req: 6, dir: "/Users/ethan/dev/app/web".into(), sources: tasks() }),
         ("error", HostMsg::Error { req: None, id: Some(ID), message: "no session".into() }),
         ("goodbye", HostMsg::Goodbye { reason: GoodbyeReason::Error { message: "bye".into() } }),
         ("goodbye_handoff", HostMsg::Goodbye { reason: GoodbyeReason::Handoff }),

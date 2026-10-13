@@ -1,4 +1,4 @@
-//! 要读文件系统的请求（列项目命令、列目录）卡住时不挡着同一条连接上的别的请求。断掉的网络挂载上
+//! 要读文件系统的请求（列命令、列目录）卡住时不挡着同一条连接上的别的请求。断掉的网络挂载上
 //! stat 会一直卡住，这里用命名管道代替：runode 根目录里自己加的命令文件 `tasks.json` 是个没人写的
 //! 命名管道时，打开它一直等。
 //!
@@ -20,7 +20,7 @@ use runode_protocol::FrameKind;
 /// 每条连接最多同时有这么多读文件系统的请求在办，和宿主里的上限一样。
 const MAX_WAITING: u32 = 16;
 
-/// 列项目命令卡在打开 `tasks.json` 上时，同一条连接上列会话、列目录照常回话；卡住的占满名额后，
+/// 列命令卡在打开 `tasks.json` 上时，同一条连接上列会话、列目录照常回话；卡住的占满名额后，
 /// 再来的读文件系统的请求当场回 `Error`；管道那头有人写了以后，卡住的都办完。
 #[test]
 fn a_stuck_file_read_does_not_hold_up_the_connection() {
@@ -36,14 +36,14 @@ fn a_stuck_file_read_does_not_hold_up_the_connection() {
     let (_host, socket) = listen(&dir);
     let mut peer = Peer::hello(&socket, false);
 
-    peer.send(&ClientMsg::ListProjectTasks { req: 1, dir: dir.clone() });
+    peer.send(&ClientMsg::ListTasks { req: 1, dir: dir.clone() });
     peer.send(&ClientMsg::ListSessions);
     assert!(matches!(peer.reply(), HostMsg::SessionList { .. }));
     peer.send(&ClientMsg::ListDirs { req: 2, path: Some(dir.clone()) });
     assert!(matches!(peer.reply(), HostMsg::Dirs { req: 2, .. }));
 
     for req in 3..=MAX_WAITING + 1 {
-        peer.send(&ClientMsg::ListProjectTasks { req, dir: dir.clone() });
+        peer.send(&ClientMsg::ListTasks { req, dir: dir.clone() });
     }
     peer.send(&ClientMsg::ListDirs { req: 100, path: Some(dir.clone()) });
     match peer.reply() {
@@ -61,7 +61,7 @@ fn a_stuck_file_read_does_not_hold_up_the_connection() {
         }
         let Ok(frame) = peer.frames.recv_timeout(Duration::from_millis(50)) else { continue };
         if frame.kind == FrameKind::Control
-            && let HostMsg::ProjectTasks { req, .. } = frame.message().unwrap()
+            && let HostMsg::Tasks { req, .. } = frame.message().unwrap()
         {
             answered.push(req);
         }

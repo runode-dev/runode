@@ -613,10 +613,10 @@
       "req": 5,
       "type": "list_dirs"
     },
-    "list_project_tasks": {
+    "list_tasks": {
       "dir": "/Users/ethan/dev/中文",
       "req": 5,
-      "type": "list_project_tasks"
+      "type": "list_tasks"
     },
     "meta": {
       "id": "0123456789abcdef0011223344556677",
@@ -670,7 +670,7 @@
       "text": "继续，用方案 2\n",
       "type": "paste"
     },
-    "project_tasks": {
+    "tasks": {
       "dir": "/Users/ethan/dev/app/web",
       "req": 6,
       "sources": [
@@ -717,7 +717,7 @@
           "truncated": true
         }
       ],
-      "type": "project_tasks"
+      "type": "tasks"
     },
     "push_register": {
       "bundle": "cn.barey.runode",

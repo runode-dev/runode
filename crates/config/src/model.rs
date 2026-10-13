@@ -25,7 +25,7 @@ pub enum PreviewClick {
     Double,
 }
 
-/// 标题栏命令菜单里点了一条项目命令时，在哪开跑它的新终端。
+/// 标题栏命令菜单里点了一条命令时，在哪开跑它的新终端。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TaskPlacement {
     /// 当前标签里，分在当前终端右边。

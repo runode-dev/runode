@@ -167,7 +167,7 @@ impl WindowView {
         if !self.watching() || !paths.iter().any(|path| watch.affects(path, git, &listed)) {
             return;
         }
-        // 项目命令从这几个文件里来，它们变了就重列。
+        // 命令从这几个文件里来，它们变了就重列。
         if paths.iter().any(|path| super::tasks::is_task_file(path)) {
             self.workspace_mut().project.tasks_stale = true;
         }
@@ -476,7 +476,7 @@ impl WindowView {
         width + CARD_GAP * shown + CARD_GAP / 2.
     }
 
-    /// 标题栏右上角的按钮：先是项目命令按钮，然后是开关右侧面板的按钮，展开时底色亮一些，打开的是
+    /// 标题栏右上角的按钮：先是命令按钮，然后是开关右侧面板的按钮，展开时底色亮一些，打开的是
     /// 上次显示的那一页。位置由调用方接着写。
     pub(super) fn render_panel_toggles(&self, window: &Window, cx: &mut Context<Self>) -> Div {
         let shown = self.workspace().panel.is_some();

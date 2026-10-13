@@ -20,7 +20,7 @@
 //!
 //! 换主题、改选项和报布局（`SetTheme`、`SetOptions`、`LayoutChanged`）记着最近一次的，重连后补发。
 //!
-//! 等回话的请求（`attach_now`、`list_sessions`、`list_project_tasks`、`held_layout`）超时了，这条连接按断开处理
+//! 等回话的请求（`attach_now`、`list_sessions`、`list_tasks`、`held_layout`）超时了，这条连接按断开处理
 //! （`Inner::timed_out`）：宿主按先后处理同一条连接上的消息，一个请求等不到回话，说明它卡住了，
 //! socket 却没断，不断开的话之后每个请求都要在主线程上等满超时。断开后请求立刻失败，等重连。
 //! `spawn` 例外，超时了连接照旧：宿主多半只是开会话慢，开好后回的 `Spawned` 没人等，读线程见了就
@@ -687,10 +687,10 @@ impl Link {
         answer
     }
 
-    /// 宿主在 `dir` 里列出的项目命令（Makefile 的目标、package.json 的 scripts），最多等 `timeout`。
-    pub fn list_project_tasks(&self, dir: PathBuf, timeout: Duration) -> Result<Vec<TaskSource>> {
-        match self.request(|req| ClientMsg::ListProjectTasks { req, dir }, timeout)? {
-            HostMsg::ProjectTasks { sources, .. } => Ok(sources),
+    /// 宿主在 `dir` 里列出的命令（Makefile 的目标、package.json 的 scripts），最多等 `timeout`。
+    pub fn list_tasks(&self, dir: PathBuf, timeout: Duration) -> Result<Vec<TaskSource>> {
+        match self.request(|req| ClientMsg::ListTasks { req, dir }, timeout)? {
+            HostMsg::Tasks { sources, .. } => Ok(sources),
             other => Err(anyhow!("unexpected answer from the host: {other:?}")),
         }
     }

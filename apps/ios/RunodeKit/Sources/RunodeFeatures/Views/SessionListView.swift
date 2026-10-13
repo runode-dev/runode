@@ -129,7 +129,7 @@
             .refreshable {
                 model.refresh()
                 model.refreshPreviews()
-                await model.refreshProjectTasks()
+                await model.refreshTasks()
             }
             .task { await model.keepRefreshing() }
             .onGeometryChange(for: CGSize.self) { $0.size } action: { size in
@@ -207,7 +207,7 @@
                         Button("Git", systemImage: "arrow.triangle.branch") { onOpenGit(session.id) }
                         Button("复制目录", systemImage: "doc.on.doc") { UIPasteboard.general.string = cwd }
                     }
-                    ProjectTasksSection(model: model, session: session) { onOpen(session.id) }
+                    TasksSection(model: model, session: session) { onOpen(session.id) }
                     Section(
                         "\(Presentation.gridSize(session.size)) · \(Presentation.sizeOwner(session.sizeOwner))"
                     ) {
@@ -217,7 +217,7 @@
                     }
                 }
                 .task(id: session.meta.cwd) {
-                    if let cwd = session.meta.cwd { await model.loadProjectTasks(in: cwd) }
+                    if let cwd = session.meta.cwd { await model.loadTasks(in: cwd) }
                 }
                 // 挂在卡片上：iOS 26 起确认框是指向所挂视图的气泡，挂在整个列表上会指到屏幕中间。
                 .confirmationDialog(
@@ -235,25 +235,25 @@
         }
     }
 
-    /// 菜单里会话目录的项目命令：Makefile、package.json 各一个子菜单，点一条就跑（见
-    /// `SessionListModel.runProjectTask`），在这个会话里跑了时调 `onRun`，在新终端里跑时由会话列表打开
+    /// 菜单里会话目录的命令：Makefile、package.json 各一个子菜单，点一条就跑（见
+    /// `SessionListModel.runTask`），在这个会话里跑了时调 `onRun`，在新终端里跑时由会话列表打开
     /// 新终端。终端结束了时子菜单点不开。会话卡片的长按菜单和终端页的「⋯」菜单都用它。
-    struct ProjectTasksSection: View {
+    struct TasksSection: View {
         let model: SessionListModel
         let session: SessionInfo
         var onRun: () -> Void = {}
 
         var body: some View {
-            let sources = model.projectTasks(for: session).filter { !$0.tasks.isEmpty }
+            let sources = model.tasks(for: session).filter { !$0.tasks.isEmpty }
             if !sources.isEmpty {
-                let runnable = model.canRunProjectTask(in: session)
-                Section(Presentation.projectTasksHeader(session)) {
+                let runnable = model.canRunTask(in: session)
+                Section(Presentation.tasksHeader(session)) {
                     ForEach(sources, id: \.self) { source in
                         Menu {
                             ForEach(source.tasks, id: \.name) { task in
                                 Button {
                                     Task {
-                                        if await model.runProjectTask(task, at: source.project, in: session.id) { onRun() }
+                                        if await model.runTask(task, at: source.project, in: session.id) { onRun() }
                                     }
                                 } label: {
                                     Text(task.name)

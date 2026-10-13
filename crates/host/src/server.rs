@@ -11,8 +11,8 @@
 //! 读的线程不等会话线程回话：列会话、读屏幕先在读的线程里把请求按先后送到会话线程，再起一个
 //! 短命的线程等回话、交给 `Outbox`，同一条连接上之后的输入照常转发。一条连接上这样在等的请求
 //! 最多 `MAX_WAITING` 个，再多的当场回 `Error`，前端狂发也堆不起线程；git 请求另算一份名额，
-//! 联网的 git 操作卡住时列会话、读屏幕照常。列目录（`ClientMsg::ListDirs`）和列项目命令
-//! （`ClientMsg::ListProjectTasks`）也另起线程办、另算一份名额：断掉的网络挂载上 stat 会一直卡住，
+//! 联网的 git 操作卡住时列会话、读屏幕照常。列目录（`ClientMsg::ListDirs`）和列命令
+//! （`ClientMsg::ListTasks`）也另起线程办、另算一份名额：断掉的网络挂载上 stat 会一直卡住，
 //! 卡住的只是那个线程。积压过了上限的连接，列会话、读屏幕、连上会话和 git 请求都当场回 `Error`，
 //! 不再往积压上加回话。开会话还在读的线程里办（开伪终端、启动 shell 要几毫秒）。
 //!
@@ -65,7 +65,7 @@ const OUTBOX_LIMIT: usize = 32 << 20;
 const MOBILE_OUTBOX_LIMIT: usize = 1 << 20;
 /// 等会话线程回话（列会话、读屏幕）的最长时间。
 pub(crate) const REPLY_TIMEOUT: Duration = Duration::from_secs(5);
-/// 一条连接上最多同时有这么多列会话、读屏幕的请求在等回话，读写 git 的请求、列目录和列项目命令的
+/// 一条连接上最多同时有这么多列会话、读屏幕的请求在等回话，读写 git 的请求、列目录和列命令的
 /// 请求各另有这么多，见 `Waiting`。
 const MAX_WAITING: usize = 16;
 /// 前端给的终端行列数最多这么大，再大的开会话、连上、改尺寸都回 `Error`：几万见方的网格会让
@@ -848,7 +848,7 @@ struct Connection {
     waiting: Waiting,
     /// 在排队或在办的 git 请求，和 `waiting` 分开算：推送、拉取卡在网络上时不占列会话、读屏幕的名额。
     git_waiting: Waiting,
-    /// 在另起的线程里读文件系统的请求（列目录、列项目命令），也和 `waiting` 分开算，见 `read_files`。
+    /// 在另起的线程里读文件系统的请求（列目录、列命令），也和 `waiting` 分开算，见 `read_files`。
     files_waiting: Waiting,
     /// 办 git 请求的工作线程，第一次要时才起。
     git: Option<GitWorker>,
@@ -1082,9 +1082,9 @@ impl Connection {
                 let browse::Listing { path, dirs, truncated } = browse::list_dirs(path)?;
                 Ok(HostMsg::Dirs { req, path, dirs, truncated })
             }),
-            ClientMsg::ListProjectTasks { req, dir } => self.read_files(req, "host-list-project-tasks", move || {
-                let sources = runode_project_tasks::list(&dir)?;
-                Ok(HostMsg::ProjectTasks { req, dir, sources })
+            ClientMsg::ListTasks { req, dir } => self.read_files(req, "host-list-tasks", move || {
+                let sources = runode_tasks::list(&dir)?;
+                Ok(HostMsg::Tasks { req, dir, sources })
             }),
             ClientMsg::Git { req, id, request } => self.git(req, id, request),
             ClientMsg::ListTodos { req } => {
@@ -1317,7 +1317,7 @@ impl Connection {
         });
     }
 
-    /// 另起线程办一件要读文件系统的请求（列目录、列项目命令，没有界面时开终端），占 `files_waiting`
+    /// 另起线程办一件要读文件系统的请求（列目录、列命令，没有界面时开终端），占 `files_waiting`
     /// 的一个名额：断掉的网络挂载上 stat、读目录会一直卡住，卡住的不能是读线程。`answer` 的 `Err` 回成带着
     /// `req` 的 `Error`。
     fn read_files(&self, req: u32, name: &str, answer: impl FnOnce() -> Result<HostMsg, String> + Send + 'static) {

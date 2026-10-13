@@ -20,7 +20,7 @@ tracing.workspace = true
 # 任务板的库和定时，见 `todos`。
 runode-todo.workspace = true
 # 会话卡片上能跑的 Makefile 目标和 package.json 的 scripts。
-runode-project-tasks.workspace = true
+runode-tasks.workspace = true
 
 [lints]
 workspace = true

@@ -140,7 +140,7 @@ actions!(
         ToggleFiles,
         /// 显示或隐藏右侧的 GitHub Actions 页。
         ToggleGitHubActions,
-        /// 打开或关掉标题栏上的项目命令菜单。
+        /// 打开或关掉标题栏上的命令菜单。
         ToggleTasks,
         /// 打开或关掉列出所有窗口里 agent 的浮层。
         GotoAgent,
@@ -262,7 +262,7 @@ pub struct WindowView {
     renaming: Option<Renaming>,
     /// 新建 workspace 的对话框。
     new_workspace: Option<new_workspace::NewWorkspaceDialog>,
-    /// 添加项目命令的对话框。
+    /// 添加命令的对话框。
     add_task: Option<tasks::AddTaskDialog>,
     /// Git 面板里 AI 写提交说明的对话框。
     commit_message_dialog: Option<git_panel::CommitMessageDialog>,
