@@ -65,10 +65,12 @@ notify.workspace = true
 objc2.workspace = true
 # 「关于」面板的内容和系统偏好的语言。
 objc2-foundation = { workspace = true, features = ["std", "NSArray", "NSData", "NSDictionary", "NSLocale", "NSString"] }
-objc2-app-kit = { workspace = true, features = ["std", "NSApplication", "NSResponder", "NSImage", "NSMenu", "NSMenuItem", "NSEvent"] }
+objc2-app-kit = { workspace = true, features = ["std", "NSApplication", "NSResponder", "NSImage", "NSMenu", "NSMenuItem", "NSEvent", "NSView", "NSWindow", "NSScreen"] }
 # 问系统设置里有没有允许发通知，设置页在被拒时提示。
 objc2-user-notifications = { workspace = true, features = ["std", "block2", "UNUserNotificationCenter", "UNNotificationSettings"] }
 block2.workspace = true
+# 程序要求改窗口尺寸时经 AppKit 改窗口的 frame。
+raw-window-handle.workspace = true
 
 [lints]
 workspace = true

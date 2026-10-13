@@ -37,6 +37,7 @@ mod preview;
 mod project;
 mod quit;
 mod remote;
+mod resize_request;
 mod settings_page;
 mod sidebar;
 mod slot;

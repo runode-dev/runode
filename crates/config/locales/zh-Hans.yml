@@ -49,6 +49,7 @@ config:
   command_highlighting: 在 shell 提示符上输入时给命令行上色：命令、关键字、选项、字符串、变量、存在的路径各有颜色，找不到的命令标红，颜色参照 zsh 插件 fast-syntax-highlighting、取自主题的调色板。shell 自己已经上了色（装了高亮插件）时不管。
   clipboard_write: 终端里的程序用 OSC 52 写系统剪贴板时（vim、tmux 和经 ssh 连到远端的 shell 都这样复制）：allow 照写，deny 丢掉。ask 还不支持，按 deny 办。
   clipboard_read: 终端里的程序用 OSC 52 读剪贴板时：ask 先弹框说明是哪个终端、哪个程序要读，你同意了才给；allow 不问直接给；deny 回给程序一个空的剪贴板。剪贴板里可能有密码，只对信得过的程序用 allow。
+  vt_window_resize_allowed: 让终端里的程序用 xterm 的序列 CSI 8 ; 行 ; 列 t 改窗口尺寸：true、false。尺寸为 0 或没给的那一维不变，小于 40 列 10 行的按 40 列 10 行办，窗口不会大过屏幕。终端正显示着、独占标签（没有分屏）、窗口不是全屏时才改，否则不理。默认关着：任何程序都能借此改你的窗口，包括经 ssh 连到的远端机器上的程序。
   terminal_host: 终端会话放在单独的后台进程里：true、false。true 时退出 Runode 后会话照常运行，下次打开接着用；false 时会话跟着 app 一起结束。只在 Runode 启动时读，改了下次启动才生效。后台还有会话时改成 false，下次启动仍会接回这些会话，那次退出时才结束它们。
   auto_update: 启动后和之后每隔几个小时查一次 Runode 的新版本：true、false。true 时有了新版本就在后台下载好，退出 Runode 时装上；false 时只在 Runode 菜单里点「检查更新…」时查。只有发布者签过名的 Runode.app 会自己更新。
   remote_access: 让手机经局域网或 Tailscale 连上这台 Mac 的终端：true、false。用 runode remote pair 给手机配对，runode remote devices 列出配对过的手机，runode remote revoke 撤销一台。改了几秒内生效，不用重启 Runode。

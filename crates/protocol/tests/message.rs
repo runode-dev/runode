@@ -335,6 +335,7 @@ fn host_messages_round_trip() {
         HostMsg::Exited { id: ID, status: None },
         HostMsg::Exited { id: ID, status: Some(130) },
         HostMsg::Bell { id: ID },
+        HostMsg::ResizeWindow { id: ID, rows: 0, columns: 120 },
         HostMsg::ScreenText { id: ID, text: "$ ls\n".into(), truncated: false },
         HostMsg::ScreenText { id: ID, text: "tail\n".into(), truncated: true },
         HostMsg::Layout { req: 7, windows: layout() },

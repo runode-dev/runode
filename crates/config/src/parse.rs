@@ -65,7 +65,7 @@ pub const KEYS: &[&[&str]] = &[
         "command-completions",
         "command-highlighting",
     ],
-    &["clipboard-write", "clipboard-read"],
+    &["clipboard-write", "clipboard-read", "vt-window-resize-allowed"],
     &["terminal-host"],
     &["auto-update"],
     &[
@@ -335,6 +335,10 @@ impl Config {
                     "deny" => ClipboardRead::Deny,
                     _ => return Err("expected ask, allow or deny".into()),
                 };
+            }
+            "vt-window-resize-allowed" => {
+                self.vt_window_resize_allowed =
+                    or_default(empty, defaults.vt_window_resize_allowed, || parse_bool(value))?;
             }
             "terminal-host" => self.terminal_host = or_default(empty, defaults.terminal_host, || parse_bool(value))?,
             "auto-update" => self.auto_update = or_default(empty, defaults.auto_update, || parse_bool(value))?,

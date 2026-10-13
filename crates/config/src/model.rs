@@ -137,6 +137,9 @@ pub struct Config {
     pub clipboard_write: ClipboardWrite,
     /// 终端里的程序用 OSC 52 读剪贴板时照读、先问还是回空的。
     pub clipboard_read: ClipboardRead,
+    /// 终端里的程序可以用 CSI 8 t 改窗口尺寸。只在终端独占标签、窗口不是全屏时改，见 `WindowView`
+    /// 处理 `TerminalEvent::ResizeWindow` 的地方。
+    pub vt_window_resize_allowed: bool,
     /// 终端会话放在单独一个进程（`runode --host`）里，退出 app 后会话还在，下次打开接着用；关着时
     /// 会话跑在 app 进程里，跟着 app 一起结束。只在 app 启动时读，改了下次启动才生效。
     pub terminal_host: bool,
@@ -227,6 +230,7 @@ impl Default for Config {
             clipboard_read: ClipboardRead::default(),
             terminal_host: false,
             auto_update: true,
+            vt_window_resize_allowed: false,
             remote_access: false,
             // 和 `runode_protocol::remote::DEFAULT_PORT` 一样；config 不依赖 protocol，桌面的测试对着两边。
             remote_access_port: 7866,

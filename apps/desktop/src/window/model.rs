@@ -359,6 +359,9 @@ impl WindowView {
             }
             TerminalEvent::AgentFinished => self.agent_finished(id, wi, ti, window, cx),
             TerminalEvent::AgentBlocked => self.agent_blocked(id, wi, ti, window, cx),
+            TerminalEvent::ResizeWindow { rows, columns } => {
+                self.resize_for_program(view, (wi, ti), (*rows, *columns), window, cx);
+            }
             TerminalEvent::Exited => self.close_pane_by_id(id, window, cx),
         }
     }

@@ -33,8 +33,8 @@ use libghostty_vt::{
     screen::Screen,
     terminal::{
         ColorScheme, ConformanceLevel, DeviceAttributeFeature, DeviceAttributes, DeviceType, Mode,
-        PrimaryDeviceAttributes, ProgramStatusState, ProgressState, SecondaryDeviceAttributes, SemanticPrompt,
-        SizeReportSize, Terminal, UnknownSequence,
+        PrimaryDeviceAttributes, ProgramStatusState, ProgressState, ResizeWindow, SecondaryDeviceAttributes,
+        SemanticPrompt, SizeReportSize, Terminal, UnknownSequence,
     },
 };
 use runode_agent_detect::Tracker;
@@ -608,6 +608,12 @@ impl HostSession {
         self.effects.bell.take()
     }
 
+    /// 自上次以来程序用 CSI 8 t 要求改窗口尺寸的话，返回最近一次要的行数和列数，0 是那一维不变。
+    /// VT 自己不改尺寸，改不改窗口由界面按配置定。
+    pub fn take_resize_window(&self) -> Option<(u16, u16)> {
+        self.effects.resize_window.take()
+    }
+
     /// 程序可不可以写剪贴板（配置项 `clipboard-write`），新建的会话可以。不可以时 VT 当场拒绝写
     /// 请求（有应答的剪贴板协议收到「不允许」），`take_clipboard` 里不会有写请求。
     pub fn set_clipboard_writes(&self, allowed: bool) {
@@ -806,6 +812,14 @@ fn register_callbacks(
         .on_bell({
             let effects = effects.clone();
             move |_| effects.bell.set(true)
+        })?
+        .on_resize_window({
+            let effects = effects.clone();
+            move |_, request| {
+                if let ResizeWindow::Grid { rows, columns } = request {
+                    effects.resize_window.set(Some((rows, columns)));
+                }
+            }
         })?
         .on_progress_report({
             let effects = effects.clone();

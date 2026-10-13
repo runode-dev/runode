@@ -446,6 +446,14 @@ pub enum HostMsg {
     Bell {
         id: SessionId,
     },
+    /// 程序用 CSI 8 t 要求把窗口改成能装下 `rows` 行、`columns` 列的大小，0 是那一维不变。紧跟在
+    /// 含这条序列的那块 `Output` 之后。宿主自己不改尺寸，桌面按配置项 `vt-window-resize-allowed`
+    /// 决定改不改窗口；手机读成 `Unknown`，不理。
+    ResizeWindow {
+        id: SessionId,
+        rows: u16,
+        columns: u16,
+    },
     /// 回 `Open`、`OpenWorkspace`：新终端的会话。
     Opened {
         req: u32,

@@ -422,6 +422,7 @@ settings:
     command_highlighting: Command line highlighting
     clipboard_write: Programs can copy
     clipboard_read: Programs can read the clipboard
+    vt_window_resize_allowed: Programs can resize the window
     terminal_host: Keep sessions after quitting
     auto_update: Update automatically
     remote_access: Remote access
@@ -480,6 +481,7 @@ settings:
     command_highlighting: Colors commands, options, strings and paths as you type, unless the shell already does.
     clipboard_write: Lets programs in the terminal, such as vim, tmux or a shell over ssh, put text on the clipboard.
     clipboard_read: Lets programs in the terminal read the text you copied, passwords included. Ask shows which program wants it first.
+    vt_window_resize_allowed: Lets programs in the terminal resize the window with CSI 8 t, only while the terminal has its tab to itself and the window is not full screen.
     terminal_host: Sessions keep running in a background process after Runode quits and come back when it opens again.
     auto_update: Check for new versions in the background, download them and install them when Runode quits.
     remote_access: Lets a paired phone reach the terminals over the local network or Tailscale. Pair below, or with runode remote pair.

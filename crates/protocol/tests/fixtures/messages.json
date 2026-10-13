@@ -776,6 +776,12 @@
       },
       "type": "resize"
     },
+    "resize_window": {
+      "columns": 100,
+      "id": "0123456789abcdef0011223344556677",
+      "rows": 30,
+      "type": "resize_window"
+    },
     "resized": {
       "id": "0123456789abcdef0011223344556677",
       "size": {

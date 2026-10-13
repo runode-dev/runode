@@ -20,6 +20,9 @@ pub(super) struct Effects {
     pub(super) title_changed: StdCell<bool>,
     /// 程序响过铃（BEL），由 `HostSession::take_bell` 取走。
     pub(super) bell: StdCell<bool>,
+    /// 程序最近一次用 CSI 8 t 要求改窗口尺寸：行数和列数，0 是那一维不变，由
+    /// `HostSession::take_resize_window` 取走。
+    pub(super) resize_window: StdCell<Option<(u16, u16)>>,
     /// 采用了一条 PATH 或各种名字的报告，对外公布的状态可能变了，由 `HostSession::take_meta` 取走。
     pub(super) reported: StdCell<bool>,
     /// 最近一次 OSC 9;4 进度报告是不是在进行中。
@@ -314,6 +317,15 @@ mod tests {
         // 前台已经回到 shell（这里的 `cat`），不带前缀的标题不再算 agent 的。
         assert!(session.feed(b"\x1b]0;~\x07"));
         assert_eq!(session.agent, None);
+    }
+
+    #[test]
+    fn resize_window_requests_keep_the_latest() {
+        let mut session = idle_host();
+        assert_eq!(session.take_resize_window(), None);
+        session.feed(b"\x1b[8;30;100t\x1b[8;;120t");
+        assert_eq!(session.take_resize_window(), Some((0, 120)));
+        assert_eq!(session.take_resize_window(), None);
     }
 
     #[test]

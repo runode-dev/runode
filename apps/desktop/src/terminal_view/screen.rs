@@ -123,6 +123,8 @@ pub(super) struct Changes {
     pub(super) commands: Vec<FinishedCommand>,
     /// 程序响过铃。
     pub(super) bell: bool,
+    /// 程序最近一次要求把窗口改成的行数和列数（CSI 8 t），0 是那一维不变。
+    pub(super) resize_window: Option<(u16, u16)>,
     /// shell 退出了。
     pub(super) exited: bool,
     /// 和宿主断开了（这一批里刚断开）。
@@ -517,6 +519,7 @@ impl<S: Vt> ScreenState<S> {
             }
             HostMsg::CommandFinished { command, .. } => changes.commands.push(command),
             HostMsg::Bell { .. } => changes.bell = true,
+            HostMsg::ResizeWindow { rows, columns, .. } => changes.resize_window = Some((rows, columns)),
             HostMsg::Exited { .. } => {
                 self.exited = true;
                 changes.exited = true;

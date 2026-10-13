@@ -123,6 +123,7 @@ impl Config {
                 }
                 .into(),
             ],
+            "vt-window-resize-allowed" => bool(self.vt_window_resize_allowed),
             "terminal-host" => bool(self.terminal_host),
             "auto-update" => bool(self.auto_update),
             "remote-access" => bool(self.remote_access),

@@ -227,6 +227,7 @@ fn session_of(message: &HostMsg) -> Option<SessionId> {
         | HostMsg::Resync { id, .. }
         | HostMsg::Exited { id, .. }
         | HostMsg::Bell { id }
+        | HostMsg::ResizeWindow { id, .. }
         | HostMsg::ScreenText { id, .. }
         | HostMsg::SizeOwner { id, .. } => Some(*id),
         _ => None,

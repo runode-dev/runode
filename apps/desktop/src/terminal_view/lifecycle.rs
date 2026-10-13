@@ -381,6 +381,9 @@ impl TerminalView {
         if changes.bell {
             self.bell_pending = true;
         }
+        if let Some((rows, columns)) = changes.resize_window {
+            cx.emit(TerminalEvent::ResizeWindow { rows, columns });
+        }
         if let Some(attach) = changes.attach {
             tracing::info!("session {} attaches again ({:?})", self.session_text(), attach.mode);
             self.send_attach(attach);

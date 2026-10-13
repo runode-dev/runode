@@ -172,6 +172,8 @@ impl Page {
                 Section("clipboard"),
                 Row("clipboard-write", Choice(&["allow", "deny"])),
                 Row("clipboard-read", Choice(&["ask", "allow", "deny"])),
+                Section("window"),
+                Row("vt-window-resize-allowed", Switch),
                 Section("tasks"),
                 Row("task-placement", Choice(&["right", "down", "tab"])),
             ],

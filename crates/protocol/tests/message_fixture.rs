@@ -303,6 +303,7 @@ fn samples() -> BTreeMap<&'static str, Value> {
         ("exited", HostMsg::Exited { id: ID, status: Some(1) }),
         ("exited_none", HostMsg::Exited { id: ID, status: None }),
         ("bell", HostMsg::Bell { id: ID }),
+        ("resize_window", HostMsg::ResizeWindow { id: ID, rows: 30, columns: 100 }),
         ("opened", HostMsg::Opened { req: 7, id: ID }),
         ("done", HostMsg::Done { req: 9 }),
         (

@@ -130,6 +130,8 @@ pub enum TerminalEvent {
     Focused,
     /// 程序响铃（BEL）。
     Bell,
+    /// 程序用 CSI 8 t 要求把窗口改成能装下这么多行、列，0 是那一维不变。
+    ResizeWindow { rows: u16, columns: u16 },
     /// 前台 agent 从工作中停了下来（干完了、等着用户回答或者退出了）。
     AgentFinished,
     /// 前台 agent 停下来等用户回答（要不要执行命令、选哪一项等）。从工作中直接变成这样时

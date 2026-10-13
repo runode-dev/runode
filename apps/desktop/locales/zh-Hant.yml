@@ -422,6 +422,7 @@ settings:
     command_highlighting: 指令列上色
     clipboard_write: 程式寫剪貼簿
     clipboard_read: 程式讀剪貼簿
+    vt_window_resize_allowed: 程式改視窗大小
     terminal_host: 結束後保留工作階段
     auto_update: 自動更新
     remote_access: 遠端存取
@@ -480,6 +481,7 @@ settings:
     command_highlighting: 輸入時給指令、選項、字串和路徑上色；shell 自己已經上了色時不管。
     clipboard_write: 終端機裡的程式（vim、tmux、經 ssh 連到遠端的 shell 等）能把文字放進剪貼簿。
     clipboard_read: 終端機裡的程式能讀到你複製過的文字，密碼也在內。選「詢問」時先說明是哪個程式要讀。
+    vt_window_resize_allowed: 終端機裡的程式能用 CSI 8 t 改視窗大小；只在終端機獨佔標籤頁、視窗不是全螢幕時改。
     terminal_host: 結束 Runode 後工作階段留在背景程序裡照常執行，下次打開接著用。
     auto_update: 在背景查新版本、下載好，結束 Runode 時裝上。
     remote_access: 讓配對過的手機經區域網路或 Tailscale 連上這台 Mac 的終端機。在下面配對，或者用 runode remote pair。
