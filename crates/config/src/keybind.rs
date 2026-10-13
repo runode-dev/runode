@@ -250,7 +250,7 @@ pub static ACTIONS: &[ActionSpec] = &[
     ),
     plain!(
         "toggle_files",
-        "Show or hide the file tree on the right; double-click a file to type its path into the terminal",
+        "Show or hide the file tree on the right; double-click a file to open it in the preview",
         Action::ToggleFiles
     ),
     plain!(

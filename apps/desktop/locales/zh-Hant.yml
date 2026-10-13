@@ -1037,7 +1037,7 @@ action:
   toggle_sidebar: 顯示或隱藏工作區側欄
   toggle_status_bar: 顯示或隱藏視窗底部的狀態列
   toggle_git: 顯示或隱藏右側的 Git 面板：暫存、提交、切換分支、同步和儲藏
-  toggle_files: 顯示或隱藏右側的檔案樹，按兩下檔案把路徑打進終端機
+  toggle_files: 顯示或隱藏右側的檔案樹，按兩下檔案在預覽裡開啟
   toggle_github_actions: 顯示或隱藏右側的 GitHub Actions 頁：經 gh 看目前分支的執行、工作流程，管理 secret 和 variable
   toggle_tasks: 打開或關閉標題列上的專案命令選單，上下鍵選、Enter 執行
   toggle_todo_board: "打開或收起鋪滿視窗的任務板：派給 agent 的任務按狀態分欄，和到點開任務的定時"
