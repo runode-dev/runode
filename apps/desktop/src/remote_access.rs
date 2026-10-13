@@ -1,4 +1,4 @@
-//! 远程访问（手机经网络连上宿主，见 `runode_remote_access`）跟着宿主活：宿主跑在哪个进程里，监听
+//! 远程访问（手机经网络连上宿主，见 `runode_remote`）跟着宿主活：宿主跑在哪个进程里，监听
 //! 就开在哪个进程里，门禁过了的连接经 `Host::connect_pair` 接到宿主上。开关（配置项
 //! `remote-access`）、端口（`remote-access-port`）和给手机看的名字（`remote-access-name`）随配置变，
 //! 几秒内生效。agent 等回答时给手机的推送也在这个进程里发，设置（`remote-access-push`
@@ -21,7 +21,7 @@ use std::{
 
 use runode_config::Config;
 use runode_host::Host;
-use runode_remote_access::{ApnsKey, Bind, Connect, Options, PushSettings, Service};
+use runode_remote::{ApnsKey, Bind, Connect, Options, PushSettings, Service};
 
 /// 盯不了文件时，单独跑的宿主隔多久看一次配置文件、设备表和配对口令；有配对口令在等时也按它看过期没有。
 const WATCH_INTERVAL: Duration = Duration::from_secs(1);
@@ -197,14 +197,14 @@ impl StayUp {
         let devices = file_stamp(dirs.remote_access_devices_file());
         let has_devices = match self.devices {
             Some((seen, has)) if seen == devices => has,
-            _ => runode_remote_access::list_devices(dirs).is_ok_and(|devices| !devices.is_empty()),
+            _ => runode_remote::list_devices(dirs).is_ok_and(|devices| !devices.is_empty()),
         };
         self.devices = Some((devices, has_devices));
         // 等着的口令到点就过期，文件却不变，所以在等时每次都读。
         let pairing = file_stamp(dirs.remote_access_pairing_file());
         let pending = match self.pairing {
             Some((seen, false)) if seen == pairing => false,
-            _ => runode_remote_access::pairing_pending(dirs),
+            _ => runode_remote::pairing_pending(dirs),
         };
         self.pairing = Some((pairing, pending));
         has_devices || pending
@@ -260,7 +260,7 @@ mod tests {
         assert!(!stay.check(&on, &dirs));
         assert!(!stay.awaiting_pairing());
         // 正在配对。
-        let ticket = runode_remote_access::PairingTicket::begin(&dirs, Duration::from_secs(60)).unwrap();
+        let ticket = runode_remote::PairingTicket::begin(&dirs, Duration::from_secs(60)).unwrap();
         assert!(stay.check(&on, &dirs));
         assert!(stay.awaiting_pairing());
         assert!(!stay.check(&off, &dirs));

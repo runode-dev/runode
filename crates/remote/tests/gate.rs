@@ -10,7 +10,7 @@ use runode_protocol::{
     remote::{Bytes, DeviceId, GateClientMsg, GateHostMsg, Purpose, RejectReason, signed_bytes},
     write_frame,
 };
-use runode_remote_access::{PairingProgress, PairingTicket, list_devices, pairing_pending, revoke_device};
+use runode_remote::{PairingProgress, PairingTicket, list_devices, pairing_pending, revoke_device};
 
 fn rejected(reason: RejectReason) -> Option<GateHostMsg> {
     Some(GateHostMsg::RemoteRejected { reason })
@@ -342,7 +342,7 @@ fn the_certificate_stays_the_same_across_restarts() {
     }
     assert_eq!(mode(&harness.dirs.remote_access_dir().unwrap()), 0o700);
     // 同一时刻只有一个监听方。
-    let second = runode_remote_access::Listener::start(options(
+    let second = runode_remote::Listener::start(options(
         &harness.dirs,
         std::sync::Arc::new(|| Err(std::io::Error::other("unused"))),
     ));
@@ -356,7 +356,7 @@ fn the_certificate_stays_the_same_across_restarts() {
     assert_eq!(phone.ask(&auth), rejected(RejectReason::UnknownDevice));
     // 停下以后监听方的状态没了，命令行据此知道远程访问没开。
     harness.listener = None;
-    assert_eq!(runode_remote_access::listener_status(&harness.dirs).unwrap(), None);
+    assert_eq!(runode_remote::listener_status(&harness.dirs).unwrap(), None);
 }
 
 /// 只剩证书或只剩私钥（上次写到一半）时重新生成一份，两个文件都换新，配对过的手机要重新配对。
@@ -389,7 +389,7 @@ fn a_corrupt_certificate_stops_the_listener_without_replacing_it() {
     for broken in [&cert, &key] {
         let good = std::fs::read(broken).unwrap();
         std::fs::write(broken, b"not DER").unwrap();
-        let started = runode_remote_access::Listener::start(options(
+        let started = runode_remote::Listener::start(options(
             &harness.dirs,
             std::sync::Arc::new(|| Err(std::io::Error::other("unused"))),
         ));
@@ -462,7 +462,7 @@ fn a_stopped_listener_does_not_bring_its_status_back() {
         Ok(UnixStream::pair()?.0)
     });
     harness.listener = None;
-    let listener = runode_remote_access::Listener::start(options(&harness.dirs, connect)).unwrap();
+    let listener = runode_remote::Listener::start(options(&harness.dirs, connect)).unwrap();
     harness.addr = listener.local_addrs()[0];
     harness.listener = Some(listener);
     let mut phone = harness.phone();
@@ -474,7 +474,7 @@ fn a_stopped_listener_does_not_bring_its_status_back() {
     release.send(()).unwrap();
     assert!(phone.closed());
     std::thread::sleep(Duration::from_millis(300));
-    let status = runode_remote_access::listener_status(&harness.dirs).unwrap().unwrap();
+    let status = runode_remote::listener_status(&harness.dirs).unwrap().unwrap();
     assert_eq!((status.port, status.connected), (harness.addr.port(), Vec::new()));
 }
 
@@ -483,7 +483,7 @@ fn the_status_file_lists_the_connected_devices() {
     let harness = Harness::start("connected");
     let key = Key::generate();
     let device_id = harness.pair(&key);
-    let connected = || runode_remote_access::listener_status(&harness.dirs).unwrap().unwrap().connected;
+    let connected = || runode_remote::listener_status(&harness.dirs).unwrap().unwrap().connected;
     let wait_for = |want: &[DeviceId]| {
         let start = std::time::Instant::now();
         while connected() != want {

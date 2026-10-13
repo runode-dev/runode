@@ -25,7 +25,7 @@ use runode_protocol::{
     },
     write_frame,
 };
-use runode_remote_access::{Bind, Listener, Options, PairingTicket, listener_status};
+use runode_remote::{Bind, Listener, Options, PairingTicket, listener_status};
 use rustls::{
     ClientConfig, ClientConnection, DigitallySignedStruct, SignatureScheme, StreamOwned,
     client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier},
@@ -118,7 +118,7 @@ impl Harness {
     }
 }
 
-pub fn options(dirs: &Dirs, connect: runode_remote_access::Connect) -> Options {
+pub fn options(dirs: &Dirs, connect: runode_remote::Connect) -> Options {
     Options {
         dirs: dirs.clone(),
         port: 0,

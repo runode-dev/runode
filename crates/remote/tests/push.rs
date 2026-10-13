@@ -5,7 +5,7 @@ mod common;
 
 use common::*;
 use runode_protocol::{ClientMsg, HostMsg, push::ApnsEnv, remote::DeviceId};
-use runode_remote_access::{PushRegistration, push_registrations, revoke_device};
+use runode_remote::{PushRegistration, push_registrations, revoke_device};
 
 const TOKEN: &str = "80f0c8b3a4e2d1c0ffeeddccbbaa99887766554433221100aabbccddeeff0011";
 

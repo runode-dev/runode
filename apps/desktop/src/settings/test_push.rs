@@ -1,5 +1,5 @@
 //! 远程访问那一页的测试推送：按下去马上给登记过的手机推一条通知
-//! （`runode_remote_access::send_test_push`），看推送的设置和密钥对不对。用当前配置里的推送设置，
+//! （`runode_remote::send_test_push`），看推送的设置和密钥对不对。用当前配置里的推送设置，
 //! 不管推送开没开，也不管监听开在哪个进程里。
 
 use crate::ui::theme::Theme;
@@ -57,11 +57,11 @@ impl SettingsView {
         let dirs = runode_paths::Dirs::from_env();
         // 写回时配置马上重载了，`self.config` 要等观察者回调才换，所以读全局的。
         let settings = crate::remote_access::push_settings(&cx.global::<crate::config::AppConfig>().0);
-        let content = runode_remote_access::TestPush {
+        let content = runode_remote::TestPush {
             title: rust_i18n::t!("settings.test_push.push_title").into_owned(),
             lines: vec![rust_i18n::t!("settings.test_push.push_line").into_owned()],
         };
-        let job = cx.background_spawn(async move { runode_remote_access::send_test_push(&dirs, &settings, &content) });
+        let job = cx.background_spawn(async move { runode_remote::send_test_push(&dirs, &settings, &content) });
         self.test_push = State::Sending {
             _task: cx.spawn(async move |this, cx| {
                 let result = job.await;

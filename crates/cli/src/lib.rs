@@ -1,7 +1,7 @@
 //! 命令行前端：`runode list`、`read`、`send`、`wait`、`open`、`kill`、`focus`、`todo`、`schedule`、`setup`、
 //! `remote` 和 `service`。
 //! 经宿主的 Unix socket 按 `runode_protocol` 说话，不碰终端仿真和界面；`remote`（给手机配对远程
-//! 访问、列出和撤销配对过的设备）不经宿主，读写 `runode_remote_access` 管的文件。
+//! 访问、列出和撤销配对过的设备）不经宿主，读写 `runode_remote` 管的文件。
 //!
 //! 和桌面 app 是同一个可执行文件：带子命令时走这里（见 `wants_cli`），不带时开窗口。在 runode
 //! 的终端里跑时，宿主设的环境变量告诉它连哪个 socket（`runode_protocol::ENV_SOCKET`）、自己在

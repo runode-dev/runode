@@ -7,7 +7,7 @@ use std::{
 };
 
 use runode_paths::Dirs;
-use runode_remote_access::{Bind, Options, Service, listener_status};
+use runode_remote::{Bind, Options, Service, listener_status};
 
 /// 等状态文件里的名字变成 `name`（`None` 是关着），最多等几秒。
 fn wait_for(dirs: &Dirs, name: Option<&str>) {

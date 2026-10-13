@@ -81,7 +81,7 @@ static LISTENING: AtomicBool = AtomicBool::new(false);
 /// 配置项 `terminal-host`：退出后保留会话，跟着配置走，见 `quit_keeps_sessions`。
 static KEEP_SESSIONS: AtomicBool = AtomicBool::new(false);
 /// 跑在 app 里的宿主的远程访问，第一次要开时才建，见 `configure`。
-static REMOTE: Mutex<Option<runode_remote_access::Service>> = Mutex::new(None);
+static REMOTE: Mutex<Option<runode_remote::Service>> = Mutex::new(None);
 /// `start` 的后台线程读到的配置，和读之前取的配置文件的修改时间，见 `take_config`。
 static LOADED_CONFIG: Mutex<Option<(Config, crate::config::Stamps)>> = Mutex::new(None);
 /// 要在界面上告诉用户的事（比如旧版本的宿主还活着），见 `take_notice`。

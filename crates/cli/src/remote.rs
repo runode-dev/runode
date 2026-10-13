@@ -1,5 +1,5 @@
 //! `runode remote …`：给手机配对远程访问（`pair`）、列出（`devices`）和撤销（`revoke`）配对过的设备。
-//! 不经宿主，读写 `runode_remote_access` 管的文件：监听方（宿主所在的进程）开着时才能配对，列和
+//! 不经宿主，读写 `runode_remote` 管的文件：监听方（宿主所在的进程）开着时才能配对，列和
 //! 撤销不用它开着。配置里还没开 `remote-access` 时，`pair` 替用户写上再等监听方起来。配对成了以后，`terminal-host` 还没开时问一句要不要开，免得退出 app 后远程访问
 //! 跟着停掉、手机连不上。
 
@@ -14,7 +14,7 @@ use anyhow::{Context as _, anyhow, bail};
 use qrcode::{Color, EcLevel, QrCode};
 use runode_config::ConfigFile;
 use runode_protocol::remote::PAIRING_TTL;
-use runode_remote_access::{
+use runode_remote::{
     Device, ListenerStatus, PairingProgress, PairingTicket, list_devices, listener_status, now_unix, revoke_device,
 };
 

@@ -4568,7 +4568,7 @@ dependencies = [
  "runode-paths",
  "runode-preview",
  "runode-protocol",
- "runode-remote-access",
+ "runode-remote",
  "runode-shared-types",
  "runode-terminal",
  "runode-ui",
@@ -4609,7 +4609,7 @@ dependencies = [
  "runode-config",
  "runode-paths",
  "runode-protocol",
- "runode-remote-access",
+ "runode-remote",
  "runode-shared-types",
  "serde_json",
  "unicode-width",
@@ -4679,7 +4679,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "runode-remote-access"
+name = "runode-remote"
 version = "0.1.8"
 dependencies = [
  "anyhow",

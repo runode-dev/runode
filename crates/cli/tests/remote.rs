@@ -1,5 +1,5 @@
 //! `runode remote …`：不经宿主，对着临时目录里远程访问的文件跑。配对要监听方开着，这里开一个只听
-//! 回环地址、接不到宿主的监听；配对本身（手机那一侧）由 `runode-remote-access` 自己的测试管。
+//! 回环地址、接不到宿主的监听；配对本身（手机那一侧）由 `runode-remote` 自己的测试管。
 
 mod common;
 
@@ -9,7 +9,7 @@ use common::run;
 use runode_cli::{Env, exit};
 use runode_paths::Dirs;
 use runode_protocol::remote::{PAIRING_TTL, PairingUri};
-use runode_remote_access::{Bind, Listener, Options, PairingTicket, list_devices};
+use runode_remote::{Bind, Listener, Options, PairingTicket, list_devices};
 
 const PHONE: &str = "00112233445566778899aabbccddeeff";
 const TABLET: &str = "0011ffeeddccbbaa9988776655443322";
@@ -152,6 +152,6 @@ fn pairing_shows_a_code_and_a_link_and_waits() {
     assert_eq!(uri.port, listener.local_addrs()[0].port());
     assert_eq!(uri.addrs[0], "127.0.0.1".parse::<std::net::IpAddr>().unwrap());
     assert_ne!(uri.secret, replacement.secret());
-    let status = runode_remote_access::listener_status(&root.dirs()).unwrap().unwrap();
+    let status = runode_remote::listener_status(&root.dirs()).unwrap().unwrap();
     assert_eq!(uri.fingerprint.to_vec(), status.fingerprint.0);
 }

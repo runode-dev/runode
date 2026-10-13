@@ -62,8 +62,8 @@ pub(super) fn refresh(cx: &mut App) -> Task<()> {
 /// 读设备表和监听方的状态。读不了设备表时当没有设备；监听没开时都没连着。
 fn read_devices() -> Devices {
     let dirs = runode_paths::Dirs::from_env();
-    let connected = runode_remote_access::listener_status(&dirs).ok().flatten().map(|status| status.connected);
-    let devices = runode_remote_access::list_devices(&dirs).unwrap_or_default();
+    let connected = runode_remote::listener_status(&dirs).ok().flatten().map(|status| status.connected);
+    let devices = runode_remote::list_devices(&dirs).unwrap_or_default();
     Devices(
         devices
             .into_iter()
@@ -96,7 +96,7 @@ impl WindowView {
                 return;
             }
             cx.update(|cx| {
-                if let Err(err) = runode_remote_access::revoke_device(&runode_paths::Dirs::from_env(), id) {
+                if let Err(err) = runode_remote::revoke_device(&runode_paths::Dirs::from_env(), id) {
                     tracing::warn!("cannot revoke remote device {id}: {err}");
                 }
                 cx.set_global(read_devices());

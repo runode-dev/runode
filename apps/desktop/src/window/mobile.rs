@@ -14,7 +14,7 @@ use gpui::{
     AnyElement, App, ClipboardItem, Context, Div, Entity, FocusHandle, Focusable, FontWeight, Hsla, KeyDownEvent,
     MouseButton, Role, SharedString, Stateful, Subscription, Window, div, prelude::*, px, svg,
 };
-use runode_remote_access::{host_name, local_interfaces};
+use runode_remote::{host_name, local_interfaces};
 
 use super::{
     CARD_GAP, TITLEBAR_HEIGHT, WindowView, cards,

@@ -15,7 +15,7 @@ use gpui::{Bounds, Context, Hsla, SharedString, Task, Window, canvas, div, fill,
 use qrcode::{Color, EcLevel, QrCode};
 use runode_paths::Dirs;
 use runode_protocol::remote::PAIRING_TTL;
-use runode_remote_access::{ListenerStatus, PairingProgress, PairingTicket, host_name, listener_status, now_unix};
+use runode_remote::{ListenerStatus, PairingProgress, PairingTicket, host_name, listener_status, now_unix};
 
 use crate::config::AppConfig;
 
