@@ -1,4 +1,4 @@
-//! 排版视图里的网络图片（`http`、`https`）：外调 curl 在几个固定的下载线程里下载，限 10 秒、限
+//! 排版视图里的网络图片（`http`、`https`）：外调 curl 在几个固定的下载线程里下载，连同重定向一共限 10 秒、限
 //! `runode_preview::MAX_IMAGE_BYTES` 字节，只收图片类型；同一个地址下好的结果留着给之后打开的文档用，
 //! 一共留到 `MAX_KEPT_BYTES`，多了放掉最久没要过的，再要时重下；下不了的不留，下次打开文档再试。
 //! 主机是本机或局域网地址的不下载：网址里写的
@@ -16,6 +16,7 @@ use std::{
         Arc, LazyLock, Mutex, PoisonError,
         mpsc::{self, Receiver, Sender},
     },
+    time::{Duration, Instant},
 };
 
 use futures::{FutureExt as _, channel::oneshot, future::Shared};
@@ -24,8 +25,8 @@ use runode_preview::{Content, ImageFormat, MAX_IMAGE_BYTES};
 
 use super::{Picture, picture_of};
 
-/// 下载的总时长上限，秒。
-const TIMEOUT_SECS: &str = "10";
+/// 一次下载连同各次重定向的总时长上限。
+const TIMEOUT: Duration = Duration::from_secs(10);
 /// 最多跟几次重定向（GitHub 上的图片地址大多要跳一次）。
 const MAX_REDIRECTS: usize = 5;
 /// 同时下载的个数：这么多个线程从队列里取地址，一篇文档里的图片再多也只起这么多个 curl。
@@ -277,9 +278,10 @@ fn loose_ipv4(host: &str) -> Option<Ipv4Addr> {
 /// 下载 `url`，返回图片格式和字节；出错、超时、太大、不是图片、落到本机或局域网地址时为空。
 /// 重定向自己跟，每一跳都重新查地址。
 fn download(url: &str) -> Option<(ImageFormat, Vec<u8>)> {
+    let deadline = Instant::now() + TIMEOUT;
     let mut url = url.to_owned();
     for _ in 0..=MAX_REDIRECTS {
-        match fetch_once(&url)? {
+        match fetch_once(&url, deadline)? {
             Hop::Done(kind, bytes) => return Some((image_type(&kind, &url)?, bytes)),
             Hop::Redirect(next) => url = next,
         }
@@ -293,9 +295,19 @@ enum Hop {
     Redirect(String),
 }
 
-/// 请求一次 `url`，不跟重定向。连的是 `public_address` 查过的那个地址，curl 不再自己解析。
-fn fetch_once(url: &str) -> Option<Hop> {
+/// 离 `deadline` 还剩的时间，写成 curl `--max-time` 要的秒数；不到一毫秒时为空（写成 0 curl 就不限时了）。
+fn max_time(deadline: Instant) -> Option<String> {
+    let left = deadline.saturating_duration_since(Instant::now());
+    (left.as_millis() > 0).then(|| format!("{:.3}", left.as_secs_f64()))
+}
+
+/// 请求一次 `url`，不跟重定向，`deadline` 前没下完算下不了。连的是 `public_address` 查过的那个地址，curl
+/// 不再自己解析。
+fn fetch_once(url: &str, deadline: Instant) -> Option<Hop> {
+    // shortcut: `public_address` 里解析主机（`to_socket_addrs`）没法限时，卡住的 DNS 查询照样占着下载线程，
+    // 真碰上了再换成能设超时的解析器。
     let (host, port, ip) = public_address(url)?;
+    let max_time = max_time(deadline)?;
     let ip = match ip {
         IpAddr::V4(ip) => ip.to_string(),
         IpAddr::V6(ip) => format!("[{ip}]"),
@@ -310,7 +322,7 @@ fn fetch_once(url: &str) -> Option<Hop> {
         command.args(["--resolve", &format!("{host}:{port}:{ip}")]);
     }
     let mut child = command
-        .args(["--max-time", TIMEOUT_SECS])
+        .args(["--max-time", &max_time])
         .args(["--max-filesize", &MAX_IMAGE_BYTES.to_string()])
         // 正文写到标准输出；状态码、内容类型和重定向的目标各一行写到标准错误。
         .args(["-w", "%{stderr}%{http_code}\n%{content_type}\n%{redirect_url}", "--", url])
@@ -504,6 +516,14 @@ mod tests {
         assert_eq!(kept(), ["https://x/a", "https://x/c"]);
         assert_eq!(trim_with(&DOWNLOADS, "https://x/c", 0).len(), 1);
         assert_eq!(kept(), ["https://x/c"]);
+    }
+
+    /// 各次重定向共用一个期限，过了就不再请求。
+    #[test]
+    fn requests_share_one_deadline() {
+        assert_eq!(max_time(Instant::now()), None);
+        let left: f64 = max_time(Instant::now() + TIMEOUT).unwrap().parse().unwrap();
+        assert!(left > 9. && left <= 10., "{left}");
     }
 
     #[test]
