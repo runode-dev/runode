@@ -698,13 +698,16 @@ impl<T: Focusable> Frame<T> {
         let theme = cx.theme();
         let border = frame_border(theme, invalid, state.focus_handle(cx).is_focused(window));
         let user = std::mem::take(div.style());
+        // 留白和边框在管编辑的 entity 外面，点到那里也要把焦点交给它。
+        let focus = state.focus_handle(cx);
         let mut div = own(div)
             .px(px(8.))
             .rounded(px(6.))
             .bg(theme.background)
             .border_1()
             .border_color(border)
-            .text_color(theme.foreground);
+            .text_color(theme.foreground)
+            .on_mouse_down(MouseButton::Left, move |_, window, cx| window.focus(&focus, cx));
         div.style().refine(&user);
         (div, state, children)
     }
