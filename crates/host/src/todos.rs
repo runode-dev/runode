@@ -124,6 +124,8 @@ impl Host {
             }
             state.path = Some(db);
         }
+        // 监听已经开了：这之前问过 `ListTodos` 的连接拿到的是「没有任务板」，叫它们重问。
+        self.shared.todos_changed();
         let todos = self.shared.todos.clone();
         let shared = Arc::downgrade(&self.shared);
         if let Err(err) =
@@ -199,6 +201,11 @@ impl Shared {
     ) -> Result<HostMsg, String> {
         self.todos_writable()?;
         let id = &self.resolve_todo(id)?;
+        // 改目录、工作树的同时有人在开始这个任务的话，开出来的会话和库里记的会对不上。
+        let _claim = match spec {
+            Some(_) => Some(self.claim_todo(id)?),
+            None => None,
+        };
         if let Some(spec) = spec {
             let old = self.todos.with_db(|db| db.todo_by_id(id))?.ok_or_else(|| no_todo(id))?;
             if old.started.is_none() {
@@ -222,6 +229,8 @@ impl Shared {
     pub(crate) fn remove_todo(&self, req: u32, id: &str) -> Result<HostMsg, String> {
         self.todos_writable()?;
         let id = &self.resolve_todo(id)?;
+        // 不和开始任务、清工作树同时做：那边正用着的工作树这边别删。
+        let _claim = self.claim_todo(id)?;
         let todo = self.todos.with_db(|db| db.remove_todo(id))?.ok_or_else(|| no_todo(id))?;
         self.todos_changed();
         if let Some(session) = todo.session {
@@ -260,7 +269,8 @@ impl Shared {
         if self.todos_writable().is_err() {
             return;
         }
-        let todos = match self.todos.with_db(|db| db.list_todos(unix_now())) {
+        // 不按看板只留七天的规矩滤：完成很久以后 shell 才退出的会话也要收掉，不然单独跑的宿主一直不空闲。
+        let todos = match self.todos.with_db(|db| db.list_todos(0)) {
             Ok(todos) => todos,
             Err(err) => {
                 tracing::warn!("cannot read the todos: {err}");
@@ -313,6 +323,11 @@ impl Shared {
         let id = self.resolve_todo(id)?;
         let todo = self.todos.with_db(|db| db.todo_by_id(&id))?.ok_or_else(|| no_todo(&id))?;
         Ok(HostMsg::Todo { req, todo })
+    }
+
+    /// 占住任务 `id`（见 `Todos::claim`），占不住时回一句让前端再试。
+    fn claim_todo(&self, id: &str) -> Result<Claim<'_>, String> {
+        self.todos.claim(id).ok_or_else(|| format!("todo {id} is starting or being cleaned up; try again"))
     }
 
     /// 前端写的任务（标识，或者 `5`、`#5` 这样的编号，见 `ClientMsg::GetTodo`）的标识。
@@ -374,8 +389,7 @@ impl Shared {
     pub(crate) fn start_todo(&self, id: &str) -> Result<SessionId, String> {
         self.todos_writable()?;
         let id = &self.resolve_todo(id)?;
-        let _claim =
-            self.todos.claim(id).ok_or_else(|| format!("todo {id} is starting or being cleaned up; try again"))?;
+        let _claim = self.claim_todo(id)?;
         let todo = self.todos.with_db(|db| db.todo_by_id(id))?.ok_or_else(|| no_todo(id))?;
         if todo.done_at.is_some() {
             return Err(format!("todo {id} is done"));
