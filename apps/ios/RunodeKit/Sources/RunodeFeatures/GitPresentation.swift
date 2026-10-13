@@ -164,3 +164,118 @@ private final class GitTreeNode {
         return la == lb ? a < b : la < lb
     }
 }
+
+extension Presentation {
+    /// 一块里紧跟着的一串删掉的行和一串加的行按先后一一配对，各自真正改了的字（`gitChangedWords`），
+    /// 和 `hunk.lines` 一一对应；配不上对的行为空。
+    public static func gitWordChanges(_ hunk: GitHunk) -> [[Range<String.Index>]] {
+        let lines = hunk.lines
+        var words = [[Range<String.Index>]](repeating: [], count: lines.count)
+        func run(_ from: Int, _ kind: GitLineKind) -> Range<Int> {
+            var end = from
+            while end < lines.count, lines[end].kind == kind { end += 1 }
+            return from..<end
+        }
+        var ix = 0
+        while ix < lines.count {
+            let removed = run(ix, .removed)
+            let added = run(removed.upperBound, .added)
+            for (old, new) in zip(removed, added) {
+                (words[old], words[new]) = gitChangedWords(lines[old].text, lines[new].text)
+            }
+            ix = max(added.upperBound, ix + 1)
+        }
+        return words
+    }
+
+    /// `old` 改成 `new` 时两边各自改了的范围，规则和电脑上的 `changed_words` 一样，改一边要跟着改另一边：
+    /// 连续的字母数字和 `_` 算一个词，一串空白算一个，别的字（标点、汉字）一个字算一个；求最长公共
+    /// 子序列，没对上的就是改了的，中间只隔着空白的并成一段。两边相同的部分不到长的那行的四分之一时
+    /// 当整行重写，都不标。收到的行里制表符已经展开，不用另外处理。
+    public static func gitChangedWords(_ old: String, _ new: String) -> ([Range<String.Index>], [Range<String.Index>]) {
+        let (rangesA, rangesB) = (wordTokens(old), wordTokens(new))
+        // 词换成编号再比，免得在最长公共子序列的内层循环里比字符串。
+        var ids: [Substring: Int] = [:]
+        func id(_ word: Substring) -> Int {
+            if let id = ids[word] { return id }
+            ids[word] = ids.count
+            return ids.count - 1
+        }
+        let a = rangesA.map { id(old[$0]) }
+        let b = rangesB.map { id(new[$0]) }
+        var prefix = 0
+        while prefix < min(a.count, b.count), a[prefix] == b[prefix] { prefix += 1 }
+        var suffix = 0
+        while suffix < min(a.count, b.count) - prefix, a[a.count - 1 - suffix] == b[b.count - 1 - suffix] {
+            suffix += 1
+        }
+        let midA = prefix..<(a.count - suffix)
+        let midB = prefix..<(b.count - suffix)
+        var keepA = [Bool](repeating: false, count: a.count)
+        var keepB = [Bool](repeating: false, count: b.count)
+        for i in 0..<prefix { (keepA[i], keepB[i]) = (true, true) }
+        for k in 0..<suffix { (keepA[a.count - 1 - k], keepB[b.count - 1 - k]) = (true, true) }
+        let (n, m) = (midA.count, midB.count)
+        // 中间不同的那段按词数相乘超过这么多时不细比，整段算改了。
+        if n * m <= 250_000 {
+            // lcs[i * (m + 1) + j] 是中间段 a 从第 i 个、b 从第 j 个起的最长公共子序列有多长。
+            var lcs = [Int32](repeating: 0, count: (n + 1) * (m + 1))
+            for i in stride(from: n - 1, through: 0, by: -1) {
+                for j in stride(from: m - 1, through: 0, by: -1) {
+                    lcs[i * (m + 1) + j] =
+                        a[prefix + i] == b[prefix + j]
+                        ? lcs[(i + 1) * (m + 1) + j + 1] + 1
+                        : max(lcs[(i + 1) * (m + 1) + j], lcs[i * (m + 1) + j + 1])
+                }
+            }
+            var (i, j) = (0, 0)
+            while i < n, j < m {
+                if a[prefix + i] == b[prefix + j] {
+                    (keepA[prefix + i], keepB[prefix + j]) = (true, true)
+                    (i, j) = (i + 1, j + 1)
+                } else if lcs[(i + 1) * (m + 1) + j] >= lcs[i * (m + 1) + j + 1] {
+                    i += 1
+                } else {
+                    j += 1
+                }
+            }
+        }
+        let kept = zip(rangesA, keepA).filter { $0.1 }.reduce(0) { $0 + old[$1.0].utf8.count }
+        if kept * 4 < max(old.utf8.count, new.utf8.count) { return ([], []) }
+        return (changedRanges(old, rangesA, keepA), changedRanges(new, rangesB, keepB))
+    }
+
+    /// 没留下的词并成连续的范围，中间只隔着空白的也并起来。
+    private static func changedRanges(_ text: String, _ words: [Range<String.Index>], _ keep: [Bool])
+        -> [Range<String.Index>]
+    {
+        var out: [Range<String.Index>] = []
+        for (range, kept) in zip(words, keep) where !kept {
+            if let last = out.last, text[last.upperBound..<range.lowerBound].allSatisfy(\.isWhitespace) {
+                out[out.count - 1] = last.lowerBound..<range.upperBound
+            } else {
+                out.append(range)
+            }
+        }
+        return out
+    }
+
+    /// 切成词，汉字这类三字节以上的字一个字算一个，不然一句话只是一个词。
+    private static func wordTokens(_ text: String) -> [Range<String.Index>] {
+        func kind(_ c: Character) -> Int {
+            if c.isWhitespace { return 1 }
+            if c == "_" || ((c.isLetter || c.isNumber) && c.utf8.count < 3) { return 2 }
+            return 0
+        }
+        var out: [Range<String.Index>] = []
+        var start = text.startIndex
+        while start < text.endIndex {
+            let k = kind(text[start])
+            var end = text.index(after: start)
+            while k != 0, end < text.endIndex, kind(text[end]) == k { end = text.index(after: end) }
+            out.append(start..<end)
+            start = end
+        }
+        return out
+    }
+}

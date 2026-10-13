@@ -489,7 +489,7 @@
         }
     }
 
-    /// 一个文件的 diff：逐行显示，新增的绿底、删掉的红底，长行折行。右上角暂存或取消暂存这个文件。
+    /// 一个文件的 diff：逐行显示，新增的绿底、删掉的红底，成对改动的行里真正改了的字底色更深，长行折行。右上角暂存或取消暂存这个文件。
     struct GitDiffScreen: View {
         let model: GitModel
         let target: GitDiffTarget
@@ -573,8 +573,9 @@
                     .padding(.vertical, 6)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .background(colors.card)
-                ForEach(Array(hunk.lines.enumerated()), id: \.offset) { _, line in
-                    GitLineView(line: line)
+                let words = Presentation.gitWordChanges(hunk)
+                ForEach(Array(hunk.lines.enumerated()), id: \.offset) { ix, line in
+                    GitLineView(line: line, words: words[ix])
                 }
             }
         }
@@ -582,6 +583,8 @@
 
     private struct GitLineView: View {
         let line: GitLine
+        /// 这一行真正改了的字，垫更深的底色。
+        let words: [Range<String.Index>]
 
         var body: some View {
             HStack(alignment: .firstTextBaseline, spacing: 6) {
@@ -590,7 +593,7 @@
                     .frame(minWidth: 32, alignment: .trailing)
                 Text(marker)
                     .foregroundStyle(tint ?? .secondary)
-                Text(line.text.isEmpty ? " " : line.text)
+                Text(text)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -600,6 +603,21 @@
             .background(tint.map { $0.opacity(0.14) } ?? Color.clear)
             .accessibilityElement(children: .ignore)
             .accessibilityLabel("\(accessibilityKind)：\(line.text)")
+        }
+
+        private var text: AttributedString {
+            if line.text.isEmpty { return AttributedString(" ") }
+            var text = AttributedString()
+            var at = line.text.startIndex
+            for range in words {
+                text += AttributedString(line.text[at..<range.lowerBound])
+                var word = AttributedString(line.text[range])
+                word.backgroundColor = tint?.opacity(0.4)
+                text += word
+                at = range.upperBound
+            }
+            text += AttributedString(line.text[at...])
+            return text
         }
 
         private var number: String {

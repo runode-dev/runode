@@ -255,3 +255,38 @@ import Testing
             ])
     }
 }
+
+/// 成对改动的行里改了哪些字，和电脑上 `changed_words` 的测试对得上。
+@Suite struct GitWordChangesTests {
+    private func changed(_ old: String, _ new: String) -> ([String], [String]) {
+        let (a, b) = Presentation.gitChangedWords(old, new)
+        return (a.map { String(old[$0]) }, b.map { String(new[$0]) })
+    }
+
+    @Test func marksOnlyTheChangedWords() {
+        #expect(changed("let total = count + 1;", "let total = count * 2;") == (["+ 1"], ["* 2"]))
+        #expect(changed("foo(bar)", "foo(bar, baz)") == ([], [", baz"]))
+    }
+
+    @Test func chineseIsComparedCharByChar() {
+        #expect(changed("改动现在只有一处：实现。", "改动现在有两处：实现，再关掉。") == (["只", "一"], ["两", "，再关掉"]))
+    }
+
+    @Test func rewrittenLinesAreNotMarked() {
+        #expect(changed("fn alpha() {}", "let beta = gamma;") == ([], []))
+    }
+
+    @Test func pairsRemovedWithAddedLines() {
+        let hunk = GitHunk(
+            header: "@@ -1,2 +1,2 @@",
+            lines: [
+                GitLine(kind: .removed, old: 1, text: "a longer new line"),
+                GitLine(kind: .added, new: 1, text: "a much longer new line"),
+                GitLine(kind: .context, old: 2, new: 2, text: "b"),
+                GitLine(kind: .added, new: 3, text: "c"),
+            ])
+        let words = Presentation.gitWordChanges(hunk)
+        #expect(words.map(\.count) == [0, 1, 0, 0])
+        #expect(String(hunk.lines[1].text[words[1][0]]) == "much ")
+    }
+}

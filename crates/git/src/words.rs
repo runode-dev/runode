@@ -1,4 +1,5 @@
 //! 一对改过的行里具体改了哪些字：两边切成词，求最长公共子序列，没对上的就是改了的。
+//! 手机端的 `Presentation.gitChangedWords` 照搬了同样的规则，改这里要跟着改那边。
 
 use std::{borrow::Cow, ops::Range};
 
