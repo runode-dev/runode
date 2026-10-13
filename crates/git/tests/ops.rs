@@ -208,6 +208,21 @@ fn commits_and_amends() {
     assert_eq!(repo.git(&["rev-list", "--count", "HEAD"]), "2");
 }
 
+/// 暂存全部再提交时有没解决的冲突就不提交，冲突留在暂存区里。
+#[test]
+fn stage_all_commit_refuses_conflicts() {
+    let repo = TestRepo::new("ops-commit-conflict");
+    repo.commit_file("a.txt", "base\n", "base");
+    repo.git(&["checkout", "-q", "-b", "feat"]);
+    repo.commit_file("a.txt", "feat\n", "feat");
+    repo.git(&["checkout", "-q", "main"]);
+    repo.commit_file("a.txt", "main\n", "main");
+    assert!(repo.try_git(&["merge", "-q", "feat"]).is_none());
+    let handle = read(&repo).repo();
+    assert!(handle.commit("merge", CommitOptions { stage_all: true, ..Default::default() }).is_err());
+    assert_eq!(repo.status(), ["UU a.txt"]);
+}
+
 #[test]
 fn undoes_the_last_commit() {
     let repo = TestRepo::new("ops-undo");

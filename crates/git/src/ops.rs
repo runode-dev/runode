@@ -343,9 +343,13 @@ impl Repo {
     }
 
     /// 提交这个仓库暂存的改动；说明经标准输入交给 git，不经命令行。`amend` 且说明为空时
-    /// 沿用上一次提交的说明。没有可提交的改动、说明为空时报 git 的错。
+    /// 沿用上一次提交的说明。没有可提交的改动、说明为空时报 git 的错。`stage_all` 时暂存区里
+    /// 有没解决的冲突就报错，什么也不做：全部暂存会把带冲突标记的文件当成解决了提交进去。
     pub fn commit(&self, message: &str, options: CommitOptions) -> Result {
         if options.stage_all {
+            if !run(&self.root, ["ls-files", "--unmerged"], None)?.is_empty() {
+                return Err(GitError::new("还有没解决的冲突，没有暂存全部再提交"));
+            }
             add_all(&self.root)?;
         }
         let mut args = vec!["commit"];
