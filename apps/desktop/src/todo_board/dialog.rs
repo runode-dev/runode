@@ -175,9 +175,10 @@ impl TodoDialog {
         };
         let locked = matches!(&editing, Some(Editing::Todo(todo)) if todo.started.is_some());
         let dir = spec.as_ref().map_or(dir, |spec| spec.dir.clone());
-        // 新建任务时目录在 git 仓库里就默认开工作树；定时默认不开，每次到点都开一个会越堆越多。
-        let worktree =
-            spec.as_ref().map_or_else(|| !schedule && runode_git::repo_root(&dir).is_some(), |spec| spec.worktree);
+        // 新建任务时目录在 git 仓库里就默认开工作树（`check_repo` 在后台看完再打开）；定时默认不开，每次到点都
+        // 开一个会越堆越多。
+        let worktree = spec.as_ref().is_some_and(|spec| spec.worktree);
+        let new_todo = spec.is_none() && !schedule;
         let field = |text: String, label: &str, placeholder: &str, cx: &mut Context<Self>| {
             let (label, placeholder) = (rust_i18n::t!(label).into_owned(), rust_i18n::t!(placeholder).into_owned());
             let select = text.len();
@@ -234,7 +235,7 @@ impl TodoDialog {
             TextareaEvent::Changed => {}
         }));
         window.focus(&title.focus_handle(cx), cx);
-        Self {
+        let mut dialog = Self {
             schedule,
             editing,
             title,
@@ -251,7 +252,34 @@ impl TodoDialog {
             error: None,
             saving: false,
             _events: events,
+        };
+        if new_todo {
+            dialog.check_repo(cx);
         }
+        dialog
+    }
+
+    /// 在后台看目录在不在 git 仓库里（`repo_root` 要起 git，慢的时候别冻住界面），看完了定要不要工作树：不在
+    /// 仓库里开不了；新建任务在仓库里默认打开。这期间换了目录或拨过开关就不动。
+    fn check_repo(&mut self, cx: &mut Context<Self>) {
+        let (dir, worktree) = (self.dir.clone(), self.worktree);
+        let repo = cx.background_executor().spawn({
+            let dir = dir.clone();
+            async move { runode_git::repo_root(&dir).is_some() }
+        });
+        cx.spawn(async move |this, cx| {
+            let repo = repo.await;
+            this.update(cx, |dialog, cx| {
+                if dialog.dir != dir || dialog.worktree != worktree {
+                    return;
+                }
+                let new_todo = !dialog.schedule && dialog.editing.is_none();
+                dialog.worktree = repo && (dialog.worktree || new_todo);
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
     }
 
     /// 弹出系统的目录选择框，选好的目录换上。
@@ -266,10 +294,8 @@ impl TodoDialog {
             let Ok(Ok(Some(paths))) = paths.await else { return };
             let Some(dir) = paths.into_iter().next() else { return };
             this.update(cx, |dialog, cx| {
-                // 不在仓库里开不了工作树；新建任务换到仓库里时照打开对话框时的规矩默认打开。
-                let new_todo = !dialog.schedule && dialog.editing.is_none();
-                dialog.worktree = runode_git::repo_root(&dir).is_some() && (dialog.worktree || new_todo);
                 dialog.dir = dir;
+                dialog.check_repo(cx);
                 cx.notify();
             })
             .ok();
