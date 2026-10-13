@@ -3,7 +3,7 @@
 //! 一共留到 `MAX_KEPT_BYTES`，多了放掉最久没要过的，再要时重下；下不了的不留，下次打开文档再试。
 //! 主机是本机或局域网地址的不下载：网址里写的
 //! 主机先查一遍，再自己解析出地址查一遍，解析到的地址交给 curl（`--resolve`）不让它再解析；重定向
-//! 自己一跳一跳地跟，每跳都这样查。
+//! 自己一跳一跳地跟，每跳都这样查。不走代理，设了代理的也直连。
 
 use std::{
     collections::HashMap,
@@ -302,8 +302,9 @@ fn fetch_once(url: &str) -> Option<Hop> {
     };
     let mut command = Command::new("curl");
     // `-q` 得是第一个参数，不读用户的 ~/.curlrc（里面的代理、跟重定向等会绕开这里的检查）；`-g` 不展开
-    // 网址里的 `{}`、`[]`，一个网址只请求一次。
-    command.args(["-q", "-g", "-sf", "--proto", "=http,https"]);
+    // 网址里的 `{}`、`[]`，一个网址只请求一次。`--noproxy '*'` 不走 `http_proxy` 这些环境变量里的代理：
+    // 代理自己解析主机，`--resolve` 管不到，查过的公网地址就作废了。
+    command.args(["-q", "-g", "-sf", "--noproxy", "*", "--proto", "=http,https"]);
     // 主机本身是 IP 时 curl 不解析，`--resolve` 也写不对 IPv6 的主机，用不着它。
     if host.parse::<IpAddr>().is_err() && loose_ipv4(&host).is_none() {
         command.args(["--resolve", &format!("{host}:{port}:{ip}")]);
