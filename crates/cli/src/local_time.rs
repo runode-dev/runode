@@ -56,7 +56,7 @@ impl LocalTime {
             return None;
         }
         Some(Self {
-            year: tm.tm_year + 1900,
+            year: tm.tm_year.checked_add(1900)?,
             month: u8::try_from(tm.tm_mon + 1).ok()?,
             day: u8::try_from(tm.tm_mday).ok()?,
             hour: u8::try_from(tm.tm_hour).ok()?,
@@ -93,6 +93,8 @@ mod tests {
         for bad in ["2026-10-13", "2026-13-01 09:00", "2026-10-13 24:00", "2026-10-13T09:00", "13:00"] {
             assert_eq!(LocalTime::parse(bad), None, "{bad}");
         }
+        // 宿主只查一次性的定时在将来，任意大的时刻都可能来：年份装不下时为空，不溢出。
+        assert_eq!(LocalTime::from_unix(2_147_482_677 * 31_556_952), None);
         assert_eq!(clock("9:30"), Some((9, 30)));
         assert_eq!(clock("09:60"), None);
     }
