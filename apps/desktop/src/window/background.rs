@@ -83,13 +83,12 @@ struct Live {
     todos: Option<HashSet<SessionId>>,
 }
 
-/// 宿主里的会话；宿主跑在 app 里时为 `None`，没有后台会话可言。有可能要结束的会话时连任务板一起问。
+/// 宿主里的会话，连同任务板；宿主跑在 app 里时为 `None`，没有后台会话可言。任务板每次都现问：任务的会话
+/// 不列进来，「全部结束」也就不会结束正在干活的任务。
 fn live_sessions() -> Option<Result<Live>> {
     (host_client::mode() != Mode::InProcess).then(|| {
         let sessions = host_client::list_sessions()?;
-        let todos =
-            if orphans(&sessions, &HashSet::new(), Some(&HashSet::new())).is_empty() { None } else { todo_sessions() };
-        Ok(Live { sessions, todos })
+        Ok(Live { sessions, todos: todo_sessions() })
     })
 }
 
@@ -114,15 +113,19 @@ fn todo_sessions() -> Option<HashSet<SessionId>> {
     }
 }
 
-/// 按问到的会话更新列表，重画窗口；列表不空时排好下一次。问不到时列表不变。
+/// 按问到的会话更新列表，重画窗口；列表不空、或者任务板没问到又有会话等着结束时排好下一次。问不到时列表不变。
 fn apply(live: Option<Result<Live>>, cx: &mut App) {
     let previous = cx.default_global::<BackgroundSessions>().sessions.clone();
+    // 任务板没问到时，有会话等着结束也要再问，不然列表空着就不再轮询，它们一直留在宿主里。
+    let mut retry = false;
     let sessions = match live {
         None => Vec::new(),
         Some(Ok(Live { sessions: live, todos })) => {
-            // 任务的会话在任务板上，不列在这里。
+            // 任务的会话在任务板上，不列在这里；没问到任务板时用看板那份兜底。
             let mut held = held_sessions(cx);
             held.extend(runode_todo_board::todo_sessions(cx));
+            held.extend(todos.iter().flatten());
+            retry = todos.is_none() && live.iter().any(|session| session.exited);
             let link = host_client::link();
             for id in orphans(&live, &held, todos.as_ref()) {
                 tracing::info!("ending the background session {id}: its shell exited");
@@ -135,7 +138,7 @@ fn apply(live: Option<Result<Live>>, cx: &mut App) {
             previous
         }
     };
-    let poll = !sessions.is_empty();
+    let poll = !sessions.is_empty() || retry;
     set(sessions, cx);
     if poll {
         schedule(POLL_INTERVAL, cx);
