@@ -1,6 +1,7 @@
 //! 写仓库的操作：暂存、丢弃、提交、同步远端和 stash。分支见 `branch`，按块暂存见 `patch`。
 
 use std::{
+    collections::HashMap,
     ffi::OsStr,
     fmt, fs,
     io::{Read, Write},
@@ -292,8 +293,10 @@ impl Repo {
         let Some(now) = crate::snapshot(&self.root, &mut UntrackedCache::default()).map(|s| s.unstaged) else {
             return Err(GitError::new("没能读到仓库现在的状态，什么也没丢"));
         };
+        // 按路径建表再比：丢整个目录时文件和未暂存的条目都可能有几万个（未跟踪的文件一个个列），逐个扫要几秒。
+        let now: HashMap<&Path, &FileDiff> = now.iter().map(|n| (n.path.as_path(), n)).collect();
         let same = |file: &FileDiff| {
-            now.iter().any(|n| n.path == file.path && n.status == file.status && n.old_path == file.old_path)
+            now.get(file.path.as_path()).is_some_and(|n| n.status == file.status && n.old_path == file.old_path)
         };
         if let Some(file) = files.iter().find(|file| !file.gitlink && !same(file)) {
             return Err(GitError::new(format!("{} 的状态变了，什么也没丢，看过最新的改动再来", file.path.display())));
