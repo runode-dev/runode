@@ -6,7 +6,7 @@ use std::{
     time::Duration,
 };
 
-use runode_shared_types::{
+use runode_types::{
     agent::AgentKind,
     clipboard::{ClipboardRead, ClipboardWrite},
     color::{Rgb, TerminalColor},
@@ -589,7 +589,7 @@ fn ghostty_config_paths() -> Vec<PathBuf> {
 
 #[cfg(test)]
 pub(crate) mod tests {
-    use runode_shared_types::clipboard::ClipboardAccess;
+    use runode_types::clipboard::ClipboardAccess;
 
     use super::*;
 

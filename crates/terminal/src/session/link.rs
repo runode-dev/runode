@@ -12,7 +12,7 @@ use libghostty_vt::{
     screen::{CellWide, GridRef, Row},
     terminal::{Point, PointCoordinate},
 };
-use runode_shared_types::grid::GridPoint;
+use runode_types::grid::GridPoint;
 
 use super::{Session, log_err};
 

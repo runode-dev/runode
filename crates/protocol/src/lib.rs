@@ -8,7 +8,7 @@
 //! 它们没有自己的 git，请宿主在会话所在的仓库里读写，线上的类型见 `git`。agent 等回答时经 APNs
 //! 给手机推通知，推送的格式见 `push`。派给 agent 的任务和定时（任务板）的数据见 `todo`。
 //!
-//! 这里只放数据和编解码，只依赖 `runode_shared_types` 和 serde；终端仿真和 PTY 都不碰。
+//! 这里只放数据和编解码，只依赖 `runode_types` 和 serde；终端仿真和 PTY 都不碰。
 
 pub mod frame;
 pub mod git;
@@ -29,7 +29,7 @@ pub use message::{
     AttachMode, BuildId, Caps, ClientKind, ClientMsg, ClipboardContent, FinishedCommand, GoodbyeReason, HandoffRefusal,
     HostMsg, Placement, SessionId, SessionInfo,
 };
-pub use runode_shared_types::tasks::{self, MAX_TASKS, TaskEntry, TaskSource, TaskSourceKind};
+pub use runode_types::tasks::{self, MAX_TASKS, TaskEntry, TaskSource, TaskSourceKind};
 
 /// 宿主给每个会话的 shell 设的环境变量：这个会话的 `SessionId`。在终端里跑的命令行据此知道
 /// 自己在哪个会话里。

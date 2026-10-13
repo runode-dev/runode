@@ -12,7 +12,7 @@ use gpui::{
     Context, Div, FocusHandle, Focusable, Hsla, KeyDownEvent, Role, SharedString, Stateful, Subscription, Window,
     actions, div, prelude::*, px, relative,
 };
-use runode_shared_types::pane::{Axis, Node, Rect, SplitId};
+use runode_types::pane::{Axis, Node, Rect, SplitId};
 
 use super::{PressDown, TITLEBAR_HEIGHT, WindowView};
 use crate::ui::font_size::FontSize;

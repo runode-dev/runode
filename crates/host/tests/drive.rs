@@ -8,7 +8,7 @@ use std::{thread, time::Duration, time::Instant};
 use common::{Peer, WAIT, listen, script, temp_dir};
 use runode_host::{ClientMsg, HostMsg, SessionId};
 use runode_protocol::{AttachMode, ClientKind, FrameKind};
-use runode_shared_types::session::{DriveAction, SessionMeta};
+use runode_types::session::{DriveAction, SessionMeta};
 
 /// 关掉回显、不按行等、不认 Ctrl-C 的 `cat -v`：程序收到的每个字节原样显示出来（ESC 是 `^[`），
 /// 回车时一起输出。`setup` 是之前给终端的序列（比如打开应用光标键）；设好终端后打印 `ready`，

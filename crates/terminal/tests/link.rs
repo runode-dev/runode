@@ -5,8 +5,8 @@ mod common;
 use std::path::Path;
 
 use common::{at, idle_session};
-use runode_shared_types::session::SessionMeta;
 use runode_terminal::session::{LinkSpan, LinkTarget};
+use runode_types::session::SessionMeta;
 
 #[test]
 fn an_osc8_hyperlink_covers_the_cells_it_marks() {

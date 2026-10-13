@@ -4,7 +4,7 @@
 
 use runode_paths::Dirs;
 use runode_protocol::{SessionId, push::Notification};
-use runode_shared_types::session::SessionMeta;
+use runode_types::session::SessionMeta;
 
 use super::{
     PushSettings,

@@ -1,7 +1,7 @@
 //! 把配置里的值按配置文件的写法写出来：配置模板里注释掉的默认值，和设置界面上显示的当前值，
 //! 都从这里取，和 `Config::apply` 的解析互为逆运算。
 
-use runode_shared_types::{
+use runode_types::{
     clipboard::{ClipboardRead, ClipboardWrite},
     color::{Rgb, TerminalColor},
     settings::{CursorStyle, OptionAsAlt},

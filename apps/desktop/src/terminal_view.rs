@@ -29,8 +29,8 @@ use gpui::{
 };
 use runode_config::Config;
 use runode_protocol::SessionId;
-use runode_shared_types::{color::Rgb, frame::Frame, grid::GridSize};
 use runode_terminal::session::{Link, Session};
+use runode_types::{color::Rgb, frame::Frame, grid::GridSize};
 
 use crate::{
     host_client::LinkEvent,
@@ -438,7 +438,7 @@ fn screen_lines(frame: &Frame) -> String {
 
 #[cfg(test)]
 mod tests {
-    use runode_shared_types::frame::Cell;
+    use runode_types::frame::Cell;
 
     use super::*;
 

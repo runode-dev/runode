@@ -20,8 +20,8 @@ use runode_protocol::{
     BuildId, ClientMsg, FrameError, FrameKind, GoodbyeReason, HANDOFF_FORMAT, HandoffPart, HandoffRefusal, HostMsg,
     ReportToken, RunningCommand, SessionId, encode_part, read_frame,
 };
-use runode_shared_types::shell::IntegrationMode;
 use runode_terminal::{fd_passing, host_session::SessionExport, pty::PtyHandoff};
+use runode_types::shell::IntegrationMode;
 
 use super::{kill_peer, ms, peer_pid, running};
 use crate::{

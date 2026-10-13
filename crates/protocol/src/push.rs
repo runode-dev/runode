@@ -36,7 +36,7 @@
 //! 和 `remote` 一样，`tests/fixtures/push` 里存着照规格另外写出来的样例（不由这里的类型生成），手机端
 //! 的测试读同一批文件；改格式要两边一起改。
 
-use runode_shared_types::session::SessionMeta;
+use runode_types::session::SessionMeta;
 use serde::{Deserialize, Serialize};
 
 use crate::message::SessionId;

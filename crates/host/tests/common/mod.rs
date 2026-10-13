@@ -15,7 +15,7 @@ use runode_host::{ClientMsg, Host, HostMsg, SessionId};
 use runode_protocol::{
     AttachMode, BuildId, Caps, ClientKind, Frame, FrameKind, PROTOCOL_VERSION, read_frame, write_frame,
 };
-use runode_shared_types::{grid::GridSize, shell::IntegrationMode};
+use runode_types::{grid::GridSize, shell::IntegrationMode};
 
 pub const SIZE: GridSize = GridSize { cols: 20, rows: 4, cell_width_px: 8, cell_height_px: 16 };
 pub const WAIT: Duration = Duration::from_secs(10);

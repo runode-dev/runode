@@ -9,7 +9,7 @@ use std::{
 use gpui::{
     App, Bounds, Context, Entity, EntityId, Focusable, Pixels, ScrollHandle, SharedString, Subscription, Window,
 };
-use runode_shared_types::{
+use runode_types::{
     grid::GridSize,
     pane::{Node, SplitId},
 };

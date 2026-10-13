@@ -5,7 +5,7 @@
 //! 一个终端有两份 VT：宿主那份（`host_session::HostSession`）接着 PTY，是权威的，应答查询、
 //! 认标题和 agent、记命令；界面那份（`session::Session`）只消费同样的字节流，用来画屏幕。
 //!
-//! 对外只用 `runode_shared_types` 里的数据类型；libghostty 和 PTY 的类型不出这个 crate。
+//! 对外只用 `runode_types` 里的数据类型；libghostty 和 PTY 的类型不出这个 crate。
 
 pub mod fd_passing;
 pub mod host_session;

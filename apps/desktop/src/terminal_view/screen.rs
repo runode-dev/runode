@@ -27,7 +27,7 @@ use std::{
 };
 
 use runode_protocol::{AttachMode, HostMsg, SessionId};
-use runode_shared_types::{
+use runode_types::{
     agent::Agent,
     grid::{GridSize, merge_window_resize},
     session::SessionMeta,

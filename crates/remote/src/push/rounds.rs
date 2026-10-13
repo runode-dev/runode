@@ -25,7 +25,7 @@ use runode_protocol::{
     push::{BLOCKED_LINES, preview_lines},
     todo::{Column, Todo, column},
 };
-use runode_shared_types::{agent::AgentState, session::SessionMeta};
+use runode_types::{agent::AgentState, session::SessionMeta};
 
 /// 要做的事。
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -217,7 +217,7 @@ mod tests {
         SessionInfo,
         todo::{Todo, TodoSpec},
     };
-    use runode_shared_types::{
+    use runode_types::{
         agent::{Agent, AgentKind},
         grid::GridSize,
     };

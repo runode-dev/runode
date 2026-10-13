@@ -8,7 +8,7 @@ pub(crate) mod logo;
 use std::time::Instant;
 
 use gpui::{App, Context, Entity, EntityId, SharedString, Window, WindowHandle};
-use runode_shared_types::agent::{Agent, AgentKind, AgentState};
+use runode_types::agent::{Agent, AgentKind, AgentState};
 
 use super::{
     NextAgent, WindowView,

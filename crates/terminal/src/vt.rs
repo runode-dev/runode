@@ -17,7 +17,7 @@ use libghostty_vt::{
     snapshot::Decoder,
     terminal::{Mode, Point, PointCoordinate},
 };
-use runode_shared_types::{
+use runode_types::{
     color::TerminalColor,
     grid::GridSize,
     settings::{self, DEFAULT_SCROLLBACK_LIMIT, TermSettings},

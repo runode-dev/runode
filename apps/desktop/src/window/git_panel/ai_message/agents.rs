@@ -1,7 +1,7 @@
 //! 能写提交说明的 agent，以及各自不进交互、只打印结果的调用方式。这些调用都关掉工具或者只读，
 //! 不留会话记录。模型不在这里选，要换模型时在对话框的 CLI 参数里写，比如 `--model sonnet`。
 
-use runode_shared_types::agent::AgentKind;
+use runode_types::agent::AgentKind;
 
 use crate::window::agents::logo::DEEPSEEK_LOGO;
 

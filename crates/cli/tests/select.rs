@@ -6,7 +6,7 @@ mod common;
 use common::*;
 use runode_cli::exit;
 use runode_protocol::{ClientMsg, HostMsg, SessionId, WindowLayout};
-use runode_shared_types::{
+use runode_types::{
     agent::{AgentKind, AgentState},
     session::{DriveAction, Driver, SessionMeta},
 };

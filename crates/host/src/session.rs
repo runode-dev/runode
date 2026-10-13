@@ -39,18 +39,18 @@ use std::{
 
 use anyhow::{Context as _, Result, anyhow};
 use runode_protocol::{AttachMode, HostMsg, SessionId, SessionInfo};
-use runode_shared_types::{
+use runode_terminal::{
+    SnapshotError,
+    host_session::{HostSession, ImportError, ImportScreen, RedactorState, ReportRedactor, SessionExport},
+    pty::{self, Pty, PtyEvent, PtyHandoff},
+};
+use runode_types::{
     clipboard::ClipboardAccess,
     grid::GridSize,
     input::KeyChord,
     session::{DriveAction, SessionMeta},
     settings::TermSettings,
     shell::IntegrationMode,
-};
-use runode_terminal::{
-    SnapshotError,
-    host_session::{HostSession, ImportError, ImportScreen, RedactorState, ReportRedactor, SessionExport},
-    pty::{self, Pty, PtyEvent, PtyHandoff},
 };
 
 use crate::{SpawnOptions, server::UiPort};

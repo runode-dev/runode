@@ -1,7 +1,7 @@
 use std::{cell::Cell, collections::HashSet, rc::Rc};
 
 use runode_protocol::SessionId;
-use runode_shared_types::agent::{Agent, AgentKind, AgentState};
+use runode_types::agent::{Agent, AgentKind, AgentState};
 
 use super::*;
 use crate::host_client::Attached;

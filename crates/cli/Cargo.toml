@@ -13,7 +13,7 @@ runode-config.workspace = true
 # `service` 命令：登录时自启的服务文件。
 runode-autostart.workspace = true
 runode-protocol.workspace = true
-runode-shared-types.workspace = true
+runode-types.workspace = true
 # `remote` 命令：配对口令、设备表和监听方的状态，以及配对 URI 里的本机地址。
 runode-remote.workspace = true
 anyhow.workspace = true

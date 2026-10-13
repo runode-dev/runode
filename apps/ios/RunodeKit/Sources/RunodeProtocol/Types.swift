@@ -1,6 +1,6 @@
 import Foundation
 
-// 宿主那边 `runode_shared_types` 里各端共用的数据，JSON 的样子照 serde 的默认写法：
+// 宿主那边 `runode_types` 里各端共用的数据，JSON 的样子照 serde 的默认写法：
 // 结构体是对象，元组结构体（`Rgb`）是数组，`rename_all = "snake_case"` 的枚举是字符串，
 // 带数据的枚举（`TerminalColor::Rgb`、`IntegrationMode::Force`）是 `{"变体": 值}`。
 // 读的时候比宿主宽松：缺了的字段按默认值读，不认识的取值不让整条消息失败，宿主加了字段或取值时
@@ -203,7 +203,7 @@ public struct TermSettings: Hashable, Sendable, Codable {
         }
     }
 
-    /// 宿主没配置时的设置，和 `TermSettings::default()`（`runode_shared_types::theme` 的默认配色）一致。
+    /// 宿主没配置时的设置，和 `TermSettings::default()`（`runode_types::theme` 的默认配色）一致。
     public static let `default` = TermSettings(
         background: Rgb(hex: 0x171618),
         foreground: Rgb(hex: 0xE6E1D8),

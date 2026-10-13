@@ -10,7 +10,7 @@
 use std::{fs, path::PathBuf, sync::mpsc};
 
 use runode_protocol::{HostMsg, PaneLayout, PaneRect, SessionId, TabLayout, WindowLayout, WorkspaceLayout};
-use runode_shared_types::{grid::GridSize, shell::IntegrationMode};
+use runode_types::{grid::GridSize, shell::IntegrationMode};
 
 use crate::{Shared, SpawnOptions, server::REPLY_TIMEOUT, session::Inbox};
 

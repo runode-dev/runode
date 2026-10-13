@@ -1,6 +1,6 @@
 //! agent 种类的公开常量和标签。
 
-use runode_shared_types::agent::AgentKind;
+use runode_types::agent::AgentKind;
 
 #[test]
 fn labels_are_unique() {

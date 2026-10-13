@@ -7,7 +7,7 @@ mod common;
 use common::{Peer, contains, host, script, temp_dir};
 use runode_host::{ClientMsg, HostMsg, SessionId};
 use runode_protocol::{AttachMode, ClientKind};
-use runode_shared_types::clipboard::{ClipboardAccess, ClipboardRead, ClipboardWrite};
+use runode_types::clipboard::{ClipboardAccess, ClipboardRead, ClipboardWrite};
 
 /// 每读到一行，把它当 base64 写进剪贴板。
 const WRITER: &str = r"while read line; do printf '\033]52;c;%s\007' $line; done";

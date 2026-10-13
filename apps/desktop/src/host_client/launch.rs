@@ -512,7 +512,7 @@ mod tests {
         use std::{path::PathBuf, sync::mpsc};
 
         use runode_host::{Host, Stopped};
-        use runode_shared_types::{grid::GridSize, shell::IntegrationMode};
+        use runode_types::{grid::GridSize, shell::IntegrationMode};
 
         use super::*;
         use crate::host_client::link::SpawnOptions;

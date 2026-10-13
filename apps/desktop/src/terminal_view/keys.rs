@@ -5,7 +5,7 @@
 //! 才能按运行中程序的要求，选择传统编码、modifyOtherKeys 或 Kitty 编码。
 
 use gpui::Keystroke;
-use runode_shared_types::input::{Key, KeyChord, KeyInput, Mods};
+use runode_types::input::{Key, KeyChord, KeyInput, Mods};
 
 /// 终端完全不该收到的按键返回 `None`：Command 键留给应用自己的快捷键。
 pub fn translate(keystroke: &Keystroke) -> Option<KeyInput> {

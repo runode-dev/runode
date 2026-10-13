@@ -342,7 +342,7 @@ mod tests {
     fn session(id: u128) -> SessionInfo {
         SessionInfo {
             id: SessionId(id),
-            size: runode_shared_types::grid::GridSize { cols: 80, rows: 24, cell_width_px: 0, cell_height_px: 0 },
+            size: runode_types::grid::GridSize { cols: 80, rows: 24, cell_width_px: 0, cell_height_px: 0 },
             meta: Default::default(),
             clients: 0,
             claimed: false,

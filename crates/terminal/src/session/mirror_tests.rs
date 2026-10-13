@@ -11,7 +11,7 @@ use libghostty_vt::{
     Terminal,
     terminal::{Mode, ModeKind},
 };
-use runode_shared_types::{
+use runode_types::{
     color::Rgb,
     grid::GridSize,
     settings::{CursorStyle, TermSettings},

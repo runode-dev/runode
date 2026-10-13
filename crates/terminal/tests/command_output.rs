@@ -11,11 +11,11 @@ use std::{
 };
 
 use common::{PROMPT, idle_host};
-use runode_shared_types::{grid::GridSize, settings::TermSettings, shell::IntegrationMode};
 use runode_terminal::{
     host_session::HostSession,
     pty::{Pty, PtyEvent},
 };
+use runode_types::{grid::GridSize, settings::TermSettings, shell::IntegrationMode};
 
 /// 40 列 12 行的宿主会话。
 fn host() -> HostSession {

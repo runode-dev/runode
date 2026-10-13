@@ -4,7 +4,7 @@
 //! 「◐」「◑」等半圆之间切换；codex 工作中是一个转圈的盲文点阵字符（「⠋」「⠙」等），空闲时
 //! 不带前缀。pi 不在标题里报告状态，而是用 OSC 9;4 进度；它的标题以「π」开头。
 
-use runode_shared_types::agent::{Agent, AgentKind, AgentState};
+use runode_types::agent::{Agent, AgentKind, AgentState};
 
 /// 去掉状态前缀后的标题是不是 pi 的，pi 的标题是「π - 目录名」。
 pub fn is_pi_title(title: &str) -> bool {

@@ -22,7 +22,7 @@ use gpui::{
     SharedString, Stateful, Window, actions, div, img, prelude::*, px, svg,
 };
 use runode_git::{self as git, FileStatus};
-use runode_shared_types::color::Rgb;
+use runode_types::color::Rgb;
 
 use super::{DIFF_ICON, DiffTarget, Preview, PreviewPanel};
 

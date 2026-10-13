@@ -13,16 +13,16 @@ use std::{
     time::{Duration, Instant},
 };
 
-use runode_shared_types::{
-    grid::GridSize,
-    session::DriveAction,
-    settings::TermSettings,
-    shell::{FinishedCommand, IntegrationMode},
-};
 use runode_terminal::{
     fd_passing::{recv_with_fds, send_with_fds},
     host_session::{HostSession, ImportScreen, RedactorState, ReportRedactor, SessionExport},
     pty::{Pty, PtyEvent, PtyHandoff, PtySink},
+};
+use runode_types::{
+    grid::GridSize,
+    session::DriveAction,
+    settings::TermSettings,
+    shell::{FinishedCommand, IntegrationMode},
 };
 
 const SIZE: GridSize = GridSize { cols: 80, rows: 24, cell_width_px: 8, cell_height_px: 16 };

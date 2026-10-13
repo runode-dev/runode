@@ -1,7 +1,7 @@
 //! 在共用的数据类型和 libghostty 的类型之间转换：对外只用前者，调 libghostty 时才换。
 
 use libghostty_vt::{key, style::RgbColor, terminal::CursorStyle};
-use runode_shared_types::{
+use runode_types::{
     color::Rgb,
     input::{Key, Mods},
     settings,

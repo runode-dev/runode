@@ -10,7 +10,7 @@ publish.workspace = true
 # `display_dir` 把家目录写成 `~`，`sound::names` 找用户装的声音。
 runode-paths.workspace = true
 # 调色板的颜色，`hsla` 换成 GPUI 的颜色。
-runode-shared-types.workspace = true
+runode-types.workspace = true
 gpui.workspace = true
 tracing.workspace = true
 

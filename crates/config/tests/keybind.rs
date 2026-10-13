@@ -5,7 +5,7 @@ use runode_config::{
     Keybind,
     keybind::{ACTIONS, Action, DEFAULTS, ScreenFile, format_trigger, parse, parse_action, parse_trigger, resolve},
 };
-use runode_shared_types::pane::Direction;
+use runode_types::pane::Direction;
 
 #[test]
 fn defaults_parse_and_action_names_are_unique() {

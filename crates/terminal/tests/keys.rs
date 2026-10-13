@@ -3,7 +3,7 @@
 mod common;
 
 use common::idle_host;
-use runode_shared_types::input::{KeyChord, parse_keys};
+use runode_types::input::{KeyChord, parse_keys};
 
 fn keys(spec: &[&str]) -> Vec<KeyChord> {
     spec.iter().flat_map(|s| parse_keys(s).unwrap()).collect()

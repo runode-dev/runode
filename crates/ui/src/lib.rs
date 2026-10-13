@@ -43,7 +43,7 @@ use std::{
 };
 
 use gpui::{App, Hsla, Image, ImageSource, MouseDownEvent, RenderImage, Window, rgb};
-use runode_shared_types::color::Rgb;
+use runode_types::color::Rgb;
 
 /// 调色板里的颜色换成 GPUI 画图用的颜色。
 pub fn hsla(color: Rgb) -> Hsla {

@@ -2,7 +2,7 @@
 //! 一行一个 `\n`。
 
 use runode_agent::{RuleBook, Signals, Verdict};
-use runode_shared_types::agent::{AgentKind, AgentState};
+use runode_types::agent::{AgentKind, AgentState};
 
 fn verdict(kind: AgentKind, screen: &str, title: &str, progress: &str) -> &'static str {
     let book = RuleBook::new(None);

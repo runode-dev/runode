@@ -16,7 +16,7 @@ use libghostty_vt::{
     selection::Selection,
     terminal::{Mode, Point, PointCoordinate},
 };
-use runode_shared_types::settings::TermSettings;
+use runode_types::settings::TermSettings;
 
 use super::super::render::Renderer;
 use crate::{
@@ -531,7 +531,7 @@ fn decoding_keeps_a_full_scrollback() {
 #[test]
 fn decoding_keeps_the_scrollback_limits() {
     let mut source = vt::new_terminal(size(20, 4)).unwrap();
-    assert_eq!(source.scrollback_max_bytes().unwrap(), Some(runode_shared_types::settings::DEFAULT_SCROLLBACK_LIMIT));
+    assert_eq!(source.scrollback_max_bytes().unwrap(), Some(runode_types::settings::DEFAULT_SCROLLBACK_LIMIT));
     vt::configure_common(&mut source, Some(3_000_000)).unwrap();
     let decoded = round_trip(&source).unwrap();
     assert_eq!(decoded.scrollback_max_bytes().unwrap(), Some(3_000_000));
@@ -710,7 +710,7 @@ fn a_session_resumes_from_a_snapshot() {
 /// 最后再探一遍：两份一样，闪烁也是期望的那样。
 #[test]
 fn a_theme_applied_after_a_snapshot_keeps_the_programs_cursor_blinking() {
-    use runode_shared_types::settings::CursorStyle;
+    use runode_types::settings::CursorStyle;
     let steady_bar =
         TermSettings { cursor_style: CursorStyle::Bar, cursor_blink: Some(false), ..TermSettings::default() };
     let blinking_underline =
@@ -754,7 +754,7 @@ fn a_theme_applied_after_a_snapshot_keeps_the_programs_cursor_blinking() {
 /// 界面这边的会话从快照建好后套主题，和宿主那份一样，程序打开的闪烁也还开着。
 #[test]
 fn a_session_from_a_snapshot_applies_the_theme_like_the_host() {
-    use runode_shared_types::settings::CursorStyle;
+    use runode_types::settings::CursorStyle;
     let mut source = host(20, 4);
     source.feed(b"\x1b[?12h");
     let mut resumed = session_from(&source);

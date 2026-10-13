@@ -9,7 +9,7 @@ use libghostty_vt::{
     screen::Screen,
     terminal::{Mode, ScrollViewport},
 };
-use runode_shared_types::input::KeyInput;
+use runode_types::input::KeyInput;
 
 use super::{
     Session,
@@ -209,7 +209,7 @@ pub enum Paste {
 mod tests {
     use super::*;
     use crate::testing::*;
-    use runode_shared_types::{
+    use runode_types::{
         input::{Key, Mods},
         settings::{self, TermSettings},
     };

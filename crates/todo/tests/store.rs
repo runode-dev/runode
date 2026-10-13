@@ -2,11 +2,11 @@
 
 use std::path::{Path, PathBuf};
 
-use runode_shared_types::{
+use runode_todo::{DONE_KEPT, Store};
+use runode_types::{
     session::SessionId,
     todo::{TodoSpec, When},
 };
-use runode_todo::{DONE_KEPT, Store};
 use rusqlite::Connection;
 fn spec(title: &str) -> TodoSpec {
     TodoSpec {

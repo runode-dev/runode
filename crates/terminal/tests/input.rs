@@ -6,8 +6,8 @@ mod common;
 use std::sync::Arc;
 
 use common::{PROMPT, capturing_session};
-use runode_shared_types::{session::SessionMeta, shell::ShellNames};
 use runode_terminal::session::{Paste, Request};
+use runode_types::{session::SessionMeta, shell::ShellNames};
 
 #[test]
 fn multiline_paste_needs_confirmation_unless_bracketed() {

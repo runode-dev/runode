@@ -4,7 +4,7 @@
 
 use anyhow::Result;
 use libghostty_vt::{key, paste, terminal::Mode};
-use runode_shared_types::input::{KeyChord, Mods};
+use runode_types::input::{KeyChord, Mods};
 
 use super::HostSession;
 use crate::session::convert::{ghostty_key, ghostty_mods};

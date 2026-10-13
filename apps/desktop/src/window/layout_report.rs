@@ -16,7 +16,7 @@ use std::{collections::HashMap, path::Path, time::Duration};
 
 use gpui::{App, EntityId, Global, Task, WindowHandle};
 use runode_protocol::{ClientMsg, PaneLayout, PaneRect, SessionId, TabLayout, WindowLayout, WorkspaceLayout};
-use runode_shared_types::pane::{Node, Rect};
+use runode_types::pane::{Node, Rect};
 
 use super::WindowView;
 
@@ -226,7 +226,7 @@ pub(super) fn current(cx: &mut App) -> Vec<WindowLayout> {
 
 #[cfg(test)]
 mod tests {
-    use runode_shared_types::pane::Axis;
+    use runode_types::pane::Axis;
 
     use super::*;
 

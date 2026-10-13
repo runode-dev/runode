@@ -3,12 +3,12 @@
 mod common;
 
 use common::{REPEAT, at, idle_session, row_text};
-use runode_shared_types::{
+use runode_terminal::session::Session;
+use runode_types::{
     color::{Rgb, TerminalColor},
     settings::TermSettings,
     theme,
 };
-use runode_terminal::session::Session;
 
 #[test]
 fn synchronized_output_freezes_the_frame_until_released() {

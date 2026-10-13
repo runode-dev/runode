@@ -6,7 +6,7 @@ use runode_protocol::{
     SessionId, SessionInfo,
     todo::{Column, DropAction, START_GRACE, Todo, TodoSpec, When, column, drop_action},
 };
-use runode_shared_types::{
+use runode_types::{
     agent::{Agent, AgentKind, AgentState},
     grid::GridSize,
     session::SessionMeta,

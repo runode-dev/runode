@@ -31,13 +31,13 @@ use runode_protocol::{
     OLDEST_READABLE_HANDOFF_FORMAT, PROTOCOL_VERSION, PaneLayout, PaneRect, TabLayout, WindowLayout, WorkspaceLayout,
     decode_part, read_frame, write_frame,
 };
-use runode_shared_types::{
+use runode_terminal::fd_passing;
+use runode_types::{
     agent::{Agent, AgentKind, AgentState},
     clipboard::{ClipboardAccess, ClipboardRead, ClipboardWrite},
     grid::GridSize,
     shell::IntegrationMode,
 };
-use runode_terminal::fd_passing;
 
 /// 角色进程演哪个角色：`old`、`successor`、`fake`。
 const ROLE: &str = "RUNODE_HANDOFF_ROLE";

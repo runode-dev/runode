@@ -9,7 +9,7 @@ use runode_protocol::{
     BuildId, ClientKind, ClientMsg, FrameKind, GoodbyeReason, HandoffPart, HandoffRefusal, HostMsg, RedactorState,
     ReportToken, RunningCommand, SessionId, decode_part, read_frame,
 };
-use runode_shared_types::{
+use runode_types::{
     clipboard::ClipboardAccess,
     color::{Rgb, TerminalColor},
     grid::GridSize,

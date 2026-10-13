@@ -11,7 +11,7 @@ use runode_protocol::{
         RELAY_NOTIFY_V3, RelayNotify, TEXT_LIMIT, notify_payload, preview_lines,
     },
 };
-use runode_shared_types::{
+use runode_types::{
     agent::{Agent, AgentKind, AgentState},
     session::SessionMeta,
 };

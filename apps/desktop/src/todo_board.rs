@@ -49,7 +49,7 @@ use runode_protocol::{
     ClientMsg, SessionId,
     todo::{Column, DropAction, Schedule, Todo, When, column, drop_action},
 };
-use runode_shared_types::agent::Agent;
+use runode_types::agent::Agent;
 
 pub use dialog::TodoDialog;
 pub use store::{Host, Step, poll_sessions, todo_sessions, watch};

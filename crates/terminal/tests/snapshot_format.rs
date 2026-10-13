@@ -12,15 +12,15 @@
 
 use std::path::PathBuf;
 
-use runode_shared_types::{
+use runode_terminal::{
+    host_session::{HostSession, snapshot_format},
+    pty::Pty,
+};
+use runode_types::{
     color::{Rgb, TerminalColor},
     grid::GridSize,
     settings::{CursorStyle, OptionAsAlt, TermSettings},
     shell::ShellFeatures,
-};
-use runode_terminal::{
-    host_session::{HostSession, snapshot_format},
-    pty::Pty,
 };
 
 const SIZE: GridSize = GridSize { cols: 20, rows: 5, cell_width_px: 8, cell_height_px: 16 };

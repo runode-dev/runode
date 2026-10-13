@@ -5,7 +5,7 @@
 //! 画由 `TerminalElement` 做。
 
 use gpui::{Pixels, Point, Size, point};
-use runode_shared_types::{color::Rgb, grid::GridSize};
+use runode_types::{color::Rgb, grid::GridSize};
 
 /// VT 里画在视图左上角的那一格：左边 `col` 列、上面 `row` 行裁掉了。
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]

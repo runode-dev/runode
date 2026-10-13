@@ -3,7 +3,7 @@
 mod common;
 
 use common::{REPEAT, at, idle_session};
-use runode_shared_types::{input::SelectionAdjust, theme};
+use runode_types::{input::SelectionAdjust, theme};
 
 #[test]
 fn select_all_covers_the_scrollback() {

@@ -55,7 +55,7 @@ use gpui::{
     Window, WindowBounds, actions, div, prelude::*, px,
 };
 use runode_config::WindowStyle;
-use runode_shared_types::{
+use runode_types::{
     color::Rgb,
     pane::{Axis, Direction, SplitId},
 };

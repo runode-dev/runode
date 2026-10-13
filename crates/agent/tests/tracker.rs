@@ -5,7 +5,7 @@ use std::time::{Duration, Instant};
 use AgentKind::*;
 use AgentState::*;
 use runode_agent::{BURST_GAP, EVAL_INTERVAL, Foreground, IDLE_RECHECK, RuleBook, Tracker};
-use runode_shared_types::agent::{Agent, AgentKind, AgentState};
+use runode_types::agent::{Agent, AgentKind, AgentState};
 
 fn agent(kind: AgentKind, state: AgentState) -> Option<Agent> {
     Some(Agent { kind, state })

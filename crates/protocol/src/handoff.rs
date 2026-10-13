@@ -21,7 +21,7 @@
 
 use std::{fmt, path::PathBuf};
 
-use runode_shared_types::{clipboard::ClipboardAccess, grid::GridSize, session::SessionMeta, settings::TermSettings};
+use runode_types::{clipboard::ClipboardAccess, grid::GridSize, session::SessionMeta, settings::TermSettings};
 use serde::{Deserialize, Deserializer, Serialize, de::DeserializeOwned};
 
 use crate::{

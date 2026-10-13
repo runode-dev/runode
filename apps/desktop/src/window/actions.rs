@@ -3,7 +3,7 @@
 use std::path::PathBuf;
 
 use gpui::{Bounds, Context, Entity, EntityId, Pixels, Window};
-use runode_shared_types::pane::{self, Axis, Direction, SplitId};
+use runode_types::pane::{self, Axis, Direction, SplitId};
 
 use super::{
     ClosePane, CloseTab, CloseWorkspace, EqualizePanes, FocusNextPane, FocusPane, FocusPreviousPane, NewSplitDown,

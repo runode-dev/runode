@@ -4,7 +4,7 @@ use libghostty_vt::{
     screen::RowSemanticPrompt,
     terminal::{Point, PointCoordinate, ScrollViewport, Terminal},
 };
-use runode_shared_types::grid::ViewportScroll;
+use runode_types::grid::ViewportScroll;
 
 use super::{Session, log_err};
 

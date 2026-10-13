@@ -26,7 +26,7 @@ use gpui::{
     accesskit::ActionData, div, img, prelude::*, px,
 };
 use runode_git::{self as git, DiffSide, FileStatus, Section};
-use runode_shared_types::color::Rgb;
+use runode_types::color::Rgb;
 
 use super::{
     DirOp, FileOp, GitDirAction, GitFileAction, GitPanel, GitPanelEvent, STASH_APPLY_ICON, STASH_POP_ICON, repo_id,

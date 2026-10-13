@@ -14,7 +14,7 @@ use runode_protocol::{
     ClientMsg, HostMsg, SessionId,
     todo::{DEFAULT_AGENT, Schedule, Todo, TodoSpec, When},
 };
-use runode_shared_types::agent::{AgentKind, AgentState};
+use runode_types::agent::{AgentKind, AgentState};
 use unicode_width::UnicodeWidthStr as _;
 
 const S: u128 = 0x5e55_0000_0000_0000_0000_0000_0000_0001;

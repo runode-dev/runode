@@ -15,7 +15,7 @@ use runode_protocol::{
     BuildId, ClientMsg, Frame, FrameKind, HostMsg, PROTOCOL_VERSION, PaneLayout, PaneRect, SessionId, SessionInfo,
     TabLayout, WindowLayout, WorkspaceLayout, read_frame, write_frame,
 };
-use runode_shared_types::{
+use runode_types::{
     agent::{Agent, AgentKind, AgentState},
     grid::GridSize,
     session::SessionMeta,

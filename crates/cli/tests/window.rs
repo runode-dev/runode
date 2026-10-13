@@ -5,7 +5,7 @@ mod common;
 use common::*;
 use runode_cli::exit;
 use runode_protocol::{AttachMode, ClientMsg, HostMsg, Placement, SessionId};
-use runode_shared_types::session::SessionMeta;
+use runode_types::session::SessionMeta;
 
 const MINE: u128 = 0x1111_0000_0000_0000_0000_0000_0000_0001;
 const NEW: u128 = 0x2222_0000_0000_0000_0000_0000_0000_0002;

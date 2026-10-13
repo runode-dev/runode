@@ -4,8 +4,8 @@ use gpui::{
     App, Bounds, ContentMask, DispatchPhase, ElementId, GlobalElementId, LayoutId, MouseMoveEvent, MouseUpEvent,
     Pixels, Size, Style, Window, fill, linear_color_stop, linear_gradient, point, prelude::*, px, relative, size,
 };
-use runode_shared_types::{color::Rgb, grid::GridSize};
 use runode_terminal::session::Session;
+use runode_types::{color::Rgb, grid::GridSize};
 
 use super::{
     TerminalView,

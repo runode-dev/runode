@@ -3,7 +3,7 @@
 mod common;
 
 use common::capturing_session;
-use runode_shared_types::{agent::Agent, grid::GridSize, session::SessionMeta};
+use runode_types::{agent::Agent, grid::GridSize, session::SessionMeta};
 
 /// 界面这份 VT 不应答任何查询：喂进 DA、DSR、XTVERSION、OSC 颜色、Kitty 键盘协议和尺寸
 /// 这些查询，也不会交出一个字节。
@@ -17,7 +17,7 @@ fn the_view_terminal_never_answers_queries() {
 
 #[test]
 fn meta_from_the_host_sets_the_title_and_agent() {
-    use runode_shared_types::agent::{AgentKind, AgentState};
+    use runode_types::agent::{AgentKind, AgentState};
 
     let (mut session, _) = capturing_session();
     let agent = Some(Agent { kind: AgentKind::Claude, state: AgentState::Working });

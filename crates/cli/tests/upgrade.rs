@@ -18,7 +18,7 @@ use runode_cli::exit;
 use runode_protocol::{
     AttachMode, BuildId, ClientMsg, Frame, FrameKind, GoodbyeReason, HostMsg, PROTOCOL_VERSION, read_frame, write_frame,
 };
-use runode_shared_types::{
+use runode_types::{
     agent::{AgentKind, AgentState},
     session::SessionMeta,
 };

@@ -46,8 +46,8 @@ use runode_protocol::{
     AttachMode, ClientKind, ClientMsg, Frame, FrameError, FrameKind, GoodbyeReason, HANDOFF_FORMAT, HostMsg,
     PROTOCOL_VERSION, SessionId, SessionInfo, WindowLayout, git::GitRequest, read_frame, write_frame,
 };
-use runode_shared_types::{grid::GridSize, input::parse_keys, session::DriveAction};
 use runode_terminal::pty;
+use runode_types::{grid::GridSize, input::parse_keys, session::DriveAction};
 
 use crate::{
     Host, Shared, SpawnOptions, Stopped, browse,

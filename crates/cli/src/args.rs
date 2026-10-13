@@ -4,7 +4,7 @@ use std::{net::IpAddr, path::PathBuf, time::Duration};
 
 use runode_autostart::Kind;
 use runode_protocol::{Placement, todo::When};
-use runode_shared_types::input::parse_keys;
+use runode_types::input::parse_keys;
 
 use crate::{SetupTarget, help, local_time::LocalTime, select::Selector};
 
@@ -28,7 +28,7 @@ pub(crate) enum Command {
         text: Text,
         /// 文字按粘贴发，不逐字打。
         paste: bool,
-        /// 打完字以后依次按的键，每项是 `runode_shared_types::input::parse_keys` 认的写法。
+        /// 打完字以后依次按的键，每项是 `runode_types::input::parse_keys` 认的写法。
         keys: Vec<String>,
         enter: bool,
         wait: bool,

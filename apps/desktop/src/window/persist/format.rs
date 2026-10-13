@@ -12,7 +12,7 @@ use std::{
 };
 
 use runode_protocol::{SessionId, SessionInfo, WindowLayout};
-use runode_shared_types::pane::Axis;
+use runode_types::pane::Axis;
 use serde::{Deserialize, Serialize};
 
 /// 格式改得不兼容时加一；读到别的版本时存档挪到一边（`load`），从默认布局开始。
@@ -572,7 +572,7 @@ mod tests {
     fn info(id: u128, claimed: bool, exited: bool) -> SessionInfo {
         SessionInfo {
             id: SessionId(id),
-            size: runode_shared_types::grid::GridSize { cols: 80, rows: 24, cell_width_px: 8, cell_height_px: 16 },
+            size: runode_types::grid::GridSize { cols: 80, rows: 24, cell_width_px: 8, cell_height_px: 16 },
             meta: Default::default(),
             clients: 0,
             claimed,

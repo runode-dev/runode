@@ -4,8 +4,8 @@
 mod common;
 
 use common::unstarted_pty;
-use runode_shared_types::{color::Rgb, grid::GridSize, settings::TermSettings};
 use runode_terminal::{host_session::HostSession, session::Session};
+use runode_types::{color::Rgb, grid::GridSize, settings::TermSettings};
 
 fn size(cols: u16, rows: u16) -> GridSize {
     GridSize { cols, rows, cell_width_px: 8, cell_height_px: 16 }

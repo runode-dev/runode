@@ -29,7 +29,7 @@
 //! 没有规则命中。
 
 use regex::Regex;
-use runode_shared_types::agent::{AgentKind, AgentState};
+use runode_types::agent::{AgentKind, AgentState};
 use serde::Deserialize;
 
 use crate::{identify, region::Region};

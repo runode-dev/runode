@@ -41,7 +41,7 @@ use libghostty_vt::{
     terminal::{PointCoordinate, Terminal},
 };
 
-use runode_shared_types::{
+use runode_types::{
     frame::Frame,
     grid::{GridPoint, GridSize},
     session::SessionMeta,
@@ -309,7 +309,7 @@ mod tests {
         pty::{Pty, PtyEvent},
         testing::*,
     };
-    use runode_shared_types::input::{Key, KeyInput, Mods};
+    use runode_types::input::{Key, KeyInput, Mods};
 
     /// 改尺寸只是请求：VT 等宿主标出位置后才改，重复的请求不再发。
     #[test]
@@ -347,7 +347,7 @@ mod tests {
             size,
             Some("/bin/sh"),
             None,
-            runode_shared_types::shell::IntegrationMode::Off,
+            runode_types::shell::IntegrationMode::Off,
             Box::new(move |event| tx.send(event).is_ok()),
         )
         .unwrap();

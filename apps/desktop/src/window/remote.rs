@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 use futures::StreamExt as _;
 use gpui::{App, Context, EntityId, Window, WindowHandle};
 use runode_protocol::{ClientMsg, HostMsg, Placement, SessionId};
-use runode_shared_types::pane::Axis;
+use runode_types::pane::Axis;
 
 use super::persist::format;
 use super::{WindowView, agents::reveal, cards, clipboard, layout_report};

@@ -38,7 +38,7 @@ use libghostty_vt::{
     },
 };
 use runode_agent::Tracker;
-use runode_shared_types::{
+use runode_types::{
     agent::{Agent, AgentState},
     grid::{GridSize, merge_window_resize},
     session::{DriveAction, Driver, SessionMeta},
@@ -633,7 +633,7 @@ impl HostSession {
     /// 收到空的就接着往下走，不用干等到自己超时。
     pub fn answer_clipboard(&self, query: ClipboardQuery, text: Option<&str>) {
         let text = match text {
-            Some(text) if text.len() > runode_shared_types::clipboard::MAX_CLIPBOARD_BYTES => {
+            Some(text) if text.len() > runode_types::clipboard::MAX_CLIPBOARD_BYTES => {
                 tracing::warn!("answered a clipboard read with nothing: {} bytes is over the limit", text.len());
                 ""
             }
@@ -924,7 +924,7 @@ mod tests {
     /// 回滚历史的字节上限随主题一起变，开着的终端也立刻按新上限来；0 表示不留回滚历史。
     #[test]
     fn apply_theme_changes_the_scrollback_limit() {
-        use runode_shared_types::settings;
+        use runode_types::settings;
 
         let mut session = idle_host();
         assert_eq!(session.terminal.scrollback_max_bytes().unwrap(), Some(settings::DEFAULT_SCROLLBACK_LIMIT));

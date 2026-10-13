@@ -3,17 +3,17 @@
 
 use std::{cell::RefCell, rc::Rc, time::Duration};
 
-use runode_shared_types::{
+use runode_terminal::{
+    host_session::HostSession,
+    pty::Pty,
+    session::{Request, Session},
+};
+use runode_types::{
     frame::Frame,
     grid::{GridPoint, GridSize},
     session::SessionMeta,
     settings::TermSettings,
     shell::IntegrationMode,
-};
-use runode_terminal::{
-    host_session::HostSession,
-    pty::Pty,
-    session::{Request, Session},
 };
 
 pub fn row_text(frame: &Frame, y: u16) -> String {

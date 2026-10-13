@@ -3,7 +3,7 @@
 use crate::ui::theme::Theme;
 use gpui::{AnyElement, Context, Div, ElementId, Role, SharedString, Window, div, prelude::*, px};
 use runode_config::StatusItem;
-use runode_shared_types::agent::AgentKind;
+use runode_types::agent::AgentKind;
 
 use super::{
     Commit, SettingsView,

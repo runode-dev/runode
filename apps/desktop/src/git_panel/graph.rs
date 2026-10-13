@@ -32,7 +32,7 @@ use gpui::{
     prelude::*, px, quad, svg, uniform_list,
 };
 use runode_git::{self as git, Commit, DiffSide, GraphRow, Half, LaneColor, RefKind};
-use runode_shared_types::color::Rgb;
+use runode_types::color::Rgb;
 
 use super::{
     GitPanel, GitPanelEvent,

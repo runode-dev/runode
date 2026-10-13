@@ -10,7 +10,7 @@ use std::{
 
 use anyhow::{anyhow, bail};
 use runode_protocol::{AttachMode, ClientMsg, HostMsg, SessionId, SessionInfo};
-use runode_shared_types::{
+use runode_types::{
     agent::{Agent, AgentState},
     input::{Key, Mods, parse_keys},
     session::SessionMeta,

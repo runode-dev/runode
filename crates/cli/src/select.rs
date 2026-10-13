@@ -13,7 +13,7 @@ use anyhow::{Result, anyhow, bail};
 use runode_protocol::{
     ClientMsg, HostMsg, PaneLayout, PaneRect, SessionId, SessionInfo, TabLayout, WindowLayout, WorkspaceLayout,
 };
-use runode_shared_types::{
+use runode_types::{
     agent::AgentState,
     pane::{Direction, Rect, neighbor},
 };

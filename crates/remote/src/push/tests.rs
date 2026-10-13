@@ -22,7 +22,7 @@ use runode_protocol::{
     todo::{Todo, TodoSpec},
     write_frame,
 };
-use runode_shared_types::{
+use runode_types::{
     agent::{Agent, AgentKind, AgentState},
     grid::GridSize,
     session::SessionMeta,

@@ -4,7 +4,7 @@ use runode_protocol::{
     BuildId, HANDOFF_FORMAT, HandoffPart, HandoffPartError, OLDEST_READABLE_HANDOFF_FORMAT, RedactorState, ReportToken,
     RunningCommand, SessionId, WindowLayout, decode_part, encode_part,
 };
-use runode_shared_types::{
+use runode_types::{
     agent::{Agent, AgentKind, AgentState},
     clipboard::{ClipboardAccess, ClipboardRead, ClipboardWrite},
     grid::GridSize,

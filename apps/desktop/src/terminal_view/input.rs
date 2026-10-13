@@ -6,11 +6,11 @@ use gpui::{
     App, Context, KeyDownEvent, Keystroke, Modifiers, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent,
     Pixels, Point, ScrollDelta, ScrollWheelEvent, Size, Window,
 };
-use runode_shared_types::{
+use runode_terminal::session::{LinkTarget, Session};
+use runode_types::{
     grid::GridPoint,
     input::{self, Mods, SelectionAdjust},
 };
-use runode_terminal::session::{LinkTarget, Session};
 
 use super::TerminalView;
 use super::keys;

@@ -17,7 +17,7 @@ use std::{
 };
 
 use runode_protocol::SessionId;
-use runode_shared_types::grid::GridSize;
+use runode_types::grid::GridSize;
 
 use runode_config::Config;
 

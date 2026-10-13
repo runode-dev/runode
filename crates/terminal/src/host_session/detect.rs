@@ -11,7 +11,7 @@ use std::{
 };
 
 use runode_agent::{Foreground, RuleBook, identify_job};
-use runode_shared_types::agent::AgentKind;
+use runode_types::agent::AgentKind;
 
 use super::{HostSession, log_err};
 use crate::{pty, vt::detection_text};
@@ -128,7 +128,7 @@ mod tests {
     #[test]
     fn a_title_reported_agent_is_checked_against_its_rules() {
         use runode_agent::EVAL_INTERVAL;
-        use runode_shared_types::{
+        use runode_types::{
             agent::{Agent, AgentKind, AgentState},
             grid::GridSize,
         };

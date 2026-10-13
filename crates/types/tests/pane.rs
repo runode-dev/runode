@@ -1,6 +1,6 @@
 //! 分屏布局树：拆分、关闭、改比例、均分，以及按方向找相邻的终端。
 
-use runode_shared_types::pane::{Axis, Direction, Node, Rect, SplitId, neighbor};
+use runode_types::pane::{Axis, Direction, Node, Rect, SplitId, neighbor};
 
 /// 1 | (2 / 3)：左边一个，右边上下两个。
 fn sample() -> Node<u32> {

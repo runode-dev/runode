@@ -5,7 +5,7 @@
 
 use gpui::{App, ClipboardItem, EntityId, PromptLevel, WindowHandle};
 use runode_protocol::{HostMsg, SessionId};
-use runode_shared_types::clipboard::MAX_CLIPBOARD_BYTES;
+use runode_types::clipboard::MAX_CLIPBOARD_BYTES;
 
 use super::{
     WindowView,

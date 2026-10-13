@@ -7,7 +7,7 @@ use gpui::{
     point, px, size,
 };
 use runode_config::CellHeight;
-use runode_shared_types::{
+use runode_types::{
     color::Rgb,
     frame::{Attrs, CursorShape, Frame},
 };

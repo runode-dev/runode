@@ -1,5 +1,5 @@
 use runode_protocol::{BuildId, Caps};
-use runode_shared_types::shell::IntegrationMode;
+use runode_types::shell::IntegrationMode;
 
 use super::*;
 

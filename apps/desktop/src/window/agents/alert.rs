@@ -8,7 +8,7 @@
 use std::collections::HashSet;
 
 use gpui::{App, Global, SystemNotification};
-use runode_shared_types::agent::AgentKind;
+use runode_types::agent::AgentKind;
 
 use crate::config::AppConfig;
 

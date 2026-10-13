@@ -1,7 +1,7 @@
 use std::{cell::RefCell, rc::Rc};
 
 use libghostty_vt::Terminal;
-use runode_shared_types::grid::GridSize;
+use runode_types::grid::GridSize;
 
 use super::*;
 use crate::testing::bare_host;

@@ -26,7 +26,7 @@
 
 use std::time::{Duration, Instant};
 
-use runode_shared_types::agent::{Agent, AgentKind, AgentState};
+use runode_types::agent::{Agent, AgentKind, AgentState};
 
 use crate::{
     agent_from_name,

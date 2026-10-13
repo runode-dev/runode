@@ -7,7 +7,7 @@ license.workspace = true
 publish.workspace = true
 
 [dependencies]
-runode-shared-types.workspace = true
+runode-types.workspace = true
 # 任务和定时存在 SQLite 文件里，见 `Store`。
 rusqlite.workspace = true
 # 每天的定时按本地的墙上时间算下一次到点（localtime_r、mktime），见 `next_fire`。

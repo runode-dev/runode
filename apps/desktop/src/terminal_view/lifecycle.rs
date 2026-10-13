@@ -21,16 +21,16 @@ use std::{
 use futures::{StreamExt as _, channel::mpsc::UnboundedReceiver, task::ArcWake};
 use gpui::{App, AppContext as _, Context, Entity, Font, Global, Point, SharedString, Task, Window, font, px};
 use runode_protocol::{AttachMode, ClientMsg, HostMsg, SessionId};
-use runode_shared_types::{
+use runode_terminal::{
+    pty::dir_label,
+    session::{self, Request, SYNC_OUTPUT_TIMEOUT, Session},
+};
+use runode_types::{
     agent::Agent,
     color::Rgb,
     grid::GridSize,
     session::{Driver, SessionMeta},
     settings::TermSettings,
-};
-use runode_terminal::{
-    pty::dir_label,
-    session::{self, Request, SYNC_OUTPUT_TIMEOUT, Session},
 };
 
 use super::{

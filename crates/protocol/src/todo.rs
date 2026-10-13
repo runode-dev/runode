@@ -1,11 +1,11 @@
-//! 任务板：派给 agent 的任务，和到点自动开一张新任务的定时（数据本身在 `runode_shared_types::todo`）。
+//! 任务板：派给 agent 的任务，和到点自动开一张新任务的定时（数据本身在 `runode_types::todo`）。
 //! 宿主持有它们（存在自己的库里），前端经 `ClientMsg::ListTodos` 这几条消息读写。
 //!
 //! 卡片在看板的哪一列不存，由 `column` 按任务和它那个会话的状态推出来，所以列总和 agent 实际
 //! 在干什么对得上；拖拽卡片能不能放、放下做什么由 `drop_action` 定。
 
-use runode_shared_types::agent::AgentState;
-pub use runode_shared_types::todo::{DEFAULT_AGENT, Schedule, Todo, TodoSpec, When};
+use runode_types::agent::AgentState;
+pub use runode_types::todo::{DEFAULT_AGENT, Schedule, Todo, TodoSpec, When};
 use serde::{Deserialize, Serialize};
 
 use crate::message::SessionInfo;

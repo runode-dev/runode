@@ -7,7 +7,7 @@
 //! `AMBIGUOUS_NAMES` 里的名字容易和别的程序撞名（`kilo` 编辑器、自己编的 `./amp`、`node cn.js`），
 //! 光名字对上不算，还要进程装在 agent 常见的安装位置，见 `installed`。
 
-use runode_shared_types::agent::AgentKind;
+use runode_types::agent::AgentKind;
 
 /// 终端前台进程组里的一个进程。
 #[derive(Clone, Debug, Default, PartialEq, Eq)]

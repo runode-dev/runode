@@ -8,7 +8,7 @@ use std::time::{Duration, Instant};
 use common::{Peer, SIZE, WAIT, contains, host, script, temp_dir};
 use runode_host::{ClientMsg, HostMsg, SessionId};
 use runode_protocol::AttachMode;
-use runode_shared_types::{settings::TermSettings, shell::IntegrationMode};
+use runode_types::{settings::TermSettings, shell::IntegrationMode};
 
 /// `cat` 当 shell：输入经宿主写给它，行规程的回显经宿主转回来；连上时给的是快照，带着宿主的主题。
 #[test]
@@ -32,7 +32,7 @@ fn resize_and_theme_changes_are_marked_in_the_stream() {
     let mut peer = Peer::pair(&host);
     let id = peer.spawn("/bin/cat");
     let (channel, _) = peer.attach(id, AttachMode::Snapshot);
-    let size = runode_shared_types::grid::GridSize { cols: 30, ..SIZE };
+    let size = runode_types::grid::GridSize { cols: 30, ..SIZE };
     peer.send(&ClientMsg::Resize { id, size: SIZE });
     peer.send(&ClientMsg::Resize { id, size });
     peer.wait(channel, |message, _| matches!(message, Some(HostMsg::Resized { size: s, .. }) if *s == size));

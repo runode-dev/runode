@@ -12,7 +12,7 @@
 //! 认出读请求，宿主拿到结果后按请求的终止符自己回话（`ClipboardQuery::answer`）。
 
 use libghostty_vt::terminal::{ClipboardWrite, ClipboardWriteError};
-use runode_shared_types::clipboard::MAX_CLIPBOARD_BYTES;
+use runode_types::clipboard::MAX_CLIPBOARD_BYTES;
 
 use super::effects::Effects;
 

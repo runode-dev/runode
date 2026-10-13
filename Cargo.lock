@@ -4583,8 +4583,8 @@ dependencies = [
  "runode-preview",
  "runode-protocol",
  "runode-remote",
- "runode-shared-types",
  "runode-terminal",
+ "runode-types",
  "runode-ui",
  "runode-update",
  "rust-i18n",
@@ -4599,7 +4599,7 @@ name = "runode-agent"
 version = "0.1.8"
 dependencies = [
  "regex",
- "runode-shared-types",
+ "runode-types",
  "serde",
  "toml 1.1.8+spec-1.1.0",
 ]
@@ -4627,7 +4627,7 @@ dependencies = [
  "runode-paths",
  "runode-protocol",
  "runode-remote",
- "runode-shared-types",
+ "runode-types",
  "serde_json",
  "unicode-width",
 ]
@@ -4639,7 +4639,7 @@ dependencies = [
  "objc2-app-kit 0.3.2",
  "objc2-foundation 0.3.2",
  "runode-paths",
- "runode-shared-types",
+ "runode-types",
  "tracing",
 ]
 
@@ -4656,10 +4656,10 @@ dependencies = [
  "runode-git",
  "runode-paths",
  "runode-protocol",
- "runode-shared-types",
  "runode-tasks",
  "runode-terminal",
  "runode-todo",
+ "runode-types",
  "tracing",
 ]
 
@@ -4681,7 +4681,7 @@ dependencies = [
 name = "runode-protocol"
 version = "0.1.8"
 dependencies = [
- "runode-shared-types",
+ "runode-types",
  "serde",
  "serde_json",
 ]
@@ -4696,7 +4696,7 @@ dependencies = [
  "ring",
  "runode-paths",
  "runode-protocol",
- "runode-shared-types",
+ "runode-types",
  "rustls",
  "serde",
  "serde_json",
@@ -4704,19 +4704,11 @@ dependencies = [
 ]
 
 [[package]]
-name = "runode-shared-types"
-version = "0.1.8"
-dependencies = [
- "serde",
- "serde_json",
-]
-
-[[package]]
 name = "runode-tasks"
 version = "0.1.8"
 dependencies = [
  "runode-paths",
- "runode-shared-types",
+ "runode-types",
  "serde_json",
 ]
 
@@ -4730,7 +4722,7 @@ dependencies = [
  "portable-pty",
  "runode-agent",
  "runode-paths",
- "runode-shared-types",
+ "runode-types",
  "tracing",
 ]
 
@@ -4739,8 +4731,16 @@ name = "runode-todo"
 version = "0.1.8"
 dependencies = [
  "libc",
- "runode-shared-types",
+ "runode-types",
  "rusqlite",
+]
+
+[[package]]
+name = "runode-types"
+version = "0.1.8"
+dependencies = [
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -4751,7 +4751,7 @@ dependencies = [
  "objc2-app-kit 0.3.2",
  "objc2-foundation 0.3.2",
  "runode-paths",
- "runode-shared-types",
+ "runode-types",
  "tracing",
 ]
 

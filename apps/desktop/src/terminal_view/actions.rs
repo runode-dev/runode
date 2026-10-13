@@ -3,8 +3,8 @@
 use std::collections::HashMap;
 
 use gpui::{ClipboardItem, Context, PromptLevel, Window, px};
-use runode_shared_types::grid::ViewportScroll;
 use runode_terminal::session::{Paste as PasteResult, Session};
+use runode_types::grid::ViewportScroll;
 
 use super::{
     ClearScreen, DecreaseFontSize, IncreaseFontSize, JumpToPrompt, MAX_FONT_SIZE, MIN_FONT_SIZE, PasteSelection,

@@ -8,7 +8,7 @@ publish.workspace = true
 
 [dependencies]
 runode-paths.workspace = true
-runode-shared-types.workspace = true
+runode-types.workspace = true
 tracing.workspace = true
 
 # 主题还会去已安装的 Ghostty.app 里找，按 bundle id 向系统查它的位置。

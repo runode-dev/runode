@@ -5,7 +5,7 @@
 use crate::ui::theme::Theme;
 use gpui::{AnyElement, Context, Div, FontWeight, Role, Window, div, prelude::*, px, svg};
 use runode_config::{Config, DEFAULT_THEME};
-use runode_shared_types::color::Rgb;
+use runode_types::color::Rgb;
 
 use super::{
     SettingsView,

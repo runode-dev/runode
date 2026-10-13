@@ -8,7 +8,7 @@ use std::{
 };
 
 use common::idle_host;
-use runode_shared_types::{color::Rgb, grid::GridSize, settings::TermSettings};
+use runode_types::{color::Rgb, grid::GridSize, settings::TermSettings};
 
 #[test]
 fn terminal_queries_are_answered_by_the_host() {
@@ -80,7 +80,7 @@ fn meta_names_the_foreground_program() {
 
 #[test]
 fn drivers_are_recorded_at_most_once_a_second() {
-    use runode_shared_types::session::{DriveAction, Driver};
+    use runode_types::session::{DriveAction, Driver};
 
     let mut session = idle_host();
     session.take_meta();

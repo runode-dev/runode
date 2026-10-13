@@ -1,7 +1,7 @@
 //! 配置里的颜色写法：十六进制（带不带 `#`）、`rgb:` 和 `rgbi:`，以及各种写错的样子。
 
 use runode_config::color::parse;
-use runode_shared_types::color::Rgb;
+use runode_types::color::Rgb;
 
 fn rgb(r: u8, g: u8, b: u8) -> Option<Rgb> {
     Some(Rgb(r, g, b))

@@ -9,7 +9,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use runode_shared_types::tasks::{MAX_TASKS, TaskEntry, TaskSource, TaskSourceKind};
+use runode_types::tasks::{MAX_TASKS, TaskEntry, TaskSource, TaskSourceKind};
 
 /// make 按这个顺序找默认的 makefile。
 const MAKEFILE_NAMES: [&str; 3] = ["GNUmakefile", "makefile", "Makefile"];

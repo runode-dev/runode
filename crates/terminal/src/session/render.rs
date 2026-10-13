@@ -6,7 +6,7 @@ use libghostty_vt::{
     style::Underline,
     terminal::Terminal,
 };
-use runode_shared_types::{
+use runode_types::{
     color::{Rgb, TerminalColor},
     frame::{Attrs, Cell, Cursor, CursorShape, Frame},
     theme,

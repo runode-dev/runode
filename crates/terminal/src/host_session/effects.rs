@@ -7,7 +7,7 @@ use std::{
     time::{Instant, SystemTime, UNIX_EPOCH},
 };
 
-use runode_shared_types::{
+use runode_types::{
     agent::AgentState,
     shell::{FinishedCommand, ShellNames},
 };
@@ -285,7 +285,7 @@ fn percent_decode(bytes: &[u8]) -> Vec<u8> {
 mod tests {
     use super::*;
     use crate::testing::*;
-    use runode_shared_types::agent::{Agent, AgentKind, AgentState};
+    use runode_types::agent::{Agent, AgentKind, AgentState};
 
     fn prompt_input(session: &HostSession) -> Option<crate::PromptInput> {
         crate::prompt_input::read(session.terminal()).unwrap()

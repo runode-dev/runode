@@ -14,7 +14,7 @@ use gpui::{
     ListHorizontalSizingBehavior, MouseButton, MouseDownEvent, MouseMoveEvent, Role, SMOOTH_SVG_SCALE_FACTOR,
     SharedString, StyledText, Window, canvas, div, fill, img, point, prelude::*, px, size, uniform_list,
 };
-use runode_shared_types::color::Rgb;
+use runode_types::color::Rgb;
 
 use super::{
     BODY_PADDING, Loaded, MAX_COLUMNS, Note, Preview, PreviewPanel, ROW_EXTRA_HEIGHT, marks::Mark, right_fade,

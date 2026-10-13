@@ -10,7 +10,7 @@ use runode_protocol::{
     todo::{Schedule, Todo, TodoSpec, When},
     write_frame,
 };
-use runode_shared_types::{
+use runode_types::{
     agent::{Agent, AgentKind, AgentState},
     clipboard::{ClipboardAccess, ClipboardRead, ClipboardWrite},
     grid::GridSize,

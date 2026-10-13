@@ -1,6 +1,6 @@
 //! 会话对外公布的状态 `SessionMeta` 的 JSON 读写。
 
-use runode_shared_types::{
+use runode_types::{
     agent::{Agent, AgentKind, AgentState},
     session::{DriveAction, Driver, SessionMeta},
     shell::ShellNames,

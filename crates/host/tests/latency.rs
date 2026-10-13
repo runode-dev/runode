@@ -27,8 +27,8 @@ use runode_host::{ClientMsg, HostMsg, SessionId};
 use runode_protocol::{
     AttachMode, BuildId, Caps, ClientKind, Frame, FrameKind, PROTOCOL_VERSION, read_frame, write_frame,
 };
-use runode_shared_types::{grid::GridSize, shell::IntegrationMode};
 use runode_terminal::session::Session;
+use runode_types::{grid::GridSize, shell::IntegrationMode};
 
 const LATENCY_SIZE: GridSize = GridSize { cols: 80, rows: 24, cell_width_px: 8, cell_height_px: 16 };
 const THROUGHPUT_SIZE: GridSize = GridSize { cols: 200, rows: 50, cell_width_px: 8, cell_height_px: 16 };

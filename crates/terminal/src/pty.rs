@@ -42,7 +42,7 @@ use std::{
 use anyhow::{Context as _, Result, anyhow, bail};
 use portable_pty::{Child, CommandBuilder, PtySize, SlavePty, native_pty_system};
 use runode_agent::{ForegroundJob, ForegroundProcess};
-use runode_shared_types::{grid::GridSize, settings::TermSettings, shell::IntegrationMode};
+use runode_types::{grid::GridSize, settings::TermSettings, shell::IntegrationMode};
 
 use crate::shell_integration;
 use notify::Notifier;

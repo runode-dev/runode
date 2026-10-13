@@ -3,7 +3,7 @@
 
 use std::path::Path;
 
-use runode_shared_types::agent::AgentKind;
+use runode_types::agent::AgentKind;
 
 use crate::{Config, docs, parse::KEYS, theme::BUNDLED_THEMES};
 

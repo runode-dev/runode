@@ -28,7 +28,7 @@ use std::{collections::HashSet, time::Duration};
 
 use gpui::{AnyWindowHandle, App, Global, PromptLevel, Window};
 use runode_protocol::{ClientMsg, SessionId, SessionInfo};
-use runode_shared_types::agent::AgentKind;
+use runode_types::agent::AgentKind;
 
 use super::{WindowView, model::Closing, persist, remote};
 use crate::{
@@ -736,7 +736,7 @@ mod tests {
 
     #[test]
     fn only_live_agents_out_of_windows_count() {
-        use runode_shared_types::{
+        use runode_types::{
             agent::{Agent, AgentState},
             grid::GridSize,
             session::SessionMeta,

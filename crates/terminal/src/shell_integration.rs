@@ -12,7 +12,7 @@ use std::{
 };
 
 use portable_pty::CommandBuilder;
-use runode_shared_types::{
+use runode_types::{
     settings::TermSettings,
     shell::{IntegrationMode, Shell},
 };

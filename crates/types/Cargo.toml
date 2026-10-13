@@ -1,5 +1,5 @@
 [package]
-name = "runode-shared-types"
+name = "runode-types"
 description = "Plain data shared across runode: terminal frames, grid geometry, split layouts, agent state, settings and input events"
 version.workspace = true
 edition.workspace = true

@@ -2,7 +2,7 @@
 
 use std::{path::PathBuf, time::Duration};
 
-use runode_shared_types::{
+use runode_types::{
     agent::AgentKind,
     clipboard::{ClipboardAccess, ClipboardRead, ClipboardWrite},
     color::{Rgb, TerminalColor},

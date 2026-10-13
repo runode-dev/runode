@@ -31,10 +31,10 @@
 
 use std::{fmt, path::PathBuf};
 
-use runode_shared_types::{
+use runode_types::{
     clipboard::ClipboardAccess, grid::GridSize, session::SessionMeta, settings::TermSettings, shell::IntegrationMode,
 };
-pub use runode_shared_types::{
+pub use runode_types::{
     session::{InvalidSessionId, SessionId},
     shell::FinishedCommand,
 };

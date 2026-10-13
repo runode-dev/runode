@@ -11,8 +11,8 @@
 use std::time::{Duration, Instant};
 
 use runode_protocol::{ClientMsg, HostMsg};
-use runode_shared_types::clipboard::{ClipboardAccess, ClipboardRead, ClipboardWrite};
 use runode_terminal::host_session::{ClipboardQuery, ClipboardRequest};
+use runode_types::clipboard::{ClipboardAccess, ClipboardRead, ClipboardWrite};
 
 use super::Runner;
 

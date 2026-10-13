@@ -51,7 +51,7 @@ pub use handoff::{GIVE_READY_WINDOW, TAKE_OVER_AFTER_READY, TakeOverError, TakeO
 pub use idle::Stopped;
 pub use launch::{STATUS_FD, Successor, disclaim_responsibility, launch, launch_successor};
 pub use runode_protocol::{BuildId, ClientMsg, HandoffRefusal, HostMsg, Placement, SessionId};
-use runode_shared_types::{clipboard::ClipboardAccess, grid::GridSize, settings::TermSettings, shell::IntegrationMode};
+use runode_types::{clipboard::ClipboardAccess, grid::GridSize, settings::TermSettings, shell::IntegrationMode};
 pub use server::{same_user, set_buffers};
 
 /// 新开一个会话。

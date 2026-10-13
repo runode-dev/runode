@@ -1,7 +1,7 @@
 //! 从窗口标题里分出 agent 的状态前缀，普通标题原样留着。
 
 use runode_agent::title::split_status;
-use runode_shared_types::agent::{Agent, AgentKind, AgentState};
+use runode_types::agent::{Agent, AgentKind, AgentState};
 
 fn agent(kind: AgentKind, state: AgentState) -> Agent {
     Agent { kind, state }

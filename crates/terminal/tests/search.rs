@@ -3,7 +3,7 @@
 mod common;
 
 use common::idle_session;
-use runode_shared_types::theme;
+use runode_types::theme;
 
 #[test]
 fn search_highlights_matches_and_steps_through_them() {

@@ -14,7 +14,7 @@ use gpui::{
     relative, svg,
 };
 use runode_protocol::SessionId;
-use runode_shared_types::{
+use runode_types::{
     pane::{Axis, Node},
     session::{DriveAction, Driver},
 };

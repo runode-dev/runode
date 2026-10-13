@@ -3,7 +3,7 @@
 mod common;
 
 use common::{PROMPT, capturing_session_sized, idle_session, row_text};
-use runode_shared_types::grid::{GridSize, ViewportScroll};
+use runode_types::grid::{GridSize, ViewportScroll};
 
 #[test]
 fn scrolling_the_viewport_by_page_and_to_the_ends() {

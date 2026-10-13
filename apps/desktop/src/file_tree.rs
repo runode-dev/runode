@@ -52,7 +52,7 @@ use gpui::{
     actions, div, img, prelude::*, px, svg, uniform_list,
 };
 use runode_git::{self as git, FileStatus};
-use runode_shared_types::color::Rgb;
+use runode_types::color::Rgb;
 
 pub use listing::{Listings, list_dirs};
 pub use search::SearchOptions;

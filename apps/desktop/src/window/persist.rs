@@ -16,7 +16,7 @@ use gpui::{
     App, Bounds, Context, EntityId, Global, Task, WeakEntity, Window, WindowBounds, WindowOptions, point, px, size,
 };
 use runode_protocol::{SessionInfo, WindowLayout};
-use runode_shared_types::pane::{Node, Split};
+use runode_types::pane::{Node, Split};
 
 use super::{
     WindowView,

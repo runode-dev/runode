@@ -6,7 +6,7 @@
 //! `None`，由调用方退回状态标记。
 
 use gpui::{AnyElement, FontWeight, Hsla, Pixels, div, img, prelude::*, svg};
-use runode_shared_types::agent::AgentKind;
+use runode_types::agent::AgentKind;
 
 use crate::ui::icons::agent_logos::{
     AMP, ANTIGRAVITY, CLAUDE, CLINE, CODEBUDDY, CODEX, CURSOR, DEEPSEEK, DEVIN, GEMINI, GITHUB_COPILOT, GOOSE, GROK,

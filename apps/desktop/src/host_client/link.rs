@@ -50,7 +50,7 @@ use runode_protocol::{
     AttachMode, BuildId, Caps, ClientKind, ClientMsg, Frame, FrameError, FrameKind, HostMsg, PROTOCOL_VERSION,
     SessionId, SessionInfo, TaskSource, WindowLayout, read_frame, write_frame,
 };
-use runode_shared_types::{
+use runode_types::{
     clipboard::ClipboardAccess, grid::GridSize, session::SessionMeta, settings::TermSettings, shell::IntegrationMode,
 };
 

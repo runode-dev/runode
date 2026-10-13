@@ -16,15 +16,15 @@ use runode_protocol::{
     HostMsg, OLDEST_READABLE_HANDOFF_FORMAT, PROTOCOL_VERSION, SessionId, WindowLayout, decode_part, read_frame,
     write_frame,
 };
-use runode_shared_types::{
-    clipboard::ClipboardAccess,
-    settings::TermSettings,
-    shell::{FinishedCommand, IntegrationMode},
-};
 use runode_terminal::{
     fd_passing,
     host_session::{RedactorState, SessionExport},
     pty::PtyHandoff,
+};
+use runode_types::{
+    clipboard::ClipboardAccess,
+    settings::TermSettings,
+    shell::{FinishedCommand, IntegrationMode},
 };
 
 use super::{TakeOverError, TakeOverOptions, TakeOverReport, ms, peer_pid, running};

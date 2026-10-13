@@ -7,7 +7,7 @@ use gpui::{
     Render, Role, SharedString, Stateful, TitlebarOptions, Window, div, linear_color_stop, linear_gradient, point,
     prelude::*, px, svg,
 };
-use runode_shared_types::agent::AgentKind;
+use runode_types::agent::AgentKind;
 
 use super::{
     AGENT_MARK_WIDTH, NEW_TAB_BUTTON_WIDTH, NewTab, PressDown, SelectLastTab, SelectTab, TAB_CLOSE_SIZE,

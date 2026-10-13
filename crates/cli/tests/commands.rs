@@ -5,7 +5,7 @@ mod common;
 use common::*;
 use runode_cli::{Env, exit};
 use runode_protocol::{AttachMode, ClientMsg, HostMsg, SessionId};
-use runode_shared_types::agent::{AgentKind, AgentState};
+use runode_types::agent::{AgentKind, AgentState};
 
 const A: u128 = 0xabcd_0000_0000_0000_0000_0000_0000_0001;
 const B: u128 = 0xabce_0000_0000_0000_0000_0000_0000_0002;

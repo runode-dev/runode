@@ -1,6 +1,6 @@
 //! 按程序名认出 shell。
 
-use runode_shared_types::shell::Shell;
+use runode_types::shell::Shell;
 
 #[test]
 fn shells_are_recognized_by_program_name() {

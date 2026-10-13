@@ -9,7 +9,7 @@ use std::{
     time::Duration,
 };
 
-use runode_shared_types::{
+use runode_types::{
     session::SessionId,
     todo::{Schedule, Todo, TodoSpec, When},
 };

@@ -1,6 +1,6 @@
 //! 写成文字的组合键：解析、写回去、连按几下，以及写错时的说明。
 
-use runode_shared_types::input::{Key, KeyChord, MAX_KEY_REPEAT, Mods, parse_keys};
+use runode_types::input::{Key, KeyChord, MAX_KEY_REPEAT, Mods, parse_keys};
 
 fn chord(s: &str) -> KeyChord {
     s.parse().unwrap_or_else(|err| panic!("{s}: {err}"))

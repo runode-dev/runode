@@ -11,7 +11,7 @@ use libghostty_vt::{
     },
     terminal::{Point, PointSpace},
 };
-use runode_shared_types::{grid::GridPoint, input::SelectionAdjust};
+use runode_types::{grid::GridPoint, input::SelectionAdjust};
 
 use super::{Session, log_err};
 

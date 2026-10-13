@@ -976,11 +976,8 @@ mod tests {
     #[test]
     fn frame_border_prefers_invalid_then_focus() {
         let ansi = crate::theme::ansi_colors(&[]);
-        let theme = Theme::new(
-            runode_shared_types::color::Rgb(0xE6, 0xE1, 0xD8),
-            runode_shared_types::color::Rgb(0x17, 0x16, 0x18),
-            ansi,
-        );
+        let theme =
+            Theme::new(runode_types::color::Rgb(0xE6, 0xE1, 0xD8), runode_types::color::Rgb(0x17, 0x16, 0x18), ansi);
         assert_eq!(frame_border(&theme, true, true), theme.destructive);
         assert_eq!(frame_border(&theme, false, true), theme.ring);
         assert_eq!(frame_border(&theme, false, false), theme.input);

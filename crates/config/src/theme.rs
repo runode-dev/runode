@@ -98,7 +98,7 @@ fn look_up_ghostty_resources_dir() -> Option<PathBuf> {
 
 #[cfg(test)]
 mod tests {
-    use runode_shared_types::{
+    use runode_types::{
         color::{Rgb, TerminalColor},
         theme,
     };

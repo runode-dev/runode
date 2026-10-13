@@ -6,7 +6,7 @@ use libghostty_vt::{
     selection::Order,
     terminal::{Point, PointCoordinate, PointSpace},
 };
-use runode_shared_types::{frame::Cell, grid::GridPoint};
+use runode_types::{frame::Cell, grid::GridPoint};
 
 use super::{Session, log_err};
 use crate::prompt_input::wrapped_rows;

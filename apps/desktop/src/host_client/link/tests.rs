@@ -614,8 +614,8 @@ fn theme_and_options_are_sent_again_after_reconnecting() {
     let settings = TermSettings { scrollback_limit: 3 << 20, ..TermSettings::default() };
     link.send(ClientMsg::SetTheme { settings: settings.clone() });
     let clipboard = ClipboardAccess {
-        write: runode_shared_types::clipboard::ClipboardWrite::Deny,
-        read: runode_shared_types::clipboard::ClipboardRead::Allow,
+        write: runode_types::clipboard::ClipboardWrite::Deny,
+        read: runode_types::clipboard::ClipboardRead::Allow,
     };
     link.send(ClientMsg::SetOptions { record_history: false, clipboard });
     let (seen, seen_rx) = mpsc::channel();

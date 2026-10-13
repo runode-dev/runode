@@ -10,7 +10,7 @@ use std::{
 use common::*;
 use runode_cli::exit;
 use runode_protocol::{AttachMode, ClientMsg, FinishedCommand, HostMsg, SessionId};
-use runode_shared_types::{
+use runode_types::{
     agent::{AgentKind, AgentState},
     session::SessionMeta,
 };

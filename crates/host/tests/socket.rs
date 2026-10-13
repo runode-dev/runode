@@ -17,7 +17,7 @@ use runode_protocol::{
     AttachMode, BuildId, Caps, ClientKind, FrameKind, GoodbyeReason, PROTOCOL_VERSION, PaneLayout, PaneRect, TabLayout,
     WindowLayout, WorkspaceLayout,
 };
-use runode_shared_types::{clipboard::ClipboardAccess, settings::TermSettings, shell::IntegrationMode};
+use runode_types::{clipboard::ClipboardAccess, settings::TermSettings, shell::IntegrationMode};
 
 /// 协议版本对不上时回 `Incompatible` 后断开。
 #[test]

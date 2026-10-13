@@ -30,7 +30,7 @@ use gpui::{
     prelude::*, px, svg,
 };
 use runode_config::StatusItem;
-use runode_shared_types::{
+use runode_types::{
     agent::{AgentKind, AgentState},
     color::Rgb,
 };

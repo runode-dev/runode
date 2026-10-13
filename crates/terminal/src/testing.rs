@@ -3,7 +3,7 @@
 use std::{cell::RefCell, rc::Rc, time::Duration};
 
 use libghostty_vt::Terminal;
-use runode_shared_types::{
+use runode_types::{
     frame::Frame,
     grid::{GridPoint, GridSize},
     session::SessionMeta,

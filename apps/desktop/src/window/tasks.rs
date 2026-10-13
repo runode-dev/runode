@@ -12,7 +12,7 @@ use gpui::{Action, App, Context, Entity, Focusable, MouseButton, SharedString, W
 use runode_config::TaskPlacement;
 use runode_paths::Dirs;
 use runode_protocol::{TaskSource, TaskSourceKind};
-use runode_shared_types::pane::Axis;
+use runode_types::pane::Axis;
 
 pub(super) use custom::AddTaskDialog;
 

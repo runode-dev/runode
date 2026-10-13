@@ -7,7 +7,7 @@ use std::time::{Duration, Instant};
 use common::{BUILD, Peer, WAIT, host, script, temp_dir};
 use runode_host::{ClientMsg, Host, HostMsg, SessionId};
 use runode_protocol::{AttachMode, BuildId, Caps, ClientKind, FrameKind, PROTOCOL_VERSION, SessionInfo};
-use runode_shared_types::{grid::GridSize, shell::IntegrationMode};
+use runode_types::{grid::GridSize, shell::IntegrationMode};
 
 const SIZE_A: GridSize = GridSize { cols: 30, rows: 6, cell_width_px: 8, cell_height_px: 16 };
 const SIZE_B: GridSize = GridSize { cols: 40, rows: 8, cell_width_px: 8, cell_height_px: 16 };

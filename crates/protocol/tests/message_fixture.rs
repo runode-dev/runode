@@ -14,7 +14,7 @@ use runode_protocol::{
     },
     push::ApnsEnv,
 };
-use runode_shared_types::{
+use runode_types::{
     agent::{Agent, AgentKind, AgentState},
     color::{Rgb, TerminalColor},
     grid::GridSize,
@@ -27,7 +27,7 @@ use serde_json::{Map, Value};
 
 const ID: SessionId = SessionId(0x0123_4567_89ab_cdef_0011_2233_4455_6677);
 
-const NOTE: &str = "由 runode_protocol 的测试 message_fixture 用宿主的 runode_protocol / runode_shared_types（Rust）\
+const NOTE: &str = "由 runode_protocol 的测试 message_fixture 用宿主的 runode_protocol / runode_types（Rust）\
                     按 serde 序列化生成，手机端的测试据此核对 Swift 这边的编解码。不要手改：改了消息格式后在仓库根跑 \
                     `RUNODE_BLESS=1 cargo test -p runode-protocol --test message_fixture` 重新生成。";
 

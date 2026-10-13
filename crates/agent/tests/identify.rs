@@ -3,7 +3,7 @@
 
 use AgentKind::*;
 use runode_agent::{ForegroundJob, ForegroundProcess, agent_from_name, identify_job};
-use runode_shared_types::agent::AgentKind;
+use runode_types::agent::AgentKind;
 
 fn process(pid: u32, name: &str, argv: &[&str]) -> ForegroundProcess {
     ForegroundProcess {

@@ -7,7 +7,7 @@
 //! 只能在 render 和 paint 里读；事件处理、构造函数里读到的可能是别的窗口刚画时换上的。
 
 use gpui::{App, Global, Hsla};
-use runode_shared_types::color::Rgb;
+use runode_types::color::Rgb;
 
 use crate::hsla;
 
@@ -127,7 +127,7 @@ impl Theme {
 /// 从配置的调色板（`(序号, 颜色)`，后写的算数）取 ANSI 16 色，`Theme::new` 用。没配置的序号用
 /// 默认配色里的；强调色（4）和出错色（1）没配置时另有缺省，和设置页一样。
 pub fn ansi_colors(palette: &[(u8, Rgb)]) -> [Rgb; 16] {
-    let mut ansi = runode_shared_types::theme::ANSI;
+    let mut ansi = runode_types::theme::ANSI;
     ansi[1] = DESTRUCTIVE_FALLBACK;
     ansi[4] = RING_FALLBACK;
     for &(ix, color) in palette {
@@ -228,7 +228,7 @@ mod tests {
     fn ansi_colors_follow_the_palette() {
         let ansi = ansi_colors(&[(2, Rgb(1, 1, 1)), (2, Rgb(2, 2, 2)), (200, Rgb(3, 3, 3))]);
         assert_eq!(ansi[2], Rgb(2, 2, 2));
-        assert_eq!(ansi[0], runode_shared_types::theme::ANSI[0]);
+        assert_eq!(ansi[0], runode_types::theme::ANSI[0]);
         assert_eq!(ansi[4], RING_FALLBACK);
         assert_eq!(ansi[1], DESTRUCTIVE_FALLBACK);
         let ansi = ansi_colors(&[(1, Rgb(9, 9, 9)), (4, Rgb(8, 8, 8))]);
