@@ -864,6 +864,8 @@ fn todo_requests_get_their_answers_and_changes_are_announced() {
         panic!("expected the new todo");
     };
     wait_changed(&mut changed);
+    let got = link.request(|req| ClientMsg::GetTodo { req, id: id.clone() }, WAIT).unwrap();
+    assert!(matches!(got, HostMsg::Todo { ref todo, .. } if todo.id == id), "{got:?}");
     let moved = link.request(|req| ClientMsg::MoveTodo { req, id, before: None }, WAIT).unwrap();
     assert!(matches!(moved, HostMsg::Done { .. }), "{moved:?}");
     // 宿主回的错带着请求编号，交回给等着的一方，连接照旧。
