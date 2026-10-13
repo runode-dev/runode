@@ -184,7 +184,7 @@ impl Repo {
 
     /// `path` 在 `side` 这一边改完以后的全部字节：工作区的文件、暂存区或提交里的 blob。
     /// 读不到（比如删掉了）时为空。符号链接和 git 一样是它指向的路径。比 `options.max_bytes` 大时
-    /// 是 `TooLarge`：工作区的文件先看大小，大的不读进内存；暂存区和提交里的 blob 由 git 读出来再比。
+    /// 是 `TooLarge`，先看大小，大的不读进内存。
     pub fn new_bytes(
         &self,
         path: &Path,
@@ -199,8 +199,8 @@ impl Repo {
                 }
                 worktree_bytes(&full)
             }
-            DiffSide::Index => git(&self.root, &["cat-file", "blob", &format!(":{}", path.display())]),
-            DiffSide::Commit { id, .. } => git(&self.root, &["cat-file", "blob", &format!("{id}:{}", path.display())]),
+            DiffSide::Index => return self.blob(&format!(":{}", path.display()), options),
+            DiffSide::Commit { id, .. } => return self.blob(&format!("{id}:{}", path.display()), options),
         };
         match bytes {
             Some(bytes) if bytes.len() as u64 > options.max_bytes => Err(TooLarge),
@@ -209,15 +209,42 @@ impl Repo {
     }
 
     /// `path` 在 `side` 这一边改之前的全部字节：工作区比的是暂存区，暂存区比的是 HEAD，提交比的是
-    /// 父提交；改了名的按原来的路径 `old_path` 找。新加的文件读不到，为空。
-    pub fn old_bytes(&self, path: &Path, old_path: Option<&Path>, side: &DiffSide) -> Option<Vec<u8>> {
+    /// 父提交；改了名的按原来的路径 `old_path` 找。新加的文件读不到，为空。比 `options.max_bytes` 大时
+    /// 是 `TooLarge`，不读进内存。
+    pub fn old_bytes(
+        &self,
+        path: &Path,
+        old_path: Option<&Path>,
+        side: &DiffSide,
+        options: ReadOptions,
+    ) -> std::result::Result<Option<Vec<u8>>, TooLarge> {
         let path = old_path.unwrap_or(path).display();
         let spec = match side {
             DiffSide::Worktree => format!(":{path}"),
             DiffSide::Index => format!("HEAD:{path}"),
-            DiffSide::Commit { parent, .. } => format!("{}:{path}", parent.as_ref()?),
+            DiffSide::Commit { parent: Some(parent), .. } => format!("{parent}:{path}"),
+            DiffSide::Commit { parent: None, .. } => return Ok(None),
         };
-        git(&self.root, &["cat-file", "blob", &spec])
+        self.blob(&spec, options)
+    }
+
+    /// blob `spec`（`版本:路径`）的字节，读不到时为空；先用 `cat-file -s` 查大小，比 `options.max_bytes`
+    /// 大的是 `TooLarge`，不读出来。
+    fn blob(&self, spec: &str, options: ReadOptions) -> std::result::Result<Option<Vec<u8>>, TooLarge> {
+        let size = git(&self.root, &["cat-file", "-s", spec])
+            .and_then(|out| String::from_utf8(out).ok()?.trim().parse::<u64>().ok());
+        let Some(size) = size else {
+            return Ok(None);
+        };
+        if size > options.max_bytes {
+            return Err(TooLarge);
+        }
+        // shortcut: 查大小和读之间暂存区换成了大文件的话仍整个读进来（下面再比一次才丢掉），真碰上了改成先
+        // `rev-parse` 出对象 id 再按 id 查、读。
+        match git(&self.root, &["cat-file", "blob", spec]) {
+            Some(bytes) if bytes.len() as u64 > options.max_bytes => Err(TooLarge),
+            bytes => Ok(bytes),
+        }
     }
 
     /// `path` 在工作区里、不是目录（符号链接看它自己）、git 没跟踪它。

@@ -197,12 +197,12 @@ fn reads_both_sides_of_a_change() {
 
     // 工作区：改之前是暂存区那份，改之后是磁盘上的。
     repo.write("a.bin", "v2");
-    assert_eq!(handle.old_bytes(path, None, &DiffSide::Worktree), bytes("v1"));
+    assert_eq!(handle.old_bytes(path, None, &DiffSide::Worktree, any), Ok(bytes("v1")));
     assert_eq!(handle.new_bytes(path, &DiffSide::Worktree, any), Ok(bytes("v2")));
 
     // 暂存区：改之前是 HEAD 那份。
     repo.git(&["add", "a.bin"]);
-    assert_eq!(handle.old_bytes(path, None, &DiffSide::Index), bytes("v1"));
+    assert_eq!(handle.old_bytes(path, None, &DiffSide::Index, any), Ok(bytes("v1")));
     assert_eq!(handle.new_bytes(path, &DiffSide::Index, any), Ok(bytes("v2")));
 
     // 提交：改之前是父提交那份；第一个提交没有父提交，没有旧的。
@@ -210,15 +210,15 @@ fn reads_both_sides_of_a_change() {
     let ids = repo.git(&["rev-list", "HEAD"]);
     let ids: Vec<_> = ids.lines().collect();
     let commit = DiffSide::Commit { id: ids[0].into(), parent: Some(ids[1].into()) };
-    assert_eq!(handle.old_bytes(path, None, &commit), bytes("v1"));
+    assert_eq!(handle.old_bytes(path, None, &commit, any), Ok(bytes("v1")));
     assert_eq!(handle.new_bytes(path, &commit, any), Ok(bytes("v2")));
-    assert_eq!(handle.old_bytes(path, None, &DiffSide::Commit { id: ids[1].into(), parent: None }), None);
+    assert_eq!(handle.old_bytes(path, None, &DiffSide::Commit { id: ids[1].into(), parent: None }, any), Ok(None));
 
     // 改了名的按原来的路径找旧的；未跟踪的没有旧的。
     repo.git(&["mv", "a.bin", "b.bin"]);
-    assert_eq!(handle.old_bytes(Path::new("b.bin"), Some(path), &DiffSide::Index), bytes("v2"));
+    assert_eq!(handle.old_bytes(Path::new("b.bin"), Some(path), &DiffSide::Index, any), Ok(bytes("v2")));
     repo.write("new.bin", "n");
-    assert_eq!(handle.old_bytes(Path::new("new.bin"), None, &DiffSide::Worktree), None);
+    assert_eq!(handle.old_bytes(Path::new("new.bin"), None, &DiffSide::Worktree, any), Ok(None));
 }
 
 #[test]
@@ -233,4 +233,7 @@ fn does_not_read_sides_over_the_size_limit() {
     assert_eq!(handle.new_bytes(path, &DiffSide::Worktree, max(3)), Err(TooLarge));
     // 暂存区里的 blob 同样按上限。
     assert_eq!(handle.new_bytes(path, &DiffSide::Index, max(4)), Err(TooLarge));
+    // 改之前的那边也是。
+    assert_eq!(handle.old_bytes(path, None, &DiffSide::Worktree, max(5)), Ok(Some(b"small".to_vec())));
+    assert_eq!(handle.old_bytes(path, None, &DiffSide::Worktree, max(4)), Err(TooLarge));
 }

@@ -174,14 +174,14 @@ impl PreviewPanel {
             // 二进制的图片把改之前和改之后的两张并排显示；新加的没有旧图，删掉的没有新图。
             let image = runode_preview::image_format(&target.rel).filter(|_| view.file.binary).map(|format| {
                 let max_bytes = runode_preview::MAX_IMAGE_BYTES;
-                // 新的那边太大时不读进内存。
-                let Ok(new) = repo.new_bytes(&target.rel, &target.side, git::ReadOptions { max_bytes }) else {
+                // 哪边太大都不读进内存。
+                let options = git::ReadOptions { max_bytes };
+                let (Ok(new), Ok(old)) = (
+                    repo.new_bytes(&target.rel, &target.side, options),
+                    repo.old_bytes(&target.rel, target.old_rel.as_deref(), &target.side, options),
+                ) else {
                     return Loaded::Note(Note::TooLarge);
                 };
-                let old = repo.old_bytes(&target.rel, target.old_rel.as_deref(), &target.side);
-                if old.as_ref().is_some_and(|bytes| bytes.len() as u64 > max_bytes) {
-                    return Loaded::Note(Note::TooLarge);
-                }
                 let image = |bytes: Vec<u8>| Arc::new(Image::from_bytes(gpui_format(format), bytes));
                 Loaded::ImageDiff { old: old.map(image), new: new.map(image) }
             });
