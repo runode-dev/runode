@@ -9,7 +9,7 @@ use std::{
     time::Duration,
 };
 
-use runode_protocol::todo::{Column, Schedule, column};
+use runode_protocol::todo::{Column, Schedule, When, column};
 use runode_todo::next_fire;
 
 use super::{Todos, unix_now};
@@ -66,9 +66,16 @@ impl Shared {
     /// 定时到点：记下到点的时刻（一次性的删掉），开一张新任务并开始它；上次开出的那张没开始成或者还在干活时
     /// 跳过。
     fn fire(&self, schedule: &Schedule, now: u64) {
-        let previous = self.todos.with_db(|db| db.latest_open_todo_of(&schedule.id));
+        // 查不到上次那张时不开：库只是一时打不开的话，开出来可能和还在干活的上一个 agent 撞在一起；下一轮再看。
+        let previous = match self.todos.with_db(|db| db.latest_open_todo_of(&schedule.id)) {
+            Ok(previous) => previous,
+            Err(err) => {
+                tracing::warn!("schedule {} cannot read its last todo: {err}", schedule.id);
+                return;
+            }
+        };
         // 上次开出的那张没开始成（比如目录没了）时也跳过，免得每到点就多一张开不起来的待办。
-        if let Ok(Some(todo)) = &previous
+        if let Some(todo) = &previous
             && match todo.session {
                 None => true,
                 Some(session) => match self.session_info(session) {
@@ -83,8 +90,15 @@ impl Shared {
                 schedule.id,
                 todo.id
             );
-            if let Err(err) = self.todos.with_db(|db| db.set_fired(&schedule.id, now)) {
-                tracing::warn!("cannot record that schedule {} fired: {err}", schedule.id);
+            // 一次性的到过就没了，跳过也删掉：只记到点的话它再也不会到点，却一直留着让宿主不空闲。
+            let skipped = self.todos.with_db(|db| match schedule.when {
+                When::Once { .. } => db.remove_schedule(&schedule.id).map(drop),
+                _ => db.set_fired(&schedule.id, now),
+            });
+            match skipped {
+                // 下一次到点变了，看板要重读。
+                Ok(()) => self.todos_changed(),
+                Err(err) => tracing::warn!("cannot record that schedule {} fired: {err}", schedule.id),
             }
             return;
         }
