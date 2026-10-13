@@ -67,6 +67,7 @@ fn ensure_lang() {
 /// `language` 在本机装着的 UTF-8 语言环境里对应的那个：先找 `region` 的，再找这种语言的本土（中文按
 /// `script` 分简繁），再找它随便哪个地区的，都没有时是 `en_US.UTF-8`。`zh`、`SG` 没有 `zh_SG.UTF-8`，
 /// 得到 `zh_CN.UTF-8`，和 Terminal.app 一样。
+#[cfg(any(target_os = "macos", test))]
 fn utf8_locale(language: &str, region: Option<&str>, script: Option<&str>, installed: &[String]) -> String {
     let home = match language {
         "zh" if script == Some("Hant") => "TW".to_owned(),
