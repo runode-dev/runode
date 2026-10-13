@@ -11,7 +11,7 @@ use crate::ui::{
     menu::{MenuHost as _, MenuItem},
 };
 
-use super::{GitPanel, GitPanelEvent, rows::Busy};
+use super::{GitPanel, GitPanelEvent, rows::Busy, show_git_error};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum WorktreeOp {
@@ -41,10 +41,10 @@ impl GitPanel {
     }
 
     /// 工作树那几项菜单。主工作树删不了（终端在某个链接工作树里时它也作为其他工作树出现），不给
-    /// 删除；主仓库有操作在跑时删除按不动。
+    /// 删除；主仓库或这个工作树有操作在跑时删除按不动。
     pub(crate) fn worktree_menu_items(&self, root: &Path, cx: &Context<Self>) -> Vec<Option<MenuItem>> {
         let main = self.state().git.as_ref().map(|git| git.main.root.clone());
-        let enabled = main.is_some_and(|main| self.state().busy(&main).is_none());
+        let enabled = main.is_some_and(|main| !self.is_busy(&main)) && !self.is_busy(root);
         let removable = self.worktree(root).is_some_and(git::Snapshot::is_linked_worktree);
         let item = |key: &str, op, enabled| {
             Some(MenuItem::new(
@@ -86,7 +86,8 @@ impl GitPanel {
     }
 
     /// 删掉工作树，先问一下。有改动（含未跟踪的文件）时 git 不让删，说明这些改动会一起丢掉，
-    /// 确认了才强制删。在主仓库上跑，主仓库那块写着忙。
+    /// 确认了才强制删。在主仓库上跑；那个工作树里的操作按它自己的根查忙，所以两块都写着忙，
+    /// 删的时候那边的提交、切分支不会同时跑，删完或失败时两边一起放开。
     fn remove_worktree(&mut self, path: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
         let Some(git) = self.state().git.as_ref() else {
             return;
@@ -123,8 +124,28 @@ impl GitPanel {
         cx.spawn_in(window, async move |this, cx| {
             if answer.await.ok() == Some(0) {
                 this.update_in(cx, |this, window, cx| {
-                    let op = move |repo: &git::Repo| repo.remove_worktree(&path, dirty);
-                    this.run_git(&main, Busy::RemoveWorktree, window, cx, op, |_, (), _, _| {});
+                    if this.is_busy(&main) || this.is_busy(&path) {
+                        return;
+                    }
+                    let ws = this.ws;
+                    let target = path.clone();
+                    // 失败也要放开工作树那块，错误带回 `done` 里报，`run_git` 出错时不调 `done`。
+                    let op = {
+                        let path = path.clone();
+                        move |repo: &git::Repo| Ok(repo.remove_worktree(&path, dirty))
+                    };
+                    this.run_git(&main, Busy::RemoveWorktree, window, cx, op, move |this, result, window, cx| {
+                        if let Some(state) = this.workspaces.get_mut(&ws) {
+                            state.repo_mut(&target).busy = None;
+                        }
+                        if let Err(err) = result {
+                            show_git_error(&err, window, cx);
+                        }
+                    });
+                    // 主仓库这会儿才忙说明 `run_git` 开跑了；没开跑（比如已经切到别的 workspace）就不占。
+                    if this.is_busy(&main) {
+                        this.state_mut().repo_mut(&path).busy = Some(Busy::RemoveWorktree);
+                    }
                 })
                 .ok();
             }
