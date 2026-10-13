@@ -24,7 +24,7 @@ make test
 cargo deny check bans   # 检查 crate 之间的依赖方向
 ```
 
-终端的测试会起真的 bash、zsh、fish、elvish 和 nushell 跑集成脚本，系统里没有的 shell 不测（macOS 自带的 bash 还是 3.2，有几项要新 bash 的也不测）。装了 [Nix](https://nixos.org) 的话，用 `nix shell -c make test` 跑：仓库的 `flake.nix` 只往 PATH 前面加这几个 shell，Rust、zig 和 Xcode 照旧用自己装的。
+终端的测试会起真的 bash、zsh、fish、elvish 和 nushell 跑集成脚本，系统里没有的 shell 不测（macOS 自带的 bash 还是 3.2，有几项要新 bash 的也不测）。装了 [Nix](https://nixos.org) 的话，在命令前加 `nix shell -c`（例如 `nix shell -c make test`）：仓库的 `flake.nix` 往 PATH 前面加上指定版本的 Rust、zig、cargo-nextest、cargo-deny 和这几个 shell，本机只需要 Xcode。Nix 没开 flakes 时加 `--extra-experimental-features 'nix-command flakes'`。
 
 CI 会跑同样的检查。代码分在哪个 crate、能依赖谁，以及命名、注释和测试的约定，见 [AGENTS.md](AGENTS.md)。
 
