@@ -123,6 +123,8 @@ struct RealShell {
     raw: Vec<u8>,
     /// 临时的家目录，用完删掉。
     home: PathBuf,
+    /// `read` 等输入时画在那一行上的提示符：fish 画 `read>`，bash、zsh 什么都不画。
+    read_prompt: &'static str,
 }
 
 impl Drop for RealShell {
@@ -182,7 +184,7 @@ impl RealShell {
                 (
                     ".config/fish/config.fish",
                     format!(
-                        "XDG_DATA_DIRS='{data}:/usr/local/share:/usr/share' RUNODE_FISH_DATA_DIR='{data}' '{program}' -l"
+                        "XDG_DATA_DIRS='{data}:/usr/local/share:/usr/share' RUNODE_FISH_DATA_DIR='{data}' '{program}' --features no-mark-prompt -l"
                     ),
                 )
             }
@@ -213,7 +215,9 @@ impl RealShell {
         let pty =
             Pty::spawn(REAL_SIZE, Some(launcher.to_str().unwrap()), Some(&home), IntegrationMode::Off, sink).unwrap();
         let session = HostSession::new(REAL_SIZE, pty, None, &TermSettings::default()).unwrap();
-        let mut real = Self { session, output, prompt, idle, prompts: 0, name: name.into(), raw: Vec::new(), home };
+        let read_prompt = if shell == "fish" { "read>" } else { "" };
+        let mut real =
+            Self { session, output, prompt, idle, prompts: 0, name: name.into(), raw: Vec::new(), home, read_prompt };
         real.wait_for_prompt();
         Some(real)
     }
@@ -304,8 +308,8 @@ fn read_commands_from(shell: Option<RealShell>) {
     assert_eq!(shell.output(2), format!("{}\n{}\n", &wide[..40], &wide[40..]), "{name}");
     shell.session.write(b"\r".to_vec());
     shell.wait_for_prompt();
-    // 回车被终端回显成一个空行。
-    assert_eq!(shell.output(1), "one\n\ntwo\n", "{name}");
+    // 回车被终端回显成一行，上面只有 `read` 的提示符。
+    assert_eq!(shell.output(1), format!("one\n{}\ntwo\n", shell.read_prompt), "{name}");
     assert_eq!(shell.output(4), "a\nb\nc\n", "{name}");
 }
 
@@ -479,10 +483,7 @@ fn fish_rc(extra: &str) -> String {
     format!("set -g fish_greeting\nfunction fish_prompt; echo -n '[f]> '; end\n{extra}")
 }
 
-/// fish 4 跑 `read` 时自己在 `read>` 提示符上发 133;A、133;B，被当成新的提示符，还在跑的那条
-/// 命令的输出就读不全了。
 #[test]
-#[ignore = "fish 4 的 read 提示符打断了命令输出"]
 fn real_fish_commands_are_read() {
     let rc = fish_rc("function fish_right_prompt; echo -n '<r>'; end\n");
     read_commands_from(RealShell::start("fish", "fish", &rc, "[f]>", &["[f]>", "<r>"]));

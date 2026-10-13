@@ -68,7 +68,9 @@ pub fn prepare(mode: IntegrationMode, program: &str, features: &str, cmd: &mut C
                 .filter(|v| !v.is_empty())
                 .unwrap_or_else(|| "/usr/local/share:/usr/share".into());
             dirs.extend(std::env::split_paths(&inherited));
-            cmd.arg("-l");
+            // fish 4 自己也发 OSC 133，连 `read` 的提示符都标成提示符，还在跑的命令就被从中间切断；
+            // 集成脚本自己标，关掉 fish 的。不认得这个功能名的老 fish 忽略它。
+            cmd.args(["--features", "no-mark-prompt", "-l"]);
             match std::env::join_paths(dirs) {
                 Ok(joined) => {
                     cmd.env("XDG_DATA_DIRS", joined);

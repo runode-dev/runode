@@ -99,7 +99,8 @@ end
 
 # 换成一个新的 fish，重新读用户配置，接上集成：数据目录照 runode 启动时那样加回 XDG_DATA_DIRS，
 # 口令和功能经环境变量交回去，runode 照样认得新 shell 的报告。换之前把历史写进文件，再报告这条
-# 命令执行完了：exec 之后不会再有它的 133;D。
+# 命令执行完了：exec 之后不会再有它的 133;D。和 runode 启动 fish 时一样关掉 fish 自己的 OSC 133
+# （mark-prompt），提示符只由这个脚本标。
 function runode-reload --description 'Restart this shell to reload its configuration'
     set -l fish (status fish-path 2>/dev/null)
     test -x "$fish"; or set fish fish
@@ -114,7 +115,7 @@ function runode-reload --description 'Restart this shell to reload its configura
     set -q __runode_features; and set -a vars RUNODE_SHELL_FEATURES=(string join , -- $__runode_features)
     history save
     printf '\e]133;D;0\a'
-    exec env $vars $fish -l
+    exec env $vars $fish --features no-mark-prompt -l
 end
 
 # 每次显示提示符前报告当前目录；PATH 和上次报告的不一样时也报告给 runode。
