@@ -3,7 +3,8 @@
 //! 和宿主说话经 app 在启动时交进来的 `Host`（`watch`）。启动时问一次宿主，这一问也让宿主之后在任务板变了时
 //! 说一声（app 交进来的通知），说了就重问；换了一条连接也重问。卡片在哪一列要看任务会话里 agent 的状态，宿主不会为它说变了，所以有窗口开着
 //! 看板时每 `SESSIONS_POLL` 问一次宿主里的会话，只留任务用到的；不 attach，免得宿主把它们算成有界面连着。
-//! 数据变了才重画各窗口；刚开始的任务过宽限期时列会变、数据却不一定变，那几轮也重画（`settling`）。
+//! 数据变了才重画开着的看板，只有看板读这份数据，不让各窗口整页重画；刚开始的任务过宽限期时列会变、数据
+//! 却不一定变，那几轮也重画（`settling`）。
 //! 请求都在后台线程上等宿主回话。
 
 use std::{
@@ -129,6 +130,14 @@ pub(crate) fn register(board: WeakEntity<TodoBoard>, cx: &mut App) {
     cx.default_global::<Boards>().0.push(board);
 }
 
+/// 重画各窗口开着的看板。
+fn notify_boards(cx: &mut App) {
+    let boards: Vec<_> = cx.default_global::<Boards>().0.iter().filter_map(WeakEntity::upgrade).collect();
+    for board in boards {
+        board.update(cx, |_, cx| cx.notify());
+    }
+}
+
 /// 有窗口开着看板。
 fn board_open(cx: &mut App) -> bool {
     let boards = &mut cx.default_global::<Boards>().0;
@@ -137,7 +146,7 @@ fn board_open(cx: &mut App) -> bool {
 }
 
 /// 现问一次任务和定时，连同任务会话的状态一起问：刚开始的任务的会话还没问过时，它会先被算成会话没了、
-/// 落进需要你那一列，下一轮才回到进行中。变了就重画各窗口。
+/// 落进需要你那一列，下一轮才回到进行中。变了就重画看板。
 fn refresh_todos(cx: &mut App) -> Task<()> {
     let host = Host::get(cx);
     cx.spawn(async move |cx| {
@@ -173,7 +182,7 @@ fn refresh_todos(cx: &mut App) -> Task<()> {
     })
 }
 
-/// 现问一次任务会话的状态，变了就重画各窗口。
+/// 现问一次任务会话的状态，变了就重画看板。
 fn refresh_sessions(cx: &mut App) -> Task<()> {
     let wanted = todo_sessions(cx);
     let host = Host::get(cx);
@@ -188,7 +197,7 @@ fn refresh_sessions(cx: &mut App) -> Task<()> {
             let mut data = take(cx);
             merge_sessions(&mut data.sessions, live, &wanted, &now_wanted);
             if settling(&data.todos, crate::unix_now()) {
-                cx.refresh_windows();
+                notify_boards(cx);
             }
             put(data, cx);
         });
@@ -255,11 +264,11 @@ fn settling(todos: &[Todo], now: u64) -> bool {
     todos.iter().any(|todo| todo.done_at.is_none() && todo.started.is_some_and(|at| now <= at.saturating_add(window)))
 }
 
-/// 放回改过的数据；和原来的不一样时重画各窗口。
+/// 放回改过的数据；和原来的不一样时重画看板。
 fn put(data: TodoData, cx: &mut App) {
     let old = std::mem::replace(cx.default_global::<TodoData>(), data);
     if old != *cx.global::<TodoData>() {
-        cx.refresh_windows();
+        notify_boards(cx);
     }
 }
 
