@@ -11,6 +11,6 @@ mod load;
 mod markdown;
 
 pub use highlight::{Color, Span, Style, highlight};
-pub use line::{DisplayLine, TAB_WIDTH, display_line};
+pub use line::{DisplayLine, TAB_WIDTH, display_line, display_width};
 pub use load::{Content, ImageFormat, MAX_IMAGE_BYTES, MAX_LINES, MAX_TEXT_BYTES, Text, image_format, load};
 pub use markdown::{Alert, Align, Block, Footnote, Image, Inline, InlineStyle, ListItem, is_markdown, parse_markdown};

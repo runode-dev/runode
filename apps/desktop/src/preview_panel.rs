@@ -427,7 +427,7 @@ fn widest_line(lines: &[String], cell_width: fn(char) -> u8) -> usize {
 
 /// `line` 画出来占几格：制表符照 `display_line` 展开，一个字按 `cell_width` 算。
 fn shown_width(line: &str, cell_width: fn(char) -> u8) -> usize {
-    runode_preview::display_line(line, &[], MAX_COLUMNS).text.chars().map(|ch| usize::from(cell_width(ch))).sum()
+    runode_preview::display_width(line, MAX_COLUMNS, |ch| usize::from(cell_width(ch)))
 }
 
 /// 预览栏，见模块说明。

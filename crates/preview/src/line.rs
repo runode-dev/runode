@@ -52,3 +52,23 @@ pub fn display_line(line: &str, spans: &[Span], max_columns: usize) -> DisplayLi
         .collect();
     DisplayLine { text, spans, cut: end < line.len() }
 }
+
+/// `line` 照 `display_line` 画出来占几格：制表符展开成空格（一格一个）、最多留 `max_columns` 列，别的字按
+/// `cell_width` 算。不拼出文字，逐行挑最宽的一行时不分配。
+pub fn display_width(line: &str, max_columns: usize, cell_width: impl Fn(char) -> usize) -> usize {
+    let (mut columns, mut width) = (0, 0);
+    for ch in line.chars() {
+        if columns >= max_columns {
+            break;
+        }
+        if ch == '\t' {
+            let tab = TAB_WIDTH - columns % TAB_WIDTH;
+            columns += tab;
+            width += tab;
+        } else {
+            columns += 1;
+            width += cell_width(ch);
+        }
+    }
+    width
+}

@@ -1,6 +1,6 @@
 //! 把一行文字换成画出来的样子：制表符展开到制表位、多字节字符的高亮范围、过长截断。
 
-use runode_preview::{Color, Span, Style, display_line};
+use runode_preview::{Color, Span, Style, display_line, display_width};
 
 fn span(range: std::ops::Range<usize>) -> Span {
     Span { range, style: Style { color: Color::Ansi(2), bold: false, italic: false } }
@@ -27,4 +27,14 @@ fn cuts_long_lines() {
     assert_eq!(line.text, "abc");
     assert_eq!(line.spans, vec![span(1..3)]);
     assert!(line.cut);
+}
+
+/// 挑最宽的行用的宽度和画出来的文字一致：制表符、截断和双宽字都照 `display_line` 算。
+#[test]
+fn display_width_matches_the_displayed_text() {
+    let wide = |ch: char| if ch.is_ascii() { 1 } else { 2 };
+    for (line, max) in [("\tab\tc", 100), ("中\t文", 100), ("abcdef", 3), ("", 10), ("\t\t中", 5)] {
+        let shown = display_line(line, &[], max).text.chars().map(wide).sum::<usize>();
+        assert_eq!(display_width(line, max, wide), shown, "{line:?}");
+    }
 }
