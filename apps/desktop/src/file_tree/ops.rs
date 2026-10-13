@@ -81,7 +81,7 @@ pub(super) fn move_into(src: &Path, dir: &Path) -> Result<PathBuf> {
     if dest == src {
         return Ok(dest);
     }
-    if dir.starts_with(src) {
+    if inside(src, dir) {
         return Err(OpError::IntoItself);
     }
     rename(src, &dest)?;
@@ -93,12 +93,27 @@ pub(super) fn move_into(src: &Path, dir: &Path) -> Result<PathBuf> {
 /// 或它下面的目录，复制的过程中会一直读到新复制出来的东西。
 pub(super) fn copy_into(src: &Path, dir: &Path) -> Result<PathBuf> {
     let name = src.file_name().ok_or(OpError::IntoItself)?;
-    if dir.starts_with(src) {
+    if inside(src, dir) {
         return Err(OpError::IntoItself);
     }
     let dest = free_name(dir, Path::new(name));
     copy_all(src, &dest)?;
     Ok(dest)
+}
+
+/// `dir` 是 `src` 自己或者在它下面。文件树把指向目录的符号链接也当目的地，所以再按真实路径比一次；
+/// `src` 本身是符号链接时挪动、复制的是链接本身，只按字面路径比。
+fn inside(src: &Path, dir: &Path) -> bool {
+    if dir.starts_with(src) {
+        return true;
+    }
+    if fs::symlink_metadata(src).is_ok_and(|meta| meta.is_symlink()) {
+        return false;
+    }
+    match (src.canonicalize(), dir.canonicalize()) {
+        (Ok(src), Ok(dir)) => dir.starts_with(src),
+        _ => false,
+    }
 }
 
 /// `dir` 里还没被占用的名字：`name` 本身，或者「名字 copy」「名字 copy 2」……
@@ -286,5 +301,25 @@ mod tests {
         assert_eq!(fs::read_to_string(copy.join("e/f")).unwrap(), "y");
         assert!(matches!(copy_into(&dir, &dir.join("e")), Err(OpError::IntoItself)));
         assert!(matches!(copy_into(&dir, &dir), Err(OpError::IntoItself)));
+    }
+
+    /// 经符号链接指进自己下面的目录也算放进自己，挪动、复制都拦；源本身是符号链接时照旧只动链接。
+    #[cfg(unix)]
+    #[test]
+    fn refuses_targets_inside_the_source_through_symlinks() {
+        let tmp = TempDir::new("symlink-into");
+        let src = tmp.0.join("src");
+        fs::create_dir_all(src.join("inner")).unwrap();
+        let alias = tmp.0.join("alias");
+        std::os::unix::fs::symlink(src.join("inner"), &alias).unwrap();
+        assert!(matches!(copy_into(&src, &alias), Err(OpError::IntoItself)));
+        assert!(matches!(move_into(&src, &alias), Err(OpError::IntoItself)));
+        assert!(!src.join("inner/src").exists());
+
+        let link = tmp.0.join("link");
+        std::os::unix::fs::symlink(&src, &link).unwrap();
+        let copy = copy_into(&link, &src.join("inner")).unwrap();
+        assert!(fs::symlink_metadata(&copy).unwrap().is_symlink());
+        assert_eq!(move_into(&link, &src).unwrap(), src.join("link"));
     }
 }
