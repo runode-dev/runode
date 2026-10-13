@@ -137,6 +137,8 @@ impl WindowView {
                 self.save(cx);
                 cx.notify();
             }
+            // 状态栏是缓存的 `Slot`，只跟着窗口的通知重画。
+            ActionsEvent::PinnedRunsChanged => cx.notify(),
             ActionsEvent::OpenFile(path) => self.open_preview(path, true, cx),
             ActionsEvent::LayoutChanged => self.save(cx),
             ActionsEvent::StartResize(si) => {

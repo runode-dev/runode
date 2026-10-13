@@ -106,6 +106,8 @@ pub enum ActionsEvent {
     RunInTerminal { command: String, refetch: Option<Refetch> },
     /// 固定到状态栏上的工作流变了，app 存下来，下次照样交回 `Input::pinned`。
     PinsChanged(Vec<PinnedWorkflow>),
+    /// 固定的工作流读到了新的运行，`pinned_items` 变了：app 的状态栏不跟着页重画，要自己重画。
+    PinnedRunsChanged,
     /// 在预览栏里打开工作流的文件。
     OpenFile(PathBuf),
     /// 三段的高度变了（双击分隔线恢复），app 存下来。
@@ -282,8 +284,13 @@ impl ActionsPanel {
                 page.loading.remove(&query);
                 page.fetched.insert(query.clone(), Instant::now());
                 if page.data.get(&query) != Some(&result) {
+                    let pinned =
+                        matches!(query, Query::WorkflowRuns(id) if page.input.pinned.iter().any(|pin| pin.id == id));
                     page.data.insert(query, result);
                     cx.notify();
+                    if pinned {
+                        cx.emit(ActionsEvent::PinnedRunsChanged);
+                    }
                 }
             })
             .ok();
