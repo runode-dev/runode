@@ -11,7 +11,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use crate::{FileDiff, FileStatus, Stash, find_repo, git, git_command};
+use crate::{FileDiff, FileStatus, Stash, UntrackedCache, find_repo, git, git_command};
 
 /// 一条写仓库的 git 命令最多跑这么久，到时杀掉：推送、拉取要联网，给得长些；等的是 ssh 问口令、
 /// 确认主机指纹或者 gpg 等着输密码这种永远等不来的输入时，不让后台线程一直挂着。
@@ -285,7 +285,17 @@ impl Repo {
     /// 移出暂存区；其余的按暂存区里的样子恢复。已经暂存的改动不受影响；冲突的文件暂存区
     /// 里没有单一的版本，报 git 的错。一个文件失败不影响其余的，返回第一个错误。子模块那样的
     /// gitlink 跳过：工作区里的提交号要到子仓库里切，`git restore` 对它什么也不做。
+    /// `files` 是先前读到的，动手前重读一次：有哪个文件不在未暂存段里了或状态、原路径变了（比如问用户
+    /// 的时候在终端里暂存了），一个也不丢、报错，免得照旧状态删掉已经暂存的内容。
     pub fn discard(&self, files: &[FileDiff]) -> Result {
+        // shortcut: 重读整个仓库的状态和 diff，大仓库里丢一个文件也多读一遍；嫌慢了再改成只对这些路径跑 git status。
+        let now = crate::snapshot(&self.root, &mut UntrackedCache::default()).map(|s| s.unstaged).unwrap_or_default();
+        let same = |file: &FileDiff| {
+            now.iter().any(|n| n.path == file.path && n.status == file.status && n.old_path == file.old_path)
+        };
+        if let Some(file) = files.iter().find(|file| !file.gitlink && !same(file)) {
+            return Err(GitError::new(format!("{} 的状态变了，什么也没丢，看过最新的改动再来", file.path.display())));
+        }
         let mut results = Vec::new();
         let mut restore = Vec::new();
         let mut remove = Vec::new();

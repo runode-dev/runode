@@ -136,6 +136,20 @@ fn discards_unstaged_changes() {
     assert!(!repo.path().join("ita.txt").exists());
 }
 
+/// 读到以后文件在别处被暂存了：照旧状态会把它当未跟踪的删掉，所以一个也不丢。
+#[test]
+fn discard_refuses_stale_statuses() {
+    let repo = TestRepo::new("ops-discard-stale");
+    repo.commit_file("a.txt", "one\n", "init");
+    repo.write("a.txt", "two\n");
+    repo.write("new.txt", "n\n");
+    let stale = read(&repo).unstaged;
+    repo.git(&["add", "new.txt"]);
+    assert!(read(&repo).repo().discard(&stale).is_err());
+    assert_eq!(repo.status(), [" M a.txt", "A  new.txt"]);
+    assert_eq!(repo.read("new.txt"), "n\n");
+}
+
 #[test]
 fn discards_inside_nested_repositories() {
     let repo = TestRepo::new("ops-discard-nested");
