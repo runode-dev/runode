@@ -316,12 +316,14 @@ impl ActionsPanel {
         }
     }
 
-    /// 页上要重读的数据：上一帧树里用到的，加上等着登录的。显示登录说明时树没排，`shown` 可能是空的，
-    /// 等着登录的那几份（比如状态栏上固定的工作流读出来的）也要接着读，登好以后页才恢复得过来。
+    /// 页上要重读的数据：上一帧树里用到的，加上等着登录或找不到 gh 的。整页换成登录说明或装 gh 的说明时
+    /// 树没排，`shown` 可能是空的；这两种错只要缓存里还有一份（比如固定工作流取到一半摘了 pin）整页就一直
+    /// 是说明，所以都要接着读，登好、装好以后页才恢复得过来。
     fn actions_queries(&self) -> Vec<Query> {
-        let login = self.data.iter().filter(|(_, result)| matches!(result, Err(err) if err == gh::LOGIN));
+        let blank =
+            self.data.iter().filter(|(_, result)| matches!(result, Err(err) if err == gh::LOGIN || err == gh::MISSING));
         let mut queries: Vec<Query> = self.shown.iter().cloned().collect();
-        queries.extend(login.map(|(query, _)| query.clone()).filter(|query| !self.shown.contains(query)));
+        queries.extend(blank.map(|(query, _)| query.clone()).filter(|query| !self.shown.contains(query)));
         queries
     }
 
@@ -1368,5 +1370,18 @@ mod tests {
         page.set_input(input("/b"));
         page.set_input(input("/a"));
         assert_ne!(page.generation, first);
+    }
+
+    #[test]
+    fn hidden_queries_that_blank_the_page_are_retried() {
+        let mut page = ActionsPanel::default();
+        page.shown.insert(Query::Workflows);
+        // 摘掉 pin 以后不再显示的那份还留着找不到 gh 的错，页上一直是装 gh 的说明。
+        page.data.insert(Query::WorkflowRuns(1), Err(gh::MISSING.to_owned()));
+        page.data.insert(Query::WorkflowRuns(2), Err(gh::LOGIN.to_owned()));
+        page.data.insert(Query::WorkflowRuns(3), Err("HTTP 404".to_owned()));
+        let mut queries = page.actions_queries();
+        queries.sort_by_key(|query| format!("{query:?}"));
+        assert_eq!(queries, [Query::WorkflowRuns(1), Query::WorkflowRuns(2), Query::Workflows]);
     }
 }
