@@ -231,6 +231,33 @@ fn a_worktree_todo_runs_in_its_own_worktree() {
     assert!(git(&repo, &["branch", "--list", "runode/ship-it"]).contains("runode/ship-it"));
 }
 
+/// 任务的工作树被删了以后再开始，另开一个工作树，不在不存在的目录（PTY 会改在家目录）里跑 agent。
+#[test]
+fn a_removed_worktree_is_made_again() {
+    let (_host, dir, mut peer) = board("todo-worktree-gone");
+    let repo = dir.join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    git(&repo, &["init", "-q", "-b", "main"]);
+    git(&repo, &["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "init"]);
+
+    let out = dir.join("cwd.txt");
+    let agent = script(&dir, "agent", &format!("pwd > '{}'", out.display()));
+    let id = add(&mut peer, TodoSpec { worktree: true, ..spec("Gone", &repo, &agent) });
+    let session = start(&mut peer, &id);
+    let first = repo.join(".worktrees").join("gone");
+    wait_for_file(&out);
+    peer.send(&ClientMsg::Kill { id: session });
+    git(&repo, &["worktree", "remove", "--force", first.to_str().unwrap()]);
+    std::fs::remove_file(&out).unwrap();
+
+    start(&mut peer, &id);
+    // 旧分支 `runode/gone` 还在，新的换个名字。
+    let second = repo.join(".worktrees").join(format!("gone-{id}"));
+    assert_eq!(std::fs::canonicalize(wait_for_file(&out).trim()).unwrap(), std::fs::canonicalize(&second).unwrap());
+    let todo = list(&mut peer).remove(0);
+    assert_eq!(todo.worktree_dir.as_deref(), Some(second.as_path()));
+}
+
 /// 改、标完成、调先后、删，问过 `ListTodos` 的连接每次都收到 `TodosChanged`；不对的请求回 `Error`。
 #[test]
 fn edits_are_announced_and_checked() {

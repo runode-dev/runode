@@ -397,11 +397,14 @@ impl Shared {
 
     /// 给任务开会话、在提示符上跑 agent，记进库里；要工作树又还没有时先开一个。
     fn launch_todo(&self, todo: &Todo) -> Result<SessionId, String> {
-        let made = match &todo.worktree_dir {
+        // 记着的工作树被删了（Git 面板、`git worktree remove`）就当没有、另开一个：PTY 遇到不存在的目录
+        // 会悄悄改在家目录里开，agent 就带着任务在那里干活。旧分支上的提交留在旧分支上。
+        let kept = todo.worktree_dir.as_ref().filter(|root| root.is_dir());
+        let made = match kept {
             None if todo.spec.worktree => Some(add_worktree(todo)?),
             _ => None,
         };
-        let cwd = match made.as_ref().map(|(root, _)| root).or(todo.worktree_dir.as_ref()) {
+        let cwd = match made.as_ref().map(|(root, _)| root).or(kept) {
             Some(root) => in_worktree(root, &todo.spec.dir),
             None => todo.spec.dir.clone(),
         };
