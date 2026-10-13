@@ -1,14 +1,13 @@
 //! Git 面板底部的「图表」，单独一栏：标题一行可以收起，上沿的分隔线
 //! 拖动改变高度，展开时每行一个提交，左边画分支的线和点，右边是引用标签和说明首行，行尾淡色写着
 //! 多久以前。点提交展开它改的文件，点文件在预览栏里看它在这个提交里的 diff；右键可以复制提交号、
-//! 切到这个提交或者从它新建分支。多个仓库时显示最近点过的那块的仓库（`GitPanel::graph_repo`），
+//! 切到这个提交或者从它新建分支。多个仓库时显示最近点过的那块的仓库（`PanelState::graph_repo`），
 //! 仓库名写在标题上。
 //!
 //! 历史在后台读，只在图表展开着时读显示的那个仓库的；仓库的 `RepoInfo` 变了（提交、切分支、拉取、
 //! 储藏之后）或者点了刷新才重读，工作区里的文件变了不重读。lane 怎么排由
 //! `runode_git::graph_layout` 算好，这里只照着画。
 
-use crate::ui::theme::ActiveTheme as _;
 use std::{
     ops::Range,
     path::{Path, PathBuf},
@@ -22,29 +21,24 @@ use gpui::{
 };
 use runode_git::{self as git, Commit, DiffSide, GraphRow, Half, LaneColor, RefKind};
 use runode_shared_types::color::Rgb;
+use runode_ui::{
+    a11y::PressDown,
+    base_name,
+    file_icons::{file_icon, folder_icon},
+    font_size::{self, FontSize, scaled},
+    hsla,
+    icons::{ARROW_DOWN_ICON, REFRESH_ICON},
+    menu::{MenuHost as _, MenuItem},
+    panel::{DIVIDER_GRAB_WIDTH, TITLEBAR_HEIGHT, added_label, removed_label},
+    theme::{ADDED, ActiveTheme as _, MODIFIED, REMOVED, RENAMED},
+    tooltip::tooltip,
+};
 
 use super::{
-    PressDown,
-    list::{ROW_HEIGHT, a11y_open_diff, chevron, file_description, status_letter},
-    repo_name,
+    GitPanel, GitPanelEvent,
+    list::{Diff, ROW_HEIGHT, a11y_open_diff, chevron, file_description, status_letter},
+    repo_id, repo_name,
     rows::{Busy, CommitChanges, CommitNote, GRAPH_PAGE, Graph, GraphNote},
-};
-use crate::ui::menu::MenuHost as _;
-use crate::{
-    assets::{ARROW_DOWN_ICON, REFRESH_ICON},
-    ui::{
-        file_icons::{file_icon, folder_icon},
-        font_size::{self, FontSize, scaled},
-        hsla,
-        tooltip::tooltip,
-    },
-    window::{
-        DIVIDER_GRAB_WIDTH, Divider, TITLEBAR_HEIGHT, WindowView,
-        files::MenuItem,
-        model::base_name,
-        preview::DiffTarget,
-        project::{ADDED, MODIFIED, REMOVED, RENAMED, added_label, removed_label},
-    },
 };
 
 /// HEAD 往下那条 lane 用蓝色，和 HEAD 的标签同色；HEAD 还没推上去时，从推上去的地方往下换成紫色，
@@ -115,17 +109,16 @@ fn lane_geometry(lanes: usize) -> (f32, f32) {
     (lane, (lane * lanes).min(MAX_GRAPH_WIDTH))
 }
 
-impl WindowView {
+impl GitPanel {
     /// 图表展开着、显示的仓库还没读过或者变了时，在后台读一遍。
-    pub(super) fn sync_graphs(&mut self, cx: &mut Context<Self>) {
-        if self.git_graph_collapsed {
+    pub(crate) fn sync_graphs(&mut self, cx: &mut Context<Self>) {
+        if self.graph_collapsed {
             return;
         }
-        let project = &self.workspace().project;
-        let Some(git) = project.git.as_ref() else {
+        let panel = self.state();
+        let Some(git) = panel.git.as_ref() else {
             return;
         };
-        let panel = &project.git_panel;
         let Some(repo) = git.get(panel.graph_repo(git)) else {
             return;
         };
@@ -137,9 +130,9 @@ impl WindowView {
 
     /// 面板底部的图表：标题一行，点了收起展开；展开时下面是提交的列表，高度由标题上沿的分隔线
     /// 拖动，双击分隔线恢复默认高度。`room` 是面板标题以下的高度。
-    pub(super) fn render_graph_pane(&self, git: &git::Repos, room: f32, cx: &mut Context<Self>) -> Div {
-        let panel = &self.workspace().project.git_panel;
-        let open = !self.git_graph_collapsed;
+    pub(crate) fn render_graph_pane(&self, git: &git::Repos, room: f32, cx: &mut Context<Self>) -> Div {
+        let panel = self.state();
+        let open = !self.graph_collapsed;
         let fg_hsla = cx.theme().foreground;
         let repo = git.get(panel.graph_repo(git));
         let name = repo.filter(|_| panel.multi(git)).map(repo_name);
@@ -189,8 +182,8 @@ impl WindowView {
                 ))
             })
             .on_press_down(cx, |this, _, cx| {
-                this.git_graph_collapsed = !this.git_graph_collapsed;
-                this.save(cx);
+                this.graph_collapsed = !this.graph_collapsed;
+                cx.emit(GitPanelEvent::OptionsChanged);
                 cx.notify();
             });
         let pane = div().relative().flex_none().w_full().flex().flex_col().child(header);
@@ -219,29 +212,29 @@ impl WindowView {
                 cx.listener(|this, event: &MouseDownEvent, _, cx| {
                     cx.stop_propagation();
                     if event.click_count >= 2 {
-                        this.git_graph_height = None;
-                        this.save(cx);
+                        this.graph_height = None;
+                        cx.emit(GitPanelEvent::OptionsChanged);
                     } else {
-                        this.dragging_divider = Some(Divider::GitGraph);
+                        cx.emit(GitPanelEvent::StartGraphResize);
                     }
                     cx.notify();
                 }),
             );
-        pane.h(px(graph_height(self.git_graph_height, room))).child(list).child(handle)
+        pane.h(px(graph_height(self.graph_height, room))).child(list).child(handle)
     }
 
-    /// 拖动图表上沿的分隔线，上沿跟到窗口里的纵坐标 `y`；面板从窗口顶上一直到底。
-    pub(in crate::window) fn resize_git_graph(&mut self, y: f32, viewport: f32) {
-        self.git_graph_height = Some(graph_height(Some(viewport - y), viewport - TITLEBAR_HEIGHT));
+    /// 拖动图表上沿的分隔线，上沿跟到窗口里的纵坐标 `y`；`viewport` 是面板底边在窗口里的纵坐标，面板从窗口
+    /// 顶上一直到它。app 跟着鼠标调，调完让页重画。
+    pub fn resize_graph(&mut self, y: f32, viewport: f32) {
+        self.graph_height = Some(graph_height(Some(viewport - y), viewport - TITLEBAR_HEIGHT));
     }
 
     /// 图表的列表里看得见的那些行。
     fn render_graph_rows(&self, range: Range<usize>, cx: &mut Context<Self>) -> Vec<AnyElement> {
-        let project = &self.workspace().project;
-        let Some(git) = &project.git else {
+        let panel = self.state();
+        let Some(git) = &panel.git else {
             return Vec::new();
         };
-        let panel = &project.git_panel;
         range
             .filter_map(|ix| panel.graph_rows.get(ix).map(|row| (ix, *row)))
             .map(|(ix, row)| self.render_git_row(ix, row, git, cx))
@@ -250,30 +243,29 @@ impl WindowView {
 
     /// 在后台读 `repo` 的历史，读完换上、重排行。
     fn load_history(&mut self, repo: git::Repo, info: git::RepoInfo, cx: &mut Context<Self>) {
-        let id = self.workspace().id;
+        let ws = self.ws;
         let root = repo.root.clone();
-        let graph = &mut self.workspace_mut().project.git_panel.repo_mut(&root).graph;
+        let panel = self.state_mut();
+        let graph = &mut panel.repo_mut(&root).graph;
         graph.loading = true;
         graph.stale = false;
         let limit = graph.limit();
         // 「加载更多」那一行换成「正在读取」。
-        let project = &mut self.workspace_mut().project;
-        project.git_panel.rebuild(project.git.as_deref());
+        panel.relayout();
         let job = cx.background_spawn(async move { repo.history(limit) });
         cx.spawn(async move |this, cx| {
             let history = job.await;
             this.update(cx, |this, cx| {
-                let Some(workspace) = this.workspaces.iter_mut().find(|workspace| workspace.id == id) else {
+                let Some(panel) = this.workspaces.get_mut(&ws) else {
                     return;
                 };
-                let project = &mut workspace.project;
-                let graph = &mut project.git_panel.repo_mut(&root).graph;
+                let graph = &mut panel.repo_mut(&root).graph;
                 graph.loading = false;
                 graph.read_for = Some(info);
                 graph.lanes =
                     history.as_ref().map_or(0, |history| history.rows.iter().map(|row| row.width).max().unwrap_or(0));
                 graph.history = Some(history.map_err(|err| err.message));
-                project.git_panel.rebuild(project.git.as_deref());
+                panel.relayout();
                 cx.notify();
             })
             .ok();
@@ -281,37 +273,15 @@ impl WindowView {
         .detach();
     }
 
-    /// 监听到 `paths` 变了：落在哪个仓库的引用上（新建、删除、移动分支或 tag，HEAD 变了），那个
-    /// 仓库读过的图表就要重读，展开着时下次显示就读。`RepoInfo` 看不出别的分支和 tag 的变化。
-    pub(in crate::window) fn graph_refs_changed(&mut self, paths: &[PathBuf], cx: &mut Context<Self>) {
-        let project = &mut self.workspace_mut().project;
-        let Some(git) = &project.git else {
-            return;
-        };
-        let mut marked = false;
-        for repo in git.iter() {
-            if let Some(state) = project.git_panel.repos.get_mut(&repo.root)
-                && state.graph.history.is_some()
-                && paths.iter().any(|path| git::refs_changed(&repo.git_dir, path))
-            {
-                state.graph.stale = true;
-                marked = true;
-            }
-        }
-        if marked {
-            cx.notify();
-        }
-    }
-
     /// 根目录是 `root` 的仓库的图表下次显示时重读。
-    pub(super) fn refresh_graph(&mut self, root: &Path, cx: &mut Context<Self>) {
-        self.workspace_mut().project.git_panel.repo_mut(root).graph.stale = true;
+    pub(crate) fn refresh_graph(&mut self, root: &Path, cx: &mut Context<Self>) {
+        self.state_mut().repo_mut(root).graph.stale = true;
         cx.notify();
     }
 
     /// 刷新时所有仓库的图表都重读。
-    pub(super) fn refresh_graphs(&mut self) {
-        for repo in self.workspace_mut().project.git_panel.repos.values_mut() {
+    pub(crate) fn refresh_graphs(&mut self) {
+        for repo in self.state_mut().repos.values_mut() {
             repo.graph.stale = true;
         }
     }
@@ -319,8 +289,7 @@ impl WindowView {
     /// 「加载更多」：多读一页。
     /// 读的期间再点不算，免得一下子叠上好几页。
     fn load_more_commits(&mut self, root: &Path, cx: &mut Context<Self>) {
-        let project = &mut self.workspace_mut().project;
-        let graph = &mut project.git_panel.repo_mut(root).graph;
+        let graph = &mut self.state_mut().repo_mut(root).graph;
         if graph.loading {
             return;
         }
@@ -332,17 +301,18 @@ impl WindowView {
 
     /// 展开或收起第 `ci` 个提交；展开时在后台读它改了什么。
     fn toggle_commit(&mut self, root: &Path, ci: usize, cx: &mut Context<Self>) {
-        let id = self.workspace().id;
-        let project = &mut self.workspace_mut().project;
-        let Some(commit) = project.git_panel.repos.get(root).and_then(|repo| repo.graph.commit(ci)).cloned() else {
+        let ws = self.ws;
+        let panel = self.state_mut();
+        let Some(commit) = panel.repos.get(root).and_then(|repo| repo.graph.commit(ci)).cloned() else {
             return;
         };
+        let git = panel.git.clone();
         let Some(repo) =
-            project.git.as_ref().and_then(|git| git.iter().find(|repo| repo.root == root)).map(git::Snapshot::repo)
+            git.as_ref().and_then(|git| git.iter().find(|repo| repo.root == root)).map(git::Snapshot::repo)
         else {
             return;
         };
-        let load = project.git_panel.toggle_commit(root, &commit.id, project.git.as_deref());
+        let load = panel.toggle_commit(root, &commit.id, git.as_deref());
         cx.notify();
         if !load {
             return;
@@ -355,11 +325,10 @@ impl WindowView {
         cx.spawn(async move |this, cx| {
             let (commit, changes) = job.await;
             this.update(cx, |this, cx| {
-                let Some(workspace) = this.workspaces.iter_mut().find(|workspace| workspace.id == id) else {
+                let Some(panel) = this.workspaces.get_mut(&ws) else {
                     return;
                 };
-                let project = &mut workspace.project;
-                let graph = &mut project.git_panel.repo_mut(&root).graph;
+                let graph = &mut panel.repo_mut(&root).graph;
                 // 读的时候又收起来了就不要了。
                 if !graph.expanded.contains(&commit) {
                     return;
@@ -369,7 +338,7 @@ impl WindowView {
                     Err(_) => CommitChanges::Failed,
                 };
                 graph.changes.insert(commit, changes);
-                project.git_panel.rebuild(project.git.as_deref());
+                panel.relayout();
                 cx.notify();
             })
             .ok();
@@ -378,7 +347,7 @@ impl WindowView {
     }
 
     /// 提交的右键菜单：复制提交号、切到这个提交、从这里新建分支。
-    pub(super) fn git_commit_action(&mut self, action: &GitCommitAction, window: &mut Window, cx: &mut Context<Self>) {
+    pub(crate) fn git_commit_action(&mut self, action: &GitCommitAction, window: &mut Window, cx: &mut Context<Self>) {
         let root = action.repo.clone();
         let id = action.id.clone();
         match action.op {
@@ -409,7 +378,9 @@ impl WindowView {
                 })
                 .detach();
             }
-            CommitOp::CreateBranch => self.open_branch_picker(&root, true, Some(id), window, cx),
+            CommitOp::CreateBranch => {
+                cx.emit(GitPanelEvent::OpenBranchPicker { root, create_only: true, start: Some(id) });
+            }
         }
     }
 
@@ -420,7 +391,7 @@ impl WindowView {
         id: String,
         cx: &mut Context<Self>,
     ) {
-        let enabled = self.workspace().project.git_panel.busy(&root).is_none();
+        let enabled = self.state().busy(&root).is_none();
         let item = |key: &str, op, enabled| {
             let action = GitCommitAction { repo: root.clone(), id: id.clone(), op };
             Some(MenuItem::new(rust_i18n::t!(key), Box::new(action), enabled, cx))
@@ -431,13 +402,13 @@ impl WindowView {
             item("git.graph.checkout", CommitOp::Checkout, enabled),
             item("git.graph.create_branch", CommitOp::CreateBranch, enabled),
         ];
-        let target = self.git_focus.clone();
+        let target = self.focus.clone();
         self.open_context_menu(position, items, target, cx);
     }
 
     /// 根目录是 `root` 的仓库的图表状态。
     fn graph(&self, root: &Path) -> Option<&Graph> {
-        self.workspace().project.git_panel.repos.get(root).map(|repo| &repo.graph)
+        self.state().repos.get(root).map(|repo| &repo.graph)
     }
 
     /// 展开的提交下面那几行左边的线：第 `ci` 个提交往下走的 lane 接着画实线穿过去，下面的提交才
@@ -450,7 +421,7 @@ impl WindowView {
     }
 
     /// 图表里的一个提交：左边的线和点，引用标签，说明首行，行尾多久以前。
-    pub(super) fn render_commit(&self, repo: &git::Snapshot, ci: usize, cx: &mut Context<Self>) -> AnyElement {
+    pub(crate) fn render_commit(&self, repo: &git::Snapshot, ci: usize, cx: &mut Context<Self>) -> AnyElement {
         let Some(graph) = self.graph(&repo.root) else {
             return div().into_any_element();
         };
@@ -472,7 +443,7 @@ impl WindowView {
         let id = commit.id.clone();
         // 下面估的宽度都是基准字号下的点数，面板和图的宽度先折成同样的单位再比。
         let scale = font_size::scale(cx);
-        let fit = fit_commit_row(self.workspace().project.git_panel.width / scale, width / scale, commit);
+        let fit = fit_commit_row(self.state().width / scale, width / scale, commit);
         let labels = ref_labels(commit, fit.labels, cx);
         self.git_row(SharedString::from(format!("git-commit-{id}")), 0., cx)
             .role(Role::TreeItem)
@@ -518,7 +489,7 @@ impl WindowView {
 
     /// 展开的提交下面它改的一个文件：状态字母、文件名、所在目录和加减了多少行。
     #[allow(clippy::too_many_arguments)]
-    pub(super) fn render_commit_file(
+    pub(crate) fn render_commit_file(
         &self,
         ix: usize,
         repo: &git::Snapshot,
@@ -533,7 +504,7 @@ impl WindowView {
             return div().into_any_element();
         };
         let (_, width) = lane_geometry(graph.lanes);
-        let panel = &self.workspace().project.git_panel;
+        let panel = &self.state();
         let depth = panel.graph_depth.get(ix).copied().unwrap_or(0) as f32;
         let tree = panel.tree;
         let name = base_name(&file.path);
@@ -545,8 +516,7 @@ impl WindowView {
         };
         let dim = cx.theme().foreground.opacity(0.5);
         let side = DiffSide::Commit { id: commit.id.clone(), parent: commit.parents.first().cloned() };
-        let target =
-            DiffTarget { root: repo.root.clone(), rel: file.path.clone(), old_rel: file.old_path.clone(), side };
+        let target = Diff { root: repo.root.clone(), rel: file.path.clone(), old_rel: file.old_path.clone(), side };
         let open = target.clone();
         let row_id = format!("git-commit-file-{}-{}", commit.id, file.path.display());
         self.git_row(SharedString::from(row_id), 0., cx)
@@ -566,9 +536,9 @@ impl WindowView {
             .child(status_letter(file.status))
             .on_mouse_down(
                 MouseButton::Left,
-                cx.listener(move |this, event: &MouseDownEvent, _, cx| {
+                cx.listener(move |_, event: &MouseDownEvent, _, cx| {
                     cx.stop_propagation();
-                    this.click_diff(target.clone(), event.click_count, cx);
+                    cx.emit(target.open(event.click_count));
                 }),
             )
             .on_a11y_action(AccessibleAction::Click, a11y_open_diff(open, cx))
@@ -576,8 +546,8 @@ impl WindowView {
     }
 
     /// 以树形式查看时展开的提交下面的一个目录，点了展开收起。
-    pub(super) fn render_commit_dir(&self, ix: usize, di: usize, ci: usize, cx: &mut Context<Self>) -> AnyElement {
-        let panel = &self.workspace().project.git_panel;
+    pub(crate) fn render_commit_dir(&self, ix: usize, di: usize, ci: usize, cx: &mut Context<Self>) -> AnyElement {
+        let panel = &self.state();
         let Some(dir) = panel.dirs.get(di) else {
             return div().into_any_element();
         };
@@ -598,8 +568,9 @@ impl WindowView {
             .child(img(folder_icon(&last, dir.expanded)).flex_none().size(px(14.)))
             .child(div().flex_1().min_w_0().truncate().child(dir.name.clone()))
             .on_press_down(cx, move |this, _, cx| {
-                let project = &mut this.workspace_mut().project;
-                project.git_panel.toggle_dir(di, project.git.as_deref());
+                let panel = this.state_mut();
+                let git = panel.git.clone();
+                panel.toggle_dir(di, git.as_deref());
                 cx.notify();
             })
             .into_any_element()
@@ -608,7 +579,7 @@ impl WindowView {
     /// 图表里不是提交的那一行。读到了提交以后的「加载更多」和「正在读取」接在最后一个提交下面：
     /// 还往下走的 lane 画成虚线，文字和说明首行对齐；「加载更多」是带向下箭头的链接，点了多读
     /// 一页。还没有提交时的说明缩进写在开头。
-    pub(super) fn render_graph_note(
+    pub(crate) fn render_graph_note(
         &self,
         repo: &git::Snapshot,
         note: GraphNote,
@@ -626,7 +597,7 @@ impl WindowView {
             .map(|row| (row, lane_geometry(graph.map_or(0, |graph| graph.lanes))));
         // 「加载更多」报成按钮，其余是一句说明。
         let row = self
-            .git_row(super::repo_id(&format!("git-graph-note-{note:?}"), &repo.root), 0., cx)
+            .git_row(repo_id(&format!("git-graph-note-{note:?}"), &repo.root), 0., cx)
             .role(if note == GraphNote::More { Role::Button } else { Role::Label })
             .aria_label(text.clone().into_owned());
         let Some((last, (lane, width))) = last else {
@@ -669,7 +640,7 @@ impl WindowView {
     }
 
     /// 展开的提交下面不列文件时的说明。
-    pub(super) fn render_commit_note(
+    pub(crate) fn render_commit_note(
         &self,
         repo: &git::Snapshot,
         ci: usize,

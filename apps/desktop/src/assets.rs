@@ -1,7 +1,7 @@
 //! 编进二进制的界面资源：`svg()`、`img()` 这类元素按路径向 GPUI 要文件，GPUI 再来这里取。
 //! 文件树的彩色类型图标和 agent 的 logo 数量多，单独列在 `file_icons::FILES` 和
-//! `window::AGENT_LOGO_FILES`，`runode_ui` 的部件自己画的图标在 `icons::FILES`，GitHub Actions 页、预览栏和
-//! 文件树各自的图标在它们的 crate 里，这里一并查。
+//! `window::AGENT_LOGO_FILES`，`runode_ui` 的部件自己画的图标在 `icons::FILES`，GitHub Actions 页、预览栏、
+//! 文件树和 Git 面板各自的图标在它们的 crate 里，这里一并查。
 
 use std::borrow::Cow;
 
@@ -14,10 +14,9 @@ use crate::{
 
 /// 几处共用的图标在 `runode_ui` 里：展开、收起的箭头，行尾和菜单常用的按钮，和预览栏、Git 面板共用的那些。
 pub use crate::ui::icons::{
-    ARROW_DOWN_ICON, BRANCH_ICON, CHECK_ICON, CHEVRON_DOWN_ICON, CHEVRON_RIGHT_ICON, CLOSE_ICON, DISCARD_ICON,
-    FOLDER_OPEN_ICON, GIT_ICON, GLOBE_ICON, MAXIMIZE_ICON, MINIMIZE_ICON, MINUS_ICON, MORE_ICON, OPEN_FILE_ICON,
-    PENCIL_ICON, PLAY_ICON, PLUS_ICON, REFRESH_ICON, SPARKLE_ICON, SYNC_ICON, TERMINAL_ICON, TRASH_ICON,
-    VIEW_LIST_ICON, VIEW_TREE_ICON,
+    BRANCH_ICON, CHECK_ICON, CHEVRON_DOWN_ICON, CHEVRON_RIGHT_ICON, CLOSE_ICON, FOLDER_OPEN_ICON, GIT_ICON, GLOBE_ICON,
+    MAXIMIZE_ICON, MINIMIZE_ICON, MINUS_ICON, PENCIL_ICON, PLAY_ICON, PLUS_ICON, REFRESH_ICON, SPARKLE_ICON,
+    TERMINAL_ICON, TRASH_ICON,
 };
 /// GitHub Actions 页的标签图标，图标本身跟着页面在 `runode_github_actions` 里。
 pub use runode_github_actions::WORKFLOW_ICON as ACTIONS_WORKFLOW_ICON;
@@ -31,9 +30,6 @@ icons! {
     pub PANEL_RIGHT_ICON = "panel-right",
     /// 收在终端区底部的分屏上展开它的箭头。
     pub CHEVRON_UP_ICON = "chevron-up",
-    /// Git 面板里储藏的应用和弹出（分支、更多、取消暂存、放弃改动和提交的在 `runode_ui`）。
-    pub STASH_APPLY_ICON = "stash-apply",
-    pub STASH_POP_ICON = "stash-pop",
     /// 卡片样式下分屏标题条右边向右、向下分屏的按钮（关闭、放大、还原的在 `runode_ui`）。
     pub SPLIT_RIGHT_ICON = "split-right",
     pub SPLIT_DOWN_ICON = "split-down",
@@ -65,6 +61,7 @@ fn all_files() -> impl Iterator<Item = &'static (&'static str, &'static [u8])> {
         .chain(runode_github_actions::FILES)
         .chain(runode_preview_panel::FILES)
         .chain(runode_file_tree::FILES)
+        .chain(runode_git_panel::FILES)
         .chain(file_icons::FILES)
         .chain(window::AGENT_LOGO_FILES)
 }

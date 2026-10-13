@@ -4734,6 +4734,7 @@ dependencies = [
  "runode-config",
  "runode-file-tree",
  "runode-git",
+ "runode-git-panel",
  "runode-github-actions",
  "runode-host",
  "runode-paths",
@@ -4845,6 +4846,17 @@ dependencies = [
 [[package]]
 name = "runode-git"
 version = "0.1.8"
+
+[[package]]
+name = "runode-git-panel"
+version = "0.1.8"
+dependencies = [
+ "gpui-pre",
+ "runode-git",
+ "runode-shared-types",
+ "runode-ui",
+ "rust-i18n",
+]
 
 [[package]]
 name = "runode-github-actions"

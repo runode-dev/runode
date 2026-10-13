@@ -1,5 +1,6 @@
 //! 一个 workspace 的项目状态：读的是哪个目录、git 状态、后台读的调度，以及换上后台读到的结果。文件树
-//! 自己的状态（展开的目录、选中的行）在 `runode_file_tree` 里。
+//! 自己的状态（展开的目录、选中的行）在 `runode_file_tree` 里，Git 面板的（排好的行、提交说明框）在
+//! `runode_git_panel` 里。
 
 use std::{
     collections::HashSet,
@@ -30,8 +31,6 @@ pub(in crate::window) struct Project {
     /// 上次问 `in_repo` 的目录和时刻，以及后台是不是正在问。
     pub(super) probed: Option<(PathBuf, Instant)>,
     pub(super) probing: bool,
-    /// Git 面板排成的行、展开收起和提交说明。
-    pub git_panel: super::super::git_panel::GitPanel,
     /// 后台正在读，读完之前不再发起。
     pub(super) refreshing: bool,
     /// 监听到了改动还没重读，或者读的时候又有了改动。
@@ -68,7 +67,6 @@ impl Workspace {
         }
         if project.git.as_deref() != scan.git.as_ref() {
             project.git = scan.git.map(Arc::new);
-            project.git_panel.rebuild(project.git.as_deref());
             changed = true;
         }
         let reveal = (project.dir.as_ref() != Some(&scan.dir)).then(|| scan.dir.clone());

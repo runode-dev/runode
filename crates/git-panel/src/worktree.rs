@@ -6,9 +6,12 @@ use std::path::{Path, PathBuf};
 use gpui::{Action, Context, Pixels, Point, PromptLevel, Window};
 use runode_git::{self as git, RepoKind};
 
-use super::rows::Busy;
-use crate::ui::menu::MenuHost as _;
-use crate::window::{WindowView, files::MenuItem, model::base_name};
+use runode_ui::{
+    base_name,
+    menu::{MenuHost as _, MenuItem},
+};
+
+use super::{GitPanel, GitPanelEvent, rows::Busy};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum WorktreeOp {
@@ -25,23 +28,23 @@ pub struct GitWorktreeAction {
     pub op: WorktreeOp,
 }
 
-impl WindowView {
+impl GitPanel {
     /// 根目录是 `root` 的那个其他工作树。
     fn worktree(&self, root: &Path) -> Option<&git::Snapshot> {
-        let git = self.workspace().project.git.as_ref()?;
+        let git = self.state().git.as_ref()?;
         git.worktrees.iter().find(|wt| wt.root == root && wt.kind == RepoKind::Worktree)
     }
 
     /// 根目录是 `root` 的仓库是不是另一个工作树。
-    pub(super) fn is_worktree(&self, root: &Path) -> bool {
+    pub(crate) fn is_worktree(&self, root: &Path) -> bool {
         self.worktree(root).is_some()
     }
 
     /// 工作树那几项菜单。主工作树删不了（终端在某个链接工作树里时它也作为其他工作树出现），不给
     /// 删除；主仓库有操作在跑时删除按不动。
-    pub(super) fn worktree_menu_items(&self, root: &Path, cx: &Context<Self>) -> Vec<Option<MenuItem>> {
-        let main = self.workspace().project.git.as_ref().map(|git| git.main.root.clone());
-        let enabled = main.is_some_and(|main| self.workspace().project.git_panel.busy(&main).is_none());
+    pub(crate) fn worktree_menu_items(&self, root: &Path, cx: &Context<Self>) -> Vec<Option<MenuItem>> {
+        let main = self.state().git.as_ref().map(|git| git.main.root.clone());
+        let enabled = main.is_some_and(|main| self.state().busy(&main).is_none());
         let removable = self.worktree(root).is_some_and(git::Snapshot::is_linked_worktree);
         let item = |key: &str, op, enabled| {
             Some(MenuItem::new(
@@ -62,13 +65,13 @@ impl WindowView {
     }
 
     /// 工作树块头的右键菜单。
-    pub(super) fn open_worktree_menu(&mut self, root: &Path, position: Point<Pixels>, cx: &mut Context<Self>) {
+    pub(crate) fn open_worktree_menu(&mut self, root: &Path, position: Point<Pixels>, cx: &mut Context<Self>) {
         let items = self.worktree_menu_items(root, cx);
-        let target = self.git_focus.clone();
+        let target = self.focus.clone();
         self.open_context_menu(position, items, target, cx);
     }
 
-    pub(super) fn git_worktree_action(
+    pub(crate) fn git_worktree_action(
         &mut self,
         action: &GitWorktreeAction,
         window: &mut Window,
@@ -76,11 +79,7 @@ impl WindowView {
     ) {
         let path = action.worktree.clone();
         match action.op {
-            WorktreeOp::OpenInNewTab => {
-                if let Some(view) = self.spawn_terminal(Some(&path), window, cx) {
-                    self.insert_tab(self.workspace().active + 1, view, window, cx);
-                }
-            }
+            WorktreeOp::OpenInNewTab => cx.emit(GitPanelEvent::OpenTerminal(path)),
             WorktreeOp::Reveal => cx.reveal_path(&path),
             WorktreeOp::Remove => self.remove_worktree(path, window, cx),
         }
@@ -89,7 +88,7 @@ impl WindowView {
     /// 删掉工作树，先问一下。有改动（含未跟踪的文件）时 git 不让删，说明这些改动会一起丢掉，
     /// 确认了才强制删。在主仓库上跑，主仓库那块写着忙。
     fn remove_worktree(&mut self, path: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(git) = self.workspace().project.git.as_ref() else {
+        let Some(git) = self.state().git.as_ref() else {
             return;
         };
         let Some(worktree) = git.worktrees.iter().find(|wt| wt.root == path) else {

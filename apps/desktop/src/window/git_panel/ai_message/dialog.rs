@@ -5,16 +5,16 @@
 use std::path::{Path, PathBuf};
 
 use gpui::{
-    Action, Context, Div, Entity, Focusable, FontWeight, Hsla, KeyDownEvent, MouseButton, Pixels, Point, Role,
+    Action, App, Context, Div, Entity, Focusable, FontWeight, Hsla, KeyDownEvent, MouseButton, Pixels, Point, Role,
     Stateful, Subscription, Window, div, prelude::*, px, svg,
 };
 
 use super::{
-    super::PressDown,
     DEFAULT_TEMPLATE, Recipe, VARIABLES,
     agents::{AGENTS, AgentSpec, CUSTOM_AGENT, agent},
     command_preview, save_recipe, saved_recipe, variable_preview,
 };
+use crate::ui::a11y::PressDown;
 use crate::ui::button::{Button, ButtonSize, ButtonVariant};
 use crate::ui::dialog::Dialog;
 use crate::ui::menu::MenuHost as _;
@@ -127,7 +127,7 @@ impl WindowView {
 
     fn close_commit_message_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.commit_message_dialog.take().is_some() {
-            window.focus(&self.git_focus.clone(), cx);
+            window.focus(&self.git_panel.focus_handle(cx), cx);
             cx.notify();
         }
     }
@@ -149,7 +149,7 @@ impl WindowView {
         let Some(dialog) = &self.commit_message_dialog else {
             return;
         };
-        if self.commit_message_blocker(&dialog.root).is_some() {
+        if self.commit_message_blocker(&dialog.root, cx).is_some() {
             return;
         }
         let (root, recipe) = (dialog.root.clone(), Self::dialog_recipe(dialog, cx));
@@ -233,12 +233,12 @@ impl WindowView {
     }
 
     /// 现在能不能生成：不能时是原因的翻译键（没有要提交的改动，或者仓库正忙）。
-    fn commit_message_blocker(&self, root: &Path) -> Option<&'static str> {
+    fn commit_message_blocker(&self, root: &Path, cx: &App) -> Option<&'static str> {
         let project = &self.workspace().project;
         let repo = project.git.as_ref().and_then(|git| git.iter().find(|repo| repo.root == root));
         if repo.is_none_or(|repo| repo.is_clean()) {
             Some("git.ai_message.nothing")
-        } else if project.git_panel.busy(root).is_some() {
+        } else if self.git_panel.read(cx).is_busy(root) {
             Some("git.ai_message.busy")
         } else {
             None
@@ -466,7 +466,7 @@ impl WindowView {
                 .text_color(color)
                 .child(text)
         });
-        let blocker = self.commit_message_blocker(&dialog.root);
+        let blocker = self.commit_message_blocker(&dialog.root, cx);
         let generate = Button::new("commit-message-generate", rust_i18n::t!("git.ai_message.generate"))
             .variant(ButtonVariant::Default)
             .icon(SPARKLE_ICON)

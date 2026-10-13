@@ -278,6 +278,7 @@ impl WindowView {
             WindowBounds::Fullscreen(bounds) => (WindowMode::Fullscreen, bounds),
         };
         let file_tree = self.file_tree.read(cx).options(cx);
+        let git = self.git_panel.read(cx).options();
         SavedWindow {
             bounds: SavedBounds {
                 display: self.display.clone(),
@@ -297,13 +298,13 @@ impl WindowView {
             preview_source: self.preview.read(cx).source(),
             show_ignored: file_tree.show_ignored,
             hide_dotfiles: !file_tree.show_dotfiles,
-            git_tree: self.git_tree,
-            git_hide_subs: !self.git_show_subs,
-            git_hide_worktrees: !self.git_show_worktrees,
+            git_tree: git.tree,
+            git_hide_subs: !git.show_subs,
+            git_hide_worktrees: !git.show_worktrees,
             file_search_tree: file_tree.search_tree,
             file_search_options: file_tree.search,
-            git_graph_collapsed: self.git_graph_collapsed,
-            git_graph_height: self.git_graph_height,
+            git_graph_collapsed: git.graph_collapsed,
+            git_graph_height: git.graph_height,
             github_actions_heights: self.github_actions.read(cx).heights(),
         }
     }
@@ -400,11 +401,14 @@ impl WindowView {
                 search: saved.file_search_options,
             };
             self.file_tree.update(cx, |tree, cx| tree.set_options(file_tree, cx));
-            self.git_tree = saved.git_tree;
-            self.git_show_subs = !saved.git_hide_subs;
-            self.git_show_worktrees = !saved.git_hide_worktrees;
-            self.git_graph_collapsed = saved.git_graph_collapsed;
-            self.git_graph_height = saved.git_graph_height;
+            let git = runode_git_panel::Options {
+                tree: saved.git_tree,
+                show_subs: !saved.git_hide_subs,
+                show_worktrees: !saved.git_hide_worktrees,
+                graph_collapsed: saved.git_graph_collapsed,
+                graph_height: saved.git_graph_height,
+            };
+            self.git_panel.update(cx, |panel, _| panel.set_options(git));
             self.github_actions.update(cx, |page, _| page.set_heights(saved.github_actions_heights));
             self.activate_workspace(active, window, cx);
         }

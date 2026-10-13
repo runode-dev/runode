@@ -72,9 +72,6 @@ pub(super) fn workspace_name(dir: &Path) -> String {
     root.file_name().map_or_else(|| dir.display().to_string(), |name| name.to_string_lossy().into_owned())
 }
 
-// 路径的最后一段在 `runode_ui`，预览栏也用；窗口里照旧从这里引。
-pub(super) use crate::ui::base_name;
-
 /// workspace 的标识，挪动位置后不变。
 pub(super) type WorkspaceId = u64;
 /// 上次看 PATH 里有没有某个命令行工具时的 PATH 和结果，见 `WindowView::tool_on_path`。
@@ -631,6 +628,7 @@ impl WindowView {
         let id = self.workspaces.remove(ix).id;
         self.forget_previews(id, cx);
         self.file_tree.update(cx, |tree, _| tree.forget_workspace(id));
+        self.git_panel.update(cx, |panel, _| panel.forget_workspace(id));
         let active =
             if ix < self.active || self.active == self.workspaces.len() { self.active - 1 } else { self.active };
         self.activate_workspace(active, window, cx);

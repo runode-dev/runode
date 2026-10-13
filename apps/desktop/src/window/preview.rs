@@ -8,17 +8,16 @@ use std::path::{Path, PathBuf};
 
 use gpui::{AnyElement, App, Context, Empty, Entity, Focusable as _, IntoElement as _, Window};
 use runode_config::PreviewClick;
-use runode_git::{self as git, HunkAction};
 use runode_preview_panel::{Input, PreviewEvent, PreviewPanel};
 
 pub(in crate::window) use runode_preview_panel::DiffTarget;
 
-use super::{WindowView, cards, git_panel::Busy, model::WorkspaceId, project::PANEL_TOGGLES_INSET, status_bar};
+use super::{WindowView, cards, model::WorkspaceId, project::PANEL_TOGGLES_INSET, status_bar};
 use crate::config::AppConfig;
 
 impl WindowView {
     /// 对当前 workspace 的预览栏做 `f`：先告诉它是哪个 workspace，交给它这个 workspace 最近读到的 git 状态。
-    fn with_preview<R>(
+    pub(super) fn with_preview<R>(
         &mut self,
         cx: &mut Context<Self>,
         f: impl FnOnce(&mut PreviewPanel, &mut Context<PreviewPanel>) -> R,
@@ -161,14 +160,9 @@ impl WindowView {
             PreviewEvent::Reveal(path) => self.with_file_tree(cx, |tree, cx| tree.reveal_file(path, cx)),
             PreviewEvent::OptionsChanged => self.save(cx),
             PreviewEvent::InsertPath { path, line } => self.insert_path(path, Some(*line), window, cx),
+            // 经 Git 面板跑，和面板上的操作一起按仓库排队；做完它发 `GitPanelEvent::HunkApplied`，再重读 diff。
             PreviewEvent::ApplyHunk { root, file, hunk, action } => {
-                let busy = if *action == HunkAction::Discard { Busy::Discard } else { Busy::Stage };
-                let (file, hunk, action) = (file.clone(), *hunk, *action);
-                // 做完马上重读，不等扫描，接着点下一块时块还对得上。
-                let op = move |repo: &git::Repo| repo.apply_hunk(&file, hunk, action);
-                self.run_git(root, busy, window, cx, op, |this, (), _, cx| {
-                    this.with_preview(cx, |panel, cx| panel.reload_diff(cx));
-                });
+                self.with_git_panel(cx, |panel, cx| panel.apply_hunk(root, file.clone(), *hunk, *action, window, cx));
             }
         }
     }

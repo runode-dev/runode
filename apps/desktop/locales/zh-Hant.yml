@@ -184,7 +184,6 @@ background:
   end_title: 終止所有背景工作階段？
   end_detail: 其中還有 %{count} 個 agent 在執行，會一併終止。
 panel:
-  no_changes: 沒有未提交的改動
   not_repo: 不在 git 倉庫裡
 paste:
   title: 貼上的內容可能會直接執行指令
@@ -221,9 +220,6 @@ tasks:
   shortcut_taken: "「%{what}」現在用著這個鍵，儲存後改成執行這條命令。"
   shortcut_not_applied: "命令存好了，快捷鍵沒改成：設定裡還有別的 keybind 行蓋著它，可能在 config-file 引入的檔案裡，要到設定裡改那一行。"
   shortcut_kept_elsewhere: "命令存好了，快捷鍵沒跟著改名：別處還有同名的命令用著這個鍵。要把它改給這條命令，再儲存一次。"
-files:
-  reveal: 在 Finder 中顯示
-  insert_path: 把路徑打進終端機
 tooltip:
   show_sidebar: 顯示側欄
   hide_sidebar: 隱藏側欄
@@ -241,20 +237,7 @@ tooltip:
   collapse_split: 摺疊分割畫面
   expand_split: 展開分割畫面
 git:
-  title: 原始碼控制
-  refresh: 重新整理
-  view_as_tree: 以樹狀檢視
-  view_as_list: 以清單檢視
-  show_submodules: 顯示子模組和巢狀倉庫
-  show_worktrees: 顯示其他工作樹
-  ok: 好
-  cancel: 取消
-  failed: Git 操作沒有完成
-  more: 更多操作
-  view_options: 檢視選項
   ai_message:
-    menu: 產生提交說明…
-    button: 用 AI 產生提交說明
     title: 產生提交說明
     close: 關閉
     subtitle: 選這次用的 agent 和提示詞範本。
@@ -287,105 +270,8 @@ git:
     missing: "找不到 %{binary} 指令。請先安裝，或確認它在 shell 的 PATH 裡。"
     timeout: "%{binary} 太久沒有結果，已經停止。"
     empty: agent 傳回的提交說明是空的。
-  busy:
-    stage: 正在暫存…
-    discard: 正在捨棄變更…
-    commit: 正在提交…
-    message: 正在產生提交說明…
-    checkout: 正在切換分支…
-    fetch: 正在擷取…
-    pull: 正在提取…
-    push: 正在推送…
-    sync: 正在同步…
-    stash: 正在儲藏…
-    remove_worktree: 正在刪除工作樹…
-  section:
-    merge: 合併衝突
-    staged: 暫存的變更
-    unstaged: 變更
-    stashes: 儲藏
-    graph: 圖表
-  message_label: 提交說明
-  message_placeholder: 提交說明（⌘↩ 提交）
-  message_placeholder_branch: 提交說明（⌘↩ 提交到「%{branch}」）
-  commit: 提交
-  commit_amend: 提交（修改上次提交）
-  commit_and_push: 提交並推送
-  commit_and_sync: 提交並同步
-  undo_last_commit: 復原上次提交
-  commit_more: 更多提交方式
-  sync_changes: "同步變更 %{behind}↓ %{ahead}↑"
-  publish_branch: 發佈分支
-  publish: 發佈
-  publish_tooltip: 把這個分支推送到遠端，並設為上游分支
-  sync_tooltip: 和「%{upstream}」同步：先提取，再推送
-  detached: "分離於 %{head}"
-  no_commits: 還沒有提交
-  repo_kind:
-    main: 倉庫
-    submodule: 子模組
-    nested: 巢狀倉庫
-    worktree: 工作樹
   checkout: 切換分支…
   create_branch: 新增分支…
-  pull: 提取
-  push: 推送
-  sync: 同步
-  fetch: 擷取
-  stage: 暫存變更
-  unstage: 取消暫存變更
-  discard: 捨棄變更
-  mark_resolved: 暫存（標記為已解決）
-  open_file: 開啟檔案
-  stage_all: 暫存所有變更
-  unstage_all: 取消暫存所有變更
-  discard_all: 捨棄所有變更
-  stash: 儲藏
-  stash_include_untracked: 儲藏（包括未追蹤的檔案）
-  stash_pop_latest: 彈出最新的儲藏
-  stash_apply: 套用儲藏
-  stash_pop: 彈出儲藏
-  stash_drop: 刪除儲藏
-  discard_title: 捨棄「%{name}」的變更？
-  delete_untracked_title: 刪除未追蹤的檔案「%{name}」？
-  delete_untracked_detail: 這個檔案會從磁碟上刪掉，無法復原。
-  discard_all_title: 捨棄全部 %{count} 個檔案的變更？
-  discard_all_untracked_detail: 其中 %{count} 個未追蹤的檔案會從磁碟上刪掉。此操作無法復原。
-  irreversible: 此操作無法復原。
-  discard_confirm: 捨棄變更
-  drop_stash_title: "刪除儲藏 #%{index}？"
-  drop_stash_confirm: 刪除
-  stage_all_title: 沒有暫存的變更
-  stage_all_detail: 要把所有變更都暫存起來，直接提交嗎？
-  stage_all_confirm: 暫存並提交
-  operation:
-    merge: 正在合併：解決衝突並暫存後提交
-    rebase: 正在重定基底：解決衝突後在終端機裡繼續
-    cherry_pick: 正在揀選：解決衝突並暫存後提交
-    revert: 正在還原：解決衝突並暫存後提交
-  worktree:
-    open_in_new_tab: 在新的終端機標籤頁中開啟
-    remove: 刪除工作樹…
-    remove_title: "刪除工作樹「%{name}」？"
-    remove_detail: 它的目錄會被刪除，它所在的分支保留。
-    remove_dirty_detail: 它還有未提交的改動或未追蹤的檔案，會隨目錄一起刪除，刪除後無法復原。
-    remove_detached_detail: 它的 HEAD 是分離的，只在這個工作樹裡做的提交刪除後可能就找不到了。
-    remove_confirm: 刪除
-    remove_force: 仍然刪除
-  graph:
-    loading: 正在讀取提交歷史…
-    failed: 讀不出提交歷史
-    more: 載入更多…
-    refresh: 重新整理圖表
-    loading_changes: 正在讀取變更…
-    changes_failed: 讀不出這個提交的變更
-    no_files: 沒有變更的檔案
-    copy_id: 拷貝提交編號
-    checkout: 切到這個提交（分離 HEAD）
-    create_branch: 從這裡新增分支…
-    checkout_title: "切到提交 %{id}？"
-    checkout_detail: HEAD 會分離在這個提交上。要保留在這裡做的新提交，請新增一個分支。
-    checkout_confirm: 切換
   picker:
     placeholder: 選擇要切換到的分支，或者輸入新分支名稱
     new_branch: 輸入新分支的名稱

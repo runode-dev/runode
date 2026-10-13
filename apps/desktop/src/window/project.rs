@@ -15,25 +15,19 @@ use std::{
     time::{Duration, Instant},
 };
 
-use gpui::{
-    Action, AnyElement, App, Context, CursorStyle, Div, Focusable, MouseButton, MouseDownEvent, Role, Stateful, Window,
-    div, prelude::*, px,
-};
-use runode_git::FileStatus;
-use runode_shared_types::color::Rgb;
-
 use super::{
     CARD_GAP, DIVIDER_GRAB_WIDTH, Divider, TITLEBAR_HEIGHT, ToggleFiles, ToggleGit, ToggleGitHubActions, WindowView,
     cards,
 };
 use crate::ui::button::Toggle;
 use crate::ui::menu::MenuHost as _;
-// 面板外框在 `runode_ui::panel`、改动颜色在 `runode_ui::theme`，窗口里各面板照旧从这里引。
-use crate::ui::a11y::A11yPress;
-pub(super) use crate::ui::{
-    panel::{added_label, panel_message, panel_shell, panel_title, removed_label},
-    theme::{ADDED, MODIFIED, REMOVED, RENAMED},
+use gpui::{
+    Action, AnyElement, App, Context, CursorStyle, Div, Focusable, MouseButton, MouseDownEvent, Role, Stateful, Window,
+    div, prelude::*, px,
 };
+// 面板外框在 `runode_ui::panel`，窗口里各面板照旧从这里引。
+use crate::ui::a11y::A11yPress;
+pub(super) use crate::ui::panel::{panel_message, panel_shell};
 use crate::{
     assets::{ACTIONS_WORKFLOW_ICON, FILES_ICON, GIT_ICON, PANEL_RIGHT_ICON},
     ui::tooltip::tooltip,
@@ -72,15 +66,6 @@ const TOGGLE_GAP: f32 = 4.;
 pub(super) const TOGGLE_MARGIN: f32 = 10.;
 /// 右侧面板都收着时标题栏右边给右上角的命令按钮和面板开关让出的宽度。
 pub(super) const PANEL_TOGGLES_INSET: f32 = TOGGLE_WIDTH * 2. + TOGGLE_GAP + TOGGLE_MARGIN + 6.;
-
-pub(super) fn status_color(status: FileStatus) -> Rgb {
-    match status {
-        FileStatus::Modified => MODIFIED,
-        FileStatus::Added | FileStatus::Untracked => ADDED,
-        FileStatus::Deleted | FileStatus::Conflicted => REMOVED,
-        FileStatus::Renamed => RENAMED,
-    }
-}
 
 /// 右侧面板显示的那一页。
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -170,7 +155,8 @@ impl WindowView {
         }
         // 分支、tag 变了时图表重读；工作区里的文件变了不重读。
         if self.git_shown() {
-            self.graph_refs_changed(&paths, cx);
+            let id = self.workspace().id;
+            self.with_git_panel(cx, |panel, cx| panel.refs_changed(id, &paths, cx));
         }
         let Some(watch) = &self.project_watch else {
             return;
@@ -212,6 +198,8 @@ impl WindowView {
         }
         let dir = self.project_dir(cx);
         let expanded = self.file_tree.read(cx).expanded_dirs(self.workspace().id);
+        // 其他工作树只在 Git 面板里显示，面板没开或者藏起来了时不读；打开面板时 `toggle_git` 会重读一次。
+        let worktrees = self.git_shown() && self.git_panel.read(cx).options().show_worktrees;
         let workspace = &mut self.workspaces[self.active];
         let project = &mut workspace.project;
         if project.refreshing {
@@ -223,8 +211,6 @@ impl WindowView {
         project.refreshed_at = Some(Instant::now());
         let id = workspace.id;
         let untracked = std::mem::take(&mut project.untracked);
-        // 其他工作树只在 Git 面板里显示，面板没开或者藏起来了时不读；打开面板时 `toggle_git` 会重读一次。
-        let worktrees = self.git_shown() && self.git_show_worktrees;
         let job = cx.background_spawn(async move { scan(dir, expanded, untracked, worktrees) });
         cx.spawn(async move |this, cx| {
             let scan = job.await;
@@ -236,6 +222,7 @@ impl WindowView {
                 workspace.project.refreshing = false;
                 workspace.project.scan_cost = scan.cost;
                 let (changed, tree) = workspace.apply_scan(scan);
+                let git = workspace.project.git.clone();
                 if changed {
                     cx.notify();
                 }
@@ -243,6 +230,8 @@ impl WindowView {
                 this.file_tree.update(cx, |page, cx| page.apply_scan(id, tree, cx));
                 // 预览栏按新的 git 状态重算改动标记，diff 标签记下要不要重读。
                 this.sync_preview_git(id, cx);
+                // Git 面板按新的 git 状态重排。面板收着时也交：预览栏里按块暂存要经它在这份状态上跑。
+                this.git_panel.update(cx, |panel, cx| panel.set_git(id, git, cx));
                 if this.workspace().id == id {
                     this.sync_project_watch(cx);
                     this.reload_stale_diff(cx);
@@ -368,7 +357,9 @@ impl WindowView {
         }
         // 收起或切走时焦点还在提交说明框或文件树里的话，按键就没处去了，交回终端。
         if git_was_shown && !self.git_shown() {
-            if self.git_focus.contains_focused(window, cx) {
+            // 菜单存在页上，页不画了菜单也画不出来：先关掉，焦点回到页上再一起交回终端。
+            self.git_panel.update(cx, |page, cx| page.close_menu(window, cx));
+            if self.git_panel.focus_handle(cx).contains_focused(window, cx) {
                 window.focus(&self.focus_handle(cx), cx);
             }
             self.close_branch_picker(window, cx);
@@ -390,15 +381,10 @@ impl WindowView {
     }
 
     /// 右侧面板显示着的那一页，收着时为空。
-    pub(super) fn render_side_panel(
-        &mut self,
-        width: f32,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> Option<AnyElement> {
+    pub(super) fn render_side_panel(&mut self, width: f32, cx: &mut Context<Self>) -> Option<AnyElement> {
         match self.workspace().panel? {
             SidePanel::Files => Some(self.render_files_panel(width, cx).into_any_element()),
-            SidePanel::Git => Some(self.render_git_panel(width, window, cx).into_any_element()),
+            SidePanel::Git => Some(self.render_git_panel(width, cx).into_any_element()),
             SidePanel::GitHubActions => Some(self.render_github_actions_panel(width, cx).into_any_element()),
         }
     }

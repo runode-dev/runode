@@ -96,7 +96,6 @@ use crate::ui::{
     drag_window, inline_edit,
     menu::{Menu, MenuHost},
     panel::{DIVIDER_GRAB_WIDTH, PANE_HEADER_HEIGHT},
-    row_buttons,
     tabs::TAB_CLOSE_SIZE,
     theme::{ActiveTheme as _, Theme, ansi_colors},
 };
@@ -104,6 +103,7 @@ use crate::{config::AppConfig, prespawn::Prespawned, terminal_view::TerminalView
 use model::{PaneLayout, Workspace, WorkspaceId, home_dir};
 use persist::format::SavedWindow;
 use runode_file_tree::FileTree;
+use runode_git_panel::GitPanel;
 use runode_github_actions::ActionsPanel;
 use runode_preview_panel::PreviewPanel;
 use slot::Slot;
@@ -236,16 +236,9 @@ pub struct WindowView {
     sidebar_scroll: ScrollHandle,
     /// 右侧面板拖动过宽度时是那个宽度，没拖过时用默认宽度；显示哪一页每个 workspace 各记一份（`Workspace::panel`）。
     panel_width: Option<f32>,
-    /// Git 面板里改动的文件以树形式查看，否则是列表；整个窗口一个设置。
-    git_tree: bool,
-    /// Git 面板里显示子模块和嵌套仓库、显示同一个仓库的其他工作树；整个窗口一个设置。
-    git_show_subs: bool,
-    git_show_worktrees: bool,
-    /// Git 面板底部的图表收起来了；拖动过高度时是那个高度。整个窗口一个设置。
-    git_graph_collapsed: bool,
-    git_graph_height: Option<f32>,
-    /// Git 面板的焦点：右键菜单的动作派发到这里；提交说明框在它里面。
-    git_focus: FocusHandle,
+    /// 右侧面板的 Git 页，见 `git_panel`：各 workspace 的面板都在它里面，显示设置和图表的高度也是。
+    git_panel: Entity<GitPanel>,
+    _git_panel_events: Subscription,
     /// 开着的分支列表。
     branch_picker: Option<git_panel::BranchPicker>,
     /// 右侧面板的 GitHub Actions 页，见 `github_actions`。
@@ -263,8 +256,8 @@ pub struct WindowView {
     /// 右侧面板的文件树，见 `files`：各 workspace 的树都在它里面，显示哪些文件和搜索的选项也是。
     file_tree: Entity<FileTree>,
     _file_tree_events: Subscription,
-    /// 窗口开着的菜单：Git 面板、状态栏、标题栏命令按钮这些的右键菜单和按钮下面的菜单，同一时刻只开一个。
-    /// 预览栏和文件树的菜单存在它们自己身上。
+    /// 窗口开着的菜单：状态栏、标题栏命令按钮这些的右键菜单和按钮下面的菜单，同一时刻只开一个。
+    /// 预览栏、文件树和 Git 面板的菜单存在它们自己身上。
     menu: Option<Menu>,
     renaming: Option<Renaming>,
     /// 新建 workspace 的对话框。
@@ -394,9 +387,7 @@ impl WindowView {
         });
         let config_watch = cx.observe_global::<AppConfig>(|this, cx| {
             // 界面跟着 `ui-font-size` 缩放，Git 面板有多个仓库时的列表记着量过的行高，要重新量。
-            for workspace in &this.workspaces {
-                workspace.project.git_panel.list.remeasure();
-            }
+            this.git_panel.read(cx).remeasure();
             cx.notify();
         });
         persist::track(cx);
@@ -413,6 +404,8 @@ impl WindowView {
         let preview_events = cx.subscribe_in(&preview, window, Self::on_preview_event);
         let file_tree = cx.new(FileTree::new);
         let file_tree_events = cx.subscribe_in(&file_tree, window, Self::on_file_tree_event);
+        let git_panel = cx.new(GitPanel::new);
+        let git_panel_events = cx.subscribe_in(&git_panel, window, Self::on_git_panel_event);
         Self {
             workspaces: Vec::new(),
             active: 0,
@@ -420,12 +413,8 @@ impl WindowView {
             sidebar_width: None,
             sidebar_scroll: ScrollHandle::new(),
             panel_width: None,
-            git_tree: false,
-            git_show_subs: true,
-            git_show_worktrees: true,
-            git_graph_collapsed: false,
-            git_graph_height: None,
-            git_focus: cx.focus_handle(),
+            git_panel,
+            _git_panel_events: git_panel_events,
             branch_picker: None,
             github_actions,
             actions_found: Default::default(),
@@ -601,7 +590,7 @@ impl WindowView {
 
     fn render_panel_slot(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let width = self.right_panel_widths(f32::from(window.viewport_size().width), cx).panel;
-        self.render_side_panel(width, window, cx).unwrap_or_else(|| Empty.into_any_element())
+        self.render_side_panel(width, cx).unwrap_or_else(|| Empty.into_any_element())
     }
 
     fn render_status_bar_slot(&mut self, _: &mut Window, cx: &mut Context<Self>) -> AnyElement {
@@ -780,7 +769,8 @@ impl Render for WindowView {
             .on_action(Self::act(cx, Self::next_agent))
             .on_action(Self::act(cx, Self::toggle_todo_board))
             .on_action(Self::act(cx, Self::arrange_panes))
-            .map(|window| Self::bind_git_actions(window, cx))
+            // 写提交说明对话框里 agent 菜单的项派发到窗口的焦点上。
+            .on_action(cx.listener(Self::select_commit_agent))
             // 终端和新建对话框没接住的拖放落到这里：侧栏收着时拖到标题栏、空 workspace 上也能开。
             .on_drop(cx.listener(Self::open_dropped_dirs))
             .relative()

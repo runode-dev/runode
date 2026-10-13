@@ -6,20 +6,21 @@ use std::{
     collections::{HashMap, HashSet},
     ops::Range,
     path::{Path, PathBuf},
+    sync::Arc,
 };
 
 use gpui::{Entity, ListAlignment, ListState, Subscription, UniformListScrollHandle, px};
 use runode_git::{self as git, FileStatus, RepoKind, Section};
 
-use crate::ui::path_tree::{TreeItem, path_tree};
-use crate::ui::textarea::TextareaState;
+use runode_ui::path_tree::{TreeItem, path_tree};
+use runode_ui::textarea::TextareaState;
 
 /// 多个仓库时的列表往可见区域外多画这么高，滚动时块头不至于一下子冒出来。
 const LIST_OVERDRAW: f32 = 200.;
 
 /// Git 面板里的一段。
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub(in crate::window) enum GitSection {
+pub(crate) enum GitSection {
     /// 有冲突、等着解决的文件，从未暂存的改动里挑出来放在最前面。
     Merge,
     Staged,
@@ -38,7 +39,7 @@ impl GitSection {
 }
 
 /// 文件在 Git 面板里归哪一段：未暂存的冲突文件单独成段。
-pub(in crate::window) fn section_of(file: &git::FileDiff, section: Section) -> GitSection {
+pub(crate) fn section_of(file: &git::FileDiff, section: Section) -> GitSection {
     match section {
         Section::Staged => GitSection::Staged,
         Section::Unstaged if file.status == FileStatus::Conflicted => GitSection::Merge,
@@ -49,19 +50,19 @@ pub(in crate::window) fn section_of(file: &git::FileDiff, section: Section) -> G
 /// Git 面板里的一行。第一个下标是仓库在 `git::Repos::iter` 里的位置（0 是主仓库），后面的指向
 /// 那个仓库的 `git::Snapshot` 那一段里的文件、块和行，或者储藏列表。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(in crate::window) enum GitRow {
+pub(crate) enum GitRow {
     /// 多个仓库时每块开头：仓库的标题，展开时连着分支栏和提交说明框，高度不固定。只有一个
     /// 仓库时没有这一行，分支栏和提交说明框固定在列表上面。
     Repo(usize),
     Section(usize, GitSection),
-    /// 以树形式查看时的目录，下标指向 `GitPanel::dirs`；冲突、已暂存、未暂存各段和图表里展开的
+    /// 以树形式查看时的目录，下标指向 `PanelState::dirs`；冲突、已暂存、未暂存各段和图表里展开的
     /// 提交下面的文件都可能有。
     Dir(usize, usize),
     File(usize, Section, usize),
     Stash(usize, usize),
     /// 只有一个仓库、又没有改动时的一句说明。
     Clean(usize),
-    /// 图表里的提交，只在 `GitPanel::graph_rows` 里：下标指向 `Graph::history` 里的提交；展开后
+    /// 图表里的提交，只在 `PanelState::graph_rows` 里：下标指向 `Graph::history` 里的提交；展开后
     /// 跟着它改的文件，下标指向 `Graph::changes` 里这个提交的文件。
     Commit(usize, usize),
     CommitFile(usize, usize, usize),
@@ -90,7 +91,7 @@ impl GitRow {
 
 /// 图表里不是提交的那一行。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(in crate::window) enum GraphNote {
+pub(crate) enum GraphNote {
     Loading,
     Failed,
     Empty,
@@ -100,7 +101,7 @@ pub(in crate::window) enum GraphNote {
 
 /// 展开的提交下面不列文件时的说明。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(in crate::window) enum CommitNote {
+pub(crate) enum CommitNote {
     Loading,
     Failed,
     /// 没改文件，比如空提交。
@@ -108,10 +109,10 @@ pub(in crate::window) enum CommitNote {
 }
 
 /// 图表一次多读这么多个提交。
-pub(in crate::window) const GRAPH_PAGE: usize = 50;
+pub(crate) const GRAPH_PAGE: usize = 50;
 
 /// 读到的一个提交改了什么。
-pub(in crate::window) enum CommitChanges {
+pub(crate) enum CommitChanges {
     Loading,
     Failed,
     Ready(Vec<git::FileDiff>),
@@ -121,7 +122,7 @@ pub(in crate::window) enum CommitChanges {
 /// 图表展开着、显示的是这个仓库，而且仓库的 HEAD、分支、上游或 stash 变了（`RepoInfo` 变了）或者
 /// 点了刷新时才重读。
 #[derive(Default)]
-pub(in crate::window) struct Graph {
+pub(crate) struct Graph {
     /// 读到的历史，读不了时是错误；还没读过时为空。
     pub history: Option<Result<git::History, String>>,
     /// 读到的图最多用到几条 lane，各行按它定 lane 的宽度，线才连得上。
@@ -167,7 +168,7 @@ impl Graph {
 
 /// 正在跑的 git 操作，写在面板顶上或者那个仓库的标题上；跑完之前这个仓库不接新的操作。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(in crate::window) enum Busy {
+pub(crate) enum Busy {
     Stage,
     Discard,
     Commit,
@@ -209,7 +210,7 @@ impl Busy {
 /// 一个仓库在 Git 面板里自己的东西：提交说明框和正在跑的操作。按仓库的根目录记，终端换到
 /// 别处再回来时说明框里写了一半的话还在。
 #[derive(Default)]
-pub(in crate::window) struct RepoPanel {
+pub(crate) struct RepoPanel {
     /// 提交说明框，第一次显示这个仓库时建出来；以及它的事件订阅。
     pub commit_box: Option<Entity<TextareaState>>,
     pub commit_events: Option<Subscription>,
@@ -221,7 +222,7 @@ pub(in crate::window) struct RepoPanel {
 
 /// 以树形式查看时的一个目录行。
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(in crate::window) struct DirRow {
+pub(crate) struct DirRow {
     /// 所在仓库的根目录。
     pub root: PathBuf,
     /// 相对仓库根的路径，并成一行的是链条最深的那个；`name` 是显示的名字，如 `crates/desktop/src`。
@@ -233,7 +234,7 @@ pub(in crate::window) struct DirRow {
 
 /// 目录行是哪儿的：工作区改动的哪一段，还是图表里展开的哪个提交（`Graph::history` 里的下标）。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(in crate::window) enum DirOwner {
+pub(crate) enum DirOwner {
     Section(GitSection),
     Commit(usize),
 }
@@ -263,7 +264,11 @@ impl Out {
 }
 
 /// 一个 workspace 的 Git 面板。
-pub(in crate::window) struct GitPanel {
+pub(crate) struct PanelState {
+    /// app 交来的这个 workspace 最近读到的 git 状态，不在仓库里时为空；`scanned` 是交来过没有，还没有时
+    /// 面板空着，不说不在仓库里。
+    pub git: Option<Arc<git::Repos>>,
+    pub scanned: bool,
     pub rows: Vec<GitRow>,
     /// 和 `rows` 一一对应：以树形式查看时这一行在第几层，列表形式时都是 0。
     pub depth: Vec<usize>,
@@ -292,7 +297,7 @@ pub(in crate::window) struct GitPanel {
     list_rows: Vec<GitRow>,
     /// 各个仓库的提交说明框和忙碌状态，按仓库根记。
     pub repos: HashMap<PathBuf, RepoPanel>,
-    /// 最近点过的那块的仓库根：菜单和快捷键派发的动作作用到它，见 `WindowView::git_target`；
+    /// 最近点过的那块的仓库根：菜单和快捷键派发的动作作用到它，见 `GitPanel::git_target`；
     /// 图表也显示它的历史。
     pub active: Option<PathBuf>,
     /// 面板上次画多宽，图表的行据此决定放不放得下日期和引用标签。
@@ -303,9 +308,11 @@ pub(in crate::window) struct GitPanel {
     pub a11y: bool,
 }
 
-impl Default for GitPanel {
+impl Default for PanelState {
     fn default() -> Self {
         Self {
+            git: None,
+            scanned: false,
             rows: Vec::new(),
             depth: Vec::new(),
             graph_rows: Vec::new(),
@@ -340,7 +347,7 @@ fn repo_open_by_default(repo: &git::Snapshot) -> bool {
     repo.kind == RepoKind::Main || !repo.is_clean() || info.operation.is_some() || unsynced || publishable
 }
 
-impl GitPanel {
+impl PanelState {
     /// 根目录是 `root` 的仓库正在跑的操作。
     pub fn busy(&self, root: &Path) -> Option<Busy> {
         self.repos.get(root).and_then(|repo| repo.busy)
@@ -422,6 +429,27 @@ impl GitPanel {
             .as_deref()
             .and_then(|root| git.iter().position(|repo| repo.root == root && self.shows(repo)))
             .unwrap_or(0)
+    }
+
+    /// 换上 app 交来的 git 状态，要重排时返回真。和上次交来的是同一份时不用换；只是头一回交来时即使不在
+    /// 仓库里也要重画：交来之前面板空着，交来以后说不在仓库里。
+    pub fn replace_git(&mut self, git: Option<Arc<git::Repos>>) -> bool {
+        let same = match (&self.git, &git) {
+            (Some(old), Some(new)) => Arc::ptr_eq(old, new),
+            (old, new) => old.is_none() && new.is_none(),
+        };
+        if same && self.scanned {
+            return false;
+        }
+        self.scanned = true;
+        self.git = git;
+        true
+    }
+
+    /// 按自己记着的 `git` 重新排行。
+    pub fn relayout(&mut self) {
+        let git = self.git.clone();
+        self.rebuild(git.as_deref());
     }
 
     /// 按 `git` 重新排行。
@@ -658,6 +686,20 @@ mod tests {
     }
 
     #[test]
+    fn replaces_git_only_when_it_changes() {
+        let mut panel = PanelState::default();
+        // 头一回交来时即使不在仓库里也算变了，之后同一份不算。
+        assert!(panel.replace_git(None));
+        assert!(!panel.replace_git(None));
+        let repos = Arc::new(git::Repos::new(repo("", RepoKind::Main, &["a.txt"])));
+        assert!(panel.replace_git(Some(repos.clone())));
+        assert!(!panel.replace_git(Some(repos.clone())));
+        // 内容一样、不是同一份也换：app 只在读到的变了时才换一份新的。
+        assert!(panel.replace_git(Some(Arc::new((*repos).clone()))));
+        assert!(panel.replace_git(None));
+    }
+
+    #[test]
     fn finds_the_changed_range() {
         assert_eq!(changed_range(&[1, 2, 3, 4], &[1, 2, 3, 4]), Changed { old: 4..4, new_len: 0 });
         assert_eq!(changed_range(&[1, 2, 3, 4], &[1, 9, 9, 4]), Changed { old: 1..3, new_len: 2 });
@@ -668,7 +710,7 @@ mod tests {
 
     #[test]
     fn keeps_blocks_open_after_a_commit() {
-        let mut panel = GitPanel::default();
+        let mut panel = PanelState::default();
         let mut sub = repo("libs/lib", RepoKind::Submodule, &[]);
         assert!(!panel.repo_expanded(&sub));
         // 提交完变干净了，但还领先上游，或者还没发布：留着同步、发布的按钮。
@@ -688,7 +730,7 @@ mod tests {
 
     #[test]
     fn hides_sub_repos_and_worktrees() {
-        let mut panel = GitPanel::default();
+        let mut panel = PanelState::default();
         let mut repos = git::Repos::new(repo("", RepoKind::Main, &["a.txt"]));
         repos.subs.push(repo("libs/lib", RepoKind::Submodule, &["b.txt"]));
         repos.worktrees.push(repo("../feat", RepoKind::Worktree, &["c.txt"]));
@@ -710,7 +752,7 @@ mod tests {
 
     #[test]
     fn one_block_per_repository() {
-        let mut panel = GitPanel::default();
+        let mut panel = PanelState::default();
         // 只有一个仓库时没有块头，和以前一样；图表单独排，还没读历史时是「在读」。
         let single = git::Repos::new(repo("", RepoKind::Main, &["a.txt"]));
         panel.rebuild(Some(&single));
@@ -751,7 +793,7 @@ mod tests {
 
     #[test]
     fn one_click_opens_a_clean_block() {
-        let mut panel = GitPanel::default();
+        let mut panel = PanelState::default();
         let mut repos = git::Repos::new(repo("", RepoKind::Main, &[]));
         repos.subs.push(repo("libs/clean", RepoKind::Submodule, &[]));
         let sub = Path::new("/repo/libs/clean");
@@ -767,7 +809,7 @@ mod tests {
 
     #[test]
     fn worktrees_follow_sub_repositories() {
-        let mut panel = GitPanel::default();
+        let mut panel = PanelState::default();
         let mut repos = git::Repos::new(repo("", RepoKind::Main, &[]));
         repos.subs.push(repo("libs/lib", RepoKind::Submodule, &["x.txt"]));
         let mut clean = repo("", RepoKind::Worktree, &[]);
@@ -798,7 +840,7 @@ mod tests {
 
     #[test]
     fn lays_out_changes_as_a_tree() {
-        let mut panel = GitPanel { tree: true, ..Default::default() };
+        let mut panel = PanelState { tree: true, ..Default::default() };
         let repos = git::Repos::new(repo("", RepoKind::Main, &["README.md", "src/a.rs", "src/b/c.rs"]));
         panel.rebuild(Some(&repos));
         let file = |fi| GitRow::File(0, Section::Unstaged, fi);
@@ -830,7 +872,7 @@ mod tests {
 
     #[test]
     fn lists_the_graph_with_expanded_commits() {
-        let mut panel = GitPanel::default();
+        let mut panel = PanelState::default();
         let repos = git::Repos::new(repo("", RepoKind::Main, &[]));
         let commit = |id: &str, parents: &[&str]| git::Commit {
             id: id.into(),
@@ -872,7 +914,7 @@ mod tests {
 
     #[test]
     fn graph_follows_the_active_block() {
-        let mut panel = GitPanel::default();
+        let mut panel = PanelState::default();
         let mut repos = git::Repos::new(repo("", RepoKind::Main, &[]));
         repos.subs.push(repo("libs/lib", RepoKind::Submodule, &[]));
         // 没点过哪块时是主仓库，点了子仓库的块换成它的。

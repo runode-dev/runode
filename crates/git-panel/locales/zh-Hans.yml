@@ -1,0 +1,121 @@
+_version: 1
+panel:
+  no_changes: 没有未提交的改动
+  not_repo: 不在 git 仓库里
+files:
+  reveal: 在访达中显示
+  insert_path: 把路径打进终端
+git:
+  title: 源代码管理
+  refresh: 刷新
+  view_as_tree: 以树形式查看
+  view_as_list: 以列表形式查看
+  show_submodules: 显示子模块和嵌套仓库
+  show_worktrees: 显示其他工作树
+  ok: 好
+  cancel: 取消
+  failed: Git 操作没有完成
+  more: 更多操作
+  view_options: 视图选项
+  ai_message:
+    menu: 生成提交说明…
+    button: 用 AI 生成提交说明
+  busy:
+    stage: 正在暂存…
+    discard: 正在放弃更改…
+    commit: 正在提交…
+    message: 正在生成提交说明…
+    checkout: 正在切换分支…
+    fetch: 正在抓取…
+    pull: 正在拉取…
+    push: 正在推送…
+    sync: 正在同步…
+    stash: 正在储藏…
+    remove_worktree: 正在删除工作树…
+  section:
+    merge: 合并冲突
+    staged: 暂存的更改
+    unstaged: 更改
+    stashes: 储藏
+    graph: 图表
+  message_label: 提交说明
+  message_placeholder: 提交说明（⌘↩ 提交）
+  message_placeholder_branch: 提交说明（⌘↩ 提交到“%{branch}”）
+  commit: 提交
+  commit_amend: 提交（修改上次提交）
+  commit_and_push: 提交并推送
+  commit_and_sync: 提交并同步
+  undo_last_commit: 撤销上次提交
+  commit_more: 更多提交方式
+  sync_changes: "同步更改 %{behind}↓ %{ahead}↑"
+  publish_branch: 发布分支
+  publish: 发布
+  publish_tooltip: 把这个分支推送到远端，并设为上游分支
+  sync_tooltip: 和“%{upstream}”同步：先拉取，再推送
+  detached: "分离于 %{head}"
+  no_commits: 还没有提交
+  repo_kind:
+    main: 仓库
+    submodule: 子模块
+    nested: 嵌套仓库
+    worktree: 工作树
+  checkout: 切换分支…
+  create_branch: 新建分支…
+  pull: 拉取
+  push: 推送
+  sync: 同步
+  fetch: 抓取
+  stage: 暂存更改
+  unstage: 取消暂存更改
+  discard: 放弃更改
+  mark_resolved: 暂存（标记为已解决）
+  open_file: 打开文件
+  stage_all: 暂存所有更改
+  unstage_all: 取消暂存所有更改
+  discard_all: 放弃所有更改
+  stash: 储藏
+  stash_include_untracked: 储藏（包括未跟踪的文件）
+  stash_pop_latest: 弹出最新的储藏
+  stash_apply: 应用储藏
+  stash_pop: 弹出储藏
+  stash_drop: 删除储藏
+  discard_title: 放弃“%{name}”的更改？
+  delete_untracked_title: 删除未跟踪的文件“%{name}”？
+  delete_untracked_detail: 这个文件会从磁盘上删掉，不能撤销。
+  discard_all_title: 放弃全部 %{count} 个文件的更改？
+  discard_all_untracked_detail: 其中 %{count} 个未跟踪的文件会从磁盘上删掉。此操作不能撤销。
+  irreversible: 此操作不能撤销。
+  discard_confirm: 放弃更改
+  drop_stash_title: "删除储藏 #%{index}？"
+  drop_stash_confirm: 删除
+  stage_all_title: 没有暂存的更改
+  stage_all_detail: 要把所有更改都暂存起来，直接提交吗？
+  stage_all_confirm: 暂存并提交
+  operation:
+    merge: 正在合并：解决冲突并暂存后提交
+    rebase: 正在变基：解决冲突后在终端里继续
+    cherry_pick: 正在拣选：解决冲突并暂存后提交
+    revert: 正在还原：解决冲突并暂存后提交
+  worktree:
+    open_in_new_tab: 在新的终端标签页里打开
+    remove: 删除工作树…
+    remove_title: "删除工作树「%{name}」？"
+    remove_detail: 它的目录会被删掉，它所在的分支保留。
+    remove_dirty_detail: 它还有没提交的改动或未跟踪的文件，会随目录一起删掉，删了找不回来。
+    remove_detached_detail: 它的 HEAD 是游离的，只在这个工作树里做的提交删了以后可能就找不到了。
+    remove_confirm: 删除
+    remove_force: 仍然删除
+  graph:
+    loading: 正在读取提交历史…
+    failed: 读不出提交历史
+    more: 加载更多…
+    refresh: 刷新图表
+    loading_changes: 正在读取改动…
+    changes_failed: 读不出这个提交的改动
+    no_files: 没有改动文件
+    copy_id: 复制提交号
+    checkout: 切到这个提交（分离头指针）
+    create_branch: 从这里新建分支…
+    checkout_title: "切到提交 %{id}？"
+    checkout_detail: HEAD 会分离在这个提交上。要保留在这里做的新提交，请新建一个分支。
+    checkout_confirm: 切换

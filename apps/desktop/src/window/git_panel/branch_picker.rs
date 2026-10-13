@@ -212,10 +212,10 @@ impl WindowView {
             (picker.repo.clone(), picker.start.clone(), choice)
         };
         self.close_branch_picker(window, cx);
-        match choice {
-            Ok(name) => self.create_branch(&root, name, start, window, cx),
-            Err(branch) => self.checkout_branch(&root, branch, window, cx),
-        }
+        self.with_git_panel(cx, |panel, cx| match choice {
+            Ok(name) => panel.create_branch(&root, name, start, window, cx),
+            Err(branch) => panel.checkout(&root, branch, window, cx),
+        });
     }
 
     /// 浮在标题栏下方正中的列表：上面是输入框，下面是各行。

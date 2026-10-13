@@ -27,10 +27,10 @@ use std::{
 
 use gpui::{Context, Window};
 use runode_git::{self as git, GitError, Section};
+use runode_git_panel::show_git_error;
 use runode_paths::Dirs;
 use serde::{Deserialize, Serialize};
 
-use super::{rows::Busy, run::show_git_error};
 use crate::window::WindowView;
 use agents::Output;
 
@@ -162,7 +162,8 @@ impl WindowView {
         }
     }
 
-    /// 按 `recipe` 给根目录是 `root` 的仓库要提交的改动写提交说明，写好了替换提交说明框里的字。
+    /// 按 `recipe` 给根目录是 `root` 的仓库要提交的改动写提交说明，写好了替换提交说明框里的字。经 Git 面板跑，
+    /// 和这个仓库别的操作一起排队，写的时候面板写着在写说明。
     pub(in crate::window) fn write_commit_message(
         &mut self,
         root: &Path,
@@ -192,14 +193,9 @@ impl WindowView {
         // 从访达打开的 app 自己的 PATH 里没有 agent 装的目录，用终端里 shell 报告的 PATH。
         let path = self.focused_view().and_then(|view| view.read(cx).meta().shell_path.clone());
         let path = path.or_else(|| std::env::var_os("PATH"));
-        let target = root.to_path_buf();
         let op =
             move |repo: &git::Repo| generate(repo, &recipe, &context, path).map_err(|message| GitError { message });
-        self.run_git(root, Busy::Message, window, cx, op, move |this, message, _, cx| {
-            if let Some(area) = this.commit_box(&target) {
-                area.update(cx, |area, cx| area.set_text(message, cx));
-            }
-        });
+        self.with_git_panel(cx, |panel, cx| panel.write_message(root, op, window, cx));
     }
 }
 

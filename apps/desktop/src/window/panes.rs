@@ -738,7 +738,7 @@ impl WindowView {
                         // 卡片样式下面板的卡片底下离窗口底边还有一段间距。
                         let spacing = if cards(cx) { CARD_GAP } else { 0. };
                         let viewport = f32::from(window.viewport_size().height) - spacing - status_bar::height(cx);
-                        this.resize_git_graph(f32::from(event.position.y), viewport);
+                        this.resize_git_graph(f32::from(event.position.y), viewport, cx);
                         cx.notify();
                         return;
                     }

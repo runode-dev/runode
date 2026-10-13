@@ -5,16 +5,17 @@
 
 use std::path::{Path, PathBuf};
 
-use gpui::{Context, PromptLevel, Window, prelude::*};
+use gpui::{App, Context, PromptLevel, Window, prelude::*};
 use runode_git::{self as git, CommitOptions, FileDiff, Section};
+use runode_ui::base_name;
 
 use super::{
     DirOp, FileOp, GitCheckout, GitCommit, GitCommitAmend, GitCommitAndPush, GitCommitAndSync, GitCreateBranch,
-    GitDirAction, GitDiscardAll, GitFetch, GitFileAction, GitPull, GitPush, GitRefresh, GitStageAll, GitStash,
-    GitStashIncludeUntracked, GitStashPopLatest, GitSync, GitUndoLastCommit, GitUnstageAll, PrimaryAction,
-    rows::{Busy, GitPanel, GitSection},
+    GitDirAction, GitDiscardAll, GitFetch, GitFileAction, GitPanel, GitPanelEvent, GitPull, GitPush, GitRefresh,
+    GitStageAll, GitStash, GitStashIncludeUntracked, GitStashPopLatest, GitSync, GitUndoLastCommit, GitUnstageAll,
+    PrimaryAction,
+    rows::{Busy, GitSection, PanelState},
 };
-use crate::window::{WindowView, model::base_name};
 
 /// 提交成功以后接着做什么。
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -27,12 +28,12 @@ enum AfterCommit {
 /// 弹框里的错误说明最多这么多个字符，git 偶尔会输出很长的一串。
 const MAX_ERROR_CHARS: usize = 2000;
 
-impl WindowView {
+impl GitPanel {
     /// 当前 workspace 里根目录是 `root` 的仓库（主仓库或者子仓库）；不在仓库里、找不到或者这个
     /// 仓库上一个操作还没跑完时为空。
     fn git_repo(&self, root: &Path) -> Option<git::Repo> {
-        let project = &self.workspace().project;
-        if project.git_panel.busy(root).is_some() {
+        let project = self.state();
+        if project.busy(root).is_some() {
             return None;
         }
         project.git.as_ref()?.iter().find(|repo| repo.root == root).map(git::Snapshot::repo)
@@ -41,7 +42,7 @@ impl WindowView {
     /// 在后台对当前 workspace 里根目录是 `root` 的仓库跑 `op`，跑的时候这个仓库写着 `busy`。
     /// 跑完马上重读，成功时再调 `done`，出错时弹框。
     #[allow(clippy::too_many_arguments)]
-    pub(in crate::window) fn run_git<T: Send + 'static>(
+    pub(crate) fn run_git<T: Send + 'static>(
         &mut self,
         root: &Path,
         busy: Busy,
@@ -53,22 +54,20 @@ impl WindowView {
         let Some(repo) = self.git_repo(root) else {
             return;
         };
-        let id = self.workspace().id;
+        let ws = self.ws;
         let root = root.to_path_buf();
-        self.workspace_mut().project.git_panel.repo_mut(&root).busy = Some(busy);
+        self.state_mut().repo_mut(&root).busy = Some(busy);
         cx.notify();
         let job = cx.background_spawn(async move { op(&repo) });
         cx.spawn_in(window, async move |this, cx| {
             let result = job.await;
             this.update_in(cx, |this, window, cx| {
-                // 跑的时候 workspace 可能已经关掉了；切走了的等切回来时再读。
-                let Some(workspace) = this.workspaces.iter_mut().find(|workspace| workspace.id == id) else {
+                // 跑的时候 workspace 可能已经关掉了；切走了的由 app 等切回来时再读。
+                let Some(state) = this.workspaces.get_mut(&ws) else {
                     return;
                 };
-                workspace.project.git_panel.repo_mut(&root).busy = None;
-                if this.workspace().id == id {
-                    this.refresh_project(cx);
-                }
+                state.repo_mut(&root).busy = None;
+                cx.emit(GitPanelEvent::Refresh(ws));
                 match result {
                     Ok(value) => done(this, value, window, cx),
                     Err(err) => show_git_error(&err, window, cx),
@@ -101,20 +100,20 @@ impl WindowView {
     }
 
     /// 根目录是 `root` 的仓库里、`section` 那一段里路径是 `path` 的文件。
-    pub(super) fn git_file(&self, root: &Path, section: Section, path: &PathBuf) -> Option<FileDiff> {
-        let git = self.workspace().project.git.as_ref()?.iter().find(|repo| repo.root == root)?;
+    pub(crate) fn git_file(&self, root: &Path, section: Section, path: &PathBuf) -> Option<FileDiff> {
+        let git = self.state().git.as_ref()?.iter().find(|repo| repo.root == root)?;
         git.files(section).iter().find(|file| &file.path == path).cloned()
     }
 
     /// 文件的右键菜单和行尾按钮：打开、在访达中显示、打进终端、暂存、取消暂存、丢掉改动。
-    pub(super) fn git_file_action(&mut self, action: &GitFileAction, window: &mut Window, cx: &mut Context<Self>) {
+    pub(crate) fn git_file_action(&mut self, action: &GitFileAction, window: &mut Window, cx: &mut Context<Self>) {
         let root = action.repo.clone();
         let full = root.join(&action.path);
         let paths = vec![action.path.clone()];
         match action.op {
-            FileOp::Open => self.open_preview(&full, true, cx),
+            FileOp::Open => cx.emit(GitPanelEvent::OpenFile(full)),
             FileOp::Reveal => cx.reveal_path(&full),
-            FileOp::InsertPath => self.insert_path(&full, None, window, cx),
+            FileOp::InsertPath => cx.emit(GitPanelEvent::InsertPath(full)),
             FileOp::Stage => {
                 self.run_git(&root, Busy::Stage, window, cx, move |repo| repo.stage(&paths), |_, (), _, _| {});
             }
@@ -132,14 +131,13 @@ impl WindowView {
 
     /// 目录的右键菜单和行尾按钮：暂存、取消暂存或丢掉这个目录下这一段里的所有改动。丢掉照常先问，
     /// 子模块那样的 gitlink 不算在里面。
-    pub(super) fn git_dir_action(&mut self, action: &GitDirAction, window: &mut Window, cx: &mut Context<Self>) {
+    pub(crate) fn git_dir_action(&mut self, action: &GitDirAction, window: &mut Window, cx: &mut Context<Self>) {
         let root = action.repo.clone();
-        let Some(git) = self.workspace().project.git.as_ref().and_then(|git| git.iter().find(|repo| repo.root == root))
-        else {
+        let Some(git) = self.state().git.as_ref().and_then(|git| git.iter().find(|repo| repo.root == root)) else {
             return;
         };
         let source = action.section.source();
-        let files: Vec<FileDiff> = GitPanel::files(git, action.section)
+        let files: Vec<FileDiff> = PanelState::files(git, action.section)
             .into_iter()
             .map(|fi| &git.files(source)[fi])
             .filter(|file| file.path.starts_with(&action.dir))
@@ -196,7 +194,7 @@ impl WindowView {
 
     /// 根目录是 `root` 的仓库整段的操作：暂存全部冲突或未暂存的文件、取消暂存全部、丢掉全部
     /// 未暂存的改动。
-    pub(super) fn git_section_action(
+    pub(crate) fn git_section_action(
         &mut self,
         root: &Path,
         section: GitSection,
@@ -204,13 +202,12 @@ impl WindowView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(git) = self.workspace().project.git.as_ref().and_then(|git| git.iter().find(|repo| repo.root == root))
-        else {
+        let Some(git) = self.state().git.as_ref().and_then(|git| git.iter().find(|repo| repo.root == root)) else {
             return;
         };
         let source = section.source();
         let files: Vec<FileDiff> =
-            GitPanel::files(git, section).into_iter().map(|fi| git.files(source)[fi].clone()).collect();
+            PanelState::files(git, section).into_iter().map(|fi| git.files(source)[fi].clone()).collect();
         match (section, stage) {
             (GitSection::Staged, _) => {
                 self.run_git(root, Busy::Stage, window, cx, git::Repo::unstage_all, |_, (), _, _| {});
@@ -225,7 +222,7 @@ impl WindowView {
     }
 
     /// 储藏那一段的按钮：应用、弹出，或者问过以后删掉。
-    pub(super) fn git_stash_action(
+    pub(crate) fn git_stash_action(
         &mut self,
         root: &Path,
         index: usize,
@@ -254,7 +251,7 @@ impl WindowView {
 
     /// 根目录是 `root` 的仓库提交说明框里的文字，去掉末尾的空白。
     fn commit_message(&self, root: &Path, cx: &Context<Self>) -> String {
-        let panel = self.workspace().project.git_panel.repos.get(root);
+        let panel = self.state().repos.get(root);
         let area = panel.and_then(|panel| panel.commit_box.as_ref());
         area.map(|area| area.read(cx).text().trim_end().to_owned()).unwrap_or_default()
     }
@@ -263,11 +260,11 @@ impl WindowView {
     /// 的改动时问一下要不要暂存全部再提交。
     fn commit(&mut self, root: PathBuf, amend: bool, after: AfterCommit, window: &mut Window, cx: &mut Context<Self>) {
         let message = self.commit_message(&root, cx);
-        let project = &self.workspace().project;
+        let project = self.state();
         let Some(git) = project.git.as_ref().and_then(|git| git.iter().find(|repo| repo.root == root)) else {
             return;
         };
-        if project.git_panel.busy(&root).is_some() || (message.trim().is_empty() && !amend) {
+        if project.busy(&root).is_some() || (message.trim().is_empty() && !amend) {
             return;
         }
         if git.staged.is_empty() && !amend {
@@ -326,17 +323,17 @@ impl WindowView {
     }
 
     /// 根目录是 `root` 的仓库的提交说明框，还没建出来时为空。
-    pub(super) fn commit_box(&self, root: &Path) -> Option<gpui::Entity<crate::ui::textarea::TextareaState>> {
-        self.workspace().project.git_panel.repos.get(root)?.commit_box.clone()
+    pub(crate) fn commit_box(&self, root: &Path) -> Option<gpui::Entity<runode_ui::textarea::TextareaState>> {
+        self.state().repos.get(root)?.commit_box.clone()
     }
 
     /// 在根目录是 `root` 的仓库的提交说明框里按了 cmd-enter。
-    pub(super) fn submit_commit_box(&mut self, root: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
+    pub(crate) fn submit_commit_box(&mut self, root: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
         self.commit(root, false, AfterCommit::Nothing, window, cx);
     }
 
     /// 根目录是 `root` 的仓库的提交按钮或同步按钮。
-    pub(super) fn run_primary(
+    pub(crate) fn run_primary(
         &mut self,
         root: &Path,
         action: PrimaryAction,
@@ -370,24 +367,24 @@ impl WindowView {
         }
     }
 
-    pub(super) fn git_commit(&mut self, _: &GitCommit, window: &mut Window, cx: &mut Context<Self>) {
+    pub(crate) fn git_commit(&mut self, _: &GitCommit, window: &mut Window, cx: &mut Context<Self>) {
         self.commit_target(false, AfterCommit::Nothing, window, cx);
     }
 
-    pub(super) fn git_commit_amend(&mut self, _: &GitCommitAmend, window: &mut Window, cx: &mut Context<Self>) {
+    pub(crate) fn git_commit_amend(&mut self, _: &GitCommitAmend, window: &mut Window, cx: &mut Context<Self>) {
         self.commit_target(true, AfterCommit::Nothing, window, cx);
     }
 
-    pub(super) fn git_commit_and_push(&mut self, _: &GitCommitAndPush, window: &mut Window, cx: &mut Context<Self>) {
+    pub(crate) fn git_commit_and_push(&mut self, _: &GitCommitAndPush, window: &mut Window, cx: &mut Context<Self>) {
         self.commit_target(false, AfterCommit::Push, window, cx);
     }
 
-    pub(super) fn git_commit_and_sync(&mut self, _: &GitCommitAndSync, window: &mut Window, cx: &mut Context<Self>) {
+    pub(crate) fn git_commit_and_sync(&mut self, _: &GitCommitAndSync, window: &mut Window, cx: &mut Context<Self>) {
         self.commit_target(false, AfterCommit::Sync, window, cx);
     }
 
     /// 撤销上次提交，改动留在暂存区；说明框空着时把那次的说明放回去，改改再提交。
-    pub(super) fn git_undo_last_commit(&mut self, _: &GitUndoLastCommit, window: &mut Window, cx: &mut Context<Self>) {
+    pub(crate) fn git_undo_last_commit(&mut self, _: &GitUndoLastCommit, window: &mut Window, cx: &mut Context<Self>) {
         let Some(root) = self.git_target(window, cx) else {
             return;
         };
@@ -401,48 +398,48 @@ impl WindowView {
         });
     }
 
-    pub(super) fn git_refresh(&mut self, _: &GitRefresh, _: &mut Window, cx: &mut Context<Self>) {
+    pub(crate) fn git_refresh(&mut self, _: &GitRefresh, _: &mut Window, cx: &mut Context<Self>) {
         self.refresh_graphs();
-        self.refresh_project(cx);
+        cx.emit(GitPanelEvent::Refresh(self.ws));
         cx.notify();
     }
 
-    pub(super) fn git_fetch(&mut self, _: &GitFetch, window: &mut Window, cx: &mut Context<Self>) {
+    pub(crate) fn git_fetch(&mut self, _: &GitFetch, window: &mut Window, cx: &mut Context<Self>) {
         self.run_on_target(Busy::Fetch, window, cx, git::Repo::fetch);
     }
 
-    pub(super) fn git_pull(&mut self, _: &GitPull, window: &mut Window, cx: &mut Context<Self>) {
+    pub(crate) fn git_pull(&mut self, _: &GitPull, window: &mut Window, cx: &mut Context<Self>) {
         self.run_on_target(Busy::Pull, window, cx, git::Repo::pull);
     }
 
     /// 推送；还没有上游分支时顺带发布到远端。
-    pub(super) fn git_push(&mut self, _: &GitPush, window: &mut Window, cx: &mut Context<Self>) {
+    pub(crate) fn git_push(&mut self, _: &GitPush, window: &mut Window, cx: &mut Context<Self>) {
         self.run_on_target(Busy::Push, window, cx, git::Repo::push);
     }
 
-    pub(super) fn git_sync(&mut self, _: &GitSync, window: &mut Window, cx: &mut Context<Self>) {
+    pub(crate) fn git_sync(&mut self, _: &GitSync, window: &mut Window, cx: &mut Context<Self>) {
         self.run_on_target(Busy::Sync, window, cx, git::Repo::sync);
     }
 
-    pub(super) fn git_stage_all(&mut self, _: &GitStageAll, window: &mut Window, cx: &mut Context<Self>) {
+    pub(crate) fn git_stage_all(&mut self, _: &GitStageAll, window: &mut Window, cx: &mut Context<Self>) {
         self.run_on_target(Busy::Stage, window, cx, git::Repo::stage_all);
     }
 
-    pub(super) fn git_unstage_all(&mut self, _: &GitUnstageAll, window: &mut Window, cx: &mut Context<Self>) {
+    pub(crate) fn git_unstage_all(&mut self, _: &GitUnstageAll, window: &mut Window, cx: &mut Context<Self>) {
         self.run_on_target(Busy::Stage, window, cx, git::Repo::unstage_all);
     }
 
-    pub(super) fn git_discard_all(&mut self, _: &GitDiscardAll, window: &mut Window, cx: &mut Context<Self>) {
+    pub(crate) fn git_discard_all(&mut self, _: &GitDiscardAll, window: &mut Window, cx: &mut Context<Self>) {
         if let Some(root) = self.git_target(window, cx) {
             self.git_section_action(&root, GitSection::Unstaged, false, window, cx);
         }
     }
 
-    pub(super) fn git_stash(&mut self, _: &GitStash, window: &mut Window, cx: &mut Context<Self>) {
+    pub(crate) fn git_stash(&mut self, _: &GitStash, window: &mut Window, cx: &mut Context<Self>) {
         self.run_on_target(Busy::Stash, window, cx, |repo| repo.stash(None, false));
     }
 
-    pub(super) fn git_stash_include_untracked(
+    pub(crate) fn git_stash_include_untracked(
         &mut self,
         _: &GitStashIncludeUntracked,
         window: &mut Window,
@@ -451,46 +448,23 @@ impl WindowView {
         self.run_on_target(Busy::Stash, window, cx, |repo| repo.stash(None, true));
     }
 
-    pub(super) fn git_stash_pop_latest(&mut self, _: &GitStashPopLatest, window: &mut Window, cx: &mut Context<Self>) {
+    pub(crate) fn git_stash_pop_latest(&mut self, _: &GitStashPopLatest, window: &mut Window, cx: &mut Context<Self>) {
         if let Some(root) = self.git_target(window, cx) {
             self.git_stash_action(&root, 0, StashOp::Pop, window, cx);
         }
     }
 
-    pub(super) fn git_checkout(&mut self, _: &GitCheckout, window: &mut Window, cx: &mut Context<Self>) {
+    /// 切换、新建分支：请 app 打开分支列表，选好以后它调 `checkout` 或 `create_branch`。
+    pub(crate) fn git_checkout(&mut self, _: &GitCheckout, window: &mut Window, cx: &mut Context<Self>) {
         if let Some(root) = self.git_target(window, cx) {
-            self.open_branch_picker(&root, false, None, window, cx);
+            cx.emit(GitPanelEvent::OpenBranchPicker { root, create_only: false, start: None });
         }
     }
 
-    pub(super) fn git_create_branch(&mut self, _: &GitCreateBranch, window: &mut Window, cx: &mut Context<Self>) {
+    pub(crate) fn git_create_branch(&mut self, _: &GitCreateBranch, window: &mut Window, cx: &mut Context<Self>) {
         if let Some(root) = self.git_target(window, cx) {
-            self.open_branch_picker(&root, true, None, window, cx);
+            cx.emit(GitPanelEvent::OpenBranchPicker { root, create_only: true, start: None });
         }
-    }
-
-    /// 在根目录是 `root` 的仓库里切到分支列表里选中的分支。
-    pub(super) fn checkout_branch(
-        &mut self,
-        root: &Path,
-        branch: git::Branch,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        self.run_git(root, Busy::Checkout, window, cx, move |repo| repo.checkout(&branch), |_, (), _, _| {});
-    }
-
-    /// 在根目录是 `root` 的仓库里从 `start` 这个提交（为空时是当前提交）新建分支并切过去。
-    pub(super) fn create_branch(
-        &mut self,
-        root: &Path,
-        name: String,
-        start: Option<String>,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        let op = move |repo: &git::Repo| repo.create_branch(&name, start.as_deref());
-        self.run_git(root, Busy::Checkout, window, cx, op, |_, (), _, _| {});
     }
 }
 
@@ -502,8 +476,8 @@ pub(super) enum StashOp {
     Drop,
 }
 
-/// git 报的错：只有一个按钮，不用等回答。
-pub(super) fn show_git_error(err: &git::GitError, window: &mut Window, cx: &mut Context<WindowView>) {
+/// git 报的错：只有一个按钮，不用等回答。app 写提交说明时读不了预设也用它报。
+pub fn show_git_error(err: &git::GitError, window: &mut Window, cx: &mut App) {
     let mut detail: String = err.message.chars().take(MAX_ERROR_CHARS).collect();
     if detail.len() < err.message.len() {
         detail.push('…');
