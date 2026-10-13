@@ -102,6 +102,42 @@ struct Polled(u64);
 
 impl Global for Polled {}
 
+/// 问会话列表的次序：`refresh_todos` 和 `refresh_sessions` 都问，问的时候领一个号（`issued`），回来时比
+/// 套上过的（`applied`）新才整份换上，慢回来的旧列表不盖掉新的。
+#[derive(Default)]
+struct Listed {
+    issued: u64,
+    applied: u64,
+}
+
+impl Global for Listed {}
+
+/// 要问一次会话列表了，领个号。
+fn next_listing(cx: &mut App) -> u64 {
+    let listed = cx.default_global::<Listed>();
+    listed.issued += 1;
+    listed.issued
+}
+
+/// 领的是 `seq` 号的那份列表回来了：比套上过的都新时记下它，返回真。
+fn newest_listing(cx: &mut App, seq: u64) -> bool {
+    let listed = cx.default_global::<Listed>();
+    let newest = seq > listed.applied;
+    if newest {
+        listed.applied = seq;
+    }
+    newest
+}
+
+/// 列表 `live` 比套上过的旧时只拿它补 `sessions` 里还没有的（等宿主回话时刚开始的任务的会话），不盖掉
+/// 新的；不再要（`wanted`）的去掉。
+fn fill_sessions(sessions: &mut HashMap<SessionId, SessionInfo>, live: Vec<SessionInfo>, wanted: &HashSet<SessionId>) {
+    sessions.retain(|id, _| wanted.contains(id));
+    for info in live.into_iter().filter(|info| wanted.contains(&info.id)) {
+        sessions.entry(info.id).or_insert(info);
+    }
+}
+
 /// 看板打开时调：现问一次任务会话的状态，之后每 `SESSIONS_POLL` 问一次，没有窗口开着看板时停下，空闲时
 /// 不再定时唤醒主线程。
 pub fn poll_sessions(cx: &mut App) {
@@ -156,6 +192,7 @@ fn board_open(cx: &mut App) -> bool {
 /// 落进需要你那一列，下一轮才回到进行中。变了就重画看板。
 fn refresh_todos(cx: &mut App) -> Task<()> {
     let host = Host::get(cx);
+    let seq = next_listing(cx);
     cx.spawn(async move |cx| {
         let (answer, live) = cx
             .background_executor()
@@ -171,11 +208,12 @@ fn refresh_todos(cx: &mut App) -> Task<()> {
                 Ok(HostMsg::Todos { todos, schedules, .. }) => {
                     if let Some(live) = live {
                         let wanted: HashSet<SessionId> = todos.iter().filter_map(|todo| todo.session).collect();
-                        data.sessions = live
-                            .into_iter()
-                            .filter(|info| wanted.contains(&info.id))
-                            .map(|info| (info.id, info))
-                            .collect();
+                        if newest_listing(cx, seq) {
+                            let live = live.into_iter().filter(|info| wanted.contains(&info.id));
+                            data.sessions = live.map(|info| (info.id, info)).collect();
+                        } else {
+                            fill_sessions(&mut data.sessions, live, &wanted);
+                        }
                     }
                     data.todos = todos;
                     data.schedules = schedules;
@@ -193,6 +231,7 @@ fn refresh_todos(cx: &mut App) -> Task<()> {
 fn refresh_sessions(cx: &mut App) -> Task<()> {
     let wanted = todo_sessions(cx);
     let host = Host::get(cx);
+    let seq = next_listing(cx);
     cx.spawn(async move |cx| {
         if wanted.is_empty() {
             return;
@@ -202,7 +241,9 @@ fn refresh_sessions(cx: &mut App) -> Task<()> {
         cx.update(|cx| {
             let now_wanted = todo_sessions(cx);
             let mut data = take(cx);
-            merge_sessions(&mut data.sessions, live, &wanted, &now_wanted);
+            if newest_listing(cx, seq) {
+                merge_sessions(&mut data.sessions, live, &wanted, &now_wanted);
+            }
             let now = crate::todo_board::unix_now();
             let since = std::mem::replace(&mut cx.default_global::<Polled>().0, now);
             if crossed_grace(&data.todos, since, now) {
@@ -312,6 +353,20 @@ mod tests {
         let mut ids: Vec<_> = sessions.keys().map(|id| id.0).collect();
         ids.sort_unstable();
         assert_eq!(ids, [1, 4]);
+    }
+
+    /// 慢回来的旧列表只补还没有的会话，不盖掉已经套上的新的；不再要的去掉。
+    #[test]
+    fn a_stale_listing_only_fills_in_missing_sessions() {
+        let mut fresh = session(1);
+        fresh.exited = true;
+        let mut sessions: HashMap<_, _> = [(SessionId(1), fresh), (SessionId(3), session(3))].into();
+        let wanted = HashSet::from([SessionId(1), SessionId(2)]);
+        fill_sessions(&mut sessions, vec![session(1), session(2), session(3)], &wanted);
+        let mut ids: Vec<_> = sessions.keys().map(|id| id.0).collect();
+        ids.sort_unstable();
+        assert_eq!(ids, [1, 2]);
+        assert!(sessions[&SessionId(1)].exited, "新的那份留着");
     }
 
     fn todo(started: Option<u64>, done_at: Option<u64>) -> Todo {
