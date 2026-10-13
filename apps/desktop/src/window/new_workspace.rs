@@ -3,13 +3,13 @@
 //! 它上面开 workspace；克隆是在新 workspace 的第一个终端里跑 `git clone`，进度、要密码和出错都在终端
 //! 里看得见。名字一律按目录取，之后可以重命名。
 
+use crate::ui::theme::ActiveTheme as _;
 use std::path::PathBuf;
 
 use gpui::{
     Context, Div, Entity, ExternalPaths, FocusHandle, Focusable, FontWeight, Hsla, KeyDownEvent, MouseButton,
     PathPromptOptions, Role, SharedString, Stateful, Subscription, Window, div, prelude::*, px, svg,
 };
-use runode_shared_types::color::Rgb;
 
 use super::{NewWorkspace, TITLEBAR_HEIGHT, WindowView, files::shell_quote, model::home_dir};
 use crate::ui::button::{Button, ButtonSize, ButtonVariant};
@@ -20,7 +20,6 @@ use crate::{
         card::Card,
         dialog::Dialog,
         font_size::FontSize,
-        hsla,
         input::{Input, InputEvent, InputState},
     },
 };
@@ -154,11 +153,11 @@ impl WindowView {
         .detach();
     }
 
-    pub(super) fn render_new_workspace(&self, fg: Rgb, bg: Rgb, cx: &mut Context<Self>) -> Option<Stateful<Div>> {
+    pub(super) fn render_new_workspace(&self, cx: &mut Context<Self>) -> Option<Stateful<Div>> {
         let dialog = self.new_workspace.as_ref()?;
-        let panel_bg = hsla(bg.mix(fg, 0.03));
-        let hover_bg = hsla(bg.mix(fg, 0.06));
-        let fg = hsla(fg);
+        let panel_bg = cx.theme().mix(0.03);
+        let hover_bg = cx.theme().mix(0.06);
+        let fg = cx.theme().foreground;
         let border = fg.opacity(0.12);
         let card = || Card::new().flex().flex_col().overflow_hidden();
         // 一个来源一行：左边图标，右边标题和一行说明，整行可点。

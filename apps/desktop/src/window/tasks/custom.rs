@@ -6,6 +6,7 @@
 //! 快捷键按名字找命令，改名、删除时一起改掉、删掉，别的份里还有同名命令时留着原来的。文件由宿主列出来
 //! （`TaskSourceKind::Custom`、`Global`），手机上也看得到。
 
+use crate::ui::theme::ActiveTheme as _;
 use std::{
     fs, io,
     path::{Path, PathBuf},
@@ -20,7 +21,6 @@ use runode_config::{
     keybind::{self, Action},
 };
 use runode_paths::Dirs;
-use runode_shared_types::color::Rgb;
 use serde_json::{Map, Value};
 
 use super::{AddTask, EditTask};
@@ -32,7 +32,6 @@ use crate::{
     ui::{
         a11y::Press,
         font_size::{FontSize, scaled},
-        hsla,
         input::{Input, InputEvent, InputState},
     },
     window::{TITLEBAR_HEIGHT, WindowView},
@@ -278,11 +277,11 @@ impl WindowView {
         .detach();
     }
 
-    pub(in crate::window) fn render_add_task(&self, fg: Rgb, bg: Rgb, cx: &mut Context<Self>) -> Option<Stateful<Div>> {
+    pub(in crate::window) fn render_add_task(&self, cx: &mut Context<Self>) -> Option<Stateful<Div>> {
         let dialog = self.add_task.as_ref()?;
-        let hover_bg = hsla(bg.mix(fg, 0.06));
-        let primary_bg = hsla(bg.mix(fg, 0.16));
-        let fg = hsla(fg);
+        let hover_bg = cx.theme().mix(0.06);
+        let primary_bg = cx.theme().mix(0.16);
+        let fg = cx.theme().foreground;
         let field = |label: String, input: &Entity<InputState>| {
             div()
                 .flex()
@@ -334,7 +333,7 @@ impl WindowView {
             .flex()
             .items_center()
             .rounded(px(6.))
-            .bg(hsla(bg))
+            .bg(cx.theme().background)
             .border_1()
             .border_color(if dialog.recording.is_some() { fg.opacity(0.6) } else { fg.opacity(0.2) })
             .cursor_pointer()
@@ -414,7 +413,7 @@ impl WindowView {
                             .p(px(2.))
                             .gap(px(2.))
                             .rounded(px(6.))
-                            .bg(hsla(bg))
+                            .bg(cx.theme().background)
                             .child(scope(
                                 "add-task-project",
                                 false,

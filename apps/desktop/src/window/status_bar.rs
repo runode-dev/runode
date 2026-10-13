@@ -304,8 +304,8 @@ impl WindowView {
     }
 
     /// 窗口底部的状态栏。
-    pub(super) fn render_status_bar(&self, fg: Rgb, bg: Rgb, cx: &mut Context<Self>) -> Stateful<Div> {
-        let fg_h = hsla(fg);
+    pub(super) fn render_status_bar(&self, cx: &mut Context<Self>) -> Stateful<Div> {
+        let fg_h = cx.theme().foreground;
         let (sleep, effective, total, terminals, ours) = match cx.try_global::<Status>() {
             Some(status) => (
                 status.sleep,
@@ -326,13 +326,13 @@ impl WindowView {
         let sleep_state =
             if effective { rust_i18n::t!("status.sleep_active") } else { rust_i18n::t!("status.sleep_inactive") };
         let sleep_item = self
-            .status_item("status-sleep", StatusPopover::Sleep, fg, bg, cx)
+            .status_item("status-sleep", StatusPopover::Sleep, cx)
             .aria_description(format!("{} · {sleep_state}", sleep_label(sleep)))
             .child(icon(COFFEE_ICON))
             .child(sleep_label(sleep))
             .child(dot);
         let resources_item = self
-            .status_item("status-resources", StatusPopover::Resources, fg, bg, cx)
+            .status_item("status-resources", StatusPopover::Resources, cx)
             .tooltip(tooltip(rust_i18n::t!("status.resources_tooltip"), None))
             .aria_description(format!(
                 "{}: {} · {terminals}",
@@ -345,7 +345,7 @@ impl WindowView {
             .child(icon(SHELL_ICON))
             .child(terminals.to_string());
         let ports_item = self
-            .status_item("status-ports", StatusPopover::Ports { external: false }, fg, bg, cx)
+            .status_item("status-ports", StatusPopover::Ports { external: false }, cx)
             .aria_description(ours.to_string())
             .child(icon(PLUG_ICON))
             .child(ours.to_string());
@@ -362,7 +362,7 @@ impl WindowView {
                 .child(sync_icon("status-update-spinner", true, 13., fg_h.opacity(0.6)))
                 .child(label)
         });
-        let pinned = self.render_pinned_workflows(fg, bg, cx);
+        let pinned = self.render_pinned_workflows(cx);
         let hidden = &cx.global::<AppConfig>().0.status_bar_hidden;
         let shown = |item| !hidden.contains(&item);
         div()
@@ -445,19 +445,12 @@ impl WindowView {
     }
 
     /// 状态栏上的一块：点了弹出 `popover`，再点一下关掉；开着时把浮层挂在它上面。
-    fn status_item(
-        &self,
-        id: &'static str,
-        popover: StatusPopover,
-        fg: Rgb,
-        bg: Rgb,
-        cx: &mut Context<Self>,
-    ) -> Stateful<Div> {
+    fn status_item(&self, id: &'static str, popover: StatusPopover, cx: &mut Context<Self>) -> Stateful<Div> {
         let open = self.status_popover.filter(|open| open.same_kind(popover));
         let content = open.map(|open| match open {
-            StatusPopover::Sleep => self.render_sleep_popover(fg, bg, cx),
-            StatusPopover::Resources => self.render_resources_popover(fg, cx),
-            StatusPopover::Ports { external } => self.render_ports_popover(external, fg, bg, cx),
+            StatusPopover::Sleep => self.render_sleep_popover(cx),
+            StatusPopover::Resources => self.render_resources_popover(cx),
+            StatusPopover::Ports { external } => self.render_ports_popover(external, cx),
         });
         let title = popover.title();
         // 浮层的左下角对着这一块的左上角，往上让出一点；放不下时贴着窗口边挪进来。
@@ -498,8 +491,8 @@ impl WindowView {
             .items_center()
             .gap(px(5.))
             .cursor_pointer()
-            .when(open.is_some(), |item| item.bg(hsla(bg.mix(fg, 0.07))))
-            .hover(|item| item.bg(hsla(bg.mix(fg, 0.10))))
+            .when(open.is_some(), |item| item.bg(cx.theme().mix(0.07)))
+            .hover(|item| item.bg(cx.theme().mix(0.10)))
             // 浮层开着时在捕获阶段就关掉、不再往下传：浮层自己的「点到外面就关」和下面再打开的都不跑。
             .capture_any_mouse_down(cx.listener(move |this, _, _, cx| {
                 if this.status_popover.is_some_and(|open| open.same_kind(popover)) {
@@ -525,8 +518,8 @@ impl WindowView {
             .children(content)
     }
 
-    fn render_sleep_popover(&self, fg: Rgb, bg: Rgb, cx: &mut Context<Self>) -> AnyElement {
-        let fg_h = hsla(fg);
+    fn render_sleep_popover(&self, cx: &mut Context<Self>) -> AnyElement {
+        let fg_h = cx.theme().foreground;
         let (current, effective) = cx
             .try_global::<Status>()
             .map_or((SleepMode::Off, false), |status| (status.sleep, status.caffeinate.is_some()));
@@ -561,8 +554,8 @@ impl WindowView {
                 .rounded(px(6.))
                 .flex()
                 .gap(px(8.))
-                .when(selected, |row| row.bg(hsla(bg.mix(fg, 0.12))))
-                .hover(|row| row.bg(hsla(bg.mix(fg, 0.10))))
+                .when(selected, |row| row.bg(cx.theme().mix(0.12)))
+                .hover(|row| row.bg(cx.theme().mix(0.10)))
                 .child(
                     div()
                         .flex_none()
@@ -609,8 +602,8 @@ impl WindowView {
             .into_any_element()
     }
 
-    fn render_resources_popover(&self, fg: Rgb, cx: &mut Context<Self>) -> AnyElement {
-        let fg_h = hsla(fg);
+    fn render_resources_popover(&self, cx: &mut Context<Self>) -> AnyElement {
+        let fg_h = cx.theme().foreground;
         let Some(status) = cx.try_global::<Status>() else { return div().into_any_element() };
         let procs = &status.procs;
         let total = status.total();
@@ -703,8 +696,8 @@ impl WindowView {
             .into_any_element()
     }
 
-    fn render_ports_popover(&self, external_open: bool, fg: Rgb, bg: Rgb, cx: &mut Context<Self>) -> AnyElement {
-        let fg_h = hsla(fg);
+    fn render_ports_popover(&self, external_open: bool, cx: &mut Context<Self>) -> AnyElement {
+        let fg_h = cx.theme().foreground;
         let Some(status) = cx.try_global::<Status>() else { return div().into_any_element() };
         // 这个窗口里的终端在哪个 workspace；别的窗口里的终端监听的端口不写 workspace。
         let names: HashMap<u32, SharedString> = self
@@ -717,7 +710,7 @@ impl WindowView {
             .collect();
         let (ours, external): (Vec<_>, Vec<_>) =
             status.ports.iter().map(|port| (port, status.port_owner(port))).partition(|(_, owner)| owner.is_some());
-        let hover_bg = hsla(bg.mix(fg, 0.10));
+        let hover_bg = cx.theme().mix(0.10);
         let view = cx.entity().downgrade();
         let port_row = |id: &'static str, port: &Port, workspace: Option<SharedString>| {
             let url = format!("http://localhost:{}", port.port);

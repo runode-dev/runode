@@ -10,7 +10,6 @@ use gpui::{
     MouseDownEvent, Orientation, Render, Role, SharedString, Stateful, TextAlign, Window, canvas, div, img, prelude::*,
     px, relative, svg,
 };
-use runode_shared_types::color::Rgb;
 
 use super::{
     CARD_GAP, DIVIDER_GRAB_WIDTH, Divider, NewWorkspace, PressDown, RenameWorkspace, Renaming, SelectLastWorkspace,
@@ -27,7 +26,6 @@ use crate::{
     ui::{
         display_dir,
         font_size::{self, FontSize, scaled},
-        hsla,
         tooltip::tooltip,
     },
 };
@@ -197,10 +195,10 @@ impl WindowView {
             .on_press_down(cx, |this, window, cx| this.toggle_sidebar(&ToggleSidebar, window, cx))
     }
 
-    pub(super) fn render_sidebar(&self, fg: Rgb, bg: Rgb, window: &Window, cx: &mut Context<Self>) -> Stateful<Div> {
+    pub(super) fn render_sidebar(&self, window: &Window, cx: &mut Context<Self>) -> Stateful<Div> {
         let modifiers = window.modifiers();
-        let rows: Vec<_> = (0..self.workspaces.len()).map(|ix| self.render_row(ix, fg, bg, modifiers, cx)).collect();
-        let drop_bg = hsla(bg.mix(fg, 0.08));
+        let rows: Vec<_> = (0..self.workspaces.len()).map(|ix| self.render_row(ix, modifiers, cx)).collect();
+        let drop_bg = cx.theme().mix(0.08);
         div()
             .id("sidebar")
             .flex_none()
@@ -209,15 +207,15 @@ impl WindowView {
             .flex()
             .flex_col()
             // 卡片样式下侧栏直接画在外框上。
-            .when(!cards(cx), |sidebar| sidebar.bg(hsla(bg.mix(fg, 0.03))).border_r_1().border_color(cx.theme().border))
+            .when(!cards(cx), |sidebar| sidebar.bg(cx.theme().mix(0.03)).border_r_1().border_color(cx.theme().border))
             // 从访达拖来的东西悬在侧栏上时提示放下能开 workspace；放下由窗口根上的 `open_dropped_dirs` 办。
             .drag_over::<ExternalPaths>(move |style, _, _, _| style.bg(drop_bg))
             .text_size(FontSize::Body)
             // 顶上这条放红绿灯（全屏时没有）和侧栏开关，和标题栏一样能拖动窗口、双击缩放，比标题栏
             // 多留一点，第一行不贴着开关。
             .child(div().flex_none().h(px(TITLEBAR_HEIGHT + 6.)).on_mouse_down(MouseButton::Left, drag_window))
-            .child(self.render_mobile_entry(fg, bg, cx))
-            .child(self.render_todo_board_entry(fg, bg, cx))
+            .child(self.render_mobile_entry(cx))
+            .child(self.render_todo_board_entry(cx.theme().fg_rgb(), cx.theme().bg_rgb(), cx))
             // 手机端和任务板的入口不是 workspace，和下面的列表用一条线隔开。
             .child(div().flex_none().mx(px(14.)).mb(px(6.)).h(px(1.)).bg(cx.theme().border))
             .child(
@@ -236,20 +234,20 @@ impl WindowView {
                     .gap(px(2.))
                     .children(rows),
             )
-            .children(self.render_background(fg, bg, cx))
-            .child(self.render_sidebar_footer(fg, cx))
+            .children(self.render_background(cx))
+            .child(self.render_sidebar_footer(cx))
     }
 
-    fn render_row(&self, ix: usize, fg: Rgb, bg: Rgb, modifiers: Modifiers, cx: &mut Context<Self>) -> Stateful<Div> {
+    fn render_row(&self, ix: usize, modifiers: Modifiers, cx: &mut Context<Self>) -> Stateful<Div> {
         let workspace = &self.workspaces[ix];
         let id = workspace.id;
         // 开着手机端引导页、任务板时高亮的是入口。
         let active = ix == self.active && self.mobile.is_none() && self.todo_board.is_none();
-        let active_bg = hsla(bg.mix(fg, 0.10));
-        let hover_bg = hsla(bg.mix(fg, 0.06));
+        let active_bg = cx.theme().mix(0.10);
+        let hover_bg = cx.theme().mix(0.06);
         let close_label = rust_i18n::t!("menu.close_workspace");
         let close_tooltip = tooltip(close_label.clone(), None);
-        let fg = hsla(fg);
+        let fg = cx.theme().foreground;
         let group = SharedString::from(format!("workspace-{ix}"));
         let renaming = self.renaming.as_ref().filter(|renaming| renaming.id == id);
         // 名字前是 GitHub 头像，不在 GitHub 上的仓库画 git 图标；agent 的标记跟在名字后面。
@@ -419,32 +417,25 @@ impl WindowView {
     }
 
     /// 侧栏底部一行：左边新建工作区，右边打开设置页。
-    fn render_sidebar_footer(&self, fg: Rgb, cx: &mut Context<Self>) -> Div {
+    fn render_sidebar_footer(&self, cx: &mut Context<Self>) -> Div {
         let settings = rust_i18n::t!("workspace.settings");
         let settings_tooltip = tooltip(settings.clone(), Some(&OpenSettings));
-        div()
-            .flex_none()
-            .h(scaled(32.))
-            .m(px(6.))
-            .flex()
-            .gap(px(2.))
-            .child(self.render_new_workspace_button(fg, cx))
-            .child(
-                Button::new("sidebar-settings", settings)
-                    .icon(SETTINGS_ICON)
-                    .icon_size(15.)
-                    .with_size(ButtonSize::Icon)
-                    .w(px(32.))
-                    .h_auto()
-                    .rounded(px(6.))
-                    .tooltip(settings_tooltip)
-                    .on_press_down(cx, |this, window, cx| this.open_settings(window, cx)),
-            )
+        div().flex_none().h(scaled(32.)).m(px(6.)).flex().gap(px(2.)).child(self.render_new_workspace_button(cx)).child(
+            Button::new("sidebar-settings", settings)
+                .icon(SETTINGS_ICON)
+                .icon_size(15.)
+                .with_size(ButtonSize::Icon)
+                .w(px(32.))
+                .h_auto()
+                .rounded(px(6.))
+                .tooltip(settings_tooltip)
+                .on_press_down(cx, |this, window, cx| this.open_settings(window, cx)),
+        )
     }
 
-    fn render_new_workspace_button(&self, fg: Rgb, cx: &mut Context<Self>) -> Button {
+    fn render_new_workspace_button(&self, cx: &mut Context<Self>) -> Button {
         let tooltip = tooltip(rust_i18n::t!("workspace.new"), Some(&NewWorkspace));
-        let fg = hsla(fg);
+        let fg = cx.theme().foreground;
         Button::new("new-workspace", rust_i18n::t!("workspace.new"))
             .flex_1()
             .min_w_0()

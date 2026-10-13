@@ -19,7 +19,6 @@ use std::{
 use anyhow::Result;
 use gpui::{App, Context, Div, Global, PromptLevel, Role, SharedString, Stateful, Task, Window, div, prelude::*, px};
 use runode_protocol::{SessionId, SessionInfo};
-use runode_shared_types::color::Rgb;
 
 use super::{
     AGENT_MARK_WIDTH, PressDown, WindowView, agents::Mark, cards, quit::held_sessions, titlebar::styled_agent_mark,
@@ -30,7 +29,6 @@ use crate::{
     ui::{
         display_dir,
         font_size::{FontSize, scaled},
-        hsla,
     },
 };
 
@@ -212,14 +210,13 @@ impl WindowView {
     }
 
     /// 侧栏里的「后台会话」一组；没有后台会话时为空。
-    pub(super) fn render_background(&self, fg: Rgb, bg: Rgb, cx: &mut Context<Self>) -> Option<Stateful<Div>> {
+    pub(super) fn render_background(&self, cx: &mut Context<Self>) -> Option<Stateful<Div>> {
         let sessions = cx.try_global::<BackgroundSessions>()?.sessions.clone();
         if sessions.is_empty() {
             return None;
         }
-        let rows: Vec<_> =
-            sessions.iter().enumerate().map(|(ix, session)| background_row(ix, session, fg, bg, cx)).collect();
-        let fg = hsla(fg);
+        let rows: Vec<_> = sessions.iter().enumerate().map(|(ix, session)| background_row(ix, session, cx)).collect();
+        let fg = cx.theme().foreground;
         let header = div()
             .flex_none()
             .h(scaled(28.))
@@ -279,10 +276,10 @@ fn end_sessions(ids: &[SessionId], cx: &mut App) {
 
 /// 「后台会话」里的一行：agent 标记，标题，下面是 agent 和状态、目录。点了在当前 workspace 新开
 /// 标签接上它。
-fn background_row(ix: usize, session: &SessionInfo, fg: Rgb, bg: Rgb, cx: &mut Context<WindowView>) -> Stateful<Div> {
+fn background_row(ix: usize, session: &SessionInfo, cx: &mut Context<WindowView>) -> Stateful<Div> {
     let id = session.id;
-    let hover_bg = hsla(bg.mix(fg, 0.06));
-    let fg = hsla(fg);
+    let hover_bg = cx.theme().mix(0.06);
+    let fg = cx.theme().foreground;
     let mark = match session.meta.agent {
         Some(agent) => styled_agent_mark(Mark::new(agent, false), ("background-agent", ix), fg, cards(cx)),
         None => div().flex_none().w(px(AGENT_MARK_WIDTH)).into_any_element(),

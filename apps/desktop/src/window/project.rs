@@ -393,15 +393,13 @@ impl WindowView {
     pub(super) fn render_side_panel(
         &mut self,
         width: f32,
-        fg: Rgb,
-        bg: Rgb,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
         match self.workspace().panel? {
             SidePanel::Files => Some(self.render_files_panel(width, cx).into_any_element()),
             SidePanel::Git => Some(self.render_git_panel(width, window, cx).into_any_element()),
-            SidePanel::GitHubActions => Some(self.render_github_actions_panel(width, fg, bg, cx).into_any_element()),
+            SidePanel::GitHubActions => Some(self.render_github_actions_panel(width, cx).into_any_element()),
         }
     }
 

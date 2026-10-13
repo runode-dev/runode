@@ -8,7 +8,7 @@ use gpui::{
     MouseButton, MouseDownEvent, Pixels, Render, Role, SharedString, Stateful, TitlebarOptions, Window, div,
     linear_color_stop, linear_gradient, point, prelude::*, px, svg,
 };
-use runode_shared_types::{agent::AgentKind, color::Rgb};
+use runode_shared_types::agent::AgentKind;
 
 use super::{
     AGENT_MARK_WIDTH, NEW_TAB_BUTTON_WIDTH, NewTab, PressDown, SelectLastTab, SelectTab, TAB_CLOSE_SIZE,
@@ -220,7 +220,7 @@ const PROMPT_COLOR: u32 = 0xEDEDED;
 /// 卡片样式下标签前面的图标叠：当前分屏的图标在最前，其余分屏（最多再两个）压在后面，往右错开
 /// 露出一条边。有 logo 的 agent 是浅底上的 logo，压在后面时铺它的代表色；shell 和别的程序是深底
 /// 上的提示符。
-fn tab_icons(tab: &Tab, fg: Rgb, bg: Rgb, cx: &App) -> Div {
+fn tab_icons(tab: &Tab, cx: &App) -> Div {
     let others = tab.root.leaves().into_iter().filter(|id| *id != tab.focused);
     let kinds: Vec<Option<AgentKind>> = std::iter::once(tab.focused)
         .chain(others)
@@ -230,9 +230,8 @@ fn tab_icons(tab: &Tab, fg: Rgb, bg: Rgb, cx: &App) -> Div {
             agent.map(|agent| agent.kind).filter(|kind| accent(*kind).is_some())
         })
         .collect();
-    let light = crate::ui::theme::is_light(fg, bg);
-    let logo_bg = if light { gpui::white() } else { hsla(bg.mix(fg, 0.14)) };
-    let fg = hsla(fg);
+    let logo_bg = if cx.theme().is_light { gpui::white() } else { cx.theme().mix(0.14) };
+    let fg = cx.theme().foreground;
     let tile = |color: Hsla| {
         div()
             .absolute()
@@ -276,30 +275,21 @@ pub(super) fn shortcut_hint(select: &dyn Action, last: &dyn Action, is_last: boo
 }
 
 impl WindowView {
-    pub(super) fn render_tab(
-        &self,
-        ix: usize,
-        width: Pixels,
-        cards: bool,
-        fg: Rgb,
-        bg: Rgb,
-        cx: &mut Context<Self>,
-    ) -> Stateful<Div> {
+    pub(super) fn render_tab(&self, ix: usize, width: Pixels, cards: bool, cx: &mut Context<Self>) -> Stateful<Div> {
         let workspace = self.workspace();
         let tab = &workspace.tabs[ix];
         let id = tab.id;
         let title = SharedString::from(tab.focused_view().read(cx).title().to_owned());
         let mark = tab.mark(cx);
         let active = ix == workspace.active;
-        let rgb_fg = fg;
         // 卡片样式下当前标签是终端背景色的胶囊，从标签条上浮起来。
         let (active_bg, hover_bg) = if cards {
-            let (track, pill) = crate::ui::theme::tab_track_colors(fg, bg);
+            let (track, pill) = crate::ui::theme::tab_track_colors(cx.theme().fg_rgb(), cx.theme().bg_rgb());
             (hsla(pill), hsla(track.mix(pill, 0.5)))
         } else {
-            (hsla(bg.mix(fg, 0.08)), hsla(bg.mix(fg, 0.04)))
+            (cx.theme().mix(0.08), cx.theme().mix(0.04))
         };
-        let icons = cards.then(|| tab_icons(tab, fg, bg, cx));
+        let icons = cards.then(|| tab_icons(tab, cx));
         let label = cards.then(|| pane_label(tab.focused_view().read(cx)));
         // 报给辅助工具的名字是标签上写的标题，agent 的状态和响铃这些只画成图形的写进说明。
         let a11y_label = label.as_ref().map_or_else(|| title.clone(), |(name, _)| name.clone());
@@ -315,7 +305,7 @@ impl WindowView {
         let close_label = rust_i18n::t!("menu.close_tab");
         let close_tooltip = tooltip(close_label.clone(), None);
         let driven_tooltip = tab.driven(now_ms(), cx).then(|| tooltip(rust_i18n::t!("driver.tab"), None));
-        let fg = hsla(fg);
+        let fg = cx.theme().foreground;
         let group = SharedString::from(format!("tab-{ix}"));
         // 当前标签自己就是一块亮色，和它相邻的分隔线去掉，只是不画颜色，免得宽度跳动。
         let divider = if active || ix == workspace.active + 1 { fg.opacity(0.) } else { cx.theme().border };
@@ -413,8 +403,7 @@ impl WindowView {
                 (Some(icons), Some((name, dir))) => {
                     // 卡片样式：图标叠、靠左的名字和目录（放不下时末尾渐隐）、状态标记，悬停时右边出关闭
                     // 按钮。两个不是当前标签的标签之间画一条短竖线。
-                    let tab_bg =
-                        if active { active_bg } else { hsla(crate::ui::theme::tab_track_colors(rgb_fg, bg).0) };
+                    let tab_bg = if active { active_bg } else { cx.theme().tab_track };
                     let separator = ix > 0 && !active && ix != workspace.active + 1;
                     let fade = |color: Hsla| {
                         linear_gradient(90., linear_color_stop(color.opacity(0.), 0.), linear_color_stop(color, 1.))

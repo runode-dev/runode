@@ -1,6 +1,7 @@
 //! 标签里的终端区：分屏树、分隔线、拖动分隔线时的遮罩，以及别的终端里的程序（经命令行）正在
 //! 操作某个分屏时右上角的驱动标记。
 
+use crate::ui::theme::ActiveTheme as _;
 use std::{
     borrow::Cow,
     collections::HashMap,
@@ -14,7 +15,6 @@ use gpui::{
 };
 use runode_protocol::SessionId;
 use runode_shared_types::{
-    color::Rgb,
     pane::{Axis, Node},
     session::{DriveAction, Driver},
 };
@@ -40,7 +40,6 @@ use crate::{
     },
     ui::{
         font_size::FontSize,
-        hsla,
         tooltip::{shortcut_text, tooltip},
     },
 };
@@ -114,22 +113,22 @@ impl Tab {
 
 impl WindowView {
     /// 当前标签的终端区：分屏树，或者放大着的那一个终端；workspace 里没有标签时是空的标签区。
-    pub(super) fn render_panes(&mut self, fg: Rgb, bg: Rgb, window: &Window, cx: &mut Context<Self>) -> AnyElement {
+    pub(super) fn render_panes(&mut self, window: &Window, cx: &mut Context<Self>) -> AnyElement {
         let now = now_ms();
         let badges = self.driver_badges(now, window, cx);
         // 这一帧画出来的分隔线再记下位置；不在画面上的（比如折叠时拿掉的）查不到，按键调大小时就跳过它。
         self.layout.borrow_mut().splits.clear();
         self.schedule_driver_redraw(now, cx);
         let Some(tab) = self.tab() else {
-            return self.render_empty_tab(fg, cx);
+            return self.render_empty_tab(cx);
         };
         if tab.zoomed || tab.root.is_leaf() {
-            return self.render_leaf(tab, tab.focused, &badges, fg, bg, window, cx);
+            return self.render_leaf(tab, tab.focused, &badges, window, cx);
         }
         let folded: Vec<EntityId> =
             if cards(cx) { tab.root.leaves().into_iter().filter(|id| tab.folded(*id)).collect() } else { Vec::new() };
         if folded.is_empty() {
-            return self.render_node(tab, &tab.root, &badges, fg, bg, window, cx);
+            return self.render_node(tab, &tab.root, &badges, window, cx);
         }
         // 折叠的分屏从分屏树里拿掉，只剩标题条，在终端区底部排成一行；当前分屏不会折叠，树不会空。
         // 拿掉的是一份拷贝，原来的树和比例不动，展开后回到原位。
@@ -145,7 +144,7 @@ impl WindowView {
                     .min_w_0()
                     .max_w(px(FOLDED_MAX_WIDTH))
                     .h_full()
-                    .child(self.render_leaf(tab, id, &badges, fg, bg, window, cx))
+                    .child(self.render_leaf(tab, id, &badges, window, cx))
             })
             .collect::<Vec<_>>();
         div()
@@ -153,15 +152,15 @@ impl WindowView {
             .flex()
             .flex_col()
             .gap(px(CARD_GAP))
-            .child(div().flex_1().min_h_0().child(self.render_node(tab, &root, &badges, fg, bg, window, cx)))
+            .child(div().flex_1().min_h_0().child(self.render_node(tab, &root, &badges, window, cx)))
             // 卡片的边框各占一像素。
             .child(div().flex_none().h(px(PANE_HEADER_HEIGHT + 2.)).flex().gap(px(CARD_GAP)).children(bar))
             .into_any_element()
     }
 
     /// 没有标签的 workspace 的终端区：一句说明和新建标签的按钮。接着窗口自己的焦点，快捷键照常派发。
-    fn render_empty_tab(&self, fg: Rgb, cx: &mut Context<Self>) -> AnyElement {
-        let fg = hsla(fg);
+    fn render_empty_tab(&self, cx: &mut Context<Self>) -> AnyElement {
+        let fg = cx.theme().foreground;
         let shortcut = shortcut_text(&NewTab, cx);
         let button = Button::new("empty-new-tab", rust_i18n::t!("menu.new_tab"))
             .variant(ButtonVariant::Outline)
@@ -281,15 +280,13 @@ impl WindowView {
         tab: &Tab,
         id: EntityId,
         badges: &HashMap<EntityId, SharedString>,
-        fg: Rgb,
-        bg: Rgb,
         window: &Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let view = tab.panes[&id].0.clone();
         let dimmed = !tab.zoomed && !tab.root.is_leaf() && id != tab.focused;
         let layout = self.layout.clone();
-        let badge = badges.get(&id).map(|text| driver_badge(("driver-badge", id), text.clone(), fg, bg));
+        let badge = badges.get(&id).map(|text| driver_badge(("driver-badge", id), text.clone(), cx));
         let cards = cards(cx);
         let label = pane_label(view.read(cx));
         let (split, focused) = (!tab.zoomed && !tab.root.is_leaf(), id == tab.focused);
@@ -318,7 +315,9 @@ impl WindowView {
                 .size_full(),
             )
             // 蒙层没有鼠标处理，点击照样落到下面的终端上。
-            .when(dimmed, |leaf| leaf.child(div().absolute().size_full().bg(hsla(bg).opacity(UNFOCUSED_DIM))))
+            .when(dimmed, |leaf| {
+                leaf.child(div().absolute().size_full().bg(cx.theme().background.opacity(UNFOCUSED_DIM)))
+            })
             .children(badge)
             // 从文件树或访达拖来的文件放到这个终端上：切到它，把路径打进去。
             .on_drop(cx.listener(move |this, dragged: &DraggedFile, window, cx| {
@@ -341,7 +340,7 @@ impl WindowView {
                 .relative()
                 .size_full()
                 .overflow_hidden()
-                .child(self.render_pane_header(tab, id, group, fg, bg, cx))
+                .child(self.render_pane_header(tab, id, group, cx))
                 .child(
                     canvas(move |bounds, _, _| _ = layout.borrow_mut().panes.insert(id, bounds), |_, (), _, _| {})
                         .absolute()
@@ -358,7 +357,7 @@ impl WindowView {
             .size_full()
             .flex()
             .flex_col()
-            .child(self.render_pane_header(tab, id, group, fg, bg, cx))
+            .child(self.render_pane_header(tab, id, group, cx))
             .child(
                 div()
                     .relative()
@@ -378,8 +377,6 @@ impl WindowView {
         tab: &Tab,
         id: EntityId,
         group: SharedString,
-        fg: Rgb,
-        bg: Rgb,
         cx: &mut Context<Self>,
     ) -> Stateful<Div> {
         let split = !tab.root.is_leaf();
@@ -388,7 +385,7 @@ impl WindowView {
         let narrow =
             self.layout.borrow().panes.get(&id).is_some_and(|bounds| bounds.size.width < px(PANE_BUTTONS_MIN_WIDTH));
         let (name, dir) = pane_label(tab.panes[&id].0.read(cx));
-        let fg_hsla = hsla(fg);
+        let fg_hsla = cx.theme().foreground;
         // 有 logo 的 agent：前面放 logo，状态标记跟在标题后面；没有 logo 的 agent 状态标记放前面。
         let mark = tab.pane_mark(id, cx);
         let logo = mark.and_then(|mark| agent_logo(mark.kind, px(14.), fg_hsla.opacity(0.85)));
@@ -405,6 +402,7 @@ impl WindowView {
                 .into_any_element(),
         };
         type Handler = fn(&mut WindowView, EntityId, &mut Window, &mut Context<WindowView>);
+        let hover_bg = cx.theme().mix(0.06);
         let mut button = |key: &'static str,
                           icon: &'static str,
                           text: Cow<'static, str>,
@@ -419,7 +417,6 @@ impl WindowView {
                 .on_press_down(cx, move |this, window, cx| handler(this, id, window, cx))
         };
         let folded = split && tab.folded(id);
-        let hover_bg = hsla(bg.mix(fg, 0.06));
         // 展开和点标题条一样：`focus_pane_from_header` 先把它展开。
         let fold = if folded {
             Some(button(
@@ -592,22 +589,20 @@ impl WindowView {
         tab: &Tab,
         node: &Node<EntityId>,
         badges: &HashMap<EntityId, SharedString>,
-        fg: Rgb,
-        bg: Rgb,
         window: &Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let split = match node {
-            Node::Leaf(id) => return self.render_leaf(tab, *id, badges, fg, bg, window, cx),
+            Node::Leaf(id) => return self.render_leaf(tab, *id, badges, window, cx),
             Node::Split(split) => split,
         };
         let (id, axis, ratio) = (split.id, split.axis, split.ratio);
         let horizontal = axis == Axis::Horizontal;
-        let first = self.render_node(tab, &split.first, badges, fg, bg, window, cx);
-        let second = self.render_node(tab, &split.second, badges, fg, bg, window, cx);
+        let first = self.render_node(tab, &split.first, badges, window, cx);
+        let second = self.render_node(tab, &split.second, badges, window, cx);
         // 卡片样式下两张卡片之间空出 `CARD_GAP`，空隙本身就是分隔线；经典样式下是一像素的线。
         let cards = cards(cx);
-        let line = if cards { hsla(fg).opacity(0.) } else { hsla(fg).opacity(0.15) };
+        let line = if cards { cx.theme().foreground.opacity(0.) } else { cx.theme().foreground.opacity(0.15) };
         let gap = if cards { CARD_GAP } else { 1. };
         let grab = if cards { CARD_GAP } else { DIVIDER_GRAB_WIDTH };
         let layout = self.layout.clone();
@@ -788,7 +783,7 @@ fn pane_group<E: StatefulInteractiveElement + IntoElement>(
 }
 
 /// 分屏右上角的驱动标记。没有鼠标处理，点击照样落到下面的终端上。
-fn driver_badge(id: impl Into<gpui::ElementId>, text: SharedString, fg: Rgb, bg: Rgb) -> Badge {
+fn driver_badge(id: impl Into<gpui::ElementId>, text: SharedString, cx: &gpui::App) -> Badge {
     Badge::new(text.clone())
         .variant(BadgeVariant::Outline)
         .id(id)
@@ -803,9 +798,9 @@ fn driver_badge(id: impl Into<gpui::ElementId>, text: SharedString, fg: Rgb, bg:
         .px(px(8.))
         .py(px(3.))
         .rounded(px(6.))
-        .bg(hsla(bg.mix(fg, 0.12)).opacity(0.92))
+        .bg(cx.theme().mix(0.12).opacity(0.92))
         .text_size(FontSize::Small)
-        .text_color(hsla(fg).opacity(0.8))
+        .text_color(cx.theme().foreground.opacity(0.8))
 }
 
 #[cfg(test)]

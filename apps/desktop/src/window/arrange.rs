@@ -12,13 +12,10 @@ use gpui::{
     Context, Div, FocusHandle, Focusable, Hsla, KeyDownEvent, Role, SharedString, Stateful, Subscription, Window,
     actions, div, prelude::*, px, relative,
 };
-use runode_shared_types::{
-    color::Rgb,
-    pane::{Axis, Node, Rect, SplitId},
-};
+use runode_shared_types::pane::{Axis, Node, Rect, SplitId};
 
 use super::{PressDown, TITLEBAR_HEIGHT, WindowView};
-use crate::ui::{font_size::FontSize, hsla};
+use crate::ui::font_size::FontSize;
 
 actions!(
     runode,
@@ -211,11 +208,11 @@ impl WindowView {
     }
 
     /// 浮在标题栏下方正中的排列浮层：方向、个数、排出来的样子和打开按钮。
-    pub(super) fn render_arrange_picker(&self, fg: Rgb, bg: Rgb, cx: &mut Context<Self>) -> Option<Div> {
+    pub(super) fn render_arrange_picker(&self, cx: &mut Context<Self>) -> Option<Div> {
         let picker = self.arrange_picker.as_ref()?;
-        let selected_bg = hsla(bg.mix(fg, 0.16));
-        let hover_bg = hsla(bg.mix(fg, 0.09));
-        let fg = hsla(fg);
+        let selected_bg = cx.theme().mix(0.16);
+        let hover_bg = cx.theme().mix(0.09);
+        let fg = cx.theme().foreground;
         let choice = |id: (&'static str, usize), label: SharedString, selected: bool| -> Stateful<Div> {
             div()
                 .id(id)

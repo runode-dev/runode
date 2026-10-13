@@ -98,9 +98,9 @@ use crate::ui::{
     panel::{DIVIDER_GRAB_WIDTH, PANE_HEADER_HEIGHT},
     row_buttons,
     tabs::TAB_CLOSE_SIZE,
-    theme::{ActiveTheme as _, Theme, ansi_colors, frame_color, tab_track_colors},
+    theme::{ActiveTheme as _, Theme, ansi_colors},
 };
-use crate::{config::AppConfig, prespawn::Prespawned, terminal_view::TerminalView, ui::font_size::FontSize, ui::hsla};
+use crate::{config::AppConfig, prespawn::Prespawned, terminal_view::TerminalView, ui::font_size::FontSize};
 use model::{PaneLayout, Workspace, WorkspaceId, home_dir};
 use persist::format::SavedWindow;
 use runode_file_tree::FileTree;
@@ -533,6 +533,7 @@ impl WindowView {
 
 impl WindowView {
     /// 窗口跟着走的前景色和背景色：有焦点的终端当前的配色，没有终端时按配置。
+    /// 只给 `follow_colors` 换主题用（任务板拆出去前也还传给它），别处画的时候从主题（`cx.theme()`）读。
     fn colors(&self, cx: &mut App) -> (Rgb, Rgb) {
         match self.focused_view() {
             Some(view) => view.update(cx, |view, _| view.colors()),
@@ -585,8 +586,7 @@ impl WindowView {
     }
 
     fn render_sidebar_slot(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
-        let (fg, bg) = self.colors(cx);
-        self.render_sidebar(fg, bg, window, cx).into_any_element()
+        self.render_sidebar(window, cx).into_any_element()
     }
 
     fn render_titlebar_slot(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
@@ -595,22 +595,19 @@ impl WindowView {
 
     /// 在终端区右边占一栏的预览栏；放大的预览栏盖在终端上，不经这里。
     fn render_preview_slot(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
-        let (fg, bg) = self.colors(cx);
         let width = self.right_panel_widths(f32::from(window.viewport_size().width), cx).preview;
         // 经典样式下右侧面板收着时预览栏贴着窗口右边。
         let rightmost = !cards(cx) && self.workspace().panel.is_none();
-        self.render_preview(width, rightmost, fg, bg, cx)
+        self.render_preview(width, rightmost, cx)
     }
 
     fn render_panel_slot(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
-        let (fg, bg) = self.colors(cx);
         let width = self.right_panel_widths(f32::from(window.viewport_size().width), cx).panel;
-        self.render_side_panel(width, fg, bg, window, cx).unwrap_or_else(|| Empty.into_any_element())
+        self.render_side_panel(width, window, cx).unwrap_or_else(|| Empty.into_any_element())
     }
 
     fn render_status_bar_slot(&mut self, _: &mut Window, cx: &mut Context<Self>) -> AnyElement {
-        let (fg, bg) = self.colors(cx);
-        self.render_status_bar(fg, bg, cx).into_any_element()
+        self.render_status_bar(cx).into_any_element()
     }
 }
 
@@ -679,24 +676,26 @@ impl Render for WindowView {
         self.focus_menu(window, cx);
         let (fg, bg) = self.colors(cx);
         self.follow_colors(fg, bg, cx);
+        // 主题刚按这个窗口的配色换上，下面都从它读。
+        let theme = cx.theme().clone();
         let (base, body) = if let Some(page) = &self.settings {
-            (bg, vec![page.view.clone().into_any_element()])
+            (theme.background, vec![page.view.clone().into_any_element()])
         } else if self.mobile.is_some() {
-            (if cards(cx) { frame_color(fg, bg) } else { bg }, self.render_mobile_body(fg, bg, window, cx))
+            (if cards(cx) { theme.frame } else { theme.background }, self.render_mobile_body(window, cx))
         } else if self.todo_board.is_some() {
-            (if cards(cx) { frame_color(fg, bg) } else { bg }, self.render_todo_body(fg, bg, window, cx))
+            (if cards(cx) { theme.frame } else { theme.background }, self.render_todo_body(fg, bg, window, cx))
         } else if cards(cx) {
-            (frame_color(fg, bg), self.render_cards_body(fg, bg, window, cx))
+            (theme.frame, self.render_cards_body(window, cx))
         } else {
-            (bg, self.render_classic_body(fg, bg, window, cx))
+            (theme.background, self.render_classic_body(window, cx))
         };
         let drag = self.dragging_divider.map(|divider| self.render_divider_drag(divider, cx));
         let menu = self.render_context_menu(window, cx);
-        let agent_picker = self.render_agent_picker(fg, bg, window, cx);
-        let arrange_picker = self.render_arrange_picker(fg, bg, cx);
+        let agent_picker = self.render_agent_picker(window, cx);
+        let arrange_picker = self.render_arrange_picker(cx);
         let branch_picker = self.render_branch_picker(cx);
-        let new_workspace = self.render_new_workspace(fg, bg, cx);
-        let add_task = self.render_add_task(fg, bg, cx);
+        let new_workspace = self.render_new_workspace(cx);
+        let add_task = self.render_add_task(cx);
         let commit_message_dialog = self.render_commit_message_dialog(cx);
         let todo_dialog = self.render_todo_dialog(fg, bg, cx);
         let status_bar = (self.settings.is_none() && status_bar::shown(cx))
@@ -790,7 +789,7 @@ impl Render for WindowView {
             .size_full()
             .flex()
             .flex_col()
-            .bg(hsla(base))
+            .bg(base)
             .child(
                 div()
                     .id("window-content")
@@ -847,16 +846,10 @@ impl WindowView {
     }
 
     /// 经典样式：终端铺满窗口，侧栏、标题栏和右侧面板之间一条细线；只有一个标签时标题栏只写标题。
-    fn render_classic_body(
-        &mut self,
-        fg: Rgb,
-        bg: Rgb,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> Vec<AnyElement> {
+    fn render_classic_body(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Vec<AnyElement> {
         let slots = self.slots(cx);
         let ClassicTitlebar { fullscreen, shown: titlebar_shown, right_column, .. } = self.classic_titlebar(window, cx);
-        let panes = self.render_panes(fg, bg, window, cx);
+        let panes = self.render_panes(window, cx);
         let sidebar = self.sidebar_visible().then(|| column_slot(&slots.sidebar, self.sidebar_width(), window));
         let sidebar_toggle = (titlebar_shown || sidebar.is_some()).then(|| self.render_sidebar_toggle(fullscreen, cx));
         let sidebar_width = if sidebar.is_some() { self.sidebar_width() } else { 0. };
@@ -866,7 +859,7 @@ impl WindowView {
         // 放大的预览栏盖在终端区上，宽度是终端区的宽度。它盖着终端，跟着终端一起重画，不缓存。
         let maximized_preview = self.preview_maximized(cx).then(|| {
             let width = f32::from(window.viewport_size().width) - sidebar_width - widths.panel;
-            self.render_preview(width, false, fg, bg, cx)
+            self.render_preview(width, false, cx)
         });
         let preview = preview_column.then(|| column_slot(&slots.preview, widths.preview, window));
         let panel = self.workspace().panel.is_some().then(|| column_slot(&slots.panel, widths.panel, window));
@@ -904,7 +897,6 @@ impl WindowView {
 
     /// 经典样式的标题栏：多个标签时是标签条和新建标签按钮，只有一个时居中写标题。
     fn render_classic_titlebar(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
-        let (fg, bg) = self.colors(cx);
         let ClassicTitlebar { show_tabs, left_inset, right_inset, .. } = self.classic_titlebar(window, cx);
         let tab_count = self.workspace().tabs.len();
         let sidebar_width = if self.sidebar_visible() { self.sidebar_width() } else { 0. };
@@ -926,9 +918,7 @@ impl WindowView {
                 .flex()
                 .overflow_x_scroll()
                 .track_scroll(&self.workspace().tab_scroll)
-                .children(
-                    (0..tab_count).map(|ix| self.render_tab(ix, tab_width, false, fg, bg, cx)).collect::<Vec<_>>(),
-                );
+                .children((0..tab_count).map(|ix| self.render_tab(ix, tab_width, false, cx)).collect::<Vec<_>>());
             let inset = div()
                 .id("panel-toggles-inset")
                 .flex_none()
@@ -950,7 +940,7 @@ impl WindowView {
                 None => self.workspace().name.clone(),
             };
             let mark = self.tab().and_then(|tab| tab.mark(cx));
-            let fg = hsla(fg);
+            let fg = cx.theme().foreground;
             let inset = left_inset.max(right_inset);
             vec![
                 div()
@@ -993,11 +983,11 @@ impl WindowView {
     /// 卡片样式：窗口底色是比终端深一档的外框，分屏和右侧面板各是一张圆角卡片，卡片之间和卡片
     /// 到窗口边留出 `CARD_GAP`。标题栏横跨侧栏以外的整个宽度：左边是这台机器，中间是胶囊样式的
     /// 标签（只有一个标签时也画），右边是新建标签和右侧面板的开关。
-    fn render_cards_body(&mut self, fg: Rgb, bg: Rgb, window: &mut Window, cx: &mut Context<Self>) -> Vec<AnyElement> {
+    fn render_cards_body(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Vec<AnyElement> {
         let slots = self.slots(cx);
         let fullscreen = window.is_fullscreen();
         let viewport = f32::from(window.viewport_size().width);
-        let panes = self.render_panes(fg, bg, window, cx);
+        let panes = self.render_panes(window, cx);
         let sidebar = self.sidebar_visible().then(|| column_slot(&slots.sidebar, self.sidebar_width(), window));
         let sidebar_toggle = self.render_sidebar_toggle(fullscreen, cx);
         let sidebar_width = if sidebar.is_some() { self.sidebar_width() } else { 0. };
@@ -1008,7 +998,7 @@ impl WindowView {
         let maximized_preview = self.preview_maximized(cx).then(|| {
             let panel = if self.workspace().panel.is_some() { widths.panel + CARD_GAP } else { 0. };
             let width = viewport - sidebar_width - 2. * CARD_GAP - panel;
-            self.render_preview(width, false, fg, bg, cx)
+            self.render_preview(width, false, cx)
         });
         let preview = self.preview_in_column(cx).then(|| column_slot(&slots.preview, widths.preview, window));
         let panel = self.workspace().panel.is_some().then(|| column_slot(&slots.panel, widths.panel, window));
@@ -1048,7 +1038,6 @@ impl WindowView {
 
     /// 卡片样式的标题栏：左边给侧栏开关让位，中间是胶囊样式的标签条，右边是新建标签和右侧面板的开关。
     fn render_cards_titlebar(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
-        let (fg, bg) = self.colors(cx);
         let viewport = f32::from(window.viewport_size().width);
         let tab_count = self.workspace().tabs.len();
         let sidebar_visible = self.sidebar_visible();
@@ -1061,7 +1050,7 @@ impl WindowView {
         let tab_count_f = tab_count.max(1) as f32;
         let tab_width =
             px(((viewport - fixed - 2. * (tab_count_f + 1.)) / tab_count_f).clamp(TAB_MIN_WIDTH, TAB_MAX_WIDTH));
-        let track_bg = hsla(tab_track_colors(fg, bg).0);
+        let track_bg = cx.theme().tab_track;
         let strip = div()
             .id("tabs")
             .role(Role::TabList)
@@ -1076,7 +1065,7 @@ impl WindowView {
             .items_center()
             .overflow_x_scroll()
             .track_scroll(&self.workspace().tab_scroll)
-            .children((0..tab_count).map(|ix| self.render_tab(ix, tab_width, true, fg, bg, cx)).collect::<Vec<_>>());
+            .children((0..tab_count).map(|ix| self.render_tab(ix, tab_width, true, cx)).collect::<Vec<_>>());
         div()
             .id("titlebar")
             .w_full()

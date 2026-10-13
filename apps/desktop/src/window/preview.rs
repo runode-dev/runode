@@ -10,7 +10,6 @@ use gpui::{AnyElement, App, Context, Empty, Entity, Focusable as _, IntoElement 
 use runode_config::PreviewClick;
 use runode_git::{self as git, HunkAction};
 use runode_preview_panel::{Input, PreviewEvent, PreviewPanel};
-use runode_shared_types::color::Rgb;
 
 pub(in crate::window) use runode_preview_panel::DiffTarget;
 
@@ -119,14 +118,7 @@ impl WindowView {
     /// 当前 workspace 的预览栏，宽 `width`；`rightmost` 时它贴着窗口右边，标签条给右上角的面板开关让位。
     /// 没有标签时什么也不画。放大着时它自己盖满终端区。预览栏的颜色从主题读，`_fg`、`_bg` 用不着了，留着
     /// 只为不在这一步改窗口里的几处调用。
-    pub(super) fn render_preview(
-        &mut self,
-        width: f32,
-        rightmost: bool,
-        _fg: Rgb,
-        _bg: Rgb,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
+    pub(super) fn render_preview(&mut self, width: f32, rightmost: bool, cx: &mut Context<Self>) -> AnyElement {
         if !self.preview_shown(cx) {
             return Empty.into_any_element();
         }

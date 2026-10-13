@@ -2,21 +2,18 @@
 //! shell 报告的 PATH 和固定到状态栏上的工作流，画面板外框和顶上的标签，替它在旁边的终端里跑 gh、
 //! 在预览栏里开工作流文件，存档固定的工作流和三段的高度。
 
+use crate::ui::theme::ActiveTheme as _;
 use std::path::PathBuf;
 
 use gpui::{AnyElement, App, Context, Div, Entity, Focusable, Stateful, Window, div, prelude::*};
 use runode_github_actions::{ActionsEvent, ActionsPanel, Input, PROGRAM, render_pinned};
-use runode_shared_types::color::Rgb;
 
 use super::{
     Divider, WindowView, cards,
     project::{SidePanel, panel_message, panel_shell},
     status_bar,
 };
-use crate::{
-    terminal_view::TerminalEvent,
-    ui::{font_size::FontSize, hsla},
-};
+use crate::{terminal_view::TerminalEvent, ui::font_size::FontSize};
 
 impl WindowView {
     pub(super) fn github_actions_shown(&self) -> bool {
@@ -78,15 +75,9 @@ impl WindowView {
         });
     }
 
-    pub(super) fn render_github_actions_panel(
-        &mut self,
-        width: f32,
-        fg: Rgb,
-        bg: Rgb,
-        cx: &mut Context<Self>,
-    ) -> Stateful<Div> {
+    pub(super) fn render_github_actions_panel(&mut self, width: f32, cx: &mut Context<Self>) -> Stateful<Div> {
         let shell = panel_shell("github-actions-panel", width, cards(cx), cx)
-            .bg(hsla(bg.mix(fg, 0.03)))
+            .bg(cx.theme().mix(0.03))
             .text_size(FontSize::Body)
             .child(self.render_panel_tabs(cx));
         if !self.git_button_visible() {
@@ -98,7 +89,7 @@ impl WindowView {
 
     /// 状态栏左边固定的工作流。颜色由 `render_pinned` 从主题读，`_fg`、`_bg` 用不着了，留着只为不在这一步
     /// 改状态栏的调用。
-    pub(super) fn render_pinned_workflows(&self, _fg: Rgb, _bg: Rgb, cx: &mut Context<Self>) -> Vec<AnyElement> {
+    pub(super) fn render_pinned_workflows(&self, cx: &mut Context<Self>) -> Vec<AnyElement> {
         let items = self.github_actions.read(cx).pinned_items();
         render_pinned(items, status_bar::STATUS_BAR_HEIGHT - 6., cx)
     }
