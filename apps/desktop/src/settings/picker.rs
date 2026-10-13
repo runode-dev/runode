@@ -1,6 +1,7 @@
 //! 从长列表里挑一项的浮层：主题、字体、语言、提示音、快捷键的动作都用它。上面一个输入框按名字
 //! 筛，上下键挪、回车选、Esc 或点外面关掉。
 
+use crate::ui::theme::Theme;
 use std::ops::Range;
 
 use gpui::{
@@ -8,7 +9,7 @@ use gpui::{
     Subscription, UniformListScrollHandle, Window, div, prelude::*, px, uniform_list,
 };
 
-use super::{SettingsView, controls::Colors};
+use super::SettingsView;
 use crate::ui::popover::Popover;
 use crate::ui::theme::ActiveTheme as _;
 use crate::ui::{
@@ -197,7 +198,8 @@ impl SettingsView {
         cx.notify();
     }
 
-    fn render_picker_rows(&mut self, range: Range<usize>, colors: Colors, cx: &mut Context<Self>) -> Vec<AnyElement> {
+    fn render_picker_rows(&mut self, range: Range<usize>, cx: &mut Context<Self>) -> Vec<AnyElement> {
+        let theme = cx.theme().clone();
         let Some(picker) = &self.picker else {
             return Vec::new();
         };
@@ -224,26 +226,22 @@ impl SettingsView {
                         .rounded(px(5.))
                         .map(|el| {
                             if row == picker.highlighted {
-                                el.bg(colors.selected)
+                                el.bg(theme.mix(0.12))
                             } else {
                                 el.hover(|el| el.bg(row_hover))
                             }
                         })
                         // 用 on_click 而不是按下就选：辅助工具点它时走的也是这个。
                         .on_click(cx.listener(move |this, _, window, cx| this.pick(ix, window, cx)))
-                        .child(
-                            div().w(px(12.)).flex_none().text_color(colors.accent).children(
-                                current.then(|| {
-                                    gpui::svg().path("icons/check.svg").size(px(11.)).text_color(colors.accent)
-                                }),
-                            ),
-                        )
+                        .child(div().w(px(12.)).flex_none().text_color(theme.ring).children(
+                            current.then(|| gpui::svg().path("icons/check.svg").size(px(11.)).text_color(theme.ring)),
+                        ))
                         .child(div().flex_1().min_w_0().truncate().child(item.label.clone()))
                         .children(item.detail.clone().map(|detail| {
                             div()
                                 .flex_none()
                                 .text_size(FontSize::Small)
-                                .text_color(colors.fg.opacity(0.45))
+                                .text_color(theme.foreground.opacity(0.45))
                                 .child(detail)
                         }))
                         .into_any_element(),
@@ -252,13 +250,13 @@ impl SettingsView {
             .collect()
     }
 
-    pub(super) fn render_picker(&mut self, colors: Colors, cx: &mut Context<Self>) -> Option<AnyElement> {
+    pub(super) fn render_picker(&mut self, theme: &Theme, cx: &mut Context<Self>) -> Option<AnyElement> {
         let picker = self.picker.as_ref()?;
         let count = picker.visible(cx).len();
         let list = uniform_list(
             "picker-list",
             count,
-            cx.processor(move |this, range: Range<usize>, _, cx| this.render_picker_rows(range, colors, cx)),
+            cx.processor(move |this, range: Range<usize>, _, cx| this.render_picker_rows(range, cx)),
         )
         .track_scroll(&picker.scroll)
         .h(scaled(ROW_HEIGHT * VISIBLE_ROWS.min(count.max(1) as f32) + 8.))
@@ -267,7 +265,7 @@ impl SettingsView {
             div()
                 .px(px(12.))
                 .py(px(10.))
-                .text_color(colors.fg.opacity(0.5))
+                .text_color(theme.foreground.opacity(0.5))
                 .child(rust_i18n::t!("settings.no_matches").into_owned())
         });
         let panel = Popover::new("picker")
@@ -285,10 +283,10 @@ impl SettingsView {
                     .pt(px(10.))
                     .pb(px(4.))
                     .text_size(FontSize::Small)
-                    .text_color(colors.fg.opacity(0.55))
+                    .text_color(theme.foreground.opacity(0.55))
                     .child(picker.title.clone()),
             )
-            .child(Input::new(&picker.field).h(scaled(30.)).mx(px(8.)).bg(colors.control))
+            .child(Input::new(&picker.field).h(scaled(30.)).mx(px(8.)).bg(theme.mix(0.06)))
             .map(|panel| match empty {
                 Some(empty) => panel.child(empty),
                 None => panel.child(list),

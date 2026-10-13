@@ -1,68 +1,29 @@
-//! 设置页里的控件：一行设置的排版，分段选项、下拉按钮、输入框和色块（按钮用 `Button`，开关用 `Switch`）。颜色取自
-//! 终端的前景和背景，和终端窗口的界面一个色调。
+//! 设置页里的控件：一行设置的排版，分段选项、下拉按钮、输入框和色块（按钮用 `Button`，开关用 `Switch`）。颜色在 render
+//! 里从窗口的主题（`Theme`）读，和终端窗口的界面一个色调。
 
+use crate::ui::theme::Theme;
 use gpui::{
     AnyElement, Context, Div, ElementId, Entity, Hsla, Role, SharedString, Stateful, Window, div, prelude::*, px, svg,
 };
-use runode_config::Config;
-use runode_shared_types::color::Rgb;
 
 use super::SettingsView;
 pub(super) use crate::ui::a11y::Press;
 use crate::ui::{
     font_size::{FontSize, scaled},
-    hsla,
     input::{Input, InputState},
 };
 
 /// 控件的高度。
 pub(super) const CONTROL_HEIGHT: f32 = 26.;
 
-#[derive(Clone, Copy)]
-pub(super) struct Colors {
-    pub fg: Hsla,
-    pub bg: Hsla,
-    /// 侧栏和浮层的底色。
-    pub panel: Hsla,
-    /// 一组设置那张卡片的底色。
-    pub card: Hsla,
-    pub hover: Hsla,
-    pub selected: Hsla,
-    /// 输入框和按钮的底色。
-    pub control: Hsla,
-    pub border: Hsla,
-    /// 开关打开时、正在录快捷键时的强调色：调色板里的蓝色。
-    pub accent: Hsla,
-    pub error: Hsla,
-}
-
-impl Colors {
-    pub fn new(config: &Config) -> Self {
-        let (fg, bg) = (config.foreground, config.background);
-        let ansi = |ix: u8, fallback: Rgb| config.palette.iter().rfind(|(i, _)| *i == ix).map_or(fallback, |(_, c)| *c);
-        Self {
-            fg: hsla(fg),
-            bg: hsla(bg),
-            panel: hsla(bg.mix(fg, 0.035)),
-            card: hsla(bg.mix(fg, 0.045)),
-            hover: hsla(bg.mix(fg, 0.07)),
-            selected: hsla(bg.mix(fg, 0.12)),
-            control: hsla(bg.mix(fg, 0.06)),
-            border: hsla(fg).opacity(0.13),
-            accent: hsla(ansi(4, Rgb(0x3b, 0x82, 0xf6))),
-            error: hsla(ansi(1, Rgb(0xe0, 0x50, 0x50))),
-        }
-    }
-}
-
 /// 一页里的小标题。
-pub(super) fn section(title: impl Into<SharedString>, colors: Colors) -> Div {
+pub(super) fn section(title: impl Into<SharedString>, theme: &Theme) -> Div {
     div()
         .pt(px(20.))
         .pb(px(10.))
         .pl(px(4.))
         .text_size(FontSize::Large)
-        .text_color(colors.fg.opacity(0.6))
+        .text_color(theme.foreground.opacity(0.6))
         .child(title.into())
 }
 
@@ -70,17 +31,17 @@ pub(super) fn section(title: impl Into<SharedString>, colors: Colors) -> Div {
 pub(super) struct Cards {
     page: Div,
     items: Vec<AnyElement>,
-    colors: Colors,
+    theme: Theme,
 }
 
 impl Cards {
-    pub fn new(page: Div, colors: Colors) -> Self {
-        Self { page, items: Vec::new(), colors }
+    pub fn new(page: Div, theme: &Theme) -> Self {
+        Self { page, items: Vec::new(), theme: theme.clone() }
     }
 
     /// 结束上一组，另起一组，上面是小标题 `title`。
     pub fn section(&mut self, title: impl Into<SharedString>) {
-        self.raw(section(title, self.colors).into_any_element());
+        self.raw(section(title, &self.theme).into_any_element());
     }
 
     /// 结束上一组，`element` 不进卡片，直接放在页面上。
@@ -108,9 +69,9 @@ impl Cards {
             .mb(px(8.))
             .px(px(16.))
             .rounded(px(10.))
-            .bg(self.colors.card)
+            .bg(self.theme.mix(0.045))
             .border_1()
-            .border_color(self.colors.border.opacity(0.5))
+            .border_color(self.theme.foreground.opacity(0.13).opacity(0.5))
             .overflow_hidden()
             .child(div().mb(px(-1.)).flex().flex_col().children(items));
         self.page = std::mem::replace(&mut self.page, div()).child(card);
@@ -125,7 +86,7 @@ pub(super) fn row(
     control: impl IntoElement,
     reset: Option<AnyElement>,
     error: Option<String>,
-    colors: Colors,
+    theme: &Theme,
 ) -> Div {
     div()
         .py(px(12.))
@@ -133,7 +94,7 @@ pub(super) fn row(
         .items_center()
         .gap(px(16.))
         .border_b_1()
-        .border_color(colors.border.opacity(0.6))
+        .border_color(theme.foreground.opacity(0.13).opacity(0.6))
         .child(
             div()
                 .flex_1()
@@ -143,7 +104,9 @@ pub(super) fn row(
                 .gap(px(3.))
                 .child(div().text_size(FontSize::Medium).font_weight(gpui::FontWeight::MEDIUM).child(title.into()))
                 .children(
-                    hint.map(|hint| div().text_size(FontSize::Body).text_color(colors.fg.opacity(0.55)).child(hint)),
+                    hint.map(|hint| {
+                        div().text_size(FontSize::Body).text_color(theme.foreground.opacity(0.55)).child(hint)
+                    }),
                 )
                 .children(error.map(|err| {
                     div()
@@ -151,7 +114,7 @@ pub(super) fn row(
                         .role(Role::Label)
                         .aria_label(err.clone())
                         .text_size(FontSize::Small)
-                        .text_color(colors.error)
+                        .text_color(theme.destructive)
                         .child(err)
                 })),
         )
@@ -165,7 +128,7 @@ pub(super) fn segmented(
     label: impl Into<SharedString>,
     options: Vec<(String, SharedString)>,
     selected: Option<&str>,
-    colors: Colors,
+    theme: &Theme,
     cx: &mut Context<SettingsView>,
     pick: impl Fn(&mut SettingsView, &str, &mut Window, &mut Context<SettingsView>) + Clone + 'static,
 ) -> Stateful<Div> {
@@ -178,9 +141,9 @@ pub(super) fn segmented(
         .p(px(2.))
         .gap(px(2.))
         .rounded(px(7.))
-        .bg(colors.control)
+        .bg(theme.mix(0.06))
         .border_1()
-        .border_color(colors.border)
+        .border_color(theme.foreground.opacity(0.13))
         .children(options.into_iter().enumerate().map(|(ix, (value, label))| {
             let on = selected == Some(value.as_str());
             let pick = pick.clone();
@@ -196,9 +159,9 @@ pub(super) fn segmented(
                 .text_size(FontSize::Body)
                 .map(|item| {
                     if on {
-                        item.bg(colors.selected).text_color(colors.fg)
+                        item.bg(theme.mix(0.12)).text_color(theme.foreground)
                     } else {
-                        item.text_color(colors.fg.opacity(0.7)).hover(|item| item.bg(colors.hover))
+                        item.text_color(theme.foreground.opacity(0.7)).hover(|item| item.bg(theme.mix(0.07)))
                     }
                 })
                 .on_press(cx, move |this, window, cx| pick(this, &value, window, cx))
@@ -214,7 +177,7 @@ pub(super) fn dropdown(
     leading: Option<AnyElement>,
     label: impl Into<SharedString>,
     width: f32,
-    colors: Colors,
+    theme: &Theme,
 ) -> Stateful<Div> {
     let label = label.into();
     div()
@@ -230,18 +193,18 @@ pub(super) fn dropdown(
         .items_center()
         .gap(px(6.))
         .rounded(px(6.))
-        .bg(colors.control)
+        .bg(theme.mix(0.06))
         .border_1()
-        .border_color(colors.border)
+        .border_color(theme.foreground.opacity(0.13))
         .text_size(FontSize::Body)
-        .hover(|button| button.bg(colors.hover))
+        .hover(|button| button.bg(theme.mix(0.07)))
         .children(leading)
         .child(div().flex_1().min_w_0().truncate().child(label))
-        .child(svg().flex_none().path("icons/chevron-down.svg").size(px(12.)).text_color(colors.fg.opacity(0.6)))
+        .child(svg().flex_none().path("icons/chevron-down.svg").size(px(12.)).text_color(theme.foreground.opacity(0.6)))
 }
 
 /// 设置页的输入框：比别处的 `Input` 矮一些，底色和别的控件一样；`width` 为 `None` 时占满剩下的宽度。
-pub(super) fn input_box(input: &Entity<InputState>, width: Option<f32>, error: bool, colors: Colors) -> Input {
+pub(super) fn input_box(input: &Entity<InputState>, width: Option<f32>, error: bool, theme: &Theme) -> Input {
     Input::new(input)
         .invalid(error)
         .map(|field| match width {
@@ -249,7 +212,7 @@ pub(super) fn input_box(input: &Entity<InputState>, width: Option<f32>, error: b
             None => field.flex_1().min_w_0(),
         })
         .h(scaled(CONTROL_HEIGHT))
-        .bg(colors.control)
+        .bg(theme.mix(0.06))
         .text_size(FontSize::Body)
 }
 
@@ -259,7 +222,7 @@ pub(super) fn chip(
     icon: Option<&'static str>,
     label: impl Into<SharedString>,
     on: bool,
-    colors: Colors,
+    theme: &Theme,
 ) -> Stateful<Div> {
     let label = label.into();
     div()
@@ -274,18 +237,19 @@ pub(super) fn chip(
         .gap(px(5.))
         .rounded(px(6.))
         .border_1()
-        .border_color(if on { colors.accent } else { colors.border })
+        .border_color(if on { theme.ring } else { theme.foreground.opacity(0.13) })
         .text_size(FontSize::Body)
-        .when(on, |chip| chip.bg(colors.accent.opacity(0.15)))
-        .hover(|chip| chip.bg(colors.hover))
-        .children(on.then(|| svg().path("icons/check.svg").size(px(11.)).text_color(colors.accent)))
-        .children(icon.map(|icon| svg().path(icon).size(px(12.)).text_color(colors.fg.opacity(0.7))))
+        .when(on, |chip| chip.bg(theme.ring.opacity(0.15)))
+        .hover(|chip| chip.bg(theme.mix(0.07)))
+        .children(on.then(|| svg().path("icons/check.svg").size(px(11.)).text_color(theme.ring)))
+        .children(icon.map(|icon| svg().path(icon).size(px(12.)).text_color(theme.foreground.opacity(0.7))))
         .child(label)
 }
 
 /// 色块；`color` 为 `None` 时画一条斜线，表示没设、跟随别的颜色。
-pub(super) fn swatch(color: Option<Hsla>, size: f32, colors: Colors) -> Div {
-    let block = div().flex_none().size(px(size)).rounded(px(4.)).border_1().border_color(colors.border);
+pub(super) fn swatch(color: Option<Hsla>, size: f32, theme: &Theme) -> Div {
+    let block =
+        div().flex_none().size(px(size)).rounded(px(4.)).border_1().border_color(theme.foreground.opacity(0.13));
     match color {
         Some(color) => block.bg(color),
         None => block
@@ -293,7 +257,7 @@ pub(super) fn swatch(color: Option<Hsla>, size: f32, colors: Colors) -> Div {
             .items_center()
             .justify_center()
             .text_size(px(size * 0.7))
-            .text_color(colors.fg.opacity(0.4))
+            .text_color(theme.foreground.opacity(0.4))
             .child("∕"),
     }
 }

@@ -2,13 +2,14 @@
 //! 是选主题的下拉，左边的色块是那个主题的背景、前景和强调色。预览和色块按主题文件里的颜色画
 //! （`runode_config::theme_config`），读过的主题记在 `SettingsView::theme_looks` 里。
 
+use crate::ui::theme::Theme;
 use gpui::{AnyElement, Context, Div, FontWeight, Role, Window, div, prelude::*, px, svg};
 use runode_config::{Config, DEFAULT_THEME};
 use runode_shared_types::color::Rgb;
 
 use super::{
     SettingsView,
-    controls::{Colors, Press, dropdown, row},
+    controls::{Press, dropdown, row},
     picker::{PickItem, PickTarget, ThemeSlot},
 };
 use crate::{
@@ -135,10 +136,10 @@ impl SettingsView {
     }
 
     /// 两张预览卡，下面是说明和上次写回失败的原因。
-    pub(super) fn render_theme_modes(&mut self, colors: Colors, cx: &mut Context<Self>) -> Div {
-        let theme = ThemeChoice::parse(self.config.theme.as_deref());
+    pub(super) fn render_theme_modes(&mut self, theme: &Theme, cx: &mut Context<Self>) -> Div {
+        let choice = ThemeChoice::parse(self.config.theme.as_deref());
         let current = Look::of(&self.config);
-        let (pair, single) = match &theme {
+        let (pair, single) = match &choice {
             ThemeChoice::Single(name) => {
                 let look = self.theme_look(name).unwrap_or(current);
                 (vec![look, look], look)
@@ -151,8 +152,8 @@ impl SettingsView {
         };
         let tiles = [("pair", MONITOR_ICON, pair), ("single", PALETTE_ICON, vec![single])].into_iter().enumerate().map(
             |(ix, (mode, icon, looks))| {
-                let on = mode == theme.mode();
-                let tint = if on { colors.accent } else { colors.fg.opacity(0.75) };
+                let on = mode == choice.mode();
+                let tint = if on { theme.ring } else { theme.foreground.opacity(0.75) };
                 let label = tr(&format!("settings.theme.{mode}"));
                 div()
                     .id(("theme-mode", ix))
@@ -171,7 +172,7 @@ impl SettingsView {
                             .rounded(px(10.))
                             .overflow_hidden()
                             .border_2()
-                            .border_color(if on { colors.accent } else { colors.border })
+                            .border_color(if on { theme.ring } else { theme.foreground.opacity(0.13) })
                             .children(looks.into_iter().map(preview)),
                     )
                     .child(
@@ -203,12 +204,12 @@ impl SettingsView {
                     .gap(px(12.))
                     .children(tiles),
             )
-            .child(note(tr("settings.hint.theme"), colors.fg.opacity(0.55)))
-            .children(self.errors.get("theme").cloned().map(|err| note(err, colors.error)))
+            .child(note(tr("settings.hint.theme"), theme.foreground.opacity(0.55)))
+            .children(self.errors.get("theme").cloned().map(|err| note(err, theme.destructive)))
     }
 
     /// 选主题的下拉，一个主题时一行，浅色、深色各一个时两行。
-    pub(super) fn render_theme_rows(&mut self, colors: Colors, cx: &mut Context<Self>) -> Vec<AnyElement> {
+    pub(super) fn render_theme_rows(&mut self, theme: &Theme, cx: &mut Context<Self>) -> Vec<AnyElement> {
         let slots = match ThemeChoice::parse(self.config.theme.as_deref()) {
             ThemeChoice::Single(name) => vec![(ThemeSlot::Single, name)],
             ThemeChoice::Pair { light, dark } => vec![(ThemeSlot::Light, light), (ThemeSlot::Dark, dark)],
@@ -221,14 +222,14 @@ impl SettingsView {
                     ThemeSlot::Light => ("settings.theme.light", "theme-light"),
                     ThemeSlot::Dark => ("settings.theme.dark", "theme-dark"),
                 };
-                let chips = self.theme_look(&name).map(|look| chips(look, colors).into_any_element());
+                let chips = self.theme_look(&name).map(|look| chips(look, theme).into_any_element());
                 let current = name.clone();
                 let title = rust_i18n::t!(title).into_owned();
-                let picker = dropdown(element, title.clone(), chips, name, 240., colors)
+                let picker = dropdown(element, title.clone(), chips, name, 240., theme)
                     .on_press(cx, move |this, window, cx| {
                         this.open_theme_picker(slot, Some(current.clone()), window, cx)
                     });
-                row(title, None, picker, None, None, colors).into_any_element()
+                row(title, None, picker, None, None, theme).into_any_element()
             })
             .collect()
     }
@@ -275,7 +276,7 @@ fn preview(look: Look) -> Div {
 }
 
 /// 下拉里主题名左边的色块：背景、前景、强调色三竖条。
-fn chips(look: Look, colors: Colors) -> Div {
+fn chips(look: Look, theme: &Theme) -> Div {
     div()
         .flex_none()
         .h(px(14.))
@@ -283,7 +284,7 @@ fn chips(look: Look, colors: Colors) -> Div {
         .rounded(px(3.))
         .overflow_hidden()
         .border_1()
-        .border_color(colors.border)
+        .border_color(theme.foreground.opacity(0.13))
         .children([look.bg, look.fg, look.accent].map(|color| div().w(px(7.)).h_full().bg(hsla(color))))
 }
 

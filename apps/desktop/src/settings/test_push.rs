@@ -2,11 +2,12 @@
 //! （`runode_remote_access::send_test_push`），看推送的设置和密钥对不对。用当前配置里的推送设置，
 //! 不管推送开没开，也不管监听开在哪个进程里。
 
+use crate::ui::theme::Theme;
 use gpui::{AppContext as _, Context, Div, Task};
 
 use super::{
     SettingsView,
-    controls::{Colors, Press, row},
+    controls::{Press, row},
 };
 use crate::ui::a11y::Disable as _;
 use crate::ui::button::{Button, ButtonVariant};
@@ -27,7 +28,7 @@ pub(super) enum State {
 }
 
 impl SettingsView {
-    pub(super) fn render_test_push(&mut self, colors: Colors, cx: &mut Context<Self>) -> Div {
+    pub(super) fn render_test_push(&mut self, theme: &Theme, cx: &mut Context<Self>) -> Div {
         let sending = matches!(self.test_push, State::Sending { .. });
         let label = if sending { "settings.test_push.sending" } else { "settings.test_push.send" };
         let send = Button::new("test-push", rust_i18n::t!(label).into_owned())
@@ -39,7 +40,7 @@ impl SettingsView {
             _ => rust_i18n::t!("settings.test_push.hint"),
         };
         let title = rust_i18n::t!("settings.test_push.title").into_owned();
-        row(title, Some(hint.into_owned().into()), send, None, self.errors.get(ERROR_ID).cloned(), colors)
+        row(title, Some(hint.into_owned().into()), send, None, self.errors.get(ERROR_ID).cloned(), theme)
     }
 
     fn send_test_push(&mut self, cx: &mut Context<Self>) {

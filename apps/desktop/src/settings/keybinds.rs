@@ -7,6 +7,7 @@
 //! 录键时拦下这个窗口里按的键（`App::intercept_keystrokes`），不让它当快捷键或者菜单命令生效；
 //! 一次只录一个按键，连按几个键的写法（`ctrl+a>n`）要在配置文件里写。
 
+use crate::ui::theme::Theme;
 use gpui::{App, Context, Div, Keystroke, SharedString, Subscription, Window, div, prelude::*, px};
 use runode_config::{
     Keybind,
@@ -15,7 +16,7 @@ use runode_config::{
 
 use super::{
     SettingsView,
-    controls::{CONTROL_HEIGHT, Cards, Colors, Press, row},
+    controls::{CONTROL_HEIGHT, Cards, Press, row},
 };
 use crate::ui::button::{Button, ButtonSize, ButtonVariant};
 use crate::ui::font_size::{self, FontSize, scaled};
@@ -379,7 +380,7 @@ impl SettingsView {
         report(self, &values, cx);
     }
 
-    pub(super) fn render_keybinds(&mut self, colors: Colors, _: &mut Window, cx: &mut Context<Self>) -> Div {
+    pub(super) fn render_keybinds(&mut self, theme: &Theme, _: &mut Window, cx: &mut Context<Self>) -> Div {
         let values = self.file.values(KEY);
         let cleared = values.iter().any(|value| value == "clear");
         let title = rust_i18n::t!("settings.keybind.use_defaults").into_owned();
@@ -392,7 +393,7 @@ impl SettingsView {
             }
             report(this, &values, cx);
         });
-        let mut out = Cards::new(div().flex().flex_col(), colors);
+        let mut out = Cards::new(div().flex().flex_col(), theme);
         out.push(
             row(
                 title,
@@ -400,7 +401,7 @@ impl SettingsView {
                 defaults,
                 None,
                 self.errors.get(KEY).cloned(),
-                colors,
+                theme,
             )
             .into_any_element(),
         );
@@ -420,7 +421,7 @@ impl SettingsView {
                     report(this, &values, cx);
                 });
             out.push(
-                row(line, None, remove, None, Some(rust_i18n::t!("settings.invalid", err = err).into()), colors)
+                row(line, None, remove, None, Some(rust_i18n::t!("settings.invalid", err = err).into()), theme)
                     .into_any_element(),
             );
         }
@@ -438,7 +439,7 @@ impl SettingsView {
             let title = format!("settings.keybind.group.{group}");
             out.section(rust_i18n::t!(&title).into_owned());
             for (ix, row) in group_rows {
-                out.push(self.render_keybind_row(ix, row, colors, cx).into_any_element());
+                out.push(self.render_keybind_row(ix, row, theme, cx).into_any_element());
             }
             if custom {
                 let open = Button::new("keybind-open-config", rust_i18n::t!("settings.open_config").into_owned())
@@ -454,7 +455,7 @@ impl SettingsView {
                             div()
                                 .flex_1()
                                 .text_size(FontSize::Small)
-                                .text_color(colors.fg.opacity(0.55))
+                                .text_color(theme.foreground.opacity(0.55))
                                 .child(rust_i18n::t!("settings.keybind.custom_hint").into_owned()),
                         )
                         .child(open)
@@ -465,7 +466,7 @@ impl SettingsView {
         out.finish()
     }
 
-    fn render_keybind_row(&mut self, ix: usize, row: &Row, colors: Colors, cx: &mut Context<Self>) -> Div {
+    fn render_keybind_row(&mut self, ix: usize, row: &Row, theme: &Theme, cx: &mut Context<Self>) -> Div {
         let recording = self.keybinds.target().filter(|target| target.row == row.key).cloned();
         let group = SharedString::from(format!("keybind-row-{ix}"));
         let tag = row.usage.split_once(':').map(|(_, param)| {
@@ -477,9 +478,9 @@ impl SettingsView {
                 .items_center()
                 .rounded_full()
                 .border_1()
-                .border_color(colors.border)
+                .border_color(theme.foreground.opacity(0.13))
                 .text_size(FontSize::Small)
-                .text_color(colors.fg.opacity(0.6))
+                .text_color(theme.foreground.opacity(0.6))
                 .child(param.to_owned())
         });
         let title = div()
@@ -528,7 +529,7 @@ impl SettingsView {
                     .on_press(cx, move |this, _, cx| this.remove_bound(&remove_bound, cx));
                 keys = keys.child(div().flex().items_center().gap(px(6.)).child(remove).child(press_box(
                     SharedString::from(format!("keybind-press-{ix}-{jx}")),
-                    colors,
+                    theme,
                     cx,
                 )));
                 continue;
@@ -543,13 +544,13 @@ impl SettingsView {
                     .cursor_pointer()
                     .hover(|keys| keys.opacity(0.75))
                     .children(caps(&bound.trigger).into_iter().map(|stroke| {
-                        div().flex().gap(px(4.)).children(stroke.into_iter().map(|cap| keycap(cap, colors)))
+                        div().flex().gap(px(4.)).children(stroke.into_iter().map(|cap| keycap(cap, theme)))
                     }))
                     .on_press(cx, move |this, window, cx| this.start_recording(target.clone(), window, cx)),
             );
         }
         if adding {
-            keys = keys.child(press_box(SharedString::from(format!("keybind-press-{ix}")), colors, cx));
+            keys = keys.child(press_box(SharedString::from(format!("keybind-press-{ix}")), theme, cx));
         }
 
         let hint = recording.map(|target| {
@@ -557,7 +558,7 @@ impl SettingsView {
                 RowKey::Digits(_) => rust_i18n::t!("settings.keybind.press_digit_hint"),
                 RowKey::Action(_) => rust_i18n::t!("settings.keybind.press_hint"),
             };
-            div().text_size(FontSize::Small).text_color(colors.fg.opacity(0.55)).child(hint.into_owned())
+            div().text_size(FontSize::Small).text_color(theme.foreground.opacity(0.55)).child(hint.into_owned())
         });
         let conflict =
             self.keybinds.conflict.as_ref().filter(|conflict| conflict.target.row == row.key).map(|conflict| {
@@ -572,7 +573,7 @@ impl SettingsView {
                     rust_i18n::t!("settings.keybind.replace").into_owned(),
                 )
                 .variant(ButtonVariant::Outline)
-                .border_color(colors.accent)
+                .border_color(theme.ring)
                 .on_press(cx, |this, _, cx| {
                     if let Some(Conflict { target, trigger, .. }) = this.keybinds.conflict.take() {
                         this.apply_recorded(target, &trigger, cx);
@@ -592,7 +593,11 @@ impl SettingsView {
                     .items_center()
                     .gap(px(8.))
                     .child(
-                        div().flex_1().text_size(FontSize::Small).text_color(colors.error).child(message.into_owned()),
+                        div()
+                            .flex_1()
+                            .text_size(FontSize::Small)
+                            .text_color(theme.destructive)
+                            .child(message.into_owned()),
                     )
                     .child(cancel)
                     .child(replace)
@@ -604,14 +609,14 @@ impl SettingsView {
             .flex_col()
             .gap(px(4.))
             .border_b_1()
-            .border_color(colors.border.opacity(0.4))
+            .border_color(theme.foreground.opacity(0.13).opacity(0.4))
             .child(div().flex().items_start().gap(px(10.)).child(title).child(add).child(keys))
             .children(hint)
             .children(conflict)
     }
 }
 
-fn keycap(cap: String, colors: Colors) -> Div {
+fn keycap(cap: String, theme: &Theme) -> Div {
     div()
         .min_w(scaled(CONTROL_HEIGHT))
         .h(scaled(CONTROL_HEIGHT))
@@ -620,19 +625,19 @@ fn keycap(cap: String, colors: Colors) -> Div {
         .items_center()
         .justify_center()
         .rounded(px(6.))
-        .bg(colors.control)
+        .bg(theme.mix(0.06))
         .border_1()
-        .border_color(colors.border)
+        .border_color(theme.foreground.opacity(0.13))
         .text_size(FontSize::Body)
         .child(cap)
 }
 
 /// 正在录键的框，点一下不录了。
-fn press_box(id: SharedString, colors: Colors, cx: &mut Context<SettingsView>) -> impl IntoElement {
+fn press_box(id: SharedString, theme: &Theme, cx: &mut Context<SettingsView>) -> impl IntoElement {
     Button::new(id, rust_i18n::t!("settings.keybind.press").into_owned())
         .variant(ButtonVariant::Outline)
-        .border_color(colors.accent)
-        .text_color(colors.fg.opacity(0.7))
+        .border_color(theme.ring)
+        .text_color(theme.foreground.opacity(0.7))
         .on_press(cx, |this, _, cx| {
             this.keybinds.stop_recording();
             cx.notify();

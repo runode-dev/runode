@@ -2,17 +2,18 @@
 //! （`runode --host`，手机远程访问靠它）。开关的状态就是服务文件在不在（`runode_autostart`），
 //! 和命令行的 `runode service` 是同一套，所以不进配置文件。
 
+use crate::ui::theme::Theme;
 use gpui::{Context, Div, prelude::*};
 use runode_autostart::Kind;
 
 use super::{
     SettingsView,
-    controls::{Colors, Press, row},
+    controls::{Press, row},
 };
 use crate::ui::switch::Switch;
 
 impl SettingsView {
-    pub(super) fn render_autostart(&mut self, colors: Colors, cx: &mut Context<Self>) -> Div {
+    pub(super) fn render_autostart(&mut self, theme: &Theme, cx: &mut Context<Self>) -> Div {
         let dirs = runode_paths::Dirs::from_env();
         let mut rows = gpui::div().flex().flex_col();
         for kind in [Kind::App, Kind::Host].into_iter().filter(|kind| kind.supported()) {
@@ -26,7 +27,7 @@ impl SettingsView {
                 switch,
                 None,
                 self.errors.get(&error_id(kind)).cloned(),
-                colors,
+                theme,
             ));
         }
         rows

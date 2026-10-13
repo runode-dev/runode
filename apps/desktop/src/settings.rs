@@ -19,6 +19,8 @@ mod picker;
 mod test_push;
 mod theme;
 
+use crate::ui::theme::ActiveTheme as _;
+use crate::ui::theme::Theme;
 use std::{collections::HashMap, sync::Arc, time::Duration};
 
 use gpui::{
@@ -37,7 +39,6 @@ use crate::{
         input::{InputEvent, InputState},
     },
 };
-use controls::Colors;
 use pages::Page;
 use picker::Picker;
 
@@ -311,7 +312,7 @@ impl SettingsView {
         cx.notify();
     }
 
-    fn render_nav(&self, colors: Colors, cx: &mut Context<Self>) -> gpui::Stateful<gpui::Div> {
+    fn render_nav(&self, theme: &Theme, cx: &mut Context<Self>) -> gpui::Stateful<gpui::Div> {
         let item = |id: &'static str, icon: &'static str, label: String, selected: bool| {
             div()
                 .id(id)
@@ -325,12 +326,12 @@ impl SettingsView {
                 .text_size(FontSize::Large)
                 .map(|item| {
                     if selected {
-                        item.bg(colors.selected).text_color(colors.fg)
+                        item.bg(theme.mix(0.12)).text_color(theme.foreground)
                     } else {
-                        item.text_color(colors.fg.opacity(0.75)).hover(|item| item.bg(colors.hover))
+                        item.text_color(theme.foreground.opacity(0.75)).hover(|item| item.bg(theme.mix(0.07)))
                     }
                 })
-                .child(svg().flex_none().path(icon).size(px(16.)).text_color(colors.fg.opacity(0.7)))
+                .child(svg().flex_none().path(icon).size(px(16.)).text_color(theme.foreground.opacity(0.7)))
                 .child(label)
         };
         let back = item("settings-back", ARROW_LEFT_ICON, rust_i18n::t!("settings.back").into_owned(), false)
@@ -343,9 +344,9 @@ impl SettingsView {
             .h_full()
             .flex()
             .flex_col()
-            .bg(colors.panel)
+            .bg(theme.mix(0.035))
             .border_r_1()
-            .border_color(colors.border)
+            .border_color(theme.foreground.opacity(0.13))
             .id("settings-nav")
             .child(titlebar_strip())
             .child(div().flex().flex_col().gap(px(2.)).px(px(10.)).child(back).child(
@@ -411,10 +412,10 @@ impl Focusable for SettingsView {
 
 impl Render for SettingsView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let colors = Colors::new(&self.config);
-        let nav = self.render_nav(colors, cx);
-        let content = self.render_page(colors, window, cx);
-        let picker = self.render_picker(colors, cx);
+        let theme = &cx.theme().clone();
+        let nav = self.render_nav(theme, cx);
+        let content = self.render_page(theme, window, cx);
+        let picker = self.render_picker(theme, cx);
         // 挑选浮层挡住了后面的页面，开着时后面的不报给辅助工具。
         let modal = picker.is_some();
         div()
@@ -425,8 +426,8 @@ impl Render for SettingsView {
             .size_full()
             .relative()
             .flex()
-            .bg(colors.bg)
-            .text_color(colors.fg)
+            .bg(theme.background)
+            .text_color(theme.foreground)
             .text_size(FontSize::Medium)
             .child(nav.aria_hidden(modal))
             .child(
