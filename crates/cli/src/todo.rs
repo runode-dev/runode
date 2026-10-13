@@ -16,7 +16,7 @@ use crate::{
     Env,
     args::{DAYS, Timing},
     client::{Connection, kind},
-    commands::tilde,
+    commands::{plain, tilde},
     local_time::LocalTime,
 };
 use unicode_width::UnicodeWidthStr as _;
@@ -237,7 +237,7 @@ pub(crate) fn show(env: &Env, id: &str, json: bool, out: &mut dyn Write) -> Resu
     };
     let title =
         if todo.number == 0 { todo.spec.title.clone() } else { format!("#{}  {}", todo.number, todo.spec.title) };
-    writeln!(out, "{title}")?;
+    writeln!(out, "{}", plain(&title))?;
     let fields: [(&str, Option<String>); 11] = [
         ("id", Some(todo.id.clone())),
         ("column", Some(column_name(column))),
@@ -257,12 +257,12 @@ pub(crate) fn show(env: &Env, id: &str, json: bool, out: &mut dyn Write) -> Resu
     ];
     for (label, value) in fields {
         if let Some(value) = value {
-            writeln!(out, "{label:<9} {value}")?;
+            writeln!(out, "{label:<9} {}", plain(&value))?;
         }
     }
     writeln!(out, "prompt")?;
     for line in todo.spec.prompt().lines() {
-        writeln!(out, "  {line}")?;
+        writeln!(out, "  {}", plain(line))?;
     }
     Ok(())
 }
@@ -366,6 +366,7 @@ fn days_text(days: u8) -> String {
 /// 打印表格：各列按最宽的格子的显示宽度补齐，列间两个空格。
 fn table(header: &[&str], rows: impl Iterator<Item = Vec<String>>, out: &mut dyn Write) -> Result<()> {
     let header: Vec<String> = header.iter().map(|&cell| cell.to_owned()).collect();
+    let rows = rows.map(|row| row.iter().map(|cell| plain(cell)).collect());
     let rows: Vec<Vec<String>> = std::iter::once(header).chain(rows).collect();
     let mut widths = vec![0; rows[0].len()];
     for row in &rows {

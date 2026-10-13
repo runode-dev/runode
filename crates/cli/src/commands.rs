@@ -351,6 +351,7 @@ fn list(world: &World, json: bool, out: &mut dyn Write) -> anyhow::Result<()> {
             row
         })
         .collect();
+    let rows: Vec<Vec<String>> = rows.iter().map(|row| row.iter().map(|cell| plain(cell)).collect()).collect();
     let mut widths = vec![0; header.len()];
     for row in std::iter::once(&header).chain(&rows) {
         for (width, cell) in widths.iter_mut().zip(row) {
@@ -732,6 +733,22 @@ pub(crate) fn state_name(state: AgentState) -> &'static str {
         AgentState::Idle => "idle",
         AgentState::Blocked => "blocked",
     }
+}
+
+/// 要打到终端上的、别的程序给的文字（标题、路径、提示词、设备名）：控制字符换成 `?`、tab 换成空格，
+/// 免得里面的转义序列清屏、改终端标题，或者把表格的一行拆成几行。
+pub(crate) fn plain(text: &str) -> String {
+    text.chars()
+        .map(|c| {
+            if c == '\t' {
+                ' '
+            } else if c.is_control() {
+                '?'
+            } else {
+                c
+            }
+        })
+        .collect()
 }
 
 /// 家目录下的路径写成 `~/…`。

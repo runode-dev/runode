@@ -150,6 +150,25 @@ fn add_outside_a_repository_needs_no_worktree_and_start_follows() {
     assert!(matches!(requests(&fake).as_slice(), [ClientMsg::AddTodo { spec, .. }] if !spec.worktree));
 }
 
+/// 标题、提示词里的控制字符（转义序列、换行）不原样打到终端上：不清屏、不把表格的一行拆成几行。
+#[test]
+fn control_characters_are_not_printed() {
+    let mut nasty = todo("00000001", "boom\x1b[2J\nsecond\tline");
+    nasty.spec.prompt = "fix it\x1b]0;pwned\x07\nthen\ttest".into();
+    let fake = host("todoctl", vec![nasty], vec![]);
+    let (code, out, err) = run("todo list", &fake.env);
+    assert_eq!(code, exit::OK, "{err}");
+    assert!(!out.contains('\x1b') && !out.contains('\t'), "{out:?}");
+    assert_eq!(out.lines().count(), 2, "{out:?}");
+    assert!(out.contains("boom?[2J?second line"), "{out:?}");
+
+    let (code, out, err) = run("todo show #1", &fake.env);
+    assert_eq!(code, exit::OK, "{err}");
+    assert!(!out.contains('\x1b') && !out.contains('\x07'), "{out:?}");
+    // 提示词照样按行分开显示。
+    assert!(out.contains("  fix it?]0;pwned?\n  then test\n"), "{out:?}");
+}
+
 #[test]
 fn list_shows_each_task_in_its_column() {
     let started = Todo { started: Some(now() - 100), session: Some(SessionId(S)), ..todo("00000002", "working one") };

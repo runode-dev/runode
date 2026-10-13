@@ -18,7 +18,7 @@ use runode_remote_access::{
     Device, ListenerStatus, PairingProgress, PairingTicket, list_devices, listener_status, now_unix, revoke_device,
 };
 
-use crate::Env;
+use crate::{Env, commands::plain};
 use unicode_width::UnicodeWidthStr as _;
 
 /// 等配对时隔多久看一眼口令文件。
@@ -88,9 +88,11 @@ pub(crate) fn devices(env: &Env, json: bool, out: &mut dyn Write) -> anyhow::Res
         return Ok(());
     }
     let now = now_unix();
-    let width = devices.iter().map(|device| device.name.width()).max().unwrap_or(0).max("NAME".len());
+    // 设备名是手机报上来的。
+    let names: Vec<String> = devices.iter().map(|device| plain(&device.name)).collect();
+    let width = names.iter().map(|name| name.width()).max().unwrap_or(0).max("NAME".len());
     writeln!(out, "{:<32}  {:<width$}  {:<10}  LAST SEEN", "ID", "NAME", "PAIRED")?;
-    for Device { device_id, name, paired_at, last_seen, .. } in &devices {
+    for (Device { device_id, paired_at, last_seen, .. }, name) in devices.iter().zip(&names) {
         // `{:<width$}` 按字符数补齐，宽字符（中文）对不齐，所以按显示宽度自己补。
         let pad = width.saturating_sub(name.width());
         writeln!(out, "{device_id}  {name}{:pad$}  {:<10}  {}", "", ago(now, *paired_at), ago(now, *last_seen))?;
