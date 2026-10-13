@@ -216,14 +216,19 @@ fn a_worktree_todo_runs_in_its_own_worktree() {
     peer.send(&ClientMsg::Kill { id: third_session });
     let done = ClientMsg::UpdateTodo { req: 6, id: third.clone(), spec: None, done: Some(true) };
     assert_eq!(ask(&mut peer, &done), HostMsg::Done { req: 6 });
+    // 等库里记下清过了，不等目录消失：宿主删完目录还要试着删分支，之后才记进库。
     let deadline = Instant::now() + Duration::from_secs(10);
-    while third_worktree.exists() {
+    let todo = loop {
+        let todo = list(&mut peer).into_iter().find(|todo| todo.id == third).unwrap();
+        if todo.worktree_dir.is_none() {
+            break todo;
+        }
         assert!(Instant::now() < deadline, "the finished todo's worktree was not cleaned up");
         thread::sleep(Duration::from_millis(50));
-    }
+    };
+    assert!(!third_worktree.exists());
+    assert_eq!(todo.branch.as_deref(), Some("runode/ship-it"));
     assert!(git(&repo, &["branch", "--list", "runode/ship-it"]).contains("runode/ship-it"));
-    let todo = list(&mut peer).into_iter().find(|todo| todo.id == third).unwrap();
-    assert_eq!((todo.worktree_dir, todo.branch.as_deref()), (None, Some("runode/ship-it")));
 }
 
 /// 改、标完成、调先后、删，问过 `ListTodos` 的连接每次都收到 `TodosChanged`；不对的请求回 `Error`。
