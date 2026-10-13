@@ -449,10 +449,12 @@ impl WindowView {
         // 分支列表可能列的是上一个 workspace 的仓库。不按下标判断换没换：关掉或拖动 workspace 时
         // 下标和 workspace 对不上。
         self.close_branch_picker(window, cx);
-        // Git 页和文件树的菜单也是：撤销提交、丢掉全部、新建、加进 .gitignore 这些项作用到当前 workspace，
-        // 切过去再按就按到别的仓库、别的目录上。
+        // 各处的菜单也是：撤销提交、丢掉全部、新建、加进 .gitignore、关闭其他标签、跑命令这些项作用到当前
+        // workspace，切过去再按就按到别的仓库、别的目录、别的标签上。
         self.git_panel.update(cx, |page, cx| page.close_menu(window, cx));
         self.file_tree.update(cx, |tree, cx| tree.close_menu(window, cx));
+        self.preview.update(cx, |preview, cx| preview.close_menu(window, cx));
+        self.close_menu(window, cx);
         self.active = ix;
         self.sidebar_scroll.scroll_to_item(ix);
         // 文件树切到这个 workspace 的树，搜索框换上它的搜索词。
