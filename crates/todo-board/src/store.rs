@@ -3,7 +3,8 @@
 //! 和宿主说话经 app 在启动时交进来的 `Host`（`watch`）。启动时问一次宿主，这一问也让宿主之后在任务板变了时
 //! 说一声（app 交进来的通知），说了就重问；换了一条连接也重问。卡片在哪一列要看任务会话里 agent 的状态，宿主不会为它说变了，所以有窗口开着
 //! 看板时每 `SESSIONS_POLL` 问一次宿主里的会话，只留任务用到的；不 attach，免得宿主把它们算成有界面连着。
-//! 数据变了才重画各窗口。请求都在后台线程上等宿主回话。
+//! 数据变了才重画各窗口；刚开始的任务过宽限期时列会变、数据却不一定变，那几轮也重画（`settling`）。
+//! 请求都在后台线程上等宿主回话。
 
 use std::{
     collections::{HashMap, HashSet},
@@ -15,7 +16,7 @@ use futures::{StreamExt as _, channel::mpsc::UnboundedReceiver};
 use gpui::{App, Global, Task, WeakEntity};
 use runode_protocol::{
     ClientMsg, HostMsg, SessionId, SessionInfo,
-    todo::{Schedule, Todo},
+    todo::{START_GRACE, Schedule, Todo},
 };
 
 use crate::TodoBoard;
@@ -186,6 +187,9 @@ fn refresh_sessions(cx: &mut App) -> Task<()> {
             let mut data = take(cx);
             data.sessions =
                 live.into_iter().filter(|info| wanted.contains(&info.id)).map(|info| (info.id, info)).collect();
+            if settling(&data.todos, crate::unix_now()) {
+                cx.refresh_windows();
+            }
             put(data, cx);
         });
     })
@@ -225,9 +229,16 @@ pub(crate) fn send(cx: &mut App, steps: Vec<Step>) -> Task<bool> {
     })
 }
 
-/// 拿出现在的数据改，改完用 `put` 放回去。
+/// 拿一份现在的数据去改，改完用 `put` 放回去；原来的留着，`put` 拿它比。
 fn take(cx: &mut App) -> TodoData {
-    std::mem::take(cx.default_global::<TodoData>())
+    cx.default_global::<TodoData>().clone()
+}
+
+/// 有没做完的任务刚开始不久，宽限期（`START_GRACE`）在这一轮前后到头：到头时它的列可能变（干完了的从进行中
+/// 落进需要你），会话的样子却没变，`put` 比不出来。
+fn settling(todos: &[Todo], now: u64) -> bool {
+    let window = START_GRACE + SESSIONS_POLL.as_secs();
+    todos.iter().any(|todo| todo.done_at.is_none() && todo.started.is_some_and(|at| now <= at.saturating_add(window)))
 }
 
 /// 放回改过的数据；和原来的不一样时重画各窗口。
@@ -235,5 +246,47 @@ fn put(data: TodoData, cx: &mut App) {
     let old = std::mem::replace(cx.default_global::<TodoData>(), data);
     if old != *cx.global::<TodoData>() {
         cx.refresh_windows();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use runode_protocol::todo::TodoSpec;
+
+    use super::*;
+
+    fn todo(started: Option<u64>, done_at: Option<u64>) -> Todo {
+        Todo {
+            id: "1".into(),
+            number: 1,
+            spec: TodoSpec {
+                title: "t".into(),
+                prompt: String::new(),
+                dir: "/tmp".into(),
+                agent: "claude".into(),
+                worktree: false,
+            },
+            created: 0,
+            started,
+            session: Some(SessionId(1)),
+            worktree_dir: None,
+            branch: None,
+            done_at,
+            schedule: None,
+            rank: 0,
+        }
+    }
+
+    /// 宽限期到头前后那一轮都算，过了一轮就不算；没开始的、做完了的不算。
+    #[test]
+    fn settling_covers_the_end_of_the_grace_period() {
+        let start = 1_000;
+        let todos = [todo(Some(start), None)];
+        assert!(settling(&todos, start + 1));
+        assert!(settling(&todos, start + START_GRACE));
+        assert!(settling(&todos, start + START_GRACE + SESSIONS_POLL.as_secs()));
+        assert!(!settling(&todos, start + START_GRACE + SESSIONS_POLL.as_secs() + 1));
+        assert!(!settling(&[todo(None, None)], start));
+        assert!(!settling(&[todo(Some(start), Some(start + 1))], start + 1));
     }
 }
