@@ -35,6 +35,8 @@ use crate::{
 
 /// 列表不空时隔这么久重问一次宿主。
 const POLL_INTERVAL: Duration = Duration::from_secs(2);
+/// 列表空着、只因为任务板没问到才再问时隔这么久：库是新版本写的这类情况会一直问不到，别每两秒唤醒宿主。
+const RETRY_INTERVAL: Duration = Duration::from_secs(30);
 /// 每个会话一行：标题和目录各占一行，和 workspace 的行一样高。
 const ROW_HEIGHT: f32 = 40.;
 /// 这一组最高这么高，再多就在组里滚动，不挤掉上面的 workspace 列表。
@@ -138,10 +140,10 @@ fn apply(live: Option<Result<Live>>, cx: &mut App) {
             previous
         }
     };
-    let poll = !sessions.is_empty() || retry;
+    let poll = if !sessions.is_empty() { Some(POLL_INTERVAL) } else { retry.then_some(RETRY_INTERVAL) };
     set(sessions, cx);
-    if poll {
-        schedule(POLL_INTERVAL, cx);
+    if let Some(delay) = poll {
+        schedule(delay, cx);
     } else {
         cx.global_mut::<BackgroundSessions>().next = None;
     }
