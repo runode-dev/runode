@@ -3,7 +3,8 @@
 mod common;
 
 use std::{
-    path::PathBuf,
+    path::{Path, PathBuf},
+    process::Command,
     time::{SystemTime, UNIX_EPOCH},
 };
 
@@ -17,6 +18,15 @@ use runode_shared_types::agent::{AgentKind, AgentState};
 use unicode_width::UnicodeWidthStr as _;
 
 const S: u128 = 0x5e55_0000_0000_0000_0000_0000_0000_0001;
+
+/// 在 `dir` 下新建一个 git 仓库，返回它的目录：要工作树的测试不靠源码目录恰好在仓库里。
+fn git_repo(dir: &Path) -> String {
+    let repo = dir.join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    let status = Command::new("git").arg("-C").arg(&repo).args(["init", "-q"]).status().unwrap();
+    assert!(status.success());
+    repo.display().to_string()
+}
 
 fn now() -> u64 {
     SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs()
@@ -90,25 +100,24 @@ fn run_args(args: &[&str], fake: &FakeHost) -> (i32, String, String) {
 #[test]
 fn add_sends_an_absolute_dir_and_the_default_agent() {
     let fake = host("todoadd", vec![], vec![]);
-    // 测试在 crate 的目录里跑，它在 git 仓库里：工作树默认开着。
     let (code, out, err) = run("todo add fix the login bug", &fake.env);
     assert_eq!(code, exit::OK, "{err}");
     assert_eq!(out, "0000abcd\n");
     let here = std::env::current_dir().unwrap();
-    let wanted = TodoSpec {
-        title: "fix the login bug".into(),
-        prompt: String::new(),
-        dir: here,
-        agent: DEFAULT_AGENT.into(),
-        worktree: true,
-    };
-    assert!(
-        // 按字节比：`PathBuf` 相等不看尾斜杠。
-        matches!(requests(&fake).as_slice(), [ClientMsg::AddTodo { spec, .. }]
-            if *spec == wanted && spec.dir.as_os_str() == wanted.dir.as_os_str()),
-        "{:?}",
-        requests(&fake)
+    let sent = requests(&fake);
+    let [ClientMsg::AddTodo { spec, .. }] = sent.as_slice() else { panic!("{sent:?}") };
+    assert_eq!(
+        (spec.title.as_str(), spec.prompt.as_str(), spec.agent.as_str()),
+        ("fix the login bug", "", DEFAULT_AGENT)
     );
+    // 按字节比：`PathBuf` 相等不看尾斜杠。
+    assert_eq!(spec.dir.as_os_str(), here.as_os_str());
+
+    // 在 git 仓库里时工作树默认开着。
+    let fake = host("todoaddrepo", vec![], vec![]);
+    let repo = git_repo(&fake.dir);
+    assert_eq!(run(&format!("todo add fix it --cwd {repo}"), &fake.env).0, exit::OK);
+    assert!(matches!(requests(&fake).as_slice(), [ClientMsg::AddTodo { spec, .. }] if spec.worktree));
 }
 
 #[test]
@@ -136,7 +145,8 @@ fn add_outside_a_repository_needs_no_worktree_and_start_follows() {
     );
     // `--no-worktree` 在仓库里也不要工作树。
     let fake = host("todonowt", vec![], vec![]);
-    assert_eq!(run("todo add docs --no-worktree", &fake.env).0, exit::OK);
+    let repo = git_repo(&fake.dir);
+    assert_eq!(run(&format!("todo add docs --cwd {repo} --no-worktree"), &fake.env).0, exit::OK);
     assert!(matches!(requests(&fake).as_slice(), [ClientMsg::AddTodo { spec, .. }] if !spec.worktree));
 }
 
@@ -299,7 +309,9 @@ fn schedule_add_sends_when_and_no_worktree_by_default() {
     let (code, out, err) = run("schedule add morning report --daily 09:30 --days mon-fri", &fake.env);
     assert_eq!(code, exit::OK, "{err}");
     assert_eq!(out, "0000beef\n");
-    let (code, _, err) = run_args(&["schedule", "add", "once", "--at", "2099-01-02 03:04", "--worktree"], &fake);
+    let repo = git_repo(&fake.dir);
+    let (code, _, err) =
+        run_args(&["schedule", "add", "once", "--at", "2099-01-02 03:04", "--cwd", &repo, "--worktree"], &fake);
     assert_eq!(code, exit::OK, "{err}");
     let sent = requests(&fake);
     let [ClientMsg::AddSchedule { spec, when, .. }, ClientMsg::AddSchedule { spec: once, when: at, .. }] =
