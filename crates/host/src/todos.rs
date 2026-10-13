@@ -233,9 +233,11 @@ impl Shared {
         Ok(HostMsg::Done { req })
     }
 
-    /// 任务的会话还在跑，见 `running`。
+    /// 任务的会话还在跑，见 `running`。查过以后这个宿主已经在交出会话了也算：交出去的会话不在 `registry`
+    /// 里，看着和结束了一样，其实在新宿主那边接着跑。所以要先查会话再查这个，反过来的话中间交出去的会被
+    /// 当成结束了。
     fn in_use(&self, todo: &Todo) -> bool {
-        todo.session.is_some_and(|session| self.running(session))
+        todo.session.is_some_and(|session| self.running(session)) || self.todos_writable().is_err()
     }
 
     /// 会话 `id` 还在跑。shell 退出了的会话留在宿主里给人看最后的输出，不算；没及时回话的算还在，免得
