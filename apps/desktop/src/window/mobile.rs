@@ -15,7 +15,6 @@ use gpui::{
     MouseButton, Role, SharedString, Stateful, Subscription, Window, div, prelude::*, px, svg,
 };
 use runode_remote_access::{host_name, local_interfaces};
-use runode_shared_types::color::Rgb;
 
 use super::{
     CARD_GAP, TITLEBAR_HEIGHT, WindowView, cards,
@@ -231,8 +230,7 @@ impl WindowView {
     /// 侧栏顶上的入口，引导页开着时高亮。
     pub(super) fn render_mobile_entry(&self, cx: &mut Context<Self>) -> Stateful<Div> {
         let label = rust_i18n::t!("mobile.entry").into_owned();
-        let (fg, bg) = (cx.theme().fg_rgb(), cx.theme().bg_rgb());
-        page_entry("mobile-entry", PHONE_ICON, label, self.mobile.is_some(), fg, bg, cx, |this, window, cx| {
+        page_entry("mobile-entry", PHONE_ICON, label, self.mobile.is_some(), cx, |this, window, cx| {
             this.show_mobile(window, cx);
         })
     }
@@ -240,21 +238,16 @@ impl WindowView {
     /// 引导页开着时窗口的内容。
     pub(super) fn render_mobile_body(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Vec<AnyElement> {
         let page = self.render_mobile_page(cx).into_any_element();
-        let (fg, bg) = (cx.theme().fg_rgb(), cx.theme().bg_rgb());
-        self.render_page_body(page, fg, bg, window, cx)
+        self.render_page_body(page, window, cx)
     }
 }
 
 /// 侧栏顶上打开一页（手机端、任务板）的入口，那一页开着时高亮。按下鼠标就开，辅助工具的按下另外登记。
-/// 颜色从主题读；`_fg`、`_bg` 不用，只是任务板还照旧传着，它改读主题时一起去掉。
-#[allow(clippy::too_many_arguments)]
 pub(super) fn page_entry(
     id: &'static str,
     icon: &'static str,
     label: String,
     active: bool,
-    _fg: Rgb,
-    _bg: Rgb,
     cx: &mut Context<WindowView>,
     open: impl Fn(&mut WindowView, &mut Window, &mut Context<WindowView>) + 'static,
 ) -> Stateful<Div> {
@@ -306,12 +299,10 @@ pub(super) fn page_entry(
 
 impl WindowView {
     /// 铺满窗口的一页（手机端引导页、任务板）开着时窗口的内容：侧栏（收着时没有），右边整块是 `page`，
-    /// 顶上留一条拖动窗口、放红绿灯。`_fg`、`_bg` 不用，只是任务板还照旧传着，它改读主题时一起去掉。
+    /// 顶上留一条拖动窗口、放红绿灯。
     pub(super) fn render_page_body(
         &mut self,
         page: AnyElement,
-        _fg: Rgb,
-        _bg: Rgb,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Vec<AnyElement> {

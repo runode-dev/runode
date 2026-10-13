@@ -681,7 +681,7 @@ impl Render for WindowView {
         } else if self.mobile.is_some() {
             (if cards(cx) { theme.frame } else { theme.background }, self.render_mobile_body(window, cx))
         } else if self.todo_board.is_some() {
-            (if cards(cx) { theme.frame } else { theme.background }, self.render_todo_body(fg, bg, window, cx))
+            (if cards(cx) { theme.frame } else { theme.background }, self.render_todo_body(window, cx))
         } else if cards(cx) {
             (theme.frame, self.render_cards_body(window, cx))
         } else {

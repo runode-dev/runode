@@ -11,7 +11,6 @@ use std::path::{Path, PathBuf};
 
 use gpui::{AnyElement, App, Context, Div, Entity, Focusable as _, Stateful, Subscription, Window, prelude::*};
 use runode_protocol::{SessionId, todo::Todo};
-use runode_shared_types::color::Rgb;
 use runode_todo_board::{AgentMarks, Host, Input, TodoBoard, TodoBoardEvent, TodoDialog};
 
 use super::{
@@ -145,22 +144,16 @@ impl WindowView {
     }
 
     /// 侧栏顶上的入口，任务板开着时高亮。
-    pub(super) fn render_todo_board_entry(&self, fg: Rgb, bg: Rgb, cx: &mut Context<Self>) -> Stateful<Div> {
+    pub(super) fn render_todo_board_entry(&self, cx: &mut Context<Self>) -> Stateful<Div> {
         let label = rust_i18n::t!("todo_board.title").into_owned();
         let active = self.todo_board.is_some();
-        super::mobile::page_entry("todo-board-entry", CHECK_ICON, label, active, fg, bg, cx, |this, window, cx| {
+        super::mobile::page_entry("todo-board-entry", CHECK_ICON, label, active, cx, |this, window, cx| {
             this.show_todo_board(window, cx);
         })
     }
 
     /// 任务板开着时窗口的内容，摆法和手机端引导页一样。
-    pub(super) fn render_todo_body(
-        &mut self,
-        fg: Rgb,
-        bg: Rgb,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> Vec<AnyElement> {
+    pub(super) fn render_todo_body(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Vec<AnyElement> {
         let Some(board) = self.todo_board.as_ref().map(|board| board.view.clone()) else { return Vec::new() };
         let config = &cx.global::<AppConfig>().0;
         let resident = config.terminal_host
@@ -175,7 +168,7 @@ impl WindowView {
             resident,
         };
         board.update(cx, |board, _| board.set_input(input));
-        self.render_page_body(board.into_any_element(), fg, bg, window, cx)
+        self.render_page_body(board.into_any_element(), window, cx)
     }
 
     /// 任务板开着的新建、编辑对话框，画在窗口最上层。
