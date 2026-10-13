@@ -319,6 +319,12 @@ fn fetch_once(url: &str) -> Option<Hop> {
         .stderr(Stdio::piped())
         .spawn()
         .ok()?;
+    // 标准错误另起线程读：超长的重定向目标写满管道时 curl 停在退出前，这边又在等标准输出读完，两边都卡住。
+    let mut stderr = child.stderr.take()?;
+    let meta = std::thread::spawn(move || {
+        let mut out = String::new();
+        stderr.read_to_string(&mut out).ok().map(|_| out)
+    });
     let mut bytes = Vec::new();
     let read = child.stdout.take()?.take(MAX_IMAGE_BYTES + 1).read_to_end(&mut bytes);
     if read.is_err() || bytes.len() as u64 > MAX_IMAGE_BYTES {
@@ -326,8 +332,7 @@ fn fetch_once(url: &str) -> Option<Hop> {
         let _ = child.wait();
         return None;
     }
-    let mut out = String::new();
-    child.stderr.take()?.read_to_string(&mut out).ok()?;
+    let out = meta.join().ok()??;
     if !child.wait().ok()?.success() {
         return None;
     }
