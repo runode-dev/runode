@@ -305,6 +305,23 @@ pub(crate) fn read_repo(
             file.status = FileStatus::Conflicted;
         }
     }
+    // 缺「我方」版本的冲突（我方删了、对方改了这类）`git diff -2` 只报一句 Unmerged path，读不出 diff：
+    // 照样列进未暂存段，面板里才看得到、能暂存成已解决，不然只剩这种冲突时面板说没有改动。
+    for (path, status) in &statuses {
+        if *status == FileStatus::Conflicted && !unstaged.iter().any(|file| &file.path == path) {
+            unstaged.push(FileDiff {
+                path: path.clone(),
+                old_path: None,
+                status: FileStatus::Conflicted,
+                added: 0,
+                removed: 0,
+                hunks: Vec::new(),
+                binary: false,
+                truncated: false,
+                gitlink: false,
+            });
+        }
+    }
     staged.sort_by(|a, b| a.path.cmp(&b.path));
     unstaged.sort_by(|a, b| a.path.cmp(&b.path));
     // 已跟踪、自带 `.git` 的目录是 gitlink：`.gitmodules` 里登记的子模块，或者没登记、直接

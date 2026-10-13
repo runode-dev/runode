@@ -126,3 +126,25 @@ fn keeps_file_names_that_are_not_utf8() {
         assert_eq!(read(&repo).statuses.get(&path), Some(&FileStatus::Added));
     }
 }
+
+/// 冲突的文件都在未暂存段里、标成冲突，不在暂存段里；我方删了、对方改了的那种 diff 读不出来，也照样列出。
+#[test]
+fn conflicts_are_listed_even_without_a_diff() {
+    let repo = TestRepo::new("snapshot-conflicts");
+    repo.commit_file("both.txt", "base\n", "base");
+    repo.commit_file("gone.txt", "base\n", "gone base");
+    repo.git(&["checkout", "-q", "-b", "feat"]);
+    repo.commit_file("both.txt", "feat\n", "feat both");
+    repo.commit_file("gone.txt", "feat\n", "feat gone");
+    repo.git(&["checkout", "-q", "main"]);
+    repo.commit_file("both.txt", "main\n", "main both");
+    repo.git(&["rm", "-q", "gone.txt"]);
+    repo.git(&["commit", "-q", "-m", "main gone"]);
+    assert!(repo.try_git(&["merge", "-q", "feat"]).is_none());
+
+    let snapshot = read(&repo);
+    let conflicted: Vec<(String, FileStatus)> =
+        snapshot.unstaged.iter().map(|file| (file.path.display().to_string(), file.status)).collect();
+    assert_eq!(conflicted, [("both.txt".into(), FileStatus::Conflicted), ("gone.txt".into(), FileStatus::Conflicted)]);
+    assert!(snapshot.staged.iter().all(|file| file.status != FileStatus::Conflicted), "{:?}", snapshot.staged);
+}
