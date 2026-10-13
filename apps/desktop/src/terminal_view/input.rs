@@ -90,9 +90,9 @@ impl TerminalView {
         let Some(at) = self.grid_point(event.position) else {
             return;
         };
+        // 画面等程序的输出再变；这里通知重画只是白画一帧。
         if let Some(session) = self.screen.live_mut() {
             session.scroll(whole, at, mouse_mods(&event.modifiers));
-            cx.notify();
         }
     }
 
