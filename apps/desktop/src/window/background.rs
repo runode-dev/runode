@@ -6,7 +6,8 @@
 //! 减去各窗口里的终端占着的、有别的界面连着的（`SessionInfo::claimed`）和 shell 已经退出的。列表
 //! 里的会话不 attach，免得宿主把它们算成有界面连着。列表不空时每 `POLL_INTERVAL` 重问一次，空了
 //! 就停；启动、接上、结束之后各问一次。问到 shell 已经退出、谁都没连着的会话（多半是列表里的后台
-//! 会话自己退出了）顺手结束，免得它一直留在宿主里、挡着宿主空闲退出。
+//! 会话自己退出了）顺手结束，免得它一直留在宿主里、挡着宿主空闲退出；任务的会话不结束，要不要结束
+//! 现问宿主的任务板，问不到时这一轮一个都不结束。
 
 use crate::ui::button::{Button, ButtonSize};
 use crate::ui::theme::ActiveTheme as _;
@@ -18,7 +19,7 @@ use std::{
 
 use anyhow::Result;
 use gpui::{App, Context, Div, Global, PromptLevel, Role, SharedString, Stateful, Task, Window, div, prelude::*, px};
-use runode_protocol::{SessionId, SessionInfo};
+use runode_protocol::{ClientMsg, HostMsg, SessionId, SessionInfo};
 
 use super::{
     AGENT_MARK_WIDTH, PressDown, WindowView, agents::Mark, cards, quit::held_sessions, titlebar::styled_agent_mark,
@@ -76,22 +77,54 @@ fn schedule(delay: Duration, cx: &mut App) {
     cx.default_global::<BackgroundSessions>().next = Some(task);
 }
 
-/// 宿主里的会话；宿主跑在 app 里时为 `None`，没有后台会话可言。
-fn live_sessions() -> Option<Result<Vec<SessionInfo>>> {
-    (host_client::mode() != Mode::InProcess).then(host_client::list_sessions)
+/// 问宿主得到的：宿主里的会话，和任务用到的会话（见 `todo_sessions`）。
+struct Live {
+    sessions: Vec<SessionInfo>,
+    todos: Option<HashSet<SessionId>>,
+}
+
+/// 宿主里的会话；宿主跑在 app 里时为 `None`，没有后台会话可言。有可能要结束的会话时连任务板一起问。
+fn live_sessions() -> Option<Result<Live>> {
+    (host_client::mode() != Mode::InProcess).then(|| {
+        let sessions = host_client::list_sessions()?;
+        let todos =
+            if orphans(&sessions, &HashSet::new(), Some(&HashSet::new())).is_empty() { None } else { todo_sessions() };
+        Ok(Live { sessions, todos })
+    })
+}
+
+/// 任务用到的会话，现问宿主的任务板：任务没做完时宿主特意留着 shell 已经退出的会话，给人看 agent 最后
+/// 的输出，不能当成没人要的结束掉。看板那份（`runode_todo_board::todo_sessions`）启动时还没问到、开始了
+/// 新任务时还没更新，靠不住。宿主不认得任务板时没有任务；问不到时为 `None`。
+fn todo_sessions() -> Option<HashSet<SessionId>> {
+    let link = host_client::link();
+    if link.connected() && !link.host_knows_todos() {
+        return Some(HashSet::new());
+    }
+    match host_client::ask_todos(|req| ClientMsg::ListTodos { req }) {
+        Ok(HostMsg::Todos { todos, .. }) => Some(todos.iter().filter_map(|todo| todo.session).collect()),
+        Ok(other) => {
+            tracing::debug!("unexpected answer to the task list: {other:?}");
+            None
+        }
+        Err(err) => {
+            tracing::debug!("failed to list the tasks before ending background sessions: {err:#}");
+            None
+        }
+    }
 }
 
 /// 按问到的会话更新列表，重画窗口；列表不空时排好下一次。问不到时列表不变。
-fn apply(live: Option<Result<Vec<SessionInfo>>>, cx: &mut App) {
+fn apply(live: Option<Result<Live>>, cx: &mut App) {
     let previous = cx.default_global::<BackgroundSessions>().sessions.clone();
     let sessions = match live {
         None => Vec::new(),
-        Some(Ok(live)) => {
+        Some(Ok(Live { sessions: live, todos })) => {
             // 任务的会话在任务板上，不列在这里。
             let mut held = held_sessions(cx);
             held.extend(runode_todo_board::todo_sessions(cx));
             let link = host_client::link();
-            for id in orphans(&live, &held) {
+            for id in orphans(&live, &held, todos.as_ref()) {
                 tracing::info!("ending the background session {id}: its shell exited");
                 link.kill(id);
             }
@@ -144,12 +177,14 @@ fn background(live: &[SessionInfo], held: &HashSet<SessionId>, previous: &[Sessi
     sessions
 }
 
-/// shell 已经退出、谁都没连着（没有界面，也没有命令行这类前端）、也不是窗口里的终端占着的会话，
-/// 同一个会话只给一次。
-fn orphans(live: &[SessionInfo], held: &HashSet<SessionId>) -> Vec<SessionId> {
+/// shell 已经退出、谁都没连着（没有界面，也没有命令行这类前端）、也不是窗口里的终端占着（`held`）、
+/// 不是任务用到的（`todos`）会话，同一个会话只给一次。不知道任务用到哪些会话时一个都不给。
+fn orphans(live: &[SessionInfo], held: &HashSet<SessionId>, todos: Option<&HashSet<SessionId>>) -> Vec<SessionId> {
+    let Some(todos) = todos else { return Vec::new() };
     let mut seen = HashSet::new();
     live.iter()
-        .filter(|session| session.exited && !session.claimed && session.clients == 0 && !held.contains(&session.id))
+        .filter(|session| session.exited && !session.claimed && session.clients == 0)
+        .filter(|session| !held.contains(&session.id) && !todos.contains(&session.id))
         .map(|session| session.id)
         .filter(|id| seen.insert(*id))
         .collect()
@@ -382,7 +417,10 @@ mod tests {
         ];
         // 2 有界面连着；3 还在跑；4 有命令行连着；5 是窗口里的终端占着的。
         let held = HashSet::from([SessionId(5)]);
-        assert_eq!(orphans(&live, &held), [SessionId(1)]);
+        assert_eq!(orphans(&live, &held, Some(&HashSet::new())), [SessionId(1)]);
+        // 1 是任务的会话；不知道任务用到哪些会话时一个都不结束。
+        assert!(orphans(&live, &held, Some(&HashSet::from([SessionId(1)]))).is_empty());
+        assert!(orphans(&live, &held, None).is_empty());
     }
 
     #[test]
