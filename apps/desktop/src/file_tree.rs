@@ -318,6 +318,8 @@ impl FileTree {
     pub fn apply_scan(&mut self, ws: WorkspaceId, scan: TreeScan, cx: &mut Context<Self>) {
         let filter = self.filter();
         let changed = self.workspaces.entry(ws).or_default().apply_scan(scan, filter);
+        // 终端换了目录时定位过去，要的目录可能还没读。
+        self.list_queued(Some(ws), cx);
         if self.ws == Some(ws) {
             if changed {
                 cx.notify();
@@ -328,7 +330,7 @@ impl FileTree {
 
     /// 在文件树里展开到 `path` 所在的目录，选中它、滚到能看见：预览栏里切到了这个文件。
     pub fn reveal_file(&mut self, path: &Path, cx: &mut Context<Self>) {
-        self.with_tree(|state, root, filter| state.reveal_file(path, root, filter));
+        self.with_tree(cx, |state, root, filter| state.reveal_file(path, root, filter));
         cx.notify();
     }
 
@@ -656,7 +658,7 @@ impl FileTree {
                     Some(want) if want == expanded => {}
                     Some(_) => {
                         this.state_mut().selected = Some(path.clone());
-                        this.with_tree(|state, root, filter| state.toggle_dir(&path, root, filter));
+                        this.with_tree(cx, |state, root, filter| state.toggle_dir(&path, root, filter));
                         cx.notify();
                     }
                     // 和点击一样把焦点交给文件树。按两下的打开法：预览设成双击才打开时单击什么也不做，而辅助
@@ -749,7 +751,7 @@ impl FileTree {
     fn click_file(&mut self, path: &Path, is_dir: bool, clicks: usize, cx: &mut Context<Self>) {
         self.state_mut().selected = Some(path.to_path_buf());
         if is_dir {
-            self.with_tree(|state, root, filter| state.toggle_dir(path, root, filter));
+            self.with_tree(cx, |state, root, filter| state.toggle_dir(path, root, filter));
             cx.notify();
             return;
         }
@@ -759,24 +761,54 @@ impl FileTree {
         cx.notify();
     }
 
-    /// 拿文件树的根目录和显示哪些文件，对当前 workspace 的树做 `f`。
-    fn with_tree<R>(&mut self, f: impl FnOnce(&mut TreeState, &Path, TreeFilter) -> R) -> R {
+    /// 拿文件树的根目录和显示哪些文件，对当前 workspace 的树做 `f`；`f` 要读的目录随后在后台读。
+    fn with_tree<R>(&mut self, cx: &mut Context<Self>, f: impl FnOnce(&mut TreeState, &Path, TreeFilter) -> R) -> R {
         let (root, filter) = (self.files_root(), self.filter());
-        f(self.state_mut(), &root, filter)
+        let result = f(self.state_mut(), &root, filter);
+        self.list_queued(self.ws, cx);
+        result
     }
 
     /// 和 `with_tree` 一样，但对的是 workspace `ws` 的树：后台改文件的操作做完时可能已经切到了别的 workspace。
     /// 那个 workspace 关掉了或者还没读到根目录时不做。
-    fn with_tree_of(&mut self, ws: Option<WorkspaceId>, f: impl FnOnce(&mut TreeState, &Path, TreeFilter)) {
+    fn with_tree_of(
+        &mut self,
+        ws: Option<WorkspaceId>,
+        cx: &mut Context<Self>,
+        f: impl FnOnce(&mut TreeState, &Path, TreeFilter),
+    ) {
         if ws == self.ws {
-            return self.with_tree(f);
+            return self.with_tree(cx, f);
         }
         let filter = self.filter();
         if let Some(state) = ws.and_then(|ws| self.workspaces.get_mut(&ws))
             && let Some(root) = state.root.clone()
         {
             f(state, &root, filter);
+            self.list_queued(ws, cx);
         }
+    }
+
+    /// 在后台读 workspace `ws` 的树记下要读的目录（`TreeState::to_list`），读完换上那个 workspace 的树：
+    /// 展开大目录、慢的卷时不卡住界面。
+    fn list_queued(&mut self, ws: Option<WorkspaceId>, cx: &mut Context<Self>) {
+        let Some(state) = ws.and_then(|ws| self.workspaces.get_mut(&ws)) else {
+            return;
+        };
+        if state.to_list.is_empty() {
+            return;
+        }
+        let (dirs, git) = (std::mem::take(&mut state.to_list), state.git.clone());
+        let job = cx.background_spawn(async move { list_dirs(dirs, git.as_deref()) });
+        cx.spawn(async move |this, cx| {
+            let listings = job.await;
+            this.update(cx, |this, cx| {
+                this.with_tree_of(ws, cx, |state, root, filter| state.apply_listings(listings, root, filter));
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
     }
 
     /// 键盘移动选中的行：`f` 返回新选中的位置，滚到那里，关掉右键菜单。
@@ -785,7 +817,7 @@ impl FileTree {
         f: impl FnOnce(&mut TreeState, &Path, TreeFilter) -> Option<usize>,
         cx: &mut Context<Self>,
     ) {
-        self.with_tree(|state, root, filter| {
+        self.with_tree(cx, |state, root, filter| {
             if let Some(ix) = f(state, root, filter) {
                 state.scroll.scroll_to_item(ix, ScrollStrategy::Nearest);
             }

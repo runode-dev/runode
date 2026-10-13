@@ -120,7 +120,7 @@ impl FileTree {
         self.menu = None;
         let (text, select) = match &target {
             EditTarget::New { dir, .. } => {
-                self.with_tree(|state, root, filter| {
+                self.with_tree(cx, |state, root, filter| {
                     if dir != root && !state.expanded.contains(dir) {
                         state.toggle_dir(dir, root, filter);
                     }
@@ -200,7 +200,7 @@ impl FileTree {
 
     /// 当场重读 workspace `ws` 的树里的 `dirs`，再选中 `path`、滚到它。
     fn relist_and_reveal(&mut self, ws: Option<WorkspaceId>, dirs: Vec<PathBuf>, path: &Path, cx: &mut Context<Self>) {
-        self.with_tree_of(ws, |state, root, filter| {
+        self.with_tree_of(ws, cx, |state, root, filter| {
             state.relist(dirs, root, filter);
             state.reveal_file(path, root, filter);
         });
@@ -210,7 +210,7 @@ impl FileTree {
     /// workspace `ws` 里 `from` 改了名或挪到了 `to`：展开的目录、选中的路径和预览的文件跟过去，重读两边的目录。
     /// 剪贴板整个窗口一份，不管是哪个 workspace 都跟过去。
     fn after_move(&mut self, ws: Option<WorkspaceId>, from: &Path, to: &Path, cx: &mut Context<Self>) {
-        self.with_tree_of(ws, |state, _, _| state.moved(from, to));
+        self.with_tree_of(ws, cx, |state, _, _| state.moved(from, to));
         if let Some(clip) = &mut self.clipboard
             && let Some(path) = follow_move(&clip.path, from, to)
         {
@@ -266,7 +266,7 @@ impl FileTree {
         if self.clipboard.as_ref().is_some_and(|clip| clip.path.starts_with(path)) {
             self.clipboard = None;
         }
-        self.with_tree_of(ws, |state, root, filter| {
+        self.with_tree_of(ws, cx, |state, root, filter| {
             let ix = state.selected_row();
             state.removed(path);
             state.selected = None;

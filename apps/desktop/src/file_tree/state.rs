@@ -11,7 +11,7 @@ use runode_git as git;
 
 use crate::file_tree::{
     TreeScan,
-    listing::{Decoration, Decorator, DirEntry, MAX_COMPACT, list_dirs, single_dir},
+    listing::{Decoration, Decorator, DirEntry, Listings, MAX_COMPACT, single_dir},
 };
 
 /// 文件树里显示哪些：被 git 忽略的、名字以 `.` 开头的。整个窗口一个设置，见 `FileTree::filter`。
@@ -49,6 +49,10 @@ pub(crate) struct TreeState {
     /// 搜索框的搜索词：搜索框整个窗口一个，切走时把框里的词存在这里，切回来时放回去。
     pub query: String,
     pub scroll: UniformListScrollHandle,
+    /// 等着在后台读的目录，由 `FileTree` 取走去读，读完经 `apply_listings` 换上。
+    pub to_list: Vec<PathBuf>,
+    /// 等目录读回来再定位一次的 `reveal`：要定位的路径所在的目录还没读到，读到以后才排得出那一行。
+    pending_reveal: Option<(PathBuf, bool, ScrollStrategy)>,
 }
 
 impl TreeState {
@@ -105,21 +109,38 @@ impl TreeState {
         }
     }
 
-    /// 当场读 `dirs` 以及往下多看的一层，读不了的不记。
-    fn list_now(&mut self, dirs: Vec<PathBuf>) {
-        if dirs.is_empty() {
-            return;
-        }
-        let listings = list_dirs(dirs, self.git.as_deref());
+    /// 记下要在后台读的 `dirs`（连同往下多看的一层，见 `list_dirs`）：大目录、慢的卷读起来会卡住界面。
+    fn list_later(&mut self, dirs: Vec<PathBuf>) {
+        self.to_list.extend(dirs);
+    }
+
+    /// 换上后台读回来的目录，读不了的不记；根目录已经换了时不是这里的目录，不要。有等着的 `reveal` 时再定位一次。
+    pub(crate) fn apply_listings(&mut self, listings: Listings, root: &Path, filter: TreeFilter) {
+        let mut read = HashSet::new();
         for (dir, listing) in listings {
-            if let Some(listing) = listing {
-                self.listings.insert(dir, listing);
+            if let Some(listing) = listing
+                && dir.starts_with(root)
+            {
+                self.listings.insert(dir.clone(), listing);
             }
+            read.insert(dir);
+        }
+        self.rebuild_rows(root, filter);
+        let Some((path, expand, strategy)) = self.pending_reveal.take() else {
+            return;
+        };
+        // shortcut: 不管读的这段时间里用户有没有选了别的，慢的卷上可能把选中拉回 `path`；碰到了再记下发起时的
+        // 选中项比一比。
+        self.reveal(&path, expand, root, filter, strategy);
+        // 刚读过还是读不了的目录不再读，不然定位一个读不了的目录会一直读下去。
+        self.to_list.retain(|dir| !read.contains(dir));
+        if self.to_list.is_empty() {
+            self.pending_reveal = None;
         }
     }
 
-    /// 展开或收起文件树里的目录；展开时当场读它的内容，免得显示收起期间已经变了的旧列表，
-    /// 之后跟着重读。
+    /// 展开或收起文件树里的目录；展开时重读它的内容（在后台），收起期间可能变过，读回来之前先显示
+    /// 记着的旧列表。
     pub(crate) fn toggle_dir(&mut self, path: &Path, root: &Path, filter: TreeFilter) {
         if self.expanded.remove(path) {
             // 选中的在收起的目录里面时，选中改成这个目录，免得选中项看不见还被删除、新建用上。
@@ -128,7 +149,7 @@ impl TreeState {
             }
         } else {
             self.expanded.insert(path.to_path_buf());
-            self.list_now(vec![path.to_path_buf()]);
+            self.list_later(vec![path.to_path_buf()]);
         }
         self.rebuild_rows(root, filter);
     }
@@ -141,6 +162,7 @@ impl TreeState {
     /// 在文件树里展开到 `path` 所在的目录，选中它、滚到能看见。已经显示着时只选中，不重排。
     pub(crate) fn reveal_file(&mut self, path: &Path, root: &Path, filter: TreeFilter) {
         if let Some(ix) = self.rows.iter().position(|row| row.path == path) {
+            self.pending_reveal = None;
             self.select_row(ix);
             self.scroll.scroll_to_item(ix, ScrollStrategy::Nearest);
             return;
@@ -165,7 +187,7 @@ impl TreeState {
             .collect();
         chain.reverse();
         let missing = chain.iter().filter(|dir| !self.listings.contains_key(*dir)).cloned().collect();
-        self.list_now(missing);
+        self.list_later(missing);
         // `path` 和它唯一的子目录并成一行时，这一行按链条最深的那个展开，一路展开下去。
         if expand {
             for _ in 0..MAX_COMPACT {
@@ -176,13 +198,15 @@ impl TreeState {
                     break;
                 };
                 if !self.listings.contains_key(&child) {
-                    self.list_now(vec![child.clone()]);
+                    self.list_later(vec![child.clone()]);
                 }
                 chain.push(child);
             }
         }
         self.expanded.extend(chain);
         self.rebuild_rows(root, filter);
+        // 要读的目录还没读回来时，读回来以后再定位一次：那时才排得出 `path` 那一行。
+        self.pending_reveal = (!self.to_list.is_empty()).then(|| (path.to_path_buf(), expand, strategy));
         // 并成一行的目录，行的路径是链条最深的那个，`path` 在链条中间时找不到原样的路径。
         let rows = &self.rows;
         let Some(ix) = rows
@@ -206,9 +230,9 @@ impl TreeState {
         }
     }
 
-    /// 改了文件之后当场重读 `dirs`，不等监听到改动；后台的重读随后照常进行。
+    /// 改了文件之后马上重读 `dirs`（在后台），不等监听到改动；app 的重读随后照常进行。
     pub(crate) fn relist(&mut self, dirs: Vec<PathBuf>, root: &Path, filter: TreeFilter) {
-        self.list_now(dirs);
+        self.list_later(dirs);
         self.rebuild_rows(root, filter);
     }
 
@@ -222,10 +246,15 @@ impl TreeState {
         }
     }
 
-    /// `path` 被删掉了：它和下面的目录不再展开。
+    /// `path` 被删掉了：它和下面的目录不再展开，上级目录的列表里马上去掉它，不等重读回来。
     pub(crate) fn removed(&mut self, path: &Path) {
         self.expanded.retain(|dir| !dir.starts_with(path));
         self.listings.retain(|dir, _| !dir.starts_with(path));
+        if let Some((parent, name)) = path.parent().zip(path.file_name())
+            && let Some(entries) = self.listings.get_mut(parent)
+        {
+            entries.retain(|entry| entry.name != name);
+        }
     }
 
     /// 选中的行在 `rows` 里的位置。
@@ -570,6 +599,44 @@ mod tests {
         assert_eq!(state.selected, Some(PathBuf::from("/p/d/b")));
         state.removed(Path::new("/p/d"));
         assert!(state.expanded.is_empty());
+    }
+
+    /// 展开、定位和改了文件时要读的目录不当场读，记下来交给后台；读回来以后行跟着变，定位等着的那一项。
+    #[test]
+    fn lists_dirs_later_and_reveals_when_they_arrive() {
+        let mut state = TreeState::default();
+        let root = Path::new("/p");
+        state.listings.insert(root.into(), vec![dir("a"), file("z")]);
+        state.rebuild_rows(root, ALL);
+        state.toggle_dir(Path::new("/p/a"), root, ALL);
+        assert_eq!(std::mem::take(&mut state.to_list), [PathBuf::from("/p/a")]);
+        assert_eq!(state.rows.len(), 2);
+        state.apply_listings(vec![(PathBuf::from("/p/a"), Some(vec![file("b")]))], root, ALL);
+        assert_eq!(names(&state), [("a".into(), 0), ("b".into(), 1), ("z".into(), 0)]);
+
+        // 新建的文件要等重读回来才排得出那一行，那时再选中它。
+        state.relist(vec![PathBuf::from("/p/a")], root, ALL);
+        state.reveal_file(Path::new("/p/a/new"), root, ALL);
+        assert_eq!(state.selected, None);
+        let read = std::mem::take(&mut state.to_list).into_iter().map(|dir| (dir, Some(vec![file("b"), file("new")])));
+        state.apply_listings(read.collect(), root, ALL);
+        assert_eq!(state.selected, Some(PathBuf::from("/p/a/new")));
+
+        // 删掉的不等重读回来就从行里去掉。
+        state.removed(Path::new("/p/a/new"));
+        state.rebuild_rows(root, ALL);
+        assert_eq!(names(&state), [("a".into(), 0), ("b".into(), 1), ("z".into(), 0)]);
+
+        // 读不了的目录读过一次就不再读，不会一直读下去。
+        state.reveal_dir(Path::new("/p/gone/x"), root, ALL);
+        let read: Listings = std::mem::take(&mut state.to_list).into_iter().map(|dir| (dir, None)).collect();
+        assert!(!read.is_empty());
+        state.apply_listings(read, root, ALL);
+        assert!(state.to_list.is_empty());
+        assert!(state.pending_reveal.is_none());
+        // 根目录换了以后才读回来的不要。
+        state.apply_listings(vec![(PathBuf::from("/q"), Some(vec![file("y")]))], root, ALL);
+        assert!(!state.listings.contains_key(Path::new("/q")));
     }
 
     /// 换上扫描结果：换了根目录时丢掉上一处的目录列表，同一份 git 状态不算变化，读不了的目录收起来，
