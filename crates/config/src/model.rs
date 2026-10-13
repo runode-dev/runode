@@ -157,7 +157,7 @@ pub struct Config {
     pub apns_key_id: Option<String>,
     pub apns_team_id: Option<String>,
     pub apns_bundle_id: Option<String>,
-    /// 界面语言，是 locales 里的某个语言标签；`None` 表示跟随系统。
+    /// 界面语言的标签，照配置里写的；`None` 表示跟随系统。
     pub language: Option<String>,
     /// agent 等用户回答或者干完了、用户又没在看那个分屏时，发系统通知。
     pub agent_notifications: bool,

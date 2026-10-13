@@ -519,7 +519,7 @@ fn action_name(keys: &str, action: &Action) -> String {
         });
         spec.map(|spec| spec.name)
     };
-    default.or_else(listed).map_or_else(|| format!("{action:?}"), keybind::describe)
+    default.or_else(listed).map_or_else(|| format!("{action:?}"), crate::i18n::describe)
 }
 
 /// 保存或删除命令时快捷键怎么跟着改，见 `with_task_keybind`。
@@ -834,7 +834,7 @@ mod tests {
     /// 自己绑的动作按动作表认出来，认不出时写动作本身。
     #[test]
     fn names_actions_the_user_bound() {
-        assert_eq!(action_name("shift-cmd-r", &Action::NewSplitRight), keybind::describe("new_split"));
+        assert_eq!(action_name("shift-cmd-r", &Action::NewSplitRight), crate::i18n::describe("new_split"));
         assert_eq!(action_name("cmd-9", &Action::GotoTab(4)), "GotoTab(4)");
     }
 

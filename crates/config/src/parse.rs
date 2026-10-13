@@ -21,7 +21,7 @@ use crate::{
 
 /// runode 认的全部键，按配置模板里的顺序分组，组与组之间在模板里空一行。`apply` 只处理
 /// 这里列出的键，模板也按这张表逐个写出，所以新增配置项只要在这里加上键名、在 `apply` 里
-/// 解析、在 `Config::values` 里写出值、在翻译里写好说明。`theme` 和 `config-file`
+/// 解析、在 `Config::values` 里写出值、在 `docs` 里写好说明。`theme` 和 `config-file`
 /// 在应用各层之前就已处理，列在这里是为了写进模板。
 pub const KEYS: &[&[&str]] = &[
     &["language"],
@@ -388,17 +388,8 @@ impl Config {
                     _ => return Err("expected true, false, left or right".into()),
                 };
             }
-            "language" => match value {
-                "" | "system" => self.language = None,
-                tag => match crate::i18n::resolve(tag) {
-                    Some(locale) => self.language = Some(locale),
-                    // 没有翻译的语言用英文，同时报出来，免得写错了不知道。
-                    None => {
-                        self.language = Some(crate::i18n::FALLBACK.to_owned());
-                        return Err(format!("no translation, using {}", crate::i18n::FALLBACK));
-                    }
-                },
-            },
+            // 有没有这种翻译只有界面知道，界面用 `i18n::resolve` 换成有翻译的那种。
+            "language" => self.language = if empty || value == "system" { None } else { Some(value.to_owned()) },
             "keybind" => {
                 // 值为空时去掉此前写的 keybind，回到默认快捷键。
                 if empty {

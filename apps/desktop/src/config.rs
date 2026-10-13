@@ -36,7 +36,6 @@ pub fn install(cx: &mut App) {
         }
         None => reload(cx),
     }
-    // 模板按界面语言写，所以先加载配置定下语言。
     if let Some(path) = runode_config::config_path()
         && let Err(err) = runode_config::create_config_file(&path)
     {
@@ -186,7 +185,7 @@ pub fn reload(cx: &mut App) {
 /// 让 `config` 生效并广播给各视图，`seen` 记作读它时各配置文件的修改时间。
 fn apply(cx: &mut App, config: Config, seen: Stamps) {
     // 先换语言再广播，观察配置的菜单和视图重画时就是新语言。
-    crate::i18n::set(&config.language.clone().unwrap_or_else(crate::i18n::system));
+    crate::i18n::set(&crate::i18n::from_config(config.language.as_deref()));
     // 宿主先换主题，视图等它在各个会话的输出流里标出位置后再跟着换。
     crate::host_client::configure(&config);
     cx.set_global(Seen(seen));

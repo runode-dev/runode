@@ -2,7 +2,7 @@
 //!
 //! 默认绑定和动作表都只在这里写一次：`DEFAULTS` 用的就是配置文件的写法，和用户写的
 //! 走同一个解析器；配置模板也从这两张表生成，新增动作或默认绑定会自动出现在模板里，
-//! 动作的说明在翻译的 `action.<name>` 里。这里只管写法和校验，解析出的 `Action` 由界面
+//! 动作的英文说明写在表里，界面显示的翻译在桌面 app 的 locales 里。这里只管写法和校验，解析出的 `Action` 由界面
 //! 换成具体的动作并决定在哪些上下文里生效。
 //! 搜索框里的文字编辑键（回车、Esc、剪切、撤销等）属于输入框本身，不开放配置。
 
@@ -108,7 +108,9 @@ pub enum ScreenFile {
 /// 一个可绑定的动作。
 pub struct ActionSpec {
     pub name: &'static str,
-    /// 参数的写法，`None` 表示不带参数。说明在翻译的 `action.<name>` 里。
+    /// 英文的说明，配置模板和设置页用；翻译在界面的 locales 里，键是 `action.<name>`。
+    pub doc: &'static str,
+    /// 参数的写法，`None` 表示不带参数。
     pub param: Option<&'static str>,
     parse: fn(Option<&str>) -> Result<Action, String>,
 }
@@ -121,8 +123,8 @@ fn plain(param: Option<&str>, action: Action) -> Result<Action, String> {
 }
 
 macro_rules! plain {
-    ($name:literal, $action:expr) => {
-        ActionSpec { name: $name, param: None, parse: |param| plain(param, $action) }
+    ($name:literal, $doc:literal, $action:expr) => {
+        ActionSpec { name: $name, doc: $doc, param: None, parse: |param| plain(param, $action) }
     };
 }
 
@@ -149,27 +151,28 @@ fn optional_amount(param: Option<&str>) -> Result<(), String> {
 }
 
 pub static ACTIONS: &[ActionSpec] = &[
-    plain!("about", Action::About),
-    plain!("quit", Action::Quit),
-    plain!("open_settings", Action::OpenSettings),
-    plain!("open_config", Action::OpenConfig),
-    plain!("reload_config", Action::ReloadConfig),
-    plain!("hide", Action::Hide),
-    plain!("hide_others", Action::HideOthers),
-    plain!("show_all", Action::ShowAll),
-    plain!("new_window", Action::NewWindow),
-    plain!("close_window", Action::CloseWindow),
-    plain!("close_all_windows", Action::CloseAllWindows),
-    plain!("minimize", Action::Minimize),
-    plain!("toggle_maximize", Action::ToggleMaximize),
-    plain!("toggle_fullscreen", Action::ToggleFullscreen),
-    plain!("new_tab", Action::NewTab),
-    plain!("close_tab", Action::CloseTab),
-    plain!("next_tab", Action::NextTab),
-    plain!("previous_tab", Action::PreviousTab),
-    plain!("last_tab", Action::LastTab),
+    plain!("about", "About Runode", Action::About),
+    plain!("quit", "Quit", Action::Quit),
+    plain!("open_settings", "Open settings", Action::OpenSettings),
+    plain!("open_config", "Open the configuration file", Action::OpenConfig),
+    plain!("reload_config", "Reload the configuration", Action::ReloadConfig),
+    plain!("hide", "Hide Runode", Action::Hide),
+    plain!("hide_others", "Hide other apps", Action::HideOthers),
+    plain!("show_all", "Show all apps", Action::ShowAll),
+    plain!("new_window", "New window", Action::NewWindow),
+    plain!("close_window", "Close the window", Action::CloseWindow),
+    plain!("close_all_windows", "Close all windows", Action::CloseAllWindows),
+    plain!("minimize", "Minimize the window", Action::Minimize),
+    plain!("toggle_maximize", "Zoom the window", Action::ToggleMaximize),
+    plain!("toggle_fullscreen", "Toggle full screen", Action::ToggleFullscreen),
+    plain!("new_tab", "New tab", Action::NewTab),
+    plain!("close_tab", "Close the tab", Action::CloseTab),
+    plain!("next_tab", "Next tab", Action::NextTab),
+    plain!("previous_tab", "Previous tab", Action::PreviousTab),
+    plain!("last_tab", "Last tab", Action::LastTab),
     ActionSpec {
         name: "goto_tab",
+        doc: "The Nth tab, counting from 1",
         param: Some("N"),
         parse: |param| match required(param)?.parse::<usize>() {
             Ok(n) if n >= 1 => Ok(Action::GotoTab(n - 1)),
@@ -178,6 +181,7 @@ pub static ACTIONS: &[ActionSpec] = &[
     },
     ActionSpec {
         name: "new_split",
+        doc: "Split to the right or down",
         param: Some("right|down"),
         parse: |param| match required(param)? {
             "right" => Ok(Action::NewSplitRight),
@@ -185,9 +189,10 @@ pub static ACTIONS: &[ActionSpec] = &[
             _ => Err("expected right or down".into()),
         },
     },
-    plain!("close_surface", Action::CloseSurface),
+    plain!("close_surface", "Close the current split, or the tab when it is the only one", Action::CloseSurface),
     ActionSpec {
         name: "goto_split",
+        doc: "Focus the previous, next, or adjacent split in a direction",
         param: Some("previous|next|left|right|up|down"),
         parse: |param| match param {
             Some("previous") => Ok(Action::FocusPreviousSplit),
@@ -197,6 +202,7 @@ pub static ACTIONS: &[ActionSpec] = &[
     },
     ActionSpec {
         name: "resize_split",
+        doc: "Move the nearest divider in this direction by a fixed step",
         param: Some("left|right|up|down"),
         // 兼容 `resize_split:left,10` 的写法，数值只校验不使用。
         parse: |param| {
@@ -208,72 +214,119 @@ pub static ACTIONS: &[ActionSpec] = &[
             Ok(Action::ResizeSplit(direction(dir)?))
         },
     },
-    plain!("equalize_splits", Action::EqualizeSplits),
-    plain!("toggle_split_zoom", Action::ToggleSplitZoom),
-    plain!("toggle_split_fold", Action::ToggleSplitFold),
-    plain!("arrange_splits", Action::ArrangeSplits),
-    plain!("new_workspace", Action::NewWorkspace),
-    plain!("close_workspace", Action::CloseWorkspace),
-    plain!("rename_workspace", Action::RenameWorkspace),
-    plain!("next_workspace", Action::NextWorkspace),
-    plain!("previous_workspace", Action::PreviousWorkspace),
-    plain!("last_workspace", Action::LastWorkspace),
+    plain!("equalize_splits", "Make all splits the same size", Action::EqualizeSplits),
+    plain!("toggle_split_zoom", "Zoom or restore the current split", Action::ToggleSplitZoom),
+    plain!(
+        "toggle_split_fold",
+        "Collapse the current split to the bottom of the tab, or expand it again",
+        Action::ToggleSplitFold
+    ),
+    plain!(
+        "arrange_splits",
+        "Open a few new terminals beside the current split in one go, picking the direction and how many",
+        Action::ArrangeSplits
+    ),
+    plain!("new_workspace", "Choose a directory and open a workspace there", Action::NewWorkspace),
+    plain!("close_workspace", "Close the workspace and all of its tabs", Action::CloseWorkspace),
+    plain!("rename_workspace", "Rename the workspace in the sidebar", Action::RenameWorkspace),
+    plain!("next_workspace", "Next workspace", Action::NextWorkspace),
+    plain!("previous_workspace", "Previous workspace", Action::PreviousWorkspace),
+    plain!("last_workspace", "Last workspace", Action::LastWorkspace),
     ActionSpec {
         name: "goto_workspace",
+        doc: "The Nth workspace, counting from 1",
         param: Some("N"),
         parse: |param| match required(param)?.parse::<usize>() {
             Ok(n) if n >= 1 => Ok(Action::GotoWorkspace(n - 1)),
             _ => Err("expected a workspace number starting from 1".into()),
         },
     },
-    plain!("toggle_sidebar", Action::ToggleSidebar),
-    plain!("toggle_status_bar", Action::ToggleStatusBar),
-    plain!("toggle_git", Action::ToggleGit),
-    plain!("toggle_files", Action::ToggleFiles),
-    plain!("toggle_github_actions", Action::ToggleGitHubActions),
-    plain!("toggle_tasks", Action::ToggleTasks),
-    plain!("toggle_todo_board", Action::ToggleTodoBoard),
+    plain!("toggle_sidebar", "Show or hide the workspace sidebar", Action::ToggleSidebar),
+    plain!("toggle_status_bar", "Show or hide the status bar at the bottom of the window", Action::ToggleStatusBar),
+    plain!(
+        "toggle_git",
+        "Show or hide the Git panel on the right to stage, commit, switch branches, sync and stash",
+        Action::ToggleGit
+    ),
+    plain!(
+        "toggle_files",
+        "Show or hide the file tree on the right; double-click a file to type its path into the terminal",
+        Action::ToggleFiles
+    ),
+    plain!(
+        "toggle_github_actions",
+        "Show or hide the GitHub Actions page on the right, with the workflow runs of the current branch, workflows, secrets and variables, read and changed through gh",
+        Action::ToggleGitHubActions
+    ),
+    plain!(
+        "toggle_tasks",
+        "Open or close the project tasks menu in the title bar; pick with the arrow keys and press Enter to run",
+        Action::ToggleTasks
+    ),
+    plain!(
+        "toggle_todo_board",
+        "Open or close the full-window todo board: tasks handed to agents in columns by their state, and the schedules that start them",
+        Action::ToggleTodoBoard
+    ),
     ActionSpec {
         name: "run_task",
+        doc: "Run the task with this name from the project tasks menu (your own, a Makefile target or a package.json script), as if clicked there; with duplicate names the one higher in the menu wins",
         param: Some("NAME"),
         parse: |param| Ok(Action::RunTask(required(param)?.to_owned())),
     },
-    plain!("goto_agent", Action::GotoAgent),
-    plain!("next_agent", Action::NextAgent),
-    plain!("copy_to_clipboard", Action::Copy),
-    plain!("paste_from_clipboard", Action::Paste),
-    plain!("paste_from_selection", Action::PasteSelection),
-    plain!("select_all", Action::SelectAll),
-    plain!("clear_screen", Action::ClearScreen),
-    plain!("reload_shell", Action::ReloadShell),
-    plain!("scroll_to_top", Action::ScrollToTop),
-    plain!("scroll_to_bottom", Action::ScrollToBottom),
-    plain!("scroll_page_up", Action::ScrollPageUp),
-    plain!("scroll_page_down", Action::ScrollPageDown),
-    plain!("scroll_to_selection", Action::ScrollToSelection),
+    plain!("goto_agent", "List the agents in every window and jump to the one you pick", Action::GotoAgent),
+    plain!(
+        "next_agent",
+        "Jump to the next agent that needs you, those waiting for an answer first, then those that finished",
+        Action::NextAgent
+    ),
+    plain!("copy_to_clipboard", "Copy", Action::Copy),
+    plain!("paste_from_clipboard", "Paste", Action::Paste),
+    plain!("paste_from_selection", "Paste the selection", Action::PasteSelection),
+    plain!("select_all", "Select all", Action::SelectAll),
+    plain!("clear_screen", "Clear the screen and the scrollback", Action::ClearScreen),
+    plain!(
+        "reload_shell",
+        "Restart the shell at the prompt so it reads its configuration again; the shell integration stays",
+        Action::ReloadShell
+    ),
+    plain!("scroll_to_top", "Scroll to the top", Action::ScrollToTop),
+    plain!("scroll_to_bottom", "Scroll to the bottom", Action::ScrollToBottom),
+    plain!("scroll_page_up", "Scroll up a page", Action::ScrollPageUp),
+    plain!("scroll_page_down", "Scroll down a page", Action::ScrollPageDown),
+    plain!("scroll_to_selection", "Scroll to the selection", Action::ScrollToSelection),
     ActionSpec {
         name: "jump_to_prompt",
+        doc: "Jump to the previous (negative) or next (positive) prompt",
         param: Some("N"),
         parse: |param| match required(param)?.parse::<isize>() {
             Ok(n) if n != 0 => Ok(Action::JumpToPrompt(n)),
             _ => Err("expected a non-zero number".into()),
         },
     },
-    ActionSpec { name: "text", param: Some("TEXT"), parse: |param| Ok(Action::SendText(unescape(required(param)?)?)) },
+    ActionSpec {
+        name: "text",
+        doc: "Send text to the program; escapes such as \\x1b, \\n, \\t, \\u{...} work",
+        param: Some("TEXT"),
+        parse: |param| Ok(Action::SendText(unescape(required(param)?)?)),
+    },
     ActionSpec {
         name: "esc",
+        doc: "Send Esc followed by the text",
         param: Some("TEXT"),
         parse: |param| Ok(Action::SendText(format!("\x1b{}", required(param)?))),
     },
     ActionSpec {
         name: "csi",
+        doc: "Send Esc [ followed by the text",
         param: Some("TEXT"),
         parse: |param| Ok(Action::SendText(format!("\x1b[{}", required(param)?))),
     },
-    plain!("start_search", Action::StartSearch),
-    plain!("search_selection", Action::SearchSelection),
+    plain!("start_search", "Open the search bar", Action::StartSearch),
+    plain!("search_selection", "Search for the selected text", Action::SearchSelection),
     ActionSpec {
         name: "navigate_search",
+        doc: "Next or previous search match",
         param: Some("next|previous"),
         parse: |param| match required(param)? {
             "next" => Ok(Action::SearchNext),
@@ -281,9 +334,10 @@ pub static ACTIONS: &[ActionSpec] = &[
             _ => Err("expected next or previous".into()),
         },
     },
-    plain!("end_search", Action::EndSearch),
+    plain!("end_search", "Close the search bar", Action::EndSearch),
     ActionSpec {
         name: "write_screen_file",
+        doc: "Write the screen and scrollback to a temporary file, then copy its path, paste its path, or open it",
         param: Some("copy|paste|open"),
         parse: |param| {
             let file = match required(param)? {
@@ -297,22 +351,18 @@ pub static ACTIONS: &[ActionSpec] = &[
     },
     ActionSpec {
         name: "increase_font_size",
+        doc: "Increase the font size by a fixed step; N can be omitted",
         param: Some("N"),
         parse: |param| optional_amount(param).map(|()| Action::IncreaseFontSize),
     },
     ActionSpec {
         name: "decrease_font_size",
+        doc: "Decrease the font size by a fixed step; N can be omitted",
         param: Some("N"),
         parse: |param| optional_amount(param).map(|()| Action::DecreaseFontSize),
     },
-    plain!("reset_font_size", Action::ResetFontSize),
+    plain!("reset_font_size", "Reset the font size", Action::ResetFontSize),
 ];
-
-/// 动作的说明，按当前的界面语言，取自翻译里的 `action.<name>`。
-pub fn describe(name: &str) -> String {
-    let key = format!("action.{name}");
-    rust_i18n::t!(&key).into_owned()
-}
 
 /// 默认绑定，写法与配置文件里 `keybind =` 的值相同。
 pub static DEFAULTS: &[&str] = &[

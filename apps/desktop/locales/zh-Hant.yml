@@ -996,3 +996,72 @@ files:
   show_ignored: 顯示 Git 忽略的檔案
   open_in_vscode: 用 VS Code 開啟
   open_in_finder: 在 Finder 中開啟
+action:
+  about: 關於 Runode
+  quit: 結束
+  open_settings: 打開設定
+  open_config: 打開設定檔
+  reload_config: 重新載入設定
+  hide: 隱藏 Runode
+  hide_others: 隱藏其他應用程式
+  show_all: 顯示全部應用程式
+  new_window: 新增視窗
+  close_window: 關閉視窗
+  close_all_windows: 關閉所有視窗
+  minimize: 將視窗縮到最小
+  toggle_maximize: 縮放視窗
+  toggle_fullscreen: 切換全螢幕
+  new_tab: 新增分頁
+  close_tab: 關閉分頁
+  next_tab: 下一個分頁
+  previous_tab: 上一個分頁
+  last_tab: 最後一個分頁
+  goto_tab: 第 N 個分頁，從 1 數
+  new_split: 向右或向下分割
+  close_surface: 關閉目前的分割畫面，分頁裡只剩它時關閉分頁
+  goto_split: 焦點移到上一個、下一個或某個方向上的分割畫面
+  resize_split: 把最近的分隔線往這個方向移，步長固定
+  equalize_splits: 平均分割畫面
+  toggle_split_zoom: 放大或還原目前的分割畫面
+  toggle_split_fold: 把目前的分割畫面摺疊到標籤底部，或展開回原位
+  arrange_splits: 在目前的分割畫面旁一次開出幾個新終端機，先選方向和個數
+  new_workspace: 選一個目錄，在裡面新增工作區
+  close_workspace: 關閉工作區和裡面所有分頁
+  rename_workspace: 在側欄裡重新命名工作區
+  next_workspace: 下一個工作區
+  previous_workspace: 上一個工作區
+  last_workspace: 最後一個工作區
+  goto_workspace: 第 N 個工作區，從 1 數
+  toggle_sidebar: 顯示或隱藏工作區側欄
+  toggle_status_bar: 顯示或隱藏視窗底部的狀態列
+  toggle_git: 顯示或隱藏右側的 Git 面板：暫存、提交、切換分支、同步和儲藏
+  toggle_files: 顯示或隱藏右側的檔案樹，按兩下檔案把路徑打進終端機
+  toggle_github_actions: 顯示或隱藏右側的 GitHub Actions 頁：經 gh 看目前分支的執行、工作流程，管理 secret 和 variable
+  toggle_tasks: 打開或關閉標題列上的專案命令選單，上下鍵選、Enter 執行
+  toggle_todo_board: "打開或收起鋪滿視窗的任務板：派給 agent 的任務按狀態分欄，和到點開任務的定時"
+  run_task: 執行專案命令選單裡叫這個名字的命令（自己加的、Makefile 目標或 package.json 的 script），和在選單裡點它一樣；同名的取選單裡靠上的
+  goto_agent: 列出所有視窗裡的 agent，選一個跳過去
+  next_agent: 跳到下一個要處理的 agent：先是等你回答的，再是做完了還沒看的
+  copy_to_clipboard: 拷貝
+  paste_from_clipboard: 貼上
+  paste_from_selection: 貼上選取內容
+  select_all: 全選
+  clear_screen: 清除螢幕並清掉捲動歷史
+  reload_shell: 把停在提示字元上的 shell 換成一個新的，重新讀 shell 設定，整合照舊
+  scroll_to_top: 捲到最上面
+  scroll_to_bottom: 捲到最下面
+  scroll_page_up: 向上捲一頁
+  scroll_page_down: 向下捲一頁
+  scroll_to_selection: 捲到選取範圍
+  jump_to_prompt: 跳到上一個（負數）或下一個（正數）提示符號
+  text: 把文字傳給程式，支援 \x1b、\n、\t、\u{...} 等跳脫字元
+  esc: 傳送 Esc 加文字
+  csi: 傳送 Esc [ 加文字
+  start_search: 打開搜尋列
+  search_selection: 用選取的文字搜尋
+  navigate_search: 下一個或上一個搜尋結果
+  end_search: 關閉搜尋列
+  write_screen_file: 把螢幕和捲動歷史寫進暫存檔，再拷貝路徑、貼上路徑或打開它
+  increase_font_size: 放大字體，步長固定，N 可省略
+  decrease_font_size: 縮小字體，步長固定，N 可省略
+  reset_font_size: 重設字體大小

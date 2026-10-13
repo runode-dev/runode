@@ -391,7 +391,7 @@ impl SettingsView {
             }
             Control::Language => {
                 let label = match &self.config.language {
-                    Some(locale) => language_name(locale),
+                    Some(tag) => language_name(&crate::i18n::configured(tag)),
                     None => rust_i18n::t!("settings.follow_system").into_owned(),
                 };
                 dropdown(id("dropdown", key), key_title(key), None, label, 180., theme)
@@ -414,11 +414,13 @@ impl SettingsView {
 
     fn open_language_picker(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let items = std::iter::once(PickItem::new("", rust_i18n::t!("settings.follow_system").into_owned()))
-            .chain(runode_config::i18n::available().into_iter().map(|locale| {
-                PickItem::new(locale.to_string(), language_name(&locale)).with_detail(locale.to_string())
-            }))
+            .chain(
+                crate::i18n::available()
+                    .into_iter()
+                    .map(|locale| PickItem::new(locale.clone(), language_name(&locale)).with_detail(locale)),
+            )
             .collect();
-        let current = self.config.language.clone().unwrap_or_default();
+        let current = self.config.language.as_deref().map(crate::i18n::configured).unwrap_or_default();
         self.open_picker(key_title("language"), items, Some(current), PickTarget::Value("language"), window, cx);
     }
 
@@ -679,7 +681,7 @@ mod tests {
     /// 每个键、每页、每个选项都有翻译。
     #[test]
     fn every_label_is_translated() {
-        for locale in runode_config::i18n::available() {
+        for locale in rust_i18n::available_locales!() {
             let t = |key: &str| rust_i18n::t!(key, locale = &locale).into_owned();
             let missing = |key: &str| {
                 let text = t(key);

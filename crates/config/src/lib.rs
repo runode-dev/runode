@@ -4,9 +4,10 @@
 //! Support），再读 runode 自己的 `~/.runode/config.conf`。语法与键名都和
 //! Ghostty 相同；同一个键 runode 也设了时以 runode 为准。runode 不认识的键直接忽略，
 //! 因为 Ghostty 的配置里大部分键与 runode 无关。runode 的配置文件不存在时，启动时会
-//! 写一份全部注释掉的模板，列出支持的键和默认值。
+//! 写一份全部注释掉的模板，列出支持的键和默认值；模板只有英文（`docs`）。
 
 pub mod color;
+mod docs;
 mod edit;
 pub mod i18n;
 pub mod keybind;
@@ -15,9 +16,6 @@ mod parse;
 mod template;
 mod theme;
 mod values;
-
-// 配置模板和动作说明的翻译，见 `i18n`；某种语言缺了某个键时取英文。
-rust_i18n::i18n!("locales", fallback = "en");
 
 pub use edit::{ConfigFile, check_value};
 pub use model::{CellHeight, Config, Keybind, PreviewClick, StatusItem, TaskPlacement, WindowStyle};

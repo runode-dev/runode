@@ -4623,7 +4623,6 @@ dependencies = [
  "objc2-foundation 0.3.2",
  "runode-paths",
  "runode-shared-types",
- "rust-i18n",
  "tracing",
 ]
 

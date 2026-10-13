@@ -5,7 +5,7 @@ use std::path::Path;
 
 use runode_shared_types::agent::AgentKind;
 
-use crate::{Config, parse::KEYS, theme::BUNDLED_THEMES};
+use crate::{Config, docs, parse::KEYS, theme::BUNDLED_THEMES};
 
 /// runode 的配置文件 `path` 不存在时写入 `template`；已存在时按 `fill_missing_keys` 补上文件里
 /// 还没有的键，没有要补的就不动。
@@ -14,12 +14,11 @@ pub fn create_config_file(path: &Path) -> std::io::Result<()> {
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir)?;
     }
-    let locale = crate::i18n::current();
     match std::fs::OpenOptions::new().write(true).create_new(true).open(path) {
-        Ok(mut file) => file.write_all(template(&locale).as_bytes()),
+        Ok(mut file) => file.write_all(template().as_bytes()),
         Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => {
             let text = std::fs::read_to_string(path)?;
-            let filled = fill_missing_keys(&text, &locale);
+            let filled = fill_missing_keys(&text);
             if filled != text { runode_paths::replace_file(path, filled.as_bytes()) } else { Ok(()) }
         }
         Err(err) => Err(err),
@@ -39,9 +38,8 @@ pub(crate) fn setting_key(line: &str) -> Option<&str> {
 /// 的键：说明和注释掉的默认值和模板里一样，插在 `KEYS` 里排在它前面、文件里写到了的那个键
 /// 后面，跨了组就先空一行。前面的键一个都没写到的不补，所以空文件或自己从头写的文件不会被
 /// 塞进整份模板。
-fn fill_missing_keys(text: &str, locale: &str) -> String {
+fn fill_missing_keys(text: &str) -> String {
     let d = Config::default();
-    let locales = crate::i18n::available().join(", ");
     let mut lines: Vec<String> = text.lines().map(str::to_owned).collect();
     let keys: Vec<(usize, &str)> =
         KEYS.iter().enumerate().flat_map(|(group, keys)| keys.iter().map(move |key| (group, *key))).collect();
@@ -59,7 +57,7 @@ fn fill_missing_keys(text: &str, locale: &str) -> String {
         if !same_group {
             block.push('\n');
         }
-        block.push_str(&key_block(&d, key, locale, &locales));
+        block.push_str(&key_block(&d, key));
         lines.splice(at..at, block.lines().map(str::to_owned));
     }
     let mut out = lines.join("\n");
@@ -70,13 +68,12 @@ fn fill_missing_keys(text: &str, locale: &str) -> String {
 }
 
 /// 模板里的一个键：上面是它的说明，每行加 `## `；下面是每个默认值一行，没有默认值时写一行空值。
-fn key_block(d: &Config, key: &str, locale: &str, locales: &str) -> String {
+fn key_block(d: &Config, key: &str) -> String {
     let mut out = String::new();
-    let doc_key = format!("config.{}", key.replace('-', "_"));
     // 能填的 agent 短名，`agent-notifications-exclude` 的说明里列出来。
     let agents: Vec<&str> = AgentKind::ALL.iter().map(|kind| kind.label()).chain(["other"]).collect();
-    let agents = agents.join(", ");
-    for line in rust_i18n::t!(&doc_key, locale = locale, locales = locales, agents = agents).lines() {
+    let doc = docs::config_doc(key).replace("%{agents}", &agents.join(", "));
+    for line in doc.lines() {
         out.push_str(&format!("## {line}\n"));
     }
     let values = template_values(d, key);
@@ -87,12 +84,11 @@ fn key_block(d: &Config, key: &str, locale: &str, locales: &str) -> String {
     out
 }
 
-/// 配置模板，按 `locale` 写说明：每个支持的键上面是 `##` 说明，说的是能填的值，取自翻译里的
-/// `config.<键名>`；下面是注释掉的默认值，取自 `Config::default`；末尾列出内置的主题名。
+/// 配置模板，说明只有英文：每个支持的键上面是 `##` 说明，说的是能填的值，取自 `docs`；
+/// 下面是注释掉的默认值，取自 `Config::default`；末尾列出内置的主题名。
 /// 全部是注释，所以写进去不会盖掉 Ghostty 配置里的同名键，以后内置默认值变了也照样生效。
-fn template(locale: &str) -> String {
+fn template() -> String {
     let d = Config::default();
-    let locales = crate::i18n::available().join(", ");
 
     let mut out = String::new();
     // 说明可以有多行，每行加 `## `。
@@ -102,18 +98,18 @@ fn template(locale: &str) -> String {
         }
     };
 
-    note(&mut out, &rust_i18n::t!("config.header", locale = locale));
+    note(&mut out, docs::HEADER);
     out.push('\n');
     for (i, group) in KEYS.iter().enumerate() {
         if i > 0 {
             out.push('\n');
         }
         for key in *group {
-            out.push_str(&key_block(&d, key, locale, &locales));
+            out.push_str(&key_block(&d, key));
         }
     }
 
-    note(&mut out, &rust_i18n::t!("config.actions", locale = locale));
+    note(&mut out, docs::ACTIONS);
     let usages: Vec<String> = crate::keybind::ACTIONS
         .iter()
         .map(|a| match a.param {
@@ -123,13 +119,11 @@ fn template(locale: &str) -> String {
         .collect();
     let width = usages.iter().map(String::len).max().unwrap_or(0);
     for (usage, action) in usages.iter().zip(crate::keybind::ACTIONS) {
-        let doc_key = format!("action.{}", action.name);
-        let doc = rust_i18n::t!(&doc_key, locale = locale);
-        out.push_str(&format!("##   {usage:width$}  {doc}\n"));
+        out.push_str(&format!("##   {usage:width$}  {}\n", action.doc));
     }
     out.push('\n');
 
-    note(&mut out, &rust_i18n::t!("config.themes", locale = locale));
+    note(&mut out, docs::THEMES);
     out.push_str(&wrap_names(BUNDLED_THEMES.iter().map(|(name, _)| *name)));
     out
 }
@@ -143,18 +137,18 @@ fn template_values(d: &Config, key: &str) -> Vec<String> {
     }
 }
 
-/// 把名字用「、」连起来，按宽度折成多行 `##` 注释。
+/// 把名字用逗号连起来，按宽度折成多行 `##` 注释。
 fn wrap_names<'a>(names: impl Iterator<Item = &'a str>) -> String {
     const WIDTH: usize = 96;
     let mut out = String::new();
     let mut line = String::new();
     for name in names {
-        if !line.is_empty() && line.chars().count() + name.chars().count() + 1 > WIDTH {
+        if !line.is_empty() && line.chars().count() + name.chars().count() + 2 > WIDTH {
             out += &format!("##   {line}\n");
             line.clear();
         }
         if !line.is_empty() {
-            line.push('、');
+            line.push_str(", ");
         }
         line.push_str(name);
     }
@@ -171,9 +165,7 @@ mod tests {
 
     #[test]
     fn template_is_all_comments_and_lists_defaults() {
-        for locale in crate::i18n::available() {
-            template_round_trips(&template(&locale));
-        }
+        template_round_trips(&template());
     }
 
     fn template_round_trips(text: &str) {
@@ -219,46 +211,41 @@ mod tests {
 
     #[test]
     fn fills_keys_added_after_the_file_was_written() {
-        for locale in crate::i18n::available() {
-            let full = template(&locale);
-            // 一组里缺了后面几个、整组都缺、多值的键缺了、组中间后来加的键缺了，补回来都和
-            // 模板一样。
-            for keys in [
-                &["preview-font-size", "file-tree-preview-click"][..],
-                &["language"],
-                &["palette"],
-                &["scrollback-limit"],
-            ] {
-                let old = without(&full, keys);
-                assert_ne!(old, full, "{keys:?}");
-                if keys == ["language"] {
-                    // 排在最前面的键前面没有可以挨着的键，不补。
-                    assert_eq!(fill_missing_keys(&old, &locale), old);
-                } else {
-                    assert_eq!(fill_missing_keys(&old, &locale), full, "{keys:?}");
-                }
+        let full = template();
+        // 一组里缺了后面几个、整组都缺、多值的键缺了、组中间后来加的键缺了，补回来都和
+        // 模板一样。
+        for keys in
+            [&["preview-font-size", "file-tree-preview-click"][..], &["language"], &["palette"], &["scrollback-limit"]]
+        {
+            let old = without(&full, keys);
+            assert_ne!(old, full, "{keys:?}");
+            if keys == ["language"] {
+                // 排在最前面的键前面没有可以挨着的键，不补。
+                assert_eq!(fill_missing_keys(&old), old);
+            } else {
+                assert_eq!(fill_missing_keys(&old), full, "{keys:?}");
             }
-            let group = without(&full, &["file-tree-preview-click", "preview-font-size"]);
-            assert_eq!(fill_missing_keys(&group, &locale), full);
-            // agent 通知这一组是后来加的，旧配置文件整组都没有。
-            let agents = [
-                "agent-notifications",
-                "agent-notifications-exclude",
-                "agent-done-sound",
-                "agent-blocked-sound",
-                "agent-split-fold",
-            ];
-            assert_eq!(fill_missing_keys(&without(&full, &agents), &locale), full);
-            assert_eq!(fill_missing_keys(&full, &locale), full);
         }
+        let group = without(&full, &["file-tree-preview-click", "preview-font-size"]);
+        assert_eq!(fill_missing_keys(&group), full);
+        // agent 通知这一组是后来加的，旧配置文件整组都没有。
+        let agents = [
+            "agent-notifications",
+            "agent-notifications-exclude",
+            "agent-done-sound",
+            "agent-blocked-sound",
+            "agent-split-fold",
+        ];
+        assert_eq!(fill_missing_keys(&without(&full, &agents)), full);
+        assert_eq!(fill_missing_keys(&full), full);
         // 用户自己写的设置算写到了，空文件不补。
         let mine = "font-size = 16\n";
-        assert!(fill_missing_keys(mine, "en").starts_with("font-size = 16\n## "));
-        assert!(!fill_missing_keys(mine, "en").contains("# font-size ="));
-        assert_eq!(fill_missing_keys("", "en"), "");
+        assert!(fill_missing_keys(mine).starts_with("font-size = 16\n## "));
+        assert!(!fill_missing_keys(mine).contains("# font-size ="));
+        assert_eq!(fill_missing_keys(""), "");
     }
 
-    /// `KEYS` 里的每个键都要在模板里，上面有一行说明；说明缺了翻译时 `t!` 返回「语言.键名」。
+    /// `KEYS` 里的每个键都要在模板里，上面有一行说明；`docs` 里漏写的键说明是空的，上面就没有 `##` 行。
     #[test]
     fn template_lists_every_key() {
         let keys: Vec<&str> = KEYS.iter().flat_map(|group| group.iter().copied()).collect();
@@ -267,8 +254,7 @@ mod tests {
         unique.sort();
         unique.dedup();
         assert_eq!(unique.len(), keys.len(), "KEYS lists a key twice");
-        let text = template(crate::i18n::FALLBACK);
-        assert!(!text.contains("en.config.") && !text.contains("en.action."), "template has untranslated keys");
+        let text = template();
         let lines: Vec<&str> = text.lines().collect();
         for key in keys {
             let setting = format!("# {key} =");

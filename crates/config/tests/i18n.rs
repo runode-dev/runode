@@ -4,7 +4,7 @@ use runode_config::i18n::resolve;
 
 #[test]
 fn resolves_language_tags() {
-    let resolve = |tag| resolve(tag);
+    let resolve = |tag| resolve(tag, &["en", "zh-Hans", "zh-Hant"]);
     assert_eq!(resolve("en-US").as_deref(), Some("en"));
     assert_eq!(resolve("en_GB.UTF-8").as_deref(), Some("en"));
     assert_eq!(resolve("zh-Hans-SG").as_deref(), Some("zh-Hans"));

@@ -334,8 +334,8 @@ impl SettingsView {
             .filter(|row| row.key != target.row)
             .filter(|row| row.bound.iter().any(|b| expand(&b.trigger, &row.usage).iter().any(|k| wanted.contains(k))))
             .map(|row| match row.usage.split_once(':') {
-                Some((_, param)) => format!("{} {param}", keybind::describe(row.name)),
-                None => keybind::describe(row.name),
+                Some((_, param)) => format!("{} {param}", crate::i18n::describe(row.name)),
+                None => crate::i18n::describe(row.name),
             })
             .collect()
     }
@@ -490,7 +490,7 @@ impl SettingsView {
             .flex()
             .items_center()
             .gap(px(8.))
-            .child(div().min_w_0().truncate().child(keybind::describe(row.name)))
+            .child(div().min_w_0().truncate().child(crate::i18n::describe(row.name)))
             .children(tag);
 
         let add_target = Record { row: row.key.clone(), usage: row.usage.clone(), replace: None };
