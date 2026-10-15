@@ -13,7 +13,7 @@ use runode_types::{
     clipboard::ClipboardAccess,
     color::{Rgb, TerminalColor},
     grid::GridSize,
-    settings::TermSettings,
+    settings::{OptionAsAlt, TermSettings},
 };
 
 const ID: &str = "0123456789abcdef0011223344556677";
@@ -40,6 +40,7 @@ fn settings() -> TermSettings {
     TermSettings {
         palette: vec![(0, Rgb(57, 58, 61))],
         cursor_color: Some(TerminalColor::Rgb(Rgb(1, 2, 3))),
+        option_as_alt: OptionAsAlt::False,
         ..TermSettings::default()
     }
 }

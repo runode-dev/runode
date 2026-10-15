@@ -23,8 +23,11 @@ pub enum CursorStyle {
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum OptionAsAlt {
-    /// 不当 Alt，按出系统给的字符。
+    /// 配置项没写：按当前的键盘布局定，美式和 ABC 这类 Option 打出的特殊字符很少用到的布局
+    /// 两边都当 Alt，别的布局不当。和 Ghostty 没写这项时一样，只是多认了中文用户常用的 ABC。
     #[default]
+    Auto,
+    /// 不当 Alt，按出系统给的字符。
     False,
     True,
     /// 只有左边的当 Alt。
@@ -75,7 +78,7 @@ pub struct TermSettings {
 }
 
 impl Default for TermSettings {
-    /// 没有配置时的设置：默认配色，块状光标，Option 键不当 Alt。
+    /// 没有配置时的设置：默认配色，块状光标，Option 键当不当 Alt 按键盘布局定。
     fn default() -> Self {
         Self {
             background: theme::BACKGROUND,
@@ -91,7 +94,7 @@ impl Default for TermSettings {
             search_foreground: TerminalColor::Rgb(theme::SEARCH_FOREGROUND),
             search_selected_background: TerminalColor::Rgb(theme::SEARCH_SELECTED_BACKGROUND),
             search_selected_foreground: TerminalColor::Rgb(theme::SEARCH_FOREGROUND),
-            option_as_alt: OptionAsAlt::False,
+            option_as_alt: OptionAsAlt::Auto,
             scrollback_limit: DEFAULT_SCROLLBACK_LIMIT,
             shell_features: ShellFeatures::default(),
         }

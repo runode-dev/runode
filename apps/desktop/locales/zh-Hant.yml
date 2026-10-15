@@ -567,7 +567,7 @@ settings:
     cursor_style: 執行中的程式仍然可以改。
     cursor_style_blink: 執行中的程式仍然可以打開或關掉閃爍。
     cursor_style_blink_timeout: 這麼多秒沒有輸入也沒有輸出，游標就停止閃爍、常亮。0 表示一直閃。
-    macos_option_as_alt: 打開後按 Option 組合鍵送出的是 Alt 組合，不再輸入特殊字元。
+    macos_option_as_alt: 打開後按 Option 組合鍵送出的是 Alt 組合，不再輸入特殊字元。預設依鍵盤配置決定：美式和 ABC 配置兩邊都當 Alt，其他配置不當。
     scrollback_limit: 每個終端機的回捲歷史最多佔多少位元組，至少 2 MiB（2097152），另外最多 1 萬行。
     shell_integration: 自動偵測依 shell 的程式名判斷。跳提示字元這類功能靠它。
     shell_integration_features: 提示字元上用直線，zsh 的 vi 命令模式裡用方塊，執行指令時恢復成上面的游標形狀。對新開的終端機生效。

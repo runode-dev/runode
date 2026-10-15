@@ -133,6 +133,8 @@ public enum CursorStyle: String, Hashable, Sendable, Codable {
 
 /// macOS 上 Option 键当不当 Alt 用；手机的硬件键盘上 Option 键照同样的设置处理。
 public enum OptionAsAlt: String, Hashable, Sendable, Codable {
+    /// 没配置：桌面按键盘布局定，手机上读不到硬件键盘的布局，当作不当 Alt。
+    case auto
     case no = "false"
     case yes = "true"
     case left
@@ -221,7 +223,7 @@ public struct TermSettings: Hashable, Sendable, Codable {
         searchForeground: .rgb(Rgb(hex: 0x000000)),
         searchSelectedBackground: .rgb(Rgb(hex: 0xF2A57E)),
         searchSelectedForeground: .rgb(Rgb(hex: 0x000000)),
-        optionAsAlt: .no,
+        optionAsAlt: .auto,
         scrollbackLimit: 10 * 1024 * 1024
     )
 

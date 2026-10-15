@@ -82,15 +82,13 @@ impl Config {
             "cursor-style-blink-timeout" => {
                 vec![self.cursor_style_blink_timeout.map_or_else(|| "0".into(), |t| t.as_secs_f32().to_string())]
             }
-            "macos-option-as-alt" => vec![
-                match self.macos_option_as_alt {
-                    OptionAsAlt::False => "false",
-                    OptionAsAlt::True => "true",
-                    OptionAsAlt::Left => "left",
-                    OptionAsAlt::Right => "right",
-                }
-                .into(),
-            ],
+            "macos-option-as-alt" => match self.macos_option_as_alt {
+                OptionAsAlt::Auto => Vec::new(),
+                OptionAsAlt::False => vec!["false".into()],
+                OptionAsAlt::True => vec!["true".into()],
+                OptionAsAlt::Left => vec!["left".into()],
+                OptionAsAlt::Right => vec!["right".into()],
+            },
             "scrollback-limit" => vec![self.scrollback_limit.to_string()],
             "shell-integration" => vec![
                 match self.shell_integration {

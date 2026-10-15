@@ -35,8 +35,7 @@ use std::{
 
 use anyhow::Result;
 use libghostty_vt::{
-    key::{self, OptionAsAlt},
-    mouse,
+    key, mouse,
     search::Search,
     terminal::{PointCoordinate, Terminal},
 };
@@ -101,7 +100,7 @@ pub struct Session {
     search: Option<Search<'static, 'static>>,
     /// 平滑滚动不足一行的部分，0 到 1 之间：画面整体往下错开这么多行，见 `scroll_smoothly`。
     scroll_offset: f32,
-    option_as_alt: OptionAsAlt,
+    option_as_alt: settings::OptionAsAlt,
     /// 最近一次向程序发输入的时刻，见 `last_input`。
     input_at: Option<Instant>,
     /// 发出输入后还没等到输出的那次输入的时刻，量按键到回显的延迟用，见 `feed`。
@@ -166,7 +165,7 @@ impl Session {
             meta: SessionMeta::default(),
             search: None,
             scroll_offset: 0.,
-            option_as_alt: OptionAsAlt::False,
+            option_as_alt: settings::OptionAsAlt::Auto,
             input_at: None,
             echo_pending: None,
         })
@@ -187,12 +186,7 @@ impl Session {
         renderer.cursor_text = settings.cursor_text;
         // 选区颜色不经过 VT 的脏标记，强制下一帧整屏重画。
         renderer.frame = Frame::default();
-        self.option_as_alt = match settings.option_as_alt {
-            settings::OptionAsAlt::False => OptionAsAlt::False,
-            settings::OptionAsAlt::True => OptionAsAlt::True,
-            settings::OptionAsAlt::Left => OptionAsAlt::Left,
-            settings::OptionAsAlt::Right => OptionAsAlt::Right,
-        };
+        self.option_as_alt = settings.option_as_alt;
     }
 
     /// 在宿主套用主题的位置（`HostMsg::ThemeApplied`）套用同样的主题，见 `vt::apply_theme`。
@@ -362,6 +356,7 @@ mod tests {
                 consumed_mods: Mods::default(),
                 unshifted,
                 text: (c != '\r').then(|| c.to_string()),
+                layout_option_as_alt: false,
             };
             assert!(session.key(&input), "key {c:?} produced no bytes");
         }

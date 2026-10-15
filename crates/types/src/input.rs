@@ -101,6 +101,9 @@ pub struct KeyInput {
     /// 不带修饰键时该键产生的字符（没有则为 '\0'）。
     pub unshifted: char,
     pub text: Option<String>,
+    /// 当前的键盘布局下 Option 默认当不当 Alt，`macos-option-as-alt` 没写时按它；只在按着
+    /// Option 时由平台查出来，别的时候是 false。
+    pub layout_option_as_alt: bool,
 }
 
 /// 上报给程序的鼠标按键。

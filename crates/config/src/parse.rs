@@ -381,7 +381,8 @@ impl Config {
             }
             "macos-option-as-alt" => {
                 self.macos_option_as_alt = match value {
-                    "" | "false" => OptionAsAlt::False,
+                    "" => OptionAsAlt::Auto,
+                    "false" => OptionAsAlt::False,
                     "true" => OptionAsAlt::True,
                     "left" => OptionAsAlt::Left,
                     "right" => OptionAsAlt::Right,

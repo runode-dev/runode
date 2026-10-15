@@ -160,7 +160,7 @@ impl Page {
                 Row("cursor-style-blink", Choice(&["", "true", "false"])),
                 Row("cursor-style-blink-timeout", Text(80.)),
                 Section("keyboard"),
-                Row("macos-option-as-alt", Choice(&["false", "true", "left", "right"])),
+                Row("macos-option-as-alt", Choice(&["", "true", "false", "left", "right"])),
                 Section("shell"),
                 Row("shell-integration", Choice(&["detect", "none", "zsh", "bash", "fish", "elvish", "nushell"])),
                 Row("shell-integration-features", Choice(&["cursor", "no-cursor"])),

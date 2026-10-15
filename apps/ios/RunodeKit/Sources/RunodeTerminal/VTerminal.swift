@@ -580,7 +580,7 @@ public final class VTerminal {
             case .yes: true
             case .left: !input.rightAlt
             case .right: input.rightAlt
-            case .no: false
+            case .no, .auto: false
             }
         var consumed = input.consumedModifiers
         // Option 当作 Alt 时不能算「已消耗」，编码器才会改用未加修饰的字符并加 ESC 前缀。
@@ -591,7 +591,7 @@ public final class VTerminal {
             case .yes: GHOSTTY_OPTION_AS_ALT_TRUE
             case .left: GHOSTTY_OPTION_AS_ALT_LEFT
             case .right: GHOSTTY_OPTION_AS_ALT_RIGHT
-            case .no: GHOSTTY_OPTION_AS_ALT_FALSE
+            case .no, .auto: GHOSTTY_OPTION_AS_ALT_FALSE
             }
         ghostty_key_encoder_setopt(keyEncoder, GHOSTTY_KEY_ENCODER_OPT_MACOS_OPTION_AS_ALT, &option)
         ghostty_key_event_set_action(keyEvent, GHOSTTY_KEY_ACTION_PRESS)

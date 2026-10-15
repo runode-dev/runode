@@ -35,7 +35,50 @@ pub fn translate(keystroke: &Keystroke) -> Option<KeyInput> {
         consumed_mods.alt = m.alt;
     }
 
-    Some(KeyInput { key, mods, consumed_mods, unshifted, text })
+    let layout_option_as_alt = m.alt && layout_option_as_alt();
+    Some(KeyInput { key, mods, consumed_mods, unshifted, text, layout_option_as_alt })
+}
+
+/// 当前的键盘布局下 Option 默认当不当 Alt：美式和 ABC 这类布局 Option 打出的 ∫、π 很少用，
+/// 当 Alt；别的布局（德语的 @、法语的 | 都靠 Option）不当。输入法开着时读的是它底下的键盘布局。
+#[cfg(target_os = "macos")]
+fn layout_option_as_alt() -> bool {
+    use std::ffi::c_void;
+
+    use objc2_foundation::NSString;
+
+    #[link(name = "Carbon", kind = "framework")]
+    unsafe extern "C" {
+        #[allow(non_upper_case_globals)]
+        static kTISPropertyInputSourceID: *const c_void;
+        fn TISCopyCurrentKeyboardLayoutInputSource() -> *mut c_void;
+        fn TISGetInputSourceProperty(source: *mut c_void, key: *const c_void) -> *const c_void;
+        fn CFRelease(cf: *const c_void);
+    }
+
+    const LAYOUTS: &[&str] = &[
+        "com.apple.keylayout.US",
+        "com.apple.keylayout.USInternational-PC",
+        "com.apple.keylayout.USInternational",
+        "com.apple.keylayout.ABC",
+    ];
+    // SAFETY: 拿到的输入源按 Copy 规则归我们，用完释放；属性值归输入源所有，只在释放前读，
+    // 它是 CFString，和 NSString 免费桥接。
+    unsafe {
+        let source = TISCopyCurrentKeyboardLayoutInputSource();
+        if source.is_null() {
+            return false;
+        }
+        let id = TISGetInputSourceProperty(source, kTISPropertyInputSourceID).cast::<NSString>();
+        let us = id.as_ref().is_some_and(|id| LAYOUTS.contains(&id.to_string().as_str()));
+        CFRelease(source);
+        us
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn layout_option_as_alt() -> bool {
+    false
 }
 
 /// 当前按下的是不是右 Option。GPUI 的修饰键不分左右，这里读正在分发的

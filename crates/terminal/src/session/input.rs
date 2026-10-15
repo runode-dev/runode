@@ -9,7 +9,7 @@ use libghostty_vt::{
     screen::Screen,
     terminal::{Mode, ScrollViewport},
 };
-use runode_types::input::KeyInput;
+use runode_types::{input::KeyInput, settings};
 
 use super::{
     Session,
@@ -29,8 +29,15 @@ impl Session {
     /// 调用方可以交给平台处理。
     pub fn key(&mut self, input: &KeyInput) -> bool {
         // Option 当作 Alt 时不能算「已消耗」，编码器才会改用未加修饰的字符并加 ESC 前缀。
+        let option_as_alt = match self.option_as_alt {
+            settings::OptionAsAlt::Auto if input.layout_option_as_alt => OptionAsAlt::True,
+            settings::OptionAsAlt::Auto | settings::OptionAsAlt::False => OptionAsAlt::False,
+            settings::OptionAsAlt::True => OptionAsAlt::True,
+            settings::OptionAsAlt::Left => OptionAsAlt::Left,
+            settings::OptionAsAlt::Right => OptionAsAlt::Right,
+        };
         let right = input.mods.right_alt;
-        let option_is_alt = match self.option_as_alt {
+        let option_is_alt = match option_as_alt {
             OptionAsAlt::True => true,
             OptionAsAlt::Left => !right,
             OptionAsAlt::Right => right,
@@ -51,7 +58,7 @@ impl Session {
         let encoded = self
             .key_encoder
             .set_options_from_terminal(&self.terminal)
-            .set_macos_option_as_alt(self.option_as_alt)
+            .set_macos_option_as_alt(option_as_alt)
             .encode_to_vec(&self.key_event, &mut self.scratch);
         if let Err(err) = encoded {
             tracing::warn!("key encode failed: {err}");
@@ -225,15 +232,39 @@ mod tests {
                 consumed_mods: alt,
                 unshifted: 's',
                 text: Some("ß".into()),
+                layout_option_as_alt: false,
             });
             session.scratch.clone()
         }
 
         let mut session = idle_session();
+        session.apply_config(&TermSettings { option_as_alt: settings::OptionAsAlt::False, ..TermSettings::default() });
         assert_eq!(option_s(&mut session, false), "ß".as_bytes());
 
         session.apply_config(&TermSettings { option_as_alt: settings::OptionAsAlt::Left, ..TermSettings::default() });
         assert_eq!(option_s(&mut session, false), b"\x1bs");
         assert_eq!(option_s(&mut session, true), "ß".as_bytes());
+    }
+
+    #[test]
+    fn unset_option_as_alt_follows_the_keyboard_layout() {
+        /// 按一次左 Option+p（美式布局下打出 π），返回编码结果。
+        fn option_p(session: &mut Session, layout_option_as_alt: bool) -> Vec<u8> {
+            let alt = Mods { alt: true, ..Mods::default() };
+            session.key(&KeyInput {
+                key: Key::P,
+                mods: alt,
+                consumed_mods: alt,
+                unshifted: 'p',
+                text: Some("π".into()),
+                layout_option_as_alt,
+            });
+            session.scratch.clone()
+        }
+
+        let mut session = idle_session();
+        session.apply_config(&TermSettings::default());
+        assert_eq!(option_p(&mut session, true), b"\x1bp");
+        assert_eq!(option_p(&mut session, false), "π".as_bytes());
     }
 }
