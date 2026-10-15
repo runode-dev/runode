@@ -426,6 +426,37 @@ fn footnotes_are_numbered_by_first_reference_and_collected_at_the_end() {
     );
 }
 
+/// 定义里的引用只在定义用上时才算：没用上的定义引用别的脚注，不占编号，也不把那条带出来。
+#[test]
+fn references_inside_unused_footnotes_do_not_count() {
+    let note = |text: &str, label: &str| Inline {
+        text: text.into(),
+        style: InlineStyle { footnote: true, ..InlineStyle::default() },
+        link: Some(format!("#fn-{label}")),
+    };
+    let back = |label: &str| Inline { text: " ↩".into(), link: Some(format!("#fnref-{label}")), ..Inline::default() };
+    let blocks =
+        parse("[^unused]: see[^hidden]\n\n[^hidden]: h\n[^shown]: s[^deep][^deep]\n[^deep]: d\n\nbody[^shown]\n");
+    assert_eq!(
+        blocks,
+        vec![
+            Block::Paragraph(vec![plain("body"), note("¹", "shown")]),
+            Block::Footnotes(vec![
+                Footnote {
+                    label: "shown".into(),
+                    blocks: vec![Block::Paragraph(vec![
+                        plain("s"),
+                        note("²", "deep"),
+                        note("²", "deep"),
+                        back("shown")
+                    ])],
+                },
+                Footnote { label: "deep".into(), blocks: vec![Block::Paragraph(vec![plain("d"), back("deep")])] },
+            ]),
+        ]
+    );
+}
+
 #[test]
 fn bare_urls_become_links_outside_code() {
     let link = |text: &str, url: &str| Inline { text: text.into(), link: Some(url.into()), ..Inline::default() };
@@ -534,10 +565,53 @@ fn unclosed_inline_html_does_not_leak_into_later_blocks() {
     assert_eq!(last.len(), 1);
     assert!(!last[0].style.bold);
     assert_eq!(last[0].link, None);
-    // 紧凑列表项没有段落标记、HTML 标题不经 Markdown 的标题，结束时也退回。
-    for text in ["- <b>one\n- two\n\nafter\n", "<h1><b>Title</h1>\n\nafter\n"] {
+    // 紧凑列表项没有段落标记、HTML 标题不经 Markdown 的标题，HTML 的段落没有段落事件，结束时也退回。
+    for text in [
+        "- <b>one\n- two\n\nafter\n",
+        "<h1><b>Title</h1>\n\nafter\n",
+        "<p><b>one</p><p>two</p>\n\nafter\n",
+        "<p><b></p><p>two</p>\n\nafter\n",
+        "<p><b>one<p>two</p>\n\nafter\n",
+    ] {
         let blocks = parse(text);
         let Some(Block::Paragraph(last)) = blocks.last() else { panic!("{blocks:?}") };
         assert!(!last[0].style.bold, "{text:?}: {blocks:?}");
+        if let [Block::Paragraph(_), Block::Paragraph(two), _] = &blocks[..] {
+            assert!(!two[0].style.bold, "{text:?}: {blocks:?}");
+        }
     }
+    // 段落外开的 `<b>` 管到 HTML 块结束。
+    let bold = InlineStyle { bold: true, ..InlineStyle::default() };
+    assert_eq!(
+        parse("<p>one</p><b>two\n\nafter\n"),
+        vec![para("one"), Block::Paragraph(vec![styled("two", bold)]), para("after")]
+    );
+    let blocks = parse("<p><a href=\"x\">one</p>\n\nafter\n");
+    assert_eq!(blocks, vec![Block::Paragraph(vec![link("one", "x")]), para("after")]);
+    // 包着块的标签照样作用在块里，块结束后闭上的不再打开。
+    assert_eq!(
+        parse("<a href=\"x\">\n<h2>Title</h2>\n</a>\n\n<b>\n<p>one</p>\n</b>\n<p>two</p>\n"),
+        vec![
+            Block::Heading { level: 2, inlines: vec![link("Title", "x")], id: "title".into() },
+            Block::Paragraph(vec![styled("one", bold)]),
+            para("two"),
+        ]
+    );
+}
+
+/// 行内的 `<script>`、`<style>`：开标签、内容和闭标签是分开的几个事件，内容照样不显示；没闭上的到段落
+/// 结束为止。
+#[test]
+fn inline_script_and_style_content_is_hidden() {
+    assert_eq!(parse("before <script>alert(1)</script> after\n"), vec![para("before  after")]);
+    assert_eq!(parse("a <STYLE>p { color: red }</style> *b*\n").len(), 1);
+    let Some(Block::Paragraph(inlines)) = parse("a <style>p { color: red }</style> b\n").pop() else { panic!() };
+    assert_eq!(inlines.iter().map(|inline| inline.text.as_str()).collect::<String>(), "a  b");
+    assert_eq!(parse("a <script>x ![i](i.png) y\n\nnext\n"), vec![para("a "), para("next")]);
+}
+
+/// CommonMark 允许图片里套图片：里面的只把替代文字并进外面那张。
+#[test]
+fn nested_images_keep_the_outer_one() {
+    assert_eq!(parse("![outer ![inner](inner.png)](outer.png)\n"), vec![images(&[image("outer.png", "outer inner")])]);
 }

@@ -362,7 +362,12 @@ fn autolink(inlines: Vec<Inline>, cancel: &AtomicBool) -> Vec<Inline> {
         let mut at = 0;
         for (range, url) in links {
             if range.start > at {
-                out.push(Inline { text: inline.text[at..range.start].to_owned(), ..inline.clone() });
+                // 不拷整个 `inline`：一段里有很多网址时每段空隙都复制一遍全文。
+                out.push(Inline {
+                    text: inline.text[at..range.start].to_owned(),
+                    style: inline.style,
+                    link: inline.link.clone(),
+                });
             }
             out.push(Inline { text: inline.text[range.clone()].to_owned(), style: inline.style, link: Some(url) });
             at = range.end;
@@ -427,6 +432,7 @@ struct InlineState {
     html_code: u32,
     links: usize,
     html_links: usize,
+    raw_text: Option<&'static str>,
 }
 
 #[derive(Default)]
@@ -449,7 +455,11 @@ struct Builder<'a> {
     links: Vec<String>,
     /// 没闭上的 HTML `<a>` 各自往 `links` 里压了地址没有（`<a name>` 这类没有 `href` 的不压）。
     html_links: Vec<bool>,
-    /// 正在收的 Markdown 段落、标题、表格单元格或 HTML 标题开头的样子，见 `InlineState`。
+    /// 在 `<script>`、`<style>` 里：标签名。行内 HTML 的开标签、内容和闭标签是分开的几个事件，内容到
+    /// 闭标签为止都不显示。
+    raw_text: Option<&'static str>,
+    /// 正在收的 Markdown 段落、标题、表格单元格开头的样子；在 HTML 块里是块开头或最近打开的块级标签处
+    /// 的样子，见 `InlineState` 和 `rewind_html_inline_state`。
     inline_saved: Option<InlineState>,
     /// 各层没摊平的列表项开头的样子：紧凑列表项里的文字没有段落标记，项结束时退回。
     item_saved: Vec<InlineState>,
@@ -459,6 +469,8 @@ struct Builder<'a> {
     image_run: bool,
     /// 在图片里：地址和收到的替代文字。
     image: Option<(String, String)>,
+    /// 图片里又套着几层图片（CommonMark 允许）：里面的只把替代文字并进外面那张。
+    nested_images: usize,
     /// 在代码块里：语言和收到的代码。
     code: Option<(Option<String>, String)>,
     /// 在 HTML 块里：收到的原文。
@@ -497,16 +509,15 @@ impl Builder<'_> {
             Event::InlineHtml(text) => self.html(&text, false),
             Event::FootnoteReference(label) => {
                 let label = label.to_lowercase();
-                let number = match self.footnote_numbers.get(&label) {
-                    Some(number) => *number,
-                    None => {
-                        self.footnote_refs.push(label.clone());
-                        self.footnote_numbers.insert(label.clone(), self.footnote_refs.len());
-                        self.footnote_refs.len()
-                    }
-                };
                 let style = InlineStyle { footnote: true, ..InlineStyle::default() };
-                self.push_inline(&superscript(number), style, Some(format!("#fn-{label}")));
+                // 定义里的引用先不编号，文字暂放标签：定义没被引用时它也不算引用，由
+                // `finish_footnotes` 在定义用得上时再编。
+                let text = if self.stack.iter().any(|frame| matches!(frame, Frame::Footnote(..))) {
+                    label.clone()
+                } else {
+                    superscript(self.footnote_number(&label))
+                };
+                self.push_inline(&text, style, Some(format!("#fn-{label}")));
             }
             Event::SoftBreak => self.push_text(" ", false),
             Event::HardBreak => self.push_text("\n", false),
@@ -567,6 +578,7 @@ impl Builder<'_> {
             }
             Tag::HtmlBlock => {
                 self.flush_implicit();
+                self.inline_saved = Some(self.inline_state());
                 self.html = Some(String::new());
             }
             Tag::List(start) => {
@@ -603,6 +615,7 @@ impl Builder<'_> {
             Tag::Strong => self.bold += 1,
             Tag::Strikethrough => self.strike += 1,
             Tag::Link { dest_url, .. } => self.links.push(dest_url.into_string()),
+            Tag::Image { .. } if self.image.is_some() => self.nested_images += 1,
             Tag::Image { dest_url, .. } => self.image = Some((dest_url.into_string(), String::new())),
             _ => {}
         }
@@ -650,6 +663,8 @@ impl Builder<'_> {
                     self.html(&html, true);
                     // 块里没闭上的段落、标题到这里为止。
                     self.close_html_inlines();
+                    self.rewind_html_inline_state();
+                    self.inline_saved = None;
                 }
             }
             TagEnd::List(_) => {
@@ -698,6 +713,7 @@ impl Builder<'_> {
             TagEnd::Link => {
                 self.links.pop();
             }
+            TagEnd::Image if self.nested_images > 0 => self.nested_images -= 1,
             TagEnd::Image => {
                 if let Some((url, alt)) = self.image.take() {
                     self.push_image(url, alt, None, None);
@@ -710,6 +726,9 @@ impl Builder<'_> {
     /// 图片单独成块。段落从图片处断开：前面的文字收成一段，后面的文字另起一段；紧跟在上一张图片后面
     /// （只隔着空白）的并进那一块。在标题、表格里只留替代文字。
     fn push_image(&mut self, url: String, alt: String, width: Option<u32>, height: Option<u32>) {
+        if self.raw_text.is_some() {
+            return;
+        }
         let paragraph = match self.open {
             Some(Open::Paragraph { implicit }) => Some(implicit),
             None => None,
@@ -814,6 +833,8 @@ impl Builder<'_> {
                 self.html_links.push(href.is_some());
             }
             _ if let Some(count) = self.style_count(&name) => *count += 1,
+            "script" => self.raw_text = Some("script"),
+            "style" => self.raw_text = Some("style"),
             _ if !block => {}
             "hr" => {
                 self.close_html_inlines();
@@ -831,8 +852,10 @@ impl Builder<'_> {
                 if self.html_open.len() < MAX_NESTING {
                     self.html_open.push(HtmlOpen { name, center, depth: self.stack.len() });
                 }
-                if let Some(level) = heading {
-                    self.open_inlines(Open::Heading(level));
+                // 块里的段落、标题从这里开始，记下开头的样子（标题由 `open_inlines` 记）。
+                match heading {
+                    Some(level) => self.open_inlines(Open::Heading(level)),
+                    None => self.inline_saved = Some(self.inline_state()),
                 }
             }
         }
@@ -846,13 +869,13 @@ impl Builder<'_> {
                 }
             }
             _ if let Some(count) = self.style_count(name) => *count = count.saturating_sub(1),
+            _ if self.raw_text == Some(name) => self.raw_text = None,
             _ if !block => {}
             _ if html_heading(name).is_some() || HTML_BLOCKS.contains(&name) => {
-                // 先收起段落、标题，块还算在居中的标签里。
+                // 先收起段落、标题，块还算在居中的标签里。块里开了没关的行内标签到这里为止，块里还没收文字
+                // 时（`<p><b></p>`）也一样。
                 self.close_html_inlines();
-                if html_heading(name).is_some() {
-                    self.restore_inline_state();
-                }
+                self.rewind_html_inline_state();
                 self.image_run = false;
                 if let Some(ix) = self.html_open.iter().rposition(|open| open.name == name) {
                     self.html_open.truncate(ix);
@@ -874,9 +897,12 @@ impl Builder<'_> {
         })
     }
 
-    /// HTML 的块边界：收起正在收的段落、标题，末尾的空白和块末尾 `<br>` 留下的换行不要。
+    /// HTML 的块边界：收起正在收的段落、标题，末尾的空白和块末尾 `<br>` 留下的换行不要；收了的话行内
+    /// 样式和链接退回段落开头的样子（`rewind_html_inline_state`）。还没收文字时不退：`<a href><h1>`
+    /// 里的链接是包着标题的。
     fn close_html_inlines(&mut self) {
         if matches!(self.open, Some(Open::Paragraph { .. } | Open::Heading(_))) {
+            self.rewind_html_inline_state();
             while let Some(last) = self.inlines.last_mut() {
                 last.text.truncate(last.text.trim_end_matches([' ', '\n']).len());
                 if !last.text.is_empty() {
@@ -920,6 +946,7 @@ impl Builder<'_> {
             html_code: self.html_code,
             links: self.links.len(),
             html_links: self.html_links.len(),
+            raw_text: self.raw_text,
         }
     }
 
@@ -933,6 +960,22 @@ impl Builder<'_> {
         self.html_code = saved.html_code;
         self.links.truncate(saved.links);
         self.html_links.truncate(saved.html_links);
+        self.raw_text = saved.raw_text;
+    }
+
+    /// HTML 块里的段落、标题结束时退回它开头的样子（`inline_saved`，在 HTML 块开头和块级标签打开处
+    /// 记下），留着给同一块里后面的段落用。只退掉开头以后开的标签：开头以前开、块里已经闭上的（`<b><p>a
+    /// </b></p>`）不再打开。
+    fn rewind_html_inline_state(&mut self) {
+        let Some(saved) = self.inline_saved else { return };
+        self.bold = self.bold.min(saved.bold);
+        self.italic = self.italic.min(saved.italic);
+        self.strike = self.strike.min(saved.strike);
+        self.kbd = self.kbd.min(saved.kbd);
+        self.html_code = self.html_code.min(saved.html_code);
+        self.links.truncate(saved.links);
+        self.html_links.truncate(saved.html_links);
+        self.raw_text = self.raw_text.and(saved.raw_text);
     }
 
     /// 段落、标题、单元格结束时退回它开头的样子。
@@ -988,6 +1031,9 @@ impl Builder<'_> {
     }
 
     fn push_inline(&mut self, text: &str, style: InlineStyle, link: Option<String>) {
+        if self.raw_text.is_some() {
+            return;
+        }
         if let Some((_, alt)) = &mut self.image {
             alt.push_str(text);
             return;
@@ -1001,7 +1047,8 @@ impl Builder<'_> {
             self.inlines.clear();
         }
         match self.inlines.last_mut() {
-            Some(last) if last.style == style && last.link == link => last.text.push_str(text),
+            // 脚注的引用一个一段：定义里的引用文字暂放标签，`finish_footnotes` 按段换成编号。
+            Some(last) if last.style == style && last.link == link && !style.footnote => last.text.push_str(text),
             _ => self.inlines.push(Inline { text: text.to_owned(), style, link }),
         }
     }
@@ -1022,13 +1069,27 @@ impl Builder<'_> {
         }
     }
 
-    /// 被引用过的脚注按编号收到文末，每条最后一段末尾接上指回引用处的箭头。
+    /// 脚注 `label` 的编号，第一次引用时发一个新的。
+    fn footnote_number(&mut self, label: &str) -> usize {
+        if let Some(number) = self.footnote_numbers.get(label) {
+            return *number;
+        }
+        self.footnote_refs.push(label.to_owned());
+        self.footnote_numbers.insert(label.to_owned(), self.footnote_refs.len());
+        self.footnote_refs.len()
+    }
+
+    /// 被引用过的脚注按编号收到文末，每条最后一段末尾接上指回引用处的箭头。定义里的引用这时才编号：
+    /// 按编号一条条看，用上的定义里引用到的脚注接着往后编，没用上的定义里的引用不算。
     fn finish_footnotes(&mut self) {
         let mut footnotes = Vec::new();
-        for label in &self.footnote_refs {
-            let Some(mut blocks) = self.footnote_defs.remove(label) else {
+        let mut ix = 0;
+        while let Some(label) = self.footnote_refs.get(ix).cloned() {
+            ix += 1;
+            let Some(mut blocks) = self.footnote_defs.remove(&label) else {
                 continue;
             };
+            self.number_footnote_refs(&mut blocks);
             let back =
                 Inline {
                     text: " ↩".to_owned(), style: InlineStyle::default(), link: Some(format!("#fnref-{label}"))
@@ -1037,10 +1098,39 @@ impl Builder<'_> {
                 Some(Block::Paragraph(inlines)) => inlines.push(back),
                 _ => blocks.push(Block::Paragraph(vec![Inline { text: "↩".to_owned(), ..back }])),
             }
-            footnotes.push(Footnote { label: label.clone(), blocks });
+            footnotes.push(Footnote { label, blocks });
         }
         if !footnotes.is_empty() {
             self.root.push(Block::Footnotes(footnotes));
+        }
+    }
+
+    /// 定义里的脚注引用（文字暂放着标签）按先后换成编号。
+    fn number_footnote_refs(&mut self, blocks: &mut [Block]) {
+        for block in blocks {
+            match block {
+                Block::Heading { inlines, .. } | Block::Paragraph(inlines) => self.number_inline_refs(inlines),
+                Block::Quote { blocks, .. } | Block::Centered(blocks) => self.number_footnote_refs(blocks),
+                Block::List { items, .. } => {
+                    for item in items {
+                        self.number_footnote_refs(&mut item.blocks);
+                    }
+                }
+                Block::Table { head, rows, .. } => {
+                    for cell in head.iter_mut().chain(rows.iter_mut().flatten()) {
+                        self.number_inline_refs(cell);
+                    }
+                }
+                Block::Code { .. } | Block::Rule | Block::Images(_) | Block::Footnotes(_) => {}
+            }
+        }
+    }
+
+    fn number_inline_refs(&mut self, inlines: &mut [Inline]) {
+        for inline in inlines.iter_mut().filter(|inline| inline.style.footnote) {
+            if let Some(label) = inline.link.as_deref().and_then(|link| link.strip_prefix("#fn-")) {
+                inline.text = superscript(self.footnote_number(label));
+            }
         }
     }
 }

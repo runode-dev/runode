@@ -23,6 +23,7 @@ pub fn display_line(line: &str, spans: &[Span], max_columns: usize) -> DisplayLi
     let mut map = Vec::with_capacity(line.len() + 1);
     let mut columns = 0;
     let mut end = line.len();
+    let mut cut = false;
     for (ix, ch) in line.char_indices() {
         if columns >= max_columns {
             end = ix;
@@ -31,7 +32,10 @@ pub fn display_line(line: &str, spans: &[Span], max_columns: usize) -> DisplayLi
         let at = text.len();
         map.extend(std::iter::repeat_n(at, ch.len_utf8()));
         if ch == '\t' {
-            let width = TAB_WIDTH - columns % TAB_WIDTH;
+            // 展开到下一个制表位，最多到上限；没展开完也算截掉了。
+            let full = TAB_WIDTH - columns % TAB_WIDTH;
+            let width = full.min(max_columns - columns);
+            cut |= width < full;
             text.extend(std::iter::repeat_n(' ', width));
             columns += width;
         } else {
@@ -50,7 +54,7 @@ pub fn display_line(line: &str, spans: &[Span], max_columns: usize) -> DisplayLi
         })
         .filter(|span| !span.range.is_empty())
         .collect();
-    DisplayLine { text, spans, cut: end < line.len() }
+    DisplayLine { text, spans, cut: cut || end < line.len() }
 }
 
 /// `line` 照 `display_line` 画出来占几格：制表符展开成空格（一格一个）、最多留 `max_columns` 列，别的字按
@@ -62,7 +66,7 @@ pub fn display_width(line: &str, max_columns: usize, cell_width: impl Fn(char) -
             break;
         }
         if ch == '\t' {
-            let tab = TAB_WIDTH - columns % TAB_WIDTH;
+            let tab = (TAB_WIDTH - columns % TAB_WIDTH).min(max_columns - columns);
             columns += tab;
             width += tab;
         } else {

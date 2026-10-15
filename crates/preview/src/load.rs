@@ -2,7 +2,7 @@
 
 use std::{
     fs::{self, File},
-    io::Read as _,
+    io::{self, Read as _},
     path::Path,
 };
 
@@ -78,7 +78,7 @@ pub fn load(path: &Path) -> Content {
             Ok(_) => {
                 // 看过大小后文件还可能变大，读的时候照样设上限，多读一个字节看超没超。
                 let mut bytes = Vec::new();
-                match File::open(path).and_then(|file| file.take(MAX_IMAGE_BYTES + 1).read_to_end(&mut bytes)) {
+                match open_regular(path).and_then(|file| file.take(MAX_IMAGE_BYTES + 1).read_to_end(&mut bytes)) {
                     Err(err) => Content::Unreadable(err.to_string()),
                     Ok(_) if bytes.len() as u64 > MAX_IMAGE_BYTES => Content::TooLarge,
                     Ok(_) => Content::Image { format, bytes },
@@ -94,13 +94,23 @@ pub fn load(path: &Path) -> Content {
     }
     let mut bytes = Vec::new();
     // 多读一个字节，读满了就说明后面还有。
-    let read = File::open(path).and_then(|file| file.take(MAX_TEXT_BYTES as u64 + 1).read_to_end(&mut bytes));
+    let read = open_regular(path).and_then(|file| file.take(MAX_TEXT_BYTES as u64 + 1).read_to_end(&mut bytes));
     if let Err(err) = read {
         return Content::Unreadable(err.to_string());
     }
     let cut = bytes.len() > MAX_TEXT_BYTES;
     bytes.truncate(MAX_TEXT_BYTES);
     decode(bytes, cut)
+}
+
+/// 打开 `path`，打开的不是普通文件时报错。调用方先看过路径是普通文件，可看过以后路径还可能被换成
+/// 别的（指向设备的符号链接），所以打开以后对着打开的这个再看一次，读的才一定是普通文件。
+fn open_regular(path: &Path) -> io::Result<File> {
+    let file = File::open(path)?;
+    if !file.metadata()?.is_file() {
+        return Err(io::Error::other("not a regular file"));
+    }
+    Ok(file)
 }
 
 /// 把读到的字节解成文本；`cut` 表示文件在这之后还有内容。含 NUL 或者不是 UTF-8 的当二进制，
@@ -122,17 +132,22 @@ fn decode(mut bytes: Vec<u8>, cut: bool) -> Content {
         }
         Err(_) => return Content::Binary,
     };
+    // 只切出要留的 `MAX_LINES` 行：2MB 全是换行时全切出来是两百万个 `String`，绝大部分随即丢掉。
+    let mut segments = text.split('\n');
     let mut lines: Vec<String> =
-        text.split('\n').map(|line| line.strip_suffix('\r').unwrap_or(line).to_owned()).collect();
-    // 以换行结尾时最后切出一个空串，那不是一行。
-    if lines.len() > 1 && lines.last().is_some_and(String::is_empty) && !cut {
-        lines.pop();
-    }
-    let mut truncated = cut;
-    if lines.len() > MAX_LINES {
-        lines.truncate(MAX_LINES);
-        truncated = true;
-    }
+        segments.by_ref().take(MAX_LINES).map(|line| line.strip_suffix('\r').unwrap_or(line).to_owned()).collect();
+    let truncated = match segments.next() {
+        // 以换行结尾时最后切出一个空串，那不是一行。
+        None => {
+            if lines.len() > 1 && lines.last().is_some_and(String::is_empty) && !cut {
+                lines.pop();
+            }
+            cut
+        }
+        // 正好 `MAX_LINES` 行、以换行结尾的不算截断。
+        Some("") if !cut && segments.next().is_none() => false,
+        Some(_) => true,
+    };
     Content::Text(Text { lines, truncated })
 }
 
@@ -158,6 +173,21 @@ mod tests {
         assert_eq!(decode(b"abc\0def".to_vec(), false), Content::Binary);
         assert_eq!(decode(b"caf\xE9".to_vec(), false), Content::Binary);
         assert_eq!(decode(vec![0x89, b'P', b'N', b'G'], false), Content::Binary);
+    }
+
+    /// 行数正好到上限、以换行结尾的不算截断，多一行（哪怕没有换行）就算。
+    #[test]
+    fn line_limit() {
+        let full = "a\n".repeat(MAX_LINES);
+        let Content::Text(read) = decode(full.clone().into_bytes(), false) else { panic!("not text") };
+        assert_eq!((read.lines.len(), read.truncated), (MAX_LINES, false));
+        let Content::Text(read) = decode(format!("{full}b").into_bytes(), false) else { panic!("not text") };
+        assert_eq!((read.lines.len(), read.truncated), (MAX_LINES, true));
+        let Content::Text(read) = decode(format!("{full}\n").into_bytes(), false) else { panic!("not text") };
+        assert_eq!((read.lines.len(), read.truncated), (MAX_LINES, true));
+        // 截在字节上限处时最后的空串也算后面还有。
+        let Content::Text(read) = decode(full.into_bytes(), true) else { panic!("not text") };
+        assert_eq!((read.lines.len(), read.truncated), (MAX_LINES, true));
     }
 
     /// 截断处切开的半个字符去掉，不当二进制；没截断时同样的字节是坏的 UTF-8。

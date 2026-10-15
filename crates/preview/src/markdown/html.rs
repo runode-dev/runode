@@ -53,7 +53,8 @@ pub(super) fn tokens(html: &str) -> Vec<Token<'_>> {
                 if let Token::Open { name, .. } = &token
                     && matches!(name.as_str(), "script" | "style")
                 {
-                    // 内容连同标签一起丢掉；闭标签下一轮当普通的闭标签读掉。
+                    // 内容丢掉，开标签照给：行内 HTML 的内容和闭标签在后面的事件里，`Builder` 据此到闭标签为止
+                    // 都不显示。闭标签下一轮当普通的闭标签读出来。
                     // 不整段转小写：一篇里有很多 `<style>` 时每个都复制一遍剩下的全文。
                     let close = format!("</{name}");
                     let at = rest
@@ -61,7 +62,6 @@ pub(super) fn tokens(html: &str) -> Vec<Token<'_>> {
                         .windows(close.len())
                         .position(|head| head.eq_ignore_ascii_case(close.as_bytes()));
                     rest = at.map_or("", |at| &rest[at..]);
-                    continue;
                 }
                 out.push(token);
             }

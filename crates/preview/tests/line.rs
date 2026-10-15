@@ -29,11 +29,29 @@ fn cuts_long_lines() {
     assert!(line.cut);
 }
 
+/// 制表符展开到上限为止，不超出列数；没展开完的算截掉了。
+#[test]
+fn tabs_stop_at_the_column_limit() {
+    let line = display_line("\t", &[], 1);
+    assert_eq!(line.text, " ");
+    assert!(line.cut);
+    let line = display_line("ab\tc", &[span(2..3)], 3);
+    assert_eq!(line.text, "ab ");
+    assert_eq!(line.spans, vec![span(2..3)]);
+    assert!(line.cut);
+    // 正好展开到上限的不算截掉。
+    assert!(!display_line("\t", &[], 4).cut);
+    assert_eq!(display_width("\t", 1, |_| 1), 1);
+    assert_eq!(display_width("ab\tc", 3, |_| 1), 3);
+}
+
 /// 挑最宽的行用的宽度和画出来的文字一致：制表符、截断和双宽字都照 `display_line` 算。
 #[test]
 fn display_width_matches_the_displayed_text() {
     let wide = |ch: char| if ch.is_ascii() { 1 } else { 2 };
-    for (line, max) in [("\tab\tc", 100), ("中\t文", 100), ("abcdef", 3), ("", 10), ("\t\t中", 5)] {
+    for (line, max) in
+        [("\tab\tc", 100), ("中\t文", 100), ("abcdef", 3), ("", 10), ("\t\t中", 5), ("\t", 1), ("a\tb", 3)]
+    {
         let shown = display_line(line, &[], max).text.chars().map(wide).sum::<usize>();
         assert_eq!(display_width(line, max, wide), shown, "{line:?}");
     }
