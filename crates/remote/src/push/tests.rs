@@ -247,6 +247,27 @@ fn direct_pushes_sign_with_the_key() {
     assert_eq!(body(&requests[2])["aps"]["alert"]["body"], "c");
 }
 
+/// 配置的密钥文件一时读不了：直连的通知先不发；文件补好了，配置不变，下一条通知照样直连发出去。
+#[test]
+fn a_missing_key_file_is_read_again_later() {
+    let scratch = Scratch::new("direct-missing");
+    let key_file = scratch.root.join("AuthKey_TEST.p8");
+    let sender = Sender::start(scratch.dirs.clone(), scratch.curl.clone()).unwrap();
+    let key = ApnsKey {
+        key_file: key_file.clone(),
+        key_id: "K".into(),
+        team_id: "T".into(),
+        bundle: "dev.example.app".into(),
+    };
+    sender.settings(Some(key), None);
+    let route = Route { env: ApnsEnv::Development, via: Via::Direct };
+    sender.notify(vec![target(route, &["a"])]);
+    assert_eq!(test_key(&scratch.root).0, key_file);
+    sender.notify(vec![target(route, &["b"])]);
+    let requests = scratch.wait_for(1);
+    assert_eq!(body(&requests[0])["aps"]["alert"]["body"], "b");
+}
+
 /// token 不认时换另一个环境再发，成了把登记的环境改过来；两边都不认就删掉登记。
 #[test]
 fn bad_tokens_try_the_other_environment() {

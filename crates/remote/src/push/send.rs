@@ -64,6 +64,7 @@ impl Sender {
             curl,
             direct_config: None,
             direct: None,
+            direct_load_failed: false,
             direct_broken: false,
             relay: runode_protocol::push::RELAY_URL.map(str::to_owned),
             queue: Vec::new(),
@@ -109,10 +110,12 @@ fn queued(target: Target, other_env: bool, now: Instant) -> Queued {
 struct Worker {
     dirs: Dirs,
     curl: Curl,
-    /// 配置里的密钥，变了才重读。
+    /// 配置里的密钥，变了才重读（没读成时另见 `direct_load_failed`）。
     direct_config: Option<ApnsKey>,
     /// 读好的密钥；没配或者读不了时为 `None`。
     direct: Option<DirectKey>,
+    /// 配了密钥却没读成：有直连的通知要发时再读一次，密钥文件补好了不用改配置也能恢复。
+    direct_load_failed: bool,
     /// APNs 说密钥不对，配置换了密钥之前直连的都不发。
     direct_broken: bool,
     relay: Option<String>,
@@ -151,15 +154,17 @@ impl Worker {
                 self.relay = relay;
                 if direct != self.direct_config {
                     self.direct_broken = false;
-                    self.direct = direct.as_ref().and_then(|key| {
-                        DirectKey::load(&key.key_file, &key.key_id, &key.team_id, &key.bundle)
-                            .map_err(|err| tracing::warn!("cannot push straight to APNs: {err}"))
-                            .ok()
-                    });
                     self.direct_config = direct;
+                    self.direct_load_failed = false;
+                    self.load_direct();
                 }
             }
             Command::Notify(targets) => {
+                // 轮询线程只在设置变了时才发 `Settings`，没读成的密钥只能在这里补读；一批读一次，
+                // 只有要直连时才读，通知本来就稀，不另外限频。
+                if self.direct_load_failed && targets.iter().any(|target| target.route.via == Via::Direct) {
+                    self.load_direct();
+                }
                 // 同一台手机、同一个会话还在退避的旧通知不发了：它和新的用同一个 collapse-id，晚到会把
                 // 新的问题替成旧的。
                 self.queue.retain(|item| {
@@ -175,6 +180,32 @@ impl Worker {
             Command::Keep(registered) => self.queue.retain(|item| {
                 registered.iter().any(|(device, token)| *device == item.target.device && *token == item.target.token)
             }),
+        }
+    }
+
+    /// 照 `direct_config` 读密钥。连着读不成时只有头一回记警告，免得每条通知都记一遍。
+    fn load_direct(&mut self) {
+        let Some(key) = &self.direct_config else {
+            self.direct = None;
+            return;
+        };
+        match DirectKey::load(&key.key_file, &key.key_id, &key.team_id, &key.bundle) {
+            Ok(loaded) => {
+                if self.direct_load_failed {
+                    tracing::info!("read the APNs key; pushing straight to APNs again");
+                }
+                self.direct = Some(loaded);
+                self.direct_load_failed = false;
+            }
+            Err(err) => {
+                if self.direct_load_failed {
+                    tracing::debug!("still cannot read the APNs key: {err}");
+                } else {
+                    tracing::warn!("cannot push straight to APNs: {err}");
+                }
+                self.direct = None;
+                self.direct_load_failed = true;
+            }
         }
     }
 
