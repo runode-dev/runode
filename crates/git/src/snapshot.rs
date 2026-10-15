@@ -193,6 +193,9 @@ pub(crate) fn diff_args(extra: &[&str]) -> Vec<String> {
         &threshold,
         "-c",
         "core.quotePath=true",
+        // 用户配了 `diff.suppressBlankEmpty` 时空的上下文行前面没有空格，`parse_diff` 认不出，后面的行号全错。
+        "-c",
+        "diff.suppressBlankEmpty=false",
         "diff",
         "-M",
         "--no-color",
