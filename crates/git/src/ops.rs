@@ -4,7 +4,7 @@ use std::{
     collections::HashMap,
     ffi::OsStr,
     fmt, fs,
-    io::{Read, Write},
+    io::{ErrorKind, Read, Write},
     os::unix::{ffi::OsStrExt, process::CommandExt},
     path::{Component, Path, PathBuf},
     process::{Child, Command, ExitStatus, Stdio},
@@ -158,8 +158,14 @@ impl Drain {
         let thread = thread::spawn(move || {
             let Some(mut pipe) = pipe else { return };
             let mut chunk = [0; 8192];
-            while let Ok(n @ 1..) = pipe.read(&mut chunk) {
-                out.lock().unwrap_or_else(PoisonError::into_inner).extend_from_slice(&chunk[..n]);
+            loop {
+                match pipe.read(&mut chunk) {
+                    Ok(0) => break,
+                    Ok(n) => out.lock().unwrap_or_else(PoisonError::into_inner).extend_from_slice(&chunk[..n]),
+                    // 信号打断的读接着读，不然输出缺一段却当成读完了。
+                    Err(err) if err.kind() == ErrorKind::Interrupted => {}
+                    Err(_) => break,
+                }
             }
         });
         Self { read, thread }
