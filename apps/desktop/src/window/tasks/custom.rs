@@ -663,7 +663,10 @@ pub(super) fn write_task(
     };
     let updated = with_task(text.as_deref(), old, new).map_err(|err| format!("{}: {err}", file.display()))?;
     let dir = file.parent().map(PathBuf::from).unwrap_or_default();
-    fs::create_dir_all(&dir).and_then(|()| fs::write(file, updated)).map_err(|err| format!("{}: {err}", file.display()))
+    // 用户手写过的文件：写临时文件再换上去，写到一半出错不留下空的或半截的。
+    fs::create_dir_all(&dir)
+        .and_then(|()| runode_paths::replace_file(file, updated.as_bytes()))
+        .map_err(|err| format!("{}: {err}", file.display()))
 }
 
 /// 在命令文件的内容 `text`（没有文件时为空）里把 `old` 换成 `new`。同一份里就在 `old` 原来的位置换，
