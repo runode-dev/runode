@@ -117,11 +117,20 @@ pub fn install(kind: Kind, dirs: &Dirs, exe: &Path) -> io::Result<Option<PathBuf
         (Kind::Host, true) => {
             // 已经加载过时 bootstrap 会报错；也不先 bootout，那会把托管着会话的宿主停掉。不带 `-k` 的
             // kickstart 只在它没在跑时拉起来；它已经在跑时可能报错，不碍事。
-            let target = launchd_target(kind)?;
-            if launchctl(&["print", &target]).is_ok() {
-                let _ = launchctl(&["kickstart", &target]);
-            } else {
-                launchctl(&["bootstrap", &launchd_domain()?, &path.to_string_lossy()])?;
+            let loaded = launchd_target(kind).and_then(|target| {
+                if launchctl(&["print", &target]).is_ok() {
+                    let _ = launchctl(&["kickstart", &target]);
+                    return Ok(());
+                }
+                launchctl(&["bootstrap", &launchd_domain()?, &path.to_string_lossy()])
+            });
+            if let Err(err) = loaded {
+                // 没加载上的服务不在 launchd 里，换回文件即可，不用 bootout。
+                let _ = match &previous {
+                    Some(previous) => std::fs::write(&path, previous),
+                    None => std::fs::remove_file(&path),
+                };
+                return Err(err);
             }
         }
         (Kind::Host, false) => {
@@ -143,15 +152,12 @@ pub fn install(kind: Kind, dirs: &Dirs, exe: &Path) -> io::Result<Option<PathBuf
                 }
                 result?;
                 // 连得上服务管理器了才问，免得连不上时当成原来没启用。启用看的是 wants 目录里的链接，
-                // 换了服务文件不影响。只有明确答 `disabled` 才算没启用，问不出来时回滚不动链接。
-                was_enabled =
-                    Command::new("systemctl").args(["--user", "is-enabled", SYSTEMD_UNIT]).output().ok().and_then(
-                        |output| match String::from_utf8_lossy(&output.stdout).trim() {
-                            "disabled" => Some(false),
-                            "enabled" => Some(true),
-                            _ => None,
-                        },
-                    );
+                // 换了服务文件不影响。
+                was_enabled = Command::new("systemctl")
+                    .args(["--user", "is-enabled", SYSTEMD_UNIT])
+                    .output()
+                    .ok()
+                    .and_then(|output| Enablement::parse(&String::from_utf8_lossy(&output.stdout)));
                 // 不用 `enable --now`、`restart`：`start` 对跑着的服务什么也不做，不会打断它托管的会话。
                 systemctl(&["enable", SYSTEMD_UNIT])?;
                 systemctl(&["start", SYSTEMD_UNIT])
@@ -159,11 +165,17 @@ pub fn install(kind: Kind, dirs: &Dirs, exe: &Path) -> io::Result<Option<PathBuf
             enable().map_err(|err| {
                 match &previous {
                     Some(previous) => {
-                        // 同 `None` 那支，先照这次的服务文件 `disable` 再换回原来的。
-                        if was_enabled == Some(false) {
+                        // 同 `None` 那支，先照这次的服务文件 `disable` 再换回原来的。原来只在运行时启用的，
+                        // 这次的 `enable` 加了持久的链接，也要撤掉，不然只管这次开机的服务成了每次登录都起。
+                        if matches!(was_enabled, Some(Enablement::Disabled | Enablement::Runtime)) {
                             let _ = systemctl(&["disable", SYSTEMD_UNIT]);
                         }
                         let _ = std::fs::write(&path, previous);
+                        // 有的 systemd 版本的 `disable` 连运行时的链接一起删，照原来的服务文件补回来；
+                        // 链接还在时这一步什么也不做。
+                        if was_enabled == Some(Enablement::Runtime) {
+                            let _ = systemctl(&["enable", "--runtime", SYSTEMD_UNIT]);
+                        }
                     }
                     None => {
                         // `enable` 成了、`start` 没成时 default.target.wants 里留着链接；`disable` 照着服务
@@ -244,6 +256,30 @@ const SYSTEMD_UNIT: &str = "runode-host.service";
 /// 刚开 linger 后等 systemd 起用户服务管理器：最多试这么多次、每次隔这么久。
 const MANAGER_TRIES: u32 = 10;
 const MANAGER_RETRY: std::time::Duration = std::time::Duration::from_millis(500);
+
+/// systemd 单元在 `install` 这次 `enable` 之前的启用状态，回滚时据此只撤这次加的链接。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Enablement {
+    /// 没启用（`disabled`）。
+    Disabled,
+    /// 持久地启用着（`enabled`），这次的 `enable` 没加什么。
+    Enabled,
+    /// 只在运行时启用着（`enabled-runtime`）：链接在运行时目录里，重启后就没了。
+    Runtime,
+}
+
+impl Enablement {
+    /// 认 `systemctl is-enabled` 的回答。别的回答（`masked`、`linked` 这些）和问不出来一样为 `None`，
+    /// 回滚时不动链接。
+    fn parse(answer: &str) -> Option<Self> {
+        match answer.trim() {
+            "disabled" => Some(Self::Disabled),
+            "enabled" => Some(Self::Enabled),
+            "enabled-runtime" => Some(Self::Runtime),
+            _ => None,
+        }
+    }
+}
 
 fn unsupported(kind: Kind) -> io::Error {
     io::Error::new(
@@ -344,6 +380,16 @@ mod tests {
         assert!(unit.contains("ExecStart=\"/opt/$$HOME/run\\\"o\\\\de\" --host\n"), "{unit}");
         assert!(unit.contains("WantedBy=default.target"));
         assert!(unit.contains("\nRestart=on-abnormal\n"), "{unit}");
+    }
+
+    #[test]
+    fn only_a_clear_answer_counts_as_how_the_unit_was_enabled() {
+        assert_eq!(Enablement::parse("disabled\n"), Some(Enablement::Disabled));
+        assert_eq!(Enablement::parse("enabled\n"), Some(Enablement::Enabled));
+        // 只在运行时启用的单元回滚时要撤掉这次加的持久链接，不能当成问不出来。
+        assert_eq!(Enablement::parse("enabled-runtime\n"), Some(Enablement::Runtime));
+        assert_eq!(Enablement::parse("masked\n"), None);
+        assert_eq!(Enablement::parse(""), None);
     }
 
     #[test]
