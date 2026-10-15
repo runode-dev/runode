@@ -348,7 +348,8 @@ impl Render for TodoDialog {
         let theme = cx.theme();
         let hover_bg = theme.mix(0.10);
         let primary_bg = theme.mix(0.16);
-        let (fg_h, bg_h, input_border) = (theme.foreground, theme.background, theme.input);
+        let (fg_h, bg_h, input_border, destructive) =
+            (theme.foreground, theme.background, theme.input, theme.destructive);
         // 输入框随内容长高，至少 28 点。
         let input = |state: &Entity<InputState>| Input::new(state).h_auto().min_h(scaled(28.)).py(px(4.));
         let field = |label: String, child: gpui::AnyElement| {
@@ -567,7 +568,7 @@ impl Render for TodoDialog {
                     .id("todo-dialog-error")
                     .role(Role::Label)
                     .aria_label(error.clone())
-                    .text_color(gpui::red())
+                    .text_color(destructive)
                     .child(error)
             }))
             .child(div().pt(px(4.)).flex().justify_end().gap(px(8.)).child(cancel).child(save));
