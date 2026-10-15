@@ -46,16 +46,22 @@ concurrency:
   group: ci-${{ inputs.ref || github.ref }}
   cancel-in-progress: true
 
+# 只读仓库；单独由 push 或 PR 触发时权限不由仓库的默认设置决定。
+permissions:
+  contents: read
+
 env:
   CARGO_TERM_COLOR: always
 
 jobs:
   check:
     runs-on: macos-15
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.ref }}
+          persist-credentials: false
       - name: 拉子模块
         run: make submodules
       # vendor/ghostty 的 build.zig.zon 要求的 zig 版本（minimum_zig_version）。
@@ -89,10 +95,12 @@ jobs:
   # 编不过。
   check-linux:
     runs-on: ubuntu-22.04
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.ref }}
+          persist-credentials: false
       - name: 拉子模块
         run: make submodules
       - uses: vercel-labs/setup-zig@83c1594f26b86da8a9a8ddd9b5ee5f3af0f96943 # v1.0.2

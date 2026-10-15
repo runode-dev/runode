@@ -120,7 +120,8 @@ notarize() {
         auth=(--key "$NOTARY_KEY" --key-id "$NOTARY_KEY_ID" --issuer "$NOTARY_ISSUER")
     fi
     local result id status
-    result=$(xcrun notarytool submit "$1" "${auth[@]}" --wait --output-format json)
+    # 公证队列积压或连接挂起时别一直等：发版的并发组不取消在跑的，这一步卡住后面所有发版都排队。
+    result=$(xcrun notarytool submit "$1" "${auth[@]}" --wait --timeout 45m --output-format json)
     id=$(jq -r .id <<<"$result")
     status=$(jq -r .status <<<"$result")
     if [[ "$status" != Accepted ]]; then

@@ -47,8 +47,10 @@ on:
 concurrency:
   group: release
 
+# 默认只读；只有推提交和标签的 prepare、建 Release 的 publish 要写。构建的 job 里有签名证书和
+# 公证密钥，又跑第三方 action 和整棵依赖树的 build.rs，不给它们写仓库的令牌。
 permissions:
-  contents: write
+  contents: read
 
 env:
   CARGO_TERM_COLOR: always
@@ -58,6 +60,9 @@ env:
 jobs:
   prepare:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: write
     outputs:
       tag: ${{ steps.version.outputs.tag }}
       version: ${{ steps.version.outputs.version }}
@@ -151,12 +156,16 @@ jobs:
             target: x86_64-apple-darwin
             uuid: 9214D93C-3F36-574E-B25E-6F340825BCAF
     runs-on: macos-15
+    # Intel 慢一倍再加公证时间也够；公证卡住时别等到 GitHub 的 6 小时上限。
+    timeout-minutes: 90
     env:
       CARGO_BUILD_TARGET: ${{ matrix.target }}
     steps:
       - uses: actions/checkout@v7
         with:
           ref: ${{ needs.prepare.outputs.tag }}
+          # 子模块是公开仓库，之后不再碰仓库，不把令牌留在 .git/config 里。
+          persist-credentials: false
       - name: 拉子模块
         run: make submodules
       - uses: vercel-labs/setup-zig@83c1594f26b86da8a9a8ddd9b5ee5f3af0f96943 # v1.0.2
@@ -232,10 +241,12 @@ jobs:
           - runner: ubuntu-22.04-arm
             arch: aarch64
     runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v7
         with:
           ref: ${{ needs.prepare.outputs.tag }}
+          persist-credentials: false
       - name: 拉子模块
         run: make submodules
       - uses: vercel-labs/setup-zig@83c1594f26b86da8a9a8ddd9b5ee5f3af0f96943 # v1.0.2
@@ -271,6 +282,7 @@ jobs:
     # 到时改在 macos-15 上用 Rosetta 跑（arch -x86_64），或者不再发 x86_64。
     needs: [prepare, build-macos]
     runs-on: macos-15-intel
+    timeout-minutes: 20
     steps:
       - uses: actions/download-artifact@v8
         with:
@@ -289,6 +301,9 @@ jobs:
     # CI 过了、各平台各架构都打好了、x86_64 的 Mac 包跑过了才发，缺一个就不发。
     needs: [prepare, ci, build-macos, build-linux, check-macos-x86_64]
     runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
     env:
       TAG: ${{ needs.prepare.outputs.tag }}
       VERSION: ${{ needs.prepare.outputs.version }}
@@ -298,6 +313,8 @@ jobs:
         with:
           ref: ${{ needs.prepare.outputs.tag }}
           sparse-checkout: docs/releases
+          # `gh` 用上面的 GH_TOKEN，不靠 checkout 留下的凭据。
+          persist-credentials: false
       - uses: actions/download-artifact@v8
         with:
           pattern: bundle-*
@@ -367,10 +384,12 @@ jobs:
         # macos-15-intel 走 Intel Mac 的安装路径，装的是 x86_64 的包。
         runner: [macos-15, macos-15-intel, ubuntu-22.04, ubuntu-22.04-arm]
     runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
         with:
           ref: ${{ needs.prepare.outputs.tag }}
+          persist-credentials: false
       - name: 安装
         env:
           RUNODE_VERSION: ${{ needs.prepare.outputs.version }}
