@@ -43,6 +43,12 @@ public final class DirectoryPickerModel {
         return parent.isEmpty ? "/" : parent
     }
 
+    /// 能在 `path` 里新建：列好了、没在等回话、连着，也没有出错的提示盖着。进不去的子目录报错时 `path`
+    /// 还是上次列好的目录，错误层盖住了列表，这时建下去会建在用户看不见的目录里。
+    public var canChoose: Bool {
+        path != nil && !isLoading && isConnected && errorMessage == nil
+    }
+
     /// 列一个目录，`path` 为空时是家目录。
     public func load(_ path: String?) async {
         requested = path

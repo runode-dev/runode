@@ -910,6 +910,13 @@ actor UnwritableMachineStore: MachineStore {
         #expect(picker.handle(.error(req: req, id: nil, message: "permission denied")))
         #expect(picker.errorMessage == "permission denied")
         #expect(picker.path == "/Users/ethan")
+        // 错误层盖着列表，`path` 还是上次的目录：这时不能在这里新建，收起提示回到那个目录后才能。
+        #expect(!picker.canChoose)
+        picker.dismissError()
+        #expect(picker.canChoose)
+        await picker.enter("secret")
+        guard case .listDirs(let again, _)? = link.sent.last else { return }
+        #expect(picker.handle(.error(req: again, id: nil, message: "permission denied")))
         await picker.retry()
         #expect(link.sent.last.map { if case .listDirs(_, path) = $0 { true } else { false } } == true)
         #expect(picker.errorMessage == nil)

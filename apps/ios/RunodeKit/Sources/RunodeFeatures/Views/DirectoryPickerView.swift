@@ -105,12 +105,12 @@
                     }
                     ToolbarItem(placement: .bottomBar) {
                         Button {
-                            if let path = picker.path { onChoose(path, name) }
+                            if picker.canChoose, let path = picker.path { onChoose(path, name) }
                         } label: {
                             Text("在这里新建").frame(maxWidth: .infinity)
                         }
                         .prominentButtonStyle()
-                        .disabled(picker.path == nil || picker.isLoading || !picker.isConnected)
+                        .disabled(!picker.canChoose)
                     }
                 }
             }
