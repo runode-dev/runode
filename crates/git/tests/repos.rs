@@ -315,6 +315,22 @@ fn excludes_a_worktree_given_by_a_relative_path() {
     assert!(repo.status().is_empty(), "{:?}", repo.status());
 }
 
+/// 路径里有 `..` 时按工作树真正所在的目录写：`scratch/../new` 建在 `new`，要排除的是 `new`，
+/// 不能把不相干的 `scratch` 藏起来。
+#[test]
+fn excludes_the_real_top_dir_of_a_path_with_parent_components() {
+    let repo = TestRepo::new("repos-add-worktree-dotdot");
+    repo.commit_file("a.txt", "one\n", "init");
+    repo.write("scratch/notes.txt", "x\n");
+    let handle = runode_git::Repo::open(repo.path()).unwrap();
+
+    handle.add_worktree(std::path::Path::new("scratch/../new"), "runode/new").unwrap();
+    assert!(repo.path().join("new/a.txt").exists());
+    assert_eq!(repo.status(), ["?? scratch/notes.txt"]);
+    let exclude = std::fs::read_to_string(repo.path().join(".git/info/exclude")).unwrap();
+    assert!(exclude.ends_with("/new/\n"), "{exclude:?}");
+}
+
 /// 目录名里的通配符按字面写进 info/exclude：`work[1]` 不能写成匹配 `work1` 的规则。
 #[test]
 fn excludes_worktree_dirs_whose_names_look_like_globs() {

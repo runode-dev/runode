@@ -5,7 +5,7 @@
 use std::{fs, path::Path};
 
 use crate::{
-    FileDiff, FileStatus, LineKind, Repo, Result, git,
+    FileDiff, FileStatus, GitError, LineKind, Repo, Result, git,
     parse::expand_tabs,
     snapshot::{MAX_DIFF_BYTES, diff, read_untracked, worktree_bytes},
 };
@@ -144,7 +144,8 @@ fn split_lines(bytes: &[u8]) -> Option<Vec<String>> {
 
 impl Repo {
     /// 读 `path`（相对仓库根）这个文件的整篇 diff，`side` 说和什么比。改名的文件把原来的路径
-    /// 放进 `old_path`，不然认不出是改名。已经没有改动时为空。未跟踪的文件整篇都是加的行。
+    /// 放进 `old_path`，不然认不出是改名。已经没有改动时为空，`git diff` 失败时报错，不当成没有改动。
+    /// 未跟踪的文件整篇都是加的行。
     pub fn file_view(&self, path: &Path, old_path: Option<&Path>, side: &DiffSide) -> Result<Option<DiffView>> {
         let specs: Vec<String> =
             std::iter::once(path).chain(old_path).map(|path| format!(":(literal){}", path.display())).collect();
@@ -165,7 +166,9 @@ impl Repo {
         };
         args.push("--");
         args.extend(specs.iter().map(String::as_str));
-        let mut file = diff(&self.root, &args).unwrap_or_default().into_iter().find(|file| file.path == path);
+        let files =
+            diff(&self.root, &args).ok_or_else(|| GitError::new(format!("没能读出 {} 的 diff", path.display())))?;
+        let mut file = files.into_iter().find(|file| file.path == path);
         if file.is_none() && *side == DiffSide::Worktree && self.untracked(path) {
             let full = self.root.join(path);
             // 和已跟踪的文件一样，超过 `MAX_DIFF_BYTES` 的不读进内存，标成截断。

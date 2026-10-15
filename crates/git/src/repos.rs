@@ -188,9 +188,11 @@ impl Repo {
     /// 把 `path` 在仓库里最上层的那一级目录写进 `info/exclude`，见 `add_worktree`。相对的 `path`
     /// 和 `git worktree add` 一样按仓库根算。
     fn exclude_top_dir(&self, path: &Path) -> Result {
-        let path = self.root.join(path);
-        let Some(Component::Normal(top)) = path.strip_prefix(&self.root).ok().and_then(|rel| rel.components().next())
-        else {
+        // 工作树已经建好了，按真实路径找最上层：`scratch/../new` 照字面取到的是 `scratch`，
+        // 根目录或中间某级是符号链接时字面上也对不上。
+        let real = |path: &Path| fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+        let (path, root) = (real(&self.root.join(path)), real(&self.root));
+        let Some(Component::Normal(top)) = path.strip_prefix(&root).ok().and_then(|rel| rel.components().next()) else {
             return Ok(());
         };
         let top = top.to_string_lossy();

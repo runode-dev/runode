@@ -152,21 +152,23 @@ if [ -z "${_runode_integrated-}" ]; then
         printf '\033]6973;%s;functions=%s\007' "$_runode_report_token" "$joined"
     }
 
-    # 把 $? 换回记下的退出码。
+    # 把 $? 换回记下的退出码。调用时接上 `&& :`：用户开了 `set -e` 时，返回非零的函数单独一条会让
+    # shell 退出，放在 `&&` 前面不会，退出码照样留在 $? 里。
     _runode_restore_status() {
         return "$_runode_last_status"
     }
 
     # 先记下退出码，再跑用户原有的 PROMPT_COMMAND，最后加标记：标记要在最后加，前面的命令改了
     # PS1 也照样标上。bash 5.1 起 PROMPT_COMMAND 可以是数组，逐个元素跑，每个元素开始时 $? 都是
-    # 上一条命令的退出码；是数组时在前后各加一个元素，后面的元素也在标记之前跑。字符串形式的
+    # 上一条命令的退出码；是数组时在前后各加一个元素，后面的元素也在标记之前跑。按属性认数组：
+    # 稀疏的数组（`([10]=…)`）没有下标 0，`${PROMPT_COMMAND+X}` 认不出来。字符串形式的
     # 记下退出码这一步把 $? 变成 0，跑用户的命令前换回去；用换行连接：用户的值以 `;`、`&` 结尾
     # 或只有空白时，拼上 `;` 会成语法错误。
     if [ "${BASH_VERSINFO[0]}" -gt 5 ] || { [ "${BASH_VERSINFO[0]}" -eq 5 ] && [ "${BASH_VERSINFO[1]}" -ge 1 ]; } &&
-        [[ -n ${PROMPT_COMMAND+X} && ${PROMPT_COMMAND@a} == *a* ]]; then
+        [[ ${PROMPT_COMMAND[@]@a} == *a* ]]; then
         PROMPT_COMMAND=('_runode_last_status=$?' "${PROMPT_COMMAND[@]}" _runode_prompt_command)
     else
-        PROMPT_COMMAND="_runode_last_status=\$?"$'\n'"${PROMPT_COMMAND:+_runode_restore_status$'\n'$PROMPT_COMMAND$'\n'}_runode_prompt_command"
+        PROMPT_COMMAND="_runode_last_status=\$?"$'\n'"${PROMPT_COMMAND:+_runode_restore_status && :$'\n'$PROMPT_COMMAND$'\n'}_runode_prompt_command"
     fi
     # 把 $1 按字节做百分号编码，结果放在 _runode_encoded 里：分号、换行、ESC、BEL 和
     # 非 ASCII 字节都不会打断转义序列。

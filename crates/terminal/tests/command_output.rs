@@ -429,6 +429,31 @@ fn real_bash_wraps_an_array_prompt_command() {
     assert_eq!(shell.output(2), "");
 }
 
+/// 稀疏的数组（没有下标 0）也按数组接上：用户的元素在标记之前跑，看到上一条命令的退出码。
+#[test]
+fn real_bash_wraps_a_sparse_array_prompt_command() {
+    if !bash_at_least(5, 1) {
+        return;
+    }
+    let rc = "PROMPT_COMMAND=([10]='seen=$?; PS1=\"[b]\\$ \"')\n";
+    let Some(mut shell) = RealShell::start("bash", "bash-prompt-sparse", rc, "[b]$", &["[b]$"]) else { return };
+    shell.run("false");
+    shell.run("echo $seen");
+    assert_eq!(shell.output(1), "1\n");
+    assert_eq!(shell.output(2), "");
+}
+
+/// 用户开了 `set -e` 时，跑用户的 PROMPT_COMMAND 前换回退出码这一步不能让 shell 退出：`! true` 留下
+/// 退出码 1，却不触发 errexit。
+#[test]
+fn real_bash_survives_errexit_while_restoring_the_exit_status() {
+    let rc = "PS1='[b]\\$ '\nPROMPT_COMMAND='seen=$?'\nset -e\n";
+    let Some(mut shell) = RealShell::start("bash", "bash-prompt-errexit", rc, "[b]$", &["[b]$"]) else { return };
+    shell.run("! true");
+    shell.run("echo $seen");
+    assert_eq!(shell.output(1), "1\n");
+}
+
 #[test]
 fn real_bash_commands_are_read_under_a_two_line_prompt() {
     read_commands_from(RealShell::start("bash", "bash-two-line", "PS1='\\W\\n[b]\\$ '\n", "[b]$", &["[b]$"]));

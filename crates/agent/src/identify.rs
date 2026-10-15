@@ -235,25 +235,39 @@ fn script_path<'a>(runtime: &str, argv: &'a [String]) -> Option<&'a str> {
 struct Bundling {
     /// 直接给代码、跑模块的选项字母：连写的一串里出现了它，也是直接给代码、跑模块。
     inline: &'static [char],
-    /// 后面要跟值的选项字母：连写时它后面的都是值。
+    /// 后面要跟值的选项字母：连写时它后面的都是值，它在最后时值是下一个参数（`-IW ignore`）。
     value: &'static [char],
 }
 
+/// 连写的一串短选项里有什么，见 `Bundling::scan`。
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Bundled {
+    /// 有 `inline` 的字母。
+    Inline,
+    /// 以 `value` 的字母结尾，下一个参数是它的值。
+    ValueNext,
+    Other,
+}
+
 impl Bundling {
-    /// `arg` 是连写的一串短选项，里面有 `inline` 的字母。
-    fn inline(self, arg: &str) -> bool {
+    /// 把 `arg` 当作连写的一串短选项来看。
+    fn scan(self, arg: &str) -> Bundled {
         let Some(letters) = arg.strip_prefix('-').filter(|letters| !letters.starts_with('-')) else {
-            return false;
+            return Bundled::Other;
         };
-        for letter in letters.chars() {
+        let mut letters = letters.chars().peekable();
+        while let Some(letter) = letters.next() {
             if self.inline.contains(&letter) {
-                return true;
+                return Bundled::Inline;
             }
-            if !letter.is_ascii_alphabetic() || self.value.contains(&letter) {
-                return false;
+            if !letter.is_ascii_alphabetic() {
+                return Bundled::Other;
+            }
+            if self.value.contains(&letter) {
+                return if letters.peek().is_none() { Bundled::ValueNext } else { Bundled::Other };
             }
         }
-        false
+        Bundled::Other
     }
 }
 
@@ -271,14 +285,12 @@ fn script_index(
         if arg == "--" {
             return (i + 1 < argv.len()).then_some(i + 1);
         }
-        if flag_matches(arg, eval_flags)
-            || flag_matches(arg, module_flags)
-            || bundling.is_some_and(|bundling| bundling.inline(arg))
-        {
+        let bundled = bundling.map_or(Bundled::Other, |bundling| bundling.scan(arg));
+        if flag_matches(arg, eval_flags) || flag_matches(arg, module_flags) || bundled == Bundled::Inline {
             return None;
         }
         if arg.starts_with('-') {
-            i += if option_takes_value(arg) { 2 } else { 1 };
+            i += if option_takes_value(arg) || bundled == Bundled::ValueNext { 2 } else { 1 };
             continue;
         }
         return Some(i);

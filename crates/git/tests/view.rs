@@ -159,6 +159,18 @@ fn reads_whole_file_diffs() {
     assert_eq!(render(&gone).len(), 13);
 }
 
+/// `git diff` 失败（暂存区里的 blob 丢了）时报错，不当成这个文件没有改动。
+#[test]
+fn a_failing_diff_is_an_error_not_no_changes() {
+    let repo = TestRepo::new("view-diff-fails");
+    repo.commit_file("a.txt", "one\n", "init");
+    let handle = read(&repo).repo();
+    let blob = repo.git(&["rev-parse", ":a.txt"]);
+    std::fs::remove_file(repo.path().join(".git/objects").join(&blob[..2]).join(&blob[2..])).unwrap();
+    repo.write("a.txt", "two\n");
+    assert!(handle.file_view(Path::new("a.txt"), None, &DiffSide::Worktree).is_err());
+}
+
 /// 只改了名、内容没变的文件没有块，全文照样读出来，按没改的行排。
 #[test]
 fn a_pure_rename_reads_the_whole_file() {

@@ -144,6 +144,11 @@ fn code_given_inline_is_not_a_script() {
     assert_eq!(alone("bash", &["bash", "-le", "/opt/bin/codex"]), Some(Codex));
     assert_eq!(alone("python3", &["python3", "-S", "/opt/bin/codex"]), Some(Codex));
     assert_eq!(alone("python3", &["python3", "-Wc", "/opt/bin/codex"]), Some(Codex));
+    // 连写的一串以带值的选项结尾时，值是下一个参数，不是脚本。
+    assert_eq!(alone("python3", &["python3", "-IW", "ignore", "/opt/bin/codex"]), Some(Codex));
+    assert_eq!(alone("python3", &["python3", "-BX", "dev", "/opt/bin/codex"]), Some(Codex));
+    assert_eq!(alone("bash", &["bash", "-eo", "pipefail", "/opt/bin/codex"]), Some(Codex));
+    assert_eq!(alone("bash", &["bash", "-O", "extglob", "/opt/bin/codex"]), Some(Codex));
     assert_eq!(alone("python3", &["python3", "/tmp/codex.py"]), None);
     assert_eq!(alone("python3", &["python3", "/tmp/codex"]), Some(Codex));
     assert_eq!(alone("MainThread", &["/path/to/other", "/path/to/cline"]), None);

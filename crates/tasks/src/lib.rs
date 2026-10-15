@@ -44,13 +44,9 @@ pub fn list(dir: &Path) -> Result<Vec<TaskSource>, String> {
     let ancestors = search_path(dir, dirs.home.as_deref());
     let makefile = ancestors.iter().find_map(|at| named_file(at, &MAKEFILE_NAMES));
     if let Some(file) = makefile
+        && let Some(prefix) = make_prefix(dir, file.parent().unwrap_or(dir))
         && let Some(text) = read_small(&file)
     {
-        let at = file.parent().unwrap_or(dir);
-        let prefix = match make_dir(dir, at) {
-            None => "make".to_owned(),
-            Some(rel) => format!("make -C {}", quote(&rel)),
-        };
         let targets = makefile_targets(&text);
         let truncated = targets.len() > MAX_TASKS;
         let tasks = targets
@@ -158,17 +154,18 @@ fn relative(from: &Path, to: &Path) -> Option<String> {
     (ups > 0).then(|| vec![".."; ups].join("/"))
 }
 
-/// `make -C` 从 `dir` 到 Makefile 所在的上级 `at` 用的目录，是同一个目录时为空。平常是相对路径
-/// （`..`、`../..`）；`..` 由 make 从进程真实的目录算，`dir` 经过符号链接时到不了 `at`，这时用 `at` 的
-/// 绝对路径（`quote` 拼不了的路径除外）。
-fn make_dir(dir: &Path, at: &Path) -> Option<String> {
-    let rel = relative(dir, at)?;
+/// 在 `dir` 里跑上级 `at` 里的 Makefile 用的命令开头：同一个目录时是 `make`，否则是 `make -C` 加目录。
+/// 目录平常是相对路径（`..`、`../..`）；`..` 由 make 从进程真实的目录算，`dir` 经过符号链接时到不了
+/// `at`，这时用 `at` 的绝对路径。绝对路径 `quote` 拼不了时为空：相对路径跑的是另一个目录里的 Makefile，
+/// 不如不列。
+fn make_prefix(dir: &Path, at: &Path) -> Option<String> {
+    let Some(rel) = relative(dir, at) else {
+        return Some("make".to_owned());
+    };
     let real = |path: &Path| fs::canonicalize(path).ok();
     let reaches = real(&dir.join(&rel)).is_some_and(|target| Some(target) == real(at));
-    match at.to_str() {
-        Some(absolute) if !reaches && quotable(absolute) => Some(absolute.to_owned()),
-        _ => Some(rel),
-    }
+    let target = if reaches { Some(rel.as_str()) } else { at.to_str().filter(|absolute| quotable(absolute)) };
+    target.map(|target| format!("make -C {}", quote(target)))
 }
 
 fn read_small(file: &Path) -> Option<String> {
@@ -352,6 +349,22 @@ build: other
         };
         assert_eq!(commands(&sources), [format!("make -C {} wrong", quote(root.join("work").to_str().unwrap()))]);
         assert_eq!(commands(&normal), ["make -C .. real"]);
+    }
+
+    /// 经过符号链接、Makefile 所在目录的绝对路径又拼不进命令行（这里带反斜杠）时不列：退回 `make -C ..`
+    /// 跑的是另一个目录里的 Makefile。
+    #[test]
+    fn an_unreachable_makefile_with_an_unquotable_path_is_not_listed() {
+        let root = std::env::temp_dir().join(format!("runode-tasks-unquotable-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(root.join("ext/project/sub")).unwrap();
+        fs::create_dir_all(root.join("wo\\rk")).unwrap();
+        fs::write(root.join("ext/project/Makefile"), "real:\n").unwrap();
+        fs::write(root.join("wo\\rk/Makefile"), "real:\n").unwrap();
+        std::os::unix::fs::symlink(root.join("ext/project/sub"), root.join("wo\\rk/link")).unwrap();
+        let sources = list(&root.join("wo\\rk/link")).unwrap();
+        fs::remove_dir_all(&root).unwrap();
+        assert!(sources.iter().all(|source| source.kind != TaskSourceKind::Makefile), "{sources:?}");
     }
 
     #[test]

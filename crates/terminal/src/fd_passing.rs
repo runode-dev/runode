@@ -156,12 +156,19 @@ const RECV_FLAGS: libc::c_int = libc::MSG_CMSG_CLOEXEC;
 const RECV_FLAGS: libc::c_int = 0;
 
 /// 读满 `buf`，随之来的描述符放进 `fds`；`fds` 多过 `max_fds` 个时不再往下读，返回 `InvalidData`。
+/// 一进来就先数一次：跟着头来的描述符已经多过头里说的个数时，不必再等后面的字节。
 fn recv_exact(stream: &UnixStream, buf: &mut [u8], fds: &mut Vec<OwnedFd>, max_fds: usize) -> io::Result<()> {
+    let too_many = |fds: &Vec<OwnedFd>| {
+        (fds.len() > max_fds).then(|| invalid(format!("expected at most {max_fds} descriptors, got {}", fds.len())))
+    };
+    if let Some(err) = too_many(fds) {
+        return Err(err);
+    }
     let mut filled = 0;
     while filled < buf.len() {
         let n = recv_some(stream, &mut buf[filled..], fds)?;
-        if fds.len() > max_fds {
-            return Err(invalid(format!("expected at most {max_fds} descriptors, got {}", fds.len())));
+        if let Some(err) = too_many(fds) {
+            return Err(err);
         }
         if n == 0 {
             return Err(io::Error::new(io::ErrorKind::UnexpectedEof, "connection closed in the middle of a message"));
@@ -285,6 +292,21 @@ mod tests {
         header[4..].copy_from_slice(&1u32.to_le_bytes());
         send_some(&a, [&header, &[]], 0, &[fd]).unwrap();
         send_some(&a, [b"x", &[]], 0, &[fd; MAX_FDS]).unwrap();
+        let err = recv_with_fds(&b).unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::InvalidData, "{err}");
+    }
+
+    /// 多出来的描述符跟着头一起到时，读完头就报错，不先等后面的字节（这里一直不来）。
+    #[test]
+    fn descriptors_beyond_the_header_count_on_the_header_stop_the_read() {
+        let (a, b) = UnixStream::pair().unwrap();
+        b.set_read_timeout(Some(std::time::Duration::from_secs(5))).unwrap();
+        let (pipe_rx, _pipe_tx) = io::pipe().unwrap();
+        let fd = pipe_rx.as_fd().as_raw_fd();
+        let mut header = [0u8; HEADER_LEN];
+        header[..4].copy_from_slice(&1u32.to_le_bytes());
+        header[4..].copy_from_slice(&1u32.to_le_bytes());
+        send_some(&a, [&header, &[]], 0, &[fd, fd]).unwrap();
         let err = recv_with_fds(&b).unwrap_err();
         assert_eq!(err.kind(), io::ErrorKind::InvalidData, "{err}");
     }
