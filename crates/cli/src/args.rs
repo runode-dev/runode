@@ -118,6 +118,18 @@ pub(crate) enum Command {
     ScheduleRemove {
         id: String,
     },
+    /// 打印给这种 shell 装的补全脚本。
+    Completions {
+        shell: Shell,
+    },
+}
+
+/// `completions` 支持的 shell。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Shell {
+    Bash,
+    Fish,
+    Zsh,
 }
 
 /// `schedule add` 什么时候到点。
@@ -470,6 +482,17 @@ pub(crate) fn parse(args: &[String]) -> Result<Command, String> {
                 }
                 other => return Err(format!("schedule knows add, list and rm, not {other}")),
             }
+        }
+        "completions" => {
+            no_more(words, 1, name)?;
+            let shell = match words.first().map(String::as_str) {
+                Some("bash") => Shell::Bash,
+                Some("fish") => Shell::Fish,
+                Some("zsh") => Shell::Zsh,
+                Some(other) => return Err(format!("completions knows bash, fish and zsh, not {other}")),
+                None => return Err("completions needs a shell: bash, fish or zsh".into()),
+            };
+            Command::Completions { shell }
         }
         other => return Err(format!("unknown command {other}")),
     };
@@ -898,6 +921,9 @@ mod tests {
     #[test]
     fn mistakes_are_reported() {
         assert!(parse("frobnicate").unwrap_err().contains("unknown command"));
+        assert_eq!(parse("completions fish"), Ok(Command::Completions { shell: Shell::Fish }));
+        assert!(parse("completions").unwrap_err().contains("needs a shell"));
+        assert!(parse("completions ksh").unwrap_err().contains("not ksh"));
         assert!(parse("list --bogus").unwrap_err().contains("unknown option"));
         assert!(parse("list --enter").unwrap_err().contains("does not take --enter"));
         assert!(parse("read a b").unwrap_err().contains("does not take b"));

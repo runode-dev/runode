@@ -62,7 +62,7 @@ runode read right --command                    # 读回这条命令的输出
 runode remote pair                             # 显示二维码，和手机配对
 ```
 
-完整用法见 `runode help`。配置文件在 `~/.runode/config.conf`。
+完整用法见 `runode help`。配置文件在 `~/.runode/config.conf`。`runode completions bash|fish|zsh` 打印 `runode` 和 `rn` 的 Tab 补全脚本，装到哪见 `runode help completions`。
 
 ## 常见问题
 

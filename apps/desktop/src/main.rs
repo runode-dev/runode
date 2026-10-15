@@ -46,6 +46,12 @@ fn main() {
     if args == ["--host", "--take-over"] {
         std::process::exit(host_process::take_over());
     }
+    // shell 的补全脚本问候选时先于命令行：补第一个词时参数是空的，不能当成要开窗口。
+    if let Some(index) = runode_cli::completion_index() {
+        let args: Vec<String> = args.iter().map(|arg| arg.to_string_lossy().into_owned()).collect();
+        let env = runode_cli::Env::from_process(env!("RUNODE_BUILD"));
+        std::process::exit(runode_cli::complete(&args, index, &env, &mut std::io::stdout().lock()));
+    }
     if runode_cli::wants_cli(&args) {
         let args: Vec<String> = args.iter().map(|arg| arg.to_string_lossy().into_owned()).collect();
         let env = runode_cli::Env::from_process(env!("RUNODE_BUILD"));

@@ -9,11 +9,12 @@
 //!
 //! 命令的解析在 `args`，连宿主和收发消息在 `client`，按写法找会话在 `select`，各个命令在
 //! `commands`，用法说明在 `help`，给 agent 装使用说明在 `setup`，远程访问在 `remote`，任务板（`todo`、
-//! `schedule`）在 `todo`，定时的本地钟点在 `local_time`。
+//! `schedule`）在 `todo`，定时的本地钟点在 `local_time`，shell 补全在 `complete`。
 
 mod args;
 mod client;
 mod commands;
+mod complete;
 mod help;
 mod local_time;
 mod remote;
@@ -28,6 +29,10 @@ pub use setup::{SKILLS_URL, SetupTarget, SkillFiles, bundled_skills, fetch_skill
 
 /// 桌面 app 给 shell 设的环境变量：runode 可执行文件的路径，没把它放进 PATH 时也能调用命令行。
 pub const ENV_BIN: &str = "RUNODE_BIN";
+
+/// shell 的补全脚本设了这个环境变量来问候选，值是正在打的词在整条命令行上的序号（程序名是 0），
+/// 见 `completion_index` 和 `complete`。
+pub const ENV_GET_COMPLETIONS: &str = "RUNODE_GET_COMPLETIONS";
 
 /// 命令行的退出码。
 pub mod exit {
@@ -72,6 +77,23 @@ impl Env {
             dirs,
             skills_url: Some(crate::SKILLS_URL.to_owned()),
         }
+    }
+}
+
+/// 进程是补全脚本为了问候选起的（设了 `ENV_GET_COMPLETIONS`）时，正在打的是第几个参数（从 0 数，
+/// 不含程序名）。值不是数字或者指着程序名时当没设。
+pub fn completion_index() -> Option<usize> {
+    let index: usize = std::env::var(ENV_GET_COMPLETIONS).ok()?.trim().parse().ok()?;
+    index.checked_sub(1)
+}
+
+/// 打印第 `index` 个参数（见 `completion_index`）的候选，给 `runode completions` 的脚本用：第一行
+/// 是 shell 另外还能补什么（`normal`、`files`、`dirs`），后面每行一个候选，制表符后面是说明。
+/// 宿主没开时没有会话和任务的候选，不报错。
+pub fn complete(args: &[String], index: usize, env: &Env, out: &mut dyn Write) -> i32 {
+    match complete::complete(args, index, env, out) {
+        Ok(()) => exit::OK,
+        Err(_) => exit::FAILED,
     }
 }
 

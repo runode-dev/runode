@@ -13,20 +13,21 @@ the running runode app; inside a runode terminal they find it through
 RUNODE_SOCKET, and RUNODE_SESSION names the terminal they run in.
 
 Commands:
-  list      List the terminal sessions
-  read      Print the text on a session's screen
-  send      Type text and keys into a session
-  wait      Wait for an agent, a command or some text on the screen
-  open      Open a terminal in the app
-  kill      End a session and close its pane
-  focus     Show a session's pane and bring its window to the front
-  todo      Put tasks for agents on the task board and start them
-  schedule  Start a task for an agent at set times
-  setup     Teach an agent to use runode
-  remote    Pair phones for remote access and manage them
-  service   Start runode at login
-  help      Show this help, or the help of a command
-  version   Show the version
+  list         List the terminal sessions
+  read         Print the text on a session's screen
+  send         Type text and keys into a session
+  wait         Wait for an agent, a command or some text on the screen
+  open         Open a terminal in the app
+  kill         End a session and close its pane
+  focus        Show a session's pane and bring its window to the front
+  todo         Put tasks for agents on the task board and start them
+  schedule     Start a task for an agent at set times
+  setup        Teach an agent to use runode
+  remote       Pair phones for remote access and manage them
+  service      Start runode at login
+  completions  Print a completion script for your shell
+  help         Show this help, or the help of a command
+  version      Show the version
 
 Options:
   -h, --help     Show this help; after a command, the help of that command
@@ -53,6 +54,7 @@ pub(crate) const PAGES: &[(&str, &str)] = &[
     ("setup", SETUP),
     ("remote", REMOTE),
     ("service", SERVICE),
+    ("completions", COMPLETIONS),
     ("session", SESSION),
 ];
 
@@ -370,6 +372,24 @@ Arguments:
         and while the task board has schedules, so they start on time;
         otherwise it exits when idle
   app   The Runode app, opened at the next login (macOS only)
+
+Options:
+  -h, --help  Show this help
+";
+
+const COMPLETIONS: &str = "\
+Print a completion script for your shell, for `runode` and `rn` alike.
+
+Usage: runode completions bash|fish|zsh
+
+The script asks runode for the candidates each time you press Tab, so it
+completes the sessions, tasks and devices there are right now and follows
+runode when it is upgraded. Install it with
+
+  bash  echo 'eval \"$(runode completions bash)\"' >> ~/.bashrc
+  fish  runode completions fish > ~/.config/fish/conf.d/runode.fish
+  zsh   echo 'eval \"$(runode completions zsh)\"' >> ~/.zshrc
+        (after the line that runs compinit)
 
 Options:
   -h, --help  Show this help
