@@ -7,6 +7,8 @@
 //! 录键时拦下这个窗口里按的键（`App::intercept_keystrokes`），不让它当快捷键或者菜单命令生效；
 //! 一次只录一个按键，连按几个键的写法（`ctrl+a>n`）要在配置文件里写。
 
+use std::collections::HashMap;
+
 use crate::ui::theme::Theme;
 use gpui::{App, Context, Div, Keystroke, SharedString, Subscription, Window, div, prelude::*, px};
 use runode_config::{
@@ -449,9 +451,14 @@ impl SettingsView {
         );
 
         let (rows, bad) = self.keybind_rows();
+        let mut seen: HashMap<String, usize> = HashMap::new();
         for (ix, line) in bad {
             let err = keybind::parse(&line).err().unwrap_or_default();
-            let remove = Button::new(("remove-bad-keybind", ix), rust_i18n::t!("settings.remove"))
+            // id 按这一行的内容取（一样的第几次出现），不按行号，同上。
+            let nth = seen.entry(line.clone()).or_default();
+            *nth += 1;
+            let id = SharedString::from(format!("remove-bad-keybind-{line}-{nth}"));
+            let remove = Button::new(id, rust_i18n::t!("settings.remove"))
                 .icon("icons/minus.svg")
                 .icon_size(12.)
                 .with_size(ButtonSize::IconSm)
@@ -472,16 +479,15 @@ impl SettingsView {
         for (gx, (first, group)) in GROUPS.iter().enumerate() {
             let start = group_start(first);
             let end = GROUPS.get(gx + 1).map_or(usize::MAX, |(next, _)| group_start(next));
-            let group_rows: Vec<_> =
-                rows.iter().enumerate().filter(|(_, row)| (start..end).contains(&row.order)).collect();
+            let group_rows: Vec<_> = rows.iter().filter(|row| (start..end).contains(&row.order)).collect();
             let custom = *group == "text";
             if group_rows.is_empty() && !custom {
                 continue;
             }
             let title = format!("settings.keybind.group.{group}");
             out.section(rust_i18n::t!(&title).into_owned());
-            for (ix, row) in group_rows {
-                out.push(self.render_keybind_row(ix, row, theme, cx).into_any_element());
+            for row in group_rows {
+                out.push(self.render_keybind_row(row, theme, cx).into_any_element());
             }
             if custom {
                 let open = Button::new("keybind-open-config", rust_i18n::t!("settings.open_config").into_owned())
@@ -508,9 +514,11 @@ impl SettingsView {
         out.finish()
     }
 
-    fn render_keybind_row(&mut self, ix: usize, row: &Row, theme: &Theme, cx: &mut Context<Self>) -> Div {
+    fn render_keybind_row(&mut self, row: &Row, theme: &Theme, cx: &mut Context<Self>) -> Div {
+        // 元素 id 按这一行的用法和键取，不按行号：绑定增减、行挪了位置时 VoiceOver 的焦点不跳。
+        let usage = &row.usage;
         let recording = self.keybinds.target().filter(|target| target.row == row.key).cloned();
-        let group = SharedString::from(format!("keybind-row-{ix}"));
+        let group = SharedString::from(format!("keybind-row-{usage}"));
         let tag = row.usage.split_once(':').map(|(_, param)| {
             div()
                 .flex_none()
@@ -538,7 +546,7 @@ impl SettingsView {
         let add_target = Record { row: row.key.clone(), usage: row.usage.clone(), replace: None };
         let adding = recording.as_ref() == Some(&add_target);
         let add_label = rust_i18n::t!("settings.keybind.add").into_owned();
-        let add = Button::new(SharedString::from(format!("keybind-add-{ix}")), add_label.clone())
+        let add = Button::new(SharedString::from(format!("keybind-add-{usage}")), add_label.clone())
             .icon("icons/plus.svg")
             .icon_size(12.)
             .with_size(ButtonSize::IconSm)
@@ -558,19 +566,22 @@ impl SettingsView {
             });
 
         let mut keys = div().flex_none().flex().flex_col().items_end().gap(px(6.));
-        for (jx, bound) in row.bound.iter().enumerate() {
+        for bound in &row.bound {
             let target = Record { row: row.key.clone(), usage: row.usage.clone(), replace: Some(bound.clone()) };
             if recording.as_ref() == Some(&target) {
                 let remove_bound = bound.clone();
                 let remove_label = rust_i18n::t!("settings.keybind.remove").into_owned();
-                let remove = Button::new(SharedString::from(format!("keybind-remove-{ix}-{jx}")), remove_label.clone())
-                    .icon("icons/ban.svg")
-                    .icon_size(12.)
-                    .with_size(ButtonSize::IconSm)
-                    .tooltip(crate::ui::tooltip::tooltip(remove_label, None))
-                    .on_press(cx, move |this, _, cx| this.remove_bound(&remove_bound, cx));
+                let remove = Button::new(
+                    SharedString::from(format!("keybind-remove-{usage}-{}", bound.trigger)),
+                    remove_label.clone(),
+                )
+                .icon("icons/ban.svg")
+                .icon_size(12.)
+                .with_size(ButtonSize::IconSm)
+                .tooltip(crate::ui::tooltip::tooltip(remove_label, None))
+                .on_press(cx, move |this, _, cx| this.remove_bound(&remove_bound, cx));
                 keys = keys.child(div().flex().items_center().gap(px(6.)).child(remove).child(press_box(
-                    SharedString::from(format!("keybind-press-{ix}-{jx}")),
+                    SharedString::from(format!("keybind-press-{usage}-{}", bound.trigger)),
                     theme,
                     cx,
                 )));
@@ -578,7 +589,7 @@ impl SettingsView {
             }
             keys = keys.child(
                 div()
-                    .id(SharedString::from(format!("keybind-keys-{ix}-{jx}")))
+                    .id(SharedString::from(format!("keybind-keys-{usage}-{}", bound.trigger)))
                     .flex()
                     .items_center()
                     .gap(px(10.))
@@ -592,7 +603,7 @@ impl SettingsView {
             );
         }
         if adding {
-            keys = keys.child(press_box(SharedString::from(format!("keybind-press-{ix}")), theme, cx));
+            keys = keys.child(press_box(SharedString::from(format!("keybind-press-{usage}")), theme, cx));
         }
 
         let hint = recording.map(|target| {
@@ -611,7 +622,7 @@ impl SettingsView {
                     actions = conflict.others.join(" / ")
                 );
                 let replace = Button::new(
-                    SharedString::from(format!("keybind-replace-{ix}")),
+                    SharedString::from(format!("keybind-replace-{usage}")),
                     rust_i18n::t!("settings.keybind.replace").into_owned(),
                 )
                 .variant(ButtonVariant::Outline)
@@ -622,7 +633,7 @@ impl SettingsView {
                     }
                 });
                 let cancel = Button::new(
-                    SharedString::from(format!("keybind-cancel-{ix}")),
+                    SharedString::from(format!("keybind-cancel-{usage}")),
                     rust_i18n::t!("settings.keybind.cancel").into_owned(),
                 )
                 .variant(ButtonVariant::Outline)
