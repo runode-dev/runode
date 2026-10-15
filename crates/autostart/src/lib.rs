@@ -66,13 +66,14 @@ pub fn service_file(kind: Kind, dirs: &Dirs) -> Option<PathBuf> {
     }
 }
 
-/// 装了没有。
+/// 装了没有。app 登记成登录项的系统上，从 macOS 12 升上来时留下的 LaunchAgent 也算：它照样在登录时开 app。
 pub fn is_installed(kind: Kind, dirs: &Dirs) -> bool {
+    let has_file = service_file(kind, dirs).is_some_and(|path| path.exists());
     #[cfg(target_os = "macos")]
     if kind == Kind::App && login_item::available() {
-        return login_item::is_enabled();
+        return login_item::is_enabled() || has_file;
     }
-    service_file(kind, dirs).is_some_and(|path| path.exists())
+    has_file
 }
 
 /// 装上 `kind` 的登录自启，返回写的服务文件；app 登记成登录项时没有服务文件，返回 `None`。`exe` 是
@@ -93,6 +94,8 @@ pub fn install(kind: Kind, dirs: &Dirs, exe: &Path) -> io::Result<Option<PathBuf
     if kind == Kind::App && login_item::available() {
         bundle()?;
         login_item::register()?;
+        // macOS 12 时写的 LaunchAgent 删掉，不然登录时 app 开两回。
+        remove_if_there(&path)?;
         return Ok(None);
     }
     let content = match (kind, cfg!(target_os = "macos")) {
@@ -103,6 +106,12 @@ pub fn install(kind: Kind, dirs: &Dirs, exe: &Path) -> io::Result<Option<PathBuf
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir)?;
     }
+    // 启用失败时换回原来的服务文件（原来没有就删掉），免得 `is_installed` 说装好了。
+    let previous = match std::fs::read(&path) {
+        Ok(previous) => Some(previous),
+        Err(err) if err.kind() == io::ErrorKind::NotFound => None,
+        Err(err) => return Err(err),
+    };
     std::fs::write(&path, content)?;
     match (kind, cfg!(target_os = "macos")) {
         (Kind::Host, true) => {
@@ -136,9 +145,11 @@ pub fn install(kind: Kind, dirs: &Dirs, exe: &Path) -> io::Result<Option<PathBuf
                 systemctl(&["start", SYSTEMD_UNIT])
             };
             enable().map_err(|err| {
+                let _ = match &previous {
+                    Some(previous) => std::fs::write(&path, previous),
+                    None => std::fs::remove_file(&path),
+                };
                 if err.kind() == io::ErrorKind::NotFound {
-                    // 不留下服务文件，免得 `is_installed` 说装好了。
-                    let _ = std::fs::remove_file(&path);
                     return io::Error::new(
                         io::ErrorKind::NotFound,
                         "systemctl was not found; starting at login needs systemd",
@@ -177,7 +188,8 @@ pub fn uninstall(kind: Kind, dirs: &Dirs) -> io::Result<bool> {
         if registered {
             login_item::unregister()?;
         }
-        return Ok(registered);
+        // 从 macOS 12 升上来时留下的 LaunchAgent 一起删，见 `is_installed`。
+        return Ok(remove_if_there(&path)? || registered);
     }
     if !path.exists() {
         return Ok(false);
@@ -191,6 +203,16 @@ pub fn uninstall(kind: Kind, dirs: &Dirs) -> io::Result<bool> {
         let _ = systemctl(&["daemon-reload"]);
     }
     Ok(true)
+}
+
+/// 删掉 `path`，返回原来在不在。
+#[cfg(target_os = "macos")]
+fn remove_if_there(path: &Path) -> io::Result<bool> {
+    match std::fs::remove_file(path) {
+        Ok(()) => Ok(true),
+        Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(false),
+        Err(err) => Err(err),
+    }
 }
 
 const SYSTEMD_UNIT: &str = "runode-host.service";
