@@ -352,6 +352,24 @@ private func workspace(_ index: UInt32, _ name: String, tabs: [[SessionId]], act
         #expect(reply.draft == "用方案 2\n用方案 3")
     }
 
+    /// 连着发了两条，宿主都回了错：两段字按回错的先后都放回文本框，不只剩第一段。
+    @Test func everyRefusedTextComesBack() async {
+        let reply = QuickReplyModel(sessionId: waiting, link: link)
+        reply.draft = "用方案 2"
+        await reply.sendDraft()
+        reply.draft = "用方案 3"
+        await reply.sendDraft()
+        guard link.sent.count == 4, case .paste(let first, _, _) = link.sent[0],
+            case .paste(let second, _, _) = link.sent[2]
+        else {
+            Issue.record("expected two pastes, got \(link.sent)")
+            return
+        }
+        reply.handle(.error(req: first, id: waiting, message: "no session"))
+        reply.handle(.error(req: second, id: waiting, message: "no session"))
+        #expect(reply.draft == "用方案 2\n用方案 3")
+    }
+
     /// 取请求编号时连接断了又连上：不发到新连接上去（断开时已经清过在等的请求），草稿还回来。
     @Test func aDisconnectWhileNumberingKeepsTheDraft() async {
         let held = HeldRequestLink()

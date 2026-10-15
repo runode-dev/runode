@@ -48,6 +48,8 @@ public final class QuickReplyModel {
     @ObservationIgnored private var pending: Set<UInt32> = []
     /// 还没回话的粘贴请求发的字：没送到时放回文本框，用户不用重打。
     @ObservationIgnored private var unsent: [UInt32: String] = [:]
+    /// 上次放回文本框的字：文本框还是它时，再有没送到的接在后面，几条都失败时不只剩第一条。
+    @ObservationIgnored private var restored: String?
     @ObservationIgnored private var batchFailed = false
     /// 断开过几次。取请求编号要等 `HostConnection`，等的时候连接可能断了（又连上）：前后对不上就不发。
     @ObservationIgnored private var disconnects = 0
@@ -112,9 +114,17 @@ public final class QuickReplyModel {
         return false
     }
 
-    /// 没送到的字放回文本框；用户已经打了新的字时不盖掉。
+    /// 没送到的字放回文本框；用户已经打了新的字时不盖掉，文本框里还是刚放回的字时接在后面。
     private func restoreDraft(_ text: String?) {
-        if let text, draft.isEmpty { draft = text }
+        guard let text else { return }
+        if draft.isEmpty {
+            draft = text
+        } else if draft == restored {
+            draft += "\n" + text
+        } else {
+            return
+        }
+        restored = draft
     }
 
     private func begin(_ requests: [UInt32]) {
