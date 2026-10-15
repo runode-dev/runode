@@ -162,7 +162,6 @@ impl Page {
                 Section("keyboard"),
                 Row("macos-option-as-alt", Choice(&["", "true", "false", "left", "right"])),
                 Section("shell"),
-                Row("shell-integration", Choice(&["detect", "none", "zsh", "bash", "fish", "elvish", "nushell"])),
                 Row("shell-integration-features", Choice(&["cursor", "no-cursor"])),
                 Section("scrollback"),
                 Row("scrollback-limit", Text(120.)),
@@ -668,12 +667,21 @@ fn key_placeholder(key: &str) -> SharedString {
 mod tests {
     use super::*;
 
-    /// 配置的每个键都在某一页上，而且只在一页上。
+    /// 只在配置文件里改、不放设置页的键。`shell-integration` 指定一种 shell 只对认不出程序名的
+    /// shell 管用，runode 启动的总是 `$SHELL`，没有换程序的配置项；放在设置页上多半被选错，
+    /// 关掉集成的人也少，就只留在文件里。
+    const FILE_ONLY: &[&str] = &["shell-integration"];
+
+    /// 配置的每个键都在某一页上，而且只在一页上；`FILE_ONLY` 里的除外。
     #[test]
     fn every_key_has_a_place() {
         let mut keys: Vec<&str> = Page::ALL.into_iter().flat_map(Page::keys).collect();
         keys.sort();
-        let mut all: Vec<&str> = runode_config::KEYS.iter().flat_map(|group| group.iter().copied()).collect();
+        let mut all: Vec<&str> = runode_config::KEYS
+            .iter()
+            .flat_map(|group| group.iter().copied())
+            .filter(|key| !FILE_ONLY.contains(key))
+            .collect();
         all.sort();
         assert_eq!(keys, all);
     }

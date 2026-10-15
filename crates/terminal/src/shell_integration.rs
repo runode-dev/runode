@@ -29,17 +29,14 @@ const NUSHELL_CONF: &str = include_str!("../shell-integration/nushell/runode.nu"
 
 /// 按 `mode` 给启动 `program` 的命令加上集成，并补上登录 shell 的参数；集成脚本开哪些功能
 /// 按 `features`（见 `features`）。集成脚本写不出来或认不出 shell 时照常以登录 shell 启动，不注入。
+/// `mode` 指定了种类而 `program` 认得出是另一种 shell 时，按程序名认出的那种注入。
 ///
 /// 注入了集成时返回这个 shell 的报告口令：随机生成，经环境变量 `RUNODE_REPORT_TOKEN` 交给
 /// 集成脚本，脚本读进不导出的变量后马上从环境里删掉，子进程继承不到。shell 报告 PATH 等信息时
 /// 带上它，终端据此认出报告确实来自这个 shell，而不是被打印到屏幕上的别的输出伪造的。没注入
 /// 或者生成不了口令时为 `None`，这时脚本不发报告。
 pub fn prepare(mode: IntegrationMode, program: &str, features: &str, cmd: &mut CommandBuilder) -> Option<String> {
-    let shell = match mode {
-        IntegrationMode::Off => None,
-        IntegrationMode::Detect => Shell::detect(program),
-        IntegrationMode::Force(shell) => Some(shell),
-    };
+    let shell = resolve(mode, program);
     let dir = shell.and_then(|_| match install_dir() {
         Ok(dir) => Some(dir),
         Err(err) => {
@@ -93,6 +90,25 @@ pub fn prepare(mode: IntegrationMode, program: &str, features: &str, cmd: &mut C
     let token = report_token()?;
     cmd.env("RUNODE_REPORT_TOKEN", &token);
     Some(token)
+}
+
+/// 按 `mode` 定给 `program` 注入哪种 shell 的集成，不注入时为 `None`。指定的种类只对认不出程序名的
+/// shell 管用（比如一个叫 sh 的符号链接）。程序名认得出是另一种 shell 时按它自己的来：把 bash 的
+/// --rcfile、elvish 的 -rc 这类参数传给 fish，fish 认不出就退出，终端刚开就关。
+fn resolve(mode: IntegrationMode, program: &str) -> Option<Shell> {
+    match mode {
+        IntegrationMode::Off => None,
+        IntegrationMode::Detect => Shell::detect(program),
+        IntegrationMode::Force(forced) => match Shell::detect(program) {
+            Some(detected) if detected != forced => {
+                tracing::warn!(
+                    "shell-integration is set to {forced:?} but {program} is {detected:?}; using its own integration"
+                );
+                Some(detected)
+            }
+            _ => Some(forced),
+        },
+    }
 }
 
 /// 把 `data` 排到 `XDG_DATA_DIRS` 最前面，fish、nushell 启动时从那里自动加载集成；`var` 告诉
@@ -191,6 +207,19 @@ mod tests {
         assert_eq!(prepare(IntegrationMode::Off, "/bin/zsh", "cursor:steady", &mut cmd), None);
         assert_eq!(cmd.get_env("RUNODE_REPORT_TOKEN"), None);
         assert_eq!(cmd.get_env("RUNODE_SHELL_FEATURES"), None);
+    }
+
+    #[test]
+    fn a_forced_shell_kind_yields_to_a_program_recognized_as_another_shell() {
+        let force = |shell| IntegrationMode::Force(shell);
+        // fish 认不出 bash 的 --rcfile，会直接退出。
+        assert_eq!(resolve(force(Shell::Bash), "/opt/homebrew/bin/fish"), Some(Shell::Fish));
+        assert_eq!(resolve(force(Shell::Elvish), "-zsh"), Some(Shell::Zsh));
+        // 认不出名字的程序才按指定的办。
+        assert_eq!(resolve(force(Shell::Bash), "/usr/local/bin/sh"), Some(Shell::Bash));
+        assert_eq!(resolve(force(Shell::Zsh), "/bin/zsh"), Some(Shell::Zsh));
+        assert_eq!(resolve(IntegrationMode::Detect, "/usr/local/bin/sh"), None);
+        assert_eq!(resolve(IntegrationMode::Off, "/bin/zsh"), None);
     }
 
     #[test]

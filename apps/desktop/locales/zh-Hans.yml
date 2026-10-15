@@ -513,7 +513,6 @@ settings:
     cursor_style_blink_timeout: 停止闪烁的等待时间
     macos_option_as_alt: 把 Option 当作 Alt
     scrollback_limit: 回滚历史大小
-    shell_integration: Shell 集成
     shell_integration_features: 提示符光标
     clipboard_write: 程序写剪贴板
     clipboard_read: 程序读剪贴板
@@ -569,7 +568,6 @@ settings:
     cursor_style_blink_timeout: 这么多秒没有输入也没有输出，光标就停止闪烁、常亮。0 表示一直闪。
     macos_option_as_alt: 打开后按 Option 组合键发的是 Alt 组合，不再输入特殊字符。默认按键盘布局定：美式和 ABC 布局两边都当 Alt，别的布局不当。
     scrollback_limit: 每个终端的回滚历史最多占多少字节，至少 2 MiB（2097152），另外最多 1 万行。
-    shell_integration: 自动检测按 shell 的程序名判断。跳提示符这类功能靠它。
     shell_integration_features: 提示符上用竖线，zsh 的 vi 命令模式里用方块，跑命令时恢复成上面的光标形状。对新开的终端生效。
     clipboard_write: 终端里的程序（vim、tmux、经 ssh 连到远端的 shell 等）能把文字放进剪贴板。
     clipboard_read: 终端里的程序能读到你复制过的文字，密码也在内。选“询问”时先说明是哪个程序要读。
@@ -610,14 +608,6 @@ settings:
       "true": 两边
       left: 左边
       right: 右边
-    shell_integration:
-      detect: 自动检测
-      none: 关
-      zsh: zsh
-      bash: bash
-      fish: fish
-      elvish: elvish
-      nushell: nushell
     shell_integration_features:
       cursor: 竖线
       no-cursor: 不改
