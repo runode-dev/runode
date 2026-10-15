@@ -89,6 +89,11 @@ impl WindowView {
         self.with_preview(cx, |panel, cx| panel.files_changed(paths, cx));
     }
 
+    /// 监听说不准哪里变了：当前预览跟着文件变的不比修改时间直接重读，工作区 diff 标签记下要重读。
+    pub(super) fn preview_all_files_changed(&mut self, cx: &mut Context<Self>) {
+        self.with_preview(cx, |panel, cx| panel.all_files_changed(cx));
+    }
+
     /// 扫描结果换上以后，当前显示的 diff 标签对应的 git 状态变了就重读。
     pub(in crate::window) fn reload_stale_diff(&mut self, cx: &mut Context<Self>) {
         self.with_preview(cx, |panel, cx| panel.reload_stale_diff(cx));

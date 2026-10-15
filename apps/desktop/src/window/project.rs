@@ -159,10 +159,11 @@ impl WindowView {
     /// （`ProjectChanges::everything`）时按路径筛的几样都当作变了。
     pub(super) fn project_changed(&mut self, changes: ProjectChanges, active: bool, cx: &mut Context<Self>) {
         let ProjectChanges { paths, everything } = changes;
-        // 预览的文件变了就重读；窗口在后台时等切回前台再按修改时间判断。说不准哪里变了时现在就按修改时间判断。
+        // 预览的文件变了就重读；窗口在后台时等切回前台再按修改时间判断。说不准哪里变了时都当作变了、直接重读：
+        // 丢了事件时按修改时间比不出同样大小、修改时间又被设回去的改写，防抖并进来的几批里明确变了的文件也在内。
         if active {
             if everything {
-                self.refresh_preview_if_changed(cx);
+                self.preview_all_files_changed(cx);
             } else {
                 self.preview_files_changed(&paths, cx);
             }

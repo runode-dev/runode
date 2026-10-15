@@ -187,7 +187,7 @@ impl PreviewPanel {
 
     /// 扫描结果换上以后，当前显示的 diff 标签对应的 git 状态变了就重读；别的标签等切过去时再读。
     pub fn reload_stale_diff(&mut self, cx: &mut Context<Self>) {
-        if self.preview().is_some_and(|preview| preview.diff.is_some() && preview.diff_stale) {
+        if self.preview().is_some_and(|preview| preview.diff.is_some() && preview.reload) {
             self.load_diff(cx);
         }
     }
@@ -207,7 +207,7 @@ impl PreviewPanel {
         let Some(preview) = self.preview_mut() else {
             return;
         };
-        preview.diff_stale = false;
+        preview.reload = false;
         preview.cancel.store(true, Ordering::Relaxed);
         preview.cancel = Arc::new(AtomicBool::new(false));
         let cancel = preview.cancel.clone();
@@ -793,14 +793,14 @@ mod tests {
         let mut tab = super::super::Preview::new("/r/a.rs".into(), Some(target), true);
         let old = repos(vec![diff("a.rs", 1), diff("b.rs", 1)]);
         tab.git_changed(Some(&old), Some(&repos(vec![diff("a.rs", 1), diff("b.rs", 2)])));
-        assert!(!tab.diff_stale, "别的文件变了不重读");
+        assert!(!tab.reload, "别的文件变了不重读");
         tab.git_changed(Some(&old), Some(&repos(vec![diff("a.rs", 2), diff("b.rs", 1)])));
-        assert!(tab.diff_stale);
+        assert!(tab.reload);
         // 工作区的 diff 标签也跟着文件事件重读：二进制文件再改一次，扫描结果里的改动可能一模一样。
         let binary = FileDiff { binary: true, hunks: Vec::new(), ..diff("a.rs", 0) };
-        tab.diff_stale = false;
+        tab.reload = false;
         tab.git_changed(Some(&repos(vec![binary.clone()])), Some(&repos(vec![binary])));
-        assert!(!tab.diff_stale);
+        assert!(!tab.reload);
         assert!(tab.affected_by(&["/r/a.rs".into()]));
         assert!(!tab.affected_by(&["/r/b.rs".into()]));
         // 暂存区的不随文件变，等扫描。

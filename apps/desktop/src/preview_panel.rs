@@ -135,8 +135,9 @@ struct Preview {
     path: PathBuf,
     /// 不为空时这是 `path` 的 diff 标签，和同一个文件的普通标签是两个。
     diff: Option<DiffTarget>,
-    /// diff 标签：扫描到 git 状态变了，下次显示时重读。
-    diff_stale: bool,
+    /// 下次显示时重读：diff 标签是扫描到 git 状态变了；跟着文件变的标签（普通标签、工作区的 diff 标签）
+    /// 也可能是监听说不准哪里变了。
+    reload: bool,
     /// 固定的标签；临时标签为假，下一个打开的文件会换掉它。
     pinned: bool,
     /// 文件的 git 状态，标签名按它上色；和 `marks` 一起重算。
@@ -219,7 +220,7 @@ impl Preview {
         Self {
             path,
             diff,
-            diff_stale: false,
+            reload: false,
             pinned,
             status: None,
             real_path,
@@ -257,7 +258,7 @@ impl Preview {
         if let Some(diff) = &self.diff
             && diff_file(old, diff) != diff_file(new, diff)
         {
-            self.diff_stale = true;
+            self.reload = true;
         }
     }
 
@@ -277,8 +278,12 @@ impl Preview {
     /// 文件只记着个大概，再改一次可能和上次一模一样，`git_changed` 看不出来。暂存区和提交里的不随文件变，
     /// 等扫描。
     fn affected_by(&self, paths: &[PathBuf]) -> bool {
-        let watched = self.diff.as_ref().is_none_or(|diff| diff.side == git::DiffSide::Worktree);
-        watched && paths.iter().any(|path| *path == self.path || *path == self.real_path)
+        self.follows_file() && paths.iter().any(|path| *path == self.path || *path == self.real_path)
+    }
+
+    /// 文件一变内容就跟着变：普通标签和工作区的 diff 标签。
+    fn follows_file(&self) -> bool {
+        self.diff.as_ref().is_none_or(|diff| diff.side == git::DiffSide::Worktree)
     }
 
     /// 这个标签要不要重读：还没读过；普通标签是文件在磁盘上变过，diff 标签是 git 状态变过。工作区的 diff
@@ -288,8 +293,8 @@ impl Preview {
         let moved = || file_stamp(&self.path) != self.stamp;
         self.content.is_none()
             || match &self.diff {
-                None => moved(),
-                Some(diff) => self.diff_stale || (diff.side == git::DiffSide::Worktree && moved()),
+                None => self.reload || moved(),
+                Some(diff) => self.reload || (diff.side == git::DiffSide::Worktree && moved()),
             }
     }
 
@@ -729,10 +734,24 @@ impl PreviewPanel {
     pub fn files_changed(&mut self, paths: &[PathBuf], cx: &mut Context<Self>) {
         for tab in self.workspaces.get_mut(&self.ws).into_iter().flat_map(|tabs| &mut tabs.tabs) {
             if tab.diff.is_some() && tab.affected_by(paths) {
-                tab.diff_stale = true;
+                tab.reload = true;
             }
         }
         if self.preview().is_some_and(|preview| preview.affected_by(paths)) {
+            self.load_preview(cx);
+        }
+    }
+
+    /// 监听说不准哪里变了（丢了事件、要求重扫）：当作所有文件都变了。当前预览跟着文件变的直接重读，
+    /// 不按大小和修改时间比，大小没变、修改时间又被设回去的改写也认得出；别的跟着文件变的标签记下要重读，
+    /// 切过去时再读，文件没了的也重读。
+    pub fn all_files_changed(&mut self, cx: &mut Context<Self>) {
+        for tab in self.workspaces.get_mut(&self.ws).into_iter().flat_map(|tabs| &mut tabs.tabs) {
+            if tab.follows_file() {
+                tab.reload = true;
+            }
+        }
+        if self.preview().is_some_and(Preview::follows_file) {
             self.load_preview(cx);
         }
     }
@@ -768,6 +787,7 @@ impl PreviewPanel {
                 .update(cx, |this, cx| {
                     let (preview, git) = this.preview_for(id, &cancel)?;
                     preview.stamp = stamp;
+                    preview.reload = false;
                     // 排版视图的旧文档在新文档解析完之前还显示着，它的图片等换上新文档时再按用没用到放。
                     let (old_highlights, old_markdown) = match preview.content.take() {
                         Some(Loaded::Text { highlights, markdown, .. }) => (highlights, markdown),
@@ -1114,5 +1134,30 @@ mod tests {
         assert!(worktree.stale(), "文件变了，工作区的 diff 要重读");
         assert!(!index.stale(), "暂存区的 diff 等扫描");
         fs::remove_dir_all(&root).ok();
+    }
+
+    /// 说不准哪里变了时（`all_files_changed`）直接重读的是跟着文件变的标签：普通标签和工作区的 diff 标签，
+    /// 暂存区的 diff 等扫描。
+    #[test]
+    fn plain_and_worktree_diff_tabs_follow_the_file() {
+        let path = PathBuf::from("/repo/a.rs");
+        let diff = |side: git::DiffSide| {
+            let target = DiffTarget { root: "/repo".into(), rel: "a.rs".into(), old_rel: None, side };
+            Preview::new(path.clone(), Some(target), false)
+        };
+        assert!(Preview::new(path.clone(), None, false).follows_file());
+        assert!(diff(git::DiffSide::Worktree).follows_file());
+        assert!(!diff(git::DiffSide::Index).follows_file());
+    }
+
+    /// 记下要重读的普通标签切过去时一定重读，不看大小和修改时间：文件没了时记着的和读到的都是空，也要重读。
+    #[test]
+    fn a_plain_tab_marked_for_reload_is_stale_even_if_the_file_is_gone() {
+        let mut tab = Preview::new(PathBuf::from("/nonexistent/runode-preview/a.rs"), None, false);
+        tab.content = Some(Loaded::Note(Note::Binary));
+        tab.stamp = None;
+        assert!(!tab.stale());
+        tab.reload = true;
+        assert!(tab.stale());
     }
 }
