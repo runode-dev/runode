@@ -164,8 +164,14 @@ pub(crate) fn parse_diff(text: &str) -> Vec<FileDiff> {
 /// `rename to` 或 `+++` 行纠正。
 fn header_path(header: &str) -> Option<PathBuf> {
     if let Some(rest) = header.strip_prefix('"') {
-        let end = rest.find("\" ")? + 2;
-        return unquote(&header[..end]).strip_prefix("a").ok().map(Path::to_path_buf);
+        // 收尾的引号是第一个没被反斜杠转义的 `"`：名字里的 `\" ` 不算。
+        let mut escaped = false;
+        let close = rest.bytes().position(|b| {
+            let close = !escaped && b == b'"';
+            escaped = !escaped && b == b'\\';
+            close
+        })?;
+        return unquote(&header[..close + 2]).strip_prefix("a").ok().map(Path::to_path_buf);
     }
     // 两个路径一样长：`a/P b/P` 共 2P+5 个字节。
     let len = header.len().checked_sub(5)? / 2;
@@ -281,6 +287,14 @@ Binary files /dev/null and b/logo.png differ
         assert_eq!((binary.status, binary.path.clone()), (FileStatus::Added, "logo.png".into()));
     }
 
+    /// 二进制和只改了权限的文件没有 `---`、`+++` 行纠正，路径全靠 `diff --git` 那一行。
+    #[test]
+    fn reads_quoted_paths_with_escaped_quotes_from_the_header_alone() {
+        let diff = "diff --git \"a/q\\\" x.bin\" \"b/q\\\" x.bin\"\nindex 1111111..2222222 100644\nBinary files \"a/q\\\" x.bin\" and \"b/q\\\" x.bin\" differ\n";
+        let files = parse_diff(diff);
+        assert_eq!((files[0].path.clone(), files[0].binary), (PathBuf::from("q\" x.bin"), true));
+    }
+
     #[test]
     fn strips_the_tab_git_adds_after_paths_with_spaces() {
         let files =
@@ -318,5 +332,8 @@ Binary files /dev/null and b/logo.png differ
         assert_eq!(unquote("plain"), Path::new("plain"));
         assert_eq!(header_path("a/x y.txt b/x y.txt"), Some(PathBuf::from("x y.txt")));
         assert_eq!(header_path("\"a/q\\\"x\" \"b/q\\\"x\""), Some(PathBuf::from("q\"x")));
+        // 名字里转义了的引号后面跟着空格，不是收尾的引号；反斜杠本身转义过的也不吞掉后面的引号。
+        assert_eq!(header_path("\"a/q\\\" x.bin\" \"b/q\\\" x.bin\""), Some(PathBuf::from("q\" x.bin")));
+        assert_eq!(header_path("\"a/q\\\\\" \"b/q\\\\\""), Some(PathBuf::from("q\\")));
     }
 }

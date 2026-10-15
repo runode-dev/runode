@@ -83,3 +83,24 @@ fn checks_out_remote_branches_with_tracking() {
     handle.checkout(find("origin/topic")).unwrap();
     assert_eq!(repo.git(&["branch", "--show-current"]), "topic");
 }
+
+/// 有和远端分支同名的标签（`origin/topic`）时，按简写起点建跟踪分支有歧义；照样建得出来。
+#[test]
+fn checks_out_a_remote_branch_shadowed_by_a_tag() {
+    let remote = TestRepo::bare("branches-tag-remote");
+    let upstream = TestRepo::clone_of(&remote, "branches-tag-upstream");
+    upstream.commit_file("a.txt", "one\n", "init");
+    upstream.git(&["push", "-q", "origin", "main"]);
+    upstream.git(&["switch", "-q", "-c", "topic"]);
+    upstream.commit_file("t.txt", "t\n", "topic work");
+    upstream.git(&["push", "-q", "origin", "topic"]);
+
+    let repo = TestRepo::clone_of(&remote, "branches-tag-local");
+    repo.git(&["tag", "origin/topic", "main"]);
+    let handle = common::read(&repo).repo();
+    let topic = handle.branches().into_iter().find(|branch| branch.name == "origin/topic").unwrap();
+    handle.checkout(&topic).unwrap();
+    assert_eq!(repo.git(&["branch", "--show-current"]), "topic");
+    assert_eq!(repo.git(&["config", "branch.topic.merge"]), "refs/heads/topic");
+    assert_eq!(repo.git(&["rev-parse", "topic"]), repo.git(&["rev-parse", "refs/remotes/origin/topic"]));
+}

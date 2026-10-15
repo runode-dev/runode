@@ -182,7 +182,8 @@ pub fn snapshot(dir: &Path, cache: &mut UntrackedCache) -> Option<Snapshot> {
 
 /// 读 `FileDiff` 用的 `git diff` 命令行（不含 `git`），再加上 `extra`。前缀写明，免得用户配置了
 /// `diff.noprefix` 之类改掉 `a/`、`b/`。子模块只在记着的提交号变了时算改动，里面改了文件不算：
-/// 那些改动在子模块自己的那份里，在这里既暂存不了也丢不掉。路径里非 ASCII 的字节按八进制转义：
+/// 那些改动在子模块自己的那份里，在这里既暂存不了也丢不掉；子模块的改动钉成 `diff --git` 的格式，
+/// 用户配了 `diff.submodule=log` 时 git 给的是读不出来的摘要。路径里非 ASCII 的字节按八进制转义：
 /// 输出要当文本读，原样给的不是 UTF-8 的文件名会被换成 U+FFFD，转义了才能由 `unquote` 还原成原来的字节。
 pub(crate) fn diff_args(extra: &[&str]) -> Vec<String> {
     let threshold = format!("core.bigFileThreshold={MAX_DIFF_BYTES}");
@@ -198,16 +199,22 @@ pub(crate) fn diff_args(extra: &[&str]) -> Vec<String> {
         "--no-textconv",
     ];
     // 上下文钉成三行：仓库配了 `diff.context=0` 时块里没有上下文，`git apply` 不收按块暂存拼出的补丁。
-    args.extend(["--unified=3", "--src-prefix=a/", "--dst-prefix=b/", "--ignore-submodules=dirty"]);
+    args.extend([
+        "--unified=3",
+        "--src-prefix=a/",
+        "--dst-prefix=b/",
+        "--ignore-submodules=dirty",
+        "--submodule=short",
+    ]);
     args.extend(extra);
     args.into_iter().map(str::to_owned).collect()
 }
 
-/// `repo` 里的 `git diff`，参数见 `diff_args`。
-pub(crate) fn diff(repo: &Path, args: &[&str]) -> Vec<FileDiff> {
+/// `repo` 里的 `git diff`，参数见 `diff_args`；git 报错时为空，不当成没有改动。
+pub(crate) fn diff(repo: &Path, args: &[&str]) -> Option<Vec<FileDiff>> {
     let full = diff_args(args);
     let full: Vec<&str> = full.iter().map(String::as_str).collect();
-    let mut files = parse_diff(&String::from_utf8_lossy(&git(repo, &full).unwrap_or_default()));
+    let mut files = parse_diff(&String::from_utf8_lossy(&git(repo, &full)?));
     // 超过大小上限的文本文件也被报成二进制：工作区里的文件超过上限、开头又没有 NUL 字节的
     // 认回来，提示改动太多。暂存段也按工作区里的文件认，暂存后又改过的可能认错，只影响提示。
     for file in files.iter_mut().filter(|file| file.binary) {
@@ -217,7 +224,7 @@ pub(crate) fn diff(repo: &Path, args: &[&str]) -> Vec<FileDiff> {
             file.truncated = true;
         }
     }
-    files
+    Some(files)
 }
 
 /// 文件开头一段里有 NUL 字节，像 git 一样当作二进制。
@@ -251,7 +258,7 @@ pub(crate) fn read_repo(
 ) -> Option<Found> {
     let repo = root.as_path();
     // 状态、暂存段和未暂存段互不依赖，几个 git 进程同时跑；stash、远端和子模块也一起读。
-    let (status, staged, mut unstaged, extra, submodules) = std::thread::scope(|scope| {
+    let (status, staged, unstaged, extra, submodules) = std::thread::scope(|scope| {
         let status = scope.spawn(|| {
             // 开头多一项 `## 分支...上游 [ahead 1, behind 2]`。里面有改动的子模块也报出来，连同没
             // 写进 `.gitmodules` 的 gitlink，据此认出子仓库；列进改动的条目以 `diff` 为准。
@@ -285,9 +292,11 @@ pub(crate) fn read_repo(
         let submodules = submodules.join().unwrap_or_else(|panic| std::panic::resume_unwind(panic));
         (status, staged, unstaged, extra, submodules)
     });
-    let status = status?;
+    // 两段 diff 有一段读不出来时整个仓库算读不出来：当成没有改动的话，会把有改动的仓库报成干净的。
+    let (status, mut unstaged) = (status?, unstaged?);
     let (mut statuses, ignored) = parse_status(&status);
-    let (mut staged, head) = staged;
+    let (staged, head) = staged;
+    let mut staged = staged?;
     let info = info::read(&status, head, &git_dir, extra);
     let mut untracked: Vec<_> =
         statuses.iter().filter(|(_, status)| **status == FileStatus::Untracked).map(|(path, _)| path.clone()).collect();
@@ -407,7 +416,11 @@ pub(crate) fn read_untracked(full: &Path, path: PathBuf, read: bool) -> FileDiff
         truncated: false,
         gitlink: false,
     };
-    let content = read.then(|| worktree_bytes(full)).flatten();
+    // 调用方按大小决定读不读，读的时候文件又变大了的，读到上限为止、当作没读。
+    let content = read
+        .then(|| worktree_bytes(full, MAX_DIFF_BYTES))
+        .flatten()
+        .filter(|content| content.len() as u64 <= MAX_DIFF_BYTES);
     let Some(content) = content else {
         file.truncated = true;
         return file;
@@ -435,8 +448,11 @@ pub(crate) fn read_untracked(full: &Path, path: PathBuf, read: bool) -> FileDiff
 }
 
 /// 工作区里一个文件的内容，按 git 的规矩：符号链接是它指向的路径，不跟过去读（指向 `/dev/zero` 的
-/// 会把内存读光，指向命名管道的会一直等着）；管道、设备这些不是普通文件的读不到，为空。
-pub(crate) fn worktree_bytes(full: &Path) -> Option<Vec<u8>> {
+/// 会把内存读光，指向命名管道的会一直等着）；管道、设备这些不是普通文件的读不到，为空。最多读
+/// `max_bytes` 加一个字节：先看过大小、读的时候文件又变大了也不整个读进内存，多出的那一个字节让
+/// 调用方认出它超了。
+pub(crate) fn worktree_bytes(full: &Path, max_bytes: u64) -> Option<Vec<u8>> {
+    use std::io::Read;
     let meta = fs::symlink_metadata(full).ok()?;
     if meta.file_type().is_symlink() {
         return fs::read_link(full).ok().map(|target| target.into_os_string().into_vec());
@@ -444,12 +460,23 @@ pub(crate) fn worktree_bytes(full: &Path) -> Option<Vec<u8>> {
     if !meta.is_file() {
         return None;
     }
-    fs::read(full).ok()
+    let mut bytes = Vec::new();
+    fs::File::open(full).ok()?.take(max_bytes.saturating_add(1)).read_to_end(&mut bytes).ok()?;
+    Some(bytes)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn reads_at_most_one_byte_past_the_limit() {
+        let path = std::env::temp_dir().join(format!("runode-git-bounded-{}", std::process::id()));
+        fs::write(&path, b"0123456789").unwrap();
+        assert_eq!(worktree_bytes(&path, 3).unwrap(), b"0123");
+        assert_eq!(worktree_bytes(&path, 100).unwrap(), b"0123456789");
+        fs::remove_file(&path).unwrap();
+    }
 
     #[test]
     fn reads_only_the_one_repository() {

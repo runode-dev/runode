@@ -51,9 +51,19 @@ fn line_text(line: &[u8]) -> String {
     String::from_utf8_lossy(line).into_owned()
 }
 
-/// 原样的一块和 `FileDiff` 里的这块是不是同一块：块头一样，行也一样。`truncated` 时
-/// `FileDiff` 里的行可能没记全，只比记下的那些。
-fn same_hunk(raw: &[&[u8]], hunk: &Hunk, truncated: bool) -> bool {
+/// `hunk` 的行有没有记全：改动超过 `MAX_FILE_LINES` 行时，截断处的那一块只记了前面一段，
+/// 按记下的行数和块头的对不上认出来。
+fn complete(hunk: &Hunk) -> bool {
+    let Some((old, new)) = crate::view::line_counts(&hunk.header) else {
+        return false;
+    };
+    let old_seen = hunk.lines.iter().filter(|line| line.kind != LineKind::Added).count();
+    let new_seen = hunk.lines.iter().filter(|line| line.kind != LineKind::Removed).count();
+    (old_seen, new_seen) == (old as usize, new as usize)
+}
+
+/// 原样的一块和 `FileDiff` 里的这块是不是同一块：块头一样，行也一样。
+fn same_hunk(raw: &[&[u8]], hunk: &Hunk) -> bool {
     let Some((head, body)) = raw.split_first() else {
         return false;
     };
@@ -73,7 +83,7 @@ fn same_hunk(raw: &[&[u8]], hunk: &Hunk, truncated: bool) -> bool {
             Some((kind, expand_tabs(&line_text(&line[1..]))))
         })
         .collect();
-    if lines.len() < hunk.lines.len() || (!truncated && lines.len() != hunk.lines.len()) {
+    if lines.len() != hunk.lines.len() {
         return false;
     }
     hunk.lines.iter().zip(&lines).all(|(line, (kind, text))| line.kind == *kind && line.text == *text)
@@ -91,6 +101,10 @@ impl Repo {
             return Err(GitError::new(format!("{} 不能按块操作", file.path.display())));
         }
         let target = file.hunks.get(hunk).ok_or_else(|| GitError::new("没有这一块改动"))?;
+        // 没记全的块核对不了没记下的那些行，读完后那里又改过也看不出来，丢弃时会连带丢掉没看过的改动。
+        if file.truncated && !complete(target) {
+            return Err(GitError::new(format!("{} 这一块太长，没有读全，不能按块操作", file.path.display())));
+        }
         let (dir, rel) = self.locate(&file.path)?;
         // 和 `diff` 读 `FileDiff` 时的参数一样，块才切得一样。
         let cached: &[&str] = if action == HunkAction::Unstage { &["--cached", "HEAD"] } else { &[] };
@@ -102,9 +116,12 @@ impl Repo {
         let chosen = raw
             .hunks
             .iter()
-            .find(|raw| same_hunk(raw, target, file.truncated))
+            .find(|raw| same_hunk(raw, target))
             .ok_or_else(|| GitError::new(format!("{} 已经变了，刷新后再试", file.path.display())))?;
-        let patch: Vec<u8> = raw.header.iter().chain(chosen).flat_map(|line| line.iter().copied()).collect();
+        // 文件头里的 `old mode`、`new mode` 是整个文件的权限改动，不属于这一块：留着的话按块暂存、丢弃会连它一起打。
+        let header =
+            raw.header.iter().filter(|line| !line.starts_with(b"old mode ") && !line.starts_with(b"new mode "));
+        let patch: Vec<u8> = header.chain(chosen).flat_map(|line| line.iter().copied()).collect();
         apply(&dir, action, &patch)
     }
 }

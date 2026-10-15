@@ -125,3 +125,42 @@ fn stages_hunks_in_nested_repositories() {
     inner.repo().apply_hunk(a, 0, HunkAction::Stage).unwrap();
     assert_eq!(repo.git(&["-C", "wt/inner", "show", ":a.txt"]), "1\ntwo\n3\n4\n5\n6\n7\n8\n9\n10\n11\n12");
 }
+
+/// 改动超过行数上限时截断处的那一块没记全：没记下的那段读完后又改了也看不出来，不让按块丢弃。
+#[test]
+fn refuses_hunks_cut_off_by_the_line_limit() {
+    let repo = TestRepo::new("hunk-truncated");
+    let base: String = (0..4000).map(|n| format!("{n}\n")).collect();
+    repo.commit_file("a.txt", &base, "init");
+    let changed: String = (0..4000).map(|n| format!("x{n}\n")).collect();
+    repo.write("a.txt", &changed);
+    let snapshot = read(&repo);
+    let a = file(&snapshot, Section::Unstaged, "a.txt");
+    assert!(a.truncated && a.hunks.len() == 1);
+    // 没记下的末尾一行又改了，块头和记下的那段都没变。
+    let later = changed.replace("x3999\n", "y3999\n");
+    repo.write("a.txt", &later);
+    assert!(snapshot.repo().apply_hunk(a, 0, HunkAction::Discard).is_err());
+    assert_eq!(repo.read("a.txt"), later);
+}
+
+/// 文件既改了权限又有两块改动：按块暂存、丢弃只动这一块的内容，不带上权限的改动。
+#[test]
+fn leaves_the_mode_change_alone() {
+    use std::os::unix::fs::PermissionsExt;
+    let repo = two_hunks("hunk-mode");
+    let full = repo.path().join("a.txt");
+    std::fs::set_permissions(&full, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let snapshot = read(&repo);
+    let a = file(&snapshot, Section::Unstaged, "a.txt");
+    assert_eq!(a.hunks.len(), 2);
+    snapshot.repo().apply_hunk(a, 1, HunkAction::Stage).unwrap();
+    assert!(repo.git(&["ls-files", "-s", "a.txt"]).starts_with("100644 "));
+    assert_eq!(repo.git(&["show", ":a.txt"]), SECOND_ONLY);
+
+    let snapshot = read(&repo);
+    let a = file(&snapshot, Section::Unstaged, "a.txt");
+    snapshot.repo().apply_hunk(a, 0, HunkAction::Discard).unwrap();
+    assert_eq!(repo.read("a.txt"), format!("{SECOND_ONLY}\n"));
+    assert_eq!(std::fs::metadata(&full).unwrap().permissions().mode() & 0o111, 0o111);
+}

@@ -78,6 +78,14 @@ pub fn first_lines(header: &str) -> Option<(u32, u32)> {
     Some((old + u32::from(old_count == 0), new + u32::from(new_count == 0)))
 }
 
+/// 块头 `@@ -a,b +c,d @@` 里旧文件和新文件各占几行（`b` 和 `d`，省略时是 1）。
+pub(crate) fn line_counts(header: &str) -> Option<(u32, u32)> {
+    let mut parts = header.strip_prefix("@@ ")?.split(' ');
+    let (_, old_count) = range(parts.next()?)?;
+    let (_, new_count) = range(parts.next()?)?;
+    Some((old_count, new_count))
+}
+
 /// 把 `file` 的各块按块头的行号嵌进新文件的全文 `new_lines`：块之间没改的行按新文件排，旧行号
 /// 随前面的块加减的行数平移。块里没改的行和加的行要和全文对得上（制表符展开后比），对不上（读
 /// 全文时文件又变了）或者块头的行号越界时为空。
@@ -157,7 +165,7 @@ impl Repo {
         };
         args.push("--");
         args.extend(specs.iter().map(String::as_str));
-        let mut file = diff(&self.root, &args).into_iter().find(|file| file.path == path);
+        let mut file = diff(&self.root, &args).unwrap_or_default().into_iter().find(|file| file.path == path);
         if file.is_none() && *side == DiffSide::Worktree && self.untracked(path) {
             let full = self.root.join(path);
             // 和已跟踪的文件一样，超过 `MAX_DIFF_BYTES` 的不读进内存，标成截断。
@@ -197,7 +205,7 @@ impl Repo {
                 if fs::symlink_metadata(&full).is_ok_and(|meta| meta.len() > options.max_bytes) {
                     return Err(TooLarge);
                 }
-                worktree_bytes(&full)
+                worktree_bytes(&full, options.max_bytes)
             }
             DiffSide::Index => return self.blob(&format!(":{}", path.display()), options),
             DiffSide::Commit { id, .. } => return self.blob(&format!("{id}:{}", path.display()), options),
@@ -229,9 +237,16 @@ impl Repo {
     }
 
     /// blob `spec`（`版本:路径`）的字节，读不到时为空；先用 `cat-file -s` 查大小，比 `options.max_bytes`
-    /// 大的是 `TooLarge`，不读出来。
+    /// 大的是 `TooLarge`，不读出来。先把 `spec` 解析成对象 id 再按 id 查大小、读：暂存区或分支在这之间
+    /// 换成了别的（大）文件，读到的也还是查过大小的那一个。
     fn blob(&self, spec: &str, options: ReadOptions) -> std::result::Result<Option<Vec<u8>>, TooLarge> {
-        let size = git(&self.root, &["cat-file", "-s", spec])
+        let Some(id) = git(&self.root, &["rev-parse", "--verify", "--quiet", spec])
+            .and_then(|out| String::from_utf8(out).ok())
+            .map(|id| id.trim().to_owned())
+        else {
+            return Ok(None);
+        };
+        let size = git(&self.root, &["cat-file", "-s", &id])
             .and_then(|out| String::from_utf8(out).ok()?.trim().parse::<u64>().ok());
         let Some(size) = size else {
             return Ok(None);
@@ -239,9 +254,7 @@ impl Repo {
         if size > options.max_bytes {
             return Err(TooLarge);
         }
-        // shortcut: 查大小和读之间暂存区换成了大文件的话仍整个读进来（下面再比一次才丢掉），真碰上了改成先
-        // `rev-parse` 出对象 id 再按 id 查、读。
-        match git(&self.root, &["cat-file", "blob", spec]) {
+        match git(&self.root, &["cat-file", "blob", &id]) {
             Some(bytes) if bytes.len() as u64 > options.max_bytes => Err(TooLarge),
             bytes => Ok(bytes),
         }

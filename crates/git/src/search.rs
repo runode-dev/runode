@@ -62,8 +62,9 @@ pub fn grep(root: &Path, query: &GrepQuery, limit: usize, cancel: &AtomicBool) -
         return Ok(Vec::new());
     }
     let scope = if in_repo(root) { "--untracked" } else { "--no-index" };
+    // 用户配了 `grep.column`、`grep.fullName` 时输出会多出列号、路径变成相对仓库根，下面按固定的格式读，都关掉。
     let child = git_command(root)
-        .args(["grep", "-z", "-n", "-I", "--no-color", "--exclude-standard"])
+        .args(["grep", "-z", "-n", "-I", "--no-color", "--no-column", "--no-full-name", "--exclude-standard"])
         .arg(scope)
         .arg(if query.regex { "-E" } else { "-F" })
         .args(query.ignore_case.then_some("-i"))

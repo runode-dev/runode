@@ -185,16 +185,23 @@ impl Repo {
         })
     }
 
-    /// 把 `path` 在仓库里最上层的那一级目录写进 `info/exclude`，见 `add_worktree`。
+    /// 把 `path` 在仓库里最上层的那一级目录写进 `info/exclude`，见 `add_worktree`。相对的 `path`
+    /// 和 `git worktree add` 一样按仓库根算。
     fn exclude_top_dir(&self, path: &Path) -> Result {
+        let path = self.root.join(path);
         let Some(Component::Normal(top)) = path.strip_prefix(&self.root).ok().and_then(|rel| rel.components().next())
         else {
             return Ok(());
         };
-        let pattern = format!("/{}/", top.to_string_lossy());
-        if git(&self.root, &["check-ignore", "-q", "--", &pattern[1..]]).is_some() {
+        let top = top.to_string_lossy();
+        if git(&self.root, &["check-ignore", "-q", "--", &format!("{top}/")]).is_some() {
             return Ok(());
         }
+        // 忽略规则一行一条，换行写不进去。
+        if top.contains(['\n', '\r']) {
+            return Err(crate::GitError::new(format!("{top:?} 里有换行，没法写进 info/exclude")));
+        }
+        let pattern = format!("/{}/", ignore_literal(&top));
         let exclude = git(&self.root, &["rev-parse", "--git-path", "info/exclude"])
             .ok_or_else(|| crate::GitError::new("没能找到 info/exclude"))?;
         let exclude = self.root.join(String::from_utf8_lossy(&exclude).trim_end());
@@ -209,6 +216,18 @@ impl Repo {
         };
         write().map_err(|err| crate::GitError::new(format!("没能写 {}：{err}", exclude.display())))
     }
+}
+
+/// 把名字转成按字面匹配的忽略规则：`[`、`*`、`?` 这些通配符和反斜杠本身前面加反斜杠。
+fn ignore_literal(name: &str) -> String {
+    let mut out = String::with_capacity(name.len());
+    for c in name.chars() {
+        if matches!(c, '\\' | '[' | ']' | '*' | '?') {
+            out.push('\\');
+        }
+        out.push(c);
+    }
+    out
 }
 
 /// 读 `dir` 所在的仓库、它里面的子模块和嵌套仓库，以及（`worktrees` 时）同一个仓库的其他

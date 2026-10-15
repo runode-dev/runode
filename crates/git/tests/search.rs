@@ -91,3 +91,14 @@ fn caps_very_long_lines() {
     assert!(hits[0].text.starts_with("needlexxx") && hits[0].text.len() <= 64 * 1024, "{}", hits[0].text.len());
     assert_eq!((hits[1].line, hits[1].text.as_str()), (2, "needle short"));
 }
+
+/// 用户配了 `grep.column` 和 `grep.fullName` 也照样读：内容里没有列号，路径相对搜索的目录。
+#[test]
+fn ignores_grep_output_settings() {
+    let repo = TestRepo::new("search-config");
+    repo.git(&["config", "grep.column", "true"]);
+    repo.git(&["config", "grep.fullName", "true"]);
+    repo.write("src/a.rs", "foo bar\n");
+    let hits = grep(&repo.path().join("src"), &literal("bar", false), 10, &AtomicBool::new(false)).unwrap();
+    assert_eq!(hits, [GrepMatch { path: "a.rs".into(), line: 1, text: "foo bar".into() }]);
+}

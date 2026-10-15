@@ -85,7 +85,9 @@ pub fn origin_url(dir: &Path) -> Option<String> {
 }
 
 /// git 给的仓库根解析过符号链接；按 `dir` 的写法换回来，界面拿 `dir` 下的路径和它比前缀
-/// 才对得上。`dir` 本身不在仓库根下面（仓库内部的符号链接）时保持原样。
+/// 才对得上。`dir` 本身不在仓库根下面（仓库内部的符号链接）时保持原样。按层数往上数到的那一级
+/// 不一定就是仓库根：`dir` 经过仓库里指向别的深度的符号链接、或者是 `sub`、`.` 这样的相对写法
+/// 数到了头（空路径），都核对它解析出来是不是仓库根，不是就用 git 给的。
 fn local_root(dir: &Path, root: PathBuf) -> PathBuf {
     let (Ok(real_dir), Ok(real_root)) = (fs::canonicalize(dir), fs::canonicalize(&root)) else {
         return root;
@@ -93,7 +95,10 @@ fn local_root(dir: &Path, root: PathBuf) -> PathBuf {
     let Ok(rel) = real_dir.strip_prefix(&real_root) else {
         return root;
     };
-    dir.ancestors().nth(rel.components().count()).map_or(root, Path::to_path_buf)
+    dir.ancestors()
+        .nth(rel.components().count())
+        .filter(|local| !local.as_os_str().is_empty() && fs::canonicalize(local).is_ok_and(|real| real == real_root))
+        .map_or(root, Path::to_path_buf)
 }
 
 #[cfg(test)]
@@ -110,6 +115,22 @@ mod tests {
         assert_eq!(local_root(&link.join("sub"), real.clone()), link);
         assert_eq!(local_root(&link, real.clone()), link);
         assert_eq!(local_root(&real.join("sub"), real.clone()), real);
+        std::fs::remove_dir_all(&base).unwrap();
+    }
+
+    #[test]
+    fn falls_back_to_the_git_root_when_the_spelling_does_not_lead_there() {
+        let base = std::env::temp_dir().join(format!("runode-git-root-inner-{}", std::process::id()));
+        let repo = base.join("repo");
+        std::fs::create_dir_all(repo.join("deep/sub")).unwrap();
+        // 仓库里的符号链接指向更深的一层：往上数两级数到了仓库外面，不能当仓库根。
+        let link = repo.join("link");
+        std::os::unix::fs::symlink(repo.join("deep/sub"), &link).unwrap();
+        assert_eq!(local_root(&link, repo.clone()), repo);
+        assert_eq!(local_root(&repo.join("deep/sub"), repo.clone()), repo);
+        // 相对的写法数到头是空路径（测试的当前目录是这个 crate 的目录，仓库根当它的上一级），也用 git 给的。
+        let parent = std::env::current_dir().unwrap().parent().unwrap().to_path_buf();
+        assert_eq!(local_root(Path::new("."), parent.clone()), parent);
         std::fs::remove_dir_all(&base).unwrap();
     }
 }

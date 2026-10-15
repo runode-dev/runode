@@ -100,7 +100,9 @@ impl Repo {
         if git(&self.root, &["rev-parse", "--verify", "--quiet", &local_ref]).is_some() {
             return run(&self.root, ["switch", local], None).map(drop);
         }
-        run(&self.root, ["switch", "-c", local, "--track", &branch.name], None).map(drop)
+        // 起点写全 `refs/remotes/…`：有同名的标签或本地分支时 `origin/topic` 有歧义，git 拒绝。
+        let start = format!("refs/remotes/{}", branch.name);
+        run(&self.root, ["switch", "-c", local, "--track", &start], None).map(drop)
     }
 
     /// 从提交 `start`（为空时是当前提交）新建分支 `name` 并切过去。

@@ -397,7 +397,9 @@ impl Repo {
         } else if has_head(&self.root) {
             run(&self.root, ["diff", "HEAD"], None)?
         } else {
-            run(&self.root, ["diff"], None)?
+            // 还没有提交时和空树比，暂存了的新文件也算进来；空树的对象号随仓库的哈希算法，问 git 要。
+            let empty = run(&self.root, ["hash-object", "-t", "tree", "--stdin"], Some(b""))?;
+            run(&self.root, ["diff", String::from_utf8_lossy(&empty).trim()], None)?
         };
         let mut text = String::from_utf8_lossy(&diff).into_owned();
         if !staged {
@@ -420,14 +422,24 @@ impl Repo {
     }
 
     /// 撤销最近一次提交，改动留在暂存区里；返回被撤销的提交的完整说明，好填回
-    /// 输入框。只有一个提交时删掉分支，仓库回到还没有提交的样子。
+    /// 输入框。只有一个提交时删掉分支，仓库回到还没有提交的样子。父提交不在本地（浅克隆）时报错，什么也不做。
     pub fn undo_last_commit(&self) -> Result<String> {
         let message = run(&self.root, ["log", "-1", "--format=%B", "HEAD"], None)?;
         let message = String::from_utf8_lossy(&message).trim_end().to_owned();
-        if git(&self.root, &["rev-parse", "--verify", "--quiet", "HEAD~1^{commit}"]).is_some() {
-            run(&self.root, ["reset", "--soft", "HEAD~1"], None)?;
-        } else {
-            run(&self.root, ["update-ref", "-d", "HEAD"], None)?;
+        // 看提交对象里记的父提交，不看 `HEAD~1` 解不解析得出来：浅克隆里父提交不在本地，那不是第一个提交。
+        let raw = run(&self.root, ["cat-file", "commit", "HEAD"], None)?;
+        let raw = String::from_utf8_lossy(&raw);
+        let parent = raw.lines().take_while(|line| !line.is_empty()).find_map(|line| line.strip_prefix("parent "));
+        match parent {
+            Some(parent) => {
+                if git(&self.root, &["cat-file", "-e", &format!("{parent}^{{commit}}")]).is_none() {
+                    return Err(GitError::new("上一个提交不在本地（浅克隆），没有撤销"));
+                }
+                run(&self.root, ["reset", "--soft", parent], None)?;
+            }
+            None => {
+                run(&self.root, ["update-ref", "-d", "HEAD"], None)?;
+            }
         }
         Ok(message)
     }

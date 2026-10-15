@@ -123,7 +123,8 @@ fn keeps_file_names_that_are_not_utf8() {
         let snapshot = read(&repo);
         assert_eq!(snapshot.statuses.get(&path), Some(&FileStatus::Untracked));
         snapshot.repo().stage(std::slice::from_ref(&path)).unwrap();
-        assert_eq!(read(&repo).statuses.get(&path), Some(&FileStatus::Added));
+        // HEAD 里有这个文件（`x`），删除只是暂存了没提交，重新加进来的 `y` 相对 HEAD 是修改。
+        assert_eq!(read(&repo).statuses.get(&path), Some(&FileStatus::Modified));
     }
 }
 
@@ -147,4 +148,31 @@ fn conflicts_are_listed_even_without_a_diff() {
         snapshot.unstaged.iter().map(|file| (file.path.display().to_string(), file.status)).collect();
     assert_eq!(conflicted, [("both.txt".into(), FileStatus::Conflicted), ("gone.txt".into(), FileStatus::Conflicted)]);
     assert!(snapshot.staged.iter().all(|file| file.status != FileStatus::Conflicted), "{:?}", snapshot.staged);
+}
+
+/// `git diff` 失败（这里是暂存区里的 blob 丢了）而 `git status` 照常时，不能当成没有改动、报干净。
+#[test]
+fn a_failing_diff_is_not_a_clean_snapshot() {
+    let repo = TestRepo::new("snapshot-diff-fails");
+    repo.commit_file("a.txt", "one\n", "init");
+    let blob = repo.git(&["rev-parse", ":a.txt"]);
+    fs::remove_file(repo.path().join(".git/objects").join(&blob[..2]).join(&blob[2..])).unwrap();
+    repo.write("a.txt", "two\n");
+    assert_eq!(repo.status(), [" M a.txt"]);
+    assert!(snapshot(repo.path(), &mut UntrackedCache::default()).is_none());
+}
+
+/// 用户配了 `diff.submodule=log` 时子模块换了提交照样列成 gitlink 的改动，不被当成没有改动。
+#[test]
+fn reads_submodule_changes_despite_diff_submodule_log() {
+    let lib = TestRepo::new("snapshot-submodule-log-lib");
+    lib.commit_file("a.txt", "one\n", "init");
+    let repo = TestRepo::new("snapshot-submodule-log");
+    repo.commit_file("top.txt", "top\n", "init");
+    repo.add_submodule(&lib, "lib");
+    repo.git(&["config", "diff.submodule", "log"]);
+    repo.git(&["-C", "lib", "commit", "-q", "--allow-empty", "-m", "next"]);
+    let snapshot = read(&repo);
+    let files: Vec<_> = snapshot.unstaged.iter().map(|file| (file.path.clone(), file.gitlink)).collect();
+    assert_eq!(files, [(PathBuf::from("lib"), true)]);
 }

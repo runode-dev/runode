@@ -186,6 +186,21 @@ fn reads_pending_diff_and_recent_messages() {
     assert!(staged.contains("+three\n") && !staged.contains("new.txt"), "{staged}");
 }
 
+/// 还没有提交时，提交会带上的改动含暂存了的新文件：全部暂存的新文件也不是空的。
+#[test]
+fn pending_diff_before_the_first_commit_includes_staged_files() {
+    let repo = TestRepo::new("ops-pending-unborn");
+    let handle = read(&repo).repo();
+    repo.write("a.txt", "one\n");
+    repo.write("new.txt", "n\n");
+    handle.stage(&paths(&["a.txt"])).unwrap();
+    repo.write("a.txt", "one\ntwo\n");
+    let all = handle.pending_diff(false).unwrap();
+    assert!(all.contains("+++ b/a.txt\n@@ -0,0 +1,2 @@\n+one\n+two\n"), "{all}");
+    assert!(all.ends_with("untracked: new.txt\n"), "{all}");
+    assert_eq!(handle.pending_diff(true).unwrap().matches("+one").count(), 1);
+}
+
 #[test]
 fn commits_and_amends() {
     let repo = TestRepo::new("ops-commit");
@@ -254,6 +269,25 @@ fn undoes_the_last_commit() {
     assert_eq!(repo.git(&["branch", "--show-current"]), "main");
     assert_eq!(repo.status(), ["A  a.txt", "A  b.txt"]);
     assert_eq!(read(&repo).staged.len(), 2);
+}
+
+/// 浅克隆里最新的提交有父提交，只是不在本地：不能当成第一个提交把分支删掉。
+#[test]
+fn refuses_to_undo_a_commit_whose_parent_is_not_local() {
+    let remote = TestRepo::bare("ops-undo-shallow-remote");
+    let upstream = TestRepo::clone_of(&remote, "ops-undo-shallow-upstream");
+    upstream.commit_file("a.txt", "one\n", "first");
+    upstream.commit_file("a.txt", "two\n", "second");
+    upstream.git(&["push", "-q", "origin", "main"]);
+    let repo = TestRepo::new("ops-undo-shallow");
+    fs::remove_dir_all(repo.path().join(".git")).unwrap();
+    let url = format!("file://{}", remote.path().display());
+    repo.git(&["clone", "-q", "--depth", "1", &url, "."]);
+    let head = repo.git(&["rev-parse", "HEAD"]);
+
+    assert!(read(&repo).repo().undo_last_commit().is_err());
+    assert_eq!(repo.git(&["rev-parse", "HEAD"]), head);
+    assert!(repo.status().is_empty(), "{:?}", repo.status());
 }
 
 #[test]

@@ -302,3 +302,29 @@ fn leaves_info_exclude_alone_when_the_worktree_dir_is_ignored() {
     assert_eq!(std::fs::read_to_string(repo.path().join(".git/info/exclude")).unwrap_or_default(), before);
     assert!(repo.status().is_empty(), "{:?}", repo.status());
 }
+
+/// 相对的路径按仓库根算，和 `git worktree add` 一样，也照样写进 info/exclude。
+#[test]
+fn excludes_a_worktree_given_by_a_relative_path() {
+    let repo = TestRepo::new("repos-add-worktree-relative");
+    repo.commit_file("a.txt", "one\n", "init");
+    let handle = runode_git::Repo::open(repo.path()).unwrap();
+
+    handle.add_worktree(std::path::Path::new(".worktrees/new"), "runode/new").unwrap();
+    assert!(repo.path().join(".worktrees/new/a.txt").exists());
+    assert!(repo.status().is_empty(), "{:?}", repo.status());
+}
+
+/// 目录名里的通配符按字面写进 info/exclude：`work[1]` 不能写成匹配 `work1` 的规则。
+#[test]
+fn excludes_worktree_dirs_whose_names_look_like_globs() {
+    let repo = TestRepo::new("repos-add-worktree-glob");
+    repo.commit_file("a.txt", "one\n", "init");
+    let handle = runode_git::Repo::open(repo.path()).unwrap();
+    repo.write("work1/x.txt", "x\n");
+
+    handle.add_worktree(&handle.root.join("work[1]").join("new"), "runode/new").unwrap();
+    assert_eq!(repo.status(), ["?? work1/x.txt"]);
+    let exclude = std::fs::read_to_string(repo.path().join(".git/info/exclude")).unwrap();
+    assert!(exclude.ends_with("/work\\[1\\]/\n"), "{exclude:?}");
+}
