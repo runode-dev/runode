@@ -155,7 +155,8 @@ public final class QuickReplyModel {
         disconnects += 1
         guard !pending.isEmpty else { return }
         pending.removeAll()
-        for text in unsent.values { restoreDraft(text) }
+        // 连着发了几条都没回话时按发出的先后拼回去，只放回一段的话别的就丢了。
+        if !unsent.isEmpty { restoreDraft(unsent.keys.sorted().compactMap { unsent[$0] }.joined(separator: "\n")) }
         unsent.removeAll()
         failedCount += 1
         errorMessage = String(localized: "连接断了，回复可能没送到")
