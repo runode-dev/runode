@@ -11,7 +11,7 @@ use std::{
 
 use crate::{
     Repo, RepoInfo, RepoKind, find_repo, git, info,
-    parse::{expand_tabs, parse_diff, parse_status},
+    parse::{expand_tabs, parse_diff, parse_status, status_sections},
     repos,
 };
 
@@ -91,7 +91,8 @@ pub struct FileDiff {
     pub removed: usize,
     pub hunks: Vec<Hunk>,
     pub binary: bool,
-    /// 改动超过 `MAX_FILE_LINES` 行，或者是没读内容的未跟踪文件，`hunks` 不全。
+    /// 改动超过 `MAX_FILE_LINES` 行，或者是没读内容的未跟踪文件，或者 diff 读不出来、只从 `git status`
+    /// 知道它改了，`hunks` 不全。
     pub truncated: bool,
     /// 是子模块那样记着一个提交号的条目（gitlink），改动是提交号变了。它的内容在子仓库里，
     /// 在这个仓库里只能暂存或撤回暂存，丢不掉，也不能按块操作。
@@ -247,7 +248,7 @@ pub(crate) struct Found {
 
 /// 读根目录是 `root`、git 目录是 `git_dir` 的这一个仓库。未跟踪的目录是嵌套的仓库（比如放在
 /// 仓库里的 worktree），git 不往里看，这里也不读，记进 `Found::children`；`.gitmodules` 里登记
-/// 而且检出了的子模块也记进去。
+/// 而且检出了的子模块也记进去。`git status` 读不出来时为空。
 pub(crate) fn read_repo(
     root: PathBuf,
     git_dir: PathBuf,
@@ -292,11 +293,56 @@ pub(crate) fn read_repo(
         let submodules = submodules.join().unwrap_or_else(|panic| std::panic::resume_unwind(panic));
         (status, staged, unstaged, extra, submodules)
     });
-    // 两段 diff 有一段读不出来时整个仓库算读不出来：当成没有改动的话，会把有改动的仓库报成干净的。
-    let (status, mut unstaged) = (status?, unstaged?);
+    let status = status?;
     let (mut statuses, ignored) = parse_status(&status);
     let (staged, head) = staged;
-    let mut staged = staged?;
+    // 哪一段 diff 读不出来（比如对象库里丢了 blob）就改用 `git status` 列出的文件，只有路径和状态：
+    // 当成没有改动会把有改动的仓库报成干净的，整个仓库当成读不出来又会被当成不在仓库里。
+    // 哪些是 gitlink 以 git 记着的模式为准，不看工作区长什么样：没检出的子模块没有 `.git`，被嵌套仓库
+    // 换掉的普通文件、指向别的仓库的符号链接却像子模块。
+    let listed = |section| {
+        let (staged, unstaged) = status_sections(&status);
+        let index = recorded_gitlinks(repo, None);
+        match section {
+            Section::Staged => {
+                // 暂存了删除的不在暂存区里，看 HEAD 里记的。
+                let removed = staged.iter().any(|file| file.status == FileStatus::Deleted);
+                let head = if removed { recorded_gitlinks(repo, Some("HEAD")) } else { HashMap::new() };
+                staged
+                    .into_iter()
+                    .map(|mut file| {
+                        file.gitlink = index.contains_key(&file.path) || head.contains_key(&file.path);
+                        file
+                    })
+                    .collect::<Vec<_>>()
+            }
+            Section::Unstaged => unstaged
+                .into_iter()
+                .filter_map(|mut file| {
+                    let Some(recorded) = index.get(&file.path) else {
+                        return Some(file);
+                    };
+                    file.gitlink = true;
+                    if file.status == FileStatus::Deleted {
+                        return Some(file);
+                    }
+                    // porcelain v1 分不清子模块是换了提交号还是只是里面有改动：拿子模块检出的提交和
+                    // 暂存区里记的比，不一样才是这个仓库的改动。没检出的子模块换不了提交号；不是目录时
+                    // 不进去问，免得问到外面这个仓库的 HEAD。
+                    let path = repo.join(&file.path);
+                    let checked_out =
+                        fs::symlink_metadata(&path).is_ok_and(|meta| meta.is_dir()) && path.join(".git").exists();
+                    let current = checked_out.then(|| git(&path, &["rev-parse", "--verify", "--quiet", "HEAD"]));
+                    current
+                        .flatten()
+                        .is_some_and(|current| String::from_utf8_lossy(&current).trim() != recorded)
+                        .then_some(file)
+                })
+                .collect::<Vec<_>>(),
+        }
+    };
+    let mut staged = staged.unwrap_or_else(|| listed(Section::Staged));
+    let mut unstaged = unstaged.unwrap_or_else(|| listed(Section::Unstaged));
     let info = info::read(&status, head, &git_dir, extra);
     let mut untracked: Vec<_> =
         statuses.iter().filter(|(_, status)| **status == FileStatus::Untracked).map(|(path, _)| path.clone()).collect();
@@ -373,6 +419,30 @@ pub(crate) fn read_repo(
         info,
     };
     Some(Found { snapshot, children })
+}
+
+/// git 记着的 gitlink（模式 160000）和它记的提交号：`tree` 为空时读暂存区，否则读那棵树。读不出来时为空。
+fn recorded_gitlinks(repo: &Path, tree: Option<&str>) -> HashMap<PathBuf, String> {
+    let output = match tree {
+        None => git(repo, &["ls-files", "--stage", "-z"]),
+        Some(tree) => git(repo, &["ls-tree", "-r", "-z", tree]),
+    };
+    // 暂存区一行是「模式 提交号 阶段\t路径」，树是「模式 类型 提交号\t路径」。
+    let oid_field = if tree.is_some() { 2 } else { 1 };
+    output
+        .unwrap_or_default()
+        .split(|b| *b == 0)
+        .filter_map(|entry| {
+            let tab = entry.iter().position(|b| *b == b'\t')?;
+            let mut fields = entry[..tab].split(|b| *b == b' ');
+            if fields.next()? != b"160000" {
+                return None;
+            }
+            let oid = fields.nth(oid_field - 1)?;
+            let path = PathBuf::from(std::ffi::OsString::from_vec(entry[tab + 1..].to_vec()));
+            Some((path, String::from_utf8_lossy(oid).into_owned()))
+        })
+        .collect()
 }
 
 /// 未跟踪的文件当作整个新增；`read` 为假或者文件太大时不读内容。大小和修改时间都没变时

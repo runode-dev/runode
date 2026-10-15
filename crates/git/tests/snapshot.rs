@@ -150,16 +150,105 @@ fn conflicts_are_listed_even_without_a_diff() {
     assert!(snapshot.staged.iter().all(|file| file.status != FileStatus::Conflicted), "{:?}", snapshot.staged);
 }
 
-/// `git diff` 失败（这里是暂存区里的 blob 丢了）而 `git status` 照常时，不能当成没有改动、报干净。
+/// `git diff` 失败（这里是对象库里的 blob 丢了）而 `git status` 照常时，不能当成没有改动、报干净，也不能
+/// 当成不在仓库里：读不出来的那一段改用 `git status` 列出的文件，只有路径和状态；读得出来的那一段照常。
 #[test]
-fn a_failing_diff_is_not_a_clean_snapshot() {
+fn a_failing_diff_falls_back_to_the_status() {
     let repo = TestRepo::new("snapshot-diff-fails");
     repo.commit_file("a.txt", "one\n", "init");
+    repo.commit_file("b.txt", "b\n", "second");
     let blob = repo.git(&["rev-parse", ":a.txt"]);
-    fs::remove_file(repo.path().join(".git/objects").join(&blob[..2]).join(&blob[2..])).unwrap();
+    let object = |blob: &str| repo.path().join(".git/objects").join(&blob[..2]).join(&blob[2..]);
+    fs::remove_file(object(&blob)).unwrap();
     repo.write("a.txt", "two\n");
-    assert_eq!(repo.status(), [" M a.txt"]);
-    assert!(snapshot(repo.path(), &mut UntrackedCache::default()).is_none());
+    repo.write("b.txt", "bb\n");
+    repo.git(&["add", "b.txt"]);
+    repo.write("new.txt", "new\n");
+    assert_eq!(repo.status(), [" M a.txt", "M  b.txt", "?? new.txt"]);
+    let snapshot = snapshot(repo.path(), &mut UntrackedCache::default()).expect("还在仓库里");
+    let files = |files: &[runode_git::FileDiff]| -> Vec<_> {
+        files.iter().map(|file| (file.path.to_string_lossy().into_owned(), file.status, file.truncated)).collect()
+    };
+    assert_eq!(files(&snapshot.staged), [("b.txt".to_owned(), FileStatus::Modified, false)]);
+    assert_eq!(
+        files(&snapshot.unstaged),
+        [("a.txt".to_owned(), FileStatus::Modified, true), ("new.txt".to_owned(), FileStatus::Untracked, false)]
+    );
+
+    // 暂存段读不出来（HEAD 里的旧版本丢了）时一样，改名带着原来的路径。
+    let old = repo.git(&["rev-parse", "HEAD:b.txt"]);
+    fs::remove_file(object(&old)).unwrap();
+    repo.git(&["mv", "a.txt", "moved.txt"]);
+    assert_eq!(repo.status(), ["M  b.txt", "RM a.txt -> moved.txt", "?? new.txt"]);
+    let snapshot = read(&repo);
+    assert_eq!(
+        files(&snapshot.staged),
+        [("b.txt".to_owned(), FileStatus::Modified, true), ("moved.txt".to_owned(), FileStatus::Renamed, true)]
+    );
+    assert_eq!(snapshot.staged[1].old_path.as_deref(), Some(Path::new("a.txt")));
+    assert_eq!(
+        files(&snapshot.unstaged),
+        [("moved.txt".to_owned(), FileStatus::Modified, true), ("new.txt".to_owned(), FileStatus::Untracked, false)]
+    );
+}
+
+/// 暂存段的 diff 读不出来时，暂存了的子模块提交号照样列出来；未暂存段分不清子模块是换了提交号还是
+/// 只是里面有改动，不列。
+#[test]
+fn a_failing_diff_keeps_a_staged_submodule() {
+    let lib = TestRepo::new("snapshot-diff-fails-lib");
+    lib.commit_file("a.txt", "one\n", "init");
+    let repo = TestRepo::new("snapshot-diff-fails-submodule");
+    repo.commit_file("top.txt", "top\n", "init");
+    repo.add_submodule(&lib, "lib");
+    let old = repo.git(&["rev-parse", "HEAD:top.txt"]);
+    fs::remove_file(repo.path().join(".git/objects").join(&old[..2]).join(&old[2..])).unwrap();
+    repo.write("top.txt", "changed\n");
+    repo.git(&["-C", "lib", "commit", "-q", "--allow-empty", "-m", "next"]);
+    repo.git(&["add", "top.txt", "lib"]);
+    repo.git(&["-C", "lib", "commit", "-q", "--allow-empty", "-m", "again"]);
+    assert_eq!(repo.status(), ["MM lib", "M  top.txt"]);
+    let snapshot = read(&repo);
+    let files = |files: &[runode_git::FileDiff]| -> Vec<_> {
+        files.iter().map(|file| (file.path.to_string_lossy().into_owned(), file.gitlink, file.truncated)).collect()
+    };
+    assert_eq!(files(&snapshot.staged), [("lib".to_owned(), true, true), ("top.txt".to_owned(), false, true)]);
+    // 未暂存段读得出来，子模块又换了提交号，照常列出。
+    assert_eq!(files(&snapshot.unstaged), [("lib".to_owned(), true, false)]);
+}
+
+/// 未暂存段的 diff 读不出来时，子模块按检出的提交和暂存区记的比：换了提交号的列出来，只是里面有改动的
+/// 不列；没检出的子模块暂存了提交号，照样认成 gitlink，不当成普通文件。
+#[test]
+fn a_failing_unstaged_diff_tells_submodule_commits_from_dirt() {
+    let lib = TestRepo::new("snapshot-unstaged-fails-lib");
+    lib.commit_file("a.txt", "one\n", "init");
+    let repo = TestRepo::new("snapshot-unstaged-fails");
+    repo.commit_file("top.txt", "top\n", "init");
+    repo.add_submodule(&lib, "lib");
+    repo.add_submodule(&lib, "dirty");
+    // 暂存区里 top.txt 的 blob 丢了，工作区又改了它：未暂存段读不出来。
+    repo.write("top.txt", "staged\n");
+    repo.git(&["add", "top.txt"]);
+    let blob = repo.git(&["rev-parse", ":top.txt"]);
+    fs::remove_file(repo.path().join(".git/objects").join(&blob[..2]).join(&blob[2..])).unwrap();
+    repo.write("top.txt", "changed\n");
+    repo.git(&["-C", "lib", "commit", "-q", "--allow-empty", "-m", "next"]);
+    repo.write("dirty/a.txt", "dirty\n");
+    let snapshot = read(&repo);
+    let files = |files: &[runode_git::FileDiff]| -> Vec<_> {
+        files.iter().map(|file| (file.path.to_string_lossy().into_owned(), file.gitlink)).collect()
+    };
+    assert_eq!(files(&snapshot.unstaged), [("lib".to_owned(), true), ("top.txt".to_owned(), false)]);
+
+    // 暂存段也读不出来（HEAD 里 top.txt 的 blob 也丢了），没检出的子模块暂存了换过的提交号。
+    let old = repo.git(&["rev-parse", "HEAD:top.txt"]);
+    fs::remove_file(repo.path().join(".git/objects").join(&old[..2]).join(&old[2..])).unwrap();
+    repo.git(&["submodule", "deinit", "-q", "-f", "dirty"]);
+    let next = repo.git(&["-C", "lib", "rev-parse", "HEAD"]);
+    repo.git(&["update-index", "--cacheinfo", &format!("160000,{next},dirty")]);
+    let snapshot = read(&repo);
+    assert_eq!(files(&snapshot.staged), [("dirty".to_owned(), true), ("top.txt".to_owned(), false)]);
 }
 
 /// 用户配了 `diff.submodule=log` 时子模块换了提交照样列成 gitlink 的改动，不被当成没有改动。

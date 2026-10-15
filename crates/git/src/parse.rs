@@ -44,6 +44,49 @@ pub(crate) fn parse_status(output: &[u8]) -> (HashMap<PathBuf, FileStatus>, Vec<
     (statuses, ignored)
 }
 
+/// 从 `git status --porcelain=v1 -z` 的输出里列出暂存段和未暂存段各有改动的文件，只有路径和状态，
+/// 没有逐行改动（标成 `truncated`）。读 diff 失败（比如对象库里丢了 blob）时拿它顶上。未跟踪、
+/// 被忽略和冲突的文件不在里面，由调用方照常另加。
+pub(crate) fn status_sections(output: &[u8]) -> (Vec<FileDiff>, Vec<FileDiff>) {
+    let side = |code| match code {
+        b' ' | b'?' | b'!' => None,
+        b'A' | b'C' => Some(FileStatus::Added),
+        b'D' => Some(FileStatus::Deleted),
+        b'R' => Some(FileStatus::Renamed),
+        _ => Some(FileStatus::Modified),
+    };
+    let (mut staged, mut unstaged) = (Vec::new(), Vec::new());
+    let mut fields = output.split(|b| *b == 0).filter(|field| !field.is_empty());
+    while let Some(field) = fields.next() {
+        if field.len() < 4 || field.starts_with(b"## ") {
+            continue;
+        }
+        let (x, y) = (field[0], field[1]);
+        let path = PathBuf::from(OsStr::from_bytes(field[3..].strip_suffix(b"/").unwrap_or(&field[3..])));
+        let old_path = (matches!(x, b'R' | b'C') || matches!(y, b'R' | b'C'))
+            .then(|| fields.next().map(|old| PathBuf::from(OsStr::from_bytes(old))))
+            .flatten();
+        if matches!((x, y), (b'U', _) | (_, b'U') | (b'A', b'A') | (b'D', b'D')) {
+            continue;
+        }
+        for (code, files) in [(x, &mut staged), (y, &mut unstaged)] {
+            let Some(status) = side(code) else { continue };
+            files.push(FileDiff {
+                path: path.clone(),
+                old_path: old_path.clone().filter(|_| status == FileStatus::Renamed),
+                status,
+                added: 0,
+                removed: 0,
+                hunks: Vec::new(),
+                binary: false,
+                truncated: true,
+                gitlink: false,
+            });
+        }
+    }
+    (staged, unstaged)
+}
+
 /// 解析 `git diff` 的统一格式输出。
 pub(crate) fn parse_diff(text: &str) -> Vec<FileDiff> {
     let mut files: Vec<FileDiff> = Vec::new();
