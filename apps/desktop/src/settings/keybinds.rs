@@ -243,9 +243,14 @@ fn remove_user_line(values: &mut Vec<String>, ix: usize, trigger: &str) {
 
 /// 把配置文件里自己写的第 `ix` 行 `keybind`（触发键是 `old`）换成触发键 `trigger`：删掉原来那行，新的接在
 /// 最后。旧键上露出别的绑定时（默认的一样的或别的动作、文件里前面绑着它的行）再写一行解绑，和换掉默认的
-/// 绑定一样旧键空出来，不把录这个键时抢过来的又还回去。那一行不在了或写错了时什么也不改，返回 false。
+/// 绑定一样旧键空出来，不把录这个键时抢过来的又还回去。那一行不在了、写错了或者已经不是 `old` 的（录键
+/// 期间文件被改过，行号挪了）时什么也不改，返回 false。
 fn replace_user_line(values: &mut Vec<String>, ix: usize, old: &str, trigger: &str) -> bool {
-    let Some(new) = values.get(ix).and_then(|value| split(value)).map(|(_, name, param)| join(trigger, name, param))
+    let Some(new) = values
+        .get(ix)
+        .and_then(|value| split(value))
+        .filter(|(current, ..)| *current == old.trim())
+        .map(|(_, name, param)| join(trigger, name, param))
     else {
         return false;
     };
@@ -420,6 +425,8 @@ impl SettingsView {
         let cleared = values.iter().any(|value| value == "clear");
         let title = rust_i18n::t!("settings.keybind.use_defaults").into_owned();
         let defaults = Switch::new("use-defaults", title.clone(), !cleared).on_press(cx, move |this, _, cx| {
+            // 录着的键记的是行号，这里在最前面加删一行会让它对不上。
+            this.keybinds.stop_recording();
             let mut values = this.file.values(KEY);
             if cleared {
                 values.retain(|value| value != "clear");
@@ -726,6 +733,11 @@ mod tests {
         assert!(!replace_user_line(&mut values, 0, "cmd+t", "ctrl+t"));
         assert!(!replace_user_line(&mut values, 3, "cmd+t", "ctrl+t"));
         assert_eq!(values, lines(&["clear"]));
+
+        // 录键期间文件前面多了一行，记着的行号指到了别的绑定上：不动。
+        let mut values = lines(&["clear", "cmd+t=new_tab", "ctrl+y=new_window"]);
+        assert!(!replace_user_line(&mut values, 1, "ctrl+y", "ctrl+t"));
+        assert_eq!(values, lines(&["clear", "cmd+t=new_tab", "ctrl+y=new_window"]));
     }
 
     /// 换掉或去掉管 1 到 9 的一行（自己写的或默认的）时，后面单独盖过其中一个数字的行照旧生效，解绑只解开
