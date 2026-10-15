@@ -10,3 +10,4 @@
 xcuserdata/
 /.playwright-cli/
 /docs/spec/
+/.claude/settings.local.json
