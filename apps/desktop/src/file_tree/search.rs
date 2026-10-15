@@ -385,6 +385,16 @@ fn snippet(text: &str, matcher: Option<&Regex>) -> (String, Option<Range<usize>>
     (format!("{prefix}{}", &text[start..end]), hit)
 }
 
+/// 交给搜索的词：按名称找时去掉两头的空白；按内容找时原样搜，搜 `fn ` 不变成搜 `fn`，只有整串都是空白时
+/// 当作没输入，和 `FileTree::searching` 一致。
+fn search_query(mode: SearchMode, text: &str) -> String {
+    match mode {
+        SearchMode::Name => text.trim().to_owned(),
+        SearchMode::Content if text.trim().is_empty() => String::new(),
+        SearchMode::Content => text.to_owned(),
+    }
+}
+
 fn found(root: &Path, rel: PathBuf, lines: Vec<FoundLine>) -> Found {
     let name = rel.file_name().unwrap_or(rel.as_os_str()).to_string_lossy().into_owned();
     let dir = rel.parent().map(|dir| dir.to_string_lossy().into_owned()).unwrap_or_default();
@@ -450,7 +460,7 @@ impl FileTree {
             SearchMode::Name => SearchOptions::default(),
             SearchMode::Content => search.options(cx),
         };
-        let query = search.field.read(cx).query().trim().to_owned();
+        let query = search_query(search.mode, search.field.read(cx).query());
         let key = SearchKey { root: self.files_root(), query, mode: search.mode, options };
         let search = &mut self.search;
         cx.notify();
@@ -1038,6 +1048,15 @@ mod tests {
         let (text, hit) = snippet(&long, Some(&literal("needle")));
         assert!(text.starts_with('…'));
         assert_eq!(&text[hit.unwrap()], "needle");
+    }
+
+    #[test]
+    fn content_search_keeps_spaces_in_the_query() {
+        assert_eq!(search_query(SearchMode::Content, "fn "), "fn ");
+        assert_eq!(search_query(SearchMode::Content, " a b "), " a b ");
+        assert_eq!(search_query(SearchMode::Content, "  \t"), "");
+        assert_eq!(search_query(SearchMode::Name, " main.rs "), "main.rs");
+        assert_eq!(search_query(SearchMode::Name, "   "), "");
     }
 }
 
