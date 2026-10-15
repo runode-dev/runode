@@ -168,14 +168,13 @@ impl WindowView {
                 self.preview_files_changed(&paths, cx);
             }
         }
-        // 分支、tag 变了时图表重读；工作区里的文件变了不重读。
-        if self.git_shown() {
-            let id = self.workspace().id;
-            if everything {
-                self.with_git_panel(cx, |panel, cx| panel.all_refs_changed(id, cx));
-            } else {
-                self.with_git_panel(cx, |panel, cx| panel.refs_changed(id, &paths, cx));
-            }
+        // 分支、tag 变了时图表重读；工作区里的文件变了不重读。Git 页收着时也要标：读过的图表留着，切回来时
+        // 只看这个标记决定重不重读。
+        let id = self.workspace().id;
+        if everything {
+            self.with_git_panel(cx, |panel, cx| panel.all_refs_changed(id, cx));
+        } else {
+            self.with_git_panel(cx, |panel, cx| panel.refs_changed(id, &paths, cx));
         }
         let Some(watch) = &self.project_watch else {
             return;
