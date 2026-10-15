@@ -838,7 +838,7 @@ impl FileTree {
                             .min_w_0()
                             .pl(px(2.))
                             .truncate()
-                            .text_size(px(font_size - 1.))
+                            .text_size(FontSize::Body)
                             .text_color(dim)
                             .when(!search.tree, |item| item.child(found.dir.clone())),
                     )
@@ -864,7 +864,7 @@ impl FileTree {
                             .w(px(gutter))
                             .flex()
                             .justify_end()
-                            .text_size(px(font_size - 1.))
+                            .text_size(FontSize::Body)
                             .text_color(dim)
                             .child(line.line.to_string()),
                     )

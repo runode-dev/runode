@@ -30,7 +30,6 @@ use crate::{
 actions!(runode, [SearchNext, SearchPrevious, EndSearch]);
 
 const CARET_WIDTH: Pixels = px(1.5);
-const CARET_HEIGHT: Pixels = px(14.);
 /// 撤销最多能退回的步数。
 const UNDO_LIMIT: usize = 100;
 
@@ -866,11 +865,13 @@ impl Element for InputText {
                 style.color.opacity(0.3),
             )
         });
+        // 光标跟着字高走（同多行输入框），界面字号改了也装得下字。
+        let caret_height = (font_size * 1.25).min(window.line_height());
         let caret = field.selected.is_empty().then(|| {
             fill(
                 Bounds::new(
-                    point(x(field.cursor()), bounds.center().y - CARET_HEIGHT / 2.),
-                    size(CARET_WIDTH, CARET_HEIGHT),
+                    point(x(field.cursor()), bounds.center().y - caret_height / 2.),
+                    size(CARET_WIDTH, caret_height),
                 ),
                 style.color,
             )

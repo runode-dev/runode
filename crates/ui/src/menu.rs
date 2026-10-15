@@ -22,6 +22,7 @@ use crate::{
 const MENU_MARGIN: f32 = 8.;
 /// 按钮下面弹出的菜单离按钮这么远。
 const DROPDOWN_GAP: f32 = 4.;
+/// 菜单的宽度，按基准字号 12 的点数写，跟界面字号一起缩放。
 const MENU_WIDTH: f32 = 240.;
 
 /// 菜单里的一项：点了把 `action` 派发给菜单的 `target`，和按快捷键走同一条路；没有 `action` 的
@@ -486,7 +487,7 @@ pub trait MenuHost: Sized + 'static {
             .track_focus(&menu.focus)
             .on_key_down(cx.listener(Self::menu_key))
             .track_scroll(&menu.scroll)
-            .w(px(MENU_WIDTH))
+            .w(scaled(MENU_WIDTH))
             .max_h(px(max_height))
             .overflow_y_scroll()
             .py(px(4.))
