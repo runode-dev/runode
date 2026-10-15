@@ -265,3 +265,25 @@ fn reads_submodule_changes_despite_diff_submodule_log() {
     let files: Vec<_> = snapshot.unstaged.iter().map(|file| (file.path.clone(), file.gitlink)).collect();
     assert_eq!(files, [(PathBuf::from("lib"), true)]);
 }
+
+/// 用户配了 `diff.suppressBlankEmpty=true` 时空的上下文行照样计进行号，后面的行号不往前错一行。
+#[test]
+fn counts_blank_context_lines_despite_suppress_blank_empty() {
+    let repo = TestRepo::new("snapshot-suppress-blank-empty");
+    repo.commit_file("a.txt", "a\n\nb\nc\n", "init");
+    repo.git(&["config", "diff.suppressBlankEmpty", "true"]);
+    repo.write("a.txt", "a\n\nb\nC\n");
+    let snapshot = read(&repo);
+    let lines: Vec<_> =
+        snapshot.unstaged[0].hunks[0].lines.iter().map(|line| (line.old, line.new, line.text.as_str())).collect();
+    assert_eq!(
+        lines,
+        [
+            (Some(1), Some(1), "a"),
+            (Some(2), Some(2), ""),
+            (Some(3), Some(3), "b"),
+            (Some(4), None, "c"),
+            (None, Some(4), "C"),
+        ]
+    );
+}
