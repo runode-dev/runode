@@ -475,7 +475,9 @@ impl Repo {
         if !has_head(&self.root) {
             return Ok(Vec::new());
         }
-        let log = run(&self.root, ["log".to_owned(), format!("-{limit}"), "--format=%B%x00".to_owned()], None)?;
+        // 关掉 `log.showSignature`：用户开了它时签过名的提交前面多出校验结果，混进说明里。
+        let count = format!("-{limit}");
+        let log = run(&self.root, ["-c", "log.showSignature=false", "log", &count, "--format=%B%x00"], None)?;
         let log = String::from_utf8_lossy(&log);
         Ok(log.split('\0').map(str::trim).filter(|message| !message.is_empty()).map(str::to_owned).collect())
     }
@@ -505,7 +507,8 @@ impl Repo {
         let id = git(&self.root, &["rev-parse", "--verify", "--quiet", &target])
             .map(|id| String::from_utf8_lossy(&id).trim().to_owned())
             .ok_or_else(|| GitError::new("还没有提交，没有可撤销的"))?;
-        let message = run(&self.root, ["log", "-1", "--format=%B", &id], None)?;
+        // 同 `recent_messages`，关掉 `log.showSignature`，签名的校验结果不混进填回输入框的说明。
+        let message = run(&self.root, ["-c", "log.showSignature=false", "log", "-1", "--format=%B", &id], None)?;
         let message = String::from_utf8_lossy(&message).trim_end().to_owned();
         // 看提交对象里记的父提交，不看 `HEAD~1` 解不解析得出来：浅克隆里父提交不在本地，那不是第一个提交。
         let raw = run(&self.root, ["cat-file", "commit", &id], None)?;

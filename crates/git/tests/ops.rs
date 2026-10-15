@@ -5,6 +5,7 @@ mod common;
 use std::{
     fs,
     path::{Path, PathBuf},
+    process::Command,
 };
 
 use common::{TestRepo, read, read_all};
@@ -289,6 +290,30 @@ fn undoes_the_last_commit() {
     assert_eq!(repo.git(&["branch", "--show-current"]), "main");
     assert_eq!(repo.status(), ["A  a.txt", "A  b.txt"]);
     assert_eq!(read(&repo).staged.len(), 2);
+}
+
+/// 用户开了 `log.showSignature`、提交签过名时，读出的说明不混进签名的校验结果（这里没配信任的
+/// 公钥，git 在说明前面写一行 `No signature`）。签名用 SSH 密钥，机器上没有 `ssh-keygen` 时不测。
+#[test]
+fn messages_skip_signature_checks() {
+    let repo = TestRepo::new("ops-signed");
+    let key = repo.path().join(".git/test-signing-key");
+    let keygen = Command::new("ssh-keygen").args(["-q", "-t", "ed25519", "-N", "", "-f"]).arg(&key).output();
+    if !keygen.is_ok_and(|output| output.status.success()) {
+        return;
+    }
+    repo.git(&["config", "gpg.format", "ssh"]);
+    repo.git(&["config", "user.signingkey", key.to_str().unwrap()]);
+    repo.git(&["config", "log.showSignature", "true"]);
+    repo.commit_file("a.txt", "one\n", "first");
+    repo.write("b.txt", "b\n");
+    repo.git(&["add", "b.txt"]);
+    repo.git(&["commit", "-q", "-S", "-m", "second\n\nbody"]);
+    // 前提：签了名，没关 `log.showSignature` 时说明前面确实多出东西，否则这条测不到什么。
+    assert_ne!(repo.git(&["log", "-1", "--format=%B"]), "second\n\nbody");
+    let handle = read(&repo).repo();
+    assert_eq!(handle.recent_messages(5).unwrap(), ["second\n\nbody", "first"]);
+    assert_eq!(handle.undo_last_commit().unwrap(), "second\n\nbody");
 }
 
 /// 浅克隆里最新的提交有父提交，只是不在本地：不能当成第一个提交把分支删掉。
