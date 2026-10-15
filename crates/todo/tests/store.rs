@@ -142,6 +142,30 @@ fn firing_a_schedule_follows_what_the_database_says_now() {
     assert_eq!(store.list_todos(10_000).unwrap().len(), 2);
 }
 
+/// 跳过这一次也照库里现在的样子办：改过、已经到过的不拿旧的到点时刻盖掉，一次性的跳过就删掉。
+#[test]
+fn skipping_a_schedule_follows_what_the_database_says_now() {
+    let mut store = Store::open(&temp_db("skip")).unwrap();
+    let every = store.add_schedule(&spec("poll"), &When::Every { minutes: 1 }, 100).unwrap();
+    let once = store.add_schedule(&spec("deploy"), &When::Once { at: 200 }, 100).unwrap();
+
+    assert!(!store.skip_schedule(&every, 150).unwrap());
+    assert!(store.skip_schedule(&every, 160).unwrap());
+    assert_eq!(store.list_schedules().unwrap()[0].last_fired, 160);
+    // 决定跳过以后被改了时间（从改的时刻重新算起）：按旧的样子到点的这次不记。
+    assert!(store.update_schedule(&every, None, Some(&When::Every { minutes: 10 }), 300).unwrap());
+    assert!(!store.skip_schedule(&every, 400).unwrap());
+    assert_eq!(store.list_schedules().unwrap()[0].last_fired, 300);
+
+    // 一次性的挪到以后了：不删。到了点再跳过就删掉，删掉了的什么都不做。
+    assert!(store.update_schedule(&once, None, Some(&When::Once { at: 1_000 }), 300).unwrap());
+    assert!(!store.skip_schedule(&once, 400).unwrap());
+    assert!(store.skip_schedule(&once, 1_000).unwrap());
+    assert!(!store.skip_schedule(&once, 1_000).unwrap());
+    assert_eq!(store.list_schedules().unwrap().iter().map(|s| s.id.as_str()).collect::<Vec<_>>(), [every.as_str()]);
+    assert!(store.list_todos(1_000).unwrap().is_empty());
+}
+
 #[test]
 fn a_schedule_that_fails_to_add_its_todo_is_left_as_it_was() {
     let path = temp_db("fire-fails");

@@ -183,6 +183,26 @@ fn insert_todo(tx: &Transaction<'_>, spec: &TodoSpec, now: u64, schedule: Option
     Ok(id)
 }
 
+/// 在 `tx` 里读定时 `id` 现在的样子，照它到了点（`now` 不早于下一次到点）时返回；已经删掉了、还没到点时为空。
+fn due_schedule(tx: &Transaction<'_>, id: &str, now: u64) -> Result<Option<Schedule>> {
+    let current = tx
+        .query_row(&format!("SELECT {SCHEDULE_COLUMNS} FROM schedules WHERE id = ?1"), [id], schedule)
+        .optional()
+        .map_err(failed)?;
+    Ok(current.filter(|current| crate::next_fire(&current.when, current.last_fired).is_some_and(|at| at <= now)))
+}
+
+/// 在 `tx` 里记下定时 `current` 在 `now` 到了点：一次性的删掉，别的记下到点的时刻。
+fn mark_fired(tx: &Transaction<'_>, current: &Schedule, now: u64) -> Result<()> {
+    if matches!(current.when, When::Once { .. }) {
+        tx.execute("DELETE FROM schedules WHERE id = ?1", [&current.id]).map_err(failed)?;
+    } else {
+        tx.execute("UPDATE schedules SET last_fired = ?2 WHERE id = ?1", params![current.id, now as i64])
+            .map_err(failed)?;
+    }
+    Ok(())
+}
+
 /// `when` 拆成表里的几列：种类，以及 `at`、`hour`、`minute`、`days`、`minutes`。存不下的时刻报错：转成负数存进去
 /// 会读回成 0，定时就再也不到点了。
 fn when_columns(when: &When) -> Result<(&'static str, [Option<i64>; 5])> {
@@ -464,28 +484,29 @@ impl Store {
     /// 以后被改过）时什么都不做，为空。返回新任务的标识。
     pub fn fire_schedule(&mut self, id: &str, now: u64) -> Result<Option<String>> {
         let tx = self.conn.transaction().map_err(failed)?;
-        let Some(current) = tx
-            .query_row(&format!("SELECT {SCHEDULE_COLUMNS} FROM schedules WHERE id = ?1"), [id], schedule)
-            .optional()
-            .map_err(failed)?
-        else {
+        let Some(current) = due_schedule(&tx, id, now)? else {
             return Ok(None);
         };
-        if !crate::next_fire(&current.when, current.last_fired).is_some_and(|at| at <= now) {
-            return Ok(None);
-        }
         let todo = insert_todo(&tx, &current.spec, now, Some(id))?;
-        if matches!(current.when, When::Once { .. }) {
-            tx.execute("DELETE FROM schedules WHERE id = ?1", [id]).map_err(failed)?;
-        } else {
-            tx.execute("UPDATE schedules SET last_fired = ?2 WHERE id = ?1", params![id, now as i64])
-                .map_err(failed)?;
-        }
+        mark_fired(&tx, &current, now)?;
         tx.commit().map_err(failed)?;
         Ok(Some(todo))
     }
 
-    /// 记下定时到点了、这次跳过，不开任务。
+    /// 定时 `id` 到点了、这次跳过（比如上次开出的任务还在干活），不开任务：记下到点的时刻（一次性的删掉）。
+    /// 和 `fire_schedule` 一样照库里它现在的样子、在一个事务里办：决定跳过以后它可能被改过、被别处触发过，
+    /// 照现在的样子已经没了、或者还没到点时什么都不做，为假，不拿旧的到点时刻盖掉新的。
+    pub fn skip_schedule(&mut self, id: &str, now: u64) -> Result<bool> {
+        let tx = self.conn.transaction().map_err(failed)?;
+        let Some(current) = due_schedule(&tx, id, now)? else {
+            return Ok(false);
+        };
+        mark_fired(&tx, &current, now)?;
+        tx.commit().map_err(failed)?;
+        Ok(true)
+    }
+
+    /// 记下定时到点了、这次跳过，不开任务。不看它现在到没到点，宿主跳过时用 `skip_schedule`。
     pub fn set_fired(&self, id: &str, at: u64) -> Result<()> {
         self.conn
             .execute("UPDATE schedules SET last_fired = ?2 WHERE id = ?1", params![id, at as i64])
