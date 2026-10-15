@@ -627,7 +627,7 @@ impl WindowView {
     }
 
     /// 关掉第 `ix` 个 workspace，里面的终端都随之结束；关掉的是当前 workspace 时切到下面那个
-    /// （没有就上面）。最后一个关掉时关窗口。
+    /// （没有就上面），关的是别的时当前的照旧显示。最后一个关掉时关窗口。
     fn close_workspace_at(&mut self, ix: usize, window: &mut Window, cx: &mut Context<Self>) {
         self.end_sessions(Closing::Workspace(ix), cx);
         if self.renaming.as_ref().is_some_and(|renaming| renaming.id == self.workspaces[ix].id) {
@@ -643,8 +643,15 @@ impl WindowView {
         self.forget_previews(id, cx);
         self.file_tree.update(cx, |tree, _| tree.forget_workspace(id));
         self.git_panel.update(cx, |panel, _| panel.forget_workspace(id));
-        let active =
-            if ix < self.active || self.active == self.workspaces.len() { self.active - 1 } else { self.active };
+        // 关的是别的 workspace 时只把下标挪到原来那个上：再切一遍会收掉正在看的手机引导页、任务板，抢走
+        // 焦点，还把没看过的结果标成看过。
+        if ix != self.active {
+            self.active = closed_index(self.active, ix);
+            self.save(cx);
+            cx.notify();
+            return;
+        }
+        let active = if self.active == self.workspaces.len() { self.active - 1 } else { self.active };
         self.activate_workspace(active, window, cx);
     }
 
@@ -750,6 +757,13 @@ pub(super) fn sessions_to_end<T: Copy + PartialEq>(layout: &[Vec<Vec<T>>], closi
     }
 }
 
+/// 关掉另一个（第 `closed` 个）workspace 后，原来第 `active` 个的当前 workspace 在第几个：关的在它前面时
+/// 往前挪一个。
+fn closed_index(active: usize, closed: usize) -> usize {
+    debug_assert_ne!(active, closed);
+    if closed < active { active - 1 } else { active }
+}
+
 /// 把第 `ix` 个标签滚进标签条，连同两边各一个邻居一起露出来：点挤在边上的标签，标签条把它滚到
 /// 正中，一次往那边多露出几个，看得到后面还有什么。按上一帧排好的位置算；标签数对不上（刚开、刚关）
 /// 时退回只露出它自己。
@@ -811,6 +825,15 @@ mod tests {
         assert_eq!(sessions_to_end(&layout(), Closing::Tab { workspace: 0, tab: 0 }), [1, 2]);
         assert_eq!(sessions_to_end(&layout(), Closing::Tab { workspace: 1, tab: 0 }), [4]);
         assert_eq!(sessions_to_end(&layout(), Closing::Tab { workspace: 1, tab: 1 }), NONE);
+    }
+
+    #[test]
+    fn closing_another_workspace_keeps_the_current_one() {
+        // 关的在当前的前面，当前的往前挪一个；在后面时不动。
+        assert_eq!(closed_index(2, 0), 1);
+        assert_eq!(closed_index(1, 0), 0);
+        assert_eq!(closed_index(0, 1), 0);
+        assert_eq!(closed_index(1, 3), 1);
     }
 
     #[test]
