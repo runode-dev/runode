@@ -86,6 +86,12 @@ pub fn load(path: &Path) -> Content {
             }
         };
     }
+    // 文本同样只读普通文件：打开没有写端的命名管道会一直阻塞，读的上限救不了。
+    match fs::metadata(path) {
+        Err(err) => return Content::Unreadable(err.to_string()),
+        Ok(meta) if !meta.is_file() => return Content::Unreadable("not a regular file".to_owned()),
+        Ok(_) => {}
+    }
     let mut bytes = Vec::new();
     // 多读一个字节，读满了就说明后面还有。
     let read = File::open(path).and_then(|file| file.take(MAX_TEXT_BYTES as u64 + 1).read_to_end(&mut bytes));

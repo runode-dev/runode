@@ -467,6 +467,8 @@ struct Builder<'a> {
     slugs: Slugger,
     /// 被引用过的脚注标签（小写），按第一次引用的先后排，位置加一就是编号。
     footnote_refs: Vec<String>,
+    /// 脚注标签到编号（从 1 数）：几万个脚注时在 `footnote_refs` 里逐个找是二次方的。
+    footnote_numbers: HashMap<String, usize>,
     /// 收到的脚注定义，标签（小写）对内容；同名的只要第一个。
     footnote_defs: HashMap<String, Vec<Block>>,
 }
@@ -495,10 +497,11 @@ impl Builder<'_> {
             Event::InlineHtml(text) => self.html(&text, false),
             Event::FootnoteReference(label) => {
                 let label = label.to_lowercase();
-                let number = match self.footnote_refs.iter().position(|known| *known == label) {
-                    Some(ix) => ix + 1,
+                let number = match self.footnote_numbers.get(&label) {
+                    Some(number) => *number,
                     None => {
                         self.footnote_refs.push(label.clone());
+                        self.footnote_numbers.insert(label.clone(), self.footnote_refs.len());
                         self.footnote_refs.len()
                     }
                 };
