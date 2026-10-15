@@ -171,12 +171,19 @@ impl Element for TextareaText {
                 .unwrap_or_default()
         });
 
-        // 竖向滚动：光标动过时滚到它露出来，内容变短时也别在下面留空。
+        // 竖向滚动：光标动过时滚到它露出来，内容变短时也别在下面留空。折行宽度、行高或输入框高度变了
+        // （窄了窗口、改了字号）时重新折过的行多出来，有焦点时光标也跟着露出来；尺寸没变时不动，滚轮
+        // 滚开的位置照留。
         let cursor = area.cursor();
         let caret_row = row_at(&rows, cursor, area.upstream);
         let max_scroll = (line_height * rows.len() - bounds.size.height).max(px(0.));
         let mut scroll_y = area.scroll_y;
-        if area.autoscroll {
+        let resized = area.metrics.as_ref().is_some_and(|metrics| {
+            metrics.wrap_width != wrap_width
+                || metrics.line_height != line_height
+                || metrics.bounds.size.height != bounds.size.height
+        });
+        if area.autoscroll || (resized && area.focus_handle.is_focused(window)) {
             let top = line_height * caret_row;
             if top < scroll_y {
                 scroll_y = top;

@@ -13,6 +13,8 @@ runode-paths.workspace = true
 runode-types.workspace = true
 gpui.workspace = true
 tracing.workspace = true
+# 输入框按字位簇挪光标、删字。
+unicode-segmentation.workspace = true
 
 # 提示音用 NSSound 按名字播放系统声音。
 [target.'cfg(target_os = "macos")'.dependencies]

@@ -176,8 +176,9 @@ impl Menu {
                 (None, false) => n - step,
             })
             .find(|&ix| self.selectable(ix));
+        // 一项能选的都没有（比如换成了空的）时不选，回车、Cmd 加键才不会按到不在了的项。
+        self.highlighted = next;
         if let Some(ix) = next {
-            self.highlighted = Some(ix);
             self.scroll.scroll_to_item(ix);
         }
     }
@@ -390,8 +391,10 @@ pub trait MenuHost: Sized + 'static {
             };
             let row_action = item.enabled && item.action.is_some();
             let highlighted = menu.highlighted == Some(ix);
-            // 整行能点的只在选中时露出按钮，不然每行行尾都摆一个。
-            let buttons = (item.enabled && (!row_action || highlighted || a11y)).then_some(&item.buttons);
+            // 整行能点的只在选中时露出按钮，不然每行行尾都摆一个；整行没有动作的（灰着的小标题）一直露出，
+            // 有动作却不可用的不露。
+            let disabled = item.action.is_some() && !item.enabled;
+            let buttons = (!disabled && (!row_action || highlighted || a11y)).then_some(&item.buttons);
             let view = cx.entity().downgrade();
             div()
                 .id(("file-menu", ix))
@@ -402,7 +405,7 @@ pub trait MenuHost: Sized + 'static {
                     None => row.role(Role::MenuItem),
                 })
                 .aria_label(item.label.clone())
-                .aria_disabled(item.action.is_some() && !item.enabled)
+                .aria_disabled(disabled)
                 .when_some(item.shortcut.clone(), |row, shortcut| row.aria_description(shortcut))
                 // 菜单拿着焦点，选中的那一项报成辅助工具眼里的焦点。
                 .when(highlighted, |row| row.aria_active_descendant())

@@ -4752,6 +4752,7 @@ dependencies = [
  "runode-paths",
  "runode-types",
  "tracing",
+ "unicode-segmentation",
 ]
 
 [[package]]

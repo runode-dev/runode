@@ -22,8 +22,8 @@ use gpui::{
 use gpui::accesskit::ActionData;
 
 use super::input::{
-    EditKind, Frame, History, Snapshot, copy_selection, forward_frame, next_char, next_word, offset_to_utf16,
-    previous_char, previous_word, range_from_utf16, range_to_utf16,
+    EditKind, Frame, History, Snapshot, copy_selection, forward_frame, ignores_input, next_char, next_word,
+    offset_to_utf16, previous_char, previous_word, range_from_utf16, range_to_utf16,
 };
 use crate::actions::{Copy, Cut, Paste, Redo, SelectAll, Undo};
 use element::TextareaText;
@@ -635,8 +635,7 @@ impl EntityInputHandler for TextareaState {
         // 回车由 `key_down` 插入换行，制表符不插入；输入法上屏的文字里真有换行时照样保留。
         let typed = text;
         let text: String = normalize_newlines(typed).chars().filter(|&c| c == '\n' || !c.is_control()).collect();
-        // 只有控制字符（比如按 tab 送来的 `\t`）时什么都不做，免得把选中的文字删掉。
-        if text.is_empty() && self.marked.is_none() && (range.is_empty() || !typed.is_empty()) {
+        if ignores_input(typed, &text, &range, self.marked.is_some()) {
             return;
         }
         // 组字确认上屏时，开始组字那一刻已经记过了。

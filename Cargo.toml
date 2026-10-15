@@ -52,6 +52,8 @@ regex = "1"
 toml = "1"
 # 命令行的表格按显示宽度补齐，中文这类宽字符占两格。
 unicode-width = "0.2"
+# 输入框按用户看到的一个字（扩展字位簇）挪光标、删字，组合的 emoji 和带附加符号的字不拆开。
+unicode-segmentation = "1.13"
 # 文件预览的语法高亮（MIT）。只开解析和纯 Rust 的 fancy-regex 正则后端，不链接 C 库；
 # 语法定义取自 two-face（MIT 或 Apache-2.0），它的正则后端特性要和这里一致。
 syntect = { version = "5.3", default-features = false, features = ["parsing", "regex-fancy"] }

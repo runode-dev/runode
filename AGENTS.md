@@ -20,7 +20,7 @@
 | `remote` | 远程访问：TLS 监听、门禁、设备表、Bonjour，给手机推通知 | protocol、types、paths、rustls、rcgen、ring、libc、serde、serde_json、tracing |
 | `update` | 桌面 app 的自动更新：查 GitHub Release、下载、核对签名，退出时原子地换上 | serde、serde_json、tracing、libc、objc2、block2、objc2-foundation |
 | `autostart` | 登录时自启（launchd、systemd、`SMAppService`），命令行和设置页共用 | paths、objc2、objc2-foundation、objc2-service-management |
-| `ui` | 桌面几处界面共用的 GPUI 部件（照 shadcn 起名，variant、size 选样子）、全 app 一份的主题 `Theme`（只能在 render 和 paint 里读）、所有图标、界面字号和无障碍的共用写法；界面文字由调用方翻译好交进来 | types、paths、GPUI、tracing、objc2-app-kit、objc2-foundation |
+| `ui` | 桌面几处界面共用的 GPUI 部件（照 shadcn 起名，variant、size 选样子）、全 app 一份的主题 `Theme`（只能在 render 和 paint 里读）、所有图标、界面字号和无障碍的共用写法；界面文字由调用方翻译好交进来 | types、paths、GPUI、tracing、unicode-segmentation、objc2-app-kit、objc2-foundation |
 | `cli` | 命令行前端（`runode list`、`send`、`todo` 等），经宿主的 Unix socket 按 protocol 说话；`setup`、`remote`、`service` 不经宿主 | protocol、types、paths、config、remote、autostart、qrcode、libc |
 | `desktop` | GPUI 桌面 app：窗口、视图、菜单、窗口存档；带子命令时交给 `cli`，带 `--host` 时是单独的宿主进程，和命令行、宿主是同一个可执行文件；远程访问的监听开在宿主所在的进程里（`remote_access`） | 以上全部、GPUI |
 

@@ -20,6 +20,7 @@ use gpui::{
 };
 
 use gpui::accesskit::ActionData;
+use unicode_segmentation::UnicodeSegmentation as _;
 
 use crate::{
     actions::{Copy, Cut, Paste, Redo, SelectAll, Undo},
@@ -296,8 +297,14 @@ impl InputState {
         cx.notify();
     }
 
+    /// 上一帧排好的文字，排完以后文字又改过（打字、`set_query`、输入法组字后还没画）时为空：拿旧的排版
+    /// 换算出的位置可能超出现在的文字或落在一个字中间，拿去切字符串就崩了。
+    fn fresh_layout(&self) -> Option<&ShapedLine> {
+        self.layout.as_ref().filter(|layout| layout.text.as_ref() == self.text)
+    }
+
     fn index_for_x(&self, x: Pixels) -> usize {
-        let (Some(layout), Some(bounds)) = (&self.layout, self.bounds) else {
+        let (Some(layout), Some(bounds)) = (self.fresh_layout(), self.bounds) else {
             return self.text.len();
         };
         layout.closest_index_for_x(x - bounds.left() + self.scroll_x)
@@ -413,12 +420,20 @@ impl InputState {
     }
 }
 
+/// 往左一个字：按用户看到的字（扩展字位簇）算，`👩‍💻` 这类连起来的 emoji、带附加符号的字和国旗不拆开。
 pub(super) fn previous_char(text: &str, offset: usize) -> usize {
-    text[..offset].char_indices().next_back().map_or(0, |(i, _)| i)
+    text[..offset].grapheme_indices(true).next_back().map_or(0, |(i, _)| i)
 }
 
+/// 往右一个字，和 `previous_char` 一样按字位簇算。
 pub(super) fn next_char(text: &str, offset: usize) -> usize {
-    text[offset..].chars().next().map_or(text.len(), |c| offset + c.len_utf8())
+    text[offset..].graphemes(true).next().map_or(text.len(), |g| offset + g.len())
+}
+
+/// 输入法送来的 `typed` 滤掉控制字符后剩 `kept`，要换掉 `range`：只有控制字符（按 tab 送来的 `\t`）
+/// 时不算输入，免得把选中的文字删掉；本来就是空串的是删除，照办。组字（`composing`）时照常换。
+pub(super) fn ignores_input(typed: &str, kept: &str, range: &Range<usize>, composing: bool) -> bool {
+    kept.is_empty() && !composing && (range.is_empty() || !typed.is_empty())
 }
 
 fn is_word_char(c: char) -> bool {
@@ -570,8 +585,9 @@ impl EntityInputHandler for InputState {
             .or(self.marked.clone())
             .unwrap_or(self.selected.clone());
         // 回车、制表符等由按键绑定处理，不进文字。
-        let text = without_controls(text);
-        if text.is_empty() && range.is_empty() && self.marked.is_none() {
+        let typed = text;
+        let text = without_controls(typed);
+        if ignores_input(typed, &text, &range, self.marked.is_some()) {
             return;
         }
         // 组字确认上屏时，开始组字那一刻已经记过了。
@@ -617,7 +633,7 @@ impl EntityInputHandler for InputState {
         _: &mut Window,
         _: &mut Context<Self>,
     ) -> Option<Bounds<Pixels>> {
-        let layout = self.layout.as_ref()?;
+        let layout = self.fresh_layout()?;
         let range = range_from_utf16(&self.text, &range);
         let x = |index| bounds.left() + layout.x_for_index(index) - self.scroll_x;
         Some(Bounds::from_corners(point(x(range.start), bounds.top()), point(x(range.end), bounds.bottom())))
@@ -630,7 +646,7 @@ impl EntityInputHandler for InputState {
         _: &mut Context<Self>,
     ) -> Option<usize> {
         let bounds = self.bounds?;
-        let index = self.layout.as_ref()?.index_for_x(point.x - bounds.left() + self.scroll_x)?;
+        let index = self.fresh_layout()?.index_for_x(point.x - bounds.left() + self.scroll_x)?;
         Some(offset_to_utf16(&self.text, index))
     }
 }
@@ -944,6 +960,30 @@ fn without_controls(text: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// 只有控制字符的输入不删选中的文字；空串是删除，照办。
+    #[test]
+    fn control_only_input_keeps_the_selection() {
+        assert!(ignores_input("\t", "", &(0..3), false));
+        assert!(ignores_input("\t", "", &(2..2), false));
+        assert!(!ignores_input("", "", &(0..3), false));
+        assert!(!ignores_input("\t", "", &(0..3), true));
+        assert!(!ignores_input("a", "a", &(0..3), false));
+    }
+
+    /// 按字挪光标、删字时，连起来的 emoji、组合附加符号和国旗算一个字。
+    #[test]
+    fn chars_are_grapheme_clusters() {
+        let text = "a👩\u{200d}💻e\u{301}🇺🇸";
+        let coder = 1..1 + "👩\u{200d}💻".len();
+        let accent = coder.end..coder.end + "e\u{301}".len();
+        assert_eq!(previous_char(text, coder.end), coder.start);
+        assert_eq!(next_char(text, coder.start), coder.end);
+        assert_eq!(next_char(text, accent.start), accent.end);
+        assert_eq!(previous_char(text, accent.end), accent.start);
+        assert_eq!(next_char(text, accent.end), text.len());
+        assert_eq!(previous_char(text, text.len()), accent.end);
+    }
 
     #[test]
     fn written_text_drops_control_characters() {

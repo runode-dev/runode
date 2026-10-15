@@ -14,16 +14,22 @@ struct Spinner {
 impl Render for Spinner {
     fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
         let (frames, frame_time) = (self.frames, self.frame_time);
+        // 没有帧时没东西可画；每帧停零秒时动画周期是零、帧率没有上限，只画第一帧。
+        if frames.is_empty() || frame_time.is_zero() {
+            return div().children(frames.first().copied()).into_any_element();
+        }
         let period = frame_time * frames.len() as u32;
-        div().with_animation(
-            "spinner",
-            // 每格只重画一次。
-            Animation::new(period).repeat_synced().with_max_fps(1. / frame_time.as_secs_f32()),
-            move |spinner, delta| {
-                let frame = (delta * frames.len() as f32) as usize;
-                spinner.child(frames[frame.min(frames.len() - 1)])
-            },
-        )
+        div()
+            .with_animation(
+                "spinner",
+                // 每格只重画一次。
+                Animation::new(period).repeat_synced().with_max_fps(1. / frame_time.as_secs_f32()),
+                move |spinner, delta| {
+                    let frame = (delta * frames.len() as f32) as usize;
+                    spinner.child(frames[frame.min(frames.len() - 1)])
+                },
+            )
+            .into_any_element()
     }
 }
 
