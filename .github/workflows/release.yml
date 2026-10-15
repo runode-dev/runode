@@ -370,8 +370,25 @@ jobs:
             fi
           fi
           # 推上来的标签可能是 main 上更早的、比现在的正式版旧的版本：那样不标 latest，免得 releases/latest
-          # 往回退，自动更新和不带版本号的安装拿到旧版本。还没有正式版时照常标。
-          current=$(gh release view --repo "$GITHUB_REPOSITORY" --json tagName --jq .tagName 2>/dev/null || true)
+          # 往回退，自动更新和不带版本号的安装拿到旧版本。还没有正式版（接口回 404）时照常标；别的失败（网络、
+          # 限流、权限）重试几次还不行就不发，不能当成没有正式版去标 latest。
+          current=""
+          for attempt in 1 2 3; do
+            if current=$(gh api "repos/$GITHUB_REPOSITORY/releases/latest" --jq .tag_name 2>latest.err); then
+              break
+            fi
+            current=""
+            if grep -q 'HTTP 404' latest.err; then
+              break
+            fi
+            cat latest.err >&2
+            if [[ $attempt == 3 ]]; then
+              echo "查不到现在的正式版，不知道这个版本该不该标 latest，不发了；重跑这个 job 即可" >&2
+              exit 1
+            fi
+            sleep 10
+          done
+          rm -f latest.err
           current=${current#v}
           if [[ -n "$current" && "$(printf '%s\n' "$current" "$VERSION" | sort -V | tail -1)" != "$VERSION" ]]; then
             echo "Runode $current 比 $VERSION 新，这个版本不标 latest"

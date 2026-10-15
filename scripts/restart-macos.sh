@@ -44,20 +44,29 @@ if [[ ! -x "$bin" ]]; then
   exit 1
 fi
 
-# 配置文件里 terminal-host 最后一次写的是不是 true，见开头。只看这个文件本身，config-file 引进来的不看：
-# 看不到时宁可不重启，也不把会话结束掉。
+# 配置文件里 terminal-host 最后算下来是不是 true，见开头。照 app 读配置的规矩（`runode_config` 的
+# `edit::active` 和 `Config::apply`）：只写键不写值（`terminal-host`）是恢复默认的 false；引号要两头
+# 都有才去掉；值不是 true、false 的那行 app 不认，沿用之前的值。config-file 引进来的文件排在这个文件
+# 之后读、能盖掉这里的值，这里不跟着去读，有引入时一律当作没开：看不准时宁可不重启，也不把会话结束掉。
 keeps_sessions() {
   [[ -f $config ]] || return 1
   local value
   value=$(awk '
     /^[[:space:]]*#/ { next }
     {
-      key = $0; sub(/=.*/, "", key); gsub(/^[[:space:]]+|[[:space:]]+$/, "", key)
-      if (key != "terminal-host" || index($0, "=") == 0) next
-      value = substr($0, index($0, "=") + 1); gsub(/^[[:space:]]+|[[:space:]]+$/, "", value); gsub(/^"|"$/, "", value)
-      last = value
+      line = $0; gsub(/^[[:space:]]+|[[:space:]]+$/, "", line)
+      if (line == "") next
+      eq = index(line, "=")
+      key = eq ? substr(line, 1, eq - 1) : line; gsub(/[[:space:]]+$/, "", key)
+      value = eq ? substr(line, eq + 1) : ""; gsub(/^[[:space:]]+/, "", value)
+      if (length(value) >= 2 && value ~ /^".*"$/) value = substr(value, 2, length(value) - 2)
+      if (key == "config-file") { if (value != "") unsure = 1; next }
+      # 键名两头带着这里去不掉的字符（BOM、不换行空格这类，app 会去掉）：认不准，也当作没开。
+      if (key != "terminal-host") { if (index(key, "terminal-host") || index(key, "config-file")) unsure = 1; next }
+      if (value == "") last = "false"
+      else if (value == "true" || value == "false") last = value
     }
-    END { print last }
+    END { print (unsure ? "unsure" : last) }
   ' "$config")
   [[ $value == true ]]
 }
@@ -66,6 +75,7 @@ keeps_sessions() {
 if pgrep -fx "$bin" >/dev/null && ! keeps_sessions; then
   echo "配置里没开 terminal-host（退出后保留会话）：从这里退出 app 时会话会跟着结束，不重启了。" >&2
   echo "先在设置里打开「退出后保留会话」，或者在 $config 里写上 terminal-host = true，再重启。" >&2
+  echo "$config 里有 config-file 引入别的文件时也不重启：这里核对不了引进来的值。" >&2
   exit 1
 fi
 

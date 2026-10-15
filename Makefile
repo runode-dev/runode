@@ -48,11 +48,18 @@ app: ## 构建并打包 Runode.app（local profile，编得快），产物在 ta
 	CARGO=$(CARGO) BUILD_PROFILE=$(APP_PROFILE) scripts/bundle-macos.sh app
 
 # 先拷到 /Applications 里的临时名，拷成了再和旧的换：拷到一半失败（磁盘满、被打断）时旧的还在。
+# 上次在两次 mv 之间断了时只剩 .Runode.app.old，先把它挪回去再删临时名；换新的没换成时也挪回去。
 install: app ## 打包 Runode.app 并装到 /Applications，覆盖旧版本
+	if [ ! -e /Applications/Runode.app ] && [ -e /Applications/.Runode.app.old ]; then \
+		mv /Applications/.Runode.app.old /Applications/Runode.app; \
+	fi
 	rm -rf /Applications/.Runode.app.new /Applications/.Runode.app.old
 	ditto target/$(APP_PROFILE)/bundle/Runode.app /Applications/.Runode.app.new
-	if [ -e /Applications/Runode.app ]; then mv /Applications/Runode.app /Applications/.Runode.app.old; fi
-	mv /Applications/.Runode.app.new /Applications/Runode.app
+	if [ -e /Applications/Runode.app ]; then mv /Applications/Runode.app /Applications/.Runode.app.old || exit 1; fi; \
+	if ! mv /Applications/.Runode.app.new /Applications/Runode.app; then \
+		if [ -e /Applications/.Runode.app.old ]; then mv /Applications/.Runode.app.old /Applications/Runode.app; fi; \
+		exit 1; \
+	fi
 	rm -rf /Applications/.Runode.app.old
 
 # 重开 app 时它只在宿主的构建号不同时才换宿主，还要先等 app 退出；用这个一步让新宿主接手会话。
