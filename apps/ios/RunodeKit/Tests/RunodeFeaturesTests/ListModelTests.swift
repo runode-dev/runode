@@ -469,7 +469,7 @@ extension LinkState {
         model.willDelete = { deleted.append($0) }
         let machine = machineRecord()
         try keys.save(StoredDeviceKey(kind: .software, data: Data([1])), for: machine.id)
-        await model.add(machine)
+        try await model.add(machine)
         #expect(model.machines.map(\.id) == [machine.id])
 
         model.beginRename(machine.id)
@@ -492,12 +492,43 @@ extension LinkState {
         let model = MachineListModel(store: store, keyStore: keys)
         let old = machineRecord(name: "旧")
         try keys.save(StoredDeviceKey(kind: .software, data: Data([1])), for: old.id)
-        await model.add(old)
+        try await model.add(old)
         let new = machineRecord(name: "新")
-        await model.add(new)
+        try await model.add(new)
         #expect(model.machines.map(\.name) == ["新"])
         #expect(try keys.key(for: old.id) == nil)
     }
+
+    /// 重新配对的记录存不下：旧的配对连同私钥留着，新存的私钥丢掉，错误交给配对页。
+    @Test func aFailedRepairKeepsTheOldPairing() async throws {
+        let store = UnwritableMachineStore()
+        let keys = MemoryDeviceKeyStore()
+        let model = MachineListModel(store: store, keyStore: keys)
+        var deleted: [UUID] = []
+        model.willDelete = { deleted.append($0) }
+        let old = machineRecord(name: "旧")
+        await store.memory.upsert(old)
+        try keys.save(StoredDeviceKey(kind: .software, data: Data([1])), for: old.id)
+        await model.load()
+        let new = machineRecord(name: "新")
+        try keys.save(StoredDeviceKey(kind: .software, data: Data([2])), for: new.id)
+        await #expect(throws: (any Error).self) { try await model.add(new) }
+        #expect(model.machines.map(\.name) == ["旧"])
+        #expect(deleted.isEmpty)
+        #expect(try keys.key(for: old.id) != nil)
+        #expect(try keys.key(for: new.id) == nil)
+    }
+}
+
+/// 读得出、写不进的电脑列表。
+actor UnwritableMachineStore: MachineStore {
+    struct WriteFailed: Error {}
+    let memory = MemoryMachineStore()
+
+    func all() async -> [MachineRecord] { await memory.all() }
+    func upsert(_ machine: MachineRecord) throws { throw WriteFailed() }
+    func updateLastAddress(id: UUID, _ address: String) throws { throw WriteFailed() }
+    func remove(id: UUID) throws { throw WriteFailed() }
 }
 
 @MainActor
@@ -552,6 +583,38 @@ extension LinkState {
         model.linkText = link()
         await model.submitLink()
         #expect(model.phase == .failed("二维码已经过期，请在电脑上重新生成"))
+    }
+
+    /// 配好了却存不下：不算配好，不给「完成」。
+    @Test func aMachineThatCannotBeSavedIsNotPaired() async {
+        let model = PairingModel(
+            pairing: FakePairing { _ in machineRecord() }, deviceName: "x",
+            now: { Date(timeIntervalSince1970: 1_800_000_000) },
+            onPaired: { _ in throw UnwritableMachineStore.WriteFailed() })
+        await model.scanned(link())
+        guard case .failed(let message) = model.phase else {
+            Issue.record("expected a failure, got \(model.phase)")
+            return
+        }
+        #expect(message.hasPrefix("存不下这台电脑"))
+    }
+
+    /// 配对页关掉以后配好的不存。
+    @Test func closingThePageDropsThePairing() async {
+        var paired: [MachineRecord] = []
+        let gate = AsyncStream<Void>.makeStream()
+        let model = PairingModel(
+            pairing: GatedPairing(gate: gate.stream), deviceName: "x",
+            now: { Date(timeIntervalSince1970: 1_800_000_000) }, onPaired: { paired.append($0) })
+        let pairing = Task { await model.scanned(link()) }
+        #expect(await eventually { model.isBusy })
+        model.cancel()
+        gate.continuation.yield()
+        await pairing.value
+        #expect(paired.isEmpty)
+        if case .paired = model.phase { Issue.record("a closed page should not reach paired") }
+        await model.scanned(link())
+        #expect(paired.isEmpty, "a closed page does not pair again")
     }
 
     @Test func rejectionsAreExplained() async {
@@ -851,6 +914,20 @@ extension LinkState {
         #expect(link.sent.last.map { if case .listDirs(_, nil) = $0 { true } else { false } } == true)
         #expect(picker.isLoading)
         #expect(picker.errorMessage == nil)
+    }
+
+    /// 取请求编号时连接断了：不再发、不转圈，报未连接。
+    @Test func aDisconnectWhileNumberingDoesNotSpin() async {
+        let held = HeldRequestLink()
+        let picker = DirectoryPickerModel(link: held)
+        let loading = Task { await picker.load(nil) }
+        #expect(await eventually { held.waiting == 1 })
+        picker.connectionLost()
+        held.release()
+        await loading.value
+        #expect(held.inner.sent.isEmpty)
+        #expect(!picker.isLoading)
+        #expect(picker.errorMessage == "未连接")
     }
 
     /// 不带编号的 `Error` 是同一条连接上别的请求的，不当成列目录的回话，接着等。

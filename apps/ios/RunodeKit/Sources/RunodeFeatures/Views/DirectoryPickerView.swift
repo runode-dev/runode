@@ -110,7 +110,7 @@
                             Text("在这里新建").frame(maxWidth: .infinity)
                         }
                         .prominentButtonStyle()
-                        .disabled(picker.path == nil || picker.isLoading)
+                        .disabled(picker.path == nil || picker.isLoading || !picker.isConnected)
                     }
                 }
             }

@@ -443,7 +443,8 @@
             switch shape {
             case .block:
                 context.fill(rect)
-                guard !cell.text.isEmpty, cell.text != " " else { return }
+                // 隐藏的字（SGR 8）光标压在上面也不露出来。
+                guard hasText(cell) else { return }
                 let textColor: Rgb =
                     switch settings.cursorText {
                     case .rgb(let rgb): rgb

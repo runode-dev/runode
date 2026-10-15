@@ -38,17 +38,24 @@ public final class MachineListModel {
         machines.first { $0.id == id }
     }
 
-    /// 配对好的一台存下来；同一个证书指纹的旧记录（重新配对的）连同私钥一起换掉。
-    public func add(_ machine: MachineRecord) async {
+    /// 配对好的一台存下来；同一个证书指纹的旧记录（重新配对的）连同私钥一起换掉。新的存好了才动旧的：
+    /// 存不下时抛出去、丢掉配对时存的新私钥，旧的配对照样能用；旧的删不掉时两条都留着。
+    public func add(_ machine: MachineRecord) async throws {
         do {
-            for old in machines where old.fingerprint == machine.fingerprint && old.id != machine.id {
-                await willDelete(old.id)
-                try? keyStore.deleteKey(for: old.id)
-                try await store.remove(id: old.id)
-            }
             try await store.upsert(machine)
         } catch {
-            errorMessage = String(localized: "存不下这台电脑：\(error.localizedDescription)")
+            try? keyStore.deleteKey(for: machine.id)
+            await load()
+            throw error
+        }
+        for old in machines where old.fingerprint == machine.fingerprint && old.id != machine.id {
+            await willDelete(old.id)
+            do {
+                try await store.remove(id: old.id)
+                try? keyStore.deleteKey(for: old.id)
+            } catch {
+                errorMessage = String(localized: "删不掉这台电脑：\(error.localizedDescription)")
+            }
         }
         await load()
     }

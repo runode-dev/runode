@@ -107,14 +107,23 @@
             clients: 0, claimed: false, sizeOwner: nil)
         static let sessions = [claude, codex, shell]
 
-        private let subscribers = Mutex<[AsyncStream<HostEvent>.Continuation]>([])
+        /// 订阅者按编号存，流结束（页面关掉、回前台重订阅）时按编号摘掉，免得越积越多。
+        private let subscribers = Mutex<(next: Int, all: [Int: AsyncStream<HostEvent>.Continuation])>((0, [:]))
         private let sizes = Mutex<[SessionId: GridSize]>([:])
 
         func events() async -> AsyncStream<HostEvent> {
             let (stream, continuation) = AsyncStream.makeStream(of: HostEvent.self)
             continuation.yield(.state(.connected(hostName: "Ethan 的 MacBook Pro", address: "192.168.1.20")))
             continuation.yield(.ready(generation: 1))
-            subscribers.withLock { $0.append(continuation) }
+            let id = subscribers.withLock {
+                let id = $0.next
+                $0.next += 1
+                $0.all[id] = continuation
+                return id
+            }
+            continuation.onTermination = { [weak self] _ in
+                self?.subscribers.withLock { _ = $0.all.removeValue(forKey: id) }
+            }
             // 参数里带着 `offline`：连上一会儿后假装断线、等着重连，用来看断线的横幅。
             if ProcessInfo.processInfo.arguments.contains("offline") {
                 Task {
@@ -126,7 +135,7 @@
         }
 
         private func emit(_ event: HostEvent) {
-            for continuation in subscribers.withLock({ $0 }) {
+            for continuation in subscribers.withLock({ Array($0.all.values) }) {
                 continuation.yield(event)
             }
         }

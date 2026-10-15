@@ -33,6 +33,7 @@ if [[ -z "$udid" ]]; then
   exit 1
 fi
 
+# 先开机，和下面的构建同时进行；已经开着时 boot 报错，不碍事。
 xcrun simctl boot "$udid" 2>/dev/null || true
 # 把模拟器窗口拿到前面；新版 Xcode 里 Simulator.app 换成了 DeviceHub.app。
 open -a Simulator 2>/dev/null || open -a DeviceHub 2>/dev/null || true
@@ -40,5 +41,7 @@ open -a Simulator 2>/dev/null || open -a DeviceHub 2>/dev/null || true
 xcodebuild -project "$ios_dir/Runode.xcodeproj" -scheme Runode -configuration Debug \
   -destination "platform=iOS Simulator,id=$udid" -derivedDataPath "$derived" -quiet build
 
+# boot 不等开好就返回，装之前等它开好；开不了机就在这里报错。
+xcrun simctl bootstatus "$udid" -b >/dev/null
 xcrun simctl install "$udid" "$derived/Build/Products/Debug-iphonesimulator/Runode.app"
 xcrun simctl launch --terminate-running-process "$udid" "$bundle_id"

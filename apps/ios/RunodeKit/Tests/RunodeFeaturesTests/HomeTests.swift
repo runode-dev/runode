@@ -78,6 +78,47 @@ private struct TwoMachines {
         #expect(machines.app.spawnableLists.map(\.machine.id) == [machines.first.id])
     }
 
+    @Test func waitingCardsWaitForTheFreshList() async throws {
+        let machines = await TwoMachines()
+        try machines.connectFirst([info(waiting, .blocked)])
+        #expect(machines.app.waitingSessions.map(\.session.id) == [waiting])
+        // 断开再连上，新列表还没到：断开前在等的会话不当成还在等。
+        let list = try #require(machines.app.sessionList(for: machines.first.id))
+        list.handle(.state(.waiting(reason: "断了", retryAt: .now + 5)))
+        list.handle(.state(.connected(hostName: "一", address: nil)))
+        list.handle(.ready(generation: 2))
+        #expect(machines.app.waitingSessions.isEmpty)
+        list.handle(.message(.sessionList([info(waiting, .blocked)])))
+        #expect(machines.app.waitingSessions.map(\.session.id) == [waiting])
+    }
+
+    /// 点开通知时配对页开着：关掉配对页（撤掉它的配对），终端页才看得见。
+    @Test func aSessionLinkClosesPairing() async {
+        let machines = await TwoMachines()
+        machines.app.startPairing()
+        #expect(machines.app.pairing != nil)
+        machines.app.open(SessionLink(machine: machines.first.id, session: plain.description))
+        #expect(machines.app.pairing == nil)
+        #expect(machines.app.path == [.machine(machines.first.id), .terminal(machine: machines.first.id, session: plain)])
+    }
+
+    /// 在后台时打开的终端页（通知比回到前台先到）回到前台时订阅连接，连上就 `Attach`。
+    @Test func aTerminalOpenedInTheBackgroundAttachesOnReturn() async throws {
+        let machines = await TwoMachines()
+        let link = machines.firstLink
+        #expect(await eventually { link.subscriberCount == 1 })
+        machines.app.setActive(false)
+        _ = try #require(machines.app.terminal(machine: machines.first.id, session: plain))
+        machines.app.setActive(true)
+        // 列表重新订阅一次，终端页订阅一次。
+        #expect(await eventually { link.subscriberCount == 3 })
+        link.emit(.ready(generation: 2))
+        #expect(
+            await eventually {
+                link.sent.contains { if case .attach(plain, _, .vtReplay) = $0 { true } else { false } }
+            })
+    }
+
     @Test func openingATerminalIsRememberedForResume() async throws {
         let machines = await TwoMachines()
         try machines.connectFirst([info(waiting, .blocked), info(plain, nil)])

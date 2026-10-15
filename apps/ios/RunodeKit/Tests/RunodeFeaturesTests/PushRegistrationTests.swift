@@ -168,6 +168,26 @@ private let secondToken = Data([0x01, 0x02])
         #expect(push.statuses[machine.id] == nil)
     }
 
+    /// 注销着的时候 token 变了：不再登记，顶不掉注销，注销照样等到电脑回话。
+    @Test func aMachineBeingDeletedIsNotRegisteredAgain() async throws {
+        let push = registration()
+        system.give(token: firstToken)
+        #expect(await eventually { push.token != nil })
+        push.connected(machine, link: link)
+        #expect(await eventually { link.registrations.count == 1 })
+        let leaving = Task { await push.unregister(machine.id, timeout: .seconds(5)) }
+        #expect(await eventually { link.registrations.count == 2 })
+        system.give(token: secondToken)
+        #expect(await eventually { push.token == "0102" })
+        try await Task.sleep(for: .milliseconds(20))
+        #expect(link.registrations.count == 2)
+        #expect(link.registrations.last?.token == nil)
+        let req = try #require(link.registrations.last?.req)
+        push.handle(.done(req: req), from: machine.id)
+        await leaving.value
+        #expect(push.statuses[machine.id] == .registered)
+    }
+
     @Test func renamingResendsWithTheNewName() async {
         let push = registration()
         system.give(token: firstToken)

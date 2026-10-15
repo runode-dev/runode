@@ -74,6 +74,50 @@ final class FakeLink: HostLink {
     }
 }
 
+/// 取请求编号时停住、等测试 `release` 才给的连接，用来测取编号的那段时间里连接断了的情形。别的都交给
+/// 里面的 `FakeLink`。
+final class HeldRequestLink: HostLink {
+    let inner = FakeLink()
+    private let held = Mutex<(released: Bool, waiters: [CheckedContinuation<Void, Never>])>((false, []))
+
+    /// 正停在取编号上的调用有几个。
+    var waiting: Int { held.withLock { $0.waiters.count } }
+
+    /// 放行停着的，以后取编号不再停。
+    func release() {
+        let waiters = held.withLock {
+            $0.released = true
+            defer { $0.waiters = [] }
+            return $0.waiters
+        }
+        for waiter in waiters {
+            waiter.resume()
+        }
+    }
+
+    func nextRequestId() async -> UInt32 {
+        await withCheckedContinuation { continuation in
+            let released = held.withLock {
+                if !$0.released { $0.waiters.append(continuation) }
+                return $0.released
+            }
+            if released { continuation.resume() }
+        }
+        return await inner.nextRequestId()
+    }
+
+    func events() async -> AsyncStream<HostEvent> { await inner.events() }
+    func send(_ message: ClientMsg) { inner.send(message) }
+    func sendInput(_ data: Data, channel: UInt32, generation: UInt64) {
+        inner.sendInput(data, channel: channel, generation: generation)
+    }
+    func start() async { await inner.start() }
+    func stop() async { await inner.stop() }
+    func reconnectNow() async { await inner.reconnectNow() }
+    func setDeviceName(_ name: String) async { await inner.setDeviceName(name) }
+    func setFocused(_ focused: Bool) { inner.setFocused(focused) }
+}
+
 /// 记下视图模型让它做的事的假显示。
 @MainActor
 final class FakeDisplay: TerminalDisplay {
@@ -105,6 +149,16 @@ struct FakePairing: Pairing {
 
     func pair(with invitation: PairingInvitation, deviceName: String) async throws -> MachineRecord {
         try result(invitation)
+    }
+}
+
+/// 等 `gate` 里来一个值才配好的假配对；被撤掉时照样配好，看调用方还存不存。
+struct GatedPairing: Pairing {
+    let gate: AsyncStream<Void>
+
+    func pair(with invitation: PairingInvitation, deviceName: String) async throws -> MachineRecord {
+        for await _ in gate { break }
+        return machineRecord()
     }
 }
 

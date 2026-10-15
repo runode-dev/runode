@@ -62,6 +62,8 @@ public final class GitModel {
     @ObservationIgnored private var pending: [UInt32: Pending] = [:]
     /// `refreshAndWait` 在等的，状态读完（或者读不了、断线）时放开。
     @ObservationIgnored private var refreshWaiters: [CheckedContinuation<Void, Never>] = []
+    /// 在办的提交交出去时输入框里的说明；提交成了时输入框还是它才清空，办着的时候用户改过的留着。
+    @ObservationIgnored private var submittedMessage: String?
 
     private enum Pending {
         case status
@@ -173,9 +175,10 @@ public final class GitModel {
         await perform(.unstage, .unstageAll)
     }
 
-    /// 提交暂存的改动；暂存段是空的时先暂存全部改动。提交成了才清空说明。
+    /// 提交暂存的改动；暂存段是空的时先暂存全部改动。提交成了才清空说明，办着的时候说明改过就不清。
     public func commit() async {
         guard canCommit else { return }
+        submittedMessage = commitMessage
         let message = commitMessage.trimmingCharacters(in: .whitespacesAndNewlines)
         await perform(.commit, .commit(message: message, stageAll: commitsEverything))
     }
@@ -253,7 +256,7 @@ public final class GitModel {
             guard let kind = pending.removeValue(forKey: req) else { return false }
             if case .action(let action) = kind {
                 running = nil
-                if action == .commit { commitMessage = "" }
+                if action == .commit, commitMessage == submittedMessage { commitMessage = "" }
                 if action == .checkout { branches = [] }
                 // 改了仓库：打开着的 diff 可能变了。
                 if let diffTarget { Task { await requestDiff(diffTarget) } }

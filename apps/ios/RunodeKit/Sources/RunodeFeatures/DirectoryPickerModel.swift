@@ -51,6 +51,11 @@ public final class DirectoryPickerModel {
             return
         }
         let req = await link.nextRequestId()
+        // 取编号时连接可能断了：那时还没有在等的请求，`connectionLost` 清不到它，发出去也会丢掉。
+        guard isConnected else {
+            errorMessage = String(localized: "未连接")
+            return
+        }
         pending = req
         isLoading = true
         errorMessage = nil

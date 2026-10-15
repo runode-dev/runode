@@ -234,6 +234,8 @@
         /// 换一份 VT（重新 `Attach` 后新建的），整屏重画。
         public func terminalDidReset(_ terminal: VTerminal?, settings: TermSettings) {
             stopMomentum()
+            // 按住的键是给原来那份 VT 的：视图换了会话或者重新连上时不接着连发。
+            stopRepeating()
             self.terminal = terminal
             grid.settings = settings
             aboveGrid.settings = settings
@@ -405,12 +407,13 @@
         /// 按当前缩放比例重画，放大后字不发虚。位图的边长和总像素有上限，免得超大的网格吃光内存。
         private func updateRasterScale() {
             let screenScale = window?.screen.scale ?? traitCollection.displayScale
-            var scale = max(scrollView.zoomScale, 0.1) * screenScale
+            // 平常不低于 1，缩小着看也不糊；网格大到连 1 都超过上限时（宿主给的尺寸最大 2000×2000）照上限
+            // 再往下压，宁可糊一些也不吃光内存。
+            var scale = max(max(scrollView.zoomScale, 0.1) * screenScale, 1)
             let size = grid.bounds.size
             if size.width > 0, size.height > 0 {
                 scale = min(scale, 8192 / size.width, 8192 / size.height, sqrt(24_000_000 / (size.width * size.height)))
             }
-            scale = max(scale, 1)
             if abs(grid.contentScaleFactor - scale) > 0.01 {
                 grid.contentScaleFactor = scale
                 aboveGrid.contentScaleFactor = scale
@@ -671,6 +674,8 @@
         @discardableResult
         public override func resignFirstResponder() -> Bool {
             if isFirstResponder { keyboardWillMove(.closing) }
+            // 松开键的事件可能送到别处去了：不再是输入焦点就不连发。
+            stopRepeating()
             let resigned = super.resignFirstResponder()
             grid.hasKeyboardFocus = isFirstResponder
             delegate?.terminalView(self, keyboardVisible: isFirstResponder)
@@ -775,7 +780,12 @@
             }
             var unhandled = Set<UIPress>()
             for press in presses {
-                if let key = press.key, let input = Self.keyInput(for: key) {
+                if let key = press.key, var input = Self.keyInput(for: key) {
+                    // 辅助栏上粘住的 Ctrl 加在这个键上，连发的也是加了 Ctrl 的。
+                    if controlLatched {
+                        input.modifiers.insert(.control)
+                        controlLatched = false
+                    }
                     emit(.key(input))
                     startRepeating(input)
                 } else {
@@ -803,7 +813,9 @@
             repeatTask = Task { @MainActor [weak self] in
                 try? await Task.sleep(for: .milliseconds(400))
                 while !Task.isCancelled {
-                    self?.emit(.key(input))
+                    // 视图没了就停，不空转。
+                    guard let self else { return }
+                    self.emit(.key(input))
                     try? await Task.sleep(for: .milliseconds(50))
                 }
             }
@@ -843,6 +855,11 @@
                 }
             if let special {
                 return KeyInput(key: special, modifiers: modifiers)
+            }
+            // Shift+回车带着 Shift 按 VT 的模式编码，和桌面一样（程序据此分出换行和提交）；交给系统的话
+            // 经 `insertText` 成了不带修饰键的回车。
+            if key.keyCode == .keyboardReturnOrEnter, modifiers == .shift {
+                return KeyInput(key: .enter, modifiers: modifiers)
             }
             guard modifiers.contains(.control) || modifiers.contains(.alt) else { return nil }
             switch key.keyCode {

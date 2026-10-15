@@ -74,8 +74,10 @@ public final class AppModel {
     public var path: [Route] = [] {
         didSet { pathChanged() }
     }
-    /// 配对页开着时的视图模型。
-    public var pairing: PairingModel?
+    /// 配对页开着时的视图模型。换掉、关掉时撤掉它正在跑的配对。
+    public var pairing: PairingModel? {
+        didSet { if oldValue !== pairing { oldValue?.cancel() } }
+    }
     /// 设置页开着。
     public var showingSettings = false
     /// 在设置页里点了「配对新电脑」：设置页关掉以后再打开配对页，两个页面不叠着弹。
@@ -216,6 +218,8 @@ public final class AppModel {
         guard machineList.machine(link.machine) != nil, let session = SessionId(link.session) else { return }
         showingSettings = false
         pairsAfterSettings = false
+        // 配对页盖在整个导航栈上，不关掉就看不见打开的终端。
+        pairing = nil
         openTerminal(machine: link.machine, session: session)
     }
 
@@ -224,7 +228,7 @@ public final class AppModel {
     public func startPairing(link: String? = nil) {
         let model = PairingModel(pairing: dependencies.pairing, deviceName: settings.deviceName) {
             [weak self] machine in
-            await self?.machineList.add(machine)
+            try await self?.machineList.add(machine)
         }
         if let link {
             model.linkText = link
@@ -300,6 +304,12 @@ public final class AppModel {
         active = isActive
         for list in sessionLists.values {
             if isActive { list.start() } else { list.stop() }
+        }
+        // 在后台时打开的终端页（点通知、系统交来链接比回到前台先到）只建了模型、没订阅连接。
+        if isActive {
+            for model in terminals.values {
+                model.open()
+            }
         }
     }
 

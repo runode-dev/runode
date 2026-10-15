@@ -22,12 +22,17 @@ public final class PairingModel {
 
     @ObservationIgnored private let pairing: any Pairing
     @ObservationIgnored private let deviceName: String
-    @ObservationIgnored private let onPaired: @MainActor (MachineRecord) async -> Void
+    @ObservationIgnored private let onPaired: @MainActor (MachineRecord) async throws -> Void
     @ObservationIgnored private let now: @Sendable () -> Date
+    /// 正在跑的配对；配对页关掉时撤掉。
+    @ObservationIgnored private var running: Task<MachineRecord, any Error>?
+    /// 配对页关掉了：之后配好的不再存。
+    @ObservationIgnored private var cancelled = false
 
+    /// `onPaired` 把配好的电脑存下来，存不下时抛出，配对页显示失败。
     public init(
         pairing: any Pairing, deviceName: String, now: @escaping @Sendable () -> Date = { .now },
-        onPaired: @escaping @MainActor (MachineRecord) async -> Void
+        onPaired: @escaping @MainActor (MachineRecord) async throws -> Void
     ) {
         self.pairing = pairing
         self.deviceName = deviceName
@@ -64,8 +69,14 @@ public final class PairingModel {
         phase = .idle
     }
 
+    /// 配对页关掉了：撤掉正在跑的配对，配好了也不存（不换掉同一台电脑的旧配对）。已经在存的照样存完。
+    public func cancel() {
+        cancelled = true
+        running?.cancel()
+    }
+
     private func pair(text: String) async {
-        guard !isBusy else { return }
+        guard !isBusy, !cancelled else { return }
         let invitation: PairingInvitation
         do {
             invitation = try PairingInvitation.parse(text)
@@ -78,10 +89,23 @@ public final class PairingModel {
             return
         }
         phase = .pairing(hostName: invitation.hostName)
+        let pairing = self.pairing
+        let deviceName = self.deviceName
+        let running = Task { try await pairing.pair(with: invitation, deviceName: deviceName) }
+        self.running = running
+        defer { self.running = nil }
         do {
-            let machine = try await pairing.pair(with: invitation, deviceName: deviceName)
-            await onPaired(machine)
+            let machine = try await running.value
+            guard !cancelled else { return }
+            do {
+                try await onPaired(machine)
+            } catch {
+                phase = .failed(String(localized: "存不下这台电脑：\(error.localizedDescription)"))
+                return
+            }
             phase = .paired(machine)
+        } catch where cancelled {
+            return
         } catch let failure as LinkFailure {
             phase = .failed(failure.errorDescription ?? String(localized: "配对失败"))
         } catch {

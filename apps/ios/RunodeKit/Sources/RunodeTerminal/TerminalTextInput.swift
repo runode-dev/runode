@@ -79,8 +79,29 @@
             typeText(text)
         }
 
+        /// 组字时退格一般由输入法自己改组字文字（`setMarkedText`）；真调到这里时只删组字文字里的：它还没发给
+        /// 程序，发退格键会删掉已经上屏的字。
         public func deleteBackward() {
-            press(.backspace)
+            guard !markedText.isEmpty else { return press(.backspace) }
+            let text = markedText as NSString
+            let range: NSRange
+            if markedSelection.length > 0 {
+                range = markedSelection
+            } else if markedSelection.location > 0 {
+                range = text.rangeOfComposedCharacterSequence(at: min(markedSelection.location, text.length) - 1)
+            } else {
+                return
+            }
+            editMarkedText(range, with: "")
+        }
+
+        /// 把组字文字里的 `range` 换成 `text`，光标放在换上的字后面，组字接着组。
+        private func editMarkedText(_ range: NSRange, with text: String) {
+            inputDelegate?.textWillChange(self)
+            markedText = (markedText as NSString).replacingCharacters(in: range, with: text)
+            markedSelection = NSRange(location: range.location + (text as NSString).length, length: 0)
+            inputDelegate?.textDidChange(self)
+            positionMarkedText()
         }
 
         // MARK: 组字
@@ -128,8 +149,12 @@
             return (markedText as NSString).substring(with: NSRange(location: from, length: to - from))
         }
 
+        /// 组字时改的是组字文字里的那一段，组字接着组；不组字时文档是空的，换上的字就是输入。
         public func replace(_ range: UITextRange, withText text: String) {
-            insertText(text)
+            guard !markedText.isEmpty, let range = range as? TerminalTextRange else { return insertText(text) }
+            let from = min(range.from.offset, documentLength)
+            let to = min(range.to.offset, documentLength)
+            editMarkedText(NSRange(location: from, length: to - from), with: text)
         }
 
         public var beginningOfDocument: UITextPosition { TerminalTextPosition(0) }

@@ -73,9 +73,10 @@ extension AppModel {
         return summary
     }
 
-    /// 连着的电脑上等用户回答的会话，按电脑的先后、再按宿主给的先后。
+    /// 连着的电脑上等用户回答的会话，按电脑的先后、再按宿主给的先后。卡片上能直接回答，所以只认这次
+    /// 连上以后收到的列表：重连上、新列表还没到时，断开前在等的会话可能早答完了。
     public var waitingSessions: [WaitingSession] {
-        machineLists.filter(\.linkState.isConnected).flatMap { list in
+        machineLists.filter { $0.linkState.isConnected && $0.listCurrent }.flatMap { list in
             list.sessions.filter { SessionGroup.of($0) == .waiting }.map { WaitingSession(list: list, session: $0) }
         }
     }

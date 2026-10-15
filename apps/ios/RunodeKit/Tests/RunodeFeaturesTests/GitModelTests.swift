@@ -116,6 +116,18 @@ import Testing
         #expect(!model.canCommit)
     }
 
+    /// 提交办着的时候改了说明（比如写下一条）：提交成了也不清掉改过的。
+    @Test func editsDuringACommitAreKept() async throws {
+        let model = try await connectedModel(status(unstaged: [changed]))
+        model.commitMessage = "修好了"
+        await model.commit()
+        let req = try lastGit(.commit(message: "修好了", stageAll: true))
+        model.commitMessage = "下一条"
+        model.handle(.gitStatus(req: req, id: sessionA, status: status(head: "5d6e7f8")))
+        #expect(model.running == nil)
+        #expect(model.commitMessage == "下一条")
+    }
+
     /// 有暂存的改动时只提交暂存的。
     @Test func commitsOnlyStagedChanges() async throws {
         let model = try await connectedModel(status(staged: [changed], unstaged: [changed]))

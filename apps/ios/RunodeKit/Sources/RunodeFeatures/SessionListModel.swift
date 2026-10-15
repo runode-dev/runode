@@ -130,8 +130,8 @@ public final class SessionListModel {
         didSet { onSessionsChanged() }
     }
     /// 这次连上以后收到过列表：`sessions` 是电脑上现在的样子。断开后、重连上还没收到新列表时为假，
-    /// 那时 `sessions` 还是断开前的。
-    @ObservationIgnored private(set) var listCurrent = false
+    /// 那时 `sessions` 还是断开前的。首页等回答的卡片看着它。
+    private(set) var listCurrent = false
     /// 这台电脑上终端的主题：只看状态的 `Attach` 回话里带着，终端页开着时它收到的 `ThemeApplied`
     /// 也经同一条连接到这里。没收到过时为空。
     public private(set) var theme: AppTheme?
@@ -172,9 +172,11 @@ public final class SessionListModel {
     @ObservationIgnored private var throttle: PreviewThrottle
     @ObservationIgnored private let now: () -> ContinuousClock.Instant
     @ObservationIgnored private var quickReplies: [SessionId: QuickReplyModel] = [:]
-    /// 每个会话在等的那次读屏幕是哪种，回话按会话对上（`ScreenText` 不带请求编号，节流保证同一个
-    /// 会话同时只有一次在等）。
+    /// 每个会话在等的那次读屏幕是哪种，回话按会话对上：`ScreenText` 不带请求编号，宿主又是各自起线程
+    /// 回话，两次同时在路上时回话可能先后颠倒、对错读法，所以同一个会话同时只读一次（`sendPreviewRead`）。
     @ObservationIgnored private var pendingPreviews: [SessionId: PreviewRead] = [:]
+    /// 读着的时候又要刷新的会话：这次（连同退回读屏幕底部的后半）有了回话再读一次。
+    @ObservationIgnored private var previewsAgain: Set<SessionId> = []
     /// 在等回话的列命令的请求，按请求编号记着列的目录。
     @ObservationIgnored private var pendingTasks: [UInt32: String] = [:]
     /// 正在列的目录：取请求编号之前就记上，同一个目录不会同时要两次。
@@ -536,6 +538,10 @@ public final class SessionListModel {
     /// 按会话现在的样子选读法发出去：shell 空闲时读最近一条命令的输出，否则读屏幕底部。
     private func sendPreviewRead(_ id: SessionId) {
         guard connected, let session = session(id) else { return }
+        guard pendingPreviews[id] == nil else {
+            previewsAgain.insert(id)
+            return
+        }
         if session.meta.foregroundIsShell && !session.exited {
             send(.lastCommand, for: id)
         } else {
@@ -559,6 +565,11 @@ public final class SessionListModel {
         send(.bottomLines(atPrompt: true), for: id)
     }
 
+    /// 一次读屏幕读完了（出错也算）：读着的时候又要过刷新的，现在再读；那次刷新已经过了节流。
+    private func finishPreview(_ id: SessionId) {
+        if previewsAgain.remove(id) != nil { sendPreviewRead(id) }
+    }
+
     // MARK: 事件
 
     func handle(_ event: HostEvent) {
@@ -573,6 +584,7 @@ public final class SessionListModel {
                 watching = []
                 throttle.reset()
                 pendingPreviews = [:]
+                previewsAgain = []
                 pendingTasks = [:]
                 listingDirs = []
                 pendingRenames = []
@@ -636,20 +648,21 @@ public final class SessionListModel {
         case .bell(let id):
             requestPreview(id)
         case .screenText(let id, let text, _):
-            guard session(id) != nil else { return }
             let read = pendingPreviews.removeValue(forKey: id) ?? .bottomLines(atPrompt: false)
+            guard session(id) != nil else { return }
             let limit = session(id).map(SessionGroup.of) == .waiting ? Self.waitingPreviewLines : Self.previewLines
             switch read {
             case .lastCommand:
                 let lines = Presentation.previewLines(text, limit: limit)
                 if lines.isEmpty {
                     fallBackToBottomLines(id)
-                } else {
-                    previews[id] = lines
+                    return
                 }
+                previews[id] = lines
             case .bottomLines(let atPrompt):
                 previews[id] = Presentation.previewLines(text, limit: limit, atPrompt: atPrompt)
             }
+            finishPreview(id)
         case .exited(let id, _):
             update(id) { $0.exited = true }
         case .resync(let id, _):
@@ -714,9 +727,14 @@ public final class SessionListModel {
                 sessions.removeAll { $0.id == id }
                 previews[id] = nil
                 pendingPreviews[id] = nil
-            } else if let id, req == nil, let read = pendingPreviews.removeValue(forKey: id), read == .lastCommand {
-                // 读最近一条命令的输出出错（多半是没有 shell 集成）：退回读屏幕底部。
-                fallBackToBottomLines(id)
+                previewsAgain.remove(id)
+            } else if let id, req == nil, let read = pendingPreviews.removeValue(forKey: id) {
+                if read == .lastCommand {
+                    // 读最近一条命令的输出出错（多半是没有 shell 集成）：退回读屏幕底部。
+                    fallBackToBottomLines(id)
+                } else {
+                    finishPreview(id)
+                }
             }
         default:
             break

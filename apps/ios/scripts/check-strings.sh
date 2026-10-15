@@ -5,7 +5,7 @@
 # 不带 bundle 参数，运行时查的是 app 自己的 catalog，Xcode 不会替包里的代码把新文字收进来，所以靠这个脚本：
 # 让编译器抽出代码里所有可本地化的字符串，和 catalog 对一遍。报三种问题，有就以非零退出：
 #   - 代码里有、catalog 里没有的键；
-#   - catalog 里缺英文或繁体翻译的键；
+#   - catalog 里缺英文或繁体翻译的键（没译完、译文为空的也算缺，复数这类变体每一条都要译好）；
 #   - 没被当成可本地化字符串的中文字面量（多半是该包 String(localized:) 却直接写了字符串）。
 #
 # 用法：apps/ios/scripts/check-strings.sh
@@ -47,10 +47,23 @@ for f in glob.glob(derived + "/**/arm64/*.stringsdata", recursive=True):
             if table != "Localizable" or entry["key"] not in catalogs[which]:
                 problems.append(f"{os.path.relpath(source, root)}:{line}: 不在 {which} 的 catalog 里：{entry['key']!r}")
 
+def units(node):
+    """一种语言的翻译里所有的 stringUnit，复数、设备这些变体和 substitutions 里的也算。"""
+    if isinstance(node, dict):
+        for name, child in node.items():
+            if name == "stringUnit":
+                yield child
+            else:
+                yield from units(child)
+
+def translated(localization):
+    found = list(units(localization))
+    return bool(found) and all(unit.get("state") == "translated" and unit.get("value") for unit in found)
+
 for which, strings in catalogs.items():
     for key, value in strings.items():
         have = value.get("localizations", {})
-        missing = [lang for lang in languages if lang not in have]
+        missing = [lang for lang in languages if not translated(have.get(lang))]
         if missing:
             problems.append(f"{which} 的 catalog 里 {key!r} 缺 {', '.join(missing)} 的翻译")
 

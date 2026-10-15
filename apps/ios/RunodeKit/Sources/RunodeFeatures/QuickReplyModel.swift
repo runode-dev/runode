@@ -47,6 +47,8 @@ public final class QuickReplyModel {
     @ObservationIgnored private let link: any HostLink
     @ObservationIgnored private var pending: Set<UInt32> = []
     @ObservationIgnored private var batchFailed = false
+    /// 断开过几次。取请求编号要等 `HostConnection`，等的时候连接可能断了（又连上）：前后对不上就不发。
+    @ObservationIgnored private var disconnects = 0
     @ObservationIgnored private let onDelivered: @MainActor (SessionId) -> Void
 
     /// `onDelivered` 在一批请求都送到后调，比如刷新这个会话的预览。
@@ -67,7 +69,9 @@ public final class QuickReplyModel {
     /// 按一个键。
     public func press(_ key: QuickKey) async {
         guard ensureConnected() else { return }
+        let epoch = disconnects
         let req = await link.nextRequestId()
+        guard stillConnected(since: epoch) else { return }
         begin([req])
         link.send(.sendKeys(req: req, id: sessionId, keys: [key.key]))
     }
@@ -77,8 +81,13 @@ public final class QuickReplyModel {
         let text = draft
         guard canSendDraft, ensureConnected() else { return }
         draft = ""
+        let epoch = disconnects
         let paste = await link.nextRequestId()
         let enter = await link.nextRequestId()
+        guard stillConnected(since: epoch) else {
+            if draft.isEmpty { draft = text }
+            return
+        }
         begin([paste, enter])
         link.send(.paste(req: paste, id: sessionId, text: text))
         link.send(.sendKeys(req: enter, id: sessionId, keys: ["enter"]))
@@ -87,6 +96,14 @@ public final class QuickReplyModel {
     /// 断着时 `HostConnection` 会把消息丢掉：不发，按失败报出来，草稿留着。
     private func ensureConnected() -> Bool {
         guard !isConnected else { return true }
+        failedCount += 1
+        errorMessage = String(localized: "未连接")
+        return false
+    }
+
+    /// 取编号的这段时间里连接没断过；断过时按没连上报失败。
+    private func stillConnected(since epoch: Int) -> Bool {
+        guard epoch != disconnects else { return true }
         failedCount += 1
         errorMessage = String(localized: "未连接")
         return false
@@ -125,6 +142,7 @@ public final class QuickReplyModel {
     /// 连接断了：还没回话的请求不会再有回音，算失败。
     public func connectionLost() {
         isConnected = false
+        disconnects += 1
         guard !pending.isEmpty else { return }
         pending.removeAll()
         failedCount += 1

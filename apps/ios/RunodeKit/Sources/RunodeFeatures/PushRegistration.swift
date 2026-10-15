@@ -114,6 +114,9 @@ public final class PushRegistration {
     /// 每台电脑在等回话的那次登记；新登记一次就换掉旧的。
     @ObservationIgnored private var pending: [UUID: Pending] = [:]
     @ObservationIgnored private var attempts = 0
+    /// 要删掉、正在注销的电脑：直到 `forget` 都不再登记，不然权限、token 晚到的那次登记会顶掉注销，
+    /// 删掉以后电脑还记着这部手机的 token。
+    @ObservationIgnored private var leaving: Set<UUID> = []
 
     private struct Peer {
         var name: String
@@ -180,6 +183,7 @@ public final class PushRegistration {
     /// 这台电脑要删掉了：连着的话先注销，等电脑回话（最多 `timeout`）再返回，免得删掉以后电脑上的 agent
     /// 等回答时还往这部手机推它的提醒，点开又找不到这台电脑。没连着时马上返回。
     func unregister(_ id: UUID, timeout: Duration) async {
+        leaving.insert(id)
         guard peers[id] != nil else { return }
         register(id, unregistering: true, timeout: timeout)
         // 回话到了（`handle`）、断开了（`disconnected`）或者超时，等回话的任务都会结束。
@@ -190,6 +194,7 @@ public final class PushRegistration {
     func forget(_ id: UUID) {
         disconnected(id)
         statuses[id] = nil
+        leaving.remove(id)
     }
 
     /// 这台电脑发来的消息：对上在等的那次登记的回话就记下结果。
@@ -245,7 +250,7 @@ public final class PushRegistration {
     /// 对这台电脑登记（关着提醒、系统不允许发通知或者 `unregistering` 时注销）。打开着提醒却还没拿到 token 时
     /// 先不发，拿到了再发。`timeout` 为空时等 `replyTimeout`。
     private func register(_ id: UUID, unregistering: Bool = false, timeout: Duration? = nil) {
-        guard let peer = peers[id], let identity, system != nil else { return }
+        guard let peer = peers[id], let identity, system != nil, unregistering || !leaving.contains(id) else { return }
         let token: String?
         if enabled && systemAllowed && !unregistering {
             guard let current = self.token else { return }

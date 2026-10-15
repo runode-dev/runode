@@ -48,7 +48,11 @@
                     Color.black
                     if model.scannerUnavailable == nil {
                         QRScannerView(
-                            onCode: { code in Task { await model.scanned(code) } },
+                            onCode: { code in
+                                // 粘贴面板开着时用户在看面板里那台电脑，后面的相机扫到别的码不能越过确认去配。
+                                guard !showingPaste else { return }
+                                Task { await model.scanned(code) }
+                            },
                             onUnavailable: { message in model.scannerUnavailable = message }
                         )
                         .accessibilityLabel("二维码取景框")

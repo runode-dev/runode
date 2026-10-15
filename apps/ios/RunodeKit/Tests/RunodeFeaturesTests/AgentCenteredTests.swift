@@ -153,6 +153,7 @@ private func workspace(_ index: UInt32, _ name: String, tabs: [[SessionId]], act
     @Test func metaAndBellRefreshButAtMostOncePerSecond() async {
         let model = model()
         model.handle(.message(.sessionList([info(waiting, .blocked)])))
+        model.handle(.message(.screenText(id: waiting, text: "x", truncated: false)))
         link.clearSent()
         // 刚读过：一个间隔内的变化合并成到点时的一次。
         model.handle(.message(.meta(id: waiting, meta: SessionMeta(title: "x"))))
@@ -164,6 +165,27 @@ private func workspace(_ index: UInt32, _ name: String, tabs: [[SessionId]], act
         #expect(readScreens(link.sent).isEmpty, "the deferred read is already scheduled")
         // 排着的那次到点后发出去，只发一次。
         #expect(await eventually { readScreens(link.sent) == [waiting] })
+    }
+
+    /// 同一个会话同时只读一次：读着的时候要的刷新等回话到了（连同退回读屏幕底部的后半）再读，
+    /// 回话不带编号，两次同时在路上会对错读法。
+    @Test func oneReadAtATimePerSession() async {
+        var shell = info(plain, nil)
+        shell.meta.foregroundIsShell = true
+        let model = model()
+        model.handle(.message(.sessionList([shell])))
+        #expect(readScreens(link.sent) == [plain])
+        link.clearSent()
+        clock.advance(.seconds(2))
+        model.handle(.message(.bell(id: plain)))
+        #expect(readScreens(link.sent).isEmpty, "the first read has not been answered")
+        // 最近一条命令没有输出：退回读屏幕底部，还是同一次。
+        model.handle(.message(.screenText(id: plain, text: "", truncated: false)))
+        #expect(link.sent == [.readScreen(id: plain, lines: SessionListModel.previewReadLines)])
+        link.clearSent()
+        model.handle(.message(.screenText(id: plain, text: "ok\n~ ❯", truncated: false)))
+        #expect(model.previews[plain] == ["ok"])
+        #expect(link.sent == [.readScreen(id: plain, lines: nil, command: 1)])
     }
 
     @Test func screenTextBecomesThePreview() {
@@ -299,6 +321,26 @@ private func workspace(_ index: UInt32, _ name: String, tabs: [[SessionId]], act
         #expect(reply.failedCount == 2)
     }
 
+    /// 取请求编号时连接断了又连上：不发到新连接上去（断开时已经清过在等的请求），草稿还回来。
+    @Test func aDisconnectWhileNumberingKeepsTheDraft() async {
+        let held = HeldRequestLink()
+        let reply = QuickReplyModel(sessionId: waiting, link: held)
+        reply.draft = "用方案 2"
+        let sending = Task { await reply.sendDraft() }
+        #expect(await eventually { held.waiting == 1 })
+        reply.connectionLost()
+        reply.isConnected = true
+        held.release()
+        await sending.value
+        #expect(held.inner.sent.isEmpty)
+        #expect(reply.draft == "用方案 2")
+        #expect(reply.failedCount == 1)
+
+        let pressing = Task { await reply.press(QuickKey.standard[0]) }
+        await pressing.value
+        #expect(held.inner.sent.count == 1, "connected since the press began")
+    }
+
     /// 断着时不发：按失败报出来，草稿留着；列表重新连上后照常发。
     @Test func nothingIsSentWhileDisconnected() async {
         let model = SessionListModel(machine: machineRecord(), link: link)
@@ -342,6 +384,7 @@ private func workspace(_ index: UInt32, _ name: String, tabs: [[SessionId]], act
         let model = SessionListModel(machine: machineRecord(), link: link, now: { clock.now })
         model.handle(.ready(generation: 1))
         model.handle(.message(.sessionList([info(waiting, .blocked)])))
+        model.handle(.message(.screenText(id: waiting, text: "x", truncated: false)))
         link.clearSent()
         let reply = model.quickReply(for: waiting)
         #expect(model.quickReply(for: waiting) === reply)

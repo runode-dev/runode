@@ -91,14 +91,19 @@ public actor FileMachineStore: MachineStore {
     }
 
     public func all() -> [MachineRecord] {
+        // 读不出来时给界面一张空表，下次再读；改动走 `load`，读不出来就不写。
+        (try? load()) ?? []
+    }
+
+    /// 读出存着的全部记录。读不出来（出了 I/O 错、重启后还没解锁时数据保护不让读）不等于文件坏了：
+    /// 不记缓存也不动文件，抛出去，下次再读；改动拿它垫底，读不出来就不写，不然会把别的配对冲掉。
+    private func load() throws -> [MachineRecord] {
         if let cache { return cache }
         guard FileManager.default.fileExists(atPath: url.path) else {
             cache = []
             return []
         }
-        // 读不出来（出了 I/O 错、重启后还没解锁时数据保护不让读）不等于文件坏了：不记缓存也不动文件，
-        // 下次再读。
-        guard let data = try? Data(contentsOf: url) else { return [] }
+        let data = try Data(contentsOf: url)
         do {
             cache = try JSONDecoder().decode([MachineRecord].self, from: data)
         } catch {
@@ -112,7 +117,7 @@ public actor FileMachineStore: MachineStore {
     }
 
     public func upsert(_ machine: MachineRecord) throws {
-        var machines = all()
+        var machines = try load()
         if let index = machines.firstIndex(where: { $0.id == machine.id }) {
             machines[index] = machine
         } else {
@@ -122,14 +127,14 @@ public actor FileMachineStore: MachineStore {
     }
 
     public func updateLastAddress(id: UUID, _ address: String) throws {
-        var machines = all()
+        var machines = try load()
         guard let index = machines.firstIndex(where: { $0.id == id }) else { return }
         machines[index].lastAddress = address
         try write(machines)
     }
 
     public func remove(id: UUID) throws {
-        try write(all().filter { $0.id != id })
+        try write(load().filter { $0.id != id })
     }
 
     private func write(_ machines: [MachineRecord]) throws {

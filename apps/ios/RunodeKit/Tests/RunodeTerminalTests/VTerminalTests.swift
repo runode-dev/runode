@@ -230,6 +230,16 @@ import Testing
         #expect(vt.encode(KeyInput(key: .backspace)) == [0x7F])
     }
 
+    /// 硬件键盘的 Shift+回车带着 Shift 编码，和桌面一样程序分得出它和回车；开着 Kitty 键盘协议时按协议编。
+    @Test func shiftEnterFollowsTheKeyboardProtocol() throws {
+        let vt = try terminal()
+        let shiftEnter = KeyInput(key: .enter, modifiers: .shift)
+        #expect(vt.encode(shiftEnter) != vt.encode(KeyInput(key: .enter)))
+        vt.feed(Array("\u{1b}[>1u".utf8))
+        #expect(vt.encode(shiftEnter) == Array("\u{1b}[13;2u".utf8))
+        #expect(vt.encode(KeyInput(key: .enter)) == [0x0D])
+    }
+
     @Test func controlCharacters() throws {
         let vt = try terminal()
         let ctrlC = try #require(KeyInput.typing("c", modifiers: .control))

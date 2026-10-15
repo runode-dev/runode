@@ -248,6 +248,46 @@ import Testing
         model.handle(attached(channel: 7))
         #expect(link.sent.suffix(1) == [.resize(id: sessionA, size: fit)])
         #expect(model.fitsPhone)
+        // 之后视图报的尺寸（键盘、转屏）也只让宿主记下。
+        link.clearSent()
+        let rotated = GridSize(cols: 90, rows: 15, cellWidthPx: 24, cellHeightPx: 48)
+        model.updateFitSize(rotated)
+        #expect(link.sent == [.resize(id: sessionA, size: rotated)])
+        // 用户在手机上打过字，再变尺寸时照常要。
+        model.send(.text("a"))
+        link.clearSent()
+        model.updateFitSize(fit)
+        #expect(link.sent == [.resize(id: sessionA, size: fit), .focus(id: sessionA, focused: true)])
+    }
+
+    /// 攒着的 Claude Code 滚轮是给那次连上的 VT 的：断线重连后不发到新的 VT 上。
+    @Test func pendingClaudeWheelIsDroppedOnReconnect() async throws {
+        let model = model()
+        let claude = SessionMeta(title: "claude", agent: Agent(kind: AgentKind("claude"), state: .working))
+        func attach(channel: UInt32, generation: UInt64) {
+            model.handle(.ready(generation: generation))
+            model.handle(
+                .message(
+                    .attached(
+                        .init(
+                            id: sessionA, channel: channel, size: smallGrid, mode: .vtReplay, meta: claude,
+                            settings: .default))))
+            let tracking = Data("\u{1b}[?1000h\u{1b}[?1006h".utf8)
+            model.handle(.frame(Frame(kind: .snapshot, channel: channel, payload: tracking), generation: generation))
+            model.handle(.message(.snapshotEnd(id: sessionA)))
+        }
+        attach(channel: 5, generation: 1)
+        // 一下滚 5 行：先发 4 个事件，剩下 1 行等过一会儿再发。
+        model.send(.wheel(lines: 5, column: 0, row: 0))
+        #expect(link.inputs.count == 1)
+        model.handle(.state(.waiting(reason: "断了", retryAt: .now)))
+        attach(channel: 7, generation: 2)
+        try await Task.sleep(for: .milliseconds(100))
+        #expect(link.inputs.count == 1)
+        model.send(.wheel(lines: 1, column: 0, row: 0))
+        let terminal = try #require(model.terminal)
+        #expect(link.inputs.last?.data == Data(terminal.encodeWheel(lines: 1, column: 0, row: 0)))
+        #expect(link.inputs.last?.channel == 7)
     }
 
     /// 手机适配着，断线期间电脑接过了尺寸：重连后不带尺寸连上，宿主报 owner 是电脑就跟随，不抢回来。

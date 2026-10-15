@@ -102,6 +102,9 @@ public final class TerminalModel {
     @ObservationIgnored private var fitSize: GridSize?
     /// 这次连接上已经替手机要过的尺寸；不要重复发。
     @ObservationIgnored private var requestedFit: GridSize?
+    /// 断线重连后适配手机却还没轮到手机：之后视图报的尺寸（布局、键盘、转屏）只让宿主记下，不发 `Focus`
+    /// 抢尺寸；用户在手机上打字或者选尺寸方式时才不再这样。
+    @ObservationIgnored private var passiveFit = false
     /// 自动模式下现在要不要适配手机。
     @ObservationIgnored private var autoFit: Bool
     @ObservationIgnored private let ownerHint: SizeOwnerHint
@@ -226,6 +229,7 @@ public final class TerminalModel {
         case .live, .replaying: break
         default: return
         }
+        passiveFit = false
         if case .wheel(let lines, let column, let row) = input, agent?.kind.label == "claude", terminal.mouseTracking {
             claudeWheel.add(lines)
             claudeWheelAnchor = (column, row)
@@ -263,16 +267,25 @@ public final class TerminalModel {
         }
     }
 
+    /// 攒着的滚轮是给这次连上的 VT 的：重新 `Attach` 或断线后丢掉，不发到新的 VT 上去。
+    private func resetClaudeWheel() {
+        claudeWheelRetry?.cancel()
+        claudeWheelRetry = nil
+        claudeWheel = ClaudeWheelPacer()
+    }
+
     /// 视图按自己的大小算出来的「适配手机」的网格。正在适配时跟着改（转屏、弹键盘）。
     public func updateFitSize(_ size: GridSize) {
         fitSize = size
-        if fitsPhone { requestFit() }
+        guard fitsPhone else { return }
+        if passiveFit { rememberFit() } else { requestFit() }
     }
 
     /// 用户在导航栏上选尺寸方式。
     public func setSizePreference(_ preference: SizePreference) {
         let wasFitting = fitsPhone
         sizePreference = preference
+        passiveFit = false
         if preference == .automatic {
             switch sizeOwnership {
             case .mine: autoFit = true
@@ -363,6 +376,8 @@ public final class TerminalModel {
     private func attach(_ rejoin: Rejoin? = nil) {
         attachRetry?.cancel()
         attachRetry = nil
+        resetClaudeWheel()
+        if rejoin == nil { passiveFit = false }
         awaitingAttach = true
         channel = nil
         self.rejoin = rejoin
@@ -414,6 +429,7 @@ public final class TerminalModel {
     }
 
     private func lostConnection(_ reason: String) {
+        resetClaudeWheel()
         generation = nil
         channel = nil
         awaitingAttach = false
@@ -448,7 +464,12 @@ public final class TerminalModel {
             display?.terminalDidReset(terminal, settings: settings)
             // 适配手机，但 `Attach` 时还不知道视图多大（或者重新连上时没带）：现在补上。
             if fitsPhone, requestedFit == nil {
-                if rejoin == .reconnect { rememberFit() } else { requestFit() }
+                if rejoin == .reconnect {
+                    passiveFit = true
+                    rememberFit()
+                } else {
+                    requestFit()
+                }
             }
         case .snapshotEnd:
             guard !awaitingAttach, channel != nil else { return }

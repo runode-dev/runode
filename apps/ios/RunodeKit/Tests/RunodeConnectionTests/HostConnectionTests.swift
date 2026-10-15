@@ -448,6 +448,21 @@ import Testing
         await memory.updateLastAddress(id: machine.id, "fd7a::1")
         #expect(await memory.all().isEmpty)
     }
+
+    @Test func anUnreadableStoreIsNotOverwritten() async throws {
+        let url = FileManager.default.temporaryDirectory.appending(path: "runode-test-\(UUID().uuidString)/machines.json")
+        defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+        let first = MachineRecord.sample()
+        try await FileMachineStore(url: url).upsert(first)
+        // 读不出来（比如数据保护还没放行）时，加一台不能把文件换成只剩新的那台。
+        try FileManager.default.setAttributes([.posixPermissions: 0], ofItemAtPath: url.path)
+        let store = FileMachineStore(url: url)
+        #expect(await store.all().isEmpty)
+        await #expect(throws: (any Error).self) { try await store.upsert(MachineRecord.sample()) }
+        await #expect(throws: (any Error).self) { try await store.remove(id: first.id) }
+        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
+        #expect(await FileMachineStore(url: url).all() == [first])
+    }
 }
 
 /// 找不到电脑，直到测试调 `appear`：那之后 `awaitPresence` 立刻返回。
