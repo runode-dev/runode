@@ -51,7 +51,7 @@ pub struct Span {
 
 const FOREGROUND: highlighting::Color = highlighting::Color { r: 0, g: 0, b: 0, a: 0xFF };
 
-fn ansi(index: u8) -> highlighting::Color {
+const fn ansi(index: u8) -> highlighting::Color {
     highlighting::Color { r: index, g: 0, b: 0, a: 0 }
 }
 
@@ -67,49 +67,50 @@ const BLUE: u8 = 4;
 const MAGENTA: u8 = 5;
 const CYAN: u8 = 6;
 
-/// 作用域到颜色和字形的映射。同一段文字匹配多条时 syntect 取最具体的那条。
-const RULES: &[(&str, Option<u8>, FontStyle)] = &[
-    ("comment, punctuation.definition.comment", Some(BLACK_BRIGHT), FontStyle::ITALIC),
-    ("string, punctuation.definition.string", Some(GREEN), FontStyle::empty()),
-    ("constant.character.escape, constant.other.placeholder", Some(CYAN), FontStyle::empty()),
+/// 作用域到颜色和字形的映射。同一段文字匹配多条时 syntect 从宽到具体逐条叠上去，颜色为 `None` 的那条
+/// 沿用前面叠上的颜色；要回到默认前景色得写 `FOREGROUND`（比如运算符不跟着 `keyword` 上色）。
+const RULES: &[(&str, Option<highlighting::Color>, FontStyle)] = &[
+    ("comment, punctuation.definition.comment", Some(ansi(BLACK_BRIGHT)), FontStyle::ITALIC),
+    ("string, punctuation.definition.string", Some(ansi(GREEN)), FontStyle::empty()),
+    ("constant.character.escape, constant.other.placeholder", Some(ansi(CYAN)), FontStyle::empty()),
     (
         "constant.numeric, constant.language, constant.character, constant.other, support.constant",
-        Some(CYAN),
+        Some(ansi(CYAN)),
         FontStyle::empty(),
     ),
-    ("keyword, storage, keyword.control, storage.type, storage.modifier", Some(MAGENTA), FontStyle::empty()),
-    ("keyword.operator", None, FontStyle::empty()),
+    ("keyword, storage, keyword.control, storage.type, storage.modifier", Some(ansi(MAGENTA)), FontStyle::empty()),
+    ("keyword.operator", Some(FOREGROUND), FontStyle::empty()),
     (
         "entity.name.function, support.function, variable.function, meta.function-call variable.function, support.macro, entity.name.macro",
-        Some(BLUE),
+        Some(ansi(BLUE)),
         FontStyle::empty(),
     ),
     (
         "entity.name.type, entity.name.class, entity.name.struct, entity.name.enum, entity.name.trait, entity.name.interface, entity.name.union, entity.other.inherited-class, support.type, support.class",
-        Some(YELLOW),
+        Some(ansi(YELLOW)),
         FontStyle::empty(),
     ),
     (
         "variable.language, entity.name.tag, support.type.property-name, meta.mapping.key string",
-        Some(RED),
+        Some(ansi(RED)),
         FontStyle::empty(),
     ),
-    ("entity.other.attribute-name", Some(YELLOW), FontStyle::empty()),
+    ("entity.other.attribute-name", Some(ansi(YELLOW)), FontStyle::empty()),
     (
         "meta.attribute, meta.annotation, entity.name.function.decorator, punctuation.definition.annotation, meta.preprocessor, keyword.other.preprocessor",
-        Some(CYAN),
+        Some(ansi(CYAN)),
         FontStyle::empty(),
     ),
-    ("markup.heading, markup.heading entity.name", Some(BLUE), FontStyle::BOLD),
+    ("markup.heading, markup.heading entity.name", Some(ansi(BLUE)), FontStyle::BOLD),
     ("markup.bold", None, FontStyle::BOLD),
     ("markup.italic", None, FontStyle::ITALIC),
-    ("markup.raw, markup.inline.raw", Some(GREEN), FontStyle::empty()),
-    ("markup.underline.link, markup.link, string.other.link", Some(CYAN), FontStyle::empty()),
-    ("markup.quote", Some(BLACK_BRIGHT), FontStyle::ITALIC),
-    ("punctuation.definition.list, markup.list punctuation.definition", Some(YELLOW), FontStyle::empty()),
-    ("markup.inserted", Some(GREEN), FontStyle::empty()),
-    ("markup.deleted, invalid", Some(RED), FontStyle::empty()),
-    ("markup.changed", Some(YELLOW), FontStyle::empty()),
+    ("markup.raw, markup.inline.raw", Some(ansi(GREEN)), FontStyle::empty()),
+    ("markup.underline.link, markup.link, string.other.link", Some(ansi(CYAN)), FontStyle::empty()),
+    ("markup.quote", Some(ansi(BLACK_BRIGHT)), FontStyle::ITALIC),
+    ("punctuation.definition.list, markup.list punctuation.definition", Some(ansi(YELLOW)), FontStyle::empty()),
+    ("markup.inserted", Some(ansi(GREEN)), FontStyle::empty()),
+    ("markup.deleted, invalid", Some(ansi(RED)), FontStyle::empty()),
+    ("markup.changed", Some(ansi(YELLOW)), FontStyle::empty()),
 ];
 
 fn theme() -> Theme {
@@ -117,7 +118,7 @@ fn theme() -> Theme {
         .iter()
         .map(|&(scope, color, font_style)| ThemeItem {
             scope: ScopeSelectors::from_str(scope).expect("scope selectors in RULES parse"),
-            style: StyleModifier { foreground: color.map(ansi), background: None, font_style: Some(font_style) },
+            style: StyleModifier { foreground: color, background: None, font_style: Some(font_style) },
         })
         .collect();
     Theme {
