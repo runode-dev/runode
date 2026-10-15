@@ -290,7 +290,7 @@ pub trait MenuHost: Sized + 'static {
             return;
         }
         menu.highlighted = Some(ix);
-        let item = menu.items.get(ix).and_then(Option::as_ref).filter(|item| item.enabled);
+        let item = menu.items[ix].as_ref().filter(|item| item.enabled);
         let Some((action, keep_open)) =
             item.and_then(|item| Some((item.action.as_ref()?.boxed_clone(), item.keep_open)))
         else {
