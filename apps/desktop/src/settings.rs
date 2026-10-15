@@ -34,7 +34,7 @@ use crate::{
     assets::ARROW_LEFT_ICON,
     config::AppConfig,
     ui::{
-        a11y::Hide,
+        a11y::{Hide, Press},
         font_size::{FontSize, scaled},
         input::{InputEvent, InputState},
     },
@@ -349,7 +349,7 @@ impl SettingsView {
         let back = item("settings-back", ARROW_LEFT_ICON, rust_i18n::t!("settings.back").into_owned(), false)
             .role(Role::Button)
             .mb(px(8.))
-            .on_click(cx.listener(|_, _, _, cx| cx.emit(Close)));
+            .on_press(cx, |_, _, cx| cx.emit(Close));
         div()
             .flex_none()
             .w(px(NAV_WIDTH))
@@ -367,7 +367,7 @@ impl SettingsView {
                         item(page.id(), page.icon(), page.title(), page == self.page)
                             .role(Role::Tab)
                             .aria_selected(page == self.page)
-                            .on_click(cx.listener(move |this, _, window, cx| this.select_page(page, window, cx)))
+                            .on_press(cx, move |this, window, cx| this.select_page(page, window, cx))
                     }),
                 ),
             ))
