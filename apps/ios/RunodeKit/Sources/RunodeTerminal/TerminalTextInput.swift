@@ -132,9 +132,13 @@
             get {
                 TerminalTextRange(markedSelection.location, markedSelection.location + markedSelection.length)
             }
+            // 系统给的偏移可能是照旧的组字文字算的，按现在的长度夹住：`deleteBackward` 拿 `markedSelection`
+            // 直接当替换范围，越界会抛 NSRangeException。
             set {
                 guard let range = newValue as? TerminalTextRange else { return }
-                markedSelection = NSRange(location: range.from.offset, length: range.to.offset - range.from.offset)
+                let from = min(max(range.from.offset, 0), documentLength)
+                let to = min(max(range.to.offset, 0), documentLength)
+                markedSelection = NSRange(location: from, length: to - from)
             }
         }
 
