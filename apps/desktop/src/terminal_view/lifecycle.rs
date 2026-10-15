@@ -678,7 +678,7 @@ impl TerminalView {
         let config = cx.global::<AppConfig>().0.clone();
 
         let config_watch = cx.observe_global_in::<AppConfig>(window, |view, window, cx| {
-            view.config = cx.global::<AppConfig>().0.clone();
+            let old = std::mem::replace(&mut view.config, cx.global::<AppConfig>().0.clone());
             // 主题等宿主标出位置后再换，见 `HostMsg::ThemeApplied`。
             let settings = view.config.term_settings();
             match view.screen.shown_mut() {
@@ -688,7 +688,10 @@ impl TerminalView {
                 None => view.colors = (settings.foreground, settings.background),
             }
             view.font = resolve_font(&view.config.font_family, window);
-            view.font_size = px(view.config.font_size.clamp(MIN_FONT_SIZE, MAX_FONT_SIZE));
+            // 配置的字号没变就留着用户按 ⌘+/⌘- 调出来的字号：明暗切换、改别的项都会走到这里。
+            if old.font_size != view.config.font_size {
+                view.font_size = px(view.config.font_size.clamp(MIN_FONT_SIZE, MAX_FONT_SIZE));
+            }
             // 字体、字号或行高调整都可能变了，单元格尺寸和字形缓存一律作废。
             view.metrics = None;
             view.glyphs.iter_mut().for_each(HashMap::clear);

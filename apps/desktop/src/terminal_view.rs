@@ -90,6 +90,8 @@ struct Metrics {
     cell: gpui::Size<Pixels>,
     ascent: Pixels,
     descent: Pixels,
+    /// 算它时窗口的缩放比例，变了就作废。
+    scale: f32,
 }
 
 /// 字形缓存按（粗体、斜体）分成四张表，查找时直接用 `&str`，命中时不必为键分配 `String`。

@@ -25,12 +25,13 @@ fn glyph_table(attrs: Attrs) -> usize {
 
 impl TerminalView {
     pub(super) fn metrics(&mut self, window: &Window) -> Metrics {
-        if let Some(metrics) = self.metrics {
+        let scale = window.scale_factor();
+        // 尺寸是按当时的缩放比例对齐到设备像素的，窗口换到另一块屏上要重算，不然背景块之间有缝。
+        if let Some(metrics) = self.metrics.filter(|metrics| metrics.scale == scale) {
             return metrics;
         }
         let text_system = window.text_system();
         let font_id = text_system.resolve_font(&self.font);
-        let scale = window.scale_factor();
         // 对齐到设备像素，相邻单元格背景之间才不会出现缝隙。
         let snap = |v: f32| (v * scale).round() / scale;
         let width = text_system
@@ -46,7 +47,7 @@ impl TerminalView {
             None => natural,
         }
         .max(1.);
-        let metrics = Metrics { cell: size(px(snap(width)), px(snap(height).ceil())), ascent, descent };
+        let metrics = Metrics { cell: size(px(snap(width)), px(snap(height).ceil())), ascent, descent, scale };
         self.metrics = Some(metrics);
         metrics
     }
@@ -277,8 +278,12 @@ pub(super) fn paint_frame(
                 let line = px(1. / scale);
                 let quads: &[Bounds<Pixels>] = match (focused, cursor.shape) {
                     (true, CursorShape::Block) => &[],
-                    // 骑在单元格左边线上，落在两个字符之间而不是贴着右边的字符。
-                    (true, CursorShape::Bar) => &[Bounds::new(position - point(line, px(0.)), size(line, ch))],
+                    // 骑在单元格左边线上，落在两个字符之间而不是贴着右边的字符；贴着可见区左边缘时
+                    // 整根会被内容遮罩裁掉，改画在单元格里。
+                    (true, CursorShape::Bar) => {
+                        let x = if position.x - line < grid.origin.x { position.x } else { position.x - line };
+                        &[Bounds::new(point(x, position.y), size(line, ch))]
+                    }
                     // 和文字下划线同一高度。
                     (true, CursorShape::Underline) => {
                         &[Bounds::new(position + point(px(0.), ch - px(2.)), size(width, line))]
