@@ -139,6 +139,29 @@
         }
       }
     },
+    "%@，电脑上线后自动连接" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@, will connect when the Mac is back online"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@，电脑上线后自动连接"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@，電腦上線後自動連線"
+          }
+        }
+      }
+    },
     "%@，稍后自动重连" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -5514,6 +5537,29 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "電腦的回應不符合通訊協定：%@"
+          }
+        }
+      }
+    },
+    "电脑离线，上线后自动连接" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Mac offline. Will connect when it is back"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "电脑离线，上线后自动连接"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "電腦離線，上線後自動連線"
           }
         }
       }

@@ -661,7 +661,7 @@
                             Text(Presentation.linkState(state))
                                 .font(.footnote)
                                 .foregroundStyle(.secondary)
-                        } else if case .waiting(let reason, _) = state {
+                        } else if case .waiting(let reason, _, _) = state {
                             Text(reason)
                                 .font(.footnote)
                                 .foregroundStyle(.secondary)

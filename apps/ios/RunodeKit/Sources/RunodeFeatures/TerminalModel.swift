@@ -383,7 +383,7 @@ public final class TerminalModel {
             switch state {
             case .connected:
                 break
-            case .waiting(let reason, _):
+            case .waiting(let reason, _, _):
                 lostConnection(reason)
             case .failed(let failure):
                 lostConnection(failure.errorDescription ?? String(localized: "连接失败"))

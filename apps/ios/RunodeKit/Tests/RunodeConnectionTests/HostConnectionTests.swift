@@ -211,6 +211,44 @@ import Testing
         #expect(!LinkFailure.rejected(.disabled).isFatal)
         #expect(!LinkFailure.rejected(.unknown("future")).isFatal)
         #expect(!LinkFailure.timeout.isFatal)
+        // 连不上和远程访问没开算电脑离线：等它上线，不按退避一遍遍试。
+        for failure in [LinkFailure.timeout, .noAddress, .connectionFailed("refused"), .rejected(.disabled)] {
+            #expect(failure.isOffline, "\(failure)")
+        }
+        #expect(!LinkFailure.rejected(.rateLimited).isOffline)
+        #expect(!LinkFailure.closed("bye").isOffline)
+    }
+
+    /// 电脑离线（连不上）时不按退避一遍遍试：等它在局域网里重新公布服务，公布了马上连。
+    @Test func anOfflineHostIsNotPolledUntilItReappears() async throws {
+        let discovery = SignalDiscovery()
+        let link = HostConnection(
+            machine: machine, keyStore: keys, machines: store, discovery: discovery,
+            identity: ClientIdentity(build: "ios-test", deviceName: "测试 iPhone"),
+            policy: ReconnectPolicy(base: .milliseconds(10), maximum: .milliseconds(20), offlineRetry: .seconds(30)),
+            open: supply.opener)
+        var events = await link.events().makeAsyncIterator()
+        await link.start()
+        // 没有准备连接，连不上：进入等待，下次兜底的重试在很久以后。
+        while let event = await events.next() {
+            if case .state(.waiting(_, let retryAt, let offline)) = event, retryAt.timeIntervalSinceNow > 10 {
+                #expect(offline)
+                break
+            }
+        }
+        let attempts = supply.requestedTargets.count
+        try await Task.sleep(for: .milliseconds(200))
+        #expect(supply.requestedTargets.count == attempts)
+        // 电脑回来了：公布服务，连接马上再试。
+        let transport = FakeTransport()
+        supply.add(transport)
+        let started = ContinuousClock.now
+        await discovery.appear()
+        var host = FakeHost(transport)
+        _ = try await admit(&host)
+        #expect(await waitReady(&events) != nil)
+        #expect(ContinuousClock.now - started < .seconds(2))
+        await link.stop()
     }
 
     @Test func triesTheNextAddressWhenOneFails() async throws {
@@ -348,7 +386,7 @@ import Testing
         await link.start()
         // 没有准备连接，连不上。
         while let event = await events.next() {
-            if case .state(.waiting(_, let retryAt)) = event, retryAt.timeIntervalSinceNow > 2 { break }
+            if case .state(.waiting(_, let retryAt, _)) = event, retryAt.timeIntervalSinceNow > 2 { break }
         }
         let transport = FakeTransport()
         supply.add(transport)
@@ -409,5 +447,28 @@ import Testing
         let memory = MemoryMachineStore()
         await memory.updateLastAddress(id: machine.id, "fd7a::1")
         #expect(await memory.all().isEmpty)
+    }
+}
+
+/// 找不到电脑，直到测试调 `appear`：那之后 `awaitPresence` 立刻返回。
+actor SignalDiscovery: HostDiscovery {
+    private var present = false
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+
+    nonisolated func locate(_ fingerprint: CertificateFingerprint, timeout: Duration) async -> TransportTarget? {
+        nil
+    }
+
+    func awaitPresence(_ fingerprint: CertificateFingerprint) async {
+        if present { return }
+        await withCheckedContinuation { waiters.append($0) }
+    }
+
+    func appear() {
+        present = true
+        for waiter in waiters {
+            waiter.resume()
+        }
+        waiters.removeAll()
     }
 }

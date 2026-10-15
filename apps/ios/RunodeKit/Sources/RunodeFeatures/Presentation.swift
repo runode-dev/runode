@@ -65,7 +65,8 @@ public enum Presentation {
         case .idle: String(localized: "未连接")
         case .connecting: String(localized: "正在连接…")
         case .connected(let hostName, _): String(localized: "已连接 \(hostName)")
-        case .waiting(let reason, _): String(localized: "\(reason)，稍后自动重连")
+        case .waiting(let reason, _, true): String(localized: "\(reason)，电脑上线后自动连接")
+        case .waiting(let reason, _, false): String(localized: "\(reason)，稍后自动重连")
         case .failed(let failure): failure.errorDescription ?? String(localized: "连接失败")
         }
     }
@@ -76,7 +77,8 @@ public enum Presentation {
         case .idle: return String(localized: "未连接")
         case .connecting: return String(localized: "连接中…")
         case .connected: return String(localized: "已连接")
-        case .waiting(_, let retryAt):
+        case .waiting(_, _, true): return String(localized: "电脑离线，上线后自动连接")
+        case .waiting(_, let retryAt, false):
             let seconds = Int(retryAt.timeIntervalSince(now).rounded(.up))
             return seconds > 0 ? String(localized: "已断开，\(seconds) 秒后重连") : String(localized: "已断开，正在重连")
         case .failed: return String(localized: "连接失败")

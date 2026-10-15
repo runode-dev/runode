@@ -3,16 +3,23 @@ import RunodeProtocol
 import Synchronization
 
 /// 断线重连等多久：第 n 次连续失败后等 `base * 2^(n-1)`，最多 `maximum`；用户没在看的电脑
-/// （`HostLink.setFocused`）最多 `idleMaximum`。
+/// （`HostLink.setFocused`）最多 `idleMaximum`。电脑离线（连不上、没开远程访问）时不按这个退避
+/// 一遍遍试，等它在局域网里重新公布 Bonjour 服务再连，兜底每 `offlineRetry` 探一次（不在局域网里的电脑
+/// 没有 Bonjour 可等）。
 public struct ReconnectPolicy: Hashable, Sendable {
     public var base: Duration
     public var maximum: Duration
     public var idleMaximum: Duration
+    public var offlineRetry: Duration
 
-    public init(base: Duration = .seconds(1), maximum: Duration = .seconds(15), idleMaximum: Duration = .seconds(60)) {
+    public init(
+        base: Duration = .seconds(1), maximum: Duration = .seconds(15), idleMaximum: Duration = .seconds(60),
+        offlineRetry: Duration = .seconds(300)
+    ) {
         self.base = base
         self.maximum = maximum
         self.idleMaximum = idleMaximum
+        self.offlineRetry = offlineRetry
     }
 
     public func delay(afterFailures failures: Int, focused: Bool = true) -> Duration {
@@ -173,7 +180,7 @@ public actor HostConnection: HostLink {
     }
 
     private func focusGained() {
-        guard focused.withLock({ $0 }), case .waiting(_, let retryAt) = state,
+        guard focused.withLock({ $0 }), case .waiting(_, let retryAt, _) = state,
             Duration.seconds(retryAt.timeIntervalSinceNow) > policy.maximum
         else { return }
         backoffTask?.cancel()
@@ -216,6 +223,8 @@ public actor HostConnection: HostLink {
         while wanted, !Task.isCancelled {
             setState(.connecting)
             var reason: String
+            // 这次是电脑离线（连不上、没开远程访问），不是连上后断的或别的错。
+            var offline = false
             do {
                 let session = try await establish()
                 let connectedAt = ContinuousClock.now
@@ -238,17 +247,32 @@ public actor HostConnection: HostLink {
                 break
             } catch {
                 failures += 1
-                // 被限速了：直接等最长的退避，不在限速期里接着撞。远程访问正在关掉也一样，多半是电脑那边
-                // 升级或重开，等它起来。
-                if case .rejected(let reason)? = error as? LinkFailure, reason == .rateLimited || reason == .disabled {
+                // 被限速了：直接等最长的退避，不在限速期里接着撞。
+                if case .rejected(.rateLimited)? = error as? LinkFailure {
                     failures = max(failures, 16)
                 }
+                offline = (error as? LinkFailure)?.isOffline ?? false
                 reason = (error as? LinkFailure)?.errorDescription ?? error.localizedDescription
             }
             guard wanted, !Task.isCancelled else { break }
             let delay = policy.delay(afterFailures: failures, focused: focused.withLock { $0 })
-            setState(.waiting(reason: reason, retryAt: .now + TimeInterval(delay.components.seconds)))
-            let backoff = Task { try await Task.sleep(for: delay) }
+            // 电脑离线时不一遍遍试：退避过后等它在局域网里重新公布服务，兜底到 `offlineRetry` 再探一次。
+            // 用户点重试、回到这台电脑的页面（`focusGained`）照样马上试。
+            let retryAfter = offline ? max(delay, policy.offlineRetry) : delay
+            setState(
+                .waiting(reason: reason, retryAt: .now + TimeInterval(retryAfter.components.seconds), offline: offline))
+            let backoff = Task { [discovery, fingerprint = machine.fingerprint] in
+                guard offline else { return try await Task.sleep(for: delay) }
+                try await withThrowingTaskGroup(of: Void.self) { group in
+                    group.addTask {
+                        try await Task.sleep(for: delay)
+                        await discovery.awaitPresence(fingerprint)
+                    }
+                    group.addTask { try await Task.sleep(for: retryAfter) }
+                    defer { group.cancelAll() }
+                    try await group.next()
+                }
+            }
             backoffTask = backoff
             _ = try? await backoff.value
             backoffTask = nil

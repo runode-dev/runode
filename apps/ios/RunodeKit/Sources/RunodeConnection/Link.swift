@@ -19,8 +19,9 @@ public enum LinkState: Hashable, Sendable {
     case idle
     case connecting
     case connected(hostName: String, address: String?)
-    /// 断了或者连不上，`retryAt` 时自动再试。
-    case waiting(reason: String, retryAt: Date)
+    /// 断了或者连不上，`retryAt` 时自动再试。`offline` 是电脑离线（连不上、没开远程访问）：不一遍遍试，
+    /// 它在局域网里重新公布服务时马上连，`retryAt` 只是兜底。
+    case waiting(reason: String, retryAt: Date, offline: Bool = false)
     /// 不会自动重试的失败（被拒绝、版本不兼容、私钥没了等），要用户处理后手动重试。
     case failed(LinkFailure)
 
@@ -59,10 +60,19 @@ public enum LinkFailure: Error, Hashable, Sendable, LocalizedError {
             // 设备被撤销、签名不对、口令作废：再试也一样，签名不对和口令作废电脑还会计入限速。
             case .unknownDevice, .badSignature, .pairingInvalid: true
             // 远程访问正在关掉：电脑升级交接、重开远程访问时监听也会停一下，断开后立刻重连正撞上它；
-            // 不算致命，只是按最长的退避等（见 `HostConnection`），用户真关了也不至于一直打扰。
+            // 不算致命，当电脑离线处理（`isOffline`）：等它重新公布服务再连，不一遍遍试。
             case .rateLimited, .disabled, .unknown: false
             }
         case .gateVersion, .incompatible, .missingKey, .invitationExpired, .keychain: true
+        default: false
+        }
+    }
+
+    /// 电脑离线：连不上、超时、没有地址，或者远程访问没开（正在关掉）。这种失败不按退避一遍遍试，等电脑
+    /// 重新上线（见 `ReconnectPolicy.offlineRetry`）。
+    public var isOffline: Bool {
+        switch self {
+        case .timeout, .noAddress, .connectionFailed, .rejected(.disabled): true
         default: false
         }
     }

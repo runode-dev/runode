@@ -454,7 +454,7 @@ func attaches(_ sent: [ClientMsg]) -> [ClientMsg] {
 
 extension LinkState {
     var retryDate: Date? {
-        if case .waiting(_, let date) = self { return date }
+        if case .waiting(_, let date, _) = self { return date }
         return nil
     }
 }

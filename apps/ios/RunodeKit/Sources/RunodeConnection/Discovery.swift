@@ -6,9 +6,18 @@ import RunodeProtocol
 public protocol HostDiscovery: Sendable {
     /// `timeout` 内找到 TXT 里 `fp` 对得上的服务就返回它，找不到返回 `nil`。
     func locate(_ fingerprint: CertificateFingerprint, timeout: Duration) async -> TransportTarget?
+    /// 一直等到这台电脑在局域网里公布服务（电脑离线时连接据此知道它回来了），只有取消才提前返回。
+    func awaitPresence(_ fingerprint: CertificateFingerprint) async
 }
 
 extension HostDiscovery {
+    /// 默认一直浏览到找到为止。
+    public func awaitPresence(_ fingerprint: CertificateFingerprint) async {
+        while !Task.isCancelled {
+            if await locate(fingerprint, timeout: .seconds(3600)) != nil { return }
+        }
+    }
+
     /// 连这台电脑时要挨个试的地址：Bonjour 找到的在前，再是 `fallback`。
     func targets(for fingerprint: CertificateFingerprint, then fallback: [TransportTarget]) async -> [TransportTarget] {
         let found = await locate(fingerprint, timeout: .seconds(2))
@@ -44,6 +53,13 @@ public struct NoDiscovery: HostDiscovery {
 
     public func locate(_ fingerprint: CertificateFingerprint, timeout: Duration) async -> TransportTarget? {
         nil
+    }
+
+    /// 找不着，只能等别的事（兜底的定时、用户点重试）来叫。
+    public func awaitPresence(_ fingerprint: CertificateFingerprint) async {
+        while !Task.isCancelled {
+            try? await Task.sleep(for: .seconds(3600))
+        }
     }
 }
 

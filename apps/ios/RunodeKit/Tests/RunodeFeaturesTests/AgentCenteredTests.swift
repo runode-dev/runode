@@ -385,6 +385,9 @@ private func workspace(_ index: UInt32, _ name: String, tabs: [[SessionId]], act
         let now = Date(timeIntervalSince1970: 1000)
         #expect(Presentation.linkStatus(.waiting(reason: "断了", retryAt: now + 4.2), now: now) == "已断开，5 秒后重连")
         #expect(Presentation.linkStatus(.waiting(reason: "断了", retryAt: now - 1), now: now) == "已断开，正在重连")
+        #expect(
+            Presentation.linkStatus(.waiting(reason: "连接失败", retryAt: now + 300, offline: true), now: now)
+                == "电脑离线，上线后自动连接")
         #expect(Presentation.linkStatus(.connecting) == "连接中…")
     }
 
