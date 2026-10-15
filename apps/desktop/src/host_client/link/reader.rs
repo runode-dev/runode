@@ -97,7 +97,7 @@ pub(super) fn dispatch(inner: &Inner, generation: u64, message: HostMsg) {
                 // 等的一方已经超时走了，没人要这个会话。
                 drop(state);
                 tracing::debug!("ending session {id}, spawned after its caller gave up");
-                let _ = inner.control(&ClientMsg::Kill { id });
+                let _ = inner.control_on(generation, &ClientMsg::Kill { id });
             }
         },
         message @ (HostMsg::Tasks { req, .. }
@@ -131,7 +131,7 @@ pub(super) fn dispatch(inner: &Inner, generation: u64, message: HostMsg) {
             drop(state);
             if inner.ui.unbounded_send((ticket, *request)).is_err() {
                 let reply = HostMsg::Error { req: None, id: None, message: "the runode app is quitting".into() };
-                let _ = inner.control(&ClientMsg::UiReply { ui, reply: Box::new(reply) });
+                let _ = inner.control_on(generation, &ClientMsg::UiReply { ui, reply: Box::new(reply) });
             }
         }
         HostMsg::Attached { id, channel, size, mode, meta, settings } => {
