@@ -22,6 +22,9 @@ const RUN_TIMEOUT: Duration = Duration::from_secs(120);
 /// git 退出以后最多再等它的输出管道关上这么久：钩子留在后台的进程拿着管道时等不到头。
 const PIPE_GRACE: Duration = Duration::from_secs(1);
 
+/// 超时时先让 git 自己收拾（删掉 `index.lock` 这类锁文件）最多这么久，再强杀。
+const TERM_GRACE: Duration = Duration::from_secs(2);
+
 /// 能在后台线程里用的仓库句柄，写操作都挂在它上面；由 `Snapshot::repo` 取得。git 命令
 /// 可能要跑好几秒（推送、拉取），界面线程别直接调。子模块和嵌套的仓库各用各的句柄。
 #[derive(Clone, Debug)]
@@ -184,17 +187,29 @@ fn batch_ssh(command: &mut Command, dir: &Path) {
     command.env("GIT_SSH_COMMAND", "ssh -o BatchMode=yes");
 }
 
-/// 杀掉 `run_for` 拉起的 git 所在的整个进程组，再收掉 git。
+/// 杀掉 `run_for` 拉起的 git 所在的整个进程组，再收掉 git。先发 TERM，git 收到会删掉自己拿着的锁文件
+/// 再退出；直接 KILL 会把 `index.lock` 留下，之后的 git 命令都说有别的 git 在跑。等 `TERM_GRACE` 还没
+/// 退的（不理 TERM 的钩子）再 KILL。
 fn kill_group(child: &mut Child) {
-    // 进程组号就是 git 的进程号（`process_group(0)`）；std 里没有给进程组发信号的接口，借 `kill`。
+    signal_group(child, "-TERM");
+    let deadline = Instant::now() + TERM_GRACE;
+    while matches!(child.try_wait(), Ok(None)) && Instant::now() < deadline {
+        thread::sleep(Duration::from_millis(10));
+    }
+    signal_group(child, "-KILL");
+    let _ = child.kill();
+    let _ = child.wait();
+}
+
+/// 给 git 所在的进程组发 `signal`。进程组号就是 git 的进程号（`process_group(0)`）；std 里没有给进程组
+/// 发信号的接口，借 `kill`。
+fn signal_group(child: &Child, signal: &str) {
     let _ = Command::new("kill")
-        .args(["-KILL", "--", &format!("-{}", child.id())])
+        .args([signal, "--", &format!("-{}", child.id())])
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .status();
-    let _ = child.kill();
-    let _ = child.wait();
 }
 
 /// git 退出以后，成功时是标准输出，失败时把标准错误（没有就用标准输出）整理成错误。
@@ -659,6 +674,12 @@ mod tests {
     #[test]
     fn kills_git_that_runs_past_the_timeout() {
         let dir = temp_repo("timeout");
+        // `commit -a` 跑钩子时拿着 `index.lock`。
+        let commit = ["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-a", "-m", "x"];
+        fs::write(dir.join("f"), "a").unwrap();
+        assert!(git(&dir, &["add", "f"]).is_some());
+        assert!(git(&dir, &commit).is_some());
+        fs::write(dir.join("f"), "b").unwrap();
         // pre-commit 钩子一直不退出，像 ssh、gpg 等着输入那样；它把进程号记下来，好看它也被杀掉了。
         let pid_file = dir.join("hook.pid");
         let hooks = dir.join(".git/test-hooks");
@@ -668,9 +689,9 @@ mod tests {
         fs::set_permissions(&hook, fs::Permissions::from_mode(0o755)).unwrap();
         assert!(git(&dir, &["config", "core.hooksPath", &hooks.to_string_lossy()]).is_some());
         let started = Instant::now();
-        let args = ["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "x"];
-        let err = run_for(&dir, args, None, Duration::from_secs(1)).unwrap_err();
-        assert!(started.elapsed() < Duration::from_secs(10), "{:?}", started.elapsed());
+        // 给足时间让钩子跑起来、记下进程号：整套测试一起跑时机器很忙。
+        let err = run_for(&dir, commit, None, Duration::from_secs(3)).unwrap_err();
+        assert!(started.elapsed() < Duration::from_secs(12), "{:?}", started.elapsed());
         assert!(err.message.contains("超过"), "{}", err.message);
         // 钩子在 git 的进程组里，跟着一起杀掉；死了以后要等被收掉，`kill -0` 才找不到它。
         let pid = fs::read_to_string(&pid_file).unwrap().trim().to_owned();
@@ -680,6 +701,8 @@ mod tests {
             thread::sleep(Duration::from_millis(50));
         }
         assert!(!alive(), "钩子 {pid} 还活着");
+        // 先发的 TERM 让 git 删掉了自己拿着的锁，后面的 git 命令不会说有别的 git 在跑。
+        assert!(!dir.join(".git/index.lock").exists());
         fs::remove_dir_all(&dir).unwrap();
     }
 
