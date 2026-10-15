@@ -80,6 +80,7 @@ icons! {
     SWIFT = "swift",
     DART = "dart",
     XML = "xml",
+    DATABASE = "database",
     IMAGE = "image",
     SVG = "svg",
     TEXT = "text",
@@ -184,6 +185,7 @@ fn icon_by_extension(ext: &str) -> Option<&'static str> {
         "swift" => SWIFT,
         "dart" => DART,
         "xml" | "plist" | "xib" | "storyboard" | "entitlements" => XML,
+        "sql" | "psql" | "pgsql" | "mysql" | "sqlite" | "sqlite3" | "db" => DATABASE,
         "png" | "jpg" | "jpeg" | "gif" | "webp" | "bmp" | "ico" | "icns" | "tif" | "tiff" | "avif" | "heic" => IMAGE,
         "svg" => SVG,
         "txt" => TEXT,
@@ -212,6 +214,7 @@ mod tests {
         assert_eq!(file_icon("CLAUDE.md"), MARKDOWN_GUIDE);
         assert_eq!(file_icon("notes.md"), MARKDOWN);
         assert_eq!(file_icon("yarn.lock"), LOCK);
+        assert_eq!(file_icon("property_counter.sql"), DATABASE);
     }
 
     #[test]
