@@ -446,6 +446,9 @@ impl WindowView {
     /// 切到第 `ix` 个 workspace，显示它切走之前的那个标签。
     pub(super) fn activate_workspace(&mut self, ix: usize, window: &mut Window, cx: &mut Context<Self>) {
         let shown = self.active == ix;
+        // 先把下标指到位：关掉当前 workspace 后 `active` 可能已经越界，下面关浮层时要经 `workspace()`
+        // 取焦点句柄。
+        self.active = ix;
         // 分支列表可能列的是上一个 workspace 的仓库。不按下标判断换没换：关掉或拖动 workspace 时
         // 下标和 workspace 对不上。
         self.close_branch_picker(window, cx);
@@ -455,7 +458,6 @@ impl WindowView {
         self.file_tree.update(cx, |tree, cx| tree.close_menu(window, cx));
         self.preview.update(cx, |preview, cx| preview.close_menu(window, cx));
         self.close_menu(window, cx);
-        self.active = ix;
         self.sidebar_scroll.scroll_to_item(ix);
         // 文件树切到这个 workspace 的树，搜索框换上它的搜索词。
         self.with_file_tree(cx, |_, _| {});
