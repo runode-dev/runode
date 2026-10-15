@@ -3,14 +3,18 @@ version = "2026.10.01.1"
 min_engine_version = 1
 updated_at = "2026-10-01T00:00:00Z"
 
+# pi draws its spinner near the input box at the bottom. pi has no idle rule
+# to override this one, so only look at the bottom of the screen and only at a
+# line that starts with the spinner: an answer or command output that says
+# "still working..." must not keep the session busy until it scrolls away.
 [[rules]]
 id = "working_literal"
 state = "working"
 priority = 100
-region = "whole_recent"
+region = "bottom_non_empty_lines(12)"
 visible_working = true
 any = [
-  { contains = ["Working..."] },
+  { line_regex = ['^\s*[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏] Working\.\.\.'] },
   { line_regex = ['^[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏] Working$'] },
 ]
 

@@ -110,6 +110,10 @@ fn pi() {
     assert_eq!(screen(Pi, "⠋ Working...\n"), "working");
     assert_eq!(screen(Pi, "── ⠙ Working ────────\n"), "working");
     assert_eq!(screen(Pi, "π - runode\n> \n"), "unknown");
+    // 回答正文或命令输出里提到这几个字不算在干活：不论在屏幕底部还是早就滚到上面。
+    assert_eq!(screen(Pi, "The build is still working... let me check.\n\n> \n"), "unknown");
+    let scrolled = format!("$ make\nstill working...\n{}> \n", "done\n".repeat(20));
+    assert_eq!(screen(Pi, &scrolled), "unknown");
 }
 
 #[test]
