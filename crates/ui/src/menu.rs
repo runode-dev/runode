@@ -184,14 +184,22 @@ impl Menu {
     }
 }
 
-/// `items` 里派发 `action` 的那一项；有几项一样时取离第 `near` 项最近的。
-fn find_action(items: &[Option<MenuItem>], near: usize, action: &dyn Action) -> Option<usize> {
+/// `items` 里和原来第 `near` 项 `old` 是同一项的那一项：整行派发的动作一样，其中右边各按钮派发的动作也一样、
+/// 字也一样的优先。只比整行的动作不够：两个名字不同的自定义命令整行跑的可能是同一条命令，删除、编辑按钮
+/// 带着名字才分得开。一样像的有几项时取离第 `near` 项最近的。
+fn find_item(items: &[Option<MenuItem>], near: usize, old: &MenuItem) -> Option<usize> {
+    let action = old.action.as_deref()?;
+    let same_buttons = |item: &MenuItem| {
+        item.buttons.len() == old.buttons.len()
+            && item.buttons.iter().zip(&old.buttons).all(|((_, a), (_, b))| a.partial_eq(b.as_ref()))
+    };
     items
         .iter()
         .enumerate()
-        .filter(|(_, item)| item.as_ref().and_then(|item| item.action.as_deref()).is_some_and(|a| a.partial_eq(action)))
+        .filter_map(|(ix, item)| Some((ix, item.as_ref()?)))
+        .filter(|(_, item)| item.action.as_deref().is_some_and(|a| a.partial_eq(action)))
+        .min_by_key(|(ix, item)| (!same_buttons(item), item.label != old.label, ix.abs_diff(near)))
         .map(|(ix, _)| ix)
-        .min_by_key(|ix| ix.abs_diff(near))
 }
 
 /// 开菜单的视图：菜单的状态存在它身上（`menu_slot`），这里给它开、关、画菜单的写法。
@@ -255,13 +263,11 @@ pub trait MenuHost: Sized + 'static {
     /// 换掉开着的菜单的各项，选中的位置尽量不变。
     fn replace_menu_items(&mut self, items: Vec<Option<MenuItem>>, cx: &mut Context<Self>) {
         if let Some(menu) = self.menu_slot() {
-            let old = menu
-                .highlighted
-                .and_then(|ix| Some((ix, menu.items.get(ix)?.as_ref()?.action.as_ref()?.boxed_clone())));
-            menu.items = items;
+            let old_items = std::mem::replace(&mut menu.items, items);
             // 选中的那一项还在时跟着它走：前面多了、少了几项（比如后台重列了命令）时行号变了，留着行号回车会
             // 按到别的项上。
-            if let Some(ix) = old.and_then(|(ix, action)| find_action(&menu.items, ix, action.as_ref())) {
+            let old = menu.highlighted.and_then(|ix| Some((ix, old_items.get(ix)?.as_ref()?)));
+            if let Some(ix) = old.and_then(|(ix, old)| find_item(&menu.items, ix, old)) {
                 menu.highlighted = Some(ix);
                 menu.scroll.scroll_to_item(ix);
             }
@@ -538,12 +544,31 @@ mod tests {
     #[test]
     fn finds_the_highlighted_item_by_action() {
         let items = [None, item(Box::new(Third)), item(Box::new(First)), item(Box::new(Second))];
-        assert_eq!(find_action(&items, 1, &First), Some(2));
-        assert_eq!(find_action(&items, 3, &Second), Some(3));
+        let old = |action: Box<dyn Action>| item(action).unwrap();
+        assert_eq!(find_item(&items, 1, &old(Box::new(First))), Some(2));
+        assert_eq!(find_item(&items, 3, &old(Box::new(Second))), Some(3));
         let without = [item(Box::new(First)), item(Box::new(Third))];
-        assert_eq!(find_action(&without, 1, &Second), None);
+        assert_eq!(find_item(&without, 1, &old(Box::new(Second))), None);
         let twice = [item(Box::new(First)), item(Box::new(Second)), item(Box::new(Third)), item(Box::new(First))];
-        assert_eq!(find_action(&twice, 2, &First), Some(3));
-        assert_eq!(find_action(&twice, 1, &First), Some(0));
+        assert_eq!(find_item(&twice, 2, &old(Box::new(First))), Some(3));
+        assert_eq!(find_item(&twice, 1, &old(Box::new(First))), Some(0));
+    }
+
+    /// 整行动作一样、按钮的动作或字不一样的两项（跑同一条命令的两个自定义命令）分得开：上面多了一行、
+    /// 原来那项挪下去时，不选到挪到它原来位置上的另一项。字改了也先认按钮；按钮也对不上时只比整行的动作。
+    #[test]
+    fn tells_apart_items_with_the_same_action() {
+        let button = || MenuButton { icon: "", tooltip: SharedString::default(), keep_open: true, cmd_key: None };
+        let task = |name: &str, delete: Box<dyn Action>| {
+            Some(MenuItem::label(name.to_owned(), None, Some(Box::new(First))).with_button(button(), delete))
+        };
+        let old = task("b", Box::new(Third)).unwrap();
+        // 原来是 [a, b]，选中第 1 项 b；重列后上面多了一行，b 挪到第 2 项，a 到了第 1 项。
+        let items = [item(Box::new(Second)), task("a", Box::new(Second)), task("b", Box::new(Third))];
+        assert_eq!(find_item(&items, 1, &old), Some(2));
+        let renamed = [item(Box::new(Second)), task("a", Box::new(Second)), task("c", Box::new(Third))];
+        assert_eq!(find_item(&renamed, 1, &old), Some(2));
+        let neither = [item(Box::new(Second)), task("a", Box::new(Second)), task("c", Box::new(Second))];
+        assert_eq!(find_item(&neither, 1, &old), Some(1));
     }
 }
