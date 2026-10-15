@@ -185,7 +185,7 @@
         private var linkSubtitle: String {
             switch model.linkState {
             case .connected(_, let address?): String(localized: "已连接 · \(Presentation.displayAddress(address))")
-            case .waiting: String(localized: "已断开，正在重连")
+            // 等重连的交给 `linkStatus`：电脑离线和按退避重连的文案不一样。
             default: Presentation.linkStatus(model.linkState)
             }
         }

@@ -1,5 +1,6 @@
 import Foundation
 import Network
+import Synchronization
 import RunodeProtocol
 
 /// 按证书指纹在局域网里找电脑现在的地址。
@@ -11,10 +12,12 @@ public protocol HostDiscovery: Sendable {
 }
 
 extension HostDiscovery {
-    /// 默认一直浏览到找到为止。
+    /// 默认一直浏览到找到为止。浏览器出错（比如没有本地网络权限）时 `locate` 会马上返回空，歇一会儿再开，
+    /// 不空转。
     public func awaitPresence(_ fingerprint: CertificateFingerprint) async {
         while !Task.isCancelled {
             if await locate(fingerprint, timeout: .seconds(3600)) != nil { return }
+            try? await Task.sleep(for: .seconds(30))
         }
     }
 
@@ -63,6 +66,13 @@ public struct NoDiscovery: HostDiscovery {
     }
 }
 
+/// `BonjourDiscovery.locate` 里等结果的一方和给结果的一方谁先到都行。
+private struct Waiting {
+    var continuation: CheckedContinuation<TransportTarget?, Never>?
+    /// 已经有结果了（外层是「有没有结果」，里层是找到的地址或空）。
+    var result: TransportTarget??
+}
+
 /// 用 Bonjour 浏览 `_runode._tcp`：电脑开着远程访问时公布这个服务，TXT 记录里有 `v=1` 和 `fp=<指纹>`。
 /// 要 Info.plist 里的 `NSLocalNetworkUsageDescription` 和 `NSBonjourServices`。
 public struct BonjourDiscovery: HostDiscovery {
@@ -74,13 +84,33 @@ public struct BonjourDiscovery: HostDiscovery {
         let browser = NWBrowser(for: .bonjourWithTXTRecord(type: Self.serviceType, domain: nil), using: .tcp)
         let queue = DispatchQueue(label: "dev.runode.bonjour")
         let once = OnceFlag()
+        // 取消时直接让等待返回：取消可能抢在 `browser.start` 之前到，那时没有人保证 `.cancelled` 的回调还会来，
+        // 不能只靠回调里的 `finish`，不然要等满 `timeout`（离线等待时是一小时）。
+        let pending = Mutex<Waiting>(Waiting())
+        let finish: @Sendable (TransportTarget?) -> Void = { target in
+            guard once.claim() else { return }
+            browser.cancel()
+            // 等待方还没登记（取消抢在前头）时记下结果，它登记时自己取。
+            let waiting = pending.withLock { waiting in
+                waiting.result = .some(target)
+                return waiting.continuation
+            }
+            waiting?.resume(returning: target)
+        }
         return await withTaskCancellationHandler {
             await withCheckedContinuation { (continuation: CheckedContinuation<TransportTarget?, Never>) in
-                let finish: @Sendable (TransportTarget?) -> Void = { target in
-                    if once.claim() {
-                        browser.cancel()
-                        continuation.resume(returning: target)
-                    }
+                let done = pending.withLock { waiting -> TransportTarget?? in
+                    if let result = waiting.result { return result }
+                    waiting.continuation = continuation
+                    return nil
+                }
+                if let done {
+                    continuation.resume(returning: done)
+                    return
+                }
+                if Task.isCancelled {
+                    finish(nil)
+                    return
                 }
                 browser.browseResultsChangedHandler = { results, _ in
                     for result in results {
@@ -106,7 +136,7 @@ public struct BonjourDiscovery: HostDiscovery {
                 queue.asyncAfter(deadline: .now() + seconds) { finish(nil) }
             }
         } onCancel: {
-            browser.cancel()
+            finish(nil)
         }
     }
 }
