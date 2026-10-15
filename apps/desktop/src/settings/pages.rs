@@ -604,8 +604,9 @@ impl SettingsView {
         const KEY: &str = "config-file";
         let files = self.file.values(KEY);
         let reset = self.reset(KEY, cx);
+        let error = self.errors.get(KEY).cloned();
         let mut out =
-            div().flex().flex_col().child(row(key_title(KEY), Some(key_hint(KEY)), div(), reset, None, theme));
+            div().flex().flex_col().child(row(key_title(KEY), Some(key_hint(KEY)), div(), reset, error, theme));
         // 末尾总留一个空的，在里面打字就是加一行。
         let last = files.len();
         for ix in 0..=last {
