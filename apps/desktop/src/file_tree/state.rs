@@ -375,6 +375,7 @@ impl TreeState {
             self.git = git;
             changed = true;
         }
+        let mut collapsed = Vec::new();
         for (dir, listing) in listings {
             match listing {
                 Some(entries) => {
@@ -386,12 +387,24 @@ impl TreeState {
                 // 目录被删掉或者改了名，收起来。
                 None => {
                     changed |= self.listings.remove(&dir).is_some();
-                    changed |= self.expanded.remove(&dir);
+                    if self.expanded.remove(&dir) {
+                        changed = true;
+                        collapsed.push(dir);
+                    }
                 }
             }
         }
         if changed {
             self.rebuild_rows(&root, filter);
+            // 选中的那一项没了行（删掉了，或者在上面收起的目录里）时，和 `apply_listings` 一样改成还有行的
+            // 收起的目录，没有的话不留选中，免得看不见的选中项还被删除、改名、新建用上。
+            if self.selected_row().is_none() {
+                let selected = self.selected.take();
+                self.selected = collapsed.into_iter().find(|dir| {
+                    selected.as_deref().is_some_and(|selected| selected.starts_with(dir))
+                        && self.rows.iter().any(|row| row.path == *dir)
+                });
+            }
         }
         // 终端换了目录，文件树跟过去。
         if let Some(dir) = reveal {
