@@ -117,7 +117,7 @@ git -C "$gh" log --no-merges --format='    %h %cs %s' "$old_base..$new_base" -- 
 echo
 echo "## 其余提交（apprt、macOS app、GTK、文档等，runode 用不到，扫一眼即可）"
 echo
-git -C "$gh" log --no-merges --format='    %h %s' "$old_base..$new_base" -- . ':(exclude)src/terminal' ':(exclude)include' ':(exclude)src/lib_vt.zig' ':(exclude)build.zig' ':(exclude)build.zig.zon' ':(exclude)src/build' | head -60
+git -C "$gh" log --no-merges --format='    %h %s' "$old_base..$new_base" -- . ':(exclude)src/terminal' ':(exclude)include' ':(exclude)src/lib_vt.zig' ':(exclude)build.zig' ':(exclude)build.zig.zon' ':(exclude)src/build' | sed -n '1,60p'
 }
 
 rs_base=$(git -C "$rs" merge-base HEAD upstream/master)
@@ -130,4 +130,4 @@ git -C "$rs" cherry -v upstream/master HEAD | sed 's/^/    /'
 up_count=$(git -C "$rs" rev-list --count "$rs_base..upstream/master")
 echo
 echo "Uzaaft 上游在那之后新增 $up_count 个提交："
-git -C "$rs" log --no-merges --format='    %h %cs %s' "$rs_base..upstream/master" | head -60
+git -C "$rs" log --no-merges --format='    %h %cs %s' "$rs_base..upstream/master" | sed -n '1,60p'
