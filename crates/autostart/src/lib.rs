@@ -112,7 +112,8 @@ pub fn install(kind: Kind, dirs: &Dirs, exe: &Path) -> io::Result<Option<PathBuf
         Err(err) if err.kind() == io::ErrorKind::NotFound => None,
         Err(err) => return Err(err),
     };
-    std::fs::write(&path, content)?;
+    // 先写临时文件再换上：写到一半失败时原来的服务文件还在，回滚有东西可换。
+    runode_paths::replace_file(&path, content.as_bytes())?;
     match (kind, cfg!(target_os = "macos")) {
         (Kind::Host, true) => {
             // 已经加载过时 bootstrap 会报错；也不先 bootout，那会把托管着会话的宿主停掉。不带 `-k` 的
@@ -127,7 +128,7 @@ pub fn install(kind: Kind, dirs: &Dirs, exe: &Path) -> io::Result<Option<PathBuf
             if let Err(err) = loaded {
                 // 没加载上的服务不在 launchd 里，换回文件即可，不用 bootout。
                 let _ = match &previous {
-                    Some(previous) => std::fs::write(&path, previous),
+                    Some(previous) => runode_paths::replace_file(&path, previous),
                     None => std::fs::remove_file(&path),
                 };
                 return Err(err);
@@ -170,7 +171,7 @@ pub fn install(kind: Kind, dirs: &Dirs, exe: &Path) -> io::Result<Option<PathBuf
                         if matches!(was_enabled, Some(Enablement::Disabled | Enablement::Runtime)) {
                             let _ = systemctl(&["disable", SYSTEMD_UNIT]);
                         }
-                        let _ = std::fs::write(&path, previous);
+                        let _ = runode_paths::replace_file(&path, previous);
                         // 有的 systemd 版本的 `disable` 连运行时的链接一起删，照原来的服务文件补回来；
                         // 链接还在时这一步什么也不做。
                         if was_enabled == Some(Enablement::Runtime) {
