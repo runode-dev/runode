@@ -311,6 +311,10 @@ pub(crate) fn parse(args: &[String]) -> Result<Command, String> {
             if text == Text::Given(String::new()) && flags.keys.is_empty() && !flags.enter {
                 return Err("send needs TEXT, --key or --enter".into());
             }
+            // 不等就没有超时可言；不报错的话这个选项被悄悄丢掉，用户以为它起了作用。
+            if flags.timeout.is_some() && !flags.wait {
+                return Err("--timeout needs --wait".into());
+            }
             Command::Send {
                 session: Selector::parse(target)?,
                 text,
@@ -932,6 +936,7 @@ mod tests {
         assert!(parse("list --enter").unwrap_err().contains("does not take --enter"));
         assert!(parse("read a b").unwrap_err().contains("does not take b"));
         assert!(parse("send").unwrap_err().contains("SESSION"));
+        assert!(parse("send ab12 hi --timeout 5").unwrap_err().contains("--timeout needs --wait"));
         assert!(parse("wait ab12 --for sleeping").unwrap_err().contains("--for"));
         assert!(parse("wait ab12 --timeout soon").unwrap_err().contains("--timeout"));
         assert!(parse("read --lines").unwrap_err().contains("needs a value"));

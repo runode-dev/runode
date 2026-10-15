@@ -124,7 +124,7 @@ Options:
                       --for command` if Enter ran one at a shell prompt with
                       shell integration, else until the screen is quiet for 2
                       seconds. It says which on stderr
-      --timeout SECS  Stop waiting after SECS
+      --timeout SECS  Stop waiting after SECS; only with --wait
   -h, --help          Show this help
 ";
 

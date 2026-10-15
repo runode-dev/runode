@@ -102,7 +102,8 @@ question, or gone. `--for working`, `idle` or `blocked` wait for that state.
 what is already there, the command you just typed included; `--lines N` widens
 it to the last N lines, scrollback included.
 
-`--timeout SECS` gives up with status 124. Status 3 means the terminal exited.
+`--timeout SECS` gives up with status 124; on `send` it only works together
+with `--wait`. Status 3 means the terminal exited.
 `--for command` needs shell integration; without it use `--for quiet` or
 `--for text`.
 
