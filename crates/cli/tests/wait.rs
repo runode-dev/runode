@@ -152,10 +152,12 @@ fn wait_for_quiet_needs_the_screen_to_stay_the_same() {
     assert_eq!(out, "quiet\n");
     // 前几次读到的都在变，从最后一次变化起再静 0.3 秒。
     assert!(started.elapsed() >= Duration::from_millis(600), "{:?}", started.elapsed());
-    // 一直在变的屏幕等不到。
-    let flapping: Vec<&str> = (0..40).map(|i| if i % 2 == 0 { "a\n" } else { "b\n" }).collect();
+    // 一直在变的屏幕等不到。安静的间隔比超时短，忽略了屏幕变化的话不到超时就报 quiet；
+    // 交替的快照按 0.1 秒读一次够读二十秒，整个超时里屏幕都在变。
+    let flapping: Vec<&str> = (0..200).map(|i| if i % 2 == 0 { "a\n" } else { "b\n" }).collect();
     let fake = host("noisy", at_prompt(), vec![], flapping);
-    assert_eq!(run("wait 5e55 --for quiet 2 --timeout 0.5", &fake.env).0, exit::TIMEOUT);
+    let (code, out, err) = run("wait 5e55 --for quiet 0.2 --timeout 1", &fake.env);
+    assert_eq!((code, out.as_str()), (exit::TIMEOUT, ""), "{err}");
 }
 
 #[test]
