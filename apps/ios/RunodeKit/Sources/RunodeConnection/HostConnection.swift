@@ -227,6 +227,11 @@ public actor HostConnection: HostLink {
             var offline = false
             do {
                 let session = try await establish()
+                // 等握手收尾时 `stop()` 插了进来：那时还没有 `transport` 可关，这里关掉，不当成连上了。
+                guard wanted, !Task.isCancelled else {
+                    session.transport.close()
+                    break
+                }
                 let connectedAt = ContinuousClock.now
                 generation += 1
                 transport = session.transport
