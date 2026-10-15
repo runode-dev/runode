@@ -217,9 +217,14 @@ impl PreviewPanel {
         let stamp_path = (target.side == git::DiffSide::Worktree).then(|| path.clone());
         let job = cx.background_spawn(async move {
             let stamp = stamp_path.and_then(|path| file_stamp(&path));
-            let read = || {
-                let repo = repo?;
-                let view = repo.file_view(&target.rel, target.old_rel.as_deref(), &target.side).ok().flatten()?;
+            // 读出错时是 git 的说明，不当成没有改动。
+            let read = || -> Result<_, String> {
+                let Some(repo) = repo else { return Ok(None) };
+                let Some(view) =
+                    repo.file_view(&target.rel, target.old_rel.as_deref(), &target.side).map_err(|err| err.message)?
+                else {
+                    return Ok(None);
+                };
                 // 二进制的图片把改之前和改之后的两张并排显示；新加的没有旧图，删掉的没有新图。
                 let image = runode_preview::image_format(&target.rel).filter(|_| view.file.binary).map(|format| {
                     let max_bytes = runode_preview::MAX_IMAGE_BYTES;
@@ -234,12 +239,16 @@ impl PreviewPanel {
                     let image = |bytes: Vec<u8>| Arc::new(Image::from_bytes(gpui_format(format), bytes));
                     Loaded::ImageDiff { old: old.map(image), new: new.map(image) }
                 });
-                Some((view, image))
+                Ok(Some((view, image)))
             };
             (stamp, read())
         });
         cx.spawn(async move |this, cx| {
             let (stamp, read) = job.await;
+            let (read, error) = match read {
+                Ok(read) => (read, None),
+                Err(err) => (None, Some(err)),
+            };
             let (view, image) = read.unzip();
             let texts = this
                 .update(cx, |this, cx| {
@@ -262,7 +271,7 @@ impl PreviewPanel {
                         _ => (None, None),
                     };
                     let content = match view {
-                        None => Loaded::Note(Note::NoChanges),
+                        None => Loaded::Note(error.map_or(Note::NoChanges, Note::Unreadable)),
                         Some(_) if let Some(Some(image)) = image => image,
                         Some(view) if view.file.binary => Loaded::Note(Note::Binary),
                         Some(view) if view.file.truncated => Loaded::Note(Note::DiffTooLarge),
