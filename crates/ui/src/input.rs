@@ -393,8 +393,9 @@ impl InputState {
         let Some(text) = cx.read_from_clipboard().and_then(|item| item.text()) else {
             return;
         };
-        // 输入框只有一行，多行内容只取第一行；控制字符和打字时一样滤掉。
-        let line = without_controls(text.lines().next().unwrap_or_default());
+        let Some(line) = pasted_line(&text) else {
+            return;
+        };
         self.record(None);
         self.replace(self.selected.clone(), &line, cx);
     }
@@ -966,9 +967,25 @@ fn without_controls(text: &str) -> String {
     text.chars().filter(|c| !c.is_control()).collect()
 }
 
+/// 粘贴进来的那一行：输入框只有一行，多行内容只取第一个有字的行，控制字符和打字时一样滤掉。
+/// 剪贴板以换行开头时第一行是空的，照取会把选中的文字换成空；整段都没有字时返回 `None`，选区不动。
+fn pasted_line(text: &str) -> Option<String> {
+    text.lines().map(without_controls).find(|line| !line.is_empty())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// 粘贴取第一个有字的行：开头的空行、只有控制字符的行跳过，整段没字时不粘。
+    #[test]
+    fn paste_takes_the_first_line_with_text() {
+        assert_eq!(pasted_line("abc\ndef").as_deref(), Some("abc"));
+        assert_eq!(pasted_line("\nabc\ndef").as_deref(), Some("abc"));
+        assert_eq!(pasted_line("\r\n\t\n a\tb").as_deref(), Some(" ab"));
+        assert_eq!(pasted_line(""), None);
+        assert_eq!(pasted_line("\n\r\n\t\n"), None);
+    }
 
     /// 只有控制字符的输入不删选中的文字；空串是删除，照办。
     #[test]
