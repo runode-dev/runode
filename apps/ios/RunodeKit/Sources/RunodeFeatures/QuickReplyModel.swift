@@ -85,11 +85,13 @@ public final class QuickReplyModel {
         let text = draft
         guard canSendDraft, ensureConnected() else { return }
         draft = ""
+        restored = nil
         let epoch = disconnects
         let paste = await link.nextRequestId()
         let enter = await link.nextRequestId()
         guard stillConnected(since: epoch) else {
-            if draft.isEmpty { draft = text }
+            // 断开时 `connectionLost` 可能已把之前没送到的放回文本框，这段接在它后面，不丢。
+            restoreDraft(text)
             return
         }
         begin([paste, enter])

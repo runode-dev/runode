@@ -95,6 +95,11 @@ final class HeldRequestLink: HostLink {
         }
     }
 
+    /// 以后取编号又停住，直到再 `release`。
+    func hold() {
+        held.withLock { $0.released = false }
+    }
+
     func nextRequestId() async -> UInt32 {
         await withCheckedContinuation { continuation in
             let released = held.withLock {

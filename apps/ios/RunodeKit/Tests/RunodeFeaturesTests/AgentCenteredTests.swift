@@ -390,6 +390,23 @@ private func workspace(_ index: UInt32, _ name: String, tabs: [[SessionId]], act
         #expect(held.inner.sent.count == 1, "connected since the press began")
     }
 
+    /// 第一条发出去了还没回话，第二条取编号时连接断了：两段字都放回文本框，第二段不被第一段挤掉。
+    @Test func aDisconnectWhileNumberingKeepsEveryDraft() async {
+        let held = HeldRequestLink()
+        held.release()
+        let reply = QuickReplyModel(sessionId: waiting, link: held)
+        reply.draft = "用方案 2"
+        await reply.sendDraft()
+        held.hold()
+        reply.draft = "用方案 3"
+        let sending = Task { await reply.sendDraft() }
+        #expect(await eventually { held.waiting == 1 })
+        reply.connectionLost()
+        held.release()
+        await sending.value
+        #expect(reply.draft == "用方案 2\n用方案 3")
+    }
+
     /// 断着时不发：按失败报出来，草稿留着；列表重新连上后照常发。
     @Test func nothingIsSentWhileDisconnected() async {
         let model = SessionListModel(machine: machineRecord(), link: link)
