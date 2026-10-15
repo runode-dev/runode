@@ -136,11 +136,16 @@ impl TreeState {
         }
         self.rebuild_rows(root, filter);
         // 选中的在收起的目录里面时，和 `toggle_dir` 一样改成这个目录（它的行也没了时不留选中），免得看不见的
-        // 选中项还被删除、改名用上。等着的 `reveal` 随后照样定位。
-        if let Some(dir) = collapsed.iter().find(|dir| {
-            self.selected.as_deref().is_some_and(|selected| selected != dir.as_path() && selected.starts_with(dir))
-        }) {
-            self.selected = self.rows.iter().any(|row| row.path == *dir).then(|| dir.clone());
+        // 选中项还被删除、改名用上。套着的几层都读不了时，里层的行跟着外层收起没了，改成还有行的那一层，
+        // 不看读回来的先后。等着的 `reveal` 随后照样定位。
+        let holding: Vec<_> = collapsed
+            .iter()
+            .filter(|dir| {
+                self.selected.as_deref().is_some_and(|selected| selected != dir.as_path() && selected.starts_with(dir))
+            })
+            .collect();
+        if !holding.is_empty() {
+            self.selected = holding.into_iter().find(|dir| self.rows.iter().any(|row| row.path == **dir)).cloned();
         }
         let Some((path, expand, strategy)) = self.pending_reveal.take() else {
             return;
@@ -150,6 +155,15 @@ impl TreeState {
         self.reveal(&path, expand, root, filter, strategy);
         // 刚读过还是读不了的目录不再读，不然定位一个读不了的目录会一直读下去。
         self.to_list.retain(|dir| !read.contains(dir));
+        // 读不了的目录在 `path` 的上级链条里时，定位又把它展开了；它不会再读，留着展开就是一个展开着却
+        // 什么都没有的目录，收回去。
+        let mut reopened = false;
+        for dir in &collapsed {
+            reopened |= self.expanded.remove(dir);
+        }
+        if reopened {
+            self.rebuild_rows(root, filter);
+        }
         if self.to_list.is_empty() {
             self.pending_reveal = None;
         }
@@ -710,6 +724,51 @@ mod tests {
         // 根目录换了以后才读回来的不要。
         state.apply_listings(vec![(PathBuf::from("/q"), Some(vec![file("y")]))], root, ALL);
         assert!(!state.listings.contains_key(Path::new("/q")));
+    }
+
+    /// 定位等着读回来的目录，那个目录却读不了：它收起来，不被等着的定位又展开成一个空的展开目录。
+    #[test]
+    fn unreadable_dirs_stay_collapsed_after_a_pending_reveal() {
+        let mut state = TreeState::default();
+        let root = Path::new("/p");
+        state.listings.insert(root.into(), vec![dir("a"), file("z")]);
+        state.rebuild_rows(root, ALL);
+        state.reveal_file(Path::new("/p/a/file"), root, ALL);
+        assert_eq!(state.to_list, [PathBuf::from("/p/a")]);
+        let read = std::mem::take(&mut state.to_list).into_iter().map(|dir| (dir, None)).collect();
+        state.apply_listings(read, root, ALL);
+        assert!(!state.expanded.contains(Path::new("/p/a")));
+        assert!(!state.rows[0].expanded);
+        assert!(state.to_list.is_empty());
+        assert!(state.pending_reveal.is_none());
+        // 收着的目录点开时照常再读。
+        state.toggle_dir(Path::new("/p/a"), root, ALL);
+        assert_eq!(state.to_list, [PathBuf::from("/p/a")]);
+        assert!(state.rows[0].expanded);
+    }
+
+    /// 选中项套在几层读不了的目录里：不管读回来的先后，都改选还有行的最外层。
+    #[test]
+    fn nested_unreadable_dirs_move_the_selection_to_the_visible_one() {
+        let open = || {
+            let mut state = TreeState::default();
+            let root = Path::new("/p");
+            state.listings.insert(root.into(), vec![dir("a"), file("z")]);
+            state.listings.insert("/p/a".into(), vec![dir("b"), file("y")]);
+            state.listings.insert("/p/a/b".into(), vec![file("file")]);
+            state.expanded.extend([PathBuf::from("/p/a"), PathBuf::from("/p/a/b")]);
+            state.rebuild_rows(root, ALL);
+            state.selected = Some(PathBuf::from("/p/a/b/file"));
+            assert_eq!(state.selected_row(), Some(2));
+            state
+        };
+        for order in [["/p/a/b", "/p/a"], ["/p/a", "/p/a/b"]] {
+            let mut state = open();
+            let read = order.iter().map(|dir| (PathBuf::from(dir), None)).collect();
+            state.apply_listings(read, Path::new("/p"), ALL);
+            assert_eq!(names(&state), [("a".into(), 0), ("z".into(), 0)], "{order:?}");
+            assert_eq!(state.selected, Some(PathBuf::from("/p/a")), "{order:?}");
+        }
     }
 
     /// 换上扫描结果：换了根目录时丢掉上一处的目录列表，同一份 git 状态不算变化，读不了的目录收起来，
