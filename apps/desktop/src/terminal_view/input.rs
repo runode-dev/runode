@@ -77,9 +77,9 @@ impl TerminalView {
             return;
         };
         let lines = wheel_lines(event.delta, metrics.cell.height);
-        // 滚轮增量为正表示内容向下移动，即往回滚到历史输出。程序没开鼠标上报时按像素
-        // 平滑滚动回滚历史；开着时只能按整行发给程序。
-        if !self.screen.live().is_some_and(Session::mouse_tracking) {
+        // 滚轮增量为正表示内容向下移动，即往回滚到历史输出。滚轮不归程序管时按像素平滑滚动
+        // 回滚历史；归程序管（开着鼠标上报，或备用屏上当方向键）时只能按整行发给程序。
+        if !self.screen.live().is_some_and(Session::program_scrolls) {
             self.scroll_remainder = 0.;
             if self.screen.shown_mut().is_some_and(|session| session.scroll_smoothly(lines)) {
                 cx.notify();

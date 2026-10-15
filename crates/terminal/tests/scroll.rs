@@ -2,8 +2,10 @@
 
 mod common;
 
-use common::{PROMPT, capturing_session_sized, idle_session, row_text};
+use common::{PROMPT, at, capturing_session, capturing_session_sized, idle_session, row_text};
+use runode_terminal::session::Request;
 use runode_types::grid::{GridSize, ViewportScroll};
+use runode_types::input::Mods;
 
 #[test]
 fn scrolling_the_viewport_by_page_and_to_the_ends() {
@@ -91,4 +93,23 @@ fn jumping_stops_once_per_two_line_prompt_with_a_right_prompt() {
     assert_eq!(top(&mut session), ("proj".into(), "% echo one <r>".into()));
     session.jump_to_prompt(false);
     assert_eq!(top(&mut session), ("proj".into(), "% echo two <r>".into()));
+}
+
+#[test]
+fn wheel_on_the_alternate_screen_becomes_arrow_keys() {
+    let (mut session, requests) = capturing_session();
+    // 主屏上滚轮滚的是回滚历史，不发给程序。
+    session.scroll(-2, at(0.5, 0.5), Mods::default());
+    assert!(requests.borrow().is_empty());
+    // 进了备用屏（pager），模式 1007 默认开着：往上滚两行是两个上方向键。
+    session.feed(b"\x1b[?1049h");
+    assert!(session.program_scrolls());
+    session.scroll(-2, at(0.5, 0.5), Mods::default());
+    assert_eq!(requests.borrow().as_slice(), [Request::Input(b"\x1b[A\x1b[A".to_vec())]);
+    requests.borrow_mut().clear();
+    // 程序关掉 1007 后滚轮又不归它管。
+    session.feed(b"\x1b[?1007l");
+    assert!(!session.program_scrolls());
+    session.scroll(1, at(0.5, 0.5), Mods::default());
+    assert!(requests.borrow().is_empty());
 }

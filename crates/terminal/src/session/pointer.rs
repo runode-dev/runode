@@ -1,6 +1,10 @@
 //! 鼠标：程序开启鼠标上报时把按键、移动和滚轮按它要求的格式发给它；没开时滚轮滚动回滚历史。
 
-use libghostty_vt::{key, mouse, terminal::ScrollViewport};
+use libghostty_vt::{
+    key, mouse,
+    screen::Screen,
+    terminal::{Mode, ScrollViewport},
+};
 use runode_types::{
     grid::GridPoint,
     input::{Mods, MouseAction, MouseButton},
@@ -9,9 +13,20 @@ use runode_types::{
 use super::{Session, convert::ghostty_mods};
 
 impl Session {
-    /// 滚轮输入：程序开启鼠标上报时发给程序，否则在回滚缓冲里滚动视口。
+    /// 滚轮输入：程序开启鼠标上报时发给程序；备用屏上开着模式 1007 时当上下方向键发给程序；否则在
+    /// 回滚缓冲里滚动视口。
     pub fn scroll(&mut self, lines: isize, at: GridPoint, mods: Mods) {
         if lines == 0 {
+            return;
+        }
+        if !self.mouse_tracking() && self.alternate_scrolls() {
+            // less、man 这类 pager 不开鼠标上报，备用屏又没有回滚历史，滚轮只能变成方向键才滚得动。
+            // 用按键编码器，DECCKM 开着时的 `ESC O A` 才对。
+            let key = if lines < 0 { key::Key::ArrowUp } else { key::Key::ArrowDown };
+            if let Some(arrow) = self.encode_key(key) {
+                self.before_input();
+                self.send_input(arrow.repeat(lines.unsigned_abs()));
+            }
             return;
         }
         if self.mouse_tracking() {
@@ -32,6 +47,18 @@ impl Session {
     /// 运行中的程序是否开启了鼠标上报。
     pub fn mouse_tracking(&self) -> bool {
         self.terminal.is_mouse_tracking().unwrap_or(false)
+    }
+
+    /// 滚轮归程序管：开着鼠标上报，或者在备用屏上开着模式 1007（滚轮当方向键）。界面据此决定按整行
+    /// 交给 `scroll` 还是自己平滑滚动回滚历史。
+    pub fn program_scrolls(&self) -> bool {
+        self.mouse_tracking() || self.alternate_scrolls()
+    }
+
+    /// 备用屏上滚轮当方向键：模式 1007，ghostty 默认开着。
+    fn alternate_scrolls(&self) -> bool {
+        self.terminal.active_screen().is_ok_and(|screen| screen == Screen::Alternate)
+            && self.terminal.mode(Mode::ALT_SCROLL).unwrap_or(false)
     }
 
     /// 把鼠标按键或移动按程序要求的上报格式发给它；程序没开上报时编码结果为空，什么都不发。
