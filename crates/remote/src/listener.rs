@@ -323,6 +323,11 @@ fn listen_v6_only(port: u16) -> io::Result<TcpListener> {
     }
     // SAFETY: `fd` 是上面新建的、没人用的描述符。
     let socket = unsafe { OwnedFd::from_raw_fd(fd) };
+    // 和标准库建的 socket 一样不让子进程继承（宿主拉起的 git 之类），不然监听关了端口还被它们占着。
+    // SAFETY: 描述符开着，只设它自己的标志。
+    if unsafe { libc::fcntl(socket.as_raw_fd(), libc::F_SETFD, libc::FD_CLOEXEC) } < 0 {
+        return Err(io::Error::last_os_error());
+    }
     let set = |level, name| {
         let on: libc::c_int = 1;
         // SAFETY: 描述符开着；值指向本地变量，长度是它的大小。
