@@ -201,6 +201,26 @@ fn pending_diff_before_the_first_commit_includes_staged_files() {
     assert_eq!(handle.pending_diff(true).unwrap().matches("+one").count(), 1);
 }
 
+/// 用户配的外部 diff 工具、总是上色和 textconv 都不影响给 AI 看的补丁：仍是 git 原样的差异。
+#[test]
+fn pending_diff_ignores_external_diff_color_and_textconv() {
+    let repo = TestRepo::new("ops-pending-config");
+    let handle = read(&repo).repo();
+    repo.commit_file("a.txt", "one\n", "first");
+    repo.git(&["config", "diff.external", "echo EXTERNAL"]);
+    repo.git(&["config", "color.ui", "always"]);
+    repo.git(&["config", "diff.upper.textconv", "sed s/o/TEXTCONV/"]);
+    repo.write(".git/info/attributes", "*.txt diff=upper\n");
+    repo.write("a.txt", "two\n");
+    let all = handle.pending_diff(false).unwrap();
+    assert!(all.contains("-one\n+two\n"), "{all}");
+    assert!(!all.contains("EXTERNAL") && !all.contains("TEXTCONV") && !all.contains('\x1b'), "{all}");
+    handle.stage(&paths(&["a.txt"])).unwrap();
+    let staged = handle.pending_diff(true).unwrap();
+    assert!(staged.contains("-one\n+two\n"), "{staged}");
+    assert!(!staged.contains("EXTERNAL") && !staged.contains("TEXTCONV") && !staged.contains('\x1b'), "{staged}");
+}
+
 #[test]
 fn commits_and_amends() {
     let repo = TestRepo::new("ops-commit");

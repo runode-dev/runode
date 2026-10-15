@@ -447,14 +447,18 @@ impl Repo {
     /// 提交要带上的改动，写提交说明时给 AI 看：`staged` 时是暂存区相对上一个提交的差异；否则是
     /// 工作区的全部改动（提交时会先全部暂存），未跟踪的文件只在末尾列出文件名。
     pub fn pending_diff(&self, staged: bool) -> Result<String> {
+        // 用户配的外部 diff 工具（`diff.external`）、`color.ui=always` 的颜色码和 textconv 转出来的文字
+        // 都不是改动本身，关掉，给 AI 看的是 git 原样的补丁。
+        let diff =
+            |target: &str| run(&self.root, ["diff", "--no-ext-diff", "--no-color", "--no-textconv", target], None);
         let diff = if staged {
-            run(&self.root, ["diff", "--cached"], None)?
+            diff("--cached")?
         } else if has_head(&self.root) {
-            run(&self.root, ["diff", "HEAD"], None)?
+            diff("HEAD")?
         } else {
             // 还没有提交时和空树比，暂存了的新文件也算进来；空树的对象号随仓库的哈希算法，问 git 要。
             let empty = run(&self.root, ["hash-object", "-t", "tree", "--stdin"], Some(b""))?;
-            run(&self.root, ["diff", String::from_utf8_lossy(&empty).trim()], None)?
+            diff(String::from_utf8_lossy(&empty).trim())?
         };
         let mut text = String::from_utf8_lossy(&diff).into_owned();
         if !staged {
