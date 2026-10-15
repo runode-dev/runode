@@ -411,7 +411,12 @@ impl FileTree {
                     }
                 }
                 Ok(dest) => this.relist_and_reveal(ws, vec![dir], &dest, cx),
-                Err(err) => this.show_file_error(error_text(&err, &base_name(&src)), window, cx),
+                Err(err) => {
+                    // 失败也可能已经动了磁盘（移动了一半、复制被清掉），让树和磁盘对上。
+                    this.with_tree_of(ws, cx, |state, root, filter| state.relist(vec![dir], root, filter));
+                    cx.notify();
+                    this.show_file_error(error_text(&err, &base_name(&src)), window, cx);
+                }
             })
             .ok();
         })

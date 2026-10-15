@@ -194,6 +194,13 @@ fn copy_all(src: &Path, dest: &Path) -> io::Result<()> {
         return copy_file(src, dest);
     }
     fs::create_dir(dest)?;
+    // 中途失败时把这次建出来的半个副本清掉，免得留下残缺的目录，再试一次又多出一份。
+    copy_entries(src, dest).inspect_err(|_| {
+        let _ = fs::remove_dir_all(dest);
+    })
+}
+
+fn copy_entries(src: &Path, dest: &Path) -> io::Result<()> {
     for entry in fs::read_dir(src)? {
         let entry = entry?;
         copy_all(&entry.path(), &dest.join(entry.file_name()))?;
@@ -245,7 +252,8 @@ pub(super) fn add_to_gitignore(root: &Path, rel: &Path, is_dir: bool) -> Result 
     if pattern.ends_with(b" ") {
         pattern.insert(pattern.len() - 1, b'\\');
     }
-    if is_dir {
+    // 文件树把指向目录的符号链接也当目录，但 git 的 `dir/` 规则只匹配真正的目录，链接要按文件写。
+    if is_dir && !fs::symlink_metadata(root.join(rel)).is_ok_and(|meta| meta.is_symlink()) {
         pattern.push(b'/');
     }
     let path = root.join(".gitignore");
@@ -366,6 +374,18 @@ mod tests {
         assert!(matches!(add_to_gitignore(&tmp.0, Path::new("x\n*"), false), Err(OpError::NewlineInName)));
         assert!(matches!(add_to_gitignore(&tmp.0, Path::new("a\r/b"), false), Err(OpError::NewlineInName)));
         assert_eq!(fs::read_to_string(&file).unwrap(), "target\n/a/b\\*.log\n/dist/\n/x\\ \n");
+    }
+
+    /// 指向目录的符号链接按文件写（不加结尾的 `/`）：git 的 `dir/` 规则只匹配真正的目录。
+    #[cfg(unix)]
+    #[test]
+    fn gitignore_treats_directory_symlinks_as_files() {
+        let tmp = TempDir::new("gitignore-symlink");
+        fs::create_dir(tmp.0.join("real")).unwrap();
+        std::os::unix::fs::symlink("real", tmp.0.join("link")).unwrap();
+        add_to_gitignore(&tmp.0, Path::new("link"), true).unwrap();
+        add_to_gitignore(&tmp.0, Path::new("real"), true).unwrap();
+        assert_eq!(fs::read(tmp.0.join(".gitignore")).unwrap(), b"/link\n/real/\n");
     }
 
     /// 名字不是合法 UTF-8 时规则照原样的字节写，git 读 .gitignore 也按字节，才匹配得到那个文件。
