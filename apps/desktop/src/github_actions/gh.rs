@@ -267,6 +267,10 @@ impl Gh {
 
     /// 删掉 `scope` 那一级叫 `name` 的 secret（`secret` 为真）或 variable。
     pub fn delete(&self, secret: bool, scope: &Scope, name: &str) -> Result<(), String> {
+        // 组织那一级这里只读；`env_args` 对它不加范围参数，照发会删掉仓库里同名的那个。
+        if matches!(scope, Scope::Org) {
+            return Err(NOT_ORG.to_owned());
+        }
         let mut args = vec![if secret { "secret" } else { "variable" }, "delete", name];
         args.extend(env_args(scope));
         self.output(&args).map(drop)
