@@ -915,7 +915,10 @@ actor UnwritableMachineStore: MachineStore {
         picker.dismissError()
         #expect(picker.canChoose)
         await picker.enter("secret")
-        guard case .listDirs(let again, _)? = link.sent.last else { return }
+        guard case .listDirs(let again, _)? = link.sent.last else {
+            Issue.record("expected a listDirs, got \(link.sent)")
+            return
+        }
         #expect(picker.handle(.error(req: again, id: nil, message: "permission denied")))
         await picker.retry()
         #expect(link.sent.last.map { if case .listDirs(_, path) = $0 { true } else { false } } == true)
