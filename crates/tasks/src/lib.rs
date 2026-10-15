@@ -4,6 +4,7 @@
 //! 菜单里列出来。只读几个小文件，但在断掉的网络挂载上也会一直卡住，调用方别在要及时响应的线程上调。
 
 use std::{
+    collections::HashSet,
     fs,
     io::Read as _,
     path::{Path, PathBuf},
@@ -46,7 +47,7 @@ pub fn list(dir: &Path) -> Result<Vec<TaskSource>, String> {
         && let Some(text) = read_small(&file)
     {
         let at = file.parent().unwrap_or(dir);
-        let prefix = match relative(dir, at) {
+        let prefix = match make_dir(dir, at) {
             None => "make".to_owned(),
             Some(rel) => format!("make -C {}", quote(&rel)),
         };
@@ -157,6 +158,19 @@ fn relative(from: &Path, to: &Path) -> Option<String> {
     (ups > 0).then(|| vec![".."; ups].join("/"))
 }
 
+/// `make -C` 从 `dir` 到 Makefile 所在的上级 `at` 用的目录，是同一个目录时为空。平常是相对路径
+/// （`..`、`../..`）；`..` 由 make 从进程真实的目录算，`dir` 经过符号链接时到不了 `at`，这时用 `at` 的
+/// 绝对路径（`quote` 拼不了的路径除外）。
+fn make_dir(dir: &Path, at: &Path) -> Option<String> {
+    let rel = relative(dir, at)?;
+    let real = |path: &Path| fs::canonicalize(path).ok();
+    let reaches = real(&dir.join(&rel)).is_some_and(|target| Some(target) == real(at));
+    match at.to_str() {
+        Some(absolute) if !reaches && quotable(absolute) => Some(absolute.to_owned()),
+        _ => Some(rel),
+    }
+}
+
 fn read_small(file: &Path) -> Option<String> {
     let mut text = String::new();
     fs::File::open(file).ok()?.take(MAX_FILE_BYTES).read_to_string(&mut text).ok()?;
@@ -165,9 +179,10 @@ fn read_small(file: &Path) -> Option<String> {
 
 /// Makefile 里显式写出来的目标和它那一行 `##` 后面的说明，按先后、去重。不算以 `.` 开头的特殊目标
 /// （`.PHONY` 等）、模式规则（`%`）、带变量的（`$`）、像文件路径的（`/`）和 `quotable` 不收的，也不算
-/// 变量赋值。
+/// 变量赋值。只列得出 `MAX_TASKS` 个，收到多一个（看得出列不全）就不往下找了。
 fn makefile_targets(text: &str) -> Vec<(String, Option<String>)> {
     let mut targets: Vec<(String, Option<String>)> = Vec::new();
+    let mut seen = HashSet::new();
     let mut continued = false;
     for line in text.lines() {
         let was_continued = continued;
@@ -185,14 +200,13 @@ fn makefile_targets(text: &str) -> Vec<(String, Option<String>)> {
             continue;
         }
         for name in names.split_whitespace() {
-            if name.starts_with('.')
-                || name.contains(['%', '/'])
-                || !quotable(name)
-                || targets.iter().any(|(seen, _)| seen == name)
-            {
+            if name.starts_with('.') || name.contains(['%', '/']) || !quotable(name) || !seen.insert(name) {
                 continue;
             }
             targets.push((name.to_owned(), description.map(str::to_owned)));
+            if targets.len() > MAX_TASKS {
+                return targets;
+            }
         }
     }
     targets
@@ -219,10 +233,10 @@ fn quotable(name: &str) -> bool {
 }
 
 /// 名字里只有不用转义的字符时原样用，否则加单引号。只给 `quotable` 的名字用：单引号里的 `\` 在 fish
-/// 里不是原样的。
+/// 里不是原样的。以 `=` 开头的也加：zsh 把 `=名字` 展开成那个命令的路径。
 fn quote(word: &str) -> String {
     let plain = |c: char| c.is_ascii_alphanumeric() || "-_.:/@+=,%^".contains(c);
-    if !word.is_empty() && word.chars().all(plain) {
+    if !word.is_empty() && !word.starts_with('=') && word.chars().all(plain) {
         word.to_owned()
     } else {
         format!("'{}'", word.replace('\'', r"'\''"))
@@ -318,6 +332,28 @@ build: other
         );
     }
 
+    /// 请求的目录经过符号链接时，`make -C ..` 里的 `..` 由 make 从真实的目录算，到不了找到的
+    /// Makefile 那里：改用它所在目录的绝对路径。
+    #[test]
+    fn a_symlinked_directory_gets_an_absolute_make_dir() {
+        let root = std::env::temp_dir().join(format!("runode-tasks-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(root.join("ext/project/sub")).unwrap();
+        fs::create_dir_all(root.join("work")).unwrap();
+        fs::write(root.join("ext/project/Makefile"), "real:\n").unwrap();
+        fs::write(root.join("work/Makefile"), "wrong:\n").unwrap();
+        std::os::unix::fs::symlink(root.join("ext/project/sub"), root.join("work/link")).unwrap();
+        let sources = list(&root.join("work/link")).unwrap();
+        let normal = list(&root.join("ext/project/sub")).unwrap();
+        fs::remove_dir_all(&root).unwrap();
+        let commands = |sources: &[TaskSource]| -> Vec<String> {
+            let make = sources.iter().find(|source| source.kind == TaskSourceKind::Makefile).unwrap();
+            make.tasks.iter().map(|task| task.command.clone()).collect()
+        };
+        assert_eq!(commands(&sources), [format!("make -C {} wrong", quote(root.join("work").to_str().unwrap()))]);
+        assert_eq!(commands(&normal), ["make -C .. real"]);
+    }
+
     #[test]
     fn search_stops_at_home() {
         let dirs = search_path(Path::new("/Users/me/dev/app"), Some(Path::new("/Users/me")));
@@ -338,5 +374,16 @@ build: other
         assert_eq!(quote("run it"), "'run it'");
         assert_eq!(quote("it's"), r"'it'\''s'");
         assert_eq!(quote("a;rm"), "'a;rm'");
+        assert_eq!(quote("=build"), "'=build'");
+        assert_eq!(quote("a=b"), "a=b");
+    }
+
+    /// 目标多得列不全时收到 `MAX_TASKS` 加一个就停，看得出列不全。
+    #[test]
+    fn makefile_targets_stop_past_the_limit() {
+        let text: String = (0..MAX_TASKS * 50).map(|i| format!("t{i}:\n")).collect();
+        let targets = makefile_targets(&text);
+        assert_eq!(targets.len(), MAX_TASKS + 1);
+        assert_eq!(targets[MAX_TASKS].0, format!("t{MAX_TASKS}"));
     }
 }
