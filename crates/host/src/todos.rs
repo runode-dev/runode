@@ -3,8 +3,8 @@
 //! `Host::serve_todos` 告诉它库在哪、起定时的线程（`schedule`）；之前这些消息都回 `Error`。
 //!
 //! 开始任务时在任务的目录（要工作树时先在仓库的 `.worktrees/` 下新开一个，分支 `runode/<名字>`）里开
-//! 一个会话，等 shell 的提示符出来再打 `<agent> "$RUNODE_TODO_PROMPT"`：提示词经环境变量交给 shell，
-//! 不用照各家 shell 的规矩转义。任务会话不进宿主手里的布局，桌面在任务板上打开它时再接进窗口。
+//! 一个会话，等 shell 的提示符出来再打 `<agent> "$RUNODE_TODO_PROMPT"`（写法照 shell 来，见
+//! `agent_command`）：提示词经环境变量交给 shell，不用照各家 shell 的规矩转义。任务会话不进宿主手里的布局，桌面在任务板上打开它时再接进窗口。
 //!
 //! 只有拿着会话的宿主改任务板：开始交出会话（`Peers::handoff`）或者要退出（`Peers::stop`）以后不改库、
 //! 不开任务，定时也不触发；接手的新宿主提交后自己接着办。两边的库是同一个文件，SQLite 自己管得住两个
@@ -25,6 +25,7 @@ use runode_protocol::{
     todo::{Todo, TodoSpec, When},
 };
 use runode_todo::Store;
+use runode_types::shell::Shell;
 
 use crate::{Host, Shared, server::REPLY_TIMEOUT, session::Inbox, workspaces::spawn_options};
 
@@ -448,7 +449,8 @@ impl Shared {
                 return Err(format!("{err:#}"));
             }
         };
-        let command = format!("{} \"${ENV_TODO_PROMPT}\"\r", todo.spec.agent);
+        // 任务会话不指定 shell，起的是 `default_shell`。
+        let command = agent_command(&todo.spec.agent, &runode_terminal::pty::default_shell());
         self.deliver(session, Inbox::TypeAtPrompt(command.into_bytes()));
         let worktree = made.as_ref().map(|(root, branch)| (root.as_path(), branch.as_str()));
         if let Err(err) = self.todos.with_db(|db| db.set_started(&todo.id, unix_now(), session, worktree)) {
@@ -459,6 +461,17 @@ impl Shared {
         tracing::info!("todo {} started in session {session}", todo.id);
         Ok(session)
     }
+}
+
+/// 在 `shell` 的提示符上打的命令：跑 `agent`，提示词取自环境变量 `ENV_TODO_PROMPT`、整个当一个参数。
+/// nushell、elvish 不在双引号里展开 `$名字`，取环境变量也各有写法。
+fn agent_command(agent: &str, shell: &str) -> String {
+    let prompt = match Shell::detect(shell) {
+        Some(Shell::Nushell) => format!("$env.{ENV_TODO_PROMPT}"),
+        Some(Shell::Elvish) => format!("$E:{ENV_TODO_PROMPT}"),
+        _ => format!("\"${ENV_TODO_PROMPT}\""),
+    };
+    format!("{agent} {prompt}\r")
 }
 
 fn no_todo(id: &str) -> String {
@@ -606,6 +619,14 @@ fn slug(title: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn agent_commands_read_the_prompt_the_way_each_shell_does() {
+        assert_eq!(agent_command("claude", "/bin/zsh"), "claude \"$RUNODE_TODO_PROMPT\"\r");
+        assert_eq!(agent_command("claude", "/opt/homebrew/bin/fish"), "claude \"$RUNODE_TODO_PROMPT\"\r");
+        assert_eq!(agent_command("codex --full-auto", "-nu"), "codex --full-auto $env.RUNODE_TODO_PROMPT\r");
+        assert_eq!(agent_command("claude", "/usr/local/bin/elvish"), "claude $E:RUNODE_TODO_PROMPT\r");
+    }
 
     #[test]
     fn slugs_keep_ascii_words() {

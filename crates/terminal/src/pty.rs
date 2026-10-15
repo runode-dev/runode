@@ -358,6 +358,11 @@ impl fmt::Display for AdoptError {
 
 impl std::error::Error for AdoptError {}
 
+/// 没指定 shell 时 `Pty::start` 起的那个：用户的 `$SHELL`，没有时 zsh。
+pub fn default_shell() -> String {
+    std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".into())
+}
+
 /// PTY 上跑着的 shell。
 enum Shell {
     /// 自己启动的子进程，退出时自己回收。
@@ -716,8 +721,7 @@ impl Pty {
         let Some(master) = self.master.clone() else {
             bail!("the pty has been handed off");
         };
-        let shell =
-            shell.map(str::to_owned).or_else(|| std::env::var("SHELL").ok()).unwrap_or_else(|| "/bin/zsh".into());
+        let shell = shell.map_or_else(default_shell, str::to_owned);
         let mut cmd = CommandBuilder::new(&shell);
         // 用登录 shell，这样会执行用户的 profile。
         let report_token = shell_integration::prepare(integration, &shell, &self.shell_features, &mut cmd);
