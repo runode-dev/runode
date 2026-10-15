@@ -296,6 +296,32 @@ fn occupied_worktree_directories_are_skipped() {
     );
 }
 
+/// git 不肯用的候选名字也跳过、不白试：`.worktrees` 下是个悬空的符号链接（git 不跟着链接看，照样说已经有了），
+/// 分支名和已有的分支一个在另一个下面（`runode/a` 和 `runode/a/old` 不能并存）。两个都去试的话尝试次数就用完了，
+/// 后面空着的名字开不出来。
+#[test]
+fn names_git_would_refuse_are_skipped() {
+    let (_host, dir, mut peer) = board("todo-worktree-refused");
+    let repo = dir.join("repo");
+    std::fs::create_dir_all(repo.join(".worktrees")).unwrap();
+    git(&repo, &["init", "-q", "-b", "main"]);
+    git(&repo, &["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "init"]);
+
+    let out = dir.join("cwd.txt");
+    let agent = script(&dir, "agent", &format!("pwd > '{}'", out.display()));
+    let id = add(&mut peer, TodoSpec { worktree: true, ..spec("Refused", &repo, &agent) });
+    std::os::unix::fs::symlink(dir.join("nowhere"), repo.join(".worktrees").join("refused")).unwrap();
+    git(&repo, &["branch", &format!("runode/refused-{id}/old")]);
+    start(&mut peer, &id);
+    let made = repo.join(".worktrees").join(format!("refused-{id}-2"));
+    assert_eq!(std::fs::canonicalize(wait_for_file(&out).trim()).unwrap(), std::fs::canonicalize(&made).unwrap());
+    let todo = list(&mut peer).remove(0);
+    assert_eq!(
+        (todo.worktree_dir.as_deref(), todo.branch),
+        (Some(made.as_path()), Some(format!("runode/refused-{id}-2")))
+    );
+}
+
 /// 改、标完成、调先后、删，问过 `ListTodos` 的连接每次都收到 `TodosChanged`；不对的请求回 `Error`。
 #[test]
 fn edits_are_announced_and_checked() {

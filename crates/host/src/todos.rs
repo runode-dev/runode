@@ -509,7 +509,7 @@ fn check_when(when: &When, now: u64) -> Result<(), String> {
 
 /// 给任务新开工作树：仓库的 `.worktrees/<名字>`，分支 `runode/<名字>`，名字取自标题；已经有了时名字后面
 /// 加上任务的标识，还有的话再加上序号。工作树被删了、分支留着时每开始一次占掉一个名字，占掉了的（分支或者
-/// 目录已经有了）直接跳过，不用 git 去试；真去试的最多 `WORKTREE_ATTEMPTS` 个。返回工作树的根目录和分支。
+/// 目录已经有了，见 `taken`）直接跳过，不用 git 去试；真去试的最多 `WORKTREE_ATTEMPTS` 个。返回工作树的根目录和分支。
 fn add_worktree(todo: &Todo) -> Result<(PathBuf, String), String> {
     let repo =
         Repo::open(&todo.spec.dir).ok_or_else(|| format!("{} is not in a git repository", todo.spec.dir.display()))?;
@@ -520,14 +520,15 @@ fn add_worktree(todo: &Todo) -> Result<(PathBuf, String), String> {
     let names = [slug.clone(), format!("{slug}-{}", todo.id)]
         .into_iter()
         .chain((2..).map(|n| format!("{slug}-{}-{n}", todo.id)));
-    // 跳过的名字不是分支已经有了、就是 `.worktrees` 下已经有了这一项，最多这么多个；只算分支的话，只占了
-    // 目录的几个名字就把候选用完了，一次都没去试。
+    // 跳过的名字不是分支已经有了（同名或者上下一级，一个分支最多占一个候选；叫 `runode` 的分支占掉全部，
+    // 那样本来就开不出来）、就是 `.worktrees` 下已经有了这一项，最多这么多个；只算分支的话，只占了目录的几个
+    // 名字就把候选用完了，一次都没去试。
     let occupied = std::fs::read_dir(&worktrees).map_or(0, Iterator::count);
     let mut last = String::new();
     let mut attempts = 0;
     for name in names.take(branches.len() + occupied + WORKTREE_ATTEMPTS) {
         let (root, branch) = (worktrees.join(&name), format!("runode/{name}"));
-        if branches.contains(&branch) || root.exists() {
+        if taken(&root, &branch, &branches) {
             last = format!("{branch} or {} is taken", root.display());
             continue;
         }
@@ -541,6 +542,18 @@ fn add_worktree(todo: &Todo) -> Result<(PathBuf, String), String> {
         }
     }
     Err(format!("cannot make a worktree for todo {}: {last}", todo.id))
+}
+
+/// 工作树 `root` 或者分支 `branch` 已经被占了，git 开不出来。`root` 上有什么都算，悬空的符号链接也算（git
+/// 不跟着链接看）。分支和已有的分支（`branches`）同名，或者一个是另一个往下的一级（`runode/a` 和
+/// `runode/a/b`）都算：git 的分支名也是路径，两个不能并存。
+fn taken(root: &Path, branch: &str, branches: &HashSet<String>) -> bool {
+    root.symlink_metadata().is_ok()
+        || branches.iter().any(|other| {
+            other == branch
+                || other.strip_prefix(branch).is_some_and(|rest| rest.starts_with('/'))
+                || branch.strip_prefix(other.as_str()).is_some_and(|rest| rest.starts_with('/'))
+        })
 }
 
 /// 删掉任务的工作树（有改动时 git 拒绝，留着）和分支（只删已经合并、或者没有新提交的），返回各删掉了
@@ -601,6 +614,31 @@ mod tests {
         assert_eq!(slug("修复登录"), None);
         assert_eq!(slug(&"a".repeat(100)).map(|slug| slug.len()), Some(MAX_SLUG));
         assert_eq!(slug("ab-------------------------------------cd x").as_deref(), Some("ab-cd-x"));
+    }
+
+    /// 候选的工作树目录上有悬空的符号链接、候选分支和已有的分支一个在另一个下面时都算占了：git 在那开不出来，
+    /// 不跳过的话白白用掉一次尝试。
+    #[test]
+    fn names_git_would_refuse_are_taken() {
+        let dir = std::env::temp_dir().join(format!("rnh-unit-{}-todo-taken", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let dangling = dir.join("dangling");
+        std::os::unix::fs::symlink(dir.join("nowhere"), &dangling).unwrap();
+        let free = dir.join("free");
+        let branches: HashSet<String> =
+            ["main", "runode/a/old", "runode/b", "runode/c-d"].into_iter().map(String::from).collect();
+
+        assert!(taken(&dangling, "runode/x", &branches));
+        assert!(!taken(&free, "runode/x", &branches));
+        assert!(taken(&free, "runode/b", &branches));
+        // 已有的分支在它下面、它在已有的分支下面。
+        assert!(taken(&free, "runode/a", &branches));
+        assert!(taken(&free, "runode/b/new", &branches));
+        // 只是名字开头一样的不冲突。
+        assert!(!taken(&free, "runode/c", &branches));
+        assert!(!taken(&free, "runode/a-2", &branches));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
