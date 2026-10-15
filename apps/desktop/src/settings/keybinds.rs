@@ -218,14 +218,21 @@ fn occupied(line: &str, resolved: &[(String, Action)]) -> bool {
     })
 }
 
-/// 删掉配置文件里自己写的第 `ix` 行 `keybind`（触发键是 `trigger`），删掉以后 `still` 认为旧键上还有绑定时
-/// 再写一行解绑。
+/// 删掉配置文件里自己写的第 `ix` 行 `keybind`（触发键是 `trigger`）。默认绑定和它前面的行叠出来的表里
+/// `still` 认为旧键上还有绑定、删了会露出来时，原地换成一行解绑：只解开它前面的，后面单独盖过其中几个键的
+/// 行照旧生效（换掉 `cmd+digit` 那一行时，后面的 `cmd+1=new_window` 还在）。
 fn drop_user_line(values: &mut Vec<String>, ix: usize, trigger: &str, still: fn(&str, &[(String, Action)]) -> bool) {
     let line = values.remove(ix);
-    let rest: Vec<_> = values.iter().filter_map(|value| keybind::parse(value).ok()).flatten().collect();
-    if still(&line, &keybind::resolve(&rest)) {
-        values.push(join(trigger, "unbind", None));
+    let before: Vec<_> = values[..ix].iter().filter_map(|value| keybind::parse(value).ok()).flatten().collect();
+    if still(&line, &keybind::resolve(&before)) {
+        values.insert(ix, join(trigger, "unbind", None));
     }
+}
+
+/// 解开默认绑定的 `trigger`：解绑的一行写在最前面，只作用在默认绑定上，文件里单独盖过其中几个键的行
+/// 照旧生效（解开默认的 `cmd+digit` 时，自己写的 `cmd+1=new_window` 还在）。
+fn unbind_default(values: &mut Vec<String>, trigger: &str) {
+    values.insert(0, join(trigger, "unbind", None));
 }
 
 /// 删掉配置文件里自己写的第 `ix` 行 `keybind`（触发键是 `trigger`）。它要是盖着一条一样的默认绑定，
@@ -388,7 +395,7 @@ impl SettingsView {
                 }
             }
             Some(Bound { trigger: old, source: Source::Default }) => {
-                values.push(join(&old, "unbind", None));
+                unbind_default(&mut values, &old);
                 values.push(format!("{trigger}={}", target.usage));
             }
             None => values.push(format!("{trigger}={}", target.usage)),
@@ -401,7 +408,7 @@ impl SettingsView {
         self.keybinds.stop_recording();
         let mut values = self.file.values(KEY);
         match bound.source {
-            Source::Default => values.push(join(&bound.trigger, "unbind", None)),
+            Source::Default => unbind_default(&mut values, &bound.trigger),
             Source::User(ix) if ix < values.len() => remove_user_line(&mut values, ix, &bound.trigger),
             Source::User(_) => return,
         }
@@ -719,6 +726,47 @@ mod tests {
         assert!(!replace_user_line(&mut values, 0, "cmd+t", "ctrl+t"));
         assert!(!replace_user_line(&mut values, 3, "cmd+t", "ctrl+t"));
         assert_eq!(values, lines(&["clear"]));
+    }
+
+    /// 换掉或去掉管 1 到 9 的一行（自己写的或默认的）时，后面单独盖过其中一个数字的行照旧生效，解绑只解开
+    /// 前面露出来的那些。
+    #[test]
+    fn unbinding_a_digit_row_keeps_later_overrides() {
+        let lines = |values: &[&str]| values.iter().map(|v| (*v).to_owned()).collect::<Vec<_>>();
+        let resolve = |values: &[String]| {
+            keybind::resolve(&values.iter().flat_map(|v| keybind::parse(v).unwrap()).collect::<Vec<_>>())
+        };
+        let action = |resolved: &[(String, Action)], keys: &str| {
+            resolved.iter().find(|(k, _)| k == keys).map(|(_, action)| action.clone())
+        };
+        let new_window = keybind::parse_action("new_window").ok();
+
+        let mut values = lines(&["cmd+digit=goto_tab", "cmd+1=new_window"]);
+        assert!(replace_user_line(&mut values, 0, "cmd+digit", "ctrl+digit"));
+        assert_eq!(values, lines(&["cmd+digit=unbind", "cmd+1=new_window", "ctrl+digit=goto_tab"]));
+        let resolved = resolve(&values);
+        assert_eq!(action(&resolved, "cmd-1"), new_window);
+        assert_eq!(action(&resolved, "cmd-2"), None);
+        assert_eq!(action(&resolved, "ctrl-2"), Some(Action::GotoTab(1)));
+
+        let mut values = lines(&["cmd+digit=goto_tab", "cmd+1=new_window"]);
+        remove_user_line(&mut values, 0, "cmd+digit");
+        assert_eq!(values, lines(&["cmd+digit=unbind", "cmd+1=new_window"]));
+        let resolved = resolve(&values);
+        assert_eq!(action(&resolved, "cmd-1"), new_window);
+        assert_eq!(action(&resolved, "cmd-2"), None);
+
+        // 默认的 `cmd+digit` 被自己写的 `cmd+1` 盖过一个，去掉默认的那一行时 `cmd+1` 还在。
+        let mut values = lines(&["cmd+1=new_window"]);
+        unbind_default(&mut values, "cmd+digit");
+        let resolved = resolve(&values);
+        assert_eq!(action(&resolved, "cmd-1"), new_window);
+        assert_eq!(action(&resolved, "cmd-3"), None);
+
+        // 只有后面的行绑着旧键、前面没有露出来的：不写解绑。
+        let mut values = lines(&["ctrl+x=new_tab", "ctrl+x=new_window"]);
+        assert!(replace_user_line(&mut values, 0, "ctrl+x", "ctrl+y"));
+        assert_eq!(values, lines(&["ctrl+x=new_window", "ctrl+y=new_tab"]));
     }
 
     /// 每个动作都有行可放，默认绑定都落在某一行上，`goto_tab` 一行管 1 到 9。
