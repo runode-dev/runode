@@ -4,9 +4,10 @@
 #![allow(dead_code)]
 
 use std::{
+    collections::VecDeque,
     os::unix::net::UnixStream,
     path::{Path, PathBuf},
-    sync::mpsc,
+    sync::{Mutex, mpsc},
     thread,
     time::{Duration, Instant},
 };
@@ -56,10 +57,12 @@ pub fn contains(haystack: &[u8], needle: &[u8]) -> bool {
     haystack.windows(needle.len()).any(|w| w == needle)
 }
 
-/// 按协议说话的一个前端：读到的帧由后台线程交过来，测试里按超时等。丢掉时断开连接。
+/// 按协议说话的一个前端：读到的帧由后台线程交过来，测试里按超时等（`next_frame`）。丢掉时断开连接。
 pub struct Peer {
     pub stream: UnixStream,
-    pub frames: mpsc::Receiver<Frame>,
+    frames: mpsc::Receiver<Frame>,
+    /// 读快照时先收下的别的帧（别的会话的输出和消息），按先后排在之后读到的前面，见 `screen`。
+    held: Mutex<VecDeque<Frame>>,
     next_req: u32,
 }
 
@@ -81,7 +84,15 @@ impl Peer {
                 }
             }
         });
-        Self { stream, frames, next_req: 1 }
+        Self { stream, frames, held: Mutex::default(), next_req: 1 }
+    }
+
+    /// 下一帧，最多等 `timeout`；读快照时先收下的排在前面。
+    pub fn next_frame(&self, timeout: Duration) -> Result<Frame, mpsc::RecvTimeoutError> {
+        if let Some(frame) = self.held.lock().unwrap().pop_front() {
+            return Ok(frame);
+        }
+        self.frames.recv_timeout(timeout)
     }
 
     pub fn connect(socket: &Path) -> Self {
@@ -132,7 +143,7 @@ impl Peer {
     }
 
     pub fn frame(&self) -> Frame {
-        self.frames.recv_timeout(WAIT).expect("timed out waiting for a frame")
+        self.next_frame(WAIT).expect("timed out waiting for a frame")
     }
 
     /// 下一条控制消息，跳过中间的输出帧。
@@ -165,8 +176,7 @@ impl Peer {
         let deadline = Instant::now() + WAIT;
         let mut output = Vec::new();
         loop {
-            let frame =
-                self.frames.recv_timeout(deadline.saturating_duration_since(Instant::now())).expect("timed out");
+            let frame = self.next_frame(deadline.saturating_duration_since(Instant::now())).expect("timed out");
             let message = match frame.kind {
                 FrameKind::Output if frame.channel == channel => {
                     output.extend_from_slice(&frame.payload);
@@ -196,22 +206,24 @@ impl Peer {
         (channel, self.screen(id, channel, given))
     }
 
-    /// `Attached` 之后的快照帧，读到 `SnapshotEnd`；`MetaOnly` 时没有。
+    /// `Attached` 之后的快照帧，读到这个会话的 `SnapshotEnd`；`MetaOnly` 时没有。同一条连接上别的会话在
+    /// 各自的线程里发事件，可能夹在快照帧中间：先收下，之后照先后读到。
     pub fn screen(&self, id: SessionId, channel: u32, mode: AttachMode) -> Vec<u8> {
         let mut screen = Vec::new();
         if mode != AttachMode::MetaOnly {
+            let deadline = Instant::now() + WAIT;
             loop {
-                let frame = self.frame();
+                let frame = self
+                    .frames
+                    .recv_timeout(deadline.saturating_duration_since(Instant::now()))
+                    .expect("timed out waiting for the snapshot");
                 match frame.kind {
-                    FrameKind::Snapshot => {
-                        assert_eq!(frame.channel, channel);
-                        screen.extend_from_slice(&frame.payload);
-                    }
-                    FrameKind::Control => {
-                        assert!(matches!(frame.message().unwrap(), HostMsg::SnapshotEnd { id: end } if end == id));
+                    FrameKind::Snapshot if frame.channel == channel => screen.extend_from_slice(&frame.payload),
+                    FrameKind::Control if matches!(frame.message().unwrap(), HostMsg::SnapshotEnd { id: end } if end == id) =>
+                    {
                         break;
                     }
-                    kind => panic!("unexpected {kind:?} before the snapshot ended"),
+                    _ => self.held.lock().unwrap().push_back(frame),
                 }
             }
         }
@@ -286,7 +298,7 @@ impl Peer {
         let deadline = Instant::now() + WAIT;
         let mut messages = Vec::new();
         loop {
-            match self.frames.recv_timeout(deadline.saturating_duration_since(Instant::now())) {
+            match self.next_frame(deadline.saturating_duration_since(Instant::now())) {
                 Ok(frame) if frame.kind == FrameKind::Control => messages.push(frame.message().unwrap()),
                 Ok(_) => {}
                 Err(mpsc::RecvTimeoutError::Disconnected) => return messages,

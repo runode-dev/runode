@@ -137,7 +137,7 @@ pub(crate) fn give(
     let ready_at = Instant::now();
 
     // 提交：从这里起会话归新宿主。
-    let pending = release(&giving.handles, &handed);
+    let Released { pending, complete } = release(&giving.handles, &handed);
     {
         let mut registry = shared.registry();
         for id in &handed {
@@ -149,19 +149,23 @@ pub(crate) fn give(
         shared.kill(*id);
     }
     let pending_bytes: usize = pending.iter().map(|(_, input)| input.len()).sum();
-    let ids: Vec<SessionId> = pending.iter().map(|(id, _)| *id).collect();
-    let blocks: Vec<&[u8]> = pending.iter().map(|(_, input)| input.as_slice()).collect();
-    let sent = encode_part(&HandoffPart::Commit { pending_input: ids }, &blocks)
-        .map_err(|err| io::Error::other(err.to_string()))
-        .and_then(|data| {
-            stream.set_write_timeout(Some(DONE_TIMEOUT))?;
-            fd_passing::send_with_fds(stream, &data, &[])
-        });
-    let commit_sent = sent.is_ok();
-    if let Err(err) = sent {
-        tracing::error!("failed to send the commit to the new host: {err}");
-    }
-    let done = wait_for_done(stream, reader);
+    // 有会话没按时交出 PTY 时不发 `Commit`：它的写线程可能还在写，没写出去的输入也还没交回来，新宿主这时
+    // 打开闸门就是两边一起写同一个 PTY。新宿主等不到 `Commit` 会放弃，下面 `reclaim` 把会话接回来。
+    let commit_sent = complete && {
+        let ids: Vec<SessionId> = pending.iter().map(|(id, _)| *id).collect();
+        let blocks: Vec<&[u8]> = pending.iter().map(|(_, input)| input.as_slice()).collect();
+        let sent = encode_part(&HandoffPart::Commit { pending_input: ids }, &blocks)
+            .map_err(|err| io::Error::other(err.to_string()))
+            .and_then(|data| {
+                stream.set_write_timeout(Some(DONE_TIMEOUT))?;
+                fd_passing::send_with_fds(stream, &data, &[])
+            });
+        if let Err(err) = &sent {
+            tracing::error!("failed to send the commit to the new host: {err}");
+        }
+        sent.is_ok()
+    };
+    let done = commit_sent && wait_for_done(stream, reader);
     if !done && reclaim(shared, kept, pending, successor, commit_sent) {
         giving.roll_back(shared, started, "the new host did not confirm taking the sessions over; took them back");
         return;
@@ -426,8 +430,16 @@ impl Watchdog {
     }
 }
 
-/// 提交：各个交出去的会话交出 PTY，返回它们没写进 PTY 的输入（只列有的）。没按时回话的当作没有。
-fn release(handles: &[(SessionId, Handle)], handed: &[SessionId]) -> Vec<(SessionId, Vec<u8>)> {
+/// `release` 的结果。
+struct Released {
+    /// 交出了 PTY 的会话没写进 PTY 的输入，只列有的。
+    pending: Vec<(SessionId, Vec<u8>)>,
+    /// 每个会话都按时交出了 PTY（线程已经结束了的不算没交：它的 PTY 随线程关掉了）。
+    complete: bool,
+}
+
+/// 提交：各个交出去的会话交出 PTY，返回它们没写进 PTY 的输入，以及是不是都按时交了。
+fn release(handles: &[(SessionId, Handle)], handed: &[SessionId]) -> Released {
     let waiting: Vec<_> = handles
         .iter()
         .filter(|(id, _)| handed.contains(id))
@@ -437,15 +449,20 @@ fn release(handles: &[(SessionId, Handle)], handed: &[SessionId]) -> Vec<(Sessio
         })
         .collect();
     let deadline = Instant::now() + RELEASE_TIMEOUT;
-    let mut pending = Vec::new();
-    for (id, released) in waiting {
-        match released.recv_timeout(deadline.saturating_duration_since(Instant::now())) {
-            Ok(input) if !input.is_empty() => pending.push((id, input)),
+    let mut released = Released { pending: Vec::new(), complete: true };
+    for (id, reply) in waiting {
+        match reply.recv_timeout(deadline.saturating_duration_since(Instant::now())) {
+            Ok(input) if !input.is_empty() => released.pending.push((id, input)),
             Ok(_) => {}
-            Err(err) => tracing::warn!("session {id} did not release its pty: {err}"),
+            Err(mpsc::RecvTimeoutError::Timeout) => {
+                tracing::error!("session {id} did not release its pty in time");
+                released.complete = false;
+            }
+            // 会话刚被结束（交接期间收到 `Kill`），线程没交就走了。
+            Err(mpsc::RecvTimeoutError::Disconnected) => tracing::warn!("session {id} ended instead of releasing"),
         }
     }
-    pending
+    released
 }
 
 /// 提交后等新宿主回 `HandoffDone`，最多等 `DONE_TIMEOUT`。等到了返回 true；没回就断开（新宿主
@@ -462,7 +479,8 @@ fn wait_for_done(stream: &UnixStream, reader: &mut BufReader<&UnixStream>) -> bo
     }
 }
 
-/// 提交以后新宿主没确认接手（见 `wait_for_done`）：多半是它死了，或者没收到 `Commit`、自己放弃了，
+/// 提交以后新宿主没确认接手（见 `wait_for_done`）：多半是它死了，或者没收到 `Commit`（包括这边有会话没按时
+/// 交出 PTY、没发 `Commit`）、自己放弃了，
 /// 这时 PTY 只剩这边留着的那份 master（`kept`）。先杀掉它（`successor`）、等它不在了，再用留着的
 /// master 和交出去的状态把会话接回来，和新宿主接手一样（`session::adopt`），返回 true。认不出、
 /// 杀不掉新宿主时不接回、返回 false：两个宿主一起读写同一个 PTY 比丢掉更糟。

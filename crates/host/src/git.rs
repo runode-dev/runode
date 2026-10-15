@@ -5,7 +5,12 @@
 //! 连接上的请求按到达的先后一件一件办：先暂存再提交不会颠倒；推送、拉取要等网络，排在后面的跟着等。
 //! 会话的目录在读的线程里向会话线程要（排在这条连接之前送去的输入后面），工作线程再等回话。
 
-use std::{path::Path, sync::mpsc, thread};
+use std::{
+    collections::HashSet,
+    path::{Path, PathBuf},
+    sync::mpsc,
+    thread,
+};
 
 use runode_git::{Branch, FileDiff, FileStatus, Hunk, Line, LineKind, Operation, Repo, Section, UntrackedCache};
 use runode_protocol::{
@@ -95,9 +100,13 @@ fn run(
         GitRequest::Unstage { paths } => done(repo()?.unstage(&paths))?,
         GitRequest::Discard { paths } => {
             let repo = repo()?;
-            // 路径是前端给的：只丢快照里未暂存段确实有的文件，`discard` 还要按状态分开删和恢复。
+            // 路径是前端给的：只丢快照里未暂存段确实有的文件，`discard` 还要按状态分开删和恢复。大仓库里
+            // 未暂存的文件成千上万，要的路径先放进集合，不每个文件都扫一遍。
+            let wanted: HashSet<&Path> = paths.iter().map(PathBuf::as_path).collect();
             let files: Vec<_> = runode_git::snapshot(dir, cache)
-                .map(|snapshot| snapshot.unstaged.into_iter().filter(|file| paths.contains(&file.path)).collect())
+                .map(|snapshot| {
+                    snapshot.unstaged.into_iter().filter(|file| wanted.contains(file.path.as_path())).collect()
+                })
                 .unwrap_or_default();
             done(repo.discard(&files))?;
         }

@@ -213,19 +213,18 @@ fn a_worktree_todo_runs_in_its_own_worktree() {
     std::fs::write(third_worktree.join("b.txt"), "b\n").unwrap();
     git(&third_worktree, &["add", "."]);
     git(&third_worktree, &["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "work"]);
+    let mut watcher = Peer::hello(&dir.join("host.sock"), false);
+    watcher.send(&ClientMsg::ListTodos { req: 1 });
+    assert!(matches!(watcher.reply(), HostMsg::Todos { req: 1, .. }));
     peer.send(&ClientMsg::Kill { id: third_session });
     let done = ClientMsg::UpdateTodo { req: 6, id: third.clone(), spec: None, done: Some(true) };
     assert_eq!(ask(&mut peer, &done), HostMsg::Done { req: 6 });
-    // 等库里记下清过了，不等目录消失：宿主删完目录还要试着删分支，之后才记进库。
-    let deadline = Instant::now() + Duration::from_secs(10);
-    let todo = loop {
-        let todo = list(&mut peer).into_iter().find(|todo| todo.id == third).unwrap();
-        if todo.worktree_dir.is_none() {
-            break todo;
-        }
-        assert!(Instant::now() < deadline, "the finished todo's worktree was not cleaned up");
-        thread::sleep(Duration::from_millis(50));
-    };
+    // 看着任务板的连接先因为标完成、再因为清掉了工作树各收到一次 `TodosChanged`：清完以后它重读，读到的
+    // 不再指着删掉了的工作树。宿主删完目录还要试着删分支，之后才记进库、发通知。
+    assert_eq!(watcher.reply(), HostMsg::TodosChanged);
+    assert_eq!(watcher.reply(), HostMsg::TodosChanged);
+    let todo = list(&mut peer).into_iter().find(|todo| todo.id == third).unwrap();
+    assert_eq!(todo.worktree_dir, None);
     assert!(!third_worktree.exists());
     assert_eq!(todo.branch.as_deref(), Some("runode/ship-it"));
     assert!(git(&repo, &["branch", "--list", "runode/ship-it"]).contains("runode/ship-it"));
@@ -250,12 +249,25 @@ fn a_removed_worktree_is_made_again() {
     git(&repo, &["worktree", "remove", "--force", first.to_str().unwrap()]);
     std::fs::remove_file(&out).unwrap();
 
-    start(&mut peer, &id);
+    let session = start(&mut peer, &id);
     // 旧分支 `runode/gone` 还在，新的换个名字。
     let second = repo.join(".worktrees").join(format!("gone-{id}"));
     assert_eq!(std::fs::canonicalize(wait_for_file(&out).trim()).unwrap(), std::fs::canonicalize(&second).unwrap());
     let todo = list(&mut peer).remove(0);
     assert_eq!(todo.worktree_dir.as_deref(), Some(second.as_path()));
+
+    // 再删一次：两个名字的分支都留着，接着往后换名字，不是从此开不起来。
+    peer.send(&ClientMsg::Kill { id: session });
+    git(&repo, &["worktree", "remove", "--force", second.to_str().unwrap()]);
+    std::fs::remove_file(&out).unwrap();
+    start(&mut peer, &id);
+    let third = repo.join(".worktrees").join(format!("gone-{id}-2"));
+    assert_eq!(std::fs::canonicalize(wait_for_file(&out).trim()).unwrap(), std::fs::canonicalize(&third).unwrap());
+    let todo = list(&mut peer).remove(0);
+    assert_eq!(
+        (todo.worktree_dir.as_deref(), todo.branch),
+        (Some(third.as_path()), Some(format!("runode/gone-{id}-2")))
+    );
 }
 
 /// 改、标完成、调先后、删，问过 `ListTodos` 的连接每次都收到 `TodosChanged`；不对的请求回 `Error`。

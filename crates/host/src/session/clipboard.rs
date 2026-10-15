@@ -99,10 +99,17 @@ impl Runner {
         }
     }
 
-    /// 改读写剪贴板的规矩：自己记一份，写的开关交给 VT（见 `HostSession::set_clipboard_writes`）。
+    /// 改读写剪贴板的规矩：自己记一份，写的开关交给 VT（见 `HostSession::set_clipboard_writes`）。改成不让读
+    /// 时，在等桌面回话的读请求当场回空的：桌面之后再回的文字按迟到的丢掉，不交给程序。
     pub(super) fn set_clipboard(&mut self, clipboard: ClipboardAccess) {
         self.clipboard = clipboard;
         self.session.set_clipboard_writes(clipboard.write == ClipboardWrite::Allow);
+        if clipboard.read == ClipboardRead::Deny
+            && let Some(read) = self.clipboard_read.take()
+        {
+            tracing::info!("session {} answered a clipboard read with nothing: clipboard-read = deny", self.id);
+            self.finish_read(read, None);
+        }
     }
 
     /// 界面回了会话请它办的事（`Inbox::UiAnswer`）：是在等的读请求的话把结果回给程序；写剪贴板的
@@ -169,7 +176,7 @@ impl Runner {
     }
 
     /// 回等着的读请求 `read`（`text` 见 `HostSession::answer_clipboard`），再给它后面排着的回空的。
-    fn finish_read(&mut self, read: PendingRead, text: Option<&str>) {
+    pub(super) fn finish_read(&mut self, read: PendingRead, text: Option<&str>) {
         self.session.answer_clipboard(read.query, text);
         for query in read.later {
             self.session.answer_clipboard(query, None);

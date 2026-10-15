@@ -845,7 +845,9 @@ fn twenty_handoffs_in_a_row_do_not_leak_descriptors() {
         }
     }
     assert!(fds.iter().all(|&count| count == fds[0]), "descriptors per host: {fds:?}");
-    // 每个新宿主收到 `Welcome` 后读到的连接对端都是旧宿主自报的进程号，见 `peer_pid_after_an_answer`。
+    // 每个新宿主收到 `Welcome` 后读到的连接对端都是旧宿主自报的进程号，见 `peer_pid_after_an_answer`。只有
+    // macOS 这样：Linux 上（`SO_PEERCRED`）读到的总是最早调 `listen` 的那个宿主，第二棒起新宿主都会记一笔对不上。
+    #[cfg(target_os = "macos")]
     for n in 0..20 {
         let log = std::fs::read_to_string(dir.join(format!("host{n}.log"))).unwrap();
         assert!(!log.contains("the connection says"), "host{n}: {log}");

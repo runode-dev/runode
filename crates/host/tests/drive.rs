@@ -112,7 +112,7 @@ fn command_output_needs_prompt_marks() {
 fn wait_for_meta(peer: &Peer, id: SessionId, wanted: impl Fn(&SessionMeta) -> bool) -> SessionMeta {
     let deadline = Instant::now() + WAIT;
     loop {
-        let frame = peer.frames.recv_timeout(deadline.saturating_duration_since(Instant::now())).expect("timed out");
+        let frame = peer.next_frame(deadline.saturating_duration_since(Instant::now())).expect("timed out");
         if frame.kind == FrameKind::Control
             && let HostMsg::Meta { id: changed, meta } = frame.message().unwrap()
             && changed == id

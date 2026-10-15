@@ -161,7 +161,17 @@ fn running(pid: libc::pid_t) -> bool {
     written == size && info.pbi_status != libc::SZOMB
 }
 
-#[cfg(not(target_os = "macos"))]
+/// Linux 上信号 0 对等着收尸的进程也成功，看 `/proc/<pid>/stat` 里的状态：`Z`（僵尸）和 `X`（正在消失）
+/// 不算。读不到时进程已经没了。
+#[cfg(target_os = "linux")]
+fn running(pid: libc::pid_t) -> bool {
+    let Ok(stat) = std::fs::read_to_string(format!("/proc/{pid}/stat")) else { return false };
+    // 第二项是括起来的程序名，里面可能有空格和括号，状态是最后一个 `)` 后面的那一项。
+    let state = stat.rsplit_once(')').and_then(|(_, rest)| rest.split_whitespace().next());
+    !matches!(state, Some("Z" | "X" | "x"))
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
 fn running(pid: libc::pid_t) -> bool {
     // SAFETY: 信号 0 只检查进程在不在。
     unsafe { libc::kill(pid, 0) == 0 }
@@ -170,4 +180,26 @@ fn running(pid: libc::pid_t) -> bool {
 /// 日志里的毫秒数。
 fn ms(duration: Duration) -> u128 {
     duration.as_millis()
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{process::Command, thread};
+
+    use super::*;
+
+    /// 已经退出、还没被收尸的进程不算在跑：交接时靠它判断对面的宿主死了没有。
+    #[test]
+    fn an_unreaped_process_is_not_running() {
+        let mut child = Command::new("/bin/sh").args(["-c", "exit 0"]).spawn().unwrap();
+        let pid = libc::pid_t::try_from(child.id()).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while running(pid) {
+            assert!(Instant::now() < deadline, "the exited child {pid} still counts as running");
+            thread::sleep(Duration::from_millis(10));
+        }
+        // 到这里还没收尸：它是个僵尸。
+        assert!(child.wait().unwrap().success());
+        assert!(!running(pid));
+    }
 }

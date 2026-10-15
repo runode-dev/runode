@@ -143,7 +143,9 @@ impl Shared {
 
     /// 新开一个会话，返回它的标识。
     ///
-    /// 交接给新宿主期间不开新会话（交出去的会话已经定了，新开的会跟着这个宿主一起退出）。
+    /// 交接给新宿主期间不开新会话（交出去的会话已经定了，新开的会跟着这个宿主一起退出），要退出了
+    /// （`Peers::stop`）也不开：没有界面时开终端在另起的线程里办，可能在 `Shutdown` 结束了所有会话、或者
+    /// 判定空闲以后才开好，登记进去的话没人收拾，shell 跟着进程一起被丢下。
     fn spawn(&self, options: SpawnOptions) -> Result<SessionId> {
         self.spawn_with(options, &[])
     }
@@ -167,12 +169,18 @@ impl Shared {
         let clipboard = setup.clipboard;
         // 开伪终端、启动 shell 要几毫秒，不占着锁。
         let handle = session::spawn(setup, options)?;
-        // 锁的先后：拿着 `peers` 再拿 `registry`；交接开始时在同一把锁里定下要交的会话。
+        // 锁的先后：拿着 `peers` 再拿 `registry`；交接开始时在同一把锁里定下要交的会话，要退出时在同一把
+        // 锁里置上 `stop`、清空登记表（见 `Shared::shut_down`）。
         let peers = self.peers();
-        if peers.handoff.is_some() {
+        let refused = match peers.stop {
+            Some(Stopped::Handoff) => Some("the host is being upgraded; try again in a moment"),
+            Some(Stopped::Idle | Stopped::Shutdown) => Some("the host is shutting down"),
+            None => peers.handoff.is_some().then_some("the host is being upgraded; try again in a moment"),
+        };
+        if let Some(refused) = refused {
             drop(peers);
             handle.send(session::Inbox::Kill);
-            anyhow::bail!("the host is being upgraded; try again in a moment");
+            anyhow::bail!(refused);
         }
         let mut registry = self.registry();
         // 这期间换过主题的话，那次换主题没赶上这个会话，补上。

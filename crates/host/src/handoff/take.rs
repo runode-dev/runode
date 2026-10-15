@@ -4,7 +4,11 @@ use std::{
     collections::HashMap,
     fs::File,
     io,
-    os::unix::net::{UnixListener, UnixStream},
+    net::Shutdown,
+    os::{
+        fd::OwnedFd,
+        unix::net::{UnixListener, UnixStream},
+    },
     path::{Path, PathBuf},
     sync::{Arc, mpsc},
     thread,
@@ -97,14 +101,18 @@ impl Host {
                 return Err(abort(&stream, format!("cannot listen on the socket: {err:#}"), started));
             }
         };
-        // 拉起这边的一方等结果有时限：过了 `ready_by` 它已经当作失败了，不能再接手成功。
-        if options.ready_by.is_some_and(|at| Instant::now() >= at) {
+        // 拉起这边的一方等结果有时限：过了 `ready_by` 它已经当作失败了，不能再接手成功。`on_ready` 是调用方的
+        // 代码，可能卡上一会儿（比如写状态管道），调完再看一次。
+        let late = || options.ready_by.is_some_and(|at| Instant::now() >= at);
+        if !late()
+            && let Some(on_ready) = &options.on_ready
+        {
+            on_ready();
+        }
+        if late() {
             self.stop_listening(&control);
             release_all(&taken.handles);
             return Err(abort(&stream, "took too long to get ready".into(), started));
-        }
-        if let Some(on_ready) = &options.on_ready {
-            on_ready();
         }
         if let Err(err) = send(&stream, &ClientMsg::HandoffReady) {
             self.stop_listening(&control);
@@ -440,10 +448,7 @@ fn abort(stream: &UnixStream, reason: String, started: Instant) -> TakeOverError
 /// 等旧宿主的 `Commit`，返回它没写进 PTY 的输入。它没发就断开时：进程已经不在了当作提交了
 /// （输入丢了），还在跑就是回滚了，返回原因。
 fn wait_for_commit(stream: &UnixStream, old_pid: Option<libc::pid_t>) -> Result<HashMap<SessionId, Vec<u8>>, String> {
-    let received = stream
-        .set_read_timeout(Some(COMMIT_TIMEOUT))
-        .and_then(|()| fd_passing::recv_with_fds(stream))
-        .map_err(|err| err.to_string());
+    let received = receive_commit(stream).map_err(|err| err.to_string());
     let error = match received.map(|(data, _)| data) {
         Ok(data) => match decode_part(&data) {
             Ok((HandoffPart::Commit { pending_input }, blocks)) => {
@@ -475,6 +480,34 @@ fn wait_for_commit(stream: &UnixStream, old_pid: Option<libc::pid_t>) -> Result<
         "the old host {pid} died without committing ({error}); taking the sessions over, input it had not written yet is lost"
     );
     Ok(HashMap::new())
+}
+
+/// 收旧宿主的 `Commit`，整个收下来最多 `COMMIT_TIMEOUT`。`SO_RCVTIMEO` 只管每一次 `recvmsg`，`Commit` 分几次
+/// 慢慢到时一次次都不超时，合起来却能远远超出（`TAKE_OVER_AFTER_READY` 就不准了），所以另起一个看门狗，到期
+/// 时断开连接，收的这边随之失败。看门狗动过手的话收到了也当作没收到：连接已经断了，回不了 `HandoffDone`。
+/// 起不了看门狗时只靠 `SO_RCVTIMEO`。
+fn receive_commit(stream: &UnixStream) -> io::Result<(Vec<u8>, Vec<OwnedFd>)> {
+    let until = Instant::now() + COMMIT_TIMEOUT;
+    stream.set_read_timeout(Some(COMMIT_TIMEOUT))?;
+    let (finished, wait) = mpsc::channel::<()>();
+    let watchdog = stream.try_clone().and_then(|watched| {
+        thread::Builder::new().name("handoff-commit-watchdog".into()).spawn(move || {
+            match wait.recv_timeout(until.saturating_duration_since(Instant::now())) {
+                Err(mpsc::RecvTimeoutError::Timeout) => {
+                    let _ = watched.shutdown(Shutdown::Both);
+                    true
+                }
+                Ok(()) | Err(mpsc::RecvTimeoutError::Disconnected) => false,
+            }
+        })
+    });
+    let watchdog = watchdog.inspect_err(|err| tracing::warn!("cannot watch the wait for the commit: {err}")).ok();
+    let received = fd_passing::recv_with_fds(stream);
+    drop(finished);
+    if watchdog.is_some_and(|watchdog| watchdog.join().unwrap_or(true)) {
+        return Err(io::Error::new(io::ErrorKind::TimedOut, format!("no commit within {COMMIT_TIMEOUT:?}")));
+    }
+    received
 }
 
 /// 不接手了：各个会话把 PTY 原样交回（只关这边的描述符）、线程结束，最多等 `RELEASE_TIMEOUT`。

@@ -275,8 +275,9 @@ pub(crate) struct Handle {
     /// 不用等积压的输出（最多 `PTY_BACKLOG_BYTES`）都喂完。
     killed: Arc<AtomicBool>,
     /// 发过 `Inbox::Driven(Some(..))`、之后还没清过：桌面每次打字都要清一下，没被标过时
-    /// `Inbox::Driven(None)` 不必进收件箱。
-    driven: Arc<AtomicBool>,
+    /// `Inbox::Driven(None)` 不必进收件箱。改它和把 `Inbox::Driven` 排进收件箱在同一把锁里：几份克隆在
+    /// 不同线程里一个标、一个清时，它和收件箱里最后一条 `Driven` 说的一样，不会记着标过却当成没标。
+    driven: Arc<Mutex<bool>>,
 }
 
 impl Handle {
@@ -285,8 +286,14 @@ impl Handle {
     pub(crate) fn send(&self, message: Inbox) -> bool {
         match &message {
             Inbox::Kill => self.killed.store(true, Ordering::Release),
-            Inbox::Driven(Some(_)) => self.driven.store(true, Ordering::Release),
-            Inbox::Driven(None) if !self.driven.swap(false, Ordering::AcqRel) => return true,
+            Inbox::Driven(drive) => {
+                let mut driven = self.driven.lock().unwrap_or_else(PoisonError::into_inner);
+                if drive.is_none() && !*driven {
+                    return true;
+                }
+                *driven = drive.is_some();
+                return self.inbox.send(message).is_ok();
+            }
             _ => {}
         }
         self.inbox.send(message).is_ok()
@@ -354,6 +361,8 @@ fn pty_sink(inbox: &mpsc::Sender<Inbox>, credits: &Arc<Credits>) -> pty::PtySink
 pub(crate) fn adopt(setup: Setup, adopted: Adopted) -> Result<Adopting> {
     let Setup { id, settings: _, env: _, ui, clipboard, read_patience } = setup;
     let Adopted { handoff, export, snapshot, replay, redactor, shell } = adopted;
+    // 交出时记着谁在操作它的，接手后照样记着：用户再打字时要清掉。
+    let driven = Arc::new(Mutex::new(export.meta.driver.is_some()));
     let (inbox, rx) = mpsc::channel();
     let credits = Arc::new(Credits::default());
     let sink = pty_sink(&inbox, &credits);
@@ -391,7 +400,7 @@ pub(crate) fn adopt(setup: Setup, adopted: Adopted) -> Result<Adopting> {
         release(&mut pty);
         return Err(anyhow!("the session thread ended while starting"));
     }
-    Ok(Adopting { handle: Handle { inbox, killed, driven: Arc::default() }, created })
+    Ok(Adopting { handle: Handle { inbox, killed, driven }, created })
 }
 
 /// 正在重建的接手来的会话，见 `adopt`。
@@ -613,14 +622,15 @@ impl Runner {
         }
     }
 
-    /// 被结束时还排在收件箱里的消息（`first` 是已经取出来的那条）：积压的输出和别的请求都丢掉，
+    /// 被结束时还排在收件箱里的消息（`first` 是已经取出来的那些：`run` 里取出的那条，或者交接冻结期间存下的
+    /// 请求）：积压的输出和别的请求都丢掉，
     /// 等着回话的一方随之收到断开；只有前端连上来（`Subscribe`）要回，不然它收不到
     /// `Attached`，干等到超时。照常给它现在的屏幕，`subscribe` 见会话已经结束，接着补发 `Exited`；
     /// 不按它的尺寸改会话。
     ///
     /// 宿主先把会话从登记表里拿掉、再置上 `Handle::killed` 的标记，`Subscribe` 又是经登记表送来
     /// 的，所以看到标记时，所有送得到的 `Subscribe` 都已经在收件箱里了。
-    fn answer_pending(&mut self, first: Option<Inbox>, inbox: &mpsc::Receiver<Inbox>) {
+    fn answer_pending(&mut self, first: impl IntoIterator<Item = Inbox>, inbox: &mpsc::Receiver<Inbox>) {
         for message in first.into_iter().chain(std::iter::from_fn(|| inbox.try_recv().ok())) {
             match message {
                 Inbox::Subscribe(subscribe) => self.subscribe(Subscribe { size: None, ..subscribe }),
@@ -785,9 +795,10 @@ impl Runner {
         let prepared = self.prepare(inbox, killed, &mut freeze);
         let _ = reply.send(prepared);
         loop {
+            // 冻结期间存下的 `Subscribe` 也要回，排在收件箱里的前面。
             if killed.load(Ordering::Acquire) {
                 self.ended();
-                self.answer_pending(None, inbox);
+                self.answer_pending(std::mem::take(&mut freeze.held), inbox);
                 return false;
             }
             match freeze.decision.take() {
@@ -922,6 +933,13 @@ impl Runner {
     /// `TypeAtPrompt` 和 `held` 里存下的输入编好接在后面。还没启动 shell 的会话没有 PTY 可交，只有存下的
     /// 输入。
     fn release(&mut self, held: Vec<Inbox>) -> Vec<u8> {
+        // 在等桌面回话的读剪贴板请求新宿主接不过去（它不知道在等什么，也不会替它计时），程序会一直等：交出
+        // PTY 之前回它空的，回话写不出去的话随没写出去的输入一起交给新宿主。冻结期间存下的界面回话随
+        // `held` 丢掉。
+        if let Some(read) = self.clipboard_read.take() {
+            tracing::info!("session {} answered a clipboard read with nothing: the host is handing over", self.id);
+            self.finish_read(read, None);
+        }
         let mut pending = match self.session.release_pty() {
             // 丢掉交出来的 master 只关这边这份，新宿主手里还有一份。
             Ok(handoff) => handoff.pending_input,
@@ -1375,6 +1393,37 @@ mod tests {
             .collect();
         let expected = [b"ab".to_vec(), b"<resized>".to_vec(), b"c".to_vec(), big, b"de".to_vec()];
         assert_eq!(seen, expected);
+    }
+
+    /// 交接冻结期间被结束：冻结时存下的 `Subscribe` 也要回，前端才收得到 `Attached`（和随后的 `Exited`），
+    /// 不干等到超时。
+    #[test]
+    fn a_session_killed_while_frozen_answers_held_subscribes() {
+        const WAIT: Duration = Duration::from_secs(10);
+        let (tx, rx) = mpsc::channel();
+        let killed = Arc::new(AtomicBool::new(false));
+        let thread_killed = killed.clone();
+        // `HostSession` 不是 `Send`，在会话的线程里建。
+        let session = thread::spawn(move || runner(true).run(&rx, &thread_killed));
+        let (prepared, ready) = mpsc::channel();
+        tx.send(Inbox::Prepare(prepared)).unwrap();
+        assert!(matches!(ready.recv_timeout(WAIT).unwrap(), Prepared::Ready(_)));
+        let (started, screen) = mpsc::channel();
+        let start = Box::new(move |_: Screen| {
+            let _ = started.send(());
+            None
+        });
+        let subscribe =
+            Subscribe { connection: 1, size: None, mode: AttachMode::MetaOnly, start, desktop: false, device: None };
+        tx.send(Inbox::Subscribe(subscribe)).unwrap();
+        // 冻结期间照常回读状态的请求：回来了，排在它前面的 `Subscribe` 就已经存下了。
+        let (info, answered) = mpsc::channel();
+        tx.send(Inbox::Info(info)).unwrap();
+        answered.recv_timeout(WAIT).unwrap();
+        killed.store(true, Ordering::Release);
+        tx.send(Inbox::Kill).unwrap();
+        screen.recv_timeout(WAIT).expect("the held subscribe was not answered");
+        session.join().unwrap();
     }
 
     #[test]

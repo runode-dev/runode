@@ -44,14 +44,21 @@ impl Shared {
         let wanted = known.iter().position(|(known, _)| {
             known.as_ref().is_some_and(|known| fs::canonicalize(known).unwrap_or_else(|_| known.clone()) == canonical)
         });
-        if let Some(id) = wanted.and_then(|ix| known[ix].1) {
-            return Ok(HostMsg::Opened { req, id });
-        }
         let find = |workspaces: &[WorkspaceLayout]| {
             wanted
                 .filter(|&ix| workspaces.get(ix).is_some_and(|workspace| workspace.dir == known[ix].0))
                 .or_else(|| workspaces.iter().position(|workspace| workspace.dir.as_ref() == Some(&canonical)))
         };
+        // 那个工作区已经有终端：规范化期间会话可能被结束、布局可能整个换过，回到锁里按现在的布局再认一遍，
+        // 还在才回它，不然照没有终端往下开。
+        if wanted.is_some_and(|ix| known[ix].1.is_some()) {
+            let mut peers = self.peers();
+            self.tidy(&mut peers.layout);
+            let workspaces = &peers.layout[front(&peers.layout)].workspaces;
+            if let Some(id) = find(workspaces).and_then(|ix| anchor(&workspaces[ix])) {
+                return Ok(HostMsg::Opened { req, id });
+            }
+        }
         let id = self.spawn(spawn_options(Some(canonical.clone()))).map_err(|err| format!("{err:#}"))?;
         let mut peers = self.peers();
         self.tidy(&mut peers.layout);

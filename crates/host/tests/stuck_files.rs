@@ -59,7 +59,7 @@ fn a_stuck_file_read_does_not_hold_up_the_connection() {
         if let Ok(writer) = OpenOptions::new().write(true).custom_flags(libc::O_NONBLOCK).open(&fifo) {
             drop(writer);
         }
-        let Ok(frame) = peer.frames.recv_timeout(Duration::from_millis(50)) else { continue };
+        let Ok(frame) = peer.next_frame(Duration::from_millis(50)) else { continue };
         if frame.kind == FrameKind::Control
             && let HostMsg::Tasks { req, .. } = frame.message().unwrap()
         {

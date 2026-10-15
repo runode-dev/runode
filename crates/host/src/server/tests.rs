@@ -45,9 +45,33 @@ fn options(shell: &str) -> SpawnOptions {
     }
 }
 
+/// 测试这头的连接，丢掉时断开：读帧的线程拿着同一个 socket 的另一份描述符，只关自己这份的话宿主看不到
+/// 断开，那条连接和宿主就一直留着。
+struct Client(UnixStream);
+
+impl Drop for Client {
+    fn drop(&mut self) {
+        let _ = self.0.shutdown(Shutdown::Both);
+    }
+}
+
+impl std::ops::Deref for Client {
+    type Target = UnixStream;
+
+    fn deref(&self) -> &UnixStream {
+        &self.0
+    }
+}
+
+impl std::ops::DerefMut for Client {
+    fn deref_mut(&mut self) -> &mut UnixStream {
+        &mut self.0
+    }
+}
+
 /// 经 `Host::connect_pair` 连上、按 `client` 握手，返回连接和读到的帧。
-fn greet(host: &Host, client: ClientKind) -> (UnixStream, mpsc::Receiver<Frame>) {
-    let mut stream = host.connect_pair().unwrap();
+fn greet(host: &Host, client: ClientKind) -> (Client, mpsc::Receiver<Frame>) {
+    let mut stream = Client(host.connect_pair().unwrap());
     let frames = frames(&stream);
     send(
         &mut stream,
@@ -98,7 +122,7 @@ fn waiting_for_answers_does_not_hold_up_input() {
     };
     send(&mut stream, &ClientMsg::ListSessions);
     send(&mut stream, &ClientMsg::ReadScreen { id: stuck, lines: None, command: None });
-    write_frame(&mut stream, FrameKind::Input, channel, b"through\r").unwrap();
+    write_frame(&mut *stream, FrameKind::Input, channel, b"through\r").unwrap();
     let mut output = Vec::new();
     while !output.windows(7).any(|w| w == b"through") {
         let frame = frames.recv_timeout(WAIT).expect("timed out");
@@ -324,4 +348,48 @@ fn a_panicking_session_tells_its_front_end() {
         thread::sleep(Duration::from_millis(5));
     }
     host.shared.kill_all();
+}
+
+/// 单独跑的宿主收到 `Shutdown` 以后不再开会话：同一次读进缓冲里、排在它后面的 `Spawn` 不办，要退出了的
+/// 宿主（没有界面时另起的线程这时才开好会话）也不登记新会话。
+#[test]
+fn a_stopping_host_opens_no_more_sessions() {
+    let host = Host::new(BuildId("test".into()));
+    host.mark_standalone();
+    let (mut stream, frames) = greet(&host, ClientKind::Cli);
+    let mut both = Vec::new();
+    for message in [
+        ClientMsg::Shutdown { kill_sessions: true },
+        ClientMsg::Spawn {
+            req: 1,
+            size: SIZE,
+            cwd: None,
+            integration: IntegrationMode::Off,
+            start: true,
+            shell: Some("/bin/cat".into()),
+            settings: None,
+        },
+    ] {
+        let frame = Frame::control(&message).unwrap();
+        write_frame(&mut both, frame.kind, 0, &frame.payload).unwrap();
+    }
+    stream.write_all(&both).unwrap();
+    loop {
+        match frames.recv_timeout(WAIT) {
+            Ok(frame) if frame.kind == FrameKind::Control => {
+                let message: HostMsg = frame.message().unwrap();
+                assert!(!matches!(message, HostMsg::Spawned { .. }), "spawned after the shutdown");
+            }
+            Ok(_) => {}
+            Err(mpsc::RecvTimeoutError::Disconnected) => break,
+            Err(mpsc::RecvTimeoutError::Timeout) => panic!("the connection stayed open after the shutdown"),
+        }
+    }
+    assert!(host.shared.registry().sessions.is_empty());
+
+    // 判定空闲退出以后开好的会话也不登记。
+    let host = Host::new(BuildId("test".into()));
+    host.shared.peers().stop = Some(Stopped::Idle);
+    assert!(host.shared.spawn(options("/bin/cat")).is_err());
+    assert!(host.shared.registry().sessions.is_empty());
 }

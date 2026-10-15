@@ -6,7 +6,7 @@ use std::{
     fs::File,
     io,
     os::{
-        fd::{AsRawFd as _, OwnedFd},
+        fd::{AsRawFd as _, FromRawFd as _, OwnedFd},
         unix::ffi::OsStrExt as _,
     },
     path::Path,
@@ -84,9 +84,16 @@ pub fn launch_successor(exe: &Path) -> io::Result<Successor> {
     // 两端都设了 close-on-exec：别处拉起的进程不会带走写端，让这边等不到结尾。
     let (reader, writer) = io::pipe()?;
     let mut writer = OwnedFd::from(writer);
-    if writer.as_raw_fd() == STATUS_FD {
-        // dup2 到自己身上不清 close-on-exec；换一个号（3 占着，复制出来的一定不是 3）。
-        writer = writer.try_clone()?;
+    if writer.as_raw_fd() <= STATUS_FD {
+        // 挪到比 `STATUS_FD` 大的号上：dup2 到自己身上不清 close-on-exec；调用方关着标准输入输出时写端可能
+        // 落在 0 到 2 上，`detach` 先把这三个换成 /dev/null，再接到 `STATUS_FD` 上的就是 /dev/null 了。
+        // SAFETY: 描述符来自上面的管道，在这次调用期间开着；`F_DUPFD_CLOEXEC` 返回新的描述符，归这里。
+        let moved = unsafe { libc::fcntl(writer.as_raw_fd(), libc::F_DUPFD_CLOEXEC, STATUS_FD + 1) };
+        if moved < 0 {
+            return Err(io::Error::last_os_error());
+        }
+        // SAFETY: `moved` 是刚复制出来、没有别人拿着的描述符。
+        writer = unsafe { OwnedFd::from_raw_fd(moved) };
     }
     let pid = detach(exe, &[c"--host", c"--take-over"], Some(&writer))?;
     drop(writer);

@@ -34,7 +34,11 @@ fn a_different_protocol_is_refused() {
         device: None,
     });
     assert!(matches!(peer.message(), HostMsg::Incompatible { protocol: PROTOCOL_VERSION, .. }));
-    assert!(peer.frames.recv_timeout(WAIT).is_err(), "the host should close the connection");
+    // 断开（读的线程读到头）才算，等满 `WAIT` 也没动静的不算。
+    assert!(
+        matches!(peer.next_frame(WAIT), Err(mpsc::RecvTimeoutError::Disconnected)),
+        "the host should close the connection"
+    );
 }
 
 /// 输入帧写给会话里的程序，输出帧原样回来；读屏幕和列会话看得到同一个会话。
@@ -97,7 +101,7 @@ fn meta_only_clients_get_no_output() {
     let (channel, _) = typist.attach(id, AttachMode::VtReplay);
     typist.input(channel, b"quiet\r");
     typist.wait_for_output(channel, b"quiet");
-    while let Ok(frame) = watcher.frames.recv_timeout(Duration::from_millis(200)) {
+    while let Ok(frame) = watcher.next_frame(Duration::from_millis(200)) {
         assert_ne!(frame.kind, FrameKind::Output);
     }
     typist.send(&ClientMsg::Kill { id });

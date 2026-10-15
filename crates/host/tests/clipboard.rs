@@ -88,11 +88,14 @@ fn writes_go_to_the_desktop_that_interacted_last() {
     second.attach(id, AttachMode::VtReplay);
     let mut cli = Peer::over(host.connect_pair().unwrap()).greet(ClientKind::Cli, false);
 
+    // 焦点和粘贴走两条连接，到会话线程的先后不一定：在发焦点的连接上读一次屏幕，回话来了焦点就办完了。
     first.send(&ClientMsg::Focus { id, focused: true });
+    first.screen_text(id, None);
     cli.send(&ClientMsg::Paste { req: 1, id, text: "aGk=\r".into() });
     assert_eq!(ui_request(&first).1, ClientMsg::WriteClipboard { id, text: "hi".into() });
 
     second.send(&ClientMsg::Focus { id, focused: true });
+    second.screen_text(id, None);
     cli.send(&ClientMsg::Paste { req: 2, id, text: "Ynll\r".into() });
     assert_eq!(ui_request(&second).1, ClientMsg::WriteClipboard { id, text: "bye".into() });
     first.send(&ClientMsg::Kill { id });
@@ -130,6 +133,25 @@ fn reads_while_asking_are_answered_with_nothing_after_the_first() {
     desktop.send(&ClientMsg::UiReply { ui, reply: Box::new(HostMsg::ClipboardText { id, text: Some("hi".into()) }) });
     let requests = requests_until(&desktop, channel, br"^[]52;c;aGk=^G^[]52;c;^[\");
     assert!(requests.is_empty(), "{requests:?}");
+    desktop.send(&ClientMsg::Kill { id });
+}
+
+/// 等桌面回话期间改成 `clipboard-read = deny`：在等的读请求当场回空的，桌面之后回的文字不交给程序。
+#[test]
+fn denying_reads_cancels_the_one_waiting() {
+    let host = host();
+    let mut desktop = Peer::pair(&host);
+    set_access(&mut desktop, ClipboardWrite::Allow, ClipboardRead::Ask);
+    let (id, channel) = reader_session(&mut desktop, "clip-revoke", r"printf '\033]52;c;?\007'");
+    let (ui, _) = ui_request(&desktop);
+    set_access(&mut desktop, ClipboardWrite::Allow, ClipboardRead::Deny);
+    desktop.wait_for_output(channel, b"^[]52;c;^G");
+    // 回话和之后的输入走同一条连接、按先后送到会话线程：文字要是交给了程序，会显示在 `x` 前面。
+    let reply = HostMsg::ClipboardText { id, text: Some("secret".into()) };
+    desktop.send(&ClientMsg::UiReply { ui, reply: Box::new(reply) });
+    desktop.input(channel, b"x");
+    let output = desktop.wait_for_output(channel, b"x");
+    assert!(!contains(&output, b"c2VjcmV0"), "{}", String::from_utf8_lossy(&output));
     desktop.send(&ClientMsg::Kill { id });
 }
 

@@ -37,6 +37,9 @@ const MAX_PROMPT: usize = 64 * 1024;
 /// 分支名和工作树目录名里取自标题的部分最长这么多个字符。
 const MAX_SLUG: usize = 40;
 
+/// 给任务开工作树时最多拿这么多个没被占的名字去试，见 `add_worktree`。
+const WORKTREE_ATTEMPTS: usize = 2;
+
 /// 任务板：库和定时的线程要的状态。
 #[derive(Default)]
 pub(crate) struct Todos {
@@ -201,11 +204,10 @@ impl Shared {
     ) -> Result<HostMsg, String> {
         self.todos_writable()?;
         let id = &self.resolve_todo(id)?;
-        // 改目录、工作树的同时有人在开始这个任务的话，开出来的会话和库里记的会对不上。
-        let _claim = match spec {
-            Some(_) => Some(self.claim_todo(id)?),
-            None => None,
-        };
+        // 改目录、工作树的同时有人在开始这个任务的话，开出来的会话和库里记的会对不上。标完成、取消完成也占着：
+        // 清工作树的（`sweep_worktrees`）占住以后重读、认定它完成了才清，这期间取消完成的话清掉的就是又要
+        // 用的工作树；正在开始的也一样，开出来的会话记在一张完成了的任务上。
+        let _claim = self.claim_todo(id)?;
         if let Some(spec) = spec {
             let old = self.todos.with_db(|db| db.todo_by_id(id))?.ok_or_else(|| no_todo(id))?;
             if old.started.is_none() {
@@ -312,8 +314,11 @@ impl Shared {
                 continue;
             }
             let (worktree_gone, branch_gone) = clean_worktree(&todo);
-            if let Err(err) = self.todos.with_db(|db| db.set_swept(&todo.id, worktree_gone, branch_gone)) {
-                tracing::warn!("cannot record that todo {} was cleaned up: {err}", todo.id);
+            match self.todos.with_db(|db| db.set_swept(&todo.id, worktree_gone, branch_gone)) {
+                // 任务的工作树、分支不再记着，看板要重读，不然一直指着删掉了的目录。
+                Ok(()) if worktree_gone || branch_gone => self.todos_changed(),
+                Ok(()) => {}
+                Err(err) => tracing::warn!("cannot record that todo {} was cleaned up: {err}", todo.id),
             }
         }
     }
@@ -422,7 +427,7 @@ impl Shared {
             Some(root) => in_worktree(root, &todo.spec.dir),
             None => todo.spec.dir.clone(),
         };
-        // 分支也删：留着的话下次开始时名字被占，两个候选名都占了以后这张任务再也开不起来。
+        // 分支也删：留着的话下次开始时名字被占，每失败一次就多占一个名字。
         let undo_worktree = || {
             let Some((root, branch)) = &made else { return };
             let Some(repo) = Repo::open(&todo.spec.dir) else { return };
@@ -500,18 +505,33 @@ fn check_when(when: &When, now: u64) -> Result<(), String> {
 }
 
 /// 给任务新开工作树：仓库的 `.worktrees/<名字>`，分支 `runode/<名字>`，名字取自标题；已经有了时名字后面
-/// 加上任务的标识再试一次。返回工作树的根目录和分支。
+/// 加上任务的标识，还有的话再加上序号。工作树被删了、分支留着时每开始一次占掉一个名字，占掉了的（分支或者
+/// 目录已经有了）直接跳过，不用 git 去试；真去试的最多 `WORKTREE_ATTEMPTS` 个。返回工作树的根目录和分支。
 fn add_worktree(todo: &Todo) -> Result<(PathBuf, String), String> {
     let repo =
         Repo::open(&todo.spec.dir).ok_or_else(|| format!("{} is not in a git repository", todo.spec.dir.display()))?;
     let slug = slug(&todo.spec.title).unwrap_or_else(|| todo.id.clone());
     let worktrees = repo.root.join(".worktrees");
+    let branches: HashSet<String> =
+        repo.branches().into_iter().filter(|branch| !branch.remote).map(|branch| branch.name).collect();
+    let names = [slug.clone(), format!("{slug}-{}", todo.id)]
+        .into_iter()
+        .chain((2..).map(|n| format!("{slug}-{}-{n}", todo.id)));
     let mut last = String::new();
-    for name in [slug.clone(), format!("{slug}-{}", todo.id)] {
+    let mut attempts = 0;
+    for name in names.take(branches.len() + WORKTREE_ATTEMPTS) {
         let (root, branch) = (worktrees.join(&name), format!("runode/{name}"));
+        if branches.contains(&branch) || root.exists() {
+            last = format!("{branch} or {} is taken", root.display());
+            continue;
+        }
         match repo.add_worktree(&root, &branch) {
             Ok(()) => return Ok((root, branch)),
             Err(err) => last = err.to_string(),
+        }
+        attempts += 1;
+        if attempts == WORKTREE_ATTEMPTS {
+            break;
         }
     }
     Err(format!("cannot make a worktree for todo {}: {last}", todo.id))
@@ -585,6 +605,27 @@ mod tests {
         assert!(todos.claim("b").is_some());
         drop(claim);
         assert!(todos.claim("a").is_some());
+    }
+
+    /// 标完成、取消完成也要占住任务：清工作树的、正在开始的占着时回一句让前端再试，不改库。
+    #[test]
+    fn marking_done_waits_for_a_claimed_todo() {
+        let dir = std::env::temp_dir().join(format!("rnh-unit-{}-todo-claim", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let host = Host::new(runode_protocol::BuildId("test".into()));
+        host.serve_todos(dir.join("todos.db"));
+        let spec = TodoSpec { title: "t".into(), prompt: String::new(), dir, agent: "claude".into(), worktree: false };
+        let shared = &host.shared;
+        let HostMsg::TodoAdded { id, .. } = shared.add_todo(1, &spec).unwrap() else { panic!("expected the new todo") };
+        let done = |shared: &Shared| shared.todos.with_db(|db| db.todo_by_id(&id)).unwrap().unwrap().done_at;
+
+        let claim = shared.todos.claim(&id).unwrap();
+        assert!(shared.update_todo(2, &id, None, Some(true)).is_err());
+        assert_eq!(done(shared), None);
+        drop(claim);
+        assert_eq!(shared.update_todo(3, &id, None, Some(true)), Ok(HostMsg::Done { req: 3 }));
+        assert!(done(shared).is_some());
     }
 
     #[test]

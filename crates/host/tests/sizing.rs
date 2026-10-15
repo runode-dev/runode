@@ -45,8 +45,7 @@ fn until(peer: &Peer, mut done: impl FnMut(&HostMsg) -> bool) -> Vec<Seen> {
     let mut seen = Vec::new();
     loop {
         let frame = peer
-            .frames
-            .recv_timeout(deadline.saturating_duration_since(Instant::now()))
+            .next_frame(deadline.saturating_duration_since(Instant::now()))
             .unwrap_or_else(|_| panic!("timed out; saw {} things", seen.len()));
         match frame.kind {
             FrameKind::Output => seen.push(Seen::Output(frame.channel, frame.payload)),
@@ -452,11 +451,21 @@ fn the_owner_leaving_skips_viewers_without_a_size() {
     assert_eq!((info_now.size, info_now.size_owner.as_deref()), (SIZE_B, Some("beta")));
     assert_eq!(owners(&seen), [size_owner(false, "beta")]);
 
-    // b 也走了：只剩手机，没有 owner。
+    // b 也走了：只剩手机，没有 owner。断开的连接什么时候把 `Detach` 送到会话线程不一定，别的连接上的来回
+    // 拦不住它：一直列会话，等到没有 owner。
     drop(b);
-    settle(&mut phone, id);
-    let (info_now, seen) = info(&mut phone, id);
-    assert_eq!((info_now.size, info_now.size_owner), (SIZE_B, None));
+    let deadline = Instant::now() + WAIT;
+    let mut seen = Vec::new();
+    let info_now = loop {
+        let (info_now, more) = info(&mut phone, id);
+        seen.extend(more);
+        if info_now.size_owner.is_none() {
+            break info_now;
+        }
+        assert!(Instant::now() < deadline, "beta still owns the session after it left");
+        std::thread::sleep(Duration::from_millis(20));
+    };
+    assert_eq!(info_now.size, SIZE_B);
     assert!(owners(&seen).is_empty(), "{seen:?}");
     assert!(resized(&seen).is_empty(), "{seen:?}");
     a.send(&ClientMsg::Kill { id });

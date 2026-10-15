@@ -364,6 +364,11 @@ impl Host {
     /// 拿到锁以后，`socket` 上已有的文件只能是上次没清掉的，删掉重建。宿主退出时删掉 `socket`
     /// （交接给新宿主时不删）。这个宿主已经在监听时返回错误。
     pub fn listen(&self, socket: &Path, lock: &Path) -> Result<()> {
+        // 先看一眼，已经在监听时不去动 `socket` 上的文件；同时调的两次都过了这里的话，`start_listening` 在锁里
+        // 拦下后一次，后一次删掉自己刚建的 socket 文件（拿着它的锁，那个路径归它）。
+        if self.shared.peers().listening.is_some() {
+            return Err(anyhow!("the host is already listening"));
+        }
         let lock = lock_exclusively(lock)?;
         match std::fs::remove_file(socket) {
             Err(err) if err.kind() != io::ErrorKind::NotFound => {
@@ -373,8 +378,13 @@ impl Host {
         }
         let listener =
             UnixListener::bind(socket).with_context(|| format!("failed to listen on {}", socket.display()))?;
-        std::fs::set_permissions(socket, std::fs::Permissions::from_mode(0o600))?;
-        self.start_listening(listener, lock, socket, false)?;
+        let started = std::fs::set_permissions(socket, std::fs::Permissions::from_mode(0o600))
+            .map_err(anyhow::Error::from)
+            .and_then(|()| self.start_listening(listener, lock, socket, false));
+        if let Err(err) = started {
+            let _ = std::fs::remove_file(socket);
+            return Err(err);
+        }
         // 之后开的 shell 里的命令行连这个 socket，开发版和装好的版本同时开着时也不会连错。
         self.set_env(runode_protocol::ENV_SOCKET, socket.as_os_str());
         Ok(())
@@ -391,7 +401,10 @@ impl Host {
         socket: &Path,
         paused: bool,
     ) -> Result<Arc<ListenControl>> {
-        if self.shared.peers().listening.is_some() {
+        // 看有没有在监听、起线程和登记 `listening` 都在同一把锁里：同时调的两次只有一次起得了线程，另一次
+        // 的线程不会被覆盖掉、停不下来。接受连接的线程要拿这把锁时（登记连上来的连接）等这里放开。
+        let mut peers = self.shared.peers();
+        if peers.listening.is_some() {
             return Err(anyhow!("the host is already listening"));
         }
         // 非阻塞：接受连接的线程先 `poll` 再接，`poll` 之后没接到（别的进程抢先接走了，或者交接
@@ -408,8 +421,7 @@ impl Host {
             .name("host-listener".into())
             .spawn(move || accept_loop(&shared, &thread_listener, &thread_control, &wake_rx))
             .context("failed to start the listener thread")?;
-        self.shared.peers().listening =
-            Some(Listening { socket: socket.into(), listener, lock, control: control.clone() });
+        peers.listening = Some(Listening { socket: socket.into(), listener, lock, control: control.clone() });
         Ok(control)
     }
 
@@ -485,8 +497,12 @@ fn unregister(shared: &Shared, id: u64) {
 }
 
 impl Shared {
-    /// 要退出了（收到 `Shutdown`）。宿主单独一个进程在跑时，给所有连接发 `Goodbye`、写完后断开，
-    /// 由 `Host::run_until_idle` 收尾，返回 true；跑在 app 进程里时什么都不做，返回 false。
+    /// 要退出了（收到 `Shutdown`，调用方已经结束了所有会话）。宿主单独一个进程在跑时，给所有连接发
+    /// `Goodbye`、写完后断开，由 `Host::run_until_idle` 收尾，返回 true；跑在 app 进程里时什么都不做，
+    /// 返回 false。
+    ///
+    /// 置上 `stop` 和再清一遍登记表在同一把锁里：调用方结束所有会话之后、这里拿到锁之前开好的会话（别的
+    /// 连接、没有界面时另起的线程开的）在这里结束；之后 `Shared::spawn_with` 看得到 `stop`，不再登记。
     fn shut_down(&self) -> bool {
         let mut peers = self.peers();
         if !peers.standalone {
@@ -494,6 +510,10 @@ impl Shared {
         }
         peers.stop.get_or_insert(Stopped::Shutdown);
         peers.accepting = false;
+        // 锁的先后：拿着 `peers` 再拿 `registry`。
+        for (_, handle) in self.registry().sessions.drain() {
+            handle.send(Inbox::Kill);
+        }
         peers.say_goodbye(None, false, &GoodbyeReason::Shutdown);
         drop(peers);
         self.peers_changed.notify_all();
@@ -699,6 +719,7 @@ fn serve(shared: &Arc<Shared>, id: u64, stream: UnixStream, check_peer: bool) {
         git_waiting: Waiting::default(),
         files_waiting: Waiting::default(),
         git: None,
+        closing: false,
     };
     connection.run(&mut BufReader::new(&stream));
     connection.detach_all();
@@ -852,6 +873,8 @@ struct Connection {
     files_waiting: Waiting,
     /// 办 git 请求的工作线程，第一次要时才起。
     git: Option<GitWorker>,
+    /// 这条连接发来的 `Shutdown` 让宿主退出了：之后的请求都不办，读的线程结束。
+    closing: bool,
 }
 
 impl Connection {
@@ -911,7 +934,12 @@ impl Connection {
             };
             match frame.kind {
                 FrameKind::Control => match frame.message::<ClientMsg>() {
-                    Ok(message) => self.handle(message),
+                    Ok(message) => {
+                        self.handle(message);
+                        if self.closing {
+                            return;
+                        }
+                    }
                     Err(err) => self.error(None, None, format!("unreadable message: {err}")),
                 },
                 FrameKind::Input => match self.channels.get(&frame.channel) {
@@ -1127,10 +1155,11 @@ impl Connection {
             ClientMsg::WriteClipboard { .. } | ClientMsg::ReadClipboard { .. } => {
                 self.error(None, None, "only the host asks the runode window to use the clipboard".into());
             }
+            // 宿主要退出时这条连接上之后的请求都不办（同一次读进缓冲里的 `Spawn` 也是），见 `Connection::run`。
             ClientMsg::Shutdown { kill_sessions: true } => {
                 self.channels.clear();
                 self.shared.kill_all();
-                self.shared.shut_down();
+                self.closing = self.shared.shut_down();
             }
             ClientMsg::Shutdown { kill_sessions: false } => {
                 self.error(None, None, "the host cannot hand its sessions over yet".into());

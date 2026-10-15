@@ -166,7 +166,7 @@ fn flooding(peer: &mut Peer, name: &str) -> (SessionId, u32, String) {
     let (channel, _) = peer.attach(id, AttachMode::Snapshot);
     // 等 zsh 出提示符。
     std::thread::sleep(Duration::from_millis(500));
-    while peer.frames.try_recv().is_ok() {}
+    while peer.next_frame(Duration::ZERO).is_ok() {}
     let marker = format!("runode-pair-{name}-{}", std::process::id());
     peer.input(channel, format!("yes {marker}\r").as_bytes());
     (id, channel, marker)
