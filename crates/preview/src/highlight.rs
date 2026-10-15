@@ -51,6 +51,10 @@ pub struct Span {
 
 const FOREGROUND: highlighting::Color = highlighting::Color { r: 0, g: 0, b: 0, a: 0xFF };
 
+/// 运算符的记号色，不是真的颜色：语法定义把 `+`、`->` 和 `and`、`typeof`、`sizeof` 这类字母写的运算符
+/// 都标成 `keyword.operator`，作用域分不开，只能分段时看字：符号写的用默认前景色，字母写的跟关键字一样。
+const OPERATOR: highlighting::Color = highlighting::Color { r: 1, g: 0, b: 0, a: 0xFF };
+
 const fn ansi(index: u8) -> highlighting::Color {
     highlighting::Color { r: index, g: 0, b: 0, a: 0 }
 }
@@ -68,7 +72,7 @@ const MAGENTA: u8 = 5;
 const CYAN: u8 = 6;
 
 /// 作用域到颜色和字形的映射。同一段文字匹配多条时 syntect 从宽到具体逐条叠上去，颜色为 `None` 的那条
-/// 沿用前面叠上的颜色；要回到默认前景色得写 `FOREGROUND`（比如运算符不跟着 `keyword` 上色）。
+/// 沿用前面叠上的颜色；要回到默认前景色得写 `FOREGROUND`。
 const RULES: &[(&str, Option<highlighting::Color>, FontStyle)] = &[
     ("comment, punctuation.definition.comment", Some(ansi(BLACK_BRIGHT)), FontStyle::ITALIC),
     ("string, punctuation.definition.string", Some(ansi(GREEN)), FontStyle::empty()),
@@ -79,7 +83,7 @@ const RULES: &[(&str, Option<highlighting::Color>, FontStyle)] = &[
         FontStyle::empty(),
     ),
     ("keyword, storage, keyword.control, storage.type, storage.modifier", Some(ansi(MAGENTA)), FontStyle::empty()),
-    ("keyword.operator", Some(FOREGROUND), FontStyle::empty()),
+    ("keyword.operator", Some(OPERATOR), FontStyle::empty()),
     (
         "entity.name.function, support.function, variable.function, meta.function-call variable.function, support.macro, entity.name.macro",
         Some(ansi(BLUE)),
@@ -238,8 +242,13 @@ fn highlight_with(
         let mut start = 0;
         for (style, piece) in pieces {
             let end = (start + piece.len()).min(line.len());
+            let color = match style.foreground {
+                OPERATOR if piece.chars().all(char::is_alphabetic) => Color::Ansi(MAGENTA),
+                OPERATOR => Color::Foreground,
+                color => decode(color),
+            };
             let style = Style {
-                color: decode(style.foreground),
+                color,
                 bold: style.font_style.contains(FontStyle::BOLD),
                 italic: style.font_style.contains(FontStyle::ITALIC),
             };

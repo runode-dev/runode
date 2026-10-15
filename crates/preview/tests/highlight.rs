@@ -56,7 +56,7 @@ fn unknown_language_or_cancel_gives_nothing() {
     assert!(highlight(Path::new("a.rs"), &lines("fn main() {}"), &AtomicBool::new(true)).is_none());
 }
 
-/// 运算符不跟着关键字上色，关键字照旧是洋红。
+/// 符号写的运算符不跟着关键字上色，关键字和字母写的运算符照旧是洋红。
 #[test]
 fn operators_keep_the_default_color() {
     let text = lines("fn f() -> i32 { 1 + 2 }");
@@ -66,4 +66,13 @@ fn operators_keep_the_default_color() {
     };
     assert_eq!(color_at(text[0].find("fn").unwrap()), Color::Ansi(5));
     assert_eq!(color_at(text[0].find('+').unwrap()), Color::Foreground);
+
+    let text = lines("x = a and not b");
+    let spans = highlight(Path::new("a.py"), &text, &AtomicBool::new(false)).unwrap();
+    let color_at = |at: usize| {
+        spans[0].iter().find(|span| span.range.contains(&at)).map_or(Color::Foreground, |span| span.style.color)
+    };
+    assert_eq!(color_at(text[0].find('=').unwrap()), Color::Foreground);
+    assert_eq!(color_at(text[0].find("and").unwrap()), Color::Ansi(5));
+    assert_eq!(color_at(text[0].find("not").unwrap()), Color::Ansi(5));
 }
