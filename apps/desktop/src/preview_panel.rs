@@ -766,6 +766,8 @@ impl PreviewPanel {
         let Some(preview) = self.preview_mut() else {
             return;
         };
+        // 起读之前就清掉要重读的标记（和 `load_diff` 一样）：读的期间文件又变了时重新标上，读完不能把它抹掉。
+        preview.reload = false;
         preview.cancel.store(true, Ordering::Relaxed);
         preview.cancel = Arc::new(AtomicBool::new(false));
         let cancel = preview.cancel.clone();
@@ -787,7 +789,6 @@ impl PreviewPanel {
                 .update(cx, |this, cx| {
                     let (preview, git) = this.preview_for(id, &cancel)?;
                     preview.stamp = stamp;
-                    preview.reload = false;
                     // 排版视图的旧文档在新文档解析完之前还显示着，它的图片等换上新文档时再按用没用到放。
                     let (old_highlights, old_markdown) = match preview.content.take() {
                         Some(Loaded::Text { highlights, markdown, .. }) => (highlights, markdown),
