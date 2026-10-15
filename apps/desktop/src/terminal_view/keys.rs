@@ -40,7 +40,8 @@ pub fn translate(keystroke: &Keystroke) -> Option<KeyInput> {
 }
 
 /// 当前的键盘布局下 Option 默认当不当 Alt：美式和 ABC 这类布局 Option 打出的 ∫、π 很少用，
-/// 当 Alt；别的布局（德语的 @、法语的 | 都靠 Option）不当。输入法开着时读的是它底下的键盘布局。
+/// 当 Alt；别的布局（德语的 @、法语的 | 都靠 Option）不当。输入法开着时读的是它底下的键盘布局：
+/// 苹果自带的拼音、五笔、仓颉、注音底下是几个不在设置里露面的 QWERTY 布局，一样当 Alt。
 #[cfg(target_os = "macos")]
 fn layout_option_as_alt() -> bool {
     use std::ffi::c_void;
@@ -61,6 +62,14 @@ fn layout_option_as_alt() -> bool {
         "com.apple.keylayout.USInternational-PC",
         "com.apple.keylayout.USInternational",
         "com.apple.keylayout.ABC",
+        // 苹果中文输入法底下的布局。
+        "com.apple.keylayout.PinyinKeyboard",
+        "com.apple.keylayout.TraditionalPinyinKeyboard",
+        "com.apple.keylayout.WubihuaKeyboard",
+        "com.apple.keylayout.TraditionalWubihuaKeyboard",
+        "com.apple.keylayout.CangjieKeyboard",
+        "com.apple.keylayout.ZhuyinBopomofo",
+        "com.apple.keylayout.ZhuyinEten",
     ];
     // SAFETY: 拿到的输入源按 Copy 规则归我们，用完释放；属性值归输入源所有，只在释放前读，
     // 它是 CFString，和 NSString 免费桥接。

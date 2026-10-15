@@ -86,7 +86,7 @@ pub(crate) fn config_doc(key: &str) -> &'static str {
             "When the cursor blinks, stop blinking and keep it solid after this many seconds without typing, terminal output or the window regaining focus; any of those starts it blinking again. 0 keeps it blinking."
         }
         "macos-option-as-alt" => {
-            "Treat Option as Alt on macOS: true (both sides), false, left (left only), right (right only). Unset, it follows the keyboard layout: both sides on U.S. and ABC layouts, whose Option characters are rarely typed, and off on other layouts."
+            "Treat Option as Alt on macOS: true (both sides), false, left (left only), right (right only). Unset, it follows the keyboard layout: both sides on U.S. and ABC layouts and under Apple's Chinese input methods, whose Option characters are rarely typed, and off on other layouts."
         }
         "scrollback-limit" => {
             "How much scrollback each terminal keeps, in bytes: a whole number; anything below 2 MiB (2097152) counts as 2 MiB. At most 10,000 lines are kept as well; whichever limit is reached first applies. Changes apply to open terminals too."

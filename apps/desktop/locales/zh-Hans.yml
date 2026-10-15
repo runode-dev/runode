@@ -566,7 +566,7 @@ settings:
     cursor_style: 运行中的程序仍然可以改。
     cursor_style_blink: 运行中的程序仍然可以打开或关掉闪烁。
     cursor_style_blink_timeout: 这么多秒没有输入也没有输出，光标就停止闪烁、常亮。0 表示一直闪。
-    macos_option_as_alt: 打开后按 Option 组合键发的是 Alt 组合，不再输入特殊字符。默认按键盘布局定：美式和 ABC 布局两边都当 Alt，别的布局不当。
+    macos_option_as_alt: 打开后按 Option 组合键发的是 Alt 组合，不再输入特殊字符。默认按键盘布局定：美式、ABC 布局和苹果中文输入法下两边都当 Alt，别的布局不当。
     scrollback_limit: 每个终端的回滚历史最多占多少字节，至少 2 MiB（2097152），另外最多 1 万行。
     shell_integration_features: 提示符上用竖线，zsh 的 vi 命令模式里用方块，跑命令时恢复成上面的光标形状。对新开的终端生效。
     clipboard_write: 终端里的程序（vim、tmux、经 ssh 连到远端的 shell 等）能把文字放进剪贴板。
