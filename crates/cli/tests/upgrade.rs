@@ -357,6 +357,36 @@ fn a_host_that_never_comes_back_times_out() {
     assert!(started.elapsed() < Duration::from_secs(5), "{:?}", started.elapsed());
 }
 
+/// 新宿主列得出会话、却不回重新连上会话的请求：也最多等到 `--timeout`，不等满回话的十秒。
+#[test]
+fn an_unanswered_attach_on_the_new_host_times_out_on_time() {
+    let new = FakeHost::start("stuckb", |message| match message {
+        ClientMsg::ListSessions => {
+            vec![HostMsg::SessionList { sessions: vec![session(id(S), agent(AgentState::Working))] }]
+        }
+        _ => vec![],
+    });
+    let new_socket = socket(&new);
+    let slot: Slot = Default::default();
+    let old_path = slot.clone();
+    let old = FakeHost::start("stucka", move |message| match message {
+        ClientMsg::ListSessions => {
+            vec![HostMsg::SessionList { sessions: vec![session(id(S), agent(AgentState::Working))] }]
+        }
+        ClientMsg::Attach { id, .. } => {
+            hand_over(&new_socket, old_path.lock().unwrap().as_deref().unwrap());
+            vec![attached(*id, agent(AgentState::Working)), handoff()]
+        }
+        _ => vec![],
+    });
+    *slot.lock().unwrap() = Some(socket(&old));
+    let started = Instant::now();
+    let (code, _, err) = run("wait 5e55 --for idle --timeout 0.5", &old.env);
+    assert_eq!(code, exit::TIMEOUT, "{err}");
+    assert!(started.elapsed() < Duration::from_secs(5), "{:?}", started.elapsed());
+    assert!(controls(&new).iter().any(|m| matches!(m, ClientMsg::Attach { .. })), "it got as far as the attach");
+}
+
 /// `open -- COMMAND` 已经开好终端、还没打命令时宿主升级了：说出开好的是哪个，不叫用户重跑
 /// （那会再开一个终端）。
 #[test]

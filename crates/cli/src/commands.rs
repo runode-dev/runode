@@ -445,7 +445,7 @@ impl Watch<'_> {
             HostMsg::SessionList { .. } => return Err(Failure::Exited),
             other => return Err(unexpected(&other)),
         }
-        let (_, meta) = attach(&connection, self.id)?;
+        let (_, meta) = attach_before(&connection, self.id, deadline).map_err(|err| expired(err, deadline))?;
         self.connection = connection;
         Ok(meta)
     }
@@ -725,8 +725,17 @@ fn resolve(connection: &Connection, env: &Env, selector: &Selector) -> anyhow::R
 
 /// 只看状态地连上会话，返回通道和连上时的状态。通道也能发输入。
 fn attach(connection: &Connection, id: SessionId) -> anyhow::Result<(u32, SessionMeta)> {
+    attach_before(connection, id, None)
+}
+
+/// 同 `attach`，但给了 `deadline` 时等回话不过它，见 `Connection::reply_before`。
+fn attach_before(
+    connection: &Connection,
+    id: SessionId,
+    deadline: Option<Instant>,
+) -> anyhow::Result<(u32, SessionMeta)> {
     connection.send(&ClientMsg::Attach { id, size: None, mode: AttachMode::MetaOnly })?;
-    match connection.reply()? {
+    match connection.reply_before(deadline)? {
         HostMsg::Attached { channel, meta, .. } => Ok((channel, meta)),
         other => bail!("unexpected answer: {}", kind(&other)),
     }

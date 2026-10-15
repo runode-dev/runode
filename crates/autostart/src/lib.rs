@@ -145,10 +145,19 @@ pub fn install(kind: Kind, dirs: &Dirs, exe: &Path) -> io::Result<Option<PathBuf
                 systemctl(&["start", SYSTEMD_UNIT])
             };
             enable().map_err(|err| {
-                let _ = match &previous {
-                    Some(previous) => std::fs::write(&path, previous),
-                    None => std::fs::remove_file(&path),
-                };
+                match &previous {
+                    Some(previous) => {
+                        let _ = std::fs::write(&path, previous);
+                    }
+                    None => {
+                        // `enable` 成了、`start` 没成时 default.target.wants 里留着链接；`disable` 照着服务
+                        // 文件的 [Install] 删，所以先删链接再删文件。
+                        let _ = systemctl(&["disable", SYSTEMD_UNIT]);
+                        let _ = std::fs::remove_file(&path);
+                    }
+                }
+                // systemd 还记着刚才 reload 进去的新定义，换回文件后再 reload 一次，之后起的才是原来那份。
+                let _ = systemctl(&["daemon-reload"]);
                 if err.kind() == io::ErrorKind::NotFound {
                     return io::Error::new(
                         io::ErrorKind::NotFound,

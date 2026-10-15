@@ -195,6 +195,10 @@ struct Poller {
     skipped: HashSet<String>,
     /// 这一轮 `ListTodos` 的请求编号。
     todo_req: u32,
+    /// 要过会话列表、宿主还没回。会话列表不带请求编号，宿主在单独的线程里等各会话回话（会话线程忙时
+    /// 要等好几秒，比两轮之间还久），没回之前不开新的一轮：不然晚到的那份会和下一轮的任务表配成一对，
+    /// 或者比下一轮的那份还晚到，把会话的状态往回改。
+    listing: bool,
 }
 
 impl Poller {
@@ -214,6 +218,7 @@ impl Poller {
             connect_failures: 0,
             skipped: HashSet::new(),
             todo_req: 0,
+            listing: false,
         }
     }
 
@@ -274,6 +279,7 @@ impl Poller {
                     Ok(link) => {
                         self.host = Some(link);
                         self.connect_failures = 0;
+                        self.listing = false;
                         rounds.reconnected();
                         self.next_poll = Instant::now();
                         continue;
@@ -298,12 +304,15 @@ impl Poller {
                     }
                 }
             }
-            if poll {
+            // 上一轮的会话列表还没回时这一轮不要，等它回来，见 `listing`。
+            let ask = poll && !self.listing;
+            if ask {
                 self.todo_req = self.todo_req.wrapping_add(1);
                 rounds.new_round();
+                self.listing = true;
             }
             let req = self.todo_req;
-            if poll
+            if ask
                 && self.host.as_ref().is_some_and(|link| {
                     link.send(&ClientMsg::ListSessions).is_err()
                         || (link.todos && link.send(&ClientMsg::ListTodos { req }).is_err())
@@ -317,6 +326,7 @@ impl Poller {
             let now = Instant::now();
             let actions = match link.messages.recv_timeout(wait) {
                 Ok(HostMsg::SessionList { sessions }) => {
+                    self.listing = false;
                     let mut actions = rounds.observe(&sessions, now);
                     if link.todos {
                         actions.extend(rounds.todo_sessions(&sessions, now, crate::now_unix()));
@@ -329,6 +339,11 @@ impl Poller {
                 }
                 Ok(HostMsg::ScreenText { id, text, .. }) => rounds.screen(id, Some(&text)),
                 Ok(HostMsg::Error { id: Some(id), .. }) => rounds.screen(id, None),
+                // 宿主不给会话列表（连接积压着、等回话的请求太多）：这一轮没有了，下一轮再要。
+                Ok(HostMsg::Error { req: None, id: None, .. }) => {
+                    self.listing = false;
+                    Vec::new()
+                }
                 Ok(HostMsg::Goodbye { reason }) => {
                     if reason == GoodbyeReason::Handoff {
                         tracing::info!("the host handed its sessions over, leaving the pushes to the new host");

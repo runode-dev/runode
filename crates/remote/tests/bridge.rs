@@ -3,7 +3,7 @@
 mod common;
 
 use std::{
-    io::Write as _,
+    io::{Read as _, Write as _},
     net::Shutdown,
     sync::{
         Arc,
@@ -150,9 +150,12 @@ fn the_host_hanging_up_mid_frame_still_closes_with_a_reply_pending() {
     let (mut phone, host) = harness.bridged(device_id, &key);
     let mut frame = Vec::new();
     write_frame(&mut frame, FrameKind::Output, 1, &[b'x'; 1000]).unwrap();
-    (&host).write_all(&frame[..frame.len() / 2]).unwrap();
-    // 等桥接那边把半帧交出去，这之后的回话只能等这一帧结束。
-    thread::sleep(Duration::from_millis(300));
+    let half = &frame[..frame.len() / 2];
+    (&host).write_all(half).unwrap();
+    // 手机读到了这半帧，桥接那边就已经在帧中间了，这之后的回话只能等这一帧结束。
+    let mut received = vec![0; half.len()];
+    phone.tls.read_exact(&mut received).unwrap();
+    assert_eq!(received, half);
     phone.send_control(br#"{"type":"shutdown","kill_sessions":true}"#);
     thread::sleep(Duration::from_millis(300));
     drop(host);

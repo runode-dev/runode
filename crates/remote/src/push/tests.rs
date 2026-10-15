@@ -353,6 +353,13 @@ fn backing_off_notifications_follow_the_registrations() {
 /// 回完紧跟一条 `TodosChanged`。
 #[derive(Clone, Default)]
 struct FakeHost {
+    /// 设了时会话列表像真的宿主一样在另一个线程里回，过这么久才回（会话线程忙着）。
+    list_delay: Arc<Mutex<Option<Duration>>>,
+    /// 收到了还没回的会话列表请求有几个，和最多时有几个。
+    lists_waiting: Arc<AtomicUsize>,
+    most_lists_waiting: Arc<AtomicUsize>,
+    /// 收到过几条 `ListSessions`。
+    list_sessions: Arc<AtomicUsize>,
     sessions: Arc<Mutex<Vec<SessionInfo>>>,
     /// 任务表；为 `None` 时是不认得任务板的旧宿主。
     todos: Arc<Mutex<Option<Vec<Todo>>>>,
@@ -377,6 +384,12 @@ impl FakeHost {
     }
 
     fn serve(&self, mut stream: UnixStream) {
+        // 晚回的会话列表从别的线程写，和这里的回话一帧一帧地轮着写。
+        let writer = Arc::new(Mutex::new(stream.try_clone().unwrap()));
+        let write = |writer: &Mutex<UnixStream>, message: &HostMsg| {
+            let frame = Frame::control(message).unwrap();
+            write_frame(&mut *writer.lock().unwrap(), FrameKind::Control, frame.channel, &frame.payload).is_ok()
+        };
         while let Ok(Some(frame)) = read_frame(&mut stream) {
             let Ok(message) = frame.message::<ClientMsg>() else { continue };
             let reply = match message {
@@ -393,12 +406,29 @@ impl FakeHost {
                         todos: self.todos.lock().unwrap().is_some(),
                     }
                 }
-                ClientMsg::ListSessions => HostMsg::SessionList { sessions: self.sessions.lock().unwrap().clone() },
+                ClientMsg::ListSessions => {
+                    self.list_sessions.fetch_add(1, Ordering::SeqCst);
+                    let list = HostMsg::SessionList { sessions: self.sessions.lock().unwrap().clone() };
+                    let Some(delay) = *self.list_delay.lock().unwrap() else {
+                        if !write(&writer, &list) {
+                            return;
+                        }
+                        continue;
+                    };
+                    let waiting = self.lists_waiting.fetch_add(1, Ordering::SeqCst) + 1;
+                    self.most_lists_waiting.fetch_max(waiting, Ordering::SeqCst);
+                    let (host, writer) = (self.clone(), writer.clone());
+                    thread::spawn(move || {
+                        thread::sleep(delay);
+                        host.lists_waiting.fetch_sub(1, Ordering::SeqCst);
+                        write(&writer, &list);
+                    });
+                    continue;
+                }
                 ClientMsg::ListTodos { req } => {
                     self.list_todos.fetch_add(1, Ordering::SeqCst);
                     let todos = self.todos.lock().unwrap().clone().expect("an old host got ListTodos");
-                    let frame = Frame::control(&HostMsg::Todos { req, todos, schedules: Vec::new() }).unwrap();
-                    if write_frame(&mut stream, FrameKind::Control, frame.channel, &frame.payload).is_err() {
+                    if !write(&writer, &HostMsg::Todos { req, todos, schedules: Vec::new() }) {
                         return;
                     }
                     HostMsg::TodosChanged
@@ -409,8 +439,7 @@ impl FakeHost {
                 }
                 other => panic!("the pusher sent {other:?}"),
             };
-            let frame = Frame::control(&reply).unwrap();
-            if write_frame(&mut stream, FrameKind::Control, frame.channel, &frame.payload).is_err() {
+            if !write(&writer, &reply) {
                 return;
             }
         }
@@ -541,6 +570,30 @@ fn finished_todos_are_pushed() {
     // 一直停着不再推。
     thread::sleep(Duration::from_millis(2500));
     assert_eq!(scratch.requests().len(), 1);
+}
+
+/// 宿主回会话列表比两轮之间还慢：上一份没回之前不要下一份，晚到的那份不会和下一轮的任务表配成一对。
+#[test]
+fn a_slow_session_list_holds_back_the_next_round() {
+    let scratch = Scratch::new("pusher-slow");
+    let host = FakeHost::default();
+    host.set(AgentState::Working);
+    *host.todos.lock().unwrap() = Some(Vec::new());
+    *host.list_delay.lock().unwrap() = Some(Duration::from_millis(2500));
+    let pusher = Pusher::start_with(scratch.dirs.clone(), host.connect(), scratch.curl.clone()).unwrap();
+    pusher.set_settings(PushSettings {
+        delay: Duration::ZERO,
+        relay: Some("https://relay.example".into()),
+        ..PushSettings::default()
+    });
+    pusher.set_listening(Listening::On);
+    scratch.register(ApnsEnv::Production, OFFICIAL_BUNDLE);
+    wait_until("the pusher asks for a second list", || host.list_sessions.load(Ordering::SeqCst) >= 2);
+    assert_eq!(host.most_lists_waiting.load(Ordering::SeqCst), 1);
+    // 任务表跟着会话列表一轮一轮地要，不多要。
+    wait_until("the todos follow the lists", || {
+        host.list_todos.load(Ordering::SeqCst) == host.list_sessions.load(Ordering::SeqCst)
+    });
 }
 
 /// 关了推送时，在退避的通知马上不发了：不到下一轮读设备表就被叫醒（这里是宿主断开）时也一样。
