@@ -46,6 +46,8 @@ public final class QuickReplyModel {
 
     @ObservationIgnored private let link: any HostLink
     @ObservationIgnored private var pending: Set<UInt32> = []
+    /// 还没回话的粘贴请求发的字：没送到时放回文本框，用户不用重打。
+    @ObservationIgnored private var unsent: [UInt32: String] = [:]
     @ObservationIgnored private var batchFailed = false
     /// 断开过几次。取请求编号要等 `HostConnection`，等的时候连接可能断了（又连上）：前后对不上就不发。
     @ObservationIgnored private var disconnects = 0
@@ -89,6 +91,7 @@ public final class QuickReplyModel {
             return
         }
         begin([paste, enter])
+        unsent[paste] = text
         link.send(.paste(req: paste, id: sessionId, text: text))
         link.send(.sendKeys(req: enter, id: sessionId, keys: ["enter"]))
     }
@@ -109,6 +112,11 @@ public final class QuickReplyModel {
         return false
     }
 
+    /// 没送到的字放回文本框；用户已经打了新的字时不盖掉。
+    private func restoreDraft(_ text: String?) {
+        if let text, draft.isEmpty { draft = text }
+    }
+
     private func begin(_ requests: [UInt32]) {
         if pending.isEmpty { batchFailed = false }
         pending.formUnion(requests)
@@ -121,8 +129,10 @@ public final class QuickReplyModel {
         switch message {
         case .done(let req) where pending.contains(req):
             pending.remove(req)
+            unsent[req] = nil
         case .error(let req?, _, let message) where pending.contains(req):
             pending.remove(req)
+            restoreDraft(unsent.removeValue(forKey: req))
             batchFailed = true
             errorMessage = String(localized: "没发出去：\(message)")
         default:
@@ -145,6 +155,8 @@ public final class QuickReplyModel {
         disconnects += 1
         guard !pending.isEmpty else { return }
         pending.removeAll()
+        for text in unsent.values { restoreDraft(text) }
+        unsent.removeAll()
         failedCount += 1
         errorMessage = String(localized: "连接断了，回复可能没送到")
     }

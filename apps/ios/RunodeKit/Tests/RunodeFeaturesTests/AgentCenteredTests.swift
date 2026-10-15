@@ -321,6 +321,25 @@ private func workspace(_ index: UInt32, _ name: String, tabs: [[SessionId]], act
         #expect(reply.failedCount == 2)
     }
 
+    /// 粘贴被宿主拒了，或者回话前连接断了：字放回文本框；用户已经打了新的字时不盖掉。
+    @Test func unsentTextComesBackToTheDraft() async {
+        let reply = QuickReplyModel(sessionId: waiting, link: link)
+        reply.draft = "用方案 2"
+        await reply.sendDraft()
+        guard case .paste(let paste, _, _)? = link.sent.first else {
+            Issue.record("expected a paste, got \(link.sent)")
+            return
+        }
+        reply.handle(.error(req: paste, id: waiting, message: "no session"))
+        #expect(reply.draft == "用方案 2")
+
+        reply.draft = "用方案 3"
+        await reply.sendDraft()
+        reply.draft = "新打的"
+        reply.connectionLost()
+        #expect(reply.draft == "新打的")
+    }
+
     /// 取请求编号时连接断了又连上：不发到新连接上去（断开时已经清过在等的请求），草稿还回来。
     @Test func aDisconnectWhileNumberingKeepsTheDraft() async {
         let held = HeldRequestLink()
