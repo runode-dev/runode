@@ -35,7 +35,7 @@ use crate::{
 use scan::scan;
 
 pub(super) use state::Project;
-pub(super) use watch::ProjectWatch;
+pub(super) use watch::{ProjectChanges, ProjectWatch};
 
 /// 显示右侧面板时隔这么久看一次终端换没换目录。
 pub(super) const POLL_INTERVAL: Duration = Duration::from_secs(1);
@@ -155,16 +155,26 @@ impl WindowView {
         }
     }
 
-    /// 监听到 `paths` 变了：有要紧的就重读。窗口在后台时只记下来，切到前台时再读。
-    pub(super) fn project_changed(&mut self, paths: Vec<PathBuf>, active: bool, cx: &mut Context<Self>) {
-        // 预览的文件变了就重读；窗口在后台时等切回前台再按修改时间判断。
+    /// 监听到 `changes`：有要紧的就重读。窗口在后台时只记下来，切到前台时再读。说不准哪里变了
+    /// （`ProjectChanges::everything`）时按路径筛的几样都当作变了。
+    pub(super) fn project_changed(&mut self, changes: ProjectChanges, active: bool, cx: &mut Context<Self>) {
+        let ProjectChanges { paths, everything } = changes;
+        // 预览的文件变了就重读；窗口在后台时等切回前台再按修改时间判断。说不准哪里变了时现在就按修改时间判断。
         if active {
-            self.preview_files_changed(&paths, cx);
+            if everything {
+                self.refresh_preview_if_changed(cx);
+            } else {
+                self.preview_files_changed(&paths, cx);
+            }
         }
         // 分支、tag 变了时图表重读；工作区里的文件变了不重读。
         if self.git_shown() {
             let id = self.workspace().id;
-            self.with_git_panel(cx, |panel, cx| panel.refs_changed(id, &paths, cx));
+            if everything {
+                self.with_git_panel(cx, |panel, cx| panel.all_refs_changed(id, cx));
+            } else {
+                self.with_git_panel(cx, |panel, cx| panel.refs_changed(id, &paths, cx));
+            }
         }
         let Some(watch) = &self.project_watch else {
             return;
@@ -172,11 +182,11 @@ impl WindowView {
         let (id, git) = (self.workspace().id, self.workspace().project.git.as_deref());
         let tree = self.file_tree.read(cx);
         let listed = |dir: &std::path::Path| tree.is_listed(id, dir);
-        if !self.watching() || !paths.iter().any(|path| watch.affects(path, git, &listed)) {
+        if !self.watching() || !(everything || paths.iter().any(|path| watch.affects(path, git, &listed))) {
             return;
         }
         // 命令从这几个文件里来，它们变了就重列。
-        if paths.iter().any(|path| super::tasks::is_task_file(path)) {
+        if everything || paths.iter().any(|path| super::tasks::is_task_file(path)) {
             self.workspace_mut().project.tasks_stale = true;
         }
         self.workspace_mut().project.stale = true;

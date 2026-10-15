@@ -38,7 +38,7 @@ use runode_preview::Span;
 use super::{
     ARROW_UP_ICON, BODY_PADDING, Loaded, MAX_COLUMNS, Note, PreviewEvent, PreviewPanel, ROW_EXTRA_HEIGHT,
     body::{TEXT_RIGHT_PADDING, WRAP_SLACK, highlight_style, shown_text},
-    gpui_format, right_fade, shown_width,
+    file_stamp, gpui_format, right_fade, shown_width,
     wrap::{WrapCache, segment},
 };
 
@@ -212,31 +212,40 @@ impl PreviewPanel {
         preview.cancel = Arc::new(AtomicBool::new(false));
         let cancel = preview.cancel.clone();
         let path = preview.path.clone();
+        // 工作区的 diff 记下文件的大小和修改时间，见 `Preview::stale`。先记再读：读的期间又改了的，下次比出来
+        // 不一样，再读一次。
+        let stamp_path = (target.side == git::DiffSide::Worktree).then(|| path.clone());
         let job = cx.background_spawn(async move {
-            let repo = repo?;
-            let view = repo.file_view(&target.rel, target.old_rel.as_deref(), &target.side).ok().flatten()?;
-            // 二进制的图片把改之前和改之后的两张并排显示；新加的没有旧图，删掉的没有新图。
-            let image = runode_preview::image_format(&target.rel).filter(|_| view.file.binary).map(|format| {
-                let max_bytes = runode_preview::MAX_IMAGE_BYTES;
-                // 哪边太大都不读进内存。
-                let options = git::ReadOptions { max_bytes };
-                let (Ok(new), Ok(old)) = (
-                    repo.new_bytes(&target.rel, &target.side, options),
-                    repo.old_bytes(&target.rel, target.old_rel.as_deref(), &target.side, options),
-                ) else {
-                    return Loaded::Note(Note::TooLarge);
-                };
-                let image = |bytes: Vec<u8>| Arc::new(Image::from_bytes(gpui_format(format), bytes));
-                Loaded::ImageDiff { old: old.map(image), new: new.map(image) }
-            });
-            Some((view, image))
+            let stamp = stamp_path.and_then(|path| file_stamp(&path));
+            let read = || {
+                let repo = repo?;
+                let view = repo.file_view(&target.rel, target.old_rel.as_deref(), &target.side).ok().flatten()?;
+                // 二进制的图片把改之前和改之后的两张并排显示；新加的没有旧图，删掉的没有新图。
+                let image = runode_preview::image_format(&target.rel).filter(|_| view.file.binary).map(|format| {
+                    let max_bytes = runode_preview::MAX_IMAGE_BYTES;
+                    // 哪边太大都不读进内存。
+                    let options = git::ReadOptions { max_bytes };
+                    let (Ok(new), Ok(old)) = (
+                        repo.new_bytes(&target.rel, &target.side, options),
+                        repo.old_bytes(&target.rel, target.old_rel.as_deref(), &target.side, options),
+                    ) else {
+                        return Loaded::Note(Note::TooLarge);
+                    };
+                    let image = |bytes: Vec<u8>| Arc::new(Image::from_bytes(gpui_format(format), bytes));
+                    Loaded::ImageDiff { old: old.map(image), new: new.map(image) }
+                });
+                Some((view, image))
+            };
+            (stamp, read())
         });
         cx.spawn(async move |this, cx| {
-            let (view, image) = job.await.unzip();
+            let (stamp, read) = job.await;
+            let (view, image) = read.unzip();
             let texts = this
                 .update(cx, |this, cx| {
                     let cell_width = this.cell_width;
                     let (preview, git) = this.preview_for(id, &cancel)?;
+                    preview.stamp = stamp;
                     // 和上次读到的一样（比如按块暂存后马上读了一次，扫描后又读一次）就留着，不重新高亮；
                     // 上次的高亮还没做完就被这次读取取消了的，重新起。
                     if let (Some(Loaded::Diff(old)), Some(view)) = (&preview.content, &view)

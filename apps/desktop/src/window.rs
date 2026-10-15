@@ -308,7 +308,7 @@ pub struct WindowView {
     _project_poll: Task<()>,
     /// 监听右侧面板在看的目录，事件发到 `project_events`，由 `_project_events` 收。
     project_watch: Option<project::ProjectWatch>,
-    project_events: futures::channel::mpsc::UnboundedSender<Vec<PathBuf>>,
+    project_events: futures::channel::mpsc::UnboundedSender<project::ProjectChanges>,
     _project_events: Task<()>,
     /// 包成缓存视图的几块界面，见 `Slot`。第一次画窗口时才建：建 `WindowView` 时它还没有实体。
     slots: Option<Slots>,
@@ -372,15 +372,15 @@ impl WindowView {
                 }
             }
         });
-        let (project_events, mut events) = futures::channel::mpsc::unbounded::<Vec<PathBuf>>();
+        let (project_events, mut events) = futures::channel::mpsc::unbounded::<project::ProjectChanges>();
         let project_events_task = cx.spawn_in(window, async move |this, cx| {
-            while let Some(mut paths) = events.next().await {
+            while let Some(mut changes) = events.next().await {
                 cx.background_executor().timer(project::WATCH_DEBOUNCE).await;
                 while let Ok(more) = events.try_recv() {
-                    paths.extend(more);
+                    changes.merge(more);
                 }
                 let alive = this.update_in(cx, |this, window, cx| {
-                    this.project_changed(paths, window.is_window_active(), cx);
+                    this.project_changed(changes, window.is_window_active(), cx);
                 });
                 if alive.is_err() {
                     break;

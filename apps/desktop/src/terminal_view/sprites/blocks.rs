@@ -74,8 +74,12 @@ fn grid(m: Metrics, rows: u32, mask: u32, out: &mut Vec<Shape>) {
 /// 按比例填充单元格的一块：起点和终点用同一种取整，相邻两块共用的那条边落在同一个像素上，
 /// 奇数尺寸下也正好拼满、不留缝也不重叠。
 fn fill_frac(m: Metrics, [x0, x1]: [f64; 2], [y0, y1]: [f64; 2], out: &mut Vec<Shape>) {
-    let at = |f: f64, size: u32| (f * f64::from(size)).round() as i32;
-    rect(out, at(x0, m.width), at(y0, m.height), at(x1, m.width), at(y1, m.height), 0xff);
+    rect(out, frac_px(x0, m.width), frac_px(y0, m.height), frac_px(x1, m.width), frac_px(y1, m.height), 0xff);
+}
+
+/// 长 `size` 的一边上比例 `f` 处落在哪个像素边界，`fill_frac` 和 `block_rect` 共用。
+fn frac_px(f: f64, size: u32) -> i32 {
+    (f * f64::from(size)).round() as i32
 }
 
 /// 盲文：点是 w×w 的整像素方块，剩余像素依次分给
@@ -141,18 +145,33 @@ pub(super) fn corner_triangle(cp: u32, m: Metrics, out: &mut Vec<Shape>) {
     }
 }
 
-/// 块元素：宽高按比例取整，再按对齐方式贴边或居中。
+/// 块元素：按对齐方式贴边或居中的一块，边界和象限块、八分块一样按 `frac_px` 取整，
+/// 奇数尺寸下 `▄` 也正好等于 `▖` 加 `▗`，`▐` 等于右边两个象限块，混着画不错出一个像素的台阶。
+/// 格子太小、取整后没了的（比如 4px 宽的 `▕`）至少留 1px，贴着它该靠的那一边。
 fn block_rect(m: Metrics, align: Align, fw: f32, fh: f32, out: &mut Vec<Shape>) {
-    let (cw, ch) = (m.width as i32, m.height as i32);
-    let w = (cw as f32 * fw).round() as i32;
-    let h = (ch as f32 * fh).round() as i32;
-    let (x, y) = match align {
-        Align::Upper => ((cw - w) / 2, 0),
-        Align::Lower => ((cw - w) / 2, ch - h),
-        Align::Left => (0, (ch - h) / 2),
-        Align::Right => (cw - w, (ch - h) / 2),
+    let (fw, fh) = (f64::from(fw), f64::from(fh));
+    let (cx, cy) = ((1. - fw) / 2., (1. - fh) / 2.);
+    let (xs, ys) = match align {
+        Align::Upper => ([cx, cx + fw], [0., fh]),
+        Align::Lower => ([cx, cx + fw], [1. - fh, 1.]),
+        Align::Left => ([0., fw], [cy, cy + fh]),
+        Align::Right => ([1. - fw, 1.], [cy, cy + fh]),
     };
-    rect(out, x, y, x + w, y + h, 0xff);
+    // `to_end`：这一维贴着终点那一边，留的 1px 放在终点前面；否则放在起点后面。
+    let edges = |[lo, hi]: [f64; 2], size: u32, to_end: bool| {
+        let (lo, hi) = (frac_px(lo, size), frac_px(hi, size));
+        let size = size as i32;
+        if hi > lo {
+            (lo, hi)
+        } else if to_end {
+            ((hi - 1).max(0), hi)
+        } else {
+            (lo, (lo + 1).min(size))
+        }
+    };
+    let (x0, x1) = edges(xs, m.width, matches!(align, Align::Right));
+    let (y0, y1) = edges(ys, m.height, matches!(align, Align::Lower));
+    rect(out, x0, y0, x1, y1, 0xff);
 }
 
 #[cfg(test)]
@@ -221,6 +240,48 @@ mod tests {
                     }
                 }
                 assert!(count.iter().flatten().all(|&n| n == 1), "{width}×{height}, {rows} 行：{count:?}");
+            }
+        }
+    }
+
+    /// 半块和拼出同样形状的象限块在奇数尺寸下一个像素都不差，上下、左右两个半块也正好拼满。
+    #[test]
+    fn half_blocks_match_quadrant_unions() {
+        for (width, height) in [(9, 7), (7, 9), (5, 5), (9, 17)] {
+            let m = metrics(width, height, 1);
+            for (half, quadrants) in [('▀', "▘▝"), ('▄', "▖▗"), ('▌', "▘▖"), ('▐', "▝▗")] {
+                let mut union = vec![vec![0u8; width as usize]; height as usize];
+                for q in quadrants.chars() {
+                    for (row, q_row) in union.iter_mut().zip(raster(q, m)) {
+                        row.iter_mut().zip(q_row).for_each(|(v, q)| *v = (*v).max(q));
+                    }
+                }
+                assert_eq!(raster(half, m), union, "{width}×{height}：{half} 和 {quadrants}");
+            }
+            for pair in [['▀', '▄'], ['▌', '▐']] {
+                let [a, b] = pair.map(|c| raster(c, m));
+                let covered = a.iter().flatten().zip(b.iter().flatten()).all(|(&a, &b)| (a == 0xff) != (b == 0xff));
+                assert!(covered, "{width}×{height}：{pair:?} 应当正好拼满");
+            }
+        }
+    }
+
+    /// 小格子里八分之一块（和别的分数块）取整后也至少有 1px，贴着该靠的那一边。
+    #[test]
+    fn fractional_blocks_are_never_empty() {
+        let eighths = "▁▂▃▄▅▆▇▉▊▋▌▍▎▏▀▐▔▕";
+        for size in 2..=5 {
+            for (width, height) in [(size, 16), (8, size), (size, size)] {
+                let m = metrics(width, height, 1);
+                for c in eighths.chars() {
+                    let grid = raster(c, m);
+                    assert!(grid.iter().flatten().any(|&v| v == 0xff), "{width}×{height}：{c} 是空的");
+                }
+                let (h, w) = (height as usize - 1, width as usize - 1);
+                assert!(raster('▁', m)[h].iter().all(|&v| v == 0xff), "{width}×{height}：▁ 贴底");
+                assert!(raster('▔', m)[0].iter().all(|&v| v == 0xff), "{width}×{height}：▔ 贴顶");
+                assert!(raster('▏', m).iter().all(|row| row[0] == 0xff), "{width}×{height}：▏ 贴左");
+                assert!(raster('▕', m).iter().all(|row| row[w] == 0xff), "{width}×{height}：▕ 贴右");
             }
         }
     }

@@ -145,7 +145,7 @@ struct Preview {
     real_path: PathBuf,
     /// 读完之前为空；重读时先留着旧的，读完再换。
     content: Option<Loaded>,
-    /// 上次读时文件的大小和修改时间，窗口切回前台时据此判断要不要重读。
+    /// 上次读时文件的大小和修改时间，窗口切回前台时据此判断要不要重读；工作区的 diff 标签也记。
     stamp: Option<(u64, SystemTime)>,
     /// 选中的行：按下的那行和现在拖到的那行，从 0 数。
     selection: Option<(usize, usize)>,
@@ -281,10 +281,16 @@ impl Preview {
         watched && paths.iter().any(|path| *path == self.path || *path == self.real_path)
     }
 
-    /// 这个标签要不要重读：还没读过；普通标签是文件在磁盘上变过，diff 标签是 git 状态变过。
+    /// 这个标签要不要重读：还没读过；普通标签是文件在磁盘上变过，diff 标签是 git 状态变过。工作区的 diff
+    /// 标签也比文件：窗口在后台、切到了别的 workspace 时听不到文件事件，二进制、改动太多的文件扫描结果
+    /// 又看不出再改过一次（见 `affected_by`）。
     fn stale(&self) -> bool {
+        let moved = || file_stamp(&self.path) != self.stamp;
         self.content.is_none()
-            || if self.diff.is_some() { self.diff_stale } else { file_stamp(&self.path) != self.stamp }
+            || match &self.diff {
+                None => moved(),
+                Some(diff) => self.diff_stale || (diff.side == git::DiffSide::Worktree && moved()),
+            }
     }
 
     fn lines(&self) -> Option<&[String]> {
@@ -1085,5 +1091,28 @@ mod tests {
         assert_eq!(widest_line(&lines(&["abcde", "中文字"]), cell_width), 1);
         assert_eq!(widest_line(&lines(&["abcdefg", "\t\t"]), cell_width), 1);
         assert_eq!(widest_line(&[], cell_width), 0);
+    }
+
+    /// 工作区的 diff 标签在听不到文件事件时（窗口在后台、切到了别的 workspace）文件又改了，回来时
+    /// 照文件的大小和修改时间认出要重读；暂存区的不随文件变，等扫描。
+    #[test]
+    fn worktree_diff_tabs_compare_file_stamps() {
+        let root = std::env::temp_dir().join(format!("rdr-diff-stamp-{}", std::process::id()));
+        fs::create_dir_all(&root).unwrap();
+        let path = root.join("a.bin");
+        fs::write(&path, b"one").unwrap();
+        let tab = |side: git::DiffSide| {
+            let target = DiffTarget { root: root.clone(), rel: "a.bin".into(), old_rel: None, side };
+            let mut tab = Preview::new(path.clone(), Some(target), false);
+            tab.content = Some(Loaded::Note(Note::Binary));
+            tab.stamp = file_stamp(&path);
+            tab
+        };
+        let (worktree, index) = (tab(git::DiffSide::Worktree), tab(git::DiffSide::Index));
+        assert!(!worktree.stale() && !index.stale());
+        fs::write(&path, b"three").unwrap();
+        assert!(worktree.stale(), "文件变了，工作区的 diff 要重读");
+        assert!(!index.stale(), "暂存区的 diff 等扫描");
+        fs::remove_dir_all(&root).ok();
     }
 }

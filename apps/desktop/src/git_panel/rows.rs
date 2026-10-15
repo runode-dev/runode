@@ -352,6 +352,17 @@ impl PanelState {
     /// `RepoInfo` 看不出别的分支和 tag 的变化；正在读的那次读完也不清掉标记，随后再读一次，读到的可能
     /// 是变化之前的。
     pub fn refs_changed(&mut self, paths: &[PathBuf]) -> bool {
+        self.mark_graphs_stale(|git_dir| paths.iter().any(|path| git::refs_changed(git_dir, path)))
+    }
+
+    /// 监听丢了事件、说不准哪里变了：哪个仓库的引用都可能变过，读过或正在读的图表都标成要重读，返回
+    /// 标了没有。
+    pub fn all_refs_changed(&mut self) -> bool {
+        self.mark_graphs_stale(|_| true)
+    }
+
+    /// git 目录让 `changed` 为真的仓库，读过或正在读的图表标成要重读，返回标了没有。
+    fn mark_graphs_stale(&mut self, changed: impl Fn(&Path) -> bool) -> bool {
         let Some(git) = self.git.clone() else {
             return false;
         };
@@ -359,7 +370,7 @@ impl PanelState {
         for repo in git.iter() {
             if let Some(repo_state) = self.repos.get_mut(&repo.root)
                 && (repo_state.graph.history.is_some() || repo_state.graph.loading)
-                && paths.iter().any(|path| git::refs_changed(&repo.git_dir, path))
+                && changed(&repo.git_dir)
             {
                 repo_state.graph.stale = true;
                 marked = true;
@@ -904,6 +915,19 @@ mod tests {
         let graph = &mut panel.repo_mut(Path::new("/repo")).graph;
         (graph.loading, graph.history, graph.read_for) = (false, Some(Err(String::new())), Some(RepoInfo::default()));
         assert!(graph.needs_read(&RepoInfo::default()));
+    }
+
+    /// 监听丢了事件时说不准哪个引用变了，读过的图表也要重读：`RepoInfo` 看不出别的分支和 tag 的变化。
+    #[test]
+    fn lost_ref_events_mark_loaded_graphs_stale() {
+        let mut panel = PanelState::default();
+        assert!(panel.replace_git(Some(Arc::new(git::Repos::new(repo("", RepoKind::Main, &[]))))));
+        panel.repo_mut(Path::new("/repo")).graph.history = Some(Err(String::new()));
+        // 按路径筛时，重扫交来的只是仓库和 git 目录本身，认不出是引用。
+        assert!(!panel.refs_changed(&[PathBuf::from("/repo"), PathBuf::from("/repo/.git")]));
+        assert!(!panel.repo_mut(Path::new("/repo")).graph.stale);
+        assert!(panel.all_refs_changed());
+        assert!(panel.repo_mut(Path::new("/repo")).graph.stale);
     }
 
     #[test]

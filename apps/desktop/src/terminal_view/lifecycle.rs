@@ -54,6 +54,9 @@ pub(crate) const PROVISIONAL_SIZE: GridSize = GridSize { cols: 80, rows: 24, cel
 const EARLY_OUTPUT_LIMIT: usize = 64 * 1024;
 /// 一次最多合并这么多排队的输出再交给 VT：积压很多时不必为它们另拼一整块大缓冲。
 const MAX_OUTPUT_BATCH: usize = 1024 * 1024;
+/// 一次最多合并这么多件排队的事件：标记、响铃这些不带输出的事件不算进 `MAX_OUTPUT_BATCH`，积压很多
+/// 时也不能一直取下去、占着主线程。
+const MAX_EVENT_BATCH: usize = 4096;
 /// 连上会话时最多等这么久宿主给的第一份屏幕。
 const ATTACH_TIMEOUT: Duration = Duration::from_secs(5);
 /// `run_command` 最多等 shell 出提示符这么久。
@@ -287,6 +290,7 @@ impl TerminalView {
                 let mut bytes = output_len(&first);
                 let mut batch = vec![first];
                 while bytes < MAX_OUTPUT_BATCH
+                    && batch.len() < MAX_EVENT_BATCH
                     && let Ok(event) = events.borrow_mut().try_recv()
                 {
                     bytes += output_len(&event);
@@ -489,27 +493,7 @@ impl TerminalView {
         let waker = futures::task::waker(Arc::new(Unpark(thread::current())));
         let mut task = std::task::Context::from_waker(&waker);
         while !ended && self.screen.is_attaching() {
-            let mut events = Vec::new();
-            let mut closed = false;
-            {
-                let mut rx = self.events.borrow_mut();
-                // 宿主那边一直在往里放时一次取不完：和读事件的任务一样取够一批就先处理、看看时限，剩下的
-                // 下一轮再取。
-                let mut bytes = 0;
-                while bytes < MAX_OUTPUT_BATCH {
-                    match rx.poll_next_unpin(&mut task) {
-                        Poll::Ready(Some(event)) => {
-                            bytes += output_len(&event);
-                            events.push(event);
-                        }
-                        Poll::Ready(None) => {
-                            closed = true;
-                            break;
-                        }
-                        Poll::Pending => break,
-                    }
-                }
-            }
+            let (events, closed) = take_batch(&mut self.events.borrow_mut(), &mut task);
             let got = !events.is_empty();
             if got {
                 self.handle_link_events(events, window, cx);
@@ -1020,6 +1004,25 @@ fn resolve_font(families: &[String], window: &Window) -> Font {
     font(family.to_owned())
 }
 
+/// 从收事件的一端取出已经排着的一批，返回这批和收事件的一端是否已经关了。宿主那边一直在往里放时
+/// 一次取不完：和读事件的任务一样取够一批（`MAX_OUTPUT_BATCH` 字节的输出或 `MAX_EVENT_BATCH` 件）
+/// 就先交出去，`wait_for_screen` 处理完看看时限，剩下的下一轮再取。
+fn take_batch(rx: &mut UnboundedReceiver<LinkEvent>, task: &mut std::task::Context<'_>) -> (Vec<LinkEvent>, bool) {
+    let mut events = Vec::new();
+    let mut bytes = 0;
+    while bytes < MAX_OUTPUT_BATCH && events.len() < MAX_EVENT_BATCH {
+        match rx.poll_next_unpin(task) {
+            Poll::Ready(Some(event)) => {
+                bytes += output_len(&event);
+                events.push(event);
+            }
+            Poll::Ready(None) => return (events, true),
+            Poll::Pending => break,
+        }
+    }
+    (events, false)
+}
+
 /// 事件里输出的字节数，合并批次时用。
 fn output_len(event: &LinkEvent) -> usize {
     match event {
@@ -1031,4 +1034,42 @@ fn output_len(event: &LinkEvent) -> usize {
 /// 这件事之后不会再有这个会话的事件：shell 退出了，或者和宿主断开了。
 fn ends(event: &LinkEvent) -> bool {
     matches!(event, LinkEvent::Lost | LinkEvent::Msg(HostMsg::Exited { .. }))
+}
+
+#[cfg(test)]
+mod tests {
+    use futures::channel::mpsc;
+
+    use super::*;
+
+    /// 只排着不带输出的事件（响铃）时，一批也只取 `MAX_EVENT_BATCH` 件，剩下的留到下一轮。
+    #[test]
+    fn take_batch_bounds_events_without_output() {
+        let (tx, mut rx) = mpsc::unbounded();
+        let id = SessionId(1);
+        for _ in 0..MAX_EVENT_BATCH * 2 + 3 {
+            tx.unbounded_send(LinkEvent::Msg(HostMsg::Bell { id })).unwrap();
+        }
+        let mut task = std::task::Context::from_waker(futures::task::noop_waker_ref());
+        let (first, closed) = take_batch(&mut rx, &mut task);
+        assert_eq!((first.len(), closed), (MAX_EVENT_BATCH, false));
+        let (second, _) = take_batch(&mut rx, &mut task);
+        assert_eq!(second.len(), MAX_EVENT_BATCH);
+        drop(tx);
+        let (rest, closed) = take_batch(&mut rx, &mut task);
+        assert_eq!((rest.len(), closed), (3, true));
+    }
+
+    /// 输出够了 `MAX_OUTPUT_BATCH` 字节就先交出去，后面排着的事件留到下一轮。
+    #[test]
+    fn take_batch_bounds_output_bytes() {
+        let (tx, mut rx) = mpsc::unbounded();
+        tx.unbounded_send(LinkEvent::Output(vec![b'x'; MAX_OUTPUT_BATCH])).unwrap();
+        tx.unbounded_send(LinkEvent::Output(b"y".to_vec())).unwrap();
+        let mut task = std::task::Context::from_waker(futures::task::noop_waker_ref());
+        let (first, closed) = take_batch(&mut rx, &mut task);
+        assert_eq!((first.len(), closed), (1, false));
+        let (second, closed) = take_batch(&mut rx, &mut task);
+        assert_eq!((second.len(), closed), (1, false));
+    }
 }

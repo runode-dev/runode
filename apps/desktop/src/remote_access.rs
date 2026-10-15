@@ -140,17 +140,21 @@ fn watch(
     let (mut config, mut seen) = loaded;
     // 刚开始盯时先看一遍，盯上之前改的也不漏。
     let mut wait = false;
+    let mut coverage = Coverage::default();
     loop {
         // 有目录没盯上（`FileWatch::follow` 下一轮再试）时不能只等动静，按时醒来再试。
         let mut covered = false;
+        let mut fresh = false;
         if let Some(files) = &mut files {
             let mut paths = config.watch_paths();
             paths.extend(dirs.remote_access_devices_file());
             paths.extend(dirs.remote_access_pairing_file());
             covered = files.follow(&paths);
+            fresh = coverage.newly_covered(paths, covered);
         }
-        // 等着的配对口令过期时文件不变，这时也按时看一眼。
-        let woken = if !wait {
+        // 这一轮才盯全的，上次比过以后、盯上之前改的没有动静，先比一遍再等。等着的配对口令过期时文件不变，
+        // 这时也按时看一眼。
+        let woken = if !wait || fresh {
             false
         } else if covered && !stay.awaiting_pairing() {
             events.recv().is_ok()
@@ -173,6 +177,20 @@ fn watch(
             service.set_push(push_settings(&config));
         }
         host.set_stay_up(stay.check(&config, dirs));
+    }
+}
+
+/// 看配置的线程上一轮盯全了的那些文件，见 `Coverage::newly_covered`。
+#[derive(Default)]
+struct Coverage(Option<Vec<PathBuf>>);
+
+impl Coverage {
+    /// 这一轮 `paths` 都盯上了（`covered`），上一轮却没盯全、或者盯的不是这些（重读的配置引入了新文件）：
+    /// 上次比对之后、盯上之前改的不会再有动静，要先比一遍再等。
+    fn newly_covered(&mut self, paths: Vec<PathBuf>, covered: bool) -> bool {
+        let fresh = covered && self.0.as_ref() != Some(&paths);
+        self.0 = covered.then_some(paths);
+        fresh
     }
 }
 
@@ -251,6 +269,20 @@ mod tests {
         assert_eq!((key.key_file.to_str(), key.bundle.as_str()), (Some("/keys/AuthKey_X.p8"), "cn.example.app"));
         // 缺了一项不直连。
         assert_eq!(push_settings(&Config { apns_team_id: None, ..config }).direct, None);
+    }
+
+    /// 目录先盯不上、改了文件以后才盯上，这之间的改动没有动静：盯上的那一轮要先比一遍，不能直接干等。
+    #[test]
+    fn newly_covered_files_are_checked_before_waiting() {
+        let mut coverage = Coverage::default();
+        let paths = vec![PathBuf::from("/config/runode/config")];
+        assert!(!coverage.newly_covered(paths.clone(), false), "没盯全时按时醒，不用另比");
+        assert!(coverage.newly_covered(paths.clone(), true), "刚盯上");
+        assert!(!coverage.newly_covered(paths.clone(), true), "一直盯着，只等动静");
+        let more = vec![PathBuf::from("/config/runode/config"), PathBuf::from("/config/runode/themes/dark")];
+        assert!(coverage.newly_covered(more, true), "重读的配置引入了新文件");
+        assert!(!coverage.newly_covered(paths.clone(), false));
+        assert!(coverage.newly_covered(paths, true), "又盯不上以后再盯上");
     }
 
     #[test]

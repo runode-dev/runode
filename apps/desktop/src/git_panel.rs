@@ -312,6 +312,15 @@ impl GitPanel {
         }
     }
 
+    /// workspace `ws` 的监听丢了事件、说不准哪里变了：各仓库读过或正在读的图表都要重读，见
+    /// `PanelState::all_refs_changed`。
+    pub fn all_refs_changed(&mut self, ws: WorkspaceId, cx: &mut Context<Self>) {
+        let marked = self.workspaces.get_mut(&ws).is_some_and(PanelState::all_refs_changed);
+        if marked && ws == self.ws {
+            cx.notify();
+        }
+    }
+
     /// 整个窗口一份的设置，app 存档用。
     pub fn options(&self) -> Options {
         Options {
