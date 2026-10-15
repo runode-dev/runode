@@ -189,8 +189,18 @@ impl SettingsView {
                     .on_press(cx, move |this, _, cx| this.pick_theme_mode(mode, cx))
             },
         );
-        let note =
-            |text: String, color| div().pt(px(10.)).pl(px(4.)).text_size(FontSize::Body).text_color(color).child(text);
+        // 提示和出错的文字报成 Label，VoiceOver 读得到写不进去的原因。
+        let note = |id: &'static str, text: String, color| {
+            div()
+                .id(id)
+                .role(Role::Label)
+                .aria_label(text.clone())
+                .pt(px(10.))
+                .pl(px(4.))
+                .text_size(FontSize::Body)
+                .text_color(color)
+                .child(text)
+        };
         div()
             .flex()
             .flex_col()
@@ -204,8 +214,8 @@ impl SettingsView {
                     .gap(px(12.))
                     .children(tiles),
             )
-            .child(note(tr("settings.hint.theme"), theme.foreground.opacity(0.55)))
-            .children(self.errors.get("theme").cloned().map(|err| note(err, theme.destructive)))
+            .child(note("theme-hint", tr("settings.hint.theme"), theme.foreground.opacity(0.55)))
+            .children(self.errors.get("theme").cloned().map(|err| note("theme-error", err, theme.destructive)))
     }
 
     /// 选主题的下拉，一个主题时一行，浅色、深色各一个时两行。
