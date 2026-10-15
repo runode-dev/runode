@@ -5,7 +5,7 @@ use std::{
     ffi::OsStr,
     fmt, fs,
     io::{Read, Write},
-    os::unix::process::CommandExt,
+    os::unix::{ffi::OsStrExt, process::CommandExt},
     path::{Component, Path, PathBuf},
     process::{Child, Command, ExitStatus, Stdio},
     thread::{self, JoinHandle},
@@ -46,6 +46,18 @@ impl fmt::Display for GitError {
 }
 
 impl std::error::Error for GitError {}
+
+/// `Repo::undo_last_commit` 撤销前看到的 HEAD。
+struct HeadCommit {
+    /// HEAD 指着的分支（`refs/heads/…`），游离时为空。
+    branch: Option<String>,
+    /// 要撤销的提交的完整对象号。
+    id: String,
+    /// 它的父提交，第一个提交没有。
+    parent: Option<String>,
+    /// 它的完整说明。
+    message: String,
+}
 
 /// 写操作的结果，默认什么也不带回来。
 pub type Result<T = (), E = GitError> = std::result::Result<T, E>;
@@ -422,26 +434,103 @@ impl Repo {
     }
 
     /// 撤销最近一次提交，改动留在暂存区里；返回被撤销的提交的完整说明，好填回
-    /// 输入框。只有一个提交时删掉分支，仓库回到还没有提交的样子。父提交不在本地（浅克隆）时报错，什么也不做。
+    /// 输入框。只有一个提交时删掉分支，仓库回到还没有提交的样子。父提交不在本地（浅克隆）、合并、
+    /// cherry-pick 或 revert 做到一半、游离的 HEAD 停在第一个提交上时报错，什么也不做；看过以后 HEAD
+    /// 又变了（终端里又提交了一个）时也报错，不会连着撤掉两个。
     pub fn undo_last_commit(&self) -> Result<String> {
-        let message = run(&self.root, ["log", "-1", "--format=%B", "HEAD"], None)?;
+        let head = self.inspect_head()?;
+        self.undo_commit(&head)
+    }
+
+    /// 撤销前看一眼 HEAD：所在的分支、指向的提交和它的父提交，后面都按这一次看到的来。
+    fn inspect_head(&self) -> Result<HeadCommit> {
+        // 分支名按原样用，不做有损转换：不是 UTF-8 的名字换了字就成了另一个（或不存在的）分支。
+        let branch = git(&self.root, &["symbolic-ref", "-q", "HEAD"])
+            .map(|mut name| {
+                if name.ends_with(b"\n") {
+                    name.pop();
+                }
+                String::from_utf8(name).map_err(|_| GitError::new("分支名不是 UTF-8，没有撤销"))
+            })
+            .transpose()?;
+        // 按分支名解析，不再读一次 HEAD：两次之间切了分支的话，分支和提交就对不上了。
+        let target = format!("{}^{{commit}}", branch.as_deref().unwrap_or("HEAD"));
+        let id = git(&self.root, &["rev-parse", "--verify", "--quiet", &target])
+            .map(|id| String::from_utf8_lossy(&id).trim().to_owned())
+            .ok_or_else(|| GitError::new("还没有提交，没有可撤销的"))?;
+        let message = run(&self.root, ["log", "-1", "--format=%B", &id], None)?;
         let message = String::from_utf8_lossy(&message).trim_end().to_owned();
         // 看提交对象里记的父提交，不看 `HEAD~1` 解不解析得出来：浅克隆里父提交不在本地，那不是第一个提交。
-        let raw = run(&self.root, ["cat-file", "commit", "HEAD"], None)?;
+        let raw = run(&self.root, ["cat-file", "commit", &id], None)?;
         let raw = String::from_utf8_lossy(&raw);
-        let parent = raw.lines().take_while(|line| !line.is_empty()).find_map(|line| line.strip_prefix("parent "));
-        match parent {
+        let parent = raw
+            .lines()
+            .take_while(|line| !line.is_empty())
+            .find_map(|line| line.strip_prefix("parent "))
+            .map(str::to_owned);
+        Ok(HeadCommit { branch, id, parent, message })
+    }
+
+    /// 撤销 `inspect_head` 看到的那个提交。引用都带着期望的旧值改：看过以后 HEAD 已经不在那个提交上时
+    /// git 拒绝，什么也不动。不用 `reset --soft`，它只认目标、不核对旧值；它和这里一样不碰暂存区和
+    /// 工作区，合并做到一半时不肯做，`ORIG_HEAD` 记下撤掉的提交，这几样照着做。
+    fn undo_commit(&self, head: &HeadCommit) -> Result<String> {
+        // 和 `reset --soft` 一样，有没解决的冲突时也不做：冲突不一定来自合并，cherry-pick、`stash pop`
+        // 冲突了也没有 `MERGE_HEAD`。
+        let unmerged = run(&self.root, ["ls-files", "--unmerged"], None)?;
+        if git(&self.root, &["rev-parse", "--verify", "--quiet", "MERGE_HEAD"]).is_some() || !unmerged.is_empty() {
+            return Err(GitError::new("合并做到一半，没有撤销"));
+        }
+        // cherry-pick、revert 冲突解决了还没提交，或者 `merge --squash` 了还没提交时，`reset` 会顺手清掉
+        // 它们的状态，`update-ref` 不会：留着的话下一次提交还当成那次操作的接续，用它备好的说明。不替用户
+        // 丢掉，不做。
+        if ["CHERRY_PICK_HEAD", "REVERT_HEAD"]
+            .iter()
+            .any(|name| git(&self.root, &["rev-parse", "--verify", "--quiet", name]).is_some())
+        {
+            return Err(GitError::new("cherry-pick 或 revert 做到一半，没有撤销"));
+        }
+        // `--git-path` 给的是相对仓库根目录的路径（git 目录在别处时是绝对路径），接在根目录后面。
+        let squash = git(&self.root, &["rev-parse", "--git-path", "SQUASH_MSG"]);
+        if squash.is_some_and(|path| self.root.join(OsStr::from_bytes(path.trim_ascii_end())).exists()) {
+            return Err(GitError::new("squash 合并了还没提交，没有撤销"));
+        }
+        let id = head.id.as_str();
+        match head.parent.as_deref() {
             Some(parent) => {
                 if git(&self.root, &["cat-file", "-e", &format!("{parent}^{{commit}}")]).is_none() {
                     return Err(GitError::new("上一个提交不在本地（浅克隆），没有撤销"));
                 }
-                run(&self.root, ["reset", "--soft", parent], None)?;
+                // 改 HEAD 跟着它指到的分支走：期间切到了别的分支，那个分支不在这个提交上就不动它；
+                // 恰好也在这个提交上时撤的正是现在检出的这一个，暂存区里留下的改动照样对得上。
+                let reason = format!("reset: moving to {parent}");
+                run(&self.root, ["update-ref", "-m", &reason, "HEAD", parent, id], None)?;
             }
             None => {
-                run(&self.root, ["update-ref", "-d", "HEAD"], None)?;
+                // 游离的 HEAD 没有分支可删。按名字删分支、不经 HEAD 删：期间 HEAD 游离到这个提交上时，
+                // 经 HEAD 删的就是 HEAD 本身，仓库就坏了。
+                let Some(branch) = head.branch.as_deref() else {
+                    return Err(GitError::new("HEAD 没在分支上，第一个提交撤销不了"));
+                };
+                let on_branch = || {
+                    git(&self.root, &["symbolic-ref", "-q", "HEAD"])
+                        .is_some_and(|name| name.trim_ascii_end() == branch.as_bytes())
+                };
+                // 看过以后切走了（切到同一个提交上的新分支，或者游离了）就不删：删的不再是检出的那一个。
+                if !on_branch() {
+                    return Err(GitError::new("看过以后 HEAD 换了分支，没有撤销"));
+                }
+                run(&self.root, ["update-ref", "-d", branch, id], None)?;
+                // 上面的检查和删除之间也可能切走，删完再看一次，切走了就照原样建回来（只在它还不存在时建）。
+                if !on_branch() {
+                    let _ = run(&self.root, ["update-ref", branch, id, ""], None);
+                    return Err(GitError::new("撤销时 HEAD 换了分支，已经恢复，没有撤销"));
+                }
             }
         }
-        Ok(message)
+        // 和 `reset` 一样记下撤掉的提交，`git reset ORIG_HEAD` 能找回来；记不下不影响撤销。
+        let _ = run(&self.root, ["update-ref", "ORIG_HEAD", id], None);
+        Ok(head.message.clone())
     }
 
     /// 从默认的远端取最新的提交，不动工作区。
@@ -563,6 +652,65 @@ mod tests {
             thread::sleep(Duration::from_millis(50));
         }
         assert!(!alive(), "钩子 {pid} 还活着");
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// 看过 HEAD、动手之前终端里又提交了一个：不能按看到的父提交把两个一起撤掉，什么也不动。
+    #[test]
+    fn undo_refuses_when_head_moves_after_inspecting() {
+        let dir = temp_repo("undo-race");
+        let commit = |message: &str| {
+            let args = ["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", message];
+            assert!(git(&dir, &args).is_some());
+        };
+        let head = || String::from_utf8(git(&dir, &["rev-parse", "HEAD"]).unwrap()).unwrap();
+        let repo = Repo::new(dir.clone());
+
+        // 只有一个提交时要删分支：期间多了一个提交，分支不删。
+        commit("a");
+        let inspected = repo.inspect_head().unwrap();
+        commit("b");
+        let moved = head();
+        assert!(repo.undo_commit(&inspected).is_err());
+        assert_eq!(head(), moved);
+
+        // 有父提交时退回父提交：期间多了一个提交，HEAD 不动，不会连着撤掉两个。
+        let inspected = repo.inspect_head().unwrap();
+        commit("c");
+        let moved = head();
+        assert!(repo.undo_commit(&inspected).is_err());
+        assert_eq!(head(), moved);
+
+        // 没有变化时照常撤掉，ORIG_HEAD 记着撤掉的那个。
+        assert_eq!(repo.undo_last_commit().unwrap(), "c");
+        let orig = String::from_utf8(git(&dir, &["rev-parse", "ORIG_HEAD"]).unwrap()).unwrap();
+        assert_eq!(orig, moved);
+        assert_eq!(String::from_utf8(git(&dir, &["log", "--format=%s"]).unwrap()).unwrap(), "b\na\n");
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// 只有一个提交，看过以后切走了（同一个提交上的新分支，或者游离到这个提交上）：什么也不删，
+    /// 刚切走的分支还在，游离的 HEAD 也还在。
+    #[test]
+    fn undo_of_the_first_commit_refuses_after_head_moves_away() {
+        let dir = temp_repo("undo-root-switch");
+        let args = ["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "a"];
+        assert!(git(&dir, &args).is_some());
+        let repo = Repo::new(dir.clone());
+        let exists = |name: &str| git(&dir, &["rev-parse", "--verify", "--quiet", name]).is_some();
+        let first = git(&dir, &["symbolic-ref", "--short", "HEAD"]).unwrap();
+        let first = format!("refs/heads/{}", String::from_utf8(first).unwrap().trim());
+
+        let inspected = repo.inspect_head().unwrap();
+        assert!(git(&dir, &["switch", "-q", "-c", "other"]).is_some());
+        assert!(repo.undo_commit(&inspected).is_err());
+        assert!(exists(&first) && exists("refs/heads/other"));
+
+        assert!(git(&dir, &["switch", "-q", &first["refs/heads/".len()..]]).is_some());
+        let inspected = repo.inspect_head().unwrap();
+        assert!(git(&dir, &["switch", "-q", "--detach"]).is_some());
+        assert!(repo.undo_commit(&inspected).is_err());
+        assert!(exists(&first) && exists("HEAD"));
         fs::remove_dir_all(&dir).unwrap();
     }
 

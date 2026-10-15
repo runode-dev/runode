@@ -290,6 +290,47 @@ fn refuses_to_undo_a_commit_whose_parent_is_not_local() {
     assert!(repo.status().is_empty(), "{:?}", repo.status());
 }
 
+/// 游离的 HEAD 停在第一个提交上：没有分支可删，删 HEAD 本身会把仓库弄坏，报错不动。合并做到一半、
+/// 有没解决的冲突时也不撤，和 `git reset --soft` 一样。
+#[test]
+fn refuses_to_undo_on_a_detached_root_or_mid_merge() {
+    let repo = TestRepo::new("ops-undo-refuses");
+    repo.commit_file("a.txt", "one\n", "first");
+    let first = repo.git(&["rev-parse", "HEAD"]);
+    repo.git(&["checkout", "-q", "--detach"]);
+    assert!(read(&repo).repo().undo_last_commit().is_err());
+    assert_eq!(repo.git(&["rev-parse", "HEAD"]), first);
+
+    repo.git(&["checkout", "-q", "main"]);
+    repo.git(&["checkout", "-q", "-b", "feat"]);
+    repo.commit_file("a.txt", "feat\n", "feat");
+    repo.git(&["checkout", "-q", "main"]);
+    repo.commit_file("a.txt", "main\n", "main");
+    let head = repo.git(&["rev-parse", "HEAD"]);
+    assert!(repo.try_git(&["merge", "-q", "feat"]).is_none());
+    assert!(read(&repo).repo().undo_last_commit().is_err());
+    assert_eq!(repo.git(&["rev-parse", "HEAD"]), head);
+
+    repo.git(&["merge", "--abort"]);
+    assert!(repo.try_git(&["cherry-pick", "feat"]).is_none());
+    assert!(read(&repo).repo().undo_last_commit().is_err(), "cherry-pick 冲突了没有 MERGE_HEAD，也不撤");
+    assert_eq!(repo.git(&["rev-parse", "HEAD"]), head);
+
+    // 冲突解决、暂存了还没提交时也不撤：撤了会留下 CHERRY_PICK_HEAD，下一次提交还当成 cherry-pick。
+    repo.write("a.txt", "both\n");
+    repo.git(&["add", "a.txt"]);
+    assert!(read(&repo).repo().undo_last_commit().is_err());
+    assert_eq!(repo.git(&["rev-parse", "HEAD"]), head);
+    assert!(repo.try_git(&["rev-parse", "--verify", "--quiet", "CHERRY_PICK_HEAD"]).is_some());
+
+    // `merge --squash` 了还没提交时也不撤：撤了会留下 SQUASH_MSG，下一次提交还用它备好的说明。
+    repo.git(&["cherry-pick", "--abort"]);
+    repo.git(&["merge", "-q", "--squash", "-X", "theirs", "feat"]);
+    assert!(read(&repo).repo().undo_last_commit().is_err());
+    assert_eq!(repo.git(&["rev-parse", "HEAD"]), head);
+    assert!(repo.path().join(".git/SQUASH_MSG").exists());
+}
+
 #[test]
 fn pushes_pulls_and_syncs() {
     let remote = TestRepo::bare("ops-remote");
