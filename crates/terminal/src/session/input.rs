@@ -73,18 +73,27 @@ impl Session {
     }
 
     /// 光标停在 shell 提示符上、shell 集成定义了 `runode-reload` 时，清掉正在编辑的输入，
-    /// 输入 ` runode-reload` 并回车：换成一个新的 shell，重新读用户配置。清输入是先按方向键挪到
-    /// 输入末尾，再按输入的字数退格；命令前面加个空格，开了 HIST_IGNORE_SPACE 之类设置的 shell
+    /// 输入 ` runode-reload` 并回车：换成一个新的 shell，重新读用户配置。集成绑了专用的按键
+    /// （`RELOAD_KEY_FUNCTION`）时只按它，由 shell 自己换掉整行：vi 命令模式里退格只挪光标、不删字，
+    /// 照下面那样按，回车会把用户原来那行执行掉。没绑的（fish 这些、老的 bash）先按方向键挪到输入
+    /// 末尾，再按输入的字数退格；命令前面加个空格，开了 HIST_IGNORE_SPACE 之类设置的 shell
     /// 不把它记进历史。读不到提示符上的输入（没有 shell 集成、命令在跑、全屏程序开着）、这个
     /// shell 的集成没报告过这个函数（比如更早的版本启动的 shell）或编码不出按键时什么也不发，
     /// 返回 false。
     pub fn reload_shell(&mut self) -> bool {
-        if !self.meta.shell_names.functions.iter().any(|name| name == shell_integration::RELOAD_FUNCTION) {
+        let has = |name| self.meta.shell_names.functions.iter().any(|function| function == name);
+        if !has(shell_integration::RELOAD_FUNCTION) {
             return false;
         }
+        let reload_key = has(shell_integration::RELOAD_KEY_FUNCTION);
         let Some(input) = self.prompt_input() else {
             return false;
         };
+        if reload_key {
+            self.before_input();
+            self.send_input(shell_integration::RELOAD_KEY.to_vec());
+            return true;
+        }
         let right = input.text[input.cursor..].chars().count();
         let backspace = input.text.chars().count();
         let mut bytes = Vec::new();

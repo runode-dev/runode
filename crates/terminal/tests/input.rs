@@ -67,3 +67,15 @@ fn reload_shell_clears_the_input_first() {
     assert!(!session.reload_shell());
     assert!(requests.borrow().is_empty());
 }
+
+/// 集成绑了换 shell 的专用按键时只按它，由 shell 换掉整行，不挪光标、不退格。
+#[test]
+fn reload_shell_presses_the_integration_key() {
+    let (mut session, requests) = capturing_session();
+    session.feed(PROMPT);
+    session.feed(b"git st\x1b[2D");
+    let names = ShellNames { functions: vec!["runode-reload".into(), "runode-reload-key".into()] };
+    session.apply_meta(SessionMeta { shell_names: Arc::new(names), ..SessionMeta::default() });
+    assert!(session.reload_shell());
+    assert_eq!(*requests.borrow(), [Request::Input(b"\x1b[6973~".to_vec())]);
+}

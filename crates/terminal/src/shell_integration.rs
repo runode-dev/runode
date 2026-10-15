@@ -20,6 +20,13 @@ use runode_types::{
 /// 集成脚本定义的函数：换成一个新的 shell，重新读用户配置，集成和报告口令照旧。
 pub(crate) const RELOAD_FUNCTION: &str = "runode-reload";
 
+/// zsh 和 bash（4.4 起）的集成在各个键位（emacs、vi 插入、vi 命令）里都绑着 `RELOAD_KEY`，按下就把整行
+/// 换成 ` runode-reload` 执行；绑着的函数叫这个名字，集成报告了它就说明绑上了。
+pub(crate) const RELOAD_KEY_FUNCTION: &str = "runode-reload-key";
+
+/// 见 `RELOAD_KEY_FUNCTION`。终端不会发出这个序列，用户也按不出来。
+pub(crate) const RELOAD_KEY: &[u8] = b"\x1b[6973~";
+
 const ZSH_ENV: &str = include_str!("../shell-integration/zsh/.zshenv");
 const ZSH_INTEGRATION: &str = include_str!("../shell-integration/zsh/runode-integration.zsh");
 const BASH_RC: &str = include_str!("../shell-integration/bash/runode.bash");

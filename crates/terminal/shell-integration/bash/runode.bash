@@ -221,6 +221,22 @@ if [ -z "${_runode_integrated-}" ]; then
         bind '"\e[<": skip-csi-sequence' 2>/dev/null
     fi
 
+    # runode 换 shell 时按的专用按键：把整行换成 runode-reload 执行。runode 看到 runode-reload-key 这个
+    # 函数就只按它，不再挪光标、退格清输入：vi 命令模式里退格不删字，回车会把用户原来那行执行掉。
+    # bind -x 的函数改不了行就执行，所以按键绑成宏：先按另一个序列让函数换掉整行，再按回车。
+    # READLINE_LINE 要 bash 4，bind -x 在 vi 命令键位里也好用的版本保守地取 4.4。
+    if [ "${BASH_VERSINFO[0]}" -gt 4 ] || { [ "${BASH_VERSINFO[0]}" -eq 4 ] && [ "${BASH_VERSINFO[1]}" -ge 4 ]; }; then
+        runode-reload-key() {
+            READLINE_LINE=' runode-reload'
+            READLINE_POINT=${#READLINE_LINE}
+        }
+        for _runode_keymap in emacs vi-insert vi-command; do
+            bind -m "$_runode_keymap" -x '"\e[6974~": runode-reload-key' 2>/dev/null
+            bind -m "$_runode_keymap" '"\e[6973~": "\e[6974~\C-m"' 2>/dev/null
+        done
+        unset _runode_keymap
+    fi
+
     # 换成一个新的 bash，重新读用户配置，接上集成：口令和功能经环境变量交回去，runode 照样认得
     # 新 shell 的报告。换之前把这个 shell 的历史写进文件，再报告这条命令执行完了：exec 之后不会
     # 再有它的 133;D。

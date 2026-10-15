@@ -206,6 +206,17 @@ _runode_drop_mouse_report() {
 'builtin' 'bindkey' -M viins '\e[<' _runode_drop_mouse_report
 'builtin' 'bindkey' -M vicmd '\e[<' _runode_drop_mouse_report
 
+# runode 换 shell 时按的专用按键：把整行换成 runode-reload 执行。runode 看到这个 widget 就只按它，
+# 不再挪光标、退格清输入：vi 命令模式里退格不删字，回车会把用户原来那行执行掉。
+runode-reload-key() {
+    BUFFER=' runode-reload'
+    'builtin' 'zle' '.accept-line'
+}
+'builtin' 'zle' -N runode-reload-key
+'builtin' 'bindkey' -M emacs '\e[6973~' runode-reload-key
+'builtin' 'bindkey' -M viins '\e[6973~' runode-reload-key
+'builtin' 'bindkey' -M vicmd '\e[6973~' runode-reload-key
+
 # 换成一个新的 zsh，重新读用户配置，接上集成：ZDOTDIR 指回集成目录，现在的 ZDOTDIR 经
 # RUNODE_ZSH_ZDOTDIR 交给集成目录里的 .zshenv 还原；口令和功能经环境变量交回去，runode 照样认得
 # 新 shell 的报告。换之前把这个 shell 的历史写进文件，再报告这条命令执行完了：exec 之后不会再有

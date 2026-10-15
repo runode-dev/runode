@@ -574,6 +574,39 @@ fn reload_in(shell: Option<RealShell>, check: &str) {
 
 const POSIX_RELOAD_CHECK: &str = "echo ${RELOADED-no} ${RUNODE_REPORT_TOKEN-gone}";
 
+/// 集成绑的换 shell 按键在 vi 命令模式里按下（`Session::reload_shell` 就是这么按的）：换成了新 shell，
+/// 行上原来的命令（建出 `bad`）没被执行。`rc` 开 vi 模式、加载 `extra`。
+fn reload_key_in_vi_command_mode(shell: Option<RealShell>) {
+    let Some(mut shell) = shell else { return };
+    let name = shell.name.clone();
+    std::fs::write(shell.home.join("extra"), "export RELOADED=yes\n").unwrap();
+    let start = shell.raw.len();
+    // ESC 进 vi 命令模式；行编辑器按顺序读，不用等它切过去。
+    shell.session.write(b"touch ~/bad\x1b".to_vec());
+    shell.session.write(b"\x1b[6973~".to_vec());
+    shell.wait_for_prompt();
+    shell.wait_for_bytes("a report after the reload", start, b"\x1b]6973;0123456789abcdef;cwd=");
+    shell.run("echo ${RELOADED-no}");
+    assert_eq!(shell.output(1), "yes\n", "{name}");
+    assert!(!shell.home.join("bad").exists(), "{name}: the line was run");
+}
+
+#[test]
+fn real_zsh_reload_key_works_in_vi_command_mode() {
+    let rc = "PROMPT='[z]%% '\nbindkey -v\nKEYTIMEOUT=1\n[[ -r ~/extra ]] && . ~/extra\n";
+    reload_key_in_vi_command_mode(RealShell::start("zsh", "zsh-reload-key", rc, "[z]%", &["[z]%"]));
+}
+
+/// 4.4 以下的 bash 没绑这个按键（`runode-reload-key` 不报告），`Session::reload_shell` 照旧清输入再打命令。
+#[test]
+fn real_bash_reload_key_works_in_vi_command_mode() {
+    if !bash_at_least(4, 4) {
+        return;
+    }
+    let rc = "set -o vi\nPS1='[b]\\$ '\n[ -r ~/extra ] && . ~/extra\n";
+    reload_key_in_vi_command_mode(RealShell::start("bash", "bash-reload-key", rc, "[b]$", &["[b]$"]));
+}
+
 #[test]
 fn real_zsh_reloads_with_the_integration() {
     reload_in(
