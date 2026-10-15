@@ -119,6 +119,8 @@ base=$(git rev-parse HEAD)
 # 标签和提交、改回版本号，修好后直接重跑；更新说明留着当草稿。只在 HEAD 还是发版前的提交、或者它的上一个
 # 是时撤，撤的也只有这里改过的文件。
 rollback() {
+  # 撤到一半再按 Ctrl-C 不重入：打断 git reset 会留下 index.lock，重入的那次就撤不成了。
+  trap '' INT TERM
   git tag -d "$tag" >/dev/null 2>&1 || true
   rm -f Cargo.toml.bak
   if [[ "$(git rev-parse HEAD)" != "$base" && "$(git rev-parse -q --verify HEAD^)" != "$base" ]]; then
