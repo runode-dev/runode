@@ -275,7 +275,9 @@ impl TerminalView {
     }
 
     /// 收宿主发来的事件的任务：把排队的事件合并成一批处理，再重绘。收事件的一端在视图里，
-    /// 只在取事件时借用：回到显示时主线程要直接从它取（见 `wait_for_screen`）。
+    /// 只在取事件时借用：回到显示时主线程要直接从它取（见 `wait_for_screen`）。取满一批（见
+    /// `MAX_OUTPUT_BATCH`、`MAX_EVENT_BATCH`）时处理完先让出主线程（`yield_now`），积压很多时也能
+    /// 在批与批之间画帧、处理输入。
     fn read_events(events: Events, window: &mut Window, cx: &mut Context<Self>) -> Task<()> {
         cx.spawn_in(window, async move |this, cx| {
             // 建视图时已经到了的结束（见 `pending_end`）先处理：任务排上主线程时外层已经订阅好了。
@@ -296,6 +298,7 @@ impl TerminalView {
                     bytes += output_len(&event);
                     batch.push(event);
                 }
+                let full = bytes >= MAX_OUTPUT_BATCH || batch.len() >= MAX_EVENT_BATCH;
                 let ended = batch.iter().any(ends);
                 let updated = this.update_in(cx, |view, window, cx| {
                     view.handle_link_events(batch, window, cx);
@@ -303,6 +306,10 @@ impl TerminalView {
                 });
                 if updated.is_err() || ended {
                     break;
+                }
+                // 取满了一批，后面多半还排着：不让的话下一轮取事件马上就绪，整片积压仍在这一次里处理完。
+                if full {
+                    yield_now().await;
                 }
             }
         })
@@ -1023,6 +1030,21 @@ fn take_batch(rx: &mut UnboundedReceiver<LinkEvent>, task: &mut std::task::Conte
     (events, false)
 }
 
+/// 让出一次主线程：先返回 `Pending` 并马上叫醒自己，排到主线程上已经排着的事（输入、画下一帧）后面
+/// 再接着跑。
+async fn yield_now() {
+    let mut yielded = false;
+    futures::future::poll_fn(|task| {
+        if std::mem::replace(&mut yielded, true) {
+            Poll::Ready(())
+        } else {
+            task.waker().wake_by_ref();
+            Poll::Pending
+        }
+    })
+    .await;
+}
+
 /// 事件里输出的字节数，合并批次时用。
 fn output_len(event: &LinkEvent) -> usize {
     match event {
@@ -1058,6 +1080,24 @@ mod tests {
         drop(tx);
         let (rest, closed) = take_batch(&mut rx, &mut task);
         assert_eq!((rest.len(), closed), (3, true));
+    }
+
+    /// `yield_now` 头一次让出、叫醒自己，再被拉起时就往下走。
+    #[test]
+    fn yield_now_wakes_itself_once() {
+        struct Count(std::sync::atomic::AtomicUsize);
+        impl ArcWake for Count {
+            fn wake_by_ref(this: &Arc<Self>) {
+                this.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            }
+        }
+        let count = Arc::new(Count(Default::default()));
+        let waker = futures::task::waker(count.clone());
+        let mut task = std::task::Context::from_waker(&waker);
+        let mut future = std::pin::pin!(yield_now());
+        assert!(future.as_mut().poll(&mut task).is_pending());
+        assert_eq!(count.0.load(std::sync::atomic::Ordering::SeqCst), 1);
+        assert!(future.as_mut().poll(&mut task).is_ready());
     }
 
     /// 输出够了 `MAX_OUTPUT_BATCH` 字节就先交出去，后面排着的事件留到下一轮。
