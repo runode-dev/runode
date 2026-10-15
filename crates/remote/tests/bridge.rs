@@ -157,9 +157,15 @@ fn the_host_hanging_up_mid_frame_still_closes_with_a_reply_pending() {
     phone.tls.read_exact(&mut received).unwrap();
     assert_eq!(received, half);
     phone.send_control(br#"{"type":"shutdown","kill_sessions":true}"#);
-    thread::sleep(Duration::from_millis(300));
+    // 放行的请求排在后面：宿主收到它时，挡下的那条已经过了筛，回话在等两帧之间。
+    phone.send_control(br#"{"type":"list_sessions"}"#);
+    assert_eq!(read_client_msg(&host), Some(ClientMsg::ListSessions));
     drop(host);
-    assert!(phone.closed());
+    // 手机停在帧中间，按帧读会把后来的字节当帧头；直接读明文，只能读到 close_notify 的结尾，回话、
+    // 别的字节和超时都不行。
+    let mut rest = Vec::new();
+    let read = phone.tls.read_to_end(&mut rest);
+    assert!(matches!(read, Ok(0)), "{read:?} after {} more bytes", rest.len());
 }
 
 /// 手机只发被挡下的请求、从不读回话：攒着的回话到了上限就先不读手机，手机那边很快写不进去，而不是

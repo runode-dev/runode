@@ -788,10 +788,13 @@ mod tests {
     fn gives_up_on_pipes_held_outside_the_process_group() {
         let dir = std::env::temp_dir();
         let started = Instant::now();
-        // `set -m` 让后台的 `sleep` 自成一个进程组。
+        // `set -m` 让后台的 `sleep` 自成一个进程组。指名用 bash：`sh` 是 dash 时（Debian、Ubuntu）没有终端
+        // 就开不了作业控制，后台进程留在组里被杀掉，测不到要测的情形。
         let script = "set -m; sleep 5 & echo hi";
-        let err = run("sh", &["-c".into(), script.into()], None, &dir, None, &[], Duration::from_secs(1)).unwrap_err();
-        assert!(err.contains("sh"), "{err}");
+        let err =
+            run("bash", &["-c".into(), script.into()], None, &dir, None, &[], Duration::from_secs(1)).unwrap_err();
+        // 比整句：错误里本来就带着程序名 bash，只看含不含 "sh" 什么错都能通过。
+        assert_eq!(err, rust_i18n::t!("git.ai_message.timeout", binary = "bash"));
         assert!(started.elapsed() < Duration::from_secs(4));
     }
 
@@ -803,13 +806,13 @@ mod tests {
         let marker = dir.join(format!("runode-ai-message-pipes-{}", std::process::id()));
         fs::remove_file(&marker).ok();
         // 后台的子 shell 自成一个进程组、不理 SIGPIPE，等 `run` 返回以后往标准输出写一行，把写不写得
-        // 进去记到 `$1` 里。
+        // 进去记到 `$1` 里。和上面一样指名用 bash 开作业控制。
         let script = r#"set -m; (trap '' PIPE; sleep 5; if echo late 2>/dev/null; then r=open; else r=closed; fi
             echo $r > "$1") & echo hi"#;
         let args = ["-c".into(), script.into(), "sh".into(), marker.display().to_string()];
         let started = Instant::now();
-        let err = run("sh", &args, None, &dir, None, &[], Duration::from_secs(1)).unwrap_err();
-        assert!(err.contains("sh"), "{err}");
+        let err = run("bash", &args, None, &dir, None, &[], Duration::from_secs(1)).unwrap_err();
+        assert_eq!(err, rust_i18n::t!("git.ai_message.timeout", binary = "bash"));
         // 要在子 shell 写之前返回，下面看到的才是返回以后的样子。
         assert!(started.elapsed() < Duration::from_secs(4));
         let result = loop {

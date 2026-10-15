@@ -606,21 +606,15 @@ fn take_back(shared: &Shared, id: SessionId, exported: Exported) -> anyhow::Resu
 mod tests {
     use super::*;
 
-    /// 一个会话：收到 `Inbox::Release` 后过 `after` 回 `input`；`after` 为空时不回，回话的一端留到测试等完以后。
-    fn session(after: Option<Duration>, input: &'static [u8]) -> (Handle, thread::JoinHandle<()>) {
+    /// 一个会话：收到 `Inbox::Release` 后，`gate` 为空时当场回 `input`；不为空时等测试从 `gate` 放行才回，
+    /// 测试丢掉放行的一端时不回就走。什么时候回全由测试定，不靠睡多久。
+    fn session(gate: Option<mpsc::Receiver<()>>, input: &'static [u8]) -> (Handle, thread::JoinHandle<()>) {
         let (tx, rx) = mpsc::channel();
         let thread = thread::spawn(move || {
             while let Ok(message) = rx.recv() {
                 let Inbox::Release(reply) = message else { continue };
-                match after {
-                    Some(after) => {
-                        thread::sleep(after);
-                        let _ = reply.send(input.to_vec());
-                    }
-                    None => {
-                        thread::sleep(Duration::from_secs(2));
-                        drop(reply);
-                    }
+                if gate.is_none_or(|gate| gate.recv().is_ok()) {
+                    let _ = reply.send(input.to_vec());
                 }
                 return;
             }
@@ -633,21 +627,22 @@ mod tests {
     #[test]
     fn a_late_release_is_waited_for_before_taking_the_session_back() {
         let ids = [SessionId(1), SessionId(2), SessionId(3)];
-        let sessions = [
-            session(Some(Duration::ZERO), b"on time"),
-            session(Some(Duration::from_millis(300)), b"late"),
-            session(None, b""),
-        ];
+        let (open_late, late_gate) = mpsc::channel();
+        let (keep_stuck, stuck_gate) = mpsc::channel::<()>();
+        let sessions = [session(None, b"on time"), session(Some(late_gate), b"late"), session(Some(stuck_gate), b"")];
         let handles: Vec<(SessionId, Handle)> =
             ids.iter().zip(&sessions).map(|(id, (handle, _))| (*id, handle.clone())).collect();
-        let Released { pending, late } = release(&handles, &ids, Duration::from_millis(100));
+        let Released { pending, late } = release(&handles, &ids, Duration::from_millis(500));
         assert_eq!(pending, vec![(ids[0], b"on time".to_vec())]);
         assert_eq!(late.iter().map(|(id, _)| *id).collect::<Vec<_>>(), [ids[1], ids[2]]);
 
+        // 第二个这时才交，第三个一直不交，直到看过结果。
+        open_late.send(()).unwrap();
         let mut pending: HashMap<SessionId, Vec<u8>> = pending.into_iter().collect();
-        let stuck = settle(late, &mut pending, Instant::now() + Duration::from_millis(400));
+        let stuck = settle(late, &mut pending, Instant::now() + Duration::from_millis(500));
         assert_eq!(stuck, [ids[2]]);
         assert_eq!(pending.get(&ids[1]).map(Vec::as_slice), Some(&b"late"[..]));
+        drop(keep_stuck);
         for (_, thread) in sessions {
             thread.join().unwrap();
         }
