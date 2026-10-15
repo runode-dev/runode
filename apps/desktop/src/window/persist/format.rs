@@ -7,7 +7,7 @@
 use std::{
     collections::HashSet,
     fs,
-    io::{self, Write as _},
+    io,
     path::{Path, PathBuf},
 };
 
@@ -345,17 +345,13 @@ pub fn write(state: &State) -> io::Result<()> {
     write_at(&path, state)
 }
 
-/// 把存档写到 `path`：先写到旁边的临时文件、落盘再改名，写到一半退出或者断电也不会留下半个文件。
-/// 临时文件名带上进程号，同时开着的两个 app 一起写时不会截断对方写了一半的。
+/// 把存档写到 `path`，经 `runode_paths::replace_file` 整个换上：写到一半退出、断电或者磁盘满时
+/// 不会留下半个文件，也不留下临时文件。
 fn write_at(path: &Path, state: &State) -> io::Result<()> {
     if let Some(dir) = path.parent() {
         fs::create_dir_all(dir)?;
     }
-    let tmp = path.with_extension(format!("json.{}.tmp", std::process::id()));
-    let mut file = fs::File::create(&tmp)?;
-    file.write_all(&serde_json::to_vec_pretty(state)?)?;
-    file.sync_all()?;
-    fs::rename(&tmp, path)
+    runode_paths::replace_file(path, &serde_json::to_vec_pretty(state)?)
 }
 
 /// 读不了的存档挪到一边，之后写的时候不覆盖它，留着排查或者换回能读它的版本。
