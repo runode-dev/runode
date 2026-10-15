@@ -117,6 +117,8 @@ impl WindowView {
         }
         // 当前窗口正在更新，`find_session` 读不到它，找到的是别的窗口。
         if let Some((target, pane)) = remote::find_session(id, cx) {
+            self.todo_board = None;
+            cx.notify();
             agents::reveal(target, pane, cx);
             return;
         }
