@@ -522,9 +522,19 @@ fn parse_terminal_color(value: &str) -> Result<TerminalColor, String> {
 /// 读一个配置文件及其 `config-file` 引入的文件，按出现顺序返回条目。
 /// 读到的文件记入 `sources`，同一文件只读一次以防循环引入。
 fn read_entries(path: &Path, sources: &mut Vec<PathBuf>) -> Vec<Entry> {
-    let Ok(text) = std::fs::read_to_string(path) else {
-        return Vec::new();
+    let mut text = match std::fs::read_to_string(path) {
+        Ok(text) => text,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Vec::new(),
+        // 不是「没有这个文件」（权限、不是 UTF-8、是个目录）时说一声，不然整份配置静默回到默认值。
+        Err(err) => {
+            tracing::warn!("cannot read {}: {err}", path.display());
+            return Vec::new();
+        }
     };
+    // 带 BOM 的文件：第一行的键会带着 U+FEFF，`trim` 去不掉，成了未知键。
+    if text.starts_with('\u{feff}') {
+        text.drain(..'\u{feff}'.len_utf8());
+    }
     if sources.iter().any(|p| p == path) {
         return Vec::new();
     }
@@ -539,6 +549,10 @@ fn read_entries(path: &Path, sources: &mut Vec<PathBuf>) -> Vec<Entry> {
                 Some(file) => (true, file),
                 None => (false, entry.value.as_str()),
             };
+            // 值是空的（模板里那行去掉注释没填）：拼出来是所在目录，读它只会报错。
+            if file.is_empty() {
+                continue;
+            }
             let file = runode_paths::Dirs::from_env().expand_home(file);
             let file = path.parent().map_or(file.clone(), |dir| dir.join(&file));
             if !optional && !file.exists() {
