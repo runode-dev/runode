@@ -140,6 +140,25 @@ fn the_phone_closing_lets_the_host_finish() {
     assert!(phone.closed());
 }
 
+/// 宿主发了半帧就断了，这时手机发来一条要挡下的请求：回话插不进去（没有两帧之间了），扔掉，照样
+/// 收尾，连接不会一直挂着。
+#[test]
+fn the_host_hanging_up_mid_frame_still_closes_with_a_reply_pending() {
+    let harness = Harness::start("midframe");
+    let key = Key::generate();
+    let device_id = harness.pair(&key);
+    let (mut phone, host) = harness.bridged(device_id, &key);
+    let mut frame = Vec::new();
+    write_frame(&mut frame, FrameKind::Output, 1, &[b'x'; 1000]).unwrap();
+    (&host).write_all(&frame[..frame.len() / 2]).unwrap();
+    // 等桥接那边把半帧交出去，这之后的回话只能等这一帧结束。
+    thread::sleep(Duration::from_millis(300));
+    phone.send_control(br#"{"type":"shutdown","kill_sessions":true}"#);
+    thread::sleep(Duration::from_millis(300));
+    drop(host);
+    assert!(phone.closed());
+}
+
 /// 手机只发被挡下的请求、从不读回话：攒着的回话到了上限就先不读手机，手机那边很快写不进去，而不是
 /// 让回话在内存里一直涨。
 #[test]

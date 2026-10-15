@@ -49,6 +49,9 @@ const MAX_PER_DEVICE: usize = 8;
 const REVOKE_CHECK: Duration = Duration::from_secs(1);
 /// 接受连接出错（比如文件描述符用完了）后等一会儿再接，免得空转。
 const ACCEPT_BACKOFF: Duration = Duration::from_millis(100);
+/// 一个监听一轮最多接这么多条就回到 `accept_loop`：连接源源不断涌来时 backlog 一直不空，不封顶的话
+/// 接连接的线程回不去，撤销了的设备断不开，`Listener` 丢掉时也停不下来。
+const ACCEPT_BATCH: usize = 64;
 
 /// 在哪些地址上听。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -413,9 +416,12 @@ fn check_revoked(shared: &Shared, seen: &mut Option<Option<(SystemTime, u64)>>) 
     }
 }
 
-/// 把 `listener` 的 backlog 里排着的连接都接下来，各起一个线程服务。
+/// 把 `listener` 的 backlog 里排着的连接接下来（最多 `ACCEPT_BATCH` 条），各起一个线程服务。
 fn accept_ready(shared: &Arc<Shared>, listener: &TcpListener) {
-    loop {
+    for _ in 0..ACCEPT_BATCH {
+        if shared.stopping.load(Ordering::Relaxed) {
+            return;
+        }
         let (tcp, peer) = match listener.accept() {
             Ok(accepted) => accepted,
             Err(err) if err.kind() == io::ErrorKind::WouldBlock => return,

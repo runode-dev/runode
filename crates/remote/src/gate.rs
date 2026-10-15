@@ -237,8 +237,10 @@ const _: () = assert!(KEEPALIVE_IDLE_SECS + KEEPALIVE_INTERVAL_SECS * KEEPALIVE_
 /// 重传这么久（秒）后断开。keepalive 只管空闲的连接，宿主正往手机发输出时对面没了靠这个发现。
 #[cfg(target_os = "macos")]
 const TCP_RXT_CONNDROPTIME: libc::c_int = 0x80;
-/// 有数据没送到时最多重传多久就断开，和 keepalive 发现空闲连接断了的时间相当。
-#[cfg(target_os = "macos")]
+/// 有数据没送到时最多重传多久就断开，和 keepalive 发现空闲连接断了的时间相当。macOS 用
+/// `TCP_RXT_CONNDROPTIME`（秒），Linux 用 `TCP_USER_TIMEOUT`（毫秒）：Linux 的 keepalive 同样不管
+/// 有数据没送到的连接，不设它要重传十几分钟才断。
+#[cfg(any(target_os = "macos", target_os = "linux", target_os = "android"))]
 const RETRANSMIT_DROP_SECS: libc::c_int = 60;
 
 /// 让手机静默消失（离开 Wi-Fi、休眠、切网）的连接在一分钟左右断开：没有这个，半开的连接永远
@@ -268,6 +270,8 @@ pub(crate) fn keep_alive(tcp: &TcpStream) -> io::Result<()> {
     set(libc::IPPROTO_TCP, libc::TCP_KEEPCNT, KEEPALIVE_PROBES)?;
     #[cfg(target_os = "macos")]
     set(libc::IPPROTO_TCP, TCP_RXT_CONNDROPTIME, RETRANSMIT_DROP_SECS)?;
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    set(libc::IPPROTO_TCP, libc::TCP_USER_TIMEOUT, RETRANSMIT_DROP_SECS * 1000)?;
     Ok(())
 }
 
@@ -351,6 +355,8 @@ mod tests {
             assert_eq!(get(libc::IPPROTO_TCP, libc::TCP_KEEPALIVE), KEEPALIVE_IDLE_SECS);
             assert_eq!(get(libc::IPPROTO_TCP, TCP_RXT_CONNDROPTIME), RETRANSMIT_DROP_SECS);
         }
+        #[cfg(any(target_os = "linux", target_os = "android"))]
+        assert_eq!(get(libc::IPPROTO_TCP, libc::TCP_USER_TIMEOUT), RETRANSMIT_DROP_SECS * 1000);
     }
 
     #[test]

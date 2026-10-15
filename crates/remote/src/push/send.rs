@@ -250,13 +250,14 @@ impl Worker {
         let item = &mut self.queue[index];
         let backoff = BACKOFF[item.failures.min(BACKOFF.len() - 1)];
         item.failures += 1;
-        let not_before = Instant::now() + after.map_or(backoff, |after| after.max(backoff));
+        // `Retry-After` 是对面给的秒数，大得离谱时加上去会溢出，同样算过了期限。
+        let wait = after.map_or(backoff, |after| after.max(backoff));
         let session = item.target.notification.session;
-        if not_before > item.deadline {
+        let Some(not_before) = Instant::now().checked_add(wait).filter(|at| *at <= item.deadline) else {
             tracing::warn!("giving up a push for session {session}: {why}");
             self.queue.remove(index);
             return;
-        }
+        };
         tracing::debug!("push for session {session} will be retried: {why}");
         item.not_before = not_before;
     }

@@ -45,13 +45,47 @@ pub fn listener_status(dirs: &Dirs) -> io::Result<Option<ListenerStatus>> {
 
 /// 监听方的锁：拿到了才开监听，一直拿到停下。另一个进程（另一个 app、或者交接时还没退出的旧宿主）
 /// 拿着时返回 `None`。
+///
+/// 拿到锁就删掉上一个监听方没清掉的状态文件（它没正常停下）：从这里到开好监听、写上新状态之间锁已经
+/// 在手里，`listener_status` 不然会把上一个的端口和指纹当成开着的报出去。
 pub(crate) fn lock_listener(dirs: &Dirs) -> io::Result<Option<File>> {
     dirs.create_remote_access_dir()?;
     let path = dirs.remote_access_lock_file().ok_or_else(no_home)?;
     let file = OpenOptions::new().create(true).truncate(false).write(true).mode(0o600).open(path)?;
     match file.try_lock() {
-        Ok(()) => Ok(Some(file)),
-        Err(TryLockError::WouldBlock) => Ok(None),
-        Err(TryLockError::Error(err)) => Err(err),
+        Ok(()) => {}
+        Err(TryLockError::WouldBlock) => return Ok(None),
+        Err(TryLockError::Error(err)) => return Err(err),
+    }
+    match std::fs::remove_file(dirs.remote_access_status_file().ok_or_else(no_home)?) {
+        Err(err) if err.kind() != io::ErrorKind::NotFound => Err(err),
+        _ => Ok(Some(file)),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::files::write_json;
+
+    /// 上一个监听方没正常停下留了状态文件：新的拿到锁、还没写上自己的状态时，不报那份旧的。
+    #[test]
+    fn a_stale_status_is_not_reported_once_the_lock_is_taken() {
+        let root = std::env::temp_dir().join(format!("rra-status-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let dirs = Dirs::from_vars(|_| Some(root.clone().into()));
+        dirs.create_remote_access_dir().unwrap();
+        let stale = ListenerStatus {
+            port: 7000,
+            fingerprint: Bytes(vec![1; 32]),
+            host_name: "old".to_owned(),
+            connected: Vec::new(),
+        };
+        write_json(&dirs.remote_access_status_file().unwrap(), &stale).unwrap();
+
+        let _lock = lock_listener(&dirs).unwrap().unwrap();
+
+        assert_eq!(listener_status(&dirs).unwrap(), None);
+        let _ = std::fs::remove_dir_all(&root);
     }
 }

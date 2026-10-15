@@ -282,6 +282,21 @@ fn failures_are_retried() {
     assert_eq!(body(&requests[0])["notification"], body(&requests[1])["notification"]);
 }
 
+/// 429 要求等的时间大得离谱（加上去会溢出）：这条放弃，发送线程照常办下一条。
+#[test]
+fn an_absurd_retry_after_gives_up_without_stopping_the_sender() {
+    let scratch = Scratch::new("retryafter");
+    let sender = Sender::start(scratch.dirs.clone(), scratch.curl.clone()).unwrap();
+    sender.settings(None, Some("https://relay.example".into()));
+    scratch
+        .rule("/v2/notify", r#"HTTP/2 429\r\nretry-after: 18446744073709551615\r\n\r\n{"reason":"TooManyRequests"}"#);
+    sender.notify(vec![target(RELAY_PROD, &["first"])]);
+    scratch.wait_for(1);
+    sender.notify(vec![target(RELAY_PROD, &["second"])]);
+    let requests = scratch.wait_for(2);
+    assert_eq!(body(&requests[1])["notification"]["lines"], serde_json::json!(["second"]));
+}
+
 /// 在退避的通知：会话不再等了就不发；同一个会话又等了，只发新的，旧的不会晚到把新问题替掉。
 #[test]
 fn backing_off_notifications_are_cancelled_or_replaced() {

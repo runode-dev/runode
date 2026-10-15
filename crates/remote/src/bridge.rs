@@ -205,6 +205,11 @@ impl Bridge {
         if self.from_host_at == self.from_host.len() {
             self.from_host.clear();
             self.from_host_at = 0;
+            if self.host_done && !self.to_phone.at_boundary() {
+                // 宿主在一帧中间断了：不会再有两帧之间，回话插不进去了，扔掉，照样收尾。
+                self.replies.clear();
+                self.replies_at = 0;
+            }
             if self.host_done && self.replies.is_empty() && !self.said_bye {
                 conn.send_close_notify();
                 self.said_bye = true;

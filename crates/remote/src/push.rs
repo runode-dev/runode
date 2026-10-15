@@ -300,6 +300,7 @@ impl Poller {
             }
             if poll {
                 self.todo_req = self.todo_req.wrapping_add(1);
+                rounds.new_round();
             }
             let req = self.todo_req;
             if poll

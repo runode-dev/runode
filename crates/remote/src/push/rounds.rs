@@ -11,9 +11,10 @@
 //! 任务板上的任务另算（`set_todos`、`todo_sessions`）：同一轮的任务表和会话列表都到了才看（两份回话
 //! 谁先到不一定，拿上一轮的任务表看会把刚标成完成、刚删掉的任务也推出去），按
 //! `runode_protocol::todo::column` 推出每个任务在哪一列，从进行中变成需要你、又不是在等回答（那个有上面
-//! 等回答的通知），过了同样的宽限期还是这样时推一条任务做完的通知；一次做完只推一次，推过又回去干活时还没
-//! 发出去的别发了。会话没了、shell 退出了也算需要你，但多半是用户自己关的，不推。重连时清掉记着的任务表
-//! 和各任务的列，第一次看到的任务只记基线，规矩同会话。
+//! 等回答的通知），过了同样的宽限期还是这样时推一条任务做完的通知；一次做完只推一次，推过以后不再是做完
+//! 等着的样子（又回去干活、标成完成、删掉了、会话没了或退出了）时还没发出去的别发了，会话正在等回答时除外
+//! （撤的是整个会话的通知，那条等回答的要留着）。会话没了、shell 退出了也算需要你，但多半是用户自己关的，
+//! 不推。重连时清掉记着的任务表和各任务的列，第一次看到的任务只记基线，规矩同会话。
 
 use std::{
     collections::HashMap,
@@ -34,7 +35,8 @@ pub(crate) enum Action {
     ReadScreen(SessionId),
     /// 推一条通知：会话的状态和屏幕底部的几行（不带文字时为空）。
     Notify(SessionId, Box<SessionMeta>, Vec<String>),
-    /// 会话不再等了（答了、退出了或者没了），或者任务推过做完又回去干活：还没发出去的通知别发了。
+    /// 会话不再等了（答了、退出了或者没了），或者任务推过做完以后不再是做完等着的样子：还没发出去的通知
+    /// 别发了。
     Cancel(SessionId),
     /// 推一条任务做完的通知：任务的会话和标题。
     TodoDone(SessionId, String),
@@ -60,8 +62,8 @@ struct TodoTrack {
     column: Column,
     /// 什么时候从进行中变成做完的；这次做完还没推时有。
     finished_at: Option<Instant>,
-    /// 这次做完推过了，还没回去干活。
-    pushed: bool,
+    /// 这次做完推过了、推的是哪个会话，还没回去干活。
+    pushed: Option<SessionId>,
 }
 
 #[derive(Default)]
@@ -105,6 +107,12 @@ impl Rounds {
         self.todo_tracked.clear();
     }
 
+    /// 又要了一轮任务表和会话列表：上一轮落单、还没配上对的那份不要了，免得和这一轮的配成一对。
+    pub(crate) fn new_round(&mut self) {
+        self.todos = None;
+        self.sessions = None;
+    }
+
     /// 收到这一轮的任务表（不是这一轮的不交进来）。`unix` 是现在的 Unix 秒，推列要用。
     pub(crate) fn set_todos(&mut self, todos: Vec<Todo>, now: Instant, unix: u64) -> Vec<Action> {
         self.todos = Some(todos);
@@ -120,22 +128,28 @@ impl Rounds {
     /// 同一轮的任务表和会话列表都到了时看任务做没做完，见模块文档；看过的两份都放掉。
     fn check_todos(&mut self, now: Instant, unix: u64) -> Vec<Action> {
         let (Some(todos), Some(sessions)) = (&self.todos, &self.sessions) else { return Vec::new() };
+        let blocked = |id: SessionId| {
+            sessions.iter().any(|info| {
+                info.id == id && !info.exited && info.meta.agent.is_some_and(|agent| agent.state == AgentState::Blocked)
+            })
+        };
         let mut actions = Vec::new();
         let mut tracked = HashMap::new();
         for todo in todos {
             let info = todo.session.and_then(|id| sessions.iter().find(|info| info.id == id));
             let column = column(todo, info, unix);
             // 停下来不是在等回答，会话还在。
-            let finished = column == Column::NeedsYou
-                && info.is_some_and(|info| {
-                    !info.exited && info.meta.agent.is_none_or(|agent| agent.state != AgentState::Blocked)
-                });
+            let finished = column == Column::NeedsYou && info.is_some_and(|info| !info.exited && !blocked(info.id));
             let previous = self.todo_tracked.remove(&todo.id);
-            let mut pushed = previous.as_ref().is_some_and(|track| track.pushed) && column == Column::NeedsYou;
-            // 推过做完又回去干活：还在退避、没发出去的那条过时了。进行中不会在等回答，同一个会话等回答的
-            // 通知一起撤掉也没错。
-            if let (Some(TodoTrack { pushed: true, .. }), Column::InProgress, Some(info)) = (&previous, column, info) {
-                actions.push(Action::Cancel(info.id));
+            let mut pushed = previous.as_ref().and_then(|track| track.pushed).filter(|_| column == Column::NeedsYou);
+            // 推过做完、现在不再是做完等着的样子：还在退避、没发出去的那条过时了。会话在等回答时不撤，那条
+            // 等回答的通知要留着。
+            if let Some(session) = previous.as_ref().and_then(|track| track.pushed)
+                && !finished
+                && !blocked(session)
+            {
+                actions.push(Action::Cancel(session));
+                pushed = None;
             }
             let mut finished_at = match previous {
                 _ if !finished => None,
@@ -147,10 +161,16 @@ impl Rounds {
                 && now.duration_since(at) >= self.delay
             {
                 finished_at = None;
-                pushed = true;
+                pushed = Some(info.id);
                 actions.push(Action::TodoDone(info.id, todo.spec.title.clone()));
             }
             tracked.insert(todo.id.clone(), TodoTrack { column, finished_at, pushed });
+        }
+        // 删掉了的任务推过的也撤。
+        for session in self.todo_tracked.values().filter_map(|track| track.pushed) {
+            if !blocked(session) {
+                actions.push(Action::Cancel(session));
+            }
         }
         self.todo_tracked = tracked;
         self.todos = None;
@@ -483,6 +503,51 @@ mod tests {
         let exited = [SessionInfo { exited: true, ..idle(A) }];
         assert_eq!(round(&mut rounds, &todos, &exited, secs(t, 104)), []);
         assert_eq!(round(&mut rounds, &todos, &exited, secs(t, 140)), []);
+    }
+
+    /// 推过做完以后标成完成、删掉了、会话没了：还没发出去的那条撤掉，只撤一次。会话在等回答时不撤，等回答
+    /// 的那条要留着。
+    #[test]
+    fn done_pushes_are_cancelled_once_the_todo_moves_on() {
+        let t = Instant::now();
+        let todos = [todo("1", A)];
+        let pushed = || {
+            let mut rounds = Rounds::new(Duration::ZERO, true);
+            round(&mut rounds, &todos, &[working(A)], t);
+            assert_eq!(round(&mut rounds, &todos, &[idle(A)], secs(t, 2)), [done(A)]);
+            rounds
+        };
+
+        let mut rounds = pushed();
+        let marked = [Todo { done_at: Some(UNIX), ..todo("1", A) }];
+        assert_eq!(round(&mut rounds, &marked, &[idle(A)], secs(t, 4)), [Action::Cancel(A)]);
+        assert_eq!(round(&mut rounds, &marked, &[idle(A)], secs(t, 6)), []);
+
+        let mut rounds = pushed();
+        assert_eq!(round(&mut rounds, &[], &[idle(A)], secs(t, 4)), [Action::Cancel(A)]);
+        assert_eq!(round(&mut rounds, &[], &[idle(A)], secs(t, 6)), []);
+
+        let mut rounds = pushed();
+        assert_eq!(round(&mut rounds, &todos, &[], secs(t, 4)), [Action::Cancel(A)]);
+        assert_eq!(round(&mut rounds, &todos, &[], secs(t, 6)), []);
+
+        let mut rounds = pushed();
+        assert_eq!(round(&mut rounds, &[], &[blocked(A)], secs(t, 4)), []);
+    }
+
+    /// 上一轮的任务表到了、会话列表还没到就又要了一轮：那份旧任务表不和这一轮的会话列表配对。
+    #[test]
+    fn a_new_round_drops_the_unpaired_snapshot() {
+        let t = Instant::now();
+        let mut rounds = Rounds::new(DELAY, true);
+        let todos = [todo("1", A)];
+        round(&mut rounds, &todos, &[working(A)], t);
+        assert_eq!(round(&mut rounds, &todos, &[idle(A)], secs(t, 2)), []);
+        assert_eq!(rounds.set_todos(todos.to_vec(), secs(t, 12), UNIX), []);
+        rounds.new_round();
+        assert_eq!(rounds.todo_sessions(&[idle(A)], secs(t, 14), UNIX), []);
+        let finished = Todo { done_at: Some(UNIX), ..todo("1", A) };
+        assert_eq!(rounds.set_todos(vec![finished], secs(t, 14), UNIX), []);
     }
 
     /// 同一轮的任务表和会话列表都到了才看，谁先到都一样：宽限期最后一刻标成完成、删掉的任务不推，不拿
