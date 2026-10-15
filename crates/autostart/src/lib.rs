@@ -128,8 +128,10 @@ pub fn install(kind: Kind, dirs: &Dirs, exe: &Path) -> io::Result<Option<PathBuf
             // 用户服务默认只在有人登录时才起；开 linger 才能开机就起，没有登录会话时也得先开它，
             // systemd 才会给这个用户起一个服务管理器。没有权限就算了，调用方用 `starts_at_boot` 看结果。
             let _ = run("loginctl", &["enable-linger"]);
+            // 走到 `enable` 前单元原来是不是启用着，没走到时为空；回滚时原来没启用的要撤掉这次的 `enable`。
+            let mut was_enabled = None;
             // 刚开 linger 时服务管理器还在起来，头几次连不上它的总线，隔一会儿再试。
-            let enable = || -> io::Result<()> {
+            let mut enable = || -> io::Result<()> {
                 let mut result = systemctl(&["daemon-reload"]);
                 for _ in 0..MANAGER_TRIES {
                     // 没有 systemctl（不是 systemd 的系统）时等也没用。
@@ -140,6 +142,16 @@ pub fn install(kind: Kind, dirs: &Dirs, exe: &Path) -> io::Result<Option<PathBuf
                     result = systemctl(&["daemon-reload"]);
                 }
                 result?;
+                // 连得上服务管理器了才问，免得连不上时当成原来没启用。启用看的是 wants 目录里的链接，
+                // 换了服务文件不影响。只有明确答 `disabled` 才算没启用，问不出来时回滚不动链接。
+                was_enabled =
+                    Command::new("systemctl").args(["--user", "is-enabled", SYSTEMD_UNIT]).output().ok().and_then(
+                        |output| match String::from_utf8_lossy(&output.stdout).trim() {
+                            "disabled" => Some(false),
+                            "enabled" => Some(true),
+                            _ => None,
+                        },
+                    );
                 // 不用 `enable --now`、`restart`：`start` 对跑着的服务什么也不做，不会打断它托管的会话。
                 systemctl(&["enable", SYSTEMD_UNIT])?;
                 systemctl(&["start", SYSTEMD_UNIT])
@@ -147,6 +159,10 @@ pub fn install(kind: Kind, dirs: &Dirs, exe: &Path) -> io::Result<Option<PathBuf
             enable().map_err(|err| {
                 match &previous {
                     Some(previous) => {
+                        // 同 `None` 那支，先照这次的服务文件 `disable` 再换回原来的。
+                        if was_enabled == Some(false) {
+                            let _ = systemctl(&["disable", SYSTEMD_UNIT]);
+                        }
                         let _ = std::fs::write(&path, previous);
                     }
                     None => {

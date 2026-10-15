@@ -461,8 +461,68 @@ pub(crate) fn worktree_bytes(full: &Path, max_bytes: u64) -> Option<Vec<u8>> {
         return None;
     }
     let mut bytes = Vec::new();
-    fs::File::open(full).ok()?.take(max_bytes.saturating_add(1)).read_to_end(&mut bytes).ok()?;
+    open_regular(full).ok()?.take(max_bytes.saturating_add(1)).read_to_end(&mut bytes).ok()?;
     Some(bytes)
+}
+
+/// `O_NONBLOCK` 的值，和 libc 里的一样（标准库没有这个常量）；没列出的平台为空，照旧阻塞地打开。
+const O_NONBLOCK: Option<i32> = if cfg!(target_vendor = "apple") {
+    Some(0x0004)
+} else if cfg!(all(
+    target_os = "linux",
+    any(
+        target_arch = "x86",
+        target_arch = "x86_64",
+        target_arch = "arm",
+        target_arch = "aarch64",
+        target_arch = "riscv64",
+        target_arch = "powerpc64",
+        target_arch = "s390x",
+        target_arch = "loongarch64"
+    )
+)) {
+    Some(0o4000)
+} else {
+    None
+};
+
+/// `O_NOFOLLOW` 的值，和 libc 里的一样；Linux 上各架构不同。没列出的平台为空，照旧跟着符号链接打开。
+const O_NOFOLLOW: Option<i32> = if cfg!(target_vendor = "apple") {
+    Some(0x0100)
+} else if cfg!(all(
+    target_os = "linux",
+    any(
+        target_arch = "x86",
+        target_arch = "x86_64",
+        target_arch = "riscv64",
+        target_arch = "s390x",
+        target_arch = "loongarch64"
+    )
+)) {
+    Some(0o400000)
+} else if cfg!(all(target_os = "linux", any(target_arch = "arm", target_arch = "aarch64", target_arch = "powerpc64"))) {
+    Some(0o100000)
+} else {
+    None
+};
+
+/// 打开 `path`，打开的不是普通文件时报错。调用方先看过路径是普通文件，可看过以后路径还可能被换成
+/// 别的（命名管道、指向设备的符号链接），所以打开以后对着打开的这个再看一次，读的才一定是普通文件。
+/// 不阻塞地打开：换成了没有写端的命名管道时阻塞式的打开一直等，走不到这次检查；对普通文件这个标志
+/// 不起作用。也不跟着符号链接打开，换成了符号链接时报错，和 `worktree_bytes` 不跟过去读的规矩一致。
+fn open_regular(path: &Path) -> std::io::Result<fs::File> {
+    use std::os::unix::fs::OpenOptionsExt as _;
+    let mut options = fs::OpenOptions::new();
+    options.read(true);
+    let flags = O_NONBLOCK.unwrap_or(0) | O_NOFOLLOW.unwrap_or(0);
+    if flags != 0 {
+        options.custom_flags(flags);
+    }
+    let file = options.open(path)?;
+    if !file.metadata()?.is_file() {
+        return Err(std::io::Error::other("not a regular file"));
+    }
+    Ok(file)
 }
 
 #[cfg(test)]
@@ -476,6 +536,38 @@ mod tests {
         assert_eq!(worktree_bytes(&path, 3).unwrap(), b"0123");
         assert_eq!(worktree_bytes(&path, 100).unwrap(), b"0123456789");
         fs::remove_file(&path).unwrap();
+    }
+
+    /// 看过是普通文件以后路径被换成没有写端的命名管道或符号链接：打开不阻塞、不跟过去，报错。
+    #[test]
+    fn open_regular_rejects_a_fifo_or_symlink_swapped_in() {
+        use std::{process::Command, sync::mpsc, thread, time::Duration};
+
+        let dir = std::env::temp_dir().join(format!("runode-git-fifo-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let fifo = dir.join("a.txt");
+        fs::remove_file(&fifo).ok();
+        assert!(Command::new("mkfifo").arg(&fifo).status().unwrap().success());
+        let (tx, rx) = mpsc::channel();
+        let path = fifo.clone();
+        thread::spawn(move || tx.send(open_regular(&path).map(drop)).ok());
+        let opened = rx.recv_timeout(Duration::from_secs(5)).expect("打开命名管道阻塞了");
+        assert!(opened.is_err());
+        // 指向命名管道的符号链接同样不阻塞；认得 `O_NOFOLLOW` 的平台上指向普通文件的也不跟过去。
+        let link = dir.join("link");
+        std::os::unix::fs::symlink(&fifo, &link).unwrap();
+        let (tx, rx) = mpsc::channel();
+        let path = link.clone();
+        thread::spawn(move || tx.send(open_regular(&path).map(drop)).ok());
+        let opened = rx.recv_timeout(Duration::from_secs(5)).expect("打开指向命名管道的符号链接阻塞了");
+        assert!(opened.is_err());
+        let file = dir.join("b.txt");
+        fs::write(&file, b"b").unwrap();
+        fs::remove_file(&link).unwrap();
+        std::os::unix::fs::symlink(&file, &link).unwrap();
+        assert!(open_regular(&file).is_ok());
+        assert_eq!(open_regular(&link).is_err(), O_NOFOLLOW.is_some());
+        fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
