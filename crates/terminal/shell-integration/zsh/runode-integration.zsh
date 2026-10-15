@@ -92,6 +92,7 @@ _runode_precmd() {
         fi
     fi
     _runode_report_names
+    _runode_bind_reload_key
     # 用户配置自己定义的 zle-line-init、zle-keymap-select 要先定义好，所以等 .zshrc 加载完、第一次
     # 显示提示符时才挂。
     if [[ -n $_runode_cursor && -z $_runode_zle_hooked ]]; then
@@ -213,9 +214,13 @@ runode-reload-key() {
     'builtin' 'zle' '.accept-line'
 }
 'builtin' 'zle' -N runode-reload-key
-'builtin' 'bindkey' -M emacs '\e[6973~' runode-reload-key
-'builtin' 'bindkey' -M viins '\e[6973~' runode-reload-key
-'builtin' 'bindkey' -M vicmd '\e[6973~' runode-reload-key
+# 这里比 .zshrc 先跑，.zshrc 里的 bindkey -d（比如 prezto 的 editor 模块）会把键位重置掉，runode 看到函数
+# 还在就照样按这个键，所以每次显示提示符前都重新绑一次。
+_runode_bind_reload_key() {
+    'builtin' 'bindkey' -M emacs '\e[6973~' runode-reload-key
+    'builtin' 'bindkey' -M viins '\e[6973~' runode-reload-key
+    'builtin' 'bindkey' -M vicmd '\e[6973~' runode-reload-key
+}
 
 # 换成一个新的 zsh，重新读用户配置，接上集成：ZDOTDIR 指回集成目录，现在的 ZDOTDIR 经
 # RUNODE_ZSH_ZDOTDIR 交给集成目录里的 .zshenv 还原；口令和功能经环境变量交回去，runode 照样认得

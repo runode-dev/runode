@@ -597,6 +597,13 @@ fn real_zsh_reload_key_works_in_vi_command_mode() {
     reload_key_in_vi_command_mode(RealShell::start("zsh", "zsh-reload-key", rc, "[z]%", &["[z]%"]));
 }
 
+/// 集成比 .zshrc 先绑这个按键，.zshrc 里 `bindkey -d` 重置了键位也照样能按。
+#[test]
+fn real_zsh_reload_key_survives_a_keymap_reset_in_zshrc() {
+    let rc = "PROMPT='[z]%% '\nbindkey -d\nbindkey -v\nKEYTIMEOUT=1\n[[ -r ~/extra ]] && . ~/extra\n";
+    reload_key_in_vi_command_mode(RealShell::start("zsh", "zsh-reload-key-reset", rc, "[z]%", &["[z]%"]));
+}
+
 /// 4.4 以下的 bash 没绑这个按键（`runode-reload-key` 不报告），`Session::reload_shell` 照旧清输入再打命令。
 #[test]
 fn real_bash_reload_key_works_in_vi_command_mode() {
