@@ -188,6 +188,11 @@ fn unquote(text: &str) -> PathBuf {
         match chars.next() {
             Some(b'n') => bytes.push(b'\n'),
             Some(b't') => bytes.push(b'\t'),
+            Some(b'r') => bytes.push(b'\r'),
+            Some(b'a') => bytes.push(7),
+            Some(b'b') => bytes.push(8),
+            Some(b'v') => bytes.push(11),
+            Some(b'f') => bytes.push(12),
             Some(digit @ b'0'..=b'7') => {
                 let mut value = u32::from(digit - b'0');
                 for _ in 0..2 {
@@ -305,6 +310,7 @@ Binary files /dev/null and b/logo.png differ
     #[test]
     fn unquotes_paths() {
         assert_eq!(unquote("\"a\\\"b\\tc\""), Path::new("a\"b\tc"));
+        assert_eq!(unquote("\"t\\rr\\a\\b\\v\\f\""), Path::new("t\rr\x07\x08\x0b\x0c"));
         assert_eq!(unquote("\"\\346\\226\\207.txt\""), Path::new("文.txt"));
         // 不是 UTF-8 的字节原样还原，不换成 U+FFFD。
         assert_eq!(unquote("\"caf\\351.txt\"").as_os_str().as_bytes(), b"caf\xe9.txt");

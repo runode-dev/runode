@@ -35,7 +35,8 @@ pub struct GrepMatch {
 /// 调用方只查要用的那些。
 pub fn list_files(root: &Path) -> Option<Vec<PathBuf>> {
     let out = git(root, &["ls-files", "-z", "--cached", "--others", "--exclude-standard", "--deduplicate"])?;
-    let paths = out.split(|&b| b == 0).filter(|path| !path.is_empty());
+    // 嵌套仓库（自带 `.git` 的未跟踪目录）会以结尾带 `/` 的目录项列出来，不是文件，丢掉。
+    let paths = out.split(|&b| b == 0).filter(|path| !path.is_empty() && !path.ends_with(b"/"));
     Some(paths.map(|path| PathBuf::from(OsStr::from_bytes(path))).collect())
 }
 

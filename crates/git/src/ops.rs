@@ -284,7 +284,8 @@ impl Repo {
     /// 丢掉工作区里还没暂存的改动，`files` 来自未暂存段。未跟踪的文件从磁盘上删掉（只删
     /// 文件不删目录，删完把因此变空的上层目录也删掉）；`git add -N` 记下的新文件同样删掉并
     /// 移出暂存区；其余的按暂存区里的样子恢复。已经暂存的改动不受影响；冲突的文件暂存区
-    /// 里没有单一的版本，报 git 的错。一个文件失败不影响其余的，返回第一个错误。子模块那样的
+    /// 里没有单一的版本，不进批量的 `git restore`（它会让整批失败），单独报错。一个文件失败不影响其余的，
+    /// 返回第一个错误。子模块那样的
     /// gitlink 跳过：工作区里的提交号要到子仓库里切，`git restore` 对它什么也不做。
     /// `files` 是先前读到的，动手前重读一次：有哪个文件不在未暂存段里了或状态、原路径变了（比如问用户
     /// 的时候在终端里暂存了），一个也不丢、报错，免得照旧状态删掉已经暂存的内容。
@@ -307,6 +308,15 @@ impl Repo {
         for file in files.iter().filter(|file| !file.gitlink) {
             match file.status {
                 FileStatus::Untracked => results.push(self.delete_untracked(&file.path)),
+                // `git restore --worktree` 碰到没解决的冲突整条命令失败，同批的别的文件一个都恢复不了，
+                // 所以冲突的（连同它的原路径）不进批量命令，单独报错。
+                FileStatus::Conflicted => {
+                    results.push(Err(GitError::new(format!(
+                        "{} 有没解决的冲突，先解决或者用 git 处理",
+                        file.path.display()
+                    ))));
+                    continue;
+                }
                 // 未暂存段里的新增和改名都是 `git add -N` 的文件，暂存区里只有个占位。
                 FileStatus::Added | FileStatus::Renamed => remove.push(file.path.as_path()),
                 _ => restore.push(file.path.as_path()),
