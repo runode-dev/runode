@@ -211,6 +211,28 @@ fn live(line: &str, resolved: &[(String, Action)]) -> bool {
     })
 }
 
+/// 删掉配置文件里自己写的第 `ix` 行 `keybind`（触发键是 `trigger`）。它要是盖着一条一样的默认绑定，
+/// 删了默认的又露出来，再写一行解绑。
+fn remove_user_line(values: &mut Vec<String>, ix: usize, trigger: &str) {
+    let line = values.remove(ix);
+    let rest: Vec<_> = values.iter().filter_map(|value| keybind::parse(value).ok()).flatten().collect();
+    if live(&line, &keybind::resolve(&rest)) {
+        values.push(join(trigger, "unbind", None));
+    }
+}
+
+/// 把配置文件里自己写的第 `ix` 行 `keybind`（触发键是 `old`）换成触发键 `trigger`：删掉原来那行（见
+/// `remove_user_line`），新的接在最后。那一行不在了或写错了时什么也不改，返回 false。
+fn replace_user_line(values: &mut Vec<String>, ix: usize, old: &str, trigger: &str) -> bool {
+    let Some(new) = values.get(ix).and_then(|value| split(value)).map(|(_, name, param)| join(trigger, name, param))
+    else {
+        return false;
+    };
+    remove_user_line(values, ix, old);
+    values.push(new);
+    true
+}
+
 fn report(view: &mut SettingsView, values: &[String], cx: &mut Context<SettingsView>) {
     if let Err(err) = view.write_unchecked(KEY, values, cx) {
         view.errors.insert(KEY.to_owned(), err);
@@ -340,16 +362,16 @@ impl SettingsView {
             .collect()
     }
 
-    /// 把录到的键写进配置：换掉 `target.replace`，或者给那一行新加一条。
+    /// 把录到的键写进配置：换掉 `target.replace`，或者给那一行新加一条。新的一行总是接在最后，后写的
+    /// 绑定生效，确认了要抢过来的键不会输给文件里后面绑着它的那一行。
     fn apply_recorded(&mut self, target: Record, trigger: &str, cx: &mut Context<Self>) {
         self.keybinds.stop_recording();
         let mut values = self.file.values(KEY);
         match target.replace {
-            Some(Bound { source: Source::User(ix), .. }) => {
-                let Some((_, name, param)) = values.get(ix).and_then(|value| split(value)) else {
+            Some(Bound { trigger: old, source: Source::User(ix) }) => {
+                if !replace_user_line(&mut values, ix, &old, trigger) {
                     return;
-                };
-                values[ix] = join(trigger, name, param);
+                }
             }
             Some(Bound { trigger: old, source: Source::Default }) => {
                 values.push(join(&old, "unbind", None));
@@ -360,21 +382,13 @@ impl SettingsView {
         report(self, &values, cx);
     }
 
-    /// 去掉一行上的一个键：默认的写一行解绑；自己写的删掉那一行，它要是盖着一条一样的默认绑定，
-    /// 删了默认的又露出来，再写一行解绑。
+    /// 去掉一行上的一个键：默认的写一行解绑；自己写的删掉那一行（见 `remove_user_line`）。
     fn remove_bound(&mut self, bound: &Bound, cx: &mut Context<Self>) {
         self.keybinds.stop_recording();
         let mut values = self.file.values(KEY);
-        let unbind = join(&bound.trigger, "unbind", None);
         match bound.source {
-            Source::Default => values.push(unbind),
-            Source::User(ix) if ix < values.len() => {
-                let line = values.remove(ix);
-                let rest: Vec<_> = values.iter().filter_map(|value| keybind::parse(value).ok()).flatten().collect();
-                if live(&line, &keybind::resolve(&rest)) {
-                    values.push(unbind);
-                }
-            }
+            Source::Default => values.push(join(&bound.trigger, "unbind", None)),
+            Source::User(ix) if ix < values.len() => remove_user_line(&mut values, ix, &bound.trigger),
             Source::User(_) => return,
         }
         report(self, &values, cx);
@@ -662,6 +676,27 @@ mod tests {
         assert_eq!(caps("cmd+digit"), [["⌘", "1…9"]]);
         assert_eq!(caps("ctrl+a>left"), [vec!["⌃", "A"], vec!["←"]]);
         assert_eq!(caps("nope+t"), [["nope+t"]]);
+    }
+
+    /// 换掉自己写的一行：新的接在最后，盖过后面绑着同一个键的行；原来那行盖着一样的默认绑定时，
+    /// 再写一行解绑，旧键不会又绑回去。
+    #[test]
+    fn replacing_a_user_line_moves_it_last_and_unbinds_a_shadowed_default() {
+        let lines = |values: &[&str]| values.iter().map(|v| (*v).to_owned()).collect::<Vec<_>>();
+        let mut values = lines(&["ctrl+x=new_tab", "ctrl+y=new_window"]);
+        assert!(replace_user_line(&mut values, 0, "ctrl+x", "ctrl+y"));
+        assert_eq!(values, lines(&["ctrl+y=new_window", "ctrl+y=new_tab"]));
+
+        let mut values = lines(&["cmd+t=new_tab"]);
+        assert!(replace_user_line(&mut values, 0, "cmd+t", "ctrl+t"));
+        assert_eq!(values, lines(&["cmd+t=unbind", "ctrl+t=new_tab"]));
+        let resolved = keybind::resolve(&values.iter().flat_map(|v| keybind::parse(v).unwrap()).collect::<Vec<_>>());
+        assert!(!resolved.iter().any(|(keys, _)| keys == "cmd-t"));
+
+        let mut values = lines(&["clear"]);
+        assert!(!replace_user_line(&mut values, 0, "cmd+t", "ctrl+t"));
+        assert!(!replace_user_line(&mut values, 3, "cmd+t", "ctrl+t"));
+        assert_eq!(values, lines(&["clear"]));
     }
 
     /// 每个动作都有行可放，默认绑定都落在某一行上，`goto_tab` 一行管 1 到 9。

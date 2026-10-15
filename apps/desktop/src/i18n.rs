@@ -71,15 +71,26 @@ fn preferred_languages() -> Vec<String> {
     objc2_foundation::NSLocale::preferredLanguages().iter().map(|tag| tag.to_string()).collect()
 }
 
-/// 按 POSIX 的优先级读语言环境变量；`LANGUAGE` 可以是冒号分隔的多个语言。
 #[cfg(not(target_os = "macos"))]
 fn preferred_languages() -> Vec<String> {
-    ["LANGUAGE", "LC_ALL", "LC_MESSAGES", "LANG"]
-        .iter()
-        .filter_map(|name| std::env::var(name).ok())
-        .flat_map(|value| value.split(':').map(str::to_owned).collect::<Vec<_>>())
-        .filter(|tag| !tag.is_empty() && tag != "C" && tag != "POSIX")
-        .collect()
+    languages_from_env(|name| std::env::var(name).ok())
+}
+
+/// 照 gettext 读语言环境变量：`LC_ALL`、`LC_MESSAGES`、`LANG` 里第一个非空的是生效的语言环境，前面的
+/// 盖过后面的，不是一串候选；它是 `C`、`POSIX` 或都没设时用英文。不是时先按 `LANGUAGE`（冒号分隔的
+/// 多个语言）挑，再用它本身。
+#[cfg(any(not(target_os = "macos"), test))]
+fn languages_from_env(var: impl Fn(&str) -> Option<String>) -> Vec<String> {
+    let Some(locale) = ["LC_ALL", "LC_MESSAGES", "LANG"].into_iter().filter_map(&var).find(|value| !value.is_empty())
+    else {
+        return Vec::new();
+    };
+    let name = locale.split(['.', '@']).next().unwrap_or_default();
+    if name == "C" || name == "POSIX" {
+        return Vec::new();
+    }
+    let language = var("LANGUAGE").unwrap_or_default();
+    language.split(':').filter(|tag| !tag.is_empty()).map(str::to_owned).chain([locale]).collect()
 }
 
 #[cfg(test)]
@@ -93,6 +104,21 @@ mod tests {
         assert_eq!(from_config(Some("ja")), FALLBACK);
         assert_eq!(configured("ja"), FALLBACK);
         assert!(available().contains(&from_config(None)));
+    }
+
+    /// `LC_ALL` 盖过 `LANG`，写成 `C` 时就是英文；`LANGUAGE` 只在语言环境不是 `C` 时排在前面。
+    #[test]
+    fn locale_variables_override_instead_of_falling_back() {
+        let env = |vars: &[(&str, &str)]| {
+            let vars: Vec<(String, String)> = vars.iter().map(|(k, v)| ((*k).to_owned(), (*v).to_owned())).collect();
+            languages_from_env(move |name| vars.iter().find(|(k, _)| k == name).map(|(_, v)| v.clone()))
+        };
+        assert!(env(&[("LC_ALL", "C"), ("LANG", "zh_CN.UTF-8")]).is_empty());
+        assert!(env(&[("LC_ALL", "C.UTF-8"), ("LANGUAGE", "zh_CN")]).is_empty());
+        assert!(env(&[("LANGUAGE", "zh_CN")]).is_empty());
+        assert_eq!(env(&[("LC_ALL", "ja_JP.UTF-8"), ("LANG", "zh_CN.UTF-8")]), ["ja_JP.UTF-8"]);
+        assert_eq!(env(&[("LC_ALL", ""), ("LC_MESSAGES", "zh_TW"), ("LANG", "en_US")]), ["zh_TW"]);
+        assert_eq!(env(&[("LANGUAGE", "fr:zh_CN"), ("LANG", "en_US.UTF-8")]), ["fr", "zh_CN", "en_US.UTF-8"]);
     }
 
     /// 英文是兜底，其余每种语言都要有英文的全部键，新增文字时漏翻译会在这里失败。动作的说明

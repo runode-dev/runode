@@ -135,8 +135,13 @@ impl WindowView {
                 });
                 project.tasks = Some((root, sources));
                 cx.notify();
-                // 列的期间终端目录换了或者文件又变了。
                 if this.workspace().id == id {
+                    // 开着的命令菜单是打开时按那时列着的命令建的（打开菜单才开始列），换上新列出来的。
+                    if this.dropdown_open() {
+                        let (items, _) = this.tasks_menu_items(cx);
+                        this.replace_menu_items(items, cx);
+                    }
+                    // 列的期间终端目录换了或者文件又变了。
                     this.list_tasks(cx);
                 }
             })
@@ -177,10 +182,12 @@ impl WindowView {
     }
 
     /// 按了绑着 `run_task:名字` 的快捷键：现请宿主列一遍终端目录的命令（菜单没打开过时还没列），按菜单里
-    /// 的顺序找第一条叫这个名字的，像在菜单里点它一样跑；没有或者列不出来时响一声、记日志。
+    /// 的顺序找第一条叫这个名字的，像在菜单里点它一样跑；没有或者列不出来时响一声、记日志。列的期间切到了
+    /// 别的 workspace 时不跑。
     pub(super) fn run_named_task(&mut self, action: &RunNamedTask, window: &mut Window, cx: &mut Context<Self>) {
         let root = self.project_dir(cx);
         let name = action.0.clone();
+        let id = self.workspace().id;
         let job = cx.background_spawn({
             let root = root.clone();
             async move { host_client::list_tasks(root) }
@@ -200,6 +207,10 @@ impl WindowView {
                 }
             };
             this.update_in(cx, |this, window, cx| match found {
+                // 列的期间切到了别的 workspace：命令是按原来那个的目录找的，不在这里跑。
+                Some(_) if this.workspace().id != id => {
+                    tracing::info!("not running the task {name:?}: switched workspaces while listing the tasks");
+                }
                 Some(task) => this.run_task(&task, window, cx),
                 None => {
                     tracing::warn!("no task named {name:?} in {}", root.display());

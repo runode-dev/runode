@@ -20,7 +20,7 @@ use std::{
     os::unix::process::CommandExt,
     path::{Path, PathBuf},
     process::{Command, Stdio},
-    sync::mpsc,
+    sync::{Mutex, PoisonError, mpsc},
     thread,
     time::{Duration, Instant},
 };
@@ -42,6 +42,8 @@ const MAX_FILES_BYTES: usize = 6_000;
 const EXAMPLES: usize = 10;
 /// agent 最多等这么久，超时就杀掉报错，免得仓库一直写着在生成、提交不了。
 const TIMEOUT: Duration = Duration::from_secs(180);
+/// 到时限杀掉整组以后，再等输出管道关上这么久。
+const KILL_GRACE: Duration = Duration::from_secs(1);
 
 /// 默认的提示词模板：就是内置的提示词。
 pub(in crate::window) const DEFAULT_TEMPLATE: &str = "{basePrompt}";
@@ -121,6 +123,9 @@ pub(in crate::window) fn saved_recipe(root: &Path) -> Result<Option<(Recipe, boo
 /// 把 `recipe` 存成根目录是 `root` 的仓库自己的（`root` 为空时存成所有仓库的默认值）。存成默认值时
 /// 不动各仓库自己的。读不懂原来的内容时不写，免得把手改的文件冲掉。
 pub(in crate::window) fn save_recipe(root: Option<&Path>, recipe: Recipe) -> Result<(), String> {
+    // 几个窗口的对话框可能同时在后台存：读、改、写整个过程排着队来，免得后存的拿着旧内容把先存的冲掉。
+    static SAVING: Mutex<()> = Mutex::new(());
+    let _saving = SAVING.lock().unwrap_or_else(PoisonError::into_inner);
     let file = Dirs::from_env().commit_message_file().ok_or("no home directory")?;
     let mut recipes = read_recipes(&file)?;
     match root {
@@ -353,8 +358,9 @@ fn render_template(template: &str, vars: &[(&str, &str)]) -> String {
     out
 }
 
-/// 按 shell 的规矩把 CLI 参数分成一个个参数：空白分开，单引号、双引号里的原样，引号外的反斜杠转义
-/// 下一个字。不展开变量、通配符和 `~`：不经 shell 跑。
+/// 按 shell 的规矩把 CLI 参数分成一个个参数：空白分开，单引号里的原样；双引号里的反斜杠只转义
+/// `"`、`\`、`$`、`` ` `` 和换行，别的字前面的原样留着；引号外的反斜杠转义下一个字，在末尾时原样留着。
+/// 反斜杠接换行是续行，两个都去掉。不展开变量、通配符和 `~`：不经 shell 跑。
 fn split_args(text: &str) -> Result<Vec<String>, String> {
     let mut args = Vec::new();
     let mut current: Option<String> = None;
@@ -366,13 +372,24 @@ fn split_args(text: &str) -> Result<Vec<String>, String> {
                 loop {
                     match chars.next() {
                         Some(end) if end == ch => break,
-                        Some('\\') if ch == '"' => arg.extend(chars.next()),
+                        Some('\\') if ch == '"' => match chars.next() {
+                            Some('\n') => {}
+                            Some(next @ ('"' | '\\' | '$' | '`')) => arg.push(next),
+                            Some(next) => {
+                                arg.push('\\');
+                                arg.push(next);
+                            }
+                            None => return Err(rust_i18n::t!("git.ai_message.unclosed_quote").into_owned()),
+                        },
                         Some(other) => arg.push(other),
                         None => return Err(rust_i18n::t!("git.ai_message.unclosed_quote").into_owned()),
                     }
                 }
             }
-            '\\' => current.get_or_insert_with(String::new).extend(chars.next()),
+            '\\' => match chars.next() {
+                Some('\n') => {}
+                next => current.get_or_insert_with(String::new).push(next.unwrap_or('\\')),
+            },
             ch if ch.is_whitespace() => args.extend(current.take()),
             ch => current.get_or_insert_with(String::new).push(ch),
         }
@@ -446,19 +463,22 @@ fn run(
         }
         thread::sleep(Duration::from_millis(100));
     };
-    // agent 退了，组里还有进程拿着输出管道时读不到头：等到时限，再杀掉整组读完剩下的。
+    // agent 退了，组里还有进程拿着输出管道时读不到头：等到时限，再杀掉整组读完剩下的。拿着管道的
+    // 进程自己另开了会话、杀不到它时，再等一会儿还读不到头就算超时，不一直等下去。
     let joined = |reader: Option<mpsc::Receiver<String>>| {
-        let reader = reader?;
+        let Some(reader) = reader else {
+            return Ok(String::new());
+        };
         let left = deadline.saturating_duration_since(Instant::now());
         reader
             .recv_timeout(left)
             .or_else(|_| {
                 kill_group();
-                reader.recv()
+                reader.recv_timeout(KILL_GRACE)
             })
-            .ok()
+            .map_err(|_| rust_i18n::t!("git.ai_message.timeout", binary = binary).into_owned())
     };
-    let (stdout, stderr) = (joined(stdout).unwrap_or_default(), joined(stderr).unwrap_or_default());
+    let (stdout, stderr) = (joined(stdout)?, joined(stderr)?);
     if !status.success() {
         let detail = [stderr.trim(), stdout.trim()].into_iter().find(|text| !text.is_empty());
         return Err(format!("{binary}: {}", detail.map_or_else(|| status.to_string(), str::to_owned)));
@@ -548,6 +568,12 @@ mod tests {
         assert_eq!(split_args("  --model sonnet ").unwrap(), ["--model", "sonnet"]);
         assert_eq!(split_args(r#"-c 'a b' "x \"y\"" c\ d ''"#).unwrap(), ["-c", "a b", "x \"y\"", "c d", ""]);
         assert!(split_args("'open").is_err());
+        // 双引号里只有 `"`、`\`、`$`、`` ` `` 前面的反斜杠是转义，别的原样留着，正则、路径不会被改掉。
+        assert_eq!(split_args(r#""\d+" "a\\b" "\$x" "C:\dir""#).unwrap(), [r"\d+", r"a\b", "$x", r"C:\dir"]);
+        assert!(split_args(r#""a\""#).is_err());
+        // 引号外末尾落单的反斜杠原样留着，不悄悄丢掉；反斜杠接换行是续行。
+        assert_eq!(split_args(r"a b\").unwrap(), ["a", r"b\"]);
+        assert_eq!(split_args("a\\\nb").unwrap(), ["ab"]);
     }
 
     #[test]
@@ -646,6 +672,18 @@ mod tests {
         let err = run("sh", &["-c".into(), "sleep 30 & wait".into()], None, &dir, None, &[], timeout).unwrap_err();
         assert!(err.contains("sh"));
         assert!(started.elapsed() < Duration::from_secs(10));
+    }
+
+    /// 拿着输出管道的后台进程自己另起了进程组、杀整组杀不到它时，到时限稍等一会儿就报超时，不一直等。
+    #[test]
+    fn gives_up_on_pipes_held_outside_the_process_group() {
+        let dir = std::env::temp_dir();
+        let started = Instant::now();
+        // `set -m` 让后台的 `sleep` 自成一个进程组。
+        let script = "set -m; sleep 5 & echo hi";
+        let err = run("sh", &["-c".into(), script.into()], None, &dir, None, &[], Duration::from_secs(1)).unwrap_err();
+        assert!(err.contains("sh"), "{err}");
+        assert!(started.elapsed() < Duration::from_secs(4));
     }
 
     #[test]

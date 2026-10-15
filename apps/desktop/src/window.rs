@@ -353,6 +353,8 @@ impl WindowView {
                 this.refresh_preview_if_changed(cx);
                 // 切回这个窗口就算看到了当前分屏。
                 this.mark_seen(window, cx);
+                // 报给宿主的布局里标着最前面的窗口（`WindowLayout::front`）。
+                layout_report::changed(cx);
             }
         });
         let visibility_watch =

@@ -16,7 +16,9 @@ pub(crate) enum Mark {
 
 /// 一个文件的改动换算成新文件里每一行的标记，键是从 1 数的行号。一串连着的删除和新增里，
 /// 有删除的新增行算修改；只删不增的标在删除处的下一行，删在末尾时标在新文件的最后一行之后。
-fn diff_marks(diff: &git::FileDiff) -> HashMap<u32, Mark> {
+/// `fresh` 说旧文件里的某一行是不是本来就是新加的（HEAD 里没有）：删掉这样的行不算删，换掉它的
+/// 新行仍算新增。
+fn diff_marks(diff: &git::FileDiff, fresh: impl Fn(u32) -> bool) -> HashMap<u32, Mark> {
     let mut marks = HashMap::new();
     for hunk in &diff.hunks {
         let mut removed = 0;
@@ -35,7 +37,7 @@ fn diff_marks(diff: &git::FileDiff) -> HashMap<u32, Mark> {
         };
         for line in &hunk.lines {
             match line.kind {
-                LineKind::Removed => removed += 1,
+                LineKind::Removed => removed += usize::from(!line.old.is_some_and(&fresh)),
                 LineKind::Added => added.extend(line.new),
                 LineKind::Context => flush(&mut removed, &mut added, line.new.unwrap_or(last_new + 1), &mut marks),
             }
@@ -76,23 +78,23 @@ fn index_to_worktree(unstaged: &git::FileDiff, line: u32) -> Option<u32> {
 }
 
 /// 工作区里这个文件相对 HEAD 改了哪些行：未暂存的改动直接用，已暂存的换算到工作区的行号上。
+/// 暂存时新加的行在工作区里又改了，仍算新增；又删了，不算删。
 pub(super) fn line_marks(snapshot: &git::Snapshot, rel: &Path) -> HashMap<u32, Mark> {
     let find = |section: Section| snapshot.files(section).iter().find(|file| file.path == rel);
     let unstaged = find(Section::Unstaged);
+    let staged = find(Section::Staged).map(|staged| diff_marks(staged, |_| false)).unwrap_or_default();
     let mut marks = HashMap::new();
-    if let Some(staged) = find(Section::Staged) {
-        for (line, mark) in diff_marks(staged) {
-            let line = match unstaged {
-                Some(unstaged) => index_to_worktree(unstaged, line),
-                None => Some(line),
-            };
-            if let Some(line) = line {
-                marks.insert(line, mark);
-            }
+    for (&line, &mark) in &staged {
+        let line = match unstaged {
+            Some(unstaged) => index_to_worktree(unstaged, line),
+            None => Some(line),
+        };
+        if let Some(line) = line {
+            marks.insert(line, mark);
         }
     }
     if let Some(unstaged) = unstaged {
-        marks.extend(diff_marks(unstaged));
+        marks.extend(diff_marks(unstaged, |line| staged.get(&line) == Some(&Mark::Added)));
     }
     marks
 }
@@ -138,7 +140,7 @@ mod tests {
             line(C, Some(6), Some(6)),
             line(R, Some(7), None),
         ]);
-        let marks = diff_marks(&file);
+        let marks = diff_marks(&file, |_| false);
         assert_eq!(marks.get(&2), Some(&Mark::Modified));
         assert_eq!(marks.get(&4), Some(&Mark::Added));
         assert_eq!(marks.get(&6), Some(&Mark::Removed));
@@ -176,10 +178,10 @@ mod tests {
     #[test]
     fn zero_context_removals_mark_the_following_line() {
         let file = zero_context(&[("@@ -50,2 +49,0 @@", vec![line(R, Some(50), None), line(R, Some(51), None)])]);
-        assert_eq!(diff_marks(&file), HashMap::from([(50, Mark::Removed)]));
+        assert_eq!(diff_marks(&file, |_| false), HashMap::from([(50, Mark::Removed)]));
         // 删掉开头几行时标在第 1 行。
         let file = zero_context(&[("@@ -1,2 +0,0 @@", vec![line(R, Some(1), None), line(R, Some(2), None)])]);
-        assert_eq!(diff_marks(&file), HashMap::from([(1, Mark::Removed)]));
+        assert_eq!(diff_marks(&file, |_| false), HashMap::from([(1, Mark::Removed)]));
     }
 
     #[test]
@@ -213,5 +215,42 @@ mod tests {
         assert_eq!(marks.get(&1), Some(&Mark::Added));
         assert_eq!(marks.get(&3), Some(&Mark::Added));
         assert_eq!(marks.len(), 2);
+    }
+
+    fn snapshot(staged: FileDiff, unstaged: FileDiff) -> git::Snapshot {
+        git::Snapshot {
+            root: "/repo".into(),
+            git_dir: "/repo/.git".into(),
+            prefix: PathBuf::new(),
+            kind: git::RepoKind::Main,
+            staged: vec![staged],
+            unstaged: vec![unstaged],
+            statuses: HashMap::new(),
+            ignored: HashSet::new(),
+            info: Default::default(),
+        }
+    }
+
+    /// 暂存时新加的行在工作区里又改了：HEAD 里没有这一行，仍算新增，不算修改。
+    #[test]
+    fn staged_additions_edited_in_the_worktree_stay_added() {
+        let staged = diff(vec![line(C, Some(1), Some(1)), line(A, None, Some(2)), line(C, Some(2), Some(3))]);
+        let unstaged = diff(vec![
+            line(C, Some(1), Some(1)),
+            line(R, Some(2), None),
+            line(A, None, Some(2)),
+            line(C, Some(3), Some(3)),
+        ]);
+        let marks = line_marks(&snapshot(staged, unstaged), Path::new("a.rs"));
+        assert_eq!(marks, HashMap::from([(2, Mark::Added)]));
+    }
+
+    /// 暂存时新加的行在工作区里又删了：和 HEAD 比什么都没变，不标删除。
+    #[test]
+    fn staged_additions_removed_in_the_worktree_leave_no_mark() {
+        let staged = diff(vec![line(C, Some(1), Some(1)), line(A, None, Some(2)), line(C, Some(2), Some(3))]);
+        let unstaged = diff(vec![line(C, Some(1), Some(1)), line(R, Some(2), None), line(C, Some(3), Some(2))]);
+        let marks = line_marks(&snapshot(staged, unstaged), Path::new("a.rs"));
+        assert_eq!(marks, HashMap::new());
     }
 }

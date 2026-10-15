@@ -1009,11 +1009,13 @@ impl Render for GitPanel {
         panel.width = width;
         panel.a11y = window.is_a11y_active();
         let mut lost_focus = false;
-        // 图表显示的仓库的块收着时也留着，读到的历史才在。
+        // 图表显示的仓库的块收着时也留着，读到的历史才在。正在读历史的也留着：丢掉了再切回来会另起一次读，
+        // 先发的那次读完时就把后发的那次的 `loading` 清掉、拿旧的结果盖上去。
         panel.repos.retain(|root, repo| {
             let keep = shown.iter().any(|(shown, _)| shown == root)
                 || graph_root.as_ref() == Some(root)
                 || repo.busy.is_some()
+                || repo.graph.loading
                 || repo.commit_box.as_ref().is_some_and(|area| !area.read(cx).text().is_empty());
             if !keep && repo.commit_box.as_ref().is_some_and(|area| area.focus_handle(cx).is_focused(window)) {
                 lost_focus = true;

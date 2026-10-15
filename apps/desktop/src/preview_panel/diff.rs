@@ -787,7 +787,15 @@ mod tests {
         assert!(!tab.diff_stale, "别的文件变了不重读");
         tab.git_changed(Some(&old), Some(&repos(vec![diff("a.rs", 2), diff("b.rs", 1)])));
         assert!(tab.diff_stale);
-        // diff 标签不跟着文件事件重读，等扫描。
+        // 工作区的 diff 标签也跟着文件事件重读：二进制文件再改一次，扫描结果里的改动可能一模一样。
+        let binary = FileDiff { binary: true, hunks: Vec::new(), ..diff("a.rs", 0) };
+        tab.diff_stale = false;
+        tab.git_changed(Some(&repos(vec![binary.clone()])), Some(&repos(vec![binary])));
+        assert!(!tab.diff_stale);
+        assert!(tab.affected_by(&["/r/a.rs".into()]));
+        assert!(!tab.affected_by(&["/r/b.rs".into()]));
+        // 暂存区的不随文件变，等扫描。
+        tab.diff = tab.diff.take().map(|target| DiffTarget { side: DiffSide::Index, ..target });
         assert!(!tab.affected_by(&["/r/a.rs".into()]));
     }
 

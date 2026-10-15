@@ -114,14 +114,21 @@ impl TreeState {
         self.to_list.extend(dirs);
     }
 
-    /// 换上后台读回来的目录，读不了的不记；根目录已经换了时不是这里的目录，不要。有等着的 `reveal` 时再定位一次。
+    /// 换上后台读回来的目录；读不了的（删掉了、改了名或者没权限）和 `apply_scan` 一样丢掉记着的旧列表、
+    /// 收起来，不再把旧的内容当真。根目录已经换了时不是这里的目录，不要。有等着的 `reveal` 时再定位一次。
     pub(crate) fn apply_listings(&mut self, listings: Listings, root: &Path, filter: TreeFilter) {
         let mut read = HashSet::new();
         for (dir, listing) in listings {
-            if let Some(listing) = listing
-                && dir.starts_with(root)
-            {
-                self.listings.insert(dir.clone(), listing);
+            if dir.starts_with(root) {
+                match listing {
+                    Some(listing) => {
+                        self.listings.insert(dir.clone(), listing);
+                    }
+                    None => {
+                        self.listings.remove(&dir);
+                        self.expanded.remove(&dir);
+                    }
+                }
             }
             read.insert(dir);
         }
@@ -218,6 +225,14 @@ impl TreeState {
         };
         self.selected = Some(rows[ix].path.clone());
         self.scroll.scroll_to_item(ix, strategy);
+    }
+
+    /// 显示哪些变了：重排行。选中的跟着藏起来时不留着，免得删除、改名还作用在看不见的文件上。
+    pub(crate) fn refilter(&mut self, root: &Path, filter: TreeFilter) {
+        self.rebuild_rows(root, filter);
+        if self.selected_row().is_none() {
+            self.selected = None;
+        }
     }
 
     /// 收起根目录下所有展开的目录。
@@ -533,6 +548,23 @@ mod tests {
         assert_eq!(names(&state), [("visible / .hidden".into(), 0)]);
     }
 
+    /// 选中的跟着藏起来时不留着，删除、改名不作用在看不见的文件上；还看得见的照旧选着。
+    #[test]
+    fn hiding_the_selected_entry_clears_the_selection() {
+        let mut state = TreeState::default();
+        let root = Path::new("/p");
+        let no_dotfiles = TreeFilter { ignored: true, dotfiles: false };
+        state.listings.insert(root.into(), vec![file(".env"), file("a")]);
+        state.rebuild_rows(root, ALL);
+        state.select_row(1);
+        state.refilter(root, no_dotfiles);
+        assert_eq!(state.selected, Some(PathBuf::from("/p/a")));
+        state.refilter(root, ALL);
+        state.select_row(0);
+        state.refilter(root, no_dotfiles);
+        assert_eq!(state.selected, None);
+    }
+
     #[test]
     fn reveals_the_terminal_dir() {
         let mut state = TreeState::default();
@@ -611,6 +643,17 @@ mod tests {
         state.toggle_dir(Path::new("/p/a"), root, ALL);
         assert_eq!(std::mem::take(&mut state.to_list), [PathBuf::from("/p/a")]);
         assert_eq!(state.rows.len(), 2);
+        state.apply_listings(vec![(PathBuf::from("/p/a"), Some(vec![file("b")]))], root, ALL);
+        assert_eq!(names(&state), [("a".into(), 0), ("b".into(), 1), ("z".into(), 0)]);
+        // 重读时读不了（删掉了或者没权限）的目录不再显示记着的旧内容，收起来。
+        state.relist(vec![PathBuf::from("/p/a")], root, ALL);
+        let read = std::mem::take(&mut state.to_list).into_iter().map(|dir| (dir, None)).collect();
+        state.apply_listings(read, root, ALL);
+        assert_eq!(names(&state), [("a".into(), 0), ("z".into(), 0)]);
+        assert!(!state.expanded.contains(Path::new("/p/a")));
+        assert!(!state.listings.contains_key(Path::new("/p/a")));
+        state.toggle_dir(Path::new("/p/a"), root, ALL);
+        state.to_list.clear();
         state.apply_listings(vec![(PathBuf::from("/p/a"), Some(vec![file("b")]))], root, ALL);
         assert_eq!(names(&state), [("a".into(), 0), ("b".into(), 1), ("z".into(), 0)]);
 

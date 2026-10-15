@@ -10,6 +10,7 @@ use crate::ui::theme::ActiveTheme as _;
 use std::{
     fs, io,
     path::{Path, PathBuf},
+    sync::{Mutex, PoisonError},
 };
 
 use gpui::{
@@ -204,6 +205,8 @@ impl WindowView {
         let name = if name.is_empty() { command.clone() } else { name };
         dialog.saving = true;
         dialog.recording = None;
+        // 写的期间对话框还能关掉、再开一个新的，写完只动发起保存的这一个。
+        let origin = dialog.name.entity_id();
         let (editing, global) = (dialog.editing.clone(), dialog.global);
         // 快捷键没改过时只跟着改名，原来的几行各留各的键；改了时换掉原名字上的；新加的没录快捷键时
         // 不碰配置，同名的别的命令绑着的键留着。
@@ -239,6 +242,7 @@ impl WindowView {
         cx.spawn_in(window, async move |this, cx| {
             let saved = job.await;
             this.update_in(cx, |this, window, cx| {
+                let same_dialog = this.add_task.as_ref().is_some_and(|dialog| dialog.name.entity_id() == origin);
                 match saved {
                     Ok((project, elsewhere)) => {
                         // 一个键只能绑一条命令：别处同名的命令还用着它时，改了名的这条不跟着拿走，告诉用户；
@@ -251,7 +255,9 @@ impl WindowView {
                         this.workspace_mut().project.tasks_stale = true;
                         this.list_tasks(cx);
                         match bound {
-                            Ok(()) => this.close_add_task(window, cx),
+                            Ok(()) if same_dialog => this.close_add_task(window, cx),
+                            Ok(()) => {}
+                            Err(err) if !same_dialog => tracing::warn!("could not bind the task shortcut: {err}"),
                             Err(err) => {
                                 let shortcut = task_shortcut(&new_name, cx);
                                 if let Some(dialog) = &mut this.add_task {
@@ -263,12 +269,13 @@ impl WindowView {
                             }
                         }
                     }
-                    Err(err) => {
-                        if let Some(dialog) = &mut this.add_task {
+                    Err(err) => match &mut this.add_task {
+                        Some(dialog) if same_dialog => {
                             dialog.saving = false;
                             dialog.error = Some(err);
                         }
-                    }
+                        _ => tracing::warn!("could not save the task: {err}"),
+                    },
                 }
                 cx.notify();
             })
@@ -648,6 +655,10 @@ fn named_elsewhere(text: &str, name: &str, except: Option<&Path>) -> bool {
 /// 对话框里告诉用户命令存在哪。
 const TASKS_FILE_HINT: &str = "~/.runode/tasks.json";
 
+/// 改命令文件的读、改、写换上去整个拿着它：保存和删除各是一个后台任务，几个窗口也会同时改，两个一起读到
+/// 同一份内容再各自换上去时，先写的那份改动就丢了。
+static WRITING: Mutex<()> = Mutex::new(());
+
 /// 把 `file` 里的 `old`（项目目录，通用的为空；名字）换成 `new`（项目目录；名字和命令行），文件和它的
 /// 目录不在时建出来；`new` 为空时删掉 `old`。读不懂原来的内容时不写，免得把手写的文件冲掉。
 pub(super) fn write_task(
@@ -655,6 +666,7 @@ pub(super) fn write_task(
     old: (Option<&Path>, &str),
     new: Option<(Option<&Path>, &str, &str)>,
 ) -> Result<(), String> {
+    let _writing = WRITING.lock().unwrap_or_else(PoisonError::into_inner);
     let text = match fs::read_to_string(file) {
         Ok(text) => Some(text),
         Err(err) if err.kind() == io::ErrorKind::NotFound && new.is_none() => return Ok(()),
@@ -746,7 +758,7 @@ mod tests {
         keybind::{self, Action},
     };
 
-    use super::{TaskKeybind, action_name, keybind_applied, named_elsewhere, with_task, with_task_keybind};
+    use super::{TaskKeybind, action_name, keybind_applied, named_elsewhere, with_task, with_task_keybind, write_task};
 
     fn pretty(json: serde_json::Value) -> String {
         serde_json::to_string_pretty(&json).unwrap() + "\n"
@@ -767,6 +779,26 @@ mod tests {
         );
         assert!(with_task(Some("[1]"), (None, "dev"), Some((None, "dev", "x"))).is_err());
         assert!(with_task(Some("{oops"), (None, "dev"), Some((None, "dev", "x"))).is_err());
+    }
+
+    /// 几个后台任务同时改命令文件：各自的改动都留下，不会读到同一份内容再互相盖掉。
+    #[test]
+    fn concurrent_writes_keep_every_change() {
+        let dir = std::env::temp_dir().join(format!("rdr-tasks-file-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let file = dir.join("tasks.json");
+        let names: Vec<String> = (0..16).map(|ix| format!("task{ix}")).collect();
+        std::thread::scope(|scope| {
+            for name in &names {
+                let file = &file;
+                scope.spawn(move || write_task(file, (None, name), Some((None, name, "true"))).unwrap());
+            }
+        });
+        let json: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&file).unwrap()).unwrap();
+        let _ = std::fs::remove_dir_all(&dir);
+        for name in &names {
+            assert!(json["global"].get(name).is_some(), "{name} is missing: {json}");
+        }
     }
 
     fn lines(values: &[&str]) -> Vec<String> {

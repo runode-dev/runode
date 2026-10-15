@@ -321,11 +321,10 @@ impl SettingsView {
         cards.finish()
     }
 
-    /// runode 的配置文件里写了 `key`、写的又不是默认值时的恢复按钮：写的正是默认值时删掉它也没有变化，
-    /// 比如开关拨回默认的那一边。
+    /// runode 的配置文件里写了 `key` 时的恢复按钮。写的正是内置默认值也留着：Ghostty 的配置或主题可能写了
+    /// 别的值，删掉这几行才回到那个值。
     pub(super) fn reset(&self, key: &'static str, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let changed = self.file.has(key) && self.file.values(key) != runode_config::Config::default().values(key);
-        changed.then(|| {
+        self.file.has(key).then(|| {
             let label = rust_i18n::t!("settings.reset").into_owned();
             Button::new(id("reset", key), label.clone())
                 .icon("icons/refresh.svg")
@@ -335,6 +334,23 @@ impl SettingsView {
                 .on_press(cx, move |this, _, cx| this.write_or_report(key, Vec::new(), cx))
                 .into_any_element()
         })
+    }
+
+    /// 逗号隔开、各层叠加的列表键（`status-bar-hidden`、`agent-notifications-exclude`）要写回的各行。读配置时
+    /// 各层的值接在一起，生效的名字里有 runode 配置文件没写的（Ghostty 的配置里加的），或者文件里已经写了
+    /// 清空的空行时，前面先写一行空值清掉别处加的，不然取消不掉它们。
+    ///
+    /// shortcut: `config-file` 引入的文件排在本文件的各行后面，那里加的这一行清不掉。
+    fn with_clear(&self, key: &str, mut values: Vec<String>) -> Vec<String> {
+        let written = self.file.values(key);
+        let own: Vec<&str> =
+            written.iter().flat_map(|value| value.split(',')).map(str::trim).filter(|name| !name.is_empty()).collect();
+        let cleared = written.iter().any(String::is_empty);
+        let inherited = self.config.values(key).iter().any(|name| !own.contains(&name.as_str()));
+        if cleared || inherited {
+            values.insert(0, String::new());
+        }
+        values
     }
 
     fn render_row(
@@ -551,7 +567,7 @@ impl SettingsView {
                     }
                     let names: Vec<_> = hidden.iter().map(|item| item.name()).collect();
                     let values = if names.is_empty() { Vec::new() } else { vec![names.join(", ")] };
-                    this.write_or_report(KEY, values, cx);
+                    this.write_or_report(KEY, this.with_clear(KEY, values), cx);
                 })
             })
             .collect();
@@ -582,7 +598,7 @@ impl SettingsView {
                     } else {
                         values.push(label.to_owned());
                     }
-                    this.write_or_report(KEY, values, cx);
+                    this.write_or_report(KEY, this.with_clear(KEY, values), cx);
                 })
             })
             .collect();

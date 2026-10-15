@@ -236,8 +236,15 @@ pub fn quit_to_update(cx: &mut App) {
             cx.restart();
             // GPUI 拉不起重启的脚本时只记日志、不退出。拉起了的话退出已经排进主线程的队列（macOS 上
             // 按先后办），这个任务排在它后面、轮不到；轮到了就是没退成，复位 `Settled`，之后从 Dock
-            // 退出照常收尾。
-            cx.spawn(async |cx| cx.update(|cx| cx.set_global(Settled(false)))).detach();
+            // 退出照常收尾；退出前冻结了的存档（交出会话、让宿主连会话一起退出之前）也解冻，不然之后
+            // 布局怎么变都不再存。
+            cx.spawn(async |cx| {
+                cx.update(|cx| {
+                    cx.set_global(Settled(false));
+                    persist::thaw(cx);
+                })
+            })
+            .detach();
         });
     });
 }

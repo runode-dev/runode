@@ -3,6 +3,7 @@
 use std::{
     path::{Path, PathBuf},
     process::{Command, Stdio},
+    sync::atomic::{AtomicU64, Ordering},
     time::{Duration, Instant, SystemTime},
 };
 
@@ -101,9 +102,11 @@ fn avatar_for(dir: &Path) -> Option<PathBuf> {
     file.exists().then_some(file)
 }
 
-/// 下到旁边的临时文件里再改名，下到一半时界面读不到半张图。
+/// 下到旁边的临时文件里再改名，下到一半时界面读不到半张图。同一个 owner 的几个 workspace 会同时下，
+/// 临时文件各用各的，不会一个写到一半被另一个截断或者改名拿走。
 fn download_avatar(owner: &str, file: &Path) {
-    let partial = file.with_extension("part");
+    static NEXT: AtomicU64 = AtomicU64::new(0);
+    let partial = file.with_extension(format!("{}-{}.part", std::process::id(), NEXT.fetch_add(1, Ordering::Relaxed)));
     let downloaded = Command::new("curl")
         .args(["-sfL", "--create-dirs", "--max-time", AVATAR_TIMEOUT_SECS, "-o"])
         .arg(&partial)

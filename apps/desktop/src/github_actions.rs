@@ -104,9 +104,10 @@ pub enum ActionsEvent {
     StartResize(usize),
 }
 
-/// gh 跑完以后要重读的那份数据，见 `ActionsEvent::RunInTerminal`。
+/// gh 跑完以后要重读的那份数据和发命令时的 `ActionsPanel::generation`，见 `ActionsEvent::RunInTerminal`。
+/// 数据按页上当前的仓库读，等 gh 跑完时仓库换过（哪怕又换回来）就不读：读到的是另一个仓库的同名数据。
 #[derive(Clone)]
-pub struct Refetch(Query);
+pub struct Refetch(Query, u64);
 
 /// 树里能展开的一项。
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -149,6 +150,8 @@ pub struct ActionsPanel {
     data: HashMap<Query, Result<Data, String>>,
     fetched: HashMap<Query, Instant>,
     loading: HashSet<Query>,
+    /// 正在读的时候改过（删了 secret、gh 跑完）的数据：读着的那份可能是改之前的，读完丢掉再读一次。
+    stale: HashSet<Query>,
     /// 上一帧页上用到的数据，定时重读只读这些。
     shown: HashSet<Query>,
     expanded: HashSet<Node>,
@@ -176,6 +179,7 @@ impl Default for ActionsPanel {
             data: HashMap::new(),
             fetched: HashMap::new(),
             loading: HashSet::new(),
+            stale: HashSet::new(),
             shown: HashSet::new(),
             expanded: HashSet::from([Node::Branch, Node::Workflows]),
             hovered: None,
@@ -235,6 +239,7 @@ impl ActionsPanel {
             self.data.clear();
             self.fetched.clear();
             self.loading.clear();
+            self.stale.clear();
             self.shown.clear();
             self.error = None;
             self.adding = None;
@@ -274,6 +279,10 @@ impl ActionsPanel {
                     return;
                 }
                 page.loading.remove(&query);
+                if page.stale.remove(&query) {
+                    page.fetch_actions(query, cx);
+                    return;
+                }
                 page.fetched.insert(query.clone(), Instant::now());
                 if page.data.get(&query) != Some(&result) {
                     let pinned =
@@ -290,9 +299,20 @@ impl ActionsPanel {
         .detach();
     }
 
+    /// 改过 `query` 那份数据以后重读：同一份正在读时，等它读完丢掉再读，见 `stale`。
+    fn refetch_actions(&mut self, query: Query, cx: &mut Context<Self>) {
+        if self.loading.contains(&query) {
+            self.stale.insert(query);
+        } else {
+            self.fetch_actions(query, cx);
+        }
+    }
+
     /// gh 跑完了：重读 `refetch` 那份数据，见 `ActionsEvent::RunInTerminal`。
-    pub fn refetch(&mut self, refetch: Refetch, cx: &mut Context<Self>) {
-        self.fetch_actions(refetch.0, cx);
+    pub fn refetch(&mut self, Refetch(query, generation): Refetch, cx: &mut Context<Self>) {
+        if generation == self.generation {
+            self.refetch_actions(query, cx);
+        }
     }
 
     /// 窗口在前台时每秒调一次：页显示着（`shown`）时页上用到的、状态栏显示着（`status_bar`）时固定的
@@ -357,7 +377,7 @@ impl ActionsPanel {
             .chain(pinned)
             .collect();
         for query in runs {
-            self.fetch_actions(query, cx);
+            self.refetch_actions(query, cx);
         }
     }
 
@@ -370,7 +390,7 @@ impl ActionsPanel {
             .cloned()
             .collect();
         for query in settings {
-            self.fetch_actions(query, cx);
+            self.refetch_actions(query, cx);
         }
     }
 
@@ -410,7 +430,8 @@ impl ActionsPanel {
 
     /// 请 app 在仓库目录里分出一个终端跑 `command`，见 `ActionsEvent::RunInTerminal`。
     fn run_in_terminal(&mut self, command: String, refetch: Option<Query>, cx: &mut Context<Self>) {
-        cx.emit(ActionsEvent::RunInTerminal { command, refetch: refetch.map(Refetch) });
+        let generation = self.generation;
+        cx.emit(ActionsEvent::RunInTerminal { command, refetch: refetch.map(|query| Refetch(query, generation)) });
     }
 
     /// 在终端里交给 gh 设 `scope` 那一级叫 `name` 的 secret（`secret` 为真）或 variable 的值，gh 跑完时重读那份列表。

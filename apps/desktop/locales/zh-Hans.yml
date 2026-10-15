@@ -690,6 +690,8 @@ machine:
   revoke_detail: 它会马上断开，要重新配对才能再连上。
   revoke: 撤销
   cancel: 取消
+  revoke_failed_title: "没能撤销「%{device}」"
+  ok: 好
 status:
   sleep_title: 防止电脑休眠
   sleep_on: 开启

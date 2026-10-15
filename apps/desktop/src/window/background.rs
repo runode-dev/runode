@@ -35,7 +35,8 @@ use crate::{
 
 /// 列表不空时隔这么久重问一次宿主。
 const POLL_INTERVAL: Duration = Duration::from_secs(2);
-/// 列表空着、只因为任务板没问到才再问时隔这么久：库是新版本写的这类情况会一直问不到，别每两秒唤醒宿主。
+/// 列表空着、只因为任务板没问到或者会话没列出来才再问时隔这么久：库是新版本写的这类情况会一直问不到，
+/// 别每两秒唤醒宿主。
 const RETRY_INTERVAL: Duration = Duration::from_secs(30);
 /// 每个会话一行：标题和目录各占一行，和 workspace 的行一样高。
 const ROW_HEIGHT: f32 = 40.;
@@ -115,7 +116,8 @@ fn todo_sessions() -> Option<HashSet<SessionId>> {
     }
 }
 
-/// 按问到的会话更新列表，重画窗口；列表不空、或者任务板没问到又有会话等着结束时排好下一次。问不到时列表不变。
+/// 按问到的会话更新列表，重画窗口；列表不空、或者任务板没问到又有会话等着结束时排好下一次。问不到时列表不变，
+/// 也排好下一次。
 fn apply(live: Option<Result<Live>>, cx: &mut App) {
     let previous = cx.default_global::<BackgroundSessions>().sessions.clone();
     // 任务板没问到时，有会话等着结束也要再问，不然列表空着就不再轮询，它们一直留在宿主里。
@@ -137,6 +139,8 @@ fn apply(live: Option<Result<Live>>, cx: &mut App) {
         }
         Some(Err(err)) => {
             tracing::debug!("failed to list the host's sessions for the background list: {err:#}");
+            // 列表空着时也要再问：启动时只问这一次，一次没问到就再也看不到后台会话了。
+            retry = true;
             previous
         }
     };

@@ -305,6 +305,14 @@ impl Inner {
         self.write(FrameKind::Control, 0, &frame.payload)
     }
 
+    /// 同 `control`，只发在第 `generation` 条连接上：等回话的登记在哪条连接上，请求就只能发在那条上。
+    /// 登记之后连接断了、又连上了新的宿主时，登记已经随旧连接撤掉，请求再发给新宿主，它照样办了，
+    /// 回话却没人收。
+    fn control_on(&self, generation: u64, message: &ClientMsg) -> io::Result<()> {
+        let frame = Frame::control(message).map_err(io::Error::other)?;
+        self.write_on(Some(generation), FrameKind::Control, 0, &frame.payload)
+    }
+
     /// 宿主收到 `Shutdown` 后结束了所有会话、说了 `Goodbye`：它不等会话线程就发 `Goodbye`，各会话的
     /// `Exited` 多半赶不上，这里替每个会话补一条 `Exited`，视图按会话结束处理，不当成断开。之后的
     /// 断开（`lost`）不再有会话要通知。
@@ -530,9 +538,9 @@ impl Link {
     fn spawn_within(&self, options: SpawnOptions, timeout: Duration) -> Result<SessionId> {
         let SpawnOptions { size, cwd, integration, start, shell, settings } = options;
         let req = self.inner.next_req.fetch_add(1, Ordering::Relaxed);
-        let (reply, _) = self.expect_reply(req)?;
+        let (reply, generation) = self.expect_reply(req)?;
         let spawn = ClientMsg::Spawn { req, size, cwd, integration, start, shell, settings };
-        if let Err(err) = self.inner.control(&spawn) {
+        if let Err(err) = self.inner.control_on(generation, &spawn) {
             self.inner.state().replies.remove(&req);
             return Err(anyhow!("failed to ask the host for a terminal: {err}"));
         }
@@ -606,7 +614,7 @@ impl Link {
     /// 登记（`route` 为 `None` 时沿用原来的登记）再发 `Attach`。没连着、或者要沿用却没有登记时
     /// 返回 false。
     fn start_attach(&self, id: SessionId, size: Option<GridSize>, mut mode: AttachMode, route: Option<Route>) -> bool {
-        {
+        let generation = {
             let mut state = self.inner.state();
             let snapshots = state.snapshots;
             if !state.connected {
@@ -634,8 +642,9 @@ impl Link {
             if let Some(channel) = route.channel.take() {
                 state.channels.remove(&channel);
             }
-        }
-        if let Err(err) = self.inner.control(&ClientMsg::Attach { id, size, mode }) {
+            state.generation
+        };
+        if let Err(err) = self.inner.control_on(generation, &ClientMsg::Attach { id, size, mode }) {
             tracing::debug!("failed to attach session {id}: {err}");
         }
         true
@@ -676,7 +685,7 @@ impl Link {
             state.lists.push_back(tx);
             state.generation
         };
-        if let Err(err) = self.inner.control(&ClientMsg::ListSessions) {
+        if let Err(err) = self.inner.control_on(generation, &ClientMsg::ListSessions) {
             tracing::debug!("failed to ask the host for its sessions: {err}");
             return Err(mpsc::RecvTimeoutError::Disconnected);
         }
@@ -709,7 +718,7 @@ impl Link {
     pub fn request(&self, make: impl FnOnce(u32) -> ClientMsg, timeout: Duration) -> Result<HostMsg> {
         let req = self.inner.next_req.fetch_add(1, Ordering::Relaxed);
         let (reply, generation) = self.expect_reply(req)?;
-        if let Err(err) = self.inner.control(&make(req)) {
+        if let Err(err) = self.inner.control_on(generation, &make(req)) {
             self.inner.state().replies.remove(&req);
             return Err(anyhow!("failed to ask the host: {err}"));
         }

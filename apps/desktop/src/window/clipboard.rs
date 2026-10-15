@@ -3,7 +3,7 @@
 //! `remote`），这里在主线程上写系统剪贴板；读之前按宿主的意思先问用户，问在显示那个终端的窗口上，
 //! 说清是哪个终端、哪个程序要读。日志里不记剪贴板的内容。
 
-use gpui::{App, ClipboardItem, EntityId, PromptLevel, WindowHandle};
+use gpui::{App, ClipboardItem, EntityId, PromptButton, PromptLevel, WindowHandle};
 use runode_protocol::{HostMsg, SessionId};
 use runode_types::clipboard::MAX_CLIPBOARD_BYTES;
 
@@ -41,8 +41,12 @@ pub(super) fn read(ticket: UiTicket, id: SessionId, ask: bool, program: Option<S
     };
     let detail = read_detail(&terminal_title(window, pane, id, cx), program.as_deref());
     let title = rust_i18n::t!("clipboard.read_title");
-    // 不允许排在前面（`ALLOW` 是第二个）：回车按的是它，免得用户正打着字时一个回车就把剪贴板交出去。
-    let answers = [&*rust_i18n::t!("clipboard.deny"), &*rust_i18n::t!("clipboard.allow")];
+    // 不允许排在前面（`ALLOW` 是第二个），按取消按钮给出：回车按的是它，一开始的键盘焦点也在它上面（空格
+    // 按的是焦点所在的按钮），免得用户正打着字时一个回车或空格就把剪贴板交出去。
+    let answers = [
+        PromptButton::cancel(rust_i18n::t!("clipboard.deny").into_owned()),
+        PromptButton::new(rust_i18n::t!("clipboard.allow").into_owned()),
+    ];
     let answer =
         window.update(cx, |_, window, cx| window.prompt(PromptLevel::Warning, &title, Some(&detail), &answers, cx));
     let Ok(answer) = answer else {

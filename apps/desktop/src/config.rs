@@ -59,25 +59,30 @@ pub fn install(cx: &mut App) {
         .detach();
     }
     cx.spawn(async move |cx| {
+        // 要盯的目录都盯上了。有盯不上的（比如系统的监视数用完了）时那边改了没有动静，照样隔一会儿比一次，
+        // 顺便重试。
+        let mut all_watched = true;
         loop {
-            if files.is_some() {
+            if files.is_some() && all_watched {
                 if events.next().await.is_none() {
                     return;
                 }
                 // 保存一次常连着来几个事件，攒一下再比，也免得读到写了一半的文件。
                 cx.background_executor().timer(WATCH_DEBOUNCE).await;
-                while events.try_recv().is_ok() {}
             } else {
                 cx.background_executor().timer(WATCH_INTERVAL).await;
             }
-            cx.update(|cx| {
+            while events.try_recv().is_ok() {}
+            all_watched = cx.update(|cx| {
+                // 先盯上再比：比完才盯上的话，中间那一下保存既没比到、也没有事件。新配置要多盯的目录在重载后
+                // 的下一轮盯上（重载会再发一个事件），那一轮盯上以后还会再比一次。
+                let all_watched =
+                    files.as_mut().is_none_or(|files| files.follow(&cx.global::<AppConfig>().0.watch_paths()));
                 let stamp = watch_stamp(&cx.global::<AppConfig>().0);
                 if cx.try_global::<Seen>().is_some_and(|seen| seen.0 != stamp) {
                     reload(cx);
                 }
-                if let Some(files) = &mut files {
-                    files.follow(&cx.global::<AppConfig>().0.watch_paths());
-                }
+                all_watched
             });
         }
     })
@@ -107,16 +112,17 @@ impl FileWatch {
         Ok(Self { watcher, roots: [dirs.config, dirs.data].into_iter().flatten().collect(), dirs: Vec::new() })
     }
 
-    /// 改成盯着 `paths` 所在的目录（见 `watch_dirs`）。盯不上的下次再试。
-    pub(crate) fn follow(&mut self, paths: &[PathBuf]) {
+    /// 改成盯着 `paths` 所在的目录（见 `watch_dirs`）。盯不上的下次再试，这时返回 false。
+    pub(crate) fn follow(&mut self, paths: &[PathBuf]) -> bool {
         let wanted = watch_dirs(paths, &self.roots);
         if wanted == self.dirs {
-            return;
+            return true;
         }
         for dir in self.dirs.iter().filter(|dir| !wanted.contains(dir)) {
             let _ = self.watcher.unwatch(dir);
         }
         let mut watched = Vec::new();
+        let all = wanted.len();
         for dir in wanted {
             let ok = self.dirs.contains(&dir)
                 || self
@@ -129,6 +135,7 @@ impl FileWatch {
             }
         }
         self.dirs = watched;
+        self.dirs.len() == all
     }
 }
 

@@ -89,6 +89,20 @@ impl<S> Phase<S> {
         manual
     }
 
+    /// 用户在「有新版本」的框里选了下载。框开着时已经回到空闲，期间定时查的、在别的窗口里点的可能已经
+    /// 在查、在下载或者下好了：还空闲时返回真，由调用方开始下载；正在查、正在下载时不再另下一份（两份会
+    /// 写同一个暂存目录），记下用户点过、有结果时弹框说；下好了时什么都不改。
+    fn accept_download(&mut self) -> bool {
+        match self {
+            Self::Idle => true,
+            Self::Checking { manual } | Self::Downloading { manual, .. } => {
+                *manual = true;
+                false
+            }
+            Self::Ready(_) => false,
+        }
+    }
+
     /// 退出时：下好了的交出来去装上，回到空闲。
     fn take_ready(&mut self) -> Option<S> {
         match std::mem::take(self) {
@@ -256,8 +270,16 @@ fn finish_check(found: Result<Found, Error>, cx: &mut App) {
             let detail = rust_i18n::t!("update.available_detail", current = VERSION);
             let answers = [&*rust_i18n::t!("update.download"), &*rust_i18n::t!("update.later")];
             prompt(PromptLevel::Info, &title, &detail, &answers, cx, move |answer, cx| {
-                if answer == 0 {
+                if answer != 0 {
+                    return;
+                }
+                let phase = &mut cx.global_mut::<Updater>().phase;
+                if phase.accept_download() {
                     download(release, installation, true, cx);
+                } else if matches!(phase, Phase::Ready(_)) {
+                    offer_restart(cx);
+                } else {
+                    changed(cx);
                 }
             });
         }
@@ -457,6 +479,21 @@ mod tests {
         let mut phase = TestPhase::Checking { manual: true };
         assert_eq!(phase.start_check(false), Start::Nothing);
         assert!(phase.finish());
+    }
+
+    /// 「有新版本」的框开着时更新已经往前走了：选了下载也不另下一份，在查、在下的记下用户要结果。
+    #[test]
+    fn accepting_a_stale_offer_does_not_download_twice() {
+        assert!(TestPhase::Idle.accept_download());
+        let mut phase = downloading(false);
+        assert!(!phase.accept_download());
+        assert!(matches!(phase, Phase::Downloading { manual: true, .. }));
+        let mut phase = TestPhase::Checking { manual: false };
+        assert!(!phase.accept_download());
+        assert!(matches!(phase, Phase::Checking { manual: true }));
+        let mut phase = TestPhase::Ready("2.0.0");
+        assert!(!phase.accept_download());
+        assert!(matches!(phase, Phase::Ready("2.0.0")));
     }
 
     /// 下载失败后回到空闲，下一轮定时（每隔 `CHECK_INTERVAL`，6 小时）照常再查。

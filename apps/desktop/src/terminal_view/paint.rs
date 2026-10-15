@@ -19,6 +19,14 @@ use crate::ui::hsla;
 /// 这里取 Hack 与 Menlo 的 post 表数值，两者都是 90/2048。
 const UNDERLINE_THICKNESS_EM: f32 = 90. / 2048.;
 
+/// 行高 `height` 对齐到缩放比例是 `scale` 的设备像素：先取整到整数点，再向上对齐到设备像素。缩放比例
+/// 是小数（如 1.25）时整数点不落在设备像素上，一行行背景之间会有缝。
+fn cell_height(height: f32, scale: f32) -> f32 {
+    let snapped = (height * scale).round() / scale;
+    // 减去一点，免得乘出来的浮点误差多进一个像素。
+    (snapped.ceil() * scale - 1e-3).ceil() / scale
+}
+
 fn glyph_table(attrs: Attrs) -> usize {
     usize::from(attrs.bold) | usize::from(attrs.italic) << 1
 }
@@ -47,7 +55,7 @@ impl TerminalView {
             None => natural,
         }
         .max(1.);
-        let metrics = Metrics { cell: size(px(snap(width)), px(snap(height).ceil())), ascent, descent, scale };
+        let metrics = Metrics { cell: size(px(snap(width)), px(cell_height(height, scale))), ascent, descent, scale };
         self.metrics = Some(metrics);
         metrics
     }
@@ -279,9 +287,11 @@ pub(super) fn paint_frame(
                 let quads: &[Bounds<Pixels>] = match (focused, cursor.shape) {
                     (true, CursorShape::Block) => &[],
                     // 骑在单元格左边线上，落在两个字符之间而不是贴着右边的字符；贴着可见区左边缘时
-                    // 整根会被内容遮罩裁掉，改画在单元格里。
+                    // 整根会被内容遮罩裁掉，改画在单元格里。可见区按眼下的内容遮罩算：横着裁掉了前几列时
+                    // 它的左边缘在网格左边缘的右边。
                     (true, CursorShape::Bar) => {
-                        let x = if position.x - line < grid.origin.x { position.x } else { position.x - line };
+                        let left = window.content_mask().bounds.origin.x;
+                        let x = if position.x - line < left { position.x } else { position.x - line };
                         &[Bounds::new(point(x, position.y), size(line, ch))]
                     }
                     // 和文字下划线同一高度。
@@ -310,7 +320,8 @@ pub(super) fn paint_frame(
 pub(super) fn paint_glyphs(line: &ShapedLine, baseline_origin: Point<Pixels>, color: Hsla, window: &mut Window) {
     for run in &line.runs {
         for glyph in &run.glyphs {
-            let position = baseline_origin + point(glyph.position.x, px(0.));
+            // 纵向的偏移照 GPUI 的写法加在基线上：组合附加符号之类排版时可能上下挪过。
+            let position = baseline_origin + glyph.position;
             let painted = if glyph.is_emoji {
                 window.paint_emoji(position, run.font_id, glyph.id, line.font_size)
             } else {
@@ -332,6 +343,21 @@ mod tests {
 
     fn ratio(fg: Rgb, bg: Rgb) -> f32 {
         contrast(luminance(fg), luminance(bg))
+    }
+
+    #[test]
+    fn cell_height_lands_on_device_pixels() {
+        // 整数倍的缩放比例下和取整到整数点一样。
+        assert_eq!(cell_height(16.3, 2.), 17.);
+        assert_eq!(cell_height(16., 1.), 16.);
+        for scale in [1.25, 1.5, 1.75, 1.1] {
+            for height in [13.9, 16.5, 17., 20.2] {
+                let device = cell_height(height, scale) * scale;
+                assert!((device - device.round()).abs() < 1e-3, "{height} @ {scale}: {device}");
+                assert!(cell_height(height, scale) >= height.floor(), "{height} @ {scale}");
+            }
+        }
+        assert!((cell_height(16.5, 1.25) - 17.6).abs() < 1e-4);
     }
 
     #[test]

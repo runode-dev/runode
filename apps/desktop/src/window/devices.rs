@@ -83,25 +83,34 @@ pub(super) fn devices(cx: &App) -> &[Paired] {
 }
 
 impl WindowView {
-    /// 问用户要不要撤销设备，撤销了马上重读设备表；它连着的连接几秒内断开。
+    /// 问用户要不要撤销设备，撤销了马上重读设备表；它连着的连接几秒内断开。撤销不了时弹框说原因，设备
+    /// 照旧列着（还在设备表里）。
     pub(super) fn revoke_device(&mut self, id: DeviceId, window: &mut Window, cx: &mut Context<Self>) {
         let Some(device) = devices(cx).iter().find(|device| device.id == id) else { return };
-        let title = rust_i18n::t!("machine.revoke_title", device = device.name);
+        let name = device.name.clone();
+        let title = rust_i18n::t!("machine.revoke_title", device = name);
         let detail = rust_i18n::t!("machine.revoke_detail");
         let answers = [rust_i18n::t!("machine.revoke"), rust_i18n::t!("machine.cancel")];
         let answers: Vec<&str> = answers.iter().map(AsRef::as_ref).collect();
         let answer = window.prompt(PromptLevel::Warning, &title, Some(&detail), &answers, cx);
-        cx.spawn(async move |_, cx| {
+        cx.spawn_in(window, async move |_, cx| {
             if answer.await != Ok(0) {
                 return;
             }
-            cx.update(|cx| {
-                if let Err(err) = runode_remote::revoke_device(&runode_paths::Dirs::from_env(), id) {
-                    tracing::warn!("cannot revoke remote device {id}: {err}");
-                }
+            let failed = cx.update(|window, cx| {
+                let revoked = runode_remote::revoke_device(&runode_paths::Dirs::from_env(), id);
                 cx.set_global(read_devices());
                 cx.refresh_windows();
+                let err = revoked.err()?;
+                tracing::warn!("cannot revoke remote device {id}: {err}");
+                let title = rust_i18n::t!("machine.revoke_failed_title", device = name);
+                let ok = [&*rust_i18n::t!("machine.ok")];
+                Some(window.prompt(PromptLevel::Critical, &title, Some(&err.to_string()), &ok, cx))
             });
+            // 只是告诉一声，等用户点掉。
+            if let Ok(Some(failed)) = failed {
+                let _ = failed.await;
+            }
         })
         .detach();
     }

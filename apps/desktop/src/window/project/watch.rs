@@ -21,13 +21,12 @@ pub(in crate::window) struct ProjectWatch {
 }
 
 impl ProjectWatch {
-    /// 开始监听，事件里的路径交给 `events`；监听不了时为空，由调用方退回定时重读。
+    /// 开始监听，事件里的路径交给 `events`（见 `changed_paths`）；监听不了时为空，由调用方退回定时重读。
     pub(super) fn new(root: PathBuf, git_dirs: Vec<PathBuf>, events: UnboundedSender<Vec<PathBuf>>) -> Option<Self> {
+        let everything: Vec<PathBuf> = std::iter::once(&root).chain(&git_dirs).cloned().collect();
         let mut watcher = notify::recommended_watcher(move |event: notify::Result<notify::Event>| {
-            if let Ok(event) = event
-                && !event.kind.is_access()
-            {
-                events.unbounded_send(event.paths).ok();
+            if let Some(paths) = changed_paths(event, &everything) {
+                events.unbounded_send(paths).ok();
             }
         })
         .inspect_err(|err| tracing::warn!("监听 {} 失败：{err}", root.display()))
@@ -65,5 +64,43 @@ impl ProjectWatch {
         }
         let ignored = git.is_some_and(|git| git.is_ignored(rel));
         !ignored || rel.parent().is_some_and(|parent| listed(&self.root.join(parent)))
+    }
+}
+
+/// 监听到的事件里变了的路径；只是读了文件的为空。出错（比如事件太多丢了一些）或者要求整个重扫时，
+/// 说不准哪里变了，当作 `everything`（根目录和要听的 git 目录）都变了，重读一遍。
+fn changed_paths(event: notify::Result<notify::Event>, everything: &[PathBuf]) -> Option<Vec<PathBuf>> {
+    match event {
+        Ok(event) if event.need_rescan() => Some(everything.to_vec()),
+        Ok(event) if event.kind.is_access() => None,
+        Ok(event) => Some(event.paths),
+        Err(err) => {
+            tracing::debug!("监听出错，整个重读：{err}");
+            Some(everything.to_vec())
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use notify::{
+        Event, EventKind,
+        event::{AccessKind, Flag, ModifyKind},
+    };
+
+    use super::*;
+
+    /// 丢了事件、要求重扫时不会因为没有路径就什么都不读。
+    #[test]
+    fn errors_and_rescans_count_as_everything_changed() {
+        let everything = [PathBuf::from("/repo"), PathBuf::from("/main/.git/worktrees/repo")];
+        let modified = Event::new(EventKind::Modify(ModifyKind::Any)).add_path("/repo/a.rs".into());
+        assert_eq!(changed_paths(Ok(modified), &everything), Some(vec![PathBuf::from("/repo/a.rs")]));
+        let read = Event::new(EventKind::Access(AccessKind::Any)).add_path("/repo/a.rs".into());
+        assert_eq!(changed_paths(Ok(read), &everything), None);
+        let rescan = Event::new(EventKind::Other).set_flag(Flag::Rescan);
+        assert_eq!(changed_paths(Ok(rescan), &everything), Some(everything.to_vec()));
+        let failed = Err(notify::Error::generic("dropped events"));
+        assert_eq!(changed_paths(failed, &everything), Some(everything.to_vec()));
     }
 }

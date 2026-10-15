@@ -237,18 +237,23 @@ impl SettingsView {
         };
         field.pending = None;
         let text = field.input.read(cx).query().trim().to_owned();
-        let commit = field.commit.clone();
+        let (input, commit) = (field.input.clone(), field.commit.clone());
         if text == self.field_text(&commit) {
             self.errors.remove(id);
             cx.notify();
             return;
         }
+        // 清空一行删掉了它，下面的行往上挪了一格。
+        let mut removed = false;
         let written = match commit {
             Commit::Value(key) => self.write(key, if text.is_empty() { Vec::new() } else { vec![text] }, cx),
             Commit::Item(key, ix) => {
                 let mut values = self.list_values(key);
                 match (ix < values.len(), text.is_empty()) {
-                    (true, true) => drop(values.remove(ix)),
+                    (true, true) => {
+                        values.remove(ix);
+                        removed = true;
+                    }
                     (true, false) => values[ix] = text,
                     (false, true) => {}
                     (false, false) => values.push(text),
@@ -264,9 +269,16 @@ impl SettingsView {
                 self.write("palette", values, cx)
             }
         };
+        let removed = removed && written.is_ok();
         match written {
             Ok(()) => drop(self.errors.remove(id)),
             Err(err) => drop(self.errors.insert(id.to_owned(), err)),
+        }
+        // 这个输入框还按行号对着这一行，现在那里是原来的下一行。重载配置时正在编辑的输入框不跟着换，
+        // 这里换成挪上来的那一行：不然还空着，失去焦点时再写回一次，会把挪上来的那一行也删掉。
+        if removed {
+            let text = self.field_text(&commit);
+            input.update(cx, |input, cx| input.set_query(text, cx));
         }
         cx.notify();
     }

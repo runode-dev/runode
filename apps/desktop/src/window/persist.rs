@@ -329,6 +329,7 @@ impl WindowView {
             let mut active_tab = 0;
             for (ti, saved_tab) in saved_workspace.tabs.iter().enumerate() {
                 let mut panes = HashMap::new();
+                let mut leaves = Vec::new();
                 let shown = wi == saved.active && ti == saved_workspace.active;
                 let restored = self.restore_node(
                     &saved_tab.root,
@@ -336,16 +337,16 @@ impl WindowView {
                     home.as_deref(),
                     shown,
                     shown.then_some(&mut shell),
-                    &mut panes,
+                    (&mut panes, &mut leaves),
                     window,
                     cx,
                 );
                 let Some(root) = restored else {
                     continue;
                 };
-                let leaves = root.leaves();
-                let focused = leaves.get(saved_tab.focused).copied().unwrap_or(leaves[0]);
-                let collapsed = saved_tab.collapsed.iter().filter_map(|ix| leaves.get(*ix).copied()).collect();
+                let (focused, collapsed) = saved_leaves(&leaves, saved_tab.focused, &saved_tab.collapsed);
+                let focused = focused.unwrap_or(root.leaves()[0]);
+                let collapsed = collapsed.into_iter().collect();
                 if ti <= saved_workspace.active {
                     active_tab = tabs.len();
                 }
@@ -416,7 +417,8 @@ impl WindowView {
     }
 
     /// `shown`：这个标签显示在窗口里，接上的会话要看屏幕，否则只看状态；要新开的，显示着的马上在
-    /// 宿主里开会话，看不见的等切过去时再开（`TerminalView::deferred`）。
+    /// 宿主里开会话，看不见的等切过去时再开（`TerminalView::deferred`）。建出来的终端放进 `panes`；
+    /// 存档里的每个叶子按先后在 `leaves` 里记一项，开不起来的记 `None`，见 `saved_leaves`。
     #[allow(clippy::too_many_arguments)]
     fn restore_node(
         &mut self,
@@ -425,7 +427,7 @@ impl WindowView {
         home: Option<&Path>,
         shown: bool,
         mut shell: Option<&mut Option<Prespawned>>,
-        panes: &mut HashMap<EntityId, (gpui::Entity<TerminalView>, gpui::Subscription)>,
+        (panes, leaves): (&mut Panes, &mut Vec<Option<EntityId>>),
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Option<Node<EntityId>> {
@@ -454,6 +456,7 @@ impl WindowView {
                             Ok(view) => view,
                             Err(err) => {
                                 tracing::error!("failed to restore terminal session: {err:#}");
+                                leaves.push(None);
                                 return None;
                             }
                         };
@@ -463,11 +466,13 @@ impl WindowView {
                 };
                 let (id, entry) = self.pane_entry(view, window, cx);
                 panes.insert(id, entry);
+                leaves.push(Some(id));
                 Some(Node::Leaf(id))
             }
             SavedNode::Split { axis, ratio, first, second } => {
-                let first = self.restore_node(first, dir, home, shown, shell.as_deref_mut(), panes, window, cx);
-                let second = self.restore_node(second, dir, home, shown, shell, panes, window, cx);
+                let first =
+                    self.restore_node(first, dir, home, shown, shell.as_deref_mut(), (panes, leaves), window, cx);
+                let second = self.restore_node(second, dir, home, shown, shell, (panes, leaves), window, cx);
                 match (first, second) {
                     (Some(first), Some(second)) => {
                         let id = self.next_id();
@@ -489,6 +494,17 @@ impl WindowView {
             }
         }
     }
+}
+
+/// 一个标签里的终端和对它们事件的订阅，见 `Tab::panes`。
+type Panes = HashMap<EntityId, (gpui::Entity<TerminalView>, gpui::Subscription)>;
+
+/// 存档里标签的第 `focused` 个叶子和 `collapsed` 里那几个叶子恢复成了哪个终端。存档按叶子的先后记，
+/// `restored` 是同样先后的每个叶子恢复出的终端（开不起来的为 `None`），开不起来的叶子不会让后面的错位；
+/// 开不起来的那几个不算。
+fn saved_leaves<T: Copy>(restored: &[Option<T>], focused: usize, collapsed: &[usize]) -> (Option<T>, Vec<T>) {
+    let at = |ix: usize| restored.get(ix).copied().flatten();
+    (at(focused), collapsed.iter().filter_map(|&ix| at(ix)).collect())
 }
 
 impl WindowView {
@@ -546,6 +562,15 @@ impl WindowView {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// 前面的叶子开不起来时，焦点和折叠的叶子仍按存档里的位置找，不往前错一位落到别的终端上。
+    #[test]
+    fn a_failed_leaf_does_not_shift_the_focus_or_the_folds() {
+        let restored = [Some('a'), None, Some('c'), Some('d')];
+        assert_eq!(saved_leaves(&restored, 2, &[1, 3]), (Some('c'), vec!['d']));
+        assert_eq!(saved_leaves(&restored, 1, &[]), (None, vec![]));
+        assert_eq!(saved_leaves(&restored, 9, &[9]), (None, vec![]));
+    }
 
     /// 关掉的窗口不是最后一个时，里面的会话随之结束，从存档里拿掉；workspace 都关掉了的窗口也拿掉。
     #[test]

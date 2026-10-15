@@ -273,10 +273,12 @@ impl Preview {
         .into()
     }
 
-    /// 监听到的这些路径里有没有正在预览的文件。diff 标签不看文件事件：文件变了会带来一次扫描，
-    /// 扫描结果里这个文件的改动变了才重读，见 `git_changed`。
+    /// 监听到的这些路径里有没有正在预览的文件。工作区的 diff 标签也看：扫描结果里二进制文件、改动太多的
+    /// 文件只记着个大概，再改一次可能和上次一模一样，`git_changed` 看不出来。暂存区和提交里的不随文件变，
+    /// 等扫描。
     fn affected_by(&self, paths: &[PathBuf]) -> bool {
-        self.diff.is_none() && paths.iter().any(|path| *path == self.path || *path == self.real_path)
+        let watched = self.diff.as_ref().is_none_or(|diff| diff.side == git::DiffSide::Worktree);
+        watched && paths.iter().any(|path| *path == self.path || *path == self.real_path)
     }
 
     /// 这个标签要不要重读：还没读过；普通标签是文件在磁盘上变过，diff 标签是 git 状态变过。
@@ -716,8 +718,14 @@ impl PreviewPanel {
         }
     }
 
-    /// 监听到 `paths` 变了：当前预览的文件在里面就重读。
+    /// 监听到 `paths` 变了：当前预览的文件在里面就重读。别的工作区 diff 标签记下要重读，切过去时再读；
+    /// 普通标签切过去时自己比文件的改动时间。
     pub fn files_changed(&mut self, paths: &[PathBuf], cx: &mut Context<Self>) {
+        for tab in self.workspaces.get_mut(&self.ws).into_iter().flat_map(|tabs| &mut tabs.tabs) {
+            if tab.diff.is_some() && tab.affected_by(paths) {
+                tab.diff_stale = true;
+            }
+        }
         if self.preview().is_some_and(|preview| preview.affected_by(paths)) {
             self.load_preview(cx);
         }

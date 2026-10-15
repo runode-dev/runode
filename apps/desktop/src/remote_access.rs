@@ -82,8 +82,11 @@ pub fn service(host: &Host) -> Option<Service> {
 /// 开着远程访问、又有手机可能连上来时不因空闲退出，不然手机连不上来开新会话。
 pub fn follow_config(host: &Host) -> Option<Following> {
     let service = Arc::new(service(host)?);
-    // 宿主进程里没有界面，系统外观无从知道；远程访问的两项和主题无关，按深色读即可。
+    // 宿主进程里没有界面，系统外观无从知道；远程访问的两项和主题无关，按深色读即可。读之前先取各配置
+    // 文件的修改时间（同 `config::reload`）：读的时候、开始盯之前有人改了，看配置的线程头一轮就重读。
+    let before = crate::config::watch_stamp(&Config::default());
     let config = Config::load(true);
+    let seen = crate::config::seen_after(&before, &config);
     let dirs = runode_paths::Dirs::from_env();
     service.set(wanted_port(&config), config.remote_access_name.clone());
     service.set_push(push_settings(&config));
@@ -95,7 +98,7 @@ pub fn follow_config(host: &Host) -> Option<Following> {
     let watch_wake = wake.clone();
     let spawned = thread::Builder::new()
         .name("remote-access-config".into())
-        .spawn(move || watch(&weak, &host, &dirs, config, stay, watch_wake, &events));
+        .spawn(move || watch(&weak, &host, &dirs, (config, seen), stay, watch_wake, &events));
     if let Err(err) = spawned {
         tracing::warn!("cannot follow the config for remote access, keeping what it says now: {err}");
     }
@@ -117,11 +120,12 @@ impl Drop for Following {
     }
 }
 
+/// `loaded` 是 `follow_config` 读出的配置和读之前各配置文件的修改时间（见 `config::seen_after`）。
 fn watch(
     service: &Weak<Service>,
     host: &Host,
     dirs: &runode_paths::Dirs,
-    mut config: Config,
+    loaded: (Config, crate::config::Stamps),
     mut stay: StayUp,
     wake: mpsc::Sender<()>,
     events: &mpsc::Receiver<()>,
@@ -133,20 +137,22 @@ fn watch(
         tracing::warn!("cannot watch the files remote access follows, checking them every second: {err}")
     })
     .ok();
-    let mut seen = crate::config::watch_stamp(&config);
+    let (mut config, mut seen) = loaded;
     // 刚开始盯时先看一遍，盯上之前改的也不漏。
     let mut wait = false;
     loop {
+        // 有目录没盯上（`FileWatch::follow` 下一轮再试）时不能只等动静，按时醒来再试。
+        let mut covered = false;
         if let Some(files) = &mut files {
             let mut paths = config.watch_paths();
             paths.extend(dirs.remote_access_devices_file());
             paths.extend(dirs.remote_access_pairing_file());
-            files.follow(&paths);
+            covered = files.follow(&paths);
         }
         // 等着的配对口令过期时文件不变，这时也按时看一眼。
         let woken = if !wait {
             false
-        } else if files.is_some() && !stay.awaiting_pairing() {
+        } else if covered && !stay.awaiting_pairing() {
             events.recv().is_ok()
         } else {
             events.recv_timeout(WATCH_INTERVAL).is_ok()

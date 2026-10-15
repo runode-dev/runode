@@ -266,12 +266,19 @@ impl WindowView {
     }
 
     /// agent 不再停在空闲时（又开始工作或者退出了），之前记的 done 作废，「干完了」的通知
-    /// 也一并收回。
+    /// 也一并收回；不再等回答了时，「等回答」的通知也收回。
     pub(super) fn forget_stale_done(&mut self, pane: EntityId, wi: usize, ti: usize, cx: &mut App) {
+        let tag = notification_tag(pane);
         let tab = &mut self.workspaces[wi].tabs[ti];
-        if tab.done.contains(&pane) && tab.pane_mark(pane, cx).is_none_or(|mark| mark.status != Status::Done) {
+        if !tab.done.contains(&pane) && !alert::posted(&tag, cx) {
+            return;
+        }
+        let status = tab.pane_mark(pane, cx).map(|mark| mark.status);
+        if status != Some(Status::Done) {
             tab.done.remove(&pane);
-            alert::dismiss(&notification_tag(pane), cx);
+        }
+        if !status.is_some_and(Status::needs_attention) {
+            alert::dismiss(&tag, cx);
         }
     }
 
@@ -282,9 +289,9 @@ impl WindowView {
         alert::alert(alert, cx);
     }
 
-    /// 用户看到了当前分屏（窗口在前台）：清掉它的 done，收回它的通知。
+    /// 用户看到了当前分屏（窗口在前台、看得见，终端没被设置页这些盖住）：清掉它的 done，收回它的通知。
     pub(super) fn mark_seen(&mut self, window: &Window, cx: &mut Context<Self>) {
-        if !window.is_window_active() {
+        if !window.is_window_active() || !window.is_visible() || self.page_covers_terminals() {
             return;
         }
         let Some(tab) = self.tab_mut() else {

@@ -71,12 +71,11 @@ fn grid(m: Metrics, rows: u32, mask: u32, out: &mut Vec<Shape>) {
     }
 }
 
-/// 按比例填充单元格的一块：起点按从另一端量的
-/// 互补比例取整，终点直接取整，奇数尺寸下相邻两块正好拼满、不留缝也不重叠。
+/// 按比例填充单元格的一块：起点和终点用同一种取整，相邻两块共用的那条边落在同一个像素上，
+/// 奇数尺寸下也正好拼满、不留缝也不重叠。
 fn fill_frac(m: Metrics, [x0, x1]: [f64; 2], [y0, y1]: [f64; 2], out: &mut Vec<Shape>) {
-    let lo = |f: f64, size: u32| (f64::from(size) - ((1. - f) * f64::from(size)).round()) as i32;
-    let hi = |f: f64, size: u32| (f * f64::from(size)).round() as i32;
-    rect(out, lo(x0, m.width), lo(y0, m.height), hi(x1, m.width), hi(y1, m.height), 0xff);
+    let at = |f: f64, size: u32| (f * f64::from(size)).round() as i32;
+    rect(out, at(x0, m.width), at(y0, m.height), at(x1, m.width), at(y1, m.height), 0xff);
 }
 
 /// 盲文：点是 w×w 的整像素方块，剩余像素依次分给
@@ -132,7 +131,9 @@ pub(super) fn corner_triangle(cp: u32, m: Metrics, out: &mut Vec<Shape>) {
         0x25e3 | 0x25fa => vec![[0., 0.], [0., h], [w, h]],
         _ => vec![[0., h], [w, h], [w, 0.]],
     };
-    if cp <= 0x25e5 {
+    // 线宽不小于内切圆半径时往里收会收过头、翻成一个反过来的三角形，挖出的洞跑到外面去，这时画成实心的。
+    let inradius = (w + h - w.hypot(h)) / 2.;
+    if cp <= 0x25e5 || t >= inradius {
         out.push(Shape::Polygon(points));
     } else {
         let inner = inset(&points, t);
@@ -202,6 +203,28 @@ mod tests {
         assert_eq!(art('\u{1fbe7}', m), ["....", "....", "..##", "..##", "..##", "..##", "....", "...."].join("\n"));
     }
 
+    /// 奇数尺寸下互补的几块正好拼满单元格：每个像素恰好被盖一次。
+    #[test]
+    fn mosaic_pieces_partition_odd_cells() {
+        for (width, height) in [(9, 7), (7, 9), (5, 5), (9, 17)] {
+            let m = metrics(width, height, 1);
+            for rows in [2, 3, 4] {
+                let mut count = vec![vec![0; width as usize]; height as usize];
+                for i in 0..2 * rows {
+                    let mut out = Vec::new();
+                    super::grid(m, rows, 1 << i, &mut out);
+                    for shape in out {
+                        let Shape::Rect { x0, y0, x1, y1, .. } = shape else { panic!("应当是矩形") };
+                        for row in &mut count[y0 as usize..y1 as usize] {
+                            row[x0 as usize..x1 as usize].iter_mut().for_each(|n| *n += 1);
+                        }
+                    }
+                }
+                assert!(count.iter().flatten().all(|&n| n == 1), "{width}×{height}, {rows} 行：{count:?}");
+            }
+        }
+    }
+
     #[test]
     fn corner_triangles() {
         let m = metrics(8, 16, 1);
@@ -213,5 +236,11 @@ mod tests {
         assert!(hollow[..14].iter().all(|row| row[0] == 0xff), "左边描边");
         assert_eq!(hollow[4][2], 0, "内部挖空");
         assert_eq!(hollow[15][7], 0, "外部为空");
+        // 线宽比内切圆半径还大时画成实心的，不挖到三角形外面去。
+        for m in [metrics(2, 3, 1), metrics(3, 4, 2)] {
+            for (hollow, solid) in [('◸', '◤'), ('◹', '◥'), ('◺', '◣'), ('◿', '◢')] {
+                assert_eq!(raster(hollow, m), raster(solid, m), "{hollow}");
+            }
+        }
     }
 }

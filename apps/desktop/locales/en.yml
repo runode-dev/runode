@@ -690,6 +690,8 @@ machine:
   revoke_detail: It's disconnected right away and has to pair again to connect.
   revoke: Revoke
   cancel: Cancel
+  revoke_failed_title: "Couldn't revoke “%{device}”"
+  ok: OK
 status:
   sleep_title: Prevent Sleep
   sleep_on: "On"

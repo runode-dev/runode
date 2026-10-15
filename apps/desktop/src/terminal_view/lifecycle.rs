@@ -493,9 +493,15 @@ impl TerminalView {
             let mut closed = false;
             {
                 let mut rx = self.events.borrow_mut();
-                loop {
+                // 宿主那边一直在往里放时一次取不完：和读事件的任务一样取够一批就先处理、看看时限，剩下的
+                // 下一轮再取。
+                let mut bytes = 0;
+                while bytes < MAX_OUTPUT_BATCH {
                     match rx.poll_next_unpin(&mut task) {
-                        Poll::Ready(Some(event)) => events.push(event),
+                        Poll::Ready(Some(event)) => {
+                            bytes += output_len(&event);
+                            events.push(event);
+                        }
                         Poll::Ready(None) => {
                             closed = true;
                             break;

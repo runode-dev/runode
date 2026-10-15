@@ -394,7 +394,7 @@ impl FileTree {
         let filter = self.filter();
         for state in self.workspaces.values_mut() {
             if let Some(root) = state.root.clone() {
-                state.rebuild_rows(&root, filter);
+                state.refilter(&root, filter);
             }
         }
     }

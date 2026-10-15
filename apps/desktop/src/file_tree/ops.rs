@@ -190,8 +190,12 @@ fn copy_all(src: &Path, dest: &Path) -> io::Result<()> {
         #[cfg(not(unix))]
         return fs::copy(src, dest).map(drop);
     }
-    if !meta.is_dir() {
+    if meta.is_file() {
         return copy_file(src, dest);
+    }
+    // 管道、套接字和设备文件不复制：打开管道会一直等到有人来写，设备文件可能读不到头。
+    if !meta.is_dir() {
+        return Err(io::Error::new(io::ErrorKind::InvalidInput, format!("{}: not a regular file", src.display())));
     }
     fs::create_dir(dest)?;
     // 中途失败时把这次建出来的半个副本清掉，免得留下残缺的目录，再试一次又多出一份。
@@ -416,6 +420,22 @@ mod tests {
         assert_eq!(fs::read_to_string(copy.join("e/f")).unwrap(), "y");
         assert!(matches!(copy_into(&dir, &dir.join("e")), Err(OpError::IntoItself)));
         assert!(matches!(copy_into(&dir, &dir), Err(OpError::IntoItself)));
+    }
+
+    /// 目录里有管道时整个复制报错、不留半个副本，不会卡在打开管道上等人来写。
+    #[cfg(unix)]
+    #[test]
+    fn refuses_to_copy_fifos() {
+        let tmp = TempDir::new("copy-fifo");
+        let dir = tmp.0.join("d");
+        fs::create_dir(&dir).unwrap();
+        fs::write(dir.join("a"), "a").unwrap();
+        let fifo = std::ffi::CString::new(dir.join("pipe").into_os_string().into_encoded_bytes()).unwrap();
+        // SAFETY: 以 NUL 结尾的路径。
+        assert_eq!(unsafe { libc::mkfifo(fifo.as_ptr(), 0o600) }, 0);
+        let err = copy_into(&dir, &tmp.0).unwrap_err();
+        assert!(matches!(&err, OpError::Io(err) if err.kind() == io::ErrorKind::InvalidInput), "{err:?}");
+        assert!(!tmp.0.join("d copy").exists());
     }
 
     /// 复制和改名都不覆盖已有的：同时粘贴同一个文件时各得一个副本，改名不盖掉别的文件。

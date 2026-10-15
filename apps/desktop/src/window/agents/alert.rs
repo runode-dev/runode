@@ -80,11 +80,15 @@ pub fn test(cx: &mut App) {
     }
 }
 
+/// 这个标识发过通知、还没收回。
+pub fn posted(tag: &str, cx: &App) -> bool {
+    cx.try_global::<Notified>().is_some_and(|notified| notified.posted.contains(tag))
+}
+
 /// 收回这个标识发过的通知：用户已经看到了那个分屏，或者分屏关掉了。没发过时什么都不做，
 /// 也就不会在 .app 之外碰通知中心。
 pub fn dismiss(tag: &str, cx: &mut App) {
-    let posted = cx.try_global::<Notified>().is_some_and(|notified| notified.posted.contains(tag));
-    if posted {
+    if posted(tag, cx) {
         cx.global_mut::<Notified>().posted.remove(tag);
         cx.dismiss_system_notification(tag);
     }

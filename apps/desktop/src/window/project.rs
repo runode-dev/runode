@@ -124,13 +124,21 @@ impl WindowView {
         };
         let real_root = fs::canonicalize(&root).unwrap_or_else(|_| root.clone());
         // 主仓库是 worktree 时它的 git 目录、连同里面子模块的 git 目录都不在 `root` 下面；一个
-        // 套在另一个里面的只听外面那个。
+        // 套在另一个里面的只听外面那个。worktree 的分支、tag 在 `commondir` 指向的共用 git 目录里，
+        // 也要听。
         let mut git_dirs: Vec<(PathBuf, PathBuf)> = project
             .git
             .iter()
             .flat_map(|git| git.iter())
-            .map(|repo| {
-                (repo.git_dir.clone(), fs::canonicalize(&repo.git_dir).unwrap_or_else(|_| repo.git_dir.clone()))
+            .flat_map(|repo| {
+                let common = fs::read_to_string(repo.git_dir.join("commondir"))
+                    .ok()
+                    .map(|common| repo.git_dir.join(common.trim()));
+                std::iter::once(repo.git_dir.clone()).chain(common)
+            })
+            .map(|dir| {
+                let real = fs::canonicalize(&dir).unwrap_or_else(|_| dir.clone());
+                (dir, real)
             })
             .filter(|(_, real)| !real.starts_with(&real_root))
             .collect();

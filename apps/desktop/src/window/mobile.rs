@@ -1021,8 +1021,17 @@ mod tests {
 
     #[test]
     fn the_pairing_day_is_read_in_local_time() {
-        // 2026-10-08 12:00 UTC，在 UTC-12 到 UTC+11 之间都还是这一天。
-        assert_eq!(local_date(1_791_460_800), (2026, 10, 8));
+        // 2026-10-08 12:00 UTC：本地比 UTC 早不到 12 小时（UTC-12 到 UTC+11:59）还是这一天，
+        // 早 12 小时及以上（UTC+12 到 UTC+14）已经是第二天。时区按跑测试的机器，不改进程的 TZ。
+        let time: libc::time_t = 1_791_460_800;
+        // SAFETY: 同 `local_date`。
+        let offset = unsafe {
+            let mut tm: libc::tm = std::mem::zeroed();
+            libc::localtime_r(&time, &mut tm);
+            tm.tm_gmtoff
+        };
+        let day = if offset < 12 * 3600 { 8 } else { 9 };
+        assert_eq!(local_date(1_791_460_800), (2026, 10, day));
     }
 
     #[test]
