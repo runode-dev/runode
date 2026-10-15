@@ -249,6 +249,15 @@ fn id(prefix: &str, key: &str) -> ElementId {
     ElementId::Name(format!("{prefix}-{key}").into())
 }
 
+/// 列表里一项按值取的元素 id：`value` 在前面的项 `earlier` 里已经出现过时带上第几次出现，同一个值写了两遍
+/// 两行的 id 才不撞；第一次出现的不带，删掉别的行它的 id 不变。
+fn unique_key(earlier: &[String], value: &str) -> String {
+    match earlier.iter().filter(|other| *other == value).count() {
+        0 => value.to_owned(),
+        seen => format!("{value}#{seen}"),
+    }
+}
+
 /// 语言的名字，用它自己的文字写。
 pub(super) fn language_name(locale: &str) -> String {
     rust_i18n::t!("settings.language_name", locale = locale).into_owned()
@@ -435,7 +444,7 @@ impl SettingsView {
         let fonts = self.config.font_family.clone();
         let count = fonts.len();
         let mut out = div().flex().flex_col();
-        for (ix, name) in fonts.into_iter().enumerate() {
+        for (ix, name) in fonts.iter().cloned().enumerate() {
             let (title, hint, reset, error) = if ix == 0 {
                 (
                     key_title("font-family"),
@@ -447,17 +456,23 @@ impl SettingsView {
                 (rust_i18n::t!("settings.fallback_font", n = ix).into_owned(), None, None, None)
             };
             let current = name.clone();
-            let picker = dropdown(("font", ix), title.clone(), None, name, 240., theme)
+            // 元素 id 按字体名取，不按行号：删掉一行后面的行号整体前移，辅助工具的焦点会跟着跳。同一个字体
+            // 写了两遍时第二个带上序号，id 才不撞。
+            let key = unique_key(&fonts[..ix], &name);
+            let picker = dropdown(format!("font-{key}"), title.clone(), None, name.clone(), 240., theme)
                 .on_press(cx, move |this, window, cx| this.open_font_picker(ix, Some(current.clone()), window, cx));
             let remove = (count > 1).then(|| {
-                Button::new(("remove-font", ix), rust_i18n::t!("settings.remove"))
+                Button::new(format!("remove-font-{key}"), rust_i18n::t!("settings.remove"))
                     .icon("icons/minus.svg")
                     .icon_size(12.)
                     .with_size(ButtonSize::IconSm)
                     .on_press(cx, move |this, _, cx| {
                         let mut fonts = this.config.font_family.clone();
-                        fonts.remove(ix);
-                        this.write_or_report("font-family", fonts, cx);
+                        // 点下去时配置可能已经变了（连按两次、外部改了文件），行号过期就不动。
+                        if ix < fonts.len() {
+                            fonts.remove(ix);
+                            this.write_or_report("font-family", fonts, cx);
+                        }
                     })
             });
             let control = div().flex().items_center().gap(px(4.)).children(remove).child(picker);
@@ -594,15 +609,18 @@ impl SettingsView {
             let placeholder = rust_i18n::t!("settings.config_file_placeholder").into_owned();
             let input = self.field(&id, Commit::Item(KEY, ix), Some(placeholder.into()), window, cx);
             let error = self.errors.get(&id).cloned();
-            let remove = (ix < files.len()).then(|| {
-                Button::new(("remove-config-file", ix), rust_i18n::t!("settings.remove"))
+            let remove = files.get(ix).map(|file| {
+                let key = unique_key(&files[..ix], file);
+                Button::new(format!("remove-config-file-{key}"), rust_i18n::t!("settings.remove"))
                     .icon("icons/minus.svg")
                     .icon_size(12.)
                     .with_size(ButtonSize::IconSm)
                     .on_press(cx, move |this, _, cx| {
                         let mut files = this.file.values(KEY);
-                        files.remove(ix);
-                        this.write_or_report(KEY, files, cx);
+                        if ix < files.len() {
+                            files.remove(ix);
+                            this.write_or_report(KEY, files, cx);
+                        }
                     })
             });
             out = out.child(

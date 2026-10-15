@@ -542,7 +542,7 @@ impl PreviewPanel {
             .map(|(item, ix, row, piece, first)| {
                 let base = div().flex_none().h(px(row_height)).w_full().flex().items_center().whitespace_nowrap();
                 if let DiffRow::Header(hunk) = row {
-                    return self.render_diff_header(ix, hunk, actionable, target, base, cx);
+                    return self.render_diff_header(hunk, actionable, target, base, cx);
                 }
                 let (kind, old, new) = match row {
                     DiffRow::Context { old, new } => (LineKind::Context, Some(old), Some(new)),
@@ -639,10 +639,8 @@ impl PreviewPanel {
     }
 
     /// 一块改动的块头，能按块操作时右边有按钮：工作区的是丢弃和暂存这一块，暂存区的是取消暂存。
-    #[allow(clippy::too_many_arguments)]
     fn render_diff_header(
         &self,
-        ix: usize,
         hunk: usize,
         actionable: bool,
         target: &DiffTarget,
@@ -665,7 +663,8 @@ impl PreviewPanel {
         let font_size = self.input.font_size;
         let fg_hsla = cx.theme().foreground;
         let (header_bg, hover_bg) = (cx.theme().mix(0.05), cx.theme().mix(0.12));
-        row.id(("preview-diff-header", ix))
+        // id 按块号取，不按行号：暂存一块后前面的行少了，行号整体平移，辅助工具会按到别的块上。
+        row.id(("preview-diff-header", hunk))
             .role(Role::Group)
             .aria_label(header.clone())
             .px(px(8.))
@@ -676,7 +675,7 @@ impl PreviewPanel {
                 // 只有按下的处理，辅助工具按不到，另外登记。
                 let view = cx.entity().downgrade();
                 div()
-                    .id(("preview-diff-hunk-button", ix * 4 + bi))
+                    .id(("preview-diff-hunk-button", hunk * 4 + bi))
                     .role(Role::Button)
                     .aria_label(rust_i18n::t!(key).into_owned())
                     .on_a11y_press(view, move |this, window, cx| this.diff_hunk_action(hunk, action, window, cx))

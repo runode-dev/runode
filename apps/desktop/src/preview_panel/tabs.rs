@@ -243,6 +243,11 @@ impl PreviewPanel {
         let view = cx.entity().downgrade();
         let fg = cx.theme().foreground;
         let color = tab.status.map_or(fg, |status| hsla(status_color(status)));
+        // 元素 id 按路径（加 diff 的哪一边）取，不按下标：关掉、拖动标签后下标整体平移，辅助工具的焦点会跳。
+        let key = match &tab.diff {
+            Some(diff) => format!("{}#{:?}", tab.path.display(), diff.side),
+            None => tab.path.display().to_string(),
+        };
         let group = SharedString::from(format!("preview-tab-{ix}"));
         let dragged = DraggedPreviewTab { ix, name: name.clone() };
         // diff 标签的图标是 diff 的样子，不是文件类型的。
@@ -251,7 +256,7 @@ impl PreviewPanel {
             None => img(file_icon(&base_name(&tab.path))).flex_none().size(px(14.)).into_any_element(),
         };
         div()
-            .id(("preview-tab", ix))
+            .id(format!("preview-tab:{key}"))
             .role(Role::Tab)
             .aria_label(name.clone())
             .aria_description(path)
@@ -283,7 +288,7 @@ impl PreviewPanel {
             .child(div().flex_none().flex().when(!active, |icon| icon.opacity(0.6)).child(icon))
             .child(
                 div()
-                    .id(("preview-tab-name", ix))
+                    .id(format!("preview-tab-name:{key}"))
                     .min_w_0()
                     .truncate()
                     .text_color(if active { color } else { color.opacity(0.6) })
@@ -292,7 +297,7 @@ impl PreviewPanel {
                     .tooltip(path_tooltip),
             )
             .child(
-                Button::new(("preview-tab-close", ix), close_label)
+                Button::new(format!("preview-tab-close:{key}"), close_label)
                     .with_size(ButtonSize::IconXs)
                     .text_size(px(14.))
                     .child("×")

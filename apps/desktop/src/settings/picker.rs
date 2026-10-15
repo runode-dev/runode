@@ -213,7 +213,7 @@ impl SettingsView {
                 let current = picker.current.as_deref() == Some(item.value.as_str());
                 Some(
                     div()
-                        .id(("pick", row))
+                        .id(format!("pick-{}", item.value))
                         .role(Role::ListBoxOption)
                         .aria_label(item.label.clone())
                         .aria_selected(row == picker.highlighted)
