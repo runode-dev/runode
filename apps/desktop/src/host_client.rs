@@ -477,6 +477,7 @@ fn end_old_host(cx: &mut gpui::AsyncApp) {
     let (tx, rx) = futures::channel::oneshot::channel();
     let spawned = thread::Builder::new().name("end-old-host".into()).spawn(move || {
         let Some(socket) = socket_path() else { return };
+        let gone = || std::os::unix::net::UnixStream::connect(&socket).is_err();
         let ended = match launch::probe(&socket, &build()) {
             Probe::Running { build: theirs, .. } if theirs == build() => {
                 tracing::warn!("the host on the socket is already this build, so not ending it");
@@ -485,11 +486,18 @@ fn end_old_host(cx: &mut gpui::AsyncApp) {
             }
             // 弹框期间旧宿主自己退了：不用结束谁，直接开 socket。旧宿主卡住、握手超时时 `probe` 也报
             // `Absent`，那时 socket 还连得上，照常去结束它。
-            Probe::Absent if std::os::unix::net::UnixStream::connect(&socket).is_err() => {
+            Probe::Absent if gone() => {
                 tracing::info!("the old host is already gone");
                 Ok(launch::Ended::Ended)
             }
-            _ => launch::end_old_host(&socket, &build()),
+            // 探完到动手之间旧宿主也可能刚好退了，结束它就会出错：socket 连不上了的不算失败。
+            _ => launch::end_old_host(&socket, &build()).or_else(|err| {
+                if !gone() {
+                    return Err(err);
+                }
+                tracing::info!("the old host went away while ending it: {err}");
+                Ok(launch::Ended::Ended)
+            }),
         };
         match ended {
             Ok(launch::Ended::Ended) => {
