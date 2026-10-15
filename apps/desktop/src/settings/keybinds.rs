@@ -398,6 +398,8 @@ impl SettingsView {
         match target.replace {
             Some(Bound { trigger: old, source: Source::User(ix) }) => {
                 if !replace_user_line(&mut values, ix, &old, trigger) {
+                    // 不在录了，录键框要收起来。
+                    cx.notify();
                     return;
                 }
             }
@@ -417,7 +419,10 @@ impl SettingsView {
         match bound.source {
             Source::Default => unbind_default(&mut values, &bound.trigger),
             Source::User(ix) if ix < values.len() => remove_user_line(&mut values, ix, &bound.trigger),
-            Source::User(_) => return,
+            Source::User(_) => {
+                cx.notify();
+                return;
+            }
         }
         report(self, &values, cx);
     }
