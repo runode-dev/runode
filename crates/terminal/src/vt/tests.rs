@@ -309,6 +309,25 @@ fn replay_keeps_the_cursor_inside_the_region_in_origin_mode() {
 /// 重放丢掉的东西。快照都带着；版本对不上、只能重放时，界面上会看到这些差别。哪天这里的
 /// 断言不成立了，说明格式化能带上它了，改注释和测试。
 #[test]
+fn replay_keeps_the_hyperlinks_of_cells() {
+    // 屏幕上带 OSC 8 超链接的字一格格都带着链接，不只是光标当前的那个。
+    let mut a = new_terminal(size(20, 4)).unwrap();
+    a.vt_write(b"\x1b]8;id=a;https://x\x07link\x1b]8;;\x07 \x1b]8;;https://y\x07two\x1b]8;;\x07");
+    let b = replayed(&a);
+    let uri = |t: &Terminal<'_, '_>, x: u16| {
+        let mut buf = [0u8; 64];
+        let len = t.grid_ref(Point::Active(PointCoordinate { x, y: 0 })).unwrap().hyperlink_uri(&mut buf).unwrap();
+        buf[..len].to_vec()
+    };
+    for t in [&a, &b] {
+        assert_eq!(uri(t, 0), b"https://x");
+        assert_eq!(uri(t, 3), b"https://x");
+        assert_eq!(uri(t, 4), b"");
+        assert_eq!(uri(t, 5), b"https://y");
+    }
+}
+
+#[test]
 fn replay_loses_what_the_formatter_cannot_express() {
     // 备用屏幕上只重放备用屏幕：主屏幕和回滚历史都没了，退出备用屏幕后是空的。
     let mut a = new_terminal(size(20, 4)).unwrap();
@@ -319,18 +338,10 @@ fn replay_loses_what_the_formatter_cannot_express() {
     assert_eq!(screen_lines(&a, 0, 0).unwrap(), ["primary"]);
     assert_eq!(screen_lines(&b, 0, 0).unwrap(), [""]);
 
-    // DECSC 存的光标、单元格上的超链接（只带光标当前的那个）、OSC 10/11/12 改的颜色，以及
-    // Kitty 键盘协议的栈（只带当前的标志）。
+    // DECSC 存的光标、OSC 10/11/12 改的颜色，以及 Kitty 键盘协议的栈（只带当前的标志）。
     let mut a = new_terminal(size(20, 4)).unwrap();
-    a.vt_write(b"\x1b[2;5H\x1b7\x1b[H\x1b]8;;https://x\x07link\x1b]8;;\x07\x1b]11;rgb:01/02/03\x07\x1b[>1u\x1b[>3u");
+    a.vt_write(b"\x1b[2;5H\x1b7\x1b[H\x1b]11;rgb:01/02/03\x07\x1b[>1u\x1b[>3u");
     let mut b = replayed(&a);
-    let uri = |t: &Terminal<'_, '_>| {
-        let mut buf = [0u8; 64];
-        let len = t.grid_ref(Point::Active(PointCoordinate { x: 0, y: 0 })).unwrap().hyperlink_uri(&mut buf).unwrap();
-        buf[..len].to_vec()
-    };
-    assert_eq!(uri(&a), b"https://x");
-    assert_eq!(uri(&b), b"");
     assert!(a.bg_color().unwrap().is_some());
     assert_eq!(b.bg_color().unwrap(), None);
     assert_eq!(b.kitty_keyboard_flags().unwrap(), a.kitty_keyboard_flags().unwrap());
