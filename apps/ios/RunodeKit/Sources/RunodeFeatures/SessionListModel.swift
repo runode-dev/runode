@@ -395,8 +395,12 @@ public final class SessionListModel {
         !windows.isEmpty
     }
 
-    /// 结束会话（视图先让用户确认）。
+    /// 结束会话（视图先让用户确认）。没连着时请求发不出去，电脑上的会话照旧在跑，列表不动，提示出错。
     public func kill(_ id: SessionId) {
+        guard connected else {
+            errorMessage = String(localized: "未连接，结束不了会话")
+            return
+        }
         link.send(.kill(id: id))
         sessions.removeAll { $0.id == id }
         watching.remove(id)

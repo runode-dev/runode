@@ -430,6 +430,18 @@ import Testing
         #expect(model.sessions.isEmpty)
     }
 
+    @Test func killWhileDisconnectedKeepsTheSession() {
+        let model = SessionListModel(machine: machineRecord(), link: link)
+        model.handle(.ready(generation: 1))
+        model.handle(.message(.sessionList([info(sessionA, title: "a")])))
+        model.handle(.state(.waiting(reason: "断了", retryAt: .now)))
+        link.clearSent()
+        model.kill(sessionA)
+        #expect(link.sent.isEmpty)
+        #expect(model.sessions.map(\.id) == [sessionA])
+        #expect(model.errorMessage == "未连接，结束不了会话")
+    }
+
     @Test func disconnectingForgetsWhatWasWatched() {
         let model = SessionListModel(machine: machineRecord(), link: link)
         model.handle(.ready(generation: 1))

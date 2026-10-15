@@ -4414,6 +4414,29 @@
         }
       }
     },
+    "未连接，结束不了会话" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Not connected; couldn't end the session"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "未连接，结束不了会话"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "未連線，無法終止工作階段"
+          }
+        }
+      }
+    },
     "本地分支" : {
       "extractionState" : "manual",
       "localizations" : {
