@@ -78,7 +78,7 @@ pub(crate) fn config_doc(key: &str) -> &'static str {
         "minimum-contrast" => {
             "Minimum contrast between text and its background: 1 to 21, 3 by default. When a program's fixed colors are hard to read on the current background (say, a program with a dark color scheme under a light theme), text is drawn darker or lighter until it reaches this contrast, keeping its hue; box drawing, block elements and other symbols that form shapes are left alone. 1 turns it off."
         }
-        "cursor-style" => "Cursor shape: block, bar, underline, block_hollow.",
+        "cursor-style" => "Cursor shape: block, bar, underline, block_hollow. Shown while a command runs and in programs that leave the cursor alone; at the prompt the shell sets a bar unless shell-integration-features says no-cursor.",
         "cursor-style-blink" => {
             "Cursor blinking: true, false (the default, the cursor stays solid); running programs can still turn blinking on or off."
         }

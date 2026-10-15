@@ -468,7 +468,6 @@ settings:
     window: Window
     cursor: Cursor
     keyboard: Keyboard
-    shell: Shell
     scrollback: Scrollback
     clipboard: Clipboard
     tasks: Tasks
@@ -563,12 +562,12 @@ settings:
     search_selected_foreground: A color, or cell-foreground / cell-background.
     palette: Colors 0–7 are the normal colors and 8–15 the bright ones. Clear a box to go back to the theme's color.
     minimum_contrast: 1 to 21. Text that is hard to read on its background is drawn darker or lighter until it reaches this contrast. 1 turns it off.
-    cursor_style: Programs can still change it while they run.
+    cursor_style: Used while a command runs and in programs that leave the cursor alone; at the prompt, see Prompt cursor below. Programs can still change it while they run.
     cursor_style_blink: Programs can still turn blinking on or off while they run.
     cursor_style_blink_timeout: Seconds without typing or output before the cursor stops blinking. 0 keeps blinking.
     macos_option_as_alt: Option then sends Alt combinations instead of typing special characters. By default it follows the keyboard layout, both sides on U.S. and ABC layouts and under Apple's Chinese input methods, off on others.
     scrollback_limit: Bytes of history kept per terminal, at least 2 MiB (2097152), and at most 10,000 lines.
-    shell_integration_features: "A bar at the prompt, a block in zsh's vi command mode, back to the cursor style while a command runs. Applies to new terminals."
+    shell_integration_features: "With a bar, zsh's vi command mode shows a block and the cursor shape above returns while a command runs. Applies to new terminals."
     clipboard_write: Lets programs in the terminal, such as vim, tmux or a shell over ssh, put text on the clipboard.
     clipboard_read: Lets programs in the terminal read the text you copied, passwords included. Ask shows which program wants it first.
     vt_window_resize_allowed: Lets programs in the terminal resize the window with CSI 8 t, only while the terminal has its tab to itself and the window is not full screen.
@@ -610,7 +609,7 @@ settings:
       right: Right
     shell_integration_features:
       cursor: Bar
-      no-cursor: Unchanged
+      no-cursor: Follow cursor shape
     file_tree_preview_click:
       single: Single click
       double: Double click

@@ -157,12 +157,11 @@ impl Page {
             Self::Terminal => &[
                 Section("cursor"),
                 Row("cursor-style", Choice(&["block", "bar", "underline", "block_hollow"])),
+                Row("shell-integration-features", Choice(&["cursor", "no-cursor"])),
                 Row("cursor-style-blink", Choice(&["", "true", "false"])),
                 Row("cursor-style-blink-timeout", Text(80.)),
                 Section("keyboard"),
                 Row("macos-option-as-alt", Choice(&["", "true", "false", "left", "right"])),
-                Section("shell"),
-                Row("shell-integration-features", Choice(&["cursor", "no-cursor"])),
                 Section("scrollback"),
                 Row("scrollback-limit", Text(120.)),
                 Section("clipboard"),
