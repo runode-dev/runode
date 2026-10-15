@@ -20,6 +20,9 @@ fn multiline_paste_needs_confirmation_unless_bracketed() {
     assert_eq!(input(&requests).as_deref(), Some(&b"ls"[..]));
     assert_eq!(session.paste("rm -rf x\nls", false), Paste::NeedsConfirmation);
     assert_eq!(input(&requests), None);
+    // 只有回车（老 Mac 的换行）也一样会执行命令。
+    assert_eq!(session.paste("echo first\recho second", false), Paste::NeedsConfirmation);
+    assert_eq!(input(&requests), None);
     // 确认后照写，换行换成回车，控制字节换成空格。
     assert_eq!(session.paste("rm -rf x\nls\x03", true), Paste::Done);
     assert_eq!(input(&requests).as_deref(), Some(&b"rm -rf x\rls "[..]));

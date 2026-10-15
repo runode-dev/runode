@@ -246,17 +246,19 @@ impl Session {
         (self.sender)(Request::Resize(size));
     }
 
-    /// 在宿主改尺寸的位置（`HostMsg::Resized`）改这边 VT 的尺寸。
+    /// 在宿主改尺寸的位置（`HostMsg::Resized`）改这边 VT 的尺寸。VT 改不成时记下的尺寸也不变，
+    /// 和 VT 对得上，同样的尺寸再来时还会再试。
     pub fn apply_resized(&mut self, size: GridSize) {
         if self.size.get() == size {
             return;
         }
-        self.size.set(size);
-        self.scroll_offset = 0.;
-        if let Err(err) =
-            self.terminal.resize(size.cols, size.rows, u32::from(size.cell_width_px), u32::from(size.cell_height_px))
+        match self.terminal.resize(size.cols, size.rows, u32::from(size.cell_width_px), u32::from(size.cell_height_px))
         {
-            tracing::warn!("terminal resize failed: {err}");
+            Ok(()) => {
+                self.size.set(size);
+                self.scroll_offset = 0.;
+            }
+            Err(err) => tracing::warn!("terminal resize failed: {err}"),
         }
     }
 

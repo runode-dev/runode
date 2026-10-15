@@ -187,6 +187,14 @@ impl PtyWriter {
         Ok((Self(tx, queued), WriterThread { stop, handle }))
     }
 
+    /// 叫写线程结束、不等它：写不进去的和排在后面的都丢掉。之后再写的都丢掉。
+    fn close(&self, thread: WriterThread) {
+        let (done, _) = mpsc::channel();
+        let _ = self.0.send(WriterMsg::Finish(done));
+        // 和 `finish` 一样先排上 `Finish` 再置标记。
+        thread.stop.store(true, Ordering::Release);
+    }
+
     /// 交接时叫停写线程并等它结束，返回没写出去的输入：程序不读输入、写不进去的那些，和排在
     /// 后面的。写线程不会卡住超过 `WRITER_STUCK_POLL`。之后再写的都丢掉。
     fn finish(&self, thread: WriterThread) -> Vec<u8> {
@@ -647,7 +655,8 @@ impl Pty {
         if let Some(gate) = self.gate.take() {
             gate.set(GateState::Abandoned);
         }
-        if let Some(reader) = &mut self.reader {
+        // 读线程结束后 `Reader` 也丢掉，它手里那份 master 跟着放开，下面取 master 时不用另复制一份。
+        if let Some(mut reader) = self.reader.take() {
             reader.stop();
             reader.join();
         }
@@ -692,22 +701,20 @@ impl Pty {
         self.report_token.as_deref()
     }
 
-    /// 在 `cwd` 下启动 shell 和读线程，参数同 `spawn`。已经启动过时什么都不做。
+    /// 在 `cwd` 下启动 shell 和读线程，参数同 `spawn`。已经启动过时什么都不做。shell 起不来
+    /// （程序或者目录不存在）时什么都没动，还算没启动，可以换个参数再来。
     pub fn start(
         &mut self,
         shell: Option<&str>,
         cwd: Option<&std::path::Path>,
         integration: IntegrationMode,
     ) -> Result<()> {
-        if self.pending.is_none() {
+        // 交出去的一定已经启动过，这里就返回了；下面只是取共用的 master。
+        let Some((slave, _)) = &self.pending else {
             return Ok(());
-        }
-        // 交出去的一定已经启动过，上面就返回了；这里只是取共用的 master。
+        };
         let Some(master) = self.master.clone() else {
             bail!("the pty has been handed off");
-        };
-        let Some((slave, sink)) = self.pending.take() else {
-            return Ok(());
         };
         let shell =
             shell.map(str::to_owned).or_else(|| std::env::var("SHELL").ok()).unwrap_or_else(|| "/bin/zsh".into());
@@ -733,6 +740,7 @@ impl Pty {
         let child = slave.spawn_command(cmd).context("failed to spawn shell")?;
         self.shell = Some(Shell::Child(child));
         self.report_token = report_token;
+        let (slave, sink) = self.pending.take().expect("the pending slave was checked above");
         // 子进程持有自己的 slave 副本；我们这份必须关掉，子进程退出时才会读到 EOF。
         drop(slave);
 
@@ -954,6 +962,10 @@ impl Drop for Pty {
             // 还没启动，或者已经交出去了。
             None => {}
         }
+        // 别处还留着 `PtyWriter` 的克隆时写线程不会因为发送端都没了而结束，叫它结束，放开 master。
+        if let Some(thread) = self.writer_thread.take() {
+            self.writer.close(thread);
+        }
     }
 }
 
@@ -1045,6 +1057,43 @@ mod tests {
         thread::sleep(Duration::from_millis(500));
         assert!(alive(pid), "dropping a paused pty must not end the shell");
         drop(old);
+    }
+
+    const TEST_SIZE: GridSize = GridSize { cols: 20, rows: 4, cell_width_px: 8, cell_height_px: 16 };
+
+    /// shell 起不来时还算没启动，换个能起的再来照样启动。
+    #[test]
+    fn a_failed_start_can_be_retried() {
+        let mut pty = Pty::open(TEST_SIZE, Box::new(|_| true)).unwrap();
+        assert!(pty.start(Some("/nonexistent/shell"), None, IntegrationMode::Off).is_err());
+        assert!(!pty.started());
+        pty.start(Some("/bin/cat"), None, IntegrationMode::Off).unwrap();
+        assert!(pty.started() && pty.shell_pid().is_some());
+    }
+
+    /// 交出的就是这个 `Pty` 自己的那份 master，不另复制：读写线程结束后没人再握着它。
+    #[test]
+    fn release_hands_over_the_master_itself() {
+        let mut pty = Pty::spawn(TEST_SIZE, Some("/bin/cat"), None, IntegrationMode::Off, Box::new(|_| true)).unwrap();
+        let raw = pty.master.as_ref().unwrap().as_raw_fd();
+        let handoff = pty.release().unwrap();
+        assert_eq!(handoff.master.as_raw_fd(), raw);
+    }
+
+    /// 丢掉 `Pty` 时别处还留着 `PtyWriter` 的克隆，写线程照样结束、放开 master。
+    #[test]
+    fn dropping_the_pty_ends_the_writer_despite_writer_clones() {
+        let pty = Pty::open(TEST_SIZE, Box::new(|_| true)).unwrap();
+        let master = Arc::downgrade(pty.master.as_ref().unwrap());
+        let writer = pty.writer.clone();
+        drop(pty);
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while master.upgrade().is_some() {
+            assert!(std::time::Instant::now() < deadline, "the writer thread still holds the master");
+            thread::sleep(std::time::Duration::from_millis(5));
+        }
+        // 之后写的丢掉。
+        writer.write(b"late");
     }
 
     /// `PtyHandoff` 的 `Debug` 不打出口令。

@@ -129,23 +129,23 @@ impl Session {
         let cursor = (self.terminal.cursor_x()?, u32::from(self.terminal.cursor_y()?));
         let (top, bottom) = wrapped_rows(&self.terminal, cursor.1, rows)?;
         let cols = self.size.get().cols;
-        let mut prompt_end = None;
+        let mut prompt = Vec::with_capacity((bottom - top + 1) as usize * usize::from(cols));
         for y in top..=bottom {
             for x in 0..cols {
                 let cell = self.terminal.grid_ref(Point::Active(PointCoordinate { x, y }))?.cell()?;
-                if cell.semantic_content()? == CellSemanticContent::Prompt {
-                    prompt_end = Some((y - top) as usize * usize::from(cols) + usize::from(x) + 1);
-                }
+                prompt.push(cell.semantic_content()? == CellSemanticContent::Prompt);
             }
         }
         // 没有提示符标记时只能看宿主最近一次读到的前台进程。
-        let at_prompt = match prompt_end {
-            Some(_) => self.terminal.is_cursor_at_prompt()?,
-            None => self.foreground_is_shell(),
-        };
+        let at_prompt =
+            if prompt.contains(&true) { self.terminal.is_cursor_at_prompt()? } else { self.foreground_is_shell() };
         if !at_prompt {
             return Ok(None);
         }
+        // 输入从光标前最后一个提示符单元格之后开始；光标后面的提示符单元格是画在行尾的右侧
+        // 提示符（zsh、fish 的集成标出来的），不算输入，也不算输入的末尾。
+        let at = ((cursor.1 - top) as usize * usize::from(cols) + usize::from(cursor.0)).min(prompt.len());
+        let prompt_end = prompt[..at].iter().rposition(|p| *p).map(|i| i + 1);
         let frame = self.frame();
         let cells: Vec<&Cell> = (top..=bottom).flat_map(|y| frame.row(y as u16)).collect();
         let mut line = InputLine {
@@ -153,7 +153,11 @@ impl Session {
             bottom,
             cols: usize::from(frame.cols),
             spacer: cells.iter().map(|c| c.spacer).collect(),
-            end: cells.iter().rposition(|c| !c.text.is_empty()).map_or(0, |i| i + 1),
+            end: cells
+                .iter()
+                .enumerate()
+                .rposition(|(i, c)| !c.text.is_empty() && !prompt.get(i).copied().unwrap_or(false))
+                .map_or(0, |i| i + 1),
             start: prompt_end.unwrap_or(0),
             cursor: 0,
         };
@@ -235,6 +239,24 @@ mod tests {
         session.select_press(at(0.2, 0.5), REPEAT);
         session.select_release(at(0.2, 0.5));
         assert_eq!(session.delete_selection_keys().unwrap(), None);
+    }
+
+    /// 行尾画着右侧提示符（`133;P;k=r` 到 `133;B`）：它既不是输入的开头，也不算输入的末尾。
+    #[test]
+    fn a_right_prompt_is_not_part_of_the_input() {
+        let mut session = idle_session();
+        session.feed(PROMPT);
+        session.feed(b"\x1b[16G\x1b]133;P;k=r\x07<r>\x1b]133;B\x07\x1b[3G");
+        session.feed(b"hello");
+        // 点在 e 上：往左四步。
+        assert_eq!(session.click_to_move_steps(at(3.5, 0.5)), Some(-4));
+        // 点在右侧提示符上：停在输入末尾，不动。
+        assert_eq!(session.click_to_move_steps(at(16.5, 0.5)), None);
+        // 选中 "ell"：先往左走到 l 之后（一步），再退格三个字符。
+        session.select_press(at(3.2, 0.5), REPEAT);
+        session.select_drag(at(5.8, 0.5), false);
+        session.select_release(at(5.8, 0.5));
+        assert_eq!(session.delete_selection_keys().unwrap(), Some((-1, 3)));
     }
 
     #[test]

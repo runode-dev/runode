@@ -31,3 +31,12 @@ fn meta_from_the_host_sets_the_title_and_agent() {
     }));
     assert_eq!(session.cwd(), Some("/tmp".into()));
 }
+
+/// VT 改不成的尺寸（行列为 0）不记下来，记着的尺寸和 VT 对得上。
+#[test]
+fn a_failed_resize_keeps_the_old_size() {
+    let (mut session, _) = capturing_session();
+    let before = session.size();
+    session.apply_resized(GridSize { cols: 0, rows: 0, ..before });
+    assert_eq!(session.size(), before);
+}

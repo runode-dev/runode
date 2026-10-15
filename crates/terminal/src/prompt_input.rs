@@ -74,7 +74,9 @@ pub fn read(terminal: &Terminal<'_, '_>) -> Result<Option<PromptInput>> {
             slots.push((slot(&grid_ref)?, prompt));
         }
     }
-    let cursor = (cursor_y - top) as usize * usize::from(cols) + usize::from(cursor_x);
+    // 输入正好写满一行时光标停在最后一格上、等着折行（pending wrap），这时它其实在那一格后面。
+    let past_last = usize::from(terminal.is_cursor_pending_wrap()?);
+    let cursor = (cursor_y - top) as usize * usize::from(cols) + usize::from(cursor_x) + past_last;
     // 输入从光标前最后一个提示符单元格之后开始。光标后面的提示符单元格是画在行尾的右侧
     // 提示符，不算输入。
     let Some(start) = slots[..cursor].iter().rposition(|(_, prompt)| *prompt).map(|i| i + 1) else {
@@ -215,6 +217,20 @@ mod tests {
         t.vt_write(b"\x1b]133;A\x07$ \x1b]133;B\x07echo hello wor");
         let input = read(&t).unwrap().unwrap();
         assert_eq!((input.text.as_str(), input.cursor), ("echo hello wor", 14));
+    }
+
+    /// 提示符加输入正好写满一行：光标停在最后一格、等着折行，算在最后一个字符后面。最后一个
+    /// 是宽字符时也一样。
+    #[test]
+    fn input_filling_the_row_puts_the_cursor_after_it() {
+        let mut t = terminal(10, 5);
+        t.vt_write(b"\x1b]133;A\x07$ \x1b]133;B\x07abcdefgh");
+        let input = read(&t).unwrap().unwrap();
+        assert_eq!((input.text.as_str(), input.cursor), ("abcdefgh", 8));
+        let mut t = terminal(10, 5);
+        t.vt_write("\x1b]133;A\x07$ \x1b]133;B\x07abcdef中".as_bytes());
+        let input = read(&t).unwrap().unwrap();
+        assert_eq!((input.text.as_str(), input.cursor), ("abcdef中", "abcdef中".len()));
     }
 
     #[test]

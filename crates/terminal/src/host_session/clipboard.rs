@@ -76,15 +76,24 @@ pub(super) fn take_write(write: ClipboardWrite<'_>, effects: &Effects) {
                 tracing::warn!("dropped a clipboard write of {} bytes, over the limit", content.data.len());
                 Err(ClipboardWriteError::InvalidData)
             }
-            Some(content) => match effects.clipboard.try_borrow_mut() {
-                // 剪贴板放的是文字，系统剪贴板只收合法的 Unicode：不是 UTF-8 的字节换成 U+FFFD，其余
-                // 照写，比整条丢掉更接近程序的本意。
-                Ok(mut requests) => {
-                    requests.push(ClipboardRequest::Write(String::from_utf8_lossy(content.data).into_owned()));
-                    Ok(())
+            // 剪贴板放的是文字，系统剪贴板只收合法的 Unicode：不是 UTF-8 的字节换成 U+FFFD，其余
+            // 照写，比整条丢掉更接近程序的本意。一个字节换成的 U+FFFD 占三个字节，换完再查一次上限。
+            Some(content) => match String::from_utf8_lossy(content.data) {
+                text if text.len() > MAX_CLIPBOARD_BYTES => {
+                    tracing::warn!(
+                        "dropped a clipboard write of {} bytes once made valid UTF-8, over the limit",
+                        text.len()
+                    );
+                    Err(ClipboardWriteError::InvalidData)
                 }
-                // 回调运行在 extern "C" 函数里，不能 panic；借不到时丢掉这一条。
-                Err(_) => Err(ClipboardWriteError::Busy),
+                text => match effects.clipboard.try_borrow_mut() {
+                    Ok(mut requests) => {
+                        requests.push(ClipboardRequest::Write(text.into_owned()));
+                        Ok(())
+                    }
+                    // 回调运行在 extern "C" 函数里，不能 panic；借不到时丢掉这一条。
+                    Err(_) => Err(ClipboardWriteError::Busy),
+                },
             },
         }
     };

@@ -55,11 +55,13 @@ pub fn send_with_fds(stream: &UnixStream, data: &[u8], fds: &[BorrowedFd<'_>]) -
 
 /// 收一条消息：那段字节和随它来的描述符，描述符都设了 `FD_CLOEXEC`。对面关了连接时返回
 /// `UnexpectedEof`；头不像样（超过 `MAX_FDS` 个描述符也算）、描述符被截断（`MSG_CTRUNC`，见
-/// `RECV_FDS`）或者个数对不上时返回 `InvalidData`，已经收到的描述符都关掉。被信号打断时重试。
+/// `RECV_FDS`）或者个数对不上时返回 `InvalidData`，已经收到的描述符都关掉。收到的描述符一多过
+/// 头里说的（还没收到头时是 `MAX_FDS`）就不往下收：对面可以给每一段字节都带上一批描述符，等收完
+/// 再数，本进程的描述符可能先用光了。被信号打断时重试。
 pub fn recv_with_fds(stream: &UnixStream) -> io::Result<(Vec<u8>, Vec<OwnedFd>)> {
     let mut fds = Vec::new();
     let mut header = [0u8; HEADER_LEN];
-    recv_exact(stream, &mut header, &mut fds)?;
+    recv_exact(stream, &mut header, &mut fds, MAX_FDS)?;
     let [l0, l1, l2, l3, c0, c1, c2, c3] = header;
     let len = usize::try_from(u32::from_le_bytes([l0, l1, l2, l3])).unwrap_or(usize::MAX);
     let count = usize::try_from(u32::from_le_bytes([c0, c1, c2, c3])).unwrap_or(usize::MAX);
@@ -67,7 +69,7 @@ pub fn recv_with_fds(stream: &UnixStream) -> io::Result<(Vec<u8>, Vec<OwnedFd>)>
         return Err(invalid(format!("bad message header: {len} bytes, {count} descriptors")));
     }
     let mut data = vec![0u8; len];
-    recv_exact(stream, &mut data, &mut fds)?;
+    recv_exact(stream, &mut data, &mut fds, count)?;
     if fds.len() != count {
         return Err(invalid(format!("expected {count} descriptors, got {}", fds.len())));
     }
@@ -153,11 +155,14 @@ const RECV_FLAGS: libc::c_int = libc::MSG_CMSG_CLOEXEC;
 #[cfg(not(target_os = "linux"))]
 const RECV_FLAGS: libc::c_int = 0;
 
-/// 读满 `buf`，随之来的描述符放进 `fds`。
-fn recv_exact(stream: &UnixStream, buf: &mut [u8], fds: &mut Vec<OwnedFd>) -> io::Result<()> {
+/// 读满 `buf`，随之来的描述符放进 `fds`；`fds` 多过 `max_fds` 个时不再往下读，返回 `InvalidData`。
+fn recv_exact(stream: &UnixStream, buf: &mut [u8], fds: &mut Vec<OwnedFd>, max_fds: usize) -> io::Result<()> {
     let mut filled = 0;
     while filled < buf.len() {
         let n = recv_some(stream, &mut buf[filled..], fds)?;
+        if fds.len() > max_fds {
+            return Err(invalid(format!("expected at most {max_fds} descriptors, got {}", fds.len())));
+        }
         if n == 0 {
             return Err(io::Error::new(io::ErrorKind::UnexpectedEof, "connection closed in the middle of a message"));
         }
@@ -246,13 +251,16 @@ mod tests {
 
     use super::*;
 
+    /// 一次 `sendmsg` 能带的描述符上限，见 `RECV_FDS`。
+    const SEND_FDS: usize = if cfg!(target_os = "linux") { 253 } else { RECV_FDS };
+
     /// 对面不按 `MAX_FDS` 来、一次塞满能发的上限时，收的一方报错，收下的描述符一个不漏地关掉：
     /// 管道读端的副本全关了，写端才会 `EPIPE`。
     #[test]
     fn too_many_descriptors_from_the_peer_are_all_closed() {
         let (a, b) = UnixStream::pair().unwrap();
         let (pipe_rx, mut pipe_tx) = io::pipe().unwrap();
-        let many: Vec<RawFd> = (0..RECV_FDS).map(|_| pipe_rx.as_fd().as_raw_fd()).collect();
+        let many: Vec<RawFd> = (0..SEND_FDS).map(|_| pipe_rx.as_fd().as_raw_fd()).collect();
         let mut header = [0u8; HEADER_LEN];
         header[4..].copy_from_slice(&u32::try_from(many.len()).unwrap().to_le_bytes());
         send_some(&a, [&header, &[]], 0, &many).unwrap();
@@ -262,6 +270,23 @@ mod tests {
         drop((a, b));
         use std::io::Write as _;
         assert_eq!(pipe_tx.write(b"x").unwrap_err().kind(), io::ErrorKind::BrokenPipe);
+    }
+
+    /// 头里说的个数没超，对面却在后面每一段字节上都再带一批描述符：多过头里说的那一刻就报错，
+    /// 不等消息收完（这里后面的字节一直不来，等收完就卡住了）。
+    #[test]
+    fn descriptors_beyond_the_header_count_stop_the_read() {
+        let (a, b) = UnixStream::pair().unwrap();
+        b.set_read_timeout(Some(std::time::Duration::from_secs(5))).unwrap();
+        let (pipe_rx, _pipe_tx) = io::pipe().unwrap();
+        let fd = pipe_rx.as_fd().as_raw_fd();
+        let mut header = [0u8; HEADER_LEN];
+        header[..4].copy_from_slice(&2u32.to_le_bytes());
+        header[4..].copy_from_slice(&1u32.to_le_bytes());
+        send_some(&a, [&header, &[]], 0, &[fd]).unwrap();
+        send_some(&a, [b"x", &[]], 0, &[fd; MAX_FDS]).unwrap();
+        let err = recv_with_fds(&b).unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::InvalidData, "{err}");
     }
 
     #[test]

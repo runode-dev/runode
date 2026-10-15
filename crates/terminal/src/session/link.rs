@@ -202,6 +202,9 @@ fn find(
     pointer: usize,
     resolve: impl Fn(&str) -> Option<PathBuf>,
 ) -> Option<(Range<usize>, LinkTarget)> {
+    if let Some(url) = find_url(chars, pointer) {
+        return Some(url);
+    }
     if !link_char(chars[pointer]) {
         return None;
     }
@@ -239,6 +242,34 @@ fn find(
         return None;
     }
     resolve_in(range.clone()).map(|path| (range, LinkTarget::Path(path)))
+}
+
+/// 在 `chars` 里找盖住第 `pointer` 个字的网址。网址里还能有括号和方括号（维基百科的
+/// `Function_(mathematics)`、IPv6 的 `http://[::1]:3000/`），一起算进来，再去掉句末的标点和没配对的
+/// 右括号：`(见 https://x/a)`、`[文字](https://x/a)` 外面那层括号不是网址的。
+fn find_url(chars: &[char], pointer: usize) -> Option<(Range<usize>, LinkTarget)> {
+    let url_char = |c: char| link_char(c) || matches!(c, '(' | ')' | '[' | ']');
+    if !url_char(chars[pointer]) {
+        return None;
+    }
+    let start = chars[..pointer].iter().rposition(|&c| !url_char(c)).map_or(0, |i| i + 1);
+    let end = chars[pointer..].iter().position(|&c| !url_char(c)).map_or(chars.len(), |i| pointer + i);
+    let mut range = start + scheme_start(&chars[start..end])?..end;
+    loop {
+        range = trim(chars, range);
+        let open = match range.end.checked_sub(1).filter(|&last| last >= range.start).map(|last| chars[last]) {
+            Some(')') => '(',
+            Some(']') => '[',
+            _ => break,
+        };
+        let close = chars[range.end - 1];
+        let count = |c: char| chars[range.clone()].iter().filter(|&&x| x == c).count();
+        if count(close) <= count(open) {
+            break;
+        }
+        range.end -= 1;
+    }
+    range.contains(&pointer).then(|| (range.clone(), LinkTarget::Url(chars[range].iter().collect())))
 }
 
 /// 能出现在网址和路径里的字。中日韩这类宽字符不算，免得把紧挨着路径的中文也吞进去。
@@ -343,6 +374,25 @@ mod tests {
         let line = "url=http://localhost:3000/";
         assert_eq!(found(line, "local", &[]), Some(("http://localhost:3000/".into(), url("http://localhost:3000/"))));
         assert_eq!(found(line, "url", &[]), None);
+    }
+
+    /// 网址里配对的括号和方括号是网址的一部分，包在网址外面的不是。
+    #[test]
+    fn a_url_keeps_its_own_brackets() {
+        let wiki = "https://en.wikipedia.org/wiki/Function_(mathematics)";
+        assert_eq!(found(&format!("see {wiki}."), "wiki", &[]), Some((wiki.into(), url(wiki))));
+        assert_eq!(found(&format!("see {wiki}"), "math", &[]), Some((wiki.into(), url(wiki))));
+        let local = "http://[::1]:3000/";
+        assert_eq!(found(&format!("at {local} now"), "::1", &[]), Some((local.into(), url(local))));
+        assert_eq!(
+            found("(see https://x.com/a)", "x.com", &[]),
+            Some(("https://x.com/a".into(), url("https://x.com/a")))
+        );
+        assert_eq!(
+            found("[doc](https://x.com/a).", "x.com", &[]),
+            Some(("https://x.com/a".into(), url("https://x.com/a")))
+        );
+        assert_eq!(found("[doc](https://x.com/a)", "doc", &[]), None);
     }
 
     #[test]

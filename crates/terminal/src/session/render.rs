@@ -193,6 +193,8 @@ impl Renderer {
             }
             if full || (y < 0 && above_fresh) || row.dirty()? {
                 let selection = row.selection()?;
+                // 这一行的高亮先挑出来，每一格只在它们里面找。
+                let highlights: Vec<&Highlight> = self.highlights.iter().filter(|h| i32::from(h.y) == y).collect();
                 let mut cell_it = self.cell_it.update(row)?;
                 let mut x = 0usize;
                 while let Some(cell) = cell_it.next() {
@@ -228,10 +230,8 @@ impl Renderer {
                     let x16 = x as u16;
                     // 宽字符的右半格跟着左半格：匹配的终点只落在宽字符的头格上。
                     let tail = read.wide == CellWide::SpacerTail;
-                    let highlight = self
-                        .highlights
-                        .iter()
-                        .find(|h| i32::from(h.y) == y && h.x0 <= x16 && (x16 <= h.x1 || (tail && x16 == h.x1 + 1)));
+                    let highlight =
+                        highlights.iter().find(|h| h.x0 <= x16 && (x16 <= h.x1 || (tail && x16 == h.x1 + 1)));
                     if let Some(highlight) = highlight {
                         let cell_bg = bg.unwrap_or(background);
                         let (hl_bg, hl_fg) = self.search_colors[usize::from(highlight.selected)];

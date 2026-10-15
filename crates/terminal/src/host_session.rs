@@ -204,7 +204,8 @@ impl HostSession {
     /// 快照里带着默认颜色和光标样式，这里不再套主题：套用会改 VT 的状态，见 `vt::apply_theme`。
     /// `settings` 只记下来，之后 `apply_theme` 拿它比较。
     pub fn from_snapshot(snapshot: &[u8], pty: Pty, settings: &TermSettings) -> Result<Self> {
-        let terminal = vt::decode_snapshot(snapshot)?;
+        let mut terminal = vt::decode_snapshot(snapshot)?;
+        recapture_report(&mut terminal);
         let size = vt::terminal_size(&terminal)?;
         let mut session = Self::with_terminal(size, pty, terminal, settings.clone())?;
         // 快照里带着标题，但不会触发标题变化的回调。按刚收到标题走一遍 `feed`，交给 agent
@@ -858,7 +859,10 @@ fn register_callbacks(
             move |term, event| {
                 let pending = effects.command_report.try_borrow_mut().ok().and_then(|mut pending| pending.take());
                 let event = match event {
-                    SemanticPrompt::InputStart => PromptEvent::InputStart,
+                    // 报告的目录当场取走：一次喂进来的输出里可能有好几轮提示符，各轮报告各的。
+                    SemanticPrompt::InputStart => {
+                        PromptEvent::InputStart(effects.shell_cwd.try_borrow_mut().ok().and_then(|mut cwd| cwd.take()))
+                    }
                     SemanticPrompt::OutputStart { .. } => PromptEvent::OutputStart(match pending {
                         Some(Some(command)) => Some(command),
                         Some(None) => {

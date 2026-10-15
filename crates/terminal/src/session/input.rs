@@ -144,7 +144,7 @@ impl Session {
     /// 按终端当前模式粘贴剪贴板文本：不安全的控制字节换成空格，开了 bracketed paste 时用
     /// 括号序列包起来，没开时换行换成回车。
     ///
-    /// 文本可能注入命令时（未开 bracketed paste 却含换行，或含 bracketed paste
+    /// 文本可能注入命令时（未开 bracketed paste 却含换行或回车，或含 bracketed paste
     /// 结束序列），除非 `allow_unsafe`，否则什么也不写并返回 `Paste::NeedsConfirmation`，
     /// 由界面向用户确认后再带 `allow_unsafe` 重试。
     ///
@@ -153,8 +153,8 @@ impl Session {
     pub fn paste(&mut self, text: &str, allow_unsafe: bool) -> Paste {
         self.before_input();
         let bracketed = self.terminal.mode(Mode::BRACKETED_PASTE).unwrap_or(false);
-        // 括号包着时换行无妨，只有结束序列能逃出括号；没包时换行就会执行命令。
-        let safe = !text.contains("\x1b[201~") && (bracketed || !text.contains('\n'));
+        // 括号包着时换行无妨，只有结束序列能逃出括号；没包时换行（回车也一样是回车键）就会执行命令。
+        let safe = !text.contains("\x1b[201~") && (bracketed || !text.contains(['\n', '\r']));
         if !safe && !allow_unsafe {
             return Paste::NeedsConfirmation;
         }

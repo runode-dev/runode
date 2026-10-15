@@ -692,6 +692,18 @@ fn a_report_split_by_the_handoff_is_adopted_and_redacted() {
     assert!(screen.contains("beforeafter"), "{screen:?}");
 }
 
+/// `HostSession::from_snapshot` 建的会话同样接得上快照停着的半条报告：剩下的部分到了以后照样采用。
+#[test]
+fn a_report_split_by_a_snapshot_is_adopted_from_the_snapshot() {
+    let (mut session, _out) = reporting_session();
+    session.feed(format!("before\x1b]6973;{}", &TOKEN[..10]).as_bytes());
+    let snapshot = session.snapshot().unwrap();
+    let (_export, pty, _new_out) = hand_over(&mut session);
+    let mut rebuilt = HostSession::from_snapshot(&snapshot, pty, &TermSettings::default()).unwrap();
+    rebuilt.feed(format!("{};path=/opt/bin\x07after", &TOKEN[10..]).as_bytes());
+    assert_eq!(rebuilt.meta().shell_path, Some("/opt/bin".into()));
+}
+
 /// 快照用不了、退回重放时，重放不带没写完的序列：输出流刚对上报告开头的几个字节就交接了，
 /// 补喂这几个字节，剩下的报告不会当成文字画上屏幕，照样采用。
 #[test]

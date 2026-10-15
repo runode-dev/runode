@@ -13,7 +13,7 @@ use std::{
 use common::{PROMPT, idle_host};
 use runode_terminal::{
     host_session::HostSession,
-    pty::{Pty, PtyEvent},
+    pty::{Pty, PtyEvent, PtySink},
 };
 use runode_types::{grid::GridSize, settings::TermSettings, shell::IntegrationMode};
 
@@ -165,6 +165,8 @@ impl Drop for RealShell {
 
 const REAL_SIZE: GridSize = GridSize { cols: 40, rows: 12, cell_width_px: 8, cell_height_px: 16 };
 const REAL_WAIT: Duration = Duration::from_secs(10);
+/// 真 shell 的集成报告带的口令。
+const REPORT_TOKEN: &str = "0123456789abcdef";
 
 /// 仓库里的集成脚本所在的目录。
 fn integration_dir() -> PathBuf {
@@ -256,7 +258,7 @@ impl RealShell {
             &launcher,
             format!(
                 "#!/bin/sh\nexec /usr/bin/env -i HOME={} PATH=/usr/bin:/bin TERM=xterm-256color LANG=en_US.UTF-8 \
-                 BASH_SILENCE_DEPRECATION_WARNING=1 RUNODE_REPORT_TOKEN=0123456789abcdef \
+                 BASH_SILENCE_DEPRECATION_WARNING=1 RUNODE_REPORT_TOKEN={REPORT_TOKEN} \
                  RUNODE_SHELL_FEATURES=cursor:steady {launch}\n",
                 quoted(home.display())
             ),
@@ -267,12 +269,25 @@ impl RealShell {
             std::fs::set_permissions(&launcher, std::fs::Permissions::from_mode(0o755)).unwrap();
         }
         let (tx, output) = mpsc::channel();
-        let sink = Box::new(move |event| match event {
-            PtyEvent::Output(data) => tx.send(data.to_vec()).is_ok(),
-            PtyEvent::Exited => false,
-        });
-        let pty =
-            Pty::spawn(REAL_SIZE, Some(launcher.to_str().unwrap()), Some(&home), IntegrationMode::Off, sink).unwrap();
+        let sink = |tx: mpsc::Sender<Vec<u8>>| -> PtySink {
+            Box::new(move |event| match event {
+                PtyEvent::Output(data) => tx.send(data.to_vec()).is_ok(),
+                PtyEvent::Exited => false,
+            })
+        };
+        // shell 由 launch.sh 起，集成和口令都是它给的；宿主那边要认这个口令，才采用 shell 的报告。
+        // 照升级时接手会话的路子交出来、带上口令再接手，读到的输出照旧进同一个通道。
+        let mut pty = Pty::spawn(
+            REAL_SIZE,
+            Some(launcher.to_str().unwrap()),
+            Some(&home),
+            IntegrationMode::Off,
+            sink(tx.clone()),
+        )
+        .unwrap();
+        let mut handoff = pty.release().unwrap();
+        handoff.report_token = Some(REPORT_TOKEN.into());
+        let pty = Pty::adopt(handoff, sink(tx)).unwrap();
         let session = HostSession::new(REAL_SIZE, pty, None, &TermSettings::default()).unwrap();
         let mut real =
             Self { session, output, prompt, idle, prompts: 0, name: name.into(), raw: Vec::new(), home, syntax };
@@ -387,6 +402,31 @@ fn real_bash_keeps_a_prompt_command_ending_in_a_semicolon() {
     shell.run("echo $ran");
     assert_eq!(shell.output(1), "yes\n");
     assert!(rfind(&shell.raw, b"syntax error").is_none(), "{}", shell.screen());
+}
+
+/// 用户的 PROMPT_COMMAND 看到的 $? 是上一条命令的退出码，不是集成记下退出码那一步的。
+#[test]
+fn real_bash_prompt_command_sees_the_exit_status() {
+    let rc = "PS1='[b]\\$ '\nPROMPT_COMMAND='seen=$?'\n";
+    let Some(mut shell) = RealShell::start("bash", "bash-prompt-status", rc, "[b]$", &["[b]$"]) else { return };
+    shell.run("false");
+    shell.run("echo $seen");
+    assert_eq!(shell.output(1), "1\n");
+}
+
+/// bash 5.1 起数组形式的 PROMPT_COMMAND 每个元素都跑，都看到上一条命令的退出码；后面的元素改了
+/// PS1，提示符照样标出来。
+#[test]
+fn real_bash_wraps_an_array_prompt_command() {
+    if !bash_at_least(5, 1) {
+        return;
+    }
+    let rc = "PROMPT_COMMAND=('seen=$?' 'PS1=\"[b]\\$ \"')\n";
+    let Some(mut shell) = RealShell::start("bash", "bash-prompt-array", rc, "[b]$", &["[b]$"]) else { return };
+    shell.run("false");
+    shell.run("echo $seen");
+    assert_eq!(shell.output(1), "1\n");
+    assert_eq!(shell.output(2), "");
 }
 
 #[test]
@@ -548,6 +588,20 @@ fn real_fish_commands_are_read() {
     read_commands_from(RealShell::start("fish", "fish", &rc, "[f]>", &["[f]>", "<r>"]));
 }
 
+/// 包起来的提示符和右侧提示符看到的 $status、$pipestatus 是上一条命令的。
+#[test]
+fn real_fish_prompts_see_the_exit_status() {
+    let rc = "set -g fish_greeting\n\
+              function fish_prompt; set -g seen $status $pipestatus; echo -n '[f]> '; end\n\
+              function fish_right_prompt; set -g right $status; echo -n '<r>'; end\n";
+    let Some(mut shell) = RealShell::start("fish", "fish-prompt-status", rc, "[f]>", &["[f]>", "<r>"]) else {
+        return;
+    };
+    shell.run("true | false");
+    shell.run("echo $seen $right");
+    assert_eq!(shell.output(1), "1 0 1 1\n");
+}
+
 #[test]
 fn real_fish_cursor_follows_the_prompt() {
     let Some(mut shell) = RealShell::start("fish", "fish-cursor", &fish_rc(""), "[f]>", &["[f]>"]) else { return };
@@ -562,7 +616,8 @@ fn real_fish_reloads_with_the_integration() {
     );
 }
 
-/// 集成加载时报告 `runode-reload`，提示符前报告百分号编码的目录，失败的命令报告退出码。
+/// 集成加载时报告 `runode-reload`，提示符前报告百分号编码的目录，失败的命令报告退出码；宿主
+/// 认得这些报告，把失败的命令记作在报告的目录里跑完、退出码是 1。
 fn reports_functions_and_exit_status(shell: Option<RealShell>, fail: &str) {
     let Some(mut shell) = shell else { return };
     shell.wait_for_bytes("runode-reload", 0, b"\x1b]6973;0123456789abcdef;functions=runode-reload");
@@ -576,6 +631,11 @@ fn reports_functions_and_exit_status(shell: Option<RealShell>, fail: &str) {
     let start = shell.raw.len();
     shell.run(fail);
     shell.wait_for_bytes("the exit status", start, b"\x1b]133;D;1");
+    let finished = shell.session.take_commands();
+    let failed = finished.iter().find(|command| command.cmd == fail);
+    assert_eq!(failed.map(|command| command.exit), Some(Some(1)), "{}: {finished:?}", shell.name);
+    let cwd = failed.and_then(|command| command.cwd.as_ref()?.canonicalize().ok());
+    assert_eq!(cwd, dir.canonicalize().ok(), "{}", shell.name);
 }
 
 /// elvish 的提示符：`[e]>`，没有右侧提示符，加上 `extra`。

@@ -36,7 +36,8 @@ pub(super) struct Effects {
     pub(super) prompts: RefCell<Vec<PromptEvent>>,
     /// shell 集成用 `SHELL_REPORT` 报告的 shell 自己的 PATH，对外见 `SessionMeta::shell_path`。
     pub(super) shell_path: RefCell<Option<std::ffi::OsString>>,
-    /// shell 集成在这次显示提示符前报告的目录，由下一个 `PromptEvent::InputStart` 取走。
+    /// shell 集成在这次显示提示符前报告的目录，由紧接着的输入开始（OSC 133;B）当场取走，放进
+    /// `PromptEvent::InputStart`。
     pub(super) shell_cwd: RefCell<Option<std::path::PathBuf>>,
     /// shell 集成用 `SHELL_REPORT` 报告的函数名，对外见 `SessionMeta::shell_names`。
     /// 和交出去的状态共享同一份，报告变了才复制一份来改。
@@ -123,8 +124,9 @@ impl Effects {
 
 /// `Effects::prompts` 里的一步。
 pub(super) enum PromptEvent {
-    /// 提示符画完，shell 等着输入（OSC 133;B）。
-    InputStart,
+    /// 提示符画完，shell 等着输入（OSC 133;B），带着 shell 集成在这一轮提示符前报告的目录（没有
+    /// 报告时为 `None`）。
+    InputStart(Option<std::path::PathBuf>),
     /// 命令开始运行（OSC 133;C），带着运行完时要报告的命令。前面没有带口令的 `command` 报告
     /// （可能是伪造的）、或者报告没带原文又没能从屏幕上读到时为 `None`，不报。
     OutputStart(Option<String>),
@@ -184,8 +186,8 @@ impl HostSession {
                 // 之后临时切进了插件目录，这时再读 shell 的目录就错了。同一轮提示符里后面的输入
                 // 开始（右提示符也标一个、续行提示符、重画）不带报告，沿用这一轮报告的；这一轮
                 // 没报告过（拿不到口令的 shell）才现读。
-                PromptEvent::InputStart => {
-                    if let Some(cwd) = self.effects.shell_cwd.take() {
+                PromptEvent::InputStart(reported) => {
+                    if let Some(cwd) = reported {
                         self.prompt_cwd = Some(cwd);
                         self.prompt_reported = true;
                     } else if !self.prompt_reported {
@@ -395,6 +397,23 @@ mod tests {
         session.feed(PROMPT);
         session.take_commands();
         assert_eq!(session.prompt_cwd(), session.live_cwd());
+    }
+
+    /// 一次喂进来的输出里有好几轮提示符时，各轮的命令记在各自报告的目录里。
+    #[test]
+    fn each_prompt_round_in_one_feed_keeps_its_own_directory() {
+        let mut session = reporting_host();
+        let round = |cwd: &str, command: &str| {
+            format!(
+                "\x1b]6973;{TOKEN};cwd={cwd}\x07\x1b]133;A\x07$ \x1b]133;B\x07{command}\r\n\
+                 \x1b]6973;{TOKEN};command={command}\x07\x1b]133;C\x07\x1b]133;D;0\x07"
+            )
+        };
+        session.feed(format!("{}{}", round("/a", "one"), round("/b", "two")).as_bytes());
+        let commands = session.take_commands();
+        let got: Vec<_> = commands.iter().map(|c| (c.cmd.as_str(), c.cwd.as_deref())).collect();
+        let (a, b) = (std::path::Path::new("/a"), std::path::Path::new("/b"));
+        assert_eq!(got, [("one", Some(a)), ("two", Some(b))]);
     }
 
     #[test]

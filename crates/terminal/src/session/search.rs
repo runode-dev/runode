@@ -2,7 +2,7 @@
 
 use libghostty_vt::{
     search::{MatchBuffer, Search},
-    terminal::{PointSpace, Terminal},
+    terminal::{Point, PointCoordinate, PointSpace, Terminal},
 };
 
 use super::{Session, log_err, render::Highlight};
@@ -27,6 +27,8 @@ impl Session {
             search.set_needle(&mut self.terminal, needle.as_bytes())?;
             search.run(&mut self.terminal)?;
             search.select_next(&mut self.terminal)?;
+            // 选中的匹配可能在视口最后一行：平滑滚动错开的半行会把它挡掉一截。
+            self.scroll_offset = 0.;
         }
         Ok(())
     }
@@ -39,6 +41,8 @@ impl Session {
         let result = search.run(&mut self.terminal).and_then(|()| {
             if backward { search.select_prev(&mut self.terminal) } else { search.select_next(&mut self.terminal) }
         });
+        // 同 `try_search`，不留平滑滚动错开的半行。
+        self.scroll_offset = 0.;
         log_err("search step", result);
     }
 
@@ -71,9 +75,19 @@ pub(super) fn search_highlights(
     for found in snapshot.viewport_matches(&mut matches)? {
         let start = terminal.point_from_grid_ref(&found.start(), PointSpace::Viewport)?;
         let end = terminal.point_from_grid_ref(&found.end(), PointSpace::Viewport)?;
-        // 一端在视口外的匹配按视口边缘截断；两端都在外面的不画。
+        // 一端在视口外的匹配按视口边缘截断。两端都在外面的，列出来可能只因为和视口在同一页上，
+        // 整个在视口上面或下面，不画；也可能比视口还长、盖住了整个视口，整个视口都画。
         let ((x0, y0), (x1, y1)) = match (start, end) {
-            (None, None) => continue,
+            (None, None) => {
+                let screen = |grid_ref| terminal.point_from_grid_ref(grid_ref, PointSpace::Screen);
+                let top = terminal.grid_ref(Point::Viewport(PointCoordinate { x: 0, y: 0 }))?;
+                match (screen(&found.start())?, screen(&found.end())?, screen(&top)?) {
+                    (Some(start), Some(end), Some(top)) if start.y < top.y && end.y > top.y => {
+                        ((0, 0), (cols.saturating_sub(1), u32::from(rows.saturating_sub(1))))
+                    }
+                    _ => continue,
+                }
+            }
             (start, end) => (
                 start.map_or((0, 0), |p| (p.x, p.y)),
                 end.map_or((cols.saturating_sub(1), u32::from(rows.saturating_sub(1))), |p| (p.x, p.y)),

@@ -74,6 +74,14 @@ fn bad_writes_are_dropped() {
     // 丢掉的不影响之后的。
     session.feed(b"\x1b]52;c;aGk=\x07");
     assert_eq!(session.take_clipboard(), [write("hi")]);
+    // 字节数没超，但不是 UTF-8 的字节换成 U+FFFD 以后超了，也丢掉。
+    let mut invalid = Vec::new();
+    encode_base64(&vec![0xff; MAX_CLIPBOARD_BYTES / 3 + 1], &mut invalid);
+    assert!(requests(&sequence(&invalid)).is_empty());
+    let mut invalid = Vec::new();
+    encode_base64(&vec![0xff; MAX_CLIPBOARD_BYTES / 3], &mut invalid);
+    let written = requests(&sequence(&invalid));
+    assert!(matches!(&written[..], [ClipboardRequest::Write(text)] if text.len() <= MAX_CLIPBOARD_BYTES));
 }
 
 #[test]

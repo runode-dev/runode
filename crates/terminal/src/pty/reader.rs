@@ -12,7 +12,7 @@ use std::{
     thread::{self, JoinHandle},
 };
 
-use anyhow::{Context as _, Result};
+use anyhow::Result;
 
 use super::{
     Gate, PtyEvent, PtySink,
@@ -40,6 +40,8 @@ pub(super) struct Reader {
     state: Arc<Mutex<State>>,
     /// 读线程；叫停后结束时交回 `PtySink`，读到 EOF 或者 `PtySink` 不要了时交回 `None`。
     thread: Option<JoinHandle<Option<PtySink>>>,
+    /// `resume` 重新起读线程没起成时收回来的 `PtySink`，留给下次 `resume`。
+    parked: Option<PtySink>,
 }
 
 impl Reader {
@@ -52,27 +54,38 @@ impl Reader {
         sink: PtySink,
         gate: Option<Arc<Gate>>,
     ) -> Result<Self> {
-        let mut reader = Self { master, notifier, state: Arc::new(Mutex::new(State::Running)), thread: None };
+        let mut reader =
+            Self { master, notifier, state: Arc::new(Mutex::new(State::Running)), thread: None, parked: None };
         reader.spawn(sink, gate)?;
         Ok(reader)
     }
 
+    /// 起读线程。起不成时 `PtySink` 收回到 `parked`：交给线程的闭包随失败一起丢掉，`PtySink`
+    /// 先放在两边共用的格子里，线程起来以后才取走。
     fn spawn(&mut self, sink: PtySink, gate: Option<Arc<Gate>>) -> Result<()> {
-        let (master, notifier, state) = (self.master.clone(), self.notifier.clone(), self.state.clone());
-        let thread = thread::Builder::new()
-            .name("pty-reader".into())
-            .spawn(move || {
-                if let Some(gate) = gate
-                    && !gate.wait()
-                {
-                    *state.lock().unwrap_or_else(PoisonError::into_inner) = State::Stopped;
-                    return Some(sink);
-                }
-                read_loop(&master, &notifier, &state, sink)
-            })
-            .context("failed to start pty reader thread")?;
-        self.thread = Some(thread);
-        Ok(())
+        let slot = Arc::new(Mutex::new(Some(sink)));
+        let (master, notifier, state, taken) =
+            (self.master.clone(), self.notifier.clone(), self.state.clone(), slot.clone());
+        let spawned = thread::Builder::new().name("pty-reader".into()).spawn(move || {
+            let sink = taken.lock().unwrap_or_else(PoisonError::into_inner).take()?;
+            if let Some(gate) = gate
+                && !gate.wait()
+            {
+                *state.lock().unwrap_or_else(PoisonError::into_inner) = State::Stopped;
+                return Some(sink);
+            }
+            read_loop(&master, &notifier, &state, sink)
+        });
+        match spawned {
+            Ok(thread) => {
+                self.thread = Some(thread);
+                Ok(())
+            }
+            Err(err) => {
+                self.parked = slot.lock().unwrap_or_else(PoisonError::into_inner).take();
+                Err(anyhow::Error::new(err).context("failed to start pty reader thread"))
+            }
+        }
     }
 
     fn lock(&self) -> MutexGuard<'_, State> {
@@ -94,7 +107,7 @@ impl Reader {
     }
 
     /// 接着读：叫停后线程还没看到时撤回叫停，已经停下时用交回的 `PtySink` 重新起读线程。读到
-    /// EOF 已经结束的不再起。
+    /// EOF 已经结束的不再起。起线程失败时还算停着，`PtySink` 留着，再调一次接着试。
     pub(super) fn resume(&mut self) -> Result<()> {
         let mut state = self.lock();
         match *state {
@@ -105,9 +118,9 @@ impl Reader {
             }
             State::Stopped => {
                 drop(state);
-                if let Some(sink) = self.join() {
-                    *self.lock() = State::Running;
+                if let Some(sink) = self.parked.take().or_else(|| self.join()) {
                     self.spawn(sink, None)?;
+                    *self.lock() = State::Running;
                 }
                 Ok(())
             }
@@ -157,8 +170,9 @@ fn read_loop(master: &OwnedFd, notifier: &Notifier, state: &Mutex<State>, mut si
     let mut fds = [poll_entry(master.as_raw_fd()), poll_entry(notifier.fd().as_raw_fd())];
     // 拿不到退出通知时定时问一次。
     let exit_poll = notifier.polls_exit();
-    // shell 退出后还能再读几次；为 `None` 时 shell 还在，或者不看 shell 退不退出。
-    let mut draining: Option<usize> = None;
+    // shell 退出后还能再读几次；为 `None` 时 shell 还在，或者不看 shell 退不退出。开始读之前它
+    // 可能已经退出了（接手时进程已经不在，或者叫停后重新起的线程），退出通知不会再来，先问一次。
+    let mut draining: Option<usize> = notifier.has_exited().then_some(0);
     loop {
         let timeout = match draining {
             Some(_) => 0,
@@ -321,6 +335,21 @@ mod tests {
         assert_eq!(output(&rx).as_deref(), Some(&b"still"[..]));
         drop(pipe_tx);
         assert!(matches!(rx.recv_timeout(Duration::from_secs(5)), Ok(PtyEvent::Exited)));
+    }
+
+    /// 开始读之前看着的进程就已经退出了（退出通知不会再来），描述符那头还开着、读不到 EOF，
+    /// 也报告退出。
+    #[test]
+    fn a_process_gone_before_reading_ends_reading() {
+        let mut child = std::process::Command::new("/bin/sleep").arg("30").spawn().unwrap();
+        let pid = libc::pid_t::try_from(child.id()).unwrap();
+        child.kill().unwrap();
+        child.wait().unwrap();
+        let (pipe_rx, pipe_tx) = pipe();
+        let (_reader, rx) = start(pipe_rx.into(), Some(pid));
+        assert!(matches!(rx.recv_timeout(Duration::from_secs(5)), Ok(PtyEvent::Exited)));
+        // 写端一直开着。
+        drop(pipe_tx);
     }
 
     /// 看着的进程退出时，描述符那头还开着、读不到 EOF，也读完已有的输出后报告退出。

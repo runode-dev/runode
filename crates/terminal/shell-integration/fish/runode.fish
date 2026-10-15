@@ -66,22 +66,23 @@ set -g __runode_integrated 1
 # 用户的 fish_prompt、fish_right_prompt 在这个脚本之后才定义，第一次显示提示符前再把它们
 # 包起来，在前后加上提示符的开始和结束标记。右侧提示符画在用户输入的同一行末尾：不能用
 # 133;A，它会先换到新的一行；画完要回到用户输入，之后敲的字才不会被当成提示符。
+#
+# 原来的提示符最先跑、输出先收起来，和标记一起打印：先打印标记的话 $status、$pipestatus 就成了
+# printf 的，提示符显示不出上一条命令失败。fish 本来就是收起提示符的输出再画，收一道不改变什么。
 function __runode_wrap_prompt --on-event fish_prompt
     functions -e __runode_wrap_prompt
     if functions -q fish_right_prompt
         functions -c fish_right_prompt __runode_original_right_prompt
         function fish_right_prompt
-            printf '\e]133;P;k=r\a'
-            __runode_original_right_prompt
-            printf '\e]133;B\a'
+            set -l prompt (__runode_original_right_prompt | string collect --no-trim-newlines)
+            printf '\e]133;P;k=r\a%s\e]133;B\a' "$prompt"
         end
     end
     functions -q fish_prompt; or return
     functions -c fish_prompt __runode_original_prompt
     function fish_prompt
-        printf '\e]133;A;cl=line;redraw=1\a'
-        __runode_original_prompt
-        printf '\e]133;B\a'
+        set -l prompt (__runode_original_prompt | string collect --no-trim-newlines)
+        printf '\e]133;A;cl=line;redraw=1\a%s\e]133;B\a' "$prompt"
     end
 end
 
