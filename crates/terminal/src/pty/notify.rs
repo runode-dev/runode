@@ -13,10 +13,7 @@
 use std::os::fd::FromRawFd;
 use std::{
     os::fd::{AsFd, AsRawFd, BorrowedFd, OwnedFd},
-    sync::{
-        Arc,
-        atomic::{AtomicBool, Ordering},
-    },
+    sync::atomic::{AtomicBool, Ordering},
     thread,
     time::{Duration, Instant},
 };
@@ -87,10 +84,12 @@ impl Notifier {
     }
 
     /// 结束 shell：先给终端的前台进程组 `foreground` 发 SIGHUP（shell 已经退出、前台程序还在时
-    /// 也发），再给 shell 的进程组发 SIGHUP，等一会儿还没退出就 SIGKILL。等的那段在单独的线程
-    /// 里，不阻塞调用方。shell 已经退出的不再给它发信号，免得进程号被别的进程重用后误杀；
-    /// `foreground` 由调用方当场从终端读出、确认过属于 shell 的会话，见 `Pty` 的 `Drop`。
-    pub(super) fn terminate(self: Arc<Self>, foreground: Option<libc::pid_t>) {
+    /// 也发），再给 shell 的进程组发 SIGHUP，等一会儿还没退出就 SIGKILL。和自己的子进程那支的
+    /// `kill` 一样就在调用方的线程里等（最多 `HANGUP_GRACE`）：调用方是会话线程，宿主关停时等会话
+    /// 线程结束，SIGKILL 就一定在进程退出前发出，不理 SIGHUP 的 shell 不会活下来。shell 已经退出的
+    /// 不再给它发信号，免得进程号被别的进程重用后误杀；`foreground` 由调用方当场从终端读出、确认过
+    /// 属于 shell 的会话，见 `Pty` 的 `Drop`。
+    pub(super) fn terminate(&self, foreground: Option<libc::pid_t>) {
         let Some(pid) = self.pid else {
             return;
         };
@@ -102,21 +101,16 @@ impl Notifier {
         }
         // shell 启动时 `setsid` 成了会话首进程，进程组号就是它的 pid。
         hangup_group(pid);
-        let spawned = thread::Builder::new().name("pty-terminator".into()).spawn(move || {
-            let until = Instant::now() + HANGUP_GRACE;
-            while Instant::now() < until {
-                if self.has_exited() {
-                    return;
-                }
-                thread::sleep(Duration::from_millis(20));
+        let until = Instant::now() + HANGUP_GRACE;
+        while Instant::now() < until {
+            if self.has_exited() {
+                return;
             }
-            if !self.has_exited() {
-                // SAFETY: 只是给进程发信号；上面刚确认它还没退出。
-                unsafe { libc::kill(pid, libc::SIGKILL) };
-            }
-        });
-        if let Err(err) = spawned {
-            tracing::warn!("failed to start the pty terminator thread: {err}");
+            thread::sleep(Duration::from_millis(20));
+        }
+        if !self.has_exited() {
+            // SAFETY: 只是给进程发信号；上面刚确认它还没退出。
+            unsafe { libc::kill(pid, libc::SIGKILL) };
         }
     }
 }
@@ -329,9 +323,38 @@ mod tests {
         use std::os::unix::process::{CommandExt as _, ExitStatusExt as _};
 
         let mut child = Command::new("/bin/sleep").arg("30").stdin(Stdio::null()).process_group(0).spawn().unwrap();
-        let notifier = Arc::new(Notifier::new(Some(pid_of(&child))).unwrap());
+        let notifier = Notifier::new(Some(pid_of(&child))).unwrap();
         notifier.terminate(None);
         assert_eq!(child.wait().unwrap().signal(), Some(libc::SIGHUP));
+    }
+
+    /// 不理 SIGHUP 的进程，`terminate` 返回时 SIGKILL 已经发出：调用方的线程一结束就退出的宿主
+    /// 也不会把它留下。
+    #[test]
+    fn terminate_kills_a_process_ignoring_sighup_before_returning() {
+        use std::os::unix::process::{CommandExt as _, ExitStatusExt as _};
+
+        // 忽略的信号经 exec 仍然忽略。
+        let mut child = Command::new("/bin/sh")
+            .args(["-c", "trap '' HUP; exec /bin/sleep 30"])
+            .stdin(Stdio::null())
+            .process_group(0)
+            .spawn()
+            .unwrap();
+        let notifier = Notifier::new(Some(pid_of(&child))).unwrap();
+        // 等 sh 设好 trap、换成 sleep，不然 SIGHUP 在那之前就结束了它。
+        thread::sleep(Duration::from_millis(200));
+        notifier.terminate(None);
+        // 远短于 `HANGUP_GRACE`：SIGKILL 要是还在别的线程里等着发，这里等不到退出。
+        let until = Instant::now() + HANGUP_GRACE / 2;
+        let status = loop {
+            if let Some(status) = child.try_wait().unwrap() {
+                break status;
+            }
+            assert!(Instant::now() < until, "still running after terminate returned");
+            thread::sleep(Duration::from_millis(5));
+        };
+        assert_eq!(status.signal(), Some(libc::SIGKILL));
     }
 
     /// shell 已经退出、前台程序还在时，前台进程组照样收到 SIGHUP。
@@ -342,7 +365,7 @@ mod tests {
         let mut shell = sleeper();
         let mut foreground =
             Command::new("/bin/sleep").arg("30").stdin(Stdio::null()).process_group(0).spawn().unwrap();
-        let notifier = Arc::new(Notifier::new(Some(pid_of(&shell))).unwrap());
+        let notifier = Notifier::new(Some(pid_of(&shell))).unwrap();
         shell.kill().unwrap();
         shell.wait().unwrap();
         eventually("the shell's exit", || notifier.has_exited());

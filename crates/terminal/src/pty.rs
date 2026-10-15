@@ -957,7 +957,7 @@ impl Drop for Pty {
             // 收到 SIGHUP。
             Some(Shell::Adopted(pid)) => {
                 let foreground = self.master.as_ref().and_then(|master| shell_foreground(master.as_fd(), pid));
-                self.notifier.clone().terminate(foreground);
+                self.notifier.terminate(foreground);
             }
             // 还没启动，或者已经交出去了。
             None => {}

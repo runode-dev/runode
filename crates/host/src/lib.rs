@@ -100,6 +100,8 @@ struct Shared {
     clipboard_patience: Mutex<Duration>,
     /// 任务板，见 `todos`；定时的线程也拿着一份。锁的先后：拿着它可以再拿 `peers` 和 `registry`。
     todos: Arc<todos::Todos>,
+    /// 还没结束的会话线程，要退出时等它们杀掉 shell，见 `session::Threads`。
+    session_threads: Arc<session::Threads>,
 }
 
 /// 会话、主题和剪贴板的规矩放在同一把锁下：新会话加进来和换主题、改规矩不会互相错过，见
@@ -152,6 +154,16 @@ impl Shared {
 
     /// 同 `spawn`，这个会话的 shell 另外设上 `env` 里的环境变量。
     fn spawn_with(&self, options: SpawnOptions, env: &[(&str, &str)]) -> Result<SessionId> {
+        // 已经不开了的当场拒绝，不白起 shell；还开的在同一把锁里记上一个会话线程，开完（登记好、或者被拒绝
+        // 后叫它结束）前一直算着：`Host::run_until_idle` 置上 `stop` 后等会话线程都结束，置上之前开始开的
+        // 会话一定等得到，开好时又看得到 `stop`，被拒绝、结束，shell 不会在进程退出后留下。
+        let _spawning = {
+            let peers = self.peers();
+            if let Some(refused) = refusal(&peers) {
+                anyhow::bail!(refused);
+            }
+            self.session_threads.enter()
+        };
         let id = SessionId::random()?;
         let (settings, generation) = {
             let registry = self.registry();
@@ -172,12 +184,7 @@ impl Shared {
         // 锁的先后：拿着 `peers` 再拿 `registry`；交接开始时在同一把锁里定下要交的会话，要退出时在同一把
         // 锁里置上 `stop`、清空登记表（见 `Shared::shut_down`）。
         let peers = self.peers();
-        let refused = match peers.stop {
-            Some(Stopped::Handoff) => Some("the host is being upgraded; try again in a moment"),
-            Some(Stopped::Idle | Stopped::Shutdown) => Some("the host is shutting down"),
-            None => peers.handoff.is_some().then_some("the host is being upgraded; try again in a moment"),
-        };
-        if let Some(refused) = refused {
+        if let Some(refused) = refusal(&peers) {
             drop(peers);
             handle.send(session::Inbox::Kill);
             anyhow::bail!(refused);
@@ -204,7 +211,8 @@ impl Shared {
         let ui = server::UiPort::new(self.me.clone());
         let clipboard = self.registry().clipboard;
         let read_patience = *self.clipboard_patience.lock().unwrap_or_else(PoisonError::into_inner);
-        session::Setup { id, settings, env, ui, clipboard, read_patience }
+        let alive = self.session_threads.enter();
+        session::Setup { id, settings, env, ui, clipboard, read_patience, alive }
     }
 
     /// 改剪贴板的规矩，告诉每个会话；和现在的一样时什么都不做。
@@ -249,6 +257,15 @@ impl Shared {
     }
 }
 
+/// 现在还开不开新会话，不开时为什么，见 `Shared::spawn`。
+fn refusal(peers: &server::Peers) -> Option<&'static str> {
+    match peers.stop {
+        Some(Stopped::Handoff) => Some("the host is being upgraded; try again in a moment"),
+        Some(Stopped::Idle | Stopped::Shutdown) => Some("the host is shutting down"),
+        None => peers.handoff.is_some().then_some("the host is being upgraded; try again in a moment"),
+    }
+}
+
 impl Host {
     /// 一个还没有会话的宿主：主题是默认的。`build` 是这次构建的标识，连上来的前端
     /// 的构建一样时才给快照，见 `AttachMode`；快照的格式版本也在这里算好。
@@ -269,6 +286,7 @@ impl Host {
             handoff_deadline: Mutex::new(handoff::DEFAULT_DEADLINE),
             clipboard_patience: Mutex::new(session::CLIPBOARD_READ_PATIENCE),
             todos: Arc::default(),
+            session_threads: Arc::default(),
         };
         Self { shared: Arc::new_cyclic(shared) }
     }

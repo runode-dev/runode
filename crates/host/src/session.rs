@@ -227,6 +227,55 @@ pub(crate) struct Setup {
     pub(crate) clipboard: ClipboardAccess,
     /// 读剪贴板最多等界面多久，见 `Host::set_clipboard_read_patience`。
     pub(crate) read_patience: Duration,
+    /// 会话线程拿着它，线程结束（`Pty` 丢掉、shell 杀掉）时才放开，见 `Threads`。
+    pub(crate) alive: Alive,
+}
+
+/// 还没结束的会话线程（连正在开的）有几个。shell 是会话线程丢掉 `Pty` 时杀的，`Inbox::Kill` 只是叫它
+/// 结束；宿主要退出时等它们都结束再走（`Host::run_until_idle`），不然进程先退出，忽略 SIGHUP 的 shell
+/// 只收到内核那一声 SIGHUP，活了下来。
+#[derive(Default)]
+pub(crate) struct Threads {
+    live: Mutex<usize>,
+    ended: Condvar,
+}
+
+impl Threads {
+    /// 记上一个会话线程，丢掉返回的 `Alive` 时算它结束。
+    pub(crate) fn enter(self: &Arc<Self>) -> Alive {
+        *self.live.lock().unwrap_or_else(PoisonError::into_inner) += 1;
+        Alive(self.clone())
+    }
+
+    /// 等所有会话线程结束，最多等到 `deadline`，返回还没结束的个数。
+    pub(crate) fn wait_until(&self, deadline: Instant) -> usize {
+        let mut live = self.live.lock().unwrap_or_else(PoisonError::into_inner);
+        while *live > 0 {
+            let left = deadline.saturating_duration_since(Instant::now());
+            if left.is_zero() {
+                break;
+            }
+            live = self.ended.wait_timeout(live, left).map_or_else(|err| err.into_inner().0, |(live, _)| live);
+        }
+        *live
+    }
+
+    /// 测试用：现在记着几个。
+    #[cfg(test)]
+    pub(crate) fn live(&self) -> usize {
+        *self.live.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+}
+
+/// `Threads` 里记着的一个会话线程，丢掉时算它结束。会话线程里第一个放进局部变量，最后一个丢掉，
+/// 排在 `Runner`（和它的 `Pty`）后面。
+pub(crate) struct Alive(Arc<Threads>);
+
+impl Drop for Alive {
+    fn drop(&mut self) {
+        *self.0.live.lock().unwrap_or_else(PoisonError::into_inner) -= 1;
+        self.0.ended.notify_all();
+    }
 }
 
 /// 别的终端里的程序对会话做了什么，见 `Inbox::Driven`。
@@ -309,7 +358,7 @@ impl Handle {
 /// 开会话：在调用的线程里打开伪终端（`start` 时连 shell 一起启动），错误当场返回；再起会话线程，
 /// 等它把 `HostSession` 建好。
 pub(crate) fn spawn(setup: Setup, options: SpawnOptions) -> Result<Handle> {
-    let Setup { id, settings, env, ui, clipboard, read_patience } = setup;
+    let Setup { id, settings, env, ui, clipboard, read_patience, alive } = setup;
     let (inbox, rx) = mpsc::channel();
     let credits = Arc::new(Credits::default());
     let sink = pty_sink(&inbox, &credits);
@@ -327,6 +376,8 @@ pub(crate) fn spawn(setup: Setup, options: SpawnOptions) -> Result<Handle> {
     thread::Builder::new()
         .name(format!("session-{id}"))
         .spawn(move || {
+            // 最后丢掉，排在 `Pty` 后面，见 `Alive`。
+            let _alive = alive;
             pty::set_current_thread_interactive();
             // 线程结束时放开读线程，免得它一直等着积压的块被处理。
             let _close = CloseOnDrop(credits.clone());
@@ -365,7 +416,7 @@ fn pty_sink(inbox: &mpsc::Sender<Inbox>, credits: &Arc<Credits>) -> pty::PtySink
 /// 停着、从没开过闸的 `Pty` 直接丢掉其实也不结束 shell（见 `Pty::adopt_paused`），明着交回是把
 /// 「不接手了」说清楚、出错时记一笔，不靠丢掉时对停着的 `Pty` 的特殊处理。
 pub(crate) fn adopt(setup: Setup, adopted: Adopted) -> Result<Adopting> {
-    let Setup { id, settings: _, env: _, ui, clipboard, read_patience } = setup;
+    let Setup { id, settings: _, env: _, ui, clipboard, read_patience, alive } = setup;
     let Adopted { handoff, export, snapshot, replay, redactor, shell } = adopted;
     // 交出时记着谁在操作它的，接手后照样记着：用户再打字时要清掉。
     let driven = Arc::new(Mutex::new(export.meta.driver.is_some()));
@@ -379,6 +430,8 @@ pub(crate) fn adopt(setup: Setup, adopted: Adopted) -> Result<Adopting> {
     let killed = Arc::new(AtomicBool::new(false));
     let killed_flag = killed.clone();
     let spawned = thread::Builder::new().name(format!("session-{id}")).spawn(move || {
+        // 最后丢掉，排在 `Pty` 后面，见 `Alive`。
+        let _alive = alive;
         pty::set_current_thread_interactive();
         let _close = CloseOnDrop(credits.clone());
         let Ok(pty) = take.recv() else { return };

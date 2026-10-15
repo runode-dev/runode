@@ -765,6 +765,32 @@ fn shutdown_ends_a_standalone_host() {
     }
 }
 
+/// 单独跑的宿主收到 `Shutdown` 后，等会话线程杀掉 shell 才从 `run_until_idle` 返回：shell 是会话线程丢掉
+/// PTY 时杀的，不等的话进程先退出，忽略 SIGHUP 的 shell 只收到内核那一声 SIGHUP，活了下来。
+#[test]
+fn shutdown_waits_for_shells_that_ignore_sighup() {
+    let dir = temp_dir("shutdown-hup");
+    let (host, socket) = listen(&dir);
+    let stopped = {
+        let (tx, rx) = mpsc::channel();
+        thread::spawn(move || tx.send(host.run_until_idle(Duration::from_secs(60))));
+        rx
+    };
+    let marker = format!("{}{}", std::process::id(), 41);
+    let mut cli = Peer::hello(&socket, false);
+    cli.spawn(&script(&dir, "nohup.sh", &format!("trap '' HUP\nexec /bin/sleep {marker}")));
+    let deadline = Instant::now() + WAIT;
+    while !running(&format!("sleep {marker}")) {
+        assert!(Instant::now() < deadline, "the session did not start");
+        thread::sleep(Duration::from_millis(20));
+    }
+    cli.send(&ClientMsg::Shutdown { kill_sessions: true });
+    cli.until_closed();
+    assert_eq!(stopped.recv_timeout(WAIT), Ok(Stopped::Shutdown));
+    // 返回时就该没了，不再等：进程这时就要退出。
+    assert!(!running(&format!("sleep {marker}")), "the shell was still running when the host stopped");
+}
+
 /// 发 `Shutdown` 的连接一时不读、写线程卡着时，`run_until_idle` 等它把 `Goodbye` 写出去才返回（最多等一会儿），
 /// 不是一收到就撤掉这条连接的登记、当作没有连接了马上返回，单独跑的进程随之退出，`Goodbye` 没写出去。
 #[test]

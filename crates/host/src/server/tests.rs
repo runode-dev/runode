@@ -393,3 +393,57 @@ fn a_stopping_host_opens_no_more_sessions() {
     assert!(host.shared.spawn(options("/bin/cat")).is_err());
     assert!(host.shared.registry().sessions.is_empty());
 }
+
+/// 要退出时正有会话在开（比如没有界面时另起的线程开终端）：`run_until_idle` 等它开好、被拒绝、杀掉 shell
+/// 才返回，不先走，留下进程退出后才起来的 shell。
+#[test]
+fn stopping_waits_for_a_session_being_opened() {
+    use std::os::unix::fs::PermissionsExt as _;
+
+    let dir = std::env::temp_dir().join(format!("rnh-{}-opening", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let marker = format!("{}{}", std::process::id(), 43);
+    let shell = dir.join("nohup.sh");
+    std::fs::write(&shell, format!("#!/bin/sh\ntrap '' HUP\nexec /bin/sleep {marker}\n")).unwrap();
+    std::fs::set_permissions(&shell, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let shell = shell.to_string_lossy().into_owned();
+    let running = || {
+        std::process::Command::new("pgrep")
+            .args(["-f", &format!("sleep {marker}")])
+            .output()
+            .is_ok_and(|out| out.status.success())
+    };
+
+    let host = Host::new(BuildId("test".into()));
+    // `Shared::spawn_with` 记上会话线程以后、开伪终端以前要拿 `env` 的锁（`Shared::setup`）：先占着它，让开会话
+    // 的线程停在这中间。
+    let env = host.shared.env.lock().unwrap();
+    let opening = {
+        let host = host.clone();
+        thread::spawn(move || host.shared.spawn(options(&shell)).is_ok())
+    };
+    let deadline = Instant::now() + WAIT;
+    while host.shared.session_threads.live() == 0 {
+        assert!(Instant::now() < deadline, "the session never started opening");
+        thread::sleep(Duration::from_millis(1));
+    }
+    host.shared.peers().stop = Some(Stopped::Shutdown);
+    let stopped = {
+        let host = host.clone();
+        let (tx, rx) = mpsc::channel();
+        thread::spawn(move || tx.send(host.run_until_idle(Duration::from_secs(60))));
+        rx
+    };
+    assert_eq!(
+        stopped.recv_timeout(Duration::from_millis(300)),
+        Err(mpsc::RecvTimeoutError::Timeout),
+        "the host stopped while a session was being opened"
+    );
+    drop(env);
+    assert!(!opening.join().unwrap(), "a session was opened after the host stopped");
+    assert_eq!(stopped.recv_timeout(WAIT), Ok(Stopped::Shutdown));
+    assert!(!running(), "the shell was still running when the host stopped");
+    assert_eq!(host.shared.session_threads.live(), 0);
+    let _ = std::fs::remove_dir_all(&dir);
+}
