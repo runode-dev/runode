@@ -204,10 +204,11 @@ import Testing
     }
 
     @Test func onlyRateLimitsAreRetried() {
-        for reason in [GateRejection.unknownDevice, .badSignature, .pairingInvalid, .disabled] {
+        for reason in [GateRejection.unknownDevice, .badSignature, .pairingInvalid] {
             #expect(LinkFailure.rejected(reason).isFatal, "\(reason)")
         }
         #expect(!LinkFailure.rejected(.rateLimited).isFatal)
+        #expect(!LinkFailure.rejected(.disabled).isFatal)
         #expect(!LinkFailure.rejected(.unknown("future")).isFatal)
         #expect(!LinkFailure.timeout.isFatal)
     }

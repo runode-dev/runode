@@ -56,9 +56,11 @@ public enum LinkFailure: Error, Hashable, Sendable, LocalizedError {
         switch self {
         case .rejected(let reason):
             switch reason {
-            // 设备被撤销、签名不对、口令作废、远程访问关了：再试也一样，签名不对和口令作废电脑还会计入限速。
-            case .unknownDevice, .badSignature, .pairingInvalid, .disabled: true
-            case .rateLimited, .unknown: false
+            // 设备被撤销、签名不对、口令作废：再试也一样，签名不对和口令作废电脑还会计入限速。
+            case .unknownDevice, .badSignature, .pairingInvalid: true
+            // 远程访问正在关掉：电脑升级交接、重开远程访问时监听也会停一下，断开后立刻重连正撞上它；
+            // 不算致命，只是按最长的退避等（见 `HostConnection`），用户真关了也不至于一直打扰。
+            case .rateLimited, .disabled, .unknown: false
             }
         case .gateVersion, .incompatible, .missingKey, .invitationExpired, .keychain: true
         default: false

@@ -238,8 +238,9 @@ public actor HostConnection: HostLink {
                 break
             } catch {
                 failures += 1
-                // 被限速了：直接等最长的退避，不在限速期里接着撞。
-                if case .rejected(.rateLimited)? = error as? LinkFailure {
+                // 被限速了：直接等最长的退避，不在限速期里接着撞。远程访问正在关掉也一样，多半是电脑那边
+                // 升级或重开，等它起来。
+                if case .rejected(let reason)? = error as? LinkFailure, reason == .rateLimited || reason == .disabled {
                     failures = max(failures, 16)
                 }
                 reason = (error as? LinkFailure)?.errorDescription ?? error.localizedDescription

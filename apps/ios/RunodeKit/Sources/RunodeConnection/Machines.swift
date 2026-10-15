@@ -92,8 +92,22 @@ public actor FileMachineStore: MachineStore {
 
     public func all() -> [MachineRecord] {
         if let cache { return cache }
-        let loaded = (try? Data(contentsOf: url)).flatMap { try? JSONDecoder().decode([MachineRecord].self, from: $0) }
-        cache = loaded ?? []
+        guard FileManager.default.fileExists(atPath: url.path) else {
+            cache = []
+            return []
+        }
+        // 读不出来（出了 I/O 错、重启后还没解锁时数据保护不让读）不等于文件坏了：不记缓存也不动文件，
+        // 下次再读。
+        guard let data = try? Data(contentsOf: url) else { return [] }
+        do {
+            cache = try JSONDecoder().decode([MachineRecord].self, from: data)
+        } catch {
+            // 文件在、读得出却解不出来（坏了、格式对不上）：挪开留底，不当成空表，不然下一次写就把所有配对冲掉。
+            let backup = url.appendingPathExtension("corrupt")
+            try? FileManager.default.removeItem(at: backup)
+            try? FileManager.default.moveItem(at: url, to: backup)
+            cache = []
+        }
         return cache ?? []
     }
 
