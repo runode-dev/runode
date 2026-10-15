@@ -760,11 +760,16 @@ impl WindowView {
                 .bg(theme.mix(0.04))
                 .border_1()
                 .border_color(theme.foreground.opacity(0.12))
-                .children(choices.enumerate().map(|(ix, network)| {
+                .children(choices.map(|network| {
                     let chosen = network == page.network;
                     let text = label(network);
+                    // id 按地址取，不按行号：重新列网卡后顺序、个数变了，VoiceOver 的焦点不跳。
+                    let id = match network {
+                        Some(addr) => SharedString::from(format!("mobile-network-option-{addr}")),
+                        None => SharedString::from("mobile-network-option-auto"),
+                    };
                     div()
-                        .id(("mobile-network-option", ix))
+                        .id(id)
                         .role(Role::ListBoxOption)
                         .aria_label(text.clone())
                         .aria_selected(chosen)
