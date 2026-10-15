@@ -47,13 +47,22 @@ APP_PROFILE ?= local
 app: ## 构建并打包 Runode.app（local profile，编得快），产物在 target/local/bundle
 	CARGO=$(CARGO) BUILD_PROFILE=$(APP_PROFILE) scripts/bundle-macos.sh app
 
+# 先拷到 /Applications 里的临时名，拷成了再和旧的换：拷到一半失败（磁盘满、被打断）时旧的还在。
 install: app ## 打包 Runode.app 并装到 /Applications，覆盖旧版本
-	rm -rf /Applications/Runode.app
-	ditto target/$(APP_PROFILE)/bundle/Runode.app /Applications/Runode.app
+	rm -rf /Applications/.Runode.app.new /Applications/.Runode.app.old
+	ditto target/$(APP_PROFILE)/bundle/Runode.app /Applications/.Runode.app.new
+	if [ -e /Applications/Runode.app ]; then mv /Applications/Runode.app /Applications/.Runode.app.old; fi
+	mv /Applications/.Runode.app.new /Applications/Runode.app
+	rm -rf /Applications/.Runode.app.old
 
 # 重开 app 时它只在宿主的构建号不同时才换宿主，还要先等 app 退出；用这个一步让新宿主接手会话。
 restart: ## 重启装好的 Runode.app，宿主也换成新装的（make install restart 装好再重启）
 	scripts/restart-macos.sh
+
+# `make install restart` 带着 -j 时也先装好再重启；只 `make restart` 时不重新打包。
+ifneq ($(filter install,$(MAKECMDGOALS)),)
+restart: install
+endif
 
 dmg: ## 发布构建并打包 Runode.app、dmg 和自动更新用的 zip，产物在 target/release/bundle
 	CARGO=$(CARGO) scripts/bundle-macos.sh

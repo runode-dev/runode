@@ -160,14 +160,28 @@ size=$(stat -f %z "$binary")
 say "量命令行冷启动……"
 cli_runs=$((rounds < 4 ? 20 : rounds * 4))
 if command -v hyperfine >/dev/null; then
-    hyperfine -N --warmup 3 --runs "$cli_runs" --export-json "$raw/cli.json" --output null "$binary help" >/dev/null 2>&1
+    # hyperfine -N 按 shell 的引号规则拆命令：路径用单引号括起来（里面的单引号写成 '\''），带空格、
+    # 特殊字符的路径也是一个词。
+    sq="'"
+    quoted="$sq${binary//$sq/$sq\\$sq$sq}$sq"
+    hyperfine -N --warmup 3 --runs "$cli_runs" --export-json "$raw/cli.json" --output null "$quoted help" >/dev/null 2>&1
     cli_tool=hyperfine
 else
+    # 不经 shell 直接 exec，路径原样是一个参数；跑失败了就停，不把失败的那次当成启动时间。
     perl -MTime::HiRes=time -e '
         my ($bin, $runs) = @ARGV;
-        for (1 .. 3) { system("$bin help >/dev/null") }
+        sub run {
+            my $pid = fork() // die "fork: $!\n";
+            if ($pid == 0) {
+                open(STDOUT, ">", "/dev/null") or exit 127;
+                exec { $bin } $bin, "help" or exit 127;
+            }
+            waitpid($pid, 0);
+            die "$bin help failed: $?\n" if $?;
+        }
+        run() for 1 .. 3;
         my @t;
-        for (1 .. $runs) { my $s = time; system("$bin help >/dev/null"); push @t, time - $s }
+        for (1 .. $runs) { my $s = time; run(); push @t, time - $s }
         print join("\n", @t), "\n";
     ' "$binary" "$cli_runs" >"$raw/cli.txt"
     cli_tool=perl

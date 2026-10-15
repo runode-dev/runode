@@ -7,6 +7,10 @@
 # 所以改了代码没提交、重新 make install 后也换得掉宿主。装的还是同一个构建时宿主不交接（回
 # `Busy`），这时没有要换的，只重开 app。
 #
+# 会话要留得下，配置里得开着 terminal-host（退出后保留会话）：这里退出 app 用的是 AppleScript 的 quit，
+# app 当成从 Dock 退出处理，不弹确认框、只按配置办，没开时会话跟着结束。所以 app 开着、配置里又没开时
+# 不重启，先说清楚。
+#
 # 用法：restart-macos.sh，一般经 make restart（装好新版本再重启用 make install restart）。
 #
 # 环境变量：
@@ -23,6 +27,7 @@ data="$HOME/.runode"
 socket="$data/run/host.sock"
 host_log="$data/cache/host.log"
 log="$data/cache/restart.log"
+config="$data/config.conf"
 # 新宿主和 app 只带 launchd 平时给 app 的这几个变量起，和在程序坞里打开时一样：宿主开的终端都继承它的
 # 环境，带上调用这个脚本的终端里的变量（CLAUDECODE、CLAUDE_CODE_*、RUNODE_SESSION 这类），终端里的
 # 程序会以为自己跑在别的程序里面。`open` 也会把调用方的环境传给 app。SHELL 取账户记录里的登录 shell：
@@ -36,6 +41,31 @@ done
 
 if [[ ! -x "$bin" ]]; then
   echo "找不到 ${bin}，先 make install" >&2
+  exit 1
+fi
+
+# 配置文件里 terminal-host 最后一次写的是不是 true，见开头。只看这个文件本身，config-file 引进来的不看：
+# 看不到时宁可不重启，也不把会话结束掉。
+keeps_sessions() {
+  [[ -f $config ]] || return 1
+  local value
+  value=$(awk '
+    /^[[:space:]]*#/ { next }
+    {
+      key = $0; sub(/=.*/, "", key); gsub(/^[[:space:]]+|[[:space:]]+$/, "", key)
+      if (key != "terminal-host" || index($0, "=") == 0) next
+      value = substr($0, index($0, "=") + 1); gsub(/^[[:space:]]+|[[:space:]]+$/, "", value); gsub(/^"|"$/, "", value)
+      last = value
+    }
+    END { print last }
+  ' "$config")
+  [[ $value == true ]]
+}
+
+# 在后台跑之前查，免得说明只写进日志里。
+if pgrep -fx "$bin" >/dev/null && ! keeps_sessions; then
+  echo "配置里没开 terminal-host（退出后保留会话）：从这里退出 app 时会话会跟着结束，不重启了。" >&2
+  echo "先在设置里打开「退出后保留会话」，或者在 $config 里写上 terminal-host = true，再重启。" >&2
   exit 1
 fi
 
@@ -57,14 +87,14 @@ wait_gone() {
   return 1
 }
 
-# 1. 退出 app。宿主单独跑时会话留在它那里；宿主跑在 app 里、配置要退出后保留会话时，app 退出前
-#    把会话交给一个单独跑的宿主；都不是时会话跟着结束，和在菜单里退出一样。
+# 1. 退出 app。宿主单独跑时会话留在它那里；宿主跑在 app 里时，app 退出前把会话交给一个单独跑的宿主。
+#    两样都要配置里开着 terminal-host，上面已经查过。
 bundle_id=$(defaults read "$app/Contents/Info" CFBundleIdentifier)
 app_pid=$(pgrep -fx "$bin" | head -n 1 || true)
 if [[ -n "$app_pid" ]]; then
   echo "退出 app（${app_pid}）"
   osascript -e "tell application id \"$bundle_id\" to quit"
-  # 有 agent 在跑时 app 会先弹框确认，给用户留点时间。
+  # 把会话交给单独跑的宿主要拉起它、等它接手，宽裕地等。
   if ! wait_gone "$app_pid" 120; then
     echo "app 两分钟内没有退出（是不是在确认框上点了取消？），不重启了" >&2
     exit 1

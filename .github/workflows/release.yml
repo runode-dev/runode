@@ -369,6 +369,14 @@ jobs:
               latest=--latest=false
             fi
           fi
+          # 推上来的标签可能是 main 上更早的、比现在的正式版旧的版本：那样不标 latest，免得 releases/latest
+          # 往回退，自动更新和不带版本号的安装拿到旧版本。还没有正式版时照常标。
+          current=$(gh release view --repo "$GITHUB_REPOSITORY" --json tagName --jq .tagName 2>/dev/null || true)
+          current=${current#v}
+          if [[ -n "$current" && "$(printf '%s\n' "$current" "$VERSION" | sort -V | tail -1)" != "$VERSION" ]]; then
+            echo "Runode $current 比 $VERSION 新，这个版本不标 latest"
+            latest=--latest=false
+          fi
           gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --verify-tag --draft "${kind[@]}" \
             "${notes[@]}" \
             "$bundle"/Runode-*.dmg "$bundle"/Runode-*.zip "$bundle"/runode-*.tar.gz "$bundle/latest.json" \

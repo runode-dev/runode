@@ -9,13 +9,14 @@ cd "$(dirname "$0")/.."
 out=apps/desktop/assets/compiled
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
-mkdir -p "$out"
-rm -f "$out/Assets.car" "$out/runode.icns"
-xcrun actool apps/desktop/assets/runode.icon --compile "$out" \
+# 先编进临时目录，两个文件都出来了再换掉提交着的那两个：编失败时留着上一份能用的。
+mkdir -p "$out" "$tmp/compiled"
+xcrun actool apps/desktop/assets/runode.icon --compile "$tmp/compiled" \
     --output-format human-readable-text --errors \
     --output-partial-info-plist "$tmp/partial.plist" \
     --app-icon runode --include-all-app-icons --enable-on-demand-resources NO \
     --development-region en --target-device mac --platform macosx --minimum-deployment-target 11.0 >&2
 # 旧版 Xcode 的 actool 不认 .icon，不报错也不出文件。
-[[ -f "$out/Assets.car" && -f "$out/runode.icns" ]] \
+[[ -s "$tmp/compiled/Assets.car" && -s "$tmp/compiled/runode.icns" ]] \
     || { echo "actool 没生成图标（要 Xcode 26 以上）：$(xcodebuild -version | head -1)" >&2; exit 1; }
+mv -f "$tmp/compiled/Assets.car" "$tmp/compiled/runode.icns" "$out/"

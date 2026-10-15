@@ -28,7 +28,10 @@ while let first = rest.first, first != "--" {
         guard !rest.isEmpty else { fail("--log needs a path") }
         log = rest.removeFirst()
     case "--timeout":
-        guard let value = rest.first.flatMap(Double.init) else { fail("--timeout needs seconds") }
+        // 换成纳秒存进 UInt64、加到开始时刻上不能溢出，所以限在一天以内。
+        guard let value = rest.first.flatMap(Double.init), value.isFinite, value >= 0, value <= 86_400 else {
+            fail("--timeout needs seconds, from 0 to 86400")
+        }
         rest.removeFirst()
         timeout = value
     default:

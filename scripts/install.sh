@@ -47,6 +47,15 @@ download_base() {
     fi
 }
 
+# 没给版本时先从最新版的版本清单里读出版本号，之后都从这个版本的地址下载：releases/latest 在几次
+# 下载之间换成新发的版本时，不会拿旧版本的包去对新版本的校验和。读到的清单留在 $tmp/latest.json。
+pin_version() {
+    [ -z "${RUNODE_VERSION:-}" ] || return 0
+    fetch "$(download_base)/latest.json" "$tmp/latest.json"
+    RUNODE_VERSION=$(tr -d '\n' <"$tmp/latest.json" | grep -o '"version": *"[^"]*"' | sed 's/.*"\([^"]*\)"$/\1/')
+    [ -n "$RUNODE_VERSION" ] || fail "版本清单里没有版本号"
+}
+
 # 第三个参数给了就显示下载进度（装包用），清单这类小文件不显示。
 fetch() {
     if command -v curl >/dev/null 2>&1; then
@@ -71,11 +80,16 @@ verify() {
     [ "$actual" = "$expected" ] || fail "$2 的校验和对不上，下载的文件可能不完整或被改过"
 }
 
-# 把命令行链接（或者放）进 bin 目录，不在 PATH 上时提醒一下。
+# 把命令行链接（或者放）进 bin 目录，不在 PATH 上时提醒一下。链接里的相对路径是相对 bin 目录算的，
+# 所以 RUNODE_APP_DIR、RUNODE_LIB_DIR 给的相对路径先按当前目录补成绝对路径。
 link_cli() {
+    case $1 in
+        /*) target=$1 ;;
+        *) target=$PWD/$1 ;;
+    esac
     mkdir -p "$bin_dir"
-    ln -sfn "$1" "$bin_dir/runode"
-    ln -sfn "$1" "$bin_dir/rn"
+    ln -sfn "$target" "$bin_dir/runode"
+    ln -sfn "$target" "$bin_dir/rn"
     case ":$PATH:" in
         *":$bin_dir:"*) ;;
         *) say "提示：$bin_dir 不在 PATH 上，把这一行加进 shell 的配置文件：export PATH=\"$bin_dir:\$PATH\"" ;;
@@ -103,7 +117,8 @@ install_macos() {
 
     # 自动更新用的 zip 按版本号起名，地址从版本清单里读。
     say "正在查找 Runode 的 macOS 版（${arch}）……"
-    fetch "$(download_base)/latest.json" "$tmp/latest.json"
+    pin_version
+    [ -f "$tmp/latest.json" ] || fetch "$(download_base)/latest.json" "$tmp/latest.json"
     url=$(tr -d '\n' <"$tmp/latest.json" | grep -o "\"$arch\": *\"[^\"]*\"" | sed 's/.*"\([^"]*\)"$/\1/')
     [ -n "$url" ] || fail "版本清单里没有 $arch 的安装包"
 
@@ -160,6 +175,7 @@ install_linux() {
     tmp=$(mktemp -d)
     trap 'rm -rf "$tmp"' EXIT
 
+    pin_version
     url="$(download_base)/runode-linux-$arch.tar.gz"
     say "正在下载 $url"
     fetch "$url" "$tmp/runode.tar.gz" progress
@@ -170,9 +186,12 @@ install_linux() {
     # 可执行文件放在 bin 目录旁边的 lib 目录里，bin 里只放链接，和 macOS 一样有 runode、rn 两个名字。
     lib_dir=${RUNODE_LIB_DIR:-$HOME/.local/lib/runode}
     mkdir -p "$lib_dir"
-    # 先放成临时名再改名：正在跑的宿主还开着旧文件，直接覆盖会写坏它。
-    install -m 755 "$tmp/runode" "$lib_dir/runode.new"
-    mv -f "$lib_dir/runode.new" "$lib_dir/runode"
+    # 先放成临时名再改名：正在跑的宿主还开着旧文件，直接覆盖会写坏它。临时名带上进程号，同时跑的两个
+    # 安装不会互相截断、挪走对方的文件；没改成名就退出时删掉。
+    staged=$lib_dir/.runode.new.$$
+    trap 'rm -rf "$tmp" "$staged"' EXIT
+    install -m 755 "$tmp/runode" "$staged"
+    mv -f "$staged" "$lib_dir/runode"
 
     link_cli "$lib_dir/runode"
     say "已装好 $bin_dir/runode。Linux 版没有桌面界面，用手机连上来：后台跑起 runode --host，"
