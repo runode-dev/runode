@@ -44,12 +44,24 @@ const VERSION: &str = env!("CARGO_PKG_VERSION");
 enum Phase<S = Staged> {
     #[default]
     Idle,
-    /// 正在查有没有新版本；`manual` 是用户在菜单里点的，有结果时弹框说。
-    Checking { manual: bool },
+    /// 正在查有没有新版本；`manual` 是用户在菜单里点的，有结果时弹框说；`accepted` 是用户已经在上一次的
+    /// 「有新版本」框里选了下载，查到了直接下，不再问一遍。
+    Checking { manual: bool, accepted: bool },
     /// 正在下载 `version`；`manual` 是用户选了下载的，下好了弹框说。
     Downloading { version: String, progress: Arc<Progress>, manual: bool },
     /// 下好了，等着装上。
     Ready(S),
+}
+
+/// 查完了谁在等结果，见 `Phase::finish_check`。
+#[derive(Debug, PartialEq, Eq)]
+enum Asked {
+    /// 后台定时查的：查到新版本直接下，别的不说。
+    Nobody,
+    /// 用户点了「检查更新…」：弹框说结果，有新版本时问要不要下载。
+    Result,
+    /// 用户已经选了下载：查到新版本直接下，下好了弹框说；查不成、不用更新时照样弹框说。
+    Download,
 }
 
 /// 要查一次时接着做什么，见 `Phase::start_check`。
@@ -70,12 +82,12 @@ impl<S> Phase<S> {
         match self {
             Self::Ready(_) if manual => Start::OfferRestart,
             Self::Ready(_) => Start::Nothing,
-            Self::Checking { manual: asked } | Self::Downloading { manual: asked, .. } => {
+            Self::Checking { manual: asked, .. } | Self::Downloading { manual: asked, .. } => {
                 *asked |= manual;
                 Start::Nothing
             }
             Self::Idle => {
-                *self = Self::Checking { manual };
+                *self = Self::Checking { manual, accepted: false };
                 Start::Check
             }
         }
@@ -84,18 +96,34 @@ impl<S> Phase<S> {
     /// 查完或者下载完了：回到空闲，返回是不是用户点的（要弹框说结果）。下载失败就停在空闲，等下一轮
     /// 定时（`CHECK_INTERVAL`）再查、再下。
     fn finish(&mut self) -> bool {
-        let manual = matches!(self, Self::Checking { manual: true } | Self::Downloading { manual: true, .. });
+        let manual = matches!(self, Self::Checking { manual: true, .. } | Self::Downloading { manual: true, .. });
         *self = Self::Idle;
         manual
     }
 
+    /// 查完了：回到空闲（见 `finish`），返回谁在等这次的结果。
+    fn finish_check(&mut self) -> Asked {
+        let accepted = matches!(self, Self::Checking { accepted: true, .. });
+        match self.finish() {
+            _ if accepted => Asked::Download,
+            true => Asked::Result,
+            false => Asked::Nobody,
+        }
+    }
+
     /// 用户在「有新版本」的框里选了下载。框开着时已经回到空闲，期间定时查的、在别的窗口里点的可能已经
     /// 在查、在下载或者下好了：还空闲时返回真，由调用方开始下载；正在查、正在下载时不再另下一份（两份会
-    /// 写同一个暂存目录），记下用户点过、有结果时弹框说；下好了时什么都不改。
+    /// 写同一个暂存目录），记下用户点过、有结果时弹框说，正在查的还记下用户要下载，查到了直接下、不再问；
+    /// 下好了时什么都不改。
     fn accept_download(&mut self) -> bool {
         match self {
             Self::Idle => true,
-            Self::Checking { manual } | Self::Downloading { manual, .. } => {
+            Self::Checking { manual, accepted } => {
+                *manual = true;
+                *accepted = true;
+                false
+            }
+            Self::Downloading { manual, .. } => {
                 *manual = true;
                 false
             }
@@ -194,7 +222,7 @@ pub fn menu_label(cx: &App) -> String {
 pub fn status_label(cx: &App) -> Option<String> {
     let phase = &cx.try_global::<Updater>()?.phase;
     match phase {
-        Phase::Checking { manual: true } | Phase::Downloading { manual: true, .. } => busy_label(phase),
+        Phase::Checking { manual: true, .. } | Phase::Downloading { manual: true, .. } => busy_label(phase),
         _ => None,
     }
 }
@@ -261,9 +289,13 @@ fn look() -> Result<Found, Error> {
 }
 
 fn finish_check(found: Result<Found, Error>, cx: &mut App) {
-    let manual = cx.global_mut::<Updater>().phase.finish();
+    let asked = cx.global_mut::<Updater>().phase.finish_check();
+    let manual = asked != Asked::Nobody;
     match found {
-        // 后台查到的直接下；手动查的先问，选了才下。
+        // 后台查到的直接下；手动查的先问，选了才下；已经选了下载的直接下，下好了弹框说。
+        Ok(Found::Available { release, installation }) if asked == Asked::Download => {
+            download(release, installation, true, cx)
+        }
         Ok(Found::Available { release, installation }) if !manual => download(release, installation, false, cx),
         Ok(Found::Available { release, installation }) => {
             let title = rust_i18n::t!("update.available_title", version = release.version);
@@ -454,7 +486,7 @@ mod tests {
     fn a_background_check_downloads_and_waits_to_install() {
         let mut phase = TestPhase::default();
         assert_eq!(phase.start_check(false), Start::Check);
-        assert!(matches!(phase, Phase::Checking { manual: false }));
+        assert!(matches!(phase, Phase::Checking { manual: false, accepted: false }));
         assert!(!phase.finish());
         assert!(matches!(phase, Phase::Idle));
         phase = downloading(false);
@@ -469,14 +501,14 @@ mod tests {
     /// 正在查或下载时用户点了：不再查一次，记下来，有结果时弹框说。
     #[test]
     fn a_click_while_busy_asks_for_the_result() {
-        let mut phase = TestPhase::Checking { manual: false };
+        let mut phase = TestPhase::Checking { manual: false, accepted: false };
         assert_eq!(phase.start_check(true), Start::Nothing);
         assert!(phase.finish());
         let mut phase = downloading(false);
         assert_eq!(phase.start_check(true), Start::Nothing);
         assert!(phase.finish());
         // 定时的那一轮撞上用户点的，不把它改回不弹框。
-        let mut phase = TestPhase::Checking { manual: true };
+        let mut phase = TestPhase::Checking { manual: true, accepted: false };
         assert_eq!(phase.start_check(false), Start::Nothing);
         assert!(phase.finish());
     }
@@ -488,12 +520,32 @@ mod tests {
         let mut phase = downloading(false);
         assert!(!phase.accept_download());
         assert!(matches!(phase, Phase::Downloading { manual: true, .. }));
-        let mut phase = TestPhase::Checking { manual: false };
+        let mut phase = TestPhase::Checking { manual: false, accepted: false };
         assert!(!phase.accept_download());
-        assert!(matches!(phase, Phase::Checking { manual: true }));
+        assert!(matches!(phase, Phase::Checking { manual: true, accepted: true }));
         let mut phase = TestPhase::Ready("2.0.0");
         assert!(!phase.accept_download());
         assert!(matches!(phase, Phase::Ready("2.0.0")));
+    }
+
+    /// 定时查的期间在上一次的「有新版本」框里选了下载：查完直接下，不再弹一次问要不要下载的框；只是点了
+    /// 「检查更新…」的照旧弹框问，定时查的照旧不说。
+    #[test]
+    fn accepting_during_a_check_downloads_when_it_finishes() {
+        let mut phase = TestPhase::default();
+        assert_eq!(phase.start_check(false), Start::Check);
+        assert!(!phase.accept_download());
+        // 又点了「检查更新…」也不把用户选的下载丢掉。
+        assert_eq!(phase.start_check(true), Start::Nothing);
+        assert_eq!(phase.finish_check(), Asked::Download);
+        assert!(matches!(phase, Phase::Idle));
+
+        let mut phase = TestPhase::default();
+        assert_eq!(phase.start_check(true), Start::Check);
+        assert_eq!(phase.finish_check(), Asked::Result);
+        let mut phase = TestPhase::default();
+        assert_eq!(phase.start_check(false), Start::Check);
+        assert_eq!(phase.finish_check(), Asked::Nobody);
     }
 
     /// 下载失败后回到空闲，下一轮定时（每隔 `CHECK_INTERVAL`，6 小时）照常再查。
@@ -513,7 +565,7 @@ mod tests {
         assert_eq!(phase.take_ready(), Some("2.0.0"));
         assert_eq!(phase.take_ready(), None);
         assert_eq!(downloading(false).take_ready(), None);
-        assert_eq!(TestPhase::Checking { manual: true }.take_ready(), None);
+        assert_eq!(TestPhase::Checking { manual: true, accepted: false }.take_ready(), None);
     }
 
     /// 更新包的签名要求里的 bundle id 和这个 app 的一样，不然新版本一律被拒、只在日志里看得到。

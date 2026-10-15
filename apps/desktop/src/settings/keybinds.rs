@@ -211,24 +211,38 @@ fn live(line: &str, resolved: &[(String, Action)]) -> bool {
     })
 }
 
-/// 删掉配置文件里自己写的第 `ix` 行 `keybind`（触发键是 `trigger`）。它要是盖着一条一样的默认绑定，
-/// 删了默认的又露出来，再写一行解绑。
-fn remove_user_line(values: &mut Vec<String>, ix: usize, trigger: &str) {
+/// `line` 的触发键在叠出来的表 `resolved` 里还绑着动作，不管是不是 `line` 的那个。
+fn occupied(line: &str, resolved: &[(String, Action)]) -> bool {
+    keybind::parse(line).is_ok_and(|binds| {
+        binds.iter().any(|bind| matches!(bind, Keybind::Bind { keys, .. } if resolved.iter().any(|(k, _)| k == keys)))
+    })
+}
+
+/// 删掉配置文件里自己写的第 `ix` 行 `keybind`（触发键是 `trigger`），删掉以后 `still` 认为旧键上还有绑定时
+/// 再写一行解绑。
+fn drop_user_line(values: &mut Vec<String>, ix: usize, trigger: &str, still: fn(&str, &[(String, Action)]) -> bool) {
     let line = values.remove(ix);
     let rest: Vec<_> = values.iter().filter_map(|value| keybind::parse(value).ok()).flatten().collect();
-    if live(&line, &keybind::resolve(&rest)) {
+    if still(&line, &keybind::resolve(&rest)) {
         values.push(join(trigger, "unbind", None));
     }
 }
 
-/// 把配置文件里自己写的第 `ix` 行 `keybind`（触发键是 `old`）换成触发键 `trigger`：删掉原来那行（见
-/// `remove_user_line`），新的接在最后。那一行不在了或写错了时什么也不改，返回 false。
+/// 删掉配置文件里自己写的第 `ix` 行 `keybind`（触发键是 `trigger`）。它要是盖着一条一样的默认绑定，
+/// 删了默认的又露出来，再写一行解绑。
+fn remove_user_line(values: &mut Vec<String>, ix: usize, trigger: &str) {
+    drop_user_line(values, ix, trigger, live);
+}
+
+/// 把配置文件里自己写的第 `ix` 行 `keybind`（触发键是 `old`）换成触发键 `trigger`：删掉原来那行，新的接在
+/// 最后。旧键上露出别的绑定时（默认的一样的或别的动作、文件里前面绑着它的行）再写一行解绑，和换掉默认的
+/// 绑定一样旧键空出来，不把录这个键时抢过来的又还回去。那一行不在了或写错了时什么也不改，返回 false。
 fn replace_user_line(values: &mut Vec<String>, ix: usize, old: &str, trigger: &str) -> bool {
     let Some(new) = values.get(ix).and_then(|value| split(value)).map(|(_, name, param)| join(trigger, name, param))
     else {
         return false;
     };
-    remove_user_line(values, ix, old);
+    drop_user_line(values, ix, old, occupied);
     values.push(new);
     true
 }
@@ -678,8 +692,8 @@ mod tests {
         assert_eq!(caps("nope+t"), [["nope+t"]]);
     }
 
-    /// 换掉自己写的一行：新的接在最后，盖过后面绑着同一个键的行；原来那行盖着一样的默认绑定时，
-    /// 再写一行解绑，旧键不会又绑回去。
+    /// 换掉自己写的一行：新的接在最后，盖过后面绑着同一个键的行；原来那行盖着默认绑定时，再写一行解绑，
+    /// 旧键不会又绑回去。
     #[test]
     fn replacing_a_user_line_moves_it_last_and_unbinds_a_shadowed_default() {
         let lines = |values: &[&str]| values.iter().map(|v| (*v).to_owned()).collect::<Vec<_>>();
@@ -690,6 +704,14 @@ mod tests {
         let mut values = lines(&["cmd+t=new_tab"]);
         assert!(replace_user_line(&mut values, 0, "cmd+t", "ctrl+t"));
         assert_eq!(values, lines(&["cmd+t=unbind", "ctrl+t=new_tab"]));
+        let resolved = keybind::resolve(&values.iter().flat_map(|v| keybind::parse(v).unwrap()).collect::<Vec<_>>());
+        assert!(!resolved.iter().any(|(keys, _)| keys == "cmd-t"));
+
+        // 自己写的那行盖着的是别的动作的默认绑定（录键时从 `new_tab` 抢过来的）：换走以后旧键也空出来，
+        // 不又绑回 `new_tab`。
+        let mut values = lines(&["cmd+t=new_window"]);
+        assert!(replace_user_line(&mut values, 0, "cmd+t", "ctrl+y"));
+        assert_eq!(values, lines(&["cmd+t=unbind", "ctrl+y=new_window"]));
         let resolved = keybind::resolve(&values.iter().flat_map(|v| keybind::parse(v).unwrap()).collect::<Vec<_>>());
         assert!(!resolved.iter().any(|(keys, _)| keys == "cmd-t"));
 

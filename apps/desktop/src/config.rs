@@ -220,6 +220,32 @@ pub fn write_values(path: &Path, key: &str, values: &[String], cx: &mut App) -> 
     Ok(file)
 }
 
+/// 逗号隔开、各层叠加的列表键（`status-bar-hidden`、`agent-notifications-exclude`）要写回 runode 配置文件的
+/// 各行：`written` 是文件里原来写的，`current` 是各层叠出来生效的名字，`values` 是要换成的。读配置时各层的值
+/// 接在一起，下面一层（Ghostty 的配置）里有的，本文件删掉也还在；读进来的配置去了重，看不出一个名字是不是两层
+/// 都写了。所以生效的名字有要去掉的，或者文件里已经写了清空的空行时，前面先写一行空值清掉别处加的，不然取消
+/// 不掉它们。只是加名字时不用：别处加的都已经在 `values` 里了。
+///
+/// shortcut: `config-file` 引入的文件排在本文件的各行后面，那里加的这一行清不掉。
+pub(crate) fn clear_first(written: &[String], current: &[String], mut values: Vec<String>) -> Vec<String> {
+    let names = |values: &[String]| -> Vec<String> {
+        values
+            .iter()
+            .flat_map(|value| value.split(','))
+            .map(str::trim)
+            .filter(|name| !name.is_empty())
+            .map(str::to_owned)
+            .collect()
+    };
+    let kept = names(&values);
+    let cleared = written.iter().any(String::is_empty);
+    let dropped = names(current).iter().any(|name| !kept.contains(name));
+    if cleared || dropped {
+        values.insert(0, String::new());
+    }
+    values
+}
+
 /// 系统深浅色变了就重载，让 `theme = light:A,dark:B` 换到对应的主题。每个窗口都会
 /// 收到外观变化，第一个窗口重载后外观已经对上，其余窗口直接跳过。
 pub fn follow_appearance(cx: &mut App) {
@@ -280,6 +306,30 @@ pub fn open(cx: &App) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// 列表键写回的各行：去掉生效的名字时先写一行空值，两层都写了同一个名字（读进来去了重，看不出来）也取消得
+    /// 掉，去掉最后一个时只剩这一行空值；只加名字时不写；文件里已经写了清空的照样留着。
+    #[test]
+    fn list_keys_clear_lower_layers_when_dropping_names() {
+        let lines = |values: &[&str]| values.iter().map(|v| (*v).to_owned()).collect::<Vec<_>>();
+        // Ghostty 和 runode 的配置文件都写了 `ports`：取消它时要清掉 Ghostty 那一层的。
+        assert_eq!(clear_first(&lines(&["ports"]), &lines(&["ports"]), Vec::new()), lines(&[""]));
+        assert_eq!(
+            clear_first(&lines(&["ports, branch"]), &lines(&["ports", "branch"]), lines(&["branch"])),
+            lines(&["", "branch"])
+        );
+        assert_eq!(
+            clear_first(&lines(&["codex"]), &lines(&["claude", "codex"]), lines(&["claude"])),
+            lines(&["", "claude"])
+        );
+        // 只加名字：别处加的已经都在要写的里面，不用清。
+        assert_eq!(clear_first(&[], &lines(&["ports"]), lines(&["ports, branch"])), lines(&["ports, branch"]));
+        // 文件里写了清空的：加名字也留着那一行空值，不然下面一层的又露出来。
+        assert_eq!(
+            clear_first(&lines(&["", "ports"]), &lines(&["ports"]), lines(&["ports, branch"])),
+            lines(&["", "ports, branch"])
+        );
+    }
 
     /// 读之前就盯着的文件记读之前取的时间，读的时候写进来的改动下一轮还看得出；没取过的现在取。
     #[test]

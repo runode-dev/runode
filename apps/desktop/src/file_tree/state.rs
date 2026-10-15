@@ -118,6 +118,7 @@ impl TreeState {
     /// 收起来，不再把旧的内容当真。根目录已经换了时不是这里的目录，不要。有等着的 `reveal` 时再定位一次。
     pub(crate) fn apply_listings(&mut self, listings: Listings, root: &Path, filter: TreeFilter) {
         let mut read = HashSet::new();
+        let mut collapsed = Vec::new();
         for (dir, listing) in listings {
             if dir.starts_with(root) {
                 match listing {
@@ -127,12 +128,20 @@ impl TreeState {
                     None => {
                         self.listings.remove(&dir);
                         self.expanded.remove(&dir);
+                        collapsed.push(dir.clone());
                     }
                 }
             }
             read.insert(dir);
         }
         self.rebuild_rows(root, filter);
+        // 选中的在收起的目录里面时，和 `toggle_dir` 一样改成这个目录（它的行也没了时不留选中），免得看不见的
+        // 选中项还被删除、改名用上。等着的 `reveal` 随后照样定位。
+        if let Some(dir) = collapsed.iter().find(|dir| {
+            self.selected.as_deref().is_some_and(|selected| selected != dir.as_path() && selected.starts_with(dir))
+        }) {
+            self.selected = self.rows.iter().any(|row| row.path == *dir).then(|| dir.clone());
+        }
         let Some((path, expand, strategy)) = self.pending_reveal.take() else {
             return;
         };
@@ -677,6 +686,27 @@ mod tests {
         state.apply_listings(read, root, ALL);
         assert!(state.to_list.is_empty());
         assert!(state.pending_reveal.is_none());
+
+        // 选中的在读不了、收起来的目录里面时，选中改成这个目录，不留着看不见的那一项。
+        let open_a = |state: &mut TreeState| {
+            state.expanded.insert(PathBuf::from("/p/a"));
+            state.listings.insert(PathBuf::from("/p/a"), vec![file("b")]);
+            state.rebuild_rows(root, ALL);
+            state.select_row(1);
+        };
+        open_a(&mut state);
+        assert_eq!(state.selected, Some(PathBuf::from("/p/a/b")));
+        state.relist(vec![PathBuf::from("/p/a")], root, ALL);
+        let read = std::mem::take(&mut state.to_list).into_iter().map(|dir| (dir, None)).collect();
+        state.apply_listings(read, root, ALL);
+        assert_eq!(state.selected, Some(PathBuf::from("/p/a")));
+        assert_eq!(state.selected_row(), Some(0));
+        // 收起的目录自己的行也没了（上级的列表里已经去掉了它）时不留选中。
+        open_a(&mut state);
+        assert_eq!(state.selected, Some(PathBuf::from("/p/a/b")));
+        state.listings.insert(root.into(), vec![file("z")]);
+        state.apply_listings(vec![(PathBuf::from("/p/a"), None)], root, ALL);
+        assert_eq!(state.selected, None);
         // 根目录换了以后才读回来的不要。
         state.apply_listings(vec![(PathBuf::from("/q"), Some(vec![file("y")]))], root, ALL);
         assert!(!state.listings.contains_key(Path::new("/q")));

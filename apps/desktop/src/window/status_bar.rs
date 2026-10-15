@@ -29,7 +29,7 @@ use gpui::{
     MouseDownEvent, Pixels, Point, Role, SharedString, Stateful, Window, WindowHandle, anchored, deferred, div, point,
     prelude::*, px, svg,
 };
-use runode_config::StatusItem;
+use runode_config::{ConfigFile, StatusItem};
 use runode_types::{
     agent::{AgentKind, AgentState},
     color::Rgb,
@@ -419,19 +419,10 @@ impl WindowView {
 
     /// 显示或隐藏状态栏上的一块：改写配置文件的 `status-bar-hidden`，所有窗口跟着重载的配置一起变。
     pub(super) fn toggle_status_item(&mut self, action: &ToggleStatusItem, _: &mut Window, cx: &mut Context<Self>) {
-        let mut hidden = cx.global::<AppConfig>().0.status_bar_hidden.clone();
-        match hidden.iter().position(|item| *item == action.item) {
-            Some(ix) => {
-                hidden.remove(ix);
-            }
-            None => hidden.push(action.item),
-        }
-        let values: Vec<String> = if hidden.is_empty() {
-            Vec::new()
-        } else {
-            vec![hidden.iter().map(|item| item.name()).collect::<Vec<_>>().join(", ")]
-        };
         let Some(path) = runode_config::config_path() else { return };
+        // 读不出来时 `write_values` 会再读一遍并报错，这里当作没写过。
+        let written = ConfigFile::read(&path).map(|file| file.values("status-bar-hidden")).unwrap_or_default();
+        let values = hidden_lines(&written, &cx.global::<AppConfig>().0.status_bar_hidden, action.item);
         if let Err(err) = crate::config::write_values(&path, "status-bar-hidden", &values, cx) {
             tracing::warn!("could not write status-bar-hidden: {err}");
         }
@@ -870,9 +861,40 @@ fn popover_header(icon: Option<&'static str>, title: String, detail: String, fg:
         .child(div().flex_none().text_color(fg.opacity(0.55)).child(detail))
 }
 
+/// 显示或隐藏 `item` 之后 `status-bar-hidden` 要写回的各行：`written` 是 runode 配置文件里原来写的，`hidden`
+/// 是各层叠出来的。写成一行、逗号隔开，和设置页一样按 `config::clear_first` 先清掉下面一层加的，不然
+/// Ghostty 的配置里也写了的那一块取消不掉。
+fn hidden_lines(written: &[String], hidden: &[StatusItem], item: StatusItem) -> Vec<String> {
+    let current: Vec<String> = hidden.iter().map(|item| item.name().to_owned()).collect();
+    let mut hidden = hidden.to_vec();
+    match hidden.iter().position(|other| *other == item) {
+        Some(ix) => {
+            hidden.remove(ix);
+        }
+        None => hidden.push(item),
+    }
+    let values = if hidden.is_empty() {
+        Vec::new()
+    } else {
+        vec![hidden.iter().map(|item| item.name()).collect::<Vec<_>>().join(", ")]
+    };
+    crate::config::clear_first(written, &current, values)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// 右键菜单里取消隐藏的一块在 Ghostty 和 runode 的配置文件里都写了时，先写一行空值清掉 Ghostty 那一层的，
+    /// 取消最后一块时只剩这一行空值；只是再藏一块时不清。
+    #[test]
+    fn toggling_an_item_clears_the_lower_layer_when_showing_it() {
+        let lines = |values: &[&str]| values.iter().map(|v| (*v).to_owned()).collect::<Vec<_>>();
+        let (a, b) = (StatusItem::ALL[0], StatusItem::ALL[1]);
+        assert_eq!(hidden_lines(&lines(&[a.name()]), &[a], a), lines(&[""]));
+        assert_eq!(hidden_lines(&lines(&[a.name()]), &[a, b], a), lines(&["", b.name()]));
+        assert_eq!(hidden_lines(&[], &[a], b), lines(&[&format!("{}, {}", a.name(), b.name())]));
+    }
 
     #[test]
     fn bytes_switch_to_gigabytes() {

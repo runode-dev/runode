@@ -336,21 +336,10 @@ impl SettingsView {
         })
     }
 
-    /// 逗号隔开、各层叠加的列表键（`status-bar-hidden`、`agent-notifications-exclude`）要写回的各行。读配置时
-    /// 各层的值接在一起，生效的名字里有 runode 配置文件没写的（Ghostty 的配置里加的），或者文件里已经写了
-    /// 清空的空行时，前面先写一行空值清掉别处加的，不然取消不掉它们。
-    ///
-    /// shortcut: `config-file` 引入的文件排在本文件的各行后面，那里加的这一行清不掉。
-    fn with_clear(&self, key: &str, mut values: Vec<String>) -> Vec<String> {
-        let written = self.file.values(key);
-        let own: Vec<&str> =
-            written.iter().flat_map(|value| value.split(',')).map(str::trim).filter(|name| !name.is_empty()).collect();
-        let cleared = written.iter().any(String::is_empty);
-        let inherited = self.config.values(key).iter().any(|name| !own.contains(&name.as_str()));
-        if cleared || inherited {
-            values.insert(0, String::new());
-        }
-        values
+    /// 逗号隔开、各层叠加的列表键（`status-bar-hidden`、`agent-notifications-exclude`）要写回的各行，见
+    /// `config::clear_first`。
+    fn with_clear(&self, key: &str, values: Vec<String>) -> Vec<String> {
+        crate::config::clear_first(&self.file.values(key), &self.config.values(key), values)
     }
 
     fn render_row(
