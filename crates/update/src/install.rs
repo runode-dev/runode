@@ -16,6 +16,9 @@ use crate::{BUNDLE_ID, Error, Release};
 
 /// 下载更新包最多等这么久。
 const ARCHIVE_TIMEOUT: Duration = Duration::from_secs(15 * 60);
+/// 更新包里的 .app 叫这个名字（打包脚本 `bundle-macos.sh` 定的）。装着的那份被用户改了名（`Runode Work.app`）
+/// 也一样，对调后装着的位置还是用户起的名字。
+const ARCHIVE_APP: &str = "Runode.app";
 
 /// 装着的、能自己更新的 .app。
 #[derive(Clone, Debug)]
@@ -71,8 +74,7 @@ impl Installation {
         // ditto 解压时保留符号链接（.app 里的 rn）和扩展属性，签名才对得上。
         run(Command::new("/usr/bin/ditto").arg("-x").arg("-k").arg(&zip).arg(dir))?;
         fs::remove_file(&zip).map_err(|err| io(&zip, err))?;
-        let name = self.app.file_name().unwrap_or(OsStr::new("Runode.app"));
-        let new_app = only_app_in(dir, name)?;
+        let new_app = only_app_in(dir, OsStr::new(ARCHIVE_APP))?;
         verify(&new_app, &self.team, version)?;
         tracing::info!("staged Runode {version} at {}", new_app.display());
         Ok(Staged {
@@ -190,7 +192,7 @@ fn parse_team(info: &str) -> Option<String> {
         .map(str::to_owned)
 }
 
-/// `dir` 里唯一的一个 .app，名字要是 `name`（装着的那份的文件名），而且是真的目录：ditto 解压时保留
+/// `dir` 里唯一的一个 .app，名字要是 `name`（`ARCHIVE_APP`），而且是真的目录：ditto 解压时保留
 /// 符号链接，包里放一个指向装着的那份的链接时，codesign 核对的是装着的那份，对调后再把它删掉。
 fn only_app_in(dir: &Path, name: &OsStr) -> Result<PathBuf, Error> {
     let entries = fs::read_dir(dir).map_err(|err| io(dir, err))?;
@@ -395,12 +397,12 @@ mod tests {
         assert!(matches!(only_app_in(&scratch.0, name), Err(Error::Rejected(_))));
     }
 
-    /// 包里的 .app 要和装着的那份同名。
+    /// 包里的 .app 要叫 `ARCHIVE_APP`，不管装着的那份叫什么。
     #[test]
-    fn the_update_must_be_named_like_the_installed_app() {
+    fn the_update_must_hold_the_archive_app() {
         let scratch = Scratch::new("named");
         fs::create_dir(scratch.0.join("Other.app")).unwrap();
-        assert!(matches!(only_app_in(&scratch.0, OsStr::new("Runode.app")), Err(Error::Rejected(_))));
+        assert!(matches!(only_app_in(&scratch.0, OsStr::new(ARCHIVE_APP)), Err(Error::Rejected(_))));
     }
 
     /// 包里的 .app 是指向装着的那份的符号链接时不收：不然核对的是装着的那份，对调后它被删掉。
