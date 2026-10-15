@@ -114,23 +114,28 @@ fi
 
 # 这一版要发了，答过不发的草稿没用了；留着会让下一版检查工作区时以为有改动。
 rm -f "$declined"
-sed -i.bak '/^\[workspace.package\]/,/^\[/s/^version = ".*"/version = "'"$version"'"/' Cargo.toml
+base=$(git rev-parse HEAD)
+# 改了版本号以后哪一步失败（Cargo.lock 更新不了、提交时钩子或签名失败、打不了标签、推不上），都撤掉这次的
+# 标签和提交、改回版本号，修好后直接重跑；更新说明留着当草稿。只在 HEAD 还是发版前的提交、或者它的上一个
+# 是时撤，撤的也只有这里改过的文件。
+rollback() {
+  git tag -d "$tag" >/dev/null 2>&1 || true
+  rm -f Cargo.toml.bak
+  if [[ "$(git rev-parse HEAD)" != "$base" && "$(git rev-parse -q --verify HEAD^)" != "$base" ]]; then
+    die "$1，已删掉标签 ${tag}；HEAD 不是刚才的发版提交，没有撤提交，自己看一下 git log"
+  fi
+  # 提交没做成时 HEAD 还是 base，这一步只是把暂存的改动退出暂存区。
+  git reset -q "$base" && git checkout -- Cargo.toml Cargo.lock \
+    || die "$1，改回版本号也失败了，自己看一下 git status"
+  die "$1，已撤回这次的标签、发版提交和版本号，草稿留在 ${notes}；修好后重新运行"
+}
+sed -i.bak '/^\[workspace.package\]/,/^\[/s/^version = ".*"/version = "'"$version"'"/' Cargo.toml \
+  || rollback "改版本号失败"
 rm Cargo.toml.bak
 # 只更新 Cargo.lock 里 workspace 自己的包的版本，不动依赖。
-cargo update --workspace
-git add Cargo.toml Cargo.lock "$notes"
-base=$(git rev-parse HEAD)
-git commit -m "chore: 发布 $tag${beta:+ beta}"
-git tag "$tag"
-if ! git push --atomic origin main "$tag"; then
-  # 推不上时撤掉这次的标签和提交、改回版本号，修好后直接重跑；更新说明留着当草稿。只在 HEAD 的上一个
-  # 确实是发版前的提交时撤，撤的也只有这里改过的文件。
-  git tag -d "$tag" >/dev/null
-  if [[ "$(git rev-parse HEAD^)" == "$base" ]]; then
-    git reset -q "$base"
-    git checkout -- Cargo.toml Cargo.lock
-    die "推送失败，已撤掉标签 $tag 和发版提交，草稿留在 $notes；修好后重新运行"
-  fi
-  die "推送失败，已删掉标签 $tag；HEAD 不是刚才的发版提交，没有撤提交，自己看一下 git log"
-fi
+cargo update --workspace || rollback "更新 Cargo.lock 失败"
+git add Cargo.toml Cargo.lock "$notes" || rollback "暂存发版的改动失败"
+git commit -m "chore: 发布 $tag${beta:+ beta}" || rollback "提交失败"
+git tag "$tag" || rollback "打标签失败"
+git push --atomic origin main "$tag" || rollback "推送失败"
 echo "已推送 ${tag}，release.yml 接着构建和发布：gh run watch" >&2
