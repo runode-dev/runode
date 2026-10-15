@@ -469,33 +469,31 @@ fn hand_over(socket: &Path, end_on_quit: bool, sessions: Option<usize>) -> Optio
 /// 之后这个 app 里的宿主开 socket，让命令行连得上。对面不是单独的宿主进程（宿主跑在别的版本的
 /// app 里）时不结束它，改请用户先退出那个版本（`Notice::OldAppRunning`）。
 ///
-/// 动手前再探一次：旧宿主已经自己退了的，直接开 socket。弹框之后 socket 上也可能已经换成这个构建的宿主（交接比这边等的久、最后成了，
-/// 或者另一个同版本的 app 让新宿主接手了），结束它就把刚接过去的会话全结束了。这时不结束，告诉
-/// 用户（`Notice::AlreadyUpgraded`）。不在运行中把这个 app 改连过去：窗口里的终端都在 app 自己
-/// 的宿主里，换了连接它们就断了。
+/// 动手前再探一次：旧宿主已经自己退了的，直接开 socket。弹框之后 socket 上也可能已经换成这个
+/// 构建的宿主（交接比这边等的久、最后成了，或者另一个同版本的 app 让新宿主接手了），结束它就把
+/// 刚接过去的会话全结束了。这时不结束，告诉用户（`Notice::AlreadyUpgraded`）。不在运行中把这个
+/// app 改连过去：窗口里的终端都在 app 自己的宿主里，换了连接它们就断了。
 fn end_old_host(cx: &mut gpui::AsyncApp) {
     let (tx, rx) = futures::channel::oneshot::channel();
     let spawned = thread::Builder::new().name("end-old-host".into()).spawn(move || {
         let Some(socket) = socket_path() else { return };
-        match launch::probe(&socket, &build()) {
+        let ended = match launch::probe(&socket, &build()) {
             Probe::Running { build: theirs, .. } if theirs == build() => {
                 tracing::warn!("the host on the socket is already this build, so not ending it");
                 let _ = tx.send(Notice::AlreadyUpgraded);
                 return;
             }
-            // 弹框期间旧宿主自己退了：不用结束谁，直接开 socket。
-            Probe::Absent => {
+            // 弹框期间旧宿主自己退了：不用结束谁，直接开 socket。旧宿主卡住、握手超时时 `probe` 也报
+            // `Absent`，那时 socket 还连得上，照常去结束它。
+            Probe::Absent if std::os::unix::net::UnixStream::connect(&socket).is_err() => {
                 tracing::info!("the old host is already gone");
-                if let Some(host) = IN_PROCESS.get() {
-                    listen_in_app(host);
-                }
-                return;
+                Ok(launch::Ended::Ended)
             }
-            _ => {}
-        }
-        match launch::end_old_host(&socket, &build()) {
+            _ => launch::end_old_host(&socket, &build()),
+        };
+        match ended {
             Ok(launch::Ended::Ended) => {
-                tracing::info!("ended the old host and its sessions");
+                tracing::info!("the old host and its sessions are gone");
                 if let Some(host) = IN_PROCESS.get() {
                     listen_in_app(host);
                 }
