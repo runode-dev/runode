@@ -142,11 +142,18 @@ impl Session {
         if !at_prompt {
             return Ok(None);
         }
+        // 输入正好写满一行时光标停在最后一格上、等着折行（pending wrap），这时它其实在那一格后面，
+        // 和 `prompt_input::read` 一样多算一格。
+        let past_last = usize::from(self.terminal.is_cursor_pending_wrap()?);
         // 输入从光标前最后一个提示符单元格之后开始；光标后面的提示符单元格是画在行尾的右侧
         // 提示符（zsh、fish 的集成标出来的），不算输入，也不算输入的末尾。
-        let at = ((cursor.1 - top) as usize * usize::from(cols) + usize::from(cursor.0)).min(prompt.len());
+        let at = ((cursor.1 - top) as usize * usize::from(cols) + usize::from(cursor.0) + past_last).min(prompt.len());
         let prompt_end = prompt[..at].iter().rposition(|p| *p).map(|i| i + 1);
         let frame = self.frame();
+        // 同步输出冻着画面时 `frame` 还是冻住前的，尺寸可能已经变了：行列对不上终端时不认。
+        if frame.cols != cols || u32::from(frame.rows) <= bottom {
+            return Ok(None);
+        }
         let cells: Vec<&Cell> = (top..=bottom).flat_map(|y| frame.row(y as u16)).collect();
         let mut line = InputLine {
             top,
@@ -161,7 +168,7 @@ impl Session {
             start: prompt_end.unwrap_or(0),
             cursor: 0,
         };
-        line.cursor = line.index(cursor.0, cursor.1).unwrap_or(0).min(line.spacer.len());
+        line.cursor = (line.index(cursor.0, cursor.1).unwrap_or(0) + past_last).min(line.spacer.len());
         Ok(Some(line))
     }
 }
@@ -192,6 +199,14 @@ mod tests {
         assert_eq!(session.click_to_move_steps(at(2.5, 0.5)), Some(-22));
         session.feed(b"\x1b[?1049h");
         assert_eq!(session.click_to_move_steps(at(2.5, 0.5)), None);
+    }
+
+    #[test]
+    fn click_to_move_counts_past_a_full_line() {
+        let mut session = idle_session();
+        // 20 列宽：正好写满一行，光标停在最后一格上等着折行，其实在 t 后面。
+        session.feed(b"abcdefghijklmnopqrst");
+        assert_eq!(session.click_to_move_steps(at(4.5, 0.5)), Some(-16));
     }
 
     #[test]
